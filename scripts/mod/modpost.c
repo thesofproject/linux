@@ -39,6 +39,9 @@ static int sec_mismatch_fatal = 0;
 static int ignore_missing_files;
 /* If set to 1, only warn (instead of error) about missing ns imports */
 static int allow_missing_ns_imports;
+/* Turn warnings into errors */
+static int fail_on_warnings;
+static int warnings_count;
 
 enum export {
 	export_plain,      export_unused,     export_gpl,
@@ -59,6 +62,7 @@ modpost_log(enum loglevel loglevel, const char *fmt, ...)
 	switch (loglevel) {
 	case LOG_WARN:
 		fprintf(stderr, "WARNING: ");
+		warnings_count++;
 		break;
 	case LOG_ERROR:
 		fprintf(stderr, "ERROR: ");
@@ -2559,7 +2563,7 @@ int main(int argc, char **argv)
 	struct dump_list *dump_read_start = NULL;
 	struct dump_list **dump_read_iter = &dump_read_start;
 
-	while ((opt = getopt(argc, argv, "ei:mnT:o:awENd:")) != -1) {
+	while ((opt = getopt(argc, argv, "ei:mnT:o:awEFNd:")) != -1) {
 		switch (opt) {
 		case 'e':
 			external_module = 1;
@@ -2587,6 +2591,9 @@ int main(int argc, char **argv)
 			break;
 		case 'w':
 			warn_unresolved = 1;
+			break;
+		case 'F':
+			fail_on_warnings = 1;
 			break;
 		case 'E':
 			sec_mismatch_fatal = 1;
@@ -2670,6 +2677,9 @@ int main(int argc, char **argv)
 	}
 
 	free(buf.p);
+
+	if (fail_on_warnings && warnings_count)
+		err |= 2;
 
 	return err;
 }

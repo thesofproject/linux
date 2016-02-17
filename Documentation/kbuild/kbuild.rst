@@ -229,6 +229,11 @@ KBUILD_MODPOST_WARN can be set to avoid errors in case of undefined
 symbols in the final module linking stage. It changes such errors
 into warnings.
 
+KBUILD_MODPOST_FAIL_ON_WARNINGS
+-------------------------------
+KBUILD_MODPOST_FAIL_ON_WARNINGS can be set to turn all warnings into
+errors in the final module linking stage.
+
 KBUILD_MODPOST_NOFINAL
 ----------------------
 KBUILD_MODPOST_NOFINAL can be set to skip the final link of modules.

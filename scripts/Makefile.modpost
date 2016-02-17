@@ -34,6 +34,8 @@
 
 # KBUILD_MODPOST_WARN can be set to avoid error out in case of undefined
 # symbols in the final module linking stage
+# KBUILD_MODPOST_FAIL_ON_WARNINGS can be set to fail whenever modpost
+# generates warnings
 # KBUILD_MODPOST_NOFINAL can be set to skip the final link of modules.
 # This is solely useful to speed up test compiles
 
@@ -47,7 +49,8 @@ MODPOST = scripts/mod/modpost								\
 	$(if $(CONFIG_MODVERSIONS),-m)							\
 	$(if $(CONFIG_MODULE_SRCVERSION_ALL),-a)					\
 	$(if $(CONFIG_SECTION_MISMATCH_WARN_ONLY),,-E)					\
-	$(if $(KBUILD_MODPOST_WARN),-w) \
+	$(if $(KBUILD_MODPOST_WARN),-w)							\
+	$(if $(KBUILD_MODPOST_FAIL_ON_WARNINGS),-F)					\
 	-o $@
 
 ifdef MODPOST_VMLINUX
