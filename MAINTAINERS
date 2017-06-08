@@ -12102,6 +12102,13 @@ F:	Documentation/rpmsg.txt
 F:	include/linux/rpmsg.h
 F:	include/linux/rpmsg/
 
+RPMSG SERIAL DRIVERS
+M:	Xiang Xiao <xiaoxiang@xiaomi.com>
+L:	linux-remoteproc@vger.kernel.org
+L:	linux-serial@vger.kernel.org
+S:	Maintained
+F:	drivers/tty/rpmsg_tty.c
+
 RENESAS CLOCK DRIVERS
 M:	Geert Uytterhoeven <geert+renesas@glider.be>
 L:	linux-renesas-soc@vger.kernel.org

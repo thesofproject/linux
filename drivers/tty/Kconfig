@@ -441,4 +441,18 @@ config VCC
 	depends on SUN_LDOMS
 	help
 	  Support for Sun logical domain consoles.
+
+config RPMSG_TTY
+	tristate "RPMSG based TTY Driver"
+	depends on RPMSG
+	help
+	  Say Y here to export rpmsg endpoints as tty device usually found in
+	  /dev/ttyRx. They make it possible for user-space programs to send
+	  and receive rpmsg packets through tty interface.
+
+	  Here is some possible use case:
+	  1.Connect to the embedded processor RTOS shell
+	  2.Communicate with the embedded GPS subsystem through NMEA
+	  3.Communicate with the embedded modem subsystem through ATCMD
+
 endif # TTY
