@@ -1538,6 +1538,12 @@ static const struct snd_soc_component_driver skl_component  = {
 	.pcm_free	= skl_pcm_free,
 };
 
+static const struct snd_soc_component_driver skl_component = {
+	.name           = "pcm",
+	// .controls	= skl_controls,
+	// .num_controls	= ARRAY_SIZE(skl_controls),
+};
+
 int skl_platform_register(struct device *dev)
 {
 	int ret;
