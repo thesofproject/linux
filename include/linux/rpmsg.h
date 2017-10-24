@@ -109,6 +109,7 @@ struct rpmsg_driver {
 	int (*probe)(struct rpmsg_device *dev);
 	void (*remove)(struct rpmsg_device *dev);
 	int (*callback)(struct rpmsg_device *, void *, int, void *, u32);
+	int (*match)(struct rpmsg_device *dev, struct rpmsg_driver *drv);
 };
 
 #if IS_ENABLED(CONFIG_RPMSG)
