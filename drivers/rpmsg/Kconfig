@@ -15,6 +15,18 @@ config RPMSG_CHAR
 	  in /dev. They make it possible for user-space programs to send and
 	  receive rpmsg packets.
 
+config RPMSG_SYSLOG
+	tristate "RPMSG syslog redirection"
+	depends on RPMSG
+	help
+	  Say Y here to redirect the syslog/printf from remote processor into
+	  the kernel log which is very useful to see what happen in the remote
+	  side.
+
+	  If the remote processor hang during bootup or panic at the runtime,
+	  We can even cat /sys/kernel/debug/remoteproc/remoteprocX/trace0 to
+	  get the last log which doesn't output yet.
+
 config RPMSG_QCOM_GLINK_NATIVE
 	tristate
 	select RPMSG
