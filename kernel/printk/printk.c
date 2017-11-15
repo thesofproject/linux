@@ -353,6 +353,7 @@ enum log_flags {
 	LOG_NEWLINE	= 2,	/* text ended with a newline */
 	LOG_PREFIX	= 4,	/* text started with a prefix */
 	LOG_CONT	= 8,	/* text is a fragment of a continuation line */
+	LOG_TIME	= 16,	/* text already prefix the timestamp */
 };
 
 struct printk_log {
@@ -1243,7 +1244,10 @@ static size_t print_prefix(const struct printk_log *msg, bool syslog, char *buf)
 		}
 	}
 
-	len += print_time(msg->ts_nsec, buf ? buf + len : NULL);
+	/* add the timestamp only when the message hasn't one yet */
+	if (!(msg->flags & LOG_TIME))
+		len += print_time(msg->ts_nsec, buf ? buf + len : NULL);
+
 	return len;
 }
 
@@ -1873,6 +1877,10 @@ asmlinkage int vprintk_emit(int facility, int level,
 				break;
 			case 'c':	/* KERN_CONT */
 				lflags |= LOG_CONT;
+				break;
+			case 't':	/* KERN_TIME */
+				lflags |= LOG_TIME;
+				break;
 			}
 
 			text_len -= 2;
