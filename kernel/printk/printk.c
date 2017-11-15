@@ -353,6 +353,7 @@ enum log_flags {
 	LOG_NEWLINE	= 2,	/* text ended with a newline */
 	LOG_PREFIX	= 4,	/* text started with a prefix */
 	LOG_CONT	= 8,	/* text is a fragment of a continuation line */
+	LOG_NOTIME	= 16,	/* don't print the timestamp */
 };
 
 struct printk_log {
@@ -1208,11 +1209,15 @@ static inline void boot_delay_msec(int level)
 static bool printk_time = IS_ENABLED(CONFIG_PRINTK_TIME);
 module_param_named(time, printk_time, bool, S_IRUGO | S_IWUSR);
 
-static size_t print_time(u64 ts, char *buf)
+static size_t print_time(const struct printk_log *msg, char *buf)
 {
 	unsigned long rem_nsec;
+	u64 ts = msg->ts_nsec;
 
 	if (!printk_time)
+		return 0;
+
+	if (msg->flags & LOG_NOTIME)
 		return 0;
 
 	rem_nsec = do_div(ts, 1000000000);
@@ -1243,7 +1248,7 @@ static size_t print_prefix(const struct printk_log *msg, bool syslog, char *buf)
 		}
 	}
 
-	len += print_time(msg->ts_nsec, buf ? buf + len : NULL);
+	len += print_time(msg, buf ? buf + len : NULL);
 	return len;
 }
 
@@ -1873,6 +1878,10 @@ asmlinkage int vprintk_emit(int facility, int level,
 				break;
 			case 'c':	/* KERN_CONT */
 				lflags |= LOG_CONT;
+				break;
+			case 't':	/* KERN_NOTIME */
+				lflags |= LOG_NOTIME;
+				break;
 			}
 
 			text_len -= 2;

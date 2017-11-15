@@ -23,6 +23,8 @@
  */
 #define KERN_CONT	KERN_SOH "c"
 
+#define KERN_NOTIME	KERN_SOH "t"	/* don't print the timestamp */
+
 /* integer equivalents of KERN_<LEVEL> */
 #define LOGLEVEL_SCHED		-2	/* Deferred messages from sched code
 					 * are set to this special level */
