@@ -3841,6 +3841,8 @@ static int rt5645_i2c_probe(struct i2c_client *i2c,
 
 	regmap_write(rt5645->regmap, RT5645_AD_DA_MIXER, 0x8080);
 
+	regmap_write(rt5645->regmap, RT5645_AD_DA_MIXER, 0x8080);
+
 	ret = regmap_register_patch(rt5645->regmap, init_list,
 				    ARRAY_SIZE(init_list));
 	if (ret != 0)
