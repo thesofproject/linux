@@ -25,6 +25,17 @@ config RPMSG_CLK
 	  1.Reuse the clock driver in the kernel side, or
 	  2.Form a hybrid(kernel plus RTOS) clock tree.
 
+config RPMSG_HOSTFS
+	bool "RPMSG fs API redirection"
+	depends on RPMSG
+	help
+	  Say Y here to redirect fs API from the remote processor.
+	  With this driver, the remote processor could:
+	  1.Save the tuning parameter during manufacture.
+	  2.Load the tuning parameter file in production.
+	  3.Save the dump to file for the tuning or debugging.
+	  4.Load the module from host dynamically.
+
 config RPMSG_SYSLOG
 	tristate "RPMSG syslog redirection"
 	depends on RPMSG
