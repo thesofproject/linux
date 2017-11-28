@@ -22,6 +22,12 @@ config RPMSG_CLK
 	help
 	  Say Y here to redirect clock API from the remote processor.
 
+config RPMSG_HOSTFS
+	tristate "RPMSG fs API redirection"
+	depends on RPMSG
+	help
+	  Say Y here to redirect fs API from the remote processor.
+
 config RPMSG_SYSLOG
 	tristate "RPMSG syslog redirection"
 	depends on RPMSG
