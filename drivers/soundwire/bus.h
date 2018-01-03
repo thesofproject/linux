@@ -18,6 +18,30 @@ static inline int sdw_acpi_find_slaves(struct sdw_bus *bus)
 void sdw_extract_slave_id(struct sdw_bus *bus,
 			  u64 addr, struct sdw_slave_id *id);
 
+#ifdef CONFIG_DEBUG_FS
+struct dentry *sdw_bus_debugfs_init(struct sdw_bus *bus);
+void sdw_bus_debugfs_exit(struct dentry *d);
+struct dentry *sdw_slave_debugfs_init(struct sdw_slave *slave);
+void sdw_slave_debugfs_exit(struct dentry *d);
+void sdw_debugfs_init(void);
+void sdw_debugfs_exit(void);
+#else
+struct dentry *sdw_bus_debugfs_init(struct sdw_bus *bus)
+{ return NULL; }
+
+void sdw_bus_debugfs_exit(struct dentry *d) {}
+
+struct dentry *sdw_slave_debugfs_init(struct sdw_slave *slave)
+{ return NULL; }
+
+void sdw_slave_debugfs_exit(struct dentry *d) {}
+
+void sdw_debugfs_init(void) {}
+
+void sdw_debugfs_exit(void) {}
+
+#endif
+
 enum {
 	SDW_MSG_FLAG_READ = 0,
 	SDW_MSG_FLAG_WRITE,
