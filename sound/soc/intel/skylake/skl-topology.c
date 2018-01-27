@@ -934,7 +934,7 @@ static int skl_tplg_find_moduleid_from_uuid(struct skl *skl,
 	struct soc_bytes_ext *sb = (void *) k->private_value;
 	struct skl_algo_data *bc = (struct skl_algo_data *)sb->dobj.private;
 	struct skl_kpb_params *uuid_params, *params;
-	struct hdac_bus *bus = skl_to_bus(skl);
+	struct hdac_bus *bus = ebus_to_hbus(skl_to_ebus(skl));
 	int i, size, module_id;
 
 	if (bc->set_params == SKL_PARAM_BIND && bc->max) {
