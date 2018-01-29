@@ -45,8 +45,8 @@ static void max98357a_enable_sdmode_work(struct work_struct *work)
 static int max98357a_daiops_trigger(struct snd_pcm_substream *substream,
 		int cmd, struct snd_soc_dai *dai)
 {
-	struct snd_soc_codec *codec = dai->codec;
-	struct max98357a_priv *max98357a = snd_soc_codec_get_drvdata(codec);
+	struct snd_soc_component *component = dai->component;
+	struct max98357a_priv *max98357a = snd_soc_component_get_drvdata(component);
 
 	if (!max98357a->sdmode)
 		return 0;
@@ -78,17 +78,17 @@ static const struct snd_soc_dapm_route max98357a_dapm_routes[] = {
 	{"Speaker", NULL, "HiFi Playback"},
 };
 
-static int max98357a_codec_probe(struct snd_soc_codec *codec)
+static int max98357a_component_probe(struct snd_soc_component *component)
 {
-	struct max98357a_priv *max98357a = snd_soc_codec_get_drvdata(codec);
+	struct max98357a_priv *max98357a = snd_soc_component_get_drvdata(component);
 
-	max98357a->sdmode = devm_gpiod_get_optional(codec->dev,
+	max98357a->sdmode = devm_gpiod_get_optional(component->dev,
 						"sdmode", GPIOD_OUT_LOW);
 
 	if (IS_ERR(max98357a->sdmode))
 		return PTR_ERR(max98357a->sdmode);
 
-	snd_soc_codec_set_drvdata(codec, max98357a);
+	snd_soc_component_set_drvdata(component, max98357a);
 
 	INIT_DELAYED_WORK(&max98357a->enable_sdmode_work,
 				max98357a_enable_sdmode_work);
@@ -96,24 +96,24 @@ static int max98357a_codec_probe(struct snd_soc_codec *codec)
 	return 0;
 }
 
-static int max98357a_codec_remove(struct snd_soc_codec *codec)
+static void max98357a_component_remove(struct snd_soc_component *component)
 {
-	struct max98357a_priv *max98357a = snd_soc_codec_get_drvdata(codec);
+	struct max98357a_priv *max98357a = snd_soc_component_get_drvdata(component);
 
 	cancel_delayed_work_sync(&max98357a->enable_sdmode_work);
-
-	return 0;
 }
 
-static const struct snd_soc_codec_driver max98357a_codec_driver = {
-	.probe			= max98357a_codec_probe,
-	.remove			= max98357a_codec_remove,
-	.component_driver = {
-		.dapm_widgets		= max98357a_dapm_widgets,
-		.num_dapm_widgets	= ARRAY_SIZE(max98357a_dapm_widgets),
-		.dapm_routes		= max98357a_dapm_routes,
-		.num_dapm_routes	= ARRAY_SIZE(max98357a_dapm_routes),
-	},
+static const struct snd_soc_component_driver max98357a_component_driver = {
+	.probe			= max98357a_component_probe,
+	.remove			= max98357a_component_remove,
+	.dapm_widgets		= max98357a_dapm_widgets,
+	.num_dapm_widgets	= ARRAY_SIZE(max98357a_dapm_widgets),
+	.dapm_routes		= max98357a_dapm_routes,
+	.num_dapm_routes	= ARRAY_SIZE(max98357a_dapm_routes),
+	.idle_bias_on		= 1,
+	.use_pmdown_time	= 1,
+	.endianness		= 1,
+	.non_legacy_dai_naming	= 1,
 };
 
 static const struct snd_soc_dai_ops max98357a_dai_ops = {
@@ -160,14 +160,13 @@ static int max98357a_platform_probe(struct platform_device *pdev)
 
 	dev_set_drvdata(&pdev->dev, max98357a);
 
-	return snd_soc_register_codec(&pdev->dev, &max98357a_codec_driver,
+	return devm_snd_soc_register_component(&pdev->dev,
+			&max98357a_component_driver,
 			&max98357a_dai_driver, 1);
 }
 
 static int max98357a_platform_remove(struct platform_device *pdev)
 {
-	snd_soc_unregister_codec(&pdev->dev);
-
 	return 0;
 }
 
