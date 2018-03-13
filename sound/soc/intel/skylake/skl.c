@@ -104,7 +104,8 @@ static void skl_enable_miscbdcge(struct device *dev, bool enable)
 static void skl_clock_power_gating(struct device *dev, bool enable)
 {
 	struct pci_dev *pci = to_pci_dev(dev);
-	struct hdac_bus *bus = pci_get_drvdata(pci);
+	struct hdac_ext_bus *ebus = pci_get_drvdata(pci);
+	struct hdac_bus *bus = ebus_to_hbus(ebus);
 	u32 val;
 
 	/* Update PDCGE bit of CGCTL register */
