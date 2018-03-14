@@ -508,6 +508,9 @@ static void remove_widget(struct snd_soc_component *comp,
 	if (dobj->ops && dobj->ops->widget_unload)
 		dobj->ops->widget_unload(comp, dobj);
 
+	if (!w->kcontrols)
+		goto free_news;
+
 	/*
 	 * Dynamic Widgets either have 1..N enum kcontrols or mixers.
 	 * The enum may either have an array of values or strings.
@@ -529,7 +532,6 @@ static void remove_widget(struct snd_soc_component *comp,
 			kfree(se);
 			kfree(w->kcontrol_news[i].name);
 		}
-		kfree(w->kcontrol_news);
 	} else {
 		/* volume mixer or bytes controls */
 		for (i = 0; w->kcontrols != NULL && i < w->num_kcontrols; i++) {
@@ -547,8 +549,11 @@ static void remove_widget(struct snd_soc_component *comp,
 			snd_ctl_remove(card, kcontrol);
 			kfree(w->kcontrol_news[i].name);
 		}
-		kfree(w->kcontrol_news);
 	}
+
+free_news:
+	kfree(w->kcontrol_news);
+
 	/* widget w is freed by soc-dapm.c */
 }
 
