@@ -57,6 +57,15 @@ config RPMSG_SYSLOG
 	  We can even cat /sys/kernel/debug/remoteproc/remoteprocX/trace0 to
 	  get the last log which doesn't output yet.
 
+config RPMSG_USRSOCK
+	tristate "RPMSG socket API redirection"
+	depends on RPMSG
+	depends on NET
+	help
+	  Say Y here to redirect sock API from the remote processor.
+	  This driver could give the remote processor the capability
+	  to access the internet through any host network interface.
+
 config RPMSG_QCOM_GLINK_NATIVE
 	tristate
 	select RPMSG

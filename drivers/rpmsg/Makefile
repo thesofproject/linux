@@ -6,6 +6,7 @@ obj-$(CONFIG_RPMSG_HOSTFS)	+= rpmsg_hostfs.o
 CFLAGS_rpmsg_hostfs.o		+= -I$(srctree)
 obj-$(CONFIG_RPMSG_RTC)		+= rpmsg_rtc.o
 obj-$(CONFIG_RPMSG_SYSLOG)	+= rpmsg_syslog.o
+obj-$(CONFIG_RPMSG_USRSOCK)	+= rpmsg_usrsock.o
 obj-$(CONFIG_RPMSG_QCOM_GLINK_RPM) += qcom_glink_rpm.o
 obj-$(CONFIG_RPMSG_QCOM_GLINK_NATIVE) += qcom_glink_native.o
 obj-$(CONFIG_RPMSG_QCOM_GLINK_SMEM) += qcom_glink_smem.o
