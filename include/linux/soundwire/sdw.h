@@ -725,6 +725,7 @@ struct sdw_master_ops {
  * Bit set implies used number, bit clear implies unused number.
  * @bus_lock: bus lock
  * @msg_lock: message lock
+ * @compute_params: points to Bus resource management implementation
  * @ops: Master callback ops
  * @port_ops: Master port callback ops
  * @params: Current bus parameters
@@ -747,6 +748,7 @@ struct sdw_bus {
 	DECLARE_BITMAP(assigned, SDW_MAX_DEVICES);
 	struct mutex bus_lock;
 	struct mutex msg_lock;
+	int (*compute_params)(struct sdw_bus *bus);
 	const struct sdw_master_ops *ops;
 	const struct sdw_master_port_ops *port_ops;
 	struct sdw_bus_params params;
@@ -849,6 +851,9 @@ struct sdw_stream_runtime {
 
 struct sdw_stream_runtime *sdw_alloc_stream(char *stream_name);
 void sdw_release_stream(struct sdw_stream_runtime *stream);
+
+int sdw_compute_params(struct sdw_bus *bus);
+
 int sdw_stream_add_master(struct sdw_bus *bus,
 		struct sdw_stream_config *stream_config,
 		struct sdw_port_config *port_config,
