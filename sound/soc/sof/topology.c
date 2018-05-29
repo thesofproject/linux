@@ -1171,9 +1171,35 @@ static int sof_widget_load_siggen(struct snd_soc_component *scomp, int index,
 				  struct sof_ipc_comp_reply *r)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_soc_dapm_widget *widget = swidget->widget;
 	struct snd_soc_tplg_private *private = &tw->priv;
+	const struct snd_kcontrol_new *kc = NULL;
 	struct sof_ipc_comp_tone tone;
+	struct soc_mixer_control *sm;
+	struct snd_sof_control *scontrol;
 	int ret;
+
+	/* siggen needs 1 mixer type control to act as a trigger */
+	if (tw->num_kcontrols != 1) {
+		dev_err(sdev->dev, "error: invalid kcontrol count %d for siggen\n",
+			tw->num_kcontrols);
+		return -EINVAL;
+	}
+
+	/* get mixer control */
+	kc = &widget->kcontrol_news[0];
+	sm = (struct soc_mixer_control *)kc->private_value;
+	scontrol = sm->dobj.private;
+
+	/*
+	 * siggen kcontrol needs only 2 values
+	 * 0 for disabling and 1 for enabling the comp
+	 */
+	if (sm->max != 1) {
+		dev_err(sdev->dev, "error: invalid max %d for siggen control\n",
+			sm->max);
+		return -EINVAL;
+	}
 
 	/* configure mixer IPC message */
 	memset(&tone, 0, sizeof(tone));
