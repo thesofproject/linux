@@ -711,13 +711,13 @@ static void hdac_hdmi_set_power_state(struct hdac_device *hdev,
 	int count;
 	unsigned int state;
 
-	if (get_wcaps(&edev->hdev, nid) & AC_WCAP_POWER) {
-		if (!snd_hdac_check_power_state(&edev->hdev, nid, pwr_state)) {
+	if (get_wcaps(hdev, nid) & AC_WCAP_POWER) {
+		if (!snd_hdac_check_power_state(hdev, nid, pwr_state)) {
 			for (count = 0; count < 10; count++) {
-				snd_hdac_codec_read(&edev->hdev, nid, 0,
+				snd_hdac_codec_read(hdev, nid, 0,
 						AC_VERB_SET_POWER_STATE,
 						pwr_state);
-				state = snd_hdac_sync_power_state(&edev->hdev,
+				state = snd_hdac_sync_power_state(hdev,
 						nid, pwr_state);
 				if (!(state & AC_PWRST_ERROR))
 					break;
@@ -1805,13 +1805,14 @@ static int hdmi_codec_probe(struct snd_soc_component *component)
 	 * hold the ref while we probe, also no need to drop the ref on
 	 * exit, we call pm_runtime_suspend() so that will do for us
 	 */
-	hlink = snd_hdac_ext_bus_get_link(hdev->bus, dev_name(&hdev->dev));
+	hlink = snd_hdac_ext_bus_get_link(hbus_to_ebus(hdev->bus),
+						dev_name(&hdev->dev));
 	if (!hlink) {
 		dev_err(&hdev->dev, "hdac link not found\n");
 		return -EIO;
 	}
 
-	snd_hdac_ext_bus_link_get(hdev->bus, hlink);
+	snd_hdac_ext_bus_link_get(hbus_to_ebus(hdev->bus), hlink);
 
 	ret = create_fill_widget_route_map(dapm);
 	if (ret < 0)
@@ -1989,13 +1990,14 @@ static int hdac_hdmi_dev_probe(struct hdac_device *hdev)
 	const struct hda_device_id *hdac_id = hdac_get_device_id(hdev, hdrv);
 
 	/* hold the ref while we probe */
-	hlink = snd_hdac_ext_bus_get_link(hdev->bus, dev_name(&hdev->dev));
+	hlink = snd_hdac_ext_bus_get_link(hbus_to_ebus(hdev->bus),
+						dev_name(&hdev->dev));
 	if (!hlink) {
 		dev_err(&hdev->dev, "hdac link not found\n");
 		return -EIO;
 	}
 
-	snd_hdac_ext_bus_link_get(hdev->bus, hlink);
+	snd_hdac_ext_bus_link_get(hbus_to_ebus(hdev->bus), hlink);
 
 	hdmi_priv = devm_kzalloc(&hdev->dev, sizeof(*hdmi_priv), GFP_KERNEL);
 	if (hdmi_priv == NULL)
@@ -2048,7 +2050,7 @@ static int hdac_hdmi_dev_probe(struct hdac_device *hdev)
 	ret = devm_snd_soc_register_component(&hdev->dev, &hdmi_hda_codec,
 					hdmi_dais, num_dais);
 
-	snd_hdac_ext_bus_link_put(hdev->bus, hlink);
+	snd_hdac_ext_bus_link_put(hbus_to_ebus(hdev->bus), hlink);
 
 	return ret;
 }
