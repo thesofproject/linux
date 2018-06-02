@@ -215,17 +215,17 @@ static inline struct hdac_device *get_hdev(struct device *dev)
 
 static int hda_ext_drv_probe(struct device *dev)
 {
-	return (get_edrv(dev))->probe(get_hdev(dev));
+	return (get_hdrv(dev))->probe(get_hdev(dev));
 }
 
 static int hdac_ext_drv_remove(struct device *dev)
 {
-	return (get_edrv(dev))->remove(get_hdev(dev));
+	return (get_hdrv(dev))->remove(get_hdev(dev));
 }
 
 static void hdac_ext_drv_shutdown(struct device *dev)
 {
-	return (get_edrv(dev))->shutdown(get_hdev(dev));
+	return (get_hdrv(dev))->shutdown(get_hdev(dev));
 }
 
 /**

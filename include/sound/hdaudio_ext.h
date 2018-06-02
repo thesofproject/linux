@@ -161,20 +161,6 @@ struct hdac_ext_dma_params {
 	u8 stream_tag;
 };
 
-/*
- * HD-audio codec base driver
- */
-struct hdac_ext_driver {
-	struct hdac_driver hdac;
-
-	int	(*probe)(struct hdac_device *dev);
-	int	(*remove)(struct hdac_device *dev);
-	void	(*shutdown)(struct hdac_device *dev);
-};
-
-int snd_hda_ext_driver_register(struct hdac_ext_driver *drv);
-void snd_hda_ext_driver_unregister(struct hdac_ext_driver *drv);
-
 int snd_hda_ext_driver_register(struct hdac_driver *drv);
 void snd_hda_ext_driver_unregister(struct hdac_driver *drv);
 
