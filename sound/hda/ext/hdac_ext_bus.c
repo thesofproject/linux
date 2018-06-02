@@ -103,6 +103,7 @@ int snd_hdac_ext_bus_init(struct hdac_bus *bus, struct device *dev,
 	if (ret < 0)
 		return ret;
 
+	bus->ext_ops = ext_ops;
 	INIT_LIST_HEAD(&bus->hlink_list);
 	bus->idx = idx++;
 
