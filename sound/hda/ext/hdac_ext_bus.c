@@ -103,7 +103,6 @@ int snd_hdac_ext_bus_init(struct hdac_bus *bus, struct device *dev,
 	if (ret < 0)
 		return ret;
 
-	bus->ext_ops = ext_ops;
 	INIT_LIST_HEAD(&bus->hlink_list);
 	bus->idx = idx++;
 
@@ -137,11 +136,9 @@ static void default_release(struct device *dev)
  *
  * Returns zero for success or a negative error code.
  */
-int snd_hdac_ext_bus_device_init(struct hdac_bus *bus, int addr,
-					struct hdac_device *hdev)
+int snd_hdac_ext_bus_device_init(struct hdac_bus *bus, int addr)
 {
 	struct hdac_device *hdev = NULL;
-	struct hdac_bus *bus = ebus_to_hbus(ebus);
 	char name[15];
 	int ret;
 

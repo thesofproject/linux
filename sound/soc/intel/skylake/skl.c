@@ -104,8 +104,7 @@ static void skl_enable_miscbdcge(struct device *dev, bool enable)
 static void skl_clock_power_gating(struct device *dev, bool enable)
 {
 	struct pci_dev *pci = to_pci_dev(dev);
-	struct hdac_ext_bus *ebus = pci_get_drvdata(pci);
-	struct hdac_bus *bus = ebus_to_hbus(ebus);
+	struct hdac_bus *bus = pci_get_drvdata(pci);
 	u32 val;
 
 	/* Update PDCGE bit of CGCTL register */
@@ -128,7 +127,6 @@ static void skl_clock_power_gating(struct device *dev, bool enable)
  */
 static int skl_init_chip(struct hdac_bus *bus, bool full_reset)
 {
-	struct hdac_ext_bus *ebus = hbus_to_ebus(bus);
 	struct hdac_ext_link *hlink;
 	int ret;
 
@@ -136,7 +134,7 @@ static int skl_init_chip(struct hdac_bus *bus, bool full_reset)
 	ret = snd_hdac_bus_init_chip(bus, full_reset);
 
 	/* Reset stream-to-link mapping */
-	list_for_each_entry(hlink, &ebus->hlink_list, list)
+	list_for_each_entry(hlink, &bus->hlink_list, list)
 		bus->io_ops->reg_writel(0, hlink->ml_addr + AZX_REG_ML_LOSIDV);
 
 	skl_enable_miscbdcge(bus->dev, true);
@@ -525,6 +523,7 @@ static int skl_find_machine(struct skl *skl, void *driver_data)
 
 static int skl_machine_device_register(struct skl *skl)
 {
+	struct hdac_bus *bus = skl_to_bus(skl);
 	struct snd_soc_acpi_mach *mach = skl->mach;
 	struct hdac_bus *bus = skl_to_bus(skl);
 	struct skl_machine_pdata *pdata;
@@ -699,24 +698,7 @@ static int probe_codec(struct hdac_bus *bus, int addr)
 		return -EIO;
 	dev_dbg(bus->dev, "codec #%d probed OK: %x\n", addr, res);
 
-	hda_codec = devm_kzalloc(&skl->pci->dev, sizeof(*hda_codec),
-				 GFP_KERNEL);
-	if (!hda_codec)
-		return -ENOMEM;
-
-	hda_codec->codec.bus = skl_to_hbus(skl);
-	hdev = &hda_codec->codec.core;
-
-	err = snd_hdac_ext_bus_device_init(bus, addr, hdev);
-	if (err < 0)
-		return err;
-
-	/* use legacy bus only for HDA codecs, idisp uses ext bus */
-	if ((res & 0xFFFF0000) != IDISP_INTEL_VENDOR_ID) {
-		hdev->type = HDA_DEV_LEGACY;
-		load_codec_module(&hda_codec->codec);
-	}
-	return 0;
+	return snd_hdac_ext_bus_device_init(bus, addr);
 }
 
 /* Codec initialization */
@@ -860,7 +842,7 @@ static int skl_create(struct pci_dev *pci,
 	struct hdac_ext_bus_ops *ext_ops = NULL;
 	struct skl *skl;
 	struct hdac_bus *bus;
-	struct hda_bus *hbus;
+
 	int err;
 
 	*rskl = NULL;
@@ -875,22 +857,12 @@ static int skl_create(struct pci_dev *pci,
 		return -ENOMEM;
 	}
 
-	hbus = skl_to_hbus(skl);
 	bus = skl_to_bus(skl);
-
-#if IS_ENABLED(CONFIG_SND_SOC_HDAC_HDA)
-	ext_ops = snd_soc_hdac_hda_get_ops();
-#endif
-	snd_hdac_ext_bus_init(bus, &pci->dev, &bus_core_ops, io_ops, ext_ops);
+	snd_hdac_ext_bus_init(bus, &pci->dev, &bus_core_ops, io_ops);
 	bus->use_posbuf = 1;
 	skl->pci = pci;
 	INIT_WORK(&skl->probe_work, skl_probe_work);
 	bus->bdl_pos_adj = 0;
-
-	mutex_init(&hbus->prepare_mutex);
-	hbus->pci = pci;
-	hbus->mixer_assigned = -1;
-	hbus->modelname = "sklbus";
 
 	*rskl = skl;
 

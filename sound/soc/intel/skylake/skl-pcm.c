@@ -1399,19 +1399,19 @@ static int skl_populate_modules(struct skl *skl)
 
 static int skl_platform_soc_probe(struct snd_soc_component *component)
 {
-	struct hdac_ext_bus *ebus = dev_get_drvdata(component->dev);
-	struct skl *skl = ebus_to_skl(ebus);
+	struct hdac_bus *bus = dev_get_drvdata(component->dev);
+	struct skl *skl = bus_to_skl(bus);
 	const struct skl_dsp_ops *ops;
 	int ret;
 
 	pm_runtime_get_sync(component->dev);
-	if ((ebus_to_hbus(ebus))->ppcap) {
+	if (bus->ppcap) {
 		skl->component = component;
 
 		/* init debugfs */
 		skl->debugfs = skl_debugfs_init(skl);
 
-		ret = skl_tplg_init(component, ebus);
+		ret = skl_tplg_init(component, bus);
 		if (ret < 0) {
 			dev_err(component->dev, "Failed to init topology!\n");
 			return ret;

@@ -72,7 +72,7 @@ struct skl_fw_config {
 };
 
 struct skl {
-	struct hda_bus hbus;
+	struct hdac_bus hbus;
 	struct pci_dev *pci;
 
 	unsigned int init_done:1; /* delayed init status */
@@ -106,11 +106,8 @@ struct skl {
 	struct snd_soc_acpi_mach *mach;
 };
 
-#define skl_to_bus(s)  (&(s)->hbus.core)
-#define bus_to_skl(bus) container_of(bus, struct skl, hbus.core)
-
-#define skl_to_hbus(s) (&(s)->hbus)
-#define hbus_to_skl(hbus) container_of((hbus), struct skl, (hbus))
+#define skl_to_bus(s)  (&(s)->hbus)
+#define bus_to_skl(bus) container_of(bus, struct skl, hbus)
 
 /* to pass dai dma data */
 struct skl_dma_params {
