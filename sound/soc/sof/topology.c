@@ -1947,6 +1947,7 @@ static const struct snd_soc_tplg_kcontrol_ops sof_io_ops[] = {
 	{SOF_TPLG_KCTL_VOL_ID, snd_sof_volume_get, snd_sof_volume_put},
 	{SOF_TPLG_KCTL_ENUM_ID, snd_sof_enum_get, snd_sof_enum_put},
 	{SOF_TPLG_KCTL_BYTES_ID, snd_sof_bytes_get, snd_sof_bytes_put},
+	{SOF_TPLG_KCTL_SWITCH_ID, snd_sof_switch_get, snd_sof_switch_put},
 };
 
 /* vendor specific bytes ext handlers available for binding */
