@@ -293,6 +293,7 @@ struct snd_sof_dev {
 
 	/* debug */
 	struct dentry *debugfs_root;
+	u32 debug_mode;
 
 	/* firmware loader */
 	int cl_bar;
