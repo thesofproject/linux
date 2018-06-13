@@ -107,6 +107,7 @@ int snd_sof_dbg_init(struct snd_sof_dev *sdev)
 {
 	const struct snd_sof_dsp_ops *ops = sdev->ops;
 	const struct snd_sof_debugfs_map *map;
+	struct dentry *dfsentry;
 	int err = 0, i;
 
 	sdev->debugfs_root = debugfs_create_dir("sof", NULL);
@@ -124,6 +125,19 @@ int snd_sof_dbg_init(struct snd_sof_dev *sdev)
 		if (err < 0)
 			dev_err(sdev->dev, "cannot create debugfs for %s\n",
 				map->name);
+	}
+
+#ifdef DEBUG
+	/* enable debug mode for DEBUG build */
+	sdev->debug_mode = 1;
+#else
+	sdev->debug_mode = 0;
+#endif
+	dfsentry = debugfs_create_u32("debugmode", 0644, sdev->debugfs_root,
+				      &sdev->debug_mode);
+	if (!dfsentry) {
+		dev_err(sdev->dev, "cannot create debugmode debugfs entry.\n");
+		return -ENODEV;
 	}
 
 	return err;
