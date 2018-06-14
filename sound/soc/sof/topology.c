@@ -368,6 +368,8 @@ static const struct sof_topology_token src_tokens[] = {
 
 /* Tone */
 static const struct sof_topology_token tone_tokens[] = {
+	{SOF_TKN_TONE_SAMPLE_RATE, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc_comp_tone, sample_rate), 0},
 };
 
 /* PCM */
@@ -1227,8 +1229,9 @@ static int sof_widget_load_siggen(struct snd_soc_component *scomp, int index,
 		return ret;
 	}
 
-	dev_dbg(sdev->dev, "tone %s: frequency %d amplitude %d\n",
-		swidget->widget->name, tone.frequency, tone.amplitude);
+	dev_dbg(sdev->dev, "tone %s: frequency %d amplitude %d sample rate %d\n",
+		swidget->widget->name, tone.frequency, tone.amplitude,
+		tone.sample_rate);
 	sof_dbg_comp_config(scomp, &tone.config);
 
 	return sof_ipc_tx_message(sdev->ipc,
