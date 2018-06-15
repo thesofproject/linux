@@ -97,6 +97,7 @@
 /* trace and debug */
 #define SOF_IPC_TRACE_DMA_PARAMS		SOF_CMD_TYPE(0x001)
 #define SOF_IPC_TRACE_DMA_POSITION		SOF_CMD_TYPE(0x002)
+#define SOF_IPC_TRACE_LEVEL			SOF_CMD_TYPE(0x003)
 
 /* Get message component id */
 #define SOF_IPC_MESSAGE_ID(x)			((x) & 0xffff)
@@ -165,6 +166,13 @@ struct sof_ipc_reply {
 struct sof_ipc_compound_hdr {
 	struct sof_ipc_hdr hdr;
 	uint32_t count;		/* count of 0 means end of compound sequence */
+}  __attribute__((packed));
+
+/* for host to send trace level setting to dsp */
+struct sof_ipc_trace_level {
+	struct sof_ipc_hdr hdr;
+	int32_t comp_id;
+	uint32_t level;
 }  __attribute__((packed));
 
 /*
@@ -774,6 +782,7 @@ struct sof_ipc_pm_ctx {
 enum sof_ipc_ext_data {
 	SOF_IPC_EXT_DMA_BUFFER = 0,
 	SOF_IPC_EXT_WINDOW,
+	SOF_IPC_EXT_COMPONENT,
 };
 
 /* FW version - SOF_IPC_GLB_VERSION */
@@ -863,6 +872,21 @@ struct sof_ipc_dma_trace_posn {
 	uint32_t host_offset;	/* Offset of DMA host buffer */
 	uint32_t overflow;	/* overflow bytes if any */
 	uint32_t messages;	/* total trace messages */
+}  __attribute__((packed));
+
+struct sof_ipc_comp_info {
+	char name[8];
+	uint32_t level;
+};
+
+#define MAX_LEVEL_INFO_SIZE 320
+
+/* for host to query components information from dsp */
+struct sof_ipc_trace_comp {
+	struct sof_ipc_ext_data_hdr ext_hdr;
+	char level_info[MAX_LEVEL_INFO_SIZE]; /* help info for trace level */
+	uint32_t num_components;  /* Size of components info */
+	struct sof_ipc_comp_info comp[];
 }  __attribute__((packed));
 
 /*
