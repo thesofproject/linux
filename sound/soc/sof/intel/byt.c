@@ -750,6 +750,48 @@ static int byt_remove(struct snd_sof_dev *sdev)
 		return byt_acpi_remove(sdev);
 }
 
+static const struct snd_soc_dai_ops byt_dai_ops = {
+};
+
+#define BYT_FORMATS (SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S24_LE | \
+	SNDRV_PCM_FMTBIT_S32_LE | SNDRV_PCM_FMTBIT_FLOAT)
+
+/* Baytrail DAIs */
+static struct snd_soc_dai_driver byt_dai[] = {
+{
+	.name = "ssp0-port",
+	.ops = &byt_dai_ops,
+	.playback = SOF_DAI_STREAM("ssp0 Tx", 1, 16,
+				   SNDRV_PCM_RATE_8000_192000, BYT_FORMATS),
+	.capture = SOF_DAI_STREAM("ssp0 Rx", 1, 16,
+				  SNDRV_PCM_RATE_8000_192000, BYT_FORMATS),
+},
+{
+	.name = "ssp1-port",
+	.ops = &byt_dai_ops,
+	.playback = SOF_DAI_STREAM("ssp1 Tx", 1, 16,
+				   SNDRV_PCM_RATE_8000_192000, BYT_FORMATS),
+	.capture = SOF_DAI_STREAM("ssp1 Rx", 1, 16,
+				  SNDRV_PCM_RATE_8000_192000, BYT_FORMATS),
+},
+{
+	.name = "ssp2-port",
+	.ops = &byt_dai_ops,
+	.playback = SOF_DAI_STREAM("ssp2 Tx", 1, 16,
+				   SNDRV_PCM_RATE_8000_192000, BYT_FORMATS),
+	.capture = SOF_DAI_STREAM("ssp2 Rx", 1, 16,
+				  SNDRV_PCM_RATE_8000_192000, BYT_FORMATS),
+},
+{
+	.name = "sof-nocodec-dai",
+	.ops = &byt_dai_ops,
+	.playback = SOF_DAI_STREAM("DAI0 Tx", 1, 16,
+				   SNDRV_PCM_RATE_8000_192000, SOF_FORMATS),
+	.capture = SOF_DAI_STREAM("DAI0 Rx", 1, 16,
+				  SNDRV_PCM_RATE_8000_192000, SOF_FORMATS),
+},
+};
+
 /* baytrail ops */
 struct snd_sof_dsp_ops sof_byt_ops = {
 	/* device init */
@@ -795,6 +837,10 @@ struct snd_sof_dsp_ops sof_byt_ops = {
 
 	/*Firmware loading */
 	.load_firmware	= snd_sof_load_firmware_memcpy,
+
+	/* DAI drivers */
+	.drv		= byt_dai,
+	.num_drv	= 3, /* BYT only has 3 SSPs */
 };
 EXPORT_SYMBOL(sof_byt_ops);
 
@@ -843,6 +889,10 @@ struct snd_sof_dsp_ops sof_cht_ops = {
 
 	/*Firmware loading */
 	.load_firmware	= snd_sof_load_firmware_memcpy,
+
+	/* DAI drivers */
+	.drv		= byt_dai,
+	.num_drv	= ARRAY_SIZE(byt_dai),
 };
 EXPORT_SYMBOL(sof_cht_ops);
 
