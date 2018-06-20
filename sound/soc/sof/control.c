@@ -195,3 +195,99 @@ int snd_sof_bytes_put(struct snd_kcontrol *kcontrol,
 	pm_runtime_put_autosuspend(sdev->dev);
 	return 0;
 }
+
+int snd_sof_switch_get(struct snd_kcontrol *kcontrol,
+		       struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_sof_control *scontrol =
+		(struct snd_sof_control *)kcontrol->private_value;
+	struct snd_sof_dev *sdev = scontrol->sdev;
+	struct sof_ipc_ctrl_data *cdata = scontrol->control_data;
+	int err;
+
+	pm_runtime_get_sync(sdev->dev);
+
+	/* get all the mixer data from DSP */
+	err = snd_sof_ipc_get_comp_data(sdev->ipc, scontrol,
+					SOF_IPC_COMP_GET_VALUE,
+					SOF_CTRL_TYPE_VALUE_COMP_GET,
+					scontrol->cmd);
+	if (err < 0) {
+		dev_err(sdev->dev, "error: failed to get comp %d switch\n",
+			cdata->comp_id);
+		return err;
+	}
+
+	dev_dbg(sdev->dev, "comp %d switch get %d\n", scontrol->comp_id,
+		cdata->compv[0].uvalue);
+	/* get value from ipc control data */
+	ucontrol->value.integer.value[0] = cdata->compv[0].uvalue;
+
+	pm_runtime_mark_last_busy(sdev->dev);
+	pm_runtime_put_autosuspend(sdev->dev);
+	return 0;
+}
+
+int snd_sof_switch_put(struct snd_kcontrol *kcontrol,
+		       struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_sof_control *scontrol =
+		(struct snd_sof_control *)kcontrol->private_value;
+	struct snd_sof_dev *sdev = scontrol->sdev;
+	struct sof_ipc_ctrl_data *cdata = scontrol->control_data;
+	int changed = 0;
+	int err;
+
+	pm_runtime_get_sync(sdev->dev);
+
+	if (cdata->compv[0].uvalue != ucontrol->value.integer.value[0]) {
+		/* set value into ipc control data */
+		cdata->compv[0].uvalue = ucontrol->value.integer.value[0];
+		err = snd_sof_ipc_set_comp_data(sdev->ipc, scontrol,
+						SOF_IPC_COMP_SET_VALUE,
+						SOF_CTRL_TYPE_VALUE_COMP_SET,
+						scontrol->cmd);
+
+		if (err < 0) {
+			dev_err(sdev->dev, "error: failed to set comp %d switch\n",
+				cdata->comp_id);
+			return err;
+		}
+
+		dev_dbg(sdev->dev, "comp %d switch put %d\n", scontrol->comp_id,
+			cdata->compv[0].uvalue);
+
+		changed = 1;
+	}
+
+	pm_runtime_mark_last_busy(sdev->dev);
+	pm_runtime_put_autosuspend(sdev->dev);
+	return changed;
+}
+
+int snd_sof_switch_debug_put(struct snd_kcontrol *kcontrol,
+			     struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_sof_control *scontrol =
+		(struct snd_sof_control *)kcontrol->private_value;
+	struct snd_sof_dev *sdev = scontrol->sdev;
+
+	/* can only switch when debug_mode enable */
+	if (!sdev->debug_mode) {
+		dev_err(sdev->dev,
+			"debug switch only enabled with debugfs debug_mode nonzero!\n");
+		return 0;
+	}
+
+	return snd_sof_switch_put(kcontrol, ucontrol);
+}
+
+int snd_sof_switch_info(struct snd_kcontrol *kcontrol,
+			struct snd_ctl_elem_info *uinfo)
+{
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_BOOLEAN;
+	uinfo->count = 1;
+	uinfo->value.integer.min = 0;
+	uinfo->value.integer.max = 1;
+	return 0;
+}
