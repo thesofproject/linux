@@ -312,6 +312,11 @@ static int get_token_dai_type(void *elem, void *object, u32 offset, u32 size)
 	return 0;
 }
 
+struct sof_dai_extra_config {
+	u32 configs;
+	u32 sspindex;
+};
+
 /* Buffers */
 static const struct sof_topology_token buffer_tokens[] = {
 	{SOF_TKN_BUF_SIZE, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
@@ -328,6 +333,14 @@ static const struct sof_topology_token dai_tokens[] = {
 		offsetof(struct sof_ipc_comp_dai, type), 0},
 	{SOF_TKN_DAI_INDEX, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
 		offsetof(struct sof_ipc_comp_dai, index), 0},
+};
+
+/* DAI EXTRA CONFIG */
+static const struct sof_topology_token sof_dai_extra_config_tokens[] = {
+	{SOF_TKN_DAI_EXT_CONFIG, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_dai_extra_config, configs), 0},
+	{SOF_TKN_DAI_INDEX, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_dai_extra_config, sspindex), 0},
 };
 
 /* BE DAI link */
@@ -804,6 +817,70 @@ static int sof_connect_dai_widget(struct snd_soc_component *scomp,
 	return 0;
 }
 
+/* LBM kcontrol, used to control loopback mode on SSP */
+static int sof_dai_add_lbm_kcontrol(struct snd_soc_component *scomp,
+				    u32 comp_id, u32 index)
+{
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_control *scontrol;
+	struct sof_ipc_ctrl_data *cdata;
+	struct snd_kcontrol *kcontrol;
+	struct snd_kcontrol_new *kc;
+	char kcname[50];
+	int err;
+
+	sprintf(kcname, "sof SSP%d LBM Switch", index);
+	dev_dbg(sdev->dev, "Adding %s\n", kcname);
+
+	kc = kzalloc(sizeof(*kc), GFP_KERNEL);
+	if (!kc)
+		return -ENOMEM;
+
+	scontrol = kzalloc(sizeof(*scontrol), GFP_KERNEL);
+	if (!scontrol)
+		return -ENOMEM;
+
+	scontrol->size = sizeof(struct sof_ipc_ctrl_data) +
+		sizeof(struct sof_ipc_ctrl_value_comp);
+	cdata = kzalloc(scontrol->size, GFP_KERNEL);
+	if (!cdata)
+		return -ENOMEM;
+
+	/* set sof control */
+	scontrol->control_data = cdata;
+	scontrol->comp_id = comp_id;
+	scontrol->sdev = sdev;
+	scontrol->cmd = SOF_CTRL_CMD_SWITCH;
+	scontrol->num_channels = 1;
+
+	/* set kcontrol new structure for kcontrol create */
+	kc->name = kcname;
+	kc->private_value = (long)scontrol;
+	kc->iface = SNDRV_CTL_ELEM_IFACE_MIXER;
+	kc->access = SNDRV_CTL_ELEM_ACCESS_READWRITE;
+	kc->info = snd_sof_switch_info;
+	kc->put = snd_sof_switch_debug_put;
+	kc->get = snd_sof_switch_get;
+
+	/* create kcontrol */
+	kcontrol = snd_soc_cnew(kc, scomp, kc->name, NULL);
+	if (!kcontrol) {
+		dev_err(sdev->dev, "ASoC: Failed to create new kcontrol %s\n",
+			kc->name);
+		return -ENOMEM;
+	}
+
+	/* add kcontrol to card */
+	err = snd_ctl_add(scomp->card->snd_card, kcontrol);
+	if (err < 0) {
+		dev_err(sdev->dev, "ASoC: Failed to add %s: %d\n",
+			kc->name, err);
+		return err;
+	}
+
+	return 0;
+}
+
 static int sof_widget_load_dai(struct snd_soc_component *scomp, int index,
 			       struct snd_sof_widget *swidget,
 			       struct snd_soc_tplg_dapm_widget *tw,
@@ -812,6 +889,7 @@ static int sof_widget_load_dai(struct snd_soc_component *scomp, int index,
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_tplg_private *private = &tw->priv;
+	struct sof_dai_extra_config ext_config;
 	struct sof_ipc_comp_dai comp_dai;
 	int ret;
 
@@ -840,6 +918,22 @@ static int sof_widget_load_dai(struct snd_soc_component *scomp, int index,
 			private->size);
 		return ret;
 	}
+
+	ext_config.configs = 0;
+	ret = sof_parse_tokens(scomp, &ext_config, sof_dai_extra_config_tokens,
+			       ARRAY_SIZE(sof_dai_extra_config_tokens),
+			       private->array, private->size);
+	if (ret != 0) {
+		dev_err(sdev->dev,
+			"error: parse dai ext config tokens failed %d\n",
+			private->size);
+		return ret;
+	}
+
+	/* add kcontrol for loop back mode */
+	if (ext_config.configs && SOF_DAI_EXT_SSP_LBM)
+		sof_dai_add_lbm_kcontrol(scomp, swidget->comp_id,
+					 ext_config.sspindex);
 
 	dev_dbg(sdev->dev, "dai %s: type %d index %d\n",
 		swidget->widget->name, comp_dai.type, comp_dai.index);
