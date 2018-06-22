@@ -709,6 +709,40 @@ static int hsw_remove(struct snd_sof_dev *sdev)
 	return 0;
 }
 
+static const struct snd_soc_dai_ops hsw_dai_ops = {
+};
+
+#define HSW_FORMATS (SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S24_LE | \
+	SNDRV_PCM_FMTBIT_S32_LE | SNDRV_PCM_FMTBIT_FLOAT)
+
+/* Haswell DAIs */
+static struct snd_soc_dai_driver hsw_dai[] = {
+{
+	.name = "ssp0-port",
+	.ops = &hsw_dai_ops,
+	.playback = SOF_DAI_STREAM("ssp0 Tx", 1, 16,
+				   SNDRV_PCM_RATE_8000_192000, HSW_FORMATS),
+	.capture = SOF_DAI_STREAM("ssp0 Rx", 1, 16,
+				  SNDRV_PCM_RATE_8000_192000, HSW_FORMATS),
+},
+{
+	.name = "ssp1-port",
+	.ops = &hsw_dai_ops,
+	.playback = SOF_DAI_STREAM("ssp1 Tx", 1, 16,
+				   SNDRV_PCM_RATE_8000_192000, HSW_FORMATS),
+	.capture = SOF_DAI_STREAM("ssp1 Rx", 1, 16,
+				  SNDRV_PCM_RATE_8000_192000, HSW_FORMATS),
+},
+{
+	.name = "sof-nocodec-dai",
+	.ops = &hsw_dai_ops,
+	.playback = SOF_DAI_STREAM("DAI0 Tx", 1, 16,
+				   SNDRV_PCM_RATE_8000_192000, SOF_FORMATS),
+	.capture = SOF_DAI_STREAM("DAI0 Rx", 1, 16,
+				  SNDRV_PCM_RATE_8000_192000, SOF_FORMATS),
+},
+};
+
 /* haswell ops */
 struct snd_sof_dsp_ops sof_hsw_ops = {
 	/*Device init */
@@ -750,6 +784,10 @@ struct snd_sof_dsp_ops sof_hsw_ops = {
 
 	/*Firmware loading */
 	.load_firmware	= snd_sof_load_firmware_memcpy,
+
+	/* DAI drivers */
+	.drv		= hsw_dai,
+	.num_drv	= ARRAY_SIZE(hsw_dai),
 
 };
 EXPORT_SYMBOL(sof_hsw_ops);

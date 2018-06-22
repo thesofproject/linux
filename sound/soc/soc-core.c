@@ -2126,7 +2126,6 @@ static void soc_check_tplg_fes(struct snd_soc_card *card)
 
 			/* override platform */
 			dai_link->platform_name = platform->component.name;
-			dai_link->cpu_dai_name = platform->component.name;
 
 			/* convert non BE into BE */
 			dai_link->no_pcm = 1;

@@ -114,6 +114,19 @@ static struct sof_dev_desc kbl_desc = {
 };
 #endif
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_ICELAKE)
+static const struct sof_dev_desc icl_desc = {
+	.machines		= snd_soc_acpi_intel_icl_machines,
+	.resindex_lpe_base	= 0,
+	.resindex_pcicfg_base	= -1,
+	.resindex_imr_base	= -1,
+	.irqindex_host_ipc	= -1,
+	.resindex_dma_base	= -1,
+	.nocodec_fw_filename = "intel/sof-icl.ri",
+	.nocodec_tplg_filename = "intel/sof-icl-nocodec.tplg"
+};
+#endif
+
 struct sof_pci_priv {
 	struct snd_sof_pdata *sof_pdata;
 	struct platform_device *pdev_pcm;
@@ -168,6 +181,9 @@ static const struct sof_ops_table mach_ops[] = {
 #endif
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_KABYLAKE)
 	{&kbl_desc, &sof_apl_ops},
+#endif
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_ICELAKE)
+	{&icl_desc, &sof_cnl_ops},
 #endif
 };
 
@@ -226,7 +242,7 @@ static int sof_pci_probe(struct pci_dev *pci,
 	/* force nocodec mode */
 	dev_warn(dev, "Force to use nocodec mode\n");
 	mach = devm_kzalloc(dev, sizeof(*mach), GFP_KERNEL);
-	ret = sof_nocodec_setup(dev, sof_pdata, mach, desc);
+	ret = sof_nocodec_setup(dev, sof_pdata, mach, desc, ops);
 	if (ret < 0)
 		return ret;
 #else
@@ -237,7 +253,7 @@ static int sof_pci_probe(struct pci_dev *pci,
 		/* fallback to nocodec mode */
 		dev_warn(dev, "No matching ASoC machine driver found - using nocodec\n");
 		mach = devm_kzalloc(dev, sizeof(*mach), GFP_KERNEL);
-		ret = sof_nocodec_setup(dev, sof_pdata, mach, desc);
+		ret = sof_nocodec_setup(dev, sof_pdata, mach, desc, ops);
 		if (ret < 0)
 			return ret;
 #else
@@ -321,6 +337,11 @@ static const struct pci_device_id sof_pci_ids[] = {
 	{ PCI_DEVICE(0x8086, 0x9d70),
 		.driver_data = (unsigned long)&skl_desc},
 #endif
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_ICELAKE)
+	{ PCI_DEVICE(0x8086, 0x34C8),
+		.driver_data = (unsigned long)&icl_desc},
+#endif
+
 	{ 0, }
 };
 MODULE_DEVICE_TABLE(pci, sof_pci_ids);

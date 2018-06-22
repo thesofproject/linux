@@ -40,6 +40,110 @@ static const struct snd_sof_debugfs_map apl_dsp_debugfs[] = {
 	{"dsp", HDA_DSP_BAR,  0, 0x10000},
 };
 
+static const struct snd_soc_dai_ops apl_dai_ops = {
+};
+
+#define APL_FORMATS (SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S24_LE | \
+	SNDRV_PCM_FMTBIT_S32_LE | SNDRV_PCM_FMTBIT_FLOAT)
+
+/* Apollolake DAIs */
+static struct snd_soc_dai_driver apl_dai[] = {
+{
+	.name = "SSP0 Pin",
+	.ops = &apl_dai_ops,
+	.playback = SOF_DAI_STREAM("ssp0 Tx", 1, 16,
+				   SNDRV_PCM_RATE_8000_192000, APL_FORMATS),
+	.capture = SOF_DAI_STREAM("ssp0 Rx", 1, 16,
+				  SNDRV_PCM_RATE_8000_192000, APL_FORMATS),
+},
+{
+	.name = "SSP1 Pin",
+	.ops = &apl_dai_ops,
+	.playback = SOF_DAI_STREAM("ssp1 Tx", 1, 16,
+				   SNDRV_PCM_RATE_8000_192000, APL_FORMATS),
+	.capture = SOF_DAI_STREAM("ssp1 Rx", 1, 16,
+				  SNDRV_PCM_RATE_8000_192000, APL_FORMATS),
+},
+{
+	.name = "SSP2 Pin",
+	.ops = &apl_dai_ops,
+	.playback = SOF_DAI_STREAM("ssp2 Tx", 1, 16,
+				   SNDRV_PCM_RATE_8000_192000, APL_FORMATS),
+	.capture = SOF_DAI_STREAM("ssp2 Rx", 1, 16,
+				  SNDRV_PCM_RATE_8000_192000, APL_FORMATS),
+},
+{
+	.name = "SSP3 Pin",
+	.ops = &apl_dai_ops,
+	.playback = SOF_DAI_STREAM("ssp3 Tx", 1, 16,
+				   SNDRV_PCM_RATE_8000_192000, APL_FORMATS),
+	.capture = SOF_DAI_STREAM("ssp3 Rx", 1, 16,
+				  SNDRV_PCM_RATE_8000_192000, APL_FORMATS),
+},
+{
+	.name = "SSP4 Pin",
+	.ops = &apl_dai_ops,
+	.playback = SOF_DAI_STREAM("ssp4 Tx", 1, 16,
+				   SNDRV_PCM_RATE_8000_192000, APL_FORMATS),
+	.capture = SOF_DAI_STREAM("ssp4 Rx", 1, 16,
+				  SNDRV_PCM_RATE_8000_192000, APL_FORMATS),
+},
+{
+	.name = "SSP5 Pin",
+	.ops = &apl_dai_ops,
+	.playback = SOF_DAI_STREAM("ssp5 Tx", 1, 16,
+				   SNDRV_PCM_RATE_8000_192000, APL_FORMATS),
+	.capture = SOF_DAI_STREAM("ssp5 Rx", 1, 16,
+				  SNDRV_PCM_RATE_8000_192000, APL_FORMATS),
+},
+{
+	.name = "DMIC01 Pin",
+	.ops = &apl_dai_ops,
+	.capture = SOF_DAI_STREAM("DMIC01 Rx", 1, 4,
+				  SNDRV_PCM_RATE_8000_192000, APL_FORMATS),
+},
+{
+	.name = "DMIC16k Pin",
+	.ops = &apl_dai_ops,
+	.capture = SOF_DAI_STREAM("DMIC16k Rx", 1, 4,
+				  SNDRV_PCM_RATE_8000_192000, APL_FORMATS),
+},
+{
+	.name = "iDisp1 Pin",
+	.ops = &apl_dai_ops,
+	.playback = SOF_DAI_STREAM("iDisp1 Tx", 1, 16,
+				   SNDRV_PCM_RATE_8000_192000, APL_FORMATS),
+},
+{
+	.name = "iDisp2 Pin",
+	.ops = &apl_dai_ops,
+	.playback = SOF_DAI_STREAM("iDisp2 Tx", 1, 16,
+				   SNDRV_PCM_RATE_8000_192000, APL_FORMATS),
+},
+{
+	.name = "iDisp3 Pin",
+	.ops = &apl_dai_ops,
+	.playback = SOF_DAI_STREAM("iDisp3 Tx", 1, 16,
+				   SNDRV_PCM_RATE_8000_192000, APL_FORMATS),
+},
+{
+	.name = "HD-Codec Pin",
+	.ops = &apl_dai_ops,
+	.playback = SOF_DAI_STREAM("HD-Codec Tx", 1, 16,
+				   SNDRV_PCM_RATE_8000_192000, APL_FORMATS),
+	.capture = SOF_DAI_STREAM("HD-Codec Rx", 1, 16,
+				   SNDRV_PCM_RATE_8000_192000, APL_FORMATS),
+},
+{
+	.name = "sof-nocodec-dai",
+	.ops = &apl_dai_ops,
+	.playback = SOF_DAI_STREAM("DAI0 Tx", 1, 16,
+				   SNDRV_PCM_RATE_8000_192000, SOF_FORMATS),
+	.capture = SOF_DAI_STREAM("DAI0 Rx", 1, 16,
+				  SNDRV_PCM_RATE_8000_192000, SOF_FORMATS),
+},
+};
+
 /* apollolake ops */
 struct snd_sof_dsp_ops sof_apl_ops = {
 	/* probe and remove */
@@ -92,5 +196,9 @@ struct snd_sof_dsp_ops sof_apl_ops = {
 	.trace_init = hda_dsp_trace_init,
 	.trace_release = hda_dsp_trace_release,
 	.trace_trigger = hda_dsp_trace_trigger,
+
+	/* DAI drivers */
+	.drv		= apl_dai,
+	.num_drv	= ARRAY_SIZE(apl_dai),
 };
 EXPORT_SYMBOL(sof_apl_ops);
