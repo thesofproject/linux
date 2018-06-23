@@ -1246,8 +1246,14 @@ int snd_soc_dapm_dai_get_connected_widgets(struct snd_soc_dai *dai, int stream,
 		paths = is_connected_input_ep(dai->capture_widget, &widgets,
 				custom_stop_condition);
 
-	/* Drop starting point */
-	list_del(widgets.next);
+	/*
+	 * Drop starting point if the list of widgets is not singular.
+	 * When the stopping condition requires the graph walk to end at a BE
+	 * and the starting widget happens to be a BE,
+	 * the list will be singular and the starting point should be retained.
+	 */
+	if (!list_is_singular(&widgets))
+		list_del(widgets.next);
 
 	ret = dapm_widget_list_create(list, &widgets);
 	if (ret)
