@@ -1582,7 +1582,6 @@ static int dpcm_add_paths(struct snd_soc_pcm_runtime *fe, int stream,
 
 	/* Create any new FE <--> BE connections */
 	for (i = 0; i < list->num_widgets; i++) {
-
 		switch (list->widgets[i]->id) {
 		case snd_soc_dapm_dai_in:
 			if (stream != SNDRV_PCM_STREAM_PLAYBACK)
@@ -2788,6 +2787,114 @@ int soc_dpcm_be_digital_mute(struct snd_soc_pcm_runtime *fe, int mute)
 
 	return 0;
 }
+
+/*
+ * create a virtual FE DAI link
+ * Virtual FE DAI links are used in hostless pipelines
+ * to enable the codecs when the pipeline is triggered
+ */
+int soc_dpcm_vfe_new(struct snd_soc_card *card, int index,
+		     const char *link_name, const char *cpu_dai_name,
+		     const char *platform_name)
+{
+	struct snd_soc_dai_link *link;
+
+	link = kzalloc(sizeof(*link), GFP_KERNEL);
+	if (!link)
+		return -ENOMEM;
+
+	dev_dbg(card->dev, "ASoC: adding new virtual FE DAI link %s\n",
+		link_name);
+
+	/* define virtual FE DAI link */
+	link->virtual = 1;
+	link->name = link_name;
+	link->id = 1;
+	link->cpu_dai_name = cpu_dai_name;
+	link->platform_name = platform_name;
+	link->codec_name = "snd-soc-dummy";
+	link->codec_dai_name = "snd-soc-dummy-dai";
+	link->num_codecs = 1;
+
+	/* allocate memory for link codecs */
+	link->codecs = devm_kzalloc(card->dev,
+				    sizeof(struct snd_soc_dai_link_component),
+				    GFP_KERNEL);
+	if (!link->codecs)
+		return -ENOMEM;
+
+	link->codecs[0].name = link->codec_name;
+	link->codecs[0].dai_name = link->codec_dai_name;
+
+	/* enable DPCM */
+	link->dynamic = 1;
+
+	/*TODO: check if we need to handle capture for virtual FE */
+	link->dpcm_playback = 1;
+
+	link->dobj.index = index;
+	link->dobj.type = SND_SOC_DOBJ_DAI_LINK;
+
+	/* add virtual dai link to card dai link list */
+	snd_soc_add_dai_link(card, link);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(soc_dpcm_vfe_new);
+
+/* free virtual FE DAI link */
+int soc_dpcm_vfe_free(struct snd_soc_card *card)
+{
+	struct snd_soc_rtdcom_list *rtdcom1, *rtdcom2;
+	struct snd_soc_pcm_runtime *rtd;
+	struct snd_pcm_str *pstr;
+	int stream_dir;
+
+	list_for_each_entry(rtd, &card->rtd_list, list) {
+
+		/* check if this is a virtual dai link */
+		if (rtd->dai_link->virtual) {
+
+			if (rtd->dai_link->dpcm_playback) {
+				stream_dir = SNDRV_PCM_STREAM_PLAYBACK;
+
+				/* disconnect FE from BE */
+				dpcm_be_disconnect(rtd, stream_dir);
+
+				/* free pcm runtime */
+				kfree(rtd->dpcm[stream_dir].runtime);
+
+				pstr = &rtd->pcm->streams[stream_dir];
+
+				/* free pcm substream amd pcm */
+				kfree(pstr->substream);
+			}
+
+			/* free pcm */
+			kfree(rtd->pcm);
+
+			/* free codec dais and component list */
+			kfree(rtd->codec_dais);
+
+			for_each_rtdcom_safe(rtd, rtdcom1, rtdcom2)
+				kfree(rtdcom1);
+
+			INIT_LIST_HEAD(&rtd->component_list);
+
+			/* remove dai_link from card */
+			snd_soc_remove_dai_link(card, rtd->dai_link);
+
+			/* free link */
+			kfree(rtd->dai_link);
+
+			/* free runtime */
+			kfree(rtd);
+		}
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(soc_dpcm_vfe_free);
 
 static int dpcm_fe_dai_open(struct snd_pcm_substream *fe_substream)
 {
