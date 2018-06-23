@@ -1134,6 +1134,17 @@ struct snd_soc_dai_link {
 	/* Do not create a PCM for this DAI link (Backend link) */
 	unsigned int ignore:1;
 
+	/*
+	 * virtual FE link
+	 * This flag indicates that there is no PCM device registered with ALSA
+	 * This is intended to be used for establishing a connection to the
+	 * BE DAI in the case of hostless pipelines such as,
+	 * DSP component -> codec, ex: tone generator -> codec
+	 * This connection will be established at runtime by triggering the
+	 * hostless pipeline with a kcontrol attached to the component.
+	 */
+	unsigned int virtual:1;
+
 	struct list_head list; /* DAI link list of the soc card */
 	struct snd_soc_dobj dobj; /* For topology */
 };
