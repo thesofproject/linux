@@ -1047,6 +1047,7 @@ static int soc_bind_dai_link(struct snd_soc_card *card,
 	struct snd_soc_dai **codec_dais;
 	struct snd_soc_platform *platform;
 	struct device_node *platform_of_node;
+	struct snd_pcm_runtime *runtime;
 	const char *platform_name;
 	int i;
 
@@ -1134,6 +1135,25 @@ static int soc_bind_dai_link(struct snd_soc_card *card,
 	}
 
 	soc_add_pcm_runtime(card, rtd);
+
+	/* if the dai link is virtual, create runtime to set it as running */
+	if (rtd->dai_link->virtual) {
+		runtime = kzalloc(sizeof(*runtime),
+				  GFP_KERNEL);
+		if (!runtime)
+			return -ENOMEM;
+
+		if (rtd->dai_link->dpcm_playback) {
+			rtd->dpcm[SNDRV_PCM_STREAM_PLAYBACK].runtime = runtime;
+			rtd->cpu_dai->playback_active = 1;
+			rtd->codec_dai->playback_active = 1;
+		}
+
+		/* increment the active count for cpu dai */
+		rtd->cpu_dai->active++;
+
+		/* does virtual FE for capture make sense */
+	}
 	return 0;
 
 _err_defer:
