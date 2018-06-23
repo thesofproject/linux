@@ -20,6 +20,7 @@
 #include <linux/string.h>
 #include <sound/soc-topology.h>
 #include <sound/soc.h>
+#include <sound/soc-dpcm.h>
 #include <uapi/sound/tlv.h>
 #include <sound/tlv.h>
 #include <uapi/sound/sof-ipc.h>
@@ -1180,6 +1181,9 @@ static int sof_widget_load_siggen(struct snd_soc_component *scomp, int index,
 	struct sof_ipc_comp_tone tone;
 	struct soc_mixer_control *sm;
 	struct snd_sof_control *scontrol;
+	const char *link_name = "TONE-VFE0";
+	const char *cpu_dai_name = "sof-audio";
+	const char *platform_name = "sof-audio";
 	int ret;
 
 	/* siggen needs 1 mixer type control to act as a trigger */
@@ -1235,9 +1239,26 @@ static int sof_widget_load_siggen(struct snd_soc_component *scomp, int index,
 		tone.sample_rate);
 	sof_dbg_comp_config(scomp, &tone.config);
 
-	return sof_ipc_tx_message(sdev->ipc,
-				  tone.comp.hdr.cmd, &tone, sizeof(tone), r,
-				  sizeof(*r));
+	ret = sof_ipc_tx_message(sdev->ipc,
+				 tone.comp.hdr.cmd, &tone, sizeof(tone), r,
+				 sizeof(*r));
+	if (ret < 0)
+		return ret;
+
+	/*
+	 * create virtual FE link
+	 * This will be used to enable the codec when
+	 * the siggen pipeline is triggered
+	 */
+	ret = soc_dpcm_vfe_new(scomp->card, index, link_name, cpu_dai_name,
+			       platform_name);
+	if (ret < 0) {
+		dev_err(sdev->dev, "error: creating virtual FE %d\n",
+			private->size);
+		return ret;
+	}
+
+	return 0;
 }
 
 /*
@@ -1395,6 +1416,9 @@ static int sof_widget_unload(struct snd_soc_component *scomp,
 
 		/* free volume table */
 		kfree(scontrol->volume_table);
+		break;
+	case snd_soc_dapm_siggen:
+		soc_dpcm_vfe_free(scomp->card);
 		break;
 	default:
 		break;
