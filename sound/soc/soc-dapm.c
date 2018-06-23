@@ -1247,7 +1247,8 @@ int snd_soc_dapm_dai_get_connected_widgets(struct snd_soc_dai *dai, int stream,
 				custom_stop_condition);
 
 	/* Drop starting point */
-	list_del(widgets.next);
+	if (!list_is_singular(&widgets))
+		list_del(widgets.next);
 
 	ret = dapm_widget_list_create(list, &widgets);
 	if (ret)
