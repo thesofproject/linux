@@ -1582,6 +1582,7 @@ static int dpcm_add_paths(struct snd_soc_pcm_runtime *fe, int stream,
 
 	/* Create any new FE <--> BE connections */
 	for (i = 0; i < list->num_widgets; i++) {
+
 		switch (list->widgets[i]->id) {
 		case snd_soc_dapm_dai_in:
 			if (stream != SNDRV_PCM_STREAM_PLAYBACK)
@@ -3104,6 +3105,57 @@ static int soc_rtdcom_mmap(struct snd_pcm_substream *substream,
 	return -EINVAL;
 }
 
+/*
+ * for virtual FE dai links, there is no need
+ * to register PCM device. So only allocate memory for
+ * the dummy pcm device and substreams to be used for
+ * codec startup
+ */
+static int soc_vfe_setup(struct snd_soc_pcm_runtime *rtd,
+			 struct snd_pcm *pcm)
+{
+	struct snd_pcm_substream *substream;
+	struct snd_pcm_str *pstr;
+	int stream_dir;
+
+	/* create pcm */
+	pcm = kzalloc(sizeof(*pcm), GFP_KERNEL);
+	if (!pcm)
+		return -ENOMEM;
+
+	/* set up playback/capture substream */
+	if (rtd->dai_link->dpcm_playback)
+		stream_dir = SNDRV_PCM_STREAM_PLAYBACK;
+	else
+		stream_dir = SNDRV_PCM_STREAM_CAPTURE;
+
+	pstr = &pcm->streams[stream_dir];
+
+	/* allocate memory for substream */
+	substream = kzalloc(sizeof(*substream), GFP_KERNEL);
+	if (!substream)
+		return -ENOMEM;
+
+	/* define substream */
+	substream->pcm = pcm;
+	substream->pstr = pstr;
+	substream->number = 0;
+	substream->stream = stream_dir;
+
+	/* prepend substream name with VFE link name to make it unique */
+	sprintf(substream->name, "%s subdevice", rtd->dai_link->name);
+	substream->buffer_bytes_max = UINT_MAX;
+
+	/* set pcm substream */
+	pstr->substream = substream;
+
+	pcm->nonatomic = rtd->dai_link->nonatomic;
+	rtd->pcm = pcm;
+	pcm->private_data = rtd;
+
+	return 0;
+}
+
 /* create a new pcm */
 int soc_new_pcm(struct snd_soc_pcm_runtime *rtd, int num)
 {
@@ -3151,6 +3203,13 @@ int soc_new_pcm(struct snd_soc_pcm_runtime *rtd, int num)
 		ret = snd_pcm_new_internal(rtd->card->snd_card, new_name, num,
 				playback, capture, &pcm);
 	} else {
+
+		/* set up virtual FE dai link */
+		if (rtd->dai_link->dynamic && rtd->dai_link->no_pcm) {
+			soc_vfe_setup(rtd, pcm);
+			goto out;
+		}
+
 		if (rtd->dai_link->dynamic)
 			snprintf(new_name, sizeof(new_name), "%s (*)",
 				rtd->dai_link->stream_name);
