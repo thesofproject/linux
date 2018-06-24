@@ -3111,7 +3111,9 @@ int soc_new_pcm(struct snd_soc_pcm_runtime *rtd, int num)
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
 	struct snd_soc_component *component;
 	struct snd_soc_rtdcom_list *rtdcom;
+	struct snd_pcm_substream *substream;
 	struct snd_pcm *pcm;
+	int stream_dir;
 	char new_name[64];
 	int ret = 0, playback = 0, capture = 0;
 	int i;
@@ -3150,6 +3152,44 @@ int soc_new_pcm(struct snd_soc_pcm_runtime *rtd, int num)
 		ret = snd_pcm_new_internal(rtd->card->snd_card, new_name, num,
 				playback, capture, &pcm);
 	} else {
+
+		/*
+		 * for virtual FE dai links, there is no need
+		 * to register PCM device. So only allocate memory for
+		 * pcm device and substream for the requested direction
+		 */
+		if (rtd->dai_link->virtual) {
+			struct snd_pcm_str *pstr;
+
+			if (rtd->dai_link->dpcm_playback)
+				stream_dir = SNDRV_PCM_STREAM_PLAYBACK;
+
+			pcm = kzalloc(sizeof(*pcm), GFP_KERNEL);
+			if (!pcm)
+				return -ENOMEM;
+
+			pstr = &pcm->streams[stream_dir];
+
+			substream = kzalloc(sizeof(*substream), GFP_KERNEL);
+			if (!substream)
+				return -ENOMEM;
+
+			substream->pcm = pcm;
+			substream->pstr = pstr;
+			substream->number = 0;
+			substream->stream = stream_dir;
+			sprintf(substream->name, "subdevice #%i", 0);
+			substream->buffer_bytes_max = UINT_MAX;
+
+			pstr->substream = substream;
+
+			pcm->nonatomic = rtd->dai_link->nonatomic;
+			rtd->pcm = pcm;
+			pcm->private_data = rtd;
+
+			goto out;
+		}
+
 		if (rtd->dai_link->dynamic)
 			snprintf(new_name, sizeof(new_name), "%s (*)",
 				rtd->dai_link->stream_name);
