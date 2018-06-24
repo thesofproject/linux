@@ -2758,6 +2758,8 @@ capture:
 	mutex_unlock(&card->mutex);
 	return 0;
 }
+EXPORT_SYMBOL_GPL(soc_dpcm_runtime_update);
+
 int soc_dpcm_be_digital_mute(struct snd_soc_pcm_runtime *fe, int mute)
 {
 	struct snd_soc_dpcm *dpcm;
