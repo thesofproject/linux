@@ -102,6 +102,9 @@ static int siggen_pipeline_trigger(struct snd_sof_control *scontrol,
 				     SOF_IPC_STREAM_PCM_FREE);
 	} else {
 
+		/* enable BE DAI */
+		soc_dpcm_runtime_update(card);
+
 		/* set pcm params */
 		ret = siggen_pcm_params(scontrol, sdev);
 		if (ret < 0)
