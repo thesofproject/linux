@@ -2662,7 +2662,7 @@ static int dpcm_run_old_update(struct snd_soc_pcm_runtime *fe, int stream)
 /* Called by DAPM mixer/mux changes to update audio routing between PCMs and
  * any DAI links.
  */
-int soc_dpcm_runtime_update(struct snd_soc_card *card)
+int snd_soc_dpcm_runtime_update(struct snd_soc_card *card)
 {
 	struct snd_soc_pcm_runtime *fe;
 	int old, new, paths;
@@ -2759,6 +2759,8 @@ capture:
 	mutex_unlock(&card->mutex);
 	return 0;
 }
+EXPORT_SYMBOL_GPL(snd_soc_dpcm_runtime_update);
+
 int soc_dpcm_be_digital_mute(struct snd_soc_pcm_runtime *fe, int mute)
 {
 	struct snd_soc_dpcm *dpcm;
