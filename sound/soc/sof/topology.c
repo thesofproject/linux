@@ -20,6 +20,7 @@
 #include <linux/string.h>
 #include <sound/soc-topology.h>
 #include <sound/soc.h>
+#include <sound/soc-dpcm.h>
 #include <uapi/sound/tlv.h>
 #include <sound/tlv.h>
 #include <uapi/sound/sof-ipc.h>
@@ -376,6 +377,8 @@ static const struct sof_topology_token src_tokens[] = {
 
 /* Tone */
 static const struct sof_topology_token tone_tokens[] = {
+	{SOF_TKN_TONE_SAMPLE_RATE, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc_comp_tone, sample_rate), 0},
 };
 
 /* PCM */
@@ -1172,9 +1175,38 @@ static int sof_widget_load_siggen(struct snd_soc_component *scomp, int index,
 				  struct sof_ipc_comp_reply *r)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_soc_dapm_widget *widget = swidget->widget;
 	struct snd_soc_tplg_private *private = &tw->priv;
+	const struct snd_kcontrol_new *kc = NULL;
 	struct sof_ipc_comp_tone tone;
+	struct soc_mixer_control *sm;
+	struct snd_sof_control *scontrol;
+	const char *link_name = "TONE-VFE0";
+	const char *cpu_dai_name = "sof-audio";
+	const char *platform_name = "sof-audio";
 	int ret;
+
+	/* siggen needs 1 mixer type control to act as a trigger */
+	if (tw->num_kcontrols != 1) {
+		dev_err(sdev->dev, "error: invalid kcontrol count %d for siggen\n",
+			tw->num_kcontrols);
+		return -EINVAL;
+	}
+
+	/* get mixer control */
+	kc = &widget->kcontrol_news[0];
+	sm = (struct soc_mixer_control *)kc->private_value;
+	scontrol = sm->dobj.private;
+
+	/*
+	 * siggen kcontrol needs only 2 values
+	 * 0 for disabling and 1 for enabling the comp
+	 */
+	if (sm->max != 1) {
+		dev_err(sdev->dev, "error: invalid max %d for siggen control\n",
+			sm->max);
+		return -EINVAL;
+	}
 
 	/* configure mixer IPC message */
 	memset(&tone, 0, sizeof(tone));
@@ -1202,13 +1234,31 @@ static int sof_widget_load_siggen(struct snd_soc_component *scomp, int index,
 		return ret;
 	}
 
-	dev_dbg(sdev->dev, "tone %s: frequency %d amplitude %d\n",
-		swidget->widget->name, tone.frequency, tone.amplitude);
+	dev_dbg(sdev->dev, "tone %s: frequency %d amplitude %d sample rate %d\n",
+		swidget->widget->name, tone.frequency, tone.amplitude,
+		tone.sample_rate);
 	sof_dbg_comp_config(scomp, &tone.config);
 
-	return sof_ipc_tx_message(sdev->ipc,
-				  tone.comp.hdr.cmd, &tone, sizeof(tone), r,
-				  sizeof(*r));
+	ret = sof_ipc_tx_message(sdev->ipc,
+				 tone.comp.hdr.cmd, &tone, sizeof(tone), r,
+				 sizeof(*r));
+	if (ret < 0)
+		return ret;
+
+	/*
+	 * create virtual FE link
+	 * This will be used to enable the codec when
+	 * the siggen pipeline is triggered
+	 */
+	ret = soc_dpcm_vfe_new(scomp->card, index, link_name, cpu_dai_name,
+			       platform_name);
+	if (ret < 0) {
+		dev_err(sdev->dev, "error: creating virtual FE %d\n",
+			private->size);
+		return ret;
+	}
+
+	return 0;
 }
 
 /*
@@ -1366,6 +1416,9 @@ static int sof_widget_unload(struct snd_soc_component *scomp,
 
 		/* free volume table */
 		kfree(scontrol->volume_table);
+		break;
+	case snd_soc_dapm_siggen:
+		soc_dpcm_vfe_free(scomp->card);
 		break;
 	default:
 		break;
@@ -1932,6 +1985,7 @@ static const struct snd_soc_tplg_kcontrol_ops sof_io_ops[] = {
 	{SOF_TPLG_KCTL_VOL_ID, snd_sof_volume_get, snd_sof_volume_put},
 	{SOF_TPLG_KCTL_ENUM_ID, snd_sof_enum_get, snd_sof_enum_put},
 	{SOF_TPLG_KCTL_BYTES_ID, snd_sof_bytes_get, snd_sof_bytes_put},
+	{SOF_TPLG_KCTL_SWITCH_ID, snd_sof_switch_get, snd_sof_switch_put},
 };
 
 /* vendor specific bytes ext handlers available for binding */

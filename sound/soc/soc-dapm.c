@@ -855,6 +855,7 @@ static int dapm_create_or_share_kcontrol(struct snd_soc_dapm_widget *w,
 			kcname_in_long_name = true;
 		} else {
 			switch (w->id) {
+			case snd_soc_dapm_siggen:
 			case snd_soc_dapm_switch:
 			case snd_soc_dapm_mixer:
 			case snd_soc_dapm_pga:
@@ -1246,7 +1247,8 @@ int snd_soc_dapm_dai_get_connected_widgets(struct snd_soc_dai *dai, int stream,
 				custom_stop_condition);
 
 	/* Drop starting point */
-	list_del(widgets.next);
+	if (!list_is_singular(&widgets))
+		list_del(widgets.next);
 
 	ret = dapm_widget_list_create(list, &widgets);
 	if (ret)
@@ -3076,6 +3078,7 @@ int snd_soc_dapm_new_widgets(struct snd_soc_card *card)
 		case snd_soc_dapm_demux:
 			dapm_new_mux(w);
 			break;
+		case snd_soc_dapm_siggen:
 		case snd_soc_dapm_pga:
 		case snd_soc_dapm_out_drv:
 			dapm_new_pga(w);
