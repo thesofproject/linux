@@ -855,6 +855,7 @@ static int dapm_create_or_share_kcontrol(struct snd_soc_dapm_widget *w,
 			kcname_in_long_name = true;
 		} else {
 			switch (w->id) {
+			case snd_soc_dapm_siggen:
 			case snd_soc_dapm_switch:
 			case snd_soc_dapm_mixer:
 			case snd_soc_dapm_pga:
@@ -3076,6 +3077,7 @@ int snd_soc_dapm_new_widgets(struct snd_soc_card *card)
 		case snd_soc_dapm_demux:
 			dapm_new_mux(w);
 			break;
+		case snd_soc_dapm_siggen:
 		case snd_soc_dapm_pga:
 		case snd_soc_dapm_out_drv:
 			dapm_new_pga(w);
