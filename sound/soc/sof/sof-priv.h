@@ -243,6 +243,8 @@ struct snd_sof_control {
 	enum sof_ipc_ctrl_cmd cmd;
 	u32 *volume_table; /* volume table computed from tlv data*/
 
+	const char *vfe_link_name; /* name of Virtual FE link */
+
 	struct mutex mutex;
 	struct list_head list;	/* list in sdev control list */
 };
