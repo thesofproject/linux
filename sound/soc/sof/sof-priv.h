@@ -43,6 +43,9 @@
 /* max number of FE PCMs before BEs */
 #define SOF_BE_PCM_BASE		16
 
+/* dai extra config bits */
+#define SOF_DAI_EXT_SSP_LBM	BIT(0)
+
 struct snd_sof_dev;
 struct snd_sof_ipc_msg;
 struct snd_sof_ipc;
