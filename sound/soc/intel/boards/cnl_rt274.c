@@ -29,7 +29,7 @@
 #define RT274_CODEC_DAI		"rt274-aif1"
 
 static int cnl_rt274_clock_control(struct snd_soc_dapm_widget *w,
-				   struct snd_kcontrol *k, int  event)
+		struct snd_kcontrol *k, int  event)
 {
 	struct snd_soc_dapm_context *dapm = w->dapm;
 	struct snd_soc_card *card = dapm->card;
@@ -42,8 +42,8 @@ static int cnl_rt274_clock_control(struct snd_soc_dapm_widget *w,
 		return -EINVAL;
 
 	ret = snd_soc_dai_set_sysclk(codec_dai, RT274_SCLK_S_PLL1,
-				     CNL_FREQ_OUT,
-				     SND_SOC_CLOCK_IN);
+							CNL_FREQ_OUT,
+							SND_SOC_CLOCK_IN);
 	if (ret) {
 		dev_err(codec_dai->dev,
 			"failed to enable PLL1: %d\n", ret);
@@ -76,8 +76,8 @@ static const struct snd_soc_dapm_widget cnl_rt274_widgets[] = {
 	SND_SOC_DAPM_MIC("Mic Jack", NULL),
 	SND_SOC_DAPM_MIC("SoC DMIC", NULL),
 	SND_SOC_DAPM_SUPPLY("Platform Clock", SND_SOC_NOPM, 0, 0,
-			    cnl_rt274_clock_control, SND_SOC_DAPM_PRE_PMU |
-			    SND_SOC_DAPM_POST_PMD),
+			cnl_rt274_clock_control, SND_SOC_DAPM_PRE_PMU |
+			SND_SOC_DAPM_POST_PMD),
 };
 
 static const struct snd_soc_pcm_stream dai_params_codec = {
@@ -116,9 +116,8 @@ static int cnl_rt274_init(struct snd_soc_pcm_runtime *runtime)
 	struct snd_soc_dai *codec_dai = runtime->codec_dai;
 
 	ret = snd_soc_card_jack_new(runtime->card, "Headset",
-				    SND_JACK_HEADSET, &cnl_headset,
-				    cnl_headset_pins,
-				    ARRAY_SIZE(cnl_headset_pins));
+		SND_JACK_HEADSET, &cnl_headset,
+		cnl_headset_pins, ARRAY_SIZE(cnl_headset_pins));
 
 	if (ret)
 		return ret;
@@ -138,45 +137,42 @@ static int cnl_rt274_init(struct snd_soc_pcm_runtime *runtime)
 }
 
 static int cnl_be_fixup(struct snd_soc_pcm_runtime *rtd,
-			struct snd_pcm_hw_params *params)
+			    struct snd_pcm_hw_params *params)
 {
 	struct snd_interval *rate = hw_param_interval(params,
 			SNDRV_PCM_HW_PARAM_RATE);
 	struct snd_interval *channels = hw_param_interval(params,
 						SNDRV_PCM_HW_PARAM_CHANNELS);
 
-	rate->min = CNL_BE_FIXUP_RATE;
-	rate->max = CNL_BE_FIXUP_RATE;
-	channels->min = 2;
-	channels->max = 2;
+	rate->min = rate->max = CNL_BE_FIXUP_RATE;
+	channels->min = channels->max = 2;
 	snd_mask_none(hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT));
 	snd_mask_set(hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT),
-		     SNDRV_PCM_FORMAT_S24_LE);
+						SNDRV_PCM_FORMAT_S24_LE);
 
 	return 0;
 }
 
-#if !IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL)
 static int cnl_dmic_fixup(struct snd_soc_pcm_runtime *rtd,
-			  struct snd_pcm_hw_params *params)
+				struct snd_pcm_hw_params *params)
 {
 	struct snd_interval *channels = hw_param_interval(params,
 						SNDRV_PCM_HW_PARAM_CHANNELS);
-	channels->min = 2;
-	channels->max = 2;
+	channels->min = channels->max = 2;
 
 	return 0;
 }
-#endif
 
+static const char pname[] = "0000:00:1f.3";
 static const char cname[] = "i2c-INT34C2:00";
 
-static struct snd_soc_dai_link cnl_rt274_dailink[] = {
+struct snd_soc_dai_link cnl_rt274_dailink[] = {
 	{
 		.name = "SSP0-Codec",
 		.cpu_dai_name = "SSP0 Pin",
 		.codec_name = cname,
 		.codec_dai_name = "rt274-aif1",
+		.platform_name = pname,
 		.be_hw_params_fixup = cnl_be_fixup,
 		.ignore_pmdown_time = 1,
 		.no_pcm = 1,
@@ -186,19 +182,27 @@ static struct snd_soc_dai_link cnl_rt274_dailink[] = {
 		.dpcm_capture = 1,
 		.init = cnl_rt274_init,
 	},
-#if !IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL)
 	{
 		.name = "dmic01",
 		.cpu_dai_name = "DMIC01 Pin",
 		.codec_name = "dmic-codec",
 		.codec_dai_name = "dmic-hifi",
+		.platform_name = pname,
 		.ignore_suspend = 1,
 		.no_pcm = 1,
 		.dpcm_capture = 1,
 		.be_hw_params_fixup = cnl_dmic_fixup,
 	},
-#endif
 };
+
+static int
+cnl_add_dai_link(struct snd_soc_card *card, struct snd_soc_dai_link *link)
+{
+	link->platform_name = pname;
+	link->nonatomic = 1;
+
+	return 0;
+}
 
 /* SoC card */
 static struct snd_soc_card snd_soc_card_cnl = {
@@ -211,6 +215,7 @@ static struct snd_soc_card snd_soc_card_cnl = {
 	.num_dapm_routes = ARRAY_SIZE(cnl_map),
 	.controls = cnl_controls,
 	.num_controls = ARRAY_SIZE(cnl_controls),
+	.add_dai_link = cnl_add_dai_link,
 	.fully_routed = true,
 };
 
