@@ -842,6 +842,14 @@ struct snd_soc_component_driver {
 	unsigned int use_pmdown_time:1; /* care pmdown_time at stop */
 	unsigned int endianness:1;
 	unsigned int non_legacy_dai_naming:1;
+
+	/* this component uses topology and ignore machine driver FEs */
+	const char *ignore_machine;
+	const char *topology_name_prefix;
+	int (*be_hw_params_fixup)(struct snd_soc_pcm_runtime *rtd,
+				  struct snd_pcm_hw_params *params);
+	bool use_dai_pcm_id;	/* use the DAI link PCM ID as PCM device number */
+	int be_pcm_base;	/* base device ID for all BE PCMs */
 };
 
 struct snd_soc_component {
@@ -1171,6 +1179,7 @@ struct snd_soc_card {
 	struct mutex dapm_mutex;
 
 	bool instantiated;
+	bool topology_shortname_created;
 
 	int (*probe)(struct snd_soc_card *card);
 	int (*late_probe)(struct snd_soc_card *card);

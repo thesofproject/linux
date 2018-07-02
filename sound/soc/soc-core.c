@@ -1736,6 +1736,8 @@ static int soc_probe_link_dais(struct snd_soc_card *card,
 {
 	struct snd_soc_dai_link *dai_link = rtd->dai_link;
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	struct snd_soc_rtdcom_list *rtdcom;
+	struct snd_soc_component *component;
 	int i, ret, num;
 
 	dev_dbg(card->dev, "ASoC: probe %s dai link %d late %d\n",
@@ -1782,18 +1784,23 @@ static int soc_probe_link_dais(struct snd_soc_card *card,
 		soc_dpcm_debugfs_add(rtd);
 #endif
 
+	num = rtd->num;
+
 	/*
 	 * most drivers will register their PCMs using DAI link ordering but
 	 * topology based drivers can use the DAI link id field to set PCM
 	 * device number and then use rtd + a base offset of the BEs.
 	 */
-	if (rtd->platform->driver->use_dai_pcm_id) {
+	for_each_rtdcom(rtd, rtdcom) {
+		component = rtdcom->component;
+
+		if (!component->driver->use_dai_pcm_id)
+			continue;
+
 		if (rtd->dai_link->no_pcm)
-			num = rtd->platform->driver->be_pcm_base + rtd->num;
+			num += component->driver->be_pcm_base;
 		else
 			num = rtd->dai_link->id;
-	} else {
-		num = rtd->num;
 	}
 
 	if (cpu_dai->driver->compress_new) {
@@ -2154,18 +2161,19 @@ EXPORT_SYMBOL_GPL(snd_soc_set_dmi_name);
 
 static void soc_check_tplg_fes(struct snd_soc_card *card)
 {
-	struct snd_soc_platform *platform;
+	struct snd_soc_component *component;
+	const struct snd_soc_component_driver *comp_drv;
 	struct snd_soc_dai_link *dai_link;
 	int i;
 
-	list_for_each_entry(platform, &platform_list, list) {
+	list_for_each_entry(component, &component_list, list) {
 
-		/* does this platform override FEs ? */
-		if (!platform->driver->ignore_machine)
+		/* does this component override FEs ? */
+		if (!component->driver->ignore_machine)
 			continue;
 
 		/* for this machine ? */
-		if (strcmp(platform->driver->ignore_machine,
+		if (strcmp(component->driver->ignore_machine,
 			   card->dev->driver->name))
 			continue;
 
@@ -2183,18 +2191,15 @@ static void soc_check_tplg_fes(struct snd_soc_card *card)
 			dev_info(card->dev, "info: override FE DAI link %s\n",
 				 card->dai_link[i].name);
 
-			/* override platform */
-			dai_link->platform_name = platform->component.name;
-			dai_link->cpu_dai_name = platform->component.name;
+			/* override platform component */
+			dai_link->platform_name = component->name;
 
 			/* convert non BE into BE */
 			dai_link->no_pcm = 1;
-			dai_link->dpcm_playback = 1;
-			dai_link->dpcm_capture = 1;
 
 			/* override any BE fixups */
 			dai_link->be_hw_params_fixup =
-				platform->driver->be_hw_params_fixup;
+				component->driver->be_hw_params_fixup;
 
 			/* most BE links don't set stream name, so set it to
 			 * dai link name if it's NULL to help bind widgets.
@@ -2204,10 +2209,19 @@ static void soc_check_tplg_fes(struct snd_soc_card *card)
 		}
 
 		/* Inform userspace we are using alternate topology */
-		if (platform->driver->topology_name_prefix) {
-			snprintf(card->topology_shortname, 32, "%s-%s",
-				 platform->driver->topology_name_prefix,
-				 card->name);
+		if (component->driver->topology_name_prefix) {
+
+			/* topology shortname created ? */
+			if (!card->topology_shortname_created) {
+				comp_drv = component->driver;
+
+				snprintf(card->topology_shortname, 32, "%s-%s",
+					 comp_drv->topology_name_prefix,
+					 card->name);
+				card->topology_shortname_created = true;
+			}
+
+			/* use topology shortname */
 			card->name = card->topology_shortname;
 		}
 	}
