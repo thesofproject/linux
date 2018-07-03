@@ -689,8 +689,22 @@ static int byt_pci_probe(struct snd_sof_dev *sdev)
 	dev_dbg(sdev->dev, "IMR VADDR %p\n", sdev->bar[BYT_IMR_BAR]);
 
 irq:
-	/* register our IRQ */
-	sdev->ipc_irq = pci->irq;
+	/*
+	 * register our IRQ
+	 * let's try to enable msi firstly
+	 * if it fails, use legacy interrupt mode
+	 * TODO: support interrupt mode selection with kernel parameter
+	 *       support msi multiple vectors
+	 */
+	ret = pci_alloc_irq_vectors(pci, 1, 1, PCI_IRQ_MSI);
+	if (ret < 0) {
+		dev_info(sdev->dev, "use legacy interrupt mode\n");
+		sdev->ipc_irq = pci->irq;
+	} else {
+		dev_info(sdev->dev, "use msi interrupt mode\n");
+		sdev->ipc_irq = pci_irq_vector(pci, 0);
+	}
+
 	dev_dbg(sdev->dev, "using IRQ %d\n", sdev->ipc_irq);
 	ret = request_threaded_irq(sdev->ipc_irq, byt_irq_handler,
 				   byt_irq_thread, 0, "AudioDSP", sdev);
@@ -714,6 +728,7 @@ irq:
 
 irq_err:
 	iounmap(sdev->bar[BYT_IMR_BAR]);
+	pci_free_irq_vectors(pci);
 imr_err:
 	iounmap(sdev->bar[BYT_DSP_BAR]);
 	return ret;
@@ -738,7 +753,10 @@ static int byt_acpi_remove(struct snd_sof_dev *sdev)
 
 static int byt_pci_remove(struct snd_sof_dev *sdev)
 {
+	struct pci_dev *pci = sdev->pci;
+
 	free_irq(sdev->ipc_irq, sdev);
+	pci_free_irq_vectors(pci);
 	return 0;
 }
 
