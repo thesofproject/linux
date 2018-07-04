@@ -158,5 +158,9 @@ static inline void dpcm_path_put(struct snd_soc_dapm_widget_list **list)
 	kfree(*list);
 }
 
-
+/* create/free virtual FE dai links */
+int soc_dpcm_vfe_new(struct snd_soc_card *, int index, const char *link_name,
+		     const char *cpu_dai_name, const char *platform_name,
+		     int stream_dir);
+int soc_dpcm_vfe_free(struct snd_soc_card *card, const char *link_name);
 #endif
