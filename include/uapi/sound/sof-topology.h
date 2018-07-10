@@ -93,4 +93,9 @@
 /* Tone */
 #define SOF_TKN_TONE_SAMPLE_RATE		800
 
+/* Virtual FE DAi Link */
+#define SOF_TKN_VFE_LINK_NAME			900
+#define SOF_TKN_VFE_CPU_DAI_NAME		901
+#define SOF_TKN_VFE_PLATFORM_NAME		902
+
 #endif
