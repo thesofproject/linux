@@ -303,7 +303,6 @@ int snd_dice_create_pcm(struct snd_dice *dice)
 		.pointer   = capture_pointer,
 		.ack       = capture_ack,
 		.page      = snd_pcm_lib_get_vmalloc_page,
-		.mmap      = snd_pcm_lib_mmap_vmalloc,
 	};
 	static const struct snd_pcm_ops playback_ops = {
 		.open      = pcm_open,
@@ -316,7 +315,6 @@ int snd_dice_create_pcm(struct snd_dice *dice)
 		.pointer   = playback_pointer,
 		.ack       = playback_ack,
 		.page      = snd_pcm_lib_get_vmalloc_page,
-		.mmap      = snd_pcm_lib_mmap_vmalloc,
 	};
 	__be32 reg;
 	struct snd_pcm *pcm;
