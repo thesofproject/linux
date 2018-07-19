@@ -98,6 +98,27 @@ int snd_sof_volume_put(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+int snd_sof_volume_info(struct snd_kcontrol *kcontrol,
+			struct snd_ctl_elem_info *uinfo)
+{
+	struct soc_mixer_control *mc =
+		(struct soc_mixer_control *)kcontrol->private_value;
+	struct snd_sof_control *scontrol = mc->dobj.private;
+	unsigned int channels = scontrol->num_channels;
+	int platform_max;
+
+	if (!mc->platform_max)
+		mc->platform_max = mc->max;
+
+	platform_max = mc->platform_max;
+
+	uinfo->count = channels;
+	uinfo->value.integer.min = 0;
+	uinfo->value.integer.max = platform_max - mc->min;
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+	return 0;
+}
+
 int snd_sof_enum_get(struct snd_kcontrol *kcontrol,
 		     struct snd_ctl_elem_value *ucontrol)
 {
