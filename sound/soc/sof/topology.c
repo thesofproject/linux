@@ -721,6 +721,7 @@ static int sof_control_load(struct snd_soc_component *scomp, int index,
 	default:
 		dev_warn(sdev->dev, "control type not supported %d:%d:%d\n",
 			 hdr->ops.get, hdr->ops.put, hdr->ops.info);
+		kfree(scontrol);
 		return 0;
 	}
 
@@ -1255,8 +1256,10 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 	case snd_soc_dapm_dai_in:
 	case snd_soc_dapm_dai_out:
 		dai = kzalloc(sizeof(*dai), GFP_KERNEL);
-		if (!dai)
+		if (!dai) {
+			kfree(swidget);
 			return -ENOMEM;
+		}
 
 		ret = sof_widget_load_dai(scomp, index, swidget, tw, &reply,
 					  dai);
@@ -1320,6 +1323,7 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 			"error: DSP failed to add widget id %d type %d name : %s stream %s reply %d\n",
 			tw->shift, swidget->id, tw->name,
 			tw->sname ? tw->sname : "none", reply.rhdr.error);
+		kfree(swidget);
 		return ret;
 	}
 
