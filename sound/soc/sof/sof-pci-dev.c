@@ -151,13 +151,6 @@ static void sof_pci_fw_cb(const struct firmware *fw, void *context)
 	}
 }
 
-static const struct dev_pm_ops sof_pci_pm = {
-	SET_SYSTEM_SLEEP_PM_OPS(snd_sof_suspend, snd_sof_resume)
-	SET_RUNTIME_PM_OPS(snd_sof_runtime_suspend, snd_sof_runtime_resume,
-			   NULL)
-	.suspend_late = snd_sof_suspend_late,
-};
-
 static const struct sof_ops_table mach_ops[] = {
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_APOLLOLAKE)
 	{&bxt_desc, &sof_apl_ops},
@@ -368,9 +361,6 @@ static struct pci_driver snd_sof_pci_driver = {
 	.probe = sof_pci_probe,
 	.remove = sof_pci_remove,
 	.shutdown = sof_pci_shutdown,
-	.driver = {
-		.pm = &sof_pci_pm,
-	},
 };
 module_pci_driver(snd_sof_pci_driver);
 
