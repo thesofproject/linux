@@ -70,6 +70,13 @@ enum skl_bitdepth {
 	SKL_DEPTH_INVALID
 };
 
+enum skl_format {
+	SKL_FMT_S16LE = 2,
+	SKL_FMT_S24LE = 6,
+	SKL_FMT_S32LE = 10,
+	SKL_FMT_FLOATLE = 14,
+	SKL_FMT_S24_3LE = 32
+};
 
 enum skl_s_freq {
 	SKL_FS_8000 = 8000,
@@ -474,8 +481,9 @@ int skl_tplg_init(struct snd_soc_component *component,
 struct skl_module_cfg *skl_tplg_fe_get_cpr_module(
 		struct snd_soc_dai *dai, int stream);
 int skl_tplg_update_pipe_params(struct device *dev,
-		struct skl_module_cfg *mconfig, struct skl_pipe_params *params);
-
+			struct skl_module_cfg *mconfig,
+			struct skl_pipe_params *params,
+			snd_pcm_format_t fmt);
 void skl_tplg_d0i3_get(struct skl *skl, enum d0i3_capability caps);
 void skl_tplg_d0i3_put(struct skl *skl, enum d0i3_capability caps);
 
