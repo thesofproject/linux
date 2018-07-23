@@ -24,6 +24,7 @@
 #include <uapi/sound/asoc.h>
 #include <sound/hdaudio.h>
 #include <sound/compress_driver.h>
+#include "../../pci/hda/hda_codec.h"
 
 /* debug flags */
 #define SOF_DBG_REGS	BIT(1)
@@ -292,7 +293,8 @@ struct snd_sof_dev {
 	/* DSP HW differentiation */
 	struct snd_sof_pdata *pdata;
 	const struct snd_sof_dsp_ops *ops;
-	struct sof_intel_hda_dev *hda;	/* for HDA based DSP HW */
+	struct sof_intel_hda_dev *hda;	/* for HDA based DSP HW FIXME: delete this and use hbus instead */
+	struct hda_bus *hbus;
 	const struct sof_arch_ops *arch_ops;
 
 	/* IPC */

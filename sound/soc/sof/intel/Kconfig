@@ -101,4 +101,10 @@ config SND_SOC_SOF_HDA_COMMON
 	select SND_SOC_SOF_PCI
 	select SND_SOC_ACPI_INTEL_MATCH
 
+config SND_SOC_SOF_HDA
+	tristate "SOF support for HDA Links(HDA/HDMI)"
+	depends on SND_SOC_SOF_HDA_COMMON
+	select SND_SOC_HDAC_HDA
+	select SND_SOC_HDAC_HDMI
+
 endif ## SND_SOC_SOF_INTEL

@@ -205,6 +205,38 @@ static struct snd_soc_dai_link broxton_tdf8532_dais[] = {
 		.dpcm_playback = 1,
 		.no_pcm = 1,
 	},
+	{
+		.name = "iDisp1",
+		.id = 6,
+		.cpu_dai_name = "iDisp1 Pin",
+		.codec_name = "ehdaudio0D2",
+		.codec_dai_name = "intel-hdmi-hifi1",
+//		.codec_name = "i2c-INT34C3:00",
+//		.codec_dai_name = "tdf8532-hifi",
+		.platform_name = "0000:00:0e.0",
+		.dpcm_playback = 1,
+		.no_pcm = 1,
+	},
+	{
+		.name = "iDisp2",
+		.id = 7,
+		.cpu_dai_name = "iDisp2 Pin",
+		.codec_name = "ehdaudio0D2",
+		.codec_dai_name = "intel-hdmi-hifi2",
+		.platform_name = "0000:00:0e.0",
+		.dpcm_playback = 1,
+		.no_pcm = 1,
+	},
+	{
+		.name = "iDisp3",
+		.id = 8,
+		.cpu_dai_name = "iDisp3 Pin",
+		.codec_name = "ehdaudio0D2",
+		.codec_dai_name = "intel-hdmi-hifi3",
+		.platform_name = "0000:00:0e.0",
+		.dpcm_playback = 1,
+		.no_pcm = 1,
+	},
 };
 
 #if !IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL)

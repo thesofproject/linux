@@ -51,6 +51,13 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_bxt_machines[] = {
 		.sof_tplg_filename = "intel/sof-apl-tdf8532.tplg",
 		.asoc_plat_name = "0000:00:0e.0",
 	},
+	{
+		.id = "HDA_GEN",
+		.drv_name = "skl_hda_generic",
+		.fw_filename = "intel/dsp_fw_bxtn.bin",
+		.machine_quirk = NULL,
+		.quirk_data = NULL,
+	},
 	{},
 };
 EXPORT_SYMBOL_GPL(snd_soc_acpi_intel_bxt_machines);

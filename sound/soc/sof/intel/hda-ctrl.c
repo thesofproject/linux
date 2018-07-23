@@ -131,3 +131,27 @@ int hda_dsp_ctrl_get_caps(struct snd_sof_dev *sdev)
 	return ret;
 }
 
+void hda_dsp_ctrl_enable_miscbdcge(struct snd_sof_dev *sdev, bool enable)
+{
+	u32 val = enable ? PCI_CGCTL_MISCBDCGE_MASK : 0;
+
+	snd_sof_pci_update_bits(sdev, PCI_CGCTL, PCI_CGCTL_MISCBDCGE_MASK, val);
+}
+
+/*
+ * While performing reset, controller may not come back properly causing
+ * issues, so recommendation is to set CGCTL.MISCBDCGE to 0 then do reset
+ * (init chip) and then again set CGCTL.MISCBDCGE to 1
+ */
+int hda_dsp_ctrl_init_chip(struct snd_sof_dev *sdev, bool full_reset)
+{
+	struct hdac_bus *bus = &sdev->hbus->core;
+	int ret;
+
+	hda_dsp_ctrl_enable_miscbdcge(sdev, false);
+	ret = snd_hdac_bus_init_chip(bus, full_reset);
+	hda_dsp_ctrl_enable_miscbdcge(sdev, true);
+
+	return ret;
+}
+

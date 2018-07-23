@@ -39,6 +39,13 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_skl_machines[] = {
 		.quirk_data = &skl_codecs,
 		.pdata = &skl_dmic_data,
 	},
+	{
+		.id = "HDA_GEN",
+		.drv_name = "skl_hda_generic",
+		.fw_filename = "intel/dsp_fw_bxtn.bin",
+		.machine_quirk = NULL,
+		.quirk_data = NULL,
+	},
 	{},
 };
 EXPORT_SYMBOL_GPL(snd_soc_acpi_intel_skl_machines);

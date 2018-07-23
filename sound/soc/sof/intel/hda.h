@@ -28,6 +28,7 @@
 #define SOF_HDA_INTSTS			0x24
 #define SOF_HDA_WAKESTS			0x0E
 #define SOF_HDA_WAKESTS_INT_MASK	((1 << 8) - 1)
+#define SOF_HDA_RIRBSTS			0x5d
 
 /* SOF_HDA_GCTL register bist */
 #define SOF_HDA_GCTL_RESET		BIT(0)
@@ -489,6 +490,14 @@ int hda_dsp_cl_boot_firmware(struct snd_sof_dev *sdev);
  */
 int hda_dsp_ctrl_get_caps(struct snd_sof_dev *sdev);
 int hda_dsp_ctrl_link_reset(struct snd_sof_dev *sdev);
+void hda_dsp_ctrl_enable_miscbdcge(struct snd_sof_dev *sdev, bool enable);
+int hda_dsp_ctrl_init_chip(struct snd_sof_dev *sdev, bool full_reset);
+
+/*
+ * HDA Codec operations.
+ */
+int hda_codec_probe_bus(struct snd_sof_dev *sdev);
+int hda_codec_i915_init(struct snd_sof_dev *sdev);
 
 /*
  * Trace Control.

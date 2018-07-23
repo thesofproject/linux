@@ -26,6 +26,7 @@
 #include <linux/firmware.h>
 #include <linux/pci.h>
 #include <sound/hdaudio_ext.h>
+#include <sound/hda_register.h>
 #include <sound/sof.h>
 #include <sound/pcm_params.h>
 #include <linux/pm_runtime.h>
@@ -407,17 +408,33 @@ int hda_dsp_stream_hw_params(struct snd_sof_dev *sdev,
 irqreturn_t hda_dsp_stream_interrupt(int irq, void *context)
 {
 	struct snd_sof_dev *sdev = (struct snd_sof_dev *)context;
+	struct hdac_bus *bus = &sdev->hbus->core;
 	u32 status;
 
 	if (!pm_runtime_active(sdev->dev))
 		return IRQ_NONE;
 
+	spin_lock(&bus->reg_lock);
+
 	status = snd_sof_dsp_read(sdev, HDA_DSP_HDA_BAR, SOF_HDA_INTSTS);
-
-	if (status == 0 || status == 0xffffffff)
+	if (status == 0 || status == 0xffffffff) {
+		spin_unlock(&bus->reg_lock);
 		return IRQ_NONE;
+	}
 
-	return status ? IRQ_WAKE_THREAD : IRQ_HANDLED;
+	/* clear rirb int */
+	status = snd_sof_dsp_read(sdev, HDA_DSP_HDA_BAR, SOF_HDA_RIRBSTS);
+	if (status & RIRB_INT_MASK) {
+		if (status & RIRB_INT_RESPONSE)
+			snd_hdac_bus_update_rirb(bus);
+		snd_sof_dsp_write(sdev, HDA_DSP_HDA_BAR, SOF_HDA_RIRBSTS,
+				  RIRB_INT_MASK);
+	}
+
+	spin_unlock(&bus->reg_lock);
+
+	return snd_sof_dsp_read(sdev, HDA_DSP_HDA_BAR, SOF_HDA_INTSTS)
+				? IRQ_WAKE_THREAD : IRQ_HANDLED;
 }
 
 irqreturn_t hda_dsp_stream_threaded_handler(int irq, void *context)
@@ -480,6 +497,10 @@ irqreturn_t hda_dsp_stream_threaded_handler(int irq, void *context)
 		}
 	}
 
+	// TODO: legacy code call snd_pcm_period_elapsed(hstr->substream);
+	// we probably dont need this since we get updates via IPC/SRAM/
+	// TODO: evaluate.
+
 	return IRQ_HANDLED;
 }
 
@@ -523,6 +544,16 @@ int hda_dsp_stream_init(struct snd_sof_dev *sdev)
 	if (ret < 0) {
 		dev_err(sdev->dev, "error: posbuffer dma alloc failed\n");
 		return -ENOMEM;
+	}
+
+	if (sdev->hbus) {
+		/* mem alloc for the CORB/RIRB ringbuffers */
+		ret = snd_dma_alloc_pages(SNDRV_DMA_TYPE_DEV, &pci->dev,
+					  PAGE_SIZE, &sdev->hbus->core.rb);
+		if (ret < 0) {
+			dev_err(sdev->dev, "error: RB alloc failed\n");
+			return -ENOMEM;
+		}
 	}
 
 	/* create capture streams */
