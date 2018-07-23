@@ -51,7 +51,7 @@ static void hda_codec_load_module(struct hda_codec *codec) {}
 /* probe individual codec */
 static int hda_codec_probe(struct snd_sof_dev *sdev, int addr)
 {
-	struct hda_bus *hbus = sdev->hbus;
+	struct hda_bus *hbus = sof_to_hbus(sdev);
 	unsigned int cmd = (addr << 28) | (AC_NODE_ROOT << 20) |
 		(AC_VERB_PARAMETERS << 8) | AC_PAR_VENDOR_ID;
 	unsigned int res = -1;
@@ -92,8 +92,7 @@ static int hda_codec_probe(struct snd_sof_dev *sdev, int addr)
 /* Codec initialization */
 int hda_codec_probe_bus(struct snd_sof_dev *sdev)
 {
-	struct hda_bus *hbus = sdev->hbus;
-	struct hdac_bus *bus = &hbus->core;
+	struct hdac_bus *bus = sof_to_bus(sdev);
 	int c, max_slots, ret = 0;
 
 	max_slots = HDA_MAX_CODECS;
@@ -116,8 +115,7 @@ int hda_codec_probe_bus(struct snd_sof_dev *sdev)
 
 int hda_codec_i915_init(struct snd_sof_dev *sdev)
 {
-	struct hda_bus *hbus = sdev->hbus;
-	struct hdac_bus *bus = &hbus->core;
+	struct hdac_bus *bus = sof_to_bus(sdev);
 	int ret;
 
 	/* i915 exposes a HDA codec for HDMI audio */

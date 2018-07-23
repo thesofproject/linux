@@ -342,12 +342,8 @@ static int hda_init(struct snd_sof_dev *sdev)
 	//int err;
 	//unsigned short gcap;
 
-	hbus = devm_kzalloc(&pci->dev, sizeof(*hbus), GFP_KERNEL);
-	if (!hbus)
-		return -ENOMEM;
-
-	sdev->hbus = hbus;
-	bus = &hbus->core;
+	hbus = sof_to_hbus(sdev);
+	bus = sof_to_bus(sdev);
 
 	/* HDA bus init */
 #if IS_ENABLED(CONFIG_SND_SOC_HDAC_HDA)
@@ -389,7 +385,7 @@ static int hda_init(struct snd_sof_dev *sdev)
 
 static int hda_init_caps(struct snd_sof_dev *sdev)
 {
-	struct hdac_bus *bus = &sdev->hbus->core;
+	struct hdac_bus *bus = sof_to_bus(sdev);
 	struct pci_dev *pci = sdev->pci;
 	struct hdac_ext_link *hlink = NULL;
 	int ret = 0;
@@ -499,9 +495,9 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 {
 	struct pci_dev *pci = sdev->pci;
 	struct sof_intel_hda_dev *hdev;
+	struct hdac_bus *bus;
 	struct sof_intel_hda_stream *stream;
 	const struct sof_intel_dsp_desc *chip;
-	int i;
 	int ret = 0;
 
 	/* set DSP arch ops */
@@ -582,20 +578,9 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	}
 
 	/* clear stream status */
-	for (i = 0 ; i < hdev->num_capture ; i++) {
-		stream = &hdev->cstream[i];
-		if (stream)
-			snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR,
-						stream->sd_offset +
-						SOF_HDA_ADSP_REG_CL_SD_STS,
-						SOF_HDA_CL_DMA_SD_INT_MASK,
-						SOF_HDA_CL_DMA_SD_INT_MASK);
-	}
-
-	for (i = 0 ; i < hdev->num_playback ; i++) {
-		stream = &hdev->pstream[i];
-		if (stream)
-			snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR,
+	bus = sof_to_bus(sdev);
+	list_for_each_entry(stream, &bus->stream_list, list) {
+		snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR,
 						stream->sd_offset +
 						SOF_HDA_ADSP_REG_CL_SD_STS,
 						SOF_HDA_CL_DMA_SD_INT_MASK,
