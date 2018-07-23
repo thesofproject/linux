@@ -338,9 +338,6 @@ static int hda_init(struct snd_sof_dev *sdev)
 	struct hdac_bus *bus;
 	struct hdac_ext_bus_ops *ext_ops;
 	struct pci_dev *pci = sdev->pci;
-	//struct hdac_ext_link *hlink = NULL;
-	//int err;
-	//unsigned short gcap;
 
 	hbus = devm_kzalloc(&pci->dev, sizeof(*hbus), GFP_KERNEL);
 	if (!hbus)
@@ -374,9 +371,6 @@ static int hda_init(struct snd_sof_dev *sdev)
 	hda_dsp_ctrl_init_chip(sdev, true);
 
 	snd_hdac_bus_parse_capabilities(bus);
-
-	//if (sof_hda_acquire_irq(hbus, 0) < 0)
-	//	return -EBUSY;
 
 	/* update BARs for sof, don't need parse them again */
 	sdev->bar[HDA_DSP_HDA_BAR] = bus->remap_addr;
@@ -473,12 +467,11 @@ static int hda_init(struct snd_sof_dev *sdev)
 static int hda_init_caps(struct snd_sof_dev *sdev)
 {
 	/*
-	 * while performing reset, controller may not come back properly causing
-	 * issues, so recommendation is to set CGCTL.MISCBDCGE to 0 then do
-	 * reset (init chip) and then again set CGCTL.MISCBDCGE to 1
+	 * set CGCTL.MISCBDCGE to 0 during reset and set back to 1
+	 * when reset finished.
+	 * TODO: maybe no need for init_caps?
 	 */
-	snd_sof_pci_update_bits(sdev, PCI_CGCTL,
-				PCI_CGCTL_MISCBDCGE_MASK, 0);
+	hda_dsp_ctrl_enable_miscbdcge(sdev, 0);
 
 	/* clear WAKESTS */
 	snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR, SOF_HDA_WAKESTS,
@@ -524,21 +517,17 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	/* set up HDA base */
 	ret = hda_init(sdev);
 	if (ret < 0)
-		goto err;
+		return ret;
 
 	/* DSP base */
 	sdev->bar[HDA_DSP_BAR] = pci_ioremap_bar(pci, HDA_DSP_BAR);
 	if (!sdev->bar[HDA_DSP_BAR]) {
 		dev_err(&pci->dev, "error: ioremap error\n");
-		ret = -ENXIO;
-		goto err;
+		return -ENXIO;
 	}
 
 	sdev->mmio_bar = HDA_DSP_BAR;
 	sdev->mailbox_bar = HDA_DSP_BAR;
-
-	pci_set_master(pci);
-	synchronize_irq(pci->irq);
 
 	/* allow 64bit DMA address if supported by H/W */
 	if (!dma_set_mask(&pci->dev, DMA_BIT_MASK(64))) {
@@ -558,27 +547,69 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 		 * not all errors are due to memory issues, but trying
 		 * to free everything does not harm
 		 */
-		goto stream_err;
+		goto err;
 	}
 
 	/*
-	 * clear bits 0-2 of PCI register TCSEL (at offset 0x44)
-	 * TCSEL == Traffic Class Select Register, which sets PCI express QOS
-	 * Ensuring these bits are 0 clears playback static on some HD Audio
-	 * codecs. PCI register TCSEL is defined in the Intel manuals.
+	 * clear TCSEL to clear playback on some HD Audio
+	 * codecs. PCI TCSEL is defined in the Intel manuals.
 	 */
 	snd_sof_pci_update_bits(sdev, PCI_TCSEL, 0x07, 0);
+
+	/*
+	 * register our IRQ
+	 * let's try to enable msi firstly
+	 * if it fails, use legacy interrupt mode
+	 * TODO: support interrupt mode selection with kernel parameter
+	 *       support msi multiple vectors
+	 */
+//	ret = pci_alloc_irq_vectors(pci, 1, 1, PCI_IRQ_MSI);
+	/* todo: MSI mode doesn't work for HDMI yet, debug it later */
+	ret = pci_alloc_irq_vectors(pci, 1, 1, PCI_IRQ_LEGACY);
+	if (ret < 0) {
+		dev_info(sdev->dev, "use legacy interrupt mode\n");
+		sdev->hda->irq = pci->irq;
+		sdev->ipc_irq = pci->irq;
+	} else {
+		dev_info(sdev->dev, "use msi interrupt mode\n");
+		sdev->hda->irq = pci_irq_vector(pci, 0);
+		/* ipc irq number is the same of hda irq */
+		sdev->ipc_irq = sdev->hda->irq;
+	}
+
+	dev_dbg(sdev->dev, "using HDA IRQ %d\n", sdev->hda->irq);
+	ret = request_threaded_irq(sdev->hda->irq, hda_dsp_stream_interrupt,
+				   hda_dsp_stream_threaded_handler,
+				   IRQF_SHARED, "AudioHDA", sdev);
+	if (ret < 0) {
+		dev_err(sdev->dev, "error: failed to register HDA IRQ %d\n",
+			sdev->hda->irq);
+		goto free_streams;
+	}
+
+	dev_dbg(sdev->dev, "using IPC IRQ %d\n", sdev->ipc_irq);
+	ret = request_threaded_irq(sdev->ipc_irq, hda_dsp_ipc_irq_handler,
+				   chip->ops->irq_thread, IRQF_SHARED,
+				   "AudioDSP", sdev);
+	if (ret < 0) {
+		dev_err(sdev->dev, "error: failed to register IPC IRQ %d\n",
+			sdev->ipc_irq);
+		goto free_hda_irq;
+	}
+
+	pci_set_master(pci);
+	synchronize_irq(pci->irq);
 
 	/* init HDA capabilities */
 	ret = hda_init_caps(sdev);
 	if (ret < 0)
-		goto stream_err;
+		goto free_ipc_irq;
 
 	/* reset HDA controller */
 	ret = hda_dsp_ctrl_link_reset(sdev);
 	if (ret < 0) {
 		dev_err(&pci->dev, "error: failed to reset HDA controller\n");
-		goto stream_err;
+		goto free_ipc_irq;
 	}
 
 	/* clear stream status */
@@ -616,45 +647,6 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 				SOF_HDA_INT_CTRL_EN | SOF_HDA_INT_GLOBAL_EN,
 				SOF_HDA_INT_CTRL_EN | SOF_HDA_INT_GLOBAL_EN);
 
-	/*
-	 * register our IRQ
-	 * let's try to enable msi firstly
-	 * if it fails, use legacy interrupt mode
-	 * TODO: support interrupt mode selection with kernel parameter
-	 *       support msi multiple vectors
-	 */
-	ret = pci_alloc_irq_vectors(pci, 1, 1, PCI_IRQ_MSI);
-	if (ret < 0) {
-		dev_info(sdev->dev, "use legacy interrupt mode\n");
-		sdev->hda->irq = pci->irq;
-		sdev->ipc_irq = pci->irq;
-	} else {
-		dev_info(sdev->dev, "use msi interrupt mode\n");
-		sdev->hda->irq = pci_irq_vector(pci, 0);
-		/* ipc irq number is the same of hda irq */
-		sdev->ipc_irq = sdev->hda->irq;
-	}
-
-	dev_dbg(sdev->dev, "using HDA IRQ %d\n", sdev->hda->irq);
-	ret = request_threaded_irq(sdev->hda->irq, hda_dsp_stream_interrupt,
-				   hda_dsp_stream_threaded_handler,
-				   IRQF_SHARED, "AudioHDA", sdev);
-	if (ret < 0) {
-		dev_err(sdev->dev, "error: failed to register HDA IRQ %d\n",
-			sdev->hda->irq);
-		goto stream_err;
-	}
-
-	dev_dbg(sdev->dev, "using IPC IRQ %d\n", sdev->ipc_irq);
-	ret = request_threaded_irq(sdev->ipc_irq, hda_dsp_ipc_irq_handler,
-				   chip->ops->irq_thread, IRQF_SHARED,
-				   "AudioDSP", sdev);
-	if (ret < 0) {
-		dev_err(sdev->dev, "error: failed to register IPC IRQ %d\n",
-			sdev->ipc_irq);
-		goto irq_err;
-	}
-
 	/* re-enable CGCTL.MISCBDCGE after reset */
 	hda_dsp_ctrl_enable_miscbdcge(sdev, true);
 
@@ -676,10 +668,12 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 
 	return 0;
 
-irq_err:
+free_ipc_irq:
+	free_irq(sdev->ipc_irq, sdev);
+free_hda_irq:
 	free_irq(sdev->hda->irq, sdev);
-stream_err:
 	pci_free_irq_vectors(pci);
+free_streams:
 	hda_dsp_stream_free(sdev);
 err:
 	/* disable DSP */
