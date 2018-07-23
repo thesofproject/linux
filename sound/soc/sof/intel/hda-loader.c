@@ -242,17 +242,19 @@ static int cl_cleanup(struct snd_sof_dev *sdev, struct snd_dma_buffer *dmab,
 
 static int cl_copy_fw(struct snd_sof_dev *sdev, int tag)
 {
-	struct sof_intel_hda_stream *stream = NULL;
-	struct sof_intel_hda_dev *hdev = sdev->hda;
-	int ret, status, i;
+	struct hdac_bus *bus = sof_to_bus(sdev);
+	struct sof_intel_hda_stream *s, *stream = NULL;
+	int ret, status;
 
 	/* get stream with tag */
-	for (i = 0; i < hdev->num_playback; i++) {
-		if (hdev->pstream[i].tag == tag) {
-			stream = &hdev->pstream[i];
+	list_for_each_entry(s, &bus->stream_list, list) {
+		if (s->direction == SNDRV_PCM_STREAM_PLAYBACK
+			&& s->tag == tag) {
+			stream = s;
 			break;
 		}
 	}
+
 	if (!stream) {
 		dev_err(sdev->dev,
 			"error: could not get stream with stream tag%d\n",

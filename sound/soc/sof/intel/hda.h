@@ -358,6 +358,8 @@ struct sof_intel_hda_stream {
 
 	/* PCM */
 	struct snd_pcm_substream *substream;
+
+	struct list_head list;	/* list of streams on the bus */
 };
 
 #define SOF_HDA_PLAYBACK_STREAMS	16
@@ -368,17 +370,10 @@ struct sof_intel_hda_stream {
 /* represents DSP HDA controller frontend - i.e. host facing control */
 struct sof_intel_hda_dev {
 
+	struct hda_bus hbus;
+
 	/* hw config */
 	const struct sof_intel_dsp_desc *desc;
-
-	/* streams */
-	struct sof_intel_hda_stream pstream[SOF_HDA_PLAYBACK_STREAMS];
-	struct sof_intel_hda_stream cstream[SOF_HDA_CAPTURE_STREAMS];
-	int num_capture;
-	int num_playback;
-
-	/* position buffers */
-	struct snd_dma_buffer posbuffer;
 
 	/*trace */
 	struct sof_intel_hda_stream *dtrace_stream;
@@ -453,10 +448,14 @@ int hda_dsp_stream_setup_bdl(struct snd_sof_dev *sdev,
 			     struct sof_intel_hda_stream *stream,
 			     struct sof_intel_dsp_bdl *bdl, int size,
 			     struct snd_pcm_hw_params *params);
+
+struct sof_intel_hda_stream *
+	hda_dsp_stream_get(struct snd_sof_dev *sdev, int direction);
 struct sof_intel_hda_stream *
 	hda_dsp_stream_get_cstream(struct snd_sof_dev *sdev);
 struct sof_intel_hda_stream *
 	hda_dsp_stream_get_pstream(struct snd_sof_dev *sdev);
+int hda_dsp_stream_put(struct snd_sof_dev *sdev, int direction, int stream_tag);
 int hda_dsp_stream_put_pstream(struct snd_sof_dev *sdev, int stream_tag);
 int hda_dsp_stream_put_cstream(struct snd_sof_dev *sdev, int stream_tag);
 int hda_dsp_stream_spib_config(struct snd_sof_dev *sdev,

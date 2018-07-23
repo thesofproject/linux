@@ -145,7 +145,7 @@ void hda_dsp_ctrl_enable_miscbdcge(struct snd_sof_dev *sdev, bool enable)
  */
 int hda_dsp_ctrl_init_chip(struct snd_sof_dev *sdev, bool full_reset)
 {
-	struct hdac_bus *bus = &sdev->hbus->core;
+	struct hdac_bus *bus = sof_to_bus(sdev);
 	int ret;
 
 	hda_dsp_ctrl_enable_miscbdcge(sdev, false);
