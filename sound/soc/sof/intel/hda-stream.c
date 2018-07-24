@@ -622,6 +622,7 @@ int hda_dsp_stream_init(struct snd_sof_dev *sdev)
 #endif
 
 		hstream = &stream->hstream;
+		hstream->bus = bus;
 		hstream->index = i;
 		sd_offset = SOF_STREAM_SD_OFFSET(hstream);
 		hstream->sd_addr = sdev->bar[HDA_DSP_HDA_BAR] + sd_offset;
@@ -679,6 +680,7 @@ int hda_dsp_stream_init(struct snd_sof_dev *sdev)
 #endif
 
 		hstream = &stream->hstream;
+		hstream->bus = bus;
 		hstream->index = i;
 		sd_offset = SOF_STREAM_SD_OFFSET(hstream);
 		hstream->sd_addr = sdev->bar[HDA_DSP_HDA_BAR] + sd_offset;
