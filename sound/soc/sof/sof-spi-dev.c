@@ -43,13 +43,6 @@ static void sof_spi_fw_cb(const struct firmware *fw, void *context)
 	}
 }
 
-static const struct dev_pm_ops sof_spi_pm = {
-	SET_SYSTEM_SLEEP_PM_OPS(snd_sof_suspend, snd_sof_resume)
-	SET_RUNTIME_PM_OPS(snd_sof_runtime_suspend, snd_sof_runtime_resume,
-			   NULL)
-	.suspend_late = snd_sof_suspend_late,
-};
-
 static int sof_spi_probe(struct spi_device *spi)
 {
 	struct device *dev = &spi->dev;

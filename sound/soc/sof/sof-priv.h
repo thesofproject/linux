@@ -229,6 +229,8 @@ struct snd_sof_pcm {
 	u32 posn_offset[2];
 	struct mutex mutex;	/* access mutex */
 	struct list_head list;	/* list in sdev pcm list */
+	struct snd_pcm_hw_params params[2];
+	int restore_stream[2]; /* restore hw_params for paused stream */
 };
 
 /* ALSA SOF Kcontrol device */
@@ -259,6 +261,16 @@ struct snd_sof_widget {
 	struct list_head list;	/* list in sdev widget list */
 
 	void *private;		/* core does not touch this */
+};
+
+/* ASoC SOF DAPM route */
+struct snd_sof_route {
+	struct snd_sof_dev *sdev;
+
+	struct snd_soc_dapm_route *route;
+	struct list_head list;	/* list in sdev route list */
+
+	void *private;
 };
 
 /* ASoC DAI device */
@@ -324,6 +336,7 @@ struct snd_sof_dev {
 	struct list_head kcontrol_list;
 	struct list_head widget_list;
 	struct list_head dai_list;
+	struct list_head route_list;
 	struct snd_soc_component *component;
 
 	/* FW configuration */
@@ -445,6 +458,8 @@ int snd_sof_init_topology(struct snd_sof_dev *sdev,
 			  struct snd_soc_tplg_ops *ops);
 int snd_sof_load_topology(struct snd_sof_dev *sdev, const char *file);
 void snd_sof_free_topology(struct snd_sof_dev *sdev);
+int sof_complete_pipeline(struct snd_sof_dev *sdev,
+			  struct snd_sof_widget *swidget);
 
 /*
  * Trace/debug
@@ -462,6 +477,7 @@ void snd_sof_trace_notify_for_error(struct snd_sof_dev *sdev);
 int snd_sof_get_status(struct snd_sof_dev *sdev, u32 panic_code,
 		       u32 tracep_code, void *oops, void *stack,
 		       size_t stack_size);
+int sof_init_trace_ipc(struct snd_sof_dev *sdev);
 
 /*
  * Platform specific ops.

@@ -158,13 +158,6 @@ static void sof_acpi_fw_cb(const struct firmware *fw, void *context)
 	}
 }
 
-static const struct dev_pm_ops sof_acpi_pm = {
-	SET_SYSTEM_SLEEP_PM_OPS(snd_sof_suspend, snd_sof_resume)
-	SET_RUNTIME_PM_OPS(snd_sof_runtime_suspend, snd_sof_runtime_resume,
-			   NULL)
-	.suspend_late = snd_sof_suspend_late,
-};
-
 static const struct sof_ops_table mach_ops[] = {
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HASWELL)
 	{&sof_acpi_haswell_desc, &sof_hsw_ops},
@@ -344,7 +337,6 @@ static struct platform_driver snd_sof_acpi_driver = {
 	.shutdown = sof_acpi_shutdown,
 	.driver = {
 		.name = "sof-audio-acpi",
-		.pm = &sof_acpi_pm,
 		.acpi_match_table = ACPI_PTR(sof_acpi_match),
 	},
 };
