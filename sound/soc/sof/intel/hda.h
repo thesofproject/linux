@@ -49,11 +49,11 @@
 #define SOF_HDA_PPCTL_PIE		BIT(31)
 #define SOF_HDA_PPCTL_GPROCEN		BIT(30)
 
-#define SOF_HDA_SPIB_CAP_ID		0x4
-#define SOF_HDA_DRSM_CAP_ID		0x5
-
 /* DPIB entry size: 8 Bytes = 2 DWords */
 #define SOF_HDA_DPIB_ENTRY_SIZE	0x8
+
+#define SOF_HDA_SPIB_CAP_ID		0x4
+#define SOF_HDA_DRSM_CAP_ID		0x5
 
 #define SOF_HDA_SPIB_BASE		0x08
 #define SOF_HDA_SPIB_INTERVAL		0x08
@@ -103,6 +103,7 @@
 #define SOF_HDA_ADSP_REG_CL_SD_FIFOL		0x14
 #define SOF_HDA_ADSP_REG_CL_SD_BDLPL		0x18
 #define SOF_HDA_ADSP_REG_CL_SD_BDLPU		0x1C
+#define SOF_HDA_ADSP_SD_ENTRY_SIZE		0x20
 
 /* CL: Software Position Based FIFO Capability Registers */
 #define SOF_DSP_REG_CL_SPBFIFO \
@@ -329,42 +330,6 @@ struct sof_intel_dsp_desc {
 	struct snd_sof_dsp_ops *ops;
 };
 
-/* per stream data for HDA DSP Frontend */
-struct sof_intel_hda_stream {
-
-	/* addresses for stream HDA functions */
-	void __iomem *pphc_addr;
-	void __iomem *pplc_addr;
-	void __iomem *spib_addr;
-	void __iomem *fifo_addr;
-	void __iomem *drsm_addr;
-
-	/* runtime state */
-	u32 dpib;
-	u32 lpib;
-	int tag;
-	int direction;
-	bool open;
-	bool running;
-	u32 index;
-
-	/* buffer & descriptors */
-	struct snd_dma_buffer bdl;
-	void __iomem *sd_addr;	/* stream descriptor pointer */
-	int sd_offset;		/* Stream descriptor offset */
-	unsigned int bufsize;	/* size of the play buffer in bytes */
-	unsigned int fifo_size;	/* FIFO size */
-
-	__le32 *posbuf;		/* position buffer pointer */
-	unsigned int frags;	/* number for period in the play buffer */
-	unsigned int config;	/* format config value */
-
-	/* PCM */
-	struct snd_pcm_substream *substream;
-
-	struct list_head list;	/* list of streams on the bus */
-};
-
 #define SOF_HDA_PLAYBACK_STREAMS	16
 #define SOF_HDA_CAPTURE_STREAMS		16
 #define SOF_HDA_PLAYBACK		0
@@ -379,10 +344,14 @@ struct sof_intel_hda_dev {
 	const struct sof_intel_dsp_desc *desc;
 
 	/*trace */
-	struct sof_intel_hda_stream *dtrace_stream;
+	struct hdac_ext_stream *dtrace_stream;
 
 	int irq;
 };
+
+#define SOF_STREAM_SD_OFFSET(s) \
+	(SOF_HDA_ADSP_SD_ENTRY_SIZE * ((s)->index) \
+	 + SOF_HDA_ADSP_LOADER_BASE)
 
 /*
  * DSP Core services.
@@ -439,30 +408,30 @@ int hda_dsp_pcm_trigger(struct snd_sof_dev *sdev,
 int hda_dsp_stream_init(struct snd_sof_dev *sdev);
 void hda_dsp_stream_free(struct snd_sof_dev *sdev);
 int hda_dsp_stream_hw_params(struct snd_sof_dev *sdev,
-			     struct sof_intel_hda_stream *stream,
+			     struct hdac_ext_stream *stream,
 			     struct snd_dma_buffer *dmab,
 			     struct snd_pcm_hw_params *params);
 int hda_dsp_stream_trigger(struct snd_sof_dev *sdev,
-			   struct sof_intel_hda_stream *stream, int cmd);
+			   struct hdac_ext_stream *stream, int cmd);
 irqreturn_t hda_dsp_stream_interrupt(int irq, void *context);
 irqreturn_t hda_dsp_stream_threaded_handler(int irq, void *context);
 int hda_dsp_stream_setup_bdl(struct snd_sof_dev *sdev,
 			     struct snd_dma_buffer *dmab,
-			     struct sof_intel_hda_stream *stream,
+			     struct hdac_stream *stream,
 			     struct sof_intel_dsp_bdl *bdl, int size,
 			     struct snd_pcm_hw_params *params);
 
-struct sof_intel_hda_stream *
+struct hdac_ext_stream *
 	hda_dsp_stream_get(struct snd_sof_dev *sdev, int direction);
-struct sof_intel_hda_stream *
+struct hdac_ext_stream *
 	hda_dsp_stream_get_cstream(struct snd_sof_dev *sdev);
-struct sof_intel_hda_stream *
+struct hdac_ext_stream *
 	hda_dsp_stream_get_pstream(struct snd_sof_dev *sdev);
 int hda_dsp_stream_put(struct snd_sof_dev *sdev, int direction, int stream_tag);
 int hda_dsp_stream_put_pstream(struct snd_sof_dev *sdev, int stream_tag);
 int hda_dsp_stream_put_cstream(struct snd_sof_dev *sdev, int stream_tag);
 int hda_dsp_stream_spib_config(struct snd_sof_dev *sdev,
-			       struct sof_intel_hda_stream *stream,
+			       struct hdac_ext_stream *stream,
 			       int enable, u32 size);
 
 /*

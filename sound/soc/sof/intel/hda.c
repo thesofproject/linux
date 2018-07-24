@@ -489,9 +489,9 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	struct pci_dev *pci = sdev->pci;
 	struct sof_intel_hda_dev *hdev;
 	struct hdac_bus *bus;
-	struct sof_intel_hda_stream *stream;
+	struct hdac_stream *stream;
 	const struct sof_intel_dsp_desc *chip;
-	int ret = 0;
+	int sd_offset, ret = 0;
 
 	/* set DSP arch ops */
 	sdev->arch_ops = &sof_xtensa_arch_ops;
@@ -611,8 +611,9 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	/* clear stream status */
 	bus = sof_to_bus(sdev);
 	list_for_each_entry(stream, &bus->stream_list, list) {
+		sd_offset = SOF_STREAM_SD_OFFSET(stream);
 		snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR,
-						stream->sd_offset +
+						sd_offset +
 						SOF_HDA_ADSP_REG_CL_SD_STS,
 						SOF_HDA_CL_DMA_SD_INT_MASK,
 						SOF_HDA_CL_DMA_SD_INT_MASK);
