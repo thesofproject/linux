@@ -34,13 +34,8 @@ static void sof_spi_fw_cb(const struct firmware *fw, void *context)
 	}
 
 	/* register PCM and DAI driver */
-	priv->pdev_pcm =
-		platform_device_register_data(dev, "sof-audio", -1,
-					      sof_pdata, sizeof(*sof_pdata));
-	if (IS_ERR(priv->pdev_pcm)) {
-		dev_err(dev, "Cannot register device sof-audio. Error %d\n",
-			(int)PTR_ERR(priv->pdev_pcm));
-	}
+	sof_create_audio_device(priv);
+	return;
 }
 
 static const struct dev_pm_ops sof_spi_pm = {
