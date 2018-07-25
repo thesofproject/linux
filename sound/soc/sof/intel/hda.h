@@ -43,6 +43,9 @@
 #define SOF_HDA_CAP_ID_MASK		(0xFFF << SOF_HDA_CAP_ID_OFF)
 #define SOF_HDA_CAP_NEXT_MASK		0xFFFF
 
+#define SOF_HDA_GTS_CAP_ID			0x1
+#define SOF_HDA_ML_CAP_ID			0x2
+
 #define SOF_HDA_PP_CAP_ID		0x3
 #define SOF_HDA_REG_PP_PPCH		0x10
 #define SOF_HDA_REG_PP_PPCTL		0x04
@@ -461,11 +464,20 @@ int hda_dsp_ctrl_link_reset(struct snd_sof_dev *sdev);
 void hda_dsp_ctrl_enable_miscbdcge(struct snd_sof_dev *sdev, bool enable);
 int hda_dsp_ctrl_init_chip(struct snd_sof_dev *sdev, bool full_reset);
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
 /*
  * HDA Codec operations.
  */
 int hda_codec_probe_bus(struct snd_sof_dev *sdev);
 int hda_codec_i915_init(struct snd_sof_dev *sdev);
+#endif
+
+/*
+ * HDA bus operations.
+ */
+int sof_hda_bus_init(struct hdac_bus *bus, struct device *dev,
+			const struct hdac_ext_bus_ops *ext_ops);
+
 
 /*
  * Trace Control.

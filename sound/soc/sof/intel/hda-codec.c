@@ -3,7 +3,7 @@
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
  *
- * Copyright(c) 2017 Intel Corporation. All rights reserved.
+ * Copyright(c) 2018 Intel Corporation. All rights reserved.
  *
  * Authors: Jeeja KP <jeeja.kp@intel.com>
  *          Keyon Jie <yang.jie@linux.intel.com>
@@ -22,7 +22,6 @@
 #include <sound/hda_i915.h>
 #include <sound/hda_register.h>
 #include <sound/hdaudio.h>
-#include <sound/hda_i915.h>
 
 #include "../../../pci/hda/hda_codec.h"
 #include "../../codecs/hdac_hda.h"
@@ -112,6 +111,7 @@ int hda_codec_probe_bus(struct snd_sof_dev *sdev)
 
 	return 0;
 }
+EXPORT_SYMBOL(hda_codec_probe_bus);
 
 int hda_codec_i915_init(struct snd_sof_dev *sdev)
 {
@@ -129,4 +129,7 @@ int hda_codec_i915_init(struct snd_sof_dev *sdev)
 
 	return ret;
 }
+EXPORT_SYMBOL(hda_codec_i915_init);
+
+MODULE_LICENSE("Dual BSD/GPL");
 

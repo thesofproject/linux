@@ -475,6 +475,7 @@ irqreturn_t hda_dsp_stream_interrupt(int irq, void *context)
 		return IRQ_NONE;
 	}
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
 	/* clear rirb int */
 	status = snd_sof_dsp_read(sdev, HDA_DSP_HDA_BAR, SOF_HDA_RIRBSTS);
 	if (status & RIRB_INT_MASK) {
@@ -483,11 +484,12 @@ irqreturn_t hda_dsp_stream_interrupt(int irq, void *context)
 		snd_sof_dsp_write(sdev, HDA_DSP_HDA_BAR, SOF_HDA_RIRBSTS,
 				  RIRB_INT_MASK);
 	}
+#endif
 
 	spin_unlock(&bus->reg_lock);
 
 	return snd_sof_dsp_read(sdev, HDA_DSP_HDA_BAR, SOF_HDA_INTSTS)
-				? IRQ_WAKE_THREAD : IRQ_HANDLED;
+		& SOF_HDA_INT_ALL_STREAM ? IRQ_WAKE_THREAD : IRQ_HANDLED;
 }
 
 irqreturn_t hda_dsp_stream_threaded_handler(int irq, void *context)
@@ -578,7 +580,6 @@ int hda_dsp_stream_init(struct snd_sof_dev *sdev)
 		dev_err(sdev->dev, "error: posbuffer dma alloc failed\n");
 		return -ENOMEM;
 	}
-
 
 	/* mem alloc for the CORB/RIRB ringbuffers */
 	ret = snd_dma_alloc_pages(SNDRV_DMA_TYPE_DEV, &pci->dev,
