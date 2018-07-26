@@ -121,6 +121,19 @@ static struct snd_soc_dai_link dailink[] = {
 		.dpcm_playback = 1,
 		.dpcm_capture = 1,
 	},
+	{
+		/* DMIC0 - Codec */
+		.name = "DMIC0",
+		.id = 1,
+		.cpu_dai_name = "DMIC01 Pin",
+		.no_pcm = 1,
+		.platform_name = "sof-audio",
+		.codec_dai_name = "snd-soc-dummy-dai",
+		.codec_name = "snd-soc-dummy",
+		.dai_fmt = SND_SOC_DAIFMT_PDM,
+		.ignore_suspend = 1,
+		.dpcm_capture = 1,
+	},
 };
 
 /* SoC card */
