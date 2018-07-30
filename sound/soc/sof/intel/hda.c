@@ -306,54 +306,22 @@ static const struct sof_intel_dsp_desc *get_chip_info(int pci_id)
 	return NULL;
 }
 
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
-
-#if 0
-static int sof_hda_acquire_irq(struct hda_bus *hbus, int do_disconnect)
-{
-	int ret;
-
-	/* register our IRQ */
-	ret = request_threaded_irq(hbus->pci->irq, sof_hda_stream_interrupt,
-				   sof_hda_stream_threaded_handler,
-				   IRQF_SHARED, "SOFHDA", &hbus->core);
-
-	if (ret) {
-		dev_err(hbus->core.dev,
-			"unable to grab IRQ %d, disabling device\n",
-			hbus->pci->irq);
-		return ret;
-	}
-
-	hbus->core.irq = hbus->pci->irq;
-	pci_intx(hbus->pci, 1);
-
-	return 0;
-}
-#endif
-
 static int hda_init(struct snd_sof_dev *sdev)
 {
 	struct hda_bus *hbus;
 	struct hdac_bus *bus;
-	struct hdac_ext_bus_ops *ext_ops;
+	struct hdac_ext_bus_ops *ext_ops = NULL;
 	struct pci_dev *pci = sdev->pci;
-	//struct hdac_ext_link *hlink = NULL;
-	//int err;
-	//unsigned short gcap;
+	int ret;
 
-	hbus = devm_kzalloc(&pci->dev, sizeof(*hbus), GFP_KERNEL);
-	if (!hbus)
-		return -ENOMEM;
-
-	sdev->hbus = hbus;
-	bus = &hbus->core;
+	hbus = sof_to_hbus(sdev);
+	bus = sof_to_bus(sdev);
 
 	/* HDA bus init */
 #if IS_ENABLED(CONFIG_SND_SOC_HDAC_HDA)
 	ext_ops = snd_soc_hdac_hda_get_ops();
 #endif
-	snd_hdac_ext_bus_init(bus, &pci->dev, NULL, NULL, ext_ops);
+	sof_hda_bus_init(bus, &pci->dev, ext_ops);
 	bus->use_posbuf = 1;
 	bus->bdl_pos_adj = 0;
 
@@ -370,26 +338,22 @@ static int hda_init(struct snd_sof_dev *sdev)
 		return -ENXIO;
 	}
 
-	// FIXME: we do this alot !
-	hda_dsp_ctrl_init_chip(sdev, true);
-
-	snd_hdac_bus_parse_capabilities(bus);
-
-	//if (sof_hda_acquire_irq(hbus, 0) < 0)
-	//	return -EBUSY;
-
-	/* update BARs for sof, don't need parse them again */
+	/* HDA base */
 	sdev->bar[HDA_DSP_HDA_BAR] = bus->remap_addr;
-	sdev->bar[HDA_DSP_PP_BAR] = bus->ppcap;
-	sdev->bar[HDA_DSP_SPIB_BAR] = bus->spbcap;
-	sdev->bar[HDA_DSP_DRSM_BAR] = bus->drsmcap;
 
-	return 0;
+	/* get controller capabilities */
+	ret = hda_dsp_ctrl_get_caps(sdev);
+	if (ret < 0)
+		dev_err(&pci->dev, "error: get caps error\n");
+
+	return ret;
 }
+
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
 
 static int hda_init_caps(struct snd_sof_dev *sdev)
 {
-	struct hdac_bus *bus = &sdev->hbus->core;
+	struct hdac_bus *bus = sof_to_bus(sdev);
 	struct pci_dev *pci = sdev->pci;
 	struct hdac_ext_link *hlink = NULL;
 	int ret = 0;
@@ -450,35 +414,14 @@ static int hda_init_caps(struct snd_sof_dev *sdev)
 
 #else
 
-static int hda_init(struct snd_sof_dev *sdev)
-{
-	struct pci_dev *pci = sdev->pci;
-	int ret;
-
-	/* HDA base */
-	sdev->bar[HDA_DSP_HDA_BAR] = pci_ioremap_bar(pci, HDA_DSP_HDA_BAR);
-	if (!sdev->bar[HDA_DSP_HDA_BAR]) {
-		dev_err(&pci->dev, "error: ioremap error\n");
-		return -ENXIO;
-	}
-
-	/* get controller capabilities */
-	ret = hda_dsp_ctrl_get_caps(sdev);
-	if (ret < 0)
-		dev_err(&pci->dev, "error: get caps error\n");
-
-	return 0;
-}
-
 static int hda_init_caps(struct snd_sof_dev *sdev)
 {
 	/*
-	 * while performing reset, controller may not come back properly causing
-	 * issues, so recommendation is to set CGCTL.MISCBDCGE to 0 then do
-	 * reset (init chip) and then again set CGCTL.MISCBDCGE to 1
+	 * set CGCTL.MISCBDCGE to 0 during reset and set back to 1
+	 * when reset finished.
+	 * TODO: maybe no need for init_caps?
 	 */
-	snd_sof_pci_update_bits(sdev, PCI_CGCTL,
-				PCI_CGCTL_MISCBDCGE_MASK, 0);
+	hda_dsp_ctrl_enable_miscbdcge(sdev, 0);
 
 	/* clear WAKESTS */
 	snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR, SOF_HDA_WAKESTS,
@@ -499,10 +442,10 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 {
 	struct pci_dev *pci = sdev->pci;
 	struct sof_intel_hda_dev *hdev;
-	struct sof_intel_hda_stream *stream;
+	struct hdac_bus *bus;
+	struct hdac_stream *stream;
 	const struct sof_intel_dsp_desc *chip;
-	int i;
-	int ret = 0;
+	int sd_offset, ret = 0;
 
 	/* set DSP arch ops */
 	sdev->arch_ops = &sof_xtensa_arch_ops;
@@ -524,21 +467,17 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	/* set up HDA base */
 	ret = hda_init(sdev);
 	if (ret < 0)
-		goto err;
+		return ret;
 
 	/* DSP base */
 	sdev->bar[HDA_DSP_BAR] = pci_ioremap_bar(pci, HDA_DSP_BAR);
 	if (!sdev->bar[HDA_DSP_BAR]) {
 		dev_err(&pci->dev, "error: ioremap error\n");
-		ret = -ENXIO;
-		goto err;
+		return -ENXIO;
 	}
 
 	sdev->mmio_bar = HDA_DSP_BAR;
 	sdev->mailbox_bar = HDA_DSP_BAR;
-
-	pci_set_master(pci);
-	synchronize_irq(pci->irq);
 
 	/* allow 64bit DMA address if supported by H/W */
 	if (!dma_set_mask(&pci->dev, DMA_BIT_MASK(64))) {
@@ -558,63 +497,14 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 		 * not all errors are due to memory issues, but trying
 		 * to free everything does not harm
 		 */
-		goto stream_err;
+		goto err;
 	}
 
 	/*
-	 * clear bits 0-2 of PCI register TCSEL (at offset 0x44)
-	 * TCSEL == Traffic Class Select Register, which sets PCI express QOS
-	 * Ensuring these bits are 0 clears playback static on some HD Audio
-	 * codecs. PCI register TCSEL is defined in the Intel manuals.
+	 * clear TCSEL to clear playback on some HD Audio
+	 * codecs. PCI TCSEL is defined in the Intel manuals.
 	 */
 	snd_sof_pci_update_bits(sdev, PCI_TCSEL, 0x07, 0);
-
-	/* init HDA capabilities */
-	ret = hda_init_caps(sdev);
-	if (ret < 0)
-		goto stream_err;
-
-	/* reset HDA controller */
-	ret = hda_dsp_ctrl_link_reset(sdev);
-	if (ret < 0) {
-		dev_err(&pci->dev, "error: failed to reset HDA controller\n");
-		goto stream_err;
-	}
-
-	/* clear stream status */
-	for (i = 0 ; i < hdev->num_capture ; i++) {
-		stream = &hdev->cstream[i];
-		if (stream)
-			snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR,
-						stream->sd_offset +
-						SOF_HDA_ADSP_REG_CL_SD_STS,
-						SOF_HDA_CL_DMA_SD_INT_MASK,
-						SOF_HDA_CL_DMA_SD_INT_MASK);
-	}
-
-	for (i = 0 ; i < hdev->num_playback ; i++) {
-		stream = &hdev->pstream[i];
-		if (stream)
-			snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR,
-						stream->sd_offset +
-						SOF_HDA_ADSP_REG_CL_SD_STS,
-						SOF_HDA_CL_DMA_SD_INT_MASK,
-						SOF_HDA_CL_DMA_SD_INT_MASK);
-	}
-
-	/* clear WAKESTS */
-	snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR, SOF_HDA_WAKESTS,
-				SOF_HDA_WAKESTS_INT_MASK,
-				SOF_HDA_WAKESTS_INT_MASK);
-
-	/* clear interrupt status register */
-	snd_sof_dsp_write(sdev, HDA_DSP_HDA_BAR, SOF_HDA_INTSTS,
-			  SOF_HDA_INT_CTRL_EN | SOF_HDA_INT_ALL_STREAM);
-
-	/* enable CIE and GIE interrupts */
-	snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR, SOF_HDA_INTCTL,
-				SOF_HDA_INT_CTRL_EN | SOF_HDA_INT_GLOBAL_EN,
-				SOF_HDA_INT_CTRL_EN | SOF_HDA_INT_GLOBAL_EN);
 
 	/*
 	 * register our IRQ
@@ -623,7 +513,9 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	 * TODO: support interrupt mode selection with kernel parameter
 	 *       support msi multiple vectors
 	 */
-	ret = pci_alloc_irq_vectors(pci, 1, 1, PCI_IRQ_MSI);
+//	ret = pci_alloc_irq_vectors(pci, 1, 1, PCI_IRQ_MSI);
+	/* todo: MSI mode doesn't work for HDMI yet, debug it later */
+	ret = pci_alloc_irq_vectors(pci, 1, 1, PCI_IRQ_LEGACY);
 	if (ret < 0) {
 		dev_info(sdev->dev, "use legacy interrupt mode\n");
 		sdev->hda->irq = pci->irq;
@@ -642,7 +534,7 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	if (ret < 0) {
 		dev_err(sdev->dev, "error: failed to register HDA IRQ %d\n",
 			sdev->hda->irq);
-		goto stream_err;
+		goto free_streams;
 	}
 
 	dev_dbg(sdev->dev, "using IPC IRQ %d\n", sdev->ipc_irq);
@@ -652,8 +544,48 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	if (ret < 0) {
 		dev_err(sdev->dev, "error: failed to register IPC IRQ %d\n",
 			sdev->ipc_irq);
-		goto irq_err;
+		goto free_hda_irq;
 	}
+
+	pci_set_master(pci);
+	synchronize_irq(pci->irq);
+
+	/* init HDA capabilities */
+	ret = hda_init_caps(sdev);
+	if (ret < 0)
+		goto free_ipc_irq;
+
+	/* reset HDA controller */
+	ret = hda_dsp_ctrl_link_reset(sdev);
+	if (ret < 0) {
+		dev_err(&pci->dev, "error: failed to reset HDA controller\n");
+		goto free_ipc_irq;
+	}
+
+	/* clear stream status */
+	bus = sof_to_bus(sdev);
+	list_for_each_entry(stream, &bus->stream_list, list) {
+		sd_offset = SOF_STREAM_SD_OFFSET(stream);
+		snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR,
+						sd_offset +
+						SOF_HDA_ADSP_REG_CL_SD_STS,
+						SOF_HDA_CL_DMA_SD_INT_MASK,
+						SOF_HDA_CL_DMA_SD_INT_MASK);
+	}
+
+	/* clear WAKESTS */
+	snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR, SOF_HDA_WAKESTS,
+				SOF_HDA_WAKESTS_INT_MASK,
+				SOF_HDA_WAKESTS_INT_MASK);
+
+	/* clear interrupt status register */
+	snd_sof_dsp_write(sdev, HDA_DSP_HDA_BAR, SOF_HDA_INTSTS,
+			  SOF_HDA_INT_CTRL_EN | SOF_HDA_INT_ALL_STREAM);
+
+	/* enable CIE and GIE interrupts */
+	snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR, SOF_HDA_INTCTL,
+				SOF_HDA_INT_CTRL_EN | SOF_HDA_INT_GLOBAL_EN,
+				SOF_HDA_INT_CTRL_EN | SOF_HDA_INT_GLOBAL_EN);
 
 	/* re-enable CGCTL.MISCBDCGE after reset */
 	hda_dsp_ctrl_enable_miscbdcge(sdev, true);
@@ -676,10 +608,12 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 
 	return 0;
 
-irq_err:
+free_ipc_irq:
+	free_irq(sdev->ipc_irq, sdev);
+free_hda_irq:
 	free_irq(sdev->hda->irq, sdev);
-stream_err:
 	pci_free_irq_vectors(pci);
+free_streams:
 	hda_dsp_stream_free(sdev);
 err:
 	/* disable DSP */
