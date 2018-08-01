@@ -134,6 +134,7 @@ static struct platform_device *
 	return pdev;
 }
 
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_BYPASS_DSP)
 static void sof_acpi_fw_cb(const struct firmware *fw, void *context)
 {
 	struct sof_platform_priv *priv = context;
@@ -152,6 +153,7 @@ static void sof_acpi_fw_cb(const struct firmware *fw, void *context)
 	sof_create_audio_device(priv);
 	return;
 }
+#endif
 
 static const struct dev_pm_ops sof_acpi_pm = {
 	SET_SYSTEM_SLEEP_PM_OPS(snd_sof_suspend, snd_sof_resume)
@@ -286,6 +288,7 @@ static int sof_acpi_probe(struct platform_device *pdev)
 	dev_dbg(dev, "created machine %s\n",
 		dev_name(&sof_pdata->pdev_mach->dev));
 
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_BYPASS_DSP)
 	/* continue SST probing after firmware is loaded */
 	dev_info(dev, "info: loading firmware %s\n", mach->sof_fw_filename);
 	ret = request_firmware_nowait(THIS_MODULE, true, mach->sof_fw_filename,
@@ -295,6 +298,10 @@ static int sof_acpi_probe(struct platform_device *pdev)
 		dev_err(dev, "error: failed to load firmware %s\n",
 			mach->sof_fw_filename);
 	}
+#else
+	/* continue probing without firmware */
+	ret = sof_create_audio_device(priv);
+#endif
 
 	return ret;
 }

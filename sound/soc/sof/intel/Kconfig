@@ -104,4 +104,13 @@ config SND_SOC_SOF_HDA
           Say Y if you want to enble HDA links with SOF.
           If unsure select "N".
 
+config SND_SOC_SOF_BYPASS_DSP
+	tristate "SOF bypass DSP"
+	depends on SND_SOC_SOF_HDA
+	help
+          This adds support for SOF in legacy HD-Audio mode which bypasses
+          the embedded DSP in HD-A controller on Intel SKL+ platforms.
+          Say Y if you have such a device.
+          If unsure select "N".
+
 endif ## SND_SOC_SOF_INTEL
