@@ -114,6 +114,7 @@ static struct sof_dev_desc kbl_desc = {
 };
 #endif
 
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_BYPASS_DSP)
 static void sof_pci_fw_cb(const struct firmware *fw, void *context)
 {
 	struct sof_platform_priv *priv = context;
@@ -129,14 +130,10 @@ static void sof_pci_fw_cb(const struct firmware *fw, void *context)
 	}
 
 	/* register PCM and DAI driver */
-	priv->pdev_pcm =
-		platform_device_register_data(dev, "sof-audio", -1,
-					      sof_pdata, sizeof(*sof_pdata));
-	if (IS_ERR(priv->pdev_pcm)) {
-		dev_err(dev, "Cannot register device sof-audio. Error %d\n",
-			(int)PTR_ERR(priv->pdev_pcm));
-	}
+	sof_create_audio_device(priv);
+	return;
 }
+#endif
 
 static const struct dev_pm_ops sof_pci_pm = {
 	SET_SYSTEM_SLEEP_PM_OPS(snd_sof_suspend, snd_sof_resume)
@@ -266,6 +263,7 @@ static int sof_pci_probe(struct pci_dev *pci,
 	dev_dbg(dev, "created machine %s\n",
 		dev_name(&sof_pdata->pdev_mach->dev));
 
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_BYPASS_DSP)
 	/* continue probing after firmware is loaded */
 	dev_info(dev, "info: loading firmware %s\n", mach->sof_fw_filename);
 	ret = request_firmware_nowait(THIS_MODULE, true, mach->sof_fw_filename,
@@ -276,6 +274,10 @@ static int sof_pci_probe(struct pci_dev *pci,
 			mach->sof_fw_filename);
 		goto release_regions;
 	}
+#else
+	/* continue probing without firmware */
+	ret = sof_create_audio_device(priv);
+#endif
 
 	return ret;
 

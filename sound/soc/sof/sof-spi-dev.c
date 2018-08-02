@@ -19,6 +19,7 @@
 #include <linux/of_device.h>
 #include "sof-priv.h"
 
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_BYPASS_DSP)
 static void sof_spi_fw_cb(const struct firmware *fw, void *context)
 {
 	struct sof_platform_priv *priv = context;
@@ -34,14 +35,10 @@ static void sof_spi_fw_cb(const struct firmware *fw, void *context)
 	}
 
 	/* register PCM and DAI driver */
-	priv->pdev_pcm =
-		platform_device_register_data(dev, "sof-audio", -1,
-					      sof_pdata, sizeof(*sof_pdata));
-	if (IS_ERR(priv->pdev_pcm)) {
-		dev_err(dev, "Cannot register device sof-audio. Error %d\n",
-			(int)PTR_ERR(priv->pdev_pcm));
-	}
+	sof_create_audio_device(priv);
+	return;
 }
+#endif
 
 static const struct dev_pm_ops sof_spi_pm = {
 	SET_SYSTEM_SLEEP_PM_OPS(snd_sof_suspend, snd_sof_resume)
@@ -101,11 +98,15 @@ static int sof_spi_probe(struct spi_device *spi)
 	dev_dbg(dev, "created machine %s\n",
 		dev_name(&sof_pdata->pdev_mach->dev));
 
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_BYPASS_DSP)
 	/* continue probing after firmware is loaded */
 	ret = request_firmware_nowait(THIS_MODULE, true, mach->sof_fw_filename,
 				      dev, GFP_KERNEL, priv, sof_spi_fw_cb);
 	if (ret)
 		platform_device_unregister(sof_pdata->pdev_mach);
+#else
+	ret = sof_create_audio_device(priv);
+#endif
 
 	return ret;
 }
