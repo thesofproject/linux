@@ -44,12 +44,35 @@ static int get_ext_windows(struct snd_sof_dev *sdev,
 	return ret;
 }
 
+static int get_ext_components(struct snd_sof_dev *sdev,
+			      struct sof_ipc_ext_data_hdr *ext_hdr)
+{
+	struct sof_ipc_trace_comp *c = (struct sof_ipc_trace_comp *)ext_hdr;
+
+	int ret = 0;
+	size_t size;
+
+	if (c->num_components == 0)
+		return -EINVAL;
+
+	size = sizeof(*c) + sizeof(struct sof_ipc_comp_info) *
+	c->num_components;
+
+	/* keep a local copy of the data */
+	sdev->info_comp = kmemdup(c, size, GFP_KERNEL);
+	if (!sdev->info_comp)
+		return -ENOMEM;
+
+	return ret;
+}
+
 /* parse the extended FW boot data structures from FW boot message */
 int snd_sof_fw_parse_ext_data(struct snd_sof_dev *sdev, u32 offset)
 {
 	struct sof_ipc_ext_data_hdr *ext_hdr;
 	void *ext_data;
 	int ret = 0;
+	u32 ext_offset;
 
 	ext_data = kzalloc(PAGE_SIZE, GFP_KERNEL);
 	if (!ext_data)
@@ -58,11 +81,12 @@ int snd_sof_fw_parse_ext_data(struct snd_sof_dev *sdev, u32 offset)
 	/* get first header */
 	snd_sof_dsp_block_read(sdev, offset, ext_data, sizeof(*ext_hdr));
 	ext_hdr = (struct sof_ipc_ext_data_hdr *)ext_data;
+	ext_offset = offset;
 
 	while (ext_hdr->hdr.cmd == SOF_IPC_FW_READY) {
 		/* read in ext structure */
-		offset += sizeof(*ext_hdr);
-		snd_sof_dsp_block_read(sdev, offset,
+		ext_offset = offset + sizeof(*ext_hdr);
+		snd_sof_dsp_block_read(sdev, ext_offset,
 				       ext_data + sizeof(*ext_hdr),
 				       ext_hdr->hdr.size - sizeof(*ext_hdr));
 
@@ -75,6 +99,9 @@ int snd_sof_fw_parse_ext_data(struct snd_sof_dev *sdev, u32 offset)
 			break;
 		case SOF_IPC_EXT_WINDOW:
 			ret = get_ext_windows(sdev, ext_hdr);
+			break;
+		case SOF_IPC_EXT_COMPONENT:
+			ret = get_ext_components(sdev, ext_hdr);
 			break;
 		default:
 			break;
@@ -283,5 +310,7 @@ EXPORT_SYMBOL(snd_sof_run_firmware);
 void snd_sof_fw_unload(struct snd_sof_dev *sdev)
 {
 	/* TODO: support module unloading at runtime */
+	kfree(sdev->info_comp);
+	kfree(sdev->info_window);
 }
 EXPORT_SYMBOL(snd_sof_fw_unload);
