@@ -26,6 +26,186 @@
 #include "sof-priv.h"
 #include "ops.h"
 
+#define LEVEL_LEN	64
+
+static int sof_set_trace_level(struct snd_sof_dev *sdev,
+			       int comp_id, int level)
+{
+	struct sof_ipc_trace_level levels;
+	struct sof_ipc_reply ipc_reply;
+	int ret;
+
+	if (!sdev->dtrace_is_enabled)
+		return 0;
+
+	/* set IPC parameters */
+	levels.hdr.size = sizeof(levels);
+	levels.hdr.cmd = SOF_IPC_GLB_TRACE_MSG | SOF_IPC_TRACE_LEVEL;
+	levels.comp_id = comp_id;
+	levels.level = level;
+
+	/* send IPC to the DSP */
+	ret = sof_ipc_tx_message(sdev->ipc,
+				 levels.hdr.cmd, &levels, sizeof(levels),
+				 &ipc_reply, sizeof(ipc_reply));
+	if (ret < 0) {
+		dev_err(sdev->dev,
+			"error: can't set levels for DMA for trace %d\n", ret);
+		goto level_err;
+	}
+
+	dev_dbg(sdev->dev, "update trace level: %d\n", level);
+
+	return 0;
+
+level_err:
+	return ret;
+}
+
+static ssize_t sof_dfsentry_trace_level_read(struct file *file,
+					     char __user *user_buf,
+					     size_t count, loff_t *ppos)
+{
+	struct snd_sof_dfsentry_buf *dfse = file->private_data;
+	struct snd_sof_dev *sdev = dfse->sdev;
+	struct sof_ipc_trace_comp *icomp;
+	char str_comp[32];
+	char value_str[16];
+	int size, total_size, i;
+	char __user *pbuf = user_buf;
+
+	if (*ppos < 0 || !count)
+		return -EINVAL;
+
+	total_size = 0;
+
+	icomp = sdev->info_comp;
+	if (!icomp)
+		return -EINVAL;
+
+	/* output trace level of non-component modules */
+	for (i = 0; i < icomp->num_components; i++) {
+		snprintf(value_str, 16, "0x%x\n", icomp->comp[i].level);
+		strcpy(str_comp, icomp->comp[i].name);
+		strcat(str_comp, " >> ");
+		strcat(str_comp, value_str);
+
+		size = strlen(str_comp);
+		total_size += size;
+		if (total_size <= *ppos)
+			return 0;
+
+		if (size > count) {
+			dev_err(sdev->dev, "error: count is not enough\n");
+			return -EINVAL;
+		}
+
+		if (copy_to_user(pbuf, str_comp, size))
+			return -EFAULT;
+
+		pbuf += size;
+	}
+
+	size = sizeof(icomp->level_info);
+	copy_to_user(pbuf, icomp->level_info, size);
+
+	total_size += size;
+	*ppos += total_size;
+	return total_size;
+}
+
+static ssize_t sof_dfsentry_trace_level_write(struct file *file,
+					      const char __user *user_buf,
+					      size_t count, loff_t *ppos)
+{
+	struct snd_sof_dfsentry_buf *dfse = file->private_data;
+	struct snd_sof_dev *sdev = dfse->sdev;
+	struct sof_ipc_trace_comp *icomp;
+	char *buf, *start;
+	char *type_str = NULL;
+	char *value_str = NULL;
+	int i, j, ret;
+	unsigned long value;
+
+	icomp = sdev->info_comp;
+	if (!icomp)
+		return -EINVAL;
+
+	if (count > LEVEL_LEN)
+		return -EINVAL;
+
+	buf = kzalloc(LEVEL_LEN, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	start = buf;
+
+	ret = simple_write_to_buffer(buf, LEVEL_LEN, ppos, user_buf, count);
+	if (ret < 0)
+		goto err_free;
+
+	type_str = strsep(&start, " ");
+	if (!type_str)
+		goto err_free;
+
+	dev_dbg(sdev->dev, "trace level type: %s\n", type_str);
+
+	value_str = strsep(&start, " ");
+	if (!value_str)
+		goto err_free;
+
+	dev_dbg(sdev->dev, "trace level value: %s\n", value_str);
+
+	/* find corresponding trace level type for non-component */
+	for (i = 0; i < icomp->num_components; i++) {
+		if (!strcmp(type_str, icomp->comp[i].name)) {
+			dev_dbg(sdev->dev, "trace level type is found\n");
+			break;
+		}
+	}
+
+	/* non-compoent trace level setting is found */
+	if (i == icomp->num_components)
+		goto err_free;
+
+	/* find corresponding trace level value */
+	ret = kstrtoul(value_str, 16, &value);
+	if (ret) {
+		dev_err(sdev->dev,
+			"error: trace level value is not available: %s\n",
+			value_str);
+		goto err_free;
+	}
+
+	icomp->comp[i].level = value;
+
+	/* propaget the value to each component when all are set*/
+	if (i == icomp->num_components - 1) {
+		for (j = 0; j < icomp->num_components - 1; j++)
+			icomp->comp[j].level = value;
+	}
+
+	ret = sof_set_trace_level(sdev, i, value);
+	if (ret < 0) {
+		dev_err(sdev->dev,
+			"error: fail to set trace level: %d\n", ret);
+		goto err_free;
+	}
+
+	return count;
+
+err_free:
+	kfree(buf);
+	return -EFAULT;
+}
+
+static const struct file_operations sof_dfs_trace_level_fops = {
+	.open = simple_open,
+	.read = sof_dfsentry_trace_level_read,
+	.write = sof_dfsentry_trace_level_write,
+	.llseek = default_llseek,
+};
+
 static size_t sof_wait_trace_avail(struct snd_sof_dev *sdev,
 				   loff_t pos, size_t buffer_size)
 {
@@ -142,6 +322,29 @@ static int trace_debugfs_create(struct snd_sof_dev *sdev)
 		return -ENODEV;
 	}
 
+	sdev->tracefs = dfse;
+
+	/* Create debugfs for trace level */
+	dfse = kzalloc(sizeof(*dfse), GFP_KERNEL);
+	if (!dfse)
+		return -ENOMEM;
+
+	dfse->buf = NULL;
+	dfse->size = 0;
+	dfse->sdev = sdev;
+
+	dfse->dfsentry = debugfs_create_file("trace_level", 0644,
+					     sdev->debugfs_root,
+					     dfse, &sof_dfs_trace_level_fops);
+	if (!dfse->dfsentry) {
+		dev_err(sdev->dev,
+			"error: cannot create debugfs entry for trace level\n");
+		kfree(dfse);
+		return -ENODEV;
+	}
+
+	sdev->trace_levelfs = dfse;
+
 	return 0;
 }
 
@@ -172,7 +375,7 @@ int snd_sof_init_trace(struct snd_sof_dev *sdev)
 		goto page_err;
 	}
 
-	/* craete compressed page table for audio firmware */
+	/* create compressed page table for audio firmware */
 	ret = snd_sof_create_page_table(sdev, &sdev->dmatb, sdev->dmatp.area,
 					sdev->dmatb.bytes);
 	if (ret < 0)
@@ -278,5 +481,8 @@ void snd_sof_release_trace(struct snd_sof_dev *sdev)
 
 	snd_dma_free_pages(&sdev->dmatb);
 	snd_dma_free_pages(&sdev->dmatp);
+
+	kfree(sdev->tracefs);
+	kfree(sdev->trace_levelfs);
 }
 EXPORT_SYMBOL(snd_sof_release_trace);
