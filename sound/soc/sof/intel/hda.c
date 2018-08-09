@@ -561,6 +561,8 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 		goto free_streams;
 	}
 
+/* don't need ipc handler for legacy HDA mode */
+#ifndef CONFIG_SND_SOC_SOF_FORCE_LEGACY_HDA
 	dev_dbg(sdev->dev, "using IPC IRQ %d\n", sdev->ipc_irq);
 	ret = request_threaded_irq(sdev->ipc_irq, hda_dsp_ipc_irq_handler,
 				   chip->ops->irq_thread, IRQF_SHARED,
@@ -570,7 +572,7 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 			sdev->ipc_irq);
 		goto free_hda_irq;
 	}
-
+#endif
 	pci_set_master(pci);
 	synchronize_irq(pci->irq);
 

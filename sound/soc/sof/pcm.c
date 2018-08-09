@@ -323,6 +323,7 @@ static snd_pcm_uframes_t sof_pcm_pointer(struct snd_pcm_substream *substream)
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_sof_dev *sdev =
 		snd_soc_platform_get_drvdata(rtd->platform);
+#ifndef CONFIG_SND_SOC_SOF_FORCE_LEGACY_HDA
 	struct snd_sof_pcm *spcm = rtd->sof;
 	snd_pcm_uframes_t host = 0, dai = 0;
 
@@ -338,8 +339,10 @@ static snd_pcm_uframes_t sof_pcm_pointer(struct snd_pcm_substream *substream)
 
 	dev_dbg(sdev->dev, "PCM: stream %d dir %d DMA position %lu DAI position %lu\n",
 		spcm->pcm.pcm_id, substream->stream, host, dai);
-
 	return host;
+#else
+	return	snd_sof_pcm_platform_pointer(sdev, substream);
+#endif
 }
 
 static int sof_pcm_open(struct snd_pcm_substream *substream)
