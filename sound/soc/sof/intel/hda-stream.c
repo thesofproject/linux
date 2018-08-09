@@ -322,8 +322,12 @@ int hda_dsp_stream_hw_params(struct snd_sof_dev *sdev,
 	/* decouple host and link DMA */
 	mask = 0x1 << hstream->index;
 	snd_sof_dsp_update_bits(sdev, HDA_DSP_PP_BAR, SOF_HDA_REG_PP_PPCTL,
+#ifndef CONFIG_SND_SOC_SOF_FORCE_LEGACY_HDA
 				mask, mask);
-
+#else
+	/* temporary using coupled mode */
+				mask, 0);
+#endif
 	if (!dmab) {
 		dev_err(sdev->dev, "error: no dma buffer allocated!\n");
 		return -ENODEV;
@@ -526,6 +530,7 @@ irqreturn_t hda_dsp_stream_threaded_handler(int irq, void *context)
 			    !s->running ||
 			    (sd_status & SOF_HDA_CL_DMA_SD_INT_MASK) == 0)
 				continue;
+			snd_pcm_period_elapsed(s->substream);
 
 		}
 	}
