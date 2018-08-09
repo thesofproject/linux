@@ -264,6 +264,10 @@ int sof_ipc_tx_message(struct snd_sof_ipc *ipc, u32 header,
 	struct snd_sof_ipc_msg *msg;
 	unsigned long flags;
 
+	/* todo: fix me: temporary disable ipc message sending */
+#ifdef CONFIG_SND_SOC_SOF_FORCE_LEGACY_HDA
+	return 0;
+#endif
 	spin_lock_irqsave(&sdev->ipc_lock, flags);
 
 	/* get an empty message */
