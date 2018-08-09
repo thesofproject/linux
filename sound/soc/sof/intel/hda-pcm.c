@@ -26,6 +26,7 @@
 #include <linux/firmware.h>
 #include <linux/pci.h>
 #include <sound/hdaudio_ext.h>
+#include <sound/hda_register.h>
 #include <sound/sof.h>
 #include <sound/pcm_params.h>
 #include <linux/pm_runtime.h>
@@ -134,6 +135,38 @@ int hda_dsp_pcm_trigger(struct snd_sof_dev *sdev,
 	struct hdac_ext_stream *stream = stream_to_hdac_ext_stream(hstream);
 
 	return hda_dsp_stream_trigger(sdev, stream, cmd);
+}
+
+snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_sof_dev *sdev,
+			struct snd_pcm_substream *substream)
+{
+	struct hdac_stream *hstream = substream->runtime->private_data;
+	struct hdac_ext_stream *stream = stream_to_hdac_ext_stream(hstream);
+	struct hdac_bus *bus = sof_to_bus(sdev);
+	snd_pcm_uframes_t pos = 0;
+
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+		pos = snd_sof_dsp_read(sdev, HDA_DSP_HDA_BAR,
+			AZX_REG_VS_SDXDPIB_XBASE +
+				(AZX_REG_VS_SDXDPIB_XINTERVAL *
+				hstream->index));
+	} else {
+		udelay(20);
+		snd_sof_dsp_read(sdev, HDA_DSP_HDA_BAR,
+			AZX_REG_VS_SDXDPIB_XBASE +
+				(AZX_REG_VS_SDXDPIB_XINTERVAL *
+				hstream->index));
+		pos = snd_hdac_stream_get_pos_posbuf(hstream);
+	}
+
+	if (pos >= hstream->bufsize)
+		pos = 0;
+
+	pos = bytes_to_frames(substream->runtime, pos);
+
+	dev_dbg(sdev->dev, "PCM: stream %d dir %d position %lu\n",
+		hstream->index, substream->stream, pos);
+	return pos;
 }
 
 int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
