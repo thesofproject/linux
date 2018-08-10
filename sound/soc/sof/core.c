@@ -291,6 +291,8 @@ static int sof_probe(struct platform_device *pdev)
 		goto ipc_err;
 	}
 
+/* bypass DSP if in force legacy hda debug mode */
+#ifndef CONFIG_SND_SOC_SOF_FORCE_LEGACY_HDA
 	/* load the firmware */
 	ret = snd_sof_load_firmware(sdev, true);
 	if (ret < 0) {
@@ -306,6 +308,7 @@ static int sof_probe(struct platform_device *pdev)
 			ret);
 		goto fw_run_err;
 	}
+#endif
 
 	/* now register audio DSP platform driver */
 	ret = snd_soc_register_platform(&pdev->dev, &sdev->plat_drv);
@@ -324,6 +327,8 @@ static int sof_probe(struct platform_device *pdev)
 		goto comp_err;
 	}
 
+/* bypass DSP if in force legacy hda debug mode */
+#ifndef CONFIG_SND_SOC_SOF_FORCE_LEGACY_HDA
 	/* init DMA trace */
 	ret = snd_sof_init_trace(sdev);
 	if (ret < 0) {
@@ -331,6 +336,7 @@ static int sof_probe(struct platform_device *pdev)
 		dev_warn(sdev->dev,
 			 "warning: failed to initialize trace %d\n", ret);
 	}
+#endif
 
 	/* autosuspend sof device */
 	pm_runtime_mark_last_busy(sdev->dev);
@@ -346,9 +352,12 @@ comp_err:
 	snd_soc_unregister_component(&pdev->dev);
 	snd_sof_free_topology(sdev);
 fw_run_err:
+/* bypass DSP if in force legacy hda debug mode */
+#ifndef CONFIG_SND_SOC_SOF_FORCE_LEGACY_HDA
 	snd_sof_fw_unload(sdev);
 fw_load_err:
 	snd_sof_ipc_free(sdev);
+#endif
 ipc_err:
 	snd_sof_free_debug(sdev);
 dbg_err:
