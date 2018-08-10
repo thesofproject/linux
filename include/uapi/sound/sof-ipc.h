@@ -131,6 +131,7 @@
 #define SOF_MEM_CAPS_HP			(1 << 4) /* high performance */
 #define SOF_MEM_CAPS_DMA			(1 << 5) /* DMA'able */
 #define SOF_MEM_CAPS_CACHE			(1 << 6) /* cacheable */
+#define SOF_MEM_CAPS_EXEC			(1 << 7) /* executable */
 
 /*
  * Command Header - Header for all IPC. Identifies IPC message.
@@ -213,13 +214,14 @@ struct sof_ipc_compound_hdr {
  /* here is the possibility to define others aux macros */
 
 #define SOF_DAI_INTEL_SSP_FRAME_PULSE_WIDTH_MAX		38
+#define SOF_DAI_INTEL_SSP_SLOT_PADDING_MAX		31
 
-/* types of DAI */
+/** \brief Types of DAI */
 enum sof_ipc_dai_type {
-	SOF_DAI_INTEL_NONE = 0,
-	SOF_DAI_INTEL_SSP,
-	SOF_DAI_INTEL_DMIC,
-	SOF_DAI_INTEL_HDA,
+	SOF_DAI_INTEL_NONE = 0,	/**< None */
+	SOF_DAI_INTEL_SSP,		/**< Intel SSP */
+	SOF_DAI_INTEL_DMIC,		/**< Intel DMIC */
+	SOF_DAI_INTEL_HDA,		/**< Intel HD/A */
 };
 
 /* SSP Configuration Request - SOF_IPC_DAI_SSP_CONFIG */
@@ -250,7 +252,7 @@ struct sof_ipc_dai_ssp_params {
 	uint16_t frame_pulse_width;
 	uint32_t quirks; // FIXME: is 32 bits enough ?
 
-	uint16_t padding;
+	uint16_t tdm_per_slot_padding_flag;
 	/* private data, e.g. for quirks */
 	//uint32_t pdata[10]; // FIXME: would really need ~16 u32
 } __attribute__((packed));
@@ -261,9 +263,27 @@ struct sof_ipc_dai_hda_params {
 	/* TODO */
 } __attribute__((packed));
 
-/* PDM controller configuration parameters */
+/* DMIC Configuration Request - SOF_IPC_DAI_DMIC_CONFIG */
+
+/* This struct is defined per 2ch PDM controller available in the platform.
+ * Normally it is sufficient to set the used microphone specific enables to 1
+ * and keep other parameters as zero. The customizations are:
+ *
+ * 1. If a device mixes different microphones types with different polarity
+ * and/or the absolute polarity matters the PCM signal from a microphone
+ * can be inverted with the controls.
+ *
+ * 2. If the microphones in a stereo pair do not appear in captured stream
+ * in desired order due to board schematics choises they can be swapped with
+ * the clk_edge parameter.
+ *
+ * 3. If PDM bit errors are seen in capture (poor quality) the skew parameter
+ * that delays the sampling time of data by half cycles of DMIC source clock
+ * can be tried for improvement. However there is no guarantee for this to fix
+ * data integrity problems.
+ */
 struct sof_ipc_dai_dmic_pdm_ctrl {
-	uint16_t id; /* pdm controller id */
+	uint16_t id; /* PDM controller ID */
 	uint16_t enable_mic_a; /* Use A (left) channel mic (0 or 1)*/
 	uint16_t enable_mic_b; /* Use B (right) channel mic (0 or 1)*/
 	uint16_t polarity_mic_a; /* Optionally invert mic A signal (0 or 1) */
@@ -273,15 +293,35 @@ struct sof_ipc_dai_dmic_pdm_ctrl {
 	uint16_t pad; /* Make sure the total size is 4 bytes aligned */
 } __attribute__((packed));
 
-/* DMIC Configuration Request - SOF_IPC_DAI_DMIC_CONFIG */
+/* This struct contains the global settings for all 2ch PDM controllers. The
+ * version number used in configuration data is checked vs. version used by
+ * device driver src/drivers/dmic.c need to match. It is incremented from
+ * initial value 1 if updates done for the to driver would alter the operation
+ * of the microhone.
+ *
+ * Note: The microphone clock (pdmclk_min, pdmclk_max, duty_min, duty_max)
+ * parameters need to be set as defined in microphone data sheet. E.g. clock
+ * range 1.0 - 3.2 MHz is usually supported microphones. Some microphones are
+ * multi-mode capable and there may be denied mic clock frequencies between
+ * the modes. In such case set the clock range limits of the desired mode to
+ * avoid the driver to set clock to an illegal rate.
+ *
+ * The duty cycle could be set to 48-52% if not known. Generally these
+ * parameters can be altered within data sheet specified limits to match
+ * required audio application performance power.
+ *
+ * The microphone clock needs to be usually about 50-80 times the used audio
+ * sample rate. With highest sample rates above 48 kHz this can relaxed
+ * somewhat.
+ */
 struct sof_ipc_dai_dmic_params {
-	uint32_t driver_ipc_version;
+	uint32_t driver_ipc_version; /* Version (1..N) */
 	uint32_t pdmclk_min; /* Minimum microphone clock in Hz (100000..N) */
 	uint32_t pdmclk_max; /* Maximum microphone clock in Hz (min...N) */
 	uint32_t fifo_fs_a;  /* FIFO A sample rate in Hz (8000..96000) */
 	uint32_t fifo_fs_b;  /* FIFO B sample rate in Hz (8000..96000) */
-	uint16_t fifo_bits_a; /* FIFO A word length (16 or 24) */
-	uint16_t fifo_bits_b; /* FIFO B word length (16 or 24) */
+	uint16_t fifo_bits_a; /* FIFO A word length (16 or 32) */
+	uint16_t fifo_bits_b; /* FIFO B word length (16 or 32) */
 	uint16_t duty_min;    /* Min. mic clock duty cycle in % (20..80) */
 	uint16_t duty_max;    /* Max. mic clock duty cycle in % (min..80) */
 	uint32_t num_pdm_active; /* Number of active pdm controllers */
@@ -642,8 +682,8 @@ struct sof_ipc_comp_volume {
 	struct sof_ipc_comp comp;
 	struct sof_ipc_comp_config config;
 	uint32_t channels;
-	int32_t min_value;
-	int32_t max_value;
+	uint32_t min_value;
+	uint32_t max_value;
 	enum sof_volume_ramp ramp;
 	uint32_t initial_ramp;	/* ramp space in ms */
 }  __attribute__((packed));
@@ -668,6 +708,7 @@ struct sof_ipc_comp_mux {
 struct sof_ipc_comp_tone {
 	struct sof_ipc_comp comp;
 	struct sof_ipc_comp_config config;
+	int32_t sample_rate;
 	int32_t frequency;
 	int32_t amplitude;
 	int32_t freq_mult;
