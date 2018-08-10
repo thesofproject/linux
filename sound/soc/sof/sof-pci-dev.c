@@ -352,7 +352,7 @@ static struct pci_driver snd_sof_pci_driver = {
 	.remove = sof_pci_remove,
 	.shutdown = sof_pci_shutdown,
 	.driver = {
-		.pm = &sof_pci_pm,
+//		.pm = &sof_pci_pm,
 	},
 };
 module_pci_driver(snd_sof_pci_driver);
