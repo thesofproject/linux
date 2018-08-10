@@ -359,6 +359,10 @@ struct snd_sof_dev {
 	u32 host_offset;
 	bool dtrace_is_enabled;
 	bool dtrace_error;
+	struct sof_ipc_trace_comp *info_comp;
+
+	struct snd_sof_dfsentry_buf *tracefs;
+	struct snd_sof_dfsentry_buf *trace_levelfs;
 
 	void *private;			/* core does not touch this */
 };
