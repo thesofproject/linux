@@ -525,12 +525,6 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	}
 
 	/*
-	 * clear TCSEL to clear playback on some HD Audio
-	 * codecs. PCI TCSEL is defined in the Intel manuals.
-	 */
-	snd_sof_pci_update_bits(sdev, PCI_TCSEL, 0x07, 0);
-
-	/*
 	 * register our IRQ
 	 * let's try to enable msi firstly
 	 * if it fails, use legacy interrupt mode
@@ -575,6 +569,13 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 #endif
 	pci_set_master(pci);
 	synchronize_irq(pci->irq);
+
+	/*
+	 * clear TCSEL to clear playback on some HD Audio
+	 * codecs. PCI TCSEL is defined in the Intel manuals.
+	 */
+	snd_sof_pci_update_bits(sdev, PCI_TCSEL, 0x07, 0);
+
 
 	/* init HDA capabilities */
 	ret = hda_init_caps(sdev);
