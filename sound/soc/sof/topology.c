@@ -1920,8 +1920,12 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 	if (!source_swidget) {
 		/* don't send any routes to DSP that include a driver PCM */
 		spcm = snd_sof_find_spcm_name(sdev, (char *)route->source);
-		if (spcm)
-			return spcm_bind(scomp, spcm, route->sink);
+		if (spcm) {
+			ret = spcm_bind(scomp, spcm, route->sink);
+			if (ret < 0)
+				goto err;
+			return 0;
+		}
 
 		dev_err(sdev->dev, "error: source %s not found\n",
 			route->source);
@@ -1936,8 +1940,12 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 	if (!sink_swidget) {
 		/* don't send any routes to DSP that include a driver PCM */
 		spcm = snd_sof_find_spcm_name(sdev, (char *)route->sink);
-		if (spcm)
-			return spcm_bind(scomp, spcm, route->source);
+		if (spcm) {
+			ret = spcm_bind(scomp, spcm, route->source);
+			if (ret < 0)
+				goto err;
+			return 0;
+		}
 
 		dev_err(sdev->dev, "error: sink %s not found\n",
 			route->sink);
