@@ -20,11 +20,15 @@
 #include <uapi/sound/sof-ipc.h>
 #include "sof-priv.h"
 
+#define DRV_NAME	"sof-audio"
+
 static int sof_compressed_open(struct snd_compr_stream *cstream)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
+	struct snd_soc_component *component =
+		snd_soc_rtdcom_lookup(rtd, DRV_NAME);
 	struct snd_sof_dev *sdev =
-		snd_soc_platform_get_drvdata(rtd->platform);
+		snd_soc_component_get_drvdata(component);
 	struct snd_sof_pcm *spcm = rtd->sof;
 
 	mutex_lock(&spcm->mutex);
@@ -36,8 +40,10 @@ static int sof_compressed_open(struct snd_compr_stream *cstream)
 static int sof_compressed_free(struct snd_compr_stream *cstream)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
+	struct snd_soc_component *component =
+		snd_soc_rtdcom_lookup(rtd, DRV_NAME);
 	struct snd_sof_dev *sdev =
-		snd_soc_platform_get_drvdata(rtd->platform);
+		snd_soc_component_get_drvdata(component);
 	struct snd_sof_pcm *spcm = rtd->sof;
 
 	mutex_lock(&spcm->mutex);
@@ -62,8 +68,10 @@ static int sof_compressed_set_params(struct snd_compr_stream *cstream,
 				     struct snd_compr_params *params)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
+	struct snd_soc_component *component =
+		snd_soc_rtdcom_lookup(rtd, DRV_NAME);
 	struct snd_sof_dev *sdev =
-		snd_soc_platform_get_drvdata(rtd->platform);
+		snd_soc_component_get_drvdata(component);
 
 	switch (params->codec.id) {
 	case SND_AUDIOCODEC_VORBIS:
@@ -80,8 +88,10 @@ static int sof_compressed_set_params(struct snd_compr_stream *cstream,
 static int sof_compressed_trigger(struct snd_compr_stream *cstream, int cmd)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
+	struct snd_soc_component *component =
+		snd_soc_rtdcom_lookup(rtd, DRV_NAME);
 	struct snd_sof_dev *sdev =
-		snd_soc_platform_get_drvdata(rtd->platform);
+		snd_soc_component_get_drvdata(component);
 	struct snd_sof_pcm *spcm = rtd->sof;
 	struct sof_ipc_stream stream;
 	struct sof_ipc_reply reply;
@@ -118,8 +128,10 @@ static int sof_compressed_pointer(struct snd_compr_stream *cstream,
 				  struct snd_compr_tstamp *tstamp)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
+	struct snd_soc_component *component =
+		snd_soc_rtdcom_lookup(rtd, DRV_NAME);
 	struct snd_sof_dev *sdev =
-		snd_soc_platform_get_drvdata(rtd->platform);
+		snd_soc_component_get_drvdata(component);
 	struct sof_ipc_stream_posn posn;
 	struct snd_sof_pcm *spcm = rtd->sof;
 

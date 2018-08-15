@@ -294,8 +294,7 @@ struct snd_sof_dev {
 	struct pci_dev *pci;
 
 	/* ASoC components */
-	struct snd_soc_platform_driver plat_drv;
-	const struct snd_soc_component_driver *cmpnt_drv;
+	struct snd_soc_component_driver plat_drv;
 
 	/* DSP firmware boot */
 	wait_queue_head_t boot_wait;
@@ -383,7 +382,6 @@ int snd_sof_suspend(struct device *dev);
 int snd_sof_suspend_late(struct device *dev);
 
 void snd_sof_new_platform_drv(struct snd_sof_dev *sdev);
-void snd_sof_new_dai_drv(struct snd_sof_dev *sdev);
 
 int snd_sof_create_page_table(struct snd_sof_dev *sdev,
 			      struct snd_dma_buffer *dmab,
