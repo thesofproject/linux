@@ -1346,7 +1346,8 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 
 	dev_dbg(sdev->dev, "tplg: ready widget id %d pipe %d type %d name : %s stream %s\n",
 		swidget->comp_id, index, swidget->id, tw->name,
-		tw->sname ? tw->sname : "none");
+		strnlen(tw->sname, SNDRV_CTL_ELEM_ID_NAME_MAXLEN) > 0
+			? tw->sname : "none");
 
 	/* handle any special case widgets */
 	switch (w->id) {
@@ -1419,7 +1420,8 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 		dev_err(sdev->dev,
 			"error: DSP failed to add widget id %d type %d name : %s stream %s reply %d\n",
 			tw->shift, swidget->id, tw->name,
-			tw->sname ? tw->sname : "none", reply.rhdr.error);
+			strnlen(tw->sname, SNDRV_CTL_ELEM_ID_NAME_MAXLEN) > 0
+				? tw->sname : "none", reply.rhdr.error);
 		kfree(swidget);
 		return ret;
 	}
