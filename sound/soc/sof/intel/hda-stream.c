@@ -530,7 +530,9 @@ irqreturn_t hda_dsp_stream_threaded_handler(int irq, void *context)
 			    !s->running ||
 			    (sd_status & SOF_HDA_CL_DMA_SD_INT_MASK) == 0)
 				continue;
+#ifdef USE_POS_BUF
 			snd_pcm_period_elapsed(s->substream);
+#endif
 
 		}
 	}

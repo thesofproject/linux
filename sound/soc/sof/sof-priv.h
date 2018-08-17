@@ -26,6 +26,8 @@
 #include <sound/compress_driver.h>
 #include "../../pci/hda/hda_codec.h"
 
+//#define USE_POS_BUF
+
 /* debug flags */
 #define SOF_DBG_REGS	BIT(1)
 #define SOF_DBG_MBOX	BIT(2)

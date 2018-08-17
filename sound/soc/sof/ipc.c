@@ -537,7 +537,9 @@ static void ipc_period_elapsed(struct snd_sof_dev *sdev, u32 msg_id)
 		posn.host_posn, posn.dai_posn, posn.wallclock);
 
 	memcpy(&spcm->stream[direction].posn, &posn, sizeof(posn));
+#ifndef USE_POS_BUF
 	snd_pcm_period_elapsed(spcm->stream[direction].substream);
+#endif
 }
 
 /* DSP notifies host of an XRUN within FW */
