@@ -303,8 +303,9 @@ static void ipc_tx_next_msg(struct work_struct *work)
 		container_of(work, struct snd_sof_ipc, tx_kwork);
 	struct snd_sof_dev *sdev = ipc->sdev;
 	struct snd_sof_ipc_msg *msg;
+	unsigned long flags;
 
-	spin_lock_irq(&sdev->ipc_lock);
+	spin_lock_irqsave(&sdev->ipc_lock, flags);
 
 	/* send message if HW read and message in TX list */
 	if (list_empty(&ipc->tx_list) || !snd_sof_dsp_is_ready(sdev))
@@ -317,7 +318,7 @@ static void ipc_tx_next_msg(struct work_struct *work)
 
 	ipc_log_header(sdev->dev, "ipc tx", msg->header);
 out:
-	spin_unlock_irq(&sdev->ipc_lock);
+	spin_unlock_irqrestore(&sdev->ipc_lock, flags);
 }
 
 /* find original TX message from DSP reply */
