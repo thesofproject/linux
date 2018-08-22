@@ -523,7 +523,6 @@ static int skl_find_machine(struct skl *skl, void *driver_data)
 
 static int skl_machine_device_register(struct skl *skl)
 {
-	struct hdac_bus *bus = skl_to_bus(skl);
 	struct snd_soc_acpi_mach *mach = skl->mach;
 	struct hdac_bus *bus = skl_to_bus(skl);
 	struct skl_machine_pdata *pdata;
