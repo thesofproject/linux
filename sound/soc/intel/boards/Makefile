@@ -50,3 +50,4 @@ obj-$(CONFIG_SND_SOC_INTEL_SKL_NAU88L25_SSM4567_MACH) += snd-soc-skl_nau88l25_ss
 obj-$(CONFIG_SND_SOC_INTEL_SKL_HDA_DSP_GENERIC_MACH) += snd-soc-skl_hda_dsp.o
 obj-$(CONFIG_SND_SOC_INTEL_CNL_RT274_MACH) += snd-soc-cnl-rt274.o
 obj-$(CONFIG_SND_SOC_INTEL_CNL_MAX98373_MACH) += snd-soc-cnl-max98373.o
+obj-$(CONFIG_SND_SOC_INTEL_SKL_HDA_DSP_GENERIC_MACH) += snd-soc-skl_hda_dsp.o
