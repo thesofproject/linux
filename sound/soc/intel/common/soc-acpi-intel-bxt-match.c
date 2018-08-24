@@ -17,8 +17,11 @@ static struct snd_soc_acpi_codecs bxt_codecs = {
 struct snd_soc_acpi_mach snd_soc_acpi_intel_bxt_machines[] = {
 	{
 		.id = "INT343A",
-		.drv_name = "bxt_alc298s_i2s",
-		.fw_filename = "intel/dsp_fw_bxtn.bin",
+//		.drv_name = "bxt_alc298s_i2s",
+//		.fw_filename = "intel/dsp_fw_bxtn.bin",
+		.drv_name = "bxt_tdf8532",
+		.sof_fw_filename = "intel/sof-apl.ri",
+		.sof_tplg_filename = "intel/sof-apl-tdf8532.tplg",
 	},
 	{
 		.id = "DLGS7219",

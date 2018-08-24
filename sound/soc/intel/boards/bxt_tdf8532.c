@@ -42,7 +42,8 @@ static const struct snd_soc_dapm_widget broxton_tdf8532_widgets[] = {
 };
 
 static const struct snd_soc_dapm_route broxton_tdf8532_map[] = {
-#ifndef CONFIG_SND_SOC_SOF_FORCE_LEGACY_HDA
+//#ifndef CONFIG_SND_SOC_SOF_FORCE_LEGACY_HDA
+#if 1
 	/* Speaker BE connections */
 	{ "Speaker", NULL, "ssp4 Tx"},
 	{ "ssp4 Tx", NULL, "codec0_out"},
@@ -80,7 +81,7 @@ static const struct snd_soc_dapm_route broxton_tdf8532_map[] = {
 	{ "ModemUl", NULL, "ssp3 Tx"},
 	{ "ssp3 Tx", NULL, "Modem_ssp3_out"},
 
-#else
+//#else
 	{ "hifi3", NULL, "iDisp3 Tx"},
 	{ "hifi2", NULL, "iDisp2 Tx"},
 	{ "hifi1", NULL, "iDisp1 Tx"},
@@ -158,7 +159,8 @@ static int broxton_hdmi_init(struct snd_soc_pcm_runtime *rtd)
 
 /* broxton digital audio interface glue - connects codec <--> CPU */
 static struct snd_soc_dai_link broxton_tdf8532_dais[] = {
-#ifndef CONFIG_SND_SOC_SOF_FORCE_LEGACY_HDA
+//#ifndef CONFIG_SND_SOC_SOF_FORCE_LEGACY_HDA
+#if 0
 	/* Probe DAI links*/
 	{
 		.name = "Bxt Compress Probe playback",
@@ -263,8 +265,10 @@ static struct snd_soc_dai_link broxton_tdf8532_dais[] = {
 		.name = "SSP4-Codec",
 		.id = 4,
 		.cpu_dai_name = "SSP4 Pin",
-		.codec_name = "i2c-INT34C3:00",
-		.codec_dai_name = "tdf8532-hifi",
+//		.codec_name = "i2c-INT34C3:00",
+//		.codec_dai_name = "tdf8532-hifi",
+		.codec_name = "snd-soc-dummy",
+		.codec_dai_name = "snd-soc-dummy-dai",
 		.platform_name = "0000:00:0e.0",
 		.ignore_suspend = 1,
 		.dpcm_playback = 1,
@@ -290,6 +294,7 @@ static struct snd_soc_dai_link broxton_tdf8532_dais[] = {
 		.codec_name = "ehdaudio0D2",
 		.codec_dai_name = "intel-hdmi-hifi1",
 		.platform_name = "0000:00:0e.0",
+			.init = broxton_hdmi_init,
 		.dpcm_playback = 1,
 		.no_pcm = 1,
 	},
@@ -300,6 +305,7 @@ static struct snd_soc_dai_link broxton_tdf8532_dais[] = {
 		.codec_name = "ehdaudio0D2",
 		.codec_dai_name = "intel-hdmi-hifi2",
 		.platform_name = "0000:00:0e.0",
+			.init = broxton_hdmi_init,
 		.dpcm_playback = 1,
 		.no_pcm = 1,
 	},
@@ -310,6 +316,7 @@ static struct snd_soc_dai_link broxton_tdf8532_dais[] = {
 		.codec_name = "ehdaudio0D2",
 		.codec_dai_name = "intel-hdmi-hifi3",
 		.platform_name = "0000:00:0e.0",
+			.init = broxton_hdmi_init,
 		.dpcm_playback = 1,
 		.no_pcm = 1,
 	},
@@ -317,7 +324,7 @@ static struct snd_soc_dai_link broxton_tdf8532_dais[] = {
 	/* Back End DAI links */
 	{
 		.name = "iDisp1",
-		.id = 0,
+		.id = 6,
 		.cpu_dai_name = "iDisp1 Pin",
 		.codec_name = "ehdaudio0D2",
 		.codec_dai_name = "intel-hdmi-hifi1",
@@ -328,7 +335,7 @@ static struct snd_soc_dai_link broxton_tdf8532_dais[] = {
 	},
 	{
 		.name = "iDisp2",
-		.id = 1,
+		.id = 7,
 		.cpu_dai_name = "iDisp2 Pin",
 		.codec_name = "ehdaudio0D2",
 		.codec_dai_name = "intel-hdmi-hifi2",
@@ -339,7 +346,7 @@ static struct snd_soc_dai_link broxton_tdf8532_dais[] = {
 	},
 	{
 		.name = "iDisp3",
-		.id = 2,
+		.id = 8,
 		.cpu_dai_name = "iDisp3 Pin",
 		.codec_name = "ehdaudio0D2",
 		.codec_dai_name = "intel-hdmi-hifi3",
