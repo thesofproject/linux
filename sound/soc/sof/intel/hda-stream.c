@@ -464,16 +464,15 @@ int hda_dsp_stream_hw_params(struct snd_sof_dev *sdev,
 
 irqreturn_t hda_dsp_stream_interrupt(int irq, void *context)
 {
-	struct snd_sof_dev *sdev = (struct snd_sof_dev *)context;
-	struct hdac_bus *bus = sof_to_bus(sdev);
+	struct hdac_bus *bus = (struct hdac_bus *)context;
 	u32 status;
 
-	if (!pm_runtime_active(sdev->dev))
+	if (!pm_runtime_active(bus->dev))
 		return IRQ_NONE;
 
 	spin_lock(&bus->reg_lock);
 
-	status = snd_sof_dsp_read(sdev, HDA_DSP_HDA_BAR, SOF_HDA_INTSTS);
+	status = snd_hdac_chip_readl(bus, INTSTS);
 	if (status == 0 || status == 0xffffffff) {
 		spin_unlock(&bus->reg_lock);
 		return IRQ_NONE;
@@ -481,54 +480,40 @@ irqreturn_t hda_dsp_stream_interrupt(int irq, void *context)
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
 	/* clear rirb int */
-	status = snd_sof_dsp_read(sdev, HDA_DSP_HDA_BAR, SOF_HDA_RIRBSTS);
+	status = snd_hdac_chip_readb(bus, RIRBSTS);
 	if (status & RIRB_INT_MASK) {
 		if (status & RIRB_INT_RESPONSE)
 			snd_hdac_bus_update_rirb(bus);
-		snd_sof_dsp_write(sdev, HDA_DSP_HDA_BAR, SOF_HDA_RIRBSTS,
-				  RIRB_INT_MASK);
+		snd_hdac_chip_writeb(bus, RIRBSTS, RIRB_INT_MASK);
 	}
 #endif
 
 	spin_unlock(&bus->reg_lock);
 
-	return snd_sof_dsp_read(sdev, HDA_DSP_HDA_BAR, SOF_HDA_INTSTS)
-		& SOF_HDA_INT_ALL_STREAM ? IRQ_WAKE_THREAD : IRQ_HANDLED;
+	return snd_hdac_chip_readl(bus, INTSTS) ? IRQ_WAKE_THREAD : IRQ_HANDLED;
 }
 
 irqreturn_t hda_dsp_stream_threaded_handler(int irq, void *context)
 {
-	struct snd_sof_dev *sdev = (struct snd_sof_dev *)context;
-	struct hdac_bus *bus = sof_to_bus(sdev);
+	struct hdac_bus *bus = (struct hdac_bus *)context;
 	struct hdac_stream *s;
-	int sd_offset;
-	//struct sof_intel_hda_dev *hdev = sdev->hda;
-	u32 status = snd_sof_dsp_read(sdev, HDA_DSP_HDA_BAR, SOF_HDA_INTSTS);
+	u32 status = snd_hdac_chip_readl(bus, INTSTS);
 	u32 sd_status;
 
 	/* check streams */
 	list_for_each_entry(s, &bus->stream_list, list) {
 		if (status & (1 << s->index)
-			&& !s->opened) {
-			sd_offset = SOF_STREAM_SD_OFFSET(s);
-			sd_status =
-				snd_sof_dsp_read(sdev, HDA_DSP_HDA_BAR,
-						 sd_offset +
-						 SOF_HDA_ADSP_REG_CL_SD_STS) &
-						 0xff;
+			&& s->opened) {
+			sd_status = snd_hdac_stream_readb(s, SD_STS);
 
-			dev_dbg(sdev->dev, "stream %d status 0x%x\n",
+			dev_dbg(bus->dev, "stream %d status 0x%x\n",
 				s->index, sd_status);
 
-			snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR,
-						sd_offset +
-						SOF_HDA_ADSP_REG_CL_SD_STS,
-						SOF_HDA_CL_DMA_SD_INT_MASK,
-						SOF_HDA_CL_DMA_SD_INT_MASK);
+			snd_hdac_stream_writeb(s, SD_STS, SD_INT_MASK);
 
 			if (!s->substream ||
 			    !s->running ||
-			    (sd_status & SOF_HDA_CL_DMA_SD_INT_MASK) == 0)
+			    (sd_status & SOF_HDA_CL_DMA_SD_INT_COMPLETE) == 0)
 				continue;
 #ifdef USE_POS_BUF
 			snd_pcm_period_elapsed(s->substream);
@@ -631,6 +616,7 @@ int hda_dsp_stream_init(struct snd_sof_dev *sdev)
 
 		hstream = &stream->hstream;
 		hstream->bus = bus;
+		hstream->sd_int_sta_mask = 1 << i;
 		hstream->index = i;
 		sd_offset = SOF_STREAM_SD_OFFSET(hstream);
 		hstream->sd_addr = sdev->bar[HDA_DSP_HDA_BAR] + sd_offset;
@@ -689,6 +675,7 @@ int hda_dsp_stream_init(struct snd_sof_dev *sdev)
 
 		hstream = &stream->hstream;
 		hstream->bus = bus;
+		hstream->sd_int_sta_mask = 1 << i;
 		hstream->index = i;
 		sd_offset = SOF_STREAM_SD_OFFSET(hstream);
 		hstream->sd_addr = sdev->bar[HDA_DSP_HDA_BAR] + sd_offset;
