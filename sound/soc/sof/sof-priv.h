@@ -26,6 +26,8 @@
 #include <sound/compress_driver.h>
 #include "../../pci/hda/hda_codec.h"
 
+//#define USE_POS_BUF
+
 /* debug flags */
 #define SOF_DBG_REGS	BIT(1)
 #define SOF_DBG_MBOX	BIT(2)
@@ -139,9 +141,13 @@ struct snd_sof_dsp_ops {
 	int (*pcm_trigger)(struct snd_sof_dev *sdev,
 			   struct snd_pcm_substream *substream, int cmd);
 
+	/* host stream pointer */
+	snd_pcm_uframes_t (*pcm_pointer)(struct snd_sof_dev *sdev,
+			   struct snd_pcm_substream *substream);
+
 	/* FW loading */
 	int (*load_firmware)(struct snd_sof_dev *sof_dev,
-			     const struct firmware *fw, bool first_boot);
+			     bool first_boot);
 	int (*load_module)(struct snd_sof_dev *sof_dev,
 			   struct snd_sof_mod_hdr *hdr);
 	int (*fw_ready)(struct snd_sof_dev *sdev, u32 msg_id);
@@ -397,9 +403,9 @@ int snd_sof_create_page_table(struct snd_sof_dev *sdev,
  * Firmware loading.
  */
 int snd_sof_load_firmware(struct snd_sof_dev *sdev,
-			  const struct firmware *fw, bool first_boot);
+			  bool first_boot);
 int snd_sof_load_firmware_memcpy(struct snd_sof_dev *sdev,
-				 const struct firmware *fw, bool first_boot);
+				 bool first_boot);
 int snd_sof_run_firmware(struct snd_sof_dev *sdev);
 int snd_sof_parse_module_memcpy(struct snd_sof_dev *sdev,
 				struct snd_sof_mod_hdr *module);
@@ -522,4 +528,9 @@ static inline void sof_oops(struct snd_sof_dev *sdev, void *oops)
 }
 
 extern const struct sof_arch_ops sof_xtensa_arch_ops;
+
+/*
+ * Utilities
+ */
+int sof_create_platform_device(struct sof_platform_priv *priv);
 #endif

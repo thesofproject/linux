@@ -314,7 +314,11 @@
 	(HDA_DSP_BDL_SIZE / sizeof(struct sof_intel_dsp_bdl))
 
 /* Number of DAIs */
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
 #define SOF_SKL_NUM_DAIS		14
+#else
+#define SOF_SKL_NUM_DAIS		8
+#endif
 
 struct sof_intel_dsp_bdl {
 	u32 addr_l;
@@ -408,6 +412,8 @@ int hda_dsp_pcm_hw_params(struct snd_sof_dev *sdev,
 			  struct snd_pcm_hw_params *params);
 int hda_dsp_pcm_trigger(struct snd_sof_dev *sdev,
 			struct snd_pcm_substream *substream, int cmd);
+snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_sof_dev *sdev,
+			struct snd_pcm_substream *substream);
 
 /*
  * DSP Stream Operations.
@@ -458,8 +464,7 @@ int hda_dsp_ipc_cmd_done(struct snd_sof_dev *sdev, int dir);
 /*
  * DSP Code loader.
  */
-int hda_dsp_cl_load_fw(struct snd_sof_dev *sdev, const struct firmware *fw,
-		       bool first_boot);
+int hda_dsp_cl_load_fw(struct snd_sof_dev *sdev, bool first_boot);
 int hda_dsp_cl_boot_firmware(struct snd_sof_dev *sdev);
 
 /*

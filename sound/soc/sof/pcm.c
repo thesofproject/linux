@@ -330,6 +330,12 @@ static snd_pcm_uframes_t sof_pcm_pointer(struct snd_pcm_substream *substream)
 	if (rtd->dai_link->no_pcm)
 		return 0;
 
+#ifdef USE_POS_BUF
+	/* if have dsp ops pointer callback, use that directly */
+	if (sdev->ops && sdev->ops->pcm_pointer)
+		return sdev->ops->pcm_pointer(sdev, substream);
+#endif
+
 	/* read position from DSP */
 	host = bytes_to_frames(substream->runtime,
 			       spcm->stream[substream->stream].posn.host_posn);
@@ -338,7 +344,6 @@ static snd_pcm_uframes_t sof_pcm_pointer(struct snd_pcm_substream *substream)
 
 	dev_dbg(sdev->dev, "PCM: stream %d dir %d DMA position %lu DAI position %lu\n",
 		spcm->pcm.pcm_id, substream->stream, host, dai);
-
 	return host;
 }
 
@@ -630,7 +635,8 @@ static int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 		/* TODO: add any other DMIC specific fixups */
 		break;
 	case SOF_DAI_INTEL_HDA:
-		/* fallthrough */
+		/* do nothing for HDA dai_link */
+		break;
 	default:
 		dev_err(sdev->dev, "error: invalid DAI type %d\n",
 			dai->dai_config.type);

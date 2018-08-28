@@ -525,12 +525,6 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	}
 
 	/*
-	 * clear TCSEL to clear playback on some HD Audio
-	 * codecs. PCI TCSEL is defined in the Intel manuals.
-	 */
-	snd_sof_pci_update_bits(sdev, PCI_TCSEL, 0x07, 0);
-
-	/*
 	 * register our IRQ
 	 * let's try to enable msi firstly
 	 * if it fails, use legacy interrupt mode
@@ -551,16 +545,19 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 		sdev->ipc_irq = sdev->hda->irq;
 	}
 
+	bus = sof_to_bus(sdev);
 	dev_dbg(sdev->dev, "using HDA IRQ %d\n", sdev->hda->irq);
 	ret = request_threaded_irq(sdev->hda->irq, hda_dsp_stream_interrupt,
 				   hda_dsp_stream_threaded_handler,
-				   IRQF_SHARED, "AudioHDA", sdev);
+				   IRQF_SHARED, "AudioHDA", bus);
 	if (ret < 0) {
 		dev_err(sdev->dev, "error: failed to register HDA IRQ %d\n",
 			sdev->hda->irq);
 		goto free_streams;
 	}
 
+/* don't need ipc handler for legacy HDA mode */
+#ifndef CONFIG_SND_SOC_SOF_FORCE_LEGACY_HDA
 	dev_dbg(sdev->dev, "using IPC IRQ %d\n", sdev->ipc_irq);
 	ret = request_threaded_irq(sdev->ipc_irq, hda_dsp_ipc_irq_handler,
 				   chip->ops->irq_thread, IRQF_SHARED,
@@ -570,9 +567,16 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 			sdev->ipc_irq);
 		goto free_hda_irq;
 	}
-
+#endif
 	pci_set_master(pci);
 	synchronize_irq(pci->irq);
+
+	/*
+	 * clear TCSEL to clear playback on some HD Audio
+	 * codecs. PCI TCSEL is defined in the Intel manuals.
+	 */
+	snd_sof_pci_update_bits(sdev, PCI_TCSEL, 0x07, 0);
+
 
 	/* init HDA capabilities */
 	ret = hda_init_caps(sdev);
@@ -587,7 +591,6 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	}
 
 	/* clear stream status */
-	bus = sof_to_bus(sdev);
 	list_for_each_entry(stream, &bus->stream_list, list) {
 		sd_offset = SOF_STREAM_SD_OFFSET(stream);
 		snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR,
@@ -635,7 +638,7 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 free_ipc_irq:
 	free_irq(sdev->ipc_irq, sdev);
 free_hda_irq:
-	free_irq(sdev->hda->irq, sdev);
+	free_irq(sdev->hda->irq, bus);
 	pci_free_irq_vectors(pci);
 free_streams:
 	hda_dsp_stream_free(sdev);
@@ -648,6 +651,7 @@ err:
 
 int hda_dsp_remove(struct snd_sof_dev *sdev)
 {
+	struct hdac_bus *bus = sof_to_bus(sdev);
 	struct pci_dev *pci = sdev->pci;
 	const struct sof_intel_dsp_desc *chip = sdev->hda->desc;
 
@@ -668,7 +672,7 @@ int hda_dsp_remove(struct snd_sof_dev *sdev)
 				SOF_HDA_PPCTL_GPROCEN, 0);
 
 	free_irq(sdev->ipc_irq, sdev);
-	free_irq(sdev->pci->irq, sdev);
+	free_irq(sdev->pci->irq, bus);
 	pci_free_irq_vectors(pci);
 
 	hda_dsp_stream_free(sdev);
