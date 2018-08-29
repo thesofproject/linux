@@ -45,22 +45,75 @@ void *get_sof_dev(void)
 	return NULL;
 }
 
-/* To be implemented later for sof related */
 static int sof_virtio_open(struct file *f, void *data)
 {
+	struct snd_sof_dev *sdev = (struct snd_sof_dev *)data;
+	struct sof_vbe *vbe;
+	int ret;
+
+	ret = sof_vbe_register(sdev, &vbe);
+	if (ret)
+		return ret;
+
+	/*
+	 * link to sdev->vbe_list
+	 * Maybe virtio_miscdev managing the list is more reasonable.
+	 * Let's use sdev to manage the FE audios now.
+	 */
+	list_add(&vbe->list, &sdev->vbe_list);
+	f->private_data = vbe;
+
 	return 0;
 }
 
-/* To be implemented later for sof related */
 static long sof_virtio_ioctl(struct file *f, void *data, unsigned int ioctl,
 			     unsigned long arg)
 {
-	return 0;
+	struct sof_vbe *vbe = f->private_data;
+	void __user *argp = (void __user *)arg;
+	int ret;
+
+	switch (ioctl) {
+	case VBS_SET_DEV:
+		ret = virtio_vqs_ioctl(&vbe->dev_info, ioctl, argp);
+		if (!ret)
+			vbe->vmid = vbe->dev_info._ctx.vmid;
+		break;
+	case VBS_SET_VQ:
+		ret = virtio_vqs_ioctl(&vbe->dev_info, ioctl, argp);
+		if (ret)
+			return ret;
+
+		/*
+		 * Maybe we should move sof_register_vhm_client()
+		 * in VBS_SET_DEV
+		 */
+		ret = sof_vbe_register_client(vbe);
+		if (ret)
+			return ret;
+		/*
+		 * TODO: load tplg and send to FE here
+		 *
+		 *  The better method is FE driver send FE-tplg id
+		 *  and request FE-tplg.
+		 *  Then BE loads the corresponding tplg based on
+		 *  the FE-tplg id and send to FE driver.
+		 */
+		break;
+	default:
+		return -ENOIOCTLCMD;
+	}
+
+	return ret;
 }
 
-/* To be implemented later for sof related */
 static int sof_virtio_release(struct file *f, void *data)
 {
+	struct sof_vbe *vbe = f->private_data;
+
+	list_del(&vbe->list);
+	devm_kfree(vbe->sdev->dev, vbe);
+	f->private_data = NULL;
 	return 0;
 }
 
