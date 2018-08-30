@@ -33,6 +33,10 @@
 #include "ops.h"
 #include "virtio-miscdev.h"
 
+/* TODO: move the below macros to the headers */
+#define iGS(x) ((x >> SOF_GLB_TYPE_SHIFT) & 0xf)
+#define iCS(x) ((x >> SOF_CMD_TYPE_SHIFT) & 0xfff)
+
 /* find client from client ID */
 static struct sof_vbe_client *vbe_client_find(struct snd_sof_dev *sdev,
 					      int client_id)
@@ -50,13 +54,194 @@ static struct sof_vbe_client *vbe_client_find(struct snd_sof_dev *sdev,
 	return NULL;
 }
 
+static int sof_virtio_send_ipc(struct snd_sof_dev *sdev, void *ipc_data,
+			       void *reply_data, size_t count,
+			       size_t reply_size)
+{
+	struct snd_sof_ipc *ipc = sdev->ipc;
+	struct sof_ipc_hdr *hdr = (struct sof_ipc_hdr *)ipc_data;
+
+	return sof_ipc_tx_message(ipc, hdr->cmd, ipc_data, count,
+				  reply_data, reply_size);
+}
+
 /* To be implemented later */
 static void sbe_ipc_fe_not_reply_get(struct sof_vbe *vbe, int vq_idx)
 {}
 
-/* To be implemented later */
+/* validate component IPC */
+static int sbe_ipc_comp(struct snd_sof_dev *sdev, int vm_id,
+			struct sof_ipc_hdr *hdr)
+{
+	/*TODO validate host comp id range based on vm_id */
+
+	/* Nothing to be done */
+	return 0;
+}
+
+/* TODO: to be implement later */
+static int sbe_ipc_stream(struct snd_sof_dev *sdev, int vm_id,
+			  struct sof_ipc_hdr *hdr)
+{
+	return 0;
+}
+
+/* TODO: to be implement later */
+static int sbe_ipc_tplg(struct snd_sof_dev *sdev, int vm_id,
+			struct sof_ipc_hdr *hdr)
+{
+	return 0;
+}
+
+/* TODO: to be implement later */
+static int sbe_ipc_post(struct snd_sof_dev *sdev,
+			void *ipc_buf, void *reply_buf)
+{
+	return 0;
+}
+
+/*
+ * TODO: The guest base ID is passed to guest at boot.
+ * TODO rename function name, not submit but consume
+ * TODO add topology ipc support and manage the multiple pcm and vms
+ */
+static int sbe_ipc_fwd(struct snd_sof_dev *sdev, int vm_id,
+		       void *ipc_buf, void *reply_buf,
+		       size_t count, size_t reply_sz)
+{
+	struct sof_ipc_hdr *hdr;
+	u32 type;
+	int ret = 0;
+
+	/* validate IPC */
+	if (!count) {
+		dev_err(sdev->dev, "error: guest IPC size is 0\n");
+		return -EINVAL;
+	}
+
+	hdr = (struct sof_ipc_hdr *)ipc_buf;
+	type = (hdr->cmd & SOF_GLB_TYPE_MASK) >> SOF_GLB_TYPE_SHIFT;
+
+	/* validate the ipc */
+	switch (type) {
+	case iGS(SOF_IPC_GLB_COMP_MSG):
+		ret = sbe_ipc_comp(sdev, vm_id, hdr);
+		if (ret < 0)
+			return ret;
+		break;
+	case iGS(SOF_IPC_GLB_STREAM_MSG):
+		ret = sbe_ipc_stream(sdev, vm_id, hdr);
+		if (ret < 0)
+			return ret;
+		break;
+	case iGS(SOF_IPC_GLB_DAI_MSG):
+		/* DAI should be priviledged for SOS only */
+		/*
+		 * After we use the new topology solution for FE,
+		 * we will not touch DAI anymore.
+		 */
+		/* return 0; */
+		break;
+	case iGS(SOF_IPC_GLB_TPLG_MSG):
+		ret = sbe_ipc_tplg(sdev, vm_id, hdr);
+		if (ret < 0)
+			return ret;
+		break;
+	case iGS(SOF_IPC_GLB_TRACE_MSG):
+		/* Trace should be initialized in SOS, skip FE requirement */
+		/* setup the error reply */
+		return 0;
+	default:
+		dev_info(sdev->dev, "unhandled IPC 0x%x!\n", type);
+		break;
+	}
+
+	/* now send the IPC */
+	ret = sof_virtio_send_ipc(sdev, ipc_buf, reply_buf, count, reply_sz);
+	if (ret < 0) {
+		dev_err(sdev->dev, "err: failed to send virtio IPC %d\n", ret);
+		return ret;
+	}
+
+	/* For some IPCs, the reply needs to be handled */
+	ret = sbe_ipc_post(sdev, ipc_buf, reply_buf);
+
+	return ret;
+}
+
+/* IPC commands coming from FE to BE */
 static void sbe_ipc_fe_cmd_get(struct sof_vbe *vbe, int vq_idx)
-{}
+{
+	struct virtio_vq_info *vq = &vbe->vqs[vq_idx];
+	struct device *dev = vbe->sdev->dev;
+	struct iovec iov[2];
+	u16 idx;
+	void *ipc_buf;
+	void *reply_buf;
+	size_t len1, len2;
+	int vm_id;
+	int ret, i;
+
+	vm_id = vbe->vmid;
+	memset(iov, 0, sizeof(iov));
+
+	/* while there are mesages in virtio queue */
+	while (virtio_vq_has_descs(vq)) {
+		/* FE uses items, first is command second is reply data */
+		ret = virtio_vq_getchain(vq, &idx, iov, 2, NULL);
+		if (ret < 2) {
+			/* something wrong in vq, no item is fetched */
+			if (ret < 0) {
+				/*
+				 * This should never happen.
+				 * FE should be aware this situation already
+				 */
+				virtio_vq_endchains(vq, 1);
+				return;
+			}
+
+			dev_err(dev, "ipc buf and reply buf not paired\n");
+			/* no enough items, let drop this kick */
+			for (i = 0; i <= ret; i++) {
+				virtio_vq_relchain(vq, idx + i,
+						   iov[i].iov_len);
+			}
+			virtio_vq_endchains(vq, 1);
+			return;
+		}
+
+		len1 = iov[SOF_VIRTIO_IPC_MSG].iov_len;
+		len2 = iov[SOF_VIRTIO_IPC_REPLY].iov_len;
+		if (!len1 || !len2) {
+			if (len1)
+				virtio_vq_relchain(vq, idx, len1);
+			if (len2)
+				virtio_vq_relchain(vq, idx + 1, len2);
+		} else {
+			ipc_buf = iov[SOF_VIRTIO_IPC_MSG].iov_base;
+			reply_buf = iov[SOF_VIRTIO_IPC_REPLY].iov_base;
+
+			/* send IPC to HW */
+			ret = sbe_ipc_fwd(vbe->sdev, vm_id, ipc_buf, reply_buf,
+					  len1, len2);
+			if (ret < 0)
+				dev_err(dev, "submit guest ipc command fail\n");
+
+			virtio_vq_relchain(vq, idx, len1);
+			virtio_vq_relchain(vq, idx + 1, len2);
+
+			/*
+			 * TODO now send the IPC reply from DSP to FE on
+			 * SOF_VIRTIO_IPC_CMD_RX_VQ
+			 * Currently, we doesn't use RX as the reply can
+			 * share the same memory of TX
+			 */
+		}
+	}
+
+	/* BE has finished the operations, now let's kick back */
+	virtio_vq_endchains(vq, 1);
+}
 
 static void handle_vq_kick(struct sof_vbe *vbe, int vq_idx)
 {
