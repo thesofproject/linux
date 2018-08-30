@@ -54,6 +54,12 @@ static struct sof_vbe_client *vbe_client_find(struct snd_sof_dev *sdev,
 	return NULL;
 }
 
+/* To be Implemented later */
+static int get_comp_id(struct snd_sof_dev *sdev, void *ipc_data)
+{
+	return 0;
+}
+
 static int sof_virtio_send_ipc(struct snd_sof_dev *sdev, void *ipc_data,
 			       void *reply_data, size_t count,
 			       size_t reply_size)
@@ -79,10 +85,328 @@ static int sbe_ipc_comp(struct snd_sof_dev *sdev, int vm_id,
 	return 0;
 }
 
-/* TODO: to be implement later */
+/*
+ * This function is to get the BE dai link for the GOS
+ * It uses the dai_link name to find the BE dai link.
+ * The Current dai_link name "vm_dai_link" is for the GOS,
+ * which means only one Virtual Machine is supported.
+ * And the VM only support one playback pcm and one capture pcm.
+ * After we switch to the new topology, we can support multiple
+ * VMs and multiple PCM streams for each VM.
+ * This function may be abandoned after switching to the new topology.
+ */
+static struct snd_pcm_substream *
+sbe_get_substream(struct snd_sof_dev *sdev,
+		  struct snd_soc_pcm_runtime *rtd, int direction)
+{
+	struct snd_pcm *pcm;
+	struct snd_pcm_str *stream;
+	struct snd_pcm_substream *substream = NULL;
+	struct snd_soc_dai_link *dai_link;
+	struct snd_soc_card *card = sdev->card;
+
+	list_for_each_entry(rtd, &card->rtd_list, list) {
+		pcm = rtd->pcm;
+		if (!pcm)
+			continue;
+
+		stream = &pcm->streams[direction];
+		if (!stream)
+			continue;
+
+		substream = stream->substream;
+		if (substream) {
+			dai_link = rtd->dai_link;
+			if (strcmp(dai_link->name, "vm_dai_link") == 0)
+				return substream;
+		}
+	}
+
+	return NULL;
+}
+
+static int sbe_pcm_open(struct snd_sof_dev *sdev,
+			void *ipc_data, int vm_id)
+{
+	/*
+	 * TO re-use the sof callback for pcm, we should find a proper
+	 * substream and do the correct setting for the substream.
+	 * As there is no FE link substream in SOS for GOS (GOS FE link
+	 * substreams are created in GOS and SOS will never see it), let's
+	 * use BE link substream in SOS for the callbacks.
+	 * This is save because the BE link substream is created dedicated for
+	 * GOS in machine driver.
+	 */
+	struct snd_pcm_substream *substream;
+	struct snd_pcm_runtime *runtime;
+	struct snd_sof_pcm *spcm;
+	struct snd_soc_pcm_runtime *rtd = NULL;
+	u32 comp_id;
+	size_t size;
+	int direction;
+
+	comp_id = get_comp_id(sdev, ipc_data);
+
+	spcm = snd_sof_find_spcm_comp(sdev, comp_id, &direction);
+	if (!spcm)
+		return -ENODEV;
+	mutex_lock(&spcm->mutex);
+	substream = sbe_get_substream(sdev, rtd, direction);
+	if (!substream || !rtd)
+		return -ENODEV;
+	if (substream->ref_count > 0)
+		return -EBUSY;
+	substream->ref_count++;	/* set it used */
+	runtime = kzalloc(sizeof(*runtime), GFP_KERNEL);
+	if (!runtime)
+		return -ENOMEM;
+	size = PAGE_ALIGN(sizeof(struct snd_pcm_mmap_status));
+	runtime->status = snd_malloc_pages(size, GFP_KERNEL);
+	if (!runtime->status) {
+		kfree(runtime);
+		return -ENOMEM;
+	}
+	memset((void *)runtime->status, 0, size);
+
+	size = PAGE_ALIGN(sizeof(struct snd_pcm_mmap_control));
+	runtime->control = snd_malloc_pages(size, GFP_KERNEL);
+	if (!runtime->control) {
+		snd_free_pages((void *)runtime->status,
+			       PAGE_ALIGN(sizeof(struct snd_pcm_mmap_status)));
+		kfree(runtime);
+		return -ENOMEM;
+	}
+	memset((void *)runtime->control, 0, size);
+
+	init_waitqueue_head(&runtime->sleep);
+	init_waitqueue_head(&runtime->tsleep);
+	runtime->status->state = SNDRV_PCM_STATE_OPEN;
+
+	substream->runtime = runtime;
+	substream->private_data = rtd;
+	rtd->sof = spcm;
+	substream->stream = direction;
+	/* check with spcm exists or not */
+	spcm->stream[direction].posn.host_posn = 0;
+	spcm->stream[direction].posn.dai_posn = 0;
+	spcm->stream[direction].substream = substream;
+
+	/* TODO: codec open */
+
+	snd_sof_pcm_platform_open(sdev, substream);
+
+	mutex_unlock(&spcm->mutex);
+	return 0;
+}
+
+static int sbe_pcm_close(struct snd_sof_dev *sdev,
+			 void *ipc_data, int vm_id)
+{
+	struct snd_pcm_substream *substream;
+	struct snd_sof_pcm *spcm;
+	struct snd_soc_pcm_runtime *rtd;
+	u32 comp_id;
+	int direction;
+
+	comp_id = get_comp_id(sdev, ipc_data);
+
+	spcm = snd_sof_find_spcm_comp(sdev, comp_id, &direction);
+	if (!spcm)
+		return 0;
+	mutex_lock(&spcm->mutex);
+	substream = sbe_get_substream(sdev, rtd, direction);
+	if (!substream) {
+		mutex_unlock(&spcm->mutex);
+		return 0;
+	}
+
+	snd_sof_pcm_platform_close(sdev, substream);
+
+	/* TODO: codec close */
+
+	substream->ref_count = 0;
+	if (substream->runtime) {
+		snd_free_pages((void *)substream->runtime->status,
+			       PAGE_ALIGN(sizeof(struct snd_pcm_mmap_status)));
+		snd_free_pages((void *)substream->runtime->control,
+			       PAGE_ALIGN(sizeof(struct snd_pcm_mmap_control)));
+		kfree(substream->runtime);
+		substream->runtime = NULL;
+		rtd->sof = NULL;
+	}
+	mutex_unlock(&spcm->mutex);
+	return 0;
+}
+
+/*
+ * FIXME - this function should only convert a compressed GOS PHY page table
+ * into a page table of SOS physical pages. It should leave the HDA stream
+ * alone for HDA code to manage.
+ */
+static int sbe_stream_prepare(struct snd_sof_dev *sdev,
+			      struct sof_ipc_pcm_params *pcm, int vm_id,
+			      struct snd_sg_page *table)
+{
+	u32 pcm_buffer_gpa = pcm->params.buffer.phy_addr;
+	u64 pcm_buffer_hpa = vhm_vm_gpa2hpa(vm_id, (u64)pcm_buffer_gpa);
+	u8 *page_table = (uint8_t *)__va(pcm_buffer_hpa);
+	int idx, i;
+	u32 gpa_parse, pages;
+	u64 hpa_parse;
+
+	pages = pcm->params.buffer.pages;
+	for (i = 0; i < pages; i++) {
+		idx = (((i << 2) + i)) >> 1;
+		gpa_parse = page_table[idx] | (page_table[idx + 1] << 8)
+			| (page_table[idx + 2] << 16);
+
+		if (i & 0x1)
+			gpa_parse <<= 8;
+		else
+			gpa_parse <<= 12;
+		gpa_parse &= 0xfffff000;
+		hpa_parse = vhm_vm_gpa2hpa(vm_id, (u64)gpa_parse);
+
+		table[i].addr = hpa_parse;
+	}
+
+	return 0;
+}
+
+static int sbe_assemble_params(struct sof_ipc_pcm_params *pcm,
+			       struct snd_pcm_hw_params *params)
+{
+	struct snd_mask *fmt = hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT);
+
+	hw_param_interval(params, SNDRV_PCM_HW_PARAM_CHANNELS)->min =
+		pcm->params.channels;
+
+	hw_param_interval(params, SNDRV_PCM_HW_PARAM_RATE)->min =
+		pcm->params.rate;
+
+	hw_param_interval(params, SNDRV_PCM_HW_PARAM_PERIOD_BYTES)->min =
+		pcm->params.host_period_bytes;
+
+	hw_param_interval(params, SNDRV_PCM_HW_PARAM_BUFFER_BYTES)->min =
+		pcm->params.buffer.size;
+
+	snd_mask_none(fmt);
+	switch (pcm->params.frame_fmt) {
+	case SOF_IPC_FRAME_S16_LE:
+		snd_mask_set(fmt, SNDRV_PCM_FORMAT_S16);
+		break;
+	case SOF_IPC_FRAME_S24_4LE:
+		snd_mask_set(fmt, SNDRV_PCM_FORMAT_S24);
+		break;
+	case SOF_IPC_FRAME_S32_LE:
+		snd_mask_set(fmt, SNDRV_PCM_FORMAT_S32);
+		break;
+	case SOF_IPC_FRAME_FLOAT:
+		snd_mask_set(fmt, SNDRV_PCM_FORMAT_FLOAT);
+		break;
+	default:
+		return -EINVAL;
+	}
+	return 0;
+}
+
+static int sbe_stream_hw_params(struct snd_sof_dev *sdev,
+				struct sof_ipc_pcm_params *pcm, int vm_id)
+{
+	struct snd_sg_page *table;
+	struct snd_sg_buf sgbuf; /* FIXME alloc at topology load */
+	struct snd_dma_buffer dmab; /* FIXME alloc at topology load */
+	struct snd_pcm_substream *substream;
+	struct snd_pcm_runtime *runtime;
+	struct snd_pcm_hw_params params;
+	int direction = pcm->params.direction;
+	u32 pages;
+	int ret;
+
+	/* find the proper substream */
+	substream = sbe_get_substream(sdev, NULL, direction);
+	if (!substream)
+		return -ENODEV;
+
+	runtime = substream->runtime;
+
+	/* setup hw */
+	pages = pcm->params.buffer.pages;
+	table = kcalloc(pages, sizeof(*table), GFP_KERNEL);
+	sgbuf.table = table;
+	dmab.private_data = &sgbuf;
+	runtime->dma_buffer_p = &dmab; /* use the audiobuf from FE */
+
+	/* TODO: codec hw_params */
+
+	/* convert buffer GPA to HPA */
+	ret = sbe_stream_prepare(sdev, pcm, vm_id, table);
+
+	/* firmware already configured host stream */
+	/* use different stream_tag from FE */
+	sbe_assemble_params(pcm, &params);
+	pcm->params.stream_tag =
+		snd_sof_pcm_platform_hw_params(sdev, substream, &params);
+	dev_dbg(sdev->dev, "stream_tag %d",
+		pcm->params.stream_tag);
+
+	kfree(table);
+	return ret;
+}
+
+/* handle the stream ipc */
 static int sbe_ipc_stream(struct snd_sof_dev *sdev, int vm_id,
 			  struct sof_ipc_hdr *hdr)
 {
+	struct sof_ipc_pcm_params *pcm;
+	struct sof_ipc_stream *stream;
+	struct snd_pcm_substream *substream;
+	int ret, direction, comp_id;
+	u32 cmd = (hdr->cmd & SOF_CMD_TYPE_MASK) >> SOF_CMD_TYPE_SHIFT;
+
+	/* TODO validate host comp id range based on vm_id */
+
+	switch (cmd) {
+	case iCS(SOF_IPC_STREAM_PCM_PARAMS):
+		sbe_pcm_open(sdev, hdr, vm_id);
+		pcm = (struct sof_ipc_pcm_params *)hdr;
+		ret = sbe_stream_hw_params(sdev, pcm, vm_id);
+		break;
+	case iCS(SOF_IPC_STREAM_TRIG_START):
+		stream = (struct sof_ipc_stream *)hdr;
+		comp_id = stream->comp_id;
+		snd_sof_find_spcm_comp(sdev, comp_id, &direction);
+		substream = sbe_get_substream(sdev, NULL, direction);
+		/* TODO: codec trigger start */
+		snd_sof_pcm_platform_trigger(sdev, substream,
+					     SNDRV_PCM_TRIGGER_START);
+		break;
+	case iCS(SOF_IPC_STREAM_TRIG_STOP):
+		stream = (struct sof_ipc_stream *)hdr;
+		comp_id = stream->comp_id;
+		snd_sof_find_spcm_comp(sdev, comp_id, &direction);
+		substream = sbe_get_substream(sdev, NULL, direction);
+		snd_sof_pcm_platform_trigger(sdev, substream,
+					     SNDRV_PCM_TRIGGER_STOP);
+		/* TODO: codec trigger stop */
+		break;
+	case iCS(SOF_IPC_STREAM_PCM_FREE):
+		sbe_pcm_close(sdev, hdr, vm_id);
+		/* setup the reply data */
+		break;
+	case iCS(SOF_IPC_STREAM_POSITION):
+		/* TODO: this is special case, we do not send this IPC to DSP
+		 * but read back position directly from memory (like SOS) and
+		 * then reply to FE.
+		 * Use stream ID to get correct stream data
+		 */
+		/* read position will be done in rx vq */
+		break;
+	default:
+		dev_dbg(sdev->dev, "0x%x!\n", cmd);
+		break;
+	}
+
 	return 0;
 }
 
@@ -148,11 +472,54 @@ static int sbe_ipc_tplg(struct snd_sof_dev *sdev, int vm_id,
 	return ret;
 }
 
-/* TODO: to be implement later */
+static int sbe_ipc_stream_param_post(struct snd_sof_dev *sdev,
+				     void *ipc_buf, void *reply_buf)
+{
+	struct sof_ipc_pcm_params_reply *ipc_params_reply;
+	struct snd_sof_pcm *spcm;
+	int direction;
+	u32 comp_id;
+	int posn_offset;
+
+	ipc_params_reply = (struct sof_ipc_pcm_params_reply *)reply_buf;
+	comp_id = ipc_params_reply->comp_id;
+	posn_offset = ipc_params_reply->posn_offset;
+
+	spcm = snd_sof_find_spcm_comp(sdev, comp_id, &direction);
+	if (!spcm)
+		return -ENODEV;
+	spcm->posn_offset[direction] =
+		sdev->stream_box.offset + posn_offset;
+	return 0;
+}
+
 static int sbe_ipc_post(struct snd_sof_dev *sdev,
 			void *ipc_buf, void *reply_buf)
 {
-	return 0;
+	struct sof_ipc_hdr *hdr;
+	u32 type, cmd;
+	int ret = 0;
+
+	hdr = (struct sof_ipc_hdr *)ipc_buf;
+	type = (hdr->cmd & SOF_GLB_TYPE_MASK) >> SOF_GLB_TYPE_SHIFT;
+	cmd = (hdr->cmd & SOF_CMD_TYPE_MASK) >> SOF_CMD_TYPE_SHIFT;
+
+	switch (type) {
+	case iGS(SOF_IPC_GLB_STREAM_MSG):
+		switch (cmd) {
+		case iCS(SOF_IPC_STREAM_PCM_PARAMS):
+			ret = sbe_ipc_stream_param_post(sdev,
+							ipc_buf, reply_buf);
+			break;
+		default:
+			break;
+		}
+		break;
+	default:
+		break;
+	}
+
+	return ret;
 }
 
 /*

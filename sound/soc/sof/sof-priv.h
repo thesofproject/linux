@@ -406,6 +406,7 @@ struct snd_sof_dev {
 #endif
 	/* ASoC components */
 	struct snd_soc_component_driver plat_drv;
+	struct snd_soc_card *card;
 
 	/* DSP firmware boot */
 	wait_queue_head_t boot_wait;
