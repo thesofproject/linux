@@ -60,6 +60,17 @@ static int get_comp_id(struct snd_sof_dev *sdev, void *ipc_data)
 	return 0;
 }
 
+static struct sof_vbe *sbe_comp_id_to_vbe(struct snd_sof_dev *sdev, int comp_id)
+{
+	struct sof_vbe *vbe;
+
+	list_for_each_entry(vbe, &sdev->vbe_list, list) {
+		if (comp_id < vbe->comp_id_end && comp_id >= vbe->comp_id_begin)
+			return vbe;
+	}
+	return NULL;
+}
+
 static int sof_virtio_send_ipc(struct snd_sof_dev *sdev, void *ipc_data,
 			       void *reply_data, size_t count,
 			       size_t reply_size)
@@ -71,9 +82,65 @@ static int sof_virtio_send_ipc(struct snd_sof_dev *sdev, void *ipc_data,
 				  reply_data, reply_size);
 }
 
-/* To be implemented later */
+/* Return true if posn buffer is filled successfully */
+static bool sbe_fill_posn_vqbuf(struct sof_vbe *vbe,
+				struct virtio_vq_info *vq,
+				struct sof_ipc_stream_posn *posn,
+				bool *endchain)
+{
+	struct device *dev = vbe->sdev->dev;
+	struct iovec iov;
+	u16 idx;
+	int ret;
+
+	*endchain = false;
+	while (virtio_vq_has_descs(vq)) {
+		ret = virtio_vq_getchain(vq, &idx, &iov, 1, NULL);
+		if (ret <= 0)
+			return false;
+
+		if (iov.iov_len < sizeof(struct sof_ipc_stream_posn)) {
+			*endchain = true;
+			dev_err(dev, "iov len %lu, expecting len %lu\n",
+				iov.iov_len, sizeof(*posn));
+			virtio_vq_relchain(vq, idx, iov.iov_len);
+			continue;
+		}
+		memcpy(iov.iov_base, posn, sizeof(struct sof_ipc_stream_posn));
+		*endchain = true;
+		virtio_vq_relchain(vq, idx, iov.iov_len);
+		return true;
+	}
+
+	return false;
+}
+
+/* IPC notification reply from FE to DSP */
 static void sbe_ipc_fe_not_reply_get(struct sof_vbe *vbe, int vq_idx)
-{}
+{
+	struct virtio_vq_info *vq;
+	struct vbs_sof_posn *entry;
+	unsigned long flags;
+	bool endchain, ret;
+
+	dev_dbg(vbe->sdev->dev,
+		"audio BE notification vq kick handling, vq_idx %d\n", vq_idx);
+
+	spin_lock_irqsave(&vbe->posn_lock, flags);
+	if (list_empty(&vbe->posn_list)) {
+		/* nothing to do */
+		spin_unlock_irqrestore(&vbe->posn_lock, flags);
+		return;
+	}
+	vq = &vbe->vqs[vq_idx];
+	entry = list_first_entry(&vbe->posn_list,
+				 struct vbs_sof_posn, list);
+
+	ret = sbe_fill_posn_vqbuf(vbe, vq, &entry->pos, &endchain);
+	spin_unlock_irqrestore(&vbe->posn_lock, flags);
+	if (endchain)
+		virtio_vq_endchains(vq, 1);
+}
 
 /* validate component IPC */
 static int sbe_ipc_comp(struct snd_sof_dev *sdev, int vm_id,
@@ -868,5 +935,49 @@ int sof_vbe_register(struct snd_sof_dev *sdev, struct sof_vbe **svbe)
 
 	*svbe = vbe;
 
+	return 0;
+}
+
+int sbe_update_guest_posn(struct snd_sof_dev *sdev,
+			  struct sof_ipc_stream_posn *posn)
+{
+	struct sof_vbe *vbe = sbe_comp_id_to_vbe(sdev, posn->comp_id);
+	struct virtio_vq_info *vq = &vbe->vqs[SOF_VIRTIO_IPC_NOT_RX_VQ];
+	struct vbs_sof_posn *entry;
+	unsigned long flags;
+	bool ret, endchain;
+
+	/* posn update for SOS */
+	if (!vbe)
+		return 0;
+
+	spin_lock_irqsave(&vbe->posn_lock, flags);
+	/*
+	 * let's try to get a notification RX vq available buffer
+	 * If there is an available buffer, let's notify immediately
+	 */
+	ret = sbe_fill_posn_vqbuf(vbe, vq, posn, &endchain);
+	if (ret) {
+		spin_unlock_irqrestore(&vbe->posn_lock, flags);
+		virtio_vq_endchains(vq, 1);
+		return 0;
+	}
+
+	/*
+	 * Notification RX vq buffer is not available. Let's save the posn
+	 * update msg. And send the msg when vq buffer is available.
+	 */
+	entry = kzalloc(sizeof(*entry), GFP_ATOMIC);
+	if (!entry) {
+		spin_unlock_irqrestore(&vbe->posn_lock, flags);
+		return -ENOMEM;
+	}
+
+	memcpy(&entry->pos, posn, sizeof(struct vbs_sof_posn));
+	list_add_tail(&entry->list, &vbe->posn_list);
+	spin_unlock_irqrestore(&vbe->posn_lock, flags);
+
+	if (endchain)
+		virtio_vq_endchains(vq, 1);
 	return 0;
 }
