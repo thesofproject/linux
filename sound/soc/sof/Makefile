@@ -4,6 +4,15 @@ ccflags-y += -DDEBUG
 
 snd-sof-objs := core.o ops.o loader.o ipc.o pcm.o pm.o debug.o topology.o\
 		control.o trace.o compressed.o utils.o
+
+ifdef CONFIG_SND_SOC_SOF_VIRTIO_BE
+snd-sof-objs += virtio-be.o virtio-miscdev.o
+endif
+
+ifdef CONFIG_SND_SOC_SOF_VIRTIO_FE
+snd-sof-objs += virtio-fe.o
+endif
+
 snd-sof-spi-objs := hw-spi.o
 
 snd-sof-pci-objs := sof-pci-dev.o
