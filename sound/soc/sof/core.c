@@ -236,6 +236,14 @@ static int sof_probe(struct platform_device *pdev)
 
 	dev_dbg(&pdev->dev, "probing SOF DSP device....\n");
 
+	/*
+	 * Currently we only support one VM. comp_id from 0 to 999 is for SOS.
+	 * Other comp_id numbers are for VM1.
+	 * TBD: comp_id number range should be dynamically assigned when
+	 * multiple VMs are supported.
+	 */
+	if (plat_data->fedev == 1)
+		sdev->next_comp_id = SOF_COMP_NUM_MAX;
 	/* initialize sof device */
 	sdev->dev = &pdev->dev;
 	sdev->parent = plat_data->dev;
@@ -252,6 +260,8 @@ static int sof_probe(struct platform_device *pdev)
 	dev_set_drvdata(&pdev->dev, sdev);
 	spin_lock_init(&sdev->ipc_lock);
 	spin_lock_init(&sdev->hw_lock);
+
+	INIT_LIST_HEAD(&sdev->vbe_list);
 
 	/* set up platform component driver */
 	snd_sof_new_platform_drv(sdev);
@@ -280,6 +290,8 @@ static int sof_probe(struct platform_device *pdev)
 			ret);
 		goto dbg_err;
 	}
+
+	snd_sof_virtio_miscdev_register(sdev);
 
 	/* init the IPC */
 	sdev->ipc = snd_sof_ipc_init(sdev);
@@ -314,6 +326,11 @@ static int sof_probe(struct platform_device *pdev)
 		goto comp_err;
 	}
 
+	if (plat_data->fedev == 1) {
+		ret = 0;
+		goto fe_ret;
+	}
+
 	/* init DMA trace */
 	ret = snd_sof_init_trace(sdev);
 	if (ret < 0) {
@@ -321,15 +338,6 @@ static int sof_probe(struct platform_device *pdev)
 		dev_warn(sdev->dev,
 			 "warning: failed to initialize trace %d\n", ret);
 	}
-
-	/* autosuspend sof device */
-	pm_runtime_mark_last_busy(sdev->dev);
-	pm_runtime_put_autosuspend(sdev->dev);
-
-	/* autosuspend pci/acpi/spi device */
-	pm_runtime_mark_last_busy(plat_data->dev);
-	pm_runtime_put_autosuspend(plat_data->dev);
-
 	return 0;
 
 comp_err:
@@ -343,7 +351,7 @@ ipc_err:
 	snd_sof_free_debug(sdev);
 dbg_err:
 	snd_sof_remove(sdev);
-
+fe_ret:
 	return ret;
 }
 
@@ -354,6 +362,7 @@ static int sof_remove(struct platform_device *pdev)
 	snd_soc_unregister_component(&pdev->dev);
 	snd_sof_fw_unload(sdev);
 	snd_sof_ipc_free(sdev);
+	snd_sof_virtio_miscdev_unregister();
 	snd_sof_free_debug(sdev);
 	snd_sof_release_trace(sdev);
 	snd_sof_remove(sdev);
