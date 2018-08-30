@@ -86,11 +86,66 @@ static int sbe_ipc_stream(struct snd_sof_dev *sdev, int vm_id,
 	return 0;
 }
 
-/* TODO: to be implement later */
+#define COMP_ID_UNASSIGNED		0xffffffff /* TODO: move to header */
+static int sbe_ipc_tplg_comp_new(struct snd_sof_dev *sdev, int vm_id,
+				 struct sof_ipc_hdr *hdr)
+{
+	struct snd_sof_pcm *spcm;
+	struct sof_ipc_comp *comp = (struct sof_ipc_comp *)hdr;
+	struct sof_ipc_comp_host *host;
+
+	switch (comp->type) {
+	case SOF_COMP_HOST:
+		/*
+		 * TODO: below is a temporary solution. next step is
+		 * to create a whole pcm staff incluing substream
+		 * based on Liam's suggestion.
+		 */
+		/*
+		 * let's create spcm in HOST ipc
+		 * spcm should be created in pcm load, but there is no such ipc
+		 * so let create it here
+		 */
+		host = (struct sof_ipc_comp_host *)hdr;
+		spcm = kzalloc(sizeof(*spcm), GFP_KERNEL);
+		if (!spcm)
+			return -ENOMEM;
+		spcm->sdev = sdev;
+		spcm->stream[SNDRV_PCM_STREAM_PLAYBACK].comp_id =
+			COMP_ID_UNASSIGNED;
+		spcm->stream[SNDRV_PCM_STREAM_CAPTURE].comp_id =
+			COMP_ID_UNASSIGNED;
+		mutex_init(&spcm->mutex);
+		spcm->stream[host->direction].comp_id = host->comp.id;
+		list_add(&spcm->list, &sdev->pcm_list);
+		break;
+	default:
+		break;
+	}
+	return 0;
+}
+
+/* validate topology IPC */
 static int sbe_ipc_tplg(struct snd_sof_dev *sdev, int vm_id,
 			struct sof_ipc_hdr *hdr)
 {
-	return 0;
+	/* TODO validate host comp id range based on vm_id */
+
+	/* TODO adding new PCM ? then alloc snd_sg_page table for it */
+	u32 cmd;
+	int ret = 0;
+
+	cmd = (hdr->cmd & SOF_CMD_TYPE_MASK) >> SOF_CMD_TYPE_SHIFT;
+
+	switch (cmd) {
+	case iCS(SOF_IPC_TPLG_COMP_NEW):
+		ret = sbe_ipc_tplg_comp_new(sdev, vm_id, hdr);
+		break;
+	default:
+		break;
+	}
+
+	return ret;
 }
 
 /* TODO: to be implement later */
