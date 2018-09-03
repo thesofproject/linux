@@ -417,7 +417,6 @@ void snd_hdac_ext_stream_spbcap_enable(struct hdac_bus *bus,
 				 bool enable, int index)
 {
 	u32 mask = 0;
-	u32 register_mask = 0;
 
 	if (!bus->spbcap) {
 		dev_err(bus->dev, "Address of SPB capability is NULL\n");
@@ -501,7 +500,6 @@ void snd_hdac_ext_stream_drsm_enable(struct hdac_bus *bus,
 				bool enable, int index)
 {
 	u32 mask = 0;
-	u32 register_mask = 0;
 
 	if (!bus->drsmcap) {
 		dev_err(bus->dev, "Address of DRSM capability is NULL\n");
