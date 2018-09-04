@@ -314,6 +314,7 @@ struct snd_sof_dev {
 	u64 irq_status;
 	int ipc_irq;
 	u32 next_comp_id; /* monotonic - reset during S3 */
+	bool dsp_error_pending;
 
 	/* memory bases for mmaped DSPs - set by dsp_init() */
 	void __iomem *bar[SND_SOF_BARS];	/* DSP base address */

@@ -252,6 +252,7 @@ static int sof_probe(struct platform_device *pdev)
 	dev_set_drvdata(&pdev->dev, sdev);
 	spin_lock_init(&sdev->ipc_lock);
 	spin_lock_init(&sdev->hw_lock);
+	sdev->dsp_error_pending = false;
 
 	/* set up platform component driver */
 	snd_sof_new_platform_drv(sdev);

@@ -378,6 +378,7 @@ static int sof_pcm_open(struct snd_pcm_substream *substream)
 
 	ret = pm_runtime_get_sync(sdev->dev);
 	if (ret < 0) {
+		sdev->dsp_error_pending = true;
 		dev_err(sdev->dev, "error: pcm open failed to resume %d\n",
 			ret);
 		mutex_unlock(&spcm->mutex);
@@ -424,6 +425,8 @@ static int sof_pcm_open(struct snd_pcm_substream *substream)
 
 	snd_sof_pcm_platform_open(sdev, substream);
 
+	/* reset the flag after boot successfully */
+	sdev->dsp_error_pending = false;
 	mutex_unlock(&spcm->mutex);
 	return 0;
 }
@@ -440,6 +443,10 @@ static int sof_pcm_close(struct snd_pcm_substream *substream)
 
 	/* nothing todo for BE */
 	if (rtd->dai_link->no_pcm)
+		return 0;
+
+	/* nothing todo for pcm open error */
+	if (sdev->dsp_error_pending)
 		return 0;
 
 	dev_dbg(sdev->dev, "pcm: close stream %d dir %d\n", spcm->pcm.pcm_id,

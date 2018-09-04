@@ -235,6 +235,7 @@ static int sof_resume(struct device *dev)
 	/* boot the firmware */
 	ret = snd_sof_run_firmware(sdev);
 	if (ret < 0) {
+		sdev->dsp_error_pending = true;
 		dev_err(sdev->dev,
 			"error: failed to boot DSP firmware after resume %d\n",
 			ret);
@@ -277,6 +278,10 @@ static int sof_suspend(struct device *dev)
 
 	/* do nothing if dsp suspend callback is not set */
 	if (!sdev->ops->suspend)
+		return 0;
+
+	/* do nothing if previous resume failure */
+	if (sdev->dsp_error_pending)
 		return 0;
 
 	/*
