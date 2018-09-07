@@ -61,6 +61,8 @@
 #define SOF_IPC_TPLG_PIPE_COMPLETE		SOF_CMD_TYPE(0x013)
 #define SOF_IPC_TPLG_BUFFER_NEW			SOF_CMD_TYPE(0x020)
 #define SOF_IPC_TPLG_BUFFER_FREE		SOF_CMD_TYPE(0x021)
+#define SOF_IPC_TPLG_REQUEST			SOF_CMD_TYPE(0x022)
+#define SOF_IPC_TPLG_RAW_DATA			SOF_CMD_TYPE(0x023)
 
 /* PM */
 #define SOF_IPC_PM_CTX_SAVE			SOF_CMD_TYPE(0x001)
@@ -781,6 +783,28 @@ struct sof_ipc_pipe_comp_connect {
 	struct sof_ipc_hdr hdr;
 	uint32_t source_id;
 	uint32_t sink_id;
+}  __attribute__((packed));
+
+enum sof_ipc_tplg_type {
+	SOF_IPC_TPLG_TYPE_RAW = 0,	/* raw binary data from file */
+	SOF_IPC_TPLG_TYPE_COMP,		/* component IPC data */
+};
+
+/* SOF_IPC_TPLG_REQUEST - request topology */
+struct sof_ipc_tplg_request {
+	struct sof_ipc_hdr hdr;
+	enum sof_ipc_tplg_type type;
+	uint32_t size;
+	uint32_t id;
+}  __attribute__((packed));
+
+/* SOF_IPC_TPLG_RAW_DATA - topology data in raw file format */
+struct sof_ipc_tplg_raw_data {
+	struct sof_ipc_hdr hdr;
+	enum sof_ipc_tplg_type type;
+	uint32_t size;
+	uint32_t id;
+	uint8_t data[0];
 }  __attribute__((packed));
 
 /*

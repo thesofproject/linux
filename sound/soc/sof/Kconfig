@@ -50,6 +50,26 @@ config SND_SOC_SOF_FORCE_NOCODEC_MODE
           Say Y if you need this force nocodec mode option
           If unsure select "N".
 
+config SND_SOC_SOF_VIRTIO_FE
+	tristate "Sound Open Firmware Virtio FrontEnd"
+	depends on SND_SOC_SOF
+	help
+	  This adds virtio support for Sound Open Firmware FrontEnd
+	  virtualization.
+	   ** Please only enable either FE or BE support, NOT both atm.**
+	  Say Y if you need it.
+	  If unsure select "N".
+
+config SND_SOC_SOF_VIRTIO_BE
+	tristate "Sound Open Firmware Virtio BackEnd kernel mode"
+	depends on SND_SOC_SOF
+	help
+	  This adds virtio support for Sound Open Firmware FrontEnd
+	  virtualization.
+	  ** Please only enable either FE or BE support, NOT both atm.**
+	  Say Y if you need it.
+	  If unsure select "N".
+
 config SND_SOC_SOF_DEBUG_XRUN_STOP
 	bool "SOF stop on XRUN"
 	depends on SND_SOC_SOF_DEBUG
