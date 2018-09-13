@@ -372,3 +372,156 @@ irq_err:
 	dev_err(sdev->dev, "error: load fw failed err: %d\n", ret);
 	return ret;
 }
+
+/*
+ * skl/kbl enable core and code loader DMA has some difference with apl/cnl
+ * add the APIs for skl/kbl
+ */
+static int cl_stream_prepare_skl(struct snd_sof_dev *sdev, unsigned int format,
+				 unsigned int size, struct snd_dma_buffer *dmab,
+				 int direction)
+{
+	/* the skl cl dma don't use stream tag, ret is for debug */
+	int ret = 0;
+	return ret;
+}
+
+static int cl_dsp_init_skl(struct snd_sof_dev *sdev, const void *fwdata,
+			   u32 fwsize)
+{
+	const struct sof_intel_dsp_desc *chip = sdev->hda->desc;
+	int ret, i;
+	u32 hipcie;
+	u32 reg;
+
+	/* check if the core is already enabled, if yes, reset and make it run,
+	 * if not, powerdown and enable it again.
+	 */
+	if (hda_dsp_core_is_enabled(sdev, HDA_DSP_CORE_MASK(0))) {
+		/* if enabled, reset it, and run the core. */
+		ret = hda_dsp_core_stall_reset(sdev, HDA_DSP_CORE_MASK(0));
+		if (ret < 0)
+			goto err;
+
+		ret = hda_dsp_core_run(sdev, HDA_DSP_CORE_MASK(0));
+		if (ret < 0) {
+			dev_err(sdev->dev, "error: dsp core start failed %d\n",
+				ret);
+			ret = -EIO;
+			goto err;
+		}
+	} else {
+		/* if not enabled, power down it first and then powerup and run
+		 * the core.
+		 */
+		ret = hda_dsp_core_reset_power_down(sdev, HDA_DSP_CORE_MASK(0));
+		if (ret < 0) {
+			dev_err(sdev->dev, "dsp core0 disable fail: %d\n", ret);
+			return ret;
+		}
+		ret = hda_dsp_enable_core(sdev, HDA_DSP_CORE_MASK(0));
+	}
+
+	/* prepare DMA for code loader stream */
+	ret = cl_stream_prepare_skl(sdev, 0x40, fwsize, &sdev->dmab,
+				    SNDRV_PCM_STREAM_PLAYBACK);
+
+	if (ret <= 0) {
+		dev_err(sdev->dev, "error: dma prepare fw loading err: %x\n",
+			ret);
+		return ret;
+	}
+
+	memcpy(sdev->dmab.area, fwdata, fwsize);
+
+	/* enable the interrupt */
+	snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR, HDA_DSP_REG_ADSPIC,
+				HDA_DSP_ADSPIC_IPC, HDA_DSP_ADSPIC_IPC);
+
+	/* enable IPC DONE interrupt */
+	snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR, chip->ipc_ctl,
+				HDA_DSP_REG_HIPCCTL_DONE,
+				HDA_DSP_REG_HIPCCTL_DONE);
+
+	/* enable IPC BUSY interrupt */
+	snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR, chip->ipc_ctl,
+				HDA_DSP_REG_HIPCCTL_BUSY,
+				HDA_DSP_REG_HIPCCTL_BUSY);
+
+	/* polling the ROM init status information. */
+	ret = snd_sof_dsp_register_poll(sdev, HDA_DSP_BAR,
+					HDA_DSP_SRAM_REG_ROM_STATUS_SKL,
+					HDA_DSP_ROM_STS_MASK, HDA_DSP_ROM_INIT,
+					HDA_DSP_INIT_TIMEOUT);
+	if (ret >= 0) {
+		dev_err(sdev->dev, "error: can't read the ROM status!");
+		goto out;
+	}
+
+	ret = -EIO;
+
+err:
+	hda_dsp_dump(sdev, SOF_DBG_REGS | SOF_DBG_PCI | SOF_DBG_MBOX);
+	hda_dsp_core_reset_power_down(sdev, HDA_DSP_CORE_MASK(0));
+out:
+	return ret;
+}
+
+static int cl_copy_fw_skl(struct snd_sof_dev *sdev)
+{
+	return -1;
+}
+
+int hda_dsp_cl_boot_firmware_skl(struct snd_sof_dev *sdev)
+{
+	struct snd_sof_pdata *plat_data = dev_get_platdata(sdev->dev);
+	struct firmware stripped_firmware;
+	int ret;
+
+	stripped_firmware.data = plat_data->fw->data;
+	stripped_firmware.size = plat_data->fw->size;
+
+	ret = cl_dsp_init_skl(sdev, stripped_firmware.data,
+			      stripped_firmware.size);
+
+	/* retry enabling core and ROM load. seemed to help */
+	if (ret < 0) {
+		ret = cl_dsp_init_skl(sdev, stripped_firmware.data,
+				      stripped_firmware.size);
+		if (ret <= 0) {
+			dev_err(sdev->dev, "Error code=0x%x: FW status=0x%x\n",
+				snd_sof_dsp_read(sdev, HDA_DSP_BAR,
+						 HDA_DSP_SRAM_REG_ROM_ERROR),
+				snd_sof_dsp_read(sdev, HDA_DSP_BAR,
+						 HDA_DSP_SRAM_REG_ROM_STATUS));
+			dev_err(sdev->dev, "Core En/ROM load fail:%d\n", ret);
+			goto irq_err;
+		}
+	}
+
+	/* init for booting wait */
+	init_waitqueue_head(&sdev->boot_wait);
+	sdev->boot_complete = false;
+
+	/* at this point DSP ROM has been initialized and should be ready for
+	 * code loading and firmware boot
+	 */
+	ret = cl_copy_fw_skl(sdev);
+	if (ret < 0) {
+		dev_err(sdev->dev, "error: load fw failed err: %d\n", ret);
+		goto irq_err;
+	}
+
+	dev_dbg(sdev->dev, "Firmware download successful, booting...\n");
+
+	return ret;
+
+irq_err:
+	hda_dsp_dump(sdev, SOF_DBG_REGS | SOF_DBG_PCI | SOF_DBG_MBOX);
+
+	/* disable DSP */
+	snd_sof_dsp_update_bits(sdev, HDA_DSP_PP_BAR, SOF_HDA_REG_PP_PPCTL,
+				SOF_HDA_PPCTL_GPROCEN, 0);
+	dev_err(sdev->dev, "error: load fw failed err: %d\n", ret);
+	return ret;
+}
