@@ -81,6 +81,7 @@ struct snd_sof_pcm *snd_sof_find_spcm_comp(struct snd_sof_dev *sdev,
 
 	return NULL;
 }
+EXPORT_SYMBOL(snd_sof_find_spcm_comp);
 
 struct snd_sof_pcm *snd_sof_find_spcm_pcm_id(struct snd_sof_dev *sdev,
 					     unsigned int pcm_id)
@@ -237,6 +238,14 @@ static int sof_probe(struct platform_device *pdev)
 
 	dev_dbg(&pdev->dev, "probing SOF DSP device....\n");
 
+	/*
+	 * Currently we only support one VM. comp_id from 0 to 999 is for SOS.
+	 * Other comp_id numbers are for VM1.
+	 * TBD: comp_id number range should be dynamically assigned when
+	 * multiple VMs are supported.
+	 */
+	if (plat_data->fedev == 1)
+		sdev->next_comp_id = SOF_COMP_NUM_MAX;
 	/* initialize sof device */
 	sdev->dev = &pdev->dev;
 	sdev->parent = plat_data->dev;
@@ -250,9 +259,12 @@ static int sof_probe(struct platform_device *pdev)
 	INIT_LIST_HEAD(&sdev->widget_list);
 	INIT_LIST_HEAD(&sdev->dai_list);
 	INIT_LIST_HEAD(&sdev->route_list);
+	INIT_LIST_HEAD(&sdev->vbe_list);
 	dev_set_drvdata(&pdev->dev, sdev);
 	spin_lock_init(&sdev->ipc_lock);
 	spin_lock_init(&sdev->hw_lock);
+
+	INIT_LIST_HEAD(&sdev->vbe_list);
 
 	/* set up platform component driver */
 	snd_sof_new_platform_drv(sdev);
@@ -282,6 +294,8 @@ static int sof_probe(struct platform_device *pdev)
 		goto dbg_err;
 	}
 
+	snd_sof_virtio_miscdev_register(sdev);
+
 	/* init the IPC */
 	sdev->ipc = snd_sof_ipc_init(sdev);
 	if (!sdev->ipc) {
@@ -289,6 +303,8 @@ static int sof_probe(struct platform_device *pdev)
 		goto ipc_err;
 	}
 
+	/* vFE will not touch HW. Let's skip fw loading */
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_VIRTIO_FE)
 	/* load the firmware */
 	ret = snd_sof_load_firmware(sdev, true);
 	if (ret < 0) {
@@ -304,7 +320,10 @@ static int sof_probe(struct platform_device *pdev)
 			ret);
 		goto fw_run_err;
 	}
-
+#else
+	sdev->vfe = plat_data->vdev->priv;
+	((struct sof_vfe *)plat_data->vdev->priv)->sdev = sdev;
+#endif
 	/* now register audio DSP platform driver and dai */
 	ret = snd_soc_register_component(&pdev->dev,  &sdev->plat_drv,
 					 sdev->ops->drv,
@@ -315,6 +334,11 @@ static int sof_probe(struct platform_device *pdev)
 		goto comp_err;
 	}
 
+	if (plat_data->fedev == 1) {
+		ret = 0;
+		goto fe_ret;
+	}
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_VIRTIO_FE)
 	/* init DMA trace */
 	ret = snd_sof_init_trace(sdev);
 	if (ret < 0) {
@@ -323,6 +347,7 @@ static int sof_probe(struct platform_device *pdev)
 			 "warning: failed to initialize trace %d\n", ret);
 	}
 
+	/* vFE doesn't support pm currently */
 	/* autosuspend sof device */
 	pm_runtime_mark_last_busy(sdev->dev);
 	pm_runtime_put_autosuspend(sdev->dev);
@@ -330,7 +355,7 @@ static int sof_probe(struct platform_device *pdev)
 	/* autosuspend pci/acpi/spi device */
 	pm_runtime_mark_last_busy(plat_data->dev);
 	pm_runtime_put_autosuspend(plat_data->dev);
-
+#endif
 	return 0;
 
 comp_err:
@@ -338,13 +363,15 @@ comp_err:
 	snd_sof_free_topology(sdev);
 fw_run_err:
 	snd_sof_fw_unload(sdev);
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_VIRTIO_FE)
 fw_load_err:
+#endif
 	snd_sof_ipc_free(sdev);
 ipc_err:
 	snd_sof_free_debug(sdev);
 dbg_err:
 	snd_sof_remove(sdev);
-
+fe_ret:
 	return ret;
 }
 
@@ -355,6 +382,7 @@ static int sof_remove(struct platform_device *pdev)
 	snd_soc_unregister_component(&pdev->dev);
 	snd_sof_fw_unload(sdev);
 	snd_sof_ipc_free(sdev);
+	snd_sof_virtio_miscdev_unregister();
 	snd_sof_free_debug(sdev);
 	snd_sof_release_trace(sdev);
 	snd_sof_remove(sdev);
