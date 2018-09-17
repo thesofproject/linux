@@ -21,6 +21,7 @@
 #include <linux/platform_device.h>
 #include <linux/firmware.h>
 #include <linux/debugfs.h>
+#include <linux/time.h>
 #include <uapi/sound/sof-ipc.h>
 #include <uapi/sound/sof-fw.h>
 #include "sof-priv.h"
@@ -148,7 +149,9 @@ static int trace_debugfs_create(struct snd_sof_dev *sdev)
 int snd_sof_init_trace_ipc(struct snd_sof_dev *sdev)
 {
 	struct sof_ipc_dma_trace_params params;
+	struct sof_ipc_dma_trace_ts ts;
 	struct sof_ipc_reply ipc_reply;
+	struct timespec t;
 	int ret;
 
 	/* set IPC parameters */
@@ -169,6 +172,21 @@ int snd_sof_init_trace_ipc(struct snd_sof_dev *sdev)
 		return ret;
 	}
 	dev_dbg(sdev->dev, "stream_tag: %d\n", params.stream_tag);
+
+	/* set time shift */
+	/* TODO: is there a better way to get system time?  */
+	ts.hdr.size = sizeof(params);
+	ts.hdr.cmd = SOF_IPC_GLB_TRACE_MSG | SOF_IPC_TRACE_TIME_SHIFT;
+	getnstimeofday(&t);
+	ts.ts = t.tv_nsec;
+
+	ret = sof_ipc_tx_message(sdev->ipc,
+				 ts.hdr.cmd, &ts, sizeof(ts),
+				 &ipc_reply, sizeof(ipc_reply));
+	if (ret < 0) {
+		dev_err(sdev->dev,
+			"error: can't set time shift for trace %d\n", ret);
+	}
 
 	/* send IPC to the DSP */
 	ret = sof_ipc_tx_message(sdev->ipc,
