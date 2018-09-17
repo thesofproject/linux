@@ -3048,6 +3048,7 @@ int snd_soc_dapm_new_widgets(struct snd_soc_card *card)
 {
 	struct snd_soc_dapm_widget *w;
 	unsigned int val;
+	int ret = 0;
 
 	mutex_lock_nested(&card->dapm_mutex, SND_SOC_DAPM_CLASS_INIT);
 
@@ -3070,22 +3071,29 @@ int snd_soc_dapm_new_widgets(struct snd_soc_card *card)
 		case snd_soc_dapm_switch:
 		case snd_soc_dapm_mixer:
 		case snd_soc_dapm_mixer_named_ctl:
-			dapm_new_mixer(w);
+			ret = dapm_new_mixer(w);
 			break;
 		case snd_soc_dapm_mux:
 		case snd_soc_dapm_demux:
-			dapm_new_mux(w);
+			ret = dapm_new_mux(w);
 			break;
 		case snd_soc_dapm_pga:
 		case snd_soc_dapm_effect:
 		case snd_soc_dapm_out_drv:
-			dapm_new_pga(w);
+			ret = dapm_new_pga(w);
 			break;
 		case snd_soc_dapm_dai_link:
-			dapm_new_dai_link(w);
+			ret = dapm_new_dai_link(w);
 			break;
 		default:
 			break;
+		}
+
+		if (ret < 0) {
+			kfree(w->kcontrols);
+			w->kcontrols = NULL;
+			mutex_unlock(&card->dapm_mutex);
+			return ret;
 		}
 
 		/* Read the initial power state from the device */
