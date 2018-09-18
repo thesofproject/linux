@@ -148,7 +148,6 @@ void hda_dsp_ctrl_misc_clock_gating(struct snd_sof_dev *sdev, bool enable)
 	snd_sof_pci_update_bits(sdev, PCI_CGCTL, PCI_CGCTL_MISCBDCGE_MASK, val);
 }
 
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
 /*
  * While performing reset, controller may not come back properly and causing
  * issues, so recommendation is to set CGCTL.MISCBDCGE to 0 then do reset
@@ -165,5 +164,3 @@ int hda_dsp_ctrl_init_chip(struct snd_sof_dev *sdev, bool full_reset)
 
 	return ret;
 }
-#endif
-
