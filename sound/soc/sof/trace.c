@@ -21,10 +21,14 @@
 #include <linux/platform_device.h>
 #include <linux/firmware.h>
 #include <linux/debugfs.h>
+#include <linux/ctype.h>
 #include <uapi/sound/sof-ipc.h>
 #include <uapi/sound/sof-fw.h>
 #include "sof-priv.h"
 #include "ops.h"
+
+#define CREATE_TRACE_POINTS
+#include <trace/events/intel-sof.h>
 
 static size_t sof_wait_trace_avail(struct snd_sof_dev *sdev,
 				   loff_t pos, size_t buffer_size)
@@ -247,6 +251,8 @@ int snd_sof_trace_update_pos(struct snd_sof_dev *sdev,
 			     struct sof_ipc_dma_trace_posn *posn)
 {
 	if (sdev->dtrace_is_enabled && sdev->host_offset != posn->host_offset) {
+		snd_sof_trace_read_buf(sdev,
+				       posn->host_offset - sdev->host_offset);
 		sdev->host_offset = posn->host_offset;
 		wake_up(&sdev->trace_sleep);
 	}
@@ -255,6 +261,25 @@ int snd_sof_trace_update_pos(struct snd_sof_dev *sdev,
 		dev_err(sdev->dev,
 			"error: DSP trace buffer overflow %u bytes. Total messages %d\n",
 			posn->overflow, posn->messages);
+
+	return 0;
+}
+
+int snd_sof_trace_read_buf(struct snd_sof_dev *sdev, uint32_t size)
+{
+	uint64_t time, val;
+	int i;
+
+	for (i = sdev->host_offset; i < sdev->host_offset + size; i += 16) {
+		time = *(u64 *)(sdev->dmatb.area + i);
+		val = *(u64 *)(sdev->dmatb.area + i + 8);
+		if (!isprint((char)(val >> 16)) || !isprint((char)(val >> 8))
+		    || !isprint((char)val)) {
+			trace_sof_dma_read_val(i, time, val);
+		} else {
+			trace_sof_dma_read_cmd(i, time,	val);
+		}
+	}
 
 	return 0;
 }

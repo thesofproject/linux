@@ -482,6 +482,8 @@ int snd_sof_debugfs_create_item(struct snd_sof_dev *sdev,
 				const char *name);
 int snd_sof_trace_update_pos(struct snd_sof_dev *sdev,
 			     struct sof_ipc_dma_trace_posn *posn);
+int snd_sof_trace_read_buf(struct snd_sof_dev *sdev,
+			     uint32_t size);
 void snd_sof_trace_notify_for_error(struct snd_sof_dev *sdev);
 int snd_sof_get_status(struct snd_sof_dev *sdev, u32 panic_code,
 		       u32 tracep_code, void *oops, void *stack,
