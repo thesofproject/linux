@@ -285,6 +285,7 @@ static int sof_control_load_volume(struct snd_soc_component *scomp,
 	scontrol->comp_id = sdev->next_comp_id;
 	scontrol->num_channels = le32_to_cpu(mc->num_channels);
 
+
 	dev_dbg(sdev->dev, "tplg: load kcontrol index %d chans %d\n",
 		scontrol->comp_id, scontrol->num_channels);
 
@@ -2362,6 +2363,48 @@ int snd_sof_complete_pipeline(struct snd_sof_dev *sdev,
 	return 1;
 }
 
+static int snd_sof_get_kcontrol_val(struct snd_sof_dev *sdev)
+{
+	struct snd_sof_control *scontrol = NULL;
+	int ipc_cmd, ctrl_type;
+	int ret = 0;
+
+	list_for_each_entry(scontrol, &sdev->kcontrol_list, list) {
+
+		/* notify DSP of kcontrol values */
+		switch (scontrol->cmd) {
+		case SOF_CTRL_CMD_VOLUME:
+		case SOF_CTRL_CMD_ENUM:
+			ipc_cmd = SOF_IPC_COMP_GET_VALUE;
+			ctrl_type = SOF_CTRL_TYPE_VALUE_CHAN_GET;
+			ret = snd_sof_ipc_get_comp_data(sdev->ipc, scontrol,
+							ipc_cmd, ctrl_type,
+							scontrol->cmd);
+			break;
+		case SOF_CTRL_CMD_BINARY:
+			ipc_cmd = SOF_IPC_COMP_GET_DATA;
+			ctrl_type = SOF_CTRL_TYPE_DATA_GET;
+			ret = snd_sof_ipc_get_comp_data(sdev->ipc, scontrol,
+							ipc_cmd, ctrl_type,
+							scontrol->cmd);
+			break;
+
+		default:
+			dev_err(sdev->dev,
+				"error: Invalid scontrol->cmd: %d\n",
+				scontrol->cmd);
+			return -EINVAL;
+		}
+		if (ret < 0) {
+			dev_warn(sdev->dev,
+				"error: failed kcontrol value get for widget: %d\n",
+				scontrol->comp_id);
+		}
+	}
+
+	return ret;
+}
+
 /* completion - called at completion of firmware loading */
 static void sof_complete(struct snd_soc_component *scomp)
 {
@@ -2382,6 +2425,7 @@ static void sof_complete(struct snd_soc_component *scomp)
 			break;
 		}
 	}
+	snd_sof_get_kcontrol_val(sdev);
 }
 
 /* manifest - optional to inform component of manifest */
