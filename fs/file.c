@@ -957,6 +957,7 @@ int f_dupfd(unsigned int from, struct file *file, unsigned flags)
 	}
 	return err;
 }
+EXPORT_SYMBOL(f_dupfd);
 
 int iterate_fd(struct files_struct *files, unsigned n,
 		int (*f)(const void *, struct file *, unsigned),

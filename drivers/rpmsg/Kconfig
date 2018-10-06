@@ -15,6 +15,25 @@ config RPMSG_CHAR
 	  in /dev. They make it possible for user-space programs to send and
 	  receive rpmsg packets.
 
+config RPMSG_CLK
+	tristate "RPMSG clock API redirection"
+	depends on COMMON_CLK
+	depends on RPMSG
+	help
+	  Say Y here to redirect clock API from the remote processor.
+
+config RPMSG_HOSTFS
+	tristate "RPMSG fs API redirection"
+	depends on RPMSG
+	help
+	  Say Y here to redirect fs API from the remote processor.
+
+config RPMSG_SYSLOG
+	tristate "RPMSG syslog redirection"
+	depends on RPMSG
+	help
+	  Say Y here to redirect the syslog from the remote processor.
+
 config RPMSG_QCOM_GLINK_NATIVE
 	tristate
 	select RPMSG

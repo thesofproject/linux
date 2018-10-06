@@ -109,6 +109,7 @@ struct rpmsg_driver {
 	int (*probe)(struct rpmsg_device *dev);
 	void (*remove)(struct rpmsg_device *dev);
 	int (*callback)(struct rpmsg_device *, void *, int, void *, u32);
+	int (*match)(struct rpmsg_device *dev, struct rpmsg_driver *drv);
 };
 
 #if IS_ENABLED(CONFIG_RPMSG)
@@ -121,6 +122,15 @@ void rpmsg_destroy_ept(struct rpmsg_endpoint *);
 struct rpmsg_endpoint *rpmsg_create_ept(struct rpmsg_device *,
 					rpmsg_rx_cb_t cb, void *priv,
 					struct rpmsg_channel_info chinfo);
+
+int rpmsg_get_max_bufsize(struct rpmsg_endpoint *ept);
+void *rpmsg_get_tx_payload_buffer(struct rpmsg_endpoint *ept,
+				  unsigned int *len, bool wait);
+
+int rpmsg_send_nocopy(struct rpmsg_endpoint *ept, void *data, int len);
+int rpmsg_sendto_nocopy(struct rpmsg_endpoint *ept, void *data, int len, u32 dst);
+int rpmsg_send_offchannel_nocopy(struct rpmsg_endpoint *ept, u32 src, u32 dst,
+				 void *data, int len);
 
 int rpmsg_send(struct rpmsg_endpoint *ept, void *data, int len);
 int rpmsg_sendto(struct rpmsg_endpoint *ept, void *data, int len, u32 dst);
@@ -178,6 +188,49 @@ static inline struct rpmsg_endpoint *rpmsg_create_ept(struct rpmsg_device *rpdev
 	WARN_ON(1);
 
 	return ERR_PTR(-ENXIO);
+}
+
+static inline int rpmsg_get_max_bufsize(struct rpmsg_endpoint *ept)
+{
+	/* This shouldn't be possible */
+	WARN_ON(1);
+
+	return -ENXIO;
+}
+
+
+static inline void *rpmsg_get_tx_payload_buffer(struct rpmsg_endpoint *ept,
+						unsigned int *len, bool wait)
+{
+	/* This shouldn't be possible */
+	WARN_ON(1);
+
+	return ERR_PTR(-ENXIO);
+}
+
+static inline int rpmsg_send_nocopy(struct rpmsg_endpoint *ept, void *data, int len)
+{
+	/* This shouldn't be possible */
+	WARN_ON(1);
+
+	return -ENXIO;
+}
+
+static inline int rpmsg_sendto_nocopy(struct rpmsg_endpoint *ept, void *data, int len, u32 dst)
+{
+	/* This shouldn't be possible */
+	WARN_ON(1);
+
+	return -ENXIO;
+}
+
+static inline int rpmsg_send_offchannel_nocopy(struct rpmsg_endpoint *ept, u32 src, u32 dst,
+					       void *data, int len)
+{
+	/* This shouldn't be possible */
+	WARN_ON(1);
+
+	return -ENXIO;
 }
 
 static inline int rpmsg_send(struct rpmsg_endpoint *ept, void *data, int len)
