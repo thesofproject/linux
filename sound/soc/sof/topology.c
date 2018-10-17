@@ -25,6 +25,7 @@
 #include <uapi/sound/sof-ipc.h>
 #include <uapi/sound/sof-topology.h>
 #include "sof-priv.h"
+#include "ops.h"
 
 #define COMP_ID_UNASSIGNED		0xffffffff
 /* Constants used in the computation of linear volume gain from dB gain */
@@ -1084,6 +1085,7 @@ static int sof_widget_load_pipeline(struct snd_soc_component *scomp,
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_tplg_private *private = &tw->priv;
+	struct sof_ipc_pm_core_config pm_core_config;
 	struct sof_ipc_pipe_new *pipeline;
 	struct snd_sof_widget *comp_swidget;
 	int ret;
@@ -1129,8 +1131,33 @@ static int sof_widget_load_pipeline(struct snd_soc_component *scomp,
 
 	ret = sof_ipc_tx_message(sdev->ipc, pipeline->hdr.cmd, pipeline,
 				 sizeof(*pipeline), r, sizeof(*r));
+	if (ret < 0)
+		goto err;
+
+	/* enable schedule core */
+	ret = snd_sof_dsp_core_enable(sdev, 1 << pipeline->core);
+	if (ret < 0) {
+		dev_err(sdev->dev, "error: enabling pipeline schedule core %d\n",
+			pipeline->core);
+		goto err;
+	}
+
+	/* send ipc to enable schedule core */
+	memset(&pm_core_config, 0, sizeof(pm_core_config));
+	pm_core_config.enable_mask = 1 << pipeline->core;
+
+	/* configure core enable ipc message */
+	pm_core_config.hdr.size = sizeof(pm_core_config);
+	pm_core_config.hdr.cmd = SOF_IPC_GLB_PM_MSG | SOF_IPC_PM_CORE_ENABLE;
+
+	/* send core enable ipc to dsp */
+	ret = sof_ipc_tx_message(sdev->ipc, pm_core_config.hdr.cmd,
+				 &pm_core_config, sizeof(pm_core_config),
+				 &pm_core_config, sizeof(pm_core_config));
+
 	if (ret >= 0)
 		return ret;
+
 err:
 	kfree(pipeline);
 	return ret;
@@ -1733,12 +1760,15 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 static int sof_widget_unload(struct snd_soc_component *scomp,
 			     struct snd_soc_dobj *dobj)
 {
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	const struct snd_kcontrol_new *kc = NULL;
+	struct sof_ipc_pipe_new *pipeline;
 	struct snd_soc_dapm_widget *widget;
 	struct snd_sof_control *scontrol;
 	struct snd_sof_widget *swidget;
 	struct soc_mixer_control *sm;
 	struct snd_sof_dai *dai;
+	int ret;
 
 	swidget = dobj->private;
 	if (!swidget)
@@ -1756,6 +1786,18 @@ static int sof_widget_unload(struct snd_soc_component *scomp,
 			list_del(&dai->list);
 			kfree(dai);
 		}
+		break;
+	case snd_soc_dapm_scheduler:
+		/* disable pipeline schedule core */
+		pipeline = (struct sof_ipc_pipe_new *)swidget->private;
+		ret = snd_sof_dsp_core_disable(sdev, 1 << pipeline->core);
+		if (ret < 0) {
+			dev_err(sdev->dev, "error: disabling pipeline schedule core %d\n",
+				pipeline->core);
+		}
+
+		/* free private value */
+		kfree(swidget->private);
 		break;
 	case snd_soc_dapm_pga:
 
