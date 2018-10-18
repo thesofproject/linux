@@ -384,7 +384,7 @@ static int sof_remove(struct platform_device *pdev)
 	snd_sof_fw_unload(sdev);
 	snd_sof_ipc_free(sdev);
 	snd_sof_free_debug(sdev);
-	snd_sof_release_trace(sdev);
+	snd_sof_free_trace(sdev);
 	snd_sof_remove(sdev);
 	return 0;
 }
