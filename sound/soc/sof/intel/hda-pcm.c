@@ -229,10 +229,8 @@ int hda_dsp_pcm_close(struct snd_sof_dev *sdev,
 	struct hdac_stream *hstream = substream->runtime->private_data;
 	int ret;
 
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		ret = hda_dsp_stream_put_pstream(sdev, hstream->stream_tag);
-	else
-		ret = hda_dsp_stream_put_cstream(sdev, hstream->stream_tag);
+	ret = hda_dsp_stream_put(sdev, substream->stream,
+				 hstream->stream_tag);
 
 	if (ret) {
 		dev_dbg(sdev->dev, "stream %s not opened!\n", substream->name);

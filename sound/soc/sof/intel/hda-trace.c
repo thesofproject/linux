@@ -81,8 +81,9 @@ int hda_dsp_trace_release(struct snd_sof_dev *sdev)
 	if (sdev->hda->dtrace_stream) {
 		hstream = &sdev->hda->dtrace_stream->hstream;
 		hstream->opened = false;
-		hda_dsp_stream_put_cstream(sdev,
-					   hstream->stream_tag);
+		hda_dsp_stream_put(sdev,
+				   SNDRV_PCM_STREAM_CAPTURE,
+				   hstream->stream_tag);
 		sdev->hda->dtrace_stream = NULL;
 		return 0;
 	}

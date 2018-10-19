@@ -454,8 +454,6 @@ struct hdac_ext_stream *
 	hda_dsp_stream_get(struct snd_sof_dev *sdev, int direction,
 			   int reverse);
 int hda_dsp_stream_put(struct snd_sof_dev *sdev, int direction, int stream_tag);
-int hda_dsp_stream_put_pstream(struct snd_sof_dev *sdev, int stream_tag);
-int hda_dsp_stream_put_cstream(struct snd_sof_dev *sdev, int stream_tag);
 int hda_dsp_stream_spib_config(struct snd_sof_dev *sdev,
 			       struct hdac_ext_stream *stream,
 			       int enable, u32 size);

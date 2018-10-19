@@ -77,7 +77,8 @@ static int cl_stream_prepare(struct snd_sof_dev *sdev, unsigned int format,
 	return hstream->stream_tag;
 
 error:
-	hda_dsp_stream_put_pstream(sdev, hstream->stream_tag);
+	hda_dsp_stream_put(sdev, SNDRV_PCM_STREAM_PLAYBACK,
+			   hstream->stream_tag);
 	snd_dma_free_pages(dmab);
 	return ret;
 }

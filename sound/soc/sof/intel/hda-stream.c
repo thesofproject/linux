@@ -218,44 +218,6 @@ int hda_dsp_stream_put(struct snd_sof_dev *sdev, int direction, int tag)
 	return -ENODEV;
 }
 
-/* free playback stream */
-int hda_dsp_stream_put_pstream(struct snd_sof_dev *sdev, int tag)
-{
-	struct hdac_bus *bus = sof_to_bus(sdev);
-	struct hdac_stream *s;
-
-	/* find used playback stream */
-	list_for_each_entry(s, &bus->stream_list, list) {
-		if (s->direction == SNDRV_PCM_STREAM_PLAYBACK
-			&& s->opened && s->stream_tag == tag) {
-			s->opened = false;
-			return 0;
-		}
-	}
-
-	dev_dbg(sdev->dev, "tag %d not opened!\n", tag);
-	return -ENODEV;
-}
-
-/* free capture stream */
-int hda_dsp_stream_put_cstream(struct snd_sof_dev *sdev, int tag)
-{
-	struct hdac_bus *bus = sof_to_bus(sdev);
-	struct hdac_stream *s;
-
-	/* find used capture stream */
-	list_for_each_entry(s, &bus->stream_list, list) {
-		if (s->direction == SNDRV_PCM_STREAM_CAPTURE
-			&& s->opened && s->stream_tag == tag) {
-			s->opened = false;
-			return 0;
-		}
-	}
-
-	dev_dbg(sdev->dev, "tag %d not opened!\n", tag);
-	return -ENODEV;
-}
-
 int hda_dsp_stream_trigger(struct snd_sof_dev *sdev,
 			   struct hdac_ext_stream *stream, int cmd)
 {
