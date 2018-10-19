@@ -415,6 +415,13 @@ static int vfe_unregister(struct snd_sof_dev *sdev)
 
 struct snd_soc_dai_driver virtio_dai[] = {
 	{
+	.name = "SSP2 Pin",
+	.playback = SOF_DAI_STREAM("ssp2 Tx", 1, 8,
+				   SNDRV_PCM_RATE_8000_192000, SKL_FORMATS),
+	.capture = SOF_DAI_STREAM("ssp2 Rx", 1, 8,
+				  SNDRV_PCM_RATE_8000_192000, SKL_FORMATS),
+	},
+	{
 	.name = "SSP4 Pin",
 	.playback = SOF_DAI_STREAM("ssp4 Tx", 1, 8,
 				   SNDRV_PCM_RATE_8000_192000, SKL_FORMATS),
@@ -438,7 +445,7 @@ struct snd_sof_dsp_ops snd_sof_vfe_ops = {
 
 	/* DAI drivers */
 	.drv		= virtio_dai,
-	.num_drv	= 1,
+	.num_drv	= 2,
 };
 EXPORT_SYMBOL(snd_sof_vfe_ops);
 module_virtio_driver(vfe_audio_driver);

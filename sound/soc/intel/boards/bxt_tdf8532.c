@@ -206,14 +206,27 @@ static struct snd_soc_dai_link broxton_tdf8532_dais[] = {
 		.no_pcm = 1,
 	},
 	{
-		/* SSP4 for vm */
-		.name = "vm_dai_link",
+		/* SSP4 for vm1 */
+		.name = "vm1_dai_linkP",
 		.id = 6,
 		.cpu_dai_name = "SSP4 Pin",
 		.codec_name = "i2c-INT34C3:00",
 		.codec_dai_name = "tdf8532-hifi",
 		.platform_name = "0000:00:0e.0",
 		.ignore_suspend = 1,
+		.dpcm_playback = 1,
+		.no_pcm = 1,
+	},
+	{
+		/* SSP2 Dirana for vm1 */
+		.name = "vm1_dai_linkC",
+		.id = 7,
+		.cpu_dai_name = "SSP2 Pin",
+		.codec_name = "snd-soc-dummy",
+		.codec_dai_name = "snd-soc-dummy-dai",
+		.platform_name = "0000:00:0e.0",
+		.ignore_suspend = 1,
+		.dpcm_capture = 1,
 		.dpcm_playback = 1,
 		.no_pcm = 1,
 	},

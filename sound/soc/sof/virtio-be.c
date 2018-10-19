@@ -186,15 +186,16 @@ static int sbe_ipc_comp(struct snd_sof_dev *sdev, int vm_id,
 /*
  * This function is to get the BE dai link for the GOS
  * It uses the dai_link name to find the BE dai link.
- * The Current dai_link name "vm_dai_link" is for the GOS,
+ * The Current dai_link name "vm#n_dai_linkP/C" is for the GOS,
  * which means only one Virtual Machine is supported.
  * And the VM only support one playback pcm and one capture pcm.
  * After we switch to the new topology, we can support multiple
  * VMs and multiple PCM streams for each VM.
  * This function may be abandoned after switching to the new topology.
  */
+#define VM_NAME_LEN 20
 static struct snd_pcm_substream *
-sbe_get_substream(struct snd_sof_dev *sdev,
+sbe_get_substream(struct snd_sof_dev *sdev, int vm_id,
 		  struct snd_soc_pcm_runtime **rtd, int direction)
 {
 	struct snd_pcm *pcm;
@@ -203,6 +204,7 @@ sbe_get_substream(struct snd_sof_dev *sdev,
 	struct snd_soc_dai_link *dai_link;
 	struct snd_soc_card *card = sdev->card;
 	struct snd_soc_pcm_runtime *r;
+	char tmp[VM_NAME_LEN], *lname = tmp;
 
 	list_for_each_entry(r, &card->rtd_list, list) {
 		/*
@@ -216,12 +218,24 @@ sbe_get_substream(struct snd_sof_dev *sdev,
 
 		stream = &pcm->streams[direction];
 		substream = stream->substream;
-		if (substream) {
+		sprintf(lname, "vm%d_dai_link%c", vm_id, direction ? 'C' : 'P');
+		if (substream && direction == SNDRV_PCM_STREAM_PLAYBACK) {
 			dai_link = r->dai_link;
-			if (strcmp(dai_link->name, "vm_dai_link") == 0) {
+			if (strcmp(dai_link->name, lname) == 0) {
 				/*
-				 * In the current solution, "vm_dai_link" is
-				 * for the vFE.
+				 * In the current solution, "vm#n_dai_linkP" is
+				 * for the vFE playback.
+				 */
+				if (rtd)
+					*rtd = r;
+				return substream;
+			}
+		} else if (substream) {
+			dai_link = r->dai_link;
+			if (strcmp(dai_link->name, lname) == 0) {
+				/*
+				 * In the current solution, "vm#n_dai_linkC" is
+				 * for the vFE capture.
 				 */
 				if (rtd)
 					*rtd = r;
@@ -263,7 +277,7 @@ static int sbe_pcm_open(struct snd_sof_dev *sdev,
 
 	mutex_lock(&spcm->mutex);
 
-	substream = sbe_get_substream(sdev, &rtd, direction);
+	substream = sbe_get_substream(sdev, vm_id, &rtd, direction);
 	if (!substream || !rtd)
 		return -ENODEV;
 	if (substream->ref_count > 0)
@@ -332,7 +346,7 @@ static int sbe_pcm_close(struct snd_sof_dev *sdev,
 	if (!spcm)
 		return 0;
 	mutex_lock(&spcm->mutex);
-	substream = sbe_get_substream(sdev, &rtd, direction);
+	substream = sbe_get_substream(sdev, vm_id, &rtd, direction);
 	if (!substream) {
 		mutex_unlock(&spcm->mutex);
 		return 0;
@@ -437,12 +451,13 @@ static int sbe_stream_hw_params(struct snd_sof_dev *sdev,
 	struct snd_pcm_substream *substream;
 	struct snd_pcm_runtime *runtime;
 	struct snd_pcm_hw_params params;
+	struct snd_soc_pcm_runtime *rtd;
 	int direction = pcm->params.direction;
 	u32 pages;
 	int ret;
 
 	/* find the proper substream */
-	substream = sbe_get_substream(sdev, NULL, direction);
+	substream = sbe_get_substream(sdev, vm_id, NULL, direction);
 	if (!substream)
 		return -ENODEV;
 
@@ -464,8 +479,11 @@ static int sbe_stream_hw_params(struct snd_sof_dev *sdev,
 	/* convert buffer GPA to HPA */
 	ret = sbe_stream_prepare(sdev, pcm, vm_id, table);
 
-	/* Use different stream_tag from FE. This is the real tag */
 	sbe_assemble_params(pcm, &params);
+
+	rtd = substream->private_data;
+
+	/* Use different stream_tag from FE. This is the real tag */
 	pcm->params.stream_tag =
 		snd_sof_pcm_platform_hw_params(sdev, substream, &params);
 	dev_dbg(sdev->dev, "stream_tag %d",
@@ -496,7 +514,7 @@ static int sbe_ipc_stream_codec(struct snd_sof_dev *sdev, int vm_id,
 		stream = (struct sof_ipc_stream *)hdr;
 		comp_id = stream->comp_id;
 		snd_sof_find_spcm_comp(sdev, comp_id, &direction);
-		substream = sbe_get_substream(sdev, &rtd, direction);
+		substream = sbe_get_substream(sdev, vm_id, &rtd, direction);
 
 		for (i = 0; i < rtd->num_codecs; i++) {
 			/*
@@ -548,7 +566,7 @@ static int sbe_ipc_stream(struct snd_sof_dev *sdev, int vm_id,
 		stream = (struct sof_ipc_stream *)hdr;
 		comp_id = stream->comp_id;
 		snd_sof_find_spcm_comp(sdev, comp_id, &direction);
-		substream = sbe_get_substream(sdev, &rtd, direction);
+		substream = sbe_get_substream(sdev, vm_id, &rtd, direction);
 		snd_sof_pcm_platform_trigger(sdev, substream,
 					     SNDRV_PCM_TRIGGER_START);
 		break;
@@ -556,7 +574,7 @@ static int sbe_ipc_stream(struct snd_sof_dev *sdev, int vm_id,
 		stream = (struct sof_ipc_stream *)hdr;
 		comp_id = stream->comp_id;
 		snd_sof_find_spcm_comp(sdev, comp_id, &direction);
-		substream = sbe_get_substream(sdev, &rtd, direction);
+		substream = sbe_get_substream(sdev, vm_id, &rtd, direction);
 		for (i = 0; i < rtd->num_codecs; i++) {
 			codec_dai = rtd->codec_dais[i];
 			ops = codec_dai->driver->ops;
