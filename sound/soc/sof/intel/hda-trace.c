@@ -52,7 +52,12 @@ static int hda_dsp_trace_prepare(struct snd_sof_dev *sdev)
 
 int hda_dsp_trace_init(struct snd_sof_dev *sdev, u32 *tag)
 {
-	sdev->hda->dtrace_stream = hda_dsp_stream_get_cstream(sdev);
+	/* get last capture stream for dma trace, this make FW easier
+	 * to manage dma channels just from index 0
+	 */
+	sdev->hda->dtrace_stream = hda_dsp_stream_get(sdev,
+						      SNDRV_PCM_STREAM_CAPTURE,
+						      TRUE);
 
 	if (!sdev->hda->dtrace_stream) {
 		dev_err(sdev->dev,

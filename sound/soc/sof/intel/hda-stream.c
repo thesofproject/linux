@@ -165,18 +165,28 @@ int hda_dsp_stream_spib_config(struct snd_sof_dev *sdev,
 
 /* get next unused stream */
 struct hdac_ext_stream *
-hda_dsp_stream_get(struct snd_sof_dev *sdev, int direction)
+hda_dsp_stream_get(struct snd_sof_dev *sdev, int direction, int reverse)
 {
 	struct hdac_bus *bus = sof_to_bus(sdev);
 	struct hdac_ext_stream *stream = NULL;
 	struct hdac_stream *s;
 
-	/* get an unused playback stream */
-	list_for_each_entry(s, &bus->stream_list, list) {
-		if (s->direction == direction && !s->opened) {
-			s->opened = true;
-			stream = stream_to_hdac_ext_stream(s);
-			break;
+	/* get an unused stream */
+	if (reverse) {
+		list_for_each_entry_reverse(s, &bus->stream_list, list) {
+			if (s->direction == direction && !s->opened) {
+				s->opened = true;
+				stream = stream_to_hdac_ext_stream(s);
+				break;
+			}
+		}
+	} else {
+		list_for_each_entry(s, &bus->stream_list, list) {
+			if (s->direction == direction && !s->opened) {
+				s->opened = true;
+				stream = stream_to_hdac_ext_stream(s);
+				break;
+			}
 		}
 	}
 
@@ -185,56 +195,6 @@ hda_dsp_stream_get(struct snd_sof_dev *sdev, int direction)
 		dev_err(sdev->dev, "error: no free %s streams\n",
 			direction == SNDRV_PCM_STREAM_PLAYBACK ?
 			"playback" : "capture");
-
-	return stream;
-}
-
-/* get next unused playback stream */
-struct hdac_ext_stream *
-hda_dsp_stream_get_pstream(struct snd_sof_dev *sdev)
-{
-	struct hdac_bus *bus = sof_to_bus(sdev);
-	struct hdac_ext_stream *stream = NULL;
-	struct hdac_stream *s;
-
-	/* get an unused playback stream */
-	list_for_each_entry(s, &bus->stream_list, list) {
-		if (s->direction == SNDRV_PCM_STREAM_PLAYBACK
-			&& !s->opened) {
-			s->opened = true;
-			stream = stream_to_hdac_ext_stream(s);
-			break;
-		}
-	}
-
-	/* stream found ? */
-	if (!stream)
-		dev_err(sdev->dev, "error: no free playback streams\n");
-
-	return stream;
-}
-
-/* get next unused capture stream */
-struct hdac_ext_stream *
-hda_dsp_stream_get_cstream(struct snd_sof_dev *sdev)
-{
-	struct hdac_bus *bus = sof_to_bus(sdev);
-	struct hdac_ext_stream *stream = NULL;
-	struct hdac_stream *s;
-
-	/* get an unused capture stream */
-	list_for_each_entry(s, &bus->stream_list, list) {
-		if (s->direction == SNDRV_PCM_STREAM_CAPTURE
-			&& !s->opened) {
-			s->opened = true;
-			stream = stream_to_hdac_ext_stream(s);
-			break;
-		}
-	}
-
-	/* stream found ? */
-	if (!stream)
-		dev_err(sdev->dev, "error: no free capture streams\n");
 
 	return stream;
 }

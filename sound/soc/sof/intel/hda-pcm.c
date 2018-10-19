@@ -212,11 +212,7 @@ int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
 {
 	struct hdac_ext_stream *stream;
 
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		stream = hda_dsp_stream_get_pstream(sdev);
-	else
-		stream = hda_dsp_stream_get_cstream(sdev);
-
+	stream = hda_dsp_stream_get(sdev, substream->stream, FALSE);
 	if (!stream) {
 		dev_err(sdev->dev, "error: no stream available\n");
 		return -ENODEV;

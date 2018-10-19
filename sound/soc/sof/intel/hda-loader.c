@@ -44,7 +44,7 @@ static int cl_stream_prepare(struct snd_sof_dev *sdev, unsigned int format,
 	int ret;
 
 	if (direction == SNDRV_PCM_STREAM_PLAYBACK) {
-		stream = hda_dsp_stream_get_pstream(sdev);
+		stream = hda_dsp_stream_get(sdev, direction, FALSE);
 	} else {
 		dev_err(sdev->dev, "error: code loading DMA is playback only\n");
 		return -EINVAL;
