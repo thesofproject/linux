@@ -89,6 +89,10 @@ struct snd_sof_dsp_ops sof_apl_ops = {
 	/* firmware run */
 	.run = hda_dsp_cl_boot_firmware,
 
+	/* dsp core enable/disable */
+	.core_enable = hda_dsp_core_run,
+	.core_disable = hda_dsp_core_reset_power_down,
+
 	/* trace callback */
 	.trace_init = hda_dsp_trace_init,
 	.trace_release = hda_dsp_trace_release,

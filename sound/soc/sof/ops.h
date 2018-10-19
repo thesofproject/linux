@@ -61,6 +61,24 @@ static inline int snd_sof_dsp_reset(struct snd_sof_dev *sdev)
 		return 0;
 }
 
+/* dsp core enable/disable */
+static inline int snd_sof_dsp_core_enable(struct snd_sof_dev *sdev,
+					  unsigned int core_mask)
+{
+	if (sdev->ops->core_enable)
+		return sdev->ops->core_enable(sdev, core_mask);
+	else
+		return 0;
+}
+
+static inline int snd_sof_dsp_core_disable(struct snd_sof_dev *sdev,
+					   unsigned int core_mask)
+{
+	if (sdev->ops->core_disable)
+		return sdev->ops->core_disable(sdev, core_mask);
+	else
+		return 0;
+}
 /* power management */
 static inline int snd_sof_dsp_resume(struct snd_sof_dev *sdev)
 {

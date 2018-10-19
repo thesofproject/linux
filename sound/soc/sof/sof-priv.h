@@ -85,6 +85,10 @@ struct snd_sof_dsp_ops {
 	int (*run)(struct snd_sof_dev *sof_dev);
 	int (*stall)(struct snd_sof_dev *sof_dev);
 	int (*reset)(struct snd_sof_dev *sof_dev);
+	int (*core_enable)(struct snd_sof_dev *sof_dev,
+			   unsigned int core_mask);
+	int (*core_disable)(struct snd_sof_dev *sof_dev,
+			    unsigned int core_mask);
 
 	/* DSP PM */
 	int (*suspend)(struct snd_sof_dev *sof_dev, int state);
