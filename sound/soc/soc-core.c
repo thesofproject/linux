@@ -1309,8 +1309,6 @@ static void soc_remove_dai_links(struct snd_soc_card *card)
 static int snd_soc_init_multicodec(struct snd_soc_card *card,
 				   struct snd_soc_dai_link *dai_link)
 {
-  printk(KERN_ERR "plb name %s cpu_dai_name %s codec_name %s id %d\n",dai_link->name, dai_link->cpu_dai_name, dai_link->codec_name, dai_link->id);
-    
 	/* Legacy codec/codec_dai link is a single entry in multicodec */
 	if (dai_link->codec_name || dai_link->codec_of_node ||
 	    dai_link->codec_dai_name) {
