@@ -96,7 +96,7 @@ struct snd_sof_pcm *snd_sof_find_spcm_pcm_id(struct snd_sof_dev *sdev,
 }
 
 struct snd_sof_widget *snd_sof_find_swidget(struct snd_sof_dev *sdev,
-					    char *name)
+					    const char *name)
 {
 	struct snd_sof_widget *swidget = NULL;
 
@@ -107,6 +107,7 @@ struct snd_sof_widget *snd_sof_find_swidget(struct snd_sof_dev *sdev,
 
 	return NULL;
 }
+EXPORT_SYMBOL(snd_sof_find_swidget);
 
 struct snd_sof_dai *snd_sof_find_dai(struct snd_sof_dev *sdev,
 				     char *name)

@@ -432,7 +432,7 @@ int snd_sof_dsp_mailbox_init(struct snd_sof_dev *sdev, u32 dspbox,
 int sof_ipc_tx_message(struct snd_sof_ipc *ipc, u32 header, void *tx_data,
 		       size_t tx_bytes, void *rx_data, size_t rx_bytes);
 struct snd_sof_widget *snd_sof_find_swidget(struct snd_sof_dev *sdev,
-					    char *name);
+					    const char *name);
 struct snd_sof_dai *snd_sof_find_dai(struct snd_sof_dev *sdev,
 				     char *name);
 struct snd_sof_pcm *snd_sof_find_spcm_dai(struct snd_sof_dev *sdev,
