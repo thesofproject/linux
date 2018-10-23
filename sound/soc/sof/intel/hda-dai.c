@@ -20,8 +20,6 @@
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
 
 struct hda_pipe_params {
-	u8 host_dma_id;
-	u8 link_dma_id;
 	u32 ch;
 	u32 s_freq;
 	u32 s_fmt;
@@ -101,7 +99,6 @@ static int hda_link_hw_params(struct snd_pcm_substream *substream,
 	p_params.ch = params_channels(params);
 	p_params.s_freq = params_rate(params);
 	p_params.stream = substream->stream;
-	p_params.link_dma_id = stream_tag - 1;
 	p_params.link_index = link->index;
 	p_params.format = params_format(params);
 
@@ -158,6 +155,7 @@ static int hda_link_hw_free(struct snd_pcm_substream *substream,
 	if (!link)
 		return -EINVAL;
 
+	snd_soc_dai_set_dma_data(dai, substream, NULL);
 	snd_hdac_ext_link_clear_stream_id(link,
 					  hdac_stream(link_dev)->stream_tag);
 	snd_hdac_ext_stream_release(link_dev, HDAC_EXT_STREAM_TYPE_LINK);

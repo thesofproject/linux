@@ -137,6 +137,12 @@
 #define SOF_MEM_CAPS_EXEC			(1 << 7) /* executable */
 
 /*
+ * Stream configuration.
+ */
+
+#define SOF_IPC_MAX_CHANNELS			8
+
+/*
  * Command Header - Header for all IPC. Identifies IPC message.
  * The size can be greater than the structure size and that means there is
  * extended bespoke data beyond the end of the structure including variable
@@ -278,7 +284,9 @@ struct sof_ipc_dai_ssp_params {
 /* HDA Configuration Request - SOF_IPC_DAI_HDA_CONFIG */
 struct sof_ipc_dai_hda_params {
 	struct sof_ipc_hdr hdr;
-	/* TODO */
+	u32 hda_count;
+	u32 hda_comp_id[SOF_IPC_MAX_CHANNELS];
+	u32 hda_dma_ch[SOF_IPC_MAX_CHANNELS];
 } __attribute__((packed));
 
 /* DMIC Configuration Request - SOF_IPC_DAI_DMIC_CONFIG */
@@ -364,12 +372,6 @@ struct sof_ipc_dai_config {
 		struct sof_ipc_dai_dmic_params dmic;
 	};
 };
-
-/*
- * Stream configuration.
- */
-
-#define SOF_IPC_MAX_CHANNELS			8
 
 /* channel positions - uses same values as ALSA */
 enum sof_ipc_chmap {
@@ -476,6 +478,10 @@ struct sof_ipc_stream_params {
 	/* for notifying host period has completed - 0 means no period IRQ */
 	uint32_t host_period_bytes;
 	enum sof_ipc_chmap chmap[SOF_IPC_MAX_CHANNELS];	/* channel map */
+	union {
+		uint32_t private_data[64];
+		struct sof_ipc_dai_hda_params hda;
+	};
 } __attribute__((packed));
 
 /* PCM params info - SOF_IPC_STREAM_PCM_PARAMS */

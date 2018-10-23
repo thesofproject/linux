@@ -95,6 +95,78 @@ static inline u32 get_bits(struct snd_sof_dev *sdev, int sample_bits)
 	}
 };
 
+/* There are two dma modes in dsp:
+ * (1) host dma and link dma work in decouple mode for SOF + HDA
+ * (2) host dma and GP dma work together for SOF + I2S
+ * The difference is that in decopule mode, the host dma is set by dai
+ * frontend and link dma is set by dai backend and the setting maybe
+ * different while in I2S mode, host dma and GP dma are independent
+ * to each other and GP dma channel is allocated in FW instead of in host
+ */
+static inline int get_hda_dma_channel(struct snd_sof_dev *sdev,
+				      struct snd_pcm_substream *substream,
+				      struct sof_ipc_stream_params *ipc_params)
+{
+	struct snd_soc_pcm_runtime *fe = substream->private_data;
+	struct hdac_ext_stream *hda_stream = NULL;
+	struct snd_soc_dpcm *dpcm;
+	int direction = substream->stream;
+	struct sof_ipc_dai_hda_params *hda_params;
+
+	hda_params = &ipc_params->hda;
+	hda_params->hda_count = 0;
+
+	/* travel BE clients to get BE stream with link dma id */
+	list_for_each_entry(dpcm, &fe->dpcm[direction].be_clients, list_be) {
+		struct snd_soc_pcm_runtime *be = dpcm->be;
+		struct snd_soc_dapm_widget *dapm_widget;
+		struct snd_sof_widget *sof_widget;
+		int index = hda_params->hda_count;
+
+		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+			dapm_widget = be->cpu_dai->playback_widget;
+		else
+			dapm_widget = be->cpu_dai->capture_widget;
+
+		sof_widget = snd_sof_find_swidget(sdev, dapm_widget->name);
+		if (!sof_widget) {
+			dev_err(sdev->dev, "error: failed to find backend widget");
+			return -EINVAL;
+		}
+
+		/* hda_stream is stored in cpu dai if the backend is for HDA
+		 * codecs. link dma copys data to HDA system and its channel
+		 * is derived from stream_tag in decouple mode. If the backend
+		 * is for I2S codecs, the dma channel is allocated in FW, so its
+		 * value is not set here
+		 */
+		hda_stream = snd_soc_dai_get_dma_data(be->cpu_dai, substream);
+		if (hda_stream)
+			hda_params->hda_dma_ch[index] =
+					hda_stream->hstream.stream_tag - 1;
+
+		hda_params->hda_comp_id[index] = sof_widget->comp_id;
+
+		dev_dbg(sdev->dev, "hda[%d] dma channel: %d", index,
+			hda_params->hda_dma_ch[index]);
+
+		if (hda_params->hda_dma_ch[index] >=
+				SOF_HDA_CAPTURE_STREAMS ||
+		    hda_params->hda_dma_ch[index] >=
+				SOF_HDA_PLAYBACK_STREAMS) {
+			dev_err(sdev->dev, "error: hda[%d] dma channel:%d is out of range\n",
+				index,
+				hda_params->hda_dma_ch[index]);
+
+			return -EIO;
+		}
+
+		hda_params->hda_count++;
+	}
+
+	return 0;
+}
+
 int hda_dsp_pcm_hw_params(struct snd_sof_dev *sdev,
 			  struct snd_pcm_substream *substream,
 			  struct snd_pcm_hw_params *params,
@@ -135,6 +207,12 @@ int hda_dsp_pcm_hw_params(struct snd_sof_dev *sdev,
 		ipc_params->host_period_bytes = 0;
 
 	ipc_params->stream_tag = hstream->stream_tag;
+
+	ret = get_hda_dma_channel(sdev, substream, ipc_params);
+	if (ret < 0) {
+		dev_err(sdev->dev, "error: failed to get hda dma channel\n");
+		return -EIO;
+	}
 
 	return 0;
 }
