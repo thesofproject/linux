@@ -609,6 +609,47 @@ static int bdw_cmd_done(struct snd_sof_dev *sdev, int dir)
 }
 
 /*
+ *stream callbacks
+ */
+static int bdw_dsp_pcm_hw_params(struct snd_sof_dev *sdev,
+				 struct snd_pcm_substream *substream,
+				 struct snd_pcm_hw_params *params,
+				 struct sof_ipc_stream_params *ipc_params)
+{
+	struct snd_soc_pcm_runtime *fe = substream->private_data;
+	struct hdac_ext_stream *be_stream = NULL;
+	struct snd_soc_dpcm *dpcm;
+	int direction = substream->stream;
+
+	/* travel BE clients to get BE stream with link dma id */
+	list_for_each_entry(dpcm, &fe->dpcm[direction].be_clients, list_be) {
+		struct snd_soc_pcm_runtime *be = dpcm->be;
+		struct snd_soc_dapm_widget *dapm_widget;
+		struct snd_sof_widget *sof_widget;
+		int index = ipc_params->be_dma_params.be_count;
+
+		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+			dapm_widget = be->cpu_dai->playback_widget;
+		else
+			dapm_widget = be->cpu_dai->capture_widget;
+
+		sof_widget = snd_sof_find_swidget(sdev, dapm_widget->name);
+		if (!sof_widget) {
+			dev_err(sdev->dev, "error: failed to find backend widget");
+			return -EINVAL;
+		}
+
+		ipc_params->be_dma_params.be_dma_ch[index] = index;
+		ipc_params->be_dma_params.be_comp_id[index] =
+				sof_widget->comp_id;
+
+		ipc_params->be_dma_params.be_count++;
+	}
+
+	return 0;
+}
+
+/*
  * Probe and remove.
  */
 static int bdw_probe(struct snd_sof_dev *sdev)
@@ -781,6 +822,9 @@ struct snd_sof_dsp_ops sof_bdw_ops = {
 	.fw_ready	= bdw_fw_ready,
 	.is_ready	= bdw_is_ready,
 	.cmd_done	= bdw_cmd_done,
+
+	/* stream callbacks */
+	.pcm_hw_params	= bdw_dsp_pcm_hw_params,
 
 	/* debug */
 	.debug_map  = bdw_debugfs,

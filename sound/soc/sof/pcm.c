@@ -146,7 +146,7 @@ static int sof_pcm_hw_params(struct snd_pcm_substream *substream,
 					     substream,
 					     params,
 					     &pcm.params);
-	dev_dbg(sdev->dev, "stream_tag %d", pcm.params.stream_tag);
+	dev_dbg(sdev->dev, "stream_tag %d", pcm.params.host_dma_ch + 1);
 
 	/* send IPC to the DSP */
 	ret = sof_ipc_tx_message(sdev->ipc, pcm.hdr.cmd, &pcm, sizeof(pcm),
