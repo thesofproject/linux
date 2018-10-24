@@ -12,7 +12,7 @@
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
-#include <sound/soc-acpi.h>
+#include <sound/sof.h>
 #include "../../codecs/hdac_hdmi.h"
 #include "skl_hda_dsp_common.h"
 
@@ -101,14 +101,14 @@ static struct snd_soc_card hda_soc_card = {
 #define IDISP_ROUTE_COUNT	(IDISP_DAI_COUNT * 2)
 #define IDISP_CODEC_MASK	0x4
 
-static int skl_hda_fill_card_info(struct snd_soc_acpi_mach_params *mach_params)
+static int skl_hda_fill_card_info(const char *platform,
+				  unsigned long codec_mask)
 {
 	struct snd_soc_card *card = &hda_soc_card;
 	struct snd_soc_dai_link *dai_link;
-	u32 codec_count, codec_mask;
+	u32 codec_count;
 	int i, num_links, num_route;
 
-	codec_mask = mach_params->codec_mask;
 	codec_count = hweight_long(codec_mask);
 
 	if (codec_count == 1 && codec_mask & IDISP_CODEC_MASK) {
@@ -127,16 +127,21 @@ static int skl_hda_fill_card_info(struct snd_soc_acpi_mach_params *mach_params)
 	card->num_dapm_routes = num_route;
 
 	for_each_card_prelinks(card, i, dai_link)
-		dai_link->platform_name = mach_params->platform;
+		dai_link->platform_name = platform;
 
 	return 0;
 }
 
 static int skl_hda_audio_probe(struct platform_device *pdev)
 {
-	struct snd_soc_acpi_mach *mach;
 	struct skl_hda_private *ctx;
 	int ret;
+
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL)
+	struct snd_sof_pdata *pdata = dev_get_platdata(&pdev->dev);
+#else
+	struct skl_machine_pdata *pdata = dev_get_drvdata(&pdev->dev);
+#endif
 
 	dev_dbg(&pdev->dev, "%s: entry\n", __func__);
 
@@ -146,11 +151,10 @@ static int skl_hda_audio_probe(struct platform_device *pdev)
 
 	INIT_LIST_HEAD(&ctx->hdmi_pcm_list);
 
-	mach = dev_get_drvdata(&pdev->dev);
-	if (!mach)
+	if (!pdata)
 		return -EINVAL;
 
-	ret = skl_hda_fill_card_info(&mach->mach_params);
+	ret = skl_hda_fill_card_info(pdata->platform, pdata->codec_mask);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "Unsupported HDAudio/iDisp configuration found\n");
 		return ret;
