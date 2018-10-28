@@ -125,7 +125,8 @@ config SND_SOC_ACPI_INTEL_MATCH
 	select SND_SOC_ACPI if ACPI
 	# this option controls the compilation of ACPI matching tables and
 	# helpers and is not meant to be selected by the user.
-endif ## SND_SOC_INTEL_SST_TOPLEVEL
+endif ## SND_SOC_INTEL_SST_TOPLEVEL || SND_SOC_SOF_INTEL
+
 
 # ASoC codec drivers
 source "sound/soc/intel/boards/Kconfig"
