@@ -78,7 +78,7 @@ static const struct hdac_io_ops io_ops = {
  * Returns 0 if successful, or a negative error code.
  */
 int sof_hda_bus_init(struct hdac_bus *bus, struct device *dev,
-			const struct hdac_ext_bus_ops *ext_ops)
+		     const struct hdac_ext_bus_ops *ext_ops)
 {
 	static int idx;
 
