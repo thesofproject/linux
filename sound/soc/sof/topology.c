@@ -2081,7 +2081,7 @@ static int sof_link_load(struct snd_soc_component *scomp, int index,
 	/* usually we use 1 config, but for HDA it may be 0 ATM */
 	if (le32_to_cpu(cfg->num_hw_configs) != 1)
 		dev_warn(sdev->dev, "warn: unexpected DAI config count %d!\n",
-			le32_to_cpu(cfg->num_hw_configs));
+			 le32_to_cpu(cfg->num_hw_configs));
 
 	/* check we have some tokens - we need at least DAI type */
 	if (le32_to_cpu(private->size) == 0) {
