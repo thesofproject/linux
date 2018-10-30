@@ -107,6 +107,7 @@ struct snd_sof_widget *snd_sof_find_swidget(struct snd_sof_dev *sdev,
 
 	return NULL;
 }
+EXPORT_SYMBOL(snd_sof_find_swidget);
 
 struct snd_sof_dai *snd_sof_find_dai(struct snd_sof_dev *sdev,
 				     const char *name)
