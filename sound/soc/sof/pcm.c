@@ -605,8 +605,7 @@ static int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 		snd_soc_rtdcom_lookup(rtd, DRV_NAME);
 	struct snd_sof_dev *sdev =
 		snd_soc_component_get_drvdata(component);
-	struct snd_sof_dai *dai =
-		snd_sof_find_dai(sdev, (char *)rtd->dai_link->name);
+	struct snd_sof_dai *dai = snd_sof_find_dai(sdev, rtd->dai_link->name);
 
 	/* no topology exists for this BE, try a common configuration */
 	if (!dai) {

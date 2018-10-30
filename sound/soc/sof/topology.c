@@ -2227,7 +2227,7 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 	source_swidget = snd_sof_find_swidget(sdev, (char *)route->source);
 	if (!source_swidget) {
 		/* don't send any routes to DSP that include a driver PCM */
-		spcm = snd_sof_find_spcm_name(sdev, (char *)route->source);
+		spcm = snd_sof_find_spcm_name(sdev, route->source);
 		if (spcm) {
 			ret = spcm_bind(scomp, spcm, route->sink);
 			goto err;
