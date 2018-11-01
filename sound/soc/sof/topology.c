@@ -2463,6 +2463,13 @@ int snd_sof_load_topology(struct snd_sof_dev *sdev, const char *file)
 		return ret;
 	}
 
+	ret = pm_runtime_get_sync(sdev->dev);
+	if (ret < 0) {
+		dev_err(sdev->dev, "error: topology load pm_runtime_get_sync failed with %d\n",
+			ret);
+		return ret;
+	}
+
 	hdr = (struct snd_soc_tplg_hdr *)fw->data;
 	ret = snd_soc_tplg_component_load(sdev->component,
 					  &sof_tplg_ops, fw,
@@ -2472,6 +2479,11 @@ int snd_sof_load_topology(struct snd_sof_dev *sdev, const char *file)
 			ret);
 		ret = -EINVAL;
 	}
+
+	ret = pm_runtime_put(sdev->dev);
+	if (ret < 0)
+		dev_err(sdev->dev, "error: topology load pm_runtime_put failed with %d\n",
+			ret);
 
 	release_firmware(fw);
 	return ret;
