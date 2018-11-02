@@ -246,9 +246,16 @@ static int sof_probe(struct platform_device *pdev)
 	/* initialize sof device */
 	sdev->dev = &pdev->dev;
 	sdev->parent = plat_data->dev;
-	if (plat_data->type == SOF_DEVICE_PCI)
+	switch (plat_data->type) {
+	case SOF_DEVICE_SPI:
+		sdev->ops = plat_data->sof_machine->ops;
+		break;
+	case SOF_DEVICE_PCI:
 		sdev->pci = container_of(plat_data->dev, struct pci_dev, dev);
-	sdev->ops = plat_data->machine->pdata;
+		/* Fall through */
+	default:
+		sdev->ops = plat_data->machine->pdata;
+	}
 
 	sdev->pdata = plat_data;
 	INIT_LIST_HEAD(&sdev->pcm_list);
