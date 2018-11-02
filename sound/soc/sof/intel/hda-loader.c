@@ -287,18 +287,6 @@ static int cl_copy_fw(struct snd_sof_dev *sdev, int tag)
 	return status;
 }
 
-int hda_dsp_cl_load_fw(struct snd_sof_dev *sdev)
-{
-	struct snd_sof_pdata *plat_data = dev_get_platdata(sdev->dev);
-	const char *fw_filename;
-
-	/* set code loading condition to true */
-	sdev->code_loading = 1;
-	fw_filename = plat_data->machine->sof_fw_filename;
-
-	return request_firmware(&plat_data->fw, fw_filename, sdev->dev);
-}
-
 int hda_dsp_cl_boot_firmware(struct snd_sof_dev *sdev)
 {
 	struct snd_sof_pdata *plat_data = dev_get_platdata(sdev->dev);
