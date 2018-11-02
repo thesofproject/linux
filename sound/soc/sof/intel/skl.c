@@ -83,7 +83,7 @@ struct snd_sof_dsp_ops sof_skl_ops = {
 	.pcm_trigger	= hda_dsp_pcm_trigger,
 
 	/* firmware loading */
-	.load_firmware = hda_dsp_cl_load_fw,
+	.load_firmware = snd_sof_load_firmware_raw,
 
 	/* firmware run */
 	.run = hda_dsp_cl_boot_firmware_skl,

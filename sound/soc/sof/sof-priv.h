@@ -403,6 +403,7 @@ int snd_sof_create_page_table(struct snd_sof_dev *sdev,
  */
 int snd_sof_load_firmware(struct snd_sof_dev *sdev,
 			  bool first_boot);
+int snd_sof_load_firmware_raw(struct snd_sof_dev *sdev, bool first_boot);
 int snd_sof_load_firmware_memcpy(struct snd_sof_dev *sdev,
 				 bool first_boot);
 int snd_sof_run_firmware(struct snd_sof_dev *sdev);
