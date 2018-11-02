@@ -336,6 +336,7 @@ struct snd_sof_dev {
 	int cl_bar;
 	struct snd_dma_buffer dmab;
 	struct sof_ipc_fw_ready fw_ready;
+	struct sof_ipc_fw_version fw_version;
 
 	/* topology */
 	struct snd_soc_tplg_ops *tplg_ops;
