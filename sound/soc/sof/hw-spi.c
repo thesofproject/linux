@@ -26,7 +26,7 @@
 #include <linux/spi/spi.h>
 #include <linux/of_device.h>
 
-#include <linux/device.h>
+#include <crypto/hash.h>
 #include <sound/sof.h>
 #include <uapi/sound/sof-fw.h>
 
@@ -276,6 +276,80 @@ static int spi_cmd_done(struct snd_sof_dev *sof_dev __maybe_unused, int dir __ma
 	return 0;
 }
 
+#define SUE_CREEK_LOAD_ADDR 0xbe100000
+
+struct spi_fw_header {
+	u32 command;
+	u32 flags;
+	u32 address;
+	u32 unused;
+	u32 size;
+	u8 sha256[32];
+} __attribute__((packed));
+
+#define REQUEST_MASK		0x81000000
+#define ROM_CONTROL_LOAD	0x02
+#define ROM_CONTROL_EXEC	0x13
+
+#define CLOCK_SELECT_SPI_SLAVE	(1 << 21)
+
+static int spi_fw_run(struct snd_sof_dev *sdev)
+{
+	struct snd_sof_pdata *plat_data = dev_get_platdata(sdev->dev);
+	struct crypto_shash *tfm;
+	int ret;
+	struct spi_fw_header *hdr = kmalloc(sizeof(*hdr), GFP_KERNEL);
+	if (!hdr)
+		return -ENOMEM;
+
+	hdr->command = REQUEST_MASK | ROM_CONTROL_LOAD;
+	hdr->flags = CLOCK_SELECT_SPI_SLAVE |
+		(plat_data->fw->size / sizeof(u32));
+	hdr->address = SUE_CREEK_LOAD_ADDR;
+	hdr->size = plat_data->fw->size;
+
+	tfm = crypto_alloc_shash("sha256", 0, 0);
+	if (IS_ERR(tfm)) {
+		dev_err(sdev->dev, "Unable to create SHA256 crypto context\n");
+		ret = PTR_ERR(tfm);
+	} else {
+		SHASH_DESC_ON_STACK(sha, tfm);
+		sha->tfm = tfm;
+		sha->flags = 0;
+		ret = crypto_shash_digest(sha, plat_data->fw->data,
+					  plat_data->fw->size, hdr->sha256);
+		crypto_free_shash(tfm);
+	}
+
+	if (ret < 0)
+		goto free;
+
+	ret = spi_write(to_spi_device(sdev->dev), hdr, sizeof(*hdr));
+	if (ret < 0) {
+		dev_err(sdev->dev, "Failed sending LOAD IPC: %d\n", ret);
+		goto free;
+	}
+
+	ret = spi_write(to_spi_device(sdev->dev), plat_data->fw->data,
+			plat_data->fw->size);
+	if (ret < 0) {
+		dev_err(sdev->dev, "Failed sending FW image: %d\n", ret);
+		goto free;
+	}
+
+	hdr->command = REQUEST_MASK | ROM_CONTROL_EXEC;
+	hdr->flags = 1;
+	ret = spi_write(to_spi_device(sdev->dev), hdr,
+			offsetof(struct spi_fw_header, unused));
+	if (ret < 0)
+		dev_err(sdev->dev, "Failed sending EXEC IPC: %d\n", ret);
+
+free:
+	kfree(hdr);
+
+	return ret;
+}
+
 /* SPI SOF ops */
 struct snd_sof_dsp_ops snd_sof_spi_ops = {
 	/* device init */
@@ -306,11 +380,9 @@ struct snd_sof_dsp_ops snd_sof_spi_ops = {
 	.debug_map_count = 0/*ARRAY_SIZE(spi_debugfs)*/,
 	.dbg_dump	= NULL/*spi_dump*/,
 
-	/* module loading */
-	.load_module	= snd_sof_parse_module_memcpy,
-
-	/*Firmware loading */
-	.load_firmware	= snd_sof_load_firmware_memcpy,
+	/* Firmware loading */
+	.load_firmware	= snd_sof_load_firmware_raw,
+	.run		= spi_fw_run,
 };
 EXPORT_SYMBOL(snd_sof_spi_ops);
 
