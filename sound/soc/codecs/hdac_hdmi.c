@@ -123,6 +123,7 @@ struct hdac_hdmi_dai_port_map {
 
 struct hdac_hdmi_drv_data {
 	unsigned int vendor_nid;
+	unsigned int base_nid;
 };
 
 struct hdac_hdmi_priv {
@@ -1538,7 +1539,11 @@ free_widgets:
 
 static int hdac_hdmi_pin2port(void *aptr, int pin)
 {
-	return pin - 4; /* map NID 0x05 -> port #1 */
+	struct hdac_device *hdev = aptr;
+	struct hdac_hdmi_priv *hdmi = hdev_to_hdmi_priv(hdev);
+	unsigned int base_nid = hdmi->drv_data->base_nid;
+
+	return pin - base_nid + 1; /* intel port is 1-based */
 }
 
 static void hdac_hdmi_eld_notify_cb(void *aptr, int port, int pipe)
@@ -1973,12 +1978,19 @@ static int hdac_hdmi_get_spk_alloc(struct hdac_device *hdev, int pcm_idx)
 	return port->eld.info.spk_alloc;
 }
 
+static struct hdac_hdmi_drv_data intel_icl_drv_data  = {
+	.vendor_nid = INTEL_VENDOR_NID,
+	.base_nid = 4,
+};
+
 static struct hdac_hdmi_drv_data intel_glk_drv_data  = {
 	.vendor_nid = INTEL_GLK_VENDOR_NID,
+	.base_nid = 5,
 };
 
 static struct hdac_hdmi_drv_data intel_drv_data  = {
 	.vendor_nid = INTEL_VENDOR_NID,
+	.base_nid = 5,
 };
 
 static int hdac_hdmi_dev_probe(struct hdac_device *hdev)
@@ -2259,6 +2271,8 @@ static const struct hda_device_id hdmi_list[] = {
 						   &intel_glk_drv_data),
 	HDA_CODEC_EXT_ENTRY(0x8086280d, 0x100000, "Geminilake HDMI",
 						   &intel_glk_drv_data),
+	HDA_CODEC_EXT_ENTRY(0x8086280f, 0x100000, "Icelake HDMI",
+						   &intel_icl_drv_data),
 	{}
 };
 
