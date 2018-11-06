@@ -286,6 +286,9 @@ int snd_sof_run_firmware(struct snd_sof_dev *sdev)
 
 	dev_dbg(sdev->dev, "booting DSP firmware\n");
 
+	/* disable clock power gating */
+	snd_sof_dsp_clock_power_gating(sdev, false);
+
 	/* boot the firmware on the DSP */
 	ret = snd_sof_dsp_run(sdev);
 	if (ret < 0) {
@@ -304,6 +307,9 @@ int snd_sof_run_firmware(struct snd_sof_dev *sdev)
 	}
 
 	dev_info(sdev->dev, "firmware boot complete\n");
+
+	/* enable clock power gating */
+	snd_sof_dsp_clock_power_gating(sdev, true);
 
 	return 0;
 }

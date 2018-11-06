@@ -95,6 +95,13 @@ static inline int snd_sof_dsp_runtime_suspend(struct snd_sof_dev *sdev,
 		return 0;
 }
 
+static inline void snd_sof_dsp_clock_power_gating(struct snd_sof_dev *sdev,
+						  bool enable)
+{
+	if (sdev->ops->clock_power_gating)
+		sdev->ops->clock_power_gating(sdev, enable);
+}
+
 static inline int snd_sof_dsp_set_clk(struct snd_sof_dev *sdev, u32 freq)
 {
 	if (sdev->ops->set_clk)

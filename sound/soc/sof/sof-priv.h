@@ -83,6 +83,7 @@ struct snd_sof_dsp_ops {
 	int (*resume)(struct snd_sof_dev *sof_dev);
 	int (*runtime_suspend)(struct snd_sof_dev *sof_dev, int state);
 	int (*runtime_resume)(struct snd_sof_dev *sof_dev);
+	void (*clock_power_gating)(struct snd_sof_dev *sof_dev, bool enable);
 
 	/* DSP clocking */
 	int (*set_clk)(struct snd_sof_dev *sof_dev, u32 freq);
