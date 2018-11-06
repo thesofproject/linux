@@ -103,5 +103,6 @@ struct snd_sof_dsp_ops sof_apl_ops = {
 	.resume			= hda_dsp_resume,
 	.runtime_suspend	= hda_dsp_runtime_suspend,
 	.runtime_resume		= hda_dsp_runtime_resume,
+	.clock_power_gating	= hda_dsp_ctrl_clock_power_gating,
 };
 EXPORT_SYMBOL(sof_apl_ops);

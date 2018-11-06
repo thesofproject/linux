@@ -29,6 +29,7 @@
 #include <sound/sof.h>
 #include <sound/pcm_params.h>
 #include <linux/pm_runtime.h>
+#include <sound/hda_register.h>
 
 #include "../sof-priv.h"
 #include "../ops.h"
@@ -146,6 +147,24 @@ void hda_dsp_ctrl_misc_clock_gating(struct snd_sof_dev *sdev, bool enable)
 	u32 val = enable ? PCI_CGCTL_MISCBDCGE_MASK : 0;
 
 	snd_sof_pci_update_bits(sdev, PCI_CGCTL, PCI_CGCTL_MISCBDCGE_MASK, val);
+}
+
+void hda_dsp_ctrl_clock_power_gating(struct snd_sof_dev *sdev, bool enable)
+{
+	struct hdac_bus *bus = sof_to_bus(sdev);
+	u32 val;
+
+	/* Update PDCGE bit of CGCTL register */
+	val = enable ? PCI_CGCTL_ADSPDCGE : 0;
+	snd_sof_pci_update_bits(sdev, PCI_CGCTL, PCI_CGCTL_ADSPDCGE, val);
+
+	/* Update L1SEN bit of EM2 register */
+	val = enable ? SOF_HDA_VS_EM2_L1SEN : 0;
+	snd_hdac_chip_updatel(bus, VS_EM2, SOF_HDA_VS_EM2_L1SEN, val);
+
+	/* Update ADSPPGD bit of PGCTL register */
+	val = enable ? 0 : PCI_TCSEL_ADSPPGD;
+	snd_sof_pci_update_bits(sdev, PCI_TCSEL, PCI_TCSEL_ADSPPGD, val);
 }
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)

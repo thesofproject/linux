@@ -17,9 +17,13 @@
 #define PCI_TCSEL			0x44
 #define PCI_CGCTL			0x48
 
+/* PCI_TVSEL bits */
+#define PCI_TCSEL_ADSPPGD               BIT(2)
+
 /* PCI_CGCTL bits */
 #define PCI_CGCTL_MISCBDCGE_MASK	BIT(6)
 #define PCI_CGCTL_LSRMD_MASK		BIT(4)
+#define PCI_CGCTL_ADSPDCGE              BIT(1)
 
 /* Legacy HDA registers and bits used - widths are variable */
 #define SOF_HDA_GCAP			0x0
@@ -32,6 +36,7 @@
 #define SOF_HDA_WAKESTS			0x0E
 #define SOF_HDA_WAKESTS_INT_MASK	((1 << 8) - 1)
 #define SOF_HDA_RIRBSTS			0x5d
+#define SOF_HDA_VS_EM2_L1SEN            BIT(13)
 
 /* SOF_HDA_GCTL register bist */
 #define SOF_HDA_GCTL_RESET		BIT(0)
@@ -490,6 +495,7 @@ int hda_dsp_cl_boot_firmware_skl(struct snd_sof_dev *sdev);
 int hda_dsp_ctrl_get_caps(struct snd_sof_dev *sdev);
 int hda_dsp_ctrl_link_reset(struct snd_sof_dev *sdev);
 void hda_dsp_ctrl_misc_clock_gating(struct snd_sof_dev *sdev, bool enable);
+void hda_dsp_ctrl_clock_power_gating(struct snd_sof_dev *sdev, bool enable);
 int hda_dsp_ctrl_init_chip(struct snd_sof_dev *sdev, bool full_reset);
 
 /*
