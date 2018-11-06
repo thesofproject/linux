@@ -714,7 +714,7 @@ static void hdac_hdmi_set_power_state(struct hdac_device *hdev,
 	if (get_wcaps(hdev, nid) & AC_WCAP_POWER) {
 		if (!snd_hdac_check_power_state(hdev, nid, pwr_state)) {
 			for (count = 0; count < 10; count++) {
-				snd_hdac_codec_read(hdev, nid, 0,
+				snd_hdac_codec_write(hdev, nid, 0,
 						AC_VERB_SET_POWER_STATE,
 						pwr_state);
 				state = snd_hdac_sync_power_state(hdev,
@@ -1867,8 +1867,8 @@ static int hdmi_codec_prepare(struct device *dev)
 	 * is received. So setting power state is ensured without using loop
 	 * to read the state.
 	 */
-	snd_hdac_codec_read(hdev, hdev->afg, 0,	AC_VERB_SET_POWER_STATE,
-							AC_PWRST_D3);
+	snd_hdac_codec_write(hdev, hdev->afg, 0, AC_VERB_SET_POWER_STATE,
+						 AC_PWRST_D3);
 
 	return 0;
 }
@@ -1879,8 +1879,8 @@ static void hdmi_codec_complete(struct device *dev)
 	struct hdac_hdmi_priv *hdmi = hdev_to_hdmi_priv(hdev);
 
 	/* Power up afg */
-	snd_hdac_codec_read(hdev, hdev->afg, 0,	AC_VERB_SET_POWER_STATE,
-							AC_PWRST_D0);
+	snd_hdac_codec_write(hdev, hdev->afg, 0, AC_VERB_SET_POWER_STATE,
+						 AC_PWRST_D0);
 
 	hdac_hdmi_skl_enable_all_pins(hdev);
 	hdac_hdmi_skl_enable_dp12(hdev);
@@ -2185,8 +2185,8 @@ static int hdac_hdmi_runtime_suspend(struct device *dev)
 	 * is received. So setting power state is ensured without using loop
 	 * to read the state.
 	 */
-	snd_hdac_codec_read(hdev, hdev->afg, 0,	AC_VERB_SET_POWER_STATE,
-							AC_PWRST_D3);
+	snd_hdac_codec_write(hdev, hdev->afg, 0, AC_VERB_SET_POWER_STATE,
+						 AC_PWRST_D3);
 	err = snd_hdac_display_power(bus, false);
 	if (err < 0) {
 		dev_err(dev, "Cannot turn on display power on i915\n");
@@ -2235,8 +2235,8 @@ static int hdac_hdmi_runtime_resume(struct device *dev)
 	hdac_hdmi_skl_enable_dp12(hdev);
 
 	/* Power up afg */
-	snd_hdac_codec_read(hdev, hdev->afg, 0,	AC_VERB_SET_POWER_STATE,
-							AC_PWRST_D0);
+	snd_hdac_codec_write(hdev, hdev->afg, 0, AC_VERB_SET_POWER_STATE,
+						 AC_PWRST_D0);
 
 	return 0;
 }
