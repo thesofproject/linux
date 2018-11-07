@@ -30,18 +30,23 @@ static size_t sof_wait_trace_avail(struct snd_sof_dev *sdev,
 				   loff_t pos, size_t buffer_size)
 {
 	wait_queue_entry_t wait;
+	u32 host_offset;
+
+	/* count the initial offset to get the buffer offset */
+	host_offset = (sdev->trace_init_offset + sdev->trace_offset) %
+		      buffer_size;
 
 	/*
 	 * If host offset is less than local pos, it means write pointer of
 	 * host DMA buffer has been wrapped. We should output the trace data
 	 * at the end of host DMA buffer at first.
 	 */
-	if (sdev->host_offset < pos)
+	if (host_offset < pos)
 		return buffer_size - pos;
 
 	/* If there is available trace data now, it is unnecessary to wait. */
-	if (sdev->host_offset > pos)
-		return sdev->host_offset - pos;
+	if (host_offset > pos)
+		return host_offset - pos;
 
 	/* wait for available trace data from FW */
 	init_waitqueue_entry(&wait, current);
@@ -58,11 +63,15 @@ static size_t sof_wait_trace_avail(struct snd_sof_dev *sdev,
 	remove_wait_queue(&sdev->trace_sleep, &wait);
 
 out:
+	/* update buffer offset after wait done */
+	host_offset = (sdev->trace_init_offset + sdev->trace_offset) %
+		      buffer_size;
+
 	/* return bytes available for copy */
-	if (sdev->host_offset < pos)
+	if (host_offset < pos)
 		return buffer_size - pos;
 	else
-		return sdev->host_offset - pos;
+		return host_offset - pos;
 }
 
 static ssize_t sof_dfsentry_trace_read(struct file *file, char __user *buffer,
@@ -154,15 +163,24 @@ int snd_sof_init_trace_ipc(struct snd_sof_dev *sdev)
 	if (sdev->dtrace_is_enabled)
 		return -EINVAL;
 
+	/* update init_offset, and reinitial offset to 0 */
+	sdev->trace_init_offset = (sdev->trace_init_offset +
+				   sdev->trace_offset) %
+				   sdev->dmatb.bytes;
+	sdev->trace_offset = 0;
+
 	/* set IPC parameters */
 	params.hdr.size = sizeof(params);
 	params.hdr.cmd = SOF_IPC_GLB_TRACE_MSG | SOF_IPC_TRACE_DMA_PARAMS;
 	params.buffer.phy_addr = sdev->dmatp.addr;
 	params.buffer.size = sdev->dmatb.bytes;
-	params.buffer.offset = 0;
 	params.buffer.pages = sdev->dma_trace_pages;
 
-	sdev->host_offset = 0;
+	/*
+	 * send offset to FW to require copying new logs
+	 * start from new offset if possible.
+	 */
+	params.buffer.offset = sdev->trace_init_offset;
 
 	ret = snd_sof_dma_trace_init(sdev, &params.stream_tag);
 	if (ret < 0) {
@@ -200,6 +218,8 @@ int snd_sof_init_trace(struct snd_sof_dev *sdev)
 
 	/* set false before start initialization */
 	sdev->dtrace_is_enabled = false;
+	sdev->trace_offset = 0;
+	sdev->trace_init_offset = 0;
 
 	/* allocate trace page table buffer */
 	ret = snd_dma_alloc_pages(SNDRV_DMA_TYPE_DEV, sdev->parent,
@@ -236,6 +256,8 @@ int snd_sof_init_trace(struct snd_sof_dev *sdev)
 
 	init_waitqueue_head(&sdev->trace_sleep);
 
+	init_waitqueue_head(&sdev->trace_sleep);
+
 	ret = snd_sof_init_trace_ipc(sdev);
 	if (ret < 0)
 		goto table_err;
@@ -252,8 +274,9 @@ EXPORT_SYMBOL(snd_sof_init_trace);
 int snd_sof_trace_update_pos(struct snd_sof_dev *sdev,
 			     struct sof_ipc_dma_trace_posn *posn)
 {
-	if (sdev->dtrace_is_enabled && sdev->host_offset != posn->host_offset) {
-		sdev->host_offset = posn->host_offset;
+	if (sdev->dtrace_is_enabled &&
+	    sdev->trace_offset != posn->host_offset) {
+		sdev->trace_offset = posn->host_offset;
 		wake_up(&sdev->trace_sleep);
 	}
 

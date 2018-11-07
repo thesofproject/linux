@@ -43,7 +43,8 @@ static int hda_dsp_trace_prepare(struct snd_sof_dev *sdev)
 
 	hstream->bufsize = sdev->dmatb.bytes;
 
-	ret = hda_dsp_stream_hw_params(sdev, stream, dmab, NULL);
+	ret = hda_dsp_stream_hw_params(sdev, stream, dmab,
+				       NULL, SOF_HDA_TRACE_STREAM);
 	if (ret < 0)
 		dev_err(sdev->dev, "error: hdac prepare failed: %x\n", ret);
 

@@ -121,7 +121,8 @@ int hda_dsp_pcm_hw_params(struct snd_sof_dev *sdev,
 			(params->info & SNDRV_PCM_INFO_NO_PERIOD_WAKEUP) &&
 			(params->flags & SNDRV_PCM_HW_PARAMS_NO_PERIOD_WAKEUP);
 
-	ret = hda_dsp_stream_hw_params(sdev, stream, dmab, params);
+	ret = hda_dsp_stream_hw_params(sdev, stream, dmab,
+				       params, SOF_HDA_AUDIO_STREAM);
 	if (ret < 0) {
 		dev_err(sdev->dev, "error: hdac prepare failed: %x\n", ret);
 		return ret;

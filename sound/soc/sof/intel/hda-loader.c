@@ -66,7 +66,8 @@ static int cl_stream_prepare(struct snd_sof_dev *sdev, unsigned int format,
 	hstream->format_val = format;
 	hstream->bufsize = size;
 
-	ret = hda_dsp_stream_hw_params(sdev, stream, dmab, NULL);
+	ret = hda_dsp_stream_hw_params(sdev, stream, dmab,
+				       NULL, SOF_HDA_CL_STREAM);
 	if (ret < 0) {
 		dev_err(sdev->dev, "error: hdac prepare failed: %x\n", ret);
 		goto error;

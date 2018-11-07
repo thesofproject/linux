@@ -343,6 +343,12 @@ struct sof_intel_dsp_desc {
 	struct snd_sof_dsp_ops *ops;
 };
 
+enum sof_hda_tream_type {
+	SOF_HDA_AUDIO_STREAM = 0,	/* normal playback/capture stream */
+	SOF_HDA_CL_STREAM,		/* code loader stream */
+	SOF_HDA_TRACE_STREAM,		/* dma trace capture stream */
+};
+
 #define SOF_HDA_PLAYBACK_STREAMS	16
 #define SOF_HDA_CAPTURE_STREAMS		16
 #define SOF_HDA_PLAYBACK		0
@@ -442,14 +448,15 @@ void hda_dsp_stream_free(struct snd_sof_dev *sdev);
 int hda_dsp_stream_hw_params(struct snd_sof_dev *sdev,
 			     struct hdac_ext_stream *stream,
 			     struct snd_dma_buffer *dmab,
-			     struct snd_pcm_hw_params *params);
+			     struct snd_pcm_hw_params *params,
+			     enum sof_hda_tream_type stream_type);
 int hda_dsp_stream_trigger(struct snd_sof_dev *sdev,
 			   struct hdac_ext_stream *stream, int cmd);
 irqreturn_t hda_dsp_stream_interrupt(int irq, void *context);
 irqreturn_t hda_dsp_stream_threaded_handler(int irq, void *context);
 int hda_dsp_stream_setup_bdl(struct snd_sof_dev *sdev,
 			     struct snd_dma_buffer *dmab,
-			     struct hdac_stream *stream);
+			     struct hdac_stream *stream, u32 init_offset);
 
 struct hdac_ext_stream *
 	hda_dsp_stream_get(struct snd_sof_dev *sdev, int direction);

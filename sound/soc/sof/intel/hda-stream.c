@@ -88,31 +88,46 @@ static int hda_setup_bdle(struct snd_sof_dev *sdev,
 /*
  * set up Buffer Descriptor List (BDL) for host memory transfer
  * BDL describes the location of the individual buffers and is little endian.
+ *
+ * The typical BDL entries after set up should looks like this:
+ *
+ * bdl[0] from the init_offset,  n entries before wrap,
+ * the e-1 full entries, and the last e entry.
+ *
+ *			     init_offset
+ *				 |
+ * |------|...........|---------S-------|------|........|--------|-------|
+ *  bdl[n] bdl[n+j]    bdl[e-1] | bdl[0] bdl[1] bdl[m]   bdl[n-2] bdl[n-1]
  */
 int hda_dsp_stream_setup_bdl(struct snd_sof_dev *sdev,
 			     struct snd_dma_buffer *dmab,
-			     struct hdac_stream *stream)
+			     struct hdac_stream *stream, u32 init_offset)
 {
 	struct sof_intel_dsp_bdl *bdl;
-	int i, offset, period_bytes, periods;
-	int remain, ioc;
+	unsigned int i, period_bytes, entries;
+	u32 bytes, offset, size = 0;
+	bool ioc, set_ioc, is_wrap = false;
 
 	period_bytes = stream->period_bytes;
 	dev_dbg(sdev->dev, "period_bytes:0x%x\n", period_bytes);
 	if (!period_bytes)
 		period_bytes = stream->bufsize;
 
-	periods = stream->bufsize / period_bytes;
+	entries = stream->bufsize / period_bytes;
 
-	dev_dbg(sdev->dev, "periods:%d\n", periods);
+	/* count the last offset fragment entry */
+	if (stream->bufsize % period_bytes)
+		entries++;
 
-	remain = stream->bufsize % period_bytes;
-	if (remain)
-		periods++;
+	/* count the last index fragment entry */
+	if (init_offset % period_bytes)
+		entries++;
+
+	dev_dbg(sdev->dev, "entries:%d\n", entries);
 
 	/* program the initial BDL entries */
 	bdl = (struct sof_intel_dsp_bdl *)stream->bdl.area;
-	offset = 0;
+	offset = init_offset;
 	stream->frags = 0;
 
 	/*
@@ -122,19 +137,28 @@ int hda_dsp_stream_setup_bdl(struct snd_sof_dev *sdev,
 	ioc = sdev->hda->no_ipc_position ?
 	      !stream->no_period_wakeup : 0;
 
-	for (i = 0; i < periods; i++) {
-		if (i == (periods - 1) && remain)
-			/* set the last small entry */
-			offset = hda_setup_bdle(sdev, dmab,
-						stream, &bdl, offset,
-						remain, 0);
+	for (i = 0; i < entries; i++) {
+		bytes = period_bytes - offset % period_bytes;
+		if (is_wrap)
+			bytes = min(bytes, init_offset - offset);
 		else
-			offset = hda_setup_bdle(sdev, dmab,
-						stream, &bdl, offset,
-						period_bytes, ioc);
+			bytes = min(bytes, stream->bufsize - offset);
+
+		/* only set ioc at period bundary */
+		set_ioc = (offset + bytes) % period_bytes ? 0 : 1;
+		offset = hda_setup_bdle(sdev, dmab,
+					stream, &bdl, offset,
+					bytes, set_ioc && ioc);
+
+		if (offset == stream->bufsize) {
+			offset = 0;
+			is_wrap = true;
+		}
+
+		size += bytes;
 	}
 
-	return offset;
+	return size;
 }
 
 int hda_dsp_stream_spib_config(struct snd_sof_dev *sdev,
@@ -344,19 +368,21 @@ int hda_dsp_stream_trigger(struct snd_sof_dev *sdev,
 }
 
 /*
- * prepare for common hdac registers settings, for both code loader
+ * prepare for common hdac registers settings, for code loader, dma trace,
  * and normal stream.
  */
 int hda_dsp_stream_hw_params(struct snd_sof_dev *sdev,
 			     struct hdac_ext_stream *stream,
 			     struct snd_dma_buffer *dmab,
-			     struct snd_pcm_hw_params *params)
+			     struct snd_pcm_hw_params *params,
+			     enum sof_hda_tream_type stream_type)
 {
 	struct hdac_bus *bus = sof_to_bus(sdev);
 	struct hdac_stream *hstream = &stream->hstream;
 	int sd_offset = SOF_STREAM_SD_OFFSET(hstream);
 	int ret, timeout = HDA_DSP_STREAM_RESET_TIMEOUT;
 	u32 val, mask;
+	u32 init_offset = 0;
 
 	if (!stream) {
 		dev_err(sdev->dev, "error: no stream available\n");
@@ -436,10 +462,13 @@ int hda_dsp_stream_hw_params(struct snd_sof_dev *sdev,
 
 	hstream->frags = 0;
 
-	ret = hda_dsp_stream_setup_bdl(sdev, dmab, hstream);
-	if (ret < 0) {
-		dev_err(sdev->dev, "error: set up of BDL failed\n");
-		return ret;
+	if (stream_type == SOF_HDA_TRACE_STREAM)
+		init_offset = sdev->trace_init_offset;
+
+	ret = hda_dsp_stream_setup_bdl(sdev, dmab, hstream, init_offset);
+	if (ret != hstream->bufsize) {
+		dev_err(sdev->dev, "error: set up of BDL failed, bufsize:0x%x, only 0x%x set\n", hstream->bufsize, ret);
+		return -EFAULT;
 	}
 
 	/* set up stream descriptor for DMA */

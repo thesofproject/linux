@@ -363,7 +363,8 @@ struct snd_sof_dev {
 	struct snd_dma_buffer dmatp;
 	int dma_trace_pages;
 	wait_queue_head_t trace_sleep;
-	u32 host_offset;
+	u32 trace_init_offset; /* restore trace offset upon resume */
+	u32 trace_offset;
 	bool dtrace_is_enabled;
 	bool dtrace_error;
 
