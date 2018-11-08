@@ -2603,6 +2603,11 @@ int snd_sof_load_topology(struct snd_sof_dev *sdev, const char *file)
 	struct snd_soc_tplg_hdr *hdr;
 	int ret;
 
+	if (sdev->tplg_loaded) {
+		dev_err(sdev->dev, "topology already loaded ?\n");
+		return -EINVAL;
+	}
+
 	dev_dbg(sdev->dev, "loading topology:%s\n", file);
 
 	ret = request_firmware(&fw, file, sdev->dev);
@@ -2622,6 +2627,8 @@ int snd_sof_load_topology(struct snd_sof_dev *sdev, const char *file)
 		ret = -EINVAL;
 	}
 
+	sdev->tplg_loaded = true;
+
 	release_firmware(fw);
 	return ret;
 }
@@ -2635,6 +2642,10 @@ void snd_sof_free_topology(struct snd_sof_dev *sdev)
 	int ret;
 
 	dev_dbg(sdev->dev, "free topology...\n");
+	if (!sdev->tplg_loaded) {
+		dev_dbg(sdev->dev, "No topology loaded, nothing to free ...\n");
+		return;
+	}
 
 	/* remove routes */
 	list_for_each_entry_safe(sroute, temp, &sdev->route_list, list) {
@@ -2654,5 +2665,7 @@ void snd_sof_free_topology(struct snd_sof_dev *sdev)
 	if (ret < 0)
 		dev_err(sdev->dev,
 			"error: tplg component free failed %d\n", ret);
+
+	sdev->tplg_loaded = false;
 }
 EXPORT_SYMBOL(snd_sof_free_topology);
