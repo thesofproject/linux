@@ -2187,11 +2187,6 @@ static int hdac_hdmi_runtime_suspend(struct device *dev)
 	 */
 	snd_hdac_codec_read(hdev, hdev->afg, 0,	AC_VERB_SET_POWER_STATE,
 							AC_PWRST_D3);
-	err = snd_hdac_display_power(bus, false);
-	if (err < 0) {
-		dev_err(dev, "Cannot turn on display power on i915\n");
-		return err;
-	}
 
 	hlink = snd_hdac_ext_bus_get_link(bus, dev_name(dev));
 	if (!hlink) {
@@ -2203,7 +2198,7 @@ static int hdac_hdmi_runtime_suspend(struct device *dev)
 
 	err = snd_hdac_display_power(bus, false);
 	if (err < 0)
-		dev_err(bus->dev, "Cannot turn off display power on i915\n");
+		dev_err(dev, "Cannot turn off display power on i915\n");
 
 	return err;
 }
