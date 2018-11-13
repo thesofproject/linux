@@ -233,7 +233,7 @@ static int sof_probe(struct platform_device *pdev)
 	struct snd_sof_pdata *plat_data = dev_get_platdata(&pdev->dev);
 	struct snd_sof_dev *sdev;
 	const char *drv_name;
-	const void *mach;
+	const void *data;
 	int size;
 	int ret;
 
@@ -330,23 +330,31 @@ static int sof_probe(struct platform_device *pdev)
 	}
 
 	/* do we need to generate any machine plat data ? */
-	if (plat_data->machine->new_mach_data) {
+	if (plat_data->machine->new_mach_data &&
+	    plat_data->type == SOF_DEVICE_ACPI) {
 		plat_data->pdev_mach =
 			plat_data->machine->new_mach_data(plat_data);
 	} else {
-		drv_name = plat_data->machine->drv_name;
-		mach = (const void *)plat_data;
+		if (plat_data->type == SOF_DEVICE_PCI)
+			drv_name = plat_data->machine->drv_name;
+		else
+			drv_name = plat_data->sof_machine->drv_name;
+
+		data = (const void *)plat_data;
 		size = sizeof(*plat_data);
 
 		/* register machine driver, pass machine info as pdata */
 		plat_data->pdev_mach =
 			platform_device_register_data(sdev->dev,
-						      drv_name, -1, mach, size);
+						      drv_name, -1, data, size);
 	}
 	if (IS_ERR(plat_data->pdev_mach)) {
 		ret = PTR_ERR(plat_data->pdev_mach);
 		goto comp_err;
 	}
+
+	/* save acpi machine descriptor for machine driver */
+	dev_set_drvdata(&plat_data->pdev_mach->dev, (void *)plat_data->machine);
 
 	dev_dbg(sdev->dev, "created machine %s\n",
 		dev_name(&plat_data->pdev_mach->dev));
