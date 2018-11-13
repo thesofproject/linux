@@ -591,11 +591,7 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	ret = hda_dsp_stream_init(sdev);
 	if (ret < 0) {
 		dev_err(&pci->dev, "error: failed to init streams\n");
-		/*
-		 * not all errors are due to memory issues, but trying
-		 * to free everything does not harm
-		 */
-		goto err;
+		goto free_streams;
 	}
 
 	/*

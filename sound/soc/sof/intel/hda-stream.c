@@ -659,6 +659,10 @@ void hda_dsp_stream_free(struct snd_sof_dev *sdev)
 	if (bus->posbuf.area)
 		snd_dma_free_pages(&bus->posbuf);
 
+	/* free the CORB/RIRB ringbuffers buffer */
+	if (bus->rb.area)
+		snd_dma_free_pages(&bus->rb);
+
 	list_for_each_entry_safe(s, _s, &bus->stream_list, list) {
 		/* TODO: decouple */
 
