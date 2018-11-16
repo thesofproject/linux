@@ -384,6 +384,9 @@ struct snd_sof_dev {
 	u32 restore_kcontrols; /* restore kcontrols upon resume */
 	u32 first_boot;
 
+	/* display audio */
+	int display_audio;	/* HDMI/DP audio is used or not */
+
 	void *private;			/* core does not touch this */
 };
 

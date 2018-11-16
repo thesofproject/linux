@@ -451,15 +451,22 @@ static int hda_init_caps(struct snd_sof_dev *sdev)
 	if (IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)) {
 		ret = hda_codec_i915_init(sdev);
 		if (ret < 0) {
+			sdev->display_audio = 0;
 			dev_err(&pci->dev, "no HDMI audio devices found\n");
-			return ret;
+		} else {
+			sdev->display_audio = 1;
 		}
 	}
 
 	ret = hda_dsp_ctrl_init_chip(sdev, true);
 	if (ret < 0) {
 		dev_err(bus->dev, "Init chip failed with ret: %d\n", ret);
-		if (IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI))
+		/*
+		 * If display_audio is false, we should not turn off display
+		 * power here as it is never turned on by audio driver.
+		 */
+		if (IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI) &&
+		    sdev->display_audio)
 			snd_hdac_display_power(bus, false);
 		return ret;
 	}
@@ -476,7 +483,8 @@ static int hda_init_caps(struct snd_sof_dev *sdev)
 	/* create codec instances */
 	hda_codec_probe_bus(sdev);
 
-	if (IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)) {
+	if (IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI) &&
+	    sdev->display_audio) {
 		ret = snd_hdac_display_power(bus, false);
 		if (ret < 0) {
 			dev_err(bus->dev, "Cannot turn off display power on i915\n");
