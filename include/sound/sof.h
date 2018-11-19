@@ -25,7 +25,7 @@ struct snd_sof_dsp_ops;
 /* SOF probe type */
 enum sof_device_type {
 	SOF_DEVICE_PCI = 0,
-	SOF_DEVICE_APCI,
+	SOF_DEVICE_ACPI,
 	SOF_DEVICE_SPI
 };
 

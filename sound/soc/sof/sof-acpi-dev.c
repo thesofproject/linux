@@ -251,7 +251,7 @@ static int sof_acpi_probe(struct platform_device *pdev)
 	sof_pdata->desc = desc;
 	priv->sof_pdata = sof_pdata;
 	sof_pdata->dev = &pdev->dev;
-	sof_pdata->type = SOF_DEVICE_APCI;
+	sof_pdata->type = SOF_DEVICE_ACPI;
 	sof_pdata->platform = "sof-audio";
 	dev_set_drvdata(&pdev->dev, priv);
 
