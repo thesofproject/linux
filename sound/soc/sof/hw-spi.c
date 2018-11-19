@@ -53,7 +53,7 @@ static void spi_block_read(struct snd_sof_dev *sdev, u32 offset, void *dest,
 		buf = dest;
 	}
 
-	ret = spi_read(to_spi_device(sdev->dev), buf, size + offset);
+	ret = spi_read(to_spi_device(sdev->parent), buf, size + offset);
 	if (ret < 0)
 		dev_err(sdev->dev, "SPI read failed: %d\n", ret);
 
@@ -77,7 +77,7 @@ static void spi_block_write(struct snd_sof_dev *sdev, u32 offset, void *src,
 		}
 
 		/* Use Read-Modify-Wwrite */
-		ret = spi_read(to_spi_device(sdev->dev), buf, size + offset);
+		ret = spi_read(to_spi_device(sdev->parent), buf, size + offset);
 		if (ret < 0) {
 			dev_err(sdev->dev, "SPI read failed: %d\n", ret);
 			goto free;
@@ -88,7 +88,7 @@ static void spi_block_write(struct snd_sof_dev *sdev, u32 offset, void *src,
 		buf = src;
 	}
 
-	ret = spi_write(to_spi_device(sdev->dev), buf, size + offset);
+	ret = spi_write(to_spi_device(sdev->parent), buf, size + offset);
 	if (ret < 0)
 		dev_err(sdev->dev, "SPI write failed: %d\n", ret);
 
@@ -135,7 +135,7 @@ static void spi_mailbox_read(struct snd_sof_dev *sdev __maybe_unused,
 			     void *message, size_t bytes)
 {
 	memset(message, 0, bytes);
-
+	spi_read(to_spi_device(sdev->parent), message, bytes);
 	/*
 	 * this will copy from a local memory buffer that was received from
 	 * DSP via SPI at last IPC
@@ -143,38 +143,28 @@ static void spi_mailbox_read(struct snd_sof_dev *sdev __maybe_unused,
 }
 
 /*
- * IPC Doorbell IRQ handler and thread.
+ * IPC Doorbell IRQ handler thread.
  */
-
-/*
- * If the handler only has to wake up the thread, we might use the standard one
- * as well
- */
-static irqreturn_t spi_irq_handler(int irq __maybe_unused, void *context)
-{
-	const struct snd_sof_dev *sdev = context;
-	const struct platform_device *pdev =
-		container_of(sdev->parent, struct platform_device, dev);
-	struct snd_sof_pdata *sof_pdata = dev_get_platdata(&pdev->dev);
-
-	// on SPI based devices this will likely come via a SoC GPIO IRQ
-
-	// check if GPIO is assetred and if so run thread.
-	if (sof_pdata->gpio >= 0 &&
-	    gpio_get_value(sof_pdata->gpio) == sof_pdata->active)
-		return IRQ_WAKE_THREAD;
-
-	return IRQ_NONE;
-}
 
 static irqreturn_t spi_irq_thread(int irq __maybe_unused, void *context __maybe_unused)
 {
+	const struct snd_sof_dev *sdev = context;
+	struct snd_sof_pdata *sof_pdata = dev_get_platdata(sdev->dev);
 	// read SPI data into local buffer and determine IPC cmd or reply
 
 	/*
 	 * if reply. Handle Immediate reply from DSP Core and set DSP
 	 * state to ready
 	 */
+	if (sof_pdata->fw_loading) {
+		disable_irq_nosync(irq);
+		sof_pdata->wake = true;
+		wake_up_interruptible(&sof_pdata->wq);
+	} else {
+		/* the IRQ line is triggered on rising edge, then holding for 1ms */
+		usleep_range(1000, 1500);
+		snd_sof_ipc_msgs_rx(sdev);
+	}
 
 	/* if cmd, Handle messages from DSP Core */
 
@@ -236,7 +226,7 @@ static int spi_get_reply(struct snd_sof_dev *sdev, struct snd_sof_ipc_msg *msg)
 static int spi_sof_probe(struct snd_sof_dev *sdev)
 {
 	struct platform_device *pdev =
-		container_of(sdev->parent, struct platform_device, dev);
+		container_of(sdev->dev, struct platform_device, dev);
 	struct snd_sof_pdata *sof_pdata = dev_get_platdata(&pdev->dev);
 	/* get IRQ from Device tree or ACPI - register our IRQ */
 	struct irq_data *irqd;
@@ -244,20 +234,24 @@ static int spi_sof_probe(struct snd_sof_dev *sdev)
 	unsigned int irq_trigger, irq_sense;
 	int ret;
 
+	init_waitqueue_head(&sof_pdata->wq);
+
+	sof_pdata->fw_loading = true;
+
 	sdev->ipc_irq = spi->irq;
-	dev_dbg(sdev->dev, "using IRQ %d\n", sdev->ipc_irq);
+	spi->mode = SPI_MODE_3;
+	spi->max_speed_hz = 12500000;
 	irqd = irq_get_irq_data(sdev->ipc_irq);
 	if (!irqd)
 		return -EINVAL;
 
 	irq_trigger = irqd_get_trigger_type(irqd);
 	irq_sense = irq_trigger & IRQ_TYPE_SENSE_MASK;
-	sof_pdata->active = irq_sense == IRQ_TYPE_EDGE_RISING ||
-		irq_sense == IRQ_TYPE_LEVEL_HIGH;
+	dev_dbg(sdev->dev, "using IRQ %d trigger 0x%x\n", sdev->ipc_irq, irq_trigger);
 
 	ret = devm_request_threaded_irq(sdev->dev, sdev->ipc_irq,
-					spi_irq_handler, spi_irq_thread,
-					irq_trigger | IRQF_ONESHOT,
+					NULL, spi_irq_thread,
+					irq_sense | IRQF_ONESHOT,
 					"AudioDSP", sdev);
 	if (ret < 0)
 		dev_err(sdev->dev, "error: failed to register IRQ %d\n",
@@ -281,32 +275,105 @@ static int spi_cmd_done(struct snd_sof_dev *sof_dev __maybe_unused, int dir __ma
 struct spi_fw_header {
 	u32 command;
 	u32 flags;
-	u32 address;
-	u32 unused;
-	u32 size;
+	u32 payload[3];
 	u8 sha256[32];
+	u8 padding[12];	/* Pad to 64 bytes */
 } __attribute__((packed));
 
-#define REQUEST_MASK		0x81000000
-#define ROM_CONTROL_LOAD	0x02
-#define ROM_CONTROL_EXEC	0x13
+#define REQUEST_MASK			0x81000000
+#define RESPONSE_MASK			0xA1000000
 
+#define ROM_CONTROL_LOAD		0x02
+#define ROM_CONTROL_MEM_READ		0x10
+#define ROM_CONTROL_MEM_WRITE		0x11
+#define ROM_CONTROL_MEM_WRITE_BLOCK	0x12
+#define ROM_CONTROL_EXEC		0x13
+#define ROM_CONTROL_WAIT		0x14
+#define ROM_CONTROL_ROM_READY		0x20
+
+#define MAX_SPI_XFER_SIZE (4 * 1024)
+
+#define FW_LOAD_NO_EXEC_FLAG	(1 << 26)
 #define CLOCK_SELECT_SPI_SLAVE	(1 << 21)
 
 static int spi_fw_run(struct snd_sof_dev *sdev)
 {
 	struct snd_sof_pdata *plat_data = dev_get_platdata(sdev->dev);
+	struct spi_device *spi = to_spi_device(sdev->parent);
 	struct crypto_shash *tfm;
+	ssize_t size;
+	const u8 *data;
+	__be32 *buf;
 	int ret;
-	struct spi_fw_header *hdr = kmalloc(sizeof(*hdr), GFP_KERNEL);
+	struct spi_fw_header *hdr = kzalloc(sizeof(*hdr), GFP_KERNEL);
 	if (!hdr)
 		return -ENOMEM;
 
-	hdr->command = REQUEST_MASK | ROM_CONTROL_LOAD;
-	hdr->flags = CLOCK_SELECT_SPI_SLAVE |
-		(plat_data->fw->size / sizeof(u32));
-	hdr->address = SUE_CREEK_LOAD_ADDR;
-	hdr->size = plat_data->fw->size;
+	buf = kmalloc(MAX_SPI_XFER_SIZE, GFP_KERNEL);
+	if (!buf) {
+		ret = -ENOMEM;
+		goto free;
+	}
+
+	pinctrl_gpio_set_config(27, PIN_CONFIG_BIAS_PULL_DOWN);
+	/* Reset the board, using the reset GPIO */
+	gpio_set_value(plat_data->reset, 0);
+	usleep_range(100000, 200000);
+	gpio_set_value(plat_data->reset, 1);
+
+	/* Wait for the "ROM Ready" IRQ */
+	ret = wait_event_interruptible_timeout(plat_data->wq, plat_data->wake,
+					       msecs_to_jiffies(2000));
+	/* The stock firmware doesn't handle the IRQ GPIO well */
+	if (ret <= 0) {
+		if (!ret)
+			ret = -ETIMEDOUT;
+		goto free;
+	}
+
+	plat_data->wake = false;
+
+	memset(hdr, 0, sizeof(*hdr));
+
+	/* Read the "ROM Ready" message */
+	spi_read(spi, hdr, sizeof(*hdr));
+
+	/* Write to memory: "Setup retention delay" copied from python scripts */
+	memset(hdr, 0, sizeof(*hdr));
+	hdr->command = cpu_to_be32(REQUEST_MASK | ROM_CONTROL_MEM_WRITE);
+	hdr->flags = cpu_to_be32(2);
+	hdr->payload[0] = cpu_to_be32(0x304628);
+	hdr->payload[1] = cpu_to_be32(0xd);
+	ret = spi_write(spi, hdr, sizeof(*hdr));
+	if (ret < 0) {
+		dev_err(sdev->dev, "Failed sending MEM_WRITE IPC: %d\n", ret);
+		goto free;
+	}
+
+	enable_irq(spi->irq);
+	ret = wait_event_interruptible_timeout(plat_data->wq, plat_data->wake,
+					       msecs_to_jiffies(10));
+	plat_data->wake = false;
+	if (ret <= 0) {
+		dev_warn(sdev->dev, "%s().%d: no IRQ: %d\n", __func__, __LINE__, ret);
+		if (ret < 0) {
+			usleep_range(10000, 12000);
+			ret = 0;
+		}
+	}
+
+	memset(hdr, 0, sizeof(*hdr));
+	spi_read(spi, hdr, sizeof(*hdr));
+
+	memset(hdr, 0, sizeof(*hdr));
+	spi_read(spi, hdr, sizeof(*hdr));
+
+	/* Send the "LOAD" message */
+	hdr->command = cpu_to_be32(REQUEST_MASK | ROM_CONTROL_LOAD);
+	hdr->flags = cpu_to_be32(CLOCK_SELECT_SPI_SLAVE | FW_LOAD_NO_EXEC_FLAG |
+				 ((sizeof(hdr->payload) + sizeof(hdr->sha256)) / sizeof(u32)));
+	hdr->payload[0] = cpu_to_be32(SUE_CREEK_LOAD_ADDR);
+	hdr->payload[2] = cpu_to_be32(plat_data->fw->size);
 
 	tfm = crypto_alloc_shash("sha256", 0, 0);
 	if (IS_ERR(tfm)) {
@@ -319,32 +386,102 @@ static int spi_fw_run(struct snd_sof_dev *sdev)
 		ret = crypto_shash_digest(sha, plat_data->fw->data,
 					  plat_data->fw->size, hdr->sha256);
 		crypto_free_shash(tfm);
+		cpu_to_be32_array((__be32 *)hdr->sha256, (const u32 *)hdr->sha256,
+				  sizeof(hdr->sha256) / 4);
 	}
 
 	if (ret < 0)
 		goto free;
 
-	ret = spi_write(to_spi_device(sdev->dev), hdr, sizeof(*hdr));
+	ret = spi_write(spi, hdr, sizeof(*hdr));
 	if (ret < 0) {
 		dev_err(sdev->dev, "Failed sending LOAD IPC: %d\n", ret);
 		goto free;
 	}
 
-	ret = spi_write(to_spi_device(sdev->dev), plat_data->fw->data,
-			plat_data->fw->size);
-	if (ret < 0) {
-		dev_err(sdev->dev, "Failed sending FW image: %d\n", ret);
-		goto free;
+	enable_irq(spi->irq);
+	ret = wait_event_interruptible_timeout(plat_data->wq, plat_data->wake,
+					       msecs_to_jiffies(350));
+	plat_data->wake = false;
+	if (ret <= 0) {
+		dev_warn(sdev->dev, "%s().%d: no IRQ: %d\n", __func__, __LINE__, ret);
+		if (ret < 0) {
+			usleep_range(350000, 400000);
+			ret = 0;
+		}
 	}
 
-	hdr->command = REQUEST_MASK | ROM_CONTROL_EXEC;
-	hdr->flags = 1;
-	ret = spi_write(to_spi_device(sdev->dev), hdr,
-			offsetof(struct spi_fw_header, unused));
+	for (data = plat_data->fw->data, size = plat_data->fw->size;
+	     size > 0;
+	     data += MAX_SPI_XFER_SIZE, size -= MAX_SPI_XFER_SIZE) {
+		size_t left = min(size, MAX_SPI_XFER_SIZE);
+
+		cpu_to_be32_array(buf, (const u32 *)data, left / 4);
+		ret = spi_write(spi, buf, left);
+		if (ret < 0) {
+			dev_err(sdev->dev, "Failed sending FW image: %d\n", ret);
+			goto free;
+		}
+	}
+
+	enable_irq(spi->irq);
+	ret = wait_event_interruptible_timeout(plat_data->wq, plat_data->wake,
+					       msecs_to_jiffies(10));
+	plat_data->wake = false;
+	if (ret <= 0) {
+		dev_warn(sdev->dev, "%s().%d: no IRQ: %d\n", __func__, __LINE__, ret);
+		if (ret < 0) {
+			usleep_range(10000, 12000);
+			ret = 0;
+		}
+	}
+
+	memset(hdr, 0, sizeof(*hdr));
+	spi_read(spi, hdr, sizeof(*hdr));
+
+	memset(hdr, 0, sizeof(*hdr));
+	spi_read(spi, hdr, sizeof(*hdr));
+
+	memset(hdr, 0, sizeof(*hdr));
+	hdr->command = cpu_to_be32(REQUEST_MASK | ROM_CONTROL_MEM_READ);
+	hdr->flags = cpu_to_be32(1);
+	hdr->payload[0] = cpu_to_be32(0x71f7c);
+	ret = spi_write(spi, hdr, sizeof(*hdr));
+
+	enable_irq(spi->irq);
+	ret = wait_event_interruptible_timeout(plat_data->wq, plat_data->wake,
+					       msecs_to_jiffies(20));
+	plat_data->wake = false;
+	if (ret <= 0) {
+		dev_warn(sdev->dev, "%s().%d: no IRQ: %d\n", __func__, __LINE__, ret);
+		if (ret < 0) {
+			usleep_range(20000, 22000);
+			ret = 0;
+		}
+	}
+
+	memset(hdr, 0, sizeof(*hdr));
+	spi_read(spi, hdr, sizeof(*hdr));
+
+	memset(hdr, 0, sizeof(*hdr));
+	spi_read(spi, hdr, sizeof(*hdr));
+
+	usleep_range(30000000, 31000000);
+
+	memset(hdr, 0, sizeof(*hdr));
+	hdr->command = cpu_to_be32(REQUEST_MASK | ROM_CONTROL_EXEC);
+	hdr->flags = cpu_to_be32(1);
+	hdr->payload[0] = cpu_to_be32(SUE_CREEK_LOAD_ADDR);
+	ret = spi_write(spi, hdr, sizeof(*hdr));
 	if (ret < 0)
 		dev_err(sdev->dev, "Failed sending EXEC IPC: %d\n", ret);
 
+	enable_irq(spi->irq);
+
+	plat_data->fw_loading = false;
+
 free:
+	kfree(buf);
 	kfree(hdr);
 
 	return ret;
@@ -361,8 +498,8 @@ struct snd_sof_dsp_ops snd_sof_spi_ops = {
 	.block_write	= spi_block_write,
 
 	/* doorbell */
-	.irq_handler	= spi_irq_handler,
-	.irq_thread	= spi_irq_thread,
+	.irq_handler	= NULL,
+	.irq_thread	= NULL,
 
 	/* mailbox */
 	.mailbox_read	= spi_mailbox_read,

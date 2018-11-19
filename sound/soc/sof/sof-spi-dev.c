@@ -61,7 +61,7 @@ static int sof_spi_probe(struct spi_device *spi)
 	struct sof_platform_priv *priv;
 	const char *tplg, *fw;
 	struct gpio_desc *gpiod;
-	int ret, irq;
+	int ret;
 
 	if (!dev->of_node || !desc)
 		return -ENODEV;
@@ -69,8 +69,6 @@ static int sof_spi_probe(struct spi_device *spi)
 	machines = desc->sof_machines;
 	if (!machines)
 		return -ENODEV;
-
-	dev_dbg(&spi->dev, "SPI DSP detected");
 
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
@@ -93,15 +91,15 @@ static int sof_spi_probe(struct spi_device *spi)
 	 * Get an IRQ GPIO descriptor from an "irq-gpios" property
 	 * If the IRQ is optional, use devm_gpiod_get_optional()
 	 */
-	gpiod = devm_gpiod_get(dev, "irq", GPIOD_IN);
+	dev_dbg(&spi->dev, "SPI DSP detected, SPI IRQ %u\n",
+		spi->irq);
+
+	/* Get a reset GPIO descriptor from a "reset-gpios" property */
+	gpiod = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
 	if (IS_ERR(gpiod))
 		return PTR_ERR(gpiod);
 
-	sof_pdata->gpio = desc_to_gpio(gpiod);
-
-	irq = gpiod_to_irq(gpiod);
-	if (irq < 0)
-		return irq;
+	sof_pdata->reset = desc_to_gpio(gpiod);
 
 	/* TODO: add any required regulators */
 
@@ -126,18 +124,18 @@ static int sof_spi_probe(struct spi_device *spi)
 	sof_pdata->name = dev_name(&spi->dev);
 	sof_pdata->sof_machine = mach;
 	sof_pdata->desc = desc;
-	priv->sof_pdata = sof_pdata;
 	sof_pdata->dev = dev;
 	sof_pdata->type = SOF_DEVICE_SPI;
+
+	priv->sof_pdata = sof_pdata;
 
 	/* register sof-audio platform driver */
 	ret = sof_create_platform_device(priv);
 	if (ret) {
 		dev_err(dev, "error: failed to create platform device!\n");
+		spi->irq = -EINVAL;
 		return ret;
 	}
-
-	spi->irq = irq;
 
 	/* allow runtime_pm */
 	pm_runtime_set_autosuspend_delay(dev, SND_SOF_SUSPEND_DELAY);
@@ -161,13 +159,13 @@ static int sof_spi_remove(struct spi_device *spi)
 }
 
 const struct of_device_id sof_of_match[] = {
-	{ .compatible = "sof,spi-sue-creek", .data = &spi_desc },
+	{ .compatible = "sof,sue-creek", .data = &spi_desc },
 	{ }
 };
 
 static struct spi_driver sof_spi_driver = {
 	.driver = {
-		.name	= "sof-spi-dev",
+		.name	= "sue-creek",
 		.of_match_table = sof_of_match,
 	},
 	.probe		= sof_spi_probe,
@@ -193,3 +191,4 @@ static void __exit sof_spi_modexit(void)
 module_exit(sof_spi_modexit);
 
 MODULE_LICENSE("Dual BSD/GPL");
+MODULE_ALIAS("spi:sue-creek");

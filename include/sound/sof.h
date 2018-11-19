@@ -57,8 +57,10 @@ struct snd_sof_pdata {
 	const struct sof_dev_desc *desc;
 
 	/* SPI data */
-	unsigned int gpio;
-	unsigned int active;
+	unsigned int reset;
+	struct wait_queue_head wq;
+	bool fw_loading;
+	bool wake;
 
 	/* hda codec */
 	unsigned long codec_mask;

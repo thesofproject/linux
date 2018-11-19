@@ -463,7 +463,7 @@ void snd_sof_ipc_msgs_tx(struct snd_sof_dev *sdev)
 EXPORT_SYMBOL(snd_sof_ipc_msgs_tx);
 
 /* schedule work to handle IPC from DSP */
-void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev)
+void snd_sof_ipc_msgs_rx(const struct snd_sof_dev *sdev)
 {
 	schedule_work(&sdev->ipc->rx_kwork);
 }

@@ -2,6 +2,7 @@
 
 #include "bcm2710.dtsi"
 #include "bcm283x-rpi-smsc9514.dtsi"
+#include "bcm283x-rpi-sof.dtsi"
 
 / {
 	compatible = "raspberrypi,3-model-b", "brcm,bcm2837";
@@ -118,6 +119,7 @@
 	cs-gpios = <&gpio 8 1>, <&gpio 7 1>;
 
 	spidev0: spidev@0{
+		status = "disabled";
 		compatible = "spidev";
 		reg = <0>;	/* CE0 */
 		#address-cells = <1>;
