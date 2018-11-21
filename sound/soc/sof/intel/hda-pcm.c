@@ -153,7 +153,7 @@ snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_sof_dev *sdev,
 {
 	struct hdac_stream *hstream = substream->runtime->private_data;
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_sof_pcm *spcm = rtd->sof;
+	struct snd_sof_pcm *spcm = rtd->private;
 	snd_pcm_uframes_t pos = 0;
 
 	if (!sdev->hda->no_ipc_position) {
