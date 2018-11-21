@@ -120,7 +120,7 @@ static struct platform_device *
 	mfld_new_mach_data(struct snd_sof_pdata *sof_pdata)
 {
 	struct snd_soc_acpi_mach pmach;
-	struct device *dev = sof_pdata->dev;
+	struct device *dev = &sof_pdata->pdev->dev;
 	const struct snd_soc_acpi_mach *mach = sof_pdata->machine;
 	struct platform_device *pdev = NULL;
 
@@ -139,7 +139,7 @@ static void sof_acpi_fw_cb(const struct firmware *fw, void *context)
 	struct sof_platform_priv *priv = context;
 	struct snd_sof_pdata *sof_pdata = priv->sof_pdata;
 	const struct snd_soc_acpi_mach *mach = sof_pdata->machine;
-	struct device *dev = sof_pdata->dev;
+	struct device *dev = &sof_pdata->pdev->dev;
 
 	sof_pdata->fw = fw;
 	if (!fw) {
@@ -273,8 +273,7 @@ static int sof_acpi_probe(struct platform_device *pdev)
 	 */
 	sof_pdata->desc = desc;
 	priv->sof_pdata = sof_pdata;
-	sof_pdata->dev = &pdev->dev;
-	sof_pdata->type = SOF_DEVICE_APCI;
+	sof_pdata->pdev = pdev;
 	dev_set_drvdata(&pdev->dev, priv);
 
 	/* do we need to generate any machine plat data ? */

@@ -23,13 +23,6 @@
 
 struct snd_sof_dsp_ops;
 
-/* SOF probe type */
-enum sof_device_type {
-	SOF_DEVICE_PCI = 0,
-	SOF_DEVICE_APCI,
-	SOF_DEVICE_SPI
-};
-
 /*
  * SOF Platform data.
  */
@@ -39,9 +32,10 @@ struct snd_sof_pdata {
 	const char *drv_name;
 	const char *name;
 
-	/* parent device */
+	/* parent devices */
 	struct device *dev;
-	enum sof_device_type type;
+	struct pci_dev *pci;
+	struct platform_device *pdev;
 
 	/* descriptor */
 	const struct sof_dev_desc *desc;
