@@ -84,7 +84,7 @@ static ssize_t sof_dfsentry_trace_read(struct file *file, char __user *buffer,
 		return 0;
 
 	/* check for buffer wrap and count overflow */
-	div64_u64_rem(lpos, buffer_size, &lpos);
+	lpos = lpos % buffer_size;
 	if (count > buffer_size - lpos)
 		count = buffer_size - lpos;
 
