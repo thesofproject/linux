@@ -202,8 +202,6 @@ struct snd_sof_pcm {
 	u32 posn_offset[2];
 	struct mutex mutex;	/* access mutex */
 	struct list_head list;	/* list in sdev pcm list */
-	struct snd_pcm_hw_params params[2];
-	int restore_stream[2]; /* restore hw_params for paused stream */
 };
 
 struct snd_sof_control {
