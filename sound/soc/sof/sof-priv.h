@@ -61,6 +61,10 @@ struct snd_sof_debugfs_map;
 struct snd_soc_tplg_ops;
 struct snd_soc_component;
 
+struct snd_sof_dai_drv {
+	struct snd_soc_dai_driver *drv;
+	int num_drv;
+};
 
 /*
  * SOF DSP HW abstraction operations.
@@ -150,8 +154,7 @@ struct snd_sof_dsp_ops {
 	int (*trace_trigger)(struct snd_sof_dev *sdev, int cmd);
 
 	/* DAI ops */
-	struct snd_soc_dai_driver *drv;
-	int num_drv;
+	struct snd_sof_dai_drv *dai_drv;
 };
 
 struct snd_sof_pdata;

@@ -99,7 +99,6 @@ struct snd_sof_dsp_ops sof_skl_ops = {
 	.trace_trigger = hda_dsp_trace_trigger,
 
 	/* DAI drivers */
-	.drv		= skl_dai,
-	.num_drv	= SOF_SKL_NUM_DAIS,
+	.dai_drv		= &hda_dai_drv,
 };
 EXPORT_SYMBOL(sof_skl_ops);
