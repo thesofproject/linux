@@ -455,9 +455,6 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	const struct sof_intel_dsp_desc *chip;
 	int sd_offset, ret = 0;
 
-	/* set DSP arch ops */
-	sdev->arch_ops = &sof_xtensa_arch_ops;
-
 	chip = get_chip_info(pci->device);
 	if (!chip) {
 		dev_err(sdev->dev, "no such device supported, chip id:%x\n",

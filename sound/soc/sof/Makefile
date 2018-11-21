@@ -18,4 +18,3 @@ obj-$(CONFIG_SND_SOC_SOF_SPI) += sof-spi-dev.o
 obj-$(CONFIG_SND_SOC_SOF_SPIDSP) += snd-sof-spi.o
 
 obj-$(CONFIG_SND_SOC_SOF_INTEL)	+= intel/
-obj-$(CONFIG_SND_SOC_SOF_XTENSA) += xtensa/
