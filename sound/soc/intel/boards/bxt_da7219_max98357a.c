@@ -114,9 +114,6 @@ static const struct snd_soc_dapm_widget broxton_widgets[] = {
 
 static const struct snd_soc_dapm_route audio_map[] = {
 	/* HP jack connectors - unknown if we have jack detection */
-	{"HiFi Playback", NULL, "SSP1.OUT"},
-	{"Playback", NULL, "SSP2.OUT"},
-	{"SSP2.IN", NULL, "Capture"},
 	{"Headphone Jack", NULL, "HPL"},
 	{"Headphone Jack", NULL, "HPR"},
 
@@ -700,7 +697,7 @@ static struct snd_soc_dai_link geminilake_dais[] = {
 		.name = "SSP1-Codec",
 		.id = 0,
 		.cpu_dai_name = "SSP1 Pin",
-		.platform_name = "sof-audio",
+		.platform_name = "0000:00:0e.0",
 		.no_pcm = 1,
 		.codec_name = "MX98357A:00",
 		.codec_dai_name = BXT_MAXIM_CODEC_DAI,
@@ -716,7 +713,7 @@ static struct snd_soc_dai_link geminilake_dais[] = {
 		.name = "SSP2-Codec",
 		.id = 1,
 		.cpu_dai_name = "SSP2 Pin",
-		.platform_name = "sof-audio",
+		.platform_name = "0000:00:0e.0",
 		.no_pcm = 1,
 		.codec_name = "i2c-DLGS7219:00",
 		.codec_dai_name = BXT_DIALOG_CODEC_DAI,
@@ -732,9 +729,9 @@ static struct snd_soc_dai_link geminilake_dais[] = {
 		.name = "dmic01",
 		.id = 2,
 		.cpu_dai_name = "DMIC01 Pin",
-		.codec_name = "snd-soc-dummy",
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.platform_name = "sof-audio",
+		.codec_name = "dmic-codec",
+		.codec_dai_name = "dmic-hifi",
+		.platform_name = "0000:00:0e.0",
 		.ignore_suspend = 1,
 		.be_hw_params_fixup = broxton_dmic_fixup,
 		.dpcm_capture = 1,
