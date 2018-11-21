@@ -72,7 +72,6 @@ void hda_dsp_block_write(struct snd_sof_dev *sdev, u32 offset, void *src,
 	u32 tmp = 0;
 	int i, m, n;
 	const u8 *src_byte = src;
-	u8 *dst_byte;
 
 	m = size / 4;
 	n = size % 4;
@@ -81,16 +80,8 @@ void hda_dsp_block_write(struct snd_sof_dev *sdev, u32 offset, void *src,
 	__iowrite32_copy(dest, src, m);
 
 	if (n) {
-		/* first read the 32bit data of dest, then change affected
-		 * bytes, and write back to dest. For unaffected bytes, it
-		 * should not be changed
-		 */
-		__ioread32_copy(&tmp, dest + m * 4, 1);
-
-		dst_byte = (u8 *)&tmp;
 		for (i = 0; i < n; i++)
-			dst_byte[i] = src_byte[m * 4 + i];
-
+			tmp |= (u32)*(src_byte + m * 4 + i) << (i * 8);
 		__iowrite32_copy(dest + m * 4, &tmp, 1);
 	}
 }
