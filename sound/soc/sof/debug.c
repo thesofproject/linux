@@ -37,7 +37,7 @@ static ssize_t sof_dfsentry_read(struct file *file, char __user *buffer,
 {
 	struct snd_sof_dfsentry_io *dfse = file->private_data;
 	struct snd_sof_dev *sdev = dfse->sdev;
-	int size, err;
+	int size;
 	u32 *buf;
 	loff_t pos = *ppos;
 	size_t ret;
@@ -59,13 +59,7 @@ static ssize_t sof_dfsentry_read(struct file *file, char __user *buffer,
 		return -ENOMEM;
 
 	/* copy from DSP MMIO */
-	err = pm_runtime_get_sync(sdev->dev);
-	if (err < 0) {
-		dev_err(sdev->dev, "error: debugFS failed to resume %d\n",
-			err);
-		return err;
-	}
-
+	pm_runtime_get(sdev->dev);
 	memcpy_fromio(buf,  dfse->buf + pos, size);
 	pm_runtime_put(sdev->dev);
 
