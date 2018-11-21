@@ -11,8 +11,6 @@
 #ifndef __SOF_INTEL_HDA_H
 #define __SOF_INTEL_HDA_H
 
-#include <sound/hda_codec.h>
-
 /* PCI registers */
 #define PCI_TCSEL			0x44
 #define PCI_CGCTL			0x48
@@ -371,8 +369,6 @@ struct sof_intel_hda_stream {
 
 /* represents DSP HDA controller frontend - i.e. host facing control */
 struct sof_intel_hda_dev {
-
-	struct hda_bus hbus;
 
 	/* hw config */
 	const struct sof_intel_dsp_desc *desc;
