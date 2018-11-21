@@ -19,7 +19,6 @@
 
 /* PCI_CGCTL bits */
 #define PCI_CGCTL_MISCBDCGE_MASK	BIT(6)
-#define PCI_CGCTL_LSRMD_MASK		BIT(4)
 
 /* Legacy HDA registers and bits used - widths are variable */
 #define SOF_HDA_GCAP			0x0
