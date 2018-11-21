@@ -8,7 +8,6 @@ config SND_SOC_SOF
 	tristate "Sound Open Firmware Support"
 	select SND_SOC_TOPOLOGY
 	select SND_SOC_COMPRESS
-	depends on !MIPS
 	help
           This adds support for Sound Open Firmware (SOF). SOF is a free and
 	  generic open source audio DSP firmware for multiple devices.
