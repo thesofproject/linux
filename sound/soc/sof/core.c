@@ -496,6 +496,7 @@ void snd_sof_shutdown(struct device *dev)
 }
 EXPORT_SYMBOL(snd_sof_shutdown);
 
+
 static struct platform_driver sof_driver = {
 	.driver = {
 		.name = "sof-audio",
