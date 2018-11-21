@@ -1807,28 +1807,15 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 			  struct snd_soc_dapm_route *route)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
-	struct sof_ipc_pipe_comp_connect *connect;
+	struct sof_ipc_pipe_comp_connect connect;
 	struct snd_sof_widget *source_swidget, *sink_swidget;
 	struct snd_sof_pcm *spcm;
-	struct snd_sof_route *sroute;
 	struct sof_ipc_reply reply;
 	int ret = 0;
 
-	/* allocate memory for sroute and connect */
-	sroute = kzalloc(sizeof(*sroute), GFP_KERNEL);
-	if (!sroute)
-		return -ENOMEM;
-
-	sroute->sdev = sdev;
-
-	connect = kzalloc(sizeof(*connect), GFP_KERNEL);
-	if (!connect) {
-		kfree(sroute);
-		return -ENOMEM;
-	}
-
-	connect->hdr.size = sizeof(*connect);
-	connect->hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_COMP_CONNECT;
+	memset(&connect, 0, sizeof(connect));
+	connect.hdr.size = sizeof(connect);
+	connect.hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_COMP_CONNECT;
 
 	dev_dbg(sdev->dev, "sink %s control %s source %s\n",
 		route->sink, route->control ? route->control : "none",
@@ -1844,11 +1831,10 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 
 		dev_err(sdev->dev, "error: source %s not found\n",
 			route->source);
-		ret = -EINVAL;
-		goto err;
+		return -EINVAL;
 	}
 
-	connect->source_id = source_swidget->comp_id;
+	connect.source_id = source_swidget->comp_id;
 
 	/* sink component */
 	sink_swidget = snd_sof_find_swidget(sdev, (char *)route->sink);
@@ -1860,11 +1846,10 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 
 		dev_err(sdev->dev, "error: sink %s not found\n",
 			route->sink);
-		ret = -EINVAL;
-		goto err;
+		return -EINVAL;
 	}
 
-	connect->sink_id = sink_swidget->comp_id;
+	connect.sink_id = sink_swidget->comp_id;
 
 	/* Some virtual routes and widgets may been added in topology for
 	 * compatibility. For virtual routes, both sink and source are not
@@ -1878,8 +1863,8 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 			route->source, route->sink);
 	} else {
 		ret = sof_ipc_tx_message(sdev->ipc,
-					 connect->hdr.cmd,
-					 connect, sizeof(*connect),
+					 connect.hdr.cmd,
+					 &connect, sizeof(connect),
 					 &reply, sizeof(reply));
 
 		/* check IPC return value */
@@ -1888,7 +1873,7 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 				route->sink,
 				route->control ? route->control : "none",
 				route->source);
-			goto err;
+			return ret;
 		}
 
 		/* check IPC reply */
@@ -1897,22 +1882,10 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 				route->sink,
 				route->control ? route->control : "none",
 				route->source, reply.error);
-			ret = reply.error;
-			goto err;
+			return reply.error;
 		}
 	}
 
-	sroute->route = route;
-	sroute->private = connect;
-
-	/* add route to route list */
-	list_add(&sroute->list, &sdev->route_list);
-
-	return ret;
-
-err:
-	kfree(connect);
-	kfree(sroute);
 	return ret;
 }
 
