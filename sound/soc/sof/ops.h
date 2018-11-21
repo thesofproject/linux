@@ -264,12 +264,10 @@ snd_sof_pcm_platform_close(struct snd_sof_dev *sdev,
 static inline int
 snd_sof_pcm_platform_hw_params(struct snd_sof_dev *sdev,
 			       struct snd_pcm_substream *substream,
-			       struct snd_pcm_hw_params *params,
-			       struct sof_ipc_stream_params *ipc_params)
+			       struct snd_pcm_hw_params *params)
 {
 	if (sdev->ops && sdev->ops->pcm_hw_params)
-		return sdev->ops->pcm_hw_params(sdev, substream,
-						params, ipc_params);
+		return sdev->ops->pcm_hw_params(sdev, substream, params);
 	else
 		return 0;
 }
