@@ -1997,9 +1997,10 @@ static int sof_route_unload(struct snd_soc_component *scomp,
 	return 0;
 }
 
-int snd_sof_complete_pipeline(struct snd_sof_dev *sdev,
-			      struct snd_sof_widget *swidget)
+static int sof_complete_pipeline(struct snd_soc_component *scomp,
+				 struct snd_sof_widget *swidget)
 {
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct sof_ipc_pipe_ready ready;
 	struct sof_ipc_reply reply;
 	int ret;
@@ -2034,7 +2035,7 @@ static void sof_complete(struct snd_soc_component *scomp)
 		switch (swidget->id) {
 		case snd_soc_dapm_scheduler:
 			swidget->complete =
-				snd_sof_complete_pipeline(sdev, swidget);
+				sof_complete_pipeline(scomp, swidget);
 			break;
 		default:
 			break;
