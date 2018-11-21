@@ -458,7 +458,7 @@ static int byt_get_reply(struct snd_sof_dev *sdev, struct snd_sof_ipc_msg *msg)
 	return ret;
 }
 
-static int byt_cmd_done(struct snd_sof_dev *sdev, int dir)
+static int byt_cmd_done(struct snd_sof_dev *sdev)
 {
 	/* clear BUSY bit and set DONE bit - accept new messages */
 	snd_sof_dsp_update_bits64_unlocked(sdev, BYT_DSP_BAR, SHIM_IPCD,

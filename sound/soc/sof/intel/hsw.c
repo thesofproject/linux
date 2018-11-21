@@ -574,7 +574,7 @@ static int hsw_get_reply(struct snd_sof_dev *sdev, struct snd_sof_ipc_msg *msg)
 	return ret;
 }
 
-static int hsw_cmd_done(struct snd_sof_dev *sdev, int dir)
+static int hsw_cmd_done(struct snd_sof_dev *sdev)
 {
 	/* clear BUSY bit and set DONE bit - accept new messages */
 	snd_sof_dsp_update_bits_unlocked(sdev, HSW_DSP_BAR, SHIM_IPCD,
