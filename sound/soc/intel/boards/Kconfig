@@ -229,20 +229,6 @@ config SND_SOC_INTEL_BXT_DA7219_MAX98357A_MACH
 	   Say Y or m if you have such a device. This is a recommended option.
 	   If unsure select "N".
 
-config SND_SOC_INTEL_GLK_RT5682_MAX98357A_MACH
-        tristate "ASoC Audio driver for Geminilake with RT5682 and MAX98357A in I2S Mode"
-        depends on MFD_INTEL_LPSS && I2C && ACPI
-        select SND_SOC_RT5682
-        select SND_SOC_MAX98357A
-        select SND_SOC_DMIC
-        select SND_SOC_HDAC_HDMI
-        select SND_HDA_DSP_LOADER
-        help
-           This adds support for ASoC machine driver for Geminilake platforms
-           with RT5682 + MAX98357A I2S audio codec.
-           Say Y if you have such a device. This is a recommended option.
-           If unsure select "N".
-
 config SND_SOC_INTEL_BXT_RT298_MACH
 	tristate "Broxton with RT298 I2S mode"
 	depends on MFD_INTEL_LPSS && I2C && ACPI
@@ -311,16 +297,21 @@ config SND_SOC_INTEL_CNL_RT274_MACH
 	   Say Y if you have such a device.
 	   If unsure select "N".
 
-config SND_SOC_INTEL_SKL_HDA_DSP_GENERIC_MACH
-	tristate "SKL/KBL/BXT/APL with HDA Codecs"
+config SND_SOC_INTEL_GLK_RT5682_MAX98357A_MACH
+	tristate "ASoC Audio driver for Geminilake with RT5682 and MAX98357A in I2S Mode"
+	depends on SND_SOC_INTEL_MACH
+	depends on X86 && ACPI && I2C
+	select SND_SOC_INTEL_SKYLAKE
+	select SND_SOC_RT5682
+	select SND_SOC_MAX98357A
+	select SND_SOC_DMIC
 	select SND_SOC_HDAC_HDMI
-	select SND_SOC_HDAC_HDA
+	select SND_HDA_DSP_LOADER
 	help
-	  This adds support for ASoC machine driver for Intel platforms
-	  SKL/KBL/BXT/APL with iDisp, HDA audio codecs.
-          Say Y or m if you have such a device. This is a recommended option.
-	  If unsure select "N".
-
+	   This adds support for ASoC machine driver for Geminilake platforms
+	   with RT5682 + MAX98357A I2S audio codec.
+	   Say Y if you have such a device. This is a recommended option.
+	   If unsure select "N".
 
 endif ## SND_SOC_INTEL_SKYLAKE
 
