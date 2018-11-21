@@ -36,7 +36,9 @@
 
 static struct snd_soc_card *audio_card;
 static struct snd_soc_jack broxton_headset;
+#ifndef DISABLE_HDMI
 static struct snd_soc_jack broxton_hdmi[3];
+#endif
 
 struct bxt_hdmi_pcm {
 	struct list_head head;
@@ -224,6 +226,7 @@ static int broxton_da7219_codec_init(struct snd_soc_pcm_runtime *rtd)
 	return ret;
 }
 
+#ifndef DISABLE_HDMI
 static int broxton_hdmi_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct bxt_card_private *ctx = snd_soc_card_get_drvdata(rtd->card);
@@ -241,6 +244,7 @@ static int broxton_hdmi_init(struct snd_soc_pcm_runtime *rtd)
 
 	return 0;
 }
+#endif
 
 #if !IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL)
 static int broxton_da7219_fe_init(struct snd_soc_pcm_runtime *rtd)
@@ -729,6 +733,7 @@ static struct snd_soc_dai_link geminilake_dais[] = {
 		.dpcm_capture = 1,
 		.no_pcm = 1,
 	},
+#ifndef DISABLE_HDMI
 	{
 		.name = "iDisp1",
 		.id = 3,
@@ -762,6 +767,7 @@ static struct snd_soc_dai_link geminilake_dais[] = {
 		.dpcm_playback = 1,
 		.no_pcm = 1,
 	},
+#endif
 };
 
 static int is_geminilake(void)
@@ -779,11 +785,13 @@ static int is_geminilake(void)
 #define NAME_SIZE	32
 static int bxt_card_late_probe(struct snd_soc_card *card)
 {
+#ifndef DISABLE_HDMI
 	struct bxt_card_private *ctx = snd_soc_card_get_drvdata(card);
 	struct bxt_hdmi_pcm *pcm;
 	struct snd_soc_component *component = NULL;
 	int err, i = 0;
 	char jack_name[NAME_SIZE];
+#endif
 
 	if (is_geminilake())
 		snd_soc_dapm_add_routes(&card->dapm, gemini_map,
@@ -792,6 +800,7 @@ static int bxt_card_late_probe(struct snd_soc_card *card)
 		snd_soc_dapm_add_routes(&card->dapm, broxton_map,
 				ARRAY_SIZE(broxton_map));
 
+#ifndef DISABLE_HDMI
 	list_for_each_entry(pcm, &ctx->hdmi_pcm_list, head) {
 		component = pcm->codec_dai->component;
 		snprintf(jack_name, sizeof(jack_name),
@@ -815,6 +824,9 @@ static int bxt_card_late_probe(struct snd_soc_card *card)
 		return -EINVAL;
 
 	return hdac_hdmi_jack_port_init(component, &card->dapm);
+#else
+	return 0;
+#endif
 
 }
 
