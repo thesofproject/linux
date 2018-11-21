@@ -830,7 +830,7 @@ static int bxt_card_late_probe(struct snd_soc_card *card)
 	if (!component)
 		return -EINVAL;
 
-	return hdac_hdmi_jack_port_init(component, &card->dapm);
+	return hdac_hdmi_jack_port_init(codec, &card->dapm);
 #else
 	return 0;
 #endif
