@@ -487,26 +487,4 @@ int snd_sof_bytes_get(struct snd_kcontrol *kcontrol,
 int snd_sof_bytes_put(struct snd_kcontrol *kcontrol,
 		      struct snd_ctl_elem_value *ucontrol);
 
-/*
- * DSP Architectures.
- */
-static inline void sof_stack(struct snd_sof_dev *sdev, void *oops, u32 *stack,
-			     u32 stack_words)
-{
-	if (sdev->arch_ops->dsp_stack)
-		sdev->arch_ops->dsp_stack(sdev, oops, stack, stack_words);
-}
-
-static inline void sof_oops(struct snd_sof_dev *sdev, void *oops)
-{
-	if (sdev->arch_ops->dsp_oops)
-		sdev->arch_ops->dsp_oops(sdev, oops);
-}
-
-extern const struct sof_arch_ops sof_xtensa_arch_ops;
-
-/*
- * Utilities
- */
-int sof_create_platform_device(struct sof_platform_priv *priv);
 #endif
