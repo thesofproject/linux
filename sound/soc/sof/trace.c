@@ -26,9 +26,10 @@
 #include "sof-priv.h"
 #include "ops.h"
 
-static size_t sof_wait_trace_avail(struct snd_sof_dev *sdev,
-				   loff_t pos, size_t buffer_size)
+static int sof_wait_trace_avail(struct snd_sof_dev *sdev, size_t *count,
+				loff_t pos, size_t size)
 {
+	size_t avail;
 	wait_queue_entry_t wait;
 
 	/*
@@ -36,12 +37,14 @@ static size_t sof_wait_trace_avail(struct snd_sof_dev *sdev,
 	 * host DMA buffer has been wrapped. We should output the trace data
 	 * at the end of host DMA buffer at first.
 	 */
-	if (sdev->host_offset < pos)
-		return buffer_size - pos;
+	if (sdev->host_offset < pos) {
+		avail = size - pos;
+		goto _host_end;
+	}
 
 	/* If there is available trace data now, it is unnecessary to wait. */
 	if (sdev->host_offset > pos)
-		return sdev->host_offset - pos;
+		goto _endcheck;
 
 	/* wait for available trace data from FW */
 	init_waitqueue_entry(&wait, current);
@@ -50,19 +53,22 @@ static size_t sof_wait_trace_avail(struct snd_sof_dev *sdev,
 
 	if (signal_pending(current)) {
 		remove_wait_queue(&sdev->trace_sleep, &wait);
-		goto out;
+		goto _endcheck;
 	}
 
 	/* set timeout to max value, no error code */
 	schedule_timeout(MAX_SCHEDULE_TIMEOUT);
 	remove_wait_queue(&sdev->trace_sleep, &wait);
 
-out:
-	/* return bytes available for copy */
-	if (sdev->host_offset < pos)
-		return buffer_size - pos;
-	else
-		return sdev->host_offset - pos;
+_endcheck:
+	/* calculate the available count */
+	avail = sdev->host_offset - pos;
+
+_host_end:
+	/* return min value between available and request count */
+	*count = avail < *count ? avail : *count;
+
+	return 0;
 }
 
 static ssize_t sof_dfsentry_trace_read(struct file *file, char __user *buffer,
@@ -70,42 +76,49 @@ static ssize_t sof_dfsentry_trace_read(struct file *file, char __user *buffer,
 {
 	struct snd_sof_dfsentry_buf *dfse = file->private_data;
 	struct snd_sof_dev *sdev = dfse->sdev;
-	unsigned long rem;
-	loff_t lpos = *ppos;
-	size_t avail, buffer_size = dfse->size;
+	int err;
+	loff_t pos = *ppos;
+	loff_t lpos = pos;
+	size_t ret, size;
 
-	/* make sure we know about any failures on the DSP side */
-	sdev->dtrace_error = false;
+	size = dfse->size;
 
 	/* check pos and count */
-	if (lpos < 0)
+	if (pos < 0)
 		return -EINVAL;
 	if (!count)
 		return 0;
 
-	/* check for buffer wrap and count overflow */
-	lpos = lpos % buffer_size;
-	if (count > buffer_size - lpos)
-		count = buffer_size - lpos;
+	/*
+	 * If pos exceeds size, it means host DMA buffer has been wrapped. So
+	 * local pos will be truncated from global pos. It is possible to wrap
+	 * host DMA buffer multiply times when keep output long time, so we
+	 * need one loop to process it.
+	 */
+	while (lpos >= size)
+		lpos -= size;
+
+	if (count > size - lpos)
+		count = size - lpos;
 
 	/* get available count based on current host offset */
-	avail = sof_wait_trace_avail(sdev, lpos, buffer_size);
-	if (sdev->dtrace_error) {
-		dev_err(sdev->dev, "error: trace IO error\n");
-		return -EIO;
+	err = sof_wait_trace_avail(sdev, &count, lpos, size);
+	if (err < 0) {
+		dev_err(sdev->dev,
+			"error: can't get more trace %d\n", err);
+		return 0;
 	}
 
-	/* make sure count is <= avail */
-	count = avail > count ? count : avail;
-
 	/* copy available trace data to debugfs */
-	rem = copy_to_user(buffer, dfse->buf + lpos, count);
-	if (rem == count)
-		return -EFAULT;
+	ret = copy_to_user(buffer, dfse->buf + lpos, count);
 
-	*ppos += count;
+	if (ret == count)
+		return -EFAULT;
+	count -= ret;
 
 	/* move debugfs reading position */
+	*ppos = pos + count;
+
 	return count;
 }
 
@@ -165,7 +178,7 @@ int snd_sof_init_trace(struct snd_sof_dev *sdev)
 				  DMA_BUF_SIZE_FOR_TRACE, &sdev->dmatb);
 	if (ret < 0) {
 		dev_err(sdev->dev,
-			"error: can't alloc buffer for trace %d\n", ret);
+			"error: can't alloc buffer for trace%d\n", ret);
 		goto page_err;
 	}
 
@@ -245,12 +258,10 @@ int snd_sof_trace_update_pos(struct snd_sof_dev *sdev,
 	return 0;
 }
 
-/* an error has occurred within the DSP that prevents further trace */
 void snd_sof_trace_notify_for_error(struct snd_sof_dev *sdev)
 {
 	if (sdev->dtrace_is_enabled) {
 		dev_err(sdev->dev, "error: waking up any trace sleepers\n");
-		sdev->dtrace_error = true;
 		wake_up(&sdev->trace_sleep);
 	}
 }
