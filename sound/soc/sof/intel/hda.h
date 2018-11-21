@@ -359,9 +359,6 @@ struct sof_intel_hda_dev {
 	/*trace */
 	struct hdac_ext_stream *dtrace_stream;
 
-	/* if position update IPC needed */
-	bool no_ipc_position;
-
 	int irq;
 };
 
