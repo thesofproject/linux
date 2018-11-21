@@ -6,9 +6,6 @@
  * Copyright(c) 2017 Intel Corporation. All rights reserved.
  *
  * Author: Liam Girdwood <liam.r.girdwood@linux.intel.com>
- *
- * Generic IPC layer that can work over MMIO and SPI/I2C. PHY layer provided
- * by platform driver code.
  */
 
 #include <linux/types.h>
@@ -34,19 +31,10 @@
 #include "sof-priv.h"
 #include "ops.h"
 
-/*
- * IPC message default size and timeout (msecs).
- * TODO: allow platforms to set size and timeout.
- */
+/* IPC message timeout (msecs) */
 #define IPC_TIMEOUT_MSECS	300
+
 #define IPC_EMPTY_LIST_SIZE	8
-
-static void ipc_trace_message(struct snd_sof_dev *sdev, u32 msg_id);
-static void ipc_stream_message(struct snd_sof_dev *sdev, u32 msg_cmd);
-
-/*
- * IPC message Tx/Rx message handling.
- */
 
 /* SOF generic IPC data */
 struct snd_sof_ipc {
@@ -71,7 +59,6 @@ static struct snd_sof_ipc_msg *msg_get_empty(struct snd_sof_ipc *ipc)
 {
 	struct snd_sof_ipc_msg *msg = NULL;
 
-	/* get first empty message in the list */
 	if (!list_empty(&ipc->empty_list)) {
 		msg = list_first_entry(&ipc->empty_list, struct snd_sof_ipc_msg,
 				       list);
@@ -81,7 +68,6 @@ static struct snd_sof_ipc_msg *msg_get_empty(struct snd_sof_ipc *ipc)
 	return msg;
 }
 
-/* wait for IPC message reply */
 static int tx_wait_done(struct snd_sof_ipc *ipc, struct snd_sof_ipc_msg *msg,
 			void *reply_data)
 {
@@ -125,7 +111,6 @@ static int tx_wait_done(struct snd_sof_ipc *ipc, struct snd_sof_ipc_msg *msg,
 	return ret;
 }
 
-/* send IPC message from host to DSP */
 int sof_ipc_tx_message(struct snd_sof_ipc *ipc, u32 header,
 		       void *msg_data, size_t msg_bytes, void *reply_data,
 		       size_t reply_bytes)
@@ -136,7 +121,6 @@ int sof_ipc_tx_message(struct snd_sof_ipc *ipc, u32 header,
 
 	spin_lock_irqsave(&sdev->ipc_lock, flags);
 
-	/* get an empty message */
 	msg = msg_get_empty(ipc);
 	if (!msg) {
 		spin_unlock_irqrestore(&sdev->ipc_lock, flags);
@@ -148,11 +132,9 @@ int sof_ipc_tx_message(struct snd_sof_ipc *ipc, u32 header,
 	msg->reply_size = reply_bytes;
 	msg->complete = false;
 
-	/* attach any data */
 	if (msg_bytes)
 		memcpy(msg->msg_data, msg_data, msg_bytes);
 
-	/* add message to transmit list */
 	list_add_tail(&msg->list, &ipc->tx_list);
 
 	/* schedule the messgae if not busy */
@@ -161,12 +143,10 @@ int sof_ipc_tx_message(struct snd_sof_ipc *ipc, u32 header,
 
 	spin_unlock_irqrestore(&sdev->ipc_lock, flags);
 
-	/* now wait for completion */
 	return tx_wait_done(ipc, msg, reply_data);
 }
 EXPORT_SYMBOL(sof_ipc_tx_message);
 
-/* send next IPC message in list */
 static void ipc_tx_next_msg(struct work_struct *work)
 {
 	struct snd_sof_ipc *ipc =
@@ -176,22 +156,19 @@ static void ipc_tx_next_msg(struct work_struct *work)
 
 	spin_lock_irq(&sdev->ipc_lock);
 
-	/* send message if HW read and message in TX list */
 	if (list_empty(&ipc->tx_list))
 		goto out;
 
-	/* sned first message in TX list */
 	msg = list_first_entry(&ipc->tx_list, struct snd_sof_ipc_msg, list);
 	list_move(&msg->list, &ipc->reply_list);
-	snd_sof_dsp_send_msg(sdev, msg);
 
+	snd_sof_dsp_send_msg(sdev, msg);
 	dev_dbg(sdev->dev, "ipc: send 0x%x\n", msg->header);
 
 out:
 	spin_unlock_irq(&sdev->ipc_lock);
 }
 
-/* find original TX message from DSP reply */
 struct snd_sof_ipc_msg *sof_ipc_reply_find_msg(struct snd_sof_ipc *ipc,
 					       u32 header)
 {
@@ -215,7 +192,7 @@ err:
 }
 EXPORT_SYMBOL(sof_ipc_reply_find_msg);
 
-/* mark IPC message as complete - locks held by caller */
+/* locks held by caller */
 void sof_ipc_tx_msg_reply_complete(struct snd_sof_ipc *ipc,
 				   struct snd_sof_ipc_msg *msg)
 {
@@ -223,7 +200,6 @@ void sof_ipc_tx_msg_reply_complete(struct snd_sof_ipc *ipc,
 	wake_up(&msg->waitq);
 }
 
-/* drop all IPC messages in preparation for DSP stall/reset */
 void sof_ipc_drop_all(struct snd_sof_ipc *ipc)
 {
 	struct snd_sof_dev *sdev = ipc->sdev;
@@ -247,7 +223,6 @@ void sof_ipc_drop_all(struct snd_sof_ipc *ipc)
 }
 EXPORT_SYMBOL(sof_ipc_drop_all);
 
-/* handle reply message from DSP */
 void snd_sof_ipc_reply(struct snd_sof_dev *sdev, u32 msg_id)
 {
 	struct snd_sof_ipc_msg *msg;
@@ -264,105 +239,17 @@ void snd_sof_ipc_reply(struct snd_sof_dev *sdev, u32 msg_id)
 }
 EXPORT_SYMBOL(snd_sof_ipc_reply);
 
-/* DSP firmware has sent host a message  */
-static void ipc_msgs_rx(struct work_struct *work)
+int snd_sof_dsp_mailbox_init(struct snd_sof_dev *sdev, u32 dspbox,
+			     size_t dspbox_size, u32 hostbox,
+			     size_t hostbox_size)
 {
-	struct snd_sof_ipc *ipc =
-		container_of(work, struct snd_sof_ipc, rx_kwork);
-	struct snd_sof_dev *sdev = ipc->sdev;
-	struct sof_ipc_hdr hdr;
-	u32 cmd, type;
-	int err = -EINVAL;
-
-	/* read back header */
-	snd_sof_dsp_mailbox_read(sdev, sdev->dsp_box.offset, &hdr, sizeof(hdr));
-
-	cmd = hdr.cmd & SOF_GLB_TYPE_MASK;
-	type = hdr.cmd & SOF_CMD_TYPE_MASK;
-
-	/* check message type */
-	switch (cmd) {
-	case SOF_IPC_GLB_REPLY:
-		dev_err(sdev->dev, "error: ipc reply unknown\n");
-		break;
-	case SOF_IPC_FW_READY:
-		/* check for FW boot completion */
-		if (!sdev->boot_complete) {
-			if (sdev->ops->fw_ready)
-				err = sdev->ops->fw_ready(sdev, cmd);
-			if (err < 0) {
-				dev_err(sdev->dev, "DSP firmware boot timeout %d\n",
-					err);
-			} else {
-				/* firmware boot completed OK */
-				sdev->boot_complete = true;
-				dev_dbg(sdev->dev, "booting DSP firmware completed\n");
-				wake_up(&sdev->boot_wait);
-			}
-		}
-		break;
-	case SOF_IPC_GLB_COMPOUND:
-	case SOF_IPC_GLB_TPLG_MSG:
-	case SOF_IPC_GLB_PM_MSG:
-	case SOF_IPC_GLB_COMP_MSG:
-		break;
-	case SOF_IPC_GLB_STREAM_MSG:
-		/* need to pass msg id into the function */
-		ipc_stream_message(sdev, hdr.cmd);
-		break;
-	case SOF_IPC_GLB_TRACE_MSG:
-		ipc_trace_message(sdev, type);
-		break;
-	default:
-		dev_err(sdev->dev, "unknown DSP message 0x%x\n", cmd);
-		break;
-	}
-
-	dev_dbg(sdev->dev, "ipc rx: 0x%x done\n", hdr.cmd);
-
-	/* tell DSP we are done */
-	snd_sof_dsp_cmd_done(sdev);
+	sdev->dsp_box.offset = dspbox;
+	sdev->dsp_box.size = dspbox_size;
+	sdev->host_box.offset = hostbox;
+	sdev->host_box.size = hostbox_size;
+	return 0;
 }
-
-/* schedule work to transmit any IPC in queue */
-void snd_sof_ipc_msgs_tx(struct snd_sof_dev *sdev)
-{
-	schedule_work(&sdev->ipc->tx_kwork);
-}
-EXPORT_SYMBOL(snd_sof_ipc_msgs_tx);
-
-/* schedule work to handle IPC from DSP */
-void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev)
-{
-	schedule_work(&sdev->ipc->rx_kwork);
-}
-EXPORT_SYMBOL(snd_sof_ipc_msgs_rx);
-
-/*
- * IPC trace mechanism.
- */
-
-static void ipc_trace_message(struct snd_sof_dev *sdev, u32 msg_id)
-{
-	struct sof_ipc_dma_trace_posn posn;
-
-	switch (msg_id) {
-	case SOF_IPC_TRACE_DMA_POSITION:
-		/* read back full message */
-		snd_sof_dsp_mailbox_read(sdev, sdev->dsp_box.offset, &posn,
-					 sizeof(posn));
-		snd_sof_trace_update_pos(sdev, &posn);
-		break;
-	default:
-		dev_err(sdev->dev, "error: unhandled trace message %x\n",
-			msg_id);
-		break;
-	}
-}
-
-/*
- * IPC stream position.
- */
+EXPORT_SYMBOL(snd_sof_dsp_mailbox_init);
 
 static void ipc_period_elapsed(struct snd_sof_dev *sdev, u32 msg_id)
 {
@@ -406,7 +293,6 @@ static void ipc_period_elapsed(struct snd_sof_dev *sdev, u32 msg_id)
 	snd_pcm_period_elapsed(spcm->stream[direction].substream);
 }
 
-/* DSP notifies host of an XRUN within FW */
 static void ipc_xrun(struct snd_sof_dev *sdev, u32 msg_id)
 {
 	struct sof_ipc_stream_posn posn;
@@ -414,7 +300,7 @@ static void ipc_xrun(struct snd_sof_dev *sdev, u32 msg_id)
 	u32 posn_offset;
 	int direction;
 
-	/* check if we have stream MMIO on this platform */
+	/* check if we have stream box */
 	if (sdev->stream_box.size == 0) {
 		/* read back full message */
 		snd_sof_dsp_mailbox_read(sdev, sdev->dsp_box.offset, &posn,
@@ -444,14 +330,12 @@ static void ipc_xrun(struct snd_sof_dev *sdev, u32 msg_id)
 	dev_dbg(sdev->dev,  "posn XRUN: host %llx comp %d size %d\n",
 		posn.host_posn, posn.xrun_comp_id, posn.xrun_size);
 
-#if defined(CONFIG_SOC_SOF_DEBUG_XRUN_STOP)
-	/* stop PCM on XRUN - used for pipeline debug */
+	return; /* TODO: don't do anything yet until preload is working */
+
 	memcpy(&spcm->stream[direction].posn, &posn, sizeof(posn));
 	snd_pcm_stop_xrun(spcm->stream[direction].substream);
-#endif
 }
 
-/* stream notifications from DSP FW */
 static void ipc_stream_message(struct snd_sof_dev *sdev, u32 msg_cmd)
 {
 	/* get msg cmd type and msd id */
@@ -472,7 +356,148 @@ static void ipc_stream_message(struct snd_sof_dev *sdev, u32 msg_cmd)
 	}
 }
 
-/* get stream position IPC - use faster MMIO method if available on platform */
+static void ipc_trace_message(struct snd_sof_dev *sdev, u32 msg_id)
+{
+	struct sof_ipc_dma_trace_posn posn;
+
+	switch (msg_id) {
+	case SOF_IPC_TRACE_DMA_POSITION:
+		/* read back full message */
+		snd_sof_dsp_mailbox_read(sdev, sdev->dsp_box.offset, &posn,
+					 sizeof(posn));
+		snd_sof_trace_update_pos(sdev, &posn);
+		break;
+	default:
+		dev_err(sdev->dev, "error: unhandled trace message %x\n",
+			msg_id);
+		break;
+	}
+}
+
+/* DSP firmware has sent host a message  */
+static void ipc_msgs_rx(struct work_struct *work)
+{
+	struct snd_sof_ipc *ipc =
+		container_of(work, struct snd_sof_ipc, rx_kwork);
+	struct snd_sof_dev *sdev = ipc->sdev;
+	struct sof_ipc_hdr hdr;
+	u32 cmd, type;
+	int err = -EINVAL;
+
+	/* read back header */
+	snd_sof_dsp_mailbox_read(sdev, sdev->dsp_box.offset, &hdr, sizeof(hdr));
+
+	cmd = hdr.cmd & SOF_GLB_TYPE_MASK;
+	type = hdr.cmd & SOF_CMD_TYPE_MASK;
+
+	switch (cmd) {
+	case SOF_IPC_GLB_REPLY:
+		dev_err(sdev->dev, "error: ipc reply unknown\n");
+		break;
+	case SOF_IPC_FW_READY:
+		/* check for FW boot completion */
+		if (!sdev->boot_complete) {
+			if (sdev->ops->fw_ready)
+				err = sdev->ops->fw_ready(sdev, cmd);
+			if (err < 0) {
+				dev_err(sdev->dev, "DSP firmware boot timeout %d\n",
+					err);
+			} else {
+				/* firmware boot completed OK */
+				sdev->boot_complete = true;
+				dev_dbg(sdev->dev, "booting DSP firmware completed\n");
+				wake_up(&sdev->boot_wait);
+			}
+		}
+		break;
+	case SOF_IPC_GLB_COMPOUND:
+	case SOF_IPC_GLB_TPLG_MSG:
+	case SOF_IPC_GLB_PM_MSG:
+	case SOF_IPC_GLB_COMP_MSG:
+		break;
+	case SOF_IPC_GLB_STREAM_MSG:
+		/* need to pass msg id into the function */
+		ipc_stream_message(sdev, hdr.cmd);
+		break;
+	case SOF_IPC_GLB_TRACE_MSG:
+		ipc_trace_message(sdev, type);
+		break;
+	default:
+		dev_err(sdev->dev, "unknown DSP message 0x%x\n", cmd);
+		break;
+	}
+
+	dev_dbg(sdev->dev, "ipc rx: 0x%x done\n", hdr.cmd);
+
+	snd_sof_dsp_cmd_done(sdev);
+}
+
+void snd_sof_ipc_msgs_tx(struct snd_sof_dev *sdev)
+{
+	schedule_work(&sdev->ipc->tx_kwork);
+}
+EXPORT_SYMBOL(snd_sof_ipc_msgs_tx);
+
+void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev)
+{
+	schedule_work(&sdev->ipc->rx_kwork);
+}
+EXPORT_SYMBOL(snd_sof_ipc_msgs_rx);
+
+struct snd_sof_ipc *snd_sof_ipc_init(struct snd_sof_dev *sdev)
+{
+	struct snd_sof_ipc *ipc;
+	struct snd_sof_ipc_msg *msg;
+	int i;
+
+	ipc = devm_kzalloc(sdev->dev, sizeof(*ipc), GFP_KERNEL);
+	if (!ipc)
+		return NULL;
+
+	INIT_LIST_HEAD(&ipc->tx_list);
+	INIT_LIST_HEAD(&ipc->reply_list);
+	INIT_LIST_HEAD(&ipc->empty_list);
+	init_waitqueue_head(&ipc->wait_txq);
+	INIT_WORK(&ipc->tx_kwork, ipc_tx_next_msg);
+	INIT_WORK(&ipc->rx_kwork, ipc_msgs_rx);
+	ipc->sdev = sdev;
+
+	/* pre-allocate messages */
+	dev_dbg(sdev->dev, "pre-allocate %d IPC messages\n",
+		IPC_EMPTY_LIST_SIZE);
+	msg = devm_kzalloc(sdev->dev, sizeof(struct snd_sof_ipc_msg) *
+			   IPC_EMPTY_LIST_SIZE, GFP_KERNEL);
+	if (!msg)
+		return NULL;
+
+	/* pre-allocate message data */
+	for (i = 0; i < IPC_EMPTY_LIST_SIZE; i++) {
+		msg->msg_data = devm_kzalloc(sdev->dev, PAGE_SIZE, GFP_KERNEL);
+		if (!msg->msg_data)
+			return NULL;
+
+		msg->reply_data = devm_kzalloc(sdev->dev, PAGE_SIZE,
+					       GFP_KERNEL);
+		if (!msg->reply_data)
+			return NULL;
+
+		init_waitqueue_head(&msg->waitq);
+		list_add(&msg->list, &ipc->empty_list);
+		msg++;
+	}
+
+	return ipc;
+}
+EXPORT_SYMBOL(snd_sof_ipc_init);
+
+void snd_sof_ipc_free(struct snd_sof_dev *sdev)
+{
+	/* TODO: send IPC to prepare DSP for shutdown */
+	cancel_work_sync(&sdev->ipc->tx_kwork);
+	cancel_work_sync(&sdev->ipc->rx_kwork);
+}
+EXPORT_SYMBOL(snd_sof_ipc_free);
+
 int snd_sof_ipc_stream_posn(struct snd_sof_dev *sdev,
 			    struct snd_sof_pcm *spcm, int direction,
 			    struct sof_ipc_stream_posn *posn)
@@ -498,10 +523,6 @@ int snd_sof_ipc_stream_posn(struct snd_sof_dev *sdev,
 	return 0;
 }
 EXPORT_SYMBOL(snd_sof_ipc_stream_posn);
-
-/*
- * IPC get()/set() for kcontrols.
- */
 
 int snd_sof_ipc_set_comp_data(struct snd_sof_ipc *ipc,
 			      struct snd_sof_control *scontrol, u32 ipc_cmd,
@@ -586,72 +607,3 @@ int snd_sof_ipc_get_comp_data(struct snd_sof_ipc *ipc,
 	return 0;
 }
 EXPORT_SYMBOL(snd_sof_ipc_get_comp_data);
-
-/*
- * IPC layer enumeration.
- */
-
-int snd_sof_dsp_mailbox_init(struct snd_sof_dev *sdev, u32 dspbox,
-			     size_t dspbox_size, u32 hostbox,
-			     size_t hostbox_size)
-{
-	sdev->dsp_box.offset = dspbox;
-	sdev->dsp_box.size = dspbox_size;
-	sdev->host_box.offset = hostbox;
-	sdev->host_box.size = hostbox_size;
-	return 0;
-}
-EXPORT_SYMBOL(snd_sof_dsp_mailbox_init);
-
-struct snd_sof_ipc *snd_sof_ipc_init(struct snd_sof_dev *sdev)
-{
-	struct snd_sof_ipc *ipc;
-	struct snd_sof_ipc_msg *msg;
-	int i;
-
-	ipc = devm_kzalloc(sdev->dev, sizeof(*ipc), GFP_KERNEL);
-	if (!ipc)
-		return NULL;
-
-	INIT_LIST_HEAD(&ipc->tx_list);
-	INIT_LIST_HEAD(&ipc->reply_list);
-	INIT_LIST_HEAD(&ipc->empty_list);
-	init_waitqueue_head(&ipc->wait_txq);
-	INIT_WORK(&ipc->tx_kwork, ipc_tx_next_msg);
-	INIT_WORK(&ipc->rx_kwork, ipc_msgs_rx);
-	ipc->sdev = sdev;
-
-	/* pre-allocate messages */
-	dev_dbg(sdev->dev, "pre-allocate %d IPC messages\n",
-		IPC_EMPTY_LIST_SIZE);
-	msg = devm_kzalloc(sdev->dev, sizeof(struct snd_sof_ipc_msg) *
-			   IPC_EMPTY_LIST_SIZE, GFP_KERNEL);
-	if (!msg)
-		return NULL;
-
-	/* pre-allocate message data */
-	for (i = 0; i < IPC_EMPTY_LIST_SIZE; i++) {
-		msg->msg_data = devm_kzalloc(sdev->dev, PAGE_SIZE, GFP_KERNEL);
-		if (!msg->msg_data)
-			return NULL;
-
-		msg->reply_data = devm_kzalloc(sdev->dev, PAGE_SIZE,
-					       GFP_KERNEL);
-		if (!msg->reply_data)
-			return NULL;
-
-		init_waitqueue_head(&msg->waitq);
-		list_add(&msg->list, &ipc->empty_list);
-		msg++;
-	}
-
-	return ipc;
-}
-EXPORT_SYMBOL(snd_sof_ipc_init);
-
-void snd_sof_ipc_free(struct snd_sof_dev *sdev)
-{
-	cancel_work_sync(&sdev->ipc->tx_kwork);
-	cancel_work_sync(&sdev->ipc->rx_kwork);
-}
-EXPORT_SYMBOL(snd_sof_ipc_free);
