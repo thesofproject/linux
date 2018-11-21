@@ -49,13 +49,11 @@ int hda_dsp_ipc_cmd_done(struct snd_sof_dev *sdev, int dir)
 
 int hda_dsp_ipc_is_ready(struct snd_sof_dev *sdev)
 {
-	u64 busy, done;
+	u64 val;
 
 	/* is DSP ready for next IPC command */
-	busy = snd_sof_dsp_read(sdev, HDA_DSP_BAR, HDA_DSP_REG_HIPCI);
-	done = snd_sof_dsp_read(sdev, HDA_DSP_BAR, HDA_DSP_REG_HIPCIE);
-	if ((busy & HDA_DSP_REG_HIPCI_BUSY) ||
-	    (done & HDA_DSP_REG_HIPCIE_DONE))
+	val = snd_sof_dsp_read(sdev, HDA_DSP_BAR, HDA_DSP_REG_HIPCI);
+	if (val & HDA_DSP_REG_HIPCI_BUSY)
 		return 0;
 
 	return 1;
