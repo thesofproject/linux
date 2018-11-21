@@ -105,9 +105,9 @@ struct snd_sof_dsp_ops {
 
 	/* mailbox */
 	void (*mailbox_read)(struct snd_sof_dev *sof_dev, u32 offset,
-			     void *addr, size_t bytes);
+			     void __iomem *addr, size_t bytes);
 	void (*mailbox_write)(struct snd_sof_dev *sof_dev, u32 offset,
-			      void *addr, size_t bytes);
+			      void __iomem *addr, size_t bytes);
 
 	/* ipc */
 	int (*send_msg)(struct snd_sof_dev *sof_dev,
@@ -162,15 +162,7 @@ struct sof_ops_table {
 	struct platform_device *(*new_data)(struct snd_sof_pdata *pdata);
 };
 
-/* FS entry for debug files that can expose DSP memories, registers */
-struct snd_sof_dfsentry_io {
-	struct dentry *dfsentry;
-	size_t size;
-	void __iomem *buf;
-	struct snd_sof_dev *sdev;
-};
-
-struct snd_sof_dfsentry_buf {
+struct snd_sof_dfsentry {
 	struct dentry *dfsentry;
 	size_t size;
 	void *buf;
@@ -393,7 +385,6 @@ struct snd_sof_pcm *snd_sof_find_spcm_comp(struct snd_sof_dev *sdev,
 					   int *direction);
 struct snd_sof_pcm *snd_sof_find_spcm_pcm_id(struct snd_sof_dev *sdev,
 					     unsigned int pcm_id);
-void sof_ipc_drop_all(struct snd_sof_ipc *ipc);
 
 /*
  * Stream IPC

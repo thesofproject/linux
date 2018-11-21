@@ -192,8 +192,8 @@ out:
 }
 
 /* find original TX message from DSP reply */
-static struct snd_sof_ipc_msg *sof_ipc_reply_find_msg(struct snd_sof_ipc *ipc,
-						      u32 header)
+struct snd_sof_ipc_msg *sof_ipc_reply_find_msg(struct snd_sof_ipc *ipc,
+					       u32 header)
 {
 	struct snd_sof_dev *sdev = ipc->sdev;
 	struct snd_sof_ipc_msg *msg;
@@ -213,10 +213,11 @@ err:
 		header);
 	return NULL;
 }
+EXPORT_SYMBOL(sof_ipc_reply_find_msg);
 
 /* mark IPC message as complete - locks held by caller */
-static void sof_ipc_tx_msg_reply_complete(struct snd_sof_ipc *ipc,
-					  struct snd_sof_ipc_msg *msg)
+void sof_ipc_tx_msg_reply_complete(struct snd_sof_ipc *ipc,
+				   struct snd_sof_ipc_msg *msg)
 {
 	msg->complete = true;
 	wake_up(&msg->waitq);
