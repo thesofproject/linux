@@ -36,12 +36,11 @@
 
 static int hda_dsp_trace_prepare(struct snd_sof_dev *sdev)
 {
-	struct hdac_ext_stream *stream = sdev->hda->dtrace_stream;
-	struct hdac_stream *hstream = &stream->hstream;
+	struct sof_intel_hda_stream *stream = sdev->hda->dtrace_stream;
 	struct snd_dma_buffer *dmab = &sdev->dmatb;
 	int ret;
 
-	hstream->bufsize = sdev->dmatb.bytes;
+	stream->bufsize = sdev->dmatb.bytes;
 
 	ret = hda_dsp_stream_hw_params(sdev, stream, dmab, NULL);
 	if (ret < 0)
@@ -60,7 +59,7 @@ int hda_dsp_trace_init(struct snd_sof_dev *sdev, u32 *tag)
 		return -ENODEV;
 	}
 
-	*tag = sdev->hda->dtrace_stream->hstream.stream_tag;
+	*tag = sdev->hda->dtrace_stream->tag;
 
 	/*
 	 * initialize capture stream, set BDL address and return corresponding
@@ -71,13 +70,10 @@ int hda_dsp_trace_init(struct snd_sof_dev *sdev, u32 *tag)
 
 int hda_dsp_trace_release(struct snd_sof_dev *sdev)
 {
-	struct hdac_stream *hstream;
-
 	if (sdev->hda->dtrace_stream) {
-		hstream = &sdev->hda->dtrace_stream->hstream;
-		hstream->opened = false;
+		sdev->hda->dtrace_stream->open = false;
 		hda_dsp_stream_put_cstream(sdev,
-					   hstream->stream_tag);
+					   sdev->hda->dtrace_stream->tag);
 		sdev->hda->dtrace_stream = NULL;
 		return 0;
 	}
