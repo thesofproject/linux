@@ -114,18 +114,29 @@ static struct sof_dev_desc kbl_desc = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_ICELAKE)
-static const struct sof_dev_desc icl_desc = {
-	.machines               = snd_soc_acpi_intel_icl_machines,
-	.resindex_lpe_base      = 0,
-	.resindex_pcicfg_base   = -1,
-	.resindex_imr_base      = -1,
-	.irqindex_host_ipc      = -1,
-	.resindex_dma_base      = -1,
-	.nocodec_fw_filename = "intel/sof-icl.ri",
-	.nocodec_tplg_filename = "intel/sof-icl-nocodec.tplg"
-};
-#endif
+static void sof_pci_fw_cb(const struct firmware *fw, void *context)
+{
+	struct sof_platform_priv *priv = context;
+	struct snd_sof_pdata *sof_pdata = priv->sof_pdata;
+	const struct snd_soc_acpi_mach *mach = sof_pdata->machine;
+	struct device *dev = sof_pdata->dev;
+
+	sof_pdata->fw = fw;
+	if (!fw) {
+		dev_err(dev, "Cannot load firmware %s\n",
+			mach->sof_fw_filename);
+		return;
+	}
+
+	/* register PCM and DAI driver */
+	priv->pdev_pcm =
+		platform_device_register_data(dev, "sof-audio", -1,
+					      sof_pdata, sizeof(*sof_pdata));
+	if (IS_ERR(priv->pdev_pcm)) {
+		dev_err(dev, "Cannot register device sof-audio. Error %d\n",
+			(int)PTR_ERR(priv->pdev_pcm));
+	}
+}
 
 static const struct dev_pm_ops sof_pci_pm = {
 	SET_SYSTEM_SLEEP_PM_OPS(snd_sof_suspend, snd_sof_resume)
@@ -255,11 +266,14 @@ static int sof_pci_probe(struct pci_dev *pci,
 	dev_dbg(dev, "created machine %s\n",
 		dev_name(&sof_pdata->pdev_mach->dev));
 
-	/* register sof-audio platform driver */
-	ret = sof_create_platform_device(priv);
+	/* continue probing after firmware is loaded */
+	dev_info(dev, "info: loading firmware %s\n", mach->sof_fw_filename);
+	ret = request_firmware_nowait(THIS_MODULE, true, mach->sof_fw_filename,
+				      dev, GFP_KERNEL, priv, sof_pci_fw_cb);
 	if (ret) {
 		platform_device_unregister(sof_pdata->pdev_mach);
-		dev_err(dev, "error: failed to create platform device!\n");
+		dev_err(dev, "error: failed to load firmware %s\n",
+			mach->sof_fw_filename);
 		goto release_regions;
 	}
 
