@@ -41,9 +41,6 @@
 /* D0I3C Register fields */
 #define AZX_REG_VS_D0I3C_CIP      0x1 /* Command in progress */
 #define AZX_REG_VS_D0I3C_I3       0x4 /* D0i3 enable */
-#define AZX_PGCTL_ADSPPGD              BIT(2)
-#define AZX_CGCTL_ADSPDCGE             BIT(1)
-#define AZX_REG_VS_EM2_L1SEN           BIT(13)
 
 #define AZX_REG_VS_EM2_L1SEN		BIT(13)
 
