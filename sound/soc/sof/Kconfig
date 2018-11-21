@@ -4,14 +4,17 @@ config SND_SOC_SOF_PCI
 config SND_SOC_SOF_ACPI
 	tristate
 
+config SND_SOC_SOF_PLATFORM
+	tristate
+
 config SND_SOC_SOF
 	tristate "Sound Open Firmware Support"
+	default m
 	select SND_SOC_TOPOLOGY
 	select SND_SOC_COMPRESS
 	help
-          This adds support for Sound Open Firmware (SOF). SOF is a free and
-	  generic open source audio DSP firmware for multiple devices.
-          Say Y if you have such a device that is supported by SOF.
+          This adds support for SOF
+          Say Y if you have such a device.
           If unsure select "N".
 
 config SND_SOC_SOF_NOCODEC
