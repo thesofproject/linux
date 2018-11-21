@@ -21,7 +21,7 @@
 #include "ops.h"
 #include "sof-priv.h"
 
-#define RUNTIME_PM 1
+#define RUNTIME_RESUME 1
 
 static int sof_restore_pipelines(struct snd_sof_dev *sdev)
 {
@@ -300,7 +300,7 @@ static int sof_resume(struct device *dev, int runtime_resume)
 	return ret;
 }
 
-static int sof_suspend(struct device *dev, int runtime_suspend)
+static int sof_suspend(struct device *dev)
 {
 	struct sof_platform_priv *priv = dev_get_drvdata(dev);
 	struct snd_sof_dev *sdev = dev_get_drvdata(&priv->pdev_pcm->dev);
@@ -332,10 +332,7 @@ static int sof_suspend(struct device *dev, int runtime_suspend)
 	snd_sof_dma_trace_release(sdev);
 
 	/* power down DSP */
-	if (runtime_suspend)
-		ret = snd_sof_dsp_runtime_suspend(sdev, 0);
-	else
-		ret = snd_sof_dsp_suspend(sdev, 0);
+	ret = snd_sof_dsp_suspend(sdev, 0);
 	if (ret < 0)
 		dev_err(sdev->dev,
 			"error: failed to power down DSP during suspend %d\n",
@@ -346,25 +343,29 @@ static int sof_suspend(struct device *dev, int runtime_suspend)
 
 int snd_sof_runtime_suspend(struct device *dev)
 {
-	return sof_suspend(dev, RUNTIME_PM);
+	return sof_suspend(dev);
 }
 EXPORT_SYMBOL(snd_sof_runtime_suspend);
 
 int snd_sof_runtime_resume(struct device *dev)
 {
-	return sof_resume(dev, RUNTIME_PM);
+	return sof_resume(dev, RUNTIME_RESUME);
 }
 EXPORT_SYMBOL(snd_sof_runtime_resume);
 
 int snd_sof_resume(struct device *dev)
 {
-	return sof_resume(dev, !RUNTIME_PM);
+	return sof_resume(dev, 0);
 }
 EXPORT_SYMBOL(snd_sof_resume);
 
 int snd_sof_suspend(struct device *dev)
 {
-	return sof_suspend(dev, !RUNTIME_PM);
+	/* suspend if dev is runtime_active */
+	if (pm_runtime_active(dev))
+		return sof_suspend(dev);
+
+	return 0;
 }
 EXPORT_SYMBOL(snd_sof_suspend);
 
