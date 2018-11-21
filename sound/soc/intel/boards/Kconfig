@@ -248,8 +248,9 @@ if  SND_SOC_INTEL_SKYLAKE
 
 config SND_SOC_INTEL_CNL_MAX98373_MACH
 	tristate "ASoC Audio driver for CNL with MAX98373 in I2S Mode"
-	depends on X86_INTEL_LPSS && ACPI && I2C
 	select SND_SOC_MAX98373
+	select SND_SOC_INTEL_SST
+	depends on SND_SOC_INTEL_SKYLAKE
 	select SND_SOC_DMIC
 	select SND_SOC_HDAC_HDMI
 	help
@@ -288,7 +289,9 @@ config SND_SOC_INTEL_KBL_RT5663_RT5514_MAX98927_MACH
 
 config SND_SOC_INTEL_CNL_RT274_MACH
 	tristate "ASoC Audio driver for Cannonlake with RT274 I2S mode"
-	depends on X86_INTEL_LPSS && ACPI && I2C
+	depends on X86 && ACPI && I2C
+	select SND_SOC_INTEL_SST
+	depends on SND_SOC_INTEL_SKYLAKE
 	select SND_SOC_RT274
 	select SND_SOC_DMIC
 	help
