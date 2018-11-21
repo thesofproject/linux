@@ -443,35 +443,20 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 				SOF_HDA_INT_CTRL_EN | SOF_HDA_INT_GLOBAL_EN,
 				SOF_HDA_INT_CTRL_EN | SOF_HDA_INT_GLOBAL_EN);
 
-	/*
-	 * register our IRQ
-	 * let's try to enable msi firstly
-	 * if it fails, use legacy interrupt mode
-	 * TODO: support interrupt mode selection with kernel parameter
-	 *       support msi multiple vectors
-	 */
-	ret = pci_alloc_irq_vectors(pci, 1, 1, PCI_IRQ_MSI);
-	if (ret < 0) {
-		dev_info(sdev->dev, "use legacy interrupt mode\n");
-		sdev->hda->irq = pci->irq;
-		sdev->ipc_irq = pci->irq;
-	} else {
-		dev_info(sdev->dev, "use msi interrupt mode\n");
-		sdev->hda->irq = pci_irq_vector(pci, 0);
-		/* ipc irq number is the same of hda irq */
-		sdev->ipc_irq = sdev->hda->irq;
-	}
+	dev_dbg(sdev->dev, "using PCI IRQ %d\n", pci->irq);
 
-	dev_dbg(sdev->dev, "using HDA IRQ %d\n", sdev->hda->irq);
-	ret = request_threaded_irq(sdev->hda->irq, hda_dsp_stream_interrupt,
+	/* register our IRQ */
+	ret = request_threaded_irq(pci->irq, hda_dsp_stream_interrupt,
 				   hda_dsp_stream_threaded_handler,
-				   IRQF_SHARED, "AudioHDA", sdev);
+				    IRQF_SHARED, "AudioHDA", sdev);
 	if (ret < 0) {
 		dev_err(sdev->dev, "error: failed to register HDA IRQ %d\n",
-			sdev->hda->irq);
+			sdev->ipc_irq);
 		goto stream_err;
 	}
+	sdev->hda->irq = pci->irq;
 
+	sdev->ipc_irq = pci->irq;
 	dev_dbg(sdev->dev, "using IPC IRQ %d\n", sdev->ipc_irq);
 	ret = request_threaded_irq(sdev->ipc_irq, hda_dsp_ipc_irq_handler,
 				   chip->ops->irq_thread, IRQF_SHARED,
@@ -506,9 +491,8 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	return 0;
 
 irq_err:
-	free_irq(sdev->hda->irq, sdev);
+	free_irq(pci->irq, sdev);
 stream_err:
-	pci_free_irq_vectors(pci);
 	hda_dsp_stream_free(sdev);
 err:
 	/* disable DSP */
@@ -519,7 +503,6 @@ err:
 
 int hda_dsp_remove(struct snd_sof_dev *sdev)
 {
-	struct pci_dev *pci = sdev->pci;
 	const struct sof_intel_dsp_desc *chip = sdev->hda->desc;
 
 	/* disable DSP IRQ */
@@ -540,7 +523,6 @@ int hda_dsp_remove(struct snd_sof_dev *sdev)
 
 	free_irq(sdev->ipc_irq, sdev);
 	free_irq(sdev->pci->irq, sdev);
-	pci_free_irq_vectors(pci);
 
 	hda_dsp_stream_free(sdev);
 	return 0;
