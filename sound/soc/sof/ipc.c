@@ -157,7 +157,7 @@ int sof_ipc_tx_message(struct snd_sof_ipc *ipc, u32 header,
 	/* add message to transmit list */
 	list_add_tail(&msg->list, &ipc->tx_list);
 
-	/* schedule the message if not busy */
+	/* schedule the messgae if not busy */
 	if (snd_sof_dsp_is_ready(sdev))
 		schedule_work(&ipc->tx_kwork);
 
@@ -182,7 +182,7 @@ static void ipc_tx_next_msg(struct work_struct *work)
 	if (list_empty(&ipc->tx_list) || !snd_sof_dsp_is_ready(sdev))
 		goto out;
 
-	/* send first message in TX list */
+	/* sned first message in TX list */
 	msg = list_first_entry(&ipc->tx_list, struct snd_sof_ipc_msg, list);
 	list_move(&msg->list, &ipc->reply_list);
 	snd_sof_dsp_send_msg(sdev, msg);
