@@ -340,7 +340,7 @@ static int sof_probe(struct platform_device *pdev)
 	spin_lock_init(&sdev->ipc_lock);
 	spin_lock_init(&sdev->hw_lock);
 
-	/* set up platform component driver */
+	/* set up platform and component drivers */
 	snd_sof_new_platform_drv(sdev);
 	snd_sof_new_dai_drv(sdev);
 
@@ -401,16 +401,14 @@ static int sof_probe(struct platform_device *pdev)
 		goto fw_run_err;
 	}
 
-	ret = snd_soc_register_component(&pdev->dev, sdev->cmpnt_drv,
-					 sdev->ops->dai_drv->drv,
-					 sdev->ops->dai_drv->num_drv);
+	ret = snd_soc_register_component(&pdev->dev,  sdev->cmpnt_drv,
+					 &sdev->dai_drv, sdev->num_dai);
 	if (ret < 0) {
 		dev_err(sdev->dev,
 			"error: failed to register DSP DAI driver %d\n", ret);
 		goto comp_err;
 	}
 
-	/* init DMA trace */
 	ret = snd_sof_init_trace(sdev);
 	if (ret < 0) {
 		dev_warn(sdev->dev,
