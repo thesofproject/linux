@@ -360,9 +360,15 @@ EXPORT_SYMBOL(snd_sof_runtime_resume);
 
 int snd_sof_resume(struct device *dev)
 {
-	return sof_resume(dev, !RUNTIME_PM);
+	return 0;
 }
 EXPORT_SYMBOL(snd_sof_resume);
+
+int snd_sof_resume_early(struct device *dev)
+{
+	return sof_resume(dev, !RUNTIME_PM);
+}
+EXPORT_SYMBOL(snd_sof_resume_early);
 
 int snd_sof_suspend(struct device *dev)
 {
