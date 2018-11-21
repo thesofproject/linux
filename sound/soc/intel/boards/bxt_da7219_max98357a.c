@@ -29,6 +29,10 @@
 #include "../../codecs/da7219.h"
 #include "../../codecs/da7219-aad.h"
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL)
+#define DISABLE_HDMI
+#endif
+
 #define BXT_DIALOG_CODEC_DAI	"da7219-hifi"
 #define BXT_MAXIM_CODEC_DAI	"HiFi"
 #define DUAL_CHANNEL		2
