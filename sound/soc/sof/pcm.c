@@ -630,8 +630,7 @@ static int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 		/* TODO: add any other DMIC specific fixups */
 		break;
 	case SOF_DAI_INTEL_HDA:
-		/* do nothing for HDA dai_link */
-		break;
+		/* fallthrough */
 	default:
 		dev_err(sdev->dev, "error: invalid DAI type %d\n",
 			dai->dai_config.type);
