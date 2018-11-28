@@ -260,9 +260,6 @@ static int sof_probe(struct platform_device *pdev)
 	spin_lock_init(&sdev->ipc_lock);
 	spin_lock_init(&sdev->hw_lock);
 
-	/* set up platform component driver */
-	snd_sof_new_platform_drv(sdev);
-
 	/* set default timeouts if none provided */
 	if (plat_data->desc->ipc_timeout == 0)
 		sdev->ipc_timeout = TIMEOUT_DEFAULT_IPC;
@@ -279,6 +276,9 @@ static int sof_probe(struct platform_device *pdev)
 		dev_err(sdev->dev, "error: failed to probe DSP %d\n", ret);
 		return ret;
 	}
+
+	/* set up platform component driver */
+	snd_sof_new_platform_drv(sdev);
 
 	/* register any debug/trace capabilities */
 	ret = snd_sof_dbg_init(sdev);

@@ -224,18 +224,12 @@ static int sof_acpi_probe(struct platform_device *pdev)
 	/* find machine */
 	mach = snd_soc_acpi_find_machine(desc->machines);
 	if (!mach) {
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_NOCODEC)
 		/* fallback to nocodec mode */
 		dev_warn(dev, "No matching ASoC machine driver found - using nocodec\n");
 		mach = devm_kzalloc(dev, sizeof(*mach), GFP_KERNEL);
 		ret = sof_nocodec_setup(dev, sof_pdata, mach, desc, ops);
 		if (ret < 0)
 			return ret;
-#else
-		dev_warn(dev, "No matching ASoC machine driver found - falling back to HDA codec\n");
-		mach = snd_soc_acpi_intel_hda_machines;
-		mach->sof_fw_filename = desc->nocodec_fw_filename;
-#endif
 	}
 #endif
 

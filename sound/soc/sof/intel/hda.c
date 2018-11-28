@@ -32,6 +32,7 @@
 #include <sound/hdaudio.h>
 #include <sound/hda_i915.h>
 #include <sound/sof/xtensa.h>
+#include <sound/soc-acpi-intel-match.h>
 
 #include "../sof-priv.h"
 #include "../ops.h"
@@ -438,8 +439,11 @@ static int hda_init_caps(struct snd_sof_dev *sdev)
 	struct pci_dev *pci = sdev->pci;
 	struct hdac_ext_link *hlink = NULL;
 	struct snd_soc_acpi_mach_params *mach_params;
+	struct snd_soc_acpi_mach *mach;
+	struct snd_sof_pdata *pdata;
+	int codec_num = 0;
 	int ret = 0;
-	int err;
+	int err, i;
 
 	device_disable_async_suspend(bus->dev);
 
@@ -472,10 +476,37 @@ static int hda_init_caps(struct snd_sof_dev *sdev)
 	else
 		dev_info(bus->dev, "hda codecs found, mask %lx!\n", bus->codec_mask);
 
-	/* used by hda machine driver to create dai links */
-	mach_params = (struct snd_soc_acpi_mach_params *)
-		&sdev->pdata->machine->mach_params;
-	mach_params->codec_mask = bus->codec_mask;
+	if (bus->codec_mask) {
+		for (i = 0; i < HDA_MAX_CODECS; i++) {
+			if (bus->codec_mask & (1 << i))
+				codec_num++;
+		}
+
+		/* if there are HDMI codec and HDA codecs, hda machine
+		 * is applied. For I2S codec + HDMI codec, there is only one
+		 * hda codec. For other cases, the value should be zero.
+		 */
+		if (codec_num > 1) {
+			/* used by hda machine driver to create dai links */
+			pdata = sdev->pdata;
+
+			mach = snd_soc_acpi_intel_hda_machines;
+			mach->pdata = pdata->machine->pdata;
+			mach->sof_fw_filename =
+					pdata->desc->nocodec_fw_filename;
+			mach->new_mach_data =
+					pdata->machine->new_mach_data;
+
+			mach_params = &mach->mach_params;
+			mach_params->codec_mask = bus->codec_mask;
+			mach_params->platform = pdata->platform;
+
+			devm_kfree(sdev->dev, (void *)pdata->machine);
+			pdata->machine = mach;
+
+			dev_info(sdev->dev, "Find hda codecs, use hda machine driver\n");
+		}
+	}
 
 	/* create codec instances */
 	hda_codec_probe_bus(sdev);
