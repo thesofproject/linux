@@ -2635,8 +2635,6 @@ EXPORT_SYMBOL(snd_sof_load_topology);
 
 void snd_sof_free_topology(struct snd_sof_dev *sdev)
 {
-	struct snd_soc_dapm_context *dapm =
-		snd_soc_component_get_dapm(sdev->component);
 	struct snd_sof_route *sroute, *temp;
 	int ret;
 
