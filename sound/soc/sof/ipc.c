@@ -434,14 +434,14 @@ static void ipc_msgs_rx(struct work_struct *work)
 }
 
 /* schedule work to transmit any IPC in queue */
-void snd_sof_ipc_msgs_tx(struct snd_sof_dev *sdev)
+void snd_sof_ipc_msgs_tx(const struct snd_sof_dev *sdev)
 {
 	schedule_work(&sdev->ipc->tx_kwork);
 }
 EXPORT_SYMBOL(snd_sof_ipc_msgs_tx);
 
 /* schedule work to handle IPC from DSP */
-void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev)
+void snd_sof_ipc_msgs_rx(const struct snd_sof_dev *sdev)
 {
 	schedule_work(&sdev->ipc->rx_kwork);
 }
