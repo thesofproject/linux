@@ -3,6 +3,7 @@
 #include "bcm2710.dtsi"
 #include "bcm283x-rpi-smsc9514.dtsi"
 #include "bcm283x-rpi-csi1-2lane.dtsi"
+#include "bcm283x-rpi-sof.dtsi"
 
 / {
 	compatible = "raspberrypi,3-model-b", "brcm,bcm2837";
@@ -123,6 +124,7 @@
 	spidev0: spidev@0{
 		compatible = "spidev";
 		reg = <0>;	/* CE0 */
+		status = "disabled";
 		#address-cells = <1>;
 		#size-cells = <0>;
 		spi-max-frequency = <125000000>;
