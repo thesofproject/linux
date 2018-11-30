@@ -47,8 +47,12 @@ struct snd_sof_pdata {
 	const struct sof_dev_desc *desc;
 
 	/* SPI data */
-	unsigned int gpio;
-	unsigned int active;
+	unsigned int reset;
+	/* FIXME: this is runtime data, not platform data, has to be moved out */
+	struct wait_queue_head wq;
+	u8 *ipc_buf;
+	bool fw_loading;
+	bool wake;
 
 	/* machine */
 	struct platform_device *pdev_mach;

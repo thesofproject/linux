@@ -29,19 +29,7 @@ static const struct dev_pm_ops spi_pm = {
 	.suspend_late = snd_sof_suspend_late,
 };
 
-/* FIXME: replace with some meaningful values */
-static struct snd_soc_acpi_mach spi_machines[] = {
-	{
-		.id = "INT343A",
-		.drv_name = "bxt_alc298s_i2s",
-		.sof_fw_filename = "intel/sof-spi.ri",
-		.sof_tplg_filename = "intel/sof-spi.tplg",
-		.asoc_plat_name = "0000:00:0e.0",
-	},
-};
-
 static const struct sof_dev_desc spi_desc = {
-	.machines		= spi_machines,
 	.nocodec_fw_filename	= "intel/sof-spi.ri",
 	.nocodec_tplg_filename	= "intel/sof-spi.tplg",
 	.resindex_lpe_base = -1,
@@ -59,21 +47,15 @@ static int sof_spi_probe(struct spi_device *spi)
 {
 	struct device *dev = &spi->dev;
 	const struct sof_dev_desc *desc = of_device_get_match_data(dev);
-	struct snd_soc_acpi_mach *machines, *mach;
+	struct snd_soc_acpi_mach *mach;
 	struct snd_sof_pdata *sof_pdata;
 	struct sof_platform_priv *priv;
 	const char *tplg, *fw;
 	struct gpio_desc *gpiod;
-	int ret, irq;
+	int ret;
 
 	if (!dev->of_node || !desc)
 		return -ENODEV;
-
-	machines = desc->machines;
-	if (!machines)
-		return -ENODEV;
-
-	dev_dbg(&spi->dev, "SPI DSP detected");
 
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
@@ -84,6 +66,10 @@ static int sof_spi_probe(struct spi_device *spi)
 	if (!sof_pdata)
 		return -ENOMEM;
 
+	sof_pdata->ipc_buf = devm_kmalloc(dev, PAGE_SIZE, GFP_KERNEL);
+	if (!sof_pdata->ipc_buf)
+		return -ENOMEM;
+
 	ret = of_property_read_string(dev->of_node, "tplg_filename", &tplg);
 	if (ret < 0 || !tplg)
 		return -EINVAL;
@@ -92,19 +78,18 @@ static int sof_spi_probe(struct spi_device *spi)
 	if (ret < 0 || !fw)
 		return -EINVAL;
 
-	/*
-	 * Get an IRQ GPIO descriptor from an "irq-gpios" property
-	 * If the IRQ is optional, use devm_gpiod_get_optional()
-	 */
-	gpiod = devm_gpiod_get(dev, "irq", GPIOD_IN);
+	dev_dbg(&spi->dev, "SPI DSP detected, SPI IRQ %u with %p\n",
+		spi->irq, sof_pdata);
+
+	of_dma_configure(dev, dev->of_node, true);
+	dma_set_coherent_mask(dev, DMA_BIT_MASK(32));
+
+	/* Get a reset GPIO descriptor from a "reset-gpios" property */
+	gpiod = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
 	if (IS_ERR(gpiod))
 		return PTR_ERR(gpiod);
 
-	sof_pdata->gpio = desc_to_gpio(gpiod);
-
-	irq = gpiod_to_irq(gpiod);
-	if (irq < 0)
-		return irq;
+	sof_pdata->reset = desc_to_gpio(gpiod);
 
 	/* TODO: add any required regulators */
 
@@ -133,18 +118,18 @@ static int sof_spi_probe(struct spi_device *spi)
 	sof_pdata->name = dev_name(&spi->dev);
 	sof_pdata->machine = mach;
 	sof_pdata->desc = desc;
-	priv->sof_pdata = sof_pdata;
 	sof_pdata->dev = dev;
 	sof_pdata->type = SOF_DEVICE_SPI;
+
+	priv->sof_pdata = sof_pdata;
 
 	/* register sof-audio platform driver */
 	ret = sof_create_platform_device(priv);
 	if (ret) {
 		dev_err(dev, "error: failed to create platform device!\n");
+		spi->irq = -EINVAL;
 		return ret;
 	}
-
-	spi->irq = irq;
 
 	/* allow runtime_pm */
 	pm_runtime_set_autosuspend_delay(dev, SND_SOF_SUSPEND_DELAY);
@@ -167,13 +152,13 @@ static int sof_spi_remove(struct spi_device *spi)
 }
 
 static const struct of_device_id sof_of_match[] = {
-	{ .compatible = "sof,spi-sue-creek", .data = &spi_desc },
+	{ .compatible = "sof,sue-creek", .data = &spi_desc },
 	{ }
 };
 
 static struct spi_driver sof_spi_driver = {
 	.driver = {
-		.name	= "sof-spi-dev",
+		.name	= "sue-creek",
 		.of_match_table = sof_of_match,
 	},
 	.probe		= sof_spi_probe,
@@ -199,3 +184,4 @@ static void __exit sof_spi_modexit(void)
 module_exit(sof_spi_modexit);
 
 MODULE_LICENSE("Dual BSD/GPL");
+MODULE_ALIAS("spi:sue-creek");
