@@ -1824,6 +1824,12 @@ static int sof_dai_unload(struct snd_soc_component *scomp,
 {
 	struct snd_sof_pcm *spcm = dobj->private;
 
+	if (spcm->pcm.playback)
+		snd_dma_free_pages(&spcm->stream[SNDRV_PCM_STREAM_PLAYBACK].page_table);
+
+	if (spcm->pcm.capture)
+		snd_dma_free_pages(&spcm->stream[SNDRV_PCM_STREAM_CAPTURE].page_table);
+
 	list_del(&spcm->list);
 	kfree(spcm);
 

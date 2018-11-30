@@ -566,31 +566,6 @@ capture:
 	return ret;
 }
 
-static void sof_pcm_free(struct snd_pcm *pcm)
-{
-	struct snd_sof_pcm *spcm;
-	struct snd_soc_pcm_runtime *rtd = pcm->private_data;
-	struct snd_soc_component *component =
-		snd_soc_rtdcom_lookup(rtd, DRV_NAME);
-	struct snd_sof_dev *sdev =
-		snd_soc_component_get_drvdata(component);
-
-	spcm = snd_sof_find_spcm_dai(sdev, rtd);
-	if (!spcm) {
-		dev_warn(sdev->dev, "warn: can't find PCM with DAI ID %d\n",
-			 rtd->dai_link->id);
-		return;
-	}
-
-	if (spcm->pcm.playback)
-		snd_dma_free_pages(&spcm->stream[SNDRV_PCM_STREAM_PLAYBACK].page_table);
-
-	if (spcm->pcm.capture)
-		snd_dma_free_pages(&spcm->stream[SNDRV_PCM_STREAM_CAPTURE].page_table);
-
-	snd_sof_free_topology(sdev);
-}
-
 /* fixup the BE DAI link to match any values from topology */
 static int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 				  struct snd_pcm_hw_params *params)
@@ -716,7 +691,11 @@ err:
 
 static void sof_pcm_remove(struct snd_soc_component *component)
 {
+	struct snd_sof_dev *sdev =
+		snd_soc_component_get_drvdata(component);
+
 	pm_runtime_disable(component->dev);
+	snd_sof_free_topology(sdev);
 }
 
 void snd_sof_new_platform_drv(struct snd_sof_dev *sdev)
@@ -736,7 +715,6 @@ void snd_sof_new_platform_drv(struct snd_sof_dev *sdev)
 	pd->ops	= &sof_pcm_ops;
 	pd->compr_ops = &sof_compressed_ops;
 	pd->pcm_new = sof_pcm_new;
-	pd->pcm_free = sof_pcm_free;
 	pd->ignore_machine = drv_name;
 	pd->be_hw_params_fixup = sof_pcm_dai_link_fixup;
 	pd->be_pcm_base = SOF_BE_PCM_BASE;
