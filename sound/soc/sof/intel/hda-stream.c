@@ -659,13 +659,15 @@ void hda_dsp_stream_free(struct snd_sof_dev *sdev)
 #endif
 
 	list_for_each_entry_safe(s, _s, &bus->stream_list, list) {
+		stream = stream_to_hdac_ext_stream(s);
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
 		/* TODO: decouple */
-
+		snd_hdac_ext_stream_decouple(bus, stream, false);
+#endif
 		/* free bdl buffer */
 		if (s->bdl.area)
 			snd_dma_free_pages(&s->bdl);
 		list_del(&s->list);
-		stream = stream_to_hdac_ext_stream(s);
 		devm_kfree(sdev->dev, stream);
 	}
 }
