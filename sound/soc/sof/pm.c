@@ -72,7 +72,7 @@ static int sof_restore_pipelines(struct snd_sof_dev *sdev)
 	struct snd_sof_route *sroute = NULL;
 	struct snd_sof_dai *dai;
 	struct sof_ipc_comp_dai *comp_dai;
-	struct sof_ipc_hdr *hdr;
+	struct sof_ipc_cmd_hdr *hdr;
 	int ret = 0;
 
 	/* restore pipeline components */
@@ -95,7 +95,7 @@ static int sof_restore_pipelines(struct snd_sof_dev *sdev)
 						 &r, sizeof(r));
 			break;
 		default:
-			hdr = (struct sof_ipc_hdr *)swidget->private;
+			hdr = (struct sof_ipc_cmd_hdr *)swidget->private;
 			ret = sof_ipc_tx_message(sdev->ipc, hdr->cmd,
 						 swidget->private, hdr->size,
 						 &r, sizeof(r));

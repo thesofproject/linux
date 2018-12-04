@@ -213,7 +213,7 @@ static int tx_wait_done(struct snd_sof_ipc *ipc, struct snd_sof_ipc_msg *msg,
 			void *reply_data)
 {
 	struct snd_sof_dev *sdev = ipc->sdev;
-	struct sof_ipc_hdr *hdr = (struct sof_ipc_hdr *)msg->msg_data;
+	struct sof_ipc_cmd_hdr *hdr = (struct sof_ipc_cmd_hdr *)msg->msg_data;
 	unsigned long flags;
 	int ret;
 
@@ -399,7 +399,7 @@ static void ipc_msgs_rx(struct work_struct *work)
 	struct snd_sof_ipc *ipc =
 		container_of(work, struct snd_sof_ipc, rx_kwork);
 	struct snd_sof_dev *sdev = ipc->sdev;
-	struct sof_ipc_hdr hdr;
+	struct sof_ipc_cmd_hdr hdr;
 	u32 cmd, type;
 	int err = -EINVAL;
 

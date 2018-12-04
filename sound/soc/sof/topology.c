@@ -941,6 +941,7 @@ static int sof_widget_load_dai(struct snd_soc_component *scomp, int index,
 	comp_dai.comp.id = swidget->comp_id;
 	comp_dai.comp.type = SOF_COMP_DAI;
 	comp_dai.comp.pipeline_id = index;
+	comp_dai.config.hdr.size = sizeof(comp_dai.config);
 
 	ret = sof_parse_tokens(scomp, &comp_dai, dai_tokens,
 			       ARRAY_SIZE(dai_tokens), private->array,
@@ -1052,6 +1053,7 @@ static int sof_widget_load_pcm(struct snd_soc_component *scomp, int index,
 	host->comp.type = SOF_COMP_HOST;
 	host->comp.pipeline_id = index;
 	host->direction = dir;
+	host->config.hdr.size = sizeof(host->config);
 
 	ret = sof_parse_tokens(scomp, host, pcm_tokens,
 			       ARRAY_SIZE(pcm_tokens), private->array,
@@ -1172,6 +1174,7 @@ static int sof_widget_load_mixer(struct snd_soc_component *scomp, int index,
 	mixer->comp.id = swidget->comp_id;
 	mixer->comp.type = SOF_COMP_MIXER;
 	mixer->comp.pipeline_id = index;
+	mixer->config.hdr.size = sizeof(mixer->config);
 
 	ret = sof_parse_tokens(scomp, &mixer->config, comp_tokens,
 			       ARRAY_SIZE(comp_tokens), private->array,
@@ -1260,6 +1263,7 @@ static int sof_widget_load_pga(struct snd_soc_component *scomp, int index,
 	volume->comp.id = swidget->comp_id;
 	volume->comp.type = SOF_COMP_VOLUME;
 	volume->comp.pipeline_id = index;
+	volume->config.hdr.size = sizeof(volume->config);
 
 	ret = sof_parse_tokens(scomp, volume, volume_tokens,
 			       ARRAY_SIZE(volume_tokens), private->array,
@@ -1322,6 +1326,7 @@ static int sof_widget_load_src(struct snd_soc_component *scomp, int index,
 	src->comp.id = swidget->comp_id;
 	src->comp.type = SOF_COMP_SRC;
 	src->comp.pipeline_id = index;
+	src->config.hdr.size = sizeof(src->config);
 
 	ret = sof_parse_tokens(scomp, src, src_tokens,
 			       ARRAY_SIZE(src_tokens), private->array,
@@ -1380,6 +1385,7 @@ static int sof_widget_load_siggen(struct snd_soc_component *scomp, int index,
 	tone->comp.id = swidget->comp_id;
 	tone->comp.type = SOF_COMP_TONE;
 	tone->comp.pipeline_id = index;
+	tone->config.hdr.size = sizeof(tone->config);
 
 	ret = sof_parse_tokens(scomp, tone, tone_tokens,
 			       ARRAY_SIZE(tone_tokens), private->array,
@@ -1463,6 +1469,8 @@ static int sof_effect_fir_load(struct snd_soc_component *scomp, int index,
 	fir->comp.id = swidget->comp_id;
 	fir->comp.type = SOF_COMP_EQ_FIR;
 	fir->comp.pipeline_id = index;
+	fir->config.hdr.size = sizeof(fir->config);
+
 
 	ret = sof_parse_tokens(scomp, &fir->config, comp_tokens,
 			       ARRAY_SIZE(comp_tokens), private->array,
@@ -1540,6 +1548,7 @@ static int sof_effect_iir_load(struct snd_soc_component *scomp, int index,
 	iir->comp.id = swidget->comp_id;
 	iir->comp.type = SOF_COMP_EQ_IIR;
 	iir->comp.pipeline_id = index;
+	iir->config.hdr.size = sizeof(iir->config);
 
 	ret = sof_parse_tokens(scomp, &iir->config, comp_tokens,
 			       ARRAY_SIZE(comp_tokens), private->array,
