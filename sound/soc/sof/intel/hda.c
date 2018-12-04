@@ -57,15 +57,12 @@ u32 hda_dsp_read(struct snd_sof_dev *sdev, void __iomem *addr)
 
 void hda_dsp_write64(struct snd_sof_dev *sdev, void __iomem *addr, u64 value)
 {
-	memcpy_toio(addr, &value, sizeof(value));
+	writeq(value, addr);
 }
 
 u64 hda_dsp_read64(struct snd_sof_dev *sdev, void __iomem *addr)
 {
-	u64 val;
-
-	memcpy_fromio(&val, addr, sizeof(val));
-	return val;
+	return readq(addr);
 }
 
 /*
@@ -77,9 +74,8 @@ void hda_dsp_block_write(struct snd_sof_dev *sdev, u32 offset, void *src,
 {
 	void __iomem *dest = sdev->bar[sdev->mmio_bar] + offset;
 	u32 tmp = 0;
-	int i, m, n;
+	int m, n;
 	const u8 *src_byte = src;
-	u8 *dst_byte;
 
 	m = size / 4;
 	n = size % 4;
@@ -94,9 +90,7 @@ void hda_dsp_block_write(struct snd_sof_dev *sdev, u32 offset, void *src,
 		 */
 		__ioread32_copy(&tmp, dest + m * 4, 1);
 
-		dst_byte = (u8 *)&tmp;
-		for (i = 0; i < n; i++)
-			dst_byte[i] = src_byte[m * 4 + i];
+		tmp |= *(u32 *)(src_byte + m * 4) & ((1 << (8 * n)) - 1);
 
 		__iowrite32_copy(dest + m * 4, &tmp, 1);
 	}

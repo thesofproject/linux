@@ -83,7 +83,7 @@ static void bdw_block_write(struct snd_sof_dev *sdev, u32 offset, void *src,
 {
 	void __iomem *dest = sdev->bar[sdev->mmio_bar] + offset;
 	u32 tmp = 0;
-	int i, m, n;
+	int m, n;
 	const u8 *src_byte = src;
 
 	m = size / 4;
@@ -93,8 +93,13 @@ static void bdw_block_write(struct snd_sof_dev *sdev, u32 offset, void *src,
 	__iowrite32_copy(dest, src, m);
 
 	if (n) {
-		for (i = 0; i < n; i++)
-			tmp |= (u32)*(src_byte + m * 4 + i) << (i * 8);
+		/* first read the 32bit data of dest, then change affected
+		 * bytes, and write back to dest. For unaffected bytes, it
+		 * should not be changed
+		 */
+		__ioread32_copy(&tmp, dest + m * 4, 1);
+
+		tmp |= *(u32 *)(src_byte + m * 4) & ((1 << (8 * n)) - 1);
 		__iowrite32_copy(dest + m * 4, &tmp, 1);
 	}
 }
@@ -141,15 +146,12 @@ static u32 bdw_read(struct snd_sof_dev *sdev, void __iomem *addr)
 static void bdw_write64(struct snd_sof_dev *sdev, void __iomem *addr,
 			u64 value)
 {
-	memcpy_toio(addr, &value, sizeof(value));
+	writeq(value, addr);
 }
 
 static u64 bdw_read64(struct snd_sof_dev *sdev, void __iomem *addr)
 {
-	u64 val;
-
-	memcpy_fromio(&val, addr, sizeof(val));
-	return val;
+	return readq(addr);
 }
 
 /*
