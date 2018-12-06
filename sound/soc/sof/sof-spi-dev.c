@@ -146,11 +146,6 @@ static int sof_spi_probe(struct spi_device *spi)
 
 	spi->irq = irq;
 
-	/* allow runtime_pm */
-	pm_runtime_set_autosuspend_delay(dev, SND_SOF_SUSPEND_DELAY);
-	pm_runtime_use_autosuspend(dev);
-	pm_runtime_allow(dev);
-
 	return ret;
 }
 

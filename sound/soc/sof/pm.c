@@ -8,6 +8,7 @@
 // Author: Liam Girdwood <liam.r.girdwood@linux.intel.com>
 //
 
+#include <sound/sof.h>
 #include "ops.h"
 #include "sof-priv.h"
 
@@ -401,3 +402,23 @@ int snd_sof_prepare(struct device *dev)
 	return 0;
 }
 EXPORT_SYMBOL(snd_sof_prepare);
+
+void snd_sof_pm_runtime_enable(struct snd_sof_dev *sdev)
+{
+	struct snd_sof_pdata *plat_data = dev_get_platdata(sdev->dev);
+
+	/* allow runtime_pm */
+	pm_runtime_set_autosuspend_delay(sdev->dev, SND_SOF_SUSPEND_DELAY);
+	pm_runtime_use_autosuspend(sdev->dev);
+
+	/*
+	 * runtime pm for pci device is "forbidden" by default.
+	 * so call pm_runtime_allow() to enable it.
+	 */
+	pm_runtime_allow(plat_data->dev);
+
+	/* follow recommendation in pci-driver.c to decrement usage counter */
+	if (sdev->pci)
+		pm_runtime_put_noidle(plat_data->dev);
+}
+EXPORT_SYMBOL(snd_sof_pm_runtime_enable);
