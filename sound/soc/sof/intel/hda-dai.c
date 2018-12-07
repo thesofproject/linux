@@ -196,13 +196,6 @@ static int hda_link_pcm_trigger(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-/*
- * FIXME: This API is also abused since it's used for two purposes.
- * when the substream argument is NULL this function is used for cleanups
- * that aren't necessarily required, and called explicitly by handling
- * ASoC core structures, which is not recommended.
- * This part will be reworked in follow-up patches.
- */
 static int hda_link_hw_free(struct snd_pcm_substream *substream,
 			    struct snd_soc_dai *dai)
 {
@@ -210,47 +203,26 @@ static int hda_link_hw_free(struct snd_pcm_substream *substream,
 	unsigned int stream_tag;
 	struct hdac_bus *bus;
 	struct hdac_ext_link *link;
-	struct snd_sof_dev *sdev;
 	struct hdac_stream *hstream;
-	struct hdac_ext_stream *stream;
 	struct snd_soc_pcm_runtime *rtd;
 	struct hdac_ext_stream *link_dev;
 	struct snd_pcm_substream pcm_substream;
 
 	memset(&pcm_substream, 0, sizeof(pcm_substream));
-	if (substream) {
-		hstream = substream->runtime->private_data;
-		bus = hstream->bus;
-		rtd = snd_pcm_substream_chip(substream);
-		link_dev = snd_soc_dai_get_dma_data(dai, substream);
-		name = rtd->codec_dai->component->name;
-		link = snd_hdac_ext_bus_get_link(bus, name);
-		if (!link)
-			return -EINVAL;
 
-		stream_tag = hdac_stream(link_dev)->stream_tag;
-		snd_hdac_ext_link_clear_stream_id(link, stream_tag);
+	hstream = substream->runtime->private_data;
+	bus = hstream->bus;
+	rtd = snd_pcm_substream_chip(substream);
+	link_dev = snd_soc_dai_get_dma_data(dai, substream);
+	name = rtd->codec_dai->component->name;
+	link = snd_hdac_ext_bus_get_link(bus, name);
+	if (!link)
+		return -EINVAL;
 
-		link_dev->link_prepared = 0;
-	} else {
-		/* release all hda streams when dai link is unloaded */
-		sdev = snd_soc_component_get_drvdata(dai->component);
-		pcm_substream.stream = SNDRV_PCM_STREAM_PLAYBACK;
-		stream = snd_soc_dai_get_dma_data(dai, &pcm_substream);
-		if (stream) {
-			snd_soc_dai_set_dma_data(dai, &pcm_substream, NULL);
-			snd_hdac_ext_stream_release(stream,
-						    HDAC_EXT_STREAM_TYPE_LINK);
-		}
+	stream_tag = hdac_stream(link_dev)->stream_tag;
+	snd_hdac_ext_link_clear_stream_id(link, stream_tag);
 
-		pcm_substream.stream = SNDRV_PCM_STREAM_CAPTURE;
-		stream = snd_soc_dai_get_dma_data(dai, &pcm_substream);
-		if (stream) {
-			snd_soc_dai_set_dma_data(dai, &pcm_substream, NULL);
-			snd_hdac_ext_stream_release(stream,
-						    HDAC_EXT_STREAM_TYPE_LINK);
-		}
-	}
+	link_dev->link_prepared = 0;
 
 	return 0;
 }

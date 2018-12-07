@@ -2330,77 +2330,6 @@ static int sof_link_load(struct snd_soc_component *scomp, int index,
 	return 0;
 }
 
-static int sof_link_hda_unload(struct snd_sof_dev *sdev,
-			       struct snd_soc_dai_link *link)
-{
-	struct snd_soc_dai_link_component dai_component;
-	struct snd_soc_dai *dai;
-	int ret = 0;
-
-	memset(&dai_component, 0, sizeof(dai_component));
-	dai_component.dai_name = link->cpu_dai_name;
-	dai = snd_soc_find_dai(&dai_component);
-	if (!dai) {
-		dev_err(sdev->dev, "error: failed to find dai %s",
-			dai_component.dai_name);
-		return -EINVAL;
-	}
-
-	/*
-	 * FIXME: this call to hw_free is mainly to release the link DMA ID.
-	 * This is abusing the API and handling SOC internals is not
-	 * recommended. This part will be reworked.
-	 */
-	if (dai->driver->ops->hw_free)
-		ret = dai->driver->ops->hw_free(NULL, dai);
-	if (ret < 0)
-		dev_err(sdev->dev, "error: failed to free hda resource for %s\n",
-			link->name);
-
-	return ret;
-}
-
-static int sof_link_unload(struct snd_soc_component *scomp,
-			   struct snd_soc_dobj *dobj)
-{
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
-	struct snd_soc_dai_link *link =
-		container_of(dobj, struct snd_soc_dai_link, dobj);
-
-	struct snd_sof_dai *sof_dai = NULL;
-	int ret = 0;
-
-	list_for_each_entry(sof_dai, &sdev->dai_list, list) {
-		if (!sof_dai->name)
-			continue;
-
-		if (strcmp(link->name, sof_dai->name) == 0)
-			break;
-	}
-
-	if (!sof_dai) {
-		dev_err(sdev->dev, "error: failed to find dai %s", link->name);
-		return -EINVAL;
-	}
-
-	switch (sof_dai->dai_config->type) {
-	case SOF_DAI_INTEL_SSP:
-	case SOF_DAI_INTEL_DMIC:
-		/* no resource needs to be released for SSP and DMIC */
-		break;
-	case SOF_DAI_INTEL_HDA:
-		ret = sof_link_hda_unload(sdev, link);
-		break;
-	default:
-		dev_err(sdev->dev, "error: invalid DAI type %d\n",
-			sof_dai->dai_config->type);
-		ret = -EINVAL;
-		break;
-	}
-
-	return ret;
-}
-
 /* bind PCM ID to host component ID */
 static int spcm_bind(struct snd_soc_component *scomp, struct snd_sof_pcm *spcm,
 		     const char *host)
@@ -2671,7 +2600,6 @@ static struct snd_soc_tplg_ops sof_tplg_ops = {
 
 	/* DAI link - used for any driver specific init */
 	.link_load	= sof_link_load,
-	.link_unload	= sof_link_unload,
 
 	/* completion - called at completion of firmware loading */
 	.complete	= sof_complete,
