@@ -60,6 +60,8 @@ struct sof_ipc_fw_ready {
 		} bits;
 	} debug;
 
+	u32 gdb_enabled;
+
 	/* reserved for future use */
 	uint32_t reserved[4];
 } __packed;
