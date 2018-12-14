@@ -42,7 +42,7 @@ int snd_sof_fw_parse_ext_data(struct snd_sof_dev *sdev, u32 offset)
 	void *ext_data;
 	int ret = 0;
 
-	ext_data = kzalloc(PAGE_SIZE, GFP_KERNEL);
+	ext_data = (void *)get_zeroed_page(GFP_KERNEL);
 	if (!ext_data)
 		return -ENOMEM;
 
@@ -84,7 +84,7 @@ int snd_sof_fw_parse_ext_data(struct snd_sof_dev *sdev, u32 offset)
 		ext_hdr = (struct sof_ipc_ext_data_hdr *)ext_data;
 	}
 out:
-	kfree(ext_data);
+	free_page((unsigned long)ext_data);
 	return ret;
 }
 EXPORT_SYMBOL(snd_sof_fw_parse_ext_data);

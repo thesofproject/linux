@@ -787,12 +787,15 @@ struct snd_sof_ipc *snd_sof_ipc_init(struct snd_sof_dev *sdev)
 
 	/* pre-allocate message data */
 	for (i = 0; i < IPC_EMPTY_LIST_SIZE; i++) {
-		msg->msg_data = devm_kzalloc(sdev->dev, PAGE_SIZE, GFP_KERNEL);
+		msg->msg_data = (void *)
+			devm_get_free_pages(sdev->dev,
+					    GFP_KERNEL | __GFP_ZERO, 0);
 		if (!msg->msg_data)
 			return NULL;
 
-		msg->reply_data = devm_kzalloc(sdev->dev, PAGE_SIZE,
-					       GFP_KERNEL);
+		msg->reply_data = (void *)
+			devm_get_free_pages(sdev->dev,
+					    GFP_KERNEL | __GFP_ZERO, 0);
 		if (!msg->reply_data)
 			return NULL;
 
