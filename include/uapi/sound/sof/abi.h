@@ -31,11 +31,11 @@
 
 /* SOF ABI version number. Format within 32bit word is MMmmmppp */
 #define SOF_ABI_MAJOR_SHIFT	24
-#define SOF_ABI_MAJOR_MASK	0xff
+#define SOF_ABI_MAJOR_MASK	GENMASK(7, 0)
 #define SOF_ABI_MINOR_SHIFT	12
-#define SOF_ABI_MINOR_MASK	0xfff
+#define SOF_ABI_MINOR_MASK	GENMASK(11, 0)
 #define SOF_ABI_PATCH_SHIFT	0
-#define SOF_ABI_PATCH_MASK	0xfff
+#define SOF_ABI_PATCH_MASK	GENMASK(11, 0)
 
 #define SOF_ABI_VER(major, minor, patch) \
 	(((major) << SOF_ABI_MAJOR_SHIFT) | \

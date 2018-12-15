@@ -25,7 +25,7 @@
 #define SOF_DAI_FMT_DSP_B	5 /**< L data MSB during FRM LRC */
 #define SOF_DAI_FMT_PDM		6 /**< Pulse density modulation */
 
-#define SOF_DAI_FMT_CONT	(1 << 4) /**< continuous clock */
+#define SOF_DAI_FMT_CONT	BIT(4) /**< continuous clock */
 #define SOF_DAI_FMT_GATED	(0 << 4) /**< clock is gated */
 
 #define SOF_DAI_FMT_NB_NF	(0 << 8) /**< normal bit clock + frame */
@@ -38,10 +38,10 @@
 #define SOF_DAI_FMT_CBM_CFS	(3 << 12) /**< codec clk master & frame slave */
 #define SOF_DAI_FMT_CBS_CFS	(4 << 12) /**< codec clk & FRM slave */
 
-#define SOF_DAI_FMT_FORMAT_MASK		0x000f
-#define SOF_DAI_FMT_CLOCK_MASK		0x00f0
-#define SOF_DAI_FMT_INV_MASK		0x0f00
-#define SOF_DAI_FMT_MASTER_MASK		0xf000
+#define SOF_DAI_FMT_FORMAT_MASK		GENMASK(3, 0)
+#define SOF_DAI_FMT_CLOCK_MASK		GENMASK(7, 4)
+#define SOF_DAI_FMT_INV_MASK		GENMASK(11, 8)
+#define SOF_DAI_FMT_MASTER_MASK		GENMASK(15, 12)
 
 /** \brief Types of DAI */
 enum sof_ipc_dai_type {

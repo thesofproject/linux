@@ -18,27 +18,27 @@
 #define SOF_IPC_MAX_CHANNELS			8
 
 /* common sample rates for use in masks */
-#define SOF_RATE_8000		(1 <<  0) /**< 8000Hz  */
-#define SOF_RATE_11025		(1 <<  1) /**< 11025Hz */
-#define SOF_RATE_12000		(1 <<  2) /**< 12000Hz */
-#define SOF_RATE_16000		(1 <<  3) /**< 16000Hz */
-#define SOF_RATE_22050		(1 <<  4) /**< 22050Hz */
-#define SOF_RATE_24000		(1 <<  5) /**< 24000Hz */
-#define SOF_RATE_32000		(1 <<  6) /**< 32000Hz */
-#define SOF_RATE_44100		(1 <<  7) /**< 44100Hz */
-#define SOF_RATE_48000		(1 <<  8) /**< 48000Hz */
-#define SOF_RATE_64000		(1 <<  9) /**< 64000Hz */
-#define SOF_RATE_88200		(1 << 10) /**< 88200Hz */
-#define SOF_RATE_96000		(1 << 11) /**< 96000Hz */
-#define SOF_RATE_176400		(1 << 12) /**< 176400Hz */
-#define SOF_RATE_192000		(1 << 13) /**< 192000Hz */
+#define SOF_RATE_8000		BIT(0) /**< 8000Hz  */
+#define SOF_RATE_11025		BIT(1) /**< 11025Hz */
+#define SOF_RATE_12000		BIT(2) /**< 12000Hz */
+#define SOF_RATE_16000		BIT(3) /**< 16000Hz */
+#define SOF_RATE_22050		BIT(4) /**< 22050Hz */
+#define SOF_RATE_24000		BIT(5) /**< 24000Hz */
+#define SOF_RATE_32000		BIT(6) /**< 32000Hz */
+#define SOF_RATE_44100		BIT(7) /**< 44100Hz */
+#define SOF_RATE_48000		BIT(8) /**< 48000Hz */
+#define SOF_RATE_64000		BIT(9) /**< 64000Hz */
+#define SOF_RATE_88200		BIT(10) /**< 88200Hz */
+#define SOF_RATE_96000		BIT(11) /**< 96000Hz */
+#define SOF_RATE_176400		BIT(12) /**< 176400Hz */
+#define SOF_RATE_192000		BIT(13) /**< 192000Hz */
 
 /* continuous and non-standard rates for flexibility */
-#define SOF_RATE_CONTINUOUS	(1 << 30)  /**< range */
-#define SOF_RATE_KNOT		(1 << 31)  /**< non-continuous */
+#define SOF_RATE_CONTINUOUS	BIT(30)  /**< range */
+#define SOF_RATE_KNOT		BIT(31)  /**< non-continuous */
 
 /* generic PCM flags for runtime settings */
-#define SOF_PCM_FLAG_XRUN_STOP	(1 << 0) /**< Stop on any XRUN */
+#define SOF_PCM_FLAG_XRUN_STOP	BIT(0) /**< Stop on any XRUN */
 
 /* stream PCM frame format */
 enum sof_ipc_frame {
@@ -114,22 +114,22 @@ struct sof_ipc_stream {
 } __packed;
 
 /* flags indicating which time stamps are in sync with each other */
-#define	SOF_TIME_HOST_SYNC	(1 << 0)
-#define	SOF_TIME_DAI_SYNC	(1 << 1)
-#define	SOF_TIME_WALL_SYNC	(1 << 2)
-#define	SOF_TIME_STAMP_SYNC	(1 << 3)
+#define	SOF_TIME_HOST_SYNC	BIT(0)
+#define	SOF_TIME_DAI_SYNC	BIT(1)
+#define	SOF_TIME_WALL_SYNC	BIT(2)
+#define	SOF_TIME_STAMP_SYNC	BIT(3)
 
 /* flags indicating which time stamps are valid */
-#define	SOF_TIME_HOST_VALID	(1 << 8)
-#define	SOF_TIME_DAI_VALID	(1 << 9)
-#define	SOF_TIME_WALL_VALID	(1 << 10)
-#define	SOF_TIME_STAMP_VALID	(1 << 11)
+#define	SOF_TIME_HOST_VALID	BIT(8)
+#define	SOF_TIME_DAI_VALID	BIT(9)
+#define	SOF_TIME_WALL_VALID	BIT(10)
+#define	SOF_TIME_STAMP_VALID	BIT(11)
 
 /* flags indicating time stamps are 64bit else 3use low 32bit */
-#define	SOF_TIME_HOST_64	(1 << 16)
-#define	SOF_TIME_DAI_64		(1 << 17)
-#define	SOF_TIME_WALL_64	(1 << 18)
-#define	SOF_TIME_STAMP_64	(1 << 19)
+#define	SOF_TIME_HOST_64	BIT(16)
+#define	SOF_TIME_DAI_64		BIT(17)
+#define	SOF_TIME_WALL_64	BIT(18)
+#define	SOF_TIME_STAMP_64	BIT(19)
 
 struct sof_ipc_stream_posn {
 	struct sof_ipc_reply rhdr;

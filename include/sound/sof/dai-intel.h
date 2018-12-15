@@ -12,17 +12,17 @@
 #include <sound/sof/header.h>
 
  /* ssc1: TINTE */
-#define SOF_DAI_INTEL_SSP_QUIRK_TINTE		(1 << 0)
+#define SOF_DAI_INTEL_SSP_QUIRK_TINTE		BIT(0)
  /* ssc1: PINTE */
-#define SOF_DAI_INTEL_SSP_QUIRK_PINTE		(1 << 1)
+#define SOF_DAI_INTEL_SSP_QUIRK_PINTE		BIT(1)
  /* ssc2: SMTATF */
-#define SOF_DAI_INTEL_SSP_QUIRK_SMTATF		(1 << 2)
+#define SOF_DAI_INTEL_SSP_QUIRK_SMTATF		BIT(2)
  /* ssc2: MMRATF */
-#define SOF_DAI_INTEL_SSP_QUIRK_MMRATF		(1 << 3)
+#define SOF_DAI_INTEL_SSP_QUIRK_MMRATF		BIT(3)
  /* ssc2: PSPSTWFDFD */
-#define SOF_DAI_INTEL_SSP_QUIRK_PSPSTWFDFD	(1 << 4)
+#define SOF_DAI_INTEL_SSP_QUIRK_PSPSTWFDFD	BIT(4)
  /* ssc2: PSPSRWFDFD */
-#define SOF_DAI_INTEL_SSP_QUIRK_PSPSRWFDFD	(1 << 5)
+#define SOF_DAI_INTEL_SSP_QUIRK_PSPSRWFDFD	BIT(5)
  /* here is the possibility to define others aux macros */
 
 #define SOF_DAI_INTEL_SSP_FRAME_PULSE_WIDTH_MAX		38
