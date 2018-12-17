@@ -141,7 +141,7 @@ static int sof_acpi_probe(struct platform_device *pdev)
 	struct snd_soc_acpi_mach *mach;
 	struct snd_sof_pdata *sof_pdata;
 	struct sof_platform_priv *priv;
-	struct snd_sof_dsp_ops *ops;
+	const struct snd_sof_dsp_ops *ops;
 	int ret = 0;
 
 	dev_dbg(&pdev->dev, "ACPI DSP detected");

@@ -81,7 +81,7 @@ struct snd_soc_acpi_mach {
 	const char *board;
 	struct snd_soc_acpi_mach * (*machine_quirk)(void *arg);
 	const void *quirk_data;
-	void *pdata;
+	const void *pdata;
 	struct snd_soc_acpi_mach_params mach_params;
 	const char *sof_fw_filename;
 	const char *sof_tplg_filename;
