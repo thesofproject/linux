@@ -95,6 +95,7 @@ int snd_sof_parse_module_memcpy(struct snd_sof_dev *sdev,
 	int count;
 	u32 offset;
 	size_t remaining;
+	u32 block_size;
 
 	dev_dbg(sdev->dev, "new module size 0x%x blocks 0x%x type 0x%x\n",
 		module->size, module->num_blocks, module->type);
@@ -102,16 +103,17 @@ int snd_sof_parse_module_memcpy(struct snd_sof_dev *sdev,
 	block = (void *)module + sizeof(*module);
 
 	/* module->size doesn't include header size */
-	remaining = module->size;
-	for (count = 0; count < module->num_blocks; count++) {
+	remaining = le32_to_cpu(module->size);
+	for (count = 0; count < le32_to_cpu(module->num_blocks); count++) {
+		block_size = le32_to_cpu(block->size);
 		/* minus header size of block */
 		remaining -= sizeof(*block);
-		if (remaining < block->size) {
+		if (remaining < block_size) {
 			dev_err(sdev->dev, "error: not enough data remaining\n");
 			return -EINVAL;
 		}
 
-		if (block->size == 0) {
+		if (block_size == 0) {
 			dev_warn(sdev->dev,
 				 "warning: block %d size zero\n", count);
 			dev_warn(sdev->dev, " type 0x%x offset 0x%x\n",
@@ -119,7 +121,7 @@ int snd_sof_parse_module_memcpy(struct snd_sof_dev *sdev,
 			continue;
 		}
 
-		switch (block->type) {
+		switch (le32_to_cpu(block->type)) {
 		case SOF_BLK_IMAGE:
 		case SOF_BLK_CACHE:
 		case SOF_BLK_REGS:
@@ -128,7 +130,7 @@ int snd_sof_parse_module_memcpy(struct snd_sof_dev *sdev,
 			continue;	/* not handled atm */
 		case SOF_BLK_TEXT:
 		case SOF_BLK_DATA:
-			offset = block->offset;
+			offset = le32_to_cpu(block->offset);
 			break;
 		default:
 			dev_err(sdev->dev, "error: bad type 0x%x for block 0x%x\n",
@@ -138,16 +140,16 @@ int snd_sof_parse_module_memcpy(struct snd_sof_dev *sdev,
 
 		dev_dbg(sdev->dev,
 			"block %d type 0x%x size 0x%x ==>  offset 0x%x\n",
-			count, block->type, block->size, offset);
+			count, block->type, block_size, offset);
 
 		snd_sof_dsp_block_write(sdev, offset,
 					(void *)block + sizeof(*block),
-					block->size);
+					block_size);
 
 		/* minus body size of block */
-		remaining -= block->size;
+		remaining -= block_size;
 		/* next block */
-		block = (void *)block + sizeof(*block) + block->size;
+		block = (void *)block + sizeof(*block) + block_size;
 	}
 
 	return 0;
@@ -157,9 +159,13 @@ EXPORT_SYMBOL(snd_sof_parse_module_memcpy);
 static int check_header(struct snd_sof_dev *sdev, const struct firmware *fw)
 {
 	struct snd_sof_fw_header *header;
+	u32 file_size, num_modules, abi;
 
 	/* Read the header information from the data pointer */
 	header = (struct snd_sof_fw_header *)fw->data;
+	file_size = le32_to_cpu(header->file_size);
+	num_modules = le32_to_cpu(header->num_modules);
+	abi = le32_to_cpu(header->abi);
 
 	/* verify FW sig */
 	if (strncmp(header->sig, SND_SOF_FW_SIG, SND_SOF_FW_SIG_SIZE) != 0) {
@@ -168,15 +174,14 @@ static int check_header(struct snd_sof_dev *sdev, const struct firmware *fw)
 	}
 
 	/* check size is valid */
-	if (fw->size != header->file_size + sizeof(*header)) {
+	if (fw->size != file_size + sizeof(*header)) {
 		dev_err(sdev->dev, "error: invalid filesize mismatch got 0x%zx expected 0x%zx\n",
-			fw->size, header->file_size + sizeof(*header));
+			fw->size, file_size + sizeof(*header));
 		return -EINVAL;
 	}
 
 	dev_dbg(sdev->dev, "header size=0x%x modules=0x%x abi=0x%x size=%zu\n",
-		header->file_size, header->num_modules,
-		header->abi, sizeof(*header));
+		file_size, num_modules, abi, sizeof(*header));
 
 	return 0;
 }
@@ -189,6 +194,7 @@ static int load_modules(struct snd_sof_dev *sdev, const struct firmware *fw)
 			   struct snd_sof_mod_hdr *hdr);
 	int ret, count;
 	size_t remaining;
+	u32 module_size;
 
 	header = (struct snd_sof_fw_header *)fw->data;
 	load_module = sdev->ops->load_module;
@@ -198,10 +204,11 @@ static int load_modules(struct snd_sof_dev *sdev, const struct firmware *fw)
 	/* parse each module */
 	module = (void *)fw->data + sizeof(*header);
 	remaining = fw->size - sizeof(*header);
-	for (count = 0; count < header->num_modules; count++) {
+	for (count = 0; count < le32_to_cpu(header->num_modules); count++) {
+		module_size = le32_to_cpu(module->size);
 		/* minus header size of module */
 		remaining -= sizeof(*module);
-		if (remaining < module->size) {
+		if (remaining < module_size) {
 			dev_err(sdev->dev, "error: not enough data remaining\n");
 			return -EINVAL;
 		}
@@ -212,8 +219,8 @@ static int load_modules(struct snd_sof_dev *sdev, const struct firmware *fw)
 			return ret;
 		}
 		/* minus body size of module */
-		remaining -=  module->size;
-		module = (void *)module + sizeof(*module) + module->size;
+		remaining -=  module_size;
+		module = (void *)module + sizeof(*module) + module_size;
 	}
 
 	return 0;
