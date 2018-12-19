@@ -79,6 +79,8 @@ struct snd_sof_dsp_ops {
 			     unsigned int core_mask);
 	int (*core_power_down)(struct snd_sof_dev *sof_dev,
 			       unsigned int core_mask);
+	bool (*is_core_enabled)(struct snd_sof_dev *sof_dev,
+				unsigned int core_mask);
 
 	/* pre/post firmware run */
 	int (*pre_fw_run)(struct snd_sof_dev *sof_dev);

@@ -237,6 +237,15 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 		return 0;
 
 	/*
+	 * If for some reason, the cores were not powered off
+	 * during suspend, powering them up again will lead to
+	 * DSP panic. So check if core 0 is powered off to make
+	 * sure before proceeding further.
+	 */
+	if (snd_sof_dsp_core_is_enabled(sdev, BIT(0))
+		return 0;
+
+	/*
 	 * if the runtime_resume flag is set, call the runtime_resume routine
 	 * or else call the system resume routine
 	 */

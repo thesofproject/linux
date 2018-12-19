@@ -79,6 +79,15 @@ static inline int snd_sof_dsp_core_power_down(struct snd_sof_dev *sdev,
 	return 0;
 }
 
+static inline int snd_sof_dsp_core_is_enabled(struct snd_sof_dev *sdev,
+					      unsigned int core_mask)
+{
+	if (sdev->ops->is_core_enabled)
+		return sdev->ops->is_core_enabled(sdev, core_mask);
+
+	return 0;
+}
+
 /* pre/post fw load */
 static inline int snd_sof_dsp_pre_fw_run(struct snd_sof_dev *sdev)
 {
