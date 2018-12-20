@@ -971,6 +971,7 @@ config SND_SOC_PCM5102A
 
 config SND_SOC_PCM512x
 	tristate
+	select GPIO_REGMAP
 
 config SND_SOC_PCM512x_I2C
 	tristate "Texas Instruments PCM512x CODECs - I2C"

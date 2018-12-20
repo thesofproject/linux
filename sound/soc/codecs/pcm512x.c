@@ -10,6 +10,7 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/clk.h>
+#include <linux/gpio/regmap.h>
 #include <linux/kernel.h>
 #include <linux/pm_runtime.h>
 #include <linux/regmap.h>
@@ -32,6 +33,7 @@ static const char * const pcm512x_supply_names[PCM512x_NUM_SUPPLIES] = {
 struct pcm512x_priv {
 	struct regmap *regmap;
 	struct clk *sclk;
+	struct gpio_regmap *gpio;
 	struct regulator_bulk_data supplies[PCM512x_NUM_SUPPLIES];
 	struct notifier_block supply_nb[PCM512x_NUM_SUPPLIES];
 	int fmt;
@@ -1503,9 +1505,17 @@ const struct regmap_config pcm512x_regmap = {
 };
 EXPORT_SYMBOL_GPL(pcm512x_regmap);
 
+/* list human-readable names, makes GPIOLIB usage straightforward */
+static const char * const pcm512x_gpio_names[] = {
+	"PCM512x-GPIO1", "PCM512x-GPIO2", "PCM512x-GPIO3",
+	"PCM512x-GPIO4", "PCM512x-GPIO5", "PCM512x-GPIO6"
+};
+
 int pcm512x_probe(struct device *dev, struct regmap *regmap)
 {
 	struct pcm512x_priv *pcm512x;
+	struct gpio_regmap_config *gpio_config;
+	unsigned int reg;
 	int i, ret;
 
 	pcm512x = devm_kzalloc(dev, sizeof(struct pcm512x_priv), GFP_KERNEL);
@@ -1561,6 +1571,43 @@ int pcm512x_probe(struct device *dev, struct regmap *regmap)
 	if (ret != 0) {
 		dev_err(dev, "Failed to reset device: %d\n", ret);
 		goto err;
+	}
+
+	/* expose 6 GPIO pins, numbered from 1 to 6 */
+	gpio_config = devm_kzalloc(dev, sizeof(*gpio_config), GFP_KERNEL);
+	if (!gpio_config)
+		return -ENOMEM;
+
+	gpio_config->parent = dev;
+	gpio_config->regmap = regmap;
+	gpio_config->label = "pcm512x-gpio";
+	gpio_config->names = pcm512x_gpio_names;
+	gpio_config->ngpio = ARRAY_SIZE(pcm512x_gpio_names);
+	gpio_config->reg_dat_base = PCM512x_GPIN;
+	gpio_config->reg_set_base = PCM512x_GPIO_CONTROL_1;
+	/* reg_dir_in_base not defined */
+	gpio_config->reg_dir_out_base = PCM512x_GPIO_EN;
+	gpio_config->reg_stride = 1;
+	gpio_config->ngpio_per_reg = ARRAY_SIZE(pcm512x_gpio_names);
+	/* .reg_mask_xlate not used */
+
+	pcm512x->gpio = devm_gpio_regmap_register(dev, gpio_config);
+	if (IS_ERR(pcm512x->gpio)) {
+		ret = PTR_ERR(pcm512x->gpio);
+		dev_err(dev, "Could not add gpio chip: %d\n", ret);
+		goto err;
+	}
+
+	/*
+	 * select Register GPIOx output for OUTPUT_x (1..6). The
+	 * actual selection of input/output is done by the gpio_regmap
+	 * helpers.
+	 */
+	for (i = 0; i < ARRAY_SIZE(pcm512x_gpio_names); i++) {
+		reg = PCM512x_GPIO_OUTPUT_1 + i;
+		ret = regmap_update_bits(regmap, reg, 0x0f, 0x02);
+		if (ret < 0)
+			return ret;
 	}
 
 	pcm512x->sclk = devm_clk_get(dev, NULL);
