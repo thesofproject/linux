@@ -62,11 +62,14 @@ static int sof_restore_pipelines(struct snd_sof_dev *sdev)
 	struct snd_sof_dai *dai;
 	struct sof_ipc_comp_dai *comp_dai;
 	struct sof_ipc_cmd_hdr *hdr;
+	int max_index = 0;
+	int link_index = 0;
 	int ret = 0;
 
 	/* restore pipeline components */
 	list_for_each_entry_reverse(swidget, &sdev->widget_list, list) {
 		struct sof_ipc_comp_reply r;
+		struct sof_ipc_dai_config *config;
 
 		/* skip if there is no private data */
 		if (!swidget->private)
@@ -82,6 +85,11 @@ static int sof_restore_pipelines(struct snd_sof_dev *sdev)
 						 comp_dai->comp.hdr.cmd,
 						 comp_dai, sizeof(*comp_dai),
 						 &r, sizeof(r));
+
+			config = dai->dai_config;
+			if (config->dai_index > max_index)
+				max_index = config->dai_index;
+
 			break;
 		case snd_soc_dapm_scheduler:
 
@@ -138,23 +146,32 @@ static int sof_restore_pipelines(struct snd_sof_dev *sdev)
 		}
 	}
 
-	/* restore dai links */
-	list_for_each_entry_reverse(dai, &sdev->dai_list, list) {
-		struct sof_ipc_reply reply;
-		struct sof_ipc_dai_config *config = dai->dai_config;
+	/* restore dai links from index 0 to max index */
+	while (link_index <= max_index) {
+		list_for_each_entry_reverse(dai, &sdev->dai_list, list) {
+			struct sof_ipc_reply reply;
+			struct sof_ipc_dai_config *config = dai->dai_config;
 
-		ret = sof_ipc_tx_message(sdev->ipc,
-					 config->hdr.cmd, config,
-					 config->hdr.size,
-					 &reply, sizeof(reply));
+			if (config->dai_index == link_index) {
+				ret = sof_ipc_tx_message(sdev->ipc,
+							 config->hdr.cmd,
+							 config,
+							 config->hdr.size,
+							 &reply, sizeof(reply));
 
-		if (ret < 0) {
-			dev_err(sdev->dev,
-				"error: failed to set dai config for %s\n",
-				dai->name);
+				if (ret < 0) {
+					dev_err(sdev->dev,
+						"error: failed to set dai config for %s\n",
+						dai->name);
 
-			return ret;
+					return ret;
+				}
+
+				break;
+			}
 		}
+
+		link_index++;
 	}
 
 	/* complete pipeline */
