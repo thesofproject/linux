@@ -557,9 +557,8 @@ static void ipc_xrun(struct snd_sof_dev *sdev, u32 msg_id)
 		posn.host_posn, posn.xrun_comp_id, posn.xrun_size);
 
 #if defined(CONFIG_SND_SOC_SOF_DEBUG_XRUN_STOP)
-	/* stop PCM on XRUN - used for pipeline debug */
+	/* save XRUN info and send to ALSA in .pointer later */
 	memcpy(&spcm->stream[direction].posn, &posn, sizeof(posn));
-	snd_pcm_stop_xrun(spcm->stream[direction].substream);
 #endif
 }
 

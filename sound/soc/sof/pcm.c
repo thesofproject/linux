@@ -338,6 +338,13 @@ static snd_pcm_uframes_t sof_pcm_pointer(struct snd_pcm_substream *substream)
 	if (rtd->dai_link->no_pcm)
 		return 0;
 
+	/* return Xrun to ALSA for further handling */
+	if (spcm->stream[substream->stream].posn.xrun_size) {
+		/* only report once for each XRUN IPC */
+		spcm->stream[substream->stream].posn.xrun_size = 0;
+		return SNDRV_PCM_POS_XRUN;
+	}
+
 	/* if have dsp ops pointer callback, use that directly */
 	if (sdev->ops->pcm_pointer)
 		return sdev->ops->pcm_pointer(sdev, substream);
