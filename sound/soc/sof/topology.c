@@ -1920,7 +1920,8 @@ static void sof_dai_set_format(struct snd_soc_tplg_hw_config *hw_config,
 /* set config for all DAI's with name matching the link name */
 static int sof_set_dai_config(struct snd_sof_dev *sdev, u32 size,
 			      struct snd_soc_dai_link *link,
-			      struct sof_ipc_dai_config *config)
+			      struct sof_ipc_dai_config *config,
+			      int direction)
 {
 	struct snd_sof_dai *dai;
 
@@ -1928,7 +1929,8 @@ static int sof_set_dai_config(struct snd_sof_dev *sdev, u32 size,
 		if (!dai->name)
 			continue;
 
-		if (strcmp(link->name, dai->name) == 0) {
+		if (strcmp(link->name, dai->name) == 0 &&
+		    dai->comp_dai.direction == direction) {
 			dai->dai_config = kmemdup(config, size, GFP_KERNEL);
 			if (!dai->dai_config)
 				return -ENOMEM;
@@ -1993,11 +1995,23 @@ static int sof_link_ssp_load(struct snd_soc_component *scomp, int index,
 		return ret;
 	}
 
-	/* set config for all DAI's with name matching the link name */
-	ret = sof_set_dai_config(sdev, size, link, config);
-	if (ret < 0)
-		dev_err(sdev->dev, "error: failed to save DAI config for SSP%d\n",
-			config->dai_index);
+	/* set config to dai component of playback */
+	if (link->dpcm_playback) {
+		ret = sof_set_dai_config(sdev, size, link, config,
+					 SNDRV_PCM_STREAM_PLAYBACK);
+		if (ret < 0)
+			dev_err(sdev->dev, "error: failed to save DAI config in dai component of playback for SSP%d\n",
+				config->dai_index);
+	}
+
+	/* set config to dai component of capture */
+	if (link->dpcm_capture) {
+		ret = sof_set_dai_config(sdev, size, link, config,
+					 SNDRV_PCM_STREAM_CAPTURE);
+		if (ret < 0)
+			dev_err(sdev->dev, "error: failed to save DAI config in dai component of capture for SSP%d\n",
+				config->dai_index);
+	}
 
 	return ret;
 }
@@ -2113,8 +2127,9 @@ static int sof_link_dmic_load(struct snd_soc_component *scomp, int index,
 		goto err;
 	}
 
-	/* set config for all DAI's with name matching the link name */
-	ret = sof_set_dai_config(sdev, size, link, ipc_config);
+	/* set config to dai component of capture */
+	ret = sof_set_dai_config(sdev, size, link, ipc_config,
+				 SNDRV_PCM_STREAM_CAPTURE);
 	if (ret < 0)
 		dev_err(sdev->dev, "error: failed to save DAI config for DMIC%d\n",
 			config->dai_index);
@@ -2237,6 +2252,14 @@ static int sof_link_hda_load(struct snd_soc_component *scomp, int index,
 
 			return ret;
 		}
+
+		/* set config to dai component of playback */
+		ret = sof_set_dai_config(sdev, size, link, config,
+					 SNDRV_PCM_STREAM_PLAYBACK);
+		if (ret < 0) {
+			dev_err(sdev->dev, "error: failed to save DAI config for playback HDA%d\n",
+				config->dai_index);
+		}
 	}
 
 	if (link->dpcm_capture) {
@@ -2248,18 +2271,14 @@ static int sof_link_hda_load(struct snd_soc_component *scomp, int index,
 
 			return ret;
 		}
-	}
 
-	/* set config for all DAI's with name matching the link name */
-	ret = sof_set_dai_config(sdev, size, link, config);
-	if (ret < 0) {
-		if (link->dpcm_playback)
-			dev_err(sdev->dev, "error: failed to save DAI config for playback HDA%d\n",
-				config->dai_index);
-
-		if (link->dpcm_capture)
+		/* set config to dai component of capture */
+		ret = sof_set_dai_config(sdev, size, link, config,
+					 SNDRV_PCM_STREAM_CAPTURE);
+		if (ret < 0) {
 			dev_err(sdev->dev, "error: failed to save DAI config for capture HDA%d\n",
 				config->dai_index);
+		}
 	}
 
 	return ret;
