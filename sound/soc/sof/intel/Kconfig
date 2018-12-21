@@ -125,6 +125,7 @@ config SND_SOC_SOF_APOLLOLAKE_SUPPORT
 config SND_SOC_SOF_APOLLOLAKE
 	tristate
 	select SND_SOC_SOF_HDA_COMMON
+	select SND_HDA_INTEL_DSP_DETECTION_APL if SND_HDA_INTEL
 	help
           This option is not user-selectable but automagically handled by
 	  'select' statements at a higher level
@@ -140,6 +141,7 @@ config SND_SOC_SOF_GEMINILAKE_SUPPORT
 config SND_SOC_SOF_GEMINILAKE
 	tristate
 	select SND_SOC_SOF_HDA_COMMON
+	select SND_HDA_INTEL_DSP_DETECTION_GLK if SND_HDA_INTEL
 	help
           This option is not user-selectable but automagically handled by
 	  'select' statements at a higher level
@@ -155,6 +157,7 @@ config SND_SOC_SOF_CANNONLAKE_SUPPORT
 config SND_SOC_SOF_CANNONLAKE
 	tristate
 	select SND_SOC_SOF_HDA_COMMON
+	select SND_HDA_INTEL_DSP_DETECTION_CNL if SND_HDA_INTEL
 	help
           This option is not user-selectable but automagically handled by
 	  'select' statements at a higher level
@@ -170,7 +173,7 @@ config SND_SOC_SOF_COFFEELAKE_SUPPORT
 config SND_SOC_SOF_COFFEELAKE
 	tristate
 	select SND_SOC_SOF_HDA_COMMON
-	select SND_HDA_INTEL_DSP_DETECTION_CFL
+	select SND_HDA_INTEL_DSP_DETECTION_CFL if SND_HDA_INTEL
 	help
           This option is not user-selectable but automagically handled by
 	  'select' statements at a higher level
@@ -186,6 +189,7 @@ config SND_SOC_SOF_KABYLAKE_SUPPORT
 config SND_SOC_SOF_KABYLAKE
 	tristate
 	select SND_SOC_SOF_HDA_COMMON
+	select SND_HDA_INTEL_DSP_DETECTION_KBL if SND_HDA_INTEL
 	help
           This option is not user-selectable but automagically handled by
 	  'select' statements at a higher level
@@ -201,6 +205,7 @@ config SND_SOC_SOF_SKYLAKE_SUPPORT
 config SND_SOC_SOF_SKYLAKE
 	tristate
 	select SND_SOC_SOF_HDA_COMMON
+	select SND_HDA_INTEL_DSP_DETECTION_SKL if SND_HDA_INTEL
 	help
           This option is not user-selectable but automagically handled by
 	  'select' statements at a higher level
@@ -216,6 +221,7 @@ config SND_SOC_SOF_ICELAKE_SUPPORT
 config SND_SOC_SOF_ICELAKE
 	tristate
 	select SND_SOC_SOF_HDA_COMMON
+	select SND_HDA_INTEL_DSP_DETECTION_ICL if SND_HDA_INTEL
 	help
           This option is not user-selectable but automagically handled by
 	  'select' statements at a higher level
