@@ -1895,7 +1895,20 @@ static int hdmi_codec_prepare(struct device *dev)
 {
 	struct hdac_device *hdev = dev_to_hdac_dev(dev);
 
-	pm_runtime_get_sync(&hdev->dev);
+	// This is a rfc patch. These comments will removed in the formal patch
+	// if this patch will be merged.
+	// We don't need call pm_runtime_get_sync to wake up all the audio
+	// subsystem just for setting the codec register.
+	// Let's directly power i915 up for codec settings and after that
+	// let's power it off.
+	// If we call pm_runtime_get_sync(&hdev->dev); you will find
+	// i915 power will not be released when suspend. The reason is
+	// described later in the "Power management sequences"
+	// what's more call snd_hdac_display_power(bus, hdev->addr, true);
+	// will simplify the sequence and make the pm sequence more effcient.
+
+	// pm_runtime_get_sync(&hdev->dev);
+	snd_hdac_display_power(hdev->bus, hdev->addr, true);
 
 	/*
 	 * Power down afg.
@@ -1906,6 +1919,7 @@ static int hdmi_codec_prepare(struct device *dev)
 	 */
 	snd_hdac_codec_read(hdev, hdev->afg, 0,	AC_VERB_SET_POWER_STATE,
 							AC_PWRST_D3);
+	snd_hdac_display_power(hdev->bus, hdev->addr, false);
 
 	return 0;
 }
@@ -1915,6 +1929,7 @@ static void hdmi_codec_complete(struct device *dev)
 	struct hdac_device *hdev = dev_to_hdac_dev(dev);
 	struct hdac_hdmi_priv *hdmi = hdev_to_hdmi_priv(hdev);
 
+	snd_hdac_display_power(hdev->bus, hdev->addr, true);
 	/* Power up afg */
 	snd_hdac_codec_read(hdev, hdev->afg, 0,	AC_VERB_SET_POWER_STATE,
 							AC_PWRST_D0);
@@ -1930,7 +1945,8 @@ static void hdmi_codec_complete(struct device *dev)
 	 */
 	hdac_hdmi_present_sense_all_pins(hdev, hdmi, false);
 
-	pm_runtime_put_sync(&hdev->dev);
+	snd_hdac_display_power(hdev->bus, hdev->addr, false);
+	//pm_runtime_put_sync(&hdev->dev);
 }
 #else
 #define hdmi_codec_prepare NULL
@@ -2173,6 +2189,13 @@ static int hdac_hdmi_dev_remove(struct hdac_device *hdev)
  * When the device is opened for playback, the device is runtime active
  * already and the display refcount is 1 as explained above.
  *
+ // This comment will be changed. And the hdmi suspend/resume flow
+ // is something wrong. Actually, hdmi_codec_prepare()
+ // will incremenst hdmi codec pm runtime usage count, while
+ // skl_suspend() will reduce the count of HDA_CODEC_IDX_CONTROLLER
+ // this is a virtual idx for the hdmi audio. HDMI codec idx is not
+ // the same as HDA_CODEC_IDX_CONTROLLER, which means i915 power will
+ // not be released when suspend. This is obviously wrong.
  * Entering to S3,
  * 1. hdmi_codec_prepare() invoke the runtime resume of codec which just
  *    increments the PM runtime usage count of the codec since the device
