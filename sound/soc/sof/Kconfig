@@ -99,12 +99,15 @@ config SND_SOC_SOF_FORCE_NOCODEC_MODE
           Say Y if you need this force nocodec mode option
           If unsure select "N".
 
-config SND_SOC_SOF_DEBUG_XRUN_STOP
-	bool "SOF stop on XRUN"
+config SND_SOC_SOF_DEBUG_XRUN_REPORT
+	bool "SOF report FW XRUN to ALSA "
 	help
-	  This option forces PCMs to stop on any XRUN event. This is useful to
-	  preserve any trace data ond pipeline status prior to the XRUN.
-	  Say Y if you are debugging SOF FW pipeline XRUNs.
+	  This option report Firmware XRUN event to ALSA, and ALSA framework
+	  will trigger PCM stop->prepare->start later on it.
+	  If we don't report this XRUN event, ALSA will still observe XRUN
+	  later when .pointer() callback has no update for some time, usually
+	  that may lead to later and lower frequecy ALSA XRUN response.
+	  Say Y if you are debugging SOF FW pipeline XRUNs handling.
           If unsure select "N".
 
 config SND_SOC_SOF_DEBUG_VERBOSE_IPC

@@ -556,7 +556,7 @@ static void ipc_xrun(struct snd_sof_dev *sdev, u32 msg_id)
 	dev_dbg(sdev->dev,  "posn XRUN: host %llx comp %d size %d\n",
 		posn.host_posn, posn.xrun_comp_id, posn.xrun_size);
 
-#if defined(CONFIG_SND_SOC_SOF_DEBUG_XRUN_STOP)
+#if defined(CONFIG_SND_SOC_SOF_DEBUG_XRUN_REPORT)
 	/* save XRUN info and send to ALSA in .pointer later */
 	memcpy(&spcm->stream[direction].posn, &posn, sizeof(posn));
 #endif
