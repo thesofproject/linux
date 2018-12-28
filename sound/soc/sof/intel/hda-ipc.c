@@ -151,8 +151,11 @@ irqreturn_t hda_dsp_ipc_irq_thread(int irq, void *context)
 					HDA_DSP_REG_HIPCCTL_DONE, 0);
 
 		/* handle immediate reply from DSP core - ignore ROM messages */
-		if (msg != 0x1004000)
+		if ((msg & HDA_DSP_IPC_PURGE_FW) != HDA_DSP_IPC_PURGE_FW)
 			reply = snd_sof_ipc_reply(sdev, msg);
+		else
+		/* for ROM messages, code loader should do cmd_done */
+			reply = 0;
 
 		/*
 		 * handle immediate reply from DSP core. If the msg is
