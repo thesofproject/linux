@@ -56,7 +56,7 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"MIC1", NULL, "Headset Mic"},
 	{"MIC2", NULL, "Mic"},
 
-#if !IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL)
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_TOPLEVEL)
 	/* SOC-codec link */
 	{"ssp2 Tx", NULL, "codec_out0"},
 	{"ssp2 Tx", NULL, "codec_out1"},

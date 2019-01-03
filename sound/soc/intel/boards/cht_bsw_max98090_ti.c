@@ -91,7 +91,7 @@ static const struct snd_soc_dapm_route cht_audio_map[] = {
 	{"Headphone", NULL, "HPR"},
 	{"Ext Spk", NULL, "SPKL"},
 	{"Ext Spk", NULL, "SPKR"},
-#if !IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL)
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_TOPLEVEL)
 	{"HiFi Playback", NULL, "ssp2 Tx"},
 	{"ssp2 Tx", NULL, "codec_out0"},
 	{"ssp2 Tx", NULL, "codec_out1"},

@@ -305,7 +305,7 @@ static const struct snd_soc_dapm_route byt_rt5651_ssp0_aif2_map[] = {
 };
 
 static const struct snd_soc_dapm_route byt_rt5651_ssp2_aif1_map[] = {
-#if !IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL)
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_TOPLEVEL)
 	{"ssp2 Tx", NULL, "codec_out0"},
 	{"ssp2 Tx", NULL, "codec_out1"},
 	{"codec_in0", NULL, "ssp2 Rx"},
@@ -878,7 +878,7 @@ static int snd_byt_rt5651_mc_probe(struct platform_device *pdev)
 	struct device *codec_dev;
 	const char *i2c_name = NULL;
 	const char *hp_swapped;
-#if !IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL)
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_TOPLEVEL)
 	bool is_bytcr = false;
 #endif
 	int ret_val = 0;
@@ -918,7 +918,7 @@ static int snd_byt_rt5651_mc_probe(struct platform_device *pdev)
 	if (!codec_dev)
 		return -EPROBE_DEFER;
 
-#if !IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL)
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_TOPLEVEL)
 	/*
 	 * swap SSP0 if bytcr is detected
 	 * (will be overridden if DMI quirk is detected)

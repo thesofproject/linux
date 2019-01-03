@@ -159,7 +159,7 @@ static const struct snd_soc_dapm_route cht_rt5650_audio_map[] = {
 };
 
 static const struct snd_soc_dapm_route cht_rt5645_ssp2_aif1_map[] = {
-#if !IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL)
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_TOPLEVEL)
 	{"AIF1 Playback", NULL, "ssp2 Tx"},
 	{"ssp2 Tx", NULL, "codec_out0"},
 	{"ssp2 Tx", NULL, "codec_out1"},
@@ -170,7 +170,7 @@ static const struct snd_soc_dapm_route cht_rt5645_ssp2_aif1_map[] = {
 };
 
 static const struct snd_soc_dapm_route cht_rt5645_ssp2_aif2_map[] = {
-#if !IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL)
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_TOPLEVEL)
 	{"AIF2 Playback", NULL, "ssp2 Tx"},
 	{"ssp2 Tx", NULL, "codec_out0"},
 	{"ssp2 Tx", NULL, "codec_out1"},
@@ -181,7 +181,7 @@ static const struct snd_soc_dapm_route cht_rt5645_ssp2_aif2_map[] = {
 };
 
 static const struct snd_soc_dapm_route cht_rt5645_ssp0_aif1_map[] = {
-#if !IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL)
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_TOPLEVEL)
 	{"AIF1 Playback", NULL, "ssp0 Tx"},
 	{"ssp0 Tx", NULL, "modem_out"},
 	{"modem_in", NULL, "ssp0 Rx" },
@@ -190,7 +190,7 @@ static const struct snd_soc_dapm_route cht_rt5645_ssp0_aif1_map[] = {
 };
 
 static const struct snd_soc_dapm_route cht_rt5645_ssp0_aif2_map[] = {
-#if !IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL)
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_TOPLEVEL)
 	{"AIF2 Playback", NULL, "ssp0 Tx"},
 	{"ssp0 Tx", NULL, "modem_out"},
 	{"modem_in", NULL, "ssp0 Rx" },
