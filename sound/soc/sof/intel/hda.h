@@ -12,6 +12,7 @@
 #define __SOF_INTEL_HDA_H
 
 #include <sound/hda_codec.h>
+#include "shim.h"
 
 /* PCI registers */
 #define PCI_TCSEL			0x44
@@ -343,19 +344,6 @@ struct sof_intel_dsp_bdl {
 	__le32 ioc;
 } __attribute((packed));
 
-/* DSP hardware descriptor */
-struct sof_intel_dsp_desc {
-	int id;
-	int cores_num;
-	int cores_mask;
-	int ipc_req;
-	int ipc_req_mask;
-	int ipc_ack;
-	int ipc_ack_mask;
-	int ipc_ctl;
-	const struct snd_sof_dsp_ops *ops;
-};
-
 #define SOF_HDA_PLAYBACK_STREAMS	16
 #define SOF_HDA_CAPTURE_STREAMS		16
 #define SOF_HDA_PLAYBACK		0
@@ -380,6 +368,20 @@ struct sof_intel_hda_dev {
 	/* DMIC device */
 	struct platform_device *dmic_dev;
 };
+
+static inline struct hdac_bus *sof_to_bus(struct snd_sof_dev *s)
+{
+	struct sof_intel_hda_dev *hda =
+		(struct sof_intel_hda_dev *)s->pdata->hw_pdata;
+	return &hda->hbus.core;
+}
+
+static inline struct hda_bus *sof_to_hbus(struct snd_sof_dev *s)
+{
+	struct sof_intel_hda_dev *hda =
+		(struct sof_intel_hda_dev *)s->pdata->hw_pdata;
+	return &hda->hbus;
+}
 
 #define bus_to_sof_hda(bus) \
 	container_of(bus, struct sof_intel_hda_dev, hbus.core)
@@ -533,5 +535,9 @@ extern struct snd_soc_dai_driver skl_dai[];
 extern const struct snd_sof_dsp_ops sof_apl_ops;
 extern const struct snd_sof_dsp_ops sof_cnl_ops;
 extern const struct snd_sof_dsp_ops sof_skl_ops;
+
+extern const struct sof_intel_dsp_desc apl_chip_info;
+extern const struct sof_intel_dsp_desc cnl_chip_info;
+extern const struct sof_intel_dsp_desc skl_chip_info;
 
 #endif

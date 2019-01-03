@@ -18,6 +18,7 @@
 #include <linux/spi/spi.h>
 #include <sound/pcm.h>
 #include <sound/sof.h>
+#include "intel/shim.h"
 #include "sof-priv.h"
 #include "hw-spi.h"
 #include "ops.h"
@@ -42,10 +43,8 @@ static const struct sof_dev_desc spi_desc = {
 	.resindex_imr_base = -1,
 	.irqindex_host_ipc = -1,
 	.resindex_dma_base = -1,
-};
-
-static const struct sof_ops_table spi_mach_ops[] = {
-	{&spi_desc, &snd_sof_spi_ops},
+	.chip_info = &spi_chip_info,
+	.ops = &snd_sof_spi_ops
 };
 
 static int sof_spi_probe(struct spi_device *spi)
@@ -55,6 +54,7 @@ static int sof_spi_probe(struct spi_device *spi)
 	struct snd_soc_acpi_mach *machines, *mach;
 	struct snd_sof_pdata *sof_pdata;
 	struct sof_platform_priv *priv;
+	struct sof_spi_dev *sof_spi;
 	const char *tplg, *fw;
 	struct gpio_desc *gpiod;
 	int ret, irq;
@@ -93,7 +93,12 @@ static int sof_spi_probe(struct spi_device *spi)
 	if (IS_ERR(gpiod))
 		return PTR_ERR(gpiod);
 
-	sof_pdata->gpio = desc_to_gpio(gpiod);
+	sof_spi = devm_kzalloc(dev, sizeof(*sof_spi), GFP_KERNEL);
+	if (!sof_spi)
+		return -ENOMEM;
+
+	sof_spi->gpio = desc_to_gpio(gpiod);
+	sof_pdata->hw_pdata = sof_spi;
 
 	irq = gpiod_to_irq(gpiod);
 	if (irq < 0)
@@ -116,20 +121,6 @@ static int sof_spi_probe(struct spi_device *spi)
 	mach->sof_fw_filename = desc->nocodec_fw_filename;
 	mach->sof_tplg_filename = desc->nocodec_tplg_filename;
 	mach->asoc_plat_name = "sof-platform";
-
-	/*
-	 * save ops in pdata.
-	 * TODO: the explicit cast removes the const attribute, we'll need
-	 * to add a dedicated ops field in the generic soc-acpi structure
-	 * to avoid such issues
-	 */
-
-	mach->pdata = (void *)sof_get_ops(desc, spi_mach_ops,
-					  ARRAY_SIZE(spi_mach_ops));
-	if (!mach->pdata) {
-		dev_err(dev, "error: no matching SPI descriptor ops\n");
-		return -ENODEV;
-	}
 
 	sof_pdata->id = -1;
 	sof_pdata->name = dev_name(&spi->dev);

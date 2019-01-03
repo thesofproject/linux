@@ -33,13 +33,11 @@ struct snd_sof_pdata {
 	/* descriptor */
 	const struct sof_dev_desc *desc;
 
-	/* SPI data */
-	int gpio;
-	unsigned int active;
-
 	/* machine */
 	struct platform_device *pdev_mach;
 	const struct snd_soc_acpi_mach *machine;
+
+	void *hw_pdata;
 };
 
 /*
@@ -66,9 +64,15 @@ struct sof_dev_desc {
 	int ipc_timeout;
 	int boot_timeout;
 
+	/* chip information for dsp */
+	const void *chip_info;
+
 	/* defaults for no codec mode */
 	const char *nocodec_fw_filename;
 	const char *nocodec_tplg_filename;
+
+	const struct snd_sof_dsp_ops *ops;
+	const struct sof_arch_ops *arch_ops;
 };
 
 int sof_nocodec_setup(struct device *dev,

@@ -233,7 +233,7 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 	int ret = 0;
 
 	/* do nothing if dsp resume callbacks are not set */
-	if (!sdev->ops->resume || !sdev->ops->runtime_resume)
+	if (!sof_ops(sdev)->resume || !sof_ops(sdev)->runtime_resume)
 		return 0;
 
 	/*
@@ -303,7 +303,7 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 	int ret = 0;
 
 	/* do nothing if dsp suspend callback is not set */
-	if (!sdev->ops->suspend)
+	if (!sof_ops(sdev)->suspend)
 		return 0;
 
 	/* release trace */
@@ -370,15 +370,9 @@ EXPORT_SYMBOL(snd_sof_resume);
 
 int snd_sof_suspend(struct device *dev)
 {
-	return 0;
-}
-EXPORT_SYMBOL(snd_sof_suspend);
-
-int snd_sof_suspend_late(struct device *dev)
-{
 	return sof_suspend(dev, false);
 }
-EXPORT_SYMBOL(snd_sof_suspend_late);
+EXPORT_SYMBOL(snd_sof_suspend);
 
 int snd_sof_prepare(struct device *dev)
 {

@@ -31,8 +31,11 @@ static struct sof_dev_desc sof_acpi_haswell_desc = {
 	.resindex_pcicfg_base = 1,
 	.resindex_imr_base = -1,
 	.irqindex_host_ipc = 0,
+	.chip_info = &hsw_chip_info,
 	.nocodec_fw_filename = "intel/sof-hsw.ri",
-	.nocodec_tplg_filename = "intel/sof-hsw-nocodec.tplg"
+	.nocodec_tplg_filename = "intel/sof-hsw-nocodec.tplg",
+	.ops = &sof_hsw_ops,
+	.arch_ops = &sof_xtensa_arch_ops
 };
 #endif
 
@@ -43,8 +46,11 @@ static struct sof_dev_desc sof_acpi_broadwell_desc = {
 	.resindex_pcicfg_base = 1,
 	.resindex_imr_base = -1,
 	.irqindex_host_ipc = 0,
+	.chip_info = &bdw_chip_info,
 	.nocodec_fw_filename = "intel/sof-bdw.ri",
-	.nocodec_tplg_filename = "intel/sof-bdw-nocodec.tplg"
+	.nocodec_tplg_filename = "intel/sof-bdw-nocodec.tplg",
+	.ops = &sof_bdw_ops,
+	.arch_ops = &sof_xtensa_arch_ops
 };
 #endif
 
@@ -57,8 +63,11 @@ static struct sof_dev_desc sof_acpi_baytrailcr_desc = {
 	.resindex_pcicfg_base = 1,
 	.resindex_imr_base = 2,
 	.irqindex_host_ipc = 0,
+	.chip_info = &byt_chip_info,
 	.nocodec_fw_filename = "intel/sof-byt.ri",
-	.nocodec_tplg_filename = "intel/sof-byt-nocodec.tplg"
+	.nocodec_tplg_filename = "intel/sof-byt-nocodec.tplg",
+	.ops = &sof_byt_ops,
+	.arch_ops = &sof_xtensa_arch_ops
 };
 
 static struct sof_dev_desc sof_acpi_baytrail_desc = {
@@ -67,8 +76,11 @@ static struct sof_dev_desc sof_acpi_baytrail_desc = {
 	.resindex_pcicfg_base = 1,
 	.resindex_imr_base = 2,
 	.irqindex_host_ipc = 5,
+	.chip_info = &byt_chip_info,
 	.nocodec_fw_filename = "intel/sof-byt.ri",
-	.nocodec_tplg_filename = "intel/sof-byt-nocodec.tplg"
+	.nocodec_tplg_filename = "intel/sof-byt-nocodec.tplg",
+	.ops = &sof_byt_ops,
+	.arch_ops = &sof_xtensa_arch_ops
 };
 
 #ifdef CONFIG_X86 /* TODO: move this to common helper */
@@ -116,8 +128,11 @@ static struct sof_dev_desc sof_acpi_cherrytrail_desc = {
 	.resindex_pcicfg_base = 1,
 	.resindex_imr_base = 2,
 	.irqindex_host_ipc = 5,
+	.chip_info = &cht_chip_info,
 	.nocodec_fw_filename = "intel/sof-cht.ri",
-	.nocodec_tplg_filename = "intel/sof-cht-nocodec.tplg"
+	.nocodec_tplg_filename = "intel/sof-cht-nocodec.tplg",
+	.ops = &sof_cht_ops,
+	.arch_ops = &sof_xtensa_arch_ops
 };
 
 #endif
@@ -126,21 +141,6 @@ static const struct dev_pm_ops sof_acpi_pm = {
 	SET_SYSTEM_SLEEP_PM_OPS(snd_sof_suspend, snd_sof_resume)
 	SET_RUNTIME_PM_OPS(snd_sof_runtime_suspend, snd_sof_runtime_resume,
 			   NULL)
-	.suspend_late = snd_sof_suspend_late,
-};
-
-static const struct sof_ops_table acpi_mach_ops[] = {
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_HASWELL)
-	{&sof_acpi_haswell_desc, &sof_hsw_ops},
-#endif
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_BROADWELL)
-	{&sof_acpi_broadwell_desc, &sof_bdw_ops},
-#endif
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_BAYTRAIL)
-	{&sof_acpi_baytrail_desc, &sof_byt_ops},
-	{&sof_acpi_baytrailcr_desc, &sof_byt_ops},
-	{&sof_acpi_cherrytrail_desc, &sof_cht_ops},
-#endif
 };
 
 static int sof_acpi_probe(struct platform_device *pdev)
@@ -173,7 +173,7 @@ static int sof_acpi_probe(struct platform_device *pdev)
 #endif
 
 	/* get ops for platform */
-	ops = sof_get_ops(desc, acpi_mach_ops, ARRAY_SIZE(acpi_mach_ops));
+	ops = desc->ops;
 	if (!ops) {
 		dev_err(dev, "error: no matching ACPI descriptor ops\n");
 		return -ENODEV;
@@ -206,13 +206,6 @@ static int sof_acpi_probe(struct platform_device *pdev)
 	}
 #endif
 
-	/*
-	 * save ops in pdata.
-	 * TODO: the explicit cast removes the const attribute, we'll need
-	 * to add a dedicated ops field in the generic soc-acpi structure
-	 * to avoid such issues
-	 */
-	mach->pdata = (void *)ops;
 	sof_pdata->machine = mach;
 	sof_pdata->desc = desc;
 	priv->sof_pdata = sof_pdata;

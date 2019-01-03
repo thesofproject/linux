@@ -140,6 +140,12 @@ int snd_sof_parse_module_memcpy(struct snd_sof_dev *sdev,
 			"block %d type 0x%x size 0x%x ==>  offset 0x%x\n",
 			count, block->type, block->size, offset);
 
+		/* checking block->size to avoid unaligned access */
+		if (block->size % sizeof(u32)) {
+			dev_err(sdev->dev, "error: invalid block size 0x%x\n",
+				block->size);
+			return -EINVAL;
+		}
 		snd_sof_dsp_block_write(sdev, offset,
 					(void *)block + sizeof(*block),
 					block->size);
@@ -191,7 +197,7 @@ static int load_modules(struct snd_sof_dev *sdev, const struct firmware *fw)
 	size_t remaining;
 
 	header = (struct snd_sof_fw_header *)fw->data;
-	load_module = sdev->ops->load_module;
+	load_module = sof_ops(sdev)->load_module;
 	if (!load_module)
 		return -EINVAL;
 
@@ -271,8 +277,8 @@ int snd_sof_load_firmware(struct snd_sof_dev *sdev)
 {
 	dev_dbg(sdev->dev, "loading firmware\n");
 
-	if (sdev->ops->load_firmware)
-		return sdev->ops->load_firmware(sdev);
+	if (sof_ops(sdev)->load_firmware)
+		return sof_ops(sdev)->load_firmware(sdev);
 	return 0;
 }
 EXPORT_SYMBOL(snd_sof_load_firmware);

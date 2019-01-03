@@ -29,8 +29,11 @@ static struct sof_dev_desc bxt_desc = {
 	.resindex_imr_base	= -1,
 	.irqindex_host_ipc	= -1,
 	.resindex_dma_base	= -1,
+	.chip_info = &apl_chip_info,
 	.nocodec_fw_filename = "intel/sof-apl.ri",
-	.nocodec_tplg_filename = "intel/sof-apl-nocodec.tplg"
+	.nocodec_tplg_filename = "intel/sof-apl-nocodec.tplg",
+	.ops = &sof_apl_ops,
+	.arch_ops = &sof_xtensa_arch_ops
 };
 #endif
 
@@ -42,8 +45,11 @@ static struct sof_dev_desc glk_desc = {
 	.resindex_imr_base	= -1,
 	.irqindex_host_ipc	= -1,
 	.resindex_dma_base	= -1,
+	.chip_info = &apl_chip_info,
 	.nocodec_fw_filename = "intel/sof-glk.ri",
-	.nocodec_tplg_filename = "intel/sof-glk-nocodec.tplg"
+	.nocodec_tplg_filename = "intel/sof-glk-nocodec.tplg",
+	.ops = &sof_apl_ops,
+	.arch_ops = &sof_xtensa_arch_ops
 };
 #endif
 
@@ -66,8 +72,11 @@ static const struct sof_dev_desc tng_desc = {
 	.resindex_imr_base	= 0,
 	.irqindex_host_ipc	= -1,
 	.resindex_dma_base	= -1,
+	.chip_info = &tng_chip_info,
 	.nocodec_fw_filename = "intel/sof-byt.ri",
-	.nocodec_tplg_filename = "intel/sof-byt.tplg"
+	.nocodec_tplg_filename = "intel/sof-byt.tplg",
+	.ops = &sof_tng_ops,
+	.arch_ops = &sof_xtensa_arch_ops
 };
 #endif
 
@@ -79,34 +88,11 @@ static const struct sof_dev_desc cnl_desc = {
 	.resindex_imr_base	= -1,
 	.irqindex_host_ipc	= -1,
 	.resindex_dma_base	= -1,
+	.chip_info = &cnl_chip_info,
 	.nocodec_fw_filename = "intel/sof-cnl.ri",
-	.nocodec_tplg_filename = "intel/sof-cnl.tplg"
-};
-#endif
-
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_SKYLAKE)
-static struct sof_dev_desc skl_desc = {
-	.machines		= snd_soc_acpi_intel_skl_machines,
-	.resindex_lpe_base	= 0,
-	.resindex_pcicfg_base	= -1,
-	.resindex_imr_base	= -1,
-	.irqindex_host_ipc	= -1,
-	.resindex_dma_base	= -1,
-	.nocodec_fw_filename = "intel/sof-skl.ri",
-	.nocodec_tplg_filename = "intel/sof-skl-nocodec.tplg"
-};
-#endif
-
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_KABYLAKE)
-static struct sof_dev_desc kbl_desc = {
-	.machines		= snd_soc_acpi_intel_kbl_machines,
-	.resindex_lpe_base	= 0,
-	.resindex_pcicfg_base	= -1,
-	.resindex_imr_base	= -1,
-	.irqindex_host_ipc	= -1,
-	.resindex_dma_base	= -1,
-	.nocodec_fw_filename = "intel/sof-kbl.ri",
-	.nocodec_tplg_filename = "intel/sof-kbl-nocodec.tplg"
+	.nocodec_tplg_filename = "intel/sof-cnl.tplg",
+	.ops = &sof_cnl_ops,
+	.arch_ops = &sof_xtensa_arch_ops
 };
 #endif
 
@@ -118,8 +104,43 @@ static const struct sof_dev_desc icl_desc = {
 	.resindex_imr_base      = -1,
 	.irqindex_host_ipc      = -1,
 	.resindex_dma_base      = -1,
+	.chip_info = &cnl_chip_info,
 	.nocodec_fw_filename = "intel/sof-icl.ri",
-	.nocodec_tplg_filename = "intel/sof-icl-nocodec.tplg"
+	.nocodec_tplg_filename = "intel/sof-icl-nocodec.tplg",
+	.ops = &sof_cnl_ops,
+	.arch_ops = &sof_xtensa_arch_ops
+};
+#endif
+
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_SKYLAKE)
+static struct sof_dev_desc skl_desc = {
+	.machines		= snd_soc_acpi_intel_skl_machines,
+	.resindex_lpe_base	= 0,
+	.resindex_pcicfg_base	= -1,
+	.resindex_imr_base	= -1,
+	.irqindex_host_ipc	= -1,
+	.resindex_dma_base	= -1,
+	.chip_info = &skl_chip_info,
+	.nocodec_fw_filename = "intel/sof-skl.ri",
+	.nocodec_tplg_filename = "intel/sof-skl-nocodec.tplg",
+	.ops = &sof_skl_ops,
+	.arch_ops = &sof_xtensa_arch_ops
+};
+#endif
+
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_KABYLAKE)
+static struct sof_dev_desc kbl_desc = {
+	.machines		= snd_soc_acpi_intel_kbl_machines,
+	.resindex_lpe_base	= 0,
+	.resindex_pcicfg_base	= -1,
+	.resindex_imr_base	= -1,
+	.irqindex_host_ipc	= -1,
+	.resindex_dma_base	= -1,
+	.chip_info = &skl_chip_info,
+	.nocodec_fw_filename = "intel/sof-kbl.ri",
+	.nocodec_tplg_filename = "intel/sof-kbl-nocodec.tplg",
+	.ops = &sof_skl_ops,
+	.arch_ops = &sof_xtensa_arch_ops
 };
 #endif
 
@@ -127,33 +148,8 @@ static const struct dev_pm_ops sof_pci_pm = {
 	SET_SYSTEM_SLEEP_PM_OPS(snd_sof_suspend, snd_sof_resume)
 	SET_RUNTIME_PM_OPS(snd_sof_runtime_suspend, snd_sof_runtime_resume,
 			   NULL)
-	.suspend_late = snd_sof_suspend_late,
 	.prepare = snd_sof_prepare,
 
-};
-
-static const struct sof_ops_table pci_mach_ops[] = {
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_EDISON)
-	{&tng_desc, &sof_tng_ops},
-#endif
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_APOLLOLAKE)
-	{&bxt_desc, &sof_apl_ops},
-#endif
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_GEMINILAKE)
-	{&glk_desc, &sof_apl_ops},
-#endif
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_CANNONLAKE)
-	{&cnl_desc, &sof_cnl_ops},
-#endif
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_SKYLAKE)
-	{&skl_desc, &sof_skl_ops},
-#endif
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_KABYLAKE)
-	{&kbl_desc, &sof_skl_ops},
-#endif
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_ICELAKE)
-	{&icl_desc, &sof_cnl_ops},
-#endif
 };
 
 static int sof_pci_probe(struct pci_dev *pci,
@@ -171,7 +167,7 @@ static int sof_pci_probe(struct pci_dev *pci,
 	dev_dbg(&pci->dev, "PCI DSP detected");
 
 	/* get ops for platform */
-	ops = sof_get_ops(desc, pci_mach_ops, ARRAY_SIZE(pci_mach_ops));
+	ops = desc->ops;
 	if (!ops) {
 		dev_err(dev, "error: no matching PCI descriptor ops\n");
 		return -ENODEV;
@@ -244,14 +240,6 @@ static int sof_pci_probe(struct pci_dev *pci,
 		ret = -ENODEV;
 		goto release_regions;
 	}
-
-	/*
-	 * save ops in pdata.
-	 * TODO: the explicit cast removes the const attribute, we'll need
-	 * to add a dedicated ops field in the generic soc-acpi structure
-	 * to avoid such issues
-	 */
-	mach->pdata = (void *)ops;
 
 	sof_pdata->id = pci_id->device;
 	sof_pdata->name = pci_name(pci);

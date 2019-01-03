@@ -174,115 +174,6 @@ void hda_dsp_dump(struct snd_sof_dev *sdev, u32 flags)
 	}
 }
 
-/*
- * Supported devices.
- */
-
-static const struct sof_intel_dsp_desc chip_info[] = {
-{
-	/* Skylake */
-	.id = 0x9d70,
-	.cores_num = 2,
-	.cores_mask = HDA_DSP_CORE_MASK(0) | HDA_DSP_CORE_MASK(1),
-	.ipc_req = HDA_DSP_REG_HIPCI,
-	.ipc_req_mask = HDA_DSP_REG_HIPCI_BUSY,
-	.ipc_ack = HDA_DSP_REG_HIPCIE,
-	.ipc_ack_mask = HDA_DSP_REG_HIPCIE_DONE,
-	.ipc_ctl = HDA_DSP_REG_HIPCCTL,
-	.ops = &sof_skl_ops,
-},
-{
-	/* Kabylake */
-	.id = 0x9d71,
-	.cores_num = 2,
-	.cores_mask = HDA_DSP_CORE_MASK(0) | HDA_DSP_CORE_MASK(1),
-	.ipc_req = HDA_DSP_REG_HIPCI,
-	.ipc_req_mask = HDA_DSP_REG_HIPCI_BUSY,
-	.ipc_ack = HDA_DSP_REG_HIPCIE,
-	.ipc_ack_mask = HDA_DSP_REG_HIPCIE_DONE,
-	.ipc_ctl = HDA_DSP_REG_HIPCCTL,
-	.ops = &sof_skl_ops,
-},
-{
-	/* Apollolake - BXT-P */
-	.id = 0x5a98,
-	.cores_num = 2,
-	.cores_mask = HDA_DSP_CORE_MASK(0) | HDA_DSP_CORE_MASK(1),
-	.ipc_req = HDA_DSP_REG_HIPCI,
-	.ipc_req_mask = HDA_DSP_REG_HIPCI_BUSY,
-	.ipc_ack = HDA_DSP_REG_HIPCIE,
-	.ipc_ack_mask = HDA_DSP_REG_HIPCIE_DONE,
-	.ipc_ctl = HDA_DSP_REG_HIPCCTL,
-	.ops = &sof_apl_ops,
-},
-{
-	/* BXT-M */
-	.id = 0x1a98,
-	.cores_num = 2,
-	.cores_mask = HDA_DSP_CORE_MASK(0) | HDA_DSP_CORE_MASK(1),
-	.ipc_req = HDA_DSP_REG_HIPCI,
-	.ipc_req_mask = HDA_DSP_REG_HIPCI_BUSY,
-	.ipc_ack = HDA_DSP_REG_HIPCIE,
-	.ipc_ack_mask = HDA_DSP_REG_HIPCIE_DONE,
-	.ipc_ctl = HDA_DSP_REG_HIPCCTL,
-	.ops = &sof_apl_ops,
-},
-{
-	/* GeminiLake */
-	.id = 0x3198,
-	.cores_num = 2,
-	.cores_mask = HDA_DSP_CORE_MASK(0) | HDA_DSP_CORE_MASK(1),
-	.ipc_req = HDA_DSP_REG_HIPCI,
-	.ipc_req_mask = HDA_DSP_REG_HIPCI_BUSY,
-	.ipc_ack = HDA_DSP_REG_HIPCIE,
-	.ipc_ack_mask = HDA_DSP_REG_HIPCIE_DONE,
-	.ipc_ctl = HDA_DSP_REG_HIPCCTL,
-	.ops = &sof_apl_ops,
-},
-{
-	/* Cannonlake */
-	.id = 0x9dc8,
-	.cores_num = 4,
-	.cores_mask = HDA_DSP_CORE_MASK(0) |
-				HDA_DSP_CORE_MASK(1) |
-				HDA_DSP_CORE_MASK(2) |
-				HDA_DSP_CORE_MASK(3),
-	.ipc_req = CNL_DSP_REG_HIPCIDR,
-	.ipc_req_mask = CNL_DSP_REG_HIPCIDR_BUSY,
-	.ipc_ack = CNL_DSP_REG_HIPCIDA,
-	.ipc_ack_mask = CNL_DSP_REG_HIPCIDA_DONE,
-	.ipc_ctl = CNL_DSP_REG_HIPCCTL,
-	.ops = &sof_cnl_ops,
-},
-{
-	/* Icelake */
-	.id = 0x34c8,
-	.cores_num = 4,
-	.cores_mask = HDA_DSP_CORE_MASK(0) |
-				HDA_DSP_CORE_MASK(1) |
-				HDA_DSP_CORE_MASK(2) |
-				HDA_DSP_CORE_MASK(3),
-	.ipc_req = CNL_DSP_REG_HIPCIDR,
-	.ipc_req_mask = CNL_DSP_REG_HIPCIDR_BUSY,
-	.ipc_ack = CNL_DSP_REG_HIPCIDA,
-	.ipc_ack_mask = CNL_DSP_REG_HIPCIDA_DONE,
-	.ipc_ctl = CNL_DSP_REG_HIPCCTL,
-	.ops = &sof_cnl_ops,
-},
-};
-
-static const struct sof_intel_dsp_desc *get_chip_info(int pci_id)
-{
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(chip_info); i++) {
-		if (chip_info[i].id == pci_id)
-			return &chip_info[i];
-	}
-
-	return NULL;
-}
-
 static int hda_init(struct snd_sof_dev *sdev)
 {
 	struct hda_bus *hbus;
@@ -405,6 +296,17 @@ static int hda_init_caps(struct snd_sof_dev *sdev)
 
 #endif
 
+static const struct sof_intel_dsp_desc
+	*get_chip_info(struct snd_sof_pdata *pdata)
+{
+	const struct sof_dev_desc *desc = pdata->desc;
+	const struct sof_intel_dsp_desc *chip_info;
+
+	chip_info = (struct sof_intel_dsp_desc *)desc->chip_info;
+
+	return chip_info;
+}
+
 int hda_dsp_probe(struct snd_sof_dev *sdev)
 {
 	struct pci_dev *pci = sdev->pci;
@@ -430,10 +332,7 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	}
 	dev_info(sdev->dev, "DSP detected with PCI class/subclass/prog-if 0x%06x\n", pci->class);
 
-	/* set DSP arch ops */
-	sdev->arch_ops = &sof_xtensa_arch_ops;
-
-	chip = get_chip_info(pci->device);
+	chip = get_chip_info(sdev->pdata);
 	if (!chip) {
 		dev_err(sdev->dev, "error: no such device supported, chip id:%x\n",
 			pci->device);
@@ -444,7 +343,7 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	hdev = devm_kzalloc(&pci->dev, sizeof(*hdev), GFP_KERNEL);
 	if (!hdev)
 		return -ENOMEM;
-	sdev->hda = hdev;
+	sdev->pdata->hw_pdata = hdev;
 	hdev->desc = chip;
 
 	hdev->dmic_dev = platform_device_register_data(&pci->dev, "dmic-codec",
@@ -462,7 +361,7 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_FORCE_IPC_POSITION)
 	hdev->no_ipc_position = 0;
 #else
-	hdev->no_ipc_position = sdev->ops->pcm_pointer ? 1 : 0;
+	hdev->no_ipc_position = sof_ops(sdev)->pcm_pointer ? 1 : 0;
 #endif
 
 	/* set up HDA base */
@@ -517,30 +416,30 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 		 * in IO-APIC mode, hda->irq and ipc_irq are using the same
 		 * irq number of pci->irq
 		 */
-		sdev->hda->irq = pci->irq;
+		hdev->irq = pci->irq;
 		sdev->ipc_irq = pci->irq;
 		sdev->msi_enabled = 0;
 	} else {
 		dev_info(sdev->dev, "use msi interrupt mode\n");
-		sdev->hda->irq = pci_irq_vector(pci, 0);
+		hdev->irq = pci_irq_vector(pci, 0);
 		/* ipc irq number is the same of hda irq */
-		sdev->ipc_irq = sdev->hda->irq;
+		sdev->ipc_irq = hdev->irq;
 		sdev->msi_enabled = 1;
 	}
 
-	dev_dbg(sdev->dev, "using HDA IRQ %d\n", sdev->hda->irq);
-	ret = request_threaded_irq(sdev->hda->irq, hda_dsp_stream_interrupt,
+	dev_dbg(sdev->dev, "using HDA IRQ %d\n", hdev->irq);
+	ret = request_threaded_irq(hdev->irq, hda_dsp_stream_interrupt,
 				   hda_dsp_stream_threaded_handler,
 				   IRQF_SHARED, "AudioHDA", bus);
 	if (ret < 0) {
 		dev_err(sdev->dev, "error: failed to register HDA IRQ %d\n",
-			sdev->hda->irq);
+			hdev->irq);
 		goto free_irq_vector;
 	}
 
 	dev_dbg(sdev->dev, "using IPC IRQ %d\n", sdev->ipc_irq);
 	ret = request_threaded_irq(sdev->ipc_irq, hda_dsp_ipc_irq_handler,
-				   chip->ops->irq_thread, IRQF_SHARED,
+				   sof_ops(sdev)->irq_thread, IRQF_SHARED,
 				   "AudioDSP", sdev);
 	if (ret < 0) {
 		dev_err(sdev->dev, "error: failed to register IPC IRQ %d\n",
@@ -624,7 +523,7 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 free_ipc_irq:
 	free_irq(sdev->ipc_irq, sdev);
 free_hda_irq:
-	free_irq(sdev->hda->irq, bus);
+	free_irq(hdev->irq, bus);
 free_irq_vector:
 	if (sdev->msi_enabled)
 		pci_free_irq_vectors(pci);
@@ -640,20 +539,22 @@ err:
 
 int hda_dsp_remove(struct snd_sof_dev *sdev)
 {
+	struct sof_intel_hda_dev *hda =
+		(struct sof_intel_hda_dev *)sdev->pdata->hw_pdata;
 	struct hdac_bus *bus = sof_to_bus(sdev);
 	struct pci_dev *pci = sdev->pci;
 	const struct sof_intel_dsp_desc *chip = NULL;
 
-	if (sdev->hda)
-		chip = sdev->hda->desc;
+	if (hda)
+		chip = hda->desc;
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
 	/* codec removal, invoke bus_device_remove */
 	snd_hdac_ext_bus_device_remove(bus);
 #endif
 
-	if (sdev->hda && (!IS_ERR_OR_NULL(sdev->hda->dmic_dev)))
-		platform_device_unregister(sdev->hda->dmic_dev);
+	if (hda && (!IS_ERR_OR_NULL(hda->dmic_dev)))
+		platform_device_unregister(hda->dmic_dev);
 
 	/* disable DSP IRQ */
 	snd_sof_dsp_update_bits(sdev, HDA_DSP_PP_BAR, SOF_HDA_REG_PP_PPCTL,
@@ -672,7 +573,7 @@ int hda_dsp_remove(struct snd_sof_dev *sdev)
 				SOF_HDA_PPCTL_GPROCEN, 0);
 
 	free_irq(sdev->ipc_irq, sdev);
-	free_irq(sdev->hda->irq, bus);
+	free_irq(hda->irq, bus);
 	if (sdev->msi_enabled)
 		pci_free_irq_vectors(pci);
 
