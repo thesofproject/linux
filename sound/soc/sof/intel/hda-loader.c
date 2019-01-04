@@ -164,7 +164,7 @@ step5:
 	ret = snd_sof_dsp_register_poll(sdev, HDA_DSP_BAR,
 					HDA_DSP_SRAM_REG_ROM_STATUS,
 					HDA_DSP_ROM_STS_MASK, HDA_DSP_ROM_INIT,
-					HDA_DSP_INIT_TIMEOUT);
+					HDA_ROM_INIT_TIMEOUT);
 	if (ret >= 0)
 		goto out;
 
@@ -314,44 +314,49 @@ int hda_dsp_cl_boot_firmware(struct snd_sof_dev *sdev)
 	init_waitqueue_head(&sdev->boot_wait);
 	sdev->boot_complete = false;
 
-	/* try attempting fw boot a few times before giving up */
+	/* try attempting ROM init a few times before giving up */
 	for (i = 0; i < HDA_FW_BOOT_ATTEMPTS; i++) {
 		tag = cl_dsp_init(sdev, stripped_firmware.data,
 				  stripped_firmware.size);
 
-		if (tag <= 0) {
-			dev_err(sdev->dev, "error: Error code=0x%x: FW status=0x%x\n",
-				snd_sof_dsp_read(sdev, HDA_DSP_BAR,
-						 HDA_DSP_SRAM_REG_ROM_ERROR),
-				snd_sof_dsp_read(sdev, HDA_DSP_BAR,
-						 HDA_DSP_SRAM_REG_ROM_STATUS));
-			dev_err(sdev->dev, "error: iteration %d of Core En/ROM load fail:%d\n",
-				i, tag);
-			ret = tag;
-			continue;
-		}
+		/* no retry anymore at success */
+		if (tag > 0)
+			break;
 
-		/* at this point DSP ROM has been initialized and
-		 * should be ready for code loading and firmware boot
-		 */
-		ret = cl_copy_fw(sdev, tag);
-		if (ret < 0) {
-			dev_err(sdev->dev, "error: iteration %d of load fw failed err: %d\n",
-				i, ret);
-			continue;
-		}
+		dev_err(sdev->dev, "error: Error code=0x%x: FW status=0x%x\n",
+			snd_sof_dsp_read(sdev, HDA_DSP_BAR,
+					 HDA_DSP_SRAM_REG_ROM_ERROR),
+			snd_sof_dsp_read(sdev, HDA_DSP_BAR,
+					 HDA_DSP_SRAM_REG_ROM_STATUS));
+		dev_err(sdev->dev, "error: iteration %d of Core En/ROM load fail:%d\n",
+			i, tag);
+		ret = tag;
+	}
 
-		dev_dbg(sdev->dev, "Firmware download successful, booting...\n");
+	if (ret < 0) {
+		dev_err(sdev->dev, "error: load fw failed after %d attempts with err: %d\n",
+			HDA_FW_BOOT_ATTEMPTS, ret);
+
+		hda_dsp_dump(sdev, SOF_DBG_REGS | SOF_DBG_PCI | SOF_DBG_MBOX);
+
+		/* disable DSP */
+		snd_sof_dsp_update_bits(sdev, HDA_DSP_PP_BAR,
+					SOF_HDA_REG_PP_PPCTL,
+					SOF_HDA_PPCTL_GPROCEN, 0);
 		return ret;
 	}
 
-	hda_dsp_dump(sdev, SOF_DBG_REGS | SOF_DBG_PCI | SOF_DBG_MBOX);
+	/* at this point DSP ROM has been initialized and
+	 * should be ready for code loading and firmware boot
+	 */
+	ret = cl_copy_fw(sdev, tag);
+	if (ret < 0) {
+		dev_err(sdev->dev, "error: iteration %d of load fw failed err: %d\n",
+			i, ret);
+		continue;
+	}
 
-	/* disable DSP */
-	snd_sof_dsp_update_bits(sdev, HDA_DSP_PP_BAR, SOF_HDA_REG_PP_PPCTL,
-				SOF_HDA_PPCTL_GPROCEN, 0);
-	dev_err(sdev->dev, "error: load fw failed after %d attempts with err: %d\n",
-		HDA_FW_BOOT_ATTEMPTS, ret);
+	dev_dbg(sdev->dev, "Firmware download successful, booting...\n");
 	return ret;
 }
 
