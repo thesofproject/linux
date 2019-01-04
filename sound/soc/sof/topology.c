@@ -2377,17 +2377,14 @@ static int sof_link_unload(struct snd_soc_component *scomp,
 	struct snd_sof_dai *sof_dai = NULL;
 	int ret = 0;
 
-	list_for_each_entry(sof_dai, &sdev->dai_list, list) {
-		if (!sof_dai->name)
-			continue;
+	list_for_each_entry(sof_dai, &sdev->dai_list, list)
+		if (sof_dai->name && !strcmp(link->name, sof_dai->name))
+			break;
 
-		if (strcmp(link->name, sof_dai->name) == 0)
-			goto found;
+	if (list_is_last(sof_dai, &sdev->dai_list)) {
+		dev_err(sdev->dev, "error: failed to find dai %s", link->name);
+		return -EINVAL;
 	}
-
-	dev_err(sdev->dev, "error: failed to find dai %s", link->name);
-	return -EINVAL;
-found:
 
 	switch (sof_dai->dai_config->type) {
 	case SOF_DAI_INTEL_SSP:

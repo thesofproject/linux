@@ -121,14 +121,14 @@ static int hsw_set_dsp_D0(struct snd_sof_dev *sdev)
 		reg = readl(sdev->bar[HSW_PCI_BAR] + PCI_PMCS)
 			& PCI_PMCS_PS_MASK;
 		if (reg == 0)
-			goto finish;
+			break;
 
 		msleep(20);
 	}
 
-	return -ENODEV;
+	if (tries < 0)
+		return -ENODEV;
 
-finish:
 	/*
 	 * select SSP1 19.2MHz base clock, SSP clock 0,
 	 * turn off Low Power Clock

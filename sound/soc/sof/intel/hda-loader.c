@@ -128,16 +128,18 @@ static int cl_dsp_init(struct snd_sof_dev *sdev, const void *fwdata,
 						chip->ipc_ack,
 						chip->ipc_ack_mask,
 						chip->ipc_ack_mask);
-			goto step5;
+			break;
 		}
 		mdelay(1);
 	}
 
-	dev_err(sdev->dev, "error: waiting for HIPCIE done, reg: 0x%x\n",
-		hipcie);
-	goto err;
+	if (!i) {
+		dev_err(sdev->dev,
+			"error: waiting for HIPCIE done, reg: 0x%x\n",
+			hipcie);
+		goto err;
+	}
 
-step5:
 	/* step 5: power down corex */
 	ret = hda_dsp_core_power_down(sdev,
 				  chip->cores_mask & ~(HDA_DSP_CORE_MASK(0)));
@@ -165,19 +167,18 @@ step5:
 					HDA_DSP_SRAM_REG_ROM_STATUS,
 					HDA_DSP_ROM_STS_MASK, HDA_DSP_ROM_INIT,
 					HDA_DSP_INIT_TIMEOUT);
-	if (ret >= 0)
-		goto out;
+	if (ret < 0) {
+		ret = -EIO;
+		goto err;
+	}
 
-	ret = -EIO;
+	return tag;
 
 err:
 	hda_dsp_dump(sdev, SOF_DBG_REGS | SOF_DBG_PCI | SOF_DBG_MBOX);
 	hda_dsp_core_reset_power_down(sdev, HDA_DSP_CORE_MASK(0) |
 				      HDA_DSP_CORE_MASK(1));
 	return ret;
-
-out:
-	return tag;
 }
 
 static int cl_trigger(struct snd_sof_dev *sdev,

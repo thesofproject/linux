@@ -161,13 +161,15 @@ int snd_sof_get_status(struct snd_sof_dev *sdev, u32 panic_code,
 			dev_err(sdev->dev, "error: %s\n", panic_msg[i].msg);
 			dev_err(sdev->dev, "error: trace point %8.8x\n",
 				tracep_code);
-			goto out;
+			break;
 		}
 	}
 
-	/* unknown error */
-	dev_err(sdev->dev, "error: unknown reason %8.8x\n", panic_code);
-	dev_err(sdev->dev, "error: trace point %8.8x\n", tracep_code);
+	if (i == ARRAY_SIZE(panic_msg)) {
+		/* unknown error */
+		dev_err(sdev->dev, "error: unknown reason %8.8x\n", panic_code);
+		dev_err(sdev->dev, "error: trace point %8.8x\n", tracep_code);
+	}
 
 out:
 	dev_err(sdev->dev, "error: panic happen at %s:%d\n",

@@ -142,13 +142,11 @@ int snd_sof_bytes_get(struct snd_kcontrol *kcontrol,
 		dev_err_ratelimited(sdev->dev, "error: DSP sent %zu bytes max is %d\n",
 				    size, be->max);
 		ret = -EINVAL;
-		goto out;
+	} else {
+		/* copy back to kcontrol */
+		memcpy(ucontrol->value.bytes.data, data, size);
 	}
 
-	/* copy back to kcontrol */
-	memcpy(ucontrol->value.bytes.data, data, size);
-
-out:
 	pm_runtime_mark_last_busy(sdev->dev);
 	err = pm_runtime_put_autosuspend(sdev->dev);
 	if (err < 0)
@@ -335,20 +333,16 @@ int snd_sof_bytes_ext_get(struct snd_kcontrol *kcontrol,
 		dev_err_ratelimited(sdev->dev, "error: user data size %d exceeds max size %d.\n",
 				    data_size, max_size);
 		ret = -EINVAL;
-		goto out;
+	} else {
+		header.numid = scontrol->cmd;
+		header.length = data_size;
+		if (copy_to_user(tlvd, &header,
+				 sizeof(const struct snd_ctl_tlv)))
+			ret = -EFAULT;
+		else if (copy_to_user(tlvd->tlv, cdata->data, data_size))
+			return -EFAULT;
 	}
 
-	header.numid = scontrol->cmd;
-	header.length = data_size;
-	if (copy_to_user(tlvd, &header, sizeof(const struct snd_ctl_tlv))) {
-		ret = -EFAULT;
-		goto out;
-	}
-
-	if (copy_to_user(tlvd->tlv, cdata->data, data_size))
-		return -EFAULT;
-
-out:
 	pm_runtime_mark_last_busy(sdev->dev);
 	err = pm_runtime_put_autosuspend(sdev->dev);
 	if (err < 0)

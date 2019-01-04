@@ -539,28 +539,29 @@ static int byt_pci_probe(struct snd_sof_dev *sdev)
 	dev_dbg(sdev->dev, "LPE VADDR %p\n", sdev->bar[BYT_DSP_BAR]);
 
 	/* IMR base - optional */
-	if (desc->resindex_imr_base == -1)
-		goto irq;
+	if (desc->resindex_imr_base != -1) {
+		base = pci_resource_start(pci, desc->resindex_imr_base);
+		size = pci_resource_len(pci, desc->resindex_imr_base);
 
-	base = pci_resource_start(pci, desc->resindex_imr_base);
-	size = pci_resource_len(pci, desc->resindex_imr_base);
-
-	/* some BIOSes don't map IMR */
-	if (base == 0x55aa55aa || base == 0x0) {
-		dev_info(sdev->dev, "IMR not set by BIOS. Ignoring\n");
-		goto irq;
+		/* some BIOSes don't map IMR */
+		if (base == 0x55aa55aa || base == 0x0) {
+			dev_info(sdev->dev, "IMR not set by BIOS. Ignoring\n");
+		} else {
+			dev_dbg(sdev->dev, "IMR base at 0x%x size 0x%x", base,
+				size);
+			sdev->bar[BYT_IMR_BAR] = devm_ioremap(sdev->dev, base,
+							      size);
+			if (!sdev->bar[BYT_IMR_BAR]) {
+				dev_err(sdev->dev,
+					"error: failed to ioremap IMR base 0x%x size 0x%x\n",
+					base, size);
+				return -ENODEV;
+			}
+			dev_dbg(sdev->dev, "IMR VADDR %p\n",
+				sdev->bar[BYT_IMR_BAR]);
+		}
 	}
 
-	dev_dbg(sdev->dev, "IMR base at 0x%x size 0x%x", base, size);
-	sdev->bar[BYT_IMR_BAR] = devm_ioremap(sdev->dev, base, size);
-	if (!sdev->bar[BYT_IMR_BAR]) {
-		dev_err(sdev->dev, "error: failed to ioremap IMR base 0x%x size 0x%x\n",
-			base, size);
-		return -ENODEV;
-	}
-	dev_dbg(sdev->dev, "IMR VADDR %p\n", sdev->bar[BYT_IMR_BAR]);
-
-irq:
 	/* register our IRQ */
 	sdev->ipc_irq = pci->irq;
 	dev_dbg(sdev->dev, "using IRQ %d\n", sdev->ipc_irq);
@@ -689,36 +690,38 @@ static int byt_acpi_probe(struct snd_sof_dev *sdev)
 	sdev->mailbox_bar = BYT_DSP_BAR;
 
 	/* IMR base - optional */
-	if (desc->resindex_imr_base == -1)
-		goto irq;
+	if (desc->resindex_imr_base != -1) {
+		mmio = platform_get_resource(pdev, IORESOURCE_MEM,
+					     desc->resindex_imr_base);
+		if (mmio) {
+			base = mmio->start;
+			size = resource_size(mmio);
+		} else {
+			dev_err(sdev->dev,
+				"error: failed to get IMR base at idx %d\n",
+				desc->resindex_imr_base);
+			return -ENODEV;
+		}
 
-	mmio = platform_get_resource(pdev, IORESOURCE_MEM,
-				     desc->resindex_imr_base);
-	if (mmio) {
-		base = mmio->start;
-		size = resource_size(mmio);
-	} else {
-		dev_err(sdev->dev, "error: failed to get IMR base at idx %d\n",
-			desc->resindex_imr_base);
-		return -ENODEV;
+		/* some BIOSes don't map IMR */
+		if (base == 0x55aa55aa || base == 0x0) {
+			dev_info(sdev->dev, "IMR not set by BIOS. Ignoring\n");
+		} else {
+			dev_dbg(sdev->dev, "IMR base at 0x%x size 0x%x", base,
+				size);
+			sdev->bar[BYT_IMR_BAR] = devm_ioremap(sdev->dev, base,
+							      size);
+			if (!sdev->bar[BYT_IMR_BAR]) {
+				dev_err(sdev->dev,
+					"error: failed to ioremap IMR base 0x%x size 0x%x\n",
+					base, size);
+				return -ENODEV;
+			}
+			dev_dbg(sdev->dev, "IMR VADDR %p\n",
+				sdev->bar[BYT_IMR_BAR]);
+		}
 	}
 
-	/* some BIOSes don't map IMR */
-	if (base == 0x55aa55aa || base == 0x0) {
-		dev_info(sdev->dev, "IMR not set by BIOS. Ignoring\n");
-		goto irq;
-	}
-
-	dev_dbg(sdev->dev, "IMR base at 0x%x size 0x%x", base, size);
-	sdev->bar[BYT_IMR_BAR] = devm_ioremap(sdev->dev, base, size);
-	if (!sdev->bar[BYT_IMR_BAR]) {
-		dev_err(sdev->dev, "error: failed to ioremap IMR base 0x%x size 0x%x\n",
-			base, size);
-		return -ENODEV;
-	}
-	dev_dbg(sdev->dev, "IMR VADDR %p\n", sdev->bar[BYT_IMR_BAR]);
-
-irq:
 	/* register our IRQ */
 	sdev->ipc_irq = platform_get_irq(pdev, desc->irqindex_host_ipc);
 	if (sdev->ipc_irq < 0) {

@@ -493,36 +493,39 @@ static int sof_pcm_new(struct snd_soc_pcm_runtime *rtd)
 	dev_dbg(sdev->dev, "creating new PCM %s\n", spcm->pcm.pcm_name);
 
 	/* do we need to allocate playback PCM DMA pages */
-	if (!spcm->pcm.playback)
-		goto capture;
+	if (spcm->pcm.playback) {
+		caps = &spcm->pcm.caps[stream];
 
-	caps = &spcm->pcm.caps[stream];
+		/* pre-allocate playback audio buffer pages */
+		dev_dbg(sdev->dev,
+			"spcm: allocate %s playback DMA buffer size 0x%x max 0x%x\n",
+			caps->name, caps->buffer_size_min,
+			caps->buffer_size_max);
 
-	/* pre-allocate playback audio buffer pages */
-	dev_dbg(sdev->dev, "spcm: allocate %s playback DMA buffer size 0x%x max 0x%x\n",
-		caps->name, caps->buffer_size_min, caps->buffer_size_max);
+		ret = snd_pcm_lib_preallocate_pages(pcm->streams[stream].substream,
+					SNDRV_DMA_TYPE_DEV_SG, sdev->parent,
+					le32_to_cpu(caps->buffer_size_min),
+					le32_to_cpu(caps->buffer_size_max));
+		if (ret) {
+			dev_err(sdev->dev,
+				"error: can't alloc DMA buffer size 0x%x/0x%x for %s %d\n",
+				caps->buffer_size_min, caps->buffer_size_max,
+				caps->name, ret);
+			return ret;
+		}
 
-	ret = snd_pcm_lib_preallocate_pages(pcm->streams[stream].substream,
-					    SNDRV_DMA_TYPE_DEV_SG, sdev->parent,
-					    le32_to_cpu(caps->buffer_size_min),
-					    le32_to_cpu(caps->buffer_size_max));
-	if (ret) {
-		dev_err(sdev->dev, "error: can't alloc DMA buffer size 0x%x/0x%x for %s %d\n",
-			caps->buffer_size_min, caps->buffer_size_max,
-			caps->name, ret);
-		return ret;
+		/* allocate playback page table buffer */
+		ret = snd_dma_alloc_pages(SNDRV_DMA_TYPE_DEV, sdev->parent,
+					  PAGE_SIZE,
+					  &spcm->stream[stream].page_table);
+		if (ret < 0) {
+			dev_err(sdev->dev,
+				"error: can't alloc page table for %s %d\n",
+				caps->name, ret);
+			goto free_playback_dma_buffer;
+		}
 	}
 
-	/* allocate playback page table buffer */
-	ret = snd_dma_alloc_pages(SNDRV_DMA_TYPE_DEV, sdev->parent,
-				  PAGE_SIZE, &spcm->stream[stream].page_table);
-	if (ret < 0) {
-		dev_err(sdev->dev, "error: can't alloc page table for %s %d\n",
-			caps->name, ret);
-		goto free_playback_dma_buffer;
-	}
-
-capture:
 	stream = SNDRV_PCM_STREAM_CAPTURE;
 
 	/* do we need to allocate capture PCM DMA pages */
@@ -705,7 +708,7 @@ static int sof_pcm_probe(struct snd_soc_component *component)
 	if (ret < 0) {
 		dev_err(sdev->dev, "error: failed to load DSP topology %d\n",
 			ret);
-		goto err;
+		return ret;
 	}
 
 	/* enable runtime PM with auto suspend */
@@ -719,7 +722,6 @@ static int sof_pcm_probe(struct snd_soc_component *component)
 	if (err < 0)
 		dev_err(sdev->dev, "error: failed to enter PM idle %d\n", err);
 
-err:
 	return ret;
 }
 
