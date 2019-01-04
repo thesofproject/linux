@@ -69,6 +69,20 @@ struct snd_soc_acpi_mach_params {
 };
 
 /**
+ * snd_soc_acpi_mach_params: interface for machine driver configuration
+ *
+ * @acpi_ipc_irq_index: used for BYT-CR detection
+ * @platform: string used for HDaudio codec support
+ * @codec_mask: used for HDAudio support
+ */
+struct snd_soc_acpi_mach_params {
+	u32 acpi_ipc_irq_index;
+	const char *platform;
+	u32 codec_mask;
+	u32 dmic_num;
+};
+
+/**
  * snd_soc_acpi_mach: ACPI-based machine descriptor. Most of the fields are
  * related to the hardware, except for the firmware and topology file names.
  * A platform supported by legacy and Sound Open Firmware (SOF) would expose
