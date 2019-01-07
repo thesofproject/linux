@@ -232,6 +232,9 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 	struct snd_sof_dev *sdev = dev_get_drvdata(&priv->pdev_pcm->dev);
 	int ret = 0;
 
+	if (!sdev)
+		return 0;
+
 	/* do nothing if dsp resume callbacks are not set */
 	if (!sof_ops(sdev)->resume || !sof_ops(sdev)->runtime_resume)
 		return 0;
@@ -301,6 +304,16 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 	struct sof_platform_priv *priv = dev_get_drvdata(dev);
 	struct snd_sof_dev *sdev = dev_get_drvdata(&priv->pdev_pcm->dev);
 	int ret = 0;
+
+	/*
+	 * If sdev is NULL, it meams the sof audio driver fails in
+	 * initialization. Let's return 0 to let suspend/resume
+	 * be successful. The audio system should already be powered down
+	 * if the probe step if initialization fails. The same with resume()
+	 * and prepare() callback.
+	 */
+	if (!sdev)
+		return 0;
 
 	/* do nothing if dsp suspend callback is not set */
 	if (!sof_ops(sdev)->suspend)
@@ -378,6 +391,9 @@ int snd_sof_prepare(struct device *dev)
 {
 	struct sof_platform_priv *priv = dev_get_drvdata(dev);
 	struct snd_sof_dev *sdev = dev_get_drvdata(&priv->pdev_pcm->dev);
+
+	if (!sdev)
+		return 0;
 
 	/*
 	 * PCI devices are brought back to full power before system suspend.
