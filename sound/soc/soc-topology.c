@@ -527,6 +527,7 @@ static void remove_dai(struct snd_soc_component *comp,
 	if (dobj->ops && dobj->ops->dai_unload)
 		dobj->ops->dai_unload(comp, dobj);
 
+	snd_soc_unregister_dai(comp, dai_drv);
 	kfree(dai_drv->name);
 	list_del(&dobj->list);
 	kfree(dai_drv);

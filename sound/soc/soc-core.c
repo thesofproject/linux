@@ -2875,6 +2875,29 @@ static inline char *fmt_multiple_name(struct device *dev,
 }
 
 /**
+ * snd_soc_unregister_dai - Unregister DAI from the ASoC core
+ *
+ * @component: The component for which the DAI should be unregistered
+ * @dai_drv: the dai driver for the DAI
+ */
+void snd_soc_unregister_dai(struct snd_soc_component *component,
+			    struct snd_soc_dai_driver *dai_drv)
+{
+	struct snd_soc_dai *dai, *_dai;
+
+	for_each_component_dais_safe(component, dai, _dai) {
+		if (dai->driver == dai_drv) {
+			dev_dbg(component->dev, "ASoC: Unregistered DAI '%s'\n",
+				dai->name);
+			list_del(&dai->list);
+			kfree(dai->name);
+			kfree(dai);
+			return;
+		}
+	}
+}
+
+/**
  * snd_soc_unregister_dai - Unregister DAIs from the ASoC core
  *
  * @component: The component for which the DAIs should be unregistered
