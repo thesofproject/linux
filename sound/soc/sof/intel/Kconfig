@@ -235,6 +235,7 @@ endif ## SND_SOC_SOF_HDA_COMMON
 config SND_SOC_SOF_HDA_LINK_BASELINE
 	tristate
 	select SND_SOC_SOF_HDA if SND_SOC_SOF_HDA_LINK
+	select SND_SOC_SOF_PROBE_WORK_QUEUE
 	help
           This option is not user-selectable but automagically handled by
 	  'select' statements at a higher level
