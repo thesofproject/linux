@@ -222,7 +222,14 @@ int snd_sof_create_page_table(struct snd_sof_dev *sdev,
 }
 
 /*
- * SOF Driver enumeration.
+ * sof_probe_continue()
+ *
+ * Implement the second part of the probe. This function may be called
+ * - directly
+ * - or from a work queue if the hardware-specific code cannot be executed
+ * from a probe context. For example, any initialization using request_module()
+ * should happen from a work queue.
+ *
  */
 static int sof_machine_check(struct snd_sof_dev *sdev)
 {
@@ -253,47 +260,14 @@ static int sof_machine_check(struct snd_sof_dev *sdev)
 
 	return 0;
 }
-static int sof_probe(struct platform_device *pdev)
+
+static int sof_probe_continue(struct snd_sof_dev *sdev)
 {
-	struct snd_sof_pdata *plat_data = dev_get_platdata(&pdev->dev);
-	struct snd_sof_dev *sdev;
+	struct snd_sof_pdata *plat_data = sdev->pdata;
 	const char *drv_name;
 	const void *mach;
 	int size;
 	int ret;
-
-	sdev = devm_kzalloc(&pdev->dev, sizeof(*sdev), GFP_KERNEL);
-	if (!sdev)
-		return -ENOMEM;
-
-	dev_dbg(&pdev->dev, "probing SOF DSP device....\n");
-
-	/* initialize sof device */
-	sdev->dev = &pdev->dev;
-	sdev->parent = plat_data->dev;
-	if dev_is_pci(plat_data->dev)
-		sdev->pci = to_pci_dev(plat_data->dev);
-
-	sdev->pdata = plat_data;
-	sdev->first_boot = true;
-	INIT_LIST_HEAD(&sdev->pcm_list);
-	INIT_LIST_HEAD(&sdev->kcontrol_list);
-	INIT_LIST_HEAD(&sdev->widget_list);
-	INIT_LIST_HEAD(&sdev->dai_list);
-	INIT_LIST_HEAD(&sdev->route_list);
-	dev_set_drvdata(sdev->dev, sdev);
-	spin_lock_init(&sdev->ipc_lock);
-	spin_lock_init(&sdev->hw_lock);
-
-	/* set default timeouts if none provided */
-	if (plat_data->desc->ipc_timeout == 0)
-		sdev->ipc_timeout = TIMEOUT_DEFAULT_IPC_MS;
-	else
-		sdev->ipc_timeout = plat_data->desc->ipc_timeout;
-	if (plat_data->desc->boot_timeout == 0)
-		sdev->boot_timeout = TIMEOUT_DEFAULT_BOOT_MS;
-	else
-		sdev->boot_timeout = plat_data->desc->boot_timeout;
 
 	/* probe the DSP hardware */
 	ret = snd_sof_probe(sdev);
@@ -401,6 +375,54 @@ dbg_err:
 	snd_sof_remove(sdev);
 
 	return ret;
+}
+
+/*
+ * SOF Driver enumeration.
+ */
+
+static int sof_probe(struct platform_device *pdev)
+{
+	struct snd_sof_pdata *plat_data = dev_get_platdata(&pdev->dev);
+	struct snd_sof_dev *sdev;
+
+	sdev = devm_kzalloc(&pdev->dev, sizeof(*sdev), GFP_KERNEL);
+	if (!sdev)
+		return -ENOMEM;
+
+	dev_dbg(&pdev->dev, "probing SOF DSP device....\n");
+
+	/* initialize sof device */
+	sdev->dev = &pdev->dev;
+	sdev->parent = plat_data->dev;
+	if dev_is_pci(plat_data->dev)
+		sdev->pci = to_pci_dev(plat_data->dev);
+
+	sdev->pdata = plat_data;
+	sdev->first_boot = true;
+	INIT_LIST_HEAD(&sdev->pcm_list);
+	INIT_LIST_HEAD(&sdev->kcontrol_list);
+	INIT_LIST_HEAD(&sdev->widget_list);
+	INIT_LIST_HEAD(&sdev->dai_list);
+	INIT_LIST_HEAD(&sdev->route_list);
+	dev_set_drvdata(sdev->dev, sdev);
+	spin_lock_init(&sdev->ipc_lock);
+	spin_lock_init(&sdev->hw_lock);
+
+	/* set up platform component driver */
+	snd_sof_new_platform_drv(sdev);
+
+	/* set default timeouts if none provided */
+	if (plat_data->desc->ipc_timeout == 0)
+		sdev->ipc_timeout = TIMEOUT_DEFAULT_IPC_MS;
+	else
+		sdev->ipc_timeout = plat_data->desc->ipc_timeout;
+	if (plat_data->desc->boot_timeout == 0)
+		sdev->boot_timeout = TIMEOUT_DEFAULT_BOOT_MS;
+	else
+		sdev->boot_timeout = plat_data->desc->boot_timeout;
+
+	return sof_probe_continue(sdev);
 }
 
 static int sof_remove(struct platform_device *pdev)
