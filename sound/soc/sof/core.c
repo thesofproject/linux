@@ -377,6 +377,22 @@ dbg_err:
 	return ret;
 }
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_PROBE_WORK_QUEUE)
+static void sof_probe_work(struct work_struct *work)
+{
+	struct snd_sof_dev *sdev =
+		container_of(work, struct snd_sof_dev, probe_work);
+	int ret;
+
+	dev_dbg(sdev->dev, "%s entry\n", __func__);
+	ret = sof_probe_continue(sdev);
+	if (ret < 0) {
+		/* errors cannot be propagated, log */
+		dev_err(sdev->dev, "error: %s failed err: %d\n", __func__, ret);
+	}
+}
+#endif
+
 /*
  * SOF Driver enumeration.
  */
@@ -409,6 +425,10 @@ static int sof_probe(struct platform_device *pdev)
 	spin_lock_init(&sdev->ipc_lock);
 	spin_lock_init(&sdev->hw_lock);
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_PROBE_WORK_QUEUE)
+	INIT_WORK(&sdev->probe_work, sof_probe_work);
+#endif
+
 	/* set up platform component driver */
 	snd_sof_new_platform_drv(sdev);
 
@@ -422,13 +442,23 @@ static int sof_probe(struct platform_device *pdev)
 	else
 		sdev->boot_timeout = plat_data->desc->boot_timeout;
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_PROBE_WORK_QUEUE)
+	schedule_work(&sdev->probe_work);
+	return 0;
+#else
 	return sof_probe_continue(sdev);
+#endif
+
 }
 
 static int sof_remove(struct platform_device *pdev)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(&pdev->dev);
 	struct snd_sof_pdata *pdata = sdev->pdata;
+
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_PROBE_WORK_QUEUE)
+	cancel_work_sync(&sdev->probe_work);
+#endif
 
 	snd_soc_unregister_component(sdev->dev);
 	snd_sof_fw_unload(sdev);

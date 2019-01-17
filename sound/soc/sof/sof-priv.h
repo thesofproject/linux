@@ -310,6 +310,9 @@ struct snd_sof_dev {
 	/* ASoC components */
 	struct snd_soc_component_driver plat_drv;
 
+	/* work queue in case the probe is implemented in two steps */
+	struct work_struct probe_work;
+
 	/* DSP firmware boot */
 	wait_queue_head_t boot_wait;
 	u32 boot_complete;
