@@ -281,7 +281,7 @@ static int sof_probe(struct platform_device *pdev)
 	INIT_LIST_HEAD(&sdev->widget_list);
 	INIT_LIST_HEAD(&sdev->dai_list);
 	INIT_LIST_HEAD(&sdev->route_list);
-	dev_set_drvdata(&pdev->dev, sdev);
+	dev_set_drvdata(sdev->dev, sdev);
 	spin_lock_init(&sdev->ipc_lock);
 	spin_lock_init(&sdev->hw_lock);
 
@@ -361,7 +361,7 @@ static int sof_probe(struct platform_device *pdev)
 	sdev->first_boot = false;
 
 	/* now register audio DSP platform driver and dai */
-	ret = snd_soc_register_component(&pdev->dev, &sdev->plat_drv,
+	ret = snd_soc_register_component(sdev->dev, &sdev->plat_drv,
 					 sof_ops(sdev)->drv,
 					 sof_ops(sdev)->num_drv);
 	if (ret < 0) {
@@ -390,7 +390,7 @@ static int sof_probe(struct platform_device *pdev)
 	return 0;
 
 comp_err:
-	snd_soc_unregister_component(&pdev->dev);
+	snd_soc_unregister_component(sdev->dev);
 fw_run_err:
 	snd_sof_fw_unload(sdev);
 fw_load_err:
@@ -408,7 +408,7 @@ static int sof_remove(struct platform_device *pdev)
 	struct snd_sof_dev *sdev = dev_get_drvdata(&pdev->dev);
 	struct snd_sof_pdata *pdata = sdev->pdata;
 
-	snd_soc_unregister_component(&pdev->dev);
+	snd_soc_unregister_component(sdev->dev);
 	snd_sof_fw_unload(sdev);
 	snd_sof_ipc_free(sdev);
 	snd_sof_free_debug(sdev);
