@@ -105,14 +105,28 @@ static struct snd_soc_ops aif1_ops = {
 	.startup = aif1_startup,
 };
 
+static struct snd_soc_dai_link_component dummy_codec_component[] = {
+	{
+		.name = "snd-soc-dummy",
+		.dai_name = "snd-soc-dummy-dai"
+	},
+};
+
+static struct snd_soc_dai_link_component platform_component[] = {
+	{
+		.name = "sst-mfld-platform"
+	}
+};
+
 static struct snd_soc_dai_link dais[] = {
 	[MERR_DPCM_AUDIO] = {
 		.name = "Audio Port",
 		.stream_name = "Audio",
 		.cpu_dai_name = "media-cpu-dai",
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
-		.platform_name = "sst-mfld-platform",
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
+		.codecs = dummy_codec_component,
+		.num_codecs = ARRAY_SIZE(dummy_codec_component),
 		.ignore_suspend = 1,
 		.nonatomic = true,
 		.dynamic = 1,
@@ -124,9 +138,10 @@ static struct snd_soc_dai_link dais[] = {
 		.name = "Deep-Buffer Audio Port",
 		.stream_name = "Deep-Buffer Audio",
 		.cpu_dai_name = "deepbuffer-cpu-dai",
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
-		.platform_name = "sst-mfld-platform",
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
+		.codecs = dummy_codec_component,
+		.num_codecs = ARRAY_SIZE(dummy_codec_component),
 		.ignore_suspend = 1,
 		.nonatomic = true,
 		.dynamic = 1,
@@ -139,10 +154,11 @@ static struct snd_soc_dai_link dais[] = {
 		.name = "SSP2-LowSpeed Connector",
 		.id = 0,
 		.cpu_dai_name = "ssp2-port",
-		.platform_name = "sst-mfld-platform",
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.no_pcm = 1,
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
+		.codecs = dummy_codec_component,
+		.num_codecs = ARRAY_SIZE(dummy_codec_component),
 		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF
 						| SND_SOC_DAIFMT_CBS_CFS,
 		.be_hw_params_fixup = codec_fixup,
