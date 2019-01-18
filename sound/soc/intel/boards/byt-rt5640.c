@@ -180,14 +180,28 @@ static struct snd_soc_ops byt_rt5640_ops = {
 	.hw_params = byt_rt5640_hw_params,
 };
 
+static struct snd_soc_dai_link_component rt5640_component[] = {
+	{
+		.name = "i2c-10EC5640:00",
+		.dai_name = "rt5640-aif1"
+	}
+};
+
+static struct snd_soc_dai_link_component platform_component[] = {
+	{
+		.name = "baytrail-pcm-audio"
+	}
+};
+
 static struct snd_soc_dai_link byt_rt5640_dais[] = {
 	{
 		.name = "Baytrail Audio",
 		.stream_name = "Audio",
 		.cpu_dai_name = "baytrail-pcm-audio",
-		.codec_dai_name = "rt5640-aif1",
-		.codec_name = "i2c-10EC5640:00",
-		.platform_name = "baytrail-pcm-audio",
+		.codecs = rt5640_component,
+		.num_codecs = ARRAY_SIZE(rt5640_component),
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
 			   SND_SOC_DAIFMT_CBS_CFS,
 		.init = byt_rt5640_init,
