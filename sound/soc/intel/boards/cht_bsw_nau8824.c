@@ -175,15 +175,36 @@ static const struct snd_soc_ops cht_be_ssp2_ops = {
 	.hw_params = cht_aif1_hw_params,
 };
 
+static struct snd_soc_dai_link_component dummy_codec_component[] = {
+	{
+		.name = "snd-soc-dummy",
+		.dai_name = "snd-soc-dummy-dai"
+	},
+};
+
+static struct snd_soc_dai_link_component nau8824_component[] = {
+	{
+		.name = "i2c-10508824:00",
+		.dai_name = NAU8824_CODEC_DAI
+	}
+};
+
+static struct snd_soc_dai_link_component platform_component[] = {
+	{
+		.name = "sst-mfld-platform"
+	}
+};
+
 static struct snd_soc_dai_link cht_dailink[] = {
 	/* Front End DAI links */
 	[MERR_DPCM_AUDIO] = {
 		.name = "Audio Port",
 		.stream_name = "Audio",
 		.cpu_dai_name = "media-cpu-dai",
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
-		.platform_name = "sst-mfld-platform",
+		.codecs = dummy_codec_component,
+		.num_codecs = ARRAY_SIZE(dummy_codec_component),
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.nonatomic = true,
 		.dynamic = 1,
 		.dpcm_playback = 1,
@@ -194,9 +215,10 @@ static struct snd_soc_dai_link cht_dailink[] = {
 		.name = "Deep-Buffer Audio Port",
 		.stream_name = "Deep-Buffer Audio",
 		.cpu_dai_name = "deepbuffer-cpu-dai",
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
-		.platform_name = "sst-mfld-platform",
+		.codecs = dummy_codec_component,
+		.num_codecs = ARRAY_SIZE(dummy_codec_component),
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.nonatomic = true,
 		.dynamic = 1,
 		.dpcm_playback = 1,
@@ -208,10 +230,11 @@ static struct snd_soc_dai_link cht_dailink[] = {
 		.name = "SSP2-Codec",
 		.id = 1,
 		.cpu_dai_name = "ssp2-port",
-		.platform_name = "sst-mfld-platform",
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.no_pcm = 1,
-		.codec_dai_name = NAU8824_CODEC_DAI,
-		.codec_name = "i2c-10508824:00",
+		.codecs = nau8824_component,
+		.num_codecs = ARRAY_SIZE(nau8824_component),
 		.dai_fmt = SND_SOC_DAIFMT_DSP_B | SND_SOC_DAIFMT_IB_NF
 			| SND_SOC_DAIFMT_CBS_CFS,
 		.init = cht_codec_init,
