@@ -254,6 +254,32 @@ static int bdw_rt5677_init(struct snd_soc_pcm_runtime *rtd)
 	return 0;
 }
 
+static struct snd_soc_dai_link_component dummy_codec_component[] = {
+	{
+		.name = "snd-soc-dummy",
+		.dai_name = "snd-soc-dummy-dai"
+	},
+};
+
+static struct snd_soc_dai_link_component rt5677_component[] = {
+	{
+		.name = "i2c-RT5677CE:00",
+		.dai_name = "rt5677-aif1"
+	}
+};
+
+static struct snd_soc_dai_link_component platform_component[] = {
+	{
+		.name = "haswell-pcm-audio"
+	}
+};
+
+static struct snd_soc_dai_link_component platform_dummy_component[] = {
+	{
+		.name = "snd-soc-dummy"
+	}
+};
+
 /* broadwell digital audio interface glue - connects codec <--> CPU */
 static struct snd_soc_dai_link bdw_rt5677_dais[] = {
 	/* Front End DAI links */
@@ -261,10 +287,11 @@ static struct snd_soc_dai_link bdw_rt5677_dais[] = {
 		.name = "System PCM",
 		.stream_name = "System Playback/Capture",
 		.cpu_dai_name = "System Pin",
-		.platform_name = "haswell-pcm-audio",
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.dynamic = 1,
-		.codec_name = "snd-soc-dummy",
-		.codec_dai_name = "snd-soc-dummy-dai",
+		.codecs = dummy_codec_component,
+		.num_codecs = ARRAY_SIZE(dummy_codec_component),
 		.init = bdw_rt5677_rtd_init,
 		.trigger = {
 			SND_SOC_DPCM_TRIGGER_POST,
@@ -280,10 +307,11 @@ static struct snd_soc_dai_link bdw_rt5677_dais[] = {
 		.name = "Codec",
 		.id = 0,
 		.cpu_dai_name = "snd-soc-dummy-dai",
-		.platform_name = "snd-soc-dummy",
+		.platforms = platform_dummy_component,
+		.num_platforms = ARRAY_SIZE(platform_dummy_component),
 		.no_pcm = 1,
-		.codec_name = "i2c-RT5677CE:00",
-		.codec_dai_name = "rt5677-aif1",
+		.codecs = rt5677_component,
+		.num_codecs = ARRAY_SIZE(rt5677_component),
 		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
 			SND_SOC_DAIFMT_CBS_CFS,
 		.ignore_suspend = 1,
