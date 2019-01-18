@@ -39,6 +39,47 @@ int skl_hda_hdmi_add_pcm(struct snd_soc_card *card, int device)
 	return 0;
 }
 
+static struct snd_soc_dai_link_component idisp1_component[] = {
+	{
+		.name = "ehdaudio0D2",
+		.dai_name = "intel-hdmi-hifi1",
+	}
+};
+
+static struct snd_soc_dai_link_component idisp2_component[] = {
+	{
+		.name = "ehdaudio0D2",
+		.dai_name = "intel-hdmi-hifi2",
+	}
+};
+
+static struct snd_soc_dai_link_component idisp3_component[] = {
+	{
+		.name = "ehdaudio0D2",
+		.dai_name = "intel-hdmi-hifi3",
+	}
+};
+
+static struct snd_soc_dai_link_component analog_codec_component[] = {
+	{
+		.name = "ehdaudio0D0",
+		.dai_name = "Analog Codec DAI"
+	}
+};
+
+static struct snd_soc_dai_link_component digital_codec_component[] = {
+	{
+		.name = "ehdaudio0D0",
+		.dai_name = "Digital Codec DAI"
+	}
+};
+
+static struct snd_soc_dai_link_component platform_component[] = {
+	{
+		.name = "0000:00:1f.3"
+	}
+};
+
 /* skl_hda_digital audio interface glue - connects codec <--> CPU */
 struct snd_soc_dai_link skl_hda_be_dai_links[HDA_DSP_MAX_BE_DAI_LINKS] = {
 	/* Back End DAI links */
@@ -46,8 +87,10 @@ struct snd_soc_dai_link skl_hda_be_dai_links[HDA_DSP_MAX_BE_DAI_LINKS] = {
 		.name = "iDisp1",
 		.id = 1,
 		.cpu_dai_name = "iDisp1 Pin",
-		.codec_name = "ehdaudio0D2",
-		.codec_dai_name = "intel-hdmi-hifi1",
+		.codecs = idisp1_component,
+		.num_codecs = ARRAY_SIZE(idisp1_component),
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.dpcm_playback = 1,
 		.no_pcm = 1,
 	},
@@ -55,8 +98,10 @@ struct snd_soc_dai_link skl_hda_be_dai_links[HDA_DSP_MAX_BE_DAI_LINKS] = {
 		.name = "iDisp2",
 		.id = 2,
 		.cpu_dai_name = "iDisp2 Pin",
-		.codec_name = "ehdaudio0D2",
-		.codec_dai_name = "intel-hdmi-hifi2",
+		.codecs = idisp2_component,
+		.num_codecs = ARRAY_SIZE(idisp2_component),
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.dpcm_playback = 1,
 		.no_pcm = 1,
 	},
@@ -64,8 +109,10 @@ struct snd_soc_dai_link skl_hda_be_dai_links[HDA_DSP_MAX_BE_DAI_LINKS] = {
 		.name = "iDisp3",
 		.id = 3,
 		.cpu_dai_name = "iDisp3 Pin",
-		.codec_name = "ehdaudio0D2",
-		.codec_dai_name = "intel-hdmi-hifi3",
+		.codecs = idisp3_component,
+		.num_codecs = ARRAY_SIZE(idisp3_component),
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.dpcm_playback = 1,
 		.no_pcm = 1,
 	},
@@ -73,9 +120,10 @@ struct snd_soc_dai_link skl_hda_be_dai_links[HDA_DSP_MAX_BE_DAI_LINKS] = {
 		.name = "Analog Playback and Capture",
 		.id = 4,
 		.cpu_dai_name = "Analog CPU DAI",
-		.codec_name = "ehdaudio0D0",
-		.codec_dai_name = "Analog Codec DAI",
-		.platform_name = "0000:00:1f.3",
+		.codecs = analog_codec_component,
+		.num_codecs = ARRAY_SIZE(analog_codec_component),
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.dpcm_playback = 1,
 		.dpcm_capture = 1,
 		.init = NULL,
@@ -85,9 +133,10 @@ struct snd_soc_dai_link skl_hda_be_dai_links[HDA_DSP_MAX_BE_DAI_LINKS] = {
 		.name = "Digital Playback and Capture",
 		.id = 5,
 		.cpu_dai_name = "Digital CPU DAI",
-		.codec_name = "ehdaudio0D0",
-		.codec_dai_name = "Digital Codec DAI",
-		.platform_name = "0000:00:1f.3",
+		.codecs = digital_codec_component,
+		.num_codecs = ARRAY_SIZE(digital_codec_component),
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.dpcm_playback = 1,
 		.dpcm_capture = 1,
 		.init = NULL,

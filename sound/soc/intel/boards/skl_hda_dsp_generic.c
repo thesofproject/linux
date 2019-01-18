@@ -69,7 +69,7 @@ skl_hda_add_dai_link(struct snd_soc_card *card, struct snd_soc_dai_link *link)
 	int ret = 0;
 
 	dev_dbg(card->dev, "%s: dai link name - %s\n", __func__, link->name);
-	link->platform_name = ctx->platform_name;
+	link->platforms[0].name = ctx->platform_name;
 	link->nonatomic = 1;
 
 	if (strstr(link->name, "HDMI")) {
@@ -127,7 +127,7 @@ static int skl_hda_fill_card_info(struct snd_soc_acpi_mach_params *mach_params)
 	card->num_dapm_routes = num_route;
 
 	for_each_card_prelinks(card, i, dai_link)
-		dai_link->platform_name = mach_params->platform;
+		dai_link->platforms[0].name = mach_params->platform;
 
 	return 0;
 }
