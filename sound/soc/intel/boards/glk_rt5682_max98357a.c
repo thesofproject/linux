@@ -317,6 +317,61 @@ static const struct snd_soc_ops geminilake_refcap_ops = {
 	.startup = geminilake_refcap_startup,
 };
 
+static struct snd_soc_dai_link_component dummy_codec_component[] = {
+	{
+		.name = "snd-soc-dummy",
+		.dai_name = "snd-soc-dummy-dai"
+	},
+};
+
+static struct snd_soc_dai_link_component rt5682_component[] = {
+	{
+		.name = "i2c-10EC5682:00",
+		.dai_name = "rt5682-aif1",
+	}
+};
+
+static struct snd_soc_dai_link_component max98357_component[] = {
+	{
+		.name = MAXIM_DEV0_NAME,
+		.dai_name = GLK_MAXIM_CODEC_DAI,
+	}
+};
+
+static struct snd_soc_dai_link_component dmic_component[] = {
+	{
+		.name = "dmic-codec",
+		.dai_name = "dmic-hifi"
+	}
+};
+
+static struct snd_soc_dai_link_component idisp1_component[] = {
+	{
+		.name = "ehdaudio0D2",
+		.dai_name = "intel-hdmi-hifi1",
+	}
+};
+
+static struct snd_soc_dai_link_component idisp2_component[] = {
+	{
+		.name = "ehdaudio0D2",
+		.dai_name = "intel-hdmi-hifi2",
+	}
+};
+
+static struct snd_soc_dai_link_component idisp3_component[] = {
+	{
+		.name = "ehdaudio0D2",
+		.dai_name = "intel-hdmi-hifi3",
+	}
+};
+
+static struct snd_soc_dai_link_component platform_component[] = {
+	{
+		.name = "0000:00:0e.0"
+	}
+};
+
 /* geminilake digital audio interface glue - connects codec <--> CPU */
 static struct snd_soc_dai_link geminilake_dais[] = {
 	/* Front End DAI links */
@@ -324,10 +379,11 @@ static struct snd_soc_dai_link geminilake_dais[] = {
 		.name = "Glk Audio Port",
 		.stream_name = "Audio",
 		.cpu_dai_name = "System Pin",
-		.platform_name = "0000:00:0e.0",
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.dynamic = 1,
-		.codec_name = "snd-soc-dummy",
-		.codec_dai_name = "snd-soc-dummy-dai",
+		.codecs = dummy_codec_component,
+		.num_codecs = ARRAY_SIZE(dummy_codec_component),
 		.nonatomic = 1,
 		.init = geminilake_rt5682_fe_init,
 		.trigger = {
@@ -338,10 +394,11 @@ static struct snd_soc_dai_link geminilake_dais[] = {
 		.name = "Glk Audio Capture Port",
 		.stream_name = "Audio Record",
 		.cpu_dai_name = "System Pin",
-		.platform_name = "0000:00:0e.0",
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.dynamic = 1,
-		.codec_name = "snd-soc-dummy",
-		.codec_dai_name = "snd-soc-dummy-dai",
+		.codecs = dummy_codec_component,
+		.num_codecs = ARRAY_SIZE(dummy_codec_component),
 		.nonatomic = 1,
 		.trigger = {
 			SND_SOC_DPCM_TRIGGER_POST, SND_SOC_DPCM_TRIGGER_POST},
@@ -351,9 +408,10 @@ static struct snd_soc_dai_link geminilake_dais[] = {
 		.name = "Glk Audio Headset Playback",
 		.stream_name = "Headset Audio",
 		.cpu_dai_name = "System Pin2",
-		.platform_name = "0000:00:0e.0",
-		.codec_name = "snd-soc-dummy",
-		.codec_dai_name = "snd-soc-dummy-dai",
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
+		.codecs = dummy_codec_component,
+		.num_codecs = ARRAY_SIZE(dummy_codec_component),
 		.dpcm_playback = 1,
 		.nonatomic = 1,
 		.dynamic = 1,
@@ -362,9 +420,10 @@ static struct snd_soc_dai_link geminilake_dais[] = {
 		.name = "Glk Audio Echo Reference cap",
 		.stream_name = "Echoreference Capture",
 		.cpu_dai_name = "Echoref Pin",
-		.platform_name = "0000:00:0e.0",
-		.codec_name = "snd-soc-dummy",
-		.codec_dai_name = "snd-soc-dummy-dai",
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
+		.codecs = dummy_codec_component,
+		.num_codecs = ARRAY_SIZE(dummy_codec_component),
 		.init = NULL,
 		.capture_only = 1,
 		.nonatomic = 1,
@@ -373,9 +432,10 @@ static struct snd_soc_dai_link geminilake_dais[] = {
 		.name = "Glk Audio Reference cap",
 		.stream_name = "Refcap",
 		.cpu_dai_name = "Reference Pin",
-		.codec_name = "snd-soc-dummy",
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.platform_name = "0000:00:0e.0",
+		.codecs = dummy_codec_component,
+		.num_codecs = ARRAY_SIZE(dummy_codec_component),
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.init = NULL,
 		.dpcm_capture = 1,
 		.nonatomic = 1,
@@ -386,9 +446,10 @@ static struct snd_soc_dai_link geminilake_dais[] = {
 		.name = "Glk Audio DMIC cap",
 		.stream_name = "dmiccap",
 		.cpu_dai_name = "DMIC Pin",
-		.codec_name = "snd-soc-dummy",
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.platform_name = "0000:00:0e.0",
+		.codecs = dummy_codec_component,
+		.num_codecs = ARRAY_SIZE(dummy_codec_component),
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.init = NULL,
 		.dpcm_capture = 1,
 		.nonatomic = 1,
@@ -399,9 +460,10 @@ static struct snd_soc_dai_link geminilake_dais[] = {
 		.name = "Glk HDMI Port1",
 		.stream_name = "Hdmi1",
 		.cpu_dai_name = "HDMI1 Pin",
-		.codec_name = "snd-soc-dummy",
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.platform_name = "0000:00:0e.0",
+		.codecs = dummy_codec_component,
+		.num_codecs = ARRAY_SIZE(dummy_codec_component),
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.dpcm_playback = 1,
 		.init = NULL,
 		.trigger = {
@@ -413,9 +475,10 @@ static struct snd_soc_dai_link geminilake_dais[] = {
 		.name = "Glk HDMI Port2",
 		.stream_name = "Hdmi2",
 		.cpu_dai_name = "HDMI2 Pin",
-		.codec_name = "snd-soc-dummy",
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.platform_name = "0000:00:0e.0",
+		.codecs = dummy_codec_component,
+		.num_codecs = ARRAY_SIZE(dummy_codec_component),
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.dpcm_playback = 1,
 		.init = NULL,
 		.trigger = {
@@ -427,9 +490,10 @@ static struct snd_soc_dai_link geminilake_dais[] = {
 		.name = "Glk HDMI Port3",
 		.stream_name = "Hdmi3",
 		.cpu_dai_name = "HDMI3 Pin",
-		.codec_name = "snd-soc-dummy",
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.platform_name = "0000:00:0e.0",
+		.codecs = dummy_codec_component,
+		.num_codecs = ARRAY_SIZE(dummy_codec_component),
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.trigger = {
 			SND_SOC_DPCM_TRIGGER_POST, SND_SOC_DPCM_TRIGGER_POST},
 		.dpcm_playback = 1,
@@ -443,10 +507,11 @@ static struct snd_soc_dai_link geminilake_dais[] = {
 		.name = "SSP1-Codec",
 		.id = 0,
 		.cpu_dai_name = "SSP1 Pin",
-		.platform_name = "0000:00:0e.0",
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.no_pcm = 1,
-		.codec_name = MAXIM_DEV0_NAME,
-		.codec_dai_name = GLK_MAXIM_CODEC_DAI,
+		.codecs = max98357_component,
+		.num_codecs = ARRAY_SIZE(max98357_component),
 		.dai_fmt = SND_SOC_DAIFMT_I2S |
 			SND_SOC_DAIFMT_NB_NF |
 			SND_SOC_DAIFMT_CBS_CFS,
@@ -459,10 +524,11 @@ static struct snd_soc_dai_link geminilake_dais[] = {
 		.name = "SSP2-Codec",
 		.id = 1,
 		.cpu_dai_name = "SSP2 Pin",
-		.platform_name = "0000:00:0e.0",
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.no_pcm = 1,
-		.codec_name = "i2c-10EC5682:00",
-		.codec_dai_name = GLK_REALTEK_CODEC_DAI,
+		.codecs = rt5682_component,
+		.num_codecs = ARRAY_SIZE(rt5682_component),
 		.init = geminilake_rt5682_codec_init,
 		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
 			SND_SOC_DAIFMT_CBS_CFS,
@@ -476,9 +542,10 @@ static struct snd_soc_dai_link geminilake_dais[] = {
 		.name = "dmic01",
 		.id = 2,
 		.cpu_dai_name = "DMIC01 Pin",
-		.codec_name = "dmic-codec",
-		.codec_dai_name = "dmic-hifi",
-		.platform_name = "0000:00:0e.0",
+		.codecs = dmic_component,
+		.num_codecs = ARRAY_SIZE(dmic_component),
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.ignore_suspend = 1,
 		.be_hw_params_fixup = geminilake_dmic_fixup,
 		.dpcm_capture = 1,
@@ -488,9 +555,10 @@ static struct snd_soc_dai_link geminilake_dais[] = {
 		.name = "iDisp1",
 		.id = 3,
 		.cpu_dai_name = "iDisp1 Pin",
-		.codec_name = "ehdaudio0D2",
-		.codec_dai_name = "intel-hdmi-hifi1",
-		.platform_name = "0000:00:0e.0",
+		.codecs = idisp1_component,
+		.num_codecs = ARRAY_SIZE(idisp1_component),
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.init = geminilake_hdmi_init,
 		.dpcm_playback = 1,
 		.no_pcm = 1,
@@ -499,9 +567,10 @@ static struct snd_soc_dai_link geminilake_dais[] = {
 		.name = "iDisp2",
 		.id = 4,
 		.cpu_dai_name = "iDisp2 Pin",
-		.codec_name = "ehdaudio0D2",
-		.codec_dai_name = "intel-hdmi-hifi2",
-		.platform_name = "0000:00:0e.0",
+		.codecs = idisp2_component,
+		.num_codecs = ARRAY_SIZE(idisp2_component),
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.init = geminilake_hdmi_init,
 		.dpcm_playback = 1,
 		.no_pcm = 1,
@@ -510,9 +579,10 @@ static struct snd_soc_dai_link geminilake_dais[] = {
 		.name = "iDisp3",
 		.id = 5,
 		.cpu_dai_name = "iDisp3 Pin",
-		.codec_name = "ehdaudio0D2",
-		.codec_dai_name = "intel-hdmi-hifi3",
-		.platform_name = "0000:00:0e.0",
+		.codecs = idisp3_component,
+		.num_codecs = ARRAY_SIZE(idisp3_component),
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.init = geminilake_hdmi_init,
 		.dpcm_playback = 1,
 		.no_pcm = 1,
