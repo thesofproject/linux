@@ -746,14 +746,35 @@ static const struct snd_soc_ops byt_rt5651_be_ssp2_ops = {
 	.hw_params = byt_rt5651_aif1_hw_params,
 };
 
+static struct snd_soc_dai_link_component dummy_codec_component[] = {
+	{
+		.name = "snd-soc-dummy",
+		.dai_name = "snd-soc-dummy-dai"
+	},
+};
+
+static struct snd_soc_dai_link_component rt5651_component[] = {
+	{
+		.name = "i2c-10EC5651:00", /* overwritten with HID */
+		.dai_name = "rt5651-aif1", /* changed w/ quirk */
+	}
+};
+
+static struct snd_soc_dai_link_component platform_component[] = {
+	{
+		.name = "sst-mfld-platform"
+	}
+};
+
 static struct snd_soc_dai_link byt_rt5651_dais[] = {
 	[MERR_DPCM_AUDIO] = {
 		.name = "Audio Port",
 		.stream_name = "Audio",
 		.cpu_dai_name = "media-cpu-dai",
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
-		.platform_name = "sst-mfld-platform",
+		.codecs = dummy_codec_component,
+		.num_codecs = ARRAY_SIZE(dummy_codec_component),
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.nonatomic = true,
 		.dynamic = 1,
 		.dpcm_playback = 1,
@@ -764,9 +785,10 @@ static struct snd_soc_dai_link byt_rt5651_dais[] = {
 		.name = "Deep-Buffer Audio Port",
 		.stream_name = "Deep-Buffer Audio",
 		.cpu_dai_name = "deepbuffer-cpu-dai",
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
-		.platform_name = "sst-mfld-platform",
+		.codecs = dummy_codec_component,
+		.num_codecs = ARRAY_SIZE(dummy_codec_component),
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.nonatomic = true,
 		.dynamic = 1,
 		.dpcm_playback = 1,
@@ -778,10 +800,11 @@ static struct snd_soc_dai_link byt_rt5651_dais[] = {
 		.name = "SSP2-Codec",
 		.id = 0,
 		.cpu_dai_name = "ssp2-port",
-		.platform_name = "sst-mfld-platform",
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.no_pcm = 1,
-		.codec_dai_name = "rt5651-aif1",
-		.codec_name = "i2c-10EC5651:00",
+		.codecs = rt5651_component,
+		.num_codecs = ARRAY_SIZE(rt5651_component),
 		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF
 						| SND_SOC_DAIFMT_CBS_CFS,
 		.be_hw_params_fixup = byt_rt5651_codec_fixup,
@@ -886,12 +909,10 @@ static int snd_byt_rt5651_mc_probe(struct platform_device *pdev)
 	struct snd_soc_acpi_mach *mach;
 	const char *platform_name;
 	struct device *codec_dev;
-	const char *i2c_name = NULL;
 	const char *hp_swapped;
 	bool is_bytcr = false;
 	int ret_val = 0;
 	int dai_index = 0;
-	int i;
 
 	priv = devm_kzalloc(&pdev->dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
@@ -903,23 +924,23 @@ static int snd_byt_rt5651_mc_probe(struct platform_device *pdev)
 	mach = byt_rt5651_card.dev->platform_data;
 	snd_soc_card_set_drvdata(&byt_rt5651_card, priv);
 
-	/* fix index of codec dai */
-	for (i = 0; i < ARRAY_SIZE(byt_rt5651_dais); i++) {
-		if (!strcmp(byt_rt5651_dais[i].codec_name, "i2c-10EC5651:00")) {
-			dai_index = i;
-			break;
-		}
+	ret_val = snd_soc_acpi_fixup_codec_name(&pdev->dev,
+						byt_rt5651_dais,
+						ARRAY_SIZE(byt_rt5651_dais),
+						"i2c-10EC5651:00",
+						mach->id);
+	if (ret_val < 0) {
+		dev_err(&pdev->dev,
+			"dailink codec name fixup failed: %d\n", ret_val);
+		return ret_val;
 	}
 
-	/* fixup codec name based on HID */
-	i2c_name = acpi_dev_get_first_match_name(mach->id, NULL, -1);
-	if (!i2c_name) {
-		dev_err(&pdev->dev, "Error cannot find '%s' dev\n", mach->id);
-		return -ENODEV;
-	}
-	snprintf(byt_rt5651_codec_name, sizeof(byt_rt5651_codec_name),
-		"%s%s", "i2c-", i2c_name);
-	byt_rt5651_dais[dai_index].codec_name = byt_rt5651_codec_name;
+	dai_index = ret_val; /* save for cpu_name change later */
+
+	/* copy codec_name, used later as well */
+	strncpy(byt_rt5651_codec_name,
+		byt_rt5651_dais[dai_index].codecs[0].name,
+		SND_ACPI_I2C_ID_LEN);
 
 	codec_dev = bus_find_device_by_name(&i2c_bus_type, NULL,
 					    byt_rt5651_codec_name);
@@ -1055,7 +1076,7 @@ static int snd_byt_rt5651_mc_probe(struct platform_device *pdev)
 			sizeof(byt_rt5651_codec_aif_name),
 			"%s", "rt5651-aif2");
 
-		byt_rt5651_dais[dai_index].codec_dai_name =
+		byt_rt5651_dais[dai_index].codecs[0].dai_name =
 			byt_rt5651_codec_aif_name;
 	}
 
