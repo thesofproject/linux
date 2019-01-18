@@ -9,6 +9,7 @@
 #include <linux/stddef.h>
 #include <linux/acpi.h>
 #include <linux/mod_devicetable.h>
+#include <sound/soc.h>
 
 struct snd_soc_acpi_package_context {
 	char *name;           /* package name */
@@ -26,6 +27,12 @@ struct snd_soc_acpi_package_context {
 struct snd_soc_acpi_mach *
 snd_soc_acpi_find_machine(struct snd_soc_acpi_mach *machines);
 
+int snd_soc_acpi_fixup_codec_name(struct device *dev,
+				  struct snd_soc_dai_link *dailink,
+				  int num_dailink,
+				  char *codec_name,
+				  const u8 *hid);
+
 bool snd_soc_acpi_find_package_from_hid(const u8 hid[ACPI_ID_LEN],
 				    struct snd_soc_acpi_package_context *ctx);
 
@@ -38,6 +45,15 @@ static inline struct snd_soc_acpi_mach *
 snd_soc_acpi_find_machine(struct snd_soc_acpi_mach *machines)
 {
 	return NULL;
+}
+
+static inline int snd_soc_acpi_fixup_codec_name(struct device *dev,
+						struct snd_soc_dai_link *dailink,
+						int num_dailink,
+						char *codec_name,
+						const u8 *hid)
+{
+	return -ENOTSUPP;
 }
 
 static inline bool

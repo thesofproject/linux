@@ -6,6 +6,50 @@
 
 #include <sound/soc-acpi.h>
 
+int snd_soc_acpi_fixup_codec_name(struct device *dev,
+				  struct snd_soc_dai_link *dailink,
+				  int num_dailink,
+				  char *codec_name,
+				  const u8 *hid)
+{
+	const char *i2c_name = NULL;
+	char *fixed_name;
+	int i;
+	int j;
+
+	/* fix index of codec dai */
+	for (i = 0; i < num_dailink; i++) {
+		for (j = 0; j < dailink[i].num_codecs; j++) {
+			if (!strcmp(dailink[i].codecs[j].name, codec_name))
+				goto end;
+		}
+	}
+
+	/* no match, nothing to do */
+	dev_warn(dev, "%s : no dailink codec match found for %s\n",
+		 __func__, codec_name);
+	return -EINVAL;
+end:
+	/* fixup codec name based on HID */
+	i2c_name = acpi_dev_get_first_match_name(hid, NULL, -1);
+	if (!i2c_name) {
+		dev_warn(dev, "%s : no ACPI ID found for %s\n",
+			 __func__, hid);
+		return -EINVAL;
+	}
+
+	fixed_name = devm_kasprintf(dev, GFP_KERNEL,
+				    "%s%s", "i2c-", i2c_name);
+	if (!fixed_name)
+		return -ENOMEM;
+
+	dailink[i].codecs[j].name = fixed_name;
+
+	/* return dailink index */
+	return i;
+}
+EXPORT_SYMBOL_GPL(snd_soc_acpi_fixup_codec_name);
+
 struct snd_soc_acpi_mach *
 snd_soc_acpi_find_machine(struct snd_soc_acpi_mach *machines)
 {
