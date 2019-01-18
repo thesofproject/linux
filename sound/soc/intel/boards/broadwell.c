@@ -150,6 +150,32 @@ static int broadwell_rtd_init(struct snd_soc_pcm_runtime *rtd)
 	return 0;
 }
 
+static struct snd_soc_dai_link_component dummy_codec_component[] = {
+	{
+		.name = "snd-soc-dummy",
+		.dai_name = "snd-soc-dummy-dai"
+	},
+};
+
+static struct snd_soc_dai_link_component rt286_component[] = {
+	{
+		.name = "i2c-INT343A:00",
+		.dai_name = "rt286-aif1",
+	}
+};
+
+static struct snd_soc_dai_link_component platform_component[] = {
+	{
+		.name = "haswell-pcm-audio"
+	}
+};
+
+static struct snd_soc_dai_link_component platform_dummy_component[] = {
+	{
+		.name = "snd-soc-dummy"
+	}
+};
+
 /* broadwell digital audio interface glue - connects codec <--> CPU */
 static struct snd_soc_dai_link broadwell_rt286_dais[] = {
 	/* Front End DAI links */
@@ -157,10 +183,11 @@ static struct snd_soc_dai_link broadwell_rt286_dais[] = {
 		.name = "System PCM",
 		.stream_name = "System Playback/Capture",
 		.cpu_dai_name = "System Pin",
-		.platform_name = "haswell-pcm-audio",
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.dynamic = 1,
-		.codec_name = "snd-soc-dummy",
-		.codec_dai_name = "snd-soc-dummy-dai",
+		.codecs = dummy_codec_component,
+		.num_codecs = ARRAY_SIZE(dummy_codec_component),
 		.init = broadwell_rtd_init,
 		.trigger = {SND_SOC_DPCM_TRIGGER_POST, SND_SOC_DPCM_TRIGGER_POST},
 		.dpcm_playback = 1,
@@ -170,10 +197,11 @@ static struct snd_soc_dai_link broadwell_rt286_dais[] = {
 		.name = "Offload0",
 		.stream_name = "Offload0 Playback",
 		.cpu_dai_name = "Offload0 Pin",
-		.platform_name = "haswell-pcm-audio",
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.dynamic = 1,
-		.codec_name = "snd-soc-dummy",
-		.codec_dai_name = "snd-soc-dummy-dai",
+		.codecs = dummy_codec_component,
+		.num_codecs = ARRAY_SIZE(dummy_codec_component),
 		.trigger = {SND_SOC_DPCM_TRIGGER_POST, SND_SOC_DPCM_TRIGGER_POST},
 		.dpcm_playback = 1,
 	},
@@ -181,10 +209,11 @@ static struct snd_soc_dai_link broadwell_rt286_dais[] = {
 		.name = "Offload1",
 		.stream_name = "Offload1 Playback",
 		.cpu_dai_name = "Offload1 Pin",
-		.platform_name = "haswell-pcm-audio",
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.dynamic = 1,
-		.codec_name = "snd-soc-dummy",
-		.codec_dai_name = "snd-soc-dummy-dai",
+		.codecs = dummy_codec_component,
+		.num_codecs = ARRAY_SIZE(dummy_codec_component),
 		.trigger = {SND_SOC_DPCM_TRIGGER_POST, SND_SOC_DPCM_TRIGGER_POST},
 		.dpcm_playback = 1,
 	},
@@ -192,10 +221,11 @@ static struct snd_soc_dai_link broadwell_rt286_dais[] = {
 		.name = "Loopback PCM",
 		.stream_name = "Loopback",
 		.cpu_dai_name = "Loopback Pin",
-		.platform_name = "haswell-pcm-audio",
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.dynamic = 1,
-		.codec_name = "snd-soc-dummy",
-		.codec_dai_name = "snd-soc-dummy-dai",
+		.codecs = dummy_codec_component,
+		.num_codecs = ARRAY_SIZE(dummy_codec_component),
 		.trigger = {SND_SOC_DPCM_TRIGGER_POST, SND_SOC_DPCM_TRIGGER_POST},
 		.dpcm_capture = 1,
 	},
@@ -205,10 +235,11 @@ static struct snd_soc_dai_link broadwell_rt286_dais[] = {
 		.name = "Codec",
 		.id = 0,
 		.cpu_dai_name = "snd-soc-dummy-dai",
-		.platform_name = "snd-soc-dummy",
+		.platforms = platform_dummy_component,
+		.num_platforms = ARRAY_SIZE(platform_dummy_component),
 		.no_pcm = 1,
-		.codec_name = "i2c-INT343A:00",
-		.codec_dai_name = "rt286-aif1",
+		.codecs = rt286_component,
+		.num_codecs = ARRAY_SIZE(rt286_component),
 		.init = broadwell_rt286_codec_init,
 		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
 			SND_SOC_DAIFMT_CBS_CFS,
