@@ -159,14 +159,35 @@ static const struct snd_soc_ops ssp2_ops = {
 
 };
 
+static struct snd_soc_dai_link_component dummy_codec_component[] = {
+	{
+		.name = "snd-soc-dummy",
+		.dai_name = "snd-soc-dummy-dai"
+	},
+};
+
+static struct snd_soc_dai_link_component da7213_component[] = {
+	{
+		.name =  "i2c-DLGS7213:00",
+		.dai_name =  "da7213-hifi"
+	}
+};
+
+static struct snd_soc_dai_link_component platform_component[] = {
+	{
+		.name = "sst-mfld-platform"
+	}
+};
+
 static struct snd_soc_dai_link dailink[] = {
 	[MERR_DPCM_AUDIO] = {
 		.name = "Audio Port",
 		.stream_name = "Audio",
 		.cpu_dai_name = "media-cpu-dai",
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
-		.platform_name = "sst-mfld-platform",
+		.codecs = dummy_codec_component,
+		.num_codecs = ARRAY_SIZE(dummy_codec_component),
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.nonatomic = true,
 		.dynamic = 1,
 		.dpcm_playback = 1,
@@ -177,9 +198,10 @@ static struct snd_soc_dai_link dailink[] = {
 		.name = "Deep-Buffer Audio Port",
 		.stream_name = "Deep-Buffer Audio",
 		.cpu_dai_name = "deepbuffer-cpu-dai",
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
-		.platform_name = "sst-mfld-platform",
+		.codecs = dummy_codec_component,
+		.num_codecs = ARRAY_SIZE(dummy_codec_component),
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.nonatomic = true,
 		.dynamic = 1,
 		.dpcm_playback = 1,
@@ -191,10 +213,11 @@ static struct snd_soc_dai_link dailink[] = {
 		.name = "SSP2-Codec",
 		.id = 0,
 		.cpu_dai_name = "ssp2-port",
-		.platform_name = "sst-mfld-platform",
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.no_pcm = 1,
-		.codec_dai_name = "da7213-hifi",
-		.codec_name = "i2c-DLGS7213:00",
+		.codecs = da7213_component,
+		.num_codecs = ARRAY_SIZE(da7213_component),
 		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF
 						| SND_SOC_DAIFMT_CBS_CFS,
 		.be_hw_params_fixup = codec_fixup,
@@ -219,36 +242,26 @@ static struct snd_soc_card bytcht_da7213_card = {
 	.num_dapm_routes = ARRAY_SIZE(audio_map),
 };
 
-static char codec_name[SND_ACPI_I2C_ID_LEN];
-
 static int bytcht_da7213_probe(struct platform_device *pdev)
 {
 	struct snd_soc_card *card;
 	struct snd_soc_acpi_mach *mach;
 	const char *platform_name;
-	const char *i2c_name = NULL;
-	int dai_index = 0;
-	int ret_val = 0;
-	int i;
+	int ret_val;
 
 	mach = (&pdev->dev)->platform_data;
 	card = &bytcht_da7213_card;
 	card->dev = &pdev->dev;
 
-	/* fix index of codec dai */
-	for (i = 0; i < ARRAY_SIZE(dailink); i++) {
-		if (!strcmp(dailink[i].codec_name, "i2c-DLGS7213:00")) {
-			dai_index = i;
-			break;
-		}
-	}
-
-	/* fixup codec name based on HID */
-	i2c_name = acpi_dev_get_first_match_name(mach->id, NULL, -1);
-	if (i2c_name) {
-		snprintf(codec_name, sizeof(codec_name),
-			"%s%s", "i2c-", i2c_name);
-		dailink[dai_index].codec_name = codec_name;
+	ret_val = snd_soc_acpi_fixup_codec_name(&pdev->dev,
+						dailink,
+						ARRAY_SIZE(dailink),
+						"i2c-DLGS7213:00",
+						mach->id);
+	if (ret_val < 0) {
+		dev_err(&pdev->dev,
+			"dailink codec name fixup failed: %d\n", ret_val);
+		return ret_val;
 	}
 
 	/* override plaform name, if required */
