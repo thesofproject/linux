@@ -36,7 +36,7 @@
 
 struct cht_mc_private {
 	struct snd_soc_jack headset;
-	char codec_name[SND_ACPI_I2C_ID_LEN];
+	char codec_i2c_name[SND_ACPI_I2C_ID_LEN];
 	struct clk *mclk;
 };
 
@@ -295,15 +295,36 @@ static const struct snd_soc_ops cht_be_ssp2_ops = {
 	.hw_params = cht_aif1_hw_params,
 };
 
+static struct snd_soc_dai_link_component dummy_codec_component[] = {
+	{
+		.name = "snd-soc-dummy",
+		.dai_name = "snd-soc-dummy-dai"
+	},
+};
+
+static struct snd_soc_dai_link_component rt5670_component[] = {
+	{
+		.name = "i2c-10EC5670:00",
+		.dai_name = "rt5670-aif1",
+	}
+};
+
+static struct snd_soc_dai_link_component platform_component[] = {
+	{
+		.name = "sst-mfld-platform"
+	}
+};
+
 static struct snd_soc_dai_link cht_dailink[] = {
 	/* Front End DAI links */
 	[MERR_DPCM_AUDIO] = {
 		.name = "Audio Port",
 		.stream_name = "Audio",
 		.cpu_dai_name = "media-cpu-dai",
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
-		.platform_name = "sst-mfld-platform",
+		.codecs = dummy_codec_component,
+		.num_codecs = ARRAY_SIZE(dummy_codec_component),
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.nonatomic = true,
 		.dynamic = 1,
 		.dpcm_playback = 1,
@@ -314,9 +335,10 @@ static struct snd_soc_dai_link cht_dailink[] = {
 		.name = "Deep-Buffer Audio Port",
 		.stream_name = "Deep-Buffer Audio",
 		.cpu_dai_name = "deepbuffer-cpu-dai",
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
-		.platform_name = "sst-mfld-platform",
+		.codecs = dummy_codec_component,
+		.num_codecs = ARRAY_SIZE(dummy_codec_component),
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.nonatomic = true,
 		.dynamic = 1,
 		.dpcm_playback = 1,
@@ -329,11 +351,12 @@ static struct snd_soc_dai_link cht_dailink[] = {
 		.name = "SSP2-Codec",
 		.id = 0,
 		.cpu_dai_name = "ssp2-port",
-		.platform_name = "sst-mfld-platform",
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.no_pcm = 1,
 		.nonatomic = true,
-		.codec_dai_name = "rt5670-aif1",
-		.codec_name = "i2c-10EC5670:00",
+		.codecs = rt5670_component,
+		.num_codecs = ARRAY_SIZE(rt5670_component),
 		.init = cht_codec_init,
 		.be_hw_params_fixup = cht_codec_fixup,
 		.dpcm_playback = 1,
@@ -349,7 +372,7 @@ static int cht_suspend_pre(struct snd_soc_card *card)
 
 	for_each_card_components(card, component) {
 		if (!strncmp(component->name,
-			     ctx->codec_name, sizeof(ctx->codec_name))) {
+			     ctx->codec_i2c_name, sizeof(ctx->codec_i2c_name))) {
 
 			dev_dbg(component->dev, "disabling jack detect before going to suspend.\n");
 			rt5670_jack_suspend(component);
@@ -366,7 +389,7 @@ static int cht_resume_post(struct snd_soc_card *card)
 
 	for_each_card_components(card, component) {
 		if (!strncmp(component->name,
-			     ctx->codec_name, sizeof(ctx->codec_name))) {
+			     ctx->codec_i2c_name, sizeof(ctx->codec_i2c_name))) {
 
 			dev_dbg(component->dev, "enabling jack detect for resume.\n");
 			rt5670_jack_resume(component);
@@ -408,17 +431,18 @@ static int snd_cht_mc_probe(struct platform_device *pdev)
 	if (!drv)
 		return -ENOMEM;
 
-	strcpy(drv->codec_name, RT5672_I2C_DEFAULT);
+	strcpy(drv->codec_i2c_name, RT5672_I2C_DEFAULT);
 
 	/* fixup codec name based on HID */
 	i2c_name = acpi_dev_get_first_match_name(mach->id, NULL, -1);
 	if (i2c_name) {
-		snprintf(drv->codec_name, sizeof(drv->codec_name),
+		snprintf(drv->codec_i2c_name, sizeof(drv->codec_i2c_name),
 			 "i2c-%s", i2c_name);
 		for (i = 0; i < ARRAY_SIZE(cht_dailink); i++) {
-			if (!strcmp(cht_dailink[i].codec_name,
-				RT5672_I2C_DEFAULT)) {
-				cht_dailink[i].codec_name = drv->codec_name;
+			if (!strcmp(cht_dailink[i].codecs[0].name,
+				    RT5672_I2C_DEFAULT)) {
+				cht_dailink[i].codecs[0].name =
+					drv->codec_i2c_name;
 				break;
 			}
 		}
