@@ -117,14 +117,28 @@ static int byt_max98090_init(struct snd_soc_pcm_runtime *runtime)
 				       hs_jack_gpios);
 }
 
+static struct snd_soc_dai_link_component max98090_component[] = {
+	{
+		.name =  "i2c-193C9890:00",
+		.dai_name = "HiFi"
+	}
+};
+
+static struct snd_soc_dai_link_component platform_component[] = {
+	{
+		.name = "baytrail-pcm-audio"
+	}
+};
+
 static struct snd_soc_dai_link byt_max98090_dais[] = {
 	{
 		.name = "Baytrail Audio",
 		.stream_name = "Audio",
 		.cpu_dai_name = "baytrail-pcm-audio",
-		.codec_dai_name = "HiFi",
-		.codec_name = "i2c-193C9890:00",
-		.platform_name = "baytrail-pcm-audio",
+		.codecs = max98090_component,
+		.num_codecs = ARRAY_SIZE(max98090_component),
+		.platforms = platform_component,
+		.num_platforms = ARRAY_SIZE(platform_component),
 		.init = byt_max98090_init,
 		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
 			   SND_SOC_DAIFMT_CBS_CFS,
