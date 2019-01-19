@@ -638,9 +638,29 @@ static int sof_pcm_probe(struct snd_soc_component *component)
 		snd_soc_component_get_drvdata(component);
 	struct snd_sof_pdata *plat_data = dev_get_platdata(component->dev);
 	const char *tplg_filename;
+	const char *drv_name;
+	const void *mach;
+	int size;
 	int ret, err;
 
-	/* load the default topology */
+	/* register the machine driver which registers the sounds card */
+	drv_name = plat_data->machine->drv_name;
+	mach = (const void *)plat_data->machine;
+	size = sizeof(*plat_data->machine);
+
+	plat_data->pdev_mach =
+		platform_device_register_data(sdev->dev, drv_name,
+					      PLATFORM_DEVID_NONE, mach, size);
+
+	if (IS_ERR(plat_data->pdev_mach)) {
+		ret = PTR_ERR(plat_data->pdev_mach);
+		goto err;
+	}
+
+	dev_dbg(sdev->dev, "created machine %s\n",
+		dev_name(&plat_data->pdev_mach->dev));
+
+	/* load the default topology. needs a valid sound card */
 	sdev->component = component;
 	tplg_filename = plat_data->machine->sof_tplg_filename;
 
@@ -670,11 +690,16 @@ static void sof_pcm_remove(struct snd_soc_component *component)
 {
 	struct snd_sof_dev *sdev =
 		snd_soc_component_get_drvdata(component);
+	struct snd_sof_pdata *plat_data = dev_get_platdata(component->dev);
 
 	pm_runtime_disable(component->dev);
 
-	/* free topology */
+	/* free topology before the sound card is unregistered */
 	snd_sof_free_topology(sdev);
+
+	/* now machine driver and free the card */
+	if (plat_data && !IS_ERR_OR_NULL(plat_data->pdev_mach))
+		platform_device_unregister(plat_data->pdev_mach);
 }
 
 void snd_sof_new_platform_drv(struct snd_sof_dev *sdev)

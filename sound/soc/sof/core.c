@@ -229,9 +229,6 @@ static int sof_probe(struct platform_device *pdev)
 {
 	struct snd_sof_pdata *plat_data = dev_get_platdata(&pdev->dev);
 	struct snd_sof_dev *sdev;
-	const char *drv_name;
-	const void *mach;
-	int size;
 	int ret;
 
 	sdev = devm_kzalloc(&pdev->dev, sizeof(*sdev), GFP_KERNEL);
@@ -334,27 +331,8 @@ static int sof_probe(struct platform_device *pdev)
 		goto fw_run_err;
 	}
 
-	drv_name = plat_data->machine->drv_name;
-	mach = (const void *)plat_data->machine;
-	size = sizeof(*plat_data->machine);
-
-	/* register machine driver, pass machine info as pdata */
-	plat_data->pdev_mach =
-		platform_device_register_data(sdev->dev, drv_name,
-					      PLATFORM_DEVID_NONE, mach, size);
-
-	if (IS_ERR(plat_data->pdev_mach)) {
-		ret = PTR_ERR(plat_data->pdev_mach);
-		goto comp_err;
-	}
-
-	dev_dbg(sdev->dev, "created machine %s\n",
-		dev_name(&plat_data->pdev_mach->dev));
-
 	return 0;
 
-comp_err:
-	snd_soc_unregister_component(&pdev->dev);
 fw_run_err:
 	snd_sof_fw_unload(sdev);
 fw_load_err:
@@ -370,7 +348,6 @@ dbg_err:
 static int sof_remove(struct platform_device *pdev)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(&pdev->dev);
-	struct snd_sof_pdata *pdata = sdev->pdata;
 
 	snd_soc_unregister_component(&pdev->dev);
 	snd_sof_fw_unload(sdev);
@@ -378,14 +355,6 @@ static int sof_remove(struct platform_device *pdev)
 	snd_sof_free_debug(sdev);
 	snd_sof_free_trace(sdev);
 	snd_sof_remove(sdev);
-
-	/*
-	 * platform_device_unregister() frees the card and its resources.
-	 * So it should be called after unregistering the comp driver
-	 * so that the card is valid while unregistering comp driver.
-	 */
-	if (pdata && !IS_ERR_OR_NULL(pdata->pdev_mach))
-		platform_device_unregister(pdata->pdev_mach);
 
 	return 0;
 }
