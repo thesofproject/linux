@@ -2795,3 +2795,16 @@ int snd_sof_load_topology(struct snd_sof_dev *sdev, const char *file)
 }
 EXPORT_SYMBOL(snd_sof_load_topology);
 
+void snd_sof_free_topology(struct snd_sof_dev *sdev)
+{
+	int ret;
+
+	dev_dbg(sdev->dev, "free topology...\n");
+
+	ret = snd_soc_tplg_component_remove(sdev->component,
+					    SND_SOC_TPLG_INDEX_ALL);
+	if (ret < 0)
+		dev_err(sdev->dev,
+			"error: tplg component free failed %d\n", ret);
+}
+EXPORT_SYMBOL(snd_sof_free_topology);
