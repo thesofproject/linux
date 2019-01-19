@@ -322,9 +322,9 @@ static int sof_probe(struct platform_device *pdev)
 	sdev->first_boot = false;
 
 	/* now register audio DSP platform driver and dai */
-	ret = snd_soc_register_component(&pdev->dev, &sdev->plat_drv,
-					 sof_ops(sdev)->drv,
-					 sof_ops(sdev)->num_drv);
+	ret = devm_snd_soc_register_component(&pdev->dev, &sdev->plat_drv,
+					      sof_ops(sdev)->drv,
+					      sof_ops(sdev)->num_drv);
 	if (ret < 0) {
 		dev_err(sdev->dev,
 			"error: failed to register DSP DAI driver %d\n", ret);
@@ -349,7 +349,6 @@ static int sof_remove(struct platform_device *pdev)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(&pdev->dev);
 
-	snd_soc_unregister_component(&pdev->dev);
 	snd_sof_fw_unload(sdev);
 	snd_sof_ipc_free(sdev);
 	snd_sof_free_debug(sdev);
