@@ -234,7 +234,7 @@ static inline int snd_sof_dsp_is_ready(struct snd_sof_dev *sdev)
 	if (sdev->ops->is_ready)
 		return sdev->ops->is_ready(sdev);
 
-	return 0;
+	return 1;
 }
 
 static inline int snd_sof_dsp_cmd_done(struct snd_sof_dev *sdev,
