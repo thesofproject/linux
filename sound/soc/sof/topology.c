@@ -2346,11 +2346,17 @@ static int sof_link_load(struct snd_soc_component *scomp, int index,
 	int ret = 0;
 
 	link->platform_name = "sof-audio";
-	link->nonatomic = true;
 
-	/* send BE configurations to DSP */
-	if (!link->no_pcm)
+	/*
+	 * Set nonatomic property for FE dai links as their trigger action
+	 * involves IPC's.
+	 */
+	if (!link->no_pcm) {
+		link->nonatomic = true;
+
+		/* nothing more to do for FE dai links */
 		return 0;
+	}
 
 	/* usually we use 1 config, but for HDA it may be 0 ATM */
 	if (le32_to_cpu(cfg->num_hw_configs) != 1)
@@ -2363,6 +2369,7 @@ static int sof_link_load(struct snd_soc_component *scomp, int index,
 		return -EINVAL;
 	}
 
+	/* Send BE DAI link configurations to DSP */
 	memset(&config, 0, sizeof(config));
 
 	/* get any common DAI tokens */
