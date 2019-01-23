@@ -247,6 +247,15 @@ static int spi_sof_probe(struct snd_sof_dev *sdev)
 	unsigned int irq_trigger, irq_sense;
 	int ret;
 
+	if (!spi) {
+		/*
+		 * Thie will not happen. We register sof-audio device in
+		 * pdev->dev.parent's probe() then invoke this functin.
+		 */
+		dev_err(sdev->dev, "error: can't get spi device\n");
+		return -ENODEV;
+	}
+
 	sdev->ipc_irq = spi->irq;
 	dev_dbg(sdev->dev, "using IRQ %d\n", sdev->ipc_irq);
 	irqd = irq_get_irq_data(sdev->ipc_irq);
