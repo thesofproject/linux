@@ -312,10 +312,8 @@ static struct snd_sof_ipc_msg *sof_ipc_reply_find_msg(struct snd_sof_ipc *ipc,
 	struct snd_sof_dev *sdev = ipc->sdev;
 	struct snd_sof_ipc_msg *msg;
 
-	header = SOF_IPC_MESSAGE_ID(header);
-
 	list_for_each_entry(msg, &ipc->reply_list, list) {
-		if (SOF_IPC_MESSAGE_ID(msg->header) == header)
+		if (msg->header == header)
 			return msg;
 	}
 
