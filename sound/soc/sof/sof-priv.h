@@ -418,7 +418,6 @@ struct snd_sof_ipc *snd_sof_ipc_init(struct snd_sof_dev *sdev);
 void snd_sof_ipc_free(struct snd_sof_dev *sdev);
 int snd_sof_ipc_reply(struct snd_sof_dev *sdev, u32 msg_id);
 void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev);
-void snd_sof_ipc_msgs_tx(struct snd_sof_dev *sdev);
 int snd_sof_ipc_stream_pcm_params(struct snd_sof_dev *sdev,
 				  struct sof_ipc_pcm_params *params);
 int snd_sof_dsp_mailbox_init(struct snd_sof_dev *sdev, u32 dspbox,

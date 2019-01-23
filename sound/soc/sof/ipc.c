@@ -32,13 +32,9 @@ static void ipc_stream_message(struct snd_sof_dev *sdev, u32 msg_cmd);
 struct snd_sof_ipc {
 	struct snd_sof_dev *sdev;
 
-	/* TX message work and status */
+	/* TX message status */
 	wait_queue_head_t wait_txq;
-	struct work_struct tx_kwork;
 	u32 msg_pending;
-
-	/* Rx Message work and status */
-	struct work_struct rx_kwork;
 
 	/* lists */
 	struct list_head tx_list;
@@ -191,6 +187,34 @@ static inline void ipc_log_header(struct device *dev, u8 *text, u32 cmd)
 }
 #endif
 
+/* caller need hold ipc_lock, send next IPC message in list */
+static void ipc_tx_next_msg_unlock(struct snd_sof_ipc *ipc)
+{
+	struct snd_sof_dev *sdev = ipc->sdev;
+	struct snd_sof_ipc_msg *msg;
+
+	/* send message if HW read and message in TX list */
+	if (list_empty(&ipc->tx_list) || !snd_sof_dsp_is_ready(sdev))
+		return;
+
+	/* send first message in TX list */
+	msg = list_first_entry(&ipc->tx_list, struct snd_sof_ipc_msg, list);
+	list_move(&msg->list, &ipc->reply_list);
+	snd_sof_dsp_send_msg(sdev, msg);
+
+	ipc_log_header(sdev->dev, "ipc tx", msg->header);
+}
+
+/* send next IPC message in list */
+static void ipc_tx_next_msg(struct snd_sof_ipc *ipc)
+{
+	struct snd_sof_dev *sdev = ipc->sdev;
+
+	spin_lock_irq(&sdev->ipc_lock);
+	ipc_tx_next_msg_unlock(ipc);
+	spin_unlock_irq(&sdev->ipc_lock);
+}
+
 /* wait for IPC message reply */
 static int tx_wait_done(struct snd_sof_ipc *ipc, struct snd_sof_ipc_msg *msg,
 			void *reply_data)
@@ -235,8 +259,8 @@ static int tx_wait_done(struct snd_sof_ipc *ipc, struct snd_sof_ipc_msg *msg,
 
 	snd_sof_dsp_cmd_done(sdev, SOF_IPC_DSP_REPLY);
 
-	/* continue to schedule any remaining messages... */
-	snd_sof_ipc_msgs_tx(sdev);
+	/* continue to send any remaining messages... */
+	ipc_tx_next_msg(sdev->ipc);
 
 	return ret;
 }
@@ -270,9 +294,8 @@ int sof_ipc_tx_message(struct snd_sof_ipc *ipc, u32 header,
 	/* add message to transmit list */
 	list_add_tail(&msg->list, &ipc->tx_list);
 
-	/* schedule the message if not busy */
-	if (snd_sof_dsp_is_ready(sdev))
-		schedule_work(&ipc->tx_kwork);
+	/* try to send the message */
+	ipc_tx_next_msg_unlock(ipc);
 
 	spin_unlock_irq(&sdev->ipc_lock);
 
@@ -280,30 +303,6 @@ int sof_ipc_tx_message(struct snd_sof_ipc *ipc, u32 header,
 	return tx_wait_done(ipc, msg, reply_data);
 }
 EXPORT_SYMBOL(sof_ipc_tx_message);
-
-/* send next IPC message in list */
-static void ipc_tx_next_msg(struct work_struct *work)
-{
-	struct snd_sof_ipc *ipc =
-		container_of(work, struct snd_sof_ipc, tx_kwork);
-	struct snd_sof_dev *sdev = ipc->sdev;
-	struct snd_sof_ipc_msg *msg;
-
-	spin_lock_irq(&sdev->ipc_lock);
-
-	/* send message if HW read and message in TX list */
-	if (list_empty(&ipc->tx_list) || !snd_sof_dsp_is_ready(sdev))
-		goto out;
-
-	/* send first message in TX list */
-	msg = list_first_entry(&ipc->tx_list, struct snd_sof_ipc_msg, list);
-	list_move(&msg->list, &ipc->reply_list);
-	snd_sof_dsp_send_msg(sdev, msg);
-
-	ipc_log_header(sdev->dev, "ipc tx", msg->header);
-out:
-	spin_unlock_irq(&sdev->ipc_lock);
-}
 
 /* find original TX message from DSP reply */
 static struct snd_sof_ipc_msg *sof_ipc_reply_find_msg(struct snd_sof_ipc *ipc,
@@ -374,11 +373,8 @@ int snd_sof_ipc_reply(struct snd_sof_dev *sdev, u32 msg_id)
 EXPORT_SYMBOL(snd_sof_ipc_reply);
 
 /* DSP firmware has sent host a message  */
-static void ipc_msgs_rx(struct work_struct *work)
+void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev)
 {
-	struct snd_sof_ipc *ipc =
-		container_of(work, struct snd_sof_ipc, rx_kwork);
-	struct snd_sof_dev *sdev = ipc->sdev;
 	struct sof_ipc_cmd_hdr hdr;
 	u32 cmd, type;
 	int err = -EINVAL;
@@ -432,19 +428,6 @@ static void ipc_msgs_rx(struct work_struct *work)
 
 	/* tell DSP we are done */
 	snd_sof_dsp_cmd_done(sdev, SOF_IPC_HOST_REPLY);
-}
-
-/* schedule work to transmit any IPC in queue */
-void snd_sof_ipc_msgs_tx(struct snd_sof_dev *sdev)
-{
-	schedule_work(&sdev->ipc->tx_kwork);
-}
-EXPORT_SYMBOL(snd_sof_ipc_msgs_tx);
-
-/* schedule work to handle IPC from DSP */
-void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev)
-{
-	schedule_work(&sdev->ipc->rx_kwork);
 }
 EXPORT_SYMBOL(snd_sof_ipc_msgs_rx);
 
@@ -769,8 +752,6 @@ struct snd_sof_ipc *snd_sof_ipc_init(struct snd_sof_dev *sdev)
 	INIT_LIST_HEAD(&ipc->reply_list);
 	INIT_LIST_HEAD(&ipc->empty_list);
 	init_waitqueue_head(&ipc->wait_txq);
-	INIT_WORK(&ipc->tx_kwork, ipc_tx_next_msg);
-	INIT_WORK(&ipc->rx_kwork, ipc_msgs_rx);
 	ipc->sdev = sdev;
 
 	/* pre-allocate messages */
@@ -803,7 +784,5 @@ EXPORT_SYMBOL(snd_sof_ipc_init);
 
 void snd_sof_ipc_free(struct snd_sof_dev *sdev)
 {
-	cancel_work_sync(&sdev->ipc->tx_kwork);
-	cancel_work_sync(&sdev->ipc->rx_kwork);
 }
 EXPORT_SYMBOL(snd_sof_ipc_free);
