@@ -152,7 +152,8 @@ irqreturn_t hda_dsp_ipc_irq_thread(int irq, void *context)
 
 		/* handle immediate reply from DSP core - ignore ROM messages */
 		if (msg != 0x1004000)
-			reply = snd_sof_ipc_reply(sdev, msg);
+			reply = snd_sof_ipc_reply(sdev, msg,
+						  HDA_DSP_REG_HIPCI_MSG_MASK);
 
 		/*
 		 * handle immediate reply from DSP core. If the msg is

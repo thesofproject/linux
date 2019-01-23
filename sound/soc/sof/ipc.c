@@ -307,13 +307,13 @@ out:
 
 /* find original TX message from DSP reply */
 static struct snd_sof_ipc_msg *sof_ipc_reply_find_msg(struct snd_sof_ipc *ipc,
-						      u32 header)
+						      u32 header, u32 mask)
 {
 	struct snd_sof_dev *sdev = ipc->sdev;
 	struct snd_sof_ipc_msg *msg;
 
 	list_for_each_entry(msg, &ipc->reply_list, list) {
-		if (msg->header == header)
+		if ((msg->header & mask) == header)
 			return msg;
 	}
 
@@ -354,11 +354,11 @@ void sof_ipc_drop_all(struct snd_sof_ipc *ipc)
 EXPORT_SYMBOL(sof_ipc_drop_all);
 
 /* handle reply message from DSP */
-int snd_sof_ipc_reply(struct snd_sof_dev *sdev, u32 msg_id)
+int snd_sof_ipc_reply(struct snd_sof_dev *sdev, u32 msg_id, u32 msg_mask)
 {
 	struct snd_sof_ipc_msg *msg;
 
-	msg = sof_ipc_reply_find_msg(sdev->ipc, msg_id);
+	msg = sof_ipc_reply_find_msg(sdev->ipc, msg_id, msg_mask);
 	if (!msg) {
 		dev_err(sdev->dev, "error: can't find message header 0x%x",
 			msg_id);

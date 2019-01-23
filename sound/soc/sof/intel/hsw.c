@@ -281,7 +281,7 @@ static irqreturn_t hsw_irq_thread(int irq, void *context)
 		 * because the done bit can't be set in cmd_done function
 		 * which is triggered by msg
 		 */
-		if (snd_sof_ipc_reply(sdev, ipcx))
+		if (snd_sof_ipc_reply(sdev, ipcx, U32_MAX))
 			hsw_cmd_done(sdev, SOF_IPC_DSP_REPLY);
 	}
 

@@ -63,7 +63,7 @@ static irqreturn_t cnl_ipc_irq_thread(int irq, void *context)
 		 * because the done bit can't be set in cmd_done function
 		 * which is triggered by msg
 		 */
-		if (snd_sof_ipc_reply(sdev, msg))
+		if (snd_sof_ipc_reply(sdev, msg, CNL_DSP_REG_HIPCIDA_MSG_MASK))
 			cnl_ipc_cmd_done(sdev, SOF_IPC_DSP_REPLY);
 
 		ret = IRQ_HANDLED;
