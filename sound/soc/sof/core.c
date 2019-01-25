@@ -389,9 +389,11 @@ static int sof_probe(struct platform_device *pdev)
 
 	/*
 	 * so far so good, set the drvdata which can be used to test probe
-	 * success.
+	 * success. Also let the parent device know the probe completed
 	 */
 	dev_set_drvdata(&pdev->dev, sdev);
+	if (plat_data->sof_probe_complete)
+		plat_data->sof_probe_complete(sdev->parent);
 
 	return 0;
 
