@@ -282,7 +282,6 @@ static int sof_probe(struct platform_device *pdev)
 	INIT_LIST_HEAD(&sdev->widget_list);
 	INIT_LIST_HEAD(&sdev->dai_list);
 	INIT_LIST_HEAD(&sdev->route_list);
-	dev_set_drvdata(&pdev->dev, sdev);
 	spin_lock_init(&sdev->ipc_lock);
 	spin_lock_init(&sdev->hw_lock);
 
@@ -387,6 +386,12 @@ static int sof_probe(struct platform_device *pdev)
 
 	dev_dbg(sdev->dev, "created machine %s\n",
 		dev_name(&plat_data->pdev_mach->dev));
+
+	/*
+	 * so far so good, set the drvdata which can be used to test probe
+	 * success.
+	 */
+	dev_set_drvdata(&pdev->dev, sdev);
 
 	return 0;
 
