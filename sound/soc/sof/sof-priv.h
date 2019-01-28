@@ -384,6 +384,7 @@ struct snd_sof_dev {
 struct sof_platform_priv {
 	struct snd_sof_pdata *sof_pdata;
 	struct platform_device *pdev_pcm;
+	int probe_complete;
 };
 
 /*

@@ -257,6 +257,7 @@ static int sof_machine_check(struct snd_sof_dev *sdev)
 static int sof_probe(struct platform_device *pdev)
 {
 	struct snd_sof_pdata *plat_data = dev_get_platdata(&pdev->dev);
+	struct sof_platform_priv *priv = dev_get_drvdata(plat_data->dev);
 	struct snd_sof_dev *sdev;
 	const char *drv_name;
 	const void *mach;
@@ -384,6 +385,8 @@ static int sof_probe(struct platform_device *pdev)
 		ret = PTR_ERR(plat_data->pdev_mach);
 		goto comp_err;
 	}
+
+	priv->probe_complete = true;
 
 	dev_dbg(sdev->dev, "created machine %s\n",
 		dev_name(&plat_data->pdev_mach->dev));
