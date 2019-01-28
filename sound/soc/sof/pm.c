@@ -234,6 +234,10 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 	struct snd_sof_dev *sdev = dev_get_drvdata(&priv->pdev_pcm->dev);
 	int ret = 0;
 
+	/* do nothing if the probe failed somehow */
+	if (!sdev)
+		return 0;
+
 	/* do nothing if dsp resume callbacks are not set */
 	if (!sof_ops(sdev)->resume || !sof_ops(sdev)->runtime_resume)
 		return 0;
@@ -303,6 +307,10 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 	struct sof_platform_priv *priv = dev_get_drvdata(dev);
 	struct snd_sof_dev *sdev = dev_get_drvdata(&priv->pdev_pcm->dev);
 	int ret = 0;
+
+	/* do nothing if the probe failed somehow */
+	if (!sdev)
+		return 0;
 
 	/* do nothing if dsp suspend callback is not set */
 	if (!sof_ops(sdev)->suspend)
