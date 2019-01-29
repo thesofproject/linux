@@ -23,14 +23,16 @@
  * DSP/host memory space.
  */
 enum snd_sof_fw_blk_type {
-	SOF_BLK_IMAGE	= 0,	/* whole image - parsed by ROMs */
-	SOF_BLK_TEXT	= 1,
-	SOF_BLK_DATA	= 2,
-	SOF_BLK_CACHE	= 3,
-	SOF_BLK_REGS	= 4,
-	SOF_BLK_SIG	= 5,
-	SOF_BLK_ROM	= 6,
+	SOF_FW_BAR_TYPE_INVALID	= -1,
+	SOF_FW_BAR_TYPE_START	= 0,
+	SOF_FW_BAR_TYPE_RESERVED	= SOF_FW_BAR_TYPE_START,
+	SOF_FW_BAR_TYPE_IRAM	= 1,    /* local instruction RAM */
+	SOF_FW_BAR_TYPE_DRAM	= 2,	/* local data RAM */
+	SOF_FW_BAR_TYPE_SRAM	= 3,	/* system RAM */
+	SOF_FW_BAR_TYPE_ROM	= 4,
+	SOF_FW_BAR_TYPE_IMR	= 5,
 	/* add new block types here */
+	SOF_FW_BAR_TYPE_NUM
 };
 
 struct snd_sof_blk_hdr {

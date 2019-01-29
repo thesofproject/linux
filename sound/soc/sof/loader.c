@@ -121,14 +121,7 @@ int snd_sof_parse_module_memcpy(struct snd_sof_dev *sdev,
 		}
 
 		switch (block->type) {
-		case SOF_BLK_IMAGE:
-		case SOF_BLK_CACHE:
-		case SOF_BLK_REGS:
-		case SOF_BLK_SIG:
-		case SOF_BLK_ROM:
-			continue;	/* not handled atm */
-		case SOF_BLK_TEXT:
-		case SOF_BLK_DATA:
+		case SOF_FW_BAR_TYPE_START ... SOF_FW_BAR_TYPE_NUM-1:
 			offset = block->offset;
 			break;
 		default:
