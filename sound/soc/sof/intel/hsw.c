@@ -551,14 +551,16 @@ static int hsw_probe(struct snd_sof_dev *sdev)
 	}
 
 	dev_dbg(sdev->dev, "LPE PHY base at 0x%x size 0x%x", base, size);
-	sdev->bar[HSW_DSP_BAR] = devm_ioremap(sdev->dev, base, size);
-	if (!sdev->bar[HSW_DSP_BAR]) {
+	sdev->bar[SOF_FW_BAR_TYPE_DRAM] = devm_ioremap(sdev->dev, base, size);
+	if (!sdev->bar[SOF_FW_BAR_TYPE_DRAM]) {
 		dev_err(sdev->dev,
 			"error: failed to ioremap LPE base 0x%x size 0x%x\n",
 			base, size);
 		return -ENODEV;
 	}
-	dev_dbg(sdev->dev, "LPE VADDR %p\n", sdev->bar[HSW_DSP_BAR]);
+	dev_dbg(sdev->dev, "LPE VADDR %p\n", sdev->bar[SOF_FW_BAR_TYPE_DRAM]);
+
+	sdev->bar[SOF_FW_BAR_TYPE_IRAM] = sdev->bar[SOF_FW_BAR_TYPE_DRAM];
 
 	/* TODO: add offsets */
 	sdev->mmio_bar = HSW_DSP_BAR;
@@ -577,14 +579,14 @@ static int hsw_probe(struct snd_sof_dev *sdev)
 	}
 
 	dev_dbg(sdev->dev, "PCI base at 0x%x size 0x%x", base, size);
-	sdev->bar[HSW_PCI_BAR] = devm_ioremap(sdev->dev, base, size);
+	sdev->bar[SOF_BAR_TYPE_PCI] = devm_ioremap(sdev->dev, base, size);
 	if (!sdev->bar[HSW_PCI_BAR]) {
 		dev_err(sdev->dev,
 			"error: failed to ioremap PCI base 0x%x size 0x%x\n",
 			base, size);
 		return -ENODEV;
 	}
-	dev_dbg(sdev->dev, "PCI VADDR %p\n", sdev->bar[HSW_PCI_BAR]);
+	dev_dbg(sdev->dev, "PCI VADDR %p\n", sdev->bar[SOF_BAR_TYPE_PCI]);
 
 	/* register our IRQ */
 	sdev->ipc_irq = platform_get_irq(pdev, desc->irqindex_host_ipc);

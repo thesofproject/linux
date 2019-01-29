@@ -55,9 +55,9 @@
 #define MBOX_DUMP_SIZE	0x30
 
 /* BARs */
-#define BYT_DSP_BAR		0
-#define BYT_PCI_BAR		1
-#define BYT_IMR_BAR		2
+#define BYT_DSP_BAR		SOF_BAR_TYPE_DRAM
+#define BYT_PCI_BAR		SOF_BAR_TYPE_PCI
+#define BYT_IMR_BAR		SOF_BAR_TYPE_IMR
 
 static const struct snd_sof_debugfs_map byt_debugfs[] = {
 	{"dmac0", BYT_DSP_BAR, DMAC0_OFFSET, DMAC_SIZE},
@@ -531,13 +531,15 @@ static int byt_pci_probe(struct snd_sof_dev *sdev)
 	size = BYT_PCI_BAR_SIZE;
 
 	dev_dbg(sdev->dev, "LPE PHY base at 0x%x size 0x%x", base, size);
-	sdev->bar[BYT_DSP_BAR] = devm_ioremap(sdev->dev, base, size);
-	if (!sdev->bar[BYT_DSP_BAR]) {
+	sdev->bar[SOF_BAR_TYPE_DRAM] = devm_ioremap(sdev->dev, base, size);
+	if (!sdev->bar[SOF_DSP_BAR_TYPE_DRAM]) {
 		dev_err(sdev->dev, "error: failed to ioremap LPE base 0x%x size 0x%x\n",
 			base, size);
 		return -ENODEV;
 	}
-	dev_dbg(sdev->dev, "LPE VADDR %p\n", sdev->bar[BYT_DSP_BAR]);
+	dev_dbg(sdev->dev, "LPE VADDR %p\n", sdev->bar[SOF_BAR_TYPE_DRAM]);
+
+	sdev->bar[SOF_BAR_TYPE_IRAM] = sdev->bar[SOF_BAR_TYPE_DRAM];
 
 	/* IMR base - optional */
 	if (desc->resindex_imr_base == -1)
@@ -553,13 +555,13 @@ static int byt_pci_probe(struct snd_sof_dev *sdev)
 	}
 
 	dev_dbg(sdev->dev, "IMR base at 0x%x size 0x%x", base, size);
-	sdev->bar[BYT_IMR_BAR] = devm_ioremap(sdev->dev, base, size);
-	if (!sdev->bar[BYT_IMR_BAR]) {
+	sdev->bar[SOF_BAR_TYPE_IMR] = devm_ioremap(sdev->dev, base, size);
+	if (!sdev->bar[SOF_BAR_TYPE_IMR]) {
 		dev_err(sdev->dev, "error: failed to ioremap IMR base 0x%x size 0x%x\n",
 			base, size);
 		return -ENODEV;
 	}
-	dev_dbg(sdev->dev, "IMR VADDR %p\n", sdev->bar[BYT_IMR_BAR]);
+	dev_dbg(sdev->dev, "IMR VADDR %p\n", sdev->bar[SOF_BAR_TYPE_IMR]);
 
 irq:
 	/* register our IRQ */

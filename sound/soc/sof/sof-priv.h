@@ -62,6 +62,20 @@ struct snd_soc_component;
 struct snd_sof_pdata;
 
 /*
+ * ... more BAR types, this time specific to Linux.
+ * These are in continuation of FW BAR types specified
+ * by snd_sof_fw_blk_type enum
+ */
+enum snd_sof_blk_type {
+	SOF_BAR_TYPE_PCI = SOF_FW_BAR_TYPE_NUM,
+	SOF_BAR_TYPE_HDA,
+	SOF_BAR_TYPE_PP,
+	SOF_BAR_TYPE_SPIB,
+	SOF_BAR_TYPE_DRSM,
+	SOF_BAR_TYPE_NUM
+};
+
+/*
  * SOF DSP HW abstraction operations.
  * Used to abstract DSP HW architecture and any IO busses between host CPU
  * and DSP device(s).
@@ -328,7 +342,7 @@ struct snd_sof_dev {
 	u32 next_comp_id; /* monotonic - reset during S3 */
 
 	/* memory bases for mmaped DSPs - set by dsp_init() */
-	void __iomem *bar[SND_SOF_BARS];	/* DSP base address */
+	void __iomem *bar[SOF_BAR_TYPE_NUM];	/* DSP base address */
 	int mmio_bar;
 	int mailbox_bar;
 	size_t dsp_oops_offset;
