@@ -300,11 +300,15 @@ static int sof_control_load_bytes(struct snd_soc_component *scomp,
 	struct sof_ipc_ctrl_data *cdata;
 	struct snd_soc_tplg_bytes_control *control =
 		(struct snd_soc_tplg_bytes_control *)hdr;
+	/*
 	const int max_size = SOF_IPC_MSG_MAX_SIZE -
 		sizeof(const struct sof_ipc_ctrl_data);
+	*/
+
+	const int max_size = SOF_IPC_MSG_MAX_SIZE * 10;
 
 	/* init the get/put bytes data */
-	scontrol->size = SOF_IPC_MSG_MAX_SIZE;
+	scontrol->size = max_size;
 	scontrol->control_data = kzalloc(scontrol->size, GFP_KERNEL);
 	cdata = scontrol->control_data;
 	if (!scontrol->control_data)
