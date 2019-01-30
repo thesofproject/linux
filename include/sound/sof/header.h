@@ -48,7 +48,7 @@
 #define SOF_IPC_FW_READY			SOF_GLB_TYPE(0x7U)
 #define SOF_IPC_GLB_DAI_MSG			SOF_GLB_TYPE(0x8U)
 #define SOF_IPC_GLB_TRACE_MSG			SOF_GLB_TYPE(0x9U)
-
+#define SOF_IPC_GLB_LARGE                       SOF_GLB_TYPE(0xBU)
 /*
  * DSP Command Message Types
  */
@@ -151,6 +151,14 @@ struct sof_ipc_reply {
 struct sof_ipc_compound_hdr {
 	struct sof_ipc_cmd_hdr hdr;
 	uint32_t count;		/**< count of 0 means end of compound sequence */
+}  __packed;
+
+struct sof_ipc_large_hdr {
+	struct sof_ipc_cmd_hdr hdr;
+	uint32_t cmd;
+	uint32_t count;
+	uint32_t id;
+	unsigned char data[];
 }  __packed;
 
 /** @}*/
