@@ -208,6 +208,7 @@ static int sof_pci_probe(struct pci_dev *pci,
 		ret = -ENOMEM;
 		goto release_regions;
 	}
+	pm_suspend_ignore_children(dev, true);
 	ret = sof_nocodec_setup(dev, sof_pdata, mach, desc, ops);
 	if (ret < 0)
 		goto release_regions;
