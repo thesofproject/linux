@@ -243,6 +243,8 @@ struct sof_process_types {
 static const struct sof_process_types sof_processs[] = {
 	{"EQFIR", SOF_PROCESS_EQFIR},
 	{"EQIIR", SOF_PROCESS_EQIIR},
+	{"KEYWORD_DETECT", SOF_PROCESS_KEYWORD_DETECT},
+	{"VOICE_DETECT", SOF_PROCESS_VOICE_DETECT},
 };
 
 static enum sof_ipc_process_type find_process(const char *name)
@@ -1757,6 +1759,14 @@ static int sof_widget_load_process(struct snd_soc_component *scomp, int index,
 	case SOF_PROCESS_EQIIR:
 		ret = sof_process_load(scomp, index, swidget, tw, r,
 				       SOF_COMP_EQ_IIR);
+		break;
+	case SOF_PROCESS_KEYWORD_DETECT:
+		ret = sof_process_load(scomp, index, swidget, tw, r,
+				       SOF_COMP_KEYWORD_DETECT);
+		break;
+	case SOF_PROCESS_VOICE_DETECT:
+		ret = sof_process_load(scomp, index, swidget, tw, r,
+				       SOF_COMP_VOICE_DETECT);
 		break;
 	default:
 		dev_err(sdev->dev, "error: invalid process type %d\n",
