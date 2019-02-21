@@ -29,12 +29,6 @@ int hda_dsp_ipc_cmd_done(struct snd_sof_dev *sdev, int dir)
 					       HDA_DSP_REG_HIPCT,
 					       HDA_DSP_REG_HIPCT_BUSY,
 					       HDA_DSP_REG_HIPCT_BUSY);
-
-		/* unmask BUSY interrupt */
-		snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR,
-					HDA_DSP_REG_HIPCCTL,
-					HDA_DSP_REG_HIPCCTL_BUSY,
-					HDA_DSP_REG_HIPCCTL_BUSY);
 	} else {
 		/*
 		 * set DONE bit - tell DSP we have received the reply msg
@@ -44,13 +38,11 @@ int hda_dsp_ipc_cmd_done(struct snd_sof_dev *sdev, int dir)
 					       HDA_DSP_REG_HIPCIE,
 					       HDA_DSP_REG_HIPCIE_DONE,
 					       HDA_DSP_REG_HIPCIE_DONE);
-
-		/* unmask Done interrupt */
-		snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR,
-					HDA_DSP_REG_HIPCCTL,
-					HDA_DSP_REG_HIPCCTL_DONE,
-					HDA_DSP_REG_HIPCCTL_DONE);
 	}
+
+	/* reenable IPC interrupt */
+	snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR, HDA_DSP_REG_ADSPIC,
+				HDA_DSP_ADSPIC_IPC, HDA_DSP_ADSPIC_IPC);
 
 	return 0;
 }
@@ -150,11 +142,6 @@ irqreturn_t hda_dsp_ipc_irq_thread(int irq, void *context)
 			 "ipc: firmware response, msg:0x%x, msg_ext:0x%x\n",
 			 msg, msg_ext);
 
-		/* mask Done interrupt */
-		snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR,
-					HDA_DSP_REG_HIPCCTL,
-					HDA_DSP_REG_HIPCCTL_DONE, 0);
-
 		/* handle immediate reply from DSP core - ignore ROM messages */
 		if (msg != 0x1004000)
 			reply = snd_sof_ipc_reply(sdev, msg);
@@ -184,11 +171,6 @@ irqreturn_t hda_dsp_ipc_irq_thread(int irq, void *context)
 			 "ipc: firmware initiated, msg:0x%x, msg_ext:0x%x\n",
 			 msg, msg_ext);
 
-		/* mask BUSY interrupt */
-		snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR,
-					HDA_DSP_REG_HIPCCTL,
-					HDA_DSP_REG_HIPCCTL_BUSY, 0);
-
 		/* handle messages from DSP */
 		if ((hipct & SOF_IPC_PANIC_MAGIC_MASK) == SOF_IPC_PANIC_MAGIC) {
 			/* this is a PANIC message !! */
@@ -199,12 +181,6 @@ irqreturn_t hda_dsp_ipc_irq_thread(int irq, void *context)
 		}
 
 		ret = IRQ_HANDLED;
-	}
-
-	if (ret == IRQ_HANDLED) {
-		/* reenable IPC interrupt */
-		snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR, HDA_DSP_REG_ADSPIC,
-					HDA_DSP_ADSPIC_IPC, HDA_DSP_ADSPIC_IPC);
 	}
 
 	/* wake up sleeper if we are loading code */
