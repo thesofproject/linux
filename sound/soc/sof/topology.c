@@ -38,6 +38,27 @@
 #define TLV_STEP	1
 #define TLV_MUTE	2
 
+static int sof_tplg_dapm_event(struct snd_soc_dapm_widget *w,
+			       struct snd_kcontrol *k, int event)
+{
+	struct snd_sof_widget *swidget = w->dobj.private;
+	struct snd_sof_dev *sdev;
+
+	if (!swidget)
+		return 0;
+
+	sdev = swidget->sdev;
+
+	dev_dbg(sdev->dev, "received event %d for widget %s\n",
+		event, w->name);
+
+	return 0;
+}
+
+static const struct snd_soc_tplg_widget_events sof_tplg_widget_ops[] = {
+	{SOF_DAPM_EVENT, sof_tplg_dapm_event},
+};
+
 static inline int get_tlv_data(const int *p, int tlv[TLV_ITEMS])
 {
 	/* we only support dB scale TLV type at the moment */
@@ -1905,6 +1926,17 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 		return ret;
 	}
 
+	if (tw->event_type) {
+		ret = snd_soc_tplg_widget_bind_event(swidget->widget,
+						     sof_tplg_widget_ops,
+						     ARRAY_SIZE(sof_tplg_widget_ops),
+						     tw->event_type);
+		if (ret) {
+			dev_err(sdev->dev, "error: widget event binding failed\n");
+			return -EINVAL;
+		}
+	}
+
 	w->dobj.private = swidget;
 	mutex_init(&swidget->mutex);
 	list_add(&swidget->list, &sdev->widget_list);
@@ -2714,6 +2746,10 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 		goto err;
 	}
 
+	/* if source is of type "snd_soc_dapm_output" ignore it */
+	if (source_swidget->id == snd_soc_dapm_output)
+		goto err;
+
 	connect->source_id = source_swidget->comp_id;
 
 	/* sink component */
@@ -2724,6 +2760,10 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 		ret = -EINVAL;
 		goto err;
 	}
+
+	/* if source is of type "snd_soc_dapm_output" ignore it */
+	if (sink_swidget->id == snd_soc_dapm_output)
+		goto err;
 
 	connect->sink_id = sink_swidget->comp_id;
 
