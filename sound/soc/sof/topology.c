@@ -38,11 +38,66 @@
 #define TLV_STEP	1
 #define TLV_MUTE	2
 
+/* helper function to send pcm params ipc */
+static int sigsink_pcm_params(struct snd_sof_widget *swidget)
+{
+	struct sof_ipc_pcm_params_reply ipc_params_reply;
+	struct snd_sof_dev *sdev = swidget->sdev;
+	struct sof_ipc_pcm_params pcm;
+	int ret = 0;
+
+	memset(&pcm, 0, sizeof(pcm));
+
+	/* set IPC PCM parameters */
+	pcm.hdr.size = sizeof(pcm);
+	pcm.hdr.cmd = SOF_IPC_GLB_STREAM_MSG | SOF_IPC_STREAM_PCM_PARAMS;
+	pcm.comp_id = swidget->comp_id;
+	pcm.params.hdr.size = sizeof(pcm.params);
+
+	dev_dbg(sdev->dev, "ranjani: comp_id is %d\b", swidget->comp_id);
+
+	/* SIGSINK implies direction has to be capture */
+	pcm.params.direction = SOF_IPC_STREAM_CAPTURE;
+
+	/* send IPC to the DSP */
+	ret = sof_ipc_tx_message(sdev->ipc, pcm.hdr.cmd, &pcm, sizeof(pcm),
+				 &ipc_params_reply, sizeof(ipc_params_reply));
+	if (ret < 0)
+		dev_err(sdev->dev, "error: setting pcm params for sigsink\n");
+
+	return ret;
+}
+
+ /* helper function to send stream trigger ipc for siggen pipeline */
+static int sigsink_trigger(struct snd_sof_widget *swidget, int cmd)
+{
+	struct snd_sof_dev *sdev = swidget->sdev;
+	struct sof_ipc_stream stream;
+	struct sof_ipc_reply reply;
+	int ret = 0;
+
+	/* set IPC stream params */
+	stream.hdr.size = sizeof(stream);
+	stream.hdr.cmd = SOF_IPC_GLB_STREAM_MSG | cmd;
+	stream.comp_id = swidget->comp_id;
+
+	/* send IPC to the DSP */
+	ret = sof_ipc_tx_message(sdev->ipc, stream.hdr.cmd, &stream,
+				 sizeof(stream), &reply, sizeof(reply));
+	if (ret < 0)
+		dev_err(sdev->dev, "error: failed to trigger %s\n",
+			swidget->widget->name);
+
+	return ret;
+}
+
 static int sof_tplg_dapm_event(struct snd_soc_dapm_widget *w,
 			       struct snd_kcontrol *k, int event)
 {
 	struct snd_sof_widget *swidget = w->dobj.private;
+	struct sof_ipc_comp_process *wprocess;
 	struct snd_sof_dev *sdev;
+	int ret;
 
 	if (!swidget)
 		return 0;
@@ -52,7 +107,57 @@ static int sof_tplg_dapm_event(struct snd_soc_dapm_widget *w,
 	dev_dbg(sdev->dev, "received event %d for widget %s\n",
 		event, w->name);
 
-	return 0;
+	if (swidget->id != snd_soc_dapm_effect)
+		return 0;
+
+	wprocess = (struct sof_ipc_comp_process *)swidget->private;
+	if (!wprocess)
+		return 0; /* FIXME: is this an error? */
+
+	/* nothing to do if this process comp isn't of type SIGSINK */
+	if (wprocess->subtype != SOF_PROCESS_SUBTYPE_SIGSINK)
+		return 0;
+
+	switch (event) {
+	case SND_SOC_DAPM_PRE_PMU:
+		/* set pcm params */
+		ret = sigsink_pcm_params(swidget);
+		if (ret < 0) {
+			dev_err(sdev->dev,
+				"error: failed to set pcm params for sigsink %s\n",
+				swidget->widget->name);
+			break;
+		}
+
+		/* start trigger */
+		ret = sigsink_trigger(swidget, SOF_IPC_STREAM_TRIG_START);
+		if (ret < 0)
+			dev_err(sdev->dev,
+				"error: failed to trigger sigsink %s\n",
+				swidget->widget->name);
+
+		break;
+	case SND_SOC_DAPM_PRE_PMD:
+		/* pcm free */
+		ret = sigsink_trigger(swidget, SOF_IPC_STREAM_PCM_FREE);
+		if (ret < 0)
+			dev_err(sdev->dev,
+				"error: failed to trigger sigsink %s\n",
+				swidget->widget->name);
+
+		/* stop trigger */
+		ret = sigsink_trigger(swidget, SOF_IPC_STREAM_TRIG_STOP);
+		if (ret < 0)
+			dev_err(sdev->dev,
+				"error: failed to trigger sigsink %s\n",
+				swidget->widget->name);
+
+		break;
+	default:
+		break;
+	}
+
+	return ret;
 }
 
 static const struct snd_soc_tplg_widget_events sof_tplg_widget_ops[] = {
