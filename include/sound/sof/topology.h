@@ -169,6 +169,12 @@ struct sof_ipc_comp_tone {
 } __packed;
 
 /** \brief Types of processing components */
+enum sof_ipc_process_subtype {
+	SOF_PROCESS_SUBTYPE_NONE = 0,		/**< None */
+	SOF_PROCESS_SUBTYPE_SIGSINK,		/**< Signal sink */
+};
+
+/** \brief Types of processing components */
 enum sof_ipc_process_type {
 	SOF_PROCESS_NONE = 0,		/**< None */
 	SOF_PROCESS_EQFIR,		/**< Intel FIR */
@@ -185,9 +191,10 @@ struct sof_ipc_comp_process {
 	struct sof_ipc_comp_config config;
 	uint32_t size;	/**< size of bespoke data section in bytes */
 	uint32_t type;	/**< sof_ipc_effect_type */
+	uint32_t subtype; /**< sof_ipc_process_subtype */
 
 	/* reserved for future use */
-	uint32_t reserved[7];
+	uint32_t reserved[6];
 
 	unsigned char data[0];
 } __packed;

@@ -261,6 +261,11 @@ struct sof_process_types {
 	enum sof_ipc_process_type type;
 };
 
+struct sof_process_subtypes {
+	const char *name;
+	enum sof_ipc_process_subtype subtype;
+};
+
 static const struct sof_process_types sof_processs[] = {
 	{"EQFIR", SOF_PROCESS_EQFIR},
 	{"EQIIR", SOF_PROCESS_EQIIR},
@@ -268,6 +273,10 @@ static const struct sof_process_types sof_processs[] = {
 	{"VOICE_DETECT", SOF_PROCESS_VOICE_DETECT},
 	{"KPB", SOF_PROCESS_KPB},
 	{"SELECTOR", SOF_PROCESS_SELECTOR},
+};
+
+static const struct sof_process_subtypes sof_process_subtypes[] = {
+	{"SIGSINK", SOF_PROCESS_SUBTYPE_SIGSINK},
 };
 
 static enum sof_ipc_process_type find_process(const char *name)
@@ -280,6 +289,18 @@ static enum sof_ipc_process_type find_process(const char *name)
 	}
 
 	return SOF_PROCESS_NONE;
+}
+
+static enum sof_ipc_process_subtype find_process_subtype(const char *name)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(sof_processs); i++) {
+		if (strcmp(name, sof_process_subtypes[i].name) == 0)
+			return sof_process_subtypes[i].subtype;
+	}
+
+	return SOF_PROCESS_SUBTYPE_NONE;
 }
 
 /*
@@ -470,6 +491,16 @@ static int get_token_process_type(void *elem, void *object, u32 offset,
 	return 0;
 }
 
+static int get_token_process_subtype(void *elem, void *object, u32 offset,
+				  u32 size)
+{
+	struct snd_soc_tplg_vendor_string_elem *velem = elem;
+	u32 *val = object + offset;
+
+	*val = find_process_subtype(velem->string);
+	return 0;
+}
+
 /* Buffers */
 static const struct sof_topology_token buffer_tokens[] = {
 	{SOF_TKN_BUF_SIZE, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
@@ -540,6 +571,9 @@ static const struct sof_topology_token process_tokens[] = {
 	{SOF_TKN_PROCESS_TYPE, SND_SOC_TPLG_TUPLE_TYPE_STRING,
 		get_token_process_type,
 		offsetof(struct sof_ipc_comp_process, type), 0},
+	{SOF_TKN_PROCESS_SUBTYPE, SND_SOC_TPLG_TUPLE_TYPE_STRING,
+		get_token_process_subtype,
+		offsetof(struct sof_ipc_comp_process, subtype), 0},
 };
 
 /* PCM */
@@ -1599,7 +1633,7 @@ static int sof_process_load(struct snd_soc_component *scomp, int index,
 			    struct snd_sof_widget *swidget,
 			    struct snd_soc_tplg_dapm_widget *tw,
 			    struct sof_ipc_comp_reply *r,
-			    int type)
+			    int type, int subtype)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_tplg_private *private = &tw->priv;
@@ -1673,6 +1707,8 @@ static int sof_process_load(struct snd_soc_component *scomp, int index,
 	process->comp.hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_COMP_NEW;
 	process->comp.id = swidget->comp_id;
 	process->comp.type = type;
+	process->type = type;
+	process->subtype = subtype;
 	process->comp.pipeline_id = index;
 	process->config.hdr.size = sizeof(process->config);
 
@@ -1773,31 +1809,33 @@ static int sof_widget_load_process(struct snd_soc_component *scomp, int index,
 		return ret;
 	}
 
+	dev_dbg(sdev->dev, "ranjani: process subtype is %d\n", config.subtype);
+
 	/* now load process specific data and send IPC */
 	switch (config.type) {
 	case SOF_PROCESS_EQFIR:
 		ret = sof_process_load(scomp, index, swidget, tw, r,
-				       SOF_COMP_EQ_FIR);
+				       SOF_COMP_EQ_FIR, config.subtype);
 		break;
 	case SOF_PROCESS_EQIIR:
 		ret = sof_process_load(scomp, index, swidget, tw, r,
-				       SOF_COMP_EQ_IIR);
+				       SOF_COMP_EQ_IIR, config.subtype);
 		break;
 	case SOF_PROCESS_KEYWORD_DETECT:
 		ret = sof_process_load(scomp, index, swidget, tw, r,
-				       SOF_COMP_KEYWORD_DETECT);
+				       SOF_COMP_KEYWORD_DETECT, config.subtype);
 		break;
 	case SOF_PROCESS_VOICE_DETECT:
 		ret = sof_process_load(scomp, index, swidget, tw, r,
-				       SOF_COMP_VOICE_DETECT);
+				       SOF_COMP_VOICE_DETECT, config.subtype);
 		break;
 	case SOF_PROCESS_KPB:
 		ret = sof_process_load(scomp, index, swidget, tw, r,
-				       SOF_COMP_KPB);
+				       SOF_COMP_KPB, config.subtype);
 		break;
 	case SOF_PROCESS_SELECTOR:
 		ret = sof_process_load(scomp, index, swidget, tw, r,
-				       SOF_COMP_SELECTOR);
+				       SOF_COMP_SELECTOR, config.subtype);
 		break;
 	default:
 		dev_err(sdev->dev, "error: invalid process type %d\n",
