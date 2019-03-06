@@ -495,6 +495,7 @@ struct hdac_stream {
 	bool no_period_wakeup:1;
 	bool locked:1;
 
+	unsigned long curr_pos;
 	/* timestamp */
 	unsigned long start_wallclk;	/* start + minimum wallclk */
 	unsigned long period_wallclk;	/* wallclk for period */
