@@ -14,6 +14,7 @@
 #include <sound/pcm.h>
 #include <sound/hda_register.h>
 #include <sound/hdaudio_ext.h>
+#include <sound/compress_driver.h>
 
 /**
  * snd_hdac_ext_stream_init - initialize each stream (aka device)
@@ -281,8 +282,7 @@ hdac_ext_link_stream_assign(struct hdac_bus *bus,
 }
 
 static struct hdac_ext_stream *
-hdac_ext_host_stream_assign(struct hdac_bus *bus,
-				struct snd_pcm_substream *substream)
+hdac_ext_host_stream_assign(struct hdac_bus *bus, int direction)
 {
 	struct hdac_ext_stream *res = NULL;
 	struct hdac_stream *stream = NULL;
@@ -296,12 +296,13 @@ hdac_ext_host_stream_assign(struct hdac_bus *bus,
 		struct hdac_ext_stream *hstream = container_of(stream,
 						struct hdac_ext_stream,
 						hstream);
-		if (stream->direction != substream->stream)
+		if (stream->direction != direction)
 			continue;
 
 		if (!stream->opened) {
 			if (!hstream->decoupled)
-				snd_hdac_ext_stream_decouple(bus, hstream, true);
+				snd_hdac_ext_stream_decouple(bus,
+						hstream, true);
 			res = hstream;
 			break;
 		}
@@ -310,12 +311,48 @@ hdac_ext_host_stream_assign(struct hdac_bus *bus,
 		spin_lock_irq(&bus->reg_lock);
 		res->hstream.opened = 1;
 		res->hstream.running = 0;
-		res->hstream.substream = substream;
+		res->hstream.substream = NULL;
+		res->hstream.cstream = NULL;
 		spin_unlock_irq(&bus->reg_lock);
 	}
 
 	return res;
 }
+
+static struct hdac_ext_stream *
+hdac_ext_host_stream_pcm_assign(struct hdac_bus *bus,
+				struct snd_pcm_substream *substream)
+{
+	struct hdac_ext_stream *res;
+
+	res = hdac_ext_host_stream_assign(bus, substream->stream);
+	if (res)
+		res->hstream.substream = substream;
+
+	return res;
+}
+
+/**
+ * snd_hdac_ext_cstream_assign - assign a host stream for compress
+ * @bus: HD-audio core bus
+ * @cstream: Compress stream to assign
+ *
+ * Assign an unused host stream for the given compress stream.
+ * If no stream is free, NULL is returned. Stream is decoupled
+ * before assignment.
+ */
+struct hdac_ext_stream *snd_hdac_ext_cstream_assign(struct hdac_bus *bus,
+					   struct snd_compr_stream *cstream)
+{
+	struct hdac_ext_stream *res;
+
+	res = hdac_ext_host_stream_assign(bus, cstream->direction);
+	if (res)
+		res->hstream.cstream = cstream;
+
+	return res;
+}
+EXPORT_SYMBOL_GPL(snd_hdac_ext_cstream_assign);
 
 /**
  * snd_hdac_ext_stream_assign - assign a stream for the PCM
@@ -350,7 +387,7 @@ struct hdac_ext_stream *snd_hdac_ext_stream_assign(struct hdac_bus *bus,
 		return hstream;
 
 	case HDAC_EXT_STREAM_TYPE_HOST:
-		return hdac_ext_host_stream_assign(bus, substream);
+		return hdac_ext_host_stream_pcm_assign(bus, substream);
 
 	case HDAC_EXT_STREAM_TYPE_LINK:
 		return hdac_ext_link_stream_assign(bus, substream);
