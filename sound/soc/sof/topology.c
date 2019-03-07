@@ -1892,7 +1892,6 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 	}
 
 	w->dobj.private = swidget;
-	mutex_init(&swidget->mutex);
 	list_add(&swidget->list, &sdev->widget_list);
 	return ret;
 }
