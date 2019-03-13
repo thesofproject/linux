@@ -348,7 +348,8 @@ static int sof_control_load_bytes(struct snd_soc_component *scomp,
 	}
 
 	/* init the get/put bytes data */
-	scontrol->size = le32_to_cpu(control->priv.size);
+	scontrol->size = sizeof(struct sof_ipc_ctrl_data) +
+		le32_to_cpu(control->priv.size);
 	scontrol->control_data = kzalloc(scontrol->size, GFP_KERNEL);
 	cdata = scontrol->control_data;
 	if (!scontrol->control_data)
