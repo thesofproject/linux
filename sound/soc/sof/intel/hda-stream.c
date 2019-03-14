@@ -80,7 +80,6 @@ int hda_dsp_stream_setup_bdl(struct snd_sof_dev *sdev,
 			     struct snd_dma_buffer *dmab,
 			     struct hdac_stream *stream)
 {
-	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct sof_intel_dsp_bdl *bdl;
 	int i, offset, period_bytes, periods;
 	int remain, ioc;
@@ -104,11 +103,9 @@ int hda_dsp_stream_setup_bdl(struct snd_sof_dev *sdev,
 	stream->frags = 0;
 
 	/*
-	 * set IOC if don't use position IPC
-	 * and period_wakeup needed.
+	 * set IOC if disalbe nowakeup mode and period_wakeup is needed
 	 */
-	ioc = hda->no_ipc_position ?
-	      !stream->no_period_wakeup : 0;
+	ioc = !stream->no_period_wakeup;
 
 	for (i = 0; i < periods; i++) {
 		if (i == (periods - 1) && remain)
@@ -463,8 +460,7 @@ irqreturn_t hda_dsp_stream_interrupt(int irq, void *context)
 
 irqreturn_t hda_dsp_stream_threaded_handler(int irq, void *context)
 {
-	struct hdac_bus *bus = context;
-	struct sof_intel_hda_dev *sof_hda = bus_to_sof_hda(bus);
+	struct hdac_bus *bus = (struct hdac_bus *)context;
 	struct hdac_stream *s;
 	u32 status = snd_hdac_chip_readl(bus, INTSTS);
 	u32 sd_status;
@@ -483,11 +479,6 @@ irqreturn_t hda_dsp_stream_threaded_handler(int irq, void *context)
 			    !s->running ||
 			    (sd_status & SOF_HDA_CL_DMA_SD_INT_COMPLETE) == 0)
 				continue;
-
-			/* Inform ALSA only in case not do that with IPC */
-			if (sof_hda->no_ipc_position)
-				snd_pcm_period_elapsed(s->substream);
-
 		}
 	}
 

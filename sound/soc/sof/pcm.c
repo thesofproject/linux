@@ -417,8 +417,12 @@ static int sof_pcm_open(struct snd_pcm_substream *substream)
 			  SNDRV_PCM_INFO_MMAP_VALID |
 			  SNDRV_PCM_INFO_INTERLEAVED |
 			  SNDRV_PCM_INFO_PAUSE |
-			  SNDRV_PCM_INFO_RESUME |
-			  SNDRV_PCM_INFO_NO_PERIOD_WAKEUP;
+			  SNDRV_PCM_INFO_RESUME;
+
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_FORCE_ENABLE_WAKEUP)
+	/* set runtime config - enable no wakeup mode */
+	runtime->hw.info |= SNDRV_PCM_INFO_NO_PERIOD_WAKEUP;
+#endif
 	runtime->hw.formats = le64_to_cpu(caps->formats);
 	runtime->hw.period_bytes_min = le32_to_cpu(caps->period_size_min);
 	runtime->hw.period_bytes_max = le32_to_cpu(caps->period_size_max);

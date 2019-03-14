@@ -363,9 +363,6 @@ struct sof_intel_hda_dev {
 	/*trace */
 	struct hdac_ext_stream *dtrace_stream;
 
-	/* if position update IPC needed */
-	u32 no_ipc_position;
-
 	int irq;
 
 	/* DMIC device */
