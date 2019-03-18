@@ -2500,15 +2500,6 @@ static int soc_valid_header(struct soc_tplg *tplg,
 		return -EINVAL;
 	}
 
-	/* big endian firmware objects not supported atm */
-	if (hdr->magic == cpu_to_be32(SND_SOC_TPLG_MAGIC)) {
-		dev_err(tplg->dev,
-			"ASoC: pass %d big endian not supported header got %x at offset 0x%lx size 0x%zx.\n",
-			tplg->pass, hdr->magic,
-			soc_tplg_get_hdr_offset(tplg), tplg->fw->size);
-		return -EINVAL;
-	}
-
 	if (le32_to_cpu(hdr->magic) != SND_SOC_TPLG_MAGIC) {
 		dev_err(tplg->dev,
 			"ASoC: pass %d does not have a valid header got %x at offset 0x%lx size 0x%zx.\n",
