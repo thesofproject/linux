@@ -165,17 +165,33 @@ static int hda_link_hw_params(struct snd_pcm_substream *substream,
 	return hda_link_dma_params(link_dev, &p_params);
 }
 
+static int restore_hw_params(struct snd_pcm_substream *substream,
+			     struct snd_soc_dai *dai)
+{
+	struct snd_soc_pcm_runtime *be = substream->private_data;
+	int stream = substream->stream;
+
+	return hda_link_hw_params(substream, &be->dpcm[stream].hw_params, dai);
+}
+
 static int hda_link_pcm_trigger(struct snd_pcm_substream *substream,
 				int cmd, struct snd_soc_dai *dai)
 {
 	struct hdac_ext_stream *link_dev =
 				snd_soc_dai_get_dma_data(dai, substream);
+	int ret;
 
 	dev_dbg(dai->dev, "In %s cmd=%d\n", __func__, cmd);
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_RESUME:
-	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+		ret = restore_hw_params(substream, dai);
+		if (ret) {
+			dev_err(dai->dev, "restore hw_params fails\n");
+			return ret;
+		}
+		/* no break, continue to start */
+	case SNDRV_PCM_TRIGGER_START:
 		snd_hdac_ext_link_stream_start(link_dev);
 		break;
 
