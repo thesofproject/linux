@@ -1229,6 +1229,20 @@ static int dpcm_be_connect(struct snd_soc_pcm_runtime *fe,
 
 	dpcm->be = be;
 	dpcm->fe = fe;
+	if (be->dai_link->trigger[stream] != SND_SOC_DPCM_TRIGGER_ANY) {
+		/*
+		 * There is a special request of trigger order in BE.
+		 * If there is a conflict of trigger order between FE and BE,
+		 * FE trigger order will be taken.
+		 */
+		if (fe->dai_link->trigger[stream] == SND_SOC_DPCM_TRIGGER_ANY)
+			fe->dai_link->trigger[stream] =
+				be->dai_link->trigger[stream];
+		else if (fe->dai_link->trigger[stream] !=
+			 be->dai_link->trigger[stream])
+			dev_info(fe->dev, "use FE order\n");
+	}
+
 	be->dpcm[stream].runtime = fe->dpcm[stream].runtime;
 	dpcm->state = SND_SOC_DPCM_LINK_STATE_NEW;
 	list_add(&dpcm->list_be, &fe->dpcm[stream].be_clients);
@@ -2347,6 +2361,11 @@ static int dpcm_fe_dai_do_trigger(struct snd_pcm_substream *substream, int cmd)
 	fe->dpcm[stream].runtime_update = SND_SOC_DPCM_UPDATE_FE;
 
 	switch (trigger) {
+	/*
+	 * SND_SOC_DPCM_TRIGGER_ANY means driver doesn't care about
+	 * the order. Let's use fe -> be as default.
+	 */
+	case SND_SOC_DPCM_TRIGGER_ANY:
 	case SND_SOC_DPCM_TRIGGER_PRE:
 		/* call trigger on the frontend before the backend. */
 

@@ -56,7 +56,8 @@ enum snd_soc_dpcm_state {
  * trigger() whilst others will just use the regular core ordering.
  */
 enum snd_soc_dpcm_trigger {
-	SND_SOC_DPCM_TRIGGER_PRE		= 0,
+	SND_SOC_DPCM_TRIGGER_ANY		= 0,
+	SND_SOC_DPCM_TRIGGER_PRE,
 	SND_SOC_DPCM_TRIGGER_POST,
 	SND_SOC_DPCM_TRIGGER_BESPOKE,
 };
