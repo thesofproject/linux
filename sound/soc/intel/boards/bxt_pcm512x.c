@@ -204,6 +204,7 @@ static struct snd_soc_dai_link dailink[] = {
 		.init = broxton_hdmi_init,
 		.dpcm_playback = 1,
 		.no_pcm = 1,
+		.trigger[0] = SND_SOC_DPCM_TRIGGER_POST,
 	},
 	{
 		.name = "iDisp2",
@@ -216,6 +217,7 @@ static struct snd_soc_dai_link dailink[] = {
 		.init = broxton_hdmi_init,
 		.dpcm_playback = 1,
 		.no_pcm = 1,
+		.trigger[0] = SND_SOC_DPCM_TRIGGER_POST,
 	},
 	{
 		.name = "iDisp3",
@@ -228,6 +230,7 @@ static struct snd_soc_dai_link dailink[] = {
 		.init = broxton_hdmi_init,
 		.dpcm_playback = 1,
 		.no_pcm = 1,
+		.trigger[0] = SND_SOC_DPCM_TRIGGER_POST,
 	},
 #endif
 };
