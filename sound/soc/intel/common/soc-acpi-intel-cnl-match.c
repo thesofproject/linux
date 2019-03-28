@@ -10,8 +10,15 @@
 #include <sound/soc-acpi-intel-match.h>
 #include "../skylake/skl.h"
 
+#define CML_MACHINE_DRIVER "sof_rt5682"
+
 static struct skl_machine_pdata cnl_pdata = {
 	.use_tplg_pcm = true,
+};
+
+static struct snd_soc_acpi_codecs cml_codecs = {
+	.num_codecs = 1,
+	.codecs = {"10EC5682"}
 };
 
 struct snd_soc_acpi_mach snd_soc_acpi_intel_cnl_machines[] = {
@@ -37,6 +44,14 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_cnl_machines[] = {
 		.sof_fw_filename = "sof-cnl.ri",
 		.sof_tplg_filename = "sof-cml-rt5682.tplg",
 	},
+	{
+		.id = "MX98357A",
+		.drv_name = CML_MACHINE_DRIVER,
+		.quirk_data = &cml_codecs,
+		.sof_fw_filename = "sof-cnl.ri",
+		.sof_tplg_filename = "sof-cml-rt5682-max98357a.tplg",
+	},
+
 	{},
 };
 EXPORT_SYMBOL_GPL(snd_soc_acpi_intel_cnl_machines);
