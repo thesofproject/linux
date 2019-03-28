@@ -506,6 +506,14 @@ int snd_sof_ipc_set_get_comp_data(struct snd_sof_ipc *ipc,
 				  bool send);
 
 /*
+ * get/get data IPC
+ */
+int snd_sof_ipc_get_set_data(struct snd_sof_ipc *ipc,
+			     struct sof_ipc_ctrl_data *cdata,
+			     size_t msg_bytes, size_t hdr_bytes,
+			     size_t elems, bool send);
+
+/*
  * Topology.
  * There is no snd_sof_free_topology since topology components will
  * be freed by snd_soc_unregister_component,
