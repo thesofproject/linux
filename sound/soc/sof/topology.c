@@ -1707,8 +1707,15 @@ static int sof_effect_iir_load(struct snd_soc_component *scomp, int index,
 
 	ret = sof_ipc_tx_message(sdev->ipc, iir->comp.hdr.cmd, iir,
 				 ipc_size, r, sizeof(*r));
-	if (ret >= 0)
-		return ret;
+	if (ret < 0)
+		goto err;
+
+	/*
+	 * create hwdep device for iir eq comp
+	 * TODO: create only if added in topology
+	 */
+	return snd_sof_hwdep_create(scomp->card->snd_card, swidget);
+
 err:
 	kfree(iir);
 	return ret;
