@@ -12,7 +12,7 @@
 #define __SOUND_SOC_SOF_PRIV_H
 
 #include <linux/device.h>
-
+#include <sound/hwdep.h>
 #include <sound/hdaudio.h>
 #include <sound/soc.h>
 
@@ -601,6 +601,10 @@ static inline void sof_oops(struct snd_sof_dev *sdev, void *oops)
 }
 
 extern const struct sof_arch_ops sof_xtensa_arch_ops;
+
+/* HWDEP */
+int snd_sof_hwdep_create(struct snd_card *card,
+			 struct snd_sof_widget *swidget);
 
 /*
  * Utilities
