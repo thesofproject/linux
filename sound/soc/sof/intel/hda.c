@@ -666,6 +666,8 @@ int hda_dsp_remove(struct snd_sof_dev *sdev)
 #endif
 	hda_codec_i915_exit(sdev);
 
+	sof_hda_bus_deinit(bus);
+
 	return 0;
 }
 

@@ -74,14 +74,34 @@ static const struct hdac_io_ops io_ops = {
 	.dma_free_pages = sof_hda_dma_free_pages,
 };
 
+static u64 bus_idx_bits;
+
+static int get_free_index(void)
+{
+	int i = 0;
+
+	while ((bus_idx_bits >> i) & 0x1) {
+		if (i++ == 63)
+			return -EINVAL;
+	}
+
+	bus_idx_bits |= 1 << i;
+	return i;
+}
+
+static void put_index(int i)
+{
+	if (i < 0 || i > 63)
+		return;
+	bus_idx_bits &= ~((u64)1 << i);
+}
+
 /*
  * This can be used for both with/without hda link support.
  */
 void sof_hda_bus_init(struct hdac_bus *bus, struct device *dev,
 		      const struct hdac_ext_bus_ops *ext_ops)
 {
-	static int idx;
-
 	memset(bus, 0, sizeof(*bus));
 	bus->dev = dev;
 
@@ -90,7 +110,7 @@ void sof_hda_bus_init(struct hdac_bus *bus, struct device *dev,
 
 	bus->irq = -1;
 	bus->ext_ops = ext_ops;
-	bus->idx = idx++;
+	bus->idx = get_free_index();
 
 	spin_lock_init(&bus->reg_lock);
 
@@ -105,4 +125,13 @@ void sof_hda_bus_init(struct hdac_bus *bus, struct device *dev,
 	bus->cmd_dma_state = true;
 #endif
 
+}
+
+/*
+ * This can be used for both with/without hda link support.
+ */
+void sof_hda_bus_deinit(struct hdac_bus *bus)
+{
+	if (bus)
+		put_index(bus->idx);
 }
