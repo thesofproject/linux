@@ -26,6 +26,7 @@
 
 struct bxt_card_private {
 	struct list_head hdmi_pcm_list;
+	struct device_link *link;
 };
 
 #if IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
@@ -52,6 +53,19 @@ static int broxton_hdmi_init(struct snd_soc_pcm_runtime *rtd)
 	pcm->codec_dai = dai;
 
 	list_add_tail(&pcm->head, &ctx->hdmi_pcm_list);
+
+	/*
+	 * Setup the device_link to make sure that hdmi codec power is
+	 * turned on before the consumer starts to operate on the
+	 * codec register.
+	 */
+	if (!ctx->link)
+		ctx->link = device_link_add(rtd->card->dev, dai->dev,
+					    DL_FLAG_RPM_ACTIVE);
+
+	if (!ctx->link)
+		dev_warn(rtd->card->dev,
+			 "failed creating device_link for HDMI codec\n");
 
 	return 0;
 }
@@ -303,12 +317,24 @@ static int bxt_pcm512x_probe(struct platform_device *pdev)
 	return ret_val;
 }
 
+int bxt_pcm512x_remove(struct platform_device *pdev)
+{
+	struct snd_soc_card *card = platform_get_drvdata(pdev);
+	struct bxt_card_private *ctx = snd_soc_card_get_drvdata(card);
+
+	if (ctx->link)
+		device_link_del(ctx->link);
+
+	return 0;
+}
+
 static struct platform_driver bxt_pcm521x_driver = {
 	.driver = {
 		.name = "bxt-pcm512x",
 		.pm = &snd_soc_pm_ops,
 	},
 	.probe = bxt_pcm512x_probe,
+	.remove = bxt_pcm512x_remove,
 };
 module_platform_driver(bxt_pcm521x_driver);
 
