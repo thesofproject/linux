@@ -462,7 +462,9 @@ int hda_dsp_stream_setup_bdl(struct snd_sof_dev *sdev,
 			     struct hdac_stream *stream);
 
 struct hdac_ext_stream *
-	hda_dsp_stream_get(struct snd_sof_dev *sdev, int direction);
+	hda_dsp_stream_get(struct snd_sof_dev *sdev,
+			   struct snd_pcm_substream *substream,
+			   int direction);
 int hda_dsp_stream_put(struct snd_sof_dev *sdev, int direction, int stream_tag);
 int hda_dsp_stream_spib_config(struct snd_sof_dev *sdev,
 			       struct hdac_ext_stream *stream,

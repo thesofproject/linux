@@ -37,7 +37,7 @@ static int cl_stream_prepare(struct snd_sof_dev *sdev, unsigned int format,
 		return -EINVAL;
 	}
 
-	dsp_stream = hda_dsp_stream_get(sdev, direction);
+	dsp_stream = hda_dsp_stream_get(sdev, NULL, direction);
 
 	if (!dsp_stream) {
 		dev_err(sdev->dev, "error: no stream available\n");

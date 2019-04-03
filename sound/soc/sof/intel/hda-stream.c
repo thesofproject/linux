@@ -150,9 +150,61 @@ int hda_dsp_stream_spib_config(struct snd_sof_dev *sdev,
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
+/*
+ * return 1 for two cases
+ * (1) for a free host stream, check whether the matched
+ * (with the same stream tag number) link stream is free.
+ * (2) if the matched link stream is used, check whether
+ * this is used by one BE of this FE pcm.
+ */
+static int check_link_stream(struct snd_pcm_substream *substream,
+			     struct hdac_stream *hstream)
+{
+	struct snd_soc_pcm_runtime *fe = substream->private_data;
+	int direction = substream->stream;
+	struct snd_soc_pcm_runtime *be_rtd;
+	struct hdac_ext_stream *link_dev;
+	struct hdac_ext_stream *stream;
+	struct snd_soc_dai *cpu_dai;
+	struct snd_soc_dpcm *dpcm;
+
+	stream = stream_to_hdac_ext_stream(hstream);
+
+	/* this link stream is free */
+	if (!stream->link_locked)
+		return 1;
+
+	for_each_dpcm_be(fe, direction, dpcm) {
+		struct snd_soc_pcm_runtime *be = dpcm->be;
+		struct snd_pcm_substream *be_substream =
+		   snd_soc_dpcm_get_substream(be, direction);
+
+		if (!be_substream)
+			continue;
+
+		if (be->dpcm[direction].state != SND_SOC_DPCM_STATE_OPEN)
+			continue;
+
+		be_rtd = be_substream->private_data;
+		cpu_dai = be_rtd->cpu_dai;
+		link_dev = snd_soc_dai_get_dma_data(cpu_dai, substream);
+
+		/* one BE of this FE uses the same stream tag as this FE */
+		if (link_dev && hstream->stream_tag ==
+		    hdac_stream(link_dev)->stream_tag)
+			return 1;
+	}
+
+	return 0;
+}
+#endif
+
 /* get next unused stream */
 struct hdac_ext_stream *
-hda_dsp_stream_get(struct snd_sof_dev *sdev, int direction)
+hda_dsp_stream_get(struct snd_sof_dev *sdev,
+		   struct snd_pcm_substream *substream,
+		   int direction)
 {
 	struct hdac_bus *bus = sof_to_bus(sdev);
 	struct hdac_ext_stream *stream = NULL;
@@ -160,9 +212,13 @@ hda_dsp_stream_get(struct snd_sof_dev *sdev, int direction)
 
 	spin_lock_irq(&bus->reg_lock);
 
-	/* get an unused stream */
 	list_for_each_entry(s, &bus->stream_list, list) {
 		if (s->direction == direction && !s->opened) {
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
+			if (substream &&
+			    !check_link_stream(substream, s))
+				continue;
+#endif
 			s->opened = true;
 			stream = stream_to_hdac_ext_stream(s);
 			break;
