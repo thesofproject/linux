@@ -62,6 +62,17 @@ int intel_ipc_pcm_params(struct snd_sof_dev *sdev,
 }
 EXPORT_SYMBOL(intel_ipc_pcm_params);
 
+void intel_ipc_mailbox_init(struct snd_sof_dev *sdev, u32 dspbox,
+			    size_t dspbox_size, u32 hostbox,
+			    size_t hostbox_size)
+{
+	sdev->dsp_box.offset = dspbox;
+	sdev->dsp_box.size = dspbox_size;
+	sdev->host_box.offset = hostbox;
+	sdev->host_box.size = hostbox_size;
+}
+EXPORT_SYMBOL(intel_ipc_mailbox_init);
+
 int intel_pcm_open(struct snd_sof_dev *sdev,
 		   struct snd_pcm_substream *substream)
 {

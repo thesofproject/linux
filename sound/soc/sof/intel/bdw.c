@@ -414,8 +414,8 @@ static void bdw_get_windows(struct snd_sof_dev *sdev)
 		return;
 	}
 
-	snd_sof_dsp_mailbox_init(sdev, inbox_offset, inbox_size,
-				 outbox_offset, outbox_size);
+	intel_ipc_mailbox_init(sdev, inbox_offset, inbox_size,
+			       outbox_offset, outbox_size);
 	sdev->stream_box.offset = stream_offset;
 	sdev->stream_box.size = stream_size;
 
@@ -447,10 +447,10 @@ static int bdw_fw_ready(struct snd_sof_dev *sdev, u32 msg_id)
 	/* copy data from the DSP FW ready offset */
 	sof_block_read(sdev, offset, fw_ready, sizeof(*fw_ready));
 
-	snd_sof_dsp_mailbox_init(sdev, fw_ready->dspbox_offset,
-				 fw_ready->dspbox_size,
-				 fw_ready->hostbox_offset,
-				 fw_ready->hostbox_size);
+	intel_ipc_mailbox_init(sdev, fw_ready->dspbox_offset,
+			       fw_ready->dspbox_size,
+			       fw_ready->hostbox_offset,
+			       fw_ready->hostbox_size);
 
 	/* make sure ABI version is compatible */
 	ret = snd_sof_ipc_valid(sdev);
@@ -631,7 +631,7 @@ static int bdw_probe(struct snd_sof_dev *sdev)
 	}
 
 	/* set default mailbox */
-	snd_sof_dsp_mailbox_init(sdev, MBOX_OFFSET, MBOX_SIZE, 0, 0);
+	intel_ipc_mailbox_init(sdev, MBOX_OFFSET, MBOX_SIZE, 0, 0);
 
 	return ret;
 }

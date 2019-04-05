@@ -455,9 +455,6 @@ int snd_sof_ipc_reply(struct snd_sof_dev *sdev, u32 msg_id);
 void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev);
 int snd_sof_ipc_stream_pcm_params(struct snd_sof_dev *sdev,
 				  struct sof_ipc_pcm_params *params);
-int snd_sof_dsp_mailbox_init(struct snd_sof_dev *sdev, u32 dspbox,
-			     size_t dspbox_size, u32 hostbox,
-			     size_t hostbox_size);
 int snd_sof_ipc_valid(struct snd_sof_dev *sdev);
 int sof_ipc_tx_message(struct snd_sof_ipc *ipc, u32 header,
 		       void *msg_data, size_t msg_bytes, void *reply_data,
@@ -619,6 +616,9 @@ void intel_ipc_msg_data(struct snd_sof_dev *sdev,
 int intel_ipc_pcm_params(struct snd_sof_dev *sdev,
 			 struct snd_pcm_substream *substream,
 			 const struct sof_ipc_pcm_params_reply *reply);
+void intel_ipc_mailbox_init(struct snd_sof_dev *sdev, u32 dspbox,
+			    size_t dspbox_size, u32 hostbox,
+			    size_t hostbox_size);
 
 int intel_pcm_open(struct snd_sof_dev *sdev,
 		   struct snd_pcm_substream *substream);

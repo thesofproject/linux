@@ -355,8 +355,8 @@ static void ipc_get_windows(struct snd_sof_dev *sdev)
 		return;
 	}
 
-	snd_sof_dsp_mailbox_init(sdev, inbox_offset, inbox_size,
-				 outbox_offset, outbox_size);
+	intel_ipc_mailbox_init(sdev, inbox_offset, inbox_size,
+			       outbox_offset, outbox_size);
 	sdev->stream_box.offset = stream_offset;
 	sdev->stream_box.size = stream_size;
 
