@@ -219,14 +219,14 @@ static void hsw_get_registers(struct snd_sof_dev *sdev,
 			      u32 *stack, size_t stack_words)
 {
 	/* first read regsisters */
-	sof_mailbox_read(sdev, sdev->dsp_oops_offset, xoops, sizeof(*xoops));
+	intel_mailbox_read(sdev, sdev->dsp_oops_offset, xoops, sizeof(*xoops));
 
 	/* then get panic info */
-	sof_mailbox_read(sdev, sdev->dsp_oops_offset + sizeof(*xoops),
-			 panic_info, sizeof(*panic_info));
+	intel_mailbox_read(sdev, sdev->dsp_oops_offset + sizeof(*xoops),
+			   panic_info, sizeof(*panic_info));
 
 	/* then get the stack */
-	sof_mailbox_read(sdev, sdev->dsp_oops_offset + sizeof(*xoops) +
+	intel_mailbox_read(sdev, sdev->dsp_oops_offset + sizeof(*xoops) +
 			   sizeof(*panic_info), stack,
 			   stack_words * sizeof(u32));
 }
@@ -474,8 +474,8 @@ static int hsw_fw_ready(struct snd_sof_dev *sdev, u32 msg_id)
 static int hsw_send_msg(struct snd_sof_dev *sdev, struct snd_sof_ipc_msg *msg)
 {
 	/* send the message */
-	sof_mailbox_write(sdev, sdev->host_box.offset, msg->msg_data,
-			  msg->msg_size);
+	intel_mailbox_write(sdev, sdev->host_box.offset, msg->msg_data,
+			    msg->msg_size);
 	snd_sof_dsp_write(sdev, HSW_DSP_BAR, SHIM_IPCX, SHIM_IPCX_BUSY);
 
 	return 0;
@@ -491,7 +491,7 @@ static void hsw_get_reply(struct snd_sof_dev *sdev)
 	spin_lock_irqsave(&sdev->ipc_lock, flags);
 
 	/* get reply */
-	sof_mailbox_read(sdev, sdev->host_box.offset, &reply, sizeof(reply));
+	intel_mailbox_read(sdev, sdev->host_box.offset, &reply, sizeof(reply));
 	if (reply.error < 0) {
 		memcpy(msg->reply_data, &reply, sizeof(reply));
 		ret = reply.error;
@@ -505,8 +505,8 @@ static void hsw_get_reply(struct snd_sof_dev *sdev)
 
 		/* read the message */
 		if (msg->reply_size > 0)
-			sof_mailbox_read(sdev, sdev->host_box.offset,
-					 msg->reply_data, msg->reply_size);
+			intel_mailbox_read(sdev, sdev->host_box.offset,
+					   msg->reply_data, msg->reply_size);
 	}
 
 	msg->reply_error = ret;

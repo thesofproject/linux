@@ -59,8 +59,8 @@ int hda_dsp_ipc_send_msg(struct snd_sof_dev *sdev, struct snd_sof_ipc_msg *msg)
 	u32 cmd = msg->header;
 
 	/* send IPC message to DSP */
-	sof_mailbox_write(sdev, sdev->host_box.offset, msg->msg_data,
-			  msg->msg_size);
+	intel_mailbox_write(sdev, sdev->host_box.offset, msg->msg_data,
+			    msg->msg_size);
 	snd_sof_dsp_write(sdev, HDA_DSP_BAR, HDA_DSP_REG_HIPCI,
 			  cmd | HDA_DSP_REG_HIPCI_BUSY);
 
@@ -91,8 +91,8 @@ void hda_dsp_ipc_get_reply(struct snd_sof_dev *sdev)
 	}
 
 	/* get IPC reply from DSP in the mailbox */
-	sof_mailbox_read(sdev, sdev->host_box.offset, &reply,
-			 sizeof(reply));
+	intel_mailbox_read(sdev, sdev->host_box.offset, &reply,
+			   sizeof(reply));
 
 	if (reply.error < 0) {
 		memcpy(msg->reply_data, &reply, sizeof(reply));
@@ -107,8 +107,8 @@ void hda_dsp_ipc_get_reply(struct snd_sof_dev *sdev)
 
 		/* read the message */
 		if (msg->reply_size > 0)
-			sof_mailbox_read(sdev, sdev->host_box.offset,
-					 msg->reply_data, msg->reply_size);
+			intel_mailbox_read(sdev, sdev->host_box.offset,
+					   msg->reply_data, msg->reply_size);
 	}
 
 out:
@@ -407,7 +407,7 @@ void hda_ipc_msg_data(struct snd_sof_dev *sdev,
 		      void *p, size_t sz)
 {
 	if (!substream || !sdev->stream_box.size) {
-		sof_mailbox_read(sdev, sdev->dsp_box.offset, p, sz);
+		intel_mailbox_read(sdev, sdev->dsp_box.offset, p, sz);
 	} else {
 		struct hdac_stream *hstream = substream->runtime->private_data;
 		struct sof_intel_hda_stream *hda_stream;
@@ -418,8 +418,8 @@ void hda_ipc_msg_data(struct snd_sof_dev *sdev,
 
 		/* The stream might already be closed */
 		if (hstream)
-			sof_mailbox_read(sdev, hda_stream->stream.posn_offset,
-					 p, sz);
+			intel_mailbox_read(sdev, hda_stream->stream.posn_offset,
+					   p, sz);
 	}
 }
 

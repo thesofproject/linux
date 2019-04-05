@@ -46,28 +46,6 @@ u64 sof_io_read64(struct snd_sof_dev *sdev, void __iomem *addr)
 EXPORT_SYMBOL(sof_io_read64);
 
 /*
- * IPC Mailbox IO
- */
-
-void sof_mailbox_write(struct snd_sof_dev *sdev, u32 offset,
-		       void *message, size_t bytes)
-{
-	void __iomem *dest = sdev->bar[sdev->mailbox_bar] + offset;
-
-	memcpy_toio(dest, message, bytes);
-}
-EXPORT_SYMBOL(sof_mailbox_write);
-
-void sof_mailbox_read(struct snd_sof_dev *sdev, u32 offset,
-		      void *message, size_t bytes)
-{
-	void __iomem *src = sdev->bar[sdev->mailbox_bar] + offset;
-
-	memcpy_fromio(message, src, bytes);
-}
-EXPORT_SYMBOL(sof_mailbox_read);
-
-/*
  * Memory copy.
  */
 
