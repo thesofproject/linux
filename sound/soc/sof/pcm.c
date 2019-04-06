@@ -334,6 +334,23 @@ static int sof_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 	snd_sof_pcm_platform_trigger(sdev, substream, cmd);
 
 	/* send IPC to the DSP */
+	ret = sof_ipc_tx_message(sdev->ipc, stream.hdr.cmd, &stream,
+				 sizeof(stream), &reply, sizeof(reply));
+
+	if (ret < 0 || cmd != SNDRV_PCM_TRIGGER_SUSPEND)
+		return ret;
+
+	/*
+	 * Send the PCM_FREE IPC to the DSP during suspend.
+	 * This is usually done during pcm hw_free but since we do not
+	 * perform hw_free during suspend, this needs to be done
+	 * explicitly to prevent hw_params errors upon resume.
+	 */
+	stream.hdr.size = sizeof(stream);
+	stream.hdr.cmd = SOF_IPC_GLB_STREAM_MSG | SOF_IPC_STREAM_PCM_FREE;
+	stream.comp_id = spcm->stream[substream->stream].comp_id;
+
+	/* send IPC to the DSP */
 	return sof_ipc_tx_message(sdev->ipc, stream.hdr.cmd, &stream,
 				  sizeof(stream), &reply, sizeof(reply));
 }
