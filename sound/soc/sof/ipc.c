@@ -254,8 +254,6 @@ static int sof_ipc_tx_message_unlocked(struct snd_sof_ipc *ipc, u32 header,
 	if (msg_bytes)
 		memcpy(msg->msg_data, msg_data, msg_bytes);
 
-	sdev->msg = msg;
-
 	ret = snd_sof_dsp_send_msg(sdev, msg);
 	/* Next reply that we receive will be related to this message */
 	if (!ret)
@@ -845,6 +843,8 @@ struct snd_sof_ipc *snd_sof_ipc_init(struct snd_sof_dev *sdev)
 				       GFP_KERNEL);
 	if (!msg->reply_data)
 		return NULL;
+
+	sdev->msg = msg;
 
 	init_waitqueue_head(&msg->waitq);
 
