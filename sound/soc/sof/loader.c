@@ -15,10 +15,10 @@
 #include "ops.h"
 
 static int get_ext_windows(struct snd_sof_dev *sdev,
-			   struct sof_ipc_ext_data_hdr *ext_hdr)
+			   const struct sof_ipc_ext_data_hdr *ext_hdr)
 {
-	struct sof_ipc_window *w =
-		container_of(ext_hdr, struct sof_ipc_window, ext_hdr);
+	const struct sof_ipc_window *w =
+		container_of(ext_hdr, const struct sof_ipc_window, ext_hdr);
 	size_t size;
 
 	if (w->num_windows == 0 || w->num_windows > SOF_IPC_MAX_ELEMS)
@@ -38,24 +38,21 @@ static int get_ext_windows(struct snd_sof_dev *sdev,
 int snd_sof_fw_parse_ext_data(struct snd_sof_dev *sdev, u32 offset)
 {
 	struct sof_ipc_ext_data_hdr *ext_hdr;
-	void *ext_data;
 	int ret = 0;
 
-	ext_data = kzalloc(PAGE_SIZE, GFP_KERNEL);
-	if (!ext_data)
+	ext_hdr = kzalloc(PAGE_SIZE, GFP_KERNEL);
+	if (!ext_hdr)
 		return -ENOMEM;
 
 	/* get first header */
-	snd_sof_dsp_block_read(sdev, offset, ext_data,
+	snd_sof_dsp_block_read(sdev, offset, ext_hdr,
 			       sizeof(*ext_hdr));
-	ext_hdr = ext_data;
 
 	while (ext_hdr->hdr.cmd == SOF_IPC_FW_READY) {
 		/* read in ext structure */
 		offset += sizeof(*ext_hdr);
-		snd_sof_dsp_block_read(sdev, offset,
-				   (void *)((u8 *)ext_data + sizeof(*ext_hdr)),
-				   ext_hdr->hdr.size - sizeof(*ext_hdr));
+		snd_sof_dsp_block_read(sdev, offset, ext_hdr + 1,
+				       ext_hdr->hdr.size - sizeof(*ext_hdr));
 
 		dev_dbg(sdev->dev, "found ext header type %d size 0x%x\n",
 			ext_hdr->type, ext_hdr->hdr.size);
@@ -79,12 +76,10 @@ int snd_sof_fw_parse_ext_data(struct snd_sof_dev *sdev, u32 offset)
 
 		/* move to next header */
 		offset += ext_hdr->hdr.size;
-		snd_sof_dsp_block_read(sdev, offset, ext_data,
-				       sizeof(*ext_hdr));
-		ext_hdr = ext_data;
+		snd_sof_dsp_block_read(sdev, offset, ext_hdr, sizeof(*ext_hdr));
 	}
 
-	kfree(ext_data);
+	kfree(ext_hdr);
 	return ret;
 }
 EXPORT_SYMBOL(snd_sof_fw_parse_ext_data);
