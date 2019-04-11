@@ -148,6 +148,7 @@ config SND_SOC_SOF_CANNONLAKE_SUPPORT
 config SND_SOC_SOF_CANNONLAKE
 	tristate
 	select SND_SOC_SOF_HDA_COMMON
+	select SND_SOC_SOF_SOUNDWIRE
 	help
 	  This option is not user-selectable but automagically handled by
 	  'select' statements at a higher level
@@ -255,6 +256,21 @@ config SND_SOC_SOF_HDA
 	select SND_HDA_EXT_CORE if SND_SOC_SOF_HDA_LINK
 	select SND_SOC_HDAC_HDA if SND_SOC_SOF_HDA_AUDIO_CODEC
 	select SND_INTEL_NHLT
+	help
+	  This option is not user-selectable but automagically handled by
+	  'select' statements at a higher level
+
+config SND_SOC_SOF_SOUNDWIRE_LINK
+	bool "SOF support for SoundWire"
+	help
+	  This adds support for SoundWire with Sound Open Firmware
+		  for Intel(R) platforms.
+	  Say Y if you want to enable SoundWire links with SOF.
+	  If unsure select "N".
+
+config SND_SOC_SOF_SOUNDWIRE
+	tristate
+	select SOUNDWIRE if SND_SOC_SOF_SOUNDWIRE_LINK
 	help
 	  This option is not user-selectable but automagically handled by
 	  'select' statements at a higher level
