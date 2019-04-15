@@ -398,6 +398,9 @@ struct sdw_master_prop {
 
 int sdw_master_read_prop(struct sdw_bus *bus);
 int sdw_slave_read_prop(struct sdw_slave *slave);
+int sdw_slave_read_dpn(struct sdw_slave *slave,
+		       struct sdw_dpn_prop *dpn, int count, int ports,
+		       char *type);
 
 /*
  * SDW Slave Structures and APIs
