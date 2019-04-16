@@ -274,6 +274,7 @@ struct snd_sof_pcm_stream {
 	struct snd_dma_buffer page_table;
 	struct sof_ipc_stream_posn posn;
 	struct snd_pcm_substream *substream;
+	struct work_struct status_work;
 };
 
 /* ALSA SOF PCM device */

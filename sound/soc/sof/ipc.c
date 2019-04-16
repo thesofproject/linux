@@ -417,6 +417,19 @@ static void ipc_trace_message(struct snd_sof_dev *sdev, u32 msg_id)
 }
 
 /*
+ * deferred IPC stream position.
+ */
+
+static void ipc_period_elapsed_work_handler(struct work_struct *work)
+{
+	struct snd_sof_pcm_stream *stream;
+
+	stream = container_of(work, struct snd_sof_pcm_stream, status_work);
+
+	snd_pcm_period_elapsed(stream->substream);
+}
+
+/*
  * IPC stream position.
  */
 
@@ -444,8 +457,22 @@ static void ipc_period_elapsed(struct snd_sof_dev *sdev, u32 msg_id)
 	memcpy(&stream->posn, &posn, sizeof(posn));
 
 	/* only inform ALSA for period_wakeup mode */
-	if (!stream->substream->runtime->no_period_wakeup)
-		snd_pcm_period_elapsed(stream->substream);
+	if (!stream->substream->runtime->no_period_wakeup) {
+		if (stream->substream->runtime->status->state ==
+		    SNDRV_PCM_STATE_RUNNING) {
+			snd_pcm_period_elapsed(stream->substream);
+		} else {
+			/*
+			 * Other than running state might cause ipc back to
+			 * dsp. We need to defer processing because we might
+			 * otherwise put irq handler to sleep with ipc busy
+			 * bit enabled (waiting for dsp ack).
+			 */
+			INIT_WORK(&stream->status_work,
+				  ipc_period_elapsed_work_handler);
+			schedule_work(&stream->status_work);
+		}
+	}
 }
 
 /* DSP notifies host of an XRUN within FW */
