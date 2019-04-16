@@ -245,12 +245,12 @@ static int hda_link_hw_free(struct snd_pcm_substream *substream,
 
 	memset(&pcm_substream, 0, sizeof(pcm_substream));
 	if (substream) {
-		hstream = substream->runtime->private_data;
-		bus = hstream->bus;
-		rtd = snd_pcm_substream_chip(substream);
 		link_dev = snd_soc_dai_get_dma_data(dai, substream);
-		snd_hdac_ext_stream_decouple(bus, link_dev, false);
+		hstream = substream->runtime->private_data;
+		rtd = snd_pcm_substream_chip(substream);
 		name = rtd->codec_dai->component->name;
+		bus = hstream->bus;
+
 		link = snd_hdac_ext_bus_get_link(bus, name);
 		if (!link)
 			return -EINVAL;
