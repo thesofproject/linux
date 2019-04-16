@@ -40,18 +40,25 @@ static int hda_dsp_trace_prepare(struct snd_sof_dev *sdev)
 int hda_dsp_trace_init(struct snd_sof_dev *sdev, u32 *stream_tag)
 {
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
+	struct hdac_bus *bus = sof_to_bus(sdev);
+	struct hdac_stream *hstream = NULL;
 	int ret;
 
-	hda->dtrace_stream = hda_dsp_stream_get(sdev,
-						NULL,
-						SNDRV_PCM_STREAM_CAPTURE);
+	/* dma trace uses the last stream */
+	list_for_each_entry_reverse(hstream, &bus->stream_list, list) {
+		if (hstream->direction == SNDRV_PCM_STREAM_CAPTURE) {
+			hstream->opened = true;
+			break;
+		}
+	}
 
-	if (!hda->dtrace_stream) {
+	if (!hstream) {
 		dev_err(sdev->dev,
 			"error: no available capture stream for DMA trace\n");
 		return -ENODEV;
 	}
 
+	hda->dtrace_stream = stream_to_hdac_ext_stream(hstream);
 	*stream_tag = hda->dtrace_stream->hstream.stream_tag;
 
 	/*
