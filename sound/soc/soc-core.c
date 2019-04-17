@@ -2932,7 +2932,24 @@ static inline char *fmt_multiple_name(struct device *dev,
 }
 
 /**
- * snd_soc_unregister_dai - Unregister DAIs from the ASoC core
+ * snd_soc_unregister_dai - Unregister dynamically created DAI
+ *
+ * @component: The component for which the DAI should be unregistered
+ * @dai: DAI which should be unregistered
+ */
+void snd_soc_unregister_dai(struct snd_soc_component *component,
+	struct snd_soc_dai *dai)
+{
+	dev_dbg(component->dev, "ASoC: Unregistered DAI '%s'\n",
+		dai->name);
+	list_del(&dai->list);
+	kfree(dai->name);
+	kfree(dai);
+}
+EXPORT_SYMBOL_GPL(snd_soc_unregister_dai);
+
+/**
+ * snd_soc_unregister_dais - Unregister DAIs from the ASoC core
  *
  * @component: The component for which the DAIs should be unregistered
  */
@@ -2940,13 +2957,8 @@ static void snd_soc_unregister_dais(struct snd_soc_component *component)
 {
 	struct snd_soc_dai *dai, *_dai;
 
-	for_each_component_dais_safe(component, dai, _dai) {
-		dev_dbg(component->dev, "ASoC: Unregistered DAI '%s'\n",
-			dai->name);
-		list_del(&dai->list);
-		kfree(dai->name);
-		kfree(dai);
-	}
+	for_each_component_dais_safe(component, dai, _dai)
+		snd_soc_unregister_dai(component, dai);
 }
 
 /* Create a DAI and add it to the component's DAI list */
