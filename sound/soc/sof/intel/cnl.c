@@ -83,7 +83,8 @@ static irqreturn_t cnl_ipc_irq_thread(int irq, void *context)
 	}
 
 	/* new message from DSP */
-	if (hipctdr & CNL_DSP_REG_HIPCTDR_BUSY) {
+	if (hipctdr & CNL_DSP_REG_HIPCTDR_BUSY &&
+	    hipcctl & CNL_DSP_REG_HIPCCTL_BUSY) {
 		hipctdd = snd_sof_dsp_read(sdev, HDA_DSP_BAR,
 					   CNL_DSP_REG_HIPCTDD);
 		msg = hipctdr & CNL_DSP_REG_HIPCTDR_MSG_MASK;
@@ -100,6 +101,11 @@ static irqreturn_t cnl_ipc_irq_thread(int irq, void *context)
 		} else {
 			snd_sof_ipc_msgs_rx(sdev);
 		}
+
+		/* mask BUSY interrupt */
+		snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR,
+					HDA_DSP_REG_HIPCCTL,
+					HDA_DSP_REG_HIPCCTL_BUSY, 0);
 
 		/*
 		 * clear busy interrupt to tell dsp controller this
