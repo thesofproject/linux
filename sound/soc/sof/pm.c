@@ -340,7 +340,10 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 #endif
 	/* notify DSP of upcoming power down */
 	ret = sof_send_pm_ipc(sdev, SOF_IPC_PM_CTX_SAVE);
-	if (ret < 0) {
+	if (ret == -ETIMEDOUT) {
+		dev_warn(sdev->dev,
+			 "warn: ctx_save ipc timeout, forced suspend\n");
+	} else if (ret < 0) {
 		dev_err(sdev->dev,
 			"error: ctx_save ipc error during suspend %d\n",
 			ret);
