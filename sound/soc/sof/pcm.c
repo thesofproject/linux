@@ -201,6 +201,14 @@ static int sof_pcm_hw_free(struct snd_pcm_substream *substream)
 	/* send IPC to the DSP */
 	ret = sof_ipc_tx_message(sdev->ipc, stream.hdr.cmd, &stream,
 				 sizeof(stream), &reply, sizeof(reply));
+	/* force power down if FW is in error state */
+	if (ret == -ETIMEDOUT) {
+		dev_warn(sdev->dev,
+			 "warn: pcm_free ipc timeout, forced suspend\n");
+		ret = snd_sof_suspend(sdev->dev);
+		if (!ret)
+			ret = snd_sof_resume(sdev->dev);
+	}
 
 	snd_pcm_lib_free_pages(substream);
 	return ret;
