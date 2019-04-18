@@ -57,6 +57,8 @@ static int hda_sdw_init(struct snd_sof_dev *sdev)
 {
 	acpi_handle handle;
 	struct sdw_intel_res res;
+	struct sof_intel_hda_dev *hdev;
+	void *sdw;
 
 	handle = ACPI_HANDLE(sdev->dev);
 
@@ -68,21 +70,30 @@ static int hda_sdw_init(struct snd_sof_dev *sdev)
 
 	hda_sdw_int_enable(sdev, true);
 
-	sdev->sdw = sdw_intel_init(handle, &res);
-	if (!sdev->sdw) {
+	sdw = sdw_intel_init(handle, &res);
+	if (!sdw) {
 		dev_err(sdev->dev, "SDW Init failed\n");
 		return -EIO;
 	}
+
+	/* save context */
+	hdev = sdev->pdata->hw_pdata;
+	hdev->sdw = sdw;
 
 	return 0;
 }
 
 static int hda_sdw_exit(struct snd_sof_dev *sdev)
 {
+	struct sof_intel_hda_dev *hdev;
+
+	hdev = sdev->pdata->hw_pdata;
+
 	hda_sdw_int_enable(sdev, false);
 
-	if (sdev->sdw)
-		sdw_intel_exit(sdev->sdw);
+	if (hdev->sdw)
+		sdw_intel_exit(hdev->sdw);
+	hdev->sdw = NULL;
 
 	return 0;
 }
@@ -713,6 +724,21 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	/* set default mailbox offset for FW ready message */
 	sdev->dsp_box.offset = HDA_DSP_MBOX_UPLINK_OFFSET;
 
+	/* need to power-up core before setting-up capabilities */
+	ret = hda_dsp_core_power_up(sdev, HDA_DSP_CORE_MASK(0));
+	if (ret < 0) {
+		dev_err(sdev->dev, "error: could not power-up DSP subsystem\n");
+		goto free_ipc_irq;
+	}
+
+	/* initialize SoundWire capabilities */
+	ret = hda_sdw_init(sdev);
+	if (ret < 0) {
+		dev_err(sdev->dev, "error: SoundWire get caps error\n");
+		hda_dsp_core_power_down(sdev, HDA_DSP_CORE_MASK(0));
+		goto free_ipc_irq;
+	}
+
 	return 0;
 
 free_ipc_irq:
@@ -743,6 +769,8 @@ int hda_dsp_remove(struct snd_sof_dev *sdev)
 	/* codec removal, invoke bus_device_remove */
 	snd_hdac_ext_bus_device_remove(bus);
 #endif
+
+	hda_sdw_exit(sdev);
 
 	if (!IS_ERR_OR_NULL(hda->dmic_dev))
 		platform_device_unregister(hda->dmic_dev);

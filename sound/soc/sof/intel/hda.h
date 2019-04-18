@@ -399,6 +399,11 @@ struct sof_intel_hda_dev {
 
 	/* DMIC device */
 	struct platform_device *dmic_dev;
+
+#if IS_ENABLED(CONFIG_SOUNDWIRE_INTEL)
+	/* sdw context */
+	void *sdw;
+#endif
 };
 
 static inline struct hdac_bus *sof_to_bus(struct snd_sof_dev *s)
