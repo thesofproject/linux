@@ -441,6 +441,9 @@ struct snd_sof_dev {
 
 	bool msi_enabled;
 
+	/* sdw instance */
+	void *sdw;
+
 	void *private;			/* core does not touch this */
 };
 
