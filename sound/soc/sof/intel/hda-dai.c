@@ -249,7 +249,6 @@ static int hda_link_hw_free(struct snd_pcm_substream *substream,
 		bus = hstream->bus;
 		rtd = snd_pcm_substream_chip(substream);
 		link_dev = snd_soc_dai_get_dma_data(dai, substream);
-		snd_hdac_ext_stream_decouple(bus, link_dev, false);
 		name = rtd->codec_dai->component->name;
 		link = snd_hdac_ext_bus_get_link(bus, name);
 		if (!link)
