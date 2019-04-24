@@ -247,10 +247,4 @@ struct sof_ipc_pipe_comp_connect {
 	uint32_t sink_id;
 }  __packed;
 
-/* external events */
-enum sof_event_types {
-	SOF_EVENT_NONE = 0,
-	SOF_KEYWORD_DETECT_DAPM_EVENT,
-};
-
 #endif

@@ -42,6 +42,12 @@
 /* size of tplg abi in byte */
 #define SOF_TPLG_ABI_SIZE 3
 
+/* external events */
+enum sof_event_types {
+	SOF_EVENT_NONE = 0,
+	SOF_KEYWORD_DETECT_DAPM_EVENT,
+};
+
 /* send pcm params ipc */
 static int ipc_pcm_params(struct snd_sof_widget *swidget, int dir)
 {
