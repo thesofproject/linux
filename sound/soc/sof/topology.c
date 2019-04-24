@@ -388,6 +388,16 @@ static enum sof_ipc_frame find_format(const char *name)
 	return SOF_IPC_FRAME_S32_LE;
 }
 
+/** \brief Types of processing components */
+enum sof_ipc_process_type {
+	SOF_PROCESS_NONE = 0,		/**< None */
+	SOF_PROCESS_EQFIR,		/**< Intel FIR */
+	SOF_PROCESS_EQIIR,		/**< Intel IIR */
+	SOF_PROCESS_KEYWORD_DETECT,	/**< Keyword Detection */
+	SOF_PROCESS_KPB,		/**< KeyPhrase Buffer Manager */
+	SOF_PROCESS_CHAN_SELECTOR,	/**< Channel Selector */
+};
+
 struct sof_process_types {
 	const char *name;
 	enum sof_ipc_process_type type;
