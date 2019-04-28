@@ -51,6 +51,17 @@ int hda_dsp_trace_init(struct snd_sof_dev *sdev, u32 *stream_tag)
 		return -ENODEV;
 	}
 
+	/*
+	 * There is a HW limitation that requires the host and link DMA engines
+	 * to be coupled whenever link DMA engine needs to be reset. This means
+	 * that even in decoupled mode, we always need to reserve link and
+	 * host DMA channels with the same ID. Trace utilizes only the host DMA.
+	 * Therefore, to prevent the link DMA with the same ID as trace host DMA
+	 * from being assigned to another stream, its link_locked attribute
+	 * must be set.
+	 */
+	hda->dtrace_stream->link_locked = 1;
+
 	*stream_tag = hda->dtrace_stream->hstream.stream_tag;
 
 	/*
@@ -78,6 +89,7 @@ int hda_dsp_trace_release(struct snd_sof_dev *sdev)
 		hda_dsp_stream_put(sdev,
 				   SNDRV_PCM_STREAM_CAPTURE,
 				   hstream->stream_tag);
+		hda->dtrace_stream->link_locked = 0;
 		hda->dtrace_stream = NULL;
 		return 0;
 	}
