@@ -120,9 +120,9 @@ int sdw_master_read_prop(struct sdw_bus *bus)
 }
 EXPORT_SYMBOL(sdw_master_read_prop);
 
-static int sdw_slave_read_dp0(struct sdw_slave *slave,
-			      struct fwnode_handle *port,
-			      struct sdw_dp0_prop *dp0)
+int sdw_slave_read_dp0(struct sdw_slave *slave,
+		       struct fwnode_handle *port,
+		       struct sdw_dp0_prop *dp0)
 {
 	int nval;
 
@@ -158,6 +158,7 @@ static int sdw_slave_read_dp0(struct sdw_slave *slave,
 
 	return 0;
 }
+EXPORT_SYMBOL(sdw_slave_read_dp0);
 
 int sdw_slave_read_dpn(struct sdw_slave *slave,
 		       struct sdw_dpn_prop *dpn, int count, int ports,
