@@ -1840,11 +1840,6 @@ static int sof_process_load(struct snd_soc_component *scomp, int index,
 			se = (struct soc_enum *)kc->private_value;
 			scontrol = se->dobj.private;
 			break;
-		default:
-			dev_err(sdev->dev, "error: unknown kcontrol type %d in widget %s\n",
-				widget->dobj.widget.kcontrol_type,
-				widget->name);
-			return -EINVAL;
 		}
 
 		/* don't include if no private data */
