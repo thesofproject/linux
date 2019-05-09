@@ -135,6 +135,8 @@ config SND_SOC_INTEL_APL
 	depends on PCI && ACPI
 	depends on  !SND_SOC_SOF_APOLLOLAKE_SUPPORT || \
 		!SND_SOC_SOF_INTEL_BUILDTIME_DISABLE_SKL_SST_DRIVER
+	select SND_SOC_INTEL_QUIRKS if \
+	       SND_SOC_SOF_INTEL_RUNTIME_DISABLE_SKL_SST_DRIVER
 	select SND_SOC_INTEL_SKYLAKE_FAMILY
 	help
 	  If you have a Intel Broxton/ApolloLake platform with the DSP
@@ -153,6 +155,8 @@ config SND_SOC_INTEL_GLK
 	depends on PCI && ACPI
 	depends on  !SND_SOC_SOF_GEMINILAKE_SUPPORT || \
 		!SND_SOC_SOF_INTEL_BUILDTIME_DISABLE_SKL_SST_DRIVER
+	select SND_SOC_INTEL_QUIRKS if \
+	       SND_SOC_SOF_INTEL_RUNTIME_DISABLE_SKL_SST_DRIVER
 	select SND_SOC_INTEL_SKYLAKE_FAMILY
 	help
 	  If you have a Intel GeminiLake platform with the DSP
@@ -238,6 +242,10 @@ config SND_SOC_ACPI_INTEL_MATCH
 	select SND_SOC_ACPI if ACPI
 	# this option controls the compilation of ACPI matching tables and
 	# helpers and is not meant to be selected by the user.
+
+config SND_SOC_INTEL_QUIRKS
+       tristate
+       # this option is selected for runtime detection of SOF/SST support
 
 endif ## SND_SOC_INTEL_SST_TOPLEVEL || SND_SOC_SOF_INTEL_TOPLEVEL
 

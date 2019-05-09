@@ -63,6 +63,7 @@ config SND_SOC_SOF_INTEL_DISABLE_ATOM_SST_MERRIFIELD
 
 config SND_SOC_SOF_INTEL_BUILDTIME_DISABLE_SKL_SST_DRIVER
 	bool "Build-time exclusion with the Skylake/SST driver"
+	depends on !SND_SOC_SOF_INTEL_RUNTIME_DISABLE_SKL_SST_DRIVER
 	help
 	  This option provides a build-time mutual exclusion with the
 	  Skylake/SST driver to select SOF. Distros should select this
@@ -71,6 +72,15 @@ config SND_SOC_SOF_INTEL_BUILDTIME_DISABLE_SKL_SST_DRIVER
 	  files.
 	  If unsure select N.
 
+config SND_SOC_SOF_INTEL_RUNTIME_DISABLE_SKL_SST_DRIVER
+	bool "Run-time exclusion with the Skylake/SST driver"
+	help
+	  This option relies on runtime-time mutual exclusion with the
+	  Skylake/SST driver to select SOF, by checking e.g. CPU ids,
+	  DMI quirks. The SOF probe is not guaranteed to work if
+	  userspace does not provide a firmware signed with the
+	  relevant authentication key.
+	  If unsure select N.
 endif
 
 config SND_SOC_SOF_INTEL_ACPI
@@ -280,6 +290,8 @@ config SND_SOC_SOF_HDA_COMMON
 	tristate
 	select SND_SOC_SOF_INTEL_COMMON
 	select SND_SOC_SOF_HDA_LINK_BASELINE
+	select SND_SOC_INTEL_QUIRKS if \
+	       SND_SOC_SOF_INTEL_RUNTIME_DISABLE_SKL_SST_DRIVER
 	help
 	  This option is not user-selectable but automagically handled by
 	  'select' statements at a higher level

@@ -21,6 +21,10 @@
 #include "intel/shim.h"
 #include "intel/hda.h"
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_RUNTIME_DISABLE_SKL_SST_DRIVER)
+#include "../intel/common/soc-intel-quirks.h"
+#endif
+
 static char *fw_path;
 module_param(fw_path, charp, 0444);
 MODULE_PARM_DESC(fw_path, "alternate path for SOF firmware.");
@@ -215,6 +219,35 @@ static const struct dev_pm_ops sof_pci_pm = {
 			   NULL)
 };
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_RUNTIME_DISABLE_SKL_SST_DRIVER)
+static bool check_intel_quirks(struct device *dev)
+{
+	bool cpu;
+	bool sof;
+
+	if (IS_ENABLED(CONFIG_SND_SOC_SOF_APOLLOLAKE_SUPPORT)) {
+		sof_intel_quirk_apl(&cpu, &sof);
+		if (cpu && !sof) {
+			dev_err(dev, "error: ApolloLake platform is not supported by SOF, aborting probe\n");
+			return false;
+		}
+	}
+	if (IS_ENABLED(CONFIG_SND_SOC_SOF_GEMINILAKE_SUPPORT)) {
+		sof_intel_quirk_glk(&cpu, &sof);
+		if (cpu && !sof) {
+			dev_err(dev, "error: GeminiLake platform is not supported by SOF, aborting probe\n");
+			return false;
+		}
+	}
+	return true;
+}
+#else
+static inline bool check_intel_quirks(struct device *dev)
+{
+	return true;
+}
+#endif
+
 static void sof_pci_probe_complete(struct device *dev)
 {
 	dev_dbg(dev, "Completing SOF PCI probe");
@@ -269,6 +302,9 @@ static int sof_pci_probe(struct pci_dev *pci,
 		return -ENODEV;
 	}
 	dev_info(dev, "DSP detected with PCI class/subclass/prog-if 0x%06x\n", pci->class);
+
+	if (!check_intel_quirks(dev))
+		return -ENODEV;
 
 skip_dsp_detection:
 	/* get ops for platform */

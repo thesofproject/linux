@@ -40,6 +40,10 @@
 #if IS_ENABLED(CONFIG_SND_SOC_INTEL_SKYLAKE_HDAUDIO_CODEC)
 #include "../../../soc/codecs/hdac_hda.h"
 #endif
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_RUNTIME_DISABLE_SKL_SST_DRIVER)
+#include "../common/soc-intel-quirks.h"
+#endif
+
 static int skl_pci_binding;
 module_param_named(pci_binding, skl_pci_binding, int, 0444);
 MODULE_PARM_DESC(pci_binding, "PCI binding (0=auto, 1=only legacy, 2=only asoc");
@@ -960,6 +964,35 @@ static int skl_first_init(struct hdac_bus *bus)
 	return skl_init_chip(bus, true);
 }
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_RUNTIME_DISABLE_SKL_SST_DRIVER)
+static bool check_intel_quirks(struct device *dev)
+{
+	bool cpu;
+	bool sof;
+
+	if (IS_ENABLED(CONFIG_SND_SOC_SOF_APOLLOLAKE_SUPPORT)) {
+		sof_intel_quirk_apl(&cpu, &sof);
+		if (cpu && sof) {
+			dev_err(dev, "ApolloLake platform is not supported by SST driver, aborting probe\n");
+			return false;
+		}
+	}
+	if (IS_ENABLED(CONFIG_SND_SOC_SOF_GEMINILAKE_SUPPORT)) {
+		sof_intel_quirk_glk(&cpu, &sof);
+		if (cpu && sof) {
+			dev_err(dev, "GeminiLake platform is not supported by SST driver, aborting probe\n");
+			return false;
+		}
+	}
+	return true;
+}
+#else
+static inline bool check_intel_quirks(struct device *dev)
+{
+	return true;
+}
+#endif
+
 static int skl_probe(struct pci_dev *pci,
 		     const struct pci_device_id *pci_id)
 {
@@ -996,6 +1029,9 @@ static int skl_probe(struct pci_dev *pci,
 		dev_err(&pci->dev, "invalid value for skl_pci_binding module parameter, ignored\n");
 		break;
 	}
+
+	if (!check_intel_quirks(&pci->dev))
+		return -ENODEV;
 
 	/* we use ext core ops, so provide NULL for ops here */
 	err = skl_create(pci, NULL, &skl);
