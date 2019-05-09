@@ -39,6 +39,26 @@ config SND_SOC_SOF_INTEL_DISABLE_LEGACY_BROADWELL
 	  The Broadwell legacy can be replaced the SOF driver. Distros
 	  should select this build-time option if they also provide
 	  userspace updates for SOF firmware, topology and UCM files.
+	  if unsure select "N"
+
+config SND_SOC_SOF_INTEL_DISABLE_ATOM_SST_BAYTRAIL
+	bool "Mutual exclusion with the Atom/SST driver on Baytrail/CherryTrail"
+	depends on SND_SOC_SOF_BAYTRAIL_SUPPORT
+	help
+	  The Atom/SST Baytrail/Cherrytrail driver can be replaced by the SOF
+	  driver. Distros should select this build-time option if they
+	  also provide userspace updates for SOF firmware, topology
+	  and UCM files.
+	  If unsure select N.
+
+config SND_SOC_SOF_INTEL_DISABLE_ATOM_SST_MERRIFIELD
+	bool "Mutual exclusion with the Atom/SST driver on Merrifield"
+	depends on SND_SOC_SOF_MERRIFIELD_SUPPORT
+	help
+	  The Atom/SST Merrifield driver can be replaced by the SOF
+	  driver. Distros should select this build-time option if they
+	  also provide userspace updates for SOF firmware, topology
+	  and UCM files.
 	  If unsure select N.
 
 endif
