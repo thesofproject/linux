@@ -8,6 +8,32 @@ config SND_SOC_SOF_INTEL_TOPLEVEL
 
 if SND_SOC_SOF_INTEL_TOPLEVEL
 
+config SND_SOC_SOF_INTEL_DRIVER_SELECTION
+	bool "Enable build- or run-time driver selection"
+	help
+	  SOF drivers can conflict with the legacy Baytrail driver,
+	  the Atom/SST driver and the Skylake/SST driver and the
+	  HDaudio legacy driver. If all these drivers are compiled in,
+	  the driver selection will be depend on the Makefile order,
+	  unless the user/distro add blacklist parameters. With this
+	  optional set of configuration, the distro can indicate a
+	  preference for SOF and avoid conflicts/blacklists.
+	  if unsure select "N"
+
+if SND_SOC_SOF_INTEL_DRIVER_SELECTION
+
+config SND_SOC_SOF_INTEL_DISABLE_LEGACY_BAYTRAIL
+	bool "Mutual exclusion with the legacy Baytrail driver"
+	depends on SND_SOC_SOF_BAYTRAIL_SUPPORT
+	help
+	  The legacy Baytrail driver is already deprecated and can be
+	  replaced the SOF driver. Distros should select this
+	  build-time option if they also provide userspace updates for
+	  SOF firmware, topology and UCM files.
+	  If unsure select N.
+
+endif
+
 config SND_SOC_SOF_INTEL_ACPI
 	tristate
 	select SND_SOC_SOF_BAYTRAIL  if SND_SOC_SOF_BAYTRAIL_SUPPORT

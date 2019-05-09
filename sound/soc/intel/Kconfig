@@ -62,6 +62,7 @@ config SND_SOC_INTEL_HASWELL
 config SND_SOC_INTEL_BAYTRAIL
 	tristate "Baytrail (legacy) Platforms"
 	depends on DMADEVICES && ACPI && SND_SST_ATOM_HIFI2_PLATFORM=n
+	depends on !SND_SOC_SOF_INTEL_DISABLE_LEGACY_BAYTRAIL
 	select SND_SOC_INTEL_SST
 	select SND_SOC_INTEL_SST_ACPI
 	select SND_SOC_INTEL_SST_FIRMWARE
@@ -70,7 +71,7 @@ config SND_SOC_INTEL_BAYTRAIL
 	  If you have a Intel Baytrail platform connected to an I2S codec,
 	  then enable this option by saying Y or m. This was typically used
 	  for Baytrail Chromebooks but this option is now deprecated and is
-	  not recommended, use SND_SST_ATOM_HIFI2_PLATFORM instead.
+	  not recommended, use SND_SST_ATOM_HIFI2_PLATFORM or SOF instead.
 
 config SND_SST_ATOM_HIFI2_PLATFORM
 	tristate
