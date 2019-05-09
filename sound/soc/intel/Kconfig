@@ -109,9 +109,12 @@ config SND_SOC_INTEL_SKYLAKE
 	tristate "All Skylake/SST Platforms"
 	depends on PCI && ACPI
 	select SND_SOC_INTEL_SKL
-	select SND_SOC_INTEL_APL
+	select SND_SOC_INTEL_APL if !SND_SOC_SOF_APOLLOLAKE_SUPPORT || \
+	       !SND_SOC_SOF_INTEL_BUILDTIME_DISABLE_SKL_SST_DRIVER
 	select SND_SOC_INTEL_KBL
-	select SND_SOC_INTEL_GLK
+	select SND_SOC_INTEL_GLK if !SND_SOC_SOF_GEMINILAKE_SUPPORT || \
+	       !SND_SOC_SOF_INTEL_BUILDTIME_DISABLE_SKL_SST_DRIVER
+
 	help
           This is a backwards-compatible option to select all devices
 	  supported by the Intel SST/Skylake driver. This option is no
@@ -130,6 +133,8 @@ config SND_SOC_INTEL_SKL
 config SND_SOC_INTEL_APL
 	tristate "Broxton/ApolloLake Platforms"
 	depends on PCI && ACPI
+	depends on  !SND_SOC_SOF_APOLLOLAKE_SUPPORT || \
+		!SND_SOC_SOF_INTEL_BUILDTIME_DISABLE_SKL_SST_DRIVER
 	select SND_SOC_INTEL_SKYLAKE_FAMILY
 	help
 	  If you have a Intel Broxton/ApolloLake platform with the DSP
@@ -146,6 +151,8 @@ config SND_SOC_INTEL_KBL
 config SND_SOC_INTEL_GLK
 	tristate "GeminiLake Platforms"
 	depends on PCI && ACPI
+	depends on  !SND_SOC_SOF_GEMINILAKE_SUPPORT || \
+		!SND_SOC_SOF_INTEL_BUILDTIME_DISABLE_SKL_SST_DRIVER
 	select SND_SOC_INTEL_SKYLAKE_FAMILY
 	help
 	  If you have a Intel GeminiLake platform with the DSP
@@ -154,6 +161,8 @@ config SND_SOC_INTEL_GLK
 config SND_SOC_INTEL_CNL
 	tristate "CannonLake/WhiskyLake Platforms"
 	depends on PCI && ACPI
+	depends on  !SND_SOC_SOF_CANNONLAKE_SUPPORT || \
+		!SND_SOC_SOF_INTEL_BUILDTIME_DISABLE_SKL_SST_DRIVER
 	select SND_SOC_INTEL_SKYLAKE_FAMILY
 	help
 	  If you have a Intel CNL/WHL platform with the DSP
@@ -163,6 +172,8 @@ config SND_SOC_INTEL_CNL
 config SND_SOC_INTEL_CFL
 	tristate "CoffeeLake Platforms"
 	depends on PCI && ACPI
+	depends on !SND_SOC_SOF_COFFEELAKE_SUPPORT || \
+		!SND_SOC_SOF_INTEL_BUILDTIME_DISABLE_SKL_SST_DRIVER
 	select SND_SOC_INTEL_SKYLAKE_FAMILY
 	help
 	  If you have a Intel CoffeeLake platform with the DSP

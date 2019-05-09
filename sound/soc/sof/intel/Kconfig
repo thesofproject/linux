@@ -61,6 +61,16 @@ config SND_SOC_SOF_INTEL_DISABLE_ATOM_SST_MERRIFIELD
 	  and UCM files.
 	  If unsure select N.
 
+config SND_SOC_SOF_INTEL_BUILDTIME_DISABLE_SKL_SST_DRIVER
+	bool "Build-time exclusion with the Skylake/SST driver"
+	help
+	  This option provides a build-time mutual exclusion with the
+	  Skylake/SST driver to select SOF. Distros should select this
+	  build-time option if they also provide SOF firmware signed
+	  with the relevant authentication keys, topology and UCM
+	  files.
+	  If unsure select N.
+
 endif
 
 config SND_SOC_SOF_INTEL_ACPI
