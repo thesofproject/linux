@@ -50,6 +50,7 @@ config SND_SOC_INTEL_HASWELL
 	tristate "Haswell/Broadwell Platforms"
 	depends on SND_DMA_SGBUF
 	depends on DMADEVICES && ACPI
+	depends on !SND_SOC_SOF_INTEL_DISABLE_LEGACY_BROADWELL
 	select SND_SOC_INTEL_SST
 	select SND_SOC_INTEL_SST_ACPI
 	select SND_SOC_INTEL_SST_FIRMWARE

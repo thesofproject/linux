@@ -32,6 +32,15 @@ config SND_SOC_SOF_INTEL_DISABLE_LEGACY_BAYTRAIL
 	  SOF firmware, topology and UCM files.
 	  If unsure select N.
 
+config SND_SOC_SOF_INTEL_DISABLE_LEGACY_BROADWELL
+	bool "Mutual exclusion with the legacy Broadwell driver"
+	depends on SND_SOC_SOF_BROADWELL_SUPPORT
+	help
+	  The Broadwell legacy can be replaced the SOF driver. Distros
+	  should select this build-time option if they also provide
+	  userspace updates for SOF firmware, topology and UCM files.
+	  If unsure select N.
+
 endif
 
 config SND_SOC_SOF_INTEL_ACPI
