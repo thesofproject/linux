@@ -539,6 +539,12 @@ static int sof_control_load_bytes(struct snd_soc_component *scomp,
 		return -EINVAL;
 	}
 
+	if (max_size > SND_SOF_CTL_TLV_LENGTH_MAX) {
+		dev_err(sdev->dev, "error: Bytes size %d exceeds max %d.\n",
+			max_size, SND_SOF_CTL_TLV_LENGTH_MAX);
+		return -ENOBUFS;
+	}
+
 	/* init the get/put bytes data */
 	scontrol->size = sizeof(struct sof_ipc_ctrl_data) +
 		le32_to_cpu(control->priv.size);

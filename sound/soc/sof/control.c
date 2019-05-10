@@ -417,9 +417,18 @@ int snd_sof_bytes_ext_put(struct snd_kcontrol *kcontrol,
 	if (copy_from_user(&header, tlvd, sizeof(const struct snd_ctl_tlv)))
 		return -EFAULT;
 
+	/* Check that length does not exceed the maximum defined for SOF */
+	if (header.length > SND_SOF_CTL_TLV_LENGTH_MAX) {
+		dev_err_ratelimited(sdev->dev,
+				    "error: Bytes size %u exceeds max %d.\n",
+				    header.length, SND_SOF_CTL_TLV_LENGTH_MAX);
+		return -ENOBUFS;
+	}
+
 	/* be->max is coming from topology */
 	if (header.length > be->max) {
-		dev_err_ratelimited(sdev->dev, "error: Bytes data size %d exceeds max %d.\n",
+		dev_err_ratelimited(sdev->dev,
+				    "error: Bytes size %u exceeds max %d.\n",
 				    header.length, be->max);
 		return -EINVAL;
 	}

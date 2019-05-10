@@ -62,6 +62,9 @@
 
 #define DMA_CHAN_INVALID	0xFFFFFFFF
 
+/* Set upper limit for TLV bytes length to 1 MB */
+#define SND_SOF_CTL_TLV_LENGTH_MAX (1024 * 1024)
+
 struct snd_sof_dev;
 struct snd_sof_ipc_msg;
 struct snd_sof_ipc;
