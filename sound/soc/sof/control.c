@@ -104,11 +104,11 @@ int snd_sof_volume_put(struct snd_kcontrol *kcontrol,
 	}
 
 	/* notify DSP of mixer updates */
-	snd_sof_ipc_set_get_comp_data(sdev->ipc, scontrol,
-				      SOF_IPC_COMP_SET_VALUE,
-				      SOF_CTRL_TYPE_VALUE_CHAN_GET,
-				      SOF_CTRL_CMD_VOLUME,
-				      true);
+	ret = snd_sof_ipc_set_get_comp_data(sdev->ipc, scontrol,
+					    SOF_IPC_COMP_SET_VALUE,
+					    SOF_CTRL_TYPE_VALUE_CHAN_GET,
+					    SOF_CTRL_CMD_VOLUME,
+					    true);
 
 	pm_runtime_mark_last_busy(sdev->dev);
 	err = pm_runtime_put_autosuspend(sdev->dev);
@@ -116,7 +116,7 @@ int snd_sof_volume_put(struct snd_kcontrol *kcontrol,
 		dev_err_ratelimited(sdev->dev,
 				    "error: volume put failed to idle %d\n",
 				    err);
-	return 0;
+	return ret;
 }
 
 int snd_sof_switch_get(struct snd_kcontrol *kcontrol,
@@ -186,11 +186,11 @@ int snd_sof_switch_put(struct snd_kcontrol *kcontrol,
 	}
 
 	/* notify DSP of mixer updates */
-	snd_sof_ipc_set_get_comp_data(sdev->ipc, scontrol,
-				      SOF_IPC_COMP_SET_VALUE,
-				      SOF_CTRL_TYPE_VALUE_CHAN_GET,
-				      SOF_CTRL_CMD_SWITCH,
-				      true);
+	ret = snd_sof_ipc_set_get_comp_data(sdev->ipc, scontrol,
+					    SOF_IPC_COMP_SET_VALUE,
+					    SOF_CTRL_TYPE_VALUE_CHAN_GET,
+					    SOF_CTRL_CMD_SWITCH,
+					    true);
 
 	pm_runtime_mark_last_busy(sdev->dev);
 	err = pm_runtime_put_autosuspend(sdev->dev);
@@ -268,11 +268,11 @@ int snd_sof_enum_put(struct snd_kcontrol *kcontrol,
 	}
 
 	/* notify DSP of enum updates */
-	snd_sof_ipc_set_get_comp_data(sdev->ipc, scontrol,
-				      SOF_IPC_COMP_SET_VALUE,
-				      SOF_CTRL_TYPE_VALUE_CHAN_GET,
-				      SOF_CTRL_CMD_ENUM,
-				      true);
+	ret = snd_sof_ipc_set_get_comp_data(sdev->ipc, scontrol,
+					    SOF_IPC_COMP_SET_VALUE,
+					    SOF_CTRL_TYPE_VALUE_CHAN_GET,
+					    SOF_CTRL_CMD_ENUM,
+					    true);
 
 	pm_runtime_mark_last_busy(sdev->dev);
 	err = pm_runtime_put_autosuspend(sdev->dev);
@@ -280,7 +280,7 @@ int snd_sof_enum_put(struct snd_kcontrol *kcontrol,
 		dev_err_ratelimited(sdev->dev,
 				    "error: enum put failed to idle %d\n",
 				    err);
-	return 0;
+	return ret;
 }
 
 int snd_sof_bytes_get(struct snd_kcontrol *kcontrol,
@@ -379,11 +379,11 @@ int snd_sof_bytes_put(struct snd_kcontrol *kcontrol,
 	memcpy(data, ucontrol->value.bytes.data, size);
 
 	/* notify DSP of byte control updates */
-	snd_sof_ipc_set_get_comp_data(sdev->ipc, scontrol,
-				      SOF_IPC_COMP_SET_DATA,
-				      SOF_CTRL_TYPE_DATA_SET,
-				      scontrol->cmd,
-				      true);
+	ret = snd_sof_ipc_set_get_comp_data(sdev->ipc, scontrol,
+					    SOF_IPC_COMP_SET_DATA,
+					    SOF_CTRL_TYPE_DATA_SET,
+					    scontrol->cmd,
+					    true);
 
 	pm_runtime_mark_last_busy(sdev->dev);
 	err = pm_runtime_put_autosuspend(sdev->dev);
@@ -472,11 +472,11 @@ int snd_sof_bytes_ext_put(struct snd_kcontrol *kcontrol,
 	}
 
 	/* notify DSP of byte control updates */
-	snd_sof_ipc_set_get_comp_data(sdev->ipc, scontrol,
-				      SOF_IPC_COMP_SET_DATA,
-				      SOF_CTRL_TYPE_DATA_SET,
-				      scontrol->cmd,
-				      true);
+	ret = snd_sof_ipc_set_get_comp_data(sdev->ipc, scontrol,
+					    SOF_IPC_COMP_SET_DATA,
+					    SOF_CTRL_TYPE_DATA_SET,
+					    scontrol->cmd,
+					    true);
 
 	pm_runtime_mark_last_busy(sdev->dev);
 	err = pm_runtime_put_autosuspend(sdev->dev);
