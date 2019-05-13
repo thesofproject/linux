@@ -1361,11 +1361,14 @@ int sof_load_pipeline_ipc(struct snd_sof_dev *sdev,
 		return ret;
 	}
 
+	mutex_lock(&sdev->cores_status_mutex);
+
 	/* power up the core that this pipeline is scheduled on */
 	ret = snd_sof_dsp_core_power_up(sdev, 1 << pipeline->core);
 	if (ret < 0) {
 		dev_err(sdev->dev, "error: powering up pipeline schedule core %d\n",
 			pipeline->core);
+		mutex_unlock(&sdev->cores_status_mutex);
 		return ret;
 	}
 
@@ -1389,6 +1392,8 @@ int sof_load_pipeline_ipc(struct snd_sof_dev *sdev,
 				 &pm_core_config, sizeof(pm_core_config));
 	if (ret < 0)
 		dev_err(sdev->dev, "error: core enable ipc failure\n");
+
+	mutex_unlock(&sdev->cores_status_mutex);
 
 	return ret;
 }
@@ -2149,6 +2154,7 @@ static int sof_widget_unload(struct snd_soc_component *scomp,
 		}
 		break;
 	case snd_soc_dapm_scheduler:
+		mutex_lock(&sdev->cores_status_mutex);
 
 		/* power down the pipeline schedule core */
 		pipeline = swidget->private;
@@ -2160,6 +2166,7 @@ static int sof_widget_unload(struct snd_soc_component *scomp,
 		/* update enabled cores mask */
 		sdev->enabled_cores_mask &= ~(1 << pipeline->core);
 
+		mutex_unlock(&sdev->cores_status_mutex);
 		break;
 	default:
 		break;

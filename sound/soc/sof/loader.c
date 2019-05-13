@@ -394,8 +394,10 @@ int snd_sof_run_firmware(struct snd_sof_dev *sdev)
 		return ret;
 	}
 
+	mutex_lock(&sdev->cores_status_mutex);
 	/* fw boot is complete. Update the active cores mask */
 	sdev->enabled_cores_mask = init_core_mask;
+	mutex_unlock(&sdev->cores_status_mutex);
 
 	return 0;
 }

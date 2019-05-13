@@ -416,6 +416,8 @@ struct snd_sof_dev {
 	struct snd_soc_component *component;
 	u32 enabled_cores_mask; /* keep track of enabled cores */
 	int core_refs[SND_SOF_CORE_MAX];
+	/* protects enabled_cores_mask & core_refs */
+	struct mutex cores_status_mutex;
 
 	/* FW configuration */
 	struct sof_ipc_dma_buffer_data *info_buffer;
