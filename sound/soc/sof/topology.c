@@ -1693,15 +1693,21 @@ int sof_load_pipeline_ipc(struct device *dev,
 			  struct sof_ipc_comp_reply *r)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
-	int ret = sof_core_enable(sdev, pipeline->core);
+	int ret;
 
+	mutex_lock(&sdev->cores_status_mutex);
+
+	ret = sof_core_enable(sdev, pipeline->core);
 	if (ret < 0)
-		return ret;
+		goto done;
 
 	ret = sof_ipc_tx_message(sdev->ipc, pipeline->hdr.cmd, pipeline,
 				 sizeof(*pipeline), r, sizeof(*r));
 	if (ret < 0)
 		dev_err(dev, "error: load pipeline ipc failure\n");
+
+done:
+	mutex_unlock(&sdev->cores_status_mutex);
 
 	return ret;
 }
@@ -2503,6 +2509,7 @@ static int sof_widget_unload(struct snd_soc_component *scomp,
 		}
 		break;
 	case snd_soc_dapm_scheduler:
+		mutex_lock(&sdev->cores_status_mutex);
 
 		/* power down the pipeline schedule core */
 		pipeline = swidget->private;
@@ -2510,6 +2517,8 @@ static int sof_widget_unload(struct snd_soc_component *scomp,
 		if (ret < 0)
 			dev_err(scomp->dev, "error: powering down pipeline schedule core %d\n",
 				pipeline->core);
+
+		mutex_unlock(&sdev->cores_status_mutex);
 		break;
 	default:
 		break;
