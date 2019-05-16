@@ -184,6 +184,7 @@ void hda_ipc_dump(struct snd_sof_dev *sdev)
 	u32 hipcie;
 	u32 hipct;
 	u32 hipcctl;
+	u32 ipc_rec, ipc_proc;
 
 	/* read IPC status */
 	hipcie = snd_sof_dsp_read(sdev, HDA_DSP_BAR, HDA_DSP_REG_HIPCIE);
@@ -195,6 +196,14 @@ void hda_ipc_dump(struct snd_sof_dev *sdev)
 	dev_err(sdev->dev,
 		"error: host status 0x%8.8x dsp status 0x%8.8x mask 0x%8.8x\n",
 		hipcie, hipct, hipcctl);
+
+	ipc_rec = snd_sof_dsp_read(sdev, HDA_DSP_BAR,
+				   HDA_DSP_SRAM_REG_FW_IPC_RECEIVED_COUNT);
+	ipc_proc = snd_sof_dsp_read(sdev, HDA_DSP_BAR,
+				    HDA_DSP_SRAM_REG_FW_IPC_PROCESSED_COUNT);
+
+	dev_err(sdev->dev, "error: ipc received: %u processed: %u\n",
+		ipc_rec, ipc_proc);
 }
 
 static int hda_init(struct snd_sof_dev *sdev)
