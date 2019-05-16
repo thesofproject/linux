@@ -82,8 +82,10 @@ int snd_sof_volume_put(struct snd_kcontrol *kcontrol,
 		(struct soc_mixer_control *)kcontrol->private_value;
 	struct snd_sof_control *scontrol = sm->dobj.private;
 	struct snd_sof_dev *sdev = scontrol->sdev;
-	struct sof_ipc_ctrl_data *cdata = scontrol->control_data;
+	struct sof_ipc_ctrl_data *pcdata = scontrol->control_data;
+	struct sof_ipc_ctrl_data *cdata;
 	unsigned int i, channels = scontrol->num_channels;
+	size_t chanv_size = channels * sizeof(struct sof_ipc_ctrl_value_chan);
 	int ret, err;
 
 	ret = pm_runtime_get_sync(sdev->dev);
@@ -94,6 +96,15 @@ int snd_sof_volume_put(struct snd_kcontrol *kcontrol,
 		pm_runtime_put_noidle(sdev->dev);
 		return ret;
 	}
+
+	/* Allocate temporary buffer for new cdata and copy header data */
+	cdata = kzalloc(sizeof(*cdata) + chanv_size, GFP_KERNEL);
+	if (!cdata)
+		return -ENOMEM;
+
+	/* Copy header and point scontrol to the new IPC data */
+	memcpy(cdata, pcdata, sizeof(*cdata));
+	scontrol->control_data = cdata;
 
 	/* update each channel */
 	for (i = 0; i < channels; i++) {
@@ -110,6 +121,15 @@ int snd_sof_volume_put(struct snd_kcontrol *kcontrol,
 					    SOF_CTRL_CMD_VOLUME,
 					    true);
 
+	/*
+	 * Point scontrol back to cache location. Copy sent control data
+	 * if he IPC was successful.
+	 */
+	scontrol->control_data = pcdata;
+	if (!ret)
+		memcpy(pcdata->chanv, cdata->chanv, chanv_size);
+
+	kfree(cdata);
 	pm_runtime_mark_last_busy(sdev->dev);
 	err = pm_runtime_put_autosuspend(sdev->dev);
 	if (err < 0)
@@ -166,8 +186,10 @@ int snd_sof_switch_put(struct snd_kcontrol *kcontrol,
 		(struct soc_mixer_control *)kcontrol->private_value;
 	struct snd_sof_control *scontrol = sm->dobj.private;
 	struct snd_sof_dev *sdev = scontrol->sdev;
-	struct sof_ipc_ctrl_data *cdata = scontrol->control_data;
+	struct sof_ipc_ctrl_data *pcdata = scontrol->control_data;
+	struct sof_ipc_ctrl_data *cdata;
 	unsigned int i, channels = scontrol->num_channels;
+	size_t chanv_size = channels * sizeof(struct sof_ipc_ctrl_value_chan);
 	int ret, err;
 
 	ret = pm_runtime_get_sync(sdev->dev);
@@ -178,6 +200,15 @@ int snd_sof_switch_put(struct snd_kcontrol *kcontrol,
 		pm_runtime_put_noidle(sdev->dev);
 		return ret;
 	}
+
+	/* Allocate temporary buffer for new cdata and copy header data */
+	cdata = kzalloc(sizeof(*cdata) + chanv_size, GFP_KERNEL);
+	if (!cdata)
+		return -ENOMEM;
+
+	/* Copy header and point scontrol to the new IPC data */
+	memcpy(cdata, pcdata, sizeof(*cdata));
+	scontrol->control_data = cdata;
 
 	/* update each channel */
 	for (i = 0; i < channels; i++) {
@@ -192,6 +223,15 @@ int snd_sof_switch_put(struct snd_kcontrol *kcontrol,
 					    SOF_CTRL_CMD_SWITCH,
 					    true);
 
+	/*
+	 * Point scontrol back to cache location. Copy sent control data
+	 * if he IPC was successful.
+	 */
+	scontrol->control_data = pcdata;
+	if (!ret)
+		memcpy(pcdata->chanv, cdata->chanv, chanv_size);
+
+	kfree(cdata);
 	pm_runtime_mark_last_busy(sdev->dev);
 	err = pm_runtime_put_autosuspend(sdev->dev);
 	if (err < 0)
@@ -248,8 +288,10 @@ int snd_sof_enum_put(struct snd_kcontrol *kcontrol,
 		(struct soc_enum *)kcontrol->private_value;
 	struct snd_sof_control *scontrol = se->dobj.private;
 	struct snd_sof_dev *sdev = scontrol->sdev;
-	struct sof_ipc_ctrl_data *cdata = scontrol->control_data;
+	struct sof_ipc_ctrl_data *pcdata = scontrol->control_data;
+	struct sof_ipc_ctrl_data *cdata;
 	unsigned int i, channels = scontrol->num_channels;
+	size_t chanv_size = channels * sizeof(struct sof_ipc_ctrl_value_chan);
 	int ret, err;
 
 	ret = pm_runtime_get_sync(sdev->dev);
@@ -260,6 +302,15 @@ int snd_sof_enum_put(struct snd_kcontrol *kcontrol,
 		pm_runtime_put_noidle(sdev->dev);
 		return ret;
 	}
+
+	/* Allocate temporary buffer for new cdata and copy header data */
+	cdata = kzalloc(sizeof(*cdata) + chanv_size, GFP_KERNEL);
+	if (!cdata)
+		return -ENOMEM;
+
+	/* Copy header and point scontrol to the new IPC data */
+	memcpy(cdata, pcdata, sizeof(*cdata));
+	scontrol->control_data = cdata;
 
 	/* update each channel */
 	for (i = 0; i < channels; i++) {
@@ -274,6 +325,15 @@ int snd_sof_enum_put(struct snd_kcontrol *kcontrol,
 					    SOF_CTRL_CMD_ENUM,
 					    true);
 
+	/*
+	 * Point scontrol back to cache location. Copy sent control data
+	 * if he IPC was successful.
+	 */
+	scontrol->control_data = pcdata;
+	if (!ret)
+		memcpy(pcdata->chanv, cdata->chanv, chanv_size);
+
+	kfree(cdata);
 	pm_runtime_mark_last_busy(sdev->dev);
 	err = pm_runtime_put_autosuspend(sdev->dev);
 	if (err < 0)
@@ -347,9 +407,10 @@ int snd_sof_bytes_put(struct snd_kcontrol *kcontrol,
 		(struct soc_bytes_ext *)kcontrol->private_value;
 	struct snd_sof_control *scontrol = be->dobj.private;
 	struct snd_sof_dev *sdev = scontrol->sdev;
-	struct sof_ipc_ctrl_data *cdata = scontrol->control_data;
-	struct sof_abi_hdr *data = cdata->data;
-	size_t size = data->size + sizeof(*data);
+	struct sof_ipc_ctrl_data *pcdata = scontrol->control_data;
+	struct sof_ipc_ctrl_data *cdata;
+	struct sof_abi_hdr *pdata = pcdata->data;
+	size_t size = pdata->size + sizeof(*pdata);
 	int ret, err;
 
 	if (be->max > sizeof(ucontrol->value.bytes.data)) {
@@ -375,8 +436,17 @@ int snd_sof_bytes_put(struct snd_kcontrol *kcontrol,
 		return ret;
 	}
 
+	/* Allocate temporary buffer for new cdata and copy header data */
+	cdata = kzalloc(sizeof(*cdata) + size, GFP_KERNEL);
+	if (!cdata)
+		return -ENOMEM;
+
+	/* Copy header and point scontrol to the new IPC data */
+	memcpy(cdata, pcdata, sizeof(*cdata));
+	scontrol->control_data = cdata;
+
 	/* copy from kcontrol */
-	memcpy(data, ucontrol->value.bytes.data, size);
+	memcpy(cdata->data, ucontrol->value.bytes.data, size);
 
 	/* notify DSP of byte control updates */
 	ret = snd_sof_ipc_set_get_comp_data(sdev->ipc, scontrol,
@@ -385,6 +455,15 @@ int snd_sof_bytes_put(struct snd_kcontrol *kcontrol,
 					    scontrol->cmd,
 					    true);
 
+	/*
+	 * Point scontrol back to cache location. Copy sent control data
+	 * if he IPC was successful.
+	 */
+	scontrol->control_data = pcdata;
+	if (!ret)
+		memcpy(pcdata->data, cdata->data, size);
+
+	kfree(cdata);
 	pm_runtime_mark_last_busy(sdev->dev);
 	err = pm_runtime_put_autosuspend(sdev->dev);
 	if (err < 0)
@@ -402,10 +481,11 @@ int snd_sof_bytes_ext_put(struct snd_kcontrol *kcontrol,
 		(struct soc_bytes_ext *)kcontrol->private_value;
 	struct snd_sof_control *scontrol = be->dobj.private;
 	struct snd_sof_dev *sdev = scontrol->sdev;
-	struct sof_ipc_ctrl_data *cdata = scontrol->control_data;
+	struct sof_ipc_ctrl_data *pcdata = scontrol->control_data;
 	struct snd_ctl_tlv header;
 	const struct snd_ctl_tlv __user *tlvd =
 		(const struct snd_ctl_tlv __user *)binary_data;
+	struct sof_ipc_ctrl_data *cdata;
 	int ret;
 	int err;
 
@@ -441,24 +521,34 @@ int snd_sof_bytes_ext_put(struct snd_kcontrol *kcontrol,
 		return -EINVAL;
 	}
 
-	if (copy_from_user(cdata->data, tlvd->tlv, header.length))
+	/* Allocate temporary buffer for new cdata */
+	cdata = kzalloc(sizeof(*cdata) + header.length, GFP_KERNEL);
+	if (!cdata)
+		return -ENOMEM;
+
+	if (copy_from_user(cdata->data, tlvd->tlv, header.length)) {
+		kfree(cdata);
 		return -EFAULT;
+	}
 
 	if (cdata->data->magic != SOF_ABI_MAGIC) {
 		dev_err_ratelimited(sdev->dev,
 				    "error: Wrong ABI magic 0x%08x.\n",
 				    cdata->data->magic);
+		kfree(cdata);
 		return -EINVAL;
 	}
 
 	if (SOF_ABI_VERSION_INCOMPATIBLE(SOF_ABI_VERSION, cdata->data->abi)) {
 		dev_err_ratelimited(sdev->dev, "error: Incompatible ABI version 0x%08x.\n",
 				    cdata->data->abi);
+		kfree(cdata);
 		return -EINVAL;
 	}
 
 	if (cdata->data->size + sizeof(const struct sof_abi_hdr) > be->max) {
 		dev_err_ratelimited(sdev->dev, "error: Mismatch in ABI data size (truncated?).\n");
+		kfree(cdata);
 		return -EINVAL;
 	}
 
@@ -468,8 +558,12 @@ int snd_sof_bytes_ext_put(struct snd_kcontrol *kcontrol,
 				    "error: bytes_ext put failed to resume %d\n",
 				    ret);
 		pm_runtime_put_noidle(sdev->dev);
+		kfree(cdata);
 		return ret;
 	}
+
+	/* Point scontrol temporarily to the new data for IPC send */
+	scontrol->control_data = cdata;
 
 	/* notify DSP of byte control updates */
 	ret = snd_sof_ipc_set_get_comp_data(sdev->ipc, scontrol,
@@ -477,6 +571,14 @@ int snd_sof_bytes_ext_put(struct snd_kcontrol *kcontrol,
 					    SOF_CTRL_TYPE_DATA_SET,
 					    scontrol->cmd,
 					    true);
+
+	/* If IPC was successful copy new data into PM cache */
+	if (!ret)
+		memcpy(pcdata->data, cdata->data, header.length);
+
+	/* Restore scontrol data pointer to cache and free cdata */
+	scontrol->control_data = pcdata;
+	kfree(cdata);
 
 	pm_runtime_mark_last_busy(sdev->dev);
 	err = pm_runtime_put_autosuspend(sdev->dev);
