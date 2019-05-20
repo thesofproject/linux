@@ -50,7 +50,6 @@ static irqreturn_t cnl_ipc_irq_thread(int irq, void *context)
 	/* reply message from DSP */
 	if (hipcida & CNL_DSP_REG_HIPCIDA_DONE &&
 	    hipcctl & CNL_DSP_REG_HIPCCTL_DONE) {
-		unsigned long flags;
 
 		hipci = snd_sof_dsp_read(sdev, HDA_DSP_BAR,
 					 CNL_DSP_REG_HIPCIDR);
@@ -66,7 +65,7 @@ static irqreturn_t cnl_ipc_irq_thread(int irq, void *context)
 					CNL_DSP_REG_HIPCCTL,
 					CNL_DSP_REG_HIPCCTL_DONE, 0);
 
-		spin_lock_irqsave(&sdev->ipc_lock, flags);
+		spin_lock_irq(&sdev->ipc_lock);
 
 		/* handle immediate reply from DSP core */
 		hda_dsp_ipc_get_reply(sdev);
@@ -79,7 +78,7 @@ static irqreturn_t cnl_ipc_irq_thread(int irq, void *context)
 
 		cnl_ipc_dsp_done(sdev);
 
-		spin_unlock_irqrestore(&sdev->ipc_lock, flags);
+		spin_unlock_irq(&sdev->ipc_lock);
 
 		ret = IRQ_HANDLED;
 	}

@@ -155,7 +155,6 @@ irqreturn_t hda_dsp_ipc_irq_thread(int irq, void *context)
 	/* is this a reply message from the DSP */
 	if (hipcie & HDA_DSP_REG_HIPCIE_DONE &&
 	    hipcctl & HDA_DSP_REG_HIPCCTL_DONE) {
-		unsigned long flags;
 
 		hipci = snd_sof_dsp_read(sdev, HDA_DSP_BAR,
 					 HDA_DSP_REG_HIPCI);
@@ -181,7 +180,7 @@ irqreturn_t hda_dsp_ipc_irq_thread(int irq, void *context)
 		 * place, the message might not yet be marked as expecting a
 		 * reply.
 		 */
-		spin_lock_irqsave(&sdev->ipc_lock, flags);
+		spin_lock_irq(&sdev->ipc_lock);
 
 		/* handle immediate reply from DSP core - ignore ROM messages */
 		if (hda_dsp_ipc_is_sof(msg)) {
@@ -198,7 +197,7 @@ irqreturn_t hda_dsp_ipc_irq_thread(int irq, void *context)
 		/* set the done bit */
 		hda_dsp_ipc_dsp_done(sdev);
 
-		spin_unlock_irqrestore(&sdev->ipc_lock, flags);
+		spin_unlock_irq(&sdev->ipc_lock);
 
 		ret = IRQ_HANDLED;
 	}
