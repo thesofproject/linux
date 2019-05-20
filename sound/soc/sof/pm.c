@@ -329,6 +329,12 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 	if (!sof_ops(sdev)->suspend)
 		return 0;
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_ENABLE_DEBUGFS_CACHE)
+	/* cache debugfs contents during runtime suspend */
+	if (runtime_suspend)
+		sof_cache_debugfs(sdev);
+#endif
+
 	/* release trace */
 	snd_sof_release_trace(sdev);
 
@@ -336,11 +342,6 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 	if (!runtime_suspend)
 		sof_set_hw_params_upon_resume(sdev);
 
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_ENABLE_DEBUGFS_CACHE)
-	/* cache debugfs contents during runtime suspend */
-	if (runtime_suspend)
-		sof_cache_debugfs(sdev);
-#endif
 	/* notify DSP of upcoming power down */
 	ret = sof_send_pm_ipc(sdev, SOF_IPC_PM_CTX_SAVE);
 	if (ret < 0) {
