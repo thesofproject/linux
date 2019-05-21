@@ -873,6 +873,15 @@ int snd_sof_run_firmware(struct snd_sof_dev *sdev)
 		return ret;
 	}
 
+	mutex_lock(&sdev->cores_status_mutex);
+	/*
+	 * fw booted, Only the master DSP core (0) should be ON here,
+	 * update to reflect it.
+	 */
+	sdev->core_refs[0] = 1;
+	sdev->enabled_cores_mask = BIT(0);
+	mutex_unlock(&sdev->cores_status_mutex);
+
 	return 0;
 }
 EXPORT_SYMBOL(snd_sof_run_firmware);

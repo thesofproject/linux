@@ -180,6 +180,7 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	u32 target_state = 0;
 	int ret;
+	int i;
 
 	/* do nothing if dsp suspend callback is not set */
 	if (!runtime_suspend && !sof_ops(sdev)->suspend)
@@ -255,6 +256,13 @@ suspend:
 	/* Do not reset FW state if DSP is in D0 */
 	if (target_state == SOF_DSP_PM_D0)
 		return ret;
+
+	mutex_lock(&sdev->cores_status_mutex);
+	/* reset ref counts of DSP cores */
+	for (i = 0; i < ARRAY_SIZE(sdev->core_refs); i++)
+		sdev->core_refs[i] = 0;
+	sdev->enabled_cores_mask = 0;
+	mutex_unlock(&sdev->cores_status_mutex);
 
 	/* reset FW state */
 	sdev->fw_state = SOF_FW_BOOT_NOT_STARTED;
