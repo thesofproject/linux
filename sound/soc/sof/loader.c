@@ -338,6 +338,7 @@ EXPORT_SYMBOL(snd_sof_load_firmware);
 int snd_sof_run_firmware(struct snd_sof_dev *sdev)
 {
 	int ret;
+	int i = 0;
 	int init_core_mask;
 
 	init_waitqueue_head(&sdev->boot_wait);
@@ -395,8 +396,14 @@ int snd_sof_run_firmware(struct snd_sof_dev *sdev)
 	}
 
 	mutex_lock(&sdev->cores_status_mutex);
-	/* fw boot is complete. Update the active cores mask */
+	/* fw booted, update the active cores mask and ref counts */
 	sdev->enabled_cores_mask = init_core_mask;
+	while (init_core_mask && (i < SND_SOF_CORE_MAX)) {
+		if (init_core_mask & BIT(0))
+			sdev->core_refs[i] = 1;
+		init_core_mask >>= 1;
+		i++;
+	}
 	mutex_unlock(&sdev->cores_status_mutex);
 
 	return 0;

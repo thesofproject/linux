@@ -333,6 +333,7 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	int ret;
+	int i;
 
 	/* do nothing if dsp suspend callback is not set */
 	if (!sof_ops(sdev)->suspend)
@@ -384,6 +385,12 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 		dev_err(sdev->dev,
 			"error: failed to power down DSP during suspend %d\n",
 			ret);
+
+	mutex_lock(&sdev->cores_status_mutex);
+	/* reset ref counts of DSP cores */
+	for (i = 0; i < ARRAY_SIZE(sdev->core_refs); i++)
+		sdev->core_refs[i] = 0;
+	mutex_unlock(&sdev->cores_status_mutex);
 
 	return ret;
 }
