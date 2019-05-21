@@ -38,6 +38,9 @@ extern int sof_core_debug;
 /* max BARs mmaped devices can use */
 #define SND_SOF_BARS	8
 
+/* max core number */
+#define SND_SOF_CORE_MAX	8
+
 /* time in ms for runtime suspend delay */
 #define SND_SOF_SUSPEND_DELAY_MS	2000
 
@@ -431,6 +434,7 @@ struct snd_sof_dev {
 	struct list_head route_list;
 	struct snd_soc_component *component;
 	u32 enabled_cores_mask; /* keep track of enabled cores */
+	int core_refs[SND_SOF_CORE_MAX];
 
 	/* FW configuration */
 	struct sof_ipc_window *info_window;
