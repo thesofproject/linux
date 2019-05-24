@@ -541,6 +541,9 @@ int snd_sof_ipc_set_get_comp_data(struct snd_sof_ipc *ipc,
 				  enum sof_ipc_ctrl_cmd ctrl_cmd,
 				  bool send);
 
+/* DSP core enable/disable IPC */
+int snd_sof_ipc_core_enable(struct snd_sof_dev *sdev);
+
 /*
  * Topology.
  * There is no snd_sof_free_topology since topology components will
