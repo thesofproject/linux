@@ -784,6 +784,34 @@ int snd_sof_ipc_set_get_comp_data(struct snd_sof_control *scontrol,
 }
 EXPORT_SYMBOL(snd_sof_ipc_set_get_comp_data);
 
+/* Helper of sending IPC to enable the DSP cores with cores_mask */
+int snd_sof_ipc_core_enable(struct snd_sof_dev *sdev, u32 core_mask)
+{
+	struct sof_ipc_pm_core_config pm_core_config;
+	int err;
+
+	/* check if IPC message needed */
+	if (core_mask == sdev->enabled_cores_mask)
+		return 0;
+
+	memset(&pm_core_config, 0, sizeof(pm_core_config));
+	pm_core_config.enable_mask = core_mask;
+
+	/* configure CORE_ENABLE ipc message */
+	pm_core_config.hdr.size = sizeof(pm_core_config);
+	pm_core_config.hdr.cmd = SOF_IPC_GLB_PM_MSG | SOF_IPC_PM_CORE_ENABLE;
+
+	/* send ipc */
+	err = sof_ipc_tx_message(sdev->ipc, pm_core_config.hdr.cmd,
+				 &pm_core_config, sizeof(pm_core_config),
+				 &pm_core_config, sizeof(pm_core_config));
+	if (err < 0)
+		dev_err(sdev->dev, "error: core enable ipc failure\n");
+
+	return err;
+}
+EXPORT_SYMBOL(snd_sof_ipc_core_enable);
+
 /*
  * IPC layer enumeration.
  */

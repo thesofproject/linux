@@ -521,6 +521,9 @@ int sof_ipc_tx_message_no_pm(struct snd_sof_ipc *ipc, u32 header,
 			     void *msg_data, size_t msg_bytes,
 			     void *reply_data, size_t reply_bytes);
 
+/* DSP core enable/disable IPC */
+int snd_sof_ipc_core_enable(struct snd_sof_dev *sdev, u32 core_mask);
+
 /*
  * Trace/debug
  */
