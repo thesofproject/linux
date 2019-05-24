@@ -249,6 +249,28 @@ static int sof_pci_probe(struct pci_dev *pci,
 
 	dev_dbg(&pci->dev, "PCI DSP detected");
 
+	/* skip DSP detection for Merrifield */
+	if (pci->subsystem_vendor == 0x8086 &&
+	    pci->subsystem_device == 0x119a)
+		goto skip_dsp_detection;
+
+	/*
+	 * detect DSP by checking class/subclass/prog-id information
+	 * class=04 subclass 03 prog-if 00: no DSP, legacy driver is required
+	 * class=04 subclass 01 prog-if 00: DSP is present
+	 *   (and may be required e.g. for DMIC or SSP support)
+	 * class=04 subclass 03 prog-if 80: either of DSP or legacy mode works
+	 */
+	if (pci->class == 0x040300) {
+		dev_err(dev, "error: the DSP is not enabled on this platform, aborting probe\n");
+		return -ENODEV;
+	} else if (pci->class != 0x040100 && pci->class != 0x040380) {
+		dev_err(dev, "error: unknown PCI class/subclass/prog-if 0x%06x found, aborting probe\n", pci->class);
+		return -ENODEV;
+	}
+	dev_info(dev, "DSP detected with PCI class/subclass/prog-if 0x%06x\n", pci->class);
+
+skip_dsp_detection:
 	/* get ops for platform */
 	ops = desc->ops;
 	if (!ops) {
