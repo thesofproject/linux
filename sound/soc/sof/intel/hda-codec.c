@@ -97,6 +97,7 @@ static int hda_codec_probe(struct snd_sof_dev *sdev, int address)
 int hda_codec_probe_bus(struct snd_sof_dev *sdev)
 {
 	struct hdac_bus *bus = sof_to_bus(sdev);
+	struct hda_bus *hbus = sof_to_hbus(sdev);
 	int i, ret;
 
 	/* probe codecs in avail slots */
@@ -112,6 +113,9 @@ int hda_codec_probe_bus(struct snd_sof_dev *sdev)
 			return ret;
 		}
 	}
+
+	/* set autosuspend delay for hda bus device */
+	snd_hda_set_power_save(hbus, SND_SOF_SUSPEND_DELAY_MS);
 
 	return 0;
 }
