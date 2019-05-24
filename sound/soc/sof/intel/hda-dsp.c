@@ -288,6 +288,7 @@ static int hda_suspend(struct snd_sof_dev *sdev, int state)
 	const struct sof_intel_dsp_desc *chip = hda->desc;
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
 	struct hdac_bus *bus = sof_to_bus(sdev);
+	struct hda_bus *hbus = sof_to_hbus(sdev);
 #endif
 	int ret;
 
@@ -314,6 +315,8 @@ static int hda_suspend(struct snd_sof_dev *sdev, int state)
 
 	/* disable hda bus irq and i/o */
 	snd_hdac_bus_stop_chip(bus);
+
+	snd_hda_set_power_save(hbus, SND_SOF_SUSPEND_DELAY_MS);
 #else
 	/* disable ppcap interrupt */
 	hda_dsp_ctrl_ppcap_enable(sdev, false);
@@ -344,6 +347,7 @@ static int hda_resume(struct snd_sof_dev *sdev)
 {
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
 	struct hdac_bus *bus = sof_to_bus(sdev);
+	struct hda_bus *hbus = sof_to_hbus(sdev);
 	struct hdac_ext_link *hlink = NULL;
 #endif
 	int ret;
@@ -374,6 +378,12 @@ static int hda_resume(struct snd_sof_dev *sdev)
 	/* enable ppcap interrupt */
 	snd_hdac_ext_bus_ppcap_enable(bus, true);
 	snd_hdac_ext_bus_ppcap_int_enable(bus, true);
+
+	/*
+	 * power cycling of HDA codecs causes failures in HDA
+	 * controller logic -> force codecs to be powered
+	 */
+	snd_hda_set_power_save(hbus, -1);
 #else
 
 	hda_dsp_ctrl_misc_clock_gating(sdev, false);
