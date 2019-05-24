@@ -1351,7 +1351,6 @@ int sof_load_pipeline_ipc(struct snd_sof_dev *sdev,
 			  struct sof_ipc_pipe_new *pipeline,
 			  struct sof_ipc_comp_reply *r)
 {
-	struct sof_ipc_pm_core_config pm_core_config;
 	int ret;
 
 	ret = sof_ipc_tx_message(sdev->ipc, pipeline->hdr.cmd, pipeline,
@@ -1361,41 +1360,8 @@ int sof_load_pipeline_ipc(struct snd_sof_dev *sdev,
 		return ret;
 	}
 
-	mutex_lock(&sdev->cores_status_mutex);
-
-	/* power up the core that this pipeline is scheduled on */
-	ret = snd_sof_dsp_core_power_up(sdev, 1 << pipeline->core);
-	if (ret < 0) {
-		dev_err(sdev->dev, "error: powering up pipeline schedule core %d\n",
-			pipeline->core);
-		mutex_unlock(&sdev->cores_status_mutex);
-		return ret;
-	}
-
-	/* update enabled cores mask */
-	sdev->enabled_cores_mask |= 1 << pipeline->core;
-
-	/*
-	 * Now notify DSP that the core that this pipeline is scheduled on
-	 * has been powered up
-	 */
-	memset(&pm_core_config, 0, sizeof(pm_core_config));
-	pm_core_config.enable_mask = sdev->enabled_cores_mask;
-
-	/* configure CORE_ENABLE ipc message */
-	pm_core_config.hdr.size = sizeof(pm_core_config);
-	pm_core_config.hdr.cmd = SOF_IPC_GLB_PM_MSG | SOF_IPC_PM_CORE_ENABLE;
-
-	/* send ipc */
-	ret = sof_ipc_tx_message(sdev->ipc, pm_core_config.hdr.cmd,
-				 &pm_core_config, sizeof(pm_core_config),
-				 &pm_core_config, sizeof(pm_core_config));
-	if (ret < 0)
-		dev_err(sdev->dev, "error: core enable ipc failure\n");
-
-	mutex_unlock(&sdev->cores_status_mutex);
-
-	return ret;
+	/* increase ref count of the DSP core */
+	return snd_sof_dsp_core_get(sdev, pipeline->core);
 }
 
 static int sof_widget_load_pipeline(struct snd_soc_component *scomp,
@@ -2154,19 +2120,10 @@ static int sof_widget_unload(struct snd_soc_component *scomp,
 		}
 		break;
 	case snd_soc_dapm_scheduler:
-		mutex_lock(&sdev->cores_status_mutex);
-
-		/* power down the pipeline schedule core */
 		pipeline = swidget->private;
-		ret = snd_sof_dsp_core_power_down(sdev, 1 << pipeline->core);
-		if (ret < 0)
-			dev_err(sdev->dev, "error: powering down pipeline schedule core %d\n",
-				pipeline->core);
 
-		/* update enabled cores mask */
-		sdev->enabled_cores_mask &= ~(1 << pipeline->core);
-
-		mutex_unlock(&sdev->cores_status_mutex);
+		/* decrease ref count of the DSP core */
+		ret = snd_sof_dsp_core_put(sdev, pipeline->core);
 		break;
 	default:
 		break;
