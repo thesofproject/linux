@@ -76,31 +76,19 @@ static inline int snd_sof_dsp_reset(struct snd_sof_dev *sdev)
 static inline int snd_sof_dsp_core_power_up(struct snd_sof_dev *sdev,
 					    unsigned int core_mask)
 {
-	int ret = 0;
+	if (sof_ops(sdev)->core_power_up && core_mask)
+		return sof_ops(sdev)->core_power_up(sdev, core_mask);
 
-	core_mask &= ~sdev->enabled_cores_mask;
-	if (sof_ops(sdev)->core_power_up && core_mask) {
-		ret = sof_ops(sdev)->core_power_up(sdev, core_mask);
-		if (!ret)
-			sdev->enabled_cores_mask |= core_mask;
-	}
-
-	return ret;
+	return 0;
 }
 
 static inline int snd_sof_dsp_core_power_down(struct snd_sof_dev *sdev,
 					      unsigned int core_mask)
 {
-	int ret = 0;
+	if (sof_ops(sdev)->core_power_down && core_mask)
+		return sof_ops(sdev)->core_power_down(sdev, core_mask);
 
-	core_mask &= sdev->enabled_cores_mask;
-	if (sof_ops(sdev)->core_power_down && core_mask) {
-		ret = sof_ops(sdev)->core_power_down(sdev, core_mask);
-		if (!ret)
-			sdev->enabled_cores_mask &= ~core_mask;
-	}
-
-	return ret;
+	return 0;
 }
 
 /* pre/post fw load */
@@ -586,4 +574,8 @@ int snd_sof_dsp_register_poll(struct snd_sof_dev *sdev, u32 bar, u32 offset,
 			      u32 interval_us);
 
 void snd_sof_dsp_panic(struct snd_sof_dev *sdev, u32 offset);
+
+int snd_sof_dsp_core_get(struct snd_sof_dev *sdev, u32 core_idx);
+int snd_sof_dsp_core_put(struct snd_sof_dev *sdev, u32 core_idx);
+
 #endif
