@@ -112,8 +112,6 @@ config SND_SOC_INTEL_SKYLAKE
 	select SND_SOC_INTEL_APL
 	select SND_SOC_INTEL_KBL
 	select SND_SOC_INTEL_GLK
-	select SND_SOC_INTEL_CNL
-	select SND_SOC_INTEL_CFL
 	help
           This is a backwards-compatible option to select all devices
 	  supported by the Intel SST/Skylake driver. This option is no
@@ -160,6 +158,7 @@ config SND_SOC_INTEL_CNL
 	help
 	  If you have a Intel CNL/WHL platform with the DSP
 	  enabled in the BIOS then enable this option by saying Y or m.
+	  This is not a recommended option.
 
 config SND_SOC_INTEL_CFL
 	tristate "CoffeeLake Platforms"
@@ -168,6 +167,7 @@ config SND_SOC_INTEL_CFL
 	help
 	  If you have a Intel CoffeeLake platform with the DSP
 	  enabled in the BIOS then enable this option by saying Y or m.
+	  This is not a recommended option.
 
 config SND_SOC_INTEL_CML_H
 	tristate "CometLake-H Platforms"
@@ -176,6 +176,7 @@ config SND_SOC_INTEL_CML_H
 	help
 	  If you have a Intel CometLake-H platform with the DSP
 	  enabled in the BIOS then enable this option by saying Y or m.
+	  This is not a recommended option.
 
 config SND_SOC_INTEL_CML_LP
 	tristate "CometLake-LP Platforms"
@@ -184,6 +185,7 @@ config SND_SOC_INTEL_CML_LP
 	help
 	  If you have a Intel CometLake-LP platform with the DSP
 	  enabled in the BIOS then enable this option by saying Y or m.
+	  This is not a recommended option.
 
 config SND_SOC_INTEL_SKYLAKE_FAMILY
 	tristate
