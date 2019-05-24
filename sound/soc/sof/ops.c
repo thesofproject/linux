@@ -161,3 +161,83 @@ void snd_sof_dsp_panic(struct snd_sof_dev *sdev, u32 offset)
 	snd_sof_trace_notify_for_error(sdev);
 }
 EXPORT_SYMBOL(snd_sof_dsp_panic);
+
+/* This is for getting ref count for a DSP core and power on it if needed */
+int snd_sof_dsp_core_get(struct snd_sof_dev *sdev, u32 core_idx)
+{
+	int ret;
+
+	mutex_lock(&sdev->cores_status_mutex);
+
+	/* already powered on, return */
+	if (sdev->core_refs[core_idx] > 0) {
+		sdev->core_refs[core_idx]++;
+		dev_vdbg(sdev->dev, "core_get: core_refs[%d] %d, no need power up\n",
+			 core_idx, sdev->core_refs[core_idx]);
+		mutex_unlock(&sdev->cores_status_mutex);
+		return 0;/* core already enabled, return */
+	}
+
+	dev_vdbg(sdev->dev, "core_get: core_refs[%d] %d, powering it up...\n",
+		 core_idx, sdev->core_refs[core_idx]);
+	/* power up the core that this pipeline is scheduled on */
+	ret = snd_sof_dsp_core_power_up(sdev, BIT(core_idx));
+	if (ret < 0) {
+		dev_err(sdev->dev, "error: powering up pipeline schedule core %d\n",
+			core_idx);
+		mutex_unlock(&sdev->cores_status_mutex);
+		return ret;
+	}
+
+	/* update core ref count and enabled_cores_mask */
+	sdev->core_refs[core_idx]++;
+	sdev->enabled_cores_mask |= BIT(core_idx);
+
+	/* Now notify DSP that the core power status changed */
+	snd_sof_ipc_core_enable(sdev);
+
+	mutex_unlock(&sdev->cores_status_mutex);
+
+	return 0;
+}
+EXPORT_SYMBOL(snd_sof_dsp_core_get);
+
+/* This is for putting ref count for a DSP core and power off it if needed */
+int snd_sof_dsp_core_put(struct snd_sof_dev *sdev, u32 core_idx)
+{
+	int ret;
+
+	mutex_lock(&sdev->cores_status_mutex);
+
+	/* return if the core is still in use */
+	if (sdev->core_refs[core_idx] > 1) {
+		sdev->core_refs[core_idx]--;
+		dev_vdbg(sdev->dev, "core_put: core_refs[%d] %d, no need power down\n",
+			 core_idx, sdev->core_refs[core_idx]);
+		mutex_unlock(&sdev->cores_status_mutex);
+		return 0;
+	}
+
+	dev_vdbg(sdev->dev, "core_put: core_refs[%d] %d, powering it down...\n",
+		 core_idx, sdev->core_refs[core_idx]);
+	/* power down the pipeline schedule core */
+	ret = snd_sof_dsp_core_power_down(sdev, BIT(core_idx));
+	if (ret < 0) {
+		dev_err(sdev->dev, "error: powering down pipeline schedule core %d\n",
+			core_idx);
+		mutex_unlock(&sdev->cores_status_mutex);
+		return ret;
+	}
+
+	/* update core ref count and enabled_cores_mask */
+	sdev->core_refs[core_idx]--;
+	sdev->enabled_cores_mask &= ~BIT(core_idx);
+
+	/* Now notify DSP that the core power status changed */
+	snd_sof_ipc_core_enable(sdev);
+
+	mutex_unlock(&sdev->cores_status_mutex);
+
+	return 0;
+}
+EXPORT_SYMBOL(snd_sof_dsp_core_put);

@@ -446,4 +446,8 @@ int snd_sof_dsp_register_poll(struct snd_sof_dev *sdev, u32 bar, u32 offset,
 			      u32 interval_us);
 
 void snd_sof_dsp_panic(struct snd_sof_dev *sdev, u32 offset);
+
+int snd_sof_dsp_core_get(struct snd_sof_dev *sdev, u32 core_idx);
+int snd_sof_dsp_core_put(struct snd_sof_dev *sdev, u32 core_idx);
+
 #endif
