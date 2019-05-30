@@ -985,6 +985,14 @@ int snd_hda_codec_device_new(struct hda_bus *bus, struct snd_card *card,
 		codec->core.subsystem_id, codec->core.revision_id);
 	snd_component_add(card, component);
 
+	/*
+	 * snd_device_new() makes the codec device managed by the card.
+	 * When the card is removed, the device reference count is
+	 * decremented. Therefore, increment it here to prevent removing
+	 * the codec device's kobject when the card is removed.
+	 */
+	get_device(hda_codec_dev(codec));
+
 	err = snd_device_new(card, SNDRV_DEV_CODEC, codec, &dev_ops);
 	if (err < 0)
 		goto error;
