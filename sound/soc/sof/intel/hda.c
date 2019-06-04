@@ -537,8 +537,7 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	}
 
 	dev_dbg(sdev->dev, "using HDA IRQ %d\n", hdev->irq);
-	ret = request_threaded_irq(hdev->irq, hda_dsp_stream_interrupt,
-				   hda_dsp_stream_threaded_handler,
+	ret = request_irq(hdev->irq, hda_dsp_stream_interrupt,
 				   IRQF_SHARED, "AudioHDA", bus);
 	if (ret < 0) {
 		dev_err(sdev->dev, "error: failed to register HDA IRQ %d\n",

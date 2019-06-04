@@ -464,6 +464,8 @@ irqreturn_t hda_dsp_stream_interrupt(int irq, void *context)
 	struct sof_intel_hda_dev *sof_hda = bus_to_sof_hda(bus);
 	u32 stream_mask;
 	u32 status;
+	struct hdac_stream *s;
+	u32 sd_status;
 
 	dev_vdbg(bus->dev, "stream irq, INTSTS status: 0x%x\n",
 		 snd_hdac_chip_readl(bus, INTSTS));
@@ -492,9 +494,33 @@ irqreturn_t hda_dsp_stream_interrupt(int irq, void *context)
 	}
 #endif
 
+	status = snd_hdac_chip_readl(bus, INTSTS);
+	/* check streams */
+	list_for_each_entry(s, &bus->stream_list, list) {
+		if (status & (1 << s->index) && s->opened) {
+			sd_status = snd_hdac_stream_readb(s, SD_STS);
+
+			dev_vdbg(bus->dev, "stream %d status 0x%x\n",
+				 s->index, sd_status);
+
+			snd_hdac_stream_writeb(s, SD_STS, SD_INT_MASK);
+
+			if (!s->substream ||
+			    !s->running ||
+			    (sd_status & SOF_HDA_CL_DMA_SD_INT_COMPLETE) == 0)
+				continue;
+
+			/* Inform ALSA only in case not do that with IPC */
+			if (sof_hda->no_ipc_position)
+				snd_pcm_period_elapsed(s->substream);
+
+		}
+	}
+
+
 	spin_unlock(&bus->reg_lock);
 
-	return snd_hdac_chip_readl(bus, INTSTS) ? IRQ_WAKE_THREAD : IRQ_HANDLED;
+	return IRQ_HANDLED;
 }
 
 irqreturn_t hda_dsp_stream_threaded_handler(int irq, void *context)
