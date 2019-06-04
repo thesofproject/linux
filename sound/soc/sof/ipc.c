@@ -207,11 +207,23 @@ static int tx_wait_done(struct snd_sof_ipc *ipc, struct snd_sof_ipc_msg *msg,
 {
 	struct snd_sof_dev *sdev = ipc->sdev;
 	struct sof_ipc_cmd_hdr *hdr = msg->msg_data;
-	int ret;
+	int retries = 0;
+	int ret = 0;
 
 	/* wait for DSP IPC completion */
-	ret = wait_event_timeout(msg->waitq, msg->ipc_complete,
-				 msecs_to_jiffies(IPC_TIMEOUT_MS));
+	while (!ret && retries++ < 2) {
+		ret = wait_event_timeout(msg->waitq, msg->ipc_complete,
+					 msecs_to_jiffies(IPC_TIMEOUT_MS));
+		if (ret == 0) {
+			dev_warn(sdev->dev, "ipc timeout, polling irq thread\n");
+			if (sof_ops(sdev) && sof_ops(sdev)->irq_thread) {
+				disable_irq(sdev->ipc_irq);
+				ret = sof_ops(sdev)->irq_thread(sdev->ipc_irq,
+								sdev);
+				enable_irq(sdev->ipc_irq);
+			}
+		}
+	}
 
 	if (ret == 0) {
 		dev_err(sdev->dev, "error: ipc timed out for 0x%x size %d\n",
