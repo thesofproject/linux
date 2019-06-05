@@ -462,36 +462,42 @@ irqreturn_t hda_dsp_stream_interrupt(int irq, void *context)
 {
 	struct hdac_bus *bus = context;
 	struct sof_intel_hda_dev *sof_hda = bus_to_sof_hda(bus);
-	u32 stream_mask;
+	int ret = IRQ_NONE;
+	u32 rirb_status;
 	u32 status;
 
 	if (!pm_runtime_active(bus->dev))
-		return IRQ_NONE;
+		return ret;
 
 	spin_lock(&bus->reg_lock);
 
 	status = snd_hdac_chip_readl(bus, INTSTS);
-	stream_mask = GENMASK(sof_hda->stream_max - 1, 0) | AZX_INT_CTRL_EN;
 
-	/* Not stream interrupt or register inaccessible, ignore it.*/
-	if (!(status & stream_mask) || status == 0xffffffff) {
+	/* Register inaccessible, ignore it.*/
+	if (status == 0xffffffff) {
 		spin_unlock(&bus->reg_lock);
-		return IRQ_NONE;
+		return ret;
 	}
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
-	/* clear rirb int */
-	status = snd_hdac_chip_readb(bus, RIRBSTS);
-	if (status & RIRB_INT_MASK) {
-		if (status & RIRB_INT_RESPONSE)
-			snd_hdac_bus_update_rirb(bus);
-		snd_hdac_chip_writeb(bus, RIRBSTS, RIRB_INT_MASK);
+	if (status & AZX_INT_CTRL_EN) {
+		/* clear rirb int */
+		rirb_status = snd_hdac_chip_readb(bus, RIRBSTS);
+		if (rirb_status & RIRB_INT_MASK) {
+			if (rirb_status & RIRB_INT_RESPONSE)
+				snd_hdac_bus_update_rirb(bus);
+			snd_hdac_chip_writeb(bus, RIRBSTS, RIRB_INT_MASK);
+		}
+		ret = IRQ_HANDLED;
 	}
 #endif
 
+	if (status & GENMASK(sof_hda->stream_max - 1, 0))
+		ret = IRQ_WAKE_THREAD;
+
 	spin_unlock(&bus->reg_lock);
 
-	return snd_hdac_chip_readl(bus, INTSTS) ? IRQ_WAKE_THREAD : IRQ_HANDLED;
+	return ret;
 }
 
 irqreturn_t hda_dsp_stream_threaded_handler(int irq, void *context)
