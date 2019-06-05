@@ -238,13 +238,53 @@ irqreturn_t hda_dsp_ipc_irq_thread(int irq, void *context)
 	return ret;
 }
 
+static void cnl_ipc_dsp_done_1(struct snd_sof_dev *sdev)
+{
+	/*
+	 * set DONE bit - tell DSP we have received the reply msg
+	 * from DSP, and processed it, don't send more reply to host
+	 */
+	snd_sof_dsp_update_bits_forced_unlocked(sdev, HDA_DSP_BAR,
+				       CNL_DSP_REG_HIPCIDA,
+				       CNL_DSP_REG_HIPCIDA_DONE,
+				       CNL_DSP_REG_HIPCIDA_DONE);
+
+	/* unmask Done interrupt */
+	snd_sof_dsp_update_bits_unlock(sdev, HDA_DSP_BAR,
+				CNL_DSP_REG_HIPCCTL,
+				CNL_DSP_REG_HIPCCTL_DONE,
+				CNL_DSP_REG_HIPCCTL_DONE);
+}
+
+static void cnl_ipc_host_done_1(struct snd_sof_dev *sdev)
+{
+	/*
+	 * set done bit to ack dsp the msg has been
+	 * processed and send reply msg to dsp
+	 */
+	snd_sof_dsp_update_bits_forced_unlocked(sdev, HDA_DSP_BAR,
+				       CNL_DSP_REG_HIPCTDA,
+				       CNL_DSP_REG_HIPCTDA_DONE,
+				       CNL_DSP_REG_HIPCTDA_DONE);
+}
+
 /* is this IRQ for ADSP ? - we only care about IPC here */
 irqreturn_t hda_dsp_ipc_irq_handler(int irq, void *context)
 {
 	struct snd_sof_dev *sdev = context;
 	int ret = IRQ_NONE;
+	u32 hipci;
+	u32 hipcctl;
+	u32 hipcida;
+	u32 hipctdr;
+	u32 hipctdd;
+	u32 msg;
+	u32 msg_ext;
 	u32 irq_status = 0;
 
+	hipcida = snd_sof_dsp_read(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCIDA);
+	hipcctl = snd_sof_dsp_read(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCCTL);
+	hipctdr = snd_sof_dsp_read(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCTDR);
 	spin_lock(&sdev->hw_lock);
 
 	/* store status */
@@ -256,14 +296,75 @@ irqreturn_t hda_dsp_ipc_irq_handler(int irq, void *context)
 		goto out;
 
 	/* IPC message ? */
-	if (irq_status & HDA_DSP_ADSPIS_IPC) {
-		/* disable IPC interrupt */
-		snd_sof_dsp_update_bits_unlocked(sdev, HDA_DSP_BAR,
-						 HDA_DSP_REG_ADSPIC,
-						 HDA_DSP_ADSPIC_IPC, 0);
-		ret = IRQ_WAKE_THREAD;
+	if (!(irq_status & HDA_DSP_ADSPIS_IPC))
+		goto out;
+
+	if (hipcida & CNL_DSP_REG_HIPCIDA_DONE &&
+	    hipcctl & CNL_DSP_REG_HIPCCTL_DONE) {
+		hipci = snd_sof_dsp_read(sdev, HDA_DSP_BAR,
+					 CNL_DSP_REG_HIPCIDR);
+		msg_ext = hipci & CNL_DSP_REG_HIPCIDR_MSG_MASK;
+		msg = hipcida & CNL_DSP_REG_HIPCIDA_MSG_MASK;
+
+		dev_vdbg(sdev->dev,
+			 "ipc: firmware response, msg:0x%x, msg_ext:0x%x\n",
+			 msg, msg_ext);
+
+		/* mask Done interrupt */
+		snd_sof_dsp_update_bits_unlock(sdev, HDA_DSP_BAR,
+					CNL_DSP_REG_HIPCCTL,
+					CNL_DSP_REG_HIPCCTL_DONE, 0);
+
+		/* handle immediate reply from DSP core */
+		hda_dsp_ipc_get_reply(sdev);
+		snd_sof_ipc_reply(sdev, msg);
+
+		if (sdev->code_loading)	{
+			sdev->code_loading = 0;
+			wake_up(&sdev->waitq);
+		}
+
+		cnl_ipc_dsp_done_1(sdev);
+
+		ret = IRQ_HANDLED;
 	}
 
+	/* new message from DSP */
+	if (hipctdr & CNL_DSP_REG_HIPCTDR_BUSY) {
+		hipctdd = snd_sof_dsp_read(sdev, HDA_DSP_BAR,
+					   CNL_DSP_REG_HIPCTDD);
+		msg = hipctdr & CNL_DSP_REG_HIPCTDR_MSG_MASK;
+		msg_ext = hipctdd & CNL_DSP_REG_HIPCTDD_MSG_MASK;
+
+		dev_vdbg(sdev->dev,
+			 "ipc: firmware initiated, msg:0x%x, msg_ext:0x%x\n",
+			 msg, msg_ext);
+
+		/* handle messages from DSP */
+		if ((hipctdr & SOF_IPC_PANIC_MAGIC_MASK) ==
+		   SOF_IPC_PANIC_MAGIC) {
+			snd_sof_dsp_panic(sdev, HDA_DSP_PANIC_OFFSET(msg_ext));
+		} else {
+			snd_sof_ipc_msgs_rx(sdev);
+		}
+
+		/*
+		 * clear busy interrupt to tell dsp controller this
+		 * interrupt has been accepted, not trigger it again
+		 */
+		snd_sof_dsp_update_bits_forced_unlocked(sdev, HDA_DSP_BAR,
+					       CNL_DSP_REG_HIPCTDR,
+					       CNL_DSP_REG_HIPCTDR_BUSY,
+					       CNL_DSP_REG_HIPCTDR_BUSY);
+
+		cnl_ipc_host_done_1(sdev);
+
+		ret = IRQ_HANDLED;
+	}
+	ret = IRQ_HANDLED;
+	/* /\* reenable IPC interrupt *\/ */
+	/* snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR, HDA_DSP_REG_ADSPIC, */
+	/* 			HDA_DSP_ADSPIC_IPC, HDA_DSP_ADSPIC_IPC); */
 out:
 	spin_unlock(&sdev->hw_lock);
 	return ret;

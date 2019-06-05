@@ -547,8 +547,8 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	}
 
 	dev_dbg(sdev->dev, "using IPC IRQ %d\n", sdev->ipc_irq);
-	ret = request_threaded_irq(sdev->ipc_irq, hda_dsp_ipc_irq_handler,
-				   sof_ops(sdev)->irq_thread, IRQF_SHARED,
+	ret = request_irq(sdev->ipc_irq, hda_dsp_ipc_irq_handler,
+				   IRQF_SHARED,
 				   "AudioDSP", sdev);
 	if (ret < 0) {
 		dev_err(sdev->dev, "error: failed to register IPC IRQ %d\n",

@@ -86,6 +86,17 @@ bool snd_sof_dsp_update_bits64_unlocked(struct snd_sof_dev *sdev, u32 bar,
 }
 EXPORT_SYMBOL(snd_sof_dsp_update_bits64_unlocked);
 
+bool snd_sof_dsp_update_bits_unlock(struct snd_sof_dev *sdev, u32 bar, u32 offset,
+			     u32 mask, u32 value)
+{
+	bool change;
+
+	change = snd_sof_dsp_update_bits_unlocked(sdev, bar, offset, mask,
+						  value);
+	return change;
+}
+EXPORT_SYMBOL(snd_sof_dsp_update_bits_unlock);
+
 /* This is for registers bits with attribute RWC */
 bool snd_sof_dsp_update_bits(struct snd_sof_dev *sdev, u32 bar, u32 offset,
 			     u32 mask, u32 value)
@@ -115,7 +126,6 @@ bool snd_sof_dsp_update_bits64(struct snd_sof_dev *sdev, u32 bar, u32 offset,
 }
 EXPORT_SYMBOL(snd_sof_dsp_update_bits64);
 
-static
 void snd_sof_dsp_update_bits_forced_unlocked(struct snd_sof_dev *sdev, u32 bar,
 					     u32 offset, u32 mask, u32 value)
 {
@@ -129,6 +139,7 @@ void snd_sof_dsp_update_bits_forced_unlocked(struct snd_sof_dev *sdev, u32 bar,
 
 	snd_sof_dsp_write(sdev, bar, offset, new);
 }
+EXPORT_SYMBOL(snd_sof_dsp_update_bits_forced_unlocked);
 
 /* This is for registers bits with attribute RWC */
 void snd_sof_dsp_update_bits_forced(struct snd_sof_dev *sdev, u32 bar,
