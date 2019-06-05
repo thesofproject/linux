@@ -466,9 +466,6 @@ irqreturn_t hda_dsp_stream_interrupt(int irq, void *context)
 	u32 rirb_status;
 	u32 status;
 
-	if (!pm_runtime_active(bus->dev))
-		return ret;
-
 	spin_lock(&bus->reg_lock);
 
 	status = snd_hdac_chip_readl(bus, INTSTS);
