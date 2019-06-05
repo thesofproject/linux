@@ -513,17 +513,28 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 
 	/*
 	 * register our IRQ
-	 * looks msi has some interrupt missing issues for us,
-	 * let's use legacy interrupt mode before we root casue that.
+	 * let's try to enable msi firstly
+	 * if it fails, use legacy interrupt mode
+	 * TODO: support interrupt mode selection with kernel parameter
+	 *       support msi multiple vectors
 	 */
-	dev_info(sdev->dev, "use legacy interrupt mode\n");
-	/*
-	 * use IO-APIC mode, hda->irq and ipc_irq are using the same
-	 * irq number of pci->irq
-	 */
-	hdev->irq = pci->irq;
-	sdev->ipc_irq = pci->irq;
-	sdev->msi_enabled = 0;
+	ret = pci_alloc_irq_vectors(pci, 1, 1, PCI_IRQ_MSI);
+	if (ret < 0) {
+		dev_info(sdev->dev, "use legacy interrupt mode\n");
+		/*
+		 * in IO-APIC mode, hda->irq and ipc_irq are using the same
+		 * irq number of pci->irq
+		 */
+		hdev->irq = pci->irq;
+		sdev->ipc_irq = pci->irq;
+		sdev->msi_enabled = 0;
+	} else {
+		dev_info(sdev->dev, "use msi interrupt mode\n");
+		hdev->irq = pci_irq_vector(pci, 0);
+		/* ipc irq number is the same of hda irq */
+		sdev->ipc_irq = hdev->irq;
+		sdev->msi_enabled = 1;
+	}
 
 	dev_dbg(sdev->dev, "using HDA IRQ %d\n", hdev->irq);
 	ret = request_threaded_irq(hdev->irq, hda_dsp_stream_interrupt,
