@@ -463,7 +463,6 @@ irqreturn_t hda_dsp_stream_interrupt(int irq, void *context)
 	struct hdac_bus *bus = context;
 	struct sof_intel_hda_dev *sof_hda = bus_to_sof_hda(bus);
 	int ret = IRQ_NONE;
-	u32 rirb_status;
 	u32 status;
 
 	spin_lock(&bus->reg_lock);
@@ -478,14 +477,8 @@ irqreturn_t hda_dsp_stream_interrupt(int irq, void *context)
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
 	if (status & AZX_INT_CTRL_EN) {
-		/* clear rirb int */
-		rirb_status = snd_hdac_chip_readb(bus, RIRBSTS);
-		if (rirb_status & RIRB_INT_MASK) {
-			if (rirb_status & RIRB_INT_RESPONSE)
-				snd_hdac_bus_update_rirb(bus);
-			snd_hdac_chip_writeb(bus, RIRBSTS, RIRB_INT_MASK);
-		}
-		ret = IRQ_HANDLED;
+		snd_hdac_chip_updatel(bus, INTCTL, AZX_INT_CTRL_EN, 0);
+		ret = IRQ_WAKE_THREAD;
 	}
 #endif
 
@@ -503,6 +496,7 @@ irqreturn_t hda_dsp_stream_threaded_handler(int irq, void *context)
 	struct sof_intel_hda_dev *sof_hda = bus_to_sof_hda(bus);
 	u32 status = snd_hdac_chip_readl(bus, INTSTS);
 	struct hdac_stream *s;
+	u32 rirb_status;
 	u32 sd_status;
 
 	/* check streams */
@@ -525,6 +519,17 @@ irqreturn_t hda_dsp_stream_threaded_handler(int irq, void *context)
 				snd_sof_pcm_period_elapsed(s->substream);
 
 		}
+	}
+
+	/* unmask 2nd level CTRL_EN (CIS) before clearing 1st level RIRBSTS */
+	snd_hdac_chip_updatel(bus, INTCTL, AZX_INT_CTRL_EN, 1);
+
+	/* clear rirb int */
+	rirb_status = snd_hdac_chip_readb(bus, RIRBSTS);
+	if (rirb_status & RIRB_INT_MASK) {
+		if (rirb_status & RIRB_INT_RESPONSE)
+			snd_hdac_bus_update_rirb(bus);
+		snd_hdac_chip_writeb(bus, RIRBSTS, RIRB_INT_MASK);
 	}
 
 	return IRQ_HANDLED;
