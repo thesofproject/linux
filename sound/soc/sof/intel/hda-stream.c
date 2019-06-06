@@ -501,8 +501,6 @@ irqreturn_t hda_dsp_stream_interrupt(int irq, void *context)
 	sdev->irq_handled = 1;
 	if (!sdev->intsts)
 		sdev->intsts = status;
-	else
-		sdev->irq_handled = 0;
 
 	
 	/* /\* check streams *\/ */

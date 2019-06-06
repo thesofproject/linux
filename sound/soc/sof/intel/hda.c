@@ -15,6 +15,7 @@
  * Hardware interface for generic Intel audio DSP HDA IP
  */
 
+#include <sound/hda_register.h>
 #include <linux/module.h>
 #include <sound/hdaudio_ext.h>
 #include <sound/sof.h>
@@ -419,8 +420,10 @@ static const struct sof_intel_dsp_desc
 irqreturn_t my_irq_handler(int irq, void *context)
 {
 	struct snd_sof_dev *sdev = context;
+	struct hdac_bus *bus = sof_to_bus(sdev);
 	//struct hdac_bus *bus;
 	irqreturn_t ret = IRQ_NONE;
+	u32 status;
 	int again = 0;
 
 	//snd_sof_dsp_update_bits_unlocked(sdev, HDA_DSP_BAR,
@@ -435,14 +438,16 @@ again:
 	}
 	dev_err(sdev->dev, "in %s %d ylb, ret: %d\n", __func__, __LINE__, ret);
 	hda_dsp_stream_interrupt(irq, context);	
-	if (sdev->irq_handled) {
-		if (ret == IRQ_NONE)
-			ret = IRQ_HANDLED;
-		again = 1;
-	}
-	if (again) {
+	//if (sdev->irq_handled) {
+	//	if (ret == IRQ_NONE)
+	//		ret = IRQ_HANDLED;
+	//	again = 1;
+	//}
+	//if (again)
+	//	goto again;
+	status = snd_hdac_chip_readl(bus, INTSTS);
+	if (status & AZX_INT_CTRL_EN)
 		goto again;
-	}
 	dev_err(sdev->dev, "in %s %d ylb, ret: %d\n", __func__, __LINE__, ret);
 	/* reenable IPC interrupt */
 	//snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR, HDA_DSP_REG_ADSPIC,

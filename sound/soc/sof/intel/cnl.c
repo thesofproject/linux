@@ -38,9 +38,19 @@ static irqreturn_t cnl_ipc_irq_thread(int irq, void *context)
 	u32 status;
 	u32 sd_status;
 
-	status = sdev->intsts;
-	//status = snd_hdac_chip_readl(bus, INTSTS);
+	//status = sdev->intsts;
+	status = snd_hdac_chip_readl(bus, INTSTS);
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
+	/* clear rirb int */
+	status = snd_hdac_chip_readb(bus, RIRBSTS);
+	if (status & RIRB_INT_MASK) {
+		if (status & RIRB_INT_RESPONSE)
+			snd_hdac_bus_update_rirb(bus);
+		snd_hdac_chip_writeb(bus, RIRBSTS, RIRB_INT_MASK);
+	}
+#endif
 	dev_err(sdev->dev, "in %s %d ylb, status: %#x\n", __func__, __LINE__, status);
+	status = snd_hdac_chip_readl(bus, INTSTS);
 	/* check streams */
 	list_for_each_entry(s, &bus->stream_list, list) {
 		if (status & (1 << s->index) && s->opened) {
