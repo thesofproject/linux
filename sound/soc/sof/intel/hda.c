@@ -416,6 +416,40 @@ static const struct sof_intel_dsp_desc
 	return chip_info;
 }
 
+irqreturn_t my_irq_handler(int irq, void *context)
+{
+	struct snd_sof_dev *sdev = context;
+	//struct hdac_bus *bus;
+	irqreturn_t ret = IRQ_NONE;
+	int again = 0;
+
+	//snd_sof_dsp_update_bits_unlocked(sdev, HDA_DSP_BAR,
+    //                                            HDA_DSP_REG_ADSPIC,
+    //                                            HDA_DSP_ADSPIC_IPC, 0);
+again:
+	again = 0;
+	//bus = sof_to_bus(sdev);
+	hda_dsp_stream_interrupt(irq, context);
+	if (sdev->irq_handled) {
+		ret = IRQ_HANDLED;
+		again = 1;
+	}
+	hda_dsp_ipc_irq_handler(irq, context);
+	if (sdev->irq_handled) {
+		ret = IRQ_HANDLED;
+		again = 1;
+	}
+	if (again) {
+		dev_err(sdev->dev, "in %s %d ylb\n", __func__, __LINE__);
+		goto again;
+	}
+
+	/* reenable IPC interrupt */
+	//snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR, HDA_DSP_REG_ADSPIC,
+	//			HDA_DSP_ADSPIC_IPC, HDA_DSP_ADSPIC_IPC);
+	return ret;
+}
+
 int hda_dsp_probe(struct snd_sof_dev *sdev)
 {
 	struct pci_dev *pci = to_pci_dev(sdev->dev);
@@ -537,23 +571,8 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	}
 
 	dev_dbg(sdev->dev, "using HDA IRQ %d\n", hdev->irq);
-	ret = request_irq(hdev->irq, hda_dsp_stream_interrupt,
-				   IRQF_SHARED, "AudioHDA", bus);
-	if (ret < 0) {
-		dev_err(sdev->dev, "error: failed to register HDA IRQ %d\n",
-			hdev->irq);
-		goto free_irq_vector;
-	}
-
-	dev_dbg(sdev->dev, "using IPC IRQ %d\n", sdev->ipc_irq);
-	ret = request_irq(sdev->ipc_irq, hda_dsp_ipc_irq_handler,
-				   IRQF_SHARED,
-				   "AudioDSP", sdev);
-	if (ret < 0) {
-		dev_err(sdev->dev, "error: failed to register IPC IRQ %d\n",
-			sdev->ipc_irq);
-		goto free_hda_irq;
-	}
+	ret = request_irq(hdev->irq, my_irq_handler,
+				   IRQF_SHARED, "AudioHDA", sdev);
 
 	pci_set_master(pci);
 	synchronize_irq(pci->irq);

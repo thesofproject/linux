@@ -460,7 +460,8 @@ int hda_dsp_stream_hw_free(struct snd_sof_dev *sdev,
 
 irqreturn_t hda_dsp_stream_interrupt(int irq, void *context)
 {
-	struct hdac_bus *bus = context;
+	struct snd_sof_dev *sdev = context;
+	struct hdac_bus *bus = sof_to_bus(sdev);
 	struct sof_intel_hda_dev *sof_hda = bus_to_sof_hda(bus);
 	u32 stream_mask;
 	u32 status;
@@ -470,6 +471,7 @@ irqreturn_t hda_dsp_stream_interrupt(int irq, void *context)
 	dev_vdbg(bus->dev, "stream irq, INTSTS status: 0x%x\n",
 		 snd_hdac_chip_readl(bus, INTSTS));
 
+	sdev->irq_handled = 0;
 	if (!pm_runtime_active(bus->dev))
 		return IRQ_NONE;
 
@@ -519,7 +521,7 @@ irqreturn_t hda_dsp_stream_interrupt(int irq, void *context)
 
 
 	spin_unlock(&bus->reg_lock);
-
+	sdev->irq_handled = 1;
 	return IRQ_HANDLED;
 }
 

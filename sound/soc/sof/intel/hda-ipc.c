@@ -282,11 +282,12 @@ irqreturn_t hda_dsp_ipc_irq_handler(int irq, void *context)
 	u32 msg_ext;
 	u32 irq_status = 0;
 
+	spin_lock(&sdev->hw_lock);
+
 	hipcida = snd_sof_dsp_read(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCIDA);
 	hipcctl = snd_sof_dsp_read(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCCTL);
 	hipctdr = snd_sof_dsp_read(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCTDR);
-	spin_lock(&sdev->hw_lock);
-
+	sdev->irq_handled = 0;
 	/* store status */
 	irq_status = snd_sof_dsp_read(sdev, HDA_DSP_BAR, HDA_DSP_REG_ADSPIS);
 	dev_vdbg(sdev->dev, "irq handler: irq_status:0x%x\n", irq_status);
@@ -325,6 +326,7 @@ irqreturn_t hda_dsp_ipc_irq_handler(int irq, void *context)
 		}
 
 		cnl_ipc_dsp_done_1(sdev);
+		sdev->irq_handled = 1;
 
 		ret = IRQ_HANDLED;
 	}
@@ -358,10 +360,10 @@ irqreturn_t hda_dsp_ipc_irq_handler(int irq, void *context)
 					       CNL_DSP_REG_HIPCTDR_BUSY);
 
 		cnl_ipc_host_done_1(sdev);
+		sdev->irq_handled = 1;
 
 		ret = IRQ_HANDLED;
 	}
-	ret = IRQ_HANDLED;
 	/* /\* reenable IPC interrupt *\/ */
 	/* snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR, HDA_DSP_REG_ADSPIC, */
 	/* 			HDA_DSP_ADSPIC_IPC, HDA_DSP_ADSPIC_IPC); */
