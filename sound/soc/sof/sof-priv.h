@@ -354,6 +354,7 @@ struct snd_sof_dev {
 
 	int irq_handled;
 	int wakeup;
+	u32 intsts;
 	/*
 	 * ASoC components. plat_drv fields are set dynamically so
 	 * can't use const

@@ -479,7 +479,7 @@ irqreturn_t hda_dsp_stream_interrupt(int irq, void *context)
 
 	status = snd_hdac_chip_readl(bus, INTSTS);
 	stream_mask = GENMASK(sof_hda->stream_max - 1, 0) | AZX_INT_CTRL_EN;
-
+	dev_err(sdev->dev, "in %s %d ylb status: %#x, intsts: %#x\n", __func__, __LINE__, status, sdev->intsts);
 	/* Not stream interrupt or register inaccessible, ignore it.*/
 	if (!(status & stream_mask) || status == 0xffffffff) {
 		spin_unlock(&bus->reg_lock);
@@ -495,33 +495,41 @@ irqreturn_t hda_dsp_stream_interrupt(int irq, void *context)
 		snd_hdac_chip_writeb(bus, RIRBSTS, RIRB_INT_MASK);
 	}
 #endif
-
+	dev_err(sdev->dev, "in %s %d ylb\n", __func__, __LINE__);
 	status = snd_hdac_chip_readl(bus, INTSTS);
-	/* check streams */
-	list_for_each_entry(s, &bus->stream_list, list) {
-		if (status & (1 << s->index) && s->opened) {
-			sd_status = snd_hdac_stream_readb(s, SD_STS);
+	dev_err(sdev->dev, "in %s %d ylb status: %#x, intsts: %#x\n", __func__, __LINE__, status, sdev->intsts);
+	sdev->irq_handled = 1;
+	if (!sdev->intsts)
+		sdev->intsts = status;
+	else
+		sdev->irq_handled = 0;
 
-			dev_vdbg(bus->dev, "stream %d status 0x%x\n",
-				 s->index, sd_status);
+	
+	/* /\* check streams *\/ */
+	/* list_for_each_entry(s, &bus->stream_list, list) { */
+	/* 	if (status & (1 << s->index) && s->opened) { */
+	/* 		sd_status = snd_hdac_stream_readb(s, SD_STS); */
 
-			snd_hdac_stream_writeb(s, SD_STS, SD_INT_MASK);
+	/* 		dev_vdbg(bus->dev, "stream %d status 0x%x\n", */
+	/* 			 s->index, sd_status); */
 
-			if (!s->substream ||
-			    !s->running ||
-			    (sd_status & SOF_HDA_CL_DMA_SD_INT_COMPLETE) == 0)
-				continue;
+	/* 		snd_hdac_stream_writeb(s, SD_STS, SD_INT_MASK); */
 
-			/* Inform ALSA only in case not do that with IPC */
-			if (sof_hda->no_ipc_position)
-				snd_pcm_period_elapsed(s->substream);
+	/* 		if (!s->substream || */
+	/* 		    !s->running || */
+	/* 		    (sd_status & SOF_HDA_CL_DMA_SD_INT_COMPLETE) == 0) */
+	/* 			continue; */
 
-		}
-	}
+	/* 		/\* Inform ALSA only in case not do that with IPC *\/ */
+	/* 		if (sof_hda->no_ipc_position) */
+	/* 			snd_pcm_period_elapsed(s->substream); */
+
+	/* 	} */
+	/* } */
 
 
 	spin_unlock(&bus->reg_lock);
-	sdev->irq_handled = 1;
+	
 	return IRQ_HANDLED;
 }
 
