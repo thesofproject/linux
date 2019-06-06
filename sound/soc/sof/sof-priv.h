@@ -353,6 +353,7 @@ struct snd_sof_dev {
 	spinlock_t hw_lock;	/* lock for HW IO access */
 
 	int irq_handled;
+	int wakeup;
 	/*
 	 * ASoC components. plat_drv fields are set dynamically so
 	 * can't use const

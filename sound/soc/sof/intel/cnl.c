@@ -29,9 +29,22 @@ static void cnl_ipc_dsp_done(struct snd_sof_dev *sdev);
 
 static irqreturn_t cnl_ipc_irq_thread(int irq, void *context)
 {
-	irqreturn_t ret = IRQ_NONE;
+	//irqreturn_t ret = IRQ_NONE;
+	struct snd_sof_dev *sdev = context;
+	
 
-	return ret;
+	dev_err(sdev->dev, "in %s %d ylb\n", __func__, __LINE__);
+	if (!sdev->wakeup)
+		return IRQ_HANDLED;
+	dev_err(sdev->dev, "in %s %d ylb\n", __func__, __LINE__);
+	snd_sof_ipc_reply(sdev, 0);
+
+	if (sdev->code_loading)	{
+		sdev->code_loading = 0;
+		wake_up(&sdev->waitq);
+	}
+	sdev->wakeup = 0;
+	return IRQ_HANDLED;
 }
 
 static void cnl_ipc_host_done(struct snd_sof_dev *sdev)

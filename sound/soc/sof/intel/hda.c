@@ -429,25 +429,26 @@ irqreturn_t my_irq_handler(int irq, void *context)
 again:
 	again = 0;
 	//bus = sof_to_bus(sdev);
-	hda_dsp_stream_interrupt(irq, context);
+	ret = hda_dsp_ipc_irq_handler(irq, context);
 	if (sdev->irq_handled) {
-		ret = IRQ_HANDLED;
 		again = 1;
 	}
-	hda_dsp_ipc_irq_handler(irq, context);
+	dev_err(sdev->dev, "in %s %d ylb, ret: %d\n", __func__, __LINE__, ret);
+	hda_dsp_stream_interrupt(irq, context);	
 	if (sdev->irq_handled) {
-		ret = IRQ_HANDLED;
+		if (ret == IRQ_NONE)
+			ret = IRQ_HANDLED;
 		again = 1;
 	}
 	if (again) {
-		dev_err(sdev->dev, "in %s %d ylb\n", __func__, __LINE__);
 		goto again;
 	}
-
+	dev_err(sdev->dev, "in %s %d ylb, ret: %d\n", __func__, __LINE__, ret);
 	/* reenable IPC interrupt */
 	//snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR, HDA_DSP_REG_ADSPIC,
 	//			HDA_DSP_ADSPIC_IPC, HDA_DSP_ADSPIC_IPC);
-	return ret;
+	//return IRQ_THREAD;
+	return IRQ_WAKE_THREAD;
 }
 
 int hda_dsp_probe(struct snd_sof_dev *sdev)
@@ -571,7 +572,8 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	}
 
 	dev_dbg(sdev->dev, "using HDA IRQ %d\n", hdev->irq);
-	ret = request_irq(hdev->irq, my_irq_handler,
+	ret = request_threaded_irq(hdev->irq, my_irq_handler,
+					  sof_ops(sdev)->irq_thread,
 				   IRQF_SHARED, "AudioHDA", sdev);
 
 	pci_set_master(pci);

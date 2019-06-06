@@ -318,17 +318,18 @@ irqreturn_t hda_dsp_ipc_irq_handler(int irq, void *context)
 
 		/* handle immediate reply from DSP core */
 		hda_dsp_ipc_get_reply(sdev);
-		snd_sof_ipc_reply(sdev, msg);
+		sdev->wakeup = 1;
+		/* snd_sof_ipc_reply(sdev, msg); */
 
-		if (sdev->code_loading)	{
-			sdev->code_loading = 0;
-			wake_up(&sdev->waitq);
-		}
+		/* if (sdev->code_loading)	{ */
+		/* 	sdev->code_loading = 0; */
+		/* 	wake_up(&sdev->waitq); */
+		/* } */
 
 		cnl_ipc_dsp_done_1(sdev);
 		sdev->irq_handled = 1;
 
-		ret = IRQ_HANDLED;
+		ret = IRQ_WAKE_THREAD;
 	}
 
 	/* new message from DSP */
@@ -362,7 +363,8 @@ irqreturn_t hda_dsp_ipc_irq_handler(int irq, void *context)
 		cnl_ipc_host_done_1(sdev);
 		sdev->irq_handled = 1;
 
-		ret = IRQ_HANDLED;
+		if (ret == IRQ_NONE)
+			ret = IRQ_HANDLED;
 	}
 	/* /\* reenable IPC interrupt *\/ */
 	/* snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR, HDA_DSP_REG_ADSPIC, */
