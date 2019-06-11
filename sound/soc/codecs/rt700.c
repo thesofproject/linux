@@ -1684,6 +1684,8 @@ int rt700_io_init(struct device *dev, struct sdw_slave *slave)
 	/* Mark Slave initialization complete */
 	rt700->hw_init = true;
 
+	pr_err("plb %s hw_init complete\n", __func__);
+
 	return ret;
 }
 

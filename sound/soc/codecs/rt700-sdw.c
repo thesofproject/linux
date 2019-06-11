@@ -192,6 +192,8 @@ static int rt700_update_status(struct sdw_slave *slave,
 {
 	struct rt700_priv *rt700 = dev_get_drvdata(&slave->dev);
 
+	pr_err("plb: in %s\n", __func__);
+
 	/* Update the status */
 	rt700->status = status;
 
@@ -201,6 +203,8 @@ static int rt700_update_status(struct sdw_slave *slave,
 	 */
 	if (rt700->hw_init || rt700->status != SDW_SLAVE_ATTACHED)
 		return 0;
+
+	pr_err("plb: in %s, calling rt700_io_init\n", __func__);
 
 	/* perform I/O transfers required for Slave initialization */
 	return rt700_io_init(&slave->dev, slave);
