@@ -504,6 +504,9 @@ static int sdw_assign_device_num(struct sdw_slave *slave)
 
 	dev_dbg(slave->bus->dev, "in %s\n", __func__);
 
+
+	dev_dbg(slave->bus->dev, "in %s\n", __func__);
+
 	/* check first if device number is assigned, if so reuse that */
 	if (!slave->dev_num) {
 		if (!slave->dev_num_sticky) {
@@ -532,6 +535,7 @@ static int sdw_assign_device_num(struct sdw_slave *slave)
 	dev_num = slave->dev_num;
 	slave->dev_num = 0;
 
+	dev_dbg(slave->bus->dev, "in %s, writing dev_num %d\n", __func__, dev_num);
 	ret = sdw_write_no_pm(slave, SDW_SCP_DEVNUMBER, dev_num);
 	if (ret < 0) {
 		dev_err(&slave->dev, "Program device_num %d failed: %d\n",
@@ -648,6 +652,8 @@ static int sdw_program_device_num(struct sdw_bus *bus)
 		 */
 
 	} while (ret == 0 && count < (SDW_MAX_DEVICES * 2));
+
+	dev_err(bus->dev, "End of %s ret %d\n", __func__, ret);
 
 	return ret;
 }
@@ -1114,6 +1120,8 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 		if (!slave)
 			continue;
 
+		dev_dbg(bus->dev, "processing Slave %d Status %d\n", i, status[i]);
+
 		switch (status[i]) {
 		case SDW_SLAVE_UNATTACHED:
 			if (slave->status == SDW_SLAVE_UNATTACHED)
@@ -1131,15 +1139,19 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 			break;
 
 		case SDW_SLAVE_ATTACHED:
-			if (slave->status == SDW_SLAVE_ATTACHED)
+			if (slave->status == SDW_SLAVE_ATTACHED) {
+				dev_err(bus->dev, "Slave %d status attached, was already attached, ignoring\n", i);
 				break;
-
+			}
 			prev_status = slave->status;
 			sdw_modify_slave_status(slave, SDW_SLAVE_ATTACHED);
 
-			if (prev_status == SDW_SLAVE_ALERT)
+			if (prev_status == SDW_SLAVE_ALERT)  {
+				dev_err(bus->dev, "Slave %d status attached, was alert, ignoring\n", i);
 				break;
+			}
 
+			dev_err(bus->dev, "Slave %d initializing\n", i);
 			ret = sdw_initialize_slave(slave);
 			if (ret)
 				dev_err(bus->dev,
@@ -1154,6 +1166,7 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 			break;
 		}
 
+		dev_err(bus->dev, "Updating Slave %d status\n", i);
 		ret = sdw_update_slave_status(slave, status[i]);
 		if (ret)
 			dev_err(slave->bus->dev,
