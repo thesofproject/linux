@@ -174,9 +174,8 @@ int hda_dsp_ctrl_init_chip(struct snd_sof_dev *sdev, bool full_reset)
 
 	if (full_reset) {
 		/* clear WAKESTS */
-		snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR, SOF_HDA_WAKESTS,
-					SOF_HDA_WAKESTS_INT_MASK,
-					SOF_HDA_WAKESTS_INT_MASK);
+		snd_sof_dsp_write(sdev, HDA_DSP_HDA_BAR, SOF_HDA_WAKESTS,
+				  SOF_HDA_WAKESTS_INT_MASK);
 
 		/* reset HDA controller */
 		ret = hda_dsp_ctrl_link_reset(sdev, true);
