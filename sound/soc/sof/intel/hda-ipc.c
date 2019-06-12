@@ -228,10 +228,6 @@ irqreturn_t hda_dsp_ipc_irq_thread(int irq, void *context)
 				    "error: nothing to do in IRQ thread\n");
 	}
 
-	/* re-enable IPC interrupt */
-	snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR, HDA_DSP_REG_ADSPIC,
-				HDA_DSP_ADSPIC_IPC, HDA_DSP_ADSPIC_IPC);
-
 	return IRQ_HANDLED;
 }
 
@@ -253,13 +249,8 @@ irqreturn_t hda_dsp_ipc_irq_handler(int irq, void *context)
 		goto out;
 
 	/* IPC message ? */
-	if (irq_status & HDA_DSP_ADSPIS_IPC) {
-		/* disable IPC interrupt */
-		snd_sof_dsp_update_bits_unlocked(sdev, HDA_DSP_BAR,
-						 HDA_DSP_REG_ADSPIC,
-						 HDA_DSP_ADSPIC_IPC, 0);
+	if (irq_status & HDA_DSP_ADSPIS_IPC)
 		ret = IRQ_WAKE_THREAD;
-	}
 
 out:
 	spin_unlock(&sdev->hw_lock);
