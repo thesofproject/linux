@@ -62,6 +62,8 @@
 
 #define DMA_CHAN_INVALID	0xFFFFFFFF
 
+#define SOF_DAI_HW_CONFIG_MAX SND_SOC_TPLG_HW_CONFIG_MAX
+
 struct snd_sof_dev;
 struct snd_sof_ipc_msg;
 struct snd_sof_ipc;
@@ -346,7 +348,9 @@ struct snd_sof_dai {
 	const char *cpu_dai_name;
 
 	struct sof_ipc_comp_dai comp_dai;
-	struct sof_ipc_dai_config *dai_config;
+	struct sof_ipc_dai_config *dai_config[SOF_DAI_HW_CONFIG_MAX];
+	int num_configs;
+	int cur_config;
 	struct list_head list;	/* list in sdev dai list */
 };
 

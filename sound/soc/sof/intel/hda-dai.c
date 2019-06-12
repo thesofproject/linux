@@ -158,6 +158,7 @@ static int hda_link_config_ipc(struct sof_intel_hda_stream *hda_stream,
 	struct snd_sof_dai *sof_dai;
 	struct sof_ipc_reply reply;
 	int ret = 0;
+	int i;
 
 	list_for_each_entry(sof_dai, &hda_stream->sdev->dai_list, list) {
 		if (!sof_dai->cpu_dai_name)
@@ -165,30 +166,34 @@ static int hda_link_config_ipc(struct sof_intel_hda_stream *hda_stream,
 
 		if (!strcmp(dai_name, sof_dai->cpu_dai_name) &&
 		    dir == sof_dai->comp_dai.direction) {
-			config = sof_dai->dai_config;
+			for (i = 0; i < sof_dai->num_configs; i++) {
+				config = sof_dai->dai_config[i];
 
-			if (!config) {
-				dev_err(hda_stream->sdev->dev,
-					"error: no config for DAI %s\n",
-					sof_dai->name);
-				return -EINVAL;
+				if (!config) {
+					dev_err(hda_stream->sdev->dev,
+						"error: no config for DAI %s\n",
+						sof_dai->name);
+					return -EINVAL;
+				}
+
+				/* update config with stream tag */
+				config->hda.link_dma_ch = channel;
+
+				/* send IPC */
+				ret = sof_ipc_tx_message(hda_stream->sdev->ipc,
+							 config->hdr.cmd,
+							 config,
+							 config->hdr.size,
+							 &reply, sizeof(reply));
+
+				if (ret < 0) {
+					dev_err(hda_stream->sdev->dev,
+						"error: failed to set dai config for %s\n",
+						sof_dai->name);
+					return ret;
+				}
 			}
-
-			/* update config with stream tag */
-			config->hda.link_dma_ch = channel;
-
-			/* send IPC */
-			ret = sof_ipc_tx_message(hda_stream->sdev->ipc,
-						 config->hdr.cmd,
-						 config,
-						 config->hdr.size,
-						 &reply, sizeof(reply));
-
-			if (ret < 0)
-				dev_err(hda_stream->sdev->dev,
-					"error: failed to set dai config for %s\n",
-					sof_dai->name);
-			return ret;
+			return 0;
 		}
 	}
 

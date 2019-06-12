@@ -2140,8 +2140,9 @@ static int sof_widget_unload(struct snd_soc_component *scomp,
 		dai = swidget->private;
 
 		if (dai) {
-			/* free dai config */
-			kfree(dai->dai_config);
+			/* free dai configs */
+			for (i = 0; i < dai->num_configs; i++)
+				kfree(dai->dai_config[i]);
 			list_del(&dai->list);
 		}
 		break;
@@ -2343,25 +2344,41 @@ static void sof_dai_set_format(struct snd_soc_tplg_hw_config *hw_config,
 	}
 }
 
-/* set config for all DAI's with name matching the link name */
-static int sof_set_dai_config(struct snd_sof_dev *sdev, u32 size,
+/* add config for all DAI's with name matching the link name */
+static int sof_dai_add_config(struct snd_sof_dev *sdev, u32 size,
 			      struct snd_soc_dai_link *link,
 			      struct sof_ipc_dai_config *config)
 {
 	struct snd_sof_dai *dai;
 	int found = 0;
+	int ret = 0;
+	int i;
 
 	list_for_each_entry(dai, &sdev->dai_list, list) {
 		if (!dai->name)
 			continue;
 
 		if (strcmp(link->name, dai->name) == 0) {
-			dai->dai_config = kmemdup(config, size, GFP_KERNEL);
-			if (!dai->dai_config)
-				return -ENOMEM;
+			i = dai->num_configs;
+
+			if (i >= SOF_DAI_HW_CONFIG_MAX) {
+				dev_err(sdev->dev,
+					"error: dai: %s no more hw_configs allowed\n",
+					link->name);
+				return -EINVAL;
+			}
+
+			dai->dai_config[i] = kmemdup(config, size, GFP_KERNEL);
+			if (!dai->dai_config[i]) {
+				ret = -ENOMEM;
+				goto err;
+			}
 
 			/* set cpu_dai_name */
 			dai->cpu_dai_name = link->cpu_dai_name;
+
+			dai->cur_config = i;
+			dai->num_configs++;
 
 			found = 1;
 		}
@@ -2378,6 +2395,12 @@ static int sof_set_dai_config(struct snd_sof_dev *sdev, u32 size,
 	}
 
 	return 0;
+
+err:
+	for (i = 0; i < dai->num_configs; i++)
+		kfree(dai->dai_config[i]);
+
+	return ret;
 }
 
 static int sof_link_ssp_load(struct snd_soc_component *scomp, int index,
@@ -2448,8 +2471,8 @@ static int sof_link_ssp_load(struct snd_soc_component *scomp, int index,
 		return ret;
 	}
 
-	/* set config for all DAI's with name matching the link name */
-	ret = sof_set_dai_config(sdev, size, link, config);
+	/* add config for all DAI's with name matching the link name */
+	ret = sof_dai_add_config(sdev, size, link, config);
 	if (ret < 0)
 		dev_err(sdev->dev, "error: failed to save DAI config for SSP%d\n",
 			config->dai_index);
@@ -2571,8 +2594,8 @@ static int sof_link_dmic_load(struct snd_soc_component *scomp, int index,
 		goto err;
 	}
 
-	/* set config for all DAI's with name matching the link name */
-	ret = sof_set_dai_config(sdev, size, link, ipc_config);
+	/* add config for all DAI's with name matching the link name */
+	ret = sof_dai_add_config(sdev, size, link, ipc_config);
 	if (ret < 0)
 		dev_err(sdev->dev, "error: failed to save DAI config for DMIC%d\n",
 			config->dai_index);
@@ -2598,6 +2621,7 @@ static int sof_link_hda_process(struct snd_sof_dev *sdev,
 	struct snd_sof_dai *sof_dai;
 	int found = 0;
 	int ret;
+	int i;
 
 	list_for_each_entry(sof_dai, &sdev->dai_list, list) {
 		if (!sof_dai->name)
@@ -2610,11 +2634,27 @@ static int sof_link_hda_process(struct snd_sof_dev *sdev,
 			config->hda.link_dma_ch = DMA_CHAN_INVALID;
 
 			/* save config in dai component */
-			sof_dai->dai_config = kmemdup(config, size, GFP_KERNEL);
-			if (!sof_dai->dai_config)
-				return -ENOMEM;
+			i = sof_dai->num_configs;
+
+			if (i >= SOF_DAI_HW_CONFIG_MAX) {
+				dev_err(sdev->dev,
+					"error: HDA dai: %d no more hw_configs allowed\n",
+					config->dai_index);
+				ret = -EINVAL;
+				goto err;
+			}
+
+			sof_dai->dai_config[i] = kmemdup(config,
+							 size, GFP_KERNEL);
+			if (!sof_dai->dai_config[i]) {
+				ret = -ENOMEM;
+				goto err;
+			}
 
 			sof_dai->cpu_dai_name = link->cpu_dai_name;
+
+			sof_dai->num_configs++;
+			sof_dai->cur_config = i;
 
 			/* send message to DSP */
 			ret = sof_ipc_tx_message(sdev->ipc,
@@ -2626,7 +2666,7 @@ static int sof_link_hda_process(struct snd_sof_dev *sdev,
 					sof_dai->comp_dai.direction,
 					config->dai_index);
 
-				return ret;
+				goto err;
 			}
 		}
 	}
@@ -2642,6 +2682,12 @@ static int sof_link_hda_process(struct snd_sof_dev *sdev,
 	}
 
 	return 0;
+
+err:
+	for (i = 0; i < sof_dai->num_configs; i++)
+		kfree(sof_dai->dai_config[i]);
+
+	return ret;
 }
 
 static int sof_link_hda_load(struct snd_soc_component *scomp, int index,
@@ -2749,44 +2795,50 @@ static int sof_link_load(struct snd_soc_component *scomp, int index,
 			cfg->num_hw_configs, le32_to_cpu(cfg->default_hw_config_id));
 
 		for (i = 0; i < num_hw_configs; i++) {
-			if (cfg->hw_config[i].id == cfg->default_hw_config_id)
+			/* configure dai IPC message */
+			hw_config = &cfg->hw_config[i];
+
+			config.hdr.cmd = SOF_IPC_GLB_DAI_MSG |
+				SOF_IPC_DAI_CONFIG;
+			config.format = le32_to_cpu(hw_config->fmt);
+
+			/*
+			 * TODO: if this is the default configuration,
+			 * let the firmware know about it
+			 */
+
+			/*
+			 * now load DAI specific data and send IPC -
+			 * type comes from token
+			 */
+			switch (config.type) {
+			case SOF_DAI_INTEL_SSP:
+				ret = sof_link_ssp_load(scomp, index, link,
+							cfg, hw_config,
+							&config);
 				break;
-		}
+			case SOF_DAI_INTEL_DMIC:
+				ret = sof_link_dmic_load(scomp, index, link,
+							 cfg, hw_config,
+							 &config);
+				break;
+			case SOF_DAI_INTEL_HDA:
+				ret = sof_link_hda_load(scomp, index, link,
+							cfg, hw_config,
+							&config);
+				break;
+			default:
+				dev_err(sdev->dev,
+					"error: invalid DAI type %d\n",
+					config.type);
+				ret = -EINVAL;
+				break;
+			}
 
-		if (i == num_hw_configs) {
-			dev_err(sdev->dev, "error: default hw_config id: %d not found!\n",
-				le32_to_cpu(cfg->default_hw_config_id));
-			return -EINVAL;
+			if (ret < 0)
+				return ret;
 		}
 	}
-
-	/* configure dai IPC message */
-	hw_config = &cfg->hw_config[i];
-
-	config.hdr.cmd = SOF_IPC_GLB_DAI_MSG | SOF_IPC_DAI_CONFIG;
-	config.format = le32_to_cpu(hw_config->fmt);
-
-	/* now load DAI specific data and send IPC - type comes from token */
-	switch (config.type) {
-	case SOF_DAI_INTEL_SSP:
-		ret = sof_link_ssp_load(scomp, index, link, cfg, hw_config,
-					&config);
-		break;
-	case SOF_DAI_INTEL_DMIC:
-		ret = sof_link_dmic_load(scomp, index, link, cfg, hw_config,
-					 &config);
-		break;
-	case SOF_DAI_INTEL_HDA:
-		ret = sof_link_hda_load(scomp, index, link, cfg, hw_config,
-					&config);
-		break;
-	default:
-		dev_err(sdev->dev, "error: invalid DAI type %d\n", config.type);
-		ret = -EINVAL;
-		break;
-	}
-	if (ret < 0)
-		return ret;
 
 	return 0;
 }
@@ -2819,6 +2871,7 @@ static int sof_link_unload(struct snd_soc_component *scomp,
 
 	struct snd_sof_dai *sof_dai;
 	int ret = 0;
+	int i;
 
 	/* only BE link is loaded by sof */
 	if (!link->no_pcm)
@@ -2837,19 +2890,21 @@ static int sof_link_unload(struct snd_soc_component *scomp,
 	return -EINVAL;
 found:
 
-	switch (sof_dai->dai_config->type) {
-	case SOF_DAI_INTEL_SSP:
-	case SOF_DAI_INTEL_DMIC:
-		/* no resource needs to be released for SSP and DMIC */
-		break;
-	case SOF_DAI_INTEL_HDA:
-		ret = sof_link_hda_unload(sdev, link);
-		break;
-	default:
-		dev_err(sdev->dev, "error: invalid DAI type %d\n",
-			sof_dai->dai_config->type);
-		ret = -EINVAL;
-		break;
+	for (i = 0; i < sof_dai->num_configs; i++) {
+		switch (sof_dai->dai_config[i]->type) {
+		case SOF_DAI_INTEL_SSP:
+		case SOF_DAI_INTEL_DMIC:
+			/* no resource needs to be released for SSP and DMIC */
+			break;
+		case SOF_DAI_INTEL_HDA:
+			ret = sof_link_hda_unload(sdev, link);
+			break;
+		default:
+			dev_err(sdev->dev, "error: config: %d invalid DAI type %d\n",
+				i, sof_dai->dai_config[i]->type);
+			ret = -EINVAL;
+			break;
+		}
 	}
 
 	return ret;

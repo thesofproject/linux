@@ -145,34 +145,38 @@ static int sof_restore_pipelines(struct snd_sof_dev *sdev)
 	/* restore dai links */
 	list_for_each_entry_reverse(dai, &sdev->dai_list, list) {
 		struct sof_ipc_reply reply;
-		struct sof_ipc_dai_config *config = dai->dai_config;
+		int i;
 
-		if (!config) {
-			dev_err(sdev->dev, "error: no config for DAI %s\n",
-				dai->name);
-			continue;
-		}
+		for (i = 0; i < dai->num_configs; i++) {
+			struct sof_ipc_dai_config *config = dai->dai_config[i];
 
-		/*
-		 * The link DMA channel would be invalidated for running
-		 * streams but not for streams that were in the PAUSED
-		 * state during suspend. So invalidate it here before setting
-		 * the dai config in the DSP.
-		 */
-		if (config->type == SOF_DAI_INTEL_HDA)
-			config->hda.link_dma_ch = DMA_CHAN_INVALID;
+			if (!config) {
+				dev_err(sdev->dev, "error: no config %d for DAI %s\n",
+					i, dai->name);
+				continue;
+			}
 
-		ret = sof_ipc_tx_message(sdev->ipc,
-					 config->hdr.cmd, config,
-					 config->hdr.size,
-					 &reply, sizeof(reply));
+			/*
+			 * The link DMA channel would be invalidated for running
+			 * streams but not for streams that were in the PAUSED
+			 * state during suspend. So invalidate it here before
+			 * setting the dai config in the DSP.
+			 */
+			if (config->type == SOF_DAI_INTEL_HDA)
+				config->hda.link_dma_ch = DMA_CHAN_INVALID;
 
-		if (ret < 0) {
-			dev_err(sdev->dev,
-				"error: failed to set dai config for %s\n",
-				dai->name);
+			ret = sof_ipc_tx_message(sdev->ipc,
+						 config->hdr.cmd, config,
+						 config->hdr.size,
+						 &reply, sizeof(reply));
 
-			return ret;
+			if (ret < 0) {
+				dev_err(sdev->dev,
+					"error: failed to set dai config %d for %s\n",
+					i, dai->name);
+
+				return ret;
+			}
 		}
 	}
 

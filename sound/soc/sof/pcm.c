@@ -608,6 +608,7 @@ static int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
 	struct snd_sof_dai *dai =
 		snd_sof_find_dai(sdev, (char *)rtd->dai_link->name);
+	int i;
 
 	/* no topology exists for this BE, try a common configuration */
 	if (!dai) {
@@ -646,12 +647,15 @@ static int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 	}
 
 	/* read rate and channels from topology */
-	switch (dai->dai_config->type) {
+
+	i = dai->cur_config;
+
+	switch (dai->dai_config[i]->type) {
 	case SOF_DAI_INTEL_SSP:
-		rate->min = dai->dai_config->ssp.fsync_rate;
-		rate->max = dai->dai_config->ssp.fsync_rate;
-		channels->min = dai->dai_config->ssp.tdm_slots;
-		channels->max = dai->dai_config->ssp.tdm_slots;
+		rate->min = dai->dai_config[i]->ssp.fsync_rate;
+		rate->max = dai->dai_config[i]->ssp.fsync_rate;
+		channels->min = dai->dai_config[i]->ssp.tdm_slots;
+		channels->max = dai->dai_config[i]->ssp.tdm_slots;
 
 		dev_dbg(sdev->dev,
 			"rate_min: %d rate_max: %d\n", rate->min, rate->max);
@@ -666,7 +670,7 @@ static int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 			dev_err(sdev->dev,
 				"error: invalid fmt %d for DAI type %d\n",
 				dai->comp_dai.config.frame_fmt,
-				dai->dai_config->type);
+				dai->dai_config[i]->type);
 		}
 		break;
 	case SOF_DAI_INTEL_HDA:
@@ -674,7 +678,7 @@ static int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 		break;
 	default:
 		dev_err(sdev->dev, "error: invalid DAI type %d\n",
-			dai->dai_config->type);
+			dai->dai_config[i]->type);
 		break;
 	}
 
