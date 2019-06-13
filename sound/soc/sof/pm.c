@@ -146,6 +146,28 @@ static int sof_restore_pipelines(struct snd_sof_dev *sdev)
 	list_for_each_entry_reverse(dai, &sdev->dai_list, list) {
 		struct sof_ipc_reply reply;
 		struct sof_ipc_dai_config *config = dai->dai_config;
+		struct snd_sof_dai *pdai;
+		int restored = false;
+
+		/*
+		 * Some of the DAI links in the list may use the same BE DAI.
+		 * If that's the case, prevent sending multiple ipc dai config
+		 * messages for the same BE DAI to the firmware.
+		 */
+		list_for_each_entry_reverse(pdai, &sdev->dai_list, list) {
+			struct sof_ipc_comp_dai *comp_dai = &pdai->comp_dai;
+
+			if (pdai == dai)
+				break;
+			if (comp_dai->type == dai->comp_dai.type &&
+			    comp_dai->dai_index == dai->comp_dai.dai_index) {
+				restored = true;
+				break;
+			}
+		}
+
+		if (restored)
+			continue;
 
 		if (!config) {
 			dev_err(sdev->dev, "error: no config for DAI %s\n",
