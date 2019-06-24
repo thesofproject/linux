@@ -353,6 +353,17 @@ snd_sof_pcm_platform_trigger(struct snd_sof_dev *sdev,
 	return 0;
 }
 
+/* host stream prepare */
+static inline int
+snd_sof_pcm_platform_prepare(struct snd_sof_dev *sdev,
+			     struct snd_pcm_substream *substream)
+{
+	if (sof_ops(sdev) && sof_ops(sdev)->pcm_prepare)
+		return sof_ops(sdev)->pcm_prepare(sdev, substream);
+
+	return 0;
+}
+
 /* host DSP message data */
 static inline void snd_sof_ipc_msg_data(struct snd_sof_dev *sdev,
 					struct snd_pcm_substream *substream,

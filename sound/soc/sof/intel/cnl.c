@@ -224,6 +224,7 @@ const struct snd_sof_dsp_ops sof_cnl_ops = {
 	.pcm_hw_free	= hda_dsp_stream_hw_free,
 	.pcm_trigger	= hda_dsp_pcm_trigger,
 	.pcm_pointer	= hda_dsp_pcm_pointer,
+	.pcm_prepare	= sdw_pcm_prepare,
 
 	/* firmware loading */
 	.load_firmware = snd_sof_load_firmware_raw,

@@ -16,6 +16,7 @@
  */
 
 #include <linux/pm_runtime.h>
+#include <linux/soundwire/sdw.h>
 #include <sound/hdaudio_ext.h>
 #include <sound/hda_register.h>
 #include <sound/sof.h>
@@ -489,8 +490,19 @@ int hda_dsp_stream_hw_free(struct snd_sof_dev *sdev,
 	struct hdac_ext_stream *link_dev = container_of(stream,
 							struct hdac_ext_stream,
 							hstream);
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct hdac_stream *hstream = substream->runtime->private_data;
+	struct sof_intel_hda_stream *hda_stream;
+	struct sdw_stream_runtime *sdw_stream;
 	struct hdac_bus *bus = sof_to_bus(sdev);
 	u32 mask = 0x1 << stream->index;
+	int ret;
+	struct sof_ipc_dai_config config;
+	struct sof_ipc_reply reply;
+	u32 size = sizeof(config);
+
+	if (rtd->dai_link->no_pcm)
+		goto be;
 
 	spin_lock_irq(&bus->reg_lock);
 	/* couple host and link DMA if link DMA channel is idle */
@@ -500,6 +512,35 @@ int hda_dsp_stream_hw_free(struct snd_sof_dev *sdev,
 	spin_unlock_irq(&bus->reg_lock);
 
 	return 0;
+be:
+
+	hda_stream = container_of(hstream,
+				  struct sof_intel_hda_stream,
+				  hda_stream.hstream);
+	sdw_stream = hda_stream->sdw_stream;
+	if (!sdw_stream)
+		return -EINVAL;
+
+	ret = sdw_deprepare_stream(sdw_stream);
+	if (ret)
+		dev_err(sdev->dev, "sdw_deprepare_stream: failed %d", ret);
+
+	memset(&config, 0, size);
+	config.hdr.size = size;
+	config.hdr.cmd = SOF_IPC_GLB_DAI_MSG | SOF_IPC_DAI_CONFIG;
+	config.type = SOF_DAI_INTEL_ALH;
+	config.dai_index = 0; /* FIXME: make this dynamic */
+	config.alh.stream_id = 0xFFFFFFFF;
+
+	/* send message to DSP */
+	ret = sof_ipc_tx_message(sdev->ipc,
+				 config.hdr.cmd, &config, size, &reply,
+				 sizeof(reply));
+	if (ret < 0) {
+		dev_err(sdev->dev, "error: failed to set DAI hw_free for ALH %d\n",
+			config.dai_index);
+	}
+	return ret;
 }
 
 irqreturn_t hda_dsp_stream_interrupt(int irq, void *context)

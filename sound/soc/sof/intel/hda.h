@@ -11,6 +11,7 @@
 #ifndef __SOF_INTEL_HDA_H
 #define __SOF_INTEL_HDA_H
 
+#include <linux/soundwire/sdw.h>
 #include <sound/hda_codec.h>
 #include <sound/hdaudio_ext.h>
 #include "shim.h"
@@ -418,6 +419,7 @@ static inline struct hda_bus *sof_to_hbus(struct snd_sof_dev *s)
 struct sof_intel_hda_stream {
 	struct snd_sof_dev *sdev;
 	struct hdac_ext_stream hda_stream;
+	struct sdw_stream_runtime *sdw_stream;
 	struct sof_intel_stream stream;
 	int host_reserved; /* reserve host DMA channel */
 };
@@ -479,6 +481,8 @@ int hda_dsp_stream_hw_free(struct snd_sof_dev *sdev,
 			   struct snd_pcm_substream *substream);
 int hda_dsp_pcm_trigger(struct snd_sof_dev *sdev,
 			struct snd_pcm_substream *substream, int cmd);
+int sdw_pcm_prepare(struct snd_sof_dev *sdev,
+		    struct snd_pcm_substream *substream);
 snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_sof_dev *sdev,
 				      struct snd_pcm_substream *substream);
 

@@ -17,6 +17,7 @@
 
 #include <sound/hda_register.h>
 #include <sound/pcm_params.h>
+#include <linux/soundwire/sdw.h>
 #include "../ops.h"
 #include "hda.h"
 
@@ -125,13 +126,97 @@ int hda_dsp_pcm_hw_params(struct snd_sof_dev *sdev,
 	return 0;
 }
 
+static int sof_sdw_stream_trigger(struct snd_pcm_substream *substream, int cmd)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct hdac_stream *hstream = substream->runtime->private_data;
+	struct sof_intel_hda_stream *hda_stream;
+	struct sdw_stream_runtime *sdw_stream;
+	int ret;
+
+	if (rtd->cpu_dai->id < SDW_DAI_ID_RANGE_START ||
+	    rtd->cpu_dai->id > SDW_DAI_ID_RANGE_END)
+		return 0;
+
+	hda_stream = container_of(hstream,
+				  struct sof_intel_hda_stream,
+				  hda_stream.hstream);
+
+	sdw_stream = hda_stream->sdw_stream;
+
+	switch (cmd) {
+	case SNDRV_PCM_TRIGGER_START:
+	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+	case SNDRV_PCM_TRIGGER_RESUME:
+		ret = sdw_enable_stream(sdw_stream);
+		if (ret) {
+			dev_err(rtd->cpu_dai->dev,
+				"sdw_enable_stream: failed: %d", ret);
+			return ret;
+		}
+		break;
+
+	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+	case SNDRV_PCM_TRIGGER_SUSPEND:
+	case SNDRV_PCM_TRIGGER_STOP:
+		ret = sdw_disable_stream(sdw_stream);
+		if (ret) {
+			dev_err(rtd->cpu_dai->dev,
+				"sdw_disable_stream: failed: %d", ret);
+			return ret;
+		}
+		break;
+
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 int hda_dsp_pcm_trigger(struct snd_sof_dev *sdev,
 			struct snd_pcm_substream *substream, int cmd)
 {
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct hdac_stream *hstream = substream->runtime->private_data;
 	struct hdac_ext_stream *stream = stream_to_hdac_ext_stream(hstream);
 
+	if (rtd->dai_link->no_pcm)
+		return sof_sdw_stream_trigger(substream, cmd);
+
 	return hda_dsp_stream_trigger(sdev, stream, cmd);
+}
+
+int sdw_pcm_prepare(struct snd_sof_dev *sdev,
+		    struct snd_pcm_substream *substream)
+{
+	//struct snd_pcm_runtime *runtime = substream->runtime;
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct hdac_stream *hstream = substream->runtime->private_data;
+	struct sof_intel_hda_stream *hda_stream;
+	struct sdw_stream_runtime *sdw_stream;
+	struct device *dev;
+	int ret = 0;
+
+	if (rtd->cpu_dai->id >= SDW_DAI_ID_RANGE_START &&
+	    rtd->cpu_dai->id <= SDW_DAI_ID_RANGE_END) {
+
+		hda_stream = container_of(hstream,
+					  struct sof_intel_hda_stream,
+					  hda_stream.hstream);
+
+		sdw_stream = hda_stream->sdw_stream;
+
+		if (!sdw_stream)
+			return -EINVAL;
+
+		dev = rtd->cpu_dai->dev;
+		ret = sdw_prepare_stream(sdw_stream);
+		if (ret)
+			dev_err(dev, "sdw_prepare_stream: failed: %d", ret);
+	}
+
+	return ret;
 }
 
 snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_sof_dev *sdev,
@@ -206,6 +291,21 @@ int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
 {
 	struct hdac_ext_stream *dsp_stream;
 	int direction = substream->stream;
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_pcm_runtime *runtime = substream->runtime;
+	struct hdac_stream *hstream;
+	struct sof_intel_hda_stream *hda_stream;
+	struct sdw_stream_runtime *sdw_stream = NULL;
+	struct snd_soc_dai_link *dai_link = rtd->dai_link;
+	int i, ret = 0;
+	char *name;
+
+	if (runtime->private_data) {
+		hstream = runtime->private_data;
+		if (hstream->opened) {
+			return 0;
+		}
+	}
 
 	dsp_stream = hda_dsp_stream_get(sdev, direction);
 
@@ -216,15 +316,77 @@ int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
 
 	/* binding pcm substream to hda stream */
 	substream->runtime->private_data = &dsp_stream->hstream;
+
+	/* SoundWire handling: THIS IS A HACK */
+	if (rtd->cpu_dai->id >= SDW_DAI_ID_RANGE_START &&
+	    rtd->cpu_dai->id <= SDW_DAI_ID_RANGE_END) {
+
+		hstream = substream->runtime->private_data;
+		hda_stream = container_of(hstream,
+					  struct sof_intel_hda_stream,
+					  hda_stream.hstream);
+
+		if (hda_stream->sdw_stream)
+			return 0;
+
+		name = kzalloc(32, GFP_KERNEL);
+		if (!name)
+			return -ENOMEM;
+
+		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+			snprintf(name, 32, "%s-Playback", rtd->cpu_dai->name);
+		else
+			snprintf(name, 32, "%s-Capture", rtd->cpu_dai->name);
+
+		sdw_stream = sdw_alloc_stream(name);
+		if (!sdw_stream) {
+			dev_err(rtd->cpu_dai->dev,
+				"alloc stream failed for DAI %s: %d",
+				rtd->cpu_dai->name, ret);
+			ret = -ENOMEM;
+			goto error;
+		}
+
+		/* Set stream pointer on CPU DAI */
+		snd_soc_dai_set_sdw_stream(rtd->cpu_dai,
+					   sdw_stream,
+					   substream->stream);
+
+		/* Set stream pointer on all CODEC DAIs */
+		for (i = 0; i < rtd->num_codecs; i++)
+			snd_soc_dai_set_sdw_stream(rtd->codec_dais[i],
+						   sdw_stream,
+						   substream->stream);
+
+		hda_stream->sdw_stream = sdw_stream;
+	}
+
 	return 0;
+
+error:
+	kfree(name);
+	sdw_release_stream(sdw_stream);
+	return ret;
 }
 
 int hda_dsp_pcm_close(struct snd_sof_dev *sdev,
 		      struct snd_pcm_substream *substream)
 {
-	struct hdac_stream *hstream = substream->runtime->private_data;
+	struct hdac_stream *hstream = NULL;
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_pcm_runtime *runtime = substream->runtime;
+	struct sof_intel_hda_stream *hda_stream;
+	struct sdw_stream_runtime *sdw_stream = NULL;
 	int direction = substream->stream;
 	int ret;
+
+	hstream = runtime->private_data;
+
+	if (rtd->dai_link->no_pcm)
+		goto be;
+
+	if (!hstream->opened)
+		goto free;
 
 	ret = hda_dsp_stream_put(sdev, direction, hstream->stream_tag);
 
@@ -233,7 +395,23 @@ int hda_dsp_pcm_close(struct snd_sof_dev *sdev,
 		return -ENODEV;
 	}
 
+	goto free;
+
+be:
+	hda_stream = container_of(hstream,
+				  struct sof_intel_hda_stream,
+				  hda_stream.hstream);
+	sdw_stream = hda_stream->sdw_stream;
+	if (!sdw_stream)
+		return -EINVAL;
+
+	sdw_release_stream(sdw_stream);
+	hda_stream->sdw_stream = NULL;
+
+free:
 	/* unbinding pcm substream to hda stream */
-	substream->runtime->private_data = NULL;
+	if (!hstream->opened && !hda_stream->sdw_stream)
+		substream->runtime->private_data = NULL;
+
 	return 0;
 }

@@ -152,6 +152,9 @@ struct snd_sof_dsp_ops {
 			   struct snd_pcm_substream *substream,
 			   int cmd); /* optional */
 
+	int (*pcm_prepare)(struct snd_sof_dev *sdev,
+			   struct snd_pcm_substream *substream); /* optional */
+
 	/* host stream pointer */
 	snd_pcm_uframes_t (*pcm_pointer)(struct snd_sof_dev *sdev,
 					 struct snd_pcm_substream *substream); /* optional */
