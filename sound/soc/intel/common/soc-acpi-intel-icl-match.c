@@ -30,7 +30,7 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_icl_machines[] = {
 		.sof_tplg_filename = "sof-icl-rt5682.tplg",
 	},
 	{
-		.id = "10EC0700",
+		.id = "MSFT0001", /* FIXME: dummy name to find machine */
 		.drv_name = "cnl_rt700",
 		.sof_fw_filename = "sof-icl.ri",
 		.sof_tplg_filename = "sof-icl-rt700.tplg",
