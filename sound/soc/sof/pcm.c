@@ -426,9 +426,9 @@ static int sof_pcm_open(struct snd_pcm_substream *substream)
 	struct snd_soc_tplg_stream_caps *caps;
 	int ret;
 
-	/* nothing to do for BE */
+	/* skip front-end specific inits for BE */
 	if (rtd->dai_link->no_pcm)
-		return 0;
+		goto platform_open;
 
 	spcm = snd_sof_find_spcm_dai(sdev, rtd);
 	if (!spcm)
@@ -485,6 +485,7 @@ static int sof_pcm_open(struct snd_pcm_substream *substream)
 	spcm->stream[substream->stream].substream = substream;
 	spcm->prepared[substream->stream] = false;
 
+platform_open:
 	ret = snd_sof_pcm_platform_open(sdev, substream);
 	if (ret < 0)
 		dev_err(sdev->dev, "error: pcm open failed %d\n", ret);
