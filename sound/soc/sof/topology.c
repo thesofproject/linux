@@ -2764,6 +2764,40 @@ static int sof_link_hda_load(struct snd_soc_component *scomp, int index,
 	return ret;
 }
 
+static int sof_link_alh_load(struct snd_soc_component *scomp, int index,
+			     struct snd_soc_dai_link *link,
+			     struct snd_soc_tplg_link_config *cfg,
+			     struct snd_soc_tplg_hw_config *hw_config,
+			     struct sof_ipc_dai_config *config)
+{
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct sof_ipc_reply reply;
+	u32 size = sizeof(*config);
+	int ret;
+
+	/* init IPC */
+	config->hdr.size = size;
+
+	/* send message to DSP */
+	ret = sof_ipc_tx_message(sdev->ipc,
+				 config->hdr.cmd, config, size, &reply,
+				 sizeof(reply));
+
+	if (ret < 0) {
+		dev_err(sdev->dev, "error: failed to set DAI config for ALH %d\n",
+			config->dai_index);
+		return ret;
+	}
+
+	/* set config for all DAI's with name matching the link name */
+	ret = sof_set_dai_config(sdev, size, link, config);
+	if (ret < 0)
+		dev_err(sdev->dev, "error: failed to save DAI config for ALH %d\n",
+			config->dai_index);
+
+	return ret;
+}
+
 /* DAI link - used for any driver specific init */
 static int sof_link_load(struct snd_soc_component *scomp, int index,
 			 struct snd_soc_dai_link *link,
@@ -2861,8 +2895,8 @@ static int sof_link_load(struct snd_soc_component *scomp, int index,
 					&config);
 		break;
 	case SOF_DAI_INTEL_ALH:
-		ret = 0;
-		dev_dbg(sdev->dev, "no ALH configuration currently required\n");
+		ret = sof_link_alh_load(scomp, index, link, cfg, hw_config,
+					&config);
 		break;
 	case SOF_DAI_IMX_SAI:
 		ret = sof_link_sai_load(scomp, index, link, cfg, hw_config,
