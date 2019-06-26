@@ -53,6 +53,70 @@ static void hda_sdw_int_enable(struct snd_sof_dev *sdev, bool enable)
 					0);
 }
 
+static int sdw_config_stream(void *arg, void *s, void *dai,
+			     void *params, int link_id, int alh_stream_id)
+{
+	struct snd_sof_dev *sdev = arg;
+	struct snd_soc_dai *d = dai;
+	struct sof_ipc_dai_config config;
+	struct sof_ipc_reply reply;
+	int ret;
+	u32 size = sizeof(config);
+
+	memset(&config, 0, size);
+	config.hdr.size = size;
+	config.hdr.cmd = SOF_IPC_GLB_DAI_MSG | SOF_IPC_DAI_CONFIG;
+	config.type = SOF_DAI_INTEL_ALH;
+	config.dai_index = (link_id << 8) | (d->id);
+	config.alh.stream_id = alh_stream_id;
+
+	/* send message to DSP */
+	ret = sof_ipc_tx_message(sdev->ipc,
+				 config.hdr.cmd, &config, size, &reply,
+				 sizeof(reply));
+	if (ret < 0) {
+		dev_err(sdev->dev,
+			"error: failed to set DAI hw_params for link %d dai->id %d ALH %d\n",
+			link_id, d->id, alh_stream_id);
+	}
+
+	return ret;
+}
+
+static int sdw_free_stream(void *arg, void *s, void *dai, int link_id)
+{
+	struct snd_sof_dev *sdev = arg;
+	struct snd_soc_dai *d = dai;
+	struct sof_ipc_dai_config config;
+	struct sof_ipc_reply reply;
+	int ret;
+	u32 size = sizeof(config);
+
+	memset(&config, 0, size);
+	config.hdr.size = size;
+	config.hdr.cmd = SOF_IPC_GLB_DAI_MSG | SOF_IPC_DAI_CONFIG;
+	config.type = SOF_DAI_INTEL_ALH;
+	config.dai_index = (link_id << 8) | d->id;
+	config.alh.stream_id = 0xFFFF; /* invalid value on purpose */
+
+	/* send message to DSP */
+	ret = sof_ipc_tx_message(sdev->ipc,
+				 config.hdr.cmd, &config, size, &reply,
+				 sizeof(reply));
+	if (ret < 0) {
+		dev_err(sdev->dev,
+			"error: failed to free stream for link %d dai->id %d\n",
+			link_id, d->id);
+	}
+
+	return ret;
+}
+
+static const struct sdw_intel_ops sdw_callback = {
+	.config_stream = sdw_config_stream,
+	.free_stream = sdw_free_stream,
+};
+
 static int hda_sdw_init(struct snd_sof_dev *sdev)
 {
 	acpi_handle handle;
@@ -67,6 +131,8 @@ static int hda_sdw_init(struct snd_sof_dev *sdev)
 	res.mmio_base = sdev->bar[HDA_DSP_BAR];
 	res.irq = sdev->ipc_irq;
 	res.parent = sdev->dev;
+	res.ops = &sdw_callback;
+	res.arg = sdev;
 
 	hda_sdw_int_enable(sdev, true);
 
