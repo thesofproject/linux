@@ -526,4 +526,3 @@ EXPORT_SYMBOL(snd_sof_device_remove);
 MODULE_AUTHOR("Liam Girdwood");
 MODULE_DESCRIPTION("Sound Open Firmware (SOF) Core");
 MODULE_LICENSE("Dual BSD/GPL");
-MODULE_ALIAS("platform:sof-audio");
