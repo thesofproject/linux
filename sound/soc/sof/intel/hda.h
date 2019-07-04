@@ -420,7 +420,6 @@ static inline struct hda_bus *sof_to_hbus(struct snd_sof_dev *s)
 struct sof_intel_hda_stream {
 	struct snd_sof_dev *sdev;
 	struct hdac_ext_stream hda_stream;
-	struct sof_intel_stream stream;
 	int hw_params_upon_resume; /* set up hw_params upon resume */
 	int host_reserved; /* reserve host DMA channel */
 };
@@ -434,6 +433,11 @@ struct sof_intel_hda_stream {
 #define SOF_STREAM_SD_OFFSET(s) \
 	(SOF_HDA_ADSP_SD_ENTRY_SIZE * ((s)->index) \
 	 + SOF_HDA_ADSP_LOADER_BASE)
+
+struct sof_stream {
+	struct hdac_stream *hstream;
+	size_t posn_offset;
+};
 
 /*
  * DSP Core services.

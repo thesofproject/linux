@@ -85,7 +85,8 @@ int hda_dsp_pcm_hw_params(struct snd_sof_dev *sdev,
 			  struct snd_pcm_hw_params *params,
 			  struct sof_ipc_stream_params *ipc_params)
 {
-	struct hdac_stream *hstream = substream->runtime->private_data;
+	struct sof_stream *s = substream->runtime->private_data;
+	struct hdac_stream *hstream = s->hstream;
 	struct hdac_ext_stream *stream = stream_to_hdac_ext_stream(hstream);
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct snd_dma_buffer *dmab;
@@ -128,7 +129,8 @@ int hda_dsp_pcm_hw_params(struct snd_sof_dev *sdev,
 int hda_dsp_pcm_trigger(struct snd_sof_dev *sdev,
 			struct snd_pcm_substream *substream, int cmd)
 {
-	struct hdac_stream *hstream = substream->runtime->private_data;
+	struct sof_stream *s = substream->runtime->private_data;
+	struct hdac_stream *hstream = s->hstream;
 	struct hdac_ext_stream *stream = stream_to_hdac_ext_stream(hstream);
 
 	return hda_dsp_stream_trigger(sdev, stream, cmd);
@@ -138,7 +140,8 @@ snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_sof_dev *sdev,
 				      struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct hdac_stream *hstream = substream->runtime->private_data;
+	struct sof_stream *s = substream->runtime->private_data;
+	struct hdac_stream *hstream = s->hstream;
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct snd_sof_pcm *spcm;
 	snd_pcm_uframes_t pos;
@@ -206,6 +209,11 @@ int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
 {
 	struct hdac_ext_stream *dsp_stream;
 	int direction = substream->stream;
+	struct sof_stream *s;
+
+	s = substream->runtime->private_data;
+	if (!s)
+		s = kzalloc(sizeof(*s), GFP_KERNEL);
 
 	dsp_stream = hda_dsp_stream_get(sdev, direction);
 
@@ -215,14 +223,17 @@ int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
 	}
 
 	/* binding pcm substream to hda stream */
-	substream->runtime->private_data = &dsp_stream->hstream;
+	s->hstream = &dsp_stream->hstream;
+
+	substream->runtime->private_data = s;
 	return 0;
 }
 
 int hda_dsp_pcm_close(struct snd_sof_dev *sdev,
 		      struct snd_pcm_substream *substream)
 {
-	struct hdac_stream *hstream = substream->runtime->private_data;
+	struct sof_stream *s = substream->runtime->private_data;
+	struct hdac_stream *hstream = s->hstream;
 	int direction = substream->stream;
 	int ret;
 
@@ -234,6 +245,9 @@ int hda_dsp_pcm_close(struct snd_sof_dev *sdev,
 	}
 
 	/* unbinding pcm substream to hda stream */
+	s->hstream = NULL;
+
+	kfree(s);
 	substream->runtime->private_data = NULL;
 	return 0;
 }

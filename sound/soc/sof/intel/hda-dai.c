@@ -37,13 +37,15 @@ struct hda_pipe_params {
 static bool hda_check_fes(struct snd_soc_pcm_runtime *rtd,
 			  int dir, int stream_tag)
 {
+	struct sof_stream *s;
 	struct snd_pcm_substream *fe_substream;
 	struct hdac_stream *fe_hstream;
 	struct snd_soc_dpcm *dpcm;
 
 	for_each_dpcm_fe(rtd, dir, dpcm) {
 		fe_substream = snd_soc_dpcm_get_substream(dpcm->fe, dir);
-		fe_hstream = fe_substream->runtime->private_data;
+		s = fe_substream->runtime->private_data;
+		fe_hstream = s->hstream;
 		if (fe_hstream->stream_tag == stream_tag)
 			return true;
 	}
@@ -199,7 +201,8 @@ static int hda_link_hw_params(struct snd_pcm_substream *substream,
 			      struct snd_pcm_hw_params *params,
 			      struct snd_soc_dai *dai)
 {
-	struct hdac_stream *hstream = substream->runtime->private_data;
+	struct sof_stream *s = substream->runtime->private_data;
+	struct hdac_stream *hstream = s->hstream;
 	struct hdac_bus *bus = hstream->bus;
 	struct hdac_ext_stream *link_dev;
 	struct snd_soc_pcm_runtime *rtd = snd_pcm_substream_chip(substream);
@@ -284,13 +287,15 @@ static int hda_link_pcm_trigger(struct snd_pcm_substream *substream,
 				snd_soc_dai_get_dma_data(dai, substream);
 	struct sof_intel_hda_stream *hda_stream;
 	struct snd_soc_pcm_runtime *rtd;
+	struct sof_stream *s;
 	struct hdac_ext_link *link;
 	struct hdac_stream *hstream;
 	struct hdac_bus *bus;
 	int stream_tag;
 	int ret;
 
-	hstream = substream->runtime->private_data;
+	s = substream->runtime->private_data;
+	hstream = s->hstream;
 	bus = hstream->bus;
 	rtd = snd_pcm_substream_chip(substream);
 
@@ -345,6 +350,7 @@ static int hda_link_hw_free(struct snd_pcm_substream *substream,
 			    struct snd_soc_dai *dai)
 {
 	unsigned int stream_tag;
+	struct sof_stream *s = substream->runtime->private_data;
 	struct sof_intel_hda_stream *hda_stream;
 	struct hdac_bus *bus;
 	struct hdac_ext_link *link;
@@ -353,7 +359,7 @@ static int hda_link_hw_free(struct snd_pcm_substream *substream,
 	struct hdac_ext_stream *link_dev;
 	int ret;
 
-	hstream = substream->runtime->private_data;
+	hstream = s->hstream;
 	bus = hstream->bus;
 	rtd = snd_pcm_substream_chip(substream);
 	link_dev = snd_soc_dai_get_dma_data(dai, substream);
