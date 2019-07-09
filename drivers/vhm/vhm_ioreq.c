@@ -267,7 +267,7 @@ EXPORT_SYMBOL_GPL(acrn_ioreq_create_client);
 
 void acrn_ioreq_clear_request(struct vhm_vm *vm)
 {
-	struct ioreq_client *client;
+	struct ioreq_client *client = NULL;
 	struct list_head *pos;
 	bool has_pending = false;
 	int retry_cnt = 10;
@@ -295,7 +295,7 @@ void acrn_ioreq_clear_request(struct vhm_vm *vm)
 			schedule_timeout_interruptible(HZ / 100);
 	} while (has_pending && --retry_cnt > 0);
 
-	if (retry_cnt == 0)
+	if (client && retry_cnt == 0)
 		pr_warn("ioreq client[%d] cannot flush pending request!\n",
 				client->id);
 
