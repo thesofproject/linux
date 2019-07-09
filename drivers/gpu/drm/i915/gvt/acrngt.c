@@ -64,40 +64,17 @@ static DEFINE_MUTEX(acrn_gvt_sysfs_lock);
 struct gvt_acrngt acrngt_priv;
 const struct intel_gvt_ops *intel_gvt_ops;
 
-static void disable_domu_plane(int pipe, int plane)
+static void acrngt_instance_destroy(struct intel_vgpu *vgpu)
 {
-	struct drm_i915_private *dev_priv = acrngt_priv.gvt->dev_priv;
+	struct acrngt_hvm_dev *info;
 
-	I915_WRITE(PLANE_CTL(pipe, plane), 0);
+	info = (struct acrngt_hvm_dev *)vgpu->handle;
 
-	I915_WRITE(PLANE_SURF(pipe, plane), 0);
-	POSTING_READ(PLANE_SURF(pipe, plane));
-}
+	if (info && info->emulation_thread != NULL)
+		kthread_stop(info->emulation_thread);
 
-void acrngt_instance_destroy(struct intel_vgpu *vgpu)
-{
-	int pipe, plane;
-	struct acrngt_hvm_dev *info = NULL;
-	struct intel_gvt *gvt = acrngt_priv.gvt;
-
-	if (vgpu) {
-		info = (struct acrngt_hvm_dev *)vgpu->handle;
-
-		if (info && info->emulation_thread != NULL)
-			kthread_stop(info->emulation_thread);
-
-                for_each_pipe(gvt->dev_priv, pipe) {
-                        for_each_universal_plane(gvt->dev_priv, pipe, plane) {
-                                if (gvt->pipe_info[pipe].plane_owner[plane] ==
-								vgpu->id) {
-					disable_domu_plane(pipe, plane);
-                                }
-                        }
-                }
-
-		intel_gvt_ops->vgpu_deactivate(vgpu);
-		intel_gvt_ops->vgpu_destroy(vgpu);
-	}
+	intel_gvt_ops->vgpu_deactivate(vgpu);
+	intel_gvt_ops->vgpu_destroy(vgpu);
 
 	if (info) {
 		gvt_dbg_core("destroy vgpu instance, vm id: %d, client %d",
@@ -108,6 +85,8 @@ void acrngt_instance_destroy(struct intel_vgpu *vgpu)
 
 		if (info->vm)
 			put_vm(info->vm);
+
+		vgpu->handle = 0;
 
 		kfree(info);
 	}
@@ -271,7 +250,7 @@ static int acrngt_emulation_thread(void *priv)
 				atomic_set(&req->processed, REQ_STATE_COMPLETE);
 				/* complete request */
 				if (acrn_ioreq_complete_request(info->client,
-						vcpu))
+								vcpu, req))
 					gvt_err("failed complete request\n");
 			}
 		}
@@ -538,33 +517,11 @@ static ssize_t acrngt_sysfs_instance_manage(struct kobject *kobj,
 	return rc < 0 ? rc : count;
 }
 
-static ssize_t show_plane_owner(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
-{
-	return sprintf(buf, "Planes:\nPipe A: %d %d %d %d\n"
-				"Pipe B: %d %d %d %d\nPipe C: %d %d %d\n",
-		acrngt_priv.gvt->pipe_info[PIPE_A].plane_owner[PLANE_PRIMARY],
-		acrngt_priv.gvt->pipe_info[PIPE_A].plane_owner[PLANE_SPRITE0],
-		acrngt_priv.gvt->pipe_info[PIPE_A].plane_owner[PLANE_SPRITE1],
-		acrngt_priv.gvt->pipe_info[PIPE_A].plane_owner[PLANE_SPRITE2],
-		acrngt_priv.gvt->pipe_info[PIPE_B].plane_owner[PLANE_PRIMARY],
-		acrngt_priv.gvt->pipe_info[PIPE_B].plane_owner[PLANE_SPRITE0],
-		acrngt_priv.gvt->pipe_info[PIPE_B].plane_owner[PLANE_SPRITE1],
-		acrngt_priv.gvt->pipe_info[PIPE_B].plane_owner[PLANE_SPRITE2],
-		acrngt_priv.gvt->pipe_info[PIPE_C].plane_owner[PLANE_PRIMARY],
-		acrngt_priv.gvt->pipe_info[PIPE_C].plane_owner[PLANE_SPRITE0],
-		acrngt_priv.gvt->pipe_info[PIPE_C].plane_owner[PLANE_SPRITE1]);
-}
-
 static struct kobj_attribute acrngt_instance_attr =
 __ATTR(create_gvt_instance, 0220, NULL, acrngt_sysfs_instance_manage);
 
-static struct kobj_attribute plane_owner_attr =
-__ATTR(plane_owner_show, 0440, show_plane_owner, NULL);
-
 static struct attribute *acrngt_ctrl_attrs[] = {
 	&acrngt_instance_attr.attr,
-	&plane_owner_attr.attr,
 	NULL,   /* need to NULL terminate the list of attributes */
 };
 
@@ -573,7 +530,7 @@ static struct kobj_type acrngt_ctrl_ktype = {
 	.default_attrs = acrngt_ctrl_attrs,
 };
 
-int acrngt_sysfs_init(struct intel_gvt *gvt)
+static int acrngt_sysfs_init(struct intel_gvt *gvt)
 {
 	int ret;
 
@@ -633,7 +590,7 @@ static int acrngt_host_init(struct device *dev, void *gvt, const void *ops)
 	return ret;
 }
 
-static void acrngt_host_exit(struct device *dev, void *gvt)
+static void acrngt_host_exit(struct device *dev)
 {
 	acrngt_sysfs_del();
 	acrngt_priv.gvt = NULL;
@@ -645,7 +602,7 @@ static int acrngt_attach_vgpu(void *vgpu, unsigned long *handle)
 	return 0;
 }
 
-static void acrngt_detach_vgpu(unsigned long handle)
+static void acrngt_detach_vgpu(void *vgpu)
 {
 	return;
 }
@@ -831,15 +788,6 @@ static int acrngt_set_trap_area(unsigned long handle, u64 start,
 	return ret;
 }
 
-static int acrngt_dom0_ready(void)
-{
-	char *env[] = {"GVT_DOM0_READY=1", NULL};
-	if(!acrn_gvt_ctrl_kobj)
-		return 0;
-	gvt_dbg_core("acrngt: Dom 0 ready to accept Dom U guests\n");
-	return kobject_uevent_env(acrn_gvt_ctrl_kobj, KOBJ_ADD, env);
-}
-
 static int acrngt_dma_map_guest_page(unsigned long handle, unsigned long gfn,
 				  unsigned long size, dma_addr_t *dma_addr)
 {
@@ -857,7 +805,6 @@ static void acrngt_dma_unmap_guest_page(unsigned long handle,
 }
 
 static struct intel_gvt_mpt acrn_gvt_mpt = {
-	//.detect_host = acrngt_detect_host,
 	.type = INTEL_GVT_HYPERVISOR_ACRN,
 	.host_init = acrngt_host_init,
 	.host_exit = acrngt_host_exit,
@@ -874,7 +821,6 @@ static struct intel_gvt_mpt acrn_gvt_mpt = {
         .dma_map_guest_page = acrngt_dma_map_guest_page,
         .dma_unmap_guest_page = acrngt_dma_unmap_guest_page,
 	.set_trap_area = acrngt_set_trap_area,
-	.dom0_ready = acrngt_dom0_ready,
 };
 
 static int __init acrngt_init(void)

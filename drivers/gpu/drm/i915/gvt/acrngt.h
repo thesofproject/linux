@@ -76,6 +76,5 @@ static ssize_t acrngt_sysfs_vgpu_id(struct kobject *kobj,
 
 struct intel_vgpu *acrngt_instance_create(domid_t vm_id,
 		struct intel_vgpu_type *type);
-void acrngt_instance_destroy(struct intel_vgpu *vgpu);
 
 #endif
