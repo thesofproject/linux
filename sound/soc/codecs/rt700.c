@@ -1128,8 +1128,35 @@ static int rt700_set_bias_level(struct snd_soc_component *component,
 	return 0;
 }
 
+#ifdef CONFIG_PM
+static int rt700_suspend(struct snd_soc_component *component)
+{
+	struct rt700_priv *rt700 = snd_soc_component_get_drvdata(component);
+
+	dev_err(component->dev, "in %s, disabling inits\n", __func__);
+
+	rt700->hw_init = 0;
+
+	return 0;
+}
+
+static int rt700_resume(struct snd_soc_component *component)
+{
+	//struct rt700_priv *rt700 = snd_soc_component_get_drvdata(component);
+
+	dev_err(component->dev, "in %s, nothing to do\n", __func__);
+
+	return 0;
+}
+#else
+#define rt700_suspend NULL
+#define rt700_resume  NULL
+#endif
+
 static const struct snd_soc_component_driver soc_codec_dev_rt700 = {
 	.set_bias_level = rt700_set_bias_level,
+	.suspend	= rt700_suspend,
+	.resume		= rt700_resume,
 	.controls = rt700_snd_controls,
 	.num_controls = ARRAY_SIZE(rt700_snd_controls),
 	.dapm_widgets = rt700_dapm_widgets,
