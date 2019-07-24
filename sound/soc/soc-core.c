@@ -1768,7 +1768,8 @@ static void __soc_setup_card_name(char *name, int len,
 	}
 }
 
-static void soc_cleanup_card_resources(struct snd_soc_card *card)
+static void soc_cleanup_card_resources(struct snd_soc_card *card,
+				       int card_probed)
 {
 	struct snd_soc_pcm_runtime *rtd, *n;
 
@@ -1795,17 +1796,19 @@ static void soc_cleanup_card_resources(struct snd_soc_card *card)
 	soc_cleanup_card_debugfs(card);
 
 	/* remove the card */
-	if (card->remove)
+	if (card_probed && card->remove)
 		card->remove(card);
 }
 
 static void snd_soc_unbind_card(struct snd_soc_card *card, bool unregister)
 {
 	if (card->instantiated) {
+		int card_probed = 1;
+
 		card->instantiated = false;
 		snd_soc_flush_all_delayed_work(card);
 
-		soc_cleanup_card_resources(card);
+		soc_cleanup_card_resources(card, card_probed);
 		if (!unregister)
 			list_add(&card->list, &unbind_card_list);
 	} else {
@@ -1819,7 +1822,7 @@ static int snd_soc_bind_card(struct snd_soc_card *card)
 	struct snd_soc_pcm_runtime *rtd;
 	struct snd_soc_component *component;
 	struct snd_soc_dai_link *dai_link;
-	int ret, i;
+	int ret, i, card_probed = 0;
 
 	mutex_lock(&client_mutex);
 	mutex_lock_nested(&card->mutex, SND_SOC_CARD_CLASS_INIT);
@@ -1871,6 +1874,7 @@ static int snd_soc_bind_card(struct snd_soc_card *card)
 		ret = card->probe(card);
 		if (ret < 0)
 			goto probe_end;
+		card_probed = 1;
 	}
 
 	/* probe all components used by DAI links on this card */
@@ -1939,6 +1943,7 @@ static int snd_soc_bind_card(struct snd_soc_card *card)
 			goto probe_end;
 		}
 	}
+	card_probed = 1;
 
 	snd_soc_dapm_new_widgets(card);
 
@@ -1960,7 +1965,7 @@ static int snd_soc_bind_card(struct snd_soc_card *card)
 
 probe_end:
 	if (ret < 0)
-		soc_cleanup_card_resources(card);
+		soc_cleanup_card_resources(card, card_probed);
 
 	mutex_unlock(&card->mutex);
 	mutex_unlock(&client_mutex);
