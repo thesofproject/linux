@@ -559,7 +559,8 @@ static void remove_link(struct snd_soc_component *comp,
 	if (card->remove_dai_link)
 		card->remove_dai_link(card, link);
 
-	snd_soc_remove_dai_link(card, link);
+	snd_soc_remove_pcm_runtime(card,
+			snd_soc_get_pcm_runtime(card, link));
 	kfree(link);
 }
 
