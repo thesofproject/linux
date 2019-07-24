@@ -541,6 +541,7 @@ static void remove_link(struct snd_soc_component *comp,
 {
 	struct snd_soc_dai_link *link =
 		container_of(dobj, struct snd_soc_dai_link, dobj);
+	struct snd_soc_card *card = comp->card;
 
 	if (pass != SOC_TPLG_PASS_PCM_DAI)
 		return;
@@ -553,7 +554,12 @@ static void remove_link(struct snd_soc_component *comp,
 	kfree(link->cpus->dai_name);
 
 	list_del(&dobj->list);
-	snd_soc_remove_dai_link(comp->card, link);
+
+	/* Notify the machine driver */
+	if (card->remove_dai_link)
+		card->remove_dai_link(card, link);
+
+	snd_soc_remove_dai_link(card, link);
 	kfree(link);
 }
 
@@ -1889,6 +1895,7 @@ static int soc_tplg_fe_link_create(struct soc_tplg *tplg,
 {
 	struct snd_soc_dai_link *link;
 	struct snd_soc_dai_link_component *dlc;
+	struct snd_soc_card *card = tplg->comp->card;
 	int ret;
 
 	/* link + cpu + codec + platform */
@@ -1945,7 +1952,11 @@ static int soc_tplg_fe_link_create(struct soc_tplg *tplg,
 	link->dobj.type = SND_SOC_DOBJ_DAI_LINK;
 	list_add(&link->dobj.list, &tplg->comp->dobj_list);
 
-	snd_soc_add_dai_link(tplg->comp->card, link);
+	/* Notify the machine driver */
+	if (card->add_dai_link)
+		card->add_dai_link(card, link);
+
+	snd_soc_add_dai_link(card, link);
 	return 0;
 }
 
