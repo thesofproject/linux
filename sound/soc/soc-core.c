@@ -2823,8 +2823,10 @@ static void snd_soc_try_rebind_card(void)
 
 static void snd_soc_del_component(struct snd_soc_component *component)
 {
+	mutex_lock(&client_mutex);
 	snd_soc_unregister_dais(component);
 	snd_soc_component_del(component);
+	mutex_unlock(&client_mutex);
 }
 
 int snd_soc_add_component(struct device *dev,
@@ -2887,29 +2889,16 @@ EXPORT_SYMBOL_GPL(snd_soc_register_component);
  *
  * @dev: The device to unregister
  */
-static int __snd_soc_unregister_component(struct device *dev)
-{
-	struct snd_soc_component *component;
-	int found = 0;
-
-	mutex_lock(&client_mutex);
-	for_each_component(component) {
-		if (dev != component->dev)
-			continue;
-
-		snd_soc_del_component(component);
-		found = 1;
-		break;
-	}
-	mutex_unlock(&client_mutex);
-
-	return found;
-}
-
 void snd_soc_unregister_component(struct device *dev)
 {
-	while (__snd_soc_unregister_component(dev))
-		;
+	struct snd_soc_component *component;
+
+	while (1) {
+		component = snd_soc_lookup_component(dev, NULL);
+		if (!component)
+			break;
+		snd_soc_del_component(component);
+	}
 }
 EXPORT_SYMBOL_GPL(snd_soc_unregister_component);
 
