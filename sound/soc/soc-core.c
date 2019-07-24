@@ -382,16 +382,17 @@ struct snd_soc_component *snd_soc_lookup_component(struct device *dev,
 }
 EXPORT_SYMBOL_GPL(snd_soc_lookup_component);
 
-struct snd_soc_pcm_runtime *snd_soc_get_pcm_runtime(struct snd_soc_card *card,
-						    const char *dai_link)
+struct snd_soc_pcm_runtime
+*snd_soc_get_pcm_runtime(struct snd_soc_card *card,
+			 struct snd_soc_dai_link *dai_link)
 {
 	struct snd_soc_pcm_runtime *rtd;
 
 	for_each_card_rtds(card, rtd) {
-		if (!strcmp(rtd->dai_link->name, dai_link))
+		if (rtd->dai_link == dai_link)
 			return rtd;
 	}
-	dev_dbg(card->dev, "ASoC: failed to find rtd %s\n", dai_link);
+	dev_dbg(card->dev, "ASoC: failed to find rtd %s\n", dai_link->name);
 	return NULL;
 }
 EXPORT_SYMBOL_GPL(snd_soc_get_pcm_runtime);
@@ -1043,7 +1044,7 @@ void snd_soc_remove_dai_link(struct snd_soc_card *card,
 
 	lockdep_assert_held(&client_mutex);
 
-	rtd = snd_soc_get_pcm_runtime(card, dai_link->name);
+	rtd = snd_soc_get_pcm_runtime(card, dai_link);
 	if (rtd)
 		soc_free_pcm_runtime(rtd);
 }
