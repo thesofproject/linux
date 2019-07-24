@@ -2870,8 +2870,6 @@ static int __snd_soc_unregister_component(struct device *dev)
 		if (dev != component->dev)
 			continue;
 
-		snd_soc_tplg_component_remove(component,
-					      SND_SOC_TPLG_INDEX_ALL);
 		snd_soc_component_del_unlocked(component);
 		found = 1;
 		break;
