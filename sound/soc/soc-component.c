@@ -20,6 +20,22 @@ static inline int _soc_component_err(struct snd_soc_component *component,
 	return ret;
 }
 
+int snd_soc_component_initialize(struct snd_soc_component *component,
+				 const struct snd_soc_component_driver *driver,
+				 struct device *dev, const char *name)
+{
+	INIT_LIST_HEAD(&component->dai_list);
+	INIT_LIST_HEAD(&component->dobj_list);
+	INIT_LIST_HEAD(&component->card_list);
+	mutex_init(&component->io_mutex);
+
+	component->name		= name;
+	component->dev		= dev;
+	component->driver	= driver;
+
+	return 0;
+}
+
 /**
  * snd_soc_component_set_sysclk - configure COMPONENT system or master clock.
  * @component: COMPONENT
