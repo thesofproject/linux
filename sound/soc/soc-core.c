@@ -2611,7 +2611,8 @@ static struct snd_soc_dai *soc_add_dai(struct snd_soc_component *component,
  * will be freed in the component cleanup.
  */
 int snd_soc_register_dai(struct snd_soc_component *component,
-			 struct snd_soc_dai_driver *dai_drv)
+			 struct snd_soc_dai_driver *dai_drv,
+			 bool legacy_dai_naming)
 {
 	struct snd_soc_dapm_context *dapm =
 		snd_soc_component_get_dapm(component);
@@ -2625,7 +2626,7 @@ int snd_soc_register_dai(struct snd_soc_component *component,
 	}
 
 	lockdep_assert_held(&client_mutex);
-	dai = soc_add_dai(component, dai_drv, false);
+	dai = soc_add_dai(component, dai_drv, legacy_dai_naming);
 	if (!dai)
 		return -ENOMEM;
 

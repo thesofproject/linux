@@ -1327,7 +1327,8 @@ struct snd_soc_dai_link *snd_soc_find_dai_link(struct snd_soc_card *card,
 					       const char *stream_name);
 
 int snd_soc_register_dai(struct snd_soc_component *component,
-	struct snd_soc_dai_driver *dai_drv);
+			 struct snd_soc_dai_driver *dai_drv,
+			 bool legacy_dai_naming);
 
 struct snd_soc_dai *snd_soc_find_dai(
 	const struct snd_soc_dai_link_component *dlc);
