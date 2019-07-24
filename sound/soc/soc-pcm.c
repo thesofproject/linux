@@ -1671,20 +1671,6 @@ int dpcm_be_dai_startup(struct snd_soc_pcm_runtime *fe, int stream)
 	return count;
 }
 
-static void dpcm_init_runtime_hw(struct snd_pcm_runtime *runtime,
-				 struct snd_soc_pcm_stream *stream)
-{
-	runtime->hw.rate_min = stream->rate_min;
-	runtime->hw.rate_max = min_not_zero(stream->rate_max, UINT_MAX);
-	runtime->hw.channels_min = stream->channels_min;
-	runtime->hw.channels_max = stream->channels_max;
-	if (runtime->hw.formats)
-		runtime->hw.formats &= stream->formats;
-	else
-		runtime->hw.formats = stream->formats;
-	runtime->hw.rates = stream->rates;
-}
-
 static void dpcm_runtime_merge_format(struct snd_pcm_substream *substream,
 				      u64 *formats)
 {
@@ -1817,11 +1803,22 @@ static void dpcm_set_fe_runtime(struct snd_pcm_substream *substream)
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
 	struct snd_soc_dai_driver *cpu_dai_drv = cpu_dai->driver;
+	struct snd_soc_pcm_stream *stream;
 
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		dpcm_init_runtime_hw(runtime, &cpu_dai_drv->playback);
+		stream = &cpu_dai_drv->playback;
 	else
-		dpcm_init_runtime_hw(runtime, &cpu_dai_drv->capture);
+		stream = &cpu_dai_drv->capture;
+
+	runtime->hw.rate_min = stream->rate_min;
+	runtime->hw.rate_max = min_not_zero(stream->rate_max, UINT_MAX);
+	runtime->hw.channels_min = stream->channels_min;
+	runtime->hw.channels_max = stream->channels_max;
+	if (runtime->hw.formats)
+		runtime->hw.formats &= stream->formats;
+	else
+		runtime->hw.formats = stream->formats;
+	runtime->hw.rates = stream->rates;
 
 	dpcm_runtime_merge_format(substream, &runtime->hw.formats);
 	dpcm_runtime_merge_chan(substream, &runtime->hw.channels_min,
