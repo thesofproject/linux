@@ -31,7 +31,7 @@ extern const struct snd_soc_dai_ops mtk_afe_fe_ops;
 
 int mtk_dynamic_irq_acquire(struct mtk_base_afe *afe);
 int mtk_dynamic_irq_release(struct mtk_base_afe *afe, int irq_id);
-int mtk_afe_dai_suspend(struct snd_soc_dai *dai);
-int mtk_afe_dai_resume(struct snd_soc_dai *dai);
+int mtk_afe_suspend(struct snd_soc_component *component);
+int mtk_afe_resume(struct snd_soc_component *component);
 
 #endif
