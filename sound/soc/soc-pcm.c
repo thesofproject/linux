@@ -574,8 +574,7 @@ static void soc_pcm_init_runtime_hw(struct snd_pcm_substream *substream)
 		 * bailed out on a higher level, since there would be no
 		 * CODEC to support the transfer direction in that case.
 		 */
-		if (!snd_soc_dai_stream_valid(codec_dai,
-					      substream->stream))
+		if (!snd_soc_dai_stream_valid(codec_dai, stream))
 			continue;
 
 		codec_stream = snd_soc_dai_get_pcm_stream(codec_dai, stream);
@@ -1926,7 +1925,7 @@ static int dpcm_fe_dai_startup(struct snd_pcm_substream *fe_substream)
 
 	dpcm_set_fe_update_state(fe, stream, SND_SOC_DPCM_UPDATE_FE);
 
-	ret = dpcm_be_dai_startup(fe, fe_substream->stream);
+	ret = dpcm_be_dai_startup(fe, stream);
 	if (ret < 0) {
 		dev_err(fe->dev,"ASoC: failed to start some BEs %d\n", ret);
 		goto be_err;
@@ -1957,7 +1956,7 @@ static int dpcm_fe_dai_startup(struct snd_pcm_substream *fe_substream)
 	return 0;
 
 unwind:
-	dpcm_be_dai_startup_unwind(fe, fe_substream->stream);
+	dpcm_be_dai_startup_unwind(fe, stream);
 be_err:
 	dpcm_set_fe_update_state(fe, stream, SND_SOC_DPCM_UPDATE_NO);
 	return ret;
@@ -2011,7 +2010,7 @@ static int dpcm_fe_dai_shutdown(struct snd_pcm_substream *substream)
 	dpcm_set_fe_update_state(fe, stream, SND_SOC_DPCM_UPDATE_FE);
 
 	/* shutdown the BEs */
-	dpcm_be_dai_shutdown(fe, substream->stream);
+	dpcm_be_dai_shutdown(fe, stream);
 
 	dev_dbg(fe->dev, "ASoC: close FE %s\n", fe->dai_link->name);
 
@@ -2171,9 +2170,9 @@ static int dpcm_fe_dai_hw_params(struct snd_pcm_substream *substream,
 	mutex_lock_nested(&fe->card->mutex, SND_SOC_CARD_CLASS_RUNTIME);
 	dpcm_set_fe_update_state(fe, stream, SND_SOC_DPCM_UPDATE_FE);
 
-	memcpy(&fe->dpcm[substream->stream].hw_params, params,
+	memcpy(&fe->dpcm[stream].hw_params, params,
 			sizeof(struct snd_pcm_hw_params));
-	ret = dpcm_be_dai_hw_params(fe, substream->stream);
+	ret = dpcm_be_dai_hw_params(fe, stream);
 	if (ret < 0) {
 		dev_err(fe->dev,"ASoC: hw_params BE failed %d\n", ret);
 		goto out;
@@ -2327,12 +2326,12 @@ static int dpcm_fe_dai_do_trigger(struct snd_pcm_substream *substream, int cmd)
 			goto out;
 		}
 
-		ret = dpcm_be_dai_trigger(fe, substream->stream, cmd);
+		ret = dpcm_be_dai_trigger(fe, stream, cmd);
 		break;
 	case SND_SOC_DPCM_TRIGGER_POST:
 		/* call trigger on the frontend after the backend. */
 
-		ret = dpcm_be_dai_trigger(fe, substream->stream, cmd);
+		ret = dpcm_be_dai_trigger(fe, stream, cmd);
 		if (ret < 0) {
 			dev_err(fe->dev,"ASoC: trigger FE failed %d\n", ret);
 			goto out;
@@ -2454,7 +2453,7 @@ static int dpcm_fe_dai_prepare(struct snd_pcm_substream *substream)
 		goto out;
 	}
 
-	ret = dpcm_be_dai_prepare(fe, substream->stream);
+	ret = dpcm_be_dai_prepare(fe, stream);
 	if (ret < 0)
 		goto out;
 
