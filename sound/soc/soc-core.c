@@ -946,19 +946,6 @@ struct snd_soc_dai_link *snd_soc_find_dai_link(struct snd_soc_card *card,
 }
 EXPORT_SYMBOL_GPL(snd_soc_find_dai_link);
 
-static bool soc_is_dai_link_bound(struct snd_soc_card *card,
-		struct snd_soc_dai_link *dai_link)
-{
-	struct snd_soc_pcm_runtime *rtd;
-
-	for_each_card_rtds(card, rtd) {
-		if (rtd->dai_link == dai_link)
-			return true;
-	}
-
-	return false;
-}
-
 static int soc_dai_link_sanity_check(struct snd_soc_card *card,
 				     struct snd_soc_dai_link *link)
 {
@@ -1109,12 +1096,6 @@ int snd_soc_add_dai_link(struct snd_soc_card *card,
 		return ret;
 
 	dev_dbg(card->dev, "ASoC: binding %s\n", dai_link->name);
-
-	if (soc_is_dai_link_bound(card, dai_link)) {
-		dev_dbg(card->dev, "ASoC: dai link %s already bound\n",
-			dai_link->name);
-		return 0;
-	}
 
 	rtd = soc_new_pcm_runtime(card, dai_link);
 	if (!rtd)
