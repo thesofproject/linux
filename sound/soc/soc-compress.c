@@ -25,10 +25,9 @@ static int soc_compr_components_open(struct snd_compr_stream *cstream,
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_soc_component *component;
-	struct snd_soc_rtdcom_list *rtdcom;
-	int ret;
+	int i, ret;
 
-	for_each_rtd_components(rtd, rtdcom, component) {
+	for_each_rtd_components(rtd, i, component) {
 		if (!component->driver->compr_ops ||
 		    !component->driver->compr_ops->open)
 			continue;
@@ -53,9 +52,9 @@ static int soc_compr_components_free(struct snd_compr_stream *cstream,
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_soc_component *component;
-	struct snd_soc_rtdcom_list *rtdcom;
+	int i;
 
-	for_each_rtd_components(rtd, rtdcom, component) {
+	for_each_rtd_components(rtd, i, component) {
 		if (component == last)
 			break;
 
@@ -346,10 +345,9 @@ static int soc_compr_components_trigger(struct snd_compr_stream *cstream,
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_soc_component *component;
-	struct snd_soc_rtdcom_list *rtdcom;
-	int ret;
+	int i, ret;
 
-	for_each_rtd_components(rtd, rtdcom, component) {
+	for_each_rtd_components(rtd, i, component) {
 		if (!component->driver->compr_ops ||
 		    !component->driver->compr_ops->trigger)
 			continue;
@@ -449,10 +447,9 @@ static int soc_compr_components_set_params(struct snd_compr_stream *cstream,
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_soc_component *component;
-	struct snd_soc_rtdcom_list *rtdcom;
-	int ret;
+	int i, ret;
 
-	for_each_rtd_components(rtd, rtdcom, component) {
+	for_each_rtd_components(rtd, i, component) {
 		if (!component->driver->compr_ops ||
 		    !component->driver->compr_ops->set_params)
 			continue;
@@ -581,9 +578,8 @@ static int soc_compr_get_params(struct snd_compr_stream *cstream,
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_soc_component *component;
-	struct snd_soc_rtdcom_list *rtdcom;
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
-	int ret = 0;
+	int i, ret = 0;
 
 	mutex_lock_nested(&rtd->card->pcm_mutex, rtd->card->pcm_subclass);
 
@@ -593,7 +589,7 @@ static int soc_compr_get_params(struct snd_compr_stream *cstream,
 			goto err;
 	}
 
-	for_each_rtd_components(rtd, rtdcom, component) {
+	for_each_rtd_components(rtd, i, component) {
 		if (!component->driver->compr_ops ||
 		    !component->driver->compr_ops->get_params)
 			continue;
@@ -612,12 +608,11 @@ static int soc_compr_get_caps(struct snd_compr_stream *cstream,
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_soc_component *component;
-	struct snd_soc_rtdcom_list *rtdcom;
-	int ret = 0;
+	int i, ret = 0;
 
 	mutex_lock_nested(&rtd->card->pcm_mutex, rtd->card->pcm_subclass);
 
-	for_each_rtd_components(rtd, rtdcom, component) {
+	for_each_rtd_components(rtd, i, component) {
 		if (!component->driver->compr_ops ||
 		    !component->driver->compr_ops->get_caps)
 			continue;
@@ -635,12 +630,11 @@ static int soc_compr_get_codec_caps(struct snd_compr_stream *cstream,
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_soc_component *component;
-	struct snd_soc_rtdcom_list *rtdcom;
-	int ret = 0;
+	int i, ret = 0;
 
 	mutex_lock_nested(&rtd->card->pcm_mutex, rtd->card->pcm_subclass);
 
-	for_each_rtd_components(rtd, rtdcom, component) {
+	for_each_rtd_components(rtd, i, component) {
 		if (!component->driver->compr_ops ||
 		    !component->driver->compr_ops->get_codec_caps)
 			continue;
@@ -658,9 +652,8 @@ static int soc_compr_ack(struct snd_compr_stream *cstream, size_t bytes)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_soc_component *component;
-	struct snd_soc_rtdcom_list *rtdcom;
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
-	int ret = 0;
+	int i, ret = 0;
 
 	mutex_lock_nested(&rtd->card->pcm_mutex, rtd->card->pcm_subclass);
 
@@ -670,7 +663,7 @@ static int soc_compr_ack(struct snd_compr_stream *cstream, size_t bytes)
 			goto err;
 	}
 
-	for_each_rtd_components(rtd, rtdcom, component) {
+	for_each_rtd_components(rtd, i, component) {
 		if (!component->driver->compr_ops ||
 		    !component->driver->compr_ops->ack)
 			continue;
@@ -690,8 +683,7 @@ static int soc_compr_pointer(struct snd_compr_stream *cstream,
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_soc_component *component;
-	struct snd_soc_rtdcom_list *rtdcom;
-	int ret = 0;
+	int i, ret = 0;
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
 
 	mutex_lock_nested(&rtd->card->pcm_mutex, rtd->card->pcm_subclass);
@@ -699,7 +691,7 @@ static int soc_compr_pointer(struct snd_compr_stream *cstream,
 	if (cpu_dai->driver->cops && cpu_dai->driver->cops->pointer)
 		cpu_dai->driver->cops->pointer(cstream, tstamp, cpu_dai);
 
-	for_each_rtd_components(rtd, rtdcom, component) {
+	for_each_rtd_components(rtd, i, component) {
 		if (!component->driver->compr_ops ||
 		    !component->driver->compr_ops->pointer)
 			continue;
@@ -717,12 +709,11 @@ static int soc_compr_copy(struct snd_compr_stream *cstream,
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_soc_component *component;
-	struct snd_soc_rtdcom_list *rtdcom;
-	int ret = 0;
+	int i, ret = 0;
 
 	mutex_lock_nested(&rtd->card->pcm_mutex, rtd->card->pcm_subclass);
 
-	for_each_rtd_components(rtd, rtdcom, component) {
+	for_each_rtd_components(rtd, i, component) {
 		if (!component->driver->compr_ops ||
 		    !component->driver->compr_ops->copy)
 			continue;
@@ -740,9 +731,8 @@ static int soc_compr_set_metadata(struct snd_compr_stream *cstream,
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_soc_component *component;
-	struct snd_soc_rtdcom_list *rtdcom;
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
-	int ret;
+	int i, ret;
 
 	if (cpu_dai->driver->cops && cpu_dai->driver->cops->set_metadata) {
 		ret = cpu_dai->driver->cops->set_metadata(cstream, metadata, cpu_dai);
@@ -750,7 +740,7 @@ static int soc_compr_set_metadata(struct snd_compr_stream *cstream,
 			return ret;
 	}
 
-	for_each_rtd_components(rtd, rtdcom, component) {
+	for_each_rtd_components(rtd, i, component) {
 		if (!component->driver->compr_ops ||
 		    !component->driver->compr_ops->set_metadata)
 			continue;
@@ -769,9 +759,8 @@ static int soc_compr_get_metadata(struct snd_compr_stream *cstream,
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_soc_component *component;
-	struct snd_soc_rtdcom_list *rtdcom;
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
-	int ret;
+	int i, ret;
 
 	if (cpu_dai->driver->cops && cpu_dai->driver->cops->get_metadata) {
 		ret = cpu_dai->driver->cops->get_metadata(cstream, metadata, cpu_dai);
@@ -779,7 +768,7 @@ static int soc_compr_get_metadata(struct snd_compr_stream *cstream,
 			return ret;
 	}
 
-	for_each_rtd_components(rtd, rtdcom, component) {
+	for_each_rtd_components(rtd, i, component) {
 		if (!component->driver->compr_ops ||
 		    !component->driver->compr_ops->get_metadata)
 			continue;
@@ -832,7 +821,6 @@ static struct snd_compr_ops soc_compr_dyn_ops = {
 int snd_soc_new_compress(struct snd_soc_pcm_runtime *rtd, int num)
 {
 	struct snd_soc_component *component;
-	struct snd_soc_rtdcom_list *rtdcom;
 	struct snd_soc_dai *codec_dai = rtd->codec_dai;
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
 	struct snd_compr *compr;
@@ -840,6 +828,7 @@ int snd_soc_new_compress(struct snd_soc_pcm_runtime *rtd, int num)
 	char new_name[64];
 	int ret = 0, direction = 0;
 	int playback = 0, capture = 0;
+	int i;
 
 	if (rtd->num_codecs > 1) {
 		dev_err(rtd->card->dev,
@@ -908,7 +897,7 @@ int snd_soc_new_compress(struct snd_soc_pcm_runtime *rtd, int num)
 		memcpy(compr->ops, &soc_compr_ops, sizeof(soc_compr_ops));
 	}
 
-	for_each_rtd_components(rtd, rtdcom, component) {
+	for_each_rtd_components(rtd, i, component) {
 		if (!component->driver->compr_ops ||
 		    !component->driver->compr_ops->copy)
 			continue;
