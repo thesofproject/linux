@@ -2481,32 +2481,6 @@ disconnect:
 	return ret;
 }
 
-static int dpcm_run_new_update(struct snd_soc_pcm_runtime *fe, int stream)
-{
-	int ret;
-
-	dpcm_set_fe_update_state(fe, stream, SND_SOC_DPCM_UPDATE_BE);
-	ret = dpcm_run_update_startup(fe, stream);
-	if (ret < 0)
-		dev_err(fe->dev, "ASoC: failed to startup some BEs\n");
-	dpcm_set_fe_update_state(fe, stream, SND_SOC_DPCM_UPDATE_NO);
-
-	return ret;
-}
-
-static int dpcm_run_old_update(struct snd_soc_pcm_runtime *fe, int stream)
-{
-	int ret;
-
-	dpcm_set_fe_update_state(fe, stream, SND_SOC_DPCM_UPDATE_BE);
-	ret = dpcm_run_update_shutdown(fe, stream);
-	if (ret < 0)
-		dev_err(fe->dev, "ASoC: failed to shutdown some BEs\n");
-	dpcm_set_fe_update_state(fe, stream, SND_SOC_DPCM_UPDATE_NO);
-
-	return ret;
-}
-
 static int dpcm_fe_runtime_update(struct snd_soc_pcm_runtime *fe,
 				  int new, int stream)
 {
@@ -2543,10 +2517,12 @@ static int dpcm_fe_runtime_update(struct snd_soc_pcm_runtime *fe,
 	/* update any playback paths */
 	count = dpcm_process_paths(fe, stream, &list, new);
 	if (count) {
+		dpcm_set_fe_update_state(fe, stream, SND_SOC_DPCM_UPDATE_BE);
 		if (new)
-			dpcm_run_new_update(fe, stream);
+			dpcm_run_update_startup(fe, stream);
 		else
-			dpcm_run_old_update(fe, stream);
+			dpcm_run_update_shutdown(fe, stream);
+		dpcm_set_fe_update_state(fe, stream, SND_SOC_DPCM_UPDATE_NO);
 
 		dpcm_clear_pending_state(fe, stream);
 		dpcm_be_disconnect(fe, stream);
