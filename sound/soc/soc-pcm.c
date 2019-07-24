@@ -1933,11 +1933,9 @@ static int dpcm_fe_dai_startup(struct snd_pcm_substream *fe_substream)
 		goto unwind;
 	}
 
-	dpcm_set_fe_update_state(fe, stream, SND_SOC_DPCM_UPDATE_NO);
-	return 0;
-
 unwind:
-	dpcm_be_dai_startup_unwind(fe, stream);
+	if (ret < 0)
+		dpcm_be_dai_startup_unwind(fe, stream);
 be_err:
 	dpcm_set_fe_update_state(fe, stream, SND_SOC_DPCM_UPDATE_NO);
 	return ret;
