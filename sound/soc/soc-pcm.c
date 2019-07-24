@@ -205,17 +205,25 @@ static int soc_rtd_startup(struct snd_soc_pcm_runtime *rtd,
 			   struct snd_pcm_substream *substream)
 {
 	if (rtd->dai_link->ops &&
-	    rtd->dai_link->ops->startup)
-		return rtd->dai_link->ops->startup(substream);
+	    rtd->dai_link->ops->startup) {
+		int ret = rtd->dai_link->ops->startup(substream);
+		if (ret < 0)
+			return ret;
+	}
+
+	rtd->started = 1;
 	return 0;
 }
 
 static void soc_rtd_shutdown(struct snd_soc_pcm_runtime *rtd,
 			     struct snd_pcm_substream *substream)
 {
-	if (rtd->dai_link->ops &&
+	if (rtd->started &&
+	    rtd->dai_link->ops &&
 	    rtd->dai_link->ops->shutdown)
 		rtd->dai_link->ops->shutdown(substream);
+
+	rtd->started = 0;
 }
 
 static int soc_rtd_prepare(struct snd_soc_pcm_runtime *rtd,
