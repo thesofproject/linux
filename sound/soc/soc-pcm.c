@@ -2552,12 +2552,60 @@ static int dpcm_run_old_update(struct snd_soc_pcm_runtime *fe, int stream)
 	return ret;
 }
 
-static int soc_dpcm_fe_runtime_update(struct snd_soc_pcm_runtime *fe, int new)
+static int dpcm_fe_runtime_update(struct snd_soc_pcm_runtime *fe,
+				  int new, int stream)
 {
 	struct snd_soc_dai *codec_dai;
 	struct snd_soc_dapm_widget_list *list;
 	int count, paths;
 	int i;
+
+	/* skip if FE doesn't have playback capability */
+	if (!snd_soc_dai_stream_valid(fe->cpu_dai, stream))
+		return 0;
+
+	for_each_rtd_codec_dai(fe, i, codec_dai)
+		if (!snd_soc_dai_stream_valid(codec_dai, stream))
+			return 0;
+
+	/* skip if FE isn't currently playing */
+	if (!fe->cpu_dai->stream_active[stream])
+		return 0;
+
+	for_each_rtd_codec_dai(fe, i, codec_dai)
+		if (!codec_dai->stream_active[stream])
+			return 0;
+
+	paths = dpcm_path_get(fe, stream, &list);
+	if (paths < 0) {
+		dev_warn(fe->dev, "ASoC: %s no valid %s path\n",
+			 fe->dai_link->name,
+			 stream == SNDRV_PCM_STREAM_PLAYBACK ?
+			 "playback" : "capture");
+		return paths;
+	}
+
+	/* update any playback paths */
+	count = dpcm_process_paths(fe, stream, &list, new);
+	if (count) {
+		if (new)
+			dpcm_run_new_update(fe, stream);
+		else
+			dpcm_run_old_update(fe, stream);
+
+		dpcm_clear_pending_state(fe, stream);
+		dpcm_be_disconnect(fe, stream);
+	}
+
+	dpcm_path_put(&list);
+
+	return 0;
+}
+
+static int soc_dpcm_fe_runtime_update(struct snd_soc_pcm_runtime *fe, int new)
+{
+	int stream;
+	int ret;
 
 	if (!fe->dai_link->dynamic)
 		return 0;
@@ -2570,76 +2618,11 @@ static int soc_dpcm_fe_runtime_update(struct snd_soc_pcm_runtime *fe, int new)
 	dev_dbg(fe->dev, "ASoC: DPCM %s runtime update for FE %s\n",
 		new ? "new" : "old", fe->dai_link->name);
 
-	/* skip if FE doesn't have playback capability */
-	if (!snd_soc_dai_stream_valid(fe->cpu_dai,   SNDRV_PCM_STREAM_PLAYBACK))
-		goto capture;
-	for_each_rtd_codec_dai(fe, i, codec_dai)
-		if (!snd_soc_dai_stream_valid(codec_dai, SNDRV_PCM_STREAM_PLAYBACK))
-			goto capture;
-
-	/* skip if FE isn't currently playing */
-	if (!fe->cpu_dai->stream_active[SNDRV_PCM_STREAM_PLAYBACK])
-		goto capture;
-	for_each_rtd_codec_dai(fe, i, codec_dai)
-		if (!codec_dai->stream_active[SNDRV_PCM_STREAM_PLAYBACK])
-			goto capture;
-
-	paths = dpcm_path_get(fe, SNDRV_PCM_STREAM_PLAYBACK, &list);
-	if (paths < 0) {
-		dev_warn(fe->dev, "ASoC: %s no valid %s path\n",
-			 fe->dai_link->name,  "playback");
-		return paths;
+	for_each_pcm_stream(stream) {
+		ret = dpcm_fe_runtime_update(fe, new, stream);
+		if (ret < 0)
+			return ret;
 	}
-
-	/* update any playback paths */
-	count = dpcm_process_paths(fe, SNDRV_PCM_STREAM_PLAYBACK, &list, new);
-	if (count) {
-		if (new)
-			dpcm_run_new_update(fe, SNDRV_PCM_STREAM_PLAYBACK);
-		else
-			dpcm_run_old_update(fe, SNDRV_PCM_STREAM_PLAYBACK);
-
-		dpcm_clear_pending_state(fe, SNDRV_PCM_STREAM_PLAYBACK);
-		dpcm_be_disconnect(fe, SNDRV_PCM_STREAM_PLAYBACK);
-	}
-
-	dpcm_path_put(&list);
-
-capture:
-	/* skip if FE doesn't have capture capability */
-	if (!snd_soc_dai_stream_valid(fe->cpu_dai,   SNDRV_PCM_STREAM_CAPTURE))
-		return 0;
-	for_each_rtd_codec_dai(fe, i, codec_dai)
-		if (!snd_soc_dai_stream_valid(codec_dai, SNDRV_PCM_STREAM_CAPTURE))
-			return 0;
-
-	/* skip if FE isn't currently capturing */
-	if (!fe->cpu_dai->stream_active[SNDRV_PCM_STREAM_CAPTURE])
-		return 0;
-	for_each_rtd_codec_dai(fe, i, codec_dai)
-		if (!codec_dai->stream_active[SNDRV_PCM_STREAM_CAPTURE])
-			return 0;
-
-	paths = dpcm_path_get(fe, SNDRV_PCM_STREAM_CAPTURE, &list);
-	if (paths < 0) {
-		dev_warn(fe->dev, "ASoC: %s no valid %s path\n",
-			 fe->dai_link->name,  "capture");
-		return paths;
-	}
-
-	/* update any old capture paths */
-	count = dpcm_process_paths(fe, SNDRV_PCM_STREAM_CAPTURE, &list, new);
-	if (count) {
-		if (new)
-			dpcm_run_new_update(fe, SNDRV_PCM_STREAM_CAPTURE);
-		else
-			dpcm_run_old_update(fe, SNDRV_PCM_STREAM_CAPTURE);
-
-		dpcm_clear_pending_state(fe, SNDRV_PCM_STREAM_CAPTURE);
-		dpcm_be_disconnect(fe, SNDRV_PCM_STREAM_CAPTURE);
-	}
-
-	dpcm_path_put(&list);
 
 	return 0;
 }
