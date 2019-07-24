@@ -2154,32 +2154,7 @@ int dpcm_be_dai_hw_params(struct snd_soc_pcm_runtime *fe, int stream)
 	}
 
 	if (unwind)
-		goto unwind;
-
-	return 0;
-
-unwind:
-	/* disable any enabled and non active backends */
-	for_each_dpcm_be(fe, stream, dpcm) {
-		struct snd_soc_pcm_runtime *be = dpcm->be;
-		struct snd_pcm_substream *be_substream =
-			snd_soc_dpcm_get_substream(be, stream);
-
-		if (!snd_soc_dpcm_be_can_update(fe, be, stream))
-			continue;
-
-		/* only allow hw_free() if no connected FEs are running */
-		if (!snd_soc_dpcm_can_be_free_stop(fe, be, stream))
-			continue;
-
-		if ((be->dpcm[stream].state != SND_SOC_DPCM_STATE_OPEN) &&
-		   (be->dpcm[stream].state != SND_SOC_DPCM_STATE_HW_PARAMS) &&
-		   (be->dpcm[stream].state != SND_SOC_DPCM_STATE_HW_FREE) &&
-		   (be->dpcm[stream].state != SND_SOC_DPCM_STATE_STOP))
-			continue;
-
-		soc_pcm_hw_free(be_substream);
-	}
+		dpcm_be_dai_hw_free(fe, stream);
 
 	return unwind;
 }
