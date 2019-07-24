@@ -3063,19 +3063,18 @@ static ssize_t dpcm_state_read_file(struct file *file, char __user *user_buf,
 {
 	struct snd_soc_pcm_runtime *fe = file->private_data;
 	ssize_t out_count = PAGE_SIZE, offset = 0, ret = 0;
+	int stream;
 	char *buf;
 
 	buf = kmalloc(out_count, GFP_KERNEL);
 	if (!buf)
 		return -ENOMEM;
 
-	if (snd_soc_dai_stream_valid(fe->cpu_dai, SNDRV_PCM_STREAM_PLAYBACK))
-		offset += dpcm_show_state(fe, SNDRV_PCM_STREAM_PLAYBACK,
-					buf + offset, out_count - offset);
-
-	if (snd_soc_dai_stream_valid(fe->cpu_dai, SNDRV_PCM_STREAM_CAPTURE))
-		offset += dpcm_show_state(fe, SNDRV_PCM_STREAM_CAPTURE,
-					buf + offset, out_count - offset);
+	for_each_pcm_stream(stream)
+		if (snd_soc_dai_stream_valid(fe->cpu_dai, stream))
+			offset += dpcm_show_state(fe, stream,
+						  buf + offset,
+						  out_count - offset);
 
 	ret = simple_read_from_buffer(user_buf, count, ppos, buf, offset);
 
