@@ -297,15 +297,22 @@ int snd_soc_dai_hw_params(struct snd_soc_dai *dai,
 			return soc_dai_err(dai, ret);
 	}
 
+	dai->hw_paramed++;
+
 	return 0;
 }
 
 void snd_soc_dai_hw_free(struct snd_soc_dai *dai,
 			 struct snd_pcm_substream *substream)
 {
+	if (!dai->hw_paramed)
+		return;
+
 	if (dai->driver->ops &&
 	    dai->driver->ops->hw_free)
 		dai->driver->ops->hw_free(substream, dai);
+
+	dai->hw_paramed--;
 }
 
 int snd_soc_dai_startup(struct snd_soc_dai *dai,
