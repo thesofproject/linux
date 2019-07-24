@@ -446,6 +446,7 @@ static struct snd_soc_pcm_runtime *soc_new_pcm_runtime(
 	struct snd_soc_component *component;
 	struct device *dev;
 	int ret;
+	int stream;
 
 	/*
 	 * for rtd->dev
@@ -493,10 +494,10 @@ static struct snd_soc_pcm_runtime *soc_new_pcm_runtime(
 	/*
 	 * rtd remaining settings
 	 */
-	INIT_LIST_HEAD(&rtd->dpcm[SNDRV_PCM_STREAM_PLAYBACK].be_clients);
-	INIT_LIST_HEAD(&rtd->dpcm[SNDRV_PCM_STREAM_CAPTURE].be_clients);
-	INIT_LIST_HEAD(&rtd->dpcm[SNDRV_PCM_STREAM_PLAYBACK].fe_clients);
-	INIT_LIST_HEAD(&rtd->dpcm[SNDRV_PCM_STREAM_CAPTURE].fe_clients);
+	for_each_pcm_stream(stream) {
+		INIT_LIST_HEAD(&rtd->dpcm[stream].be_clients);
+		INIT_LIST_HEAD(&rtd->dpcm[stream].fe_clients);
+	}
 
 	rtd->card = card;
 	rtd->dai_link = dai_link;
@@ -572,17 +573,14 @@ int snd_soc_suspend(struct device *dev)
 	snd_soc_flush_all_delayed_work(card);
 
 	for_each_card_rtds(card, rtd) {
+		int stream;
 
 		if (rtd->dai_link->ignore_suspend)
 			continue;
 
-		snd_soc_dapm_stream_event(rtd,
-					  SNDRV_PCM_STREAM_PLAYBACK,
-					  SND_SOC_DAPM_STREAM_SUSPEND);
-
-		snd_soc_dapm_stream_event(rtd,
-					  SNDRV_PCM_STREAM_CAPTURE,
-					  SND_SOC_DAPM_STREAM_SUSPEND);
+		for_each_pcm_stream(stream)
+			snd_soc_dapm_stream_event(rtd, stream,
+						  SND_SOC_DAPM_STREAM_SUSPEND);
 	}
 
 	/* Recheck all endpoints too, their state is affected by suspend */
@@ -678,17 +676,14 @@ static void soc_resume_deferred(struct work_struct *work)
 	}
 
 	for_each_card_rtds(card, rtd) {
+		int stream;
 
 		if (rtd->dai_link->ignore_suspend)
 			continue;
 
-		snd_soc_dapm_stream_event(rtd,
-					  SNDRV_PCM_STREAM_PLAYBACK,
-					  SND_SOC_DAPM_STREAM_RESUME);
-
-		snd_soc_dapm_stream_event(rtd,
-					  SNDRV_PCM_STREAM_CAPTURE,
-					  SND_SOC_DAPM_STREAM_RESUME);
+		for_each_pcm_stream(stream)
+			snd_soc_dapm_stream_event(rtd, stream,
+						  SND_SOC_DAPM_STREAM_RESUME);
 	}
 
 	/* unmute any active DACs */
