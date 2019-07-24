@@ -350,6 +350,13 @@ struct snd_soc_dai {
 	struct list_head list;
 };
 
+static inline struct snd_soc_pcm_stream *
+snd_soc_dai_get_pcm_stream(const struct snd_soc_dai *dai, int stream)
+{
+	return (stream == SNDRV_PCM_STREAM_PLAYBACK) ?
+		&dai->driver->playback : &dai->driver->capture;
+}
+
 static inline void *snd_soc_dai_get_dma_data(const struct snd_soc_dai *dai,
 					     const struct snd_pcm_substream *ss)
 {
