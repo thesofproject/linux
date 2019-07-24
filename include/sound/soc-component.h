@@ -215,6 +215,8 @@ struct snd_soc_component {
 	const char *debugfs_prefix;
 #endif
 
+	u8 hw_paramed;
+
 	/* bit field */
 	unsigned int suspended:1; /* is in suspend PM state */
 	unsigned int compress_opened:1;
