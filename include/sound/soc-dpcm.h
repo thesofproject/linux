@@ -110,8 +110,6 @@ struct snd_soc_dpcm_runtime {
 	list_for_each_entry(dpcm, &(fe)->dpcm[stream].be_clients, list_be)
 #define for_each_dpcm_be_safe(fe, stream, dpcm, _dpcm)			\
 	list_for_each_entry_safe(dpcm, _dpcm, &(fe)->dpcm[stream].be_clients, list_be)
-#define for_each_dpcm_be_rollback(fe, stream, dpcm)			\
-	list_for_each_entry_continue_reverse(dpcm, &(fe)->dpcm[stream].be_clients, list_be)
 
 /* can this BE stop and free */
 int snd_soc_dpcm_can_be_free_stop(struct snd_soc_pcm_runtime *fe,
