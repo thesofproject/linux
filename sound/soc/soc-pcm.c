@@ -1613,6 +1613,7 @@ int dpcm_be_dai_startup(struct snd_soc_pcm_runtime *fe, int stream)
 {
 	struct snd_soc_dpcm *dpcm;
 	int err, count = 0;
+	int unwind = 0;
 
 	/* only startup BE DAIs that are either sinks or sources to this FE DAI */
 	for_each_dpcm_be(fe, stream, dpcm) {
@@ -1658,18 +1659,21 @@ int dpcm_be_dai_startup(struct snd_soc_pcm_runtime *fe, int stream)
 					be->dpcm[stream].state);
 
 			be->dpcm[stream].state = SND_SOC_DPCM_STATE_CLOSE;
-			goto unwind;
+			unwind = err;
 		}
 
 		be->dpcm[stream].state = SND_SOC_DPCM_STATE_OPEN;
 		count++;
 	}
 
+	if (unwind)
+		goto unwind;
+
 	return count;
 
 unwind:
 	/* disable any enabled and non active backends */
-	for_each_dpcm_be_rollback(fe, stream, dpcm) {
+	for_each_dpcm_be(fe, stream, dpcm) {
 		struct snd_soc_pcm_runtime *be = dpcm->be;
 		struct snd_pcm_substream *be_substream =
 			snd_soc_dpcm_get_substream(be, stream);
@@ -1693,7 +1697,7 @@ unwind:
 		be->dpcm[stream].state = SND_SOC_DPCM_STATE_CLOSE;
 	}
 
-	return err;
+	return unwind;
 }
 
 static void dpcm_init_runtime_hw(struct snd_pcm_runtime *runtime,
@@ -2092,7 +2096,8 @@ int dpcm_be_dai_hw_free(struct snd_soc_pcm_runtime *fe, int stream)
 int dpcm_be_dai_hw_params(struct snd_soc_pcm_runtime *fe, int stream)
 {
 	struct snd_soc_dpcm *dpcm;
-	int ret;
+	int ret = 0;
+	int unwind = 0;
 
 	for_each_dpcm_be(fe, stream, dpcm) {
 
@@ -2116,7 +2121,7 @@ int dpcm_be_dai_hw_params(struct snd_soc_pcm_runtime *fe, int stream)
 				dev_err(be->dev,
 					"ASoC: hw_params BE fixup failed %d\n",
 					ret);
-				goto unwind;
+				unwind = ret;
 			}
 		}
 
@@ -2140,16 +2145,20 @@ int dpcm_be_dai_hw_params(struct snd_soc_pcm_runtime *fe, int stream)
 		if (ret < 0) {
 			dev_err(dpcm->be->dev,
 				"ASoC: hw_params BE failed %d\n", ret);
-			goto unwind;
+			unwind = ret;
 		}
 
 		be->dpcm[stream].state = SND_SOC_DPCM_STATE_HW_PARAMS;
 	}
+
+	if (unwind)
+		goto unwind;
+
 	return 0;
 
 unwind:
 	/* disable any enabled and non active backends */
-	for_each_dpcm_be_rollback(fe, stream, dpcm) {
+	for_each_dpcm_be(fe, stream, dpcm) {
 		struct snd_soc_pcm_runtime *be = dpcm->be;
 		struct snd_pcm_substream *be_substream =
 			snd_soc_dpcm_get_substream(be, stream);
@@ -2170,7 +2179,7 @@ unwind:
 		soc_pcm_hw_free(be_substream);
 	}
 
-	return ret;
+	return unwind;
 }
 
 static int dpcm_fe_dai_hw_free(struct snd_pcm_substream *substream)
