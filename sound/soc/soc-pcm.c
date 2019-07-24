@@ -1668,38 +1668,12 @@ int dpcm_be_dai_startup(struct snd_soc_pcm_runtime *fe, int stream)
 		count++;
 	}
 
-	if (unwind)
-		goto unwind;
-
-	return count;
-
-unwind:
-	/* disable any enabled and non active backends */
-	for_each_dpcm_be(fe, stream, dpcm) {
-		struct snd_soc_pcm_runtime *be = dpcm->be;
-		struct snd_pcm_substream *be_substream =
-			snd_soc_dpcm_get_substream(be, stream);
-
-		if (!snd_soc_dpcm_be_can_update(fe, be, stream))
-			continue;
-
-		if (be->dpcm[stream].users == 0)
-			dev_err(be->dev, "ASoC: no users %s at close %d\n",
-				stream ? "capture" : "playback",
-				be->dpcm[stream].state);
-
-		if (--be->dpcm[stream].users != 0)
-			continue;
-
-		if (be->dpcm[stream].state != SND_SOC_DPCM_STATE_OPEN)
-			continue;
-
-		soc_pcm_close(be_substream);
-		be_substream->runtime = NULL;
-		be->dpcm[stream].state = SND_SOC_DPCM_STATE_CLOSE;
+	if (unwind) {
+		dpcm_be_dai_startup_unwind(fe, stream);
+		return unwind;
 	}
 
-	return unwind;
+	return count;
 }
 
 static void dpcm_init_runtime_hw(struct snd_pcm_runtime *runtime,
