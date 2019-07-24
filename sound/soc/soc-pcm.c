@@ -1801,14 +1801,8 @@ static void dpcm_set_fe_runtime(struct snd_pcm_substream *substream)
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
-	struct snd_soc_dai_driver *cpu_dai_drv = cpu_dai->driver;
-	struct snd_soc_pcm_stream *stream;
-
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		stream = &cpu_dai_drv->playback;
-	else
-		stream = &cpu_dai_drv->capture;
+	struct snd_soc_pcm_stream *stream = snd_soc_dai_get_pcm_stream(
+		rtd->cpu_dai, substream->stream);
 
 	runtime->hw.rate_min = stream->rate_min;
 	runtime->hw.rate_max = min_not_zero(stream->rate_max, UINT_MAX);
