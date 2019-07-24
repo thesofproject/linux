@@ -273,34 +273,17 @@ EXPORT_SYMBOL_GPL(snd_soc_pcm_lib_ioctl);
 static int snd_soc_rtdcom_add(struct snd_soc_pcm_runtime *rtd,
 			      struct snd_soc_component *component)
 {
-	struct snd_soc_rtdcom_list *rtdcom;
 	struct snd_soc_component *comp;
+	int i;
 
-	for_each_rtd_components(rtd, rtdcom, comp) {
+	for_each_rtd_components(rtd, i, comp) {
 		/* already connected */
 		if (comp == component)
 			return 0;
 	}
 
-	/*
-	 * created rtdcom here will be freed when rtd->dev was freed.
-	 * see
-	 *	soc_free_pcm_runtime() :: device_unregister(rtd->dev)
-	 */
-	rtdcom = devm_kzalloc(rtd->dev, sizeof(*rtdcom), GFP_KERNEL);
-	if (!rtdcom)
-		return -ENOMEM;
-
-	rtdcom->component = component;
-	INIT_LIST_HEAD(&rtdcom->list);
-
-	/*
-	 * When rtd was freed, created rtdcom here will be
-	 * also freed.
-	 * And we don't need to call list_del(&rtdcom->list)
-	 * when freed, because rtd is also freed.
-	 */
-	list_add_tail(&rtdcom->list, &rtd->component_list);
+	rtd->components[rtd->num_components] = component;
+	rtd->num_components++;
 
 	return 0;
 }
@@ -308,8 +291,8 @@ static int snd_soc_rtdcom_add(struct snd_soc_pcm_runtime *rtd,
 struct snd_soc_component *snd_soc_rtdcom_lookup(struct snd_soc_pcm_runtime *rtd,
 						const char *driver_name)
 {
-	struct snd_soc_rtdcom_list *rtdcom;
 	struct snd_soc_component *component;
+	int i;
 
 	if (!driver_name)
 		return NULL;
@@ -322,7 +305,7 @@ struct snd_soc_component *snd_soc_rtdcom_lookup(struct snd_soc_pcm_runtime *rtd,
 	 * But, if many components which have same driver name are connected
 	 * to 1 rtd, this function will return 1st found component.
 	 */
-	for_each_rtd_components(rtd, rtdcom, component) {
+	for_each_rtd_components(rtd, i, component) {
 		const char *component_name = component->driver->name;
 
 		if (!component_name)
@@ -330,7 +313,7 @@ struct snd_soc_component *snd_soc_rtdcom_lookup(struct snd_soc_pcm_runtime *rtd,
 
 		if ((component_name == driver_name) ||
 		    strcmp(component_name, driver_name) == 0)
-			return rtdcom->component;
+			return component;
 	}
 
 	return NULL;
@@ -408,6 +391,7 @@ static struct snd_soc_pcm_runtime *soc_new_pcm_runtime(
 	struct snd_soc_card *card, struct snd_soc_dai_link *dai_link)
 {
 	struct snd_soc_pcm_runtime *rtd;
+	struct snd_soc_component *component;
 	struct device *dev;
 	int ret;
 
@@ -433,7 +417,12 @@ static struct snd_soc_pcm_runtime *soc_new_pcm_runtime(
 	/*
 	 * for rtd
 	 */
-	rtd = devm_kzalloc(dev, sizeof(*rtd), GFP_KERNEL);
+	rtd = devm_kzalloc(dev,
+			   sizeof(*rtd) +
+			   sizeof(*component) * (dai_link->num_cpus +
+						 dai_link->num_codecs +
+						 dai_link->num_platforms),
+			   GFP_KERNEL);
 	if (!rtd)
 		goto free_rtd;
 
@@ -452,7 +441,6 @@ static struct snd_soc_pcm_runtime *soc_new_pcm_runtime(
 	/*
 	 * rtd remaining settings
 	 */
-	INIT_LIST_HEAD(&rtd->component_list);
 	INIT_LIST_HEAD(&rtd->dpcm[SNDRV_PCM_STREAM_PLAYBACK].be_clients);
 	INIT_LIST_HEAD(&rtd->dpcm[SNDRV_PCM_STREAM_CAPTURE].be_clients);
 	INIT_LIST_HEAD(&rtd->dpcm[SNDRV_PCM_STREAM_PLAYBACK].fe_clients);
@@ -1083,9 +1071,8 @@ static int soc_init_pcm_runtime(struct snd_soc_card *card,
 {
 	struct snd_soc_dai_link *dai_link = rtd->dai_link;
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
-	struct snd_soc_rtdcom_list *rtdcom;
 	struct snd_soc_component *component;
-	int ret, num;
+	int ret, num, i;
 
 	/* set default power off timeout */
 	rtd->pmdown_time = pmdown_time;
@@ -1116,7 +1103,7 @@ static int soc_init_pcm_runtime(struct snd_soc_card *card,
 	 * topology based drivers can use the DAI link id field to set PCM
 	 * device number and then use rtd + a base offset of the BEs.
 	 */
-	for_each_rtd_components(rtd, rtdcom, component) {
+	for_each_rtd_components(rtd, i, component) {
 		if (!component->driver->use_dai_pcm_id)
 			continue;
 
@@ -1381,12 +1368,11 @@ static void soc_remove_link_components(struct snd_soc_card *card)
 {
 	struct snd_soc_component *component;
 	struct snd_soc_pcm_runtime *rtd;
-	struct snd_soc_rtdcom_list *rtdcom;
-	int order;
+	int i, order;
 
 	for_each_comp_order(order) {
 		for_each_card_rtds(card, rtd) {
-			for_each_rtd_components(rtd, rtdcom, component) {
+			for_each_rtd_components(rtd, i, component) {
 				if (component->driver->remove_order != order)
 					continue;
 
@@ -1400,12 +1386,11 @@ static int soc_probe_link_components(struct snd_soc_card *card)
 {
 	struct snd_soc_component *component;
 	struct snd_soc_pcm_runtime *rtd;
-	struct snd_soc_rtdcom_list *rtdcom;
-	int ret, order;
+	int i, ret, order;
 
 	for_each_comp_order(order) {
 		for_each_card_rtds(card, rtd) {
-			for_each_rtd_components(rtd, rtdcom, component) {
+			for_each_rtd_components(rtd, i, component) {
 				if (component->driver->probe_order != order)
 					continue;
 
