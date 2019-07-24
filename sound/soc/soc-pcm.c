@@ -2556,8 +2556,10 @@ static int dpcm_run_old_update(struct snd_soc_pcm_runtime *fe, int stream)
 
 static int soc_dpcm_fe_runtime_update(struct snd_soc_pcm_runtime *fe, int new)
 {
+	struct snd_soc_dai *codec_dai;
 	struct snd_soc_dapm_widget_list *list;
 	int count, paths;
+	int i;
 
 	if (!fe->dai_link->dynamic)
 		return 0;
@@ -2571,13 +2573,18 @@ static int soc_dpcm_fe_runtime_update(struct snd_soc_pcm_runtime *fe, int new)
 		new ? "new" : "old", fe->dai_link->name);
 
 	/* skip if FE doesn't have playback capability */
-	if (!snd_soc_dai_stream_valid(fe->cpu_dai,   SNDRV_PCM_STREAM_PLAYBACK) ||
-	    !snd_soc_dai_stream_valid(fe->codec_dai, SNDRV_PCM_STREAM_PLAYBACK))
+	if (!snd_soc_dai_stream_valid(fe->cpu_dai,   SNDRV_PCM_STREAM_PLAYBACK))
 		goto capture;
+	for_each_rtd_codec_dai(fe, i, codec_dai)
+		if (!snd_soc_dai_stream_valid(codec_dai, SNDRV_PCM_STREAM_PLAYBACK))
+			goto capture;
 
 	/* skip if FE isn't currently playing */
-	if (!fe->cpu_dai->playback_active || !fe->codec_dai->playback_active)
+	if (!fe->cpu_dai->playback_active)
 		goto capture;
+	for_each_rtd_codec_dai(fe, i, codec_dai)
+		if (!codec_dai->playback_active)
+			goto capture;
 
 	paths = dpcm_path_get(fe, SNDRV_PCM_STREAM_PLAYBACK, &list);
 	if (paths < 0) {
@@ -2602,13 +2609,18 @@ static int soc_dpcm_fe_runtime_update(struct snd_soc_pcm_runtime *fe, int new)
 
 capture:
 	/* skip if FE doesn't have capture capability */
-	if (!snd_soc_dai_stream_valid(fe->cpu_dai,   SNDRV_PCM_STREAM_CAPTURE) ||
-	    !snd_soc_dai_stream_valid(fe->codec_dai, SNDRV_PCM_STREAM_CAPTURE))
+	if (!snd_soc_dai_stream_valid(fe->cpu_dai,   SNDRV_PCM_STREAM_CAPTURE))
 		return 0;
+	for_each_rtd_codec_dai(fe, i, codec_dai)
+		if (!snd_soc_dai_stream_valid(codec_dai, SNDRV_PCM_STREAM_CAPTURE))
+			return 0;
 
 	/* skip if FE isn't currently capturing */
-	if (!fe->cpu_dai->capture_active || !fe->codec_dai->capture_active)
+	if (!fe->cpu_dai->capture_active)
 		return 0;
+	for_each_rtd_codec_dai(fe, i, codec_dai)
+		if (!codec_dai->capture_active)
+			return 0;
 
 	paths = dpcm_path_get(fe, SNDRV_PCM_STREAM_CAPTURE, &list);
 	if (paths < 0) {
