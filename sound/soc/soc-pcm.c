@@ -563,17 +563,24 @@ static int soc_pcm_open(struct snd_pcm_substream *substream)
 
 	mutex_lock_nested(&rtd->card->pcm_mutex, rtd->card->pcm_subclass);
 
+	ret = soc_pcm_components_open(substream);
+	if (ret < 0)
+		goto component_err;
+
+	ret = soc_rtd_startup(rtd, substream);
+	if (ret < 0) {
+		pr_err("ASoC: %s startup failed: %d\n",
+		       rtd->dai_link->name, ret);
+		goto rtd_err;
+	}
+
 	/* startup the audio subsystem */
 	ret = snd_soc_dai_startup(cpu_dai, substream);
 	if (ret < 0) {
 		dev_err(cpu_dai->dev, "ASoC: can't open interface %s: %d\n",
 			cpu_dai->name, ret);
-		goto out;
+		goto cpu_dai_err;
 	}
-
-	ret = soc_pcm_components_open(substream);
-	if (ret < 0)
-		goto component_err;
 
 	for_each_rtd_codec_dai(rtd, i, codec_dai) {
 		ret |= snd_soc_dai_startup(codec_dai, substream);
@@ -586,14 +593,7 @@ static int soc_pcm_open(struct snd_pcm_substream *substream)
 	if (ret < 0) {
 		dev_err(codec_dai->dev, "ASoC: can't open codec %s: %d\n",
 			codec_dai->name, ret);
-		goto codec_dai_err;
-	}
-
-	ret = soc_rtd_startup(rtd, substream);
-	if (ret < 0) {
-		pr_err("ASoC: %s startup failed: %d\n",
-		       rtd->dai_link->name, ret);
-		goto codec_dai_err;
+		goto config_err;
 	}
 
 	/* Dynamic PCM DAI links compat checks use dynamic capabilities */
@@ -660,17 +660,15 @@ dynamic:
 	return 0;
 
 config_err:
-	soc_rtd_shutdown(rtd, substream);
-
-codec_dai_err:
 	for_each_rtd_codec_dai(rtd, i, codec_dai)
 		snd_soc_dai_shutdown(codec_dai, substream);
-
+cpu_dai_err:
+	snd_soc_dai_shutdown(cpu_dai, substream);
+rtd_err:
+	soc_rtd_shutdown(rtd, substream);
 component_err:
 	soc_pcm_components_close(substream);
 
-	snd_soc_dai_shutdown(cpu_dai, substream);
-out:
 	mutex_unlock(&rtd->card->pcm_mutex);
 
 	for_each_rtd_components(rtd, i, component) {
