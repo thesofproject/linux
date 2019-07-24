@@ -240,17 +240,24 @@ static int soc_rtd_hw_params(struct snd_soc_pcm_runtime *rtd,
 			     struct snd_pcm_hw_params *params)
 {
 	if (rtd->dai_link->ops &&
-	    rtd->dai_link->ops->hw_params)
-		return rtd->dai_link->ops->hw_params(substream, params);
+	    rtd->dai_link->ops->hw_params) {
+		int ret = rtd->dai_link->ops->hw_params(substream, params);
+		if (ret < 0)
+			return ret;
+	}
+
+	rtd->hw_paramed = 1;
 	return 0;
 }
 
 static void soc_rtd_hw_free(struct snd_soc_pcm_runtime *rtd,
 			    struct snd_pcm_substream *substream)
 {
-	if (rtd->dai_link->ops &&
+	if (rtd->hw_paramed &&
+	    rtd->dai_link->ops &&
 	    rtd->dai_link->ops->hw_free)
 		rtd->dai_link->ops->hw_free(substream);
+	rtd->hw_paramed = 0;
 }
 
 static int soc_rtd_trigger(struct snd_soc_pcm_runtime *rtd,
