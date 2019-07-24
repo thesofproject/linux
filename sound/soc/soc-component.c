@@ -363,18 +363,30 @@ int snd_soc_component_hw_params(struct snd_soc_component *component,
 				struct snd_pcm_substream *substream,
 				struct snd_pcm_hw_params *params)
 {
-	if (component->driver->hw_params)
-		return component->driver->hw_params(component,
+	if (component->driver->hw_params) {
+		int ret = component->driver->hw_params(component,
 						    substream, params);
+
+		if (ret < 0)
+			return soc_component_err(component, ret);
+	}
+	component->hw_paramed++;
+
 	return 0;
 }
 
 int snd_soc_component_hw_free(struct snd_soc_component *component,
 			       struct snd_pcm_substream *substream)
 {
-	if (component->driver->hw_free)
-		return component->driver->hw_free(component, substream);
-	return 0;
+	int ret = 0;
+
+	if (component->hw_paramed) {
+		if (component->driver->hw_free)
+			ret = component->driver->hw_free(component, substream);
+		component->hw_paramed--;
+	}
+
+	return ret;
 }
 
 int snd_soc_component_trigger(struct snd_soc_component *component,
