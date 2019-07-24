@@ -907,31 +907,15 @@ static void soc_pcm_codec_params_fixup(struct snd_pcm_hw_params *params,
 	interval->max = channels;
 }
 
-static int soc_pcm_components_hw_free(struct snd_pcm_substream *substream,
-				      struct snd_soc_component *last)
-{
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_component *component;
-	int i, ret = 0;
-
-	for_each_rtd_components(rtd, i, component) {
-		if (component == last)
-			break;
-
-		ret |= snd_soc_component_hw_free(component, substream);
-	}
-
-	return ret;
-}
-
 /*
  * Frees resources allocated by hw_params, can be called multiple times
  */
 static int soc_pcm_hw_free(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_component *component;
 	struct snd_soc_dai *dai;
-	int i;
+	int i, ret;
 
 	mutex_lock_nested(&rtd->card->pcm_mutex, rtd->card->pcm_subclass);
 
@@ -949,7 +933,11 @@ static int soc_pcm_hw_free(struct snd_pcm_substream *substream)
 	soc_rtd_hw_free(rtd, substream);
 
 	/* free any component resources */
-	soc_pcm_components_hw_free(substream, NULL);
+	ret = 0;
+	for_each_rtd_components(rtd, i, component)
+		ret |= snd_soc_component_hw_free(component, substream);
+	if (ret < 0)
+		return ret;
 
 	/* now free hw params for the DAIs  */
 	for_each_rtd_dais(rtd, i, dai) {
@@ -978,6 +966,7 @@ static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 	int i, ret = 0;
 	int codec_err = 0;
 	int cpu_err = 0;
+	int component_err = 0;
 
 	mutex_lock_nested(&rtd->card->pcm_mutex, rtd->card->pcm_subclass);
 
@@ -1069,14 +1058,14 @@ static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 
 	for_each_rtd_components(rtd, i, component) {
 		ret = snd_soc_component_hw_params(component, substream, params);
-		if (ret < 0) {
-			dev_err(component->dev,
-				"ASoC: %s hw params failed: %d\n",
-				component->name, ret);
-			goto component_err;
-		}
+		if (ret < 0)
+			component_err = ret;
 	}
-	component = NULL;
+
+	if (component_err) {
+		ret = component_err;
+		goto component_err;
+	}
 
 	ret = soc_pcm_params_symmetry(substream, params);
         if (ret)
@@ -1086,7 +1075,8 @@ out:
 	return ret;
 
 component_err:
-	soc_pcm_components_hw_free(substream, component);
+	for_each_rtd_components(rtd, i, component)
+		snd_soc_component_hw_free(component, substream);
 
 cpu_err:
 	for_each_rtd_cpu_dais(rtd, i, cpu_dai) {
