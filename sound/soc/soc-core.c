@@ -1149,15 +1149,13 @@ static void soc_set_name_prefix(struct snd_soc_card *card,
 	component->name_prefix = str;
 }
 
-static void soc_remove_component(struct snd_soc_component *component,
-				 int probed)
+static void soc_remove_component(struct snd_soc_component *component)
 {
 
 	if (!component->card)
 		return;
 
-	if (probed)
-		snd_soc_component_remove(component);
+	snd_soc_component_remove(component);
 
 	/* For framework level robustness */
 	snd_soc_component_set_jack(component, NULL, NULL);
@@ -1175,7 +1173,6 @@ static int soc_probe_component(struct snd_soc_card *card,
 	struct snd_soc_dapm_context *dapm =
 		snd_soc_component_get_dapm(component);
 	struct snd_soc_dai *dai;
-	int probed = 0;
 	int ret;
 
 	if (!strcmp(component->name, "snd-soc-dummy"))
@@ -1231,7 +1228,6 @@ static int soc_probe_component(struct snd_soc_card *card,
 	     dapm->bias_level != SND_SOC_BIAS_OFF,
 	     "codec %s can not start from non-off bias with idle_bias_off==1\n",
 	     component->name);
-	probed = 1;
 
 	/* machine specific init */
 	if (component->init) {
@@ -1260,7 +1256,7 @@ static int soc_probe_component(struct snd_soc_card *card,
 
 err_probe:
 	if (ret < 0)
-		soc_remove_component(component, probed);
+		soc_remove_component(component);
 
 	return ret;
 }
@@ -1321,7 +1317,7 @@ static void soc_remove_link_components(struct snd_soc_card *card)
 				if (component->driver->remove_order != order)
 					continue;
 
-				soc_remove_component(component, 1);
+				soc_remove_component(component);
 			}
 		}
 	}
@@ -1406,7 +1402,7 @@ static void soc_remove_aux_devices(struct snd_soc_card *card)
 	for_each_comp_order(order) {
 		for_each_card_auxs_safe(card, comp, _comp) {
 			if (comp->driver->remove_order == order)
-				soc_remove_component(comp, 1);
+				soc_remove_component(comp);
 		}
 	}
 }

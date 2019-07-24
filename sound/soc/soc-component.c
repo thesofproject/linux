@@ -407,16 +407,25 @@ int snd_soc_component_is_suspended(struct snd_soc_component *component)
 
 int snd_soc_component_probe(struct snd_soc_component *component)
 {
-	if (component->driver->probe)
-		return component->driver->probe(component);
+	if (component->driver->probe) {
+		int ret = component->driver->probe(component);
+
+		if (ret < 0)
+			return soc_component_err(component, ret);
+	}
+
+	component->probed = 1;
 
 	return 0;
 }
 
 void snd_soc_component_remove(struct snd_soc_component *component)
 {
-	if (component->driver->remove)
+	if (component->probed &&
+	    component->driver->remove)
 		component->driver->remove(component);
+
+	component->probed = 0;
 }
 
 int snd_soc_component_of_xlate_dai_id(struct snd_soc_component *component,

@@ -218,6 +218,7 @@ struct snd_soc_component {
 	/* bit field */
 	unsigned int suspended:1; /* is in suspend PM state */
 	unsigned int compress_opened:1;
+	unsigned int probed:1;
 };
 
 #define for_each_component_dais(component, dai)\
