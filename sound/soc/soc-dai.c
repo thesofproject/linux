@@ -311,21 +311,29 @@ void snd_soc_dai_hw_free(struct snd_soc_dai *dai,
 int snd_soc_dai_startup(struct snd_soc_dai *dai,
 			struct snd_pcm_substream *substream)
 {
-	int ret = 0;
-
 	if (dai->driver->ops &&
-	    dai->driver->ops->startup)
-		ret = dai->driver->ops->startup(substream, dai);
+	    dai->driver->ops->startup) {
+		int ret = dai->driver->ops->startup(substream, dai);
+		if (ret < 0)
+			return soc_dai_err(dai, ret);
+	}
 
-	return ret;
+	dai->started++;
+
+	return 0;
 }
 
 void snd_soc_dai_shutdown(struct snd_soc_dai *dai,
 			 struct snd_pcm_substream *substream)
 {
+	if (!dai->started)
+		return;
+
 	if (dai->driver->ops &&
 	    dai->driver->ops->shutdown)
 		dai->driver->ops->shutdown(substream, dai);
+
+	dai->started--;
 }
 
 int snd_soc_dai_prepare(struct snd_soc_dai *dai,
