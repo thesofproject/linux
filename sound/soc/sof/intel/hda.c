@@ -39,7 +39,7 @@
 
 #if IS_ENABLED(CONFIG_SOUNDWIRE_INTEL)
 
-static void hda_sdw_int_enable(struct snd_sof_dev *sdev, bool enable)
+void hda_sdw_int_enable(struct snd_sof_dev *sdev, bool enable)
 {
 	if (enable)
 		snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR,

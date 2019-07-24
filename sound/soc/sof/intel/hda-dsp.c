@@ -374,6 +374,17 @@ static int hda_resume(struct snd_sof_dev *sdev, bool runtime_resume)
 	hda_dsp_ctrl_ppcap_enable(sdev, true);
 	hda_dsp_ctrl_ppcap_int_enable(sdev, true);
 
+#if IS_ENABLED(CONFIG_SOUNDWIRE_INTEL)
+	/* need to power-up core before setting-up capabilities */
+	ret = hda_dsp_core_power_up(sdev, HDA_DSP_CORE_MASK(0));
+	if (ret < 0) {
+		dev_err(sdev->dev, "error: could not power-up DSP subsystem\n");
+		return ret;
+	}
+
+	hda_sdw_int_enable(sdev, true);
+#endif
+
 	return 0;
 }
 
