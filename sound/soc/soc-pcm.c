@@ -547,25 +547,24 @@ static int soc_pcm_open(struct snd_pcm_substream *substream)
 		goto component_err;
 
 	for_each_rtd_codec_dai(rtd, i, codec_dai) {
-		ret = snd_soc_dai_startup(codec_dai, substream);
-		if (ret < 0) {
-			dev_err(codec_dai->dev,
-				"ASoC: can't open codec %s: %d\n",
-				codec_dai->name, ret);
-			goto codec_dai_err;
-		}
+		ret |= snd_soc_dai_startup(codec_dai, substream);
 
 		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
 			codec_dai->tx_mask = 0;
 		else
 			codec_dai->rx_mask = 0;
 	}
+	if (ret < 0) {
+		dev_err(codec_dai->dev, "ASoC: can't open codec %s: %d\n",
+			codec_dai->name, ret);
+		goto codec_dai_err;
+	}
 
 	ret = soc_rtd_startup(rtd, substream);
 	if (ret < 0) {
 		pr_err("ASoC: %s startup failed: %d\n",
 		       rtd->dai_link->name, ret);
-		goto machine_err;
+		goto codec_dai_err;
 	}
 
 	/* Dynamic PCM DAI links compat checks use dynamic capabilities */
@@ -634,11 +633,8 @@ dynamic:
 config_err:
 	soc_rtd_shutdown(rtd, substream);
 
-machine_err:
-	i = rtd->num_codecs;
-
 codec_dai_err:
-	for_each_rtd_codec_dai_rollback(rtd, i, codec_dai)
+	for_each_rtd_codec_dai(rtd, i, codec_dai)
 		snd_soc_dai_shutdown(codec_dai, substream);
 
 component_err:
