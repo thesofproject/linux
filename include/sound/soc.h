@@ -1151,6 +1151,7 @@ struct snd_soc_pcm_runtime {
 #define for_each_rtd_codec_dai_rollback(rtd, i, dai)		\
 	for (; ((--i) >= 0) && ((dai) = rtd->codec_dais[i]);)
 
+void snd_soc_close_delayed_work(struct work_struct *work);
 
 /* mixer control */
 struct soc_mixer_control {
