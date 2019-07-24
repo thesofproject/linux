@@ -725,27 +725,28 @@ static int soc_pcm_open(struct snd_pcm_substream *substream)
 
 	ret = soc_pcm_components_open(substream);
 	if (ret < 0)
-		goto component_err;
+		goto config_err;
 
 	ret = soc_rtd_startup(rtd, substream);
 	if (ret < 0) {
 		pr_err("ASoC: %s startup failed: %d\n",
 		       rtd->dai_link->name, ret);
-		goto rtd_err;
+		goto config_err;
 	}
 
 	/* startup the audio subsystem */
 	for_each_rtd_dais(rtd, i, dai) {
-		ret |= snd_soc_dai_startup(dai, substream);
+		ret = snd_soc_dai_startup(dai, substream);
+		if (ret < 0) {
+			dev_err(rtd->dev, "ASoC: can't start DAI: %s (%d)\n",
+				dai->name, ret);
+			goto config_err;
+		}
 
 		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
 			dai->tx_mask = 0;
 		else
 			dai->rx_mask = 0;
-	}
-	if (ret < 0) {
-		dev_err(rtd->dev, "ASoC: can't start DAI: %d\n", ret);
-		goto config_err;
 	}
 
 	/* Dynamic PCM DAI links compat checks use dynamic capabilities */
@@ -801,30 +802,14 @@ static int soc_pcm_open(struct snd_pcm_substream *substream)
 		 runtime->hw.rate_max);
 
 dynamic:
-
+	ret = 0;
+config_err:
 	snd_soc_runtime_activate(rtd, substream->stream);
 
 	mutex_unlock(&rtd->card->pcm_mutex);
-	return 0;
 
-config_err:
-	for_each_rtd_dais(rtd, i, dai)
-		snd_soc_dai_shutdown(dai, substream);
-rtd_err:
-	soc_rtd_shutdown(rtd, substream);
-component_err:
-	soc_pcm_components_close(substream);
-
-	mutex_unlock(&rtd->card->pcm_mutex);
-
-	for_each_rtd_components(rtd, i, component) {
-		pm_runtime_mark_last_busy(component->dev);
-		pm_runtime_put_autosuspend(component->dev);
-	}
-
-	for_each_rtd_components(rtd, i, component)
-		if (!component->active)
-			pinctrl_pm_select_sleep_state(component->dev);
+	if (ret < 0)
+		soc_pcm_close(substream);
 
 	return ret;
 }
