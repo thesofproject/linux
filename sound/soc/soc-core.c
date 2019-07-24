@@ -397,8 +397,6 @@ struct snd_pcm_substream *snd_soc_get_dai_substream(struct snd_soc_card *card,
 }
 EXPORT_SYMBOL_GPL(snd_soc_get_dai_substream);
 
-static const struct snd_soc_ops null_snd_soc_ops;
-
 static void soc_release_rtd_dev(struct device *dev)
 {
 	/* "dev" means "rtd->dev" */
@@ -481,8 +479,6 @@ static struct snd_soc_pcm_runtime *soc_new_pcm_runtime(
 
 	rtd->card = card;
 	rtd->dai_link = dai_link;
-	if (!rtd->dai_link->ops)
-		rtd->dai_link->ops = &null_snd_soc_ops;
 
 	/* see for_each_card_rtds */
 	list_add_tail(&rtd->list, &card->rtd_list);
