@@ -1956,7 +1956,7 @@ static int soc_tplg_fe_link_create(struct soc_tplg *tplg,
 	if (card->add_dai_link)
 		card->add_dai_link(card, link);
 
-	snd_soc_add_dai_link(card, link);
+	snd_soc_add_pcm_runtime(card, link);
 	return 0;
 }
 
