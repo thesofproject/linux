@@ -953,6 +953,7 @@ static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
 	struct snd_soc_dai *codec_dai;
 	int i, ret = 0;
+	int codec_err = 0;
 
 	mutex_lock_nested(&rtd->card->pcm_mutex, rtd->card->pcm_subclass);
 
@@ -1000,7 +1001,7 @@ static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 		ret = snd_soc_dai_hw_params(codec_dai, substream,
 					    &codec_params);
 		if(ret < 0)
-			goto codec_err;
+			codec_err = ret;
 
 		codec_dai->rate = params_rate(&codec_params);
 		codec_dai->channels = params_channels(&codec_params);
@@ -1009,10 +1010,14 @@ static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 
 		snd_soc_dapm_update_dai(substream, &codec_params, codec_dai);
 	}
+	if (codec_err) {
+		ret = codec_err;
+		goto codec_err;
+	}
 
 	ret = snd_soc_dai_hw_params(cpu_dai, substream, params);
 	if (ret < 0)
-		goto interface_err;
+		goto codec_err;
 
 	/* store the parameters for each DAIs */
 	cpu_dai->rate = params_rate(params);
@@ -1046,11 +1051,8 @@ component_err:
 	snd_soc_dai_hw_free(cpu_dai, substream);
 	cpu_dai->rate = 0;
 
-interface_err:
-	i = rtd->num_codecs;
-
 codec_err:
-	for_each_rtd_codec_dai_rollback(rtd, i, codec_dai) {
+	for_each_rtd_codec_dai(rtd, i, codec_dai) {
 		if (!snd_soc_dai_stream_valid(codec_dai, substream->stream))
 			continue;
 
