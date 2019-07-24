@@ -1153,8 +1153,6 @@ struct snd_soc_pcm_runtime {
 	for ((i) = 0;						       \
 	     ((i) < rtd->num_codecs) && ((dai) = rtd->codec_dais[i]); \
 	     (i)++)
-#define for_each_rtd_codec_dai_rollback(rtd, i, dai)		\
-	for (; ((--i) >= 0) && ((dai) = rtd->codec_dais[i]);)
 
 void snd_soc_close_delayed_work(struct work_struct *work);
 void snd_soc_stream_stop(struct snd_soc_pcm_runtime *rtd, int stream);
