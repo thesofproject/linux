@@ -115,16 +115,37 @@
 					#size-cells = <0>;
 					mclk-fs = <512>;
 					port@0 {
+						prefix = "pcm3168a";
+						convert-channels = <8>; /* TDM Split */
 						reg = <0>;
-						pcm3168a_endpoint_p: endpoint {
+						pcm3168a_endpoint_p: endpoint@0 {
 							remote-endpoint = <&rsnd_for_pcm3168a_play>;
 							clocks = <&clksndsel>;
 						};
+						pcm3168a_endpoint_p2: endpoint@1 {
+							remote-endpoint = <&rsnd_for_pcm3168a_play2>;
+						};
+						pcm3168a_endpoint_p3: endpoint@2 {
+							remote-endpoint = <&rsnd_for_pcm3168a_play3>;
+						};
+						pcm3168a_endpoint_p4: endpoint@3 {
+							remote-endpoint = <&rsnd_for_pcm3168a_play4>;
+						};
 					};
 					port@1 {
+						prefix = "pcm3168a";
+						convert-channels = <6>; /* TDM Split */
 						reg = <1>;
-						pcm3168a_endpoint_c: endpoint {
+						pcm3168a_endpoint_c: endpoint@0 {
 							remote-endpoint = <&rsnd_for_pcm3168a_capture>;
+							clocks = <&clksndsel>;
+						};
+						pcm3168a_endpoint_c2: endpoint@1 {
+							remote-endpoint = <&rsnd_for_pcm3168a_capture2>;
+							clocks = <&clksndsel>;
+						};
+						pcm3168a_endpoint_c3: endpoint@2 {
+							remote-endpoint = <&rsnd_for_pcm3168a_capture3>;
 							clocks = <&clksndsel>;
 						};
 					};
@@ -298,29 +319,83 @@
 	ports {
 		/* rsnd_port0/1 are on salvator-common */
 		rsnd_port2: port@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
 			reg = <2>;
-			rsnd_for_pcm3168a_play: endpoint {
+			rsnd_for_pcm3168a_play: endpoint@2 {
+				reg = <2>;
 				remote-endpoint = <&pcm3168a_endpoint_p>;
 
 				dai-format = "i2s";
 				bitclock-master = <&rsnd_for_pcm3168a_play>;
 				frame-master = <&rsnd_for_pcm3168a_play>;
-				dai-tdm-slot-num = <8>;
 
-				playback = <&ssi3>;
+				playback = <&ssiu30 &ssi3>;
+			};
+			rsnd_for_pcm3168a_play2: endpoint@3 {
+				reg = <3>;
+				remote-endpoint = <&pcm3168a_endpoint_p2>;
+
+				dai-format = "i2s";
+				bitclock-master = <&rsnd_for_pcm3168a_play2>;
+				frame-master = <&rsnd_for_pcm3168a_play2>;
+
+				playback = <&ssiu31 &ssi3>;
+			};
+			rsnd_for_pcm3168a_play3: endpoint@4 {
+				reg = <4>;
+				remote-endpoint = <&pcm3168a_endpoint_p3>;
+
+				dai-format = "i2s";
+				bitclock-master = <&rsnd_for_pcm3168a_play3>;
+				frame-master = <&rsnd_for_pcm3168a_play3>;
+
+				playback = <&ssiu32 &ssi3>;
+			};
+			rsnd_for_pcm3168a_play4: endpoint@5 {
+				reg = <5>;
+				remote-endpoint = <&pcm3168a_endpoint_p4>;
+
+				dai-format = "i2s";
+				bitclock-master = <&rsnd_for_pcm3168a_play4>;
+				frame-master = <&rsnd_for_pcm3168a_play4>;
+
+				playback = <&ssiu33 &ssi3>;
 			};
 		};
 		rsnd_port3: port@3 {
+			#address-cells = <1>;
+			#size-cells = <0>;
 			reg = <3>;
-			rsnd_for_pcm3168a_capture: endpoint {
+			rsnd_for_pcm3168a_capture: endpoint@6 {
+				reg = <6>;
 				remote-endpoint = <&pcm3168a_endpoint_c>;
 
 				dai-format = "i2s";
 				bitclock-master = <&rsnd_for_pcm3168a_capture>;
 				frame-master = <&rsnd_for_pcm3168a_capture>;
-				dai-tdm-slot-num = <6>;
 
-				capture  = <&ssi4>;
+				capture  = <&ssiu40 &ssi4>;
+			};
+			rsnd_for_pcm3168a_capture2: endpoint@7 {
+				reg = <7>;
+				remote-endpoint = <&pcm3168a_endpoint_c2>;
+
+				dai-format = "i2s";
+				bitclock-master = <&rsnd_for_pcm3168a_capture2>;
+				frame-master = <&rsnd_for_pcm3168a_capture2>;
+
+				capture  = <&ssiu41 &ssi4>;
+			};
+			rsnd_for_pcm3168a_capture3: endpoint@8 {
+				reg = <8>;
+				remote-endpoint = <&pcm3168a_endpoint_c3>;
+
+				dai-format = "i2s";
+				bitclock-master = <&rsnd_for_pcm3168a_capture3>;
+				frame-master = <&rsnd_for_pcm3168a_capture3>;
+
+				capture  = <&ssiu42 &ssi4>;
 			};
 		};
 	};
@@ -359,8 +434,18 @@
 };
 
 &sound_card {
+	compatible = "audio-graph-scu-card";
+
+	routing =	"pcm3168a Playback", "DAI2 Playback",
+			"pcm3168a Playback", "DAI3 Playback",
+			"pcm3168a Playback", "DAI4 Playback",
+			"pcm3168a Playback", "DAI5 Playback",
+			"DAI6 Capture", "pcm3168a Capture",
+			"DAI7 Capture", "pcm3168a Capture",
+			"DAI8 Capture", "pcm3168a Capture";
+
 	dais = <&rsnd_port0	/* ak4613 */
-		&rsnd_port1	/* HDMI0  */
+//		&rsnd_port1	/* HDMI0  */
 		&rsnd_port2	/* pcm3168a playback */
 		&rsnd_port3	/* pcm3168a capture  */
 		>;
