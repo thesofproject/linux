@@ -463,47 +463,32 @@ static void soc_pcm_init_runtime_hw(struct snd_pcm_substream *substream)
 	hw->rate_max = min_not_zero(hw->rate_max, rate_max);
 }
 
-static int soc_pcm_components_open(struct snd_pcm_substream *substream,
-				   struct snd_soc_component **last)
+static int soc_pcm_components_open(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_component *component;
 	int i, ret = 0;
 
 	for_each_rtd_components(rtd, i, component) {
-		*last = component;
-
-		ret = snd_soc_component_module_get_when_open(component);
-		if (ret < 0) {
-			dev_err(component->dev,
-				"ASoC: can't get module %s\n",
-				component->name);
-			return ret;
-		}
-
-		ret = snd_soc_component_open(component, substream);
-		if (ret < 0) {
-			dev_err(component->dev,
-				"ASoC: can't open component %s: %d\n",
-				component->name, ret);
-			return ret;
-		}
+		ret |= snd_soc_component_module_get_when_open(component);
+		ret |= snd_soc_component_open(component, substream);
 	}
-	*last = NULL;
-	return 0;
+
+	if (ret < 0)
+		dev_err(component->dev,
+			"ASoC: error happen during open component %s: %d\n",
+			component->name, ret);
+
+	return ret;
 }
 
-static int soc_pcm_components_close(struct snd_pcm_substream *substream,
-				    struct snd_soc_component *last)
+static int soc_pcm_components_close(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_component *component;
 	int i, ret = 0;
 
 	for_each_rtd_components(rtd, i, component) {
-		if (component == last)
-			break;
-
 		ret |= snd_soc_component_close(component, substream);
 		snd_soc_component_module_put_when_close(component);
 	}
@@ -542,7 +527,7 @@ static int soc_pcm_open(struct snd_pcm_substream *substream)
 		goto out;
 	}
 
-	ret = soc_pcm_components_open(substream, &component);
+	ret = soc_pcm_components_open(substream);
 	if (ret < 0)
 		goto component_err;
 
@@ -638,7 +623,7 @@ codec_dai_err:
 		snd_soc_dai_shutdown(codec_dai, substream);
 
 component_err:
-	soc_pcm_components_close(substream, component);
+	soc_pcm_components_close(substream);
 
 	snd_soc_dai_shutdown(cpu_dai, substream);
 out:
@@ -692,7 +677,7 @@ static int soc_pcm_close(struct snd_pcm_substream *substream)
 
 	soc_rtd_shutdown(rtd, substream);
 
-	soc_pcm_components_close(substream, NULL);
+	soc_pcm_components_close(substream);
 
 	snd_soc_stream_stop(rtd, substream->stream);
 
