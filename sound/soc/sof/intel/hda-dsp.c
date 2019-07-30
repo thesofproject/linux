@@ -492,7 +492,7 @@ int hda_dsp_set_hw_params_upon_resume(struct snd_sof_dev *sdev)
 		 */
 		if (stream->link_substream) {
 			rtd = snd_pcm_substream_chip(stream->link_substream);
-			name = rtd->codec_dai->component->name;
+			name = asoc_codec_dai(rtd, 0)->component->name;
 			link = snd_hdac_ext_bus_get_link(bus, name);
 			if (!link)
 				return -EINVAL;
