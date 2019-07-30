@@ -103,8 +103,8 @@ static struct snd_soc_jack mt8173_rt5650_jack;
 static int mt8173_rt5650_init(struct snd_soc_pcm_runtime *runtime)
 {
 	struct snd_soc_card *card = runtime->card;
-	struct snd_soc_component *component = runtime->codec_dais[0]->component;
-	const char *codec_capture_dai = runtime->codec_dais[1]->name;
+	struct snd_soc_component *component = asoc_codec_dai(runtime, 0)->component;
+	const char *codec_capture_dai = asoc_codec_dai(runtime, 1)->name;
 	int ret;
 
 	rt5645_sel_asrc_clk_src(component,
