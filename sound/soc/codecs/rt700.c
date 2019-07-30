@@ -629,6 +629,10 @@ int rt700_jack_detect(struct rt700_priv *rt700, bool *hp, bool *mic)
 	*hp = false;
 	*mic = false;
 
+	/* don't do any jack detection for now */
+	pr_err("in %s\n", __func__);
+	return 0;
+
 	reg = RT700_VERB_GET_PIN_SENSE | RT700_HP_OUT;
 	ret = regmap_write(rt700->regmap, reg, 0x00);
 	if (ret < 0)
