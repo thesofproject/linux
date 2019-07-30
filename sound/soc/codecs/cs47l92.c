@@ -1789,12 +1789,12 @@ static int cs47l92_open(struct snd_compr_stream *stream)
 	struct madera *madera = priv->madera;
 	int n_adsp;
 
-	if (strcmp(rtd->codec_dai->name, "cs47l92-dsp-trace") == 0) {
+	if (strcmp(asoc_codec_dai(rtd, 0)->name, "cs47l92-dsp-trace") == 0) {
 		n_adsp = 0;
 	} else {
 		dev_err(madera->dev,
 			"No suitable compressed stream for DAI '%s'\n",
-			rtd->codec_dai->name);
+			asoc_codec_dai(rtd, 0)->name);
 		return -EINVAL;
 	}
 
