@@ -685,7 +685,7 @@ struct snd_soc_dai *rsnd_substream_to_dai(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 
-	return  rtd->cpu_dai;
+	return  asoc_cpu_dai(rtd, 0);
 }
 
 static
