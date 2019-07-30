@@ -579,9 +579,14 @@ static int rt700_hda_read(struct regmap *regmap, unsigned int vid,
 static unsigned int rt700_button_detect(struct rt700_priv *rt700)
 {
 	unsigned int btn_type = 0, val80, val81;
+	int ret;
 
-	rt700_index_read(rt700->regmap, RT700_IRQ_FLAG_TABLE1, &val80);
-	rt700_index_read(rt700->regmap, RT700_IRQ_FLAG_TABLE2, &val81);
+	ret = rt700_index_read(rt700->regmap, RT700_IRQ_FLAG_TABLE1, &val80);
+	if (ret < 0)
+		goto read_error;
+	ret = rt700_index_read(rt700->regmap, RT700_IRQ_FLAG_TABLE2, &val81);
+	if (ret < 0)
+		goto read_error;
 
 	val80 &= 0x0381;
 	val81 &= 0xff00;
@@ -612,20 +617,32 @@ static unsigned int rt700_button_detect(struct rt700_priv *rt700)
 		btn_type |= SND_JACK_BTN_3;
 		break;
 	}
+read_error:
 	return btn_type;
 }
 
 int rt700_jack_detect(struct rt700_priv *rt700, bool *hp, bool *mic)
 {
 	unsigned int buf, jack_status, reg, btn_type, loop = 0;
+	int ret;
+
+	*hp = false;
+	*mic = false;
 
 	reg = RT700_VERB_GET_PIN_SENSE | RT700_HP_OUT;
-	regmap_write(rt700->regmap, reg, 0x00);
-	regmap_read(rt700->regmap, RT700_READ_HDA_3, &jack_status);
+	ret = regmap_write(rt700->regmap, reg, 0x00);
+	if (ret < 0)
+		goto io_error;
+	ret = regmap_read(rt700->regmap, RT700_READ_HDA_3, &jack_status);
+	if (ret < 0)
+		goto io_error;
 
 	/* pin attached */
 	if (jack_status & 0x80) {
-		rt700_index_read(rt700->regmap, RT700_COMBO_JACK_AUTO_CTL2, &buf);
+		ret = rt700_index_read(rt700->regmap,
+				       RT700_COMBO_JACK_AUTO_CTL2, &buf);
+		if (ret < 0)
+			goto io_error;
 
 		while ((buf & RT700_COMBOJACK_AUTO_DET_STATUS) == 0) {
 			if (loop >= 200) {
@@ -636,7 +653,9 @@ int rt700_jack_detect(struct rt700_priv *rt700, bool *hp, bool *mic)
 			loop++;
 
 			usleep_range(9000, 10000);
-			rt700_index_read(rt700->regmap, RT700_COMBO_JACK_AUTO_CTL2, &buf);
+			ret = rt700_index_read(rt700->regmap, RT700_COMBO_JACK_AUTO_CTL2, &buf);
+			if (ret < 0)
+				goto io_error;
 		}
 
 		if (buf & RT700_COMBOJACK_AUTO_DET_TRS) {
@@ -649,21 +668,32 @@ int rt700_jack_detect(struct rt700_priv *rt700, bool *hp, bool *mic)
 			btn_type = rt700_button_detect(rt700);
 			pr_debug("%s, btn_type=0x%x\n",	__func__, btn_type);
 		}
-	} else {
-		*hp = false;
-		*mic = false;
 	}
 
 	/* Clear IRQ */
-	rt700_index_read(rt700->regmap, 0x10, &buf);
-	buf = buf | 0x1000;
-	rt700_index_write(rt700->regmap, 0x10, buf);
+	ret = rt700_index_read(rt700->regmap, 0x10, &buf);
+	if (ret < 0)
+		goto io_error;
 
-	rt700_index_read(rt700->regmap, 0x19, &buf);
+	buf = buf | 0x1000;
+	ret = rt700_index_write(rt700->regmap, 0x10, buf);
+	if (ret < 0)
+		goto io_error;
+
+	ret = rt700_index_read(rt700->regmap, 0x19, &buf);
+	if (ret < 0)
+		goto io_error;
+
 	buf = buf | 0x0100;
-	rt700_index_write(rt700->regmap, 0x19, buf);
+	ret = rt700_index_write(rt700->regmap, 0x19, buf);
+	if (ret < 0)
+		goto io_error;
 
 	return 0;
+
+io_error:
+	pr_err_ratelimited("IO error in %s, ret %d\n", __func__, ret);
+	return ret;
 }
 EXPORT_SYMBOL(rt700_jack_detect);
 
