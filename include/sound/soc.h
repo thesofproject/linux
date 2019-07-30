@@ -1173,11 +1173,11 @@ struct snd_soc_pcm_runtime {
 	     (i)++)
 #define for_each_rtd_cpu_dais(rtd, i, dai)				\
 	for ((i) = 0;							\
-	     ((i) < rtd->num_cpus) && ((dai) = rtd->cpu_dais[i]);	\
+	     ((i) < rtd->num_cpus) && ((dai) = asoc_cpu_dai(rtd, i));	\
 	     (i)++)
 #define for_each_rtd_codec_dais(rtd, i, dai)\
 	for ((i) = 0;						       \
-	     ((i) < rtd->num_codecs) && ((dai) = rtd->codec_dais[i]); \
+	     ((i) < rtd->num_codecs) && ((dai) = asoc_codec_dai(rtd, i)); \
 	     (i)++)
 #define for_each_rtd_dais(rtd, i, dai)					\
 	for ((i) = 0;							\
@@ -1372,8 +1372,8 @@ struct snd_soc_dai *snd_soc_card_get_codec_dai(struct snd_soc_card *card,
 	struct snd_soc_pcm_runtime *rtd;
 
 	list_for_each_entry(rtd, &card->rtd_list, list) {
-		if (!strcmp(rtd->codec_dai->name, dai_name))
-			return rtd->codec_dai;
+		if (!strcmp(asoc_codec_dai(rtd, 0)->name, dai_name))
+			return asoc_codec_dai(rtd, 0);
 	}
 
 	return NULL;

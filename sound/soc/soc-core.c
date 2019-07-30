@@ -370,7 +370,7 @@ void snd_soc_close_delayed_work(struct work_struct *work)
 {
 	struct snd_soc_pcm_runtime *rtd =
 		container_of(work, struct snd_soc_pcm_runtime, delayed_work.work);
-	struct snd_soc_dai *codec_dai = rtd->codec_dais[0];
+	struct snd_soc_dai *codec_dai = asoc_codec_dai(rtd, 0);
 	int playback = SNDRV_PCM_STREAM_PLAYBACK;
 
 	mutex_lock_nested(&rtd->card->pcm_mutex, rtd->card->pcm_subclass);
@@ -1031,27 +1031,27 @@ int snd_soc_add_pcm_runtime(struct snd_soc_card *card,
 	/* FIXME: we need full multi CPU support in the future */
 	/* Find CPU from registered CPUs */
 	for_each_link_cpus(dai_link, i, cpu) {
-		rtd->cpu_dais[i] = snd_soc_find_dai(cpu);
-		if (!rtd->cpu_dais[i]) {
+		asoc_cpu_dai(rtd, i) = snd_soc_find_dai(cpu);
+		if (!asoc_cpu_dai(rtd, i)) {
 			dev_info(card->dev, "ASoC: CPU DAI %s not registered\n",
 				 cpu->dai_name);
 			goto _err_defer;
 		}
-		snd_soc_rtdcom_add(rtd, rtd->cpu_dais[i]->component);
+		snd_soc_rtdcom_add(rtd, asoc_cpu_dai(rtd, i)->component);
 	}
 	/* Single cpu links expect cpu and cpu_dai in runtime data */
 	rtd->cpu_dai = rtd->cpu_dais[0];
 
 	/* Find CODEC from registered CODECs */
 	for_each_link_codecs(dai_link, i, codec) {
-		rtd->codec_dais[i] = snd_soc_find_dai(codec);
-		if (!rtd->codec_dais[i]) {
+		asoc_codec_dai(rtd, i) = snd_soc_find_dai(codec);
+		if (!asoc_codec_dai(rtd, i)) {
 			dev_info(card->dev, "ASoC: CODEC DAI %s not registered\n",
 				 codec->dai_name);
 			goto _err_defer;
 		}
 
-		snd_soc_rtdcom_add(rtd, rtd->codec_dais[i]->component);
+		snd_soc_rtdcom_add(rtd, asoc_codec_dai(rtd, i)->component);
 	}
 
 	/* Single codec links expect codec and codec_dai in runtime data */
@@ -1100,7 +1100,7 @@ static int soc_init_pcm_runtime(struct snd_soc_card *card,
 				struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_dai_link *dai_link = rtd->dai_link;
-	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	struct snd_soc_dai *cpu_dai = asoc_cpu_dai(rtd, 0);
 	struct snd_soc_component *component;
 	int ret, num, i;
 

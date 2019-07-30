@@ -135,7 +135,7 @@ static ssize_t dpcm_state_read_file(struct file *file, char __user *user_buf,
 			 "%s doesn't support Multi CPU yet\n", __func__);
 
 	for_each_pcm_streams(stream)
-		if (snd_soc_dai_stream_valid(fe->cpu_dai, stream))
+		if (snd_soc_dai_stream_valid(asoc_cpu_dai(fe, 0), stream))
 			offset += dpcm_show_state(fe, stream,
 						  buf + offset,
 						  out_count - offset);
@@ -575,7 +575,7 @@ static void soc_pcm_init_runtime_hw(struct snd_pcm_substream *substream)
 		dev_warn(rtd->dev,
 			 "%s doesn't support Multi CPU yet\n", __func__);
 
-	cpu_stream = snd_soc_dai_get_pcm_stream(rtd->cpu_dai, stream);
+	cpu_stream = snd_soc_dai_get_pcm_stream(asoc_cpu_dai(rtd, 0), stream);
 
 	/* first calculate min/max only for CODECs in the DAI link */
 	for_each_rtd_codec_dais(rtd, i, codec_dai) {
@@ -757,9 +757,9 @@ static int soc_pcm_open(struct snd_pcm_substream *substream)
 	soc_pcm_init_runtime_hw(substream);
 
 	if (rtd->num_cpus == 1)
-		cpu_dai_name = rtd->cpu_dai->name;
+		cpu_dai_name = asoc_cpu_dai(rtd, 0)->name;
 	if (rtd->num_codecs == 1)
-		codec_dai_name = rtd->codec_dai->name;
+		codec_dai_name = asoc_codec_dai(rtd, 0)->name;
 
 	if (soc_pcm_has_symmetry(substream))
 		runtime->hw.info |= SNDRV_PCM_INFO_JOINT_DUPLEX;
@@ -1021,7 +1021,7 @@ static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 		dev_warn(rtd->dev,
 			 "%s doesn't support Multi CPU yet\n", __func__);
 
-	cpu_dai = rtd->cpu_dai;
+	cpu_dai = asoc_cpu_dai(rtd, 0);
 
 	/* store the parameters for each DAIs */
 	cpu_dai->rate = params_rate(params);
@@ -1330,7 +1330,7 @@ static bool dpcm_end_walk_at_be(struct snd_soc_dapm_widget *widget,
 int dpcm_path_get(struct snd_soc_pcm_runtime *fe,
 	int stream, struct snd_soc_dapm_widget_list **list)
 {
-	struct snd_soc_dai *cpu_dai = fe->cpu_dai;
+	struct snd_soc_dai *cpu_dai = asoc_cpu_dai(fe, 0);
 	int paths;
 
 	if (fe->num_cpus > 1)
@@ -1625,7 +1625,7 @@ static void dpcm_runtime_merge_chan(struct snd_pcm_substream *substream,
 			dev_warn(be->dev,
 				 "%s doesn't support Multi CPU yet\n", __func__);
 
-		cpu_stream = snd_soc_dai_get_pcm_stream(be->cpu_dai, stream);
+		cpu_stream = snd_soc_dai_get_pcm_stream(asoc_cpu_dai(be, 0), stream);
 
 		*channels_min = max(*channels_min, cpu_stream->channels_min);
 		*channels_max = min(*channels_max, cpu_stream->channels_max);
@@ -1635,7 +1635,7 @@ static void dpcm_runtime_merge_chan(struct snd_pcm_substream *substream,
 		 * DAIs connected to a single CPU DAI, use CPU DAI's directly
 		 */
 		if (be->num_codecs == 1) {
-			codec_stream = snd_soc_dai_get_pcm_stream(be->codec_dais[0], stream);
+			codec_stream = snd_soc_dai_get_pcm_stream(asoc_codec_dai(be, 0), stream);
 
 			*channels_min = max(*channels_min,
 					    codec_stream->channels_min);
@@ -1690,7 +1690,7 @@ static void dpcm_set_fe_runtime(struct snd_pcm_substream *substream)
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_pcm_stream *stream = snd_soc_dai_get_pcm_stream(
-		rtd->cpu_dai, substream->stream);
+		asoc_cpu_dai(rtd, 0), substream->stream);
 
 	if (rtd->num_cpus > 1)
 		dev_warn(rtd->dev,
@@ -1741,7 +1741,7 @@ static int dpcm_apply_symmetry(struct snd_pcm_substream *fe_substream,
 {
 	struct snd_soc_dpcm *dpcm;
 	struct snd_soc_pcm_runtime *fe = fe_substream->private_data;
-	struct snd_soc_dai *fe_cpu_dai = fe->cpu_dai;
+	struct snd_soc_dai *fe_cpu_dai = asoc_cpu_dai(fe, 0);
 	int err;
 
 	if (fe->num_cpus > 1)
@@ -2525,7 +2525,7 @@ static int soc_dpcm_fe_runtime_update(struct snd_soc_pcm_runtime *fe, int new)
 		return 0;
 
 	/* only check active links */
-	if (!fe->cpu_dai->active)
+	if (!asoc_cpu_dai(fe, 0)->active)
 		return 0;
 
 	/* DAPM sync will call this to update DSP paths */
@@ -2715,7 +2715,7 @@ int soc_new_pcm(struct snd_soc_pcm_runtime *rtd, int num)
 			snprintf(new_name, sizeof(new_name), "%s %s-%d",
 				rtd->dai_link->stream_name,
 				(rtd->num_codecs > 1) ?
-				"multicodec" : rtd->codec_dai->name, num);
+				"multicodec" : asoc_codec_dai(rtd, 0)->name, num);
 
 		ret = snd_pcm_new(rtd->card->snd_card, new_name, num, playback,
 			capture, &pcm);
@@ -2795,8 +2795,8 @@ int soc_new_pcm(struct snd_soc_pcm_runtime *rtd, int num)
 	pcm->no_device_suspend = true;
 out:
 	dev_info(rtd->card->dev, "%s <-> %s mapping ok\n",
-		 (rtd->num_codecs > 1) ? "multicodec" : rtd->codec_dai->name,
-		 (rtd->num_cpus > 1)   ? "multicpu"   : rtd->cpu_dai->name);
+		 (rtd->num_codecs > 1) ? "multicodec" : asoc_codec_dai(rtd, 0)->name,
+		 (rtd->num_cpus > 1)   ? "multicpu"   : asoc_cpu_dai(rtd, 0)->name);
 	return ret;
 }
 
