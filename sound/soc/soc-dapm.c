@@ -4280,7 +4280,7 @@ int snd_soc_dapm_link_dai_widgets(struct snd_soc_card *card)
 static void dapm_connect_dai_link_widgets(struct snd_soc_card *card,
 					  struct snd_soc_pcm_runtime *rtd)
 {
-	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	struct snd_soc_dai *cpu_dai = asoc_cpu_dai(rtd, 0);
 	struct snd_soc_dai *codec_dai;
 	struct snd_soc_dapm_widget *playback = NULL, *capture = NULL;
 	struct snd_soc_dapm_widget *codec, *playback_cpu, *capture_cpu;
