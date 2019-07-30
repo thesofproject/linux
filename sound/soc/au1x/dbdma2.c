@@ -292,7 +292,7 @@ static int au1xpsc_pcm_open(struct snd_soc_component *component,
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	int stype = substream->stream, *dmaids;
 
-	dmaids = snd_soc_dai_get_dma_data(rtd->cpu_dai, substream);
+	dmaids = snd_soc_dai_get_dma_data(asoc_cpu_dai(rtd, 0), substream);
 	if (!dmaids)
 		return -ENODEV;	/* whoa, has ordering changed? */
 
