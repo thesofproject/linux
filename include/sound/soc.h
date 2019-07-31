@@ -413,7 +413,7 @@ enum snd_soc_card_subclass {
 	SND_SOC_CARD_CLASS_RUNTIME	= 1,
 };
 
-#define for_each_pcm_stream(stream) \
+#define for_each_pcm_streams(stream) \
 	for (stream  = SNDRV_PCM_STREAM_PLAYBACK;	\
 	     stream <= SNDRV_PCM_STREAM_LAST;		\
 	     stream++)
@@ -1149,7 +1149,7 @@ struct snd_soc_pcm_runtime {
 	for ((i) = 0;							\
 	     ((i) < rtd->num_components) && ((component) = rtd->components[i]);\
 	     (i)++)
-#define for_each_rtd_codec_dai(rtd, i, dai)\
+#define for_each_rtd_codec_dais(rtd, i, dai)\
 	for ((i) = 0;						       \
 	     ((i) < rtd->num_codecs) && ((dai) = rtd->codec_dais[i]); \
 	     (i)++)

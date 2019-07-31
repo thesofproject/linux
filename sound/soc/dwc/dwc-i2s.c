@@ -428,7 +428,7 @@ static int dw_i2s_resume(struct snd_soc_component *component)
 		clk_enable(dev->clk);
 
 	for_each_component_dais(component, dai) {
-		for_each_pcm_stream(stream)
+		for_each_pcm_streams(stream)
 			if (dai->stream_active[stream])
 				dw_i2s_config(dev, stream);
 	}
