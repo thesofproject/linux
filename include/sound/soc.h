@@ -843,11 +843,14 @@ struct snd_soc_dai_link {
 	struct snd_soc_dobj dobj; /* For topology */
 #endif
 };
+#define for_each_link_cpus(link, i, cpu)				\
+	for ((i) = 0;							\
+	     ((i) < link->num_cpus) && ((cpu) = &link->cpus[i]);	\
+	     (i)++)
 #define for_each_link_codecs(link, i, codec)				\
 	for ((i) = 0;							\
 	     ((i) < link->num_codecs) && ((codec) = &link->codecs[i]);	\
 	     (i)++)
-
 #define for_each_link_platforms(link, i, platform)			\
 	for ((i) = 0;							\
 	     ((i) < link->num_platforms) &&				\
@@ -1135,6 +1138,8 @@ struct snd_soc_pcm_runtime {
 	struct snd_soc_dai *codec_dai;
 	struct snd_soc_dai *cpu_dai;
 
+	struct snd_soc_dai **cpu_dais;
+	unsigned int num_cpus;
 	struct snd_soc_dai **codec_dais;
 	unsigned int num_codecs;
 
@@ -1156,6 +1161,10 @@ struct snd_soc_pcm_runtime {
 #define for_each_rtd_components(rtd, i, component)			\
 	for ((i) = 0;							\
 	     ((i) < rtd->num_components) && ((component) = rtd->components[i]);\
+	     (i)++)
+#define for_each_rtd_cpu_dais(rtd, i, dai)				\
+	for ((i) = 0;							\
+	     ((i) < rtd->num_cpus) && ((dai) = rtd->cpu_dais[i]);	\
 	     (i)++)
 #define for_each_rtd_codec_dais(rtd, i, dai)\
 	for ((i) = 0;						       \

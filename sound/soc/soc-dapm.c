@@ -4288,6 +4288,10 @@ static void dapm_connect_dai_link_widgets(struct snd_soc_card *card,
 	struct snd_pcm_str *streams = rtd->pcm->streams;
 	int i;
 
+	if (rtd->num_cpus > 1)
+		dev_warn(rtd->dev,
+			 "%s doesn't support Multi CPU yet\n", __func__);
+
 	if (rtd->dai_link->params) {
 		playback_cpu = cpu_dai->capture_widget;
 		capture_cpu = cpu_dai->playback_widget;
@@ -4418,9 +4422,11 @@ static void soc_dapm_stream_event(struct snd_soc_pcm_runtime *rtd, int stream,
 	int event)
 {
 	struct snd_soc_dai *codec_dai;
+	struct snd_soc_dai *cpu_dai;
 	int i;
 
-	soc_dapm_dai_stream_event(rtd->cpu_dai, stream, event);
+	for_each_rtd_cpu_dais(rtd, i, cpu_dai)
+		soc_dapm_dai_stream_event(cpu_dai, stream, event);
 	for_each_rtd_codec_dais(rtd, i, codec_dai)
 		soc_dapm_dai_stream_event(codec_dai, stream, event);
 
