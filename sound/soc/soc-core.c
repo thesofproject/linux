@@ -495,7 +495,7 @@ static struct snd_soc_pcm_runtime *soc_new_pcm_runtime(
 	/*
 	 * rtd remaining settings
 	 */
-	for_each_pcm_stream(stream) {
+	for_each_pcm_streams(stream) {
 		INIT_LIST_HEAD(&rtd->dpcm[stream].be_clients);
 		INIT_LIST_HEAD(&rtd->dpcm[stream].fe_clients);
 	}
@@ -553,7 +553,7 @@ int snd_soc_suspend(struct device *dev)
 		if (rtd->dai_link->ignore_suspend)
 			continue;
 
-		for_each_rtd_codec_dai(rtd, i, dai) {
+		for_each_rtd_codec_dais(rtd, i, dai) {
 			if (dai->stream_active[playback])
 				snd_soc_dai_digital_mute(dai, 1, playback);
 		}
@@ -579,7 +579,7 @@ int snd_soc_suspend(struct device *dev)
 		if (rtd->dai_link->ignore_suspend)
 			continue;
 
-		for_each_pcm_stream(stream)
+		for_each_pcm_streams(stream)
 			snd_soc_dapm_stream_event(rtd, stream,
 						  SND_SOC_DAPM_STREAM_SUSPEND);
 	}
@@ -682,7 +682,7 @@ static void soc_resume_deferred(struct work_struct *work)
 		if (rtd->dai_link->ignore_suspend)
 			continue;
 
-		for_each_pcm_stream(stream)
+		for_each_pcm_streams(stream)
 			snd_soc_dapm_stream_event(rtd, stream,
 						  SND_SOC_DAPM_STREAM_RESUME);
 	}
@@ -695,7 +695,7 @@ static void soc_resume_deferred(struct work_struct *work)
 		if (rtd->dai_link->ignore_suspend)
 			continue;
 
-		for_each_rtd_codec_dai(rtd, i, dai) {
+		for_each_rtd_codec_dais(rtd, i, dai) {
 			if (dai->stream_active[playback])
 				snd_soc_dai_digital_mute(dai, 0, playback);
 		}
@@ -1344,7 +1344,7 @@ static void soc_remove_link_dais(struct snd_soc_card *card)
 	for_each_comp_order(order) {
 		for_each_card_rtds(card, rtd) {
 			/* remove the CODEC DAI */
-			for_each_rtd_codec_dai(rtd, i, codec_dai)
+			for_each_rtd_codec_dais(rtd, i, codec_dai)
 				soc_remove_dai(codec_dai, order);
 
 			soc_remove_dai(rtd->cpu_dai, order);
@@ -1370,7 +1370,7 @@ static int soc_probe_link_dais(struct snd_soc_card *card)
 				return ret;
 
 			/* probe the CODEC DAI */
-			for_each_rtd_codec_dai(rtd, i, codec_dai) {
+			for_each_rtd_codec_dais(rtd, i, codec_dai) {
 				ret = soc_probe_dai(codec_dai, order);
 				if (ret)
 					return ret;
@@ -1504,7 +1504,7 @@ int snd_soc_runtime_set_dai_fmt(struct snd_soc_pcm_runtime *rtd,
 	unsigned int i;
 	int ret;
 
-	for_each_rtd_codec_dai(rtd, i, codec_dai) {
+	for_each_rtd_codec_dais(rtd, i, codec_dai) {
 		ret = snd_soc_dai_set_fmt(codec_dai, dai_fmt);
 		if (ret != 0 && ret != -ENOTSUPP) {
 			dev_warn(codec_dai->dev,
