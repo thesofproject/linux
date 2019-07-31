@@ -964,9 +964,6 @@ static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 	struct snd_soc_dai *cpu_dai;
 	struct snd_soc_dai *codec_dai;
 	int i, ret = 0;
-	int codec_err = 0;
-	int cpu_err = 0;
-	int component_err = 0;
 
 	mutex_lock_nested(&rtd->card->pcm_mutex, rtd->card->pcm_subclass);
 
@@ -1014,7 +1011,7 @@ static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 		ret = snd_soc_dai_hw_params(codec_dai, substream,
 					    &codec_params);
 		if(ret < 0)
-			codec_err = ret;
+			goto out;
 
 		codec_dai->rate = params_rate(&codec_params);
 		codec_dai->channels = params_channels(&codec_params);
@@ -1023,10 +1020,6 @@ static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 
 		snd_soc_dapm_update_dai(substream, &codec_params, codec_dai);
 	}
-	if (codec_err) {
-		ret = codec_err;
-		goto codec_err;
-	}
 
 	for_each_rtd_cpu_dais(rtd, i, cpu_dai) {
 		if (!snd_soc_dai_stream_valid(cpu_dai, substream->stream))
@@ -1034,12 +1027,9 @@ static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 
 		ret = snd_soc_dai_hw_params(cpu_dai, substream, params);
 		if (ret < 0)
-			cpu_err = ret;
+			goto out;
 	}
-	if (cpu_err) {
-		ret = cpu_err;
-		goto cpu_err;
-	}
+
 
 	/* how to handle these for Multi CPU ? */
 	if (rtd->num_cpus > 1)
@@ -1059,45 +1049,18 @@ static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 	for_each_rtd_components(rtd, i, component) {
 		ret = snd_soc_component_hw_params(component, substream, params);
 		if (ret < 0)
-			component_err = ret;
-	}
-
-	if (component_err) {
-		ret = component_err;
-		goto component_err;
+			goto out;
 	}
 
 	ret = soc_pcm_params_symmetry(substream, params);
         if (ret)
-		goto component_err;
+		goto out;
 out:
 	mutex_unlock(&rtd->card->pcm_mutex);
-	return ret;
 
-component_err:
-	for_each_rtd_components(rtd, i, component)
-		snd_soc_component_hw_free(component, substream);
+	if (ret < 0)
+		soc_pcm_hw_free(substream);
 
-cpu_err:
-	for_each_rtd_cpu_dais(rtd, i, cpu_dai) {
-		if (!snd_soc_dai_stream_valid(cpu_dai, substream->stream))
-			continue;
-
-		snd_soc_dai_hw_free(cpu_dai, substream);
-		cpu_dai->rate = 0;
-	}
-codec_err:
-	for_each_rtd_codec_dais(rtd, i, codec_dai) {
-		if (!snd_soc_dai_stream_valid(codec_dai, substream->stream))
-			continue;
-
-		snd_soc_dai_hw_free(codec_dai, substream);
-		codec_dai->rate = 0;
-	}
-
-	soc_rtd_hw_free(rtd, substream);
-
-	mutex_unlock(&rtd->card->pcm_mutex);
 	return ret;
 }
 
