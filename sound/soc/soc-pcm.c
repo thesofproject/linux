@@ -821,7 +821,6 @@ static void soc_pcm_codec_params_fixup(struct snd_pcm_hw_params *params,
 static int soc_pcm_hw_free(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_component *component;
 	struct snd_soc_dai *dai;
 	int i, ret;
 
@@ -841,9 +840,7 @@ static int soc_pcm_hw_free(struct snd_pcm_substream *substream)
 	snd_soc_link_hw_free(substream);
 
 	/* free any component resources */
-	ret = 0;
-	for_each_rtd_components(rtd, i, component)
-		ret |= snd_soc_component_hw_free(component, substream);
+	ret = snd_soc_pcm_component_hw_free(substream);
 	if (ret < 0)
 		return ret;
 
