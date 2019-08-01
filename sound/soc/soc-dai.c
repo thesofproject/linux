@@ -343,19 +343,6 @@ void snd_soc_dai_shutdown(struct snd_soc_dai *dai,
 	dai->started--;
 }
 
-int snd_soc_dai_bespoke_trigger(struct snd_soc_dai *dai,
-				struct snd_pcm_substream *substream,
-				int cmd)
-{
-	int ret = 0;
-
-	if (dai->driver->ops &&
-	    dai->driver->ops->bespoke_trigger)
-		ret = dai->driver->ops->bespoke_trigger(substream, cmd, dai);
-
-	return ret;
-}
-
 snd_pcm_sframes_t snd_soc_dai_delay(struct snd_soc_dai *dai,
 				    struct snd_pcm_substream *substream)
 {
@@ -448,6 +435,26 @@ int snd_soc_pcm_dai_trigger(struct snd_pcm_substream *substream,
 		if (dai->driver->ops &&
 		    dai->driver->ops->trigger) {
 			ret = dai->driver->ops->trigger(substream, cmd, dai);
+			if (ret < 0)
+				return soc_dai_err(dai, ret);
+		}
+	}
+
+	return 0;
+}
+
+int snd_soc_pcm_dai_bespoke_trigger(struct snd_pcm_substream *substream,
+				    int cmd)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *dai;
+	int i, ret;
+
+	for_each_rtd_dais(rtd, i, dai) {
+		if (dai->driver->ops &&
+		    dai->driver->ops->bespoke_trigger) {
+			ret = dai->driver->ops->bespoke_trigger(substream,
+								cmd, dai);
 			if (ret < 0)
 				return soc_dai_err(dai, ret);
 		}
