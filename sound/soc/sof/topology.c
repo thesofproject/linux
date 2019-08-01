@@ -2281,6 +2281,7 @@ static int sof_dai_load(struct snd_soc_component *scomp, int index,
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_tplg_stream_caps *caps;
+	struct snd_soc_tplg_private *private = &pcm->priv;
 	struct snd_sof_pcm *spcm;
 	int stream = SNDRV_PCM_STREAM_PLAYBACK;
 	int ret = 0;
@@ -2308,6 +2309,15 @@ static int sof_dai_load(struct snd_soc_component *scomp, int index,
 	if (!spcm->pcm.playback)
 		goto capture;
 
+	ret = sof_parse_tokens(scomp, &spcm->stream[stream], stream_tokens,
+			       ARRAY_SIZE(stream_tokens), private->array,
+			       le32_to_cpu(private->size));
+	if (ret != 0) {
+		dev_err(sdev->dev, "error: parse playback stream tokens failed %d\n",
+			le32_to_cpu(private->size));
+		return ret;
+	}
+
 	caps = &spcm->pcm.caps[stream];
 
 	/* allocate playback page table buffer */
@@ -2334,6 +2344,15 @@ capture:
 	/* do we need to allocate capture PCM DMA pages */
 	if (!spcm->pcm.capture)
 		return ret;
+
+	ret = sof_parse_tokens(scomp, &spcm->stream[stream], stream_tokens,
+			       ARRAY_SIZE(stream_tokens), private->array,
+			       le32_to_cpu(private->size));
+	if (ret != 0) {
+		dev_err(sdev->dev, "error: parse capture stream tokens failed %d\n",
+			le32_to_cpu(private->size));
+		return ret;
+	}
 
 	caps = &spcm->pcm.caps[stream];
 
