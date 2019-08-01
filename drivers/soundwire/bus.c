@@ -1077,6 +1077,8 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 	struct sdw_slave *slave;
 	int i, ret = 0;
 
+	dev_dbg(bus->dev, "%s: start\n", __func__);
+
 	/* first check if any Slaves fell off the bus */
 	for (i = 1; i <= SDW_MAX_DEVICES; i++) {
 		mutex_lock(&bus->bus_lock);
@@ -1171,7 +1173,12 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 		if (ret)
 			dev_err(slave->bus->dev,
 				"Update Slave status failed:%d\n", ret);
+
+		dev_err(bus->dev, "%s: Updating Slave %d status done\n",
+			__func__, i);
 	}
+
+	dev_dbg(bus->dev, "%s: end\n", __func__);
 
 	return ret;
 }
