@@ -343,18 +343,6 @@ void snd_soc_dai_shutdown(struct snd_soc_dai *dai,
 	dai->started--;
 }
 
-int snd_soc_dai_prepare(struct snd_soc_dai *dai,
-			struct snd_pcm_substream *substream)
-{
-	int ret = 0;
-
-	if (dai->driver->ops &&
-	    dai->driver->ops->prepare)
-		ret = dai->driver->ops->prepare(substream, dai);
-
-	return ret;
-}
-
 int snd_soc_dai_trigger(struct snd_soc_dai *dai,
 			struct snd_pcm_substream *substream,
 			int cmd)
@@ -436,6 +424,24 @@ int snd_soc_pcm_dai_new(struct snd_soc_pcm_runtime *rtd)
 	for_each_rtd_dais(rtd, i, dai) {
 		if (dai->driver->pcm_new) {
 			ret = dai->driver->pcm_new(rtd, dai);
+			if (ret < 0)
+				return soc_dai_err(dai, ret);
+		}
+	}
+
+	return 0;
+}
+
+int snd_soc_pcm_dai_prepare(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *dai;
+	int i, ret;
+
+	for_each_rtd_dais(rtd, i, dai) {
+		if (dai->driver->ops &&
+		    dai->driver->ops->prepare) {
+			ret = dai->driver->ops->prepare(substream, dai);
 			if (ret < 0)
 				return soc_dai_err(dai, ret);
 		}
