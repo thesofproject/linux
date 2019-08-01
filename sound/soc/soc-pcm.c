@@ -865,7 +865,6 @@ static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 				struct snd_pcm_hw_params *params)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_component *component;
 	struct snd_soc_dai *cpu_dai;
 	struct snd_soc_dai *codec_dai;
 	int i, ret = 0;
@@ -951,11 +950,9 @@ static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 
 	snd_soc_dapm_update_dai(substream, params, cpu_dai);
 
-	for_each_rtd_components(rtd, i, component) {
-		ret = snd_soc_component_hw_params(component, substream, params);
-		if (ret < 0)
-			goto out;
-	}
+	ret = snd_soc_pcm_component_hw_params(substream, params);
+	if (ret < 0)
+		goto out;
 
 	ret = soc_pcm_params_symmetry(substream, params);
         if (ret)
