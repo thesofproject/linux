@@ -1000,6 +1000,8 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 	struct sdw_slave *slave;
 	int i, ret = 0;
 
+	dev_dbg(bus->dev, "%s: start\n", __func__);
+
 	if (status[0] == SDW_SLAVE_ATTACHED) {
 		dev_dbg(bus->dev, "Slave attached, programming device number\n");
 		ret = sdw_program_device_num(bus);
@@ -1076,7 +1078,12 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 		if (ret)
 			dev_err(slave->bus->dev,
 				"Update Slave status failed:%d\n", ret);
+
+		dev_err(bus->dev, "%s: Updating Slave %d status done\n",
+			__func__, i);
 	}
+
+	dev_dbg(bus->dev, "%s: end\n", __func__);
 
 	return ret;
 }
