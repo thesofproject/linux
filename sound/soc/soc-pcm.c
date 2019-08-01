@@ -1122,24 +1122,16 @@ static int soc_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
  */
 static snd_pcm_uframes_t soc_pcm_pointer(struct snd_pcm_substream *substream)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_dai *dai;
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	snd_pcm_uframes_t offset = 0;
-	snd_pcm_sframes_t add_delay = 0;
-	int i;
 
 	/* clearing the previous total delay */
 	runtime->delay = 0;
 
 	offset = snd_soc_pcm_component_pointer(substream);
 
-	for_each_rtd_dais(rtd, i, dai)
-		add_delay = max(add_delay,
-				snd_soc_dai_delay(dai, substream));
-
 	/* base delay if assigned in pointer callback */
-	runtime->delay += add_delay;
+	runtime->delay += snd_soc_pcm_dai_delay(substream);
 
 	return offset;
 }

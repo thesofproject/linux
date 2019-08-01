@@ -343,18 +343,6 @@ void snd_soc_dai_shutdown(struct snd_soc_dai *dai,
 	dai->started--;
 }
 
-snd_pcm_sframes_t snd_soc_dai_delay(struct snd_soc_dai *dai,
-				    struct snd_pcm_substream *substream)
-{
-	int delay = 0;
-
-	if (dai->driver->ops &&
-	    dai->driver->ops->delay)
-		delay = dai->driver->ops->delay(substream, dai);
-
-	return delay;
-}
-
 int snd_soc_dai_probe(struct snd_soc_dai *dai)
 {
 	if (dai->driver->probe)
@@ -461,4 +449,21 @@ int snd_soc_pcm_dai_bespoke_trigger(struct snd_pcm_substream *substream,
 	}
 
 	return 0;
+}
+
+snd_pcm_sframes_t snd_soc_pcm_dai_delay(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *dai;
+	snd_pcm_sframes_t delay = 0;
+	int i;
+
+	for_each_rtd_dais(rtd, i, dai) {
+		if (dai->driver->ops &&
+		    dai->driver->ops->delay)
+			delay = max(delay,
+				    dai->driver->ops->delay(substream, dai));
+	}
+
+	return delay;
 }
