@@ -336,6 +336,8 @@ static int rt700_sdw_probe(struct sdw_slave *slave,
 	struct regmap *regmap;
 	int ret = 0;
 
+	pr_debug("%s start\n", __func__);
+
 	/* Assign ops */
 	slave->ops = &rt700_slave_ops;
 
@@ -344,12 +346,17 @@ static int rt700_sdw_probe(struct sdw_slave *slave,
 	if (!regmap)
 		return -EINVAL;
 
+	pr_debug("%s start 2 \n", __func__);
 	rt700_init(&slave->dev, regmap, slave);
 
+	pr_debug("%s start 3 \n", __func__);
 	/* Perform IO operations only if slave is in ATTACHED state */
-	if (slave->status == SDW_SLAVE_ATTACHED)
+	if (slave->status == SDW_SLAVE_ATTACHED) {
+		pr_debug("%s start 4 \n", __func__);
 		rt700_io_init(&slave->dev, slave);
+	}
 
+	pr_debug("%s end \n", __func__);
 	return ret;
 }
 
