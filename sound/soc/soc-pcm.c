@@ -968,19 +968,15 @@ out:
 
 static int soc_pcm_trigger_start(struct snd_pcm_substream *substream, int cmd)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_component *component;
-	int i, ret;
+	int ret;
 
 	ret = snd_soc_link_trigger(substream, cmd);
 	if (ret < 0)
 		return ret;
 
-	for_each_rtd_components(rtd, i, component) {
-		ret = snd_soc_component_trigger(component, substream, cmd);
-		if (ret < 0)
-			return ret;
-	}
+	ret = snd_soc_pcm_component_trigger(substream, cmd);
+	if (ret < 0)
+		return ret;
 
 	ret = snd_soc_pcm_dai_trigger(substream, cmd);
 	if (ret < 0)
@@ -991,19 +987,15 @@ static int soc_pcm_trigger_start(struct snd_pcm_substream *substream, int cmd)
 
 static int soc_pcm_trigger_stop(struct snd_pcm_substream *substream, int cmd)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_component *component;
-	int i, ret;
+	int ret;
 
 	ret = snd_soc_pcm_dai_trigger(substream, cmd);
 	if (ret < 0)
 		return ret;
 
-	for_each_rtd_components(rtd, i, component) {
-		ret = snd_soc_component_trigger(component, substream, cmd);
-		if (ret < 0)
-			return ret;
-	}
+	ret = snd_soc_pcm_component_trigger(substream, cmd);
+	if (ret < 0)
+		return ret;
 
 	ret = snd_soc_link_trigger(substream, cmd);
 	if (ret < 0)
