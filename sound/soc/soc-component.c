@@ -367,15 +367,6 @@ int snd_soc_component_close(struct snd_soc_component *component,
 	return 0;
 }
 
-int snd_soc_component_trigger(struct snd_soc_component *component,
-			      struct snd_pcm_substream *substream,
-			      int cmd)
-{
-	if (component->driver->trigger)
-		return component->driver->trigger(component, substream, cmd);
-	return 0;
-}
-
 void snd_soc_component_suspend(struct snd_soc_component *component)
 {
 	if (component->driver->suspend)
@@ -653,6 +644,24 @@ int snd_soc_pcm_component_hw_params(struct snd_pcm_substream *substream,
 				return soc_component_err(component, ret);
 		}
 		component->hw_paramed++;
+	}
+
+	return 0;
+}
+
+int snd_soc_pcm_component_trigger(struct snd_pcm_substream *substream,
+				  int cmd)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_component *component;
+	int i, ret;
+
+	for_each_rtd_components(rtd, i, component) {
+		if (component->driver->trigger) {
+			ret = component->driver->trigger(component, substream, cmd);
+			if (ret < 0)
+				return soc_component_err(component, ret);
+		}
 	}
 
 	return 0;
