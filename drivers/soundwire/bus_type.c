@@ -110,6 +110,9 @@ static int sdw_drv_probe(struct device *dev)
 	slave->bus->clk_stop_timeout = max_t(u32, slave->bus->clk_stop_timeout,
 					     slave->prop.clk_stop_timeout);
 
+	slave->probe_complete = true;
+	dev_dbg(dev, "probe complete\n");
+
 	return 0;
 }
 
@@ -123,6 +126,8 @@ static int sdw_drv_remove(struct device *dev)
 		ret = drv->remove(slave);
 
 	dev_pm_domain_detach(dev, false);
+
+	slave->probe_complete = false;
 
 	return ret;
 }
