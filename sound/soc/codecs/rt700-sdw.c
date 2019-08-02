@@ -190,9 +190,17 @@ EXPORT_SYMBOL(hda_to_sdw);
 static int rt700_update_status(struct sdw_slave *slave,
 			       enum sdw_slave_status status)
 {
-	struct rt700_priv *rt700 = dev_get_drvdata(&slave->dev);
+	struct rt700_priv *rt700;
+
 
 	pr_err("plb: in %s\n", __func__);
+
+	if (!slave->probe_complete) {
+		pr_err("plb: in %s, probe not complete\n", __func__);
+		return -EAGAIN;
+	}
+
+	rt700 = dev_get_drvdata(&slave->dev);
 
 	/* Update the status */
 	rt700->status = status;
@@ -362,6 +370,7 @@ static int rt700_sdw_probe(struct sdw_slave *slave,
 
 static int rt700_sdw_remove(struct sdw_slave *slave)
 {
+	slave->probe_complete = false;
 	return rt700_remove(&slave->dev);
 }
 
@@ -384,6 +393,7 @@ static struct sdw_driver rt700_sdw_driver = {
 
 static int __init sdw_slave_init(void)
 {
+	pr_err("rt700 sdw_slave_init\n");
 	return sdw_register_driver(&rt700_sdw_driver);
 }
 
