@@ -567,6 +567,7 @@ struct sdw_slave {
 	struct completion *port_ready;
 	u16 dev_num;
 	u16 dev_num_sticky;
+	bool probe_complete;
 };
 
 #define dev_to_sdw_dev(_dev) container_of(_dev, struct sdw_slave, dev)
