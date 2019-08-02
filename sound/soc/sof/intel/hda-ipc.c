@@ -228,9 +228,10 @@ irqreturn_t hda_dsp_ipc_irq_thread(int irq, void *context)
 				    "nothing to do in IPC IRQ thread\n");
 	}
 
-	/* re-enable IPC interrupt */
-	snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR, HDA_DSP_REG_ADSPIC,
-				HDA_DSP_ADSPIC_IPC, HDA_DSP_ADSPIC_IPC);
+	/* re-enable IPC interrupt for legacy mode only */
+	if (!sdev->msi_enabled)
+		snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR, HDA_DSP_REG_ADSPIC,
+					HDA_DSP_ADSPIC_IPC, HDA_DSP_ADSPIC_IPC);
 
 	return IRQ_HANDLED;
 }
@@ -254,10 +255,11 @@ irqreturn_t hda_dsp_ipc_irq_handler(int irq, void *context)
 
 	/* IPC message ? */
 	if (irq_status & HDA_DSP_ADSPIS_IPC) {
-		/* disable IPC interrupt */
-		snd_sof_dsp_update_bits_unlocked(sdev, HDA_DSP_BAR,
-						 HDA_DSP_REG_ADSPIC,
-						 HDA_DSP_ADSPIC_IPC, 0);
+		/* disable IPC interrupt for legacy mode only */
+		if (!sdev->msi_enabled)
+			snd_sof_dsp_update_bits_unlocked(sdev, HDA_DSP_BAR,
+							 HDA_DSP_REG_ADSPIC,
+							 HDA_DSP_ADSPIC_IPC, 0);
 		ret = IRQ_WAKE_THREAD;
 	}
 

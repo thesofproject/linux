@@ -105,9 +105,10 @@ static irqreturn_t cnl_ipc_irq_thread(int irq, void *context)
 				    "nothing to do in IPC IRQ thread\n");
 	}
 
-	/* re-enable IPC interrupt */
-	snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR, HDA_DSP_REG_ADSPIC,
-				HDA_DSP_ADSPIC_IPC, HDA_DSP_ADSPIC_IPC);
+	/* re-enable IPC interrupt for legacy interrupts only */
+	if (!sdev->msi_enabled)
+		snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR, HDA_DSP_REG_ADSPIC,
+					HDA_DSP_ADSPIC_IPC, HDA_DSP_ADSPIC_IPC);
 
 	return IRQ_HANDLED;
 }
