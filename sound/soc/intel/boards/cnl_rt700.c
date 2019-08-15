@@ -23,6 +23,10 @@
 #include <sound/soc-acpi.h>
 #include "../../codecs/hdac_hdmi.h"
 
+static int is_rt711;
+module_param_named(is_using_rt711, is_rt711, int, 0444);
+MODULE_PARM_DESC(sof_debug, "Using rt711 test card");
+
 struct cnl_rt700_mc_private {
 	struct list_head hdmi_pcm_list;
 };
@@ -104,7 +108,6 @@ static const struct snd_soc_dapm_widget cnl_rt700_widgets[] = {
 static const struct snd_soc_dapm_route cnl_rt700_map[] = {
 	/*Headphones*/
 	{ "Headphones", NULL, "HP" },
-	{ "Speaker", NULL, "SPK" },
 	{ "MIC2", NULL, "AMIC" },
 };
 
@@ -114,12 +117,34 @@ static const struct snd_kcontrol_new cnl_rt700_controls[] = {
 	SOC_DAPM_PIN_SWITCH("Speaker"),
 };
 
+static const struct snd_soc_dapm_route cnl_spk_rt700_map[] = {
+	{ "Speaker", NULL, "SPK" },
+};
+
+static const struct snd_soc_dapm_route cnl_spk_rt1308_map[] = {
+	{ "Speaker", NULL, "rt1308-1 SPOL" },
+	{ "Speaker", NULL, "rt1308-1 SPOR" },
+	{ "Speaker", NULL, "rt1308-2 SPOL" },
+	{ "Speaker", NULL, "rt1308-2 SPOR" },
+};
+
 SND_SOC_DAILINK_DEF(sdw0_pin2,
 	DAILINK_COMP_ARRAY(COMP_CPU("SDW0 Pin2")));
 SND_SOC_DAILINK_DEF(sdw0_pin3,
 	DAILINK_COMP_ARRAY(COMP_CPU("SDW0 Pin3")));
+
 SND_SOC_DAILINK_DEF(sdw0_codec,
 	DAILINK_COMP_ARRAY(COMP_CODEC("sdw:0:25d:700:0:0", "rt700-aif1")));
+
+SND_SOC_DAILINK_DEF(sdw1_pin,
+	DAILINK_COMP_ARRAY(COMP_CPU("SDW1 Pin2")));
+SND_SOC_DAILINK_DEF(sdw1_codec,
+	DAILINK_COMP_ARRAY(COMP_CODEC("sdw:1:25d:1308:0:0", "rt1308-aif")));
+
+SND_SOC_DAILINK_DEF(sdw2_pin,
+	DAILINK_COMP_ARRAY(COMP_CPU("SDW2 Pin2")));
+SND_SOC_DAILINK_DEF(sdw2_codec,
+	DAILINK_COMP_ARRAY(COMP_CODEC("sdw:2:25d:1308:0:2", "rt1308-aif")));
 
 SND_SOC_DAILINK_DEF(dmic_pin,
 	DAILINK_COMP_ARRAY(COMP_CPU("DMIC01 Pin")));
@@ -150,6 +175,39 @@ SND_SOC_DAILINK_DEF(idisp3_codec,
 SND_SOC_DAILINK_DEF(platform,
 		DAILINK_COMP_ARRAY(COMP_PLATFORM("0000:00:1f.3")));
 
+static struct snd_soc_dai_link_component rt711_component[] = {
+	{
+		.name = "sdw:0:25d:711:0:1",
+		.dai_name = "rt711-aif1",
+	}
+};
+
+static int cnl_rt700_init(struct snd_soc_pcm_runtime *runtime)
+{
+	struct snd_soc_card *card = runtime->card;
+	int ret;
+
+	ret = snd_soc_dapm_add_routes(&card->dapm, cnl_spk_rt700_map,
+				      ARRAY_SIZE(cnl_spk_rt700_map));
+	if (ret)
+		dev_warn(card->dev, "add new routes failed %d\n", ret);
+
+	return ret;
+}
+
+static int cnl_rt1308_init(struct snd_soc_pcm_runtime *runtime)
+{
+	struct snd_soc_card *card = runtime->card;
+	int ret;
+
+	ret = snd_soc_dapm_add_routes(&card->dapm, cnl_spk_rt1308_map,
+				      ARRAY_SIZE(cnl_spk_rt1308_map));
+	if (ret)
+		dev_warn(card->dev, "add new routes failed %d\n", ret);
+
+	return ret;
+}
+
 struct snd_soc_dai_link cnl_rt700_msic_dailink[] = {
 	{
 		.name = "SDW0-Playback",
@@ -169,7 +227,7 @@ struct snd_soc_dai_link cnl_rt700_msic_dailink[] = {
 	},
 	{
 		.name = "dmic01",
-		.id = 2,
+		.id = 4,
 		.ignore_suspend = 1,
 		.dpcm_capture = 1,
 		.no_pcm = 1,
@@ -177,7 +235,7 @@ struct snd_soc_dai_link cnl_rt700_msic_dailink[] = {
 	},
 	{
 		.name = "dmic16k",
-		.id = 3,
+		.id = 5,
 		.ignore_suspend = 1,
 		.dpcm_capture = 1,
 		.no_pcm = 1,
@@ -186,7 +244,7 @@ struct snd_soc_dai_link cnl_rt700_msic_dailink[] = {
 #if IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
 	{
 		.name = "iDisp1",
-		.id = 4,
+		.id = 6,
 		.init = cnl_hdmi_init,
 		.no_pcm = 1,
 		.dpcm_playback = 1,
@@ -194,7 +252,7 @@ struct snd_soc_dai_link cnl_rt700_msic_dailink[] = {
 	},
 	{
 		.name = "iDisp2",
-		.id = 5,
+		.id = 7,
 		.init = cnl_hdmi_init,
 		.no_pcm = 1,
 		.dpcm_playback = 1,
@@ -202,13 +260,41 @@ struct snd_soc_dai_link cnl_rt700_msic_dailink[] = {
 	},
 	{
 		.name = "iDisp3",
-		.id = 6,
+		.id = 8,
 		.init = cnl_hdmi_init,
 		.no_pcm = 1,
 		.dpcm_playback = 1,
 		SND_SOC_DAILINK_REG(idisp3_pin, idisp3_codec, platform),
 	},
 #endif
+	{
+		.name = "SDW1-Codec",
+		.id = 2,
+		.no_pcm = 1,
+		.dpcm_playback = 1,
+		.nonatomic = true,
+		.init = cnl_rt1308_init,
+		SND_SOC_DAILINK_REG(sdw1_pin, sdw1_codec, platform),
+	},
+	{
+		.name = "SDW2-Codec",
+		.id = 3,
+		.no_pcm = 1,
+		.dpcm_playback = 1,
+		.nonatomic = true,
+		SND_SOC_DAILINK_REG(sdw2_pin, sdw2_codec, platform),
+	},
+};
+
+static struct snd_soc_codec_conf rt1308_codec_conf[] = {
+	{
+		.dev_name = "sdw:1:25d:1308:0:0",
+		.name_prefix = "rt1308-1",
+	},
+	{
+		.dev_name = "sdw:2:25d:1308:0:2",
+		.name_prefix = "rt1308-2",
+	},
 };
 
 /* SoC card */
@@ -242,6 +328,22 @@ static int snd_cnl_rt700_mc_probe(struct platform_device *pdev)
 #if IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
 	INIT_LIST_HEAD(&ctx->hdmi_pcm_list);
 #endif
+
+	if (is_rt711) {
+		snd_soc_card_cnl_rt700.codec_conf = rt1308_codec_conf;
+		snd_soc_card_cnl_rt700.num_configs =
+			ARRAY_SIZE(rt1308_codec_conf);
+		cnl_rt700_msic_dailink[0].codecs = rt711_component;
+		cnl_rt700_msic_dailink[0].num_codecs =
+			ARRAY_SIZE(rt711_component);
+		cnl_rt700_msic_dailink[1].codecs = rt711_component;
+		cnl_rt700_msic_dailink[1].num_codecs =
+			ARRAY_SIZE(rt711_component);
+	} else {
+		cnl_rt700_msic_dailink[0].init = cnl_rt700_init;
+		snd_soc_card_cnl_rt700.num_links =
+			ARRAY_SIZE(cnl_rt700_msic_dailink) - 2;
+	}
 
 	card = &snd_soc_card_cnl_rt700;
 	card->dev = &pdev->dev;
