@@ -14,6 +14,9 @@
 #include "../../codecs/hdac_hdmi.h"
 #include "skl_hda_dsp_common.h"
 
+#include <sound/hda_codec.h>
+#include "../../codecs/hdac_hda.h"
+
 #define NAME_SIZE	32
 
 int skl_hda_hdmi_add_pcm(struct snd_soc_card *card, int device)
@@ -136,14 +139,19 @@ int skl_hda_hdmi_jack_init(struct snd_soc_card *card)
 	char jack_name[NAME_SIZE];
 	int err;
 
+	if (ctx->common_hdmi_codec_drv)
+		return skl_hda_hdmi_build_controls(card);
+
 	list_for_each_entry(pcm, &ctx->hdmi_pcm_list, head) {
+		if (!pcm)
+			continue;
+
 		component = pcm->codec_dai->component;
 		snprintf(jack_name, sizeof(jack_name),
 			 "HDMI/DP, pcm=%d Jack", pcm->device);
 		err = snd_soc_card_jack_new(card, jack_name,
 					    SND_JACK_AVOUT, &pcm->hdmi_jack,
 					    NULL, 0);
-
 		if (err)
 			return err;
 
