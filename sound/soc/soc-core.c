@@ -186,7 +186,7 @@ static int dai_list_show(struct seq_file *m, void *v)
 
 	for_each_component(component)
 		for_each_component_dais(component, dai)
-			seq_printf(m, "%s\n", dai->name);
+		seq_printf(m, "%s : id %d\n", dai->name, dai->id);
 
 	mutex_unlock(&client_mutex);
 
