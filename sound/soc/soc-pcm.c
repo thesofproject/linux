@@ -878,6 +878,10 @@ static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 
 	mutex_lock_nested(&rtd->pcm_mutex, rtd->pcm_subclass);
 	if (rtd->dai_link->ops->hw_params) {
+
+		pr_err("plb: %s dai_link name name %s\n", __func__,
+		       rtd->dai_link->name);
+
 		ret = rtd->dai_link->ops->hw_params(substream, params);
 		if (ret < 0) {
 			dev_err(rtd->card->dev, "ASoC: machine hw_params"
@@ -888,6 +892,9 @@ static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 
 	for_each_rtd_codec_dai(rtd, i, codec_dai) {
 		struct snd_pcm_hw_params codec_params;
+
+		pr_err("plb: %s codec_dai name %s\n", __func__,
+		       codec_dai->name);
 
 		/*
 		 * Skip CODECs which don't support the current stream type,
@@ -933,6 +940,8 @@ static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 		snd_soc_dapm_update_dai(substream, &codec_params, codec_dai);
 	}
 
+	pr_err("plb: %s cpu_dai name %s\n", __func__, cpu_dai->name);
+
 	ret = snd_soc_dai_hw_params(cpu_dai, substream, params);
 	if (ret < 0)
 		goto interface_err;
@@ -947,6 +956,9 @@ static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 
 	for_each_rtdcom(rtd, rtdcom) {
 		component = rtdcom->component;
+
+		pr_err("plb: %s component name %s\n", __func__,
+		       component->name);
 
 		ret = snd_soc_component_hw_params(component, substream, params);
 		if (ret < 0) {
@@ -1057,6 +1069,8 @@ static int soc_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 	int i, ret;
 
 	for_each_rtd_codec_dai(rtd, i, codec_dai) {
+		pr_err("plb: %s codec_dai name %s\n", __func__,
+		       codec_dai->name);
 		ret = snd_soc_dai_trigger(codec_dai, substream, cmd);
 		if (ret < 0)
 			return ret;
@@ -1065,16 +1079,26 @@ static int soc_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 	for_each_rtdcom(rtd, rtdcom) {
 		component = rtdcom->component;
 
+		pr_err("plb: %s component name %s\n", __func__,
+		       component->name);
+
 		ret = snd_soc_component_trigger(component, substream, cmd);
 		if (ret < 0)
 			return ret;
 	}
+
+	pr_err("plb: %s cpu_dai name %s\n", __func__,
+	       cpu_dai->name);
 
 	snd_soc_dai_trigger(cpu_dai, substream, cmd);
 	if (ret < 0)
 		return ret;
 
 	if (rtd->dai_link->ops->trigger) {
+		pr_err("plb: %s dai_link name %s\n", __func__,
+		       rtd->dai_link->name);
+
+
 		ret = rtd->dai_link->ops->trigger(substream, cmd);
 		if (ret < 0)
 			return ret;
