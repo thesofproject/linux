@@ -192,7 +192,7 @@ static struct sdw_intel_ctx
 		link->alh = res->mmio_base + SDW_ALH_BASE;
 		link->irq = res->irq;
 		link->ops = res->ops;
-		link->arg = res->arg;
+		link->dev = res->dev;
 
 		/* let the SoundWire master driver to its probe */
 		md->driver->probe(md, link);
