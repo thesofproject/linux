@@ -1237,6 +1237,7 @@ static int sdw_master_read_intel_prop(struct sdw_bus *bus)
 				 "intel-sdw-ip-clock",
 				 &prop->mclk_freq);
 
+	prop->mclk_freq /= 2;
 	fwnode_property_read_u32(link,
 				 "intel-quirk-mask",
 				 &quirk_mask);
