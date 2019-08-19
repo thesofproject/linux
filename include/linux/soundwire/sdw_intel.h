@@ -13,6 +13,7 @@
 struct sdw_intel_ops {
 	int (*config_stream)(void *arg, void *substream,
 			     void *dai, void *hw_params, int stream_num);
+	int (*free_stream)(void *arg, void *substream, void *dai);
 };
 
 /**
