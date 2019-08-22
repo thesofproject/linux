@@ -3812,7 +3812,7 @@ snd_soc_dai_link_event_pre_pmu(struct snd_soc_dapm_widget *w,
 				"ASoC: startup() failed: %d\n", ret);
 			goto out;
 		}
-		source->active++;
+		source->stream_active[substream->stream]++;
 	}
 
 	substream->stream = SNDRV_PCM_STREAM_PLAYBACK;
@@ -3825,7 +3825,7 @@ snd_soc_dai_link_event_pre_pmu(struct snd_soc_dapm_widget *w,
 				"ASoC: startup() failed: %d\n", ret);
 			goto out;
 		}
-		sink->active++;
+		sink->stream_active[substream->stream]++;
 	}
 
 	substream->hw_opened = 1;
@@ -3958,14 +3958,14 @@ static int snd_soc_dai_link_event(struct snd_soc_dapm_widget *w,
 		substream->stream = SNDRV_PCM_STREAM_CAPTURE;
 		snd_soc_dapm_widget_for_each_source_path(w, path) {
 			source = path->source->priv;
-			source->active--;
+			source->stream_active[substream->stream]--;
 			snd_soc_dai_shutdown(source, substream);
 		}
 
 		substream->stream = SNDRV_PCM_STREAM_PLAYBACK;
 		snd_soc_dapm_widget_for_each_sink_path(w, path) {
 			sink = path->sink->priv;
-			sink->active--;
+			sink->stream_active[substream->stream]--;
 			snd_soc_dai_shutdown(sink, substream);
 		}
 		break;
