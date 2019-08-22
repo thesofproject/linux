@@ -294,6 +294,18 @@ int snd_soc_component_set_jack(struct snd_soc_component *component,
 }
 EXPORT_SYMBOL_GPL(snd_soc_component_set_jack);
 
+int snd_soc_component_activity(struct snd_soc_component *component)
+{
+	struct snd_soc_dai *dai;
+	int active = 0;
+
+	for_each_component_dais(component, dai)
+		active += snd_soc_dai_activity(dai);
+
+	return active;
+}
+EXPORT_SYMBOL_GPL(snd_soc_component_activity);
+
 int snd_soc_component_module_get(struct snd_soc_component *component,
 				 int upon_open)
 {
