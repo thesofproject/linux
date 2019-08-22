@@ -662,7 +662,7 @@ static int s3c2412_i2s_suspend(struct snd_soc_dai *dai)
 	struct s3c_i2sv2_info *i2s = to_info(dai);
 	u32 iismod;
 
-	if (dai->active) {
+	if (snd_soc_dai_activity(dai)) {
 		i2s->suspend_iismod = readl(i2s->regs + S3C2412_IISMOD);
 		i2s->suspend_iiscon = readl(i2s->regs + S3C2412_IISCON);
 		i2s->suspend_iispsr = readl(i2s->regs + S3C2412_IISPSR);
@@ -689,9 +689,9 @@ static int s3c2412_i2s_resume(struct snd_soc_dai *dai)
 	struct s3c_i2sv2_info *i2s = to_info(dai);
 
 	pr_info("dai_active %d, IISMOD %08x, IISCON %08x\n",
-		dai->active, i2s->suspend_iismod, i2s->suspend_iiscon);
+		snd_soc_dai_activity(dai), i2s->suspend_iismod, i2s->suspend_iiscon);
 
-	if (dai->active) {
+	if (snd_soc_dai_activity(dai)) {
 		writel(i2s->suspend_iiscon, i2s->regs + S3C2412_IISCON);
 		writel(i2s->suspend_iismod, i2s->regs + S3C2412_IISMOD);
 		writel(i2s->suspend_iispsr, i2s->regs + S3C2412_IISPSR);
