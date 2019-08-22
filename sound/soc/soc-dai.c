@@ -276,6 +276,18 @@ int snd_soc_dai_digital_mute(struct snd_soc_dai *dai, int mute,
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_digital_mute);
 
+int snd_soc_dai_activity(struct snd_soc_dai *dai)
+{
+	int stream, active;
+
+	active = 0;
+	for_each_pcm_streams(stream)
+		active += dai->stream_active[stream];
+
+	return active;
+}
+EXPORT_SYMBOL_GPL(snd_soc_dai_activity);
+
 int snd_soc_dai_hw_params(struct snd_soc_dai *dai,
 			  struct snd_pcm_substream *substream,
 			  struct snd_pcm_hw_params *params)
