@@ -2039,7 +2039,7 @@ static int max98090_dai_trigger(struct snd_pcm_substream *substream, int cmd,
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_RESUME:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
-		if (!max98090->master && dai->active == 1)
+		if (!max98090->master && snd_soc_dai_activity(dai) == 1)
 			queue_delayed_work(system_power_efficient_wq,
 					   &max98090->pll_det_enable_work,
 					   msecs_to_jiffies(10));
@@ -2047,7 +2047,7 @@ static int max98090_dai_trigger(struct snd_pcm_substream *substream, int cmd,
 	case SNDRV_PCM_TRIGGER_STOP:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
-		if (!max98090->master && dai->active == 1)
+		if (!max98090->master && snd_soc_dai_activity(dai) == 1)
 			schedule_work(&max98090->pll_det_disable_work);
 		break;
 	default:
@@ -2109,7 +2109,7 @@ static void max98090_pll_work(struct work_struct *work)
 		container_of(work, struct max98090_priv, pll_work);
 	struct snd_soc_component *component = max98090->component;
 
-	if (!snd_soc_component_is_active(component))
+	if (!snd_soc_component_activity(component))
 		return;
 
 	dev_info_ratelimited(component->dev, "PLL unlocked\n");
