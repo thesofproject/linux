@@ -209,10 +209,10 @@ static int soc_compr_free(struct snd_compr_stream *cstream)
 
 	snd_soc_dai_digital_mute(codec_dai, 1, cstream->direction);
 
-	if (!cpu_dai->active)
+	if (!snd_soc_dai_activity(cpu_dai))
 		cpu_dai->rate = 0;
 
-	if (!codec_dai->active)
+	if (!snd_soc_dai_activity(codec_dai))
 		codec_dai->rate = 0;
 
 	if (rtd->dai_link->compr_ops && rtd->dai_link->compr_ops->shutdown)
