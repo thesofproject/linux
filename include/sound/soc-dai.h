@@ -137,7 +137,7 @@ int snd_soc_dai_set_tristate(struct snd_soc_dai *dai, int tristate);
 /* Digital Audio Interface mute */
 int snd_soc_dai_digital_mute(struct snd_soc_dai *dai, int mute,
 			     int direction);
-
+int snd_soc_dai_activity(struct snd_soc_dai *dai);
 
 int snd_soc_dai_get_channel_map(struct snd_soc_dai *dai,
 		unsigned int *tx_num, unsigned int *tx_slot,
