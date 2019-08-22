@@ -278,11 +278,8 @@ static void snd_soc_runtime_action(struct snd_soc_pcm_runtime *rtd,
 
 	lockdep_assert_held(&rtd->card->pcm_mutex);
 
-	for_each_rtd_dais(rtd, i, dai) {
+	for_each_rtd_dais(rtd, i, dai)
 		dai->stream_active[stream] += action;
-		dai->active += action;
-		dai->component->active += action;
-	}
 }
 
 /**

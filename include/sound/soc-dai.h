@@ -350,8 +350,6 @@ struct snd_soc_dai {
 	unsigned int stream_active[SNDRV_PCM_STREAM_LAST + 1]; /* usage count */
 	unsigned int probed:1;
 
-	unsigned int active;
-
 	u8 started;
 	u8 hw_paramed;
 	u8 trigger_started;
