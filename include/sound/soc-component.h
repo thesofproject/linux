@@ -181,8 +181,6 @@ struct snd_soc_component {
 	struct device *dev;
 	struct snd_soc_card *card;
 
-	unsigned int active;
-
 	struct list_head list;
 	struct list_head card_aux_list; /* for auxiliary bound components */
 	struct list_head card_list;
@@ -388,12 +386,6 @@ static inline void snd_soc_component_set_drvdata(struct snd_soc_component *c,
 static inline void *snd_soc_component_get_drvdata(struct snd_soc_component *c)
 {
 	return dev_get_drvdata(c->dev);
-}
-
-static inline bool snd_soc_component_is_active(
-	struct snd_soc_component *component)
-{
-	return component->active != 0;
 }
 
 /* component pin */
