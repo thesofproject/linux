@@ -401,16 +401,6 @@ static int rt711_set_jack_detect(struct snd_soc_component *component,
 	/* power on */
 	regmap_write(rt711->regmap, RT711_SET_AUDIO_POWER_STATE, AC_PWRST_D0);
 
-	/* Enable Jack Detection */
-	rt711_index_write(rt711->regmap, RT711_VENDOR_REG,
-		RT711_DIGITAL_MISC_CTRL4, 0x201b);
-	rt711_index_write(rt711->regmap, RT711_VENDOR_REG,
-		RT711_COMBO_JACK_AUTO_CTL1, 0x5089);
-	rt711_index_write(rt711->regmap, RT711_VENDOR_REG,
-		RT711_VREFOUT_CTL, 0x5064);
-	rt711_index_write(rt711->regmap, RT711_VENDOR_REG,
-		RT711_INLINE_CMD_CTL, 0xd249);
-
 	/* unsolicited response & IRQ control */
 	regmap_write(rt711->regmap, RT711_SET_MIC2_UNSOLICITED_ENABLE, 0x82);
 	regmap_write(rt711->regmap, RT711_SET_HP_UNSOLICITED_ENABLE, 0x81);
@@ -1209,6 +1199,16 @@ int rt711_io_init(struct device *dev, struct sdw_slave *slave)
 	/* Data port arragement */
 	rt711_index_write(rt711->regmap, RT711_VENDOR_REG,
 		RT711_TX_RX_MUX_CTL, 0x0154);
+
+	/* Set index */
+	rt711_index_write(rt711->regmap, RT711_VENDOR_REG,
+		RT711_DIGITAL_MISC_CTRL4, 0x201b);
+	rt711_index_write(rt711->regmap, RT711_VENDOR_REG,
+		RT711_COMBO_JACK_AUTO_CTL1, 0x5089);
+	rt711_index_write(rt711->regmap, RT711_VENDOR_REG,
+		RT711_VREFOUT_CTL, 0x5064);
+	rt711_index_write(rt711->regmap, RT711_VENDOR_REG,
+		RT711_INLINE_CMD_CTL, 0xd249);
 
 	/* Finish Initial Settings, set power to D3 */
 	regmap_write(rt711->regmap, RT711_SET_AUDIO_POWER_STATE, AC_PWRST_D3);
