@@ -422,3 +422,35 @@ int snd_sof_suspend(struct device *dev)
 	return sof_suspend(dev, false);
 }
 EXPORT_SYMBOL(snd_sof_suspend);
+
+int snd_sof_set_dsp_state(struct snd_sof_dev *sdev,
+			  enum sof_d0_substate d0_substate)
+{
+	int ret;
+
+	dev_dbg(sdev->dev, "setting ADSP D0 substate:%d\n", d0_substate);
+
+	/* Todo: destroy/reload unused pipelines/widgets in FW */
+
+	/* do platform specific set_state */
+	ret = snd_sof_dsp_set_state(sdev, d0_substate);
+	if (ret < 0) {
+		dev_err(sdev->dev,
+			"error: d0i3_exit ipc error %d\n", ret);
+		return ret;
+	}
+
+	/* sending set_state IPC */
+	ret = sof_send_pm_ipc(sdev, SOF_IPC_PM_SET_STATE | d0_substate);
+	if (ret < 0) {
+		dev_err(sdev->dev,
+			"error: d0i3_exit ipc error %d\n", ret);
+		return ret;
+	}
+
+	/* update dsp D0 sub-state */
+	sdev->d0_substate = d0_substate;
+
+	return 0;
+}
+EXPORT_SYMBOL(snd_sof_set_dsp_state);
