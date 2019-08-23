@@ -197,7 +197,7 @@ static int sof_restore_pipelines(struct snd_sof_dev *sdev)
 	return ret;
 }
 
-static int sof_send_pm_ipc(struct snd_sof_dev *sdev, int cmd)
+static int sof_send_pm_ctx_ipc(struct snd_sof_dev *sdev, int cmd)
 {
 	struct sof_ipc_pm_ctx pm_ctx;
 	struct sof_ipc_reply reply;
@@ -213,6 +213,22 @@ static int sof_send_pm_ipc(struct snd_sof_dev *sdev, int cmd)
 				 sizeof(pm_ctx), &reply, sizeof(reply));
 }
 
+static int sof_send_pm_gate_ipc(struct snd_sof_dev *sdev, u32 flags)
+{
+	struct sof_ipc_pm_gate pm_gate;
+	struct sof_ipc_reply reply;
+
+	memset(&pm_gate, 0, sizeof(pm_gate));
+
+	/* configure pm_gate ipc message */
+	pm_gate.hdr.size = sizeof(pm_gate);
+	pm_gate.hdr.cmd = SOF_IPC_GLB_PM_MSG | SOF_IPC_PM_GATE;
+	pm_gate.flags = flags;
+
+	/* send pm_gate ipc to dsp */
+	return sof_ipc_tx_message(sdev->ipc, pm_gate.hdr.cmd, &pm_gate,
+				 sizeof(pm_gate), &reply, sizeof(reply));
+}
 static int sof_set_hw_params_upon_resume(struct snd_sof_dev *sdev)
 {
 	struct snd_pcm_substream *substream;
@@ -320,7 +336,7 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 	}
 
 	/* notify DSP of system resume */
-	ret = sof_send_pm_ipc(sdev, SOF_IPC_PM_CTX_RESTORE);
+	ret = sof_send_pm_ctx_ipc(sdev, SOF_IPC_PM_CTX_RESTORE);
 	if (ret < 0)
 		dev_err(sdev->dev,
 			"error: ctx_restore ipc error during resume %d\n",
@@ -361,7 +377,7 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 		sof_cache_debugfs(sdev);
 #endif
 	/* notify DSP of upcoming power down */
-	ret = sof_send_pm_ipc(sdev, SOF_IPC_PM_CTX_SAVE);
+	ret = sof_send_pm_ctx_ipc(sdev, SOF_IPC_PM_CTX_SAVE);
 	if (ret == -EBUSY || ret == -EAGAIN) {
 		/*
 		 * runtime PM has logic to handle -EBUSY/-EAGAIN so
@@ -422,3 +438,41 @@ int snd_sof_suspend(struct device *dev)
 	return sof_suspend(dev, false);
 }
 EXPORT_SYMBOL(snd_sof_suspend);
+
+int snd_sof_set_dsp_power_state(struct snd_sof_dev *sdev,
+				enum sof_d0_substate d0_substate)
+{
+	u32 flags;
+	int ret;
+
+	dev_dbg(sdev->dev, "setting ADSP D0 substate:%d\n", d0_substate);
+
+	/* Todo: destroy/reload unused pipelines/widgets in FW */
+
+	/* do platform specific set_state */
+	ret = snd_sof_dsp_set_power_state(sdev, d0_substate);
+	if (ret < 0) {
+		dev_err(sdev->dev,
+			"error: d0i3_exit ipc error %d\n", ret);
+		return ret;
+	}
+
+	if (d0_substate == SOF_DSP_D0I3)
+		flags = SOF_PM_PG_STREAMING;
+	else
+		flags = SOF_PM_PPG | SOF_PM_PCG;
+
+	/* sending pm_gate IPC */
+	ret = sof_send_pm_gate_ipc(sdev, flags);
+	if (ret < 0) {
+		dev_err(sdev->dev,
+			"error: d0i3_exit ipc error %d\n", ret);
+		return ret;
+	}
+
+	/* update dsp D0 sub-state */
+	sdev->d0_substate = d0_substate;
+
+	return 0;
+}
+EXPORT_SYMBOL(snd_sof_set_dsp_power_state);
