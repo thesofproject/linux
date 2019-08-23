@@ -57,7 +57,7 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_cnl_machines[] = {
 		.id = "MSFT0001", /* FIXME: dummy name to find machine */
 		.drv_name = "cnl_rt700",
 		.sof_fw_filename = "sof-cnl.ri",
-		.sof_tplg_filename = "sof-icl-rt700.tplg",
+		.sof_tplg_filename = "sof-cml-rt700.tplg",
 	},
 
 	{},
