@@ -14,6 +14,7 @@
 #include <linux/init.h>
 #include <linux/input.h>
 #include <linux/io.h>
+#include <linux/dmi.h>
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <sound/jack.h>
@@ -112,6 +113,25 @@ static const struct snd_kcontrol_new cnl_rt700_controls[] = {
 	SOC_DAPM_PIN_SWITCH("Headphones"),
 	SOC_DAPM_PIN_SWITCH("AMIC"),
 	SOC_DAPM_PIN_SWITCH("Speaker"),
+};
+
+static struct snd_soc_dai_link_component cnl_rt700_component[] = {
+	{
+		.name = "sdw:1:25d:700:0:0",
+		.dai_name = "rt700-aif1",
+	}
+};
+
+static struct snd_soc_dai_link_component sdw1_pin2_component[] = {
+	{
+		.dai_name = "SDW1 Pin2",
+	}
+};
+
+static struct snd_soc_dai_link_component sdw1_pin3_component[] = {
+	{
+		.dai_name = "SDW1 Pin3",
+	}
 };
 
 SND_SOC_DAILINK_DEF(sdw0_pin2,
@@ -231,6 +251,7 @@ static int snd_cnl_rt700_mc_probe(struct platform_device *pdev)
 	struct snd_soc_acpi_mach *mach;
 	const char *platform_name;
 	struct snd_soc_card *card;
+	const char *product;
 	int ret;
 
 	dev_dbg(&pdev->dev, "Entry %s\n", __func__);
@@ -242,6 +263,20 @@ static int snd_cnl_rt700_mc_probe(struct platform_device *pdev)
 #if IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
 	INIT_LIST_HEAD(&ctx->hdmi_pcm_list);
 #endif
+
+	product = dmi_get_system_info(DMI_PRODUCT_NAME);
+	if (strstr(product, "CometLake")) {
+		cnl_rt700_msic_dailink[0].codecs = cnl_rt700_component;
+		cnl_rt700_msic_dailink[0].num_codecs =
+			ARRAY_SIZE(cnl_rt700_component);
+		cnl_rt700_msic_dailink[0].cpus = sdw1_pin2_component;
+		cnl_rt700_msic_dailink[0].num_cpus = 1;
+		cnl_rt700_msic_dailink[1].codecs = cnl_rt700_component;
+		cnl_rt700_msic_dailink[1].num_codecs =
+			ARRAY_SIZE(cnl_rt700_component);
+		cnl_rt700_msic_dailink[1].cpus = sdw1_pin3_component;
+		cnl_rt700_msic_dailink[1].num_cpus = 1;
+	}
 
 	card = &snd_soc_card_cnl_rt700;
 	card->dev = &pdev->dev;
