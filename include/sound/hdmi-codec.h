@@ -76,7 +76,8 @@ struct hdmi_codec_ops {
 	 * Mute/unmute HDMI audio stream.
 	 * Optional
 	 */
-	int (*digital_mute)(struct device *dev, void *data, bool enable);
+	int (*mute_stream)(struct device *dev, void *data,
+			   bool enable, int direction);
 
 	/*
 	 * Provides EDID-Like-Data from connected HDMI device.
