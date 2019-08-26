@@ -262,7 +262,7 @@ static int snd_cnl_rt700_mc_probe(struct platform_device *pdev)
 		cnl_rt700_msic_dailink[0].num_cpus =
 			ARRAY_SIZE(sdw1_pin2);
 
-		cnl_rt700_msic_dailink[0].name = "SDW1-Capture";
+		cnl_rt700_msic_dailink[1].name = "SDW1-Capture";
 		cnl_rt700_msic_dailink[1].codecs = sdw1_codec;
 		cnl_rt700_msic_dailink[1].num_codecs =
 			ARRAY_SIZE(sdw1_codec);
