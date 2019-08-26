@@ -441,10 +441,13 @@ static int zx_hdmi_audio_hw_params(struct device *dev,
 	return zx_hdmi_infoframe_trans(hdmi, &frame, FSEL_AUDIO);
 }
 
-static int zx_hdmi_audio_digital_mute(struct device *dev, void *data,
-				      bool enable)
+static int zx_hdmi_audio_mute(struct device *dev, void *data,
+			      bool enable, int direction)
 {
 	struct zx_hdmi *hdmi = dev_get_drvdata(dev);
+
+	if (direction != SNDRV_PCM_STREAM_PLAYBACK)
+		return 0;
 
 	if (enable)
 		hdmi_writeb_mask(hdmi, TPI_AUD_CONFIG, TPI_AUD_MUTE,
@@ -470,7 +473,7 @@ static const struct hdmi_codec_ops zx_hdmi_codec_ops = {
 	.audio_startup = zx_hdmi_audio_startup,
 	.hw_params = zx_hdmi_audio_hw_params,
 	.audio_shutdown = zx_hdmi_audio_shutdown,
-	.digital_mute = zx_hdmi_audio_digital_mute,
+	.mute_stream = zx_hdmi_audio_mute,
 	.get_eld = zx_hdmi_audio_get_eld,
 };
 
