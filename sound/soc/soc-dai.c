@@ -264,13 +264,9 @@ EXPORT_SYMBOL_GPL(snd_soc_dai_set_tristate);
 int snd_soc_dai_digital_mute(struct snd_soc_dai *dai, int mute,
 			     int direction)
 {
-	if (dai->driver->ops)
-		return -ENOTSUPP;
-	else if (dai->driver->ops->mute_stream)
+	if (dai->driver->ops &&
+	    dai->driver->ops->mute_stream)
 		return dai->driver->ops->mute_stream(dai, mute, direction);
-	else if (direction == SNDRV_PCM_STREAM_PLAYBACK &&
-		 dai->driver->ops->digital_mute)
-		return dai->driver->ops->digital_mute(dai, mute);
 	else
 		return -ENOTSUPP;
 }
