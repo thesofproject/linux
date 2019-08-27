@@ -377,7 +377,8 @@ void snd_soc_close_delayed_work(struct work_struct *work)
 
 	dev_dbg(rtd->dev, "ASoC: pop wq checking: %s status: %s waiting: %s\n",
 		codec_dai->driver->playback.stream_name,
-		codec_dai->stream_active[playback] ? "active" : "inactive",
+		snd_soc_dai_stream_activity(codec_dai, playback) ?
+		"active" : "inactive",
 		rtd->pop_wait ? "yes" : "no");
 
 	/* are we waiting on this codec DAI stream */
@@ -561,7 +562,7 @@ int snd_soc_suspend(struct device *dev)
 			continue;
 
 		for_each_rtd_codec_dais(rtd, i, dai) {
-			if (dai->stream_active[playback])
+			if (snd_soc_dai_stream_activity(dai, playback))
 				snd_soc_dai_digital_mute(dai, 1, playback);
 		}
 	}
@@ -703,7 +704,7 @@ static void soc_resume_deferred(struct work_struct *work)
 			continue;
 
 		for_each_rtd_codec_dais(rtd, i, dai) {
-			if (dai->stream_active[playback])
+			if (snd_soc_dai_stream_activity(dai, playback))
 				snd_soc_dai_digital_mute(dai, 0, playback);
 		}
 	}

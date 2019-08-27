@@ -282,7 +282,7 @@ int snd_soc_dai_activity(struct snd_soc_dai *dai)
 
 	active = 0;
 	for_each_pcm_streams(stream)
-		active += dai->stream_active[stream];
+		active += snd_soc_dai_stream_activity(dai, stream);
 
 	return active;
 }
