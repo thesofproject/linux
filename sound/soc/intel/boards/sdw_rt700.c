@@ -239,7 +239,7 @@ static int mc_probe(struct platform_device *pdev)
 	struct snd_soc_acpi_mach *mach;
 	const char *platform_name;
 	struct snd_soc_card *card = &card_sdw_rt700;
-	const char *product;
+	const char *board;
 	int ret;
 
 	dev_dbg(&pdev->dev, "Entry %s\n", __func__);
@@ -252,8 +252,8 @@ static int mc_probe(struct platform_device *pdev)
 	INIT_LIST_HEAD(&ctx->hdmi_pcm_list);
 #endif
 
-	product = dmi_get_system_info(DMI_PRODUCT_NAME);
-	if (strstr(product, "CometLake")) { /* FIXME: test against RVP */
+	board = dmi_get_system_info(DMI_BOARD_NAME);
+	if (strstr(board, "CometLake U DDR4 HR ERB")) {
 		dailink[0].name = "SDW1-Playback";
 		dailink[0].codecs = sdw1_codec;
 		dailink[0].num_codecs = ARRAY_SIZE(sdw1_codec);
