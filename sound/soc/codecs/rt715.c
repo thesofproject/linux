@@ -1187,12 +1187,8 @@ int rt715_init(struct device *dev, struct regmap *regmap,
 	 * to handle this, only register codec if it is actually
 	 * present on board, adding check accordingly
 	 */
-	if (slave->bus->link_id == 2) {
-		ret =  snd_soc_register_component(dev,
-						  &soc_codec_dev_rt715,
-						  rt715_dai,
-						  ARRAY_SIZE(rt715_dai));
-	}
+	ret = snd_soc_register_component(dev, &soc_codec_dev_rt715, rt715_dai,
+					ARRAY_SIZE(rt715_dai));
 
 
 	ret = device_create_file(&slave->dev, &dev_attr_index_reg);
