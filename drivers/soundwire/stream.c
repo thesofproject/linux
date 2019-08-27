@@ -1460,6 +1460,25 @@ static void sdw_release_bus_lock(struct sdw_stream_runtime *stream)
 	}
 }
 
+int sdw_calculate_bandwidth(struct sdw_stream_runtime *stream, bool inc)
+{
+	struct sdw_master_runtime *m_rt;
+	struct sdw_bus *bus = NULL;
+	int bandwidth;
+
+	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
+		bus = m_rt->bus;
+		bandwidth = m_rt->stream->params.rate *
+			m_rt->ch_count * m_rt->stream->params.bps;
+		if (inc)
+			bus->params.bandwidth += bandwidth;
+		else
+			bus->params.bandwidth -= bandwidth;
+
+	}
+}
+EXPORT_SYMBOL(sdw_calculate_bandwidth);
+
 static int _sdw_prepare_stream(struct sdw_stream_runtime *stream)
 {
 	struct sdw_master_runtime *m_rt;
@@ -1479,11 +1498,6 @@ static int _sdw_prepare_stream(struct sdw_stream_runtime *stream)
 			dev_err(bus->dev, "Async mode not supported\n");
 			return -EINVAL;
 		}
-
-		/* Increment cumulative bus bandwidth */
-		/* TODO: Update this during Device-Device support */
-		bus->params.bandwidth += m_rt->stream->params.rate *
-			m_rt->ch_count * m_rt->stream->params.bps;
 
 		/* Compute params */
 		if (bus->compute_params) {
@@ -1721,10 +1735,6 @@ static int _sdw_deprepare_stream(struct sdw_stream_runtime *stream)
 				"De-prepare port(s) failed: %d\n", ret);
 			return ret;
 		}
-
-		/* TODO: Update this during Device-Device support */
-		bus->params.bandwidth -= m_rt->stream->params.rate *
-			m_rt->ch_count * m_rt->stream->params.bps;
 
 		/* Compute params */
 		if (bus->compute_params) {

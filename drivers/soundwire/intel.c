@@ -819,6 +819,7 @@ static int intel_hw_params(struct snd_pcm_substream *substream,
 		dev_err(cdns->dev, "add master to stream failed:%d\n", ret);
 
 	kfree(pconfig);
+	sdw_calculate_bandwidth(dma->stream, true);
 error:
 	return ret;
 }
@@ -892,6 +893,7 @@ intel_hw_free(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
 		dev_err(dai->dev, "sdw_deprepare_stream: failed %d", ret);
 		return ret;
 	}
+	sdw_calculate_bandwidth(dma->stream, false);
 
 	ret = sdw_stream_remove_master(&cdns->bus, dma->stream);
 	if (ret < 0) {

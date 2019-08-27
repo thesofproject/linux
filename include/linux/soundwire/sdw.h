@@ -861,6 +861,7 @@ struct sdw_stream_runtime {
 struct sdw_stream_runtime *sdw_alloc_stream(char *stream_name);
 void sdw_release_stream(struct sdw_stream_runtime *stream);
 
+int sdw_calculate_bandwidth(struct sdw_stream_runtime *stream, bool inc);
 int sdw_compute_params(struct sdw_bus *bus);
 
 int sdw_stream_add_master(struct sdw_bus *bus,
