@@ -279,7 +279,7 @@ static void snd_soc_runtime_action(struct snd_soc_pcm_runtime *rtd,
 	lockdep_assert_held(&rtd->card->pcm_mutex);
 
 	for_each_rtd_dais(rtd, i, dai)
-		dai->stream_active[stream] += action;
+		snd_soc_dai_stream_activity(dai, stream) += action;
 }
 
 /**
@@ -2446,7 +2446,7 @@ static int dpcm_fe_runtime_update(struct snd_soc_pcm_runtime *fe,
 			return 0;
 
 		/* skip if FE isn't currently playing */
-		if (!dai->stream_active[stream])
+		if (!snd_soc_dai_stream_activity(dai, stream))
 			return 0;
 	}
 
