@@ -36,6 +36,7 @@ static const struct snd_pcm_hardware sst_byt_pcm_hardware = {
 /* private data for each PCM DSP stream */
 struct sst_byt_pcm_data {
 	struct sst_byt_stream *stream;
+	struct snd_soc_component *component;
 	struct snd_pcm_substream *substream;
 	struct mutex mutex;
 
@@ -132,12 +133,11 @@ static int sst_byt_pcm_hw_free(struct snd_soc_component *component,
 	return 0;
 }
 
-static int sst_byt_pcm_restore_stream_context(struct snd_pcm_substream *substream)
+static int sst_byt_pcm_restore_stream_context(struct sst_byt_pcm_data *pcm_data)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_component *component = snd_soc_rtdcom_lookup(rtd, DRV_NAME);
+	struct snd_soc_pcm_runtime *rtd = pcm_data->substream->private_data;
+	struct snd_soc_component *component = pcm_data->component;
 	struct sst_byt_priv_data *pdata = snd_soc_component_get_drvdata(component);
-	struct sst_byt_pcm_data *pcm_data = &pdata->pcm[substream->stream];
 	struct sst_byt *byt = pdata->byt;
 	int ret;
 
@@ -162,7 +162,7 @@ static void sst_byt_pcm_work(struct work_struct *work)
 		container_of(work, struct sst_byt_pcm_data, work);
 
 	if (snd_pcm_running(pcm_data->substream))
-		sst_byt_pcm_restore_stream_context(pcm_data->substream);
+		sst_byt_pcm_restore_stream_context(pcm_data);
 }
 
 static int sst_byt_pcm_trigger(struct snd_soc_component *component,
@@ -211,7 +211,7 @@ static u32 byt_notify_pointer(struct sst_byt_stream *stream, void *data)
 	struct snd_pcm_substream *substream = pcm_data->substream;
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_component *component = snd_soc_rtdcom_lookup(rtd, DRV_NAME);
+	struct snd_soc_component *component = pcm_data->component;
 	struct sst_byt_priv_data *pdata = snd_soc_component_get_drvdata(component);
 	struct sst_byt *byt = pdata->byt;
 	u32 pos, hw_pos;
@@ -255,6 +255,7 @@ static int sst_byt_pcm_open(struct snd_soc_component *component,
 	mutex_lock(&pcm_data->mutex);
 
 	pcm_data->substream = substream;
+	pcm_data->component = component;
 
 	snd_soc_set_runtime_hwparams(substream, &sst_byt_pcm_hardware);
 
