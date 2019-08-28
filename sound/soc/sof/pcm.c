@@ -762,7 +762,7 @@ void snd_sof_new_platform_drv(struct snd_sof_dev *sdev)
 	pd->page = sof_pcm_page;
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_COMPRESS)
-	pd->compr_ops = &sof_compressed_ops;
+	pd->compress_ops = &sof_compressed_ops;
 #endif
 	pd->pcm_construct = sof_pcm_new;
 	pd->ignore_machine = drv_name;
