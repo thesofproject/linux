@@ -286,7 +286,7 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 	/* load the firmware */
 	ret = snd_sof_load_firmware(sdev);
 	if (ret < 0) {
-		dev_err(sdev->dev,
+		dev_err(dev,
 			"error: failed to load DSP firmware after resume %d\n",
 			ret);
 		return ret;
@@ -295,7 +295,7 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 	/* boot the firmware */
 	ret = snd_sof_run_firmware(sdev);
 	if (ret < 0) {
-		dev_err(sdev->dev,
+		dev_err(dev,
 			"error: failed to boot DSP firmware after resume %d\n",
 			ret);
 		return ret;
@@ -305,7 +305,7 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 	ret = snd_sof_init_trace_ipc(sdev);
 	if (ret < 0) {
 		/* non fatal */
-		dev_warn(sdev->dev,
+		dev_warn(dev,
 			 "warning: failed to init trace after resume %d\n",
 			 ret);
 	}
@@ -313,7 +313,7 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 	/* restore pipelines */
 	ret = sof_restore_pipelines(sdev);
 	if (ret < 0) {
-		dev_err(sdev->dev,
+		dev_err(dev,
 			"error: failed to restore pipeline after resume %d\n",
 			ret);
 		return ret;
@@ -322,7 +322,7 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 	/* notify DSP of system resume */
 	ret = sof_send_pm_ipc(sdev, SOF_IPC_PM_CTX_RESTORE);
 	if (ret < 0)
-		dev_err(sdev->dev,
+		dev_err(dev,
 			"error: ctx_restore ipc error during resume %d\n",
 			ret);
 
