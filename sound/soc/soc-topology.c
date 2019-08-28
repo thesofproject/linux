@@ -115,11 +115,7 @@ static int soc_tplg_check_elem_count(struct soc_tplg *tplg, size_t elem_size,
 
 static inline int soc_tplg_is_eof(struct soc_tplg *tplg)
 {
-	const u8 *end = tplg->hdr_pos;
-
-	if (end >= tplg->fw->data + tplg->fw->size)
-		return 1;
-	return 0;
+	return tplg->hdr_pos >= tplg->fw->data + tplg->fw->size;
 }
 
 static inline unsigned long soc_tplg_get_hdr_offset(struct soc_tplg *tplg)
