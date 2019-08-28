@@ -108,6 +108,7 @@ struct hsw_pcm_data {
 	struct snd_pcm *hsw_pcm;
 	u32 volume[2];
 	struct snd_pcm_substream *substream;
+	struct snd_soc_component *component;
 	struct snd_compr_stream *cstream;
 	unsigned int wpos;
 	struct mutex mutex;
@@ -710,7 +711,7 @@ static u32 hsw_notify_pointer(struct sst_hsw_stream *stream, void *data)
 	struct snd_pcm_substream *substream = pcm_data->substream;
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_component *component = snd_soc_rtdcom_lookup(rtd, DRV_NAME);
+	struct snd_soc_component *component = pcm_data->component;
 	struct hsw_priv_data *pdata = snd_soc_component_get_drvdata(component);
 	struct sst_hsw *hsw = pdata->hsw;
 	u32 pos;
@@ -823,6 +824,7 @@ static int hsw_pcm_open(struct snd_soc_component *component,
 	pm_runtime_get_sync(pdata->dev);
 
 	pcm_data->substream = substream;
+	pcm_data->component = component;
 
 	snd_soc_set_runtime_hwparams(substream, &hsw_pcm_hardware);
 
