@@ -479,11 +479,11 @@ static int mt8173_afe_hdmi_trigger(struct snd_pcm_substream *substream, int cmd,
 	}
 }
 
-static int mt8173_memif_fs(struct snd_pcm_substream *substream,
+static int mt8173_memif_fs(struct snd_soc_component *component,
+			   struct snd_pcm_substream *substream,
 			   unsigned int rate)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_component *component = snd_soc_rtdcom_lookup(rtd, AFE_PCM_NAME);
 	struct mtk_base_afe *afe = snd_soc_component_get_drvdata(component);
 	struct mtk_base_afe_memif *memif = &afe->memif[asoc_cpu_dai(rtd, 0)->id];
 	int fs;
@@ -509,7 +509,8 @@ static int mt8173_memif_fs(struct snd_pcm_substream *substream,
 	return fs;
 }
 
-static int mt8173_irq_fs(struct snd_pcm_substream *substream, unsigned int rate)
+static int mt8173_irq_fs(struct snd_soc_component *component,
+			 struct snd_pcm_substream *substream, unsigned int rate)
 {
 	return mt8173_afe_i2s_fs(rate);
 }

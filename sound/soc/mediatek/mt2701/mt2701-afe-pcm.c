@@ -491,7 +491,8 @@ static int mt2701_dlm_fe_trigger(struct snd_pcm_substream *substream,
 	}
 }
 
-static int mt2701_memif_fs(struct snd_pcm_substream *substream,
+static int mt2701_memif_fs(struct snd_soc_component *component,
+			   struct snd_pcm_substream *substream,
 			   unsigned int rate)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
@@ -505,7 +506,8 @@ static int mt2701_memif_fs(struct snd_pcm_substream *substream,
 	return fs;
 }
 
-static int mt2701_irq_fs(struct snd_pcm_substream *substream, unsigned int rate)
+static int mt2701_irq_fs(struct snd_soc_component *component,
+			 struct snd_pcm_substream *substream, unsigned int rate)
 {
 	return mt2701_afe_i2s_fs(rate);
 }

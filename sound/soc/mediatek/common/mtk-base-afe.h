@@ -80,9 +80,11 @@ struct mtk_base_afe {
 	unsigned int num_dai_drivers;
 
 	const struct snd_pcm_hardware *mtk_afe_hardware;
-	int (*memif_fs)(struct snd_pcm_substream *substream,
+	int (*memif_fs)(struct snd_soc_component *component,
+			struct snd_pcm_substream *substream,
 			unsigned int rate);
-	int (*irq_fs)(struct snd_pcm_substream *substream,
+	int (*irq_fs)(struct snd_soc_component *component,
+		      struct snd_pcm_substream *substream,
 		      unsigned int rate);
 
 	void *platform_priv;

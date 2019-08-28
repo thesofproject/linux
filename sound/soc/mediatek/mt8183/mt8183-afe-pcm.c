@@ -139,23 +139,20 @@ static const struct snd_pcm_hardware mt8183_afe_hardware = {
 	.fifo_size = 0,
 };
 
-static int mt8183_memif_fs(struct snd_pcm_substream *substream,
+static int mt8183_memif_fs(struct snd_soc_component *component,
+			   struct snd_pcm_substream *substream,
 			   unsigned int rate)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_component *component =
-		snd_soc_rtdcom_lookup(rtd, AFE_PCM_NAME);
 	struct mtk_base_afe *afe = snd_soc_component_get_drvdata(component);
 	int id = asoc_cpu_dai(rtd, 0)->id;
 
 	return mt8183_rate_transform(afe->dev, rate, id);
 }
 
-static int mt8183_irq_fs(struct snd_pcm_substream *substream, unsigned int rate)
+static int mt8183_irq_fs(struct snd_soc_component *component,
+			 struct snd_pcm_substream *substream, unsigned int rate)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_component *component =
-		snd_soc_rtdcom_lookup(rtd, AFE_PCM_NAME);
 	struct mtk_base_afe *afe = snd_soc_component_get_drvdata(component);
 
 	return mt8183_general_rate_transform(afe->dev, rate);
