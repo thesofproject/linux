@@ -708,7 +708,7 @@ static const struct snd_soc_component_driver sst_soc_platform_drv  = {
 	.ioctl		= snd_soc_pcm_lib_ioctl,
 	.trigger	= sst_soc_trigger,
 	.pointer	= sst_soc_pointer,
-	.compr_ops	= &sst_platform_compr_ops,
+	.compress_ops	= &sst_platform_compress_ops,
 	.pcm_construct	= sst_soc_pcm_new,
 };
 
