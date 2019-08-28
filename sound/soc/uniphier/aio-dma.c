@@ -256,7 +256,7 @@ static const struct snd_soc_component_driver uniphier_soc_platform = {
 	.mmap		= uniphier_aiodma_mmap,
 	.pcm_construct	= uniphier_aiodma_new,
 	.pcm_destruct	= uniphier_aiodma_free,
-	.compr_ops	= &uniphier_aio_compr_ops,
+	.compress_ops	= &uniphier_aio_compress_ops,
 };
 
 static const struct regmap_config aiodma_regmap_config = {
