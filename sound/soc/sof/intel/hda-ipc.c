@@ -139,6 +139,7 @@ irqreturn_t hda_dsp_ipc_irq_thread(int irq, void *context)
 	u32 hipcte;
 	u32 msg;
 	u32 msg_ext;
+	bool host_msg = false;
 	bool ipc_irq = false;
 
 	/* read IPC status */
@@ -147,6 +148,33 @@ irqreturn_t hda_dsp_ipc_irq_thread(int irq, void *context)
 	hipct = snd_sof_dsp_read(sdev, HDA_DSP_BAR, HDA_DSP_REG_HIPCT);
 	hipci = snd_sof_dsp_read(sdev, HDA_DSP_BAR, HDA_DSP_REG_HIPCI);
 	hipcte = snd_sof_dsp_read(sdev, HDA_DSP_BAR, HDA_DSP_REG_HIPCTE);
+
+	/* is this a new message from DSP */
+	if (hipct & HDA_DSP_REG_HIPCT_BUSY) {
+		msg = hipct & HDA_DSP_REG_HIPCT_MSG_MASK;
+		msg_ext = hipcte & HDA_DSP_REG_HIPCTE_MSG_MASK;
+
+		dev_vdbg(sdev->dev,
+			 "ipc: firmware initiated, msg:0x%x, msg_ext:0x%x\n",
+			 msg, msg_ext);
+
+		/* mask BUSY interrupt */
+		snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR,
+					HDA_DSP_REG_HIPCCTL,
+					HDA_DSP_REG_HIPCCTL_BUSY, 0);
+
+		/* handle messages from DSP */
+		if ((hipct & SOF_IPC_PANIC_MAGIC_MASK) == SOF_IPC_PANIC_MAGIC)
+			/* this is a PANIC message !! */
+			snd_sof_dsp_panic(sdev, HDA_DSP_PANIC_OFFSET(msg_ext));
+		else
+			/* normal message - process normally */
+			host_msg = true;
+
+		hda_dsp_ipc_host_done(sdev);
+
+		ipc_irq = true;
+	}
 
 	/* is this a reply message from the DSP */
 	if (hipcie & HDA_DSP_REG_HIPCIE_DONE) {
@@ -194,33 +222,8 @@ irqreturn_t hda_dsp_ipc_irq_thread(int irq, void *context)
 		ipc_irq = true;
 	}
 
-	/* is this a new message from DSP */
-	if (hipct & HDA_DSP_REG_HIPCT_BUSY) {
-		msg = hipct & HDA_DSP_REG_HIPCT_MSG_MASK;
-		msg_ext = hipcte & HDA_DSP_REG_HIPCTE_MSG_MASK;
-
-		dev_vdbg(sdev->dev,
-			 "ipc: firmware initiated, msg:0x%x, msg_ext:0x%x\n",
-			 msg, msg_ext);
-
-		/* mask BUSY interrupt */
-		snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR,
-					HDA_DSP_REG_HIPCCTL,
-					HDA_DSP_REG_HIPCCTL_BUSY, 0);
-
-		/* handle messages from DSP */
-		if ((hipct & SOF_IPC_PANIC_MAGIC_MASK) == SOF_IPC_PANIC_MAGIC) {
-			/* this is a PANIC message !! */
-			snd_sof_dsp_panic(sdev, HDA_DSP_PANIC_OFFSET(msg_ext));
-		} else {
-			/* normal message - process normally */
-			snd_sof_ipc_msgs_rx(sdev);
-		}
-
-		hda_dsp_ipc_host_done(sdev);
-
-		ipc_irq = true;
-	}
+	if (host_msg)
+		snd_sof_ipc_msgs_rx(sdev);
 
 	if (!ipc_irq) {
 		/*
