@@ -3315,12 +3315,11 @@ static int snd_sof_cache_kcontrol_val(struct snd_sof_dev *sdev)
 	return ret;
 }
 
-int snd_sof_complete_pipeline(struct snd_sof_dev *sdev,
-			      struct snd_sof_widget *swidget)
+bool snd_sof_complete_pipeline(struct snd_sof_dev *sdev,
+			       struct snd_sof_widget *swidget)
 {
 	struct sof_ipc_pipe_ready ready;
 	struct sof_ipc_reply reply;
-	int ret;
 
 	dev_dbg(sdev->dev, "tplg: complete pipeline %s id %d\n",
 		swidget->widget->name, swidget->comp_id);
@@ -3330,12 +3329,9 @@ int snd_sof_complete_pipeline(struct snd_sof_dev *sdev,
 	ready.hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_PIPE_COMPLETE;
 	ready.comp_id = swidget->comp_id;
 
-	ret = sof_ipc_tx_message(sdev->ipc,
-				 ready.hdr.cmd, &ready, sizeof(ready), &reply,
-				 sizeof(reply));
-	if (ret < 0)
-		return ret;
-	return 1;
+	return !sof_ipc_tx_message(sdev->ipc,
+				   ready.hdr.cmd, &ready, sizeof(ready), &reply,
+				   sizeof(reply));
 }
 
 /* completion - called at completion of firmware loading */

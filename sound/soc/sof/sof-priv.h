@@ -357,7 +357,7 @@ struct snd_sof_widget {
 	struct snd_sof_dev *sdev;
 	int comp_id;
 	int pipeline_id;
-	int complete;
+	bool complete;
 	int id;
 
 	struct snd_soc_dapm_widget *widget;
@@ -588,8 +588,8 @@ int snd_sof_ipc_set_get_comp_data(struct snd_sof_ipc *ipc,
 int snd_sof_init_topology(struct snd_sof_dev *sdev,
 			  struct snd_soc_tplg_ops *ops);
 int snd_sof_load_topology(struct snd_sof_dev *sdev, const char *file);
-int snd_sof_complete_pipeline(struct snd_sof_dev *sdev,
-			      struct snd_sof_widget *swidget);
+bool snd_sof_complete_pipeline(struct snd_sof_dev *sdev,
+			       struct snd_sof_widget *swidget);
 
 int sof_load_pipeline_ipc(struct snd_sof_dev *sdev,
 			  struct sof_ipc_pipe_new *pipeline,
