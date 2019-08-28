@@ -20,8 +20,7 @@
 #include <sound/initval.h>
 #include <sound/soc-dpcm.h>
 
-static int soc_compr_components_open(struct snd_compr_stream *cstream,
-				     struct snd_soc_component **last)
+static int soc_compr_components_open(struct snd_compr_stream *cstream)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_soc_component *component;
@@ -38,25 +37,25 @@ static int soc_compr_components_open(struct snd_compr_stream *cstream,
 				"Compress ASoC: can't open platform %s: %d\n",
 				component->name, ret);
 
-			*last = component;
 			return ret;
 		}
+		component->compress_opened = 1;
 	}
 
-	*last = NULL;
 	return 0;
 }
 
-static int soc_compr_components_free(struct snd_compr_stream *cstream,
-				     struct snd_soc_component *last)
+static int soc_compr_components_free(struct snd_compr_stream *cstream)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_soc_component *component;
 	int i;
 
 	for_each_rtd_components(rtd, i, component) {
-		if (component == last)
-			break;
+		if (!component->compress_opened)
+			continue;
+
+		component->compress_opened = 0;
 
 		if (!component->driver->compress_ops ||
 		    !component->driver->compress_ops->free)
@@ -71,7 +70,6 @@ static int soc_compr_components_free(struct snd_compr_stream *cstream,
 static int soc_compr_open(struct snd_compr_stream *cstream)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
-	struct snd_soc_component *component;
 	struct snd_soc_dai *cpu_dai = asoc_cpu_dai(rtd, 0);
 	int ret;
 
@@ -87,7 +85,7 @@ static int soc_compr_open(struct snd_compr_stream *cstream)
 		}
 	}
 
-	ret = soc_compr_components_open(cstream, &component);
+	ret = soc_compr_components_open(cstream);
 	if (ret < 0)
 		goto machine_err;
 
@@ -108,7 +106,7 @@ static int soc_compr_open(struct snd_compr_stream *cstream)
 	return 0;
 
 machine_err:
-	soc_compr_components_free(cstream, component);
+	soc_compr_components_free(cstream);
 
 	if (cpu_dai->driver->cops && cpu_dai->driver->cops->shutdown)
 		cpu_dai->driver->cops->shutdown(cstream, cpu_dai);
@@ -122,7 +120,6 @@ static int soc_compr_open_fe(struct snd_compr_stream *cstream)
 	struct snd_soc_pcm_runtime *fe = cstream->private_data;
 	struct snd_pcm_substream *fe_substream =
 		 fe->pcm->streams[cstream->direction].substream;
-	struct snd_soc_component *component;
 	struct snd_soc_dai *cpu_dai = asoc_cpu_dai(fe, 0);
 	struct snd_soc_dpcm *dpcm;
 	struct snd_soc_dapm_widget_list *list;
@@ -170,7 +167,7 @@ static int soc_compr_open_fe(struct snd_compr_stream *cstream)
 		}
 	}
 
-	ret = soc_compr_components_open(cstream, &component);
+	ret = soc_compr_components_open(cstream);
 	if (ret < 0)
 		goto open_err;
 
@@ -196,7 +193,7 @@ static int soc_compr_open_fe(struct snd_compr_stream *cstream)
 	return 0;
 
 machine_err:
-	soc_compr_components_free(cstream, component);
+	soc_compr_components_free(cstream);
 open_err:
 	if (cpu_dai->driver->cops && cpu_dai->driver->cops->shutdown)
 		cpu_dai->driver->cops->shutdown(cstream, cpu_dai);
@@ -235,7 +232,7 @@ static int soc_compr_free(struct snd_compr_stream *cstream)
 	if (rtd->dai_link->compr_ops && rtd->dai_link->compr_ops->shutdown)
 		rtd->dai_link->compr_ops->shutdown(cstream);
 
-	soc_compr_components_free(cstream, NULL);
+	soc_compr_components_free(cstream);
 
 	if (cpu_dai->driver->cops && cpu_dai->driver->cops->shutdown)
 		cpu_dai->driver->cops->shutdown(cstream, cpu_dai);
@@ -286,7 +283,7 @@ static int soc_compr_free_fe(struct snd_compr_stream *cstream)
 	if (fe->dai_link->compr_ops && fe->dai_link->compr_ops->shutdown)
 		fe->dai_link->compr_ops->shutdown(cstream);
 
-	soc_compr_components_free(cstream, NULL);
+	soc_compr_components_free(cstream);
 
 	if (cpu_dai->driver->cops && cpu_dai->driver->cops->shutdown)
 		cpu_dai->driver->cops->shutdown(cstream, cpu_dai);
