@@ -214,9 +214,6 @@ static int rt715_read_prop(struct sdw_slave *slave)
 	if (!prop->src_dpn_prop)
 		return -ENOMEM;
 
-	/* call helper to read */
-	sdw_slave_read_dpn(slave, prop->src_dpn_prop, nval,
-			   prop->source_ports, "source");
 	dpn = prop->src_dpn_prop;
 	i = 0;
 	addr = prop->source_ports;
@@ -235,10 +232,6 @@ static int rt715_read_prop(struct sdw_slave *slave)
 					   GFP_KERNEL);
 	if (!prop->sink_dpn_prop)
 		return -ENOMEM;
-
-	/* call helper to read */
-	sdw_slave_read_dpn(slave, prop->sink_dpn_prop, nval,
-			   prop->sink_ports, "sink");
 
 	dpn = prop->sink_dpn_prop;
 	i = 0;
