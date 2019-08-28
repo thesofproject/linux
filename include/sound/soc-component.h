@@ -183,8 +183,6 @@ struct snd_soc_component {
 
 	unsigned int active;
 
-	unsigned int suspended:1; /* is in suspend PM state */
-
 	struct list_head list;
 	struct list_head card_aux_list; /* for auxiliary bound components */
 	struct list_head card_list;
@@ -218,6 +216,10 @@ struct snd_soc_component {
 	struct dentry *debugfs_root;
 	const char *debugfs_prefix;
 #endif
+
+	/* bit field */
+	unsigned int suspended:1; /* is in suspend PM state */
+	unsigned int compress_opened:1;
 };
 
 #define for_each_component_dais(component, dai)\
