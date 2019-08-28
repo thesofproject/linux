@@ -54,7 +54,7 @@ static int sof_pcm_dsp_params(struct snd_sof_pcm *spcm, struct snd_pcm_substream
 /*
  * sof pcm period elapse work
  */
-static void sof_pcm_period_elapsed_work(struct work_struct *work)
+void snd_sof_pcm_period_elapsed_work(struct work_struct *work)
 {
 	struct snd_sof_pcm_stream *sps =
 		container_of(work, struct snd_sof_pcm_stream,
@@ -62,6 +62,7 @@ static void sof_pcm_period_elapsed_work(struct work_struct *work)
 
 	snd_pcm_period_elapsed(sps->substream);
 }
+EXPORT_SYMBOL(snd_sof_pcm_period_elapsed_work);
 
 /*
  * sof pcm period elapse, this could be called at irq thread context.
@@ -477,7 +478,7 @@ static int sof_pcm_open(struct snd_soc_component *component,
 		substream->stream);
 
 	INIT_WORK(&spcm->stream[substream->stream].period_elapsed_work,
-		  sof_pcm_period_elapsed_work);
+		  snd_sof_pcm_period_elapsed_work);
 
 	caps = &spcm->pcm.caps[substream->stream];
 

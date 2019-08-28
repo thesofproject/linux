@@ -90,12 +90,18 @@ int hda_dsp_pcm_hw_params(struct snd_sof_dev *sdev,
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct snd_dma_buffer *dmab;
 	struct sof_ipc_fw_version *v = &sdev->fw_ready.version;
+	struct snd_sof_pcm *spcm;
 	int ret;
 	u32 size, rate, bits;
 
 	size = params_buffer_bytes(params);
 	rate = get_mult_div(sdev, params_rate(params));
 	bits = get_bits(sdev, params_width(params));
+
+	spcm = snd_sof_find_spcm_dai(sdev, substream->private_data);
+	if (spcm)
+		INIT_WORK(&spcm->stream[substream->stream].period_elapsed_work,
+			  snd_sof_pcm_period_elapsed_work);
 
 	hstream->substream = substream;
 
