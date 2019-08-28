@@ -156,7 +156,7 @@ int mtk_afe_fe_hw_params(struct snd_pcm_substream *substream,
 	if (memif->data->fs_shift < 0)
 		return 0;
 
-	fs = afe->memif_fs(substream, params_rate(params));
+	fs = afe->memif_fs(dai->component, substream, params_rate(params));
 
 	if (fs < 0)
 		return -EINVAL;
@@ -203,7 +203,7 @@ int mtk_afe_fe_trigger(struct snd_pcm_substream *substream, int cmd,
 				       irq_data->irq_cnt_shift);
 
 		/* set irq fs */
-		fs = afe->irq_fs(substream, runtime->rate);
+		fs = afe->irq_fs(dai->component, substream, runtime->rate);
 
 		if (fs < 0)
 			return -EINVAL;
