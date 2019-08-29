@@ -29,6 +29,18 @@ int snd_soc_link_init(struct snd_soc_pcm_runtime *rtd)
 	return 0;
 }
 
+int snd_soc_link_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
+				    struct snd_pcm_hw_params *params)
+{
+	if (rtd->dai_link->be_hw_params_fixup) {
+		int ret = rtd->dai_link->be_hw_params_fixup(rtd, params);
+		if (ret < 0)
+			return soc_link_err(rtd, ret);
+	}
+
+	return 0;
+}
+
 int snd_soc_link_startup(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
