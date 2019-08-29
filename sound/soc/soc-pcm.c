@@ -1859,15 +1859,11 @@ int dpcm_be_dai_hw_params(struct snd_soc_pcm_runtime *fe, int stream)
 				sizeof(struct snd_pcm_hw_params));
 
 		/* perform any hw_params fixups */
-		if (be->dai_link->be_hw_params_fixup) {
-			ret = be->dai_link->be_hw_params_fixup(be,
-					&dpcm->hw_params);
-			if (ret < 0) {
-				dev_err(be->dev,
-					"ASoC: hw_params BE fixup failed %d\n",
-					ret);
-				unwind = ret;
-			}
+		ret = snd_soc_link_be_hw_params_fixup(be, &dpcm->hw_params);
+		if (ret < 0) {
+			dev_err(be->dev,
+				"ASoC: hw_params BE fixup failed %d\n", ret);
+			unwind = ret;
 		}
 
 		/* copy the fixed-up hw params for BE dai */

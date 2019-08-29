@@ -296,11 +296,9 @@ int snd_soc_dai_hw_params(struct snd_soc_dai *dai,
 	int ret;
 
 	/* perform any topology hw_params fixups before DAI  */
-	if (rtd->dai_link->be_hw_params_fixup) {
-		ret = rtd->dai_link->be_hw_params_fixup(rtd, params);
-		if (ret < 0)
-			return soc_dai_err(dai, ret);
-	}
+	ret = snd_soc_link_be_hw_params_fixup(rtd, params);
+	if (ret < 0)
+		return soc_dai_err(dai, ret);
 
 	if (dai->driver->ops &&
 	    dai->driver->ops->hw_params) {
