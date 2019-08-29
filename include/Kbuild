@@ -981,6 +981,7 @@ header-test-			+= sound/soc-acpi-intel-match.h
 header-test-			+= sound/soc-dai.h
 header-test-			+= sound/soc-dapm.h
 header-test-			+= sound/soc-dpcm.h
+header-test-			+= sound/soc-link.h
 header-test-			+= sound/sof/control.h
 header-test-			+= sound/sof/dai-intel.h
 header-test-			+= sound/sof/dai.h
