@@ -1432,5 +1432,6 @@ int snd_soc_pcm_lib_ioctl(struct snd_soc_component *component,
 			  unsigned int cmd, void *arg);
 
 #include <sound/soc-component.h>
+#include <sound/soc-link.h>
 
 #endif
