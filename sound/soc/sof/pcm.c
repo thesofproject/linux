@@ -687,6 +687,37 @@ static int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 	return 0;
 }
 
+static void sof_set_longname(struct snd_soc_component *component)
+{
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct snd_sof_pdata *pdata = sdev->pdata;
+	char flavour[80];
+	int pos = 0;
+	int i;
+
+	pos += sprintf(flavour, "%s", "SOF");
+	pos += sprintf(flavour + pos, "-%02d%02d%02d-",
+		       sdev->fw_version.major,
+		       sdev->fw_version.minor,
+		       sdev->fw_version.micro);
+
+	for (i = 0; pdata->tplg_filename[i]; i++) {
+		if (pdata->tplg_filename[i] == '.')
+			break;
+		if (isalnum(pdata->tplg_filename[i]))
+			flavour[pos++] = pdata->tplg_filename[i];
+	}
+
+	sprintf(flavour + pos, "-%02d%02d%02d",
+		SOF_ABI_VERSION_MAJOR(sdev->fw_version.abi_version),
+		SOF_ABI_VERSION_MINOR(sdev->fw_version.abi_version),
+		SOF_ABI_VERSION_PATCH(sdev->fw_version.abi_version));
+
+	snd_soc_set_dmi_name(component->card, flavour);
+
+	dev_dbg(sdev->dev, "sof_pcm_probe: %s\n", flavour);
+}
+
 static int sof_pcm_probe(struct snd_soc_component *component)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
@@ -710,6 +741,8 @@ static int sof_pcm_probe(struct snd_soc_component *component)
 			ret);
 		return ret;
 	}
+
+	sof_set_longname(component);
 
 	/*
 	 * Some platforms in SOF, ex: BYT, may not have their platform PM
