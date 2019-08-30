@@ -45,4 +45,20 @@ struct sof_ipc_pm_core_config {
 	uint32_t enable_mask;
 } __packed;
 
+struct sof_ipc_pm_gate {
+	struct sof_ipc_cmd_hdr hdr;
+	uint32_t flags;
+} __packed;
+
+#define SOF_PM_PG_RSVD		BIT(0)
+
+/** \brief Indicates whether streaming is active */
+#define SOF_PM_PG_STREAMING	BIT(1)
+
+/** \brief Prevent power gating (0 - deep power state transitions allowed) */
+#define SOF_PM_PPG		BIT(2)
+
+/** \brief Prevent clock gating (0 - cg allowed, 1 - DSP clock always on) */
+#define SOF_PM_PCG		BIT(3)
+
 #endif
