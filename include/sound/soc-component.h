@@ -453,5 +453,6 @@ int snd_soc_pcm_component_trigger(struct snd_pcm_substream *substream,
 				  int cmd);
 
 int snd_soc_component_compr_open(struct snd_compr_stream *cstream);
+int snd_soc_component_compr_free(struct snd_compr_stream *cstream);
 
 #endif /* __SOC_COMPONENT_H */
