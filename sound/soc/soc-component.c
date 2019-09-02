@@ -852,3 +852,24 @@ int snd_soc_component_compr_pointer(struct snd_compr_stream *cstream,
 	return 0;
 }
 EXPORT_SYMBOL_GPL(snd_soc_component_compr_pointer);
+
+int snd_soc_component_compr_copy(struct snd_compr_stream *cstream,
+				 char __user *buf, size_t count)
+{
+	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
+	struct snd_soc_component *component;
+	int i, ret;
+
+	for_each_rtd_components(rtd, i, component) {
+		if (component->driver->compress_ops &&
+		    component->driver->compress_ops->copy) {
+			ret = component->driver->compress_ops->copy(
+				component, cstream, buf, count);
+			if (ret < 0)
+				return soc_component_err(component, ret);
+		}
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(snd_soc_component_compr_copy);
