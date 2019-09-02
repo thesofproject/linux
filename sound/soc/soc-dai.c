@@ -518,3 +518,17 @@ void snd_soc_dai_compr_shutdown(struct snd_soc_dai *dai,
 		dai->driver->cops->shutdown(cstream, dai);
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_compr_shutdown);
+
+int snd_soc_dai_compr_trigger(struct snd_soc_dai *dai,
+			      struct snd_compr_stream *cstream, int cmd)
+{
+	if (dai->driver->cops &&
+	    dai->driver->cops->trigger) {
+		int ret = dai->driver->cops->trigger(cstream, cmd, dai);
+		if (ret < 0)
+			return soc_dai_err(dai, ret);
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(snd_soc_dai_compr_trigger);
