@@ -466,5 +466,7 @@ int snd_soc_component_compr_get_codec_caps(struct snd_compr_stream *cstream,
 int snd_soc_component_compr_ack(struct snd_compr_stream *cstream, size_t bytes);
 int snd_soc_component_compr_pointer(struct snd_compr_stream *cstream,
 				    struct snd_compr_tstamp *tstamp);
+int snd_soc_component_compr_copy(struct snd_compr_stream *cstream,
+				 char __user *buf, size_t count);
 
 #endif /* __SOC_COMPONENT_H */

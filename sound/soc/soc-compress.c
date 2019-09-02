@@ -488,20 +488,11 @@ static int soc_compr_copy(struct snd_compr_stream *cstream,
 			  char __user *buf, size_t count)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
-	struct snd_soc_component *component;
-	int i, ret = 0;
+	int ret;
 
 	mutex_lock_nested(&rtd->card->pcm_mutex, rtd->card->pcm_subclass);
 
-	for_each_rtd_components(rtd, i, component) {
-		if (!component->driver->compress_ops ||
-		    !component->driver->compress_ops->copy)
-			continue;
-
-		ret = component->driver->compress_ops->copy(
-			component, cstream, buf, count);
-		break;
-	}
+	ret = snd_soc_component_compr_copy(cstream, buf, count);
 
 	mutex_unlock(&rtd->card->pcm_mutex);
 	return ret;
