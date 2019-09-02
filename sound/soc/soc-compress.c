@@ -20,31 +20,6 @@
 #include <sound/initval.h>
 #include <sound/soc-dpcm.h>
 
-static int soc_compr_components_open(struct snd_compr_stream *cstream)
-{
-	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
-	struct snd_soc_component *component;
-	int i, ret;
-
-	for_each_rtd_components(rtd, i, component) {
-		if (!component->driver->compress_ops ||
-		    !component->driver->compress_ops->open)
-			continue;
-
-		ret = component->driver->compress_ops->open(component, cstream);
-		if (ret < 0) {
-			dev_err(component->dev,
-				"Compress ASoC: can't open platform %s: %d\n",
-				component->name, ret);
-
-			return ret;
-		}
-		component->compress_opened = 1;
-	}
-
-	return 0;
-}
-
 static int soc_compr_components_free(struct snd_compr_stream *cstream)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
@@ -79,7 +54,7 @@ static int soc_compr_open(struct snd_compr_stream *cstream)
 	if (ret < 0)
 		goto out;
 
-	ret = soc_compr_components_open(cstream);
+	ret = snd_soc_component_compr_open(cstream);
 	if (ret < 0)
 		goto machine_err;
 
@@ -148,7 +123,7 @@ static int soc_compr_open_fe(struct snd_compr_stream *cstream)
 	if (ret < 0)
 		goto out;
 
-	ret = soc_compr_components_open(cstream);
+	ret = snd_soc_component_compr_open(cstream);
 	if (ret < 0)
 		goto open_err;
 
