@@ -769,3 +769,24 @@ int snd_soc_component_compr_get_params(struct snd_compr_stream *cstream,
 	return 0;
 }
 EXPORT_SYMBOL_GPL(snd_soc_component_compr_get_params);
+
+int snd_soc_component_compr_get_caps(struct snd_compr_stream *cstream,
+				     struct snd_compr_caps *caps)
+{
+	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
+	struct snd_soc_component *component;
+	int i, ret;
+
+	for_each_rtd_components(rtd, i, component) {
+		if (component->driver->compress_ops &&
+		    component->driver->compress_ops->get_caps) {
+			ret = component->driver->compress_ops->get_caps(
+				component, cstream, caps);
+			if (ret < 0)
+				return soc_component_err(component, ret);
+		}
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(snd_soc_component_compr_get_caps);
