@@ -592,3 +592,18 @@ int snd_soc_dai_compr_pointer(struct snd_soc_dai *dai,
 	return 0;
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_compr_pointer);
+
+int snd_soc_dai_compr_set_metadata(struct snd_soc_dai *dai,
+				   struct snd_compr_stream *cstream,
+				   struct snd_compr_metadata *metadata)
+{
+	if (dai->driver->cops &&
+	    dai->driver->cops->set_metadata) {
+		int ret = dai->driver->cops->set_metadata(cstream, metadata, dai);
+		if (ret < 0)
+			return soc_dai_err(dai, ret);
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(snd_soc_dai_compr_set_metadata);
