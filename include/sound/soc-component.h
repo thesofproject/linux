@@ -459,5 +459,7 @@ int snd_soc_component_compr_set_params(struct snd_compr_stream *cstream,
 				       struct snd_compr_params *params);
 int snd_soc_component_compr_get_params(struct snd_compr_stream *cstream,
 				       struct snd_codec *params);
+int snd_soc_component_compr_get_caps(struct snd_compr_stream *cstream,
+				     struct snd_compr_caps *caps);
 
 #endif /* __SOC_COMPONENT_H */
