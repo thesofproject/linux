@@ -148,3 +148,17 @@ void snd_soc_link_compr_shutdown(struct snd_soc_pcm_runtime *rtd,
 		rtd->dai_link->compr_ops->shutdown(cstream);
 }
 EXPORT_SYMBOL_GPL(snd_soc_link_compr_shutdown);
+
+int snd_soc_link_compr_set_params(struct snd_soc_pcm_runtime *rtd,
+				  struct snd_compr_stream *cstream)
+{
+	if (rtd->dai_link->compr_ops &&
+	    rtd->dai_link->compr_ops->set_params) {
+		int ret = rtd->dai_link->compr_ops->set_params(cstream);
+		if (ret < 0)
+			return soc_link_err(rtd, ret);
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(snd_soc_link_compr_set_params);

@@ -24,5 +24,7 @@ int snd_soc_link_compr_startup(struct snd_soc_pcm_runtime *rtd,
 			       struct snd_compr_stream *cstream);
 void snd_soc_link_compr_shutdown(struct snd_soc_pcm_runtime *rtd,
 				 struct snd_compr_stream *cstream);
+int snd_soc_link_compr_set_params(struct snd_soc_pcm_runtime *rtd,
+				  struct snd_compr_stream *cstream);
 
 #endif /* __SOC_LINK_H */
