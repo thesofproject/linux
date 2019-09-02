@@ -562,3 +562,18 @@ int snd_soc_dai_compr_get_params(struct snd_soc_dai *dai,
 	return 0;
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_compr_get_params);
+
+int snd_soc_dai_compr_ack(struct snd_soc_dai *dai,
+			  struct snd_compr_stream *cstream,
+			  size_t bytes)
+{
+	if (dai->driver->cops &&
+	    dai->driver->cops->ack) {
+		int ret = dai->driver->cops->ack(cstream, bytes, dai);
+		if (ret < 0)
+			return soc_dai_err(dai, ret);
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(snd_soc_dai_compr_ack);
