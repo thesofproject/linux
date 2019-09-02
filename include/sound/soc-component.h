@@ -457,5 +457,7 @@ int snd_soc_component_compr_free(struct snd_compr_stream *cstream);
 int snd_soc_component_compr_trigger(struct snd_compr_stream *cstream, int cmd);
 int snd_soc_component_compr_set_params(struct snd_compr_stream *cstream,
 				       struct snd_compr_params *params);
+int snd_soc_component_compr_get_params(struct snd_compr_stream *cstream,
+				       struct snd_codec *params);
 
 #endif /* __SOC_COMPONENT_H */
