@@ -790,3 +790,24 @@ int snd_soc_component_compr_get_caps(struct snd_compr_stream *cstream,
 	return 0;
 }
 EXPORT_SYMBOL_GPL(snd_soc_component_compr_get_caps);
+
+int snd_soc_component_compr_get_codec_caps(struct snd_compr_stream *cstream,
+					   struct snd_compr_codec_caps *codec)
+{
+	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
+	struct snd_soc_component *component;
+	int i, ret;
+
+	for_each_rtd_components(rtd, i, component) {
+		if (component->driver->compress_ops &&
+		    component->driver->compress_ops->get_codec_caps) {
+			ret = component->driver->compress_ops->get_codec_caps(
+				component, cstream, codec);
+			if (ret < 0)
+				return soc_component_err(component, ret);
+		}
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(snd_soc_component_compr_get_codec_caps);

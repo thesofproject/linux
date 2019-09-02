@@ -437,20 +437,11 @@ static int soc_compr_get_codec_caps(struct snd_compr_stream *cstream,
 				    struct snd_compr_codec_caps *codec)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
-	struct snd_soc_component *component;
-	int i, ret = 0;
+	int ret;
 
 	mutex_lock_nested(&rtd->card->pcm_mutex, rtd->card->pcm_subclass);
 
-	for_each_rtd_components(rtd, i, component) {
-		if (!component->driver->compress_ops ||
-		    !component->driver->compress_ops->get_codec_caps)
-			continue;
-
-		ret = component->driver->compress_ops->get_codec_caps(
-			component, cstream, codec);
-		break;
-	}
+	ret = snd_soc_component_compr_get_codec_caps(cstream, codec);
 
 	mutex_unlock(&rtd->card->pcm_mutex);
 	return ret;
