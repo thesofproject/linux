@@ -8,6 +8,18 @@
 #include <linux/module.h>
 #include <sound/soc.h>
 
+#define soc_component_err(component, ret)		\
+	_soc_component_err(component, __func__, ret)
+static inline int _soc_component_err(struct snd_soc_component *component,
+				     const char *func, int ret)
+{
+	dev_err(component->dev,
+		"ASoC: error at %s on %s: %d\n",
+		func, component->name, ret);
+
+	return ret;
+}
+
 /**
  * snd_soc_component_set_sysclk - configure COMPONENT system or master clock.
  * @component: COMPONENT
@@ -521,7 +533,7 @@ int snd_soc_pcm_component_new(struct snd_pcm *pcm)
 		if (component->driver->pcm_construct) {
 			ret = component->driver->pcm_construct(component, rtd);
 			if (ret < 0)
-				return ret;
+				return soc_component_err(component, ret);
 		}
 	}
 
