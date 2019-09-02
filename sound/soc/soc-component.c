@@ -666,3 +666,24 @@ int snd_soc_pcm_component_trigger(struct snd_pcm_substream *substream,
 
 	return 0;
 }
+
+int snd_soc_component_compr_open(struct snd_compr_stream *cstream)
+{
+	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
+	struct snd_soc_component *component;
+	int i, ret;
+
+	for_each_rtd_components(rtd, i, component) {
+		if (component->driver->compress_ops &&
+		    component->driver->compress_ops->open) {
+			ret = component->driver->compress_ops->open(
+				component, cstream);
+			if (ret < 0)
+				return soc_component_err(component, ret);
+		}
+		component->compress_opened = 1;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(snd_soc_component_compr_open);
