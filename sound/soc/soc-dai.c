@@ -495,3 +495,17 @@ snd_pcm_sframes_t snd_soc_pcm_dai_delay(struct snd_pcm_substream *substream)
 
 	return delay;
 }
+
+int snd_soc_dai_compr_startup(struct snd_soc_dai *dai,
+			      struct snd_compr_stream *cstream)
+{
+	if (dai->driver->cops &&
+	    dai->driver->cops->startup) {
+		int ret = dai->driver->cops->startup(cstream, dai);
+		if (ret < 0)
+			return soc_dai_err(dai, ret);
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(snd_soc_dai_compr_startup);
