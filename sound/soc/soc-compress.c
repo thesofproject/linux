@@ -204,8 +204,7 @@ static int soc_compr_free(struct snd_compr_stream *cstream)
 	if (!snd_soc_dai_activity(codec_dai))
 		codec_dai->rate = 0;
 
-	if (rtd->dai_link->compr_ops && rtd->dai_link->compr_ops->shutdown)
-		rtd->dai_link->compr_ops->shutdown(cstream);
+	snd_soc_link_compr_shutdown(rtd, cstream);
 
 	soc_compr_components_free(cstream);
 
@@ -254,8 +253,7 @@ static int soc_compr_free_fe(struct snd_compr_stream *cstream)
 
 	fe->dpcm[stream].runtime = NULL;
 
-	if (fe->dai_link->compr_ops && fe->dai_link->compr_ops->shutdown)
-		fe->dai_link->compr_ops->shutdown(cstream);
+	snd_soc_link_compr_shutdown(fe, cstream);
 
 	soc_compr_components_free(cstream);
 
