@@ -1954,8 +1954,9 @@ static int soc_tplg_fe_link_create(struct soc_tplg *tplg,
 	list_add(&link->dobj.list, &tplg->comp->dobj_list);
 
 	/* Notify the machine driver */
-	if (card->add_dai_link)
-		card->add_dai_link(card, link);
+	ret = snd_soc_card_add_dai_link(card, link);
+	if (ret < 0)
+		return ret;
 
 	snd_soc_add_pcm_runtime(card, link);
 	return 0;
