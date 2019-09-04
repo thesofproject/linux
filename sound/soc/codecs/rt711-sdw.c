@@ -286,6 +286,18 @@ static int rt711_sdw_probe(struct sdw_slave *slave,
 	return ret;
 }
 
+static int rt711_sdw_remove(struct sdw_slave *slave)
+{
+	struct rt711_priv *rt711 = dev_get_drvdata(&slave->dev);
+
+	if (rt711 && rt711->hw_init) {
+		cancel_delayed_work(&rt711->jack_detect_work);
+		cancel_delayed_work(&rt711->jack_btn_check_work);
+	}
+
+	return 0;
+}
+
 static const struct sdw_device_id rt711_id[] = {
 	SDW_SLAVE_ENTRY(0x025d, 0x711, 0),
 	{},
@@ -298,6 +310,7 @@ static struct sdw_driver rt711_sdw_driver = {
 		.owner = THIS_MODULE,
 	},
 	.probe = rt711_sdw_probe,
+	.remove = rt711_sdw_remove,
 	.ops = &rt711_slave_ops,
 	.id_table = rt711_id,
 };
