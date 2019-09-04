@@ -1238,14 +1238,6 @@ struct soc_enum {
 #endif
 };
 
-/* device driver data */
-
-static inline void snd_soc_card_set_drvdata(struct snd_soc_card *card,
-		void *data)
-{
-	card->drvdata = data;
-}
-
 static inline void *snd_soc_card_get_drvdata(struct snd_soc_card *card)
 {
 	return card->drvdata;
