@@ -556,8 +556,7 @@ static void remove_link(struct snd_soc_component *comp,
 	list_del(&dobj->list);
 
 	/* Notify the machine driver */
-	if (card->remove_dai_link)
-		card->remove_dai_link(card, link);
+	snd_soc_card_remove_dai_link(card, link);
 
 	snd_soc_remove_pcm_runtime(card,
 			snd_soc_get_pcm_runtime(card, link));
