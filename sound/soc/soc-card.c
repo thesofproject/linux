@@ -83,3 +83,14 @@ int snd_soc_card_suspend_pre(struct snd_soc_card *card)
 
 	return 0;
 }
+
+int snd_soc_card_suspend_post(struct snd_soc_card *card)
+{
+	if (card->suspend_post) {
+		int ret = card->suspend_post(card);
+		if (ret < 0)
+			return soc_card_err(card, ret);
+	}
+
+	return 0;
+}
