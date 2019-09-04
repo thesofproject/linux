@@ -183,3 +183,16 @@ int snd_soc_card_set_bias_level(struct snd_soc_card *card,
 
 	return 0;
 }
+
+int snd_soc_card_set_bias_level_post(struct snd_soc_card *card,
+				     struct snd_soc_dapm_context *dapm,
+				     enum snd_soc_bias_level level)
+{
+	if (card->set_bias_level_post) {
+		int ret = card->set_bias_level_post(card, dapm, level);
+		if (ret < 0)
+			return soc_card_err(card, ret);
+	}
+
+	return 0;
+}
