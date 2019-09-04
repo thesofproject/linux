@@ -1790,10 +1790,7 @@ static void soc_cleanup_card_resources(struct snd_soc_card *card)
 	soc_cleanup_card_debugfs(card);
 
 	/* remove the card */
-	if (card->probed && card->remove)
-		card->remove(card);
-
-	card->probed = 0;
+	snd_soc_card_remove(card);
 }
 
 static void snd_soc_unbind_card(struct snd_soc_card *card, bool unregister)

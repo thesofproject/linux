@@ -154,3 +154,19 @@ int snd_soc_card_late_probe(struct snd_soc_card *card)
 
 	return 0;
 }
+
+int snd_soc_card_remove(struct snd_soc_card *card)
+{
+	int ret = 0;
+
+	if (card->probed &&
+	    card->remove)
+		ret = card->remove(card);
+
+	card->probed = 0;
+
+	if (ret < 0)
+		soc_card_err(card, ret);
+
+	return ret;
+}
