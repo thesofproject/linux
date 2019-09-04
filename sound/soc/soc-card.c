@@ -116,3 +116,22 @@ int snd_soc_card_resume_post(struct snd_soc_card *card)
 
 	return 0;
 }
+
+int snd_soc_card_probe(struct snd_soc_card *card)
+{
+	if (card->probe) {
+		int ret = card->probe(card);
+		if (ret < 0)
+			return soc_card_err(card, ret);
+
+		/*
+		 * set probed here
+		 * see
+		 *	snd_soc_bind_card()
+		 *	snd_soc_card_late_probe()
+		 */
+		card->probed = 1;
+	}
+
+	return 0;
+}
