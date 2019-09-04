@@ -408,11 +408,6 @@ enum snd_soc_pcm_subclass {
 	SND_SOC_PCM_CLASS_BE	= 1,
 };
 
-enum snd_soc_card_subclass {
-	SND_SOC_CARD_CLASS_INIT		= 0,
-	SND_SOC_CARD_CLASS_RUNTIME	= 1,
-};
-
 #define for_each_pcm_streams(stream) \
 	for (stream  = SNDRV_PCM_STREAM_PLAYBACK;	\
 	     stream <= SNDRV_PCM_STREAM_LAST;		\
