@@ -345,8 +345,14 @@ void snd_soc_dai_shutdown(struct snd_soc_dai *dai,
 
 int snd_soc_dai_probe(struct snd_soc_dai *dai)
 {
-	if (dai->driver->probe)
-		return dai->driver->probe(dai);
+	if (dai->driver->probe) {
+		int ret = dai->driver->probe(dai);
+		if (ret < 0)
+			return soc_dai_err(dai, ret);
+	}
+
+	dai->probed = 1;
+
 	return 0;
 }
 
