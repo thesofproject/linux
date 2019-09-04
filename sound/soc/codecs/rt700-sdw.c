@@ -298,6 +298,13 @@ static int rt700_sdw_probe(struct sdw_slave *slave,
 
 static int rt700_sdw_remove(struct sdw_slave *slave)
 {
+	struct rt700_priv *rt700 = dev_get_drvdata(&slave->dev);
+
+	if (rt700 && rt700->hw_init) {
+		cancel_delayed_work(&rt700->jack_detect_work);
+		cancel_delayed_work(&rt700->jack_btn_check_work);
+	}
+
 	return 0;
 }
 
