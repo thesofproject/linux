@@ -358,9 +358,15 @@ int snd_soc_dai_probe(struct snd_soc_dai *dai)
 
 int snd_soc_dai_remove(struct snd_soc_dai *dai)
 {
-	if (dai->driver->remove)
-		return dai->driver->remove(dai);
-	return 0;
+	int ret = 0;
+
+	if (dai->probed &&
+	    dai->driver->remove)
+		ret = dai->driver->remove(dai);
+
+	dai->probed = 0;
+
+	return ret;
 }
 
 int snd_soc_dai_compress_new(struct snd_soc_dai *dai,
