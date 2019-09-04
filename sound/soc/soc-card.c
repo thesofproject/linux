@@ -72,3 +72,14 @@ int snd_soc_card_jack_new(struct snd_soc_card *card, const char *id, int type,
 	return 0;
 }
 EXPORT_SYMBOL_GPL(snd_soc_card_jack_new);
+
+int snd_soc_card_suspend_pre(struct snd_soc_card *card)
+{
+	if (card->suspend_pre) {
+		int ret = card->suspend_pre(card);
+		if (ret < 0)
+			return soc_card_err(card, ret);
+	}
+
+	return 0;
+}
