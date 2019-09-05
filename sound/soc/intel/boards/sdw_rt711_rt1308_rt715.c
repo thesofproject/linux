@@ -103,22 +103,20 @@ static const struct snd_soc_dapm_widget widgets[] = {
 };
 
 static const struct snd_soc_dapm_route map[] = {
-	/*Headphones*/
+	/* Headphones */
 	{ "Headphones", NULL, "rt711 HP" },
 	{ "rt711 MIC2", NULL, "AMIC" },
+	/* Speakers */
+	{ "Speaker", NULL, "rt1308-1 SPOL" },
+	{ "Speaker", NULL, "rt1308-1 SPOR" },
+	{ "Speaker", NULL, "rt1308-2 SPOL" },
+	{ "Speaker", NULL, "rt1308-2 SPOR" },
 };
 
 static const struct snd_kcontrol_new controls[] = {
 	SOC_DAPM_PIN_SWITCH("Headphones"),
 	SOC_DAPM_PIN_SWITCH("AMIC"),
 	SOC_DAPM_PIN_SWITCH("Speaker"),
-};
-
-static const struct snd_soc_dapm_route spk_rt1308_map[] = {
-	{ "Speaker", NULL, "rt1308-1 SPOL" },
-	{ "Speaker", NULL, "rt1308-1 SPOR" },
-	{ "Speaker", NULL, "rt1308-2 SPOL" },
-	{ "Speaker", NULL, "rt1308-2 SPOR" },
 };
 
 SND_SOC_DAILINK_DEF(sdw0_pin2,
@@ -163,19 +161,6 @@ SND_SOC_DAILINK_DEF(idisp3_codec,
 SND_SOC_DAILINK_DEF(platform,
 		DAILINK_COMP_ARRAY(COMP_PLATFORM("0000:00:1f.3")));
 
-static int rt1308_init(struct snd_soc_pcm_runtime *runtime)
-{
-	struct snd_soc_card *card = runtime->card;
-	int ret;
-
-	ret = snd_soc_dapm_add_routes(&card->dapm, spk_rt1308_map,
-				      ARRAY_SIZE(spk_rt1308_map));
-	if (ret)
-		dev_warn(card->dev, "add new routes failed %d\n", ret);
-
-	return ret;
-}
-
 static struct snd_soc_codec_conf codec_conf[] = {
 	{
 		.dev_name = "sdw:0:25d:711:0:1",
@@ -219,7 +204,6 @@ struct snd_soc_dai_link dailink[] = {
 		.no_pcm = 1,
 		.dpcm_playback = 1,
 		.nonatomic = true,
-		.init = rt1308_init,
 		SND_SOC_DAILINK_REG(sdw1_pin2, sdw1_codec, platform),
 	},
 	{
