@@ -198,8 +198,6 @@ static int rt715_read_prop(struct sdw_slave *slave)
 	unsigned long addr;
 	struct sdw_dpn_prop *dpn;
 
-	sdw_slave_read_prop(slave);
-
 	prop->paging_support = false;
 
 	/* first we need to allocate memory for set bits in port lists */
