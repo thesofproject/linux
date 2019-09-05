@@ -226,7 +226,7 @@ int rt1308_clock_config(struct device *dev)
 	regmap_write(rt1308->regmap, 0xe0, value);
 	regmap_write(rt1308->regmap, 0xf0, value);
 
-	dev_dbg(dev, "%s clock_config complete\n", __func__);
+	dev_dbg(dev, "%s complete, clk_freq=%d\n", __func__, clk_freq);
 
 	return 0;
 }
@@ -290,6 +290,9 @@ static int rt1308_update_status(struct sdw_slave *slave,
 	/* Update the status */
 	rt1308->status = status;
 
+	if (status == SDW_SLAVE_UNATTACHED)
+		rt1308->hw_init = false;
+
 	/*
 	 * Perform initialization only if slave status is present and
 	 * hw_init flag is false
@@ -313,7 +316,7 @@ static int rt1308_bus_config(struct sdw_slave *slave,
 	if (ret < 0)
 		dev_err(&slave->dev, "Invalid clk config");
 
-	return 0;
+	return ret;
 }
 
 static int rt1308_interrupt_callback(struct sdw_slave *slave,
@@ -518,6 +521,9 @@ static int rt1308_sdw_hw_params(struct snd_pcm_substream *substream,
 	if (!stream)
 		return -ENOMEM;
 
+	if (!rt1308->sdw_slave)
+		return -EINVAL;
+
 	/* SoundWire specific configuration */
 	/* port 1 for playback */
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
@@ -553,6 +559,9 @@ static int rt1308_sdw_pcm_hw_free(struct snd_pcm_substream *substream,
 		snd_soc_component_get_drvdata(component);
 	struct sdw_stream_data *stream =
 		snd_soc_dai_get_dma_data(dai, substream);
+
+	if (!rt1308->sdw_slave)
+		return -EINVAL;
 
 	sdw_stream_remove_slave(rt1308->sdw_slave, stream->sdw_stream);
 	return 0;
@@ -638,7 +647,6 @@ static int rt1308_sdw_probe(struct sdw_slave *slave,
 			   const struct sdw_device_id *id)
 {
 	struct regmap *regmap;
-	int ret = 0;
 
 	/* Assign ops */
 	slave->ops = &rt1308_slave_ops;
@@ -654,14 +662,6 @@ static int rt1308_sdw_probe(struct sdw_slave *slave,
 	if (slave->status == SDW_SLAVE_ATTACHED)
 		rt1308_io_init(&slave->dev, slave);
 
-	return ret;
-}
-
-static int rt1308_sdw_remove(struct sdw_slave *slave)
-{
-	struct rt1308_sdw_priv *rt1308 = dev_get_drvdata(&slave->dev);
-
-	regmap_write(rt1308->regmap, RT1308_SDW_RESET, 0);
 	return 0;
 }
 
@@ -677,7 +677,6 @@ static struct sdw_driver rt1308_sdw_driver = {
 		.owner = THIS_MODULE,
 	},
 	.probe = rt1308_sdw_probe,
-	.remove = rt1308_sdw_remove,
 	.ops = &rt1308_slave_ops,
 	.id_table = rt1308_id,
 };
