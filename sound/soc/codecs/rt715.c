@@ -8,7 +8,6 @@
  *
  */
 
-// #define DEBUG
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/version.h>
@@ -802,7 +801,7 @@ static int rt715_pcm_hw_params(struct snd_pcm_substream *substream,
 		return -ENOMEM;
 
 	if (!rt715->slave)
-		return 0;
+		return -EINVAL;
 
 	switch (dai->id) {
 	case RT715_AIF1:
@@ -903,7 +902,7 @@ int rt715_pcm_hw_free(struct snd_pcm_substream *substream,
 		snd_soc_dai_get_dma_data(dai, substream);
 
 	if (!rt715->slave)
-		return 0;
+		return -EINVAL;
 
 	sdw_stream_remove_slave(rt715->slave, stream->sdw_stream);
 	return 0;
