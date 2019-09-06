@@ -144,6 +144,9 @@ static int rt711_update_status(struct sdw_slave *slave,
 	/* Update the status */
 	rt711->status = status;
 
+	if (status == SDW_SLAVE_UNATTACHED)
+		rt711->hw_init = false;
+
 	/*
 	 * Perform initialization only if slave status is present and
 	 * hw_init flag is false
@@ -237,7 +240,7 @@ static int rt711_bus_config(struct sdw_slave *slave,
 	if (ret < 0)
 		dev_err(&slave->dev, "Invalid clk config");
 
-	return 0;
+	return ret;
 }
 
 static int rt711_interrupt_callback(struct sdw_slave *slave,
@@ -267,7 +270,6 @@ static int rt711_sdw_probe(struct sdw_slave *slave,
 			   const struct sdw_device_id *id)
 {
 	struct regmap *regmap;
-	int ret = 0;
 
 	/* Assign ops */
 	slave->ops = &rt711_slave_ops;
@@ -283,7 +285,7 @@ static int rt711_sdw_probe(struct sdw_slave *slave,
 	if (slave->status == SDW_SLAVE_ATTACHED)
 		rt711_io_init(&slave->dev, slave);
 
-	return ret;
+	return 0;
 }
 
 static int rt711_sdw_remove(struct sdw_slave *slave)

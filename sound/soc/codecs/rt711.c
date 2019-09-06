@@ -115,7 +115,6 @@ static unsigned int rt711_index_read(struct regmap *regmap,
 	regmap_read(regmap, RT711_READ_HDA_0, &sdw_data_0);
 	*value = ((sdw_data_3 & 0xff) << 24) | ((sdw_data_2 & 0xff) << 16) |
 		 ((sdw_data_1 & 0xff) << 8) | (sdw_data_0 & 0xff);
-	return 0;
 
 err:
 	return ret;
@@ -870,7 +869,7 @@ static int rt711_probe(struct snd_soc_component *component)
 	if (ret < 0)
 		dev_err(component->dev, "%s calibration failed\n", __func__);
 
-	return 0;
+	return ret;
 }
 
 static const struct snd_soc_component_driver soc_codec_dev_rt711 = {
@@ -935,7 +934,7 @@ static int rt711_pcm_hw_params(struct snd_pcm_substream *substream,
 		return -ENOMEM;
 
 	if (!rt711->slave)
-		return 0;
+		return -EINVAL;
 
 	/* SoundWire specific configuration */
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
@@ -1017,7 +1016,7 @@ int rt711_pcm_hw_free(struct snd_pcm_substream *substream,
 		snd_soc_dai_get_dma_data(dai, substream);
 
 	if (!rt711->slave)
-		return 0;
+		return -EINVAL;
 
 	sdw_stream_remove_slave(rt711->slave, stream->sdw_stream);
 	return 0;
@@ -1108,6 +1107,8 @@ int rt711_clock_config(struct device *dev)
 
 	regmap_write(rt711->regmap, 0xe0, value);
 	regmap_write(rt711->regmap, 0xf0, value);
+
+	dev_dbg(dev, "%s complete, clk_freq=%d\n", __func__, clk_freq);
 
 	return 0;
 }
