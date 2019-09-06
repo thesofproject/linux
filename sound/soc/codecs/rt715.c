@@ -1212,10 +1212,6 @@ int rt715_io_init(struct device *dev, struct sdw_slave *slave)
 
 	if (rt715->hw_init)
 		return 0;
-	/* Enable Runtime PM */
-	pm_runtime_set_autosuspend_delay(&slave->dev, 3000);
-	pm_runtime_use_autosuspend(&slave->dev);
-	pm_runtime_enable(&slave->dev);
 
 	/* Mute nid=08h/09h */
 	regmap_write(rt715->regmap, RT715_SET_GAIN_LINE_ADC_H, 0xb0);
@@ -1248,9 +1244,15 @@ int rt715_io_init(struct device *dev, struct sdw_slave *slave)
 	/* Finish Initial Settings, set power to D3 */
 	regmap_write(rt715->regmap, RT715_SET_AUDIO_POWER_STATE, AC_PWRST_D3);
 
-	pm_runtime_put_sync_autosuspend(&slave->dev);
 	/* Mark Slave initialization complete */
 	rt715->hw_init = true;
+
+	/* Enable Runtime PM */
+	pm_runtime_set_autosuspend_delay(&slave->dev, 3000);
+	pm_runtime_use_autosuspend(&slave->dev);
+	pm_runtime_mark_last_busy(&slave->dev);
+	pm_runtime_enable(&slave->dev);
+
 	return ret;
 }
 
