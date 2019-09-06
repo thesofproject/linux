@@ -1181,11 +1181,6 @@ int rt711_io_init(struct device *dev, struct sdw_slave *slave)
 	if (rt711->hw_init)
 		return 0;
 
-	/* Enable Runtime PM */
-	pm_runtime_set_autosuspend_delay(&slave->dev, 3000);
-	pm_runtime_use_autosuspend(&slave->dev);
-	pm_runtime_enable(&slave->dev);
-
 	rt711_reset(rt711->regmap);
 
 	/* power on */
@@ -1244,8 +1239,6 @@ int rt711_io_init(struct device *dev, struct sdw_slave *slave)
 	/* Finish Initial Settings, set power to D3 */
 	regmap_write(rt711->regmap, RT711_SET_AUDIO_POWER_STATE, AC_PWRST_D3);
 
-	pm_runtime_put_sync_autosuspend(&slave->dev);
-
 	INIT_DELAYED_WORK(&rt711->jack_detect_work,
 			rt711_jack_detect_handler);
 	INIT_DELAYED_WORK(&rt711->jack_btn_check_work,
@@ -1256,6 +1249,12 @@ int rt711_io_init(struct device *dev, struct sdw_slave *slave)
 
 	/* Mark Slave initialization complete */
 	rt711->hw_init = true;
+
+	/* Enable Runtime PM */
+	pm_runtime_set_autosuspend_delay(&slave->dev, 3000);
+	pm_runtime_use_autosuspend(&slave->dev);
+	pm_runtime_mark_last_busy(&slave->dev);
+	pm_runtime_enable(&slave->dev);
 
 	dev_dbg(&slave->dev, "%s hw_init complete\n", __func__);
 	return ret;
