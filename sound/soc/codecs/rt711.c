@@ -326,10 +326,16 @@ static void rt711_jack_detect_handler(struct work_struct *work)
 			SND_JACK_BTN_0 | SND_JACK_BTN_1 |
 			SND_JACK_BTN_2 | SND_JACK_BTN_3);
 
-	if (btn_type & (SND_JACK_BTN_0 | SND_JACK_BTN_1 |
-		SND_JACK_BTN_2 | SND_JACK_BTN_3))
+	if (btn_type) {
+		/* button released */
+		snd_soc_jack_report(rt711->hs_jack, rt711->jack_type,
+			SND_JACK_HEADSET |
+			SND_JACK_BTN_0 | SND_JACK_BTN_1 |
+			SND_JACK_BTN_2 | SND_JACK_BTN_3);
+
 		mod_delayed_work(system_power_efficient_wq,
-			&rt711->jack_btn_check_work, msecs_to_jiffies(250));
+			&rt711->jack_btn_check_work, msecs_to_jiffies(200));
+	}
 
 	return;
 
@@ -378,10 +384,16 @@ static void rt711_btn_check_handler(struct work_struct *work)
 			SND_JACK_BTN_0 | SND_JACK_BTN_1 |
 			SND_JACK_BTN_2 | SND_JACK_BTN_3);
 
-	if (btn_type & (SND_JACK_BTN_0 | SND_JACK_BTN_1 |
-		SND_JACK_BTN_2 | SND_JACK_BTN_3))
+	if (btn_type) {
+		/* button released */
+		snd_soc_jack_report(rt711->hs_jack, rt711->jack_type,
+			SND_JACK_HEADSET |
+			SND_JACK_BTN_0 | SND_JACK_BTN_1 |
+			SND_JACK_BTN_2 | SND_JACK_BTN_3);
+
 		mod_delayed_work(system_power_efficient_wq,
-			&rt711->jack_btn_check_work, msecs_to_jiffies(250));
+			&rt711->jack_btn_check_work, msecs_to_jiffies(200));
+	}
 
 	return;
 
