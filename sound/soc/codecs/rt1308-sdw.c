@@ -179,11 +179,6 @@ int rt1308_io_init(struct device *dev, struct sdw_slave *slave)
 	if (rt1308->hw_init)
 		return 0;
 
-	/* Enable Runtime PM */
-	pm_runtime_set_autosuspend_delay(&slave->dev, 3000);
-	pm_runtime_use_autosuspend(&slave->dev);
-	pm_runtime_enable(&slave->dev);
-
 	ret = rt1308_read_prop(slave);
 	if (ret < 0)
 		goto _io_init_err_;
@@ -229,10 +224,14 @@ int rt1308_io_init(struct device *dev, struct sdw_slave *slave)
 	regmap_write(rt1308->regmap, 0xc101, 0xaf);
 	regmap_write(rt1308->regmap, 0xc310, 0x24);
 
-	pm_runtime_put_sync_autosuspend(&slave->dev);
-
 	/* Mark Slave initialization complete */
 	rt1308->hw_init = true;
+
+	/* Enable Runtime PM */
+	pm_runtime_set_autosuspend_delay(&slave->dev, 3000);
+	pm_runtime_use_autosuspend(&slave->dev);
+	pm_runtime_mark_last_busy(&slave->dev);
+	pm_runtime_enable(&slave->dev);
 
 	dev_dbg(&slave->dev, "%s hw_init complete\n", __func__);
 
