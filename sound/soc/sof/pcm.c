@@ -422,6 +422,7 @@ static int sof_pcm_open(struct snd_pcm_substream *substream)
 	struct snd_soc_component *component =
 		snd_soc_rtdcom_lookup(rtd, DRV_NAME);
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct snd_sof_pdata *plat_data = sdev->pdata;
 	struct snd_sof_pcm *spcm;
 	struct snd_soc_tplg_stream_caps *caps;
 	int ret;
@@ -486,10 +487,16 @@ static int sof_pcm_open(struct snd_pcm_substream *substream)
 	spcm->prepared[substream->stream] = false;
 
 	ret = snd_sof_pcm_platform_open(sdev, substream);
-	if (ret < 0)
+	if (ret < 0) {
 		dev_err(sdev->dev, "error: pcm open failed %d\n", ret);
+		return ret;
+	}
 
-	return ret;
+	if (!spcm->stream[substream->stream].d0i3_compatible)
+		pm_runtime_get_sync(&plat_data->pdev_d0ix->dev);
+
+	return 0;
+
 }
 
 static int sof_pcm_close(struct snd_pcm_substream *substream)
@@ -498,6 +505,7 @@ static int sof_pcm_close(struct snd_pcm_substream *substream)
 	struct snd_soc_component *component =
 		snd_soc_rtdcom_lookup(rtd, DRV_NAME);
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct snd_sof_pdata *plat_data = sdev->pdata;
 	struct snd_sof_pcm *spcm;
 	int err;
 
@@ -520,6 +528,11 @@ static int sof_pcm_close(struct snd_pcm_substream *substream)
 		 * keep going, no point in preventing the close
 		 * from happening
 		 */
+	}
+
+	if (!spcm->stream[substream->stream].d0i3_compatible) {
+		pm_runtime_mark_last_busy(&plat_data->pdev_d0ix->dev);
+		pm_runtime_put_autosuspend(&plat_data->pdev_d0ix->dev);
 	}
 
 	return 0;
