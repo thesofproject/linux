@@ -22,54 +22,17 @@
 static bool rt700_readable_register(struct device *dev, unsigned int reg)
 {
 	switch (reg) {
-	case 0x0020:
-	case 0x0030:
-	case 0x0060:
-	case 0x0070:
 	case 0x00e0:
 	case 0x00f0:
-	case 0x0000 ... 0x0005:
-	case 0x0022 ... 0x0026:
-	case 0x0032 ... 0x0036:
-	case 0x0040 ... 0x0046:
-	case 0x0050 ... 0x0055:
-	case 0x0100 ... 0x0105:
-	case 0x0120 ... 0x0127:
-	case 0x0130 ... 0x0137:
-	case 0x0200 ... 0x0205:
-	case 0x0220 ... 0x0227:
-	case 0x0230 ... 0x0237:
-	case 0x0300 ... 0x0305:
-	case 0x0320 ... 0x0327:
-	case 0x0330 ... 0x0337:
-	case 0x0400 ... 0x0405:
-	case 0x0420 ... 0x0427:
-	case 0x0430 ... 0x0437:
-	case 0x0500 ... 0x0505:
-	case 0x0520 ... 0x0527:
-	case 0x0530 ... 0x0537:
-	case 0x0600 ... 0x0605:
-	case 0x0620 ... 0x0627:
-	case 0x0630 ... 0x0637:
-	case 0x0700 ... 0x0705:
-	case 0x0720 ... 0x0727:
-	case 0x0730 ... 0x0737:
-	case 0x0800 ... 0x0805:
-	case 0x0820 ... 0x0827:
-	case 0x0830 ... 0x0837:
-	case 0x0f00 ... 0x0f05:
-	case 0x0f30 ... 0x0f37:
 	case 0x2000 ... 0x200e:
 	case 0x2012 ... 0x2016:
 	case 0x201a ... 0x2027:
 	case 0x2029 ... 0x202a:
 	case 0x202d ... 0x2034:
-	case 0x2100 ... 0x213f:
 	case 0x2200 ... 0x2204:
 	case 0x2206 ... 0x2212:
 	case 0x2220 ... 0x2223:
 	case 0x2230 ... 0x2231:
-	case 0x3000 ... 0xffff:
 		return true;
 	default:
 		return false;
@@ -79,34 +42,6 @@ static bool rt700_readable_register(struct device *dev, unsigned int reg)
 static bool rt700_volatile_register(struct device *dev, unsigned int reg)
 {
 	switch (reg) {
-	case 0x0000:
-	case 0x0001:
-	case 0x0004:
-	case 0x0005:
-	case 0x0040:
-	case 0x0042:
-	case 0x0043:
-	case 0x0044:
-	case 0x0045:
-	case 0x0104:
-	case 0x0204:
-	case 0x0304:
-	case 0x0404:
-	case 0x0504:
-	case 0x0604:
-	case 0x0704:
-	case 0x0804:
-	case 0x0105:
-	case 0x0205:
-	case 0x0305:
-	case 0x0405:
-	case 0x0505:
-	case 0x0605:
-	case 0x0705:
-	case 0x0805:
-	case 0x0f00:
-	case 0x0f04:
-	case 0x0f05:
 	case 0x2009:
 	case 0x2016:
 	case 0x201b:
@@ -116,13 +51,11 @@ static bool rt700_volatile_register(struct device *dev, unsigned int reg)
 	case 0x2021:
 	case 0x2023:
 	case 0x2230:
-	case 0x0050 ... 0x0055: /* device id */
 	case 0x200b ... 0x200e: /* i2c read */
 	case 0x2012 ... 0x2015: /* HD-A read */
 	case 0x202d ... 0x202f: /* BRA */
 	case 0x2201 ... 0x2212: /* i2c debug */
 	case 0x2220 ... 0x2223: /* decoded HD-A */
-	case 0x3000 ... 0xffff: /* HD-A command */
 		return true;
 	default:
 		return false;
@@ -134,7 +67,7 @@ static const struct regmap_config rt700_sdw_regmap = {
 	.val_bits = 8, /* Total number of bits in register */
 	.readable_reg = rt700_readable_register, /* Readable registers */
 	.volatile_reg = rt700_volatile_register, /* volatile register */
-	.max_register = 0xffff, /* Maximum number of register */
+	.max_register = 0xff01, /* Maximum number of register */
 	.reg_defaults = rt700_reg_defaults, /* Defaults */
 	.num_reg_defaults = ARRAY_SIZE(rt700_reg_defaults),
 	.cache_type = REGCACHE_RBTREE,
