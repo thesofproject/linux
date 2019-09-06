@@ -116,7 +116,6 @@ static int rt700_index_read(struct regmap *regmap,
 	regmap_read(regmap, RT700_READ_HDA_0, &sdw_data_0);
 	*value = ((sdw_data_3 & 0xff) << 24) | ((sdw_data_2 & 0xff) << 16) |
 		 ((sdw_data_1 & 0xff) << 8) | (sdw_data_0 & 0xff);
-	return 0;
 
 err:
 	return ret;
@@ -890,7 +889,7 @@ static int rt700_pcm_hw_params(struct snd_pcm_substream *substream,
 		return -ENOMEM;
 
 	if (!rt700->slave)
-		return 0;
+		return -EINVAL;
 
 	/* SoundWire specific configuration */
 	/* This code assumes port 1 for playback and port 2 for capture */
@@ -977,7 +976,7 @@ static int rt700_pcm_hw_free(struct snd_pcm_substream *substream,
 		snd_soc_dai_get_dma_data(dai, substream);
 
 	if (!rt700->slave)
-		return 0;
+		return -EINVAL;
 
 	sdw_stream_remove_slave(rt700->slave, stream->sdw_stream);
 	return 0;
@@ -1075,6 +1074,8 @@ int rt700_clock_config(struct device *dev)
 
 	regmap_write(rt700->regmap, 0xe0, value);
 	regmap_write(rt700->regmap, 0xf0, value);
+
+	dev_dbg(dev, "%s complete, clk_freq=%d\n", __func__, clk_freq);
 
 	return 0;
 }

@@ -150,6 +150,9 @@ static int rt700_update_status(struct sdw_slave *slave,
 	/* Update the status */
 	rt700->status = status;
 
+	if (status == SDW_SLAVE_UNATTACHED)
+		rt700->hw_init = false;
+
 	/*
 	 * Perform initialization only if slave status is present and
 	 * hw_init flag is false
@@ -243,7 +246,7 @@ static int rt700_bus_config(struct sdw_slave *slave,
 	if (ret < 0)
 		dev_err(&slave->dev, "Invalid clk config");
 
-	return 0;
+	return ret;
 }
 
 static int rt700_interrupt_callback(struct sdw_slave *slave,
@@ -277,7 +280,6 @@ static int rt700_sdw_probe(struct sdw_slave *slave,
 			   const struct sdw_device_id *id)
 {
 	struct regmap *regmap;
-	int ret = 0;
 
 	/* Assign ops */
 	slave->ops = &rt700_slave_ops;
@@ -293,7 +295,7 @@ static int rt700_sdw_probe(struct sdw_slave *slave,
 	if (slave->status == SDW_SLAVE_ATTACHED)
 		rt700_io_init(&slave->dev, slave);
 
-	return ret;
+	return 0;
 }
 
 static int rt700_sdw_remove(struct sdw_slave *slave)
