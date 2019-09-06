@@ -538,6 +538,14 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 		return PTR_ERR(hdev->dmic_dev);
 	}
 
+	hdev->d0ix_dev = platform_device_register_data(sdev->dev, "sof_d0ix",
+						       PLATFORM_DEVID_NONE,
+						       sdev, sizeof(*sdev));
+	if (IS_ERR(hdev->d0ix_dev)) {
+		dev_err(sdev->dev, "error: failed to create d0ix device\n");
+		return PTR_ERR(hdev->d0ix_dev);
+	}
+
 	/*
 	 * use position update IPC if either it is forced
 	 * or we don't have other choice
@@ -687,6 +695,9 @@ int hda_dsp_remove(struct snd_sof_dev *sdev)
 	/* codec removal, invoke bus_device_remove */
 	snd_hdac_ext_bus_device_remove(bus);
 #endif
+
+	if (!IS_ERR_OR_NULL(hda->d0ix_dev))
+		platform_device_unregister(hda->d0ix_dev);
 
 	if (!IS_ERR_OR_NULL(hda->dmic_dev))
 		platform_device_unregister(hda->dmic_dev);

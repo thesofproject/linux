@@ -406,6 +406,9 @@ struct sof_intel_hda_dev {
 
 	/* DMIC device */
 	struct platform_device *dmic_dev;
+
+	/* platform device for D0ix PM */
+	struct platform_device *d0ix_dev;
 };
 
 static inline struct hdac_bus *sof_to_bus(struct snd_sof_dev *s)
