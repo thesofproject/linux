@@ -1208,7 +1208,6 @@ int rt715_init(struct device *dev, struct regmap *regmap,
 int rt715_io_init(struct device *dev, struct sdw_slave *slave)
 {
 	struct rt715_priv *rt715 = dev_get_drvdata(dev);
-	int ret;
 
 	if (rt715->hw_init)
 		return 0;
@@ -1253,7 +1252,7 @@ int rt715_io_init(struct device *dev, struct sdw_slave *slave)
 	pm_runtime_mark_last_busy(&slave->dev);
 	pm_runtime_enable(&slave->dev);
 
-	return ret;
+	return 0;
 }
 
 int rt715_remove(struct device *dev)
