@@ -204,7 +204,10 @@ found:
 int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
 		     struct snd_pcm_substream *substream)
 {
+	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct hdac_ext_stream *dsp_stream;
+	struct snd_sof_pcm *spcm;
 	int direction = substream->stream;
 
 	dsp_stream = hda_dsp_stream_get(sdev, direction);
@@ -216,13 +219,24 @@ int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
 
 	/* binding pcm substream to hda stream */
 	substream->runtime->private_data = &dsp_stream->hstream;
+
+	spcm = snd_sof_find_spcm_dai(sdev, rtd);
+	if (!spcm)
+		return -EINVAL;
+
+	if (!spcm->stream[substream->stream].d0i3_compatible)
+		pm_runtime_get_sync(&hdev->d0ix_dev->dev);
+
 	return 0;
 }
 
 int hda_dsp_pcm_close(struct snd_sof_dev *sdev,
 		      struct snd_pcm_substream *substream)
 {
+	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct hdac_stream *hstream = substream->runtime->private_data;
+	struct snd_sof_pcm *spcm;
 	int direction = substream->stream;
 	int ret;
 
@@ -235,5 +249,15 @@ int hda_dsp_pcm_close(struct snd_sof_dev *sdev,
 
 	/* unbinding pcm substream to hda stream */
 	substream->runtime->private_data = NULL;
+
+	spcm = snd_sof_find_spcm_dai(sdev, rtd);
+	if (!spcm)
+		return -EINVAL;
+
+	if (!spcm->stream[substream->stream].d0i3_compatible) {
+		pm_runtime_mark_last_busy(&hdev->d0ix_dev->dev);
+		pm_runtime_put_autosuspend(&hdev->d0ix_dev->dev);
+	}
+
 	return 0;
 }
