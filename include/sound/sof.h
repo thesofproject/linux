@@ -48,6 +48,7 @@ struct snd_sof_pdata {
 
 	/* machine */
 	struct platform_device *pdev_mach;
+	struct platform_device *pdev_d0ix;
 	const struct snd_soc_acpi_mach *machine;
 
 	void *hw_pdata;

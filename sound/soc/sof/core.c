@@ -402,6 +402,16 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	dev_dbg(sdev->dev, "created machine %s\n",
 		dev_name(&plat_data->pdev_mach->dev));
 
+	plat_data->pdev_d0ix =
+		platform_device_register_data(sdev->dev, "sof_d0ix",
+					      PLATFORM_DEVID_NONE, sdev,
+					      sizeof(*sdev));
+
+	if (IS_ERR(plat_data->pdev_d0ix)) {
+		ret = PTR_ERR(plat_data->pdev_d0ix);
+		goto fw_run_err;
+	}
+
 	if (plat_data->sof_probe_complete)
 		plat_data->sof_probe_complete(sdev->dev);
 
@@ -515,6 +525,10 @@ int snd_sof_device_remove(struct device *dev)
 	snd_sof_ipc_free(sdev);
 	snd_sof_free_debug(sdev);
 	snd_sof_free_trace(sdev);
+
+	/* Unregister D0Ix power management device */
+	if (!IS_ERR_OR_NULL(pdata->pdev_d0ix))
+		platform_device_unregister(pdata->pdev_d0ix);
 
 	/*
 	 * Unregister machine driver. This will unbind the snd_card which
