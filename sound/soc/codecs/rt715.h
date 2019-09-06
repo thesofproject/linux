@@ -196,7 +196,6 @@ int rt715_io_init(struct device *dev, struct sdw_slave *slave);
 int rt715_init(struct device *dev, struct regmap *regmap,
 	       struct sdw_slave *slave);
 
-int rt715_remove(struct device *dev);
 int hda_to_sdw(unsigned int nid, unsigned int verb, unsigned int payload,
 	       unsigned int *sdw_addr_h, unsigned int *sdw_data_h,
 	       unsigned int *sdw_addr_l, unsigned int *sdw_data_l);

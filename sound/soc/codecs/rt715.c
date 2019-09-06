@@ -1178,15 +1178,13 @@ int rt715_init(struct device *dev, struct regmap *regmap,
 	 */
 	rt715->hw_init = false;
 
-	/*
-	 * TODO: The BIOS used currently has multiple entries
-	 * for Slave(s). Ideally for a given platform, BIOS should
-	 * hold entries of actual Slave(s) present on board. So
-	 * to handle this, only register codec if it is actually
-	 * present on board, adding check accordingly
-	 */
-	ret = snd_soc_register_component(dev, &soc_codec_dev_rt715, rt715_dai,
-					ARRAY_SIZE(rt715_dai));
+	ret = devm_snd_soc_register_component(dev,
+					      &soc_codec_dev_rt715,
+					      rt715_dai,
+					      ARRAY_SIZE(rt715_dai));
+
+	if (ret < 0)
+		return ret;
 
 	ret = device_create_file(&slave->dev, &dev_attr_index_reg);
 	if (ret != 0) {
@@ -1254,13 +1252,6 @@ int rt715_io_init(struct device *dev, struct sdw_slave *slave)
 
 	return 0;
 }
-
-int rt715_remove(struct device *dev)
-{
-	snd_soc_unregister_component(dev);
-	return 0;
-}
-EXPORT_SYMBOL(rt715_remove);
 
 MODULE_DESCRIPTION("ASoC rt715 driver");
 MODULE_DESCRIPTION("ASoC rt715 driver SDW");

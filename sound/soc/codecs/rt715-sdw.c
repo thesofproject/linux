@@ -256,11 +256,6 @@ static int rt715_sdw_probe(struct sdw_slave *slave,
 	return 0;
 }
 
-static int rt715_sdw_remove(struct sdw_slave *slave)
-{
-	return rt715_remove(&slave->dev);
-}
-
 static const struct sdw_device_id rt715_id[] = {
 	SDW_SLAVE_ENTRY(0x025d, 0x715, 0),
 	{},
@@ -273,7 +268,6 @@ static struct sdw_driver rt715_sdw_driver = {
 		   .owner = THIS_MODULE,
 		   },
 	.probe = rt715_sdw_probe,
-	.remove = rt715_sdw_remove,
 	.ops = &rt715_slave_ops,
 	.id_table = rt715_id,
 };
