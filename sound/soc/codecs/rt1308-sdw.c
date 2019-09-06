@@ -72,73 +72,6 @@ static const struct regmap_config rt1308_sdw_regmap = {
 	.use_single_write = true,
 };
 
-int rt1308_io_init(struct device *dev, struct sdw_slave *slave)
-{
-	struct rt1308_sdw_priv *rt1308 = dev_get_drvdata(dev);
-	int ret = 0;
-
-	if (rt1308->hw_init)
-		return 0;
-
-	/* Enable Runtime PM */
-	pm_runtime_set_autosuspend_delay(&slave->dev, 3000);
-	pm_runtime_use_autosuspend(&slave->dev);
-	pm_runtime_enable(&slave->dev);
-
-	/* sw reset */
-	regmap_write(rt1308->regmap, RT1308_SDW_RESET, 0);
-
-	/* Set Page Widget */
-	regmap_write(rt1308->regmap, SDW_SCP_ADDRPAGE2, 0x01);
-
-	/* read efuse */
-	regmap_write(rt1308->regmap, 0xc360, 0x01);
-	regmap_write(rt1308->regmap, 0xc360, 0x80);
-	regmap_write(rt1308->regmap, 0xc7f0, 0x04);
-	regmap_write(rt1308->regmap, 0xc7f1, 0xfe);
-	msleep(100);
-	regmap_write(rt1308->regmap, 0xc7f0, 0x44);
-	msleep(20);
-	regmap_write(rt1308->regmap, 0xc240, 0x10);
-
-	/* initial settings */
-	regmap_write(rt1308->regmap, 0xc103, 0xc0);
-	regmap_write(rt1308->regmap, 0xc030, 0x17);
-	regmap_write(rt1308->regmap, 0xc031, 0x81);
-	regmap_write(rt1308->regmap, 0xc032, 0x26);
-	regmap_write(rt1308->regmap, 0xc040, 0x80);
-	regmap_write(rt1308->regmap, 0xc041, 0x80);
-	regmap_write(rt1308->regmap, 0xc042, 0x06);
-	regmap_write(rt1308->regmap, 0xc052, 0x0a);
-	regmap_write(rt1308->regmap, 0xc080, 0x0a);
-	regmap_write(rt1308->regmap, 0xc060, 0x02);
-	regmap_write(rt1308->regmap, 0xc061, 0x75);
-	regmap_write(rt1308->regmap, 0xc062, 0x05);
-	regmap_write(rt1308->regmap, 0xc171, 0x07);
-	regmap_write(rt1308->regmap, 0xc173, 0x0d);
-	regmap_write(rt1308->regmap, 0xc311, 0x7f);
-	regmap_write(rt1308->regmap, 0xc900, 0x90);
-	regmap_write(rt1308->regmap, 0xc1a0, 0x84);
-	regmap_write(rt1308->regmap, 0xc1a1, 0x01);
-	regmap_write(rt1308->regmap, 0xc360, 0x78);
-	regmap_write(rt1308->regmap, 0xc361, 0x87);
-	regmap_write(rt1308->regmap, 0xc0a1, 0x71);
-	regmap_write(rt1308->regmap, 0xc210, 0x00);
-	regmap_write(rt1308->regmap, 0xc070, 0x00);
-	regmap_write(rt1308->regmap, 0xc100, 0xaf);
-	regmap_write(rt1308->regmap, 0xc101, 0xaf);
-	regmap_write(rt1308->regmap, 0xc310, 0x24);
-
-	pm_runtime_put_sync_autosuspend(&slave->dev);
-
-	/* Mark Slave initialization complete */
-	rt1308->hw_init = true;
-
-	dev_dbg(&slave->dev, "%s hw_init complete\n", __func__);
-
-	return ret;
-}
-
 /* Bus clock frequency */
 #define RT1308_CLK_FREQ_9600000HZ 9600000
 #define RT1308_CLK_FREQ_12000000HZ 12000000
@@ -193,7 +126,7 @@ static int rt1308_read_prop(struct sdw_slave *slave)
 	unsigned long addr;
 	struct sdw_dpn_prop *dpn;
 
-	prop->paging_support = false;
+	prop->paging_support = true;
 
 	/* first we need to allocate memory for set bits in port lists */
 	prop->source_ports = 0x00;	/* BITMAP: 00010100 (not enable yet) */
@@ -233,7 +166,78 @@ static int rt1308_read_prop(struct sdw_slave *slave)
 	/* set the timeout values */
 	prop->clk_stop_timeout = 20;
 
+	dev_dbg(&slave->dev, "%s\n", __func__);
+
 	return 0;
+}
+
+int rt1308_io_init(struct device *dev, struct sdw_slave *slave)
+{
+	struct rt1308_sdw_priv *rt1308 = dev_get_drvdata(dev);
+	int ret = 0;
+
+	if (rt1308->hw_init)
+		return 0;
+
+	/* Enable Runtime PM */
+	pm_runtime_set_autosuspend_delay(&slave->dev, 3000);
+	pm_runtime_use_autosuspend(&slave->dev);
+	pm_runtime_enable(&slave->dev);
+
+	ret = rt1308_read_prop(slave);
+	if (ret < 0)
+		goto _io_init_err_;
+
+	/* sw reset */
+	regmap_write(rt1308->regmap, RT1308_SDW_RESET, 0);
+
+	/* read efuse */
+	regmap_write(rt1308->regmap, 0xc360, 0x01);
+	regmap_write(rt1308->regmap, 0xc360, 0x80);
+	regmap_write(rt1308->regmap, 0xc7f0, 0x04);
+	regmap_write(rt1308->regmap, 0xc7f1, 0xfe);
+	msleep(100);
+	regmap_write(rt1308->regmap, 0xc7f0, 0x44);
+	msleep(20);
+	regmap_write(rt1308->regmap, 0xc240, 0x10);
+
+	/* initial settings */
+	regmap_write(rt1308->regmap, 0xc103, 0xc0);
+	regmap_write(rt1308->regmap, 0xc030, 0x17);
+	regmap_write(rt1308->regmap, 0xc031, 0x81);
+	regmap_write(rt1308->regmap, 0xc032, 0x26);
+	regmap_write(rt1308->regmap, 0xc040, 0x80);
+	regmap_write(rt1308->regmap, 0xc041, 0x80);
+	regmap_write(rt1308->regmap, 0xc042, 0x06);
+	regmap_write(rt1308->regmap, 0xc052, 0x0a);
+	regmap_write(rt1308->regmap, 0xc080, 0x0a);
+	regmap_write(rt1308->regmap, 0xc060, 0x02);
+	regmap_write(rt1308->regmap, 0xc061, 0x75);
+	regmap_write(rt1308->regmap, 0xc062, 0x05);
+	regmap_write(rt1308->regmap, 0xc171, 0x07);
+	regmap_write(rt1308->regmap, 0xc173, 0x0d);
+	regmap_write(rt1308->regmap, 0xc311, 0x7f);
+	regmap_write(rt1308->regmap, 0xc900, 0x90);
+	regmap_write(rt1308->regmap, 0xc1a0, 0x84);
+	regmap_write(rt1308->regmap, 0xc1a1, 0x01);
+	regmap_write(rt1308->regmap, 0xc360, 0x78);
+	regmap_write(rt1308->regmap, 0xc361, 0x87);
+	regmap_write(rt1308->regmap, 0xc0a1, 0x71);
+	regmap_write(rt1308->regmap, 0xc210, 0x00);
+	regmap_write(rt1308->regmap, 0xc070, 0x00);
+	regmap_write(rt1308->regmap, 0xc100, 0xaf);
+	regmap_write(rt1308->regmap, 0xc101, 0xaf);
+	regmap_write(rt1308->regmap, 0xc310, 0x24);
+
+	pm_runtime_put_sync_autosuspend(&slave->dev);
+
+	/* Mark Slave initialization complete */
+	rt1308->hw_init = true;
+
+	dev_dbg(&slave->dev, "%s hw_init complete\n", __func__);
+
+_io_init_err_:
+	return ret;
 }
 
 static int rt1308_update_status(struct sdw_slave *slave,
