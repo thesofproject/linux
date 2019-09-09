@@ -607,9 +607,6 @@ static int rt1308_sdw_probe(struct sdw_slave *slave,
 {
 	struct regmap *regmap;
 
-	/* Assign ops */
-	slave->ops = &rt1308_slave_ops;
-
 	/* Regmap Initialization */
 	regmap = devm_regmap_init_sdw(slave, &rt1308_sdw_regmap);
 	if (!regmap)
@@ -620,6 +617,9 @@ static int rt1308_sdw_probe(struct sdw_slave *slave,
 	/* Perform IO operations only if slave is in ATTACHED state */
 	if (slave->status == SDW_SLAVE_ATTACHED)
 		rt1308_io_init(&slave->dev, slave);
+
+	/* Assign ops */
+	slave->ops = &rt1308_slave_ops;
 
 	return 0;
 }
