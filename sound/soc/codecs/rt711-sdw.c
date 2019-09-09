@@ -249,7 +249,6 @@ static struct sdw_driver rt711_sdw_driver = {
 	},
 	.probe = rt711_sdw_probe,
 	.remove = rt711_sdw_remove,
-	.ops = &rt711_slave_ops,
 	.id_table = rt711_id,
 };
 module_sdw_driver(rt711_sdw_driver);

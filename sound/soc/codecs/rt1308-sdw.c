@@ -636,7 +636,6 @@ static struct sdw_driver rt1308_sdw_driver = {
 		.owner = THIS_MODULE,
 	},
 	.probe = rt1308_sdw_probe,
-	.ops = &rt1308_slave_ops,
 	.id_table = rt1308_id,
 };
 module_sdw_driver(rt1308_sdw_driver);
