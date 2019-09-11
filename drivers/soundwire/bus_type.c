@@ -49,20 +49,24 @@ int sdw_slave_modalias(const struct sdw_slave *slave, char *buf, size_t size)
 
 static int sdw_uevent(struct device *dev, struct kobj_uevent_env *env)
 {
+	struct sdw_master_device *md;
 	struct sdw_slave *slave;
 	char modalias[32];
 
-	if (is_sdw_slave(dev)) {
+	if (is_sdw_md(dev)) {
+		md = to_sdw_master_device(dev);
+		/* TODO: do we need to call add_uevent_var() ? */
+	} else if (is_sdw_slave(dev)) {
 		slave = to_sdw_slave_device(dev);
+
+		sdw_slave_modalias(slave, modalias, sizeof(modalias));
+
+		if (add_uevent_var(env, "MODALIAS=%s", modalias))
+			return -ENOMEM;
 	} else {
 		dev_warn(dev, "uevent for unknown Soundwire type\n");
 		return -EINVAL;
 	}
-
-	sdw_slave_modalias(slave, modalias, sizeof(modalias));
-
-	if (add_uevent_var(env, "MODALIAS=%s", modalias))
-		return -ENOMEM;
 
 	return 0;
 }
