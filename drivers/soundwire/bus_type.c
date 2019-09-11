@@ -59,8 +59,8 @@ static int sdw_uevent(struct device *dev, struct kobj_uevent_env *env)
 
 		if (add_uevent_var(env, "MODALIAS=%s", modalias))
 			return -ENOMEM;
-	} else {
-		/* only Slave device type supported */
+	} else if (!is_sdw_md(dev)) {
+		/* only Slave and Master device type supported */
 		dev_warn(dev, "uevent for unknown Soundwire type\n");
 		return -EINVAL;
 	}
