@@ -378,6 +378,15 @@ int hda_dsp_pre_fw_run(struct snd_sof_dev *sdev)
 /* post fw run operations */
 int hda_dsp_post_fw_run(struct snd_sof_dev *sdev)
 {
+#ifndef SOUNDWIRE_POWER_FIRST
+	int ret;
+
+	ret = hda_sdw_startup(sdev);
+	if (ret < 0) {
+		dev_err(sdev->dev, "error: could not startup SoundWire links\n");
+		return ret;
+	}
+#endif
 	/* re-enable clock gating and power gating */
 	return hda_dsp_ctrl_clock_power_gating(sdev, true);
 }
