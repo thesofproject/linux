@@ -4,24 +4,8 @@
 #ifndef __SDW_INTEL_LOCAL_H
 #define __SDW_INTEL_LOCAL_H
 
-/**
- * struct sdw_intel_link_res - Soundwire link resources
- * @registers: Link IO registers base
- * @shim: Audio shim pointer
- * @alh: ALH (Audio Link Hub) pointer
- * @irq: Interrupt line
- * @ops: Shim callback ops
- * @arg: Shim callback ops argument
- *
- * This is set as pdata for each link instance.
- */
-struct sdw_intel_link_res {
-	void __iomem *registers;
-	void __iomem *shim;
-	void __iomem *alh;
-	int irq;
-	const struct sdw_intel_ops *ops;
-	void *arg;
-};
+#define SDW_INTEL_QUIRK_MASK_BUS_DISABLE      BIT(1)
+
+extern struct sdw_md_driver intel_sdw_driver;
 
 #endif /* __SDW_INTEL_LOCAL_H */
