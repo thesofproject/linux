@@ -550,12 +550,6 @@ static const struct snd_kcontrol_new rt700_snd_controls[] = {
 			    RT700_SET_GAIN_AMIC_L, RT700_DIR_IN_SFT, 3, 0,
 			    rt700_set_amp_gain_get, rt700_set_amp_gain_put,
 			    mic_vol_tlv),
-	SOC_DOUBLE_R_EXT("Speaker Playback Switch", RT700_SET_GAIN_SPK_H,
-			    RT700_SET_GAIN_SPK_L, RT700_DIR_OUT_SFT, 1, 1,
-			    rt700_set_amp_gain_get, rt700_set_amp_gain_put),
-	SOC_DOUBLE_R_EXT("Headphone Playback Switch", RT700_SET_GAIN_HP_H,
-			    RT700_SET_GAIN_HP_L, RT700_DIR_OUT_SFT, 1, 1,
-			    rt700_set_amp_gain_get, rt700_set_amp_gain_put),
 };
 
 static int rt700_mux_get(struct snd_kcontrol *kcontrol,
@@ -748,6 +742,60 @@ static int rt700_adc_08_event(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
+static int rt700_hpo_mux_event(struct snd_soc_dapm_widget *w,
+	struct snd_kcontrol *kcontrol, int event)
+{
+	struct snd_soc_component *component =
+		snd_soc_dapm_to_component(w->dapm);
+	unsigned int val_h = (1 << RT700_DIR_OUT_SFT) | (0x3 << 4);
+	unsigned int val_l;
+
+	switch (event) {
+	case SND_SOC_DAPM_POST_PMU:
+		val_l = 0x00;
+		snd_soc_component_write(component,
+			RT700_SET_GAIN_HP_H, val_h);
+		snd_soc_component_write(component,
+			RT700_SET_GAIN_HP_L, val_l);
+		break;
+	case SND_SOC_DAPM_PRE_PMD:
+		val_l = (1 << RT700_MUTE_SFT);
+		snd_soc_component_write(component,
+			RT700_SET_GAIN_HP_H, val_h);
+		snd_soc_component_write(component,
+			RT700_SET_GAIN_HP_L, val_l);
+		break;
+	}
+	return 0;
+}
+
+static int rt700_spk_pga_event(struct snd_soc_dapm_widget *w,
+	struct snd_kcontrol *kcontrol, int event)
+{
+	struct snd_soc_component *component =
+		snd_soc_dapm_to_component(w->dapm);
+	unsigned int val_h = (1 << RT700_DIR_OUT_SFT) | (0x3 << 4);
+	unsigned int val_l;
+
+	switch (event) {
+	case SND_SOC_DAPM_POST_PMU:
+		val_l = 0x00;
+		snd_soc_component_write(component,
+			RT700_SET_GAIN_SPK_H, val_h);
+		snd_soc_component_write(component,
+			RT700_SET_GAIN_SPK_L, val_l);
+		break;
+	case SND_SOC_DAPM_PRE_PMD:
+		val_l = (1 << RT700_MUTE_SFT);
+		snd_soc_component_write(component,
+			RT700_SET_GAIN_SPK_H, val_h);
+		snd_soc_component_write(component,
+			RT700_SET_GAIN_SPK_L, val_l);
+		break;
+	}
+	return 0;
+}
+
 static const struct snd_soc_dapm_widget rt700_dapm_widgets[] = {
 	SND_SOC_DAPM_OUTPUT("HP"),
 	SND_SOC_DAPM_OUTPUT("SPK"),
@@ -762,8 +810,12 @@ static const struct snd_soc_dapm_widget rt700_dapm_widgets[] = {
 	SND_SOC_DAPM_DAC_E("DAC Surround", NULL, SND_SOC_NOPM, 0, 0,
 		rt700_dac_surround_event,
 		SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD),
-	SND_SOC_DAPM_MUX("HPO Mux", SND_SOC_NOPM, 0, 0, &rt700_hp_mux),
-	SND_SOC_DAPM_PGA("SPK PGA", SND_SOC_NOPM, 0, 0,	NULL, 0),
+	SND_SOC_DAPM_MUX_E("HPO Mux", SND_SOC_NOPM, 0, 0, &rt700_hp_mux,
+		rt700_hpo_mux_event,
+		SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD),
+	SND_SOC_DAPM_PGA_E("SPK PGA", SND_SOC_NOPM, 0, 0, NULL, 0,
+		rt700_spk_pga_event,
+		SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD),
 	SND_SOC_DAPM_ADC_E("ADC 09", NULL, SND_SOC_NOPM, 0, 0,
 		rt700_adc_09_event,
 		SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD),
