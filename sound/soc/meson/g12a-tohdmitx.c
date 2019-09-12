@@ -85,7 +85,7 @@ static int g12a_tohdmitx_get_input_val(struct snd_soc_component *component,
 {
 	unsigned int val;
 
-	snd_soc_component_read(component, TOHDMITX_CTRL0, &val);
+	val = snd_soc_component_read(component, TOHDMITX_CTRL0);
 	return (val & mask) >> __ffs(mask);
 }
 
