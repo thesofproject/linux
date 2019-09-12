@@ -22,6 +22,7 @@ struct  rt711_priv {
 	struct snd_soc_jack *hs_jack;
 	struct delayed_work jack_detect_work;
 	struct delayed_work jack_btn_check_work;
+	struct work_struct calibration_work;
 	int jack_type;
 };
 

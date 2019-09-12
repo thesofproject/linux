@@ -405,10 +405,13 @@ static int rt711_set_jack_detect(struct snd_soc_component *component,
 	struct snd_soc_jack *hs_jack, void *data)
 {
 	struct rt711_priv *rt711 = snd_soc_component_get_drvdata(component);
+	struct snd_soc_dapm_context *dapm =
+		snd_soc_component_get_dapm(rt711->component);
 
 	while (!rt711->hw_init)
 		return -EAGAIN;
 
+	snd_soc_dapm_mutex_lock(dapm);
 	/* power on */
 	regmap_write(rt711->regmap, RT711_SET_AUDIO_POWER_STATE, AC_PWRST_D0);
 
@@ -423,6 +426,7 @@ static int rt711_set_jack_detect(struct snd_soc_component *component,
 
 	/* power off */
 	regmap_write(rt711->regmap, RT711_SET_AUDIO_POWER_STATE, AC_PWRST_D3);
+	snd_soc_dapm_mutex_unlock(dapm);
 
 	rt711->hs_jack = hs_jack;
 
@@ -882,16 +886,12 @@ static int rt711_set_bias_level(struct snd_soc_component *component,
 static int rt711_probe(struct snd_soc_component *component)
 {
 	struct rt711_priv *rt711 = snd_soc_component_get_drvdata(component);
-	int ret;
 
 	rt711->component = component;
 
-	/* calibration */
-	ret = rt711_calibration(rt711);
-	if (ret < 0)
-		dev_err(component->dev, "%s calibration failed\n", __func__);
+	schedule_work(&rt711->calibration_work);
 
-	return ret;
+	return 0;
 }
 
 static const struct snd_soc_component_driver soc_codec_dev_rt711 = {
@@ -1135,6 +1135,14 @@ int rt711_clock_config(struct device *dev)
 	return 0;
 }
 
+static void rt711_calibration_work(struct work_struct *work)
+{
+	struct rt711_priv *rt711 =
+		container_of(work, struct rt711_priv, calibration_work);
+
+	rt711_calibration(rt711);
+}
+
 int rt711_init(struct device *dev, struct regmap *regmap,
 	       struct sdw_slave *slave)
 {
@@ -1242,6 +1250,7 @@ int rt711_io_init(struct device *dev, struct sdw_slave *slave)
 			rt711_jack_detect_handler);
 	INIT_DELAYED_WORK(&rt711->jack_btn_check_work,
 			rt711_btn_check_handler);
+	INIT_WORK(&rt711->calibration_work, rt711_calibration_work);
 
 	/* Mark Slave initialization complete */
 	rt711->hw_init = true;
