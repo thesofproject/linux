@@ -231,6 +231,7 @@ static int rt711_sdw_remove(struct sdw_slave *slave)
 	if (rt711 && rt711->hw_init) {
 		cancel_delayed_work(&rt711->jack_detect_work);
 		cancel_delayed_work(&rt711->jack_btn_check_work);
+		cancel_work_sync(&rt711->calibration_work);
 	}
 
 	return 0;
