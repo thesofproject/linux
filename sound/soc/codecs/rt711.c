@@ -627,9 +627,6 @@ static const struct snd_kcontrol_new rt711_snd_controls[] = {
 			    RT711_SET_GAIN_DMIC2_L, RT711_DIR_IN_SFT, 3, 0,
 			    rt711_set_amp_gain_get, rt711_set_amp_gain_put,
 			    mic_vol_tlv),
-	SOC_DOUBLE_R_EXT("Headphone Playback Switch", RT711_SET_GAIN_HP_H,
-			    RT711_SET_GAIN_HP_L, RT711_DIR_OUT_SFT, 1, 1,
-			    rt711_set_amp_gain_get, rt711_set_amp_gain_put),
 };
 
 static int rt711_mux_get(struct snd_kcontrol *kcontrol,
@@ -742,15 +739,29 @@ static int rt711_dac_surround_event(struct snd_soc_dapm_widget *w,
 {
 	struct snd_soc_component *component =
 		snd_soc_dapm_to_component(w->dapm);
+	unsigned int val_h = (1 << RT711_DIR_OUT_SFT) | (0x3 << 4);
+	unsigned int val_l;
 
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
 		snd_soc_component_write(component,
 			RT711_SET_STREAMID_DAC2, 0x10);
+
+		val_l = 0x00;
+		snd_soc_component_write(component,
+			RT711_SET_GAIN_HP_H, val_h);
+		snd_soc_component_write(component,
+			RT711_SET_GAIN_HP_L, val_l);
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
 		snd_soc_component_write(component,
 			RT711_SET_STREAMID_DAC2, 0x00);
+
+		val_l = (1 << RT711_MUTE_SFT);
+		snd_soc_component_write(component,
+			RT711_SET_GAIN_HP_H, val_h);
+		snd_soc_component_write(component,
+			RT711_SET_GAIN_HP_L, val_l);
 		break;
 	}
 	return 0;
