@@ -21,6 +21,12 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_tgl_machines[] = {
 EXPORT_SYMBOL_GPL(snd_soc_acpi_intel_tgl_machines);
 
 struct snd_soc_acpi_mach snd_soc_acpi_intel_tgl_sdw_machines[] = {
+	{
+		.link_mask = 0x1, /* this will only enable rt711 for now */
+		.drv_name = "sdw_rt711_rt1308_rt715",
+		.sof_fw_filename = "sof-tgl.ri",
+		.sof_tplg_filename = "sof-tgl-rt711-rt1308-rt715.tplg",
+	},
 	{},
 };
 EXPORT_SYMBOL_GPL(snd_soc_acpi_intel_tgl_sdw_machines);
