@@ -315,7 +315,6 @@ static int snd_soc_rtdcom_add(struct snd_soc_pcm_runtime *rtd,
 		return -ENOMEM;
 
 	new_rtdcom->component = component;
-	INIT_LIST_HEAD(&new_rtdcom->list);
 
 	list_add_tail(&new_rtdcom->list, &rtd->component_list);
 
@@ -2958,7 +2957,7 @@ err:
  * @dai_drv: DAI driver to use for the DAI
  *
  * Topology can use this API to register DAIs when probing a component.
- * These DAIs's widgets will be freed in the card cleanup and the DAIs
+ * These DAIs' widgets will be freed in the card cleanup and the DAIs
  * will be freed in the component cleanup.
  */
 int snd_soc_register_dai(struct snd_soc_component *component,

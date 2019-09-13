@@ -3136,7 +3136,7 @@ int soc_new_pcm(struct snd_soc_pcm_runtime *rtd, int num)
 			rtd->dai_link->name);
 		return ret;
 	}
-	dev_dbg(rtd->card->dev, "ASoC: registered pcm #%d %s\n",num, new_name);
+	dev_dbg(rtd->card->dev, "ASoC: registered pcm #%d %s\n", num, new_name);
 
 	/* DAPM dai link stream work */
 	INIT_DELAYED_WORK(&rtd->delayed_work, close_delayed_work);

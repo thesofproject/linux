@@ -3,8 +3,6 @@
 snd-sof-objs := core.o ops.o loader.o ipc.o pcm.o pm.o debug.o topology.o\
 		control.o trace.o utils.o
 
-snd-sof-pci-objs := sof-pci-dev.o
-snd-sof-acpi-objs := sof-acpi-dev.o
 snd-sof-nocodec-objs := nocodec.o
 
 obj-$(CONFIG_SND_SOC_SOF) += snd-sof.o

@@ -1146,6 +1146,8 @@ static int sof_connect_dai_widget(struct snd_soc_component *scomp,
 		default:
 			break;
 		}
+
+		break;
 	}
 
 	/* check we have a connection */
@@ -2225,10 +2227,9 @@ static int sof_dai_load(struct snd_soc_component *scomp, int index,
 	spcm->stream[SNDRV_PCM_STREAM_PLAYBACK].comp_id = COMP_ID_UNASSIGNED;
 	spcm->stream[SNDRV_PCM_STREAM_CAPTURE].comp_id = COMP_ID_UNASSIGNED;
 
-	if (pcm) {
-		spcm->pcm = *pcm;
-		dev_dbg(sdev->dev, "tplg: load pcm %s\n", pcm->dai_name);
-	}
+	spcm->pcm = *pcm;
+	dev_dbg(sdev->dev, "tplg: load pcm %s\n", pcm->dai_name);
+
 	dai_drv->dobj.private = spcm;
 	list_add(&spcm->list, &sdev->pcm_list);
 
@@ -2372,10 +2373,9 @@ static int sof_set_dai_config(struct snd_sof_dev *sdev, u32 size,
 	 * dai enabled, but the dai link in topology would support both, one
 	 * or none of them. Here print a warning message to notify user
 	 */
-	if (!found) {
+	if (!found)
 		dev_warn(sdev->dev, "warning: failed to find dai for dai link %s",
 			 link->name);
-	}
 
 	return 0;
 }

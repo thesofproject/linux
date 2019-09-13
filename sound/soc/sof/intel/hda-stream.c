@@ -107,8 +107,7 @@ int hda_dsp_stream_setup_bdl(struct snd_sof_dev *sdev,
 	 * set IOC if don't use position IPC
 	 * and period_wakeup needed.
 	 */
-	ioc = hda->no_ipc_position ?
-	      !stream->no_period_wakeup : 0;
+	ioc = hda->no_ipc_position && !stream->no_period_wakeup;
 
 	for (i = 0; i < periods; i++) {
 		if (i == (periods - 1) && remain)

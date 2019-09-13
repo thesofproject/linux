@@ -1946,7 +1946,7 @@ static int soc_tplg_pcm_create(struct soc_tplg *tplg,
 	if (ret < 0)
 		return ret;
 
-	return  soc_tplg_fe_link_create(tplg, pcm);
+	return soc_tplg_fe_link_create(tplg, pcm);
 }
 
 /* copy stream caps from the old version 4 of source */

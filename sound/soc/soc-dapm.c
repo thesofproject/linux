@@ -1932,9 +1932,8 @@ static int dapm_power_widgets(struct snd_soc_card *card, int event)
 	 * that new widgets may be added to the dirty list while we
 	 * iterate.
 	 */
-	list_for_each_entry(w, &card->dapm_dirty, dirty) {
+	list_for_each_entry(w, &card->dapm_dirty, dirty)
 		dapm_power_one_widget(w, &up_list, &down_list);
-	}
 
 	list_for_each_entry(w, &card->widgets, list) {
 		switch (w->id) {
