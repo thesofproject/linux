@@ -93,9 +93,12 @@ static int tfa9879_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static int tfa9879_digital_mute(struct snd_soc_dai *dai, int mute)
+static int tfa9879_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	struct snd_soc_component *component = dai->component;
+
+	if (direction != SNDRV_PCM_STREAM_PLAYBACK)
+		return 0;
 
 	snd_soc_component_update_bits(component, TFA9879_MISC_CONTROL,
 				      TFA9879_S_MUTE_MASK,
@@ -251,7 +254,7 @@ static const struct regmap_config tfa9879_regmap = {
 
 static const struct snd_soc_dai_ops tfa9879_dai_ops = {
 	.hw_params = tfa9879_hw_params,
-	.digital_mute = tfa9879_digital_mute,
+	.mute_stream = tfa9879_mute,
 	.set_fmt = tfa9879_set_fmt,
 };
 
