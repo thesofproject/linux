@@ -327,11 +327,15 @@ static int atmel_classd_codec_dai_startup(struct snd_pcm_substream *substream,
 	return clk_prepare_enable(dd->gclk);
 }
 
-static int atmel_classd_codec_dai_digital_mute(struct snd_soc_dai *codec_dai,
-	int mute)
+static int atmel_classd_codec_dai_mute(struct snd_soc_dai *codec_dai,
+				       int mute,
+				       int direction)
 {
 	struct snd_soc_component *component = codec_dai->component;
 	u32 mask, val;
+
+	if (direction != SNDRV_PCM_STREAM_PLAYBACK)
+		return 0;
 
 	mask = CLASSD_MR_LMUTE_MASK | CLASSD_MR_RMUTE_MASK;
 
@@ -469,7 +473,7 @@ static int atmel_classd_codec_dai_trigger(struct snd_pcm_substream *substream,
 }
 
 static const struct snd_soc_dai_ops atmel_classd_codec_dai_ops = {
-	.digital_mute	= atmel_classd_codec_dai_digital_mute,
+	.mute_stream	= atmel_classd_codec_dai_mute,
 	.startup	= atmel_classd_codec_dai_startup,
 	.shutdown	= atmel_classd_codec_dai_shutdown,
 	.hw_params	= atmel_classd_codec_dai_hw_params,
