@@ -220,10 +220,13 @@ static int ssm4567_hw_params(struct snd_pcm_substream *substream,
 				SSM4567_DAC_FS_MASK, dacfs);
 }
 
-static int ssm4567_mute(struct snd_soc_dai *dai, int mute)
+static int ssm4567_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	struct ssm4567 *ssm4567 = snd_soc_component_get_drvdata(dai->component);
 	unsigned int val;
+
+	if (direction != SNDRV_PCM_STREAM_PLAYBACK)
+		return 0;
 
 	val = mute ? SSM4567_DAC_MUTE : 0;
 	return regmap_update_bits(ssm4567->regmap, SSM4567_REG_DAC_CTRL,
@@ -390,7 +393,7 @@ static int ssm4567_set_bias_level(struct snd_soc_component *component,
 
 static const struct snd_soc_dai_ops ssm4567_dai_ops = {
 	.hw_params	= ssm4567_hw_params,
-	.digital_mute	= ssm4567_mute,
+	.mute_stream	= ssm4567_mute,
 	.set_fmt	= ssm4567_set_dai_fmt,
 	.set_tdm_slot	= ssm4567_set_tdm_slot,
 };
