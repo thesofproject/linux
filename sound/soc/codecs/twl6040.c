@@ -997,8 +997,11 @@ static void twl6040_mute_path(struct snd_soc_component *component, enum twl6040_
 	}
 }
 
-static int twl6040_digital_mute(struct snd_soc_dai *dai, int mute)
+static int twl6040_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
+	if (direction != SNDRV_PCM_STREAM_PLAYBACK)
+		return 0;
+
 	switch (dai->id) {
 	case TWL6040_DAI_LEGACY:
 		twl6040_mute_path(dai->component, TWL6040_DAI_DL1, mute);
@@ -1020,7 +1023,7 @@ static const struct snd_soc_dai_ops twl6040_dai_ops = {
 	.hw_params	= twl6040_hw_params,
 	.prepare	= twl6040_prepare,
 	.set_sysclk	= twl6040_set_dai_sysclk,
-	.digital_mute	= twl6040_digital_mute,
+	.mute_stream	= twl6040_mute,
 };
 
 static struct snd_soc_dai_driver twl6040_dai[] = {
