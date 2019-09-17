@@ -362,12 +362,15 @@ static int cs42xx8_hw_free(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static int cs42xx8_digital_mute(struct snd_soc_dai *dai, int mute)
+static int cs42xx8_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	struct snd_soc_component *component = dai->component;
 	struct cs42xx8_priv *cs42xx8 = snd_soc_component_get_drvdata(component);
 	u8 dac_unmute = cs42xx8->tx_channels ?
 		        ~((0x1 << cs42xx8->tx_channels) - 1) : 0;
+
+	if (direction != SNDRV_PCM_STREAM_PLAYBACK)
+		return 0;
 
 	regmap_write(cs42xx8->regmap, CS42XX8_DACMUTE,
 		     mute ? CS42XX8_DACMUTE_ALL : dac_unmute);
@@ -380,7 +383,7 @@ static const struct snd_soc_dai_ops cs42xx8_dai_ops = {
 	.set_sysclk	= cs42xx8_set_dai_sysclk,
 	.hw_params	= cs42xx8_hw_params,
 	.hw_free	= cs42xx8_hw_free,
-	.digital_mute	= cs42xx8_digital_mute,
+	.mute_stream	= cs42xx8_mute,
 };
 
 static struct snd_soc_dai_driver cs42xx8_dai = {
