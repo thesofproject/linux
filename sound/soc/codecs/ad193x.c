@@ -143,9 +143,12 @@ static inline bool ad193x_has_adc(const struct ad193x_priv *ad193x)
  * DAI ops entries
  */
 
-static int ad193x_mute(struct snd_soc_dai *dai, int mute)
+static int ad193x_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	struct ad193x_priv *ad193x = snd_soc_component_get_drvdata(dai->component);
+
+	if (direction != SNDRV_PCM_STREAM_PLAYBACK)
+		return 0;
 
 	if (mute)
 		regmap_update_bits(ad193x->regmap, AD193X_DAC_CTRL2,
@@ -371,7 +374,7 @@ static int ad193x_startup(struct snd_pcm_substream *substream,
 static const struct snd_soc_dai_ops ad193x_dai_ops = {
 	.startup = ad193x_startup,
 	.hw_params = ad193x_hw_params,
-	.digital_mute = ad193x_mute,
+	.mute_stream = ad193x_mute,
 	.set_tdm_slot = ad193x_set_tdm_slot,
 	.set_sysclk	= ad193x_set_dai_sysclk,
 	.set_fmt = ad193x_set_dai_fmt,
