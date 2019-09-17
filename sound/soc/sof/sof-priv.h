@@ -424,10 +424,6 @@ struct snd_sof_dev {
 	int ipc_timeout;
 	int boot_timeout;
 
-	/* Wait queue for code loading */
-	wait_queue_head_t waitq;
-	int code_loading;
-
 	/* DMA for Trace */
 	struct snd_dma_buffer dmatb;
 	struct snd_dma_buffer dmatp;
