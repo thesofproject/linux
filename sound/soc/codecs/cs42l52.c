@@ -784,9 +784,12 @@ static int cs42l52_set_fmt(struct snd_soc_dai *codec_dai, unsigned int fmt)
 	return 0;
 }
 
-static int cs42l52_digital_mute(struct snd_soc_dai *dai, int mute)
+static int cs42l52_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	struct snd_soc_component *component = dai->component;
+
+	if (direction != SNDRV_PCM_STREAM_PLAYBACK)
+		return 0;
 
 	if (mute)
 		snd_soc_component_update_bits(component, CS42L52_PB_CTL1,
@@ -865,7 +868,7 @@ static int cs42l52_set_bias_level(struct snd_soc_component *component,
 
 static const struct snd_soc_dai_ops cs42l52_ops = {
 	.hw_params	= cs42l52_pcm_hw_params,
-	.digital_mute	= cs42l52_digital_mute,
+	.mute_stream	= cs42l52_mute,
 	.set_fmt	= cs42l52_set_fmt,
 	.set_sysclk	= cs42l52_set_sysclk,
 };
