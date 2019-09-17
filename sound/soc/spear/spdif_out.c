@@ -188,10 +188,13 @@ static int spdif_out_trigger(struct snd_pcm_substream *substream, int cmd,
 	return ret;
 }
 
-static int spdif_digital_mute(struct snd_soc_dai *dai, int mute)
+static int spdif_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	struct spdif_out_dev *host = snd_soc_dai_get_drvdata(dai);
 	u32 val;
+
+	if (direction != SNDRV_PCM_STREAM_PLAYBACK)
+		return 0;
 
 	host->saved_params.mute = mute;
 	val = readl(host->io_base + SPDIF_OUT_CTRL);
@@ -229,7 +232,8 @@ static int spdif_mute_put(struct snd_kcontrol *kcontrol,
 	if (host->saved_params.mute == ucontrol->value.integer.value[0])
 		return 0;
 
-	spdif_digital_mute(cpu_dai, ucontrol->value.integer.value[0]);
+	spdif_mute(cpu_dai, ucontrol->value.integer.value[0],
+		   SNDRV_PCM_STREAM_PLAYBACK);
 
 	return 1;
 }
@@ -250,7 +254,7 @@ static int spdif_soc_dai_probe(struct snd_soc_dai *dai)
 }
 
 static const struct snd_soc_dai_ops spdif_out_dai_ops = {
-	.digital_mute	= spdif_digital_mute,
+	.mute_stream	= spdif_mute,
 	.startup	= spdif_out_startup,
 	.shutdown	= spdif_out_shutdown,
 	.trigger	= spdif_out_trigger,
