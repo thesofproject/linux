@@ -169,7 +169,7 @@ static int tas2552_setup_pll(struct snd_soc_component *component,
 		pll_clkin += tas2552->tdm_delay;
 	}
 
-	pll_enable = snd_soc_component_read32(component, TAS2552_CFG_2) & TAS2552_PLL_ENABLE;
+	pll_enable = snd_soc_component_read(component, TAS2552_CFG_2) & TAS2552_PLL_ENABLE;
 	snd_soc_component_update_bits(component, TAS2552_CFG_2, TAS2552_PLL_ENABLE, 0);
 
 	if (pll_clkin == pll_clk)
@@ -187,7 +187,7 @@ static int tas2552_setup_pll(struct snd_soc_component *component,
 		unsigned int d, q, t;
 		u8 j;
 		u8 pll_sel = (tas2552->pll_clk_id << 3) & TAS2552_PLL_SRC_MASK;
-		u8 p = snd_soc_component_read32(component, TAS2552_PLL_CTRL_1);
+		u8 p = snd_soc_component_read(component, TAS2552_PLL_CTRL_1);
 
 		p = (p >> 7);
 
@@ -465,10 +465,13 @@ static int tas2552_set_dai_tdm_slot(struct snd_soc_dai *dai,
 	return 0;
 }
 
-static int tas2552_mute(struct snd_soc_dai *dai, int mute)
+static int tas2552_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	u8 cfg1_reg = 0;
 	struct snd_soc_component *component = dai->component;
+
+	if (direction != SNDRV_PCM_STREAM_PLAYBACK)
+		return 0;
 
 	if (mute)
 		cfg1_reg |= TAS2552_MUTE;
@@ -519,7 +522,7 @@ static const struct snd_soc_dai_ops tas2552_speaker_dai_ops = {
 	.set_sysclk	= tas2552_set_dai_sysclk,
 	.set_fmt	= tas2552_set_dai_fmt,
 	.set_tdm_slot	= tas2552_set_dai_tdm_slot,
-	.digital_mute = tas2552_mute,
+	.mute_stream	= tas2552_mute,
 };
 
 /* Formats supported by TAS2552 driver. */
