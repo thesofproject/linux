@@ -800,9 +800,12 @@ static int cs42l56_set_dai_fmt(struct snd_soc_dai *codec_dai, unsigned int fmt)
 	return 0;
 }
 
-static int cs42l56_digital_mute(struct snd_soc_dai *dai, int mute)
+static int cs42l56_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	struct snd_soc_component *component = dai->component;
+
+	if (direction != SNDRV_PCM_STREAM_PLAYBACK)
+		return 0;
 
 	if (mute) {
 		/* Hit the DSP Mixer first */
@@ -929,7 +932,7 @@ static int cs42l56_set_bias_level(struct snd_soc_component *component,
 
 static const struct snd_soc_dai_ops cs42l56_ops = {
 	.hw_params	= cs42l56_pcm_hw_params,
-	.digital_mute	= cs42l56_digital_mute,
+	.mute_stream	= cs42l56_mute,
 	.set_fmt	= cs42l56_set_dai_fmt,
 	.set_sysclk	= cs42l56_set_sysclk,
 };
