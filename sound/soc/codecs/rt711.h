@@ -23,6 +23,7 @@ struct  rt711_priv {
 	struct delayed_work jack_detect_work;
 	struct delayed_work jack_btn_check_work;
 	struct work_struct calibration_work;
+	struct mutex calibrate_mutex;
 	int jack_type;
 };
 
