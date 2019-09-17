@@ -334,12 +334,18 @@ static int rt700_set_jack_detect(struct snd_soc_component *component,
 	struct snd_soc_jack *hs_jack, void *data)
 {
 	struct rt700_priv *rt700 = snd_soc_component_get_drvdata(component);
+	struct snd_soc_dapm_context *dapm =
+		snd_soc_component_get_dapm(component);
 
-	while (!rt700->hw_init)
+	if (!rt700->hw_init) {
+		dev_dbg(&rt700->slave->dev, "%s hw_init not ready yet\n", __func__);
 		return -EAGAIN;
+	}
 
 	/* power on */
-	regmap_write(rt700->regmap, RT700_SET_AUDIO_POWER_STATE, AC_PWRST_D0);
+	if (dapm->bias_level <= SND_SOC_BIAS_STANDBY)
+		regmap_write(rt700->regmap,
+			RT700_SET_AUDIO_POWER_STATE, AC_PWRST_D0);
 	/* Enable Jack Detection */
 	regmap_write(rt700->regmap,  RT700_SET_MIC2_UNSOLICITED_ENABLE, 0x82);
 	regmap_write(rt700->regmap,  RT700_SET_HP_UNSOLICITED_ENABLE, 0x81);
@@ -348,7 +354,9 @@ static int rt700_set_jack_detect(struct snd_soc_component *component,
 	rt700_index_write(rt700->regmap, 0x19, 0x2e11);
 
 	/* power off */
-	regmap_write(rt700->regmap, RT700_SET_AUDIO_POWER_STATE, AC_PWRST_D3);
+	if (dapm->bias_level <= SND_SOC_BIAS_STANDBY)
+		regmap_write(rt700->regmap,
+			RT700_SET_AUDIO_POWER_STATE, AC_PWRST_D3);
 
 	rt700->hs_jack = hs_jack;
 
