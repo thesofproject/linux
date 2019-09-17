@@ -577,3 +577,18 @@ int snd_soc_dai_compr_ack(struct snd_soc_dai *dai,
 	return 0;
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_compr_ack);
+
+int snd_soc_dai_compr_pointer(struct snd_soc_dai *dai,
+			      struct snd_compr_stream *cstream,
+			      struct snd_compr_tstamp *tstamp)
+{
+	if (dai->driver->cops &&
+	    dai->driver->cops->pointer) {
+		int ret = dai->driver->cops->pointer(cstream, tstamp, dai);
+		if (ret < 0)
+			return soc_dai_err(dai, ret);
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(snd_soc_dai_compr_pointer);
