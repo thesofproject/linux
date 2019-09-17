@@ -108,9 +108,12 @@ static int axg_spdifout_trigger(struct snd_pcm_substream *substream, int cmd,
 	}
 }
 
-static int axg_spdifout_digital_mute(struct snd_soc_dai *dai, int mute)
+static int axg_spdifout_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	struct axg_spdifout *priv = snd_soc_dai_get_drvdata(dai);
+
+	if (direction != SNDRV_PCM_STREAM_PLAYBACK)
+		return 0;
 
 	/* Use spdif valid bit to perform digital mute */
 	regmap_update_bits(priv->map, SPDIFOUT_CTRL0, SPDIFOUT_CTRL0_VSET,
@@ -285,7 +288,7 @@ static void axg_spdifout_shutdown(struct snd_pcm_substream *substream,
 
 static const struct snd_soc_dai_ops axg_spdifout_ops = {
 	.trigger	= axg_spdifout_trigger,
-	.digital_mute	= axg_spdifout_digital_mute,
+	.mute_stream	= axg_spdifout_mute,
 	.hw_params	= axg_spdifout_hw_params,
 	.startup	= axg_spdifout_startup,
 	.shutdown	= axg_spdifout_shutdown,
