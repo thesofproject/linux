@@ -447,7 +447,7 @@ static int wm8770_hw_params(struct snd_pcm_substream *substream,
 	}
 
 	/* Only need to set MCLK/LRCLK ratio if we're master */
-	if (snd_soc_component_read32(component, WM8770_MSTRCTRL) & 0x100) {
+	if (snd_soc_component_read(component, WM8770_MSTRCTRL) & 0x100) {
 		for (; i < ARRAY_SIZE(mclk_ratios); ++i) {
 			ratio = wm8770->sysclk / params_rate(params);
 			if (ratio == mclk_ratios[i])
@@ -472,9 +472,12 @@ static int wm8770_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static int wm8770_mute(struct snd_soc_dai *dai, int mute)
+static int wm8770_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	struct snd_soc_component *component;
+
+	if (direction != SNDRV_PCM_STREAM_PLAYBACK)
+		return 0;
 
 	component = dai->component;
 	return snd_soc_component_update_bits(component, WM8770_DACMUTE, 0x10,
@@ -538,7 +541,7 @@ static int wm8770_set_bias_level(struct snd_soc_component *component,
 			SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_S32_LE)
 
 static const struct snd_soc_dai_ops wm8770_dai_ops = {
-	.digital_mute = wm8770_mute,
+	.mute_stream = wm8770_mute,
 	.hw_params = wm8770_hw_params,
 	.set_fmt = wm8770_set_fmt,
 	.set_sysclk = wm8770_set_sysclk,
