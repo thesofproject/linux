@@ -76,11 +76,14 @@ static int pcm179x_set_dai_fmt(struct snd_soc_dai *codec_dai,
 	return 0;
 }
 
-static int pcm179x_digital_mute(struct snd_soc_dai *dai, int mute)
+static int pcm179x_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	struct snd_soc_component *component = dai->component;
 	struct pcm179x_private *priv = snd_soc_component_get_drvdata(component);
 	int ret;
+
+	if (direction != SNDRV_PCM_STREAM_PLAYBACK)
+		return 0;
 
 	ret = regmap_update_bits(priv->regmap, PCM179X_SOFT_MUTE,
 				 PCM179X_MUTE_MASK, !!mute);
@@ -145,7 +148,7 @@ static int pcm179x_hw_params(struct snd_pcm_substream *substream,
 static const struct snd_soc_dai_ops pcm179x_dai_ops = {
 	.set_fmt	= pcm179x_set_dai_fmt,
 	.hw_params	= pcm179x_hw_params,
-	.digital_mute	= pcm179x_digital_mute,
+	.mute_stream	= pcm179x_mute,
 };
 
 static const DECLARE_TLV_DB_SCALE(pcm179x_dac_tlv, -12000, 50, 1);
