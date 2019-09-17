@@ -405,9 +405,12 @@ static int ak4641_i2s_set_dai_fmt(struct snd_soc_dai *codec_dai,
 	return snd_soc_component_write(component, AK4641_MODE1, mode1);
 }
 
-static int ak4641_mute(struct snd_soc_dai *dai, int mute)
+static int ak4641_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	struct snd_soc_component *component = dai->component;
+
+	if (direction != SNDRV_PCM_STREAM_PLAYBACK)
+		return 0;
 
 	return snd_soc_component_update_bits(component, AK4641_DAC, 0x20, mute ? 0x20 : 0);
 }
@@ -467,14 +470,14 @@ static int ak4641_set_bias_level(struct snd_soc_component *component,
 static const struct snd_soc_dai_ops ak4641_i2s_dai_ops = {
 	.hw_params    = ak4641_i2s_hw_params,
 	.set_fmt      = ak4641_i2s_set_dai_fmt,
-	.digital_mute = ak4641_mute,
+	.mute_stream  = ak4641_mute,
 	.set_sysclk   = ak4641_set_dai_sysclk,
 };
 
 static const struct snd_soc_dai_ops ak4641_pcm_dai_ops = {
 	.hw_params    = NULL, /* rates are controlled by BT chip */
 	.set_fmt      = ak4641_pcm_set_dai_fmt,
-	.digital_mute = ak4641_mute,
+	.mute_stream  = ak4641_mute,
 	.set_sysclk   = ak4641_set_dai_sysclk,
 };
 
