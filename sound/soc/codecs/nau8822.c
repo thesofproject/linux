@@ -188,7 +188,7 @@ static int nau8822_eq_get(struct snd_kcontrol *kcontrol,
 	val = (u16 *)ucontrol->value.bytes.data;
 	reg = NAU8822_REG_EQ1;
 	for (i = 0; i < params->max / sizeof(u16); i++) {
-		reg_val = snd_soc_component_read32(component, reg + i);
+		reg_val = snd_soc_component_read(component, reg + i);
 		/* conversion of 16-bit integers between native CPU format
 		 * and big endian format
 		 */
@@ -445,7 +445,7 @@ static int check_mclk_select_pll(struct snd_soc_dapm_widget *source,
 		snd_soc_dapm_to_component(source->dapm);
 	unsigned int value;
 
-	value = snd_soc_component_read32(component, NAU8822_REG_CLOCKING);
+	value = snd_soc_component_read(component, NAU8822_REG_CLOCKING);
 
 	return (value & NAU8822_CLKM_MASK);
 }
@@ -900,9 +900,12 @@ static int nau8822_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static int nau8822_mute(struct snd_soc_dai *dai, int mute)
+static int nau8822_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	struct snd_soc_component *component = dai->component;
+
+	if (direction != SNDRV_PCM_STREAM_PLAYBACK)
+		return 0;
 
 	dev_dbg(component->dev, "%s: %d\n", __func__, mute);
 
@@ -967,7 +970,7 @@ static int nau8822_set_bias_level(struct snd_soc_component *component,
 
 static const struct snd_soc_dai_ops nau8822_dai_ops = {
 	.hw_params	= nau8822_hw_params,
-	.digital_mute	= nau8822_mute,
+	.mute_stream	= nau8822_mute,
 	.set_fmt	= nau8822_set_dai_fmt,
 	.set_sysclk	= nau8822_set_dai_sysclk,
 	.set_pll	= nau8822_set_pll,
