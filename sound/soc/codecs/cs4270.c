@@ -352,7 +352,7 @@ static int cs4270_hw_params(struct snd_pcm_substream *substream,
 
 	/* Set the sample rate */
 
-	reg = snd_soc_component_read32(component, CS4270_MODE);
+	reg = snd_soc_component_read(component, CS4270_MODE);
 	reg &= ~(CS4270_MODE_SPEED_MASK | CS4270_MODE_DIV_MASK);
 	reg |= cs4270_mode_ratios[i].mclk;
 
@@ -369,7 +369,7 @@ static int cs4270_hw_params(struct snd_pcm_substream *substream,
 
 	/* Set the DAI format */
 
-	reg = snd_soc_component_read32(component, CS4270_FORMAT);
+	reg = snd_soc_component_read(component, CS4270_FORMAT);
 	reg &= ~(CS4270_FORMAT_DAC_MASK | CS4270_FORMAT_ADC_MASK);
 
 	switch (cs4270->mode) {
@@ -403,13 +403,16 @@ static int cs4270_hw_params(struct snd_pcm_substream *substream,
  * board does not have the MUTEA or MUTEB pins connected to such circuitry,
  * then this function will do nothing.
  */
-static int cs4270_dai_mute(struct snd_soc_dai *dai, int mute)
+static int cs4270_dai_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	struct snd_soc_component *component = dai->component;
 	struct cs4270_private *cs4270 = snd_soc_component_get_drvdata(component);
 	int reg6;
 
-	reg6 = snd_soc_component_read32(component, CS4270_MUTE);
+	if (direction != SNDRV_PCM_STREAM_PLAYBACK)
+		return 0;
+
+	reg6 = snd_soc_component_read(component, CS4270_MUTE);
 
 	if (mute)
 		reg6 |= CS4270_MUTE_DAC_A | CS4270_MUTE_DAC_B;
@@ -468,7 +471,7 @@ static const struct snd_soc_dai_ops cs4270_dai_ops = {
 	.hw_params	= cs4270_hw_params,
 	.set_sysclk	= cs4270_set_dai_sysclk,
 	.set_fmt	= cs4270_set_dai_fmt,
-	.digital_mute	= cs4270_dai_mute,
+	.mute_stream	= cs4270_dai_mute,
 };
 
 static struct snd_soc_dai_driver cs4270_dai = {
@@ -564,7 +567,7 @@ static int cs4270_soc_suspend(struct snd_soc_component *component)
 	struct cs4270_private *cs4270 = snd_soc_component_get_drvdata(component);
 	int reg, ret;
 
-	reg = snd_soc_component_read32(component, CS4270_PWRCTL) | CS4270_PWRCTL_PDN_ALL;
+	reg = snd_soc_component_read(component, CS4270_PWRCTL) | CS4270_PWRCTL_PDN_ALL;
 	if (reg < 0)
 		return reg;
 
@@ -596,7 +599,7 @@ static int cs4270_soc_resume(struct snd_soc_component *component)
 	regcache_sync(cs4270->regmap);
 
 	/* ... then disable the power-down bits */
-	reg = snd_soc_component_read32(component, CS4270_PWRCTL);
+	reg = snd_soc_component_read(component, CS4270_PWRCTL);
 	reg &= ~CS4270_PWRCTL_PDN_ALL;
 
 	return snd_soc_component_write(component, CS4270_PWRCTL, reg);
