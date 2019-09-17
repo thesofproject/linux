@@ -406,14 +406,18 @@ static int rt711_set_jack_detect(struct snd_soc_component *component,
 {
 	struct rt711_priv *rt711 = snd_soc_component_get_drvdata(component);
 	struct snd_soc_dapm_context *dapm =
-		snd_soc_component_get_dapm(rt711->component);
+		snd_soc_component_get_dapm(component);
 
-	while (!rt711->hw_init)
+	if (!rt711->hw_init) {
+		dev_dbg(&rt711->slave->dev, "%s hw_init not ready yet\n", __func__);
 		return -EAGAIN;
+	}
 
 	snd_soc_dapm_mutex_lock(dapm);
 	/* power on */
-	regmap_write(rt711->regmap, RT711_SET_AUDIO_POWER_STATE, AC_PWRST_D0);
+	if (dapm->bias_level <= SND_SOC_BIAS_STANDBY)
+		regmap_write(rt711->regmap,
+			RT711_SET_AUDIO_POWER_STATE, AC_PWRST_D0);
 
 	/* unsolicited response & IRQ control */
 	regmap_write(rt711->regmap, RT711_SET_MIC2_UNSOLICITED_ENABLE, 0x82);
@@ -425,7 +429,9 @@ static int rt711_set_jack_detect(struct snd_soc_component *component,
 		0x19, 0x2e11);
 
 	/* power off */
-	regmap_write(rt711->regmap, RT711_SET_AUDIO_POWER_STATE, AC_PWRST_D3);
+	if (dapm->bias_level <= SND_SOC_BIAS_STANDBY)
+		regmap_write(rt711->regmap,
+			RT711_SET_AUDIO_POWER_STATE, AC_PWRST_D3);
 	snd_soc_dapm_mutex_unlock(dapm);
 
 	rt711->hs_jack = hs_jack;
