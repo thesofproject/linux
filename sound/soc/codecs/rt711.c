@@ -132,16 +132,13 @@ static void rt711_reset(struct regmap *regmap)
 
 static int rt711_calibration(struct rt711_priv *rt711)
 {
-	struct snd_soc_dapm_context *dapm =
-		snd_soc_component_get_dapm(rt711->component);
 	unsigned int val, loop = 0;
 	struct device *dev;
 	struct regmap *regmap = rt711->regmap;
 
-	snd_soc_dapm_mutex_lock(dapm);
-	if (dapm->bias_level <= SND_SOC_BIAS_STANDBY)
-		regmap_write(rt711->regmap,
-			     RT711_SET_AUDIO_POWER_STATE, AC_PWRST_D0);
+	mutex_lock(&rt711->calibrate_mutex);
+	regmap_write(rt711->regmap,
+		RT711_SET_AUDIO_POWER_STATE, AC_PWRST_D0);
 
 	dev = regmap_get_device(regmap);
 
@@ -180,10 +177,9 @@ static int rt711_calibration(struct rt711_priv *rt711)
 	val |= RT711_DEPOP_CTL;
 	rt711_index_write(regmap, RT711_VENDOR_REG, RT711_FSM_CTL, val);
 
-	if (dapm->bias_level <= SND_SOC_BIAS_STANDBY)
-		regmap_write(rt711->regmap,
-			     RT711_SET_AUDIO_POWER_STATE, AC_PWRST_D3);
-	snd_soc_dapm_mutex_unlock(dapm);
+	regmap_write(rt711->regmap,
+		RT711_SET_AUDIO_POWER_STATE, AC_PWRST_D3);
+	mutex_unlock(&rt711->calibrate_mutex);
 
 	dev_dbg(dev, "%s calibration complete\n", __func__);
 	return 0;
@@ -413,7 +409,7 @@ static int rt711_set_jack_detect(struct snd_soc_component *component,
 		return -EAGAIN;
 	}
 
-	snd_soc_dapm_mutex_lock(dapm);
+	mutex_lock(&rt711->calibrate_mutex);
 	/* power on */
 	if (dapm->bias_level <= SND_SOC_BIAS_STANDBY)
 		regmap_write(rt711->regmap,
@@ -432,7 +428,7 @@ static int rt711_set_jack_detect(struct snd_soc_component *component,
 	if (dapm->bias_level <= SND_SOC_BIAS_STANDBY)
 		regmap_write(rt711->regmap,
 			RT711_SET_AUDIO_POWER_STATE, AC_PWRST_D3);
-	snd_soc_dapm_mutex_unlock(dapm);
+	mutex_unlock(&rt711->calibrate_mutex);
 
 	rt711->hs_jack = hs_jack;
 
@@ -895,8 +891,6 @@ static int rt711_probe(struct snd_soc_component *component)
 
 	rt711->component = component;
 
-	schedule_work(&rt711->calibration_work);
-
 	return 0;
 }
 
@@ -1256,7 +1250,9 @@ int rt711_io_init(struct device *dev, struct sdw_slave *slave)
 			rt711_jack_detect_handler);
 	INIT_DELAYED_WORK(&rt711->jack_btn_check_work,
 			rt711_btn_check_handler);
+	mutex_init(&rt711->calibrate_mutex);
 	INIT_WORK(&rt711->calibration_work, rt711_calibration_work);
+	schedule_work(&rt711->calibration_work);
 
 	/* Mark Slave initialization complete */
 	rt711->hw_init = true;
