@@ -935,9 +935,13 @@ static int aic31xx_hw_params(struct snd_pcm_substream *substream,
 	return aic31xx_setup_pll(component, params);
 }
 
-static int aic31xx_dac_mute(struct snd_soc_dai *codec_dai, int mute)
+static int aic31xx_dac_mute(struct snd_soc_dai *codec_dai, int mute,
+			    int direction)
 {
 	struct snd_soc_component *component = codec_dai->component;
+
+	if (direction != SNDRV_PCM_STREAM_PLAYBACK)
+		return 0;
 
 	if (mute) {
 		snd_soc_component_update_bits(component, AIC31XX_DACMUTE,
@@ -1336,7 +1340,7 @@ static const struct snd_soc_dai_ops aic31xx_dai_ops = {
 	.hw_params	= aic31xx_hw_params,
 	.set_sysclk	= aic31xx_set_dai_sysclk,
 	.set_fmt	= aic31xx_set_dai_fmt,
-	.digital_mute	= aic31xx_dac_mute,
+	.mute_stream	= aic31xx_dac_mute,
 };
 
 static struct snd_soc_dai_driver dac31xx_dai_driver[] = {
