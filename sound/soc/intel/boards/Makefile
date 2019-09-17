@@ -34,6 +34,7 @@ snd-skl_nau88l25_max98357a-objs := skl_nau88l25_max98357a.o
 snd-soc-skl_nau88l25_ssm4567-objs := skl_nau88l25_ssm4567.o
 snd-soc-tgl-rt1308-objs := tgl_rt1308.o
 snd-soc-sdw-rt700-objs := sdw_rt700.o
+snd-soc-sdw-rt711-objs := sdw_rt711.o
 snd-soc-sdw-rt711-rt1308-rt715-objs := sdw_rt711_rt1308_rt715.o
 
 obj-$(CONFIG_SND_SOC_INTEL_SOF_RT5682_MACH) += snd-soc-sof_rt5682.o
@@ -69,4 +70,5 @@ obj-$(CONFIG_SND_SOC_INTEL_SKL_NAU88L25_SSM4567_MACH) += snd-soc-skl_nau88l25_ss
 obj-$(CONFIG_SND_SOC_INTEL_SKL_HDA_DSP_GENERIC_MACH) += snd-soc-skl_hda_dsp.o
 obj-$(CONFIG_SND_SOC_INTEL_TGL_RT1308_MACH) += snd-soc-tgl-rt1308.o
 obj-$(CONFIG_SND_SOC_INTEL_SOUNDWIRE_RT700_MACH) += snd-soc-sdw-rt700.o
+obj-$(CONFIG_SND_SOC_INTEL_SOUNDWIRE_RT711_MACH) += snd-soc-sdw-rt711.o
 obj-$(CONFIG_SND_SOC_INTEL_SOUNDWIRE_RT711_RT1308_RT715_MACH) += snd-soc-sdw-rt711-rt1308-rt715.o
