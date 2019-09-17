@@ -147,10 +147,13 @@ static struct sdw_intel_ctx
 	int count;
 	int i;
 
+	if (!res)
+		return NULL;
+
 	if (acpi_bus_get_device(res->handle, &adev))
 		return NULL;
 
-	if (!res || !res->count)
+	if (!res->count)
 		return NULL;
 
 	count = res->count;
