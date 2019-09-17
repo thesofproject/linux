@@ -252,11 +252,14 @@ static int tas6424_set_dai_tdm_slot(struct snd_soc_dai *dai,
 	return 0;
 }
 
-static int tas6424_mute(struct snd_soc_dai *dai, int mute)
+static int tas6424_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	struct snd_soc_component *component = dai->component;
 	struct tas6424_data *tas6424 = snd_soc_component_get_drvdata(component);
 	unsigned int val;
+
+	if (direction != SNDRV_PCM_STREAM_PLAYBACK)
+		return 0;
 
 	dev_dbg(component->dev, "%s() mute=%d\n", __func__, mute);
 
@@ -382,7 +385,7 @@ static const struct snd_soc_dai_ops tas6424_speaker_dai_ops = {
 	.hw_params	= tas6424_hw_params,
 	.set_fmt	= tas6424_set_dai_fmt,
 	.set_tdm_slot	= tas6424_set_dai_tdm_slot,
-	.digital_mute	= tas6424_mute,
+	.mute_stream	= tas6424_mute,
 };
 
 static struct snd_soc_dai_driver tas6424_dai[] = {
