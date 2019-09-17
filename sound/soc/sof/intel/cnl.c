@@ -59,9 +59,12 @@ static irqreturn_t cnl_ipc_irq_thread(int irq, void *context)
 
 		spin_lock_irq(&sdev->ipc_lock);
 
-		/* handle immediate reply from DSP core */
-		hda_dsp_ipc_get_reply(sdev);
-		snd_sof_ipc_reply(sdev, msg);
+		/* do not check reply if no message was initiated */
+		if (sdev->msg) {
+			hda_dsp_ipc_get_reply(sdev);
+			snd_sof_ipc_reply(sdev, msg);
+		}
+
 
 		if (sdev->code_loading)	{
 			sdev->code_loading = 0;
