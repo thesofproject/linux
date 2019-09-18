@@ -232,7 +232,7 @@ read_error:
 	return btn_type;
 }
 
-int rt711_headset_detect(struct rt711_priv *rt711)
+static int rt711_headset_detect(struct rt711_priv *rt711)
 {
 	unsigned int buf, loop = 0;
 	int ret;
@@ -926,8 +926,8 @@ static int rt711_set_sdw_stream(struct snd_soc_dai *dai, void *sdw_stream,
 	return 0;
 }
 
-void rt711_shutdown(struct snd_pcm_substream *substream,
-		    struct snd_soc_dai *dai)
+static void rt711_shutdown(struct snd_pcm_substream *substream,
+			   struct snd_soc_dai *dai)
 {
 	struct sdw_stream_data *stream;
 
@@ -1029,8 +1029,8 @@ static int rt711_pcm_hw_params(struct snd_pcm_substream *substream,
 	return retval;
 }
 
-int rt711_pcm_hw_free(struct snd_pcm_substream *substream,
-		      struct snd_soc_dai *dai)
+static int rt711_pcm_hw_free(struct snd_pcm_substream *substream,
+			     struct snd_soc_dai *dai)
 {
 	struct snd_soc_component *component = dai->component;
 	struct rt711_priv *rt711 = snd_soc_component_get_drvdata(component);
