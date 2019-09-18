@@ -237,7 +237,6 @@ static int rt715_sdw_probe(struct sdw_slave *slave,
 			   const struct sdw_device_id *id)
 {
 	struct regmap *regmap;
-	int ret = 0;
 
 	/* Assign ops */
 	slave->ops = &rt715_slave_ops;
