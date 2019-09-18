@@ -195,6 +195,7 @@ static inline u32 cdns_readl(struct sdw_cdns *cdns, int offset)
 
 static inline void cdns_writel(struct sdw_cdns *cdns, int offset, u32 value)
 {
+	dev_vdbg(cdns->dev, "%s %x %x\n", __func__, offset, value);
 	writel(value, cdns->registers + offset);
 }
 
@@ -669,13 +670,36 @@ static int cdns_update_slave_status(struct sdw_cdns *cdns,
 
 		/* first check if Slave reported multiple status */
 		if (set_status > 1) {
+			u32 val;
+
 			dev_warn_ratelimited(cdns->dev,
-					     "Slave reported multiple Status: %d\n",
-					     mask);
-			/*
-			 * TODO: we need to reread the status here by
-			 * issuing a PING cmd
-			 */
+					     "Slave %d reported multiple Status: %d\n",
+					     i, mask);
+
+			/* check latest status extracted from PING commands */
+			val = cdns_readl(cdns, CDNS_MCP_SLAVE_STAT);
+			val >>= (i * 2);
+
+			switch (val & 0x3) {
+			case 0:
+				status[i] = SDW_SLAVE_UNATTACHED;
+				break;
+			case 1:
+				status[i] = SDW_SLAVE_ATTACHED;
+				break;
+			case 2:
+				status[i] = SDW_SLAVE_ALERT;
+				break;
+			case 3:
+			default:
+				status[i] = SDW_SLAVE_RESERVED;
+				break;
+			}
+
+			dev_warn_ratelimited(cdns->dev,
+					     "Slave %d status updated to %d\n",
+					     i, status[i]);
+
 		}
 	}
 
@@ -759,13 +783,29 @@ irqreturn_t sdw_cdns_thread(int irq, void *dev_id)
 {
 	struct sdw_cdns *cdns = dev_id;
 	u32 slave0, slave1;
+	u32 slave0_new, slave1_new;
 
-	dev_dbg_ratelimited(cdns->dev, "Slave status change\n");
+	dev_dbg_ratelimited(cdns->dev, "%s: start\n", __func__);
 
 	slave0 = cdns_readl(cdns, CDNS_MCP_SLAVE_INTSTAT0);
 	slave1 = cdns_readl(cdns, CDNS_MCP_SLAVE_INTSTAT1);
 
-	cdns_update_slave_status(cdns, slave0, slave1);
+	if (slave0 || slave1) {
+		dev_dbg(cdns->dev, "%s: Slave sticky status %08x %08x\n",
+			__func__, slave0, slave1);
+
+		cdns_update_slave_status(cdns, slave0, slave1);
+	}
+
+	slave0_new = cdns_readl(cdns, CDNS_MCP_SLAVE_INTSTAT0);
+	slave1_new = cdns_readl(cdns, CDNS_MCP_SLAVE_INTSTAT1);
+
+	if (slave0_new || slave1_new)
+		dev_dbg_ratelimited(cdns->dev,
+				    "%s: Slave sticky status %08x %08x\n",
+				    __func__, slave0_new, slave1_new);
+
+	/* clear sticky status bits */
 	cdns_writel(cdns, CDNS_MCP_SLAVE_INTSTAT0, slave0);
 	cdns_writel(cdns, CDNS_MCP_SLAVE_INTSTAT1, slave1);
 
@@ -773,6 +813,8 @@ irqreturn_t sdw_cdns_thread(int irq, void *dev_id)
 	cdns_writel(cdns, CDNS_MCP_INTSTAT, CDNS_MCP_INT_SLAVE_MASK);
 	cdns_updatel(cdns, CDNS_MCP_INTMASK,
 		     CDNS_MCP_INT_SLAVE_MASK, CDNS_MCP_INT_SLAVE_MASK);
+
+	dev_dbg_ratelimited(cdns->dev, "%s: end\n", __func__);
 
 	return IRQ_HANDLED;
 }
