@@ -59,7 +59,7 @@ static bool rt711_volatile_register(struct device *dev, unsigned int reg)
 	}
 }
 
-const struct regmap_config rt711_sdw_regmap = {
+static const struct regmap_config rt711_sdw_regmap = {
 	.reg_bits = 32, /* Total register space for SDW */
 	.val_bits = 8, /* Total number of bits in register */
 	.readable_reg = rt711_readable_register, /* Readable registers */
