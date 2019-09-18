@@ -545,8 +545,8 @@ static int rt715_set_sdw_stream(struct snd_soc_dai *dai, void *sdw_stream,
 	return 0;
 }
 
-void rt715_shutdown(struct snd_pcm_substream *substream,
-		    struct snd_soc_dai *dai)
+static void rt715_shutdown(struct snd_pcm_substream *substream,
+			   struct snd_soc_dai *dai)
 
 {
 	struct sdw_stream_data *stream;
@@ -667,8 +667,8 @@ static int rt715_pcm_hw_params(struct snd_pcm_substream *substream,
 	return retval;
 }
 
-int rt715_pcm_hw_free(struct snd_pcm_substream *substream,
-		      struct snd_soc_dai *dai)
+static int rt715_pcm_hw_free(struct snd_pcm_substream *substream,
+			     struct snd_soc_dai *dai)
 {
 	struct snd_soc_component *component = dai->component;
 	struct rt715_priv *rt715 = snd_soc_component_get_drvdata(component);
