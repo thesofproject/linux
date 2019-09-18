@@ -166,7 +166,7 @@ read_error:
 	return btn_type;
 }
 
-int rt700_headset_detect(struct rt700_priv *rt700)
+static int rt700_headset_detect(struct rt700_priv *rt700)
 {
 	unsigned int buf, loop = 0;
 	int ret;
