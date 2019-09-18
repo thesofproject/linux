@@ -572,7 +572,7 @@ static int rt715_pcm_hw_params(struct snd_pcm_substream *substream,
 	stream = snd_soc_dai_get_dma_data(dai, substream);
 
 	if (!stream)
-		return -ENOMEM;
+		return -EINVAL;
 
 	if (!rt715->slave)
 		return -EINVAL;
