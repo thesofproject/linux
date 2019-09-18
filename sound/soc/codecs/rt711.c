@@ -726,10 +726,10 @@ static const char * const adc_mux_text[] = {
 	"DMIC",
 };
 
-static const SOC_ENUM_SINGLE_DECL(
+static SOC_ENUM_SINGLE_DECL(
 	rt711_adc22_enum, SND_SOC_NOPM, 0, adc_mux_text);
 
-static const SOC_ENUM_SINGLE_DECL(
+static SOC_ENUM_SINGLE_DECL(
 	rt711_adc23_enum, SND_SOC_NOPM, 0, adc_mux_text);
 
 static const struct snd_kcontrol_new rt711_adc22_mux =
