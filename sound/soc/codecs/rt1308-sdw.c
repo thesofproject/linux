@@ -80,7 +80,7 @@ static const struct regmap_config rt1308_sdw_regmap = {
 #define RT1308_CLK_FREQ_2400000HZ 2400000
 #define RT1308_CLK_FREQ_12288000HZ 12288000
 
-int rt1308_clock_config(struct device *dev)
+static int rt1308_clock_config(struct device *dev)
 {
 	struct rt1308_sdw_priv *rt1308 = dev_get_drvdata(dev);
 	unsigned int clk_freq, value;
@@ -171,7 +171,7 @@ static int rt1308_read_prop(struct sdw_slave *slave)
 	return 0;
 }
 
-int rt1308_io_init(struct device *dev, struct sdw_slave *slave)
+static int rt1308_io_init(struct device *dev, struct sdw_slave *slave)
 {
 	struct rt1308_sdw_priv *rt1308 = dev_get_drvdata(dev);
 	int ret = 0;
@@ -571,8 +571,8 @@ static struct snd_soc_dai_driver rt1308_sdw_dai[] = {
 	},
 };
 
-int rt1308_sdw_init(struct device *dev, struct regmap *regmap,
-	       struct sdw_slave *slave)
+static int rt1308_sdw_init(struct device *dev, struct regmap *regmap,
+			   struct sdw_slave *slave)
 {
 	struct rt1308_sdw_priv *rt1308;
 	int ret;
