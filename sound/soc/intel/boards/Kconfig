@@ -480,7 +480,7 @@ config SND_SOC_INTEL_SOUNDWIRE_RT700_MACH
 	  If unsure select "N"
 
 config SND_SOC_INTEL_SOUNDWIRE_RT711_RT1308_RT715_MACH
-	tristate "SoundWire with RT700, RT1308 and RT715"
+	tristate "SoundWire with RT711, RT1308 and RT715"
         depends on SOUNDWIRE && ACPI
 	select SND_SOC_RT711_SDW
 	select SND_SOC_RT1308_SDW
