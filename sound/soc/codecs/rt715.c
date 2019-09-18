@@ -394,16 +394,16 @@ static const char * const adc_25_mux_text[] = {
 	"DMIC4",
 };
 
-static const SOC_ENUM_SINGLE_DECL(
+static SOC_ENUM_SINGLE_DECL(
 	rt715_adc22_enum, RT715_MUX_IN1, 0, adc_22_23_mux_text);
 
-static const SOC_ENUM_SINGLE_DECL(
+static SOC_ENUM_SINGLE_DECL(
 	rt715_adc23_enum, RT715_MUX_IN2, 0, adc_22_23_mux_text);
 
-static const SOC_ENUM_SINGLE_DECL(
+static SOC_ENUM_SINGLE_DECL(
 	rt715_adc24_enum, RT715_MUX_IN3, 0, adc_24_mux_text);
 
-static const SOC_ENUM_SINGLE_DECL(
+static SOC_ENUM_SINGLE_DECL(
 	rt715_adc25_enum, RT715_MUX_IN4, 0, adc_25_mux_text);
 
 static const struct snd_kcontrol_new rt715_adc22_mux =
