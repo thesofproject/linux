@@ -65,6 +65,8 @@ static int sdw_intel_cleanup(struct sdw_intel_ctx *ctx)
 		if (md) {
 			md->driver->remove(md);
 			put_device(&md->dev);
+			md->dev.driver = NULL;
+			device_unregister(&md->dev);
 		}
 	}
 
