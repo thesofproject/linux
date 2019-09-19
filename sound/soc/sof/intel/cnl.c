@@ -15,6 +15,7 @@
  * Hardware interface for audio DSP on Cannonlake.
  */
 
+#include <sound/sof/header-intel-cavs.h>
 #include "../ops.h"
 #include "hda.h"
 
@@ -150,14 +151,50 @@ static void cnl_ipc_dsp_done(struct snd_sof_dev *sdev)
 				CNL_DSP_REG_HIPCCTL_DONE);
 }
 
+static bool cnl_is_ipc_compact(struct snd_sof_ipc_msg *msg)
+{
+	/* the compact IPC subset might be extended later */
+	if (msg->header == (SOF_IPC_GLB_PM_MSG | SOF_IPC_PM_GATE))
+		return true;
+	else
+		return false;
+}
+
+static void cnl_compact_ipc_assemble(struct snd_sof_ipc_msg *msg,
+				     u32 *dr, u32 *dd)
+{
+	struct sof_ipc_pm_gate *pm_gate;
+
+	if (msg->header == (SOF_IPC_GLB_PM_MSG | SOF_IPC_PM_GATE)) {
+		pm_gate = msg->msg_data;
+		*dr = CAVS_IPC_MSG_TGT | CAVS_IPC_MOD_SET_D0IX;
+		*dd = pm_gate->flags & CAVS_IPC_MOD_SETD0IX_BIT_MASK;
+	}
+}
+
 static int cnl_ipc_send_msg(struct snd_sof_dev *sdev,
 			    struct snd_sof_ipc_msg *msg)
 {
-	/* send the message */
-	sof_mailbox_write(sdev, sdev->host_box.offset, msg->msg_data,
-			  msg->msg_size);
-	snd_sof_dsp_write(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCIDR,
-			  CNL_DSP_REG_HIPCIDR_BUSY);
+	u32 dr = 0;
+	u32 dd = 0;
+
+	/* send the message via IPC registers only */
+	if (cnl_is_ipc_compact(msg)) {
+		/* assemble IPC registers */
+		cnl_compact_ipc_assemble(msg, &dr, &dd);
+
+		/* send the message */
+		snd_sof_dsp_write(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCIDD,
+				  dd);
+		snd_sof_dsp_write(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCIDR,
+				  CNL_DSP_REG_HIPCIDR_BUSY | dr);
+	} else {
+		/* send the message via mailbox */
+		sof_mailbox_write(sdev, sdev->host_box.offset, msg->msg_data,
+				  msg->msg_size);
+		snd_sof_dsp_write(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCIDR,
+				  CNL_DSP_REG_HIPCIDR_BUSY);
+	}
 
 	return 0;
 }
