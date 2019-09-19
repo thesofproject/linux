@@ -62,10 +62,8 @@ static int sdw_intel_cleanup(struct sdw_intel_ctx *ctx)
 
 	for (i = 0; i < ctx->count; i++, link++) {
 		md = link->md;
-		if (md) {
+		if (md)
 			md->driver->remove(md);
-			put_device(&md->dev);
-		}
 	}
 
 	kfree(ctx->links);
