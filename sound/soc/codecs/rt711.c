@@ -135,6 +135,7 @@ static int rt711_calibration(struct rt711_priv *rt711)
 	unsigned int val, loop = 0;
 	struct device *dev;
 	struct regmap *regmap = rt711->regmap;
+	int ret = 0;
 
 	mutex_lock(&rt711->calibrate_mutex);
 	regmap_write(rt711->regmap,
@@ -162,7 +163,8 @@ static int rt711_calibration(struct rt711_priv *rt711)
 		if (loop >= 500) {
 			pr_err("%s, calibration time-out!\n",
 							__func__);
-			return -ETIMEDOUT;
+			ret = -ETIMEDOUT;
+			break;
 		}
 		loop++;
 
@@ -181,8 +183,8 @@ static int rt711_calibration(struct rt711_priv *rt711)
 		RT711_SET_AUDIO_POWER_STATE, AC_PWRST_D3);
 	mutex_unlock(&rt711->calibrate_mutex);
 
-	dev_dbg(dev, "%s calibration complete\n", __func__);
-	return 0;
+	dev_dbg(dev, "%s calibration complete, ret=%d\n", __func__, ret);
+	return ret;
 }
 
 static unsigned int rt711_button_detect(struct rt711_priv *rt711)
