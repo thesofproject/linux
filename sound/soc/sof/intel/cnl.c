@@ -150,14 +150,36 @@ static void cnl_ipc_dsp_done(struct snd_sof_dev *sdev)
 				CNL_DSP_REG_HIPCCTL_DONE);
 }
 
+static bool cnl_is_ipc_compact(struct snd_sof_ipc_msg *msg)
+{
+	/* the compact IPC subset might be extended later */
+	if (msg->header == (SOF_IPC_GLB_PM_MSG | SOF_IPC_PM_GATE))
+		return true;
+	else
+		return false;
+}
+
 static int cnl_ipc_send_msg(struct snd_sof_dev *sdev,
 			    struct snd_sof_ipc_msg *msg)
 {
-	/* send the message */
-	sof_mailbox_write(sdev, sdev->host_box.offset, msg->msg_data,
-			  msg->msg_size);
-	snd_sof_dsp_write(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCIDR,
-			  CNL_DSP_REG_HIPCIDR_BUSY);
+	u32 payload;
+
+	/* send the message via IPC registers only */
+	if (cnl_is_ipc_compact(msg)) {
+		/* only the first 32bits in payload will be sent*/
+		payload = *(u32 *)((char *)msg->msg_data +
+				   sizeof(struct sof_ipc_cmd_hdr));
+		snd_sof_dsp_write(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCIDD,
+				  payload);
+		snd_sof_dsp_write(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCIDR,
+				  CNL_DSP_REG_HIPCIDR_BUSY | msg->header);
+	} else {
+		/* send the message via mailbox */
+		sof_mailbox_write(sdev, sdev->host_box.offset, msg->msg_data,
+				  msg->msg_size);
+		snd_sof_dsp_write(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCIDR,
+				  CNL_DSP_REG_HIPCIDR_BUSY);
+	}
 
 	return 0;
 }
