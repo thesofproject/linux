@@ -1209,6 +1209,9 @@ static int intel_master_remove(struct sdw_master_device *md)
 	}
 	sdw_delete_bus_master(&sdw->cdns.bus);
 
+	md->dev.driver = NULL;
+	device_unregister(&md->dev);
+
 	return 0;
 }
 
