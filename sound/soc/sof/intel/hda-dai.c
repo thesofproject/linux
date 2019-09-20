@@ -262,8 +262,8 @@ static int hda_link_pcm_prepare(struct snd_pcm_substream *substream,
 	struct hdac_ext_stream *link_dev =
 				snd_soc_dai_get_dma_data(dai, substream);
 	struct sof_intel_hda_stream *hda_stream;
-	struct snd_sof_dev *sdev =
-				snd_soc_component_get_drvdata(dai->component);
+	struct snd_soc_component *scomp = dai->component;
+	struct snd_sof_dev *sdev = dev_get_drvdata(scomp->dev->parent);
 	struct snd_soc_pcm_runtime *rtd = snd_pcm_substream_chip(substream);
 	int stream = substream->stream;
 

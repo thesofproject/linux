@@ -353,7 +353,6 @@ static int sof_pci_probe(struct pci_dev *pci,
 	sof_pdata->machine = mach;
 	sof_pdata->desc = (struct sof_dev_desc *)pci_id->driver_data;
 	sof_pdata->dev = dev;
-	sof_pdata->platform = dev_name(dev);
 
 	/* alternate fw and tplg filenames ? */
 	if (fw_path)
