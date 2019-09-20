@@ -431,7 +431,7 @@ config SND_SOC_INTEL_SOF_RT5682_MACH
 		   (SND_SOC_SOF_BAYTRAIL && (X86_INTEL_LPSS || COMPILE_TEST))
 	select SND_SOC_RT5682
 	select SND_SOC_DMIC
-	select SND_SOC_HDAC_HDMI
+	select SND_SOC_HDAC_HDMI if SND_SOC_SOF_HDA_LINK
 	help
 	   This adds support for ASoC machine driver for SOF platforms
 	   with rt5682 codec.

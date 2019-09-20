@@ -41,8 +41,6 @@ static unsigned long sof_rt5682_quirk = SOF_RT5682_MCLK_EN |
 
 static int is_legacy_cpu;
 
-static struct snd_soc_jack sof_hdmi[3];
-
 struct sof_hdmi_pcm {
 	struct list_head head;
 	struct snd_soc_dai *codec_dai;
@@ -261,6 +259,9 @@ static struct snd_soc_dai_link_component platform_component[] = {
 	}
 };
 
+#if IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
+static struct snd_soc_jack sof_hdmi[3];
+
 static int sof_card_late_probe(struct snd_soc_card *card)
 {
 	struct sof_card_private *ctx = snd_soc_card_get_drvdata(card);
@@ -297,6 +298,12 @@ static int sof_card_late_probe(struct snd_soc_card *card)
 
 	return hdac_hdmi_jack_port_init(component, &card->dapm);
 }
+#else
+static int sof_card_late_probe(struct snd_soc_card *card)
+{
+	return 0;
+}
+#endif
 
 static const struct snd_kcontrol_new sof_controls[] = {
 	SOC_DAPM_PIN_SWITCH("Headphone Jack"),
