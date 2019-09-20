@@ -307,7 +307,8 @@ static int hda_dsp_wait_d0i3c_done(struct snd_sof_dev *sdev, int retry)
 }
 
 int hda_dsp_set_power_state(struct snd_sof_dev *sdev,
-			    enum sof_d0_substate d0_substate)
+			    enum sof_d0_substate d0_substate,
+			    u32 *flags)
 {
 	struct hdac_bus *bus = sof_to_bus(sdev);
 	int retry = 50;
@@ -335,6 +336,11 @@ int hda_dsp_set_power_state(struct snd_sof_dev *sdev,
 
 	dev_vdbg(bus->dev, "D0I3C updated, register = 0x%x\n",
 		 snd_hdac_chip_readb(bus, VS_D0I3C));
+
+	if (d0_substate == SOF_DSP_D0I3)
+		*flags = SOF_PM_PG_STREAMING;
+	else
+		*flags = SOF_PM_PPG | SOF_PM_PCG;
 
 	return 0;
 }
