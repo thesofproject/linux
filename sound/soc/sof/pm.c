@@ -435,12 +435,66 @@ EXPORT_SYMBOL(snd_sof_set_d0_state);
 
 int snd_sof_resume(struct device *dev)
 {
+	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
+	struct pci_dev *pci = to_pci_dev(sdev->dev);
+	int ret;
+
+	/* resuming from D0I3 */
+	if (sdev->d0_substate == SOF_DSP_D0I3) {
+		dev_dbg(sdev->dev, "ADSP will exit from D0i3...\n");
+		ret = snd_sof_set_d0_state(sdev, SOF_DSP_D0I0);
+		if (ret < 0) {
+			dev_err(sdev->dev, "error: failed to exit from D0I3 %d\n",
+				ret);
+			return ret;
+		}
+
+		pci_restore_state(pci);
+		disable_irq_wake(pci->irq);
+
+		/* resume DMA trace, only need send ipc */
+		ret = snd_sof_init_trace_ipc(sdev);
+		if (ret < 0) {
+			/* non fatal */
+			dev_warn(sdev->dev,
+				 "warning: failed to init trace after resume %d\n",
+				 ret);
+		}
+
+		return 0;
+	}
+
+	/* else, resuming from D3 */
 	return sof_resume(dev, false);
 }
 EXPORT_SYMBOL(snd_sof_resume);
 
 int snd_sof_suspend(struct device *dev)
 {
+	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
+	struct pci_dev *pci = to_pci_dev(sdev->dev);
+	int ret;
+
+	/* suspend to D0i3 */
+	if (sdev->s0_suspend) {
+		dev_dbg(sdev->dev, "ADSP will try to enter D0i3 for S2idle...\n");
+		ret = snd_sof_set_d0_state(sdev, SOF_DSP_D0I3);
+		if (ret < 0) {
+			dev_warn(sdev->dev, "error: failed to enter D0I3, fall back to enter D3, %d\n",
+				 ret);
+			return ret;
+		}
+
+		/* release trace */
+		snd_sof_release_trace(sdev);
+
+		enable_irq_wake(pci->irq);
+		pci_save_state(pci);
+
+		return 0;
+	}
+
+	/* else, deep suspend */
 	return sof_suspend(dev, false);
 }
 EXPORT_SYMBOL(snd_sof_suspend);
