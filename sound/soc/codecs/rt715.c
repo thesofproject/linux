@@ -319,6 +319,8 @@ static int rt715_mux_get(struct snd_kcontrol *kcontrol,
 	/* FIXME: PLB: check return status on read/write */
 	snd_soc_component_write(component, reg, 0x0);
 	snd_soc_component_read(component, RT715_READ_HDA_0, &val);
+	if ((e->reg == 0x24 || e->reg == 0x25) && (val > 0))
+		val -= 1;
 	ucontrol->value.enumerated.item[0] = val;
 
 	return 0;
@@ -376,8 +378,14 @@ static const char * const adc_22_23_mux_text[] = {
 	"DMIC4",
 };
 
+static const unsigned int rt715_adc_24_25_values[] = {
+	0,
+	2,
+	3,
+	4,
+	5,
+};
 static const char * const adc_24_mux_text[] = {
-	"MIC2",
 	"MIC2",
 	"DMIC1",
 	"DMIC2",
@@ -386,7 +394,6 @@ static const char * const adc_24_mux_text[] = {
 };
 
 static const char * const adc_25_mux_text[] = {
-	"MIC1",
 	"MIC1",
 	"DMIC1",
 	"DMIC2",
@@ -400,11 +407,12 @@ static SOC_ENUM_SINGLE_DECL(
 static SOC_ENUM_SINGLE_DECL(
 	rt715_adc23_enum, RT715_MUX_IN2, 0, adc_22_23_mux_text);
 
-static SOC_ENUM_SINGLE_DECL(
-	rt715_adc24_enum, RT715_MUX_IN3, 0, adc_24_mux_text);
-
-static SOC_ENUM_SINGLE_DECL(
-	rt715_adc25_enum, RT715_MUX_IN4, 0, adc_25_mux_text);
+static SOC_VALUE_ENUM_SINGLE_DECL(rt715_adc24_enum,
+	RT715_MUX_IN3, 0, 0xf,
+	adc_24_mux_text, rt715_adc_24_25_values);
+static SOC_VALUE_ENUM_SINGLE_DECL(rt715_adc25_enum,
+	RT715_MUX_IN4, 0, 0xf,
+	adc_25_mux_text, rt715_adc_24_25_values);
 
 static const struct snd_kcontrol_new rt715_adc22_mux =
 	SOC_DAPM_ENUM_EXT("ADC 22 Mux", rt715_adc22_enum,
@@ -473,12 +481,10 @@ static const struct snd_soc_dapm_route rt715_audio_map[] = {
 	{"ADC 23 Mux", "DMIC3", "DMIC3"},
 	{"ADC 23 Mux", "DMIC4", "DMIC4"},
 	{"ADC 24 Mux", "MIC2", "MIC2"},
-	{"ADC 24 Mux", "MIC2", "MIC2"},
 	{"ADC 24 Mux", "DMIC1", "DMIC1"},
 	{"ADC 24 Mux", "DMIC2", "DMIC2"},
 	{"ADC 24 Mux", "DMIC3", "DMIC3"},
 	{"ADC 24 Mux", "DMIC4", "DMIC4"},
-	{"ADC 25 Mux", "MIC1", "MIC1"},
 	{"ADC 25 Mux", "MIC1", "MIC1"},
 	{"ADC 25 Mux", "DMIC1", "DMIC1"},
 	{"ADC 25 Mux", "DMIC2", "DMIC2"},
