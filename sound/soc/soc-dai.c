@@ -9,6 +9,17 @@
 #include <sound/soc.h>
 #include <sound/soc-dai.h>
 
+#define soc_dai_err(dai, ret) _soc_dai_err(dai, __func__, ret)
+static inline int _soc_dai_err(struct snd_soc_dai *dai,
+			       const char *func, int ret)
+{
+	dev_err(dai->dev,
+		"ASoC: error at %s on %s: %d\n",
+		func, dai->name, ret);
+
+	return ret;
+}
+
 /**
  * snd_soc_dai_set_sysclk - configure DAI system or master clock.
  * @dai: DAI
@@ -45,7 +56,7 @@ int snd_soc_dai_set_clkdiv(struct snd_soc_dai *dai,
 	if (dai->driver->ops->set_clkdiv)
 		return dai->driver->ops->set_clkdiv(dai, div_id, div);
 	else
-		return -EINVAL;
+		return soc_dai_err(dai, -EINVAL);
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_set_clkdiv);
 
@@ -83,7 +94,7 @@ int snd_soc_dai_set_bclk_ratio(struct snd_soc_dai *dai, unsigned int ratio)
 	if (dai->driver->ops->set_bclk_ratio)
 		return dai->driver->ops->set_bclk_ratio(dai, ratio);
 	else
-		return -EINVAL;
+		return soc_dai_err(dai, -EINVAL);
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_set_bclk_ratio);
 
@@ -263,21 +274,14 @@ int snd_soc_dai_hw_params(struct snd_soc_dai *dai,
 	/* perform any topology hw_params fixups before DAI  */
 	if (rtd->dai_link->be_hw_params_fixup) {
 		ret = rtd->dai_link->be_hw_params_fixup(rtd, params);
-		if (ret < 0) {
-			dev_err(rtd->dev,
-				"ASoC: hw_params topology fixup failed %d\n",
-				ret);
-			return ret;
-		}
+		if (ret < 0)
+			return soc_dai_err(dai, ret);
 	}
 
 	if (dai->driver->ops->hw_params) {
 		ret = dai->driver->ops->hw_params(substream, params, dai);
-		if (ret < 0) {
-			dev_err(dai->dev, "ASoC: can't set %s hw params: %d\n",
-				dai->name, ret);
-			return ret;
-		}
+		if (ret < 0)
+			return soc_dai_err(dai, ret);
 	}
 
 	return 0;
