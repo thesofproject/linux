@@ -319,7 +319,10 @@ static int rt715_mux_get(struct snd_kcontrol *kcontrol,
 	/* FIXME: PLB: check return status on read/write */
 	snd_soc_component_write(component, reg, 0x0);
 	snd_soc_component_read(component, RT715_READ_HDA_0, &val);
-	if ((e->reg == 0x24 || e->reg == 0x25) && (val > 0))
+	/* According to return value of mux of nid RT715_MUX_IN3 and
+	RT715_MUX_IN4, we should convert value here to match the amixer
+	item number. */
+	if ((e->reg == RT715_MUX_IN3 || e->reg == RT715_MUX_IN4) && (val > 0))
 		val -= 1;
 	ucontrol->value.enumerated.item[0] = val;
 
@@ -378,6 +381,11 @@ static const char * const adc_22_23_mux_text[] = {
 	"DMIC4",
 };
 
+/**
+ * Due to mux design for nid 24/25, connection index 0 and 1 will be connected
+ * to the same dmic source, therefore we bypass index 1 to avoid
+ * misunderstaning on usage of dapm routing.
+ */
 static const unsigned int rt715_adc_24_25_values[] = {
 	0,
 	2,
@@ -385,6 +393,7 @@ static const unsigned int rt715_adc_24_25_values[] = {
 	4,
 	5,
 };
+
 static const char * const adc_24_mux_text[] = {
 	"MIC2",
 	"DMIC1",
