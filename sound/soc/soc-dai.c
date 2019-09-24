@@ -32,7 +32,8 @@ static inline int _soc_dai_err(struct snd_soc_dai *dai,
 int snd_soc_dai_set_sysclk(struct snd_soc_dai *dai, int clk_id,
 			   unsigned int freq, int dir)
 {
-	if (dai->driver->ops->set_sysclk)
+	if (dai->driver->ops &&
+	    dai->driver->ops->set_sysclk)
 		return dai->driver->ops->set_sysclk(dai, clk_id, freq, dir);
 
 	return snd_soc_component_set_sysclk(dai->component, clk_id, 0,
@@ -53,7 +54,8 @@ EXPORT_SYMBOL_GPL(snd_soc_dai_set_sysclk);
 int snd_soc_dai_set_clkdiv(struct snd_soc_dai *dai,
 			   int div_id, int div)
 {
-	if (dai->driver->ops->set_clkdiv)
+	if (dai->driver->ops &&
+	    dai->driver->ops->set_clkdiv)
 		return dai->driver->ops->set_clkdiv(dai, div_id, div);
 	else
 		return soc_dai_err(dai, -EINVAL);
@@ -73,7 +75,8 @@ EXPORT_SYMBOL_GPL(snd_soc_dai_set_clkdiv);
 int snd_soc_dai_set_pll(struct snd_soc_dai *dai, int pll_id, int source,
 			unsigned int freq_in, unsigned int freq_out)
 {
-	if (dai->driver->ops->set_pll)
+	if (dai->driver->ops &&
+	    dai->driver->ops->set_pll)
 		return dai->driver->ops->set_pll(dai, pll_id, source,
 						 freq_in, freq_out);
 
@@ -91,7 +94,8 @@ EXPORT_SYMBOL_GPL(snd_soc_dai_set_pll);
  */
 int snd_soc_dai_set_bclk_ratio(struct snd_soc_dai *dai, unsigned int ratio)
 {
-	if (dai->driver->ops->set_bclk_ratio)
+	if (dai->driver->ops &&
+	    dai->driver->ops->set_bclk_ratio)
 		return dai->driver->ops->set_bclk_ratio(dai, ratio);
 	else
 		return soc_dai_err(dai, -EINVAL);
@@ -107,7 +111,8 @@ EXPORT_SYMBOL_GPL(snd_soc_dai_set_bclk_ratio);
  */
 int snd_soc_dai_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 {
-	if (dai->driver->ops->set_fmt == NULL)
+	if (!dai->driver->ops ||
+	    !dai->driver->ops->set_fmt)
 		return -ENOTSUPP;
 	return dai->driver->ops->set_fmt(dai, fmt);
 }
@@ -164,7 +169,8 @@ int snd_soc_dai_set_tdm_slot(struct snd_soc_dai *dai,
 			     unsigned int tx_mask, unsigned int rx_mask,
 			     int slots, int slot_width)
 {
-	if (dai->driver->ops->xlate_tdm_slot_mask)
+	if (dai->driver->ops &&
+	    dai->driver->ops->xlate_tdm_slot_mask)
 		dai->driver->ops->xlate_tdm_slot_mask(slots,
 						      &tx_mask, &rx_mask);
 	else
@@ -173,7 +179,8 @@ int snd_soc_dai_set_tdm_slot(struct snd_soc_dai *dai,
 	dai->tx_mask = tx_mask;
 	dai->rx_mask = rx_mask;
 
-	if (dai->driver->ops->set_tdm_slot)
+	if (dai->driver->ops &&
+	    dai->driver->ops->set_tdm_slot)
 		return dai->driver->ops->set_tdm_slot(dai, tx_mask, rx_mask,
 						      slots, slot_width);
 	else
@@ -197,7 +204,8 @@ int snd_soc_dai_set_channel_map(struct snd_soc_dai *dai,
 				unsigned int tx_num, unsigned int *tx_slot,
 				unsigned int rx_num, unsigned int *rx_slot)
 {
-	if (dai->driver->ops->set_channel_map)
+	if (dai->driver->ops &&
+	    dai->driver->ops->set_channel_map)
 		return dai->driver->ops->set_channel_map(dai, tx_num, tx_slot,
 							 rx_num, rx_slot);
 	else
@@ -219,7 +227,8 @@ int snd_soc_dai_get_channel_map(struct snd_soc_dai *dai,
 				unsigned int *tx_num, unsigned int *tx_slot,
 				unsigned int *rx_num, unsigned int *rx_slot)
 {
-	if (dai->driver->ops->get_channel_map)
+	if (dai->driver->ops &&
+	    dai->driver->ops->get_channel_map)
 		return dai->driver->ops->get_channel_map(dai, tx_num, tx_slot,
 							 rx_num, rx_slot);
 	else
@@ -236,7 +245,8 @@ EXPORT_SYMBOL_GPL(snd_soc_dai_get_channel_map);
  */
 int snd_soc_dai_set_tristate(struct snd_soc_dai *dai, int tristate)
 {
-	if (dai->driver->ops->set_tristate)
+	if (dai->driver->ops &&
+	    dai->driver->ops->set_tristate)
 		return dai->driver->ops->set_tristate(dai, tristate);
 	else
 		return -EINVAL;
@@ -254,7 +264,9 @@ EXPORT_SYMBOL_GPL(snd_soc_dai_set_tristate);
 int snd_soc_dai_digital_mute(struct snd_soc_dai *dai, int mute,
 			     int direction)
 {
-	if (dai->driver->ops->mute_stream)
+	if (dai->driver->ops)
+		return -ENOTSUPP;
+	else if (dai->driver->ops->mute_stream)
 		return dai->driver->ops->mute_stream(dai, mute, direction);
 	else if (direction == SNDRV_PCM_STREAM_PLAYBACK &&
 		 dai->driver->ops->digital_mute)
@@ -278,7 +290,8 @@ int snd_soc_dai_hw_params(struct snd_soc_dai *dai,
 			return soc_dai_err(dai, ret);
 	}
 
-	if (dai->driver->ops->hw_params) {
+	if (dai->driver->ops &&
+	    dai->driver->ops->hw_params) {
 		ret = dai->driver->ops->hw_params(substream, params, dai);
 		if (ret < 0)
 			return soc_dai_err(dai, ret);
@@ -290,7 +303,8 @@ int snd_soc_dai_hw_params(struct snd_soc_dai *dai,
 void snd_soc_dai_hw_free(struct snd_soc_dai *dai,
 			 struct snd_pcm_substream *substream)
 {
-	if (dai->driver->ops->hw_free)
+	if (dai->driver->ops &&
+	    dai->driver->ops->hw_free)
 		dai->driver->ops->hw_free(substream, dai);
 }
 
@@ -299,7 +313,8 @@ int snd_soc_dai_startup(struct snd_soc_dai *dai,
 {
 	int ret = 0;
 
-	if (dai->driver->ops->startup)
+	if (dai->driver->ops &&
+	    dai->driver->ops->startup)
 		ret = dai->driver->ops->startup(substream, dai);
 
 	return ret;
@@ -308,7 +323,8 @@ int snd_soc_dai_startup(struct snd_soc_dai *dai,
 void snd_soc_dai_shutdown(struct snd_soc_dai *dai,
 			 struct snd_pcm_substream *substream)
 {
-	if (dai->driver->ops->shutdown)
+	if (dai->driver->ops &&
+	    dai->driver->ops->shutdown)
 		dai->driver->ops->shutdown(substream, dai);
 }
 
@@ -317,7 +333,8 @@ int snd_soc_dai_prepare(struct snd_soc_dai *dai,
 {
 	int ret = 0;
 
-	if (dai->driver->ops->prepare)
+	if (dai->driver->ops &&
+	    dai->driver->ops->prepare)
 		ret = dai->driver->ops->prepare(substream, dai);
 
 	return ret;
@@ -329,7 +346,8 @@ int snd_soc_dai_trigger(struct snd_soc_dai *dai,
 {
 	int ret = 0;
 
-	if (dai->driver->ops->trigger)
+	if (dai->driver->ops &&
+	    dai->driver->ops->trigger)
 		ret = dai->driver->ops->trigger(substream, cmd, dai);
 
 	return ret;
@@ -341,7 +359,8 @@ int snd_soc_dai_bespoke_trigger(struct snd_soc_dai *dai,
 {
 	int ret = 0;
 
-	if (dai->driver->ops->bespoke_trigger)
+	if (dai->driver->ops &&
+	    dai->driver->ops->bespoke_trigger)
 		ret = dai->driver->ops->bespoke_trigger(substream, cmd, dai);
 
 	return ret;
@@ -352,7 +371,8 @@ snd_pcm_sframes_t snd_soc_dai_delay(struct snd_soc_dai *dai,
 {
 	int delay = 0;
 
-	if (dai->driver->ops->delay)
+	if (dai->driver->ops &&
+	    dai->driver->ops->delay)
 		delay = dai->driver->ops->delay(substream, dai);
 
 	return delay;
