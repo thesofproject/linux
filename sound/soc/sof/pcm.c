@@ -346,6 +346,11 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 		stream.hdr.cmd |= SOF_IPC_STREAM_TRIG_RELEASE;
 		break;
 	case SNDRV_PCM_TRIGGER_RESUME:
+		/* No need to resume it as the stream is already active */
+		if (spcm->stream[substream->stream].suspend_ignored) {
+			spcm->stream[substream->stream].suspend_ignored = false;
+			return 0;
+		}
 		/* set up hw_params */
 		ret = sof_pcm_prepare(component, substream);
 		if (ret < 0) {
@@ -356,9 +361,21 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 
 		/* fallthrough */
 	case SNDRV_PCM_TRIGGER_START:
+		/* No need to start it as the stream is already active */
+		if (spcm->stream[substream->stream].suspend_ignored) {
+			spcm->stream[substream->stream].suspend_ignored = false;
+			return 0;
+		}
 		stream.hdr.cmd |= SOF_IPC_STREAM_TRIG_START;
 		break;
 	case SNDRV_PCM_TRIGGER_SUSPEND:
+		/* Don't suspend the d0i3 compatible stream at S0ix. */
+		if (sdev->s0_suspend &&
+		    spcm->stream[substream->stream].d0i3_compatible) {
+			spcm->stream[substream->stream].suspend_ignored = true;
+			return 0;
+		}
+		/* fallthrough */
 	case SNDRV_PCM_TRIGGER_STOP:
 		stream.hdr.cmd |= SOF_IPC_STREAM_TRIG_STOP;
 		ipc_first = true;
