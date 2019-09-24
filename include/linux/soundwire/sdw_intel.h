@@ -97,9 +97,10 @@ struct sdw_intel_link_res {
 	void __iomem *registers;
 	void __iomem *shim;
 	void __iomem *alh;
-	int irq;
 	const struct sdw_intel_ops *ops;
 	struct device *dev;
+	struct sdw_cdns *cdns;
+	struct list_head list;
 };
 
 /**
@@ -115,7 +116,9 @@ struct sdw_intel_ctx {
 	void __iomem *mmio_base;
 	u32 link_mask;
 	acpi_handle handle;
+	int irq;
 	struct sdw_intel_link_res *links;
+	struct list_head link_list;
 };
 
 /*
@@ -139,5 +142,7 @@ sdw_intel_probe(struct sdw_intel_res *res);
 int sdw_intel_startup(struct sdw_intel_ctx *ctx);
 
 void sdw_intel_exit(struct sdw_intel_ctx *ctx);
+
+void sdw_intel_enable_irq(void __iomem *mmio_base, bool enable);
 
 #endif
