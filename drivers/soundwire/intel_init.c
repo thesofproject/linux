@@ -11,8 +11,10 @@
 #include <linux/export.h>
 #include <linux/io.h>
 #include <linux/module.h>
+#include <linux/interrupt.h>
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_intel.h>
+#include "cadence_master.h"
 #include "intel.h"
 
 #define SDW_LINK_TYPE		4 /* from Intel ACPI documentation */
@@ -161,6 +163,32 @@ void sdw_intel_enable_irq(void __iomem *mmio_base, bool enable)
 }
 EXPORT_SYMBOL(sdw_intel_enable_irq);
 
+static irqreturn_t sdw_intel_irq(int irq, void *dev_id)
+{
+	struct sdw_intel_ctx *ctx = dev_id;
+	u32 int_status;
+
+	int_status = readl(ctx->mmio_base + HDA_DSP_REG_ADSPIS2);
+	if (int_status & HDA_DSP_REG_ADSPIC2_SNDW) {
+		sdw_intel_enable_irq(ctx->mmio_base, false);
+		return IRQ_WAKE_THREAD;
+	}
+
+	return IRQ_NONE;
+}
+
+static irqreturn_t sdw_intel_thread(int irq, void *dev_id)
+{
+	struct sdw_intel_ctx *ctx = dev_id;
+	struct sdw_intel_link_res *link;
+
+	list_for_each_entry(link, &ctx->link_list, list)
+		sdw_cdns_irq(irq, link->cdns);
+
+	sdw_intel_enable_irq(ctx->mmio_base, true);
+	return IRQ_HANDLED;
+}
+
 static struct sdw_intel_ctx
 *sdw_intel_probe_controller(struct sdw_intel_res *res)
 {
@@ -171,6 +199,7 @@ static struct sdw_intel_ctx
 	u32 link_mask;
 	int count;
 	int i;
+	int ret;
 
 	if (!res)
 		return NULL;
@@ -196,9 +225,12 @@ static struct sdw_intel_ctx
 	ctx->mmio_base = res->mmio_base;
 	ctx->link_mask = res->link_mask;
 	ctx->handle = res->handle;
+	ctx->irq = res->irq;
 
 	link = ctx->links;
 	link_mask = ctx->link_mask;
+
+	INIT_LIST_HEAD(&ctx->link_list);
 
 	/* Create SDW Master devices */
 	for (i = 0; i < count; i++, link++) {
@@ -220,12 +252,22 @@ static struct sdw_intel_ctx
 			+ (SDW_LINK_SIZE * i);
 		link->shim = res->mmio_base + SDW_SHIM_BASE;
 		link->alh = res->mmio_base + SDW_ALH_BASE;
-		link->irq = res->irq;
 		link->ops = res->ops;
 		link->dev = res->dev;
 
 		/* let the SoundWire master driver to its probe */
 		md->driver->probe(md, link);
+
+		list_add_tail(&link->list, &ctx->link_list);
+	}
+
+	ret = request_threaded_irq(ctx->irq,
+				   sdw_intel_irq, sdw_intel_thread,
+				   IRQF_SHARED, KBUILD_MODNAME, ctx);
+	if (ret < 0) {
+		dev_err(&adev->dev, "unable to grab IRQ %d, disabling device\n",
+			res->irq);
+		goto err;
 	}
 
 	return ctx;
@@ -373,6 +415,7 @@ EXPORT_SYMBOL(sdw_intel_startup);
  */
 void sdw_intel_exit(struct sdw_intel_ctx *ctx)
 {
+	free_irq(ctx->irq, ctx);
 	sdw_intel_cleanup(ctx);
 	kfree(ctx);
 }
