@@ -14,9 +14,9 @@
 #include <sound/pcm_params.h>
 #include <sound/sof.h>
 #include "sof-priv.h"
+#include "sof-client.h"
+#include "sof-audio.h"
 #include "ops.h"
-
-#define DRV_NAME	"sof-audio-component"
 
 /* Create DMA buffer page table for DSP */
 static int create_page_table(struct snd_soc_component *component,
@@ -24,28 +24,32 @@ static int create_page_table(struct snd_soc_component *component,
 			     unsigned char *dma_area, size_t size)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_sof_dev *sdev = dev_get_drvdata(component->dev->parent);
-	struct snd_sof_pcm *spcm;
 	struct snd_dma_buffer *dmab = snd_pcm_get_dma_buf(substream);
+	struct sof_audio_dev *sof_audio =
+		sof_get_client_data(component->dev);
+	struct snd_sof_pcm *spcm;
 	int stream = substream->stream;
 
-	spcm = snd_sof_find_spcm_dai(sdev, rtd);
+	spcm = snd_sof_find_spcm_dai(sof_audio, rtd);
 	if (!spcm)
 		return -EINVAL;
 
-	return snd_sof_create_page_table(sdev->dev, dmab,
+	return snd_sof_create_page_table(component->dev, dmab,
 		spcm->stream[stream].page_table.area, size);
 }
 
 static int sof_pcm_dsp_params(struct snd_sof_pcm *spcm, struct snd_pcm_substream *substream,
 			      const struct sof_ipc_pcm_params_reply *reply)
 {
-	struct snd_sof_dev *sdev = spcm->sdev;
+	struct snd_soc_component *scomp = spcm->scomp;
+	struct snd_sof_dev *sdev = dev_get_drvdata(scomp->dev->parent);
+	int ret;
+
 	/* validate offset */
-	int ret = snd_sof_ipc_pcm_params(sdev, substream, reply);
+	ret = snd_sof_ipc_pcm_params(sdev, substream, reply);
 
 	if (ret < 0)
-		dev_err(sdev->dev, "error: got wrong reply for PCM %d\n",
+		dev_err(scomp->dev, "error: got wrong reply for PCM %d\n",
 			spcm->pcm.pcm_id);
 
 	return ret;
@@ -71,12 +75,13 @@ void snd_sof_pcm_period_elapsed(struct snd_pcm_substream *substream)
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_component *component =
 		snd_soc_rtdcom_lookup(rtd, DRV_NAME);
-	struct snd_sof_dev *sdev = dev_get_drvdata(component->dev->parent);
+	struct sof_audio_dev *sof_audio =
+		sof_get_client_data(component->dev);
 	struct snd_sof_pcm *spcm;
 
-	spcm = snd_sof_find_spcm_dai(sdev, rtd);
+	spcm = snd_sof_find_spcm_dai(sof_audio, rtd);
 	if (!spcm) {
-		dev_err(sdev->dev,
+		dev_err(component->dev,
 			"error: period elapsed for unknown stream!\n");
 		return;
 	}
@@ -101,6 +106,8 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct snd_sof_dev *sdev = dev_get_drvdata(component->dev->parent);
+	struct sof_audio_dev *sof_audio =
+		sof_get_client_data(component->dev);
 	struct snd_sof_pcm *spcm;
 	struct sof_ipc_pcm_params pcm;
 	struct sof_ipc_pcm_params_reply ipc_params_reply;
@@ -110,11 +117,11 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 	if (rtd->dai_link->no_pcm)
 		return 0;
 
-	spcm = snd_sof_find_spcm_dai(sdev, rtd);
+	spcm = snd_sof_find_spcm_dai(sof_audio, rtd);
 	if (!spcm)
 		return -EINVAL;
 
-	dev_dbg(sdev->dev, "pcm: hw params stream %d dir %d\n",
+	dev_dbg(component->dev, "pcm: hw params stream %d dir %d\n",
 		spcm->pcm.pcm_id, substream->stream);
 
 	memset(&pcm, 0, sizeof(pcm));
@@ -122,7 +129,8 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 	/* allocate audio buffer pages */
 	ret = snd_pcm_lib_malloc_pages(substream, params_buffer_bytes(params));
 	if (ret < 0) {
-		dev_err(sdev->dev, "error: could not allocate %d bytes for PCM %d\n",
+		dev_err(component->dev,
+			"error: could not allocate %d bytes for PCM %d\n",
 			params_buffer_bytes(params), spcm->pcm.pcm_id);
 		return ret;
 	}
@@ -187,18 +195,18 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 					     params,
 					     &pcm.params);
 	if (ret < 0) {
-		dev_err(sdev->dev, "error: platform hw params failed\n");
+		dev_err(component->dev, "error: platform hw params failed\n");
 		return ret;
 	}
 
-	dev_dbg(sdev->dev, "stream_tag %d", pcm.params.stream_tag);
+	dev_dbg(component->dev, "stream_tag %d", pcm.params.stream_tag);
 
 	/* send IPC to the DSP */
 	ret = sof_client_tx_message(component->dev, pcm.hdr.cmd, &pcm,
 				    sizeof(pcm), &ipc_params_reply,
 				    sizeof(ipc_params_reply));
 	if (ret < 0) {
-		dev_err(sdev->dev, "error: hw params ipc failed for stream %d\n",
+		dev_err(component->dev, "error: hw params ipc failed for stream %d\n",
 			pcm.params.stream_tag);
 		return ret;
 	}
@@ -241,6 +249,8 @@ static int sof_pcm_hw_free(struct snd_soc_component *component,
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_sof_dev *sdev = dev_get_drvdata(component->dev->parent);
+	struct sof_audio_dev *sof_audio =
+		sof_get_client_data(component->dev);
 	struct snd_sof_pcm *spcm;
 	int ret, err = 0;
 
@@ -248,12 +258,12 @@ static int sof_pcm_hw_free(struct snd_soc_component *component,
 	if (rtd->dai_link->no_pcm)
 		return 0;
 
-	spcm = snd_sof_find_spcm_dai(sdev, rtd);
+	spcm = snd_sof_find_spcm_dai(sof_audio, rtd);
 	if (!spcm)
 		return -EINVAL;
 
-	dev_dbg(sdev->dev, "pcm: free stream %d dir %d\n", spcm->pcm.pcm_id,
-		substream->stream);
+	dev_dbg(component->dev, "pcm: free stream %d dir %d\n",
+		spcm->pcm.pcm_id, substream->stream);
 
 	if (spcm->prepared[substream->stream]) {
 		ret = sof_pcm_dsp_pcm_free(substream, component, spcm);
@@ -267,7 +277,7 @@ static int sof_pcm_hw_free(struct snd_soc_component *component,
 
 	ret = snd_sof_pcm_platform_hw_free(sdev, substream);
 	if (ret < 0) {
-		dev_err(sdev->dev, "error: platform hw free failed\n");
+		dev_err(component->dev, "error: platform hw free failed\n");
 		err = ret;
 	}
 
@@ -278,7 +288,8 @@ static int sof_pcm_prepare(struct snd_soc_component *component,
 			   struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_sof_dev *sdev = dev_get_drvdata(component->dev->parent);
+	struct sof_audio_dev *sof_audio =
+		sof_get_client_data(component->dev);
 	struct snd_sof_pcm *spcm;
 	int ret;
 
@@ -286,21 +297,21 @@ static int sof_pcm_prepare(struct snd_soc_component *component,
 	if (rtd->dai_link->no_pcm)
 		return 0;
 
-	spcm = snd_sof_find_spcm_dai(sdev, rtd);
+	spcm = snd_sof_find_spcm_dai(sof_audio, rtd);
 	if (!spcm)
 		return -EINVAL;
 
 	if (spcm->prepared[substream->stream])
 		return 0;
 
-	dev_dbg(sdev->dev, "pcm: prepare stream %d dir %d\n", spcm->pcm.pcm_id,
-		substream->stream);
+	dev_dbg(component->dev, "pcm: prepare stream %d dir %d\n",
+		spcm->pcm.pcm_id, substream->stream);
 
 	/* set hw_params */
 	ret = sof_pcm_hw_params(component,
 				substream, &spcm->params[substream->stream]);
 	if (ret < 0) {
-		dev_err(sdev->dev, "error: set pcm hw_params after resume\n");
+		dev_err(component->dev, "error: set pcm hw_params after resume\n");
 		return ret;
 	}
 
@@ -316,6 +327,8 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_sof_dev *sdev = dev_get_drvdata(component->dev->parent);
+	struct sof_audio_dev *sof_audio =
+		sof_get_client_data(component->dev);
 	struct snd_sof_pcm *spcm;
 	struct sof_ipc_stream stream;
 	struct sof_ipc_reply reply;
@@ -327,11 +340,11 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 	if (rtd->dai_link->no_pcm)
 		return 0;
 
-	spcm = snd_sof_find_spcm_dai(sdev, rtd);
+	spcm = snd_sof_find_spcm_dai(sof_audio, rtd);
 	if (!spcm)
 		return -EINVAL;
 
-	dev_dbg(sdev->dev, "pcm: trigger stream %d dir %d cmd %d\n",
+	dev_dbg(component->dev, "pcm: trigger stream %d dir %d cmd %d\n",
 		spcm->pcm.pcm_id, substream->stream, cmd);
 
 	stream.hdr.size = sizeof(stream);
@@ -350,7 +363,7 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 		/* set up hw_params */
 		ret = sof_pcm_prepare(component, substream);
 		if (ret < 0) {
-			dev_err(sdev->dev,
+			dev_err(component->dev,
 				"error: failed to set up hw_params upon resume\n");
 			return ret;
 		}
@@ -397,6 +410,8 @@ static snd_pcm_uframes_t sof_pcm_pointer(struct snd_soc_component *component,
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_sof_dev *sdev = dev_get_drvdata(component->dev->parent);
+	struct sof_audio_dev *sof_audio =
+		sof_get_client_data(component->dev);
 	struct snd_sof_pcm *spcm;
 	snd_pcm_uframes_t host, dai;
 
@@ -408,7 +423,7 @@ static snd_pcm_uframes_t sof_pcm_pointer(struct snd_soc_component *component,
 	if (sof_ops(sdev)->pcm_pointer)
 		return sof_ops(sdev)->pcm_pointer(sdev, substream);
 
-	spcm = snd_sof_find_spcm_dai(sdev, rtd);
+	spcm = snd_sof_find_spcm_dai(sof_audio, rtd);
 	if (!spcm)
 		return -EINVAL;
 
@@ -418,7 +433,8 @@ static snd_pcm_uframes_t sof_pcm_pointer(struct snd_soc_component *component,
 	dai = bytes_to_frames(substream->runtime,
 			      spcm->stream[substream->stream].posn.dai_posn);
 
-	dev_dbg(sdev->dev, "PCM: stream %d dir %d DMA position %lu DAI position %lu\n",
+	dev_dbg(component->dev,
+		"PCM: stream %d dir %d DMA position %lu DAI position %lu\n",
 		spcm->pcm.pcm_id, substream->stream, host, dai);
 
 	return host;
@@ -442,6 +458,8 @@ static int sof_pcm_open(struct snd_soc_component *component,
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct snd_sof_dev *sdev = dev_get_drvdata(component->dev->parent);
 	const struct snd_sof_dsp_ops *ops = sof_ops(sdev);
+	struct sof_audio_dev *sof_audio =
+		sof_get_client_data(component->dev);
 	struct snd_sof_pcm *spcm;
 	struct snd_soc_tplg_stream_caps *caps;
 	int ret;
@@ -450,12 +468,12 @@ static int sof_pcm_open(struct snd_soc_component *component,
 	if (rtd->dai_link->no_pcm)
 		return 0;
 
-	spcm = snd_sof_find_spcm_dai(sdev, rtd);
+	spcm = snd_sof_find_spcm_dai(sof_audio, rtd);
 	if (!spcm)
 		return -EINVAL;
 
-	dev_dbg(sdev->dev, "pcm: open stream %d dir %d\n", spcm->pcm.pcm_id,
-		substream->stream);
+	dev_dbg(component->dev, "pcm: open stream %d dir %d\n",
+		spcm->pcm.pcm_id, substream->stream);
 
 	INIT_WORK(&spcm->stream[substream->stream].period_elapsed_work,
 		  sof_pcm_period_elapsed_work);
@@ -485,13 +503,13 @@ static int sof_pcm_open(struct snd_soc_component *component,
 	 */
 	runtime->hw.buffer_bytes_max = le32_to_cpu(caps->buffer_size_max);
 
-	dev_dbg(sdev->dev, "period min %zd max %zd bytes\n",
+	dev_dbg(component->dev, "period min %zd max %zd bytes\n",
 		runtime->hw.period_bytes_min,
 		runtime->hw.period_bytes_max);
-	dev_dbg(sdev->dev, "period count %d max %d\n",
+	dev_dbg(component->dev, "period count %d max %d\n",
 		runtime->hw.periods_min,
 		runtime->hw.periods_max);
-	dev_dbg(sdev->dev, "buffer max %zd bytes\n",
+	dev_dbg(component->dev, "buffer max %zd bytes\n",
 		runtime->hw.buffer_bytes_max);
 
 	/* set wait time - TODO: come from topology */
@@ -504,7 +522,7 @@ static int sof_pcm_open(struct snd_soc_component *component,
 
 	ret = snd_sof_pcm_platform_open(sdev, substream);
 	if (ret < 0)
-		dev_err(sdev->dev, "error: pcm open failed %d\n", ret);
+		dev_err(component->dev, "error: pcm open failed %d\n", ret);
 
 	return ret;
 }
@@ -514,6 +532,8 @@ static int sof_pcm_close(struct snd_soc_component *component,
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_sof_dev *sdev = dev_get_drvdata(component->dev->parent);
+	struct sof_audio_dev *sof_audio =
+		sof_get_client_data(component->dev);
 	struct snd_sof_pcm *spcm;
 	int err;
 
@@ -521,16 +541,16 @@ static int sof_pcm_close(struct snd_soc_component *component,
 	if (rtd->dai_link->no_pcm)
 		return 0;
 
-	spcm = snd_sof_find_spcm_dai(sdev, rtd);
+	spcm = snd_sof_find_spcm_dai(sof_audio, rtd);
 	if (!spcm)
 		return -EINVAL;
 
-	dev_dbg(sdev->dev, "pcm: close stream %d dir %d\n", spcm->pcm.pcm_id,
-		substream->stream);
+	dev_dbg(component->dev, "pcm: close stream %d dir %d\n",
+		spcm->pcm.pcm_id, substream->stream);
 
 	err = snd_sof_pcm_platform_close(sdev, substream);
 	if (err < 0) {
-		dev_err(sdev->dev, "error: pcm close failed %d\n",
+		dev_err(component->dev, "error: pcm close failed %d\n",
 			err);
 		/*
 		 * keep going, no point in preventing the close
@@ -549,21 +569,22 @@ static int sof_pcm_close(struct snd_soc_component *component,
 static int sof_pcm_new(struct snd_soc_component *component,
 		       struct snd_soc_pcm_runtime *rtd)
 {
-	struct snd_sof_dev *sdev = dev_get_drvdata(component->dev->parent);
+	struct sof_audio_dev *sof_audio =
+		sof_get_client_data(component->dev);
 	struct snd_sof_pcm *spcm;
 	struct snd_pcm *pcm = rtd->pcm;
 	struct snd_soc_tplg_stream_caps *caps;
 	int stream = SNDRV_PCM_STREAM_PLAYBACK;
 
 	/* find SOF PCM for this RTD */
-	spcm = snd_sof_find_spcm_dai(sdev, rtd);
+	spcm = snd_sof_find_spcm_dai(sof_audio, rtd);
 	if (!spcm) {
-		dev_warn(sdev->dev, "warn: can't find PCM with DAI ID %d\n",
+		dev_warn(component->dev, "warn: can't find PCM with DAI ID %d\n",
 			 rtd->dai_link->id);
 		return 0;
 	}
 
-	dev_dbg(sdev->dev, "creating new PCM %s\n", spcm->pcm.pcm_name);
+	dev_dbg(component->dev, "creating new PCM %s\n", spcm->pcm.pcm_name);
 
 	/* do we need to pre-allocate playback audio buffer pages */
 	if (!spcm->pcm.playback)
@@ -572,11 +593,13 @@ static int sof_pcm_new(struct snd_soc_component *component,
 	caps = &spcm->pcm.caps[stream];
 
 	/* pre-allocate playback audio buffer pages */
-	dev_dbg(sdev->dev, "spcm: allocate %s playback DMA buffer size 0x%x max 0x%x\n",
+	dev_dbg(component->dev,
+		"spcm: allocate %s playback DMA buffer size 0x%x max 0x%x\n",
 		caps->name, caps->buffer_size_min, caps->buffer_size_max);
 
 	snd_pcm_lib_preallocate_pages(pcm->streams[stream].substream,
-				      SNDRV_DMA_TYPE_DEV_SG, sdev->dev,
+				      SNDRV_DMA_TYPE_DEV_SG,
+				      component->dev->parent,
 				      le32_to_cpu(caps->buffer_size_min),
 				      le32_to_cpu(caps->buffer_size_max));
 capture:
@@ -589,11 +612,13 @@ capture:
 	caps = &spcm->pcm.caps[stream];
 
 	/* pre-allocate capture audio buffer pages */
-	dev_dbg(sdev->dev, "spcm: allocate %s capture DMA buffer size 0x%x max 0x%x\n",
+	dev_dbg(component->dev,
+		"spcm: allocate %s capture DMA buffer size 0x%x max 0x%x\n",
 		caps->name, caps->buffer_size_min, caps->buffer_size_max);
 
 	snd_pcm_lib_preallocate_pages(pcm->streams[stream].substream,
-				      SNDRV_DMA_TYPE_DEV_SG, sdev->dev,
+				      SNDRV_DMA_TYPE_DEV_SG,
+				      component->dev->parent,
 				      le32_to_cpu(caps->buffer_size_min),
 				      le32_to_cpu(caps->buffer_size_max));
 
@@ -612,12 +637,14 @@ static int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 	struct snd_soc_component *component =
 		snd_soc_rtdcom_lookup(rtd, DRV_NAME);
 	struct snd_sof_dev *sdev = dev_get_drvdata(component->dev->parent);
-	struct snd_sof_dai *dai =
-		snd_sof_find_dai(sdev, (char *)rtd->dai_link->name);
+	struct snd_sof_dai *dai;
+
+	dai = snd_sof_find_dai(component, (char *)rtd->dai_link->name);
 
 	/* no topology exists for this BE, try a common configuration */
 	if (!dai) {
-		dev_warn(sdev->dev, "warning: no topology found for BE DAI %s config\n",
+		dev_warn(component->dev,
+			 "warning: no topology found for BE DAI %s config\n",
 			 rtd->dai_link->name);
 
 		/*  set 48k, stereo, 16bits by default */
@@ -659,9 +686,9 @@ static int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 		channels->min = dai->dai_config->ssp.tdm_slots;
 		channels->max = dai->dai_config->ssp.tdm_slots;
 
-		dev_dbg(sdev->dev,
+		dev_dbg(component->dev,
 			"rate_min: %d rate_max: %d\n", rate->min, rate->max);
-		dev_dbg(sdev->dev,
+		dev_dbg(component->dev,
 			"channels_min: %d channels_max: %d\n",
 			channels->min, channels->max);
 
@@ -669,7 +696,7 @@ static int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 	case SOF_DAI_INTEL_DMIC:
 		/* DMIC only supports 16 or 32 bit formats */
 		if (dai->comp_dai.config.frame_fmt == SOF_IPC_FRAME_S24_4LE) {
-			dev_err(sdev->dev,
+			dev_err(component->dev,
 				"error: invalid fmt %d for DAI type %d\n",
 				dai->comp_dai.config.frame_fmt,
 				dai->dai_config->type);
@@ -690,7 +717,7 @@ static int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 			channels->min, channels->max);
 		break;
 	default:
-		dev_err(sdev->dev, "error: invalid DAI type %d\n",
+		dev_err(component->dev, "error: invalid DAI type %d\n",
 			dai->dai_config->type);
 		break;
 	}
@@ -701,34 +728,39 @@ static int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 static int sof_pcm_probe(struct snd_soc_component *component)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(component->dev->parent);
+	struct sof_audio_dev *sof_audio =
+		sof_get_client_data(component->dev);
 	struct snd_sof_pdata *plat_data = sdev->pdata;
 	const char *tplg_filename;
 	int ret;
 
 	/* load the default topology */
-	sdev->component = component;
-
-	tplg_filename = devm_kasprintf(sdev->dev, GFP_KERNEL,
-				       "%s/%s",
-				       plat_data->tplg_filename_prefix,
-				       plat_data->tplg_filename);
+	sof_audio->component = component;
+	tplg_filename = kasprintf(GFP_KERNEL, "%s/%s",
+				  plat_data->tplg_filename_prefix,
+				  plat_data->tplg_filename);
 	if (!tplg_filename)
 		return -ENOMEM;
 
-	ret = snd_sof_load_topology(sdev, tplg_filename);
+	ret = snd_sof_load_topology(component, tplg_filename);
 	if (ret < 0) {
-		dev_err(sdev->dev, "error: failed to load DSP topology %d\n",
+		dev_err(component->dev, "error: failed to load DSP topology %d\n",
 			ret);
 		return ret;
 	}
 
 	/*
 	 * Some platforms in SOF, ex: BYT, may not have their platform PM
-	 * callbacks set. Increment the usage count so as to
-	 * prevent the device from entering runtime suspend.
+	 * callbacks set. Increment the usage count for both the comp device
+	 * and the SOF device so as to prevent the device from entering runtime
+	 * suspend.
 	 */
-	if (!sof_ops(sdev)->runtime_suspend || !sof_ops(sdev)->runtime_resume)
+	if (!sof_ops(sdev)->runtime_suspend || !sof_ops(sdev)->runtime_resume) {
 		pm_runtime_get_noresume(sdev->dev);
+		pm_runtime_get_noresume(component->dev);
+	}
+
+	kfree(tplg_filename);
 
 	return ret;
 }
@@ -739,10 +771,10 @@ static void sof_pcm_remove(struct snd_soc_component *component)
 	snd_soc_tplg_component_remove(component, SND_SOC_TPLG_INDEX_ALL);
 }
 
-void snd_sof_new_platform_drv(struct snd_sof_dev *sdev)
+void snd_sof_new_platform_drv(struct sof_audio_dev *sof_audio,
+			      struct snd_sof_pdata *plat_data)
 {
-	struct snd_soc_component_driver *pd = &sdev->plat_drv;
-	struct snd_sof_pdata *plat_data = sdev->pdata;
+	struct snd_soc_component_driver *pd = &sof_audio->plat_drv;
 	const char *drv_name;
 
 	drv_name = plat_data->machine->drv_name;

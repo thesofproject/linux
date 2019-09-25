@@ -18,6 +18,9 @@
 #include <sound/hda_register.h>
 #include <sound/pcm_params.h>
 #include "../ops.h"
+#include "../sof-client.h"
+#include "../sof-priv.h"
+#include "../sof-audio.h"
 #include "hda.h"
 
 #define SDnFMT_BASE(x)	((x) << 14)
@@ -147,12 +150,14 @@ snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_sof_dev *sdev,
 				      struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_component *scomp = snd_soc_rtdcom_lookup(rtd, DRV_NAME);
+	struct sof_audio_dev *sof_audio = sof_get_client_data(scomp->dev);
 	struct hdac_stream *hstream = substream->runtime->private_data;
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct snd_sof_pcm *spcm;
 	snd_pcm_uframes_t pos;
 
-	spcm = snd_sof_find_spcm_dai(sdev, rtd);
+	spcm = snd_sof_find_spcm_dai(sof_audio, rtd);
 	if (!spcm) {
 		dev_warn_ratelimited(sdev->dev, "warn: can't find PCM with DAI ID %d\n",
 				     rtd->dai_link->id);
@@ -205,7 +210,7 @@ snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_sof_dev *sdev,
 found:
 	pos = bytes_to_frames(substream->runtime, pos);
 
-	dev_vdbg(sdev->dev, "PCM: stream %d dir %d position %lu\n",
+	dev_vdbg(scomp->dev, "PCM: stream %d dir %d position %lu\n",
 		 hstream->index, substream->stream, pos);
 	return pos;
 }

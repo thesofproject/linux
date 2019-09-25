@@ -22,9 +22,7 @@ struct snd_sof_dsp_ops;
  */
 struct snd_sof_pdata {
 	const struct firmware *fw;
-	const char *drv_name;
 	const char *name;
-	const char *platform;
 
 	struct device *dev;
 
@@ -40,15 +38,9 @@ struct snd_sof_pdata {
 	/* descriptor */
 	const struct sof_dev_desc *desc;
 
-	/* firmware and topology filenames */
+	/* firmware filename */
 	const char *fw_filename_prefix;
 	const char *fw_filename;
-	const char *tplg_filename_prefix;
-	const char *tplg_filename;
-
-	/* machine */
-	struct platform_device *pdev_mach;
-	const struct snd_soc_acpi_mach *machine;
 
 	void *hw_pdata;
 };

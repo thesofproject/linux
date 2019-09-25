@@ -19,6 +19,7 @@
 #include <sound/hdaudio_ext.h>
 #include <sound/hda_register.h>
 #include <sound/sof.h>
+#include "../sof-audio.h"
 #include "../ops.h"
 #include "hda.h"
 
