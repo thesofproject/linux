@@ -216,6 +216,7 @@ struct snd_soc_component {
 #endif
 
 	u8 hw_paramed;
+	u8 trigger_started; /* trigger started count */
 
 	/* bit field */
 	unsigned int suspended:1; /* is in suspend PM state */
