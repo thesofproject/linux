@@ -412,23 +412,51 @@ int snd_soc_pcm_dai_prepare(struct snd_pcm_substream *substream)
 	return 0;
 }
 
+static int soc_dai_trigger(struct snd_soc_dai *dai,
+			   struct snd_pcm_substream *substream, int cmd)
+{
+	if (dai->driver->ops &&
+	    dai->driver->ops->trigger) {
+		int ret = dai->driver->ops->trigger(substream, cmd, dai);
+		if (ret < 0)
+			return soc_dai_err(dai, ret);
+	}
+
+	return 0;
+}
+
 int snd_soc_pcm_dai_trigger(struct snd_pcm_substream *substream,
 			    int cmd)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_dai *dai;
-	int i, ret;
+	int i, ret = 0;
 
-	for_each_rtd_dais(rtd, i, dai) {
-		if (dai->driver->ops &&
-		    dai->driver->ops->trigger) {
-			ret = dai->driver->ops->trigger(substream, cmd, dai);
+	switch (cmd) {
+	case SNDRV_PCM_TRIGGER_START:
+	case SNDRV_PCM_TRIGGER_RESUME:
+	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+		for_each_rtd_dais(rtd, i, dai) {
+			ret = soc_dai_trigger(dai, substream, cmd);
 			if (ret < 0)
-				return soc_dai_err(dai, ret);
+				break;
+			dai->trigger_started++;
+		}
+		break;
+	case SNDRV_PCM_TRIGGER_STOP:
+	case SNDRV_PCM_TRIGGER_SUSPEND:
+	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+		for_each_rtd_dais(rtd, i, dai) {
+			if (dai->trigger_started) {
+				int r = soc_dai_trigger(dai, substream, cmd);
+				if (r < 0)
+					ret = r;
+				dai->trigger_started--;
+			}
 		}
 	}
 
-	return 0;
+	return ret;
 }
 
 int snd_soc_pcm_dai_bespoke_trigger(struct snd_pcm_substream *substream,

@@ -329,6 +329,7 @@ struct snd_soc_dai {
 
 	u8 started;
 	u8 hw_paramed;
+	u8 trigger_started;
 
 	struct snd_soc_dapm_widget *playback_widget;
 	struct snd_soc_dapm_widget *capture_widget;
