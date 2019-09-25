@@ -399,23 +399,10 @@ io_error:
 	pr_err_ratelimited("IO error in %s, ret %d\n", __func__, ret);
 }
 
-static int rt711_set_jack_detect(struct snd_soc_component *component,
-	struct snd_soc_jack *hs_jack, void *data)
+static int rt711_jack_init(struct rt711_priv *rt711)
 {
-	struct rt711_priv *rt711 = snd_soc_component_get_drvdata(component);
-	struct snd_soc_dapm_context *dapm =
-		snd_soc_component_get_dapm(component);
-
-	if (!rt711->hw_init) {
-		dev_dbg(&rt711->slave->dev, "%s hw_init not ready yet\n", __func__);
-		return -EAGAIN;
-	}
 
 	mutex_lock(&rt711->calibrate_mutex);
-	/* power on */
-	if (dapm->bias_level <= SND_SOC_BIAS_STANDBY)
-		regmap_write(rt711->regmap,
-			RT711_SET_AUDIO_POWER_STATE, AC_PWRST_D0);
 
 	/* unsolicited response & IRQ control */
 	regmap_write(rt711->regmap, RT711_SET_MIC2_UNSOLICITED_ENABLE, 0x82);
@@ -426,19 +413,39 @@ static int rt711_set_jack_detect(struct snd_soc_component *component,
 	rt711_index_write(rt711->regmap, RT711_VENDOR_REG,
 		0x19, 0x2e11);
 
-	/* power off */
-	if (dapm->bias_level <= SND_SOC_BIAS_STANDBY)
-		regmap_write(rt711->regmap,
-			RT711_SET_AUDIO_POWER_STATE, AC_PWRST_D3);
 	mutex_unlock(&rt711->calibrate_mutex);
-
-	rt711->hs_jack = hs_jack;
-
-	dev_dbg(&rt711->slave->dev, "in %s...\n", __func__);
 
 	mod_delayed_work(system_power_efficient_wq,
 			   &rt711->jack_detect_work, msecs_to_jiffies(250));
 
+}
+
+static int rt711_set_jack_detect(struct snd_soc_component *component,
+	struct snd_soc_jack *hs_jack, void *data)
+{
+	struct rt711_priv *rt711 = snd_soc_component_get_drvdata(component);
+	struct snd_soc_dapm_context *dapm =
+		snd_soc_component_get_dapm(component);
+
+	rt711->hs_jack = hs_jack;
+
+	if (!rt711->hw_init) {
+		dev_warn(&rt711->slave->dev, "%s hw_init not ready yet\n", __func__);
+		return 0;
+	}
+
+	dev_dbg(&rt711->slave->dev, "in %s...\n", __func__);
+	/* power on */
+	if (dapm->bias_level <= SND_SOC_BIAS_STANDBY)
+		regmap_write(rt711->regmap,
+			RT711_SET_AUDIO_POWER_STATE, AC_PWRST_D0);
+
+	rt711_jack_init(rt711);
+
+	/* power off */
+	if (dapm->bias_level <= SND_SOC_BIAS_STANDBY)
+		regmap_write(rt711->regmap,
+			RT711_SET_AUDIO_POWER_STATE, AC_PWRST_D3);
 	return 0;
 }
 
@@ -1238,13 +1245,17 @@ int rt711_io_init(struct device *dev, struct sdw_slave *slave)
 	rt711_index_write(rt711->regmap, RT711_VENDOR_REG,
 		RT711_INLINE_CMD_CTL, 0xd249);
 
-	/* Finish Initial Settings, set power to D3 */
-	regmap_write(rt711->regmap, RT711_SET_AUDIO_POWER_STATE, AC_PWRST_D3);
-
 	INIT_DELAYED_WORK(&rt711->jack_detect_work,
 			rt711_jack_detect_handler);
 	INIT_DELAYED_WORK(&rt711->jack_btn_check_work,
 			rt711_btn_check_handler);
+
+	if (rt711->hs_jack)
+		rt711_jack_init(rt711);
+
+	/* Finish Initial Settings, set power to D3 */
+	regmap_write(rt711->regmap, RT711_SET_AUDIO_POWER_STATE, AC_PWRST_D3);
+
 	mutex_init(&rt711->calibrate_mutex);
 	INIT_WORK(&rt711->calibration_work, rt711_calibration_work);
 	schedule_work(&rt711->calibration_work);
