@@ -112,10 +112,9 @@ void snd_soc_link_hw_free(struct snd_pcm_substream *substream)
 	rtd->hw_paramed = 0;
 }
 
-int snd_soc_link_trigger(struct snd_pcm_substream *substream, int cmd)
+static int soc_link_trigger(struct snd_soc_pcm_runtime *rtd,
+			    struct snd_pcm_substream *substream, int cmd)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-
 	if (rtd->dai_link->ops &&
 	    rtd->dai_link->ops->trigger) {
 		int ret = rtd->dai_link->ops->trigger(substream, cmd);
@@ -124,6 +123,30 @@ int snd_soc_link_trigger(struct snd_pcm_substream *substream, int cmd)
 	}
 
 	return 0;
+}
+
+int snd_soc_link_trigger(struct snd_pcm_substream *substream, int cmd)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	int ret = 0;
+
+	switch (cmd) {
+	case SNDRV_PCM_TRIGGER_START:
+	case SNDRV_PCM_TRIGGER_RESUME:
+	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+		ret = soc_link_trigger(rtd, substream, cmd);
+		if (ret == 0)
+			rtd->trigger_started = 1;
+		break;
+	case SNDRV_PCM_TRIGGER_STOP:
+	case SNDRV_PCM_TRIGGER_SUSPEND:
+	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+		if (rtd->trigger_started)
+			ret = soc_link_trigger(rtd, substream, cmd);
+		rtd->trigger_started = 0;
+	}
+
+	return ret;
 }
 
 int snd_soc_link_compr_startup(struct snd_soc_pcm_runtime *rtd,
