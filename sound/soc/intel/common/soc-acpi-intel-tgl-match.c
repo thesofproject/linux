@@ -12,9 +12,10 @@
 struct snd_soc_acpi_mach snd_soc_acpi_intel_tgl_machines[] = {
 	{
 		.id = "10EC1308",
-		.drv_name = "tgl_rt1308",
+		.drv_name = "rt711_rt1308",
+		.link_mask = 0x1, /* RT711 on SoundWire link0 */
 		.sof_fw_filename = "sof-tgl.ri",
-		.sof_tplg_filename = "sof-tgl-rt1308.tplg",
+		.sof_tplg_filename = "sof-tgl-rt711-rt1308.tplg",
 	},
 	{},
 };
