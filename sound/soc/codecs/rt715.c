@@ -311,7 +311,8 @@ static int rt715_mux_get(struct snd_kcontrol *kcontrol,
 	struct snd_soc_component *component =
 		snd_soc_dapm_kcontrol_component(kcontrol);
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
-	unsigned int reg, val, ret;
+	unsigned int reg, val;
+	int ret;
 
 	/* nid = e->reg, vid = 0xf01 */
 	reg = RT715_VERB_GET_CONNECT_SEL | e->reg;
@@ -348,8 +349,9 @@ static int rt715_mux_put(struct snd_kcontrol *kcontrol,
 				snd_soc_dapm_kcontrol_dapm(kcontrol);
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
 	unsigned int *item = ucontrol->value.enumerated.item;
-	unsigned int val, val2, change, reg, ret;
+	unsigned int val, val2, change, reg;
 	struct snd_soc_dapm_update update;
+	int ret;
 
 	if (item[0] >= e->items)
 		return -EINVAL;
