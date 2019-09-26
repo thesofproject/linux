@@ -8,13 +8,20 @@
 #include <sound/soc.h>
 #include <sound/jack.h>
 
-#define soc_card_err(dai, ret) _soc_card_err(dai, __func__, ret)
-static inline int _soc_card_err(struct snd_soc_card *card,
+#define soc_card_ret(dai, ret) _soc_card_ret(dai, __func__, ret)
+static inline int _soc_card_ret(struct snd_soc_card *card,
 				const char *func, int ret)
 {
-	dev_err(card->dev,
-		"ASoC: error at %s on %s: %d\n",
-		func, card->name, ret);
+	switch(ret) {
+	case -EPROBE_DEFER:
+	case -ENOTSUPP:
+	case 0:
+		break;
+	default:
+		dev_err(card->dev,
+			"ASoC: error at %s() on %s: %d\n",
+			func, card->name, ret);
+	}
 
 	return ret;
 }
@@ -64,57 +71,53 @@ int snd_soc_card_jack_new(struct snd_soc_card *card, const char *id, int type,
 
 	ret = snd_jack_new(card->snd_card, id, type, &jack->jack, false, false);
 	if (ret)
-		return soc_card_err(card, ret);
+		goto out;
 
 	if (num_pins)
-		return snd_soc_jack_add_pins(jack, num_pins, pins);
-
-	return 0;
+		ret = snd_soc_jack_add_pins(jack, num_pins, pins);
+out:
+	return soc_card_ret(card, ret);
 }
 EXPORT_SYMBOL_GPL(snd_soc_card_jack_new);
 
 int snd_soc_card_suspend_pre(struct snd_soc_card *card)
 {
-	if (card->suspend_pre) {
-		int ret = card->suspend_pre(card);
-		if (ret < 0)
-			return soc_card_err(card, ret);
-	}
+	int ret = 0;
 
-	return 0;
+	if (card->suspend_pre)
+		ret = card->suspend_pre(card);
+
+	return soc_card_ret(card, ret);
 }
 
 int snd_soc_card_suspend_post(struct snd_soc_card *card)
 {
-	if (card->suspend_post) {
-		int ret = card->suspend_post(card);
-		if (ret < 0)
-			return soc_card_err(card, ret);
-	}
+	int ret = 0;
 
-	return 0;
+	if (card->suspend_post)
+		ret = card->suspend_post(card);
+
+	return soc_card_ret(card, ret);
 }
 
 int snd_soc_card_resume_pre(struct snd_soc_card *card)
 {
-	if (card->resume_pre) {
-		int ret = card->resume_pre(card);
-		if (ret < 0)
-			return soc_card_err(card, ret);
-	}
+	int ret = 0;
 
-	return 0;
+	if (card->resume_pre)
+		ret = card->resume_pre(card);
+
+	return soc_card_ret(card, ret);
 }
 
 int snd_soc_card_resume_post(struct snd_soc_card *card)
 {
-	if (card->resume_post) {
-		int ret = card->resume_post(card);
-		if (ret < 0)
-			return soc_card_err(card, ret);
-	}
+	int ret = 0;
 
-	return 0;
+	if (card->resume_post)
+		ret = card->resume_post(card);
+
+	return soc_card_ret(card, ret);
 }
 
 int snd_soc_card_probe(struct snd_soc_card *card)
@@ -122,7 +125,7 @@ int snd_soc_card_probe(struct snd_soc_card *card)
 	if (card->probe) {
 		int ret = card->probe(card);
 		if (ret < 0)
-			return soc_card_err(card, ret);
+			return soc_card_ret(card, ret);
 
 		/*
 		 * set probed here
@@ -141,7 +144,7 @@ int snd_soc_card_late_probe(struct snd_soc_card *card)
 	if (card->late_probe) {
 		int ret = card->late_probe(card);
 		if (ret < 0)
-			return soc_card_err(card, ret);
+			return soc_card_ret(card, ret);
 	}
 
 	/*
@@ -165,48 +168,42 @@ int snd_soc_card_remove(struct snd_soc_card *card)
 
 	card->probed = 0;
 
-	if (ret < 0)
-		soc_card_err(card, ret);
-
-	return ret;
+	return soc_card_ret(card, ret);
 }
 
 int snd_soc_card_set_bias_level(struct snd_soc_card *card,
 				struct snd_soc_dapm_context *dapm,
 				enum snd_soc_bias_level level)
 {
-	if (card->set_bias_level) {
-		int ret = card->set_bias_level(card, dapm, level);
-		if (ret < 0)
-			return soc_card_err(card, ret);
-	}
+	int ret = 0;
 
-	return 0;
+	if (card->set_bias_level)
+		ret = card->set_bias_level(card, dapm, level);
+
+	return soc_card_ret(card, ret);
 }
 
 int snd_soc_card_set_bias_level_post(struct snd_soc_card *card,
 				     struct snd_soc_dapm_context *dapm,
 				     enum snd_soc_bias_level level)
 {
-	if (card->set_bias_level_post) {
-		int ret = card->set_bias_level_post(card, dapm, level);
-		if (ret < 0)
-			return soc_card_err(card, ret);
-	}
+	int ret = 0;
 
-	return 0;
+	if (card->set_bias_level_post)
+		ret = card->set_bias_level_post(card, dapm, level);
+
+	return soc_card_ret(card, ret);
 }
 
 int snd_soc_card_add_dai_link(struct snd_soc_card *card,
 			      struct snd_soc_dai_link *dai_link)
 {
-	if (card->add_dai_link) {
-		int ret = card->add_dai_link(card, dai_link);
-		if (ret < 0)
-			return soc_card_err(card, ret);
-	}
+	int ret = 0;
 
-	return 0;
+	if (card->add_dai_link)
+		ret = card->add_dai_link(card, dai_link);
+
+	return soc_card_ret(card, ret);
 }
 EXPORT_SYMBOL_GPL(snd_soc_card_add_dai_link);
 
