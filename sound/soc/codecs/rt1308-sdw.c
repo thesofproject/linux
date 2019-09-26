@@ -183,6 +183,27 @@ static int rt1308_io_init(struct device *dev, struct sdw_slave *slave)
 	if (ret < 0)
 		goto _io_init_err_;
 
+	/*
+	 * PM runtime is only enabled when a Slave reports as Attached
+	 */
+	if (!rt1308->first_init) {
+		/* set autosuspend parameters */
+		pm_runtime_set_autosuspend_delay(&slave->dev, 3000);
+		pm_runtime_use_autosuspend(&slave->dev);
+
+		/* update count of parent 'active' children */
+		pm_runtime_set_active(&slave->dev);
+
+		/* make sure the device does not suspend immediately */
+		pm_runtime_mark_last_busy(&slave->dev);
+
+		pm_runtime_enable(&slave->dev);
+
+		rt1308->first_init = true;
+	}
+
+	pm_runtime_get_noresume(&slave->dev);
+
 	/* sw reset */
 	regmap_write(rt1308->regmap, RT1308_SDW_RESET, 0);
 
@@ -227,11 +248,8 @@ static int rt1308_io_init(struct device *dev, struct sdw_slave *slave)
 	/* Mark Slave initialization complete */
 	rt1308->hw_init = true;
 
-	/* Enable Runtime PM */
-	pm_runtime_set_autosuspend_delay(&slave->dev, 3000);
-	pm_runtime_use_autosuspend(&slave->dev);
 	pm_runtime_mark_last_busy(&slave->dev);
-	pm_runtime_enable(&slave->dev);
+	pm_runtime_put_autosuspend(&slave->dev);
 
 	dev_dbg(&slave->dev, "%s hw_init complete\n", __func__);
 
@@ -590,6 +608,7 @@ static int rt1308_sdw_init(struct device *dev, struct regmap *regmap,
 	 * HW init will be performed when device reports present
 	 */
 	rt1308->hw_init = false;
+	rt1308->first_init = false;
 
 	ret =  devm_snd_soc_register_component(dev,
 					  &soc_component_sdw_rt1308,
@@ -615,10 +634,6 @@ static int rt1308_sdw_probe(struct sdw_slave *slave,
 		return -EINVAL;
 
 	rt1308_sdw_init(&slave->dev, regmap, slave);
-
-	/* Perform IO operations only if slave is in ATTACHED state */
-	if (slave->status == SDW_SLAVE_ATTACHED)
-		rt1308_io_init(&slave->dev, slave);
 
 	return 0;
 }
