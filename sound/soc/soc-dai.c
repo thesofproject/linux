@@ -9,13 +9,20 @@
 #include <sound/soc.h>
 #include <sound/soc-dai.h>
 
-#define soc_dai_err(dai, ret) _soc_dai_err(dai, __func__, ret)
-static inline int _soc_dai_err(struct snd_soc_dai *dai,
+#define soc_dai_ret(dai, ret) _soc_dai_ret(dai, __func__, ret)
+static inline int _soc_dai_ret(struct snd_soc_dai *dai,
 			       const char *func, int ret)
 {
-	dev_err(dai->dev,
-		"ASoC: error at %s on %s: %d\n",
-		func, dai->name, ret);
+	switch(ret) {
+	case -EPROBE_DEFER:
+	case -ENOTSUPP:
+	case 0:
+		break;
+	default:
+		dev_err(dai->dev,
+			"ASoC: error at %s() on %s: %d\n",
+			func, dai->name, ret);
+	}
 
 	return ret;
 }
@@ -32,12 +39,15 @@ static inline int _soc_dai_err(struct snd_soc_dai *dai,
 int snd_soc_dai_set_sysclk(struct snd_soc_dai *dai, int clk_id,
 			   unsigned int freq, int dir)
 {
+	int ret;
+
 	if (dai->driver->ops &&
 	    dai->driver->ops->set_sysclk)
-		return dai->driver->ops->set_sysclk(dai, clk_id, freq, dir);
-
-	return snd_soc_component_set_sysclk(dai->component, clk_id, 0,
-					    freq, dir);
+		ret = dai->driver->ops->set_sysclk(dai, clk_id, freq, dir);
+	else
+		ret = snd_soc_component_set_sysclk(dai->component, clk_id, 0,
+						   freq, dir);
+	return soc_dai_ret(dai, ret);
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_set_sysclk);
 
@@ -54,11 +64,13 @@ EXPORT_SYMBOL_GPL(snd_soc_dai_set_sysclk);
 int snd_soc_dai_set_clkdiv(struct snd_soc_dai *dai,
 			   int div_id, int div)
 {
+	int ret = -EINVAL;
+
 	if (dai->driver->ops &&
 	    dai->driver->ops->set_clkdiv)
-		return dai->driver->ops->set_clkdiv(dai, div_id, div);
-	else
-		return soc_dai_err(dai, -EINVAL);
+		ret = dai->driver->ops->set_clkdiv(dai, div_id, div);
+
+	return soc_dai_ret(dai, ret);
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_set_clkdiv);
 
@@ -75,13 +87,17 @@ EXPORT_SYMBOL_GPL(snd_soc_dai_set_clkdiv);
 int snd_soc_dai_set_pll(struct snd_soc_dai *dai, int pll_id, int source,
 			unsigned int freq_in, unsigned int freq_out)
 {
+	int ret;
+
 	if (dai->driver->ops &&
 	    dai->driver->ops->set_pll)
-		return dai->driver->ops->set_pll(dai, pll_id, source,
-						 freq_in, freq_out);
+		ret = dai->driver->ops->set_pll(dai, pll_id, source,
+						freq_in, freq_out);
+	else
+		ret = snd_soc_component_set_pll(dai->component, pll_id, source,
+						freq_in, freq_out);
 
-	return snd_soc_component_set_pll(dai->component, pll_id, source,
-					 freq_in, freq_out);
+	return soc_dai_ret(dai, ret);
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_set_pll);
 
@@ -94,11 +110,13 @@ EXPORT_SYMBOL_GPL(snd_soc_dai_set_pll);
  */
 int snd_soc_dai_set_bclk_ratio(struct snd_soc_dai *dai, unsigned int ratio)
 {
+	int ret = -EINVAL;
+
 	if (dai->driver->ops &&
 	    dai->driver->ops->set_bclk_ratio)
-		return dai->driver->ops->set_bclk_ratio(dai, ratio);
-	else
-		return soc_dai_err(dai, -EINVAL);
+		ret = dai->driver->ops->set_bclk_ratio(dai, ratio);
+
+	return soc_dai_ret(dai, ret);
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_set_bclk_ratio);
 
@@ -111,10 +129,13 @@ EXPORT_SYMBOL_GPL(snd_soc_dai_set_bclk_ratio);
  */
 int snd_soc_dai_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 {
-	if (!dai->driver->ops ||
-	    !dai->driver->ops->set_fmt)
-		return -ENOTSUPP;
-	return dai->driver->ops->set_fmt(dai, fmt);
+	int ret = -ENOTSUPP;
+
+	if (dai->driver->ops &&
+	    dai->driver->ops->set_fmt)
+		ret = dai->driver->ops->set_fmt(dai, fmt);
+
+	return soc_dai_ret(dai, ret);
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_set_fmt);
 
@@ -169,22 +190,29 @@ int snd_soc_dai_set_tdm_slot(struct snd_soc_dai *dai,
 			     unsigned int tx_mask, unsigned int rx_mask,
 			     int slots, int slot_width)
 {
+	int ret;
+
 	if (dai->driver->ops &&
 	    dai->driver->ops->xlate_tdm_slot_mask)
-		dai->driver->ops->xlate_tdm_slot_mask(slots,
-						      &tx_mask, &rx_mask);
+		ret = dai->driver->ops->xlate_tdm_slot_mask(slots,
+							    &tx_mask, &rx_mask);
 	else
-		snd_soc_xlate_tdm_slot_mask(slots, &tx_mask, &rx_mask);
+		ret = snd_soc_xlate_tdm_slot_mask(slots, &tx_mask, &rx_mask);
+
+	if (ret < 0)
+		goto out;
 
 	dai->tx_mask = tx_mask;
 	dai->rx_mask = rx_mask;
 
+	ret = -ENOTSUPP;
+
 	if (dai->driver->ops &&
 	    dai->driver->ops->set_tdm_slot)
-		return dai->driver->ops->set_tdm_slot(dai, tx_mask, rx_mask,
+		ret = dai->driver->ops->set_tdm_slot(dai, tx_mask, rx_mask,
 						      slots, slot_width);
-	else
-		return -ENOTSUPP;
+out:
+	return soc_dai_ret(dai, ret);
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_set_tdm_slot);
 
@@ -204,12 +232,13 @@ int snd_soc_dai_set_channel_map(struct snd_soc_dai *dai,
 				unsigned int tx_num, unsigned int *tx_slot,
 				unsigned int rx_num, unsigned int *rx_slot)
 {
+	int ret = -ENOTSUPP;
+
 	if (dai->driver->ops &&
 	    dai->driver->ops->set_channel_map)
-		return dai->driver->ops->set_channel_map(dai, tx_num, tx_slot,
-							 rx_num, rx_slot);
-	else
-		return -ENOTSUPP;
+		ret = dai->driver->ops->set_channel_map(dai, tx_num, tx_slot,
+							rx_num, rx_slot);
+	return soc_dai_ret(dai, ret);
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_set_channel_map);
 
@@ -227,12 +256,14 @@ int snd_soc_dai_get_channel_map(struct snd_soc_dai *dai,
 				unsigned int *tx_num, unsigned int *tx_slot,
 				unsigned int *rx_num, unsigned int *rx_slot)
 {
+	int ret = -ENOTSUPP;
+
 	if (dai->driver->ops &&
 	    dai->driver->ops->get_channel_map)
-		return dai->driver->ops->get_channel_map(dai, tx_num, tx_slot,
-							 rx_num, rx_slot);
-	else
-		return -ENOTSUPP;
+		ret = dai->driver->ops->get_channel_map(dai, tx_num, tx_slot,
+							rx_num, rx_slot);
+
+	return soc_dai_ret(dai, ret);
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_get_channel_map);
 
@@ -245,11 +276,13 @@ EXPORT_SYMBOL_GPL(snd_soc_dai_get_channel_map);
  */
 int snd_soc_dai_set_tristate(struct snd_soc_dai *dai, int tristate)
 {
+	int ret = -EINVAL;
+
 	if (dai->driver->ops &&
 	    dai->driver->ops->set_tristate)
-		return dai->driver->ops->set_tristate(dai, tristate);
-	else
-		return -EINVAL;
+		ret = dai->driver->ops->set_tristate(dai, tristate);
+
+	return soc_dai_ret(dai, ret);
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_set_tristate);
 
@@ -264,11 +297,13 @@ EXPORT_SYMBOL_GPL(snd_soc_dai_set_tristate);
 int snd_soc_dai_digital_mute(struct snd_soc_dai *dai, int mute,
 			     int direction)
 {
+	int ret = -ENOTSUPP;
+
 	if (dai->driver->ops &&
 	    dai->driver->ops->mute_stream)
-		return dai->driver->ops->mute_stream(dai, mute, direction);
-	else
-		return -ENOTSUPP;
+		ret = dai->driver->ops->mute_stream(dai, mute, direction);
+
+	return soc_dai_ret(dai, ret);
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_digital_mute);
 
@@ -294,18 +329,18 @@ int snd_soc_dai_hw_params(struct snd_soc_dai *dai,
 	/* perform any topology hw_params fixups before DAI  */
 	ret = snd_soc_link_be_hw_params_fixup(rtd, params);
 	if (ret < 0)
-		return soc_dai_err(dai, ret);
+		goto end;
 
 	if (dai->driver->ops &&
 	    dai->driver->ops->hw_params) {
 		ret = dai->driver->ops->hw_params(substream, params, dai);
 		if (ret < 0)
-			return soc_dai_err(dai, ret);
+			goto end;
 	}
 
 	dai->hw_paramed++;
-
-	return 0;
+end:
+	return soc_dai_ret(dai, ret);
 }
 
 void snd_soc_dai_hw_free(struct snd_soc_dai *dai,
@@ -328,7 +363,7 @@ int snd_soc_dai_startup(struct snd_soc_dai *dai,
 	    dai->driver->ops->startup) {
 		int ret = dai->driver->ops->startup(substream, dai);
 		if (ret < 0)
-			return soc_dai_err(dai, ret);
+			return soc_dai_ret(dai, ret);
 	}
 
 	dai->started++;
@@ -354,7 +389,7 @@ int snd_soc_dai_probe(struct snd_soc_dai *dai)
 	if (dai->driver->probe) {
 		int ret = dai->driver->probe(dai);
 		if (ret < 0)
-			return soc_dai_err(dai, ret);
+			return soc_dai_ret(dai, ret);
 	}
 
 	dai->probed = 1;
@@ -378,9 +413,12 @@ int snd_soc_dai_remove(struct snd_soc_dai *dai)
 int snd_soc_dai_compress_new(struct snd_soc_dai *dai,
 			     struct snd_soc_pcm_runtime *rtd, int num)
 {
+	int ret = -ENOTSUPP;
+
 	if (dai->driver->compress_new)
-		return dai->driver->compress_new(rtd, num);
-	return -ENOTSUPP;
+		ret = dai->driver->compress_new(rtd, num);
+
+	return soc_dai_ret(dai, ret);
 }
 
 /*
@@ -405,7 +443,7 @@ int snd_soc_pcm_dai_new(struct snd_soc_pcm_runtime *rtd)
 		if (dai->driver->pcm_new) {
 			ret = dai->driver->pcm_new(rtd, dai);
 			if (ret < 0)
-				return soc_dai_err(dai, ret);
+				return soc_dai_ret(dai, ret);
 		}
 	}
 
@@ -423,7 +461,7 @@ int snd_soc_pcm_dai_prepare(struct snd_pcm_substream *substream)
 		    dai->driver->ops->prepare) {
 			ret = dai->driver->ops->prepare(substream, dai);
 			if (ret < 0)
-				return soc_dai_err(dai, ret);
+				return soc_dai_ret(dai, ret);
 		}
 	}
 
@@ -433,14 +471,13 @@ int snd_soc_pcm_dai_prepare(struct snd_pcm_substream *substream)
 static int soc_dai_trigger(struct snd_soc_dai *dai,
 			   struct snd_pcm_substream *substream, int cmd)
 {
-	if (dai->driver->ops &&
-	    dai->driver->ops->trigger) {
-		int ret = dai->driver->ops->trigger(substream, cmd, dai);
-		if (ret < 0)
-			return soc_dai_err(dai, ret);
-	}
+	int ret = 0;
 
-	return 0;
+	if (dai->driver->ops &&
+	    dai->driver->ops->trigger)
+		ret = dai->driver->ops->trigger(substream, cmd, dai);
+
+	return soc_dai_ret(dai, ret);
 }
 
 int snd_soc_pcm_dai_trigger(struct snd_pcm_substream *substream,
@@ -457,7 +494,7 @@ int snd_soc_pcm_dai_trigger(struct snd_pcm_substream *substream,
 		for_each_rtd_dais(rtd, i, dai) {
 			ret = soc_dai_trigger(dai, substream, cmd);
 			if (ret < 0)
-				break;
+				return soc_dai_ret(dai, ret);
 			dai->trigger_started++;
 		}
 		break;
@@ -468,7 +505,7 @@ int snd_soc_pcm_dai_trigger(struct snd_pcm_substream *substream,
 			if (dai->trigger_started) {
 				int r = soc_dai_trigger(dai, substream, cmd);
 				if (r < 0)
-					ret = r;
+					ret = soc_dai_ret(dai, r);
 				dai->trigger_started--;
 			}
 		}
@@ -490,7 +527,7 @@ int snd_soc_pcm_dai_bespoke_trigger(struct snd_pcm_substream *substream,
 			ret = dai->driver->ops->bespoke_trigger(substream,
 								cmd, dai);
 			if (ret < 0)
-				return soc_dai_err(dai, ret);
+				return soc_dai_ret(dai, ret);
 		}
 	}
 
@@ -517,14 +554,13 @@ snd_pcm_sframes_t snd_soc_pcm_dai_delay(struct snd_pcm_substream *substream)
 int snd_soc_dai_compr_startup(struct snd_soc_dai *dai,
 			      struct snd_compr_stream *cstream)
 {
-	if (dai->driver->cops &&
-	    dai->driver->cops->startup) {
-		int ret = dai->driver->cops->startup(cstream, dai);
-		if (ret < 0)
-			return soc_dai_err(dai, ret);
-	}
+	int ret = 0;
 
-	return 0;
+	if (dai->driver->cops &&
+	    dai->driver->cops->startup)
+		ret = dai->driver->cops->startup(cstream, dai);
+
+	return soc_dai_ret(dai, ret);
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_compr_startup);
 
@@ -540,14 +576,13 @@ EXPORT_SYMBOL_GPL(snd_soc_dai_compr_shutdown);
 int snd_soc_dai_compr_trigger(struct snd_soc_dai *dai,
 			      struct snd_compr_stream *cstream, int cmd)
 {
-	if (dai->driver->cops &&
-	    dai->driver->cops->trigger) {
-		int ret = dai->driver->cops->trigger(cstream, cmd, dai);
-		if (ret < 0)
-			return soc_dai_err(dai, ret);
-	}
+	int ret = 0;
 
-	return 0;
+	if (dai->driver->cops &&
+	    dai->driver->cops->trigger)
+		ret = dai->driver->cops->trigger(cstream, cmd, dai);
+
+	return soc_dai_ret(dai, ret);
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_compr_trigger);
 
@@ -555,14 +590,13 @@ int snd_soc_dai_compr_set_params(struct snd_soc_dai *dai,
 				 struct snd_compr_stream *cstream,
 				 struct snd_compr_params *params)
 {
-	if (dai->driver->cops &&
-	    dai->driver->cops->set_params) {
-		int ret = dai->driver->cops->set_params(cstream, params, dai);
-		if (ret < 0)
-			return soc_dai_err(dai, ret);
-	}
+	int ret = 0;
 
-	return 0;
+	if (dai->driver->cops &&
+	    dai->driver->cops->set_params)
+		ret = dai->driver->cops->set_params(cstream, params, dai);
+
+	return soc_dai_ret(dai, ret);
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_compr_set_params);
 
@@ -570,14 +604,13 @@ int snd_soc_dai_compr_get_params(struct snd_soc_dai *dai,
 				 struct snd_compr_stream *cstream,
 				 struct snd_codec *params)
 {
-	if (dai->driver->cops &&
-	    dai->driver->cops->get_params) {
-		int ret = dai->driver->cops->get_params(cstream, params, dai);
-		if (ret < 0)
-			return soc_dai_err(dai, ret);
-	}
+	int ret = 0;
 
-	return 0;
+	if (dai->driver->cops &&
+	    dai->driver->cops->get_params)
+		ret = dai->driver->cops->get_params(cstream, params, dai);
+
+	return soc_dai_ret(dai, ret);
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_compr_get_params);
 
@@ -585,14 +618,13 @@ int snd_soc_dai_compr_ack(struct snd_soc_dai *dai,
 			  struct snd_compr_stream *cstream,
 			  size_t bytes)
 {
-	if (dai->driver->cops &&
-	    dai->driver->cops->ack) {
-		int ret = dai->driver->cops->ack(cstream, bytes, dai);
-		if (ret < 0)
-			return soc_dai_err(dai, ret);
-	}
+	int ret = 0;
 
-	return 0;
+	if (dai->driver->cops &&
+	    dai->driver->cops->ack)
+		ret = dai->driver->cops->ack(cstream, bytes, dai);
+
+	return soc_dai_ret(dai, ret);
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_compr_ack);
 
@@ -600,14 +632,13 @@ int snd_soc_dai_compr_pointer(struct snd_soc_dai *dai,
 			      struct snd_compr_stream *cstream,
 			      struct snd_compr_tstamp *tstamp)
 {
-	if (dai->driver->cops &&
-	    dai->driver->cops->pointer) {
-		int ret = dai->driver->cops->pointer(cstream, tstamp, dai);
-		if (ret < 0)
-			return soc_dai_err(dai, ret);
-	}
+	int ret = 0;
 
-	return 0;
+	if (dai->driver->cops &&
+	    dai->driver->cops->pointer)
+		ret = dai->driver->cops->pointer(cstream, tstamp, dai);
+
+	return soc_dai_ret(dai, ret);
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_compr_pointer);
 
@@ -615,14 +646,13 @@ int snd_soc_dai_compr_set_metadata(struct snd_soc_dai *dai,
 				   struct snd_compr_stream *cstream,
 				   struct snd_compr_metadata *metadata)
 {
-	if (dai->driver->cops &&
-	    dai->driver->cops->set_metadata) {
-		int ret = dai->driver->cops->set_metadata(cstream, metadata, dai);
-		if (ret < 0)
-			return soc_dai_err(dai, ret);
-	}
+	int ret = 0;
 
-	return 0;
+	if (dai->driver->cops &&
+	    dai->driver->cops->set_metadata)
+		ret = dai->driver->cops->set_metadata(cstream, metadata, dai);
+
+	return soc_dai_ret(dai, ret);
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_compr_set_metadata);
 
@@ -630,13 +660,12 @@ int snd_soc_dai_compr_get_metadata(struct snd_soc_dai *dai,
 				   struct snd_compr_stream *cstream,
 				   struct snd_compr_metadata *metadata)
 {
-	if (dai->driver->cops &&
-	    dai->driver->cops->get_metadata) {
-		int ret = dai->driver->cops->get_metadata(cstream, metadata, dai);
-		if (ret < 0)
-			return soc_dai_err(dai, ret);
-	}
+	int ret = 0;
 
-	return 0;
+	if (dai->driver->cops &&
+	    dai->driver->cops->get_metadata)
+		ret = dai->driver->cops->get_metadata(cstream, metadata, dai);
+
+	return soc_dai_ret(dai, ret);
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_compr_get_metadata);
