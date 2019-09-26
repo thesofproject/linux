@@ -1107,6 +1107,7 @@ int rt700_init(struct device *dev, struct regmap *sdw_regmap,
 	 * HW init will be performed when device reports present
 	 */
 	rt700->hw_init = false;
+	rt700->first_init = false;
 
 	ret =  devm_snd_soc_register_component(dev,
 					  &soc_codec_dev_rt700,
@@ -1124,6 +1125,27 @@ int rt700_io_init(struct device *dev, struct sdw_slave *slave)
 
 	if (rt700->hw_init)
 		return 0;
+
+	/*
+	 * PM runtime is only enabled when a Slave reports as Attached
+	 */
+	if (!rt700->first_init) {
+		/* set autosuspend parameters */
+		pm_runtime_set_autosuspend_delay(&slave->dev, 3000);
+		pm_runtime_use_autosuspend(&slave->dev);
+
+		/* update count of parent 'active' children */
+		pm_runtime_set_active(&slave->dev);
+
+		/* make sure the device does not suspend immediately */
+		pm_runtime_mark_last_busy(&slave->dev);
+
+		pm_runtime_enable(&slave->dev);
+
+		rt700->first_init = true;
+	}
+
+	pm_runtime_get_noresume(&slave->dev);
 
 	/* reset */
 	regmap_write(rt700->regmap, 0xff01, 0x0000);
@@ -1184,11 +1206,8 @@ int rt700_io_init(struct device *dev, struct sdw_slave *slave)
 	/* Mark Slave initialization complete */
 	rt700->hw_init = true;
 
-	/* Enable Runtime PM */
-	pm_runtime_set_autosuspend_delay(&slave->dev, 3000);
-	pm_runtime_use_autosuspend(&slave->dev);
 	pm_runtime_mark_last_busy(&slave->dev);
-	pm_runtime_enable(&slave->dev);
+	pm_runtime_put_autosuspend(&slave->dev);
 
 	dev_dbg(&slave->dev, "%s hw_init complete\n", __func__);
 
