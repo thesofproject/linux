@@ -23,6 +23,7 @@
 #include <sound/sof.h>
 #include <sound/sof/xtensa.h>
 #include "../ops.h"
+#include "../sof-audio.h"
 #include "hda.h"
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
@@ -539,7 +540,8 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_FORCE_IPC_POSITION)
 	hdev->no_ipc_position = 0;
 #else
-	hdev->no_ipc_position = sof_ops(sdev)->pcm_pointer ? 1 : 0;
+	hdev->no_ipc_position =
+		(sdev->pdata->desc->audio_ops)->pcm_pointer ? 1 : 0;
 #endif
 
 	/* set up HDA base */

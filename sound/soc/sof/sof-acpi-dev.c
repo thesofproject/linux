@@ -48,6 +48,7 @@ static const struct sof_dev_desc sof_acpi_haswell_desc = {
 	.nocodec_fw_filename = "sof-hsw.ri",
 	.nocodec_tplg_filename = "sof-hsw-nocodec.tplg",
 	.ops = &sof_hsw_ops,
+	.audio_ops = &sof_hsw_audio_ops,
 	.arch_ops = &sof_xtensa_arch_ops
 };
 #endif
@@ -65,6 +66,7 @@ static const struct sof_dev_desc sof_acpi_broadwell_desc = {
 	.nocodec_fw_filename = "sof-bdw.ri",
 	.nocodec_tplg_filename = "sof-bdw-nocodec.tplg",
 	.ops = &sof_bdw_ops,
+	.audio_ops = &sof_bdw_audio_ops,
 	.arch_ops = &sof_xtensa_arch_ops
 };
 #endif
@@ -84,6 +86,7 @@ static const struct sof_dev_desc sof_acpi_baytrailcr_desc = {
 	.nocodec_fw_filename = "sof-byt.ri",
 	.nocodec_tplg_filename = "sof-byt-nocodec.tplg",
 	.ops = &sof_byt_ops,
+	.audio_ops = &sof_byt_audio_ops,
 	.arch_ops = &sof_xtensa_arch_ops
 };
 
@@ -99,6 +102,7 @@ static const struct sof_dev_desc sof_acpi_baytrail_desc = {
 	.nocodec_fw_filename = "sof-byt.ri",
 	.nocodec_tplg_filename = "sof-byt-nocodec.tplg",
 	.ops = &sof_byt_ops,
+	.audio_ops = &sof_byt_audio_ops,
 	.arch_ops = &sof_xtensa_arch_ops
 };
 
@@ -114,6 +118,7 @@ static const struct sof_dev_desc sof_acpi_cherrytrail_desc = {
 	.nocodec_fw_filename = "sof-cht.ri",
 	.nocodec_tplg_filename = "sof-cht-nocodec.tplg",
 	.ops = &sof_cht_ops,
+	.audio_ops = &sof_cht_audio_ops,
 	.arch_ops = &sof_xtensa_arch_ops
 };
 

@@ -530,9 +530,10 @@ int hda_dsp_stream_hw_params(struct snd_sof_dev *sdev,
 	return ret;
 }
 
-int hda_dsp_stream_hw_free(struct snd_sof_dev *sdev,
+int hda_dsp_stream_hw_free(struct snd_soc_component *scomp,
 			   struct snd_pcm_substream *substream)
 {
+	struct snd_sof_dev *sdev = dev_get_drvdata(scomp->dev->parent);
 	struct hdac_stream *stream = substream->runtime->private_data;
 	struct hdac_ext_stream *link_dev = container_of(stream,
 							struct hdac_ext_stream,

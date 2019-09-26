@@ -568,6 +568,12 @@ static int sof_audio_probe(struct platform_device *pdev)
 	INIT_LIST_HEAD(&sof_audio->dai_list);
 	INIT_LIST_HEAD(&sof_audio->route_list);
 
+	sof_audio->audio_ops = sdev->pdata->desc->audio_ops;
+
+	/* check for mandatory audio ops */
+	if (!sof_audio || !sof_audio->audio_ops->ipc_pcm_params)
+		return -EINVAL;
+
 	audio_client->client_data = sof_audio;
 
 	/* register for stream message rx */
@@ -595,8 +601,8 @@ static int sof_audio_probe(struct platform_device *pdev)
 
 	/* now register audio DSP platform driver and dai */
 	ret = devm_snd_soc_register_component(&pdev->dev, &sof_audio->plat_drv,
-					      sof_ops(sdev)->drv,
-					      sof_ops(sdev)->num_drv);
+					      sof_audio->audio_ops->drv,
+					      sof_audio->audio_ops->num_drv);
 	if (ret < 0) {
 		dev_err(&pdev->dev,
 			"error: failed to register DSP DAI driver %d\n", ret);

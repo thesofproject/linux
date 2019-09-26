@@ -19,6 +19,7 @@
 
 #include "../ops.h"
 #include "../sof-priv.h"
+#include "../sof-audio.h"
 
 struct intel_stream {
 	size_t posn_offset;
@@ -41,10 +42,11 @@ void intel_ipc_msg_data(struct snd_sof_dev *sdev,
 }
 EXPORT_SYMBOL(intel_ipc_msg_data);
 
-int intel_ipc_pcm_params(struct snd_sof_dev *sdev,
+int intel_ipc_pcm_params(struct snd_soc_component *scomp,
 			 struct snd_pcm_substream *substream,
 			 const struct sof_ipc_pcm_params_reply *reply)
 {
+	struct snd_sof_dev *sdev = dev_get_drvdata(scomp->dev->parent);
 	struct intel_stream *stream = substream->runtime->private_data;
 	size_t posn_offset = reply->posn_offset;
 
@@ -55,14 +57,14 @@ int intel_ipc_pcm_params(struct snd_sof_dev *sdev,
 
 	stream->posn_offset = sdev->stream_box.offset + posn_offset;
 
-	dev_dbg(sdev->dev, "pcm: stream dir %d, posn mailbox offset is %zu",
+	dev_dbg(scomp->dev, "pcm: stream dir %d, posn mailbox offset is %zu",
 		substream->stream, stream->posn_offset);
 
 	return 0;
 }
 EXPORT_SYMBOL(intel_ipc_pcm_params);
 
-int intel_pcm_open(struct snd_sof_dev *sdev,
+int intel_pcm_open(struct snd_soc_component *scomp,
 		   struct snd_pcm_substream *substream)
 {
 	struct intel_stream *stream = kmalloc(sizeof(*stream), GFP_KERNEL);
@@ -77,7 +79,7 @@ int intel_pcm_open(struct snd_sof_dev *sdev,
 }
 EXPORT_SYMBOL(intel_pcm_open);
 
-int intel_pcm_close(struct snd_sof_dev *sdev,
+int intel_pcm_close(struct snd_soc_component *scomp,
 		    struct snd_pcm_substream *substream)
 {
 	struct intel_stream *stream = substream->runtime->private_data;

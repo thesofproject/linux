@@ -83,11 +83,12 @@ static inline u32 get_bits(struct snd_sof_dev *sdev, int sample_bits)
 	}
 };
 
-int hda_dsp_pcm_hw_params(struct snd_sof_dev *sdev,
+int hda_dsp_pcm_hw_params(struct snd_soc_component *scomp,
 			  struct snd_pcm_substream *substream,
 			  struct snd_pcm_hw_params *params,
 			  struct sof_ipc_stream_params *ipc_params)
 {
+	struct snd_sof_dev *sdev = dev_get_drvdata(scomp->dev->parent);
 	struct hdac_stream *hstream = substream->runtime->private_data;
 	struct hdac_ext_stream *stream = stream_to_hdac_ext_stream(hstream);
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
@@ -113,7 +114,7 @@ int hda_dsp_pcm_hw_params(struct snd_sof_dev *sdev,
 
 	ret = hda_dsp_stream_hw_params(sdev, stream, dmab, params);
 	if (ret < 0) {
-		dev_err(sdev->dev, "error: hdac prepare failed: %x\n", ret);
+		dev_err(scomp->dev, "error: hdac prepare failed: %x\n", ret);
 		return ret;
 	}
 
@@ -137,21 +138,22 @@ int hda_dsp_pcm_hw_params(struct snd_sof_dev *sdev,
 	return 0;
 }
 
-int hda_dsp_pcm_trigger(struct snd_sof_dev *sdev,
+int hda_dsp_pcm_trigger(struct snd_soc_component *scomp,
 			struct snd_pcm_substream *substream, int cmd)
 {
+	struct snd_sof_dev *sdev = dev_get_drvdata(scomp->dev->parent);
 	struct hdac_stream *hstream = substream->runtime->private_data;
 	struct hdac_ext_stream *stream = stream_to_hdac_ext_stream(hstream);
 
 	return hda_dsp_stream_trigger(sdev, stream, cmd);
 }
 
-snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_sof_dev *sdev,
+snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_soc_component *scomp,
 				      struct snd_pcm_substream *substream)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_component *scomp = snd_soc_rtdcom_lookup(rtd, DRV_NAME);
 	struct sof_audio_dev *sof_audio = sof_get_client_data(scomp->dev);
+	struct snd_sof_dev *sdev = dev_get_drvdata(scomp->dev->parent);
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct hdac_stream *hstream = substream->runtime->private_data;
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct snd_sof_pcm *spcm;
@@ -159,7 +161,8 @@ snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_sof_dev *sdev,
 
 	spcm = snd_sof_find_spcm_dai(sof_audio, rtd);
 	if (!spcm) {
-		dev_warn_ratelimited(sdev->dev, "warn: can't find PCM with DAI ID %d\n",
+		dev_warn_ratelimited(scomp->dev,
+				     "warn: can't find PCM with DAI ID %d\n",
 				     rtd->dai_link->id);
 		return 0;
 	}
@@ -215,16 +218,17 @@ found:
 	return pos;
 }
 
-int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
+int hda_dsp_pcm_open(struct snd_soc_component *scomp,
 		     struct snd_pcm_substream *substream)
 {
+	struct snd_sof_dev *sdev = dev_get_drvdata(scomp->dev->parent);
 	struct hdac_ext_stream *dsp_stream;
 	int direction = substream->stream;
 
 	dsp_stream = hda_dsp_stream_get(sdev, direction);
 
 	if (!dsp_stream) {
-		dev_err(sdev->dev, "error: no stream available\n");
+		dev_err(scomp->dev, "error: no stream available\n");
 		return -ENODEV;
 	}
 
@@ -233,9 +237,10 @@ int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
 	return 0;
 }
 
-int hda_dsp_pcm_close(struct snd_sof_dev *sdev,
+int hda_dsp_pcm_close(struct snd_soc_component *scomp,
 		      struct snd_pcm_substream *substream)
 {
+	struct snd_sof_dev *sdev = dev_get_drvdata(scomp->dev->parent);
 	struct hdac_stream *hstream = substream->runtime->private_data;
 	int direction = substream->stream;
 	int ret;
@@ -243,7 +248,7 @@ int hda_dsp_pcm_close(struct snd_sof_dev *sdev,
 	ret = hda_dsp_stream_put(sdev, direction, hstream->stream_tag);
 
 	if (ret) {
-		dev_dbg(sdev->dev, "stream %s not opened!\n", substream->name);
+		dev_dbg(scomp->dev, "stream %s not opened!\n", substream->name);
 		return -ENODEV;
 	}
 

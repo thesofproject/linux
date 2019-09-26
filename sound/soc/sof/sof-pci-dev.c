@@ -49,6 +49,7 @@ static const struct sof_dev_desc bxt_desc = {
 	.nocodec_fw_filename = "sof-apl.ri",
 	.nocodec_tplg_filename = "sof-apl-nocodec.tplg",
 	.ops = &sof_apl_ops,
+	.audio_ops = &sof_apl_audio_ops,
 	.arch_ops = &sof_xtensa_arch_ops
 };
 #endif
@@ -67,6 +68,7 @@ static const struct sof_dev_desc glk_desc = {
 	.nocodec_fw_filename = "sof-glk.ri",
 	.nocodec_tplg_filename = "sof-glk-nocodec.tplg",
 	.ops = &sof_apl_ops,
+	.audio_ops = &sof_apl_audio_ops,
 	.arch_ops = &sof_xtensa_arch_ops
 };
 #endif
@@ -113,6 +115,7 @@ static const struct sof_dev_desc cnl_desc = {
 	.nocodec_fw_filename = "sof-cnl.ri",
 	.nocodec_tplg_filename = "sof-cnl-nocodec.tplg",
 	.ops = &sof_cnl_ops,
+	.audio_ops = &sof_cnl_audio_ops,
 	.arch_ops = &sof_xtensa_arch_ops
 };
 #endif
@@ -131,6 +134,7 @@ static const struct sof_dev_desc cfl_desc = {
 	.nocodec_fw_filename = "sof-cnl.ri",
 	.nocodec_tplg_filename = "sof-cnl-nocodec.tplg",
 	.ops = &sof_cnl_ops,
+	.audio_ops = &sof_cnl_audio_ops,
 	.arch_ops = &sof_xtensa_arch_ops
 };
 #endif
@@ -151,6 +155,7 @@ static const struct sof_dev_desc cml_desc = {
 	.nocodec_fw_filename = "sof-cnl.ri",
 	.nocodec_tplg_filename = "sof-cnl-nocodec.tplg",
 	.ops = &sof_cnl_ops,
+	.audio_ops = &sof_cnl_audio_ops,
 	.arch_ops = &sof_xtensa_arch_ops
 };
 #endif
@@ -169,6 +174,7 @@ static const struct sof_dev_desc icl_desc = {
 	.nocodec_fw_filename = "sof-icl.ri",
 	.nocodec_tplg_filename = "sof-icl-nocodec.tplg",
 	.ops = &sof_cnl_ops,
+	.audio_ops = &sof_cnl_audio_ops,
 	.arch_ops = &sof_xtensa_arch_ops
 };
 #endif
@@ -223,6 +229,7 @@ static const struct sof_dev_desc tgl_desc = {
 	.nocodec_fw_filename = "sof-tgl.ri",
 	.nocodec_tplg_filename = "sof-tgl-nocodec.tplg",
 	.ops = &sof_cnl_ops,
+	.audio_ops = &sof_cnl_audio_ops,
 	.arch_ops = &sof_xtensa_arch_ops
 };
 #endif
@@ -241,6 +248,7 @@ static const struct sof_dev_desc ehl_desc = {
 	.nocodec_fw_filename = "sof-ehl.ri",
 	.nocodec_tplg_filename = "sof-ehl-nocodec.tplg",
 	.ops = &sof_cnl_ops,
+	.audio_ops = &sof_cnl_audio_ops,
 	.arch_ops = &sof_xtensa_arch_ops
 };
 #endif

@@ -304,90 +304,12 @@ static inline int snd_sof_dma_trace_trigger(struct snd_sof_dev *sdev, int cmd)
 	return 0;
 }
 
-/* host PCM ops */
-static inline int
-snd_sof_pcm_platform_open(struct snd_sof_dev *sdev,
-			  struct snd_pcm_substream *substream)
-{
-	if (sof_ops(sdev) && sof_ops(sdev)->pcm_open)
-		return sof_ops(sdev)->pcm_open(sdev, substream);
-
-	return 0;
-}
-
-/* disconnect pcm substream to a host stream */
-static inline int
-snd_sof_pcm_platform_close(struct snd_sof_dev *sdev,
-			   struct snd_pcm_substream *substream)
-{
-	if (sof_ops(sdev) && sof_ops(sdev)->pcm_close)
-		return sof_ops(sdev)->pcm_close(sdev, substream);
-
-	return 0;
-}
-
-/* host stream hw params */
-static inline int
-snd_sof_pcm_platform_hw_params(struct snd_sof_dev *sdev,
-			       struct snd_pcm_substream *substream,
-			       struct snd_pcm_hw_params *params,
-			       struct sof_ipc_stream_params *ipc_params)
-{
-	if (sof_ops(sdev) && sof_ops(sdev)->pcm_hw_params)
-		return sof_ops(sdev)->pcm_hw_params(sdev, substream,
-						    params, ipc_params);
-
-	return 0;
-}
-
-/* host stream hw free */
-static inline int
-snd_sof_pcm_platform_hw_free(struct snd_sof_dev *sdev,
-			     struct snd_pcm_substream *substream)
-{
-	if (sof_ops(sdev) && sof_ops(sdev)->pcm_hw_free)
-		return sof_ops(sdev)->pcm_hw_free(sdev, substream);
-
-	return 0;
-}
-
-/* host stream trigger */
-static inline int
-snd_sof_pcm_platform_trigger(struct snd_sof_dev *sdev,
-			     struct snd_pcm_substream *substream, int cmd)
-{
-	if (sof_ops(sdev) && sof_ops(sdev)->pcm_trigger)
-		return sof_ops(sdev)->pcm_trigger(sdev, substream, cmd);
-
-	return 0;
-}
-
 /* host DSP message data */
 static inline void snd_sof_ipc_msg_data(struct snd_sof_dev *sdev,
 					struct snd_pcm_substream *substream,
 					void *p, size_t sz)
 {
 	sof_ops(sdev)->ipc_msg_data(sdev, substream, p, sz);
-}
-
-/* host configure DSP HW parameters */
-static inline int
-snd_sof_ipc_pcm_params(struct snd_sof_dev *sdev,
-		       struct snd_pcm_substream *substream,
-		       const struct sof_ipc_pcm_params_reply *reply)
-{
-	return sof_ops(sdev)->ipc_pcm_params(sdev, substream, reply);
-}
-
-/* host stream pointer */
-static inline snd_pcm_uframes_t
-snd_sof_pcm_platform_pointer(struct snd_sof_dev *sdev,
-			     struct snd_pcm_substream *substream)
-{
-	if (sof_ops(sdev) && sof_ops(sdev)->pcm_pointer)
-		return sof_ops(sdev)->pcm_pointer(sdev, substream);
-
-	return 0;
 }
 
 static inline const struct snd_sof_dsp_ops

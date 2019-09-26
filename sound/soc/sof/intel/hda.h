@@ -478,19 +478,19 @@ void hda_ipc_irq_dump(struct snd_sof_dev *sdev);
 /*
  * DSP PCM Operations.
  */
-int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
+int hda_dsp_pcm_open(struct snd_soc_component *scomp,
 		     struct snd_pcm_substream *substream);
-int hda_dsp_pcm_close(struct snd_sof_dev *sdev,
+int hda_dsp_pcm_close(struct snd_soc_component *scomp,
 		      struct snd_pcm_substream *substream);
-int hda_dsp_pcm_hw_params(struct snd_sof_dev *sdev,
+int hda_dsp_pcm_hw_params(struct snd_soc_component *scomp,
 			  struct snd_pcm_substream *substream,
 			  struct snd_pcm_hw_params *params,
 			  struct sof_ipc_stream_params *ipc_params);
-int hda_dsp_stream_hw_free(struct snd_sof_dev *sdev,
+int hda_dsp_stream_hw_free(struct snd_soc_component *scomp,
 			   struct snd_pcm_substream *substream);
-int hda_dsp_pcm_trigger(struct snd_sof_dev *sdev,
+int hda_dsp_pcm_trigger(struct snd_soc_component *scomp,
 			struct snd_pcm_substream *substream, int cmd);
-snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_sof_dev *sdev,
+snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_soc_component *scomp,
 				      struct snd_pcm_substream *substream);
 
 /*
@@ -521,7 +521,7 @@ int hda_dsp_stream_spib_config(struct snd_sof_dev *sdev,
 void hda_ipc_msg_data(struct snd_sof_dev *sdev,
 		      struct snd_pcm_substream *substream,
 		      void *p, size_t sz);
-int hda_ipc_pcm_params(struct snd_sof_dev *sdev,
+int hda_ipc_pcm_params(struct snd_soc_component *scomp,
 		       struct snd_pcm_substream *substream,
 		       const struct sof_ipc_pcm_params_reply *reply);
 
@@ -606,6 +606,9 @@ extern struct snd_soc_dai_driver skl_dai[];
 extern const struct snd_sof_dsp_ops sof_apl_ops;
 extern const struct snd_sof_dsp_ops sof_cnl_ops;
 extern const struct snd_sof_dsp_ops sof_skl_ops;
+
+extern const struct snd_sof_audio_ops sof_apl_audio_ops;
+extern const struct snd_sof_audio_ops sof_cnl_audio_ops;
 
 extern const struct sof_intel_dsp_desc apl_chip_info;
 extern const struct sof_intel_dsp_desc cnl_chip_info;

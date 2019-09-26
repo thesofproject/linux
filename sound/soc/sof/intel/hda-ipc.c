@@ -297,10 +297,11 @@ void hda_ipc_msg_data(struct snd_sof_dev *sdev,
 	}
 }
 
-int hda_ipc_pcm_params(struct snd_sof_dev *sdev,
+int hda_ipc_pcm_params(struct snd_soc_component *scomp,
 		       struct snd_pcm_substream *substream,
 		       const struct sof_ipc_pcm_params_reply *reply)
 {
+	struct snd_sof_dev *sdev = dev_get_drvdata(scomp->dev->parent);
 	struct hdac_stream *hstream = substream->runtime->private_data;
 	struct sof_intel_hda_stream *hda_stream;
 	/* validate offset */
@@ -316,7 +317,7 @@ int hda_ipc_pcm_params(struct snd_sof_dev *sdev,
 
 	hda_stream->stream.posn_offset = sdev->stream_box.offset + posn_offset;
 
-	dev_dbg(sdev->dev, "pcm: stream dir %d, posn mailbox offset is %zu",
+	dev_dbg(scomp->dev, "pcm: stream dir %d, posn mailbox offset is %zu",
 		substream->stream, hda_stream->stream.posn_offset);
 
 	return 0;

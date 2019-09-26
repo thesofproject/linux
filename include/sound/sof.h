@@ -16,6 +16,7 @@
 #include <sound/soc-acpi.h>
 
 struct snd_sof_dsp_ops;
+struct snd_sof_audio_ops;
 
 /*
  * SOF Platform data.
@@ -85,6 +86,9 @@ struct sof_dev_desc {
 
 	const struct snd_sof_dsp_ops *ops;
 	const struct sof_arch_ops *arch_ops;
+
+	/* client ops */
+	const struct snd_sof_audio_ops *audio_ops;
 };
 
 int sof_nocodec_setup(struct device *dev,

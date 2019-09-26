@@ -16,6 +16,7 @@
  */
 
 #include "../ops.h"
+#include "../sof-audio.h"
 #include "hda.h"
 
 static const struct snd_sof_debugfs_map cnl_dsp_debugfs[] = {
@@ -209,21 +210,12 @@ const struct snd_sof_dsp_ops sof_cnl_ops = {
 	.get_window_offset = hda_dsp_ipc_get_window_offset,
 
 	.ipc_msg_data	= hda_ipc_msg_data,
-	.ipc_pcm_params	= hda_ipc_pcm_params,
 
 	/* debug */
 	.debug_map	= cnl_dsp_debugfs,
 	.debug_map_count	= ARRAY_SIZE(cnl_dsp_debugfs),
 	.dbg_dump	= hda_dsp_dump,
 	.ipc_dump	= cnl_ipc_dump,
-
-	/* stream callbacks */
-	.pcm_open	= hda_dsp_pcm_open,
-	.pcm_close	= hda_dsp_pcm_close,
-	.pcm_hw_params	= hda_dsp_pcm_hw_params,
-	.pcm_hw_free	= hda_dsp_stream_hw_free,
-	.pcm_trigger	= hda_dsp_pcm_trigger,
-	.pcm_pointer	= hda_dsp_pcm_pointer,
 
 	/* firmware loading */
 	.load_firmware = snd_sof_load_firmware_raw,
@@ -244,10 +236,6 @@ const struct snd_sof_dsp_ops sof_cnl_ops = {
 	.trace_release = hda_dsp_trace_release,
 	.trace_trigger = hda_dsp_trace_trigger,
 
-	/* DAI drivers */
-	.drv		= skl_dai,
-	.num_drv	= SOF_SKL_NUM_DAIS,
-
 	/* PM */
 	.suspend		= hda_dsp_suspend,
 	.resume			= hda_dsp_resume,
@@ -256,6 +244,25 @@ const struct snd_sof_dsp_ops sof_cnl_ops = {
 	.runtime_idle		= hda_dsp_runtime_idle,
 	.set_hw_params_upon_resume = hda_dsp_set_hw_params_upon_resume,
 	.set_power_state	= hda_dsp_set_power_state,
+};
+EXPORT_SYMBOL(sof_cnl_ops);
+
+/* cannonlake audio ops */
+const struct snd_sof_audio_ops sof_cnl_audio_ops = {
+	/* stream callbacks */
+	.pcm_open	= hda_dsp_pcm_open,
+	.pcm_close	= hda_dsp_pcm_close,
+	.pcm_hw_params	= hda_dsp_pcm_hw_params,
+	.pcm_hw_free	= hda_dsp_stream_hw_free,
+	.pcm_trigger	= hda_dsp_pcm_trigger,
+	.pcm_pointer	= hda_dsp_pcm_pointer,
+
+	/* IPC */
+	.ipc_pcm_params	= hda_ipc_pcm_params,
+
+	/* DAI drivers */
+	.drv		= skl_dai,
+	.num_drv	= SOF_SKL_NUM_DAIS,
 
 	/* ALSA HW info flags */
 	.hw_info =	SNDRV_PCM_INFO_MMAP |
@@ -264,7 +271,7 @@ const struct snd_sof_dsp_ops sof_cnl_ops = {
 			SNDRV_PCM_INFO_PAUSE |
 			SNDRV_PCM_INFO_NO_PERIOD_WAKEUP,
 };
-EXPORT_SYMBOL(sof_cnl_ops);
+EXPORT_SYMBOL(sof_cnl_audio_ops);
 
 const struct sof_intel_dsp_desc cnl_chip_info = {
 	/* Cannonlake */

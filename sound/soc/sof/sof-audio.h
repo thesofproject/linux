@@ -21,6 +21,48 @@
 struct snd_soc_tplg_ops;
 struct snd_soc_component;
 
+struct snd_sof_audio_ops {
+
+	/* host configure DSP HW parameters */
+	int (*ipc_pcm_params)(struct snd_soc_component *scomp,
+			      struct snd_pcm_substream *substream,
+			      const struct sof_ipc_pcm_params_reply *reply); /* mandatory */
+
+	/* connect pcm substream to a host stream */
+	int (*pcm_open)(struct snd_soc_component *scomp,
+			struct snd_pcm_substream *substream); /* optional */
+
+	/* disconnect pcm substream to a host stream */
+	int (*pcm_close)(struct snd_soc_component *scomp,
+			 struct snd_pcm_substream *substream); /* optional */
+
+	/* host stream hw params */
+	int (*pcm_hw_params)(struct snd_soc_component *scomp,
+			     struct snd_pcm_substream *substream,
+			     struct snd_pcm_hw_params *params,
+			     struct sof_ipc_stream_params *ipc_params); /* optional */
+
+	/* host stream hw_free */
+	int (*pcm_hw_free)(struct snd_soc_component *scomp,
+			   struct snd_pcm_substream *substream); /* optional */
+
+	/* host stream trigger */
+	int (*pcm_trigger)(struct snd_soc_component *scomp,
+			   struct snd_pcm_substream *substream,
+			   int cmd); /* optional */
+
+	/* host stream pointer */
+	snd_pcm_uframes_t (*pcm_pointer)(struct snd_soc_component *scomp,
+					 struct snd_pcm_substream *substream); /* optional */
+
+	/* DAI ops */
+	struct snd_soc_dai_driver *drv;
+	int num_drv;
+
+	/* ALSA HW info flags, will be stored in snd_pcm_runtime.hw.info */
+	u32 hw_info;
+};
+
 /* PCM stream, mapped to FW component */
 struct snd_sof_pcm_stream {
 	u32 comp_id;
@@ -126,6 +168,9 @@ struct sof_audio_dev {
 	struct list_head route_list;
 	struct snd_soc_component *component;
 
+	/* Platform-specific audio ops */
+	const struct snd_sof_audio_ops *audio_ops;
+
 	void *private;
 };
 
@@ -215,5 +260,14 @@ int snd_sof_bytes_ext_put(struct snd_kcontrol *kcontrol,
 int snd_sof_bytes_ext_get(struct snd_kcontrol *kcontrol,
 			  unsigned int __user *binary_data,
 			  unsigned int size);
+
+int intel_ipc_pcm_params(struct snd_soc_component *scomp,
+			 struct snd_pcm_substream *substream,
+			 const struct sof_ipc_pcm_params_reply *reply);
+
+int intel_pcm_open(struct snd_soc_component *scomp,
+		   struct snd_pcm_substream *substream);
+int intel_pcm_close(struct snd_soc_component *scomp,
+		    struct snd_pcm_substream *substream);
 
 #endif

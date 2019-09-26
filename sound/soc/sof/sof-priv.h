@@ -12,16 +12,12 @@
 #define __SOUND_SOC_SOF_PRIV_H
 
 #include <linux/device.h>
-
 #include <sound/hdaudio.h>
 #include <sound/soc.h>
-#include <sound/control.h>
-
 #include <sound/sof.h>
 #include <sound/sof/info.h>
 #include <sound/sof/pm.h>
 #include <sound/sof/trace.h>
-
 #include <uapi/sound/sof/fw.h>
 
 /* debug flags */
@@ -136,41 +132,10 @@ struct snd_sof_dsp_ops {
 	 */
 	int (*fw_ready)(struct snd_sof_dev *sdev, u32 msg_id); /* mandatory */
 
-	/* connect pcm substream to a host stream */
-	int (*pcm_open)(struct snd_sof_dev *sdev,
-			struct snd_pcm_substream *substream); /* optional */
-	/* disconnect pcm substream to a host stream */
-	int (*pcm_close)(struct snd_sof_dev *sdev,
-			 struct snd_pcm_substream *substream); /* optional */
-
-	/* host stream hw params */
-	int (*pcm_hw_params)(struct snd_sof_dev *sdev,
-			     struct snd_pcm_substream *substream,
-			     struct snd_pcm_hw_params *params,
-			     struct sof_ipc_stream_params *ipc_params); /* optional */
-
-	/* host stream hw_free */
-	int (*pcm_hw_free)(struct snd_sof_dev *sdev,
-			   struct snd_pcm_substream *substream); /* optional */
-
-	/* host stream trigger */
-	int (*pcm_trigger)(struct snd_sof_dev *sdev,
-			   struct snd_pcm_substream *substream,
-			   int cmd); /* optional */
-
-	/* host stream pointer */
-	snd_pcm_uframes_t (*pcm_pointer)(struct snd_sof_dev *sdev,
-					 struct snd_pcm_substream *substream); /* optional */
-
 	/* host read DSP stream data */
 	void (*ipc_msg_data)(struct snd_sof_dev *sdev,
 			     struct snd_pcm_substream *substream,
 			     void *p, size_t sz); /* mandatory */
-
-	/* host configure DSP HW parameters */
-	int (*ipc_pcm_params)(struct snd_sof_dev *sdev,
-			      struct snd_pcm_substream *substream,
-			      const struct sof_ipc_pcm_params_reply *reply); /* mandatory */
 
 	/* pre/post firmware run */
 	int (*pre_fw_run)(struct snd_sof_dev *sof_dev); /* optional */
@@ -209,13 +174,6 @@ struct snd_sof_dsp_ops {
 	int (*get_mailbox_offset)(struct snd_sof_dev *sdev);/* mandatory for common loader code */
 	int (*get_window_offset)(struct snd_sof_dev *sdev,
 				 u32 id);/* mandatory for common loader code */
-
-	/* DAI ops */
-	struct snd_soc_dai_driver *drv;
-	int num_drv;
-
-	/* ALSA HW info flags, will be stored in snd_pcm_runtime.hw.info */
-	u32 hw_info;
 };
 
 /* DSP architecture specific callbacks for oops and stack dumps */
@@ -519,13 +477,5 @@ int sof_fw_ready(struct snd_sof_dev *sdev, u32 msg_id);
 void intel_ipc_msg_data(struct snd_sof_dev *sdev,
 			struct snd_pcm_substream *substream,
 			void *p, size_t sz);
-int intel_ipc_pcm_params(struct snd_sof_dev *sdev,
-			 struct snd_pcm_substream *substream,
-			 const struct sof_ipc_pcm_params_reply *reply);
-
-int intel_pcm_open(struct snd_sof_dev *sdev,
-		   struct snd_pcm_substream *substream);
-int intel_pcm_close(struct snd_sof_dev *sdev,
-		    struct snd_pcm_substream *substream);
 
 #endif
