@@ -1174,7 +1174,6 @@ int rt711_init(struct device *dev, struct regmap *regmap,
 int rt711_io_init(struct device *dev, struct sdw_slave *slave)
 {
 	struct rt711_priv *rt711 = dev_get_drvdata(dev);
-	int ret;
 
 	if (rt711->hw_init)
 		return 0;
@@ -1255,7 +1254,7 @@ int rt711_io_init(struct device *dev, struct sdw_slave *slave)
 	pm_runtime_enable(&slave->dev);
 
 	dev_dbg(&slave->dev, "%s hw_init complete\n", __func__);
-	return ret;
+	return 0;
 }
 
 MODULE_DESCRIPTION("ASoC RT711 SDW driver");
