@@ -105,11 +105,10 @@ static int rt715_set_amp_gain_put(struct snd_kcontrol *kcontrol,
 	int i;
 
 	/* Can't use update bit function, so read the original value first */
-	/* 0x2000 to convert write add offset to read add offset ,0x800 to convert set command to get command */
 	addr_h = (mc->reg + 0x2000) | 0x800;
 	addr_l = (mc->rreg + 0x2000) | 0x800;
 	if (mc->shift == RT715_DIR_OUT_SFT) /* output */
-		val_h = 0x80;  /* ex:Verb ID=Bh's 'Get' payload, bit15 defines Get Input/Output amp gain */
+		val_h = 0x80;
 	else /* input */
 		val_h = 0x0;
 
@@ -312,18 +311,26 @@ static int rt715_mux_get(struct snd_kcontrol *kcontrol,
 	struct snd_soc_component *component =
 		snd_soc_dapm_kcontrol_component(kcontrol);
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
-	unsigned int reg, val;
+	unsigned int reg, val, ret;
 
 	/* nid = e->reg, vid = 0xf01 */
 	reg = RT715_VERB_GET_CONNECT_SEL | e->reg;
 	/* FIXME: PLB: check return status on read/write */
-	snd_soc_component_write(component, reg, 0x0);
-	snd_soc_component_read(component, RT715_READ_HDA_0, &val);
+	ret = snd_soc_component_write(component, reg, 0x0);
+	if (ret < 0) {
+		dev_err(component->dev, "sdw write failed\n");
+		return ret;
+	}
+	ret = snd_soc_component_read(component, RT715_READ_HDA_0, &val);
+	if (ret < 0) {
+		dev_err(component->dev, "sdw read failed\n");
+		return ret;
+	}
 
 	/*
-	 * According to return value of mux of nid RT715_MUX_IN3 and
-	 * RT715_MUX_IN4, we should convert value here to match the amixer
-	 * item number.
+	 * The first two indices of ADC Mux 24/25 are routed to the same
+	 * hardware source. ie, ADC Mux 24 0/1 will both connect to MIC2.
+	 * To have a unique set of inputs, we skip the index1 of the muxes.
 	 */
 	if ((e->reg == RT715_MUX_IN3 || e->reg == RT715_MUX_IN4) && (val > 0))
 		val -= 1;
@@ -341,7 +348,7 @@ static int rt715_mux_put(struct snd_kcontrol *kcontrol,
 				snd_soc_dapm_kcontrol_dapm(kcontrol);
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
 	unsigned int *item = ucontrol->value.enumerated.item;
-	unsigned int val, val2, change, reg;
+	unsigned int val, val2, change, reg, ret;
 	struct snd_soc_dapm_update update;
 
 	if (item[0] >= e->items)
@@ -351,9 +358,16 @@ static int rt715_mux_put(struct snd_kcontrol *kcontrol,
 	val = snd_soc_enum_item_to_val(e, item[0]) << e->shift_l;
 
 	reg = RT715_VERB_GET_CONNECT_SEL | e->reg;
-	/* FIXME: PLB: check return status on read/write */
-	snd_soc_component_write(component, reg, 0x0);
-	snd_soc_component_read(component, RT715_READ_HDA_0, &val2);
+	ret = snd_soc_component_write(component, reg, 0x0);
+	if (ret < 0) {
+		dev_err(component->dev, "sdw write failed\n");
+		return ret;
+	}
+	ret = snd_soc_component_read(component, RT715_READ_HDA_0, &val2);
+	if (ret < 0) {
+		dev_err(component->dev, "sdw read failed\n");
+		return ret;
+	}
 	if (val == val2)
 		change = 0;
 	else
