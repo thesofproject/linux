@@ -156,6 +156,7 @@ struct rt1308_sdw_priv {
 	enum sdw_slave_status status;
 	struct sdw_bus_params params;
 	bool hw_init;
+	bool first_init;
 };
 
 struct sdw_stream_data {
