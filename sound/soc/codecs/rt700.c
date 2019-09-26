@@ -408,10 +408,6 @@ static int rt700_set_amp_gain_put(struct snd_kcontrol *kcontrol,
 
 	rt700_get_gain(rt700, addr_h, addr_l, val_h, &read_rl, &read_ll);
 
-	/* Now set value */
-	addr_h = mc->reg;
-	addr_l = mc->rreg;
-
 	/* L Channel */
 	if (mc->invert) {
 		/* for mute */
