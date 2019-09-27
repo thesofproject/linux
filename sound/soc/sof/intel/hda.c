@@ -109,21 +109,6 @@ static const struct sdw_intel_ops sdw_callback = {
 	.free_stream = sdw_free_stream,
 };
 
-void hda_sdw_int_enable(struct snd_sof_dev *sdev, bool enable)
-{
-	if (enable) {
-		snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR,
-					HDA_DSP_REG_ADSPIC2,
-					HDA_DSP_ADSPIC2_SNDW,
-					HDA_DSP_ADSPIC2_SNDW);
-	} else {
-		snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR,
-					HDA_DSP_REG_ADSPIC2,
-					HDA_DSP_ADSPIC2_SNDW,
-					0);
-	}
-}
-
 static int hda_sdw_acpi_scan(struct snd_sof_dev *sdev)
 {
 	struct sof_intel_hda_dev *hdev;
@@ -201,7 +186,7 @@ static int hda_sdw_exit(struct snd_sof_dev *sdev)
 
 	hdev = sdev->pdata->hw_pdata;
 
-	hda_sdw_int_enable(sdev, false);
+	sdw_intel_enable_irq(sdev->bar[HDA_DSP_BAR], false);
 
 	if (hdev->sdw)
 		sdw_intel_exit(hdev->sdw);

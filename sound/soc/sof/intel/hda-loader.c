@@ -389,7 +389,7 @@ int hda_dsp_post_fw_run(struct snd_sof_dev *sdev)
 		}
 	}
 
-	hda_sdw_int_enable(sdev, true);
+	sdw_intel_enable_irq(sdev->bar[HDA_DSP_BAR], true);
 
 	/* re-enable clock gating and power gating */
 	return hda_dsp_ctrl_clock_power_gating(sdev, true);
