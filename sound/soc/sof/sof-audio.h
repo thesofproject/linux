@@ -15,11 +15,13 @@
 #include <sound/sof/control.h>
 #include <sound/sof/dai.h>
 #include <sound/sof/topology.h>
+#include "sof-priv.h"
 
 #define DRV_NAME	"sof-audio-component"
 
 struct snd_soc_tplg_ops;
 struct snd_soc_component;
+struct sof_audio_dev;
 
 struct snd_sof_audio_ops {
 
@@ -228,8 +230,7 @@ int sof_load_pipeline_ipc(struct snd_soc_component *scomp,
 			  struct sof_ipc_pipe_new *pipeline,
 			  struct sof_ipc_comp_reply *r);
 
-void snd_sof_new_platform_drv(struct sof_audio_dev *sof_audio,
-			      struct snd_sof_pdata *plat_data);
+void snd_sof_new_platform_drv(struct sof_audio_dev *sof_audio);
 
 /*
  * Stream IPC
@@ -273,5 +274,9 @@ int intel_pcm_open(struct snd_soc_component *scomp,
 		   struct snd_pcm_substream *substream);
 int intel_pcm_close(struct snd_soc_component *scomp,
 		    struct snd_pcm_substream *substream);
+
+int sof_nocodec_setup(struct device *dev,
+		      struct sof_audio_dev *sof_audio,
+		      const struct sof_dev_desc *desc);
 
 #endif

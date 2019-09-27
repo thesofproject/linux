@@ -101,7 +101,6 @@ snd_sof_machine_driver_select(struct snd_sof_dev *sdev,
 	if (sof_audio->audio_ops->machine_driver_select)
 		return sof_audio->audio_ops->machine_driver_select(sdev,
 								   sof_audio);
-
 	return 0;
 }
 #endif

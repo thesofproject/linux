@@ -11,20 +11,21 @@
 #include <linux/module.h>
 #include <sound/sof.h>
 #include "sof-priv.h"
+#include "sof-audio.h"
 
 static struct snd_soc_card sof_nocodec_card = {
 	.name = "nocodec", /* the sof- prefix is added by the core */
 };
 
 static int sof_nocodec_bes_setup(struct device *dev,
-				 const struct snd_sof_dsp_ops *ops,
+				 const struct snd_sof_audio_ops *audio_ops,
 				 struct snd_soc_dai_link *links,
 				 int link_num, struct snd_soc_card *card)
 {
 	struct snd_soc_dai_link_component *dlc;
 	int i;
 
-	if (!ops || !links || !card)
+	if (!audio_ops || !links || !card)
 		return -EINVAL;
 
 	/* set up BE dai_links */
@@ -48,7 +49,7 @@ static int sof_nocodec_bes_setup(struct device *dev,
 
 		links[i].id = i;
 		links[i].no_pcm = 1;
-		links[i].cpus->dai_name = ops->drv[i].name;
+		links[i].cpus->dai_name = audio_ops->drv[i].name;
 		links[i].platforms->name = dev_name(dev);
 		links[i].codecs->dai_name = "snd-soc-dummy-dai";
 		links[i].codecs->name = "snd-soc-dummy";
@@ -63,30 +64,27 @@ static int sof_nocodec_bes_setup(struct device *dev,
 }
 
 int sof_nocodec_setup(struct device *dev,
-		      struct snd_sof_pdata *sof_pdata,
-		      struct snd_soc_acpi_mach *mach,
-		      const struct sof_dev_desc *desc,
-		      const struct snd_sof_dsp_ops *ops)
+		      struct sof_audio_dev *sof_audio,
+		      const struct sof_dev_desc *desc)
 {
+	const struct snd_sof_audio_ops *audio_ops = sof_audio->audio_ops;
 	struct snd_soc_dai_link *links;
 	int ret;
 
-	if (!mach)
+	if (!sof_audio->machine)
 		return -EINVAL;
 
-	sof_pdata->drv_name = "sof-nocodec";
-
-	mach->drv_name = "sof-nocodec";
-	sof_pdata->fw_filename = desc->nocodec_fw_filename;
-	sof_pdata->tplg_filename = desc->nocodec_tplg_filename;
+	sof_audio->drv_name = "sof-nocodec";
+	sof_audio->machine->drv_name = "sof-nocodec";
+	sof_audio->tplg_filename = desc->nocodec_tplg_filename;
 
 	/* create dummy BE dai_links */
 	links = devm_kzalloc(dev, sizeof(struct snd_soc_dai_link) *
-			     ops->num_drv, GFP_KERNEL);
+			     audio_ops->num_drv, GFP_KERNEL);
 	if (!links)
 		return -ENOMEM;
 
-	ret = sof_nocodec_bes_setup(dev, ops, links, ops->num_drv,
+	ret = sof_nocodec_bes_setup(dev, audio_ops, links, audio_ops->num_drv,
 				    &sof_nocodec_card);
 	return ret;
 }
