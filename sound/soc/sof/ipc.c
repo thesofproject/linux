@@ -45,9 +45,6 @@ struct snd_sof_ipc {
 struct sof_ipc_ctrl_data_params {
 	size_t msg_bytes;
 	size_t hdr_bytes;
-	size_t pl_size;
-	size_t elems;
-	u32 num_msg;
 	u8 *src;
 	u8 *dst;
 };
@@ -547,10 +544,6 @@ static int sof_get_ctrl_copy_params(enum sof_ipc_ctrl_type ctrl_type,
 		return -EINVAL;
 	}
 
-	/* calculate payload size and number of messages */
-	sparams->pl_size = SOF_IPC_MSG_MAX_SIZE - sparams->hdr_bytes;
-	sparams->num_msg = DIV_ROUND_UP(sparams->msg_bytes, sparams->pl_size);
-
 	return 0;
 }
 
@@ -560,6 +553,7 @@ static int sof_set_get_large_ctrl_data(struct snd_sof_dev *sdev,
 				       bool send)
 {
 	struct sof_ipc_ctrl_data *partdata;
+	unsigned int num_msg;
 	size_t send_bytes;
 	size_t offset = 0;
 	size_t msg_bytes;
@@ -581,8 +575,10 @@ static int sof_set_get_large_ctrl_data(struct snd_sof_dev *sdev,
 	if (err < 0)
 		goto free;
 
+	/* calculate payload size and number of messages */
 	msg_bytes = sparams->msg_bytes;
-	pl_size = sparams->pl_size;
+	pl_size = SOF_IPC_MSG_MAX_SIZE - sparams->hdr_bytes;
+	num_msg = DIV_ROUND_UP(msg_bytes, pl_size);
 
 	/* copy the header data */
 	memcpy(partdata, cdata, sparams->hdr_bytes);
@@ -591,7 +587,7 @@ static int sof_set_get_large_ctrl_data(struct snd_sof_dev *sdev,
 	mutex_lock(&sdev->ipc->tx_mutex);
 
 	/* copy the payload data in a loop */
-	for (i = 0; i < sparams->num_msg; i++) {
+	for (i = 0; i < num_msg; i++) {
 		send_bytes = min(msg_bytes, pl_size);
 		partdata->num_elems = send_bytes;
 		partdata->rhdr.hdr.size = sparams->hdr_bytes + send_bytes;
@@ -640,13 +636,14 @@ int snd_sof_ipc_set_get_comp_data(struct snd_sof_ipc *ipc,
 	struct sof_ipc_fw_version *v = &ready->version;
 	struct sof_ipc_ctrl_data_params sparams;
 	size_t send_bytes;
+	size_t elems;
 	int err;
 
 	/* read or write firmware volume */
 	if (scontrol->readback_offset != 0) {
 		/* write/read value header via mmaped region */
 		send_bytes = sizeof(struct sof_ipc_ctrl_value_chan) *
-		cdata->num_elems;
+			cdata->num_elems;
 		if (send)
 			snd_sof_dsp_block_write(sdev, sdev->mmio_bar,
 						scontrol->readback_offset,
@@ -672,28 +669,28 @@ int snd_sof_ipc_set_get_comp_data(struct snd_sof_ipc *ipc,
 		sparams.msg_bytes = scontrol->num_channels *
 			sizeof(struct sof_ipc_ctrl_value_chan);
 		sparams.hdr_bytes = sizeof(struct sof_ipc_ctrl_data);
-		sparams.elems = scontrol->num_channels;
+		elems = scontrol->num_channels;
 		break;
 	case SOF_CTRL_TYPE_VALUE_COMP_GET:
 	case SOF_CTRL_TYPE_VALUE_COMP_SET:
 		sparams.msg_bytes = scontrol->num_channels *
 			sizeof(struct sof_ipc_ctrl_value_comp);
 		sparams.hdr_bytes = sizeof(struct sof_ipc_ctrl_data);
-		sparams.elems = scontrol->num_channels;
+		elems = scontrol->num_channels;
 		break;
 	case SOF_CTRL_TYPE_DATA_GET:
 	case SOF_CTRL_TYPE_DATA_SET:
 		sparams.msg_bytes = cdata->data->size;
 		sparams.hdr_bytes = sizeof(struct sof_ipc_ctrl_data) +
 			sizeof(struct sof_abi_hdr);
-		sparams.elems = cdata->data->size;
+		elems = cdata->data->size;
 		break;
 	default:
 		return -EINVAL;
 	}
 
 	cdata->rhdr.hdr.size = sparams.msg_bytes + sparams.hdr_bytes;
-	cdata->num_elems = sparams.elems;
+	cdata->num_elems = elems;
 	cdata->elems_remaining = 0;
 
 	/* send normal size ipc in one part */
