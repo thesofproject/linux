@@ -7,38 +7,43 @@
 //
 #include <sound/soc.h>
 
-#define soc_link_err(rtd, ret) _soc_link_err(rtd, __func__, ret)
-static inline int _soc_link_err(struct snd_soc_pcm_runtime *rtd,
+#define soc_link_ret(rtd, ret) _soc_link_ret(rtd, __func__, ret)
+static inline int _soc_link_ret(struct snd_soc_pcm_runtime *rtd,
 				const char *func, int ret)
 {
-	dev_err(rtd->dev,
-		"ASoC: error at %s on %s: %d\n",
-		func, rtd->dai_link->name, ret);
+	switch(ret) {
+	case -EPROBE_DEFER:
+	case -ENOTSUPP:
+	case 0:
+		break;
+	default:
+		dev_err(rtd->dev,
+			"ASoC: error at %s() on %s: %d\n",
+			func, rtd->dai_link->name, ret);
+	}
 
 	return ret;
 }
 
 int snd_soc_link_init(struct snd_soc_pcm_runtime *rtd)
 {
-	if (rtd->dai_link->init) {
-		int ret = rtd->dai_link->init(rtd);
-		if (ret < 0)
-			return soc_link_err(rtd, ret);
-	}
+	int ret = 0;
 
-	return 0;
+	if (rtd->dai_link->init)
+		ret = rtd->dai_link->init(rtd);
+
+	return soc_link_ret(rtd, ret);
 }
 
 int snd_soc_link_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 				    struct snd_pcm_hw_params *params)
 {
-	if (rtd->dai_link->be_hw_params_fixup) {
-		int ret = rtd->dai_link->be_hw_params_fixup(rtd, params);
-		if (ret < 0)
-			return soc_link_err(rtd, ret);
-	}
+	int ret = 0;
 
-	return 0;
+	if (rtd->dai_link->be_hw_params_fixup)
+		ret = rtd->dai_link->be_hw_params_fixup(rtd, params);
+
+	return soc_link_ret(rtd, ret);
 }
 
 int snd_soc_link_startup(struct snd_pcm_substream *substream)
@@ -49,7 +54,7 @@ int snd_soc_link_startup(struct snd_pcm_substream *substream)
 	    rtd->dai_link->ops->startup) {
 		int ret = rtd->dai_link->ops->startup(substream);
 		if (ret < 0)
-			return soc_link_err(rtd, ret);
+			return soc_link_ret(rtd, ret);
 	}
 
 	rtd->started = 1;
@@ -72,15 +77,13 @@ void snd_soc_link_shutdown(struct snd_pcm_substream *substream)
 int snd_soc_link_prepare(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	int ret = 0;
 
 	if (rtd->dai_link->ops &&
-	    rtd->dai_link->ops->prepare) {
-		int ret = rtd->dai_link->ops->prepare(substream);
-		if (ret < 0)
-			return soc_link_err(rtd, ret);
-	}
+	    rtd->dai_link->ops->prepare)
+		ret = rtd->dai_link->ops->prepare(substream);
 
-	return 0;
+	return soc_link_ret(rtd, ret);
 }
 
 int snd_soc_link_hw_params(struct snd_pcm_substream *substream,
@@ -92,7 +95,7 @@ int snd_soc_link_hw_params(struct snd_pcm_substream *substream,
 	    rtd->dai_link->ops->hw_params) {
 		int ret = rtd->dai_link->ops->hw_params(substream, params);
 		if (ret < 0)
-			return soc_link_err(rtd, ret);
+			return soc_link_ret(rtd, ret);
 	}
 
 	rtd->hw_paramed = 1;
@@ -115,14 +118,13 @@ void snd_soc_link_hw_free(struct snd_pcm_substream *substream)
 static int soc_link_trigger(struct snd_soc_pcm_runtime *rtd,
 			    struct snd_pcm_substream *substream, int cmd)
 {
-	if (rtd->dai_link->ops &&
-	    rtd->dai_link->ops->trigger) {
-		int ret = rtd->dai_link->ops->trigger(substream, cmd);
-		if (ret < 0)
-			return soc_link_err(rtd, ret);
-	}
+	int ret = 0;
 
-	return 0;
+	if (rtd->dai_link->ops &&
+	    rtd->dai_link->ops->trigger)
+		ret = rtd->dai_link->ops->trigger(substream, cmd);
+
+	return soc_link_ret(rtd, ret);
 }
 
 int snd_soc_link_trigger(struct snd_pcm_substream *substream, int cmd)
@@ -152,14 +154,13 @@ int snd_soc_link_trigger(struct snd_pcm_substream *substream, int cmd)
 int snd_soc_link_compr_startup(struct snd_soc_pcm_runtime *rtd,
 			       struct snd_compr_stream *cstream)
 {
-	if (rtd->dai_link->compr_ops &&
-	    rtd->dai_link->compr_ops->startup) {
-		int ret = rtd->dai_link->compr_ops->startup(cstream);
-		if (ret < 0)
-			return soc_link_err(rtd, ret);
-	}
+	int ret = 0;
 
-	return 0;
+	if (rtd->dai_link->compr_ops &&
+	    rtd->dai_link->compr_ops->startup)
+		ret = rtd->dai_link->compr_ops->startup(cstream);
+
+	return soc_link_ret(rtd, ret);
 }
 EXPORT_SYMBOL_GPL(snd_soc_link_compr_startup);
 
@@ -175,13 +176,12 @@ EXPORT_SYMBOL_GPL(snd_soc_link_compr_shutdown);
 int snd_soc_link_compr_set_params(struct snd_soc_pcm_runtime *rtd,
 				  struct snd_compr_stream *cstream)
 {
-	if (rtd->dai_link->compr_ops &&
-	    rtd->dai_link->compr_ops->set_params) {
-		int ret = rtd->dai_link->compr_ops->set_params(cstream);
-		if (ret < 0)
-			return soc_link_err(rtd, ret);
-	}
+	int ret = 0;
 
-	return 0;
+	if (rtd->dai_link->compr_ops &&
+	    rtd->dai_link->compr_ops->set_params)
+		ret = rtd->dai_link->compr_ops->set_params(cstream);
+
+	return soc_link_ret(rtd, ret);
 }
 EXPORT_SYMBOL_GPL(snd_soc_link_compr_set_params);
