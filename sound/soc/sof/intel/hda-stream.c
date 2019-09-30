@@ -76,9 +76,9 @@ static int hda_setup_bdle(struct snd_sof_dev *sdev,
  * set up Buffer Descriptor List (BDL) for host memory transfer
  * BDL describes the location of the individual buffers and is little endian.
  */
-int hda_dsp_stream_setup_bdl(struct snd_sof_dev *sdev,
-			     struct snd_dma_buffer *dmab,
-			     struct hdac_stream *stream)
+static int hda_dsp_stream_setup_bdl(struct snd_sof_dev *sdev,
+				    struct snd_dma_buffer *dmab,
+				    struct hdac_stream *stream)
 {
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct sof_intel_dsp_bdl *bdl;

@@ -496,9 +496,6 @@ int hda_dsp_stream_trigger(struct snd_sof_dev *sdev,
 			   struct hdac_ext_stream *stream, int cmd);
 irqreturn_t hda_dsp_stream_interrupt(int irq, void *context);
 irqreturn_t hda_dsp_stream_threaded_handler(int irq, void *context);
-int hda_dsp_stream_setup_bdl(struct snd_sof_dev *sdev,
-			     struct snd_dma_buffer *dmab,
-			     struct hdac_stream *stream);
 
 struct hdac_ext_stream *
 	hda_dsp_stream_get(struct snd_sof_dev *sdev, int direction);
