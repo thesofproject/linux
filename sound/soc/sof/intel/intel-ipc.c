@@ -17,12 +17,9 @@
 #include <sound/pcm.h>
 #include <sound/sof/stream.h>
 
+#include "shim.h"
 #include "../ops.h"
 #include "../sof-priv.h"
-
-struct intel_stream {
-	size_t posn_offset;
-};
 
 /* Mailbox-based Intel IPC implementation */
 void intel_ipc_msg_data(struct snd_sof_dev *sdev,
@@ -32,7 +29,8 @@ void intel_ipc_msg_data(struct snd_sof_dev *sdev,
 	if (!substream || !sdev->stream_box.size) {
 		sof_mailbox_read(sdev, sdev->dsp_box.offset, p, sz);
 	} else {
-		struct intel_stream *stream = substream->runtime->private_data;
+		struct sof_intel_stream *stream =
+			substream->runtime->private_data;
 
 		/* The stream might already be closed */
 		if (stream)
@@ -45,7 +43,7 @@ int intel_ipc_pcm_params(struct snd_sof_dev *sdev,
 			 struct snd_pcm_substream *substream,
 			 const struct sof_ipc_pcm_params_reply *reply)
 {
-	struct intel_stream *stream = substream->runtime->private_data;
+	struct sof_intel_stream *stream = substream->runtime->private_data;
 	size_t posn_offset = reply->posn_offset;
 
 	/* check if offset is overflow or it is not aligned */
@@ -65,7 +63,7 @@ EXPORT_SYMBOL(intel_ipc_pcm_params);
 int intel_pcm_open(struct snd_sof_dev *sdev,
 		   struct snd_pcm_substream *substream)
 {
-	struct intel_stream *stream = kmalloc(sizeof(*stream), GFP_KERNEL);
+	struct sof_intel_stream *stream = kmalloc(sizeof(*stream), GFP_KERNEL);
 
 	if (!stream)
 		return -ENOMEM;
@@ -80,7 +78,7 @@ EXPORT_SYMBOL(intel_pcm_open);
 int intel_pcm_close(struct snd_sof_dev *sdev,
 		    struct snd_pcm_substream *substream)
 {
-	struct intel_stream *stream = substream->runtime->private_data;
+	struct sof_intel_stream *stream = substream->runtime->private_data;
 
 	substream->runtime->private_data = NULL;
 	kfree(stream);
