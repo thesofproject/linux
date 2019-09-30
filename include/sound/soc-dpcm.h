@@ -103,6 +103,12 @@ struct snd_soc_dpcm_runtime {
 	int trigger_pending; /* trigger cmd + 1 if pending, 0 if not */
 };
 
+enum snd_soc_update_mode {
+	SND_SOC_UPDATE_RUNTIME,
+	SND_SOC_UPDATE_STARTUP,
+	SND_SOC_UPDATE_SHUTDOWN,
+};
+
 #define for_each_dpcm_fe(be, stream, dpcm)				\
 	list_for_each_entry(dpcm, &(be)->dpcm[stream].fe_clients, list_fe)
 
@@ -143,12 +149,12 @@ void snd_soc_dpcm_be_set_state(struct snd_soc_pcm_runtime *be, int stream,
 /* internal use only */
 int soc_dpcm_be_digital_mute(struct snd_soc_pcm_runtime *fe, int mute);
 void soc_dpcm_debugfs_add(struct snd_soc_pcm_runtime *rtd);
-int soc_dpcm_runtime_update(struct snd_soc_card *);
+int soc_dpcm_runtime_update(struct snd_soc_card *, enum snd_soc_update_mode);
 
-int dpcm_path_get(struct snd_soc_pcm_runtime *fe,
-	int stream, struct snd_soc_dapm_widget_list **list_);
-int dpcm_process_paths(struct snd_soc_pcm_runtime *fe,
-	int stream, struct snd_soc_dapm_widget_list **list, int new);
+int dpcm_path_get(struct snd_soc_pcm_runtime *fe, int stream,
+	struct snd_soc_dapm_widget_list **list_);
+int dpcm_process_paths(struct snd_soc_pcm_runtime *fe, int stream,
+	struct snd_soc_dapm_widget_list **list, bool new, bool force_prune);
 int dpcm_be_dai_startup(struct snd_soc_pcm_runtime *fe, int stream);
 int dpcm_be_dai_shutdown(struct snd_soc_pcm_runtime *fe, int stream);
 void dpcm_be_disconnect(struct snd_soc_pcm_runtime *fe, int stream);

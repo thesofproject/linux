@@ -1474,7 +1474,7 @@ int dpcm_path_get(struct snd_soc_pcm_runtime *fe,
 }
 
 static int dpcm_prune_paths(struct snd_soc_pcm_runtime *fe, int stream,
-	struct snd_soc_dapm_widget_list **list_)
+			    struct snd_soc_dapm_widget_list **list_, bool force)
 {
 	struct snd_soc_dpcm *dpcm;
 	struct snd_soc_dapm_widget_list *list = *list_;
@@ -1487,7 +1487,7 @@ static int dpcm_prune_paths(struct snd_soc_pcm_runtime *fe, int stream,
 		widget = dai_get_widget(dpcm->be->cpu_dai, stream);
 
 		/* prune the BE if it's no longer in our active list */
-		if (widget && widget_in_list(list, widget))
+		if (widget && widget_in_list(list, widget) && !force)
 			continue;
 
 		dev_dbg(fe->dev, "ASoC: pruning %s BE %s for %s\n",
@@ -1565,12 +1565,13 @@ static int dpcm_add_paths(struct snd_soc_pcm_runtime *fe, int stream,
  * FE substream.
  */
 int dpcm_process_paths(struct snd_soc_pcm_runtime *fe,
-	int stream, struct snd_soc_dapm_widget_list **list, int new)
+		       int stream, struct snd_soc_dapm_widget_list **list,
+		       bool new, bool force_prune)
 {
 	if (new)
 		return dpcm_add_paths(fe, stream, list);
 	else
-		return dpcm_prune_paths(fe, stream, list);
+		return dpcm_prune_paths(fe, stream, list, force_prune);
 }
 
 void dpcm_clear_pending_state(struct snd_soc_pcm_runtime *fe, int stream)
@@ -2565,11 +2566,13 @@ static int soc_pcm_ioctl(struct snd_pcm_substream *substream,
 	return snd_pcm_lib_ioctl(substream, cmd, arg);
 }
 
-static int dpcm_run_update_shutdown(struct snd_soc_pcm_runtime *fe, int stream)
+static int dpcm_run_update_shutdown(struct snd_soc_pcm_runtime *fe, int stream,
+				    bool force)
 {
 	struct snd_pcm_substream *substream =
 		snd_soc_dpcm_get_substream(fe, stream);
 	enum snd_soc_dpcm_trigger trigger = fe->dai_link->trigger[stream];
+	int event = force ? SND_SOC_DAPM_STREAM_STOP : SND_SOC_DAPM_STREAM_NOP;
 	int err;
 
 	dev_dbg(fe->dev, "ASoC: runtime %s close on FE %s\n",
@@ -2601,7 +2604,7 @@ static int dpcm_run_update_shutdown(struct snd_soc_pcm_runtime *fe, int stream)
 		dev_err(fe->dev,"ASoC: shutdown FE failed %d\n", err);
 
 	/* run the stream event for each BE */
-	dpcm_dapm_stream_event(fe, stream, SND_SOC_DAPM_STREAM_NOP);
+	dpcm_dapm_stream_event(fe, stream, event);
 
 	return 0;
 }
@@ -2707,12 +2710,13 @@ static int dpcm_run_new_update(struct snd_soc_pcm_runtime *fe, int stream)
 	return ret;
 }
 
-static int dpcm_run_old_update(struct snd_soc_pcm_runtime *fe, int stream)
+static int dpcm_run_old_update(struct snd_soc_pcm_runtime *fe, int stream,
+			       bool force)
 {
 	int ret;
 
 	dpcm_set_fe_update_state(fe, stream, SND_SOC_DPCM_UPDATE_BE);
-	ret = dpcm_run_update_shutdown(fe, stream);
+	ret = dpcm_run_update_shutdown(fe, stream, force);
 	if (ret < 0)
 		dev_err(fe->dev, "ASoC: failed to shutdown some BEs\n");
 	dpcm_set_fe_update_state(fe, stream, SND_SOC_DPCM_UPDATE_NO);
@@ -2720,7 +2724,8 @@ static int dpcm_run_old_update(struct snd_soc_pcm_runtime *fe, int stream)
 	return ret;
 }
 
-static int soc_dpcm_fe_runtime_update(struct snd_soc_pcm_runtime *fe, int new)
+static int soc_dpcm_fe_runtime_update(struct snd_soc_pcm_runtime *fe, bool new,
+				      bool force_prune)
 {
 	struct snd_soc_dapm_widget_list *list;
 	int count, paths;
@@ -2753,12 +2758,14 @@ static int soc_dpcm_fe_runtime_update(struct snd_soc_pcm_runtime *fe, int new)
 	}
 
 	/* update any playback paths */
-	count = dpcm_process_paths(fe, SNDRV_PCM_STREAM_PLAYBACK, &list, new);
+	count = dpcm_process_paths(fe, SNDRV_PCM_STREAM_PLAYBACK, &list, new,
+				   force_prune);
 	if (count) {
 		if (new)
 			dpcm_run_new_update(fe, SNDRV_PCM_STREAM_PLAYBACK);
 		else
-			dpcm_run_old_update(fe, SNDRV_PCM_STREAM_PLAYBACK);
+			dpcm_run_old_update(fe, SNDRV_PCM_STREAM_PLAYBACK,
+					    force_prune);
 
 		dpcm_clear_pending_state(fe, SNDRV_PCM_STREAM_PLAYBACK);
 		dpcm_be_disconnect(fe, SNDRV_PCM_STREAM_PLAYBACK);
@@ -2784,12 +2791,14 @@ capture:
 	}
 
 	/* update any old capture paths */
-	count = dpcm_process_paths(fe, SNDRV_PCM_STREAM_CAPTURE, &list, new);
+	count = dpcm_process_paths(fe, SNDRV_PCM_STREAM_CAPTURE, &list, new,
+				   force_prune);
 	if (count) {
 		if (new)
 			dpcm_run_new_update(fe, SNDRV_PCM_STREAM_CAPTURE);
 		else
-			dpcm_run_old_update(fe, SNDRV_PCM_STREAM_CAPTURE);
+			dpcm_run_old_update(fe, SNDRV_PCM_STREAM_CAPTURE,
+					    force_prune);
 
 		dpcm_clear_pending_state(fe, SNDRV_PCM_STREAM_CAPTURE);
 		dpcm_be_disconnect(fe, SNDRV_PCM_STREAM_CAPTURE);
@@ -2803,25 +2812,30 @@ capture:
 /* Called by DAPM mixer/mux changes to update audio routing between PCMs and
  * any DAI links.
  */
-int soc_dpcm_runtime_update(struct snd_soc_card *card)
+int soc_dpcm_runtime_update(struct snd_soc_card *card,
+			    enum snd_soc_update_mode mode)
 {
 	struct snd_soc_pcm_runtime *fe;
 	int ret = 0;
 
 	mutex_lock_nested(&card->mutex, SND_SOC_CARD_CLASS_RUNTIME);
+
 	/* shutdown all old paths first */
-	for_each_card_rtds(card, fe) {
-		ret = soc_dpcm_fe_runtime_update(fe, 0);
-		if (ret)
-			goto out;
-	}
+	if (mode != SND_SOC_UPDATE_STARTUP)
+		for_each_card_rtds(card, fe) {
+			ret = soc_dpcm_fe_runtime_update(fe, false,
+					mode == SND_SOC_UPDATE_SHUTDOWN);
+			if (ret)
+				goto out;
+		}
 
 	/* bring new paths up */
-	for_each_card_rtds(card, fe) {
-		ret = soc_dpcm_fe_runtime_update(fe, 1);
-		if (ret)
-			goto out;
-	}
+	if (mode != SND_SOC_UPDATE_SHUTDOWN)
+		for_each_card_rtds(card, fe) {
+			ret = soc_dpcm_fe_runtime_update(fe, true, false);
+			if (ret)
+				goto out;
+		}
 
 out:
 	mutex_unlock(&card->mutex);
@@ -2876,7 +2890,7 @@ static int dpcm_fe_dai_open(struct snd_pcm_substream *fe_substream)
 	}
 
 	/* calculate valid and active FE <-> BE dpcms */
-	dpcm_process_paths(fe, stream, &list, 1);
+	dpcm_process_paths(fe, stream, &list, 1, false);
 
 	ret = dpcm_fe_dai_startup(fe_substream);
 	if (ret < 0) {
