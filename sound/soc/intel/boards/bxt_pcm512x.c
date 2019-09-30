@@ -270,7 +270,7 @@ static int bxt_pcm512x_probe(struct platform_device *pdev)
 	if (IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI))
 		INIT_LIST_HEAD(&ctx->hdmi_pcm_list);
 
-	mach = (&pdev->dev)->platform_data;
+	mach = dev_get_platdata(&pdev->dev);
 	card = &bxt_pcm512x_card;
 	card->dev = &pdev->dev;
 
