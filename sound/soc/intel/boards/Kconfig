@@ -287,6 +287,10 @@ config SND_SOC_INTEL_BXT_RT298_MACH
 	   Say Y or m if you have such a device. This is a recommended option.
 	   If unsure select "N".
 
+endif ## SND_SOC_INTEL_APL
+
+if SND_SOC_SOF_APOLLOLAKE
+
 config SND_SOC_INTEL_BXT_PCM512x_MACH
 	tristate "Broxton with TI PCM512x codec"
 	depends on MFD_INTEL_LPSS && I2C && ACPI
@@ -297,7 +301,7 @@ config SND_SOC_INTEL_BXT_PCM512x_MACH
 	  Say Y or m if you have such a device. This is a recommended option.
 	  If unsure select "N".
 
-endif ## SND_SOC_INTEL_APL
+endif ## SND_SOC_SOF_APOLLOLAKE
 
 if SND_SOC_INTEL_KBL
 
