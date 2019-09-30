@@ -52,7 +52,7 @@ static bool rt1308_volatile_register(struct device *dev, unsigned int reg)
 	case 0x3004 ... 0x3005:
 	case 0x3008:
 	case 0x300a:
-	case 0xc000 ... 0xcff3: /* Vendor-defined command */
+	case 0xc000:
 		return true;
 	default:
 		return false;
