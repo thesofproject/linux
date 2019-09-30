@@ -2256,7 +2256,7 @@ static int dpcm_fe_dai_hw_params(struct snd_pcm_substream *substream,
 	if (ret < 0) {
 		dev_err(fe->dev,"ASoC: hw_params FE failed %d\n", ret);
 		dpcm_be_dai_hw_free(fe, stream);
-	 } else
+	} else
 		fe->dpcm[stream].state = SND_SOC_DPCM_STATE_HW_PARAMS;
 
 out:
@@ -3239,11 +3239,9 @@ EXPORT_SYMBOL_GPL(snd_soc_dpcm_fe_can_update);
 int snd_soc_dpcm_be_can_update(struct snd_soc_pcm_runtime *fe,
 		struct snd_soc_pcm_runtime *be, int stream)
 {
-	if ((fe->dpcm[stream].runtime_update == SND_SOC_DPCM_UPDATE_FE) ||
-	   ((fe->dpcm[stream].runtime_update == SND_SOC_DPCM_UPDATE_BE) &&
-		  be->dpcm[stream].runtime_update))
-		return 1;
-	return 0;
+	return fe->dpcm[stream].runtime_update == SND_SOC_DPCM_UPDATE_FE ||
+		(fe->dpcm[stream].runtime_update == SND_SOC_DPCM_UPDATE_BE &&
+		 be->dpcm[stream].runtime_update);
 }
 EXPORT_SYMBOL_GPL(snd_soc_dpcm_be_can_update);
 
