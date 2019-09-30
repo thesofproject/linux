@@ -63,9 +63,6 @@ static int snd_pcm_add(struct snd_pcm *newpcm)
 {
 	struct snd_pcm *pcm;
 
-	if (newpcm->internal)
-		return 0;
-
 	list_for_each_entry(pcm, &snd_pcm_devices, list) {
 		if (pcm->card == newpcm->card && pcm->device == newpcm->device)
 			return -EBUSY;
