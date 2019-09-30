@@ -644,10 +644,47 @@ static const struct sdw_device_id rt1308_id[] = {
 };
 MODULE_DEVICE_TABLE(sdw, rt1308_id);
 
+static int rt1308_dev_suspend(struct device *dev)
+{
+	struct rt1308_sdw_priv *rt1308 = dev_get_drvdata(dev);
+
+	regcache_cache_only(rt1308->regmap, true);
+
+	return 0;
+}
+
+#define RT1308_PROBE_TIMEOUT 2000
+
+static int rt1308_dev_resume(struct device *dev)
+{
+	struct sdw_slave *slave = to_sdw_slave_device(dev);
+	struct rt1308_sdw_priv *rt1308 = dev_get_drvdata(dev);
+	unsigned long time;
+
+	time = wait_for_completion_timeout(&slave->enumeration_complete,
+					   msecs_to_jiffies(RT1308_PROBE_TIMEOUT));
+	if (!time) {
+		dev_err(&slave->dev, "Enumeration not complete, timed out\n");
+		return -ETIMEDOUT;
+	}
+
+	regcache_cache_only(rt1308->regmap, false);
+	regcache_mark_dirty(rt1308->regmap);
+	regcache_sync(rt1308->regmap);
+
+	return 0;
+}
+
+static const struct dev_pm_ops rt1308_pm = {
+	SET_SYSTEM_SLEEP_PM_OPS(rt1308_dev_suspend, rt1308_dev_resume)
+	SET_RUNTIME_PM_OPS(rt1308_dev_suspend, rt1308_dev_resume, NULL)
+};
+
 static struct sdw_driver rt1308_sdw_driver = {
 	.driver = {
 		.name = "rt1308",
 		.owner = THIS_MODULE,
+		.pm = &rt1308_pm,
 	},
 	.probe = rt1308_sdw_probe,
 	.ops = &rt1308_slave_ops,
