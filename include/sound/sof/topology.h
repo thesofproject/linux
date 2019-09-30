@@ -9,6 +9,7 @@
 #ifndef __INCLUDE_SOUND_SOF_TOPOLOGY_H__
 #define __INCLUDE_SOUND_SOF_TOPOLOGY_H__
 
+#include <linux/bits.h>
 #include <sound/sof/header.h>
 
 /*
@@ -64,14 +65,14 @@ struct sof_ipc_comp {
 /*
  * SOF memory capabilities, add new ones at the end
  */
-#define SOF_MEM_CAPS_RAM			(1 << 0)
-#define SOF_MEM_CAPS_ROM			(1 << 1)
-#define SOF_MEM_CAPS_EXT			(1 << 2) /**< external */
-#define SOF_MEM_CAPS_LP			(1 << 3) /**< low power */
-#define SOF_MEM_CAPS_HP			(1 << 4) /**< high performance */
-#define SOF_MEM_CAPS_DMA			(1 << 5) /**< DMA'able */
-#define SOF_MEM_CAPS_CACHE			(1 << 6) /**< cacheable */
-#define SOF_MEM_CAPS_EXEC			(1 << 7) /**< executable */
+#define SOF_MEM_CAPS_RAM		BIT(0)
+#define SOF_MEM_CAPS_ROM		BIT(1)
+#define SOF_MEM_CAPS_EXT		BIT(2) /**< external */
+#define SOF_MEM_CAPS_LP			BIT(3) /**< low power */
+#define SOF_MEM_CAPS_HP			BIT(4) /**< high performance */
+#define SOF_MEM_CAPS_DMA		BIT(5) /**< DMA'able */
+#define SOF_MEM_CAPS_CACHE		BIT(6) /**< cacheable */
+#define SOF_MEM_CAPS_EXEC		BIT(7) /**< executable */
 
 /* create new component buffer - SOF_IPC_TPLG_BUFFER_NEW */
 struct sof_ipc_buffer {
