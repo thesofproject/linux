@@ -287,7 +287,7 @@ EXPORT_SYMBOL(snd_pcm_sgbuf_ops_page);
 int snd_pcm_lib_malloc_pages(struct snd_pcm_substream *substream, size_t size)
 {
 	struct snd_pcm_runtime *runtime;
-	struct snd_dma_buffer *dmab = NULL;
+	struct snd_dma_buffer *dmab;
 
 	if (PCM_RUNTIME_CHECK(substream))
 		return -EINVAL;
