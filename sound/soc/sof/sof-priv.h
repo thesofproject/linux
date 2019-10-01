@@ -395,6 +395,12 @@ struct snd_sof_dev {
 
 	/* power states related */
 	enum sof_d0_substate d0_substate;
+	/*
+	 * Set this flag which will be used to ignore the dapm PM events
+	 * and the suspending of d0i3_compatible stream during the S0ix
+	 * suspend/resume cycle, and clear the flag once resuming finished.
+	 */
+	bool s0_suspend;
 
 	/* DSP firmware boot */
 	wait_queue_head_t boot_wait;
