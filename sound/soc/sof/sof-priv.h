@@ -375,6 +375,9 @@ struct snd_sof_dev {
 	wait_queue_head_t waitq;
 	int code_loading;
 
+	/* probes */
+	unsigned int extractor;
+
 	/* DMA for Trace */
 	struct snd_dma_buffer dmatb;
 	struct snd_dma_buffer dmatp;
