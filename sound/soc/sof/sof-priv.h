@@ -398,6 +398,7 @@ struct snd_sof_dev {
 
 	/* probes */
 	unsigned int extractor;
+	char disable_extraction;
 
 	/* DMA for Trace */
 	struct snd_dma_buffer dmatb;
