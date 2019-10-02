@@ -253,7 +253,7 @@ static int mc_probe(struct platform_device *pdev)
 #endif
 
 	board = dmi_get_system_info(DMI_BOARD_NAME);
-	if (strstr(board, "CometLake U DDR4 HR ERB")) {
+	if (strstr(board, "CometLake U DDR4 HR")) {
 		dailink[0].name = "SDW1-Playback";
 		dailink[0].codecs = sdw1_codec;
 		dailink[0].num_codecs = ARRAY_SIZE(sdw1_codec);
