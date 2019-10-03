@@ -238,14 +238,18 @@ int snd_hdac_bus_get_response(struct hdac_bus *bus, unsigned int addr,
 {
 	unsigned long timeout;
 	unsigned long loopcounter;
+	int do_poll = 0;
 
+ again:
 	timeout = jiffies + msecs_to_jiffies(1000);
 
 	for (loopcounter = 0;; loopcounter++) {
 		spin_lock_irq(&bus->reg_lock);
-		if (bus->polling_mode)
+		if (bus->polling_mode || do_poll)
 			snd_hdac_bus_update_rirb(bus);
 		if (!bus->rirb.cmds[addr]) {
+			if (!do_poll)
+				bus->poll_count = 0;
 			if (res)
 				*res = bus->rirb.res[addr]; /* the last value */
 			spin_unlock_irq(&bus->reg_lock);
@@ -260,6 +264,23 @@ int snd_hdac_bus_get_response(struct hdac_bus *bus, unsigned int addr,
 			udelay(10);
 			cond_resched();
 		}
+	}
+
+	if (!bus->polling_mode && bus->poll_count < 2) {
+		dev_dbg(bus->dev,
+			"response timeout, polling the codec once: last cmd=0x%08x\n",
+			bus->last_cmd[addr]);
+		do_poll = 1;
+		bus->poll_count++;
+		goto again;
+	}
+
+	if (!bus->polling_mode) {
+		dev_warn(bus->dev,
+			 "response timeout, switching to polling mode: last cmd=0x%08x\n",
+			 bus->last_cmd[addr]);
+		bus->polling_mode = 1;
+		goto again;
 	}
 
 	return -EIO;
