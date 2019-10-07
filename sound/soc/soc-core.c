@@ -370,7 +370,6 @@ static void soc_free_pcm_runtime(struct snd_soc_pcm_runtime *rtd)
 	if (!rtd)
 		return;
 
-	kfree(rtd->codec_dais);
 	list_del(&rtd->list);
 
 	/*
@@ -384,7 +383,6 @@ static void soc_free_pcm_runtime(struct snd_soc_pcm_runtime *rtd)
 	 *	soc_new_pcm_runtime()
 	 */
 	device_unregister(rtd->dev);
-	kfree(rtd);
 }
 
 static struct snd_soc_pcm_runtime *soc_new_pcm_runtime(
@@ -416,7 +414,7 @@ static struct snd_soc_pcm_runtime *soc_new_pcm_runtime(
 	/*
 	 * for rtd
 	 */
-	rtd = kzalloc(sizeof(struct snd_soc_pcm_runtime), GFP_KERNEL);
+	rtd = devm_kzalloc(dev, sizeof(*rtd), GFP_KERNEL);
 	if (!rtd)
 		goto free_rtd;
 
@@ -426,7 +424,7 @@ static struct snd_soc_pcm_runtime *soc_new_pcm_runtime(
 	/*
 	 * for rtd->codec_dais
 	 */
-	rtd->codec_dais = kcalloc(dai_link->num_codecs,
+	rtd->codec_dais = devm_kcalloc(dev, dai_link->num_codecs,
 					sizeof(struct snd_soc_dai *),
 					GFP_KERNEL);
 	if (!rtd->codec_dais)
@@ -464,8 +462,6 @@ static void soc_remove_pcm_runtimes(struct snd_soc_card *card)
 
 	for_each_card_rtds_safe(card, rtd, _rtd)
 		soc_free_pcm_runtime(rtd);
-
-	card->num_rtd = 0;
 }
 
 struct snd_soc_pcm_runtime *snd_soc_get_pcm_runtime(struct snd_soc_card *card,
@@ -1277,23 +1273,6 @@ static int soc_probe_link_components(struct snd_soc_card *card)
 	return 0;
 }
 
-static void soc_remove_dai_links(struct snd_soc_card *card)
-{
-	struct snd_soc_dai_link *link, *_link;
-
-	soc_remove_link_dais(card);
-
-	soc_remove_link_components(card);
-
-	for_each_card_links_safe(card, link, _link) {
-		if (link->dobj.type == SND_SOC_DOBJ_DAI_LINK)
-			dev_warn(card->dev, "Topology forgot to remove link %s?\n",
-				link->name);
-
-		list_del(&link->list);
-	}
-}
-
 static int soc_init_dai_link(struct snd_soc_card *card,
 			     struct snd_soc_dai_link *link)
 {
@@ -1924,8 +1903,46 @@ match:
 	}
 }
 
+#define soc_setup_card_name(name, name1, name2, norm)		\
+	__soc_setup_card_name(name, sizeof(name), name1, name2, norm)
+static void __soc_setup_card_name(char *name, int len,
+				  const char *name1, const char *name2,
+				  int normalization)
+{
+	int i;
+
+	snprintf(name, len, "%s", name1 ? name1 : name2);
+
+	if (!normalization)
+		return;
+
+	/*
+	 * Name normalization
+	 *
+	 * The driver name is somewhat special, as it's used as a key for
+	 * searches in the user-space.
+	 *
+	 * ex)
+	 *	"abcd??efg" -> "abcd__efg"
+	 */
+	for (i = 0; i < len; i++) {
+		switch (name[i]) {
+		case '_':
+		case '-':
+		case '\0':
+			break;
+		default:
+			if (!isalnum(name[i]))
+				name[i] = '_';
+			break;
+		}
+	}
+}
+
 static void soc_cleanup_card_resources(struct snd_soc_card *card)
 {
+	struct snd_soc_dai_link *link, *_link;
+
 	/* free the ALSA card at first; this syncs with pending operations */
 	if (card->snd_card) {
 		snd_card_free(card->snd_card);
@@ -1933,7 +1950,12 @@ static void soc_cleanup_card_resources(struct snd_soc_card *card)
 	}
 
 	/* remove and free each DAI */
-	soc_remove_dai_links(card);
+	soc_remove_link_dais(card);
+	soc_remove_link_components(card);
+
+	for_each_card_links_safe(card, link, _link)
+		snd_soc_remove_dai_link(card, link);
+
 	soc_remove_pcm_runtimes(card);
 
 	/* remove auxiliary devices */
@@ -1984,6 +2006,7 @@ static int snd_soc_instantiate_card(struct snd_soc_card *card)
 		goto probe_end;
 
 	/* add predefined DAI links to the list */
+	card->num_rtd = 0;
 	for_each_card_prelinks(card, i, dai_link) {
 		ret = snd_soc_add_dai_link(card, dai_link);
 		if (ret < 0)
@@ -2082,24 +2105,12 @@ static int snd_soc_instantiate_card(struct snd_soc_card *card)
 	/* try to set some sane longname if DMI is available */
 	snd_soc_set_dmi_name(card, NULL);
 
-	snprintf(card->snd_card->shortname, sizeof(card->snd_card->shortname),
-		 "%s", card->name);
-	snprintf(card->snd_card->longname, sizeof(card->snd_card->longname),
-		 "%s", card->long_name ? card->long_name : card->name);
-	snprintf(card->snd_card->driver, sizeof(card->snd_card->driver),
-		 "%s", card->driver_name ? card->driver_name : card->name);
-	for (i = 0; i < ARRAY_SIZE(card->snd_card->driver); i++) {
-		switch (card->snd_card->driver[i]) {
-		case '_':
-		case '-':
-		case '\0':
-			break;
-		default:
-			if (!isalnum(card->snd_card->driver[i]))
-				card->snd_card->driver[i] = '_';
-			break;
-		}
-	}
+	soc_setup_card_name(card->snd_card->shortname,
+			    card->name, NULL, 0);
+	soc_setup_card_name(card->snd_card->longname,
+			    card->long_name, card->name, 0);
+	soc_setup_card_name(card->snd_card->driver,
+			    card->driver_name, card->name, 1);
 
 	if (card->late_probe) {
 		ret = card->late_probe(card);
@@ -2406,7 +2417,6 @@ int snd_soc_register_card(struct snd_soc_card *card)
 	INIT_LIST_HEAD(&card->dapm_dirty);
 	INIT_LIST_HEAD(&card->dobj_list);
 
-	card->num_rtd = 0;
 	card->instantiated = 0;
 	mutex_init(&card->mutex);
 	mutex_init(&card->dapm_mutex);
@@ -2494,7 +2504,7 @@ static char *fmt_single_name(struct device *dev, int *id)
 			*id = 0;
 	}
 
-	return kstrdup(name, GFP_KERNEL);
+	return devm_kstrdup(dev, name, GFP_KERNEL);
 }
 
 /*
@@ -2511,7 +2521,7 @@ static inline char *fmt_multiple_name(struct device *dev,
 		return NULL;
 	}
 
-	return kstrdup(dai_drv->name, GFP_KERNEL);
+	return devm_kstrdup(dev, dai_drv->name, GFP_KERNEL);
 }
 
 /**
@@ -2527,8 +2537,6 @@ static void snd_soc_unregister_dais(struct snd_soc_component *component)
 		dev_dbg(component->dev, "ASoC: Unregistered DAI '%s'\n",
 			dai->name);
 		list_del(&dai->list);
-		kfree(dai->name);
-		kfree(dai);
 	}
 }
 
@@ -2542,7 +2550,7 @@ static struct snd_soc_dai *soc_add_dai(struct snd_soc_component *component,
 
 	dev_dbg(dev, "ASoC: dynamically register DAI %s\n", dev_name(dev));
 
-	dai = kzalloc(sizeof(struct snd_soc_dai), GFP_KERNEL);
+	dai = devm_kzalloc(dev, sizeof(*dai), GFP_KERNEL);
 	if (dai == NULL)
 		return NULL;
 
@@ -2564,10 +2572,8 @@ static struct snd_soc_dai *soc_add_dai(struct snd_soc_component *component,
 		else
 			dai->id = component->num_dai;
 	}
-	if (dai->name == NULL) {
-		kfree(dai);
+	if (!dai->name)
 		return NULL;
-	}
 
 	dai->component = component;
 	dai->dev = dev;
@@ -2753,7 +2759,6 @@ static void snd_soc_component_add(struct snd_soc_component *component)
 static void snd_soc_component_cleanup(struct snd_soc_component *component)
 {
 	snd_soc_unregister_dais(component);
-	kfree(component->name);
 }
 
 static void snd_soc_component_del_unlocked(struct snd_soc_component *component)
