@@ -854,6 +854,8 @@ static unsigned long i915_audio_component_get_power(struct device *kdev)
 	if (dev_priv->audio_power_refcount++ == 0) {
 		if (INTEL_GEN(dev_priv) >= 10 || IS_GEMINILAKE(dev_priv)) {
 			I915_WRITE(AUD_FREQ_CNTRL, dev_priv->audio_freq_cntrl);
+			printk("restored AUD_FREQ_CNTRL to 0x%x\n",
+				      dev_priv->audio_freq_cntrl);
 			DRM_DEBUG_KMS("restored AUD_FREQ_CNTRL to 0x%x\n",
 				      dev_priv->audio_freq_cntrl);
 		}
@@ -1128,6 +1130,8 @@ static void i915_audio_component_init(struct drm_i915_private *dev_priv)
 
 	if (INTEL_GEN(dev_priv) >= 10 || IS_GEMINILAKE(dev_priv)) {
 		dev_priv->audio_freq_cntrl = I915_READ(AUD_FREQ_CNTRL);
+		printk("DEBUG: init value of AUD_FREQ_CNTRL of 0x%x\n",
+			      dev_priv->audio_freq_cntrl);
 		DRM_DEBUG_KMS("init value of AUD_FREQ_CNTRL of 0x%x\n",
 			      dev_priv->audio_freq_cntrl);
 	}
