@@ -104,4 +104,8 @@
 /* for backward compatibility */
 #define SOF_TKN_EFFECT_TYPE	SOF_TKN_PROCESS_TYPE
 
+/* Led control for mute switches */
+#define SOF_TKN_MUTE_LED_USE			1300
+#define SOF_TKN_MUTE_LED_DIRECTION		1301
+
 #endif

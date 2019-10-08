@@ -15,6 +15,7 @@
 
 #include <sound/hdaudio.h>
 #include <sound/soc.h>
+#include <sound/control.h>
 
 #include <sound/sof.h>
 #include <sound/sof/stream.h> /* needs to be included before control.h */
@@ -296,6 +297,12 @@ struct snd_sof_pcm {
 	int hw_params_upon_resume[2]; /* set up hw_params upon resume */
 };
 
+struct snd_sof_led_control {
+	unsigned int use_led;
+	unsigned int direction;
+	unsigned int led_value;
+};
+
 /* ALSA SOF Kcontrol device */
 struct snd_sof_control {
 	struct snd_sof_dev *sdev;
@@ -310,6 +317,8 @@ struct snd_sof_control {
 	u32 *volume_table; /* volume table computed from tlv data*/
 
 	struct list_head list;	/* list in sdev control list */
+
+	struct snd_sof_led_control led_ctl;
 };
 
 /* ASoC SOF DAPM widget */
