@@ -399,17 +399,10 @@ io_error:
 	pr_err_ratelimited("IO error in %s, ret %d\n", __func__, ret);
 }
 
-static int rt711_set_jack_detect(struct snd_soc_component *component,
-	struct snd_soc_jack *hs_jack, void *data)
+static void rt711_jack_init(struct rt711_priv *rt711)
 {
-	struct rt711_priv *rt711 = snd_soc_component_get_drvdata(component);
 	struct snd_soc_dapm_context *dapm =
-		snd_soc_component_get_dapm(component);
-
-	if (!rt711->hw_init) {
-		dev_dbg(&rt711->slave->dev, "%s hw_init not ready yet\n", __func__);
-		return -EAGAIN;
-	}
+		snd_soc_component_get_dapm(rt711->component);
 
 	mutex_lock(&rt711->calibrate_mutex);
 	/* power on */
@@ -417,27 +410,55 @@ static int rt711_set_jack_detect(struct snd_soc_component *component,
 		regmap_write(rt711->regmap,
 			RT711_SET_AUDIO_POWER_STATE, AC_PWRST_D0);
 
-	/* unsolicited response & IRQ control */
-	regmap_write(rt711->regmap, RT711_SET_MIC2_UNSOLICITED_ENABLE, 0x82);
-	regmap_write(rt711->regmap, RT711_SET_HP_UNSOLICITED_ENABLE, 0x81);
-	regmap_write(rt711->regmap, RT711_SET_INLINE_UNSOLICITED_ENABLE, 0x83);
-	rt711_index_write(rt711->regmap, RT711_VENDOR_REG,
-		0x10, 0x2420);
-	rt711_index_write(rt711->regmap, RT711_VENDOR_REG,
-		0x19, 0x2e11);
+	if (rt711->hs_jack) {
+		/* unsolicited response & IRQ control */
+		regmap_write(rt711->regmap,
+			RT711_SET_MIC2_UNSOLICITED_ENABLE, 0x82);
+		regmap_write(rt711->regmap,
+			RT711_SET_HP_UNSOLICITED_ENABLE, 0x81);
+		regmap_write(rt711->regmap,
+			RT711_SET_INLINE_UNSOLICITED_ENABLE, 0x83);
+		rt711_index_write(rt711->regmap, RT711_VENDOR_REG,
+			0x10, 0x2420);
+		rt711_index_write(rt711->regmap, RT711_VENDOR_REG,
+			0x19, 0x2e11);
+
+		dev_dbg(&rt711->slave->dev, "in %s enable\n", __func__);
+
+		mod_delayed_work(system_power_efficient_wq,
+			&rt711->jack_detect_work, msecs_to_jiffies(250));
+	} else {
+		regmap_write(rt711->regmap,
+			RT711_SET_MIC2_UNSOLICITED_ENABLE, 0x00);
+		regmap_write(rt711->regmap,
+			RT711_SET_HP_UNSOLICITED_ENABLE, 0x00);
+		regmap_write(rt711->regmap,
+			RT711_SET_INLINE_UNSOLICITED_ENABLE, 0x00);
+
+		dev_dbg(&rt711->slave->dev, "in %s disable\n", __func__);
+	}
 
 	/* power off */
 	if (dapm->bias_level <= SND_SOC_BIAS_STANDBY)
 		regmap_write(rt711->regmap,
 			RT711_SET_AUDIO_POWER_STATE, AC_PWRST_D3);
 	mutex_unlock(&rt711->calibrate_mutex);
+}
+
+static int rt711_set_jack_detect(struct snd_soc_component *component,
+	struct snd_soc_jack *hs_jack, void *data)
+{
+	struct rt711_priv *rt711 = snd_soc_component_get_drvdata(component);
 
 	rt711->hs_jack = hs_jack;
 
-	dev_dbg(&rt711->slave->dev, "in %s...\n", __func__);
+	if (!rt711->hw_init) {
+		dev_dbg(&rt711->slave->dev,
+			"%s hw_init not ready yet\n", __func__);
+		return 0;
+	}
 
-	mod_delayed_work(system_power_efficient_wq,
-			   &rt711->jack_detect_work, msecs_to_jiffies(250));
+	rt711_jack_init(rt711);
 
 	return 0;
 }
@@ -1243,6 +1264,13 @@ int rt711_io_init(struct device *dev, struct sdw_slave *slave)
 	mutex_init(&rt711->calibrate_mutex);
 	INIT_WORK(&rt711->calibration_work, rt711_calibration_work);
 	schedule_work(&rt711->calibration_work);
+
+	/*
+	 * if set_jack callback occurred early than io_init,
+	 * we set up the jack detection function now
+	 */
+	if (rt711->hs_jack)
+		rt711_jack_init(rt711);
 
 	/* Mark Slave initialization complete */
 	rt711->hw_init = true;
