@@ -267,7 +267,7 @@ int snd_hdac_bus_get_response(struct hdac_bus *bus, unsigned int addr,
 	}
 
 	if (!bus->polling_mode && bus->poll_count < 2) {
-		dev_dbg(bus->dev,
+		dev_warn(bus->dev,
 			"response timeout, polling the codec once: last cmd=0x%08x\n",
 			bus->last_cmd[addr]);
 		do_poll = 1;
