@@ -289,8 +289,11 @@ static int sof_pci_probe(struct pci_dev *pci,
 
 	ret = snd_intel_dsp_driver_probe(pci);
 	if (ret != SND_INTEL_DSP_DRIVER_ANY &&
-	    ret != SND_INTEL_DSP_DRIVER_SOF)
+	    ret != SND_INTEL_DSP_DRIVER_SOF) {
+		dev_info(&pci->dev,
+			 "Driver not selected for this PCI Device\n");
 		return -ENODEV;
+	}
 
 	dev_dbg(&pci->dev, "PCI DSP detected");
 

@@ -990,8 +990,10 @@ static int skl_probe(struct pci_dev *pci,
 	case SND_SKL_PCI_BIND_AUTO:
 		err = snd_intel_dsp_driver_probe(pci);
 		if (err != SND_INTEL_DSP_DRIVER_ANY &&
-		    err != SND_INTEL_DSP_DRIVER_SST)
+		    err != SND_INTEL_DSP_DRIVER_SST) {
+			dev_info(&pci->dev, "Driver not selected for this PCI Device\n");
 			return -ENODEV;
+		}
 		break;
 	case SND_SKL_PCI_BIND_LEGACY:
 		dev_info(&pci->dev, "Module parameter forced binding with HDaudio legacy, aborting probe\n");

@@ -2044,8 +2044,11 @@ static int azx_probe(struct pci_dev *pci,
 	if (dsp_driver) {
 		err = snd_intel_dsp_driver_probe(pci);
 		if (err != SND_INTEL_DSP_DRIVER_ANY &&
-		    err != SND_INTEL_DSP_DRIVER_LEGACY)
+		    err != SND_INTEL_DSP_DRIVER_LEGACY) {
+			dev_info(&pci->dev,
+				 "Driver not selected for this PCI Device\n");
 			return -ENODEV;
+		}
 	}
 
 	err = snd_card_new(&pci->dev, index[dev], id[dev], THIS_MODULE,
