@@ -249,6 +249,9 @@ static int rt700_dev_suspend(struct device *dev)
 {
 	struct rt700_priv *rt700 = dev_get_drvdata(dev);
 
+	if (!rt700->hw_init)
+		return 0;
+
 	regcache_cache_only(rt700->regmap, true);
 
 	return 0;
@@ -261,6 +264,9 @@ static int rt700_dev_resume(struct device *dev)
 	struct sdw_slave *slave = to_sdw_slave_device(dev);
 	struct rt700_priv *rt700 = dev_get_drvdata(dev);
 	unsigned long time;
+
+	if (!rt700->hw_init)
+		return 0;
 
 	time = wait_for_completion_timeout(&slave->enumeration_complete,
 					   msecs_to_jiffies(RT700_PROBE_TIMEOUT));
