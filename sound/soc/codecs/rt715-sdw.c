@@ -261,6 +261,9 @@ static int rt715_dev_suspend(struct device *dev)
 {
 	struct rt715_priv *rt715 = dev_get_drvdata(dev);
 
+	if (!rt715->hw_init)
+		return 0;
+
 	regcache_cache_only(rt715->regmap, true);
 
 	return 0;
@@ -273,6 +276,9 @@ static int rt715_dev_resume(struct device *dev)
 	struct sdw_slave *slave = to_sdw_slave_device(dev);
 	struct rt715_priv *rt715 = dev_get_drvdata(dev);
 	unsigned long time;
+
+	if (!rt715->hw_init)
+		return 0;
 
 	time = wait_for_completion_timeout(&slave->enumeration_complete,
 					   msecs_to_jiffies(RT715_PROBE_TIMEOUT));
