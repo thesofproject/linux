@@ -41,33 +41,13 @@ static int rt711_index_write(struct regmap *regmap,
 		unsigned int nid, unsigned int reg, unsigned int value)
 {
 	int ret;
-	unsigned int val_h, val_l;
+	unsigned int addr = ((RT711_PRIV_INDEX_W_H | nid) << 16) | reg;
 
-	val_h = (reg >> 8) & 0xff;
-	val_l = reg & 0xff;
-	ret = regmap_write(regmap, RT711_PRIV_INDEX_W_H | nid, val_h);
+	ret = regmap_write(regmap, addr, value);
 	if (ret < 0) {
-		pr_err("Failed to set private addr: %d\n", ret);
+		pr_err("Failed to set private value: %08x <= %04x %d\n", ret, addr, value);
 		goto err;
 	}
-	ret = regmap_write(regmap, RT711_PRIV_INDEX_W_L | nid, val_l);
-	if (ret < 0) {
-		pr_err("Failed to set private addr: %d\n", ret);
-		goto err;
-	}
-	val_h = (value >> 8) & 0xff;
-	val_l = value & 0xff;
-	ret = regmap_write(regmap, RT711_PRIV_DATA_W_H | nid, val_h);
-	if (ret < 0) {
-		pr_err("Failed to set private value: %d\n", ret);
-		goto err;
-	}
-	ret = regmap_write(regmap, RT711_PRIV_DATA_W_L | nid, val_l);
-	if (ret < 0) {
-		pr_err("Failed to set private value: %d\n", ret);
-		goto err;
-	}
-	return 0;
 
 err:
 	return ret;
@@ -77,44 +57,14 @@ static unsigned int rt711_index_read(struct regmap *regmap,
 		unsigned int nid, unsigned int reg, unsigned int *value)
 {
 	int ret;
-	unsigned int val_h, val_l;
-	unsigned int sdw_data_3, sdw_data_2, sdw_data_1, sdw_data_0;
+	unsigned int addr = ((RT711_PRIV_INDEX_W_H | nid) << 16) | reg;
 
-	val_h = (reg >> 8) & 0xff;
-	val_l = reg & 0xff;
-	ret = regmap_write(regmap, RT711_PRIV_INDEX_W_H | nid, val_h);
+	*value = 0;
+	ret = regmap_read(regmap, addr, value);
 	if (ret < 0) {
-		pr_err("Failed to set private addr: %d\n", ret);
+		pr_err("Failed to get private value: %08x => %04x %d\n", ret, addr, *value);
 		goto err;
 	}
-	ret = regmap_write(regmap, RT711_PRIV_INDEX_W_L | nid, val_l);
-	if (ret < 0) {
-		pr_err("Failed to set private addr: %d\n", ret);
-		goto err;
-	}
-	val_h = 0;
-	val_l = 0;
-	ret = regmap_write(regmap, RT711_PRIV_DATA_R_H | nid, val_h);
-	if (ret < 0) {
-		pr_err("Failed to set private value: %d\n", ret);
-		goto err;
-	}
-	ret = regmap_write(regmap, RT711_PRIV_DATA_R_L | nid, val_l);
-	if (ret < 0) {
-		pr_err("Failed to set private value: %d\n", ret);
-		goto err;
-	}
-
-	sdw_data_3 = 0;
-	sdw_data_2 = 0;
-	sdw_data_1 = 0;
-	sdw_data_0 = 0;
-	regmap_read(regmap, RT711_READ_HDA_3, &sdw_data_3);
-	regmap_read(regmap, RT711_READ_HDA_2, &sdw_data_2);
-	regmap_read(regmap, RT711_READ_HDA_1, &sdw_data_1);
-	regmap_read(regmap, RT711_READ_HDA_0, &sdw_data_0);
-	*value = ((sdw_data_3 & 0xff) << 24) | ((sdw_data_2 & 0xff) << 16) |
-		 ((sdw_data_1 & 0xff) << 8) | (sdw_data_0 & 0xff);
 
 err:
 	return ret;
@@ -280,7 +230,7 @@ static void rt711_jack_detect_handler(struct work_struct *work)
 	struct rt711_priv *rt711 =
 		container_of(work, struct rt711_priv, jack_detect_work.work);
 	int btn_type = 0, ret;
-	unsigned int jack_status, reg;
+	unsigned int jack_status = 0, reg;
 
 	if (!rt711->hs_jack)
 		return;
@@ -289,15 +239,12 @@ static void rt711_jack_detect_handler(struct work_struct *work)
 		return;
 
 	reg = RT711_VERB_GET_PIN_SENSE | RT711_HP_OUT;
-	ret = regmap_write(rt711->regmap, reg, 0x00);
-	if (ret < 0)
-		goto io_error;
-	ret = regmap_read(rt711->regmap, RT711_READ_HDA_3, &jack_status);
+	ret = regmap_read(rt711->regmap, reg, &jack_status);
 	if (ret < 0)
 		goto io_error;
 
 	/* pin attached */
-	if (jack_status & 0x80) {
+	if (jack_status & (1 << 31)) {
 		/* jack in */
 		if (rt711->jack_type == 0) {
 			ret = rt711_headset_detect(rt711);
@@ -346,18 +293,15 @@ static void rt711_btn_check_handler(struct work_struct *work)
 	struct rt711_priv *rt711 = container_of(work, struct rt711_priv,
 		jack_btn_check_work.work);
 	int btn_type = 0, ret;
-	unsigned int jack_status, reg;
+	unsigned int jack_status = 0, reg;
 
 	reg = RT711_VERB_GET_PIN_SENSE | RT711_HP_OUT;
-	ret = regmap_write(rt711->regmap, reg, 0x00);
-	if (ret < 0)
-		goto io_error;
-	ret = regmap_read(rt711->regmap, RT711_READ_HDA_3, &jack_status);
+	ret = regmap_read(rt711->regmap, reg, &jack_status);
 	if (ret < 0)
 		goto io_error;
 
 	/* pin attached */
-	if (jack_status & 0x80) {
+	if (jack_status & (1 << 31)) {
 		if (rt711->jack_type == SND_JACK_HEADSET) {
 			/* jack is already in, report button event */
 			btn_type = rt711_button_detect(rt711);
@@ -468,15 +412,13 @@ static void rt711_get_gain(struct rt711_priv *rt711, unsigned int addr_h,
 			   unsigned int *r_val, unsigned int *l_val)
 {
 	/* R Channel */
-	regmap_write(rt711->regmap, addr_h, val_h);
-	regmap_write(rt711->regmap, addr_l, 0);
-	regmap_read(rt711->regmap, RT711_READ_HDA_0, r_val);
+	*r_val = (val_h << 8);
+	regmap_read(rt711->regmap, addr_l, r_val);
 
 	/* L Channel */
 	val_h |= 0x20;
-	regmap_write(rt711->regmap, addr_h, val_h);
-	regmap_write(rt711->regmap, addr_l, 0);
-	regmap_read(rt711->regmap, RT711_READ_HDA_0, l_val);
+	*l_val = (val_h << 8);
+	regmap_read(rt711->regmap, addr_h, l_val);
 }
 
 /* For Verb-Set Amplifier Gain (Verb ID = 3h) */
@@ -494,8 +436,8 @@ static int rt711_set_amp_gain_put(struct snd_kcontrol *kcontrol,
 	int i;
 
 	/* Can't use update bit function, so read the original value first */
-	addr_h = (mc->reg + 0x2000) | 0x800;
-	addr_l = (mc->rreg + 0x2000) | 0x800;
+	addr_h = mc->reg;
+	addr_l = mc->rreg;
 	if (mc->shift == RT711_DIR_OUT_SFT) /* output */
 		val_h = 0x80;
 	else /* input */
@@ -544,27 +486,22 @@ static int rt711_set_amp_gain_put(struct snd_kcontrol *kcontrol,
 	}
 
 	for (i = 0; i < 3; i++) { /* retry 3 times at most */
-		addr_h = mc->reg;
-		addr_l = mc->rreg;
+
 		if (val_ll == val_lr) {
 			/* Set both L/R channels at the same time */
 			val_h = (1 << mc->shift) | (3 << 4);
-			regmap_write(rt711->regmap, addr_h, val_h);
-			regmap_write(rt711->regmap, addr_l, val_ll);
+			regmap_write(rt711->regmap, addr_h, (val_h << 8 | val_ll));
+			regmap_write(rt711->regmap, addr_l, (val_h << 8 | val_ll));
 		} else {
 			/* Lch*/
 			val_h = (1 << mc->shift) | (1 << 5);
-			regmap_write(rt711->regmap, addr_h, val_h);
-			regmap_write(rt711->regmap, addr_l, val_ll);
+			regmap_write(rt711->regmap, addr_h, (val_h << 8 | val_ll));
 
 			/* Rch */
 			val_h = (1 << mc->shift) | (1 << 4);
-			regmap_write(rt711->regmap, addr_h, val_h);
-			regmap_write(rt711->regmap, addr_l, val_lr);
+			regmap_write(rt711->regmap, addr_l, (val_h << 8 | val_lr));
 		}
 		/* check result */
-		addr_h = (mc->reg + 0x2000) | 0x800;
-		addr_l = (mc->rreg + 0x2000) | 0x800;
 		if (mc->shift == RT711_DIR_OUT_SFT) /* output */
 			val_h = 0x80;
 		else /* input */
@@ -593,8 +530,8 @@ static int rt711_set_amp_gain_get(struct snd_kcontrol *kcontrol,
 	unsigned int read_ll, read_rl;
 
 	/* switch to get command */
-	addr_h = (mc->reg + 0x2000) | 0x800;
-	addr_l = (mc->rreg + 0x2000) | 0x800;
+	addr_h = mc->reg;
+	addr_l = mc->rreg;
 	if (mc->shift == RT711_DIR_OUT_SFT) /* output */
 		val_h = 0x80;
 	else /* input */
@@ -659,7 +596,8 @@ static int rt711_mux_get(struct snd_kcontrol *kcontrol,
 {
 	struct snd_soc_component *component =
 		snd_soc_dapm_kcontrol_component(kcontrol);
-	unsigned int reg, val, nid;
+	struct rt711_priv *rt711 = snd_soc_component_get_drvdata(component);
+	unsigned int reg, val = 0, nid;
 	int ret;
 
 	if (strstr(ucontrol->id.name, "ADC 22 Mux"))
@@ -670,17 +608,13 @@ static int rt711_mux_get(struct snd_kcontrol *kcontrol,
 		return -EINVAL;
 
 	/* vid = 0xf01 */
-	reg = RT711_VERB_GET_CONNECT_SEL | nid;
-	ret = snd_soc_component_write(component, reg, 0x0);
-	if (ret < 0) {
-		dev_err(component->dev, "sdw write failed\n");
-		return ret;
-	}
-	ret = snd_soc_component_read(component, RT711_READ_HDA_0, &val);
+	reg = RT711_VERB_SET_CONNECT_SEL | nid;
+	ret = regmap_read(rt711->regmap, reg, &val);
 	if (ret < 0) {
 		dev_err(component->dev, "sdw read failed\n");
 		return ret;
 	}
+
 	ucontrol->value.enumerated.item[0] = val;
 
 	return 0;
@@ -692,10 +626,11 @@ static int rt711_mux_put(struct snd_kcontrol *kcontrol,
 	struct snd_soc_component *component =
 		snd_soc_dapm_kcontrol_component(kcontrol);
 	struct snd_soc_dapm_context *dapm =
-				snd_soc_dapm_kcontrol_dapm(kcontrol);
+		snd_soc_dapm_kcontrol_dapm(kcontrol);
+	struct rt711_priv *rt711 = snd_soc_component_get_drvdata(component);
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
 	unsigned int *item = ucontrol->value.enumerated.item;
-	unsigned int val, val2, change, reg, nid;
+	unsigned int val, val2 = 0, change, reg, nid;
 	int ret;
 
 	if (item[0] >= e->items)
@@ -711,17 +646,13 @@ static int rt711_mux_put(struct snd_kcontrol *kcontrol,
 	/* Verb ID = 0x701h */
 	val = snd_soc_enum_item_to_val(e, item[0]) << e->shift_l;
 
-	reg = RT711_VERB_GET_CONNECT_SEL | nid;
-	ret = snd_soc_component_write(component, reg, 0x0);
-	if (ret < 0) {
-		dev_err(component->dev, "sdw write failed\n");
-		return ret;
-	}
-	ret = snd_soc_component_read(component, RT711_READ_HDA_0, &val2);
+	reg = RT711_VERB_SET_CONNECT_SEL | nid;
+	ret = regmap_read(rt711->regmap, reg, &val2);
 	if (ret < 0) {
 		dev_err(component->dev, "sdw read failed\n");
 		return ret;
 	}
+
 	if (val == val2)
 		change = 0;
 	else
@@ -729,7 +660,7 @@ static int rt711_mux_put(struct snd_kcontrol *kcontrol,
 
 	if (change) {
 		reg = RT711_VERB_SET_CONNECT_SEL | nid;
-		snd_soc_component_write(component, reg, val);
+		regmap_write(rt711->regmap, reg, val);
 	}
 
 	snd_soc_dapm_mux_update_power(dapm, kcontrol,
@@ -764,29 +695,26 @@ static int rt711_dac_surround_event(struct snd_soc_dapm_widget *w,
 {
 	struct snd_soc_component *component =
 		snd_soc_dapm_to_component(w->dapm);
+	struct rt711_priv *rt711 = snd_soc_component_get_drvdata(component);
 	unsigned int val_h = (1 << RT711_DIR_OUT_SFT) | (0x3 << 4);
 	unsigned int val_l;
 
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
-		snd_soc_component_write(component,
+		regmap_write(rt711->regmap,
 			RT711_SET_STREAMID_DAC2, 0x10);
 
 		val_l = 0x00;
-		snd_soc_component_write(component,
-			RT711_SET_GAIN_HP_H, val_h);
-		snd_soc_component_write(component,
-			RT711_SET_GAIN_HP_L, val_l);
+		regmap_write(rt711->regmap,
+			RT711_SET_GAIN_HP_H, (val_h << 8 | val_l));
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
-		snd_soc_component_write(component,
+		regmap_write(rt711->regmap,
 			RT711_SET_STREAMID_DAC2, 0x00);
 
 		val_l = (1 << RT711_MUTE_SFT);
-		snd_soc_component_write(component,
-			RT711_SET_GAIN_HP_H, val_h);
-		snd_soc_component_write(component,
-			RT711_SET_GAIN_HP_L, val_l);
+		regmap_write(rt711->regmap,
+			RT711_SET_GAIN_HP_H, (val_h << 8 | val_l));
 		break;
 	}
 	return 0;
@@ -797,14 +725,15 @@ static int rt711_adc_09_event(struct snd_soc_dapm_widget *w,
 {
 	struct snd_soc_component *component =
 		snd_soc_dapm_to_component(w->dapm);
+	struct rt711_priv *rt711 = snd_soc_component_get_drvdata(component);
 
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
-		snd_soc_component_write(component,
+		regmap_write(rt711->regmap,
 			RT711_SET_STREAMID_ADC1, 0x10);
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
-		snd_soc_component_write(component,
+		regmap_write(rt711->regmap,
 			RT711_SET_STREAMID_ADC1, 0x00);
 		break;
 	}
@@ -816,14 +745,15 @@ static int rt711_adc_08_event(struct snd_soc_dapm_widget *w,
 {
 	struct snd_soc_component *component =
 		snd_soc_dapm_to_component(w->dapm);
+	struct rt711_priv *rt711 = snd_soc_component_get_drvdata(component);
 
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
-		snd_soc_component_write(component,
+		regmap_write(rt711->regmap,
 			RT711_SET_STREAMID_ADC2, 0x10);
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
-		snd_soc_component_write(component,
+		regmap_write(rt711->regmap,
 			RT711_SET_STREAMID_ADC2, 0x00);
 		break;
 	}
@@ -881,18 +811,19 @@ static int rt711_set_bias_level(struct snd_soc_component *component,
 {
 	struct snd_soc_dapm_context *dapm =
 		snd_soc_component_get_dapm(component);
+	struct rt711_priv *rt711 = snd_soc_component_get_drvdata(component);
 
 	switch (level) {
 	case SND_SOC_BIAS_PREPARE:
 		if (dapm->bias_level == SND_SOC_BIAS_STANDBY) {
-			snd_soc_component_write(component,
+			regmap_write(rt711->regmap,
 						RT711_SET_AUDIO_POWER_STATE,
 						AC_PWRST_D0);
 		}
 		break;
 
 	case SND_SOC_BIAS_STANDBY:
-		snd_soc_component_write(component,
+		regmap_write(rt711->regmap,
 					RT711_SET_AUDIO_POWER_STATE,
 					AC_PWRST_D3);
 		break;
@@ -1007,11 +938,6 @@ static int rt711_pcm_hw_params(struct snd_pcm_substream *substream,
 		return retval;
 	}
 
-	/* 48Khz */
-	snd_soc_component_write(component, RT711_DAC_FORMAT_H, 0x0);
-	snd_soc_component_write(component, RT711_ADC1_FORMAT_H, 0x0);
-	snd_soc_component_write(component, RT711_ADC2_FORMAT_H, 0x0);
-
 	if (params_channels(params) <= 16) {
 		/* bit 3:0 Number of Channel */
 		val |= (params_channels(params) - 1);
@@ -1041,9 +967,10 @@ static int rt711_pcm_hw_params(struct snd_pcm_substream *substream,
 		return -EINVAL;
 	}
 
-	snd_soc_component_write(component, RT711_DAC_FORMAT_L, val);
-	snd_soc_component_write(component, RT711_ADC1_FORMAT_L, val);
-	snd_soc_component_write(component, RT711_ADC2_FORMAT_L, val);
+	/* 48Khz */
+	regmap_write(rt711->regmap, RT711_DAC_FORMAT_H, val);
+	regmap_write(rt711->regmap, RT711_ADC1_FORMAT_H, val);
+	regmap_write(rt711->regmap, RT711_ADC2_FORMAT_H, val);
 
 	return retval;
 }
@@ -1162,8 +1089,8 @@ static void rt711_calibration_work(struct work_struct *work)
 	rt711_calibration(rt711);
 }
 
-int rt711_init(struct device *dev, struct regmap *regmap,
-	       struct sdw_slave *slave)
+int rt711_init(struct device *dev, struct regmap *sdw_regmap,
+	       struct regmap *regmap, struct sdw_slave *slave)
 {
 	struct rt711_priv *rt711;
 	int ret;
@@ -1174,6 +1101,7 @@ int rt711_init(struct device *dev, struct regmap *regmap,
 
 	dev_set_drvdata(dev, rt711);
 	rt711->slave = slave;
+	rt711->sdw_regmap = sdw_regmap;
 	rt711->regmap = regmap;
 
 	/*
@@ -1213,18 +1141,12 @@ int rt711_io_init(struct device *dev, struct sdw_slave *slave)
 	regmap_write(rt711->regmap, RT711_SET_PIN_LINE2, 0x20);
 
 	/* Mute HP/ADC1/ADC2 */
-	regmap_write(rt711->regmap, RT711_SET_GAIN_HP_H, 0xa0);
-	regmap_write(rt711->regmap, RT711_SET_GAIN_HP_L, 0x80);
-	regmap_write(rt711->regmap, RT711_SET_GAIN_HP_H, 0x90);
-	regmap_write(rt711->regmap, RT711_SET_GAIN_HP_L, 0x80);
-	regmap_write(rt711->regmap, RT711_SET_GAIN_ADC2_H, 0x60);
-	regmap_write(rt711->regmap, RT711_SET_GAIN_ADC2_L, 0x80);
-	regmap_write(rt711->regmap, RT711_SET_GAIN_ADC2_H, 0x50);
-	regmap_write(rt711->regmap, RT711_SET_GAIN_ADC2_L, 0x80);
-	regmap_write(rt711->regmap, RT711_SET_GAIN_ADC1_H, 0x60);
-	regmap_write(rt711->regmap, RT711_SET_GAIN_ADC1_L, 0x80);
-	regmap_write(rt711->regmap, RT711_SET_GAIN_ADC1_H, 0x50);
-	regmap_write(rt711->regmap, RT711_SET_GAIN_ADC1_L, 0x80);
+	regmap_write(rt711->regmap, RT711_SET_GAIN_HP_H, 0xa080);
+	regmap_write(rt711->regmap, RT711_SET_GAIN_HP_H, 0x9080);
+	regmap_write(rt711->regmap, RT711_SET_GAIN_ADC2_H, 0x6080);
+	regmap_write(rt711->regmap, RT711_SET_GAIN_ADC2_H, 0x5080);
+	regmap_write(rt711->regmap, RT711_SET_GAIN_ADC1_H, 0x6080);
+	regmap_write(rt711->regmap, RT711_SET_GAIN_ADC1_H, 0x5080);
 
 	/* Set Configuration Default */
 	regmap_write(rt711->regmap, 0x4f12, 0x91);
