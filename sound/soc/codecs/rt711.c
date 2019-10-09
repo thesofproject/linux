@@ -611,7 +611,7 @@ static int rt711_mux_get(struct snd_kcontrol *kcontrol,
 	reg = RT711_VERB_SET_CONNECT_SEL | nid;
 	ret = regmap_read(rt711->regmap, reg, &val);
 	if (ret < 0) {
-		dev_err(component->dev, "sdw read failed\n");
+		dev_err(component->dev, "%s: sdw read failed: %d\n", __func__, ret);
 		return ret;
 	}
 
@@ -649,7 +649,7 @@ static int rt711_mux_put(struct snd_kcontrol *kcontrol,
 	reg = RT711_VERB_SET_CONNECT_SEL | nid;
 	ret = regmap_read(rt711->regmap, reg, &val2);
 	if (ret < 0) {
-		dev_err(component->dev, "sdw read failed\n");
+		dev_err(component->dev, "%s: sdw read failed: %d\n", __func__, ret);
 		return ret;
 	}
 
