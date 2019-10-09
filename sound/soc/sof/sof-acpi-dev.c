@@ -12,6 +12,7 @@
 #include <linux/firmware.h>
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
+#include <linux/dmi.h>
 #include <sound/soc-acpi.h>
 #include <sound/soc-acpi-intel-match.h>
 #include <sound/sof.h>
@@ -117,6 +118,39 @@ static const struct sof_dev_desc sof_acpi_cherrytrail_desc = {
 	.arch_ops = &sof_xtensa_arch_ops
 };
 
+static int minnowboard_quirk_cb(const struct dmi_system_id *id)
+{
+	struct device *dev = id->driver_data;
+
+	/*
+	 * Increment the usage count so as to prevent the device
+	 * from entering runtime suspend.
+	 */
+	pm_runtime_get_noresume(dev);
+
+	return 1;
+}
+
+static struct dmi_system_id minnowbard_quirk_table[] = {
+	{
+		/* Minnowboard Max B3 */
+		.callback = minnowboard_quirk_cb,
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Circuitco"),
+			DMI_MATCH(DMI_PRODUCT_NAME,
+				  "Minnowboard Max B3 PLATFORM"),
+		},
+	},
+	{
+		/* Minnowboard Turbot */
+		.callback = minnowboard_quirk_cb,
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "ADI"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "Minnowboard Turbot"),
+		},
+	},
+};
+
 #endif
 
 static const struct dev_pm_ops sof_acpi_pm = {
@@ -127,13 +161,26 @@ static const struct dev_pm_ops sof_acpi_pm = {
 
 static void sof_acpi_probe_complete(struct device *dev)
 {
+	int i;
+
 	if (sof_acpi_debug & SOF_ACPI_DISABLE_PM_RUNTIME)
 		return;
 
 	/* allow runtime_pm */
 	pm_runtime_set_autosuspend_delay(dev, SND_SOF_SUSPEND_DELAY_MS);
 	pm_runtime_use_autosuspend(dev);
+	pm_runtime_set_active(dev);
 	pm_runtime_enable(dev);
+	pm_runtime_mark_last_busy(dev);
+
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_BAYTRAIL)
+	/* set driver data in the quirk table */
+	for (i = 0; i < ARRAY_SIZE(minnowbard_quirk_table); i++)
+		minnowbard_quirk_table[i].driver_data = dev;
+
+	/* check for Minnowboards */
+	dmi_check_system(minnowbard_quirk_table);
+#endif
 }
 
 static int sof_acpi_probe(struct platform_device *pdev)
