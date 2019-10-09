@@ -1439,20 +1439,7 @@ int snd_soc_add_dai_link(struct snd_soc_card *card,
 {
 	int ret;
 
-	if (dai_link->dobj.type
-	    && dai_link->dobj.type != SND_SOC_DOBJ_DAI_LINK) {
-		dev_err(card->dev, "Invalid dai link type %d\n",
-			dai_link->dobj.type);
-		return -EINVAL;
-	}
-
 	lockdep_assert_held(&client_mutex);
-	/*
-	 * Notify the machine driver for extra initialization
-	 * on the link created by topology.
-	 */
-	if (dai_link->dobj.type && card->add_dai_link)
-		card->add_dai_link(card, dai_link);
 
 	ret = soc_bind_dai_link(card, dai_link);
 	if (ret < 0)
@@ -1478,20 +1465,7 @@ EXPORT_SYMBOL_GPL(snd_soc_add_dai_link);
 void snd_soc_remove_dai_link(struct snd_soc_card *card,
 			     struct snd_soc_dai_link *dai_link)
 {
-	if (dai_link->dobj.type
-	    && dai_link->dobj.type != SND_SOC_DOBJ_DAI_LINK) {
-		dev_err(card->dev, "Invalid dai link type %d\n",
-			dai_link->dobj.type);
-		return;
-	}
-
 	lockdep_assert_held(&client_mutex);
-	/*
-	 * Notify the machine driver for extra destruction
-	 * on the link created by topology.
-	 */
-	if (dai_link->dobj.type && card->remove_dai_link)
-		card->remove_dai_link(card, dai_link);
 
 	list_del(&dai_link->list);
 
@@ -2612,12 +2586,6 @@ struct snd_soc_dai *snd_soc_register_dai(struct snd_soc_component *component,
 {
 	struct device *dev = component->dev;
 	struct snd_soc_dai *dai;
-
-	if (dai_drv->dobj.type &&
-	    dai_drv->dobj.type != SND_SOC_DOBJ_PCM) {
-		dev_err(dev, "Invalid dai type %d\n", dai_drv->dobj.type);
-		return NULL;
-	}
 
 	dev_dbg(dev, "ASoC: dai register %s\n", dai_drv->name);
 
