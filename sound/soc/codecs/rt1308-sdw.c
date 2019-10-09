@@ -648,6 +648,9 @@ static int rt1308_dev_suspend(struct device *dev)
 {
 	struct rt1308_sdw_priv *rt1308 = dev_get_drvdata(dev);
 
+	if (!rt1308->hw_init)
+		return 0;
+
 	regcache_cache_only(rt1308->regmap, true);
 
 	return 0;
@@ -660,6 +663,9 @@ static int rt1308_dev_resume(struct device *dev)
 	struct sdw_slave *slave = to_sdw_slave_device(dev);
 	struct rt1308_sdw_priv *rt1308 = dev_get_drvdata(dev);
 	unsigned long time;
+
+	if (!rt1308->hw_init)
+		return 0;
 
 	time = wait_for_completion_timeout(&slave->enumeration_complete,
 					   msecs_to_jiffies(RT1308_PROBE_TIMEOUT));
