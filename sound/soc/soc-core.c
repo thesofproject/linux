@@ -2748,8 +2748,6 @@ EXPORT_SYMBOL_GPL(snd_soc_component_exit_regmap);
 
 static void snd_soc_component_add(struct snd_soc_component *component)
 {
-	mutex_lock(&client_mutex);
-
 	if (!component->driver->write && !component->driver->read) {
 		if (!component->regmap)
 			component->regmap = dev_get_regmap(component->dev,
@@ -2760,8 +2758,6 @@ static void snd_soc_component_add(struct snd_soc_component *component)
 
 	/* see for_each_component */
 	list_add(&component->list, &component_list);
-
-	mutex_unlock(&client_mutex);
 }
 
 static void snd_soc_component_del(struct snd_soc_component *component)
@@ -2835,9 +2831,11 @@ int snd_soc_add_component(struct device *dev,
 	int ret;
 	int i;
 
+	mutex_lock(&client_mutex);
+
 	ret = snd_soc_component_initialize(component, component_driver, dev);
 	if (ret)
-		goto err_free;
+		goto err_del;
 
 	if (component_driver->endianness) {
 		for (i = 0; i < num_dai; i++) {
@@ -2849,17 +2847,23 @@ int snd_soc_add_component(struct device *dev,
 	ret = snd_soc_register_dais(component, dai_drv, num_dai);
 	if (ret < 0) {
 		dev_err(dev, "ASoC: Failed to register DAIs: %d\n", ret);
-		goto err_cleanup;
+		goto err_del;
 	}
 
 	snd_soc_component_add(component);
-	snd_soc_try_rebind_card();
 
-	return 0;
+err_del:
+	mutex_unlock(&client_mutex);
 
-err_cleanup:
-	snd_soc_del_component(component);
-err_free:
+	/*
+	 * these should be called without
+	 * mutex_unlock(client_mutex)
+	 */
+	if (ret < 0)
+		snd_soc_del_component(component);
+	else
+		snd_soc_try_rebind_card();
+
 	return ret;
 }
 EXPORT_SYMBOL_GPL(snd_soc_add_component);
