@@ -476,6 +476,7 @@ static int rt711_dev_suspend(struct device *dev)
 		return 0;
 
 	regcache_cache_only(rt711->regmap, true);
+	regcache_mark_dirty(rt711->regmap);
 
 	return 0;
 }
@@ -499,7 +500,6 @@ static int rt711_dev_resume(struct device *dev)
 	}
 
 	regcache_cache_only(rt711->regmap, false);
-	regcache_mark_dirty(rt711->regmap);
 	regcache_sync(rt711->regmap);
 
 	return 0;
