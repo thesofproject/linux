@@ -652,6 +652,7 @@ static int rt1308_dev_suspend(struct device *dev)
 		return 0;
 
 	regcache_cache_only(rt1308->regmap, true);
+	regcache_mark_dirty(rt1308->regmap);
 
 	return 0;
 }
@@ -675,7 +676,6 @@ static int rt1308_dev_resume(struct device *dev)
 	}
 
 	regcache_cache_only(rt1308->regmap, false);
-	regcache_mark_dirty(rt1308->regmap);
 	regcache_sync(rt1308->regmap);
 
 	return 0;

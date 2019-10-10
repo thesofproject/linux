@@ -478,6 +478,7 @@ static int rt700_dev_suspend(struct device *dev)
 		return 0;
 
 	regcache_cache_only(rt700->regmap, true);
+	regcache_mark_dirty(rt700->regmap);
 
 	return 0;
 }
@@ -501,7 +502,6 @@ static int rt700_dev_resume(struct device *dev)
 	}
 
 	regcache_cache_only(rt700->regmap, false);
-	regcache_mark_dirty(rt700->regmap);
 	regcache_sync(rt700->regmap);
 
 	return 0;
