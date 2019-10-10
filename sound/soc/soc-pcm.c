@@ -343,6 +343,20 @@ int dpcm_dapm_stream_event(struct snd_soc_pcm_runtime *fe, int dir,
 	return 0;
 }
 
+static void soc_pcm_set_dai_params(struct snd_soc_dai *dai,
+				   struct snd_pcm_hw_params *params)
+{
+	if (params) {
+		dai->rate	 = params_rate(params);
+		dai->channels	 = params_channels(params);
+		dai->sample_bits = snd_pcm_format_physical_width(params_format(params));
+	} else {
+		dai->rate	 = 0;
+		dai->channels	 = 0;
+		dai->sample_bits = 0;
+	}
+}
+
 static int soc_pcm_apply_symmetry(struct snd_pcm_substream *substream,
 					struct snd_soc_dai *soc_dai)
 {
@@ -404,13 +418,12 @@ static int soc_pcm_params_symmetry(struct snd_pcm_substream *substream,
 				struct snd_pcm_hw_params *params)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai d;
 	struct snd_soc_dai *dai;
 	struct snd_soc_dai *cpu_dai;
-	unsigned int rate, channels, sample_bits, symmetry, i;
+	unsigned int symmetry, i;
 
-	rate = params_rate(params);
-	channels = params_channels(params);
-	sample_bits = snd_pcm_format_physical_width(params_format(params));
+	soc_pcm_set_dai_params(&d, params);
 
 	/* reject unmatched parameters when applying symmetry */
 	symmetry = rtd->dai_link->symmetric_rates;
@@ -420,9 +433,9 @@ static int soc_pcm_params_symmetry(struct snd_pcm_substream *substream,
 
 	if (symmetry)
 		for_each_rtd_cpu_dais(rtd, i, cpu_dai)
-			if (cpu_dai->rate && cpu_dai->rate != rate) {
+			if (cpu_dai->rate && cpu_dai->rate != d.rate) {
 				dev_err(rtd->dev, "ASoC: unmatched rate symmetry: %d - %d\n",
-					cpu_dai->rate, rate);
+					cpu_dai->rate, d.rate);
 				return -EINVAL;
 			}
 
@@ -434,9 +447,9 @@ static int soc_pcm_params_symmetry(struct snd_pcm_substream *substream,
 	if (symmetry)
 		for_each_rtd_cpu_dais(rtd, i, cpu_dai)
 			if (cpu_dai->channels &&
-			    cpu_dai->channels != channels) {
+			    cpu_dai->channels != d.channels) {
 				dev_err(rtd->dev, "ASoC: unmatched channel symmetry: %d - %d\n",
-					cpu_dai->channels, channels);
+					cpu_dai->channels, d.channels);
 				return -EINVAL;
 			}
 
@@ -448,9 +461,9 @@ static int soc_pcm_params_symmetry(struct snd_pcm_substream *substream,
 	if (symmetry)
 		for_each_rtd_cpu_dais(rtd, i, cpu_dai)
 			if (cpu_dai->sample_bits &&
-			    cpu_dai->sample_bits != sample_bits) {
+			    cpu_dai->sample_bits != d.sample_bits) {
 				dev_err(rtd->dev, "ASoC: unmatched sample bits symmetry: %d - %d\n",
-					cpu_dai->sample_bits, sample_bits);
+					cpu_dai->sample_bits, d.sample_bits);
 				return -EINVAL;
 			}
 
@@ -857,9 +870,7 @@ static int soc_pcm_hw_free(struct snd_pcm_substream *substream)
 	/* clear the corresponding DAIs parameters when going to be inactive */
 	for_each_rtd_dais(rtd, i, dai) {
 		if (snd_soc_dai_activity(dai) == 1) {
-			dai->rate = 0;
-			dai->channels = 0;
-			dai->sample_bits = 0;
+			soc_pcm_set_dai_params(dai, NULL);
 			snd_soc_dai_digital_mute(dai, 1, substream->stream);
 		}
 	}
@@ -945,11 +956,7 @@ static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 		if(ret < 0)
 			goto out;
 
-		codec_dai->rate = params_rate(&codec_params);
-		codec_dai->channels = params_channels(&codec_params);
-		codec_dai->sample_bits = snd_pcm_format_physical_width(
-						params_format(&codec_params));
-
+		soc_pcm_set_dai_params(codec_dai, &codec_params);
 		snd_soc_dapm_update_dai(substream, &codec_params, codec_dai);
 	}
 
@@ -971,11 +978,7 @@ static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 	cpu_dai = asoc_cpu_dai(rtd, 0);
 
 	/* store the parameters for each DAIs */
-	cpu_dai->rate = params_rate(params);
-	cpu_dai->channels = params_channels(params);
-	cpu_dai->sample_bits =
-		snd_pcm_format_physical_width(params_format(params));
-
+	soc_pcm_set_dai_params(cpu_dai, params);
 	snd_soc_dapm_update_dai(substream, params, cpu_dai);
 
 	ret = snd_soc_pcm_component_hw_params(substream, params);
