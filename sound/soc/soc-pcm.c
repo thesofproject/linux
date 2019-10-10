@@ -398,47 +398,23 @@ static int soc_pcm_params_symmetry(struct snd_pcm_substream *substream,
 
 	soc_pcm_set_dai_params(&d, params);
 
+#define __soc_pcm_params_symmetry(name, sname)				\
+	symmetry = rtd->dai_link->symmetric_##sname;			\
+	for_each_rtd_dais(rtd, i, dai)					\
+		symmetry |= dai->driver->symmetric_##sname;		\
+									\
+	if (symmetry)							\
+		for_each_rtd_cpu_dais(rtd, i, cpu_dai)			\
+			if (cpu_dai->name && cpu_dai->name != d.name) {	\
+				dev_err(rtd->dev, "ASoC: unmatched %s symmetry: %d - %d\n",\
+					#name, cpu_dai->name, d.name);	\
+				return -EINVAL;				\
+			}
+
 	/* reject unmatched parameters when applying symmetry */
-	symmetry = rtd->dai_link->symmetric_rates;
-
-	for_each_rtd_dais(rtd, i, dai)
-		symmetry |= dai->driver->symmetric_rates;
-
-	if (symmetry)
-		for_each_rtd_cpu_dais(rtd, i, cpu_dai)
-			if (cpu_dai->rate && cpu_dai->rate != d.rate) {
-				dev_err(rtd->dev, "ASoC: unmatched rate symmetry: %d - %d\n",
-					cpu_dai->rate, d.rate);
-				return -EINVAL;
-			}
-
-	symmetry = rtd->dai_link->symmetric_channels;
-
-	for_each_rtd_dais(rtd, i, dai)
-		symmetry |= dai->driver->symmetric_channels;
-
-	if (symmetry)
-		for_each_rtd_cpu_dais(rtd, i, cpu_dai)
-			if (cpu_dai->channels &&
-			    cpu_dai->channels != d.channels) {
-				dev_err(rtd->dev, "ASoC: unmatched channel symmetry: %d - %d\n",
-					cpu_dai->channels, d.channels);
-				return -EINVAL;
-			}
-
-	symmetry = rtd->dai_link->symmetric_samplebits;
-
-	for_each_rtd_dais(rtd, i, dai)
-		symmetry |= dai->driver->symmetric_samplebits;
-
-	if (symmetry)
-		for_each_rtd_cpu_dais(rtd, i, cpu_dai)
-			if (cpu_dai->sample_bits &&
-			    cpu_dai->sample_bits != d.sample_bits) {
-				dev_err(rtd->dev, "ASoC: unmatched sample bits symmetry: %d - %d\n",
-					cpu_dai->sample_bits, d.sample_bits);
-				return -EINVAL;
-			}
+	__soc_pcm_params_symmetry(rate,		rates);
+	__soc_pcm_params_symmetry(channels,	channels);
+	__soc_pcm_params_symmetry(sample_bits,	samplebits);
 
 	return 0;
 }
