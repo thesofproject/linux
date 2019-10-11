@@ -589,6 +589,7 @@ struct sdw_master_device {
 	int link_id;
 	struct sdw_master_driver *driver;
 	void *pdata;
+	bool pm_runtime_suspended;
 };
 
 #define dev_to_sdw_master_device(d)	\
