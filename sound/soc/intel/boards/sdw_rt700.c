@@ -294,6 +294,7 @@ static int mc_probe(struct platform_device *pdev)
 static struct platform_driver sdw_rt700_driver = {
 	.driver = {
 		.name = "sdw_rt700",
+		.pm = &snd_soc_pm_ops,
 	},
 	.probe = mc_probe,
 };
