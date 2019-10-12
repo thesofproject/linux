@@ -1552,6 +1552,8 @@ int sdw_prepare_stream(struct sdw_stream_runtime *stream)
 	bool update_params = true;
 	int ret = 0;
 
+	pr_err("%s: %s start\n", __func__, stream->name);
+
 	if (!stream) {
 		pr_err("SoundWire: Handle not found for stream\n");
 		return -EINVAL;
@@ -1584,6 +1586,9 @@ int sdw_prepare_stream(struct sdw_stream_runtime *stream)
 
 state_err:
 	sdw_release_bus_lock(stream);
+
+	pr_err("%s: %s: done\n", __func__, stream->name);
+
 	return ret;
 }
 EXPORT_SYMBOL(sdw_prepare_stream);
@@ -1640,6 +1645,8 @@ int sdw_enable_stream(struct sdw_stream_runtime *stream)
 {
 	int ret;
 
+	pr_err("%s: %s: start\n", __func__, stream->name);
+
 	if (!stream) {
 		pr_err("SoundWire: Handle not found for stream\n");
 		return -EINVAL;
@@ -1661,6 +1668,8 @@ int sdw_enable_stream(struct sdw_stream_runtime *stream)
 
 state_err:
 	sdw_release_bus_lock(stream);
+
+	pr_err("%s: %s: done\n", __func__, stream->name);
 	return ret;
 }
 EXPORT_SYMBOL(sdw_enable_stream);
@@ -1725,6 +1734,8 @@ int sdw_disable_stream(struct sdw_stream_runtime *stream)
 {
 	int ret;
 
+	pr_err("%s: %s: start\n", __func__, stream->name);
+
 	if (!stream) {
 		pr_err("SoundWire: Handle not found for stream\n");
 		return -EINVAL;
@@ -1745,6 +1756,9 @@ int sdw_disable_stream(struct sdw_stream_runtime *stream)
 
 state_err:
 	sdw_release_bus_lock(stream);
+
+	pr_err("%s: %s: done\n", __func__, stream->name);
+
 	return ret;
 }
 EXPORT_SYMBOL(sdw_disable_stream);
@@ -1792,6 +1806,8 @@ int sdw_deprepare_stream(struct sdw_stream_runtime *stream)
 {
 	int ret;
 
+	pr_err("%s: %s: start\n", __func__, stream->name);
+
 	if (!stream) {
 		pr_err("SoundWire: Handle not found for stream\n");
 		return -EINVAL;
@@ -1813,6 +1829,9 @@ int sdw_deprepare_stream(struct sdw_stream_runtime *stream)
 
 state_err:
 	sdw_release_bus_lock(stream);
+
+	pr_err("%s: %s: done\n", __func__, stream->name);
+
 	return ret;
 }
 EXPORT_SYMBOL(sdw_deprepare_stream);
