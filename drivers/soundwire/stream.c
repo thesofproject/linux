@@ -1551,6 +1551,9 @@ int sdw_prepare_stream(struct sdw_stream_runtime *stream)
 		return -EINVAL;
 	}
 
+	if (stream->state != SDW_STREAM_CONFIGURED)
+		return 0;
+
 	sdw_acquire_bus_lock(stream);
 
 	ret = _sdw_prepare_stream(stream);

@@ -9,10 +9,15 @@
 
 static void sdw_slave_release(struct device *dev)
 {
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_slave *slave = to_sdw_slave_device(dev);
 
 	kfree(slave);
 }
+
+struct device_type sdw_slave_type = {
+	.name =		"sdw_slave",
+	.release =	sdw_slave_release,
+};
 
 static int sdw_slave_add(struct sdw_bus *bus,
 			 struct sdw_slave_id *id, struct fwnode_handle *fwnode)
@@ -34,12 +39,15 @@ static int sdw_slave_add(struct sdw_bus *bus,
 		     bus->link_id, id->mfg_id, id->part_id,
 		     id->class_id, id->unique_id);
 
-	slave->dev.release = sdw_slave_release;
 	slave->dev.bus = &sdw_bus_type;
 	slave->dev.of_node = of_node_get(to_of_node(fwnode));
+	slave->dev.type = &sdw_slave_type;
 	slave->bus = bus;
 	slave->status = SDW_SLAVE_UNATTACHED;
+	init_completion(&slave->enumeration_complete);
 	slave->dev_num = 0;
+	init_completion(&slave->probe_complete);
+	slave->probed = false;
 
 	mutex_lock(&bus->bus_lock);
 	list_add_tail(&slave->node, &bus->slaves);
@@ -128,7 +136,8 @@ int sdw_of_find_slaves(struct sdw_bus *bus)
 	struct device_node *node;
 
 	for_each_child_of_node(bus->dev->of_node, node) {
-		int link_id, sdw_version, ret, len;
+		int link_id, ret, len;
+		unsigned int sdw_version;
 		const char *compat = NULL;
 		struct sdw_slave_id id;
 		const __be32 *addr;
