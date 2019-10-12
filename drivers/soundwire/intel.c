@@ -762,6 +762,8 @@ static int intel_startup(struct snd_pcm_substream *substream,
 	struct sdw_cdns *cdns = snd_soc_dai_get_drvdata(dai);
 	int ret;
 
+	dev_err(dai->dev, "%s: %s: start\n", __func__, dai->name);
+
 	ret = pm_runtime_get_sync(cdns->dev);
 	if (ret < 0 && ret != -EACCES) {
 		dev_err_ratelimited(cdns->dev,
@@ -770,7 +772,11 @@ static int intel_startup(struct snd_pcm_substream *substream,
 		pm_runtime_put_noidle(cdns->dev);
 	}
 
-	return sdw_stream_setup(substream, dai);
+	ret =  sdw_stream_setup(substream, dai);
+
+	dev_err(dai->dev, "%s: %s: done\n", __func__, dai->name);
+
+	return ret;
 }
 
 static int intel_hw_params(struct snd_pcm_substream *substream,
@@ -786,6 +792,8 @@ static int intel_hw_params(struct snd_pcm_substream *substream,
 	int ch, dir;
 	int ret;
 	bool pcm = true;
+
+	dev_err(dai->dev, "%s: %s: start\n", __func__, dai->name);
 
 	dma = snd_soc_dai_get_dma_data(dai, substream);
 	if (!dma)
@@ -854,6 +862,8 @@ static int intel_hw_params(struct snd_pcm_substream *substream,
 
 	kfree(pconfig);
 error:
+
+	dev_err(dai->dev, "%s: %s: done\n", __func__, dai->name);
 	return ret;
 }
 
@@ -865,6 +875,8 @@ static int intel_prepare(struct snd_pcm_substream *substream,
 	struct sdw_cdns_dma_data *dma;
 	int ch, dir;
 	int ret;
+
+	dev_err(dai->dev, "%s: %s: start\n", __func__, dai->name);
 
 	dma = snd_soc_dai_get_dma_data(dai, substream);
 	if (!dma) {
@@ -900,6 +912,7 @@ static int intel_prepare(struct snd_pcm_substream *substream,
 
 	ret = sdw_prepare_stream(dma->stream);
 
+	dev_err(dai->dev, "%s: %s: done\n", __func__, dai->name);
 err:
 	return ret;
 }
@@ -910,6 +923,8 @@ static int intel_trigger(struct snd_pcm_substream *substream, int cmd,
 	struct sdw_cdns_dma_data *dma;
 	int ret;
 
+	dev_err(dai->dev, "%s: %s: start\n", __func__, dai->name);
+
 	dma = snd_soc_dai_get_dma_data(dai, substream);
 	if (!dma) {
 		dev_err(dai->dev, "failed to get dma data in %s", __func__);
@@ -917,14 +932,18 @@ static int intel_trigger(struct snd_pcm_substream *substream, int cmd,
 	}
 
 	switch (cmd) {
+	case SNDRV_PCM_TRIGGER_RESUME:
+		dev_err(dai->dev, "%s: %s: resume\n", __func__, dai->name);
+		/* fallthrough */
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
-	case SNDRV_PCM_TRIGGER_RESUME:
 		ret = sdw_enable_stream(dma->stream);
 		break;
 
-	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
+		dev_err(dai->dev, "%s: %s: suspend\n", __func__, dai->name);
+		/* fallthrough */
+	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 	case SNDRV_PCM_TRIGGER_STOP:
 		ret = sdw_disable_stream(dma->stream);
 		break;
@@ -938,6 +957,9 @@ static int intel_trigger(struct snd_pcm_substream *substream, int cmd,
 		dev_err(dai->dev,
 			"%s trigger %d failed: %d",
 			__func__, cmd, ret);
+
+	dev_err(dai->dev, "%s: %s: done\n", __func__, dai->name);
+
 	return ret;
 }
 
@@ -948,6 +970,8 @@ intel_hw_free(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
 	struct sdw_intel *sdw = cdns_to_intel(cdns);
 	struct sdw_cdns_dma_data *dma;
 	int ret;
+
+	dev_err(dai->dev, "%s: %s: start\n", __func__, dai->name);
 
 	dma = snd_soc_dai_get_dma_data(dai, substream);
 	if (!dma)
@@ -976,6 +1000,8 @@ intel_hw_free(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
 	sdw->pdi = NULL;
 	sdw_release_stream(dma->stream);
 
+	dev_err(dai->dev, "%s: %s: done\n", __func__, dai->name);
+
 	return 0;
 }
 
@@ -984,6 +1010,8 @@ static void intel_shutdown(struct snd_pcm_substream *substream,
 {
 	struct sdw_cdns_dma_data *dma;
 	struct sdw_cdns *cdns = snd_soc_dai_get_drvdata(dai);
+
+	dev_err(dai->dev, "%s: %s: start\n", __func__, dai->name);
 
 	dma = snd_soc_dai_get_dma_data(dai, substream);
 	if (!dma)
@@ -994,6 +1022,8 @@ static void intel_shutdown(struct snd_pcm_substream *substream,
 
 	pm_runtime_mark_last_busy(cdns->dev);
 	pm_runtime_put_autosuspend(cdns->dev);
+
+	dev_err(dai->dev, "%s: %s: done\n", __func__, dai->name);
 }
 
 static int intel_pcm_set_sdw_stream(struct snd_soc_dai *dai,
@@ -1349,6 +1379,8 @@ static int intel_suspend(struct device *dev)
 		return 0;
 	}
 
+	dev_err(dev, "%s start\n", __func__);
+
 	if (pm_runtime_status_suspended(dev)) {
 		dev_dbg(dev,
 			"%s: pm_runtime status: suspended\n",
@@ -1377,6 +1409,8 @@ static int intel_suspend(struct device *dev)
 
 	intel_shim_wake(sdw, false);
 
+	dev_err(dev, "%s done\n", __func__);
+
 	return 0;
 }
 
@@ -1392,6 +1426,8 @@ static int intel_suspend_runtime(struct device *dev)
 		return 0;
 	}
 
+	dev_err(dev, "%s start\n", __func__);
+
 	ret = sdw_cdns_enable_interrupt(cdns, false);
 	if (ret < 0) {
 		dev_err(dev, "cannot disable interrupts on suspend\n");
@@ -1405,6 +1441,8 @@ static int intel_suspend_runtime(struct device *dev)
 	}
 
 	intel_shim_wake(sdw, false);
+
+	dev_err(dev, "%s done\n", __func__);
 
 	return 0;
 }
@@ -1421,6 +1459,8 @@ static int intel_resume(struct device *dev)
 			cdns->bus.link_id);
 		return 0;
 	}
+
+	dev_err(dev, "%s start\n", __func__);
 
 	if (md->pm_runtime_suspended) {
 		dev_dbg(dev,
@@ -1454,6 +1494,8 @@ static int intel_resume(struct device *dev)
 		return ret;
 	}
 
+	dev_err(dev, "%s done\n", __func__);
+
 	return ret;
 }
 
@@ -1468,6 +1510,8 @@ static int intel_resume_runtime(struct device *dev)
 			cdns->bus.link_id);
 		return 0;
 	}
+
+	dev_err(dev, "%s start\n", __func__);
 
 	ret = intel_init(sdw);
 	if (ret) {
@@ -1489,6 +1533,8 @@ static int intel_resume_runtime(struct device *dev)
 		dev_err(dev, "unable to exit bus reset sequence during resume\n");
 		return ret;
 	}
+
+	dev_err(dev, "%s done\n", __func__);
 
 	return ret;
 }
