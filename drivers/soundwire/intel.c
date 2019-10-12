@@ -875,6 +875,7 @@ static int intel_trigger(struct snd_pcm_substream *substream, int cmd,
 {
 	struct sdw_cdns_dma_data *dma;
 	int ret;
+	int err;
 
 	dma = snd_soc_dai_get_dma_data(dai, substream);
 	if (!dma) {
@@ -893,6 +894,16 @@ static int intel_trigger(struct snd_pcm_substream *substream, int cmd,
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_STOP:
 		ret = sdw_disable_stream(dma->stream);
+
+		if (!ret) {
+			err = sdw_deprepare_stream(dma->stream);
+			if (err) {
+				dev_err(dai->dev,
+					"sdw_deprepare_stream: failed %d", err);
+				ret = err;
+			}
+		}
+
 		break;
 
 	default:
@@ -918,12 +929,6 @@ intel_hw_free(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
 	dma = snd_soc_dai_get_dma_data(dai, substream);
 	if (!dma)
 		return -EIO;
-
-	ret = sdw_deprepare_stream(dma->stream);
-	if (ret) {
-		dev_err(dai->dev, "sdw_deprepare_stream: failed %d", ret);
-		return ret;
-	}
 
 	ret = sdw_stream_remove_master(&cdns->bus, dma->stream);
 	if (ret < 0) {
