@@ -446,10 +446,6 @@ static int rt711_sdw_probe(struct sdw_slave *slave,
 
 	rt711_init(&slave->dev, sdw_regmap, regmap, slave);
 
-	/* Perform IO operations only if slave is in ATTACHED state */
-	if (slave->status == SDW_SLAVE_ATTACHED)
-		rt711_io_init(&slave->dev, slave);
-
 	return 0;
 }
 
@@ -472,10 +468,53 @@ static const struct sdw_device_id rt711_id[] = {
 };
 MODULE_DEVICE_TABLE(sdw, rt711_id);
 
+static int rt711_dev_suspend(struct device *dev)
+{
+	struct rt711_priv *rt711 = dev_get_drvdata(dev);
+
+	if (!rt711->hw_init)
+		return 0;
+
+	regcache_cache_only(rt711->regmap, true);
+	regcache_mark_dirty(rt711->regmap);
+
+	return 0;
+}
+
+#define RT711_PROBE_TIMEOUT 2000
+
+static int rt711_dev_resume(struct device *dev)
+{
+	struct sdw_slave *slave = to_sdw_slave_device(dev);
+	struct rt711_priv *rt711 = dev_get_drvdata(dev);
+	unsigned long time;
+
+	if (!rt711->hw_init)
+		return 0;
+
+	time = wait_for_completion_timeout(&slave->enumeration_complete,
+					   msecs_to_jiffies(RT711_PROBE_TIMEOUT));
+	if (!time) {
+		dev_err(&slave->dev, "Enumeration not complete, timed out\n");
+		return -ETIMEDOUT;
+	}
+
+	regcache_cache_only(rt711->regmap, false);
+	regcache_sync(rt711->regmap);
+
+	return 0;
+}
+
+static const struct dev_pm_ops rt711_pm = {
+	SET_SYSTEM_SLEEP_PM_OPS(rt711_dev_suspend, rt711_dev_resume)
+	SET_RUNTIME_PM_OPS(rt711_dev_suspend, rt711_dev_resume, NULL)
+};
+
 static struct sdw_driver rt711_sdw_driver = {
 	.driver = {
 		.name = "rt711",
 		.owner = THIS_MODULE,
+		.pm = &rt711_pm,
 	},
 	.probe = rt711_sdw_probe,
 	.remove = rt711_sdw_remove,

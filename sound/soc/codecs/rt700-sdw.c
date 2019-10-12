@@ -224,10 +224,6 @@ static int rt700_sdw_probe(struct sdw_slave *slave,
 
 	rt700_init(&slave->dev, regmap, slave);
 
-	/* Perform IO operations only if slave is in ATTACHED state */
-	if (slave->status == SDW_SLAVE_ATTACHED)
-		rt700_io_init(&slave->dev, slave);
-
 	return 0;
 }
 
@@ -249,10 +245,53 @@ static const struct sdw_device_id rt700_id[] = {
 };
 MODULE_DEVICE_TABLE(sdw, rt700_id);
 
+static int rt700_dev_suspend(struct device *dev)
+{
+	struct rt700_priv *rt700 = dev_get_drvdata(dev);
+
+	if (!rt700->hw_init)
+		return 0;
+
+	regcache_cache_only(rt700->regmap, true);
+	regcache_mark_dirty(rt700->regmap);
+
+	return 0;
+}
+
+#define RT700_PROBE_TIMEOUT 2000
+
+static int rt700_dev_resume(struct device *dev)
+{
+	struct sdw_slave *slave = to_sdw_slave_device(dev);
+	struct rt700_priv *rt700 = dev_get_drvdata(dev);
+	unsigned long time;
+
+	if (!rt700->hw_init)
+		return 0;
+
+	time = wait_for_completion_timeout(&slave->enumeration_complete,
+					   msecs_to_jiffies(RT700_PROBE_TIMEOUT));
+	if (!time) {
+		dev_err(&slave->dev, "Enumeration not complete, timed out\n");
+		return -ETIMEDOUT;
+	}
+
+	regcache_cache_only(rt700->regmap, false);
+	regcache_sync(rt700->regmap);
+
+	return 0;
+}
+
+static const struct dev_pm_ops rt700_pm = {
+	SET_SYSTEM_SLEEP_PM_OPS(rt700_dev_suspend, rt700_dev_resume)
+	SET_RUNTIME_PM_OPS(rt700_dev_suspend, rt700_dev_resume, NULL)
+};
+
 static struct sdw_driver rt700_sdw_driver = {
 	.driver = {
 		.name = "rt700",
 		.owner = THIS_MODULE,
+		.pm = &rt700_pm,
 	},
 	.probe = rt700_sdw_probe,
 	.remove = rt700_sdw_remove,

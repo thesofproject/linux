@@ -52,7 +52,7 @@ static bool rt1308_volatile_register(struct device *dev, unsigned int reg)
 	case 0x3004 ... 0x3005:
 	case 0x3008:
 	case 0x300a:
-	case 0xc000 ... 0xcff3: /* Vendor-defined command */
+	case 0xc000:
 		return true;
 	default:
 		return false;
@@ -183,6 +183,27 @@ static int rt1308_io_init(struct device *dev, struct sdw_slave *slave)
 	if (ret < 0)
 		goto _io_init_err_;
 
+	/*
+	 * PM runtime is only enabled when a Slave reports as Attached
+	 */
+	if (!rt1308->first_init) {
+		/* set autosuspend parameters */
+		pm_runtime_set_autosuspend_delay(&slave->dev, 3000);
+		pm_runtime_use_autosuspend(&slave->dev);
+
+		/* update count of parent 'active' children */
+		pm_runtime_set_active(&slave->dev);
+
+		/* make sure the device does not suspend immediately */
+		pm_runtime_mark_last_busy(&slave->dev);
+
+		pm_runtime_enable(&slave->dev);
+
+		rt1308->first_init = true;
+	}
+
+	pm_runtime_get_noresume(&slave->dev);
+
 	/* sw reset */
 	regmap_write(rt1308->regmap, RT1308_SDW_RESET, 0);
 
@@ -227,11 +248,8 @@ static int rt1308_io_init(struct device *dev, struct sdw_slave *slave)
 	/* Mark Slave initialization complete */
 	rt1308->hw_init = true;
 
-	/* Enable Runtime PM */
-	pm_runtime_set_autosuspend_delay(&slave->dev, 3000);
-	pm_runtime_use_autosuspend(&slave->dev);
 	pm_runtime_mark_last_busy(&slave->dev);
-	pm_runtime_enable(&slave->dev);
+	pm_runtime_put_autosuspend(&slave->dev);
 
 	dev_dbg(&slave->dev, "%s hw_init complete\n", __func__);
 
@@ -590,6 +608,7 @@ static int rt1308_sdw_init(struct device *dev, struct regmap *regmap,
 	 * HW init will be performed when device reports present
 	 */
 	rt1308->hw_init = false;
+	rt1308->first_init = false;
 
 	ret =  devm_snd_soc_register_component(dev,
 					  &soc_component_sdw_rt1308,
@@ -616,10 +635,6 @@ static int rt1308_sdw_probe(struct sdw_slave *slave,
 
 	rt1308_sdw_init(&slave->dev, regmap, slave);
 
-	/* Perform IO operations only if slave is in ATTACHED state */
-	if (slave->status == SDW_SLAVE_ATTACHED)
-		rt1308_io_init(&slave->dev, slave);
-
 	return 0;
 }
 
@@ -629,10 +644,53 @@ static const struct sdw_device_id rt1308_id[] = {
 };
 MODULE_DEVICE_TABLE(sdw, rt1308_id);
 
+static int rt1308_dev_suspend(struct device *dev)
+{
+	struct rt1308_sdw_priv *rt1308 = dev_get_drvdata(dev);
+
+	if (!rt1308->hw_init)
+		return 0;
+
+	regcache_cache_only(rt1308->regmap, true);
+	regcache_mark_dirty(rt1308->regmap);
+
+	return 0;
+}
+
+#define RT1308_PROBE_TIMEOUT 2000
+
+static int rt1308_dev_resume(struct device *dev)
+{
+	struct sdw_slave *slave = to_sdw_slave_device(dev);
+	struct rt1308_sdw_priv *rt1308 = dev_get_drvdata(dev);
+	unsigned long time;
+
+	if (!rt1308->hw_init)
+		return 0;
+
+	time = wait_for_completion_timeout(&slave->enumeration_complete,
+					   msecs_to_jiffies(RT1308_PROBE_TIMEOUT));
+	if (!time) {
+		dev_err(&slave->dev, "Enumeration not complete, timed out\n");
+		return -ETIMEDOUT;
+	}
+
+	regcache_cache_only(rt1308->regmap, false);
+	regcache_sync(rt1308->regmap);
+
+	return 0;
+}
+
+static const struct dev_pm_ops rt1308_pm = {
+	SET_SYSTEM_SLEEP_PM_OPS(rt1308_dev_suspend, rt1308_dev_resume)
+	SET_RUNTIME_PM_OPS(rt1308_dev_suspend, rt1308_dev_resume, NULL)
+};
+
 static struct sdw_driver rt1308_sdw_driver = {
 	.driver = {
 		.name = "rt1308",
 		.owner = THIS_MODULE,
+		.pm = &rt1308_pm,
 	},
 	.probe = rt1308_sdw_probe,
 	.ops = &rt1308_slave_ops,

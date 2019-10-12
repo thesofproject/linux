@@ -139,6 +139,9 @@ static const struct reg_default rt1308_reg_defaults[] = {
 	{ 0x3005, 0x23 },
 	{ 0x3008, 0x02 },
 	{ 0x300a, 0x00 },
+	{ 0xc003 | (RT1308_DAC_SET << 4), 0x00 },
+	{ 0xc001 | (RT1308_POWER << 4), 0x00 },
+	{ 0xc002 | (RT1308_POWER << 4), 0x00 },
 };
 
 #define RT1308_SDW_OFFSET 0xc000
@@ -156,6 +159,7 @@ struct rt1308_sdw_priv {
 	enum sdw_slave_status status;
 	struct sdw_bus_params params;
 	bool hw_init;
+	bool first_init;
 };
 
 struct sdw_stream_data {
