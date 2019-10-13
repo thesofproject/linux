@@ -332,6 +332,11 @@ static int imx8_remove(struct snd_sof_dev *sdev)
 	return 0;
 }
 
+static int imx8_machine_register(struct snd_sof_dev *sdev)
+{
+	return devm_of_platform_populate(sdev->dev);
+}
+
 /* on i.MX8 there is 1 to 1 match between type and BAR idx */
 static int imx8_get_bar_index(struct snd_sof_dev *sdev, u32 type)
 {
@@ -363,6 +368,8 @@ struct snd_sof_dsp_ops sof_imx8_ops = {
 	/* probe and remove */
 	.probe		= imx8_probe,
 	.remove		= imx8_remove,
+	.machine_register = imx8_machine_register,
+
 	/* DSP core boot */
 	.run		= imx8_run,
 

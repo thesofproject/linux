@@ -550,6 +550,7 @@ static struct snd_soc_dai_driver bdw_dai[] = {
 const struct snd_sof_dsp_ops sof_bdw_ops = {
 	/*Device init */
 	.probe          = bdw_probe,
+	.machine_register = sof_machine_register,
 
 	/* DSP Core Control */
 	.run            = bdw_run,

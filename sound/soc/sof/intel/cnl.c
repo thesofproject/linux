@@ -187,6 +187,7 @@ const struct snd_sof_dsp_ops sof_cnl_ops = {
 	/* probe and remove */
 	.probe		= hda_dsp_probe,
 	.remove		= hda_dsp_remove,
+	.machine_register = sof_machine_register,
 
 	/* Register IO */
 	.write		= sof_io_write,

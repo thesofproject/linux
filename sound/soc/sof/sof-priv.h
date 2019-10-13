@@ -93,6 +93,9 @@ struct snd_sof_dsp_ops {
 	int (*probe)(struct snd_sof_dev *sof_dev); /* mandatory */
 	int (*remove)(struct snd_sof_dev *sof_dev); /* optional */
 
+	/* machine driver probing */
+	int (*machine_register)(struct snd_sof_dev *sof_dev); /* mandatory */
+
 	/* DSP core boot / reset */
 	int (*run)(struct snd_sof_dev *sof_dev); /* mandatory */
 	int (*stall)(struct snd_sof_dev *sof_dev); /* optional */
@@ -489,6 +492,7 @@ int snd_sof_create_page_table(struct snd_sof_dev *sdev,
 			      struct snd_dma_buffer *dmab,
 			      unsigned char *page_table, size_t size);
 
+int sof_machine_register(struct snd_sof_dev *sdev);
 /*
  * Firmware loading.
  */

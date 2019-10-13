@@ -486,6 +486,7 @@ irq:
 const struct snd_sof_dsp_ops sof_tng_ops = {
 	/* device init */
 	.probe		= tangier_pci_probe,
+	.machine_register = sof_machine_register,
 
 	/* DSP core boot / reset */
 	.run		= byt_run,
@@ -647,6 +648,7 @@ irq:
 const struct snd_sof_dsp_ops sof_byt_ops = {
 	/* device init */
 	.probe		= byt_acpi_probe,
+	.machine_register = sof_machine_register,
 
 	/* DSP core boot / reset */
 	.run		= byt_run,
@@ -706,6 +708,7 @@ EXPORT_SYMBOL(byt_chip_info);
 const struct snd_sof_dsp_ops sof_cht_ops = {
 	/* device init */
 	.probe		= byt_acpi_probe,
+	.machine_register = sof_machine_register,
 
 	/* DSP core boot / reset */
 	.run		= byt_run,

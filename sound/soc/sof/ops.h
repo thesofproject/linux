@@ -37,6 +37,11 @@ static inline int snd_sof_remove(struct snd_sof_dev *sdev)
 	return 0;
 }
 
+static inline int snd_sof_machine_register(struct snd_sof_dev *sdev)
+{
+	return sof_ops(sdev)->machine_register(sdev);
+}
+
 /* control */
 
 /*
