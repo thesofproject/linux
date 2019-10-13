@@ -2496,6 +2496,7 @@ static int sof_link_ssp_load(struct snd_soc_component *scomp, int index,
 			     struct sof_ipc_dai_config *config)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct platform_device *pdev;
 	struct snd_soc_tplg_private *private = &cfg->priv;
 	struct sof_ipc_reply reply;
 	u32 size = sizeof(*config);
@@ -2525,6 +2526,16 @@ static int sof_link_ssp_load(struct snd_soc_component *scomp, int index,
 	config->ssp.mclk_direction = hw_config->mclk_direction;
 	config->ssp.rx_slots = le32_to_cpu(hw_config->rx_slots);
 	config->ssp.tx_slots = le32_to_cpu(hw_config->tx_slots);
+
+	if (soc_intel_is_byt()) {
+		pdev = to_platform_device(sdev->dev);
+
+		if (soc_intel_is_byt_cr(pdev) && config->dai_index == 2) {
+			dev_dbg(sdev->dev,
+				"BYT-CR detected, SSP0 used instead of SSP2\n");
+			config->dai_index = 0;
+		}
+	}
 
 	dev_dbg(sdev->dev, "tplg: config SSP%d fmt 0x%x mclk %d bclk %d fclk %d width (%d)%d slots %d mclk id %d quirks %d\n",
 		config->dai_index, config->format,

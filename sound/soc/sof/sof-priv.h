@@ -28,6 +28,8 @@
 
 #include <uapi/sound/sof/fw.h>
 
+#include "../intel/common/soc-intel-quirks.h"
+
 /* debug flags */
 #define SOF_DBG_ENABLE_TRACE	BIT(0)
 #define SOF_DBG_REGS		BIT(1)
