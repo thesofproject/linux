@@ -44,7 +44,7 @@ static int sof_of_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	const struct sof_dev_desc *desc;
 	/*TODO: create a generic snd_soc_xxx_mach */
-	struct snd_soc_acpi_mach *mach;
+	struct snd_soc_fw_mach *mach;
 	struct snd_sof_pdata *sof_pdata;
 	const struct snd_sof_dsp_ops *ops;
 	int ret;
@@ -53,6 +53,9 @@ static int sof_of_probe(struct platform_device *pdev)
 
 	sof_pdata = devm_kzalloc(dev, sizeof(*sof_pdata), GFP_KERNEL);
 	if (!sof_pdata)
+		return -ENOMEM;
+	mach = devm_kzalloc(dev, sizeof(*mach), GFP_KERNEL);
+	if (!mach)
 		return -ENOMEM;
 
 	desc = device_get_match_data(dev);
@@ -69,7 +72,8 @@ static int sof_of_probe(struct platform_device *pdev)
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_FORCE_NOCODEC_MODE)
 	/* force nocodec mode */
 	dev_warn(dev, "Force to use nocodec mode\n");
-	mach = devm_kzalloc(dev, sizeof(*mach), GFP_KERNEL);
+	mach->type = SND_SOC_FW_TYPE_ACPI;
+	mach->acpi = devm_kzalloc(dev, sizeof(*mach), GFP_KERNEL);
 	if (!mach)
 		return -ENOMEM;
 	ret = sof_nocodec_setup(dev, sof_pdata, mach, desc, ops);

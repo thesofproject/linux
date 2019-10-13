@@ -17,6 +17,30 @@
 
 struct snd_sof_dsp_ops;
 
+enum {
+	SND_SOC_FW_TYPE_ACPI = 0,
+	SND_SOC_FW_TYPE_OF,
+};
+
+struct snd_soc_fw_mach {
+	int type;
+	union {
+		struct snd_soc_acpi_mach *acpi;
+		struct device_node *of;
+	};
+};
+
+static inline
+const char *sof_mach_get_drv_name(const struct snd_soc_fw_mach *mach)
+{
+	switch (mach->type) {
+	case SND_SOC_FW_TYPE_ACPI:
+		return mach->acpi->drv_name;
+	default:
+		return NULL;
+	}
+}
+
 /*
  * SOF Platform data.
  */
@@ -48,7 +72,7 @@ struct snd_sof_pdata {
 
 	/* machine */
 	struct platform_device *pdev_mach;
-	const struct snd_soc_acpi_mach *machine;
+	const struct snd_soc_fw_mach *machine;
 
 	void *hw_pdata;
 };

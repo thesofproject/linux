@@ -582,9 +582,9 @@ int sof_machine_register(struct snd_sof_dev *sdev)
 	const void *mach;
 	int size;
 
-	drv_name = plat_data->machine->drv_name;
-	mach = (const void *)plat_data->machine;
-	size = sizeof(*plat_data->machine);
+	drv_name = sof_mach_get_drv_name(plat_data->machine);
+	mach = (const void *)plat_data->machine->acpi;
+	size = sizeof(*plat_data->machine->acpi);
 
 	/* register machine driver, pass machine info as pdata */
 	plat_data->pdev_mach =
