@@ -117,6 +117,8 @@ struct sdw_intel {
 	struct sdw_cdns cdns;
 	int instance;
 	struct sdw_intel_link_res *link_res;
+	struct snd_pcm_hw_params *hw_params;
+	struct sdw_cdns_pdi *pdi;
 #ifdef CONFIG_DEBUG_FS
 	struct dentry *debugfs;
 #endif
@@ -810,11 +812,15 @@ static int intel_hw_params(struct snd_pcm_substream *substream,
 		goto error;
 	}
 
+	dma->suspend_reinitialize = false;
+
 	/* do run-time configurations for SHIM, ALH and PDI/PORT */
 	intel_pdi_shim_configure(sdw, pdi);
 	intel_pdi_alh_configure(sdw, pdi);
 	sdw_cdns_config_stream(cdns, ch, dir, pdi);
 
+	sdw->pdi = pdi;
+	sdw->hw_params = params;
 
 	/* Inform DSP about PDI stream number */
 	ret = intel_params_stream(sdw, substream, dai, params,
@@ -858,7 +864,11 @@ error:
 static int intel_prepare(struct snd_pcm_substream *substream,
 			 struct snd_soc_dai *dai)
 {
+	struct sdw_cdns *cdns = snd_soc_dai_get_drvdata(dai);
+	struct sdw_intel *sdw = cdns_to_intel(cdns);
 	struct sdw_cdns_dma_data *dma;
+	int ch, dir;
+	int ret;
 
 	dma = snd_soc_dai_get_dma_data(dai, substream);
 	if (!dma) {
@@ -867,7 +877,39 @@ static int intel_prepare(struct snd_pcm_substream *substream,
 		return -EIO;
 	}
 
-	return sdw_prepare_stream(dma->stream);
+	if (dma->suspend_reinitialize) {
+		/*
+		 * .prepare() is called when dealing with underflows or
+		 * after system resume. In the latter case, we need to
+		 * re-initialize the ALH settings, which is not needed
+		 * in the underflow case
+		 */
+
+		/* configure stream */
+		ch = params_channels(sdw->hw_params);
+		if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
+			dir = SDW_DATA_DIR_RX;
+		else
+			dir = SDW_DATA_DIR_TX;
+
+		intel_pdi_shim_configure(sdw, sdw->pdi);
+		intel_pdi_alh_configure(sdw, sdw->pdi);
+		sdw_cdns_config_stream(cdns, ch, dir, sdw->pdi);
+
+		/* Inform DSP about PDI stream number */
+		ret = intel_params_stream(sdw, substream, dai, sdw->hw_params,
+					  sdw->instance,
+					  sdw->pdi->intel_alh_id);
+		if (ret)
+			goto err;
+
+		dma->suspend_reinitialize = false;
+	}
+
+	ret = sdw_prepare_stream(dma->stream);
+
+err:
+	return ret;
 }
 
 static int intel_trigger(struct snd_pcm_substream *substream, int cmd,
@@ -889,8 +931,10 @@ static int intel_trigger(struct snd_pcm_substream *substream, int cmd,
 		ret = sdw_enable_stream(dma->stream);
 		break;
 
-	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
+		dma->suspend_reinitialize = true;
+		/* fallthrough */
+	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 	case SNDRV_PCM_TRIGGER_STOP:
 		ret = sdw_disable_stream(dma->stream);
 		break;
@@ -938,6 +982,8 @@ intel_hw_free(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
 		return ret;
 	}
 
+	sdw->hw_params = NULL;
+	sdw->pdi = NULL;
 	sdw_release_stream(dma->stream);
 
 	return 0;
