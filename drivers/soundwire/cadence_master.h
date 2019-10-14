@@ -81,6 +81,7 @@ struct sdw_cdns_stream_config {
  * @bus: Bus handle
  * @stream_type: Stream type
  * @link_id: Master link id
+ * after a TRIGGER_SUSPEND.
  */
 struct sdw_cdns_dma_data {
 	char *name;
