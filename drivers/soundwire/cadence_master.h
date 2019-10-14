@@ -81,6 +81,8 @@ struct sdw_cdns_stream_config {
  * @bus: Bus handle
  * @stream_type: Stream type
  * @link_id: Master link id
+ * @suspend_reinitialize: status flag indicating PDI needs to be reinitialized
+ * after a TRIGGER_SUSPEND.
  */
 struct sdw_cdns_dma_data {
 	char *name;
@@ -89,6 +91,7 @@ struct sdw_cdns_dma_data {
 	struct sdw_bus *bus;
 	enum sdw_stream_type stream_type;
 	int link_id;
+	bool suspend_reinitialize;
 };
 
 /**
