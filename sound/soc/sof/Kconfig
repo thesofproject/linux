@@ -166,6 +166,16 @@ config SND_SOC_SOF_DEBUG_RETAIN_DSP_CONTEXT
 	  Say Y if you want to retain DSP context for FW exceptions.
 	  If unsure, select "N".
 
+config SND_SOC_SOF_DEBUG_D0I3_AT_S0IX
+	bool "SOF put audio device to D0I3 state at S0Ix"
+	default n
+	help
+	  This enable audio device D0I3 support, where audio can keep partially
+	  active with low power consumption, which is typically used at Wake on
+	  Voice or deep buffer playback scenarios.
+	  Say Y if you need this feature to be supported.
+	  If unsure select "N".
+
 endif ## SND_SOC_SOF_DEBUG
 
 endif ## SND_SOC_SOF_OPTIONS
