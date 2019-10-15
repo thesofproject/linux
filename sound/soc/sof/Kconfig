@@ -171,6 +171,15 @@ config SND_SOC_SOF_DEBUG_RETAIN_DSP_CONTEXT
 	  Say Y if you want to retain DSP context for FW exceptions.
 	  If unsure, select "N".
 
+config SND_SOC_SOF_DEBUG_PROBES
+	bool "SOF enable data probing"
+	select SND_SOC_COMPRESS
+	help
+	  This option enables the data probing feature that can be used to
+	  gather data directly from specific points of the audio pipeline.
+	  Say Y if you want to enable probes.
+	  If unsure, select "N".
+
 endif ## SND_SOC_SOF_DEBUG
 
 endif ## SND_SOC_SOF_DEVELOPER_SUPPORT
