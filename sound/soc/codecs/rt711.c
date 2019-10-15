@@ -46,10 +46,8 @@ static int rt711_index_write(struct regmap *regmap,
 	ret = regmap_write(regmap, addr, value);
 	if (ret < 0) {
 		pr_err("Failed to set private value: %08x <= %04x %d\n", ret, addr, value);
-		goto err;
 	}
 
-err:
 	return ret;
 }
 
@@ -63,10 +61,8 @@ static unsigned int rt711_index_read(struct regmap *regmap,
 	ret = regmap_read(regmap, addr, value);
 	if (ret < 0) {
 		pr_err("Failed to get private value: %08x => %04x %d\n", ret, addr, *value);
-		goto err;
 	}
 
-err:
 	return ret;
 }
 
