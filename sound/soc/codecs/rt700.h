@@ -15,6 +15,7 @@ extern const struct dev_pm_ops rt700_runtime_pm;
 struct  rt700_priv {
 	struct snd_soc_component *component;
 	struct regmap *regmap;
+	struct regmap *sdw_regmap;
 	struct sdw_slave *slave;
 	enum sdw_slave_status status;
 	struct sdw_bus_params params;
@@ -166,8 +167,8 @@ enum {
 };
 
 int rt700_io_init(struct device *dev, struct sdw_slave *slave);
-int rt700_init(struct device *dev, struct regmap *regmap,
-	       struct sdw_slave *slave);
+int rt700_init(struct device *dev, struct regmap *sdw_regmap,
+	       struct regmap *regmap, struct sdw_slave *slave);
 
 int rt700_jack_detect(struct rt700_priv *rt700, bool *hp, bool *mic);
 int rt700_clock_config(struct device *dev);
