@@ -38,7 +38,7 @@ struct tgl_hdmi_pcm {
 static int tgl_hdmi_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct tgl_card_private *ctx = snd_soc_card_get_drvdata(rtd->card);
-	struct snd_soc_dai *dai = rtd->codec_dai;
+	struct snd_soc_dai *dai = asoc_codec_dai(rtd, 0);
 	struct tgl_hdmi_pcm *pcm;
 
 	pcm = devm_kzalloc(rtd->card->dev, sizeof(*pcm), GFP_KERNEL);
@@ -99,7 +99,7 @@ static int tgl_rt1308_hw_params(struct snd_pcm_substream *substream,
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_card *card = rtd->card;
-	struct snd_soc_dai *codec_dai = rtd->codec_dai;
+	struct snd_soc_dai *codec_dai = asoc_codec_dai(rtd, 0);
 	int clk_id, clk_freq, pll_out;
 	int err;
 

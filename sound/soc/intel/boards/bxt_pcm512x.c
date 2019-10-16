@@ -40,7 +40,7 @@ struct bxt_hdmi_pcm {
 static int broxton_hdmi_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct bxt_card_private *ctx = snd_soc_card_get_drvdata(rtd->card);
-	struct snd_soc_dai *dai = rtd->codec_dai;
+	struct snd_soc_dai *dai = asoc_codec_dai(rtd, 0);
 	struct bxt_hdmi_pcm *pcm;
 
 	pcm = devm_kzalloc(rtd->card->dev, sizeof(*pcm), GFP_KERNEL);
@@ -131,7 +131,7 @@ static int codec_fixup(struct snd_soc_pcm_runtime *rtd,
 static int aif1_startup(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_component *codec = rtd->codec_dai->component;
+	struct snd_soc_component *codec = asoc_codec_dai(rtd, 0)->component;
 
 	snd_soc_component_update_bits(codec, PCM512x_GPIO_CONTROL_1,
 				      0x08, 0x08);
@@ -143,7 +143,7 @@ static int aif1_startup(struct snd_pcm_substream *substream)
 static void aif1_shutdown(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_component *codec = rtd->codec_dai->component;
+	struct snd_soc_component *codec = asoc_codec_dai(rtd, 0)->component;
 
 	snd_soc_component_update_bits(codec, PCM512x_GPIO_CONTROL_1,
 				      0x08, 0x00);
@@ -151,7 +151,7 @@ static void aif1_shutdown(struct snd_pcm_substream *substream)
 
 static int init(struct snd_soc_pcm_runtime *rtd)
 {
-	struct snd_soc_component *codec = rtd->codec_dai->component;
+	struct snd_soc_component *codec = asoc_codec_dai(rtd, 0)->component;
 
 	snd_soc_component_update_bits(codec, PCM512x_GPIO_EN, 0x08, 0x08);
 	snd_soc_component_update_bits(codec, PCM512x_GPIO_OUTPUT_4, 0x0f, 0x02);
