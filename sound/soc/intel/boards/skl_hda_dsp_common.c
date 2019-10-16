@@ -101,6 +101,7 @@ struct snd_soc_dai_link skl_hda_be_dai_links[HDA_DSP_MAX_BE_DAI_LINKS] = {
 		.id = 4,
 		.dpcm_playback = 1,
 		.dpcm_capture = 1,
+		.init = NULL,
 		.no_pcm = 1,
 		SND_SOC_DAILINK_REG(analog_cpu, analog_codec, platform),
 	},
@@ -109,22 +110,9 @@ struct snd_soc_dai_link skl_hda_be_dai_links[HDA_DSP_MAX_BE_DAI_LINKS] = {
 		.id = 5,
 		.dpcm_playback = 1,
 		.dpcm_capture = 1,
+		.init = NULL,
 		.no_pcm = 1,
 		SND_SOC_DAILINK_REG(digital_cpu, digital_codec, platform),
-	},
-	{
-		.name = "dmic01",
-		.id = 6,
-		.dpcm_capture = 1,
-		.no_pcm = 1,
-		SND_SOC_DAILINK_REG(dmic_pin, dmic_codec, platform),
-	},
-	{
-		.name = "dmic16k",
-		.id = 7,
-		.dpcm_capture = 1,
-		.no_pcm = 1,
-		SND_SOC_DAILINK_REG(dmic16k, dmic_codec, platform),
 	},
 };
 
