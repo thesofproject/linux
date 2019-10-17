@@ -104,6 +104,7 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 	struct snd_sof_pcm *spcm;
 	struct sof_ipc_pcm_params pcm;
 	struct sof_ipc_pcm_params_reply ipc_params_reply;
+	int pb = 0;
 	int ret;
 
 	/* nothing to do for BE */
@@ -155,7 +156,14 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 	pcm.params.buffer_fmt = SOF_IPC_BUFFER_INTERLEAVED;
 	pcm.params.rate = params_rate(params);
 	pcm.params.channels = params_channels(params);
-	pcm.params.host_period_bytes = params_period_bytes(params);
+	/* Host period bytes defines the frequency of position
+	 * updates from dsp. Make it at least every 20ms.
+	 */
+	pb = pcm.params.rate / 50 * pcm.params.channels *
+		pcm.params.sample_valid_bytes;
+
+	pcm.params.host_period_bytes = pb < params_period_bytes(params) ? pb :
+		params_period_bytes(params);
 
 	/* container size */
 	ret = snd_pcm_format_physical_width(params_format(params));
