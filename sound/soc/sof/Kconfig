@@ -15,6 +15,7 @@ config SND_SOC_SOF_PCI
 	select SND_SOC_SOF
 	select SND_SOC_ACPI if ACPI
 	select SND_SOC_SOF_OPTIONS
+	select SND_SOC_SOF_CLIENT
 	select SND_SOC_SOF_INTEL_PCI if SND_SOC_SOF_INTEL_TOPLEVEL
 	help
 	  This adds support for PCI enumeration. This option is
@@ -28,6 +29,7 @@ config SND_SOC_SOF_ACPI
 	select SND_SOC_SOF
 	select SND_SOC_ACPI if ACPI
 	select SND_SOC_SOF_OPTIONS
+	select SND_SOC_SOF_CLIENT
 	select SND_SOC_SOF_INTEL_ACPI if SND_SOC_SOF_INTEL_TOPLEVEL
 	select IOSF_MBI if X86 && PCI
 	help
@@ -45,6 +47,12 @@ config SND_SOC_SOF_OF
 	  This adds support for Device Tree enumeration. This option is
 	  required to enable i.MX8 devices.
 	  Say Y if you need this option. If unsure select "N".
+
+config SND_SOC_SOF_CLIENT
+	tristate
+	help
+	  This option is not user-selectable but automagically handled by
+	  'select' statements at a higher level
 
 config SND_SOC_SOF_OPTIONS
 	tristate
