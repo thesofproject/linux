@@ -28,6 +28,7 @@
 #define QUAD_CHANNEL		4
 
 static struct snd_soc_jack broxton_headset;
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT) && IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
 static struct snd_soc_jack broxton_hdmi[3];
 
 struct bxt_hdmi_pcm {
@@ -39,6 +40,7 @@ struct bxt_hdmi_pcm {
 struct bxt_card_private {
 	struct list_head hdmi_pcm_list;
 };
+#endif
 
 enum {
 	BXT_DPCM_AUDIO_PB = 0,
@@ -109,8 +111,10 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	/* other jacks */
 	{"MIC", NULL, "Headset Mic"},
 
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT)
 	/* digital mics */
 	{"DMic", NULL, "SoC DMIC"},
+#if IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
 
 	/* CODEC BE connections */
 	{"HDMI1", NULL, "hif5-0 Output"},
@@ -123,10 +127,11 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"iDisp2 Tx", NULL, "iDisp2_out"},
 	{"hifi1", NULL, "iDisp1 Tx"},
 	{"iDisp1 Tx", NULL, "iDisp1_out"},
-
+#endif
 	/* DMIC */
 	{"dmic01_hifi", NULL, "DMIC01 Rx"},
 	{"DMIC01 Rx", NULL, "DMIC AIF"},
+#endif
 
 	{ "Headphone Jack", NULL, "Platform Clock" },
 	{ "Headset Mic", NULL, "Platform Clock" },
@@ -221,6 +226,7 @@ static int broxton_da7219_codec_init(struct snd_soc_pcm_runtime *rtd)
 	return ret;
 }
 
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT) && IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
 static int broxton_hdmi_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct bxt_card_private *ctx = snd_soc_card_get_drvdata(rtd->card);
@@ -238,6 +244,7 @@ static int broxton_hdmi_init(struct snd_soc_pcm_runtime *rtd)
 
 	return 0;
 }
+#endif
 
 static int broxton_da7219_fe_init(struct snd_soc_pcm_runtime *rtd)
 {
@@ -308,6 +315,7 @@ static const struct snd_soc_ops broxton_da7219_fe_ops = {
 	.startup = bxt_fe_startup,
 };
 
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT)
 static int broxton_dmic_fixup(struct snd_soc_pcm_runtime *rtd,
 			struct snd_pcm_hw_params *params)
 {
@@ -336,6 +344,7 @@ static int broxton_dmic_startup(struct snd_pcm_substream *substream)
 static const struct snd_soc_ops broxton_dmic_ops = {
 	.startup = broxton_dmic_startup,
 };
+#endif
 
 static const unsigned int rates_16000[] = {
 	16000,
@@ -384,9 +393,11 @@ SND_SOC_DAILINK_DEF(system2,
 SND_SOC_DAILINK_DEF(reference,
 	DAILINK_COMP_ARRAY(COMP_CPU("Reference Pin")));
 
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT)
 SND_SOC_DAILINK_DEF(dmic,
 	DAILINK_COMP_ARRAY(COMP_CPU("DMIC Pin")));
 
+#if IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
 SND_SOC_DAILINK_DEF(hdmi1,
 	DAILINK_COMP_ARRAY(COMP_CPU("HDMI1 Pin")));
 
@@ -395,6 +406,8 @@ SND_SOC_DAILINK_DEF(hdmi2,
 
 SND_SOC_DAILINK_DEF(hdmi3,
 	DAILINK_COMP_ARRAY(COMP_CPU("HDMI3 Pin")));
+#endif
+#endif
 
  /* Back End DAI */
 SND_SOC_DAILINK_DEF(ssp5_pin,
@@ -409,6 +422,7 @@ SND_SOC_DAILINK_DEF(ssp1_codec,
 	DAILINK_COMP_ARRAY(COMP_CODEC("i2c-DLGS7219:00",
 				      BXT_DIALOG_CODEC_DAI)));
 
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT)
 SND_SOC_DAILINK_DEF(dmic_pin,
 	DAILINK_COMP_ARRAY(COMP_CPU("DMIC01 Pin")));
 
@@ -418,6 +432,7 @@ SND_SOC_DAILINK_DEF(dmic16k_pin,
 SND_SOC_DAILINK_DEF(dmic_codec,
 	DAILINK_COMP_ARRAY(COMP_CODEC("dmic-codec", "dmic-hifi")));
 
+#if IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
 SND_SOC_DAILINK_DEF(idisp1_pin,
 	DAILINK_COMP_ARRAY(COMP_CPU("iDisp1 Pin")));
 SND_SOC_DAILINK_DEF(idisp1_codec,
@@ -434,6 +449,8 @@ SND_SOC_DAILINK_DEF(idisp3_pin,
 SND_SOC_DAILINK_DEF(idisp3_codec,
 	DAILINK_COMP_ARRAY(COMP_CODEC("ehdaudio0D2",
 				      "intel-hdmi-hifi3")));
+#endif
+#endif
 
 SND_SOC_DAILINK_DEF(platform,
 	DAILINK_COMP_ARRAY(COMP_PLATFORM("0000:00:0e.0")));
@@ -487,6 +504,7 @@ static struct snd_soc_dai_link broxton_dais[] = {
 		.ops = &broxton_refcap_ops,
 		SND_SOC_DAILINK_REG(reference, dummy, platform),
 	},
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT)
 	[BXT_DPCM_AUDIO_DMIC_CP] =
 	{
 		.name = "Bxt Audio DMIC cap",
@@ -528,6 +546,7 @@ static struct snd_soc_dai_link broxton_dais[] = {
 		.dynamic = 1,
 		SND_SOC_DAILINK_REG(hdmi3, dummy, platform),
 	},
+#endif
 	/* Back End DAI links */
 	{
 		/* SSP5 - Codec */
@@ -556,6 +575,7 @@ static struct snd_soc_dai_link broxton_dais[] = {
 		.dpcm_capture = 1,
 		SND_SOC_DAILINK_REG(ssp1_pin, ssp1_codec, platform),
 	},
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT)
 	{
 		.name = "dmic01",
 		.id = 2,
@@ -565,6 +585,7 @@ static struct snd_soc_dai_link broxton_dais[] = {
 		.no_pcm = 1,
 		SND_SOC_DAILINK_REG(dmic_pin, dmic_codec, platform),
 	},
+#if IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
 	{
 		.name = "iDisp1",
 		.id = 3,
@@ -589,6 +610,7 @@ static struct snd_soc_dai_link broxton_dais[] = {
 		.no_pcm = 1,
 		SND_SOC_DAILINK_REG(idisp3_pin, idisp3_codec, platform),
 	},
+#endif
 	{
 		.name = "dmic16k",
 		.id = 6,
@@ -597,8 +619,10 @@ static struct snd_soc_dai_link broxton_dais[] = {
 		.no_pcm = 1,
 		SND_SOC_DAILINK_REG(dmic16k_pin, dmic_codec, platform),
 	},
+#endif
 };
 
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT) && IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
 #define NAME_SIZE	32
 static int bxt_card_late_probe(struct snd_soc_card *card)
 {
@@ -639,6 +663,7 @@ static int bxt_card_late_probe(struct snd_soc_card *card)
 
 	return hdac_hdmi_jack_port_init(component, &card->dapm);
 }
+#endif
 
 /* broxton audio machine driver for SPT + da7219 */
 static struct snd_soc_card broxton_audio_card = {
@@ -653,24 +678,30 @@ static struct snd_soc_card broxton_audio_card = {
 	.dapm_routes = audio_map,
 	.num_dapm_routes = ARRAY_SIZE(audio_map),
 	.fully_routed = true,
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT) && IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
 	.late_probe = bxt_card_late_probe,
+#endif
 };
 
 static int broxton_audio_probe(struct platform_device *pdev)
 {
-	struct bxt_card_private *ctx;
 	struct snd_soc_acpi_mach *mach;
 	const char *platform_name;
 	int ret;
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT) && IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
+	struct bxt_card_private *ctx;
 
 	ctx = devm_kzalloc(&pdev->dev, sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
 
 	INIT_LIST_HEAD(&ctx->hdmi_pcm_list);
+#endif
 
 	broxton_audio_card.dev = &pdev->dev;
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT) && IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
 	snd_soc_card_set_drvdata(&broxton_audio_card, ctx);
+#endif
 	if (soc_intel_is_glk()) {
 		unsigned int i;
 
