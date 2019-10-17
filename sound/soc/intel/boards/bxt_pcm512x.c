@@ -28,7 +28,7 @@ struct bxt_card_private {
 	struct list_head hdmi_pcm_list;
 };
 
-#if IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT) && IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
 static struct snd_soc_jack broxton_hdmi[3];
 
 struct bxt_hdmi_pcm {
@@ -88,11 +88,6 @@ static int bxt_card_late_probe(struct snd_soc_card *card)
 		return -EINVAL;
 
 	return hdac_hdmi_jack_port_init(component, &card->dapm);
-}
-#else
-static int bxt_card_late_probe(struct snd_soc_card *card)
-{
-	return 0;
 }
 #endif
 
@@ -175,6 +170,7 @@ SND_SOC_DAILINK_DEF(ssp5_codec,
 SND_SOC_DAILINK_DEF(platform,
 	DAILINK_COMP_ARRAY(COMP_PLATFORM("0000:00:0e.0")));
 
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT) && IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
 SND_SOC_DAILINK_DEF(idisp1_pin,
 	DAILINK_COMP_ARRAY(COMP_CPU("iDisp1 Pin")));
 SND_SOC_DAILINK_DEF(idisp1_codec,
@@ -189,6 +185,7 @@ SND_SOC_DAILINK_DEF(idisp3_pin,
 	DAILINK_COMP_ARRAY(COMP_CPU("iDisp3 Pin")));
 SND_SOC_DAILINK_DEF(idisp3_codec,
 	DAILINK_COMP_ARRAY(COMP_CODEC("ehdaudio0D2", "intel-hdmi-hifi3")));
+#endif
 
 static struct snd_soc_dai_link dailink[] = {
 	/* CODEC<->CODEC link */
@@ -206,7 +203,7 @@ static struct snd_soc_dai_link dailink[] = {
 		.dpcm_capture = 1,
 		SND_SOC_DAILINK_REG(ssp5_pin, ssp5_codec, platform),
 	},
-#if IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT) && IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
 	{
 		.name = "iDisp1",
 		.id = 1,
@@ -244,7 +241,9 @@ static struct snd_soc_card bxt_pcm512x_card = {
 	.num_dapm_widgets = ARRAY_SIZE(dapm_widgets),
 	.dapm_routes = audio_map,
 	.num_dapm_routes = ARRAY_SIZE(audio_map),
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT) && IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
 	.late_probe = bxt_card_late_probe,
+#endif
 };
 
  /* i2c-<HID>:00 with HID being 8 chars */
@@ -264,9 +263,10 @@ static int bxt_pcm512x_probe(struct platform_device *pdev)
 	if (!ctx)
 		return -ENOMEM;
 
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT) && IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
 	if (IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI))
 		INIT_LIST_HEAD(&ctx->hdmi_pcm_list);
-
+#endif
 	mach = (&pdev->dev)->platform_data;
 	card = &bxt_pcm512x_card;
 	card->dev = &pdev->dev;
