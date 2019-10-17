@@ -12,6 +12,7 @@
 
 struct rt715_priv {
 	struct regmap *regmap;
+	struct regmap *sdw_regmap;
 	struct snd_soc_codec *codec;
 	struct sdw_slave *slave;
 	int dbg_nid;
@@ -194,8 +195,8 @@ enum {
 };
 
 int rt715_io_init(struct device *dev, struct sdw_slave *slave);
-int rt715_init(struct device *dev, struct regmap *regmap,
-	       struct sdw_slave *slave);
+int rt715_init(struct device *dev, struct regmap *sdw_regmap,
+	struct regmap *regmap, struct sdw_slave *slave);
 
 int hda_to_sdw(unsigned int nid, unsigned int verb, unsigned int payload,
 	       unsigned int *sdw_addr_h, unsigned int *sdw_data_h,

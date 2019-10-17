@@ -38,39 +38,34 @@
 
 #include "rt715.h"
 
-static int rt715_index_write(struct regmap *regmap,
-			     unsigned int reg, unsigned int value)
+static int rt715_index_write(struct regmap *regmap, unsigned int reg,
+		unsigned int value)
 {
 	int ret;
-	unsigned int val_h, val_l;
+	unsigned int addr = ((RT715_PRIV_INDEX_W_H) << 16) | reg;
 
-	val_h = (reg >> 8) & 0xff;
-	val_l = reg & 0xff;
-	ret = regmap_write(regmap, RT715_PRIV_INDEX_W_H, val_h);
+	ret = regmap_write(regmap, addr, value);
 	if (ret < 0) {
-		pr_err("Failed to set private addr: %d\n", ret);
-		goto err;
+		pr_err("Failed to set private value: %08x <= %04x %d\n", ret,
+			addr, value);
 	}
-	ret = regmap_write(regmap, RT715_PRIV_INDEX_W_L, val_l);
-	if (ret < 0) {
-		pr_err("Failed to set private addr: %d\n", ret);
-		goto err;
-	}
-	val_h = (value >> 8) & 0xff;
-	val_l = value & 0xff;
-	ret = regmap_write(regmap, RT715_PRIV_DATA_W_H, val_h);
-	if (ret < 0) {
-		pr_err("Failed to set private value: %d\n", ret);
-		goto err;
-	}
-	ret = regmap_write(regmap, RT715_PRIV_DATA_W_L, val_l);
-	if (ret < 0) {
-		pr_err("Failed to set private value: %d\n", ret);
-		goto err;
-	}
-	return 0;
 
-err:
+	return ret;
+}
+
+static unsigned int rt715_index_read(struct regmap *regmap, unsigned int reg,
+		unsigned int *value)
+{
+	int ret;
+	unsigned int addr = ((RT715_PRIV_INDEX_W_H) << 16) | reg;
+
+	*value = 0;
+	ret = regmap_read(regmap, addr, value);
+	if (ret < 0) {
+		pr_err("Failed to get private value: %08x => %04x %d\n", ret,
+			addr, *value);
+	}
+
 	return ret;
 }
 
@@ -79,15 +74,13 @@ static void rt715_get_gain(struct rt715_priv *rt715, unsigned int addr_h,
 			   unsigned int *r_val, unsigned int *l_val)
 {
 	/* R Channel */
-	regmap_write(rt715->regmap, addr_h, val_h);
-	regmap_write(rt715->regmap, addr_l, 0);
-	regmap_read(rt715->regmap, RT715_READ_HDA_0, r_val);
+	*r_val = (val_h << 8);
+	regmap_read(rt715->regmap, addr_l, r_val);
 
 	/* L Channel */
 	val_h |= 0x20;
-	regmap_write(rt715->regmap, addr_h, val_h);
-	regmap_write(rt715->regmap, addr_l, 0);
-	regmap_read(rt715->regmap, RT715_READ_HDA_0, l_val);
+	*l_val = (val_h << 8);
+	regmap_read(rt715->regmap, addr_h, l_val);
 }
 
 /* For Verb-Set Amplifier Gain (Verb ID = 3h) */
@@ -105,8 +98,8 @@ static int rt715_set_amp_gain_put(struct snd_kcontrol *kcontrol,
 	int i;
 
 	/* Can't use update bit function, so read the original value first */
-	addr_h = (mc->reg + 0x2000) | 0x800;
-	addr_l = (mc->rreg + 0x2000) | 0x800;
+	addr_h = mc->reg;
+	addr_l = mc->rreg;
 	if (mc->shift == RT715_DIR_OUT_SFT) /* output */
 		val_h = 0x80;
 	else /* input */
@@ -151,27 +144,22 @@ static int rt715_set_amp_gain_put(struct snd_kcontrol *kcontrol,
 	}
 
 	for (i = 0; i < 3; i++) { /* retry 3 times at most */
-		addr_h = mc->reg;
-		addr_l = mc->rreg;
+
 		if (val_ll == val_lr) {
 			/* Set both L/R channels at the same time */
 			val_h = (1 << mc->shift) | (3 << 4);
-			regmap_write(rt715->regmap, addr_h, val_h);
-			regmap_write(rt715->regmap, addr_l, val_ll);
+			regmap_write(rt715->regmap, addr_h, (val_h << 8 | val_ll));
+			regmap_write(rt715->regmap, addr_l, (val_h << 8 | val_ll));
 		} else {
 			/* Lch*/
 			val_h = (1 << mc->shift) | (1 << 5);
-			regmap_write(rt715->regmap, addr_h, val_h);
-			regmap_write(rt715->regmap, addr_l, val_ll);
+			regmap_write(rt715->regmap, addr_h, (val_h << 8 | val_ll));
 
 			/* Rch */
 			val_h = (1 << mc->shift) | (1 << 4);
-			regmap_write(rt715->regmap, addr_h, val_h);
-			regmap_write(rt715->regmap, addr_l, val_lr);
+			regmap_write(rt715->regmap, addr_l, (val_h << 8 | val_lr));
 		}
 		/* check result */
-		addr_h = (mc->reg + 0x2000) | 0x800;
-		addr_l = (mc->rreg + 0x2000) | 0x800;
 		if (mc->shift == RT715_DIR_OUT_SFT) /* output */
 			val_h = 0x80;
 		else /* input */
@@ -199,8 +187,8 @@ static int rt715_set_amp_gain_get(struct snd_kcontrol *kcontrol,
 	unsigned int addr_h, addr_l, val_h;
 	unsigned int read_ll, read_rl;
 
-	addr_h = (mc->reg + 0x2000) | 0x800;
-	addr_l = (mc->rreg + 0x2000) | 0x800;
+	addr_h = mc->reg;
+	addr_l = mc->rreg;
 	if (mc->shift == RT715_DIR_OUT_SFT) /* output */
 		val_h = 0x80;
 	else /* input */
@@ -306,21 +294,15 @@ static int rt715_mux_get(struct snd_kcontrol *kcontrol,
 {
 	struct snd_soc_component *component =
 		snd_soc_dapm_kcontrol_component(kcontrol);
+	struct rt715_priv *rt715 = snd_soc_component_get_drvdata(component);
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
-	unsigned int reg, val;
-	int ret;
+	unsigned int reg, val, ret;
 
 	/* nid = e->reg, vid = 0xf01 */
-	reg = RT715_VERB_GET_CONNECT_SEL | e->reg;
-
-	ret = snd_soc_component_write(component, reg, 0x0);
+	reg = RT715_VERB_SET_CONNECT_SEL | e->reg;
+	ret = regmap_read(rt715->regmap, reg, &val);
 	if (ret < 0) {
-		dev_err(component->dev, "sdw write failed\n");
-		return ret;
-	}
-	ret = snd_soc_component_read(component, RT715_READ_HDA_0, &val);
-	if (ret < 0) {
-		dev_err(component->dev, "sdw read failed\n");
+		dev_err(component->dev, "%s: sdw read failed: %d\n", __func__, ret);
 		return ret;
 	}
 
@@ -343,11 +325,10 @@ static int rt715_mux_put(struct snd_kcontrol *kcontrol,
 		snd_soc_dapm_kcontrol_component(kcontrol);
 	struct snd_soc_dapm_context *dapm =
 				snd_soc_dapm_kcontrol_dapm(kcontrol);
+	struct rt715_priv *rt715 = snd_soc_component_get_drvdata(component);
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
 	unsigned int *item = ucontrol->value.enumerated.item;
-	unsigned int val, val2, change, reg;
-	struct snd_soc_dapm_update update;
-	int ret;
+	unsigned int val, val2 = 0, change, reg, ret;
 
 	if (item[0] >= e->items)
 		return -EINVAL;
@@ -355,17 +336,13 @@ static int rt715_mux_put(struct snd_kcontrol *kcontrol,
 	/* Verb ID = 0x701h, nid = e->reg */
 	val = snd_soc_enum_item_to_val(e, item[0]) << e->shift_l;
 
-	reg = RT715_VERB_GET_CONNECT_SEL | e->reg;
-	ret = snd_soc_component_write(component, reg, 0x0);
+	reg = RT715_VERB_SET_CONNECT_SEL | e->reg;
+	ret = regmap_read(rt715->regmap, reg, &val2);
 	if (ret < 0) {
-		dev_err(component->dev, "sdw write failed\n");
+		dev_err(component->dev, "%s: sdw read failed: %d\n", __func__, ret);
 		return ret;
 	}
-	ret = snd_soc_component_read(component, RT715_READ_HDA_0, &val2);
-	if (ret < 0) {
-		dev_err(component->dev, "sdw read failed\n");
-		return ret;
-	}
+
 	if (val == val2)
 		change = 0;
 	else
@@ -373,14 +350,11 @@ static int rt715_mux_put(struct snd_kcontrol *kcontrol,
 
 	if (change) {
 		reg = RT715_VERB_SET_CONNECT_SEL | e->reg;
-		snd_soc_component_write(component, reg, val);
-		update.kcontrol = kcontrol;
-		update.reg = e->reg;
-		update.mask = 0xff;
-		update.val = val;
-		snd_soc_dapm_mux_update_power(dapm, kcontrol,
-					      item[0], e, &update);
+		regmap_write(rt715->regmap, reg, val);
 	}
+
+	snd_soc_dapm_mux_update_power(dapm, kcontrol,
+					      item[0], e, NULL);
 
 	return change;
 }
@@ -521,18 +495,19 @@ static int rt715_set_bias_level(struct snd_soc_component *component,
 {
 	struct snd_soc_dapm_context *dapm =
 		snd_soc_component_get_dapm(component);
+	struct rt715_priv *rt715 = snd_soc_component_get_drvdata(component);
 
 	switch (level) {
 	case SND_SOC_BIAS_PREPARE:
 		if (dapm->bias_level == SND_SOC_BIAS_STANDBY) {
-			snd_soc_component_write(component,
+			regmap_write(rt715->regmap,
 						RT715_SET_AUDIO_POWER_STATE,
 						AC_PWRST_D0);
 		}
 		break;
 
 	case SND_SOC_BIAS_STANDBY:
-		snd_soc_component_write(component,
+		regmap_write(rt715->regmap,
 					RT715_SET_AUDIO_POWER_STATE,
 					AC_PWRST_D3);
 		break;
@@ -643,16 +618,10 @@ static int rt715_pcm_hw_params(struct snd_pcm_substream *substream,
 	/* bit 14 0:48K 1:44.1K */
 	/* bit 15 Stream Type 0:PCM 1:Non-PCM, should always be PCM */
 	case 44100:
-		snd_soc_component_write(component, RT715_MIC_ADC_FORMAT_H, 0x40);
-		snd_soc_component_write(component, RT715_MIC_LINE_FORMAT_H, 0x40);
-		snd_soc_component_write(component, RT715_MIX_ADC_FORMAT_H, 0x40);
-		snd_soc_component_write(component, RT715_MIX_ADC2_FORMAT_H, 0x40);
+		val |= 0x40 << 8;
 		break;
 	case 48000:
-		snd_soc_component_write(component, RT715_MIC_ADC_FORMAT_H, 0x0);
-		snd_soc_component_write(component, RT715_MIC_LINE_FORMAT_H, 0x00);
-		snd_soc_component_write(component, RT715_MIX_ADC_FORMAT_H, 0x00);
-		snd_soc_component_write(component, RT715_MIX_ADC2_FORMAT_H, 0x0);
+		val |= 0x0 << 8;
 		break;
 	default:
 		dev_err(component->dev, "Unsupported sample rate %d\n",
@@ -689,10 +658,10 @@ static int rt715_pcm_hw_params(struct snd_pcm_substream *substream,
 		return -EINVAL;
 	}
 
-	snd_soc_component_write(component, RT715_MIC_ADC_FORMAT_L, val);
-	snd_soc_component_write(component, RT715_MIC_LINE_FORMAT_L, val);
-	snd_soc_component_write(component, RT715_MIX_ADC_FORMAT_L, val);
-	snd_soc_component_write(component, RT715_MIX_ADC2_FORMAT_L, val);
+	regmap_write(rt715->regmap, RT715_MIC_ADC_FORMAT_H, val);
+	regmap_write(rt715->regmap, RT715_MIC_LINE_FORMAT_H, val);
+	regmap_write(rt715->regmap, RT715_MIX_ADC_FORMAT_H, val);
+	regmap_write(rt715->regmap, RT715_MIX_ADC2_FORMAT_H, val);
 
 	return retval;
 }
@@ -794,8 +763,8 @@ int rt715_clock_config(struct device *dev)
 	return 0;
 }
 
-int rt715_init(struct device *dev, struct regmap *regmap,
-	       struct sdw_slave *slave)
+int rt715_init(struct device *dev, struct regmap *sdw_regmap,
+	struct regmap *regmap, struct sdw_slave *slave)
 {
 	struct rt715_priv *rt715;
 	int ret;
@@ -807,6 +776,7 @@ int rt715_init(struct device *dev, struct regmap *regmap,
 	dev_set_drvdata(dev, rt715);
 	rt715->slave = slave;
 	rt715->regmap = regmap;
+	rt715->sdw_regmap = sdw_regmap;
 
 	/*
 	 * Mark hw_init to false
@@ -852,15 +822,12 @@ int rt715_io_init(struct device *dev, struct sdw_slave *slave)
 	pm_runtime_get_noresume(&slave->dev);
 
 	/* Mute nid=08h/09h */
-	regmap_write(rt715->regmap, RT715_SET_GAIN_LINE_ADC_H, 0xb0);
-	regmap_write(rt715->regmap, RT715_SET_GAIN_LINE_ADC_L, 0x80);
-	regmap_write(rt715->regmap, RT715_SET_GAIN_MIX_ADC_H, 0xb0);
-	regmap_write(rt715->regmap, RT715_SET_GAIN_MIX_ADC_L, 0x80);
+	regmap_write(rt715->regmap, RT715_SET_GAIN_LINE_ADC_H, 0xb080);
+	regmap_write(rt715->regmap, RT715_SET_GAIN_MIX_ADC_H, 0xb080);
 	/* Mute nid=07h/27h */
-	regmap_write(rt715->regmap, RT715_SET_GAIN_MIC_ADC_H, 0xb0);
-	regmap_write(rt715->regmap, RT715_SET_GAIN_MIC_ADC_L, 0x80);
-	regmap_write(rt715->regmap, RT715_SET_GAIN_MIX_ADC2_H, 0xb0);
-	regmap_write(rt715->regmap, RT715_SET_GAIN_MIX_ADC2_L, 0x80);
+	regmap_write(rt715->regmap, RT715_SET_GAIN_MIC_ADC_H, 0xb080);
+	regmap_write(rt715->regmap, RT715_SET_GAIN_MIX_ADC2_H, 0xb080);
+
 	/* Set Pin Widget */
 	regmap_write(rt715->regmap, RT715_SET_PIN_DMIC1, 0x20);
 	regmap_write(rt715->regmap, RT715_SET_PIN_DMIC2, 0x20);
