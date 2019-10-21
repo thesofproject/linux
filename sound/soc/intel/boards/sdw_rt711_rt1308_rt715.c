@@ -177,22 +177,22 @@ SND_SOC_DAILINK_DEF(sdw0_pin2,
 SND_SOC_DAILINK_DEF(sdw0_pin3,
 	DAILINK_COMP_ARRAY(COMP_CPU("SDW0 Pin3")));
 SND_SOC_DAILINK_DEF(sdw0_codec,
-	DAILINK_COMP_ARRAY(COMP_CODEC("sdw:0:25d:711:0:1", "rt711-aif1")));
+	DAILINK_COMP_ARRAY(COMP_CODEC("sdw:0:25d:711:0", "rt711-aif1")));
 
 SND_SOC_DAILINK_DEF(sdw1_pin2,
 	DAILINK_COMP_ARRAY(COMP_CPU("SDW1 Pin2")));
 SND_SOC_DAILINK_DEF(sdw1_codec,
-	DAILINK_COMP_ARRAY(COMP_CODEC("sdw:1:25d:1308:0:0", "rt1308-aif")));
+	DAILINK_COMP_ARRAY(COMP_CODEC("sdw:1:25d:1308:0", "rt1308-aif")));
 
 SND_SOC_DAILINK_DEF(sdw2_pin2,
 	DAILINK_COMP_ARRAY(COMP_CPU("SDW2 Pin2")));
 SND_SOC_DAILINK_DEF(sdw2_codec,
-	DAILINK_COMP_ARRAY(COMP_CODEC("sdw:2:25d:1308:0:2", "rt1308-aif")));
+	DAILINK_COMP_ARRAY(COMP_CODEC("sdw:2:25d:1308:0", "rt1308-aif")));
 
 SND_SOC_DAILINK_DEF(sdw3_pin2,
 	DAILINK_COMP_ARRAY(COMP_CPU("SDW3 Pin2")));
 SND_SOC_DAILINK_DEF(sdw3_codec,
-	DAILINK_COMP_ARRAY(COMP_CODEC("sdw:3:25d:715:0:1", "rt715-aif2")));
+	DAILINK_COMP_ARRAY(COMP_CODEC("sdw:3:25d:715:0", "rt715-aif2")));
 
 #if IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
 SND_SOC_DAILINK_DEF(idisp1_pin,
@@ -216,19 +216,19 @@ SND_SOC_DAILINK_DEF(platform,
 
 static struct snd_soc_codec_conf codec_conf[] = {
 	{
-		.dev_name = "sdw:0:25d:711:0:1",
+		.dev_name = "sdw:0:25d:711:0",
 		.name_prefix = "rt711",
 	},
 	{
-		.dev_name = "sdw:1:25d:1308:0:0",
+		.dev_name = "sdw:1:25d:1308:0",
 		.name_prefix = "rt1308-1",
 	},
 	{
-		.dev_name = "sdw:2:25d:1308:0:2",
+		.dev_name = "sdw:2:25d:1308:0",
 		.name_prefix = "rt1308-2",
 	},
 	{
-		.dev_name = "sdw:3:25d:715:0:1",
+		.dev_name = "sdw:3:25d:715:0",
 		.name_prefix = "rt715",
 	},
 
