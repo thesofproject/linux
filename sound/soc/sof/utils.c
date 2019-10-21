@@ -8,6 +8,7 @@
 // Author: Keyon Jie <yang.jie@linux.intel.com>
 //
 
+// Fred: add comment here
 #include <linux/io-64-nonatomic-lo-hi.h>
 #include <linux/platform_device.h>
 #include <sound/soc.h>
