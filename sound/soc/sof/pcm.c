@@ -10,6 +10,7 @@
 // PCM Layer, interface between ALSA and IPC.
 //
 
+// Fred: add comment here
 #include <linux/pm_runtime.h>
 #include <sound/pcm_params.h>
 #include <sound/sof.h>
