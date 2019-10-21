@@ -9,6 +9,7 @@
 //
 
 // Fred: just add comment here
+// just another comment here
 #include <linux/debugfs.h>
 #include <linux/sched/signal.h>
 #include "sof-priv.h"
