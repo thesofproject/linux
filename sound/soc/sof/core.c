@@ -16,7 +16,7 @@
 #include "sof-priv.h"
 #include "ops.h"
 
-/* just a dumb comment */
+/* just another dumb comment */
 
 /* see SOF_DBG_ flags */
 int sof_core_debug;
