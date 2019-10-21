@@ -542,6 +542,10 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	hdev->no_ipc_position = sof_ops(sdev)->pcm_pointer ? 1 : 0;
 #endif
 
+	ret = pci_enable_device(pci);
+	if (ret < 0)
+		return ret;
+
 	/* set up HDA base */
 	bus = sof_to_bus(sdev);
 	ret = hda_init(sdev);
@@ -666,6 +670,8 @@ free_streams:
 	iounmap(sdev->bar[HDA_DSP_BAR]);
 hdac_bus_unmap:
 	iounmap(bus->remap_addr);
+/* disable_pci: not currently used */
+	pci_disable_device(pci);
 err:
 	return ret;
 }
@@ -713,6 +719,8 @@ int hda_dsp_remove(struct snd_sof_dev *sdev)
 
 	iounmap(sdev->bar[HDA_DSP_BAR]);
 	iounmap(bus->remap_addr);
+
+	pci_disable_device(pci);
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
 	snd_hdac_ext_bus_exit(bus);
