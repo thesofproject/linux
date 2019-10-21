@@ -16,6 +16,8 @@
 #include "sof-priv.h"
 #include "ops.h"
 
+/* just a dumb comment */
+
 /* see SOF_DBG_ flags */
 int sof_core_debug;
 module_param_named(sof_debug, sof_core_debug, int, 0444);
