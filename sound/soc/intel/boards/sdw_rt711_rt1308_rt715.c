@@ -77,6 +77,11 @@ static int card_late_probe(struct snd_soc_card *card)
 		if (err)
 			return err;
 
+		err = snd_jack_add_new_kctl(hdmi[i].jack,
+					    jack_name, SND_JACK_AVOUT);
+		if (err)
+			dev_warn(component->dev, "failed creating Jack kctl\n");
+
 		err = hdac_hdmi_jack_init(pcm->codec_dai, pcm->device,
 					  &hdmi[i]);
 		if (err < 0)
