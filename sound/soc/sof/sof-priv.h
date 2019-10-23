@@ -385,6 +385,8 @@ struct snd_sof_dai {
 /* SOF client device */
 struct snd_sof_client {
 	struct platform_device *pdev;
+
+	void *client_data; /* core does not touch this */
 };
 
 /*

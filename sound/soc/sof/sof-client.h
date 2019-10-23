@@ -15,4 +15,6 @@ struct snd_sof_client *sof_client_dev_register(struct snd_sof_dev *sdev,
 					       const char *name);
 void sof_client_dev_unregister(struct snd_sof_client *client);
 
+void *sof_get_client_data(struct device *dev);
+
 #endif

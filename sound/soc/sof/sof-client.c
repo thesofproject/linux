@@ -7,6 +7,14 @@
 #include <linux/device.h>
 #include "sof-client.h"
 
+void *sof_get_client_data(struct device *dev)
+{
+	struct snd_sof_client *client = dev_get_platdata(dev);
+
+	return client->client_data;
+}
+EXPORT_SYMBOL(sof_get_client_data);
+
 struct snd_sof_client *sof_client_dev_register(struct snd_sof_dev *sdev,
 					       const char *name)
 {
