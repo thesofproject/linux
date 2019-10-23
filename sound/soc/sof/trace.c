@@ -11,6 +11,7 @@
 #include <linux/debugfs.h>
 #include <linux/sched/signal.h>
 #include "sof-priv.h"
+#include "sof-client.h"
 #include "ops.h"
 
 static size_t sof_trace_avail(struct snd_sof_dev *sdev,
@@ -250,8 +251,8 @@ int snd_sof_init_trace(struct snd_sof_dev *sdev)
 	}
 
 	/* create compressed page table for audio firmware */
-	ret = snd_sof_create_page_table(sdev, &sdev->dmatb, sdev->dmatp.area,
-					sdev->dmatb.bytes);
+	ret = snd_sof_create_page_table(sdev->dev, &sdev->dmatb,
+					sdev->dmatp.area, sdev->dmatb.bytes);
 	if (ret < 0)
 		goto table_err;
 
