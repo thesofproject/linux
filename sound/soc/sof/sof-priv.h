@@ -347,6 +347,8 @@ struct snd_sof_dev {
 
 	/* client devices */
 	struct snd_sof_client *sof_audio;
+	struct snd_sof_client **sof_clients;
+	int sof_num_clients;
 
 	/* IPC rx client table */
 	struct list_head ipc_rx_list;
