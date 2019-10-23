@@ -16,6 +16,65 @@
 #include "audio-ops.h"
 #include "ops.h"
 
+int sof_register_audio_clients(struct snd_sof_dev *sdev)
+{
+	struct snd_sof_pdata *plat_data = sdev->pdata;
+	const struct sof_dev_desc *desc = plat_data->desc;
+	const struct snd_sof_audio_ops *audio_ops = desc->audio_ops;
+	char *client_name;
+	size_t size;
+	int count;
+	u32 type;
+	int i;
+
+	/* number of audio clients to register */
+	sdev->sof_num_clients = audio_ops->num_dai_drv_info;
+
+	size = sdev->sof_num_clients * sizeof(*sdev->sof_clients);
+
+	sdev->sof_clients = devm_kzalloc(sdev->dev, size, GFP_KERNEL);
+	if (!sdev->sof_clients)
+		return -ENOMEM;
+
+	/* register clients. Any of these can fail but keep going */
+	for (i = 0; i < audio_ops->num_dai_drv_info; i++) {
+		type = audio_ops->dai_drv_info[i].type;
+		count = snd_sof_get_dai_drv_count(audio_ops, type);
+
+		switch (type) {
+		case SOF_DAI_INTEL_SSP:
+			client_name = "sof-ssp-audio";
+			break;
+		case SOF_DAI_INTEL_DMIC:
+			client_name = "sof-dmic-audio";
+			break;
+		case SOF_DAI_INTEL_HDA:
+			client_name = "sof-hda-audio";
+			break;
+		}
+
+		sdev->sof_clients[i] =
+				sof_client_dev_register(sdev, client_name);
+		if (!sdev->sof_clients[i])
+			dev_warn(sdev->dev, "%s client failed to register\n",
+				 client_name);
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(sof_register_audio_clients);
+
+int sof_unregister_audio_clients(struct snd_sof_dev *sdev)
+{
+	int i;
+
+	for (i = 0; i < sdev->sof_num_clients; i++)
+		sof_client_dev_unregister(sdev->sof_clients[i]);
+
+	return 0;
+}
+EXPORT_SYMBOL(sof_unregister_audio_clients);
+
 static void ipc_period_elapsed(struct snd_sof_client *client, u32 msg_id)
 {
 	struct sof_audio_dev *sof_audio = client->client_data;

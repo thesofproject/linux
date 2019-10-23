@@ -480,4 +480,8 @@ void intel_ipc_msg_data(struct snd_sof_dev *sdev,
 			struct snd_pcm_substream *substream,
 			void *p, size_t sz);
 
+/* audio client register/unregister */
+int sof_register_audio_clients(struct snd_sof_dev *sdev);
+int sof_unregister_audio_clients(struct snd_sof_dev *sdev);
+
 #endif
