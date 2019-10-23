@@ -262,8 +262,9 @@ static int sof_audio_probe(struct platform_device *pdev)
 	int size;
 	int ret;
 
-	/* set IPC RX callback */
+	/* set IPC RX and TX callback */
 	audio_client->sof_client_rx_cb = sof_audio_rx_message;
+	audio_client->sof_ipc_reply_cb = NULL;
 
 	/* create SOF audio device */
 	sof_audio = devm_kzalloc(&pdev->dev, sizeof(*sof_audio), GFP_KERNEL);
