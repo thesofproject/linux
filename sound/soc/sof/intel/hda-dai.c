@@ -459,3 +459,21 @@ struct snd_soc_dai_driver skl_dai[] = {
 },
 #endif
 };
+
+struct sof_dai_drv_info hda_dai_drv_info[] = {
+{
+	.type = SOF_DAI_INTEL_SSP,
+	.count = 6,
+	.offset = 0,
+},
+{
+	.type = SOF_DAI_INTEL_DMIC,
+	.count = 2,
+	.offset = 6,
+},
+{
+	.type = SOF_DAI_INTEL_HDA,
+	.count = 6,
+	.offset = 8,
+},
+};

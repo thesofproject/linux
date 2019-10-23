@@ -405,6 +405,22 @@ static struct snd_soc_dai_driver byt_dai[] = {
 },
 };
 
+/* DAI DRV info */
+struct sof_dai_drv_info byt_dai_drv_info[] = {
+{
+	.type = SOF_DAI_INTEL_SSP,
+	.count = 3, /* we have only 3 SSPs on byt */
+},
+};
+
+/* DAI DRV info */
+struct sof_dai_drv_info cht_dai_drv_info[] = {
+{
+	.type = SOF_DAI_INTEL_SSP,
+	.count = 6, /* all 6 SSPs are available for cherrytrail */
+},
+};
+
 /*
  * Probe and remove.
  */
@@ -537,6 +553,8 @@ const struct snd_sof_audio_ops sof_tng_audio_ops = {
 
 	/* DAI drivers */
 	.drv = byt_dai,
+	.dai_drv_info	= byt_dai_drv_info,
+	.num_dai_drv_info = 1,
 	.num_drv = 3, /* we have only 3 SSPs on byt*/
 
 	/* ALSA HW info flags */
@@ -710,6 +728,8 @@ const struct snd_sof_audio_ops sof_byt_audio_ops = {
 
 	/* DAI drivers */
 	.drv = byt_dai,
+	.dai_drv_info	= byt_dai_drv_info,
+	.num_dai_drv_info = 1,
 	.num_drv = 3, /* we have only 3 SSPs on byt*/
 
 	/* ALSA HW info flags */
@@ -781,6 +801,8 @@ const struct snd_sof_audio_ops sof_cht_audio_ops = {
 
 	/* DAI drivers */
 	.drv = byt_dai,
+	.dai_drv_info	= cht_dai_drv_info,
+	.num_dai_drv_info = 1,
 	/* all 6 SSPs may be available for cherrytrail */
 	.num_drv = ARRAY_SIZE(byt_dai),
 

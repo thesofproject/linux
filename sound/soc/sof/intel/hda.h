@@ -13,6 +13,7 @@
 
 #include <sound/hda_codec.h>
 #include <sound/hdaudio_ext.h>
+#include <sound/sof/dai.h>
 #include "shim.h"
 #include "../sof-audio.h"
 
@@ -348,6 +349,10 @@
 #else
 #define SOF_SKL_NUM_DAIS		8
 #endif
+
+/* DAI DRV info */
+extern struct sof_dai_drv_info hda_dai_drv_info[];
+#define SOF_HDA_NUM_DAI_DRV_INFO 3
 
 /* Intel HD Audio SRAM Window 0*/
 #define HDA_ADSP_SRAM0_BASE_SKL		0x8000

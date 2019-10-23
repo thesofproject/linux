@@ -23,6 +23,12 @@ struct snd_soc_tplg_ops;
 struct snd_soc_component;
 struct sof_audio_dev;
 
+struct sof_dai_drv_info {
+	u32 type;
+	int count;
+	int offset;
+};
+
 struct snd_sof_audio_ops {
 
 	/* host configure DSP HW parameters */
@@ -63,6 +69,8 @@ struct snd_sof_audio_ops {
 
 	/* DAI ops */
 	struct snd_soc_dai_driver *drv;
+	struct sof_dai_drv_info *dai_drv_info;
+	int num_dai_drv_info;
 	int num_drv;
 
 	/* ALSA HW info flags, will be stored in snd_pcm_runtime.hw.info */
@@ -278,5 +286,10 @@ int intel_pcm_close(struct snd_soc_component *scomp,
 int sof_nocodec_setup(struct device *dev,
 		      struct sof_audio_dev *sof_audio,
 		      const struct sof_dev_desc *desc);
+
+int snd_sof_get_dai_drv_count(const struct snd_sof_audio_ops *audio_ops,
+			      u32 type);
+int snd_sof_get_dai_drv_offset(const struct snd_sof_audio_ops *audio_ops,
+			       u32 type);
 
 #endif

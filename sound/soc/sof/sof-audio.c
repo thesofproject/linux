@@ -216,6 +216,34 @@ struct snd_sof_dai *snd_sof_find_dai(struct snd_soc_component *scomp,
 	return NULL;
 }
 
+/* get dai drv count based on type */
+int snd_sof_get_dai_drv_count(const struct snd_sof_audio_ops *audio_ops,
+			      u32 type)
+{
+	struct sof_dai_drv_info *dai_drv_info = audio_ops->dai_drv_info;
+	int i;
+
+	for (i = 0; i < audio_ops->num_dai_drv_info; i++)
+		if (dai_drv_info[i].type == type)
+			return dai_drv_info[i].count;
+
+	return -EINVAL;
+}
+
+/* get dai drv offset based on type */
+int snd_sof_get_dai_drv_offset(const struct snd_sof_audio_ops *audio_ops,
+			       u32 type)
+{
+	struct sof_dai_drv_info *dai_drv_info = audio_ops->dai_drv_info;
+	int i;
+
+	for (i = 0; i < audio_ops->num_dai_drv_info; i++)
+		if (dai_drv_info[i].type == type)
+			return dai_drv_info[i].offset;
+
+	return -EINVAL;
+}
+
 /*
  * SOF Driver enumeration.
  */

@@ -547,6 +547,14 @@ static struct snd_soc_dai_driver bdw_dai[] = {
 },
 };
 
+/* DAI DRV info */
+static struct sof_dai_drv_info bdw_dai_drv_info[] = {
+{
+	.type = SOF_DAI_INTEL_SSP,
+	.count = ARRAY_SIZE(bdw_dai),
+},
+};
+
 /* broadwell ops */
 const struct snd_sof_dsp_ops sof_bdw_ops = {
 	/*Device init */
@@ -597,6 +605,8 @@ const struct snd_sof_audio_ops sof_bdw_audio_ops = {
 
 	/* DAI drivers */
 	.drv = bdw_dai,
+	.dai_drv_info = bdw_dai_drv_info,
+	.num_dai_drv_info = 1,
 	.num_drv = ARRAY_SIZE(bdw_dai),
 
 	/* ALSA HW info flags */
