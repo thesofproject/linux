@@ -391,6 +391,10 @@ struct snd_sof_client {
 				 void *reply_data,
 				 size_t reply_bytes);
 
+	/* IPC RX callback */
+	void (*sof_client_rx_cb)(struct snd_sof_client *client,
+				 u32 msg_cmd);
+
 	void *client_data; /* core does not touch this */
 };
 
