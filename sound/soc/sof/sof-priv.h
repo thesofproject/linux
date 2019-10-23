@@ -569,7 +569,7 @@ void snd_sof_pcm_period_elapsed(struct snd_pcm_substream *substream);
 /*
  * Stream IPC
  */
-int snd_sof_ipc_stream_posn(struct snd_sof_dev *sdev,
+int snd_sof_ipc_stream_posn(struct snd_soc_component *scomp,
 			    struct snd_sof_pcm *spcm, int direction,
 			    struct sof_ipc_stream_posn *posn);
 

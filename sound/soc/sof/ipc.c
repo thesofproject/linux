@@ -509,7 +509,7 @@ static void ipc_stream_message(struct snd_sof_dev *sdev, u32 msg_cmd)
 }
 
 /* get stream position IPC - use faster MMIO method if available on platform */
-int snd_sof_ipc_stream_posn(struct snd_sof_dev *sdev,
+int snd_sof_ipc_stream_posn(struct snd_soc_component *scomp,
 			    struct snd_sof_pcm *spcm, int direction,
 			    struct sof_ipc_stream_posn *posn)
 {
@@ -522,9 +522,9 @@ int snd_sof_ipc_stream_posn(struct snd_sof_dev *sdev,
 	stream.comp_id = spcm->stream[direction].comp_id;
 
 	/* send IPC to the DSP */
-	err = sof_ipc_tx_message(sdev->ipc,
-				 stream.hdr.cmd, &stream, sizeof(stream), &posn,
-				 sizeof(*posn));
+	err = sof_client_tx_message(scomp->dev,
+				    stream.hdr.cmd, &stream, sizeof(stream),
+				    &posn, sizeof(*posn));
 	if (err < 0) {
 		dev_err(sdev->dev, "error: failed to get stream %d position\n",
 			stream.comp_id);
