@@ -258,6 +258,7 @@ static int sof_audio_probe(struct platform_device *pdev)
 	struct snd_soc_acpi_mach *machine =
 		(struct snd_soc_acpi_mach *)plat_data->machine;
 	struct sof_audio_dev *sof_audio;
+	struct ipc_rx_client *audio_rx;
 	const char *drv_name;
 	int size;
 	int ret;
@@ -278,6 +279,14 @@ static int sof_audio_probe(struct platform_device *pdev)
 	INIT_LIST_HEAD(&sof_audio->route_list);
 
 	audio_client->client_data = sof_audio;
+
+	/* register for stream message rx */
+	audio_rx = devm_kzalloc(&pdev->dev, sizeof(*audio_rx), GFP_KERNEL);
+	if (!audio_rx)
+		return -ENOMEM;
+	audio_rx->ipc_cmd = SOF_IPC_GLB_STREAM_MSG;
+	audio_rx->dev = &pdev->dev;
+	snd_sof_ipc_rx_register(sdev, audio_rx);
 
 	/* check machine info */
 	ret = sof_machine_check(sdev);
