@@ -13,6 +13,7 @@ snd-sof-intel-hda-common-objs := hda.o hda-loader.o hda-stream.o hda-trace.o \
 				 apl.o cnl.o
 
 snd-sof-intel-hda-objs := hda-codec.o sof-hda-audio.o
+snd-sof-intel-dmic-machine-objs := sof-dmic.o
 snd-sof-intel-ssp-objs := sof-ssp-audio.o
 
 obj-$(CONFIG_SND_SOC_SOF_INTEL_ATOM_HIFI_EP) += snd-sof-intel-byt.o
@@ -20,4 +21,5 @@ obj-$(CONFIG_SND_SOC_SOF_BROADWELL) += snd-sof-intel-bdw.o
 obj-$(CONFIG_SND_SOC_SOF_INTEL_HIFI_EP_IPC) += snd-sof-intel-ipc.o
 obj-$(CONFIG_SND_SOC_SOF_HDA_COMMON) += snd-sof-intel-hda-common.o
 obj-$(CONFIG_SND_SOC_SOF_HDA) += snd-sof-intel-hda.o
+obj-$(CONFIG_SND_SOC_SOF_DMIC_MACHINE) += snd-sof-intel-dmic-machine.o
 obj-$(CONFIG_SND_SOC_SOF_SSP) += snd-sof-intel-ssp.o

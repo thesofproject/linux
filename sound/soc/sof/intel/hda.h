@@ -628,4 +628,10 @@ extern const struct sof_intel_dsp_desc tgl_chip_info;
 extern const struct sof_intel_dsp_desc ehl_chip_info;
 extern const struct sof_intel_dsp_desc jsl_chip_info;
 
+/* DMIC set up */
+int sof_dmic_setup(struct device *dev,
+		   struct sof_audio_dev *sof_audio,
+		   struct snd_soc_acpi_mach *mach,
+		   const struct sof_intel_dsp_desc *chip);
+
 #endif

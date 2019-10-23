@@ -321,6 +321,10 @@ config SND_SOC_SOF_HDA
 
 endif ## SND_SOC_SOF_INTEL_PCI
 
+config SND_SOC_SOF_DMIC_MACHINE
+	tristate
+	select SND_INTEL_NHLT if ACPI
+
 config SND_SOC_SOF_SSP
 	tristate
 	help
