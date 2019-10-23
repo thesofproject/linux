@@ -13,6 +13,7 @@ config SND_SOC_SOF_INTEL_ACPI
 	tristate
 	select SND_SOC_SOF_BAYTRAIL  if SND_SOC_SOF_BAYTRAIL_SUPPORT
 	select SND_SOC_SOF_BROADWELL if SND_SOC_SOF_BROADWELL_SUPPORT
+	select SND_SOC_SOF_SSP
 	help
 	  This option is not user-selectable but automagically handled by
 	  'select' statements at a higher level
@@ -30,6 +31,7 @@ config SND_SOC_SOF_INTEL_PCI
 	select SND_SOC_SOF_TIGERLAKE   if SND_SOC_SOF_TIGERLAKE_SUPPORT
 	select SND_SOC_SOF_ELKHARTLAKE if SND_SOC_SOF_ELKHARTLAKE_SUPPORT
 	select SND_SOC_SOF_JASPERLAKE  if SND_SOC_SOF_JASPERLAKE_SUPPORT
+	select SND_SOC_SOF_SSP
 	help
 	  This option is not user-selectable but automagically handled by
 	  'select' statements at a higher level
@@ -318,5 +320,11 @@ config SND_SOC_SOF_HDA
 	  'select' statements at a higher level
 
 endif ## SND_SOC_SOF_INTEL_PCI
+
+config SND_SOC_SOF_SSP
+	tristate
+	help
+	  This option is not user-selectable but automagically handled by
+	  'select' statements at a higher level
 
 endif ## SND_SOC_SOF_INTEL_TOPLEVEL
