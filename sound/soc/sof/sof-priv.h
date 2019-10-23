@@ -386,6 +386,11 @@ struct snd_sof_dai {
 struct snd_sof_client {
 	struct platform_device *pdev;
 
+	/* IPC reply callback */
+	void (*sof_ipc_reply_cb)(struct snd_sof_client *client,
+				 void *reply_data,
+				 size_t reply_bytes);
+
 	void *client_data; /* core does not touch this */
 };
 
