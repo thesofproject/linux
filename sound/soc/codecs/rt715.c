@@ -831,6 +831,8 @@ int rt715_io_init(struct device *dev, struct sdw_slave *slave)
 	/* Set Pin Widget */
 	regmap_write(rt715->regmap, RT715_SET_PIN_DMIC1, 0x20);
 	regmap_write(rt715->regmap, RT715_SET_PIN_DMIC2, 0x20);
+	regmap_write(rt715->regmap, RT715_SET_PIN_DMIC3, 0x20);
+	regmap_write(rt715->regmap, RT715_SET_PIN_DMIC4, 0x20);
 	/* Set Converter Stream */
 	regmap_write(rt715->regmap, RT715_SET_STREAMID_LINE_ADC, 0x10);
 	regmap_write(rt715->regmap, RT715_SET_STREAMID_MIX_ADC, 0x10);
@@ -845,6 +847,14 @@ int rt715_io_init(struct device *dev, struct sdw_slave *slave)
 	regmap_write(rt715->regmap, RT715_SET_DMIC2_CONFIG_DEFAULT2, 0x11);
 	regmap_write(rt715->regmap, RT715_SET_DMIC2_CONFIG_DEFAULT3, 0xa1);
 	regmap_write(rt715->regmap, RT715_SET_DMIC2_CONFIG_DEFAULT4, 0x81);
+	regmap_write(rt715->regmap, RT715_SET_DMIC3_CONFIG_DEFAULT1, 0xd0);
+	regmap_write(rt715->regmap, RT715_SET_DMIC3_CONFIG_DEFAULT2, 0x11);
+	regmap_write(rt715->regmap, RT715_SET_DMIC3_CONFIG_DEFAULT3, 0xa1);
+	regmap_write(rt715->regmap, RT715_SET_DMIC3_CONFIG_DEFAULT4, 0x81);
+	regmap_write(rt715->regmap, RT715_SET_DMIC4_CONFIG_DEFAULT1, 0xd1);
+	regmap_write(rt715->regmap, RT715_SET_DMIC4_CONFIG_DEFAULT2, 0x11);
+	regmap_write(rt715->regmap, RT715_SET_DMIC4_CONFIG_DEFAULT3, 0xa1);
+	regmap_write(rt715->regmap, RT715_SET_DMIC4_CONFIG_DEFAULT4, 0x81);
 
 	/* Finish Initial Settings, set power to D3 */
 	regmap_write(rt715->regmap, RT715_SET_AUDIO_POWER_STATE, AC_PWRST_D3);
