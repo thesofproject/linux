@@ -794,3 +794,4 @@ void snd_sof_new_platform_drv(struct sof_audio_dev *sof_audio)
 	 /* increment module refcount when a pcm is opened */
 	pd->module_get_upon_open = 1;
 }
+EXPORT_SYMBOL(snd_sof_new_platform_drv);

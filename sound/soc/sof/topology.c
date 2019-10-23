@@ -1436,6 +1436,7 @@ int sof_load_pipeline_ipc(struct snd_soc_component *scomp,
 
 	return ret;
 }
+EXPORT_SYMBOL(sof_load_pipeline_ipc);
 
 static int sof_widget_load_pipeline(struct snd_soc_component *scomp,
 				    int index, struct snd_sof_widget *swidget,
@@ -3276,6 +3277,7 @@ int snd_sof_complete_pipeline(struct snd_soc_component *scomp,
 		return ret;
 	return 1;
 }
+EXPORT_SYMBOL(snd_sof_complete_pipeline);
 
 /* completion - called at completion of firmware loading */
 static void sof_complete(struct snd_soc_component *scomp)

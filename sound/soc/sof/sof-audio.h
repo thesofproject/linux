@@ -292,4 +292,12 @@ int snd_sof_get_dai_drv_count(const struct snd_sof_audio_ops *audio_ops,
 int snd_sof_get_dai_drv_offset(const struct snd_sof_audio_ops *audio_ops,
 			       u32 type);
 
+/* IPC */
+void sof_audio_rx_message(struct snd_sof_client *client, u32 msg_cmd);
+
+/* PM */
+int sof_audio_resume(struct device *dev);
+int sof_audio_suspend(struct device *dev);
+int sof_audio_runtime_suspend(struct device *dev);
+
 #endif

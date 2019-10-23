@@ -80,7 +80,7 @@ static void ipc_xrun(struct snd_sof_client *client, u32 msg_id)
 }
 
 /* Audio client IPC RX callback */
-static void sof_audio_rx_message(struct snd_sof_client *client, u32 msg_cmd)
+void sof_audio_rx_message(struct snd_sof_client *client, u32 msg_cmd)
 {
 	struct platform_device *pdev = client->pdev;
 
@@ -101,6 +101,7 @@ static void sof_audio_rx_message(struct snd_sof_client *client, u32 msg_cmd)
 		break;
 	}
 }
+EXPORT_SYMBOL(sof_audio_rx_message);
 
 /*
  * Generic object lookup APIs.
@@ -130,6 +131,7 @@ struct snd_sof_pcm *snd_sof_find_spcm_name(struct snd_soc_component *scomp,
 
 	return NULL;
 }
+EXPORT_SYMBOL(snd_sof_find_spcm_name);
 
 struct snd_sof_pcm *snd_sof_find_spcm_comp(struct snd_soc_component *scomp,
 					   unsigned int comp_id,
@@ -150,6 +152,7 @@ struct snd_sof_pcm *snd_sof_find_spcm_comp(struct snd_soc_component *scomp,
 
 	return NULL;
 }
+EXPORT_SYMBOL(snd_sof_find_spcm_comp);
 
 struct snd_sof_pcm *snd_sof_find_spcm_pcm_id(struct snd_soc_component *scomp,
 					     unsigned int pcm_id)
@@ -164,6 +167,7 @@ struct snd_sof_pcm *snd_sof_find_spcm_pcm_id(struct snd_soc_component *scomp,
 
 	return NULL;
 }
+EXPORT_SYMBOL(snd_sof_find_spcm_pcm_id);
 
 struct snd_sof_widget *snd_sof_find_swidget(struct snd_soc_component *scomp,
 					    const char *name)
@@ -178,6 +182,7 @@ struct snd_sof_widget *snd_sof_find_swidget(struct snd_soc_component *scomp,
 
 	return NULL;
 }
+EXPORT_SYMBOL(snd_sof_find_swidget);
 
 /* find widget by stream name and direction */
 struct snd_sof_widget *
@@ -201,6 +206,7 @@ snd_sof_find_swidget_sname(struct snd_soc_component *scomp,
 
 	return NULL;
 }
+EXPORT_SYMBOL(snd_sof_find_swidget_sname);
 
 struct snd_sof_dai *snd_sof_find_dai(struct snd_soc_component *scomp,
 				     const char *name)
@@ -229,6 +235,7 @@ int snd_sof_get_dai_drv_count(const struct snd_sof_audio_ops *audio_ops,
 
 	return -EINVAL;
 }
+EXPORT_SYMBOL(snd_sof_get_dai_drv_count);
 
 /* get dai drv offset based on type */
 int snd_sof_get_dai_drv_offset(const struct snd_sof_audio_ops *audio_ops,
@@ -243,7 +250,7 @@ int snd_sof_get_dai_drv_offset(const struct snd_sof_audio_ops *audio_ops,
 
 	return -EINVAL;
 }
-
+EXPORT_SYMBOL(snd_sof_get_dai_drv_offset);
 /*
  * SOF Driver enumeration.
  */
@@ -603,20 +610,23 @@ static int sof_destroy_pipelines(struct device *dev)
 	return ret;
 }
 
-static int sof_audio_resume(struct device *dev)
+int sof_audio_resume(struct device *dev)
 {
 	return sof_restore_pipelines(dev);
 }
+EXPORT_SYMBOL(sof_audio_resume);
 
-static int sof_audio_suspend(struct device *dev)
+int sof_audio_suspend(struct device *dev)
 {
 	return sof_set_hw_params_upon_resume(dev);
 }
+EXPORT_SYMBOL(sof_audio_suspend);
 
-static int sof_audio_runtime_suspend(struct device *dev)
+int sof_audio_runtime_suspend(struct device *dev)
 {
 	return sof_destroy_pipelines(dev);
 }
+EXPORT_SYMBOL(sof_audio_runtime_suspend);
 
 static const struct dev_pm_ops sof_audio_pm = {
 	SET_SYSTEM_SLEEP_PM_OPS(sof_audio_suspend, sof_audio_resume)
