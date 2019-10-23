@@ -276,6 +276,7 @@ config SND_SOC_SOF_HDA_LINK
 	bool "SOF support for HDA Links(HDA/HDMI)"
 	depends on SND_SOC_SOF_NOCODEC=n
 	select SND_SOC_SOF_PROBE_WORK_QUEUE
+	select SND_SOC_SOF_DMIC
 	help
 	  This adds support for HDA links(HDA/HDMI) with Sound Open Firmware
 		  for Intel(R) platforms.
@@ -324,6 +325,14 @@ endif ## SND_SOC_SOF_INTEL_PCI
 config SND_SOC_SOF_DMIC_MACHINE
 	tristate
 	select SND_INTEL_NHLT if ACPI
+
+config SND_SOC_SOF_DMIC
+	tristate
+	select SND_SOC_SOF_DMIC_MACHINE
+	select SND_INTEL_NHLT if ACPI
+	help
+	  This option is not user-selectable but automagically handled by
+	  'select' statements at a higher level
 
 config SND_SOC_SOF_SSP
 	tristate
