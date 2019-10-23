@@ -152,6 +152,7 @@ static int hda_link_dma_params(struct hdac_ext_stream *stream,
 
 /* Send DAI_CONFIG IPC to the DAI that matches the dai_name and direction */
 static int hda_link_config_ipc(struct sof_intel_hda_stream *hda_stream,
+			       struct snd_soc_component *scomp,
 			       const char *dai_name, int channel, int dir)
 {
 	struct sof_ipc_dai_config *config;
@@ -178,16 +179,17 @@ static int hda_link_config_ipc(struct sof_intel_hda_stream *hda_stream,
 			config->hda.link_dma_ch = channel;
 
 			/* send IPC */
-			ret = sof_ipc_tx_message(hda_stream->sdev->ipc,
-						 config->hdr.cmd,
-						 config,
-						 config->hdr.size,
-						 &reply, sizeof(reply));
+			ret = sof_client_tx_message(scomp->dev,
+						    config->hdr.cmd,
+						    config,
+						    config->hdr.size,
+						    &reply, sizeof(reply));
 
 			if (ret < 0)
 				dev_err(hda_stream->sdev->dev,
 					"error: failed to set dai config for %s\n",
 					sof_dai->name);
+
 			return ret;
 		}
 	}
@@ -207,6 +209,7 @@ static int hda_link_hw_params(struct snd_pcm_substream *substream,
 	struct sof_intel_hda_stream *hda_stream;
 	struct hda_pipe_params p_params = {0};
 	struct hdac_ext_link *link;
+	struct snd_soc_component *scomp = snd_soc_rtdcom_lookup(rtd, DRV_NAME);
 	int stream_tag;
 	int ret;
 
@@ -223,7 +226,7 @@ static int hda_link_hw_params(struct snd_pcm_substream *substream,
 	hda_stream = hstream_to_sof_hda_stream(link_dev);
 
 	/* update the DSP with the new tag */
-	ret = hda_link_config_ipc(hda_stream, dai->name, stream_tag - 1,
+	ret = hda_link_config_ipc(hda_stream, scomp, dai->name, stream_tag - 1,
 				  substream->stream);
 	if (ret < 0)
 		return ret;
@@ -284,16 +287,16 @@ static int hda_link_pcm_trigger(struct snd_pcm_substream *substream,
 	struct hdac_ext_stream *link_dev =
 				snd_soc_dai_get_dma_data(dai, substream);
 	struct sof_intel_hda_stream *hda_stream;
-	struct snd_soc_pcm_runtime *rtd;
+	struct snd_soc_pcm_runtime *rtd = snd_pcm_substream_chip(substream);
 	struct hdac_ext_link *link;
 	struct hdac_stream *hstream;
 	struct hdac_bus *bus;
+	struct snd_soc_component *scomp = snd_soc_rtdcom_lookup(rtd, DRV_NAME);
 	int stream_tag;
 	int ret;
 
 	hstream = substream->runtime->private_data;
 	bus = hstream->bus;
-	rtd = snd_pcm_substream_chip(substream);
 
 	link = snd_hdac_ext_bus_get_link(bus, rtd->codec_dai->component->name);
 	if (!link)
@@ -323,7 +326,7 @@ static int hda_link_pcm_trigger(struct snd_pcm_substream *substream,
 		 * clear link DMA channel. It will be assigned when
 		 * hw_params is set up again after resume.
 		 */
-		ret = hda_link_config_ipc(hda_stream, dai->name,
+		ret = hda_link_config_ipc(hda_stream, scomp, dai->name,
 					  DMA_CHAN_INVALID, substream->stream);
 		if (ret < 0)
 			return ret;
@@ -353,19 +356,19 @@ static int hda_link_hw_free(struct snd_pcm_substream *substream,
 	struct hdac_bus *bus;
 	struct hdac_ext_link *link;
 	struct hdac_stream *hstream;
-	struct snd_soc_pcm_runtime *rtd;
+	struct snd_soc_pcm_runtime *rtd = snd_pcm_substream_chip(substream);
 	struct hdac_ext_stream *link_dev;
+	struct snd_soc_component *scomp = snd_soc_rtdcom_lookup(rtd, DRV_NAME);
 	int ret;
 
 	hstream = substream->runtime->private_data;
 	bus = hstream->bus;
-	rtd = snd_pcm_substream_chip(substream);
 	link_dev = snd_soc_dai_get_dma_data(dai, substream);
 	hda_stream = hstream_to_sof_hda_stream(link_dev);
 
 	/* free the link DMA channel in the FW */
-	ret = hda_link_config_ipc(hda_stream, dai->name, DMA_CHAN_INVALID,
-				  substream->stream);
+	ret = hda_link_config_ipc(hda_stream, scomp, dai->name,
+				  DMA_CHAN_INVALID, substream->stream);
 	if (ret < 0)
 		return ret;
 
