@@ -194,8 +194,9 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 	dev_dbg(sdev->dev, "stream_tag %d", pcm.params.stream_tag);
 
 	/* send IPC to the DSP */
-	ret = sof_ipc_tx_message(sdev->ipc, pcm.hdr.cmd, &pcm, sizeof(pcm),
-				 &ipc_params_reply, sizeof(ipc_params_reply));
+	ret = sof_client_tx_message(component->dev, pcm.hdr.cmd, &pcm,
+				    sizeof(pcm), &ipc_params_reply,
+				    sizeof(ipc_params_reply));
 	if (ret < 0) {
 		dev_err(sdev->dev, "error: hw params ipc failed for stream %d\n",
 			pcm.params.stream_tag);
@@ -215,7 +216,7 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 }
 
 static int sof_pcm_dsp_pcm_free(struct snd_pcm_substream *substream,
-				struct snd_sof_dev *sdev,
+				struct snd_soc_component *scomp,
 				struct snd_sof_pcm *spcm)
 {
 	struct sof_ipc_stream stream;
@@ -227,8 +228,8 @@ static int sof_pcm_dsp_pcm_free(struct snd_pcm_substream *substream,
 	stream.comp_id = spcm->stream[substream->stream].comp_id;
 
 	/* send IPC to the DSP */
-	ret = sof_ipc_tx_message(sdev->ipc, stream.hdr.cmd, &stream,
-				 sizeof(stream), &reply, sizeof(reply));
+	ret = sof_client_tx_message(scomp->dev, stream.hdr.cmd, &stream,
+				    sizeof(stream), &reply, sizeof(reply));
 	if (!ret)
 		spcm->prepared[substream->stream] = false;
 
@@ -255,7 +256,7 @@ static int sof_pcm_hw_free(struct snd_soc_component *component,
 		substream->stream);
 
 	if (spcm->prepared[substream->stream]) {
-		ret = sof_pcm_dsp_pcm_free(substream, sdev, spcm);
+		ret = sof_pcm_dsp_pcm_free(substream, component, spcm);
 		if (ret < 0)
 			err = ret;
 	}
@@ -377,8 +378,8 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 		snd_sof_pcm_platform_trigger(sdev, substream, cmd);
 
 	/* send IPC to the DSP */
-	ret = sof_ipc_tx_message(sdev->ipc, stream.hdr.cmd, &stream,
-				 sizeof(stream), &reply, sizeof(reply));
+	ret = sof_client_tx_message(component->dev, stream.hdr.cmd, &stream,
+				    sizeof(stream), &reply, sizeof(reply));
 
 	/* need to STOP DMA even if STOP IPC failed */
 	if (ipc_first)
@@ -386,7 +387,7 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 
 	/* free PCM if reset_hw_params is set and the STOP IPC is successful */
 	if (!ret && reset_hw_params)
-		ret = sof_pcm_dsp_pcm_free(substream, sdev, spcm);
+		ret = sof_pcm_dsp_pcm_free(substream, component, spcm);
 
 	return ret;
 }
