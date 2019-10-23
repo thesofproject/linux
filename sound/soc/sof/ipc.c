@@ -13,7 +13,7 @@
 
 #include <linux/mutex.h>
 #include <linux/types.h>
-
+#include "sof-client.h"
 #include "sof-priv.h"
 #include "sof-audio.h"
 #include "ops.h"
@@ -306,6 +306,18 @@ int sof_ipc_tx_message(struct snd_sof_ipc *ipc, u32 header,
 	return ret;
 }
 EXPORT_SYMBOL(sof_ipc_tx_message);
+
+/* send IPC message from client to DSP */
+int sof_client_tx_message(struct device *dev, u32 header,
+			  void *msg_data, size_t msg_bytes, void *reply_data,
+			  size_t reply_bytes)
+{
+	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
+
+	return sof_ipc_tx_message(sdev->ipc, header, msg_data, msg_bytes,
+				 reply_data, reply_bytes);
+}
+EXPORT_SYMBOL(sof_client_tx_message);
 
 /* handle reply message from DSP */
 int snd_sof_ipc_reply(struct snd_sof_dev *sdev, u32 msg_id)

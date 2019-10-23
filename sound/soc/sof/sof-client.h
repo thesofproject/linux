@@ -23,4 +23,9 @@ int snd_sof_create_page_table(struct device *dev,
 
 void *sof_get_client_data(struct device *dev);
 
+/* IPC TX */
+int sof_client_tx_message(struct device *dev, u32 header,
+			  void *msg_data, size_t msg_bytes, void *reply_data,
+			  size_t reply_bytes);
+
 #endif
