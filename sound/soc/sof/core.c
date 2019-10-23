@@ -208,7 +208,7 @@ EXPORT_SYMBOL(snd_sof_get_status);
  * into compressed page table.
  */
 
-int snd_sof_create_page_table(struct snd_sof_dev *sdev,
+int snd_sof_create_page_table(struct device *dev,
 			      struct snd_dma_buffer *dmab,
 			      unsigned char *page_table, size_t size)
 {
@@ -216,7 +216,7 @@ int snd_sof_create_page_table(struct snd_sof_dev *sdev,
 
 	pages = snd_sgbuf_aligned_pages(size);
 
-	dev_dbg(sdev->dev, "generating page table for %p size 0x%zx pages %d\n",
+	dev_dbg(dev, "generating page table for %p size 0x%zx pages %d\n",
 		dmab->area, size, pages);
 
 	for (i = 0; i < pages; i++) {
@@ -231,7 +231,7 @@ int snd_sof_create_page_table(struct snd_sof_dev *sdev,
 		u32 pfn = snd_sgbuf_get_addr(dmab, i * PAGE_SIZE) >> PAGE_SHIFT;
 		u8 *pg_table;
 
-		dev_vdbg(sdev->dev, "pfn i %i idx %d pfn %x\n", i, idx, pfn);
+		dev_vdbg(dev, "pfn i %i idx %d pfn %x\n", i, idx, pfn);
 
 		pg_table = (u8 *)(page_table + idx);
 
