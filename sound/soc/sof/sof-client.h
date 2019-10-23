@@ -20,6 +20,8 @@ struct snd_sof_client {
 	void (*sof_client_rx_cb)(struct snd_sof_client *client,
 				 u32 msg_cmd);
 
+	struct list_head list;	/* list in sdev ipc_rx_list */
+
 	void *client_data; /* core does not touch this */
 };
 
@@ -29,10 +31,12 @@ int snd_sof_create_page_table(struct device *dev,
 
 void *sof_get_client_data(struct device *dev);
 
-/* IPC TX */
+/* IPC TX/RX */
 int sof_client_tx_message(struct device *dev, u32 header,
 			  void *msg_data, size_t msg_bytes, void *reply_data,
 			  size_t reply_bytes);
+void snd_sof_ipc_rx_register(struct snd_sof_client *client,
+			     struct device *dev);
 
 /* client API's */
 inline int

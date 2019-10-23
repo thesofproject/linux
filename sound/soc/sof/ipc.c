@@ -319,6 +319,16 @@ int sof_client_tx_message(struct device *dev, u32 header,
 }
 EXPORT_SYMBOL(sof_client_tx_message);
 
+/* register client to receive IPC */
+void snd_sof_ipc_rx_register(struct snd_sof_client *client,
+			     struct device *dev)
+{
+	struct snd_sof_dev *sdev = snd_sof_get_sof_dev(dev);
+
+	list_add(&client->list, &sdev->ipc_rx_list);
+}
+EXPORT_SYMBOL(snd_sof_ipc_rx_register);
+
 /* handle reply message from DSP */
 int snd_sof_ipc_reply(struct snd_sof_dev *sdev, u32 msg_id)
 {
