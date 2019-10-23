@@ -12,7 +12,7 @@ snd-sof-intel-hda-common-objs := hda.o hda-loader.o hda-stream.o hda-trace.o \
 				 hda-dai.o hda-bus.o \
 				 apl.o cnl.o
 
-snd-sof-intel-hda-objs := hda-codec.o
+snd-sof-intel-hda-objs := hda-codec.o sof-hda-audio.o
 snd-sof-intel-ssp-objs := sof-ssp-audio.o
 
 obj-$(CONFIG_SND_SOC_SOF_INTEL_ATOM_HIFI_EP) += snd-sof-intel-byt.o
