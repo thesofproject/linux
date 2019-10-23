@@ -15,6 +15,92 @@
 #include "sof-audio.h"
 #include "ops.h"
 
+static void ipc_period_elapsed(struct snd_sof_client *client, u32 msg_id)
+{
+	struct sof_audio_dev *sof_audio = client->client_data;
+	struct snd_soc_component *scomp = sof_audio->component;
+	struct snd_sof_dev *sdev = dev_get_drvdata(scomp->dev->parent);
+	struct snd_sof_pcm_stream *stream;
+	struct sof_ipc_stream_posn posn;
+	struct snd_sof_pcm *spcm;
+	int direction;
+
+	spcm = snd_sof_find_spcm_comp(scomp, msg_id, &direction);
+	if (!spcm) {
+		dev_err(scomp->dev,
+			"error: period elapsed for unknown stream, msg_id %d\n",
+			msg_id);
+		return;
+	}
+
+	stream = &spcm->stream[direction];
+	snd_sof_ipc_msg_data(sdev, stream->substream, &posn, sizeof(posn));
+
+	dev_dbg(scomp->dev, "posn : host 0x%llx dai 0x%llx wall 0x%llx\n",
+		posn.host_posn, posn.dai_posn, posn.wallclock);
+
+	memcpy(&stream->posn, &posn, sizeof(posn));
+
+	/* only inform ALSA for period_wakeup mode */
+	if (!stream->substream->runtime->no_period_wakeup)
+		snd_sof_pcm_period_elapsed(stream->substream);
+}
+
+/* DSP notifies host of an XRUN within FW */
+static void ipc_xrun(struct snd_sof_client *client, u32 msg_id)
+{
+	struct sof_audio_dev *sof_audio = client->client_data;
+	struct snd_soc_component *scomp = sof_audio->component;
+	struct snd_sof_dev *sdev = dev_get_drvdata(scomp->dev->parent);
+	struct snd_sof_pcm_stream *stream;
+	struct sof_ipc_stream_posn posn;
+	struct snd_sof_pcm *spcm;
+	int direction;
+
+	spcm = snd_sof_find_spcm_comp(scomp, msg_id, &direction);
+	if (!spcm) {
+		dev_err(scomp->dev, "error: XRUN for unknown stream, msg_id %d\n",
+			msg_id);
+		return;
+	}
+
+	stream = &spcm->stream[direction];
+	/* TODO: figure out how to do this from core */
+	snd_sof_ipc_msg_data(sdev, stream->substream, &posn, sizeof(posn));
+
+	dev_dbg(sdev->dev,  "posn XRUN: host %llx comp %d size %d\n",
+		posn.host_posn, posn.xrun_comp_id, posn.xrun_size);
+
+#if defined(CONFIG_SND_SOC_SOF_DEBUG_XRUN_STOP)
+	/* stop PCM on XRUN - used for pipeline debug */
+	memcpy(&stream->posn, &posn, sizeof(posn));
+	snd_pcm_stop_xrun(stream->substream);
+#endif
+}
+
+/* Audio client IPC RX callback */
+static void sof_audio_rx_message(struct snd_sof_client *client, u32 msg_cmd)
+{
+	struct platform_device *pdev = client->pdev;
+
+	/* get msg cmd type and msd id */
+	u32 msg_type = msg_cmd & SOF_CMD_TYPE_MASK;
+	u32 msg_id = SOF_IPC_MESSAGE_ID(msg_cmd);
+
+	switch (msg_type) {
+	case SOF_IPC_STREAM_POSITION:
+		ipc_period_elapsed(client, msg_id);
+		break;
+	case SOF_IPC_STREAM_TRIG_XRUN:
+		ipc_xrun(client, msg_id);
+		break;
+	default:
+		dev_err(&pdev->dev, "error: unhandled stream message %x\n",
+			msg_id);
+		break;
+	}
+}
+
 /*
  * Generic object lookup APIs.
  */
@@ -175,6 +261,9 @@ static int sof_audio_probe(struct platform_device *pdev)
 	const char *drv_name;
 	int size;
 	int ret;
+
+	/* set IPC RX callback */
+	audio_client->sof_client_rx_cb = sof_audio_rx_message;
 
 	/* create SOF audio device */
 	sof_audio = devm_kzalloc(&pdev->dev, sizeof(*sof_audio), GFP_KERNEL);

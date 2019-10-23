@@ -20,7 +20,8 @@
 #include "ops.h"
 
 static void ipc_trace_message(struct snd_sof_dev *sdev, u32 msg_id);
-static void ipc_stream_message(struct snd_sof_dev *sdev, u32 msg_cmd);
+static void ipc_client_message(struct snd_sof_dev *sdev,
+			       u32 ipc_cmd, u32 msg_cmd);
 
 /*
  * IPC message Tx/Rx message handling.
@@ -393,8 +394,7 @@ void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev)
 	case SOF_IPC_GLB_COMP_MSG:
 		break;
 	case SOF_IPC_GLB_STREAM_MSG:
-		/* need to pass msg id into the function */
-		ipc_stream_message(sdev, hdr.cmd);
+		ipc_client_message(sdev, cmd, hdr.cmd);
 		break;
 	case SOF_IPC_GLB_TRACE_MSG:
 		ipc_trace_message(sdev, type);
@@ -430,83 +430,20 @@ static void ipc_trace_message(struct snd_sof_dev *sdev, u32 msg_id)
 }
 
 /*
- * IPC stream position.
+ * Notifications from DSP FW.
  */
-
-static void ipc_period_elapsed(struct snd_sof_dev *sdev, u32 msg_id)
+static void ipc_client_message(struct snd_sof_dev *sdev,
+			       u32 ipc_cmd, u32 msg_cmd)
 {
-	struct snd_sof_pcm_stream *stream;
-	struct sof_ipc_stream_posn posn;
-	struct snd_sof_pcm *spcm;
-	int direction;
+	struct ipc_rx_client *rx_client;
+	struct snd_sof_client *sof_client;
 
-	spcm = snd_sof_find_spcm_comp(sdev, msg_id, &direction);
-	if (!spcm) {
-		dev_err(sdev->dev,
-			"error: period elapsed for unknown stream, msg_id %d\n",
-			msg_id);
-		return;
-	}
-
-	stream = &spcm->stream[direction];
-	snd_sof_ipc_msg_data(sdev, stream->substream, &posn, sizeof(posn));
-
-	dev_dbg(sdev->dev, "posn : host 0x%llx dai 0x%llx wall 0x%llx\n",
-		posn.host_posn, posn.dai_posn, posn.wallclock);
-
-	memcpy(&stream->posn, &posn, sizeof(posn));
-
-	/* only inform ALSA for period_wakeup mode */
-	if (!stream->substream->runtime->no_period_wakeup)
-		snd_sof_pcm_period_elapsed(stream->substream);
-}
-
-/* DSP notifies host of an XRUN within FW */
-static void ipc_xrun(struct snd_sof_dev *sdev, u32 msg_id)
-{
-	struct snd_sof_pcm_stream *stream;
-	struct sof_ipc_stream_posn posn;
-	struct snd_sof_pcm *spcm;
-	int direction;
-
-	spcm = snd_sof_find_spcm_comp(sdev, msg_id, &direction);
-	if (!spcm) {
-		dev_err(sdev->dev, "error: XRUN for unknown stream, msg_id %d\n",
-			msg_id);
-		return;
-	}
-
-	stream = &spcm->stream[direction];
-	snd_sof_ipc_msg_data(sdev, stream->substream, &posn, sizeof(posn));
-
-	dev_dbg(sdev->dev,  "posn XRUN: host %llx comp %d size %d\n",
-		posn.host_posn, posn.xrun_comp_id, posn.xrun_size);
-
-#if defined(CONFIG_SND_SOC_SOF_DEBUG_XRUN_STOP)
-	/* stop PCM on XRUN - used for pipeline debug */
-	memcpy(&stream->posn, &posn, sizeof(posn));
-	snd_pcm_stop_xrun(stream->substream);
-#endif
-}
-
-/* stream notifications from DSP FW */
-static void ipc_stream_message(struct snd_sof_dev *sdev, u32 msg_cmd)
-{
-	/* get msg cmd type and msd id */
-	u32 msg_type = msg_cmd & SOF_CMD_TYPE_MASK;
-	u32 msg_id = SOF_IPC_MESSAGE_ID(msg_cmd);
-
-	switch (msg_type) {
-	case SOF_IPC_STREAM_POSITION:
-		ipc_period_elapsed(sdev, msg_id);
-		break;
-	case SOF_IPC_STREAM_TRIG_XRUN:
-		ipc_xrun(sdev, msg_id);
-		break;
-	default:
-		dev_err(sdev->dev, "error: unhandled stream message %x\n",
-			msg_id);
-		break;
+	/* send message to the clients registered to receive it */
+	list_for_each_entry(rx_client, &sdev->ipc_rx_list, list) {
+		if (rx_client->ipc_cmd == ipc_cmd) {
+			sof_client = dev_get_platdata(rx_client->dev);
+			sof_client->sof_client_rx_cb(sof_client, msg_cmd);
+		}
 	}
 }
 
