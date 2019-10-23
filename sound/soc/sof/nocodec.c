@@ -76,7 +76,6 @@ int sof_nocodec_setup(struct device *dev,
 		return -EINVAL;
 
 	sof_audio->drv_name = "sof-nocodec";
-	sof_audio->machine->drv_name = "sof-nocodec";
 	sof_audio->tplg_filename = desc->nocodec_tplg_filename;
 
 	/* create dummy BE dai_links */

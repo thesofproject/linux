@@ -343,13 +343,6 @@
 #define HDA_DSP_MAX_BDL_ENTRIES			\
 	(HDA_DSP_BDL_SIZE / sizeof(struct sof_intel_dsp_bdl))
 
-/* Number of DAIs */
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
-#define SOF_SKL_NUM_DAIS		14
-#else
-#define SOF_SKL_NUM_DAIS		8
-#endif
-
 /* DAI DRV info */
 extern struct sof_dai_drv_info hda_dai_drv_info[];
 #define SOF_HDA_NUM_DAI_DRV_INFO 3

@@ -71,7 +71,6 @@ struct snd_sof_audio_ops {
 	struct snd_soc_dai_driver *drv;
 	struct sof_dai_drv_info *dai_drv_info;
 	int num_dai_drv_info;
-	int num_drv;
 
 	/* ALSA HW info flags, will be stored in snd_pcm_runtime.hw.info */
 	u32 hw_info;

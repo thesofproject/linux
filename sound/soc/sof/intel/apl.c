@@ -109,7 +109,6 @@ const struct snd_sof_audio_ops sof_apl_audio_ops = {
 	.drv		= skl_dai,
 	.dai_drv_info	= hda_dai_drv_info,
 	.num_dai_drv_info = SOF_HDA_NUM_DAI_DRV_INFO,
-	.num_drv	= SOF_SKL_NUM_DAIS,
 
 	/* ALSA HW info flags */
 	.hw_info =	SNDRV_PCM_INFO_MMAP |

@@ -19,7 +19,6 @@
 #include <sound/hda_register.h>
 
 #include <linux/module.h>
-#include <sound/intel-nhlt.h>
 #include <sound/sof.h>
 #include <sound/sof/xtensa.h>
 #include "../ops.h"
@@ -47,12 +46,6 @@ static bool hda_use_msi = IS_ENABLED(CONFIG_PCI);
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG)
 module_param_named(use_msi, hda_use_msi, bool, 0444);
 MODULE_PARM_DESC(use_msi, "SOF HDA use PCI MSI mode");
-#endif
-
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
-static int hda_dmic_num = -1;
-module_param_named(dmic_num, hda_dmic_num, int, 0444);
-MODULE_PARM_DESC(dmic_num, "SOF HDA DMIC number");
 #endif
 
 static const struct hda_dsp_msg_code hda_dsp_rom_msg[] = {
@@ -291,26 +284,9 @@ static int hda_init(struct snd_sof_dev *sdev)
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
 
-static int check_nhlt_dmic(struct snd_sof_dev *sdev)
-{
-	struct nhlt_acpi_table *nhlt;
-	int dmic_num;
-
-	nhlt = intel_nhlt_init(sdev->dev);
-	if (nhlt) {
-		dmic_num = intel_nhlt_get_dmic_geo(sdev->dev, nhlt);
-		intel_nhlt_free(nhlt);
-		if (dmic_num == 2 || dmic_num == 4)
-			return dmic_num;
-	}
-
-	return 0;
-}
-
 static const char *fixup_tplg_name(struct snd_sof_dev *sdev,
 				   const char *sof_tplg_filename,
-				   const char *idisp_str,
-				   const char *dmic_str)
+				   const char *idisp_str)
 {
 	const char *tplg_filename = NULL;
 	char *filename;
@@ -324,8 +300,8 @@ static const char *fixup_tplg_name(struct snd_sof_dev *sdev,
 	split_ext = strsep(&filename, ".");
 	if (split_ext) {
 		tplg_filename = devm_kasprintf(sdev->dev, GFP_KERNEL,
-					       "%s%s%s.tplg",
-					       split_ext, idisp_str, dmic_str);
+					       "%s%s.tplg",
+					       split_ext, idisp_str);
 		if (!tplg_filename)
 			return NULL;
 	}
@@ -341,8 +317,6 @@ int hda_machine_driver_select(struct snd_sof_dev *sdev,
 	struct hdac_ext_link *hlink;
 	const char *tplg_filename;
 	const char *idisp_str;
-	const char *dmic_str;
-	int dmic_num;
 	int codec_num = 0;
 	int i;
 
@@ -381,29 +355,9 @@ int hda_machine_driver_select(struct snd_sof_dev *sdev,
 			else
 				idisp_str = "";
 
-			/* first check NHLT for DMICs */
-			dmic_num = check_nhlt_dmic(sdev);
-
-			/* allow for module parameter override */
-			if (hda_dmic_num != -1)
-				dmic_num = hda_dmic_num;
-
-			switch (dmic_num) {
-			case 2:
-				dmic_str = "-2ch";
-				break;
-			case 4:
-				dmic_str = "-4ch";
-				break;
-			default:
-				dmic_num = 0;
-				dmic_str = "";
-				break;
-			}
-
 			tplg_filename = sof_audio->tplg_filename;
 			tplg_filename = fixup_tplg_name(sdev, tplg_filename,
-							idisp_str, dmic_str);
+							idisp_str);
 			if (!tplg_filename) {
 				hda_codec_i915_exit(sdev);
 				return -EINVAL;

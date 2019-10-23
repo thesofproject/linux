@@ -555,7 +555,6 @@ const struct snd_sof_audio_ops sof_tng_audio_ops = {
 	.drv = byt_dai,
 	.dai_drv_info	= byt_dai_drv_info,
 	.num_dai_drv_info = 1,
-	.num_drv = 3, /* we have only 3 SSPs on byt*/
 
 	/* ALSA HW info flags */
 	.hw_info =	SNDRV_PCM_INFO_MMAP |
@@ -732,7 +731,6 @@ const struct snd_sof_audio_ops sof_byt_audio_ops = {
 	.drv = byt_dai,
 	.dai_drv_info	= byt_dai_drv_info,
 	.num_dai_drv_info = 1,
-	.num_drv = 3, /* we have only 3 SSPs on byt*/
 
 	/* ALSA HW info flags */
 	.hw_info =	SNDRV_PCM_INFO_MMAP |
@@ -807,8 +805,6 @@ const struct snd_sof_audio_ops sof_cht_audio_ops = {
 	.drv = byt_dai,
 	.dai_drv_info	= cht_dai_drv_info,
 	.num_dai_drv_info = 1,
-	/* all 6 SSPs may be available for cherrytrail */
-	.num_drv = ARRAY_SIZE(byt_dai),
 
 	/* ALSA HW info flags */
 	.hw_info =	SNDRV_PCM_INFO_MMAP |
