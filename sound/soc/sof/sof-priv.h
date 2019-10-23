@@ -377,6 +377,9 @@ struct snd_sof_dev {
 	/* SOF audio client */
 	struct snd_sof_client *sof_audio;
 
+	/* IPC rx client table */
+	struct list_head ipc_rx_list;
+
 	void *private;			/* core does not touch this */
 };
 
