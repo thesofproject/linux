@@ -116,10 +116,11 @@ int sof_restore_pipelines(struct device *dev)
 		case snd_soc_dapm_dai_out:
 			dai = swidget->private;
 			comp_dai = &dai->comp_dai;
-			ret = sof_ipc_tx_message(sdev->ipc,
-						 comp_dai->comp.hdr.cmd,
-						 comp_dai, sizeof(*comp_dai),
-						 &r, sizeof(r));
+			ret = sof_client_tx_message(dev,
+						    comp_dai->comp.hdr.cmd,
+						    comp_dai,
+						    sizeof(*comp_dai),
+						    &r, sizeof(r));
 			break;
 		case snd_soc_dapm_scheduler:
 
@@ -134,9 +135,10 @@ int sof_restore_pipelines(struct device *dev)
 			break;
 		default:
 			hdr = swidget->private;
-			ret = sof_ipc_tx_message(sdev->ipc, hdr->cmd,
-						 swidget->private, hdr->size,
-						 &r, sizeof(r));
+			ret = sof_client_tx_message(dev, hdr->cmd,
+						    swidget->private,
+						    hdr->size,
+						    &r, sizeof(r));
 			break;
 		}
 		if (ret < 0) {
@@ -160,10 +162,9 @@ int sof_restore_pipelines(struct device *dev)
 		connect = sroute->private;
 
 		/* send ipc */
-		ret = sof_ipc_tx_message(sdev->ipc,
-					 connect->hdr.cmd,
-					 connect, sizeof(*connect),
-					 &reply, sizeof(reply));
+		ret = sof_client_tx_message(dev, connect->hdr.cmd,
+					    connect, sizeof(*connect),
+					    &reply, sizeof(reply));
 		if (ret < 0) {
 			dev_err(dev,
 				"error: failed to load route sink %s control %s source %s\n",
@@ -196,10 +197,9 @@ int sof_restore_pipelines(struct device *dev)
 		if (config->type == SOF_DAI_INTEL_HDA)
 			config->hda.link_dma_ch = DMA_CHAN_INVALID;
 
-		ret = sof_ipc_tx_message(sdev->ipc,
-					 config->hdr.cmd, config,
-					 config->hdr.size,
-					 &reply, sizeof(reply));
+		ret = sof_client_tx_message(dev, config->hdr.cmd, config,
+					    config->hdr.size,
+					    &reply, sizeof(reply));
 
 		if (ret < 0) {
 			dev_err(dev,
