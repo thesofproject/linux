@@ -26,6 +26,12 @@ MODULE_PARM_DESC(sof_debug, "SOF core debug options (0x0 all off)");
 #define TIMEOUT_DEFAULT_IPC_MS  500
 #define TIMEOUT_DEFAULT_BOOT_MS 2000
 
+void snd_sof_ipc_rx_register(struct snd_sof_dev *sdev,
+			     struct ipc_rx_client *rx_client)
+{
+	list_add(&rx_client->list, &sdev->ipc_rx_list);
+}
+EXPORT_SYMBOL(snd_sof_ipc_rx_register);
 /*
  * Generic object lookup APIs.
  */
