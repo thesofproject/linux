@@ -22,9 +22,7 @@ struct snd_sof_dsp_ops;
  */
 struct snd_sof_pdata {
 	const struct firmware *fw;
-	const char *drv_name;
 	const char *name;
-	const char *platform;
 
 	struct device *dev;
 
@@ -40,15 +38,9 @@ struct snd_sof_pdata {
 	/* descriptor */
 	const struct sof_dev_desc *desc;
 
-	/* firmware and topology filenames */
+	/* firmware filename */
 	const char *fw_filename_prefix;
 	const char *fw_filename;
-	const char *tplg_filename_prefix;
-	const char *tplg_filename;
-
-	/* machine */
-	struct platform_device *pdev_mach;
-	const struct snd_soc_acpi_mach *machine;
 
 	void *hw_pdata;
 };
@@ -97,10 +89,4 @@ struct sof_dev_desc {
 	const struct snd_sof_dsp_ops *ops;
 	const struct sof_arch_ops *arch_ops;
 };
-
-int sof_nocodec_setup(struct device *dev,
-		      struct snd_sof_pdata *sof_pdata,
-		      struct snd_soc_acpi_mach *mach,
-		      const struct sof_dev_desc *desc,
-		      const struct snd_sof_dsp_ops *ops);
 #endif

@@ -33,6 +33,15 @@
 
 /* SOF audio device */
 struct sof_audio_dev {
+	const char *platform;
+	const char *drv_name;
+	const char *tplg_filename;
+	const char *tplg_filename_prefix;
+
+	/* machine */
+	struct platform_device *pdev_mach;
+	const struct snd_soc_acpi_mach *machine;
+
 	/*
 	 * ASoC components. plat_drv fields are set dynamically so
 	 * can't use const
@@ -226,7 +235,10 @@ int snd_sof_ipc_set_get_comp_data(struct snd_sof_control *scontrol,
 int sof_restore_pipelines(struct device *dev);
 int sof_set_hw_params_upon_resume(struct device *dev);
 
-void snd_sof_new_platform_drv(struct sof_audio_dev *sof_audio,
-			      struct snd_sof_pdata *plat_data);
+void snd_sof_new_platform_drv(struct sof_audio_dev *sof_audio);
+
+int sof_nocodec_setup(struct device *dev,
+		      struct sof_audio_dev *sof_audio,
+		      const struct sof_dev_desc *desc);
 
 #endif

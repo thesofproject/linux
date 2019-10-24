@@ -451,16 +451,6 @@ static int hda_init_caps(struct snd_sof_dev *sdev)
 	struct hdac_bus *bus = sof_to_bus(sdev);
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
 	struct hdac_ext_link *hlink;
-	struct snd_soc_acpi_mach_params *mach_params;
-	struct snd_soc_acpi_mach *hda_mach;
-	struct snd_sof_pdata *pdata = sdev->pdata;
-	struct snd_soc_acpi_mach *mach;
-	const char *tplg_filename;
-	const char *idisp_str;
-	const char *dmic_str;
-	int dmic_num;
-	int codec_num = 0;
-	int i;
 #endif
 	int ret = 0;
 
@@ -494,95 +484,8 @@ static int hda_init_caps(struct snd_sof_dev *sdev)
 	if (bus->mlcap)
 		snd_hdac_ext_bus_get_ml_capabilities(bus);
 
-	/* codec detection */
-	if (!bus->codec_mask) {
-		dev_info(bus->dev, "no hda codecs found!\n");
-	} else {
-		dev_info(bus->dev, "hda codecs found, mask %lx\n",
-			 bus->codec_mask);
-
-		for (i = 0; i < HDA_MAX_CODECS; i++) {
-			if (bus->codec_mask & (1 << i))
-				codec_num++;
-		}
-
-		/*
-		 * If no machine driver is found, then:
-		 *
-		 * hda machine driver is used if :
-		 * 1. there is one HDMI codec and one external HDAudio codec
-		 * 2. only HDMI codec
-		 */
-		if (!pdata->machine && codec_num <= 2 &&
-		    HDA_IDISP_CODEC(bus->codec_mask)) {
-			hda_mach = snd_soc_acpi_intel_hda_machines;
-			pdata->machine = hda_mach;
-
-			/* topology: use the info from hda_machines */
-			pdata->tplg_filename =
-				hda_mach->sof_tplg_filename;
-
-			/*
-			 * firmware: pick the first in machine list,
-			 * or use nocodec firmware name if list is empty
-			 */
-			mach = pdata->desc->machines;
-			if (mach->id[0])
-				pdata->fw_filename = mach->sof_fw_filename;
-			else
-				pdata->fw_filename =
-					pdata->desc->nocodec_fw_filename;
-
-			dev_info(bus->dev, "using HDA machine driver %s now\n",
-				 hda_mach->drv_name);
-
-			if (codec_num == 1)
-				idisp_str = "-idisp";
-			else
-				idisp_str = "";
-
-			/* first check NHLT for DMICs */
-			dmic_num = check_nhlt_dmic(sdev);
-
-			/* allow for module parameter override */
-			if (hda_dmic_num != -1)
-				dmic_num = hda_dmic_num;
-
-			switch (dmic_num) {
-			case 2:
-				dmic_str = "-2ch";
-				break;
-			case 4:
-				dmic_str = "-4ch";
-				break;
-			default:
-				dmic_num = 0;
-				dmic_str = "";
-				break;
-			}
-
-			tplg_filename = pdata->tplg_filename;
-			tplg_filename = fixup_tplg_name(sdev, tplg_filename,
-							idisp_str, dmic_str);
-			if (!tplg_filename) {
-				hda_codec_i915_exit(sdev);
-				return ret;
-			}
-			pdata->tplg_filename = tplg_filename;
-		}
-	}
-
-	/* used by hda machine driver to create dai links */
-	if (pdata->machine) {
-		mach_params = (struct snd_soc_acpi_mach_params *)
-			&pdata->machine->mach_params;
-		mach_params->codec_mask = bus->codec_mask;
-		mach_params->platform = dev_name(sdev->dev);
-		mach_params->common_hdmi_codec_drv = hda_codec_use_common_hdmi;
-	}
-
 	/* create codec instances */
-	hda_codec_probe_bus(sdev);
+	hda_codec_probe_bus(sdev, hda_codec_use_common_hdmi);
 
 	hda_codec_i915_put(sdev);
 

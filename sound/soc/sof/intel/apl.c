@@ -101,6 +101,7 @@ const struct snd_sof_dsp_ops sof_apl_ops = {
 	/* machine driver check */
 	.machine_driver_select = hda_machine_driver_select,
 	.set_mach_params = hda_set_mach_params,
+	.fixup_tplg_filename = hda_fixup_tplg_filename,
 
 	/* ALSA HW info flags */
 	.hw_info =	SNDRV_PCM_INFO_MMAP |
