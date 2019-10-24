@@ -25,7 +25,7 @@
 #include "../../codecs/hdac_hdmi.h"
 
 /* comment out this define for mono configurations */
-#define ENABLE_RT1308_SDW2
+//#define ENABLE_RT1308_SDW2
 
 struct mc_private {
 	struct list_head hdmi_pcm_list;
