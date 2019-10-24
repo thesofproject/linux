@@ -26,7 +26,7 @@
 #include "hda_dsp_common.h"
 
 /* comment out this define for mono configurations */
-#define ENABLE_RT1308_SDW2
+//#define ENABLE_RT1308_SDW2
 
 #define MAX_NO_PROPS 2
 
