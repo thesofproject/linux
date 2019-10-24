@@ -288,9 +288,6 @@ static int rt1308_update_status(struct sdw_slave *slave,
 	/* Update the status */
 	rt1308->status = status;
 
-	if (status == SDW_SLAVE_UNATTACHED)
-		rt1308->hw_init = false;
-
 	/*
 	 * Perform initialization only if slave status is present and
 	 * hw_init flag is false
