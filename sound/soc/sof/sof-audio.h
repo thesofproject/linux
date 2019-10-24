@@ -75,6 +75,8 @@ struct snd_sof_audio_ops {
 
 	/* ALSA HW info flags, will be stored in snd_pcm_runtime.hw.info */
 	u32 hw_info;
+
+	int num_nocodec_dailinks;
 };
 
 /* PCM stream, mapped to FW component */

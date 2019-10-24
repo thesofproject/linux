@@ -69,6 +69,7 @@ int sof_nocodec_setup(struct device *dev,
 {
 	const struct snd_sof_audio_ops *audio_ops = sof_audio->audio_ops;
 	struct snd_soc_dai_link *links;
+	int num_drv;
 	int ret;
 
 	if (!sof_audio->machine)
@@ -79,12 +80,13 @@ int sof_nocodec_setup(struct device *dev,
 	sof_audio->tplg_filename = desc->nocodec_tplg_filename;
 
 	/* create dummy BE dai_links */
+	num_drv = audio_ops->num_nocodec_dailinks;
 	links = devm_kzalloc(dev, sizeof(struct snd_soc_dai_link) *
-			     audio_ops->num_drv, GFP_KERNEL);
+			     num_drv, GFP_KERNEL);
 	if (!links)
 		return -ENOMEM;
 
-	ret = sof_nocodec_bes_setup(dev, audio_ops, links, audio_ops->num_drv,
+	ret = sof_nocodec_bes_setup(dev, audio_ops, links, num_drv,
 				    &sof_nocodec_card);
 	return ret;
 }

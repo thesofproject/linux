@@ -117,6 +117,8 @@ const struct snd_sof_audio_ops sof_apl_audio_ops = {
 			SNDRV_PCM_INFO_INTERLEAVED |
 			SNDRV_PCM_INFO_PAUSE |
 			SNDRV_PCM_INFO_NO_PERIOD_WAKEUP,
+
+	.num_nocodec_dailinks = 6,
 };
 EXPORT_SYMBOL(sof_apl_audio_ops);
 

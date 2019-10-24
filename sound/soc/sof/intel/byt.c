@@ -563,6 +563,8 @@ const struct snd_sof_audio_ops sof_tng_audio_ops = {
 			SNDRV_PCM_INFO_INTERLEAVED |
 			SNDRV_PCM_INFO_PAUSE |
 			SNDRV_PCM_INFO_BATCH,
+
+	.num_nocodec_dailinks = 3,
 };
 EXPORT_SYMBOL(sof_tng_audio_ops);
 
@@ -738,6 +740,8 @@ const struct snd_sof_audio_ops sof_byt_audio_ops = {
 			SNDRV_PCM_INFO_INTERLEAVED |
 			SNDRV_PCM_INFO_PAUSE |
 			SNDRV_PCM_INFO_BATCH,
+
+	.num_nocodec_dailinks = 3,
 };
 EXPORT_SYMBOL(sof_byt_audio_ops);
 
@@ -812,6 +816,8 @@ const struct snd_sof_audio_ops sof_cht_audio_ops = {
 			SNDRV_PCM_INFO_INTERLEAVED |
 			SNDRV_PCM_INFO_PAUSE |
 			SNDRV_PCM_INFO_BATCH,
+
+	.num_nocodec_dailinks = 6,
 };
 EXPORT_SYMBOL(sof_cht_audio_ops);
 
