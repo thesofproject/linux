@@ -600,6 +600,10 @@ int hda_dsp_trace_trigger(struct snd_sof_dev *sdev, int cmd);
 /* common dai driver */
 extern struct snd_soc_dai_driver skl_dai[];
 
+/* Platform specific machine driver selection */
+int hda_machine_driver_select(struct snd_sof_dev *dev,
+			      struct sof_audio_dev *sof_audio);
+
 /*
  * Platform Specific HW abstraction Ops.
  */

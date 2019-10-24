@@ -102,6 +102,9 @@ const struct snd_sof_audio_ops sof_apl_audio_ops = {
 	/* IPC */
 	.ipc_pcm_params	= hda_ipc_pcm_params,
 
+	/* machine driver check */
+	.machine_driver_select = hda_machine_driver_select,
+
 	/* DAI drivers */
 	.drv		= skl_dai,
 	.num_drv	= SOF_SKL_NUM_DAIS,
