@@ -1260,11 +1260,10 @@ static int intel_master_probe(struct sdw_master_device *md, void *link_ctx)
 		return ret;
 	}
 
-	if (sdw->cdns.bus.prop.hw_disabled) {
-		dev_info(&md->dev, "SoundWire master %d is disabled, ignoring\n",
+	if (sdw->cdns.bus.prop.hw_disabled)
+		dev_info(&md->dev,
+			 "SoundWire master %d is disabled, will be ignored\n",
 			 sdw->cdns.bus.link_id);
-		return 0;
-	}
 
 	return 0;
 }
@@ -1279,7 +1278,8 @@ static int intel_master_startup(struct sdw_master_device *md)
 	sdw = md->pdata;
 
 	if (sdw->cdns.bus.prop.hw_disabled) {
-		dev_info(&md->dev, "SoundWire master %d is disabled, ignoring\n",
+		dev_info(&md->dev,
+			 "SoundWire master %d is disabled, ignoring\n",
 			 sdw->cdns.bus.link_id);
 		return 0;
 	}
