@@ -679,7 +679,7 @@ static void sdw_modify_slave_status(struct sdw_slave *slave,
 			"%s: signaling completion for Slave %d\n",
 			__func__, slave->dev_num);
 
-		complete(&slave->enumeration_complete);
+//		complete(&slave->enumeration_complete);
 	}
 	slave->status = status;
 	mutex_unlock(&slave->bus->bus_lock);
@@ -1160,6 +1160,7 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 					"Slave %d initialization failed: %d\n",
 					i, ret);
 
+			complete(&slave->enumeration_complete);
 			break;
 
 		default:
