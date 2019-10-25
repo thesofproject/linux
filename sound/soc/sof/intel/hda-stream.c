@@ -185,17 +185,6 @@ hda_dsp_stream_get(struct snd_sof_dev *sdev, int direction)
 			direction == SNDRV_PCM_STREAM_PLAYBACK ?
 			"playback" : "capture");
 
-	/*
-	 * Disable DMI Link L1 entry when capture stream is opened.
-	 * Workaround to address a known issue with host DMA that results
-	 * in xruns during pause/release in capture scenarios.
-	 */
-	if (!IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_ALWAYS_ENABLE_DMI_L1))
-		if (stream && direction == SNDRV_PCM_STREAM_CAPTURE)
-			snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR,
-						HDA_VS_INTEL_EM2,
-						HDA_VS_INTEL_EM2_L1SEN, 0);
-
 	return stream;
 }
 
@@ -204,43 +193,23 @@ int hda_dsp_stream_put(struct snd_sof_dev *sdev, int direction, int stream_tag)
 {
 	struct hdac_bus *bus = sof_to_bus(sdev);
 	struct hdac_stream *s;
-	bool active_capture_stream = false;
-	bool found = false;
 
 	spin_lock_irq(&bus->reg_lock);
 
-	/*
-	 * close stream matching the stream tag
-	 * and check if there are any open capture streams.
-	 */
+	/* find used stream */
 	list_for_each_entry(s, &bus->stream_list, list) {
-		if (!s->opened)
-			continue;
-
-		if (s->direction == direction && s->stream_tag == stream_tag) {
+		if (s->direction == direction &&
+		    s->opened && s->stream_tag == stream_tag) {
 			s->opened = false;
-			found = true;
-		} else if (s->direction == SNDRV_PCM_STREAM_CAPTURE) {
-			active_capture_stream = true;
+			spin_unlock_irq(&bus->reg_lock);
+			return 0;
 		}
 	}
 
 	spin_unlock_irq(&bus->reg_lock);
 
-	/* Enable DMI L1 entry if there are no capture streams open */
-	if (!IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_ALWAYS_ENABLE_DMI_L1))
-		if (!active_capture_stream)
-			snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR,
-						HDA_VS_INTEL_EM2,
-						HDA_VS_INTEL_EM2_L1SEN,
-						HDA_VS_INTEL_EM2_L1SEN);
-
-	if (!found) {
-		dev_dbg(sdev->dev, "stream_tag %d not opened!\n", stream_tag);
-		return -ENODEV;
-	}
-
-	return 0;
+	dev_dbg(sdev->dev, "stream_tag %d not opened!\n", stream_tag);
+	return -ENODEV;
 }
 
 int hda_dsp_stream_trigger(struct snd_sof_dev *sdev,
@@ -249,6 +218,11 @@ int hda_dsp_stream_trigger(struct snd_sof_dev *sdev,
 	struct hdac_stream *hstream = &stream->hstream;
 	int sd_offset = SOF_STREAM_SD_OFFSET(hstream);
 	u32 dma_start = SOF_HDA_SD_CTL_DMA_START;
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_ALWAYS_ENABLE_DMI_L1)
+	struct hdac_bus *bus = sof_to_bus(sdev);
+	struct hdac_stream *s;
+	bool active_capture_stream = false;
+#endif
 	int ret;
 	u32 run;
 
@@ -257,6 +231,17 @@ int hda_dsp_stream_trigger(struct snd_sof_dev *sdev,
 	case SNDRV_PCM_TRIGGER_RESUME:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
 	case SNDRV_PCM_TRIGGER_START:
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_ALWAYS_ENABLE_DMI_L1)
+		/*
+		 * Disable DMI Link L1 entry when capture stream is started.
+		 * Workaround to address a known issue with host DMA that
+		 * results in xruns during pause/release in capture scenarios.
+		 */
+		if (hstream->direction == SNDRV_PCM_STREAM_CAPTURE)
+			snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR,
+						HDA_VS_INTEL_EM2,
+						HDA_VS_INTEL_EM2_L1SEN, 0);
+#endif
 		snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR, SOF_HDA_INTCTL,
 					1 << hstream->index,
 					1 << hstream->index);
@@ -312,6 +297,24 @@ int hda_dsp_stream_trigger(struct snd_sof_dev *sdev,
 		hstream->running = false;
 		snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR, SOF_HDA_INTCTL,
 					1 << hstream->index, 0x0);
+
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_ALWAYS_ENABLE_DMI_L1)
+		/* check if there are any capture streams running */
+		list_for_each_entry(s, &bus->stream_list, list) {
+			if (s->running &&
+			    s->direction == SNDRV_PCM_STREAM_CAPTURE) {
+				active_capture_stream = true;
+				break;
+			}
+		}
+
+		/* Enable DMI L1 entry if there's no running capture stream */
+		if (!active_capture_stream)
+			snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR,
+						HDA_VS_INTEL_EM2,
+						HDA_VS_INTEL_EM2_L1SEN,
+						HDA_VS_INTEL_EM2_L1SEN);
+#endif
 		break;
 	default:
 		dev_err(sdev->dev, "error: unknown command: %d\n", cmd);
