@@ -12,6 +12,7 @@
 #define __SOUND_SOC_SOF_PRIV_H
 
 #include <linux/device.h>
+#include <linux/workqueue.h>
 
 #include <sound/hdaudio.h>
 #include <sound/soc.h>
