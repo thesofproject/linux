@@ -9,6 +9,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
+#include <linux/pfn.h>
 #include <linux/pm_runtime.h>
 #include <asm/page.h>
 #include <asm/pgtable.h>
@@ -434,7 +435,7 @@ static int create_adsp_page_table(struct snd_pcm_substream *substream,
 	struct snd_dma_buffer *dmab = snd_pcm_get_dma_buf(substream);
 	int i, pages, stream = substream->stream;
 
-	pages = snd_sgbuf_aligned_pages(size);
+	pages = PFN_UP(size);
 
 	dev_dbg(rtd->dev, "generating page table for %p size 0x%zx pages %d\n",
 		dma_area, size, pages);

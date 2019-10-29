@@ -10,6 +10,7 @@
 
 #include <linux/firmware.h>
 #include <linux/module.h>
+#include <linux/pfn.h>
 #include <asm/unaligned.h>
 #include <sound/soc.h>
 #include <sound/sof.h>
@@ -208,7 +209,7 @@ int snd_sof_create_page_table(struct snd_sof_dev *sdev,
 {
 	int i, pages;
 
-	pages = snd_sgbuf_aligned_pages(size);
+	pages = PFN_UP(size);
 
 	dev_dbg(sdev->dev, "generating page table for %p size 0x%zx pages %d\n",
 		dmab->area, size, pages);

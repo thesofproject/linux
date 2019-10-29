@@ -7,6 +7,7 @@
 
 #include <linux/slab.h>
 #include <linux/mm.h>
+#include <linux/pfn.h>
 #include <linux/vmalloc.h>
 #include <linux/export.h>
 #include <asm/pgtable.h>
@@ -76,7 +77,7 @@ void *snd_malloc_sgbuf_pages(struct device *device,
 #endif
 	}
 	sgbuf->dev = device;
-	pages = snd_sgbuf_aligned_pages(size);
+	pages = PFN_UP(size);
 	sgbuf->tblsize = sgbuf_align_table(pages);
 	table = kcalloc(sgbuf->tblsize, sizeof(*table), GFP_KERNEL);
 	if (!table)
