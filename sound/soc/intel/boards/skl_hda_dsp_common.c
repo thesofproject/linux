@@ -149,6 +149,7 @@ int skl_hda_hdmi_jack_init(struct snd_soc_card *card)
 		err = snd_soc_card_jack_new(card, jack_name,
 					    SND_JACK_AVOUT, &pcm->hdmi_jack,
 					    NULL, 0);
+
 		if (err)
 			return err;
 
