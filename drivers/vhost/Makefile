@@ -11,3 +11,8 @@ vhost_vsock-y := vsock.o
 obj-$(CONFIG_VHOST_RING) += vringh.o
 
 obj-$(CONFIG_VHOST)	+= vhost.o
+
+ifdef CONFIG_SND_SOC_SOF_VIRTIO_VHOST
+obj-$(CONFIG_SND_SOC_SOF) += vhost_dsp.o
+vhost_dsp-y := dsp.o dsp-sof.o
+endif

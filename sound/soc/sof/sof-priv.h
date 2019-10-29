@@ -62,6 +62,19 @@
 
 #define DMA_CHAN_INVALID	0xFFFFFFFF
 
+/* The maximum number of components a virtio user vFE driver can use */
+#define SOF_VIRTIO_MAX_UOS_COMPS	1000
+
+#define SOF_VIRTIO_COMP_ID_UNASSIGNED	0xffffffff
+
+/*
+ * in virtio iovec array:
+ *  iovec[0]: the ipc message data between vFE and vBE
+ *  iovec[1]: the ipc reply data between vFE and vBE
+ */
+#define SOF_VIRTIO_IPC_MSG 0
+#define SOF_VIRTIO_IPC_REPLY 1
+
 struct snd_sof_dev;
 struct snd_sof_ipc_msg;
 struct snd_sof_ipc;
@@ -288,6 +301,7 @@ struct snd_sof_pcm_stream {
 	struct sof_ipc_stream_posn posn;
 	struct snd_pcm_substream *substream;
 	struct work_struct period_elapsed_work;
+	size_t guest_offset;
 };
 
 /* ALSA SOF PCM device */
@@ -345,10 +359,21 @@ struct snd_sof_dai {
 	struct snd_sof_dev *sdev;
 	const char *name;
 	const char *cpu_dai_name;
+	unsigned int pipeline_id;
 
 	struct sof_ipc_comp_dai comp_dai;
 	struct sof_ipc_dai_config *dai_config;
 	struct list_head list;	/* list in sdev dai list */
+};
+
+struct sof_core_ops {
+	struct snd_sof_pcm *(*find_spcm_comp)(struct snd_sof_dev *sdev,
+					      unsigned int comp_id,
+					      int *direction);
+	int (*ipc_tx_message)(struct snd_sof_ipc *ipc, u32 header,
+			      void *msg_data, size_t msg_bytes,
+			      void *reply_data, size_t reply_bytes);
+	void (*pcm_period_elapsed_work)(struct work_struct *work);
 };
 
 /*
@@ -364,6 +389,7 @@ struct snd_sof_dev {
 	 * can't use const
 	 */
 	struct snd_soc_component_driver plat_drv;
+	struct snd_soc_card *card;
 
 	/* DSP firmware boot */
 	wait_queue_head_t boot_wait;
@@ -423,6 +449,9 @@ struct snd_sof_dev {
 	wait_queue_head_t waitq;
 	int code_loading;
 
+	/* virtio for BE and FE */
+	struct list_head vbe_list;
+
 	/* DMA for Trace */
 	struct snd_dma_buffer dmatb;
 	struct snd_dma_buffer dmatp;
@@ -435,7 +464,21 @@ struct snd_sof_dev {
 
 	u32 msi_enabled;
 
+	struct sof_core_ops core_ops;
+
 	void *private;			/* core does not touch this */
+};
+
+/* SOF generic IPC data */
+struct snd_sof_ipc {
+	struct snd_sof_dev *sdev;
+
+	/* protects messages and the disable flag */
+	struct mutex tx_mutex;
+	/* disables further sending of ipc's */
+	bool disable_ipc_tx;
+
+	struct snd_sof_ipc_msg msg;
 };
 
 /*
@@ -570,6 +613,29 @@ void snd_sof_get_status(struct snd_sof_dev *sdev, u32 panic_code,
 			struct sof_ipc_panic_info *panic_info,
 			void *stack, size_t stack_words);
 int snd_sof_init_trace_ipc(struct snd_sof_dev *sdev);
+
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_VIRTIO_BE) || IS_ENABLED(CONFIG_SND_SOC_SOF_VIRTIO_VHOST)
+int dsp_sof_virtio_miscdev_register(struct snd_sof_dev *sdev);
+int dsp_sof_virtio_miscdev_unregister(void);
+int dsp_sof_update_guest_posn(struct snd_sof_dev *sdev,
+			      struct sof_ipc_stream_posn *posn);
+#else
+static inline int dsp_sof_virtio_miscdev_register(struct snd_sof_dev *sdev)
+{
+	return 0;
+}
+
+static inline int dsp_sof_virtio_miscdev_unregister(void)
+{
+	return 0;
+}
+
+static inline int dsp_sof_update_guest_posn(struct snd_sof_dev *sdev,
+					    struct sof_ipc_stream_posn *posn)
+{
+	return 0;
+}
+#endif
 
 /*
  * Platform specific ops.
