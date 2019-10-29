@@ -1020,9 +1020,6 @@ static int sdw_update_slave_status(struct sdw_slave *slave,
 {
 	unsigned long time;
 
-	if (!slave->ops || !slave->ops->update_status)
-		return 0;
-
 	if (!slave->probed) {
 		/*
 		 * the slave status update is typically handled in an
@@ -1039,6 +1036,10 @@ static int sdw_update_slave_status(struct sdw_slave *slave,
 			return -ETIMEDOUT;
 		}
 	}
+
+	if (!slave->ops || !slave->ops->update_status)
+		return 0;
+
 	return slave->ops->update_status(slave, status);
 }
 
