@@ -17,6 +17,8 @@
 
 struct snd_sof_dsp_ops;
 
+struct sof_vfe;
+
 /*
  * SOF Platform data.
  */
@@ -27,6 +29,8 @@ struct snd_sof_pdata {
 	const char *platform;
 
 	struct device *dev;
+
+	struct sof_vfe *vfe;
 
 	/*
 	 * notification callback used if the hardware initialization

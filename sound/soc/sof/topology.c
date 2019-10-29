@@ -725,6 +725,9 @@ static const struct sof_topology_token comp_tokens[] = {
 	{SOF_TKN_COMP_FORMAT,
 		SND_SOC_TPLG_TUPLE_TYPE_STRING, get_token_comp_format,
 		offsetof(struct sof_ipc_comp_config, frame_fmt), 0},
+	{SOF_TKN_COMP_REF,
+		SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc_comp_config, ref_comp_id), 0},
 };
 
 /* SSP */
@@ -1176,7 +1179,11 @@ static int sof_widget_load_dai(struct snd_soc_component *scomp, int index,
 	comp_dai.comp.hdr.size = sizeof(comp_dai);
 	comp_dai.comp.hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_COMP_NEW;
 	comp_dai.comp.id = swidget->comp_id;
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_VIRTIO_FE)
+	comp_dai.comp.type = SOF_COMP_VIRT_CON;
+#else
 	comp_dai.comp.type = SOF_COMP_DAI;
+#endif
 	comp_dai.comp.pipeline_id = index;
 	comp_dai.config.hdr.size = sizeof(comp_dai.config);
 
@@ -1207,6 +1214,7 @@ static int sof_widget_load_dai(struct snd_soc_component *scomp, int index,
 
 	if (ret == 0 && dai) {
 		dai->sdev = sdev;
+		dai->pipeline_id = swidget->pipeline_id;
 		memcpy(&dai->comp_dai, &comp_dai, sizeof(comp_dai));
 	}
 
@@ -1253,6 +1261,13 @@ static int sof_widget_load_buffer(struct snd_soc_component *scomp, int index,
 
 	swidget->private = buffer;
 
+	/*
+	 * VirtIO dummy buffers between a dummy "aif_in" / "aif_out" widget and
+	 * a mixer / demux respectively
+	 */
+	if (!buffer->size)
+		return 0;
+
 	ret = sof_ipc_tx_message(sdev->ipc, buffer->comp.hdr.cmd, buffer,
 				 sizeof(*buffer), r, sizeof(*r));
 	if (ret < 0) {
@@ -1297,6 +1312,15 @@ static int sof_widget_load_pcm(struct snd_soc_component *scomp, int index,
 	struct snd_soc_tplg_private *private = &tw->priv;
 	struct sof_ipc_comp_host *host;
 	int ret;
+
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_VIRTIO_BE) || IS_ENABLED(CONFIG_SND_SOC_SOF_VIRTIO_VHOST)
+	/*
+	 * For now just drop it. Might need to use a more robust identification
+	 * than the name
+	 */
+	if (!strncmp("VIO", swidget->widget->name, 3))
+		return 0;
+#endif
 
 	host = kzalloc(sizeof(*host), GFP_KERNEL);
 	if (!host)
@@ -2711,6 +2735,11 @@ static int sof_link_load(struct snd_soc_component *scomp, int index,
 	if (!link->no_pcm) {
 		link->nonatomic = true;
 
+		if (link->stream_name &&
+		    (!strcmp(link->stream_name, "vm_fe_playback") ||
+		     !strcmp(link->stream_name, "vm_fe_capture")))
+			link->no_pcm = true;
+
 		/* nothing more to do for FE dai links */
 		return 0;
 	}
@@ -2894,6 +2923,13 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 		goto err;
 	}
 
+	if (source_swidget->id == snd_soc_dapm_buffer) {
+		struct sof_ipc_buffer *buffer = source_swidget->private;
+		/* Is this a virtual VM buffer? */
+		if (!buffer->size)
+			goto err;
+	}
+
 	/*
 	 * Virtual widgets of type output/out_drv may be added in topology
 	 * for compatibility. These are not handled by the FW.
@@ -2913,6 +2949,13 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 			route->sink);
 		ret = -EINVAL;
 		goto err;
+	}
+
+	if (sink_swidget->id == snd_soc_dapm_buffer) {
+		struct sof_ipc_buffer *buffer = sink_swidget->private;
+		/* Is this a virtual VM buffer? */
+		if (!buffer->size)
+			goto err;
 	}
 
 	/*
@@ -3176,12 +3219,19 @@ EXPORT_SYMBOL(snd_sof_init_topology);
 
 int snd_sof_load_topology(struct snd_sof_dev *sdev, const char *file)
 {
+	struct firmware vfe_fw;
 	const struct firmware *fw;
 	int ret;
 
 	dev_dbg(sdev->dev, "loading topology:%s\n", file);
 
-	ret = request_firmware(&fw, file, sdev->dev);
+	if (sdev->pdata->vfe) {
+		fw = &vfe_fw;
+		ret = sof_ops(sdev)->request_topology(sdev, file, &vfe_fw);
+	} else {
+		ret = request_firmware(&fw, file, sdev->dev);
+	}
+
 	if (ret < 0) {
 		dev_err(sdev->dev, "error: tplg request firmware %s failed err: %d\n",
 			file, ret);
@@ -3197,7 +3247,9 @@ int snd_sof_load_topology(struct snd_sof_dev *sdev, const char *file)
 		ret = -EINVAL;
 	}
 
-	release_firmware(fw);
+	if (!sdev->pdata->vfe)
+		release_firmware(fw);
+
 	return ret;
 }
 EXPORT_SYMBOL(snd_sof_load_topology);

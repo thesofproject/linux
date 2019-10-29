@@ -1420,6 +1420,9 @@ static int widget_in_list(struct snd_soc_dapm_widget_list *list,
 	return 0;
 }
 
+#define SOC_VIRT_DAI_PLAYBACK "VM FE Playback"
+#define SOC_VIRT_DAI_CAPTURE "VM FE Capture"
+
 static bool dpcm_end_walk_at_be(struct snd_soc_dapm_widget *widget,
 		enum snd_soc_dapm_direction dir)
 {
@@ -1430,7 +1433,8 @@ static bool dpcm_end_walk_at_be(struct snd_soc_dapm_widget *widget,
 
 	if (dir == SND_SOC_DAPM_DIR_OUT) {
 		for_each_card_rtds(card, rtd) {
-			if (!rtd->dai_link->no_pcm)
+			if (!rtd->dai_link->no_pcm ||
+			    !strcmp(widget->name, SOC_VIRT_DAI_PLAYBACK))
 				continue;
 
 			if (rtd->cpu_dai->playback_widget == widget)
@@ -1443,7 +1447,8 @@ static bool dpcm_end_walk_at_be(struct snd_soc_dapm_widget *widget,
 		}
 	} else { /* SND_SOC_DAPM_DIR_IN */
 		for_each_card_rtds(card, rtd) {
-			if (!rtd->dai_link->no_pcm)
+			if (!rtd->dai_link->no_pcm ||
+			    !strcmp(widget->name, SOC_VIRT_DAI_CAPTURE))
 				continue;
 
 			if (rtd->cpu_dai->capture_widget == widget)
@@ -1487,6 +1492,13 @@ static int dpcm_prune_paths(struct snd_soc_pcm_runtime *fe, int stream,
 	for_each_dpcm_be(fe, stream, dpcm) {
 		/* is there a valid CPU DAI widget for this BE */
 		widget = dai_get_widget(dpcm->be->cpu_dai, stream);
+
+		/*
+		 * The problem with VirtIO is, that as long as .playback_widget
+		 * or .capture_widget respectively is set, the back-end isn't
+		 * pruned. If we force the .{playback,capture}_widget = NULL,
+		 * then later that widget isn't included in the clean up.
+		 */
 
 		/* prune the BE if it's no longer in our active list */
 		if (widget && widget_in_list(list, widget) && !force)
@@ -3151,14 +3163,6 @@ int soc_new_pcm(struct snd_soc_pcm_runtime *rtd, int num)
 	rtd->pcm = pcm;
 	pcm->private_data = rtd;
 
-	if (rtd->dai_link->no_pcm) {
-		if (playback)
-			pcm->streams[SNDRV_PCM_STREAM_PLAYBACK].substream->private_data = rtd;
-		if (capture)
-			pcm->streams[SNDRV_PCM_STREAM_CAPTURE].substream->private_data = rtd;
-		goto out;
-	}
-
 	/* ASoC PCM operations */
 	if (rtd->dai_link->dynamic) {
 		rtd->ops.open		= dpcm_fe_dai_open;
@@ -3178,6 +3182,14 @@ int soc_new_pcm(struct snd_soc_pcm_runtime *rtd, int num)
 		rtd->ops.close		= soc_pcm_close;
 		rtd->ops.pointer	= soc_pcm_pointer;
 		rtd->ops.ioctl		= soc_pcm_ioctl;
+	}
+
+	if (rtd->dai_link->no_pcm) {
+		if (playback)
+			pcm->streams[SNDRV_PCM_STREAM_PLAYBACK].substream->private_data = rtd;
+		if (capture)
+			pcm->streams[SNDRV_PCM_STREAM_CAPTURE].substream->private_data = rtd;
+		goto out;
 	}
 
 	for_each_rtdcom(rtd, rtdcom) {

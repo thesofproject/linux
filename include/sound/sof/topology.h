@@ -37,6 +37,7 @@ enum sof_comp_type {
 	SOF_COMP_KPB,			/* A key phrase buffer component */
 	SOF_COMP_SELECTOR,		/**< channel selector component */
 	SOF_COMP_DEMUX,
+	SOF_COMP_VIRT_CON,
 	/* keep FILEREAD/FILEWRITE as the last ones */
 	SOF_COMP_FILEREAD = 10000,	/**< host test based file IO */
 	SOF_COMP_FILEWRITE = 10001,	/**< host test based file IO */
@@ -86,7 +87,7 @@ struct sof_ipc_comp_config {
 	struct sof_ipc_cmd_hdr hdr;
 	uint32_t periods_sink;	/**< 0 means variable */
 	uint32_t periods_source;/**< 0 means variable */
-	uint32_t reserved1;	/**< reserved */
+	uint32_t ref_comp_id;	/**< ID of the referenced component */
 	uint32_t frame_fmt;	/**< SOF_IPC_FRAME_ */
 	uint32_t xrun_action;
 

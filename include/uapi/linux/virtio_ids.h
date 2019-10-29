@@ -45,6 +45,7 @@
 #define VIRTIO_ID_CRYPTO       20 /* virtio crypto */
 #define VIRTIO_ID_IOMMU        23 /* virtio IOMMU */
 #define VIRTIO_ID_PMEM         27 /* virtio pmem */
+#define VIRTIO_ID_DSP          28 /* virtio DSP */
 
 #ifdef CONFIG_ACRN_VIRTIO_DEVICES
 /* ACRN virtio device types */

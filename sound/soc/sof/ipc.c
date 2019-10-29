@@ -14,6 +14,8 @@
 #include <linux/mutex.h>
 #include <linux/types.h>
 
+#include <sound/sof/virtio.h>
+
 #include "sof-priv.h"
 #include "ops.h"
 
@@ -21,7 +23,7 @@
  * IPC message default size and timeout (ms).
  * TODO: allow platforms to set size and timeout.
  */
-#define IPC_TIMEOUT_MS		300
+#define IPC_TIMEOUT_MS		600
 
 static void ipc_trace_message(struct snd_sof_dev *sdev, u32 msg_id);
 static void ipc_stream_message(struct snd_sof_dev *sdev, u32 msg_cmd);
@@ -74,6 +76,10 @@ static void ipc_log_header(struct device *dev, u8 *text, u32 cmd)
 			str2 = "BUFFER_NEW"; break;
 		case SOF_IPC_TPLG_BUFFER_FREE:
 			str2 = "BUFFER_FREE"; break;
+		case SOF_IPC_TPLG_VFE_GET:
+			str2 = "VFE_GET"; break;
+		case SOF_IPC_TPLG_VFE_COMP_ID:
+			str2 = "VFE_COMP_ID"; break;
 		default:
 			str2 = "unknown type"; break;
 		}
@@ -233,9 +239,9 @@ static int tx_wait_done(struct snd_sof_ipc *ipc, struct snd_sof_ipc_msg *msg,
 }
 
 /* send IPC message from host to DSP */
-static int sof_ipc_tx_message_unlocked(struct snd_sof_ipc *ipc, u32 header,
-				       void *msg_data, size_t msg_bytes,
-				       void *reply_data, size_t reply_bytes)
+int sof_ipc_tx_message_unlocked(struct snd_sof_ipc *ipc, u32 header,
+				void *msg_data, size_t msg_bytes,
+				void *reply_data, size_t reply_bytes)
 {
 	struct snd_sof_dev *sdev = ipc->sdev;
 	struct snd_sof_ipc_msg *msg;
@@ -287,6 +293,7 @@ static int sof_ipc_tx_message_unlocked(struct snd_sof_ipc *ipc, u32 header,
 
 	return ret;
 }
+EXPORT_SYMBOL(sof_ipc_tx_message_unlocked);
 
 /* send IPC message from host to DSP */
 int sof_ipc_tx_message(struct snd_sof_ipc *ipc, u32 header,
@@ -437,6 +444,8 @@ static void ipc_period_elapsed(struct snd_sof_dev *sdev, u32 msg_id)
 	dev_dbg(sdev->dev, "posn : host 0x%llx dai 0x%llx wall 0x%llx\n",
 		posn->host_posn, posn->dai_posn, posn->wallclock);
 
+	/* optionally update position for vBE */
+	dsp_sof_update_guest_posn(sdev, posn);
 
 	/* only inform ALSA for period_wakeup mode */
 	if (!stream->substream->runtime->no_period_wakeup)
@@ -497,15 +506,16 @@ int snd_sof_ipc_stream_posn(struct snd_sof_dev *sdev,
 			    struct snd_sof_pcm *spcm, int direction,
 			    struct sof_ipc_stream_posn *posn)
 {
-	struct sof_ipc_stream stream;
+	struct sof_ipc_stream stream = {
+		.hdr = {
+			.size = sizeof(stream),
+			.cmd = SOF_IPC_GLB_STREAM_MSG | SOF_IPC_STREAM_POSITION,
+		},
+		.comp_id = spcm->stream[direction].comp_id,
+	};
 	int err;
 
-	/* read position via slower IPC */
-	stream.hdr.size = sizeof(stream);
-	stream.hdr.cmd = SOF_IPC_GLB_STREAM_MSG | SOF_IPC_STREAM_POSITION;
-	stream.comp_id = spcm->stream[direction].comp_id;
-
-	/* send IPC to the DSP */
+	/* read position from the DSP via slower IPC */
 	err = sof_ipc_tx_message(sdev->ipc,
 				 stream.hdr.cmd, &stream, sizeof(stream), &posn,
 				 sizeof(*posn));
@@ -815,7 +825,7 @@ struct snd_sof_ipc *snd_sof_ipc_init(struct snd_sof_dev *sdev)
 	/* indicate that we aren't sending a message ATM */
 	msg->ipc_complete = true;
 
-	/* pre-allocate message data */
+	/* pre-allocate message data, nullify it to avoid leaking kernel data */
 	msg->msg_data = devm_kzalloc(sdev->dev, SOF_IPC_MSG_MAX_SIZE,
 				     GFP_KERNEL);
 	if (!msg->msg_data)

@@ -210,6 +210,10 @@ struct snd_sof_dsp_ops {
 	int (*trace_trigger)(struct snd_sof_dev *sdev,
 			     int cmd); /* optional */
 
+	/* VirtIO operations */
+	int (*request_topology)(struct snd_sof_dev *sdev, const char *name,
+				struct firmware *fw); /* optional */
+
 	/* DAI ops */
 	struct snd_soc_dai_driver *drv;
 	int num_drv;
@@ -452,6 +456,7 @@ struct snd_sof_dev {
 
 	/* virtio for BE and FE */
 	struct list_head vbe_list;
+	bool is_vfe;
 
 	/* DMA for Trace */
 	struct snd_dma_buffer dmatb;
@@ -494,6 +499,7 @@ int snd_sof_runtime_resume(struct device *dev);
 int snd_sof_runtime_idle(struct device *dev);
 int snd_sof_resume(struct device *dev);
 int snd_sof_suspend(struct device *dev);
+int sof_restore_pipelines(struct snd_sof_dev *sdev);
 
 void snd_sof_new_platform_drv(struct snd_sof_dev *sdev);
 
@@ -529,6 +535,9 @@ int snd_sof_ipc_valid(struct snd_sof_dev *sdev);
 int sof_ipc_tx_message(struct snd_sof_ipc *ipc, u32 header,
 		       void *msg_data, size_t msg_bytes, void *reply_data,
 		       size_t reply_bytes);
+int sof_ipc_tx_message_unlocked(struct snd_sof_ipc *ipc, u32 header,
+				void *msg_data, size_t msg_bytes,
+				void *reply_data, size_t reply_bytes);
 struct snd_sof_widget *snd_sof_find_swidget(struct snd_sof_dev *sdev,
 					    const char *name);
 struct snd_sof_widget *snd_sof_find_swidget_sname(struct snd_sof_dev *sdev,
@@ -638,10 +647,19 @@ static inline int dsp_sof_update_guest_posn(struct snd_sof_dev *sdev,
 }
 #endif
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_VIRTIO_FE)
+int sof_vfe_pcm_copy_user(struct snd_pcm_substream *substream, int channel,
+			  unsigned long pos, void __user *buf,
+			  unsigned long bytes);
+#else
+#define sof_vfe_pcm_copy_user NULL
+#endif
+
 /*
  * Platform specific ops.
  */
 extern struct snd_compr_ops sof_compressed_ops;
+extern struct snd_sof_dsp_ops snd_sof_virtio_fe_ops;
 
 /*
  * Kcontrols.
@@ -715,5 +733,7 @@ int intel_pcm_open(struct snd_sof_dev *sdev,
 		   struct snd_pcm_substream *substream);
 int intel_pcm_close(struct snd_sof_dev *sdev,
 		    struct snd_pcm_substream *substream);
+
+void sof_pcm_period_elapsed_work(struct work_struct *work);
 
 #endif

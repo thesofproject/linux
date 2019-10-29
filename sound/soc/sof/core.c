@@ -320,7 +320,8 @@ static int sof_dsp_start(struct snd_sof_dev *sdev)
 
 fw_run_err:
 #if !IS_ENABLED(CONFIG_SND_SOC_SOF_PROBE_WORK_QUEUE)
-	snd_sof_fw_unload(sdev);
+	if (!sdev->is_vfe)
+		snd_sof_fw_unload(sdev);
 #endif
 
 	return ret;
@@ -365,6 +366,9 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 		goto dbg_err;
 	}
 
+	/* optionally register virtio miscdev */
+	dsp_sof_virtio_miscdev_register(sdev);
+
 	/* init the IPC */
 	sdev->ipc = snd_sof_ipc_init(sdev);
 	if (!sdev->ipc) {
@@ -372,9 +376,12 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 		goto ipc_err;
 	}
 
-	ret = sof_dsp_start(sdev);
-	if (ret < 0)
-		goto fw_load_err;
+	/* virtio front-end mode will not touch HW, skip fw loading */
+	if (!plat_data->vfe) {
+		ret = sof_dsp_start(sdev);
+		if (ret < 0)
+			goto fw_load_err;
+	}
 
 	/* hereafter all FW boot flows are for PM reasons */
 	sdev->first_boot = false;
@@ -413,10 +420,12 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 
 #if !IS_ENABLED(CONFIG_SND_SOC_SOF_PROBE_WORK_QUEUE)
 fw_run_err:
-	snd_sof_fw_unload(sdev);
+	if (!sdev->is_vfe)
+		snd_sof_fw_unload(sdev);
 fw_load_err:
 	snd_sof_ipc_free(sdev);
 ipc_err:
+	dsp_sof_virtio_miscdev_unregister();
 	snd_sof_free_debug(sdev);
 dbg_err:
 	snd_sof_remove(sdev);
@@ -479,8 +488,13 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 	INIT_LIST_HEAD(&sdev->widget_list);
 	INIT_LIST_HEAD(&sdev->dai_list);
 	INIT_LIST_HEAD(&sdev->route_list);
+	INIT_LIST_HEAD(&sdev->vbe_list);
 	spin_lock_init(&sdev->ipc_lock);
 	spin_lock_init(&sdev->hw_lock);
+
+	sdev->core_ops.find_spcm_comp = snd_sof_find_spcm_comp;
+	sdev->core_ops.ipc_tx_message = sof_ipc_tx_message;
+	sdev->core_ops.pcm_period_elapsed_work = sof_pcm_period_elapsed_work;
 
 	if (IS_ENABLED(CONFIG_SND_SOC_SOF_PROBE_WORK_QUEUE))
 		INIT_WORK(&sdev->probe_work, sof_probe_work);
@@ -512,10 +526,13 @@ int snd_sof_device_remove(struct device *dev)
 	if (IS_ENABLED(CONFIG_SND_SOC_SOF_PROBE_WORK_QUEUE))
 		cancel_work_sync(&sdev->probe_work);
 
-	snd_sof_fw_unload(sdev);
 	snd_sof_ipc_free(sdev);
+	dsp_sof_virtio_miscdev_unregister();
 	snd_sof_free_debug(sdev);
-	snd_sof_free_trace(sdev);
+	if (!pdata->vfe) {
+		snd_sof_fw_unload(sdev);
+		snd_sof_free_trace(sdev);
+	}
 
 	/*
 	 * Unregister machine driver. This will unbind the snd_card which
@@ -533,9 +550,11 @@ int snd_sof_device_remove(struct device *dev)
 	 */
 	snd_sof_remove(sdev);
 
-	/* release firmware */
-	release_firmware(pdata->fw);
-	pdata->fw = NULL;
+	if (!pdata->vfe) {
+		/* release firmware */
+		release_firmware(pdata->fw);
+		pdata->fw = NULL;
+	}
 
 	return 0;
 }

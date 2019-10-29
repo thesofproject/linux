@@ -5,9 +5,12 @@ snd-sof-objs := core.o ops.o loader.o ipc.o pcm.o pm.o debug.o topology.o\
 
 snd-sof-nocodec-objs := nocodec.o
 
+ifdef CONFIG_SND_SOC_SOF_VIRTIO_FE
+snd-sof-objs += virtio-fe.o
+endif
+
 obj-$(CONFIG_SND_SOC_SOF) += snd-sof.o
 obj-$(CONFIG_SND_SOC_SOF_NOCODEC) += snd-sof-nocodec.o
-
 
 obj-$(CONFIG_SND_SOC_SOF_ACPI) += sof-acpi-dev.o
 obj-$(CONFIG_SND_SOC_SOF_PCI) += sof-pci-dev.o

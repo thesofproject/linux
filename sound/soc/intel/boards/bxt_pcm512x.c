@@ -166,6 +166,12 @@ static const struct snd_soc_ops aif1_ops = {
 	.shutdown = aif1_shutdown,
 };
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_VIRTIO_BE) || IS_ENABLED(CONFIG_SND_SOC_SOF_VIRTIO_VHOST)
+#define SSP5_NAME "vm_dai_link"
+#else
+#define SSP5_NAME "SSP5-Codec"
+#endif
+
 SND_SOC_DAILINK_DEF(ssp5_pin,
 	DAILINK_COMP_ARRAY(COMP_CPU("SSP5 Pin")));
 SND_SOC_DAILINK_DEF(ssp5_codec,
@@ -197,7 +203,7 @@ static struct snd_soc_dai_link dailink[] = {
 	/* CODEC<->CODEC link */
 	/* back ends */
 	{
-		.name = "SSP5-Codec",
+		.name = SSP5_NAME,
 		.id = 0,
 		.no_pcm = 1,
 		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF

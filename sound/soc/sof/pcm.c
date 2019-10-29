@@ -55,7 +55,7 @@ static int sof_pcm_dsp_params(struct snd_sof_pcm *spcm, struct snd_pcm_substream
 /*
  * sof pcm period elapse work
  */
-static void sof_pcm_period_elapsed_work(struct work_struct *work)
+void sof_pcm_period_elapsed_work(struct work_struct *work)
 {
 	struct snd_sof_pcm_stream *sps =
 		container_of(work, struct snd_sof_pcm_stream,
@@ -63,6 +63,7 @@ static void sof_pcm_period_elapsed_work(struct work_struct *work)
 
 	snd_pcm_period_elapsed(sps->substream);
 }
+EXPORT_SYMBOL(sof_pcm_period_elapsed_work);
 
 /*
  * sof pcm period elapse, this could be called at irq thread context.
@@ -532,6 +533,7 @@ static struct snd_pcm_ops sof_pcm_ops = {
 	.trigger	= sof_pcm_trigger,
 	.pointer	= sof_pcm_pointer,
 	.page		= snd_pcm_sgbuf_ops_page,
+	.copy_user	= sof_vfe_pcm_copy_user,
 };
 
 /*
@@ -645,6 +647,11 @@ static int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 		return -EINVAL;
 	}
 
+	if (!dai->dai_config) {
+		dev_dbg(sdev->dev, "no DAI config for %s!\n", rtd->dai_link->name);
+		return 0;
+	}
+
 	/* read rate and channels from topology */
 	switch (dai->dai_config->type) {
 	case SOF_DAI_INTEL_SSP:
@@ -690,6 +697,7 @@ static int sof_pcm_probe(struct snd_soc_component *component)
 
 	/* load the default topology */
 	sdev->component = component;
+	sdev->card = component->card;
 
 	tplg_filename = devm_kasprintf(sdev->dev, GFP_KERNEL,
 				       "%s/%s",

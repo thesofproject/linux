@@ -59,7 +59,7 @@ static int sof_restore_kcontrols(struct snd_sof_dev *sdev)
 	return 0;
 }
 
-static int sof_restore_pipelines(struct snd_sof_dev *sdev)
+int sof_restore_pipelines(struct snd_sof_dev *sdev)
 {
 	struct snd_sof_widget *swidget;
 	struct snd_sof_route *sroute;
@@ -67,6 +67,7 @@ static int sof_restore_pipelines(struct snd_sof_dev *sdev)
 	struct snd_sof_dai *dai;
 	struct sof_ipc_comp_dai *comp_dai;
 	struct sof_ipc_cmd_hdr *hdr;
+	struct sof_ipc_buffer *buffer;
 	int ret;
 
 	/* restore pipeline components */
@@ -98,6 +99,15 @@ static int sof_restore_pipelines(struct snd_sof_dev *sdev)
 			pipeline = swidget->private;
 			ret = sof_load_pipeline_ipc(sdev, pipeline, &r);
 			break;
+
+		case snd_soc_dapm_buffer:
+
+			buffer = swidget->private;
+			if (!buffer->size)
+				break;
+
+			/* Fall through */
+
 		default:
 			hdr = swidget->private;
 			ret = sof_ipc_tx_message(sdev->ipc, hdr->cmd,
