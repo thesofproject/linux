@@ -1337,7 +1337,7 @@ static int sof_widget_load_pcm(struct snd_soc_component *scomp, int index,
 	ret = sof_ipc_tx_message(sdev->ipc, host->comp.hdr.cmd, host,
 				 sizeof(*host), r, sizeof(*r));
 	if (ret >= 0)
-		return ret;
+		return 0;
 err:
 	kfree(host);
 	return ret;
