@@ -143,9 +143,6 @@ int skl_hda_hdmi_jack_init(struct snd_soc_card *card)
 		return skl_hda_hdmi_build_controls(card);
 
 	list_for_each_entry(pcm, &ctx->hdmi_pcm_list, head) {
-		if (!pcm)
-			continue;
-
 		component = pcm->codec_dai->component;
 		snprintf(jack_name, sizeof(jack_name),
 			 "HDMI/DP, pcm=%d Jack", pcm->device);

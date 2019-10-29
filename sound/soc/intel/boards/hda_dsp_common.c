@@ -23,7 +23,7 @@ struct snd_pcm *hda_dsp_hdmi_pcm_handle(struct snd_soc_card *card,
 
 	for_each_card_rtds(card, rtd) {
 		spcm = rtd->pcm ?
-			rtd->pcm->streams[SNDRV_PCM_STREAM_PLAYBACK].pcm : 0;
+			rtd->pcm->streams[SNDRV_PCM_STREAM_PLAYBACK].pcm : NULL;
 		if (spcm && strstr(spcm->id, "HDMI")) {
 			if (i == hdmi_idx)
 				return rtd->pcm;
@@ -31,7 +31,7 @@ struct snd_pcm *hda_dsp_hdmi_pcm_handle(struct snd_soc_card *card,
 		}
 	}
 
-	return 0;
+	return NULL;
 }
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_AUDIO_CODEC)
