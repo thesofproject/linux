@@ -487,8 +487,10 @@ MODULE_DEVICE_TABLE(sdw, rt711_id);
 
 static int rt711_dev_suspend(struct device *dev)
 {
+	struct sdw_slave *slave = to_sdw_slave_device(dev);
 	struct rt711_priv *rt711 = dev_get_drvdata(dev);
 
+	init_completion(&slave->enumeration_complete);
 	if (!rt711->hw_init)
 		return 0;
 
