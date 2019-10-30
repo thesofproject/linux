@@ -501,10 +501,15 @@ static int rt711_dev_resume(struct device *dev)
 	struct sdw_slave *slave = to_sdw_slave_device(dev);
 	struct rt711_priv *rt711 = dev_get_drvdata(dev);
 	unsigned long time;
+	int ret;
+	bool retry = true;
 
 	if (!rt711->hw_init)
 		return 0;
 
+	regcache_cache_only(rt711->regmap, false);
+
+repeat:
 	time = wait_for_completion_timeout(&slave->enumeration_complete,
 				msecs_to_jiffies(RT711_PROBE_TIMEOUT));
 	if (!time) {
@@ -512,9 +517,20 @@ static int rt711_dev_resume(struct device *dev)
 		return -ETIMEDOUT;
 	}
 
-	regcache_cache_only(rt711->regmap, false);
-	regcache_sync_region(rt711->regmap, 0x3000, 0x8fff);
-	regcache_sync_region(rt711->regmap, 0x752010, 0x752091);
+	ret = regcache_sync_region(rt711->regmap, 0x3000, 0x8fff);
+	if (ret && retry) {
+		dev_warn(dev, "%s sync error %d, retry\n", __func__, ret);
+		msleep(5);
+		retry = false;
+		goto repeat;
+	}
+	ret = regcache_sync_region(rt711->regmap, 0x752010, 0x752091);
+	if (ret && retry) {
+		dev_warn(dev, "%s sync error %d, retry\n", __func__, ret);
+		msleep(5);
+		retry = false;
+		goto repeat;
+	}
 
 	return 0;
 }
