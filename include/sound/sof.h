@@ -14,8 +14,80 @@
 #include <linux/pci.h>
 #include <sound/soc.h>
 #include <sound/soc-acpi.h>
+#include <sound/soc-of.h>
 
 struct snd_sof_dsp_ops;
+
+enum snd_soc_sof_mach_type {
+	SND_SOC_SOF_MACH_TYPE_ACPI = 0,
+	SND_SOC_SOF_MACH_TYPE_OF,
+};
+
+struct snd_soc_sof_mach {
+	enum snd_soc_sof_mach_type type;
+	union {
+		const struct snd_soc_acpi_mach *acpi;
+		const struct snd_soc_of_mach *of;
+	};
+};
+
+static inline
+const char *sof_mach_get_drv_name(const struct snd_soc_sof_mach *mach)
+{
+	switch (mach->type) {
+	case SND_SOC_SOF_MACH_TYPE_ACPI:
+		return mach->acpi->drv_name;
+	case SND_SOC_SOF_MACH_TYPE_OF:
+		return mach->of->drv_name;
+	default:
+		pr_debug("Unknown mach type %d\n", mach->type);
+		return NULL;
+	}
+}
+
+static inline
+const void *sof_mach_get_machine(const struct snd_soc_sof_mach *mach)
+{
+	switch (mach->type) {
+	case SND_SOC_SOF_MACH_TYPE_ACPI:
+		return mach->acpi;
+	case SND_SOC_SOF_MACH_TYPE_OF:
+		return mach->of;
+	default:
+		pr_debug("Unknown mach type %d\n", mach->type);
+		return NULL;
+	}
+}
+
+static inline
+void sof_mach_set_machine(struct snd_soc_sof_mach *mach, const void *machine,
+			  enum snd_soc_sof_mach_type type)
+{
+	mach->type = type;
+
+	switch (mach->type) {
+	case SND_SOC_SOF_MACH_TYPE_ACPI:
+		mach->acpi = machine;
+		break;
+	case SND_SOC_SOF_MACH_TYPE_OF:
+		mach->of = machine;
+		break;
+	default:
+		pr_debug("Unknown mach type %d\n", mach->type);
+	}
+}
+
+static inline int sof_mach_get_mach_size(const struct snd_soc_sof_mach *mach)
+{
+	switch (mach->type) {
+	case SND_SOC_SOF_MACH_TYPE_ACPI:
+		return sizeof(*mach->acpi);
+	case SND_SOC_SOF_MACH_TYPE_OF:
+		return sizeof(*mach->of);
+	default:
+		return -EINVAL;
+	}
+}
 
 /*
  * SOF Platform data.
