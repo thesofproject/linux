@@ -507,4 +507,6 @@ int intel_pcm_close(struct snd_sof_dev *sdev,
 
 bool snd_sof_dsp_d0i3_on_suspend(struct snd_sof_dev *sdev);
 
+struct snd_sof_dev *snd_sof_get_sof_dev(struct device *dev);
+
 #endif
