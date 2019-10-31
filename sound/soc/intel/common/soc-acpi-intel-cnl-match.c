@@ -76,7 +76,7 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_cnl_sdw_machines[] = {
 		.link_mask = 0xB, /* 3 active links required */
 		.drv_name = "sdw_rt711_rt1308_rt715",
 		.sof_fw_filename = "sof-cnl.ri",
-		.sof_tplg_filename = "sof-cml-rt711-rt1308-rt715.tplg",
+		.sof_tplg_filename = "sof-cml-rt711-rt1308-mono-rt715.tplg",
 	},
 	{
 		.link_mask = 0x2, /* RT700 connected on Link1 */
