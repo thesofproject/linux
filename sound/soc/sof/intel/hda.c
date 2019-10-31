@@ -502,9 +502,16 @@ static const struct sof_intel_dsp_desc
 irqreturn_t hda_dsp_interrupt_handler(int irq, void *context)
 {
 	struct snd_sof_dev *sdev = context;
+	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
 
 	if (check_ipc(sdev) || is_stream_irq(sdev))
 		return IRQ_WAKE_THREAD;
+
+	if (hdev->sdw && is_sdw_intel_irq(hdev->sdw)) {
+		/* disable SDW interrupt */
+		hda_sdw_int_enable(sdev, false);
+		return IRQ_WAKE_THREAD;
+	}
 
 	return IRQ_NONE;
 }
@@ -512,11 +519,17 @@ irqreturn_t hda_dsp_interrupt_handler(int irq, void *context)
 irqreturn_t hda_dsp_interrupt_thread(int irq, void *context)
 {
 	struct snd_sof_dev *sdev = context;
+	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
 
 	if (check_ipc(sdev))
 		sof_ops(sdev)->irq_thread(irq, sdev);
 	if (is_stream_irq(sdev))
 		hda_dsp_stream_threaded_handler(irq, sdev);
+	if (hdev->sdw && is_sdw_intel_irq(hdev->sdw)) {
+		/* disable SDW interrupt */
+		hda_sdw_int_enable(sdev, false);
+		sdw_intel_thread(irq, hdev->sdw);
+	}
 
 	return IRQ_HANDLED;
 }
