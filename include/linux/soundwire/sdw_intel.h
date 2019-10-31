@@ -123,4 +123,18 @@ void sdw_intel_exit(struct sdw_intel_ctx *ctx);
 
 void sdw_intel_enable_irq(void __iomem *mmio_base, bool enable);
 
+irqreturn_t sdw_intel_thread(int irq, void *dev_id);
+
+static inline
+bool is_sdw_intel_irq(struct sdw_intel_ctx *ctx)
+{
+	u32 int_status;
+
+	int_status = readl(ctx->mmio_base + 0x14);
+	if (int_status & BIT(5))
+		return true;
+
+	return false;
+}
+
 #endif

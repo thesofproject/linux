@@ -36,6 +36,10 @@
 #define SOF_DBG_PCI		BIT(4)
 #define SOF_DBG_RETAIN_CTX	BIT(5)	/* prevent DSP D3 on FW exception */
 
+/* interrupt event flags */
+#define SOF_IRQ_IPC		BIT(0)
+#define SOF_IRQ_SDW		BIT(1)
+
 /* global debug state set by SOF_DBG_ flags */
 extern int sof_core_debug;
 
@@ -424,6 +428,7 @@ struct snd_sof_dev {
 	struct snd_sof_mailbox stream_box;	/* Stream position update */
 	struct snd_sof_ipc_msg *msg;
 	int ipc_irq;
+	u32 irq_event;	/* Which interrupt are triggered*/
 	u32 next_comp_id; /* monotonic - reset during S3 */
 
 	/* memory bases for mmaped DSPs - set by dsp_init() */

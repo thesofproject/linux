@@ -237,14 +237,17 @@ irqreturn_t hda_dsp_ipc_irq_thread(int irq, void *context)
 	return IRQ_HANDLED;
 }
 
-/* is this IRQ for ADSP ? - we only care about IPC here */
+/* is this IRQ for ADSP or SDW? - we only care about IPC and SDW here */
 irqreturn_t hda_dsp_ipc_irq_handler(int irq, void *context)
 {
 	struct snd_sof_dev *sdev = context;
+	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
 	int ret = IRQ_NONE;
 	u32 irq_status;
 
 	spin_lock(&sdev->hw_lock);
+
+	sdev->irq_event = 0;
 
 	/* store status */
 	irq_status = snd_sof_dsp_read(sdev, HDA_DSP_BAR, HDA_DSP_REG_ADSPIS);
@@ -260,12 +263,33 @@ irqreturn_t hda_dsp_ipc_irq_handler(int irq, void *context)
 		snd_sof_dsp_update_bits_unlocked(sdev, HDA_DSP_BAR,
 						 HDA_DSP_REG_ADSPIC,
 						 HDA_DSP_ADSPIC_IPC, 0);
+		sdev->irq_event |= SOF_IRQ_IPC;
+		ret = IRQ_WAKE_THREAD;
+	}
+	/* SDW message */
+	if (hdev->sdw && is_sdw_intel_irq(hdev->sdw)) {
+		hda_sdw_int_enable(sdev, false);
+		sdev->irq_event |= SOF_IRQ_SDW;
 		ret = IRQ_WAKE_THREAD;
 	}
 
 out:
 	spin_unlock(&sdev->hw_lock);
 	return ret;
+}
+
+irqreturn_t hda_dsp_irq_thread(int irq, void *context)
+{
+	struct snd_sof_dev *sdev = context;
+	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+
+	if (sdev->irq_event & SOF_IRQ_IPC)
+		sof_ops(sdev)->irq_thread(irq, context);
+
+	if (sdev->irq_event & SOF_IRQ_SDW)
+		sdw_intel_thread(irq, hdev->sdw);
+
+	return IRQ_HANDLED;
 }
 
 int hda_dsp_ipc_get_mailbox_offset(struct snd_sof_dev *sdev)
