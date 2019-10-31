@@ -165,6 +165,7 @@ int sdw_cdns_pcm_set_stream(struct snd_soc_dai *dai,
 			    void *stream, int direction);
 int sdw_cdns_pdm_set_stream(struct snd_soc_dai *dai,
 			    void *stream, int direction);
+bool sdw_cdns_check_resume_status(struct sdw_cdns *cdns);
 
 enum sdw_command_response
 cdns_reset_page_addr(struct sdw_bus *bus, unsigned int dev_num);
