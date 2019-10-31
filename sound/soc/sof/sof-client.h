@@ -13,9 +13,14 @@
 /* SOF client device */
 struct snd_sof_client {
 	struct platform_device *pdev;
+
+	void *client_data; /* core does not touch this */
 };
 
 int snd_sof_create_page_table(struct device *dev,
 			      struct snd_dma_buffer *dmab,
 			      unsigned char *page_table, size_t size);
+
+void *sof_get_client_data(struct device *dev);
+
 #endif
