@@ -2389,7 +2389,7 @@ static int sof_dai_load(struct snd_soc_component *scomp, int index,
 	caps = &spcm->pcm.caps[stream];
 
 	/* allocate playback page table buffer */
-	ret = snd_dma_alloc_pages(SNDRV_DMA_TYPE_DEV, scomp->dev,
+	ret = snd_dma_alloc_pages(SNDRV_DMA_TYPE_DEV, sof_audio->dma_dev,
 				  PAGE_SIZE, &spcm->stream[stream].page_table);
 	if (ret < 0) {
 		dev_err(scomp->dev, "error: can't alloc page table for %s %d\n",
@@ -2419,7 +2419,7 @@ capture:
 	caps = &spcm->pcm.caps[stream];
 
 	/* allocate capture page table buffer */
-	ret = snd_dma_alloc_pages(SNDRV_DMA_TYPE_DEV, scomp->dev,
+	ret = snd_dma_alloc_pages(SNDRV_DMA_TYPE_DEV, sof_audio->dma_dev,
 				  PAGE_SIZE, &spcm->stream[stream].page_table);
 	if (ret < 0) {
 		dev_err(scomp->dev, "error: can't alloc page table for %s %d\n",

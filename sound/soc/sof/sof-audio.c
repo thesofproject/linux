@@ -617,6 +617,13 @@ static int sof_audio_probe(struct platform_device *pdev)
 
 	sof_audio->platform = dev_name(&pdev->dev);
 
+	/*
+	 * On some platforms such as Intel Ice Lake, DMA page buffer alloc
+	 * fails when the client platform device is used.
+	 * So, use SOF top-level device instead.
+	 */
+	sof_audio->dma_dev = pdev->dev.parent;
+
 	audio_client->client_data = sof_audio;
 
 	/* set IPC RX callback */

@@ -563,6 +563,7 @@ static int sof_pcm_close(struct snd_soc_component *component,
 static int sof_pcm_new(struct snd_soc_component *component,
 		       struct snd_soc_pcm_runtime *rtd)
 {
+	struct sof_audio_dev *sof_audio = sof_get_client_data(component->dev);
 	struct snd_sof_pcm *spcm;
 	struct snd_pcm *pcm = rtd->pcm;
 	struct snd_soc_tplg_stream_caps *caps;
@@ -591,7 +592,7 @@ static int sof_pcm_new(struct snd_soc_component *component,
 
 	snd_pcm_lib_preallocate_pages(pcm->streams[stream].substream,
 				      SNDRV_DMA_TYPE_DEV_SG,
-				      component->dev,
+				      sof_audio->dma_dev,
 				      le32_to_cpu(caps->buffer_size_min),
 				      le32_to_cpu(caps->buffer_size_max));
 capture:
@@ -610,7 +611,7 @@ capture:
 
 	snd_pcm_lib_preallocate_pages(pcm->streams[stream].substream,
 				      SNDRV_DMA_TYPE_DEV_SG,
-				      component->dev,
+				      sof_audio->dma_dev,
 				      le32_to_cpu(caps->buffer_size_min),
 				      le32_to_cpu(caps->buffer_size_max));
 

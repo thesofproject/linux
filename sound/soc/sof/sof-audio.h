@@ -38,6 +38,9 @@ struct sof_audio_dev {
 	const char *tplg_filename;
 	const char *tplg_filename_prefix;
 
+	/* dma dev */
+	struct device *dma_dev;
+
 	/* machine */
 	struct platform_device *pdev_mach;
 	const struct snd_soc_acpi_mach *machine;
