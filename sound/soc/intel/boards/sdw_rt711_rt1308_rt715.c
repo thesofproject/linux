@@ -27,6 +27,19 @@
 /* comment out this define for mono configurations */
 #define ENABLE_RT1308_SDW2
 
+#define MAX_NO_PROPS 2
+
+extern struct bus_type sdw_bus_type;
+
+enum {
+	SOF_RT711_JD_SRC_JD1 = 1,
+	SOF_RT711_JD_SRC_JD2 = 2,
+};
+
+#define SOF_RT711_JDSRC(quirk)		((quirk) & GENMASK(1, 0))
+
+static unsigned long sof_rt711_rt1308_rt715_quirk = SOF_RT711_JD_SRC_JD1;
+
 struct mc_private {
 	struct list_head hdmi_pcm_list;
 	struct snd_soc_jack sdw_headset;
@@ -148,6 +161,49 @@ static int headset_init(struct snd_soc_pcm_runtime *rtd)
 	if (ret)
 		dev_err(rtd->card->dev, "Headset Jack call-back failed: %d\n",
 			ret);
+
+	return ret;
+}
+
+static int sof_rt711_rt1308_rt715_quirk_cb(const struct dmi_system_id *id)
+{
+	sof_rt711_rt1308_rt715_quirk = (unsigned long)id->driver_data;
+	return 1;
+}
+
+static const struct dmi_system_id sof_sdw_rt711_rt1308_rt715_quirk_table[] = {
+	{
+		.callback = sof_rt711_rt1308_rt715_quirk_cb,
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc"),
+		},
+		.driver_data = (void *)(SOF_RT711_JD_SRC_JD2),
+	},
+	{}
+};
+
+/*
+ * Note this MUST be called before snd_soc_register_card(), so that the props
+ * are in place before the codec component driver's probe function parses them.
+ */
+static int sof_rt711_add_codec_device_props(const char *sdw_dev_name)
+{
+	struct property_entry props[MAX_NO_PROPS] = {};
+	struct device *sdw_dev;
+	int ret, cnt = 0;
+
+	sdw_dev = bus_find_device_by_name(&sdw_bus_type, NULL, sdw_dev_name);
+	if (!sdw_dev)
+		return -EPROBE_DEFER;
+
+	if (SOF_RT711_JDSRC(sof_rt711_rt1308_rt715_quirk)) {
+		props[cnt++] = PROPERTY_ENTRY_U32(
+			       "realtek,jd-src",
+			       SOF_RT711_JDSRC(sof_rt711_rt1308_rt715_quirk));
+	}
+
+	ret = device_add_properties(sdw_dev, props);
+	put_device(sdw_dev);
 
 	return ret;
 }
@@ -346,6 +402,8 @@ static int mc_probe(struct platform_device *pdev)
 	if (!ctx)
 		return -ENOMEM;
 
+	dmi_check_system(sof_sdw_rt711_rt1308_rt715_quirk_table);
+
 #if IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
 	INIT_LIST_HEAD(&ctx->hdmi_pcm_list);
 #endif
@@ -362,6 +420,7 @@ static int mc_probe(struct platform_device *pdev)
 
 	snd_soc_card_set_drvdata(card, ctx);
 
+	sof_rt711_add_codec_device_props("sdw:0:25d:711:0");
 	/* Register the card */
 	ret = devm_snd_soc_register_card(&pdev->dev, card);
 	if (ret) {
