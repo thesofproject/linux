@@ -2063,7 +2063,7 @@ static int snd_soc_instantiate_card(struct snd_soc_card *card)
 	/* probe auxiliary components */
 	ret = soc_probe_aux_devices(card);
 	if (ret < 0)
-		goto probe_end;
+		goto comp_remove;
 
 	/*
 	 * Find new DAI links added during probing components and bind them.
@@ -2075,10 +2075,10 @@ static int snd_soc_instantiate_card(struct snd_soc_card *card)
 
 		ret = soc_init_dai_link(card, dai_link);
 		if (ret)
-			goto probe_end;
+			goto comp_remove;
 		ret = soc_bind_dai_link(card, dai_link);
 		if (ret)
-			goto probe_end;
+			goto comp_remove;
 	}
 
 	/* probe all DAI links on this card */
@@ -2086,7 +2086,7 @@ static int snd_soc_instantiate_card(struct snd_soc_card *card)
 	if (ret < 0) {
 		dev_err(card->dev,
 			"ASoC: failed to instantiate card %d\n", ret);
-		goto probe_end;
+		goto comp_remove;
 	}
 
 	for_each_card_rtds(card, rtd)
@@ -2098,17 +2098,17 @@ static int snd_soc_instantiate_card(struct snd_soc_card *card)
 	ret = snd_soc_add_card_controls(card, card->controls,
 					card->num_controls);
 	if (ret < 0)
-		goto probe_end;
+		goto comp_remove;
 
 	ret = snd_soc_dapm_add_routes(&card->dapm, card->dapm_routes,
 				      card->num_dapm_routes);
 	if (ret < 0)
-		goto probe_end;
+		goto comp_remove;
 
 	ret = snd_soc_dapm_add_routes(&card->dapm, card->of_dapm_routes,
 				      card->num_of_dapm_routes);
 	if (ret < 0)
-		goto probe_end;
+		goto comp_remove;
 
 	/* try to set some sane longname if DMI is available */
 	snd_soc_set_dmi_name(card, NULL);
@@ -2125,7 +2125,7 @@ static int snd_soc_instantiate_card(struct snd_soc_card *card)
 		if (ret < 0) {
 			dev_err(card->dev, "ASoC: %s late_probe() failed: %d\n",
 				card->name, ret);
-			goto probe_end;
+			goto comp_remove;
 		}
 	}
 
@@ -2135,12 +2135,16 @@ static int snd_soc_instantiate_card(struct snd_soc_card *card)
 	if (ret < 0) {
 		dev_err(card->dev, "ASoC: failed to register soundcard %d\n",
 				ret);
-		goto probe_end;
+		goto comp_remove;
 	}
 
 	card->instantiated = 1;
 	dapm_mark_endpoints_dirty(card);
 	snd_soc_dapm_sync(&card->dapm);
+
+comp_remove:
+	if (ret < 0)
+		soc_remove_link_components(card);
 
 probe_end:
 	if (ret < 0)
