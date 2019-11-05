@@ -17,6 +17,7 @@
 #include <linux/dmi.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/soundwire/sdw_type.h>
 #include <sound/jack.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
@@ -29,8 +30,6 @@
 //#define ENABLE_RT1308_SDW2
 
 #define MAX_NO_PROPS 2
-
-extern struct bus_type sdw_bus_type;
 
 enum {
 	SOF_RT711_JD_SRC_JD1 = 1,
