@@ -18,6 +18,7 @@
 #include <sound/sof/dai.h>
 #include <sound/sof/topology.h>
 #include "sof-priv.h"
+#include "sof-client.h"
 
 #define SOF_AUDIO_PCM_DRV_NAME	"sof-audio-component"
 
@@ -188,11 +189,10 @@ static inline
 struct snd_sof_pcm *snd_sof_find_spcm_dai(struct snd_soc_component *scomp,
 					  struct snd_soc_pcm_runtime *rtd)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
-
+	struct sof_audio_dev *sof_audio = sof_get_client_data(scomp->dev);
 	struct snd_sof_pcm *spcm = NULL;
 
-	list_for_each_entry(spcm, &sdev->pcm_list, list) {
+	list_for_each_entry(spcm, &sof_audio->pcm_list, list) {
 		if (le32_to_cpu(spcm->pcm.dai_id) == rtd->dai_link->id)
 			return spcm;
 	}
@@ -221,4 +221,5 @@ int snd_sof_ipc_set_get_comp_data(struct snd_sof_control *scontrol,
 /* PM */
 int sof_restore_pipelines(struct device *dev);
 int sof_set_hw_params_upon_resume(struct device *dev);
+
 #endif

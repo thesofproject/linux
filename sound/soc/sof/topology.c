@@ -794,7 +794,7 @@ static void sof_parse_word_tokens(struct snd_soc_component *scomp,
 				  int count,
 				  struct snd_soc_tplg_vendor_array *array)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct sof_audio_dev *sof_audio = sof_get_client_data(scomp->dev);
 	struct snd_soc_tplg_vendor_value_elem *elem;
 	size_t size = sizeof(struct sof_ipc_dai_dmic_pdm_ctrl);
 	int i, j;
@@ -819,8 +819,8 @@ static void sof_parse_word_tokens(struct snd_soc_component *scomp,
 				continue;
 
 			/* pdm config array index */
-			if (sdev->private)
-				index = sdev->private;
+			if (sof_audio->private)
+				index = sof_audio->private;
 
 			/* matched - determine offset */
 			switch (tokens[j].token) {
@@ -1124,10 +1124,10 @@ static int sof_control_load(struct snd_soc_component *scomp, int index,
 			    struct snd_kcontrol_new *kc,
 			    struct snd_soc_tplg_ctl_hdr *hdr)
 {
+	struct sof_audio_dev *sof_audio = sof_get_client_data(scomp->dev);
 	struct soc_mixer_control *sm;
 	struct soc_bytes_ext *sbe;
 	struct soc_enum *se;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_dobj *dobj;
 	struct snd_sof_control *scontrol;
 	int ret = -EINVAL;
@@ -1180,7 +1180,7 @@ static int sof_control_load(struct snd_soc_component *scomp, int index,
 	}
 
 	dobj->private = scontrol;
-	list_add(&scontrol->list, &sdev->kcontrol_list);
+	list_add(&scontrol->list, &sof_audio->kcontrol_list);
 	return ret;
 }
 
@@ -1653,6 +1653,7 @@ static int sof_widget_load_pga(struct snd_soc_component *scomp, int index,
 			       struct sof_ipc_comp_reply *r)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct sof_audio_dev *sof_audio = sof_get_client_data(scomp->dev);
 	struct snd_soc_tplg_private *private = &tw->priv;
 	struct sof_ipc_comp_volume *volume;
 	struct snd_sof_control *scontrol;
@@ -1700,7 +1701,7 @@ static int sof_widget_load_pga(struct snd_soc_component *scomp, int index,
 
 	swidget->private = volume;
 
-	list_for_each_entry(scontrol, &sdev->kcontrol_list, list) {
+	list_for_each_entry(scontrol, &sof_audio->kcontrol_list, list) {
 		if (scontrol->comp_id == swidget->comp_id &&
 		    scontrol->volume_table) {
 			min_step = scontrol->min_volume_step;
@@ -2118,6 +2119,7 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 			    struct snd_soc_tplg_dapm_widget *tw)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct sof_audio_dev *sof_audio = sof_get_client_data(scomp->dev);
 	struct snd_sof_widget *swidget;
 	struct snd_sof_dai *dai;
 	struct sof_ipc_comp_reply reply;
@@ -2156,7 +2158,7 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 					  dai);
 		if (ret == 0) {
 			sof_connect_dai_widget(scomp, w, tw, dai);
-			list_add(&dai->list, &sdev->dai_list);
+			list_add(&dai->list, &sof_audio->dai_list);
 			swidget->private = dai;
 		} else {
 			kfree(dai);
@@ -2168,7 +2170,7 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 	case snd_soc_dapm_pga:
 		ret = sof_widget_load_pga(scomp, index, swidget, tw, &reply);
 		/* Find scontrol for this pga and set readback offset*/
-		list_for_each_entry(scontrol, &sdev->kcontrol_list, list) {
+		list_for_each_entry(scontrol, &sof_audio->kcontrol_list, list) {
 			if (scontrol->comp_id == swidget->comp_id) {
 				scontrol->readback_offset = reply.offset;
 				break;
@@ -2237,7 +2239,7 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 	}
 
 	w->dobj.private = swidget;
-	list_add(&swidget->list, &sdev->widget_list);
+	list_add(&swidget->list, &sof_audio->widget_list);
 	return ret;
 }
 
@@ -2353,7 +2355,7 @@ static int sof_dai_load(struct snd_soc_component *scomp, int index,
 			struct snd_soc_dai_driver *dai_drv,
 			struct snd_soc_tplg_pcm *pcm, struct snd_soc_dai *dai)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct sof_audio_dev *sof_audio = sof_get_client_data(scomp->dev);
 	struct snd_soc_tplg_stream_caps *caps;
 	struct snd_soc_tplg_private *private = &pcm->priv;
 	struct snd_sof_pcm *spcm;
@@ -2376,7 +2378,7 @@ static int sof_dai_load(struct snd_soc_component *scomp, int index,
 	dev_dbg(scomp->dev, "tplg: load pcm %s\n", pcm->dai_name);
 
 	dai_drv->dobj.private = spcm;
-	list_add(&spcm->list, &sdev->pcm_list);
+	list_add(&spcm->list, &sof_audio->pcm_list);
 
 	ret = sof_parse_tokens(scomp, spcm, stream_tokens,
 			       ARRAY_SIZE(stream_tokens), private->array,
@@ -2397,7 +2399,7 @@ static int sof_dai_load(struct snd_soc_component *scomp, int index,
 	caps = &spcm->pcm.caps[stream];
 
 	/* allocate playback page table buffer */
-	ret = snd_dma_alloc_pages(SNDRV_DMA_TYPE_DEV, sdev->dev,
+	ret = snd_dma_alloc_pages(SNDRV_DMA_TYPE_DEV, scomp->dev,
 				  PAGE_SIZE, &spcm->stream[stream].page_table);
 	if (ret < 0) {
 		dev_err(scomp->dev, "error: can't alloc page table for %s %d\n",
@@ -2427,7 +2429,7 @@ capture:
 	caps = &spcm->pcm.caps[stream];
 
 	/* allocate capture page table buffer */
-	ret = snd_dma_alloc_pages(SNDRV_DMA_TYPE_DEV, sdev->dev,
+	ret = snd_dma_alloc_pages(SNDRV_DMA_TYPE_DEV, scomp->dev,
 				  PAGE_SIZE, &spcm->stream[stream].page_table);
 	if (ret < 0) {
 		dev_err(scomp->dev, "error: can't alloc page table for %s %d\n",
@@ -2505,14 +2507,15 @@ static void sof_dai_set_format(struct snd_soc_tplg_hw_config *hw_config,
 }
 
 /* set config for all DAI's with name matching the link name */
-static int sof_set_dai_config(struct snd_sof_dev *sdev, u32 size,
+static int sof_set_dai_config(struct snd_soc_component *scomp, u32 size,
 			      struct snd_soc_dai_link *link,
 			      struct sof_ipc_dai_config *config)
 {
+	struct sof_audio_dev *sof_audio = sof_get_client_data(scomp->dev);
 	struct snd_sof_dai *dai;
 	int found = 0;
 
-	list_for_each_entry(dai, &sdev->dai_list, list) {
+	list_for_each_entry(dai, &sof_audio->dai_list, list) {
 		if (!dai->name)
 			continue;
 
@@ -2534,7 +2537,7 @@ static int sof_set_dai_config(struct snd_sof_dev *sdev, u32 size,
 	 * or none of them. Here print a warning message to notify user
 	 */
 	if (!found) {
-		dev_warn(sdev->dev, "warning: failed to find dai for dai link %s",
+		dev_warn(scomp->dev, "warning: failed to find dai for dai link %s",
 			 link->name);
 	}
 
@@ -2610,7 +2613,7 @@ static int sof_link_ssp_load(struct snd_soc_component *scomp, int index,
 	}
 
 	/* set config for all DAI's with name matching the link name */
-	ret = sof_set_dai_config(sdev, size, link, config);
+	ret = sof_set_dai_config(scomp, size, link, config);
 	if (ret < 0)
 		dev_err(scomp->dev, "error: failed to save DAI config for SSP%d\n",
 			config->dai_index);
@@ -2688,7 +2691,7 @@ static int sof_link_esai_load(struct snd_soc_component *scomp, int index,
 	}
 
 	/* set config for all DAI's with name matching the link name */
-	ret = sof_set_dai_config(sdev, size, link, config);
+	ret = sof_set_dai_config(scomp, size, link, config);
 	if (ret < 0)
 		dev_err(scomp->dev, "error: failed to save DAI config for ESAI%d\n",
 			config->dai_index);
@@ -2703,6 +2706,7 @@ static int sof_link_dmic_load(struct snd_soc_component *scomp, int index,
 			      struct sof_ipc_dai_config *config)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct sof_audio_dev *sof_audio = sof_get_client_data(scomp->dev);
 	struct snd_soc_tplg_private *private = &cfg->priv;
 	struct sof_ipc_dai_config *ipc_config;
 	struct sof_ipc_reply reply;
@@ -2747,8 +2751,8 @@ static int sof_link_dmic_load(struct snd_soc_component *scomp, int index,
 	 * alloc memory for private member
 	 * Used to track the pdm config array index currently being parsed
 	 */
-	sdev->private = kzalloc(sizeof(u32), GFP_KERNEL);
-	if (!sdev->private) {
+	sof_audio->private = kzalloc(sizeof(u32), GFP_KERNEL);
+	if (!sof_audio->private) {
 		kfree(ipc_config);
 		return -ENOMEM;
 	}
@@ -2811,13 +2815,13 @@ static int sof_link_dmic_load(struct snd_soc_component *scomp, int index,
 	}
 
 	/* set config for all DAI's with name matching the link name */
-	ret = sof_set_dai_config(sdev, size, link, ipc_config);
+	ret = sof_set_dai_config(scomp, size, link, ipc_config);
 	if (ret < 0)
 		dev_err(scomp->dev, "error: failed to save DAI config for DMIC%d\n",
 			config->dai_index);
 
 err:
-	kfree(sdev->private);
+	kfree(sof_audio->private);
 	kfree(ipc_config);
 
 	return ret;
@@ -2828,17 +2832,19 @@ err:
  * in FW. Here get the dai_index, set dma channel of each dai
  * and send config to FW. In FW, each dai sets config by dai_index
  */
-static int sof_link_hda_process(struct snd_sof_dev *sdev,
+static int sof_link_hda_process(struct snd_soc_component *scomp,
 				struct snd_soc_dai_link *link,
 				struct sof_ipc_dai_config *config)
 {
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct sof_audio_dev *sof_audio = sof_get_client_data(scomp->dev);
 	struct sof_ipc_reply reply;
 	u32 size = sizeof(*config);
 	struct snd_sof_dai *sof_dai;
 	int found = 0;
 	int ret;
 
-	list_for_each_entry(sof_dai, &sdev->dai_list, list) {
+	list_for_each_entry(sof_dai, &sof_audio->dai_list, list) {
 		if (!sof_dai->name)
 			continue;
 
@@ -2889,7 +2895,6 @@ static int sof_link_hda_load(struct snd_soc_component *scomp, int index,
 			     struct snd_soc_tplg_hw_config *hw_config,
 			     struct sof_ipc_dai_config *config)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_tplg_private *private = &cfg->priv;
 	struct snd_soc_dai *dai;
 	u32 size = sizeof(*config);
@@ -2916,7 +2921,7 @@ static int sof_link_hda_load(struct snd_soc_component *scomp, int index,
 		return -EINVAL;
 	}
 
-	ret = sof_link_hda_process(sdev, link, config);
+	ret = sof_link_hda_process(scomp, link, config);
 	if (ret < 0)
 		dev_err(scomp->dev, "error: failed to process hda dai link %s",
 			link->name);
@@ -2950,7 +2955,7 @@ static int sof_link_alh_load(struct snd_soc_component *scomp, int index,
 	}
 
 	/* set config for all DAI's with name matching the link name */
-	ret = sof_set_dai_config(sdev, size, link, config);
+	ret = sof_set_dai_config(scomp, size, link, config);
 	if (ret < 0)
 		dev_err(scomp->dev, "error: failed to save DAI config for ALH %d\n",
 			config->dai_index);
@@ -3081,7 +3086,7 @@ static int sof_link_load(struct snd_soc_component *scomp, int index,
 	return 0;
 }
 
-static int sof_link_hda_unload(struct snd_sof_dev *sdev,
+static int sof_link_hda_unload(struct snd_soc_component *scomp,
 			       struct snd_soc_dai_link *link)
 {
 	struct snd_soc_dai *dai;
@@ -3089,7 +3094,7 @@ static int sof_link_hda_unload(struct snd_sof_dev *sdev,
 
 	dai = snd_soc_find_dai(link->cpus);
 	if (!dai) {
-		dev_err(sdev->dev, "error: failed to find dai %s in %s",
+		dev_err(scomp->dev, "error: failed to find dai %s in %s",
 			link->cpus->dai_name, __func__);
 		return -EINVAL;
 	}
@@ -3100,7 +3105,7 @@ static int sof_link_hda_unload(struct snd_sof_dev *sdev,
 static int sof_link_unload(struct snd_soc_component *scomp,
 			   struct snd_soc_dobj *dobj)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct sof_audio_dev *sof_audio = sof_get_client_data(scomp->dev);
 	struct snd_soc_dai_link *link =
 		container_of(dobj, struct snd_soc_dai_link, dobj);
 
@@ -3111,7 +3116,7 @@ static int sof_link_unload(struct snd_soc_component *scomp,
 	if (!link->no_pcm)
 		return 0;
 
-	list_for_each_entry(sof_dai, &sdev->dai_list, list) {
+	list_for_each_entry(sof_dai, &sof_audio->dai_list, list) {
 		if (!sof_dai->name)
 			continue;
 
@@ -3131,7 +3136,7 @@ found:
 		/* no resource needs to be released for SSP, DMIC and ALH */
 		break;
 	case SOF_DAI_INTEL_HDA:
-		ret = sof_link_hda_unload(sdev, link);
+		ret = sof_link_hda_unload(scomp, link);
 		break;
 	default:
 		dev_err(scomp->dev, "error: invalid DAI type %d\n",
@@ -3148,6 +3153,7 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 			  struct snd_soc_dapm_route *route)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct sof_audio_dev *sof_audio = sof_get_client_data(scomp->dev);
 	struct sof_ipc_pipe_comp_connect *connect;
 	struct snd_sof_widget *source_swidget, *sink_swidget;
 	struct snd_soc_dobj *dobj = &route->dobj;
@@ -3257,7 +3263,7 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 		sroute->private = connect;
 
 		/* add route to route list */
-		list_add(&sroute->list, &sdev->route_list);
+		list_add(&sroute->list, &sof_audio->route_list);
 
 		return ret;
 	}
@@ -3273,12 +3279,12 @@ err:
  */
 static int snd_sof_cache_kcontrol_val(struct snd_soc_component *scomp)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct sof_audio_dev *sof_audio = sof_get_client_data(scomp->dev);
 	struct snd_sof_control *scontrol = NULL;
 	int ipc_cmd, ctrl_type;
 	int ret = 0;
 
-	list_for_each_entry(scontrol, &sdev->kcontrol_list, list) {
+	list_for_each_entry(scontrol, &sof_audio->kcontrol_list, list) {
 
 		/* notify DSP of kcontrol values */
 		switch (scontrol->cmd) {
@@ -3339,11 +3345,11 @@ int snd_sof_complete_pipeline(struct device *dev,
 /* completion - called at completion of firmware loading */
 static void sof_complete(struct snd_soc_component *scomp)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct sof_audio_dev *sof_audio = sof_get_client_data(scomp->dev);
 	struct snd_sof_widget *swidget;
 
 	/* some widget types require completion notificattion */
-	list_for_each_entry(swidget, &sdev->widget_list, list) {
+	list_for_each_entry(swidget, &sof_audio->widget_list, list) {
 		if (swidget->complete)
 			continue;
 

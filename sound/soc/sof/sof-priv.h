@@ -346,11 +346,6 @@ struct snd_sof_dev {
 
 	/* topology */
 	struct snd_soc_tplg_ops *tplg_ops;
-	struct list_head pcm_list;
-	struct list_head kcontrol_list;
-	struct list_head widget_list;
-	struct list_head dai_list;
-	struct list_head route_list;
 	struct snd_soc_component *component;
 	u32 enabled_cores_mask; /* keep track of enabled cores */
 
@@ -378,6 +373,9 @@ struct snd_sof_dev {
 	u32 dtrace_draining;
 
 	bool msi_enabled;
+
+	/* SOF audio client */
+	struct snd_sof_client *sof_audio;
 
 	void *private;			/* core does not touch this */
 };

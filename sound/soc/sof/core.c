@@ -14,6 +14,8 @@
 #include <sound/soc.h>
 #include <sound/sof.h>
 #include "sof-priv.h"
+#include "sof-audio.h"
+#include "sof-client.h"
 #include "ops.h"
 
 /* see SOF_DBG_ flags */
@@ -356,6 +358,7 @@ static void sof_probe_work(struct work_struct *work)
 
 int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 {
+	struct sof_audio_dev *sof_audio;
 	struct snd_sof_dev *sdev;
 
 	sdev = devm_kzalloc(dev, sizeof(*sdev), GFP_KERNEL);
@@ -380,11 +383,26 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 	    !sof_ops(sdev)->fw_ready)
 		return -EINVAL;
 
-	INIT_LIST_HEAD(&sdev->pcm_list);
-	INIT_LIST_HEAD(&sdev->kcontrol_list);
-	INIT_LIST_HEAD(&sdev->widget_list);
-	INIT_LIST_HEAD(&sdev->dai_list);
-	INIT_LIST_HEAD(&sdev->route_list);
+	/* create SOF audio client */
+	sdev->sof_audio = devm_kzalloc(sdev->dev, sizeof(*sdev->sof_audio),
+				       GFP_KERNEL);
+	if (!sdev->sof_audio)
+		return -ENOMEM;
+
+	/* create SOF audio client data */
+	sof_audio = devm_kzalloc(sdev->dev, sizeof(*sof_audio), GFP_KERNEL);
+	if (!sof_audio)
+		return -ENOMEM;
+
+	INIT_LIST_HEAD(&sof_audio->pcm_list);
+	INIT_LIST_HEAD(&sof_audio->kcontrol_list);
+	INIT_LIST_HEAD(&sof_audio->widget_list);
+	INIT_LIST_HEAD(&sof_audio->dai_list);
+	INIT_LIST_HEAD(&sof_audio->route_list);
+
+	/* set audio client data */
+	sdev->sof_audio->client_data = sof_audio;
+
 	spin_lock_init(&sdev->ipc_lock);
 	spin_lock_init(&sdev->hw_lock);
 

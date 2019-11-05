@@ -122,7 +122,7 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 	/* allocate audio buffer pages */
 	ret = snd_pcm_lib_malloc_pages(substream, params_buffer_bytes(params));
 	if (ret < 0) {
-		dev_err(component->dev, "error: could not allocate %d bytes for PCM %d\n",
+		dev_err(component->dev,	"error: could not allocate %d bytes for PCM %d\n",
 			params_buffer_bytes(params), spcm->pcm.pcm_id);
 		return ret;
 	}
@@ -570,7 +570,6 @@ static int sof_pcm_close(struct snd_soc_component *component,
 static int sof_pcm_new(struct snd_soc_component *component,
 		       struct snd_soc_pcm_runtime *rtd)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
 	struct snd_sof_pcm *spcm;
 	struct snd_pcm *pcm = rtd->pcm;
 	struct snd_soc_tplg_stream_caps *caps;
@@ -598,7 +597,8 @@ static int sof_pcm_new(struct snd_soc_component *component,
 		caps->name, caps->buffer_size_min, caps->buffer_size_max);
 
 	snd_pcm_lib_preallocate_pages(pcm->streams[stream].substream,
-				      SNDRV_DMA_TYPE_DEV_SG, sdev->dev,
+				      SNDRV_DMA_TYPE_DEV_SG,
+				      component->dev,
 				      le32_to_cpu(caps->buffer_size_min),
 				      le32_to_cpu(caps->buffer_size_max));
 capture:
@@ -616,7 +616,8 @@ capture:
 		caps->name, caps->buffer_size_min, caps->buffer_size_max);
 
 	snd_pcm_lib_preallocate_pages(pcm->streams[stream].substream,
-				      SNDRV_DMA_TYPE_DEV_SG, sdev->dev,
+				      SNDRV_DMA_TYPE_DEV_SG,
+				      component->dev,
 				      le32_to_cpu(caps->buffer_size_min),
 				      le32_to_cpu(caps->buffer_size_max));
 

@@ -19,6 +19,9 @@
 #include <sound/pcm_params.h>
 #include "../sof-audio.h"
 #include "../ops.h"
+#include "../sof-client.h"
+#include "../sof-priv.h"
+#include "../sof-audio.h"
 #include "hda.h"
 
 #define SDnFMT_BASE(x)	((x) << 14)
