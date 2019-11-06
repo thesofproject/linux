@@ -9,11 +9,9 @@
 //
 
 #include "sof-audio.h"
-#include "ops.h"
 
 int sof_set_hw_params_upon_resume(struct device *dev)
 {
-	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	struct sof_audio_dev *sof_audio = sof_get_client_data(dev);
 	struct snd_pcm_substream *substream;
 	struct snd_sof_pcm *spcm;
@@ -38,12 +36,11 @@ int sof_set_hw_params_upon_resume(struct device *dev)
 	}
 
 	/* set internal flag for BE */
-	return snd_sof_dsp_hw_params_upon_resume(sdev);
+	return snd_sof_client_hw_params_upon_resume(dev);
 }
 
 static int sof_restore_kcontrols(struct device *dev)
 {
-	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	struct sof_audio_dev *sof_audio = sof_get_client_data(dev);
 	struct snd_sof_control *scontrol;
 	int ipc_cmd, ctrl_type;
@@ -93,7 +90,6 @@ static int sof_restore_kcontrols(struct device *dev)
 
 int sof_restore_pipelines(struct device *dev)
 {
-	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	struct sof_audio_dev *sof_audio = sof_get_client_data(dev);
 	struct snd_sof_widget *swidget;
 	struct snd_sof_route *sroute;
