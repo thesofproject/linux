@@ -225,3 +225,12 @@ int snd_sof_client_ipc_pcm_params(struct device *dev,
 	return snd_sof_ipc_pcm_params(sdev, substream, reply);
 }
 EXPORT_SYMBOL(snd_sof_client_ipc_pcm_params);
+
+struct snd_soc_acpi_mach *
+snd_sof_client_machine_driver_select(struct device *dev)
+{
+	struct snd_sof_dev *sdev = snd_sof_get_sof_dev(dev);
+
+	return snd_sof_machine_driver_select(sdev);
+}
+EXPORT_SYMBOL(snd_sof_client_machine_driver_select);

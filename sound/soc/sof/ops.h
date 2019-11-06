@@ -390,6 +390,16 @@ snd_sof_pcm_platform_pointer(struct snd_sof_dev *sdev,
 	return 0;
 }
 
+/* machine driver select */
+static inline struct snd_soc_acpi_mach *
+snd_sof_machine_driver_select(struct snd_sof_dev *sdev)
+{
+	if (sof_ops(sdev) && sof_ops(sdev)->machine_driver_select)
+		return sof_ops(sdev)->machine_driver_select(sdev);
+
+	return NULL;
+}
+
 static inline const struct snd_sof_dsp_ops
 *sof_get_ops(const struct sof_dev_desc *d,
 	     const struct sof_ops_table mach_ops[], int asize)

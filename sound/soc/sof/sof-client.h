@@ -85,4 +85,8 @@ u32 snd_sof_get_hw_info(struct device *dev);
 int snd_sof_get_num_drv(struct device *dev);
 struct snd_soc_dai_driver *snd_sof_get_dai_drv(struct device *dev);
 
+/* machine driver select */
+struct snd_soc_acpi_mach *
+snd_sof_client_machine_driver_select(struct device *dev);
+
 #endif
