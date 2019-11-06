@@ -11,7 +11,7 @@
 #include <linux/module.h>
 #include <sound/sof.h>
 #include <sound/sof/xtensa.h>
-#include "../sof-priv.h"
+#include "../sof-priv-core.h"
 
 struct xtensa_exception_cause {
 	u32 id;

@@ -12,10 +12,9 @@
 #include <sound/tlv.h>
 #include <sound/pcm_params.h>
 #include <uapi/sound/sof/tokens.h>
-#include "sof-priv.h"
 #include "sof-audio.h"
-#include "sof-client.h"
-#include "ops.h"
+#include <sound/sof/pm.h>
+#include <sound/sof/info.h>
 
 #define COMP_ID_UNASSIGNED		0xffffffff
 /*

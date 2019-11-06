@@ -14,6 +14,8 @@
 #include <sound/hda_codec.h>
 #include <sound/hdaudio_ext.h>
 #include "shim.h"
+#include "../sof-audio.h"
+#include "../sof-priv-core.h"
 
 /* PCI registers */
 #define PCI_TCSEL			0x44

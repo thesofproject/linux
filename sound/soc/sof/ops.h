@@ -16,7 +16,6 @@
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <sound/pcm.h>
-#include "sof-priv.h"
 
 #define sof_ops(sdev) \
 	((sdev)->pdata->desc->ops)

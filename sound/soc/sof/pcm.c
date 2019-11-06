@@ -13,8 +13,7 @@
 #include <linux/pm_runtime.h>
 #include <sound/pcm_params.h>
 #include <sound/sof.h>
-#include "sof-priv.h"
-#include "sof-client.h"
+#include "sof-priv-core.h"
 #include "sof-audio.h"
 
 /* Create DMA buffer page table for DSP */

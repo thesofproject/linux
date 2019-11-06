@@ -17,12 +17,10 @@
 
 #include <sound/hda_register.h>
 #include <sound/pcm_params.h>
-#include "../sof-audio.h"
-#include "../ops.h"
 #include "../sof-client.h"
-#include "../sof-priv.h"
 #include "../sof-audio.h"
 #include "hda.h"
+#include "../ops.h"
 
 #define SDnFMT_BASE(x)	((x) << 14)
 #define SDnFMT_MULT(x)	(((x) - 1) << 11)

@@ -14,7 +14,7 @@
 #include <linux/mutex.h>
 #include <linux/types.h>
 #include "sof-client.h"
-#include "sof-priv.h"
+#include "sof-priv-core.h"
 #include "sof-audio.h"
 #include "ops.h"
 

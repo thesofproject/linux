@@ -15,6 +15,7 @@
 #include <linux/module.h>
 #include <sound/sof.h>
 #include <sound/sof/xtensa.h>
+#include "../sof-priv-core.h"
 #include "../ops.h"
 #include "shim.h"
 

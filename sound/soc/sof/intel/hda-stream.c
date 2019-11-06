@@ -19,9 +19,9 @@
 #include <sound/hdaudio_ext.h>
 #include <sound/hda_register.h>
 #include <sound/sof.h>
-#include "../ops.h"
 #include "../sof-audio.h"
 #include "hda.h"
+#include "../ops.h"
 
 /*
  * set up one of BDL entries for a stream

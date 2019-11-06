@@ -10,7 +10,7 @@
 
 #include <linux/debugfs.h>
 #include <linux/sched/signal.h>
-#include "sof-priv.h"
+#include "sof-priv-core.h"
 #include "sof-client.h"
 #include "ops.h"
 

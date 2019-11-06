@@ -16,7 +16,7 @@
 #include <sound/soc-acpi-intel-match.h>
 #include <sound/sof.h>
 #include "../intel/common/soc-intel-quirks.h"
-#include "ops.h"
+#include "sof-priv-core.h"
 
 /* platform specific devices */
 #include "intel/shim.h"

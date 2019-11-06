@@ -18,8 +18,8 @@
 #include <linux/firmware.h>
 #include <sound/hdaudio_ext.h>
 #include <sound/sof.h>
-#include "../ops.h"
 #include "hda.h"
+#include "../ops.h"
 
 #define HDA_FW_BOOT_ATTEMPTS	3
 

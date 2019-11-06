@@ -16,7 +16,6 @@
  */
 
 #include <sound/hdaudio_ext.h>
-#include "../ops.h"
 #include "hda.h"
 
 static int hda_dsp_trace_prepare(struct snd_sof_dev *sdev)

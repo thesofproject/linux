@@ -16,7 +16,7 @@
 #include <sound/soc-acpi.h>
 #include <sound/soc-acpi-intel-match.h>
 #include <sound/sof.h>
-#include "ops.h"
+#include "sof-priv-core.h"
 
 /* platform specific devices */
 #include "intel/shim.h"

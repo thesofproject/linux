@@ -8,6 +8,12 @@
  * Author: Liam Girdwood <liam.r.girdwood@linux.intel.com>
  */
 
+/*
+ * This file should is exclusive for the SOF core and
+ * platform-specific code. It should not be touched by
+ * the SOF clients.
+ */
+
 #ifndef __SOUND_SOC_SOF_PRIV_H
 #define __SOUND_SOC_SOF_PRIV_H
 

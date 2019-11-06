@@ -12,7 +12,7 @@
 #include <linux/platform_device.h>
 #include <sound/soc.h>
 #include <sound/sof.h>
-#include "sof-priv.h"
+#include "sof-priv-core.h"
 
 /*
  * Register IO

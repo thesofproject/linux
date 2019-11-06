@@ -8,6 +8,8 @@
 // Author: Ranjani Sridharan <ranjani.sridharan@linux.intel.com>
 //
 
+#include <sound/sof.h>
+#include <linux/pm_runtime.h>
 #include "sof-audio.h"
 
 int sof_set_hw_params_upon_resume(struct device *dev)
@@ -345,4 +347,3 @@ struct snd_sof_dai *snd_sof_find_dai(struct snd_soc_component *scomp,
 
 	return NULL;
 }
-

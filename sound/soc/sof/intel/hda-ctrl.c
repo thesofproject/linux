@@ -17,8 +17,8 @@
 
 #include <sound/hdaudio_ext.h>
 #include <sound/hda_register.h>
-#include "../ops.h"
 #include "hda.h"
+#include "../ops.h"
 
 /*
  * HDA Operations.

@@ -15,7 +15,6 @@
  * Hardware interface for audio DSP on Apollolake and GeminiLake
  */
 
-#include "../sof-priv.h"
 #include "hda.h"
 
 static const struct snd_sof_debugfs_map apl_dsp_debugfs[] = {

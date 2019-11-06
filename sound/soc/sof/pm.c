@@ -8,8 +8,8 @@
 // Author: Liam Girdwood <liam.r.girdwood@linux.intel.com>
 //
 
+#include "sof-priv-core.h"
 #include "ops.h"
-#include "sof-priv.h"
 #include "sof-audio.h"
 
 static int sof_send_pm_ctx_ipc(struct snd_sof_dev *sdev, int cmd)

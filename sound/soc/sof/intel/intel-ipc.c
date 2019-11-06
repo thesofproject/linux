@@ -17,8 +17,7 @@
 #include <sound/pcm.h>
 #include <sound/sof/stream.h>
 
-#include "../ops.h"
-#include "../sof-priv.h"
+#include "../sof-priv-core.h"
 
 struct intel_stream {
 	size_t posn_offset;

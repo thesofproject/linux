@@ -9,6 +9,7 @@
 //
 
 #include <linux/pci.h>
+#include "sof-priv-core.h"
 #include "ops.h"
 
 static

@@ -12,6 +12,7 @@
 
 #include <linux/firmware.h>
 #include <sound/sof.h>
+#include "sof-priv-core.h"
 #include "ops.h"
 
 static int get_ext_windows(struct snd_sof_dev *sdev,

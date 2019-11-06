@@ -9,6 +9,7 @@
 //
 
 #include "sof-client.h"
+#include "sof-priv-core.h"
 #include "ops.h"
 
 void *sof_get_client_data(struct device *dev)

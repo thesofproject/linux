@@ -11,13 +11,14 @@
 #ifndef __SOUND_SOC_SOF_AUDIO_H
 #define __SOUND_SOC_SOF_AUDIO_H
 
+#include <sound/soc-topology.h>
 #include <sound/soc.h>
+#include <sound/sof.h>
 #include <sound/control.h>
 #include <sound/sof/stream.h> /* needs to be included before control.h */
 #include <sound/sof/control.h>
 #include <sound/sof/dai.h>
 #include <sound/sof/topology.h>
-#include "sof-priv.h"
 #include "sof-client.h"
 
 #define SOF_AUDIO_PCM_DRV_NAME	"sof-audio-component"
@@ -26,6 +27,9 @@
 #define SOF_BE_PCM_BASE		16
 
 #define DMA_CHAN_INVALID	0xFFFFFFFF
+
+/* time in ms for runtime suspend delay */
+#define SND_SOF_AUDIO_SUSPEND_DELAY_MS	2000
 
 /* SOF audio device */
 struct sof_audio_dev {

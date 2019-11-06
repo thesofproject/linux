@@ -15,8 +15,8 @@
  * Hardware interface for generic Intel audio DSP HDA IP
  */
 
-#include "../ops.h"
 #include "hda.h"
+#include "../ops.h"
 
 static void hda_dsp_ipc_host_done(struct snd_sof_dev *sdev)
 {

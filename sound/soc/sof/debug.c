@@ -14,7 +14,7 @@
 #include <linux/debugfs.h>
 #include <linux/io.h>
 #include <linux/pm_runtime.h>
-#include "sof-priv.h"
+#include "sof-priv-core.h"
 #include "ops.h"
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_IPC_FLOOD_TEST)
