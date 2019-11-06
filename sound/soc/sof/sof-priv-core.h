@@ -303,12 +303,6 @@ struct snd_sof_dev {
 	spinlock_t ipc_lock;	/* lock for IPC users */
 	spinlock_t hw_lock;	/* lock for HW IO access */
 
-	/*
-	 * ASoC components. plat_drv fields are set dynamically so
-	 * can't use const
-	 */
-	struct snd_soc_component_driver plat_drv;
-
 	/* power states related */
 	enum sof_d0_substate d0_substate;
 	/* flag to track if the intended power target of suspend is S0ix */
@@ -352,7 +346,6 @@ struct snd_sof_dev {
 
 	/* topology */
 	struct snd_soc_tplg_ops *tplg_ops;
-	struct snd_soc_component *component;
 	u32 enabled_cores_mask; /* keep track of enabled cores */
 
 	/* FW configuration */
@@ -405,8 +398,6 @@ int snd_sof_prepare(struct device *dev);
 void snd_sof_complete(struct device *dev);
 int snd_sof_set_d0_substate(struct snd_sof_dev *sdev,
 			    enum sof_d0_substate d0_substate);
-
-void snd_sof_new_platform_drv(struct snd_sof_dev *sdev);
 
 /*
  * Firmware loading.

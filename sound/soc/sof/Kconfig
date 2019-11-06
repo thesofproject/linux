@@ -52,6 +52,9 @@ config SND_SOC_SOF_DEVELOPER_SUPPORT
 	  Say Y if you are involved in SOF development and need this option
 	  If not, select N
 
+config SND_SOC_SOF_AUDIO
+	tristate
+
 if SND_SOC_SOF_DEVELOPER_SUPPORT
 
 config SND_SOC_SOF_NOCODEC
@@ -179,6 +182,7 @@ config SND_SOC_SOF
 	tristate
 	select SND_SOC_TOPOLOGY
 	select SND_SOC_SOF_NOCODEC if SND_SOC_SOF_NOCODEC_SUPPORT
+	select SND_SOC_SOF_AUDIO
 	help
 	  This option is not user-selectable but automagically handled by
 	  'select' statements at a higher level

@@ -97,15 +97,6 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 			 ret);
 	}
 
-	/* restore pipelines */
-	ret = sof_restore_pipelines(sdev->dev);
-	if (ret < 0) {
-		dev_err(sdev->dev,
-			"error: failed to restore pipeline after resume %d\n",
-			ret);
-		return ret;
-	}
-
 	/* notify DSP of system resume */
 	ret = sof_send_pm_ctx_ipc(sdev, SOF_IPC_PM_CTX_RESTORE);
 	if (ret < 0)
@@ -130,17 +121,6 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 
 	/* release trace */
 	snd_sof_release_trace(sdev);
-
-	/* set restore_stream for all streams during system suspend */
-	if (!runtime_suspend) {
-		ret = sof_set_hw_params_upon_resume(sdev->dev);
-		if (ret < 0) {
-			dev_err(sdev->dev,
-				"error: setting hw_params flag during suspend %d\n",
-				ret);
-			return ret;
-		}
-	}
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_ENABLE_DEBUGFS_CACHE)
 	/* cache debugfs contents during runtime suspend */

@@ -13,6 +13,8 @@
 #include "../sof-client.h"
 #include "../sof-audio.h"
 #include "hda.h"
+#include "../sof-client.h"
+#include "../sof-audio.h"
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
 

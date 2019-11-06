@@ -12,6 +12,126 @@
 #include <linux/pm_runtime.h>
 #include "sof-audio.h"
 
+static void ipc_period_elapsed(struct snd_sof_client *client, u32 msg_id)
+{
+	struct sof_audio_dev *sof_audio = client->client_data;
+	struct snd_soc_component *scomp = sof_audio->component;
+	struct snd_sof_pcm_stream *stream;
+	struct sof_ipc_stream_posn posn;
+	struct snd_sof_pcm *spcm;
+	int direction;
+
+	spcm = snd_sof_find_spcm_comp(scomp, msg_id, &direction);
+	if (!spcm) {
+		dev_err(scomp->dev,
+			"error: period elapsed for unknown stream, msg_id %d\n",
+			msg_id);
+		return;
+	}
+
+	stream = &spcm->stream[direction];
+	snd_sof_client_ipc_msg_data(scomp->dev, stream->substream, &posn,
+				    sizeof(posn));
+
+	dev_dbg(scomp->dev, "posn : host 0x%llx dai 0x%llx wall 0x%llx\n",
+		posn.host_posn, posn.dai_posn, posn.wallclock);
+
+	memcpy(&stream->posn, &posn, sizeof(posn));
+
+	/* only inform ALSA for period_wakeup mode */
+	if (!stream->substream->runtime->no_period_wakeup)
+		snd_sof_pcm_period_elapsed(stream->substream);
+}
+
+/* DSP notifies host of an XRUN within FW */
+static void ipc_xrun(struct snd_sof_client *client, u32 msg_id)
+{
+	struct sof_audio_dev *sof_audio = client->client_data;
+	struct snd_soc_component *scomp = sof_audio->component;
+	struct snd_sof_pcm_stream *stream;
+	struct sof_ipc_stream_posn posn;
+	struct snd_sof_pcm *spcm;
+	int direction;
+
+	spcm = snd_sof_find_spcm_comp(scomp, msg_id, &direction);
+	if (!spcm) {
+		dev_err(scomp->dev, "error: XRUN for unknown stream, msg_id %d\n",
+			msg_id);
+		return;
+	}
+
+	stream = &spcm->stream[direction];
+	/* TODO: figure out how to do this from core */
+	snd_sof_client_ipc_msg_data(scomp->dev, stream->substream, &posn,
+				    sizeof(posn));
+
+	dev_dbg(scomp->dev,  "posn XRUN: host %llx comp %d size %d\n",
+		posn.host_posn, posn.xrun_comp_id, posn.xrun_size);
+
+#if defined(CONFIG_SND_SOC_SOF_DEBUG_XRUN_STOP)
+	/* stop PCM on XRUN - used for pipeline debug */
+	memcpy(&stream->posn, &posn, sizeof(posn));
+	snd_pcm_stop_xrun(stream->substream);
+#endif
+}
+
+/* Audio client IPC RX callback */
+static void sof_audio_rx_message(struct snd_sof_client *client, u32 msg_cmd)
+{
+	struct platform_device *pdev = client->pdev;
+
+	/* get msg cmd type and msd id */
+	u32 msg_type = msg_cmd & SOF_CMD_TYPE_MASK;
+	u32 msg_id = SOF_IPC_MESSAGE_ID(msg_cmd);
+
+	switch (msg_type) {
+	case SOF_IPC_STREAM_POSITION:
+		ipc_period_elapsed(client, msg_id);
+		break;
+	case SOF_IPC_STREAM_TRIG_XRUN:
+		ipc_xrun(client, msg_id);
+		break;
+	default:
+		dev_dbg(&pdev->dev, "unhandled IPC message %x\n", msg_type);
+		break;
+	}
+}
+
+/*
+ * SOF Driver enumeration.
+ */
+static int sof_machine_check(struct platform_device *pdev)
+{
+	struct snd_sof_pdata *plat_data = snd_sof_get_pdata(&pdev->dev);
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_NOCODEC)
+	struct snd_soc_acpi_mach *machine;
+	int ret;
+#endif
+
+	if (plat_data->machine)
+		return 0;
+
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_NOCODEC)
+	dev_err(&pdev->dev, "error: no matching ASoC machine driver found - aborting probe\n");
+	return -ENODEV;
+#else
+	/* fallback to nocodec mode */
+	dev_warn(&pdev->dev, "No ASoC machine driver found - using nocodec\n");
+	machine = devm_kzalloc(&pdev->dev, sizeof(*machine), GFP_KERNEL);
+	if (!machine)
+		return -ENOMEM;
+
+	ret = sof_nocodec_setup(&pdev->dev, plat_data, machine,
+				plat_data->desc, plat_data->desc->ops);
+	if (ret < 0)
+		return ret;
+
+	plat_data->machine = machine;
+
+	return 0;
+#endif
+}
+
 int sof_set_hw_params_upon_resume(struct device *dev)
 {
 	struct sof_audio_dev *sof_audio = sof_get_client_data(dev);
@@ -347,3 +467,180 @@ struct snd_sof_dai *snd_sof_find_dai(struct snd_soc_component *scomp,
 
 	return NULL;
 }
+
+static int sof_destroy_pipelines(struct device *dev)
+{
+	struct sof_audio_dev *sof_audio = sof_get_client_data(dev);
+	struct snd_sof_widget *swidget;
+	struct sof_ipc_free ipc_free;
+	struct sof_ipc_reply reply;
+	int ret = 0;
+
+	list_for_each_entry_reverse(swidget, &sof_audio->widget_list, list) {
+		memset(&ipc_free, 0, sizeof(ipc_free));
+
+		/* skip if there is no private data */
+		if (!swidget->private)
+			continue;
+
+		/* configure ipc free message */
+		ipc_free.hdr.size = sizeof(ipc_free);
+		ipc_free.hdr.cmd = SOF_IPC_GLB_TPLG_MSG;
+		ipc_free.id = swidget->comp_id;
+
+		switch (swidget->id) {
+		case snd_soc_dapm_scheduler:
+			ipc_free.hdr.cmd |= SOF_IPC_TPLG_PIPE_FREE;
+			break;
+		case snd_soc_dapm_buffer:
+			ipc_free.hdr.cmd |= SOF_IPC_TPLG_BUFFER_FREE;
+			break;
+		default:
+			ipc_free.hdr.cmd |= SOF_IPC_TPLG_COMP_FREE;
+			break;
+		}
+		ret = sof_client_tx_message(dev, ipc_free.hdr.cmd,
+					    &ipc_free, sizeof(ipc_free), &reply,
+					    sizeof(reply));
+		if (ret < 0) {
+			dev_err(dev,
+				"error: failed to free widget type %d with ID: %d\n",
+				swidget->widget->id, swidget->comp_id);
+
+			return ret;
+		}
+	}
+
+	return ret;
+}
+
+static int sof_audio_resume(struct device *dev)
+{
+	return sof_restore_pipelines(dev);
+}
+
+static int sof_audio_suspend(struct device *dev)
+{
+	return sof_set_hw_params_upon_resume(dev);
+}
+
+static int sof_audio_runtime_suspend(struct device *dev)
+{
+	return sof_destroy_pipelines(dev);
+}
+
+static const struct dev_pm_ops sof_audio_pm = {
+	SET_SYSTEM_SLEEP_PM_OPS(sof_audio_suspend, sof_audio_resume)
+	SET_RUNTIME_PM_OPS(sof_audio_runtime_suspend, sof_audio_resume, NULL)
+};
+
+static int sof_audio_probe(struct platform_device *pdev)
+{
+	struct snd_sof_client *audio_client = dev_get_platdata(&pdev->dev);
+	struct snd_sof_pdata *plat_data = snd_sof_get_pdata(&pdev->dev);
+	struct snd_soc_acpi_mach *machine =
+		(struct snd_soc_acpi_mach *)plat_data->machine;
+	struct sof_audio_dev *sof_audio;
+	const char *drv_name;
+	int size;
+	int ret;
+
+	/* create SOF audio device */
+	sof_audio = devm_kzalloc(&pdev->dev, sizeof(*sof_audio), GFP_KERNEL);
+	if (!sof_audio)
+		return -ENOMEM;
+
+	INIT_LIST_HEAD(&sof_audio->pcm_list);
+	INIT_LIST_HEAD(&sof_audio->kcontrol_list);
+	INIT_LIST_HEAD(&sof_audio->widget_list);
+	INIT_LIST_HEAD(&sof_audio->dai_list);
+	INIT_LIST_HEAD(&sof_audio->route_list);
+
+	audio_client->client_data = sof_audio;
+
+	/* set IPC RX callback */
+	audio_client->sof_client_rx_cb = sof_audio_rx_message;
+
+	snd_sof_ipc_rx_register(audio_client, &pdev->dev);
+
+	/* check machine info */
+	ret = sof_machine_check(pdev);
+	if (ret < 0) {
+		dev_err(&pdev->dev, "error: failed to get machine info %d\n",
+			ret);
+		return ret;
+	}
+
+	/* set platform name */
+	machine->mach_params.platform = dev_name(&pdev->dev);
+	plat_data->platform = dev_name(&pdev->dev);
+
+	/* set up platform component driver */
+	snd_sof_new_platform_drv(sof_audio, plat_data);
+
+	/* now register audio DSP platform driver and dai */
+	ret = devm_snd_soc_register_component(&pdev->dev, &sof_audio->plat_drv,
+					      snd_sof_get_dai_drv(&pdev->dev),
+					      snd_sof_get_num_drv(&pdev->dev));
+	if (ret < 0) {
+		dev_err(&pdev->dev,
+			"error: failed to register DSP DAI driver %d\n", ret);
+		return ret;
+	}
+
+	drv_name = plat_data->machine->drv_name;
+	size = sizeof(*plat_data->machine);
+
+	/* register machine driver, pass machine info as pdata */
+	plat_data->pdev_mach =
+		platform_device_register_data(&pdev->dev, drv_name,
+					      PLATFORM_DEVID_NONE,
+					      (const void *)machine, size);
+
+	if (IS_ERR(plat_data->pdev_mach)) {
+		ret = PTR_ERR(plat_data->pdev_mach);
+		return ret;
+	}
+
+	dev_dbg(&pdev->dev, "created machine %s\n",
+		dev_name(&plat_data->pdev_mach->dev));
+
+	/* enable runtime PM */
+	pm_runtime_set_autosuspend_delay(&pdev->dev,
+					 SND_SOF_AUDIO_SUSPEND_DELAY_MS);
+	pm_runtime_use_autosuspend(&pdev->dev);
+	pm_runtime_set_active(&pdev->dev);
+	pm_runtime_enable(&pdev->dev);
+	pm_runtime_mark_last_busy(&pdev->dev);
+	pm_runtime_put_autosuspend(&pdev->dev);
+
+	return 0;
+}
+
+static int sof_audio_remove(struct platform_device *pdev)
+{
+	struct snd_sof_pdata *pdata = snd_sof_get_pdata(&pdev->dev);
+
+	pm_runtime_disable(&pdev->dev);
+
+	if (!IS_ERR_OR_NULL(pdata->pdev_mach))
+		platform_device_unregister(pdata->pdev_mach);
+
+	return 0;
+}
+
+static struct platform_driver sof_audio_driver = {
+	.driver = {
+		.name = "sof-audio",
+		.pm = &sof_audio_pm,
+	},
+
+	.probe = sof_audio_probe,
+	.remove = sof_audio_remove,
+};
+
+module_platform_driver(sof_audio_driver);
+
+MODULE_DESCRIPTION("SOF Audio Client Platform Driver");
+MODULE_LICENSE("Dual BSD/GPL");
+MODULE_ALIAS("platform:sof-audio");

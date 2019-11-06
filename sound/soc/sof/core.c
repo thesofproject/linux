@@ -14,9 +14,37 @@
 #include <sound/soc.h>
 #include <sound/sof.h>
 #include "sof-priv-core.h"
-#include "sof-audio.h"
 #include "sof-client.h"
 #include "ops.h"
+
+static struct snd_sof_client *sof_client_dev_register(struct snd_sof_dev *sdev,
+						      const char *name)
+{
+	struct snd_sof_client *client;
+
+	client = devm_kzalloc(sdev->dev, sizeof(*client), GFP_KERNEL);
+	if (!client)
+		return NULL;
+
+	/* register client platform device */
+	client->pdev = platform_device_register_data(sdev->dev, name,
+						     PLATFORM_DEVID_NONE,
+						     client, sizeof(*client));
+	if (IS_ERR(client->pdev)) {
+		dev_err(sdev->dev, "error: Failed to register %s\n", name);
+		return NULL;
+	}
+
+	dev_dbg(sdev->dev, "%s client registered\n", name);
+
+	return client;
+}
+
+static void sof_client_dev_unregister(struct snd_sof_client *client)
+{
+	if (!IS_ERR_OR_NULL(client->pdev))
+		platform_device_unregister(client->pdev);
+}
 
 /* see SOF_DBG_ flags */
 int sof_core_debug;
@@ -167,47 +195,9 @@ int snd_sof_create_page_table(struct device *dev,
 }
 EXPORT_SYMBOL(snd_sof_create_page_table);
 
-/*
- * SOF Driver enumeration.
- */
-static int sof_machine_check(struct snd_sof_dev *sdev)
-{
-	struct snd_sof_pdata *plat_data = sdev->pdata;
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_NOCODEC)
-	struct snd_soc_acpi_mach *machine;
-	int ret;
-#endif
-
-	if (plat_data->machine)
-		return 0;
-
-#if !IS_ENABLED(CONFIG_SND_SOC_SOF_NOCODEC)
-	dev_err(sdev->dev, "error: no matching ASoC machine driver found - aborting probe\n");
-	return -ENODEV;
-#else
-	/* fallback to nocodec mode */
-	dev_warn(sdev->dev, "No ASoC machine driver found - using nocodec\n");
-	machine = devm_kzalloc(sdev->dev, sizeof(*machine), GFP_KERNEL);
-	if (!machine)
-		return -ENOMEM;
-
-	ret = sof_nocodec_setup(sdev->dev, plat_data, machine,
-				plat_data->desc, plat_data->desc->ops);
-	if (ret < 0)
-		return ret;
-
-	plat_data->machine = machine;
-
-	return 0;
-#endif
-}
-
 static int sof_probe_continue(struct snd_sof_dev *sdev)
 {
 	struct snd_sof_pdata *plat_data = sdev->pdata;
-	const char *drv_name;
-	const void *mach;
-	int size;
 	int ret;
 
 	/* probe the DSP hardware */
@@ -216,17 +206,6 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 		dev_err(sdev->dev, "error: failed to probe DSP %d\n", ret);
 		return ret;
 	}
-
-	/* check machine info */
-	ret = sof_machine_check(sdev);
-	if (ret < 0) {
-		dev_err(sdev->dev, "error: failed to get machine info %d\n",
-			ret);
-		goto dbg_err;
-	}
-
-	/* set up platform component driver */
-	snd_sof_new_platform_drv(sdev);
 
 	/* register any debug/trace capabilities */
 	ret = snd_sof_dbg_init(sdev);
@@ -283,32 +262,13 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	/* hereafter all FW boot flows are for PM reasons */
 	sdev->first_boot = false;
 
-	/* now register audio DSP platform driver and dai */
-	ret = devm_snd_soc_register_component(sdev->dev, &sdev->plat_drv,
-					      sof_ops(sdev)->drv,
-					      sof_ops(sdev)->num_drv);
-	if (ret < 0) {
-		dev_err(sdev->dev,
-			"error: failed to register DSP DAI driver %d\n", ret);
-		goto fw_run_err;
-	}
-
-	drv_name = plat_data->machine->drv_name;
-	mach = (const void *)plat_data->machine;
-	size = sizeof(*plat_data->machine);
-
-	/* register machine driver, pass machine info as pdata */
-	plat_data->pdev_mach =
-		platform_device_register_data(sdev->dev, drv_name,
-					      PLATFORM_DEVID_NONE, mach, size);
-
-	if (IS_ERR(plat_data->pdev_mach)) {
-		ret = PTR_ERR(plat_data->pdev_mach);
-		goto fw_run_err;
-	}
-
-	dev_dbg(sdev->dev, "created machine %s\n",
-		dev_name(&plat_data->pdev_mach->dev));
+	/*
+	 * Register audio client.
+	 * This can fail but errors cannot be propagated.
+	 */
+	sdev->sof_audio = sof_client_dev_register(sdev, "sof-audio");
+	if (!sdev->sof_audio)
+		dev_warn(sdev->dev, "sof-audio client failed to register\n");
 
 	/*
 	 * Some platforms in SOF, ex: BYT, may not have their platform PM
@@ -340,7 +300,6 @@ dbg_err:
 	 * They will be released with an explicit call to
 	 * snd_sof_device_remove() when the PCI/ACPI device is removed
 	 */
-
 fw_run_err:
 fw_load_err:
 ipc_err:
@@ -366,7 +325,6 @@ static void sof_probe_work(struct work_struct *work)
 
 int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 {
-	struct sof_audio_dev *sof_audio;
 	struct snd_sof_dev *sdev;
 
 	sdev = devm_kzalloc(dev, sizeof(*sdev), GFP_KERNEL);
@@ -391,26 +349,7 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 	    !sof_ops(sdev)->fw_ready)
 		return -EINVAL;
 
-	/* create SOF audio client */
-	sdev->sof_audio = devm_kzalloc(sdev->dev, sizeof(*sdev->sof_audio),
-				       GFP_KERNEL);
-	if (!sdev->sof_audio)
-		return -ENOMEM;
-
-	/* create SOF audio client data */
-	sof_audio = devm_kzalloc(sdev->dev, sizeof(*sof_audio), GFP_KERNEL);
-	if (!sof_audio)
-		return -ENOMEM;
-
-	INIT_LIST_HEAD(&sof_audio->pcm_list);
-	INIT_LIST_HEAD(&sof_audio->kcontrol_list);
-	INIT_LIST_HEAD(&sof_audio->widget_list);
-	INIT_LIST_HEAD(&sof_audio->dai_list);
-	INIT_LIST_HEAD(&sof_audio->route_list);
-
-	/* set audio client data */
-	sdev->sof_audio->client_data = sof_audio;
-
+	INIT_LIST_HEAD(&sdev->ipc_rx_list);
 	spin_lock_init(&sdev->ipc_lock);
 	spin_lock_init(&sdev->hw_lock);
 
@@ -444,25 +383,14 @@ int snd_sof_device_remove(struct device *dev)
 	if (IS_ENABLED(CONFIG_SND_SOC_SOF_PROBE_WORK_QUEUE))
 		cancel_work_sync(&sdev->probe_work);
 
+	/* Unregister audio client device */
+	if (sdev->sof_audio)
+		sof_client_dev_unregister(sdev->sof_audio);
+
 	snd_sof_fw_unload(sdev);
 	snd_sof_ipc_free(sdev);
 	snd_sof_free_debug(sdev);
 	snd_sof_free_trace(sdev);
-
-	/*
-	 * Unregister machine driver. This will unbind the snd_card which
-	 * will remove the component driver and unload the topology
-	 * before freeing the snd_card.
-	 */
-	if (!IS_ERR_OR_NULL(pdata->pdev_mach))
-		platform_device_unregister(pdata->pdev_mach);
-
-	/*
-	 * Unregistering the machine driver results in unloading the topology.
-	 * Some widgets, ex: scheduler, attempt to power down the core they are
-	 * scheduled on, when they are unloaded. Therefore, the DSP must be
-	 * removed only after the topology has been unloaded.
-	 */
 	snd_sof_remove(sdev);
 
 	/* release firmware */

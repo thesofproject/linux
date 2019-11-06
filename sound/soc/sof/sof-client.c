@@ -14,15 +14,15 @@
 
 void *sof_get_client_data(struct device *dev)
 {
-	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
+	struct snd_sof_client *client = dev_get_platdata(dev);
 
-	return sdev->sof_audio->client_data;
+	return client->client_data;
 }
 EXPORT_SYMBOL(sof_get_client_data);
 
 struct snd_sof_dev *snd_sof_get_sof_dev(struct device *dev)
 {
-	return dev_get_drvdata(dev);
+	return dev_get_drvdata(dev->parent);
 }
 EXPORT_SYMBOL(snd_sof_get_sof_dev);
 

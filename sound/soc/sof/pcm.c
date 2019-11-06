@@ -13,7 +13,6 @@
 #include <linux/pm_runtime.h>
 #include <sound/pcm_params.h>
 #include <sound/sof.h>
-#include "sof-priv-core.h"
 #include "sof-audio.h"
 
 /* Create DMA buffer page table for DSP */
@@ -718,13 +717,13 @@ static int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 
 static int sof_pcm_probe(struct snd_soc_component *component)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct sof_audio_dev *sof_audio = sof_get_client_data(component->dev);
 	struct snd_sof_pdata *plat_data = snd_sof_get_pdata(component->dev);
 	const char *tplg_filename;
 	int ret;
 
 	/* load the default topology */
-	sdev->component = component;
+	sof_audio->component = component;
 
 	tplg_filename = devm_kasprintf(component->dev, GFP_KERNEL,
 				       "%s/%s",
@@ -749,10 +748,10 @@ static void sof_pcm_remove(struct snd_soc_component *component)
 	snd_soc_tplg_component_remove(component, SND_SOC_TPLG_INDEX_ALL);
 }
 
-void snd_sof_new_platform_drv(struct snd_sof_dev *sdev)
+void snd_sof_new_platform_drv(struct sof_audio_dev *sof_audio,
+			      struct snd_sof_pdata *plat_data)
 {
-	struct snd_soc_component_driver *pd = &sdev->plat_drv;
-	struct snd_sof_pdata *plat_data = sdev->pdata;
+	struct snd_soc_component_driver *pd = &sof_audio->plat_drv;
 	const char *drv_name;
 
 	drv_name = plat_data->machine->drv_name;
