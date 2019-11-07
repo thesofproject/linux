@@ -7,6 +7,7 @@
 #include <linux/platform_device.h>
 #include <sound/memalloc.h>
 #include <sound/soc.h>
+#include <sound/soc-acpi.h>
 #include <sound/sof/stream.h>
 
 #ifndef __SOUND_SOC_SOF_CLIENT_H
@@ -88,5 +89,8 @@ struct snd_soc_dai_driver *snd_sof_get_dai_drv(struct device *dev);
 /* machine driver select */
 struct snd_soc_acpi_mach *
 snd_sof_client_machine_driver_select(struct device *dev);
+void
+snd_sof_client_set_mach_params(struct device *dev,
+			       struct snd_soc_acpi_mach_params *mach_params);
 
 #endif

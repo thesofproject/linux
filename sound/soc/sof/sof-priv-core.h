@@ -212,6 +212,9 @@ struct snd_sof_dsp_ops {
 	struct snd_soc_acpi_mach *
 		(*machine_driver_select)(struct snd_sof_dev *sdev); /* optional */
 
+	void (*set_mach_params)(struct snd_sof_dev *sdev,
+				struct snd_soc_acpi_mach_params *mach_params); /* optional */
+
 	/* DAI ops */
 	struct snd_soc_dai_driver *drv;
 	int num_drv;

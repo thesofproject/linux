@@ -110,6 +110,16 @@ struct snd_soc_dai_driver *snd_sof_get_dai_drv(struct device *dev)
 }
 EXPORT_SYMBOL(snd_sof_get_dai_drv);
 
+void
+snd_sof_client_set_mach_params(struct device *dev,
+			       struct snd_soc_acpi_mach_params *mach_params)
+{
+	struct snd_sof_dev *sdev = snd_sof_get_sof_dev(dev);
+
+	snd_sof_set_mach_params(sdev, mach_params);
+}
+EXPORT_SYMBOL(snd_sof_client_set_mach_params);
+
 inline int
 snd_sof_client_hw_params_upon_resume(struct device *dev)
 {

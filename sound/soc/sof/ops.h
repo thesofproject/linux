@@ -400,6 +400,14 @@ snd_sof_machine_driver_select(struct snd_sof_dev *sdev)
 	return NULL;
 }
 
+static inline void
+snd_sof_set_mach_params(struct snd_sof_dev *sdev,
+			struct snd_soc_acpi_mach_params *mach_params)
+{
+	if (sof_ops(sdev) && sof_ops(sdev)->set_mach_params)
+		sof_ops(sdev)->set_mach_params(sdev, mach_params);
+}
+
 static inline const struct snd_sof_dsp_ops
 *sof_get_ops(const struct sof_dev_desc *d,
 	     const struct sof_ops_table mach_ops[], int asize)

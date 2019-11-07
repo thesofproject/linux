@@ -365,6 +365,7 @@ struct snd_soc_acpi_mach *hda_machine_driver_select(struct snd_sof_dev *sdev)
 		 */
 		if (codec_num <= 2 && HDA_IDISP_CODEC(bus->codec_mask)) {
 			hda_mach = snd_soc_acpi_intel_hda_machines;
+			sof_mach_set_machine(mach, hda_mach);
 
 			dev_info(bus->dev, "using HDA machine driver %s now\n",
 				 hda_mach->drv_name);
@@ -373,11 +374,24 @@ struct snd_soc_acpi_mach *hda_machine_driver_select(struct snd_sof_dev *sdev)
 
 	return hda_mach;
 }
+
+void hda_set_mach_params(struct snd_sof_dev *sdev,
+			 struct snd_soc_acpi_mach_params *mach_params)
+{
+	struct hdac_bus *bus = sof_to_bus(sdev);
+
+	mach_params->codec_mask = bus->codec_mask;
+	mach_params->common_hdmi_codec_drv = hda_codec_use_common_hdmi;
+}
 #else
 struct snd_soc_acpi_mach *hda_machine_driver_select(struct snd_sof_dev *sdev)
 {
 	return NULL;
 }
+
+void hda_set_mach_params(struct snd_sof_dev *sdev,
+			 struct snd_soc_acpi_mach_params *mach_params)
+{}
 #endif
 
 static int hda_init_caps(struct snd_sof_dev *sdev)
