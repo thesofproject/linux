@@ -244,3 +244,13 @@ snd_sof_client_machine_driver_select(struct device *dev)
 	return snd_sof_machine_driver_select(sdev);
 }
 EXPORT_SYMBOL(snd_sof_client_machine_driver_select);
+
+const char *
+snd_sof_client_fixup_tplg_filename(struct device *dev,
+				   const char *tplg_filename)
+{
+	struct snd_sof_dev *sdev = snd_sof_get_sof_dev(dev);
+
+	return snd_sof_fixup_tplg_filename(sdev, tplg_filename);
+}
+EXPORT_SYMBOL(snd_sof_client_fixup_tplg_filename);

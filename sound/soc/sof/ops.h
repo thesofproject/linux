@@ -408,6 +408,15 @@ snd_sof_set_mach_params(struct snd_sof_dev *sdev,
 		sof_ops(sdev)->set_mach_params(sdev, mach_params);
 }
 
+static inline const char *
+snd_sof_fixup_tplg_filename(struct snd_sof_dev *sdev, const char *tplg_filename)
+{
+	if (sof_ops(sdev) && sof_ops(sdev)->fixup_tplg_filename)
+		return sof_ops(sdev)->fixup_tplg_filename(sdev, tplg_filename);
+
+	return NULL;
+}
+
 static inline const struct snd_sof_dsp_ops
 *sof_get_ops(const struct sof_dev_desc *d,
 	     const struct sof_ops_table mach_ops[], int asize)

@@ -93,4 +93,8 @@ void
 snd_sof_client_set_mach_params(struct device *dev,
 			       struct snd_soc_acpi_mach_params *mach_params);
 
+const char *
+snd_sof_client_fixup_tplg_filename(struct device *dev,
+				   const char *tplg_filename);
+
 #endif

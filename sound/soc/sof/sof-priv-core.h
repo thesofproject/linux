@@ -215,6 +215,9 @@ struct snd_sof_dsp_ops {
 	void (*set_mach_params)(struct snd_sof_dev *sdev,
 				struct snd_soc_acpi_mach_params *mach_params); /* optional */
 
+	const char * (*fixup_tplg_filename)(struct snd_sof_dev *sdev,
+					    const char *tplg_filename); /* optional */
+
 	/* DAI ops */
 	struct snd_soc_dai_driver *drv;
 	int num_drv;

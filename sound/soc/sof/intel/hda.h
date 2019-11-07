@@ -614,6 +614,8 @@ extern struct snd_soc_dai_driver skl_dai[];
 struct snd_soc_acpi_mach *hda_machine_driver_select(struct snd_sof_dev *sdev);
 void hda_set_mach_params(struct snd_sof_dev *sdev,
 			 struct snd_soc_acpi_mach_params *mach_params);
+const char *
+hda_fixup_tplg_filename(struct snd_sof_dev *sdev, const char *tplg_filename);
 
 /*
  * Platform Specific HW abstraction Ops.

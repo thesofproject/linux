@@ -365,7 +365,6 @@ struct snd_soc_acpi_mach *hda_machine_driver_select(struct snd_sof_dev *sdev)
 		 */
 		if (codec_num <= 2 && HDA_IDISP_CODEC(bus->codec_mask)) {
 			hda_mach = snd_soc_acpi_intel_hda_machines;
-			sof_mach_set_machine(mach, hda_mach);
 
 			dev_info(bus->dev, "using HDA machine driver %s now\n",
 				 hda_mach->drv_name);
@@ -373,6 +372,53 @@ struct snd_soc_acpi_mach *hda_machine_driver_select(struct snd_sof_dev *sdev)
 	}
 
 	return hda_mach;
+}
+
+const char *
+hda_fixup_tplg_filename(struct snd_sof_dev *sdev, const char *tplg_filename)
+{
+	struct hdac_bus *bus = sof_to_bus(sdev);
+	const char *idisp_str;
+	const char *dmic_str;
+	int dmic_num;
+	int codec_num = 0;
+	int i;
+
+	for (i = 0; i < HDA_MAX_CODECS; i++) {
+		if (bus->codec_mask & (1 << i))
+			codec_num++;
+	}
+
+	if (codec_num <= 2 && HDA_IDISP_CODEC(bus->codec_mask)) {
+		if (codec_num == 1)
+			idisp_str = "-idisp";
+		else
+			idisp_str = "";
+
+		/* first check NHLT for DMICs */
+		dmic_num = check_nhlt_dmic(sdev);
+
+		/* allow for module parameter override */
+		if (hda_dmic_num != -1)
+			dmic_num = hda_dmic_num;
+
+		switch (dmic_num) {
+		case 2:
+			dmic_str = "-2ch";
+			break;
+		case 4:
+			dmic_str = "-4ch";
+			break;
+		default:
+			dmic_num = 0;
+			dmic_str = "";
+			break;
+		}
+		return fixup_tplg_name(sdev, tplg_filename,
+				       idisp_str, dmic_str);
+	}
+
+	return NULL;
 }
 
 void hda_set_mach_params(struct snd_sof_dev *sdev,
@@ -392,6 +438,12 @@ struct snd_soc_acpi_mach *hda_machine_driver_select(struct snd_sof_dev *sdev)
 void hda_set_mach_params(struct snd_sof_dev *sdev,
 			 struct snd_soc_acpi_mach_params *mach_params)
 {}
+
+const char *
+hda_fixup_tplg_filename(struct snd_sof_dev *sdev, const char *tplg_filename)
+{
+	return NULL;
+}
 #endif
 
 static int hda_init_caps(struct snd_sof_dev *sdev)
