@@ -337,6 +337,47 @@ static const char *fixup_tplg_name(struct snd_sof_dev *sdev,
 	return tplg_filename;
 }
 
+struct snd_soc_acpi_mach *hda_machine_driver_select(struct snd_sof_dev *sdev)
+{
+	struct hdac_bus *bus = sof_to_bus(sdev);
+	struct snd_soc_acpi_mach *hda_mach = NULL;
+	int codec_num = 0;
+	int i;
+
+	/* codec detection */
+	if (!bus->codec_mask) {
+		dev_info(bus->dev, "no hda codecs found!\n");
+	} else {
+		dev_info(bus->dev, "hda codecs found, mask %lx\n",
+			 bus->codec_mask);
+
+		for (i = 0; i < HDA_MAX_CODECS; i++) {
+			if (bus->codec_mask & (1 << i))
+				codec_num++;
+		}
+
+		/*
+		 * If no machine driver is found, then:
+		 *
+		 * hda machine driver is used if :
+		 * 1. there is one HDMI codec and one external HDAudio codec
+		 * 2. only HDMI codec
+		 */
+		if (codec_num <= 2 && HDA_IDISP_CODEC(bus->codec_mask)) {
+			hda_mach = snd_soc_acpi_intel_hda_machines;
+
+			dev_info(bus->dev, "using HDA machine driver %s now\n",
+				 hda_mach->drv_name);
+		}
+	}
+
+	return hda_mach;
+}
+#else
+struct snd_soc_acpi_mach *hda_machine_driver_select(struct snd_sof_dev *sdev)
+{
+	return NULL;
+}
 #endif
 
 static int hda_init_caps(struct snd_sof_dev *sdev)
