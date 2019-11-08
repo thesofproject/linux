@@ -1241,6 +1241,10 @@ int sdw_cdns_suspend(struct sdw_cdns *cdns)
 	cdns_updatel(cdns, CDNS_MCP_CONTROL, CDNS_MCP_CONTROL_BLOCK_WAKEUP,
 		     CDNS_MCP_CONTROL_BLOCK_WAKEUP);
 
+	cdns_updatel(cdns, CDNS_MCP_CONTROL, CDNS_MCP_CONTROL_CMD_ACCEPT, 0);
+
+	cdns_update_config(cdns);
+
 	/* Prepare slaves for clock stop */
 	ret = sdw_bus_prep_clk_stop(&cdns->bus);
 	if (ret < 0)
@@ -1278,6 +1282,53 @@ bool sdw_cdns_check_resume_status(struct sdw_cdns *cdns)
 }
 EXPORT_SYMBOL(sdw_cdns_check_resume_status);
 
+/**
+ * sdw_cdns_resume: Cadence PM resume routine
+ *
+ * @cdns: Cadence instance
+ */
+int sdw_cdns_resume(struct sdw_cdns *cdns)
+{
+	int ret;
+
+	/* Disable block wakeup */
+	cdns_updatel(cdns, CDNS_MCP_CONTROL, CDNS_MCP_CONTROL_BLOCK_WAKEUP, 0);
+
+	cdns_updatel(cdns, CDNS_MCP_CONTROL, CDNS_MCP_CONTROL_CLK_STOP_CLR,
+		     CDNS_MCP_CONTROL_CLK_STOP_CLR);
+
+	cdns_updatel(cdns, CDNS_MCP_CONTROL, CDNS_MCP_CONTROL_CMD_ACCEPT,
+		     CDNS_MCP_CONTROL_CMD_ACCEPT);
+
+	/* flush command FIFOs */
+	cdns_updatel(cdns, CDNS_MCP_CONTROL, CDNS_MCP_CONTROL_CMD_RST,
+		     CDNS_MCP_CONTROL_CMD_RST);
+
+	/* Set SSP interval to default value */
+	cdns_writel(cdns, CDNS_MCP_SSP_CTRL0, CDNS_DEFAULT_SSP_INTERVAL);
+	cdns_writel(cdns, CDNS_MCP_SSP_CTRL1, CDNS_DEFAULT_SSP_INTERVAL);
+
+	/* enable bus operations with clock and data */
+	cdns_updatel(cdns, CDNS_MCP_CONFIG,
+		     CDNS_MCP_CONFIG_OP,
+		     CDNS_MCP_CONFIG_OP_NORMAL);
+
+	/* commit changes */
+	cdns_update_config(cdns);
+
+	ret = cdns_clear_bit(cdns, CDNS_MCP_STAT, CDNS_MCP_STAT_CLK_STOP);
+	if (ret < 0) {
+		dev_err(cdns->dev, "Clear clock stop failed\n");
+		return ret;
+	}
+
+	ret = sdw_bus_exit_clk_stop(&cdns->bus);
+	if (ret < 0)
+		dev_err(cdns->dev, "Unable to exit clock stop during resume\n");
+
+	return ret;
+}
+EXPORT_SYMBOL(sdw_cdns_resume);
 
 /**
  * sdw_cdns_probe() - Cadence probe routine
