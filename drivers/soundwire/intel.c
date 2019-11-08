@@ -408,6 +408,39 @@ static void intel_shim_wake(struct sdw_intel *sdw, bool wake_enable)
 	}
 }
 
+void sdw_intel_jack_detect(struct sdw_intel_ctx *ctx)
+{
+	struct sdw_intel_link_res *link;
+	struct sdw_master_device *md;
+	struct sdw_slave *slave;
+	struct sdw_bus *bus;
+
+	list_for_each_entry(link, &ctx->link_list, list) {
+		struct sdw_intel *sdw;
+		u16 wake_sts;
+
+		md = link->md;
+		bus = &link->cdns->bus;
+		sdw = cdns_to_intel(link->cdns);
+		wake_sts = intel_readw(sdw->link_res->shim, SDW_SHIM_WAKESTS);
+
+		if (!(wake_sts & BIT(sdw->instance)))
+			continue;
+
+		/*
+		 * wake up master and slave so that slave can notify master
+		 * the jack event and let codec driver check jack status
+		 */
+		list_for_each_entry(slave, &bus->slaves, node) {
+			if (slave->prop.wake_capable) {
+				pm_runtime_get(&slave->dev);
+				pm_runtime_put(&slave->dev);
+			}
+		}
+	}
+}
+EXPORT_SYMBOL(sdw_intel_jack_detect);
+
 static int intel_link_power_down(struct sdw_intel *sdw)
 {
 	int link_control, spa_mask, cpa_mask, ret;
