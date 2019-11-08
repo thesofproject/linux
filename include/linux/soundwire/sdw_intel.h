@@ -94,7 +94,9 @@ struct sdw_intel_ctx {
 	void __iomem *mmio_base;
 	u32 link_mask;
 	acpi_handle handle;
+	int irq;
 	struct sdw_intel_link_res *links;
+	struct list_head link_list;
 };
 
 /*

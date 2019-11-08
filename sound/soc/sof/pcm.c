@@ -356,6 +356,9 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 			return 0;
 		}
 
+		dev_dbg(sdev->dev, "pcm: trigger resume stream %d dir %d cmd %d\n",
+			spcm->pcm.pcm_id, substream->stream, cmd);
+
 		/* set up hw_params */
 		ret = sof_pcm_prepare(component, substream);
 		if (ret < 0) {
@@ -389,6 +392,10 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 			spcm->stream[substream->stream].suspend_ignored = true;
 			return 0;
 		}
+
+		dev_dbg(sdev->dev, "pcm: trigger suspend stream %d dir %d cmd %d\n",
+			spcm->pcm.pcm_id, substream->stream, cmd);
+
 		/* fallthrough */
 	case SNDRV_PCM_TRIGGER_STOP:
 		stream.hdr.cmd |= SOF_IPC_STREAM_TRIG_STOP;
