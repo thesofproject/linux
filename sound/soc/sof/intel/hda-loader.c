@@ -410,6 +410,8 @@ int hda_dsp_post_fw_run(struct snd_sof_dev *sdev)
 
 	hda_sdw_int_enable(sdev, true);
 
+	hda_sdw_jack_detect(sdev);
+
 	/* re-enable clock gating and power gating */
 	return hda_dsp_ctrl_clock_power_gating(sdev, true);
 }

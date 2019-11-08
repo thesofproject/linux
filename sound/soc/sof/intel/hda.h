@@ -620,6 +620,7 @@ int hda_dsp_trace_trigger(struct snd_sof_dev *sdev, int cmd);
 
 int hda_sdw_startup(struct snd_sof_dev *sdev);
 void hda_sdw_int_enable(struct snd_sof_dev *sdev, bool enable);
+void hda_sdw_jack_detect(struct snd_sof_dev *sdev);
 
 #else
 
@@ -644,6 +645,10 @@ static inline int hda_sdw_exit(struct snd_sof_dev *sdev)
 }
 
 static inline void hda_sdw_int_enable(struct snd_sof_dev *sdev, bool enable)
+{
+}
+
+static void hda_sdw_jack_detect(struct snd_sof_dev *sdev)
 {
 }
 

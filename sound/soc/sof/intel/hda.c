@@ -131,6 +131,17 @@ static int hda_sdw_acpi_scan(struct snd_sof_dev *sdev)
 	return 0;
 }
 
+void hda_sdw_jack_detect(struct snd_sof_dev *sdev)
+{
+	struct sof_intel_hda_dev *hdev;
+
+	hdev = sdev->pdata->hw_pdata;
+	if (!hdev->sdw)
+		return;
+
+	sdw_intel_jack_detect(hdev->sdw);
+}
+
 static int hda_sdw_probe(struct snd_sof_dev *sdev)
 {
 	struct sof_intel_hda_dev *hdev;
