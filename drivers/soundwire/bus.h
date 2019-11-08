@@ -207,6 +207,11 @@ static inline int sdw_update(struct sdw_slave *slave, u32 addr, u8 mask, u8 val)
 	return sdw_write(slave, addr, tmp);
 }
 
-void sdw_clear_slave_status(struct sdw_bus *bus);
+/* possible requests to force Slaves to become unattached */
+#define SDW_UNATTACH_REQUEST_MASTER_RESET	BIT(0)
+#define SDW_UNATTACH_REQUEST_MASTER_RESUME	BIT(1)
+#define SDW_UNATTACH_REQUEST_MASTER_PM_RESUME	BIT(2)
+
+void sdw_clear_slave_status(struct sdw_bus *bus, int request);
 
 #endif /* __SDW_BUS_H */
