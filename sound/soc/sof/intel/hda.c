@@ -82,6 +82,43 @@ static const struct hda_dsp_msg_code hda_dsp_rom_msg[] = {
 	{HDA_DSP_ROM_NULL_FW_ENTRY,	"error: null FW entry point"},
 };
 
+static const struct hda_dsp_msg_code hda_skl_dsp_rom_msg[] = {
+	{SKL_DSP_ROM_ERROR | SKL_DSP_ROM_INIT,
+		"error: init failed"},
+	{SKL_DSP_ROM_ERROR | SKL_DSP_ROM_INIT_DONE,
+		"error: init completion failed"},
+	{SKL_DSP_ROM_ERROR | SKL_DSP_ROM_MEM_PWR_DONE,
+		"error: failed to power up memory"},
+	{SKL_DSP_ROM_ERROR | SKL_DSP_ROM_MANIFEST_LOADED,
+		"error: failed to load manifest"},
+	{SKL_DSP_ROM_ERROR | SKL_DSP_ROM_MANIFEST_VERIFIED,
+		"error: failed to verify manifest"},
+	{SKL_DSP_ROM_ERROR | SKL_DSP_ROM_FEAT_MASK_VERIFIED,
+		"error: failed to verify manifest"},
+	{SKL_DSP_ROM_ERROR | SKL_DSP_ROM_BASEFW_FOUND,
+		"error: base fw not found"},
+	{SKL_DSP_ROM_ERROR | SKL_DSP_ROM_BASEFW_BA_VALID,
+		"error: base address not valid"},
+	{SKL_DSP_ROM_ERROR | SKL_DSP_ROM_BASEFW_TOTAL_PWR,
+		"error: failed to power IP"},
+	{SKL_DSP_ROM_ERROR | SKL_DSP_ROM_BASEFW_TEXT_LOADED,
+		"error: failed to load text"},
+	{SKL_DSP_ROM_ERROR | SKL_DSP_ROM_BASEFW_TEXT_HASHED,
+		"error: failed to validate text"},
+	{SKL_DSP_ROM_ERROR | SKL_DSP_ROM_BASEFW_RODA_LOADED,
+		"error: failed to load data"},
+	{SKL_DSP_ROM_ERROR | SKL_DSP_ROM_BASEFW_RODA_HASHED,
+		"error: failed to validate data"},
+	{SKL_DSP_ROM_ERROR | SKL_DSP_ROM_BASEFW_HASH_VER,
+		"error: failed to verify hash"},
+	{SKL_DSP_ROM_ERROR | SKL_DSP_ROM_BASEFW_START_FOUND,
+		"error: failed to start FW"},
+	{SKL_DSP_ROM_BASEFW_ENTERED, "error: fw failed to boot"},
+	{HDA_DSP_ROM_KERNEL_EXCEPTION, "error: kernel exception"},
+	{HDA_DSP_ROM_USER_EXCEPTION, "error: user exception"},
+	{HDA_DSP_ROM_UNEXPECTED_RESET, "error: unexpected reset"},
+};
+
 static void hda_dsp_get_status_skl(struct snd_sof_dev *sdev)
 {
 	u32 status;
@@ -90,10 +127,10 @@ static void hda_dsp_get_status_skl(struct snd_sof_dev *sdev)
 	status = snd_sof_dsp_read(sdev, HDA_DSP_BAR,
 				  HDA_ADSP_FW_STATUS_SKL);
 
-	for (i = 0; i < ARRAY_SIZE(hda_dsp_rom_msg); i++) {
-		if (status == hda_dsp_rom_msg[i].code) {
+	for (i = 0; i < ARRAY_SIZE(hda_skl_dsp_rom_msg); i++) {
+		if (status == hda_skl_dsp_rom_msg[i].code) {
 			dev_err(sdev->dev, "%s - code %8.8x\n",
-				hda_dsp_rom_msg[i].msg, status);
+				hda_skl_dsp_rom_msg[i].msg, status);
 			return;
 		}
 	}
