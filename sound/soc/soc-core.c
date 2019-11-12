@@ -1469,6 +1469,7 @@ EXPORT_SYMBOL_GPL(snd_soc_add_dai_link);
  * snd_soc_remove_dai_link - Remove a DAI link from the list
  * @card: The ASoC card that owns the link
  * @dai_link: The DAI link to remove
+ * @unbind: unbind dai link
  *
  * This function removes a DAI link from the ASoC card's link list.
  *
@@ -1476,7 +1477,8 @@ EXPORT_SYMBOL_GPL(snd_soc_add_dai_link);
  * remove them by using the dobj embedded in the link.
  */
 void snd_soc_remove_dai_link(struct snd_soc_card *card,
-			     struct snd_soc_dai_link *dai_link)
+			     struct snd_soc_dai_link *dai_link,
+			     bool unbind)
 {
 	lockdep_assert_held(&client_mutex);
 
@@ -1488,7 +1490,8 @@ void snd_soc_remove_dai_link(struct snd_soc_card *card,
 
 	list_del(&dai_link->list);
 
-	soc_unbind_dai_link(card, dai_link);
+	if (unbind)
+		soc_unbind_dai_link(card, dai_link);
 }
 EXPORT_SYMBOL_GPL(snd_soc_remove_dai_link);
 
@@ -1997,7 +2000,7 @@ static void soc_cleanup_card_resources(struct snd_soc_card *card)
 	soc_remove_link_dais(card);
 
 	for_each_card_links_safe(card, link, _link)
-		snd_soc_remove_dai_link(card, link);
+		snd_soc_remove_dai_link(card, link, true);
 
 	/* remove auxiliary devices */
 	soc_remove_aux_devices(card);

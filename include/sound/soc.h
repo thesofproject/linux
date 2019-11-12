@@ -1328,7 +1328,8 @@ void snd_soc_of_put_dai_link_codecs(struct snd_soc_dai_link *dai_link);
 int snd_soc_add_dai_link(struct snd_soc_card *card,
 				struct snd_soc_dai_link *dai_link);
 void snd_soc_remove_dai_link(struct snd_soc_card *card,
-			     struct snd_soc_dai_link *dai_link);
+			     struct snd_soc_dai_link *dai_link,
+			     bool unbind);
 struct snd_soc_dai_link *snd_soc_find_dai_link(struct snd_soc_card *card,
 					       int id, const char *name,
 					       const char *stream_name);
