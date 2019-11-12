@@ -97,4 +97,6 @@ const char *
 snd_sof_client_fixup_tplg_filename(struct device *dev,
 				   const char *tplg_filename);
 
+void snd_sof_client_set_dsp_D0i3(struct device *dev);
+
 #endif

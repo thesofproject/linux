@@ -317,6 +317,7 @@ struct snd_sof_dev {
 	enum sof_d0_substate d0_substate;
 	/* flag to track if the intended power target of suspend is S0ix */
 	bool s0_suspend;
+	bool dsp_D0i3;
 
 	/* DSP firmware boot */
 	wait_queue_head_t boot_wait;
@@ -514,8 +515,6 @@ int intel_pcm_open(struct snd_sof_dev *sdev,
 		   struct snd_pcm_substream *substream);
 int intel_pcm_close(struct snd_sof_dev *sdev,
 		    struct snd_pcm_substream *substream);
-
-bool snd_sof_dsp_d0i3_on_suspend(struct snd_sof_dev *sdev);
 
 struct snd_sof_dev *snd_sof_get_sof_dev(struct device *dev);
 

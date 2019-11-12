@@ -55,19 +55,6 @@ MODULE_PARM_DESC(sof_debug, "SOF core debug options (0x0 all off)");
 #define TIMEOUT_DEFAULT_IPC_MS  500
 #define TIMEOUT_DEFAULT_BOOT_MS 2000
 
-bool snd_sof_dsp_d0i3_on_suspend(struct snd_sof_dev *sdev)
-{
-	struct snd_sof_pcm *spcm;
-
-	list_for_each_entry(spcm, &sdev->pcm_list, list) {
-		if (spcm->stream[SNDRV_PCM_STREAM_PLAYBACK].suspend_ignored ||
-		    spcm->stream[SNDRV_PCM_STREAM_CAPTURE].suspend_ignored)
-			return true;
-	}
-
-	return false;
-}
-
 /*
  * FW Panic/fault handling.
  */

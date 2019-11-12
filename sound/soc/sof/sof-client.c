@@ -254,3 +254,11 @@ snd_sof_client_fixup_tplg_filename(struct device *dev,
 	return snd_sof_fixup_tplg_filename(sdev, tplg_filename);
 }
 EXPORT_SYMBOL(snd_sof_client_fixup_tplg_filename);
+
+void snd_sof_client_set_dsp_D0i3(struct device *dev)
+{
+	struct snd_sof_dev *sdev = snd_sof_get_sof_dev(dev);
+
+	sdev->dsp_D0i3 = true;
+}
+EXPORT_SYMBOL(snd_sof_client_set_dsp_D0i3);

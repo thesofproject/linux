@@ -346,6 +346,7 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 			 * enabled in D0ix.
 			 */
 			spcm->stream[substream->stream].suspend_ignored = false;
+			snd_sof_client_set_dsp_D0i3(component->dev);
 			return 0;
 		}
 
