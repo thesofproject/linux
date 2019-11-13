@@ -144,6 +144,7 @@ bool snd_sof_dsp_d0i3_on_suspend(struct snd_sof_dev *sdev)
 
 	return false;
 }
+EXPORT_SYMBOL(snd_sof_dsp_d0i3_on_suspend);
 
 /*
  * FW Panic/fault handling.
