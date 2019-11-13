@@ -306,6 +306,22 @@ static int sof_machine_check(struct snd_sof_dev *sdev)
 #endif
 }
 
+static int snd_sof_fw_stall(struct snd_sof_dev *sdev)
+{
+	int ret;
+
+	/* notify DSP of upcoming power down */
+	ret = sof_send_pm_ctx_ipc(sdev, SOF_IPC_PM_CTX_SAVE);
+	if (ret < 0) {
+		/* FW in unexpected state, continue to power down */
+		dev_warn(sdev->dev,
+			 "ctx_save ipc error %d, might be unable to recover\n",
+			 ret);
+	}
+
+	return ret;
+}
+
 static int sof_probe_continue(struct snd_sof_dev *sdev)
 {
 	struct snd_sof_pdata *plat_data = sdev->pdata;
@@ -368,6 +384,9 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 		goto fw_run_err;
 	}
 
+	/* hereafter all FW boot flows are for PM reasons */
+	sdev->first_boot = false;
+
 	if (IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_ENABLE_FIRMWARE_TRACE) ||
 	    (sof_core_debug & SOF_DBG_ENABLE_TRACE)) {
 		sdev->dtrace_is_supported = true;
@@ -384,9 +403,6 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 		dev_dbg(sdev->dev, "SOF firmware trace disabled\n");
 	}
 
-	/* hereafter all FW boot flows are for PM reasons */
-	sdev->first_boot = false;
-
 	/* now register audio DSP platform driver and dai */
 	ret = devm_snd_soc_register_component(sdev->dev, &sdev->plat_drv,
 					      sof_ops(sdev)->drv,
@@ -394,7 +410,7 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	if (ret < 0) {
 		dev_err(sdev->dev,
 			"error: failed to register DSP DAI driver %d\n", ret);
-		goto fw_run_err;
+		goto register_err;
 	}
 
 	drv_name = plat_data->machine->drv_name;
@@ -408,7 +424,7 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 
 	if (IS_ERR(plat_data->pdev_mach)) {
 		ret = PTR_ERR(plat_data->pdev_mach);
-		goto fw_run_err;
+		goto register_err;
 	}
 
 	dev_dbg(sdev->dev, "created machine %s\n",
@@ -420,6 +436,8 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	return 0;
 
 #if !IS_ENABLED(CONFIG_SND_SOC_SOF_PROBE_WORK_QUEUE)
+register_err:
+	snd_sof_fw_stall(sdev);
 fw_run_err:
 	snd_sof_fw_unload(sdev);
 fw_load_err:
@@ -437,6 +455,7 @@ dbg_err:
 	 * snd_sof_device_remove() when the PCI/ACPI device is removed
 	 */
 
+register_err:
 fw_run_err:
 fw_load_err:
 ipc_err:
@@ -520,6 +539,9 @@ int snd_sof_device_remove(struct device *dev)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	struct snd_sof_pdata *pdata = sdev->pdata;
+	int ret;
+
+	snd_sof_fw_stall(sdev);
 
 	if (IS_ENABLED(CONFIG_SND_SOC_SOF_PROBE_WORK_QUEUE))
 		cancel_work_sync(&sdev->probe_work);
@@ -536,6 +558,8 @@ int snd_sof_device_remove(struct device *dev)
 	 */
 	if (!IS_ERR_OR_NULL(pdata->pdev_mach))
 		platform_device_unregister(pdata->pdev_mach);
+
+	snd_sof_dsp_reset(sdev);
 
 	/*
 	 * Unregistering the machine driver results in unloading the topology.
