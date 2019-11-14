@@ -159,7 +159,13 @@ static int sof_keyword_dapm_event(struct snd_soc_dapm_widget *w,
 	/* process events */
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
-		if (spcm->stream[stream].suspend_ignored) {
+		/*
+		 * if the D0i3_pipeline_count is > 0, this indicates that
+		 * D0i3-compatible pipelines were not stopped during
+		 * suspend. So no need to start them upon resuming.
+		 */
+		if (spcm->stream[stream].d0i3_compatible &&
+		    sdev->D0i3_pipeline_count) {
 			dev_dbg(sdev->dev, "PRE_PMU event ignored, KWD pipeline is already RUNNING\n");
 			return 0;
 		}
@@ -181,7 +187,14 @@ static int sof_keyword_dapm_event(struct snd_soc_dapm_widget *w,
 				swidget->widget->name);
 		break;
 	case SND_SOC_DAPM_POST_PMD:
-		if (spcm->stream[stream].suspend_ignored) {
+		/*
+		 * if the D0i3_pipeline_count is > 0, this indicates that
+		 * D0i3-compatible pipelines were not stopped during
+		 * suspend. So the KWD pipeline needs to be kept running
+		 * as well.
+		 */
+		if (spcm->stream[stream].d0i3_compatible &&
+		    sdev->D0i3_pipeline_count) {
 			dev_dbg(sdev->dev, "POST_PMD even ignored, KWD pipeline will remain RUNNING\n");
 			return 0;
 		}

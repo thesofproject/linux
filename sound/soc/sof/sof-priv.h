@@ -311,11 +311,6 @@ struct snd_sof_pcm_stream {
 	struct snd_pcm_substream *substream;
 	struct work_struct period_elapsed_work;
 	bool d0i3_compatible; /* DSP can be in D0I3 when this pcm is opened */
-	/*
-	 * flag to indicate that the DSP pipelines should be kept
-	 * active or not while suspending the stream
-	 */
-	bool suspend_ignored;
 };
 
 /* ALSA SOF PCM device */
@@ -405,6 +400,9 @@ struct snd_sof_dev {
 	enum sof_d0_substate d0_substate;
 	/* flag to track if the intended power target of suspend is S0ix */
 	bool s0_suspend;
+
+	/* number of pipelines running when the DSP is in D0i3 */
+	u32 D0i3_pipeline_count;
 
 	/* DSP firmware boot */
 	wait_queue_head_t boot_wait;
@@ -552,8 +550,6 @@ struct snd_sof_pcm *snd_sof_find_spcm_dai(struct snd_sof_dev *sdev,
 
 	return NULL;
 }
-
-bool snd_sof_dsp_d0i3_on_suspend(struct snd_sof_dev *sdev);
 
 struct snd_sof_pcm *snd_sof_find_spcm_name(struct snd_sof_dev *sdev,
 					   const char *name);
