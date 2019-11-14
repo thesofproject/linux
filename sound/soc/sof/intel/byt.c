@@ -184,13 +184,31 @@ static void byt_dump(struct snd_sof_dev *sdev, u32 flags)
 static irqreturn_t byt_irq_handler(int irq, void *context)
 {
 	struct snd_sof_dev *sdev = context;
+	u64 ipcx, ipcd;
 	u64 isr;
 	int ret = IRQ_NONE;
 
-	/* Interrupt arrived, check src */
 	isr = snd_sof_dsp_read64(sdev, BYT_DSP_BAR, SHIM_ISRX);
-	if (isr & (SHIM_ISRX_DONE | SHIM_ISRX_BUSY))
+	ipcx = snd_sof_dsp_read64(sdev, BYT_DSP_BAR, SHIM_IPCX);
+	ipcd = snd_sof_dsp_read64(sdev, BYT_DSP_BAR, SHIM_IPCD);
+
+	if ((isr & SHIM_ISRX_DONE) && (ipcx & SHIM_BYT_IPCX_DONE)) {
+		/* reply message from DSP, Mask Done interrupt first */
+		snd_sof_dsp_update_bits64_unlocked(sdev, BYT_DSP_BAR,
+						   SHIM_IMRX,
+						   SHIM_IMRX_DONE,
+						   SHIM_IMRX_DONE);
 		ret = IRQ_WAKE_THREAD;
+	}
+
+	if ((isr & SHIM_ISRX_BUSY) && (ipcd & SHIM_BYT_IPCD_BUSY)) {
+		/* new message from DSP, Mask Busy interrupt first */
+		snd_sof_dsp_update_bits64_unlocked(sdev, BYT_DSP_BAR,
+						   SHIM_IMRX,
+						   SHIM_IMRX_BUSY,
+						   SHIM_IMRX_BUSY);
+		ret = IRQ_WAKE_THREAD;
+	}
 
 	return ret;
 }
@@ -203,16 +221,11 @@ static irqreturn_t byt_irq_thread(int irq, void *context)
 
 	imrx = snd_sof_dsp_read64(sdev, BYT_DSP_BAR, SHIM_IMRX);
 	ipcx = snd_sof_dsp_read64(sdev, BYT_DSP_BAR, SHIM_IPCX);
+	ipcd = snd_sof_dsp_read64(sdev, BYT_DSP_BAR, SHIM_IPCD);
 
 	/* reply message from DSP */
-	if (ipcx & SHIM_BYT_IPCX_DONE &&
-	    !(imrx & SHIM_IMRX_DONE)) {
-		/* Mask Done interrupt before first */
-		snd_sof_dsp_update_bits64_unlocked(sdev, BYT_DSP_BAR,
-						   SHIM_IMRX,
-						   SHIM_IMRX_DONE,
-						   SHIM_IMRX_DONE);
-
+	if ((ipcx & SHIM_BYT_IPCX_DONE) &&
+	    (imrx & SHIM_IMRX_DONE)) {
 		spin_lock_irq(&sdev->ipc_lock);
 
 		/*
@@ -231,15 +244,8 @@ static irqreturn_t byt_irq_thread(int irq, void *context)
 	}
 
 	/* new message from DSP */
-	ipcd = snd_sof_dsp_read64(sdev, BYT_DSP_BAR, SHIM_IPCD);
-	if (ipcd & SHIM_BYT_IPCD_BUSY &&
-	    !(imrx & SHIM_IMRX_BUSY)) {
-		/* Mask Busy interrupt before return */
-		snd_sof_dsp_update_bits64_unlocked(sdev, BYT_DSP_BAR,
-						   SHIM_IMRX,
-						   SHIM_IMRX_BUSY,
-						   SHIM_IMRX_BUSY);
-
+	if ((ipcd & SHIM_BYT_IPCD_BUSY) &&
+	    (imrx & SHIM_IMRX_BUSY)) {
 		/* Handle messages from DSP Core */
 		if ((ipcd & SOF_IPC_PANIC_MAGIC_MASK) == SOF_IPC_PANIC_MAGIC) {
 			snd_sof_dsp_panic(sdev, BYT_PANIC_OFFSET(ipcd) +
