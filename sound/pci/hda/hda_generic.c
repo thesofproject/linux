@@ -4203,7 +4203,7 @@ static bool detect_pin_state(struct hda_codec *codec, hda_nid_t pin)
 {
 	if (!is_jack_detectable(codec, pin))
 		return true;
-	return snd_hda_jack_detect_state(codec, pin) != HDA_JACK_NOT_PRESENT;
+	return snd_hda_jack_detect_state(codec, pin, 0) != HDA_JACK_NOT_PRESENT;
 }
 
 /* power up/down the paths of the given pin according to the jack state;
@@ -4260,7 +4260,7 @@ static void add_pin_power_ctls(struct hda_codec *codec, int num_pins,
 
 	for (i = 0; i < num_pins && pins[i]; i++) {
 		if (is_jack_detectable(codec, pins[i]))
-			snd_hda_jack_detect_enable_callback(codec, pins[i], cb);
+			snd_hda_jack_detect_enable_callback(codec, pins[i], 0, cb);
 		else
 			set_path_power(codec, pins[i], true, -1);
 	}
@@ -4413,7 +4413,7 @@ static bool detect_jacks(struct hda_codec *codec, int num_pins, hda_nid_t *pins)
 		/* don't detect pins retasked as inputs */
 		if (snd_hda_codec_get_pin_target(codec, nid) & AC_PINCTL_IN_EN)
 			continue;
-		if (snd_hda_jack_detect_state(codec, nid) == HDA_JACK_PRESENT)
+		if (snd_hda_jack_detect_state(codec, nid, 0) == HDA_JACK_PRESENT)
 			present = true;
 	}
 	return present;
@@ -4614,7 +4614,7 @@ void snd_hda_gen_mic_autoswitch(struct hda_codec *codec,
 		/* don't detect pins retasked as outputs */
 		if (snd_hda_codec_get_pin_target(codec, pin) & AC_PINCTL_OUT_EN)
 			continue;
-		if (snd_hda_jack_detect_state(codec, pin) == HDA_JACK_PRESENT) {
+		if (snd_hda_jack_detect_state(codec, pin, 0) == HDA_JACK_PRESENT) {
 			mux_select(codec, 0, spec->am_entry[i].idx);
 			return;
 		}
@@ -4794,7 +4794,7 @@ static int check_auto_mute_availability(struct hda_codec *codec)
 		if (!is_jack_detectable(codec, nid))
 			continue;
 		codec_dbg(codec, "Enable HP auto-muting on NID 0x%x\n", nid);
-		snd_hda_jack_detect_enable_callback(codec, nid,
+		snd_hda_jack_detect_enable_callback(codec, nid, 0,
 						    call_hp_automute);
 		spec->detect_hp = 1;
 	}
@@ -4806,7 +4806,7 @@ static int check_auto_mute_availability(struct hda_codec *codec)
 				if (!is_jack_detectable(codec, nid))
 					continue;
 				codec_dbg(codec, "Enable Line-Out auto-muting on NID 0x%x\n", nid);
-				snd_hda_jack_detect_enable_callback(codec, nid,
+				snd_hda_jack_detect_enable_callback(codec, nid, 0,
 								    call_line_automute);
 				spec->detect_lo = 1;
 			}
@@ -4847,7 +4847,7 @@ static bool auto_mic_check_imux(struct hda_codec *codec)
 	/* we don't need the jack detection for the first pin */
 	for (i = 1; i < spec->am_num_entries; i++)
 		snd_hda_jack_detect_enable_callback(codec,
-						    spec->am_entry[i].pin,
+						    spec->am_entry[i].pin, 0,
 						    call_mic_autoswitch);
 	return true;
 }
@@ -5990,7 +5990,7 @@ static void clear_unsol_on_unused_pins(struct hda_codec *codec)
 	snd_array_for_each(&codec->init_pins, i, pin) {
 		hda_nid_t nid = pin->nid;
 		if (is_jack_detectable(codec, nid) &&
-		    !snd_hda_jack_tbl_get(codec, nid))
+		    !snd_hda_jack_tbl_get(codec, nid, 0))
 			snd_hda_codec_write_cache(codec, nid, 0,
 					AC_VERB_SET_UNSOLICITED_ENABLE, 0);
 	}

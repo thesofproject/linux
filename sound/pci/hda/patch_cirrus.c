@@ -1028,7 +1028,7 @@ static void cs4210_spdif_automute(struct hda_codec *codec,
 	    spec->vendor_nid != CS4210_VENDOR_NID)
 		return;
 
-	spdif_present = snd_hda_jack_detect(codec, spdif_pin);
+	spdif_present = snd_hda_jack_detect(codec, spdif_pin, 0);
 	if (spdif_present == spec->spdif_present)
 		return;
 
@@ -1049,7 +1049,7 @@ static void parse_cs421x_digital(struct hda_codec *codec)
 		hda_nid_t nid = cfg->dig_out_pins[i];
 		if (get_wcaps(codec, nid) & AC_WCAP_UNSOL_CAP) {
 			spec->spdif_detect = 1;
-			snd_hda_jack_detect_enable_callback(codec, nid,
+			snd_hda_jack_detect_enable_callback(codec, nid, 0,
 							    cs4210_spdif_automute);
 		}
 	}

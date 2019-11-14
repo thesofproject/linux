@@ -466,7 +466,7 @@ static void jack_update_power(struct hda_codec *codec,
 
 	if (jack && jack->nid) {
 		stac_toggle_power_map(codec, jack->nid,
-				      snd_hda_jack_detect(codec, jack->nid),
+				      snd_hda_jack_detect(codec, jack->nid, 0),
 				      true);
 		return;
 	}
@@ -474,10 +474,10 @@ static void jack_update_power(struct hda_codec *codec,
 	/* update all jacks */
 	for (i = 0; i < spec->num_pwrs; i++) {
 		hda_nid_t nid = spec->pwr_nids[i];
-		if (!snd_hda_jack_tbl_get(codec, nid))
+		if (!snd_hda_jack_tbl_get(codec, nid, 0))
 			continue;
 		stac_toggle_power_map(codec, nid,
-				      snd_hda_jack_detect(codec, nid),
+				      snd_hda_jack_detect(codec, nid, 0),
 				      false);
 	}
 
@@ -513,7 +513,7 @@ static void stac_init_power_map(struct hda_codec *codec)
 		if (def_conf == AC_JACK_PORT_COMPLEX &&
 		    spec->vref_mute_led_nid != nid &&
 		    is_jack_detectable(codec, nid)) {
-			snd_hda_jack_detect_enable_callback(codec, nid,
+			snd_hda_jack_detect_enable_callback(codec, nid, 0,
 							    jack_update_power);
 		} else {
 			if (def_conf == AC_JACK_PORT_NONE)
@@ -3063,7 +3063,7 @@ static void stac92hd71bxx_fixup_hp_m4(struct hda_codec *codec,
 	/* Enable VREF power saving on GPIO1 detect */
 	snd_hda_codec_write_cache(codec, codec->core.afg, 0,
 				  AC_VERB_SET_GPIO_UNSOLICITED_RSP_MASK, 0x02);
-	jack = snd_hda_jack_detect_enable_callback(codec, codec->core.afg,
+	jack = snd_hda_jack_detect_enable_callback(codec, codec->core.afg, 0,
 						   stac_vref_event);
 	if (!IS_ERR(jack))
 		jack->private_data = 0x02;
@@ -4105,7 +4105,7 @@ static void stac9205_fixup_dell_m43(struct hda_codec *codec,
 		/* Enable unsol response for GPIO4/Dock HP connection */
 		snd_hda_codec_write_cache(codec, codec->core.afg, 0,
 			AC_VERB_SET_GPIO_UNSOLICITED_RSP_MASK, 0x10);
-		jack = snd_hda_jack_detect_enable_callback(codec, codec->core.afg,
+		jack = snd_hda_jack_detect_enable_callback(codec, codec->core.afg, 0,
 							   stac_vref_event);
 		if (!IS_ERR(jack))
 			jack->private_data = 0x01;

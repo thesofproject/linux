@@ -19,6 +19,7 @@ typedef void (*hda_jack_callback_fn) (struct hda_codec *, struct hda_jack_callba
 
 struct hda_jack_callback {
 	hda_nid_t nid;
+	int dev_id;
 	hda_jack_callback_fn func;
 	unsigned int private_data;	/* arbitrary data */
 	unsigned int unsol_res;		/* unsolicited event bits */
@@ -28,6 +29,7 @@ struct hda_jack_callback {
 
 struct hda_jack_tbl {
 	hda_nid_t nid;
+	int dev_id;
 	unsigned char tag;		/* unsol event tag */
 	struct hda_jack_callback *callback;
 	/* jack-detection stuff */
@@ -49,45 +51,51 @@ struct hda_jack_keymap {
 };
 
 struct hda_jack_tbl *
-snd_hda_jack_tbl_get(struct hda_codec *codec, hda_nid_t nid);
+snd_hda_jack_tbl_get(struct hda_codec *codec, hda_nid_t nid, int dev_id);
 struct hda_jack_tbl *
-snd_hda_jack_tbl_get_from_tag(struct hda_codec *codec, unsigned char tag);
+snd_hda_jack_tbl_get_from_tag(struct hda_codec *codec,
+			      unsigned char tag, int dev_id);
 
 void snd_hda_jack_tbl_clear(struct hda_codec *codec);
 
 void snd_hda_jack_set_dirty_all(struct hda_codec *codec);
 
-int snd_hda_jack_detect_enable(struct hda_codec *codec, hda_nid_t nid);
+int snd_hda_jack_detect_enable(struct hda_codec *codec, hda_nid_t nid,
+			       int dev_id);
 struct hda_jack_callback *
 snd_hda_jack_detect_enable_callback(struct hda_codec *codec, hda_nid_t nid,
-				    hda_jack_callback_fn cb);
+				    int dev_id, hda_jack_callback_fn cb);
 
 int snd_hda_jack_set_gating_jack(struct hda_codec *codec, hda_nid_t gated_nid,
 				 hda_nid_t gating_nid);
 
-u32 snd_hda_jack_pin_sense(struct hda_codec *codec, hda_nid_t nid);
+u32 snd_hda_jack_pin_sense(struct hda_codec *codec, hda_nid_t nid, int dev_id);
 
 /* the jack state returned from snd_hda_jack_detect_state() */
 enum {
 	HDA_JACK_NOT_PRESENT, HDA_JACK_PRESENT, HDA_JACK_PHANTOM,
 };
 
-int snd_hda_jack_detect_state(struct hda_codec *codec, hda_nid_t nid);
+int snd_hda_jack_detect_state(struct hda_codec *codec, hda_nid_t nid,
+			      int dev_id);
 
 /**
  * snd_hda_jack_detect - Detect the jack
  * @codec: the HDA codec
  * @nid: pin NID to check jack detection
+ * @dev_id: pin device entry id
  */
-static inline bool snd_hda_jack_detect(struct hda_codec *codec, hda_nid_t nid)
+static inline bool
+snd_hda_jack_detect(struct hda_codec *codec, hda_nid_t nid, int dev_id)
 {
-	return snd_hda_jack_detect_state(codec, nid) != HDA_JACK_NOT_PRESENT;
+	return snd_hda_jack_detect_state(codec, nid, dev_id) !=
+		HDA_JACK_NOT_PRESENT;
 }
 
 bool is_jack_detectable(struct hda_codec *codec, hda_nid_t nid);
 
 int snd_hda_jack_add_kctl(struct hda_codec *codec, hda_nid_t nid,
-			  const char *name, bool phantom_jack,
+			  int dev_id, const char *name, bool phantom_jack,
 			  int type, const struct hda_jack_keymap *keymap);
 int snd_hda_jack_add_kctls(struct hda_codec *codec,
 			   const struct auto_pin_cfg *cfg);

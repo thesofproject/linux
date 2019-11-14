@@ -1177,7 +1177,7 @@ static void alc880_fixup_vol_knob(struct hda_codec *codec,
 				  const struct hda_fixup *fix, int action)
 {
 	if (action == HDA_FIXUP_ACT_PROBE)
-		snd_hda_jack_detect_enable_callback(codec, 0x21,
+		snd_hda_jack_detect_enable_callback(codec, 0x21, 0,
 						    alc_update_knob_master);
 }
 
@@ -1644,7 +1644,7 @@ static void alc260_fixup_gpio1_toggle(struct hda_codec *codec,
 		spec->gen.detect_hp = 1;
 		spec->gen.automute_speaker = 1;
 		spec->gen.autocfg.hp_pins[0] = 0x0f; /* copy it for automute */
-		snd_hda_jack_detect_enable_callback(codec, 0x0f,
+		snd_hda_jack_detect_enable_callback(codec, 0x0f, 0,
 						    snd_hda_gen_hp_automute);
 		alc_setup_gpio(codec, 0x01);
 	}
@@ -3038,7 +3038,7 @@ static void alc282_init(struct hda_codec *codec)
 
 	if (!hp_pin)
 		return;
-	hp_pin_sense = snd_hda_jack_detect(codec, hp_pin);
+	hp_pin_sense = snd_hda_jack_detect(codec, hp_pin, 0);
 	coef78 = alc_read_coef_idx(codec, 0x78);
 
 	/* Index 0x78 Direct Drive HP AMP LPM Control 1 */
@@ -3076,7 +3076,7 @@ static void alc282_shutup(struct hda_codec *codec)
 		return;
 	}
 
-	hp_pin_sense = snd_hda_jack_detect(codec, hp_pin);
+	hp_pin_sense = snd_hda_jack_detect(codec, hp_pin, 0);
 	coef78 = alc_read_coef_idx(codec, 0x78);
 	alc_write_coef_idx(codec, 0x78, 0x9004);
 
@@ -3155,7 +3155,7 @@ static void alc283_init(struct hda_codec *codec)
 		return;
 
 	msleep(30);
-	hp_pin_sense = snd_hda_jack_detect(codec, hp_pin);
+	hp_pin_sense = snd_hda_jack_detect(codec, hp_pin, 0);
 
 	/* Index 0x43 Direct Drive HP AMP LPM Control 1 */
 	/* Headphone capless set to high power mode */
@@ -3190,7 +3190,7 @@ static void alc283_shutup(struct hda_codec *codec)
 		return;
 	}
 
-	hp_pin_sense = snd_hda_jack_detect(codec, hp_pin);
+	hp_pin_sense = snd_hda_jack_detect(codec, hp_pin, 0);
 
 	alc_write_coef_idx(codec, 0x43, 0x9004);
 
@@ -3227,7 +3227,7 @@ static void alc256_init(struct hda_codec *codec)
 
 	msleep(30);
 
-	hp_pin_sense = snd_hda_jack_detect(codec, hp_pin);
+	hp_pin_sense = snd_hda_jack_detect(codec, hp_pin, 0);
 
 	if (hp_pin_sense)
 		msleep(2);
@@ -3270,7 +3270,7 @@ static void alc256_shutup(struct hda_codec *codec)
 	if (!hp_pin)
 		hp_pin = 0x21;
 
-	hp_pin_sense = snd_hda_jack_detect(codec, hp_pin);
+	hp_pin_sense = snd_hda_jack_detect(codec, hp_pin, 0);
 
 	if (hp_pin_sense)
 		msleep(2);
@@ -3315,8 +3315,8 @@ static void alc225_init(struct hda_codec *codec)
 		hp_pin = 0x21;
 	msleep(30);
 
-	hp1_pin_sense = snd_hda_jack_detect(codec, hp_pin);
-	hp2_pin_sense = snd_hda_jack_detect(codec, 0x16);
+	hp1_pin_sense = snd_hda_jack_detect(codec, hp_pin, 0);
+	hp2_pin_sense = snd_hda_jack_detect(codec, 0x16, 0);
 
 	if (hp1_pin_sense || hp2_pin_sense)
 		msleep(2);
@@ -3364,8 +3364,8 @@ static void alc225_shutup(struct hda_codec *codec)
 	/* 3k pull low control for Headset jack. */
 	alc_update_coef_idx(codec, 0x4a, 0, 3 << 10);
 
-	hp1_pin_sense = snd_hda_jack_detect(codec, hp_pin);
-	hp2_pin_sense = snd_hda_jack_detect(codec, 0x16);
+	hp1_pin_sense = snd_hda_jack_detect(codec, hp_pin, 0);
+	hp2_pin_sense = snd_hda_jack_detect(codec, 0x16, 0);
 
 	if (hp1_pin_sense || hp2_pin_sense)
 		msleep(2);
@@ -3413,7 +3413,7 @@ static void alc_default_init(struct hda_codec *codec)
 
 	msleep(30);
 
-	hp_pin_sense = snd_hda_jack_detect(codec, hp_pin);
+	hp_pin_sense = snd_hda_jack_detect(codec, hp_pin, 0);
 
 	if (hp_pin_sense)
 		msleep(2);
@@ -3442,7 +3442,7 @@ static void alc_default_shutup(struct hda_codec *codec)
 		return;
 	}
 
-	hp_pin_sense = snd_hda_jack_detect(codec, hp_pin);
+	hp_pin_sense = snd_hda_jack_detect(codec, hp_pin, 0);
 
 	if (hp_pin_sense)
 		msleep(2);
@@ -4117,7 +4117,7 @@ static void alc280_fixup_hp_gpio2_mic_hotkey(struct hda_codec *codec,
 		spec->gpio_data |= 0x02;
 		snd_hda_codec_write_cache(codec, codec->core.afg, 0,
 					  AC_VERB_SET_GPIO_UNSOLICITED_RSP_MASK, 0x04);
-		snd_hda_jack_detect_enable_callback(codec, codec->core.afg,
+		snd_hda_jack_detect_enable_callback(codec, codec->core.afg, 0,
 						    gpio2_mic_hotkey_event);
 		return;
 	}
@@ -4146,7 +4146,7 @@ static void alc233_fixup_lenovo_line2_mic_hotkey(struct hda_codec *codec,
 		if (alc_register_micmute_input_device(codec) != 0)
 			return;
 
-		snd_hda_jack_detect_enable_callback(codec, 0x1b,
+		snd_hda_jack_detect_enable_callback(codec, 0x1b, 0,
 						    gpio2_mic_hotkey_event);
 		return;
 	}
@@ -4989,7 +4989,7 @@ static void alc_update_headset_mode(struct hda_codec *codec)
 
 	int new_headset_mode;
 
-	if (!snd_hda_jack_detect(codec, hp_pin))
+	if (!snd_hda_jack_detect(codec, hp_pin, 0))
 		new_headset_mode = ALC_HEADSET_MODE_UNPLUGGED;
 	else if (mux_pin == spec->headset_mic_pin)
 		new_headset_mode = ALC_HEADSET_MODE_HEADSET;
@@ -5466,7 +5466,7 @@ static void asus_tx300_automute(struct hda_codec *codec)
 {
 	struct alc_spec *spec = codec->spec;
 	snd_hda_gen_update_outputs(codec);
-	if (snd_hda_jack_detect(codec, 0x1b))
+	if (snd_hda_jack_detect(codec, 0x1b, 0))
 		spec->gen.mute_bits |= (1ULL << 0x14);
 }
 
@@ -5487,7 +5487,7 @@ static void alc282_fixup_asus_tx300(struct hda_codec *codec,
 		snd_hda_apply_pincfgs(codec, dock_pins);
 		spec->gen.auto_mute_via_amp = 1;
 		spec->gen.automute_hook = asus_tx300_automute;
-		snd_hda_jack_detect_enable_callback(codec, 0x1b,
+		snd_hda_jack_detect_enable_callback(codec, 0x1b, 0,
 						    snd_hda_gen_hp_automute);
 		break;
 	case HDA_FIXUP_ACT_PROBE:
@@ -5677,9 +5677,9 @@ static void alc_fixup_headset_jack(struct hda_codec *codec,
 
 	switch (action) {
 	case HDA_FIXUP_ACT_PRE_PROBE:
-		snd_hda_jack_detect_enable_callback(codec, 0x55,
+		snd_hda_jack_detect_enable_callback(codec, 0x55, 0,
 						    alc_headset_btn_callback);
-		snd_hda_jack_add_kctl(codec, 0x55, "Headset Jack", false,
+		snd_hda_jack_add_kctl(codec, 0x55, 0, "Headset Jack", false,
 				      SND_JACK_HEADSET, alc_headset_btn_keymap);
 		break;
 	case HDA_FIXUP_ACT_INIT:
@@ -8435,7 +8435,7 @@ static void alc662_aspire_ethos_mute_speakers(struct hda_codec *codec,
 	 * 0x15 - front left/front right
 	 * 0x18 - front center/ LFE
 	 */
-	if (snd_hda_jack_detect_state(codec, 0x1b) == HDA_JACK_PRESENT) {
+	if (snd_hda_jack_detect_state(codec, 0x1b, 0) == HDA_JACK_PRESENT) {
 		snd_hda_set_pin_ctl_cache(codec, 0x15, 0);
 		snd_hda_set_pin_ctl_cache(codec, 0x18, 0);
 	} else {
@@ -8453,7 +8453,7 @@ static void alc662_fixup_aspire_ethos_hp(struct hda_codec *codec,
 
 	switch (action) {
 	case HDA_FIXUP_ACT_PRE_PROBE:
-		snd_hda_jack_detect_enable_callback(codec, 0x1b,
+		snd_hda_jack_detect_enable_callback(codec, 0x1b, 0,
 				alc662_aspire_ethos_mute_speakers);
 		break;
 	case HDA_FIXUP_ACT_INIT:

@@ -261,7 +261,7 @@ static void cxt_update_headset_mode(struct hda_codec *codec)
 		spec->gen.hp_jack_present = false;
 	} else {
 		snd_hda_codec_write_cache(codec, 0x1c, 0, 0x410, 0x54); /* disable merged mode for analog int-mic */
-		spec->gen.hp_jack_present = snd_hda_jack_detect(codec, spec->gen.autocfg.hp_pins[0]);
+		spec->gen.hp_jack_present = snd_hda_jack_detect(codec, spec->gen.autocfg.hp_pins[0], 0);
 	}
 
 	snd_hda_gen_update_outputs(codec);

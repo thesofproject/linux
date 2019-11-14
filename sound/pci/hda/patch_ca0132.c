@@ -4064,7 +4064,7 @@ static int ca0132_select_out(struct hda_codec *codec)
 	auto_jack = spec->vnode_lswitch[VNID_HP_ASEL - VNODE_START_NID];
 
 	if (auto_jack)
-		jack_present = snd_hda_jack_detect(codec, spec->unsol_tag_hp);
+		jack_present = snd_hda_jack_detect(codec, spec->unsol_tag_hp, 0);
 	else
 		jack_present =
 			spec->vnode_lswitch[VNID_HP_SEL - VNODE_START_NID];
@@ -4320,8 +4320,8 @@ static int ca0132_alt_select_out(struct hda_codec *codec)
 	 * hp/speaker auto detect is enabled.
 	 */
 	if (auto_jack) {
-		jack_present = snd_hda_jack_detect(codec, spec->unsol_tag_hp) ||
-			   snd_hda_jack_detect(codec, spec->unsol_tag_front_hp);
+		jack_present = snd_hda_jack_detect(codec, spec->unsol_tag_hp, 0) ||
+			   snd_hda_jack_detect(codec, spec->unsol_tag_front_hp, 0);
 
 		if (jack_present)
 			spec->cur_out_type = HEADPHONE_OUT;
@@ -4376,9 +4376,9 @@ static int ca0132_alt_select_out(struct hda_codec *codec)
 
 		/* enable headphone, either front or rear */
 
-		if (snd_hda_jack_detect(codec, spec->unsol_tag_front_hp))
+		if (snd_hda_jack_detect(codec, spec->unsol_tag_front_hp, 0))
 			headphone_nid = spec->out_pins[2];
-		else if (snd_hda_jack_detect(codec, spec->unsol_tag_hp))
+		else if (snd_hda_jack_detect(codec, spec->unsol_tag_hp, 0))
 			headphone_nid = spec->out_pins[1];
 
 		pin_ctl = snd_hda_codec_read(codec, headphone_nid, 0,
@@ -4460,7 +4460,7 @@ static void ca0132_unsol_hp_delayed(struct work_struct *work)
 	else
 		ca0132_select_out(spec->codec);
 
-	jack = snd_hda_jack_tbl_get(spec->codec, spec->unsol_tag_hp);
+	jack = snd_hda_jack_tbl_get(spec->codec, spec->unsol_tag_hp, 0);
 	if (jack) {
 		jack->block_report = 0;
 		snd_hda_jack_report_sync(spec->codec);
@@ -4599,7 +4599,7 @@ static int ca0132_select_mic(struct hda_codec *codec)
 	auto_jack = spec->vnode_lswitch[VNID_AMIC1_ASEL - VNODE_START_NID];
 
 	if (auto_jack)
-		jack_present = snd_hda_jack_detect(codec, spec->unsol_tag_amic1);
+		jack_present = snd_hda_jack_detect(codec, spec->unsol_tag_amic1, 0);
 	else
 		jack_present =
 			spec->vnode_lswitch[VNID_AMIC1_SEL - VNODE_START_NID];
@@ -7606,7 +7606,7 @@ static void hp_callback(struct hda_codec *codec, struct hda_jack_callback *cb)
 	 */
 	cancel_delayed_work_sync(&spec->unsol_hp_work);
 	schedule_delayed_work(&spec->unsol_hp_work, msecs_to_jiffies(500));
-	tbl = snd_hda_jack_tbl_get(codec, cb->nid);
+	tbl = snd_hda_jack_tbl_get(codec, cb->nid, 0);
 	if (tbl)
 		tbl->block_report = 1;
 }
@@ -7624,15 +7624,15 @@ static void amic_callback(struct hda_codec *codec, struct hda_jack_callback *cb)
 static void ca0132_init_unsol(struct hda_codec *codec)
 {
 	struct ca0132_spec *spec = codec->spec;
-	snd_hda_jack_detect_enable_callback(codec, spec->unsol_tag_hp, hp_callback);
-	snd_hda_jack_detect_enable_callback(codec, spec->unsol_tag_amic1,
+	snd_hda_jack_detect_enable_callback(codec, spec->unsol_tag_hp, 0, hp_callback);
+	snd_hda_jack_detect_enable_callback(codec, spec->unsol_tag_amic1, 0,
 					    amic_callback);
-	snd_hda_jack_detect_enable_callback(codec, UNSOL_TAG_DSP,
+	snd_hda_jack_detect_enable_callback(codec, UNSOL_TAG_DSP, 0,
 					    ca0132_process_dsp_response);
 	/* Front headphone jack detection */
 	if (ca0132_use_alt_functions(spec))
 		snd_hda_jack_detect_enable_callback(codec,
-			spec->unsol_tag_front_hp, hp_callback);
+			spec->unsol_tag_front_hp, 0, hp_callback);
 }
 
 /*
