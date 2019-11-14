@@ -88,6 +88,7 @@ struct hda_conn_list {
 	struct list_head list;
 	int len;
 	hda_nid_t nid;
+	int dev_id;
 	hda_nid_t conns[0];
 };
 
@@ -96,8 +97,9 @@ static struct hda_conn_list *
 lookup_conn_list(struct hda_codec *codec, hda_nid_t nid)
 {
 	struct hda_conn_list *p;
+	int dev_id = snd_hda_get_dev_select(codec, nid);
 	list_for_each_entry(p, &codec->conn_list, list) {
-		if (p->nid == nid)
+		if (p->nid == nid && p->dev_id == dev_id)
 			return p;
 	}
 	return NULL;
@@ -113,6 +115,7 @@ static int add_conn_list(struct hda_codec *codec, hda_nid_t nid, int len,
 		return -ENOMEM;
 	p->len = len;
 	p->nid = nid;
+	p->dev_id = snd_hda_get_dev_select(codec, nid);
 	memcpy(p->conns, list, len * sizeof(hda_nid_t));
 	list_add(&p->list, &codec->conn_list);
 	return 0;
