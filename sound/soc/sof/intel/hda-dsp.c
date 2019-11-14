@@ -339,12 +339,16 @@ static int hda_dsp_send_pm_gate_ipc(struct snd_sof_dev *sdev, u32 flags)
 }
 
 int hda_dsp_set_power_state(struct snd_sof_dev *sdev,
-			    enum sof_d0_substate d0_substate)
+			    enum sof_dsp_power_state state)
 {
 	struct hdac_bus *bus = sof_to_bus(sdev);
 	u32 flags;
 	int ret;
 	u8 value;
+
+	/* Nothing to do for D3 */
+	if (state == SOF_DSP_D3)
+		return 0;
 
 	/* Write to D0I3C after Command-In-Progress bit is cleared */
 	ret = hda_dsp_wait_d0i3c_done(sdev);
@@ -354,7 +358,7 @@ int hda_dsp_set_power_state(struct snd_sof_dev *sdev,
 	}
 
 	/* Update D0I3C register */
-	value = d0_substate == SOF_DSP_D0I3 ? SOF_HDA_VS_D0I3C_I3 : 0;
+	value = state == SOF_DSP_D0I3 ? SOF_HDA_VS_D0I3C_I3 : 0;
 	snd_hdac_chip_updateb(bus, VS_D0I3C, SOF_HDA_VS_D0I3C_I3, value);
 
 	/* Wait for cmd in progress to be cleared before exiting the function */
@@ -367,7 +371,7 @@ int hda_dsp_set_power_state(struct snd_sof_dev *sdev,
 	dev_vdbg(bus->dev, "D0I3C updated, register = 0x%x\n",
 		 snd_hdac_chip_readb(bus, VS_D0I3C));
 
-	if (d0_substate == SOF_DSP_D0I0)
+	if (state == SOF_DSP_D0I0)
 		flags = HDA_PM_PPG;/* prevent power gating in D0 */
 	else
 		flags = HDA_PM_NO_DMA_TRACE;/* disable DMA trace in D0I3*/
@@ -428,6 +432,8 @@ static int hda_suspend(struct snd_sof_dev *sdev, bool runtime_suspend)
 		return ret;
 	}
 
+	sdev->dsp_power_state = SOF_DSP_D3;
+
 	return 0;
 }
 
@@ -473,15 +479,26 @@ static int hda_resume(struct snd_sof_dev *sdev, bool runtime_resume)
 	hda_dsp_ctrl_ppcap_enable(sdev, true);
 	hda_dsp_ctrl_ppcap_int_enable(sdev, true);
 
+	sdev->dsp_power_state = SOF_DSP_D0I0;
+
 	return 0;
 }
 
-int hda_dsp_resume(struct snd_sof_dev *sdev)
+int hda_dsp_resume(struct snd_sof_dev *sdev,
+		   enum sof_dsp_power_state state)
 {
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct pci_dev *pci = to_pci_dev(sdev->dev);
+	int ret;
 
-	if (sdev->s0_suspend) {
+	if (sdev->dsp_power_state == SOF_DSP_D0I3) {
+		/* set DSP power state */
+		ret = hda_dsp_set_power_state(sdev, state);
+		if (ret < 0)
+			return ret;
+
+		sdev->dsp_power_state = state;
+
 		/* restore L1SEN bit */
 		if (hda->l1_support_changed)
 			snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR,
@@ -523,14 +540,22 @@ int hda_dsp_runtime_suspend(struct snd_sof_dev *sdev)
 	return hda_suspend(sdev, true);
 }
 
-int hda_dsp_suspend(struct snd_sof_dev *sdev)
+int hda_dsp_suspend(struct snd_sof_dev *sdev,
+		    enum sof_dsp_power_state state)
 {
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct hdac_bus *bus = sof_to_bus(sdev);
 	struct pci_dev *pci = to_pci_dev(sdev->dev);
 	int ret;
 
-	if (sdev->s0_suspend) {
+	if (state == SOF_DSP_D0I3) {
+		/* set DSP power state */
+		ret = hda_dsp_set_power_state(sdev, state);
+		if (ret < 0)
+			return ret;
+
+		sdev->dsp_power_state = state;
+
 		/* enable L1SEN to make sure the system can enter S0Ix */
 		hda->l1_support_changed =
 			snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR,

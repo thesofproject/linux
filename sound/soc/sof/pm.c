@@ -276,7 +276,7 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 	if (runtime_resume)
 		ret = snd_sof_dsp_runtime_resume(sdev);
 	else
-		ret = snd_sof_dsp_resume(sdev);
+		ret = snd_sof_dsp_resume(sdev, SOF_DSP_D0I0);
 	if (ret < 0) {
 		dev_err(sdev->dev,
 			"error: failed to power up DSP after resume\n");
@@ -325,9 +325,6 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 		dev_err(sdev->dev,
 			"error: ctx_restore ipc error during resume %d\n",
 			ret);
-
-	/* initialize default D0 sub-state */
-	sdev->d0_substate = SOF_DSP_D0I0;
 
 	return ret;
 }
@@ -382,7 +379,7 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 	if (runtime_suspend)
 		ret = snd_sof_dsp_runtime_suspend(sdev);
 	else
-		ret = snd_sof_dsp_suspend(sdev);
+		ret = snd_sof_dsp_suspend(sdev, SOF_DSP_D3);
 	if (ret < 0)
 		dev_err(sdev->dev,
 			"error: failed to power down DSP during suspend %d\n",
@@ -410,26 +407,6 @@ int snd_sof_runtime_resume(struct device *dev)
 	return sof_resume(dev, true);
 }
 EXPORT_SYMBOL(snd_sof_runtime_resume);
-
-int snd_sof_set_d0_substate(struct snd_sof_dev *sdev,
-			    enum sof_d0_substate d0_substate)
-{
-	int ret;
-
-	if (sdev->d0_substate == d0_substate)
-		return 0;
-
-	/* do platform specific set_state */
-	ret = snd_sof_dsp_set_power_state(sdev, d0_substate);
-	if (ret < 0)
-		return ret;
-
-	/* update dsp D0 sub-state */
-	sdev->d0_substate = d0_substate;
-
-	return 0;
-}
-EXPORT_SYMBOL(snd_sof_set_d0_substate);
 
 /*
  * Audio DSP states may transform as below:-
@@ -466,27 +443,11 @@ EXPORT_SYMBOL(snd_sof_set_d0_substate);
 int snd_sof_resume(struct device *dev)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
-	int ret;
 
-	if (sdev->d0_substate == SOF_DSP_D0I3) {
-		/* resume from D0I3 */
-		dev_dbg(sdev->dev, "DSP will exit from D0i3...\n");
-		ret = snd_sof_set_d0_substate(sdev, SOF_DSP_D0I0);
-		if (ret == -ENOTSUPP) {
-			/* fallback to resume from D3 */
-			dev_dbg(sdev->dev, "D0i3 not supported, fall back to resume from D3...\n");
-			goto d3_resume;
-		} else if (ret < 0) {
-			dev_err(sdev->dev, "error: failed to exit from D0I3 %d\n",
-				ret);
-			return ret;
-		}
+	/* resume from D0i3 */
+	if (sdev->dsp_power_state == SOF_DSP_D0I3)
+		return snd_sof_dsp_resume(sdev, SOF_DSP_D0I0);
 
-		/* platform-specific resume from D0i3 */
-		return snd_sof_dsp_resume(sdev);
-	}
-
-d3_resume:
 	/* resume from D3 */
 	return sof_resume(dev, false);
 }
@@ -495,27 +456,11 @@ EXPORT_SYMBOL(snd_sof_resume);
 int snd_sof_suspend(struct device *dev)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
-	int ret;
 
-	if (sdev->D0i3_pipeline_count) {
-		/* suspend to D0i3 */
-		dev_dbg(sdev->dev, "DSP is trying to enter D0i3...\n");
-		ret = snd_sof_set_d0_substate(sdev, SOF_DSP_D0I3);
-		if (ret == -ENOTSUPP) {
-			/* fallback to D3 suspend */
-			dev_dbg(sdev->dev, "D0i3 not supported, fall back to D3...\n");
-			goto d3_suspend;
-		} else if (ret < 0) {
-			dev_err(sdev->dev, "error: failed to enter D0I3, %d\n",
-				ret);
-			return ret;
-		}
+	/* suspend to D0i3 */
+	if (sdev->D0i3_pipeline_count)
+		return snd_sof_dsp_suspend(sdev, SOF_DSP_D0I3);
 
-		/* platform-specific suspend to D0i3 */
-		return snd_sof_dsp_suspend(sdev);
-	}
-
-d3_suspend:
 	/* suspend to D3 */
 	return sof_suspend(dev, false);
 }

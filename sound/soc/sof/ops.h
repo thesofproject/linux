@@ -138,18 +138,20 @@ static inline int snd_sof_dsp_get_window_offset(struct snd_sof_dev *sdev,
 	return -ENOTSUPP;
 }
 /* power management */
-static inline int snd_sof_dsp_resume(struct snd_sof_dev *sdev)
+static inline int snd_sof_dsp_resume(struct snd_sof_dev *sdev,
+				     enum sof_dsp_power_state state)
 {
 	if (sof_ops(sdev)->resume)
-		return sof_ops(sdev)->resume(sdev);
+		return sof_ops(sdev)->resume(sdev, state);
 
 	return 0;
 }
 
-static inline int snd_sof_dsp_suspend(struct snd_sof_dev *sdev)
+static inline int snd_sof_dsp_suspend(struct snd_sof_dev *sdev,
+				      enum sof_dsp_power_state state)
 {
 	if (sof_ops(sdev)->suspend)
-		return sof_ops(sdev)->suspend(sdev);
+		return sof_ops(sdev)->suspend(sdev, state);
 
 	return 0;
 }
@@ -194,12 +196,11 @@ static inline int snd_sof_dsp_set_clk(struct snd_sof_dev *sdev, u32 freq)
 }
 
 static inline int snd_sof_dsp_set_power_state(struct snd_sof_dev *sdev,
-					      enum sof_d0_substate substate)
+					      enum sof_dsp_power_state state)
 {
 	if (sof_ops(sdev)->set_power_state)
-		return sof_ops(sdev)->set_power_state(sdev, substate);
+		return sof_ops(sdev)->set_power_state(sdev, state);
 
-	/* D0 substate is not supported */
 	return -ENOTSUPP;
 }
 

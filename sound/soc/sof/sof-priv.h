@@ -68,10 +68,11 @@ extern int sof_core_debug;
 
 #define DMA_CHAN_INVALID	0xFFFFFFFF
 
-/* DSP D0ix sub-state */
-enum sof_d0_substate {
-	SOF_DSP_D0I0 = 0,	/* DSP default D0 substate */
-	SOF_DSP_D0I3,		/* DSP D0i3(low power) substate*/
+/* DSP power state */
+enum sof_dsp_power_state {
+	SOF_DSP_D0I0 = 0,
+	SOF_DSP_D0I3,	/* DSP D0i3(low power state) */
+	SOF_DSP_D3,
 };
 
 struct snd_sof_dev;
@@ -183,14 +184,16 @@ struct snd_sof_dsp_ops {
 	int (*post_fw_run)(struct snd_sof_dev *sof_dev); /* optional */
 
 	/* DSP PM */
-	int (*suspend)(struct snd_sof_dev *sof_dev); /* optional */
-	int (*resume)(struct snd_sof_dev *sof_dev); /* optional */
+	int (*suspend)(struct snd_sof_dev *sof_dev,
+		       enum sof_dsp_power_state state); /* optional */
+	int (*resume)(struct snd_sof_dev *sof_dev,
+		      enum sof_dsp_power_state state); /* optional */
 	int (*runtime_suspend)(struct snd_sof_dev *sof_dev); /* optional */
 	int (*runtime_resume)(struct snd_sof_dev *sof_dev); /* optional */
 	int (*runtime_idle)(struct snd_sof_dev *sof_dev); /* optional */
 	int (*set_hw_params_upon_resume)(struct snd_sof_dev *sdev); /* optional */
 	int (*set_power_state)(struct snd_sof_dev *sdev,
-			       enum sof_d0_substate d0_substate); /* optional */
+			       enum sof_dsp_power_state state); /* optional */
 
 	/* DSP clocking */
 	int (*set_clk)(struct snd_sof_dev *sof_dev, u32 freq); /* optional */
@@ -397,7 +400,7 @@ struct snd_sof_dev {
 	struct snd_soc_component_driver plat_drv;
 
 	/* power states related */
-	enum sof_d0_substate d0_substate;
+	enum sof_dsp_power_state dsp_power_state;
 	/* flag to track if the intended power target of suspend is S0ix */
 	bool s0_suspend;
 
@@ -492,8 +495,6 @@ int snd_sof_resume(struct device *dev);
 int snd_sof_suspend(struct device *dev);
 int snd_sof_prepare(struct device *dev);
 void snd_sof_complete(struct device *dev);
-int snd_sof_set_d0_substate(struct snd_sof_dev *sdev,
-			    enum sof_d0_substate d0_substate);
 
 void snd_sof_new_platform_drv(struct snd_sof_dev *sdev);
 
@@ -550,6 +551,8 @@ struct snd_sof_pcm *snd_sof_find_spcm_dai(struct snd_sof_dev *sdev,
 
 	return NULL;
 }
+
+bool snd_sof_dsp_d0i3_on_suspend(struct snd_sof_dev *sdev);
 
 struct snd_sof_pcm *snd_sof_find_spcm_name(struct snd_sof_dev *sdev,
 					   const char *name);
