@@ -186,6 +186,7 @@ static int rt1308_io_init(struct device *dev, struct sdw_slave *slave)
 		goto _io_init_err_;
 
 	if (rt1308->first_init) {
+		regcache_mark_dirty(rt1308->regmap);
 		regcache_cache_only(rt1308->regmap, false);
 		regcache_cache_bypass(rt1308->regmap, true);
 	}
