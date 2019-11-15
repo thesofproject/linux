@@ -231,6 +231,7 @@ int sdw_transfer(struct sdw_bus *bus, struct sdw_msg *msg)
 {
 	int ret;
 
+	init_completion(&bus->transfer_complete);
 	mutex_lock(&bus->msg_lock);
 
 	ret = do_transfer(bus, msg);
@@ -242,6 +243,7 @@ int sdw_transfer(struct sdw_bus *bus, struct sdw_msg *msg)
 		sdw_reset_page(bus, msg->dev_num);
 
 	mutex_unlock(&bus->msg_lock);
+	complete(&bus->transfer_complete);
 
 	return ret;
 }

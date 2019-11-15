@@ -108,6 +108,8 @@ MODULE_PARM_DESC(sdw_md_flags, "SoundWire Intel Master device flags (0x0 all off
 #define SDW_ALH_STRMZCFG_DMAT		GENMASK(7, 0)
 #define SDW_ALH_STRMZCFG_CHN		GENMASK(19, 16)
 
+#define DEFAULT_TRANSFER_TIMEOUT	200
+
 enum intel_pdi_type {
 	INTEL_PDI_IN = 0,
 	INTEL_PDI_OUT = 1,
@@ -1417,6 +1419,7 @@ static int intel_suspend(struct device *dev)
 	struct sdw_master_device *md = to_sdw_master_device(dev);
 	struct sdw_cdns *cdns = dev_get_drvdata(dev);
 	struct sdw_intel *sdw = cdns_to_intel(cdns);
+	unsigned long time;
 	int ret;
 
 	if (cdns->bus.prop.hw_disabled) {
@@ -1426,6 +1429,14 @@ static int intel_suspend(struct device *dev)
 	}
 
 	dev_err(dev, "%s start\n", __func__);
+	if (mutex_is_locked(&sdw->cdns.bus.msg_lock)) {
+		time = wait_for_completion_timeout(&sdw->cdns.bus.transfer_complete,
+				msecs_to_jiffies(DEFAULT_TRANSFER_TIMEOUT));
+		if (!time) {
+			dev_err(dev, "transfer not complete, timed out\n");
+			return -ETIMEDOUT;
+		}
+	}
 
 	if (pm_runtime_status_suspended(dev)) {
 		dev_dbg(dev,
@@ -1464,6 +1475,7 @@ static int intel_suspend_runtime(struct device *dev)
 {
 	struct sdw_cdns *cdns = dev_get_drvdata(dev);
 	struct sdw_intel *sdw = cdns_to_intel(cdns);
+	unsigned long time;
 	int ret;
 
 	if (cdns->bus.prop.hw_disabled) {
@@ -1473,7 +1485,14 @@ static int intel_suspend_runtime(struct device *dev)
 	}
 
 	dev_err(dev, "%s start\n", __func__);
-
+	if (mutex_is_locked(&sdw->cdns.bus.msg_lock)) {
+		time = wait_for_completion_timeout(&sdw->cdns.bus.transfer_complete,
+				msecs_to_jiffies(DEFAULT_TRANSFER_TIMEOUT));
+		if (!time) {
+			dev_err(dev, "transfer not complete, timed out\n");
+			return -ETIMEDOUT;
+		}
+	}
 	ret = sdw_cdns_enable_interrupt(cdns, false);
 	if (ret < 0) {
 		dev_err(dev, "cannot disable interrupts on suspend\n");

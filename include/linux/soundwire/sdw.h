@@ -815,6 +815,7 @@ struct sdw_bus {
 	unsigned int clk_stop_timeout;
 	u32 bank_switch_timeout;
 	bool multi_link;
+	struct completion transfer_complete;
 };
 
 int sdw_add_bus_master(struct sdw_bus *bus);
