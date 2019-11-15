@@ -1134,6 +1134,7 @@ int rt700_io_init(struct device *dev, struct sdw_slave *slave)
 		return 0;
 
 	if (rt700->first_init) {
+		regcache_mark_dirty(rt700->regmap);
 		regcache_cache_only(rt700->regmap, false);
 		regcache_cache_bypass(rt700->regmap, true);
 	}
