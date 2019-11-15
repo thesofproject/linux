@@ -1175,6 +1175,7 @@ int rt711_io_init(struct device *dev, struct sdw_slave *slave)
 		return 0;
 
 	if (rt711->first_init) {
+		regcache_mark_dirty(rt711->regmap);
 		regcache_cache_only(rt711->regmap, false);
 		regcache_cache_bypass(rt711->regmap, true);
 	}
