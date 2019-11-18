@@ -1412,6 +1412,93 @@ static int intel_master_remove(struct sdw_master_device *md)
 
 #ifdef CONFIG_PM
 
+static int _suspend(struct device *dev, bool clock_stop)
+{
+	struct sdw_cdns *cdns = dev_get_drvdata(dev);
+	struct sdw_intel *sdw = cdns_to_intel(cdns);
+	int ret;
+
+	dev_dbg(dev, "%s start\n", __func__);
+
+	if (clock_stop) {
+		ret = sdw_cdns_suspend(cdns, true);
+		if (ret < 0) {
+			dev_err(dev, "cannot enable clock stop on suspend\n");
+			return ret;
+		}
+	} else {
+		ret = sdw_cdns_enable_interrupt(cdns, false);
+		if (ret < 0) {
+			dev_err(dev, "cannot disable interrupts on suspend\n");
+			return ret;
+		}
+	}
+
+	ret = intel_link_power_down(sdw);
+	if (ret) {
+		dev_err(dev, "Link power down failed: %d", ret);
+		return ret;
+	}
+
+	/* set WAKEEN interrupt for wake-up events */
+	intel_shim_wake(sdw, clock_stop);
+
+	dev_dbg(dev, "%s done\n", __func__);
+
+	return 0;
+}
+
+static int _resume(struct device *dev, bool clock_stop)
+{
+	struct sdw_cdns *cdns = dev_get_drvdata(dev);
+	struct sdw_intel *sdw = cdns_to_intel(cdns);
+	u32 request;
+	int ret;
+
+	dev_dbg(dev, "%s start\n", __func__);
+
+	/* Invoke shim for wake disable */
+	intel_shim_wake(sdw, false);
+
+	ret = intel_init(sdw);
+	if (ret) {
+		dev_err(dev, "%s failed: %d", __func__, ret);
+		return ret;
+	}
+
+	/*
+	 * make sure all Slaves are tagged as UNATTACHED and provide
+	 * reason for reinitialization in normal resume case
+	 */
+	request = clock_stop ? SDW_UNATTACH_REQUEST_CLOCK_STOP_MODE1 :
+					SDW_UNATTACH_REQUEST_MASTER_RESET;
+	sdw_clear_slave_status(&sdw->cdns.bus, request);
+
+	ret = sdw_cdns_enable_interrupt(cdns, true);
+	if (ret < 0) {
+		dev_err(dev, "cannot enable interrupts during resume\n");
+		return ret;
+	}
+
+	if (clock_stop) {
+		ret = sdw_cdns_resume(cdns, false);
+		if (ret < 0) {
+			dev_err(dev, "unable to exit bus reset sequence during resume\n");
+			return ret;
+		}
+	} else {
+		ret = sdw_cdns_exit_reset(cdns);
+		if (ret < 0) {
+			dev_err(dev, "unable to exit bus reset sequence during resume\n");
+			return ret;
+		}
+	}
+
+	dev_dbg(dev, "%s done\n", __func__);
+
+	return ret;
+}
+
 static int intel_suspend(struct device *dev)
 {
 	struct sdw_master_device *md = to_sdw_master_device(dev);
