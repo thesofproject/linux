@@ -3028,6 +3028,8 @@ int soc_new_pcm(struct snd_soc_pcm_runtime *rtd, int num)
 			rtd->ops.page		= snd_soc_pcm_component_page;
 		if (drv->mmap)
 			rtd->ops.mmap		= snd_soc_pcm_component_mmap;
+		if (drv->sync_stop)
+			rtd->ops.sync_stop	= snd_soc_pcm_component_sync_stop;
 	}
 
 	if (playback)
