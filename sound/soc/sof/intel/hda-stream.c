@@ -593,8 +593,11 @@ static bool hda_dsp_stream_check(struct hdac_bus *bus, u32 status)
 				continue;
 
 			/* Inform ALSA only in case not do that with IPC */
-			if (sof_hda->no_ipc_position)
-				snd_sof_pcm_period_elapsed(s->substream);
+			if (sof_hda->no_ipc_position) {
+				spin_unlock_irq(&bus->reg_lock);
+				snd_pcm_period_elapsed(s->substream);
+				spin_lock_irq(&bus->reg_lock);
+			}
 		}
 	}
 
