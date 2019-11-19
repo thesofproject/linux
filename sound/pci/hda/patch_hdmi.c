@@ -773,34 +773,32 @@ static void jack_callback(struct hda_codec *codec,
 	if (codec_has_acomp(codec))
 		return;
 
-	/* hda_jack don't support DP MST */
-	check_presence_and_report(codec, jack->nid, 0);
+	check_presence_and_report(codec, jack->nid, jack->dev_id);
 }
 
 static void hdmi_intrinsic_event(struct hda_codec *codec, unsigned int res)
 {
 	int tag = res >> AC_UNSOL_RES_TAG_SHIFT;
 	struct hda_jack_tbl *jack;
-	int dev_entry = (res & AC_UNSOL_RES_DE) >> AC_UNSOL_RES_DE_SHIFT;
 
-	/*
-	 * assume DP MST uses dyn_pcm_assign and acomp and
-	 * never comes here
-	 * if DP MST supports unsol event, below code need
-	 * consider dev_entry
-	 */
-	jack = snd_hda_jack_tbl_get_from_tag(codec, tag);
+	if (codec->dp_mst) {
+		int dev_entry =
+			(res & AC_UNSOL_RES_DE) >> AC_UNSOL_RES_DE_SHIFT;
+
+		jack = snd_hda_jack_tbl_get_from_tag(codec, tag, dev_entry);
+	} else {
+		jack = snd_hda_jack_tbl_get_from_tag(codec, tag, 0);
+	}
 	if (!jack)
 		return;
 	jack->jack_dirty = 1;
 
 	codec_dbg(codec,
 		"HDMI hot plug event: Codec=%d Pin=%d Device=%d Inactive=%d Presence_Detect=%d ELD_Valid=%d\n",
-		codec->addr, jack->nid, dev_entry, !!(res & AC_UNSOL_RES_IA),
+		codec->addr, jack->nid, jack->dev_id, !!(res & AC_UNSOL_RES_IA),
 		!!(res & AC_UNSOL_RES_PD), !!(res & AC_UNSOL_RES_ELDV));
 
-	/* hda_jack don't support DP MST */
-	check_presence_and_report(codec, jack->nid, 0);
+	check_presence_and_report(codec, jack->nid, jack->dev_id);
 }
 
 static void hdmi_non_intrinsic_event(struct hda_codec *codec, unsigned int res)
@@ -830,11 +828,21 @@ static void hdmi_unsol_event(struct hda_codec *codec, unsigned int res)
 {
 	int tag = res >> AC_UNSOL_RES_TAG_SHIFT;
 	int subtag = (res & AC_UNSOL_RES_SUBTAG) >> AC_UNSOL_RES_SUBTAG_SHIFT;
+	struct hda_jack_tbl *jack;
 
 	if (codec_has_acomp(codec))
 		return;
 
-	if (!snd_hda_jack_tbl_get_from_tag(codec, tag)) {
+	if (codec->dp_mst) {
+		int dev_entry =
+			(res & AC_UNSOL_RES_DE) >> AC_UNSOL_RES_DE_SHIFT;
+
+		jack = snd_hda_jack_tbl_get_from_tag(codec, tag, dev_entry);
+	} else {
+		jack = snd_hda_jack_tbl_get_from_tag(codec, tag, 0);
+	}
+
+	if (!jack) {
 		codec_dbg(codec, "Unexpected HDMI event tag 0x%x\n", tag);
 		return;
 	}
@@ -1520,7 +1528,7 @@ static bool hdmi_present_sense_via_verbs(struct hdmi_spec_per_pin *per_pin,
 	bool ret;
 	bool do_repoll = false;
 
-	present = snd_hda_jack_pin_sense(codec, pin_nid);
+	present = snd_hda_jack_pin_sense(codec, pin_nid, per_pin->dev_id);
 
 	mutex_lock(&per_pin->lock);
 	eld->monitor_present = !!(present & AC_PINSENSE_PRESENCE);
@@ -1553,7 +1561,7 @@ static bool hdmi_present_sense_via_verbs(struct hdmi_spec_per_pin *per_pin,
 
 	ret = !repoll || !eld->monitor_present || eld->eld_valid;
 
-	jack = snd_hda_jack_tbl_get(codec, pin_nid);
+	jack = snd_hda_jack_tbl_get_mst(codec, pin_nid, per_pin->dev_id);
 	if (jack) {
 		jack->block_report = !ret;
 		jack->pin_sense = (eld->monitor_present && eld->eld_valid) ?
@@ -1584,7 +1592,8 @@ static struct snd_jack *pin_idx_to_jack(struct hda_codec *codec,
 		 * DP MST will use dyn_pcm_assign,
 		 * so DP MST will never come here
 		 */
-		jack_tbl = snd_hda_jack_tbl_get(codec, per_pin->pin_nid);
+		jack_tbl = snd_hda_jack_tbl_get_mst(codec, per_pin->pin_nid,
+						    per_pin->dev_id);
 		if (jack_tbl)
 			jack = jack_tbl->jack;
 	}
@@ -1665,7 +1674,8 @@ static void hdmi_repoll_eld(struct work_struct *work)
 	struct hdmi_spec *spec = codec->spec;
 	struct hda_jack_tbl *jack;
 
-	jack = snd_hda_jack_tbl_get(codec, per_pin->pin_nid);
+	jack = snd_hda_jack_tbl_get_mst(codec, per_pin->pin_nid,
+					per_pin->dev_id);
 	if (jack)
 		jack->jack_dirty = 1;
 
@@ -2166,11 +2176,13 @@ static int generic_hdmi_build_jack(struct hda_codec *codec, int pcm_idx)
 	if (phantom_jack)
 		strncat(hdmi_str, " Phantom",
 			sizeof(hdmi_str) - strlen(hdmi_str) - 1);
-	ret = snd_hda_jack_add_kctl(codec, per_pin->pin_nid, hdmi_str,
-				    phantom_jack, 0, NULL);
+	ret = snd_hda_jack_add_kctl_mst(codec, per_pin->pin_nid,
+					per_pin->dev_id, hdmi_str, phantom_jack,
+					0, NULL);
 	if (ret < 0)
 		return ret;
-	jack = snd_hda_jack_tbl_get(codec, per_pin->pin_nid);
+	jack = snd_hda_jack_tbl_get_mst(codec, per_pin->pin_nid,
+					per_pin->dev_id);
 	if (jack == NULL)
 		return 0;
 	/* assign jack->jack to pcm_rec[].jack to
@@ -2279,10 +2291,11 @@ static int generic_hdmi_init(struct hda_codec *codec)
 		if (codec_has_acomp(codec))
 			continue;
 		if (spec->use_jack_detect)
-			snd_hda_jack_detect_enable(codec, pin_nid);
+			snd_hda_jack_detect_enable(codec, pin_nid, dev_id);
 		else
-			snd_hda_jack_detect_enable_callback(codec, pin_nid,
-							    jack_callback);
+			snd_hda_jack_detect_enable_callback_mst(codec, pin_nid,
+								dev_id,
+								jack_callback);
 	}
 	mutex_unlock(&spec->pcm_lock);
 	return 0;
@@ -2431,11 +2444,11 @@ static int patch_generic_hdmi(struct hda_codec *codec)
 
 /* turn on / off the unsol event jack detection dynamically */
 static void reprogram_jack_detect(struct hda_codec *codec, hda_nid_t nid,
-				  bool use_acomp)
+				  int dev_id, bool use_acomp)
 {
 	struct hda_jack_tbl *tbl;
 
-	tbl = snd_hda_jack_tbl_get(codec, nid);
+	tbl = snd_hda_jack_tbl_get_mst(codec, nid, dev_id);
 	if (tbl) {
 		/* clear unsol even if component notifier is used, or re-enable
 		 * if notifier is cleared
@@ -2448,7 +2461,7 @@ static void reprogram_jack_detect(struct hda_codec *codec, hda_nid_t nid,
 		 * at need (i.e. only when notifier is cleared)
 		 */
 		if (!use_acomp)
-			snd_hda_jack_detect_enable(codec, nid);
+			snd_hda_jack_detect_enable(codec, nid, dev_id);
 	}
 }
 
@@ -2468,6 +2481,7 @@ static void generic_acomp_notifier_set(struct drm_audio_component *acomp,
 		for (i = 0; i < spec->num_pins; i++)
 			reprogram_jack_detect(spec->codec,
 					      get_pin(spec, i)->pin_nid,
+					      get_pin(spec, i)->dev_id,
 					      use_acomp);
 	}
 	mutex_unlock(&spec->pcm_lock);
@@ -2963,7 +2977,7 @@ static int simple_playback_init(struct hda_codec *codec)
 	if (get_wcaps(codec, pin) & AC_WCAP_OUT_AMP)
 		snd_hda_codec_write(codec, pin, 0, AC_VERB_SET_AMP_GAIN_MUTE,
 				    AMP_OUT_UNMUTE);
-	snd_hda_jack_detect_enable(codec, pin);
+	snd_hda_jack_detect_enable(codec, pin, per_pin->dev_id);
 	return 0;
 }
 
