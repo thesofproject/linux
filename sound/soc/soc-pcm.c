@@ -3008,6 +3008,7 @@ int soc_new_pcm(struct snd_soc_pcm_runtime *rtd, int num)
 		rtd->ops.close		= dpcm_fe_dai_close;
 		rtd->ops.pointer	= soc_pcm_pointer;
 		rtd->ops.ioctl		= snd_soc_pcm_component_ioctl;
+		rtd->ops.sync_stop	= snd_soc_pcm_component_sync_stop;
 	} else {
 		rtd->ops.open		= soc_pcm_open;
 		rtd->ops.hw_params	= soc_pcm_hw_params;
@@ -3017,6 +3018,7 @@ int soc_new_pcm(struct snd_soc_pcm_runtime *rtd, int num)
 		rtd->ops.close		= soc_pcm_close;
 		rtd->ops.pointer	= soc_pcm_pointer;
 		rtd->ops.ioctl		= snd_soc_pcm_component_ioctl;
+		rtd->ops.sync_stop	= snd_soc_pcm_component_sync_stop;
 	}
 
 	for_each_rtd_components(rtd, rtdcom, component) {
