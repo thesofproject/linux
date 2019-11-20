@@ -382,6 +382,22 @@ static int byt_reset(struct snd_sof_dev *sdev)
 	return 0;
 }
 
+static int byt_remove(struct snd_sof_dev *sdev)
+{
+	/* put DSP into reset, set reset vector and stall */
+	snd_sof_dsp_update_bits64(sdev, BYT_DSP_BAR, SHIM_CSR,
+				  SHIM_BYT_CSR_RST | SHIM_BYT_CSR_VECTOR_SEL |
+				  SHIM_BYT_CSR_STALL,
+				  SHIM_BYT_CSR_RST | SHIM_BYT_CSR_VECTOR_SEL |
+				  SHIM_BYT_CSR_STALL);
+
+	/* disable Interrupt from both sides */
+	snd_sof_dsp_update_bits64(sdev, BYT_DSP_BAR, SHIM_IMRX, 0x3, 0x3);
+	snd_sof_dsp_update_bits64(sdev, BYT_DSP_BAR, SHIM_IMRD, 0x3, 0x3);
+
+	return 0;
+}
+
 /* Baytrail DAIs */
 static struct snd_soc_dai_driver byt_dai[] = {
 {
@@ -654,6 +670,7 @@ irq:
 const struct snd_sof_dsp_ops sof_byt_ops = {
 	/* device init */
 	.probe		= byt_acpi_probe,
+	.remove		= byt_remove,
 
 	/* DSP core boot / reset */
 	.run		= byt_run,
@@ -720,6 +737,7 @@ EXPORT_SYMBOL(byt_chip_info);
 const struct snd_sof_dsp_ops sof_cht_ops = {
 	/* device init */
 	.probe		= byt_acpi_probe,
+	.remove		= byt_remove,
 
 	/* DSP core boot / reset */
 	.run		= byt_run,
