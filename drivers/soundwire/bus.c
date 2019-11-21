@@ -1493,6 +1493,7 @@ EXPORT_SYMBOL(sdw_handle_slave_status);
 
 void sdw_clear_slave_status(struct sdw_bus *bus, u32 request)
 {
+	enum sdw_clk_stop_mode mode;
 	struct sdw_slave *slave;
 	int i;
 
@@ -1508,6 +1509,13 @@ void sdw_clear_slave_status(struct sdw_bus *bus, u32 request)
 		slave = sdw_get_slave(bus, i);
 		if (!slave)
 			continue;
+
+		/* only slaves in clock stop mode1 will be unattached */
+		if (request == SDW_UNATTACH_REQUEST_CLOCK_STOP_MODE1) {
+			mode = sdw_get_clk_stop_mode(slave);
+			if (mode != SDW_CLK_STOP_MODE1)
+				continue;
+		}
 
 		if (slave->status != SDW_SLAVE_UNATTACHED)
 			sdw_modify_slave_status(slave, SDW_SLAVE_UNATTACHED);
