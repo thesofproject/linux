@@ -289,6 +289,34 @@ int sof_ipc_tx_message(struct snd_sof_ipc *ipc, u32 header,
 		       void *msg_data, size_t msg_bytes, void *reply_data,
 		       size_t reply_bytes)
 {
+	struct snd_sof_dev *sdev = ipc->sdev;
+	int ret;
+
+	if (msg_bytes > SOF_IPC_MSG_MAX_SIZE ||
+	    reply_bytes > SOF_IPC_MSG_MAX_SIZE)
+		return -ENOBUFS;
+
+	snd_sof_dsp_set_power_state(sdev, SOF_DSP_STATE_SET_D0);
+
+	/* Serialise IPC TX */
+	mutex_lock(&ipc->tx_mutex);
+
+	ret = sof_ipc_tx_message_unlocked(ipc, header, msg_data, msg_bytes,
+					  reply_data, reply_bytes);
+
+	mutex_unlock(&ipc->tx_mutex);
+
+	snd_sof_dsp_set_power_state(sdev, SOF_DSP_STATE_SET_AUTO);
+
+	return ret;
+}
+EXPORT_SYMBOL(sof_ipc_tx_message);
+
+/* send IPC message from host to DSP without changing DSP power state */
+int sof_ipc_tx_message_nopm(struct snd_sof_ipc *ipc, u32 header,
+			    void *msg_data, size_t msg_bytes,
+			    void *reply_data, size_t reply_bytes)
+{
 	int ret;
 
 	if (msg_bytes > SOF_IPC_MSG_MAX_SIZE ||
@@ -305,7 +333,7 @@ int sof_ipc_tx_message(struct snd_sof_ipc *ipc, u32 header,
 
 	return ret;
 }
-EXPORT_SYMBOL(sof_ipc_tx_message);
+EXPORT_SYMBOL(sof_ipc_tx_message_nopm);
 
 /* handle reply message from DSP */
 int snd_sof_ipc_reply(struct snd_sof_dev *sdev, u32 msg_id)
