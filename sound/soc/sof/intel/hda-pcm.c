@@ -213,10 +213,10 @@ found:
 }
 
 int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
-		     struct snd_pcm_substream *substream)
+		     struct snd_sof_pcm_stream *sstream)
 {
 	struct hdac_ext_stream *dsp_stream;
-	int direction = substream->stream;
+	int direction = sstream->substream->stream;
 
 	dsp_stream = hda_dsp_stream_get(sdev, direction);
 
@@ -226,25 +226,27 @@ int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
 	}
 
 	/* binding pcm substream to hda stream */
-	substream->runtime->private_data = &dsp_stream->hstream;
+	sstream->substream->runtime->private_data = &dsp_stream->hstream;
 	return 0;
 }
 
 int hda_dsp_pcm_close(struct snd_sof_dev *sdev,
-		      struct snd_pcm_substream *substream)
+		      struct snd_sof_pcm_stream *sstream)
 {
-	struct hdac_stream *hstream = substream->runtime->private_data;
-	int direction = substream->stream;
+	struct hdac_stream *hstream =
+		sstream->substream->runtime->private_data;
+	int direction = sstream->substream->stream;
 	int ret;
 
 	ret = hda_dsp_stream_put(sdev, direction, hstream->stream_tag);
 
 	if (ret) {
-		dev_dbg(sdev->dev, "stream %s not opened!\n", substream->name);
+		dev_dbg(sdev->dev, "stream %s not opened!\n",
+			sstream->substream->name);
 		return -ENODEV;
 	}
 
 	/* unbinding pcm substream to hda stream */
-	substream->runtime->private_data = NULL;
+	sstream->substream->runtime->private_data = NULL;
 	return 0;
 }

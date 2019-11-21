@@ -309,10 +309,10 @@ static inline int snd_sof_dma_trace_trigger(struct snd_sof_dev *sdev, int cmd)
 /* host PCM ops */
 static inline int
 snd_sof_pcm_platform_open(struct snd_sof_dev *sdev,
-			  struct snd_pcm_substream *substream)
+			  struct snd_sof_pcm_stream *sstream)
 {
 	if (sof_ops(sdev) && sof_ops(sdev)->pcm_open)
-		return sof_ops(sdev)->pcm_open(sdev, substream);
+		return sof_ops(sdev)->pcm_open(sdev, sstream);
 
 	return 0;
 }
@@ -320,10 +320,10 @@ snd_sof_pcm_platform_open(struct snd_sof_dev *sdev,
 /* disconnect pcm substream to a host stream */
 static inline int
 snd_sof_pcm_platform_close(struct snd_sof_dev *sdev,
-			   struct snd_pcm_substream *substream)
+			   struct snd_sof_pcm_stream *sstream)
 {
 	if (sof_ops(sdev) && sof_ops(sdev)->pcm_close)
-		return sof_ops(sdev)->pcm_close(sdev, substream);
+		return sof_ops(sdev)->pcm_close(sdev, sstream);
 
 	return 0;
 }

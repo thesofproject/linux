@@ -79,6 +79,7 @@ struct snd_sof_debugfs_map;
 struct snd_soc_tplg_ops;
 struct snd_soc_component;
 struct snd_sof_pdata;
+struct snd_sof_pcm_stream;
 
 /*
  * SOF DSP HW abstraction operations.
@@ -142,10 +143,10 @@ struct snd_sof_dsp_ops {
 
 	/* connect pcm substream to a host stream */
 	int (*pcm_open)(struct snd_sof_dev *sdev,
-			struct snd_pcm_substream *substream); /* optional */
+			struct snd_sof_pcm_stream *sstream); /* optional */
 	/* disconnect pcm substream to a host stream */
 	int (*pcm_close)(struct snd_sof_dev *sdev,
-			 struct snd_pcm_substream *substream); /* optional */
+			 struct snd_sof_pcm_stream *sstream); /* optional */
 
 	/* host stream hw params */
 	int (*pcm_hw_params)(struct snd_sof_dev *sdev,
@@ -534,9 +535,9 @@ int intel_ipc_pcm_params(struct snd_sof_dev *sdev,
 			 const struct sof_ipc_pcm_params_reply *reply);
 
 int intel_pcm_open(struct snd_sof_dev *sdev,
-		   struct snd_pcm_substream *substream);
+		   struct snd_sof_pcm_stream *sstream);
 int intel_pcm_close(struct snd_sof_dev *sdev,
-		    struct snd_pcm_substream *substream);
+		    struct snd_sof_pcm_stream *sstream);
 
 int sof_machine_check(struct snd_sof_dev *sdev);
 

@@ -492,9 +492,9 @@ void hda_ipc_irq_dump(struct snd_sof_dev *sdev);
  * DSP PCM Operations.
  */
 int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
-		     struct snd_pcm_substream *substream);
+		     struct snd_sof_pcm_stream *sstream);
 int hda_dsp_pcm_close(struct snd_sof_dev *sdev,
-		      struct snd_pcm_substream *substream);
+		      struct snd_sof_pcm_stream *sstream);
 int hda_dsp_pcm_hw_params(struct snd_sof_dev *sdev,
 			  struct snd_pcm_substream *substream,
 			  struct snd_pcm_hw_params *params,

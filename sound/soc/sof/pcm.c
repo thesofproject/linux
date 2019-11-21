@@ -522,7 +522,8 @@ static int sof_pcm_open(struct snd_soc_component *component,
 	spcm->stream[substream->stream].substream = substream;
 	spcm->prepared[substream->stream] = false;
 
-	ret = snd_sof_pcm_platform_open(sdev, substream);
+	ret = snd_sof_pcm_platform_open(sdev,
+					&spcm->stream[substream->stream]);
 	if (ret < 0)
 		dev_err(component->dev, "error: pcm open failed %d\n", ret);
 
@@ -548,7 +549,8 @@ static int sof_pcm_close(struct snd_soc_component *component,
 	dev_dbg(component->dev, "pcm: close stream %d dir %d\n",
 		spcm->pcm.pcm_id, substream->stream);
 
-	err = snd_sof_pcm_platform_close(sdev, substream);
+	err = snd_sof_pcm_platform_close(sdev,
+					 &spcm->stream[substream->stream]);
 	if (err < 0) {
 		dev_err(component->dev, "error: pcm close failed %d\n",
 			err);

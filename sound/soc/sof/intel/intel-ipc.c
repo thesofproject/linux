@@ -18,7 +18,7 @@
 #include <sound/sof/stream.h>
 
 #include "../ops.h"
-#include "../sof-priv.h"
+#include "../sof-audio.h"
 
 struct intel_stream {
 	size_t posn_offset;
@@ -63,7 +63,7 @@ int intel_ipc_pcm_params(struct snd_sof_dev *sdev,
 EXPORT_SYMBOL(intel_ipc_pcm_params);
 
 int intel_pcm_open(struct snd_sof_dev *sdev,
-		   struct snd_pcm_substream *substream)
+		   struct snd_sof_pcm_stream *sstream)
 {
 	struct intel_stream *stream = kmalloc(sizeof(*stream), GFP_KERNEL);
 
@@ -71,18 +71,19 @@ int intel_pcm_open(struct snd_sof_dev *sdev,
 		return -ENOMEM;
 
 	/* binding pcm substream to hda stream */
-	substream->runtime->private_data = stream;
+	sstream->substream->runtime->private_data = stream;
 
 	return 0;
 }
 EXPORT_SYMBOL(intel_pcm_open);
 
 int intel_pcm_close(struct snd_sof_dev *sdev,
-		    struct snd_pcm_substream *substream)
+		    struct snd_sof_pcm_stream *sstream)
 {
-	struct intel_stream *stream = substream->runtime->private_data;
+	struct intel_stream *stream =
+		sstream->substream->runtime->private_data;
 
-	substream->runtime->private_data = NULL;
+	sstream->substream->runtime->private_data = NULL;
 	kfree(stream);
 
 	return 0;
