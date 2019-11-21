@@ -414,6 +414,9 @@ struct sof_intel_hda_dev {
 	/* PM related */
 	enum sof_dsp_state dsp_power_state;
 	struct mutex ps_mutex;	/* protects dsp_power_state change */
+	u32 pcm_active;		/* Count of active PCMs */
+	u32 lp_pcm_active;	/* Count of active low power PCMs */
+	struct delayed_work d0i3_work;
 	bool l1_support_changed;/* during suspend, is L1SEN changed or not */
 
 	/* DMIC device */
@@ -472,6 +475,7 @@ int hda_dsp_core_reset_power_down(struct snd_sof_dev *sdev,
 void hda_dsp_ipc_int_enable(struct snd_sof_dev *sdev);
 void hda_dsp_ipc_int_disable(struct snd_sof_dev *sdev);
 
+void hda_dsp_d0i3_work(struct work_struct *work);
 int hda_dsp_set_power_state(struct snd_sof_dev *sdev,
 			    enum sof_dsp_state_cmd cmd);
 int hda_dsp_power_state_init(struct sof_intel_hda_dev *hda);

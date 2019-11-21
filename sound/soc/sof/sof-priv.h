@@ -36,6 +36,9 @@ extern int sof_core_debug;
 /* time in ms for runtime suspend delay */
 #define SND_SOF_SUSPEND_DELAY_MS	2000
 
+/* time in ms for D0i3 entry delay */
+#define SND_SOF_D0I3_DELAY_MS	5000
+
 /* DMA buffer size for trace */
 #define DMA_BUF_SIZE_FOR_TRACE (PAGE_SIZE * 16)
 

@@ -215,6 +215,7 @@ found:
 int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
 		     struct snd_sof_pcm_stream *sstream)
 {
+	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct hdac_ext_stream *dsp_stream;
 	int direction = sstream->substream->stream;
 
@@ -227,12 +228,21 @@ int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
 
 	/* binding pcm substream to hda stream */
 	sstream->substream->runtime->private_data = &dsp_stream->hstream;
+
+	/* update active pcm counts */
+	hda->pcm_active++;
+	if (sstream->d0i3_compatible)
+		hda->lp_pcm_active++;
+
+	hda_dsp_set_power_state(sdev, SOF_DSP_STATE_SET_AUTO);
+
 	return 0;
 }
 
 int hda_dsp_pcm_close(struct snd_sof_dev *sdev,
 		      struct snd_sof_pcm_stream *sstream)
 {
+	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct hdac_stream *hstream =
 		sstream->substream->runtime->private_data;
 	int direction = sstream->substream->stream;
@@ -248,5 +258,13 @@ int hda_dsp_pcm_close(struct snd_sof_dev *sdev,
 
 	/* unbinding pcm substream to hda stream */
 	sstream->substream->runtime->private_data = NULL;
+
+	/* update active pcm counts */
+	hda->pcm_active--;
+	if (sstream->d0i3_compatible)
+		hda->lp_pcm_active--;
+
+	hda_dsp_set_power_state(sdev, SOF_DSP_STATE_SET_AUTO);
+
 	return 0;
 }

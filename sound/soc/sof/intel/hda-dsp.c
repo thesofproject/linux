@@ -353,6 +353,9 @@ int hda_dsp_set_d0i0(struct snd_sof_dev *sdev)
 		goto exit;
 	}
 
+	/* First Cancel any pending attempt to put DSP to D0i3 */
+	cancel_delayed_work_sync(&hda->d0i3_work);
+
 	/* Write to D0I3C after Command-In-Progress bit is cleared */
 	ret = hda_dsp_wait_d0i3c_done(sdev);
 	if (ret < 0) {
@@ -446,17 +449,42 @@ exit:
 	return ret;
 }
 
+void hda_dsp_d0i3_work(struct work_struct *work)
+{
+	struct sof_intel_hda_dev *hda =
+		container_of(work, struct sof_intel_hda_dev,
+			     d0i3_work.work);
+	struct snd_sof_dev *sdev = dev_get_drvdata(hda->dev);
+
+	/* keep DMA trace opened for delayed D0I3 entry (in S0) */
+	hda_dsp_set_d0i3(sdev, 0);
+}
+
 int hda_dsp_set_power_state(struct snd_sof_dev *sdev,
 			    enum sof_dsp_state_cmd cmd)
 {
+	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	int ret = 0;
 
 	switch (cmd) {
+	case SOF_DSP_STATE_SET_AUTO:
+		/* First Cancel any pending attempt to put DSP to D0i3 */
+		cancel_delayed_work_sync(&hda->d0i3_work);
+
+		/* Schedule delay entry to D0I3 if needed */
+		if (hda->lp_pcm_active &&
+		    hda->lp_pcm_active == hda->pcm_active)
+			schedule_delayed_work(&hda->d0i3_work,
+					      SND_SOF_D0I3_DELAY_MS);
+		break;
 	case SOF_DSP_STATE_SET_D0:
 		ret = hda_dsp_set_d0i0(sdev);
 		break;
 	case SOF_DSP_STATE_SET_D0I3:
-		/* disable DMA trace */
+		/* First Cancel any pending attempt to put DSP to D0i3 */
+		cancel_delayed_work_sync(&hda->d0i3_work);
+
+		/* disable DMA trace for instant D0I3 entry (in S2Idle) */
 		ret = hda_dsp_set_d0i3(sdev, HDA_PM_NO_DMA_TRACE);
 		break;
 	case SOF_DSP_STATE_SET_D3:
