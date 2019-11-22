@@ -18,6 +18,7 @@
 #include "../ops.h"
 #include "hda.h"
 #include "hda-ipc.h"
+#include "../sof-audio.h"
 
 static const struct snd_sof_debugfs_map cnl_dsp_debugfs[] = {
 	{"hda", HDA_DSP_HDA_BAR, 0, 0x4000, SOF_DEBUGFS_ACCESS_ALWAYS},
@@ -231,7 +232,6 @@ const struct snd_sof_dsp_ops sof_cnl_ops = {
 	.block_write	= sof_block_write,
 
 	/* doorbell */
-	.irq_handler	= hda_dsp_ipc_irq_handler,
 	.irq_thread	= cnl_ipc_irq_thread,
 
 	/* ipc */
@@ -242,6 +242,12 @@ const struct snd_sof_dsp_ops sof_cnl_ops = {
 
 	.ipc_msg_data	= hda_ipc_msg_data,
 	.ipc_pcm_params	= hda_ipc_pcm_params,
+
+	/* machine driver */
+	.machine_select = hda_machine_select,
+	.machine_register = sof_machine_register,
+	.machine_unregister = sof_machine_unregister,
+	.set_mach_params = hda_set_mach_params,
 
 	/* debug */
 	.debug_map	= cnl_dsp_debugfs,
