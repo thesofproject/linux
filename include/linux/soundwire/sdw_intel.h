@@ -131,4 +131,21 @@ void sdw_intel_exit(struct sdw_intel_ctx *ctx);
 
 void sdw_intel_enable_irq(void __iomem *mmio_base, bool enable);
 
+irqreturn_t sdw_intel_thread(int irq, void *dev_id);
+
+#define SDW_ADSPIS2	0x14
+#define SDW_ADSPIC_SNDW	BIT(5)
+
+static inline
+bool sdw_intel_check_irq(struct sdw_intel_ctx *ctx)
+{
+	u32 int_status;
+
+	int_status = readl(ctx->mmio_base + SDW_ADSPIS2);
+	if (int_status & SDW_ADSPIC_SNDW)
+		return true;
+
+	return false;
+}
+
 #endif
