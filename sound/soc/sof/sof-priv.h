@@ -298,6 +298,10 @@ struct snd_sof_ipc_msg {
 	bool ipc_complete;
 };
 
+#define SOF_IRQ_IPC	BIT(0)
+#define SOF_IRQ_STREAM	BIT(1)
+#define SOF_IRQ_SDW	BIT(2)
+
 /*
  * SOF Device Level.
  */
@@ -387,6 +391,8 @@ struct snd_sof_dev {
 	u32 dtrace_draining;
 
 	bool msi_enabled;
+
+	u32 irq_event;
 
 	void *private;			/* core does not touch this */
 };
