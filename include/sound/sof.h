@@ -17,6 +17,8 @@
 
 struct snd_sof_dsp_ops;
 
+struct sof_vfe;
+
 /*
  * SOF Platform data.
  */
@@ -29,6 +31,8 @@ struct snd_sof_pdata {
 
 	/* indicate how many first bytes shouldn't be loaded into DSP memory. */
 	size_t fw_offset;
+
+	struct sof_vfe *vfe;
 
 	/*
 	 * notification callback used if the hardware initialization

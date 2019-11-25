@@ -58,6 +58,9 @@ extern int sof_core_debug;
 /* So far the master core on all DSPs has ID 0 */
 #define SOF_DSP_MASTER_CORE 0
 
+/* The maximum number of components a virtio user vFE driver can use */
+#define SOF_RPMSG_MAX_UOS_COMPS	1000
+
 /* DSP power state */
 enum sof_dsp_power_states {
 	SOF_DSP_PM_D0,
@@ -252,6 +255,10 @@ struct snd_sof_dsp_ops {
 	void (*machine_select)(struct snd_sof_dev *sdev); /* optional */
 	void (*set_mach_params)(const struct snd_soc_acpi_mach *mach,
 				struct device *dev); /* optional */
+
+	/* VirtIO operations */
+	int (*request_topology)(struct snd_sof_dev *sdev,
+				struct firmware *fw); /* optional */
 
 	/* DAI ops */
 	struct snd_soc_dai_driver *drv;
@@ -448,6 +455,18 @@ struct snd_sof_dev {
 	void *private;			/* core does not touch this */
 };
 
+/* SOF generic IPC data */
+struct snd_sof_ipc {
+	struct snd_sof_dev *sdev;
+
+	/* protects messages and the disable flag */
+	struct mutex tx_mutex;
+	/* disables further sending of ipc's */
+	bool disable_ipc_tx;
+
+	struct snd_sof_ipc_msg msg;
+};
+
 /*
  * Device Level.
  */
@@ -526,6 +545,15 @@ void snd_sof_get_status(struct snd_sof_dev *sdev, u32 panic_code,
 			void *stack, size_t stack_words);
 int snd_sof_init_trace_ipc(struct snd_sof_dev *sdev);
 void snd_sof_handle_fw_exception(struct snd_sof_dev *sdev);
+
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_RPMSG_FE)
+int sof_vfe_pcm_copy_user(struct snd_soc_component *component,
+			  struct snd_pcm_substream *substream, int channel,
+			  unsigned long pos, void __user *buf,
+			  unsigned long bytes);
+#else
+#define sof_vfe_pcm_copy_user NULL
+#endif
 
 /*
  * Platform specific ops.

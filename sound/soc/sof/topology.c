@@ -1444,7 +1444,8 @@ static int sof_widget_load_dai(struct snd_soc_component *scomp, int index,
 	comp_dai.comp.hdr.size = sizeof(comp_dai);
 	comp_dai.comp.hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_COMP_NEW;
 	comp_dai.comp.id = swidget->comp_id;
-	comp_dai.comp.type = SOF_COMP_DAI;
+	comp_dai.comp.type = sdev->pdata->vfe ? SOF_COMP_VIRT_CON :
+		SOF_COMP_DAI;
 	comp_dai.comp.pipeline_id = index;
 	comp_dai.comp.core = core;
 	comp_dai.config.hdr.size = sizeof(comp_dai.config);
@@ -3684,12 +3685,21 @@ static struct snd_soc_tplg_ops sof_tplg_ops = {
 
 int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 {
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct firmware vfe_fw;
 	const struct firmware *fw;
 	int ret;
 
 	dev_dbg(scomp->dev, "loading topology:%s\n", file);
 
-	ret = request_firmware(&fw, file, scomp->dev);
+	/* VirtIO guests request topology from the host */
+	if (sdev->pdata->vfe) {
+		fw = &vfe_fw;
+		ret = sof_ops(sdev)->request_topology(sdev, file, &vfe_fw);
+	} else {
+		ret = request_firmware(&fw, file, sdev->dev);
+	}
+
 	if (ret < 0) {
 		dev_err(scomp->dev, "error: tplg request firmware %s failed err: %d\n",
 			file, ret);
@@ -3705,7 +3715,9 @@ int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 		ret = -EINVAL;
 	}
 
-	release_firmware(fw);
+	if (!sdev->pdata->vfe)
+		release_firmware(fw);
+
 	return ret;
 }
 EXPORT_SYMBOL(snd_sof_load_topology);

@@ -678,6 +678,13 @@ static int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 		return -EINVAL;
 	}
 
+	/* VirtIO guests have no .dai_config, DAIs are configured by the host */
+	if (!dai->dai_config) {
+		dev_dbg(component->dev, "no DAI config for %s!\n",
+			rtd->dai_link->name);
+		return 0;
+	}
+
 	/* read rate and channels from topology */
 	switch (dai->dai_config->type) {
 	case SOF_DAI_INTEL_SSP:
@@ -793,6 +800,8 @@ void snd_sof_new_platform_drv(struct snd_sof_dev *sdev)
 	pd->hw_free = sof_pcm_hw_free;
 	pd->trigger = sof_pcm_trigger;
 	pd->pointer = sof_pcm_pointer;
+	if (plat_data->vfe)
+		pd->copy_user = sof_vfe_pcm_copy_user;
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_COMPRESS)
 	pd->compress_ops = &sof_compressed_ops;

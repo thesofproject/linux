@@ -10,6 +10,10 @@ snd-sof-of-objs := sof-of-dev.o
 
 snd-sof-nocodec-objs := nocodec.o
 
+ifdef CONFIG_SND_SOC_SOF_RPMSG_FE
+snd-sof-objs += rpmsg-vfe.o
+endif
+
 obj-$(CONFIG_SND_SOC_SOF) += snd-sof.o
 obj-$(CONFIG_SND_SOC_SOF_NOCODEC) += snd-sof-nocodec.o
 

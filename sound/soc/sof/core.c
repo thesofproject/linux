@@ -178,7 +178,8 @@ static int sof_load_and_run_firmware(struct snd_sof_dev *sdev)
 	return 0;
 
 fw_run_err:
-	snd_sof_fw_unload(sdev);
+	if (!sdev->pdata->vfe)
+		snd_sof_fw_unload(sdev);
 
 	return ret;
 }
@@ -229,9 +230,12 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 		goto ipc_err;
 	}
 
-	ret = sof_load_and_run_firmware(sdev);
-	if (ret < 0)
-		goto fw_load_err;
+	/* virtio front-end mode will not touch HW, skip fw loading */
+	if (!plat_data->vfe) {
+		ret = sof_load_and_run_firmware(sdev);
+		if (ret < 0)
+			goto fw_load_err;
+	}
 
 	/* hereafter all FW boot flows are for PM reasons */
 	sdev->first_boot = false;
@@ -265,7 +269,8 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 
 fw_trace_err:
 	snd_sof_free_trace(sdev);
-	snd_sof_fw_unload(sdev);
+	if (!sdev->pdata->vfe)
+		snd_sof_fw_unload(sdev);
 fw_load_err:
 	snd_sof_ipc_free(sdev);
 ipc_err:
@@ -369,10 +374,12 @@ int snd_sof_device_remove(struct device *dev)
 		cancel_work_sync(&sdev->probe_work);
 
 	if (sdev->fw_state > SOF_FW_BOOT_NOT_STARTED) {
-		snd_sof_fw_unload(sdev);
+		if (!pdata->vfe) {
+			snd_sof_fw_unload(sdev);
+			snd_sof_free_trace(sdev);
+		}
 		snd_sof_ipc_free(sdev);
 		snd_sof_free_debug(sdev);
-		snd_sof_free_trace(sdev);
 	}
 
 	/*
@@ -391,9 +398,11 @@ int snd_sof_device_remove(struct device *dev)
 	if (sdev->fw_state > SOF_FW_BOOT_NOT_STARTED)
 		snd_sof_remove(sdev);
 
-	/* release firmware */
-	release_firmware(pdata->fw);
-	pdata->fw = NULL;
+	if (!pdata->vfe) {
+		/* release firmware */
+		release_firmware(pdata->fw);
+		pdata->fw = NULL;
+	}
 
 	return 0;
 }

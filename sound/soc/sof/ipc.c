@@ -25,18 +25,6 @@ static void ipc_stream_message(struct snd_sof_dev *sdev, u32 msg_cmd);
  * IPC message Tx/Rx message handling.
  */
 
-/* SOF generic IPC data */
-struct snd_sof_ipc {
-	struct snd_sof_dev *sdev;
-
-	/* protects messages and the disable flag */
-	struct mutex tx_mutex;
-	/* disables further sending of ipc's */
-	bool disable_ipc_tx;
-
-	struct snd_sof_ipc_msg msg;
-};
-
 struct sof_ipc_ctrl_data_params {
 	size_t msg_bytes;
 	size_t hdr_bytes;
@@ -84,6 +72,10 @@ static void ipc_log_header(struct device *dev, u8 *text, u32 cmd)
 			str2 = "BUFFER_NEW"; break;
 		case SOF_IPC_TPLG_BUFFER_FREE:
 			str2 = "BUFFER_FREE"; break;
+		case SOF_IPC_TPLG_VFE_GET:
+			str2 = "VFE_GET"; break;
+		case SOF_IPC_TPLG_VFE_COMP_ID:
+			str2 = "VFE_COMP_ID"; break;
 		default:
 			str2 = "unknown type"; break;
 		}

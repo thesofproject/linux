@@ -96,6 +96,13 @@ config SND_SOC_SOF_STRICT_ABI_CHECKS
 	  If you are not involved in SOF releases and CI development
 	  select "N".
 
+config SND_SOC_SOF_RPMSG_FE
+	bool "SOF VirtIO guest role"
+	depends on SND_SOC_SOF_NOCODEC_SUPPORT
+	depends on VIRTIO && RPMSG_VIRTIO
+	---help---
+	  Enable SOF for a VirtIO based guest configuration.
+
 config SND_SOC_SOF_DEBUG
 	bool "SOF debugging features"
 	help
