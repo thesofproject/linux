@@ -1415,37 +1415,41 @@ int dpcm_path_get(struct snd_soc_pcm_runtime *fe,
 	return paths;
 }
 
+static bool dpcm_be_is_active(struct snd_soc_dpcm *dpcm, int stream,
+			      struct snd_soc_dapm_widget_list *list)
+{
+	struct snd_soc_dapm_widget *widget;
+	struct snd_soc_dai *dai;
+	unsigned int i;
+
+	/* is there a valid CPU DAI widget for this BE */
+	widget = dai_get_widget(dpcm->be->cpu_dai, stream);
+
+	/* prune the BE if it's no longer in our active list */
+	if (widget && widget_in_list(list, widget))
+		return true;
+
+	/* is there a valid CODEC DAI widget for this BE */
+	for_each_rtd_codec_dai(dpcm->be, i, dai) {
+		widget = dai_get_widget(dai, stream);
+
+		/* prune the BE if it's no longer in our active list */
+		if (widget && widget_in_list(list, widget))
+			return true;
+	}
+
+	return false;
+}
+
 static int dpcm_prune_paths(struct snd_soc_pcm_runtime *fe, int stream,
 	struct snd_soc_dapm_widget_list **list_)
 {
 	struct snd_soc_dpcm *dpcm;
-	struct snd_soc_dapm_widget_list *list = *list_;
-	struct snd_soc_dapm_widget *widget;
-	struct snd_soc_dai *dai;
 	int prune = 0;
-	int do_prune;
 
 	/* Destroy any old FE <--> BE connections */
 	for_each_dpcm_be(fe, stream, dpcm) {
-		unsigned int i;
-
-		/* is there a valid CPU DAI widget for this BE */
-		widget = dai_get_widget(dpcm->be->cpu_dai, stream);
-
-		/* prune the BE if it's no longer in our active list */
-		if (widget && widget_in_list(list, widget))
-			continue;
-
-		/* is there a valid CODEC DAI widget for this BE */
-		do_prune = 1;
-		for_each_rtd_codec_dai(dpcm->be, i, dai) {
-			widget = dai_get_widget(dai, stream);
-
-			/* prune the BE if it's no longer in our active list */
-			if (widget && widget_in_list(list, widget))
-				do_prune = 0;
-		}
-		if (!do_prune)
+		if (dpcm_be_is_active(dpcm, stream, *list_))
 			continue;
 
 		dev_dbg(fe->dev, "ASoC: pruning %s BE %s for %s\n",
