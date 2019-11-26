@@ -54,10 +54,22 @@ extern int sof_core_debug;
 	(IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_ENABLE_DEBUGFS_CACHE) || \
 	 IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_IPC_FLOOD_TEST))
 
-/* DSP D0ix sub-state */
-enum sof_d0_substate {
-	SOF_DSP_D0I0 = 0,	/* DSP default D0 substate */
-	SOF_DSP_D0I3,		/* DSP D0i3(low power) substate*/
+#define	SOF_DSP_STATE_BIT_D0		BIT(0) /* dsp is in D0 or D3 */
+#define	SOF_DSP_STATE_BIT_I3		BIT(1) /* dsp is in I3 or I0 */
+/* dsp power state is under updating */
+#define	SOF_DSP_STATE_BIT_UPDATE	BIT(2)
+
+enum sof_dsp_state {
+	SOF_DSP_STATE_D3 = 0,
+	SOF_DSP_STATE_D0 = SOF_DSP_STATE_BIT_D0,
+	SOF_DSP_STATE_D0I3 = SOF_DSP_STATE_BIT_D0 | SOF_DSP_STATE_BIT_I3,
+};
+
+enum sof_dsp_state_cmd {
+	SOF_DSP_STATE_SET_D3 = SOF_DSP_STATE_D3,
+	SOF_DSP_STATE_SET_D0 = SOF_DSP_STATE_D0,
+	SOF_DSP_STATE_SET_D0I3 = SOF_DSP_STATE_D0I3,
+	SOF_DSP_STATE_SET_AUTO = SOF_DSP_STATE_BIT_UPDATE,
 };
 
 struct snd_sof_dev;
@@ -169,14 +181,15 @@ struct snd_sof_dsp_ops {
 	int (*post_fw_run)(struct snd_sof_dev *sof_dev); /* optional */
 
 	/* DSP PM */
-	int (*suspend)(struct snd_sof_dev *sof_dev); /* optional */
+	int (*suspend)(struct snd_sof_dev *sof_dev,
+		       enum sof_dsp_state state); /* optional */
 	int (*resume)(struct snd_sof_dev *sof_dev); /* optional */
 	int (*runtime_suspend)(struct snd_sof_dev *sof_dev); /* optional */
 	int (*runtime_resume)(struct snd_sof_dev *sof_dev); /* optional */
 	int (*runtime_idle)(struct snd_sof_dev *sof_dev); /* optional */
 	int (*set_hw_params_upon_resume)(struct snd_sof_dev *sdev); /* optional */
 	int (*set_power_state)(struct snd_sof_dev *sdev,
-			       enum sof_d0_substate d0_substate); /* optional */
+			       enum sof_dsp_state_cmd cmd); /* optional */
 
 	/* DSP clocking */
 	int (*set_clk)(struct snd_sof_dev *sof_dev, u32 freq); /* optional */
@@ -322,7 +335,6 @@ struct snd_sof_dev {
 	struct snd_soc_component_driver plat_drv;
 
 	/* power states related */
-	enum sof_d0_substate d0_substate;
 	/* flag to track if the intended power target of suspend is S0ix */
 	bool s0_suspend;
 
@@ -414,9 +426,6 @@ int snd_sof_resume(struct device *dev);
 int snd_sof_suspend(struct device *dev);
 int snd_sof_prepare(struct device *dev);
 void snd_sof_complete(struct device *dev);
-int snd_sof_set_d0_substate(struct snd_sof_dev *sdev,
-			    enum sof_d0_substate d0_substate);
-
 void snd_sof_new_platform_drv(struct snd_sof_dev *sdev);
 
 int snd_sof_create_page_table(struct device *dev,

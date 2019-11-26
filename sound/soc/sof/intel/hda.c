@@ -480,6 +480,7 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	hdev = devm_kzalloc(sdev->dev, sizeof(*hdev), GFP_KERNEL);
 	if (!hdev)
 		return -ENOMEM;
+	hdev->dev = sdev->pdata->dev;
 	sdev->pdata->hw_pdata = hdev;
 	hdev->desc = chip;
 
@@ -597,6 +598,9 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	/* set default mailbox offset for FW ready message */
 	sdev->dsp_box.offset = HDA_DSP_MBOX_UPLINK_OFFSET;
 
+	mutex_init(&hdev->ps_mutex);
+	hda_dsp_power_state_init(hdev);
+
 	return 0;
 
 free_ipc_irq:
@@ -661,6 +665,8 @@ int hda_dsp_remove(struct snd_sof_dev *sdev)
 	snd_hdac_ext_bus_exit(bus);
 #endif
 	hda_codec_i915_exit(sdev);
+
+	hda_dsp_power_state_reset(hda);
 
 	return 0;
 }

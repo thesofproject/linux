@@ -397,6 +397,8 @@ struct sof_intel_hda_dev {
 
 	struct hda_bus hbus;
 
+	struct device *dev;
+
 	/* hw config */
 	const struct sof_intel_dsp_desc *desc;
 
@@ -410,6 +412,8 @@ struct sof_intel_hda_dev {
 	u32 stream_max;
 
 	/* PM related */
+	enum sof_dsp_state dsp_power_state;
+	struct mutex ps_mutex;	/* protects dsp_power_state change */
 	bool l1_support_changed;/* during suspend, is L1SEN changed or not */
 
 	/* DMIC device */
@@ -469,9 +473,11 @@ void hda_dsp_ipc_int_enable(struct snd_sof_dev *sdev);
 void hda_dsp_ipc_int_disable(struct snd_sof_dev *sdev);
 
 int hda_dsp_set_power_state(struct snd_sof_dev *sdev,
-			    enum sof_d0_substate d0_substate);
+			    enum sof_dsp_state_cmd cmd);
+int hda_dsp_power_state_init(struct sof_intel_hda_dev *hda);
+int hda_dsp_power_state_reset(struct sof_intel_hda_dev *hda);
 
-int hda_dsp_suspend(struct snd_sof_dev *sdev);
+int hda_dsp_suspend(struct snd_sof_dev *sdev, u32 state);
 int hda_dsp_resume(struct snd_sof_dev *sdev);
 int hda_dsp_runtime_suspend(struct snd_sof_dev *sdev);
 int hda_dsp_runtime_resume(struct snd_sof_dev *sdev);

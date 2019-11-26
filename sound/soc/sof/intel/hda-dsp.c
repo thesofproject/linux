@@ -338,47 +338,153 @@ static int hda_dsp_send_pm_gate_ipc(struct snd_sof_dev *sdev, u32 flags)
 				  sizeof(pm_gate), &reply, sizeof(reply));
 }
 
-int hda_dsp_set_power_state(struct snd_sof_dev *sdev,
-			    enum sof_d0_substate d0_substate)
+int hda_dsp_set_d0i0(struct snd_sof_dev *sdev)
 {
+	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct hdac_bus *bus = sof_to_bus(sdev);
 	u32 flags;
-	int ret;
-	u8 value;
+	int ret = 0;
+
+	mutex_lock(&hda->ps_mutex);
+	/* return if not in D0I3 */
+	if (hda->dsp_power_state != SOF_DSP_STATE_D0I3) {
+		dev_vdbg(bus->dev, "%s dsp power state already in %d\n",
+			 __func__, hda->dsp_power_state);
+		goto exit;
+	}
 
 	/* Write to D0I3C after Command-In-Progress bit is cleared */
 	ret = hda_dsp_wait_d0i3c_done(sdev);
 	if (ret < 0) {
 		dev_err(bus->dev, "CIP timeout before D0I3C update!\n");
-		return ret;
+		goto exit;
 	}
 
 	/* Update D0I3C register */
-	value = d0_substate == SOF_DSP_D0I3 ? SOF_HDA_VS_D0I3C_I3 : 0;
-	snd_hdac_chip_updateb(bus, VS_D0I3C, SOF_HDA_VS_D0I3C_I3, value);
+	snd_hdac_chip_updateb(bus, VS_D0I3C, SOF_HDA_VS_D0I3C_I3, 0);
 
 	/* Wait for cmd in progress to be cleared before exiting the function */
 	ret = hda_dsp_wait_d0i3c_done(sdev);
 	if (ret < 0) {
 		dev_err(bus->dev, "CIP timeout after D0I3C update!\n");
-		return ret;
+		goto exit;
 	}
 
 	dev_vdbg(bus->dev, "D0I3C updated, register = 0x%x\n",
 		 snd_hdac_chip_readb(bus, VS_D0I3C));
 
-	if (d0_substate == SOF_DSP_D0I0)
-		flags = HDA_PM_PPG;/* prevent power gating in D0 */
-	else
-		flags = HDA_PM_NO_DMA_TRACE;/* disable DMA trace in D0I3*/
+	flags = HDA_PM_PPG;/* prevent power gating in D0 */
 
 	/* sending pm_gate IPC */
 	ret = hda_dsp_send_pm_gate_ipc(sdev, flags);
-	if (ret < 0)
+	if (ret < 0) {
 		dev_err(sdev->dev,
 			"error: PM_GATE ipc error %d\n", ret);
+		goto exit;
+	}
+
+	/* success, update power state */
+	hda->dsp_power_state = SOF_DSP_STATE_D0;
+
+exit:
+	mutex_unlock(&hda->ps_mutex);
+	return ret;
+}
+
+int hda_dsp_set_d0i3(struct snd_sof_dev *sdev, u32 flags)
+{
+	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
+	struct hdac_bus *bus = sof_to_bus(sdev);
+	int ret = 0;
+
+	mutex_lock(&hda->ps_mutex);
+
+	/* return if in D3 */
+	if (hda->dsp_power_state == SOF_DSP_STATE_D3) {
+		dev_vdbg(bus->dev, "%s dsp power state already in %d\n",
+			 __func__, hda->dsp_power_state);
+		goto exit;
+	}
+
+	/* sending pm_gate IPC */
+	ret = hda_dsp_send_pm_gate_ipc(sdev, flags);
+	if (ret < 0) {
+		dev_err(sdev->dev,
+			"error: PM_GATE ipc error %d\n", ret);
+		goto exit;
+	}
+
+	/* return if already in D0I3 */
+	if (hda->dsp_power_state == SOF_DSP_STATE_D0I3)
+		goto exit;
+
+	/* Write to D0I3C after Command-In-Progress bit is cleared */
+	ret = hda_dsp_wait_d0i3c_done(sdev);
+	if (ret < 0) {
+		dev_err(bus->dev, "CIP timeout before D0I3C update!\n");
+		goto exit;
+	}
+
+	/* Update D0I3C register */
+	snd_hdac_chip_updateb(bus, VS_D0I3C, SOF_HDA_VS_D0I3C_I3,
+			      SOF_HDA_VS_D0I3C_I3);
+
+	/* Wait for cmd in progress to be cleared before exiting the function */
+	ret = hda_dsp_wait_d0i3c_done(sdev);
+	if (ret < 0) {
+		dev_err(bus->dev, "CIP timeout after D0I3C update!\n");
+		goto exit;
+	}
+
+	dev_vdbg(bus->dev, "D0I3C updated, register = 0x%x\n",
+		 snd_hdac_chip_readb(bus, VS_D0I3C));
+
+	hda->dsp_power_state = SOF_DSP_STATE_D0I3;
+
+exit:
+	mutex_unlock(&hda->ps_mutex);
+	return ret;
+}
+
+int hda_dsp_set_power_state(struct snd_sof_dev *sdev,
+			    enum sof_dsp_state_cmd cmd)
+{
+	int ret = 0;
+
+	switch (cmd) {
+	case SOF_DSP_STATE_SET_D0:
+		ret = hda_dsp_set_d0i0(sdev);
+		break;
+	case SOF_DSP_STATE_SET_D0I3:
+		/* disable DMA trace */
+		ret = hda_dsp_set_d0i3(sdev, HDA_PM_NO_DMA_TRACE);
+		break;
+	case SOF_DSP_STATE_SET_D3:
+	default:
+		dev_info(sdev->dev, "Do nothing for non-D0ix state %d.\n",
+			 cmd);
+		break;
+	}
 
 	return ret;
+}
+
+int hda_dsp_power_state_init(struct sof_intel_hda_dev *hda)
+{
+	mutex_lock(&hda->ps_mutex);
+	hda->dsp_power_state = SOF_DSP_STATE_D0;
+	mutex_unlock(&hda->ps_mutex);
+
+	return 0;
+}
+
+int hda_dsp_power_state_reset(struct sof_intel_hda_dev *hda)
+{
+	mutex_lock(&hda->ps_mutex);
+	hda->dsp_power_state = SOF_DSP_STATE_D3;
+	mutex_unlock(&hda->ps_mutex);
+
+	return 0;
 }
 
 static int hda_suspend(struct snd_sof_dev *sdev, bool runtime_suspend)
@@ -428,11 +534,14 @@ static int hda_suspend(struct snd_sof_dev *sdev, bool runtime_suspend)
 		return ret;
 	}
 
+	hda_dsp_power_state_reset(hda);
+
 	return 0;
 }
 
 static int hda_resume(struct snd_sof_dev *sdev, bool runtime_resume)
 {
+	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
 	struct hdac_bus *bus = sof_to_bus(sdev);
 	struct hdac_ext_link *hlink = NULL;
@@ -473,6 +582,8 @@ static int hda_resume(struct snd_sof_dev *sdev, bool runtime_resume)
 	hda_dsp_ctrl_ppcap_enable(sdev, true);
 	hda_dsp_ctrl_ppcap_int_enable(sdev, true);
 
+	hda_dsp_power_state_init(hda);
+
 	return 0;
 }
 
@@ -480,8 +591,17 @@ int hda_dsp_resume(struct snd_sof_dev *sdev)
 {
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct pci_dev *pci = to_pci_dev(sdev->dev);
+	int ret;
 
-	if (sdev->s0_suspend) {
+	if (hda->dsp_power_state == SOF_DSP_STATE_D0I3) {
+		/* set DSP power state */
+		ret = hda_dsp_set_power_state(sdev, SOF_DSP_STATE_SET_D0);
+		if (ret < 0) {
+			dev_err(sdev->dev, "error: failed to exit from D0I3 %d\n",
+				ret);
+			return ret;
+		}
+
 		/* restore L1SEN bit */
 		if (hda->l1_support_changed)
 			snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR,
@@ -523,14 +643,22 @@ int hda_dsp_runtime_suspend(struct snd_sof_dev *sdev)
 	return hda_suspend(sdev, true);
 }
 
-int hda_dsp_suspend(struct snd_sof_dev *sdev)
+int hda_dsp_suspend(struct snd_sof_dev *sdev, enum sof_dsp_state state)
 {
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct hdac_bus *bus = sof_to_bus(sdev);
 	struct pci_dev *pci = to_pci_dev(sdev->dev);
 	int ret;
 
-	if (sdev->s0_suspend) {
+	if (state == SOF_DSP_STATE_D0I3) {
+		/* set DSP power state */
+		ret = hda_dsp_set_power_state(sdev, SOF_DSP_STATE_SET_D0I3);
+		if (ret < 0) {
+			dev_err(sdev->dev, "error: failed to enter D0I3, %d\n",
+				ret);
+			return ret;
+		}
+
 		/* enable L1SEN to make sure the system can enter S0Ix */
 		hda->l1_support_changed =
 			snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR,

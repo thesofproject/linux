@@ -146,10 +146,11 @@ static inline int snd_sof_dsp_resume(struct snd_sof_dev *sdev)
 	return 0;
 }
 
-static inline int snd_sof_dsp_suspend(struct snd_sof_dev *sdev)
+static inline int snd_sof_dsp_suspend(struct snd_sof_dev *sdev,
+				      enum sof_dsp_state state)
 {
 	if (sof_ops(sdev)->suspend)
-		return sof_ops(sdev)->suspend(sdev);
+		return sof_ops(sdev)->suspend(sdev, state);
 
 	return 0;
 }
@@ -194,10 +195,10 @@ static inline int snd_sof_dsp_set_clk(struct snd_sof_dev *sdev, u32 freq)
 }
 
 static inline int snd_sof_dsp_set_power_state(struct snd_sof_dev *sdev,
-					      enum sof_d0_substate substate)
+					      enum sof_dsp_state_cmd cmd)
 {
 	if (sof_ops(sdev)->set_power_state)
-		return sof_ops(sdev)->set_power_state(sdev, substate);
+		return sof_ops(sdev)->set_power_state(sdev, cmd);
 
 	/* D0 substate is not supported */
 	return -ENOTSUPP;
