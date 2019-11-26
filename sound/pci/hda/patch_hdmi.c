@@ -398,6 +398,8 @@ static int hdmi_create_eld_ctl(struct hda_codec *codec, int pcm_idx,
 	if (err < 0)
 		return err;
 
+	codec_warn(codec, "HDMI: DEBUG: eld ctl %x created for pcm_idx %d\n",
+		   kctl, pcm_idx);
 	get_hdmi_pcm(spec, pcm_idx)->eld_ctl = kctl;
 	return 0;
 }
@@ -1382,7 +1384,11 @@ static void hdmi_attach_hda_pcm(struct hdmi_spec *spec,
 	/* pcm already be attached to the pin */
 	if (per_pin->pcm)
 		return;
+
 	idx = hdmi_find_pcm_slot(spec, per_pin);
+	codec_warn(spec->codec,
+		   "HDMI: DEBUG: pcm assign pin %d to pcm_idx %d, num_nid %d, dev_id %d\n",
+		   per_pin->pin_nid, idx, spec->num_nids, per_pin->dev_id);
 	if (idx == -EBUSY)
 		return;
 	per_pin->pcm_idx = idx;
@@ -1484,6 +1490,7 @@ static bool update_eld(struct hda_codec *codec,
 {
 	struct hdmi_eld *pin_eld = &per_pin->sink_eld;
 	struct hdmi_spec *spec = codec->spec;
+	struct snd_kcontrol *eld_ctl;
 	bool old_eld_valid = pin_eld->eld_valid;
 	bool eld_changed;
 	int pcm_idx;
@@ -1537,11 +1544,17 @@ static bool update_eld(struct hda_codec *codec,
 		hdmi_setup_audio_infoframe(codec, per_pin, per_pin->non_pcm);
 	}
 
-	if (eld_changed && pcm_idx >= 0)
+	eld_ctl = get_hdmi_pcm(spec, pcm_idx)->eld_ctl;
+	if (!eld_ctl)
+		codec_warn(codec, "HDMI: NULL eld_ctl for pcm_idx %d\n",
+			   pcm_idx);
+
+	if (eld_changed && pcm_idx >= 0 && eld_ctl)
 		snd_ctl_notify(codec->card,
 			       SNDRV_CTL_EVENT_MASK_VALUE |
 			       SNDRV_CTL_EVENT_MASK_INFO,
 			       &get_hdmi_pcm(spec, pcm_idx)->eld_ctl->id);
+
 	return eld_changed;
 }
 
