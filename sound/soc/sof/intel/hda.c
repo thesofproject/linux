@@ -219,7 +219,7 @@ static bool hda_dsp_check_sdw_irq(struct snd_sof_dev *sdev)
 	if (irq_status == 0xffffffff)
 		goto out;
 
-	/* IPC message ? */
+	/* SDW message ? */
 	if (irq_status & HDA_DSP_REG_ADSPIS2_SNDW)
 		ret = true;
 
