@@ -407,6 +407,7 @@ static int intel_link_power_down(struct sdw_intel *sdw)
 	unsigned int link_id = sdw->instance;
 	void __iomem *shim = sdw->link_res->shim;
 	u16 ioctl;
+	int retry = 3;
 
 	/* Glue logic */
 	ioctl = intel_readw(shim, SDW_SHIM_IOCTL(link_id));
@@ -424,6 +425,12 @@ static int intel_link_power_down(struct sdw_intel *sdw)
 	link_control &=  spa_mask;
 
 	ret = intel_clear_bit(shim, SDW_SHIM_LCTL, link_control, cpa_mask);
+	while (ret == -EAGAIN && retry >= 0) {
+		msleep(1);
+		ret = intel_clear_bit(shim, SDW_SHIM_LCTL,
+				      link_control, cpa_mask);
+		retry--;
+	}
 	if (ret < 0)
 		return ret;
 
