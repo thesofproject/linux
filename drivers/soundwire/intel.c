@@ -118,6 +118,7 @@ struct sdw_intel {
 	struct sdw_cdns cdns;
 	int instance;
 	struct sdw_intel_link_res *link_res;
+	struct mutex link_power_lock; /* lock for link power up/down */
 #ifdef CONFIG_DEBUG_FS
 	struct dentry *debugfs;
 #endif
@@ -313,7 +314,9 @@ static int intel_link_power_up(struct sdw_intel *sdw)
 	cpa_mask = (SDW_SHIM_LCTL_CPA << link_id);
 	link_control |=  spa_mask;
 
+	mutex_lock(&sdw->link_power_lock);
 	ret = intel_set_bit(shim, SDW_SHIM_LCTL, link_control, cpa_mask);
+	mutex_unlock(&sdw->link_power_lock);
 	if (ret < 0)
 		return ret;
 
@@ -423,7 +426,9 @@ static int intel_link_power_down(struct sdw_intel *sdw)
 	cpa_mask = (SDW_SHIM_LCTL_CPA << link_id);
 	link_control &=  spa_mask;
 
+	mutex_lock(&sdw->link_power_lock);
 	ret = intel_clear_bit(shim, SDW_SHIM_LCTL, link_control, cpa_mask);
+	mutex_unlock(&sdw->link_power_lock);
 	if (ret < 0)
 		return ret;
 
@@ -1274,6 +1279,7 @@ static int intel_master_probe(struct sdw_master_device *md, void *link_ctx)
 	sdw->cdns.bus.link_id = md->link_id;
 	sdw->link_res->cdns = &sdw->cdns;
 
+	mutex_init(&sdw->link_power_lock);
 	sdw_cdns_probe(&sdw->cdns);
 
 	/* Set property read ops */
