@@ -307,6 +307,8 @@ static int intel_link_power_up(struct sdw_intel *sdw)
 	int spa_mask, cpa_mask;
 	int link_control, ret;
 
+	mutex_lock(sdw->link_res->shim_lock);
+
 	/* Link power up sequence */
 	link_control = intel_readl(shim, SDW_SHIM_LCTL);
 	spa_mask = (SDW_SHIM_LCTL_SPA << link_id);
@@ -314,6 +316,8 @@ static int intel_link_power_up(struct sdw_intel *sdw)
 	link_control |=  spa_mask;
 
 	ret = intel_set_bit(shim, SDW_SHIM_LCTL, link_control, cpa_mask);
+	mutex_unlock(sdw->link_res->shim_lock);
+
 	if (ret < 0)
 		return ret;
 
@@ -327,6 +331,8 @@ static int intel_shim_init(struct sdw_intel *sdw)
 	unsigned int link_id = sdw->instance;
 	int sync_reg, ret;
 	u16 ioctl = 0, act = 0;
+
+	mutex_lock(sdw->link_res->shim_lock);
 
 	/* Initialize Shim */
 	ioctl |= SDW_SHIM_IOCTL_BKE;
@@ -372,6 +378,8 @@ static int intel_shim_init(struct sdw_intel *sdw)
 	sync_reg |= SDW_SHIM_SYNC_SYNCCPU;
 	ret = intel_clear_bit(shim, SDW_SHIM_SYNC, sync_reg,
 			      SDW_SHIM_SYNC_SYNCCPU);
+	mutex_unlock(sdw->link_res->shim_lock);
+
 	if (ret < 0)
 		dev_err(sdw->cdns.dev, "Failed to set sync period: %d\n", ret);
 
@@ -384,13 +392,15 @@ static void intel_shim_wake(struct sdw_intel *sdw, bool wake_enable)
 	unsigned int link_id = sdw->instance;
 	u16 wake_en, wake_sts;
 
+	mutex_lock(sdw->link_res->shim_lock);
+	wake_en = intel_readw(shim, SDW_SHIM_WAKEEN);
+
 	if (wake_enable) {
 		/* Enable the wakeup */
-		intel_writew(shim, SDW_SHIM_WAKEEN,
-			     (SDW_SHIM_WAKEEN_ENABLE << link_id));
+		wake_en |= (SDW_SHIM_WAKEEN_ENABLE << link_id);
+		intel_writew(shim, SDW_SHIM_WAKEEN, wake_en);
 	} else {
 		/* Disable the wake up interrupt */
-		wake_en = intel_readw(shim, SDW_SHIM_WAKEEN);
 		wake_en &= ~(SDW_SHIM_WAKEEN_ENABLE << link_id);
 		intel_writew(shim, SDW_SHIM_WAKEEN, wake_en);
 
@@ -399,6 +409,7 @@ static void intel_shim_wake(struct sdw_intel *sdw, bool wake_enable)
 		wake_sts |= (SDW_SHIM_WAKEEN_ENABLE << link_id);
 		intel_writew(shim, SDW_SHIM_WAKESTS_STATUS, wake_sts);
 	}
+	mutex_unlock(sdw->link_res->shim_lock);
 }
 
 static int intel_link_power_down(struct sdw_intel *sdw)
@@ -407,6 +418,8 @@ static int intel_link_power_down(struct sdw_intel *sdw)
 	unsigned int link_id = sdw->instance;
 	void __iomem *shim = sdw->link_res->shim;
 	u16 ioctl;
+
+	mutex_lock(sdw->link_res->shim_lock);
 
 	/* Glue logic */
 	ioctl = intel_readw(shim, SDW_SHIM_IOCTL(link_id));
@@ -424,6 +437,8 @@ static int intel_link_power_down(struct sdw_intel *sdw)
 	link_control &=  spa_mask;
 
 	ret = intel_clear_bit(shim, SDW_SHIM_LCTL, link_control, cpa_mask);
+	mutex_unlock(sdw->link_res->shim_lock);
+
 	if (ret < 0)
 		return ret;
 
@@ -651,10 +666,14 @@ static int intel_pre_bank_switch(struct sdw_bus *bus)
 	if (!bus->multi_link)
 		return 0;
 
+	mutex_lock(sdw->link_res->shim_lock);
+
 	/* Read SYNC register */
 	sync_reg = intel_readl(shim, SDW_SHIM_SYNC);
 	sync_reg |= SDW_SHIM_SYNC_CMDSYNC << sdw->instance;
 	intel_writel(shim, SDW_SHIM_SYNC, sync_reg);
+
+	mutex_unlock(sdw->link_res->shim_lock);
 
 	return 0;
 }
@@ -670,6 +689,8 @@ static int intel_post_bank_switch(struct sdw_bus *bus)
 	if (!bus->multi_link)
 		return 0;
 
+	mutex_lock(sdw->link_res->shim_lock);
+
 	/* Read SYNC register */
 	sync_reg = intel_readl(shim, SDW_SHIM_SYNC);
 
@@ -681,9 +702,10 @@ static int intel_post_bank_switch(struct sdw_bus *bus)
 	 *
 	 * So, set the SYNCGO bit only if CMDSYNC bit is set for any Master.
 	 */
-	if (!(sync_reg & SDW_SHIM_SYNC_CMDSYNC_MASK))
-		return 0;
-
+	if (!(sync_reg & SDW_SHIM_SYNC_CMDSYNC_MASK)) {
+		ret = 0;
+		goto unlock;
+	}
 	/*
 	 * Set SyncGO bit to synchronously trigger a bank switch for
 	 * all the masters. A write to SYNCGO bit clears CMDSYNC bit for all
@@ -693,6 +715,9 @@ static int intel_post_bank_switch(struct sdw_bus *bus)
 
 	ret = intel_clear_bit(shim, SDW_SHIM_SYNC, sync_reg,
 			      SDW_SHIM_SYNC_SYNCGO);
+unlock:
+	mutex_unlock(sdw->link_res->shim_lock);
+
 	if (ret < 0)
 		dev_err(sdw->cdns.dev, "Post bank switch failed: %d\n", ret);
 
