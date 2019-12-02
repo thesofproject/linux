@@ -723,6 +723,9 @@ void intel_audio_codec_enable(struct intel_encoder *encoder,
 
 	if (acomp && acomp->base.audio_ops &&
 	    acomp->base.audio_ops->pin_eld_notify) {
+		printk("HDMI DEBUG: enable dp-mst:%d, enc type %d (MST %d)\n",
+			intel_crtc_has_type(crtc_state, INTEL_OUTPUT_DP_MST),
+			encoder->type, INTEL_OUTPUT_DP_MST);
 		/* audio drivers expect pipe = -1 to indicate Non-MST cases */
 		if (!intel_crtc_has_type(crtc_state, INTEL_OUTPUT_DP_MST))
 			pipe = -1;
@@ -766,6 +769,9 @@ void intel_audio_codec_disable(struct intel_encoder *encoder,
 
 	if (acomp && acomp->base.audio_ops &&
 	    acomp->base.audio_ops->pin_eld_notify) {
+		printk("HDMI DEBUG: disable dpmst:%d, enc type %d (MST %d)\n",
+			intel_crtc_has_type(old_crtc_state, INTEL_OUTPUT_DP_MST),
+			encoder->type, INTEL_OUTPUT_DP_MST);
 		/* audio drivers expect pipe = -1 to indicate Non-MST cases */
 		if (!intel_crtc_has_type(old_crtc_state, INTEL_OUTPUT_DP_MST))
 			pipe = -1;
