@@ -234,14 +234,21 @@ static void rt711_jack_detect_handler(struct work_struct *work)
 {
 	struct rt711_priv *rt711 =
 		container_of(work, struct rt711_priv, jack_detect_work.work);
-	int btn_type = 0, ret;
+	struct sdw_slave *slave = rt711->slave;
 	unsigned int jack_status = 0, reg;
+	int btn_type = 0, ret;
 
 	if (!rt711->hs_jack)
 		return;
 
 	if (!rt711->component->card->instantiated)
 		return;
+
+	ret = pm_runtime_get_sync(&slave->dev);
+	if (ret < 0) {
+		dev_err(&slave->dev, "Failed to resume device: %d\n", ret);
+		return ret;
+	}
 
 	reg = RT711_VERB_GET_PIN_SENSE | RT711_HP_OUT;
 	ret = regmap_read(rt711->regmap, reg, &jack_status);
@@ -287,9 +294,14 @@ static void rt711_jack_detect_handler(struct work_struct *work)
 			&rt711->jack_btn_check_work, msecs_to_jiffies(200));
 	}
 
+	pm_runtime_mark_last_busy(&slave->dev);
+	pm_runtime_put(&slave->dev);
+
 	return;
 
 io_error:
+	pm_runtime_mark_last_busy(&slave->dev);
+	pm_runtime_put(&slave->dev);
 	pr_err_ratelimited("IO error in %s, ret %d\n", __func__, ret);
 }
 
@@ -297,8 +309,15 @@ static void rt711_btn_check_handler(struct work_struct *work)
 {
 	struct rt711_priv *rt711 = container_of(work, struct rt711_priv,
 		jack_btn_check_work.work);
-	int btn_type = 0, ret;
+	struct sdw_slave *slave = rt711->slave;
 	unsigned int jack_status = 0, reg;
+	int btn_type = 0, ret;
+
+	ret = pm_runtime_get_sync(&slave->dev);
+	if (ret < 0) {
+		dev_err(&slave->dev, "Failed to resume device: %d\n", ret);
+		return ret;
+	}
 
 	reg = RT711_VERB_GET_PIN_SENSE | RT711_HP_OUT;
 	ret = regmap_read(rt711->regmap, reg, &jack_status);
@@ -342,9 +361,14 @@ static void rt711_btn_check_handler(struct work_struct *work)
 			&rt711->jack_btn_check_work, msecs_to_jiffies(200));
 	}
 
+	pm_runtime_mark_last_busy(&slave->dev);
+	pm_runtime_put(&slave->dev);
+
 	return;
 
 io_error:
+	pm_runtime_mark_last_busy(&slave->dev);
+	pm_runtime_put(&slave->dev);
 	pr_err_ratelimited("IO error in %s, ret %d\n", __func__, ret);
 }
 

@@ -156,14 +156,21 @@ static void rt700_jack_detect_handler(struct work_struct *work)
 {
 	struct rt700_priv *rt700 =
 		container_of(work, struct rt700_priv, jack_detect_work.work);
-	int btn_type = 0, ret;
+	struct sdw_slave *slave = rt700->slave;
 	unsigned int jack_status = 0, reg;
+	int btn_type = 0, ret;
 
 	if (!rt700->hs_jack)
 		return;
 
 	if (!rt700->component->card->instantiated)
 		return;
+
+	ret = pm_runtime_get_sync(&slave->dev);
+	if (ret < 0) {
+		dev_err(&slave->dev, "Failed to resume device: %d\n", ret);
+		return ret;
+	}
 
 	reg = RT700_VERB_GET_PIN_SENSE | RT700_HP_OUT;
 	ret = regmap_read(rt700->regmap, reg, &jack_status);
@@ -209,9 +216,14 @@ static void rt700_jack_detect_handler(struct work_struct *work)
 			&rt700->jack_btn_check_work, msecs_to_jiffies(200));
 	}
 
+	pm_runtime_mark_last_busy(&slave->dev);
+	pm_runtime_put(&slave->dev);
+
 	return;
 
 io_error:
+	pm_runtime_mark_last_busy(&slave->dev);
+	pm_runtime_put(&slave->dev);
 	pr_err_ratelimited("IO error in %s, ret %d\n", __func__, ret);
 }
 
@@ -219,8 +231,15 @@ static void rt700_btn_check_handler(struct work_struct *work)
 {
 	struct rt700_priv *rt700 = container_of(work, struct rt700_priv,
 		jack_btn_check_work.work);
-	int btn_type = 0, ret;
+	struct sdw_slave *slave = rt700->slave;
 	unsigned int jack_status = 0, reg;
+	int btn_type = 0, ret;
+
+	ret = pm_runtime_get_sync(&slave->dev);
+	if (ret < 0) {
+		dev_err(&slave->dev, "Failed to resume device: %d\n", ret);
+		return ret;
+	}
 
 	reg = RT700_VERB_GET_PIN_SENSE | RT700_HP_OUT;
 	ret = regmap_read(rt700->regmap, reg, &jack_status);
@@ -263,9 +282,14 @@ static void rt700_btn_check_handler(struct work_struct *work)
 			&rt700->jack_btn_check_work, msecs_to_jiffies(200));
 	}
 
+	pm_runtime_mark_last_busy(&slave->dev);
+	pm_runtime_put(&slave->dev);
+
 	return;
 
 io_error:
+	pm_runtime_mark_last_busy(&slave->dev);
+	pm_runtime_put(&slave->dev);
 	pr_err_ratelimited("IO error in %s, ret %d\n", __func__, ret);
 }
 
