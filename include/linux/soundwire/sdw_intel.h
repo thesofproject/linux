@@ -79,6 +79,7 @@ struct sdw_intel_ctx {
 	struct sdw_intel_link_res *links;
 	int irq;
 	struct list_head link_list;
+	struct mutex shim_lock; /* lock for access to shared SHIM registers */
 };
 
 /**
