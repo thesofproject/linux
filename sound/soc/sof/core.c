@@ -104,6 +104,8 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 		return ret;
 	}
 
+	sdev->fw_state = SOF_FW_BOOT_PREPARE;
+
 	/* check machine info */
 	ret = sof_machine_check(sdev);
 	if (ret < 0) {
@@ -142,6 +144,8 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 			ret);
 		goto fw_load_err;
 	}
+
+	sdev->fw_state = SOF_FW_BOOT_IN_PROGRESS;
 
 	/* boot the firmware */
 	ret = snd_sof_run_firmware(sdev);
@@ -254,6 +258,7 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 
 	sdev->pdata = plat_data;
 	sdev->first_boot = true;
+	sdev->fw_state = SOF_FW_BOOT_NOT_STARTED;
 	dev_set_drvdata(dev, sdev);
 
 	/* check all mandatory ops */
