@@ -580,4 +580,22 @@ config SND_SOC_INTEL_SOUNDWIRE_RT711_RT1308_RT715_MACH
 endif
 
 
+if SND_SOC_SOF_TIGERLAKE && SND_SOC_SOF_INTEL_SOUNDWIRE
+
+config SND_SOC_INTEL_TGL_SOUNDWIRE_RT5682_MACH
+       tristate "TGL with RT5682 in SDW mode"
+	depends on I2C && ACPI
+	depends on MFD_INTEL_LPSS || COMPILE_TEST
+	select SND_SOC_RT5682_SDW
+	select SND_HDA_CODEC_HDMI if SND_SOC_SOF_HDA_CODEC
+	select SND_SOC_HDAC_HDMI if SND_SOC_SOF_HDA_LINK
+	help
+	   This adds support for ASoC machine driver for Tigerlake platforms
+	   with SoundWire MAX98373 audio codec.
+	   Say Y if you have such a device.
+	   If unsure select "N".
+
+
+endif ## SND_SOC_SOF_TIGERLAKE && SND_SOC_SOF_INTEL_SOUNDWIRE
+
 endif ## SND_SOC_INTEL_MACH
