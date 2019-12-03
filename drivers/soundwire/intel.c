@@ -386,8 +386,9 @@ static void intel_shim_wake(struct sdw_intel *sdw, bool wake_enable)
 
 	if (wake_enable) {
 		/* Enable the wakeup */
-		intel_writew(shim, SDW_SHIM_WAKEEN,
-			     (SDW_SHIM_WAKEEN_ENABLE << link_id));
+		wake_en = intel_readw(shim, SDW_SHIM_WAKEEN);
+		wake_en |= (SDW_SHIM_WAKEEN_ENABLE << link_id);
+		intel_writew(shim, SDW_SHIM_WAKEEN, wake_en);
 	} else {
 		/* Disable the wake up interrupt */
 		wake_en = intel_readw(shim, SDW_SHIM_WAKEEN);
