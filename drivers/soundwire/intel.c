@@ -1387,6 +1387,8 @@ static int intel_master_startup(struct sdw_master_device *md)
 
 		pm_runtime_set_active(&md->dev);
 		pm_runtime_enable(&md->dev);
+	} else {
+		dev_pm_set_driver_flags(&md->dev, DPM_FLAG_NEVER_SKIP);
 	}
 
 	/*
