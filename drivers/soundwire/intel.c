@@ -1456,7 +1456,7 @@ static int intel_suspend(struct device *dev)
 
 	dev_err(dev, "%s start\n", __func__);
 
-	if (pm_runtime_status_suspended(dev)) {
+	if (pm_runtime_suspended(dev)) {
 		dev_dbg(dev,
 			"%s: pm_runtime status: suspended\n",
 			__func__);
