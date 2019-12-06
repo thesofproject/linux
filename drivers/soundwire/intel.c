@@ -1313,6 +1313,9 @@ static int intel_init(struct sdw_intel *sdw)
 	intel_link_power_up(sdw);
 	intel_shim_init(sdw);
 
+	if (sdw_cdns_is_clock_stop(&sdw->cdns))
+		return 0;
+
 	return sdw_cdns_init(&sdw->cdns);
 }
 
