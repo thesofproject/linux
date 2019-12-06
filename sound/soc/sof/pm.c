@@ -17,6 +17,8 @@ static int sof_send_pm_ctx_ipc(struct snd_sof_dev *sdev, int cmd)
 	struct sof_ipc_pm_ctx pm_ctx;
 	struct sof_ipc_reply reply;
 
+	dev_err(sdev->dev, "%s\n", __func__);
+
 	memset(&pm_ctx, 0, sizeof(pm_ctx));
 
 	/* configure ctx save ipc message */
@@ -51,6 +53,8 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	int ret;
+
+	dev_err(dev, "%s\n", __func__);
 
 	/* do nothing if dsp resume callbacks are not set */
 	if (!sof_ops(sdev)->resume || !sof_ops(sdev)->runtime_resume)
@@ -124,6 +128,8 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	int ret;
 
+	dev_err(dev, "%s\n", __func__);
+
 	/* do nothing if dsp suspend callback is not set */
 	if (!sof_ops(sdev)->suspend)
 		return 0;
@@ -180,6 +186,7 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 
 int snd_sof_runtime_suspend(struct device *dev)
 {
+	dev_err(dev, "%s\n", __func__);
 	return sof_suspend(dev, true);
 }
 EXPORT_SYMBOL(snd_sof_runtime_suspend);
@@ -188,12 +195,14 @@ int snd_sof_runtime_idle(struct device *dev)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 
+	dev_err(dev, "%s\n", __func__);
 	return snd_sof_dsp_runtime_idle(sdev);
 }
 EXPORT_SYMBOL(snd_sof_runtime_idle);
 
 int snd_sof_runtime_resume(struct device *dev)
 {
+	dev_err(dev, "%s\n", __func__);
 	return sof_resume(dev, true);
 }
 EXPORT_SYMBOL(snd_sof_runtime_resume);
@@ -255,6 +264,8 @@ int snd_sof_resume(struct device *dev)
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	int ret;
 
+	dev_err(dev, "%s\n", __func__);
+
 	if (snd_sof_dsp_d0i3_on_suspend(sdev)) {
 		/* resume from D0I3 */
 		dev_dbg(sdev->dev, "DSP will exit from D0i3...\n");
@@ -283,6 +294,8 @@ int snd_sof_suspend(struct device *dev)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	int ret;
+
+	dev_err(dev, "%s\n", __func__);
 
 	if (snd_sof_dsp_d0i3_on_suspend(sdev)) {
 		/* suspend to D0i3 */
