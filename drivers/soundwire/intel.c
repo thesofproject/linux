@@ -447,6 +447,44 @@ static int intel_link_power_down(struct sdw_intel *sdw)
 	return 0;
 }
 
+void sdw_intel_process_wakeen_event(struct sdw_intel_ctx *ctx)
+{
+	struct sdw_intel_link_res *link;
+	struct sdw_slave *slave;
+	struct sdw_bus *bus;
+	u16 wake_sts;
+
+	wake_sts = intel_readw(ctx->links->shim, SDW_SHIM_WAKESTS);
+
+	list_for_each_entry(link, &ctx->link_list, list) {
+		struct sdw_intel *sdw;
+
+		bus = &link->cdns->bus;
+		sdw = cdns_to_intel(link->cdns);
+
+		if (!(wake_sts & BIT(sdw->instance)))
+			continue;
+
+		/* disable WAKEEN interrupt ASAP to prevent interrupt flood */
+		intel_shim_wake(sdw, false);
+
+		/*
+		 * wake up master and slave so that slave can notify master
+		 * the wakeen event and let codec driver check codec status
+		 */
+		list_for_each_entry(slave, &bus->slaves, node) {
+			if (slave->prop.wake_capable) {
+				if (slave->status != SDW_SLAVE_ATTACHED &&
+				    slave->status != SDW_SLAVE_ALERT)
+					continue;
+
+				pm_request_resume(&slave->dev);
+			}
+		}
+	}
+}
+EXPORT_SYMBOL(sdw_intel_process_wakeen_event);
+
 /*
  * PDI routines
  */
