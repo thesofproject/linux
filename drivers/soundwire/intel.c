@@ -18,6 +18,7 @@
 #include <linux/soundwire/sdw_registers.h>
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_intel.h>
+#include <linux/soundwire/sdw_type.h>
 #include "cadence_master.h"
 #include "bus.h"
 #include "intel.h"
@@ -1654,6 +1655,7 @@ struct sdw_md_driver intel_sdw_driver = {
 		.name = "intel-sdw",
 		.owner = THIS_MODULE,
 		.pm = &intel_pm,
+		.bus = &sdw_bus_type,
 	},
 	.probe = intel_master_probe,
 	.startup = intel_master_startup,
