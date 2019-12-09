@@ -1374,6 +1374,8 @@ int sdw_cdns_clock_restart(struct sdw_cdns *cdns, bool bus_reset)
 {
 	int ret;
 
+	dev_dbg(cdns->dev, "%s: start\n", __func__);
+
 	/* unmask Slave interrupts that were masked when stopping the clock */
 	cdns_enable_slave_interrupts(cdns, true);
 
@@ -1423,6 +1425,8 @@ int sdw_cdns_clock_restart(struct sdw_cdns *cdns, bool bus_reset)
 		if (ret < 0)
 			dev_err(cdns->dev, "bus failed to exit clock stop %d\n", ret);
 	}
+
+	dev_dbg(cdns->dev, "%s: end\n", __func__);
 
 	return ret;
 }
