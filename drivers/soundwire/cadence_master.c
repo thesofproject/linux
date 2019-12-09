@@ -1330,6 +1330,8 @@ int sdw_cdns_clock_restart(struct sdw_cdns *cdns, bool bus_reset)
 {
 	int ret;
 
+	dev_dbg(cdns->dev, "%s: start\n", __func__);
+
 	ret = cdns_clear_bit(cdns, CDNS_MCP_CONTROL,
 			     CDNS_MCP_CONTROL_CLK_STOP_CLR);
 	if (ret < 0) {
@@ -1374,6 +1376,8 @@ int sdw_cdns_clock_restart(struct sdw_cdns *cdns, bool bus_reset)
 	ret = sdw_bus_exit_clk_stop(&cdns->bus);
 	if (ret < 0)
 		dev_err(cdns->dev, "bus failed to exit clock stop %d\n", ret);
+
+	dev_dbg(cdns->dev, "%s: end\n", __func__);
 
 	return ret;
 }
