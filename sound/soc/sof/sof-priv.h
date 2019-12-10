@@ -11,6 +11,7 @@
 #ifndef __SOUND_SOC_SOF_PRIV_H
 #define __SOUND_SOC_SOF_PRIV_H
 
+#include <linux/atomic.h>
 #include <linux/device.h>
 #include <sound/hdaudio.h>
 #include <sound/sof.h>
@@ -424,6 +425,9 @@ struct snd_sof_dev {
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_PROBES)
 	unsigned int extractor_stream_tag;
 #endif
+
+	/* VirtIO fields for host and guest */
+	atomic_t dsp_reset_count;
 
 	/* DMA for Trace */
 	struct snd_dma_buffer dmatb;

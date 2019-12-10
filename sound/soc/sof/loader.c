@@ -10,6 +10,7 @@
 // Generic firmware loader.
 //
 
+#include <linux/atomic.h>
 #include <linux/firmware.h>
 #include <sound/sof.h>
 #include <uapi/sound/sof/ext_manifest.h>
@@ -804,6 +805,9 @@ int snd_sof_run_firmware(struct snd_sof_dev *sdev)
 
 	/* fw boot is complete. Update the active cores mask */
 	sdev->enabled_cores_mask = init_core_mask;
+
+	/* increment reset count */
+	atomic_add(1, &sdev->dsp_reset_count);
 
 	return 0;
 }
