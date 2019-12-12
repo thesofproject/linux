@@ -46,6 +46,7 @@ struct sdw_master_device *sdw_md_add(struct sdw_md_driver *driver,
 	md->dev.type = &sdw_md_type;
 	md->dev.dma_mask = md->dev.parent->dma_mask;
 	dev_set_name(&md->dev, "sdw-master-%d", md->link_id);
+	md->dev.driver = &driver->driver;
 
 	ret = device_register(&md->dev);
 	if (ret) {
@@ -56,8 +57,6 @@ struct sdw_master_device *sdw_md_add(struct sdw_md_driver *driver,
 		 */
 		put_device(&md->dev);
 	}
-
-	md->dev.driver = &driver->driver;
 
 	return md;
 }

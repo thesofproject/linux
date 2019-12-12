@@ -18,6 +18,7 @@
 #include <linux/soundwire/sdw_registers.h>
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_intel.h>
+#include <linux/soundwire/sdw_type.h>
 #include "cadence_master.h"
 #include "bus.h"
 #include "intel.h"
@@ -104,7 +105,7 @@ MODULE_PARM_DESC(sdw_md_flags, "SoundWire Intel Master device flags (0x0 all off
 #define SDW_ALH_STRMZCFG(x)		(0x000 + (0x4 * (x)))
 #define SDW_ALH_NUM_STREAMS		64
 
-#define SDW_ALH_STRMZCFG_DMAT_VAL	0x3
+#define SDW_ALH_STRMZCFG_DMAT_VAL	0xf
 #define SDW_ALH_STRMZCFG_DMAT		GENMASK(7, 0)
 #define SDW_ALH_STRMZCFG_CHN		GENMASK(19, 16)
 
@@ -1236,6 +1237,7 @@ static int sdw_master_read_intel_prop(struct sdw_bus *bus)
 				 "intel-sdw-ip-clock",
 				 &prop->mclk_freq);
 
+	prop->mclk_freq /= 2;
 	fwnode_property_read_u32(link,
 				 "intel-quirk-mask",
 				 &quirk_mask);
@@ -1308,6 +1310,9 @@ static int intel_master_probe(struct sdw_master_device *md, void *link_ctx)
 
 	/* set driver data, accessed by snd_soc_dai_set_drvdata() */
 	dev_set_drvdata(&md->dev, &sdw->cdns);
+
+	/* use generic bandwidth allocation algorithm */
+	sdw->cdns.bus.compute_params = sdw_compute_params;
 
 	ret = sdw_add_bus_master(&sdw->cdns.bus);
 	if (ret) {
@@ -1650,6 +1655,7 @@ struct sdw_md_driver intel_sdw_driver = {
 		.name = "intel-sdw",
 		.owner = THIS_MODULE,
 		.pm = &intel_pm,
+		.bus = &sdw_bus_type,
 	},
 	.probe = intel_master_probe,
 	.startup = intel_master_startup,
