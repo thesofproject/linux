@@ -61,6 +61,13 @@ enum sof_dsp_power_state {
 	SOF_DSP_D3,
 };
 
+/* System suspend state */
+enum sof_system_suspend_state {
+	SOF_SUSPEND_NONE = 0,
+	SOF_SUSPEND_S3,
+	SOF_SUSPEND_S0,
+};
+
 struct snd_sof_dev;
 struct snd_sof_ipc_msg;
 struct snd_sof_ipc;
@@ -324,8 +331,9 @@ struct snd_sof_dev {
 
 	/* power states related */
 	enum sof_dsp_power_state dsp_power_state;
-	/* flag to track if the intended power target of suspend is S0ix */
-	bool s0_suspend;
+
+	/* Intended power target of system suspend */
+	enum sof_system_suspend_state system_suspend_target;
 
 	/* DSP firmware boot */
 	wait_queue_head_t boot_wait;

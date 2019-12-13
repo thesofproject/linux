@@ -302,6 +302,7 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 	sdev->pdata = plat_data;
 	sdev->first_boot = true;
 	sdev->fw_state = SOF_FW_BOOT_NOT_STARTED;
+	sdev->system_suspend_target = SOF_SUSPEND_NONE;
 	dev_set_drvdata(dev, sdev);
 
 	/* check all mandatory ops */
