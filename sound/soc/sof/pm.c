@@ -131,7 +131,8 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 	return ret;
 }
 
-static int sof_suspend(struct device *dev, bool runtime_suspend)
+static int sof_suspend(struct device *dev, bool runtime_suspend,
+		       enum sof_dsp_power_state dsp_power_target)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	int ret;
@@ -140,7 +141,8 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 	if (!sof_ops(sdev)->suspend)
 		return 0;
 
-	if (sdev->fw_state != SOF_FW_BOOT_COMPLETE)
+	if (sdev->fw_state != SOF_FW_BOOT_COMPLETE ||
+	    dsp_power_target == SOF_DSP_D0I3)
 		goto power_down;
 
 	/* release trace */
@@ -196,6 +198,10 @@ power_down:
 			"error: failed to power down DSP during suspend %d\n",
 			ret);
 
+	/* return if DSP is not entering D3 */
+	if (dsp_power_target != SOF_DSP_D3)
+		return ret;
+
 	/* reset FW state */
 	sdev->fw_state = SOF_FW_BOOT_NOT_STARTED;
 
@@ -204,7 +210,7 @@ power_down:
 
 int snd_sof_runtime_suspend(struct device *dev)
 {
-	return sof_suspend(dev, true);
+	return sof_suspend(dev, true, SOF_DSP_D3);
 }
 EXPORT_SYMBOL(snd_sof_runtime_suspend);
 
@@ -241,6 +247,36 @@ int snd_sof_set_dsp_power_state(struct snd_sof_dev *sdev,
 	return 0;
 }
 EXPORT_SYMBOL(snd_sof_set_dsp_power_state);
+
+enum sof_dsp_power_state
+snd_sof_get_dsp_power_target(struct snd_sof_dev *sdev)
+{
+	enum sof_dsp_power_state dsp_power_target;
+
+	switch (sdev->system_suspend_target) {
+	case SOF_SUSPEND_S3:
+		/* DSP should be in D3 if the system is suspending to S3 */
+		dsp_power_target = SOF_DSP_D3;
+		break;
+	case SOF_SUSPEND_S0:
+		/*
+		 * if suspending to S0ix, determing DSP power target based on
+		 * the number of D0i3 streams running in the DSP
+		 */
+		if (snd_sof_dsp_d0i3_on_suspend(sdev))
+			dsp_power_target = SOF_DSP_D0I3;
+		else
+			dsp_power_target = SOF_DSP_D3;
+		break;
+	default:
+		/* TODO: Implement DSP D0I3 during S0 */
+		dsp_power_target = SOF_DSP_D0;
+		break;
+	}
+
+	return dsp_power_target;
+}
+EXPORT_SYMBOL(snd_sof_get_dsp_power_target);
 
 /*
  * Audio DSP states may transform as below:-
@@ -283,14 +319,10 @@ EXPORT_SYMBOL(snd_sof_resume);
 int snd_sof_suspend(struct device *dev)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
-	int ret;
+	enum sof_dsp_power_state dsp_power_target;
 
-	if (snd_sof_dsp_d0i3_on_suspend(sdev))
-		return snd_sof_dsp_suspend(sdev, SOF_DSP_D0I3);
-
-d3_suspend:
-	/* suspend to D3 */
-	return sof_suspend(dev, false);
+	dsp_power_target = snd_sof_get_dsp_power_target(sdev);
+	return sof_suspend(dev, false, dsp_power_target);
 }
 EXPORT_SYMBOL(snd_sof_suspend);
 
