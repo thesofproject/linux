@@ -54,10 +54,11 @@ extern int sof_core_debug;
 	(IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_ENABLE_DEBUGFS_CACHE) || \
 	 IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_IPC_FLOOD_TEST))
 
-/* DSP D0ix sub-state */
-enum sof_d0_substate {
-	SOF_DSP_D0I0 = 0,	/* DSP default D0 substate */
-	SOF_DSP_D0I3,		/* DSP D0i3(low power) substate*/
+/* DSP power state */
+enum sof_dsp_power_state {
+	SOF_DSP_D0 = 0,
+	SOF_DSP_D0I3,	/* DSP low power D0 substate */
+	SOF_DSP_D3,
 };
 
 struct snd_sof_dev;
@@ -176,7 +177,7 @@ struct snd_sof_dsp_ops {
 	int (*runtime_idle)(struct snd_sof_dev *sof_dev); /* optional */
 	int (*set_hw_params_upon_resume)(struct snd_sof_dev *sdev); /* optional */
 	int (*set_power_state)(struct snd_sof_dev *sdev,
-			       enum sof_d0_substate d0_substate); /* optional */
+			       enum sof_dsp_power_state state); /* optional */
 
 	/* DSP clocking */
 	int (*set_clk)(struct snd_sof_dev *sof_dev, u32 freq); /* optional */
@@ -322,7 +323,7 @@ struct snd_sof_dev {
 	struct snd_soc_component_driver plat_drv;
 
 	/* power states related */
-	enum sof_d0_substate d0_substate;
+	enum sof_dsp_power_state dsp_power_state;
 	/* flag to track if the intended power target of suspend is S0ix */
 	bool s0_suspend;
 
@@ -414,8 +415,8 @@ int snd_sof_resume(struct device *dev);
 int snd_sof_suspend(struct device *dev);
 int snd_sof_prepare(struct device *dev);
 void snd_sof_complete(struct device *dev);
-int snd_sof_set_d0_substate(struct snd_sof_dev *sdev,
-			    enum sof_d0_substate d0_substate);
+int snd_sof_set_dsp_power_state(struct snd_sof_dev *sdev,
+				enum sof_dsp_power_state state);
 
 void snd_sof_new_platform_drv(struct snd_sof_dev *sdev);
 

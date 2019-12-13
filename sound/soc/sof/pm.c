@@ -121,7 +121,7 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 			ret);
 
 	/* initialize default D0 sub-state */
-	sdev->d0_substate = SOF_DSP_D0I0;
+	sdev->dsp_power_state = SOF_DSP_D0;
 
 	return ret;
 }
@@ -217,25 +217,25 @@ int snd_sof_runtime_resume(struct device *dev)
 }
 EXPORT_SYMBOL(snd_sof_runtime_resume);
 
-int snd_sof_set_d0_substate(struct snd_sof_dev *sdev,
-			    enum sof_d0_substate d0_substate)
+int snd_sof_set_dsp_power_state(struct snd_sof_dev *sdev,
+				enum sof_dsp_power_state state)
 {
 	int ret;
 
-	if (sdev->d0_substate == d0_substate)
+	if (sdev->dsp_power_state == state)
 		return 0;
 
 	/* do platform specific set_state */
-	ret = snd_sof_dsp_set_power_state(sdev, d0_substate);
+	ret = snd_sof_dsp_set_power_state(sdev, state);
 	if (ret < 0)
 		return ret;
 
 	/* update dsp D0 sub-state */
-	sdev->d0_substate = d0_substate;
+	sdev->dsp_power_state = state;
 
 	return 0;
 }
-EXPORT_SYMBOL(snd_sof_set_d0_substate);
+EXPORT_SYMBOL(snd_sof_set_dsp_power_state);
 
 /*
  * Audio DSP states may transform as below:-
@@ -277,7 +277,7 @@ int snd_sof_resume(struct device *dev)
 	if (snd_sof_dsp_d0i3_on_suspend(sdev)) {
 		/* resume from D0I3 */
 		dev_dbg(sdev->dev, "DSP will exit from D0i3...\n");
-		ret = snd_sof_set_d0_substate(sdev, SOF_DSP_D0I0);
+		ret = snd_sof_set_dsp_power_state(sdev, SOF_DSP_D0);
 		if (ret == -ENOTSUPP) {
 			/* fallback to resume from D3 */
 			dev_dbg(sdev->dev, "D0i3 not supported, fall back to resume from D3...\n");
@@ -306,7 +306,7 @@ int snd_sof_suspend(struct device *dev)
 	if (snd_sof_dsp_d0i3_on_suspend(sdev)) {
 		/* suspend to D0i3 */
 		dev_dbg(sdev->dev, "DSP is trying to enter D0i3...\n");
-		ret = snd_sof_set_d0_substate(sdev, SOF_DSP_D0I3);
+		ret = snd_sof_set_dsp_power_state(sdev, SOF_DSP_D0I3);
 		if (ret == -ENOTSUPP) {
 			/* fallback to D3 suspend */
 			dev_dbg(sdev->dev, "D0i3 not supported, fall back to D3...\n");

@@ -194,12 +194,11 @@ static inline int snd_sof_dsp_set_clk(struct snd_sof_dev *sdev, u32 freq)
 }
 
 static inline int snd_sof_dsp_set_power_state(struct snd_sof_dev *sdev,
-					      enum sof_d0_substate substate)
+					      enum sof_dsp_power_state state)
 {
 	if (sof_ops(sdev)->set_power_state)
-		return sof_ops(sdev)->set_power_state(sdev, substate);
+		return sof_ops(sdev)->set_power_state(sdev, state);
 
-	/* D0 substate is not supported */
 	return -ENOTSUPP;
 }
 
