@@ -378,6 +378,8 @@ int hda_dsp_set_power_state(struct snd_sof_dev *sdev,
 		dev_err(sdev->dev,
 			"error: PM_GATE ipc error %d\n", ret);
 
+	sdev->dsp_power_state = state;
+
 	return ret;
 }
 
@@ -428,6 +430,8 @@ static int hda_suspend(struct snd_sof_dev *sdev, bool runtime_suspend)
 		return ret;
 	}
 
+	sdev->dsp_power_state = SOF_DSP_D3;
+
 	return 0;
 }
 
@@ -473,6 +477,8 @@ static int hda_resume(struct snd_sof_dev *sdev, bool runtime_resume)
 	hda_dsp_ctrl_ppcap_enable(sdev, true);
 	hda_dsp_ctrl_ppcap_int_enable(sdev, true);
 
+	sdev->dsp_power_state = SOF_DSP_D0;
+
 	return 0;
 }
 
@@ -480,8 +486,15 @@ int hda_dsp_resume(struct snd_sof_dev *sdev)
 {
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct pci_dev *pci = to_pci_dev(sdev->dev);
+	int ret;
 
-	if (sdev->system_suspend_target == SOF_SUSPEND_S0) {
+	/* resuming from D0i3 */
+	if (sdev->dsp_power_state == SOF_DSP_D0I3) {
+		/* set DSP power state */
+		ret = hda_dsp_set_power_state(sdev, SOF_DSP_D0);
+		if (ret < 0)
+			return ret;
+
 		/* restore L1SEN bit */
 		if (hda->l1_support_changed)
 			snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR,
@@ -531,7 +544,12 @@ int hda_dsp_suspend(struct snd_sof_dev *sdev,
 	struct pci_dev *pci = to_pci_dev(sdev->dev);
 	int ret;
 
-	if (sdev->system_suspend_target == SOF_SUSPEND_S0) {
+	if (target_state == SOF_DSP_D0I3) {
+		/* set DSP power state */
+		ret = hda_dsp_set_power_state(sdev, SOF_DSP_D0I3);
+		if (ret < 0)
+			return ret;
+
 		/* enable L1SEN to make sure the system can enter S0Ix */
 		hda->l1_support_changed =
 			snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR,

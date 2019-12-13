@@ -50,6 +50,7 @@ static void sof_cache_debugfs(struct snd_sof_dev *sdev)
 static int sof_resume(struct device *dev, bool runtime_resume)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
+	enum sof_dsp_power_state old_state = sdev->dsp_power_state;
 	int ret;
 
 	/* do nothing if dsp resume callbacks are not set */
@@ -69,6 +70,10 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 			"error: failed to power up DSP after resume\n");
 		return ret;
 	}
+
+	/* Nothing further to do if DSP was in D0i3 during suspend */
+	if (old_state == SOF_DSP_D0I3)
+		return 0;
 
 	sdev->fw_state = SOF_FW_BOOT_PREPARE;
 
@@ -271,29 +276,6 @@ EXPORT_SYMBOL(snd_sof_set_dsp_power_state);
 
 int snd_sof_resume(struct device *dev)
 {
-	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
-	int ret;
-
-	if (snd_sof_dsp_d0i3_on_suspend(sdev)) {
-		/* resume from D0I3 */
-		dev_dbg(sdev->dev, "DSP will exit from D0i3...\n");
-		ret = snd_sof_set_dsp_power_state(sdev, SOF_DSP_D0);
-		if (ret == -ENOTSUPP) {
-			/* fallback to resume from D3 */
-			dev_dbg(sdev->dev, "D0i3 not supported, fall back to resume from D3...\n");
-			goto d3_resume;
-		} else if (ret < 0) {
-			dev_err(sdev->dev, "error: failed to exit from D0I3 %d\n",
-				ret);
-			return ret;
-		}
-
-		/* platform-specific resume from D0i3 */
-		return snd_sof_dsp_resume(sdev);
-	}
-
-d3_resume:
-	/* resume from D3 */
 	return sof_resume(dev, false);
 }
 EXPORT_SYMBOL(snd_sof_resume);
@@ -303,23 +285,8 @@ int snd_sof_suspend(struct device *dev)
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	int ret;
 
-	if (snd_sof_dsp_d0i3_on_suspend(sdev)) {
-		/* suspend to D0i3 */
-		dev_dbg(sdev->dev, "DSP is trying to enter D0i3...\n");
-		ret = snd_sof_set_dsp_power_state(sdev, SOF_DSP_D0I3);
-		if (ret == -ENOTSUPP) {
-			/* fallback to D3 suspend */
-			dev_dbg(sdev->dev, "D0i3 not supported, fall back to D3...\n");
-			goto d3_suspend;
-		} else if (ret < 0) {
-			dev_err(sdev->dev, "error: failed to enter D0I3, %d\n",
-				ret);
-			return ret;
-		}
-
-		/* platform-specific suspend to D0i3 */
+	if (snd_sof_dsp_d0i3_on_suspend(sdev))
 		return snd_sof_dsp_suspend(sdev, SOF_DSP_D0I3);
-	}
 
 d3_suspend:
 	/* suspend to D3 */
