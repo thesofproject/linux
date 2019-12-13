@@ -1800,7 +1800,6 @@ struct sdw_md_driver intel_sdw_driver = {
 		.owner = THIS_MODULE,
 		.bus = &sdw_bus_type,
 		.pm = &intel_pm,
-		.bus = &sdw_bus_type,
 	},
 	.probe = intel_master_probe,
 	.startup = intel_master_startup,

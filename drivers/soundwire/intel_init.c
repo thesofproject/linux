@@ -235,12 +235,6 @@ static struct sdw_intel_ctx
 
 	INIT_LIST_HEAD(&ctx->link_list);
 
-	err = driver_register(&intel_sdw_driver.driver);
-	if (err) {
-		dev_err(&adev->dev, "failed to register sdw master driver\n");
-		goto register_err;
-	}
-
 	/* Create SDW Master devices */
 	for (i = 0; i < count; i++, link++) {
 		if (link_mask && !(link_mask & BIT(i)))
