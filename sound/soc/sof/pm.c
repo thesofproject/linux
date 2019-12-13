@@ -185,7 +185,7 @@ power_down:
 	if (runtime_suspend)
 		ret = snd_sof_dsp_runtime_suspend(sdev);
 	else
-		ret = snd_sof_dsp_suspend(sdev);
+		ret = snd_sof_dsp_suspend(sdev, SOF_DSP_D3);
 	if (ret < 0)
 		dev_err(sdev->dev,
 			"error: failed to power down DSP during suspend %d\n",
@@ -318,7 +318,7 @@ int snd_sof_suspend(struct device *dev)
 		}
 
 		/* platform-specific suspend to D0i3 */
-		return snd_sof_dsp_suspend(sdev);
+		return snd_sof_dsp_suspend(sdev, SOF_DSP_D0I3);
 	}
 
 d3_suspend:

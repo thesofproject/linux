@@ -177,7 +177,8 @@ struct snd_sof_dsp_ops {
 	int (*post_fw_run)(struct snd_sof_dev *sof_dev); /* optional */
 
 	/* DSP PM */
-	int (*suspend)(struct snd_sof_dev *sof_dev); /* optional */
+	int (*suspend)(struct snd_sof_dev *sof_dev,
+		       enum sof_dsp_power_state target_state); /* optional */
 	int (*resume)(struct snd_sof_dev *sof_dev); /* optional */
 	int (*runtime_suspend)(struct snd_sof_dev *sof_dev); /* optional */
 	int (*runtime_resume)(struct snd_sof_dev *sof_dev); /* optional */

@@ -523,7 +523,8 @@ int hda_dsp_runtime_suspend(struct snd_sof_dev *sdev)
 	return hda_suspend(sdev, true);
 }
 
-int hda_dsp_suspend(struct snd_sof_dev *sdev)
+int hda_dsp_suspend(struct snd_sof_dev *sdev,
+		    enum sof_dsp_power_state target_state)
 {
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct hdac_bus *bus = sof_to_bus(sdev);

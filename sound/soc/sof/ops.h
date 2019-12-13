@@ -146,10 +146,11 @@ static inline int snd_sof_dsp_resume(struct snd_sof_dev *sdev)
 	return 0;
 }
 
-static inline int snd_sof_dsp_suspend(struct snd_sof_dev *sdev)
+static inline int snd_sof_dsp_suspend(struct snd_sof_dev *sdev,
+				      enum sof_dsp_power_state target_state)
 {
 	if (sof_ops(sdev)->suspend)
-		return sof_ops(sdev)->suspend(sdev);
+		return sof_ops(sdev)->suspend(sdev, target_state);
 
 	return 0;
 }
