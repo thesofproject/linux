@@ -299,6 +299,9 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 	/* initialize DSP power state */
 	sdev->dsp_power_state = SOF_DSP_D0;
 
+	/* Init delayed work for DSP D0i3 entry */
+	INIT_DELAYED_WORK(&sdev->d0i3_work, sof_dsp_d0i3_work);
+
 	sdev->pdata = plat_data;
 	sdev->first_boot = true;
 	sdev->fw_state = SOF_FW_BOOT_NOT_STARTED;

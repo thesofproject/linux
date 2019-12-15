@@ -36,6 +36,9 @@ extern int sof_core_debug;
 /* time in ms for runtime suspend delay */
 #define SND_SOF_SUSPEND_DELAY_MS	2000
 
+/* time in ms for D0i3 entry delay */
+#define SND_SOF_D0I3_DELAY_MS	5000
+
 /* DMA buffer size for trace */
 #define DMA_BUF_SIZE_FOR_TRACE (PAGE_SIZE * 16)
 
@@ -332,6 +335,7 @@ struct snd_sof_dev {
 
 	/* power states related */
 	enum sof_dsp_power_state dsp_power_state;
+	struct delayed_work d0i3_work;
 
 	/* Intended power target of system suspend */
 	enum sof_system_suspend_state system_suspend_target;
@@ -424,6 +428,7 @@ int snd_sof_resume(struct device *dev);
 int snd_sof_suspend(struct device *dev);
 int snd_sof_prepare(struct device *dev);
 void snd_sof_complete(struct device *dev);
+void sof_dsp_d0i3_work(struct work_struct *work);
 enum sof_dsp_power_state
 snd_sof_get_dsp_power_target(struct snd_sof_dev *sdev);
 

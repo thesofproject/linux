@@ -12,6 +12,24 @@
 #include "sof-priv.h"
 #include "sof-audio.h"
 
+void sof_dsp_d0i3_work(struct work_struct *work)
+{
+	struct snd_sof_dev *sdev = container_of(work, struct snd_sof_dev,
+						d0i3_work.work);
+	enum sof_dsp_power_state dsp_power_target;
+	int ret;
+
+	/* determine the DSP power target */
+	dsp_power_target = snd_sof_get_dsp_power_target(sdev);
+
+	/* set DSP power state */
+	if (dsp_power_target == SOF_DSP_D0I3) {
+		ret = snd_sof_dsp_set_power_state(sdev, SOF_DSP_D0I3);
+		if (ret < 0)
+			dev_warn(sdev->dev, "DSP D0i3 entry failed\n");
+	}
+}
+
 static int sof_send_pm_ctx_ipc(struct snd_sof_dev *sdev, int cmd)
 {
 	struct sof_ipc_pm_ctx pm_ctx;
@@ -198,6 +216,9 @@ power_down:
 			"error: failed to power down DSP during suspend %d\n",
 			ret);
 
+	/* cancel any attempt for DSP D0i3 */
+	cancel_delayed_work_sync(&sdev->d0i3_work);
+
 	/* return if DSP is not entering D3 */
 	if (dsp_power_target != SOF_DSP_D3)
 		return ret;
@@ -249,8 +270,11 @@ snd_sof_get_dsp_power_target(struct snd_sof_dev *sdev)
 			dsp_power_target = SOF_DSP_D3;
 		break;
 	default:
-		/* TODO: Implement DSP D0I3 during S0 */
-		dsp_power_target = SOF_DSP_D0;
+		/* check if only D0i3-compatible streams are active */
+		if (snd_sof_dsp_d0i3_in_S0(sdev))
+			dsp_power_target = SOF_DSP_D0I3;
+		else
+			dsp_power_target = SOF_DSP_D0;
 		break;
 	}
 

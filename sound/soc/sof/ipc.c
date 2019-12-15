@@ -295,6 +295,9 @@ int sof_ipc_tx_message(struct snd_sof_ipc *ipc, u32 header,
 	    reply_bytes > SOF_IPC_MSG_MAX_SIZE)
 		return -ENOBUFS;
 
+	/* cancel any attempt for DSP D0i3 entry */
+	cancel_delayed_work_sync(&sdev->d0i3_work);
+
 	/* Serialise IPC TX */
 	mutex_lock(&ipc->tx_mutex);
 
@@ -302,6 +305,9 @@ int sof_ipc_tx_message(struct snd_sof_ipc *ipc, u32 header,
 					  reply_data, reply_bytes);
 
 	mutex_unlock(&ipc->tx_mutex);
+
+	/* schedule delayed work for DSP D0i3 entry */
+	schedule_delayed_work(&sdev->d0i3_work, SND_SOF_D0I3_DELAY_MS);
 
 	return ret;
 }
