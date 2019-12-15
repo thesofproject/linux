@@ -195,10 +195,12 @@ static inline int snd_sof_dsp_set_clk(struct snd_sof_dev *sdev, u32 freq)
 }
 
 static inline int snd_sof_dsp_set_power_state(struct snd_sof_dev *sdev,
-					      enum sof_dsp_power_state state)
+					      enum sof_dsp_power_state state,
+					      bool dma_trace_enable)
 {
 	if (sof_ops(sdev)->set_power_state)
-		return sof_ops(sdev)->set_power_state(sdev, state);
+		return sof_ops(sdev)->set_power_state(sdev, state,
+						      dma_trace_enable);
 
 	return -ENOTSUPP;
 }

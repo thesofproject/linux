@@ -339,7 +339,8 @@ static int hda_dsp_send_pm_gate_ipc(struct snd_sof_dev *sdev, u32 flags)
 }
 
 int hda_dsp_set_power_state(struct snd_sof_dev *sdev,
-			    enum sof_dsp_power_state state)
+			    enum sof_dsp_power_state state,
+			    bool dma_trace_enable)
 {
 	struct hdac_bus *bus = sof_to_bus(sdev);
 	u32 flags;
@@ -367,10 +368,13 @@ int hda_dsp_set_power_state(struct snd_sof_dev *sdev,
 	dev_vdbg(bus->dev, "D0I3C updated, register = 0x%x\n",
 		 snd_hdac_chip_readb(bus, VS_D0I3C));
 
-	if (state == SOF_DSP_D0)
-		flags = HDA_PM_PPG;/* prevent power gating in D0 */
-	else
-		flags = HDA_PM_NO_DMA_TRACE;/* disable DMA trace in D0I3*/
+	if (state == SOF_DSP_D0) {
+		flags = HDA_PM_PPG; /* prevent power gating in D0 */
+	} else {
+		/* disable DMA trace in D0I3 */
+		if (!dma_trace_enable)
+			flags = HDA_PM_NO_DMA_TRACE;
+	}
 
 	/* sending pm_gate IPC */
 	ret = hda_dsp_send_pm_gate_ipc(sdev, flags);
@@ -491,7 +495,7 @@ int hda_dsp_resume(struct snd_sof_dev *sdev)
 	/* resuming from D0i3 */
 	if (sdev->dsp_power_state == SOF_DSP_D0I3) {
 		/* set DSP power state */
-		ret = hda_dsp_set_power_state(sdev, SOF_DSP_D0);
+		ret = hda_dsp_set_power_state(sdev, SOF_DSP_D0, false);
 		if (ret < 0)
 			return ret;
 
@@ -546,7 +550,7 @@ int hda_dsp_suspend(struct snd_sof_dev *sdev,
 
 	if (target_state == SOF_DSP_D0I3) {
 		/* set DSP power state */
-		ret = hda_dsp_set_power_state(sdev, SOF_DSP_D0I3);
+		ret = hda_dsp_set_power_state(sdev, SOF_DSP_D0I3, false);
 		if (ret < 0)
 			return ret;
 

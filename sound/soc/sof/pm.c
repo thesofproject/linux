@@ -24,7 +24,7 @@ void sof_dsp_d0i3_work(struct work_struct *work)
 
 	/* set DSP power state */
 	if (dsp_power_target == SOF_DSP_D0I3) {
-		ret = snd_sof_dsp_set_power_state(sdev, SOF_DSP_D0I3);
+		ret = snd_sof_dsp_set_power_state(sdev, SOF_DSP_D0I3, true);
 		if (ret < 0)
 			dev_warn(sdev->dev, "DSP D0i3 entry failed\n");
 	}

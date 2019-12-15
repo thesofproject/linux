@@ -469,7 +469,8 @@ void hda_dsp_ipc_int_enable(struct snd_sof_dev *sdev);
 void hda_dsp_ipc_int_disable(struct snd_sof_dev *sdev);
 
 int hda_dsp_set_power_state(struct snd_sof_dev *sdev,
-			    enum sof_dsp_power_state state);
+			    enum sof_dsp_power_state state,
+			    bool dma_trace_enable);
 
 int hda_dsp_suspend(struct snd_sof_dev *sdev,
 		    enum sof_dsp_power_state target_state);
