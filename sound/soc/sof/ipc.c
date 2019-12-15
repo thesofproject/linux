@@ -289,6 +289,7 @@ int sof_ipc_tx_message(struct snd_sof_ipc *ipc, u32 header,
 		       void *msg_data, size_t msg_bytes, void *reply_data,
 		       size_t reply_bytes)
 {
+	struct snd_sof_dev *sdev = ipc->sdev;
 	int ret;
 
 	if (msg_bytes > SOF_IPC_MSG_MAX_SIZE ||
@@ -297,6 +298,11 @@ int sof_ipc_tx_message(struct snd_sof_ipc *ipc, u32 header,
 
 	/* cancel any attempt for DSP D0i3 entry */
 	cancel_delayed_work_sync(&sdev->d0i3_work);
+
+	/* resume DSP if it is in D0i3 */
+	ret = snd_sof_dsp_set_power_state(sdev, SOF_DSP_D0, true);
+	if (ret < 0)
+		dev_warn(sdev->dev, "DSP D0i3 entry failed\n");
 
 	/* Serialise IPC TX */
 	mutex_lock(&ipc->tx_mutex);
@@ -312,6 +318,32 @@ int sof_ipc_tx_message(struct snd_sof_ipc *ipc, u32 header,
 	return ret;
 }
 EXPORT_SYMBOL(sof_ipc_tx_message);
+
+/*
+ * send IPC message without resuming DSP
+ * This is used for sending the IPC to resume the DSP from D0I3.
+ */
+int sof_ipc_tx_message_no_resume(struct snd_sof_ipc *ipc, u32 header,
+				 void *msg_data, size_t msg_bytes,
+				 void *reply_data, size_t reply_bytes)
+{
+	int ret;
+
+	if (msg_bytes > SOF_IPC_MSG_MAX_SIZE ||
+	    reply_bytes > SOF_IPC_MSG_MAX_SIZE)
+		return -ENOBUFS;
+
+	/* Serialise IPC TX */
+	mutex_lock(&ipc->tx_mutex);
+
+	ret = sof_ipc_tx_message_unlocked(ipc, header, msg_data, msg_bytes,
+					  reply_data, reply_bytes);
+
+	mutex_unlock(&ipc->tx_mutex);
+
+	return ret;
+}
+EXPORT_SYMBOL(sof_ipc_tx_message_no_resume);
 
 /* handle reply message from DSP */
 int snd_sof_ipc_reply(struct snd_sof_dev *sdev, u32 msg_id)
