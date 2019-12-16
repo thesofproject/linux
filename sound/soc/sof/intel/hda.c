@@ -1120,3 +1120,4 @@ void hda_machine_select(struct snd_sof_dev *sdev)
 }
 
 MODULE_LICENSE("Dual BSD/GPL");
+MODULE_IMPORT_NS(SOUNDWIRE_INTEL_INIT);
