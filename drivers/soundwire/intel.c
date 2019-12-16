@@ -1226,7 +1226,7 @@ struct sdw_master_driver intel_sdw_driver = {
 	.startup = intel_master_startup,
 	.remove = intel_master_remove,
 };
-EXPORT_SYMBOL(intel_sdw_driver);
+EXPORT_SYMBOL_NS(intel_sdw_driver, SOUNDWIRE_INTEL);
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_ALIAS("platform:int-sdw");
