@@ -228,26 +228,6 @@ int snd_sof_runtime_resume(struct device *dev)
 }
 EXPORT_SYMBOL(snd_sof_runtime_resume);
 
-int snd_sof_set_dsp_power_state(struct snd_sof_dev *sdev,
-				enum sof_dsp_power_state state)
-{
-	int ret;
-
-	if (sdev->dsp_power_state == state)
-		return 0;
-
-	/* do platform specific set_state */
-	ret = snd_sof_dsp_set_power_state(sdev, state);
-	if (ret < 0)
-		return ret;
-
-	/* update dsp D0 sub-state */
-	sdev->dsp_power_state = state;
-
-	return 0;
-}
-EXPORT_SYMBOL(snd_sof_set_dsp_power_state);
-
 enum sof_dsp_power_state
 snd_sof_get_dsp_power_target(struct snd_sof_dev *sdev)
 {

@@ -424,8 +424,6 @@ int snd_sof_resume(struct device *dev);
 int snd_sof_suspend(struct device *dev);
 int snd_sof_prepare(struct device *dev);
 void snd_sof_complete(struct device *dev);
-int snd_sof_set_dsp_power_state(struct snd_sof_dev *sdev,
-				enum sof_dsp_power_state state);
 enum sof_dsp_power_state
 snd_sof_get_dsp_power_target(struct snd_sof_dev *sdev);
 
