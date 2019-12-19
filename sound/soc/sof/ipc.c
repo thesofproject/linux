@@ -268,7 +268,6 @@ static int sof_ipc_tx_message_unlocked(struct snd_sof_ipc *ipc, u32 header,
 	spin_unlock_irq(&sdev->ipc_lock);
 
 	if (ret < 0) {
-		/* So far IPC TX never fails, consider making the above void */
 		dev_err_ratelimited(sdev->dev,
 				    "error: ipc tx failed with error %d\n",
 				    ret);
