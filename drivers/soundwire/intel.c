@@ -1723,6 +1723,9 @@ static int intel_resume_runtime(struct device *dev)
 	clock_stop_quirks = sdw->link_res->clock_stop_quirks;
 
 	if (clock_stop_quirks & SDW_INTEL_CLK_STOP_TEARDOWN) {
+
+		dev_dbg(dev, "%s resume from TEARDOWN\n", __func__);
+
 		ret = intel_init(sdw);
 		if (ret) {
 			dev_err(dev, "%s failed: %d", __func__, ret);
@@ -1749,6 +1752,9 @@ static int intel_resume_runtime(struct device *dev)
 		}
 
 	} else if (clock_stop_quirks & SDW_INTEL_CLK_STOP_BUS_RESET) {
+
+		dev_dbg(dev, "%s resume from BUS_RESET\n", __func__);
+
 		ret = intel_init(sdw);
 		if (ret) {
 			dev_err(dev, "%s failed: %d", __func__, ret);
@@ -1780,6 +1786,9 @@ static int intel_resume_runtime(struct device *dev)
 		}
 
 	} else if (!clock_stop_quirks) {
+
+		dev_err(dev, "%s resume with no quirks\n", __func__);
+
 		ret = intel_init(sdw);
 		if (ret) {
 			dev_err(dev, "%s failed: %d", __func__, ret);
