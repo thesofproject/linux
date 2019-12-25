@@ -267,6 +267,13 @@ static int sdw_program_port_params(struct sdw_master_runtime *m_rt)
 	/* Program transport & port parameters for Slave(s) */
 	list_for_each_entry(s_rt, &m_rt->slave_rt_list, m_rt_node) {
 		list_for_each_entry(p_rt, &s_rt->port_list, port_node) {
+			/*
+			 * skip unprepared slaves since transport & port
+			 * parameters are not computed for them
+			 */
+			if (!p_rt->port_params.num && !p_rt->port_params.bps)
+				continue;
+
 			ret = sdw_program_slave_port_params(bus, s_rt, p_rt);
 			if (ret < 0)
 				return ret;
