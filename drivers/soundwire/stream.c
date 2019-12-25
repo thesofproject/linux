@@ -139,10 +139,10 @@ static int sdw_program_slave_port_params(struct sdw_bus *bus,
 					  s_rt->direction,
 					  t_params->port_num);
 	if (!dpn_prop) {
-		dev_err(&s_rt->slave->dev,
-			"invalid dpn_prop direction %d port_num %d\n",
-			s_rt->direction, t_params->port_num);
-		return -EINVAL;
+		dev_info(&s_rt->slave->dev,
+			 "dpn_prop direction %d port_num %d is not ready\n",
+			 s_rt->direction, t_params->port_num);
+		return 0;
 	}
 
 	addr1 = SDW_DPN_PORTCTRL(t_params->port_num);
