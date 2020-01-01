@@ -1458,6 +1458,12 @@ int dpcm_path_get(struct snd_soc_pcm_runtime *fe,
 	struct snd_soc_dai *cpu_dai = fe->cpu_dai;
 	int paths;
 
+	if (fe->num_cpus > 1) {
+		dev_err(fe->dev,
+			 "%s doesn't support Multi CPU yet\n", __func__);
+		return -EINVAL;
+	}
+
 	/* get number of valid DAI paths and their widgets */
 	paths = snd_soc_dapm_dai_get_connected_widgets(cpu_dai, stream, list,
 			dpcm_end_walk_at_be);
@@ -2783,6 +2789,12 @@ static int soc_dpcm_fe_runtime_update(struct snd_soc_pcm_runtime *fe, int new)
 	struct snd_soc_dapm_widget_list *list;
 	int count, paths;
 
+	if (fe->num_cpus > 1) {
+		dev_err(fe->dev,
+			 "%s doesn't support Multi CPU yet\n", __func__);
+		return -EINVAL;
+	}
+
 	if (!fe->dai_link->dynamic)
 		return 0;
 
@@ -3345,6 +3357,12 @@ static ssize_t dpcm_state_read_file(struct file *file, char __user *user_buf,
 	struct snd_soc_pcm_runtime *fe = file->private_data;
 	ssize_t out_count = PAGE_SIZE, offset = 0, ret = 0;
 	char *buf;
+
+	if (fe->num_cpus > 1) {
+		dev_err(fe->dev,
+			 "%s doesn't support Multi CPU yet\n", __func__);
+		return -EINVAL;
+	}
 
 	buf = kmalloc(out_count, GFP_KERNEL);
 	if (!buf)
