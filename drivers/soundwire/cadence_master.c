@@ -756,11 +756,24 @@ irqreturn_t sdw_cdns_irq(int irq, void *dev_id)
 	int_status = cdns_readl(cdns, CDNS_MCP_INTSTAT);
 
 	/* check for reserved values read as zero */
-	if (int_status & CDNS_MCP_INT_RESERVED)
+	if (int_status & CDNS_MCP_INT_RESERVED) {
+		dev_dbg_ratelimited(cdns->dev,
+				    "%s: Invalid interrupt status bits %x\n",
+				    __func__, int_status);
 		return IRQ_NONE;
+	}
 
-	if (!(int_status & CDNS_MCP_INT_IRQ))
+	if (!(int_status & CDNS_MCP_INT_IRQ)) {
+		if (int_status)
+			dev_dbg_ratelimited(cdns->dev,
+					    "%s: Invalid interrupt cascade bit, status %x\n",
+					    __func__, int_status);
+		else
+			dev_dbg_ratelimited(cdns->dev,
+					    "%s: Invalid interrupt, nothing to do with status 0\n",
+					    __func__);
 		return IRQ_NONE;
+	}
 
 	if (int_status & CDNS_MCP_INT_RX_WL) {
 		cdns_read_response(cdns);
