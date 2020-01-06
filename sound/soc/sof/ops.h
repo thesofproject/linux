@@ -418,7 +418,7 @@ snd_sof_machine_select(struct snd_sof_dev *sdev)
 }
 
 static inline void
-snd_sof_set_mach_params(const struct snd_soc_acpi_mach *mach,
+snd_sof_set_mach_params(const struct snd_soc_sof_mach *mach,
 			struct device *dev)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);

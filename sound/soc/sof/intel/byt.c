@@ -443,12 +443,14 @@ static void byt_machine_select(struct snd_sof_dev *sdev)
 
 	sof_pdata->tplg_filename = tplg_filename;
 	mach->mach_params.acpi_ipc_irq_index = desc->irqindex_host_ipc;
-	sof_pdata->machine = mach;
+	sof_mach_set_machine(sof_pdata->machine, mach,
+			     SND_SOC_SOF_MACH_TYPE_ACPI);
 }
 
-static void byt_set_mach_params(const struct snd_soc_acpi_mach *mach,
+static void byt_set_mach_params(const struct snd_soc_sof_mach *machine,
 				struct device *dev)
 {
+	const struct snd_soc_acpi_mach *mach = machine->acpi;
 	struct snd_soc_acpi_mach_params *mach_params;
 
 	mach_params = (struct snd_soc_acpi_mach_params *)&mach->mach_params;

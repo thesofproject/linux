@@ -300,6 +300,11 @@ static int sof_pci_probe(struct pci_dev *pci,
 	if (!sof_pdata)
 		return -ENOMEM;
 
+	sof_pdata->machine = devm_kzalloc(dev, sizeof(*sof_pdata->machine),
+					  GFP_KERNEL);
+	if (!sof_pdata->machine)
+		return -ENOMEM;
+
 	ret = pcim_enable_device(pci);
 	if (ret < 0)
 		return ret;

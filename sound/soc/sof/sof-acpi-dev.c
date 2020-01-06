@@ -128,6 +128,10 @@ static int sof_acpi_probe(struct platform_device *pdev)
 	sof_pdata = devm_kzalloc(dev, sizeof(*sof_pdata), GFP_KERNEL);
 	if (!sof_pdata)
 		return -ENOMEM;
+	sof_pdata->machine = devm_kzalloc(dev, sizeof(*sof_pdata->machine),
+					  GFP_KERNEL);
+	if (!sof_pdata->machine)
+		return -ENOMEM;
 
 	desc = device_get_match_data(dev);
 	if (!desc)

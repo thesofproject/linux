@@ -443,7 +443,8 @@ nocodec:
 	if (ret < 0)
 		return ret;
 
-	sof_pdata->machine = mach;
+	sof_mach_set_machine(sof_pdata->machine, mach,
+			     SND_SOC_SOF_MACH_TYPE_ACPI);
 	snd_sof_set_mach_params(sof_pdata->machine, sdev->dev);
 
 	return 0;
@@ -457,9 +458,9 @@ int sof_machine_register(struct snd_sof_dev *sdev, void *pdata)
 	const void *mach;
 	int size;
 
-	drv_name = plat_data->machine->drv_name;
-	mach = (const void *)plat_data->machine;
-	size = sizeof(*plat_data->machine);
+	drv_name = sof_mach_get_drv_name(plat_data->machine);
+	mach = sof_mach_get_machine(plat_data->machine);
+	size = sof_mach_get_mach_size(plat_data->machine);
 
 	/* register machine driver, pass machine info as pdata */
 	plat_data->pdev_mach =

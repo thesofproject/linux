@@ -119,7 +119,7 @@ struct snd_sof_pdata {
 
 	/* machine */
 	struct platform_device *pdev_mach;
-	const struct snd_soc_acpi_mach *machine;
+	struct snd_soc_sof_mach *machine;
 
 	void *hw_pdata;
 };
