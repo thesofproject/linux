@@ -62,6 +62,8 @@ static int sof_of_probe(struct platform_device *pdev)
 	if (!sof_pdata)
 		return -ENOMEM;
 
+	platform_set_drvdata(pdev, sof_pdata);
+
 	desc = device_get_match_data(dev);
 	if (!desc)
 		return -ENODEV;
