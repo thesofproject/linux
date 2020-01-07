@@ -269,9 +269,11 @@ static struct sdw_intel_ctx
 
 err:
 	sdw_intel_cleanup(ctx);
-link_err:
 	driver_unregister(&intel_sdw_driver.driver);
 register_err:
+	if (ctx->links)
+		kfree(ctx->links);
+link_err:
 	kfree(ctx);
 	return NULL;
 }
