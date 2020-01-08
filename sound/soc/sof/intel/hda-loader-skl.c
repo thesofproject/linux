@@ -491,7 +491,6 @@ int hda_dsp_cl_boot_firmware_skl(struct snd_sof_dev *sdev)
 
 	/* init for booting wait */
 	init_waitqueue_head(&sdev->boot_wait);
-	sdev->boot_complete = false;
 
 	/*
 	 * at this point DSP ROM has been initialized and should
