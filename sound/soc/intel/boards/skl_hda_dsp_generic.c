@@ -48,17 +48,20 @@ static const struct snd_soc_dapm_route skl_hda_map[] = {
 	/* CODEC BE connections */
 	{ "Analog Codec Playback", NULL, "Analog CPU Playback" },
 	{ "Analog CPU Playback", NULL, "codec0_out" },
+#if 0
 	{ "Digital Codec Playback", NULL, "Digital CPU Playback" },
 	{ "Digital CPU Playback", NULL, "codec1_out" },
 	{ "Alt Analog Codec Playback", NULL, "Alt Analog CPU Playback" },
 	{ "Alt Analog CPU Playback", NULL, "codec2_out" },
-
+#endif
 	{ "codec0_in", NULL, "Analog CPU Capture" },
 	{ "Analog CPU Capture", NULL, "Analog Codec Capture" },
+#if 0
 	{ "codec1_in", NULL, "Digital CPU Capture" },
 	{ "Digital CPU Capture", NULL, "Digital Codec Capture" },
 	{ "codec2_in", NULL, "Alt Analog CPU Capture" },
 	{ "Alt Analog CPU Capture", NULL, "Alt Analog Codec Capture" },
+#endif
 };
 
 static int skl_hda_card_late_probe(struct snd_soc_card *card)
