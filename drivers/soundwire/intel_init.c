@@ -267,7 +267,12 @@ static struct sdw_intel_ctx
 		link->clock_stop_quirks = res->clock_stop_quirks;
 
 		/* let the SoundWire master driver to its probe */
-		md->driver->probe(md, link);
+		err = md->driver->probe(md, link);
+		if (err < 0) {
+			dev_err(&adev->dev, "Could not probe Master %d %d\n",
+				i, err);
+			goto err;
+		}
 
 		list_add_tail(&link->list, &ctx->link_list);
 		bus = &link->cdns->bus;
