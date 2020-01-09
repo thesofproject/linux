@@ -326,6 +326,57 @@ static int intel_link_power_up(struct sdw_intel *sdw)
 	return 0;
 }
 
+/* this needs to be called with shim_lock */
+static void intel_shim_glue_to_master_ip(struct sdw_intel *sdw)
+{
+	void __iomem *shim = sdw->link_res->shim;
+	unsigned int link_id = sdw->instance;
+	u16 ioctl;
+
+	/* Switch to MIP from Glue logic */
+	ioctl = intel_readw(shim,  SDW_SHIM_IOCTL(link_id));
+
+	ioctl &= ~(SDW_SHIM_IOCTL_DOE);
+	intel_writew(shim, SDW_SHIM_IOCTL(link_id), ioctl);
+	usleep_range(10, 15);
+
+	ioctl &= ~(SDW_SHIM_IOCTL_DO);
+	intel_writew(shim, SDW_SHIM_IOCTL(link_id), ioctl);
+	usleep_range(10, 15);
+
+	ioctl |= (SDW_SHIM_IOCTL_MIF);
+	intel_writew(shim, SDW_SHIM_IOCTL(link_id), ioctl);
+	usleep_range(10, 15);
+
+	ioctl &= ~(SDW_SHIM_IOCTL_BKE);
+	ioctl &= ~(SDW_SHIM_IOCTL_COE);
+	intel_writew(shim, SDW_SHIM_IOCTL(link_id), ioctl);
+	usleep_range(10, 15);
+
+	/* at this point Master IP has full control of the I/Os */
+}
+
+/* this needs to be called with shim_lock */
+static void intel_shim_master_ip_to_glue(struct sdw_intel *sdw)
+{
+	unsigned int link_id = sdw->instance;
+	void __iomem *shim = sdw->link_res->shim;
+	u16 ioctl;
+
+	/* Glue logic */
+	ioctl = intel_readw(shim, SDW_SHIM_IOCTL(link_id));
+	ioctl |= SDW_SHIM_IOCTL_BKE;
+	ioctl |= SDW_SHIM_IOCTL_COE;
+	intel_writew(shim, SDW_SHIM_IOCTL(link_id), ioctl);
+	usleep_range(10, 15);
+
+	ioctl &= ~(SDW_SHIM_IOCTL_MIF);
+	intel_writew(shim, SDW_SHIM_IOCTL(link_id), ioctl);
+	usleep_range(10, 15);
+
+	/* at this point Integration Glue has full control of the I/Os */
+}
+
 static int intel_shim_init(struct sdw_intel *sdw, bool clock_stop)
 {
 	void __iomem *shim = sdw->link_res->shim;
@@ -352,25 +403,7 @@ static int intel_shim_init(struct sdw_intel *sdw, bool clock_stop)
 	intel_writew(shim, SDW_SHIM_IOCTL(link_id), ioctl);
 	usleep_range(10, 15);
 
-	/* Switch to MIP from Glue logic */
-	ioctl = intel_readw(shim,  SDW_SHIM_IOCTL(link_id));
-
-	ioctl &= ~(SDW_SHIM_IOCTL_DOE);
-	intel_writew(shim, SDW_SHIM_IOCTL(link_id), ioctl);
-	usleep_range(10, 15);
-
-	ioctl &= ~(SDW_SHIM_IOCTL_DO);
-	intel_writew(shim, SDW_SHIM_IOCTL(link_id), ioctl);
-	usleep_range(10, 15);
-
-	ioctl |= (SDW_SHIM_IOCTL_MIF);
-	intel_writew(shim, SDW_SHIM_IOCTL(link_id), ioctl);
-	usleep_range(10, 15);
-
-	ioctl &= ~(SDW_SHIM_IOCTL_BKE);
-	ioctl &= ~(SDW_SHIM_IOCTL_COE);
-	intel_writew(shim, SDW_SHIM_IOCTL(link_id), ioctl);
-	usleep_range(10, 15);
+	intel_shim_glue_to_master_ip(sdw);
 
 	act |= 0x1 << SDW_REG_SHIFT(SDW_SHIM_CTMCTL_DOAIS);
 	act |= SDW_SHIM_CTMCTL_DACTQE;
@@ -425,23 +458,14 @@ static void intel_shim_wake(struct sdw_intel *sdw, bool wake_enable)
 
 static int intel_link_power_down(struct sdw_intel *sdw)
 {
-	int link_control, spa_mask, cpa_mask, ret;
+	int link_control, spa_mask, cpa_mask;
 	unsigned int link_id = sdw->instance;
 	void __iomem *shim = sdw->link_res->shim;
-	u16 ioctl;
+	int ret = 0;
 
 	mutex_lock(sdw->link_res->shim_lock);
 
-	/* Glue logic */
-	ioctl = intel_readw(shim, SDW_SHIM_IOCTL(link_id));
-	ioctl |= SDW_SHIM_IOCTL_BKE;
-	ioctl |= SDW_SHIM_IOCTL_COE;
-	intel_writew(shim, SDW_SHIM_IOCTL(link_id), ioctl);
-	usleep_range(10, 15);
-
-	ioctl &= ~(SDW_SHIM_IOCTL_MIF);
-	intel_writew(shim, SDW_SHIM_IOCTL(link_id), ioctl);
-	usleep_range(10, 15);
+	intel_shim_master_ip_to_glue(sdw);
 
 	/* Link power down sequence */
 	link_control = intel_readl(shim, SDW_SHIM_LCTL);
@@ -450,6 +474,7 @@ static int intel_link_power_down(struct sdw_intel *sdw)
 	link_control &=  spa_mask;
 
 	ret = intel_clear_bit(shim, SDW_SHIM_LCTL, link_control, cpa_mask);
+
 	mutex_unlock(sdw->link_res->shim_lock);
 
 	if (ret < 0)
@@ -1555,6 +1580,7 @@ static int intel_suspend_runtime(struct device *dev)
 	clock_stop_quirks = sdw->link_res->clock_stop_quirks;
 
 	if (clock_stop_quirks & SDW_INTEL_CLK_STOP_TEARDOWN) {
+
 		ret = sdw_cdns_enable_interrupt(cdns, false);
 		if (ret < 0) {
 			dev_err(dev, "cannot disable interrupts on suspend\n");
@@ -1568,8 +1594,10 @@ static int intel_suspend_runtime(struct device *dev)
 		}
 
 		intel_shim_wake(sdw, false);
+
 	} else if (clock_stop_quirks & SDW_INTEL_CLK_STOP_BUS_RESET ||
-		!clock_stop_quirks) {
+		   !clock_stop_quirks) {
+
 		ret = sdw_cdns_clock_stop(cdns, true);
 		if (ret < 0) {
 			dev_err(dev, "cannot enable clock stop on suspend\n");
@@ -1748,6 +1776,7 @@ static int intel_resume_runtime(struct device *dev)
 			dev_err(dev, "unable to restart clock during resume\n");
 			return ret;
 		}
+
 	} else if (!clock_stop_quirks) {
 		ret = intel_init(sdw);
 		if (ret) {
