@@ -197,6 +197,7 @@ static struct sdw_intel_ctx
 	struct acpi_device *adev;
 	struct sdw_master_device *md;
 	struct sdw_slave *slave;
+	struct list_head *node;
 	struct sdw_bus *bus;
 	u32 link_mask;
 	int num_slaves = 0;
@@ -271,7 +272,7 @@ static struct sdw_intel_ctx
 		list_add_tail(&link->list, &ctx->link_list);
 		bus = &link->cdns->bus;
 		/* Calculate number of slaves */
-		list_for_each_entry(slave, &bus->slaves, node)
+		list_for_each(node, &bus->slaves)
 			num_slaves++;
 	}
 
