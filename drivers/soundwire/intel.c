@@ -1555,6 +1555,7 @@ static int intel_suspend(struct device *dev)
 	struct sdw_master_device *md = to_sdw_master_device(dev);
 	struct sdw_cdns *cdns = dev_get_drvdata(dev);
 	struct sdw_intel *sdw = cdns_to_intel(cdns);
+	u32 clock_stop_quirks;
 	int ret;
 
 	if (cdns->bus.prop.hw_disabled) {
@@ -1575,6 +1576,32 @@ static int intel_suspend(struct device *dev)
 		 * we will need to reset the pm_runtime status to active
 		 */
 		md->pm_runtime_suspended = true;
+		clock_stop_quirks = sdw->link_res->clock_stop_quirks;
+
+		if ((clock_stop_quirks & SDW_INTEL_CLK_STOP_BUS_RESET ||
+		     !clock_stop_quirks) &&
+		    !pm_runtime_suspended(dev->parent)) {
+
+			/*
+			 * if we've enabled clock stop, and the parent
+			 * is still active, disable shim wake. The
+			 * SHIM registers are not accessible if the
+			 * parent is already pm_runtime suspended so
+			 * it's too late to change that
+			 * configuration
+			 */
+
+			dev_dbg(dev, "%s: disabling shim wake\n", __func__);
+
+			intel_shim_wake(sdw, false);
+
+			/*
+			 * FIXME: if we suspend with the clock stop
+			 * mode turned on, can we resume without
+			 * issues, or do we need to turn-off the
+			 * clock-stop mode before suspending?
+			 */
+		}
 
 		return 0;
 	}
