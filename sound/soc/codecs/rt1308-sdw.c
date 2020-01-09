@@ -510,6 +510,14 @@ static void rt1308_sdw_shutdown(struct snd_pcm_substream *substream,
 	kfree(stream);
 }
 
+static int rt1308_set_tdm_slot(struct snd_soc_dai *dai,
+			       unsigned int tx_mask, unsigned int rx_mask,
+			       int slots, int slot_width)
+{
+	dai->channels = slots;
+	return 0;
+}
+
 static int rt1308_sdw_hw_params(struct snd_pcm_substream *substream,
 	struct snd_pcm_hw_params *params, struct snd_soc_dai *dai)
 {
@@ -540,12 +548,20 @@ static int rt1308_sdw_hw_params(struct snd_pcm_substream *substream,
 		return -EINVAL;
 	}
 
+	/*
+	 * machine driver sets tx_mask to dispatch stream channels
+	 * to each codec in multiple-codecs case
+	 */
+	if (dai->tx_mask)
+		num_channels = dai->channels;
+	else
+		num_channels = params_channels(params);
+
 	stream_config.frame_rate = params_rate(params);
-	stream_config.ch_count = params_channels(params);
+	stream_config.ch_count = num_channels;
 	stream_config.bps = snd_pcm_format_width(params_format(params));
 	stream_config.direction = direction;
 
-	num_channels = params_channels(params);
 	port_config.ch_mask = (1 << (num_channels)) - 1;
 	port_config.num = port;
 
@@ -600,6 +616,7 @@ static const struct snd_soc_dai_ops rt1308_aif_dai_ops = {
 	.hw_free	= rt1308_sdw_pcm_hw_free,
 	.set_sdw_stream	= rt1308_set_sdw_stream,
 	.shutdown	= rt1308_sdw_shutdown,
+	.set_tdm_slot	= rt1308_set_tdm_slot,
 };
 
 #define RT1308_STEREO_RATES SNDRV_PCM_RATE_48000
