@@ -1041,7 +1041,7 @@ static int hda_generic_machine_select(struct snd_sof_dev *sdev)
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_SOUNDWIRE)
 /* Check if all Slaves defined on the link can be found */
 static bool link_slaves_found(struct snd_sof_dev *sdev,
-			      struct snd_soc_acpi_link_adr *link,
+			      const struct snd_soc_acpi_link_adr *link,
 			      struct sdw_intel_ctx *sdw)
 {
 	struct hdac_bus *bus = sof_to_bus(sdev);
@@ -1097,14 +1097,15 @@ static bool link_slaves_found(struct snd_sof_dev *sdev,
 
 static int hda_sdw_machine_select(struct snd_sof_dev *sdev)
 {
+	struct snd_sof_pdata *pdata = sdev->pdata;
+	const struct snd_soc_acpi_link_adr *link;
 	struct hdac_bus *bus = sof_to_bus(sdev);
 	struct snd_soc_acpi_mach *mach;
-	struct snd_sof_pdata *pdata = sdev->pdata;
-	struct sof_intel_hda_dev *hdev = pdata->hw_pdata;
+	struct sof_intel_hda_dev *hdev;
 	u32 link_mask;
-	struct snd_soc_acpi_link_adr *link;
 	int i;
 
+	hdev = pdata->hw_pdata;
 	link_mask = hdev->info.link_mask;
 
 	/*
