@@ -18,11 +18,8 @@ static const u64 rt711_0_adr[] = {
 	0x000010025D071100
 };
 
-static const u64 rt1308_1_1_adr[] = {
-	0x000120025D130800
-};
-
-static const u64 rt1308_1_2_adr[] = {
+static const u64 rt1308_1_adr[] = {
+	0x000120025D130800,
 	0x000122025D130800
 };
 
@@ -43,13 +40,8 @@ static const struct snd_soc_acpi_link_adr tgl_rvp[] = {
 	},
 	{
 		.mask = BIT(1),
-		.num_adr = ARRAY_SIZE(rt1308_1_1_adr),
-		.adr = rt1308_1_1_adr,
-	},
-	{
-		.mask = BIT(1),
-		.num_adr = ARRAY_SIZE(rt1308_1_2_adr),
-		.adr = rt1308_1_2_adr,
+		.num_adr = ARRAY_SIZE(rt1308_1_adr),
+		.adr = rt1308_1_adr,
 	},
 	{}
 };
