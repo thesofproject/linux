@@ -643,6 +643,15 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	/* set default mailbox offset for FW ready message */
 	sdev->dsp_box.offset = HDA_DSP_MBOX_UPLINK_OFFSET;
 
+	/*
+	 * set pm suspend delay for the hda codec. Use the same value as SOF
+	 * uses. If this is not set, HDA codec will suspend with 0ms suspend
+	 * delay i.e. very quickly after idle. Very quick wakeup/suspend might
+	 * cause for example jack inserts not being detected as the codec setup
+	 * and jack connection measurement need some time.
+	 */
+	snd_hda_set_power_save(sof_to_hbus(sdev), SND_SOF_SUSPEND_DELAY_MS);
+
 	return 0;
 
 free_ipc_irq:
