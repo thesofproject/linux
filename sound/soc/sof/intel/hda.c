@@ -466,12 +466,17 @@ static irqreturn_t hda_dsp_interrupt_thread(int irq, void *context)
 {
 	struct snd_sof_dev *sdev = context;
 
+	if (hda_dsp_check_cl_dma_irq(sdev)) {
+		dev_dbg(sdev->dev, "plb: cl dma interrupt\n");
+	}
+
 	/* deal with streams and controller first */
 	if (hda_dsp_check_stream_irq(sdev))
 		hda_dsp_stream_threaded_handler(irq, sdev);
 
 	if (hda_dsp_check_ipc_irq(sdev))
 		sof_ops(sdev)->irq_thread(irq, sdev);
+
 
 	/* enable GIE interrupt */
 	snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR,

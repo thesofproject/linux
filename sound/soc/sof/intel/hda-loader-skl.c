@@ -212,6 +212,8 @@ static void cl_skl_cldma_set_intr(struct snd_sof_dev *sdev, bool enable)
 {
 	u32 val = enable ? HDA_DSP_ADSPIC_CL_DMA : 0;
 
+	dev_dbg(sdev->dev, "plb: %s interrupt enable %d\n", __func__, enable);
+
 	snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR, HDA_DSP_REG_ADSPIC,
 				HDA_DSP_ADSPIC_CL_DMA, val);
 }
@@ -420,6 +422,10 @@ cl_skl_cldma_copy_to_buf(struct snd_sof_dev *sdev, const void *bin,
 
 			bytes_left -= bufsize;
 			curr_pos += bufsize;
+
+			dev_dbg(sdev->dev, "%s: plb: sleeping 100ms\n", __func__);
+
+			msleep(100);
 		} else {
 
 			dev_dbg(sdev->dev, "cldma copy 0x%x bytes\n",
@@ -513,6 +519,38 @@ irq_err:
 	cl_cleanup_skl(sdev);
 
 	dev_err(sdev->dev, "error: load fw failed err: %d\n", ret);
+	return ret;
+}
+
+bool hda_dsp_check_cl_dma_irq(struct snd_sof_dev *sdev)
+{
+	int sd_offset = SOF_HDA_ADSP_LOADER_BASE;
+	u32 irq_status;
+	u32 status;
+	bool ret = false;
+
+	/* store status */
+	irq_status = snd_sof_dsp_read(sdev, HDA_DSP_BAR, HDA_DSP_REG_ADSPIS);
+
+	/* invalid message ? */
+	if (irq_status == 0xffffffff)
+		goto out;
+
+	/* IPC message ? */
+	if (irq_status &  HDA_DSP_ADSPIS_CL_DMA) {
+		ret = true;
+
+		status = snd_sof_dsp_read(sdev, HDA_DSP_BAR,
+					  sd_offset + SOF_HDA_ADSP_REG_CL_SD_STS);
+
+		if (!(status  & SOF_HDA_CL_DMA_SD_INT_COMPLETE))
+			dev_dbg_ratelimited(sdev->dev, "plb: CL DMA ERR\n");
+		else
+			dev_dbg_ratelimited(sdev->dev, "plb: CL BUFF_COMPLETE\n");
+	}
+
+
+out:
 	return ret;
 }
 
