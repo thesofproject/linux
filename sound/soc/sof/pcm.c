@@ -113,7 +113,6 @@ static int sof_pcm_dsp_pcm_free(struct snd_pcm_substream *substream,
 	return ret;
 }
 
-/* this may get called several times by oss emulation */
 static int sof_pcm_hw_params(struct snd_soc_component *component,
 			     struct snd_pcm_substream *substream,
 			     struct snd_pcm_hw_params *params)
