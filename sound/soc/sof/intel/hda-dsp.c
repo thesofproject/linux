@@ -756,8 +756,6 @@ int hda_dsp_suspend(struct snd_sof_dev *sdev, u32 target_state)
 	}
 
 	return hda_dsp_set_power_state(sdev, &target_dsp_state);
-
-	return 0;
 }
 
 int hda_dsp_set_hw_params_upon_resume(struct snd_sof_dev *sdev)
