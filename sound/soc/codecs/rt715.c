@@ -203,7 +203,6 @@ static int rt715_set_amp_gain_get(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-static const DECLARE_TLV_DB_SCALE(out_vol_tlv, -6525, 75, 0);
 static const DECLARE_TLV_DB_SCALE(in_vol_tlv, -1725, 75, 0);
 static const DECLARE_TLV_DB_SCALE(mic_vol_tlv, 0, 1000, 0);
 
@@ -371,7 +370,7 @@ static const char * const adc_22_23_mux_text[] = {
  * 1 will be connected to the same dmic source, therefore we skip index 1 to
  * avoid misunderstanding on usage of dapm routing.
  */
-static const unsigned int rt715_adc_24_25_values[] = {
+static int rt715_adc_24_25_values[] = {
 	0,
 	2,
 	3,
