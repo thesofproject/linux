@@ -1083,6 +1083,7 @@ static bool link_slaves_found(struct snd_sof_dev *sdev,
 			 */
 			unique_id = (link->adr[i] >> 40) & GENMASK(3, 0);
 			if (link->num_adr == 1 ||
+			    ids[j].id.unique_id == SDW_IGNORED_UNIQUE_ID ||
 			    ids[j].id.unique_id == unique_id) {
 				dev_dbg(bus->dev,
 					"found %x at link %d\n",
