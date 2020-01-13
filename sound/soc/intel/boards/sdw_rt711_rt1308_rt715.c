@@ -25,6 +25,7 @@
 #include <sound/soc.h>
 #include <sound/soc-acpi.h>
 #include "../../codecs/hdac_hdmi.h"
+#include "../../codecs/rt1308.h"
 #include "hda_dsp_common.h"
 
 /* comment out this define for mono configurations */
@@ -45,6 +46,20 @@ struct mc_private {
 	struct list_head hdmi_pcm_list;
 	bool common_hdmi_codec_drv;
 	struct snd_soc_jack sdw_headset;
+};
+
+struct codec_info {
+	const int id;
+	int amp_num;
+	const u8 acpi_id[ACPI_ID_LEN];
+	const bool direction[2]; // playback & capture support
+	const char *dai_name;
+	const struct snd_soc_ops *ops;
+
+	void (*init)(const struct snd_soc_acpi_link_adr *link,
+		     struct snd_soc_dai_link *dai_links,
+		     struct codec_info *info,
+		     bool playback);
 };
 
 #if IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
@@ -242,7 +257,15 @@ static const struct snd_soc_dapm_route map[] = {
 	{ "Speaker", NULL, "rt1308-1 SPOR" },
 };
 
-static const struct snd_soc_dapm_route second_speaker_map[] = {
+/*
+ * dapm routes for rt1308 will be registered dynamically according
+ * to the number of rt1308 used. The first two entries will be registered
+ * for one codec case, and the last two entries are also registered
+ * if two 1308s are used.
+ */
+static const struct snd_soc_dapm_route rt1308_speaker_map[] = {
+	{ "Speaker", NULL, "rt1308-1 SPOL" },
+	{ "Speaker", NULL, "rt1308-1 SPOR" },
 	{ "Speaker", NULL, "rt1308-2 SPOL" },
 	{ "Speaker", NULL, "rt1308-2 SPOR" },
 };
@@ -253,17 +276,39 @@ static const struct snd_kcontrol_new controls[] = {
 	SOC_DAPM_PIN_SWITCH("Speaker"),
 };
 
+static int first_spk_init(struct snd_soc_pcm_runtime *rtd)
+{
+	struct snd_soc_card *card = rtd->card;
+	int ret;
+
+	ret = snd_soc_dapm_add_routes(&card->dapm, rt1308_speaker_map, 2);
+	if (ret)
+		dev_err(rtd->dev, "failed to add first SPK map: %d\n", ret);
+
+	return ret;
+}
+
 static int second_spk_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_card *card = rtd->card;
 	int ret;
 
-	ret = snd_soc_dapm_add_routes(&card->dapm, second_speaker_map,
-				      ARRAY_SIZE(second_speaker_map));
-
+	ret = snd_soc_dapm_add_routes(&card->dapm, rt1308_speaker_map + 2, 2);
 	if (ret)
-		dev_err(rtd->dev, "second Speaker map addition failed: %d\n",
-			ret);
+		dev_err(rtd->dev, "failed to add second SPK map: %d\n", ret);
+
+	return ret;
+}
+
+static int all_spk_init(struct snd_soc_pcm_runtime *rtd)
+{
+	struct snd_soc_card *card = rtd->card;
+	int ret;
+
+	ret = snd_soc_dapm_add_routes(&card->dapm, rt1308_speaker_map, 4);
+	if (ret)
+		dev_err(rtd->dev, "failed to add all SPK map: %d\n", ret);
+
 	return ret;
 }
 
@@ -327,6 +372,110 @@ static struct snd_soc_codec_conf codec_conf[] = {
 		.name_prefix = "rt1308-2",
 	},
 
+};
+
+static struct snd_soc_dai_link_component platform_component[] = {
+	{
+		/* name might be overridden during probe */
+		.name = "0000:00:1f.3"
+	}
+};
+
+static int rt1308_i2s_hw_params(struct snd_pcm_substream *substream,
+				struct snd_pcm_hw_params *params)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_card *card = rtd->card;
+	struct snd_soc_dai *codec_dai = rtd->codec_dai;
+	int clk_id, clk_freq, pll_out;
+	int err;
+
+	clk_id = RT1308_PLL_S_MCLK;
+	clk_freq = 38400000;
+
+	pll_out = params_rate(params) * 512;
+
+	/* Set rt1308 pll */
+	err = snd_soc_dai_set_pll(codec_dai, 0, clk_id, clk_freq, pll_out);
+	if (err < 0) {
+		dev_err(card->dev, "Failed to set RT1308 PLL: %d\n", err);
+		return err;
+	}
+
+	/* Set rt1308 sysclk */
+	err = snd_soc_dai_set_sysclk(codec_dai, RT1308_FS_SYS_S_PLL, pll_out,
+				     SND_SOC_CLOCK_IN);
+	if (err < 0) {
+		dev_err(card->dev, "Failed to set RT1308 SYSCLK: %d\n", err);
+		return err;
+	}
+
+	return 0;
+}
+
+/* machine stream operations */
+static struct snd_soc_ops rt1308_i2s_ops = {
+	.hw_params = rt1308_i2s_hw_params,
+};
+
+static void rt711_init(const struct snd_soc_acpi_link_adr *link,
+		       struct snd_soc_dai_link *dai_links,
+		       struct codec_info *info,
+		       bool playback)
+{
+	/*
+	 * headset should be initialized once.
+	 * Do it with dai link for playback.
+	 */
+	if (!playback)
+		return;
+
+	dai_links->init = headset_init;
+}
+
+static void rt1308_init(const struct snd_soc_acpi_link_adr *link,
+			struct snd_soc_dai_link *dai_links,
+			struct codec_info *info,
+			bool playback)
+{
+	info->amp_num++;
+	if (info->amp_num == 1)
+		dai_links->init = first_spk_init;
+
+	if (info->amp_num == 2) {
+		/*
+		 * if two 1308s are in one dai link, the init function
+		 * in this dai link will be first set for the first speaker,
+		 * and it should be reset to initialize all speakers when
+		 * the second speaker is found.
+		 */
+		if (dai_links->init)
+			dai_links->init = all_spk_init;
+		else
+			dai_links->init = second_spk_init;
+	}
+}
+
+static struct codec_info codec_info_list[] = {
+	{
+		.id = 0x711,
+		.direction = {true, true},
+		.dai_name = "rt711-aif1",
+		.init = rt711_init,
+	},
+	{
+		.id = 0x1308,
+		.acpi_id = "10EC1308",
+		.direction = {true, false},
+		.dai_name = "rt1308-aif",
+		.ops = &rt1308_i2s_ops,
+		.init = rt1308_init,
+	},
+	{
+		.id = 0x715,
+		.direction = {false, true},
+		.dai_name = "rt715-aif2"
+	},
 };
 
 static struct snd_soc_dai_link dailink[] = {
