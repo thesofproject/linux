@@ -47,6 +47,15 @@ struct mc_private {
 	struct snd_soc_jack sdw_headset;
 };
 
+struct codec_info {
+	int id;
+	bool direction[2]; // playback & capture support
+	const char *dai_name;
+	void (*init)(const struct snd_soc_acpi_link_adr *link,
+		     struct snd_soc_dai_link *dai_links,
+		     bool playback);
+};
+
 #if IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
 static struct snd_soc_jack hdmi[3];
 
@@ -329,7 +338,64 @@ static struct snd_soc_codec_conf codec_conf[] = {
 
 };
 
-static struct snd_soc_dai_link dailink[] = {
+static struct snd_soc_dai_link_component rt1308_component[] = {
+	{
+		.name = "i2c-10EC1308:00",
+		.dai_name = "rt1308-aif",
+	}
+};
+
+static struct snd_soc_dai_link_component platform_component[] = {
+	{
+		/* name might be overridden during probe */
+		.name = "0000:00:1f.3"
+	}
+};
+
+static void rt711_init(const struct snd_soc_acpi_link_adr *link,
+		       struct snd_soc_dai_link *dai_links,
+		       bool playback)
+{
+	if (!playback)
+		return;
+
+	dai_links->init = headset_init;
+}
+
+static int rt1308_num;
+static void rt1308_init(const struct snd_soc_acpi_link_adr *link,
+			struct snd_soc_dai_link *dai_links,
+			bool playback)
+{
+	if (!playback)
+		return;
+
+	rt1308_num++;
+	if (rt1308_num > 1)
+		dai_links->init = second_spk_init;
+}
+
+static struct codec_info codec_info_list[] = {
+	{
+		.id = 0x711,
+		.direction = {true, true},
+		.dai_name = "rt711-aif1",
+		.init = rt711_init,
+	},
+	{
+		.id = 0x1308,
+		.direction = {true, false},
+		.dai_name = "rt1308-aif",
+		.init = rt1308_init,
+	},
+	{
+		.id = 0x715,
+		.direction = {false, true},
+		.dai_name = "rt715-aif2"
+	},
+};
+
+struct snd_soc_dai_link dailink[] = {
 	{
 		.name = "SDW0-Playback",
 		.id = 0,
