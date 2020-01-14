@@ -402,6 +402,10 @@ static struct snd_soc_dai_link dailink[] = {
 };
 
 /* SoC card */
+#if !IS_ENABLED(CONFIG_SND_SOC_INTEL_USER_FRIENDLY_LONG_NAMES)
+/* Can also be sof-sdw-rt711-mono-rt1308-rt715 */
+static char sdw_card_long_name[] = "sof-sdw-rt711-stereo-rt1308-rt715";
+#endif
 static struct snd_soc_card card_rt700_rt1308_rt715 = {
 	.name = "sdw-rt711-1308-715",
 	.dai_link = dailink,
@@ -459,6 +463,13 @@ static int mc_probe(struct platform_device *pdev)
 		card->num_configs = ARRAY_SIZE(codec_conf) - 1;
 	}
 
+#if !IS_ENABLED(CONFIG_SND_SOC_INTEL_USER_FRIENDLY_LONG_NAMES)
+	snprintf(sdw_card_long_name, sizeof(sdw_card_long_name),
+		 "sof-sdw-rt711-%s-rt1308-rt715",
+		 (sof_rt711_rt1308_rt715_quirk & SOF_SDW_MONO_SPK) ?
+			"mono" : "stereo");
+	card_rt700_rt1308_rt715.long_name = sdw_card_long_name;
+#endif
 	/* Register the card */
 	ret = devm_snd_soc_register_card(&pdev->dev, card);
 	if (ret) {
