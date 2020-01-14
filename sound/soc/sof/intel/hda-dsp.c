@@ -442,10 +442,22 @@ revert:
 	/* fallback to the previous register value */
 	value = value ? 0 : SOF_HDA_VS_D0I3C_I3;
 
-	return hda_dsp_update_d0i3c_register(sdev, value);
+	/*
+	 * This can fail but return the IPC error to signal that
+	 * the state change failed.
+	 */
+	hda_dsp_update_d0i3c_register(sdev, value);
+
+	return ret;
 }
 
-/* All DSP power state transitions are initiated by the driver */
+/*
+ * All DSP power state transitions are initiated by the driver.
+ * If the requested state change fails, the error is simply returned.
+ * Further state transitions are attempted only when the set_power_save() op
+ * is called again either because of a new IPC sent to the DSP or
+ * during system suspend/resume.
+ */
 int hda_dsp_set_power_state(struct snd_sof_dev *sdev,
 			    const struct sof_dsp_power_state *target_state)
 {
