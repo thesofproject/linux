@@ -498,6 +498,8 @@ set_state:
 	}
 
 	sdev->dsp_power_state = *target_state;
+	dev_dbg(sdev->dev, "New DSP state %d substate %d\n",
+		target_state->state, target_state->substate);
 	return ret;
 }
 
