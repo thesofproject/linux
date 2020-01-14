@@ -343,8 +343,9 @@ static int hda_dsp_send_pm_gate_ipc(struct snd_sof_dev *sdev, u32 flags)
 	pm_gate.flags = flags;
 
 	/* send pm_gate ipc to dsp */
-	return sof_ipc_tx_message(sdev->ipc, pm_gate.hdr.cmd, &pm_gate,
-				  sizeof(pm_gate), &reply, sizeof(reply));
+	return sof_ipc_tx_message_no_pm(sdev->ipc, pm_gate.hdr.cmd,
+					&pm_gate, sizeof(pm_gate), &reply,
+					sizeof(reply));
 }
 
 static int hda_dsp_update_d0i3c_register(struct snd_sof_dev *sdev, u8 value)

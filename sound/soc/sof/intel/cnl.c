@@ -173,10 +173,6 @@ static int cnl_ipc_send_msg(struct snd_sof_dev *sdev,
 {
 	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
 	struct sof_ipc_cmd_hdr *hdr;
-	const struct sof_dsp_power_state target_state = {
-		.state = SOF_DSP_PM_D0,
-		.substate = SOF_HDA_DSP_PM_D0I0,
-	};
 	u32 dr = 0;
 	u32 dd = 0;
 	int ret;
@@ -196,13 +192,6 @@ static int cnl_ipc_send_msg(struct snd_sof_dev *sdev,
 		snd_sof_dsp_write(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCIDR,
 				  CNL_DSP_REG_HIPCIDR_BUSY | dr);
 		return 0;
-	}
-
-	/* ensure the DSP is in D0I0 before sending the message via mailbox */
-	ret = snd_sof_dsp_set_power_state(sdev, &target_state);
-	if (ret < 0) {
-		dev_err(sdev->dev, "error: resuming DSP %d\n", ret);
-		return ret;
 	}
 
 	/* send the message via mailbox */
