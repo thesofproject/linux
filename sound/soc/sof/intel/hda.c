@@ -643,7 +643,7 @@ skip_soundwire:
 	/* create codec instances */
 	hda_codec_probe_bus(sdev, hda_codec_use_common_hdmi);
 
-	hda_codec_i915_put(sdev);
+	hda_codec_i915_display_power(sdev, false);
 
 	/*
 	 * we are done probing so decrement link counts
