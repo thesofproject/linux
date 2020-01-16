@@ -175,7 +175,6 @@ static int cnl_ipc_send_msg(struct snd_sof_dev *sdev,
 	struct sof_ipc_cmd_hdr *hdr;
 	u32 dr = 0;
 	u32 dd = 0;
-	int ret;
 
 	/*
 	 * Currently the only compact IPC supported is the PM_GATE
