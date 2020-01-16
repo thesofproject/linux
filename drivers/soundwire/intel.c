@@ -63,7 +63,9 @@ MODULE_PARM_DESC(sdw_md_flags, "SoundWire Intel Master device flags (0x0 all off
 #define SDW_SHIM_LCTL_SPA		BIT(0)
 #define SDW_SHIM_LCTL_CPA		BIT(8)
 
-#define SDW_SHIM_SYNC_SYNCPRD_VAL	0x176F
+#define SDW_SHIM_SYNC_GSYNC_KHZ		4 /* 4 kHz */
+#define SDW_SHIM_SYNC_SYNCPRD_VAL_24	(24000 / SDW_SHIM_SYNC_GSYNC_KHZ - 1)
+#define SDW_SHIM_SYNC_SYNCPRD_VAL_38_4	(38400 / SDW_SHIM_SYNC_GSYNC_KHZ - 1)
 #define SDW_SHIM_SYNC_SYNCPRD		GENMASK(14, 0)
 #define SDW_SHIM_SYNC_SYNCCPU		BIT(15)
 #define SDW_SHIM_SYNC_CMDSYNC_MASK	GENMASK(19, 16)
@@ -405,9 +407,29 @@ static int intel_shim_init(struct sdw_intel *sdw, bool clock_stop)
 	usleep_range(10, 15);
 
 	if (!clock_stop) {
+		struct sdw_bus *bus = &sdw->cdns.bus;
+		struct sdw_master_prop *prop = &bus->prop;
+		u32 syncprd;
+
+		/*
+		 * The hardware relies on an internal counter,
+		 * typically 4kHz, to generate the SoundWire SSP -
+		 * which defines a 'safe' synchronization point
+		 * between commands and audio transport and allows for
+		 * multi link synchronization. The SYNCPRD value is
+		 * only dependent on the oscillator clock provided to
+		 * the IP, so adjust based on _DSD properties reported
+		 * in DSDT tables. The values reported are based on
+		 * either 24MHz (CNL/CML) or 38.4 MHz (ICL/TGL+).
+		 */
+		if (prop->mclk_freq == 24000000)
+			syncprd = SDW_SHIM_SYNC_SYNCPRD_VAL_24;
+		else
+			syncprd = SDW_SHIM_SYNC_SYNCPRD_VAL_38_4;
+
 		/* Now set SyncPRD period */
 		sync_reg = intel_readl(shim, SDW_SHIM_SYNC);
-		sync_reg |= (SDW_SHIM_SYNC_SYNCPRD_VAL <<
+		sync_reg |= (syncprd <<
 			     SDW_REG_SHIFT(SDW_SHIM_SYNC_SYNCPRD));
 
 		/* Set SyncCPU bit */
