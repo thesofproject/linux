@@ -177,7 +177,7 @@ static int intel_clear_bit(void __iomem *base, int offset, u32 value, u32 mask)
 static int intel_set_bit(void __iomem *base, int offset, u32 value, u32 mask)
 {
 	writel(value, base + offset);
-	return intel_wait__bit(base, offset, mask, mask);
+	return intel_wait_bit(base, offset, mask, mask);
 }
 
 /*
@@ -300,10 +300,41 @@ static int intel_link_power_up(struct sdw_intel *sdw)
 {
 	unsigned int link_id = sdw->instance;
 	void __iomem *shim = sdw->link_res->shim;
+	struct sdw_bus *bus = &sdw->cdns.bus;
+	struct sdw_master_prop *prop = &bus->prop;
 	int spa_mask, cpa_mask;
-	int link_control, ret;
+	int link_control;
+	int ret = 0;
+	u32 syncprd;
+	u32 sync_reg;
 
 	mutex_lock(sdw->link_res->shim_lock);
+
+	/*
+	 * The hardware relies on an internal counter,
+	 * typically 4kHz, to generate the SoundWire SSP -
+	 * which defines a 'safe' synchronization point
+	 * between commands and audio transport and allows for
+	 * multi link synchronization. The SYNCPRD value is
+	 * only dependent on the oscillator clock provided to
+	 * the IP, so adjust based on _DSD properties reported
+	 * in DSDT tables. The values reported are based on
+	 * either 24MHz (CNL/CML) or 38.4 MHz (ICL/TGL+).
+	 */
+	if (prop->mclk_freq == 24000000)
+		syncprd = SDW_SHIM_SYNC_SYNCPRD_VAL_24;
+	else
+		syncprd = SDW_SHIM_SYNC_SYNCPRD_VAL_38_4;
+
+	/* we first need to program the SyncPRD/CPU registers */
+	/* set SyncPRD period */
+	sync_reg = intel_readl(shim, SDW_SHIM_SYNC);
+	sync_reg |= (syncprd <<
+		     SDW_REG_SHIFT(SDW_SHIM_SYNC_SYNCPRD));
+
+	/* Set SyncCPU bit */
+	sync_reg |= SDW_SHIM_SYNC_SYNCCPU;
+	intel_writel(shim, SDW_SHIM_SYNC, syncprd);
 
 	/* Link power up sequence */
 	link_control = intel_readl(shim, SDW_SHIM_LCTL);
@@ -312,13 +343,23 @@ static int intel_link_power_up(struct sdw_intel *sdw)
 	link_control |=  spa_mask;
 
 	ret = intel_set_bit(shim, SDW_SHIM_LCTL, link_control, cpa_mask);
-	mutex_unlock(sdw->link_res->shim_lock);
+	if (ret < 0) {
+		dev_err(sdw->cdns.dev, "Failed to power up link: %d\n", ret);
+		goto out;
+	}
 
-	if (ret < 0)
-		return ret;
+	/* SyncCPU will change once link is active */
+	ret = intel_wait_bit(shim, SDW_SHIM_SYNC, SDW_SHIM_SYNC_SYNCCPU, 0);
+	if (ret < 0) {
+		dev_err(sdw->cdns.dev, "Failed to set SHIM_SYNC: %d\n", ret);
+		goto out;
+	}
 
 	sdw->cdns.link_up = true;
-	return 0;
+out:
+	mutex_unlock(sdw->link_res->shim_lock);
+
+	return ret;
 }
 
 /* this needs to be called with shim_lock */
@@ -376,7 +417,7 @@ static int intel_shim_init(struct sdw_intel *sdw, bool clock_stop)
 {
 	void __iomem *shim = sdw->link_res->shim;
 	unsigned int link_id = sdw->instance;
-	int sync_reg, ret = 0;
+	int ret = 0;
 	u16 ioctl = 0, act = 0;
 
 	mutex_lock(sdw->link_res->shim_lock);
@@ -406,40 +447,6 @@ static int intel_shim_init(struct sdw_intel *sdw, bool clock_stop)
 	intel_writew(shim, SDW_SHIM_CTMCTL(link_id), act);
 	usleep_range(10, 15);
 
-	if (!clock_stop) {
-		struct sdw_bus *bus = &sdw->cdns.bus;
-		struct sdw_master_prop *prop = &bus->prop;
-		u32 syncprd;
-
-		/*
-		 * The hardware relies on an internal counter,
-		 * typically 4kHz, to generate the SoundWire SSP -
-		 * which defines a 'safe' synchronization point
-		 * between commands and audio transport and allows for
-		 * multi link synchronization. The SYNCPRD value is
-		 * only dependent on the oscillator clock provided to
-		 * the IP, so adjust based on _DSD properties reported
-		 * in DSDT tables. The values reported are based on
-		 * either 24MHz (CNL/CML) or 38.4 MHz (ICL/TGL+).
-		 */
-		if (prop->mclk_freq == 24000000)
-			syncprd = SDW_SHIM_SYNC_SYNCPRD_VAL_24;
-		else
-			syncprd = SDW_SHIM_SYNC_SYNCPRD_VAL_38_4;
-
-		/* Now set SyncPRD period */
-		sync_reg = intel_readl(shim, SDW_SHIM_SYNC);
-		sync_reg |= (syncprd <<
-			     SDW_REG_SHIFT(SDW_SHIM_SYNC_SYNCPRD));
-
-		/* Set SyncCPU bit */
-		sync_reg |= SDW_SHIM_SYNC_SYNCCPU;
-		ret = intel_clear_bit(shim, SDW_SHIM_SYNC, sync_reg,
-				      SDW_SHIM_SYNC_SYNCCPU);
-		if (ret < 0)
-			dev_err(sdw->cdns.dev, "Failed to set sync period: %d\n", ret);
-
-	}
 	mutex_unlock(sdw->link_res->shim_lock);
 
 	return ret;
