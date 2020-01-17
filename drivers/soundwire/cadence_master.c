@@ -1099,12 +1099,44 @@ static void cdns_init_clock_ctrl(struct sdw_cdns *cdns)
 }
 
 /**
+ * sdw_cdns_init_step2() - step 2 of Cadence initialization
+ * @cdns: Cadence instance
+ */
+void sdw_cdns_init_step2(struct sdw_cdns *cdns, bool multi_master)
+{
+	u32 val;
+
+	/* Configure mcp config */
+	val = cdns_readl(cdns, CDNS_MCP_CONFIG);
+
+	/* Set cmd mode for Tx and Rx cmds */
+	val &= ~CDNS_MCP_CONFIG_CMD;
+
+	/* Disable sniffer mode */
+	val &= ~CDNS_MCP_CONFIG_SNIFFER;
+
+	/* Disable auto bus release */
+	val &= ~CDNS_MCP_CONFIG_BUS_REL;
+
+	// FIXME: MULTI-MASTER HERE
+
+	/* Set frame delay between PREQ and ping frame to 15 frames */ // FIXME: 31
+	val |= 0xF << SDW_REG_SHIFT(CDNS_MCP_CONFIG_MPREQ_DELAY);
+
+	/* Set Max cmd retry to 15 */ // FIXME: 0
+	val |= CDNS_MCP_CONFIG_MCMD_RETRY;
+
+	/* write but this does not yet take effect */
+	cdns_writel(cdns, CDNS_MCP_CONFIG, val);
+}
+EXPORT_SYMBOL(sdw_cdns_init_step2);
+
+/**
  * sdw_cdns_init() - Cadence initialization
  * @cdns: Cadence instance
  */
 int sdw_cdns_init(struct sdw_cdns *cdns)
 {
-	u32 val;
 	int ret;
 
 	ret = cdns_soft_reset(cdns);
@@ -1124,25 +1156,7 @@ int sdw_cdns_init(struct sdw_cdns *cdns)
 	cdns_updatel(cdns, CDNS_MCP_CONTROL, CDNS_MCP_CONTROL_CMD_ACCEPT,
 		     CDNS_MCP_CONTROL_CMD_ACCEPT);
 
-	/* Configure mcp config */
-	val = cdns_readl(cdns, CDNS_MCP_CONFIG);
-
-	/* Set Max cmd retry to 15 */
-	val |= CDNS_MCP_CONFIG_MCMD_RETRY;
-
-	/* Set frame delay between PREQ and ping frame to 15 frames */
-	val |= 0xF << SDW_REG_SHIFT(CDNS_MCP_CONFIG_MPREQ_DELAY);
-
-	/* Disable auto bus release */
-	val &= ~CDNS_MCP_CONFIG_BUS_REL;
-
-	/* Disable sniffer mode */
-	val &= ~CDNS_MCP_CONFIG_SNIFFER;
-
-	/* Set cmd mode for Tx and Rx cmds */
-	val &= ~CDNS_MCP_CONFIG_CMD;
-
-	cdns_writel(cdns, CDNS_MCP_CONFIG, val);
+	sdw_cdns_init_step2(cdns, false);
 
 	/* commit changes */
 	return cdns_config_update(cdns);
