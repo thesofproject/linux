@@ -246,6 +246,11 @@ static int cdns_config_update(struct sdw_cdns *cdns)
 {
 	int ret;
 
+	if (sdw_cdns_is_clock_stop(cdns)) {
+		dev_err(cdns->dev, "Cannot program MCP_CONFIG_UPDATE in ClockStopMode\n");
+		return -EINVAL;
+	}
+
 	ret = cdns_clear_bit(cdns, CDNS_MCP_CONFIG_UPDATE,
 			     CDNS_MCP_CONFIG_UPDATE_BIT);
 	if (ret < 0)
@@ -1314,7 +1319,11 @@ int sdw_cdns_clock_stop(struct sdw_cdns *cdns, bool block_wake)
 			     CDNS_MCP_CONTROL_CMD_ACCEPT, 0);
 
 	/* commit changes */
-	cdns_config_update(cdns);
+	ret = cdns_config_update(cdns);
+	if (ret < 0) {
+		dev_err(cdns->dev, "%s: config_update failed\n", __func__);
+		return ret;
+	}
 
 	/* Prepare slaves for clock stop */
 	ret = sdw_bus_prep_clk_stop(&cdns->bus);
@@ -1396,7 +1405,11 @@ int sdw_cdns_clock_restart(struct sdw_cdns *cdns, bool bus_reset)
 		     CDNS_MCP_CONFIG_OP,
 		     CDNS_MCP_CONFIG_OP_NORMAL);
 
-	cdns_config_update(cdns);
+	ret = cdns_config_update(cdns);
+	if (ret < 0) {
+		dev_err(cdns->dev, "%s: config_update failed\n", __func__);
+		return ret;
+	}
 
 	if (!bus_reset) {
 		ret = sdw_bus_exit_clk_stop(&cdns->bus);
