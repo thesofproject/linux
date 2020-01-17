@@ -20,6 +20,7 @@
 
 #include <linux/acpi.h>
 #include <linux/module.h>
+#include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_intel.h>
 #include <sound/intel-nhlt.h>
 #include <sound/sof.h>
@@ -1052,22 +1053,10 @@ static bool link_slaves_found(struct snd_sof_dev *sdev,
 	unsigned int part_id, link_id, unique_id, mfg_id;
 	int i, j;
 
-	/*
-	 * ADR definition
-	 *   Bit     Contents
-	 *   63:48   link_id
-	 *   47:44   sdw_version
-	 *   43:40   unique_id
-	 *   39:32   mfg_id [15:8]
-	 *   31:24   mfg_id [7:0]
-	 *   23:16   part_id [15:8]
-	 *   15:08   part_id [7:0]
-	 *   07:00   class_id
-	 */
 	for (i = 0; i < link->num_adr; i++) {
-		mfg_id = (link->adr[i] >> 24) & GENMASK(15, 0);
-		part_id = (link->adr[i] >> 8) & GENMASK(15, 0);
-		link_id = (link->adr[i] >> 48) & GENMASK(15, 0);
+		mfg_id = SDW_MFG_ID(link->adr[i]);
+		part_id = SDW_PART_ID(link->adr[i]);
+		link_id = SDW_DISCO_LINK_ID(link->adr[i]);
 		for (j = 0; j < num_slaves; j++) {
 			if (ids[j].link_id != link_id ||
 			    ids[j].id.part_id != part_id ||
@@ -1078,7 +1067,7 @@ static bool link_slaves_found(struct snd_sof_dev *sdev,
 			 * if there is more than one
 			 * Slave on the link
 			 */
-			unique_id = (link->adr[i] >> 40) & GENMASK(3, 0);
+			unique_id = SDW_UNIQUE_ID(link->adr[i]);
 			if (link->num_adr == 1 ||
 			    ids[j].id.unique_id == SDW_IGNORED_UNIQUE_ID ||
 			    ids[j].id.unique_id == unique_id) {
