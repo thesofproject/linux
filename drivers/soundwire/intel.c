@@ -1432,6 +1432,8 @@ static int intel_master_startup(struct sdw_master_device *md)
 		goto err_init;
 	}
 
+	sdw_cdns_init_step2(&sdw->cdns, false);
+
 	ret = sdw_cdns_exit_reset(&sdw->cdns);
 	if (ret < 0) {
 		dev_err(sdw->cdns.dev, "unable to exit bus reset sequence\n");
@@ -1757,6 +1759,8 @@ static int intel_resume(struct device *dev)
 		return ret;
 	}
 
+	sdw_cdns_init_step2(&sdw->cdns, false);
+
 	ret = sdw_cdns_exit_reset(cdns);
 	if (ret < 0) {
 		dev_err(dev, "unable to exit bus reset sequence during resume\n");
@@ -1821,6 +1825,8 @@ static int intel_resume_runtime(struct device *dev)
 			dev_err(dev, "cannot enable interrupts during resume\n");
 			return ret;
 		}
+
+		sdw_cdns_init_step2(&sdw->cdns, false);
 
 		ret = sdw_cdns_exit_reset(cdns);
 		if (ret < 0) {
