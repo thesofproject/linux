@@ -1117,7 +1117,10 @@ void sdw_cdns_init_step2(struct sdw_cdns *cdns, bool multi_master)
 	/* Disable auto bus release */
 	val &= ~CDNS_MCP_CONFIG_BUS_REL;
 
-	// FIXME: MULTI-MASTER HERE
+	if (multi_master) {
+		/* Set Multi-master mode to take gsync into account */
+		val |= CDNS_MCP_CONFIG_MMASTER;
+	}
 
 	/* Set frame delay between PREQ and ping frame to 15 frames */ // FIXME: 31
 	val |= 0xF << SDW_REG_SHIFT(CDNS_MCP_CONFIG_MPREQ_DELAY);
