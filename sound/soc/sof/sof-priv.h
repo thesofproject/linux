@@ -418,6 +418,8 @@ struct snd_sof_dev {
 
 	bool msi_enabled;
 
+	struct snd_sof_audio_data *sof_audio_data;
+
 	void *private;			/* core does not touch this */
 };
 

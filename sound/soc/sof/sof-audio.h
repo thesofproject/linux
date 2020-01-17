@@ -110,6 +110,36 @@ struct snd_sof_dai {
 	struct list_head list;	/* list in sdev dai list */
 };
 
+/* SOF audio client data */
+struct snd_sof_audio_data {
+	struct device *dev;
+	struct device *dma_dev;
+
+	/* topology info */
+	const char *tplg_filename_prefix;
+	const char *tplg_filename;
+
+	/* machine info */
+	struct platform_device *pdev_mach;
+	const struct snd_soc_acpi_mach *machine;
+
+	/*
+	 * ASoC components. plat_drv fields are set dynamically so
+	 * can't use const
+	 */
+	struct snd_soc_component_driver plat_drv;
+
+	/* topology */
+	struct list_head pcm_list;
+	struct list_head kcontrol_list;
+	struct list_head widget_list;
+	struct list_head dai_list;
+	struct list_head route_list;
+	struct snd_soc_component *component;
+
+	void *private;
+};
+
 /*
  * Kcontrols.
  */
