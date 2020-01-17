@@ -831,6 +831,28 @@ static void cdns_update_slave_status_work(struct work_struct *work)
 /*
  * init routines
  */
+static int cdns_soft_reset(struct sdw_cdns *cdns)
+{
+	int ret;
+
+	cdns_updatel(cdns, CDNS_MCP_CONTROL,
+		     CDNS_MCP_CONTROL_SOFT_RST,
+		     CDNS_MCP_CONTROL_SOFT_RST);
+
+	ret = cdns_config_update(cdns);
+	if (ret < 0) {
+		dev_err(cdns->dev, "%s: config_update failed: %d\n", __func__, ret);
+		return ret;
+	}
+
+	ret = cdns_set_wait(cdns, CDNS_MCP_CONTROL,
+			    CDNS_MCP_CONTROL_SOFT_RST,
+			    0);
+	if (ret < 0)
+		dev_err(cdns->dev, "%s: wait for SOFT_RST failed: %d\n", __func__, ret);
+
+	return ret;
+}
 
 /**
  * sdw_cdns_exit_reset() - Program reset parameters and start bus operations
@@ -1058,6 +1080,11 @@ int sdw_cdns_init(struct sdw_cdns *cdns)
 	struct sdw_master_prop *prop = &bus->prop;
 	u32 val;
 	int divider;
+	int ret;
+
+	ret = cdns_soft_reset(cdns);
+	if (ret < 0)
+		return ret;
 
 	/* Set clock divider */
 	divider	= (prop->mclk_freq / prop->max_clk_freq) - 1;
