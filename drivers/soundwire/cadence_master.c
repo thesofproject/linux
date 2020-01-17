@@ -242,7 +242,7 @@ static int cdns_clear_bit(struct sdw_cdns *cdns, int offset, u32 value)
  * all changes to the MCP_CONFIG, MCP_CONTROL, MCP_CMDCTRL and MCP_PHYCTRL
  * need to be confirmed with a write to MCP_CONFIG_UPDATE
  */
-static int cdns_update_config(struct sdw_cdns *cdns)
+static int cdns_config_update(struct sdw_cdns *cdns)
 {
 	int ret;
 
@@ -845,7 +845,7 @@ int sdw_cdns_exit_reset(struct sdw_cdns *cdns)
 		     CDNS_MCP_CONFIG_OP_NORMAL);
 
 	/* commit changes */
-	return cdns_update_config(cdns);
+	return cdns_config_update(cdns);
 }
 EXPORT_SYMBOL(sdw_cdns_exit_reset);
 
@@ -1102,7 +1102,7 @@ int sdw_cdns_init(struct sdw_cdns *cdns)
 	cdns_writel(cdns, CDNS_MCP_CONFIG, val);
 
 	/* commit changes */
-	return cdns_update_config(cdns);
+	return cdns_config_update(cdns);
 }
 EXPORT_SYMBOL(sdw_cdns_init);
 
@@ -1314,7 +1314,7 @@ int sdw_cdns_clock_stop(struct sdw_cdns *cdns, bool block_wake)
 			     CDNS_MCP_CONTROL_CMD_ACCEPT, 0);
 
 	/* commit changes */
-	cdns_update_config(cdns);
+	cdns_config_update(cdns);
 
 	/* Prepare slaves for clock stop */
 	ret = sdw_bus_prep_clk_stop(&cdns->bus);
@@ -1396,7 +1396,7 @@ int sdw_cdns_clock_restart(struct sdw_cdns *cdns, bool bus_reset)
 		     CDNS_MCP_CONFIG_OP,
 		     CDNS_MCP_CONFIG_OP_NORMAL);
 
-	cdns_update_config(cdns);
+	cdns_config_update(cdns);
 
 	if (!bus_reset) {
 		ret = sdw_bus_exit_clk_stop(&cdns->bus);
