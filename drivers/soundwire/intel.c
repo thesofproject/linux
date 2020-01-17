@@ -33,6 +33,7 @@
 #define SDW_INTEL_MASTER_DISABLE_PM_RUNTIME		BIT(0)
 #define SDW_INTEL_MASTER_DISABLE_CLOCK_STOP		BIT(1)
 #define SDW_INTEL_MASTER_DISABLE_PM_RUNTIME_IDLE	BIT(2)
+#define SDW_INTEL_MASTER_DISABLE_MULTI_MASTER		BIT(3)
 
 static int md_flags;
 module_param_named(sdw_md_flags, md_flags, int, 0444);
@@ -1438,6 +1439,7 @@ static int intel_master_startup(struct sdw_master_device *md)
 	struct sdw_cdns_stream_config config;
 	struct sdw_intel *sdw;
 	int link_flags;
+	bool multi_master;
 	u32 clock_stop_quirks;
 	int ret;
 
@@ -1449,6 +1451,11 @@ static int intel_master_startup(struct sdw_master_device *md)
 			 sdw->cdns.bus.link_id);
 		return 0;
 	}
+
+	link_flags = md_flags >> (sdw->cdns.bus.link_id * 8);
+	multi_master = !(link_flags & SDW_INTEL_MASTER_DISABLE_MULTI_MASTER);
+	if (!multi_master)
+		dev_dbg(&md->dev, "Multi-master is disabled\n");
 
 	/* Initialize shim, controller and Cadence IP */
 	ret = intel_init(sdw);
@@ -1469,12 +1476,23 @@ static int intel_master_startup(struct sdw_master_device *md)
 		goto err_init;
 	}
 
-	sdw_cdns_init_step2(&sdw->cdns, false);
+	/* follow recommended programming flows to avoid timeouts when gsync is enabled */
+	if (multi_master)
+		intel_shim_sync_arm(sdw);
+	sdw_cdns_init_step2(&sdw->cdns, multi_master);
 
 	ret = sdw_cdns_exit_reset(&sdw->cdns);
 	if (ret < 0) {
 		dev_err(sdw->cdns.dev, "unable to exit bus reset sequence\n");
 		goto err_interrupt;
+	}
+
+	if (multi_master) {
+		ret = intel_shim_sync_go(sdw);
+		if (ret < 0) {
+			dev_err(sdw->cdns.dev, "sync go failed: %d\n", ret);
+			goto err_interrupt;
+		}
 	}
 
 	/* Register DAIs */
@@ -1488,7 +1506,6 @@ static int intel_master_startup(struct sdw_master_device *md)
 	intel_debugfs_init(sdw);
 
 	/* Enable runtime PM */
-	link_flags = md_flags >> (sdw->cdns.bus.link_id * 8);
 	if (!(link_flags & SDW_INTEL_MASTER_DISABLE_PM_RUNTIME)) {
 		pm_runtime_set_autosuspend_delay(&md->dev, 3000);
 		pm_runtime_use_autosuspend(&md->dev);
@@ -1749,6 +1766,7 @@ static int intel_resume(struct device *dev)
 	struct sdw_cdns *cdns = dev_get_drvdata(dev);
 	struct sdw_intel *sdw = cdns_to_intel(cdns);
 	int link_flags;
+	bool multi_master;
 	int ret;
 
 	if (cdns->bus.prop.hw_disabled) {
@@ -1758,6 +1776,9 @@ static int intel_resume(struct device *dev)
 	}
 
 	dev_err(dev, "%s start\n", __func__);
+
+	link_flags = md_flags >> (sdw->cdns.bus.link_id * 8);
+	multi_master = !(link_flags & SDW_INTEL_MASTER_DISABLE_MULTI_MASTER);
 
 	if (md->pm_runtime_suspended) {
 		dev_dbg(dev,
@@ -1772,7 +1793,6 @@ static int intel_resume(struct device *dev)
 
 		md->pm_runtime_suspended = false;
 
-		link_flags = md_flags >> (sdw->cdns.bus.link_id * 8);
 		if (!(link_flags & SDW_INTEL_MASTER_DISABLE_PM_RUNTIME_IDLE))
 			pm_runtime_idle(&md->dev);
 	}
@@ -1796,12 +1816,23 @@ static int intel_resume(struct device *dev)
 		return ret;
 	}
 
-	sdw_cdns_init_step2(&sdw->cdns, false);
+	/* follow recommended programming flows to avoid timeouts when gsync is enabled */
+	if (multi_master)
+		intel_shim_sync_arm(sdw);
+	sdw_cdns_init_step2(&sdw->cdns, multi_master);
 
 	ret = sdw_cdns_exit_reset(cdns);
 	if (ret < 0) {
 		dev_err(dev, "unable to exit bus reset sequence during resume\n");
 		return ret;
+	}
+
+	if (multi_master) {
+		ret = intel_shim_sync_go(sdw);
+		if (ret < 0) {
+			dev_err(sdw->cdns.dev, "sync go failed during resume\n");
+			return ret;
+		}
 	}
 
 	/*
@@ -1827,6 +1858,8 @@ static int intel_resume_runtime(struct device *dev)
 	struct sdw_intel *sdw = cdns_to_intel(cdns);
 	u32 clock_stop_quirks;
 	bool clock_stop0;
+	int link_flags;
+	bool multi_master;
 	int status;
 	int ret;
 
@@ -1837,6 +1870,9 @@ static int intel_resume_runtime(struct device *dev)
 			cdns->bus.link_id);
 		return 0;
 	}
+
+	link_flags = md_flags >> (sdw->cdns.bus.link_id * 8);
+	multi_master = !(link_flags & SDW_INTEL_MASTER_DISABLE_MULTI_MASTER);
 
 	clock_stop_quirks = sdw->link_res->clock_stop_quirks;
 
@@ -1863,12 +1899,23 @@ static int intel_resume_runtime(struct device *dev)
 			return ret;
 		}
 
-		sdw_cdns_init_step2(&sdw->cdns, false);
+		/* follow recommended programming flows to avoid timeouts when gsync is enabled */
+		if (multi_master)
+			intel_shim_sync_arm(sdw);
+		sdw_cdns_init_step2(&sdw->cdns, multi_master);
 
 		ret = sdw_cdns_exit_reset(cdns);
 		if (ret < 0) {
 			dev_err(dev, "unable to exit bus reset sequence during resume\n");
 			return ret;
+		}
+
+		if (multi_master) {
+			ret = intel_shim_sync_go(sdw);
+			if (ret < 0) {
+				dev_err(sdw->cdns.dev, "sync go failed during resume\n");
+				return ret;
+			}
 		}
 	} else if (clock_stop_quirks & SDW_INTEL_CLK_STOP_BUS_RESET) {
 
