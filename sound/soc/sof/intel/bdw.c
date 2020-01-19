@@ -541,6 +541,7 @@ static void bdw_machine_select(struct snd_sof_dev *sdev)
 {
 	struct snd_sof_pdata *sof_pdata = sdev->pdata;
 	const struct sof_dev_desc *desc = sof_pdata->desc;
+	struct snd_soc_component_driver *pd = &sdev->plat_drv;
 	struct snd_soc_acpi_mach *mach;
 
 	mach = snd_soc_acpi_find_machine(desc->machines);
@@ -552,6 +553,7 @@ static void bdw_machine_select(struct snd_sof_dev *sdev)
 	sof_pdata->tplg_filename = mach->sof_tplg_filename;
 	mach->mach_params.acpi_ipc_irq_index = desc->irqindex_host_ipc;
 	sof_pdata->machine = mach;
+	pd->ignore_machine = mach->drv_name;
 }
 
 static void bdw_set_mach_params(const struct snd_soc_acpi_mach *mach,

@@ -767,10 +767,6 @@ static void sof_pcm_remove(struct snd_soc_component *component)
 void snd_sof_new_platform_drv(struct snd_sof_dev *sdev)
 {
 	struct snd_soc_component_driver *pd = &sdev->plat_drv;
-	struct snd_sof_pdata *plat_data = sdev->pdata;
-	const char *drv_name;
-
-	drv_name = plat_data->machine->drv_name;
 
 	pd->name = "sof-audio-component";
 	pd->probe = sof_pcm_probe;
@@ -787,7 +783,6 @@ void snd_sof_new_platform_drv(struct snd_sof_dev *sdev)
 	pd->compr_ops = &sof_compressed_ops;
 #endif
 	pd->pcm_construct = sof_pcm_new;
-	pd->ignore_machine = drv_name;
 	pd->be_hw_params_fixup = sof_pcm_dai_link_fixup;
 	pd->be_pcm_base = SOF_BE_PCM_BASE;
 	pd->use_dai_pcm_id = true;

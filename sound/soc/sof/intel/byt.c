@@ -413,6 +413,7 @@ static void byt_machine_select(struct snd_sof_dev *sdev)
 {
 	struct snd_sof_pdata *sof_pdata = sdev->pdata;
 	const struct sof_dev_desc *desc = sof_pdata->desc;
+	struct snd_soc_component_driver *pd = &sdev->plat_drv;
 	struct snd_soc_acpi_mach *mach;
 	struct platform_device *pdev;
 	const char *tplg_filename;
@@ -441,6 +442,7 @@ static void byt_machine_select(struct snd_sof_dev *sdev)
 		return;
 	}
 
+	pd->ignore_machine = mach->drv_name;
 	sof_pdata->tplg_filename = tplg_filename;
 	mach->mach_params.acpi_ipc_irq_index = desc->irqindex_host_ipc;
 	sof_pdata->machine = mach;

@@ -951,6 +951,7 @@ static int hda_generic_machine_select(struct snd_sof_dev *sdev)
 	struct snd_soc_acpi_mach_params *mach_params;
 	struct snd_soc_acpi_mach *hda_mach;
 	struct snd_sof_pdata *pdata = sdev->pdata;
+	struct snd_soc_component_driver *pd = &sdev->plat_drv;
 	const char *tplg_filename;
 	const char *idisp_str;
 	const char *dmic_str;
@@ -1031,6 +1032,7 @@ static int hda_generic_machine_select(struct snd_sof_dev *sdev)
 		mach_params->codec_mask = bus->codec_mask;
 		mach_params->common_hdmi_codec_drv = hda_codec_use_common_hdmi;
 		mach_params->dmic_num = dmic_num;
+		pd->ignore_machine = pdata->machine->drv_name;
 	}
 
 	return 0;
