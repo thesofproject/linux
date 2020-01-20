@@ -1076,7 +1076,7 @@ static int sdw_initialize_slave(struct sdw_slave *slave)
 	if (ret < 0) {
 		dev_err(slave->bus->dev,
 			"SDW_DP0_INTMASK read failed:%d\n", ret);
-		return val;
+		return ret;
 	}
 
 	return 0;
