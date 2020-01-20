@@ -402,6 +402,7 @@ static struct snd_soc_dai_link dailink[] = {
 };
 
 /* SoC card */
+static char components_string[] = "cfg-spk:2"; /* cfg-spk:%d */
 #if !IS_ENABLED(CONFIG_SND_SOC_INTEL_USER_FRIENDLY_LONG_NAMES)
 /* Can also be sof-sdw-rt711-mono-rt1308-rt715 */
 static char sdw_card_long_name[] = "sof-sdw-rt711-stereo-rt1308-rt715";
@@ -419,6 +420,7 @@ static struct snd_soc_card card_rt700_rt1308_rt715 = {
 	.late_probe = card_late_probe,
 	.codec_conf = codec_conf,
 	.num_configs = ARRAY_SIZE(codec_conf),
+	.components = components_string,
 };
 
 static int mc_probe(struct platform_device *pdev)
@@ -463,6 +465,9 @@ static int mc_probe(struct platform_device *pdev)
 		card->num_configs = ARRAY_SIZE(codec_conf) - 1;
 	}
 
+	snprintf(components_string, sizeof(components_string),
+		 "cfg-spk:%d",
+		 (sof_rt711_rt1308_rt715_quirk & SOF_SDW_MONO_SPK) ? 2 : 4);
 #if !IS_ENABLED(CONFIG_SND_SOC_INTEL_USER_FRIENDLY_LONG_NAMES)
 	snprintf(sdw_card_long_name, sizeof(sdw_card_long_name),
 		 "sof-sdw-rt711-%s-rt1308-rt715",
