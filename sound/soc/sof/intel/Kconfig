@@ -114,6 +114,7 @@ if SND_SOC_SOF_INTEL_PCI
 
 config SND_SOC_SOF_MERRIFIELD_SUPPORT
 	bool "SOF support for Tangier/Merrifield"
+	depends on SND_SOC_INTEL_NOT_RECOMMENDED || COMPILE_TEST
 	help
 	  This adds support for Sound Open Firmware for Intel(R) platforms
 	  using the Tangier/Merrifield processors.
@@ -330,6 +331,7 @@ config SND_SOC_SOF_HDA_AUDIO_CODEC
 
 config SND_SOC_SOF_HDA_ALWAYS_ENABLE_DMI_L1
 	bool "SOF enable DMI Link L1"
+	depends on SND_SOC_INTEL_NOT_RECOMMENDED || COMPILE_TEST
 	help
 	  This option enables DMI L1 for both playback and capture
 	  and disables known workarounds for specific HDaudio platforms.

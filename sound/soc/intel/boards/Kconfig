@@ -30,13 +30,15 @@ if SND_SOC_INTEL_HASWELL
 
 config SND_SOC_INTEL_HASWELL_MACH
 	tristate "Haswell Lynxpoint"
+	depends on SND_SOC_INTEL_NOT_RECOMMENDED || COMPILE_TEST
 	depends on I2C
 	depends on I2C_DESIGNWARE_PLATFORM || COMPILE_TEST
 	depends on X86_INTEL_LPSS || COMPILE_TEST
 	select SND_SOC_RT5640
 	help
 	  This adds support for the Lynxpoint Audio DSP on Intel(R) Haswell
-	  Ultrabook platforms. This is a recommended option.
+	  Ultrabook platforms. This is not a recommended option, there are no
+	  known commercial devices with the DSP enabled.
 	  Say Y or m if you have such a device.
 	  If unsure select "N".
 
@@ -226,6 +228,7 @@ if SND_SST_ATOM_HIFI2_PLATFORM
 
 config SND_SOC_INTEL_BYT_CHT_NOCODEC_MACH
 	tristate "Baytrail & Cherrytrail platform with no codec (MinnowBoard MAX, Up)"
+	depends on SND_SOC_INTEL_NOT_RECOMMENDED || COMPILE_TEST
 	depends on I2C && ACPI
 	depends on X86_INTEL_LPSS || COMPILE_TEST
 	help
