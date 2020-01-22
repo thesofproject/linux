@@ -137,6 +137,8 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	struct snd_sof_pdata *plat_data = sdev->pdata;
 	int ret;
 
+	sdev->probe_error_mask = 0;
+
 	/* probe the DSP hardware */
 	ret = snd_sof_probe(sdev);
 	if (ret < 0) {
@@ -244,33 +246,21 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 
 	return 0;
 
-#if !IS_ENABLED(CONFIG_SND_SOC_SOF_PROBE_WORK_QUEUE)
 fw_trace_err:
+	sdev->probe_error_mask |= SOF_FW_PROBE_ERROR_FREE_TRACE;
 	snd_sof_free_trace(sdev);
 fw_run_err:
+	sdev->probe_error_mask |= SOF_FW_PROBE_ERROR_FW_UNLOAD;
 	snd_sof_fw_unload(sdev);
 fw_load_err:
+	sdev->probe_error_mask |= SOF_FW_PROBE_ERROR_IPC_FREE;
 	snd_sof_ipc_free(sdev);
 ipc_err:
+	sdev->probe_error_mask |= SOF_FW_PROBE_ERROR_FREE_DEBUG;
 	snd_sof_free_debug(sdev);
 dbg_err:
+	sdev->probe_error_mask |= SOF_FW_PROBE_ERROR_DSP_REMOVE;
 	snd_sof_remove(sdev);
-#else
-
-	/*
-	 * when the probe_continue is handled in a work queue, the
-	 * probe does not fail so we don't release resources here.
-	 * They will be released with an explicit call to
-	 * snd_sof_device_remove() when the PCI/ACPI device is removed
-	 */
-
-fw_trace_err:
-fw_run_err:
-fw_load_err:
-ipc_err:
-dbg_err:
-
-#endif
 
 	return ret;
 }
@@ -353,10 +343,14 @@ int snd_sof_device_remove(struct device *dev)
 	if (IS_ENABLED(CONFIG_SND_SOC_SOF_PROBE_WORK_QUEUE))
 		cancel_work_sync(&sdev->probe_work);
 
-	snd_sof_fw_unload(sdev);
-	snd_sof_ipc_free(sdev);
-	snd_sof_free_debug(sdev);
-	snd_sof_free_trace(sdev);
+	if (!(sdev->probe_error_mask & SOF_FW_PROBE_ERROR_FW_UNLOAD))
+		snd_sof_fw_unload(sdev);
+	if (!(sdev->probe_error_mask & SOF_FW_PROBE_ERROR_IPC_FREE))
+		snd_sof_ipc_free(sdev);
+	if (!(sdev->probe_error_mask & SOF_FW_PROBE_ERROR_FREE_DEBUG))
+		snd_sof_free_debug(sdev);
+	if (!(sdev->probe_error_mask & SOF_FW_PROBE_ERROR_FREE_TRACE))
+		snd_sof_free_trace(sdev);
 
 	/*
 	 * Unregister machine driver. This will unbind the snd_card which
@@ -364,13 +358,15 @@ int snd_sof_device_remove(struct device *dev)
 	 * before freeing the snd_card.
 	 */
 	snd_sof_machine_unregister(sdev, pdata);
+
 	/*
 	 * Unregistering the machine driver results in unloading the topology.
 	 * Some widgets, ex: scheduler, attempt to power down the core they are
 	 * scheduled on, when they are unloaded. Therefore, the DSP must be
 	 * removed only after the topology has been unloaded.
 	 */
-	snd_sof_remove(sdev);
+	if (!(sdev->probe_error_mask & SOF_FW_PROBE_ERROR_DSP_REMOVE))
+		snd_sof_remove(sdev);
 
 	/* release firmware */
 	release_firmware(pdata->fw);

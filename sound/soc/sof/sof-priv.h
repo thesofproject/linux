@@ -326,6 +326,12 @@ enum snd_sof_fw_state {
 	SOF_FW_BOOT_COMPLETE,
 };
 
+#define SOF_FW_PROBE_ERROR_FW_UNLOAD	BIT(0)
+#define SOF_FW_PROBE_ERROR_IPC_FREE	BIT(1)
+#define SOF_FW_PROBE_ERROR_FREE_DEBUG	BIT(2)
+#define SOF_FW_PROBE_ERROR_FREE_TRACE	BIT(3)
+#define SOF_FW_PROBE_ERROR_DSP_REMOVE	BIT(4)
+
 /*
  * SOF Device Level.
  */
@@ -417,6 +423,8 @@ struct snd_sof_dev {
 	u32 dtrace_draining;
 
 	bool msi_enabled;
+
+	int probe_error_mask;
 
 	void *private;			/* core does not touch this */
 };
