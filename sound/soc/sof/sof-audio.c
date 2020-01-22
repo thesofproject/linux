@@ -17,12 +17,13 @@
  */
 bool snd_sof_dsp_only_d0i3_compatible_stream_active(struct snd_sof_dev *sdev)
 {
+	struct snd_sof_audio_data *audio_data = sdev->sof_audio_data;
 	struct snd_pcm_substream *substream;
 	struct snd_sof_pcm *spcm;
 	bool d0i3_compatible_active = false;
 	int dir;
 
-	list_for_each_entry(spcm, &sdev->pcm_list, list) {
+	list_for_each_entry(spcm, &audio_data->pcm_list, list) {
 		for (dir = 0; dir <= SNDRV_PCM_STREAM_CAPTURE; dir++) {
 			substream = spcm->stream[dir].substream;
 			if (!substream || !substream->runtime)
@@ -46,9 +47,10 @@ EXPORT_SYMBOL(snd_sof_dsp_only_d0i3_compatible_stream_active);
 
 bool snd_sof_stream_suspend_ignored(struct snd_sof_dev *sdev)
 {
+	struct snd_sof_audio_data *audio_data = sdev->sof_audio_data;
 	struct snd_sof_pcm *spcm;
 
-	list_for_each_entry(spcm, &sdev->pcm_list, list) {
+	list_for_each_entry(spcm, &audio_data->pcm_list, list) {
 		if (spcm->stream[SNDRV_PCM_STREAM_PLAYBACK].suspend_ignored ||
 		    spcm->stream[SNDRV_PCM_STREAM_CAPTURE].suspend_ignored)
 			return true;
@@ -60,6 +62,7 @@ bool snd_sof_stream_suspend_ignored(struct snd_sof_dev *sdev)
 int sof_set_hw_params_upon_resume(struct device *dev)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
+	struct snd_sof_audio_data *audio_data = sdev->sof_audio_data;
 	struct snd_pcm_substream *substream;
 	struct snd_sof_pcm *spcm;
 	snd_pcm_state_t state;
@@ -70,7 +73,7 @@ int sof_set_hw_params_upon_resume(struct device *dev)
 	 * So, set the flag to indicate this for those streams that
 	 * have been suspended.
 	 */
-	list_for_each_entry(spcm, &sdev->pcm_list, list) {
+	list_for_each_entry(spcm, &audio_data->pcm_list, list) {
 		for (dir = 0; dir <= SNDRV_PCM_STREAM_CAPTURE; dir++) {
 			/*
 			 * do not reset hw_params upon resume for streams that
@@ -96,12 +99,13 @@ int sof_set_hw_params_upon_resume(struct device *dev)
 static int sof_restore_kcontrols(struct device *dev)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
+	struct snd_sof_audio_data *audio_data = sdev->sof_audio_data;
 	struct snd_sof_control *scontrol;
 	int ipc_cmd, ctrl_type;
 	int ret = 0;
 
 	/* restore kcontrol values */
-	list_for_each_entry(scontrol, &sdev->kcontrol_list, list) {
+	list_for_each_entry(scontrol, &audio_data->kcontrol_list, list) {
 		/* reset readback offset for scontrol after resuming */
 		scontrol->readback_offset = 0;
 
@@ -145,6 +149,7 @@ static int sof_restore_kcontrols(struct device *dev)
 int sof_restore_pipelines(struct device *dev)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
+	struct snd_sof_audio_data *audio_data = sdev->sof_audio_data;
 	struct snd_sof_widget *swidget;
 	struct snd_sof_route *sroute;
 	struct sof_ipc_pipe_new *pipeline;
@@ -154,7 +159,7 @@ int sof_restore_pipelines(struct device *dev)
 	int ret;
 
 	/* restore pipeline components */
-	list_for_each_entry_reverse(swidget, &sdev->widget_list, list) {
+	list_for_each_entry_reverse(swidget, &audio_data->widget_list, list) {
 		struct sof_ipc_comp_reply r;
 
 		/* skip if there is no private data */
@@ -199,7 +204,7 @@ int sof_restore_pipelines(struct device *dev)
 	}
 
 	/* restore pipeline connections */
-	list_for_each_entry_reverse(sroute, &sdev->route_list, list) {
+	list_for_each_entry_reverse(sroute, &audio_data->route_list, list) {
 		struct sof_ipc_pipe_comp_connect *connect;
 		struct sof_ipc_reply reply;
 
@@ -227,7 +232,7 @@ int sof_restore_pipelines(struct device *dev)
 	}
 
 	/* restore dai links */
-	list_for_each_entry_reverse(dai, &sdev->dai_list, list) {
+	list_for_each_entry_reverse(dai, &audio_data->dai_list, list) {
 		struct sof_ipc_reply reply;
 		struct sof_ipc_dai_config *config = dai->dai_config;
 
@@ -261,7 +266,7 @@ int sof_restore_pipelines(struct device *dev)
 	}
 
 	/* complete pipeline */
-	list_for_each_entry(swidget, &sdev->widget_list, list) {
+	list_for_each_entry(swidget, &audio_data->widget_list, list) {
 		switch (swidget->id) {
 		case snd_soc_dapm_scheduler:
 			swidget->complete =
@@ -289,9 +294,10 @@ struct snd_sof_pcm *snd_sof_find_spcm_name(struct snd_soc_component *scomp,
 					   const char *name)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_audio_data *audio_data = sdev->sof_audio_data;
 	struct snd_sof_pcm *spcm;
 
-	list_for_each_entry(spcm, &sdev->pcm_list, list) {
+	list_for_each_entry(spcm, &audio_data->pcm_list, list) {
 		/* match with PCM dai name */
 		if (strcmp(spcm->pcm.dai_name, name) == 0)
 			return spcm;
@@ -315,10 +321,11 @@ struct snd_sof_pcm *snd_sof_find_spcm_comp(struct snd_soc_component *scomp,
 					   int *direction)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_audio_data *audio_data = sdev->sof_audio_data;
 	struct snd_sof_pcm *spcm;
 	int dir;
 
-	list_for_each_entry(spcm, &sdev->pcm_list, list) {
+	list_for_each_entry(spcm, &audio_data->pcm_list, list) {
 		dir = SNDRV_PCM_STREAM_PLAYBACK;
 		if (spcm->stream[dir].comp_id == comp_id) {
 			*direction = dir;
@@ -339,9 +346,10 @@ struct snd_sof_pcm *snd_sof_find_spcm_pcm_id(struct snd_soc_component *scomp,
 					     unsigned int pcm_id)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_audio_data *audio_data = sdev->sof_audio_data;
 	struct snd_sof_pcm *spcm;
 
-	list_for_each_entry(spcm, &sdev->pcm_list, list) {
+	list_for_each_entry(spcm, &audio_data->pcm_list, list) {
 		if (le32_to_cpu(spcm->pcm.pcm_id) == pcm_id)
 			return spcm;
 	}
@@ -353,9 +361,10 @@ struct snd_sof_widget *snd_sof_find_swidget(struct snd_soc_component *scomp,
 					    const char *name)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_audio_data *audio_data = sdev->sof_audio_data;
 	struct snd_sof_widget *swidget;
 
-	list_for_each_entry(swidget, &sdev->widget_list, list) {
+	list_for_each_entry(swidget, &audio_data->widget_list, list) {
 		if (strcmp(name, swidget->widget->name) == 0)
 			return swidget;
 	}
@@ -369,6 +378,7 @@ snd_sof_find_swidget_sname(struct snd_soc_component *scomp,
 			   const char *pcm_name, int dir)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_audio_data *audio_data = sdev->sof_audio_data;
 	struct snd_sof_widget *swidget;
 	enum snd_soc_dapm_type type;
 
@@ -377,7 +387,7 @@ snd_sof_find_swidget_sname(struct snd_soc_component *scomp,
 	else
 		type = snd_soc_dapm_aif_out;
 
-	list_for_each_entry(swidget, &sdev->widget_list, list) {
+	list_for_each_entry(swidget, &audio_data->widget_list, list) {
 		if (!strcmp(pcm_name, swidget->widget->sname) &&
 		    swidget->id == type)
 			return swidget;
@@ -390,9 +400,10 @@ struct snd_sof_dai *snd_sof_find_dai(struct snd_soc_component *scomp,
 				     const char *name)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_audio_data *audio_data = sdev->sof_audio_data;
 	struct snd_sof_dai *dai;
 
-	list_for_each_entry(dai, &sdev->dai_list, list) {
+	list_for_each_entry(dai, &audio_data->dai_list, list) {
 		if (dai->name && (strcmp(name, dai->name) == 0))
 			return dai;
 	}
@@ -407,8 +418,30 @@ int sof_machine_check(struct snd_sof_dev *sdev)
 {
 	struct snd_sof_pdata *sof_pdata = sdev->pdata;
 	const struct sof_dev_desc *desc = sof_pdata->desc;
+	struct snd_sof_audio_data *audio_data;
 	struct snd_soc_acpi_mach *mach;
 	int ret;
+
+	/* create audio data */
+	audio_data = devm_kzalloc(sdev->dev, sizeof(*audio_data), GFP_KERNEL);
+	if (!audio_data)
+		return -ENOMEM;
+
+	audio_data->dev = sdev->dev;
+
+	INIT_LIST_HEAD(&audio_data->pcm_list);
+	INIT_LIST_HEAD(&audio_data->kcontrol_list);
+	INIT_LIST_HEAD(&audio_data->widget_list);
+	INIT_LIST_HEAD(&audio_data->dai_list);
+	INIT_LIST_HEAD(&audio_data->route_list);
+
+	sdev->sof_audio_data = audio_data;
+
+	/*
+	 * set default tplg path.
+	 * TODO: set alternate path from kernel param
+	 */
+	audio_data->tplg_filename_prefix = sof_pdata->desc->default_tplg_path;
 
 	/* force nocodec mode */
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_FORCE_NOCODEC_MODE)
@@ -418,8 +451,8 @@ int sof_machine_check(struct snd_sof_dev *sdev)
 
 	/* find machine */
 	snd_sof_machine_select(sdev);
-	if (sof_pdata->machine) {
-		snd_sof_set_mach_params(sof_pdata->machine, sdev->dev);
+	if (audio_data->machine) {
+		snd_sof_set_mach_params(audio_data->machine, sdev->dev);
 		return 0;
 	}
 
@@ -437,49 +470,51 @@ nocodec:
 		return -ENOMEM;
 
 	mach->drv_name = "sof-nocodec";
-	sof_pdata->tplg_filename = desc->nocodec_tplg_filename;
+	audio_data->tplg_filename = desc->nocodec_tplg_filename;
 
 	ret = sof_nocodec_setup(sdev->dev, desc->ops);
 	if (ret < 0)
 		return ret;
 
-	sof_pdata->machine = mach;
-	snd_sof_set_mach_params(sof_pdata->machine, sdev->dev);
+	audio_data->machine = mach;
+	snd_sof_set_mach_params(audio_data->machine, sdev->dev);
 
 	return 0;
 }
 EXPORT_SYMBOL(sof_machine_check);
 
-int sof_machine_register(struct snd_sof_dev *sdev, void *pdata)
+int sof_machine_register(void *data)
 {
-	struct snd_sof_pdata *plat_data = (struct snd_sof_pdata *)pdata;
+	struct snd_sof_audio_data *audio_data =
+		(struct snd_sof_audio_data *)data;
 	const char *drv_name;
 	const void *mach;
 	int size;
 
-	drv_name = plat_data->machine->drv_name;
-	mach = (const void *)plat_data->machine;
-	size = sizeof(*plat_data->machine);
+	drv_name = audio_data->machine->drv_name;
+	mach = (const void *)audio_data->machine;
+	size = sizeof(*audio_data->machine);
 
 	/* register machine driver, pass machine info as pdata */
-	plat_data->pdev_mach =
-		platform_device_register_data(sdev->dev, drv_name,
+	audio_data->pdev_mach =
+		platform_device_register_data(audio_data->dev, drv_name,
 					      PLATFORM_DEVID_NONE, mach, size);
-	if (IS_ERR(plat_data->pdev_mach))
-		return PTR_ERR(plat_data->pdev_mach);
+	if (IS_ERR(audio_data->pdev_mach))
+		return PTR_ERR(audio_data->pdev_mach);
 
-	dev_dbg(sdev->dev, "created machine %s\n",
-		dev_name(&plat_data->pdev_mach->dev));
+	dev_dbg(audio_data->dev, "created machine %s\n",
+		dev_name(&audio_data->pdev_mach->dev));
 
 	return 0;
 }
 EXPORT_SYMBOL(sof_machine_register);
 
-void sof_machine_unregister(struct snd_sof_dev *sdev, void *pdata)
+void sof_machine_unregister(void *data)
 {
-	struct snd_sof_pdata *plat_data = (struct snd_sof_pdata *)pdata;
+	struct snd_sof_audio_data *audio_data =
+		(struct snd_sof_audio_data *)data;
 
-	if (!IS_ERR_OR_NULL(plat_data->pdev_mach))
-		platform_device_unregister(plat_data->pdev_mach);
+	if (!IS_ERR_OR_NULL(audio_data->pdev_mach))
+		platform_device_unregister(audio_data->pdev_mach);
 }
 EXPORT_SYMBOL(sof_machine_unregister);

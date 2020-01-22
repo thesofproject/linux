@@ -395,19 +395,19 @@ snd_sof_pcm_platform_pointer(struct snd_sof_dev *sdev,
 
 /* machine driver */
 static inline int
-snd_sof_machine_register(struct snd_sof_dev *sdev, void *pdata)
+snd_sof_machine_register(struct snd_sof_dev *sdev, void *data)
 {
 	if (sof_ops(sdev) && sof_ops(sdev)->machine_register)
-		return sof_ops(sdev)->machine_register(sdev, pdata);
+		return sof_ops(sdev)->machine_register(data);
 
 	return 0;
 }
 
 static inline void
-snd_sof_machine_unregister(struct snd_sof_dev *sdev, void *pdata)
+snd_sof_machine_unregister(struct snd_sof_dev *sdev, void *data)
 {
 	if (sof_ops(sdev) && sof_ops(sdev)->machine_unregister)
-		sof_ops(sdev)->machine_unregister(sdev, pdata);
+		sof_ops(sdev)->machine_unregister(data);
 }
 
 static inline void

@@ -734,17 +734,17 @@ static int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 static int sof_pcm_probe(struct snd_soc_component *component)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
-	struct snd_sof_pdata *plat_data = sdev->pdata;
+	struct snd_sof_audio_data *audio_data = sdev->sof_audio_data;
 	const char *tplg_filename;
 	int ret;
 
 	/* load the default topology */
-	sdev->component = component;
+	audio_data->component = component;
 
 	tplg_filename = devm_kasprintf(sdev->dev, GFP_KERNEL,
 				       "%s/%s",
-				       plat_data->tplg_filename_prefix,
-				       plat_data->tplg_filename);
+				       audio_data->tplg_filename_prefix,
+				       audio_data->tplg_filename);
 	if (!tplg_filename)
 		return -ENOMEM;
 
@@ -766,11 +766,11 @@ static void sof_pcm_remove(struct snd_soc_component *component)
 
 void snd_sof_new_platform_drv(struct snd_sof_dev *sdev)
 {
-	struct snd_soc_component_driver *pd = &sdev->plat_drv;
-	struct snd_sof_pdata *plat_data = sdev->pdata;
+	struct snd_sof_audio_data *audio_data = sdev->sof_audio_data;
+	struct snd_soc_component_driver *pd = &audio_data->plat_drv;
 	const char *drv_name;
 
-	drv_name = plat_data->machine->drv_name;
+	drv_name = audio_data->machine->drv_name;
 
 	pd->name = "sof-audio-component";
 	pd->probe = sof_pcm_probe;

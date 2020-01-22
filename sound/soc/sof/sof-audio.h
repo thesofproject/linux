@@ -200,10 +200,11 @@ struct snd_sof_pcm *snd_sof_find_spcm_dai(struct snd_soc_component *scomp,
 					  struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_audio_data *audio_data = sdev->sof_audio_data;
 
 	struct snd_sof_pcm *spcm = NULL;
 
-	list_for_each_entry(spcm, &sdev->pcm_list, list) {
+	list_for_each_entry(spcm, &audio_data->pcm_list, list) {
 		if (le32_to_cpu(spcm->pcm.dai_id) == rtd->dai_link->id)
 			return spcm;
 	}
@@ -236,7 +237,7 @@ bool snd_sof_stream_suspend_ignored(struct snd_sof_dev *sdev);
 bool snd_sof_dsp_only_d0i3_compatible_stream_active(struct snd_sof_dev *sdev);
 
 /* Machine driver enumeration */
-int sof_machine_register(struct snd_sof_dev *sdev, void *pdata);
-void sof_machine_unregister(struct snd_sof_dev *sdev, void *pdata);
+int sof_machine_register(void *data);
+void sof_machine_unregister(void *data);
 
 #endif

@@ -433,7 +433,7 @@ static void ipc_trace_message(struct snd_sof_dev *sdev, u32 msg_id)
 
 static void ipc_period_elapsed(struct snd_sof_dev *sdev, u32 msg_id)
 {
-	struct snd_soc_component *scomp = sdev->component;
+	struct snd_soc_component *scomp = sdev->sof_audio_data->component;
 	struct snd_sof_pcm_stream *stream;
 	struct sof_ipc_stream_posn posn;
 	struct snd_sof_pcm *spcm;
@@ -463,7 +463,7 @@ static void ipc_period_elapsed(struct snd_sof_dev *sdev, u32 msg_id)
 /* DSP notifies host of an XRUN within FW */
 static void ipc_xrun(struct snd_sof_dev *sdev, u32 msg_id)
 {
-	struct snd_soc_component *scomp = sdev->component;
+	struct snd_soc_component *scomp = sdev->sof_audio_data->component;
 	struct snd_sof_pcm_stream *stream;
 	struct sof_ipc_stream_posn posn;
 	struct snd_sof_pcm *spcm;

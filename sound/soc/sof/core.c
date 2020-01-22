@@ -13,6 +13,7 @@
 #include <sound/soc.h>
 #include <sound/sof.h>
 #include "sof-priv.h"
+#include "sof-audio.h"
 #include "ops.h"
 
 /* see SOF_DBG_ flags */
@@ -218,7 +219,8 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	sdev->first_boot = false;
 
 	/* now register audio DSP platform driver and dai */
-	ret = devm_snd_soc_register_component(sdev->dev, &sdev->plat_drv,
+	ret = devm_snd_soc_register_component(sdev->dev,
+					      &sdev->sof_audio_data->plat_drv,
 					      sof_ops(sdev)->drv,
 					      sof_ops(sdev)->num_drv);
 	if (ret < 0) {
@@ -227,7 +229,7 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 		goto fw_trace_err;
 	}
 
-	ret = snd_sof_machine_register(sdev, plat_data);
+	ret = snd_sof_machine_register(sdev, sdev->sof_audio_data);
 	if (ret < 0)
 		goto fw_trace_err;
 
@@ -302,11 +304,6 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 	    !sof_ops(sdev)->fw_ready)
 		return -EINVAL;
 
-	INIT_LIST_HEAD(&sdev->pcm_list);
-	INIT_LIST_HEAD(&sdev->kcontrol_list);
-	INIT_LIST_HEAD(&sdev->widget_list);
-	INIT_LIST_HEAD(&sdev->dai_list);
-	INIT_LIST_HEAD(&sdev->route_list);
 	spin_lock_init(&sdev->ipc_lock);
 	spin_lock_init(&sdev->hw_lock);
 
@@ -352,7 +349,7 @@ int snd_sof_device_remove(struct device *dev)
 	 * will remove the component driver and unload the topology
 	 * before freeing the snd_card.
 	 */
-	snd_sof_machine_unregister(sdev, pdata);
+	snd_sof_machine_unregister(sdev, sdev->sof_audio_data);
 
 	/*
 	 * Unregistering the machine driver results in unloading the topology.

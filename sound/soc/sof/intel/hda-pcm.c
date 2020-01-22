@@ -148,7 +148,7 @@ snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_sof_dev *sdev,
 				      struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_component *scomp = sdev->component;
+	struct snd_soc_component *scomp = sdev->sof_audio_data->component;
 	struct hdac_stream *hstream = substream->runtime->private_data;
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct snd_sof_pcm *spcm;

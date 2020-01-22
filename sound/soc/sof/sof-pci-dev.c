@@ -27,10 +27,6 @@ static char *fw_path;
 module_param(fw_path, charp, 0444);
 MODULE_PARM_DESC(fw_path, "alternate path for SOF firmware.");
 
-static char *tplg_path;
-module_param(tplg_path, charp, 0444);
-MODULE_PARM_DESC(tplg_path, "alternate path for SOF topology.");
-
 static int sof_pci_debug;
 module_param_named(sof_pci_debug, sof_pci_debug, int, 0444);
 MODULE_PARM_DESC(sof_pci_debug, "SOF PCI debug options (0x0 all off)");
@@ -342,12 +338,6 @@ static int sof_pci_probe(struct pci_dev *pci,
 		sof_pdata->fw_filename_prefix =
 			sof_pdata->desc->default_fw_path;
 	}
-
-	if (tplg_path)
-		sof_pdata->tplg_filename_prefix = tplg_path;
-	else
-		sof_pdata->tplg_filename_prefix =
-			sof_pdata->desc->default_tplg_path;
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_PROBE_WORK_QUEUE)
 	/* set callback to enable runtime_pm */

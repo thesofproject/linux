@@ -945,12 +945,12 @@ int hda_dsp_remove(struct snd_sof_dev *sdev)
 }
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
-static int hda_generic_machine_select(struct snd_sof_dev *sdev)
+static int hda_generic_machine_select(struct snd_sof_dev *sdev,
+				      struct snd_sof_audio_data *audio_data)
 {
 	struct hdac_bus *bus = sof_to_bus(sdev);
 	struct snd_soc_acpi_mach_params *mach_params;
 	struct snd_soc_acpi_mach *hda_mach;
-	struct snd_sof_pdata *pdata = sdev->pdata;
 	const char *tplg_filename;
 	const char *idisp_str;
 	const char *dmic_str;
@@ -977,12 +977,12 @@ static int hda_generic_machine_select(struct snd_sof_dev *sdev)
 		 * 1. there is one HDMI codec and one external HDAudio codec
 		 * 2. only HDMI codec
 		 */
-		if (!pdata->machine && codec_num <= 2 &&
+		if (!audio_data->machine && codec_num <= 2 &&
 		    HDA_IDISP_CODEC(bus->codec_mask)) {
 			hda_mach = snd_soc_acpi_intel_hda_machines;
 
 			/* topology: use the info from hda_machines */
-			pdata->tplg_filename =
+			audio_data->tplg_filename =
 				hda_mach->sof_tplg_filename;
 
 			dev_info(bus->dev, "using HDA machine driver %s now\n",
@@ -1013,21 +1013,21 @@ static int hda_generic_machine_select(struct snd_sof_dev *sdev)
 				break;
 			}
 
-			tplg_filename = pdata->tplg_filename;
+			tplg_filename = audio_data->tplg_filename;
 			tplg_filename = fixup_tplg_name(sdev, tplg_filename,
 							idisp_str, dmic_str);
 			if (!tplg_filename)
 				return -EINVAL;
 
-			pdata->machine = hda_mach;
-			pdata->tplg_filename = tplg_filename;
+			audio_data->machine = hda_mach;
+			audio_data->tplg_filename = tplg_filename;
 		}
 	}
 
 	/* used by hda machine driver to create dai links */
-	if (pdata->machine) {
+	if (audio_data->machine) {
 		mach_params = (struct snd_soc_acpi_mach_params *)
-			&pdata->machine->mach_params;
+			&audio_data->machine->mach_params;
 		mach_params->codec_mask = bus->codec_mask;
 		mach_params->common_hdmi_codec_drv = hda_codec_use_common_hdmi;
 		mach_params->dmic_num = dmic_num;
@@ -1036,7 +1036,8 @@ static int hda_generic_machine_select(struct snd_sof_dev *sdev)
 	return 0;
 }
 #else
-static int hda_generic_machine_select(struct snd_sof_dev *sdev)
+static int hda_generic_machine_select(struct snd_sof_dev *sdev,
+				      struct snd_sof_audio_data *audio_data)
 {
 	return 0;
 }
@@ -1167,14 +1168,15 @@ void hda_set_mach_params(const struct snd_soc_acpi_mach *mach,
 
 void hda_machine_select(struct snd_sof_dev *sdev)
 {
+	struct snd_sof_audio_data *audio_data = sdev->sof_audio_data;
 	struct snd_sof_pdata *sof_pdata = sdev->pdata;
 	const struct sof_dev_desc *desc = sof_pdata->desc;
 	struct snd_soc_acpi_mach *mach;
 
 	mach = snd_soc_acpi_find_machine(desc->machines);
 	if (mach) {
-		sof_pdata->tplg_filename = mach->sof_tplg_filename;
-		sof_pdata->machine = mach;
+		audio_data->tplg_filename = mach->sof_tplg_filename;
+		audio_data->machine = mach;
 	}
 
 	/*
@@ -1186,9 +1188,9 @@ void hda_machine_select(struct snd_sof_dev *sdev)
 	 * Choose HDA generic machine driver if mach is NULL.
 	 * Otherwise, set certain mach params.
 	 */
-	hda_generic_machine_select(sdev);
+	hda_generic_machine_select(sdev, audio_data);
 
-	if (!sof_pdata->machine)
+	if (!audio_data->machine)
 		dev_warn(sdev->dev, "warning: No matching ASoC machine driver found\n");
 }
 

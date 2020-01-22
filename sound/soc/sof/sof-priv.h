@@ -81,7 +81,6 @@ struct snd_sof_ipc_msg;
 struct snd_sof_ipc;
 struct snd_sof_debugfs_map;
 struct snd_soc_tplg_ops;
-struct snd_soc_component;
 struct snd_sof_pdata;
 
 /*
@@ -220,10 +219,8 @@ struct snd_sof_dsp_ops {
 				 u32 id);/* mandatory for common loader code */
 
 	/* machine driver ops */
-	int (*machine_register)(struct snd_sof_dev *sdev,
-				void *pdata); /* optional */
-	void (*machine_unregister)(struct snd_sof_dev *sdev,
-				   void *pdata); /* optional */
+	int (*machine_register)(void *data); /* optional */
+	void (*machine_unregister)(void *data); /* optional */
 	void (*machine_select)(struct snd_sof_dev *sdev); /* optional */
 	void (*set_mach_params)(const struct snd_soc_acpi_mach *mach,
 				struct device *dev); /* optional */
@@ -334,12 +331,6 @@ struct snd_sof_dev {
 	spinlock_t ipc_lock;	/* lock for IPC users */
 	spinlock_t hw_lock;	/* lock for HW IO access */
 
-	/*
-	 * ASoC components. plat_drv fields are set dynamically so
-	 * can't use const
-	 */
-	struct snd_soc_component_driver plat_drv;
-
 	/* current DSP power state */
 	struct sof_dsp_power_state dsp_power_state;
 
@@ -385,12 +376,6 @@ struct snd_sof_dev {
 
 	/* topology */
 	struct snd_soc_tplg_ops *tplg_ops;
-	struct list_head pcm_list;
-	struct list_head kcontrol_list;
-	struct list_head widget_list;
-	struct list_head dai_list;
-	struct list_head route_list;
-	struct snd_soc_component *component;
 	u32 enabled_cores_mask; /* keep track of enabled cores */
 
 	/* FW configuration */

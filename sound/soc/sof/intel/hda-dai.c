@@ -155,12 +155,14 @@ static int hda_link_dma_params(struct hdac_ext_stream *stream,
 static int hda_link_config_ipc(struct sof_intel_hda_stream *hda_stream,
 			       const char *dai_name, int channel, int dir)
 {
+	struct snd_sof_audio_data *audio_data =
+		hda_stream->sdev->sof_audio_data;
 	struct sof_ipc_dai_config *config;
 	struct snd_sof_dai *sof_dai;
 	struct sof_ipc_reply reply;
 	int ret = 0;
 
-	list_for_each_entry(sof_dai, &hda_stream->sdev->dai_list, list) {
+	list_for_each_entry(sof_dai, &audio_data->dai_list, list) {
 		if (!sof_dai->cpu_dai_name)
 			continue;
 

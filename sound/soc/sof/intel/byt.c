@@ -411,6 +411,7 @@ static const char *fixup_tplg_name(struct snd_sof_dev *sdev,
 
 static void byt_machine_select(struct snd_sof_dev *sdev)
 {
+	struct snd_sof_audio_data *audio_data = sdev->sof_audio_data;
 	struct snd_sof_pdata *sof_pdata = sdev->pdata;
 	const struct sof_dev_desc *desc = sof_pdata->desc;
 	struct snd_soc_acpi_mach *mach;
@@ -441,9 +442,9 @@ static void byt_machine_select(struct snd_sof_dev *sdev)
 		return;
 	}
 
-	sof_pdata->tplg_filename = tplg_filename;
+	audio_data->tplg_filename = tplg_filename;
 	mach->mach_params.acpi_ipc_irq_index = desc->irqindex_host_ipc;
-	sof_pdata->machine = mach;
+	audio_data->machine = mach;
 }
 
 static void byt_set_mach_params(const struct snd_soc_acpi_mach *mach,

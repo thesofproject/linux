@@ -90,7 +90,6 @@ static int sof_of_probe(struct platform_device *pdev)
 
 	/* TODO: read alternate fw and tplg filenames from DT */
 	sof_pdata->fw_filename_prefix = sof_pdata->desc->default_fw_path;
-	sof_pdata->tplg_filename_prefix = sof_pdata->desc->default_tplg_path;
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_PROBE_WORK_QUEUE)
 	/* set callback to enable runtime_pm */
