@@ -38,6 +38,8 @@ static int sof_nocodec_bes_setup(struct device *dev,
 		if (!links[i].name)
 			return -ENOMEM;
 
+		links[i].stream_name = links[i].name;
+
 		links[i].cpus = &dlc[0];
 		links[i].codecs = &dlc[1];
 		links[i].platforms = &dlc[2];
