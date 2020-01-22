@@ -81,7 +81,6 @@ struct snd_sof_dev;
 struct snd_sof_ipc_msg;
 struct snd_sof_ipc;
 struct snd_sof_debugfs_map;
-struct snd_soc_tplg_ops;
 struct snd_sof_pdata;
 
 /*
@@ -375,8 +374,6 @@ struct snd_sof_dev {
 	struct sof_ipc_fw_version fw_version;
 	struct sof_ipc_cc_version *cc_version;
 
-	/* topology */
-	struct snd_soc_tplg_ops *tplg_ops;
 	u32 enabled_cores_mask; /* keep track of enabled cores */
 
 	/* FW configuration */
