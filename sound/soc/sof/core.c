@@ -262,6 +262,9 @@ dbg_err:
 	sdev->probe_error_mask |= SOF_FW_PROBE_ERROR_DSP_REMOVE;
 	snd_sof_remove(sdev);
 
+	sdev->fw_state = SOF_FW_BOOT_NOT_STARTED;
+	sdev->first_boot = true;
+
 	return ret;
 }
 

@@ -93,6 +93,9 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 	if (!sof_ops(sdev)->resume || !sof_ops(sdev)->runtime_resume)
 		return 0;
 
+	if (sdev->fw_state == SOF_FW_BOOT_NOT_STARTED && sdev->first_boot)
+		return 0;
+
 	/*
 	 * if the runtime_resume flag is set, call the runtime_resume routine
 	 * or else call the system resume routine
@@ -174,6 +177,9 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 	if (!sof_ops(sdev)->suspend)
 		return 0;
 
+	if (sdev->fw_state == SOF_FW_BOOT_NOT_STARTED)
+		return 0;
+
 	if (sdev->fw_state != SOF_FW_BOOT_COMPLETE)
 		goto suspend;
 
@@ -221,11 +227,6 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 	}
 
 suspend:
-
-	/* return if the DSP was not probed successfully */
-	if (sdev->fw_state == SOF_FW_BOOT_NOT_STARTED)
-		return 0;
-
 	/* platform-specific suspend */
 	if (runtime_suspend)
 		ret = snd_sof_dsp_runtime_suspend(sdev);
