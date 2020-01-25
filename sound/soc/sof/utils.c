@@ -14,6 +14,7 @@
 #include <sound/soc.h>
 #include <sound/sof.h>
 #include "sof-priv.h"
+#include "sof-client.h"
 
 /*
  * Register IO
@@ -119,9 +120,9 @@ EXPORT_SYMBOL(sof_block_read);
  * into compressed page table.
  */
 
-int snd_sof_create_page_table(struct device *dev,
-			      struct snd_dma_buffer *dmab,
-			      unsigned char *page_table, size_t size)
+int sof_client_create_page_table(struct device *dev,
+				 struct snd_dma_buffer *dmab,
+				 unsigned char *page_table, size_t size)
 {
 	int i, pages;
 
@@ -169,4 +170,4 @@ int snd_sof_create_page_table(struct device *dev,
 
 	return pages;
 }
-EXPORT_SYMBOL(snd_sof_create_page_table);
+EXPORT_SYMBOL_NS(sof_client_create_page_table, SND_SOC_SOF_CLIENT);

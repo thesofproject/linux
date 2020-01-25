@@ -31,8 +31,8 @@ static int create_page_table(struct snd_soc_component *component,
 	if (!spcm)
 		return -EINVAL;
 
-	return snd_sof_create_page_table(component->dev, dmab,
-		spcm->stream[stream].page_table.area, size);
+	return sof_client_create_page_table(component->dev, dmab,
+		    spcm->stream[stream].page_table.area, size);
 }
 
 static int sof_pcm_dsp_params(struct snd_sof_pcm *spcm, struct snd_pcm_substream *substream,

@@ -11,12 +11,6 @@
 #ifndef __SOUND_SOC_SOF_AUDIO_H
 #define __SOUND_SOC_SOF_AUDIO_H
 
-#include <sound/soc.h>
-#include <sound/control.h>
-#include <sound/sof/stream.h> /* needs to be included before control.h */
-#include <sound/sof/control.h>
-#include <sound/sof/dai.h>
-#include <sound/sof/topology.h>
 #include "sof-priv.h"
 
 #define SOF_AUDIO_PCM_DRV_NAME	"sof-audio-component"

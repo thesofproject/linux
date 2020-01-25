@@ -218,6 +218,9 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	/* hereafter all FW boot flows are for PM reasons */
 	sdev->first_boot = false;
 
+	INIT_LIST_HEAD(&sdev->client_list);
+	mutex_init(&sdev->client_mutex);
+
 	/* now register audio DSP platform driver and dai */
 	ret = devm_snd_soc_register_component(sdev->dev,
 					      &sdev->sof_audio_data->plat_drv,

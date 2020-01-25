@@ -402,6 +402,10 @@ struct snd_sof_dev {
 	bool msi_enabled;
 
 	struct snd_sof_audio_data *sof_audio_data;
+	/* client devices */
+	struct list_head client_list;
+	int num_clients;
+	struct mutex client_mutex; /* protects client_list */
 
 	void *private;			/* core does not touch this */
 };
@@ -422,10 +426,6 @@ int snd_sof_prepare(struct device *dev);
 void snd_sof_complete(struct device *dev);
 
 void snd_sof_new_platform_drv(struct snd_sof_dev *sdev);
-
-int snd_sof_create_page_table(struct device *dev,
-			      struct snd_dma_buffer *dmab,
-			      unsigned char *page_table, size_t size);
 
 /*
  * Firmware loading.

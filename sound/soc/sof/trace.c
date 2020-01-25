@@ -10,6 +10,7 @@
 
 #include <linux/debugfs.h>
 #include <linux/sched/signal.h>
+#include "sof-client.h"
 #include "sof-priv.h"
 #include "ops.h"
 
@@ -250,8 +251,9 @@ int snd_sof_init_trace(struct snd_sof_dev *sdev)
 	}
 
 	/* create compressed page table for audio firmware */
-	ret = snd_sof_create_page_table(sdev->dev, &sdev->dmatb,
-					sdev->dmatp.area, sdev->dmatb.bytes);
+	ret = sof_client_create_page_table(sdev->dev, &sdev->dmatb,
+					   sdev->dmatp.area,
+					   sdev->dmatb.bytes);
 	if (ret < 0)
 		goto table_err;
 
