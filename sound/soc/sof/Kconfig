@@ -60,6 +60,9 @@ if SND_SOC_SOF_DEVELOPER_SUPPORT
 config SND_SOC_SOF_NOCODEC
 	tristate
 
+config SND_SOC_SOF_IPC_TEST
+	tristate
+
 config SND_SOC_SOF_NOCODEC_SUPPORT
 	bool "SOF nocodec mode support"
 	help
@@ -183,6 +186,7 @@ config SND_SOC_SOF
 	select SND_SOC_TOPOLOGY
 	select SND_SOC_SOF_AUDIO
 	select SND_SOC_SOF_NOCODEC if SND_SOC_SOF_NOCODEC_SUPPORT
+	select SND_SOC_SOF_IPC_TEST if SND_SOC_SOF_DEBUG_IPC_FLOOD_TEST
 	help
 	  This option is not user-selectable but automagically handled by
 	  'select' statements at a higher level

@@ -105,5 +105,6 @@ int sof_ipc_set_get_large_ctrl_data(struct device *dev,
 				    struct sof_ipc_ctrl_data *cdata,
 				    struct sof_ipc_ctrl_data_params *sparams,
 				    bool send);
+struct dentry *sof_client_get_debugfs_root(struct device *dev);
 
 #endif

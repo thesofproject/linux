@@ -292,3 +292,11 @@ void sof_client_dsp_block_write(struct device *dev, u32 bar,
 	snd_sof_dsp_block_write(sdev, bar, offset, src, bytes);
 }
 EXPORT_SYMBOL_NS(sof_client_dsp_block_write, SND_SOC_SOF_CLIENT);
+
+struct dentry *sof_client_get_debugfs_root(struct device *dev)
+{
+	struct snd_sof_dev *sdev = dev_get_drvdata(dev->parent);
+
+	return sdev->debugfs_root;
+}
+EXPORT_SYMBOL_NS(sof_client_get_debugfs_root, SND_SOC_SOF_CLIENT);

@@ -244,6 +244,11 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	 */
 	sof_client_new(sdev, "sof-audio", SOF_CLIENT_AUDIO);
 
+	/* Register dummy client for IPC testing */
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_IPC_FLOOD_TEST)
+	sof_client_new(sdev, "sof-ipc-test", SOF_CLIENT_IPC);
+#endif
+
 	/*
 	 * Some platforms in SOF, ex: BYT, may not have their platform PM
 	 * callbacks set. Increment the usage count so as to
