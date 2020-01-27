@@ -1066,22 +1066,26 @@ static void intel_shutdown(struct snd_pcm_substream *substream,
 	pm_runtime_put_autosuspend(cdns->dev);
 }
 
-static int intel_dai_suspend(struct snd_soc_dai *dai)
+static int intel_component_dais_suspend(struct snd_soc_component *component)
 {
 	struct sdw_cdns_dma_data *dma;
+	struct snd_soc_dai *dai;
 
-	/*
-	 * we don't have a .suspend dai_ops, and we don't have access
-	 * to the substream, so let's mark both capture and playback
-	 * DMA contexts as suspended
-	 */
-	dma = dai->playback_dma_data;
-	if (dma)
-		dma->suspended = true;
+	for_each_component_dais(component, dai) {
 
-	dma = dai->capture_dma_data;
-	if (dma)
-		dma->suspended = true;
+		/*
+		 * we don't have a .suspend dai_ops, and we don't have access
+		 * to the substream, so let's mark both capture and playback
+		 * DMA contexts as suspended
+		 */
+		dma = dai->playback_dma_data;
+		if (dma)
+			dma->suspended = true;
+
+		dma = dai->capture_dma_data;
+		if (dma)
+			dma->suspended = true;
+	}
 
 	return 0;
 }
@@ -1120,6 +1124,7 @@ static const struct snd_soc_dai_ops intel_pdm_dai_ops = {
 
 static const struct snd_soc_component_driver dai_component = {
 	.name           = "soundwire",
+	.suspend	= intel_component_dais_suspend
 };
 
 static int intel_create_dai(struct sdw_cdns *cdns,
@@ -1157,8 +1162,6 @@ static int intel_create_dai(struct sdw_cdns *cdns,
 			dais[i].ops = &intel_pcm_dai_ops;
 		else
 			dais[i].ops = &intel_pdm_dai_ops;
-
-		dais[i].suspend = intel_dai_suspend;
 	}
 
 	return 0;
