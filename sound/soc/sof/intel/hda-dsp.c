@@ -18,7 +18,7 @@
 #include <linux/module.h>
 #include <sound/hdaudio_ext.h>
 #include <sound/hda_register.h>
-#include "../sof-audio.h"
+#include "../sof-client.h"
 #include "../ops.h"
 #include "hda.h"
 #include "hda-ipc.h"
@@ -825,15 +825,31 @@ void hda_dsp_d0i3_work(struct work_struct *work)
 	struct hdac_bus *bus = &hdev->hbus.core;
 	struct snd_sof_dev *sdev = dev_get_drvdata(bus->dev);
 	struct sof_dsp_power_state target_state;
+	struct snd_sof_client *client;
+	struct device *dev;
+	bool remain = false;
 	int ret;
 
 	target_state.state = SOF_DSP_PM_D0;
 
-	/* DSP can enter D0I3 iff only D0I3-compatible streams are active */
-	if (snd_sof_dsp_only_d0i3_compatible_stream_active(sdev))
-		target_state.substate = SOF_HDA_DSP_PM_D0I3;
-	else
+	/*
+	 * Check all clients to see if their current status allows the
+	 * DSP to enter D0I3.
+	 */
+	mutex_lock(&sdev->client_mutex);
+	list_for_each_entry(client, &sdev->client_list, list) {
+		dev = &client->pdev->dev;
+
+		if (client->allow_lp_d0_substate_in_s0)
+			if (!client->allow_lp_d0_substate_in_s0(dev))
+				remain = true;
+	}
+	mutex_unlock(&sdev->client_mutex);
+
+	if (remain)
 		target_state.substate = SOF_HDA_DSP_PM_D0I0;
+	else
+		target_state.substate = SOF_HDA_DSP_PM_D0I3;
 
 	/* remain in D0I0 */
 	if (target_state.substate == SOF_HDA_DSP_PM_D0I0)

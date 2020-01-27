@@ -13,7 +13,7 @@
 #include <sound/soc.h>
 #include <sound/sof.h>
 #include "sof-priv.h"
-#include "sof-audio.h"
+#include "sof-client.h"
 #include "ops.h"
 
 /* see SOF_DBG_ flags */
@@ -49,6 +49,34 @@ static const struct sof_panic_msg panic_msg[] = {
 	{SOF_IPC_PANIC_WFI, "invalid wait state"},
 	{SOF_IPC_PANIC_ASSERT, "assertion failed"},
 };
+
+static void sof_client_new(struct snd_sof_dev *sdev, const char *name,
+			   enum sof_client_type client_type)
+{
+	struct snd_sof_client *client;
+	struct platform_device *pdev;
+
+	client = devm_kzalloc(sdev->dev, sizeof(*client), GFP_KERNEL);
+	if (!client)
+		return;
+
+	client->type = client_type;
+
+	/* register client platform device */
+	pdev = platform_device_register_data(sdev->dev, name,
+					     PLATFORM_DEVID_NONE,
+					     client, sizeof(*client));
+	if (PTR_ERR(pdev))
+		dev_err(sdev->dev,
+			"error: failed to create platform device %s\n",
+			name);
+}
+
+static void sof_client_free(struct snd_sof_dev *sdev,
+			    struct snd_sof_client *client)
+{
+	platform_device_unregister(client->pdev);
+}
 
 /*
  * helper to be called from .dbg_dump callbacks. No error code is
@@ -147,17 +175,6 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 
 	sdev->fw_state = SOF_FW_BOOT_PREPARE;
 
-	/* check machine info */
-	ret = sof_machine_check(sdev);
-	if (ret < 0) {
-		dev_err(sdev->dev, "error: failed to get machine info %d\n",
-			ret);
-		goto dbg_err;
-	}
-
-	/* set up platform component driver */
-	snd_sof_new_platform_drv(sdev);
-
 	/* register any debug/trace capabilities */
 	ret = snd_sof_dbg_init(sdev);
 	if (ret < 0) {
@@ -221,20 +238,11 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	INIT_LIST_HEAD(&sdev->client_list);
 	mutex_init(&sdev->client_mutex);
 
-	/* now register audio DSP platform driver and dai */
-	ret = devm_snd_soc_register_component(sdev->dev,
-					      &sdev->sof_audio_data->plat_drv,
-					      sof_ops(sdev)->drv,
-					      sof_ops(sdev)->num_drv);
-	if (ret < 0) {
-		dev_err(sdev->dev,
-			"error: failed to register DSP DAI driver %d\n", ret);
-		goto fw_trace_err;
-	}
-
-	ret = snd_sof_machine_register(sdev, sdev->sof_audio_data);
-	if (ret < 0)
-		goto fw_trace_err;
+	/*
+	 * Register audio client.
+	 * This can fail but errors cannot be propagated.
+	 */
+	sof_client_new(sdev, "sof-audio", SOF_CLIENT_AUDIO);
 
 	/*
 	 * Some platforms in SOF, ex: BYT, may not have their platform PM
@@ -249,8 +257,6 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 
 	return 0;
 
-fw_trace_err:
-	snd_sof_free_trace(sdev);
 fw_run_err:
 	snd_sof_fw_unload(sdev);
 fw_load_err:
@@ -336,32 +342,27 @@ int snd_sof_device_remove(struct device *dev)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	struct snd_sof_pdata *pdata = sdev->pdata;
+	struct snd_sof_client *client, *_client;
 
 	if (IS_ENABLED(CONFIG_SND_SOC_SOF_PROBE_WORK_QUEUE))
 		cancel_work_sync(&sdev->probe_work);
+
+	/* unregister client devices */
+	mutex_lock(&sdev->client_mutex);
+	list_for_each_entry_safe(client, _client, &sdev->client_list, list) {
+		sof_client_free(sdev, client);
+		list_del(&client->list);
+		sdev->num_clients--;
+	}
+	mutex_unlock(&sdev->client_mutex);
 
 	if (sdev->fw_state > SOF_FW_BOOT_NOT_STARTED) {
 		snd_sof_fw_unload(sdev);
 		snd_sof_ipc_free(sdev);
 		snd_sof_free_debug(sdev);
 		snd_sof_free_trace(sdev);
-	}
-
-	/*
-	 * Unregister machine driver. This will unbind the snd_card which
-	 * will remove the component driver and unload the topology
-	 * before freeing the snd_card.
-	 */
-	snd_sof_machine_unregister(sdev, sdev->sof_audio_data);
-
-	/*
-	 * Unregistering the machine driver results in unloading the topology.
-	 * Some widgets, ex: scheduler, attempt to power down the core they are
-	 * scheduled on, when they are unloaded. Therefore, the DSP must be
-	 * removed only after the topology has been unloaded.
-	 */
-	if (sdev->fw_state > SOF_FW_BOOT_NOT_STARTED)
 		snd_sof_remove(sdev);
+	}
 
 	/* release firmware */
 	release_firmware(pdata->fw);

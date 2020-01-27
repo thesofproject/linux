@@ -147,7 +147,7 @@ int hda_dsp_pcm_trigger(struct snd_sof_dev *sdev,
 snd_pcm_uframes_t hda_dsp_pcm_pointer(struct device *dev,
 				      struct snd_pcm_substream *substream)
 {
-	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
+	struct snd_sof_dev *sdev = dev_get_drvdata(dev->parent);
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct hdac_stream *hstream = substream->runtime->private_data;
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;

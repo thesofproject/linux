@@ -78,7 +78,7 @@ int sof_nocodec_setup(struct device *dev,
 				    &sof_nocodec_card);
 	return ret;
 }
-EXPORT_SYMBOL(sof_nocodec_setup);
+EXPORT_SYMBOL_NS(sof_nocodec_setup, SND_SOC_SOF_AUDIO_NOCODEC);
 
 static int sof_nocodec_probe(struct platform_device *pdev)
 {

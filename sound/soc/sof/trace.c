@@ -12,6 +12,7 @@
 #include <linux/sched/signal.h>
 #include "sof-client.h"
 #include "sof-priv.h"
+#include "sof-audio.h"
 #include "ops.h"
 
 static size_t sof_trace_avail(struct snd_sof_dev *sdev,

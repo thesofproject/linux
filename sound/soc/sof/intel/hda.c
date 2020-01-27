@@ -1170,8 +1170,8 @@ void hda_set_mach_params(const struct snd_soc_acpi_mach *mach,
 
 void hda_machine_select(struct device *dev)
 {
-	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
-	struct snd_sof_audio_data *audio_data = sdev->sof_audio_data;
+	struct snd_sof_audio_data *audio_data = sof_get_client_data(dev);
+	struct snd_sof_dev *sdev = dev_get_drvdata(dev->parent);
 	struct snd_sof_pdata *sof_pdata = sdev->pdata;
 	const struct sof_dev_desc *desc = sof_pdata->desc;
 	struct snd_soc_acpi_mach *mach;
@@ -1200,6 +1200,7 @@ void hda_machine_select(struct device *dev)
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_IMPORT_NS(SND_SOC_SOF_CORE);
 MODULE_IMPORT_NS(SND_SOC_SOF_CLIENT);
+MODULE_IMPORT_NS(SND_SOC_SOF_AUDIO);
 MODULE_IMPORT_NS(SND_SOC_SOF_HDA_AUDIO_CODEC);
 MODULE_IMPORT_NS(SND_SOC_SOF_HDA_AUDIO_CODEC_I915);
 MODULE_IMPORT_NS(SND_SOC_SOF_XTENSA);

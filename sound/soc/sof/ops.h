@@ -401,7 +401,7 @@ static inline snd_pcm_uframes_t
 snd_sof_pcm_platform_pointer(struct device *dev,
 			     struct snd_pcm_substream *substream)
 {
-	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
+	struct snd_sof_dev *sdev = dev_get_drvdata(dev->parent);
 
 	if (sof_ops(sdev) && sof_ops(sdev)->pcm_pointer)
 		return sof_ops(sdev)->pcm_pointer(dev, substream);
@@ -429,7 +429,7 @@ snd_sof_machine_unregister(struct snd_sof_dev *sdev, void *data)
 static inline void
 snd_sof_machine_select(struct device *dev)
 {
-	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
+	struct snd_sof_dev *sdev = dev_get_drvdata(dev->parent);
 
 	if (sof_ops(sdev) && sof_ops(sdev)->machine_select)
 		sof_ops(sdev)->machine_select(dev);
@@ -439,7 +439,7 @@ static inline void
 snd_sof_set_mach_params(const struct snd_soc_acpi_mach *mach,
 			struct device *dev)
 {
-	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
+	struct snd_sof_dev *sdev = dev_get_drvdata(dev->parent);
 
 	if (sof_ops(sdev) && sof_ops(sdev)->set_mach_params)
 		sof_ops(sdev)->set_mach_params(mach, dev);

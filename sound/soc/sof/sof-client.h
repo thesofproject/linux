@@ -101,5 +101,9 @@ void sof_client_dsp_block_read(struct device *dev, u32 bar,
 			       u32 offset, void *dest, size_t bytes);
 void sof_client_dsp_block_write(struct device *dev, u32 bar,
 				u32 offset, void *src, size_t bytes);
+int sof_ipc_set_get_large_ctrl_data(struct device *dev,
+				    struct sof_ipc_ctrl_data *cdata,
+				    struct sof_ipc_ctrl_data_params *sparams,
+				    bool send);
 
 #endif

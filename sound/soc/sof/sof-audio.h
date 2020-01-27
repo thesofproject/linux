@@ -11,9 +11,10 @@
 #ifndef __SOUND_SOC_SOF_AUDIO_H
 #define __SOUND_SOC_SOF_AUDIO_H
 
-#include "sof-priv.h"
+#include "sof-client.h"
 
 #define SOF_AUDIO_PCM_DRV_NAME	"sof-audio-component"
+#define SND_SOF_AUDIO_SUSPEND_DELAY_MS 3000
 
 /* max number of FE PCMs before BEs */
 #define SOF_BE_PCM_BASE		16
@@ -129,7 +130,6 @@ struct snd_sof_audio_data {
 	struct list_head widget_list;
 	struct list_head dai_list;
 	struct list_head route_list;
-	struct snd_soc_component *component;
 
 	void *private;
 };
@@ -174,13 +174,6 @@ int sof_load_pipeline_ipc(struct device *dev,
 			  struct sof_ipc_pipe_new *pipeline,
 			  struct sof_ipc_comp_reply *r);
 
-/*
- * Stream IPC
- */
-int snd_sof_ipc_stream_posn(struct snd_soc_component *scomp,
-			    struct snd_sof_pcm *spcm, int direction,
-			    struct sof_ipc_stream_posn *posn);
-
 struct snd_sof_widget *snd_sof_find_swidget(struct device *dev,
 					    const char *name);
 struct snd_sof_widget *
@@ -193,8 +186,7 @@ static inline
 struct snd_sof_pcm *snd_sof_find_spcm_dai(struct device *dev,
 					  struct snd_soc_pcm_runtime *rtd)
 {
-	struct snd_sof_dev *sdev = dev_drvdata(dev);
-	struct snd_sof_audio_data *audio_data = sdev->sof_audio_data;
+	struct snd_sof_audio_data *audio_data = sof_get_client_data(dev);
 
 	struct snd_sof_pcm *spcm = NULL;
 
@@ -225,10 +217,8 @@ int sof_audio_ipc_set_get_comp_data(struct snd_sof_control *scontrol,
 				    bool send);
 
 /* PM */
-int sof_restore_pipelines(struct device *dev);
-int sof_set_hw_params_upon_resume(struct device *dev);
-bool snd_sof_stream_suspend_ignored(struct snd_sof_dev *sdev);
-bool snd_sof_dsp_only_d0i3_compatible_stream_active(struct snd_sof_dev *sdev);
+bool snd_sof_stream_suspend_ignored(struct device *dev);
+bool snd_sof_dsp_only_d0i3_compatible_stream_active(struct device *dev);
 
 /* Machine driver enumeration */
 int sof_machine_register(void *data);

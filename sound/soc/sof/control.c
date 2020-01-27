@@ -12,7 +12,6 @@
 
 #include <linux/pm_runtime.h>
 #include <linux/leds.h>
-#include "sof-priv.h"
 #include "sof-audio.h"
 
 static void update_mute_led(struct snd_sof_control *scontrol,

@@ -401,7 +401,6 @@ struct snd_sof_dev {
 
 	bool msi_enabled;
 
-	struct snd_sof_audio_data *sof_audio_data;
 	/* client devices */
 	struct list_head client_list;
 	int num_clients;
@@ -424,8 +423,6 @@ int snd_sof_resume(struct device *dev);
 int snd_sof_suspend(struct device *dev);
 int snd_sof_prepare(struct device *dev);
 void snd_sof_complete(struct device *dev);
-
-void snd_sof_new_platform_drv(struct snd_sof_dev *sdev);
 
 /*
  * Firmware loading.
@@ -458,10 +455,6 @@ int sof_ipc_tx_message(struct snd_sof_ipc *ipc, u32 header,
 int sof_ipc_tx_message_no_pm(struct snd_sof_ipc *ipc, u32 header,
 			     void *msg_data, size_t msg_bytes,
 			     void *reply_data, size_t reply_bytes);
-int sof_ipc_set_get_large_ctrl_data(struct device *dev,
-				    struct sof_ipc_ctrl_data *cdata,
-				    struct sof_ipc_ctrl_data_params *sparams,
-				    bool send);
 
 /*
  * Trace/debug
@@ -539,7 +532,5 @@ int intel_pcm_open(struct snd_sof_dev *sdev,
 		   struct snd_pcm_substream *substream);
 int intel_pcm_close(struct snd_sof_dev *sdev,
 		    struct snd_pcm_substream *substream);
-
-int sof_machine_check(struct snd_sof_dev *sdev);
 
 #endif

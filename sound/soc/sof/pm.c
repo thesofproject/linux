@@ -10,7 +10,7 @@
 
 #include "ops.h"
 #include "sof-priv.h"
-#include "sof-audio.h"
+#include "sof-client.h"
 
 /*
  * Helper function to determine the target DSP state during
@@ -20,32 +20,35 @@
  */
 static u32 snd_sof_dsp_power_target(struct snd_sof_dev *sdev)
 {
-	u32 target_dsp_state;
+	struct snd_sof_client *client;
+	struct device *dev;
 
 	switch (sdev->system_suspend_target) {
 	case SOF_SUSPEND_S3:
 		/* DSP should be in D3 if the system is suspending to S3 */
-		target_dsp_state = SOF_DSP_PM_D3;
 		break;
 	case SOF_SUSPEND_S0IX:
+		mutex_lock(&sdev->client_mutex);
 		/*
-		 * Currently, the only criterion for retaining the DSP in D0
-		 * is that there are streams that ignored the suspend trigger.
-		 * Additional criteria such Soundwire clock-stop mode and
-		 * device suspend latency considerations will be added later.
+		 * Check all clients to see if any of them is requesting to
+		 * keep the DSP in D0 during suspend.
 		 */
-		if (snd_sof_stream_suspend_ignored(sdev))
-			target_dsp_state = SOF_DSP_PM_D0;
-		else
-			target_dsp_state = SOF_DSP_PM_D3;
+		list_for_each_entry(client, &sdev->client_list, list) {
+			dev = &client->pdev->dev;
+			if (client->request_d0_during_suspend)
+				if (client->request_d0_during_suspend(dev)) {
+					mutex_unlock(&sdev->client_mutex);
+					return SOF_DSP_PM_D0;
+				}
+		}
+		mutex_unlock(&sdev->client_mutex);
 		break;
 	default:
 		/* This case would be during runtime suspend */
-		target_dsp_state = SOF_DSP_PM_D3;
 		break;
 	}
 
-	return target_dsp_state;
+	return SOF_DSP_PM_D3;
 }
 
 static int sof_send_pm_ctx_ipc(struct snd_sof_dev *sdev, int cmd)
@@ -149,15 +152,6 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 			 ret);
 	}
 
-	/* restore pipelines */
-	ret = sof_restore_pipelines(sdev->dev);
-	if (ret < 0) {
-		dev_err(sdev->dev,
-			"error: failed to restore pipeline after resume %d\n",
-			ret);
-		return ret;
-	}
-
 	/* notify DSP of system resume */
 	ret = sof_send_pm_ctx_ipc(sdev, SOF_IPC_PM_CTX_RESTORE);
 	if (ret < 0)
@@ -180,17 +174,6 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 
 	if (sdev->fw_state != SOF_FW_BOOT_COMPLETE)
 		goto suspend;
-
-	/* set restore_stream for all streams during system suspend */
-	if (!runtime_suspend) {
-		ret = sof_set_hw_params_upon_resume(sdev->dev);
-		if (ret < 0) {
-			dev_err(sdev->dev,
-				"error: setting hw_params flag during suspend %d\n",
-				ret);
-			return ret;
-		}
-	}
 
 	target_state = snd_sof_dsp_power_target(sdev);
 

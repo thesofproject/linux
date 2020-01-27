@@ -13,9 +13,8 @@
 
 #include <linux/mutex.h>
 #include <linux/types.h>
-
+#include "sof-client.h"
 #include "sof-priv.h"
-#include "sof-audio.h"
 #include "ops.h"
 
 static void ipc_trace_message(struct snd_sof_dev *sdev, u32 msg_id);
@@ -417,116 +416,22 @@ static void ipc_trace_message(struct snd_sof_dev *sdev, u32 msg_id)
 	}
 }
 
-/*
- * IPC stream position.
- */
-
-static void ipc_period_elapsed(struct snd_sof_dev *sdev, u32 msg_id)
-{
-	struct snd_soc_component *scomp = sdev->sof_audio_data->component;
-	struct snd_sof_pcm_stream *stream;
-	struct sof_ipc_stream_posn posn;
-	struct snd_sof_pcm *spcm;
-	int direction;
-
-	spcm = snd_sof_find_spcm_comp(scomp->dev, msg_id, &direction);
-	if (!spcm) {
-		dev_err(sdev->dev,
-			"error: period elapsed for unknown stream, msg_id %d\n",
-			msg_id);
-		return;
-	}
-
-	stream = &spcm->stream[direction];
-	snd_sof_ipc_msg_data(sdev, stream->substream, &posn, sizeof(posn));
-
-	dev_dbg(sdev->dev, "posn : host 0x%llx dai 0x%llx wall 0x%llx\n",
-		posn.host_posn, posn.dai_posn, posn.wallclock);
-
-	memcpy(&stream->posn, &posn, sizeof(posn));
-
-	/* only inform ALSA for period_wakeup mode */
-	if (!stream->substream->runtime->no_period_wakeup)
-		snd_sof_pcm_period_elapsed(stream->substream);
-}
-
-/* DSP notifies host of an XRUN within FW */
-static void ipc_xrun(struct snd_sof_dev *sdev, u32 msg_id)
-{
-	struct snd_soc_component *scomp = sdev->sof_audio_data->component;
-	struct snd_sof_pcm_stream *stream;
-	struct sof_ipc_stream_posn posn;
-	struct snd_sof_pcm *spcm;
-	int direction;
-
-	spcm = snd_sof_find_spcm_comp(scomp->dev, msg_id, &direction);
-	if (!spcm) {
-		dev_err(sdev->dev, "error: XRUN for unknown stream, msg_id %d\n",
-			msg_id);
-		return;
-	}
-
-	stream = &spcm->stream[direction];
-	snd_sof_ipc_msg_data(sdev, stream->substream, &posn, sizeof(posn));
-
-	dev_dbg(sdev->dev,  "posn XRUN: host %llx comp %d size %d\n",
-		posn.host_posn, posn.xrun_comp_id, posn.xrun_size);
-
-#if defined(CONFIG_SND_SOC_SOF_DEBUG_XRUN_STOP)
-	/* stop PCM on XRUN - used for pipeline debug */
-	memcpy(&stream->posn, &posn, sizeof(posn));
-	snd_pcm_stop_xrun(stream->substream);
-#endif
-}
-
 /* stream notifications from DSP FW */
 static void ipc_stream_message(struct snd_sof_dev *sdev, u32 msg_cmd)
 {
-	/* get msg cmd type and msd id */
-	u32 msg_type = msg_cmd & SOF_CMD_TYPE_MASK;
-	u32 msg_id = SOF_IPC_MESSAGE_ID(msg_cmd);
+	struct snd_sof_client *client;
 
-	switch (msg_type) {
-	case SOF_IPC_STREAM_POSITION:
-		ipc_period_elapsed(sdev, msg_id);
-		break;
-	case SOF_IPC_STREAM_TRIG_XRUN:
-		ipc_xrun(sdev, msg_id);
-		break;
-	default:
-		dev_err(sdev->dev, "error: unhandled stream message %x\n",
-			msg_id);
-		break;
+	/* Send IPC to all clients */
+	mutex_lock(&sdev->client_mutex);
+	list_for_each_entry(client, &sdev->client_list, list) {
+		if (client->type != SOF_CLIENT_AUDIO)
+			continue;
+
+		if (client->sof_client_ipc_rx)
+			client->sof_client_ipc_rx(&client->pdev->dev, msg_cmd);
 	}
+	mutex_unlock(&sdev->client_mutex);
 }
-
-/* get stream position IPC - use faster MMIO method if available on platform */
-int snd_sof_ipc_stream_posn(struct snd_soc_component *scomp,
-			    struct snd_sof_pcm *spcm, int direction,
-			    struct sof_ipc_stream_posn *posn)
-{
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
-	struct sof_ipc_stream stream;
-	int err;
-
-	/* read position via slower IPC */
-	stream.hdr.size = sizeof(stream);
-	stream.hdr.cmd = SOF_IPC_GLB_STREAM_MSG | SOF_IPC_STREAM_POSITION;
-	stream.comp_id = spcm->stream[direction].comp_id;
-
-	/* send IPC to the DSP */
-	err = sof_ipc_tx_message(sdev->ipc,
-				 stream.hdr.cmd, &stream, sizeof(stream), &posn,
-				 sizeof(*posn));
-	if (err < 0) {
-		dev_err(sdev->dev, "error: failed to get stream %d position\n",
-			stream.comp_id);
-		return err;
-	}
-
-	return 0;
-}
-EXPORT_SYMBOL(snd_sof_ipc_stream_posn);
 
 static int sof_get_ctrl_copy_params(enum sof_ipc_ctrl_type ctrl_type,
 				    struct sof_ipc_ctrl_data *src,
@@ -565,7 +470,7 @@ int sof_ipc_set_get_large_ctrl_data(struct device *dev,
 				    struct sof_ipc_ctrl_data_params *sparams,
 				    bool send)
 {
-	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
+	struct snd_sof_dev *sdev = dev_get_drvdata(dev->parent);
 	struct sof_ipc_fw_ready *ready = &sdev->fw_ready;
 	struct sof_ipc_fw_version *v = &ready->version;
 	struct sof_ipc_ctrl_data *partdata;

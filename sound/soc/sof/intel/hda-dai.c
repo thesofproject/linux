@@ -156,7 +156,7 @@ static int hda_link_config_ipc(struct sof_intel_hda_stream *hda_stream,
 			       struct snd_soc_dai *dai, int channel, int dir)
 {
 	struct snd_sof_audio_data *audio_data =
-		hda_stream->sdev->sof_audio_data;
+		sof_get_client_data(dai->component->dev);
 	struct sof_ipc_dai_config *config;
 	struct snd_sof_dai *sof_dai;
 	struct sof_ipc_reply reply;

@@ -411,8 +411,8 @@ static const char *fixup_tplg_name(struct snd_sof_dev *sdev,
 
 static void byt_machine_select(struct device *dev)
 {
-	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
-	struct snd_sof_audio_data *audio_data = sdev->sof_audio_data;
+	struct snd_sof_audio_data *audio_data = sof_get_client_data(dev);
+	struct snd_sof_dev *sdev = dev_get_drvdata(dev->parent);
 	struct snd_sof_pdata *sof_pdata = sdev->pdata;
 	const struct sof_dev_desc *desc = sof_pdata->desc;
 	struct snd_soc_acpi_mach *mach;
@@ -884,5 +884,6 @@ EXPORT_SYMBOL_NS(cht_chip_info, SND_SOC_SOF_BAYTRAIL);
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_IMPORT_NS(SND_SOC_SOF_CORE);
 MODULE_IMPORT_NS(SND_SOC_SOF_CLIENT);
+MODULE_IMPORT_NS(SND_SOC_SOF_AUDIO);
 MODULE_IMPORT_NS(SND_SOC_SOF_INTEL_HIFI_EP_IPC);
 MODULE_IMPORT_NS(SND_SOC_SOF_XTENSA);
