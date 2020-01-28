@@ -1300,7 +1300,7 @@ static int intel_init(struct sdw_intel *sdw)
 /*
  * probe and init
  */
-static int intel_master_probe(struct sdw_master_device *md, void *link_ctx)
+int intel_master_probe(struct sdw_master_device *md, void *link_ctx)
 {
 	struct sdw_intel *sdw;
 	int ret;
@@ -1346,8 +1346,9 @@ static int intel_master_probe(struct sdw_master_device *md, void *link_ctx)
 
 	return 0;
 }
+EXPORT_SYMBOL_NS(intel_master_probe, SOUNDWIRE_INTEL);
 
-static int intel_master_startup(struct sdw_master_device *md)
+int intel_master_startup(struct sdw_master_device *md)
 {
 	struct sdw_cdns_stream_config config;
 	struct sdw_intel *sdw;
@@ -1448,8 +1449,9 @@ err_init:
 	sdw_delete_bus_master(&sdw->cdns.bus);
 	return ret;
 }
+EXPORT_SYMBOL_NS(intel_master_startup, SOUNDWIRE_INTEL);
 
-static int intel_master_remove(struct sdw_master_device *md)
+int intel_master_remove(struct sdw_master_device *md)
 {
 	struct sdw_intel *sdw;
 
@@ -1474,8 +1476,9 @@ static int intel_master_remove(struct sdw_master_device *md)
 
 	return 0;
 }
+EXPORT_SYMBOL_NS(intel_master_remove, SOUNDWIRE_INTEL);
 
-static void intel_master_process_wakeen_event(struct sdw_master_device *md)
+void intel_master_process_wake_event(struct sdw_master_device *md)
 {
 	struct sdw_intel *sdw;
 	struct sdw_slave *slave;
@@ -1517,6 +1520,7 @@ static void intel_master_process_wakeen_event(struct sdw_master_device *md)
 			pm_request_resume(&slave->dev);
 	}
 }
+EXPORT_SYMBOL_NS(intel_master_process_wake_event, SOUNDWIRE_INTEL);
 
 /*
  * PM calls
@@ -1832,17 +1836,11 @@ static const struct dev_pm_ops intel_pm = {
 	SET_RUNTIME_PM_OPS(intel_suspend_runtime, intel_resume_runtime, NULL)
 };
 
-struct sdw_master_driver intel_sdw_driver = {
-	.driver = {
-		.name = "intel-sdw",
-		.owner = THIS_MODULE,
-		.bus = &sdw_bus_type,
-		.pm = &intel_pm,
-	},
-	.probe = intel_master_probe,
-	.startup = intel_master_startup,
-	.process_wake_event = intel_master_process_wakeen_event,
-	.remove = intel_master_remove,
+struct device_driver intel_sdw_driver = {
+	.name = "intel-sdw",
+	.owner = THIS_MODULE,
+	.bus = &sdw_bus_type,
+	.pm = &intel_pm,
 };
 EXPORT_SYMBOL_NS(intel_sdw_driver, SOUNDWIRE_INTEL);
 

@@ -20,7 +20,7 @@ struct device_type sdw_master_type = {
 };
 
 struct sdw_master_device
-*sdw_master_device_add(struct sdw_master_driver *driver,
+*sdw_master_device_add(struct device_driver *driver,
 		       struct device *parent,
 		       struct fwnode_handle *fwnode,
 		       int link_id)
@@ -28,8 +28,8 @@ struct sdw_master_device
 	struct sdw_master_device *md;
 	int ret;
 
-	if (!driver->probe) {
-		dev_err(parent, "mandatory probe callback missing\n");
+	if (!driver) {
+		dev_err(parent, "mandatory driver missing\n");
 		return ERR_PTR(-EINVAL);
 	}
 
@@ -39,15 +39,13 @@ struct sdw_master_device
 
 	md->link_id = link_id;
 
-	md->driver = driver;
-
 	md->dev.parent = parent;
 	md->dev.fwnode = fwnode;
 	md->dev.bus = &sdw_bus_type;
 	md->dev.type = &sdw_master_type;
 	md->dev.dma_mask = md->dev.parent->dma_mask;
 	dev_set_name(&md->dev, "sdw-master-%d", md->link_id);
-	md->dev.driver = &driver->driver;
+	md->dev.driver = driver;
 
 	ret = device_register(&md->dev);
 	if (ret) {

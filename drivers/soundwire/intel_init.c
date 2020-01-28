@@ -75,7 +75,7 @@ static int sdw_intel_cleanup(struct sdw_intel_ctx *ctx)
 
 		md = link->md;
 		if (md)
-			md->driver->remove(md);
+			intel_master_remove(md);
 	}
 
 	kfree(ctx->links);
@@ -234,7 +234,7 @@ static struct sdw_intel_ctx
 	link = ctx->links;
 	link_mask = ctx->link_mask;
 
-	err = driver_register(&intel_sdw_driver.driver);
+	err = driver_register(&intel_sdw_driver);
 	if (err) {
 		dev_err(&adev->dev, "failed to register sdw master driver\n");
 		goto register_err;
@@ -267,7 +267,7 @@ static struct sdw_intel_ctx
 		link->clock_stop_quirks = res->clock_stop_quirks;
 
 		/* let the SoundWire master driver to its probe */
-		err = md->driver->probe(md, link);
+		err = intel_master_probe(md, link);
 		if (err < 0) {
 			dev_err(&adev->dev, "Could not probe Master %d %d\n",
 				i, err);
@@ -301,7 +301,7 @@ static struct sdw_intel_ctx
 err:
 	sdw_intel_cleanup(ctx);
 link_err:
-	driver_unregister(&intel_sdw_driver.driver);
+	driver_unregister(&intel_sdw_driver);
 register_err:
 	kfree(ctx);
 	return NULL;
@@ -346,7 +346,7 @@ sdw_intel_startup_controller(struct sdw_intel_ctx *ctx)
 
 		md = link->md;
 
-		md->driver->startup(md);
+		intel_master_startup(md);
 
 		if (!link->clock_stop_quirks) {
 			/*
@@ -455,7 +455,7 @@ EXPORT_SYMBOL_NS(sdw_intel_startup, SOUNDWIRE_INTEL_INIT);
 void sdw_intel_exit(struct sdw_intel_ctx *ctx)
 {
 	sdw_intel_cleanup(ctx);
-	driver_unregister(&intel_sdw_driver.driver);
+	driver_unregister(&intel_sdw_driver);
 	kfree(ctx);
 }
 EXPORT_SYMBOL_NS(sdw_intel_exit, SOUNDWIRE_INTEL_INIT);
@@ -472,7 +472,7 @@ void sdw_intel_process_wakeen_event(struct sdw_intel_ctx *ctx)
 
 		md = link->md;
 
-		md->driver->process_wake_event(md);
+		intel_master_process_wake_event(md);
 	}
 }
 EXPORT_SYMBOL_NS(sdw_intel_process_wakeen_event, SOUNDWIRE_INTEL_INIT);

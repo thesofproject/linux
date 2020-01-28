@@ -35,6 +35,14 @@ struct sdw_intel_link_res {
 
 #define SDW_INTEL_QUIRK_MASK_BUS_DISABLE      BIT(1)
 
-extern struct sdw_master_driver intel_sdw_driver;
+extern struct device_driver intel_sdw_driver;
+
+int intel_master_probe(struct sdw_master_device *md, void *link_ctx);
+int intel_master_startup(struct sdw_master_device *md);
+int intel_master_shutdown(struct sdw_master_device *md);
+int intel_master_remove(struct sdw_master_device *md);
+int intel_master_autonomous_clock_stop_enable(struct sdw_master_device *md,
+					      bool state);
+void intel_master_process_wake_event(struct sdw_master_device *md);
 
 #endif /* __SDW_INTEL_LOCAL_H */
