@@ -537,8 +537,9 @@ static int bdw_probe(struct snd_sof_dev *sdev)
 	return ret;
 }
 
-static void bdw_machine_select(struct snd_sof_dev *sdev)
+static void bdw_machine_select(struct device *dev)
 {
+	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	struct snd_sof_audio_data *audio_data = sdev->sof_audio_data;
 	struct snd_sof_pdata *sof_pdata = sdev->pdata;
 	const struct sof_dev_desc *desc = sof_pdata->desc;

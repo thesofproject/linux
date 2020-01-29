@@ -548,7 +548,7 @@ int sof_machine_check(struct snd_sof_dev *sdev)
 #endif
 
 	/* find machine */
-	snd_sof_machine_select(sdev);
+	snd_sof_machine_select(sdev->dev);
 	if (audio_data->machine) {
 		snd_sof_set_mach_params(audio_data->machine, sdev->dev);
 		return 0;

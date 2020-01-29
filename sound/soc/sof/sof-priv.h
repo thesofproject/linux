@@ -221,7 +221,7 @@ struct snd_sof_dsp_ops {
 	/* machine driver ops */
 	int (*machine_register)(void *data); /* optional */
 	void (*machine_unregister)(void *data); /* optional */
-	void (*machine_select)(struct snd_sof_dev *sdev); /* optional */
+	void (*machine_select)(struct device *dev); /* optional */
 	void (*set_mach_params)(const struct snd_soc_acpi_mach *mach,
 				struct device *dev); /* optional */
 

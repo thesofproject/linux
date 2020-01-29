@@ -427,10 +427,12 @@ snd_sof_machine_unregister(struct snd_sof_dev *sdev, void *data)
 }
 
 static inline void
-snd_sof_machine_select(struct snd_sof_dev *sdev)
+snd_sof_machine_select(struct device *dev)
 {
+	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
+
 	if (sof_ops(sdev) && sof_ops(sdev)->machine_select)
-		sof_ops(sdev)->machine_select(sdev);
+		sof_ops(sdev)->machine_select(dev);
 }
 
 static inline void

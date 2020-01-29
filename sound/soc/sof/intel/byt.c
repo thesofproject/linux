@@ -409,8 +409,9 @@ static const char *fixup_tplg_name(struct snd_sof_dev *sdev,
 	return tplg_filename;
 }
 
-static void byt_machine_select(struct snd_sof_dev *sdev)
+static void byt_machine_select(struct device *dev)
 {
+	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	struct snd_sof_audio_data *audio_data = sdev->sof_audio_data;
 	struct snd_sof_pdata *sof_pdata = sdev->pdata;
 	const struct sof_dev_desc *desc = sof_pdata->desc;
@@ -420,15 +421,13 @@ static void byt_machine_select(struct snd_sof_dev *sdev)
 
 	mach = snd_soc_acpi_find_machine(desc->machines);
 	if (!mach) {
-		dev_warn(sdev->dev, "warning: No matching ASoC machine driver found\n");
+		dev_warn(dev, "warning: No matching ASoC machine driver found\n");
 		return;
 	}
 
 	pdev = to_platform_device(sdev->dev);
 	if (soc_intel_is_byt_cr(pdev)) {
-		dev_dbg(sdev->dev,
-			"BYT-CR detected, SSP0 used instead of SSP2\n");
-
+		dev_dbg(dev, "BYT-CR detected, SSP0 used instead of SSP2\n");
 		tplg_filename = fixup_tplg_name(sdev,
 						mach->sof_tplg_filename,
 						"ssp0");
@@ -437,8 +436,7 @@ static void byt_machine_select(struct snd_sof_dev *sdev)
 	}
 
 	if (!tplg_filename) {
-		dev_dbg(sdev->dev,
-			"error: no topology filename\n");
+		dev_dbg(dev, "error: no topology filename\n");
 		return;
 	}
 

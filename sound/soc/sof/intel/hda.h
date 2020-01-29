@@ -707,7 +707,7 @@ extern const struct sof_intel_dsp_desc ehl_chip_info;
 extern const struct sof_intel_dsp_desc jsl_chip_info;
 
 /* machine driver select */
-void hda_machine_select(struct snd_sof_dev *sdev);
+void hda_machine_select(struct device *dev);
 void hda_set_mach_params(const struct snd_soc_acpi_mach *mach,
 			 struct device *dev);
 
