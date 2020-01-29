@@ -151,9 +151,9 @@ static int hda_link_dma_params(struct hdac_ext_stream *stream,
 	return 0;
 }
 
-/* Send DAI_CONFIG IPC to the DAI that matches the dai_name and direction */
+/* Send DAI_CONFIG IPC to the DAI that matches the dai name and direction */
 static int hda_link_config_ipc(struct sof_intel_hda_stream *hda_stream,
-			       const char *dai_name, int channel, int dir)
+			       struct snd_soc_dai *dai, int channel, int dir)
 {
 	struct snd_sof_audio_data *audio_data =
 		hda_stream->sdev->sof_audio_data;
@@ -166,7 +166,7 @@ static int hda_link_config_ipc(struct sof_intel_hda_stream *hda_stream,
 		if (!sof_dai->cpu_dai_name)
 			continue;
 
-		if (!strcmp(dai_name, sof_dai->cpu_dai_name) &&
+		if (!strcmp(dai->name, sof_dai->cpu_dai_name) &&
 		    dir == sof_dai->comp_dai.direction) {
 			config = sof_dai->dai_config;
 
@@ -228,7 +228,7 @@ static int hda_link_hw_params(struct snd_pcm_substream *substream,
 	hda_stream = hstream_to_sof_hda_stream(link_dev);
 
 	/* update the DSP with the new tag */
-	ret = hda_link_config_ipc(hda_stream, dai->name, stream_tag - 1,
+	ret = hda_link_config_ipc(hda_stream, dai, stream_tag - 1,
 				  substream->stream);
 	if (ret < 0)
 		return ret;
@@ -322,8 +322,8 @@ static int hda_link_pcm_trigger(struct snd_pcm_substream *substream,
 		 * clear link DMA channel. It will be assigned when
 		 * hw_params is set up again after resume.
 		 */
-		ret = hda_link_config_ipc(hda_stream, dai->name,
-					  DMA_CHAN_INVALID, substream->stream);
+		ret = hda_link_config_ipc(hda_stream, dai, DMA_CHAN_INVALID,
+					  substream->stream);
 		if (ret < 0)
 			return ret;
 
@@ -370,7 +370,7 @@ static int hda_link_hw_free(struct snd_pcm_substream *substream,
 	hda_stream = hstream_to_sof_hda_stream(link_dev);
 
 	/* free the link DMA channel in the FW */
-	ret = hda_link_config_ipc(hda_stream, dai->name, DMA_CHAN_INVALID,
+	ret = hda_link_config_ipc(hda_stream, dai, DMA_CHAN_INVALID,
 				  substream->stream);
 	if (ret < 0)
 		return ret;
