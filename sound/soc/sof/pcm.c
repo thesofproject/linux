@@ -424,14 +424,16 @@ static snd_pcm_uframes_t sof_pcm_pointer(struct snd_soc_component *component,
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
 	struct snd_sof_pcm *spcm;
 	snd_pcm_uframes_t host, dai;
+	int ret;
 
 	/* nothing to do for BE */
 	if (rtd->dai_link->no_pcm)
 		return 0;
 
 	/* use dsp ops pointer callback directly if set */
-	if (sof_ops(sdev)->pcm_pointer)
-		return sof_ops(sdev)->pcm_pointer(sdev, substream);
+	ret = snd_sof_pcm_platform_pointer(component->dev, substream);
+	if (ret != -ENOTSUPP)
+		return ret;
 
 	spcm = snd_sof_find_spcm_dai(component, rtd);
 	if (!spcm)

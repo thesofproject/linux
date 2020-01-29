@@ -166,7 +166,7 @@ struct snd_sof_dsp_ops {
 			   int cmd); /* optional */
 
 	/* host stream pointer */
-	snd_pcm_uframes_t (*pcm_pointer)(struct snd_sof_dev *sdev,
+	snd_pcm_uframes_t (*pcm_pointer)(struct device *dev,
 					 struct snd_pcm_substream *substream); /* optional */
 
 	/* host read DSP stream data */

@@ -398,13 +398,15 @@ snd_sof_ipc_pcm_params(struct snd_sof_dev *sdev,
 
 /* host stream pointer */
 static inline snd_pcm_uframes_t
-snd_sof_pcm_platform_pointer(struct snd_sof_dev *sdev,
+snd_sof_pcm_platform_pointer(struct device *dev,
 			     struct snd_pcm_substream *substream)
 {
-	if (sof_ops(sdev) && sof_ops(sdev)->pcm_pointer)
-		return sof_ops(sdev)->pcm_pointer(sdev, substream);
+	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 
-	return 0;
+	if (sof_ops(sdev) && sof_ops(sdev)->pcm_pointer)
+		return sof_ops(sdev)->pcm_pointer(dev, substream);
+
+	return -ENOTSUPP;
 }
 
 /* machine driver */

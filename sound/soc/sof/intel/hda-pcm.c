@@ -144,9 +144,10 @@ int hda_dsp_pcm_trigger(struct snd_sof_dev *sdev,
 	return hda_dsp_stream_trigger(sdev, stream, cmd);
 }
 
-snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_sof_dev *sdev,
+snd_pcm_uframes_t hda_dsp_pcm_pointer(struct device *dev,
 				      struct snd_pcm_substream *substream)
 {
+	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_component *scomp = sdev->sof_audio_data->component;
 	struct hdac_stream *hstream = substream->runtime->private_data;
@@ -156,7 +157,7 @@ snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_sof_dev *sdev,
 
 	spcm = snd_sof_find_spcm_dai(scomp, rtd);
 	if (!spcm) {
-		dev_warn_ratelimited(sdev->dev, "warn: can't find PCM with DAI ID %d\n",
+		dev_warn_ratelimited(dev, "warn: can't find PCM with DAI ID %d\n",
 				     rtd->dai_link->id);
 		return 0;
 	}
@@ -207,7 +208,7 @@ snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_sof_dev *sdev,
 found:
 	pos = bytes_to_frames(substream->runtime, pos);
 
-	dev_vdbg(sdev->dev, "PCM: stream %d dir %d position %lu\n",
+	dev_vdbg(dev, "PCM: stream %d dir %d position %lu\n",
 		 hstream->index, substream->stream, pos);
 	return pos;
 }
