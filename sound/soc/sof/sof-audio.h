@@ -181,19 +181,19 @@ int snd_sof_ipc_stream_posn(struct snd_soc_component *scomp,
 			    struct snd_sof_pcm *spcm, int direction,
 			    struct sof_ipc_stream_posn *posn);
 
-struct snd_sof_widget *snd_sof_find_swidget(struct snd_soc_component *scomp,
+struct snd_sof_widget *snd_sof_find_swidget(struct device *dev,
 					    const char *name);
 struct snd_sof_widget *
-snd_sof_find_swidget_sname(struct snd_soc_component *scomp,
+snd_sof_find_swidget_sname(struct device *dev,
 			   const char *pcm_name, int dir);
-struct snd_sof_dai *snd_sof_find_dai(struct snd_soc_component *scomp,
+struct snd_sof_dai *snd_sof_find_dai(struct device *dev,
 				     const char *name);
 
 static inline
-struct snd_sof_pcm *snd_sof_find_spcm_dai(struct snd_soc_component *scomp,
+struct snd_sof_pcm *snd_sof_find_spcm_dai(struct device *dev,
 					  struct snd_soc_pcm_runtime *rtd)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = dev_drvdata(dev);
 	struct snd_sof_audio_data *audio_data = sdev->sof_audio_data;
 
 	struct snd_sof_pcm *spcm = NULL;
@@ -206,12 +206,12 @@ struct snd_sof_pcm *snd_sof_find_spcm_dai(struct snd_soc_component *scomp,
 	return NULL;
 }
 
-struct snd_sof_pcm *snd_sof_find_spcm_name(struct snd_soc_component *scomp,
+struct snd_sof_pcm *snd_sof_find_spcm_name(struct device *dev,
 					   const char *name);
-struct snd_sof_pcm *snd_sof_find_spcm_comp(struct snd_soc_component *scomp,
+struct snd_sof_pcm *snd_sof_find_spcm_comp(struct device *dev,
 					   unsigned int comp_id,
 					   int *direction);
-struct snd_sof_pcm *snd_sof_find_spcm_pcm_id(struct snd_soc_component *scomp,
+struct snd_sof_pcm *snd_sof_find_spcm_pcm_id(struct device *dev,
 					     unsigned int pcm_id);
 void snd_sof_pcm_period_elapsed(struct snd_pcm_substream *substream);
 

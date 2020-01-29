@@ -27,7 +27,7 @@ static int create_page_table(struct snd_soc_component *component,
 	struct snd_dma_buffer *dmab = snd_pcm_get_dma_buf(substream);
 	int stream = substream->stream;
 
-	spcm = snd_sof_find_spcm_dai(component, rtd);
+	spcm = snd_sof_find_spcm_dai(component->dev, rtd);
 	if (!spcm)
 		return -EINVAL;
 
@@ -73,7 +73,7 @@ void snd_sof_pcm_period_elapsed(struct snd_pcm_substream *substream)
 		snd_soc_rtdcom_lookup(rtd, SOF_AUDIO_PCM_DRV_NAME);
 	struct snd_sof_pcm *spcm;
 
-	spcm = snd_sof_find_spcm_dai(component, rtd);
+	spcm = snd_sof_find_spcm_dai(component->dev, rtd);
 	if (!spcm) {
 		dev_err(component->dev,
 			"error: period elapsed for unknown stream!\n");
@@ -129,7 +129,7 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 	if (rtd->dai_link->no_pcm)
 		return 0;
 
-	spcm = snd_sof_find_spcm_dai(component, rtd);
+	spcm = snd_sof_find_spcm_dai(component->dev, rtd);
 	if (!spcm)
 		return -EINVAL;
 
@@ -243,7 +243,7 @@ static int sof_pcm_hw_free(struct snd_soc_component *component,
 	if (rtd->dai_link->no_pcm)
 		return 0;
 
-	spcm = snd_sof_find_spcm_dai(component, rtd);
+	spcm = snd_sof_find_spcm_dai(component->dev, rtd);
 	if (!spcm)
 		return -EINVAL;
 
@@ -278,7 +278,7 @@ static int sof_pcm_prepare(struct snd_soc_component *component,
 	if (rtd->dai_link->no_pcm)
 		return 0;
 
-	spcm = snd_sof_find_spcm_dai(component, rtd);
+	spcm = snd_sof_find_spcm_dai(component->dev, rtd);
 	if (!spcm)
 		return -EINVAL;
 
@@ -320,7 +320,7 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 	if (rtd->dai_link->no_pcm)
 		return 0;
 
-	spcm = snd_sof_find_spcm_dai(component, rtd);
+	spcm = snd_sof_find_spcm_dai(component->dev, rtd);
 	if (!spcm)
 		return -EINVAL;
 
@@ -435,7 +435,7 @@ static snd_pcm_uframes_t sof_pcm_pointer(struct snd_soc_component *component,
 	if (ret != -ENOTSUPP)
 		return ret;
 
-	spcm = snd_sof_find_spcm_dai(component, rtd);
+	spcm = snd_sof_find_spcm_dai(component->dev, rtd);
 	if (!spcm)
 		return -EINVAL;
 
@@ -467,7 +467,7 @@ static int sof_pcm_open(struct snd_soc_component *component,
 	if (rtd->dai_link->no_pcm)
 		return 0;
 
-	spcm = snd_sof_find_spcm_dai(component, rtd);
+	spcm = snd_sof_find_spcm_dai(component->dev, rtd);
 	if (!spcm)
 		return -EINVAL;
 
@@ -538,7 +538,7 @@ static int sof_pcm_close(struct snd_soc_component *component,
 	if (rtd->dai_link->no_pcm)
 		return 0;
 
-	spcm = snd_sof_find_spcm_dai(component, rtd);
+	spcm = snd_sof_find_spcm_dai(component->dev, rtd);
 	if (!spcm)
 		return -EINVAL;
 
@@ -573,7 +573,7 @@ static int sof_pcm_new(struct snd_soc_component *component,
 	int stream = SNDRV_PCM_STREAM_PLAYBACK;
 
 	/* find SOF PCM for this RTD */
-	spcm = snd_sof_find_spcm_dai(component, rtd);
+	spcm = snd_sof_find_spcm_dai(component->dev, rtd);
 	if (!spcm) {
 		dev_warn(component->dev, "warn: can't find PCM with DAI ID %d\n",
 			 rtd->dai_link->id);
@@ -639,7 +639,7 @@ static int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 	struct snd_soc_component *component =
 		snd_soc_rtdcom_lookup(rtd, SOF_AUDIO_PCM_DRV_NAME);
 	struct snd_sof_dai *dai =
-		snd_sof_find_dai(component, (char *)rtd->dai_link->name);
+		snd_sof_find_dai(component->dev, (char *)rtd->dai_link->name);
 
 	/* no topology exists for this BE, try a common configuration */
 	if (!dai) {
@@ -743,7 +743,7 @@ static int sof_pcm_probe(struct snd_soc_component *component)
 	/* load the default topology */
 	audio_data->component = component;
 
-	tplg_filename = devm_kasprintf(sdev->dev, GFP_KERNEL,
+	tplg_filename = devm_kasprintf(component->dev, GFP_KERNEL,
 				       "%s/%s",
 				       audio_data->tplg_filename_prefix,
 				       audio_data->tplg_filename);

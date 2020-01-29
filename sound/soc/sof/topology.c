@@ -64,7 +64,7 @@ static int ipc_pcm_params(struct snd_sof_widget *swidget, int dir)
 	memset(&pcm, 0, sizeof(pcm));
 
 	/* get runtime PCM params using widget's stream name */
-	spcm = snd_sof_find_spcm_name(scomp, swidget->widget->sname);
+	spcm = snd_sof_find_spcm_name(scomp->dev, swidget->widget->sname);
 	if (!spcm) {
 		dev_err(scomp->dev, "error: cannot find PCM for %s\n",
 			swidget->widget->name);
@@ -152,7 +152,7 @@ static int sof_keyword_dapm_event(struct snd_soc_dapm_widget *w,
 		event, w->name);
 
 	/* get runtime PCM params using widget's stream name */
-	spcm = snd_sof_find_spcm_name(scomp, swidget->widget->sname);
+	spcm = snd_sof_find_spcm_name(scomp->dev, swidget->widget->sname);
 	if (!spcm) {
 		dev_err(scomp->dev, "error: cannot find PCM for %s\n",
 			swidget->widget->name);
@@ -1391,7 +1391,7 @@ static int spcm_bind(struct snd_soc_component *scomp, struct snd_sof_pcm *spcm,
 {
 	struct snd_sof_widget *host_widget;
 
-	host_widget = snd_sof_find_swidget_sname(scomp,
+	host_widget = snd_sof_find_swidget_sname(scomp->dev,
 						 spcm->pcm.caps[dir].name,
 						 dir);
 	if (!host_widget) {
@@ -1535,7 +1535,7 @@ static int sof_widget_load_pipeline(struct snd_soc_component *scomp,
 	pipeline->comp_id = swidget->comp_id;
 
 	/* component at start of pipeline is our stream id */
-	comp_swidget = snd_sof_find_swidget(scomp, tw->sname);
+	comp_swidget = snd_sof_find_swidget(scomp->dev, tw->sname);
 	if (!comp_swidget) {
 		dev_err(scomp->dev, "error: widget %s refers to non existent widget %s\n",
 			tw->name, tw->sname);
@@ -3332,7 +3332,8 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 		route->source);
 
 	/* source component */
-	source_swidget = snd_sof_find_swidget(scomp, (char *)route->source);
+	source_swidget = snd_sof_find_swidget(scomp->dev,
+					      (char *)route->source);
 	if (!source_swidget) {
 		dev_err(scomp->dev, "error: source %s not found\n",
 			route->source);
@@ -3353,7 +3354,7 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 	connect->source_id = source_swidget->comp_id;
 
 	/* sink component */
-	sink_swidget = snd_sof_find_swidget(scomp, (char *)route->sink);
+	sink_swidget = snd_sof_find_swidget(scomp->dev, (char *)route->sink);
 	if (!sink_swidget) {
 		dev_err(scomp->dev, "error: sink %s not found\n",
 			route->sink);

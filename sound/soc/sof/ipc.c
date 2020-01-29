@@ -429,7 +429,7 @@ static void ipc_period_elapsed(struct snd_sof_dev *sdev, u32 msg_id)
 	struct snd_sof_pcm *spcm;
 	int direction;
 
-	spcm = snd_sof_find_spcm_comp(scomp, msg_id, &direction);
+	spcm = snd_sof_find_spcm_comp(scomp->dev, msg_id, &direction);
 	if (!spcm) {
 		dev_err(sdev->dev,
 			"error: period elapsed for unknown stream, msg_id %d\n",
@@ -459,7 +459,7 @@ static void ipc_xrun(struct snd_sof_dev *sdev, u32 msg_id)
 	struct snd_sof_pcm *spcm;
 	int direction;
 
-	spcm = snd_sof_find_spcm_comp(scomp, msg_id, &direction);
+	spcm = snd_sof_find_spcm_comp(scomp->dev, msg_id, &direction);
 	if (!spcm) {
 		dev_err(sdev->dev, "error: XRUN for unknown stream, msg_id %d\n",
 			msg_id);
