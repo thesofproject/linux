@@ -15,6 +15,7 @@
 #include <sound/hdaudio.h>
 #include <sound/sof.h>
 #include <sound/sof/info.h>
+#include <sound/sof/control.h>
 #include <sound/sof/pm.h>
 #include <sound/sof/trace.h>
 #include <uapi/sound/sof/fw.h>
@@ -460,6 +461,10 @@ int sof_ipc_tx_message(struct snd_sof_ipc *ipc, u32 header,
 int sof_ipc_tx_message_no_pm(struct snd_sof_ipc *ipc, u32 header,
 			     void *msg_data, size_t msg_bytes,
 			     void *reply_data, size_t reply_bytes);
+int sof_ipc_set_get_large_ctrl_data(struct device *dev,
+				    struct sof_ipc_ctrl_data *cdata,
+				    struct sof_ipc_ctrl_data_params *sparams,
+				    bool send);
 
 /*
  * Trace/debug

@@ -106,11 +106,11 @@ int snd_sof_volume_put(struct snd_kcontrol *kcontrol,
 
 	/* notify DSP of mixer updates */
 	if (pm_runtime_active(scomp->dev))
-		snd_sof_ipc_set_get_comp_data(scontrol,
-					      SOF_IPC_COMP_SET_VALUE,
-					      SOF_CTRL_TYPE_VALUE_CHAN_GET,
-					      SOF_CTRL_CMD_VOLUME,
-					      true);
+		sof_audio_ipc_set_get_comp_data(scontrol,
+						SOF_IPC_COMP_SET_VALUE,
+						SOF_CTRL_TYPE_VALUE_CHAN_GET,
+						SOF_CTRL_CMD_VOLUME,
+						true);
 	return change;
 }
 
@@ -155,11 +155,11 @@ int snd_sof_switch_put(struct snd_kcontrol *kcontrol,
 
 	/* notify DSP of mixer updates */
 	if (pm_runtime_active(scomp->dev))
-		snd_sof_ipc_set_get_comp_data(scontrol,
-					      SOF_IPC_COMP_SET_VALUE,
-					      SOF_CTRL_TYPE_VALUE_CHAN_GET,
-					      SOF_CTRL_CMD_SWITCH,
-					      true);
+		sof_audio_ipc_set_get_comp_data(scontrol,
+						SOF_IPC_COMP_SET_VALUE,
+						SOF_CTRL_TYPE_VALUE_CHAN_GET,
+						SOF_CTRL_CMD_SWITCH,
+						true);
 
 	return change;
 }
@@ -202,11 +202,11 @@ int snd_sof_enum_put(struct snd_kcontrol *kcontrol,
 
 	/* notify DSP of enum updates */
 	if (pm_runtime_active(scomp->dev))
-		snd_sof_ipc_set_get_comp_data(scontrol,
-					      SOF_IPC_COMP_SET_VALUE,
-					      SOF_CTRL_TYPE_VALUE_CHAN_GET,
-					      SOF_CTRL_CMD_ENUM,
-					      true);
+		sof_audio_ipc_set_get_comp_data(scontrol,
+						SOF_IPC_COMP_SET_VALUE,
+						SOF_CTRL_TYPE_VALUE_CHAN_GET,
+						SOF_CTRL_CMD_ENUM,
+						true);
 
 	return change;
 }
@@ -276,11 +276,11 @@ int snd_sof_bytes_put(struct snd_kcontrol *kcontrol,
 
 	/* notify DSP of byte control updates */
 	if (pm_runtime_active(scomp->dev))
-		snd_sof_ipc_set_get_comp_data(scontrol,
-					      SOF_IPC_COMP_SET_DATA,
-					      SOF_CTRL_TYPE_DATA_SET,
-					      scontrol->cmd,
-					      true);
+		sof_audio_ipc_set_get_comp_data(scontrol,
+						SOF_IPC_COMP_SET_DATA,
+						SOF_CTRL_TYPE_DATA_SET,
+						scontrol->cmd,
+						true);
 
 	return 0;
 }
@@ -344,11 +344,11 @@ int snd_sof_bytes_ext_put(struct snd_kcontrol *kcontrol,
 
 	/* notify DSP of byte control updates */
 	if (pm_runtime_active(scomp->dev))
-		snd_sof_ipc_set_get_comp_data(scontrol,
-					      SOF_IPC_COMP_SET_DATA,
-					      SOF_CTRL_TYPE_DATA_SET,
-					      scontrol->cmd,
-					      true);
+		sof_audio_ipc_set_get_comp_data(scontrol,
+						SOF_IPC_COMP_SET_DATA,
+						SOF_CTRL_TYPE_DATA_SET,
+						scontrol->cmd,
+						true);
 
 	return 0;
 }

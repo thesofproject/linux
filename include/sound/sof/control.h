@@ -125,6 +125,21 @@ struct sof_ipc_ctrl_data {
 	};
 } __packed;
 
+/* control data parameters */
+struct sof_ipc_ctrl_data_params {
+	size_t msg_bytes; /* message size */
+	size_t hdr_bytes;
+	size_t pl_size; /* MAX payload size per IPC (not including hdr) */
+	size_t elems; /* number of elements */
+	/*
+	 * number of messages to send if message size is larger
+	 * than the MAX IPC size
+	 */
+	u32 num_msg;
+	u8 *src;
+	u8 *dst;
+};
+
 /** Event type */
 enum sof_ipc_ctrl_event_type {
 	SOF_CTRL_EVENT_GENERIC = 0,	/**< generic event */

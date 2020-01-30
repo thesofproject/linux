@@ -224,11 +224,11 @@ void snd_sof_pcm_period_elapsed(struct snd_pcm_substream *substream);
 /*
  * Mixer IPC
  */
-int snd_sof_ipc_set_get_comp_data(struct snd_sof_control *scontrol,
-				  u32 ipc_cmd,
-				  enum sof_ipc_ctrl_type ctrl_type,
-				  enum sof_ipc_ctrl_cmd ctrl_cmd,
-				  bool send);
+int sof_audio_ipc_set_get_comp_data(struct snd_sof_control *scontrol,
+				    u32 ipc_cmd,
+				    enum sof_ipc_ctrl_type ctrl_type,
+				    enum sof_ipc_ctrl_cmd ctrl_cmd,
+				    bool send);
 
 /* PM */
 int sof_restore_pipelines(struct device *dev);

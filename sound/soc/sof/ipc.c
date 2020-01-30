@@ -37,16 +37,6 @@ struct snd_sof_ipc {
 	struct snd_sof_ipc_msg msg;
 };
 
-struct sof_ipc_ctrl_data_params {
-	size_t msg_bytes;
-	size_t hdr_bytes;
-	size_t pl_size;
-	size_t elems;
-	u32 num_msg;
-	u8 *src;
-	u8 *dst;
-};
-
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_VERBOSE_IPC)
 static void ipc_log_header(struct device *dev, u8 *text, u32 cmd)
 {
@@ -570,11 +560,14 @@ static int sof_get_ctrl_copy_params(enum sof_ipc_ctrl_type ctrl_type,
 	return 0;
 }
 
-static int sof_set_get_large_ctrl_data(struct snd_sof_dev *sdev,
-				       struct sof_ipc_ctrl_data *cdata,
-				       struct sof_ipc_ctrl_data_params *sparams,
-				       bool send)
+int sof_ipc_set_get_large_ctrl_data(struct device *dev,
+				    struct sof_ipc_ctrl_data *cdata,
+				    struct sof_ipc_ctrl_data_params *sparams,
+				    bool send)
 {
+	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
+	struct sof_ipc_fw_ready *ready = &sdev->fw_ready;
+	struct sof_ipc_fw_version *v = &ready->version;
 	struct sof_ipc_ctrl_data *partdata;
 	size_t send_bytes;
 	size_t offset = 0;
@@ -582,6 +575,12 @@ static int sof_set_get_large_ctrl_data(struct snd_sof_dev *sdev,
 	size_t pl_size;
 	int err;
 	int i;
+
+	/* large messages is only supported from ABI 3.3.0 onwards */
+	if (v->abi_version < SOF_ABI_VER(3, 3, 0)) {
+		dev_err(sdev->dev, "error: incompatible FW ABI version\n");
+		return -EINVAL;
+	}
 
 	/* allocate max ipc size because we have at least one */
 	partdata = kzalloc(SOF_IPC_MSG_MAX_SIZE, GFP_KERNEL);
@@ -640,111 +639,7 @@ static int sof_set_get_large_ctrl_data(struct snd_sof_dev *sdev,
 	kfree(partdata);
 	return err;
 }
-
-/*
- * IPC get()/set() for kcontrols.
- */
-int snd_sof_ipc_set_get_comp_data(struct snd_sof_control *scontrol,
-				  u32 ipc_cmd,
-				  enum sof_ipc_ctrl_type ctrl_type,
-				  enum sof_ipc_ctrl_cmd ctrl_cmd,
-				  bool send)
-{
-	struct snd_soc_component *scomp = scontrol->scomp;
-	struct sof_ipc_ctrl_data *cdata = scontrol->control_data;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
-	struct sof_ipc_fw_ready *ready = &sdev->fw_ready;
-	struct sof_ipc_fw_version *v = &ready->version;
-	struct sof_ipc_ctrl_data_params sparams;
-	size_t send_bytes;
-	int err;
-
-	/* read or write firmware volume */
-	if (scontrol->readback_offset != 0) {
-		/* write/read value header via mmaped region */
-		send_bytes = sizeof(struct sof_ipc_ctrl_value_chan) *
-		cdata->num_elems;
-		if (send)
-			snd_sof_dsp_block_write(sdev, sdev->mmio_bar,
-						scontrol->readback_offset,
-						cdata->chanv, send_bytes);
-
-		else
-			snd_sof_dsp_block_read(sdev, sdev->mmio_bar,
-					       scontrol->readback_offset,
-					       cdata->chanv, send_bytes);
-		return 0;
-	}
-
-	cdata->rhdr.hdr.cmd = SOF_IPC_GLB_COMP_MSG | ipc_cmd;
-	cdata->cmd = ctrl_cmd;
-	cdata->type = ctrl_type;
-	cdata->comp_id = scontrol->comp_id;
-	cdata->msg_index = 0;
-
-	/* calculate header and data size */
-	switch (cdata->type) {
-	case SOF_CTRL_TYPE_VALUE_CHAN_GET:
-	case SOF_CTRL_TYPE_VALUE_CHAN_SET:
-		sparams.msg_bytes = scontrol->num_channels *
-			sizeof(struct sof_ipc_ctrl_value_chan);
-		sparams.hdr_bytes = sizeof(struct sof_ipc_ctrl_data);
-		sparams.elems = scontrol->num_channels;
-		break;
-	case SOF_CTRL_TYPE_VALUE_COMP_GET:
-	case SOF_CTRL_TYPE_VALUE_COMP_SET:
-		sparams.msg_bytes = scontrol->num_channels *
-			sizeof(struct sof_ipc_ctrl_value_comp);
-		sparams.hdr_bytes = sizeof(struct sof_ipc_ctrl_data);
-		sparams.elems = scontrol->num_channels;
-		break;
-	case SOF_CTRL_TYPE_DATA_GET:
-	case SOF_CTRL_TYPE_DATA_SET:
-		sparams.msg_bytes = cdata->data->size;
-		sparams.hdr_bytes = sizeof(struct sof_ipc_ctrl_data) +
-			sizeof(struct sof_abi_hdr);
-		sparams.elems = cdata->data->size;
-		break;
-	default:
-		return -EINVAL;
-	}
-
-	cdata->rhdr.hdr.size = sparams.msg_bytes + sparams.hdr_bytes;
-	cdata->num_elems = sparams.elems;
-	cdata->elems_remaining = 0;
-
-	/* send normal size ipc in one part */
-	if (cdata->rhdr.hdr.size <= SOF_IPC_MSG_MAX_SIZE) {
-		err = sof_ipc_tx_message(sdev->ipc, cdata->rhdr.hdr.cmd, cdata,
-					 cdata->rhdr.hdr.size, cdata,
-					 cdata->rhdr.hdr.size);
-
-		if (err < 0)
-			dev_err(sdev->dev, "error: set/get ctrl ipc comp %d\n",
-				cdata->comp_id);
-
-		return err;
-	}
-
-	/* data is bigger than max ipc size, chop into smaller pieces */
-	dev_dbg(sdev->dev, "large ipc size %u, control size %u\n",
-		cdata->rhdr.hdr.size, scontrol->size);
-
-	/* large messages is only supported from ABI 3.3.0 onwards */
-	if (v->abi_version < SOF_ABI_VER(3, 3, 0)) {
-		dev_err(sdev->dev, "error: incompatible FW ABI version\n");
-		return -EINVAL;
-	}
-
-	err = sof_set_get_large_ctrl_data(sdev, cdata, &sparams, send);
-
-	if (err < 0)
-		dev_err(sdev->dev, "error: set/get large ctrl ipc comp %d\n",
-			cdata->comp_id);
-
-	return err;
-}
-EXPORT_SYMBOL(snd_sof_ipc_set_get_comp_data);
+EXPORT_SYMBOL_NS(sof_ipc_set_get_large_ctrl_data, SND_SOC_SOF_CLIENT);
 
 /*
  * IPC layer enumeration.

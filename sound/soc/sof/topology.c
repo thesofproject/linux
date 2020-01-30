@@ -2104,11 +2104,11 @@ static int sof_process_load(struct snd_soc_component *scomp, int index,
 	/* send control data with large message supported method */
 	for (i = 0; i < widget->num_kcontrols; i++) {
 		wdata[i].control->readback_offset = 0;
-		ret = snd_sof_ipc_set_get_comp_data(wdata[i].control,
-						    wdata[i].ipc_cmd,
-						    wdata[i].ctrl_type,
-						    wdata[i].control->cmd,
-						    true);
+		ret = sof_audio_ipc_set_get_comp_data(wdata[i].control,
+						      wdata[i].ipc_cmd,
+						      wdata[i].ctrl_type,
+						      wdata[i].control->cmd,
+						      true);
 		if (ret != 0) {
 			dev_err(scomp->dev, "error: send control failed\n");
 			break;
@@ -3455,10 +3455,9 @@ static int snd_sof_cache_kcontrol_val(struct snd_soc_component *scomp)
 				scontrol->cmd);
 			return -EINVAL;
 		}
-		ret = snd_sof_ipc_set_get_comp_data(scontrol,
-						    ipc_cmd, ctrl_type,
-						    scontrol->cmd,
-						    false);
+		ret = sof_audio_ipc_set_get_comp_data(scontrol, ipc_cmd,
+						      ctrl_type, scontrol->cmd,
+						      false);
 		if (ret < 0) {
 			dev_warn(scomp->dev,
 				 "error: kcontrol value get for widget: %d\n",
