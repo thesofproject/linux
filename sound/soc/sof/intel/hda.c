@@ -1089,7 +1089,8 @@ static bool link_slaves_found(struct snd_sof_dev *sdev,
 	return true;
 }
 
-static int hda_sdw_machine_select(struct snd_sof_dev *sdev)
+static int hda_sdw_machine_select(struct snd_sof_dev *sdev,
+				  struct snd_sof_audio_data *audio_data)
 {
 	struct snd_sof_pdata *pdata = sdev->pdata;
 	const struct snd_soc_acpi_link_adr *link;
@@ -1108,7 +1109,7 @@ static int hda_sdw_machine_select(struct snd_sof_dev *sdev)
 	 * machines, for mixed cases with I2C/I2S the detection relies
 	 * on the HID list.
 	 */
-	if (link_mask && !pdata->machine) {
+	if (link_mask && !audio_data->machine) {
 		for (mach = pdata->desc->alt_machines;
 		     mach && mach->link_mask; mach++) {
 			if (mach->link_mask != link_mask)
@@ -1136,12 +1137,12 @@ static int hda_sdw_machine_select(struct snd_sof_dev *sdev)
 				"SoundWire machine driver %s topology %s\n",
 				mach->drv_name,
 				mach->sof_tplg_filename);
-			pdata->machine = mach;
+			audio_data->machine = mach;
 			mach->mach_params.links = mach->links;
 			mach->mach_params.link_mask = mach->link_mask;
 			mach->mach_params.platform = dev_name(sdev->dev);
 			pdata->fw_filename = mach->sof_fw_filename;
-			pdata->tplg_filename = mach->sof_tplg_filename;
+			audio_data->tplg_filename = mach->sof_tplg_filename;
 		} else {
 			dev_info(sdev->dev,
 				 "No SoundWire machine driver found\n");
@@ -1151,7 +1152,8 @@ static int hda_sdw_machine_select(struct snd_sof_dev *sdev)
 	return 0;
 }
 #else
-static int hda_sdw_machine_select(struct snd_sof_dev *sdev)
+static int hda_sdw_machine_select(struct snd_sof_dev *sdev,
+				  struct snd_sof_audio_data *audio_data)
 {
 	return 0;
 }
@@ -1182,7 +1184,7 @@ void hda_machine_select(struct snd_sof_dev *sdev)
 	/*
 	 * If I2S fails, try SoundWire
 	 */
-	hda_sdw_machine_select(sdev);
+	hda_sdw_machine_select(sdev, audio_data);
 
 	/*
 	 * Choose HDA generic machine driver if mach is NULL.
