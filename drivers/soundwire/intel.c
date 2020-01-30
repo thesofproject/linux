@@ -1344,6 +1344,8 @@ static int intel_master_probe(struct sdw_master_device *md, void *link_ctx)
 			 "SoundWire master %d is disabled, will be ignored\n",
 			 sdw->cdns.bus.link_id);
 
+	complete(&md->probe_complete);
+
 	return 0;
 }
 
@@ -1470,12 +1472,10 @@ static int intel_master_remove(struct sdw_master_device *md)
 	}
 	sdw_delete_bus_master(&sdw->cdns.bus);
 
-	device_unregister(&md->dev);
-
 	return 0;
 }
 
-static void intel_master_process_wakeen_event(struct sdw_master_device *md)
+static int intel_master_process_wakeen_event(struct sdw_master_device *md)
 {
 	struct sdw_intel *sdw;
 	struct sdw_slave *slave;
@@ -1489,14 +1489,14 @@ static void intel_master_process_wakeen_event(struct sdw_master_device *md)
 		dev_info(&md->dev,
 			 "SoundWire master %d is disabled, ignoring\n",
 			 sdw->cdns.bus.link_id);
-		return;
+		return 0;
 	}
 
 	shim = sdw->link_res->shim;
 	wake_sts = intel_readw(shim, SDW_SHIM_WAKESTS);
 
 	if (!(wake_sts & BIT(sdw->instance)))
-		return;
+		return 0;
 
 	/* disable WAKEEN interrupt ASAP to prevent interrupt flood */
 	intel_shim_wake(sdw, false);
@@ -1516,6 +1516,8 @@ static void intel_master_process_wakeen_event(struct sdw_master_device *md)
 		if (slave->dev_num_sticky && slave->prop.wake_capable)
 			pm_request_resume(&slave->dev);
 	}
+
+	return 0;
 }
 
 /*
@@ -1834,7 +1836,7 @@ static const struct dev_pm_ops intel_pm = {
 
 struct sdw_master_driver intel_sdw_driver = {
 	.driver = {
-		.name = "intel-sdw",
+		.name = "intel-master",
 		.owner = THIS_MODULE,
 		.bus = &sdw_bus_type,
 		.pm = &intel_pm,
@@ -1844,8 +1846,8 @@ struct sdw_master_driver intel_sdw_driver = {
 	.process_wake_event = intel_master_process_wakeen_event,
 	.remove = intel_master_remove,
 };
-EXPORT_SYMBOL_NS(intel_sdw_driver, SOUNDWIRE_INTEL);
+module_sdw_master_driver(intel_sdw_driver);
 
 MODULE_LICENSE("Dual BSD/GPL");
-MODULE_ALIAS("platform:int-sdw");
+MODULE_ALIAS("sdw:intel-master");
 MODULE_DESCRIPTION("Intel Soundwire Master Driver");
