@@ -24,6 +24,7 @@
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
 #include <sound/soc-dpcm.h>
+#include <sound/soc-topology.h>
 #include <sound/initval.h>
 
 #define DPCM_MAX_BE_USERS	8
@@ -1418,10 +1419,15 @@ static bool dpcm_end_walk_at_be(struct snd_soc_dapm_widget *widget,
 	int stream;
 
 	/* adjust dir to stream */
-	if (dir == SND_SOC_DAPM_DIR_OUT)
+	if (dir == SND_SOC_DAPM_DIR_OUT) {
+		if (!strcmp(widget->sname, SOC_VIRT_DAI_PLAYBACK))
+			return false;
 		stream = SNDRV_PCM_STREAM_PLAYBACK;
-	else
+	} else {
+		if (!strcmp(widget->sname, SOC_VIRT_DAI_CAPTURE))
+			return false;
 		stream = SNDRV_PCM_STREAM_CAPTURE;
+	}
 
 	rtd = dpcm_get_be(card, widget, stream);
 	if (rtd)
@@ -2999,14 +3005,6 @@ int soc_new_pcm(struct snd_soc_pcm_runtime *rtd, int num)
 	rtd->pcm = pcm;
 	pcm->private_data = rtd;
 
-	if (rtd->dai_link->no_pcm || rtd->dai_link->params) {
-		if (playback)
-			pcm->streams[SNDRV_PCM_STREAM_PLAYBACK].substream->private_data = rtd;
-		if (capture)
-			pcm->streams[SNDRV_PCM_STREAM_CAPTURE].substream->private_data = rtd;
-		goto out;
-	}
-
 	/* ASoC PCM operations */
 	if (rtd->dai_link->dynamic) {
 		rtd->ops.open		= dpcm_fe_dai_open;
@@ -3024,6 +3022,19 @@ int soc_new_pcm(struct snd_soc_pcm_runtime *rtd, int num)
 		rtd->ops.hw_free	= soc_pcm_hw_free;
 		rtd->ops.close		= soc_pcm_close;
 		rtd->ops.pointer	= soc_pcm_pointer;
+	}
+
+	if (rtd->dai_link->no_pcm || rtd->dai_link->params) {
+		/*
+		 * Usually in this case we also don't need to assign .ops
+		 * callbacks, but in case of a "no PCM" pipeline, used by a VM
+		 * we use the .prepare() hook to configure the hardware.
+		 */
+		if (playback)
+			pcm->streams[SNDRV_PCM_STREAM_PLAYBACK].substream->private_data = rtd;
+		if (capture)
+			pcm->streams[SNDRV_PCM_STREAM_CAPTURE].substream->private_data = rtd;
+		goto out;
 	}
 
 	for_each_rtd_components(rtd, i, component) {

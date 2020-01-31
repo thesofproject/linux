@@ -11,6 +11,7 @@
 #ifndef _SOF_RPMSG_H
 #define _SOF_RPMSG_H
 
+#include <linux/list.h>
 #include <linux/virtio_rpmsg.h>
 
 #include <sound/sof/header.h>
@@ -116,5 +117,76 @@ struct sof_rpmsg_ipc_req {
 	u32 reply_size;
 	u8 ipc_msg[SOF_IPC_MSG_MAX_SIZE];
 } __packed;
+
+struct snd_sof_dev;
+struct sof_ipc_stream_posn;
+
+#if IS_ENABLED(CONFIG_VHOST_SOF)
+struct firmware;
+
+struct vhost_dsp;
+struct sof_vhost_ops {
+	int (*update_posn)(struct vhost_dsp *dsp,
+			   struct sof_ipc_stream_posn *posn);
+};
+
+struct sof_vhost_client {
+	const struct firmware *fw;
+	struct snd_sof_dev *sdev;
+	/* List of guest endpoints, connecting to the host mixer or demux */
+	struct list_head pipe_conn;
+	/* List of vhost instances on a DSP */
+	struct list_head list;
+
+	/* Component ID range index in the bitmap */
+	unsigned int id;
+
+	/* the comp_ids for this vm audio */
+	int comp_id_begin;
+	int comp_id_end;
+
+	unsigned int reset_count;
+
+	struct vhost_dsp *vhost;
+};
+
+/* The below functions are only referenced when VHOST_SOF is selected */
+struct device;
+void sof_vhost_client_release(struct sof_vhost_client *client);
+struct sof_vhost_client *sof_vhost_client_add(struct snd_sof_dev *sdev,
+					      struct vhost_dsp *dsp);
+struct device *sof_vhost_dev_init(const struct sof_vhost_ops *ops);
+struct vhost_adsp_topology;
+int sof_vhost_set_tplg(struct sof_vhost_client *client,
+		       const struct vhost_adsp_topology *tplg);
+/* Copy audio data between DMA and VirtQueue */
+void *sof_vhost_stream_data(struct sof_vhost_client *client,
+			    const struct sof_rpmsg_data_req *req,
+			    struct sof_rpmsg_data_resp *resp);
+/* Forward an IPC message from a guest to the DSP */
+int sof_vhost_ipc_fwd(struct sof_vhost_client *client,
+		      void *ipc_buf, void *reply_buf,
+		      size_t count, size_t reply_sz);
+
+/* The below functions are always referenced, they need dummy counterparts */
+int sof_vhost_update_guest_posn(struct snd_sof_dev *sdev,
+				struct sof_ipc_stream_posn *posn);
+void sof_vhost_suspend(struct snd_sof_dev *sdev);
+void sof_vhost_dev_set(struct snd_sof_dev *sdev);
+#else
+static inline int sof_vhost_update_guest_posn(struct snd_sof_dev *sdev,
+					      struct sof_ipc_stream_posn *posn)
+{
+	return 0;
+}
+
+static inline void sof_vhost_suspend(struct snd_sof_dev *sdev)
+{
+}
+
+static inline void sof_vhost_dev_set(struct snd_sof_dev *sdev)
+{
+}
+#endif
 
 #endif

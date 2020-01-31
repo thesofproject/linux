@@ -34,6 +34,9 @@ struct snd_soc_dapm_route;
 /* object scan be loaded and unloaded in groups with identfying indexes */
 #define SND_SOC_TPLG_INDEX_ALL	0	/* ID that matches all FW objects */
 
+#define SOC_VIRT_DAI_PLAYBACK "VM FE Playback"
+#define SOC_VIRT_DAI_CAPTURE "VM FE Capture"
+
 /* dynamic object type */
 enum snd_soc_dobj_type {
 	SND_SOC_DOBJ_NONE		= 0,	/* object is not dynamic */

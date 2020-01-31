@@ -3,16 +3,14 @@
 snd-sof-objs := core.o ops.o loader.o ipc.o pcm.o pm.o debug.o topology.o\
 		control.o trace.o utils.o sof-audio.o
 snd-sof-$(CONFIG_SND_SOC_SOF_DEBUG_PROBES) += probe.o compress.o
+snd-sof-$(CONFIG_SND_SOC_SOF_RPMSG_FE) += rpmsg-vfe.o
+snd-sof-$(CONFIG_VHOST_SOF) += vhost-vbe.o
 
 snd-sof-pci-objs := sof-pci-dev.o
 snd-sof-acpi-objs := sof-acpi-dev.o
 snd-sof-of-objs := sof-of-dev.o
 
 snd-sof-nocodec-objs := nocodec.o
-
-ifdef CONFIG_SND_SOC_SOF_RPMSG_FE
-snd-sof-objs += rpmsg-vfe.o
-endif
 
 obj-$(CONFIG_SND_SOC_SOF) += snd-sof.o
 obj-$(CONFIG_SND_SOC_SOF_NOCODEC) += snd-sof-nocodec.o

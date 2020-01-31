@@ -8,6 +8,8 @@
 // Author: Liam Girdwood <liam.r.girdwood@linux.intel.com>
 //
 
+#include <sound/sof/rpmsg.h>
+
 #include "ops.h"
 #include "sof-priv.h"
 #include "sof-audio.h"
@@ -253,6 +255,8 @@ suspend:
 	/* reset FW state */
 	sdev->fw_state = SOF_FW_BOOT_NOT_STARTED;
 	sdev->enabled_cores_mask = 0;
+
+	sof_vhost_suspend(sdev);
 
 	return ret;
 }

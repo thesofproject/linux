@@ -14,6 +14,8 @@
 #include <linux/mutex.h>
 #include <linux/types.h>
 
+#include <sound/sof/rpmsg.h>
+
 #include "sof-priv.h"
 #include "sof-audio.h"
 #include "ops.h"
@@ -451,6 +453,9 @@ static void ipc_period_elapsed(struct snd_sof_dev *sdev, u32 msg_id)
 		posn.host_posn, posn.dai_posn, posn.wallclock);
 
 	memcpy(&stream->posn, &posn, sizeof(posn));
+
+	/* optionally update position for vBE */
+	sof_vhost_update_guest_posn(sdev, &posn);
 
 	/* only inform ALSA for period_wakeup mode */
 	if (!stream->substream->runtime->no_period_wakeup)

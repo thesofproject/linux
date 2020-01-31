@@ -1525,6 +1525,13 @@ static int sof_widget_load_buffer(struct snd_soc_component *scomp, int index,
 
 	swidget->private = buffer;
 
+	/*
+	 * VirtIO dummy buffers between a dummy "aif_in" / "aif_out" widget and
+	 * a mixer / demux respectively
+	 */
+	if (!buffer->size)
+		return 0;
+
 	ret = sof_ipc_tx_message(sdev->ipc, buffer->comp.hdr.cmd, buffer,
 				 sizeof(*buffer), r, sizeof(*r));
 	if (ret < 0) {
@@ -1569,6 +1576,16 @@ static int sof_widget_load_pcm(struct snd_soc_component *scomp, int index,
 	struct snd_soc_tplg_private *private = &tw->priv;
 	struct sof_ipc_comp_host *host;
 	int ret;
+
+	/*
+	 * For now just drop any virtual PCMs. Might need to use a more robust
+	 * identification than the name
+	 */
+	if ((dir == SOF_IPC_STREAM_PLAYBACK &&
+	     !strcmp(SOC_VIRT_DAI_PLAYBACK, swidget->widget->sname)) ||
+	    (dir == SOF_IPC_STREAM_CAPTURE &&
+	     !strcmp(SOC_VIRT_DAI_CAPTURE, swidget->widget->sname)))
+		return 0;
 
 	host = kzalloc(sizeof(*host), GFP_KERNEL);
 	if (!host)
@@ -3208,6 +3225,15 @@ static int sof_link_load(struct snd_soc_component *scomp, int index,
 		link->trigger[SNDRV_PCM_STREAM_CAPTURE] =
 					SND_SOC_DPCM_TRIGGER_POST;
 
+		/*
+		 * set .no_pcm on VirtIO hosts for pseudo PCMs, used as anchors
+		 * for guest pipeline linking
+		 */
+		if (link->stream_name &&
+		    (!strcmp(link->stream_name, "vm_fe_playback") ||
+		     !strcmp(link->stream_name, "vm_fe_capture")))
+			link->no_pcm = true;
+
 		/* nothing more to do for FE dai links */
 		return 0;
 	}
@@ -3426,6 +3452,32 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 			route->sink);
 		ret = -EINVAL;
 		goto err;
+	}
+
+	/*
+	 * In VirtIO case the host topology will contain a dummy PCM and a
+	 * buffer at each location, where a partial guest topology will be
+	 * attached. These dummy widgets shall not be sent to the DSP. We use
+	 * them to identify and store VirtIO guest connection points.
+	 */
+	if (source_swidget->id == snd_soc_dapm_buffer) {
+		struct sof_ipc_buffer *buffer = source_swidget->private;
+		/* Is this a virtual playback buffer? */
+		if (!buffer->size) {
+			ret = sof_vhost_add_conn(sdev, sink_swidget,
+					       source_swidget,
+					       SOF_IPC_STREAM_PLAYBACK);
+			goto err;
+		}
+	} else if (sink_swidget->id == snd_soc_dapm_buffer) {
+		struct sof_ipc_buffer *buffer = sink_swidget->private;
+		/* Is this a virtual capture buffer? */
+		if (!buffer->size) {
+			ret = sof_vhost_add_conn(sdev, source_swidget,
+					       sink_swidget,
+					       SOF_IPC_STREAM_CAPTURE);
+			goto err;
+		}
 	}
 
 	/*
@@ -3695,7 +3747,7 @@ int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 	/* VirtIO guests request topology from the host */
 	if (sdev->pdata->vfe) {
 		fw = &vfe_fw;
-		ret = sof_ops(sdev)->request_topology(sdev, file, &vfe_fw);
+		ret = sof_ops(sdev)->request_topology(sdev, &vfe_fw);
 	} else {
 		ret = request_firmware(&fw, file, sdev->dev);
 	}

@@ -91,7 +91,8 @@ void snd_sof_pcm_period_elapsed(struct snd_pcm_substream *substream)
 	 * To avoid sending IPC before the previous IPC is handled, we
 	 * schedule delayed work here to call the snd_pcm_period_elapsed().
 	 */
-	schedule_work(&spcm->stream[substream->stream].period_elapsed_work);
+	if (spcm->stream[substream->stream].substream)
+		schedule_work(&spcm->stream[substream->stream].period_elapsed_work);
 }
 EXPORT_SYMBOL(snd_sof_pcm_period_elapsed);
 
@@ -758,6 +759,7 @@ static int sof_pcm_probe(struct snd_soc_component *component)
 
 	/* load the default topology */
 	sdev->component = component;
+	sdev->card = component->card;
 
 	tplg_filename = devm_kasprintf(sdev->dev, GFP_KERNEL,
 				       "%s/%s",

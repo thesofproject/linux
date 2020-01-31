@@ -41,6 +41,7 @@ struct snd_sof_pcm_stream {
 	 * active or not while suspending the stream
 	 */
 	bool suspend_ignored;
+	size_t guest_offset;
 };
 
 /* ALSA SOF PCM device */
@@ -221,5 +222,20 @@ bool snd_sof_dsp_only_d0i3_compatible_stream_active(struct snd_sof_dev *sdev);
 /* Machine driver enumeration */
 int sof_machine_register(struct snd_sof_dev *sdev, void *pdata);
 void sof_machine_unregister(struct snd_sof_dev *sdev, void *pdata);
+
+#if IS_ENABLED(CONFIG_VHOST_SOF)
+int sof_vhost_add_conn(struct snd_sof_dev *sdev,
+		     struct snd_sof_widget *w_host,
+		     struct snd_sof_widget *w_guest,
+		     enum sof_ipc_stream_direction direction);
+#else
+static inline int sof_vhost_add_conn(struct snd_sof_dev *sdev,
+				   struct snd_sof_widget *w_host,
+				   struct snd_sof_widget *w_guest,
+				   enum sof_ipc_stream_direction direction)
+{
+	return 0;
+}
+#endif
 
 #endif

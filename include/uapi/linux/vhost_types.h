@@ -13,6 +13,7 @@
 
 #include <linux/types.h>
 #include <linux/compiler.h>
+#include <linux/limits.h>
 #include <linux/virtio_config.h>
 #include <linux/virtio_ring.h>
 
@@ -125,6 +126,12 @@ struct vhost_vdpa_config {
 	__u32 off;
 	__u32 len;
 	__u8 buf[0];
+};
+
+/* VHOST_ADSP */
+
+struct vhost_adsp_topology {
+	char name[NAME_MAX + 1];
 };
 
 /* Feature bits */

@@ -13,6 +13,8 @@
 #include <linux/module.h>
 #include <sound/soc.h>
 #include <sound/sof.h>
+#include <sound/sof/rpmsg.h>
+#include "sof-audio.h"
 #include "sof-priv.h"
 #include "ops.h"
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_PROBES)
@@ -222,6 +224,9 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 		goto dbg_err;
 	}
 
+	/* enable the vhost driver on this device */
+	sof_vhost_dev_set(sdev);
+
 	/* init the IPC */
 	sdev->ipc = snd_sof_ipc_init(sdev);
 	if (!sdev->ipc) {
@@ -334,6 +339,7 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 	INIT_LIST_HEAD(&sdev->widget_list);
 	INIT_LIST_HEAD(&sdev->dai_list);
 	INIT_LIST_HEAD(&sdev->route_list);
+	INIT_LIST_HEAD(&sdev->vbe_list);
 	spin_lock_init(&sdev->ipc_lock);
 	spin_lock_init(&sdev->hw_lock);
 

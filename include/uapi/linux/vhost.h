@@ -142,4 +142,9 @@
 /* Get the max ring size. */
 #define VHOST_VDPA_GET_VRING_NUM	_IOR(VHOST_VIRTIO, 0x76, __u16)
 
+/* VHOST_ADSP specific defines */
+
+#define VHOST_ADSP_SET_GUEST_TPLG	_IOW(VHOST_VIRTIO, 0x80,	\
+					struct vhost_adsp_topology)
+
 #endif

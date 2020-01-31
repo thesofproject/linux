@@ -60,6 +60,18 @@ extern int sof_core_debug;
 
 /* The maximum number of components a virtio user vFE driver can use */
 #define SOF_RPMSG_MAX_UOS_COMPS	1000
+#define SOF_RPMSG_COMP_ID_UNASSIGNED	0xffffffff
+
+/*
+ * in virtio iovec array:
+ *  iovec[0]: the ipc message data between vFE and vBE
+ *  iovec[1]: the ipc reply data between vFE and vBE
+ */
+#define SOF_RPMSG_IPC_MSG 0
+#define SOF_RPMSG_IPC_REPLY 1
+
+/* Maximum supported number of VirtIO clients */
+#define SND_SOF_MAX_VFES BITS_PER_LONG
 
 /* DSP power state */
 enum sof_dsp_power_states {
@@ -371,6 +383,7 @@ struct snd_sof_dev {
 	 * can't use const
 	 */
 	struct snd_soc_component_driver plat_drv;
+	struct snd_soc_card *card;
 
 	/* current DSP power state */
 	struct sof_dsp_power_state dsp_power_state;
@@ -438,6 +451,9 @@ struct snd_sof_dev {
 
 	/* VirtIO fields for host and guest */
 	atomic_t dsp_reset_count;
+	struct list_head vbe_list;
+	struct list_head connector_list;
+	unsigned long vfe_mask[DIV_ROUND_UP(SND_SOF_MAX_VFES, BITS_PER_LONG)];
 
 	/* DMA for Trace */
 	struct snd_dma_buffer dmatb;
