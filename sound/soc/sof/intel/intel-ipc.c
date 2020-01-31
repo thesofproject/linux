@@ -90,3 +90,4 @@ int intel_pcm_close(struct snd_sof_dev *sdev,
 EXPORT_SYMBOL_NS(intel_pcm_close, SND_SOC_SOF_INTEL_HIFI_EP_IPC);
 
 MODULE_LICENSE("Dual BSD/GPL");
+MODULE_IMPORT_NS(SND_SOC_SOF_CORE);

@@ -27,25 +27,25 @@ void sof_io_write(struct snd_sof_dev *sdev, void __iomem *addr, u32 value)
 {
 	writel(value, addr);
 }
-EXPORT_SYMBOL(sof_io_write);
+EXPORT_SYMBOL_NS(sof_io_write, SND_SOC_SOF_CORE);
 
 u32 sof_io_read(struct snd_sof_dev *sdev, void __iomem *addr)
 {
 	return readl(addr);
 }
-EXPORT_SYMBOL(sof_io_read);
+EXPORT_SYMBOL_NS(sof_io_read, SND_SOC_SOF_CORE);
 
 void sof_io_write64(struct snd_sof_dev *sdev, void __iomem *addr, u64 value)
 {
 	writeq(value, addr);
 }
-EXPORT_SYMBOL(sof_io_write64);
+EXPORT_SYMBOL_NS(sof_io_write64, SND_SOC_SOF_CORE);
 
 u64 sof_io_read64(struct snd_sof_dev *sdev, void __iomem *addr)
 {
 	return readq(addr);
 }
-EXPORT_SYMBOL(sof_io_read64);
+EXPORT_SYMBOL_NS(sof_io_read64, SND_SOC_SOF_CORE);
 
 /*
  * IPC Mailbox IO
@@ -58,7 +58,7 @@ void sof_mailbox_write(struct snd_sof_dev *sdev, u32 offset,
 
 	memcpy_toio(dest, message, bytes);
 }
-EXPORT_SYMBOL(sof_mailbox_write);
+EXPORT_SYMBOL_NS(sof_mailbox_write, SND_SOC_SOF_CORE);
 
 void sof_mailbox_read(struct snd_sof_dev *sdev, u32 offset,
 		      void *message, size_t bytes)
@@ -67,7 +67,7 @@ void sof_mailbox_read(struct snd_sof_dev *sdev, u32 offset,
 
 	memcpy_fromio(message, src, bytes);
 }
-EXPORT_SYMBOL(sof_mailbox_read);
+EXPORT_SYMBOL_NS(sof_mailbox_read, SND_SOC_SOF_CORE);
 
 /*
  * Memory copy.
@@ -102,7 +102,7 @@ void sof_block_write(struct snd_sof_dev *sdev, u32 bar, u32 offset, void *src,
 		iowrite32(tmp, dest + m * 4);
 	}
 }
-EXPORT_SYMBOL(sof_block_write);
+EXPORT_SYMBOL_NS(sof_block_write, SND_SOC_SOF_CORE);
 
 void sof_block_read(struct snd_sof_dev *sdev, u32 bar, u32 offset, void *dest,
 		    size_t size)
@@ -111,7 +111,7 @@ void sof_block_read(struct snd_sof_dev *sdev, u32 bar, u32 offset, void *dest,
 
 	memcpy_fromio(dest, src, size);
 }
-EXPORT_SYMBOL(sof_block_read);
+EXPORT_SYMBOL_NS(sof_block_read, SND_SOC_SOF_CORE);
 
 /*
  * Generic buffer page table creation.

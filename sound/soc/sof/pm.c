@@ -254,7 +254,7 @@ int snd_sof_runtime_suspend(struct device *dev)
 {
 	return sof_suspend(dev, true);
 }
-EXPORT_SYMBOL(snd_sof_runtime_suspend);
+EXPORT_SYMBOL_NS(snd_sof_runtime_suspend, SND_SOC_SOF_CORE);
 
 int snd_sof_runtime_idle(struct device *dev)
 {
@@ -262,25 +262,25 @@ int snd_sof_runtime_idle(struct device *dev)
 
 	return snd_sof_dsp_runtime_idle(sdev);
 }
-EXPORT_SYMBOL(snd_sof_runtime_idle);
+EXPORT_SYMBOL_NS(snd_sof_runtime_idle, SND_SOC_SOF_CORE);
 
 int snd_sof_runtime_resume(struct device *dev)
 {
 	return sof_resume(dev, true);
 }
-EXPORT_SYMBOL(snd_sof_runtime_resume);
+EXPORT_SYMBOL_NS(snd_sof_runtime_resume, SND_SOC_SOF_CORE);
 
 int snd_sof_resume(struct device *dev)
 {
 	return sof_resume(dev, false);
 }
-EXPORT_SYMBOL(snd_sof_resume);
+EXPORT_SYMBOL_NS(snd_sof_resume, SND_SOC_SOF_CORE);
 
 int snd_sof_suspend(struct device *dev)
 {
 	return sof_suspend(dev, false);
 }
-EXPORT_SYMBOL(snd_sof_suspend);
+EXPORT_SYMBOL_NS(snd_sof_suspend, SND_SOC_SOF_CORE);
 
 int snd_sof_prepare(struct device *dev)
 {
@@ -298,7 +298,7 @@ int snd_sof_prepare(struct device *dev)
 
 	return 0;
 }
-EXPORT_SYMBOL(snd_sof_prepare);
+EXPORT_SYMBOL_NS(snd_sof_prepare, SND_SOC_SOF_CORE);
 
 void snd_sof_complete(struct device *dev)
 {
@@ -306,4 +306,4 @@ void snd_sof_complete(struct device *dev)
 
 	sdev->system_suspend_target = SOF_SUSPEND_NONE;
 }
-EXPORT_SYMBOL(snd_sof_complete);
+EXPORT_SYMBOL_NS(snd_sof_complete, SND_SOC_SOF_CORE);

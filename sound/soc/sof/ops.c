@@ -46,7 +46,7 @@ bool snd_sof_pci_update_bits(struct snd_sof_dev *sdev, u32 offset,
 	spin_unlock_irqrestore(&sdev->hw_lock, flags);
 	return change;
 }
-EXPORT_SYMBOL(snd_sof_pci_update_bits);
+EXPORT_SYMBOL_NS(snd_sof_pci_update_bits, SND_SOC_SOF_CORE);
 
 bool snd_sof_dsp_update_bits_unlocked(struct snd_sof_dev *sdev, u32 bar,
 				      u32 offset, u32 mask, u32 value)
@@ -66,7 +66,7 @@ bool snd_sof_dsp_update_bits_unlocked(struct snd_sof_dev *sdev, u32 bar,
 
 	return true;
 }
-EXPORT_SYMBOL(snd_sof_dsp_update_bits_unlocked);
+EXPORT_SYMBOL_NS(snd_sof_dsp_update_bits_unlocked, SND_SOC_SOF_CORE);
 
 bool snd_sof_dsp_update_bits64_unlocked(struct snd_sof_dev *sdev, u32 bar,
 					u32 offset, u64 mask, u64 value)
@@ -84,7 +84,7 @@ bool snd_sof_dsp_update_bits64_unlocked(struct snd_sof_dev *sdev, u32 bar,
 
 	return true;
 }
-EXPORT_SYMBOL(snd_sof_dsp_update_bits64_unlocked);
+EXPORT_SYMBOL_NS(snd_sof_dsp_update_bits64_unlocked, SND_SOC_SOF_CORE);
 
 /* This is for registers bits with attribute RWC */
 bool snd_sof_dsp_update_bits(struct snd_sof_dev *sdev, u32 bar, u32 offset,
@@ -99,7 +99,7 @@ bool snd_sof_dsp_update_bits(struct snd_sof_dev *sdev, u32 bar, u32 offset,
 	spin_unlock_irqrestore(&sdev->hw_lock, flags);
 	return change;
 }
-EXPORT_SYMBOL(snd_sof_dsp_update_bits);
+EXPORT_SYMBOL_NS(snd_sof_dsp_update_bits, SND_SOC_SOF_CORE);
 
 bool snd_sof_dsp_update_bits64(struct snd_sof_dev *sdev, u32 bar, u32 offset,
 			       u64 mask, u64 value)
@@ -113,7 +113,7 @@ bool snd_sof_dsp_update_bits64(struct snd_sof_dev *sdev, u32 bar, u32 offset,
 	spin_unlock_irqrestore(&sdev->hw_lock, flags);
 	return change;
 }
-EXPORT_SYMBOL(snd_sof_dsp_update_bits64);
+EXPORT_SYMBOL_NS(snd_sof_dsp_update_bits64, SND_SOC_SOF_CORE);
 
 static
 void snd_sof_dsp_update_bits_forced_unlocked(struct snd_sof_dev *sdev, u32 bar,
@@ -140,7 +140,7 @@ void snd_sof_dsp_update_bits_forced(struct snd_sof_dev *sdev, u32 bar,
 	snd_sof_dsp_update_bits_forced_unlocked(sdev, bar, offset, mask, value);
 	spin_unlock_irqrestore(&sdev->hw_lock, flags);
 }
-EXPORT_SYMBOL(snd_sof_dsp_update_bits_forced);
+EXPORT_SYMBOL_NS(snd_sof_dsp_update_bits_forced, SND_SOC_SOF_CORE);
 
 void snd_sof_dsp_panic(struct snd_sof_dev *sdev, u32 offset)
 {
@@ -160,4 +160,4 @@ void snd_sof_dsp_panic(struct snd_sof_dev *sdev, u32 offset)
 	snd_sof_dsp_dbg_dump(sdev, SOF_DBG_REGS | SOF_DBG_MBOX);
 	snd_sof_trace_notify_for_error(sdev);
 }
-EXPORT_SYMBOL(snd_sof_dsp_panic);
+EXPORT_SYMBOL_NS(snd_sof_dsp_panic, SND_SOC_SOF_CORE);

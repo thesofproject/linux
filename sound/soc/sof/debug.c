@@ -370,7 +370,7 @@ int snd_sof_debugfs_io_item(struct snd_sof_dev *sdev,
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(snd_sof_debugfs_io_item);
+EXPORT_SYMBOL_NS_GPL(snd_sof_debugfs_io_item, SND_SOC_SOF_CORE);
 
 /* create FS entry for debug files to expose kernel memory */
 int snd_sof_debugfs_buf_item(struct snd_sof_dev *sdev,
@@ -409,7 +409,7 @@ int snd_sof_debugfs_buf_item(struct snd_sof_dev *sdev,
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(snd_sof_debugfs_buf_item);
+EXPORT_SYMBOL_NS_GPL(snd_sof_debugfs_buf_item, SND_SOC_SOF_CORE);
 
 int snd_sof_dbg_init(struct snd_sof_dev *sdev)
 {
@@ -456,13 +456,13 @@ int snd_sof_dbg_init(struct snd_sof_dev *sdev)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(snd_sof_dbg_init);
+EXPORT_SYMBOL_NS_GPL(snd_sof_dbg_init, SND_SOC_SOF_CORE);
 
 void snd_sof_free_debug(struct snd_sof_dev *sdev)
 {
 	debugfs_remove_recursive(sdev->debugfs_root);
 }
-EXPORT_SYMBOL_GPL(snd_sof_free_debug);
+EXPORT_SYMBOL_NS_GPL(snd_sof_free_debug, SND_SOC_SOF_CORE);
 
 void snd_sof_handle_fw_exception(struct snd_sof_dev *sdev)
 {
@@ -478,4 +478,4 @@ void snd_sof_handle_fw_exception(struct snd_sof_dev *sdev)
 	snd_sof_ipc_dump(sdev);
 	snd_sof_trace_notify_for_error(sdev);
 }
-EXPORT_SYMBOL(snd_sof_handle_fw_exception);
+EXPORT_SYMBOL_NS(snd_sof_handle_fw_exception, SND_SOC_SOF_CORE);

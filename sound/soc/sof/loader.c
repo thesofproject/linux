@@ -127,7 +127,7 @@ int snd_sof_fw_parse_ext_data(struct snd_sof_dev *sdev, u32 bar, u32 offset)
 	kfree(ext_data);
 	return ret;
 }
-EXPORT_SYMBOL(snd_sof_fw_parse_ext_data);
+EXPORT_SYMBOL_NS(snd_sof_fw_parse_ext_data, SND_SOC_SOF_CORE);
 
 /*
  * IPC Firmware ready.
@@ -295,7 +295,7 @@ int sof_fw_ready(struct snd_sof_dev *sdev, u32 msg_id)
 
 	return 0;
 }
-EXPORT_SYMBOL(sof_fw_ready);
+EXPORT_SYMBOL_NS(sof_fw_ready, SND_SOC_SOF_CORE);
 
 /* generic module parser for mmaped DSPs */
 int snd_sof_parse_module_memcpy(struct snd_sof_dev *sdev,
@@ -380,7 +380,7 @@ int snd_sof_parse_module_memcpy(struct snd_sof_dev *sdev,
 
 	return 0;
 }
-EXPORT_SYMBOL(snd_sof_parse_module_memcpy);
+EXPORT_SYMBOL_NS(snd_sof_parse_module_memcpy, SND_SOC_SOF_CORE);
 
 static int check_header(struct snd_sof_dev *sdev, const struct firmware *fw)
 {
@@ -496,7 +496,7 @@ int snd_sof_load_firmware_raw(struct snd_sof_dev *sdev)
 
 	return ret;
 }
-EXPORT_SYMBOL(snd_sof_load_firmware_raw);
+EXPORT_SYMBOL_NS(snd_sof_load_firmware_raw, SND_SOC_SOF_CORE);
 
 int snd_sof_load_firmware_memcpy(struct snd_sof_dev *sdev)
 {
@@ -536,7 +536,7 @@ error:
 	return ret;
 
 }
-EXPORT_SYMBOL(snd_sof_load_firmware_memcpy);
+EXPORT_SYMBOL_NS(snd_sof_load_firmware_memcpy, SND_SOC_SOF_CORE);
 
 int snd_sof_load_firmware(struct snd_sof_dev *sdev)
 {
@@ -546,7 +546,7 @@ int snd_sof_load_firmware(struct snd_sof_dev *sdev)
 		return sof_ops(sdev)->load_firmware(sdev);
 	return 0;
 }
-EXPORT_SYMBOL(snd_sof_load_firmware);
+EXPORT_SYMBOL_NS(snd_sof_load_firmware, SND_SOC_SOF_CORE);
 
 int snd_sof_run_firmware(struct snd_sof_dev *sdev)
 {
@@ -619,10 +619,10 @@ int snd_sof_run_firmware(struct snd_sof_dev *sdev)
 
 	return 0;
 }
-EXPORT_SYMBOL(snd_sof_run_firmware);
+EXPORT_SYMBOL_NS(snd_sof_run_firmware, SND_SOC_SOF_CORE);
 
 void snd_sof_fw_unload(struct snd_sof_dev *sdev)
 {
 	/* TODO: support module unloading at runtime */
 }
-EXPORT_SYMBOL(snd_sof_fw_unload);
+EXPORT_SYMBOL_NS(snd_sof_fw_unload, SND_SOC_SOF_CORE);

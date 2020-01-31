@@ -295,7 +295,7 @@ int sof_ipc_tx_message(struct snd_sof_ipc *ipc, u32 header,
 	return sof_ipc_tx_message_no_pm(ipc, header, msg_data, msg_bytes,
 					reply_data, reply_bytes);
 }
-EXPORT_SYMBOL(sof_ipc_tx_message);
+EXPORT_SYMBOL_NS(sof_ipc_tx_message, SND_SOC_SOF_CORE);
 
 /*
  * send IPC message from host to DSP without modifying the DSP state.
@@ -322,7 +322,7 @@ int sof_ipc_tx_message_no_pm(struct snd_sof_ipc *ipc, u32 header,
 
 	return ret;
 }
-EXPORT_SYMBOL(sof_ipc_tx_message_no_pm);
+EXPORT_SYMBOL_NS(sof_ipc_tx_message_no_pm, SND_SOC_SOF_CORE);
 
 /* handle reply message from DSP */
 int snd_sof_ipc_reply(struct snd_sof_dev *sdev, u32 msg_id)
@@ -341,7 +341,7 @@ int snd_sof_ipc_reply(struct snd_sof_dev *sdev, u32 msg_id)
 
 	return 0;
 }
-EXPORT_SYMBOL(snd_sof_ipc_reply);
+EXPORT_SYMBOL_NS(snd_sof_ipc_reply, SND_SOC_SOF_CORE);
 
 /* DSP firmware has sent host a message  */
 void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev)
@@ -394,7 +394,7 @@ void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev)
 
 	ipc_log_header(sdev->dev, "ipc rx done", hdr.cmd);
 }
-EXPORT_SYMBOL(snd_sof_ipc_msgs_rx);
+EXPORT_SYMBOL_NS(snd_sof_ipc_msgs_rx, SND_SOC_SOF_CORE);
 
 /*
  * IPC trace mechanism.
@@ -655,7 +655,7 @@ int snd_sof_dsp_mailbox_init(struct snd_sof_dev *sdev, u32 dspbox,
 	sdev->host_box.size = hostbox_size;
 	return 0;
 }
-EXPORT_SYMBOL(snd_sof_dsp_mailbox_init);
+EXPORT_SYMBOL_NS(snd_sof_dsp_mailbox_init, SND_SOC_SOF_CORE);
 
 int snd_sof_ipc_valid(struct snd_sof_dev *sdev)
 {
@@ -706,7 +706,7 @@ int snd_sof_ipc_valid(struct snd_sof_dev *sdev)
 
 	return 0;
 }
-EXPORT_SYMBOL(snd_sof_ipc_valid);
+EXPORT_SYMBOL_NS(snd_sof_ipc_valid, SND_SOC_SOF_CORE);
 
 struct snd_sof_ipc *snd_sof_ipc_init(struct snd_sof_dev *sdev)
 {
@@ -739,7 +739,7 @@ struct snd_sof_ipc *snd_sof_ipc_init(struct snd_sof_dev *sdev)
 
 	return ipc;
 }
-EXPORT_SYMBOL(snd_sof_ipc_init);
+EXPORT_SYMBOL_NS(snd_sof_ipc_init, SND_SOC_SOF_CORE);
 
 void snd_sof_ipc_free(struct snd_sof_dev *sdev)
 {
@@ -753,4 +753,4 @@ void snd_sof_ipc_free(struct snd_sof_dev *sdev)
 	ipc->disable_ipc_tx = true;
 	mutex_unlock(&ipc->tx_mutex);
 }
-EXPORT_SYMBOL(snd_sof_ipc_free);
+EXPORT_SYMBOL_NS(snd_sof_ipc_free, SND_SOC_SOF_CORE);

@@ -280,7 +280,7 @@ page_err:
 	snd_dma_free_pages(&sdev->dmatp);
 	return ret;
 }
-EXPORT_SYMBOL(snd_sof_init_trace);
+EXPORT_SYMBOL_NS(snd_sof_init_trace, SND_SOC_SOF_CORE);
 
 int snd_sof_trace_update_pos(struct snd_sof_dev *sdev,
 			     struct sof_ipc_dma_trace_posn *posn)
@@ -313,7 +313,7 @@ void snd_sof_trace_notify_for_error(struct snd_sof_dev *sdev)
 		wake_up(&sdev->trace_sleep);
 	}
 }
-EXPORT_SYMBOL(snd_sof_trace_notify_for_error);
+EXPORT_SYMBOL_NS(snd_sof_trace_notify_for_error, SND_SOC_SOF_CORE);
 
 void snd_sof_release_trace(struct snd_sof_dev *sdev)
 {
@@ -336,7 +336,7 @@ void snd_sof_release_trace(struct snd_sof_dev *sdev)
 	sdev->dtrace_draining = true;
 	wake_up(&sdev->trace_sleep);
 }
-EXPORT_SYMBOL(snd_sof_release_trace);
+EXPORT_SYMBOL_NS(snd_sof_release_trace, SND_SOC_SOF_CORE);
 
 void snd_sof_free_trace(struct snd_sof_dev *sdev)
 {
@@ -351,4 +351,4 @@ void snd_sof_free_trace(struct snd_sof_dev *sdev)
 		sdev->dma_trace_pages = 0;
 	}
 }
-EXPORT_SYMBOL(snd_sof_free_trace);
+EXPORT_SYMBOL_NS(snd_sof_free_trace, SND_SOC_SOF_CORE);

@@ -91,7 +91,7 @@ out:
 	sof_oops(sdev, oops);
 	sof_stack(sdev, oops, stack, stack_words);
 }
-EXPORT_SYMBOL(snd_sof_get_status);
+EXPORT_SYMBOL_NS(snd_sof_get_status, SND_SOC_SOF_CORE);
 
 /*
  *			FW Boot State Transition Diagram
@@ -330,7 +330,7 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 
 	return sof_probe_continue(sdev);
 }
-EXPORT_SYMBOL(snd_sof_device_probe);
+EXPORT_SYMBOL_NS(snd_sof_device_probe, SND_SOC_SOF_CORE);
 
 int snd_sof_device_remove(struct device *dev)
 {
@@ -369,7 +369,7 @@ int snd_sof_device_remove(struct device *dev)
 
 	return 0;
 }
-EXPORT_SYMBOL(snd_sof_device_remove);
+EXPORT_SYMBOL_NS(snd_sof_device_remove, SND_SOC_SOF_CORE);
 
 MODULE_AUTHOR("Liam Girdwood");
 MODULE_DESCRIPTION("Sound Open Firmware (SOF) Core");
