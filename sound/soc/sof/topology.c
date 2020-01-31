@@ -751,14 +751,15 @@ static const struct sof_topology_token led_tokens[] = {
 	 get_token_u32, offsetof(struct snd_sof_led_control, direction), 0},
 };
 
-static void sof_parse_uuid_tokens(struct snd_soc_component *scomp,
-				  void *object,
-				  const struct sof_topology_token *tokens,
-				  int count,
-				  struct snd_soc_tplg_vendor_array *array)
+static int sof_parse_uuid_tokens(struct snd_soc_component *scomp,
+				 void *object,
+				 const struct sof_topology_token *tokens,
+				 int count,
+				 struct snd_soc_tplg_vendor_array *array)
 {
 	struct snd_soc_tplg_vendor_uuid_elem *elem;
 	int i, j;
+	int found = 0;
 
 	/* parse element by element */
 	for (i = 0; i < le32_to_cpu(array->num_elems); i++) {
@@ -777,18 +778,22 @@ static void sof_parse_uuid_tokens(struct snd_soc_component *scomp,
 			/* matched - now load token */
 			tokens[j].get_token(elem, object, tokens[j].offset,
 					    tokens[j].size);
+			found++;
 		}
 	}
+
+	return found;
 }
 
-static void sof_parse_string_tokens(struct snd_soc_component *scomp,
-				    void *object,
-				    const struct sof_topology_token *tokens,
-				    int count,
-				    struct snd_soc_tplg_vendor_array *array)
+static int sof_parse_string_tokens(struct snd_soc_component *scomp,
+				   void *object,
+				   const struct sof_topology_token *tokens,
+				   int count,
+				   struct snd_soc_tplg_vendor_array *array)
 {
 	struct snd_soc_tplg_vendor_string_elem *elem;
 	int i, j;
+	int found = 0;
 
 	/* parse element by element */
 	for (i = 0; i < le32_to_cpu(array->num_elems); i++) {
@@ -807,15 +812,18 @@ static void sof_parse_string_tokens(struct snd_soc_component *scomp,
 			/* matched - now load token */
 			tokens[j].get_token(elem, object, tokens[j].offset,
 					    tokens[j].size);
+			found++;
 		}
 	}
+
+	return found;
 }
 
-static void sof_parse_word_tokens(struct snd_soc_component *scomp,
-				  void *object,
-				  const struct sof_topology_token *tokens,
-				  int count,
-				  struct snd_soc_tplg_vendor_array *array)
+static int sof_parse_word_tokens(struct snd_soc_component *scomp,
+				 void *object,
+				 const struct sof_topology_token *tokens,
+				 int count,
+				 struct snd_soc_tplg_vendor_array *array)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_tplg_vendor_value_elem *elem;
@@ -823,6 +831,7 @@ static void sof_parse_word_tokens(struct snd_soc_component *scomp,
 	int i, j;
 	u32 offset;
 	u32 *index = NULL;
+	int found = 0;
 
 	/* parse element by element */
 	for (i = 0; i < le32_to_cpu(array->num_elems); i++) {
@@ -879,8 +888,11 @@ static void sof_parse_word_tokens(struct snd_soc_component *scomp,
 			tokens[j].get_token(elem, object,
 					    offset + tokens[j].offset,
 					    tokens[j].size);
+			found++;
 		}
 	}
+
+	return found;
 }
 
 static int sof_parse_tokens(struct snd_soc_component *scomp,
@@ -888,9 +900,13 @@ static int sof_parse_tokens(struct snd_soc_component *scomp,
 			    const struct sof_topology_token *tokens,
 			    int count,
 			    struct snd_soc_tplg_vendor_array *array,
-			    int priv_size)
+			    int priv_size,
+			    int *read_bytes)
 {
+	int found = 0;
 	int asize;
+
+	*read_bytes = 0;
 
 	while (priv_size > 0) {
 		asize = le32_to_cpu(array->size);
@@ -913,19 +929,19 @@ static int sof_parse_tokens(struct snd_soc_component *scomp,
 		/* call correct parser depending on type */
 		switch (le32_to_cpu(array->type)) {
 		case SND_SOC_TPLG_TUPLE_TYPE_UUID:
-			sof_parse_uuid_tokens(scomp, object, tokens, count,
-					      array);
+			found += sof_parse_uuid_tokens(scomp, object, tokens,
+						       count, array);
 			break;
 		case SND_SOC_TPLG_TUPLE_TYPE_STRING:
-			sof_parse_string_tokens(scomp, object, tokens, count,
-						array);
+			found += sof_parse_string_tokens(scomp, object, tokens,
+							count, array);
 			break;
 		case SND_SOC_TPLG_TUPLE_TYPE_BOOL:
 		case SND_SOC_TPLG_TUPLE_TYPE_BYTE:
 		case SND_SOC_TPLG_TUPLE_TYPE_WORD:
 		case SND_SOC_TPLG_TUPLE_TYPE_SHORT:
-			sof_parse_word_tokens(scomp, object, tokens, count,
-					      array);
+			found += sof_parse_word_tokens(scomp, object, tokens,
+						      count, array);
 			break;
 		default:
 			dev_err(scomp->dev, "error: unknown token type %d\n",
@@ -936,6 +952,13 @@ static int sof_parse_tokens(struct snd_soc_component *scomp,
 		/* next array */
 		array = (struct snd_soc_tplg_vendor_array *)((u8 *)array
 			+ asize);
+
+		/* update parse position */
+		*read_bytes += asize;
+
+		/* return when all tokens have been found */
+		if (found == count)
+			return 0;
 	}
 	return 0;
 }
@@ -962,6 +985,7 @@ static int sof_control_load_volume(struct snd_soc_component *scomp,
 		container_of(hdr, struct snd_soc_tplg_mixer_control, hdr);
 	struct sof_ipc_ctrl_data *cdata;
 	int tlv[TLV_ITEMS];
+	int read_bytes;
 	unsigned int i;
 	int ret = 0;
 
@@ -1018,7 +1042,7 @@ skip:
 	/* set up possible led control from mixer private data */
 	ret = sof_parse_tokens(scomp, &scontrol->led_ctl, led_tokens,
 			       ARRAY_SIZE(led_tokens), mc->priv.array,
-			       le32_to_cpu(mc->priv.size));
+			       le32_to_cpu(mc->priv.size), &read_bytes);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse led tokens failed %d\n",
 			le32_to_cpu(mc->priv.size));
@@ -1289,6 +1313,7 @@ static int sof_widget_load_dai(struct snd_soc_component *scomp, int index,
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_tplg_private *private = &tw->priv;
 	struct sof_ipc_comp_dai comp_dai;
+	int read_bytes;
 	int ret;
 
 	/* configure dai IPC message */
@@ -1302,7 +1327,7 @@ static int sof_widget_load_dai(struct snd_soc_component *scomp, int index,
 
 	ret = sof_parse_tokens(scomp, &comp_dai, dai_tokens,
 			       ARRAY_SIZE(dai_tokens), private->array,
-			       le32_to_cpu(private->size));
+			       le32_to_cpu(private->size), &read_bytes);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse dai tokens failed %d\n",
 			le32_to_cpu(private->size));
@@ -1311,7 +1336,7 @@ static int sof_widget_load_dai(struct snd_soc_component *scomp, int index,
 
 	ret = sof_parse_tokens(scomp, &comp_dai.config, comp_tokens,
 			       ARRAY_SIZE(comp_tokens), private->array,
-			       le32_to_cpu(private->size));
+			       le32_to_cpu(private->size), &read_bytes);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse dai.cfg tokens failed %d\n",
 			private->size);
@@ -1345,6 +1370,7 @@ static int sof_widget_load_buffer(struct snd_soc_component *scomp, int index,
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_tplg_private *private = &tw->priv;
 	struct sof_ipc_buffer *buffer;
+	int read_bytes;
 	int ret;
 
 	buffer = kzalloc(sizeof(*buffer), GFP_KERNEL);
@@ -1360,7 +1386,7 @@ static int sof_widget_load_buffer(struct snd_soc_component *scomp, int index,
 
 	ret = sof_parse_tokens(scomp, buffer, buffer_tokens,
 			       ARRAY_SIZE(buffer_tokens), private->array,
-			       le32_to_cpu(private->size));
+			       le32_to_cpu(private->size), &read_bytes);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse buffer tokens failed %d\n",
 			private->size);
@@ -1416,6 +1442,7 @@ static int sof_widget_load_pcm(struct snd_soc_component *scomp, int index,
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_tplg_private *private = &tw->priv;
 	struct sof_ipc_comp_host *host;
+	int read_bytes;
 	int ret;
 
 	host = kzalloc(sizeof(*host), GFP_KERNEL);
@@ -1433,7 +1460,7 @@ static int sof_widget_load_pcm(struct snd_soc_component *scomp, int index,
 
 	ret = sof_parse_tokens(scomp, host, pcm_tokens,
 			       ARRAY_SIZE(pcm_tokens), private->array,
-			       le32_to_cpu(private->size));
+			       le32_to_cpu(private->size), &read_bytes);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse host tokens failed %d\n",
 			private->size);
@@ -1442,7 +1469,7 @@ static int sof_widget_load_pcm(struct snd_soc_component *scomp, int index,
 
 	ret = sof_parse_tokens(scomp, &host->config, comp_tokens,
 			       ARRAY_SIZE(comp_tokens), private->array,
-			       le32_to_cpu(private->size));
+			       le32_to_cpu(private->size), &read_bytes);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse host.cfg tokens failed %d\n",
 			le32_to_cpu(private->size));
@@ -1521,6 +1548,7 @@ static int sof_widget_load_pipeline(struct snd_soc_component *scomp,
 	struct snd_soc_tplg_private *private = &tw->priv;
 	struct sof_ipc_pipe_new *pipeline;
 	struct snd_sof_widget *comp_swidget;
+	int read_bytes;
 	int ret;
 
 	pipeline = kzalloc(sizeof(*pipeline), GFP_KERNEL);
@@ -1549,7 +1577,7 @@ static int sof_widget_load_pipeline(struct snd_soc_component *scomp,
 
 	ret = sof_parse_tokens(scomp, pipeline, sched_tokens,
 			       ARRAY_SIZE(sched_tokens), private->array,
-			       le32_to_cpu(private->size));
+			       le32_to_cpu(private->size), &read_bytes);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse pipeline tokens failed %d\n",
 			private->size);
@@ -1583,6 +1611,7 @@ static int sof_widget_load_mixer(struct snd_soc_component *scomp, int index,
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_tplg_private *private = &tw->priv;
 	struct sof_ipc_comp_mixer *mixer;
+	int read_bytes;
 	int ret;
 
 	mixer = kzalloc(sizeof(*mixer), GFP_KERNEL);
@@ -1599,7 +1628,7 @@ static int sof_widget_load_mixer(struct snd_soc_component *scomp, int index,
 
 	ret = sof_parse_tokens(scomp, &mixer->config, comp_tokens,
 			       ARRAY_SIZE(comp_tokens), private->array,
-			       le32_to_cpu(private->size));
+			       le32_to_cpu(private->size), &read_bytes);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse mixer.cfg tokens failed %d\n",
 			private->size);
@@ -1630,6 +1659,7 @@ static int sof_widget_load_mux(struct snd_soc_component *scomp, int index,
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_tplg_private *private = &tw->priv;
 	struct sof_ipc_comp_mux *mux;
+	int read_bytes;
 	int ret;
 
 	mux = kzalloc(sizeof(*mux), GFP_KERNEL);
@@ -1646,7 +1676,7 @@ static int sof_widget_load_mux(struct snd_soc_component *scomp, int index,
 
 	ret = sof_parse_tokens(scomp, &mux->config, comp_tokens,
 			       ARRAY_SIZE(comp_tokens), private->array,
-			       le32_to_cpu(private->size));
+			       le32_to_cpu(private->size), &read_bytes);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse mux.cfg tokens failed %d\n",
 			private->size);
@@ -1679,6 +1709,7 @@ static int sof_widget_load_pga(struct snd_soc_component *scomp, int index,
 	struct snd_soc_tplg_private *private = &tw->priv;
 	struct sof_ipc_comp_volume *volume;
 	struct snd_sof_control *scontrol;
+	int read_bytes;
 	int min_step;
 	int max_step;
 	int ret;
@@ -1704,7 +1735,7 @@ static int sof_widget_load_pga(struct snd_soc_component *scomp, int index,
 
 	ret = sof_parse_tokens(scomp, volume, volume_tokens,
 			       ARRAY_SIZE(volume_tokens), private->array,
-			       le32_to_cpu(private->size));
+			       le32_to_cpu(private->size), &read_bytes);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse volume tokens failed %d\n",
 			private->size);
@@ -1712,7 +1743,7 @@ static int sof_widget_load_pga(struct snd_soc_component *scomp, int index,
 	}
 	ret = sof_parse_tokens(scomp, &volume->config, comp_tokens,
 			       ARRAY_SIZE(comp_tokens), private->array,
-			       le32_to_cpu(private->size));
+			       le32_to_cpu(private->size), &read_bytes);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse volume.cfg tokens failed %d\n",
 			le32_to_cpu(private->size));
@@ -1756,6 +1787,7 @@ static int sof_widget_load_src(struct snd_soc_component *scomp, int index,
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_tplg_private *private = &tw->priv;
 	struct sof_ipc_comp_src *src;
+	int read_bytes;
 	int ret;
 
 	src = kzalloc(sizeof(*src), GFP_KERNEL);
@@ -1772,7 +1804,7 @@ static int sof_widget_load_src(struct snd_soc_component *scomp, int index,
 
 	ret = sof_parse_tokens(scomp, src, src_tokens,
 			       ARRAY_SIZE(src_tokens), private->array,
-			       le32_to_cpu(private->size));
+			       le32_to_cpu(private->size), &read_bytes);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse src tokens failed %d\n",
 			private->size);
@@ -1781,7 +1813,7 @@ static int sof_widget_load_src(struct snd_soc_component *scomp, int index,
 
 	ret = sof_parse_tokens(scomp, &src->config, comp_tokens,
 			       ARRAY_SIZE(comp_tokens), private->array,
-			       le32_to_cpu(private->size));
+			       le32_to_cpu(private->size), &read_bytes);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse src.cfg tokens failed %d\n",
 			le32_to_cpu(private->size));
@@ -1815,6 +1847,7 @@ static int sof_widget_load_asrc(struct snd_soc_component *scomp, int index,
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_tplg_private *private = &tw->priv;
 	struct sof_ipc_comp_asrc *asrc;
+	int read_bytes;
 	int ret;
 
 	asrc = kzalloc(sizeof(*asrc), GFP_KERNEL);
@@ -1831,7 +1864,7 @@ static int sof_widget_load_asrc(struct snd_soc_component *scomp, int index,
 
 	ret = sof_parse_tokens(scomp, asrc, asrc_tokens,
 			       ARRAY_SIZE(asrc_tokens), private->array,
-			       le32_to_cpu(private->size));
+			       le32_to_cpu(private->size), &read_bytes);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse asrc tokens failed %d\n",
 			private->size);
@@ -1840,7 +1873,7 @@ static int sof_widget_load_asrc(struct snd_soc_component *scomp, int index,
 
 	ret = sof_parse_tokens(scomp, &asrc->config, comp_tokens,
 			       ARRAY_SIZE(comp_tokens), private->array,
-			       le32_to_cpu(private->size));
+			       le32_to_cpu(private->size), &read_bytes);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse asrc.cfg tokens failed %d\n",
 			le32_to_cpu(private->size));
@@ -1876,6 +1909,7 @@ static int sof_widget_load_siggen(struct snd_soc_component *scomp, int index,
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_tplg_private *private = &tw->priv;
 	struct sof_ipc_comp_tone *tone;
+	int read_bytes;
 	int ret;
 
 	tone = kzalloc(sizeof(*tone), GFP_KERNEL);
@@ -1892,7 +1926,7 @@ static int sof_widget_load_siggen(struct snd_soc_component *scomp, int index,
 
 	ret = sof_parse_tokens(scomp, tone, tone_tokens,
 			       ARRAY_SIZE(tone_tokens), private->array,
-			       le32_to_cpu(private->size));
+			       le32_to_cpu(private->size), &read_bytes);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse tone tokens failed %d\n",
 			le32_to_cpu(private->size));
@@ -1901,7 +1935,7 @@ static int sof_widget_load_siggen(struct snd_soc_component *scomp, int index,
 
 	ret = sof_parse_tokens(scomp, &tone->config, comp_tokens,
 			       ARRAY_SIZE(comp_tokens), private->array,
-			       le32_to_cpu(private->size));
+			       le32_to_cpu(private->size), &read_bytes);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse tone.cfg tokens failed %d\n",
 			le32_to_cpu(private->size));
@@ -2007,6 +2041,7 @@ static int sof_process_load(struct snd_soc_component *scomp, int index,
 	struct sof_ipc_comp_process *process = NULL;
 	struct sof_widget_data *wdata = NULL;
 	size_t ipc_data_size = 0;
+	int read_bytes;
 	size_t ipc_size;
 	int offset = 0;
 	int ret = 0;
@@ -2061,7 +2096,7 @@ static int sof_process_load(struct snd_soc_component *scomp, int index,
 
 	ret = sof_parse_tokens(scomp, &process->config, comp_tokens,
 			       ARRAY_SIZE(comp_tokens), private->array,
-			       le32_to_cpu(private->size));
+			       le32_to_cpu(private->size), &read_bytes);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse process.cfg tokens failed %d\n",
 			le32_to_cpu(private->size));
@@ -2133,6 +2168,7 @@ static int sof_widget_load_process(struct snd_soc_component *scomp, int index,
 {
 	struct snd_soc_tplg_private *private = &tw->priv;
 	struct sof_ipc_comp_process config;
+	int read_bytes;
 	int ret;
 
 	/* check we have some tokens - we need at least process type */
@@ -2146,7 +2182,7 @@ static int sof_widget_load_process(struct snd_soc_component *scomp, int index,
 	/* get the process token */
 	ret = sof_parse_tokens(scomp, &config, process_tokens,
 			       ARRAY_SIZE(process_tokens), private->array,
-			       le32_to_cpu(private->size));
+			       le32_to_cpu(private->size), &read_bytes);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse process tokens failed %d\n",
 			le32_to_cpu(private->size));
@@ -2445,6 +2481,7 @@ static int sof_dai_load(struct snd_soc_component *scomp, int index,
 	struct snd_soc_tplg_private *private = &pcm->priv;
 	struct snd_sof_pcm *spcm;
 	int stream = SNDRV_PCM_STREAM_PLAYBACK;
+	int read_bytes;
 	int ret = 0;
 
 	/* nothing to do for BEs atm */
@@ -2467,8 +2504,8 @@ static int sof_dai_load(struct snd_soc_component *scomp, int index,
 
 	ret = sof_parse_tokens(scomp, spcm, stream_tokens,
 			       ARRAY_SIZE(stream_tokens), private->array,
-			       le32_to_cpu(private->size));
-	if (ret) {
+			       le32_to_cpu(private->size), &read_bytes);
+	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse stream tokens failed %d\n",
 			le32_to_cpu(private->size));
 		return ret;
@@ -2638,6 +2675,7 @@ static int sof_link_ssp_load(struct snd_soc_component *scomp, int index,
 	struct snd_soc_tplg_private *private = &cfg->priv;
 	struct sof_ipc_reply reply;
 	u32 size = sizeof(*config);
+	int read_bytes;
 	int ret;
 
 	/* handle master/slave and inverted clocks */
@@ -2649,7 +2687,7 @@ static int sof_link_ssp_load(struct snd_soc_component *scomp, int index,
 
 	ret = sof_parse_tokens(scomp, &config->ssp, ssp_tokens,
 			       ARRAY_SIZE(ssp_tokens), private->array,
-			       le32_to_cpu(private->size));
+			       le32_to_cpu(private->size), &read_bytes);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse ssp tokens failed %d\n",
 			le32_to_cpu(private->size));
@@ -2715,6 +2753,7 @@ static int sof_link_sai_load(struct snd_soc_component *scomp, int index,
 	struct snd_soc_tplg_private *private = &cfg->priv;
 	struct sof_ipc_reply reply;
 	u32 size = sizeof(*config);
+	int read_bytes;
 	int ret;
 
 	/* handle master/slave and inverted clocks */
@@ -2726,7 +2765,7 @@ static int sof_link_sai_load(struct snd_soc_component *scomp, int index,
 
 	ret = sof_parse_tokens(scomp, &config->sai, sai_tokens,
 			       ARRAY_SIZE(sai_tokens), private->array,
-			       le32_to_cpu(private->size));
+			       le32_to_cpu(private->size), &read_bytes);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse sai tokens failed %d\n",
 			le32_to_cpu(private->size));
@@ -2783,6 +2822,7 @@ static int sof_link_esai_load(struct snd_soc_component *scomp, int index,
 	struct snd_soc_tplg_private *private = &cfg->priv;
 	struct sof_ipc_reply reply;
 	u32 size = sizeof(*config);
+	int read_bytes;
 	int ret;
 
 	/* handle master/slave and inverted clocks */
@@ -2794,7 +2834,7 @@ static int sof_link_esai_load(struct snd_soc_component *scomp, int index,
 
 	ret = sof_parse_tokens(scomp, &config->esai, esai_tokens,
 			       ARRAY_SIZE(esai_tokens), private->array,
-			       le32_to_cpu(private->size));
+			       le32_to_cpu(private->size), &read_bytes);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse esai tokens failed %d\n",
 			le32_to_cpu(private->size));
@@ -2853,6 +2893,7 @@ static int sof_link_dmic_load(struct snd_soc_component *scomp, int index,
 	struct sof_ipc_reply reply;
 	struct sof_ipc_fw_ready *ready = &sdev->fw_ready;
 	struct sof_ipc_fw_version *v = &ready->version;
+	int read_bytes;
 	u32 size;
 	int ret, j;
 
@@ -2866,7 +2907,7 @@ static int sof_link_dmic_load(struct snd_soc_component *scomp, int index,
 	/* get DMIC tokens */
 	ret = sof_parse_tokens(scomp, &config->dmic, dmic_tokens,
 			       ARRAY_SIZE(dmic_tokens), private->array,
-			       le32_to_cpu(private->size));
+			       le32_to_cpu(private->size), &read_bytes);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse dmic tokens failed %d\n",
 			le32_to_cpu(private->size));
@@ -2901,7 +2942,7 @@ static int sof_link_dmic_load(struct snd_soc_component *scomp, int index,
 	/* get DMIC PDM tokens */
 	ret = sof_parse_tokens(scomp, &ipc_config->dmic.pdm[0], dmic_pdm_tokens,
 			       ARRAY_SIZE(dmic_pdm_tokens), private->array,
-			       le32_to_cpu(private->size));
+			       le32_to_cpu(private->size), &read_bytes);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse dmic pdm tokens failed %d\n",
 			le32_to_cpu(private->size));
@@ -3038,6 +3079,7 @@ static int sof_link_hda_load(struct snd_soc_component *scomp, int index,
 	struct snd_soc_tplg_private *private = &cfg->priv;
 	struct snd_soc_dai *dai;
 	u32 size = sizeof(*config);
+	int read_bytes;
 	int ret;
 
 	/* init IPC */
@@ -3047,7 +3089,7 @@ static int sof_link_hda_load(struct snd_soc_component *scomp, int index,
 	/* get any bespoke DAI tokens */
 	ret = sof_parse_tokens(scomp, config, hda_tokens,
 			       ARRAY_SIZE(hda_tokens), private->array,
-			       le32_to_cpu(private->size));
+			       le32_to_cpu(private->size), &read_bytes);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse hda tokens failed %d\n",
 			le32_to_cpu(private->size));
@@ -3112,6 +3154,7 @@ static int sof_link_load(struct snd_soc_component *scomp, int index,
 	struct sof_ipc_dai_config config;
 	struct snd_soc_tplg_hw_config *hw_config;
 	int num_hw_configs;
+	int read_bytes;
 	int ret;
 	int i = 0;
 
@@ -3148,7 +3191,7 @@ static int sof_link_load(struct snd_soc_component *scomp, int index,
 	/* get any common DAI tokens */
 	ret = sof_parse_tokens(scomp, &config, dai_link_tokens,
 			       ARRAY_SIZE(dai_link_tokens), private->array,
-			       le32_to_cpu(private->size));
+			       le32_to_cpu(private->size), &read_bytes);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse link tokens failed %d\n",
 			le32_to_cpu(private->size));
