@@ -234,4 +234,9 @@ bool snd_sof_dsp_only_d0i3_compatible_stream_active(struct snd_sof_dev *sdev);
 int sof_machine_register(void *data);
 void sof_machine_unregister(void *data);
 
+void snd_sof_new_platform_drv(struct device *dev);
+
+void sof_audio_ipc_period_elapsed(struct device *dev, u32 msg_id);
+void sof_audio_ipc_xrun(struct device *dev, u32 msg_id);
+
 #endif
