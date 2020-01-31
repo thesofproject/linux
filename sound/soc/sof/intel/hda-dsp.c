@@ -839,7 +839,7 @@ void hda_dsp_d0i3_work(struct work_struct *work)
 		return;
 
 	/* This can fail but error cannot be propagated */
-	ret = hda_dsp_set_power_state(sdev, &target_state);
+	ret = snd_sof_dsp_set_power_state(sdev, &target_state);
 	if (ret < 0)
 		dev_err_ratelimited(sdev->dev,
 				    "error: failed to set DSP state %d substate %d\n",
