@@ -174,6 +174,22 @@ struct sof_ipc_comp_asrc {
 	uint32_t reserved[4];
 } __attribute__((packed));
 
+struct mux_stream_data {
+	uint32_t data_id;
+	uint32_t pipeline_id;
+	uint8_t num_channels;
+	uint8_t mask[8];
+	uint8_t reserved[3]; /* padding */
+} __packed;
+
+struct sof_mux_config {
+	uint16_t frame_format;
+	uint16_t num_channels;
+	uint16_t num_streams;
+	uint16_t reserved; /* padding to ensure proper alignment */
+	struct mux_stream_data streams[];
+} __packed;
+
 /* generic MUX component */
 struct sof_ipc_comp_mux {
 	struct sof_ipc_comp comp;

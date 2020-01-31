@@ -486,6 +486,15 @@ static int get_token_u16(void *elem, void *object, u32 offset, u32 size)
 	return 0;
 }
 
+static int get_token_u8(void *elem, void *object, u32 offset, u32 size)
+{
+	struct snd_soc_tplg_vendor_value_elem *velem = elem;
+	u8 *val = (u8 *)object + offset;
+
+	*val = (u8)velem->value;
+	return 0;
+}
+
 static int get_token_comp_format(void *elem, void *object, u32 offset, u32 size)
 {
 	struct snd_soc_tplg_vendor_string_elem *velem = elem;
@@ -612,6 +621,22 @@ static const struct sof_topology_token stream_tokens[] = {
 	{SOF_TKN_STREAM_CAPTURE_COMPATIBLE_D0I3,
 		SND_SOC_TPLG_TUPLE_TYPE_BOOL, get_token_u16,
 		offsetof(struct snd_sof_pcm, stream[1].d0i3_compatible), 0},
+};
+
+/* Mux data */
+static const struct sof_topology_token mux_tokens[] = {
+	{SOF_TKN_MUX_NUM_CHANNELS, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_mux_config, num_channels), 0},
+	{SOF_TKN_MUX_NUM_STREAMS, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_mux_config, num_streams), 0},
+};
+
+/* Mux stream data */
+static const struct sof_topology_token mux_stream_tokens[] = {
+	{SOF_TKN_MUX_STREAM_PIPELINE_ID, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct mux_stream_data, pipeline_id), 0},
+	{SOF_TKN_MUX_STREAM_CHANNELS, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u8,
+		offsetof(struct mux_stream_data, num_channels), 0},
 };
 
 /* Generic components */
@@ -2029,6 +2054,61 @@ static int sof_get_control_data(struct snd_soc_component *scomp,
 	return 0;
 }
 
+/*
+ * Sof mux/demux component
+ */
+static int sof_process_load_mux(struct snd_soc_component *scomp,
+				struct sof_ipc_comp_process *process,
+				struct snd_soc_tplg_private *private,
+				int *bytes_written)
+{
+	struct sof_mux_config *mc = (struct sof_mux_config *)&process->data;
+	struct mux_stream_data *msd = (struct mux_stream_data *)
+		((u8 *)process->data + sizeof(struct sof_mux_config));
+	struct snd_soc_tplg_vendor_array *varray;
+	int read_bytes = 0;
+	int pos = 0;
+	int ret;
+	int i;
+
+	/* parse mux config array */
+	ret = sof_parse_tokens(scomp, mc, mux_tokens,
+			       ARRAY_SIZE(mux_tokens), private->array,
+			       le32_to_cpu(private->size), &read_bytes);
+	if (ret != 0) {
+		dev_err(scomp->dev, "error: parse mux tokens failed %d\n",
+			private->size);
+		return ret;
+	}
+
+	/* parse mux stream config arrays */
+	for (i = 0; i < mc->num_streams; i++, msd++) {
+		varray = (struct snd_soc_tplg_vendor_array *)
+			((u8 *)private->array  + pos);
+		ret = sof_parse_tokens(scomp, msd, mux_stream_tokens,
+				       ARRAY_SIZE(mux_stream_tokens),
+				       varray,
+				       le32_to_cpu(private->size) - pos,
+				       &read_bytes);
+		if (ret != 0) {
+			dev_err(scomp->dev, "error: mux stream tokens %d\n",
+				private->size);
+			return ret;
+		}
+		pos += read_bytes;
+	}
+
+	/* get the channel byte masks after stream arrays */
+	msd -= mc->num_streams;
+	for (i = 0; i < mc->num_streams; i++, msd++, pos += 8)
+		memcpy(&msd->mask[0], (u8 *)private->array + pos, 8);
+
+	*bytes_written = sizeof(struct sof_mux_config) +
+		mc->num_streams * sizeof(struct mux_stream_data);
+
+	return ret;
+}
+
 static int sof_process_load(struct snd_soc_component *scomp, int index,
 			    struct snd_sof_widget *swidget,
 			    struct snd_soc_tplg_dapm_widget *tw,
@@ -2104,6 +2184,18 @@ static int sof_process_load(struct snd_soc_component *scomp, int index,
 	}
 
 	sof_dbg_comp_config(scomp, &process->config);
+
+	/* possible tuplet parsing for process components */
+	switch (type) {
+	case SOF_COMP_MUX:
+	case SOF_COMP_DEMUX:
+		ret = sof_process_load_mux(scomp, process, private, &offset);
+		if (ret < 0) {
+			dev_err(scomp->dev, "error: parse mux tokens failed %d\n",
+				le32_to_cpu(private->size));
+			goto err;
+		}
+	}
 
 	/*
 	 * found private data in control, so copy it.
