@@ -8,6 +8,9 @@ vhost_rpmsg-y := rpmsg.o
 obj-$(CONFIG_VHOST_SCSI) += vhost_scsi.o
 vhost_scsi-y := scsi.o
 
+obj-$(CONFIG_VHOST_SOF) += vhost_sof.o
+vhost_sof-y := adsp.o
+
 obj-$(CONFIG_VHOST_VSOCK) += vhost_vsock.o
 vhost_vsock-y := vsock.o
 

@@ -63,6 +63,16 @@ config VHOST_SCSI
 	Say M here to enable the vhost_scsi TCM fabric module
 	for use with virtio-scsi guests
 
+config VHOST_SOF
+	tristate "Vhost SOF driver"
+	depends on SND_SOC_SOF
+	select VHOST
+	select VHOST_RPMSG
+	default n
+	---help---
+	  SOF vhost VirtIO driver. It exports the same IPC interface, as the
+	  one, used for Audio DSP communication, to Linux VirtIO guests.
+
 config VHOST_VSOCK
 	tristate "vhost virtio-vsock driver"
 	depends on VSOCKETS && EVENTFD && VHOST_DPN
