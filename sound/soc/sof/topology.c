@@ -11,6 +11,7 @@
 #include <linux/firmware.h>
 #include <sound/tlv.h>
 #include <sound/pcm_params.h>
+#include <sound/sof/channel_map.h>
 #include <uapi/sound/sof/tokens.h>
 #include "sof-priv.h"
 #include "sof-audio.h"
@@ -612,6 +613,28 @@ static const struct sof_topology_token stream_tokens[] = {
 	{SOF_TKN_STREAM_CAPTURE_COMPATIBLE_D0I3,
 		SND_SOC_TPLG_TUPLE_TYPE_BOOL, get_token_u16,
 		offsetof(struct snd_sof_pcm, stream[1].d0i3_compatible), 0},
+};
+
+/* Channel map */
+static const struct sof_topology_token channel_map_tokens[] = {
+	{SOF_TKN_CHANNEL_MAP_INDEX, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc_channel_map, ch_index), 0},
+	{SOF_TKN_CHANNEL_MAP_EXT_ID, SND_SOC_TPLG_TUPLE_TYPE_WORD,
+		get_token_u32, offsetof(struct sof_ipc_channel_map, ext_id), 0},
+	{SOF_TKN_CHANNEL_MAP_MASK, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc_channel_map, ch_mask), 0},
+};
+
+/* Channel map coeff */
+static const struct sof_topology_token channel_map_coeff_tokens[] = {
+	{SOF_TKN_CHANNEL_MAP_COEFF, SND_SOC_TPLG_TUPLE_TYPE_WORD,
+	 get_token_u32, 0, 0},
+};
+
+/* Stream map */
+static const struct sof_topology_token stream_map_tokens[] = {
+	{SOF_TKN_STREAM_MAP_NUM_CH_MAPS, SND_SOC_TPLG_TUPLE_TYPE_WORD,
+	 get_token_u32, offsetof(struct sof_ipc_stream_map, num_ch_map), 0},
 };
 
 /* Generic components */
@@ -2018,6 +2041,106 @@ static int sof_get_control_data(struct snd_soc_component *scomp,
 	return 0;
 }
 
+/*
+ * Sof mux/demux component
+ */
+static int sof_process_load_mux(struct snd_soc_component *scomp,
+				struct sof_ipc_comp_process *process,
+				struct snd_soc_tplg_private *private,
+				int *offset)
+{
+	struct sof_ipc_stream_map *sm =
+		(struct sof_ipc_stream_map *)((u8 *)process->data + (*offset));
+	u8 *pos = (u8 *)(sm + 1);
+	struct sof_ipc_channel_map *cm_temp = NULL;
+	struct sof_ipc_channel_map *cm_temp_p;
+	u32 *cm_coeffs_temp = NULL;
+	u32 *cm_coeffs_temp_p;
+	int num_coeffs = 0;
+	size_t size;
+	int ret;
+	int i;
+
+	/* parse stream map */
+	ret = sof_parse_tokens(scomp, sm, stream_map_tokens,
+			       ARRAY_SIZE(stream_map_tokens), private->array,
+			       le32_to_cpu(private->size));
+	if (ret != 0) {
+		dev_err(scomp->dev, "error: mux stream map tokens failed %d\n",
+			private->size);
+		return ret;
+	}
+
+	/* reserve temp memory for variable amount of channel maps */
+	size = sizeof(struct sof_ipc_channel_map) * sm->num_ch_map;
+	cm_temp = kzalloc(size, GFP_KERNEL);
+	if (!cm_temp)
+		return -ENOMEM;
+
+	/* parse channel maps to temp memory cm_temp */
+	ret = sof_parse_token_sets(scomp, cm_temp, channel_map_tokens,
+				   ARRAY_SIZE(channel_map_tokens),
+				   private->array,
+				   le32_to_cpu(private->size),
+				   sm->num_ch_map,
+				   sizeof(struct sof_ipc_channel_map));
+	if (ret != 0) {
+		dev_err(scomp->dev, "error: mux channel map tokens %d\n",
+			private->size);
+		goto out;
+	}
+
+	/* calculate total amount of coeffs i.e. all bits set in all masks */
+	cm_temp_p = cm_temp;
+	for (i = 0; i < sm->num_ch_map; i++, cm_temp_p++)
+		num_coeffs += hweight_long(cm_temp_p->ch_mask);
+
+	/* reserve temp memory for variable amount of coeffs */
+	size = sizeof(u32) * num_coeffs;
+	cm_coeffs_temp = kzalloc(size, GFP_KERNEL);
+	if (!cm_coeffs_temp) {
+		ret = -ENOMEM;
+		goto out;
+	}
+
+	/* parse coeffs to temp memory cm_coeffs */
+	ret = sof_parse_token_sets(scomp, cm_coeffs_temp,
+				   channel_map_coeff_tokens,
+				   ARRAY_SIZE(channel_map_coeff_tokens),
+				   private->array,
+				   le32_to_cpu(private->size),
+				   num_coeffs,
+				   sizeof(u32));
+	if (ret != 0) {
+		dev_err(scomp->dev, "error: mux stream tokens %d\n",
+			private->size);
+		goto out;
+	}
+
+	/* update offset as num_coeffs is still valid for total amount */
+	*offset += sizeof(struct sof_ipc_stream_map) +
+		sm->num_ch_map * sizeof(struct sof_ipc_channel_map) +
+		num_coeffs * sizeof(u32);
+
+	/* copy map and coeff data from temp areas to process struct */
+	cm_temp_p = cm_temp;
+	cm_coeffs_temp_p = cm_coeffs_temp;
+	for (i = 0; i < sm->num_ch_map; i++) {
+		memcpy(pos, cm_temp_p, sizeof(struct sof_ipc_channel_map));
+		pos += sizeof(struct sof_ipc_channel_map);
+		num_coeffs = hweight_long(cm_temp_p->ch_mask);
+		memcpy(pos, cm_coeffs_temp_p, sizeof(u32) * num_coeffs);
+		pos += sizeof(u32) * num_coeffs;
+		cm_temp_p++;
+		cm_coeffs_temp_p += num_coeffs;
+	}
+
+out:
+	kfree(cm_temp);
+	kfree(cm_coeffs_temp);
+	return ret;
+}
+
 static int sof_process_load(struct snd_soc_component *scomp, int index,
 			    struct snd_sof_widget *swidget,
 			    struct snd_soc_tplg_dapm_widget *tw,
@@ -2104,6 +2227,20 @@ static int sof_process_load(struct snd_soc_component *scomp, int index,
 			       wdata[i].pdata->data,
 			       wdata[i].pdata->size);
 			offset += wdata[i].pdata->size;
+		}
+	}
+
+	/* possible tuplet parsing for process components */
+	switch (type) {
+	case SOF_COMP_MUX:
+	case SOF_COMP_DEMUX:
+		ret = sof_process_load_mux(scomp, process, private,
+					   &offset);
+		if (ret < 0) {
+			dev_err(scomp->dev,
+				"error: mux tokens load %d\n",
+				le32_to_cpu(private->size));
+			goto err;
 		}
 	}
 
