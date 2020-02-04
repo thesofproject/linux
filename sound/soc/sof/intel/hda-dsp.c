@@ -595,6 +595,12 @@ static int hda_suspend(struct snd_sof_dev *sdev, bool runtime_suspend)
 		return ret;
 	}
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
+	/* display codec can powered off after link reset */
+	if (HDA_IDISP_CODEC(bus->codec_mask))
+		hda_codec_i915_display_power(sdev, false);
+#endif
+
 	return 0;
 }
 
@@ -605,6 +611,12 @@ static int hda_resume(struct snd_sof_dev *sdev, bool runtime_resume)
 	struct hdac_ext_link *hlink = NULL;
 #endif
 	int ret;
+
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
+	/* display codec must be powered before link reset */
+	if (HDA_IDISP_CODEC(bus->codec_mask))
+		hda_codec_i915_display_power(sdev, true);
+#endif
 
 	/*
 	 * clear TCSEL to clear playback on some HD Audio
