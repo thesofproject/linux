@@ -630,17 +630,6 @@ struct sdw_slave {
 
 #define dev_to_sdw_dev(_dev) container_of(_dev, struct sdw_slave, dev)
 
-struct sdw_master_device {
-	struct device dev;
-	int link_id;
-	struct sdw_master_driver *driver;
-	void *pdata;
-	bool pm_runtime_suspended;
-};
-
-#define dev_to_sdw_master_device(d)	\
-	container_of(d, struct sdw_master_device, dev)
-
 struct sdw_driver {
 	const char *name;
 
@@ -652,31 +641,6 @@ struct sdw_driver {
 	const struct sdw_device_id *id_table;
 	const struct sdw_slave_ops *ops;
 
-	struct device_driver driver;
-};
-
-/**
- * struct sdw_master_driver - SoundWire 'Master Device' driver
- *
- * @probe: initializations and allocation (hardware may not be enabled yet)
- * @startup: initialization handled after the hardware is enabled, all
- * clock/power dependencies are available
- * @shutdown: cleanups before hardware is disabled (optional)
- * @free: free all remaining resources
- * @autonomous_clock_stop_enable: enable/disable driver control while
- * in clock-stop mode, typically in always-on/D0ix modes. When the driver
- * yields control, another entity in the system (typically firmware
- * running on an always-on microprocessor) is responsible to tracking
- * Slave-initiated wakes
- */
-struct sdw_master_driver {
-	int (*probe)(struct sdw_master_device *md, void *link_ctx);
-	int (*startup)(struct sdw_master_device *md);
-	int (*shutdown)(struct sdw_master_device *md);
-	int (*remove)(struct sdw_master_device *md);
-	int (*autonomous_clock_stop_enable)(struct sdw_master_device *md,
-					    bool state);
-	void (*process_wake_event)(struct sdw_master_device *md);
 	struct device_driver driver;
 };
 
@@ -868,12 +832,6 @@ struct sdw_bus {
 
 int sdw_add_bus_master(struct sdw_bus *bus);
 void sdw_delete_bus_master(struct sdw_bus *bus);
-
-struct sdw_master_device
-*sdw_master_device_add(struct sdw_master_driver *driver,
-		       struct device *parent,
-		       struct fwnode_handle *fwnode,
-		       int link_id);
 
 /**
  * sdw_port_config: Master or Slave Port configuration

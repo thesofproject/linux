@@ -47,19 +47,15 @@ int sdw_slave_modalias(const struct sdw_slave *slave, char *buf, size_t size)
 			slave->id.mfg_id, slave->id.part_id);
 }
 
-int sdw_uevent(struct device *dev, struct kobj_uevent_env *env)
+static int sdw_uevent(struct device *dev, struct kobj_uevent_env *env)
 {
-	struct sdw_slave *slave;
+	struct sdw_slave *slave = dev_to_sdw_dev(dev);
 	char modalias[32];
 
-	if (is_sdw_slave(dev)) {
-		slave = dev_to_sdw_dev(dev);
+	sdw_slave_modalias(slave, modalias, sizeof(modalias));
 
-		sdw_slave_modalias(slave, modalias, sizeof(modalias));
-
-		if (add_uevent_var(env, "MODALIAS=%s", modalias))
-			return -ENOMEM;
-	}
+	if (add_uevent_var(env, "MODALIAS=%s", modalias))
+		return -ENOMEM;
 
 	return 0;
 }
@@ -67,6 +63,7 @@ int sdw_uevent(struct device *dev, struct kobj_uevent_env *env)
 struct bus_type sdw_bus_type = {
 	.name = "soundwire",
 	.match = sdw_bus_match,
+	.uevent = sdw_uevent,
 };
 EXPORT_SYMBOL_GPL(sdw_bus_type);
 

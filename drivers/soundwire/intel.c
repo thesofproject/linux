@@ -13,12 +13,12 @@
 #include <linux/io.h>
 #include <linux/pm_runtime.h>
 #include <linux/platform_device.h>
+#include <linux/pm_runtime.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
 #include <linux/soundwire/sdw_registers.h>
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_intel.h>
-#include <linux/soundwire/sdw_type.h>
 #include "cadence_master.h"
 #include "bus.h"
 #include "intel.h"
@@ -1300,24 +1300,24 @@ static int intel_init(struct sdw_intel *sdw)
 /*
  * probe and init
  */
-static int intel_master_probe(struct sdw_master_device *md, void *link_ctx)
+static int intel_master_probe(struct platform_device *pdev)
 {
+	struct sdw_intel_link_res *parent_res;
 	struct sdw_intel *sdw;
 	int ret;
 
-	sdw = devm_kzalloc(&md->dev, sizeof(*sdw), GFP_KERNEL);
+	sdw = devm_kzalloc(&pdev->dev, sizeof(*sdw), GFP_KERNEL);
 	if (!sdw)
 		return -ENOMEM;
 
-	sdw->instance = md->link_id;
-	sdw->link_res = link_ctx;
-	sdw->cdns.dev = &md->dev;
+	sdw->instance = pdev->id;
+	sdw->link_res = dev_get_platdata(&pdev->dev);
+	sdw->cdns.dev = &pdev->dev;
 	sdw->cdns.registers = sdw->link_res->registers;
-	sdw->cdns.instance = md->link_id;
+	sdw->cdns.instance = pdev->id;
 	sdw->cdns.msg_count = 0;
-	sdw->cdns.bus.dev = &md->dev;
-	sdw->cdns.bus.link_id = md->link_id;
-	sdw->link_res->cdns = &sdw->cdns;
+	sdw->cdns.bus.dev = &pdev->dev;
+	sdw->cdns.bus.link_id = pdev->id;
 
 	sdw_cdns_probe(&sdw->cdns);
 
@@ -1325,41 +1325,41 @@ static int intel_master_probe(struct sdw_master_device *md, void *link_ctx)
 	sdw_intel_ops.read_prop = intel_prop_read;
 	sdw->cdns.bus.ops = &sdw_intel_ops;
 
-	md->pdata = sdw;
-
 	/* set driver data, accessed by snd_soc_dai_set_drvdata() */
-	dev_set_drvdata(&md->dev, &sdw->cdns);
+	dev_set_drvdata(&pdev->dev, &sdw->cdns);
 
 	/* use generic bandwidth allocation algorithm */
 	sdw->cdns.bus.compute_params = sdw_compute_params;
 
 	ret = sdw_add_bus_master(&sdw->cdns.bus);
 	if (ret) {
-		dev_err(&md->dev, "sdw_add_bus_master fail: %d\n", ret);
+		dev_err(&pdev->dev, "sdw_add_bus_master fail: %d\n", ret);
 		return ret;
 	}
 
-	if (sdw->cdns.bus.prop.hw_disabled)
-		dev_info(&md->dev,
-			 "SoundWire master %d is disabled, will be ignored\n",
+	if (sdw->cdns.bus.prop.hw_disabled) {
+		dev_info(&pdev->dev, "SoundWire master %d is disabled, ignoring\n",
 			 sdw->cdns.bus.link_id);
+	}
+
+	parent_res = sdw->link_res->parent_res;
+	complete(&parent_res->probe_complete);
+	parent_res->cdns = &sdw->cdns;
 
 	return 0;
 }
 
-static int intel_master_startup(struct sdw_master_device *md)
+int intel_master_startup(struct platform_device *pdev)
 {
+	struct sdw_cdns *cdns = platform_get_drvdata(pdev);
+	struct sdw_intel *sdw = cdns_to_intel(cdns);
 	struct sdw_cdns_stream_config config;
-	struct sdw_intel *sdw;
 	int link_flags;
 	u32 clock_stop_quirks;
 	int ret;
 
-	sdw = md->pdata;
-
 	if (sdw->cdns.bus.prop.hw_disabled) {
-		dev_info(&md->dev,
-			 "SoundWire master %d is disabled, ignoring\n",
+		dev_info(&pdev->dev, "SoundWire master %d is disabled, ignoring\n",
 			 sdw->cdns.bus.link_id);
 		return 0;
 	}
@@ -1402,12 +1402,12 @@ static int intel_master_startup(struct sdw_master_device *md)
 	/* Enable runtime PM */
 	link_flags = md_flags >> (sdw->cdns.bus.link_id * 8);
 	if (!(link_flags & SDW_INTEL_MASTER_DISABLE_PM_RUNTIME)) {
-		pm_runtime_set_autosuspend_delay(&md->dev, 3000);
-		pm_runtime_use_autosuspend(&md->dev);
-		pm_runtime_mark_last_busy(&md->dev);
+		pm_runtime_set_autosuspend_delay(&pdev->dev, 3000);
+		pm_runtime_use_autosuspend(&pdev->dev);
+		pm_runtime_mark_last_busy(&pdev->dev);
 
-		pm_runtime_set_active(&md->dev);
-		pm_runtime_enable(&md->dev);
+		pm_runtime_set_active(&pdev->dev);
+		pm_runtime_enable(&pdev->dev);
 	}
 
 	clock_stop_quirks = sdw->link_res->clock_stop_quirks;
@@ -1421,7 +1421,7 @@ static int intel_master_startup(struct sdw_master_device *md)
 		 * no effect if pm_runtime is disabled by the user via
 		 * a module parameter for testing purposes.
 		 */
-		pm_runtime_get_noresume(&md->dev);
+		pm_runtime_get_noresume(&pdev->dev);
 	}
 
 	/*
@@ -1438,7 +1438,7 @@ static int intel_master_startup(struct sdw_master_device *md)
 	 * definition of Master properties.
 	 */
 	if (!(link_flags & SDW_INTEL_MASTER_DISABLE_PM_RUNTIME_IDLE))
-		pm_runtime_idle(&md->dev);
+		pm_runtime_idle(&pdev->dev);
 
 	return 0;
 
@@ -1448,14 +1448,14 @@ err_init:
 	sdw_delete_bus_master(&sdw->cdns.bus);
 	return ret;
 }
+EXPORT_SYMBOL(intel_master_startup);
 
-static int intel_master_remove(struct sdw_master_device *md)
+static int intel_master_remove(struct platform_device *pdev)
 {
-	struct sdw_intel *sdw;
+	struct sdw_cdns *cdns = platform_get_drvdata(pdev);
+	struct sdw_intel *sdw = cdns_to_intel(cdns);
 
-	pm_runtime_disable(&md->dev);
-
-	sdw = md->pdata;
+	pm_runtime_disable(&pdev->dev);
 
 	/*
 	 * Since pm_runtime is already disabled, we don't decrease
@@ -1470,33 +1470,30 @@ static int intel_master_remove(struct sdw_master_device *md)
 	}
 	sdw_delete_bus_master(&sdw->cdns.bus);
 
-	device_unregister(&md->dev);
-
 	return 0;
 }
 
-static void intel_master_process_wakeen_event(struct sdw_master_device *md)
+int intel_master_process_wakeen_event(struct platform_device *pdev)
 {
-	struct sdw_intel *sdw;
+	struct sdw_cdns *cdns = platform_get_drvdata(pdev);
+	struct sdw_intel *sdw = cdns_to_intel(cdns);
 	struct sdw_slave *slave;
 	struct sdw_bus *bus;
 	void __iomem *shim;
 	u16 wake_sts;
 
-	sdw = md->pdata;
-
 	if (sdw->cdns.bus.prop.hw_disabled) {
-		dev_info(&md->dev,
+		dev_info(&pdev->dev,
 			 "SoundWire master %d is disabled, ignoring\n",
 			 sdw->cdns.bus.link_id);
-		return;
+		return 0;
 	}
 
 	shim = sdw->link_res->shim;
 	wake_sts = intel_readw(shim, SDW_SHIM_WAKESTS);
 
 	if (!(wake_sts & BIT(sdw->instance)))
-		return;
+		return 0;
 
 	/* disable WAKEEN interrupt ASAP to prevent interrupt flood */
 	intel_shim_wake(sdw, false);
@@ -1516,7 +1513,10 @@ static void intel_master_process_wakeen_event(struct sdw_master_device *md)
 		if (slave->dev_num_sticky && slave->prop.wake_capable)
 			pm_request_resume(&slave->dev);
 	}
+
+	return 0;
 }
+EXPORT_SYMBOL(intel_master_process_wakeen_event);
 
 /*
  * PM calls
@@ -1526,7 +1526,6 @@ static void intel_master_process_wakeen_event(struct sdw_master_device *md)
 
 static int intel_suspend(struct device *dev)
 {
-	struct sdw_master_device *md = dev_to_sdw_master_device(dev);
 	struct sdw_cdns *cdns = dev_get_drvdata(dev);
 	struct sdw_intel *sdw = cdns_to_intel(cdns);
 	u32 clock_stop_quirks;
@@ -1547,7 +1546,7 @@ static int intel_suspend(struct device *dev)
 		 * keep track of the state for the system resume, where
 		 * we will need to reset the pm_runtime status to active
 		 */
-		md->pm_runtime_suspended = true;
+		sdw->link_res->pm_runtime_suspended = true;
 		clock_stop_quirks = sdw->link_res->clock_stop_quirks;
 
 		if ((clock_stop_quirks & SDW_INTEL_CLK_STOP_BUS_RESET ||
@@ -1649,7 +1648,6 @@ static int intel_suspend_runtime(struct device *dev)
 
 static int intel_resume(struct device *dev)
 {
-	struct sdw_master_device *md = dev_to_sdw_master_device(dev);
 	struct sdw_cdns *cdns = dev_get_drvdata(dev);
 	struct sdw_intel *sdw = cdns_to_intel(cdns);
 	int link_flags;
@@ -1661,7 +1659,7 @@ static int intel_resume(struct device *dev)
 		return 0;
 	}
 
-	if (md->pm_runtime_suspended) {
+	if (sdw->link_res->pm_runtime_suspended) {
 		dev_dbg(dev,
 			"%s: pm_runtime status was suspended, forcing active\n",
 			__func__);
@@ -1672,11 +1670,11 @@ static int intel_resume(struct device *dev)
 		pm_runtime_mark_last_busy(dev);
 		pm_runtime_enable(dev);
 
-		md->pm_runtime_suspended = false;
+		sdw->link_res->pm_runtime_suspended = false;
 
 		link_flags = md_flags >> (sdw->cdns.bus.link_id * 8);
 		if (!(link_flags & SDW_INTEL_MASTER_DISABLE_PM_RUNTIME_IDLE))
-			pm_runtime_idle(&md->dev);
+			pm_runtime_idle(dev);
 	}
 
 	ret = intel_init(sdw);
@@ -1832,19 +1830,16 @@ static const struct dev_pm_ops intel_pm = {
 	SET_RUNTIME_PM_OPS(intel_suspend_runtime, intel_resume_runtime, NULL)
 };
 
-struct sdw_master_driver intel_sdw_driver = {
+static struct platform_driver sdw_intel_drv = {
+	.probe = intel_master_probe,
+	.remove = intel_master_remove,
 	.driver = {
-		.name = "intel-sdw",
-		.owner = THIS_MODULE,
-		.bus = &sdw_bus_type,
+		.name = "int-sdw",
 		.pm = &intel_pm,
 	},
-	.probe = intel_master_probe,
-	.startup = intel_master_startup,
-	.process_wake_event = intel_master_process_wakeen_event,
-	.remove = intel_master_remove,
 };
-EXPORT_SYMBOL_NS(intel_sdw_driver, SOUNDWIRE_INTEL);
+
+module_platform_driver(sdw_intel_drv);
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_ALIAS("platform:int-sdw");
