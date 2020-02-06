@@ -645,7 +645,7 @@ skip_soundwire:
 	hda_codec_probe_bus(sdev, hda_codec_use_common_hdmi);
 
 	if (!HDA_IDISP_CODEC(bus->codec_mask))
-		hda_codec_i915_display_power(sdev, false);
+		hda_codec_i915_exit(sdev);
 
 	/*
 	 * we are done probing so decrement link counts
