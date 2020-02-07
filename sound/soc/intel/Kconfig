@@ -208,6 +208,7 @@ config SND_SOC_INTEL_SKYLAKE_SSP_CLK
 
 config SND_SOC_INTEL_SKYLAKE_HDAUDIO_CODEC
 	bool "HDAudio codec support"
+	depends on !SND_SOC_SOF_HDA_AUDIO_CODEC
 	help
 	  This option broke audio on Linus' Skylake laptop in December 2018
 	  and the race conditions during the probe were not fixed since.
