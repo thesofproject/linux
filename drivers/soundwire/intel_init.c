@@ -69,8 +69,10 @@ static int sdw_intel_cleanup(struct sdw_intel_ctx *ctx)
 		if (link_mask && !(link_mask & BIT(i)))
 			continue;
 
-		if (!IS_ERR_OR_NULL(link->md))
+		if (!IS_ERR_OR_NULL(link->md)) {
+			pm_runtime_disable(&link->md->dev);
 			device_unregister(&link->md->dev);
+		}
 
 		if (!link->clock_stop_quirks)
 			pm_runtime_put_noidle(link->dev);
