@@ -755,9 +755,12 @@ static void sof_parse_uuid_tokens(struct snd_soc_component *scomp,
 				  void *object,
 				  const struct sof_topology_token *tokens,
 				  int count,
-				  struct snd_soc_tplg_vendor_array *array)
+				  struct snd_soc_tplg_vendor_array *array,
+				  int *index, size_t objsize)
 {
 	struct snd_soc_tplg_vendor_uuid_elem *elem;
+	bool match = false;
+	u32 offset;
 	int i, j;
 
 	/* parse element by element */
@@ -774,6 +777,19 @@ static void sof_parse_uuid_tokens(struct snd_soc_component *scomp,
 			if (tokens[j].token != le32_to_cpu(elem->token))
 				continue;
 
+			/*
+			 * Topology could contain multiple vendor tuples of the
+			 * same type. Compute offset to save the tokens in the
+			 * appropriate array within the destination object.
+			 */
+			offset = *index * objsize;
+
+			/* increment index for the first matched token */
+			if (index && !match) {
+				match = true;
+				(*index)++;
+			}
+
 			/* matched - now load token */
 			tokens[j].get_token(elem, object, tokens[j].offset,
 					    tokens[j].size);
@@ -785,9 +801,12 @@ static void sof_parse_string_tokens(struct snd_soc_component *scomp,
 				    void *object,
 				    const struct sof_topology_token *tokens,
 				    int count,
-				    struct snd_soc_tplg_vendor_array *array)
+				    struct snd_soc_tplg_vendor_array *array,
+				    int *index, size_t objsize)
 {
 	struct snd_soc_tplg_vendor_string_elem *elem;
+	bool match = false;
+	u32 offset;
 	int i, j;
 
 	/* parse element by element */
@@ -803,6 +822,19 @@ static void sof_parse_string_tokens(struct snd_soc_component *scomp,
 			/* match token id */
 			if (tokens[j].token != le32_to_cpu(elem->token))
 				continue;
+
+			/*
+			 * Topology could contain multiple vendor tuples of the
+			 * same type. Compute offset to save the tokens in the
+			 * appropriate array within the destination object.
+			 */
+			offset = *index * objsize;
+
+			/* increment index for the first matched token */
+			if (index && !match) {
+				match = true;
+				(*index)++;
+			}
 
 			/* matched - now load token */
 			tokens[j].get_token(elem, object, tokens[j].offset,
@@ -892,11 +924,11 @@ static int sof_parse_tokens(struct snd_soc_component *scomp,
 		switch (le32_to_cpu(array->type)) {
 		case SND_SOC_TPLG_TUPLE_TYPE_UUID:
 			sof_parse_uuid_tokens(scomp, object, tokens, count,
-					      array);
+					      array, &index, objsize);
 			break;
 		case SND_SOC_TPLG_TUPLE_TYPE_STRING:
 			sof_parse_string_tokens(scomp, object, tokens, count,
-						array);
+						array, &index, objsize);
 			break;
 		case SND_SOC_TPLG_TUPLE_TYPE_BOOL:
 		case SND_SOC_TPLG_TUPLE_TYPE_BYTE:
