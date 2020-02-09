@@ -1175,6 +1175,11 @@ void hda_machine_select(struct snd_sof_dev *sdev)
 	if (mach) {
 		sof_pdata->tplg_filename = mach->sof_tplg_filename;
 		sof_pdata->machine = mach;
+
+		if (mach->link_mask) {
+			mach->mach_params.links = mach->links;
+			mach->mach_params.link_mask = mach->link_mask;
+		}
 	}
 
 	/*
