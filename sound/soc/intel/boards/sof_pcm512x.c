@@ -138,6 +138,10 @@ static int sof_card_late_probe(struct snd_soc_card *card)
 
 	pcm = list_first_entry(&ctx->hdmi_pcm_list, struct sof_hdmi_pcm, head);
 
+	if (strcmp("snd_hda_codec_hdmi",
+		   pcm->codec_dai->component->dev->driver->name))
+		return 0;
+
 	return hda_dsp_hdmi_build_controls(card, pcm->codec_dai->component);
 }
 #else
