@@ -519,14 +519,12 @@ static int hda_init(struct snd_sof_dev *sdev)
 	/* HDA base */
 	sdev->bar[HDA_DSP_HDA_BAR] = bus->remap_addr;
 
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
 	/* init i915 and HDMI codecs */
 	ret = hda_codec_i915_init(sdev);
 	if (ret < 0) {
 		dev_err(sdev->dev, "error: init i915 and HDMI codec failed\n");
 		return ret;
 	}
-#endif
 
 	/* get controller capabilities */
 	ret = hda_dsp_ctrl_get_caps(sdev);
@@ -645,7 +643,7 @@ skip_soundwire:
 	hda_codec_probe_bus(sdev, hda_codec_use_common_hdmi);
 
 	if (!HDA_IDISP_CODEC(bus->codec_mask))
-		hda_codec_i915_display_power(sdev, false);
+		hda_codec_i915_exit(sdev);
 
 	/*
 	 * we are done probing so decrement link counts
@@ -884,6 +882,7 @@ free_streams:
 	iounmap(sdev->bar[HDA_DSP_BAR]);
 hdac_bus_unmap:
 	iounmap(bus->remap_addr);
+	hda_codec_i915_exit(sdev);
 err:
 	return ret;
 }

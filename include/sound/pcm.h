@@ -1415,6 +1415,15 @@ static inline u64 pcm_format_to_bits(snd_pcm_format_t pcm_format)
 	return 1ULL << (__force int) pcm_format;
 }
 
+/**
+ * pcm_for_each_format - helper to iterate for each format type
+ * @f: the iterator variable in snd_pcm_format_t type
+ */
+#define pcm_for_each_format(f)						\
+	for ((f) = SNDRV_PCM_FORMAT_FIRST;				\
+	     (__force int)(f) <= (__force int)SNDRV_PCM_FORMAT_LAST;	\
+	     (f) = (__force snd_pcm_format_t)((__force int)(f) + 1))
+
 /* printk helpers */
 #define pcm_err(pcm, fmt, args...) \
 	dev_err((pcm)->card->dev, fmt, ##args)
@@ -1450,7 +1459,7 @@ struct snd_pcm_status64 {
 #define SNDRV_PCM_IOCTL_STATUS_EXT64	_IOWR('A', 0x24, struct snd_pcm_status64)
 
 struct snd_pcm_status32 {
-	s32 state;		/* stream state */
+	snd_pcm_state_t state;		/* stream state */
 	s32 trigger_tstamp_sec;	/* time when stream was started/stopped/paused */
 	s32 trigger_tstamp_nsec;
 	s32 tstamp_sec;		/* reference timestamp */
@@ -1461,7 +1470,7 @@ struct snd_pcm_status32 {
 	u32 avail;		/* number of frames available */
 	u32 avail_max;		/* max frames available on hw since last status */
 	u32 overrange;		/* count of ADC (capture) overrange detections from last status */
-	s32 suspended_state;	/* suspended stream state */
+	snd_pcm_state_t suspended_state;	/* suspended stream state */
 	u32 audio_tstamp_data;	/* needed for 64-bit alignment, used for configs/report to/from userspace */
 	s32 audio_tstamp_sec;	/* sample counter, wall clock, PHC or on-demand sync'ed */
 	s32 audio_tstamp_nsec;
