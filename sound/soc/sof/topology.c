@@ -753,13 +753,14 @@ static const struct sof_topology_token led_tokens[] = {
 	 get_token_u32, offsetof(struct snd_sof_led_control, direction), 0},
 };
 
-static void sof_parse_uuid_tokens(struct snd_soc_component *scomp,
-				  void *object,
-				  const struct sof_topology_token *tokens,
-				  int count,
-				  struct snd_soc_tplg_vendor_array *array)
+static int sof_parse_uuid_tokens(struct snd_soc_component *scomp,
+				 void *object,
+				 const struct sof_topology_token *tokens,
+				 int count,
+				 struct snd_soc_tplg_vendor_array *array)
 {
 	struct snd_soc_tplg_vendor_uuid_elem *elem;
+	int found = 0;
 	int i, j;
 
 	/* parse element by element */
@@ -779,17 +780,22 @@ static void sof_parse_uuid_tokens(struct snd_soc_component *scomp,
 			/* matched - now load token */
 			tokens[j].get_token(elem, object, tokens[j].offset,
 					    tokens[j].size);
+
+			found++;
 		}
 	}
+
+	return found;
 }
 
-static void sof_parse_string_tokens(struct snd_soc_component *scomp,
-				    void *object,
-				    const struct sof_topology_token *tokens,
-				    int count,
-				    struct snd_soc_tplg_vendor_array *array)
+static int sof_parse_string_tokens(struct snd_soc_component *scomp,
+				   void *object,
+				   const struct sof_topology_token *tokens,
+				   int count,
+				   struct snd_soc_tplg_vendor_array *array)
 {
 	struct snd_soc_tplg_vendor_string_elem *elem;
+	int found = 0;
 	int i, j;
 
 	/* parse element by element */
@@ -809,19 +815,24 @@ static void sof_parse_string_tokens(struct snd_soc_component *scomp,
 			/* matched - now load token */
 			tokens[j].get_token(elem, object, tokens[j].offset,
 					    tokens[j].size);
+
+			found++;
 		}
 	}
+
+	return found;
 }
 
-static void sof_parse_word_tokens(struct snd_soc_component *scomp,
-				  void *object,
-				  const struct sof_topology_token *tokens,
-				  int count,
-				  struct snd_soc_tplg_vendor_array *array)
+static int sof_parse_word_tokens(struct snd_soc_component *scomp,
+				 void *object,
+				 const struct sof_topology_token *tokens,
+				 int count,
+				 struct snd_soc_tplg_vendor_array *array)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_tplg_vendor_value_elem *elem;
 	size_t size = sizeof(struct sof_ipc_dai_dmic_pdm_ctrl);
+	int found = 0;
 	int i, j;
 	u32 offset;
 	u32 *index = NULL;
@@ -881,8 +892,12 @@ static void sof_parse_word_tokens(struct snd_soc_component *scomp,
 			tokens[j].get_token(elem, object,
 					    offset + tokens[j].offset,
 					    tokens[j].size);
+
+			found++;
 		}
 	}
+
+	return found;
 }
 
 static int sof_parse_tokens(struct snd_soc_component *scomp,
@@ -892,9 +907,10 @@ static int sof_parse_tokens(struct snd_soc_component *scomp,
 			    struct snd_soc_tplg_vendor_array *array,
 			    int priv_size)
 {
+	int found = 0;
 	int asize;
 
-	while (priv_size > 0) {
+	while (priv_size > 0 && found < count) {
 		asize = le32_to_cpu(array->size);
 
 		/* validate asize */
@@ -915,19 +931,19 @@ static int sof_parse_tokens(struct snd_soc_component *scomp,
 		/* call correct parser depending on type */
 		switch (le32_to_cpu(array->type)) {
 		case SND_SOC_TPLG_TUPLE_TYPE_UUID:
-			sof_parse_uuid_tokens(scomp, object, tokens, count,
-					      array);
+			found += sof_parse_uuid_tokens(scomp, object, tokens,
+						       count, array);
 			break;
 		case SND_SOC_TPLG_TUPLE_TYPE_STRING:
-			sof_parse_string_tokens(scomp, object, tokens, count,
-						array);
+			found += sof_parse_string_tokens(scomp, object, tokens,
+							 count, array);
 			break;
 		case SND_SOC_TPLG_TUPLE_TYPE_BOOL:
 		case SND_SOC_TPLG_TUPLE_TYPE_BYTE:
 		case SND_SOC_TPLG_TUPLE_TYPE_WORD:
 		case SND_SOC_TPLG_TUPLE_TYPE_SHORT:
-			sof_parse_word_tokens(scomp, object, tokens, count,
-					      array);
+			found += sof_parse_word_tokens(scomp, object, tokens,
+						       count, array);
 			break;
 		default:
 			dev_err(scomp->dev, "error: unknown token type %d\n",
