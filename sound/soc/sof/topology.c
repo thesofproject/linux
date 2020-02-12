@@ -2644,10 +2644,11 @@ static int sof_link_ssp_load(struct snd_soc_component *scomp, int index,
 	sof_dai_set_format(hw_config, config);
 
 	/* init IPC */
-	memset(&config->ssp, 0, sizeof(struct sof_ipc_dai_ssp_params));
+	memset(&config->dai_data[0].ssp, 0,
+	       sizeof(struct sof_ipc_dai_ssp_params));
 	config->hdr.size = size;
 
-	ret = sof_parse_tokens(scomp, &config->ssp, ssp_tokens,
+	ret = sof_parse_tokens(scomp, &config->dai_data[0].ssp, ssp_tokens,
 			       ARRAY_SIZE(ssp_tokens), private->array,
 			       le32_to_cpu(private->size));
 	if (ret != 0) {
@@ -2656,30 +2657,37 @@ static int sof_link_ssp_load(struct snd_soc_component *scomp, int index,
 		return ret;
 	}
 
-	config->ssp.mclk_rate = le32_to_cpu(hw_config->mclk_rate);
-	config->ssp.bclk_rate = le32_to_cpu(hw_config->bclk_rate);
-	config->ssp.fsync_rate = le32_to_cpu(hw_config->fsync_rate);
-	config->ssp.tdm_slots = le32_to_cpu(hw_config->tdm_slots);
-	config->ssp.tdm_slot_width = le32_to_cpu(hw_config->tdm_slot_width);
-	config->ssp.mclk_direction = hw_config->mclk_direction;
-	config->ssp.rx_slots = le32_to_cpu(hw_config->rx_slots);
-	config->ssp.tx_slots = le32_to_cpu(hw_config->tx_slots);
+	config->dai_data[0].ssp.mclk_rate = le32_to_cpu(hw_config->mclk_rate);
+	config->dai_data[0].ssp.bclk_rate = le32_to_cpu(hw_config->bclk_rate);
+	config->dai_data[0].ssp.fsync_rate = le32_to_cpu(hw_config->fsync_rate);
+	config->dai_data[0].ssp.tdm_slots = le32_to_cpu(hw_config->tdm_slots);
+	config->dai_data[0].ssp.tdm_slot_width =
+		le32_to_cpu(hw_config->tdm_slot_width);
+	config->dai_data[0].ssp.mclk_direction = hw_config->mclk_direction;
+	config->dai_data[0].ssp.rx_slots = le32_to_cpu(hw_config->rx_slots);
+	config->dai_data[0].ssp.tx_slots = le32_to_cpu(hw_config->tx_slots);
 
 	dev_dbg(scomp->dev, "tplg: config SSP%d fmt 0x%x mclk %d bclk %d fclk %d width (%d)%d slots %d mclk id %d quirks %d\n",
 		config->dai_index, config->format,
-		config->ssp.mclk_rate, config->ssp.bclk_rate,
-		config->ssp.fsync_rate, config->ssp.sample_valid_bits,
-		config->ssp.tdm_slot_width, config->ssp.tdm_slots,
-		config->ssp.mclk_id, config->ssp.quirks);
+		config->dai_data[0].ssp.mclk_rate,
+		config->dai_data[0].ssp.bclk_rate,
+		config->dai_data[0].ssp.fsync_rate,
+		config->dai_data[0].ssp.sample_valid_bits,
+		config->dai_data[0].ssp.tdm_slot_width,
+		config->dai_data[0].ssp.tdm_slots,
+		config->dai_data[0].ssp.mclk_id,
+		config->dai_data[0].ssp.quirks);
 
 	/* validate SSP fsync rate and channel count */
-	if (config->ssp.fsync_rate < 8000 || config->ssp.fsync_rate > 192000) {
+	if (config->dai_data[0].ssp.fsync_rate < 8000 ||
+	    config->dai_data[0].ssp.fsync_rate > 192000) {
 		dev_err(scomp->dev, "error: invalid fsync rate for SSP%d\n",
 			config->dai_index);
 		return -EINVAL;
 	}
 
-	if (config->ssp.tdm_slots < 1 || config->ssp.tdm_slots > 8) {
+	if (config->dai_data[0].ssp.tdm_slots < 1 ||
+	    config->dai_data[0].ssp.tdm_slots > 8) {
 		dev_err(scomp->dev, "error: invalid channel count for SSP%d\n",
 			config->dai_index);
 		return -EINVAL;
@@ -2721,10 +2729,11 @@ static int sof_link_sai_load(struct snd_soc_component *scomp, int index,
 	sof_dai_set_format(hw_config, config);
 
 	/* init IPC */
-	memset(&config->sai, 0, sizeof(struct sof_ipc_dai_sai_params));
+	memset(&config->dai_data[0].sai, 0,
+	       sizeof(struct sof_ipc_dai_sai_params));
 	config->hdr.size = size;
 
-	ret = sof_parse_tokens(scomp, &config->sai, sai_tokens,
+	ret = sof_parse_tokens(scomp, &config->dai_data[0].sai, sai_tokens,
 			       ARRAY_SIZE(sai_tokens), private->array,
 			       le32_to_cpu(private->size));
 	if (ret != 0) {
@@ -2733,21 +2742,25 @@ static int sof_link_sai_load(struct snd_soc_component *scomp, int index,
 		return ret;
 	}
 
-	config->sai.mclk_rate = le32_to_cpu(hw_config->mclk_rate);
-	config->sai.mclk_direction = hw_config->mclk_direction;
+	config->dai_data[0].sai.mclk_rate = le32_to_cpu(hw_config->mclk_rate);
+	config->dai_data[0].sai.mclk_direction = hw_config->mclk_direction;
 
-	config->sai.tdm_slots = le32_to_cpu(hw_config->tdm_slots);
-	config->sai.tdm_slot_width = le32_to_cpu(hw_config->tdm_slot_width);
-	config->sai.rx_slots = le32_to_cpu(hw_config->rx_slots);
-	config->sai.tx_slots = le32_to_cpu(hw_config->tx_slots);
+	config->dai_data[0].sai.tdm_slots = le32_to_cpu(hw_config->tdm_slots);
+	config->dai_data[0].sai.tdm_slot_width =
+		le32_to_cpu(hw_config->tdm_slot_width);
+	config->dai_data[0].sai.rx_slots = le32_to_cpu(hw_config->rx_slots);
+	config->dai_data[0].sai.tx_slots = le32_to_cpu(hw_config->tx_slots);
 
 	dev_info(scomp->dev,
 		 "tplg: config SAI%d fmt 0x%x mclk %d width %d slots %d mclk id %d\n",
-		config->dai_index, config->format,
-		config->sai.mclk_rate, config->sai.tdm_slot_width,
-		config->sai.tdm_slots, config->sai.mclk_id);
+		 config->dai_index, config->format,
+		 config->dai_data[0].sai.mclk_rate,
+		 config->dai_data[0].sai.tdm_slot_width,
+		 config->dai_data[0].sai.tdm_slots,
+		 config->dai_data[0].sai.mclk_id);
 
-	if (config->sai.tdm_slots < 1 || config->sai.tdm_slots > 8) {
+	if (config->dai_data[0].sai.tdm_slots < 1 ||
+	    config->dai_data[0].sai.tdm_slots > 8) {
 		dev_err(scomp->dev, "error: invalid channel count for SAI%d\n",
 			config->dai_index);
 		return -EINVAL;
@@ -2789,10 +2802,11 @@ static int sof_link_esai_load(struct snd_soc_component *scomp, int index,
 	sof_dai_set_format(hw_config, config);
 
 	/* init IPC */
-	memset(&config->esai, 0, sizeof(struct sof_ipc_dai_esai_params));
+	memset(&config->dai_data[0].esai, 0,
+	       sizeof(struct sof_ipc_dai_esai_params));
 	config->hdr.size = size;
 
-	ret = sof_parse_tokens(scomp, &config->esai, esai_tokens,
+	ret = sof_parse_tokens(scomp, &config->dai_data[0].esai, esai_tokens,
 			       ARRAY_SIZE(esai_tokens), private->array,
 			       le32_to_cpu(private->size));
 	if (ret != 0) {
@@ -2801,22 +2815,27 @@ static int sof_link_esai_load(struct snd_soc_component *scomp, int index,
 		return ret;
 	}
 
-	config->esai.mclk_rate = le32_to_cpu(hw_config->mclk_rate);
-	config->esai.bclk_rate = le32_to_cpu(hw_config->bclk_rate);
-	config->esai.fsync_rate = le32_to_cpu(hw_config->fsync_rate);
-	config->esai.mclk_direction = hw_config->mclk_direction;
-	config->esai.tdm_slots = le32_to_cpu(hw_config->tdm_slots);
-	config->esai.tdm_slot_width = le32_to_cpu(hw_config->tdm_slot_width);
-	config->esai.rx_slots = le32_to_cpu(hw_config->rx_slots);
-	config->esai.tx_slots = le32_to_cpu(hw_config->tx_slots);
+	config->dai_data[0].esai.mclk_rate = le32_to_cpu(hw_config->mclk_rate);
+	config->dai_data[0].esai.bclk_rate = le32_to_cpu(hw_config->bclk_rate);
+	config->dai_data[0].esai.fsync_rate =
+		le32_to_cpu(hw_config->fsync_rate);
+	config->dai_data[0].esai.mclk_direction = hw_config->mclk_direction;
+	config->dai_data[0].esai.tdm_slots = le32_to_cpu(hw_config->tdm_slots);
+	config->dai_data[0].esai.tdm_slot_width =
+		le32_to_cpu(hw_config->tdm_slot_width);
+	config->dai_data[0].esai.rx_slots = le32_to_cpu(hw_config->rx_slots);
+	config->dai_data[0].esai.tx_slots = le32_to_cpu(hw_config->tx_slots);
 
 	dev_info(scomp->dev,
 		 "tplg: config ESAI%d fmt 0x%x mclk %d width %d slots %d mclk id %d\n",
-		config->dai_index, config->format,
-		config->esai.mclk_rate, config->esai.tdm_slot_width,
-		config->esai.tdm_slots, config->esai.mclk_id);
+		 config->dai_index, config->format,
+		 config->dai_data[0].esai.mclk_rate,
+		 config->dai_data[0].esai.tdm_slot_width,
+		 config->dai_data[0].esai.tdm_slots,
+		 config->dai_data[0].esai.mclk_id);
 
-	if (config->esai.tdm_slots < 1 || config->esai.tdm_slots > 8) {
+	if (config->dai_data[0].esai.tdm_slots < 1 ||
+	    config->dai_data[0].esai.tdm_slots > 8) {
 		dev_err(scomp->dev, "error: invalid channel count for ESAI%d\n",
 			config->dai_index);
 		return -EINVAL;
@@ -2861,10 +2880,11 @@ static int sof_link_dmic_load(struct snd_soc_component *scomp, int index,
 	 * that does not include the PDM controller config array
 	 * Set the common params to 0.
 	 */
-	memset(&config->dmic, 0, sizeof(struct sof_ipc_dai_dmic_params));
+	memset(&config->dai_data[0].dmic, 0,
+	       sizeof(struct sof_ipc_dai_dmic_params));
 
 	/* get DMIC tokens */
-	ret = sof_parse_tokens(scomp, &config->dmic, dmic_tokens,
+	ret = sof_parse_tokens(scomp, &config->dai_data[0].dmic, dmic_tokens,
 			       ARRAY_SIZE(dmic_tokens), private->array,
 			       le32_to_cpu(private->size));
 	if (ret != 0) {
@@ -2879,7 +2899,7 @@ static int sof_link_dmic_load(struct snd_soc_component *scomp, int index,
 	 * This will be the ipc payload for setting dai config
 	 */
 	size = sizeof(*config) + sizeof(struct sof_ipc_dai_dmic_pdm_ctrl) *
-					config->dmic.num_pdm_active;
+					config->dai_data[0].dmic.num_pdm_active;
 
 	ipc_config = kzalloc(size, GFP_KERNEL);
 	if (!ipc_config)
@@ -2899,7 +2919,8 @@ static int sof_link_dmic_load(struct snd_soc_component *scomp, int index,
 	}
 
 	/* get DMIC PDM tokens */
-	ret = sof_parse_tokens(scomp, &ipc_config->dmic.pdm[0], dmic_pdm_tokens,
+	ret = sof_parse_tokens(scomp, &ipc_config->dai_data[0].dmic.pdm[0],
+			       dmic_pdm_tokens,
 			       ARRAY_SIZE(dmic_pdm_tokens), private->array,
 			       le32_to_cpu(private->size));
 	if (ret != 0) {
@@ -2913,34 +2934,38 @@ static int sof_link_dmic_load(struct snd_soc_component *scomp, int index,
 
 	/* debug messages */
 	dev_dbg(scomp->dev, "tplg: config DMIC%d driver version %d\n",
-		ipc_config->dai_index, ipc_config->dmic.driver_ipc_version);
+		ipc_config->dai_index,
+		ipc_config->dai_data[0].dmic.driver_ipc_version);
 	dev_dbg(scomp->dev, "pdmclk_min %d pdm_clkmax %d duty_min %hd\n",
-		ipc_config->dmic.pdmclk_min, ipc_config->dmic.pdmclk_max,
-		ipc_config->dmic.duty_min);
+		ipc_config->dai_data[0].dmic.pdmclk_min,
+		ipc_config->dai_data[0].dmic.pdmclk_max,
+		ipc_config->dai_data[0].dmic.duty_min);
 	dev_dbg(scomp->dev, "duty_max %hd fifo_fs %d num_pdms active %d\n",
-		ipc_config->dmic.duty_max, ipc_config->dmic.fifo_fs,
-		ipc_config->dmic.num_pdm_active);
+		ipc_config->dai_data[0].dmic.duty_max,
+		ipc_config->dai_data[0].dmic.fifo_fs,
+		ipc_config->dai_data[0].dmic.num_pdm_active);
 	dev_dbg(scomp->dev, "fifo word length %hd\n",
-		ipc_config->dmic.fifo_bits);
+		ipc_config->dai_data[0].dmic.fifo_bits);
 
-	for (j = 0; j < ipc_config->dmic.num_pdm_active; j++) {
+	for (j = 0; j < ipc_config->dai_data[0].dmic.num_pdm_active; j++) {
 		dev_dbg(scomp->dev, "pdm %hd mic a %hd mic b %hd\n",
-			ipc_config->dmic.pdm[j].id,
-			ipc_config->dmic.pdm[j].enable_mic_a,
-			ipc_config->dmic.pdm[j].enable_mic_b);
+			ipc_config->dai_data[0].dmic.pdm[j].id,
+			ipc_config->dai_data[0].dmic.pdm[j].enable_mic_a,
+			ipc_config->dai_data[0].dmic.pdm[j].enable_mic_b);
 		dev_dbg(scomp->dev, "pdm %hd polarity a %hd polarity b %hd\n",
-			ipc_config->dmic.pdm[j].id,
-			ipc_config->dmic.pdm[j].polarity_mic_a,
-			ipc_config->dmic.pdm[j].polarity_mic_b);
+			ipc_config->dai_data[0].dmic.pdm[j].id,
+			ipc_config->dai_data[0].dmic.pdm[j].polarity_mic_a,
+			ipc_config->dai_data[0].dmic.pdm[j].polarity_mic_b);
 		dev_dbg(scomp->dev, "pdm %hd clk_edge %hd skew %hd\n",
-			ipc_config->dmic.pdm[j].id,
-			ipc_config->dmic.pdm[j].clk_edge,
-			ipc_config->dmic.pdm[j].skew);
+			ipc_config->dai_data[0].dmic.pdm[j].id,
+			ipc_config->dai_data[0].dmic.pdm[j].clk_edge,
+			ipc_config->dai_data[0].dmic.pdm[j].skew);
 	}
 
 	if (SOF_ABI_VER(v->major, v->minor, v->micro) < SOF_ABI_VER(3, 0, 1)) {
 		/* this takes care of backwards compatible handling of fifo_bits_b */
-		ipc_config->dmic.reserved_2 = ipc_config->dmic.fifo_bits;
+		ipc_config->dai_data[0].dmic.reserved_2 =
+			ipc_config->dai_data[0].dmic.fifo_bits;
 	}
 
 	/* send message to DSP */
@@ -2991,7 +3016,7 @@ static int sof_link_hda_process(struct snd_sof_dev *sdev,
 			config->dai_index = sof_dai->comp_dai.dai_index;
 			found = 1;
 
-			config->hda.link_dma_ch = DMA_CHAN_INVALID;
+			config->dai_data[0].hda.link_dma_ch = DMA_CHAN_INVALID;
 
 			/* save config in dai component */
 			sof_dai->dai_config = kmemdup(config, size, GFP_KERNEL);
@@ -3041,7 +3066,8 @@ static int sof_link_hda_load(struct snd_soc_component *scomp, int index,
 	int ret;
 
 	/* init IPC */
-	memset(&config->hda, 0, sizeof(struct sof_ipc_dai_hda_params));
+	memset(&config->dai_data[0].hda, 0,
+	       sizeof(struct sof_ipc_dai_hda_params));
 	config->hdr.size = size;
 
 	/* get any bespoke DAI tokens */

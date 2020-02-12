@@ -67,7 +67,7 @@ static int sdw_params_stream(struct device *dev,
 	config.hdr.cmd = SOF_IPC_GLB_DAI_MSG | SOF_IPC_DAI_CONFIG;
 	config.type = SOF_DAI_INTEL_ALH;
 	config.dai_index = (link_id << 8) | (d->id);
-	config.alh.stream_id = alh_stream_id;
+	config.dai_data[0].alh.stream_id = alh_stream_id;
 
 	/* send message to DSP */
 	ret = sof_ipc_tx_message(sdev->ipc,
@@ -98,7 +98,7 @@ static int sdw_free_stream(struct device *dev,
 	config.hdr.cmd = SOF_IPC_GLB_DAI_MSG | SOF_IPC_DAI_CONFIG;
 	config.type = SOF_DAI_INTEL_ALH;
 	config.dai_index = (link_id << 8) | d->id;
-	config.alh.stream_id = 0xFFFF; /* invalid value on purpose */
+	config.dai_data[0].alh.stream_id = 0xFFFF; /* invalid value on purpose */
 
 	/* send message to DSP */
 	ret = sof_ipc_tx_message(sdev->ipc,

@@ -51,7 +51,8 @@
 
 /* SSP Configuration Request - SOF_IPC_DAI_SSP_CONFIG */
 struct sof_ipc_dai_ssp_params {
-	struct sof_ipc_hdr hdr;
+	uint32_t subdai_index; /* only used in multi-dai usages */
+	uint32_t reserved0;
 	uint16_t reserved1;
 	uint16_t mclk_id;
 
@@ -83,13 +84,15 @@ struct sof_ipc_dai_ssp_params {
 
 /* HDA Configuration Request - SOF_IPC_DAI_HDA_CONFIG */
 struct sof_ipc_dai_hda_params {
-	struct sof_ipc_hdr hdr;
+	uint32_t subdai_index; /* only used in multi-dai usages */
+	uint32_t reserved0;
 	uint32_t link_dma_ch;
 } __packed;
 
 /* ALH Configuration Request - SOF_IPC_DAI_ALH_CONFIG */
 struct sof_ipc_dai_alh_params {
-	struct sof_ipc_hdr hdr;
+	uint32_t subdai_index; /* only used in multi-dai usages */
+	uint32_t reserved0;
 	uint32_t stream_id;
 
 	/* reserved for future use */
@@ -116,7 +119,7 @@ struct sof_ipc_dai_alh_params {
  * data integrity problems.
  */
 struct sof_ipc_dai_dmic_pdm_ctrl {
-	struct sof_ipc_hdr hdr;
+	uint32_t reserved0[2];
 	uint16_t id;		/**< PDM controller ID */
 
 	uint16_t enable_mic_a;	/**< Use A (left) channel mic (0 or 1)*/
@@ -161,7 +164,8 @@ struct sof_ipc_dai_dmic_pdm_ctrl {
  * treated as an error.
  */
 struct sof_ipc_dai_dmic_params {
-	struct sof_ipc_hdr hdr;
+	uint32_t subdai_index; /* only used in multi-dai usages */
+	uint32_t reserved0;
 	uint32_t driver_ipc_version;	/**< Version (1..N) */
 
 	uint32_t pdmclk_min;	/**< Minimum microphone clock in Hz (100000..N) */

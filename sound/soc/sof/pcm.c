@@ -679,10 +679,10 @@ static int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 	/* read rate and channels from topology */
 	switch (dai->dai_config->type) {
 	case SOF_DAI_INTEL_SSP:
-		rate->min = dai->dai_config->ssp.fsync_rate;
-		rate->max = dai->dai_config->ssp.fsync_rate;
-		channels->min = dai->dai_config->ssp.tdm_slots;
-		channels->max = dai->dai_config->ssp.tdm_slots;
+		rate->min = dai->dai_config->dai_data[0].ssp.fsync_rate;
+		rate->max = dai->dai_config->dai_data[0].ssp.fsync_rate;
+		channels->min = dai->dai_config->dai_data[0].ssp.tdm_slots;
+		channels->max = dai->dai_config->dai_data[0].ssp.tdm_slots;
 
 		dev_dbg(component->dev,
 			"rate_min: %d rate_max: %d\n", rate->min, rate->max);
@@ -707,16 +707,16 @@ static int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 		/* do nothing for ALH dai_link */
 		break;
 	case SOF_DAI_IMX_ESAI:
-		channels->min = dai->dai_config->esai.tdm_slots;
-		channels->max = dai->dai_config->esai.tdm_slots;
+		channels->min = dai->dai_config->dai_data[0].esai.tdm_slots;
+		channels->max = dai->dai_config->dai_data[0].esai.tdm_slots;
 
 		dev_dbg(component->dev,
 			"channels_min: %d channels_max: %d\n",
 			channels->min, channels->max);
 		break;
 	case SOF_DAI_IMX_SAI:
-		channels->min = dai->dai_config->sai.tdm_slots;
-		channels->max = dai->dai_config->sai.tdm_slots;
+		channels->min = dai->dai_config->dai_data[0].sai.tdm_slots;
+		channels->max = dai->dai_config->dai_data[0].sai.tdm_slots;
 
 		dev_dbg(component->dev,
 			"channels_min: %d channels_max: %d\n",

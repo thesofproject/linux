@@ -176,7 +176,7 @@ static int hda_link_config_ipc(struct sof_intel_hda_stream *hda_stream,
 			}
 
 			/* update config with stream tag */
-			config->hda.link_dma_ch = channel;
+			config->dai_data[0].hda.link_dma_ch = channel;
 
 			/* send IPC */
 			ret = sof_ipc_tx_message(hda_stream->sdev->ipc,

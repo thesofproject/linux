@@ -244,7 +244,7 @@ int sof_restore_pipelines(struct device *dev)
 		 * the dai config in the DSP.
 		 */
 		if (config->type == SOF_DAI_INTEL_HDA)
-			config->hda.link_dma_ch = DMA_CHAN_INVALID;
+			config->dai_data[0].hda.link_dma_ch = DMA_CHAN_INVALID;
 
 		ret = sof_ipc_tx_message(sdev->ipc,
 					 config->hdr.cmd, config,
