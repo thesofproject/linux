@@ -73,11 +73,40 @@ void snd_hdac_i915_set_bclk(struct hdac_bus *bus)
 }
 EXPORT_SYMBOL_GPL(snd_hdac_i915_set_bclk);
 
+static int hops_to_pci_root(struct pci_bus *bus)
+{
+	int hops = 0;
+	while (bus->parent) {
+		++hops;
+		bus = bus->parent;
+	}
+	return hops;
+}
+
 static int i915_component_master_match(struct device *dev, int subcomponent,
 				       void *data)
 {
-	return !strcmp(dev->driver->name, "i915") &&
-	       subcomponent == I915_COMPONENT_AUDIO;
+	struct pci_dev *hdac_pci, *i915_pci;
+	struct hdac_bus *bus = data;
+
+	if (!dev_is_pci(dev))
+		return 0;
+
+	hdac_pci = to_pci_dev(bus->dev);
+	i915_pci = to_pci_dev(dev);
+
+	// TODO: change to dev_dbg before upstream submit
+	dev_info(bus->dev, "i915-dev depth %d (%s), audio-dev depth %u (%s)\n",
+		hops_to_pci_root(i915_pci->bus), dev_name(dev),
+		hops_to_pci_root(hdac_pci->bus), dev_name(bus->dev));
+
+	if (!strcmp(dev->driver->name, "i915") &&
+	    subcomponent == I915_COMPONENT_AUDIO &&
+	    (hops_to_pci_root(i915_pci->bus) ==
+	     hops_to_pci_root(hdac_pci->bus)))
+		return 1;
+
+	return 0;
 }
 
 /* check whether intel graphics is present */
