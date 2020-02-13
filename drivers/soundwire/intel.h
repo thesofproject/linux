@@ -28,6 +28,7 @@
  * @cdns: Cadence master descriptor
  * @list: used to walk-through all masters exposed by the same controller
  * @pm_runtime_suspended: flag to avoid resuming before system suspend
+ * @link_mask: global mask needed for power-up/down sequences
  */
 struct sdw_intel_link_res {
 	void *parent_res;
@@ -46,6 +47,7 @@ struct sdw_intel_link_res {
 	struct sdw_cdns *cdns;
 	struct list_head list;
 	bool pm_runtime_suspended;
+	u32 link_mask;
 };
 
 #define SDW_INTEL_QUIRK_MASK_BUS_DISABLE      BIT(1)
