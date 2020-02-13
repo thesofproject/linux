@@ -28,6 +28,7 @@
 struct mc_private {
 	struct list_head hdmi_pcm_list;
 	bool common_hdmi_codec_drv;
+	struct snd_soc_jack sdw_headset;
 };
 
 #if IS_ENABLED(CONFIG_SND_SOC_HDAC_HDMI)
@@ -105,6 +106,52 @@ static int card_late_probe(struct snd_soc_card *card)
 }
 #endif
 
+static struct snd_soc_jack_pin sdw_jack_pins[] = {
+	{
+		.pin    = "Headphones",
+		.mask   = SND_JACK_HEADPHONE,
+	},
+	{
+		.pin    = "AMIC",
+		.mask   = SND_JACK_MICROPHONE,
+	},
+};
+
+static int headset_init(struct snd_soc_pcm_runtime *rtd)
+{
+	struct snd_soc_component *component = rtd->codec_dai->component;
+	struct mc_private *ctx = snd_soc_card_get_drvdata(rtd->card);
+	struct snd_soc_jack *jack;
+	int ret;
+
+	ret = snd_soc_card_jack_new(rtd->card, "Headset Jack",
+				    SND_JACK_HEADSET | SND_JACK_BTN_0 |
+				    SND_JACK_BTN_1 | SND_JACK_BTN_2 |
+				    SND_JACK_BTN_3,
+				    &ctx->sdw_headset,
+				    sdw_jack_pins,
+				    ARRAY_SIZE(sdw_jack_pins));
+	if (ret) {
+		dev_err(rtd->card->dev, "Headset Jack creation failed: %d\n",
+			ret);
+		return ret;
+	}
+
+	jack = &ctx->sdw_headset;
+
+	snd_jack_set_key(jack->jack, SND_JACK_BTN_0, KEY_VOLUMEUP);
+	snd_jack_set_key(jack->jack, SND_JACK_BTN_1, KEY_PLAYPAUSE);
+	snd_jack_set_key(jack->jack, SND_JACK_BTN_2, KEY_VOLUMEDOWN);
+	snd_jack_set_key(jack->jack, SND_JACK_BTN_3, KEY_VOICECOMMAND);
+
+	ret = snd_soc_component_set_jack(component, jack, NULL);
+	if (ret)
+		dev_err(rtd->card->dev, "Headset Jack call-back failed: %d\n",
+			ret);
+
+	return ret;
+}
+
 static const struct snd_soc_dapm_widget widgets[] = {
 	SND_SOC_DAPM_HP("Headphones", NULL),
 	SND_SOC_DAPM_MIC("AMIC", NULL),
@@ -171,6 +218,7 @@ static struct snd_soc_dai_link dailink[] = {
 	{
 		.name = "SDW0-Playback",
 		.id = 0,
+		.init = headset_init,
 		.no_pcm = 1,
 		.dpcm_playback = 1,
 		.nonatomic = true,
