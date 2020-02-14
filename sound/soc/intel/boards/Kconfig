@@ -575,7 +575,6 @@ config SND_SOC_INTEL_SOUNDWIRE_RT711_RT1308_RT715_MACH
 	select SND_SOC_RT711_SDW
 	select SND_SOC_RT1308_SDW
 	select SND_SOC_RT715_SDW
-	select SND_SOC_HDAC_HDMI if SND_SOC_SOF_HDA_LINK
         help
 	  Add support for Intel SoundWire-based platforms connected to RT711,
           RT1308 and RT715
