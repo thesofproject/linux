@@ -1396,30 +1396,19 @@ int sdw_cdns_clock_restart(struct sdw_cdns *cdns, bool bus_reset)
 	 */
 	cdns_updatel(cdns, CDNS_MCP_CONTROL, CDNS_MCP_CONTROL_CMD_ACCEPT, 0);
 
-	if (bus_reset) {
-		/* program maximum length reset to be safe */
-		cdns_updatel(cdns, CDNS_MCP_CONTROL,
-			     CDNS_MCP_CONTROL_RST_DELAY,
-			     CDNS_MCP_CONTROL_RST_DELAY);
-
-		/* use hardware generated reset */
-		cdns_updatel(cdns, CDNS_MCP_CONTROL,
-			     CDNS_MCP_CONTROL_HW_RST,
-			     CDNS_MCP_CONTROL_HW_RST);
-	}
-
-	/* enable bus operations with clock and data */
-	cdns_updatel(cdns, CDNS_MCP_CONFIG,
-		     CDNS_MCP_CONFIG_OP,
-		     CDNS_MCP_CONFIG_OP_NORMAL);
-
-	ret = cdns_config_update(cdns);
-	if (ret < 0) {
-		dev_err(cdns->dev, "%s: config_update failed\n", __func__);
-		return ret;
-	}
-
 	if (!bus_reset) {
+
+		/* enable bus operations with clock and data */
+		cdns_updatel(cdns, CDNS_MCP_CONFIG,
+			     CDNS_MCP_CONFIG_OP,
+			     CDNS_MCP_CONFIG_OP_NORMAL);
+
+		ret = cdns_config_update(cdns);
+		if (ret < 0) {
+			dev_err(cdns->dev, "%s: config_update failed\n", __func__);
+			return ret;
+		}
+
 		ret = sdw_bus_exit_clk_stop(&cdns->bus);
 		if (ret < 0)
 			dev_err(cdns->dev, "bus failed to exit clock stop %d\n", ret);
