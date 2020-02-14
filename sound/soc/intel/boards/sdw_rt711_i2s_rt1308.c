@@ -432,7 +432,7 @@ static int mc_probe(struct platform_device *pdev)
 	card->dev = &pdev->dev;
 
 	/* override platform name, if required */
-	mach = (&pdev->dev)->platform_data;
+	mach = pdev->dev.platform_data;
 	platform_name = mach->mach_params.platform;
 
 	ret = snd_soc_fixup_dai_links_platform_name(card, platform_name);
