@@ -225,7 +225,7 @@ static int bxt_wm8804_probe(struct platform_device *pdev)
 	int ret_val = 0;
 	int i;
 
-	mach = (&pdev->dev)->platform_data;
+	mach = pdev->dev.platform_data;
 	card = &bxt_wm8804_card;
 	card->dev = &pdev->dev;
 
