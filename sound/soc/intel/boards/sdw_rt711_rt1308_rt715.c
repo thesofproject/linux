@@ -947,7 +947,7 @@ static int mc_probe(struct platform_device *pdev)
 
 	card->dev = &pdev->dev;
 
-	mach = (&pdev->dev)->platform_data;
+	mach = pdev->dev.platform_data;
 	ret = sof_card_dai_links_create(&pdev->dev, mach,
 					&card_rt700_rt1308_rt715);
 	if (ret < 0)
