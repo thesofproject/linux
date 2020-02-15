@@ -80,7 +80,7 @@ struct codec_info {
 		     bool playback);
 };
 
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_COMMON_HDMI_CODEC)
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_AUDIO_CODEC)
 static struct snd_soc_jack hdmi[3];
 
 struct hdmi_pcm {
@@ -766,7 +766,7 @@ static int sof_card_dai_links_create(struct device *dev,
 	for (i = 0; i < ARRAY_SIZE(codec_info_list); i++)
 		codec_info_list[i].amp_num = 0;
 
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_COMMON_HDMI_CODEC)
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_AUDIO_CODEC)
 	hdmi_num = sof_rt711_rt1308_rt715_quirk & SOF_SDW_TGL_HDMI ?
 				SOF_TGL_HDMI_COUNT : SOF_PRE_TGL_HDMI_COUNT;
 #endif
@@ -866,7 +866,7 @@ DMIC:
 			      dmic_component, 1, dmic_init, NULL);
 	}
 
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_COMMON_HDMI_CODEC)
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_AUDIO_CODEC)
 	/* HDMI */
 	if (hdmi_num > 0) {
 		idisp_components = devm_kcalloc(dev, hdmi_num,
@@ -941,7 +941,7 @@ static int mc_probe(struct platform_device *pdev)
 
 	dmi_check_system(sof_sdw_rt711_rt1308_rt715_quirk_table);
 
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_COMMON_HDMI_CODEC)
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_AUDIO_CODEC)
 	INIT_LIST_HEAD(&ctx->hdmi_pcm_list);
 #endif
 
