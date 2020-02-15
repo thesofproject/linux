@@ -1044,6 +1044,7 @@ intel_hw_free(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
 
 	dma->hw_params = NULL;
 	dma->pdi = NULL;
+	kfree(dma->stream->name);
 	sdw_release_stream(dma->stream);
 
 	return 0;
