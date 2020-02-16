@@ -32,6 +32,7 @@
 
 #define MAX_NO_PROPS 2
 #define MAX_HDMI_NUM 4
+#define SDW_DMIC_DAI_ID 4
 
 enum {
 	SOF_RT711_JD_SRC_JD1 = 1,
@@ -58,6 +59,7 @@ enum {
 #define SOF_SDW_PCH_DMIC		BIT(4)
 #define SOF_SSP_PORT(x)		(((x) & GENMASK(5, 0)) << 5)
 #define SOF_SSP_GET_PORT(quirk)	(((quirk) >> 5) & GENMASK(5, 0))
+#define SOF_RT715_DAI_ID_FIX		BIT(11)
 
 static unsigned long sof_rt711_rt1308_rt715_quirk = SOF_RT711_JD_SRC_JD1;
 
@@ -222,7 +224,8 @@ static const struct dmi_system_id sof_sdw_rt711_rt1308_rt715_quirk_table[] = {
 			DMI_MATCH(DMI_PRODUCT_NAME, "Latitude"),
 		},
 		.driver_data = (void *)(SOF_RT711_JD_SRC_JD2 |
-					SOF_SDW_MONO_SPK),
+					SOF_SDW_MONO_SPK |
+					SOF_RT715_DAI_ID_FIX),
 	},
 	{
 		.callback = sof_rt711_rt1308_rt715_quirk_cb,
@@ -491,6 +494,19 @@ static void rt1308_init(const struct snd_soc_acpi_link_adr *link,
 	}
 }
 
+static void rt715_init(const struct snd_soc_acpi_link_adr *link,
+		       struct snd_soc_dai_link *dai_links,
+		       struct codec_info *info,
+		       bool playback)
+{
+	/*
+	 * DAI ID is fixed at SDW_DMIC_DAI_ID for 715 to
+	 * keep sdw DMIC and HDMI setting static in UCM
+	 */
+	if (sof_rt711_rt1308_rt715_quirk & SOF_RT715_DAI_ID_FIX)
+		dai_links->id = SDW_DMIC_DAI_ID;
+}
+
 static struct codec_info codec_info_list[] = {
 	{
 		.id = 0x711,
@@ -509,7 +525,8 @@ static struct codec_info codec_info_list[] = {
 	{
 		.id = 0x715,
 		.direction = {false, true},
-		.dai_name = "rt715-aif2"
+		.dai_name = "rt715-aif2",
+		.init = rt715_init,
 	},
 };
 
@@ -576,11 +593,11 @@ static void init_dai_link(struct snd_soc_dai_link *dai_links,
 			  struct snd_soc_dai_link_component *cpus,
 			  char *cpu_name,
 			  struct snd_soc_dai_link_component *codecs,
-			  int codecs_num,
+			  int codecs_num, int dai_id,
 			  int (*init)(struct snd_soc_pcm_runtime *rtd),
 			  const struct snd_soc_ops *ops)
 {
-	dai_links[id].id = id;
+	dai_links[id].id = dai_id;
 	dai_links[id].name = name;
 	dai_links[id].platforms = platform_component;
 	dai_links[id].num_platforms = ARRAY_SIZE(platform_component);
@@ -691,7 +708,7 @@ static void set_codec_init_func(const struct snd_soc_acpi_link_adr *link,
 }
 
 static int create_sdw_codec_dai(struct device *dev,
-				struct snd_soc_dai_link *dai_links, int id,
+				struct snd_soc_dai_link *dai_links, int *id,
 				struct snd_soc_dai_link_component *cpus,
 				const struct snd_soc_acpi_link_adr *link)
 {
@@ -738,13 +755,14 @@ static int create_sdw_codec_dai(struct device *dev,
 		if (!cpu_name)
 			return -ENOMEM;
 
-		init_dai_link(dai_links, id + j, name, 1 - i, i, cpus, cpu_name,
-			      codec, link->num_adr, NULL, NULL);
-		set_codec_init_func(link, dai_links + id + j, 1 - i);
+		init_dai_link(dai_links, *id, name, 1 - i, i, cpus, cpu_name,
+			      codec, link->num_adr, *id, NULL, NULL);
+		set_codec_init_func(link, dai_links + *id, 1 - i);
+		(*id)++;
 		j++;
 	}
 
-	return j;
+	return 0;
 }
 
 static int sof_card_dai_links_create(struct device *dev,
@@ -763,7 +781,7 @@ static int sof_card_dai_links_create(struct device *dev,
 	int num_links, ssp_mask;
 	char *name, *cpu_name;
 	int i, j, index, id = 0;
-	int val;
+	int ret, dai_id = 0;
 
 	/* reset amp_num to ensure amp_num++ starts from 0 in each probe */
 	for (i = 0; i < ARRAY_SIZE(codec_info_list); i++)
@@ -804,14 +822,19 @@ static int sof_card_dai_links_create(struct device *dev,
 		return -EINVAL;
 
 	for (; adr_link->num_adr; adr_link++) {
-		val = create_sdw_codec_dai(dev, links, id, cpus, adr_link);
-		if (val < 0) {
+		ret = create_sdw_codec_dai(dev, links, &id, cpus, adr_link);
+		if (ret < 0) {
 			dev_err(dev, "failed to create dai link %d", id);
 			return -ENOMEM;
 		}
-
-		id += val;
 	}
+
+	/*
+	 * DAI link ID of SSP & DMIC & HDMI are based on last
+	 * link ID used by sdw link. The dai_id is not always equal
+	 * to ID for DAI link ID may be changed by some sdw codecs.
+	 */
+	dai_id = links[id - 1].id + 1;
 
 SSP:
 	/* SSP */
@@ -851,10 +874,9 @@ SSP:
 
 		ssp_components->name = codec_name;
 		ssp_components->dai_name = info->dai_name;
-
 		init_dai_link(links, id++, name, info->direction[0],
 			      info->direction[1], cpus, cpu_name,
-			      ssp_components, 1, NULL, info->ops);
+			      ssp_components, 1, dai_id++, NULL, info->ops);
 
 		info->init(NULL, links + id - 1, info, 0);
 	}
@@ -863,10 +885,9 @@ DMIC:
 	/* dmic */
 	if (dmic_num > 0) {
 		init_dai_link(links, id++, "dmic01", 0, 1, cpus, "DMIC01 Pin",
-			      dmic_component, 1, dmic_init, NULL);
-
+			      dmic_component, 1, dai_id++, dmic_init, NULL);
 		init_dai_link(links, id++, "dmic16k", 0, 1, cpus, "DMIC16k Pin",
-			      dmic_component, 1, dmic_init, NULL);
+			      dmic_component, 1, dai_id++, dmic_init, NULL);
 	}
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_AUDIO_CODEC)
@@ -899,7 +920,8 @@ DMIC:
 			return -ENOMEM;
 
 		init_dai_link(links, id++, name, 1, 0, cpus, cpu_name,
-			      idisp_components + i, 1, hdmi_init, NULL);
+			      idisp_components + i, 1, dai_id++,
+			      hdmi_init, NULL);
 	}
 #endif
 
