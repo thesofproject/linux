@@ -31,6 +31,7 @@
 /* comment out this define for mono configurations */
 
 #define MAX_NO_PROPS 2
+#define MAX_HDMI_NUM 4
 
 enum {
 	SOF_RT711_JD_SRC_JD1 = 1,
@@ -81,7 +82,7 @@ struct codec_info {
 };
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_AUDIO_CODEC)
-static struct snd_soc_jack hdmi[3];
+static struct snd_soc_jack hdmi[MAX_HDMI_NUM];
 
 struct hdmi_pcm {
 	struct list_head head;
@@ -750,7 +751,9 @@ static int sof_card_dai_links_create(struct device *dev,
 				     struct snd_soc_acpi_mach *mach,
 				     struct snd_soc_card *card)
 {
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_AUDIO_CODEC)
 	struct snd_soc_dai_link_component *idisp_components;
+#endif
 	struct snd_soc_dai_link_component *ssp_components;
 	struct snd_soc_acpi_mach_params *mach_params;
 	int ssp_num, sdw_num, hdmi_num = 0, dmic_num;
