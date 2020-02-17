@@ -548,6 +548,9 @@ static inline int find_codec_info_acpi(const u8 *acpi_id)
 {
 	int i;
 
+	if (!acpi_id[0])
+		return -EINVAL;
+
 	for (i = 0; i < ARRAY_SIZE(codec_info_list); i++)
 		if (!memcmp(codec_info_list[i].acpi_id, acpi_id,
 			    ACPI_ID_LEN))
@@ -793,7 +796,14 @@ static int sof_card_dai_links_create(struct device *dev,
 #endif
 
 	ssp_mask = SOF_SSP_GET_PORT(sof_rt711_rt1308_rt715_quirk);
-	ssp_num = hweight_long(ssp_mask);
+	/*
+	 * on generic tgl platform, I2S or sdw mode is supported
+	 * based on board rework. A ACPI device is registered in
+	 * system only when I2S mode is supported, not sdw mode.
+	 * Here check ACPI ID to confirm I2S is supported.
+	 */
+	index = find_codec_info_acpi(mach->id);
+	ssp_num = index >= 0 ? hweight_long(ssp_mask) : 0;
 
 	mach_params = &mach->mach_params;
 	sdw_num = get_sdw_dai_link_num(mach_params);
@@ -840,10 +850,6 @@ SSP:
 	/* SSP */
 	if (!ssp_num)
 		goto DMIC;
-
-	index = find_codec_info_acpi(mach->id);
-	if (index < 0)
-		return -EINVAL;
 
 	for (i = 0, j = 0; ssp_mask; i++, ssp_mask >>= 1) {
 		struct codec_info *info;
