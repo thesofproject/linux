@@ -722,6 +722,9 @@ static int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 			"channels_min: %d channels_max: %d\n",
 			channels->min, channels->max);
 		break;
+	case SOF_DAI_MULTIDAI:
+		/* do nothing for multi dai dai_link */
+		break;
 	default:
 		dev_err(component->dev, "error: invalid DAI type %d\n",
 			dai->dai_config->type);

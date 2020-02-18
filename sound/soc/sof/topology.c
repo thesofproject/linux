@@ -372,6 +372,7 @@ static const struct sof_dai_types sof_dais[] = {
 	{"ALH", SOF_DAI_INTEL_ALH},
 	{"SAI", SOF_DAI_IMX_SAI},
 	{"ESAI", SOF_DAI_IMX_ESAI},
+	{"MULTI", SOF_DAI_MULTIDAI},
 };
 
 static enum sof_ipc_dai_type find_dai(const char *name)
@@ -749,6 +750,19 @@ static const struct sof_topology_token led_tokens[] = {
 	 offsetof(struct snd_sof_led_control, use_led), 0},
 	{SOF_TKN_MUTE_LED_DIRECTION, SND_SOC_TPLG_TUPLE_TYPE_WORD,
 	 get_token_u32, offsetof(struct snd_sof_led_control, direction), 0},
+};
+
+static const struct sof_topology_token multidai_tokens[] = {
+	{SOF_TKN_MULTIDAI_SUBTYPE, SND_SOC_TPLG_TUPLE_TYPE_STRING, get_token_dai_type,
+		offsetof(struct sof_ipc_dai_multi_params, type), 0},
+	{SOF_TKN_MULTIDAI_INDEX0, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc_dai_multi_params, dai_index[0]), 0},
+	{SOF_TKN_MULTIDAI_INDEX1, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc_dai_multi_params, dai_index[1]), 0},
+	{SOF_TKN_MULTIDAI_INDEX2, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc_dai_multi_params, dai_index[2]), 0},
+	{SOF_TKN_MULTIDAI_INDEX3, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc_dai_multi_params, dai_index[3]), 0},
 };
 
 static void sof_parse_uuid_tokens(struct snd_soc_component *scomp,
@@ -3107,6 +3121,51 @@ static int sof_link_alh_load(struct snd_soc_component *scomp, int index,
 	return ret;
 }
 
+static int sof_link_multi_load(struct snd_soc_component *scomp, int index,
+			     struct snd_soc_dai_link *link,
+			     struct snd_soc_tplg_link_config *cfg,
+			     struct snd_soc_tplg_hw_config *hw_config,
+			     struct sof_ipc_dai_config *config)
+{
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_soc_tplg_private *private = &cfg->priv;
+	struct sof_ipc_reply reply;
+	u32 size = sizeof(*config);
+	int ret;
+
+	ret = sof_parse_tokens(scomp, &config->multi, multidai_tokens,
+			       ARRAY_SIZE(multidai_tokens), private->array,
+			       le32_to_cpu(private->size));
+	if (ret != 0) {
+		dev_err(scomp->dev, "error: parse multi dai tokens failed %d\n",
+			le32_to_cpu(private->size));
+		return ret;
+	}
+
+	/* init IPC */
+	config->hdr.size = size;
+
+#if 0 /* Didn't implement it on FW side yet */
+	/* send message to DSP */
+	ret = sof_ipc_tx_message(sdev->ipc,
+				 config->hdr.cmd, config, size, &reply,
+				 sizeof(reply));
+
+	if (ret < 0) {
+		dev_err(scomp->dev, "error: failed to set DAI config for MULTI %d\n",
+			config->dai_index);
+		return ret;
+	}
+#endif
+
+	/* set config for all DAI's with name matching the link name */
+	ret = sof_set_dai_config(sdev, size, link, config);
+	if (ret < 0)
+		dev_err(scomp->dev, "error: failed to save DAI config for MULTI %d\n",
+			config->dai_index);
+	return ret;
+}
+
 /* DAI link - used for any driver specific init */
 static int sof_link_load(struct snd_soc_component *scomp, int index,
 			 struct snd_soc_dai_link *link,
@@ -3218,6 +3277,10 @@ static int sof_link_load(struct snd_soc_component *scomp, int index,
 		ret = sof_link_esai_load(scomp, index, link, cfg, hw_config,
 					 &config);
 		break;
+	case SOF_DAI_MULTIDAI:
+		ret = sof_link_multi_load(scomp, index, link, cfg, hw_config,
+					&config);
+		break;
 	default:
 		dev_err(scomp->dev, "error: invalid DAI type %d\n",
 			config.type);
@@ -3279,6 +3342,7 @@ found:
 	case SOF_DAI_INTEL_ALH:
 	case SOF_DAI_IMX_SAI:
 	case SOF_DAI_IMX_ESAI:
+	case SOF_DAI_MULTIDAI:
 		/* no resource needs to be released for all cases above */
 		break;
 	case SOF_DAI_INTEL_HDA:
