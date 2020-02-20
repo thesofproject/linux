@@ -22,6 +22,7 @@
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
 #include <sound/soc-acpi.h>
+#include <linux/soundwire/sdw.h>
 #include "../../codecs/hdac_hdmi.h"
 #include "hda_dsp_common.h"
 
@@ -152,6 +153,22 @@ static int headset_init(struct snd_soc_pcm_runtime *rtd)
 	return ret;
 }
 
+/* these wrappers are only needed to avoid typecast compilation errors */
+static int sdw_startup(struct snd_pcm_substream *substream)
+{
+	return sdw_startup_stream(substream);
+}
+
+static void sdw_shutdown(struct snd_pcm_substream *substream)
+{
+	sdw_shutdown_stream(substream);
+}
+
+static const struct snd_soc_ops sdw_ops = {
+	.startup = sdw_startup,
+	.shutdown = sdw_shutdown,
+};
+
 static const struct snd_soc_dapm_widget widgets[] = {
 	SND_SOC_DAPM_HP("Headphones", NULL),
 	SND_SOC_DAPM_MIC("AMIC", NULL),
@@ -222,6 +239,7 @@ static struct snd_soc_dai_link dailink[] = {
 		.no_pcm = 1,
 		.dpcm_playback = 1,
 		.nonatomic = true,
+		.ops = &sdw_ops,
 		SND_SOC_DAILINK_REG(sdw0_pin2, sdw0_codec, platform),
 	},
 	{
@@ -230,6 +248,7 @@ static struct snd_soc_dai_link dailink[] = {
 		.no_pcm = 1,
 		.dpcm_capture = 1,
 		.nonatomic = true,
+		.ops = &sdw_ops,
 		SND_SOC_DAILINK_REG(sdw0_pin3, sdw0_codec, platform),
 	},
 	{
