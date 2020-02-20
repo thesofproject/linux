@@ -43,6 +43,18 @@ struct dsp_pipeline_connect {
 	struct list_head list;
 };
 
+struct sof_vhost_comp_list {
+	struct list_head list;
+	uint32_t comp_id;
+	enum sof_comp_type comp_type;
+};
+
+struct sof_vhost_pipe_list {
+	struct list_head list;
+	uint32_t comp_id;
+	uint32_t pipe_id;
+};
+
 static const char dsp_pcm_name[] = "VHost PCM";
 
 /*
@@ -446,6 +458,75 @@ static int sof_vhost_ipc_comp(struct sof_vhost_client *client,
 		cdata->comp_id >= client->comp_id_end ? -EINVAL : 0;
 }
 
+void sof_vhost_topology_purge(struct sof_vhost_client *client)
+{
+	struct snd_sof_dev *sdev = client->sdev;
+	struct sof_ipc_free fcomp = {
+		.hdr = {
+			.size = sizeof(fcomp),
+		},
+	};
+	struct sof_ipc_reply reply;
+	struct sof_vhost_comp_list *citem, *ctmp;
+	struct sof_vhost_pipe_list *pitem, *ptmp;
+	int ret;
+
+	pm_runtime_get_sync(sdev->dev);
+
+	/* First free all pipelines */
+	list_for_each_entry_safe(pitem, ptmp, &client->pipe_list, list) {
+		fcomp.id = pitem->comp_id;
+		fcomp.hdr.cmd = SOF_IPC_GLB_TPLG_MSG |
+			SOF_IPC_TPLG_PIPE_FREE;
+
+		dev_dbg(sdev->dev, "tplg: unload component ID: %d pipe %u\n",
+			fcomp.id, pitem->pipe_id);
+
+		/* send IPC to the DSP */
+		ret = sof_ipc_tx_message(sdev->ipc,
+					 fcomp.hdr.cmd, &fcomp, sizeof(fcomp),
+					 &reply, sizeof(reply));
+		if (ret < 0)
+			dev_err(sdev->dev, "error: %d unloading component %d\n",
+				ret, fcomp.id);
+
+		list_del(&pitem->list);
+		kfree(pitem);
+	}
+
+	/* Then free all individual components */
+	list_for_each_entry_safe(citem, ctmp, &client->comp_list, list) {
+		fcomp.id = citem->comp_id;
+		switch (citem->comp_type) {
+		case SOF_COMP_BUFFER:
+			fcomp.hdr.cmd = SOF_IPC_GLB_TPLG_MSG |
+				SOF_IPC_TPLG_BUFFER_FREE;
+			break;
+		default:
+			fcomp.hdr.cmd = SOF_IPC_GLB_TPLG_MSG |
+				SOF_IPC_TPLG_COMP_FREE;
+		}
+
+		dev_dbg(sdev->dev, "tplg: unload component ID: %d type %u\n",
+			fcomp.id, citem->comp_type);
+
+		/* send IPC to the DSP */
+		ret = sof_ipc_tx_message(sdev->ipc,
+					 fcomp.hdr.cmd, &fcomp, sizeof(fcomp),
+					 &reply, sizeof(reply));
+		if (ret < 0)
+			dev_err(sdev->dev, "error: %d unloading component %d\n",
+				ret, fcomp.id);
+
+		list_del(&citem->list);
+		kfree(citem);
+	}
+
+	pm_runtime_mark_last_busy(sdev->dev);
+	pm_runtime_put_autosuspend(sdev->dev);
+}
+EXPORT_SYMBOL_GPL(sof_vhost_topology_purge);
+
 /* process PM IPC */
 static int sof_vhost_ipc_pm(struct sof_vhost_client *client,
 			    struct sof_ipc_cmd_hdr *hdr,
@@ -527,6 +608,48 @@ int sof_vhost_add_conn(struct snd_sof_dev *sdev,
 	return 0;
 }
 
+static int sof_vhost_tplg_comp_add(struct sof_vhost_client *client,
+				   struct sof_ipc_comp *comp)
+{
+	struct sof_vhost_comp_list *citem = kmalloc(sizeof(*citem), GFP_KERNEL);
+	if (!citem)
+		return -ENOMEM;
+
+	citem->comp_id = comp->id;
+	citem->comp_type = comp->type;
+
+	dev_dbg(client->sdev->dev, "%s(): adding %p ID %d type %x\n",
+		__func__, citem, comp->id, comp->type);
+	list_add_tail(&citem->list, &client->comp_list);
+
+	return 0;
+}
+
+static int sof_vhost_tplg_pipe_add(struct sof_vhost_client *client,
+				   struct sof_ipc_pipe_new *pipe)
+{
+	struct sof_vhost_pipe_list *pitem = kmalloc(sizeof(*pitem), GFP_KERNEL);
+	if (!pitem)
+		return -ENOMEM;
+
+	pitem->comp_id = pipe->comp_id;
+	pitem->pipe_id = pipe->pipeline_id;
+
+	dev_dbg(client->sdev->dev, "%s(): adding %p ID %d pipe %x\n",
+		__func__, pitem, pipe->comp_id, pipe->pipeline_id);
+	list_add_tail(&pitem->list, &client->pipe_list);
+
+	return 0;
+}
+
+static int sof_vhost_ipc_tplg_buf_new(struct sof_vhost_client *client,
+				      struct sof_ipc_cmd_hdr *hdr,
+				      struct sof_ipc_reply *rhdr)
+{
+	struct sof_ipc_comp *comp = container_of(hdr, struct sof_ipc_comp, hdr);
+	return sof_vhost_tplg_comp_add(client, comp);
+}
+
 /* Handle some special cases of the "new component" IPC */
 static int sof_vhost_ipc_tplg_comp_new(struct sof_vhost_client *client,
 				       struct sof_ipc_cmd_hdr *hdr,
@@ -537,6 +660,7 @@ static int sof_vhost_ipc_tplg_comp_new(struct sof_vhost_client *client,
 	struct snd_sof_pcm *spcm, *last;
 	struct sof_ipc_comp_host *host;
 	struct dsp_pipeline_connect *conn;
+	int ret;
 
 	if (comp->id < client->comp_id_begin ||
 	    comp->id >= client->comp_id_end)
@@ -598,6 +722,10 @@ static int sof_vhost_ipc_tplg_comp_new(struct sof_vhost_client *client,
 		break;
 	}
 
+	ret = sof_vhost_tplg_comp_add(client, comp);
+	if (ret < 0)
+		return ret;
+
 	return 0;
 }
 
@@ -609,6 +737,9 @@ static int sof_vhost_ipc_tplg_pipe_new(struct sof_vhost_client *client,
 						struct sof_ipc_pipe_new, hdr);
 	struct snd_sof_dev *sdev = client->sdev;
 	struct dsp_pipeline_connect *conn;
+	int ret = sof_vhost_tplg_pipe_add(client, pipeline);
+	if (ret < 0)
+		return ret;
 
 	list_for_each_entry(conn, &sdev->connector_list, list)
 		if (pipeline->pipeline_id == conn->guest_pipeline_id) {
@@ -730,6 +861,8 @@ static int sof_vhost_ipc_tplg(struct sof_vhost_client *client,
 	switch (cmd) {
 	case SOF_IPC_TPLG_COMP_NEW:
 		return sof_vhost_ipc_tplg_comp_new(client, hdr, reply_buf);
+	case SOF_IPC_TPLG_BUFFER_NEW:
+		return sof_vhost_ipc_tplg_buf_new(client, hdr, reply_buf);
 	case SOF_IPC_TPLG_PIPE_NEW:
 		return sof_vhost_ipc_tplg_pipe_new(client, hdr);
 	case SOF_IPC_TPLG_COMP_CONNECT:
@@ -995,6 +1128,23 @@ EXPORT_SYMBOL_GPL(sof_vhost_set_tplg);
 void sof_vhost_suspend(struct snd_sof_dev *sdev)
 {
 	struct snd_sof_pcm *spcm, *next;
+	struct sof_vhost_client *client;
+
+	/* Upon resume we'll rebuild lists */
+	list_for_each_entry(client, &sdev->vbe_list, list) {
+		struct sof_vhost_comp_list *citem, *ctmp;
+		struct sof_vhost_pipe_list *pitem, *ptmp;
+
+		list_for_each_entry_safe(pitem, ptmp, &client->pipe_list, list) {
+			list_del(&pitem->list);
+			kfree(pitem);
+		}
+
+		list_for_each_entry_safe(citem, ctmp, &client->comp_list, list) {
+			list_del(&citem->list);
+			kfree(citem);
+		}
+	}
 
 	list_for_each_entry_safe(spcm, next, &sdev->pcm_list, list)
 		if (!strcmp(dsp_pcm_name, spcm->pcm.pcm_name)) {
@@ -1008,6 +1158,9 @@ void sof_vhost_suspend(struct snd_sof_dev *sdev)
 /* A VM instance has closed the miscdevice */
 void sof_vhost_client_release(struct sof_vhost_client *client)
 {
+	/* If a VM crashes we don't get ioctl(VHOST_SET_RUNNING, 0) from QEMU */
+	sof_vhost_topology_purge(client);
+
 	bitmap_release_region(client->sdev->vfe_mask, client->id, 0);
 
 	list_del(&client->list);
@@ -1018,7 +1171,7 @@ EXPORT_SYMBOL_GPL(sof_vhost_client_release);
 
 /* A new VM instance has opened the miscdevice */
 struct sof_vhost_client *sof_vhost_client_add(struct snd_sof_dev *sdev,
-					      struct sof_vhost *dsp)
+					      struct vhost_dsp *dsp)
 {
 	int id = bitmap_find_free_region(sdev->vfe_mask, SND_SOF_MAX_VFES, 0);
 	struct sof_vhost_client *client;
@@ -1031,6 +1184,9 @@ struct sof_vhost_client *sof_vhost_client_add(struct snd_sof_dev *sdev,
 		bitmap_release_region(sdev->vfe_mask, id, 0);
 		return NULL;
 	}
+
+	INIT_LIST_HEAD(&client->pipe_list);
+	INIT_LIST_HEAD(&client->comp_list);
 
 	client->sdev = sdev;
 	client->id = id;

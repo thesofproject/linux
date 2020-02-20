@@ -137,6 +137,9 @@ struct sof_vhost_client {
 	struct list_head pipe_conn;
 	/* List of vhost instances on a DSP */
 	struct list_head list;
+	/* List of widgets to free for tear-down */
+	struct list_head comp_list;
+	struct list_head pipe_list;
 
 	/* Component ID range index in the bitmap */
 	unsigned int id;
@@ -167,6 +170,7 @@ void *sof_vhost_stream_data(struct sof_vhost_client *client,
 int sof_vhost_ipc_fwd(struct sof_vhost_client *client,
 		      void *ipc_buf, void *reply_buf,
 		      size_t count, size_t reply_sz);
+void sof_vhost_topology_purge(struct sof_vhost_client *client);
 
 /* The below functions are always referenced, they need dummy counterparts */
 int sof_vhost_update_guest_posn(struct snd_sof_dev *sdev,
