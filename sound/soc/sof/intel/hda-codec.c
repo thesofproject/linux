@@ -124,12 +124,8 @@ static int hda_codec_probe(struct snd_sof_dev *sdev, int address,
 	    (resp & 0xFFFF0000) != IDISP_VID_INTEL) {
 		hdev->type = HDA_DEV_LEGACY;
 		ret = hda_codec_load_module(&hda_priv->codec);
-		/*
-		 * handle ret==0 (no driver bound) as an error, but pass
-		 * other return codes without modification
-		 */
-		if (ret == 0)
-			ret = -ENOENT;
+		if (!ret)
+			dev_warn(sdev->dev, "codec #%d no driver\n", address);
 	}
 
 	return ret;
