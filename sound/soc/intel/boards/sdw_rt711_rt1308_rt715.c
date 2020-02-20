@@ -24,6 +24,7 @@
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
 #include <sound/soc-acpi.h>
+#include <linux/soundwire/sdw.h>
 #include "../../codecs/hdac_hdmi.h"
 #include "../../codecs/rt1308.h"
 #include "hda_dsp_common.h"
@@ -456,6 +457,22 @@ static struct snd_soc_ops rt1308_i2s_ops = {
 	.hw_params = rt1308_i2s_hw_params,
 };
 
+/* these wrappers are only needed to avoid typecast compilation errors */
+static int sdw_startup(struct snd_pcm_substream *substream)
+{
+	return sdw_startup_stream(substream);
+}
+
+static void sdw_shutdown(struct snd_pcm_substream *substream)
+{
+	sdw_shutdown_stream(substream);
+}
+
+static const struct snd_soc_ops sdw_ops = {
+	.startup = sdw_startup,
+	.shutdown = sdw_shutdown,
+};
+
 static void rt711_init(const struct snd_soc_acpi_link_adr *link,
 		       struct snd_soc_dai_link *dai_links,
 		       struct codec_info *info,
@@ -759,7 +776,7 @@ static int create_sdw_codec_dai(struct device *dev,
 			return -ENOMEM;
 
 		init_dai_link(dai_links, *id, name, 1 - i, i, cpus, cpu_name,
-			      codec, link->num_adr, *id, NULL, NULL);
+			      codec, link->num_adr, *id, NULL, &sdw_ops);
 		set_codec_init_func(link, dai_links + *id, 1 - i);
 		(*id)++;
 		j++;
