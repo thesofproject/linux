@@ -2,7 +2,7 @@
 # Each line is a file pattern followed by one or more owners.
 
 # These owners will be the default owners for everything in the repo.
-*	@lgirdwood @plbossart
+*	@lgirdwood @plbossart @ranj063 @kv2019i @dbaluta
 
 # Order is important. The last matching pattern has the most precedence.
 # So if a pull request only touches javascript files, only these owners
@@ -71,3 +71,7 @@ sound/soc/sof/intel-ipc.c			@keyonjie @libinyang @bardliao @lyakh
 sound/soc/sof/Kconfig				@keyonjie @libinyang
 sound/soc/sof/Makefile				@keyonjie @libinyang
 sound/soc/sof/shim.h				@keyonjie @libinyang @bardliao @lyakh @juimonen
+
+# SoundWire parts
+drivers/soundwire				@bardliao @RanderWang
+include/linux/soundwire				@bardliao @RanderWang
