@@ -590,8 +590,11 @@ static int get_sdw_dai_link_num(struct snd_soc_acpi_mach_params *mach_params)
 
 	for (; link->num_adr; link++) {
 		int part_id, id;
+		u64 adr;
 
-		part_id = SDW_PART_ID(link->adr[0]);
+		adr = link->adr_d[0].adr;
+
+		part_id = SDW_PART_ID(adr);
 		id = find_codec_info_part(part_id);
 		if (id < 0)
 			return 0;
@@ -646,15 +649,18 @@ static bool is_unique_device(const struct snd_soc_acpi_link_adr *link,
 
 	for (i = 0; i < link->num_adr; i++) {
 		unsigned int sdw1_version, mfg1_id, part1_id, class1_id;
+		u64 adr;
 
 		/* skip itself */
 		if (i == id)
 			continue;
 
-		sdw1_version = SDW_VERSION(link->adr[i]);
-		mfg1_id = SDW_MFG_ID(link->adr[i]);
-		part1_id = SDW_PART_ID(link->adr[i]);
-		class1_id = SDW_CLASS_ID(link->adr[i]);
+		adr = link->adr_d[i].adr;
+
+		sdw1_version = SDW_VERSION(adr);
+		mfg1_id = SDW_MFG_ID(adr);
+		part1_id = SDW_PART_ID(adr);
+		class1_id = SDW_CLASS_ID(adr);
 
 		if (sdw_version == sdw1_version &&
 		    mfg_id == mfg1_id &&
@@ -676,13 +682,16 @@ static int create_codec_dai_name(struct device *dev,
 		unsigned int sdw_version, unique_id, mfg_id;
 		unsigned int link_id, part_id, class_id;
 		int id;
+		u64 adr;
 
-		sdw_version = SDW_VERSION(link->adr[i]);
-		link_id = SDW_DISCO_LINK_ID(link->adr[i]);
-		unique_id = SDW_UNIQUE_ID(link->adr[i]);
-		mfg_id = SDW_MFG_ID(link->adr[i]);
-		part_id = SDW_PART_ID(link->adr[i]);
-		class_id = SDW_CLASS_ID(link->adr[i]);
+		adr = link->adr_d[i].adr;
+
+		sdw_version = SDW_VERSION(adr);
+		link_id = SDW_DISCO_LINK_ID(adr);
+		unique_id = SDW_UNIQUE_ID(adr);
+		mfg_id = SDW_MFG_ID(adr);
+		part_id = SDW_PART_ID(adr);
+		class_id = SDW_CLASS_ID(adr);
 
 		if (is_unique_device(link, sdw_version, mfg_id, part_id,
 				     class_id, i))
@@ -717,7 +726,7 @@ static void set_codec_init_func(const struct snd_soc_acpi_link_adr *link,
 	int i, id;
 
 	for (i = 0; i < link->num_adr; i++) {
-		part_id = SDW_PART_ID(link->adr[i]);
+		part_id = SDW_PART_ID(link->adr_d[i].adr);
 		id = find_codec_info_part(part_id);
 
 		if (codec_info_list[id].init)
@@ -747,7 +756,7 @@ static int create_sdw_codec_dai(struct device *dev,
 	if (ret < 0)
 		return ret;
 
-	part_id = SDW_PART_ID(link->adr[0]);
+	part_id = SDW_PART_ID(link->adr_d[0].adr);
 	idx = find_codec_info_part(part_id);
 	if (idx < 0)
 		return idx;
