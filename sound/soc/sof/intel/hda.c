@@ -1053,9 +1053,11 @@ static bool link_slaves_found(struct snd_sof_dev *sdev,
 	int i, j;
 
 	for (i = 0; i < link->num_adr; i++) {
-		mfg_id = SDW_MFG_ID(link->adr[i]);
-		part_id = SDW_PART_ID(link->adr[i]);
-		link_id = SDW_DISCO_LINK_ID(link->adr[i]);
+		u64 adr = link->adr_d[i].adr;
+
+		mfg_id = SDW_MFG_ID(adr);
+		part_id = SDW_PART_ID(adr);
+		link_id = SDW_DISCO_LINK_ID(adr);
 		for (j = 0; j < num_slaves; j++) {
 			if (ids[j].link_id != link_id ||
 			    ids[j].id.part_id != part_id ||
@@ -1066,7 +1068,7 @@ static bool link_slaves_found(struct snd_sof_dev *sdev,
 			 * if there is more than one
 			 * Slave on the link
 			 */
-			unique_id = SDW_UNIQUE_ID(link->adr[i]);
+			unique_id = SDW_UNIQUE_ID(adr);
 			if (link->num_adr == 1 ||
 			    ids[j].id.unique_id == SDW_IGNORED_UNIQUE_ID ||
 			    ids[j].id.unique_id == unique_id) {
