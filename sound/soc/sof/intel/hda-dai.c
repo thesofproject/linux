@@ -422,56 +422,176 @@ static struct snd_soc_cdai_ops sof_probe_compr_ops = {
 struct snd_soc_dai_driver skl_dai[] = {
 {
 	.name = "SSP0 Pin",
+	.playback = {
+		.stream_name = "ssp0 Tx",
+		.channels_min = 1,
+		.channels_max = 8,
+	},
+	.capture = {
+		.stream_name = "ssp0 Rx",
+		.channels_min = 1,
+		.channels_max = 8,
+	},
 },
 {
 	.name = "SSP1 Pin",
+	.playback = {
+		.stream_name = "ssp1 Tx",
+		.channels_min = 1,
+		.channels_max = 8,
+	},
+	.capture = {
+		.stream_name = "ssp1 Rx",
+		.channels_min = 1,
+		.channels_max = 8,
+	},
 },
 {
 	.name = "SSP2 Pin",
+	.playback = {
+		.stream_name = "ssp2 Tx",
+		.channels_min = 1,
+		.channels_max = 8,
+	},
+	.capture = {
+		.stream_name = "ssp2 Rx",
+		.channels_min = 1,
+		.channels_max = 8,
+	},
 },
 {
 	.name = "SSP3 Pin",
+	.playback = {
+		.stream_name = "ssp3 Tx",
+		.channels_min = 1,
+		.channels_max = 8,
+	},
+	.capture = {
+		.stream_name = "ssp3 Rx",
+		.channels_min = 1,
+		.channels_max = 8,
+	},
 },
 {
 	.name = "SSP4 Pin",
+	.playback = {
+		.stream_name = "ssp4 Tx",
+		.channels_min = 1,
+		.channels_max = 8,
+	},
+	.capture = {
+		.stream_name = "ssp4 Rx",
+		.channels_min = 1,
+		.channels_max = 8,
+	},
 },
 {
 	.name = "SSP5 Pin",
+	.playback = {
+		.stream_name = "ssp5 Tx",
+		.channels_min = 1,
+		.channels_max = 8,
+	},
+	.capture = {
+		.stream_name = "ssp5 Rx",
+		.channels_min = 1,
+		.channels_max = 8,
+	},
 },
 {
 	.name = "DMIC01 Pin",
+	.capture = {
+		.stream_name = "DMIC01 Rx",
+		.channels_min = 1,
+		.channels_max = 4,
+	},
 },
 {
 	.name = "DMIC16k Pin",
+	.capture = {
+		.stream_name = "DMIC16k Rx",
+		.channels_min = 1,
+		.channels_max = 4,
+	},
 },
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
 {
 	.name = "iDisp1 Pin",
 	.ops = &hda_link_dai_ops,
+	.playback = {
+		.stream_name = "iDisp1 Tx",
+		.channels_min = 1,
+		.channels_max = 8,
+	},
 },
 {
 	.name = "iDisp2 Pin",
 	.ops = &hda_link_dai_ops,
+	.playback = {
+		.stream_name = "iDisp2 Tx",
+		.channels_min = 1,
+		.channels_max = 8,
+	},
 },
 {
 	.name = "iDisp3 Pin",
 	.ops = &hda_link_dai_ops,
+	.playback = {
+		.stream_name = "iDisp3 Tx",
+		.channels_min = 1,
+		.channels_max = 8,
+	},
 },
 {
 	.name = "iDisp4 Pin",
 	.ops = &hda_link_dai_ops,
+	.playback = {
+		.stream_name = "iDisp4 Tx",
+		.channels_min = 1,
+		.channels_max = 8,
+	},
 },
 {
 	.name = "Analog CPU DAI",
 	.ops = &hda_link_dai_ops,
+	.playback = {
+		.stream_name = "Analog CPU Playback",
+		.channels_min = 1,
+		.channels_max = 16,
+	},
+	.capture = {
+		.stream_name = "Analog CPU Capture",
+		.channels_min = 1,
+		.channels_max = 16,
+	},
 },
 {
 	.name = "Digital CPU DAI",
 	.ops = &hda_link_dai_ops,
+	.playback = {
+		.stream_name = "Digital CPU Playback",
+		.channels_min = 1,
+		.channels_max = 16,
+	},
+	.capture = {
+		.stream_name = "Digital CPU Capture",
+		.channels_min = 1,
+		.channels_max = 16,
+	},
 },
 {
 	.name = "Alt Analog CPU DAI",
 	.ops = &hda_link_dai_ops,
+	.playback = {
+		.stream_name = "Alt Analog CPU Playback",
+		.channels_min = 1,
+		.channels_max = 16,
+	},
+	.capture = {
+		.stream_name = "Alt Analog CPU Capture",
+		.channels_min = 1,
+		.channels_max = 16,
+	},
 },
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_PROBES)
 {
