@@ -200,7 +200,7 @@ static struct dma_chan *dmaengine_pcm_compat_request_channel(
 	if (rtd->num_cpus > 1) {
 		dev_err(rtd->dev,
 			"%s doesn't support Multi CPU yet\n", __func__);
-		return -EINVAL;
+		return NULL;
 	}
 
 	dma_data = snd_soc_dai_get_dma_data(rtd->cpu_dai, substream);
