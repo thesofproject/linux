@@ -5,16 +5,36 @@
 #define __SOUNDWIRE_TYPES_H
 
 extern struct bus_type sdw_bus_type;
+extern struct device_type sdw_slave_type;
+extern struct device_type sdw_master_type;
+
+static inline int is_sdw_slave(const struct device *dev)
+{
+	return dev->type == &sdw_slave_type;
+}
 
 #define drv_to_sdw_driver(_drv) container_of(_drv, struct sdw_driver, driver)
 
 #define sdw_register_driver(drv) \
 	__sdw_register_driver(drv, THIS_MODULE)
 
+static inline int is_sdw_master_device(const struct device *dev)
+{
+	return dev->type == &sdw_master_type;
+}
+
+#define drv_to_sdw_master_driver(_drv) \
+	container_of(_drv, struct sdw_master_driver, driver)
+
+#define sdw_register_master_driver(drv) \
+	__sdw_register_master_driver(drv, THIS_MODULE)
+
 int __sdw_register_driver(struct sdw_driver *drv, struct module *owner);
 void sdw_unregister_driver(struct sdw_driver *drv);
 
-int sdw_slave_modalias(const struct sdw_slave *slave, char *buf, size_t size);
+int __sdw_register_master_driver(struct sdw_master_driver *mdrv,
+				 struct module *owner);
+void sdw_unregister_master_driver(struct sdw_master_driver *mdrv);
 
 /**
  * module_sdw_driver() - Helper macro for registering a Soundwire driver
@@ -27,4 +47,18 @@ int sdw_slave_modalias(const struct sdw_slave *slave, char *buf, size_t size);
 #define module_sdw_driver(__sdw_driver) \
 	module_driver(__sdw_driver, sdw_register_driver, \
 			sdw_unregister_driver)
+
+/**
+ * module_sdw_master_driver() - Helper macro for registering a Soundwire
+ * Master driver
+ * @__sdw_master_driver: soundwire Master driver struct
+ *
+ * Helper macro for Soundwire Master drivers which do not do anything special in
+ * module init/exit. This eliminates a lot of boilerplate. Each module may only
+ * use this macro once, and calling it replaces module_init() and module_exit()
+ */
+#define module_sdw_master_driver(__sdw_master_driver) \
+	module_driver(__sdw_master_driver, sdw_register_master_driver, \
+			sdw_unregister_master_driver)
+
 #endif /* __SOUNDWIRE_TYPES_H */

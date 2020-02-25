@@ -12,9 +12,9 @@
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/module.h>
-#include <linux/platform_device.h>
-#include <linux/pm_runtime.h>
+#include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_intel.h>
+#include <linux/pm_runtime.h>
 #include "cadence_master.h"
 #include "intel.h"
 
@@ -69,9 +69,8 @@ static int sdw_intel_cleanup(struct sdw_intel_ctx *ctx)
 		if (link_mask && !(link_mask & BIT(i)))
 			continue;
 
-		pm_runtime_disable(&link->pdev->dev);
-
-		platform_device_unregister(link->pdev);
+		if (!IS_ERR_OR_NULL(link->md))
+			device_unregister(&link->md->dev);
 
 		if (!link->clock_stop_quirks)
 			pm_runtime_put_noidle(link->dev);
@@ -190,11 +189,10 @@ EXPORT_SYMBOL(sdw_intel_thread);
 static struct sdw_intel_ctx
 *sdw_intel_probe_controller(struct sdw_intel_res *res)
 {
-	struct platform_device_info pdevinfo;
-	struct platform_device *pdev;
 	struct sdw_intel_link_res *link;
 	struct sdw_intel_ctx *ctx;
 	struct acpi_device *adev;
+	struct sdw_master_device *md;
 	unsigned long time;
 	struct sdw_slave *slave;
 	struct list_head *node;
@@ -240,7 +238,6 @@ static struct sdw_intel_ctx
 		if (link_mask && !(link_mask & BIT(i)))
 			continue;
 
-		link->parent_res = link;
 		link->mmio_base = res->mmio_base;
 		link->registers = res->mmio_base + SDW_LINK_BASE
 			+ (SDW_LINK_SIZE * i);
@@ -253,22 +250,14 @@ static struct sdw_intel_ctx
 		link->shim_mask = &ctx->shim_mask;
 		link->link_mask = link_mask;
 
-		init_completion(&link->probe_complete);
+		md = sdw_master_device_add("intel-master",
+					   res->parent,
+					   acpi_fwnode_handle(adev),
+					   i,
+					   link);
 
-		memset(&pdevinfo, 0, sizeof(pdevinfo));
-
-		pdevinfo.parent = res->parent;
-		pdevinfo.name = "int-sdw";
-		pdevinfo.id = i;
-		pdevinfo.fwnode = acpi_fwnode_handle(adev);
-		pdevinfo.data = link;
-		pdevinfo.size_data = sizeof(*link);
-
-		pdev = platform_device_register_full(&pdevinfo);
-		if (IS_ERR(pdev)) {
-			dev_err(&adev->dev,
-				"platform device creation failed: %ld\n",
-				PTR_ERR(pdev));
+		if (IS_ERR(md)) {
+			dev_err(&adev->dev, "Could not create link %d\n", i);
 			goto err;
 		}
 
@@ -276,14 +265,14 @@ static struct sdw_intel_ctx
 		 * we need to wait for the bus to be probed so that we
 		 * can report ACPI information to the upper layers
 		 */
-		time = wait_for_completion_timeout(&link->probe_complete,
+		time = wait_for_completion_timeout(&md->probe_complete,
 				msecs_to_jiffies(SDW_INTEL_MASTER_PROBE_TIMEOUT));
 		if (!time) {
 			dev_err(&adev->dev, "Master %d probe timed out\n", i);
 			goto err;
 		}
 
-		link->pdev = pdev;
+		link->md = md;
 
 		list_add_tail(&link->list, &ctx->link_list);
 		bus = &link->cdns->bus;
@@ -310,6 +299,7 @@ static struct sdw_intel_ctx
 	return ctx;
 
 err:
+	ctx->count = i;
 	sdw_intel_cleanup(ctx);
 link_err:
 	kfree(ctx);
@@ -321,6 +311,7 @@ sdw_intel_startup_controller(struct sdw_intel_ctx *ctx)
 {
 	struct acpi_device *adev;
 	struct sdw_intel_link_res *link;
+	struct sdw_master_device *md;
 	u32 caps;
 	u32 link_mask;
 	int i;
@@ -350,7 +341,9 @@ sdw_intel_startup_controller(struct sdw_intel_ctx *ctx)
 		if (link_mask && !(link_mask & BIT(i)))
 			continue;
 
-		intel_master_startup(link->pdev);
+		md = link->md;
+
+		sdw_master_device_startup(md);
 
 		if (!link->clock_stop_quirks) {
 			/*
@@ -471,7 +464,7 @@ void sdw_intel_process_wakeen_event(struct sdw_intel_ctx *ctx)
 		return;
 
 	list_for_each_entry(link, &ctx->link_list, list)
-		intel_master_process_wakeen_event(link->pdev);
+		sdw_master_device_process_wake_event(link->md);
 }
 EXPORT_SYMBOL_NS(sdw_intel_process_wakeen_event, SOUNDWIRE_INTEL_INIT);
 
