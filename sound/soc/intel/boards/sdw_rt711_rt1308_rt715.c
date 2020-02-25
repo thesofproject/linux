@@ -35,6 +35,9 @@
 #define MAX_HDMI_NUM 4
 #define SDW_DMIC_DAI_ID 4
 
+/* 8 combinations with 4 links + unused group 0 */
+#define SDW_MAX_GROUPS 9
+
 enum {
 	SOF_RT711_JD_SRC_JD1 = 1,
 	SOF_RT711_JD_SRC_JD2 = 2,
@@ -581,36 +584,59 @@ static inline int find_codec_info_acpi(const u8 *acpi_id)
 	return i;
 }
 
-static int get_sdw_dai_link_num(struct snd_soc_acpi_mach_params *mach_params)
+/*
+ * get BE dailink number and CPU DAI number based on sdw link adr.
+ * Since some sdw slaves may be aggregated, the CPU DAI number
+ * may be larger than the number of BE dailinks.
+ */
+static int get_sdw_dailink_info(const struct snd_soc_acpi_link_adr *links,
+				int *sdw_be_num, int *sdw_cpu_dai_num)
 {
 	const struct snd_soc_acpi_link_adr *link;
-	int num = 0;
+	bool group_visited[SDW_MAX_GROUPS];
+	int i;
 
-	link = mach_params->links;
-	if (!link)
+	*sdw_cpu_dai_num = 0;
+	*sdw_be_num  = 0;
+
+	if (!links)
 		return -EINVAL;
 
-	for (; link->num_adr; link++) {
-		int part_id, id;
+	for (i = 0; i < SDW_MAX_GROUPS; i++)
+		group_visited[i] = false;
+
+	for (link = links; link->num_adr; link++) {
+		const struct snd_soc_acpi_endpoint *endpoint;
+		int part_id, codec_index;
+		int stream;
 		u64 adr;
 
-		adr = link->adr_d[0].adr;
-
+		adr = link->adr_d->adr;
 		part_id = SDW_PART_ID(adr);
-		id = find_codec_info_part(part_id);
-		if (id < 0)
-			return 0;
+		codec_index = find_codec_info_part(part_id);
+		if (codec_index < 0)
+			return codec_index;
 
-		/* support playback */
-		if (codec_info_list[id].direction[0])
-			num++;
+		endpoint = link->adr_d->endpoints;
 
-		/* support capture */
-		if (codec_info_list[id].direction[1])
-			num++;
+		/* count DAI number for playback and capture */
+		for_each_pcm_streams(stream) {
+			if (!codec_info_list[codec_index].direction[stream])
+				continue;
+
+			(*sdw_cpu_dai_num)++;
+
+			/* count BE for each non-aggregated slave or group */
+			if (!endpoint->aggregated ||
+			    !group_visited[endpoint->group_id])
+				(*sdw_be_num)++;
+		}
+
+		if (endpoint->aggregated)
+			group_visited[endpoint->group_id] = true;
 	}
 
-	return num;
+	return 0;
 }
 
 static void init_dai_link(struct snd_soc_dai_link *dai_links,
@@ -737,7 +763,7 @@ static void set_codec_init_func(const struct snd_soc_acpi_link_adr *link,
 	}
 }
 
-static int create_sdw_codec_dai(struct device *dev, int *be_index,
+static int create_sdw_codec_dai(struct device *dev, int *be_id,
 				struct snd_soc_dai_link *dai_links,
 				struct snd_soc_dai_link_component *cpus,
 				const struct snd_soc_acpi_link_adr *link,
@@ -787,10 +813,10 @@ static int create_sdw_codec_dai(struct device *dev, int *be_index,
 			return -ENOMEM;
 
 		cpus[*cpu_id].dai_name = cpu_name;
-		init_dai_link(dai_links + *be_index, name, 1 - i, i, cpus +
+		init_dai_link(dai_links + *be_id, name, 1 - i, i, cpus +
 			      (*cpu_id)++, 1, codec, link->num_adr,
-			      *be_index, NULL, &sdw_ops);
-		set_codec_init_func(link, dai_links + (*be_index)++, 1 - i);
+			      *be_id, NULL, &sdw_ops);
+		set_codec_init_func(link, dai_links + (*be_id)++, 1 - i);
 		j++;
 	}
 
@@ -812,20 +838,23 @@ static int sof_card_dai_links_create(struct device *dev,
 				     struct snd_soc_acpi_mach *mach,
 				     struct snd_soc_card *card)
 {
+	int ssp_num, sdw_be_num = 0, hdmi_num = 0, dmic_num;
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_AUDIO_CODEC)
 	struct snd_soc_dai_link_component *idisp_components;
 #endif
 	struct snd_soc_dai_link_component *ssp_components;
 	struct snd_soc_acpi_mach_params *mach_params;
-	int ssp_num, sdw_num, hdmi_num = 0, dmic_num;
 	const struct snd_soc_acpi_link_adr *adr_link;
 	struct snd_soc_dai_link_component *cpus;
 	int ssp_codec_index, ssp_mask;
 	struct snd_soc_dai_link *links;
 	int num_links, link_id = 0;
 	char *name, *cpu_name;
+	int total_cpu_dai_num;
+	int sdw_cpu_dai_num;
 	int i, j, be_id = 0;
 	int cpu_id = 0;
+	int comp_num;
 	int ret;
 
 	/* reset amp_num to ensure amp_num++ starts from 0 in each probe */
@@ -846,27 +875,36 @@ static int sof_card_dai_links_create(struct device *dev,
 	 */
 	ssp_codec_index = find_codec_info_acpi(mach->id);
 	ssp_num = ssp_codec_index >= 0 ? hweight_long(ssp_mask) : 0;
+	comp_num = hdmi_num + ssp_num;
 
 	mach_params = &mach->mach_params;
-	sdw_num = get_sdw_dai_link_num(mach_params);
+	ret = get_sdw_dailink_info(mach_params->links,
+				   &sdw_be_num, &sdw_cpu_dai_num);
+	if (ret < 0) {
+		dev_err(dev, "failed to get sdw link info %d", ret);
+		return ret;
+	}
 
 	/* enable dmic01 & dmic16k */
 	dmic_num = (sof_rt711_rt1308_rt715_quirk & SOF_SDW_PCH_DMIC) ? 2 : 0;
+	comp_num += dmic_num;
 
-	dev_dbg(dev, "sdw %d, ssp %d, dmic %d, hdmi %d", sdw_num, ssp_num,
+	dev_dbg(dev, "sdw %d, ssp %d, dmic %d, hdmi %d", sdw_be_num, ssp_num,
 		dmic_num, hdmi_num);
 
-	num_links = ssp_num + sdw_num + dmic_num + hdmi_num;
-	links = devm_kcalloc(dev, num_links, sizeof(struct snd_soc_dai_link),
-			     GFP_KERNEL);
-	cpus = devm_kcalloc(dev, num_links,
-			    sizeof(struct snd_soc_dai_link_component),
+	/* allocate BE dailinks */
+	num_links = comp_num + sdw_be_num;
+	links = devm_kcalloc(dev, num_links, sizeof(*links), GFP_KERNEL);
+
+	/* allocated CPU DAIs */
+	total_cpu_dai_num = comp_num + sdw_cpu_dai_num;
+	cpus = devm_kcalloc(dev, total_cpu_dai_num, sizeof(*cpus),
 			    GFP_KERNEL);
 	if (!links || !cpus)
 		return -ENOMEM;
 
 	/* SDW */
-	if (!sdw_num)
+	if (!sdw_be_num)
 		goto SSP;
 
 	adr_link = mach_params->links;
