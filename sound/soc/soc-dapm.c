@@ -1105,6 +1105,11 @@ static int snd_soc_dapm_suspend_check(struct snd_soc_dapm_widget *widget)
 	}
 }
 
+static void dapm_widget_list_free(struct snd_soc_dapm_widget_list **list)
+{
+	kfree(*list);
+}
+
 static int dapm_widget_list_create(struct snd_soc_dapm_widget_list **list,
 	struct list_head *widgets)
 {
@@ -1308,6 +1313,11 @@ int snd_soc_dapm_dai_get_connected_widgets(struct snd_soc_dai *dai, int stream,
 	mutex_unlock(&card->dapm_mutex);
 
 	return paths;
+}
+
+void snd_soc_dapm_dai_free_widgets(struct snd_soc_dapm_widget_list **list)
+{
+	dapm_widget_list_free(list);
 }
 
 /*
@@ -2620,10 +2630,7 @@ static int dapm_update_dai_unlocked(struct snd_pcm_substream *substream,
 	struct snd_soc_dapm_widget *w;
 	int ret;
 
-	if (dir == SNDRV_PCM_STREAM_PLAYBACK)
-		w = dai->playback_widget;
-	else
-		w = dai->capture_widget;
+	w = snd_soc_dai_get_widget(dai, dir);
 
 	if (!w)
 		return 0;
@@ -3600,6 +3607,9 @@ snd_soc_dapm_new_control_unlocked(struct snd_soc_dapm_context *dapm,
 			ret = PTR_ERR(w->pinctrl);
 			goto request_failed;
 		}
+
+		/* set to sleep_state when initializing */
+		dapm_pinctrl_event(w, NULL, SND_SOC_DAPM_POST_PMD);
 		break;
 	case snd_soc_dapm_clock_supply:
 		w->clk = devm_clk_get(dapm->dev, w->name);
@@ -4372,10 +4382,7 @@ static void soc_dapm_dai_stream_event(struct snd_soc_dai *dai, int stream,
 	struct snd_soc_dapm_widget *w;
 	unsigned int ep;
 
-	if (stream == SNDRV_PCM_STREAM_PLAYBACK)
-		w = dai->playback_widget;
-	else
-		w = dai->capture_widget;
+	w = snd_soc_dai_get_widget(dai, stream);
 
 	if (w) {
 		dapm_mark_dirty(w, "stream event");
