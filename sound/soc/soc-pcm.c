@@ -907,7 +907,6 @@ dynamic:
 config_err:
 	for_each_rtd_codec_dai(rtd, i, codec_dai)
 		snd_soc_dai_shutdown(codec_dai, substream);
-	i = rtd->num_cpus;
 cpu_dai_err:
 	for_each_rtd_cpu_dai(rtd, i, cpu_dai)
 		snd_soc_dai_shutdown(cpu_dai, substream);
@@ -2846,12 +2845,6 @@ static int soc_dpcm_fe_runtime_update(struct snd_soc_pcm_runtime *fe, int new)
 	int stream;
 	int count, paths;
 	int ret;
-
-	if (fe->num_cpus > 1) {
-		dev_err(fe->dev,
-			"%s doesn't support Multi CPU yet\n", __func__);
-		return -EINVAL;
-	}
 
 	if (fe->num_cpus > 1) {
 		dev_err(fe->dev,
