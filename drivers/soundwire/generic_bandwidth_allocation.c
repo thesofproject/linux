@@ -42,6 +42,7 @@ static void sdw_compute_slave_ports(struct sdw_master_runtime *m_rt,
 	struct sdw_port_runtime *p_rt;
 	int port_bo, sample_int;
 	unsigned int rate, bps, ch = 0;
+	unsigned int slave_total_ch;
 
 	port_bo = t_data->block_offset;
 
@@ -49,6 +50,7 @@ static void sdw_compute_slave_ports(struct sdw_master_runtime *m_rt,
 		rate = m_rt->stream->params.rate;
 		bps = m_rt->stream->params.bps;
 		sample_int = (m_rt->bus->params.curr_dr_freq / rate);
+		slave_total_ch = 0;
 
 		list_for_each_entry(p_rt, &s_rt->port_list, port_node) {
 			ch = sdw_ch_mask_to_ch(p_rt->ch_mask);
@@ -67,6 +69,18 @@ static void sdw_compute_slave_ports(struct sdw_master_runtime *m_rt,
 					     SDW_PORT_DATA_MODE_NORMAL);
 
 			port_bo += bps * ch;
+			slave_total_ch += ch;
+		}
+
+		if (m_rt->direction == SDW_DATA_DIR_TX &&
+		    m_rt->ch_count == slave_total_ch) {
+			/*
+			 * Slave devices were configured to access all channels
+			 * of the stream, which indicates that they operate in
+			 * 'mirror mode'. Make sure we reset the port offset for
+			 * the next device in the list
+			 */
+			port_bo = t_data->block_offset;
 		}
 	}
 }
