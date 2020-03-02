@@ -37,3 +37,4 @@ obj-$(CONFIG_DA8XX_MSTPRI)	+= da8xx-mstpri.o
 
 # MHI
 obj-$(CONFIG_MHI_BUS)		+= mhi/
+obj-$(CONFIG_VIRTUAL_BUS)	+= virtual_bus.o

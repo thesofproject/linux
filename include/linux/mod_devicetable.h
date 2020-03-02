@@ -829,6 +829,15 @@ struct wmi_device_id {
  */
 struct mhi_device_id {
 	const char chan[MHI_NAME_SIZE];
+
+	kernel_ulong_t driver_data;
+};
+
+#define VIRTBUS_NAME_SIZE 20
+#define VIRTBUS_MODULE_PREFIX "virtbus:"
+
+struct virtbus_dev_id {
+	char name[VIRTBUS_NAME_SIZE];
 	kernel_ulong_t driver_data;
 };
 
