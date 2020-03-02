@@ -43,9 +43,13 @@ static void sdw_compute_slave_ports(struct sdw_master_runtime *m_rt,
 	int port_bo, sample_int;
 	unsigned int rate, bps, ch = 0;
 
-	port_bo = t_data->block_offset;
+	if (m_rt->direction == SDW_DATA_DIR_RX)
+		port_bo = t_data->block_offset;
 
 	list_for_each_entry(s_rt, &m_rt->slave_rt_list, m_rt_node) {
+		if (m_rt->direction == SDW_DATA_DIR_TX)
+			port_bo = t_data->block_offset;
+
 		rate = m_rt->stream->params.rate;
 		bps = m_rt->stream->params.bps;
 		sample_int = (m_rt->bus->params.curr_dr_freq / rate);
