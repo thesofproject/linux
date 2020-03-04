@@ -4793,8 +4793,8 @@ static void soc_dapm_shutdown_dapm(struct snd_soc_dapm_context *dapm)
 		if (w->dapm != dapm)
 			continue;
 		if (w->power) {
-			dapm_seq_insert(w, &down_list, false);
 			w->new_power = 0;
+			dapm_seq_insert(w, &down_list, false);
 			powerdown = 1;
 		}
 	}
