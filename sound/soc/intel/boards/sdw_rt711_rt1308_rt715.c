@@ -646,12 +646,12 @@ static int get_sdw_dailink_info(const struct snd_soc_acpi_link_adr *links,
 	return 0;
 }
 
-static void init_dai_link(struct snd_soc_dai_link *dai_links,
+static void init_dai_link(struct snd_soc_dai_link *dai_links, int be_id,
 			  char *name, int playback, int capture,
 			  struct snd_soc_dai_link_component *cpus,
 			  int cpus_num,
 			  struct snd_soc_dai_link_component *codecs,
-			  int codecs_num, int be_id,
+			  int codecs_num,
 			  int (*init)(struct snd_soc_pcm_runtime *rtd),
 			  const struct snd_soc_ops *ops)
 {
@@ -964,10 +964,11 @@ static int create_sdw_dailink(struct device *dev, int *be_index,
 
 		playback = (stream == SNDRV_PCM_STREAM_PLAYBACK);
 		capture = (stream == SNDRV_PCM_STREAM_CAPTURE);
-		init_dai_link(dai_links + *be_index, name, playback, capture,
-			      cpus + *cpu_id, cpu_dai_num, codecs,
-			      codec_num, *be_index, NULL,
-			      &sdw_ops);
+		init_dai_link(dai_links + *be_index, *be_index, name,
+			      playback, capture,
+			      cpus + *cpu_id, cpu_dai_num,
+			      codecs, codec_num,
+			      NULL, &sdw_ops);
 
 		ret = set_codec_init_func(link, dai_links + (*be_index)++,
 					  playback);
@@ -1151,8 +1152,10 @@ SSP:
 
 		playback = info->direction[SNDRV_PCM_STREAM_PLAYBACK];
 		capture = info->direction[SNDRV_PCM_STREAM_CAPTURE];
-		init_dai_link(links + link_id, name, playback, capture,
-			      cpus + cpu_id, 1, ssp_components, 1, be_id,
+		init_dai_link(links + link_id, be_id, name,
+			      playback, capture,
+			      cpus + cpu_id, 1,
+			      ssp_components, 1,
 			      NULL, info->ops);
 
 		info->init(NULL, links + link_id, info, 0);
@@ -1163,15 +1166,19 @@ DMIC:
 	/* dmic */
 	if (dmic_num > 0) {
 		cpus[cpu_id].dai_name = "DMIC01 Pin";
-		init_dai_link(links + link_id, "dmic01", 0, 1,
-			      cpus + cpu_id, 1, dmic_component,
-			      1, be_id, dmic_init, NULL);
+		init_dai_link(links + link_id, be_id, "dmic01",
+			      0, 1, // DMIC only supports capture
+			      cpus + cpu_id, 1,
+			      dmic_component, 1,
+			      dmic_init, NULL);
 		INC_ID(be_id, cpu_id, link_id);
 
 		cpus[cpu_id].dai_name = "DMIC16k Pin";
-		init_dai_link(links + link_id, "dmic16k", 0, 1,
-			      cpus + cpu_id, 1, dmic_component,
-			      1, be_id, dmic_init, NULL);
+		init_dai_link(links + link_id, be_id, "dmic16k",
+			      0, 1, // DMIC only supports capture
+			      cpus + cpu_id, 1,
+			      dmic_component, 1,
+			      dmic_init, NULL);
 		INC_ID(be_id, cpu_id, link_id);
 	}
 
@@ -1205,9 +1212,11 @@ DMIC:
 			return -ENOMEM;
 
 		cpus[cpu_id].dai_name = cpu_name;
-		init_dai_link(links + link_id, name, 1, 0,
-			      cpus + cpu_id, 1, idisp_components + i,
-			      1, be_id, hdmi_init, NULL);
+		init_dai_link(links + link_id, be_id, name,
+			      1, 0, // HDMI only supports playback
+			      cpus + cpu_id, 1,
+			      idisp_components + i, 1,
+			      hdmi_init, NULL);
 		INC_ID(be_id, cpu_id, link_id);
 	}
 #endif
