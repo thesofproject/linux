@@ -316,16 +316,38 @@ static const struct snd_kcontrol_new controls[] = {
 	SOC_DAPM_PIN_SWITCH("Speaker"),
 };
 
+static int set_amp_tdm_slots(struct snd_soc_pcm_runtime *rtd, bool tdm_mode)
+{
+	struct snd_soc_dai *codec_dai;
+	int ret;
+	int i;
+
+	for_each_rtd_codec_dai(rtd, i, codec_dai) {
+		if (tdm_mode)
+			/* tx_mask 0, rx_mask with only one bit, single slot) */
+			ret = snd_soc_dai_set_tdm_slot(codec_dai, 0, BIT(i), 1, 0);
+		else
+			/* tx_mask 0, rx_mask 0x3, 2 slots */
+			ret = snd_soc_dai_set_tdm_slot(codec_dai, 0, 0x3, 2, 0);
+		if (ret < 0)
+			return ret;
+	}
+
+	return 0;
+}
+
 static int first_spk_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_card *card = rtd->card;
 	int ret;
 
 	ret = snd_soc_dapm_add_routes(&card->dapm, rt1308_speaker_map, 2);
-	if (ret)
+	if (ret) {
 		dev_err(rtd->dev, "failed to add first SPK map: %d\n", ret);
+		return ret;
+	}
 
-	return ret;
+	return set_amp_tdm_slots(rtd, false);
 }
 
 static int second_spk_init(struct snd_soc_pcm_runtime *rtd)
@@ -334,10 +356,12 @@ static int second_spk_init(struct snd_soc_pcm_runtime *rtd)
 	int ret;
 
 	ret = snd_soc_dapm_add_routes(&card->dapm, rt1308_speaker_map + 2, 2);
-	if (ret)
+	if (ret) {
 		dev_err(rtd->dev, "failed to add second SPK map: %d\n", ret);
+		return ret;
+	}
 
-	return ret;
+	return set_amp_tdm_slots(rtd, false);
 }
 
 static int all_spk_init(struct snd_soc_pcm_runtime *rtd)
@@ -346,10 +370,12 @@ static int all_spk_init(struct snd_soc_pcm_runtime *rtd)
 	int ret;
 
 	ret = snd_soc_dapm_add_routes(&card->dapm, rt1308_speaker_map, 4);
-	if (ret)
+	if (ret) {
 		dev_err(rtd->dev, "failed to add all SPK map: %d\n", ret);
+		return ret;
+	}
 
-	return ret;
+	return set_amp_tdm_slots(rtd, true);
 }
 
 static const struct snd_soc_dapm_widget dmic_widgets[] = {
