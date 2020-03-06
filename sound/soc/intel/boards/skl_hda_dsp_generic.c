@@ -100,6 +100,7 @@ static struct snd_soc_card hda_soc_card = {
 	.dapm_routes = skl_hda_map,
 	.add_dai_link = skl_hda_add_dai_link,
 	.fully_routed = true,
+	.disable_route_checks = true,
 	.late_probe = skl_hda_card_late_probe,
 };
 
