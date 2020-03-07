@@ -17,6 +17,9 @@ enum {
 	HDAC_LAST_DAI_ID = HDAC_HDMI_3_DAI_ID,
 };
 
+#define HDAC_ANALOG_CODEC_DAI_NAME "Analog Codec DAI"
+#define HDAC_HDMI0_DAI_NAME "intel-hdmi-hifi1"
+
 struct hdac_hda_pcm {
 	int stream_tag[2];
 	unsigned int format_val[2];

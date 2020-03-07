@@ -168,6 +168,29 @@ static int skl_hda_fill_card_info(struct snd_soc_acpi_mach_params *mach_params)
 	return 0;
 }
 
+#define HDA_CODEC_AUTOSUSPEND_DELAY_MS 1000
+
+static void skl_set_hda_codec_autosuspend_delay(struct snd_soc_card *card,
+						const char *codec_dai_name)
+{
+	struct snd_soc_dai *codec_dai;
+	struct hdac_hda_priv *hda_pvt;
+	struct hdac_device *hdev;
+
+	codec_dai = snd_soc_card_get_codec_dai(card, codec_dai_name);
+	if (!codec_dai)
+		return;
+
+	hda_pvt = snd_soc_component_get_drvdata(codec_dai->component);
+	hdev = &hda_pvt->codec.core;
+	pm_runtime_get_noresume(&hdev->dev);
+	pm_runtime_set_autosuspend_delay(&hdev->dev,
+					 HDA_CODEC_AUTOSUSPEND_DELAY_MS);
+	pm_runtime_use_autosuspend(&hdev->dev);
+	pm_runtime_mark_last_busy(&hdev->dev);
+	pm_runtime_put_autosuspend(&hdev->dev);
+}
+
 static int skl_hda_audio_probe(struct platform_device *pdev)
 {
 	struct snd_soc_acpi_mach *mach;
@@ -206,7 +229,16 @@ static int skl_hda_audio_probe(struct platform_device *pdev)
 		hda_soc_card.components = hda_soc_components;
 	}
 
-	return devm_snd_soc_register_card(&pdev->dev, &hda_soc_card);
+	ret = devm_snd_soc_register_card(&pdev->dev, &hda_soc_card);
+	if (!ret) {
+		/* set hda analog codec */
+		skl_set_hda_codec_autosuspend_delay(&hda_soc_card,
+						    HDAC_ANALOG_CODEC_DAI_NAME);
+		/* set hda hdmi/dp codec */
+		skl_set_hda_codec_autosuspend_delay(&hda_soc_card,
+						    HDAC_HDMI0_DAI_NAME);
+	}
+	return ret;
 }
 
 static struct platform_driver skl_hda_audio = {

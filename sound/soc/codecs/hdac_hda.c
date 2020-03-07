@@ -64,7 +64,7 @@ static const struct snd_soc_dai_ops hdac_hda_dai_ops = {
 static struct snd_soc_dai_driver hdac_hda_dais[] = {
 {
 	.id = HDAC_ANALOG_DAI_ID,
-	.name = "Analog Codec DAI",
+	.name = HDAC_ANALOG_CODEC_DAI_NAME,
 	.ops = &hdac_hda_dai_ops,
 	.playback = {
 		.stream_name	= "Analog Codec Playback",
@@ -127,7 +127,7 @@ static struct snd_soc_dai_driver hdac_hda_dais[] = {
 },
 {
 	.id = HDAC_HDMI_0_DAI_ID,
-	.name = "intel-hdmi-hifi1",
+	.name = HDAC_HDMI0_DAI_NAME,
 	.ops = &hdac_hda_dai_ops,
 	.playback = {
 		.stream_name    = "hifi1",
