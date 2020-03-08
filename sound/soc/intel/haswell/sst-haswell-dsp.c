@@ -250,14 +250,17 @@ static void hsw_set_dsp_D3(struct sst_dsp *sst)
 
 	/* Disable core clock gating (VDRTCTL2.DCLCGE = 0) */
 	reg = readl(sst->addr.pci_cfg + SST_VDRTCTL2);
-	reg &= ~(SST_VDRTCL2_DCLCGE | SST_VDRTCL2_DTCGE);
+	reg &= ~SST_VDRTCL2_DCLCGE;
 	writel(reg, sst->addr.pci_cfg + SST_VDRTCTL2);
 
-	/* enable power gating and switch off DRAM & IRAM blocks */
+	/*
+	 * enable power gating (but preserve D3PGD) and
+	 * switch off DRAM & IRAM blocks.
+	 */
 	val = readl(sst->addr.pci_cfg + SST_VDRTCTL0);
 	val |= SST_VDRTCL0_DSRAMPGE_MASK |
 		SST_VDRTCL0_ISRAMPGE_MASK;
-	val &= ~(SST_VDRTCL0_D3PGD | SST_VDRTCL0_D3SRAMPGD);
+	val &= ~SST_VDRTCL0_D3SRAMPGD;
 	writel(val, sst->addr.pci_cfg + SST_VDRTCTL0);
 
 	/* switch off audio PLL */
@@ -304,7 +307,7 @@ static int hsw_set_dsp_D0(struct sst_dsp *sst)
 	int tries = 10;
 	u32 reg, fw_dump_bit;
 
-	/* Disable core clock gating (VDRTCTL2.DCLCGE = 0) */
+	/* Disable core clock gating and trunk clock gating */
 	reg = readl(sst->addr.pci_cfg + SST_VDRTCTL2);
 	reg &= ~(SST_VDRTCL2_DCLCGE | SST_VDRTCL2_DTCGE);
 	writel(reg, sst->addr.pci_cfg + SST_VDRTCTL2);
@@ -348,9 +351,12 @@ finish:
 	/* Stall and reset core, set CSR */
 	hsw_reset(sst);
 
-	/* Enable core clock gating (VDRTCTL2.DCLCGE = 1), delay 50 us */
+	/*
+	 * Enable core clock gating(DCLCGE = 1), keep trunk clock gating
+	 * disabled (DTCGE = 0) to avoid FW crashes.
+	 */
 	reg = readl(sst->addr.pci_cfg + SST_VDRTCTL2);
-	reg |= SST_VDRTCL2_DCLCGE | SST_VDRTCL2_DTCGE;
+	reg |= SST_VDRTCL2_DCLCGE;
 	writel(reg, sst->addr.pci_cfg + SST_VDRTCTL2);
 
 	udelay(50);
