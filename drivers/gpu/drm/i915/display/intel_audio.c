@@ -849,7 +849,7 @@ static unsigned long i915_audio_component_get_power(struct device *kdev)
 	ret = intel_display_power_get(dev_priv, POWER_DOMAIN_AUDIO);
 
 	if (dev_priv->audio_power_refcount++ == 0) {
-		if (IS_TIGERLAKE(dev_priv) || IS_ICELAKE(dev_priv)) {
+		if (INTEL_GEN(dev_priv) >= 9) {
 			I915_WRITE(AUD_FREQ_CNTRL, dev_priv->audio_freq_cntrl);
 			DRM_DEBUG_KMS("restored AUD_FREQ_CNTRL to 0x%x\n",
 				      dev_priv->audio_freq_cntrl);
@@ -1124,7 +1124,7 @@ static void i915_audio_component_init(struct drm_i915_private *dev_priv)
 		return;
 	}
 
-	if (IS_TIGERLAKE(dev_priv) || IS_ICELAKE(dev_priv)) {
+	if (INTEL_GEN(dev_priv) >= 9) {
 		dev_priv->audio_freq_cntrl = I915_READ(AUD_FREQ_CNTRL);
 		DRM_DEBUG_KMS("init value of AUD_FREQ_CNTRL of 0x%x\n",
 			      dev_priv->audio_freq_cntrl);
