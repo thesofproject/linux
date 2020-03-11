@@ -82,7 +82,7 @@ static const struct snd_soc_acpi_link_adr tgl_rvp[] = {
 struct snd_soc_acpi_mach snd_soc_acpi_intel_tgl_machines[] = {
 	{
 		.id = "10EC1308",
-		.drv_name = "sdw_rt711_rt1308_rt715",
+		.drv_name = "sof_sdw",
 		.link_mask = 0x1, /* RT711 on SoundWire link0 */
 		.links = tgl_i2s_rt1308,
 		.sof_fw_filename = "sof-tgl.ri",
@@ -105,7 +105,7 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_tgl_sdw_machines[] = {
 	{
 		.link_mask = 0x3, /* rt711 on link 0 and 2 rt1308s on link 1 */
 		.links = tgl_rvp,
-		.drv_name = "sdw_rt711_rt1308_rt715",
+		.drv_name = "sof_sdw",
 		.sof_fw_filename = "sof-tgl.ri",
 		.sof_tplg_filename = "sof-tgl-rt711-rt1308.tplg",
 	},
