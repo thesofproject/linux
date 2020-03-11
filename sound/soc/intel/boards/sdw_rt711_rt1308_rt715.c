@@ -66,6 +66,7 @@ enum {
 #define SOF_SSP_PORT(x)		(((x) & GENMASK(5, 0)) << 5)
 #define SOF_SSP_GET_PORT(quirk)	(((quirk) >> 5) & GENMASK(5, 0))
 #define SOF_RT715_DAI_ID_FIX		BIT(11)
+#define SOF_SDW_NO_AGGREGATED		BIT(12)
 
 static unsigned long sof_rt711_rt1308_rt715_quirk = SOF_RT711_JD_SRC_JD1;
 
@@ -242,7 +243,8 @@ static const struct dmi_system_id sof_sdw_rt711_rt1308_rt715_quirk_table[] = {
 			DMI_MATCH(DMI_PRODUCT_NAME, "XPS"),
 		},
 		.driver_data = (void *)(SOF_RT711_JD_SRC_JD2 |
-					SOF_RT715_DAI_ID_FIX),
+					SOF_RT715_DAI_ID_FIX |
+					SOF_SDW_NO_AGGREGATED),
 	},
 	{
 		.callback = sof_rt711_rt1308_rt715_quirk_cb,
@@ -601,8 +603,10 @@ static int get_sdw_dailink_info(const struct snd_soc_acpi_link_adr *links,
 {
 	const struct snd_soc_acpi_link_adr *link;
 	bool group_visited[SDW_MAX_GROUPS];
+	bool no_aggregated;
 	int i;
 
+	no_aggregated = sof_rt711_rt1308_rt715_quirk & SOF_SDW_NO_AGGREGATED;
 	*sdw_cpu_dai_num = 0;
 	*sdw_be_num  = 0;
 
@@ -634,7 +638,7 @@ static int get_sdw_dailink_info(const struct snd_soc_acpi_link_adr *links,
 			(*sdw_cpu_dai_num)++;
 
 			/* count BE for each non-aggregated slave or group */
-			if (!endpoint->aggregated ||
+			if (!endpoint->aggregated || no_aggregated ||
 			    !group_visited[endpoint->group_id])
 				(*sdw_be_num)++;
 		}
@@ -805,8 +809,10 @@ static int get_slave_info(const struct snd_soc_acpi_link_adr *adr_link,
 {
 	const struct snd_soc_acpi_adr_device *adr_d;
 	const struct snd_soc_acpi_link_adr *adr_next;
+	bool no_aggregated;
 	int index = 0;
 
+	no_aggregated = sof_rt711_rt1308_rt715_quirk & SOF_SDW_NO_AGGREGATED;
 	*codec_num = adr_link->num_adr;
 	adr_d = adr_link->adr_d;
 
@@ -815,7 +821,7 @@ static int get_slave_info(const struct snd_soc_acpi_link_adr *adr_link,
 		return -EINVAL;
 
 	cpu_dai_id[index++] = ffs(adr_link->mask) - 1;
-	if (!adr_d->endpoints->aggregated) {
+	if (!adr_d->endpoints->aggregated || no_aggregated) {
 		*cpu_dai_num = 1;
 		*group_id = 0;
 		return 0;
