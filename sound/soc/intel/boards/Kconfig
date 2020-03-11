@@ -542,30 +542,22 @@ endif ## SND_SOC_SOF_JASPERLAKE
 
 if SND_SOC_SOF_INTEL_SOUNDWIRE
 
-config SND_SOC_INTEL_SOUNDWIRE_RT700_MACH
-	tristate "SoundWire with RT700 codec"
-	depends on SOUNDWIRE && ACPI
-	depends on SND_HDA_CODEC_HDMI
-	select SND_SOC_RT700_SDW
-	select SND_SOC_DMIC
-        help
-	  Add support for Intel SoundWire-based platforms connected to RT700
-	  on link 0 or 1
-	  If unsure select "N"
-
-config SND_SOC_INTEL_SOUNDWIRE_RT711_RT1308_RT715_MACH
-	tristate "SoundWire with RT711, RT1308 and RT715"
+config SND_SOC_INTEL_SOUNDWIRE_SOF_MACH
+	tristate "SoundWire generic machine driver"
 	depends on I2C && ACPI
 	depends on MFD_INTEL_LPSS || COMPILE_TEST
+	depends on SND_SOC_INTEL_USER_FRIENDLY_LONG_NAMES || COMPILE_TEST
 	depends on SOUNDWIRE
 	depends on SND_HDA_CODEC_HDMI
+	select SND_SOC_RT700_SDW
 	select SND_SOC_RT711_SDW
 	select SND_SOC_RT1308_SDW
 	select SND_SOC_RT1308
 	select SND_SOC_RT715_SDW
+	select SND_SOC_DMIC
         help
-	  Add support for Intel SoundWire-based platforms connected to RT711,
-          RT1308 and RT715
+	  Add support for Intel SoundWire-based platforms connected to
+	  RT700, RT711, RT1308 and RT715
 	  If unsure select "N".
 
 endif
