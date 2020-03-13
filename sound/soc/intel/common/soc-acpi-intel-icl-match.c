@@ -128,12 +128,12 @@ static const struct snd_soc_acpi_link_adr icl_3_in_1_default[] = {
 	{
 		.mask = BIT(1),
 		.num_adr = ARRAY_SIZE(rt1308_1_group1_adr),
-		.adr_d = rt1308_1_adr,
+		.adr_d = rt1308_1_group1_adr,
 	},
 	{
 		.mask = BIT(2),
 		.num_adr = ARRAY_SIZE(rt1308_2_group1_adr),
-		.adr_d = rt1308_2_adr,
+		.adr_d = rt1308_2_group1_adr,
 	},
 	{
 		.mask = BIT(3),
