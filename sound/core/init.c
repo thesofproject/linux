@@ -695,9 +695,21 @@ card_number_show_attr(struct device *dev,
 
 static DEVICE_ATTR(number, 0444, card_number_show_attr, NULL);
 
+static ssize_t
+components_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct snd_card *card = container_of(dev, struct snd_card, card_dev);
+
+	return scnprintf(buf, PAGE_SIZE, "%s\n", card->components);
+}
+
+static DEVICE_ATTR_RO(components);
+
 static struct attribute *card_dev_attrs[] = {
 	&dev_attr_id.attr,
 	&dev_attr_number.attr,
+	&dev_attr_components.attr,
 	NULL
 };
 
