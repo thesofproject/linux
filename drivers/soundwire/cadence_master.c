@@ -1291,7 +1291,7 @@ int sdw_cdns_clock_stop(struct sdw_cdns *cdns, bool block_wake)
 	status = cdns_readl(cdns, CDNS_MCP_STAT);
 	if (status & CDNS_MCP_STAT_CLK_STOP) {
 		dev_dbg(cdns->dev, "Clock is already stopped\n");
-		return 1;
+		return 0;
 	}
 
 	/*
