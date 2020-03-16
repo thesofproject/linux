@@ -532,35 +532,23 @@ static void soc_pcm_set_msb(struct snd_pcm_substream *substream, int bits)
 static void soc_pcm_apply_msb(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_dai *cpu_dai;
-	struct snd_soc_dai *codec_dai;
-	struct snd_soc_pcm_stream *pcm_codec, *pcm_cpu;
+	struct snd_soc_dai *dai;
+	struct snd_soc_pcm_stream *pcm;
 	int stream = substream->stream;
 	int i;
-	unsigned int bits = 0, cpu_bits = 0;
+	unsigned int bits = 0;
 
-	for_each_rtd_codec_dais(rtd, i, codec_dai) {
-		pcm_codec = snd_soc_dai_get_pcm_stream(codec_dai, stream);
+	for_each_rtd_dais(rtd, i, dai) {
+		pcm = snd_soc_dai_get_pcm_stream(dai, stream);
 
-		if (pcm_codec->sig_bits == 0) {
+		if (pcm->sig_bits == 0) {
 			bits = 0;
 			break;
 		}
-		bits = max(pcm_codec->sig_bits, bits);
-	}
-
-	for_each_rtd_cpu_dais(rtd, i, cpu_dai) {
-		pcm_cpu = snd_soc_dai_get_pcm_stream(cpu_dai, stream);
-
-		if (pcm_cpu->sig_bits == 0) {
-			cpu_bits = 0;
-			break;
-		}
-		cpu_bits = max(pcm_cpu->sig_bits, cpu_bits);
+		bits = max(pcm->sig_bits, bits);
 	}
 
 	soc_pcm_set_msb(substream, bits);
-	soc_pcm_set_msb(substream, cpu_bits);
 }
 
 /**
