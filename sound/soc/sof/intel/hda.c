@@ -1109,7 +1109,8 @@ static int hda_sdw_machine_select(struct snd_sof_dev *sdev)
 				break;
 
 			link = mach->links;
-			for (i = 0; i < hdev->info.count; i++, link++) {
+			for (i = 0; i < hdev->info.count && link->num_adr;
+			     i++, link++) {
 				/*
 				 * Try next machine if any expected Slaves
 				 * are not found on this link.
@@ -1118,7 +1119,7 @@ static int hda_sdw_machine_select(struct snd_sof_dev *sdev)
 					break;
 			}
 			/* Found if all Slaves are checked */
-			if (i == hdev->info.count)
+			if (i == hdev->info.count || !link->num_adr)
 				break;
 		}
 		if (mach && mach->link_mask) {
