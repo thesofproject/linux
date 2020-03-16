@@ -1344,14 +1344,10 @@ static int intel_init(struct sdw_intel *sdw)
 {
 	bool clock_stop;
 
-	dev_err(sdw->cdns.dev, "%s: start\n", __func__);
-
 	/* Initialize shim and controller */
 	intel_link_power_up(sdw);
 
 	clock_stop = sdw_cdns_is_clock_stop(&sdw->cdns);
-
-	dev_err(sdw->cdns.dev, "%s: shim_init clock stop %d\n", __func__, clock_stop);
 
 	intel_shim_init(sdw, clock_stop);
 
