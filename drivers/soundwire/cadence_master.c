@@ -1276,12 +1276,10 @@ int sdw_cdns_clock_stop(struct sdw_cdns *cdns, bool block_wake)
 {
 	bool slave_present = false;
 	struct sdw_slave *slave;
-	u32 status;
 	int ret;
 
 	/* Check suspend status */
-	status = cdns_readl(cdns, CDNS_MCP_STAT);
-	if (status & CDNS_MCP_STAT_CLK_STOP) {
+	if (sdw_cdns_is_clock_stop(cdns)) {
 		dev_dbg(cdns->dev, "Clock is already stopped\n");
 		return 0;
 	}
