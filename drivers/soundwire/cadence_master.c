@@ -1262,15 +1262,7 @@ static const struct sdw_master_port_ops cdns_port_ops = {
  */
 bool sdw_cdns_is_clock_stop(struct sdw_cdns *cdns)
 {
-	u32 status;
-
-	status = cdns_readl(cdns, CDNS_MCP_STAT) & CDNS_MCP_STAT_CLK_STOP;
-	if (status) {
-		dev_dbg(cdns->dev, "Clock is stopped\n");
-		return true;
-	}
-
-	return false;
+	return !!(cdns_readl(cdns, CDNS_MCP_STAT) & CDNS_MCP_STAT_CLK_STOP);
 }
 EXPORT_SYMBOL(sdw_cdns_is_clock_stop);
 
