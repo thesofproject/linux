@@ -18,7 +18,6 @@ properties:
     enum:
       - fsl,imx8qxp-dsp
       - fsl,imx8qm-dsp
-      - fsl,imx8mp-dsp
 
   reg:
     description: Should contain register location and length
