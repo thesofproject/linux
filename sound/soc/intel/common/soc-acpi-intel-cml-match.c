@@ -80,6 +80,23 @@ static const struct snd_soc_acpi_endpoint spk_r_endpoint = {
 	.group_id = 1,
 };
 
+static const struct snd_soc_acpi_adr_device rt700_1_adr[] = {
+	{
+		.adr = 0x000110025D070000,
+		.num_endpoints = 1,
+		.endpoints = &single_endpoint,
+	}
+};
+
+static const struct snd_soc_acpi_link_adr cml_rvp[] = {
+	{
+		.mask = BIT(1),
+		.num_adr = ARRAY_SIZE(rt700_1_adr),
+		.adr_d = rt700_1_adr,
+	},
+	{}
+};
+
 static const struct snd_soc_acpi_adr_device rt711_0_adr[] = {
 	{
 		.adr = 0x000010025D071100,
@@ -193,6 +210,7 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_cml_sdw_machines[] = {
 	},
 	{
 		.link_mask = 0x2, /* RT700 connected on Link1 */
+		.links = cml_rvp,
 		.drv_name = "sof_sdw",
 		.sof_fw_filename = "sof-cml.ri",
 		.sof_tplg_filename = "sof-cml-rt700.tplg",
