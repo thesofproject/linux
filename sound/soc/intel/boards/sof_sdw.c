@@ -796,7 +796,8 @@ DMIC:
 			      0, 1, // DMIC only supports capture
 			      cpus + cpu_id, 1,
 			      dmic_component, 1,
-			      sof_sdw_dmic_init, NULL);
+			      /* don't call sof_sdw_dmic_init() twice */
+			      NULL, NULL);
 		INC_ID(be_id, cpu_id, link_id);
 	}
 
