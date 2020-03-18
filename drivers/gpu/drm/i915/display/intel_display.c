@@ -14585,6 +14585,10 @@ static int intel_atomic_check(struct drm_device *dev,
 		if (new_crtc_state->hw.mode.private_flags !=
 		    old_crtc_state->hw.mode.private_flags)
 			new_crtc_state->uapi.mode_changed = true;
+
+		if (new_crtc_state->hw.active) {
+			new_crtc_state->uapi.mode_changed = true;
+		}
 	}
 
 	ret = drm_atomic_helper_check_modeset(dev, &state->base);
