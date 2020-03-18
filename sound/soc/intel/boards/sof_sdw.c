@@ -32,7 +32,6 @@ static const struct dmi_system_id sof_sdw_quirk_table[] = {
 			DMI_MATCH(DMI_PRODUCT_NAME, "Latitude"),
 		},
 		.driver_data = (void *)(SOF_RT711_JD_SRC_JD2 |
-					SOF_SDW_MONO_SPK |
 					SOF_RT715_DAI_ID_FIX),
 	},
 	{
@@ -43,6 +42,7 @@ static const struct dmi_system_id sof_sdw_quirk_table[] = {
 		},
 		.driver_data = (void *)(SOF_RT711_JD_SRC_JD2 |
 					SOF_RT715_DAI_ID_FIX |
+					SOF_SDW_FOUR_SPK |
 					SOF_SDW_NO_AGGREGATION),
 	},
 	{
@@ -888,7 +888,7 @@ static int mc_probe(struct platform_device *pdev)
 
 	card->components = devm_kasprintf(card->dev, GFP_KERNEL,
 					  "cfg-spk:%d",
-					  (sof_sdw_quirk & SOF_SDW_MONO_SPK) ? 2 : 4);
+					  (sof_sdw_quirk & SOF_SDW_FOUR_SPK) ? 4 : 2);
 	if (!card->components)
 		return -ENOMEM;
 

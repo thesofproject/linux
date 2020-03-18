@@ -41,7 +41,7 @@ enum {
 };
 
 #define SOF_RT711_JDSRC(quirk)		((quirk) & GENMASK(1, 0))
-#define SOF_SDW_MONO_SPK		BIT(2)
+#define SOF_SDW_FOUR_SPK		BIT(2)
 #define SOF_SDW_TGL_HDMI		BIT(3)
 #define SOF_SDW_PCH_DMIC		BIT(4)
 #define SOF_SSP_PORT(x)		(((x) & GENMASK(5, 0)) << 5)
