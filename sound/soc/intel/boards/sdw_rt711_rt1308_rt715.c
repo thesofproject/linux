@@ -324,7 +324,7 @@ static int set_amp_tdm_slots(struct snd_soc_pcm_runtime *rtd, bool tdm_mode)
 	int ret;
 	int i;
 
-	for_each_rtd_codec_dai(rtd, i, codec_dai) {
+	for_each_rtd_codec_dais(rtd, i, codec_dai) {
 		if (tdm_mode)
 			/* tx_mask 0, rx_mask with only one bit, single slot) */
 			ret = snd_soc_dai_set_tdm_slot(codec_dai, 0, BIT(i), 1, 0);
