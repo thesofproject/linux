@@ -49,6 +49,7 @@ struct sdw_master_device
 	md->link_ops = link_ops;
 
 	md->dev.parent = parent;
+	md->dev.of_node = parent->of_node;
 	md->dev.fwnode = fwnode;
 	md->dev.bus = &sdw_bus_type;
 	md->dev.type = &sdw_master_type;
