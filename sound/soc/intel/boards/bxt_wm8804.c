@@ -53,7 +53,7 @@ static uint32_t snd_rpi_hifiberry_digi_enable_clock(int sample_rate)
 
 static int snd_rpi_hifiberry_digi_init(struct snd_soc_pcm_runtime *rtd)
 {
-	struct snd_soc_component *codec =  rtd->codec_dai->component;
+	struct snd_soc_component *codec = asoc_rtd_to_codec(rtd, 0)->component;
 
 	/* enable TX output */
 	snd_soc_component_update_bits(codec, WM8804_PWRDN, 0x4, 0x0);
@@ -73,7 +73,7 @@ static int snd_rpi_hifiberry_digi_startup(struct snd_pcm_substream *substream)
 {
 	/* turn on digital output */
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_component *codec = rtd->codec_dai->component;
+	struct snd_soc_component *codec = asoc_rtd_to_codec(rtd, 0)->component;
 
 	snd_soc_component_update_bits(codec, WM8804_PWRDN, 0x3c, 0x00);
 	return 0;
@@ -85,7 +85,8 @@ static void snd_rpi_hifiberry_digi_shutdown(struct snd_pcm_substream *substream)
 	if (auto_shutdown_output) {
 		/* turn off output */
 		struct snd_soc_pcm_runtime *rtd = substream->private_data;
-		struct snd_soc_component *codec = rtd->codec_dai->component;
+		struct snd_soc_component *codec =
+			asoc_rtd_to_codec(rtd, 0)->component;
 
 		snd_soc_component_update_bits(codec, WM8804_PWRDN, 0x3c, 0x3c);
 	}
@@ -95,7 +96,7 @@ static int snd_rpi_hifiberry_digi_hw_params(struct snd_pcm_substream *substream,
 					    struct snd_pcm_hw_params *params)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_dai *codec_dai = rtd->codec_dai;
+	struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(rtd, 0);
 	struct snd_soc_component *codec = codec_dai->component;
 
 	int sysclk = 27000000; /* This is fixed on this board */
