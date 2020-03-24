@@ -42,8 +42,7 @@ static const struct dmi_system_id sof_sdw_quirk_table[] = {
 		},
 		.driver_data = (void *)(SOF_RT711_JD_SRC_JD2 |
 					SOF_RT715_DAI_ID_FIX |
-					SOF_SDW_FOUR_SPK |
-					SOF_SDW_NO_AGGREGATION),
+					SOF_SDW_FOUR_SPK),
 	},
 		{
 		.callback = sof_sdw_quirk_cb,
@@ -53,8 +52,7 @@ static const struct dmi_system_id sof_sdw_quirk_table[] = {
 		},
 		.driver_data = (void *)(SOF_RT711_JD_SRC_JD2 |
 					SOF_RT715_DAI_ID_FIX |
-					SOF_SDW_FOUR_SPK |
-					SOF_SDW_NO_AGGREGATION),
+					SOF_SDW_FOUR_SPK),
 	},
 	{
 		.callback = sof_sdw_quirk_cb,
