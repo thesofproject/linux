@@ -15,15 +15,31 @@
  * Hardware interface for audio DSP on Apollolake and GeminiLake
  */
 
+#include <linux/module.h>
 #include "../sof-priv.h"
 #include "hda.h"
 #include "../sof-audio.h"
+#include "../sof-client.h"
 
 static const struct snd_sof_debugfs_map apl_dsp_debugfs[] = {
 	{"hda", HDA_DSP_HDA_BAR, 0, 0x4000, SOF_DEBUGFS_ACCESS_ALWAYS},
 	{"pp", HDA_DSP_PP_BAR,  0, 0x1000, SOF_DEBUGFS_ACCESS_ALWAYS},
 	{"dsp", HDA_DSP_BAR,  0, 0x10000, SOF_DEBUGFS_ACCESS_ALWAYS},
 };
+
+static void apl_register_clients(struct snd_sof_dev *sdev)
+{
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_IPC_FLOOD_TEST_CLIENT)
+	/*
+	 * Register 2 IPC clients to facilitate tandem flood test.
+	 * The device name below is appended with the device ID assigned
+	 * automatically when the ancillary device is registered making
+	 * them unique.
+	 */
+	sof_client_dev_register(sdev, "sof-ipc-test");
+	sof_client_dev_register(sdev, "sof-ipc-test");
+#endif
+}
 
 /* apollolake ops */
 const struct snd_sof_dsp_ops sof_apl_ops = {
@@ -101,6 +117,9 @@ const struct snd_sof_dsp_ops sof_apl_ops = {
 	.trace_release = hda_dsp_trace_release,
 	.trace_trigger = hda_dsp_trace_trigger,
 
+	/* client register */
+	.register_clients = apl_register_clients,
+
 	/* DAI drivers */
 	.drv		= skl_dai,
 	.num_drv	= SOF_SKL_NUM_DAIS,
@@ -140,3 +159,4 @@ const struct sof_intel_dsp_desc apl_chip_info = {
 	.ssp_base_offset = APL_SSP_BASE_OFFSET,
 };
 EXPORT_SYMBOL_NS(apl_chip_info, SND_SOC_SOF_INTEL_HDA_COMMON);
+MODULE_IMPORT_NS(SND_SOC_SOF_CLIENT);

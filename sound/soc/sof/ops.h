@@ -14,9 +14,12 @@
 #include <linux/device.h>
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
+#include <linux/list.h>
+#include <linux/mutex.h>
 #include <linux/types.h>
 #include <sound/pcm.h>
 #include "sof-priv.h"
+#include "sof-client.h"
 
 #define sof_ops(sdev) \
 	((sdev)->pdata->desc->ops)
@@ -468,6 +471,23 @@ snd_sof_set_mach_params(const struct snd_soc_acpi_mach *mach,
 
 	if (sof_ops(sdev) && sof_ops(sdev)->set_mach_params)
 		sof_ops(sdev)->set_mach_params(mach, dev);
+}
+
+static inline void
+snd_sof_register_clients(struct snd_sof_dev *sdev)
+{
+	if (sof_ops(sdev) && sof_ops(sdev)->register_clients)
+		sof_ops(sdev)->register_clients(sdev);
+}
+
+static inline void
+snd_sof_unregister_clients(struct snd_sof_dev *sdev)
+{
+	struct sof_client_dev *cdev, *_cdev;
+
+	/* unregister client devices */
+	list_for_each_entry_safe(cdev, _cdev, &sdev->client_list, list)
+		sof_client_dev_unregister(cdev);
 }
 
 static inline const struct snd_sof_dsp_ops

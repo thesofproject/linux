@@ -246,6 +246,12 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	if (plat_data->sof_probe_complete)
 		plat_data->sof_probe_complete(sdev->dev);
 
+	/*
+	 * Register client devices. This can fail but errors cannot be
+	 * propagated.
+	 */
+	snd_sof_register_clients(sdev);
+
 	return 0;
 
 fw_trace_err:
@@ -356,6 +362,7 @@ int snd_sof_device_remove(struct device *dev)
 			dev_warn(dev, "error: %d failed to prepare DSP for device removal",
 				 ret);
 
+		snd_sof_unregister_clients(sdev);
 		snd_sof_fw_unload(sdev);
 		snd_sof_ipc_free(sdev);
 		snd_sof_free_debug(sdev);
@@ -389,4 +396,5 @@ EXPORT_SYMBOL(snd_sof_device_remove);
 MODULE_AUTHOR("Liam Girdwood");
 MODULE_DESCRIPTION("Sound Open Firmware (SOF) Core");
 MODULE_LICENSE("Dual BSD/GPL");
+MODULE_IMPORT_NS(SND_SOC_SOF_CLIENT);
 MODULE_ALIAS("platform:sof-audio");
