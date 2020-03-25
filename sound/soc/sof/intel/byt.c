@@ -19,6 +19,9 @@
 #include "shim.h"
 #include "../sof-audio.h"
 #include "../../intel/common/soc-intel-quirks.h"
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT)
+#include "../sof-client.h"
+#endif
 
 /* DSP memories */
 #define IRAM_OFFSET		0x0C0000
@@ -779,6 +782,24 @@ irq:
 	return ret;
 }
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT)
+static void byt_register_clients(struct snd_sof_dev *sdev)
+{
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_IPC_FLOOD_TEST_CLIENT)
+	/*
+	 * Register 2 IPC clients to facilitate tandem flood test.
+	 * The device name below is appended with the device ID assigned
+	 * automatically when the virtbus device is registered making
+	 * them unique.
+	 */
+	sof_client_dev_register(sdev, "sof-ipc-test");
+	sof_client_dev_register(sdev, "sof-ipc-test");
+#endif
+}
+#else
+static void byt_register_clients(struct snd_sof_dev *sdev) {}
+#endif
+
 /* baytrail ops */
 const struct snd_sof_dsp_ops sof_byt_ops = {
 	/* device init */
@@ -831,6 +852,9 @@ const struct snd_sof_dsp_ops sof_byt_ops = {
 
 	/*Firmware loading */
 	.load_firmware	= snd_sof_load_firmware_memcpy,
+
+	/* client register */
+	.register_clients = byt_register_clients,
 
 	/* DAI drivers */
 	.drv = byt_dai,
@@ -906,6 +930,9 @@ const struct snd_sof_dsp_ops sof_cht_ops = {
 	/*Firmware loading */
 	.load_firmware	= snd_sof_load_firmware_memcpy,
 
+	/* client register */
+	.register_clients = byt_register_clients,
+
 	/* DAI drivers */
 	.drv = byt_dai,
 	/* all 6 SSPs may be available for cherrytrail */
@@ -933,3 +960,4 @@ EXPORT_SYMBOL_NS(cht_chip_info, SND_SOC_SOF_BAYTRAIL);
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_IMPORT_NS(SND_SOC_SOF_INTEL_HIFI_EP_IPC);
 MODULE_IMPORT_NS(SND_SOC_SOF_XTENSA);
+MODULE_IMPORT_NS(SND_SOC_SOF_CLIENT);

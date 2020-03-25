@@ -14,9 +14,14 @@
 #include <linux/device.h>
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
+#include <linux/list.h>
+#include <linux/mutex.h>
 #include <linux/types.h>
 #include <sound/pcm.h>
 #include "sof-priv.h"
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT)
+#include "sof-client.h"
+#endif
 
 #define sof_ops(sdev) \
 	((sdev)->pdata->desc->ops)
@@ -469,6 +474,35 @@ snd_sof_set_mach_params(const struct snd_soc_acpi_mach *mach,
 	if (sof_ops(sdev) && sof_ops(sdev)->set_mach_params)
 		sof_ops(sdev)->set_mach_params(mach, dev);
 }
+
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT)
+static inline void
+snd_sof_register_clients(struct snd_sof_dev *sdev)
+{
+	if (sof_ops(sdev) && sof_ops(sdev)->register_clients)
+		sof_ops(sdev)->register_clients(sdev);
+}
+
+static inline void
+snd_sof_unregister_clients(struct snd_sof_dev *sdev)
+{
+	struct sof_client_dev *cdev, *_cdev;
+
+	/* unregister client devices */
+	mutex_lock(&sdev->client_mutex);
+	list_for_each_entry_safe(cdev, _cdev, &sdev->client_list, list) {
+		sof_client_dev_unregister(cdev);
+		list_del(&cdev->list);
+	}
+	mutex_unlock(&sdev->client_mutex);
+}
+#else
+static inline void
+snd_sof_register_clients(struct snd_sof_dev *sdev) {}
+
+static inline void
+snd_sof_unregister_clients(struct snd_sof_dev *sdev) {}
+#endif
 
 static inline const struct snd_sof_dsp_ops
 *sof_get_ops(const struct sof_dev_desc *d,
