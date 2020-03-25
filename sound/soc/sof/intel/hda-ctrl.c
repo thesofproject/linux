@@ -200,7 +200,7 @@ int hda_dsp_ctrl_init_chip(struct snd_sof_dev *sdev, bool full_reset)
 		ret = hda_dsp_ctrl_link_reset(sdev, true);
 		if (ret < 0) {
 			dev_err(sdev->dev, "error: failed to reset HDA controller\n");
-			return ret;
+			goto err;
 		}
 
 		usleep_range(500, 1000);
@@ -209,7 +209,7 @@ int hda_dsp_ctrl_init_chip(struct snd_sof_dev *sdev, bool full_reset)
 		ret = hda_dsp_ctrl_link_reset(sdev, false);
 		if (ret < 0) {
 			dev_err(sdev->dev, "error: failed to exit HDA controller reset\n");
-			return ret;
+			goto err;
 		}
 
 		usleep_range(1000, 1200);
@@ -219,7 +219,8 @@ int hda_dsp_ctrl_init_chip(struct snd_sof_dev *sdev, bool full_reset)
 	/* check to see if controller is ready */
 	if (!snd_hdac_chip_readb(bus, GCTL)) {
 		dev_dbg(bus->dev, "controller not ready!\n");
-		return -EBUSY;
+		ret = -EBUSY;
+		goto err;
 	}
 
 	/* Accept unsolicited responses */
@@ -285,6 +286,7 @@ int hda_dsp_ctrl_init_chip(struct snd_sof_dev *sdev, bool full_reset)
 
 	bus->chip_init = true;
 
+err:
 	hda_dsp_ctrl_misc_clock_gating(sdev, true);
 
 	return ret;
