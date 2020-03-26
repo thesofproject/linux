@@ -58,7 +58,7 @@ static int sdw_intel_cleanup(struct sdw_intel_ctx *ctx)
 {
 	struct sdw_intel_link_res *link = ctx->links;
 	u32 link_mask;
-	int i;
+	int i, ret;
 
 	if (!link)
 		return 0;
@@ -71,7 +71,11 @@ static int sdw_intel_cleanup(struct sdw_intel_ctx *ctx)
 
 		if (!IS_ERR_OR_NULL(link->md)) {
 			pm_runtime_disable(&link->md->dev);
-			device_unregister(&link->md->dev);
+			ret = sdw_master_device_del(link->md);
+			if (ret < 0)
+				dev_err(&link->md->dev,
+					"master device del failed %d\n",
+					ret);
 		}
 
 		if (!link->clock_stop_quirks)
@@ -196,13 +200,13 @@ static struct sdw_intel_ctx
 	struct sdw_intel_ctx *ctx;
 	struct acpi_device *adev;
 	struct sdw_master_device *md;
-	unsigned long time;
 	struct sdw_slave *slave;
 	struct list_head *node;
 	struct sdw_bus *bus;
 	u32 link_mask;
 	int num_slaves = 0;
 	int count;
+	int ret;
 	int i;
 
 	if (!res)
@@ -236,6 +240,12 @@ static struct sdw_intel_ctx
 
 	INIT_LIST_HEAD(&ctx->link_list);
 
+	ret = driver_register(sdw_intel_link_ops.driver);
+	if (ret) {
+		dev_err(&adev->dev, "failed to register sdw master driver: %d\n", ret);
+		goto register_err;
+	}
+
 	/* Create SDW Master devices */
 	for (i = 0; i < count; i++, link++) {
 		if (link_mask && !(link_mask & BIT(i)))
@@ -253,25 +263,14 @@ static struct sdw_intel_ctx
 		link->shim_mask = &ctx->shim_mask;
 		link->link_mask = link_mask;
 
-		md = sdw_master_device_add("intel-master",
-					   res->parent,
+		md = sdw_master_device_add(res->parent,
 					   acpi_fwnode_handle(adev),
+					   &sdw_intel_link_ops,
 					   i,
 					   link);
 
 		if (IS_ERR(md)) {
 			dev_err(&adev->dev, "Could not create link %d\n", i);
-			goto err;
-		}
-
-		/*
-		 * we need to wait for the bus to be probed so that we
-		 * can report ACPI information to the upper layers
-		 */
-		time = wait_for_completion_timeout(&md->probe_complete,
-				msecs_to_jiffies(SDW_INTEL_MASTER_PROBE_TIMEOUT));
-		if (!time) {
-			dev_err(&adev->dev, "Master %d probe timed out\n", i);
 			goto err;
 		}
 
@@ -303,6 +302,8 @@ static struct sdw_intel_ctx
 
 err:
 	ctx->count = i;
+	driver_unregister(sdw_intel_link_ops.driver);
+register_err:
 	sdw_intel_cleanup(ctx);
 link_err:
 	kfree(ctx);
@@ -455,6 +456,7 @@ EXPORT_SYMBOL_NS(sdw_intel_startup, SOUNDWIRE_INTEL_INIT);
 void sdw_intel_exit(struct sdw_intel_ctx *ctx)
 {
 	sdw_intel_cleanup(ctx);
+	driver_unregister(sdw_intel_link_ops.driver);
 	kfree(ctx);
 }
 EXPORT_SYMBOL_NS(sdw_intel_exit, SOUNDWIRE_INTEL_INIT);
