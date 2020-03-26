@@ -41,6 +41,6 @@ struct sdw_intel_link_res {
 
 #define SDW_INTEL_QUIRK_MASK_BUS_DISABLE      BIT(1)
 
-#define SDW_INTEL_MASTER_PROBE_TIMEOUT 2000
+extern struct sdw_link_ops sdw_intel_link_ops;
 
 #endif /* __SDW_INTEL_LOCAL_H */
