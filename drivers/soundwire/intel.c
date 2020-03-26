@@ -1401,8 +1401,6 @@ static int intel_master_probe(struct sdw_master_device *md, void *link_ctx)
 			 "SoundWire master %d is disabled, will be ignored\n",
 			 sdw->cdns.bus.link_id);
 
-	complete(&md->probe_complete);
-
 	/*
 	 * Ignore BIOS err_threshold, it's a really bad idea when dealing
 	 * with multiple hardware synchronized links
@@ -2030,19 +2028,20 @@ static const struct dev_pm_ops intel_pm = {
 	SET_RUNTIME_PM_OPS(intel_suspend_runtime, intel_resume_runtime, NULL)
 };
 
-static struct sdw_master_driver intel_sdw_driver = {
-	.driver = {
-		.name = "intel-master",
-		.owner = THIS_MODULE,
-		.bus = &sdw_bus_type,
-		.pm = &intel_pm,
-	},
-	.probe = intel_master_probe,
+static struct device_driver sdw_intel_driver = {
+	.name = "intel-master",
+	.bus = &sdw_bus_type,
+	.pm = &intel_pm,
+};
+
+struct sdw_link_ops sdw_intel_link_ops = {
+	.driver = &sdw_intel_driver,
+	.add = intel_master_probe,
 	.startup = intel_master_startup,
-	.remove = intel_master_remove,
+	.del = intel_master_remove,
 	.process_wake_event = intel_master_process_wakeen_event,
 };
-module_sdw_master_driver(intel_sdw_driver);
+EXPORT_SYMBOL(sdw_intel_link_ops);
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_ALIAS("sdw:intel-master");
