@@ -823,7 +823,7 @@ static void sof_parse_word_tokens(struct snd_soc_component *scomp,
 	size_t size = sizeof(struct sof_ipc_dai_dmic_pdm_ctrl);
 	int i, j;
 	u32 offset;
-	u32 *index = NULL;
+	unsigned int *index = &sdev->pdm_index;
 
 	/* parse element by element */
 	for (i = 0; i < le32_to_cpu(array->num_elems); i++) {
@@ -842,17 +842,12 @@ static void sof_parse_word_tokens(struct snd_soc_component *scomp,
 			if (tokens[j].token != le32_to_cpu(elem->token))
 				continue;
 
-			/* pdm config array index */
-			if (sdev->private)
-				index = sdev->private;
-
 			/* matched - determine offset */
 			switch (tokens[j].token) {
 			case SOF_TKN_INTEL_DMIC_PDM_CTRL_ID:
 
 				/* inc number of pdm array index */
-				if (index)
-					(*index)++;
+				(*index)++;
 				/* fallthrough */
 			case SOF_TKN_INTEL_DMIC_PDM_MIC_A_Enable:
 			case SOF_TKN_INTEL_DMIC_PDM_MIC_B_Enable:
@@ -862,7 +857,7 @@ static void sof_parse_word_tokens(struct snd_soc_component *scomp,
 			case SOF_TKN_INTEL_DMIC_PDM_SKEW:
 
 				/* check if array index is valid */
-				if (!index || *index == 0) {
+				if (!*index) {
 					dev_err(scomp->dev,
 						"error: invalid array offset\n");
 					continue;
@@ -2927,15 +2922,8 @@ static int sof_link_dmic_load(struct snd_soc_component *scomp, int index,
 	/* copy the common dai config and dmic params */
 	memcpy(ipc_config, config, sizeof(*config));
 
-	/*
-	 * alloc memory for private member
-	 * Used to track the pdm config array index currently being parsed
-	 */
-	sdev->private = kzalloc(sizeof(u32), GFP_KERNEL);
-	if (!sdev->private) {
-		kfree(ipc_config);
-		return -ENOMEM;
-	}
+	/* reset PDM index */
+	sdev->pdm_index = 0;
 
 	/* get DMIC PDM tokens */
 	ret = sof_parse_tokens(scomp, &ipc_config->dmic.pdm[0], dmic_pdm_tokens,
@@ -3001,7 +2989,6 @@ static int sof_link_dmic_load(struct snd_soc_component *scomp, int index,
 			config->dai_index);
 
 err:
-	kfree(sdev->private);
 	kfree(ipc_config);
 
 	return ret;
