@@ -205,10 +205,17 @@ static const struct config_entry config_table[] = {
 				}
 			},
 			{
-				.ident = "Dell laptop",
 				.matches = {
 					DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc"),
-				}
+					DMI_EXACT_MATCH(DMI_PRODUCT_SKU, "09C6")
+				},
+			},
+			{
+				/* early version of SKU 09C6 */
+				.matches = {
+					DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc"),
+					DMI_EXACT_MATCH(DMI_PRODUCT_SKU, "0983")
+				},
 			},
 			{}
 		}
@@ -225,10 +232,16 @@ static const struct config_entry config_table[] = {
 		.device = 0x06c8,
 		.dmi_table = (const struct dmi_system_id []) {
 			{
-				.ident = "Dell laptop",
 				.matches = {
-					DMI_MATCH(DMI_SYS_VENDOR, "Dell"),
-				}
+					DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc"),
+					DMI_EXACT_MATCH(DMI_PRODUCT_SKU, "098F"),
+				},
+			},
+			{
+				.matches = {
+					DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc"),
+					DMI_EXACT_MATCH(DMI_PRODUCT_SKU, "0990"),
+				},
 			},
 			{}
 		}
