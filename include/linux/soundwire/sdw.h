@@ -632,26 +632,48 @@ struct sdw_slave {
 
 #define dev_to_sdw_dev(_dev) container_of(_dev, struct sdw_slave, dev)
 
+struct sdw_link_ops;
+
 /**
  * struct sdw_master_device - SoundWire 'Master Device' representation
- *
  * @dev: Linux device for this Master
- * @master_name: Linux driver name
- * @driver: Linux driver for this Master (set by SoundWire core during probe)
- * @probe_complete: used by parent if synchronous probe behavior is needed
+ * @link_ops: link-specific ops, initialized with sdw_master_device_add()
  * @link_id: link index as defined by MIPI DisCo specification
- * @pm_runtime_suspended: flag to restore pm_runtime state after system resume
+ * @pm_runtime_suspended: flag set with the value of pm_runtime_suspended()
+ * during system suspend and checked during system resume.
  * @pdata: private data typically provided with sdw_master_device_add()
+ *
+ * link_ops can be NULL when link-level initializations and power-management
+ * are not desired.
  */
-
 struct sdw_master_device {
 	struct device dev;
-	const char *master_name;
-	struct sdw_master_driver *driver;
-	struct completion probe_complete;
+	struct sdw_link_ops *link_ops;
 	int link_id;
 	bool pm_runtime_suspended;
 	void *pdata;
+};
+
+/**
+ * struct sdw_link_ops - SoundWire link-specific ops
+ * @add: initializations and allocation (hardware may not be enabled yet)
+ * @startup: initialization handled after the hardware is enabled, all
+ * clock/power dependencies are available
+ * @del: free all remaining resources
+ * @process_wake_event: handle external wake
+ * @driver: raw structure used for name/PM hooks.
+ *
+ * This optional structure is provided for link specific
+ * operations. All members are optional, but if .add() is supported the
+ * dual .del() function shall be used to release all resources allocated
+ * in .add().
+ */
+struct sdw_link_ops {
+	int (*add)(struct sdw_master_device *md, void *link_ctx);
+	int (*startup)(struct sdw_master_device *md);
+	int (*del)(struct sdw_master_device *md);
+	int (*process_wake_event)(struct sdw_master_device *md);
+	struct device_driver *driver;
 };
 
 #define dev_to_sdw_master_device(d)	\
@@ -668,26 +690,6 @@ struct sdw_driver {
 	const struct sdw_device_id *id_table;
 	const struct sdw_slave_ops *ops;
 
-	struct device_driver driver;
-};
-
-/**
- * struct sdw_master_driver - SoundWire 'Master Device' driver
- *
- * @probe: initializations and allocation (hardware may not be enabled yet)
- * @startup: initialization handled after the hardware is enabled, all
- * clock/power dependencies are available (optional)
- * @shutdown: cleanups before hardware is disabled (optional)
- * @remove: free all remaining resources
- * @process_wake_event: handle external wake (optional)
- * @driver: baseline structure used for name/PM hooks.
- */
-struct sdw_master_driver {
-	int (*probe)(struct sdw_master_device *md, void *link_ctx);
-	int (*startup)(struct sdw_master_device *md);
-	int (*shutdown)(struct sdw_master_device *md);
-	int (*remove)(struct sdw_master_device *md);
-	int (*process_wake_event)(struct sdw_master_device *md);
 	struct device_driver driver;
 };
 
@@ -886,35 +888,17 @@ struct sdw_bus {
 int sdw_add_bus_master(struct sdw_bus *bus);
 void sdw_delete_bus_master(struct sdw_bus *bus);
 
-/**
- * sdw_master_device_add() - create a Linux Master Device representation.
- *
- * @master_name: Linux driver name
- * @parent: the parent Linux device (e.g. a PCI device)
- * @fwnode: the parent fwnode (e.g. an ACPI companion device to the parent)
- * @link_id: link index as defined by MIPI DisCo specification
- * @pdata: private data (e.g. register base, offsets, platform quirks, etc).
- */
 struct sdw_master_device
-*sdw_master_device_add(const char *master_name,
-		       struct device *parent,
+*sdw_master_device_add(struct device *parent,
 		       struct fwnode_handle *fwnode,
+		       struct sdw_link_ops *master_ops,
 		       int link_id,
 		       void *pdata);
 
-/**
- * sdw_master_device_startup() - startup hardware
- *
- * @md: Linux Soundwire master device
- */
+int sdw_master_device_del(struct sdw_master_device *md);
+
 int sdw_master_device_startup(struct sdw_master_device *md);
 
-/**
- * sdw_master_device_process_wake_event() - handle external wake
- * event, e.g. handled at the PCI level
- *
- * @md: Linux Soundwire master device
- */
 int sdw_master_device_process_wake_event(struct sdw_master_device *md);
 
 /**
