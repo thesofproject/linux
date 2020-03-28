@@ -39,6 +39,7 @@ int get_compat_ipc64_perm(struct ipc64_perm *to,
 			  struct compat_ipc64_perm __user *from)
 {
 	struct compat_ipc64_perm v;
+
 	if (copy_from_user(&v, from, sizeof(v)))
 		return -EFAULT;
 	to->uid = v.uid;
@@ -51,6 +52,7 @@ int get_compat_ipc_perm(struct ipc64_perm *to,
 			struct compat_ipc_perm __user *from)
 {
 	struct compat_ipc_perm v;
+
 	if (copy_from_user(&v, from, sizeof(v)))
 		return -EFAULT;
 	to->uid = v.uid;
