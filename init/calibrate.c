@@ -16,7 +16,7 @@ unsigned long lpj_fine;
 unsigned long preset_lpj;
 static int __init lpj_setup(char *str)
 {
-	preset_lpj = simple_strtoul(str,NULL,0);
+	preset_lpj = simple_strtoul(str, NULL, 0);
 	return 1;
 }
 
