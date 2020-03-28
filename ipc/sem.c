@@ -543,7 +543,7 @@ static int newary(struct ipc_namespace *ns, struct ipc_params *params)
 	if (!sma)
 		return -ENOMEM;
 
-	sma->sem_perm.mode = (semflg & S_IRWXUGO);
+	sma->sem_perm.mode = semflg & S_IRWXUGO;
 	sma->sem_perm.key = key;
 
 	sma->sem_perm.security = NULL;

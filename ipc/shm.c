@@ -624,7 +624,7 @@ static int newseg(struct ipc_namespace *ns, struct ipc_params *params)
 		return -ENOMEM;
 
 	shp->shm_perm.key = key;
-	shp->shm_perm.mode = (shmflg & S_IRWXUGO);
+	shp->shm_perm.mode = shmflg & S_IRWXUGO;
 	shp->mlock_user = NULL;
 
 	shp->shm_perm.security = NULL;
