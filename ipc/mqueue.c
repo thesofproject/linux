@@ -1361,7 +1361,7 @@ retry:
 
 	ret = 0;
 	spin_lock(&info->lock);
-	if (notification == NULL) {
+	if (!notification) {
 		if (info->notify_owner == task_tgid(current)) {
 			remove_notification(info);
 			inode->i_atime = inode->i_ctime = current_time(inode);
@@ -1688,7 +1688,7 @@ static int __init init_mqueue_fs(void)
 	mqueue_inode_cachep = kmem_cache_create("mqueue_inode_cache",
 				sizeof(struct mqueue_inode_info), 0,
 				SLAB_HWCACHE_ALIGN|SLAB_ACCOUNT, init_once);
-	if (mqueue_inode_cachep == NULL)
+	if (!mqueue_inode_cachep)
 		return -ENOMEM;
 
 	/* ignore failures - they are not fatal */
