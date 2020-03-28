@@ -197,7 +197,7 @@ static void __init md_setup_drive(void)
 			ainfo.md_minor =minor;
 			ainfo.not_persistent = 1;
 
-			ainfo.state = (1 << MD_SB_CLEAN);
+			ainfo.state = BIT(MD_SB_CLEAN);
 			ainfo.layout = 0;
 			ainfo.chunk_size = md_setup_args[ent].chunk;
 			err = ksys_ioctl(fd, SET_ARRAY_INFO, (long)&ainfo);

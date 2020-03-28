@@ -190,7 +190,7 @@ static unsigned long calibrate_delay_converge(void)
 	unsigned long lpj, lpj_base, ticks, loopadd, loopadd_base, chop_limit;
 	int trials = 0, band = 0, trial_in_band = 0;
 
-	lpj = (1<<12);
+	lpj = BIT(12);
 
 	/* wait for "start of" clock tick */
 	ticks = jiffies;
