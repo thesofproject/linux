@@ -146,6 +146,31 @@ skip_dacpro:
 	return 0;
 }
 
+static int aif1_update_rate_den(struct snd_pcm_substream *substream,
+				struct snd_pcm_hw_params *params)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct sof_card_private *ctx = snd_soc_card_get_drvdata(rtd->card);
+	struct snd_ratnum rats_no_pll;
+	unsigned int num = 0, den = 0;
+	int err;
+
+	rats_no_pll.num = clk_get_rate(ctx->sclk) / 64;
+	rats_no_pll.den_min = 1;
+	rats_no_pll.den_max = 128;
+	rats_no_pll.den_step = 1;
+
+	err = snd_interval_ratnum(hw_param_interval(params,
+						    SNDRV_PCM_HW_PARAM_RATE),
+				  1, &rats_no_pll, &num, &den);
+	if (err >= 0 && den) {
+		params->rate_num = num;
+		params->rate_den = den;
+	}
+
+	return 0;
+}
+
 static int aif1_startup(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
@@ -155,6 +180,75 @@ static int aif1_startup(struct snd_pcm_substream *substream)
 	gpiod_set_value_cansleep(ctx->gpio_4, 1);
 
 	return 0;
+}
+
+static int aif1_hw_params(struct snd_pcm_substream *substream,
+			  struct snd_pcm_hw_params *params)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(rtd, 0);
+	struct sof_card_private *ctx = snd_soc_card_get_drvdata(rtd->card);
+	struct device *dev = rtd->card->dev;
+	int current_rate;
+	int sclk_rate;
+	int channels;
+	int width;
+	int rate;
+	int ret = 0;
+
+	if (ctx->is_dac_pro) {
+		rate = params_rate(params);
+		channels = params_channels(params);
+		width = snd_pcm_format_physical_width(params_format(params));
+
+		if (rate % 24000)
+			sclk_rate = 22579200;
+		else
+			sclk_rate = 24576000;
+
+		current_rate = clk_get_rate(ctx->sclk);
+		if (current_rate != sclk_rate) {
+			/*
+			 * The sclk clock is started and stopped by the codec
+			 * resume/suspend functions. If the rate isn't correct,
+			 * stop, set the new rate and restart the clock
+			 */
+
+			dev_dbg(dev, "reconfiguring SCLK to rate %d\n",
+				sclk_rate);
+
+			clk_disable_unprepare(ctx->sclk);
+
+			ret = clk_set_rate(ctx->sclk, sclk_rate);
+			if (ret) {
+				dev_err(dev, "Could not set SCLK rate %d\n",
+					sclk_rate);
+				return ret;
+			}
+
+			ret = clk_prepare_enable(ctx->sclk);
+			if (ret) {
+				dev_err(dev, "Failed to enable SCLK: %d\n",
+					ret);
+				return ret;
+			}
+		}
+
+		ret = aif1_update_rate_den(substream, params);
+		if (ret) {
+			dev_err(dev, "Failed to update rate denominator: %d\n", ret);
+			return ret;
+		}
+
+		ret = snd_soc_dai_set_bclk_ratio(codec_dai,
+						 channels * width);
+		if (ret) {
+			dev_err(dev, "Failed to set bclk ratio : %d\n", ret);
+			return ret;
+		}
+	}
+
+	return ret;
 }
 
 static void aif1_shutdown(struct snd_pcm_substream *substream)
@@ -168,6 +262,7 @@ static void aif1_shutdown(struct snd_pcm_substream *substream)
 
 static const struct snd_soc_ops sof_pcm512x_ops = {
 	.startup = aif1_startup,
+	.hw_params = aif1_hw_params,
 	.shutdown = aif1_shutdown,
 };
 
