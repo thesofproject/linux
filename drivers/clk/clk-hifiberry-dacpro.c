@@ -21,13 +21,13 @@
 #define CLK_48EN_RATE 24576000UL
 
 /**
- * struct hifiberry_dacpro_clk - Common struct to the HiFiBerry DAC Pro
+ * struct clk_hifiberry_hw - Common struct to the HiFiBerry DAC Pro
  * @hw: clk_hw for the common clk framework
  * @mode: 0 => CLK44EN, 1 => CLK48EN
  */
 struct clk_hifiberry_hw {
 	struct clk_hw hw;
-	uint8_t mode;
+	u8 mode;
 };
 
 #define to_hifiberry_clk(_hw) container_of(_hw, struct clk_hifiberry_hw, hw)
@@ -39,14 +39,15 @@ static const struct of_device_id clk_hifiberry_dacpro_dt_ids[] = {
 MODULE_DEVICE_TABLE(of, clk_hifiberry_dacpro_dt_ids);
 
 static unsigned long clk_hifiberry_dacpro_recalc_rate(struct clk_hw *hw,
-	unsigned long parent_rate)
+						      unsigned long parent_rate)
 {
 	return (to_hifiberry_clk(hw)->mode == 0) ? CLK_44EN_RATE :
 		CLK_48EN_RATE;
 }
 
 static long clk_hifiberry_dacpro_round_rate(struct clk_hw *hw,
-	unsigned long rate, unsigned long *parent_rate)
+					    unsigned long rate,
+					    unsigned long *parent_rate)
 {
 	long actual_rate;
 
@@ -66,21 +67,20 @@ static long clk_hifiberry_dacpro_round_rate(struct clk_hw *hw,
 	return actual_rate;
 }
 
-
 static int clk_hifiberry_dacpro_set_rate(struct clk_hw *hw,
-	unsigned long rate, unsigned long parent_rate)
+					 unsigned long rate,
+					 unsigned long parent_rate)
 {
-	unsigned long actual_rate;
 	struct clk_hifiberry_hw *clk = to_hifiberry_clk(hw);
+	unsigned long actual_rate;
 
 	actual_rate = (unsigned long)clk_hifiberry_dacpro_round_rate(hw, rate,
-		&parent_rate);
+								&parent_rate);
 	clk->mode = (actual_rate == CLK_44EN_RATE) ? 0 : 1;
 	return 0;
 }
 
-
-const struct clk_ops clk_hifiberry_dacpro_rate_ops = {
+static const struct clk_ops clk_hifiberry_dacpro_rate_ops = {
 	.recalc_rate = clk_hifiberry_dacpro_recalc_rate,
 	.round_rate = clk_hifiberry_dacpro_round_rate,
 	.set_rate = clk_hifiberry_dacpro_set_rate,
@@ -88,15 +88,15 @@ const struct clk_ops clk_hifiberry_dacpro_rate_ops = {
 
 static int clk_hifiberry_dacpro_probe(struct platform_device *pdev)
 {
-	int ret;
 	struct clk_hifiberry_hw *proclk;
-	struct clk *clk;
-	struct device *dev;
 	struct clk_init_data init;
+	struct device *dev;
+	struct clk *clk;
+	int ret;
 
 	dev = &pdev->dev;
 
-	proclk = kzalloc(sizeof(struct clk_hifiberry_hw), GFP_KERNEL);
+	proclk = devm_kzalloc(dev, sizeof(*proclk), GFP_KERNEL);
 	if (!proclk)
 		return -ENOMEM;
 
@@ -115,7 +115,6 @@ static int clk_hifiberry_dacpro_probe(struct platform_device *pdev)
 			clk);
 	} else {
 		dev_err(dev, "Fail to register clock driver\n");
-		kfree(proclk);
 		ret = PTR_ERR(clk);
 	}
 	return ret;
@@ -135,18 +134,7 @@ static struct platform_driver clk_hifiberry_dacpro_driver = {
 		.of_match_table = clk_hifiberry_dacpro_dt_ids,
 	},
 };
-
-static int __init clk_hifiberry_dacpro_init(void)
-{
-	return platform_driver_register(&clk_hifiberry_dacpro_driver);
-}
-core_initcall(clk_hifiberry_dacpro_init);
-
-static void __exit clk_hifiberry_dacpro_exit(void)
-{
-	platform_driver_unregister(&clk_hifiberry_dacpro_driver);
-}
-module_exit(clk_hifiberry_dacpro_exit);
+module_platform_driver(clk_hifiberry_dacpro_driver);
 
 MODULE_DESCRIPTION("HiFiBerry DAC Pro clock driver");
 MODULE_LICENSE("GPL v2");
