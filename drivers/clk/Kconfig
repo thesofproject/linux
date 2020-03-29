@@ -72,6 +72,7 @@ config COMMON_CLK_HI655X
 
 config COMMON_CLK_HIFIBERRY_DACPRO
 	tristate
+	depends on OF
 
 config COMMON_CLK_SCMI
 	tristate "Clock driver controlled via SCMI interface"
