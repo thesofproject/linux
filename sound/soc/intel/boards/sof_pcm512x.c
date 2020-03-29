@@ -46,6 +46,8 @@ struct sof_card_private {
 	struct list_head hdmi_pcm_list;
 	bool idisp_codec;
 	struct gpio_desc *gpio_4;
+	struct clk *sclk;
+	bool is_dac_pro;
 };
 
 static int sof_pcm512x_quirk_cb(const struct dmi_system_id *id)
@@ -87,6 +89,60 @@ static int sof_hdmi_init(struct snd_soc_pcm_runtime *rtd)
 
 static int sof_pcm512x_codec_init(struct snd_soc_pcm_runtime *rtd)
 {
+	struct sof_card_private *ctx = snd_soc_card_get_drvdata(rtd->card);
+	struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(rtd, 0);
+	struct device *dev = rtd->card->dev;
+	unsigned int sck;
+	int ret;
+
+	ctx->sclk = devm_clk_get(rtd->card->dev, "sclk");
+	if (IS_ERR(ctx->sclk)) {
+		dev_info(dev, "Could not get SCLK, will operate in SOC master mode\n");
+		goto skip_dacpro;
+	}
+
+	/*
+	 * now we have a clk, see if it's really present or if we are on
+	 * plain vanilla DAC+
+	 */
+
+	/* Try 48 kHz */
+	clk_set_rate(ctx->sclk, 24576000UL);
+	ret = clk_prepare_enable(ctx->sclk);
+	if (ret) {
+		dev_info(dev, "Failed to enable SCLK for DAC+ PRO 48 kHz: %d\n", ret);
+		goto skip_dacpro;
+	}
+
+	snd_soc_component_read(codec_dai->component,
+			       PCM512x_RATE_DET_4, &sck);
+	clk_disable_unprepare(ctx->sclk);
+	if (sck & 0x40) {
+		dev_info(dev, "No SCLK detected for DAC+ PRO 48 kHz\n");
+		goto skip_dacpro;
+	}
+
+	/* Try 44.1 kHz */
+	clk_set_rate(ctx->sclk, 22579200UL);
+	ret = clk_prepare_enable(ctx->sclk);
+	if (ret) {
+		dev_info(dev, "Failed to enable SCLK for DAC+ PRO 44.1 kHz: %d\n", ret);
+		goto skip_dacpro;
+	}
+
+	snd_soc_component_read(codec_dai->component,
+			       PCM512x_RATE_DET_4, &sck);
+	clk_disable_unprepare(ctx->sclk);
+
+	if (sck & 0x40) {
+		dev_info(dev, "No SCLK detected for DAC+ PRO 44.1 kHz\n");
+		goto skip_dacpro;
+	}
+
+	dev_info(dev, "DAC+ PRO detected\n");
+	ctx->is_dac_pro = true;
+
+skip_dacpro:
 	return 0;
 }
 
