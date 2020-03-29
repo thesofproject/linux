@@ -24,10 +24,12 @@
  * struct clk_hifiberry_hw - Common struct to the HiFiBerry DAC Pro
  * @hw: clk_hw for the common clk framework
  * @mode: 0 => CLK44EN, 1 => CLK48EN
+ * @sclk_lookup: handle for "sclk"
  */
 struct clk_hifiberry_hw {
 	struct clk_hw hw;
 	u8 mode;
+	struct clk_lookup *sclk_lookup;
 };
 
 #define to_hifiberry_clk(_hw) container_of(_hw, struct clk_hifiberry_hw, hw)
@@ -121,15 +123,34 @@ static int clk_hifiberry_dacpro_probe(struct platform_device *pdev)
 	ret = devm_clk_hw_register_clkdev(dev, &proclk->hw,
 					  init.name, NULL);
 #endif
+	if (ret) {
+		dev_err(dev, "Fail to add clock driver\n");
+		return ret;
+	}
+
+	proclk->sclk_lookup = clkdev_hw_create(&proclk->hw, "sclk", NULL);
+	if (!proclk->sclk_lookup) {
+#ifndef CONFIG_ACPI
+		of_clk_del_provider(dev->of_node);
+#endif
+		return -ENOMEM;
+	}
+
+	platform_set_drvdata(pdev, proclk);
 
 	return ret;
 }
 
 static int clk_hifiberry_dacpro_remove(struct platform_device *pdev)
 {
+	struct clk_hifiberry_hw *proclk = platform_get_drvdata(pdev);
+
+	clkdev_drop(proclk->sclk_lookup);
+
 #ifndef CONFIG_ACPI
 	of_clk_del_provider(pdev->dev.of_node);
 #endif
+
 	return 0;
 }
 
