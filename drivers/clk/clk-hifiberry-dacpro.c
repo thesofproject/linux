@@ -114,15 +114,22 @@ static int clk_hifiberry_dacpro_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+#ifndef CONFIG_ACPI
 	ret = of_clk_add_hw_provider(dev->of_node, of_clk_hw_simple_get,
 				     &proclk->hw);
+#else
+	ret = devm_clk_hw_register_clkdev(dev, &proclk->hw,
+					  init.name, NULL);
+#endif
 
 	return ret;
 }
 
 static int clk_hifiberry_dacpro_remove(struct platform_device *pdev)
 {
+#ifndef CONFIG_ACPI
 	of_clk_del_provider(pdev->dev.of_node);
+#endif
 	return 0;
 }
 
