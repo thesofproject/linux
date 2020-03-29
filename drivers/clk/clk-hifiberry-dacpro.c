@@ -91,7 +91,6 @@ static int clk_hifiberry_dacpro_probe(struct platform_device *pdev)
 	struct clk_hifiberry_hw *proclk;
 	struct clk_init_data init;
 	struct device *dev;
-	struct clk *clk;
 	int ret;
 
 	dev = &pdev->dev;
@@ -109,14 +108,15 @@ static int clk_hifiberry_dacpro_probe(struct platform_device *pdev)
 	proclk->mode = 0;
 	proclk->hw.init = &init;
 
-	clk = devm_clk_register(dev, &proclk->hw);
-	if (!IS_ERR(clk)) {
-		ret = of_clk_add_provider(dev->of_node, of_clk_src_simple_get,
-			clk);
-	} else {
+	ret = devm_clk_hw_register(dev, &proclk->hw);
+	if (ret) {
 		dev_err(dev, "Fail to register clock driver\n");
-		ret = PTR_ERR(clk);
+		return ret;
 	}
+
+	ret = of_clk_add_hw_provider(dev->of_node, of_clk_hw_simple_get,
+				     &proclk->hw);
+
 	return ret;
 }
 
