@@ -9,6 +9,7 @@
 
 #include <linux/clk-provider.h>
 #include <linux/clkdev.h>
+#include <linux/delay.h>
 #include <linux/gpio/consumer.h>
 #include <linux/gpio/machine.h>
 #include <linux/kernel.h>
@@ -145,6 +146,8 @@ static int clk_hifiberry_dacpro_prepare(struct clk_hw *hw)
 	default:
 		return -EINVAL;
 	}
+	/* wait for SCLK update to be detected by PCM512x codec */
+	usleep_range(5000, 10000);
 
 	clk->prepared = 1;
 
@@ -168,6 +171,8 @@ static void clk_hifiberry_dacpro_unprepare(struct clk_hw *hw)
 	default:
 		return;
 	}
+	/* wait for SCLK update to be detected by PCM512x codec */
+	usleep_range(5000, 10000);
 
 	clk->prepared = false;
 }
