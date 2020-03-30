@@ -409,27 +409,23 @@ static int create_codec_dai_name(struct device *dev,
 	return 0;
 }
 
-static int set_codec_init_func(const struct snd_soc_acpi_link_adr *link,
+static int set_dailink_init_func(const struct snd_soc_acpi_link_adr *link,
 			       struct snd_soc_dai_link *dai_links,
 			       bool playback)
 {
-	int i;
+	unsigned int part_id;
+	int codec_index;
 
-	for (i = 0; i < link->num_adr; i++) {
-		unsigned int part_id;
-		int codec_index;
+	part_id = SDW_PART_ID(link->adr_d[0].adr);
+	codec_index = find_codec_info_part(part_id);
 
-		part_id = SDW_PART_ID(link->adr_d[i].adr);
-		codec_index = find_codec_info_part(part_id);
+	if (codec_index < 0)
+		return codec_index;
 
-		if (codec_index < 0)
-			return codec_index;
-
-		if (codec_info_list[codec_index].init)
-			codec_info_list[codec_index].init(link, dai_links,
-						 &codec_info_list[codec_index],
-						 playback);
-	}
+	if (codec_info_list[codec_index].init)
+		codec_info_list[codec_index].init(link, dai_links,
+						  &codec_info_list[codec_index],
+						  playback);
 
 	return 0;
 }
@@ -622,8 +618,8 @@ static int create_sdw_dailink(struct device *dev, int *be_index,
 			      codecs, codec_num,
 			      NULL, &sdw_ops);
 
-		ret = set_codec_init_func(link, dai_links + (*be_index)++,
-					  playback);
+		ret = set_dailink_init_func(link, dai_links + (*be_index)++,
+					    playback);
 		if (ret < 0) {
 			dev_err(dev, "failed to init codec %d", codec_index);
 			return ret;
