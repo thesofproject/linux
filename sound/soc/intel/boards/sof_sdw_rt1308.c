@@ -136,12 +136,11 @@ int sof_sdw_rt1308_init(const struct snd_soc_acpi_link_adr *link,
 
 	if (info->amp_num == 2) {
 		/*
-		 * if two 1308s are in one dai link, the init function
-		 * in this dai link will be first set for the first speaker,
-		 * and it should be reset to initialize all speakers when
-		 * the second speaker is found.
+		 * if dai_links->num_codecs = 2, it implies that 2 rt1308s
+		 * are in the same dai link. Otherwise they will be in 2
+		 * dai links.
 		 */
-		if (dai_links->init)
+		if (dai_links->num_codecs == 2)
 			dai_links->init = all_spk_init;
 		else
 			dai_links->init = second_spk_init;
