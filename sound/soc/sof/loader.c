@@ -247,7 +247,7 @@ static int snd_sof_fw_ext_man_parse(struct snd_sof_dev *sdev,
 			elem_hdr->type, elem_hdr->size);
 
 		if (elem_hdr->size < sizeof(*elem_hdr) ||
-		    iptr + elem_hdr->size > fw->size) {
+		    elem_hdr->size > remaining) {
 			dev_err(sdev->dev, "error: invalid sof_ext_man header size, type %d size 0x%X\n",
 				elem_hdr->type, elem_hdr->size);
 			break;
