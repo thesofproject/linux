@@ -1264,8 +1264,10 @@ static int sof_connect_dai_widget(struct snd_soc_component *scomp,
 				 * to ensure BE will connect to the right DAI
 				 * widget.
 				 */
-				if (!cpu_dai->capture_widget)
+				if (!cpu_dai->capture_widget) {
+					cpu_dai->capture_widget = w;
 					break;
+				}
 			}
 			if (i == rtd->num_cpus) {
 				dev_err(scomp->dev, "error: can't find BE for DAI %s\n",
@@ -1273,7 +1275,6 @@ static int sof_connect_dai_widget(struct snd_soc_component *scomp,
 
 				return -EINVAL;
 			}
-			cpu_dai->capture_widget = w;
 			dai->name = rtd->dai_link->name;
 			dev_dbg(scomp->dev, "tplg: connected widget %s -> DAI link %s\n",
 				w->name, rtd->dai_link->name);
@@ -1285,8 +1286,10 @@ static int sof_connect_dai_widget(struct snd_soc_component *scomp,
 				 * to ensure BE will connect to the right DAI
 				 * widget.
 				 */
-				if (!cpu_dai->playback_widget)
+				if (!cpu_dai->playback_widget) {
+					cpu_dai->playback_widget = w;
 					break;
+				}
 			}
 			if (i == rtd->num_cpus) {
 				dev_err(scomp->dev, "error: can't find BE for DAI %s\n",
@@ -1294,7 +1297,6 @@ static int sof_connect_dai_widget(struct snd_soc_component *scomp,
 
 				return -EINVAL;
 			}
-			cpu_dai->playback_widget = w;
 			dai->name = rtd->dai_link->name;
 			dev_dbg(scomp->dev, "tplg: connected widget %s -> DAI link %s\n",
 				w->name, rtd->dai_link->name);
