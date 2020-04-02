@@ -1323,6 +1323,9 @@ static int sof_widget_load_dai(struct snd_soc_component *scomp, int index,
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_tplg_private *private = &tw->priv;
 	struct sof_ipc_comp_dai comp_dai;
+	struct sof_ipc_dai_config config;
+	struct sof_ipc_reply reply;
+	u32 size = sizeof(config);
 	int ret;
 
 	/* configure dai IPC message */
@@ -1364,6 +1367,42 @@ static int sof_widget_load_dai(struct snd_soc_component *scomp, int index,
 		memcpy(&dai->comp_dai, &comp_dai, sizeof(comp_dai));
 	}
 
+	if (comp_dai.type != SOF_DAI_INTEL_ALH)
+		goto OUT;
+
+	/*
+	 * Some ALH DAIs are not configured by sof_link_alh_load(), so
+	 * configure them here
+	 */
+	memset(&config, 0, size);
+	config.hdr.size = size;
+	config.hdr.cmd = SOF_IPC_GLB_DAI_MSG | SOF_IPC_DAI_CONFIG;
+	config.type = comp_dai.type;
+	config.dai_index = comp_dai.dai_index;
+	ret = sof_parse_tokens(scomp, &config.alh, alh_tokens,
+			       ARRAY_SIZE(alh_tokens), private->array,
+			       le32_to_cpu(private->size));
+	if (ret != 0) {
+		dev_err(scomp->dev, "error: parse alh tokens failed %d\n",
+			le32_to_cpu(private->size));
+		return ret;
+	}
+	/*
+	 * Not every DAI has config data here, and we don't need to send
+	 * ipc for them
+	 */
+	if (!config.alh.rate && !config.alh.channels)
+		goto OUT;
+
+	ret = sof_ipc_tx_message(sdev->ipc,
+				 config.hdr.cmd, &config, size, &reply,
+				 sizeof(reply));
+	if (ret != 0) {
+		dev_err(scomp->dev, "error: config alh ipc failed %d\n",
+			ret);
+		return ret;
+	}
+OUT:
 	return ret;
 }
 
