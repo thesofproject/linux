@@ -22,6 +22,8 @@
 #include "bus.h"
 #include "intel.h"
 
+#define INTEL_MASTER_SUSPEND_DELAY_MS	3000
+
 /*
  * debug/config flags for the Intel SoundWire Master.
  *
@@ -1505,7 +1507,8 @@ static int intel_master_startup(struct sdw_master_device *md)
 
 	/* Enable runtime PM */
 	if (!(link_flags & SDW_INTEL_MASTER_DISABLE_PM_RUNTIME)) {
-		pm_runtime_set_autosuspend_delay(&md->dev, 3000);
+		pm_runtime_set_autosuspend_delay(&md->dev,
+						 INTEL_MASTER_SUSPEND_DELAY_MS);
 		pm_runtime_use_autosuspend(&md->dev);
 		pm_runtime_mark_last_busy(&md->dev);
 
@@ -1528,9 +1531,9 @@ static int intel_master_startup(struct sdw_master_device *md)
 	}
 
 	/*
-	 * Slave devices have an pm_runtime of 'Unsupported' until
-	 * they report as ATTACHED. If they don't, e.g. because there
-	 * are no Slave devices populated or if the power-on is
+	 * The runtime PM status of Slave devices is "Unsupported"
+	 * until they report as ATTACHED. If they don't, e.g. because
+	 * there are no Slave devices populated or if the power-on is
 	 * delayed or dependent on a power switch, the Master will
 	 * remain active and prevent its parent from suspending.
 	 *
@@ -1839,7 +1842,7 @@ static int intel_resume(struct device *dev)
 	 * master from suspending.
 	 * A reasonable compromise is to update the pm_runtime
 	 * counters and delay the pm_runtime suspend by several
-	 * seconds, by which all enumeration should be complete.
+	 * seconds, by when all enumeration should be complete.
 	 */
 	pm_runtime_mark_last_busy(cdns->dev);
 
