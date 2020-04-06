@@ -215,4 +215,6 @@ static inline int sdw_update(struct sdw_slave *slave, u32 addr, u8 mask, u8 val)
 
 void sdw_clear_slave_status(struct sdw_bus *bus, u32 request);
 
+int sdw_slave_uevent(struct device *dev, struct kobj_uevent_env *env);
+
 #endif /* __SDW_BUS_H */
