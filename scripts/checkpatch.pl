@@ -2904,7 +2904,7 @@ sub process {
 				my $typo_fix = $spelling_fix{lc($typo)};
 				$typo_fix = ucfirst($typo_fix) if ($typo =~ /^[A-Z]/);
 				$typo_fix = uc($typo_fix) if ($typo =~ /^[A-Z]+$/);
-				my $msg_level = \&WARN;
+				my $msg_level = \&CHK;
 				$msg_level = \&CHK if ($file);
 				if (&{$msg_level}("TYPO_SPELLING",
 						  "'$typo' may be misspelled - perhaps '$typo_fix'?\n" . $herecurr) &&
