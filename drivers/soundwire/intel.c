@@ -974,11 +974,13 @@ error:
 static int intel_prepare(struct snd_pcm_substream *substream,
 			 struct snd_soc_dai *dai)
 {
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *first_cpu_dai = asoc_rtd_to_cpu(rtd, 0);
 	struct sdw_cdns *cdns = snd_soc_dai_get_drvdata(dai);
 	struct sdw_intel *sdw = cdns_to_intel(cdns);
 	struct sdw_cdns_dma_data *dma;
 	int ch, dir;
-	int ret;
+	int ret = 0;
 
 	dma = snd_soc_dai_get_dma_data(dai, substream);
 	if (!dma) {
@@ -1019,7 +1021,13 @@ static int intel_prepare(struct snd_pcm_substream *substream,
 			goto err;
 	}
 
-	ret = sdw_prepare_stream(dma->stream);
+	/*
+	 * All cpu dais belong to a stream. To ensure sdw_prepare_stream
+	 * is called once per stream, we should call it only when
+	 * dai = first_cpu_dai.
+	 */
+	if (first_cpu_dai == dai)
+		ret = sdw_prepare_stream(dma->stream);
 
 err:
 	return ret;
@@ -1028,8 +1036,18 @@ err:
 static int intel_trigger(struct snd_pcm_substream *substream, int cmd,
 			 struct snd_soc_dai *dai)
 {
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *first_cpu_dai = asoc_rtd_to_cpu(rtd, 0);
 	struct sdw_cdns_dma_data *dma;
 	int ret;
+
+	/*
+	 * All cpu dais belong to a stream. To ensure sdw_enable/disable_stream
+	 * are called once per stream, we should call them only when
+	 * dai = first_cpu_dai.
+	 */
+	if (first_cpu_dai != dai)
+		return 0;
 
 	dma = snd_soc_dai_get_dma_data(dai, substream);
 	if (!dma) {
@@ -1065,6 +1083,8 @@ static int intel_trigger(struct snd_pcm_substream *substream, int cmd,
 static int
 intel_hw_free(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
 {
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *first_cpu_dai = asoc_rtd_to_cpu(rtd, 0);
 	struct sdw_cdns *cdns = snd_soc_dai_get_drvdata(dai);
 	struct sdw_intel *sdw = cdns_to_intel(cdns);
 	struct sdw_cdns_dma_data *dma;
@@ -1074,12 +1094,26 @@ intel_hw_free(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
 	if (!dma)
 		return -EIO;
 
-	ret = sdw_deprepare_stream(dma->stream);
-	if (ret) {
-		dev_err(dai->dev, "sdw_deprepare_stream: failed %d", ret);
-		return ret;
+	/*
+	 * All cpu dais belong to a stream. To ensure sdw_deprepare_stream
+	 * is called once per stream, we should call it only when
+	 * dai = first_cpu_dai.
+	 */
+	if (first_cpu_dai == dai) {
+		ret = sdw_deprepare_stream(dma->stream);
+		if (ret) {
+			dev_err(dai->dev, "sdw_deprepare_stream: failed %d",
+				ret);
+			return ret;
+		}
 	}
 
+	/*
+	 * The sdw stream state will transition to RELEASED when stream->
+	 * master_list is empty. So the stream state will transition to
+	 * DEPREPARED for the first cpu-dai and to RELEASED for the last
+	 * cpu-dai.
+	 */
 	ret = sdw_stream_remove_master(&cdns->bus, dma->stream);
 	if (ret < 0) {
 		dev_err(dai->dev, "remove master from stream %s failed: %d\n",
