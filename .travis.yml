@@ -15,9 +15,10 @@ jobs:
   include:
     - if: type = pull_request
       name: checkpatch
-      script:
+      script: # FIXME: replace with TRAVIS_COMMIT_RANGE or similar
         - SHA_PR=`git log --oneline -1 | sed -rn "s/.*Merge (.*) into.*/\1/p"`
         - SHA_MAIN=`git log --oneline -1 | sed -rn "s/.*Merge .* into (.*)/\1/p"`
+        - git fetch https://github.com/marc-hb/linux checkpatch-strict-not-fatal && git cherry-pick FETCH_HEAD
         - scripts/checkpatch.pl --strict --codespell -g $SHA_MAIN..$SHA_PR
     - name: "Code Scan"
       script:
