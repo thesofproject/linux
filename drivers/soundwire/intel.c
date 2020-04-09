@@ -1418,6 +1418,7 @@ static int intel_master_probe(struct sdw_master_device *md, void *link_ctx)
 	sdw_intel_ops.read_prop = intel_prop_read;
 	sdw->cdns.bus.ops = &sdw_intel_ops;
 
+	md->bus = &sdw->cdns.bus;
 	md->pdata = sdw;
 
 	/* set driver data, accessed by snd_soc_dai_set_drvdata() */
