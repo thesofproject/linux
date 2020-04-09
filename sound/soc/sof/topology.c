@@ -8,6 +8,9 @@
 // Author: Liam Girdwood <liam.r.girdwood@linux.intel.com>
 //
 
+#include <linux/bits.h>
+#include <linux/device.h>
+#include <linux/errno.h>
 #include <linux/firmware.h>
 #include <linux/workqueue.h>
 #include <sound/tlv.h>
@@ -714,6 +717,13 @@ static const struct sof_topology_token sai_tokens[] = {
 		offsetof(struct sof_ipc_dai_sai_params, mclk_id), 0},
 };
 
+/* Core tokens */
+static const struct sof_topology_token core_tokens[] = {
+	{SOF_TKN_COMP_CORE_ID,
+		SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc_comp, core), 0},
+};
+
 /*
  * DMIC PDM Tokens
  * SOF_TKN_INTEL_DMIC_PDM_CTRL_ID should be the first token
@@ -1275,6 +1285,59 @@ static int sof_control_unload(struct snd_soc_component *scomp,
  * DAI Topology
  */
 
+/* Static DSP core power management so far, should be extended in the future */
+static int sof_core_enable(struct snd_sof_dev *sdev, int core)
+{
+	struct sof_ipc_pm_core_config pm_core_config = {
+		.hdr = {
+			.cmd = SOF_IPC_GLB_PM_MSG | SOF_IPC_PM_CORE_ENABLE,
+			.size = sizeof(pm_core_config),
+		},
+		.enable_mask = sdev->enabled_cores_mask | BIT(core),
+	};
+	int ret;
+
+	if (sdev->enabled_cores_mask & BIT(core))
+		return 0;
+
+	/* power up the core */
+	ret = snd_sof_dsp_core_power_up(sdev, BIT(core));
+	if (ret < 0) {
+		dev_err(sdev->dev, "error: %d powering up core %d\n",
+			ret, core);
+		return ret;
+	}
+
+	/* update enabled cores mask */
+	sdev->enabled_cores_mask |= BIT(core);
+
+	/* Now notify DSP that the core has been powered up */
+	ret = sof_ipc_tx_message(sdev->ipc, pm_core_config.hdr.cmd,
+				 &pm_core_config, sizeof(pm_core_config),
+				 &pm_core_config, sizeof(pm_core_config));
+	if (ret < 0)
+		dev_err(sdev->dev, "error: core %d enable ipc failure %d\n",
+			core, ret);
+
+	return ret;
+}
+
+int sof_pipeline_core_enable(struct snd_sof_dev *sdev,
+			    const struct snd_sof_widget *swidget)
+{
+	const struct sof_ipc_pipe_new *pipeline;
+
+	if (swidget->id == snd_soc_dapm_scheduler) {
+		pipeline = swidget->private;
+	} else {
+		pipeline = snd_sof_pipeline_find(sdev, swidget->pipeline_id);
+		if (!pipeline)
+			return -ENOENT;
+	}
+
+	return sof_core_enable(sdev, pipeline->core);
+}
+
 static int sof_connect_dai_widget(struct snd_soc_component *scomp,
 				  struct snd_soc_dapm_widget *w,
 				  struct snd_soc_tplg_dapm_widget *tw,
@@ -1550,44 +1613,15 @@ int sof_load_pipeline_ipc(struct device *dev,
 			  struct sof_ipc_comp_reply *r)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
-	struct sof_ipc_pm_core_config pm_core_config;
-	int ret;
+	int ret = sof_core_enable(sdev, pipeline->core);
+
+	if (ret < 0)
+		return ret;
 
 	ret = sof_ipc_tx_message(sdev->ipc, pipeline->hdr.cmd, pipeline,
 				 sizeof(*pipeline), r, sizeof(*r));
-	if (ret < 0) {
-		dev_err(dev, "error: load pipeline ipc failure\n");
-		return ret;
-	}
-
-	/* power up the core that this pipeline is scheduled on */
-	ret = snd_sof_dsp_core_power_up(sdev, 1 << pipeline->core);
-	if (ret < 0) {
-		dev_err(dev, "error: powering up pipeline schedule core %d\n",
-			pipeline->core);
-		return ret;
-	}
-
-	/* update enabled cores mask */
-	sdev->enabled_cores_mask |= 1 << pipeline->core;
-
-	/*
-	 * Now notify DSP that the core that this pipeline is scheduled on
-	 * has been powered up
-	 */
-	memset(&pm_core_config, 0, sizeof(pm_core_config));
-	pm_core_config.enable_mask = sdev->enabled_cores_mask;
-
-	/* configure CORE_ENABLE ipc message */
-	pm_core_config.hdr.size = sizeof(pm_core_config);
-	pm_core_config.hdr.cmd = SOF_IPC_GLB_PM_MSG | SOF_IPC_PM_CORE_ENABLE;
-
-	/* send ipc */
-	ret = sof_ipc_tx_message(sdev->ipc, pm_core_config.hdr.cmd,
-				 &pm_core_config, sizeof(pm_core_config),
-				 &pm_core_config, sizeof(pm_core_config));
 	if (ret < 0)
-		dev_err(dev, "error: core enable ipc failure\n");
+		dev_err(dev, "error: load pipeline ipc failure\n");
 
 	return ret;
 }
@@ -2314,6 +2348,22 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 		swidget->comp_id, index, swidget->id, tw->name,
 		strnlen(tw->sname, SNDRV_CTL_ELEM_ID_NAME_MAXLEN) > 0
 			? tw->sname : "none");
+
+	ret = sof_parse_tokens(scomp, &comp, core_tokens,
+			       ARRAY_SIZE(core_tokens), tw->priv.array,
+			       le32_to_cpu(tw->priv.size));
+	if (ret != 0) {
+		dev_err(scomp->dev, "error: parsing core tokens failed %d\n",
+			ret);
+		return ret;
+	}
+
+	/* default is master core, safe to call for already enabled cores */
+	ret = sof_core_enable(sdev, comp.core);
+	if (ret < 0) {
+		dev_err(scomp->dev, "error: enable core: %d\n", ret);
+		return ret;
+	}
 
 	/* handle any special case widgets */
 	switch (w->id) {
