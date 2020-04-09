@@ -321,25 +321,39 @@ int snd_sof_bytes_ext_put(struct snd_kcontrol *kcontrol,
 		return -EINVAL;
 	}
 
-	if (copy_from_user(cdata->data, tlvd->tlv, header.length))
+	/* first copy only size of sof_abi_hdr */
+	if (copy_from_user(cdata->data, tlvd->tlv, sizeof(struct sof_abi_hdr)))
 		return -EFAULT;
 
-	if (cdata->data->magic != SOF_ABI_MAGIC) {
-		dev_err_ratelimited(scomp->dev,
-				    "error: Wrong ABI magic 0x%08x.\n",
-				    cdata->data->magic);
-		return -EINVAL;
-	}
+	/* check if this blob actually uses sof_abi_hdr */
+	if (cdata->data->magic == SOF_ABI_MAGIC) {
+		/* sof_abi_hdr specific checks */
+		if (SOF_ABI_VERSION_INCOMPATIBLE(SOF_ABI_VERSION,
+						 cdata->data->abi)) {
+			dev_err_ratelimited(scomp->dev,
+					    "error: Bad ABI ver 0x%08x.\n",
+					    cdata->data->abi);
+			return -EINVAL;
+		}
 
-	if (SOF_ABI_VERSION_INCOMPATIBLE(SOF_ABI_VERSION, cdata->data->abi)) {
-		dev_err_ratelimited(scomp->dev, "error: Incompatible ABI version 0x%08x.\n",
-				    cdata->data->abi);
-		return -EINVAL;
-	}
+		if (cdata->data->size +
+		    sizeof(const struct sof_abi_hdr) > be->max) {
+			dev_err_ratelimited(scomp->dev,
+					    "error: Wrong ABI data size.\n");
+			return -EINVAL;
+		}
 
-	if (cdata->data->size + sizeof(const struct sof_abi_hdr) > be->max) {
-		dev_err_ratelimited(scomp->dev, "error: Mismatch in ABI data size (truncated?).\n");
-		return -EINVAL;
+		/* copy the whole data blob */
+		if (copy_from_user(cdata->data, tlvd->tlv, header.length))
+			return -EFAULT;
+	} else {
+		dev_dbg(scomp->dev, "no sof_abi_hdr in binary blob\n");
+
+		if (copy_from_user(cdata->data->data, tlvd->tlv, header.length))
+			return -EFAULT;
+
+		/* set values for missing sof_abi_hdr */
+		cdata->data->size = header.length;
 	}
 
 	/* notify DSP of byte control updates */
@@ -374,12 +388,14 @@ int snd_sof_bytes_ext_get(struct snd_kcontrol *kcontrol,
 	 */
 	size -= sizeof(const struct snd_ctl_tlv);
 
-	/* set the ABI header values */
-	cdata->data->magic = SOF_ABI_MAGIC;
-	cdata->data->abi = SOF_ABI_VERSION;
-
-	/* Prevent read of other kernel data or possibly corrupt response */
-	data_size = cdata->data->size + sizeof(const struct sof_abi_hdr);
+	/* check if this blob actually uses sof_abi_hdr */
+	if (cdata->data->magic == SOF_ABI_MAGIC) {
+		data_size = cdata->data->size +
+			sizeof(const struct sof_abi_hdr);
+	} else {
+		dev_dbg(scomp->dev, "no sof_abi_hdr in blob\n");
+		data_size = cdata->data->size;
+	}
 
 	/* check data size doesn't exceed max coming from topology */
 	if (data_size > be->max) {
