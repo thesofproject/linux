@@ -637,6 +637,7 @@ struct sdw_link_ops;
 /**
  * struct sdw_master_device - SoundWire 'Master Device' representation
  * @dev: Linux device for this Master
+ * @bus: Bus handle
  * @link_ops: link-specific ops, initialized with sdw_master_device_add()
  * @link_id: link index as defined by MIPI DisCo specification
  * @pm_runtime_suspended: flag set with the value of pm_runtime_suspended()
@@ -648,6 +649,7 @@ struct sdw_link_ops;
  */
 struct sdw_master_device {
 	struct device dev;
+	struct sdw_bus *bus;
 	struct sdw_link_ops *link_ops;
 	int link_id;
 	bool pm_runtime_suspended;
