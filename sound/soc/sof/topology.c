@@ -1109,16 +1109,15 @@ static int sof_control_load_bytes(struct snd_soc_component *scomp,
 	dev_dbg(scomp->dev, "tplg: load kcontrol index %d chans %d\n",
 		scontrol->comp_id, scontrol->num_channels);
 
-	if (le32_to_cpu(control->priv.size) > 0) {
-		memcpy(cdata->data, control->priv.data,
-		       le32_to_cpu(control->priv.size));
+	if (le32_to_cpu(control->priv.size) == 0)
+		return ret;
 
-		if (cdata->data->magic != SOF_ABI_MAGIC) {
-			dev_err(scomp->dev, "error: Wrong ABI magic 0x%08x.\n",
-				cdata->data->magic);
-			ret = -EINVAL;
-			goto out_free;
-		}
+	/* copy only possible sof_abi_hdr */
+	memcpy(cdata->data, control->priv.data,
+	       sizeof(struct sof_abi_hdr));
+
+	/* does this blob have sof_abi_hdr */
+	if (cdata->data->magic == SOF_ABI_MAGIC) {
 		if (SOF_ABI_VERSION_INCOMPATIBLE(SOF_ABI_VERSION,
 						 cdata->data->abi)) {
 			dev_err(scomp->dev,
@@ -1134,6 +1133,15 @@ static int sof_control_load_bytes(struct snd_soc_component *scomp,
 			ret = -EINVAL;
 			goto out_free;
 		}
+		/* copy entire data area */
+		memcpy(cdata->data, control->priv.data,
+		       le32_to_cpu(control->priv.size));
+	} else {
+		memcpy(cdata->data->data, control->priv.data,
+		       le32_to_cpu(control->priv.size));
+
+		/* set values for missing sof_abi_hdr */
+		cdata->data->size = le32_to_cpu(control->priv.size);
 	}
 
 	return ret;
@@ -2003,10 +2011,6 @@ static int sof_get_control_data(struct snd_soc_component *scomp,
 
 		wdata[i].pdata = wdata[i].control->control_data->data;
 		if (!wdata[i].pdata)
-			return -EINVAL;
-
-		/* make sure data is valid - data can be updated at runtime */
-		if (wdata[i].pdata->magic != SOF_ABI_MAGIC)
 			return -EINVAL;
 
 		*size += wdata[i].pdata->size;
