@@ -8,6 +8,7 @@
 #include <linux/soundwire/sdw_registers.h>
 #include <linux/soundwire/sdw.h>
 #include "bus.h"
+#include "sysfs_local.h"
 
 /**
  * sdw_add_bus_master() - add a bus Master instance
