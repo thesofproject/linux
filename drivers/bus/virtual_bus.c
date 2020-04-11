@@ -86,6 +86,14 @@ static int virtbus_uevent(struct device *dev, struct kobj_uevent_env *env)
 	return 0;
 }
 
+static const struct dev_pm_ops virtbus_dev_pm_ops = {
+	.runtime_suspend = pm_generic_runtime_suspend,
+	.runtime_resume = pm_generic_runtime_resume,
+#ifdef CONFIG_PM_SLEEP
+	SET_SYSTEM_SLEEP_PM_OPS(pm_generic_suspend, pm_generic_resume)
+#endif
+};
+
 struct bus_type virtual_bus_type = {
 	.name = "virtbus",
 	.match = virtbus_match,
@@ -95,6 +103,7 @@ struct bus_type virtual_bus_type = {
 	.suspend = virtbus_suspend,
 	.resume = virtbus_resume,
 	.uevent = virtbus_uevent,
+	.pm = &virtbus_dev_pm_ops,
 };
 
 /**
