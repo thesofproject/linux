@@ -15,6 +15,7 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/virtual_bus.h>
+#include "ops.h"
 #include "sof-client.h"
 #include "sof-priv.h"
 
@@ -86,6 +87,60 @@ struct dentry *sof_client_get_debugfs_root(struct sof_client_dev *cdev)
 	return cdev->sdev->debugfs_root;
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_get_debugfs_root, SND_SOC_SOF_CLIENT);
+
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_PROBES_CLIENT)
+int sof_client_probe_compr_assign(struct sof_client_dev *cdev,
+				  struct snd_compr_stream *cstream,
+				  struct snd_soc_dai *dai)
+{
+	return snd_sof_probe_compr_assign(cdev->sdev, cstream, dai);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_probe_compr_assign, SND_SOC_SOF_CLIENT);
+
+int sof_client_probe_compr_free(struct sof_client_dev *cdev,
+				struct snd_compr_stream *cstream,
+				struct snd_soc_dai *dai)
+{
+	return snd_sof_probe_compr_free(cdev->sdev, cstream, dai);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_probe_compr_free, SND_SOC_SOF_CLIENT);
+
+int sof_client_probe_compr_set_params(struct sof_client_dev *cdev,
+				      struct snd_compr_stream *cstream,
+				      struct snd_compr_params *params,
+				      struct snd_soc_dai *dai)
+{
+	return snd_sof_probe_compr_set_params(cdev->sdev, cstream, params, dai);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_probe_compr_set_params, SND_SOC_SOF_CLIENT);
+
+int sof_client_probe_compr_trigger(struct sof_client_dev *cdev,
+				   struct snd_compr_stream *cstream, int cmd,
+				   struct snd_soc_dai *dai)
+{
+	return snd_sof_probe_compr_trigger(cdev->sdev, cstream, cmd, dai);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_probe_compr_trigger, SND_SOC_SOF_CLIENT);
+
+int sof_client_probe_compr_pointer(struct sof_client_dev *cdev,
+				   struct snd_compr_stream *cstream,
+				   struct snd_compr_tstamp *tstamp,
+				   struct snd_soc_dai *dai)
+{
+	return snd_sof_probe_compr_pointer(cdev->sdev, cstream, tstamp, dai);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_probe_compr_pointer, SND_SOC_SOF_CLIENT);
+
+/*
+ * DMA buffer alloc fails when using the client dev.
+ * Use the SOF core device instead.
+ */
+struct device *sof_client_get_dma_dev(struct sof_client_dev *cdev)
+{
+	return cdev->sdev->dev;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_get_dma_dev, SND_SOC_SOF_CLIENT);
+#endif
 
 MODULE_AUTHOR("Ranjani Sridharan <ranjani.sridharan@linux.intel.com>");
 MODULE_LICENSE("GPL v2");
