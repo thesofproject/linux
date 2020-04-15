@@ -30,12 +30,12 @@ struct device_type sdw_master_type = {
  * The link_ops argument can be NULL, it is only used when link-specific
  * initializations and power-management are required.
  */
-struct sdw_master_device
-*sdw_master_device_add(struct device *parent,
-		       struct fwnode_handle *fwnode,
-		       struct sdw_link_ops *link_ops,
-		       int link_id,
-		       void *pdata)
+struct sdw_master_device*
+sdw_master_device_add(struct device *parent,
+		      struct fwnode_handle *fwnode,
+		      struct sdw_link_ops *link_ops,
+		      int link_id,
+		      void *pdata)
 {
 	struct sdw_master_device *md;
 	int ret;

@@ -888,12 +888,12 @@ struct sdw_bus {
 int sdw_add_bus_master(struct sdw_bus *bus);
 void sdw_delete_bus_master(struct sdw_bus *bus);
 
-struct sdw_master_device
-*sdw_master_device_add(struct device *parent,
-		       struct fwnode_handle *fwnode,
-		       struct sdw_link_ops *master_ops,
-		       int link_id,
-		       void *pdata);
+struct sdw_master_device*
+sdw_master_device_add(struct device *parent,
+		      struct fwnode_handle *fwnode,
+		      struct sdw_link_ops *master_ops,
+		      int link_id,
+		      void *pdata);
 
 int sdw_master_device_del(struct sdw_master_device *md);
 
