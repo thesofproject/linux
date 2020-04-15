@@ -4,7 +4,8 @@
 #ifndef __SOUNDWIRE_TYPES_H
 #define __SOUNDWIRE_TYPES_H
 
-extern struct bus_type sdw_bus_type;
+extern struct bus_type sdw_slave_bus_type;
+extern struct bus_type sdw_master_bus_type;
 extern struct device_type sdw_slave_type;
 extern struct device_type sdw_master_type;
 

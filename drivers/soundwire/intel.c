@@ -2067,7 +2067,7 @@ static const struct dev_pm_ops intel_pm = {
 
 static struct device_driver sdw_intel_driver = {
 	.name = "intel-master",
-	.bus = &sdw_bus_type,
+	.bus = &sdw_master_bus_type,
 	.pm = &intel_pm,
 };
 

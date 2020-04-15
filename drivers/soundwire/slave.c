@@ -47,7 +47,7 @@ static int sdw_slave_add(struct sdw_bus *bus,
 			     id->class_id, id->unique_id);
 	}
 
-	slave->dev.bus = &sdw_bus_type;
+	slave->dev.bus = &sdw_slave_bus_type;
 	slave->dev.of_node = of_node_get(to_of_node(fwnode));
 	slave->dev.type = &sdw_slave_type;
 	slave->bus = bus;

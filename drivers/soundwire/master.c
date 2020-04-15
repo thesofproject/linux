@@ -51,7 +51,7 @@ struct sdw_master_device
 	md->dev.parent = parent;
 	md->dev.of_node = parent->of_node;
 	md->dev.fwnode = fwnode;
-	md->dev.bus = &sdw_bus_type;
+	md->dev.bus = &sdw_master_bus_type;
 	md->dev.type = &sdw_master_type;
 	md->dev.dma_mask = md->dev.parent->dma_mask;
 	dev_set_name(&md->dev, "sdw-master-%d", md->link_id);

@@ -31,7 +31,7 @@ sdw_get_device_id(struct sdw_slave *slave, struct sdw_driver *drv)
 	return NULL;
 }
 
-static int sdw_bus_match(struct device *dev, struct device_driver *ddrv)
+static int sdw_slave_bus_match(struct device *dev, struct device_driver *ddrv)
 {
 	struct sdw_slave *slave = dev_to_sdw_dev(dev);
 	struct sdw_driver *drv = drv_to_sdw_driver(ddrv);
@@ -61,11 +61,16 @@ int sdw_slave_uevent(struct device *dev, struct kobj_uevent_env *env)
 	return 0;
 }
 
-struct bus_type sdw_bus_type = {
+struct bus_type sdw_slave_bus_type = {
 	.name = "soundwire",
-	.match = sdw_bus_match,
+	.match = sdw_slave_bus_match,
 };
-EXPORT_SYMBOL_GPL(sdw_bus_type);
+EXPORT_SYMBOL_GPL(sdw_slave_bus_type);
+
+struct bus_type sdw_master_bus_type = {
+	.name = "soundwire-master",
+};
+EXPORT_SYMBOL_GPL(sdw_master_bus_type);
 
 static int sdw_drv_probe(struct device *dev)
 {
@@ -150,7 +155,7 @@ static void sdw_drv_shutdown(struct device *dev)
  */
 int __sdw_register_driver(struct sdw_driver *drv, struct module *owner)
 {
-	drv->driver.bus = &sdw_bus_type;
+	drv->driver.bus = &sdw_slave_bus_type;
 
 	if (!drv->probe) {
 		pr_err("driver %s didn't provide SDW probe routine\n",
@@ -183,14 +188,22 @@ EXPORT_SYMBOL_GPL(sdw_unregister_driver);
 
 static int __init sdw_bus_init(void)
 {
+	int ret;
+
 	sdw_debugfs_init();
-	return bus_register(&sdw_bus_type);
+
+	ret = bus_register(&sdw_master_bus_type);
+	if (ret)
+		return ret;
+
+	return bus_register(&sdw_slave_bus_type);
 }
 
 static void __exit sdw_bus_exit(void)
 {
 	sdw_debugfs_exit();
-	bus_unregister(&sdw_bus_type);
+	bus_unregister(&sdw_slave_bus_type);
+	bus_unregister(&sdw_master_bus_type);
 }
 
 postcore_initcall(sdw_bus_init);
