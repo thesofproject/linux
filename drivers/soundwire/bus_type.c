@@ -33,17 +33,10 @@ sdw_get_device_id(struct sdw_slave *slave, struct sdw_driver *drv)
 
 static int sdw_bus_match(struct device *dev, struct device_driver *ddrv)
 {
-	struct sdw_slave *slave;
-	struct sdw_driver *drv;
-	int ret = 0;
+	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_driver *drv = drv_to_sdw_driver(ddrv);
 
-	if (is_sdw_slave(dev)) {
-		slave = dev_to_sdw_dev(dev);
-		drv = drv_to_sdw_driver(ddrv);
-
-		ret = !!sdw_get_device_id(slave, drv);
-	}
-	return ret;
+	return !!sdw_get_device_id(slave, drv);
 }
 
 static int sdw_slave_modalias(const struct sdw_slave *slave, char *buf,
