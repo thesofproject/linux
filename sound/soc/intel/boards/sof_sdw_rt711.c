@@ -25,7 +25,8 @@ static int rt711_add_codec_device_props(const char *sdw_dev_name)
 	struct device *sdw_dev;
 	int ret;
 
-	sdw_dev = bus_find_device_by_name(&sdw_bus_type, NULL, sdw_dev_name);
+	sdw_dev = bus_find_device_by_name(&sdw_slave_bus_type, NULL,
+					  sdw_dev_name);
 	if (!sdw_dev)
 		return -EPROBE_DEFER;
 
