@@ -321,7 +321,7 @@ int snd_sof_bytes_ext_put(struct snd_kcontrol *kcontrol,
 		return -EINVAL;
 	}
 
-	if (copy_from_user(cdata->data, tlvd->tlv, header.length))
+	if (copy_from_user(cdata->data, header.tlv, header.length))
 		return -EFAULT;
 
 	if (cdata->data->magic != SOF_ABI_MAGIC) {
@@ -396,7 +396,7 @@ int snd_sof_bytes_ext_get(struct snd_kcontrol *kcontrol,
 		goto out;
 	}
 
-	if (copy_to_user(tlvd->tlv, cdata->data, data_size))
+	if (copy_to_user(header.tlv, cdata->data, data_size))
 		ret = -EFAULT;
 
 out:
