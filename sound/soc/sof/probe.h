@@ -12,8 +12,8 @@
 #define __SOF_PROBE_H
 
 #include <sound/sof/header.h>
-
-struct snd_sof_dev;
+#include <linux/debugfs.h>
+#include "sof-client.h"
 
 #define SOF_PROBE_INVALID_NODE_ID UINT_MAX
 
@@ -66,20 +66,27 @@ struct sof_ipc_probe_point_remove_params {
 	unsigned int buffer_id[0];
 } __packed;
 
-int sof_ipc_probe_init(struct snd_sof_dev *sdev,
-		u32 stream_tag, size_t buffer_size);
-int sof_ipc_probe_deinit(struct snd_sof_dev *sdev);
-int sof_ipc_probe_dma_info(struct snd_sof_dev *sdev,
-		struct sof_probe_dma **dma, size_t *num_dma);
-int sof_ipc_probe_dma_add(struct snd_sof_dev *sdev,
-		struct sof_probe_dma *dma, size_t num_dma);
-int sof_ipc_probe_dma_remove(struct snd_sof_dev *sdev,
-		unsigned int *stream_tag, size_t num_stream_tag);
-int sof_ipc_probe_points_info(struct snd_sof_dev *sdev,
-		struct sof_probe_point_desc **desc, size_t *num_desc);
-int sof_ipc_probe_points_add(struct snd_sof_dev *sdev,
-		struct sof_probe_point_desc *desc, size_t num_desc);
-int sof_ipc_probe_points_remove(struct snd_sof_dev *sdev,
-		unsigned int *buffer_id, size_t num_buffer_id);
+int sof_probe_init(struct sof_client_dev *cdev, u32 stream_tag,
+		   size_t buffer_size);
+int sof_probe_deinit(struct sof_client_dev *cdev);
+int sof_probe_dma_info(struct sof_client_dev *cdev,
+		       struct sof_probe_dma **dma, size_t *num_dma);
+int sof_probe_dma_add(struct sof_client_dev *cdev,
+		      struct sof_probe_dma *dma, size_t num_dma);
+int sof_probe_dma_remove(struct sof_client_dev *cdev,
+			 unsigned int *stream_tag, size_t num_stream_tag);
+int sof_probe_points_info(struct sof_client_dev *cdev,
+			  struct sof_probe_point_desc **desc,
+			  size_t *num_desc);
+int sof_probe_points_add(struct sof_client_dev *cdev,
+			 struct sof_probe_point_desc *desc,
+			 size_t num_desc);
+int sof_probe_points_remove(struct sof_client_dev *cdev,
+			    unsigned int *buffer_id, size_t num_buffer_id);
+
+struct sof_probes_data {
+	struct dentry *dfs_root;
+	unsigned int extractor_stream_tag;
+};
 
 #endif

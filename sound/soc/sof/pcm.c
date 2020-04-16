@@ -16,9 +16,6 @@
 #include "sof-priv.h"
 #include "sof-audio.h"
 #include "ops.h"
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_PROBES)
-#include "compress.h"
-#endif
 
 /* Create DMA buffer page table for DSP */
 static int create_page_table(struct snd_soc_component *component,
@@ -783,14 +780,6 @@ void snd_sof_new_platform_drv(struct snd_sof_dev *sdev)
 	pd->hw_free = sof_pcm_hw_free;
 	pd->trigger = sof_pcm_trigger;
 	pd->pointer = sof_pcm_pointer;
-
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_COMPRESS)
-	pd->compr_ops = &sof_compressed_ops;
-#endif
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_PROBES)
-	/* override cops when probe support is enabled */
-	pd->compr_ops = &sof_probe_compressed_ops;
-#endif
 	pd->pcm_construct = sof_pcm_new;
 	pd->ignore_machine = drv_name;
 	pd->be_hw_params_fixup = sof_pcm_dai_link_fixup;

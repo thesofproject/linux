@@ -420,10 +420,6 @@ struct snd_sof_dev {
 	int ipc_timeout;
 	int boot_timeout;
 
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_PROBES)
-	unsigned int extractor_stream_tag;
-#endif
-
 	/* DMA for Trace */
 	struct snd_dma_buffer dmatb;
 	struct snd_dma_buffer dmatp;

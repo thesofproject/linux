@@ -42,13 +42,11 @@ config SND_SOC_SOF_OF
 	  Say Y if you need this option. If unsure select "N".
 
 config SND_SOC_SOF_DEBUG_PROBES
-	bool "SOF enable data probing"
+	bool
 	select SND_SOC_COMPRESS
 	help
-	  This option enables the data probing feature that can be used to
-	  gather data directly from specific points of the audio pipeline.
-	  Say Y if you want to enable probes.
-	  If unsure, select "N".
+	  This option is not user-selectable but automagically handled by
+	  'select' statements at a higher level
 
 config SND_SOC_SOF_CLIENT
 	tristate
@@ -193,6 +191,15 @@ config SND_SOC_SOF_DEBUG_IPC_FLOOD_TEST_CLIENT
 	  Say Y if you want to enable IPC flood test.
 	  If unsure, select "N".
 
+config SND_SOC_SOF_DEBUG_PROBES_CLIENT
+	tristate "SOF enable data probing"
+	depends on SND_SOC_SOF_CLIENT
+	help
+	  This option enables the data probing feature that can be used to
+	  gather data directly from specific points of the audio pipeline.
+	  Say Y if you want to enable probes.
+	  If unsure, select "N".
+
 config SND_SOC_SOF_DEBUG_RETAIN_DSP_CONTEXT
 	bool "SOF retain DSP context on any FW exceptions"
 	help
@@ -208,6 +215,7 @@ endif ## SND_SOC_SOF_DEVELOPER_SUPPORT
 config SND_SOC_SOF
 	tristate
 	select SND_SOC_SOF_CLIENT if SND_SOC_SOF_CLIENT_SUPPORT
+	select SND_SOC_SOF_DEBUG_PROBES if SND_SOC_SOF_DEBUG_PROBES_CLIENT
 	select SND_SOC_TOPOLOGY
 	select SND_SOC_SOF_NOCODEC if SND_SOC_SOF_NOCODEC_SUPPORT
 	help
