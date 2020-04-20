@@ -69,13 +69,11 @@ static int sdw_intel_cleanup(struct sdw_intel_ctx *ctx)
 		if (link_mask && !(link_mask & BIT(i)))
 			continue;
 
-		if (!IS_ERR_OR_NULL(link->md)) {
-			ret = sdw_master_device_del(link->md);
-			if (ret < 0)
-				dev_err(&link->md->dev,
-					"master device del failed %d\n",
-					ret);
-		}
+		ret = sdw_master_device_del(&link->md);
+		if (ret < 0)
+			dev_err(&link->md.dev,
+				"master device del failed %d\n",
+				ret);
 
 		if (!link->clock_stop_quirks)
 			pm_runtime_put_noidle(link->dev);
@@ -198,7 +196,6 @@ static struct sdw_intel_ctx
 	struct sdw_intel_link_res *link;
 	struct sdw_intel_ctx *ctx;
 	struct acpi_device *adev;
-	struct sdw_master_device *md;
 	struct sdw_slave *slave;
 	struct list_head *node;
 	struct sdw_bus *bus;
@@ -262,18 +259,17 @@ static struct sdw_intel_ctx
 		link->shim_mask = &ctx->shim_mask;
 		link->link_mask = link_mask;
 
-		md = sdw_master_device_add(res->parent,
-					   acpi_fwnode_handle(adev),
-					   &sdw_intel_link_ops,
-					   i,
-					   link);
+		ret = sdw_master_device_add(&link->md,
+					    res->parent,
+					    acpi_fwnode_handle(adev),
+					    &sdw_intel_link_ops,
+					    i,
+					    link);
 
-		if (IS_ERR(md)) {
+		if (ret < 0) {
 			dev_err(&adev->dev, "Could not create link %d\n", i);
 			goto err;
 		}
-
-		link->md = md;
 
 		list_add_tail(&link->list, &ctx->link_list);
 		bus = &link->cdns->bus;
@@ -314,7 +310,6 @@ sdw_intel_startup_controller(struct sdw_intel_ctx *ctx)
 {
 	struct acpi_device *adev;
 	struct sdw_intel_link_res *link;
-	struct sdw_master_device *md;
 	u32 caps;
 	u32 link_mask;
 	int i;
@@ -344,9 +339,7 @@ sdw_intel_startup_controller(struct sdw_intel_ctx *ctx)
 		if (link_mask && !(link_mask & BIT(i)))
 			continue;
 
-		md = link->md;
-
-		sdw_master_device_startup(md);
+		sdw_master_device_startup(&link->md);
 
 		if (!link->clock_stop_quirks) {
 			/*
@@ -468,7 +461,7 @@ void sdw_intel_process_wakeen_event(struct sdw_intel_ctx *ctx)
 		return;
 
 	list_for_each_entry(link, &ctx->link_list, list)
-		sdw_master_device_process_wake_event(link->md);
+		sdw_master_device_process_wake_event(&link->md);
 }
 EXPORT_SYMBOL_NS(sdw_intel_process_wakeen_event, SOUNDWIRE_INTEL_INIT);
 

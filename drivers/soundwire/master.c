@@ -7,11 +7,10 @@
 #include <linux/soundwire/sdw_type.h>
 #include "bus.h"
 
+/* nothing to free but this function is mandatory */
 static void sdw_master_device_release(struct device *dev)
 {
-	struct sdw_master_device *md = dev_to_sdw_master_device(dev);
-
-	kfree(md);
+	return;
 }
 
 struct device_type sdw_master_type = {
@@ -21,6 +20,7 @@ struct device_type sdw_master_type = {
 
 /**
  * sdw_master_device_add() - create a Linux Master Device representation.
+ * @md: Master device
  * @parent: the parent Linux device (e.g. a PCI device)
  * @fwnode: the parent fwnode (e.g. an ACPI companion device to the parent)
  * @link_ops: link-specific ops (optional)
@@ -30,19 +30,17 @@ struct device_type sdw_master_type = {
  * The link_ops argument can be NULL, it is only used when link-specific
  * initializations and power-management are required.
  */
-struct sdw_master_device
-*sdw_master_device_add(struct device *parent,
-		       struct fwnode_handle *fwnode,
-		       struct sdw_link_ops *link_ops,
-		       int link_id,
-		       void *pdata)
+int sdw_master_device_add(struct sdw_master_device *md,
+			  struct device *parent,
+			  struct fwnode_handle *fwnode,
+			  struct sdw_link_ops *link_ops,
+			  int link_id,
+			  void *pdata)
 {
-	struct sdw_master_device *md;
 	int ret;
 
-	md = kzalloc(sizeof(*md), GFP_KERNEL);
 	if (!md)
-		return ERR_PTR(-ENOMEM);
+		return -EINVAL;
 
 	md->link_id = link_id;
 	md->pdata = pdata;
@@ -86,12 +84,12 @@ struct sdw_master_device
 		}
 	}
 
-	return md;
+	return ret;
 
 link_add_err:
 	device_unregister(&md->dev);
 device_register_err:
-	return ERR_PTR(ret);
+	return ret;
 }
 EXPORT_SYMBOL_GPL(sdw_master_device_add);
 
@@ -99,14 +97,17 @@ EXPORT_SYMBOL_GPL(sdw_master_device_add);
  * sdw_master_device_del() - delete a Linux Master Device representation.
  * @md: the master device
  *
- * This function is the dual of sdw_master_device_add(), itreleases
+ * This function is the dual of sdw_master_device_add(), it releases
  * all link-specific resources and unregisters the device.
  */
 int sdw_master_device_del(struct sdw_master_device *md)
 {
 	int ret = 0;
 
-	if (md && md->link_ops && md->link_ops->del) {
+	if (!md)
+		return -EINVAL;
+
+	if (md->link_ops && md->link_ops->del) {
 		ret = md->link_ops->del(md);
 		if (ret < 0) {
 			dev_err(&md->dev, "link_ops del callback failed: %d\n",
@@ -131,7 +132,7 @@ int sdw_master_device_startup(struct sdw_master_device *md)
 	struct sdw_link_ops *link_ops;
 	int ret = 0;
 
-	if (IS_ERR_OR_NULL(md))
+	if (!md)
 		return -EINVAL;
 
 	link_ops = md->link_ops;
@@ -154,7 +155,7 @@ int sdw_master_device_process_wake_event(struct sdw_master_device *md)
 	struct sdw_link_ops *link_ops;
 	int ret = 0;
 
-	if (IS_ERR_OR_NULL(md))
+	if (!md)
 		return -EINVAL;
 
 	link_ops = md->link_ops;
