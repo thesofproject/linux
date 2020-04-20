@@ -39,6 +39,15 @@ struct sdw_intel_link_res {
 	struct list_head list;
 };
 
+struct sdw_intel {
+	struct sdw_cdns cdns;
+	int instance;
+	struct sdw_intel_link_res *link_res;
+#ifdef CONFIG_DEBUG_FS
+	struct dentry *debugfs;
+#endif
+};
+
 #define SDW_INTEL_QUIRK_MASK_BUS_DISABLE      BIT(1)
 
 extern struct sdw_link_ops sdw_intel_link_ops;

@@ -58,7 +58,7 @@ static int sdw_intel_cleanup(struct sdw_intel_ctx *ctx)
 {
 	struct sdw_intel_link_res *link = ctx->links;
 	u32 link_mask;
-	int i, ret;
+	int i;
 
 	if (!link)
 		return 0;
@@ -69,13 +69,8 @@ static int sdw_intel_cleanup(struct sdw_intel_ctx *ctx)
 		if (link_mask && !(link_mask & BIT(i)))
 			continue;
 
-		if (!IS_ERR_OR_NULL(link->md)) {
-			ret = sdw_master_device_del(link->md);
-			if (ret < 0)
-				dev_err(&link->md->dev,
-					"master device del failed %d\n",
-					ret);
-		}
+		if (!IS_ERR_OR_NULL(link->md))
+			sdw_delete_bus_master(link->md->bus);
 
 		if (!link->clock_stop_quirks)
 			pm_runtime_put_noidle(link->dev);
@@ -83,6 +78,8 @@ static int sdw_intel_cleanup(struct sdw_intel_ctx *ctx)
 
 	kfree(ctx->links);
 	ctx->links = NULL;
+	kfree(ctx->sdw_intels);
+	ctx->sdw_intels = NULL;
 	kfree(ctx->ids);
 	ctx->ids = NULL;
 
@@ -196,9 +193,9 @@ static struct sdw_intel_ctx
 *sdw_intel_probe_controller(struct sdw_intel_res *res)
 {
 	struct sdw_intel_link_res *link;
+	struct sdw_intel *sdw;
 	struct sdw_intel_ctx *ctx;
 	struct acpi_device *adev;
-	struct sdw_master_device *md;
 	struct sdw_slave *slave;
 	struct list_head *node;
 	struct sdw_bus *bus;
@@ -245,8 +242,10 @@ static struct sdw_intel_ctx
 		goto register_err;
 	}
 
+	ctx->sdw_intels = kcalloc(count, sizeof(*ctx->sdw_intels), GFP_KERNEL);
+	sdw = ctx->sdw_intels;
 	/* Create SDW Master devices */
-	for (i = 0; i < count; i++, link++) {
+	for (i = 0; i < count; i++, link++, sdw++) {
 		if (link_mask && !(link_mask & BIT(i)))
 			continue;
 
@@ -261,22 +260,24 @@ static struct sdw_intel_ctx
 		link->shim_lock = &ctx->shim_lock;
 		link->shim_mask = &ctx->shim_mask;
 		link->link_mask = link_mask;
+		sdw->link_res = link;
+		sdw->cdns.bus.link_id = i;
+		sdw->cdns.bus.md.dev.parent = res->parent;
+		sdw->cdns.bus.md.dev.of_node = res->parent->of_node;
+		sdw->cdns.bus.md.dev.fwnode = acpi_fwnode_handle(adev);
+		sdw->cdns.bus.link_ops = &sdw_intel_link_ops;
+		sdw->cdns.bus.pdata = sdw;
 
-		md = sdw_master_device_add(res->parent,
-					   acpi_fwnode_handle(adev),
-					   &sdw_intel_link_ops,
-					   i,
-					   link);
-
-		if (IS_ERR(md)) {
+		ret = sdw_add_bus_master(&sdw->cdns.bus);
+		if (ret) {
 			dev_err(&adev->dev, "Could not create link %d\n", i);
 			goto err;
 		}
 
-		link->md = md;
+		link->md = &sdw->cdns.bus.md;
 
 		list_add_tail(&link->list, &ctx->link_list);
-		bus = &link->cdns->bus;
+		bus = &sdw->cdns.bus;
 		/* Calculate number of slaves */
 		list_for_each(node, &bus->slaves)
 			num_slaves++;
@@ -346,7 +347,7 @@ sdw_intel_startup_controller(struct sdw_intel_ctx *ctx)
 
 		md = link->md;
 
-		sdw_master_device_startup(md);
+		sdw_bus_master_startup(md->bus);
 
 		if (!link->clock_stop_quirks) {
 			/*
@@ -468,7 +469,7 @@ void sdw_intel_process_wakeen_event(struct sdw_intel_ctx *ctx)
 		return;
 
 	list_for_each_entry(link, &ctx->link_list, list)
-		sdw_master_device_process_wake_event(link->md);
+		sdw_bus_master_process_wake_event(link->md->bus);
 }
 EXPORT_SYMBOL_NS(sdw_intel_process_wakeen_event, SOUNDWIRE_INTEL_INIT);
 
