@@ -842,17 +842,10 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 		goto err_clk;
 	}
 
-	ret = sdw_add_bus_master(&ctrl->bus);
-	if (ret) {
-		dev_err(dev, "Failed to register Soundwire controller (%d)\n",
-			ret);
-		goto err_md;
-	}
-
 	qcom_swrm_init(ctrl);
 	ret = qcom_swrm_register_dais(ctrl);
 	if (ret)
-		goto err_master_add;
+		goto err_md;
 
 	dev_info(dev, "Qualcomm Soundwire controller v%x.%x.%x Registered\n",
 		 (ctrl->version >> 24) & 0xff, (ctrl->version >> 16) & 0xff,
@@ -860,8 +853,6 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 
 	return 0;
 
-err_master_add:
-	sdw_delete_bus_master(&ctrl->bus);
 err_md:
 	err = sdw_master_device_del(ctrl->md);
 	if (err < 0) /* log but return initial status */
@@ -877,8 +868,7 @@ static int qcom_swrm_remove(struct platform_device *pdev)
 	struct qcom_swrm_ctrl *ctrl = dev_get_drvdata(&pdev->dev);
 	int err;
 
-	sdw_delete_bus_master(&ctrl->bus);
-	err = sdw_master_device_del(ctrl->md);
+	err = sdw_master_device_del(&ctrl->md);
 	if (err < 0)
 		dev_err(&pdev->dev, "master device del failed %d\n", err);
 	clk_disable_unprepare(ctrl->hclk);

@@ -84,6 +84,18 @@ int sdw_master_device_add(struct sdw_master_device *md,
 		}
 	}
 
+	/* the bus handle may be set initially or in the link_ops, check now */
+	if (!md->bus)
+		goto link_add_err;
+
+	ret = sdw_add_bus_master(md->bus);
+	if (ret) {
+		dev_err(&md->dev,
+			"Failed to register Soundwire controller (%d)\n",
+			ret);
+		goto link_add_err;
+	}
+
 	return ret;
 
 link_add_err:
@@ -115,6 +127,7 @@ int sdw_master_device_del(struct sdw_master_device *md)
 			return ret;
 		}
 	}
+	sdw_delete_bus_master(md->bus);
 
 	device_unregister(&md->dev);
 

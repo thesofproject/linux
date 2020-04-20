@@ -217,4 +217,7 @@ void sdw_clear_slave_status(struct sdw_bus *bus, u32 request);
 
 int sdw_slave_uevent(struct device *dev, struct kobj_uevent_env *env);
 
+int sdw_add_bus_master(struct sdw_bus *bus);
+void sdw_delete_bus_master(struct sdw_bus *bus);
+
 #endif /* __SDW_BUS_H */
