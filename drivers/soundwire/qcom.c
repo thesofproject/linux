@@ -800,9 +800,6 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 		goto err_clk;
 	}
 
-	/* add bus handle */
-	ctrl->md->bus = &ctrl->bus;
-
 	/* the bus uses the sdw_master_device, not the platform device */
 	ctrl->bus.dev = &ctrl->md->dev;
 
