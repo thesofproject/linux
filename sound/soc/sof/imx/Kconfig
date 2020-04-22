@@ -13,8 +13,8 @@ if SND_SOC_SOF_IMX_TOPLEVEL
 
 config SND_SOC_SOF_IMX_OF
 	def_tristate SND_SOC_SOF_OF
-	select SND_SOC_SOF_IMX8 if SND_SOC_SOF_IMX8_SUPPORT && IMX_SCU
-	select SND_SOC_SOF_IMX8M if SND_SOC_SOF_IMX8M_SUPPORT
+	select SND_SOC_SOF_IMX8 if SND_SOC_SOF_IMX8_SUPPORT && IMX_SCU && IMX_MBOX
+	select SND_SOC_SOF_IMX8M if SND_SOC_SOF_IMX8M_SUPPORT && IMX_MBOX
 	help
 	  This option is not user-selectable but automagically handled by
 	  'select' statements at a higher level
@@ -42,7 +42,7 @@ config SND_SOC_SOF_IMX8M_SUPPORT
 
 config SND_SOC_SOF_IMX8M
 	tristate
-	depends on IMX_DSP
+	select IMX_DSP
 	help
 	  This option is not user-selectable but automagically handled by
 	  'select' statements at a higher level
