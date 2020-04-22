@@ -381,8 +381,8 @@ sdw_bread_no_pm(struct sdw_bus *bus, u16 dev_num, u32 addr)
 	ret = sdw_transfer(bus, &msg);
 	if (ret < 0)
 		return ret;
-	else
-		return buf;
+
+	return buf;
 }
 
 static int
