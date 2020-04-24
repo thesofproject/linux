@@ -58,7 +58,7 @@ static int sdw_intel_cleanup(struct sdw_intel_ctx *ctx)
 {
 	struct sdw_intel_link_res *link = ctx->links;
 	u32 link_mask;
-	int i, ret;
+	int i;
 
 	if (!link)
 		return 0;
@@ -69,22 +69,11 @@ static int sdw_intel_cleanup(struct sdw_intel_ctx *ctx)
 		if (link_mask && !(link_mask & BIT(i)))
 			continue;
 
-		if (!IS_ERR_OR_NULL(link->md)) {
-			ret = sdw_master_device_del(link->md);
-			if (ret < 0)
-				dev_err(&link->md->dev,
-					"master device del failed %d\n",
-					ret);
-		}
+		sdw_bus_master_delete(link->bus);
 
 		if (!link->clock_stop_quirks)
 			pm_runtime_put_noidle(link->dev);
 	}
-
-	kfree(ctx->links);
-	ctx->links = NULL;
-	kfree(ctx->ids);
-	ctx->ids = NULL;
 
 	return 0;
 }
@@ -196,9 +185,9 @@ static struct sdw_intel_ctx
 *sdw_intel_probe_controller(struct sdw_intel_res *res)
 {
 	struct sdw_intel_link_res *link;
+	struct sdw_intel *sdw;
 	struct sdw_intel_ctx *ctx;
 	struct acpi_device *adev;
-	struct sdw_master_device *md;
 	struct sdw_slave *slave;
 	struct list_head *node;
 	struct sdw_bus *bus;
@@ -220,12 +209,18 @@ static struct sdw_intel_ctx
 	count = res->count;
 	dev_dbg(&adev->dev, "Creating %d SDW Link devices\n", count);
 
-	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
+	ctx = devm_kzalloc(&adev->dev, sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
 		return NULL;
 
-	ctx->links = kcalloc(count, sizeof(*ctx->links), GFP_KERNEL);
+	ctx->links = devm_kzalloc(&adev->dev,
+				  count * sizeof(*ctx->links), GFP_KERNEL);
 	if (!ctx->links)
+		goto link_err;
+
+	sdw = devm_kzalloc(&adev->dev,
+			   count * sizeof(struct sdw_intel), GFP_KERNEL);
+	if (!sdw)
 		goto link_err;
 
 	ctx->count = count;
@@ -241,12 +236,13 @@ static struct sdw_intel_ctx
 
 	ret = driver_register(sdw_intel_link_ops.driver);
 	if (ret) {
-		dev_err(&adev->dev, "failed to register sdw master driver: %d\n", ret);
+		dev_err(&adev->dev,
+			"failed to register sdw master driver: %d\n", ret);
 		goto register_err;
 	}
 
 	/* Create SDW Master devices */
-	for (i = 0; i < count; i++, link++) {
+	for (i = 0; i < count; i++, link++, sdw++) {
 		if (link_mask && !(link_mask & BIT(i)))
 			continue;
 
@@ -262,18 +258,21 @@ static struct sdw_intel_ctx
 		link->shim_mask = &ctx->shim_mask;
 		link->link_mask = link_mask;
 
-		md = sdw_master_device_add(res->parent,
-					   acpi_fwnode_handle(adev),
-					   &sdw_intel_link_ops,
-					   i,
-					   link);
+		sdw->link_res = link;
+		sdw->cdns.bus.link_id = i;
+		sdw->cdns.bus.link_ops = &sdw_intel_link_ops;
+		sdw->cdns.bus.pdata = sdw;
 
-		if (IS_ERR(md)) {
+		ret = sdw_bus_master_add(&sdw->cdns.bus,
+					 res->parent,
+					 acpi_fwnode_handle(adev));
+		if (ret) {
 			dev_err(&adev->dev, "Could not create link %d\n", i);
 			goto err;
 		}
 
-		link->md = md;
+		link->bus = &sdw->cdns.bus;
+		link->cdns = &sdw->cdns;
 
 		list_add_tail(&link->list, &ctx->link_list);
 		bus = &link->cdns->bus;
@@ -305,7 +304,6 @@ err:
 register_err:
 	sdw_intel_cleanup(ctx);
 link_err:
-	kfree(ctx);
 	return NULL;
 }
 
@@ -314,7 +312,6 @@ sdw_intel_startup_controller(struct sdw_intel_ctx *ctx)
 {
 	struct acpi_device *adev;
 	struct sdw_intel_link_res *link;
-	struct sdw_master_device *md;
 	u32 caps;
 	u32 link_mask;
 	int i;
@@ -344,9 +341,7 @@ sdw_intel_startup_controller(struct sdw_intel_ctx *ctx)
 		if (link_mask && !(link_mask & BIT(i)))
 			continue;
 
-		md = link->md;
-
-		sdw_master_device_startup(md);
+		sdw_bus_master_startup(link->bus);
 
 		if (!link->clock_stop_quirks) {
 			/*
@@ -456,7 +451,6 @@ void sdw_intel_exit(struct sdw_intel_ctx *ctx)
 {
 	sdw_intel_cleanup(ctx);
 	driver_unregister(sdw_intel_link_ops.driver);
-	kfree(ctx);
 }
 EXPORT_SYMBOL_NS(sdw_intel_exit, SOUNDWIRE_INTEL_INIT);
 
@@ -468,7 +462,7 @@ void sdw_intel_process_wakeen_event(struct sdw_intel_ctx *ctx)
 		return;
 
 	list_for_each_entry(link, &ctx->link_list, list)
-		sdw_master_device_process_wake_event(link->md);
+		sdw_bus_master_process_wake_event(link->bus);
 }
 EXPORT_SYMBOL_NS(sdw_intel_process_wakeen_event, SOUNDWIRE_INTEL_INIT);
 
