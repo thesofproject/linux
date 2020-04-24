@@ -10,20 +10,28 @@
 #include "bus.h"
 
 /**
- * sdw_add_bus_master() - add a bus Master instance
+ * sdw_bus_master_add() - add a bus Master instance
  * @bus: bus instance
+ * @parent: parent device
+ * @fwnode: firmware node handle
  *
  * Initializes the bus instance, read properties and create child
  * devices.
  */
-int sdw_add_bus_master(struct sdw_bus *bus)
+int sdw_bus_master_add(struct sdw_bus *bus, struct device *parent,
+		       struct fwnode_handle *fwnode)
 {
 	struct sdw_master_prop *prop = NULL;
 	int ret;
 
-	if (!bus->dev) {
-		pr_err("SoundWire bus has no device\n");
-		return -ENODEV;
+	if (!bus)
+		return -EINVAL;
+
+	ret = sdw_master_device_add(bus, parent, fwnode);
+	if (ret) {
+		dev_err(parent, "Failed to add master device at link %d\n",
+			bus->link_id);
+		return ret;
 	}
 
 	if (!bus->ops) {
@@ -113,7 +121,7 @@ int sdw_add_bus_master(struct sdw_bus *bus)
 
 	return 0;
 }
-EXPORT_SYMBOL(sdw_add_bus_master);
+EXPORT_SYMBOL(sdw_bus_master_add);
 
 static int sdw_delete_slave(struct device *dev, void *data)
 {
@@ -137,18 +145,19 @@ static int sdw_delete_slave(struct device *dev, void *data)
 }
 
 /**
- * sdw_delete_bus_master() - delete the bus master instance
+ * sdw_bus_master_delete() - delete the bus master instance
  * @bus: bus to be deleted
  *
  * Remove the instance, delete the child devices.
  */
-void sdw_delete_bus_master(struct sdw_bus *bus)
+void sdw_bus_master_delete(struct sdw_bus *bus)
 {
 	device_for_each_child(bus->dev, NULL, sdw_delete_slave);
+	sdw_master_device_del(bus);
 
 	sdw_bus_debugfs_exit(bus);
 }
-EXPORT_SYMBOL(sdw_delete_bus_master);
+EXPORT_SYMBOL(sdw_bus_master_delete);
 
 /*
  * SDW IO Calls
