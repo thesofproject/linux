@@ -46,6 +46,17 @@ int sdw_master_device_add(struct sdw_bus *bus, struct device *parent,
 
 	dev_set_name(&md->dev, "sdw-master-%d", bus->link_id);
 
+	if (bus->link_ops && bus->link_ops->driver) {
+		/*
+		 * A driver is only needed for ASoC integration (need
+		 * driver->name) and for link-specific power management
+		 * w/ a pm_dev_ops structure.
+		 *
+		 * The driver needs to be registered by the parent
+		 */
+		md->dev.driver = bus->link_ops->driver;
+	}
+
 	ret = device_register(&md->dev);
 	if (ret) {
 		dev_err(parent, "Failed to add master: ret %d\n", ret);
@@ -61,6 +72,19 @@ int sdw_master_device_add(struct sdw_bus *bus, struct device *parent,
 	md->bus = bus;
 	bus->dev = &md->dev;
 
+	if (bus->link_ops && bus->link_ops->add) {
+		ret = bus->link_ops->add(bus, bus->pdata);
+		if (ret < 0) {
+			dev_err(&md->dev,
+				"link_ops add callback failed: %d\n", ret);
+			goto link_add_err;
+		}
+	}
+
+	return ret;
+
+link_add_err:
+	device_unregister(&md->dev);
 device_register_err:
 	return ret;
 }
@@ -73,7 +97,53 @@ device_register_err:
  */
 int sdw_master_device_del(struct sdw_bus *bus)
 {
+	int ret;
+
+	if (!bus)
+		return -EINVAL;
+
+	if (bus->link_ops && bus->link_ops->del) {
+		ret = bus->link_ops->del(bus);
+		if (ret < 0)
+			dev_err(bus->dev,
+				"link_ops del callback failed: %d\n",
+				ret);
+	}
+
 	device_unregister(bus->dev);
 
 	return 0;
 }
+
+/**
+ * sdw_bus_master_startup() - startup hardware
+ * @bus: bus handle
+ */
+int sdw_bus_master_startup(struct sdw_bus *bus)
+{
+	if (!bus)
+		return -EINVAL;
+
+	if (bus->link_ops && bus->link_ops->startup)
+		return bus->link_ops->startup(bus);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(sdw_bus_master_startup);
+
+/**
+ * sdw_bus_master_process_wake_event() - handle external wake
+ * event, e.g. handled at the PCI level
+ * @bus: bus handle
+ */
+int sdw_bus_master_process_wake_event(struct sdw_bus *bus)
+{
+	if (!bus)
+		return -EINVAL;
+
+	if (bus->link_ops && bus->link_ops->process_wake_event)
+		return bus->link_ops->process_wake_event(bus);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(sdw_bus_master_process_wake_event);
