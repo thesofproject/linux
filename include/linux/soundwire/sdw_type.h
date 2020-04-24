@@ -21,6 +21,8 @@ static inline int is_sdw_slave(const struct device *dev)
 int __sdw_register_driver(struct sdw_driver *drv, struct module *owner);
 void sdw_unregister_driver(struct sdw_driver *drv);
 
+int sdw_slave_uevent(struct device *dev, struct kobj_uevent_env *env);
+
 /**
  * module_sdw_driver() - Helper macro for registering a Soundwire driver
  * @__sdw_driver: soundwire slave driver struct
@@ -32,5 +34,4 @@ void sdw_unregister_driver(struct sdw_driver *drv);
 #define module_sdw_driver(__sdw_driver) \
 	module_driver(__sdw_driver, sdw_register_driver, \
 			sdw_unregister_driver)
-
 #endif /* __SOUNDWIRE_TYPES_H */
