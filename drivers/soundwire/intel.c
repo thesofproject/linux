@@ -1427,7 +1427,7 @@ static int intel_master_probe(struct sdw_master_device *md, void *link_ctx)
 	/* use generic bandwidth allocation algorithm */
 	sdw->cdns.bus.compute_params = sdw_compute_params;
 
-	ret = sdw_add_bus_master(&sdw->cdns.bus);
+	ret = sdw_bus_master_add(&sdw->cdns.bus);
 	if (ret) {
 		dev_err(&md->dev, "sdw_add_bus_master fail: %d\n", ret);
 		return ret;
@@ -1586,7 +1586,7 @@ static int intel_master_startup(struct sdw_master_device *md)
 err_interrupt:
 	sdw_cdns_enable_interrupt(&sdw->cdns, false);
 err_init:
-	sdw_delete_bus_master(&sdw->cdns.bus);
+	sdw_bus_master_delete(&sdw->cdns.bus);
 	return ret;
 }
 
@@ -1609,7 +1609,7 @@ static int intel_master_remove(struct sdw_master_device *md)
 		sdw_cdns_enable_interrupt(&sdw->cdns, false);
 		snd_soc_unregister_component(sdw->cdns.dev);
 	}
-	sdw_delete_bus_master(&sdw->cdns.bus);
+	sdw_bus_master_delete(&sdw->cdns.bus);
 
 	return 0;
 }

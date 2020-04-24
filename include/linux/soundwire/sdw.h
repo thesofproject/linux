@@ -887,8 +887,9 @@ struct sdw_bus {
 	int hw_sync_min_links;
 };
 
-int sdw_add_bus_master(struct sdw_bus *bus);
-void sdw_delete_bus_master(struct sdw_bus *bus);
+int sdw_bus_master_add(struct sdw_bus *bus, struct device *parent,
+		       struct fwnode_handle *fwnode);
+void sdw_bus_master_delete(struct sdw_bus *bus);
 
 struct sdw_master_device
 *sdw_master_device_add(struct device *parent,

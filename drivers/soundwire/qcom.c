@@ -843,7 +843,7 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 		goto err_md;
 	}
 
-	ret = sdw_add_bus_master(&ctrl->bus);
+	ret = sdw_bus_master_add(&ctrl->bus, dev, dev->fwnode);
 	if (ret) {
 		dev_err(dev, "Failed to register Soundwire controller (%d)\n",
 			ret);
@@ -862,7 +862,7 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 	return 0;
 
 err_master_add:
-	sdw_delete_bus_master(&ctrl->bus);
+	sdw_bus_master_delete(&ctrl->bus);
 err_md:
 	err = sdw_master_device_del(ctrl->md);
 	if (err < 0) /* log but return initial status */
