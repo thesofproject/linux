@@ -550,6 +550,7 @@ int snd_sof_debugfs_io_item(struct snd_sof_dev *sdev,
 			    const char *name,
 			    enum sof_debugfs_access_type access_type)
 {
+#if IS_ENABLED(SND_SOC_SOF_DEBUG_DSP_IO)
 	struct snd_sof_dfsentry *dfse;
 
 	if (!sdev)
@@ -582,6 +583,7 @@ int snd_sof_debugfs_io_item(struct snd_sof_dev *sdev,
 
 	/* add to dfsentry list */
 	list_add(&dfse->list, &sdev->dfsentry_list);
+#endif
 
 	return 0;
 }

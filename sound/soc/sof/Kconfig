@@ -41,6 +41,15 @@ config SND_SOC_SOF_OF
 	  required to enable i.MX8 devices.
 	  Say Y if you need this option. If unsure select "N".
 
+config SND_SOC_SOF_DEBUG_DSP_IO
+	bool "SOF enable dsp io debugging"
+	default y
+	help
+	  This option enables the dsp io debugging feature that can be used
+	  to gather dsp status, such as trace log, registers and so on.
+	  Say Y if you want to enable dsp io debugging.
+	  If unsure, select "N".
+
 config SND_SOC_SOF_DEBUG_PROBES
 	bool "SOF enable data probing"
 	select SND_SOC_COMPRESS
