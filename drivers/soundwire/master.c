@@ -42,6 +42,17 @@ int sdw_master_device_add(struct sdw_bus *bus, struct device *parent,
 
 	dev_set_name(&md->dev, "sdw-master-%d", bus->link_id);
 
+	if (bus->link_ops && bus->link_ops->driver) {
+		/*
+		 * A driver is only needed for ASoC integration (need
+		 * driver->name) and for link-specific power management
+		 * w/ a pm_dev_ops structure.
+		 *
+		 * The driver needs to be registered by the parent
+		 */
+		md->dev.driver = bus->link_ops->driver;
+	}
+
 	ret = device_register(&md->dev);
 	if (ret) {
 		dev_err(parent, "Failed to add master: ret %d\n", ret);
@@ -50,13 +61,27 @@ int sdw_master_device_add(struct sdw_bus *bus, struct device *parent,
 		 * when release method is invoked.
 		 */
 		put_device(&md->dev);
-		return ret;
+		goto device_register_err;
 	}
 
 	/* add shortcuts to improve code readability/compactness */
 	md->bus = bus;
 	bus->dev = &md->dev;
 
+	if (bus->link_ops && bus->link_ops->add) {
+		ret = bus->link_ops->add(bus, bus->pdata);
+		if (ret < 0) {
+			dev_err(&md->dev,
+				"link_ops add callback failed: %d\n", ret);
+			goto link_add_err;
+		}
+	}
+
+	return ret;
+
+link_add_err:
+	device_unregister(&md->dev);
+device_register_err:
 	return ret;
 }
 
@@ -68,6 +93,18 @@ int sdw_master_device_add(struct sdw_bus *bus, struct device *parent,
  */
 int sdw_master_device_del(struct sdw_bus *bus)
 {
+	int ret;
+
+	if (bus->link_ops && bus->link_ops->del) {
+		ret = bus->link_ops->del(bus);
+		if (ret < 0) {
+			dev_err(bus->dev,
+				"link_ops del callback failed: %d\n",
+				ret);
+			return ret;
+		}
+	}
+
 	device_unregister(bus->dev);
 
 	return 0;
