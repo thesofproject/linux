@@ -1099,7 +1099,6 @@ static int intel_probe(struct platform_device *pdev)
 	sdw->cdns.registers = sdw->link_res->registers;
 	sdw->cdns.instance = sdw->instance;
 	sdw->cdns.msg_count = 0;
-	sdw->cdns.bus.dev = &pdev->dev;
 	sdw->cdns.bus.link_id = pdev->id;
 
 	sdw_cdns_probe(&sdw->cdns);
@@ -1110,7 +1109,8 @@ static int intel_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, sdw);
 
-	ret = sdw_bus_master_add(&sdw->cdns.bus);
+	ret = sdw_bus_master_add(&sdw->cdns.bus, sdw->cdns.dev,
+				 sdw->cdns.dev.fwnode);
 	if (ret) {
 		dev_err(&pdev->dev, "sdw_bus_master_add fail: %d\n", ret);
 		return ret;
