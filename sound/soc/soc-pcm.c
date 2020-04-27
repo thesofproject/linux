@@ -2799,31 +2799,33 @@ int soc_new_pcm(struct snd_soc_pcm_runtime *rtd, int num)
 	}
 
 	if (rtd->dai_link->dynamic || rtd->dai_link->no_pcm) {
-		for_each_rtd_cpu_dais(rtd, i, cpu_dai) {
+		if (rtd->dai_link->dpcm_playback) {
+			stream = SNDRV_PCM_STREAM_PLAYBACK;
 
-			if (rtd->dai_link->dpcm_playback) {
-				stream = SNDRV_PCM_STREAM_PLAYBACK;
-				if (snd_soc_dai_stream_valid(cpu_dai, stream)) {
-					playback = 1;
-				} else if (playback != 0) {
+			for_each_rtd_cpu_dais(rtd, i, cpu_dai)
+				if (!snd_soc_dai_stream_valid(cpu_dai,
+							      stream)) {
 					dev_err(rtd->card->dev,
-						"CPU DAI %s does not support playback\n",
-						cpu_dai->name);
+						"CPU DAI %s for rtd %s does not support playback\n",
+						cpu_dai->name,
+						rtd->dai_link->stream_name);
 					return -EINVAL;
 				}
-			}
+			playback = 1;
+		}
+		if (rtd->dai_link->dpcm_capture) {
+			stream = SNDRV_PCM_STREAM_CAPTURE;
 
-			if (rtd->dai_link->dpcm_capture) {
-				stream = SNDRV_PCM_STREAM_CAPTURE;
-				if (snd_soc_dai_stream_valid(cpu_dai, stream)) {
-					capture = 1;
-				} else if (capture != 0) {
+			for_each_rtd_cpu_dais(rtd, i, cpu_dai)
+				if (!snd_soc_dai_stream_valid(cpu_dai,
+							      stream)) {
 					dev_err(rtd->card->dev,
-						"CPU DAI %s does not support capture\n",
-						cpu_dai->name);
+						"CPU DAI %s for rtd %s does not support capture\n",
+						cpu_dai->name,
+						rtd->dai_link->stream_name);
 					return -EINVAL;
 				}
-			}
+			capture = 1;
 		}
 	} else {
 		/* Adapt stream for codec2codec links */
