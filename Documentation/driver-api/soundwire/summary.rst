@@ -101,7 +101,7 @@ Following is the Bus API to register the SoundWire Bus:
 
 .. code-block:: c
 
-	int sdw_add_bus_master(struct sdw_bus *bus)
+	int sdw_bus_master_add(struct sdw_bus *bus)
 	{
 		if (!bus->dev)
 			return -ENODEV;
