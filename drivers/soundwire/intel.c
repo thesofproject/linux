@@ -11,14 +11,15 @@
 #include <linux/module.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
-#include <linux/platform_device.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
 #include <linux/soundwire/sdw_registers.h>
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_intel.h>
-#include "cadence_master.h"
+#include <linux/soundwire/sdw_type.h>
 #include "bus.h"
+#include "cadence_master.h"
+#include "intel_master.h"
 #include "intel.h"
 
 /* Intel SHIM Registers Definition */
@@ -92,21 +93,10 @@
 #define SDW_ALH_STRMZCFG_DMAT		GENMASK(7, 0)
 #define SDW_ALH_STRMZCFG_CHN		GENMASK(19, 16)
 
-#define SDW_INTEL_QUIRK_MASK_BUS_DISABLE	BIT(1)
-
 enum intel_pdi_type {
 	INTEL_PDI_IN = 0,
 	INTEL_PDI_OUT = 1,
 	INTEL_PDI_BD = 2,
-};
-
-struct sdw_intel {
-	struct sdw_cdns cdns;
-	int instance;
-	struct sdw_intel_link_res *link_res;
-#ifdef CONFIG_DEBUG_FS
-	struct dentry *debugfs;
-#endif
 };
 
 #define cdns_to_intel(_cdns) container_of(_cdns, struct sdw_intel, cdns)
@@ -1081,45 +1071,81 @@ static int intel_init(struct sdw_intel *sdw)
 }
 
 /*
- * probe and init
+ * probe, startup and remove callbacks
  */
-static int intel_probe(struct platform_device *pdev)
+static int intel_master_probe(struct sdw_intel_master_dev *master_dev)
 {
-	struct sdw_cdns_stream_config config;
+	struct device *dev = sdw_intel_master_to_dev(master_dev);
 	struct sdw_intel *sdw;
+	struct sdw_bus *bus;
 	int ret;
 
-	sdw = devm_kzalloc(&pdev->dev, sizeof(*sdw), GFP_KERNEL);
+	sdw = devm_kzalloc(dev, sizeof(*sdw), GFP_KERNEL);
 	if (!sdw)
 		return -ENOMEM;
 
-	sdw->instance = pdev->id;
-	sdw->link_res = dev_get_platdata(&pdev->dev);
-	sdw->cdns.dev = &pdev->dev;
+	master_dev->pdata = sdw;
+
+	sdw->instance = master_dev->link_id;
+	sdw->link_res = master_dev->link_res;
+	sdw->cdns.dev = dev;
 	sdw->cdns.registers = sdw->link_res->registers;
-	sdw->cdns.instance = sdw->instance;
+	sdw->cdns.instance = master_dev->link_id;
 	sdw->cdns.msg_count = 0;
-	sdw->cdns.bus.dev = &pdev->dev;
-	sdw->cdns.bus.link_id = pdev->id;
+	sdw->cdns.bus.link_id = master_dev->link_id;
 
 	sdw_cdns_probe(&sdw->cdns);
 
 	/* Set property read ops */
+	bus = &sdw->cdns.bus;
 	sdw_intel_ops.read_prop = intel_prop_read;
-	sdw->cdns.bus.ops = &sdw_intel_ops;
+	bus->ops = &sdw_intel_ops;
 
-	platform_set_drvdata(pdev, sdw);
+	/* set driver data, accessed by snd_soc_dai_set_drvdata() */
+	dev_set_drvdata(dev, &sdw->cdns);
 
-	/* 2nd and 3rd arguments are just added for compilation */
-	ret = sdw_bus_master_add(&sdw->cdns.bus, NULL, NULL);
+	ret = sdw_bus_master_add(bus, dev, master_dev->fwnode);
 	if (ret) {
-		dev_err(&pdev->dev, "sdw_bus_master_add fail: %d\n", ret);
+		dev_err(dev, "sdw_add_bus_master fail: %d\n", ret);
 		return ret;
 	}
 
-	if (sdw->cdns.bus.prop.hw_disabled) {
-		dev_info(&pdev->dev, "SoundWire master %d is disabled, ignoring\n",
-			 sdw->cdns.bus.link_id);
+	if (bus->prop.hw_disabled)
+		dev_info(dev,
+			 "SoundWire master %d is disabled, will be ignored\n",
+			 bus->link_id);
+
+	/* Acquire IRQ */
+	ret = request_threaded_irq(sdw->link_res->irq,
+				   sdw_cdns_irq, sdw_cdns_thread,
+				   IRQF_SHARED, KBUILD_MODNAME, &sdw->cdns);
+	if (ret < 0) {
+		dev_err(dev, "unable to request IRQ %d, disabling device\n",
+			sdw->link_res->irq);
+		goto err_init;
+	}
+
+	complete(&master_dev->probe_complete);
+
+	return 0;
+
+err_init:
+	sdw_bus_master_delete(bus);
+	return ret;
+}
+
+static int intel_master_startup(struct sdw_intel_master_dev *master_dev)
+{
+	struct device *dev = sdw_intel_master_to_dev(master_dev);
+	struct sdw_intel *sdw = master_dev->pdata;
+	struct sdw_bus *bus = &sdw->cdns.bus;
+	struct sdw_cdns_stream_config config;
+	int ret;
+
+	if (bus->prop.hw_disabled) {
+		dev_info(dev,
+			 "SoundWire master %d is disabled, ignoring\n",
+			 bus->link_id);
 		return 0;
 	}
 
@@ -1136,33 +1162,23 @@ static int intel_probe(struct platform_device *pdev)
 
 	intel_pdi_ch_update(sdw);
 
-	/* Acquire IRQ */
-	ret = request_threaded_irq(sdw->link_res->irq,
-				   sdw_cdns_irq, sdw_cdns_thread,
-				   IRQF_SHARED, KBUILD_MODNAME, &sdw->cdns);
-	if (ret < 0) {
-		dev_err(sdw->cdns.dev, "unable to grab IRQ %d, disabling device\n",
-			sdw->link_res->irq);
-		goto err_init;
-	}
-
 	ret = sdw_cdns_enable_interrupt(&sdw->cdns, true);
 	if (ret < 0) {
-		dev_err(sdw->cdns.dev, "cannot enable interrupts\n");
+		dev_err(dev, "cannot enable interrupts\n");
 		goto err_init;
 	}
 
 	ret = sdw_cdns_exit_reset(&sdw->cdns);
 	if (ret < 0) {
-		dev_err(sdw->cdns.dev, "unable to exit bus reset sequence\n");
+		dev_err(dev, "unable to exit bus reset sequence\n");
 		goto err_interrupt;
 	}
 
 	/* Register DAIs */
 	ret = intel_register_dai(sdw);
 	if (ret) {
-		dev_err(sdw->cdns.dev, "DAI registration failed: %d\n", ret);
-		snd_soc_unregister_component(sdw->cdns.dev);
+		dev_err(dev, "DAI registration failed: %d\n", ret);
+		snd_soc_unregister_component(dev);
 		goto err_interrupt;
 	}
 
@@ -1172,40 +1188,117 @@ static int intel_probe(struct platform_device *pdev)
 
 err_interrupt:
 	sdw_cdns_enable_interrupt(&sdw->cdns, false);
-	free_irq(sdw->link_res->irq, sdw);
 err_init:
-	sdw_bus_master_delete(&sdw->cdns.bus);
 	return ret;
 }
 
-static int intel_remove(struct platform_device *pdev)
+static void intel_master_remove(struct sdw_intel_master_dev *master_dev)
 {
-	struct sdw_intel *sdw;
+	struct device *dev = sdw_intel_master_to_dev(master_dev);
+	struct sdw_intel *sdw = master_dev->pdata;
+	struct sdw_bus *bus = &sdw->cdns.bus;
 
-	sdw = platform_get_drvdata(pdev);
-
-	if (!sdw->cdns.bus.prop.hw_disabled) {
+	if (!bus->prop.hw_disabled) {
 		intel_debugfs_exit(sdw);
 		sdw_cdns_enable_interrupt(&sdw->cdns, false);
 		free_irq(sdw->link_res->irq, sdw);
-		snd_soc_unregister_component(sdw->cdns.dev);
+		snd_soc_unregister_component(dev);
 	}
-	sdw_bus_master_delete(&sdw->cdns.bus);
+	sdw_bus_master_delete(bus);
+}
+
+static const struct sdw_intel_link_ops intel_master_link_ops = {
+	.startup = intel_master_startup,
+};
+
+#if IS_ENABLED(CONFIG_VIRTUAL_BUS)
+static int intel_master_probe_vdev(struct virtbus_device *vdev)
+{
+
+	struct sdw_intel_master_dev *master_dev =
+		to_sdw_intel_master_dev(vdev);
+
+	return intel_master_probe(master_dev);
+}
+
+static int intel_master_remove_vdev(struct virtbus_device *vdev)
+{
+
+	struct sdw_intel_master_dev *master_dev =
+		to_sdw_intel_master_dev(vdev);
+
+	intel_master_remove(master_dev);
 
 	return 0;
 }
 
-static struct platform_driver sdw_intel_drv = {
-	.probe = intel_probe,
-	.remove = intel_remove,
-	.driver = {
-		.name = "int-sdw",
+static void intel_master_shutdown_vdev(struct virtbus_device *vdev)
+{
+	/* FIXME: what should we do here */
+}
 
-	},
+static const struct virtbus_dev_id intel_master_virtbus_id_table[] = {
+	{"sdw-intel-master"},
+	{},
 };
 
-module_platform_driver(sdw_intel_drv);
+static struct sdw_intel_master_drv intel_master_drv = {
+	.virtbus_drv = {
+		.driver = {
+			.name = "intel-master-virtbus-drv",
+		},
+		.id_table = intel_master_virtbus_id_table,
+		.probe = intel_master_probe_vdev,
+		.remove = intel_master_remove_vdev,
+		.shutdown = intel_master_shutdown_vdev,/* FIXME: is this needed */
+	},
+	.link_ops = &intel_master_link_ops
+};
+
+#else
+
+static int intel_master_probe_pdev(struct platform_device *pdev)
+{
+
+	struct sdw_intel_master_dev *master_dev =
+		to_sdw_intel_master_dev(pdev);
+
+	return intel_master_probe(master_dev);
+}
+
+static int intel_master_remove_pdev(struct platform_device *pdev)
+{
+
+	struct sdw_intel_master_dev *master_dev =
+		to_sdw_intel_master_dev(pdev);
+
+	intel_master_remove(master_dev);
+
+	return 0;
+}
+
+static void intel_master_shutdown_pdev(struct platform_device *pdev)
+{
+	/* FIXME: what should we do here */
+}
+
+static struct sdw_intel_master_drv intel_master_drv = {
+	.platform_drv = {
+		.driver = {
+			.name = "sdw-intel-master",
+		},
+		.probe = intel_master_probe_pdev,
+		.remove = intel_master_remove_pdev,
+		.shutdown = intel_master_shutdown_pdev,/* FIXME: is this needed */
+	},
+	.link_ops = &intel_master_link_ops
+};
+
+#endif
+
+module_sdw_intel_master_driver(intel_master_drv);
 
 MODULE_LICENSE("Dual BSD/GPL");
-MODULE_ALIAS("platform:int-sdw");
+MODULE_ALIAS("virtbus:sdw-intel-master");
+MODULE_ALIAS("platform:sdw-intel-master");
 MODULE_DESCRIPTION("Intel Soundwire Master Driver");
