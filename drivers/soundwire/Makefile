@@ -16,6 +16,9 @@ soundwire-cadence-objs := cadence_master.o
 obj-$(CONFIG_SOUNDWIRE_CADENCE) += soundwire-cadence.o
 
 #Intel driver
+soundwire-intel-master-objs :=	intel_master.o
+obj-$(CONFIG_SOUNDWIRE_INTEL) += soundwire-intel-master.o
+
 soundwire-intel-objs :=	intel.o
 obj-$(CONFIG_SOUNDWIRE_INTEL) += soundwire-intel.o
 
