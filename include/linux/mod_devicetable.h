@@ -249,6 +249,7 @@ struct hda_device_id {
 };
 
 struct sdw_device_id {
+	__u8  class_id;
 	__u16 mfg_id;
 	__u16 part_id;
 	kernel_ulong_t driver_data;

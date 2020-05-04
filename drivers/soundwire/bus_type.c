@@ -14,7 +14,7 @@
  * @drv: SoundWire Slave Driver
  *
  * The match is done by comparing the mfg_id and part_id from the
- * struct sdw_device_id.
+ * struct sdw_device_id. If this fails the class_id will be matched.
  */
 static const struct sdw_device_id *
 sdw_get_device_id(struct sdw_slave *slave, struct sdw_driver *drv)
@@ -24,6 +24,14 @@ sdw_get_device_id(struct sdw_slave *slave, struct sdw_driver *drv)
 	while (id && id->mfg_id) {
 		if (slave->id.mfg_id == id->mfg_id &&
 		    slave->id.part_id == id->part_id)
+			return id;
+		id++;
+	}
+
+	/* try and check if this Slave can be handled by a class driver */
+	id = drv->id_table;
+	while (id && id->class_id) {
+		if (slave->id.class_id == id->class_id)
 			return id;
 		id++;
 	}

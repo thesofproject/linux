@@ -695,8 +695,23 @@ struct sdw_driver {
 	struct device_driver driver;
 };
 
-#define SDW_SLAVE_ENTRY(_mfg_id, _part_id, _drv_data) \
-	{ .mfg_id = (_mfg_id), .part_id = (_part_id), \
+#define SDW_SLAVE_ENTRY(_mfg_id, _part_id, _drv_data)	\
+	{ .mfg_id = (_mfg_id), .part_id = (_part_id),	\
+	  .class_id = 0,				\
+	  .driver_data = (unsigned long)(_drv_data) }
+
+/*
+ * To avoid race conditions with module loading and cases where a
+ * class driver is bound to a device when a better vendor-specific
+ * driver was available but not yet registered, we force an invalid
+ * mfg_id and part_id so that the alias rules will never match an
+ * actual device. The class driver needs to be registered manually,
+ * e.g. with request_module, when all vendor-specific drivers have
+ * already been loaded by kmod/udev rules and registered.
+ */
+#define SDW_SLAVE_CLASS_ENTRY(_class_id, _drv_data)	\
+	{ .mfg_id = 0xffff, .part_id = 0xffff,		\
+	  .class_id = (_class_id),			\
 	  .driver_data = (unsigned long)(_drv_data) }
 
 int sdw_handle_slave_status(struct sdw_bus *bus,
