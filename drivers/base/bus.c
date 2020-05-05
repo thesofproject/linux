@@ -617,7 +617,11 @@ int bus_add_driver(struct device_driver *drv)
 	if (error)
 		goto out_unregister;
 
-	klist_add_tail(&priv->knode_bus, &bus->p->klist_drivers);
+	if (drv->priority)
+		klist_add_head(&priv->knode_bus, &bus->p->klist_drivers);
+	else
+		klist_add_tail(&priv->knode_bus, &bus->p->klist_drivers);
+
 	if (drv->bus->p->drivers_autoprobe) {
 		error = driver_attach(drv);
 		if (error)
