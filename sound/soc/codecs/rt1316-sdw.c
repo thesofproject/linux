@@ -220,6 +220,7 @@ static struct sdw_driver sdw_rt1316_driver = {
 		.name = "sdw-rt1316",
 		.owner = THIS_MODULE,
 		.pm = &rt1316_pm,
+		.priority = 1,
 	},
 	.probe = rt1316_sdw_probe,
 	.ops = &rt1316_slave_ops,
