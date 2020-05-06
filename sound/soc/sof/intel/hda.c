@@ -185,6 +185,10 @@ int hda_sdw_startup(struct snd_sof_dev *sdev)
 {
 	struct sof_intel_hda_dev *hdev;
 
+#if IS_ENABLED(CONFIG_SND_SOC_SDCA)
+	request_module("snd-soc-sdca");
+#endif
+
 	hdev = sdev->pdata->hw_pdata;
 
 	if (!hdev->sdw)
