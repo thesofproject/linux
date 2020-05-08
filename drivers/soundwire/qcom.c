@@ -803,9 +803,6 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 	/* add bus handle */
 	ctrl->md->bus = &ctrl->bus;
 
-	/* the bus uses the sdw_master_device, not the platform device */
-	ctrl->bus.dev = &ctrl->md->dev;
-
 	ctrl->bus.ops = &qcom_swrm_ops;
 	ctrl->bus.port_ops = &qcom_swrm_port_ops;
 	ctrl->bus.compute_params = &qcom_swrm_compute_params;

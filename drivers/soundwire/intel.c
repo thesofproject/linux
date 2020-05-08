@@ -1408,7 +1408,6 @@ static int intel_master_probe(struct sdw_master_device *md, void *link_ctx)
 	sdw->cdns.registers = sdw->link_res->registers;
 	sdw->cdns.instance = md->link_id;
 	sdw->cdns.msg_count = 0;
-	sdw->cdns.bus.dev = &md->dev;
 	sdw->cdns.bus.link_id = md->link_id;
 	sdw->link_res->cdns = &sdw->cdns;
 
