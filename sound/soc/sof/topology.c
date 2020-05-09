@@ -2183,7 +2183,13 @@ static int sof_process_load(struct snd_soc_component *scomp, int index,
 	process->comp.hdr.size = ipc_size;
 	process->comp.hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_COMP_NEW;
 	process->comp.id = swidget->comp_id;
-	process->comp.type = type;
+	if (sdev->fw_ready.version.abi_version >= SOF_ABI_VER(3, 17, 0)) {
+		/* use generic process component if supported */
+		process->comp.type = SOF_COMP_PROCESS;
+		process->comp.subtype = type;
+	} else {
+		process->comp.type = SOF_COMP_PROCESS;
+	}
 	process->comp.pipeline_id = index;
 	process->config.hdr.size = sizeof(process->config);
 
