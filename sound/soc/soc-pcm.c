@@ -265,7 +265,7 @@ static void snd_soc_runtime_action(struct snd_soc_pcm_runtime *rtd,
 	lockdep_assert_held(&rtd->card->pcm_mutex);
 
 	for_each_rtd_dais(rtd, i, dai) {
-		dai->stream_active[stream] += action;
+		snd_soc_dai_stream_activity(dai, stream) += action;
 		snd_soc_component_activity(dai->component) += action;
 	}
 }
@@ -1157,15 +1157,13 @@ static int soc_pcm_hw_free(struct snd_pcm_substream *substream)
 
 	/* clear the corresponding DAIs parameters when going to be inactive */
 	for_each_rtd_dais(rtd, i, dai) {
-		int active = dai->stream_active[substream->stream];
-
 		if (snd_soc_dai_activity(dai) == 1) {
 			dai->rate = 0;
 			dai->channels = 0;
 			dai->sample_bits = 0;
 		}
 
-		if (active == 1)
+		if (snd_soc_dai_stream_activity(dai, substream->stream) == 1)
 			snd_soc_dai_digital_mute(dai, 1, substream->stream);
 	}
 
@@ -2716,6 +2714,8 @@ disconnect:
 static int soc_dpcm_fe_runtime_update(struct snd_soc_pcm_runtime *fe, int new)
 {
 	struct snd_soc_dapm_widget_list *list;
+	struct snd_soc_dai *cpu_dai = asoc_rtd_to_cpu(fe, 0);
+	struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(fe, 0);
 	int stream;
 	int count, paths;
 	int ret;
@@ -2730,7 +2730,7 @@ static int soc_dpcm_fe_runtime_update(struct snd_soc_pcm_runtime *fe, int new)
 		return 0;
 
 	/* only check active links */
-	if (!snd_soc_dai_activity(asoc_rtd_to_cpu(fe, 0)))
+	if (!snd_soc_dai_activity(cpu_dai))
 		return 0;
 
 	/* DAPM sync will call this to update DSP paths */
@@ -2740,13 +2740,14 @@ static int soc_dpcm_fe_runtime_update(struct snd_soc_pcm_runtime *fe, int new)
 	for_each_pcm_streams(stream) {
 
 		/* skip if FE doesn't have playback/capture capability */
-		if (!snd_soc_dai_stream_valid(asoc_rtd_to_cpu(fe, 0),   stream) ||
-		    !snd_soc_dai_stream_valid(asoc_rtd_to_codec(fe, 0), stream))
+		if (!snd_soc_dai_stream_valid(cpu_dai,   stream) ||
+		    !snd_soc_dai_stream_valid(codec_dai, stream))
 			continue;
 
 		/* skip if FE isn't currently playing/capturing */
-		if (!asoc_rtd_to_cpu(fe, 0)->stream_active[stream] ||
-		    !asoc_rtd_to_codec(fe, 0)->stream_active[stream])
+		/* skip if FE isn't currently playing/capturing */
+		if (!snd_soc_dai_stream_activity(cpu_dai,   stream) ||
+		    !snd_soc_dai_stream_activity(codec_dai, stream))
 			continue;
 
 		paths = dpcm_path_get(fe, stream, &list);
