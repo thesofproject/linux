@@ -632,43 +632,17 @@ struct sdw_slave {
 
 #define dev_to_sdw_dev(_dev) container_of(_dev, struct sdw_slave, dev)
 
-struct sdw_link_ops;
-
 /**
  * struct sdw_master_device - SoundWire 'Master Device' representation
  * @dev: Linux device for this Master
  * @bus: Bus handle
- * @link_id: link index as defined by MIPI DisCo specification
  * @pm_runtime_suspended: flag set with the value of pm_runtime_suspended()
  * during system suspend and checked during system resume.
  */
 struct sdw_master_device {
 	struct device dev;
 	struct sdw_bus *bus;
-	int link_id;
 	bool pm_runtime_suspended;
-};
-
-/**
- * struct sdw_link_ops - SoundWire link-specific ops
- * @add: initializations and allocation (hardware may not be enabled yet)
- * @startup: initialization handled after the hardware is enabled, all
- * clock/power dependencies are available
- * @del: free all remaining resources
- * @process_wake_event: handle external wake
- * @driver: raw structure used for name/PM hooks.
- *
- * This optional structure is provided for link specific
- * operations. All members are optional, but if .add() is supported the
- * dual .del() function shall be used to release all resources allocated
- * in .add().
- */
-struct sdw_link_ops {
-	int (*add)(struct sdw_bus *bus, void *link_ctx);
-	int (*startup)(struct sdw_bus *bus);
-	int (*del)(struct sdw_bus *bus);
-	int (*process_wake_event)(struct sdw_bus *bus);
-	struct device_driver *driver;
 };
 
 #define dev_to_sdw_master_device(d)	\
@@ -858,11 +832,6 @@ struct sdw_master_ops {
  * meaningful if multi_link is set. If set to 1, hardware-based
  * synchronization will be used even if a stream only uses a single
  * SoundWire segment.
- * @link_ops: link-specific ops, initialized with sdw_master_device_add()
- * @pdata: private data typically provided with sdw_master_device_add()
- *
- * link_ops can be NULL when link-level initializations and power-management
- * are not desired.
  */
 struct sdw_bus {
 	struct device *dev;
@@ -887,15 +856,11 @@ struct sdw_bus {
 	u32 bank_switch_timeout;
 	bool multi_link;
 	int hw_sync_min_links;
-	struct sdw_link_ops *link_ops;
-	void *pdata;
 };
 
 int sdw_bus_master_add(struct sdw_bus *bus, struct device *parent,
 		       struct fwnode_handle *fwnode);
 void sdw_bus_master_delete(struct sdw_bus *bus);
-int sdw_bus_master_startup(struct sdw_bus *bus);
-int sdw_bus_master_process_wake_event(struct sdw_bus *bus);
 
 /**
  * sdw_port_config: Master or Slave Port configuration

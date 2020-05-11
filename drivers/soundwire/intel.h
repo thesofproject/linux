@@ -50,6 +50,7 @@ struct sdw_intel {
 
 #define SDW_INTEL_QUIRK_MASK_BUS_DISABLE      BIT(1)
 
-extern struct sdw_link_ops sdw_intel_link_ops;
+int intel_master_startup(struct platform_device *pdev);
+int intel_master_process_wakeen_event(struct platform_device *pdev);
 
 #endif /* __SDW_INTEL_LOCAL_H */

@@ -338,7 +338,7 @@ sdw_intel_startup_controller(struct sdw_intel_ctx *ctx)
 		if (link_mask && !(link_mask & BIT(i)))
 			continue;
 
-		sdw_bus_master_startup(&link->cdns->bus);
+		intel_master_startup(link->pdev);
 
 		if (!link->clock_stop_quirks) {
 			/*
@@ -459,7 +459,7 @@ void sdw_intel_process_wakeen_event(struct sdw_intel_ctx *ctx)
 		return;
 
 	list_for_each_entry(link, &ctx->link_list, list)
-		sdw_bus_master_process_wake_event(&link->cdns->bus);
+		intel_master_process_wakeen_event(link->pdev);
 }
 EXPORT_SYMBOL_NS(sdw_intel_process_wakeen_event, SOUNDWIRE_INTEL_INIT);
 

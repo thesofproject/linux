@@ -1410,8 +1410,6 @@ static int intel_master_probe(struct platform_device *pdev)
 	sdw->cdns.bus.compute_params = sdw_compute_params;
 
 	sdw->cdns.bus.link_id = sdw->instance;
-	sdw->cdns.bus.link_ops = &sdw_intel_link_ops;
-	sdw->cdns.bus.pdata = sdw;
 
 	platform_set_drvdata(pdev, sdw);
 
@@ -1438,29 +1436,31 @@ static int intel_master_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int intel_master_startup(struct sdw_bus *bus)
+int intel_master_startup(struct platform_device *pdev)
 {
 	struct sdw_cdns_stream_config config;
 	struct device *dev = &pdev->dev;
 	struct sdw_intel *sdw;
+	struct sdw_bus *bus;
 	int link_flags;
 	bool multi_link;
 	u32 clock_stop_quirks;
 	int ret;
 
-	sdw = bus->pdata;
+	sdw = platform_get_drvdata(pdev);
+	bus = &sdw->cdns.bus;
 
-	if (bus->prop.hw_disabled) {
+	if (sdw->cdns.bus.prop.hw_disabled) {
 		dev_info(dev,
 			 "SoundWire master %d is disabled, ignoring\n",
-			 bus->link_id);
+			 sdw->instance);
 		return 0;
 	}
 
 	link_flags = md_flags >> (bus->link_id * 8);
 	multi_link = !(link_flags & SDW_INTEL_MASTER_DISABLE_MULTI_LINK);
 	if (!multi_link) {
-		dev_dbg(bus->dev, "Multi-link is disabled\n");
+		dev_dbg(&pdev->dev, "Multi-link is disabled\n");
 		bus->multi_link = false;
 	} else {
 		/*
@@ -1601,19 +1601,21 @@ static int intel_master_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static int intel_master_process_wakeen_event(struct sdw_bus *bus)
+int intel_master_process_wakeen_event(struct platform_device *pdev)
 {
-	struct sdw_intel *sdw;
 	struct sdw_slave *slave;
+	struct sdw_intel *sdw;
+	struct sdw_bus *bus;
 	void __iomem *shim;
 	u16 wake_sts;
 
-	sdw = bus->pdata;
+	sdw = platform_get_drvdata(pdev);
+	bus = &sdw->cdns.bus;
 
-	if (bus->prop.hw_disabled) {
-		dev_info(bus->dev,
+	if (sdw->cdns.bus.prop.hw_disabled) {
+		dev_info(&pdev->dev,
 			 "SoundWire master %d is disabled, ignoring\n",
-			 bus->link_id);
+			 sdw->instance);
 		return 0;
 	}
 
@@ -2049,12 +2051,6 @@ static const struct dev_pm_ops intel_pm = {
 	SET_SYSTEM_SLEEP_PM_OPS(intel_suspend, intel_resume)
 	SET_RUNTIME_PM_OPS(intel_suspend_runtime, intel_resume_runtime, NULL)
 };
-
-struct sdw_link_ops sdw_intel_link_ops = {
-	.startup = intel_master_startup,
-	.process_wake_event = intel_master_process_wakeen_event,
-};
-EXPORT_SYMBOL(sdw_intel_link_ops);
 
 static struct platform_driver sdw_intel_drv = {
 	.probe = intel_master_probe,
