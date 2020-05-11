@@ -772,7 +772,7 @@ static int soc_pcm_close(struct snd_pcm_substream *substream)
 	}
 
 	for_each_rtd_components(rtd, i, component)
-		if (!component->active)
+		if (!snd_soc_component_activity(component))
 			pinctrl_pm_select_sleep_state(component->dev);
 
 	return 0;
@@ -866,7 +866,7 @@ static int soc_pcm_open(struct snd_pcm_substream *substream)
 
 	/* Symmetry only applies if we've already got an active stream. */
 	for_each_rtd_dais(rtd, i, dai) {
-		if (dai->active) {
+		if (snd_soc_dai_activity(dai)) {
 			ret = soc_pcm_apply_symmetry(substream, dai);
 			if (ret != 0)
 				goto config_err;
@@ -904,7 +904,7 @@ component_err:
 	}
 
 	for_each_rtd_components(rtd, i, component)
-		if (!component->active)
+		if (!snd_soc_component_activity(component))
 			pinctrl_pm_select_sleep_state(component->dev);
 
 	return ret;
@@ -1160,7 +1160,7 @@ static int soc_pcm_hw_free(struct snd_pcm_substream *substream)
 	for_each_rtd_dais(rtd, i, dai) {
 		int active = dai->stream_active[substream->stream];
 
-		if (dai->active == 1) {
+		if (snd_soc_dai_activity(dai) == 1) {
 			dai->rate = 0;
 			dai->channels = 0;
 			dai->sample_bits = 0;
@@ -1929,7 +1929,7 @@ static int dpcm_apply_symmetry(struct snd_pcm_substream *fe_substream,
 
 	for_each_rtd_cpu_dais (fe, i, fe_cpu_dai) {
 		/* Symmetry only applies if we've got an active stream. */
-		if (fe_cpu_dai->active) {
+		if (snd_soc_dai_activity(fe_cpu_dai)) {
 			err = soc_pcm_apply_symmetry(fe_substream, fe_cpu_dai);
 			if (err < 0)
 				return err;
@@ -1958,7 +1958,7 @@ static int dpcm_apply_symmetry(struct snd_pcm_substream *fe_substream,
 
 		/* Symmetry only applies if we've got an active stream. */
 		for_each_rtd_dais(rtd, i, dai) {
-			if (dai->active) {
+			if (snd_soc_dai_activity(dai)) {
 				err = soc_pcm_apply_symmetry(fe_substream, dai);
 				if (err < 0)
 					return err;
@@ -2731,7 +2731,7 @@ static int soc_dpcm_fe_runtime_update(struct snd_soc_pcm_runtime *fe, int new)
 		return 0;
 
 	/* only check active links */
-	if (!asoc_rtd_to_cpu(fe, 0)->active)
+	if (!snd_soc_dai_activity(asoc_rtd_to_cpu(fe, 0)))
 		return 0;
 
 	/* DAPM sync will call this to update DSP paths */
