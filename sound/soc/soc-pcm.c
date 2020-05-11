@@ -267,7 +267,7 @@ static void snd_soc_runtime_action(struct snd_soc_pcm_runtime *rtd,
 	for_each_rtd_dais(rtd, i, dai) {
 		dai->stream_active[stream] += action;
 		dai->active += action;
-		dai->component->active += action;
+		snd_soc_component_activity(dai->component) += action;
 	}
 }
 

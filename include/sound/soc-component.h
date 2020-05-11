@@ -358,6 +358,7 @@ int snd_soc_component_stream_event(struct snd_soc_component *component,
 				   int event);
 int snd_soc_component_set_bias_level(struct snd_soc_component *component,
 				     enum snd_soc_bias_level level);
+#define snd_soc_component_activity(component)	((component)->active)
 
 #ifdef CONFIG_REGMAP
 void snd_soc_component_init_regmap(struct snd_soc_component *component,
