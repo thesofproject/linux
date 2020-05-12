@@ -212,5 +212,13 @@ struct max98373_priv {
 	bool interleave_mode;
 	unsigned int ch_size;
 	bool tdm_mode;
+	/* variables to support soundwire */
+	struct sdw_slave *slave;
+	bool hw_init;
+	bool pm_init_once;
+	int slot;
+	unsigned int rx_mask;
 };
+
+extern const struct snd_soc_component_driver soc_codec_dev_max98373_sdw;
 #endif

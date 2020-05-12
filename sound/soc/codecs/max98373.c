@@ -875,6 +875,21 @@ static const struct snd_soc_component_driver soc_codec_dev_max98373 = {
 	.non_legacy_dai_naming	= 1,
 };
 
+const struct snd_soc_component_driver soc_codec_dev_max98373_sdw = {
+	.probe			= NULL,
+	.controls		= max98373_snd_controls,
+	.num_controls		= ARRAY_SIZE(max98373_snd_controls),
+	.dapm_widgets		= max98373_dapm_widgets,
+	.num_dapm_widgets	= ARRAY_SIZE(max98373_dapm_widgets),
+	.dapm_routes		= max98373_audio_map,
+	.num_dapm_routes	= ARRAY_SIZE(max98373_audio_map),
+	.idle_bias_on		= 1,
+	.use_pmdown_time	= 1,
+	.endianness		= 1,
+	.non_legacy_dai_naming	= 1,
+};
+EXPORT_SYMBOL_GPL(soc_codec_dev_max98373_sdw);
+
 static const struct regmap_config max98373_regmap = {
 	.reg_bits = 16,
 	.val_bits = 8,
