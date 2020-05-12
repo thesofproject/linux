@@ -241,7 +241,7 @@ static int snd_sof_fw_ext_man_parse(struct snd_sof_dev *sdev,
 		    elem_hdr->size > remaining) {
 			dev_err(sdev->dev, "error: invalid sof_ext_man header size, type %d size 0x%X\n",
 				elem_hdr->type, elem_hdr->size);
-			break;
+			return -EINVAL;
 		}
 
 		/* process structure data */
@@ -264,7 +264,7 @@ static int snd_sof_fw_ext_man_parse(struct snd_sof_dev *sdev,
 		if (ret < 0) {
 			dev_err(sdev->dev, "error: failed to parse sof_ext_man header type %d size 0x%X\n",
 				elem_hdr->type, elem_hdr->size);
-			break;
+			return ret;
 		}
 
 		remaining -= elem_hdr->size;
@@ -273,10 +273,10 @@ static int snd_sof_fw_ext_man_parse(struct snd_sof_dev *sdev,
 
 	if (remaining) {
 		dev_err(sdev->dev, "error: sof_ext_man header is inconsistent\n");
-		ret = -EINVAL;
+		return -EINVAL;
 	}
 
-	return ret ? ext_man_size : ret;
+	return ext_man_size;
 }
 
 /*
