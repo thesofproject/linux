@@ -92,21 +92,10 @@
 #define SDW_ALH_STRMZCFG_DMAT		GENMASK(7, 0)
 #define SDW_ALH_STRMZCFG_CHN		GENMASK(19, 16)
 
-#define SDW_INTEL_QUIRK_MASK_BUS_DISABLE	BIT(1)
-
 enum intel_pdi_type {
 	INTEL_PDI_IN = 0,
 	INTEL_PDI_OUT = 1,
 	INTEL_PDI_BD = 2,
-};
-
-struct sdw_intel {
-	struct sdw_cdns cdns;
-	int instance;
-	struct sdw_intel_link_res *link_res;
-#ifdef CONFIG_DEBUG_FS
-	struct dentry *debugfs;
-#endif
 };
 
 #define cdns_to_intel(_cdns) container_of(_cdns, struct sdw_intel, cdns)
@@ -1083,9 +1072,8 @@ static int intel_init(struct sdw_intel *sdw)
 /*
  * probe and init
  */
-static int intel_probe(struct platform_device *pdev)
+static int intel_bus_probe(struct platform_device *pdev)
 {
-	struct sdw_cdns_stream_config config;
 	struct sdw_intel *sdw;
 	int ret;
 
@@ -1094,9 +1082,7 @@ static int intel_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	sdw->instance = pdev->id;
-	sdw->link_res = dev_get_platdata(&pdev->dev);
 	sdw->cdns.dev = &pdev->dev;
-	sdw->cdns.registers = sdw->link_res->registers;
 	sdw->cdns.instance = sdw->instance;
 	sdw->cdns.msg_count = 0;
 	sdw->cdns.bus.link_id = pdev->id;
@@ -1115,9 +1101,29 @@ static int intel_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	if (sdw->cdns.bus.prop.hw_disabled) {
-		dev_info(&pdev->dev, "SoundWire master %d is disabled, ignoring\n",
+	if (sdw->cdns.bus.prop.hw_disabled)
+		dev_info(&pdev->dev,
+			 "SoundWire master %d is disabled, ignoring\n",
 			 sdw->cdns.bus.link_id);
+
+	/* set driver data, accessed by snd_soc_dai_set_drvdata() */
+	dev_set_drvdata(sdw->cdns.bus.dev, &sdw->cdns);
+
+	return 0;
+}
+
+int intel_master_startup(struct platform_device *pdev)
+{
+	struct sdw_cdns_stream_config config;
+	struct sdw_intel *sdw;
+	int ret;
+
+	sdw = platform_get_drvdata(pdev);
+
+	if (sdw->cdns.bus.prop.hw_disabled) {
+		dev_info(&pdev->dev,
+			 "SoundWire master %d is disabled, ignoring\n",
+			 sdw->instance);
 		return 0;
 	}
 
@@ -1134,25 +1140,15 @@ static int intel_probe(struct platform_device *pdev)
 
 	intel_pdi_ch_update(sdw);
 
-	/* Acquire IRQ */
-	ret = request_threaded_irq(sdw->link_res->irq,
-				   sdw_cdns_irq, sdw_cdns_thread,
-				   IRQF_SHARED, KBUILD_MODNAME, &sdw->cdns);
-	if (ret < 0) {
-		dev_err(sdw->cdns.dev, "unable to grab IRQ %d, disabling device\n",
-			sdw->link_res->irq);
-		goto err_init;
-	}
-
 	ret = sdw_cdns_enable_interrupt(&sdw->cdns, true);
 	if (ret < 0) {
-		dev_err(sdw->cdns.dev, "cannot enable interrupts\n");
+		dev_err(&pdev->dev, "cannot enable interrupts\n");
 		goto err_init;
 	}
 
 	ret = sdw_cdns_exit_reset(&sdw->cdns);
 	if (ret < 0) {
-		dev_err(sdw->cdns.dev, "unable to exit bus reset sequence\n");
+		dev_err(&pdev->dev, "unable to exit bus reset sequence\n");
 		goto err_interrupt;
 	}
 
@@ -1170,13 +1166,11 @@ static int intel_probe(struct platform_device *pdev)
 
 err_interrupt:
 	sdw_cdns_enable_interrupt(&sdw->cdns, false);
-	free_irq(sdw->link_res->irq, sdw);
 err_init:
-	sdw_bus_master_delete(&sdw->cdns.bus);
 	return ret;
 }
 
-static int intel_remove(struct platform_device *pdev)
+static int intel_bus_remove(struct platform_device *pdev)
 {
 	struct sdw_intel *sdw;
 
@@ -1194,10 +1188,10 @@ static int intel_remove(struct platform_device *pdev)
 }
 
 static struct platform_driver sdw_intel_drv = {
-	.probe = intel_probe,
-	.remove = intel_remove,
+	.probe = intel_bus_probe,
+	.remove = intel_bus_remove,
 	.driver = {
-		.name = "int-sdw",
+		.name = "intel-sdw-bus",
 
 	},
 };
@@ -1205,5 +1199,5 @@ static struct platform_driver sdw_intel_drv = {
 module_platform_driver(sdw_intel_drv);
 
 MODULE_LICENSE("Dual BSD/GPL");
-MODULE_ALIAS("platform:int-sdw");
-MODULE_DESCRIPTION("Intel Soundwire Master Driver");
+MODULE_ALIAS("sdw:intel-sdw-bus");
+MODULE_DESCRIPTION("Intel Soundwire Bus Driver");

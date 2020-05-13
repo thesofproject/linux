@@ -15,6 +15,7 @@
  * @irq: Interrupt line
  * @ops: Shim callback ops
  * @dev: device implementing hw_params and free callbacks
+ * @clock_stop_quirks: mask defining requested behavior on pm_suspend
  */
 struct sdw_intel_link_res {
 	struct platform_device *pdev;
@@ -25,6 +26,20 @@ struct sdw_intel_link_res {
 	int irq;
 	const struct sdw_intel_ops *ops;
 	struct device *dev;
+	u32 clock_stop_quirks;
 };
+
+struct sdw_intel {
+	struct sdw_cdns cdns;
+	int instance;
+	struct sdw_intel_link_res *link_res;
+#ifdef CONFIG_DEBUG_FS
+	struct dentry *debugfs;
+#endif
+};
+
+#define SDW_INTEL_QUIRK_MASK_BUS_DISABLE      BIT(1)
+
+int intel_master_startup(struct platform_device *pdev);
 
 #endif /* __SDW_INTEL_LOCAL_H */
