@@ -345,11 +345,9 @@ int snd_sof_device_remove(struct device *dev)
 	int ret;
 
 	ret = snd_sof_dsp_power_down_notify(sdev);
-	if (ret < 0) {
-		dev_err(dev, "error: %d failed to prepare DSP for device removal",
-			ret);
-		return ret;
-	}
+	if (ret < 0)
+		dev_warn(dev, "error: %d failed to prepare DSP for device removal",
+			 ret);
 
 	if (IS_ENABLED(CONFIG_SND_SOC_SOF_PROBE_WORK_QUEUE))
 		cancel_work_sync(&sdev->probe_work);
