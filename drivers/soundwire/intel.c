@@ -1580,9 +1580,9 @@ err_init:
 
 static int intel_master_remove(struct platform_device *pdev)
 {
-	struct sdw_intel *sdw = platform_get_drvdata(pdev);
-	struct sdw_bus *bus = &sdw->cdns.bus;
+	struct sdw_intel *sdw;
 
+	sdw = platform_get_drvdata(pdev);
 
 	/*
 	 * Since pm_runtime is already disabled, we don't decrease
@@ -1590,13 +1590,13 @@ static int intel_master_remove(struct platform_device *pdev)
 	 * SDW_INTEL_CLK_STOP_NOT_ALLOWED
 	 */
 
-	if (!bus->prop.hw_disabled) {
+	if (!sdw->cdns.bus.prop.hw_disabled) {
 		intel_debugfs_exit(sdw);
 		sdw_cdns_enable_interrupt(&sdw->cdns, false);
 		snd_soc_unregister_component(sdw->cdns.dev);
 	}
 
-	sdw_bus_master_delete(bus);
+	sdw_bus_master_delete(&sdw->cdns.bus);
 
 	return 0;
 }
