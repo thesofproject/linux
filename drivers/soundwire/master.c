@@ -136,7 +136,7 @@ int sdw_master_device_add(struct sdw_bus *bus, struct device *parent,
 	md->dev.fwnode = fwnode;
 	md->dev.dma_mask = parent->dma_mask;
 
-	dev_set_name(&md->dev, "sdw-master-%d", bus->link_id);
+	dev_set_name(&md->dev, "sdw-master-%d", bus->id);
 
 	ret = device_register(&md->dev);
 	if (ret) {
