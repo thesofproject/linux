@@ -26,8 +26,8 @@
  * can change this without changing anything in the firmware of the remote
  * processor.
  */
-#define MAX_RPMSG_NUM_BUFS	512
-#define MAX_RPMSG_BUF_SIZE	512
+#define MAX_RPMSG_NUM_BUFS	(512 / 32)
+#define MAX_RPMSG_BUF_SIZE	(512 * 32)
 
 /**
  * struct rpmsg_hdr - common header for all rpmsg messages
