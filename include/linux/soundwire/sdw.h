@@ -832,6 +832,7 @@ struct sdw_master_ops {
  * @dev: hortcut to &bus->md->dev. Also used as parent to create Master device
  * before Master device is created.
  * @link_id: Link id number, can be 0 to N, unique for each Master
+ * @id: Unique id for each bus
  * @slaves: list of Slaves on this bus
  * @assigned: Bitmap for Slave device numbers.
  * Bit set implies used number, bit clear implies unused number.
@@ -866,6 +867,7 @@ struct sdw_master_ops {
 struct sdw_bus {
 	struct device *dev;
 	struct sdw_master_device *md;
+	int id;
 	unsigned int link_id;
 	struct list_head slaves;
 	DECLARE_BITMAP(assigned, SDW_MAX_DEVICES);
