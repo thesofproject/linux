@@ -25,12 +25,12 @@ int sdw_bus_master_add(struct sdw_bus *bus, struct device *parent,
 	struct sdw_master_prop *prop = NULL;
 	int ret;
 
-	if (!bus->dev) {
+	if (!parent) {
 		pr_err("SoundWire parent device is not set\n");
 		return -ENODEV;
 	}
 
-	ret = sdw_master_device_add(bus, bus->dev, bus->dev->fwnode);
+	ret = sdw_master_device_add(bus, parent, fwnode);
 	if (ret) {
 		dev_err(bus->dev, "Failed to add master device at link %d\n",
 			bus->link_id);

@@ -165,9 +165,8 @@ int sdw_master_device_add(struct sdw_bus *bus, struct device *parent,
 
 	/* add shortcuts to improve code readability/compactness */
 	md->bus = bus;
-	bus->md = md;
-	/* Now, Master device is created, point bus->dev to &md->dev */
 	bus->dev = &md->dev;
+	bus->md = md;
 
 	return ret;
 
@@ -197,7 +196,7 @@ int sdw_master_device_del(struct sdw_bus *bus)
 		}
 	}
 
-	device_unregister(&bus->md->dev);
+	device_unregister(bus->dev);
 
 	return ret;
 }

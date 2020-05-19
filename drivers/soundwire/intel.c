@@ -1426,7 +1426,7 @@ static int intel_master_probe(struct sdw_master_device *md, void *link_ctx)
 	/* use generic bandwidth allocation algorithm */
 	sdw->cdns.bus.compute_params = sdw_compute_params;
 
-	ret = sdw_bus_master_add(&sdw->cdns.bus);
+	ret = sdw_bus_master_add(&sdw->cdns.bus, &pdev->dev, pdev->dev.fwnode);
 	if (ret) {
 		dev_err(&md->dev, "sdw_add_bus_master fail: %d\n", ret);
 		return ret;
