@@ -243,5 +243,8 @@ int main(void)
 	DEVID(mhi_device_id);
 	DEVID_FIELD(mhi_device_id, chan);
 
+	DEVID(ancillary_device_id);
+	DEVID_FIELD(ancillary_device_id, name);
+
 	return 0;
 }

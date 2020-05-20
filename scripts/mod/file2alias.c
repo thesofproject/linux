@@ -1364,6 +1364,13 @@ static int do_mhi_entry(const char *filename, void *symval, char *alias)
 {
 	DEF_FIELD_ADDR(symval, mhi_device_id, chan);
 	sprintf(alias, MHI_DEVICE_MODALIAS_FMT, *chan);
+	return 1;
+}
+
+static int do_ancillary_entry(const char *filename, void *symval, char *alias)
+{
+	DEF_FIELD_ADDR(symval, ancillary_device_id, name);
+	sprintf(alias, ANCILLARY_MODULE_PREFIX "%s", *name);
 
 	return 1;
 }
@@ -1442,6 +1449,7 @@ static const struct devtable devtable[] = {
 	{"tee", SIZE_tee_client_device_id, do_tee_entry},
 	{"wmi", SIZE_wmi_device_id, do_wmi_entry},
 	{"mhi", SIZE_mhi_device_id, do_mhi_entry},
+	{"ancillary", SIZE_ancillary_device_id, do_ancillary_entry},
 };
 
 /* Create MODULE_ALIAS() statements.

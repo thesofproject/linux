@@ -838,4 +838,12 @@ struct mhi_device_id {
 	kernel_ulong_t driver_data;
 };
 
+#define ANCILLARY_NAME_SIZE 20
+#define ANCILLARY_MODULE_PREFIX "ancillary:"
+
+struct ancillary_device_id {
+	char name[ANCILLARY_NAME_SIZE];
+	kernel_ulong_t driver_data;
+};
+
 #endif /* LINUX_MOD_DEVICETABLE_H */
