@@ -101,6 +101,7 @@ available subsections can be seen below.
    sync_file
    vfio-mediated-device
    vfio
+   virtual_bus
    xilinx/index
    xillybus
    zorro

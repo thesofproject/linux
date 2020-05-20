@@ -203,4 +203,13 @@ config DA8XX_MSTPRI
 source "drivers/bus/fsl-mc/Kconfig"
 source "drivers/bus/mhi/Kconfig"
 
+config VIRTUAL_BUS
+       tristate "Software based Virtual Bus"
+       help
+	 Provides a software bus for virtual bus drivers to register and
+	 attach virtual bus devices.  It matches driver and device based on a
+	 unique string and calls the driver's probe routine. One example is
+	 SOF (Sound Open Firmware) clients such as audio cards or test
+	 tools needing to connect with the SOF core.
+
 endmenu
