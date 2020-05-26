@@ -420,9 +420,11 @@ EXPORT_SYMBOL_NS(sdw_intel_acpi_scan, SOUNDWIRE_INTEL_INIT);
  * sdw_intel_probe() - SoundWire Intel probe routine
  * @res: resource data
  *
- * This creates SoundWire Master and Slave devices below the controller.
- * All the information necessary is stored in the context, and the res
- * argument pointer can be freed after this step.
+ * This registers a platform device for each Master handled by the controller,
+ * and SoundWire Master and Slave devices will be created by the platform
+ * device probe. All the information necessary is stored in the context, and
+ * the res argument pointer can be freed after this step.
+ * This function will be called after sdw_intel_acpi_scan() by SOF probe.
  */
 struct sdw_intel_ctx
 *sdw_intel_probe(struct sdw_intel_res *res)
@@ -435,6 +437,8 @@ EXPORT_SYMBOL_NS(sdw_intel_probe, SOUNDWIRE_INTEL_INIT);
  * sdw_intel_startup() - SoundWire Intel startup
  * @ctx: SoundWire context allocated in the probe
  *
+ * Startup Intel SoundWire controller. This function will be called after
+ * Intel Audio DSP is powered up.
  */
 int sdw_intel_startup(struct sdw_intel_ctx *ctx)
 {
