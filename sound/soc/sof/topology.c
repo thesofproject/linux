@@ -1336,13 +1336,21 @@ int sof_pipeline_core_enable(struct snd_sof_dev *sdev,
 	} else {
 		pipeline = snd_sof_pipeline_find(sdev, swidget->pipeline_id);
 		if (!pipeline)
-			return -ENOENT;
+			/*
+			 * Virtualisation guest pipelines do not have a
+			 * scheduling component in the host topology graph
+			 */
+			dev_dbg(sdev->dev,
+				"%s(): no pipeline found for widget \"%s\" ID %d pipe %d\n",
+				__func__, swidget->widget->name, swidget->id, swidget->pipeline_id);
 	}
 
-	/* First enable the pipeline core */
-	ret = sof_core_enable(sdev, pipeline->core);
-	if (ret < 0)
-		return ret;
+	if (pipeline) {
+		/* First enable the pipeline core */
+		ret = sof_core_enable(sdev, pipeline->core);
+		if (ret < 0)
+			return ret;
+	}
 
 	return sof_core_enable(sdev, swidget->core);
 }
