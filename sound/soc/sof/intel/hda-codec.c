@@ -22,6 +22,7 @@
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_AUDIO_CODEC)
 #define IDISP_VID_INTEL	0x80860000
+#define HDA_CODEC_GENERIC_MODULE "snd-hda-codec-generic"
 
 /* load the legacy HDA codec driver */
 static int hda_codec_load_module(struct hda_codec *codec)
@@ -32,7 +33,11 @@ static int hda_codec_load_module(struct hda_codec *codec)
 
 	snd_hdac_codec_modalias(&codec->core, alias, sizeof(alias));
 	dev_dbg(&codec->core.dev, "loading codec module: %s\n", module);
-	request_module(module);
+	if (request_module(module) &&
+	    (codec->core.vendor_id & 0xFFFF0000) != IDISP_VID_INTEL) {
+		codec->probe_id = HDA_CODEC_ID_GENERIC;
+		request_module(HDA_CODEC_GENERIC_MODULE);
+	}
 #endif
 	return device_attach(hda_codec_dev(codec));
 }
