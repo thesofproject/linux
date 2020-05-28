@@ -1657,8 +1657,13 @@ match:
 
 			/* convert non BE into BE */
 			dai_link->no_pcm = 1;
-			dai_link->dpcm_playback = 1;
-			dai_link->dpcm_capture = 1;
+
+			/* convert a normal link to a DPCM link */
+			if (!(dai_link->dpcm_playback ||
+			      dai_link->dpcm_capture)) {
+				dai_link->dpcm_playback = 1;
+				dai_link->dpcm_capture = 1;
+			}
 
 			/* override any BE fixups */
 			dai_link->be_hw_params_fixup =
