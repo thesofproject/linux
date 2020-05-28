@@ -233,8 +233,14 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 
 	ret = snd_sof_machine_register(sdev, plat_data);
 	if (ret < 0)
-		goto fw_trace_err;
+		dev_err(sdev->dev,
+			"error: failed to register machine driver %d\n", ret);
 
+	/*
+	 * fall through in case of topology/machine-drv load error and
+	 * keep DSP powered up for debug
+	 */
+fw_trace_err:
 	/*
 	 * Some platforms in SOF, ex: BYT, may not have their platform PM
 	 * callbacks set. Increment the usage count so as to
@@ -248,8 +254,6 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 
 	return 0;
 
-fw_trace_err:
-	snd_sof_free_trace(sdev);
 fw_run_err:
 	snd_sof_fw_unload(sdev);
 fw_load_err:

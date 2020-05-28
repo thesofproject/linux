@@ -2541,11 +2541,13 @@ static int sof_widget_unload(struct snd_soc_component *scomp,
 
 		/* power down the pipeline schedule core */
 		pipeline = swidget->private;
+#define TOPOLOGY_NO_POWER_DOWN 0
+#if TOPOLOGY_NO_POWER_DOWN
 		ret = snd_sof_dsp_core_power_down(sdev, 1 << pipeline->core);
 		if (ret < 0)
 			dev_err(scomp->dev, "error: powering down pipeline schedule core %d\n",
 				pipeline->core);
-
+#endif
 		/* update enabled cores mask */
 		sdev->enabled_cores_mask &= ~(1 << pipeline->core);
 
