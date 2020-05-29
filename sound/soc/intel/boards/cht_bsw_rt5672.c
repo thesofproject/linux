@@ -379,7 +379,7 @@ static int cht_resume_post(struct snd_soc_card *card)
 	return 0;
 }
 
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_BROADWELL)
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_BAYTRAIL)
 /* use space before codec name to simplify card ID, and simplify driver name */
 #define CARD_NAME "bytcht rt5672" /* card name will be 'sof-bytcht rt5672' */
 #define DRIVER_NAME "SOF"

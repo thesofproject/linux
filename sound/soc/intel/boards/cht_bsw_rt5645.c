@@ -479,7 +479,7 @@ static struct snd_soc_dai_link cht_dailink[] = {
 	},
 };
 
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_BROADWELL)
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_BAYTRAIL)
 /* use space before codec name to simplify card ID, and simplify driver name */
 #define CARD_RT5645_NAME "bytcht rt5645" /* card name 'sof-bytcht rt5645' */
 #define CARD_RT5650_NAME "bytcht rt5650" /* card name 'sof-bytcht rt5650' */
