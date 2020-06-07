@@ -511,6 +511,7 @@ static int snd_cml_rt1011_probe(struct platform_device *pdev)
 {
 	struct snd_soc_dai_link_component *rt1011_dais_components;
 	struct snd_soc_codec_conf *rt1011_dais_confs;
+	struct snd_soc_dai_link *dai_link;
 	struct card_private *ctx;
 	struct snd_soc_acpi_mach *mach;
 	const char *platform_name;
@@ -583,11 +584,10 @@ static int snd_cml_rt1011_probe(struct platform_device *pdev)
 		snd_soc_card_cml.codec_conf = rt1011_dais_confs;
 		snd_soc_card_cml.num_configs = SPK_CH;
 
-		for (i = 0; i < ARRAY_SIZE(cml_rt1011_rt5682_dailink); i++) {
-			if (!strcmp(cml_rt1011_rt5682_dailink[i].name,
-					"SSP1-Codec")) {
-				cml_rt1011_rt5682_dailink[i].codecs = rt1011_dais_components;
-				cml_rt1011_rt5682_dailink[i].num_codecs = SPK_CH;
+		for_each_card_prelinks(&snd_soc_card_cml, i, dai_link) {
+			if (!strcmp(dai_link->name, "SSP1-Codec")) {
+				dai_link->codecs = rt1011_dais_components;
+				dai_link->num_codecs = SPK_CH;
 			}
 		}
 	}
