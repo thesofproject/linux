@@ -547,7 +547,7 @@ static int snd_cml_rt1011_probe(struct platform_device *pdev)
 	if (sof_rt1011_quirk & (SOF_RT1011_SPEAKER_TL |
 				SOF_RT1011_SPEAKER_TR)) {
 		for_each_card_prelinks(&snd_soc_card_cml, i, dai_link) {
-			if (!strcmp(cml_rt1011_rt5682_dailink[i].codecs->dai_name,
+			if (!strcmp(dai_link->codecs->dai_name,
 				    CML_RT1011_CODEC_DAI)) {
 				dai_link->codecs = ssp1_codec_4spk;
 				dai_link->num_codecs = ARRAY_SIZE(ssp1_codec_4spk);
