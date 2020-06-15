@@ -9,16 +9,11 @@
 #include <sound/soc.h>
 #include <sound/soc-acpi.h>
 #include "sof_sdw_common.h"
+#include "sof_maxim_common.h"
 
 static const struct snd_soc_dapm_widget mx8373_widgets[] = {
 	SND_SOC_DAPM_SPK("Left Spk", NULL),
 	SND_SOC_DAPM_SPK("Right Spk", NULL),
-};
-
-static const struct snd_soc_dapm_route mx8373_map[] = {
-	/* Speakers */
-	{ "Left Spk", NULL, "mx8373-1 BE_OUT" },
-	{ "Right Spk", NULL, "mx8373-2 BE_OUT" },
 };
 
 static const struct snd_kcontrol_new mx8373_controls[] = {
@@ -51,7 +46,7 @@ static int spk_init(struct snd_soc_pcm_runtime *rtd)
 		return ret;
 	}
 
-	ret = snd_soc_dapm_add_routes(&card->dapm, mx8373_map, 2);
+	ret = snd_soc_dapm_add_routes(&card->dapm, max_98373_dapm_routes, 2);
 	if (ret)
 		dev_err(rtd->dev, "failed to add first SPK map: %d\n", ret);
 
