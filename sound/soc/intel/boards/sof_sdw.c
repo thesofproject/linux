@@ -140,11 +140,11 @@ static struct snd_soc_codec_conf codec_conf[] = {
 	/* two MAX98373s on link1 with different unique id */
 	{
 		.dlc = COMP_CODEC_CONF("sdw:1:19f:8373:0:3"),
-		.name_prefix = "mx8373-1",
+		.name_prefix = "Right",
 	},
 	{
 		.dlc = COMP_CODEC_CONF("sdw:1:19f:8373:0:7"),
-		.name_prefix = "mx8373-2",
+		.name_prefix = "Left",
 	},
 	{
 		.dlc = COMP_CODEC_CONF("sdw:0:25d:5682:0"),
