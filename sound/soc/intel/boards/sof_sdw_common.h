@@ -71,6 +71,9 @@ struct mc_private {
 
 extern unsigned long sof_sdw_quirk;
 
+int sdw_startup(struct snd_pcm_substream *substream);
+void sdw_shutdown(struct snd_pcm_substream *substream);
+
 /* generic HDMI support */
 int sof_sdw_hdmi_init(struct snd_soc_pcm_runtime *rtd);
 

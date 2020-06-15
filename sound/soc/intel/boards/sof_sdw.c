@@ -172,12 +172,12 @@ static struct snd_soc_dai_link_component platform_component[] = {
 };
 
 /* these wrappers are only needed to avoid typecast compilation errors */
-static int sdw_startup(struct snd_pcm_substream *substream)
+int sdw_startup(struct snd_pcm_substream *substream)
 {
 	return sdw_startup_stream(substream);
 }
 
-static void sdw_shutdown(struct snd_pcm_substream *substream)
+void sdw_shutdown(struct snd_pcm_substream *substream)
 {
 	sdw_shutdown_stream(substream);
 }

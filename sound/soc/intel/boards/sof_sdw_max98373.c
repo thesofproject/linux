@@ -53,6 +53,12 @@ static int spk_init(struct snd_soc_pcm_runtime *rtd)
 	return ret;
 }
 
+static const struct snd_soc_ops max_98373_sdw_ops = {
+	.startup = sdw_startup,
+	.trigger = max98373_trigger,
+	.shutdown = sdw_shutdown,
+};
+
 int sof_sdw_mx8373_init(const struct snd_soc_acpi_link_adr *link,
 			struct snd_soc_dai_link *dai_links,
 			struct sof_sdw_codec_info *info,
@@ -61,6 +67,8 @@ int sof_sdw_mx8373_init(const struct snd_soc_acpi_link_adr *link,
 	info->amp_num++;
 	if (info->amp_num == 2)
 		dai_links->init = spk_init;
+
+	dai_links->ops = &max_98373_sdw_ops;
 
 	return 0;
 }
