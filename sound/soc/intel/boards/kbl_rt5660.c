@@ -216,7 +216,7 @@ static void kabylake_rt5660_codec_exit(struct snd_soc_pcm_runtime *rtd)
 	 * so explicitly test if the gpiod is valid
 	 */
 	if (!IS_ERR_OR_NULL(ctx->gpio_lo_mute))
-		gpiod_put(ctx->gpio_lo_mute));
+		gpiod_put(ctx->gpio_lo_mute);
 }
 
 static int kabylake_hdmi_init(struct snd_soc_pcm_runtime *rtd, int device)
