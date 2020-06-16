@@ -1600,14 +1600,15 @@ static int sof_widget_load_pcm(struct snd_soc_component *scomp, int index,
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_tplg_private *private = &tw->priv;
 	struct sof_ipc_comp_host *host;
+	size_t ipc_size = sizeof(*host) + sizeof(swidget->comp_ext);
 	int ret;
 
-	host = kzalloc(sizeof(*host), GFP_KERNEL);
+	host = kzalloc(ipc_size, GFP_KERNEL);
 	if (!host)
 		return -ENOMEM;
 
 	/* configure host comp IPC message */
-	host->comp.hdr.size = sizeof(*host);
+	host->comp.hdr.size = ipc_size;
 	host->comp.hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_COMP_NEW;
 	host->comp.id = swidget->comp_id;
 	host->comp.type = SOF_COMP_HOST;
@@ -1615,6 +1616,11 @@ static int sof_widget_load_pcm(struct snd_soc_component *scomp, int index,
 	host->comp.core = core;
 	host->direction = dir;
 	host->config.hdr.size = sizeof(host->config);
+
+	/* append extended data to the end of the component */
+	memcpy((u8 *)host + sizeof(*host),
+	       &swidget->comp_ext, sizeof(swidget->comp_ext));
+	host->comp.ext_data_offset = sizeof(*host);
 
 	ret = sof_parse_tokens(scomp, host, pcm_tokens,
 			       ARRAY_SIZE(pcm_tokens), private->array,
@@ -1640,7 +1646,7 @@ static int sof_widget_load_pcm(struct snd_soc_component *scomp, int index,
 	swidget->private = host;
 
 	ret = sof_ipc_tx_message(sdev->ipc, host->comp.hdr.cmd, host,
-				 sizeof(*host), r, sizeof(*r));
+				 ipc_size, r, sizeof(*r));
 	if (ret >= 0)
 		return ret;
 err:
