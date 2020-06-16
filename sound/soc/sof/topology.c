@@ -1522,19 +1522,25 @@ static int sof_widget_load_buffer(struct snd_soc_component *scomp, int index,
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_tplg_private *private = &tw->priv;
 	struct sof_ipc_buffer *buffer;
+	size_t ipc_size = sizeof(*buffer) + sizeof(swidget->comp_ext);
 	int ret;
 
-	buffer = kzalloc(sizeof(*buffer), GFP_KERNEL);
+	buffer = kzalloc(ipc_size, GFP_KERNEL);
 	if (!buffer)
 		return -ENOMEM;
 
 	/* configure dai IPC message */
-	buffer->comp.hdr.size = sizeof(*buffer);
+	buffer->comp.hdr.size = ipc_size;
 	buffer->comp.hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_BUFFER_NEW;
 	buffer->comp.id = swidget->comp_id;
 	buffer->comp.type = SOF_COMP_BUFFER;
 	buffer->comp.pipeline_id = index;
 	buffer->comp.core = core;
+
+	/* append extended data to the end of the buffer */
+	memcpy((u8 *)buffer + sizeof(*buffer),
+	       &swidget->comp_ext, sizeof(swidget->comp_ext));
+	buffer->comp.ext_data_offset = sizeof(*buffer);
 
 	ret = sof_parse_tokens(scomp, buffer, buffer_tokens,
 			       ARRAY_SIZE(buffer_tokens), private->array,
@@ -1552,7 +1558,7 @@ static int sof_widget_load_buffer(struct snd_soc_component *scomp, int index,
 	swidget->private = buffer;
 
 	ret = sof_ipc_tx_message(sdev->ipc, buffer->comp.hdr.cmd, buffer,
-				 sizeof(*buffer), r, sizeof(*r));
+				 ipc_size, r, sizeof(*r));
 	if (ret < 0) {
 		dev_err(scomp->dev, "error: buffer %s load failed\n",
 			swidget->widget->name);
