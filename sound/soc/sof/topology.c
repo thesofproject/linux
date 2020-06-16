@@ -1799,20 +1799,26 @@ static int sof_widget_load_mux(struct snd_soc_component *scomp, int index,
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_tplg_private *private = &tw->priv;
 	struct sof_ipc_comp_mux *mux;
+	size_t ipc_size = sizeof(*mux) + sizeof(swidget->comp_ext);
 	int ret;
 
-	mux = kzalloc(sizeof(*mux), GFP_KERNEL);
+	mux = kzalloc(ipc_size, GFP_KERNEL);
 	if (!mux)
 		return -ENOMEM;
 
 	/* configure mux IPC message */
-	mux->comp.hdr.size = sizeof(*mux);
+	mux->comp.hdr.size = ipc_size;
 	mux->comp.hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_COMP_NEW;
 	mux->comp.id = swidget->comp_id;
 	mux->comp.type = SOF_COMP_MUX;
 	mux->comp.pipeline_id = index;
 	mux->comp.core = core;
 	mux->config.hdr.size = sizeof(mux->config);
+
+	/* append extended data to the end of the component */
+	memcpy((u8 *)mux + sizeof(*mux),
+	       &swidget->comp_ext, sizeof(swidget->comp_ext));
+	mux->comp.ext_data_offset = sizeof(*mux);
 
 	ret = sof_parse_tokens(scomp, &mux->config, comp_tokens,
 			       ARRAY_SIZE(comp_tokens), private->array,
@@ -1829,7 +1835,7 @@ static int sof_widget_load_mux(struct snd_soc_component *scomp, int index,
 	swidget->private = mux;
 
 	ret = sof_ipc_tx_message(sdev->ipc, mux->comp.hdr.cmd, mux,
-				 sizeof(*mux), r, sizeof(*r));
+				 ipc_size, r, sizeof(*r));
 	if (ret < 0)
 		kfree(mux);
 
