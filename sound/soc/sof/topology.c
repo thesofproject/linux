@@ -1837,11 +1837,12 @@ static int sof_widget_load_pga(struct snd_soc_component *scomp, int index,
 	struct snd_soc_tplg_private *private = &tw->priv;
 	struct sof_ipc_comp_volume *volume;
 	struct snd_sof_control *scontrol;
+	size_t ipc_size = sizeof(*volume) + sizeof(swidget->comp_ext);
 	int min_step;
 	int max_step;
 	int ret;
 
-	volume = kzalloc(sizeof(*volume), GFP_KERNEL);
+	volume = kzalloc(ipc_size, GFP_KERNEL);
 	if (!volume)
 		return -ENOMEM;
 
@@ -1853,13 +1854,18 @@ static int sof_widget_load_pga(struct snd_soc_component *scomp, int index,
 	}
 
 	/* configure volume IPC message */
-	volume->comp.hdr.size = sizeof(*volume);
+	volume->comp.hdr.size = ipc_size;
 	volume->comp.hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_COMP_NEW;
 	volume->comp.id = swidget->comp_id;
 	volume->comp.type = SOF_COMP_VOLUME;
 	volume->comp.pipeline_id = index;
 	volume->comp.core = core;
 	volume->config.hdr.size = sizeof(volume->config);
+
+	/* append extended data to the end of the component */
+	memcpy((u8 *)volume + sizeof(*volume),
+	       &swidget->comp_ext, sizeof(swidget->comp_ext));
+	volume->comp.ext_data_offset = sizeof(*volume);
 
 	ret = sof_parse_tokens(scomp, volume, volume_tokens,
 			       ARRAY_SIZE(volume_tokens), private->array,
@@ -1895,7 +1901,7 @@ static int sof_widget_load_pga(struct snd_soc_component *scomp, int index,
 	}
 
 	ret = sof_ipc_tx_message(sdev->ipc, volume->comp.hdr.cmd, volume,
-				 sizeof(*volume), r, sizeof(*r));
+				 ipc_size, r, sizeof(*r));
 	if (ret >= 0)
 		return ret;
 err:
