@@ -2067,20 +2067,26 @@ static int sof_widget_load_siggen(struct snd_soc_component *scomp, int index,
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_tplg_private *private = &tw->priv;
 	struct sof_ipc_comp_tone *tone;
+	size_t ipc_size = sizeof(*tone) + sizeof(swidget->comp_ext);
 	int ret;
 
-	tone = kzalloc(sizeof(*tone), GFP_KERNEL);
+	tone = kzalloc(ipc_size, GFP_KERNEL);
 	if (!tone)
 		return -ENOMEM;
 
 	/* configure siggen IPC message */
-	tone->comp.hdr.size = sizeof(*tone);
+	tone->comp.hdr.size = ipc_size;
 	tone->comp.hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_COMP_NEW;
 	tone->comp.id = swidget->comp_id;
 	tone->comp.type = SOF_COMP_TONE;
 	tone->comp.pipeline_id = index;
 	tone->comp.core = core;
 	tone->config.hdr.size = sizeof(tone->config);
+
+	/* append extended data to the end of the component */
+	memcpy((u8 *)tone + sizeof(*tone),
+	       &swidget->comp_ext, sizeof(swidget->comp_ext));
+	tone->comp.ext_data_offset = sizeof(*tone);
 
 	ret = sof_parse_tokens(scomp, tone, tone_tokens,
 			       ARRAY_SIZE(tone_tokens), private->array,
@@ -2107,7 +2113,7 @@ static int sof_widget_load_siggen(struct snd_soc_component *scomp, int index,
 	swidget->private = tone;
 
 	ret = sof_ipc_tx_message(sdev->ipc, tone->comp.hdr.cmd, tone,
-				 sizeof(*tone), r, sizeof(*r));
+				 ipc_size, r, sizeof(*r));
 	if (ret >= 0)
 		return ret;
 err:
