@@ -779,7 +779,10 @@ static int max98373_sdw_set_tdm_slot(struct snd_soc_dai *dai,
 	struct max98373_priv *max98373 =
 		snd_soc_component_get_drvdata(component);
 
-	/* tx_mask is ignored since it's irrelevant for I/V feedback */
+	/* tx_mask is unused since it's irrelevant for I/V feedback */
+	if (tx_mask)
+		return -EINVAL;
+
 	if (!rx_mask && !slots && !slot_width)
 		max98373->tdm_mode = false;
 	else
