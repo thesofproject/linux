@@ -568,8 +568,24 @@ static int snd_cml_rt1011_probe(struct platform_device *pdev)
 	return devm_snd_soc_register_card(&pdev->dev, &snd_soc_card_cml);
 }
 
+static int snd_cml_rt1011_remove(struct platform_device *pdev)
+{
+	struct snd_soc_card *card = platform_get_drvdata(pdev);
+	struct snd_soc_component *component;
+
+	for_each_card_components(card, component) {
+		if (!strcmp(component->name, ssp0_codec[0].name)) {
+			snd_soc_component_set_jack(component, NULL, NULL);
+			break;
+		}
+	}
+
+	return 0;
+}
+
 static struct platform_driver snd_cml_rt1011_rt5682_driver = {
 	.probe = snd_cml_rt1011_probe,
+	.remove = snd_cml_rt1011_remove,
 	.driver = {
 		.name = "cml_rt1011_rt5682",
 		.pm = &snd_soc_pm_ops,
