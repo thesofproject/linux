@@ -133,6 +133,14 @@ static int rt711_rtd_init(struct snd_soc_pcm_runtime *rtd)
 	return ret;
 }
 
+static void rt711_rtd_exit(struct snd_soc_pcm_runtime *rtd)
+{
+	struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(rtd, 0);
+	struct snd_soc_component *component = codec_dai->component;
+
+	device_remove_properties(component->dev);
+}
+
 int sof_sdw_rt711_init(const struct snd_soc_acpi_link_adr *link,
 		       struct snd_soc_dai_link *dai_links,
 		       struct sof_sdw_codec_info *info,
@@ -152,6 +160,7 @@ int sof_sdw_rt711_init(const struct snd_soc_acpi_link_adr *link,
 		return ret;
 
 	dai_links->init = rt711_rtd_init;
+	dai_links->exit = rt711_rtd_exit;
 
 	return 0;
 }
