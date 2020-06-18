@@ -160,6 +160,13 @@ static int cml_rt5682_codec_init(struct snd_soc_pcm_runtime *rtd)
 	return ret;
 };
 
+static void cml_rt5682_codec_exit(struct snd_soc_pcm_runtime *rtd)
+{
+	struct snd_soc_component *component = asoc_rtd_to_codec(rtd, 0)->component;
+
+	snd_soc_component_set_jack(component, NULL, NULL);
+}
+
 static int cml_rt1011_spk_init(struct snd_soc_pcm_runtime *rtd)
 {
 	int ret = 0;
@@ -421,6 +428,7 @@ static struct snd_soc_dai_link cml_rt1011_rt5682_dailink[] = {
 		.name = "SSP0-Codec",
 		.id = 0,
 		.init = cml_rt5682_codec_init,
+		.exit = cml_rt5682_codec_exit,
 		.ignore_pmdown_time = 1,
 		.ops = &cml_rt5682_ops,
 		.dpcm_playback = 1,
@@ -568,24 +576,8 @@ static int snd_cml_rt1011_probe(struct platform_device *pdev)
 	return devm_snd_soc_register_card(&pdev->dev, &snd_soc_card_cml);
 }
 
-static int snd_cml_rt1011_remove(struct platform_device *pdev)
-{
-	struct snd_soc_card *card = platform_get_drvdata(pdev);
-	struct snd_soc_component *component;
-
-	for_each_card_components(card, component) {
-		if (!strcmp(component->name, ssp0_codec[0].name)) {
-			snd_soc_component_set_jack(component, NULL, NULL);
-			break;
-		}
-	}
-
-	return 0;
-}
-
 static struct platform_driver snd_cml_rt1011_rt5682_driver = {
 	.probe = snd_cml_rt1011_probe,
-	.remove = snd_cml_rt1011_remove,
 	.driver = {
 		.name = "cml_rt1011_rt5682",
 		.pm = &snd_soc_pm_ops,
