@@ -731,7 +731,7 @@ static struct snd_soc_dai_driver max98373_dai[] = {
 	}
 };
 
-static void max98373_reset(struct max98373_priv *max98373, struct device *dev)
+void max98373_reset(struct max98373_priv *max98373, struct device *dev)
 {
 	int ret, reg, count;
 
@@ -757,6 +757,7 @@ static void max98373_reset(struct max98373_priv *max98373, struct device *dev)
 	}
 	dev_err(dev, "Reset failed. (ret:%d)\n", ret);
 }
+EXPORT_SYMBOL_GPL(max98373_reset);
 
 static int max98373_probe(struct snd_soc_component *component)
 {
@@ -899,11 +900,10 @@ static const struct regmap_config max98373_regmap = {
 	.cache_type = REGCACHE_RBTREE,
 };
 
-static void max98373_slot_config(struct i2c_client *i2c,
-	struct max98373_priv *max98373)
+void max98373_slot_config(struct device *dev,
+			  struct max98373_priv *max98373)
 {
 	int value;
-	struct device *dev = &i2c->dev;
 
 	if (!device_property_read_u32(dev, "maxim,vmon-slot-no", &value))
 		max98373->v_slot = value & 0xF;
@@ -935,6 +935,7 @@ static void max98373_slot_config(struct i2c_client *i2c,
 	else
 		max98373->spkfb_slot = 2;
 }
+EXPORT_SYMBOL_GPL(max98373_slot_config);
 
 static int max98373_i2c_probe(struct i2c_client *i2c,
 	const struct i2c_device_id *id)
@@ -969,7 +970,7 @@ static int max98373_i2c_probe(struct i2c_client *i2c,
 	}
 
 	/* voltage/current slot & gpio configuration */
-	max98373_slot_config(i2c, max98373);
+	max98373_slot_config(&i2c->dev, max98373);
 
 	/* Power on device */
 	if (gpio_is_valid(max98373->reset_gpio)) {
