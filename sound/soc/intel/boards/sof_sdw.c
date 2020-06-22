@@ -910,7 +910,7 @@ DMIC:
 	return 0;
 }
 
-int sof_sdw_card_late_probe(struct snd_soc_card *card)
+static int sof_sdw_card_late_probe(struct snd_soc_card *card)
 {
 	int i, ret;
 
