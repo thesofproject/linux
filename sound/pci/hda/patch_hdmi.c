@@ -952,6 +952,26 @@ static int hdmi_setup_stream(struct hda_codec *codec, hda_nid_t cvt_nid,
 	return 0;
 }
 
+static int hdmi_choose_cvt_nopin(struct hda_codec *codec,
+				 int pcm_idx, int *cvt_id)
+{
+	struct hdmi_spec *spec = codec->spec;
+	struct hdmi_spec_per_cvt *per_cvt;
+
+	if (pcm_idx >= spec->num_cvts)
+		return -EINVAL;
+
+	per_cvt = get_cvt(spec, pcm_idx);
+
+	if (per_cvt->assigned)
+		return -EBUSY;
+
+	if (cvt_id)
+		*cvt_id = pcm_idx;
+
+	return 0;
+}
+
 /* Try to find an available converter
  * If pin_idx is less then zero, just try to find an available converter.
  * Otherwise, try to find an available converter and get the cvt mux index
@@ -1162,7 +1182,9 @@ static int hdmi_pcm_open_no_pin(struct hda_pcm_stream *hinfo,
 	if (pcm_idx < 0)
 		return -EINVAL;
 
-	err = hdmi_choose_cvt(codec, -1, &cvt_idx);
+	err = hdmi_choose_cvt_nopin(codec, pcm_idx, &cvt_idx);
+	if (err)
+		err = hdmi_choose_cvt(codec, -1, &cvt_idx);
 	if (err)
 		return err;
 
