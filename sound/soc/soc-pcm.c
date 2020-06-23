@@ -208,6 +208,7 @@ static inline void dpcm_remove_debugfs_state(struct snd_soc_dpcm *dpcm)
  * PCM runtime components
  * @rtd: ASoC PCM runtime that is activated
  * @stream: Direction of the PCM stream
+ * @action: increment (1) or decrement (-1) active counts
  *
  * Increments/Decrements the active count for all the DAIs and components
  * attached to a PCM runtime.
