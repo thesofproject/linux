@@ -156,7 +156,7 @@ static int intel_wait_bit(void __iomem *base, int offset, u32 mask, u32 target)
 			return 0;
 
 		timeout--;
-		udelay(50);
+		usleep_range(50, 100);
 	} while (timeout != 0);
 
 	return -EAGAIN;
