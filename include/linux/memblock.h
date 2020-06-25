@@ -507,6 +507,13 @@ void memblock_dump_all(void);
  */
 void memblock_set_current_limit(phys_addr_t limit);
 
+#ifdef CONFIG_MEMBLOCK_MEMSIZE
+extern void __init_memblock memblock_memsize_record(const char *name,
+		phys_addr_t base, phys_addr_t size, bool nomap, bool reusable);
+#else
+static inline void __init_memblock memblock_memsize_record(const char *name,
+		phys_addr_t base, phys_addr_t size, bool nomap, bool reusable) { }
+#endif
 
 phys_addr_t memblock_get_current_limit(void);
 
