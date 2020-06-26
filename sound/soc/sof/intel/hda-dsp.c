@@ -412,8 +412,7 @@ static int hda_dsp_set_D0_state(struct snd_sof_dev *sdev,
 		 * But it can be kept enabled when the DSP enters D0I3 while the
 		 * system is in S0 for debug.
 		 */
-		if (hda_enable_trace_D0I3_S0 &&
-		    sdev->system_suspend_target != SOF_SUSPEND_NONE)
+		if (sdev->system_suspend_target != SOF_SUSPEND_NONE)
 			flags = HDA_PM_NO_DMA_TRACE;
 	} else {
 		/* prevent power gating in D0I0 */
