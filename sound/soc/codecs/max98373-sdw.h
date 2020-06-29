@@ -1,5 +1,6 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (c) 2020 Maxim Integrated */
+/* SPDX-License-Identifier: GPL-2.0-only
+ *  Copyright (c) 2020 Maxim Integrated
+ */
 
 #ifndef _MAX98373_SDW_H
 #define _MAX98373_SDW_H
