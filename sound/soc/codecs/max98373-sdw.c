@@ -255,6 +255,9 @@ static int max98373_resume(struct device *dev)
 	struct max98373_priv *max98373 = dev_get_drvdata(dev);
 	unsigned long time;
 
+	if (!slave->unattach_request)
+		goto regmap_sync;
+
 	time = wait_for_completion_timeout(&slave->initialization_complete,
 					   msecs_to_jiffies(2000));
 	if (!time) {
@@ -262,6 +265,8 @@ static int max98373_resume(struct device *dev)
 		return -ETIMEDOUT;
 	}
 
+regmap_sync:
+	slave->unattach_request = 0;
 	regcache_cache_only(max98373->regmap, false);
 	regcache_sync(max98373->regmap);
 
