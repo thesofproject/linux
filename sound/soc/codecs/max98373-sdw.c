@@ -7,7 +7,6 @@
 #include <linux/mod_devicetable.h>
 #include <linux/pm_runtime.h>
 #include <linux/regmap.h>
-#include <linux/slab.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
@@ -15,7 +14,6 @@
 #include <linux/of.h>
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_type.h>
-#include "max98373.h"
 #include "max98373-sdw.h"
 
 struct sdw_stream_data {
