@@ -206,7 +206,7 @@ static int axg_pdm_set_sample_pointer(struct axg_pdm *priv)
 static void axg_pdm_set_channel_mask(struct axg_pdm *priv,
 				     unsigned int channels)
 {
-	unsigned int mask = GENMASK(channels - 1, 0);
+	unsigned int mask = GENMASK((int)channels - 1, 0);
 
 	/* Put all channel in reset */
 	regmap_update_bits(priv->map, PDM_CTRL,
