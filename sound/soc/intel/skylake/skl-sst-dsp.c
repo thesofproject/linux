@@ -52,7 +52,7 @@ unsigned int skl_dsp_get_enabled_cores(struct sst_dsp *ctx)
 	unsigned int core_mask, en_cores_mask;
 	u32 val;
 
-	core_mask = SKL_DSP_CORES_MASK(skl->cores.count);
+	core_mask = SKL_DSP_CORES_MASK((long)skl->cores.count);
 
 	val = sst_dsp_shim_read_unlocked(ctx, SKL_ADSP_REG_ADSPCS);
 
