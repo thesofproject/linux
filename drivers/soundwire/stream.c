@@ -13,8 +13,6 @@
 #include <linux/slab.h>
 #include <linux/soundwire/sdw_registers.h>
 #include <linux/soundwire/sdw.h>
-#include <sound/core.h>
-#include <sound/pcm.h>
 #include <sound/soc.h>
 #include "bus.h"
 
@@ -1856,12 +1854,9 @@ static int set_stream(struct snd_pcm_substream *substream,
 
 	/* Set stream pointer on all DAIs */
 	for_each_rtd_dais(rtd, i, dai) {
-		ret = snd_soc_dai_set_sdw_stream(dai, sdw_stream,
-						 substream->stream);
+		ret = snd_soc_dai_set_sdw_stream(dai, sdw_stream, substream->stream);
 		if (ret < 0) {
-			dev_err(rtd->dev,
-				"failed to set stream pointer on dai %s",
-				dai->name);
+			dev_err(rtd->dev, "failed to set stream pointer on dai %s", dai->name);
 			break;
 		}
 	}
@@ -1869,6 +1864,13 @@ static int set_stream(struct snd_pcm_substream *substream,
 	return ret;
 }
 
+/**
+ * sdw_startup_stream() - Startup SoundWire stream
+ *
+ * @stream: Soundwire stream
+ *
+ * Documentation/driver-api/soundwire/stream.rst explains this API in detail
+ */
 int sdw_startup_stream(void *sdw_substream)
 {
 	struct snd_pcm_substream *substream = sdw_substream;
@@ -1887,8 +1889,7 @@ int sdw_startup_stream(void *sdw_substream)
 
 	sdw_stream = sdw_alloc_stream(name);
 	if (!sdw_stream) {
-		dev_err(rtd->dev, "alloc stream failed for substream DAI %s",
-			substream->name);
+		dev_err(rtd->dev, "alloc stream failed for substream DAI %s", substream->name);
 		ret = -ENOMEM;
 		goto error;
 	}
@@ -1907,6 +1908,13 @@ error:
 }
 EXPORT_SYMBOL(sdw_startup_stream);
 
+/**
+ * sdw_shutdown_stream() - Shutdown SoundWire stream
+ *
+ * @stream: Soundwire stream
+ *
+ * Documentation/driver-api/soundwire/stream.rst explains this API in detail
+ */
 void sdw_shutdown_stream(void *sdw_substream)
 {
 	struct snd_pcm_substream *substream = sdw_substream;
