@@ -154,7 +154,7 @@ static void axg_spdifin_write_mode_param(struct regmap *map, int mode,
 	reg = offset * regmap_get_reg_stride(map) + base_reg;
 	shift = width * (num_per_reg - 1 - rem);
 
-	regmap_update_bits(map, reg, GENMASK(width - 1, 0) << shift,
+	regmap_update_bits(map, reg, GENMASK((int)width - 1, 0) << shift,
 			   val << shift);
 }
 
