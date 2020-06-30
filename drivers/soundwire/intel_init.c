@@ -184,7 +184,7 @@ irqreturn_t sdw_intel_thread(int irq, void *dev_id)
 	sdw_intel_enable_irq(ctx->mmio_base, true);
 	return IRQ_HANDLED;
 }
-EXPORT_SYMBOL(sdw_intel_thread);
+EXPORT_SYMBOL_NS(sdw_intel_thread, SOUNDWIRE_INTEL_INIT);
 
 static struct sdw_intel_ctx
 *sdw_intel_probe_controller(struct sdw_intel_res *res)
