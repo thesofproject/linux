@@ -427,7 +427,7 @@ static int ak4458_set_dai_mute(struct snd_soc_dai *dai, int mute)
 		mdelay(ndt);
 	}
 
-	return 0;
+	return ret;
 }
 
 static int ak4458_set_tdm_slot(struct snd_soc_dai *dai, unsigned int tx_mask,
