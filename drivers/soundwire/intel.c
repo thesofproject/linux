@@ -1656,9 +1656,7 @@ int intel_master_process_wakeen_event(struct platform_device *pdev)
 	bus = &sdw->cdns.bus;
 
 	if (bus->prop.hw_disabled) {
-		dev_dbg(dev,
-			"SoundWire master %d is disabled, ignoring\n",
-			bus->link_id);
+		dev_dbg(dev, "SoundWire master %d is disabled, ignoring\n", bus->link_id);
 		return 0;
 	}
 
