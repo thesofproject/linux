@@ -142,7 +142,7 @@ static void omap_mcbsp_st_fir_write(struct omap_mcbsp *mcbsp, s16 *fir)
 
 static void omap_mcbsp_st_chgain(struct omap_mcbsp *mcbsp)
 {
-	u16 w;
+	__maybe_unused u16 w;
 	struct omap_mcbsp_st_data *st_data = mcbsp->st_data;
 
 	w = MCBSP_ST_READ(mcbsp, SSELCR);
