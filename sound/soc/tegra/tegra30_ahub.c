@@ -363,9 +363,9 @@ static const struct {
 	 (TEGRA30_AHUB_##name##_STRIDE * TEGRA30_AHUB_##name##_COUNT) - 4)
 
 #define REG_IN_ARRAY(reg, name) \
-	((reg >= TEGRA30_AHUB_##name) && \
-	 (reg <= LAST_REG(name) && \
-	 (!((reg - TEGRA30_AHUB_##name) % TEGRA30_AHUB_##name##_STRIDE))))
+	(((reg) >= TEGRA30_AHUB_##name) &&	\
+	 ((reg) <= LAST_REG(name) &&					\
+	  (!(((reg) - TEGRA30_AHUB_##name) % TEGRA30_AHUB_##name##_STRIDE))))
 
 static bool tegra30_ahub_apbif_wr_rd_reg(struct device *dev, unsigned int reg)
 {
@@ -396,7 +396,7 @@ static bool tegra30_ahub_apbif_wr_rd_reg(struct device *dev, unsigned int reg)
 		break;
 	}
 
-	if (REG_IN_ARRAY(reg, CHANNEL_CTRL) ||
+	if (REG_IN_ARRAY((int)reg, CHANNEL_CTRL) ||
 	    REG_IN_ARRAY(reg, CHANNEL_CLEAR) ||
 	    REG_IN_ARRAY(reg, CHANNEL_STATUS) ||
 	    REG_IN_ARRAY(reg, CHANNEL_TXFIFO) ||
@@ -466,7 +466,7 @@ static const struct regmap_config tegra30_ahub_apbif_regmap_config = {
 
 static bool tegra30_ahub_ahub_wr_rd_reg(struct device *dev, unsigned int reg)
 {
-	if (REG_IN_ARRAY(reg, AUDIO_RX))
+	if (REG_IN_ARRAY((int)reg, AUDIO_RX))
 		return true;
 
 	return false;
