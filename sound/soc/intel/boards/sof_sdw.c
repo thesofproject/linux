@@ -140,11 +140,11 @@ static struct snd_soc_codec_conf codec_conf[] = {
 	/* two MAX98373s on link1 with different unique id */
 	{
 		.dlc = COMP_CODEC_CONF("sdw:1:19f:8373:0:3"),
-		.name_prefix = "mx8373-1",
+		.name_prefix = "Right",
 	},
 	{
 		.dlc = COMP_CODEC_CONF("sdw:1:19f:8373:0:7"),
-		.name_prefix = "mx8373-2",
+		.name_prefix = "Left",
 	},
 	{
 		.dlc = COMP_CODEC_CONF("sdw:0:25d:5682:0"),
@@ -167,12 +167,12 @@ static struct snd_soc_dai_link_component platform_component[] = {
 };
 
 /* these wrappers are only needed to avoid typecast compilation errors */
-static int sdw_startup(struct snd_pcm_substream *substream)
+int sdw_startup(struct snd_pcm_substream *substream)
 {
 	return sdw_startup_stream(substream);
 }
 
-static void sdw_shutdown(struct snd_pcm_substream *substream)
+void sdw_shutdown(struct snd_pcm_substream *substream)
 {
 	sdw_shutdown_stream(substream);
 }
@@ -214,6 +214,7 @@ static struct sof_sdw_codec_info codec_info_list[] = {
 		.direction = {true, true},
 		.dai_name = "max98373-aif1",
 		.init = sof_sdw_mx8373_init,
+		.codec_card_late_probe = sof_sdw_mx8373_late_probe,
 	},
 	{
 		.id = 0x5682,
@@ -910,12 +911,28 @@ DMIC:
 	return 0;
 }
 
+int sof_sdw_card_late_probe(struct snd_soc_card *card)
+{
+	int i, ret;
+
+	for (i = 0; i < ARRAY_SIZE(codec_info_list); i++) {
+		if (!codec_info_list[i].late_probe)
+			continue;
+
+		ret = codec_info_list[i].codec_card_late_probe(card);
+		if (ret < 0)
+			return ret;
+	}
+
+	return sof_sdw_hdmi_card_late_probe(card);
+}
+
 /* SoC card */
 static const char sdw_card_long_name[] = "Intel Soundwire SOF";
 
 static struct snd_soc_card card_sof_sdw = {
 	.name = "soundwire",
-	.late_probe = sof_sdw_hdmi_card_late_probe,
+	.late_probe = sof_sdw_card_late_probe,
 	.codec_conf = codec_conf,
 	.num_configs = ARRAY_SIZE(codec_conf),
 };

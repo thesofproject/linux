@@ -314,6 +314,9 @@ static int max98373_resume(struct device *dev)
 	struct max98373_priv *max98373 = dev_get_drvdata(dev);
 	unsigned long time;
 
+	if (!slave->unattach_request)
+		goto regmap_sync;
+
 	time = wait_for_completion_timeout(&slave->initialization_complete,
 					   msecs_to_jiffies(2000));
 	if (!time) {
@@ -321,6 +324,8 @@ static int max98373_resume(struct device *dev)
 		return -ETIMEDOUT;
 	}
 
+regmap_sync:
+	slave->unattach_request = 0;
 	regcache_cache_only(max98373->regmap, false);
 	regcache_sync(max98373->regmap);
 
@@ -614,11 +619,16 @@ static int max98373_sdw_dai_hw_params(struct snd_pcm_substream *substream,
 	stream_config.bps = snd_pcm_format_width(params_format(params));
 	stream_config.direction = direction;
 
-	if (max98373->slot) {
+	if (max98373->slot && direction == SDW_DATA_DIR_RX) {
 		stream_config.ch_count = max98373->slot;
 		port_config.ch_mask = max98373->rx_mask;
 	} else {
-		stream_config.ch_count = params_channels(params);
+		/* only IV are supported by capture */
+		if (direction == SDW_DATA_DIR_TX)
+			stream_config.ch_count = 2;
+		else
+			stream_config.ch_count = params_channels(params);
+
 		port_config.ch_mask = GENMASK(stream_config.ch_count - 1, 0);
 	}
 
@@ -774,7 +784,11 @@ static int max98373_sdw_set_tdm_slot(struct snd_soc_dai *dai,
 	struct max98373_priv *max98373 =
 		snd_soc_component_get_drvdata(component);
 
-	if (!tx_mask && !rx_mask && !slots && !slot_width)
+	/* tx_mask is unused since it's irrelevant for I/V feedback */
+	if (tx_mask)
+		return -EINVAL;
+
+	if (!rx_mask && !slots && !slot_width)
 		max98373->tdm_mode = false;
 	else
 		max98373->tdm_mode = true;

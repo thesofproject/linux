@@ -11,7 +11,7 @@
 
 #define MAX_98373_PIN_NAME 16
 
-static const struct snd_soc_dapm_route max_98373_dapm_routes[] = {
+const struct snd_soc_dapm_route max_98373_dapm_routes[] = {
 	/* speaker */
 	{ "Left Spk", NULL, "Left BE_OUT" },
 	{ "Right Spk", NULL, "Right BE_OUT" },
