@@ -66,8 +66,8 @@
 
 extern const unsigned char line6_midi_id[3];
 
-static const int SYSEX_DATA_OFS = sizeof(line6_midi_id) + 3;
-static const int SYSEX_EXTRA_SIZE = sizeof(line6_midi_id) + 4;
+static __maybe_unused const int SYSEX_DATA_OFS = sizeof(line6_midi_id) + 3;
+static __maybe_unused const int SYSEX_EXTRA_SIZE = sizeof(line6_midi_id) + 4;
 
 /*
 	 Common properties of Line 6 devices.
