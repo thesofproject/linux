@@ -1670,18 +1670,13 @@ int intel_master_process_wakeen_event(struct platform_device *pdev)
 	intel_shim_wake(sdw, false);
 
 	/*
-	 * wake up master and slave so that slave can notify master
-	 * the wakeen event and let codec driver check codec status
+	 * resume the Master, which will generate a bus reset and result in
+	 * Slaves re-attaching and be re-enumerated. The SoundWire physical
+	 * device which generated the wake will trigger an interrupt, which
+	 * will in turn cause the corresponding Linux Slave device to be be
+	 * resumed and the Slave codec driver to check the status.
 	 */
-	list_for_each_entry(slave, &bus->slaves, node) {
-		/*
-		 * discard devices that are defined in ACPI tables but
-		 * not physically present and devices that cannot
-		 * generate wakes
-		 */
-		if (slave->dev_num_sticky && slave->prop.wake_capable)
-			pm_request_resume(&slave->dev);
-	}
+	pm_request_resume(dev);
 
 	return 0;
 }
