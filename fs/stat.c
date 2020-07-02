@@ -111,7 +111,7 @@ void generic_fillattr(struct mnt_idmap *idmap, u32 request_mask,
 	}
 
 }
-EXPORT_SYMBOL(generic_fillattr);
+EXPORT_SYMBOL_NS(generic_fillattr, "ANDROID_GKI_VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver");
 
 /**
  * generic_fill_statx_attr - Fill in the statx attributes from the inode flags

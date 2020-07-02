@@ -2866,7 +2866,7 @@ int kern_path(const char *name, unsigned int flags, struct path *path)
 	return ret;
 
 }
-EXPORT_SYMBOL(kern_path);
+EXPORT_SYMBOL_GPL(kern_path);
 
 /**
  * vfs_path_parent_lookup - lookup a parent path relative to a dentry-vfsmount pair
@@ -3495,7 +3495,7 @@ int vfs_create(struct mnt_idmap *idmap, struct inode *dir,
 		fsnotify_create(dir, dentry);
 	return error;
 }
-EXPORT_SYMBOL(vfs_create);
+EXPORT_SYMBOL_NS(vfs_create, "ANDROID_GKI_VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver");
 
 int vfs_mkobj(struct dentry *dentry, umode_t mode,
 		int (*f)(struct dentry *, umode_t, void *),
@@ -4465,7 +4465,7 @@ err:
 	dput(dentry);
 	return ERR_PTR(error);
 }
-EXPORT_SYMBOL(vfs_mkdir);
+EXPORT_SYMBOL_NS(vfs_mkdir, "ANDROID_GKI_VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver");
 
 int do_mkdirat(int dfd, struct filename *name, umode_t mode)
 {
@@ -4561,7 +4561,7 @@ out:
 		d_delete_notify(dir, dentry);
 	return error;
 }
-EXPORT_SYMBOL(vfs_rmdir);
+EXPORT_SYMBOL_NS(vfs_rmdir, "ANDROID_GKI_VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver");
 
 int do_rmdir(int dfd, struct filename *name)
 {
@@ -4690,7 +4690,7 @@ out:
 
 	return error;
 }
-EXPORT_SYMBOL(vfs_unlink);
+EXPORT_SYMBOL_NS(vfs_unlink, "ANDROID_GKI_VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver");
 
 /*
  * Make sure that the actual truncation of the file will occur outside its
@@ -4951,7 +4951,7 @@ int vfs_link(struct dentry *old_dentry, struct mnt_idmap *idmap,
 		fsnotify_link(dir, inode, new_dentry);
 	return error;
 }
-EXPORT_SYMBOL(vfs_link);
+EXPORT_SYMBOL_NS(vfs_link, "ANDROID_GKI_VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver");
 
 /*
  * Hardlinks are often used in delicate situations.  We avoid
@@ -5250,7 +5250,7 @@ out:
 
 	return error;
 }
-EXPORT_SYMBOL(vfs_rename);
+EXPORT_SYMBOL_NS(vfs_rename, "ANDROID_GKI_VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver");
 
 int do_renameat2(int olddfd, struct filename *from, int newdfd,
 		 struct filename *to, unsigned int flags)
