@@ -1648,7 +1648,6 @@ int intel_master_process_wakeen_event(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct sdw_intel *sdw;
 	struct sdw_bus *bus;
-	struct sdw_slave *slave;
 	void __iomem *shim;
 	u16 wake_sts;
 
