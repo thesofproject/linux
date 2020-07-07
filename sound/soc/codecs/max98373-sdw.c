@@ -241,7 +241,7 @@ static const struct regmap_config max98373_sdw_regmap = {
 };
 
 /* Power management functions and structure */
-static int max98373_suspend(struct device *dev)
+static __maybe_unused int max98373_suspend(struct device *dev)
 {
 	struct max98373_priv *max98373 = dev_get_drvdata(dev);
 
@@ -250,7 +250,7 @@ static int max98373_suspend(struct device *dev)
 	return 0;
 }
 
-static int max98373_resume(struct device *dev)
+static __maybe_unused int max98373_resume(struct device *dev)
 {
 	struct sdw_slave *slave = dev_to_sdw_dev(dev);
 	struct max98373_priv *max98373 = dev_get_drvdata(dev);
