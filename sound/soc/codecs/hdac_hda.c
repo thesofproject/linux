@@ -608,7 +608,7 @@ static int hdac_hda_dev_probe(struct hdac_device *hdev)
 static int hdac_hda_dev_remove(struct hdac_device *hdev)
 {
 	/*
-	 * Resources are freed hdac_hda_codec_remove(). This
+	 * Resources are freed in hdac_hda_codec_remove(). This
 	 * function is kept to keep hda_codec_driver_remove() happy.
 	 */
 	return 0;
