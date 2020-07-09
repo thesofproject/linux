@@ -35,6 +35,7 @@ SOC_INTEL_IS_CPU(cht, ATOM_AIRMONT);
 SOC_INTEL_IS_CPU(apl, ATOM_GOLDMONT);
 SOC_INTEL_IS_CPU(glk, ATOM_GOLDMONT_PLUS);
 SOC_INTEL_IS_CPU(cml, KABYLAKE_L);
+SOC_INTEL_IS_CPU(rkl, ROCKETLAKE);
 
 static inline bool soc_intel_is_byt_cr(struct platform_device *pdev)
 {
@@ -110,6 +111,11 @@ static inline bool soc_intel_is_glk(void)
 }
 
 static inline bool soc_intel_is_cml(void)
+{
+	return false;
+}
+
+static inline bool soc_intel_is_rkl(void)
 {
 	return false;
 }
