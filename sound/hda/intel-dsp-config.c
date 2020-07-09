@@ -6,11 +6,13 @@
 #include <linux/dmi.h>
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/platform_device.h>
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_intel.h>
 #include <sound/core.h>
 #include <sound/intel-dsp-config.h>
 #include <sound/intel-nhlt.h>
+#include "../soc/intel/common/soc-intel-quirks.h"
 
 static int dsp_driver;
 
@@ -30,6 +32,7 @@ struct config_entry {
 	u32 flags;
 	u16 device;
 	const struct dmi_system_id *dmi_table;
+	bool (*cpu_id_check)(void);
 };
 
 /*
@@ -289,6 +292,7 @@ static const struct config_entry config_table[] = {
 
 /* Tigerlake */
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_TIGERLAKE)
+	/* TigerLake-LP */
 	{
 		.flags = FLAG_SOF,
 		.device = 0xa0c8,
@@ -305,6 +309,21 @@ static const struct config_entry config_table[] = {
 	{
 		.flags = FLAG_SOF | FLAG_SOF_ONLY_IF_DMIC_OR_SOUNDWIRE,
 		.device = 0xa0c8,
+	},
+	/* TigerLake-H */
+	{
+		.flags = FLAG_SOF,
+		.device = 0x43c8,
+		.dmi_table = (const struct dmi_system_id []) {
+			{
+				.ident = "Dell",
+				.matches = {
+					DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc"),
+				}
+			},
+			{}
+		},
+		.cpu_id_check = soc_intel_is_rkl,
 	},
 #endif
 
@@ -328,6 +347,8 @@ static const struct config_entry *snd_intel_dsp_find_config
 		if (table->device != device)
 			continue;
 		if (table->dmi_table && !dmi_check_system(table->dmi_table))
+			continue;
+		if (table->cpu_id_check && !table->cpu_id_check())
 			continue;
 		return table;
 	}
