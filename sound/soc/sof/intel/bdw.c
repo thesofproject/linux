@@ -370,7 +370,7 @@ static int bdw_send_msg(struct snd_sof_dev *sdev, struct snd_sof_ipc_msg *msg)
 
 static void bdw_get_reply(struct snd_sof_dev *sdev)
 {
-	struct snd_sof_ipc_msg *msg = sdev->msg;
+	struct snd_sof_ipc_msg *msg = &sdev->ipc->msg;
 	struct sof_ipc_reply reply;
 	int ret = 0;
 
@@ -379,7 +379,7 @@ static void bdw_get_reply(struct snd_sof_dev *sdev)
 	 * ipc belongs to none of the ipcs sent from driver.
 	 * In this case, the driver must ignore the ipc.
 	 */
-	if (!msg) {
+	if (msg->ipc_complete) {
 		dev_warn(sdev->dev, "unexpected ipc interrupt raised!\n");
 		return;
 	}

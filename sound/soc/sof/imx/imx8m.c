@@ -32,11 +32,11 @@ struct imx8m_priv {
 
 static void imx8m_get_reply(struct snd_sof_dev *sdev)
 {
-	struct snd_sof_ipc_msg *msg = sdev->msg;
+	struct snd_sof_ipc_msg *msg = &sdev->ipc->msg;
 	struct sof_ipc_reply reply;
 	int ret = 0;
 
-	if (!msg) {
+	if (msg->ipc_complete) {
 		dev_warn(sdev->dev, "unexpected ipc interrupt\n");
 		return;
 	}

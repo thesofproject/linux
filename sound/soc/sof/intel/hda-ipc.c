@@ -67,7 +67,7 @@ int hda_dsp_ipc_send_msg(struct snd_sof_dev *sdev, struct snd_sof_ipc_msg *msg)
 
 void hda_dsp_ipc_get_reply(struct snd_sof_dev *sdev)
 {
-	struct snd_sof_ipc_msg *msg = sdev->msg;
+	struct snd_sof_ipc_msg *msg = &sdev->ipc->msg;
 	struct sof_ipc_reply reply;
 	struct sof_ipc_cmd_hdr *hdr;
 	int ret = 0;
@@ -77,7 +77,7 @@ void hda_dsp_ipc_get_reply(struct snd_sof_dev *sdev)
 	 * ipc belongs to none of the ipcs sent from driver.
 	 * In this case, the driver must ignore the ipc.
 	 */
-	if (!msg) {
+	if (msg->ipc_complete) {
 		dev_warn(sdev->dev, "unexpected ipc interrupt raised!\n");
 		return;
 	}
