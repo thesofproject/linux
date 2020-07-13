@@ -728,18 +728,6 @@ int snd_sof_run_firmware(struct snd_sof_dev *sdev)
 
 	init_waitqueue_head(&sdev->boot_wait);
 
-	/* create read-only fw_version debugfs to store boot version info */
-	if (sdev->first_boot) {
-		ret = snd_sof_debugfs_buf_item(sdev, &sdev->fw_version,
-					       sizeof(sdev->fw_version),
-					       "fw_version", 0444);
-		/* errors are only due to memory allocation, not debugfs */
-		if (ret < 0) {
-			dev_err(sdev->dev, "error: snd_sof_debugfs_buf_item failed\n");
-			return ret;
-		}
-	}
-
 	/* perform pre fw run operations */
 	ret = snd_sof_dsp_pre_fw_run(sdev);
 	if (ret < 0) {
@@ -789,6 +777,18 @@ int snd_sof_run_firmware(struct snd_sof_dev *sdev)
 
 	/* fw boot is complete. Update the active cores mask */
 	sdev->enabled_cores_mask = init_core_mask;
+
+	/* create read-only fw_version debugfs to store boot version info */
+	if (sdev->first_boot) {
+		ret = snd_sof_debugfs_buf_item(sdev, &sdev->fw_version,
+					       sizeof(sdev->fw_version),
+					       "fw_version", 0444);
+		/* errors are only due to memory allocation, not debugfs */
+		if (ret < 0) {
+			dev_err(sdev->dev, "error: snd_sof_debugfs_buf_item failed\n");
+			return ret;
+		}
+	}
 
 	return 0;
 }
