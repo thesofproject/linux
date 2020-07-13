@@ -141,6 +141,7 @@ struct snd_sof_dsp_ops {
 	int (*load_firmware)(struct snd_sof_dev *sof_dev); /* mandatory */
 	int (*load_module)(struct snd_sof_dev *sof_dev,
 			   struct snd_sof_mod_hdr *hdr); /* optional */
+	int firmware_boot_retries;
 	/*
 	 * FW ready checks for ABI compatibility and creates
 	 * memory windows at first boot

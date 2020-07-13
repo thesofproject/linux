@@ -954,6 +954,8 @@ const struct snd_sof_dsp_ops sof_cht_ops = {
 	/*Firmware loading */
 	.load_firmware	= snd_sof_load_firmware_memcpy,
 
+	.firmware_boot_retries = 2,
+
 	/* PM */
 	.suspend = byt_suspend,
 	.resume = byt_resume,

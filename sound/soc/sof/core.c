@@ -139,6 +139,7 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 {
 	struct snd_sof_pdata *plat_data = sdev->pdata;
 	int ret;
+	int tries = 0;
 
 	/* probe the DSP hardware */
 	ret = snd_sof_probe(sdev);
@@ -181,11 +182,13 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 		goto ipc_err;
 	}
 
+fw_load_retry:
 	/* load the firmware */
 	ret = snd_sof_load_firmware(sdev);
 	if (ret < 0) {
 		dev_err(sdev->dev, "error: failed to load DSP firmware %d\n",
 			ret);
+
 		goto fw_load_err;
 	}
 
@@ -199,6 +202,12 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	if (ret < 0) {
 		dev_err(sdev->dev, "error: failed to boot DSP firmware %d\n",
 			ret);
+		/* when the DSP boots but FW_READY fails, tentatively retry */
+		if (ret == -EIO && ++tries < sof_ops(sdev)->firmware_boot_retries) {
+			dev_warn(sdev->dev, "retrying DSP boot, iteration %d\n", tries);
+			goto fw_load_retry;
+		}
+
 		goto fw_run_err;
 	}
 
