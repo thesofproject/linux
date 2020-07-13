@@ -97,7 +97,7 @@ static void byt_get_registers(struct snd_sof_dev *sdev,
 {
 	u32 offset = sdev->dsp_oops_offset;
 
-	/* first read regsisters */
+	/* first read registers */
 	sof_mailbox_read(sdev, offset, xoops, sizeof(*xoops));
 
 	/* note: variable AR register array is not read */
