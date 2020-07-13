@@ -328,7 +328,9 @@ static int byt_run(struct snd_sof_dev *sdev)
 
 	/* release stall and wait to unstall */
 	snd_sof_dsp_update_bits64(sdev, BYT_DSP_BAR, SHIM_CSR,
-				  SHIM_BYT_CSR_STALL, 0x0);
+				  SHIM_BYT_CSR_XT_SNOOP | SHIM_BYT_CSR_STALL,
+				  SHIM_BYT_CSR_XT_SNOOP);
+
 	while (tries--) {
 		if (!(snd_sof_dsp_read64(sdev, BYT_DSP_BAR, SHIM_CSR) &
 		      SHIM_BYT_CSR_PWAITMODE))
