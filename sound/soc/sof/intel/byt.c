@@ -733,6 +733,7 @@ static int byt_acpi_probe(struct snd_sof_dev *sdev)
 		container_of(sdev->dev, struct platform_device, dev);
 	struct resource *mmio;
 	u32 base, size;
+	u32 pmc_status;
 	int ret;
 
 	/* DSP DMA can only access low 31 bits of host memory */
@@ -766,6 +767,36 @@ static int byt_acpi_probe(struct snd_sof_dev *sdev)
 	/* TODO: add offsets */
 	sdev->mmio_bar = BYT_DSP_BAR;
 	sdev->mailbox_bar = BYT_DSP_BAR;
+
+	/* PCI base */
+	mmio = platform_get_resource(pdev, IORESOURCE_MEM,
+				     desc->resindex_pcicfg_base);
+	if (mmio) {
+		base = mmio->start;
+		size = resource_size(mmio);
+	} else {
+		dev_err(sdev->dev, "error: failed to get PCI base at idx %d\n",
+			desc->resindex_pcicfg_base);
+		return -ENODEV;
+	}
+
+	dev_dbg(sdev->dev, "PCI base at 0x%x size 0x%x", base, size);
+	sdev->bar[BYT_PCI_BAR] = devm_ioremap(sdev->dev, base, size);
+	if (!sdev->bar[BYT_PCI_BAR]) {
+		dev_err(sdev->dev,
+			"error: failed to ioremap PCI base 0x%x size 0x%x\n",
+			base, size);
+		return -ENODEV;
+	}
+	dev_dbg(sdev->dev, "PCI VADDR %p\n", sdev->bar[BYT_PCI_BAR]);
+
+	pmc_status = snd_sof_dsp_read(sdev, BYT_PCI_BAR, PCI_PMCS);
+	if (pmc_status & 0x3) {
+		dev_err(sdev->dev, "error: PMC status does not indicated D0 state %x\n",
+			pmc_status);
+		return -ENODEV;
+
+	}
 
 	/* IMR base - optional */
 	if (desc->resindex_imr_base == -1)
