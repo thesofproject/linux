@@ -172,7 +172,6 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 	pcm.params.buffer.size = runtime->dma_bytes;
 	pcm.params.direction = substream->stream;
 	pcm.params.sample_valid_bytes = params_width(params) >> 3;
-	pcm.params.buffer_fmt = SOF_IPC_BUFFER_INTERLEAVED;
 	pcm.params.rate = params_rate(params);
 	pcm.params.channels = params_channels(params);
 	pcm.params.host_period_bytes = params_period_bytes(params);

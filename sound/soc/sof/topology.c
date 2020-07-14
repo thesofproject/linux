@@ -84,7 +84,6 @@ static int ipc_pcm_params(struct snd_sof_widget *swidget, int dir)
 	pcm.params.hdr.size = sizeof(pcm.params);
 	pcm.params.direction = dir;
 	pcm.params.sample_valid_bytes = params_width(params) >> 3;
-	pcm.params.buffer_fmt = SOF_IPC_BUFFER_INTERLEAVED;
 	pcm.params.rate = params_rate(params);
 	pcm.params.channels = params_channels(params);
 	pcm.params.host_period_bytes = params_period_bytes(params);
