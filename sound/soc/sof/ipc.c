@@ -491,12 +491,49 @@ static void ipc_xrun(struct snd_sof_dev *sdev, u32 msg_id)
 #endif
 }
 
+static int kwd_notification_handler(struct snd_sof_dev *sdev, u32 comp_id)
+{
+	int ret = -ENODEV;
+	int direction = SNDRV_PCM_STREAM_CAPTURE;
+	int cmd = SNDRV_PCM_TRIGGER_START;
+	struct snd_sof_pcm *spcm;
+	struct snd_pcm_substream *substream;
+
+	/* Firmware detected a key phrase and is about to start draining.
+	 * Its timme to resume the KWD stream now.
+	 *
+	 * Find correct stream first - KWD stream has suspend_ignored
+	 * attribute assigned.
+	 */
+	list_for_each_entry(spcm, &sdev->pcm_list, list) {
+		if (spcm->stream[direction].suspend_ignored) {
+			substream = spcm->stream[direction].substream;
+			ret = snd_sof_pcm_platform_trigger(sdev,
+							   substream,
+							   cmd);
+			if (ret < 0) {
+				dev_dbg(sdev->dev,
+					"error in %s: failed to trigger substream %s",
+					__func__, substream->name);
+			}
+			break;
+		}
+	}
+	return ret;
+}
+
 static void ipc_component_notification(struct snd_sof_dev *sdev, u32 comp_id)
 {
 	int ret;
 
 	switch (comp_id) {
 	case SOF_COMP_KEYWORD_DETECT:
+		ret = kwd_notification_handler(sdev, comp_id);
+		if (ret < 0) {
+			dev_warn(sdev->dev,
+				 "error %d in %s: failed to handle KWD notification.\n",
+				 ret, __func__);
+		}
 		break;
 	default:
 		dev_warn(sdev->dev,
