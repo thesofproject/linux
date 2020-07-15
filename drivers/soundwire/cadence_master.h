@@ -104,7 +104,6 @@ struct sdw_cdns_dma_data {
  * @bus: Bus handle
  * @instance: instance number
  * @response_buf: SoundWire response buffer
- * @tx_complete: Tx completion
  * @defer: Defer pointer
  * @ports: Data ports
  * @num_ports: Total number of data ports
@@ -120,7 +119,6 @@ struct sdw_cdns {
 	unsigned int instance;
 
 	u32 response_buf[0x80];
-	struct completion tx_complete;
 	struct sdw_defer *defer;
 
 	struct sdw_cdns_port *ports;
@@ -133,8 +131,6 @@ struct sdw_cdns {
 
 	bool link_up;
 	unsigned int msg_count;
-
-	struct work_struct work;
 
 	struct list_head list;
 };
