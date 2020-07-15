@@ -19,6 +19,9 @@
 #include <sound/sof/trace.h>
 #include <uapi/sound/sof/fw.h>
 
+/* Unique IDs for ipc test clients */
+extern struct ida sof_ipc_test_client_ida;
+
 /* debug flags */
 #define SOF_DBG_ENABLE_TRACE	BIT(0)
 #define SOF_DBG_REGS		BIT(1)
@@ -251,6 +254,9 @@ struct snd_sof_dsp_ops {
 	void (*machine_select)(struct snd_sof_dev *sdev); /* optional */
 	void (*set_mach_params)(const struct snd_soc_acpi_mach *mach,
 				struct device *dev); /* optional */
+
+	/* client ops */
+	void (*register_clients)(struct snd_sof_dev *sdev); /* optional */
 
 	/* DAI ops */
 	struct snd_soc_dai_driver *drv;
