@@ -383,6 +383,12 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 			 * and mark the flag to ignore the upcoming DAPM
 			 * PM events.
 			 */
+			ret = snd_sof_pcm_platform_trigger(sdev, substream, cmd);
+			if (ret < 0) {
+				dev_warn(sdev->dev,
+					 "error %d in %s: failed to trigger KWD stream\n",
+					 ret, __func__);
+			}
 			spcm->stream[substream->stream].suspend_ignored = true;
 			return 0;
 		}
