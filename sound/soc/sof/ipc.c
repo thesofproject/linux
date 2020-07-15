@@ -20,6 +20,7 @@
 
 static void ipc_trace_message(struct snd_sof_dev *sdev, u32 msg_id);
 static void ipc_stream_message(struct snd_sof_dev *sdev, u32 msg_cmd);
+static void ipc_component_message(struct snd_sof_dev *sdev, u32 msg_cmd);
 
 /*
  * IPC message Tx/Rx message handling.
@@ -387,7 +388,9 @@ void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev)
 	case SOF_IPC_GLB_COMPOUND:
 	case SOF_IPC_GLB_TPLG_MSG:
 	case SOF_IPC_GLB_PM_MSG:
+		break;
 	case SOF_IPC_GLB_COMP_MSG:
+		ipc_component_message(sdev, hdr.cmd);
 		break;
 	case SOF_IPC_GLB_STREAM_MSG:
 		/* need to pass msg id into the function */
@@ -486,6 +489,40 @@ static void ipc_xrun(struct snd_sof_dev *sdev, u32 msg_id)
 	memcpy(&stream->posn, &posn, sizeof(posn));
 	snd_pcm_stop_xrun(stream->substream);
 #endif
+}
+
+static void ipc_component_notification(struct snd_sof_dev *sdev, u32 comp_id)
+{
+	int ret;
+
+	switch (comp_id) {
+	case SOF_COMP_KEYWORD_DETECT:
+		break;
+	default:
+		dev_warn(sdev->dev,
+			 "warning: unhandled notification for component %x\n",
+			 comp_id);
+		break;
+	}
+}
+
+/* component notifications from DSP FW */
+static void ipc_component_message(struct snd_sof_dev *sdev, u32 msg_cmd)
+{
+	/* get msg cmd type and component id */
+	u32 msg_type = msg_cmd & SOF_CMD_TYPE_MASK;
+	u32 comp_id = SOF_IPC_MESSAGE_ID(msg_cmd);
+
+	switch (msg_type) {
+	case SOF_IPC_COMP_NOTIFICATION:
+		ipc_component_notification(sdev, comp_id);
+		break;
+	default:
+		dev_warn(sdev->dev,
+			 "warning: unhandled component message %x for component %x\n",
+			 msg_type, comp_id);
+		break;
+	}
 }
 
 /* stream notifications from DSP FW */
