@@ -38,6 +38,22 @@
 
 /* Command specific payload bits in secondary register */
 
+/*
+ * Notify firmware Host DMAs have been restarted upon S0ix exit.
+ * When this notification is received, the firmware may initiate DMA transfers.
+ * The Host shall not send this notification before the DMAs are enabled.
+ * Conversely, Firmware shall ignore this notification if it didn't receive
+ * a corresponding STOP_NOTIFICATION.
+ */
+#define HDA_PM_HOST_DMA_RESTART_NOTIFICATION	BIT(6)
+
+/*
+ * Notify firmware Host DMAs will be stopped upon entry in S0ix. When
+ * is notification is received, the firmware shall not initiate any
+ * DMA transfers before it receives the HDA_PCM_HOST_DMA_RESTART_NOTIFICATION.
+ */
+#define HDA_PM_HOST_DMA_STOP_NOTIFICATION	BIT(5)
+
 /* Disable DMA tracing (0 - keep tracing, 1 - to disable DMA trace) */
 #define HDA_PM_NO_DMA_TRACE	BIT(4)
 /* Prevent clock gating (0 - cg allowed, 1 - DSP clock always on) */
