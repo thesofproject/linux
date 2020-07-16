@@ -375,7 +375,6 @@ DEFINE_DEBUGFS_ATTRIBUTE(cdns_hw_reset_fops, NULL, cdns_hw_reset, "%llu\n");
 static int cdns_parity_error_injection(void *data, u64 value)
 {
 	struct sdw_cdns *cdns = data;
-	struct sdw_slave *slave;
 	struct sdw_bus *bus;
 	int ret;
 
