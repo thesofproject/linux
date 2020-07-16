@@ -57,6 +57,37 @@ bool snd_sof_stream_suspend_ignored(struct snd_sof_dev *sdev)
 	return false;
 }
 
+int snd_sof_stream_trigger_suspend_ignored(struct snd_sof_dev *sdev, int cmd)
+{
+	struct snd_pcm_substream *substream;
+	struct snd_sof_pcm *spcm;
+	int dir;
+	int ret = -ENODEV;
+
+	list_for_each_entry(spcm, &sdev->pcm_list, list) {
+		for_each_pcm_streams(dir) {
+			if (!spcm->stream[dir].suspend_ignored)
+				continue;
+
+			substream = spcm->stream[dir].substream;
+
+			if (!substream || !substream->runtime)
+				continue;
+
+			ret = snd_sof_pcm_platform_trigger(sdev,
+							   substream,
+							   cmd);
+			if (ret < 0) {
+				dev_dbg(sdev->dev,
+					"error in %s: failed to trigger substream %s",
+					__func__, substream->name);
+			}
+		}
+	}
+	return ret;
+}
+EXPORT_SYMBOL(snd_sof_stream_trigger_suspend_ignored);
+
 int sof_set_hw_params_upon_resume(struct device *dev)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
