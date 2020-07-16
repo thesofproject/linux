@@ -29,6 +29,12 @@ module_param_named(enable_trace_D0I3_S0, hda_enable_trace_D0I3_S0, bool, 0444);
 MODULE_PARM_DESC(enable_trace_D0I3_S0,
 		 "SOF HDA enable trace when the DSP is in D0I3 in S0");
 #endif
+static bool hda_S0ix_host_dma_stop;
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG)
+module_param_named(S0ix_host_dma_stop, hda_S0ix_host_dma_stop, bool, 0444);
+MODULE_PARM_DESC(S0ix_host_dma_stop,
+		 "SOF HDA force Host DMAs to stop on S0ix entry and restart on S0ix exit");
+#endif
 
 /*
  * DSP Core control.
@@ -379,6 +385,8 @@ static int hda_dsp_update_d0i3c_register(struct snd_sof_dev *sdev, u8 value)
 static int hda_dsp_set_D0_state(struct snd_sof_dev *sdev,
 				const struct sof_dsp_power_state *target_state)
 {
+	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
+	const struct sof_intel_dsp_desc *chip = hda->desc;
 	u32 flags = 0;
 	int ret;
 	u8 value = 0;
@@ -417,9 +425,29 @@ static int hda_dsp_set_D0_state(struct snd_sof_dev *sdev,
 		    !hda_enable_trace_D0I3_S0 ||
 		    sdev->system_suspend_target != SOF_SUSPEND_NONE)
 			flags = HDA_PM_NO_DMA_TRACE;
+
+		/* disable DMAs if needed */
+		if (hda_S0ix_host_dma_stop || chip->S0ix_host_dma_stop_required) {
+			flags |= HDA_PM_HOST_DMA_STOP_NOTIFICATION;
+
+			/* the DMAs are stopped after the PM_GATE IPC */
+		}
 	} else {
 		/* prevent power gating in D0I0 */
 		flags = HDA_PM_PPG;
+
+		/* restart DMAs if needed */
+		if (hda_S0ix_host_dma_stop || chip->S0ix_host_dma_stop_required) {
+			flags |= HDA_PM_HOST_DMA_RESTART_NOTIFICATION;
+
+			ret = snd_sof_stream_trigger_suspend_ignored(sdev, SNDRV_PCM_TRIGGER_START);
+
+			/* on errors we still exit S0ix and try to restart the DSP */
+			if (ret < 0)
+				dev_warn(sdev->dev,
+					 "error: could not TRIGGER_START suspend_ignore streams: %d\n",
+					 ret);
+		}
 	}
 
 	/* update D0I3C register */
@@ -437,6 +465,14 @@ static int hda_dsp_set_D0_state(struct snd_sof_dev *sdev,
 		dev_err(sdev->dev,
 			"error: PM_GATE ipc error %d\n", ret);
 		goto revert;
+	}
+
+	if (flags & HDA_PM_HOST_DMA_STOP_NOTIFICATION) {
+		ret = snd_sof_stream_trigger_suspend_ignored(sdev, SNDRV_PCM_TRIGGER_SUSPEND);
+		if (ret < 0)
+			dev_err(sdev->dev,
+				"error: could not TRIGGER_SUSPEND suspend_ignore streams: %d\n",
+				ret);
 	}
 
 	return ret;
