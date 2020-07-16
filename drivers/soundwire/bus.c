@@ -1271,7 +1271,7 @@ static int sdw_initialize_slave(struct sdw_slave *slave)
 
 static int sdw_handle_dp0_interrupt(struct sdw_slave *slave, u8 *slave_status)
 {
-	u8 clear = 0, impl_int_mask;
+	u8 clear = 0, impl_int_mask, sdca_clear;
 	int status, status2, ret, count = 0;
 
 	status = sdw_read(slave, SDW_DP0_INT);
@@ -1300,6 +1300,49 @@ static int sdw_handle_dp0_interrupt(struct sdw_slave *slave, u8 *slave_status)
 		if (status & SDW_DP0_INT_BRA_FAILURE) {
 			dev_err(&slave->dev, "BRA failed\n");
 			clear |= SDW_DP0_INT_BRA_FAILURE;
+		}
+
+		if (status & SDW_DP0_SDCA_CASCADE) {
+			sdca_clear = sdw_read(slave, SDW_SCP_SDCA_INT1);
+			if (slave->prop.scp_sdca_int_mask1 & sdca_clear) {
+				ret = sdw_write(slave, SDW_SCP_SDCA_INT1,
+						slave->prop.scp_sdca_int_mask1);
+				if (ret < 0) {
+					dev_err(slave->bus->dev,
+						"SDW_SCP_SDCA_INT1 write failed:%d\n", ret);
+					return ret;
+				}
+			}
+			sdca_clear = sdw_read(slave, SDW_SCP_SDCA_INT2);
+			if (slave->prop.scp_sdca_int_mask2 & sdca_clear) {
+				ret = sdw_write(slave, SDW_SCP_SDCA_INT2,
+						slave->prop.scp_sdca_int_mask2);
+				if (ret < 0) {
+					dev_err(slave->bus->dev,
+						"SDW_SCP_SDCA_INT2 write failed:%d\n", ret);
+					return ret;
+				}
+			}
+			sdca_clear = sdw_read(slave, SDW_SCP_SDCA_INT3);
+			if (slave->prop.scp_sdca_int_mask3 & sdca_clear) {
+				ret = sdw_write(slave, SDW_SCP_SDCA_INT3,
+						slave->prop.scp_sdca_int_mask3);
+				if (ret < 0) {
+					dev_err(slave->bus->dev,
+						"SDW_SCP_SDCA_INT3 write failed:%d\n", ret);
+					return ret;
+				}
+			}
+			sdca_clear = sdw_read(slave, SDW_SCP_SDCA_INT4);
+			if (slave->prop.scp_sdca_int_mask4 & sdca_clear) {
+				ret = sdw_write(slave, SDW_SCP_SDCA_INT4,
+						slave->prop.scp_sdca_int_mask4);
+				if (ret < 0) {
+					dev_err(slave->bus->dev,
+						"SDW_SCP_SDCA_INT4 write failed:%d\n", ret);
+					return ret;
+				}
+			}
 		}
 
 		impl_int_mask = SDW_DP0_INT_IMPDEF1 |

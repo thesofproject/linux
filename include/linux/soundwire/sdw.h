@@ -356,6 +356,10 @@ struct sdw_dpn_prop {
  * @src_dpn_prop: Source Data Port N properties
  * @sink_dpn_prop: Sink Data Port N properties
  * @scp_int1_mask: SCP_INT1_MASK desired settings
+ * @scp_sdca_int_mask1: SDW_SCP_SDCA_INTMASK1 desired settings
+ * @scp_sdca_int_mask2: SDW_SCP_SDCA_INTMASK2 desired settings
+ * @scp_sdca_int_mask3: SDW_SCP_SDCA_INTMASK3 desired settings
+ * @scp_sdca_int_mask4: SDW_SCP_SDCA_INTMASK4 desired settings
  * @quirks: bitmask identifying deltas from the MIPI specification
  */
 struct sdw_slave_prop {
@@ -379,6 +383,8 @@ struct sdw_slave_prop {
 	struct sdw_dpn_prop *src_dpn_prop;
 	struct sdw_dpn_prop *sink_dpn_prop;
 	u8 scp_int1_mask;
+	u8 scp_sdca_int_mask1, scp_sdca_int_mask2;
+	u8 scp_sdca_int_mask3, scp_sdca_int_mask4;
 	u32 quirks;
 };
 
