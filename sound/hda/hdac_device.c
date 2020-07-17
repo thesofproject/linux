@@ -109,12 +109,16 @@ int snd_hdac_device_init(struct hdac_device *codec, struct hdac_bus *bus,
 				     codec->vendor_id & 0xffff);
 	if (!codec->chip_name) {
 		err = -ENOMEM;
-		goto error;
+		goto error_chip;
 	}
 
 	return 0;
 
+ error_chip:
+	kfree(codec->vendor_name);
  error:
+	pm_runtime_put_noidle(&codec->dev);
+	pm_runtime_set_suspended(&codec->dev);
 	put_device(&codec->dev);
 	return err;
 }
