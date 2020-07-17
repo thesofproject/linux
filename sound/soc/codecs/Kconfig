@@ -1185,10 +1185,14 @@ config SND_SOC_RT700_SDW
 config SND_SOC_RT711
 	tristate
 
+config SND_SOC_RT711_SDCA
+	tristate
+
 config SND_SOC_RT711_SDW
 	tristate "Realtek RT711 Codec - SDW"
 	depends on SOUNDWIRE
 	select SND_SOC_RT711
+	select SND_SOC_RT711_SDCA
 	select REGMAP_SOUNDWIRE
 
 config SND_SOC_RT715
