@@ -305,4 +305,14 @@
 #define SDW_CASC_PORT_MASK_INTSTAT3		1
 #define SDW_CASC_PORT_REG_OFFSET_INTSTAT3	2
 
+/* v1.2 device - SDCA address mapping */
+#define SDW_SDCA_CTL(fun, ent, ctl, ch) (BIT(30) |	\
+					 (((fun) & 0x7) << 22) |	\
+					 (((ent) & 0x40) << 15) |	\
+					 (((ent) & 0x3f) << 7) |	\
+					 (((ctl) & 0x30) << 15) |	\
+					 (((ctl) & 0x0f) << 3) |	\
+					 (((ch) & 0x38) << 12) |	\
+					 ((ch) & 0x07))
+
 #endif /* __SDW_REGISTERS_H */
