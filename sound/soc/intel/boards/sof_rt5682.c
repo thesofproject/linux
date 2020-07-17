@@ -66,12 +66,29 @@ struct sof_card_private {
 	bool common_hdmi_codec_drv;
 };
 
+const char * sof_override_tplg_name=NULL;
+
 static int sof_rt5682_quirk_cb(const struct dmi_system_id *id)
 {
 	sof_rt5682_quirk = (unsigned long)id->driver_data;
 	return 1;
 }
-
+static int sof_rt5682_tplg_cb(const struct dmi_system_id *id)
+{
+	sof_override_tplg_name = (const char *)id->driver_data;
+	return 1;
+}
+static const struct dmi_system_id sof_rt5682_tplg_table[] = {
+	{
+		.callback = sof_rt5682_tplg_cb,
+		.matches = {
+			/* will replace with real product name later*/
+			DMI_MATCH(DMI_PRODUCT_NAME, "Google Unique Product Name"),
+		},
+		.driver_data = (void *)("sof-tgl-max98373-rt5682-ampI2S2.tplg"),
+	},
+	{}
+};
 static const struct dmi_system_id sof_rt5682_quirk_table[] = {
 	{
 		.callback = sof_rt5682_quirk_cb,
@@ -118,6 +135,19 @@ static const struct dmi_system_id sof_rt5682_quirk_table[] = {
 		},
 		.driver_data = (void *)(SOF_RT5682_MCLK_EN |
 					SOF_RT5682_SSP_CODEC(0)),
+	},
+	{
+		.callback = sof_rt5682_quirk_cb,
+		.matches = {
+			/* will replace with real product name later*/
+			DMI_MATCH(DMI_PRODUCT_NAME, "Google Unique Product Name"),
+		},
+		.driver_data = (void *)(SOF_RT5682_MCLK_EN |
+					SOF_RT5682_SSP_CODEC(0) |
+					SOF_SPEAKER_AMP_PRESENT |
+					SOF_MAX98373_SPEAKER_AMP_PRESENT |
+					SOF_RT5682_SSP_AMP(2) |
+					SOF_RT5682_NUM_HDMIDEV(4)),
 	},
 	{}
 };
@@ -733,6 +763,10 @@ static int sof_audio_probe(struct platform_device *pdev)
 	dmi_check_system(sof_rt5682_quirk_table);
 
 	mach = pdev->dev.platform_data;
+	dmi_check_system(sof_rt5682_tplg_table);
+
+	if(sof_override_tplg_name)
+		mach->sof_tplg_filename=sof_override_tplg_name;
 
 	/* A speaker amp might not be present when the quirk claims one is.
 	 * Detect this via whether the machine driver match includes quirk_data.
