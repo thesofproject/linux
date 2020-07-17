@@ -1672,7 +1672,7 @@ int intel_master_process_wakeen_event(struct platform_device *pdev)
 	 * resume the Master, which will generate a bus reset and result in
 	 * Slaves re-attaching and be re-enumerated. The SoundWire physical
 	 * device which generated the wake will trigger an interrupt, which
-	 * will in turn cause the corresponding Linux Slave device to be be
+	 * will in turn cause the corresponding Linux Slave device to be
 	 * resumed and the Slave codec driver to check the status.
 	 */
 	pm_request_resume(dev);
