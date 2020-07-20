@@ -7,13 +7,17 @@ git:
 before_install:
   - sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
   - sudo apt-get update -qq
-  - sudo apt-get install -y python-ply python-git libelf-dev codespell sparse fakeroot gcc-9 g++-9 gcc-aarch64-linux-gnu
+  - sudo apt-get install -y python-ply python-git libelf-dev codespell fakeroot gcc-9 g++-9 gcc-aarch64-linux-gnu
   - sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 90 --slave /usr/bin/g++ g++ /usr/bin/g++-9
   - sudo apt-get install -y xz-utils lftp
-  - git clone https://github.com/thesofproject/kconfig.git
+  - git clone --depth 1 https://github.com/thesofproject/kconfig.git
   - mkdir 0day
   - wget https://raw.githubusercontent.com/intel/lkp-tests/master/sbin/make.cross -O make.cross
   - chmod +x make.cross
+  - mkdir -p $PWD/bin
+  - git clone --depth 1 --branch v0.6.2 git://git.kernel.org/pub/scm/devel/sparse/sparse.git
+  - BINDIR=$PWD/bin make -C sparse install
+  - export PATH=$PWD/bin:$PATH
 
 jobs:
   include:
@@ -25,16 +29,10 @@ jobs:
         - scripts/checkpatch.pl --strict --codespell -g $SHA_MAIN..$SHA_PR
     - name: "Code Scan"
       script:
-        - sudo apt-get install automake ocaml-native-compilers ocaml-findlib
-        - wget https://github.com/coccinelle/coccinelle/archive/1.0.7.tar.gz
-        - tar -xf 1.0.7.tar.gz
-        - cd coccinelle-1.0.7 && ./autogen && ./configure && make && sudo make install
-        - cd -
         - export ARCH=x86_64
         - bash kconfig/kconfig-sof-default.sh
         - make modules_prepare
         - make M=sound/soc/sof C=2
-        - make coccicheck MODE=report M=sound/soc/sof
     - name: "BUILD GCC9 SOF Kernel x86_64"
       script:
         - export ARCH=x86_64 KCFLAGS="-Wall -Werror"
