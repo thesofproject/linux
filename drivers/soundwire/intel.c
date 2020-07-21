@@ -1777,7 +1777,6 @@ static int intel_suspend_runtime(struct device *dev)
 
 	} else if (clock_stop_quirks & SDW_INTEL_CLK_STOP_BUS_RESET ||
 		   !clock_stop_quirks) {
-
 		ret = sdw_cdns_clock_stop(cdns, true);
 		if (ret < 0) {
 			dev_err(dev, "cannot enable clock stop on suspend\n");
