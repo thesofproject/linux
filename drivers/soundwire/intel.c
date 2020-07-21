@@ -1024,7 +1024,6 @@ static int intel_prepare(struct snd_pcm_substream *substream,
 	}
 
 	if (dma->suspended) {
-
 		dma->suspended = false;
 
 		/*
@@ -1182,7 +1181,6 @@ static int intel_component_dais_suspend(struct snd_soc_component *component)
 	struct snd_soc_dai *dai;
 
 	for_each_component_dais(component, dai) {
-
 		/*
 		 * we don't have a .suspend dai_ops, and we don't have access
 		 * to the substream, so let's mark both capture and playback
