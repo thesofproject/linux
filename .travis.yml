@@ -17,6 +17,8 @@ before_install:
   - sudo apt-get install -y python-ply python-git libelf-dev codespell fakeroot gcc-9 g++-9 gcc-aarch64-linux-gnu
   - sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 90 --slave /usr/bin/g++ g++ /usr/bin/g++-9
   - sudo apt-get install -y xz-utils lftp
+
+install:
   - git clone --depth 1 https://github.com/thesofproject/kconfig.git
   - mkdir 0day
   - wget https://raw.githubusercontent.com/intel/lkp-tests/master/sbin/make.cross -O make.cross
