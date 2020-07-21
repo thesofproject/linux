@@ -868,6 +868,20 @@ struct acpi_chan_package {   /* ACPICA seems to require 64 bit integers */
 	u64 mclock_value;    /* usually 25MHz (0x17d7940), ignored */
 };
 
+static int remove_properties(struct bus_type *bus, char *codec_name)
+{
+	struct device *dev;
+
+	dev = bus_find_device_by_name(bus, NULL, codec_name);
+	if (!dev)
+		return -EINVAL;
+
+	device_remove_properties(dev);
+	put_device(dev);
+
+	return 0;
+}
+
 static int snd_byt_rt5651_mc_probe(struct platform_device *pdev)
 {
 	static const char * const mic_name[] = { "dmic", "in1", "in2", "in12" };
@@ -1012,7 +1026,7 @@ static int snd_byt_rt5651_mc_probe(struct platform_device *pdev)
 				/* fall through */
 			case -EPROBE_DEFER:
 				put_device(codec_dev);
-				return ret_val;
+				goto err;
 			}
 		}
 		priv->hp_detect = devm_fwnode_gpiod_get(&pdev->dev,
@@ -1032,7 +1046,7 @@ static int snd_byt_rt5651_mc_probe(struct platform_device *pdev)
 				/* fall through */
 			case -EPROBE_DEFER:
 				put_device(codec_dev);
-				return ret_val;
+				goto err;
 			}
 		}
 	}
@@ -1062,7 +1076,7 @@ static int snd_byt_rt5651_mc_probe(struct platform_device *pdev)
 			 * for all other errors, including -EPROBE_DEFER
 			 */
 			if (ret_val != -ENOENT)
-				return ret_val;
+				goto err;
 			byt_rt5651_quirk &= ~BYT_RT5651_MCLK_EN;
 		}
 	}
@@ -1091,17 +1105,26 @@ static int snd_byt_rt5651_mc_probe(struct platform_device *pdev)
 	ret_val = snd_soc_fixup_dai_links_platform_name(&byt_rt5651_card,
 							platform_name);
 	if (ret_val)
-		return ret_val;
+		goto err;
 
 	ret_val = devm_snd_soc_register_card(&pdev->dev, &byt_rt5651_card);
 
 	if (ret_val) {
 		dev_err(&pdev->dev, "devm_snd_soc_register_card failed %d\n",
 			ret_val);
-		return ret_val;
+		goto err;
 	}
 	platform_set_drvdata(pdev, &byt_rt5651_card);
 	return ret_val;
+
+err:
+	remove_properties(&i2c_bus_type, byt_rt5651_codec_name);
+	return ret_val;
+}
+
+static int snd_byt_rt5651_mc_remove(struct platform_device *pdev)
+{
+	return remove_properties(&i2c_bus_type, byt_rt5651_codec_name);
 }
 
 static struct platform_driver snd_byt_rt5651_mc_driver = {
@@ -1112,6 +1135,7 @@ static struct platform_driver snd_byt_rt5651_mc_driver = {
 #endif
 	},
 	.probe = snd_byt_rt5651_mc_probe,
+	.remove = snd_byt_rt5651_mc_remove,
 };
 
 module_platform_driver(snd_byt_rt5651_mc_driver);

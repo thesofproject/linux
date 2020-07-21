@@ -462,6 +462,20 @@ static const struct dmi_system_id byt_cht_es8316_quirk_table[] = {
 	{}
 };
 
+static int remove_properties(struct bus_type *bus, char *codec_name)
+{
+	struct device *dev;
+
+	dev = bus_find_device_by_name(bus, NULL, codec_name);
+	if (!dev)
+		return -EINVAL;
+
+	device_remove_properties(dev);
+	put_device(dev);
+
+	return 0;
+}
+
 static int snd_byt_cht_es8316_mc_probe(struct platform_device *pdev)
 {
 	static const char * const mic_name[] = { "in1", "in2" };
@@ -575,7 +589,7 @@ static int snd_byt_cht_es8316_mc_probe(struct platform_device *pdev)
 			dev_err(dev, "get speaker GPIO failed: %d\n", ret);
 			/* fall through */
 		case -EPROBE_DEFER:
-			return ret;
+			goto err;
 		}
 	}
 
@@ -598,10 +612,14 @@ static int snd_byt_cht_es8316_mc_probe(struct platform_device *pdev)
 	if (ret) {
 		gpiod_put(priv->speaker_en_gpio);
 		dev_err(dev, "snd_soc_register_card failed: %d\n", ret);
-		return ret;
+		goto err;
 	}
 	platform_set_drvdata(pdev, &byt_cht_es8316_card);
 	return 0;
+
+err:
+	remove_properties(&i2c_bus_type, codec_name);
+	return ret;
 }
 
 static int snd_byt_cht_es8316_mc_remove(struct platform_device *pdev)
@@ -610,7 +628,8 @@ static int snd_byt_cht_es8316_mc_remove(struct platform_device *pdev)
 	struct byt_cht_es8316_private *priv = snd_soc_card_get_drvdata(card);
 
 	gpiod_put(priv->speaker_en_gpio);
-	return 0;
+
+	return remove_properties(&i2c_bus_type, codec_name);
 }
 
 static struct platform_driver snd_byt_cht_es8316_mc_driver = {

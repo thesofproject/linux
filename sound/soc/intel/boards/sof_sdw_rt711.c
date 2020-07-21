@@ -40,6 +40,20 @@ static int rt711_add_codec_device_props(const char *sdw_dev_name)
 	return ret;
 }
 
+static int remove_properties(struct bus_type *bus, const char *codec_name)
+{
+	struct device *dev;
+
+	dev = bus_find_device_by_name(bus, NULL, codec_name);
+	if (!dev)
+		return -EINVAL;
+
+	device_remove_properties(dev);
+	put_device(dev);
+
+	return 0;
+}
+
 static const struct snd_soc_dapm_widget rt711_widgets[] = {
 	SND_SOC_DAPM_HP("Headphone", NULL),
 	SND_SOC_DAPM_MIC("Headset Mic", NULL),
@@ -135,17 +149,7 @@ static int rt711_rtd_init(struct snd_soc_pcm_runtime *rtd)
 
 int sof_sdw_rt711_exit(struct device *dev, struct snd_soc_dai_link *dai_link)
 {
-	struct device *sdw_dev;
-
-	sdw_dev = bus_find_device_by_name(&sdw_bus_type, NULL,
-					  dai_link->codecs[0].name);
-	if (!sdw_dev)
-		return -EINVAL;
-
-	device_remove_properties(sdw_dev);
-	put_device(sdw_dev);
-
-	return 0;
+	return remove_properties(&sdw_bus_type, dai_link->codecs[0].name);
 }
 
 int sof_sdw_rt711_init(const struct snd_soc_acpi_link_adr *link,
