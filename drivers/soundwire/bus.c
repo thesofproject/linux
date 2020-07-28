@@ -1344,7 +1344,7 @@ static int sdw_handle_dp0_interrupt(struct sdw_slave *slave, u8 *slave_status)
 static int sdw_handle_port_interrupt(struct sdw_slave *slave,
 				     int port, u8 *slave_status)
 {
-	u8 clear = 0, impl_int_mask;
+	u8 clear, impl_int_mask;
 	int status, status2, ret, count = 0;
 	u32 addr;
 
@@ -1361,6 +1361,8 @@ static int sdw_handle_port_interrupt(struct sdw_slave *slave,
 	}
 
 	do {
+		clear = status & ~SDW_DPN_INTERRUPTS;
+
 		if (status & SDW_DPN_INT_TEST_FAIL) {
 			dev_err(&slave->dev, "Test fail for port:%d\n", port);
 			clear |= SDW_DPN_INT_TEST_FAIL;
@@ -1383,7 +1385,7 @@ static int sdw_handle_port_interrupt(struct sdw_slave *slave,
 			*slave_status = clear;
 		}
 
-		/* clear the interrupt */
+		/* clear the interrupt but don't touch reserved fields */
 		ret = sdw_write(slave, addr, clear);
 		if (ret < 0) {
 			dev_err(slave->bus->dev,
@@ -1404,7 +1406,7 @@ static int sdw_handle_port_interrupt(struct sdw_slave *slave,
 		count++;
 
 		/* we can get alerts while processing so keep retrying */
-	} while (status != 0 && count < SDW_READ_INTR_CLEAR_RETRY);
+	} while ((status & SDW_DPN_INTERRUPTS) && (count < SDW_READ_INTR_CLEAR_RETRY));
 
 	if (count == SDW_READ_INTR_CLEAR_RETRY)
 		dev_warn(slave->bus->dev, "Reached MAX_RETRY on port read");
