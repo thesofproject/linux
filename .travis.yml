@@ -58,7 +58,8 @@ jobs:
         - export ARCH=x86_64 KCFLAGS="-Wall -Werror"
         - bash kconfig/kconfig-sof-default.sh
         - make modules_prepare
-        - make -j`getconf _NPROCESSORS_ONLN` M=sound/soc/sof W=1
+        - make -j`getconf _NPROCESSORS_ONLN` sound/ W=1
+        - make -j`getconf _NPROCESSORS_ONLN` drivers/soundwire/ W=1
         - make -j`getconf _NPROCESSORS_ONLN`
         - make -j`getconf _NPROCESSORS_ONLN` bindeb-pkg
     - name: "BUILD GCC9 SST Kernel x86_64"
