@@ -216,7 +216,7 @@ config SND_SOC_INTEL_SKYLAKE_HDAUDIO_CODEC
 	bool "HDAudio codec support"
 	depends on SND_SOC_INTEL_NOT_RECOMMENDED || COMPILE_TEST
 	help
-	  If you have Intel Skylake or Kabylake with HDaudio codec
+	  If you have Intel Skylake or Kabylake with HDAudio codec
 	  and DMIC present then enable this option by saying Y.
 
 config SND_SOC_INTEL_SKYLAKE_COMMON
