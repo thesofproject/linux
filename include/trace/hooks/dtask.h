@@ -58,7 +58,11 @@ DECLARE_HOOK(android_vh_rwsem_write_wait_finish,
 	TP_PROTO(struct rw_semaphore *sem),
 	TP_ARGS(sem));
 
-#endif /* _TRACE_HOOK_DTASK_H */
+struct task_struct;
+DECLARE_HOOK(android_vh_sched_show_task,
+	TP_PROTO(struct task_struct *task),
+	TP_ARGS(task));
 
+#endif /* _TRACE_HOOK_DTASK_H */
 /* This part must be outside protection */
 #include <trace/define_trace.h>
