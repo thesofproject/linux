@@ -354,6 +354,7 @@ int hda_dsp_cl_boot_firmware(struct snd_sof_dev *sdev)
 	struct snd_sof_pdata *plat_data = sdev->pdata;
 	const struct sof_dev_desc *desc = plat_data->desc;
 	const struct sof_intel_dsp_desc *chip_info;
+	struct hdac_bus *bus = sof_to_bus(sdev);
 	struct hdac_ext_stream *stream;
 	struct firmware stripped_firmware;
 	int ret, ret1, tag, i;
@@ -409,11 +410,12 @@ int hda_dsp_cl_boot_firmware(struct snd_sof_dev *sdev)
 	if (i == HDA_FW_BOOT_ATTEMPTS) {
 		dev_err(sdev->dev, "error: dsp init failed after %d attempts with err: %d\n",
 			i, ret);
-		dev_err(sdev->dev, "ROM error=0x%x: FW status=0x%x\n",
+		dev_err(sdev->dev, "ROM error=0x%x: FW status=0x%x: PM status=0x%x\n",
 			snd_sof_dsp_read(sdev, HDA_DSP_BAR,
 					 HDA_DSP_SRAM_REG_ROM_ERROR),
 			snd_sof_dsp_read(sdev, HDA_DSP_BAR,
-					 HDA_DSP_SRAM_REG_ROM_STATUS));
+					 HDA_DSP_SRAM_REG_ROM_STATUS),
+			snd_hdac_chip_readb(bus, VS_D0I3C));
 		goto cleanup;
 	}
 
