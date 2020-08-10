@@ -435,6 +435,9 @@ static const struct sof_process_types sof_process[] = {
 	{"DEMUX", SOF_PROCESS_DEMUX, SOF_COMP_DEMUX},
 	{"DCBLOCK", SOF_PROCESS_DCBLOCK, SOF_COMP_DCBLOCK},
 	{"SMART_AMP", SOF_PROCESS_SMART_AMP, SOF_COMP_SMART_AMP},
+	{"PCM", SOF_PROCESS_CODEC_PCM, SOF_COMP_POST_PROCESS},
+	{"MP3", SOF_PROCESS_CODEC_MP3, SOF_COMP_POST_PROCESS},
+	{"AAC", SOF_PROCESS_CODEC_AAC, SOF_COMP_POST_PROCESS},
 };
 
 static enum sof_ipc_process_type find_process(const char *name)
