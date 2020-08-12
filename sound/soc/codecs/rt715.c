@@ -37,6 +37,10 @@
 
 #include "rt715.h"
 
+static int power_up_delay = 400;
+module_param(power_up_delay, int, 0444);
+MODULE_PARM_DESC(power_up_delay, "RT715 power up delay time in ms");
+
 static int rt715_index_write(struct regmap *regmap, unsigned int reg,
 		unsigned int value)
 {
@@ -498,6 +502,7 @@ static int rt715_set_bias_level(struct snd_soc_component *component,
 			regmap_write(rt715->regmap,
 						RT715_SET_AUDIO_POWER_STATE,
 						AC_PWRST_D0);
+			msleep(power_up_delay);
 		}
 		break;
 
