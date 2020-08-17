@@ -1135,8 +1135,7 @@ intel_hw_free(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
 	if (first_cpu_dai == dai) {
 		ret = sdw_deprepare_stream(dma->stream);
 		if (ret) {
-			dev_err(dai->dev, "sdw_deprepare_stream: failed %d",
-				ret);
+			dev_err(dai->dev, "sdw_deprepare_stream: failed %d", ret);
 			return ret;
 		}
 	}
