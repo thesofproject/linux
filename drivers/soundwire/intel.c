@@ -1699,9 +1699,7 @@ static int intel_suspend(struct device *dev)
 	}
 
 	if (pm_runtime_suspended(dev)) {
-		dev_dbg(dev,
-			"%s: pm_runtime status: suspended\n",
-			__func__);
+		dev_dbg(dev, "%s: pm_runtime status: suspended\n", __func__);
 
 		clock_stop_quirks = sdw->link_res->clock_stop_quirks;
 
@@ -1827,9 +1825,7 @@ static int intel_resume(struct device *dev)
 	multi_link = !(link_flags & SDW_INTEL_MASTER_DISABLE_MULTI_LINK);
 
 	if (pm_runtime_suspended(dev)) {
-		dev_dbg(dev,
-			"%s: pm_runtime status was suspended, forcing active\n",
-			__func__);
+		dev_dbg(dev, "%s: pm_runtime status was suspended, forcing active\n", __func__);
 
 		/* follow required sequence from runtime_pm.rst */
 		pm_runtime_disable(dev);
