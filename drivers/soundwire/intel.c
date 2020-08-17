@@ -2046,9 +2046,7 @@ static int intel_resume_runtime(struct device *dev)
 
 		clock_stop0 = sdw_cdns_is_clock_stop(&sdw->cdns);
 		if (!clock_stop0)
-			dev_err(dev,
-				"%s invalid configuration, clock was not stopped",
-				__func__);
+			dev_err(dev, "%s invalid configuration, clock was not stopped", __func__);
 
 		ret = intel_init(sdw);
 		if (ret) {
