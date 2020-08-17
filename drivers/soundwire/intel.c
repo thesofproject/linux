@@ -363,8 +363,7 @@ static int intel_link_power_up(struct sdw_intel *sdw)
 		syncprd = SDW_SHIM_SYNC_SYNCPRD_VAL_24;
 
 	if (!*shim_mask) {
-		dev_dbg(sdw->cdns.dev,
-			"%s: powering up all links\n", __func__);
+		dev_dbg(sdw->cdns.dev, "%s: powering up all links\n", __func__);
 
 		/* we first need to program the SyncPRD/CPU registers */
 		dev_dbg(sdw->cdns.dev,
@@ -551,8 +550,7 @@ static int intel_link_power_down(struct sdw_intel *sdw)
 
 	if (!*shim_mask) {
 
-		dev_dbg(sdw->cdns.dev,
-			"%s: powering down all links\n", __func__);
+		dev_dbg(sdw->cdns.dev, "%s: powering down all links\n", __func__);
 
 		/* Link power down sequence */
 		link_control = intel_readl(shim, SDW_SHIM_LCTL);
@@ -573,8 +571,7 @@ static int intel_link_power_down(struct sdw_intel *sdw)
 	mutex_unlock(sdw->link_res->shim_lock);
 
 	if (ret < 0) {
-		dev_err(sdw->cdns.dev,
-			"%s: could not power down link\n", __func__);
+		dev_err(sdw->cdns.dev, "%s: could not power down link\n", __func__);
 
 		return ret;
 	}
