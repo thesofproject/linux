@@ -1343,7 +1343,7 @@ static int sof_core_enable(struct snd_sof_dev *sdev, int core)
 }
 
 int sof_pipeline_core_enable(struct snd_sof_dev *sdev,
-			    const struct snd_sof_widget *swidget)
+			     const struct snd_sof_widget *swidget)
 {
 	const struct sof_ipc_pipe_new *pipeline;
 	int ret;
