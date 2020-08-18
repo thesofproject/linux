@@ -25,9 +25,9 @@
 int sdw_rows[SDW_FRAME_ROWS] = {48, 50, 60, 64, 75, 80, 125, 147,
 			96, 100, 120, 128, 150, 160, 250, 0,
 			192, 200, 240, 256, 72, 144, 90, 180};
+EXPORT_SYMBOL(sdw_rows);
 
 int sdw_cols[SDW_FRAME_COLS] = {2, 4, 6, 8, 10, 12, 14, 16};
-EXPORT_SYMBOL(sdw_rows);
 EXPORT_SYMBOL(sdw_cols);
 
 int sdw_find_col_index(int col)
