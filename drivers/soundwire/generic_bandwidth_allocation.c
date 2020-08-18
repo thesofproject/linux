@@ -219,12 +219,15 @@ static int sdw_add_element_group_count(struct sdw_group *group,
 			continue;
 
 		if (group->count >= group->max_size) {
+			unsigned int *rates;
+
 			group->max_size += 1;
-			group->rates = krealloc(group->rates,
+			rates = krealloc(group->rates,
 						(sizeof(int) * group->max_size),
 						GFP_KERNEL);
-			if (!group->rates)
+			if (!rates)
 				return -ENOMEM;
+			group->rates = rates;
 		}
 
 		group->rates[group->count++] = rate;
