@@ -1197,6 +1197,8 @@ static __always_inline int is_connected_ep(struct snd_soc_dapm_widget *widget,
 	struct snd_soc_dapm_path *path;
 	int con = 0;
 
+	printk(KERN_DEBUG "Keyon: %s, %d, widget %s is_ep %d dir %d, widget->endpoints[dir]:%d\n", __func__, __LINE__,
+		widget->name, widget->is_ep, dir, widget->endpoints[dir]);
 	if (widget->endpoints[dir] >= 0)
 		return widget->endpoints[dir];
 
@@ -1213,6 +1215,9 @@ static __always_inline int is_connected_ep(struct snd_soc_dapm_widget *widget,
 
 	if ((widget->is_ep & SND_SOC_DAPM_DIR_TO_EP(dir)) && widget->connected) {
 		widget->endpoints[dir] = snd_soc_dapm_suspend_check(widget);
+		printk(KERN_DEBUG "Keyon: %s, %d, widget %s is_ep %d dir %d, widget->endpoints[dir]:%d\n", __func__, __LINE__,
+			widget->name, widget->is_ep, dir, widget->endpoints[dir]);
+
 		return widget->endpoints[dir];
 	}
 
@@ -1236,6 +1241,8 @@ static __always_inline int is_connected_ep(struct snd_soc_dapm_widget *widget,
 
 	widget->endpoints[dir] = con;
 
+	printk(KERN_DEBUG "Keyon: %s, %d, widget %s con:%d\n", __func__, __LINE__,
+		widget->name, con);
 	return con;
 }
 
@@ -1442,6 +1449,8 @@ static int dapm_generic_check_power(struct snd_soc_dapm_widget *w)
 
 	in = is_connected_input_ep(w, NULL, NULL);
 	out = is_connected_output_ep(w, NULL, NULL);
+	printk(KERN_DEBUG "Keyon: %s, %d, widget %s in %d, out:%d\n", __func__, __LINE__,
+		w->name, in, out);
 	return out != 0 && in != 0;
 }
 
@@ -1880,6 +1889,8 @@ static void dapm_widget_set_power(struct snd_soc_dapm_widget *w, bool power,
 {
 	struct snd_soc_dapm_path *path;
 
+	printk(KERN_DEBUG "Keyon: %s, %d, widget %s power:%d, new_power %d\n", __func__, __LINE__,
+		w->name, w->power, power);
 	if (w->power == power)
 		return;
 
@@ -1909,6 +1920,9 @@ static void dapm_power_one_widget(struct snd_soc_dapm_widget *w,
 				  struct list_head *down_list)
 {
 	int power;
+
+	printk(KERN_DEBUG "Keyon: %s, %d, widget %s id %d, power:%d\n", __func__, __LINE__,
+		w->name, w->id, w->power);
 
 	switch (w->id) {
 	case snd_soc_dapm_pre:
@@ -4785,7 +4799,11 @@ static void soc_dapm_shutdown_dapm(struct snd_soc_dapm_context *dapm)
 
 	mutex_lock(&card->dapm_mutex);
 
+	printk(KERN_DEBUG "Keyon: %s, %d\n", __func__, __LINE__);
+
 	for_each_card_widgets(dapm->card, w) {
+		printk(KERN_DEBUG "Keyon: %s, %d, widget %s power:%d, new_power %d\n", __func__, __LINE__,
+			w->name, w->power, w->new_power);
 		if (w->dapm != dapm)
 			continue;
 		if (w->power) {
