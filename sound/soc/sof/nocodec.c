@@ -12,9 +12,39 @@
 #include <sound/sof.h>
 #include "sof-priv.h"
 
+static const struct snd_soc_dapm_widget sof_widgets[] = {
+	SND_SOC_DAPM_MIC("SSP0 Input", NULL),
+	SND_SOC_DAPM_SPK("SSP0 Output", NULL),
+	SND_SOC_DAPM_MIC("SSP1 Input", NULL),
+	SND_SOC_DAPM_SPK("SSP1 Output", NULL),
+	SND_SOC_DAPM_MIC("SSP2 Input", NULL),
+	SND_SOC_DAPM_SPK("SSP2 Output", NULL),
+
+	SND_SOC_DAPM_INPUT("DMic"),
+};
+
+static const struct snd_soc_dapm_route sof_map[] = {
+	/* SSPs */
+	{ "SSP0 Output", NULL, "SSP0.OUT" },
+	{ "SSP0.IN", NULL, "SSP0 Input" },
+	{ "SSP1 Output", NULL, "SSP1.OUT" },
+	{ "SSP1.IN", NULL, "SSP1 Input" },
+	{ "SSP2 Output", NULL, "SSP2.OUT" },
+	{ "SSP2.IN", NULL, "SSP2 Input" },
+
+	/* digital mics */
+	{"DMIC0.IN", NULL, "DMic"},
+	{"DMIC1.IN", NULL, "DMic"},
+};
+
 static struct snd_soc_card sof_nocodec_card = {
 	.name = "nocodec", /* the sof- prefix is added by the core */
-	.owner = THIS_MODULE
+	.owner = THIS_MODULE,
+
+	.dapm_widgets = sof_widgets,
+	.num_dapm_widgets = ARRAY_SIZE(sof_widgets),
+	.dapm_routes = sof_map,
+	.num_dapm_routes = ARRAY_SIZE(sof_map),
 };
 
 static int sof_nocodec_bes_setup(struct device *dev,
