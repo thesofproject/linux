@@ -1680,7 +1680,7 @@ int intel_master_process_wakeen_event(struct platform_device *pdev)
 
 #ifdef CONFIG_PM
 
-static int intel_suspend(struct device *dev)
+static int __maybe_unused intel_suspend(struct device *dev)
 {
 	struct sdw_cdns *cdns = dev_get_drvdata(dev);
 	struct sdw_intel *sdw = cdns_to_intel(cdns);
@@ -1796,7 +1796,7 @@ static int intel_suspend_runtime(struct device *dev)
 	return ret;
 }
 
-static int intel_resume(struct device *dev)
+static int __maybe_unused intel_resume(struct device *dev)
 {
 	struct sdw_cdns *cdns = dev_get_drvdata(dev);
 	struct sdw_intel *sdw = cdns_to_intel(cdns);
