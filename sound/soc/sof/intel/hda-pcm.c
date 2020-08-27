@@ -168,38 +168,14 @@ snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_sof_dev *sdev,
 	}
 
 	/*
-	 * DPIB/posbuf position mode:
-	 * For Playback, Use DPIB register from HDA space which
-	 * reflects the actual data transferred.
-	 * For Capture, Use the position buffer for pointer, as DPIB
-	 * is not accurate enough, its update may be completed
-	 * earlier than the data written to DDR.
+	 * LPIB (Link Position In Buffer):
+	 * Value indicates the number of bytes processed by the corresponding
+	 * DMA engine, it is aligned on frame boundary and gets incremented when
+	 * data is sent out on link.
 	 */
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-		pos = snd_sof_dsp_read(sdev, HDA_DSP_HDA_BAR,
-				       AZX_REG_VS_SDXDPIB_XBASE +
-				       (AZX_REG_VS_SDXDPIB_XINTERVAL *
-					hstream->index));
-	} else {
-		/*
-		 * For capture stream, we need more workaround to fix the
-		 * position incorrect issue:
-		 *
-		 * 1. Wait at least 20us before reading position buffer after
-		 * the interrupt generated(IOC), to make sure position update
-		 * happens on frame boundary i.e. 20.833uSec for 48KHz.
-		 * 2. Perform a dummy Read to DPIB register to flush DMA
-		 * position value.
-		 * 3. Read the DMA Position from posbuf. Now the readback
-		 * value should be >= period boundary.
-		 */
-		usleep_range(20, 21);
-		snd_sof_dsp_read(sdev, HDA_DSP_HDA_BAR,
-				 AZX_REG_VS_SDXDPIB_XBASE +
-				 (AZX_REG_VS_SDXDPIB_XINTERVAL *
-				  hstream->index));
-		pos = snd_hdac_stream_get_pos_posbuf(hstream);
-	}
+	pos = snd_sof_dsp_read(sdev, HDA_DSP_HDA_BAR,
+			       SOF_STREAM_SD_OFFSET(hstream) +
+			       SOF_HDA_ADSP_REG_CL_SD_LPIB);
 
 	if (pos >= hstream->bufsize)
 		pos = 0;
