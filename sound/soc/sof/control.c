@@ -388,8 +388,9 @@ int snd_sof_bytes_ext_volatile_get(struct snd_kcontrol *kcontrol, unsigned int _
 
 	/* check data size doesn't exceed max coming from topology */
 	if (cdata->data->size > be->max - sizeof(const struct sof_abi_hdr)) {
-		dev_err_ratelimited(scomp->dev, "error: user data size %d exceeds max size %lu.\n",
-				    cdata->data->size, be->max - sizeof(const struct sof_abi_hdr));
+		dev_err_ratelimited(scomp->dev, "error: user data size %d exceeds max size %zu.\n",
+				    cdata->data->size,
+				    (size_t)be->max - sizeof(const struct sof_abi_hdr));
 		ret = -EINVAL;
 		goto out;
 	}
