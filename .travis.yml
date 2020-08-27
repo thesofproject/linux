@@ -67,6 +67,14 @@ jobs:
         - export ARCH=x86_64
         - bash kconfig/kconfig-sst.sh
         - KCFLAGS="-Wall -Werror" make -j`getconf _NPROCESSORS_ONLN`
+    - name: "BUILD GCC9 SOF Kernel i386"
+      script:
+        - export ARCH=i386 KCFLAGS="-Wall -Werror"
+        - bash kconfig/kconfig-sof-default.sh
+        - make modules_prepare
+        - make -j`getconf _NPROCESSORS_ONLN` sound/
+        - make -j`getconf _NPROCESSORS_ONLN` drivers/soundwire/
+        - make -j`getconf _NPROCESSORS_ONLN`
     - name: "BUILD GCC9 SOF Kernel arm64"
       script:
         - export ARCH=arm64 CROSS_COMPILE=/usr/bin/aarch64-linux-gnu-
