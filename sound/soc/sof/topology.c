@@ -1162,8 +1162,8 @@ static int sof_control_load_bytes(struct snd_soc_component *scomp,
 
 	/* init the get/put bytes data */
 	if (priv_size > max_size - sizeof(struct sof_ipc_ctrl_data)) {
-		dev_err(scomp->dev, "err: bytes data size %lu exceeds max %lu.\n",
-			priv_size, max_size - sizeof(struct sof_ipc_ctrl_data));
+		dev_err(scomp->dev, "err: bytes data size %zu exceeds max %zu.\n",
+			priv_size, (size_t)max_size - sizeof(struct sof_ipc_ctrl_data));
 		ret = -EINVAL;
 		goto out;
 	}
