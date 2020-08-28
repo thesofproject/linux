@@ -58,7 +58,7 @@ MODULE_PARM_DESC(cdns_mcp_int_mask, "Cadence MCP IntMask");
 #define CDNS_MCP_FRAME_SHAPE			0x10
 #define CDNS_MCP_FRAME_SHAPE_INIT		0x14
 #define CDNS_MCP_FRAME_SHAPE_COL_MASK		GENMASK(2, 0)
-#define CDNS_MCP_FRAME_SHAPE_ROW_OFFSET		3
+#define CDNS_MCP_FRAME_SHAPE_ROW_MASK		GENMASK(7, 3)
 
 #define CDNS_MCP_CONFIG_UPDATE			0x18
 #define CDNS_MCP_CONFIG_UPDATE_BIT		BIT(0)
@@ -1165,9 +1165,10 @@ static u32 cdns_set_initial_frame_shape(int n_rows, int n_cols)
 	int r;
 
 	r = sdw_find_row_index(n_rows);
-	c = sdw_find_col_index(n_cols) & CDNS_MCP_FRAME_SHAPE_COL_MASK;
+	c = sdw_find_col_index(n_cols);
 
-	val = FIELD_PREP(CDNS_MCP_FRAME_SHAPE_ROW_OFFSET, r) | c;
+	val = FIELD_PREP(CDNS_MCP_FRAME_SHAPE_ROW_MASK, r) |
+		FIELD_PREP(CDNS_MCP_FRAME_SHAPE_COL_MASK, c);
 
 	return val;
 }
