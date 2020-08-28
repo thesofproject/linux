@@ -472,12 +472,12 @@ struct sdw_slave_id {
 #define SDW_PART_ID_MASK	GENMASK(23, 8)
 #define SDW_CLASS_ID_MASK	GENMASK(7, 0)
 
-#define SDW_DISCO_LINK_ID(adr)	FIELD_GET(SDW_DISCO_LINK_ID_MASK, addr)
-#define SDW_VERSION(adr)	FIELD_GET(SDW_VERSION_MASK, addr)
-#define SDW_UNIQUE_ID(adr)	FIELD_GET(SDW_UNIQUE_ID_MASK, addr)
-#define SDW_MFG_ID(adr)		FIELD_GET(SDW_MFG_ID_MASK, addr)
-#define SDW_PART_ID(adr)	FIELD_GET(SDW_PART_ID_MASK, addr)
-#define SDW_CLASS_ID(adr)	FIELD_GET(SDW_CLASS_ID_MASK, addr)
+#define SDW_DISCO_LINK_ID(adr)	FIELD_GET(SDW_DISCO_LINK_ID_MASK, adr)
+#define SDW_VERSION(adr)	FIELD_GET(SDW_VERSION_MASK, adr)
+#define SDW_UNIQUE_ID(adr)	FIELD_GET(SDW_UNIQUE_ID_MASK, adr)
+#define SDW_MFG_ID(adr)		FIELD_GET(SDW_MFG_ID_MASK, adr)
+#define SDW_PART_ID(adr)	FIELD_GET(SDW_PART_ID_MASK, adr)
+#define SDW_CLASS_ID(adr)	FIELD_GET(SDW_CLASS_ID_MASK, adr)
 
 /**
  * struct sdw_slave_intr_status - Slave interrupt status
