@@ -381,10 +381,11 @@ static int intel_link_power_up(struct sdw_intel *sdw)
 		link_control = intel_readl(shim, SDW_SHIM_LCTL);
 
 		/* only power-up enabled links */
-		spa_mask = sdw->link_res->link_mask <<
-			SDW_REG_SHIFT(SDW_SHIM_LCTL_SPA_MASK);
-		cpa_mask = sdw->link_res->link_mask <<
-			SDW_REG_SHIFT(SDW_SHIM_LCTL_CPA_MASK);
+		spa_mask = FIELD_PREP(SDW_SHIM_LCTL_SPA_MASK,
+				      sdw->link_res->link_mask);
+		cpa_mask = FIELD_PREP(SDW_SHIM_LCTL_CPA_MASK,
+				      sdw->link_res->link_mask);
+
 
 		link_control |=  spa_mask;
 
@@ -555,10 +556,11 @@ static int intel_link_power_down(struct sdw_intel *sdw)
 		link_control = intel_readl(shim, SDW_SHIM_LCTL);
 
 		/* only power-down enabled links */
-		spa_mask = (~sdw->link_res->link_mask) <<
-			SDW_REG_SHIFT(SDW_SHIM_LCTL_SPA_MASK);
-		cpa_mask = sdw->link_res->link_mask <<
-			SDW_REG_SHIFT(SDW_SHIM_LCTL_CPA_MASK);
+		spa_mask = FIELD_PREP(SDW_SHIM_LCTL_SPA_MASK,
+				      ~sdw->link_res->link_mask);
+
+		cpa_mask = FIELD_PREP(SDW_SHIM_LCTL_CPA_MASK,
+				      sdw->link_res->link_mask);
 
 		link_control &=  spa_mask;
 
