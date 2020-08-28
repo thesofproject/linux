@@ -6,14 +6,15 @@
 # yaml merge-expand .travis.yml exp.yml && diff -b -u .travis.yml exp.yml
 
 language: c
-dist: bionic
+dist: focal
 
 git:
   depth: 20
 
 before_install:
   - sudo apt-get update -qq
-  - sudo apt-get install -y python-ply python-git libelf-dev codespell fakeroot gcc g++ gcc-aarch64-linux-gnu
+  - sudo apt-get install -y python-ply libelf-dev codespell fakeroot gcc g++ gcc-aarch64-linux-gnu
+  - sudo apt-get install -y clang-format clang-tidy clang-tools clang clangd
   - sudo apt-get install -y xz-utils lftp
 
 install:
@@ -57,32 +58,39 @@ jobs:
         - export ARCH=x86_64 KCFLAGS="-Wall -Werror"
         - export MAKEFLAGS=j"$(nproc)"
         - bash kconfig/kconfig-sof-default.sh
-        - make modules_prepare
         - make sound/ W=1
         - make drivers/soundwire/ W=1
         - make
         - make bindeb-pkg
     - name: "BUILD GCC9 SST Kernel x86_64"
       script:
-        - export ARCH=x86_64
+        - export ARCH=x86_64 KCFLAGS="-Wall -Werror"
+        - export MAKEFLAGS=j"$(nproc)"
         - bash kconfig/kconfig-sst.sh
-        - KCFLAGS="-Wall -Werror" make -j`getconf _NPROCESSORS_ONLN`
+        - make sound/
+        - make
     - name: "BUILD GCC9 SOF Kernel i386"
       script:
         - export ARCH=i386 KCFLAGS="-Wall -Werror"
         - export MAKEFLAGS=j"$(nproc)"
         - bash kconfig/kconfig-sof-default.sh
-        - make modules_prepare
         - make sound/
         - make drivers/soundwire/
         - make
     - name: "BUILD GCC9 SOF Kernel arm64"
       script:
-        - export ARCH=arm64 CROSS_COMPILE=/usr/bin/aarch64-linux-gnu-
+        - export ARCH=arm64 CROSS_COMPILE=/usr/bin/aarch64-linux-gnu- KCFLAGS="-Wall -Werror"
+        - export MAKEFLAGS=j"$(nproc)"
         - bash kconfig/kconfig-sof-arm64.sh
-        - KCFLAGS="-Wall -Werror" make -j`getconf _NPROCESSORS_ONLN`
+        - make sound/
+        - make drivers/soundwire/
+        - make
     - name: "BUILD CLANG SOF Kernel x86_64"
       script:
+        - export ARCH=x86_64 CC=clang KCFLAGS="-Wall -Werror"
+        - export MAKEFLAGS=j"$(nproc)"
         - bash kconfig/kconfig-sof-default.sh
-        - COMPILER_INSTALL_PATH=$PWD/0day COMPILER=clang ./make.cross ARCH=x86_64 olddefconfig
-        - COMPILER_INSTALL_PATH=$PWD/0day COMPILER=clang ./make.cross ARCH=x86_64
+        - make olddefconfig
+        - make sound/
+        - make drivers/soundwire/
+        - make
