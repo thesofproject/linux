@@ -133,8 +133,7 @@ MODULE_PARM_DESC(cdns_mcp_int_mask, "Cadence MCP IntMask");
 #define CDNS_MCP_CMD_SSP_TAG			BIT(31)
 #define CDNS_MCP_CMD_COMMAND			GENMASK(30, 28)
 #define CDNS_MCP_CMD_DEV_ADDR			GENMASK(27, 24)
-#define CDNS_MCP_CMD_REG_ADDR_H			GENMASK(23, 16)
-#define CDNS_MCP_CMD_REG_ADDR_L			GENMASK(15, 8)
+#define CDNS_MCP_CMD_REG_ADDR			GENMASK(23, 8)
 #define CDNS_MCP_CMD_REG_DATA			GENMASK(7, 0)
 
 #define CDNS_MCP_CMD_READ			2
@@ -529,7 +528,7 @@ _cdns_xfer_msg(struct sdw_cdns *cdns, struct sdw_msg *msg, int cmd,
 	for (i = 0; i < count; i++) {
 		data = FIELD_PREP(CDNS_MCP_CMD_DEV_ADDR, msg->dev_num);
 		data |= FIELD_PREP(CDNS_MCP_CMD_COMMAND, cmd);
-		data |= FIELD_PREP(CDNS_MCP_CMD_REG_ADDR_L, addr);
+		data |= FIELD_PREP(CDNS_MCP_CMD_REG_ADDR, addr);
 		addr++;
 
 		if (msg->flags == SDW_MSG_FLAG_WRITE)
@@ -574,8 +573,8 @@ cdns_program_scp_addr(struct sdw_cdns *cdns, struct sdw_msg *msg)
 	data[0] |= FIELD_PREP(CDNS_MCP_CMD_COMMAND, 0x3);
 	data[1] = data[0];
 
-	data[0] |= FIELD_PREP(CDNS_MCP_CMD_REG_ADDR_L, SDW_SCP_ADDRPAGE1);
-	data[1] |= FIELD_PREP(CDNS_MCP_CMD_REG_ADDR_L, SDW_SCP_ADDRPAGE2);
+	data[0] |= FIELD_PREP(CDNS_MCP_CMD_REG_ADDR, SDW_SCP_ADDRPAGE1);
+	data[1] |= FIELD_PREP(CDNS_MCP_CMD_REG_ADDR, SDW_SCP_ADDRPAGE2);
 
 	data[0] |= msg->addr_page1;
 	data[1] |= msg->addr_page2;
