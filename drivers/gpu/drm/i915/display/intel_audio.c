@@ -1014,11 +1014,15 @@ static unsigned long i915_audio_component_get_power(struct device *kdev)
 
 	ret = intel_display_power_get(dev_priv, POWER_DOMAIN_AUDIO);
 
+	drm_err(&dev_priv->drm,
+		"i915 audio get power, cdclk %ld, before\n",
+		dev_priv->cdclk.hw.cdclk);
+
 	if (dev_priv->audio_power_refcount++ == 0) {
 		if (INTEL_GEN(dev_priv) >= 9) {
 			intel_de_write(dev_priv, AUD_FREQ_CNTRL,
 				       dev_priv->audio_freq_cntrl);
-			drm_dbg_kms(&dev_priv->drm,
+			drm_err(&dev_priv->drm,
 				    "restored AUD_FREQ_CNTRL to 0x%x\n",
 				    dev_priv->audio_freq_cntrl);
 		}
@@ -1031,6 +1035,10 @@ static unsigned long i915_audio_component_get_power(struct device *kdev)
 			intel_de_write(dev_priv, AUD_PIN_BUF_CTL,
 				       (intel_de_read(dev_priv, AUD_PIN_BUF_CTL) | AUD_PIN_BUF_ENABLE));
 	}
+
+	drm_err(&dev_priv->drm,
+		"i915 audio get power, cdclk %ld, completed\n",
+		dev_priv->cdclk.hw.cdclk);
 
 	return ret;
 }
