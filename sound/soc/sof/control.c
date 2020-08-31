@@ -233,7 +233,7 @@ int snd_sof_bytes_get(struct snd_kcontrol *kcontrol,
 	if (data->size > be->max - sizeof(*data)) {
 		dev_err_ratelimited(scomp->dev,
 				    "error: %u bytes of control data is invalid, max is %zu\n",
-				    data->size, (size_t)be->max - sizeof(*data));
+				    data->size, be->max - sizeof(*data));
 		return -EINVAL;
 	}
 
@@ -267,7 +267,7 @@ int snd_sof_bytes_put(struct snd_kcontrol *kcontrol,
 	if (data->size > be->max - sizeof(*data)) {
 		dev_err_ratelimited(scomp->dev,
 				    "error: data size too big %u bytes max is %zu\n",
-				    data->size, (size_t)be->max - sizeof(*data));
+				    data->size, be->max - sizeof(*data));
 		return -EINVAL;
 	}
 
@@ -443,7 +443,7 @@ int snd_sof_bytes_ext_get(struct snd_kcontrol *kcontrol,
 	if (cdata->data->size > be->max - sizeof(const struct sof_abi_hdr)) {
 		dev_err_ratelimited(scomp->dev, "error: user data size %d exceeds max size %zu.\n",
 				    cdata->data->size,
-				    (size_t)be->max - sizeof(const struct sof_abi_hdr));
+				    be->max - sizeof(const struct sof_abi_hdr));
 		return -EINVAL;
 	}
 
