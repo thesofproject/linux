@@ -428,7 +428,7 @@ cleanup:
 	}
 
 	/*
-	 * return master core id if both fw copy
+	 * return primary core id if both fw copy
 	 * and stream clean up are successful
 	 */
 	if (!ret)
