@@ -2422,7 +2422,7 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 
 	swidget->core = comp.core;
 
-	/* default is master core, safe to call for already enabled cores */
+	/* default is primary core, safe to call for already enabled cores */
 	ret = sof_core_enable(sdev, comp.core);
 	if (ret < 0) {
 		dev_err(scomp->dev, "error: enable core: %d\n", ret);
