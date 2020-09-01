@@ -2388,7 +2388,7 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 	struct sof_ipc_comp_reply reply;
 	struct snd_sof_control *scontrol;
 	struct sof_ipc_comp comp = {
-		.core = SOF_DSP_MASTER_CORE,
+		.core = SOF_DSP_PRIMARY_CORE,
 	};
 	int ret = 0;
 
