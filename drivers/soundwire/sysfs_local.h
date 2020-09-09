@@ -8,6 +8,10 @@
  * SDW sysfs APIs -
  */
 
+/* basic routine to report status of Slave (attachment, dev_num) */
+int sdw_slave_status_sysfs_init(struct sdw_slave *slave);
+
+/* additional device-managed properties reported after driver probe */
 int sdw_slave_sysfs_init(struct sdw_slave *slave);
 int sdw_slave_sysfs_dpn_init(struct sdw_slave *slave);
 

@@ -6,6 +6,7 @@
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_type.h>
 #include "bus.h"
+#include "sysfs_local.h"
 
 static void sdw_slave_release(struct device *dev)
 {
@@ -83,6 +84,7 @@ int sdw_slave_add(struct sdw_bus *bus,
 		return ret;
 	}
 	sdw_slave_debugfs_init(slave);
+	sdw_slave_status_sysfs_init(slave);
 
 	return ret;
 }
