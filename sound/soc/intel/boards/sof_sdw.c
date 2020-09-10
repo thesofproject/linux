@@ -52,6 +52,15 @@ static const struct dmi_system_id sof_sdw_quirk_table[] = {
 		.callback = sof_sdw_quirk_cb,
 		.matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc"),
+			DMI_EXACT_MATCH(DMI_PRODUCT_SKU, "0A3E")
+		},
+		.driver_data = (void *)(SOF_RT711_JD_SRC_JD2 |
+					SOF_RT715_DAI_ID_FIX),
+	},
+	{
+		.callback = sof_sdw_quirk_cb,
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc"),
 			DMI_EXACT_MATCH(DMI_PRODUCT_SKU, "09C6")
 		},
 		.driver_data = (void *)(SOF_RT711_JD_SRC_JD2 |
@@ -145,6 +154,10 @@ static struct snd_soc_codec_conf codec_conf[] = {
 		.dlc = COMP_CODEC_CONF("sdw:0:25d:711:1"),
 		.name_prefix = "rt711",
 	},
+	{
+		.dlc = COMP_CODEC_CONF("sdw:1:25d:711:0"),
+		.name_prefix = "rt711",
+	},
 	/* rt1308 w/ I2S connection */
 	{
 		.dlc = COMP_CODEC_CONF("i2c-10EC1308:00"),
@@ -153,6 +166,11 @@ static struct snd_soc_codec_conf codec_conf[] = {
 	/* rt1308 left on link 1 */
 	{
 		.dlc = COMP_CODEC_CONF("sdw:1:25d:1308:0"),
+		.name_prefix = "rt1308-1",
+	},
+	/* rt1308 on link 2 */
+	{
+		.dlc = COMP_CODEC_CONF("sdw:2:25d:1308:0"),
 		.name_prefix = "rt1308-1",
 	},
 	/* two 1308s on link1 with different unique id */
@@ -171,6 +189,10 @@ static struct snd_soc_codec_conf codec_conf[] = {
 	},
 	{
 		.dlc = COMP_CODEC_CONF("sdw:3:25d:715:0"),
+		.name_prefix = "rt715",
+	},
+	{
+		.dlc = COMP_CODEC_CONF("sdw:0:25d:715:0"),
 		.name_prefix = "rt715",
 	},
 	/* two MAX98373s on link1 with different unique id */
