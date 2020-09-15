@@ -2229,7 +2229,7 @@ static int sof_process_load(struct snd_soc_component *scomp, int index,
 	}
 
 	process = (struct sof_ipc_comp_process *)
-		  sof_comp_alloc(swidget, &ipc_size, index, 0);
+		  sof_comp_alloc(swidget, &ipc_size, index, swidget->core);
 	if (!process) {
 		ret = -ENOMEM;
 		goto out;
