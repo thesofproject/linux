@@ -82,7 +82,6 @@ config SND_SST_ATOM_HIFI2_PLATFORM
 
 config SND_SST_ATOM_HIFI2_PLATFORM_PCI
 	tristate "PCI HiFi2 (Merrifield) Platforms"
-	depends on SND_SOC_INTEL_NOT_RECOMMENDED || COMPILE_TEST
 	depends on X86 && PCI
 	select SND_SST_IPC_PCI
 	select SND_SST_ATOM_HIFI2_PLATFORM
@@ -116,9 +115,9 @@ config SND_SOC_INTEL_SKYLAKE
 	select SND_SOC_INTEL_SKL
 	select SND_SOC_INTEL_APL
 	select SND_SOC_INTEL_KBL
-	select SND_SOC_INTEL_GLK if SND_SOC_INTEL_NOT_RECOMMENDED || COMPILE_TEST
-	select SND_SOC_INTEL_CNL if SND_SOC_INTEL_NOT_RECOMMENDED || COMPILE_TEST
-	select SND_SOC_INTEL_CFL if SND_SOC_INTEL_NOT_RECOMMENDED || COMPILE_TEST
+	select SND_SOC_INTEL_GLK
+	select SND_SOC_INTEL_CNL
+	select SND_SOC_INTEL_CFL
 	help
 	  This is a backwards-compatible option to select all devices
 	  supported by the Intel SST/Skylake driver. This option is no
@@ -155,7 +154,6 @@ config SND_SOC_INTEL_KBL
 
 config SND_SOC_INTEL_GLK
 	tristate "GeminiLake Platforms"
-	depends on SND_SOC_INTEL_NOT_RECOMMENDED || COMPILE_TEST
 	depends on PCI && ACPI
 	depends on COMMON_CLK
 	select SND_SOC_INTEL_SKYLAKE_FAMILY
@@ -165,7 +163,6 @@ config SND_SOC_INTEL_GLK
 
 config SND_SOC_INTEL_CNL
 	tristate "CannonLake/WhiskyLake Platforms"
-	depends on SND_SOC_INTEL_NOT_RECOMMENDED || COMPILE_TEST
 	depends on PCI && ACPI
 	depends on COMMON_CLK
 	select SND_SOC_INTEL_SKYLAKE_FAMILY
@@ -175,7 +172,6 @@ config SND_SOC_INTEL_CNL
 
 config SND_SOC_INTEL_CFL
 	tristate "CoffeeLake Platforms"
-	depends on SND_SOC_INTEL_NOT_RECOMMENDED || COMPILE_TEST
 	depends on PCI && ACPI
 	depends on COMMON_CLK
 	select SND_SOC_INTEL_SKYLAKE_FAMILY
@@ -185,7 +181,6 @@ config SND_SOC_INTEL_CFL
 
 config SND_SOC_INTEL_CML_H
 	tristate "CometLake-H Platforms"
-	depends on SND_SOC_INTEL_NOT_RECOMMENDED || COMPILE_TEST
 	depends on PCI && ACPI
 	depends on COMMON_CLK
 	select SND_SOC_INTEL_SKYLAKE_FAMILY
@@ -195,7 +190,6 @@ config SND_SOC_INTEL_CML_H
 
 config SND_SOC_INTEL_CML_LP
 	tristate "CometLake-LP Platforms"
-	depends on SND_SOC_INTEL_NOT_RECOMMENDED || COMPILE_TEST
 	depends on PCI && ACPI
 	depends on COMMON_CLK
 	select SND_SOC_INTEL_SKYLAKE_FAMILY
@@ -214,7 +208,6 @@ config SND_SOC_INTEL_SKYLAKE_SSP_CLK
 
 config SND_SOC_INTEL_SKYLAKE_HDAUDIO_CODEC
 	bool "HDAudio codec support"
-	depends on SND_SOC_INTEL_NOT_RECOMMENDED || COMPILE_TEST
 	help
 	  If you have Intel Skylake or Kabylake with HDAudio codec
 	  and DMIC present then enable this option by saying Y.
@@ -244,15 +237,6 @@ config SND_SOC_ACPI_INTEL_MATCH
 	select SND_SOC_ACPI if ACPI
 	# this option controls the compilation of ACPI matching tables and
 	# helpers and is not meant to be selected by the user.
-
-config SND_SOC_INTEL_NOT_RECOMMENDED
-	bool "Intel ASoC: expose not-recommended legacy options"
-	help
-	  When unset, this option de-activates features previously
-	  marked as not recommended or deprecated.
-	  When set, these features will be fully visible in menuconfig
-	  Distributions and 'normal' users SHOULD NOT enable this
-	  option.
 
 endif ## SND_SOC_INTEL_SST_TOPLEVEL || SND_SOC_SOF_INTEL_TOPLEVEL
 
