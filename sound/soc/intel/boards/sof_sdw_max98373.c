@@ -79,6 +79,9 @@ static int max98373_sdw_trigger(struct snd_pcm_substream *substream, int cmd)
 
 		ret = max98373_trigger(substream, cmd);
 		break;
+	default:
+		ret = -EINVAL;
+		break;
 	}
 
 	return ret;
