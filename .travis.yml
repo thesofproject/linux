@@ -55,7 +55,7 @@ jobs:
         - make M=sound/soc/sof C=2
     - name: "BUILD GCC9 SOF Kernel x86_64"
       script:
-        - export ARCH=x86_64 KCFLAGS="-Wall -Werror"
+        - export ARCH=x86_64 KCFLAGS="-Wall -Werror" KBUILD_MODPOST_FAIL_ON_WARNINGS=1
         - export MAKEFLAGS=j"$(nproc)"
         - bash kconfig/kconfig-sof-default.sh
         - make sound/ W=1
@@ -64,14 +64,14 @@ jobs:
         - make bindeb-pkg
     - name: "BUILD GCC9 SST Kernel x86_64"
       script:
-        - export ARCH=x86_64 KCFLAGS="-Wall -Werror"
+        - export ARCH=x86_64 KCFLAGS="-Wall -Werror" KBUILD_MODPOST_FAIL_ON_WARNINGS=1
         - export MAKEFLAGS=j"$(nproc)"
         - bash kconfig/kconfig-sst.sh
         - make sound/
         - make
     - name: "BUILD GCC9 SOF Kernel i386"
       script:
-        - export ARCH=i386 KCFLAGS="-Wall -Werror"
+        - export ARCH=i386 KCFLAGS="-Wall -Werror" KBUILD_MODPOST_FAIL_ON_WARNINGS=1
         - export MAKEFLAGS=j"$(nproc)"
         - bash kconfig/kconfig-sof-default.sh
         - make sound/
@@ -79,7 +79,7 @@ jobs:
         - make
     - name: "BUILD GCC9 SOF Kernel arm64"
       script:
-        - export ARCH=arm64 CROSS_COMPILE=/usr/bin/aarch64-linux-gnu- KCFLAGS="-Wall -Werror"
+        - export ARCH=arm64 CROSS_COMPILE=/usr/bin/aarch64-linux-gnu- KCFLAGS="-Wall -Werror" KBUILD_MODPOST_FAIL_ON_WARNINGS=1
         - export MAKEFLAGS=j"$(nproc)"
         - bash kconfig/kconfig-sof-arm64.sh
         - make sound/
@@ -87,7 +87,7 @@ jobs:
         - make
     - name: "BUILD CLANG SOF Kernel x86_64"
       script:
-        - export ARCH=x86_64 CC=clang KCFLAGS="-Wall -Werror"
+        - export ARCH=x86_64 CC=clang KCFLAGS="-Wall -Werror" KBUILD_MODPOST_FAIL_ON_WARNINGS=1
         - export MAKEFLAGS=j"$(nproc)"
         - bash kconfig/kconfig-sof-default.sh
         - make olddefconfig
