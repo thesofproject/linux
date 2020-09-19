@@ -34,9 +34,43 @@ install:
 jobs:
   include:
     - if: type = pull_request
-      name: checkpatch
+      # These two are combined because they both need a merge base and
+      # locally unshallowing .git/ seems time consuming for some reason.
+      # Without the merge base, the --xxxstats will either fail or be
+      # wrong and checkpatch prints confusing garbage.
+      name: checkpatch and age of git base
       script:
+        # Start with some visual and plain English context. A picture is
+        # worth thousand words and makes all the rest less abstract.
         - *short_log
+        - git --no-pager log --oneline --graph --decorate
+                                    --max-count=5 "${TRAVIS_BRANCH}"
+        # If the merge base is missing then the shallow depth
+        # optimization has _already_ failed because Travis' already
+        # fetched practically the entire history with a "git fetch
+        # github pulls/1234/merge" command. The very long duration of
+        # that earlier fetch merge command is hidden in Travis logs
+        # under the git clone command _wrongly_ advertised as quick!
+        - git merge-base "${TRAVIS_PULL_REQUEST_SHA}" "${TRAVIS_BRANCH}" ||
+              git fetch --unshallow https://github.com/"${TRAVIS_REPO_SLUG}"
+                "${TRAVIS_BRANCH}"
+        # Show how "late" the PR base is
+        - |
+          # Tests are run on the PR merged with this extra code from the
+          # (moving) target branch:
+          git diff --shortstat --dirstat \
+              "${TRAVIS_PULL_REQUEST_SHA}"..."${TRAVIS_BRANCH}"
+        # Use set -x to expand all values in the log.
+        # No double dot '..' so rev-list fails if a TRAVIS_ variable is missing
+        - set -x; behind=$(git rev-list --no-merges
+            ^"${TRAVIS_PULL_REQUEST_SHA}" "${TRAVIS_BRANCH}" | wc -l) ; set +x
+        # Note $behind is NOT comparable to clone depth in repos with merges.
+        - '[ "$behind" -lt 1000 ] # is the PR base too far behind?'
+
+        # New Ubuntu 20.04 location
+        - sudo mkdir -p /usr/share/codespell && sudo ln -s
+           /usr/lib/python3/dist-packages/codespell_lib/data/dictionary.txt
+           /usr/share/codespell/dictionary.txt
         # TODO: stop screen-scraping the git log and switch to
         # ${TRAVIS_COMMIT_RANGE} or ${TRAVIS_BRANCH}..HEAD after testing
         # both force pushes and not.
@@ -47,6 +81,7 @@ jobs:
         - SHA_PR=`git log --oneline -1 | sed -rn "s/.*Merge (.*) into.*/\1/p"`
         - SHA_MAIN=`git log --oneline -1 | sed -rn "s/.*Merge .* into (.*)/\1/p"`
         - ( set -x; scripts/checkpatch.pl --strict --codespell -g $SHA_MAIN..$SHA_PR )
+
     - name: Sparse check
       script:
         - export ARCH=x86_64
