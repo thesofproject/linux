@@ -5,6 +5,14 @@
 
 menu "Bus devices"
 
+config ANCILLARY_BUS
+       tristate "Software based Ancillary Bus"
+       help
+         Enable Ancillary Bus support.  An ancillary_device is typically a
+         subset of a larger device, with simple driver matching, e.g. a PCI
+         function which supports features from more than one subsystem such as
+         rdma, vdpa sharing, or separate functions as part of an audio card.
+
 config ARM_CCI
 	bool
 
