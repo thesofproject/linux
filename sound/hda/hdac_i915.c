@@ -75,6 +75,8 @@ EXPORT_SYMBOL_GPL(snd_hdac_i915_set_bclk);
 
 /**
  * Returns true if the devices can be connected for audio.
+ * @i915: i915 PCI device
+ * @hdac: HDA audio controller PCI device
  */
 static bool connectivity_check(struct pci_dev *i915, struct pci_dev *hdac)
 {
