@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-1.0
+// SPDX-License-Identifier: GPL-2.0
 // Copyright (c) 2020, Linaro Limited
 
 #include <linux/err.h>
@@ -251,11 +251,13 @@ static int q6afe_clock_dev_probe(struct platform_device *pdev)
 	return 0;
 }
 
+#ifdef CONFIG_OF
 static const struct of_device_id q6afe_clock_device_id[] = {
 	{ .compatible = "qcom,q6afe-clocks" },
 	{},
 };
 MODULE_DEVICE_TABLE(of, q6afe_clock_device_id);
+#endif
 
 static struct platform_driver q6afe_clock_platform_driver = {
 	.driver = {
