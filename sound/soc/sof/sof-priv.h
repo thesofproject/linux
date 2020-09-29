@@ -400,6 +400,7 @@ struct snd_sof_dev {
 	/* debug */
 	struct dentry *debugfs_root;
 	struct list_head dfsentry_list;
+	int block_pm;
 
 	/* firmware loader */
 	struct snd_dma_buffer dmab;

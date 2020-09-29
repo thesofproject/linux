@@ -626,6 +626,86 @@ int snd_sof_debugfs_buf_item(struct snd_sof_dev *sdev,
 }
 EXPORT_SYMBOL_GPL(snd_sof_debugfs_buf_item);
 
+static ssize_t block_pm_read(struct file *file, char __user *to, size_t count, loff_t *ppos)
+{
+	struct snd_sof_dfsentry *dfse = file->private_data;
+	struct snd_sof_dev *sdev = dfse->sdev;
+	char buf[4] = {0};
+
+	snprintf(buf, sizeof(buf), "%d\n", sdev->block_pm);
+	return simple_read_from_buffer(to, count, ppos, buf, sizeof(buf));
+}
+
+static ssize_t block_pm_write(struct file *file, const char __user *from, size_t count,
+			      loff_t *ppos)
+{
+	struct snd_sof_dfsentry *dfse = file->private_data;
+	struct snd_sof_dev *sdev = dfse->sdev;
+	loff_t pos = 0;
+	char buf[4];
+	int ret;
+
+	if (count > sizeof(buf)) {
+		dev_err(sdev->dev, "%s too long input, %zu > %ld\n", __func__, count, sizeof(buf));
+		return -EINVAL;
+	}
+
+	ret = simple_write_to_buffer(buf, sizeof(buf), &pos, from, count);
+	if (ret <= 0)
+		return -EINVAL;
+
+	/* parse input */
+	if (buf[0] == '1' && !sdev->block_pm) {
+		ret = pm_runtime_get_sync(sdev->dev);
+		if (!ret || ret == -EACCES) {
+			dev_info(sdev->dev, "pm block enabled");
+			sdev->block_pm = 1;
+		} else {
+			pm_runtime_put_noidle(sdev->dev);
+			dev_info(sdev->dev, "pm block failed, %d", ret);
+		}
+	} else if (buf[0] == '0' && sdev->block_pm) {
+		pm_runtime_mark_last_busy(sdev->dev);
+		pm_runtime_put_autosuspend(sdev->dev);
+		sdev->block_pm = 0;
+		dev_info(sdev->dev, "pm block disabled");
+	} else if (buf[0] == '0' + sdev->block_pm) {
+		dev_info(sdev->dev, "pm block state %d remained", sdev->block_pm);
+	} else {
+		return -EINVAL;
+	}
+	return count;
+}
+
+static const struct file_operations block_pm_fops = {
+	.open = simple_open,
+	.read = block_pm_read,
+	.write = block_pm_write,
+	.llseek = default_llseek,
+};
+
+static int snd_sof_dbg_block_pm_init(struct snd_sof_dev *sdev)
+{
+	struct snd_sof_dfsentry *dfse;
+
+	dfse = devm_kzalloc(sdev->dev, sizeof(*dfse), GFP_KERNEL);
+	if (!dfse)
+		goto error;
+
+	/* don't allocate buffer before first usage, to save memory when unused */
+	dfse->type = SOF_DFSENTRY_TYPE_BUF;
+	dfse->sdev = sdev;
+
+	debugfs_create_file("block_pm", 0644, sdev->debugfs_root, dfse, &block_pm_fops);
+
+	/* add to dfsentry list */
+	list_add(&dfse->list, &sdev->dfsentry_list);
+	return 0;
+error:
+	kfree(dfse);
+	return -ENOMEM;
+}
+
 int snd_sof_dbg_init(struct snd_sof_dev *sdev)
 {
 	const struct snd_sof_dsp_ops *ops = sof_ops(sdev);
@@ -650,6 +730,11 @@ int snd_sof_dbg_init(struct snd_sof_dev *sdev)
 		if (err < 0)
 			return err;
 	}
+
+	/* create read-write block_pm debugfs entry */
+	err = snd_sof_dbg_block_pm_init(sdev);
+	if (err < 0)
+		return err;
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_PROBES)
 	err = snd_sof_debugfs_probe_item(sdev, "probe_points",
