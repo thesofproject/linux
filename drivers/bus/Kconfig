@@ -5,6 +5,9 @@
 
 menu "Bus devices"
 
+config ANCILLARY_BUS
+       tristate
+
 config ARM_CCI
 	bool
 
