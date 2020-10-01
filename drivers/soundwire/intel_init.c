@@ -12,7 +12,7 @@
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/module.h>
-#include <linux/platform_device.h>
+#include <linux/ancillary_bus.h>
 #include <linux/pm_runtime.h>
 #include <linux/soundwire/sdw_intel.h>
 #include "cadence_master.h"
@@ -29,6 +29,42 @@
 static int ctrl_link_mask;
 module_param_named(sdw_link_mask, ctrl_link_mask, int, 0444);
 MODULE_PARM_DESC(sdw_link_mask, "Intel link mask (one bit per link)");
+
+static void intel_link_ancildev_release(struct device *dev)
+{
+	/* nothing to do here but release required by ancillary_device */
+}
+
+static int intel_link_dev_init(struct sdw_intel_link_dev *ldev,
+			       struct device *parent,
+			       struct fwnode_handle *fwnode,
+			       const char *name,
+			       int link_id)
+{
+	struct ancillary_device *ancildev;
+	int ret;
+
+	ancildev = &ldev->ancildev;
+	ancildev->name = name;
+	ancildev->dev.parent = parent;
+	ancildev->dev.fwnode = fwnode;
+	ancildev->dev.release = intel_link_ancildev_release;
+
+	/* we don't use an IDA since we already have a link ID */
+	ancildev->id = link_id;
+
+	ret = ancillary_device_initialize(ancildev);
+	if (ret < 0)
+		dev_err(parent, "failed to initialize link dev %s link_id %d\n",
+			name, link_id);
+
+	return ret;
+}
+
+static void intel_link_dev_unregister(struct sdw_intel_link_dev *ldev)
+{
+	ancillary_device_unregister(&ldev->ancildev);
+}
 
 static bool is_link_enabled(struct fwnode_handle *fw_node, int i)
 {
@@ -56,26 +92,24 @@ static bool is_link_enabled(struct fwnode_handle *fw_node, int i)
 
 static int sdw_intel_cleanup(struct sdw_intel_ctx *ctx)
 {
-	struct sdw_intel_link_res *link = ctx->links;
+	struct sdw_intel_link_dev *ldev = ctx->ldev;
 	u32 link_mask;
 	int i;
 
-	if (!link)
+	if (!ldev)
 		return 0;
 
 	link_mask = ctx->link_mask;
 
-	for (i = 0; i < ctx->count; i++, link++) {
+	for (i = 0; i < ctx->count; i++, ldev++) {
 		if (!(link_mask & BIT(i)))
 			continue;
 
-		if (link->pdev) {
-			pm_runtime_disable(&link->pdev->dev);
-			platform_device_unregister(link->pdev);
-		}
+		pm_runtime_disable(&ldev->ancildev.dev);
+		intel_link_dev_unregister(ldev);
 
-		if (!link->clock_stop_quirks)
-			pm_runtime_put_noidle(link->dev);
+		if (!ldev->link_res.clock_stop_quirks)
+			pm_runtime_put_noidle(ldev->link_res.dev);
 	}
 
 	return 0;
@@ -189,9 +223,8 @@ EXPORT_SYMBOL_NS(sdw_intel_thread, SOUNDWIRE_INTEL_INIT);
 static struct sdw_intel_ctx
 *sdw_intel_probe_controller(struct sdw_intel_res *res)
 {
-	struct platform_device_info pdevinfo;
-	struct platform_device *pdev;
 	struct sdw_intel_link_res *link;
+	struct sdw_intel_link_dev *ldev;
 	struct sdw_intel_ctx *ctx;
 	struct acpi_device *adev;
 	struct sdw_slave *slave;
@@ -201,6 +234,7 @@ static struct sdw_intel_ctx
 	int num_slaves = 0;
 	int count;
 	int i;
+	int ret;
 
 	if (!res)
 		return NULL;
@@ -219,9 +253,9 @@ static struct sdw_intel_ctx
 		return NULL;
 
 	ctx->count = count;
-	ctx->links = devm_kcalloc(&adev->dev, ctx->count,
-				  sizeof(*ctx->links), GFP_KERNEL);
-	if (!ctx->links)
+	ctx->ldev = devm_kcalloc(&adev->dev, ctx->count,
+				 sizeof(*ctx->ldev), GFP_KERNEL);
+	if (!ctx->ldev)
 		return NULL;
 
 	ctx->count = count;
@@ -230,19 +264,30 @@ static struct sdw_intel_ctx
 	ctx->handle = res->handle;
 	mutex_init(&ctx->shim_lock);
 
-	link = ctx->links;
+	ldev = ctx->ldev;
 	link_mask = ctx->link_mask;
 
 	INIT_LIST_HEAD(&ctx->link_list);
 
 	/* Create SDW Master devices */
-	for (i = 0; i < count; i++, link++) {
+	for (i = 0; i < count; i++, ldev++) {
 		if (!(link_mask & BIT(i))) {
 			dev_dbg(&adev->dev,
 				"Link %d masked, will not be enabled\n", i);
 			continue;
 		}
 
+		ret = intel_link_dev_init(ldev,
+					  res->parent,
+					  acpi_fwnode_handle(adev),
+					  "link", /* prefixed by core with "soundwire_intel." */
+					  i);
+		if (ret < 0)
+			goto err;
+
+		link = &ldev->link_res;
+
+		/* now set link information */
 		link->mmio_base = res->mmio_base;
 		link->registers = res->mmio_base + SDW_LINK_BASE
 			+ (SDW_LINK_SIZE * i);
@@ -257,24 +302,15 @@ static struct sdw_intel_ctx
 		link->shim_mask = &ctx->shim_mask;
 		link->link_mask = link_mask;
 
-		memset(&pdevinfo, 0, sizeof(pdevinfo));
-
-		pdevinfo.parent = res->parent;
-		pdevinfo.name = "intel-sdw";
-		pdevinfo.id = i;
-		pdevinfo.fwnode = acpi_fwnode_handle(adev);
-		pdevinfo.data = link;
-		pdevinfo.size_data = sizeof(*link);
-
-		pdev = platform_device_register_full(&pdevinfo);
-		if (IS_ERR(pdev)) {
-			dev_err(&adev->dev,
-				"platform device creation failed: %ld\n",
-				PTR_ERR(pdev));
+		ret = ancillary_device_add(&ldev->ancildev);
+		if (ret < 0) {
+			dev_err(&adev->dev, "failed to add link dev %s link_id %d\n",
+				ldev->ancildev.name, i);
+			put_device(&ldev->ancildev.dev);
 			goto err;
 		}
-		link->pdev = pdev;
-		link->cdns = platform_get_drvdata(pdev);
+
+		link->cdns = dev_get_drvdata(&ldev->ancildev.dev);
 
 		list_add_tail(&link->list, &ctx->link_list);
 		bus = &link->cdns->bus;
@@ -311,7 +347,7 @@ static int
 sdw_intel_startup_controller(struct sdw_intel_ctx *ctx)
 {
 	struct acpi_device *adev;
-	struct sdw_intel_link_res *link;
+	struct sdw_intel_link_dev *ldev;
 	u32 caps;
 	u32 link_mask;
 	int i;
@@ -330,27 +366,27 @@ sdw_intel_startup_controller(struct sdw_intel_ctx *ctx)
 		return -EINVAL;
 	}
 
-	if (!ctx->links)
+	if (!ctx->ldev)
 		return -EINVAL;
 
-	link = ctx->links;
+	ldev = ctx->ldev;
 	link_mask = ctx->link_mask;
 
 	/* Startup SDW Master devices */
-	for (i = 0; i < ctx->count; i++, link++) {
+	for (i = 0; i < ctx->count; i++, ldev++) {
 		if (!(link_mask & BIT(i)))
 			continue;
 
-		intel_master_startup(link->pdev);
+		intel_link_startup(&ldev->ancildev);
 
-		if (!link->clock_stop_quirks) {
+		if (!ldev->link_res.clock_stop_quirks) {
 			/*
 			 * we need to prevent the parent PCI device
 			 * from entering pm_runtime suspend, so that
 			 * power rails to the SoundWire IP are not
 			 * turned off.
 			 */
-			pm_runtime_get_noresume(link->dev);
+			pm_runtime_get_noresume(ldev->link_res.dev);
 		}
 	}
 
@@ -459,22 +495,22 @@ EXPORT_SYMBOL_NS(sdw_intel_exit, SOUNDWIRE_INTEL_INIT);
 
 void sdw_intel_process_wakeen_event(struct sdw_intel_ctx *ctx)
 {
-	struct sdw_intel_link_res *link;
+	struct sdw_intel_link_dev *ldev;
 	u32 link_mask;
 	int i;
 
-	if (!ctx->links)
+	if (!ctx->ldev)
 		return;
 
-	link = ctx->links;
+	ldev = ctx->ldev;
 	link_mask = ctx->link_mask;
 
 	/* Startup SDW Master devices */
-	for (i = 0; i < ctx->count; i++, link++) {
+	for (i = 0; i < ctx->count; i++, ldev++) {
 		if (!(link_mask & BIT(i)))
 			continue;
 
-		intel_master_process_wakeen_event(link->pdev);
+		intel_link_process_wakeen_event(&ldev->ancildev);
 	}
 }
 EXPORT_SYMBOL_NS(sdw_intel_process_wakeen_event, SOUNDWIRE_INTEL_INIT);
