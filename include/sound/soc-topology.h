@@ -167,6 +167,9 @@ struct snd_soc_tplg_ops {
 	/* vendor specific bytes ext handlers available for binding */
 	const struct snd_soc_tplg_bytes_ext_ops *bytes_ext_ops;
 	int bytes_ext_ops_count;
+
+	/* get vendor specific bespoke control type */
+	int (*control_type)(int type);
 };
 
 #ifdef CONFIG_SND_SOC_TOPOLOGY

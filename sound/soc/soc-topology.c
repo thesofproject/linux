@@ -682,6 +682,40 @@ int snd_soc_tplg_widget_bind_event(struct snd_soc_dapm_widget *w,
 }
 EXPORT_SYMBOL_GPL(snd_soc_tplg_widget_bind_event);
 
+/* get possible control type, also possible bespoke */
+static int soc_tplg_get_kcontrol_type(struct soc_tplg *tplg, struct snd_soc_tplg_ctl_hdr *hdr)
+{
+	int ret = -EINVAL;
+
+	switch (le32_to_cpu(hdr->ops.info)) {
+	case SND_SOC_TPLG_CTL_VOLSW:
+	case SND_SOC_TPLG_CTL_STROBE:
+	case SND_SOC_TPLG_CTL_VOLSW_SX:
+	case SND_SOC_TPLG_CTL_VOLSW_XR_SX:
+	case SND_SOC_TPLG_CTL_RANGE:
+	case SND_SOC_TPLG_DAPM_CTL_VOLSW:
+	case SND_SOC_TPLG_DAPM_CTL_PIN:
+		ret = SND_SOC_TPLG_TYPE_MIXER;
+		break;
+	case SND_SOC_TPLG_CTL_ENUM:
+	case SND_SOC_TPLG_CTL_ENUM_VALUE:
+	case SND_SOC_TPLG_DAPM_CTL_ENUM_DOUBLE:
+	case SND_SOC_TPLG_DAPM_CTL_ENUM_VIRT:
+	case SND_SOC_TPLG_DAPM_CTL_ENUM_VALUE:
+		ret = SND_SOC_TPLG_TYPE_ENUM;
+		break;
+	case SND_SOC_TPLG_CTL_BYTES:
+		ret = SND_SOC_TPLG_TYPE_BYTES;
+		break;
+	default:
+		/* check for bespoke info type */
+		if (tplg->ops && tplg->ops->control_type)
+			ret = tplg->ops->control_type(le32_to_cpu(hdr->ops.info));
+	}
+
+	return ret;
+}
+
 /* optionally pass new dynamic kcontrol to component driver. */
 static int soc_tplg_init_kcontrol(struct soc_tplg *tplg,
 	struct snd_kcontrol_new *k, struct snd_soc_tplg_ctl_hdr *hdr)
@@ -1127,6 +1161,7 @@ static int soc_tplg_kcontrol_elems_load(struct soc_tplg *tplg,
 	struct snd_soc_tplg_hdr *hdr)
 {
 	struct snd_soc_tplg_ctl_hdr *control_hdr;
+	int kcontrol_type;
 	int ret;
 	int i;
 
@@ -1142,26 +1177,18 @@ static int soc_tplg_kcontrol_elems_load(struct soc_tplg *tplg,
 			return -EINVAL;
 		}
 
-		switch (le32_to_cpu(control_hdr->ops.info)) {
-		case SND_SOC_TPLG_CTL_VOLSW:
-		case SND_SOC_TPLG_CTL_STROBE:
-		case SND_SOC_TPLG_CTL_VOLSW_SX:
-		case SND_SOC_TPLG_CTL_VOLSW_XR_SX:
-		case SND_SOC_TPLG_CTL_RANGE:
-		case SND_SOC_TPLG_DAPM_CTL_VOLSW:
-		case SND_SOC_TPLG_DAPM_CTL_PIN:
+		kcontrol_type = soc_tplg_get_kcontrol_type(tplg, control_hdr);
+
+		switch (kcontrol_type) {
+		case SND_SOC_TPLG_TYPE_MIXER:
 			ret = soc_tplg_dmixer_create(tplg, 1,
 					le32_to_cpu(hdr->payload_size));
 			break;
-		case SND_SOC_TPLG_CTL_ENUM:
-		case SND_SOC_TPLG_CTL_ENUM_VALUE:
-		case SND_SOC_TPLG_DAPM_CTL_ENUM_DOUBLE:
-		case SND_SOC_TPLG_DAPM_CTL_ENUM_VIRT:
-		case SND_SOC_TPLG_DAPM_CTL_ENUM_VALUE:
+		case SND_SOC_TPLG_TYPE_ENUM:
 			ret = soc_tplg_denum_create(tplg, 1,
 					le32_to_cpu(hdr->payload_size));
 			break;
-		case SND_SOC_TPLG_CTL_BYTES:
+		case SND_SOC_TPLG_TYPE_BYTES:
 			ret = soc_tplg_dbytes_create(tplg, 1,
 					le32_to_cpu(hdr->payload_size));
 			break;
@@ -1642,14 +1669,10 @@ static int soc_tplg_dapm_widget_create(struct soc_tplg *tplg,
 	dev_dbg(tplg->dev, "ASoC: template %s has %d controls of type %x\n",
 		w->name, w->num_kcontrols, control_hdr->type);
 
-	switch (le32_to_cpu(control_hdr->ops.info)) {
-	case SND_SOC_TPLG_CTL_VOLSW:
-	case SND_SOC_TPLG_CTL_STROBE:
-	case SND_SOC_TPLG_CTL_VOLSW_SX:
-	case SND_SOC_TPLG_CTL_VOLSW_XR_SX:
-	case SND_SOC_TPLG_CTL_RANGE:
-	case SND_SOC_TPLG_DAPM_CTL_VOLSW:
-		kcontrol_type = SND_SOC_TPLG_TYPE_MIXER;  /* volume mixer */
+	kcontrol_type = soc_tplg_get_kcontrol_type(tplg, control_hdr);
+
+	switch (kcontrol_type) {
+	case SND_SOC_TPLG_TYPE_MIXER:  /* volume mixer */
 		template.num_kcontrols = le32_to_cpu(w->num_kcontrols);
 		template.kcontrol_news =
 			soc_tplg_dapm_widget_dmixer_create(tplg,
@@ -1659,12 +1682,7 @@ static int soc_tplg_dapm_widget_create(struct soc_tplg *tplg,
 			goto hdr_err;
 		}
 		break;
-	case SND_SOC_TPLG_CTL_ENUM:
-	case SND_SOC_TPLG_CTL_ENUM_VALUE:
-	case SND_SOC_TPLG_DAPM_CTL_ENUM_DOUBLE:
-	case SND_SOC_TPLG_DAPM_CTL_ENUM_VIRT:
-	case SND_SOC_TPLG_DAPM_CTL_ENUM_VALUE:
-		kcontrol_type = SND_SOC_TPLG_TYPE_ENUM;	/* enumerated mixer */
+	case SND_SOC_TPLG_TYPE_ENUM:	/* enumerated mixer */
 		template.num_kcontrols = le32_to_cpu(w->num_kcontrols);
 		template.kcontrol_news =
 			soc_tplg_dapm_widget_denum_create(tplg,
@@ -1674,8 +1692,7 @@ static int soc_tplg_dapm_widget_create(struct soc_tplg *tplg,
 			goto hdr_err;
 		}
 		break;
-	case SND_SOC_TPLG_CTL_BYTES:
-		kcontrol_type = SND_SOC_TPLG_TYPE_BYTES; /* bytes control */
+	case SND_SOC_TPLG_TYPE_BYTES: /* bytes control */
 		template.num_kcontrols = le32_to_cpu(w->num_kcontrols);
 		template.kcontrol_news =
 			soc_tplg_dapm_widget_dbytes_create(tplg,
