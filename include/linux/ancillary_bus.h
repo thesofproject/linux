@@ -55,4 +55,14 @@ static inline void ancillary_driver_unregister(struct ancillary_driver *ancildrv
 	driver_unregister(&ancildrv->driver);
 }
 
+/**
+ * module_ancillary_driver() - Helper macro for registering an ancillary driver
+ * @__ancillary_driver: ancillary driver struct
+ *
+ * Helper macro for ancillary drivers which do not do anything special in
+ * module init/exit. This eliminates a lot of boilerplate. Each module may only
+ * use this macro once, and calling it replaces module_init() and module_exit()
+ */
+#define module_ancillary_driver(__ancillary_driver) \
+	module_driver(__ancillary_driver, ancillary_driver_register, ancillary_driver_unregister)
 #endif /* _ANCILLARY_BUS_H_ */
