@@ -1244,17 +1244,22 @@ static int sof_control_load(struct snd_soc_component *scomp, int index,
 	case SND_SOC_TPLG_CTL_VOLSW:
 	case SND_SOC_TPLG_CTL_VOLSW_SX:
 	case SND_SOC_TPLG_CTL_VOLSW_XR_SX:
+	case SOF_TPLG_KCTL_VOL_ID:
+	case SOF_TPLG_KCTL_SWITCH_ID:
+
 		sm = (struct soc_mixer_control *)kc->private_value;
 		dobj = &sm->dobj;
 		ret = sof_control_load_volume(scomp, scontrol, kc, hdr);
 		break;
 	case SND_SOC_TPLG_CTL_BYTES:
+	case SOF_TPLG_KCTL_BYTES_ID:
 		sbe = (struct soc_bytes_ext *)kc->private_value;
 		dobj = &sbe->dobj;
 		ret = sof_control_load_bytes(scomp, scontrol, kc, hdr);
 		break;
 	case SND_SOC_TPLG_CTL_ENUM:
 	case SND_SOC_TPLG_CTL_ENUM_VALUE:
+	case SOF_TPLG_KCTL_ENUM_ID:
 		se = (struct soc_enum *)kc->private_value;
 		dobj = &se->dobj;
 		ret = sof_control_load_enum(scomp, scontrol, kc, hdr);
@@ -3671,10 +3676,10 @@ static int sof_manifest(struct snd_soc_component *scomp, int index,
 
 /* vendor specific kcontrol handlers available for binding */
 static const struct snd_soc_tplg_kcontrol_ops sof_io_ops[] = {
-	{SOF_TPLG_KCTL_VOL_ID, snd_sof_volume_get, snd_sof_volume_put},
+	{SOF_TPLG_KCTL_VOL_ID, snd_sof_volume_get, snd_sof_volume_put, snd_sof_volume_info},
 	{SOF_TPLG_KCTL_BYTES_ID, snd_sof_bytes_get, snd_sof_bytes_put},
 	{SOF_TPLG_KCTL_ENUM_ID, snd_sof_enum_get, snd_sof_enum_put},
-	{SOF_TPLG_KCTL_SWITCH_ID, snd_sof_switch_get, snd_sof_switch_put},
+	{SOF_TPLG_KCTL_SWITCH_ID, snd_sof_switch_get, snd_sof_switch_put, snd_sof_volume_info},
 };
 
 /* vendor specific bytes ext handlers available for binding */
@@ -3718,6 +3723,8 @@ static struct snd_soc_tplg_ops sof_tplg_ops = {
 	/* vendor specific bytes ext handlers available for binding */
 	.bytes_ext_ops	= sof_bytes_ext_ops,
 	.bytes_ext_ops_count	= ARRAY_SIZE(sof_bytes_ext_ops),
+
+	.control_type = snd_sof_control_type,
 };
 
 int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)

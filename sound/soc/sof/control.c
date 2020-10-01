@@ -12,6 +12,7 @@
 
 #include <linux/pm_runtime.h>
 #include <linux/leds.h>
+#include <uapi/sound/sof/tokens.h>
 #include "sof-priv.h"
 #include "sof-audio.h"
 
@@ -112,6 +113,28 @@ int snd_sof_volume_put(struct snd_kcontrol *kcontrol,
 					      SOF_CTRL_CMD_VOLUME,
 					      true);
 	return change;
+}
+
+int snd_sof_volume_info(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_info *uinfo)
+{
+	struct soc_mixer_control *sm = (struct soc_mixer_control *)kcontrol->private_value;
+	struct snd_sof_control *scontrol = sm->dobj.private;
+	unsigned int channels = scontrol->num_channels;
+	int platform_max;
+
+	if (!sm->platform_max)
+		sm->platform_max = sm->max;
+	platform_max = sm->platform_max;
+
+	if (platform_max == 1 && !strstr(kcontrol->id.name, " Volume"))
+		uinfo->type = SNDRV_CTL_ELEM_TYPE_BOOLEAN;
+	else
+		uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+
+	uinfo->count = channels;
+	uinfo->value.integer.min = 0;
+	uinfo->value.integer.max = platform_max - sm->min;
+	return 0;
 }
 
 int snd_sof_switch_get(struct snd_kcontrol *kcontrol,
@@ -488,4 +511,26 @@ int snd_sof_bytes_ext_get(struct snd_kcontrol *kcontrol,
 		return -EFAULT;
 
 	return 0;
+}
+
+int snd_sof_control_type(type)
+{
+	int ret;
+
+	switch (type) {
+	case SOF_TPLG_KCTL_VOL_ID:
+	case SOF_TPLG_KCTL_SWITCH_ID:
+		ret = SND_SOC_TPLG_TYPE_MIXER;
+		break;
+	case SOF_TPLG_KCTL_BYTES_ID:
+		ret = SND_SOC_TPLG_TYPE_BYTES;
+		break;
+	case SOF_TPLG_KCTL_ENUM_ID:
+		ret = SND_SOC_TPLG_TYPE_ENUM;
+		break;
+	default:
+		ret = -EINVAL;
+	}
+
+	return ret;
 }
