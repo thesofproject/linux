@@ -496,6 +496,10 @@ int hda_dsp_ext_man_get_cavs_config_data(struct snd_sof_dev *sdev,
 			hda->clk_config_lpro = config_data->elems[i].value;
 			dev_dbg(sdev->dev, "FW clock config: %s\n", hda->clk_config_lpro ? "LPRO" : "HPRO");
 			break;
+		case SOF_EXT_MAN_CAVS_CONFIG_OUTBOX_SIZE:
+		case SOF_EXT_MAN_CAVS_CONFIG_INBOX_SIZE:
+			/* This elem is supported but config data is not being used yet */
+			break;
 		default:
 			dev_warn(sdev->dev, "unsupported token type: %d\n",
 				 config_data->elems[i].token);

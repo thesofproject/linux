@@ -21,6 +21,8 @@
 enum sof_cavs_config_elem_type {
 	SOF_EXT_MAN_CAVS_CONFIG_EMPTY		= 0,
 	SOF_EXT_MAN_CAVS_CONFIG_CAVS_LPRO	= 1,
+	SOF_EXT_MAN_CAVS_CONFIG_OUTBOX_SIZE	= 2,
+	SOF_EXT_MAN_CAVS_CONFIG_INBOX_SIZE	= 3,
 	SOF_EXT_MAN_CAVS_CONFIG_LAST_ELEM,  /**< keep it at the end of enum list */
 };
 
