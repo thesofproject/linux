@@ -1002,12 +1002,16 @@ static void __azx_runtime_resume(struct azx *chip, bool from_rt)
 	azx_init_pci(chip);
 	hda_intel_init_chip(chip, true);
 
-	if (status && from_rt) {
-		list_for_each_codec(codec, &chip->bus)
+	if (from_rt) {
+		list_for_each_codec(codec, &chip->bus) {
+			if (codec->forced_resume && pm_runtime_suspended(hda_codec_dev(codec)))
+				pm_request_resume(hda_codec_dev(codec));
+
 			if (!codec->relaxed_resume &&
 			    (status & (1 << codec->addr)))
 				schedule_delayed_work(&codec->jackpoll_work,
 						      codec->jackpoll_interval);
+		}
 	}
 
 	/* power down again for link-controlled chips */

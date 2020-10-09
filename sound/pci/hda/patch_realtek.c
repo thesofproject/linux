@@ -849,6 +849,12 @@ static int alc_build_controls(struct hda_codec *codec)
 static void alc_pre_init(struct hda_codec *codec)
 {
 	alc_fill_eapd_coef(codec);
+
+	/*
+	 * if controller is resumed from suspend, while codec remains in D3, codec
+	 * needs to be woken up once or otherwise jack detection does not work
+	 */
+	codec->forced_resume = 1;
 }
 
 #define is_s3_resume(codec) \
