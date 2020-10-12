@@ -77,7 +77,9 @@ static inline int snd_sof_dsp_core_power_up(struct snd_sof_dev *sdev,
 static inline int snd_sof_dsp_core_power_down(struct snd_sof_dev *sdev,
 					      unsigned int core_mask)
 {
-	if (sof_ops(sdev)->core_power_down)
+	/* Only power down the enabled cores */
+	core_mask = core_mask & sdev->enabled_cores_mask;
+	if (sof_ops(sdev)->core_power_down && core_mask)
 		return sof_ops(sdev)->core_power_down(sdev, core_mask);
 
 	return 0;
