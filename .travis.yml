@@ -111,13 +111,6 @@ jobs:
         - make drivers/soundwire/ W=1
         - make
         - make bindeb-pkg
-    - name: "BUILD GCC9 SST Kernel x86_64"
-      script:
-        - export ARCH=x86_64 KCFLAGS="-Wall -Werror"
-        - export MAKEFLAGS=j"$(nproc)"
-        - bash kconfig/kconfig-sst.sh
-        - make sound/
-        - make
     - name: "BUILD GCC9 SOF Kernel i386"
       script:
         - export ARCH=i386 KCFLAGS="-Wall -Werror"
