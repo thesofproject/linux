@@ -85,16 +85,12 @@ jobs:
         - sudo mkdir -p /usr/share/codespell && sudo ln -s
            /usr/lib/python3/dist-packages/codespell_lib/data/dictionary.txt
            /usr/share/codespell/dictionary.txt
-        # TODO: stop screen-scraping the git log and switch to
-        # ${TRAVIS_COMMIT_RANGE} or ${TRAVIS_BRANCH}..HEAD after testing
-        # both force pushes and not.
+
         # Note TRAVIS_COMMIT_RANGE has triple dots for "git diff" and
         # needs conversion to double dots for git log's inconsistent
         # user interface.
-        - printf '%s %s\n' "${TRAVIS_BRANCH}" "${TRAVIS_COMMIT_RANGE/.../..}"
-        - SHA_PR=`git log --oneline -1 | sed -rn "s/.*Merge (.*) into.*/\1/p"`
-        - SHA_MAIN=`git log --oneline -1 | sed -rn "s/.*Merge .* into (.*)/\1/p"`
-        - ( set -x; scripts/checkpatch.pl --strict --codespell -g $SHA_MAIN..$SHA_PR )
+        - ( set -x; scripts/checkpatch.pl --strict --codespell
+                     -g "${TRAVIS_COMMIT_RANGE/.../..}" )
 
     - name: Sparse check
       script:
