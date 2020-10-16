@@ -118,7 +118,8 @@ static int rt1308_clock_config(struct device *dev)
 static int rt1308_read_prop(struct sdw_slave *slave)
 {
 	struct sdw_slave_prop *prop = &slave->prop;
-	int nval, i;
+	int nval;
+	int i, j;
 	u32 bit;
 	unsigned long addr;
 	struct sdw_dpn_prop *dpn;
@@ -129,10 +130,28 @@ static int rt1308_read_prop(struct sdw_slave *slave)
 	prop->paging_support = true;
 
 	/* first we need to allocate memory for set bits in port lists */
-	prop->source_ports = 0x00; /* BITMAP: 00010100 (not enable yet) */
+	prop->source_ports = 0x14; /* BITMAP: 00010100 */
 	prop->sink_ports = 0x2; /* BITMAP:  00000010 */
 
-	/* for sink */
+	nval = hweight32(prop->source_ports);
+	prop->src_dpn_prop = devm_kcalloc(&slave->dev, nval,
+						sizeof(*prop->src_dpn_prop),
+						GFP_KERNEL);
+	if (!prop->src_dpn_prop)
+		return -ENOMEM;
+
+	i = 0;
+	dpn = prop->src_dpn_prop;
+	addr = prop->source_ports;
+	for_each_set_bit(bit, &addr, 32) {
+		dpn[i].num = bit;
+		dpn[i].type = SDW_DPN_FULL;
+		dpn[i].simple_ch_prep_sm = true;
+		dpn[i].ch_prep_timeout = 10;
+		i++;
+	}
+
+	/* do this again for sink now */
 	nval = hweight32(prop->sink_ports);
 	prop->sink_dpn_prop = devm_kcalloc(&slave->dev, nval,
 						sizeof(*prop->sink_dpn_prop),
@@ -140,15 +159,15 @@ static int rt1308_read_prop(struct sdw_slave *slave)
 	if (!prop->sink_dpn_prop)
 		return -ENOMEM;
 
-	i = 0;
+	j = 0;
 	dpn = prop->sink_dpn_prop;
 	addr = prop->sink_ports;
 	for_each_set_bit(bit, &addr, 32) {
-		dpn[i].num = bit;
-		dpn[i].type = SDW_DPN_FULL;
-		dpn[i].simple_ch_prep_sm = true;
-		dpn[i].ch_prep_timeout = 10;
-		i++;
+		dpn[j].num = bit;
+		dpn[j].type = SDW_DPN_FULL;
+		dpn[j].simple_ch_prep_sm = true;
+		dpn[j].ch_prep_timeout = 10;
+		j++;
 	}
 
 	/* set the timeout values */
@@ -526,6 +545,7 @@ static int rt1308_sdw_hw_params(struct snd_pcm_substream *substream,
 		snd_soc_component_get_drvdata(component);
 	struct sdw_stream_config stream_config;
 	struct sdw_port_config port_config;
+	struct sdw_port_config port_config_feedback[2];
 	enum sdw_data_direction direction;
 	struct sdw_stream_data *stream;
 	int retval, port, num_channels, ch_mask;
@@ -540,13 +560,12 @@ static int rt1308_sdw_hw_params(struct snd_pcm_substream *substream,
 		return -EINVAL;
 
 	/* SoundWire specific configuration */
+	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
+		goto capture;
+
 	/* port 1 for playback */
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-		direction = SDW_DATA_DIR_RX;
-		port = 1;
-	} else {
-		return -EINVAL;
-	}
+	direction = SDW_DATA_DIR_RX;
+	port = 1;
 
 	if (rt1308->slots) {
 		num_channels = rt1308->slots;
@@ -566,6 +585,29 @@ static int rt1308_sdw_hw_params(struct snd_pcm_substream *substream,
 
 	retval = sdw_stream_add_slave(rt1308->sdw_slave, &stream_config,
 				&port_config, 1, stream->sdw_stream);
+	if (retval) {
+		dev_err(dai->dev, "Unable to configure port\n");
+		return retval;
+	}
+
+	return retval;
+
+capture:
+	direction = SDW_DATA_DIR_TX;
+	num_channels = 4;
+
+	stream_config.frame_rate = params_rate(params);
+	stream_config.ch_count = num_channels;
+	stream_config.bps = snd_pcm_format_width(params_format(params));
+	stream_config.direction = direction;
+
+	port_config_feedback[0].ch_mask = BIT(0) | BIT(1);
+	port_config_feedback[0].num = 2; /* DP2 */
+	port_config_feedback[1].ch_mask = BIT(0) | BIT(1);
+	port_config_feedback[1].num = 4; /* DP4 */
+
+	retval = sdw_stream_add_slave(rt1308->sdw_slave, &stream_config,
+				port_config_feedback, 2, stream->sdw_stream);
 	if (retval) {
 		dev_err(dai->dev, "Unable to configure port\n");
 		return retval;
@@ -630,6 +672,13 @@ static struct snd_soc_dai_driver rt1308_sdw_dai[] = {
 			.stream_name = "DP1 Playback",
 			.channels_min = 1,
 			.channels_max = 2,
+			.rates = RT1308_STEREO_RATES,
+			.formats = RT1308_FORMATS,
+		},
+		.capture = {
+			.stream_name = "DP2-4 Capture",
+			.channels_min = 4,
+			.channels_max = 4,
 			.rates = RT1308_STEREO_RATES,
 			.formats = RT1308_FORMATS,
 		},
