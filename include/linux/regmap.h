@@ -1011,6 +1011,20 @@ bool regmap_ac97_default_volatile(struct device *dev, unsigned int reg);
 				sdw, config)
 
 /**
+ * devm_regmap_init_sdw_mbq() - Initialise managed register map
+ *
+ * @sdw: Device that will be interacted with
+ * @config: Configuration for register map
+ *
+ * The return value will be an ERR_PTR() on error or a valid pointer
+ * to a struct regmap. The regmap will be automatically freed by the
+ * device management code.
+ */
+#define devm_regmap_init_sdw_mbq(sdw, config)			\
+	__regmap_lockdep_wrapper(__devm_regmap_init_sdw_mbq, #config,   \
+				sdw, config)
+
+/**
  * devm_regmap_init_slimbus() - Initialise managed register map
  *
  * @slimbus: Device that will be interacted with
