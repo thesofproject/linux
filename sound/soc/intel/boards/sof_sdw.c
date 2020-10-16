@@ -292,7 +292,7 @@ static struct sof_sdw_codec_info codec_info_list[] = {
 	{
 		.part_id = 0x1308,
 		.acpi_id = "10EC1308",
-		.direction = {true, false},
+		.direction = {true, true},
 		.dai_name = "rt1308-aif",
 		.ops = &sof_sdw_rt1308_i2s_ops,
 		.init = sof_sdw_rt1308_init,
