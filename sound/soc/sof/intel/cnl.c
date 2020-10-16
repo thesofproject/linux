@@ -235,12 +235,26 @@ void cnl_ipc_dump(struct snd_sof_dev *sdev)
 
 static int cnl_register_clients(struct snd_sof_dev *sdev)
 {
-	return intel_register_ipc_test_clients(sdev);
+	int ret;
+
+	ret = intel_register_ipc_test_clients(sdev);
+	if (ret < 0)
+		return ret;
+
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_PROBES)
+	return sof_client_dev_register(sdev, "probes", 0);
+#endif
+
+	return 0;
 }
 
 static void cnl_unregister_clients(struct snd_sof_dev *sdev)
 {
 	intel_unregister_ipc_test_clients(sdev);
+
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_PROBES)
+	sof_client_dev_unregister(sdev, "probes", 0);
+#endif
 }
 
 /* cannonlake ops */
@@ -411,3 +425,4 @@ const struct sof_intel_dsp_desc jsl_chip_info = {
 };
 EXPORT_SYMBOL_NS(jsl_chip_info, SND_SOC_SOF_INTEL_HDA_COMMON);
 MODULE_IMPORT_NS(SND_SOC_SOF_INTEL_CLIENT);
+MODULE_IMPORT_NS(SND_SOC_SOF_CLIENT);
