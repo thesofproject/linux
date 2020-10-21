@@ -2680,7 +2680,7 @@ static int _regmap_read(struct regmap *map, unsigned int reg,
 			return 0;
 	}
 
-	if (map->cache_only)
+	if (map->cache_only && !regmap_volatile(map, reg))
 		return -EBUSY;
 
 	if (!regmap_readable(map, reg))
