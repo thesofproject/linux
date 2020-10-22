@@ -27,6 +27,7 @@ int sof_client_ipc_tx_message(struct sof_client_dev *cdev, void *ipc_msg,
 			      void *reply_data, size_t reply_bytes);
 
 struct dentry *sof_client_get_debugfs_root(struct sof_client_dev *cdev);
+struct device *sof_client_get_dma_dev(struct sof_client_dev *cdev);
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT)
 int sof_client_dev_register(struct snd_sof_dev *sdev, const char *name, u32 id);
