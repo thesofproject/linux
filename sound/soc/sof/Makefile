@@ -3,7 +3,7 @@
 snd-sof-objs := core.o ops.o loader.o ipc.o pcm.o pm.o debug.o topology.o\
 		control.o trace.o utils.o sof-audio.o
 snd-sof-client-objs := sof-client.o
-snd-sof-$(CONFIG_SND_SOC_SOF_DEBUG_PROBES) += probe.o compress.o
+snd-sof-probes-objs := probe.o compress.o sof-probes-client.o
 
 snd-sof-pci-objs := sof-pci-dev.o
 snd-sof-acpi-objs := sof-acpi-dev.o
@@ -24,6 +24,7 @@ obj-$(CONFIG_SND_SOC_SOF_PCI_DEV) += snd-sof-pci.o
 obj-$(CONFIG_SND_SOC_SOF_CLIENT) += snd-sof-client.o
 
 obj-$(CONFIG_SND_SOC_SOF_DEBUG_IPC_FLOOD_TEST_CLIENT) += snd-sof-ipc-test.o
+obj-$(CONFIG_SND_SOC_SOF_DEBUG_PROBES_CLIENT) += snd-sof-probes.o
 
 obj-$(CONFIG_SND_SOC_SOF_INTEL_TOPLEVEL) += intel/
 obj-$(CONFIG_SND_SOC_SOF_IMX_TOPLEVEL) += imx/
