@@ -12,6 +12,7 @@
 #include <linux/module.h>
 #include <sound/soc.h>
 #include <sound/sof.h>
+#include "sof-client.h"
 #include "sof-priv.h"
 #include "ops.h"
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_PROBES)
@@ -53,18 +54,66 @@ static const struct sof_panic_msg panic_msg[] = {
 };
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT)
+static int snd_sof_register_ipcflood_test(struct snd_sof_dev *sdev)
+{
+	int i;
+	int ret;
+
+	if (!IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_IPC_FLOOD_TEST))
+		return 0;
+
+	for (i = 0; i < CONFIG_SND_SOC_SOF_DEBUG_IPC_FLOOD_TEST_NUM; i++) {
+		ret = sof_client_dev_register(sdev, "ipc_test", i);
+		if (ret < 0)
+			break;
+	}
+
+	if (ret) {
+		for (; i >= 0; --i)
+			sof_client_dev_unregister(sdev, "ipc_test", i);
+	}
+
+	return ret;
+}
+
+static void snd_sof_unregister_ipcflood_test(struct snd_sof_dev *sdev)
+{
+	int i;
+
+	if (!IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_IPC_FLOOD_TEST))
+		return;
+
+	for (i = 0; i < CONFIG_SND_SOC_SOF_DEBUG_IPC_FLOOD_TEST_NUM; i++)
+		sof_client_dev_unregister(sdev, "ipc_test", i);
+}
+
 static int snd_sof_register_clients(struct snd_sof_dev *sdev)
 {
-	if (sof_ops(sdev) && sof_ops(sdev)->register_clients)
-		return sof_ops(sdev)->register_clients(sdev);
+	int ret;
 
-	return 0;
+	/* Register platform independent client devices */
+	ret = snd_sof_register_ipcflood_test(sdev);
+	if (ret) {
+		dev_err(sdev->dev, "error: IPC flood test client registration failed\n");
+		return ret;
+	}
+
+	/* Platform depndent client device registration */
+	if (sof_ops(sdev) && sof_ops(sdev)->register_clients)
+		ret = sof_ops(sdev)->register_clients(sdev);
+
+	if (ret)
+		snd_sof_unregister_ipcflood_test(sdev);
+
+	return ret;
 }
 
 static void snd_sof_unregister_clients(struct snd_sof_dev *sdev)
 {
 	if (sof_ops(sdev) && sof_ops(sdev)->unregister_clients)
 		sof_ops(sdev)->unregister_clients(sdev);
+
+	snd_sof_unregister_ipcflood_test(sdev);
 }
 #else /* CONFIG_SND_SOC_SOF_CLIENT */
 static inline int snd_sof_register_clients(struct snd_sof_dev *sdev)
@@ -72,10 +121,9 @@ static inline int snd_sof_register_clients(struct snd_sof_dev *sdev)
 	return 0;
 }
 
-static inline  void snd_sof_unregister_clients(struct snd_sof_dev *sdev)
-{
-}
+static inline  void snd_sof_unregister_clients(struct snd_sof_dev *sdev) { }
 #endif /* CONFIG_SND_SOC_SOF_CLIENT */
+
 /*
  * helper to be called from .dbg_dump callbacks. No error code is
  * provided, it's left as an exercise for the caller of .dbg_dump
@@ -452,3 +500,4 @@ MODULE_AUTHOR("Liam Girdwood");
 MODULE_DESCRIPTION("Sound Open Firmware (SOF) Core");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_ALIAS("platform:sof-audio");
+MODULE_IMPORT_NS(SND_SOC_SOF_CLIENT);
