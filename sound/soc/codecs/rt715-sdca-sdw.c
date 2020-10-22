@@ -136,7 +136,7 @@ static int rt715_update_status(struct sdw_slave *slave,
 static int rt715_read_prop(struct sdw_slave *slave)
 {
 	struct sdw_slave_prop *prop = &slave->prop;
-	int nval, i, j;
+	int nval, i;
 	u32 bit;
 	unsigned long addr;
 	struct sdw_dpn_prop *dpn;
@@ -162,25 +162,6 @@ static int rt715_read_prop(struct sdw_slave *slave)
 		dpn[i].simple_ch_prep_sm = true;
 		dpn[i].ch_prep_timeout = 10;
 		i++;
-	}
-
-	/* do this again for sink now */
-	nval = hweight32(prop->sink_ports);
-
-	prop->sink_dpn_prop = devm_kcalloc(&slave->dev, nval,
-					sizeof(*prop->sink_dpn_prop),
-					GFP_KERNEL);
-	if (!prop->sink_dpn_prop)
-		return -ENOMEM;
-
-	dpn = prop->sink_dpn_prop;
-	j = 0;
-	addr = prop->sink_ports;
-	for_each_set_bit(bit, &addr, 32) {
-		dpn[j].num = bit;
-		dpn[j].simple_ch_prep_sm = true;
-		dpn[j].ch_prep_timeout = 10;
-		j++;
 	}
 
 	/* set the timeout values */
@@ -259,16 +240,18 @@ static int __maybe_unused rt715_dev_resume(struct device *dev)
 regmap_sync:
 	slave->unattach_request = 0;
 	regcache_cache_only(rt715->regmap, false);
-	regcache_sync_region(rt715->regmap, SDW_SDCA_CTL(FUN_JACK_CODEC,
-		RT715_SDCA_ST_EN, RT715_SDCA_ST_CTRL, CH_00),
+	regcache_sync_region(rt715->regmap,
+		SDW_SDCA_CTL(FUN_JACK_CODEC, RT715_SDCA_ST_EN, RT715_SDCA_ST_CTRL,
+			CH_00),
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_SMPU_TRIG_ST_EN,
-		RT715_SDCA_SMPU_TRIG_ST_CTRL, CH_00));
+			RT715_SDCA_SMPU_TRIG_ST_CTRL, CH_00));
 	regcache_cache_only(rt715->mbq_regmap, false);
 	regcache_sync_region(rt715->mbq_regmap, 0x2000000, 0x61020ff);
-	regcache_sync_region(rt715->mbq_regmap, SDW_SDCA_CTL(FUN_JACK_CODEC,
-		RT715_SDCA_ST_EN, RT715_SDCA_ST_CTRL, CH_00),
+	regcache_sync_region(rt715->mbq_regmap,
+		SDW_SDCA_CTL(FUN_JACK_CODEC, RT715_SDCA_ST_EN, RT715_SDCA_ST_CTRL,
+			CH_00),
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_SMPU_TRIG_ST_EN,
-		RT715_SDCA_SMPU_TRIG_ST_CTRL, CH_00));
+			RT715_SDCA_SMPU_TRIG_ST_CTRL, CH_00));
 
 	return 0;
 }

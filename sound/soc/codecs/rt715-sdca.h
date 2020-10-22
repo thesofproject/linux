@@ -115,7 +115,6 @@ struct rt715_sdw_stream_data {
 enum {
 	RT715_AIF1,
 	RT715_AIF2,
-	RT715_AIFS,
 };
 
 int rt715_io_init(struct device *dev, struct sdw_slave *slave);
