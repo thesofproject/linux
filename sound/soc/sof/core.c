@@ -52,6 +52,30 @@ static const struct sof_panic_msg panic_msg[] = {
 	{SOF_IPC_PANIC_ASSERT, "assertion failed"},
 };
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT)
+static int snd_sof_register_clients(struct snd_sof_dev *sdev)
+{
+	if (sof_ops(sdev) && sof_ops(sdev)->register_clients)
+		return sof_ops(sdev)->register_clients(sdev);
+
+	return 0;
+}
+
+static void snd_sof_unregister_clients(struct snd_sof_dev *sdev)
+{
+	if (sof_ops(sdev) && sof_ops(sdev)->unregister_clients)
+		sof_ops(sdev)->unregister_clients(sdev);
+}
+#else /* CONFIG_SND_SOC_SOF_CLIENT */
+static inline int snd_sof_register_clients(struct snd_sof_dev *sdev)
+{
+	return 0;
+}
+
+static inline  void snd_sof_unregister_clients(struct snd_sof_dev *sdev)
+{
+}
+#endif /* CONFIG_SND_SOC_SOF_CLIENT */
 /*
  * helper to be called from .dbg_dump callbacks. No error code is
  * provided, it's left as an exercise for the caller of .dbg_dump
@@ -249,6 +273,12 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	if (plat_data->sof_probe_complete)
 		plat_data->sof_probe_complete(sdev->dev);
 
+	ret = snd_sof_register_clients(sdev);
+	if (ret < 0) {
+		dev_err(sdev->dev, "error: failed to register clients %d\n", ret);
+		goto fw_trace_err;
+	}
+
 	sdev->probe_completed = true;
 
 	return 0;
@@ -373,6 +403,7 @@ int snd_sof_device_remove(struct device *dev)
 			dev_warn(dev, "error: %d failed to prepare DSP for device removal",
 				 ret);
 
+		snd_sof_unregister_clients(sdev);
 		snd_sof_fw_unload(sdev);
 		snd_sof_ipc_free(sdev);
 		snd_sof_free_debug(sdev);
