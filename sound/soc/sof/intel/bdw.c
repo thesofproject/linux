@@ -22,6 +22,7 @@
 #include "shim.h"
 #include "../sof-acpi-dev.h"
 #include "../sof-audio.h"
+#include "intel-client.h"
 
 /* BARs */
 #define BDW_DSP_BAR 0
@@ -567,6 +568,16 @@ static void bdw_set_mach_params(const struct snd_soc_acpi_mach *mach,
 	mach_params->platform = dev_name(dev);
 }
 
+static int bdw_register_clients(struct snd_sof_dev *sdev)
+{
+	return intel_register_ipc_test_clients(sdev);
+}
+
+static void bdw_unregister_clients(struct snd_sof_dev *sdev)
+{
+	intel_unregister_ipc_test_clients(sdev);
+}
+
 /* Broadwell DAIs */
 static struct snd_soc_dai_driver bdw_dai[] = {
 {
@@ -641,6 +652,10 @@ static const struct snd_sof_dsp_ops sof_bdw_ops = {
 
 	/*Firmware loading */
 	.load_firmware	= snd_sof_load_firmware_memcpy,
+
+	/* client ops */
+	.register_clients = bdw_register_clients,
+	.unregister_clients = bdw_unregister_clients,
 
 	/* DAI drivers */
 	.drv = bdw_dai,
@@ -721,3 +736,4 @@ MODULE_LICENSE("Dual BSD/GPL");
 MODULE_IMPORT_NS(SND_SOC_SOF_INTEL_HIFI_EP_IPC);
 MODULE_IMPORT_NS(SND_SOC_SOF_XTENSA);
 MODULE_IMPORT_NS(SND_SOC_SOF_ACPI_DEV);
+MODULE_IMPORT_NS(SND_SOC_SOF_INTEL_CLIENT);

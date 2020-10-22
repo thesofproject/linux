@@ -35,6 +35,12 @@ config SND_SOC_SOF_INTEL_COMMON
 	  This option is not user-selectable but automagically handled by
 	  'select' statements at a higher level.
 
+config SND_SOC_SOF_INTEL_CLIENT
+	tristate
+	help
+	  This option is not user-selectable but automagically handled by
+	  'select' statements at a higher level.
+
 if SND_SOC_SOF_ACPI
 
 config SND_SOC_SOF_BAYTRAIL
@@ -44,6 +50,8 @@ config SND_SOC_SOF_BAYTRAIL
 	select SND_SOC_SOF_INTEL_ATOM_HIFI_EP
 	select SND_SOC_SOF_ACPI_DEV
 	select IOSF_MBI if X86 && PCI
+	select SND_SOC_SOF_PROBE_WORK_QUEUE if SND_SOC_SOF_CLIENT
+	select SND_SOC_SOF_INTEL_CLIENT if SND_SOC_SOF_CLIENT
 	help
 	  This adds support for Sound Open Firmware for Intel(R) platforms
 	  using the Baytrail, Braswell or Cherrytrail processors.
@@ -63,6 +71,8 @@ config SND_SOC_SOF_BROADWELL
 	select SND_SOC_SOF_INTEL_COMMON
 	select SND_SOC_SOF_INTEL_HIFI_EP_IPC
 	select SND_SOC_SOF_ACPI_DEV
+	select SND_SOC_SOF_PROBE_WORK_QUEUE if SND_SOC_SOF_CLIENT
+	select SND_SOC_SOF_INTEL_CLIENT if SND_SOC_SOF_CLIENT
 	help
 	  This adds support for Sound Open Firmware for Intel(R) platforms
 	  using the Broadwell processors.
@@ -94,6 +104,7 @@ config SND_SOC_SOF_MERRIFIELD
 config SND_SOC_SOF_INTEL_APL
 	tristate
 	select SND_SOC_SOF_HDA_COMMON
+	select SND_SOC_SOF_INTEL_CLIENT if SND_SOC_SOF_CLIENT
 
 config SND_SOC_SOF_APOLLOLAKE
 	tristate "SOF support for Apollolake"
@@ -119,6 +130,7 @@ config SND_SOC_SOF_INTEL_CNL
 	tristate
 	select SND_SOC_SOF_HDA_COMMON
 	select SND_SOC_SOF_INTEL_SOUNDWIRE_LINK_BASELINE
+	select SND_SOC_SOF_INTEL_CLIENT if SND_SOC_SOF_CLIENT
 
 config SND_SOC_SOF_CANNONLAKE
 	tristate "SOF support for Cannonlake"
@@ -153,6 +165,7 @@ config SND_SOC_SOF_INTEL_ICL
 	tristate
 	select SND_SOC_SOF_HDA_COMMON
 	select SND_SOC_SOF_INTEL_SOUNDWIRE_LINK_BASELINE
+	select SND_SOC_SOF_INTEL_CLIENT if SND_SOC_SOF_CLIENT
 
 config SND_SOC_SOF_ICELAKE
 	tristate "SOF support for Icelake"
@@ -178,6 +191,7 @@ config SND_SOC_SOF_INTEL_TGL
 	tristate
 	select SND_SOC_SOF_HDA_COMMON
 	select SND_SOC_SOF_INTEL_SOUNDWIRE_LINK_BASELINE
+	select SND_SOC_SOF_INTEL_CLIENT if SND_SOC_SOF_CLIENT
 
 config SND_SOC_SOF_TIGERLAKE
 	tristate "SOF support for Tigerlake"

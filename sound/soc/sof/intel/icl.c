@@ -17,12 +17,23 @@
 #include "hda.h"
 #include "hda-ipc.h"
 #include "../sof-audio.h"
+#include "intel-client.h"
 
 static const struct snd_sof_debugfs_map icl_dsp_debugfs[] = {
 	{"hda", HDA_DSP_HDA_BAR, 0, 0x4000, SOF_DEBUGFS_ACCESS_ALWAYS},
 	{"pp", HDA_DSP_PP_BAR,  0, 0x1000, SOF_DEBUGFS_ACCESS_ALWAYS},
 	{"dsp", HDA_DSP_BAR,  0, 0x10000, SOF_DEBUGFS_ACCESS_ALWAYS},
 };
+
+static int icl_register_clients(struct snd_sof_dev *sdev)
+{
+	return intel_register_ipc_test_clients(sdev);
+}
+
+static void icl_unregister_clients(struct snd_sof_dev *sdev)
+{
+	intel_unregister_ipc_test_clients(sdev);
+}
 
 /* Icelake ops */
 const struct snd_sof_dsp_ops sof_icl_ops = {
@@ -105,6 +116,10 @@ const struct snd_sof_dsp_ops sof_icl_ops = {
 	.trace_release = hda_dsp_trace_release,
 	.trace_trigger = hda_dsp_trace_trigger,
 
+	/* client ops */
+	.register_clients = icl_register_clients,
+	.unregister_clients = icl_unregister_clients,
+
 	/* DAI drivers */
 	.drv		= skl_dai,
 	.num_drv	= SOF_SKL_NUM_DAIS,
@@ -144,3 +159,4 @@ const struct sof_intel_dsp_desc icl_chip_info = {
 	.ssp_base_offset = CNL_SSP_BASE_OFFSET,
 };
 EXPORT_SYMBOL_NS(icl_chip_info, SND_SOC_SOF_INTEL_HDA_COMMON);
+MODULE_IMPORT_NS(SND_SOC_SOF_INTEL_CLIENT);
