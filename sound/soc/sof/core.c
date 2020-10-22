@@ -237,6 +237,12 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 		goto fw_trace_err;
 	}
 
+	ret = sof_register_clients(sdev);
+	if (ret < 0) {
+		dev_err(sdev->dev, "error: failed to register clients %d\n", ret);
+		goto sof_machine_err;
+	}
+
 	/*
 	 * Some platforms in SOF, ex: BYT, may not have their platform PM
 	 * callbacks set. Increment the usage count so as to
@@ -252,6 +258,8 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 
 	return 0;
 
+sof_machine_err:
+	snd_sof_machine_unregister(sdev, plat_data);
 fw_trace_err:
 	snd_sof_free_trace(sdev);
 fw_run_err:
@@ -363,6 +371,12 @@ int snd_sof_device_remove(struct device *dev)
 
 	if (IS_ENABLED(CONFIG_SND_SOC_SOF_PROBE_WORK_QUEUE))
 		cancel_work_sync(&sdev->probe_work);
+
+	/*
+	 * Unregister any registered client device first before IPC and debugfs
+	 * to allow client drivers to be removed cleanly
+	 */
+	sof_unregister_clients(sdev);
 
 	if (sdev->fw_state > SOF_FW_BOOT_NOT_STARTED) {
 		ret = snd_sof_dsp_power_down_notify(sdev);

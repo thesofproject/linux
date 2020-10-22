@@ -11,6 +11,7 @@
 #include <linux/list.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
+#include "ops.h"
 #include "sof-client.h"
 #include "sof-priv.h"
 
@@ -36,6 +37,20 @@ static int sof_client_dev_add_data(struct sof_client_dev *cdev, const void *data
 
 	cdev->auxdev.dev.platform_data = d;
 	return 0;
+}
+
+int sof_register_clients(struct snd_sof_dev *sdev)
+{
+	if (sof_ops(sdev) && sof_ops(sdev)->register_ipc_clients)
+		return sof_ops(sdev)->register_ipc_clients(sdev);
+
+	return 0;
+}
+
+void sof_unregister_clients(struct snd_sof_dev *sdev)
+{
+	if (sof_ops(sdev) && sof_ops(sdev)->unregister_ipc_clients)
+		sof_ops(sdev)->unregister_ipc_clients(sdev);
 }
 
 int sof_client_dev_register(struct snd_sof_dev *sdev, const char *name, u32 id,
