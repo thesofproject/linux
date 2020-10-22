@@ -451,3 +451,4 @@ MODULE_AUTHOR("Liam Girdwood");
 MODULE_DESCRIPTION("Sound Open Firmware (SOF) Core");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_ALIAS("platform:sof-audio");
+MODULE_IMPORT_NS(SND_SOC_SOF_CLIENT);
