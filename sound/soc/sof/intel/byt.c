@@ -19,6 +19,7 @@
 #include "shim.h"
 #include "../sof-audio.h"
 #include "../../intel/common/soc-intel-quirks.h"
+#include "intel-client.h"
 
 /* DSP memories */
 #define IRAM_OFFSET		0x0C0000
@@ -821,6 +822,16 @@ irq:
 	return ret;
 }
 
+static int byt_register_clients(struct snd_sof_dev *sdev)
+{
+	return intel_register_ipc_test_clients(sdev);
+}
+
+static void byt_unregister_clients(struct snd_sof_dev *sdev)
+{
+	intel_unregister_ipc_test_clients(sdev);
+}
+
 /* baytrail ops */
 const struct snd_sof_dsp_ops sof_byt_ops = {
 	/* device init */
@@ -878,6 +889,10 @@ const struct snd_sof_dsp_ops sof_byt_ops = {
 	/* PM */
 	.suspend = byt_suspend,
 	.resume = byt_resume,
+
+	/* client ops */
+	.register_clients = byt_register_clients,
+	.unregister_clients = byt_unregister_clients,
 
 	/* DAI drivers */
 	.drv = byt_dai,
@@ -958,6 +973,10 @@ const struct snd_sof_dsp_ops sof_cht_ops = {
 	.suspend = byt_suspend,
 	.resume = byt_resume,
 
+	/* client ops */
+	.register_clients = byt_register_clients,
+	.unregister_clients = byt_unregister_clients,
+
 	/* DAI drivers */
 	.drv = byt_dai,
 	/* all 6 SSPs may be available for cherrytrail */
@@ -985,3 +1004,4 @@ EXPORT_SYMBOL_NS(cht_chip_info, SND_SOC_SOF_BAYTRAIL);
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_IMPORT_NS(SND_SOC_SOF_INTEL_HIFI_EP_IPC);
 MODULE_IMPORT_NS(SND_SOC_SOF_XTENSA);
+MODULE_IMPORT_NS(SND_SOC_SOF_INTEL_CLIENT);
