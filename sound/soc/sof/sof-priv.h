@@ -455,6 +455,15 @@ struct snd_sof_dev {
 
 	bool msi_enabled;
 
+	/*
+	 * Used to keep track of registered IPC client devices so that they can
+	 * be removed when the parent SOF module is removed.
+	 */
+	struct list_head ipc_client_list;
+
+	/* mutex to protect client list */
+	struct mutex ipc_client_mutex;
+
 	void *private;			/* core does not touch this */
 };
 
