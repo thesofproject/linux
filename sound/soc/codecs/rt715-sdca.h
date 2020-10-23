@@ -117,8 +117,8 @@ enum {
 	RT715_AIF2,
 };
 
-int rt715_io_init(struct device *dev, struct sdw_slave *slave);
-int rt715_init(struct device *dev, struct regmap *mbq_regmap,
+int rt715_sdca_io_init(struct device *dev, struct sdw_slave *slave);
+int rt715_sdca_init(struct device *dev, struct regmap *mbq_regmap,
 	struct regmap *regmap, struct sdw_slave *slave);
 
 #endif /* __RT715_SDCA_H__ */

@@ -29,8 +29,8 @@
 
 #include "rt715-sdca.h"
 
-static int rt715_index_write(struct rt715_sdca_priv *rt715, unsigned int nid,
-		unsigned int reg, unsigned int value)
+static int rt715_sdca_index_write(struct rt715_sdca_priv *rt715,
+		unsigned int nid, unsigned int reg, unsigned int value)
 {
 	struct regmap *regmap = rt715->mbq_regmap;
 	unsigned int addr;
@@ -47,7 +47,7 @@ static int rt715_index_write(struct rt715_sdca_priv *rt715, unsigned int nid,
 	return ret;
 }
 
-static int rt715_index_read(struct rt715_sdca_priv *rt715,
+static int rt715_sdca_index_read(struct rt715_sdca_priv *rt715,
 		unsigned int nid, unsigned int reg, unsigned int *value)
 {
 	struct regmap *regmap = rt715->mbq_regmap;
@@ -65,23 +65,23 @@ static int rt715_index_read(struct rt715_sdca_priv *rt715,
 	return ret;
 }
 
-static int rt715_index_update_bits(struct rt715_sdca_priv *rt715,
+static int rt715_sdca_index_update_bits(struct rt715_sdca_priv *rt715,
 	unsigned int nid, unsigned int reg, unsigned int mask, unsigned int val)
 {
 	unsigned int tmp;
 	int ret;
 
-	ret = rt715_index_read(rt715, nid, reg, &tmp);
+	ret = rt715_sdca_index_read(rt715, nid, reg, &tmp);
 	if (ret < 0)
 		return ret;
 
 	set_mask_bits(&tmp, mask, val);
 
-	return rt715_index_write(rt715, nid, reg, tmp);
+	return rt715_sdca_index_write(rt715, nid, reg, tmp);
 }
 
 /* SDCA Volume/Boost control */
-static int rt715_set_amp_gain_put_sdca(struct snd_kcontrol *kcontrol,
+static int rt715_sdca_set_amp_gain_put(struct snd_kcontrol *kcontrol,
 		struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
@@ -146,7 +146,7 @@ static int rt715_set_amp_gain_put_sdca(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-static int rt715_set_amp_gain_get_sdca(struct snd_kcontrol *kcontrol,
+static int rt715_sdca_set_amp_gain_get(struct snd_kcontrol *kcontrol,
 		struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
@@ -216,7 +216,7 @@ static const DECLARE_TLV_DB_SCALE(mic_vol_tlv, 0, 1000, 0);
 	.private_value = SOC_DOUBLE_R_VALUE(reg_left, reg_right, xshift, \
 					    xmax, xinvert) }
 
-static const struct snd_kcontrol_new rt715_snd_controls_sdca[] = {
+static const struct snd_kcontrol_new rt715_sdca_snd_controls[] = {
 	/* Capture switch */
 	SOC_DOUBLE_R("FU0A Capture Switch",
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC7_27_VOL,
@@ -255,7 +255,7 @@ static const struct snd_kcontrol_new rt715_snd_controls_sdca[] = {
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC7_27_VOL,
 			RT715_SDCA_FU_VOL_CTRL, CH_02),
 			0x2f, 0x7f, 0,
-		rt715_set_amp_gain_get_sdca, rt715_set_amp_gain_put_sdca,
+		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
 		in_vol_tlv),
 	SOC_DOUBLE_R_EXT_TLV("FU02 1_2 Capture Volume",
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC8_9_VOL,
@@ -263,7 +263,7 @@ static const struct snd_kcontrol_new rt715_snd_controls_sdca[] = {
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC8_9_VOL,
 			RT715_SDCA_FU_VOL_CTRL, CH_02),
 			0x2f, 0x7f, 0,
-		rt715_set_amp_gain_get_sdca, rt715_set_amp_gain_put_sdca,
+		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
 		in_vol_tlv),
 	SOC_DOUBLE_R_EXT_TLV("FU02 3_4 Capture Volume",
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC8_9_VOL,
@@ -272,7 +272,7 @@ static const struct snd_kcontrol_new rt715_snd_controls_sdca[] = {
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC8_9_VOL,
 			RT715_SDCA_FU_VOL_CTRL,
 			CH_04), 0x2f, 0x7f, 0,
-		rt715_set_amp_gain_get_sdca, rt715_set_amp_gain_put_sdca,
+		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
 		in_vol_tlv),
 	SOC_DOUBLE_R_EXT_TLV("FU06 1_2 Capture Volume",
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC10_11_VOL,
@@ -281,7 +281,7 @@ static const struct snd_kcontrol_new rt715_snd_controls_sdca[] = {
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC10_11_VOL,
 			RT715_SDCA_FU_VOL_CTRL,
 			CH_02), 0x2f, 0x7f, 0,
-		rt715_set_amp_gain_get_sdca, rt715_set_amp_gain_put_sdca,
+		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
 		in_vol_tlv),
 	SOC_DOUBLE_R_EXT_TLV("FU06 3_4 Capture Volume",
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC10_11_VOL,
@@ -290,7 +290,7 @@ static const struct snd_kcontrol_new rt715_snd_controls_sdca[] = {
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC10_11_VOL,
 			RT715_SDCA_FU_VOL_CTRL,
 			CH_04), 0x2f, 0x7f, 0,
-		rt715_set_amp_gain_get_sdca, rt715_set_amp_gain_put_sdca,
+		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
 		in_vol_tlv),
 	/* MIC Boost Control */
 	SOC_DOUBLE_R_EXT_TLV("FU0E 1_2 Boost",
@@ -300,7 +300,7 @@ static const struct snd_kcontrol_new rt715_snd_controls_sdca[] = {
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_DMIC_GAIN_EN,
 			RT715_SDCA_FU_DMIC_GAIN_CTRL,
 			CH_02), 8, 3, 0,
-		rt715_set_amp_gain_get_sdca, rt715_set_amp_gain_put_sdca,
+		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
 		mic_vol_tlv),
 	SOC_DOUBLE_R_EXT_TLV("FU0E 3_4 Boost",
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_DMIC_GAIN_EN,
@@ -309,7 +309,7 @@ static const struct snd_kcontrol_new rt715_snd_controls_sdca[] = {
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_DMIC_GAIN_EN,
 			RT715_SDCA_FU_DMIC_GAIN_CTRL,
 			CH_04), 8, 3, 0,
-		rt715_set_amp_gain_get_sdca, rt715_set_amp_gain_put_sdca,
+		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
 		mic_vol_tlv),
 	SOC_DOUBLE_R_EXT_TLV("FU0E 5_6 Boost",
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_DMIC_GAIN_EN,
@@ -318,7 +318,7 @@ static const struct snd_kcontrol_new rt715_snd_controls_sdca[] = {
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_DMIC_GAIN_EN,
 			RT715_SDCA_FU_DMIC_GAIN_CTRL,
 			CH_06), 8, 3, 0,
-		rt715_set_amp_gain_get_sdca, rt715_set_amp_gain_put_sdca,
+		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
 		mic_vol_tlv),
 	SOC_DOUBLE_R_EXT_TLV("FU0E 7_8 Boost",
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_DMIC_GAIN_EN,
@@ -327,7 +327,7 @@ static const struct snd_kcontrol_new rt715_snd_controls_sdca[] = {
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_DMIC_GAIN_EN,
 			RT715_SDCA_FU_DMIC_GAIN_CTRL,
 			CH_08), 8, 3, 0,
-		rt715_set_amp_gain_get_sdca, rt715_set_amp_gain_put_sdca,
+		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
 		mic_vol_tlv),
 	SOC_DOUBLE_R_EXT_TLV("FU0C 1_2 Boost",
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_AMIC_GAIN_EN,
@@ -336,7 +336,7 @@ static const struct snd_kcontrol_new rt715_snd_controls_sdca[] = {
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_AMIC_GAIN_EN,
 			RT715_SDCA_FU_DMIC_GAIN_CTRL,
 			CH_02), 8, 3, 0,
-		rt715_set_amp_gain_get_sdca, rt715_set_amp_gain_put_sdca,
+		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
 		mic_vol_tlv),
 	SOC_DOUBLE_R_EXT_TLV("FU0C 3_4 Boost",
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_AMIC_GAIN_EN,
@@ -345,7 +345,7 @@ static const struct snd_kcontrol_new rt715_snd_controls_sdca[] = {
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_AMIC_GAIN_EN,
 			RT715_SDCA_FU_DMIC_GAIN_CTRL,
 			CH_04), 8, 3, 0,
-		rt715_set_amp_gain_get_sdca, rt715_set_amp_gain_put_sdca,
+		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
 		mic_vol_tlv),
 	SOC_DOUBLE_R_EXT_TLV("FU0C 5_6 Boost",
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_AMIC_GAIN_EN,
@@ -354,7 +354,7 @@ static const struct snd_kcontrol_new rt715_snd_controls_sdca[] = {
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_AMIC_GAIN_EN,
 			RT715_SDCA_FU_DMIC_GAIN_CTRL,
 			CH_06), 8, 3, 0,
-		rt715_set_amp_gain_get_sdca, rt715_set_amp_gain_put_sdca,
+		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
 		mic_vol_tlv),
 	SOC_DOUBLE_R_EXT_TLV("FU0C 7_8 Boost",
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_AMIC_GAIN_EN,
@@ -363,11 +363,11 @@ static const struct snd_kcontrol_new rt715_snd_controls_sdca[] = {
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_AMIC_GAIN_EN,
 			RT715_SDCA_FU_DMIC_GAIN_CTRL,
 			CH_08), 8, 3, 0,
-		rt715_set_amp_gain_get_sdca, rt715_set_amp_gain_put_sdca,
+		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
 		mic_vol_tlv),
 };
 
-static int rt715_mux_get(struct snd_kcontrol *kcontrol,
+static int rt715_sdca_mux_get(struct snd_kcontrol *kcontrol,
 			struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_soc_component *component =
@@ -386,7 +386,7 @@ static int rt715_mux_get(struct snd_kcontrol *kcontrol,
 	else
 		return -EINVAL;
 
-	rt715_index_read(rt715, RT715_VENDOR_HDA_CTL,
+	rt715_sdca_index_read(rt715, RT715_VENDOR_HDA_CTL,
 		RT715_HDA_LEGACY_MUX_CTL1, &val);
 	val = (val >> mask_sft) & 0xf;
 
@@ -403,7 +403,7 @@ static int rt715_mux_get(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-static int rt715_mux_put(struct snd_kcontrol *kcontrol,
+static int rt715_sdca_mux_put(struct snd_kcontrol *kcontrol,
 			struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_soc_component *component =
@@ -432,14 +432,14 @@ static int rt715_mux_put(struct snd_kcontrol *kcontrol,
 	/* Verb ID = 0x701h, nid = e->reg */
 	val = snd_soc_enum_item_to_val(e, item[0]) << e->shift_l;
 
-	rt715_index_read(rt715, RT715_VENDOR_HDA_CTL,
+	rt715_sdca_index_read(rt715, RT715_VENDOR_HDA_CTL,
 		RT715_HDA_LEGACY_MUX_CTL1, &val2);
 	val2 = (val2 >> mask_sft) & 0xf;
 
 	change = val != val2;
 
 	if (change)
-		rt715_index_update_bits(rt715, RT715_VENDOR_HDA_CTL,
+		rt715_sdca_index_update_bits(rt715, RT715_VENDOR_HDA_CTL,
 			RT715_HDA_LEGACY_MUX_CTL1, 0xf << mask_sft, val << mask_sft);
 
 	snd_soc_dapm_mux_update_power(dapm, kcontrol, item[0], e, NULL);
@@ -502,21 +502,21 @@ static SOC_VALUE_ENUM_SINGLE_DECL(rt715_adc25_enum,
 
 static const struct snd_kcontrol_new rt715_adc22_mux =
 	SOC_DAPM_ENUM_EXT("ADC 22 Mux", rt715_adc22_enum,
-			rt715_mux_get, rt715_mux_put);
+			rt715_sdca_mux_get, rt715_sdca_mux_put);
 
 static const struct snd_kcontrol_new rt715_adc23_mux =
 	SOC_DAPM_ENUM_EXT("ADC 23 Mux", rt715_adc23_enum,
-			rt715_mux_get, rt715_mux_put);
+			rt715_sdca_mux_get, rt715_sdca_mux_put);
 
 static const struct snd_kcontrol_new rt715_adc24_mux =
 	SOC_DAPM_ENUM_EXT("ADC 24 Mux", rt715_adc24_enum,
-			rt715_mux_get, rt715_mux_put);
+			rt715_sdca_mux_get, rt715_sdca_mux_put);
 
 static const struct snd_kcontrol_new rt715_adc25_mux =
 	SOC_DAPM_ENUM_EXT("ADC 25 Mux", rt715_adc25_enum,
-			rt715_mux_get, rt715_mux_put);
+			rt715_sdca_mux_get, rt715_sdca_mux_put);
 
-static int rt715_pde23_24_event(struct snd_soc_dapm_widget *w,
+static int rt715_sdca_pde23_24_event(struct snd_soc_dapm_widget *w,
 	struct snd_kcontrol *kcontrol, int event)
 {
 	struct snd_soc_component *component =
@@ -540,7 +540,7 @@ static int rt715_pde23_24_event(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
-static const struct snd_soc_dapm_widget rt715_dapm_widgets[] = {
+static const struct snd_soc_dapm_widget rt715_sdca_dapm_widgets[] = {
 	SND_SOC_DAPM_INPUT("DMIC1"),
 	SND_SOC_DAPM_INPUT("DMIC2"),
 	SND_SOC_DAPM_INPUT("DMIC3"),
@@ -551,7 +551,7 @@ static const struct snd_soc_dapm_widget rt715_dapm_widgets[] = {
 	SND_SOC_DAPM_INPUT("LINE2"),
 
 	SND_SOC_DAPM_SUPPLY("PDE23_24", SND_SOC_NOPM, 0, 0,
-		rt715_pde23_24_event,
+		rt715_sdca_pde23_24_event,
 		SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD),
 
 	SND_SOC_DAPM_ADC("ADC 07", NULL, SND_SOC_NOPM, 4, 0),
@@ -570,7 +570,7 @@ static const struct snd_soc_dapm_widget rt715_dapm_widgets[] = {
 	SND_SOC_DAPM_AIF_OUT("DP6TX", "DP6 Capture", 0, SND_SOC_NOPM, 0, 0),
 };
 
-static const struct snd_soc_dapm_route rt715_audio_map[] = {
+static const struct snd_soc_dapm_route rt715_sdca_audio_map[] = {
 	{"DP6TX", NULL, "ADC 09"},
 	{"DP6TX", NULL, "ADC 08"},
 	{"DP4TX", NULL, "ADC 07"},
@@ -620,15 +620,15 @@ static const struct snd_soc_dapm_route rt715_audio_map[] = {
 };
 
 static const struct snd_soc_component_driver soc_codec_dev_rt715_sdca = {
-	.controls = rt715_snd_controls_sdca,
-	.num_controls = ARRAY_SIZE(rt715_snd_controls_sdca),
-	.dapm_widgets = rt715_dapm_widgets,
-	.num_dapm_widgets = ARRAY_SIZE(rt715_dapm_widgets),
-	.dapm_routes = rt715_audio_map,
-	.num_dapm_routes = ARRAY_SIZE(rt715_audio_map),
+	.controls = rt715_sdca_snd_controls,
+	.num_controls = ARRAY_SIZE(rt715_sdca_snd_controls),
+	.dapm_widgets = rt715_sdca_dapm_widgets,
+	.num_dapm_widgets = ARRAY_SIZE(rt715_sdca_dapm_widgets),
+	.dapm_routes = rt715_sdca_audio_map,
+	.num_dapm_routes = ARRAY_SIZE(rt715_sdca_audio_map),
 };
 
-static int rt715_set_sdw_stream(struct snd_soc_dai *dai, void *sdw_stream,
+static int rt715_sdca_set_sdw_stream(struct snd_soc_dai *dai, void *sdw_stream,
 				int direction)
 {
 	struct rt715_sdw_stream_data *stream;
@@ -648,7 +648,7 @@ static int rt715_set_sdw_stream(struct snd_soc_dai *dai, void *sdw_stream,
 	return 0;
 }
 
-static void rt715_shutdown(struct snd_pcm_substream *substream,
+static void rt715_sdca_shutdown(struct snd_pcm_substream *substream,
 				struct snd_soc_dai *dai)
 
 {
@@ -662,7 +662,7 @@ static void rt715_shutdown(struct snd_pcm_substream *substream,
 	kfree(stream);
 }
 
-static int rt715_pcm_hw_params(struct snd_pcm_substream *substream,
+static int rt715_sdca_pcm_hw_params(struct snd_pcm_substream *substream,
 				struct snd_pcm_hw_params *params,
 				struct snd_soc_dai *dai)
 {
@@ -687,13 +687,13 @@ static int rt715_pcm_hw_params(struct snd_pcm_substream *substream,
 	case RT715_AIF1:
 		direction = SDW_DATA_DIR_TX;
 		port = 6;
-		rt715_index_write(rt715, RT715_VENDOR_REG, RT715_SDW_INPUT_SEL,
+		rt715_sdca_index_write(rt715, RT715_VENDOR_REG, RT715_SDW_INPUT_SEL,
 			0xa500);
 		break;
 	case RT715_AIF2:
 		direction = SDW_DATA_DIR_TX;
 		port = 4;
-		rt715_index_write(rt715, RT715_VENDOR_REG, RT715_SDW_INPUT_SEL,
+		rt715_sdca_index_write(rt715, RT715_VENDOR_REG, RT715_SDW_INPUT_SEL,
 			0xaf00);
 		break;
 	default:
@@ -777,7 +777,7 @@ static int rt715_pcm_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static int rt715_pcm_hw_free(struct snd_pcm_substream *substream,
+static int rt715_sdca_pcm_hw_free(struct snd_pcm_substream *substream,
 				struct snd_soc_dai *dai)
 {
 	struct snd_soc_component *component = dai->component;
@@ -796,14 +796,14 @@ static int rt715_pcm_hw_free(struct snd_pcm_substream *substream,
 #define RT715_FORMATS (SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S20_3LE | \
 			SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_S8)
 
-static struct snd_soc_dai_ops rt715_ops = {
-	.hw_params	= rt715_pcm_hw_params,
-	.hw_free	= rt715_pcm_hw_free,
-	.set_sdw_stream	= rt715_set_sdw_stream,
-	.shutdown	= rt715_shutdown,
+static struct snd_soc_dai_ops rt715_sdca_ops = {
+	.hw_params	= rt715_sdca_pcm_hw_params,
+	.hw_free	= rt715_sdca_pcm_hw_free,
+	.set_sdw_stream	= rt715_sdca_set_sdw_stream,
+	.shutdown	= rt715_sdca_shutdown,
 };
 
-static struct snd_soc_dai_driver rt715_dai[] = {
+static struct snd_soc_dai_driver rt715_sdca_dai[] = {
 	{
 		.name = "rt715-aif1",
 		.id = RT715_AIF1,
@@ -814,7 +814,7 @@ static struct snd_soc_dai_driver rt715_dai[] = {
 			.rates = RT715_STEREO_RATES,
 			.formats = RT715_FORMATS,
 		},
-		.ops = &rt715_ops,
+		.ops = &rt715_sdca_ops,
 	},
 	{
 		.name = "rt715-aif2",
@@ -826,7 +826,7 @@ static struct snd_soc_dai_driver rt715_dai[] = {
 			.rates = RT715_STEREO_RATES,
 			.formats = RT715_FORMATS,
 		},
-		.ops = &rt715_ops,
+		.ops = &rt715_sdca_ops,
 	},
 };
 
@@ -838,7 +838,7 @@ static struct snd_soc_dai_driver rt715_dai[] = {
 #define RT715_CLK_FREQ_2400000HZ 2400000
 #define RT715_CLK_FREQ_12288000HZ 12288000
 
-int rt715_init(struct device *dev, struct regmap *mbq_regmap,
+int rt715_sdca_init(struct device *dev, struct regmap *mbq_regmap,
 	struct regmap *regmap, struct sdw_slave *slave)
 {
 	struct rt715_sdca_priv *rt715;
@@ -862,13 +862,13 @@ int rt715_init(struct device *dev, struct regmap *mbq_regmap,
 
 	ret = devm_snd_soc_register_component(dev,
 			&soc_codec_dev_rt715_sdca,
-			rt715_dai,
-			ARRAY_SIZE(rt715_dai));
+			rt715_sdca_dai,
+			ARRAY_SIZE(rt715_sdca_dai));
 
 	return ret;
 }
 
-int rt715_io_init(struct device *dev, struct sdw_slave *slave)
+int rt715_sdca_io_init(struct device *dev, struct sdw_slave *slave)
 {
 	struct rt715_sdca_priv *rt715 = dev_get_drvdata(dev);
 	unsigned int hw_ver;
@@ -897,7 +897,7 @@ int rt715_io_init(struct device *dev, struct sdw_slave *slave)
 
 	pm_runtime_get_noresume(&slave->dev);
 
-	rt715_index_read(rt715, RT715_VENDOR_REG,
+	rt715_sdca_index_read(rt715, RT715_VENDOR_REG,
 		RT715_PRODUCT_NUM, &hw_ver);
 	hw_ver = hw_ver & 0x000f;
 
@@ -907,12 +907,12 @@ int rt715_io_init(struct device *dev, struct sdw_slave *slave)
 			RT715_SDCA_CX_CLK_SEL_CTRL, CH_00), 0x1);
 	/* set GPIO_4/5/6 to be 3rd/4th DMIC usage */
 	if (hw_ver == 0x0)
-		rt715_index_update_bits(rt715, RT715_VENDOR_REG,
+		rt715_sdca_index_update_bits(rt715, RT715_VENDOR_REG,
 			RT715_AD_FUNC_EN, 0x54, 0x54);
 	else if (hw_ver == 0x1) {
-		rt715_index_update_bits(rt715, RT715_VENDOR_REG,
+		rt715_sdca_index_update_bits(rt715, RT715_VENDOR_REG,
 			RT715_AD_FUNC_EN, 0x55, 0x55);
-		rt715_index_update_bits(rt715, RT715_VENDOR_REG,
+		rt715_sdca_index_update_bits(rt715, RT715_VENDOR_REG,
 			RT715_REV_1, 0x40, 0x40);
 	}
 	/* trigger mode = VAD enable */

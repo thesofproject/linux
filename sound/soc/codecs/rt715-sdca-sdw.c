@@ -114,7 +114,7 @@ static const struct regmap_config rt715_sdca_mbq_regmap = {
 	.use_single_write = true,
 };
 
-static int rt715_update_status(struct sdw_slave *slave,
+static int rt715_sdca_update_status(struct sdw_slave *slave,
 				enum sdw_slave_status status)
 {
 	struct rt715_sdca_priv *rt715 = dev_get_drvdata(&slave->dev);
@@ -130,10 +130,10 @@ static int rt715_update_status(struct sdw_slave *slave,
 		return 0;
 
 	/* perform I/O transfers required for Slave initialization */
-	return rt715_io_init(&slave->dev, slave);
+	return rt715_sdca_io_init(&slave->dev, slave);
 }
 
-static int rt715_read_prop(struct sdw_slave *slave)
+static int rt715_sdca_read_prop(struct sdw_slave *slave)
 {
 	struct sdw_slave_prop *prop = &slave->prop;
 	int nval, i;
@@ -171,8 +171,8 @@ static int rt715_read_prop(struct sdw_slave *slave)
 }
 
 static struct sdw_slave_ops rt715_sdca_slave_ops = {
-	.read_prop = rt715_read_prop,
-	.update_status = rt715_update_status,
+	.read_prop = rt715_sdca_read_prop,
+	.update_status = rt715_sdca_update_status,
 };
 
 static int rt715_sdca_sdw_probe(struct sdw_slave *slave,
@@ -191,7 +191,7 @@ static int rt715_sdca_sdw_probe(struct sdw_slave *slave,
 	if (!regmap)
 		return -EINVAL;
 
-	return rt715_init(&slave->dev, mbq_regmap, regmap, slave);
+	return rt715_sdca_init(&slave->dev, mbq_regmap, regmap, slave);
 }
 
 static const struct sdw_device_id rt715_sdca_id[] = {
