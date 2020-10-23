@@ -105,12 +105,17 @@ int snd_sof_volume_put(struct snd_kcontrol *kcontrol,
 	}
 
 	/* notify DSP of mixer updates */
-	if (pm_runtime_active(scomp->dev))
+	if (pm_runtime_active(scomp->dev)) {
 		snd_sof_ipc_set_get_comp_data(scontrol,
 					      SOF_IPC_COMP_SET_VALUE,
 					      SOF_CTRL_TYPE_VALUE_CHAN_GET,
 					      SOF_CTRL_CMD_VOLUME,
 					      true);
+	} else {
+		dev_err_ratelimited(scomp->dev, "error: Device is not runtime-active\n");
+		return -EPERM;
+	}
+
 	return change;
 }
 
@@ -176,12 +181,16 @@ int snd_sof_switch_put(struct snd_kcontrol *kcontrol,
 		update_mute_led(scontrol, kcontrol, ucontrol);
 
 	/* notify DSP of mixer updates */
-	if (pm_runtime_active(scomp->dev))
+	if (pm_runtime_active(scomp->dev)) {
 		snd_sof_ipc_set_get_comp_data(scontrol,
 					      SOF_IPC_COMP_SET_VALUE,
 					      SOF_CTRL_TYPE_VALUE_CHAN_GET,
 					      SOF_CTRL_CMD_SWITCH,
 					      true);
+	} else {
+		dev_err_ratelimited(scomp->dev, "error: Device is not runtime-active\n");
+		return -EPERM;
+	}
 
 	return change;
 }
@@ -223,12 +232,16 @@ int snd_sof_enum_put(struct snd_kcontrol *kcontrol,
 	}
 
 	/* notify DSP of enum updates */
-	if (pm_runtime_active(scomp->dev))
+	if (pm_runtime_active(scomp->dev)) {
 		snd_sof_ipc_set_get_comp_data(scontrol,
 					      SOF_IPC_COMP_SET_VALUE,
 					      SOF_CTRL_TYPE_VALUE_CHAN_GET,
 					      SOF_CTRL_CMD_ENUM,
 					      true);
+	} else {
+		dev_err_ratelimited(scomp->dev, "error: Device is not runtime-active\n");
+		return -EPERM;
+	}
 
 	return change;
 }
@@ -299,12 +312,16 @@ int snd_sof_bytes_put(struct snd_kcontrol *kcontrol,
 	memcpy(data, ucontrol->value.bytes.data, size);
 
 	/* notify DSP of byte control updates */
-	if (pm_runtime_active(scomp->dev))
+	if (pm_runtime_active(scomp->dev)) {
 		snd_sof_ipc_set_get_comp_data(scontrol,
 					      SOF_IPC_COMP_SET_DATA,
 					      SOF_CTRL_TYPE_DATA_SET,
 					      scontrol->cmd,
 					      true);
+	} else {
+		dev_err_ratelimited(scomp->dev, "error: Device is not runtime-active\n");
+		return -EPERM;
+	}
 
 	return 0;
 }
@@ -379,12 +396,16 @@ int snd_sof_bytes_ext_put(struct snd_kcontrol *kcontrol,
 	}
 
 	/* notify DSP of byte control updates */
-	if (pm_runtime_active(scomp->dev))
+	if (pm_runtime_active(scomp->dev)) {
 		snd_sof_ipc_set_get_comp_data(scontrol,
 					      SOF_IPC_COMP_SET_DATA,
 					      SOF_CTRL_TYPE_DATA_SET,
 					      scontrol->cmd,
 					      true);
+	} else {
+		dev_err_ratelimited(scomp->dev, "error: Device is not runtime-active\n");
+		return -EPERM;
+	}
 
 	return 0;
 }
