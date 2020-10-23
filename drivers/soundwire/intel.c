@@ -1708,6 +1708,8 @@ static int __maybe_unused intel_resume(struct device *dev)
 	struct sdw_cdns *cdns = dev_get_drvdata(dev);
 	struct sdw_intel *sdw = cdns_to_intel(cdns);
 	struct sdw_bus *bus = &cdns->bus;
+	struct sdw_slave *slave;
+	unsigned long time;
 	int link_flags;
 	bool multi_link;
 	int ret;
@@ -1781,6 +1783,18 @@ static int __maybe_unused intel_resume(struct device *dev)
 		}
 	}
 
+	/* Waiting for all Slaves be attached */
+	list_for_each_entry(slave, &bus->slaves, node) {
+		if (!slave->unattach_request)
+			continue;
+		time = wait_for_completion_timeout(&slave->enumeration_complete,
+			500);
+		if (!time) {
+			dev_err(&slave->dev, "enumeration not complete, timed out\n");
+			return -ETIMEDOUT;
+		}
+	}
+
 	/*
 	 * after system resume, the pm_runtime suspend() may kick in
 	 * during the enumeration, before any children device force the
@@ -1801,6 +1815,8 @@ static int intel_resume_runtime(struct device *dev)
 	struct sdw_cdns *cdns = dev_get_drvdata(dev);
 	struct sdw_intel *sdw = cdns_to_intel(cdns);
 	struct sdw_bus *bus = &cdns->bus;
+	struct sdw_slave *slave;
+	unsigned long time;
 	u32 clock_stop_quirks;
 	bool clock_stop0;
 	int link_flags;
@@ -1964,6 +1980,18 @@ static int intel_resume_runtime(struct device *dev)
 		dev_err(dev, "%s clock_stop_quirks %x unsupported\n",
 			__func__, clock_stop_quirks);
 		ret = -EINVAL;
+	}
+
+	/* Waiting for all Slaves be attached */
+	list_for_each_entry(slave, &bus->slaves, node) {
+		if (!slave->unattach_request)
+			continue;
+		time = wait_for_completion_timeout(&slave->enumeration_complete,
+			500);
+		if (!time) {
+			dev_err(&slave->dev, "enumeration not complete, timed out\n");
+			return -ETIMEDOUT;
+		}
 	}
 
 	return ret;
