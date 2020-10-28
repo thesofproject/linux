@@ -85,7 +85,8 @@ static int rt711_sdca_calibration(struct rt711_sdca_priv *rt711)
 	unsigned int val, loop_rc = 0, loop_dc = 0;
 	struct device *dev;
 	struct regmap *regmap = rt711->regmap;
-	int ret, chk_cnt = 100;
+	int chk_cnt = 100;
+	int ret = 0;
 
 	mutex_lock(&rt711->calibrate_mutex);
 	dev = regmap_get_device(regmap);
