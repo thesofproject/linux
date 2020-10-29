@@ -572,6 +572,12 @@ static const struct sof_topology_token sched_tokens[] = {
 		offsetof(struct sof_ipc_pipe_new, time_domain), 0},
 };
 
+static const struct sof_topology_token pipeline_tokens[] = {
+	{SOF_TKN_SCHED_DYNAMIC, SND_SOC_TPLG_TUPLE_TYPE_BOOL, get_token_u16,
+		offsetof(struct snd_sof_widget, dynamic_pipeline_widget), 0},
+
+};
+
 /* volume */
 static const struct sof_topology_token volume_tokens[] = {
 	{SOF_TKN_VOLUME_RAMP_STEP_TYPE, SND_SOC_TPLG_TUPLE_TYPE_WORD,
@@ -1739,6 +1745,15 @@ static int sof_widget_load_pipeline(struct snd_soc_component *scomp, int index,
 
 	ret = sof_parse_tokens(scomp, pipeline, sched_tokens,
 			       ARRAY_SIZE(sched_tokens), private->array,
+			       le32_to_cpu(private->size));
+	if (ret != 0) {
+		dev_err(scomp->dev, "error: parse pipeline tokens failed %d\n",
+			private->size);
+		goto err;
+	}
+
+	ret = sof_parse_tokens(scomp, swidget, pipeline_tokens,
+			       ARRAY_SIZE(pipeline_tokens), private->array,
 			       le32_to_cpu(private->size));
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse pipeline tokens failed %d\n",
