@@ -17,9 +17,8 @@ dist: focal
 #
 # - When it's too shallow it will save zero time because fetching pull
 #   requests with a base older than the shallow history will take as
-#   much time as cloning the entire repo... without even providing the
-#   entire repo information as checkpatch seems to be producing very
-#   confusing garbage in that case. See example and discussion in
+#   much time as cloning the entire repo.
+#   See example and discussion in
 #   https://github.com/thesofproject/linux/pull/2341
 #   (The workaround is of course to rebase the pull request)
 git:
@@ -51,7 +50,8 @@ jobs:
       # These two are combined because they both need a merge base and
       # locally unshallowing .git/ seems time consuming for some reason.
       # Without the merge base, the --xxxstats will either fail or be
-      # wrong and checkpatch prints confusing garbage.
+      # wrong and checkpatch will check every commit since the dawn of
+      # time.
       name: checkpatch and age of git base
       script:
         # Start with some visual and plain English context. A picture is
@@ -81,6 +81,37 @@ jobs:
         # Note $behind is NOT comparable to clone depth in repos with merges.
         - '[ "$behind" -lt 1000 ] # is the PR base too far behind?'
 
+        # The previous code looks at the target branch to show how far
+        # ahead it is from the pull request and how much the pull
+        # request misses from it. This may NOT be enough to address
+        # checkpatch issues with shallow cloning. Checkpatch tries to
+        # look at the _other_ side = the content of the PR itself; more
+        # specifically at:
+        #     git log ^"${TRAVIS_BRANCH}" "${TRAVIS_PULL_REQUEST_SHA}".
+        #
+        # From time to time "${TRAVIS_PULL_REQUEST_SHA}" is a merge
+        # commit, more specifically a "back-merge" of upstream code back
+        # into our branch. Such a back-merge "defeats" the previous git
+        # merge-base check above which leaves our ${TRAVIS_BRANCH}
+        # target branch shallow. Because of this shallowness, git log
+        # ^"${TRAVIS_BRANCH}" "${TRAVIS_PULL_REQUEST_SHA}" can generally
+        # _not_ connect the bottom of the shallow target branch to the
+        # pull request, so git tells checkpatch to check every single
+        # commit since the dawn of time! Let's try to detect such
+        # backmerges by looking at the all _parents_ of
+        # "${TRAVIS_PULL_REQUEST_SHA}": see if we fail to find a
+        # merge-base for some (upstream) parent because of our
+        # shallowness.
+        - skip_checkpatch=false;
+          (set -e; set -x;
+            for PR_parent in
+              $(git log -n 1 --pretty=%P ${TRAVIS_PULL_REQUEST_SHA}); do
+                 git merge-base $PR_parent ${TRAVIS_BRANCH};
+            done
+          ) || skip_checkpatch=true
+        # This check is not bullet-proof (imagine some commit on top of
+        # the backmerge) but it catches all common backmerges.
+
         # New Ubuntu 20.04 location
         - sudo mkdir -p /usr/share/codespell && sudo ln -s
            /usr/lib/python3/dist-packages/codespell_lib/data/dictionary.txt
@@ -89,8 +120,8 @@ jobs:
         # Note TRAVIS_COMMIT_RANGE has triple dots for "git diff" and
         # needs conversion to double dots for git log's inconsistent
         # user interface.
-        - ( set -x; scripts/checkpatch.pl --strict --codespell
-                     -g "${TRAVIS_COMMIT_RANGE/.../..}" )
+        - $skip_checkpatch || ( set -x; scripts/checkpatch.pl
+                --strict --codespell -g "${TRAVIS_COMMIT_RANGE/.../..}" )
 
     - name: Sparse check
       script:
