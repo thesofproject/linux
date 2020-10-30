@@ -17,9 +17,8 @@ dist: focal
 #
 # - When it's too shallow it will save zero time because fetching pull
 #   requests with a base older than the shallow history will take as
-#   much time as cloning the entire repo... without even providing the
-#   entire repo information as checkpatch seems to be producing very
-#   confusing garbage in that case. See example and discussion in
+#   much time as cloning the entire repo.
+#   See example and discussion in
 #   https://github.com/thesofproject/linux/pull/2341
 #   (The workaround is of course to rebase the pull request)
 git:
@@ -47,25 +46,30 @@ install:
 
 jobs:
   include:
+
+    # Show how "late" the PR base is = how much code the PR submission
+    # misses from the target branch.
     - if: type = pull_request
-      # These two are combined because they both need a merge base and
-      # locally unshallowing .git/ seems time consuming for some reason.
-      # Without the merge base, the --xxxstats will either fail or be
-      # wrong and checkpatch prints confusing garbage.
-      name: checkpatch and age of git base
+      name: age of git base
       script:
         # Start with some visual and plain English context. A picture is
         # worth thousand words and makes all the rest less abstract.
         - *short_log
         - git --no-pager log --oneline --graph --decorate
                                     --max-count=5 "${TRAVIS_BRANCH}"
+
+        # We need a merge-base because 'git diff A...B' silently (!)
+        # degrades to 'git diff A..B' when B is shallow and 'git rev-list
+        # ^A B | wc' is silently (!) truncated.
+        #
         # If the merge base is missing then the shallow depth
         # optimization has _already_ failed because Travis' already
         # fetched practically the entire history with a "git fetch
         # github pulls/1234/merge" command. The very long duration of
         # that earlier fetch merge command is hidden in Travis logs
         # under the git clone command _wrongly_ advertised as quick!
-        - git merge-base "${TRAVIS_PULL_REQUEST_SHA}" "${TRAVIS_BRANCH}" ||
+        - &unshallow_for_merge_base
+          git merge-base --all "${TRAVIS_PULL_REQUEST_SHA}" "${TRAVIS_BRANCH}" ||
               git fetch --unshallow https://github.com/"${TRAVIS_REPO_SLUG}"
                 "${TRAVIS_BRANCH}"
         # Show how "late" the PR base is
@@ -80,6 +84,17 @@ jobs:
             ^"${TRAVIS_PULL_REQUEST_SHA}" "${TRAVIS_BRANCH}" | wc -l) ; set +x
         # Note $behind is NOT comparable to clone depth in repos with merges.
         - '[ "$behind" -lt 1000 ] # is the PR base too far behind?'
+
+    - name: checkpatch
+      script:
+        # If git misses this merge base then 'git rev-list
+        # ^${TRAVIS_BRANCH} ${TRAVIS_PULL_REQUEST_SHA}' will tell
+        # checkpatch to scan practically every single git commit in the
+        # repo.
+        #
+        # FIXME: this addresses only pull requests without any merge
+        # submitted as part of the pull request itself.
+        - *unshallow_for_merge_base
 
         # New Ubuntu 20.04 location
         - sudo mkdir -p /usr/share/codespell && sudo ln -s
