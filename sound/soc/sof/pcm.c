@@ -315,7 +315,7 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 	struct snd_sof_pcm *spcm;
 	struct sof_ipc_stream stream;
 	struct sof_ipc_reply reply;
-	bool reset_hw_params = false;
+	bool pcm_free = false;
 	bool ipc_first = false;
 	int ret;
 
@@ -386,11 +386,11 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 			spcm->stream[substream->stream].suspend_ignored = true;
 			return 0;
 		}
+		pcm_free = true;
 		fallthrough;
 	case SNDRV_PCM_TRIGGER_STOP:
 		stream.hdr.cmd |= SOF_IPC_STREAM_TRIG_STOP;
 		ipc_first = true;
-		reset_hw_params = true;
 		break;
 	default:
 		dev_err(component->dev, "error: unhandled trigger cmd %d\n",
@@ -413,8 +413,8 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 	if (ipc_first)
 		snd_sof_pcm_platform_trigger(sdev, substream, cmd);
 
-	/* free PCM if reset_hw_params is set and the STOP IPC is successful */
-	if (!ret && reset_hw_params)
+	/* free PCM if pcm_free is set and the STOP IPC is successful */
+	if (!ret && pcm_free)
 		ret = sof_pcm_dsp_pcm_free(substream, sdev, spcm);
 
 	return ret;
