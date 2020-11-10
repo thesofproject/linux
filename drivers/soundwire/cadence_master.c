@@ -487,17 +487,17 @@ cdns_fill_msg_resp(struct sdw_cdns *cdns,
 		}
 		if (cdns->response_buf[i] & CDNS_MCP_RESP_NACK) {
 			nack = 1;
-			dev_err_ratelimited(cdns->dev, "Msg NACK received, cmd %d\n", i);
+			dev_err(cdns->dev, "Msg NACK received, cmd %d\n", i);
 		}
 	}
 
 	if (nack) {
-		dev_err_ratelimited(cdns->dev, "Msg NACKed for Slave %d\n", msg->dev_num);
+		dev_err(cdns->dev, "Msg NACKed for Slave %d\n", msg->dev_num);
 		return SDW_CMD_FAIL;
 	}
 
 	if (no_ack) {
-		dev_dbg_ratelimited(cdns->dev, "Msg ignored for Slave %d\n", msg->dev_num);
+		dev_dbg(cdns->dev, "Msg ignored for Slave %d\n", msg->dev_num);
 		return SDW_CMD_IGNORED;
 	}
 
@@ -606,13 +606,13 @@ cdns_program_scp_addr(struct sdw_cdns *cdns, struct sdw_msg *msg)
 
 	/* For NACK, NO ack, don't return err if we are in Broadcast mode */
 	if (nack) {
-		dev_err_ratelimited(cdns->dev,
+		dev_err(cdns->dev,
 				    "SCP_addrpage NACKed for Slave %d\n", msg->dev_num);
 		return SDW_CMD_FAIL;
 	}
 
 	if (no_ack) {
-		dev_dbg_ratelimited(cdns->dev,
+		dev_dbg(cdns->dev,
 				    "SCP_addrpage ignored for Slave %d\n", msg->dev_num);
 		return SDW_CMD_IGNORED;
 	}
@@ -779,7 +779,7 @@ static int cdns_update_slave_status(struct sdw_cdns *cdns,
 		if (set_status > 1) {
 			u32 val;
 
-			dev_warn_ratelimited(cdns->dev,
+			dev_warn(cdns->dev,
 					     "Slave %d reported multiple Status: %d\n",
 					     i, mask);
 
@@ -803,7 +803,7 @@ static int cdns_update_slave_status(struct sdw_cdns *cdns,
 				break;
 			}
 
-			dev_warn_ratelimited(cdns->dev,
+			dev_warn(cdns->dev,
 					     "Slave %d status updated to %d\n",
 					     i, status[i]);
 
@@ -855,12 +855,12 @@ irqreturn_t sdw_cdns_irq(int irq, void *dev_id)
 
 	if (int_status & CDNS_MCP_INT_PARITY) {
 		/* Parity error detected by Master */
-		dev_err_ratelimited(cdns->dev, "Parity error\n");
+		dev_err(cdns->dev, "Parity error\n");
 	}
 
 	if (int_status & CDNS_MCP_INT_CTRL_CLASH) {
 		/* Slave is driving bit slot during control word */
-		dev_err_ratelimited(cdns->dev, "Bus clash for control word\n");
+		dev_err(cdns->dev, "Bus clash for control word\n");
 	}
 
 	if (int_status & CDNS_MCP_INT_DATA_CLASH) {
@@ -868,7 +868,7 @@ irqreturn_t sdw_cdns_irq(int irq, void *dev_id)
 		 * Multiple slaves trying to drive bit slot, or issue with
 		 * ownership of data bits or Slave gone bonkers
 		 */
-		dev_err_ratelimited(cdns->dev, "Bus clash for data word\n");
+		dev_err(cdns->dev, "Bus clash for data word\n");
 	}
 
 	if (cdns->bus.params.m_data_mode != SDW_PORT_DATA_MODE_NORMAL &&
@@ -877,7 +877,7 @@ irqreturn_t sdw_cdns_irq(int irq, void *dev_id)
 
 		/* just log which ports report an error */
 		port_intstat = cdns_readl(cdns, CDNS_MCP_PORT_INTSTAT);
-		dev_err_ratelimited(cdns->dev, "DP interrupt: PortIntStat %8x\n",
+		dev_err(cdns->dev, "DP interrupt: PortIntStat %8x\n",
 				    port_intstat);
 
 		/* clear status w/ write1 */
@@ -919,7 +919,7 @@ static void cdns_update_slave_status_work(struct work_struct *work)
 		container_of(work, struct sdw_cdns, work);
 	u32 slave0, slave1;
 
-	dev_dbg_ratelimited(cdns->dev, "Slave status change\n");
+	dev_dbg(cdns->dev, "Slave status change\n");
 
 	slave0 = cdns_readl(cdns, CDNS_MCP_SLAVE_INTSTAT0);
 	slave1 = cdns_readl(cdns, CDNS_MCP_SLAVE_INTSTAT1);
