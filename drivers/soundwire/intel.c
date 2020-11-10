@@ -612,6 +612,8 @@ static int intel_shim_sync_go_unlocked(struct sdw_intel *sdw)
 	if (ret < 0)
 		dev_err(sdw->cdns.dev, "SyncGO clear failed: %d\n", ret);
 
+	dev_dbg(sdw->cdns.dev, "sync go done\n");
+
 	return ret;
 }
 
@@ -1456,6 +1458,7 @@ int intel_master_startup(struct platform_device *pdev)
 	}
 
 	if (multi_link) {
+		dev_dbg(dev, "startup sync go start\n");
 		ret = intel_shim_sync_go(sdw);
 		if (ret < 0) {
 			dev_err(dev, "sync go failed: %d\n", ret);
@@ -1774,6 +1777,7 @@ static int __maybe_unused intel_resume(struct device *dev)
 	}
 
 	if (multi_link) {
+		dev_dbg(dev, "system resume sync go start\n");
 		ret = intel_shim_sync_go(sdw);
 		if (ret < 0) {
 			dev_err(dev, "sync go failed during resume\n");
@@ -1858,6 +1862,7 @@ static int intel_resume_runtime(struct device *dev)
 		}
 
 		if (multi_link) {
+			dev_dbg(dev, "pm_runtime resume sync go start\n");
 			ret = intel_shim_sync_go(sdw);
 			if (ret < 0) {
 				dev_err(dev, "sync go failed during resume\n");
@@ -1930,6 +1935,7 @@ static int intel_resume_runtime(struct device *dev)
 			}
 
 			if (multi_link) {
+				dev_dbg(dev, "pm_runtime bus_reset resume sync go start\n");
 				ret = intel_shim_sync_go(sdw);
 				if (ret < 0) {
 					dev_err(sdw->cdns.dev, "sync go failed during resume\n");
