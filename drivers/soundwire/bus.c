@@ -794,7 +794,7 @@ static void sdw_modify_slave_status(struct sdw_slave *slave,
 
 	mutex_lock(&bus->bus_lock);
 
-	dev_vdbg(bus->dev,
+	dev_dbg(bus->dev,
 		 "%s: changing status slave %d status %d new status %d\n",
 		 __func__, slave->dev_num, slave->status, status);
 
@@ -1647,6 +1647,8 @@ static int sdw_update_slave_status(struct sdw_slave *slave,
 {
 	unsigned long time;
 
+	dev_dbg(&slave->dev, "%s: status %d\n", __func__, status);
+
 	if (!slave->probed) {
 		/*
 		 * the slave status update is typically handled in an
@@ -1697,8 +1699,10 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 			continue;
 
 		if (status[i] == SDW_SLAVE_UNATTACHED &&
-		    slave->status != SDW_SLAVE_UNATTACHED)
+		    slave->status != SDW_SLAVE_UNATTACHED) {
+			dev_err(bus->dev, "device %d became UNATTACHED\n", i);
 			sdw_modify_slave_status(slave, SDW_SLAVE_UNATTACHED);
+		}
 	}
 
 	if (status[0] == SDW_SLAVE_ATTACHED) {
@@ -1730,9 +1734,12 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 
 		switch (status[i]) {
 		case SDW_SLAVE_UNATTACHED:
-			if (slave->status == SDW_SLAVE_UNATTACHED)
+			if (slave->status == SDW_SLAVE_UNATTACHED) {
+				dev_err(bus->dev, "Handling unattached device %d, step 1\n", i);
 				break;
+			}
 
+			dev_err(bus->dev, "Handling unattached device %d, step 2\n", i);
 			sdw_modify_slave_status(slave, SDW_SLAVE_UNATTACHED);
 			break;
 
@@ -1770,6 +1777,7 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 			break;
 		}
 
+		dev_dbg(bus->dev, "Updating status for device %d\n", i);
 		ret = sdw_update_slave_status(slave, status[i]);
 		if (ret)
 			dev_err(&slave->dev,
