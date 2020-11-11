@@ -789,14 +789,20 @@ static int max98373_update_status(struct sdw_slave *slave,
 {
 	struct max98373_priv *max98373 = dev_get_drvdata(&slave->dev);
 
+	dev_dbg(&slave->dev, "%s: start\n", __func__);
+
 	if (status == SDW_SLAVE_UNATTACHED)
 		max98373->hw_init = false;
 
 	/*
 	 * Perform initialization only if slave status is SDW_SLAVE_ATTACHED
 	 */
-	if (max98373->hw_init || status != SDW_SLAVE_ATTACHED)
+	if (max98373->hw_init || status != SDW_SLAVE_ATTACHED) {
+		dev_dbg(&slave->dev, "%s: no io_init\n", __func__);
 		return 0;
+	}
+
+	dev_dbg(&slave->dev, "%s: calling io_init\n", __func__);
 
 	/* perform I/O transfers required for Slave initialization */
 	return max98373_io_init(slave);
