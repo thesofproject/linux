@@ -88,8 +88,17 @@ static int rt715_sdca_set_amp_gain_put(struct snd_kcontrol *kcontrol,
 	struct soc_mixer_control *mc =
 		(struct soc_mixer_control *)kcontrol->private_value;
 	struct rt715_sdca_priv *rt715 = snd_soc_component_get_drvdata(component);
-	unsigned int val_l, val_r, gain_l_val, gain_r_val;
+	unsigned int val_l, val_r, gain_l_val, gain_r_val, loop_cnt, i, reg;
 	int ret;
+
+	if (strstr(ucontrol->id.name, "FU02 Capture Volume") ||
+		strstr(ucontrol->id.name, "FU06 Capture Volume"))
+		loop_cnt = 2;
+	else if (strstr(ucontrol->id.name, "FU0E Boost") ||
+		strstr(ucontrol->id.name, "FU0C Boost"))
+		loop_cnt = 4;
+	else
+		loop_cnt = 1;
 
 	/* control value to 2s complement */
 	/* L channel */
@@ -129,18 +138,24 @@ static int rt715_sdca_set_amp_gain_put(struct snd_kcontrol *kcontrol,
 	}
 
 	/* Lch*/
-	ret = regmap_write(rt715->mbq_regmap, mc->reg, gain_l_val);
-	if (ret != 0) {
-		dev_err(component->dev, "Failed to write 0x%x=0x%x\n", mc->reg,
-			gain_l_val);
-		return ret;
+	for (i = 0; i < loop_cnt; i++) {
+		ret = regmap_write(rt715->mbq_regmap, mc->reg + i * 2, gain_l_val);
+		if (ret != 0) {
+			dev_err(component->dev, "Failed to write 0x%x=0x%x\n",
+				mc->reg + i * 2, gain_l_val);
+			return ret;
+		}
 	}
+
 	/* Rch */
-	ret = regmap_write(rt715->mbq_regmap, mc->rreg, gain_r_val);
-	if (ret != 0) {
-		dev_err(component->dev, "Failed to write 0x%x=0x%x\n", mc->rreg,
-			gain_r_val);
-		return ret;
+	for (i = 0; i < loop_cnt; i++) {
+		reg = (i == 3) ? (mc->rreg - 2) | BIT(15) : mc->rreg + i * 2;
+		ret = regmap_write(rt715->mbq_regmap, reg, gain_r_val);
+		if (ret != 0) {
+			dev_err(component->dev, "Failed to write 0x%x=0x%x\n",
+				reg, gain_r_val);
+			return ret;
+		}
 	}
 
 	return 0;
@@ -208,6 +223,86 @@ static int rt715_sdca_set_amp_gain_get(struct snd_kcontrol *kcontrol,
 static const DECLARE_TLV_DB_SCALE(in_vol_tlv, -17625, 375, 0);
 static const DECLARE_TLV_DB_SCALE(mic_vol_tlv, 0, 1000, 0);
 
+static int rt715_sdca_fu_info(struct snd_kcontrol *kcontrol,
+			 struct snd_ctl_elem_info *uinfo)
+{
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+	uinfo->count = 2;
+	uinfo->value.integer.min = 0;
+	uinfo->value.integer.max = 1;
+
+	return 0;
+}
+
+static int rt715_sdca_get_volsw(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct soc_mixer_control *mc =
+		(struct soc_mixer_control *)kcontrol->private_value;
+	unsigned int invert = mc->invert;
+	unsigned int max = mc->max;
+	int val;
+
+	val = snd_soc_component_read(component, mc->reg);
+	if (val < 0)
+		return -EINVAL;
+	ucontrol->value.integer.value[0] = invert ? max - val : val;
+
+	val = snd_soc_component_read(component, mc->rreg);
+	if (val < 0)
+		return -EINVAL;
+	ucontrol->value.integer.value[1] = invert ? max - val : val;
+
+	return 0;
+}
+
+static int rt715_sdca_put_volsw(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct soc_mixer_control *mc =
+		(struct soc_mixer_control *)kcontrol->private_value;
+	unsigned int val, val2, loop_cnt = 2, i;
+	unsigned int invert = mc->invert;
+	unsigned int reg2 = mc->rreg;
+	unsigned int reg = mc->reg;
+	unsigned int max = mc->max;
+	int err;
+
+	val = ucontrol->value.integer.value[0];
+	if (invert)
+		val = max - val;
+
+	val2 = ucontrol->value.integer.value[1];
+	if (invert)
+		val2 = max - val2;
+
+	for (i = 0; i < loop_cnt; i++) {
+		err = snd_soc_component_write(component, reg + i * 2, val);
+		if (err < 0)
+			return err;
+		err = snd_soc_component_write(component, reg2 + i * 2, val2);
+		if (err < 0)
+			return err;
+	}
+
+	return 0;
+}
+
+#define RT715_SDCA_FU_VALUE(xlreg, xrreg, xshift, xmax, xinvert) \
+	((unsigned long)&(struct soc_mixer_control) \
+	{.reg = xlreg, .rreg = xrreg, .shift = xshift, \
+	.max = xmax, .invert = xinvert})
+
+#define RT715_SDCA_FU_CTRL(xname, reg_left, reg_right, xshift, xmax, xinvert) \
+{	.iface = SNDRV_CTL_ELEM_IFACE_MIXER, .name = (xname), \
+	.info = rt715_sdca_fu_info, \
+	.get = rt715_sdca_get_volsw, \
+	.put = rt715_sdca_put_volsw, \
+	.private_value = RT715_SDCA_FU_VALUE(reg_left, reg_right, xshift, \
+					    xmax, xinvert)}
+
 #define SOC_DOUBLE_R_EXT(xname, reg_left, reg_right, xshift, xmax, xinvert,\
 	 xhandler_get, xhandler_put) \
 {	.iface = SNDRV_CTL_ELEM_IFACE_MIXER, .name = (xname), \
@@ -224,29 +319,17 @@ static const struct snd_kcontrol_new rt715_sdca_snd_controls[] = {
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC7_27_VOL,
 			RT715_SDCA_FU_MUTE_CTRL, CH_02),
 			0, 1, 1),
-	SOC_DOUBLE_R("FU02 1_2 Capture Switch",
+	RT715_SDCA_FU_CTRL("FU02 Capture Switch",
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC8_9_VOL,
 			RT715_SDCA_FU_MUTE_CTRL, CH_01),
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC8_9_VOL,
 			RT715_SDCA_FU_MUTE_CTRL, CH_02),
 			0, 1, 1),
-	SOC_DOUBLE_R("FU02 3_4 Capture Switch",
-		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC8_9_VOL,
-			RT715_SDCA_FU_MUTE_CTRL, CH_03),
-		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC8_9_VOL,
-			RT715_SDCA_FU_MUTE_CTRL, CH_04),
-			0, 1, 1),
-	SOC_DOUBLE_R("FU06 1_2 Capture Switch",
+	RT715_SDCA_FU_CTRL("FU06 Capture Switch",
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC10_11_VOL,
 			RT715_SDCA_FU_MUTE_CTRL, CH_01),
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC10_11_VOL,
 			RT715_SDCA_FU_MUTE_CTRL, CH_02),
-			0, 1, 1),
-	SOC_DOUBLE_R("FU06 3_4 Capture Switch",
-		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC10_11_VOL,
-			RT715_SDCA_FU_MUTE_CTRL, CH_03),
-		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC10_11_VOL,
-			RT715_SDCA_FU_MUTE_CTRL, CH_04),
 			0, 1, 1),
 	/* Volume Control */
 	SOC_DOUBLE_R_EXT_TLV("FU0A Capture Volume",
@@ -257,7 +340,7 @@ static const struct snd_kcontrol_new rt715_sdca_snd_controls[] = {
 			0x2f, 0x7f, 0,
 		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
 		in_vol_tlv),
-	SOC_DOUBLE_R_EXT_TLV("FU02 1_2 Capture Volume",
+	SOC_DOUBLE_R_EXT_TLV("FU02 Capture Volume",
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC8_9_VOL,
 			RT715_SDCA_FU_VOL_CTRL, CH_01),
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC8_9_VOL,
@@ -265,16 +348,7 @@ static const struct snd_kcontrol_new rt715_sdca_snd_controls[] = {
 			0x2f, 0x7f, 0,
 		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
 		in_vol_tlv),
-	SOC_DOUBLE_R_EXT_TLV("FU02 3_4 Capture Volume",
-		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC8_9_VOL,
-			RT715_SDCA_FU_VOL_CTRL,
-			CH_03),
-		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC8_9_VOL,
-			RT715_SDCA_FU_VOL_CTRL,
-			CH_04), 0x2f, 0x7f, 0,
-		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
-		in_vol_tlv),
-	SOC_DOUBLE_R_EXT_TLV("FU06 1_2 Capture Volume",
+	SOC_DOUBLE_R_EXT_TLV("FU06 Capture Volume",
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC10_11_VOL,
 			RT715_SDCA_FU_VOL_CTRL,
 			CH_01),
@@ -283,17 +357,8 @@ static const struct snd_kcontrol_new rt715_sdca_snd_controls[] = {
 			CH_02), 0x2f, 0x7f, 0,
 		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
 		in_vol_tlv),
-	SOC_DOUBLE_R_EXT_TLV("FU06 3_4 Capture Volume",
-		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC10_11_VOL,
-			RT715_SDCA_FU_VOL_CTRL,
-			CH_03),
-		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC10_11_VOL,
-			RT715_SDCA_FU_VOL_CTRL,
-			CH_04), 0x2f, 0x7f, 0,
-		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
-		in_vol_tlv),
 	/* MIC Boost Control */
-	SOC_DOUBLE_R_EXT_TLV("FU0E 1_2 Boost",
+	SOC_DOUBLE_R_EXT_TLV("FU0E Boost",
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_DMIC_GAIN_EN,
 			RT715_SDCA_FU_DMIC_GAIN_CTRL,
 			CH_01),
@@ -302,67 +367,13 @@ static const struct snd_kcontrol_new rt715_sdca_snd_controls[] = {
 			CH_02), 8, 3, 0,
 		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
 		mic_vol_tlv),
-	SOC_DOUBLE_R_EXT_TLV("FU0E 3_4 Boost",
-		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_DMIC_GAIN_EN,
-			RT715_SDCA_FU_DMIC_GAIN_CTRL,
-			CH_03),
-		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_DMIC_GAIN_EN,
-			RT715_SDCA_FU_DMIC_GAIN_CTRL,
-			CH_04), 8, 3, 0,
-		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
-		mic_vol_tlv),
-	SOC_DOUBLE_R_EXT_TLV("FU0E 5_6 Boost",
-		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_DMIC_GAIN_EN,
-			RT715_SDCA_FU_DMIC_GAIN_CTRL,
-			CH_05),
-		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_DMIC_GAIN_EN,
-			RT715_SDCA_FU_DMIC_GAIN_CTRL,
-			CH_06), 8, 3, 0,
-		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
-		mic_vol_tlv),
-	SOC_DOUBLE_R_EXT_TLV("FU0E 7_8 Boost",
-		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_DMIC_GAIN_EN,
-			RT715_SDCA_FU_DMIC_GAIN_CTRL,
-			CH_07),
-		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_DMIC_GAIN_EN,
-			RT715_SDCA_FU_DMIC_GAIN_CTRL,
-			CH_08), 8, 3, 0,
-		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
-		mic_vol_tlv),
-	SOC_DOUBLE_R_EXT_TLV("FU0C 1_2 Boost",
+	SOC_DOUBLE_R_EXT_TLV("FU0C Boost",
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_AMIC_GAIN_EN,
 			RT715_SDCA_FU_DMIC_GAIN_CTRL,
 			CH_01),
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_AMIC_GAIN_EN,
 			RT715_SDCA_FU_DMIC_GAIN_CTRL,
 			CH_02), 8, 3, 0,
-		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
-		mic_vol_tlv),
-	SOC_DOUBLE_R_EXT_TLV("FU0C 3_4 Boost",
-		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_AMIC_GAIN_EN,
-			RT715_SDCA_FU_DMIC_GAIN_CTRL,
-			CH_03),
-		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_AMIC_GAIN_EN,
-			RT715_SDCA_FU_DMIC_GAIN_CTRL,
-			CH_04), 8, 3, 0,
-		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
-		mic_vol_tlv),
-	SOC_DOUBLE_R_EXT_TLV("FU0C 5_6 Boost",
-		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_AMIC_GAIN_EN,
-			RT715_SDCA_FU_DMIC_GAIN_CTRL,
-			CH_05),
-		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_AMIC_GAIN_EN,
-			RT715_SDCA_FU_DMIC_GAIN_CTRL,
-			CH_06), 8, 3, 0,
-		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
-		mic_vol_tlv),
-	SOC_DOUBLE_R_EXT_TLV("FU0C 7_8 Boost",
-		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_AMIC_GAIN_EN,
-			RT715_SDCA_FU_DMIC_GAIN_CTRL,
-			CH_07),
-		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_AMIC_GAIN_EN,
-			RT715_SDCA_FU_DMIC_GAIN_CTRL,
-			CH_08), 8, 3, 0,
 		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
 		mic_vol_tlv),
 };
