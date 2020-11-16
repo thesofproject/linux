@@ -343,8 +343,10 @@ static int rt711_sdca_sdw_remove(struct sdw_slave *slave)
 {
 	struct rt711_sdca_priv *rt711 = dev_get_drvdata(&slave->dev);
 
-	if (rt711 && rt711->hw_init)
-		cancel_delayed_work(&rt711->jack_detect_work);
+	if (rt711 && rt711->hw_init) {
+		cancel_delayed_work_sync(&rt711->jack_detect_work);
+		cancel_delayed_work_sync(&rt711->jack_btn_check_work);
+	}
 
 	return 0;
 }
