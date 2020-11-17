@@ -267,8 +267,8 @@ static int sdw_transfer_unlocked(struct sdw_bus *bus, struct sdw_msg *msg)
 
 	ret = do_transfer(bus, msg);
 	if (ret != 0 && ret != -ENODATA)
-		dev_err(bus->dev, "trf on Slave %d failed:%d\n",
-			msg->dev_num, ret);
+		dev_err(bus->dev, "trf on Slave %d failed:%d addr %x\n",
+			msg->dev_num, ret, msg->addr);
 
 	if (msg->page)
 		sdw_reset_page(bus, msg->dev_num);
