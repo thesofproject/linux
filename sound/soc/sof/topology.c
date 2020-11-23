@@ -2744,12 +2744,12 @@ static void sof_dai_set_format(struct snd_soc_tplg_hw_config *hw_config,
 
 /*
  * Send IPC and set the same config for all DAIs with name matching the link
- * name. Note that the function can only be used for the case that all DAIs
- * have a common DAI config for now.
+ * name.
  */
-static int sof_set_dai_config(struct snd_sof_dev *sdev, u32 size,
-			      struct snd_soc_dai_link *link,
-			      struct sof_ipc_dai_config *config)
+static int sof_set_dai_config_multi(struct snd_sof_dev *sdev, u32 size,
+				    struct snd_soc_dai_link *link,
+				    struct sof_ipc_dai_config *config,
+				    int num_conf, int def_conf)
 {
 	struct snd_sof_dai *dai;
 	int found = 0;
@@ -2767,9 +2767,9 @@ static int sof_set_dai_config(struct snd_sof_dev *sdev, u32 size,
 			 */
 			config->dai_index = dai->comp_dai.dai_index;
 
-			dai->dai_config = kmemdup(config, size, GFP_KERNEL);
-			if (!dai->dai_config)
-				return -ENOMEM;
+			dai->num_conf = num_conf;
+			dai->def_conf = def_conf;
+			dai->dai_config = config;
 
 			/* set cpu_dai_name */
 			dai->cpu_dai_name = link->cpus->dai_name;
@@ -2791,64 +2791,84 @@ static int sof_set_dai_config(struct snd_sof_dev *sdev, u32 size,
 	return 0;
 }
 
+static int sof_set_dai_config(struct snd_sof_dev *sdev, u32 size,
+			      struct snd_soc_dai_link *link,
+			      struct sof_ipc_dai_config *config)
+{
+	return sof_set_dai_config_multi(sdev, size, link, config, 1, 0);
+}
+
 static int sof_link_ssp_load(struct snd_soc_component *scomp, int index,
 			     struct snd_soc_dai_link *link,
 			     struct snd_soc_tplg_link_config *cfg,
 			     struct snd_soc_tplg_hw_config *hw_config,
-			     struct sof_ipc_dai_config *config)
+			     struct sof_ipc_dai_config *config,
+			     int num_conf, int def_conf)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_tplg_private *private = &cfg->priv;
+	int common_data = num_conf ? num_conf : 1;
 	u32 size = sizeof(*config);
 	int ret;
+	int i;
 
-	/* handle master/slave and inverted clocks */
-	sof_dai_set_format(hw_config, config);
+	/*
+	 * Parse common data, we should have 1 common data per hw_config.
+	 * However we might not have hw_config at all so parse 1 common data
+	 * anyway.
+	 */
+	ret = sof_parse_token_sets(scomp, &config->ssp, ssp_tokens,
+				   ARRAY_SIZE(ssp_tokens), private->array,
+				   le32_to_cpu(private->size),
+				   common_data, size);
 
-	/* init IPC */
-	memset(&config->ssp, 0, sizeof(struct sof_ipc_dai_ssp_params));
-	config->hdr.size = size;
-
-	ret = sof_parse_tokens(scomp, &config->ssp, ssp_tokens,
-			       ARRAY_SIZE(ssp_tokens), private->array,
-			       le32_to_cpu(private->size));
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse ssp tokens failed %d\n",
 			le32_to_cpu(private->size));
 		return ret;
 	}
 
-	config->ssp.mclk_rate = le32_to_cpu(hw_config->mclk_rate);
-	config->ssp.bclk_rate = le32_to_cpu(hw_config->bclk_rate);
-	config->ssp.fsync_rate = le32_to_cpu(hw_config->fsync_rate);
-	config->ssp.tdm_slots = le32_to_cpu(hw_config->tdm_slots);
-	config->ssp.tdm_slot_width = le32_to_cpu(hw_config->tdm_slot_width);
-	config->ssp.mclk_direction = hw_config->mclk_direction;
-	config->ssp.rx_slots = le32_to_cpu(hw_config->rx_slots);
-	config->ssp.tx_slots = le32_to_cpu(hw_config->tx_slots);
+	/* process all possible hw configs */
+	for (i = 0; i < num_conf; i++) {
 
-	dev_dbg(scomp->dev, "tplg: config SSP%d fmt 0x%x mclk %d bclk %d fclk %d width (%d)%d slots %d mclk id %d quirks %d\n",
-		config->dai_index, config->format,
-		config->ssp.mclk_rate, config->ssp.bclk_rate,
-		config->ssp.fsync_rate, config->ssp.sample_valid_bits,
-		config->ssp.tdm_slot_width, config->ssp.tdm_slots,
-		config->ssp.mclk_id, config->ssp.quirks);
+		/* handle master/slave and inverted clocks */
+		sof_dai_set_format(&hw_config[i], &config[i]);
 
-	/* validate SSP fsync rate and channel count */
-	if (config->ssp.fsync_rate < 8000 || config->ssp.fsync_rate > 192000) {
-		dev_err(scomp->dev, "error: invalid fsync rate for SSP%d\n",
-			config->dai_index);
-		return -EINVAL;
-	}
+		config[i].hdr.size = size;
 
-	if (config->ssp.tdm_slots < 1 || config->ssp.tdm_slots > 8) {
-		dev_err(scomp->dev, "error: invalid channel count for SSP%d\n",
-			config->dai_index);
-		return -EINVAL;
+		/* copy differentiating hw configs to ipc structs */
+		config[i].ssp.mclk_rate = le32_to_cpu(hw_config[i].mclk_rate);
+		config[i].ssp.bclk_rate = le32_to_cpu(hw_config[i].bclk_rate);
+		config[i].ssp.fsync_rate = le32_to_cpu(hw_config[i].fsync_rate);
+		config[i].ssp.tdm_slots = le32_to_cpu(hw_config[i].tdm_slots);
+		config[i].ssp.tdm_slot_width = le32_to_cpu(hw_config[i].tdm_slot_width);
+		config[i].ssp.mclk_direction = hw_config[i].mclk_direction;
+		config[i].ssp.rx_slots = le32_to_cpu(hw_config[i].rx_slots);
+		config[i].ssp.tx_slots = le32_to_cpu(hw_config[i].tx_slots);
+
+		dev_dbg(scomp->dev, "tplg: config SSP%d fmt 0x%x mclk %d bclk %d fclk %d width (%d)%d slots %d mclk id %d quirks %d\n",
+			config[i].dai_index, config[i].format,
+			config[i].ssp.mclk_rate, config[i].ssp.bclk_rate,
+			config[i].ssp.fsync_rate, config[i].ssp.sample_valid_bits,
+			config[i].ssp.tdm_slot_width, config[i].ssp.tdm_slots,
+			config[i].ssp.mclk_id, config[i].ssp.quirks);
+
+		/* validate SSP fsync rate and channel count */
+		if (config[i].ssp.fsync_rate < 8000 || config[i].ssp.fsync_rate > 192000) {
+			dev_err(scomp->dev, "error: invalid fsync rate for SSP%d\n",
+				config[i].dai_index);
+			return -EINVAL;
+		}
+
+		if (config[i].ssp.tdm_slots < 1 || config[i].ssp.tdm_slots > 8) {
+			dev_err(scomp->dev, "error: invalid channel count for SSP%d\n",
+				config[i].dai_index);
+			return -EINVAL;
+		}
 	}
 
 	/* set config for all DAI's with name matching the link name */
-	ret = sof_set_dai_config(sdev, size, link, config);
+	ret = sof_set_dai_config_multi(sdev, size, link, config, num_conf, def_conf);
 	if (ret < 0)
 		dev_err(scomp->dev, "error: failed to save DAI config for SSP%d\n",
 			config->dai_index);
@@ -3139,11 +3159,12 @@ static int sof_link_load(struct snd_soc_component *scomp, int index,
 			 struct snd_soc_tplg_link_config *cfg)
 {
 	struct snd_soc_tplg_private *private = &cfg->priv;
-	struct sof_ipc_dai_config config;
 	struct snd_soc_tplg_hw_config *hw_config;
-	int num_hw_configs;
+	struct sof_ipc_dai_config *config;
+	int num_conf;
+	int def_conf;
 	int ret;
-	int i = 0;
+	int i;
 
 	if (!link->platforms) {
 		dev_err(scomp->dev, "error: no platforms\n");
@@ -3180,88 +3201,101 @@ static int sof_link_load(struct snd_soc_component *scomp, int index,
 		return -EINVAL;
 	}
 
-	/* Send BE DAI link configurations to DSP */
-	memset(&config, 0, sizeof(config));
-
-	/* get any common DAI tokens */
-	ret = sof_parse_tokens(scomp, &config, dai_link_tokens,
-			       ARRAY_SIZE(dai_link_tokens), private->array,
-			       le32_to_cpu(private->size));
-	if (ret != 0) {
-		dev_err(scomp->dev, "error: parse link tokens failed %d\n",
-			le32_to_cpu(private->size));
-		return ret;
-	}
-
 	/*
 	 * DAI links are expected to have at least 1 hw_config.
 	 * But some older topologies might have no hw_config for HDA dai links.
 	 */
-	num_hw_configs = le32_to_cpu(cfg->num_hw_configs);
-	if (!num_hw_configs) {
-		if (config.type != SOF_DAI_INTEL_HDA) {
+	hw_config = cfg->hw_config;
+	num_conf = le32_to_cpu(cfg->num_hw_configs);
+	if (!num_conf) {
+		if (config->type != SOF_DAI_INTEL_HDA) {
 			dev_err(scomp->dev, "error: unexpected DAI config count %d!\n",
 				le32_to_cpu(cfg->num_hw_configs));
 			return -EINVAL;
 		}
+		num_conf = 1;
 	} else {
 		dev_dbg(scomp->dev, "tplg: %d hw_configs found, default id: %d!\n",
 			cfg->num_hw_configs, le32_to_cpu(cfg->default_hw_config_id));
 
-		for (i = 0; i < num_hw_configs; i++) {
-			if (cfg->hw_config[i].id == cfg->default_hw_config_id)
+		for (def_conf = 0; def_conf < num_conf; def_conf++) {
+			if (hw_config[def_conf].id == cfg->default_hw_config_id)
 				break;
 		}
 
-		if (i == num_hw_configs) {
+		if (def_conf == num_conf) {
 			dev_err(scomp->dev, "error: default hw_config id: %d not found!\n",
 				le32_to_cpu(cfg->default_hw_config_id));
 			return -EINVAL;
 		}
 	}
 
-	/* configure dai IPC message */
-	hw_config = &cfg->hw_config[i];
+	/* reserve memory for all hw configs, eventually freed by widget */
+	config = kzalloc(num_conf * sizeof(*config), GFP_KERNEL);
+	if (!config)
+		return -ENOMEM;
 
-	config.hdr.cmd = SOF_IPC_GLB_DAI_MSG | SOF_IPC_DAI_CONFIG;
-	config.format = le32_to_cpu(hw_config->fmt);
+	/* get any common DAI tokens */
+	ret = sof_parse_tokens(scomp, config, dai_link_tokens,
+			       ARRAY_SIZE(dai_link_tokens), private->array,
+			       le32_to_cpu(private->size));
+	if (ret != 0) {
+		dev_err(scomp->dev, "error: parse link tokens failed %d\n",
+			le32_to_cpu(private->size));
+		goto err;
+	}
+
+	config->hdr.cmd = SOF_IPC_GLB_DAI_MSG | SOF_IPC_DAI_CONFIG;
+	config->format = le32_to_cpu(hw_config->fmt);
+
+	/* copy common data to all config ipc structs */
+	for (i = 1; i < num_conf; i++) {
+		config[i].hdr.cmd = SOF_IPC_GLB_DAI_MSG | SOF_IPC_DAI_CONFIG;
+		config[i].format = hw_config[i].fmt;
+		config[i].type = config[i - 1].type;
+		config[i].dai_index = config[i - 1].dai_index;
+	}
 
 	/* now load DAI specific data and send IPC - type comes from token */
-	switch (config.type) {
+	switch (config->type) {
 	case SOF_DAI_INTEL_SSP:
 		ret = sof_link_ssp_load(scomp, index, link, cfg, hw_config,
-					&config);
+					config, num_conf, def_conf);
 		break;
 	case SOF_DAI_INTEL_DMIC:
 		ret = sof_link_dmic_load(scomp, index, link, cfg, hw_config,
-					 &config);
+					 config);
 		break;
 	case SOF_DAI_INTEL_HDA:
 		ret = sof_link_hda_load(scomp, index, link, cfg, hw_config,
-					&config);
+					config);
 		break;
 	case SOF_DAI_INTEL_ALH:
 		ret = sof_link_alh_load(scomp, index, link, cfg, hw_config,
-					&config);
+					config);
 		break;
 	case SOF_DAI_IMX_SAI:
 		ret = sof_link_sai_load(scomp, index, link, cfg, hw_config,
-					&config);
+					config);
 		break;
 	case SOF_DAI_IMX_ESAI:
 		ret = sof_link_esai_load(scomp, index, link, cfg, hw_config,
-					 &config);
+					 config);
 		break;
 	default:
 		dev_err(scomp->dev, "error: invalid DAI type %d\n",
-			config.type);
+			config->type);
 		ret = -EINVAL;
 		break;
 	}
 	if (ret < 0)
-		return ret;
+		goto err;
 
 	return 0;
+
+err:
+	kfree(config);
+	return ret;
 }
 
 static int sof_link_hda_unload(struct snd_sof_dev *sdev,

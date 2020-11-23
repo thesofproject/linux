@@ -131,6 +131,8 @@ struct snd_sof_dai {
 	const char *cpu_dai_name;
 
 	struct sof_ipc_comp_dai comp_dai;
+	int num_conf;
+	int def_conf;
 	struct sof_ipc_dai_config *dai_config;
 	struct list_head list;	/* list in sdev dai list */
 };
