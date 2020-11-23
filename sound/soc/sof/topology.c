@@ -3231,7 +3231,7 @@ static int sof_link_load(struct snd_soc_component *scomp, int index,
 	}
 
 	/* reserve memory for all hw configs, eventually freed by widget */
-	config = kzalloc(num_conf * sizeof(*config), GFP_KERNEL);
+	config = kcalloc(num_conf, sizeof(*config), GFP_KERNEL);
 	if (!config)
 		return -ENOMEM;
 
@@ -3245,8 +3245,8 @@ static int sof_link_load(struct snd_soc_component *scomp, int index,
 		goto err;
 	}
 
-	config->hdr.cmd = SOF_IPC_GLB_DAI_MSG | SOF_IPC_DAI_CONFIG;
-	config->format = le32_to_cpu(hw_config->fmt);
+	config[0].hdr.cmd = SOF_IPC_GLB_DAI_MSG | SOF_IPC_DAI_CONFIG;
+	config[0].format = le32_to_cpu(hw_config->fmt);
 
 	/* copy common data to all config ipc structs */
 	for (i = 1; i < num_conf; i++) {
@@ -3257,7 +3257,7 @@ static int sof_link_load(struct snd_soc_component *scomp, int index,
 	}
 
 	/* now load DAI specific data and send IPC - type comes from token */
-	switch (config->type) {
+	switch (config[0].type) {
 	case SOF_DAI_INTEL_SSP:
 		ret = sof_link_ssp_load(scomp, index, link, cfg, hw_config,
 					config, num_conf, def_conf);
