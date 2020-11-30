@@ -35,7 +35,6 @@ static int field##_attribute_alloc(struct device *dev,			\
 	dpn_attr = devm_kzalloc(dev, sizeof(*dpn_attr), GFP_KERNEL);	\
 	if (!dpn_attr)							\
 		return -ENOMEM;						\
-	sysfs_attr_init(&dpn_attr->dev_attr.attr);			\
 	dpn_attr->N = N;						\
 	dpn_attr->dir = dir;						\
 	sysfs_attr_init(&dpn_attr->dev_attr.attr);			\
