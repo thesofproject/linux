@@ -299,6 +299,7 @@ static int max98373_read_prop(struct sdw_slave *slave)
 	prop->sink_ports = BIT(1);
 	prop->paging_support = true;
 	prop->clk_stop_timeout = 20;
+	prop->quirks = SDW_SLAVE_QUIRKS_INVALID_INITIAL_PARITY;
 
 	nval = hweight32(prop->source_ports);
 	prop->src_dpn_prop = devm_kcalloc(&slave->dev, nval,
