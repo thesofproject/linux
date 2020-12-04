@@ -705,7 +705,7 @@ static int __maybe_unused rt1316_dev_suspend(struct device *dev)
 	return 0;
 }
 
-#define RT1316_PROBE_TIMEOUT 2000
+#define RT1316_PROBE_TIMEOUT 5000
 
 static int __maybe_unused rt1316_dev_resume(struct device *dev)
 {
