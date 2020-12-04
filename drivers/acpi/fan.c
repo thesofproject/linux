@@ -357,6 +357,7 @@ static int acpi_fan_get_fps(struct acpi_device *device)
 		fps->dev_attr.store = NULL;
 		fps->dev_attr.attr.name = fps->name;
 		fps->dev_attr.attr.mode = 0444;
+		sysfs_attr_init(&fps->dev_attr.attr);
 		status = sysfs_create_file(&device->dev.kobj, &fps->dev_attr.attr);
 		if (status) {
 			int j;
