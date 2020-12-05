@@ -414,9 +414,31 @@ regmap_sync:
 	return 0;
 }
 
+static int __maybe_unused rt711_sdca_dev_suspend_runtime(struct device *dev)
+{
+	int ret;
+
+	dev_dbg(dev, "%s: start\n", __func__);
+	ret = rt711_sdca_dev_suspend(dev);
+	dev_dbg(dev, "%s: done\n", __func__);
+
+	return ret;
+}
+
+static int __maybe_unused rt711_sdca_dev_resume_runtime(struct device *dev)
+{
+	int ret;
+
+	dev_dbg(dev, "%s: start\n", __func__);
+	ret = rt711_sdca_dev_resume(dev);
+	dev_dbg(dev, "%s: done\n", __func__);
+
+	return ret;
+}
+
 static const struct dev_pm_ops rt711_sdca_pm = {
 	SET_SYSTEM_SLEEP_PM_OPS(rt711_sdca_dev_suspend, rt711_sdca_dev_resume)
-	SET_RUNTIME_PM_OPS(rt711_sdca_dev_suspend, rt711_sdca_dev_resume, NULL)
+	SET_RUNTIME_PM_OPS(rt711_sdca_dev_suspend_runtime, rt711_sdca_dev_resume_runtime, NULL)
 };
 
 static struct sdw_driver rt711_sdca_sdw_driver = {
