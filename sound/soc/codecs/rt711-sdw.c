@@ -504,13 +504,18 @@ static int __maybe_unused rt711_dev_resume(struct device *dev)
 
 	dev_dbg(&slave->dev, "%s: start\n", __func__);
 
-	if (!rt711->hw_init)
+	if (!rt711->hw_init) {
+		dev_dbg(&slave->dev, "%s: done - hw_init not necessary\n",
+			__func__);
 		return 0;
+	}
 
 	if (!slave->unattach_request)
 		goto regmap_sync;
 
 	slave->unattach_request = 0;
+
+	dev_dbg(&slave->dev, "%s: wait_for_completion start\n", __func__);
 
 	time = wait_for_completion_timeout(&slave->initialization_complete,
 				msecs_to_jiffies(RT711_PROBE_TIMEOUT));
@@ -519,9 +524,11 @@ static int __maybe_unused rt711_dev_resume(struct device *dev)
 		return -ETIMEDOUT;
 	}
 
-	dev_dbg(&slave->dev, "%s: regmap_sync\n", __func__);
+	dev_dbg(&slave->dev, "%s: wait_for_completion done\n", __func__);
 
 regmap_sync:
+	dev_dbg(&slave->dev, "%s: regmap_sync\n", __func__);
+
 	regcache_cache_only(rt711->regmap, false);
 	regcache_sync_region(rt711->regmap, 0x3000, 0x8fff);
 	regcache_sync_region(rt711->regmap, 0x752009, 0x752091);
