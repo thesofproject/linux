@@ -1748,6 +1748,12 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 			break;
 
 		case SDW_SLAVE_ALERT:
+			if (slave->status != SDW_SLAVE_ATTACHED) {
+				dev_err(&slave->dev,
+					"Slave %d reports alert but was not attached before\n", i);
+				break;
+			}
+
 			ret = sdw_handle_slave_alerts(slave);
 			if (ret)
 				dev_err(&slave->dev,
