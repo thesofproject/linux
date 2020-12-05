@@ -502,6 +502,8 @@ static int __maybe_unused rt711_dev_resume(struct device *dev)
 	struct rt711_priv *rt711 = dev_get_drvdata(dev);
 	unsigned long time;
 
+	dev_dbg(&slave->dev, "%s: start\n", __func__);
+
 	if (!rt711->hw_init)
 		return 0;
 
@@ -517,12 +519,16 @@ static int __maybe_unused rt711_dev_resume(struct device *dev)
 		return -ETIMEDOUT;
 	}
 
+	dev_dbg(&slave->dev, "%s: regmap_sync\n", __func__);
+
 regmap_sync:
 	regcache_cache_only(rt711->regmap, false);
 	regcache_sync_region(rt711->regmap, 0x3000, 0x8fff);
 	regcache_sync_region(rt711->regmap, 0x752009, 0x752091);
 
 	pm_runtime_mark_last_busy(dev);
+
+	dev_dbg(&slave->dev, "%s: done\n", __func__);
 
 	return 0;
 }
