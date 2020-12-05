@@ -1720,6 +1720,8 @@ static int __maybe_unused intel_resume(struct device *dev)
 		return 0;
 	}
 
+	dev_dbg(dev, "%s: start\n", __func__);
+
 	link_flags = md_flags >> (bus->link_id * 8);
 	multi_link = !(link_flags & SDW_INTEL_MASTER_DISABLE_MULTI_LINK);
 
@@ -1795,6 +1797,9 @@ static int __maybe_unused intel_resume(struct device *dev)
 	 */
 	pm_runtime_mark_last_busy(dev);
 
+	dev_dbg(dev, "%s: done\n", __func__);
+
+
 	return ret;
 }
 
@@ -1815,6 +1820,8 @@ static int intel_resume_runtime(struct device *dev)
 			bus->link_id);
 		return 0;
 	}
+
+	dev_dbg(dev, "%s: start\n", __func__);
 
 	link_flags = md_flags >> (bus->link_id * 8);
 	multi_link = !(link_flags & SDW_INTEL_MASTER_DISABLE_MULTI_LINK);
@@ -1967,6 +1974,8 @@ static int intel_resume_runtime(struct device *dev)
 			__func__, clock_stop_quirks);
 		ret = -EINVAL;
 	}
+
+	dev_dbg(dev, "%s: done\n", __func__);
 
 	return ret;
 }
