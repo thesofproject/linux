@@ -9,6 +9,7 @@
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/mod_devicetable.h>
+#include <linux/pm_runtime.h>
 #include <linux/soundwire/sdw_registers.h>
 #include <linux/module.h>
 
@@ -401,6 +402,9 @@ regmap_sync:
 	regcache_sync(rt711->regmap);
 	regcache_cache_only(rt711->mbq_regmap, false);
 	regcache_sync(rt711->mbq_regmap);
+
+	pm_runtime_mark_last_busy(dev);
+
 	return 0;
 }
 
