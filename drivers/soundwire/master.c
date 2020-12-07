@@ -107,7 +107,36 @@ static void sdw_master_device_release(struct device *dev)
 	kfree(md);
 }
 
+static int __maybe_unused sdw_master_device_suspend(struct device *dev)
+{
+	dev_dbg(dev, "%s: start\n", __func__);
+
+	dev_dbg(dev, "%s: done\n", __func__);
+
+	return 0;
+}
+
+static int __maybe_unused sdw_master_device_resume(struct device *dev)
+{
+	dev_dbg(dev, "%s: start\n", __func__);
+
+	if (pm_runtime_suspended(dev)) {
+		dev_dbg(dev, "%s: pm_runtime status was suspended, forcing active\n", __func__);
+
+		/* follow required sequence from runtime_pm.rst */
+		pm_runtime_disable(dev);
+		pm_runtime_set_active(dev);
+		pm_runtime_mark_last_busy(dev);
+		pm_runtime_enable(dev);
+	}
+
+	dev_dbg(dev, "%s: done\n", __func__);
+
+	return 0;
+}
+
 static const struct dev_pm_ops master_dev_pm = {
+	SET_SYSTEM_SLEEP_PM_OPS(sdw_master_device_suspend, sdw_master_device_resume)
 	SET_RUNTIME_PM_OPS(pm_generic_runtime_suspend,
 			   pm_generic_runtime_resume, NULL)
 };
