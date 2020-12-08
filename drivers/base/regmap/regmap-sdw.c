@@ -11,18 +11,18 @@
 static int regmap_sdw_write(void *context, unsigned int reg, unsigned int val)
 {
 	struct device *dev = context;
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);
 
-	return sdw_write_no_pm(slave, reg, val);
+	return sdw_write_no_pm(peripheral, reg, val);
 }
 
 static int regmap_sdw_read(void *context, unsigned int reg, unsigned int *val)
 {
 	struct device *dev = context;
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);
 	int read;
 
-	read = sdw_read_no_pm(slave, reg);
+	read = sdw_read_no_pm(peripheral, reg);
 	if (read < 0)
 		return read;
 
@@ -53,7 +53,7 @@ static int regmap_sdw_config_check(const struct regmap_config *config)
 	return 0;
 }
 
-struct regmap *__regmap_init_sdw(struct sdw_slave *sdw,
+struct regmap *__regmap_init_sdw(struct sdw_peripheral *sdw,
 				 const struct regmap_config *config,
 				 struct lock_class_key *lock_key,
 				 const char *lock_name)
@@ -69,7 +69,7 @@ struct regmap *__regmap_init_sdw(struct sdw_slave *sdw,
 }
 EXPORT_SYMBOL_GPL(__regmap_init_sdw);
 
-struct regmap *__devm_regmap_init_sdw(struct sdw_slave *sdw,
+struct regmap *__devm_regmap_init_sdw(struct sdw_peripheral *sdw,
 				      const struct regmap_config *config,
 				      struct lock_class_key *lock_key,
 				      const char *lock_name)

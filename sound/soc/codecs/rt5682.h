@@ -1439,8 +1439,8 @@ struct rt5682_priv {
 	struct mutex disable_irq_lock; /* imp-def irq lock protection */
 	bool disable_irq;
 	struct mutex calibrate_mutex;
-	struct sdw_slave *slave;
-	enum sdw_slave_status status;
+	struct sdw_peripheral *peripheral;
+	enum sdw_peripheral_status status;
 	struct sdw_bus_params params;
 	bool hw_init;
 	bool first_hw_init;

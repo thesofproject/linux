@@ -26,10 +26,10 @@ Stream Sample in memory (System memory, DSP memory or FIFOs) ::
 	-------------------------
 
 Example 1: Stereo Stream with L and R channels is rendered from Manager to
-Slave. Both Manager and Slave is using single port. ::
+Peripheral. Both Manager and Peripheral is using single port. ::
 
 	+---------------+                    Clock Signal  +---------------+
-	|    Manager    +----------------------------------+     Slave     |
+	|    Manager    +----------------------------------+  Peripheral   |
 	|   Interface   |                                  |   Interface   |
 	|               |                                  |       1       |
 	|               |                     Data Signal  |               |
@@ -38,12 +38,12 @@ Slave. Both Manager and Slave is using single port. ::
 	+---------------+  +----------------------->       +---------------+
 
 
-Example 2: Stereo Stream with L and R channels is captured from Slave to
-Manager. Both Manager and Slave is using single port. ::
+Example 2: Stereo Stream with L and R channels is captured from Peripheral to
+Manager. Both Manager and Peripheral is using single port. ::
 
 
 	+---------------+                    Clock Signal  +---------------+
-	|    Manager    +----------------------------------+     Slave     |
+	|    Manager    +----------------------------------+  Peripheral   |
 	|   Interface   |                                  |   Interface   |
 	|               |                                  |       1       |
 	|               |                     Data Signal  |               |
@@ -53,11 +53,11 @@ Manager. Both Manager and Slave is using single port. ::
 
 
 Example 3: Stereo Stream with L and R channels is rendered by Manager. Each
-of the L and R channel is received by two different Slaves. Manager and both
-Slaves are using single port. ::
+of the L and R channel is received by two different Peripherals. Manager and both
+Peripherals are using single port. ::
 
 	+---------------+                    Clock Signal  +---------------+
-	|    Manager    +---------+------------------------+     Slave     |
+	|    Manager    +---------+------------------------+  Peripheral   |
 	|   Interface   |         |                        |   Interface   |
 	|               |         |                        |       1       |
 	|               |         |           Data Signal  |               |
@@ -67,7 +67,7 @@ Slaves are using single port. ::
 	                    |     |
 	                    |     |
 	                    |     |                        +---------------+
-	                    |     +----------------------> |     Slave     |
+	                    |     +----------------------> |  Peripheral   |
 	                    |                              |   Interface   |
 	                    |                              |       2       |
 	                    |                              |               |
@@ -77,13 +77,13 @@ Slaves are using single port. ::
 
 Example 4: Stereo Stream with L and R channels is rendered by
 Manager. Both of the L and R channels are received by two different
-Slaves. Manager and both Slaves are using single port handling
-L+R. Each Slave device processes the L + R data locally, typically
+Peripherals. Manager and both Peripherals are using single port handling
+L+R. Each Peripheral device processes the L + R data locally, typically
 based on static configuration or dynamic orientation, and may drive
 one or more speakers. ::
 
 	+---------------+                    Clock Signal  +---------------+
-	|    Manager    +---------+------------------------+     Slave     |
+	|    Manager    +---------+------------------------+  Peripheral   |
 	|   Interface   |         |                        |   Interface   |
 	|               |         |                        |       1       |
 	|               |         |           Data Signal  |               |
@@ -93,7 +93,7 @@ one or more speakers. ::
 	                    |     |
 	                    |     |
 	                    |     |                        +---------------+
-	                    |     +----------------------> |     Slave     |
+	                    |     +----------------------> |  Peripheral   |
 	                    |                              |   Interface   |
 	                    |                              |       2       |
 	                    |                              |               |
@@ -102,7 +102,7 @@ one or more speakers. ::
 	                                                   +---------------+
 
 Example 5: Stereo Stream with L and R channel is rendered by two different
-Ports of the Manager and is received by only single Port of the Slave
+Ports of the Manager and is received by only single Port of the Peripheral
 interface. ::
 
 	+--------------------+
@@ -118,7 +118,7 @@ interface. ::
 	|     +--------------+           |                 ||         |     |
 	|     |             ||           |                 +----------+     |
 	|     |  Data Port  |------------+                 |                |
-	|     |      2      ||  R Channel                  |     Slave      |
+	|     |      2      ||  R Channel                  |  Peripheral    |
 	|     |  R Channel  ||                             |   Interface    |
 	|     |   (Data)    ||                             |       1        |
 	|     +--------------+         Clock Signal        |     L  +  R    |
@@ -127,11 +127,11 @@ interface. ::
 							   +----------------+
 
 Example 6: Stereo Stream with L and R channel is rendered by 2 Managers, each
-rendering one channel, and is received by two different Slaves, each
-receiving one channel. Both Managers and both Slaves are using single port. ::
+rendering one channel, and is received by two different Peripherals, each
+receiving one channel. Both Managers and both Peripherals are using single port. ::
 
 	+---------------+                    Clock Signal  +---------------+
-	|    Manager    +----------------------------------+     Slave     |
+	|    Manager    +----------------------------------+  Peripheral   |
 	|   Interface   |                                  |   Interface   |
 	|       1       |                                  |       1       |
 	|               |                     Data Signal  |               |
@@ -140,7 +140,7 @@ receiving one channel. Both Managers and both Slaves are using single port. ::
 	+---------------+  +----------------------->       +---------------+
 
 	+---------------+                    Clock Signal  +---------------+
-	|    Manager    +----------------------------------+     Slave     |
+	|    Manager    +----------------------------------+  Peripheral   |
 	|   Interface   |                                  |   Interface   |
 	|       2       |                                  |       2       |
 	|               |                     Data Signal  |               |
@@ -149,12 +149,12 @@ receiving one channel. Both Managers and both Slaves are using single port. ::
 	+---------------+  +----------------------->       +---------------+
 
 Example 7: Stereo Stream with L and R channel is rendered by 2
-Managers, each rendering both channels. Each Slave receives L + R. This
-is the same application as Example 4 but with Slaves placed on
+Managers, each rendering both channels. Each Peripheral receives L + R. This
+is the same application as Example 4 but with Peripherals placed on
 separate links. ::
 
 	+---------------+                    Clock Signal  +---------------+
-	|    Manager    +----------------------------------+     Slave     |
+	|    Manager    +----------------------------------+  Peripheral   |
 	|   Interface   |                                  |   Interface   |
 	|       1       |                                  |       1       |
 	|               |                     Data Signal  |               |
@@ -163,7 +163,7 @@ separate links. ::
 	+---------------+  +----------------------->       +---------------+
 
 	+---------------+                    Clock Signal  +---------------+
-	|    Manager    +----------------------------------+     Slave     |
+	|    Manager    +----------------------------------+  Peripheral   |
 	|   Interface   |                                  |   Interface   |
 	|       2       |                                  |       2       |
 	|               |                     Data Signal  |               |
@@ -172,10 +172,10 @@ separate links. ::
 	+---------------+  +----------------------->       +---------------+
 
 Example 8: 4-channel Stream is rendered by 2 Managers, each rendering a
-2 channels. Each Slave receives 2 channels. ::
+2 channels. Each Peripheral receives 2 channels. ::
 
 	+---------------+                    Clock Signal  +---------------+
-	|    Manager    +----------------------------------+     Slave     |
+	|    Manager    +----------------------------------+  Peripheral   |
 	|   Interface   |                                  |   Interface   |
 	|       1       |                                  |       1       |
 	|               |                     Data Signal  |               |
@@ -184,7 +184,7 @@ Example 8: 4-channel Stream is rendered by 2 Managers, each rendering a
 	+---------------+  +----------------------->       +---------------+
 
 	+---------------+                    Clock Signal  +---------------+
-	|    Manager    +----------------------------------+     Slave     |
+	|    Manager    +----------------------------------+  Peripheral   |
 	|   Interface   |                                  |   Interface   |
 	|       2       |                                  |       2       |
 	|               |                     Data Signal  |               |
@@ -198,14 +198,14 @@ framework(ASoC DPCM) guarantees that stream operations on a card are
 always serialized. So, there is no race condition and hence no need for
 global lock.
 
-Note2: A Slave device may be configured to receive all channels
+Note2: A Peripheral device may be configured to receive all channels
 transmitted on a link for a given Stream (Example 4) or just a subset
-of the data (Example 3). The configuration of the Slave device is not
+of the data (Example 3). The configuration of the Peripheral device is not
 handled by a SoundWire subsystem API, but instead by the
 snd_soc_dai_set_tdm_slot() API. The platform or machine driver will
 typically configure which of the slots are used. For Example 4, the
-same slots would be used by all Devices, while for Example 3 the Slave
-Device1 would use e.g. Slot 0 and Slave device2 slot 1.
+same slots would be used by all Devices, while for Example 3 the Peripheral
+Device1 would use e.g. Slot 0 and Peripheral device2 slot 1.
 
 Note3: Multiple Sink ports can extract the same information for the
 same bitSlots in the SoundWire frame, however multiple Source ports
@@ -265,7 +265,7 @@ Stream State Operations
 -----------------------
 
 Below section explains the operations done by the Bus on Manager(s) and
-Slave(s) as part of stream state transitions.
+Peripheral(s) as part of stream state transitions.
 
 SDW_STREAM_ALLOCATED
 ~~~~~~~~~~~~~~~~~~~~
@@ -279,7 +279,7 @@ of the stream. Operations performed before entering in this state:
 
   (2) The resources required for holding stream runtime information are
       allocated and initialized. This holds all stream related information
-      such as stream type (PCM/PDM) and parameters, Manager and Slave
+      such as stream type (PCM/PDM) and parameters, Manager and Peripheral
       interface associated with the stream, stream state etc.
 
 After all above operations are successful, stream state is set to
@@ -306,18 +306,18 @@ this state:
 
   (1) The resources allocated for stream information in SDW_STREAM_ALLOCATED
       state are updated here. This includes stream parameters, Manager(s)
-      and Slave(s) runtime information associated with current stream.
+      and Peripheral(s) runtime information associated with current stream.
 
-  (2) All the Manager(s) and Slave(s) associated with current stream provide
+  (2) All the Manager(s) and Peripheral(s) associated with current stream provide
       the port information to Bus which includes port numbers allocated by
-      Manager(s) and Slave(s) for current stream and their channel mask.
+      Manager(s) and Peripheral(s) for current stream and their channel mask.
 
 After all above operations are successful, stream state is set to
 ``SDW_STREAM_CONFIGURED``.
 
 Bus implements below APIs for CONFIG state which needs to be called by
-the respective Manager(s) and Slave(s) associated with stream. These APIs can
-only be invoked once by respective Manager(s) and Slave(s). From ASoC DPCM
+the respective Manager(s) and Peripheral(s) associated with stream. These APIs can
+only be invoked once by respective Manager(s) and Peripheral(s). From ASoC DPCM
 framework, this stream state is linked to .hw_params() operation.
 
 .. code-block:: c
@@ -327,7 +327,7 @@ framework, this stream state is linked to .hw_params() operation.
 		struct sdw_ports_config * ports_config,
 		struct sdw_stream_runtime * stream);
 
-  int sdw_stream_add_slave(struct sdw_slave * slave,
+  int sdw_stream_add_peripheral(struct sdw_peripheral * peripheral,
 		struct sdw_stream_config * stream_config,
 		struct sdw_ports_config * ports_config,
 		struct sdw_stream_runtime * stream);
@@ -346,12 +346,12 @@ Prepare state of stream. Operations performed before entering in this state:
       stream(s) on Bus. Re-computation is required to accommodate current
       stream on the Bus.
 
-  (2) Transport and port parameters of all Manager(s) and Slave(s) port(s) are
+  (2) Transport and port parameters of all Manager(s) and Peripheral(s) port(s) are
       computed for the current as well as already active stream based on frame
       shape and clock frequency computed in step 1.
 
   (3) Computed Bus and transport parameters are programmed in Manager(s) and
-      Slave(s) registers. The banked registers programming is done on the
+      Peripheral(s) registers. The banked registers programming is done on the
       alternate bank (bank currently unused). Port(s) are enabled for the
       already active stream(s) on the alternate bank (bank currently unused).
       This is done in order to not disrupt already active stream(s).
@@ -359,7 +359,7 @@ Prepare state of stream. Operations performed before entering in this state:
   (4) Once all the values are programmed, Bus initiates switch to alternate
       bank where all new values programmed gets into effect.
 
-  (5) Ports of Manager(s) and Slave(s) for current stream are prepared by
+  (5) Ports of Manager(s) and Peripheral(s) for current stream are prepared by
       programming PrepareCtrl register.
 
 After all above operations are successful, stream state is set to
@@ -386,7 +386,7 @@ Operations performed before entering in this state:
       in alternate bank (bank currently unused). It includes programming of
       already active stream(s) as well.
 
-  (2) All the Manager(s) and Slave(s) port(s) for the current stream are
+  (2) All the Manager(s) and Peripheral(s) port(s) for the current stream are
       enabled on alternate bank (bank currently unused) by programming
       ChannelEn register.
 
@@ -411,7 +411,7 @@ SDW_STREAM_DISABLED
 Disable state of stream. The data port(s) are disabled upon exiting this state.
 Operations performed before entering in this state:
 
-  (1) All the Manager(s) and Slave(s) port(s) for the current stream are
+  (1) All the Manager(s) and Peripheral(s) port(s) for the current stream are
       disabled on alternate bank (bank currently unused) by programming
       ChannelEn register.
 
@@ -448,7 +448,7 @@ SDW_STREAM_DEPREPARED
 De-prepare state of stream. Operations performed before entering in this
 state:
 
-  (1) All the port(s) of Manager(s) and Slave(s) for current stream are
+  (1) All the port(s) of Manager(s) and Peripheral(s) for current stream are
       de-prepared by programming PrepareCtrl register.
 
   (2) The payload bandwidth of current stream is reduced from the total
@@ -481,10 +481,10 @@ SDW_STREAM_RELEASED
 
 Release state of stream. Operations performed before entering in this state:
 
-  (1) Release port resources for all Manager(s) and Slave(s) port(s)
+  (1) Release port resources for all Manager(s) and Peripheral(s) port(s)
       associated with current stream.
 
-  (2) Release Manager(s) and Slave(s) runtime resources associated with
+  (2) Release Manager(s) and Peripheral(s) runtime resources associated with
       current stream.
 
   (3) Release stream runtime resources associated with current stream.
@@ -493,14 +493,14 @@ After all above operations are successful, stream state is set to
 ``SDW_STREAM_RELEASED``.
 
 Bus implements below APIs for RELEASE state which needs to be called by
-all the Manager(s) and Slave(s) associated with stream. From ASoC DPCM
+all the Manager(s) and Peripheral(s) associated with stream. From ASoC DPCM
 framework, this stream state is linked to .hw_free() operation.
 
 .. code-block:: c
 
   int sdw_stream_remove_manager(struct sdw_bus * bus,
 		struct sdw_stream_runtime * stream);
-  int sdw_stream_remove_slave(struct sdw_slave * slave,
+  int sdw_stream_remove_peripheral(struct sdw_peripheral * peripheral,
 		struct sdw_stream_runtime * stream);
 
 

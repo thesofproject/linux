@@ -50,7 +50,7 @@ static int field##_attribute_alloc(struct device *dev,			\
 
 #define sdw_dpn_attr(field)						\
 									\
-static ssize_t field##_dpn_show(struct sdw_slave *slave,		\
+static ssize_t field##_dpn_show(struct sdw_peripheral *peripheral,	\
 				int N,					\
 				int dir,				\
 				const char *format_string,		\
@@ -62,11 +62,11 @@ static ssize_t field##_dpn_show(struct sdw_slave *slave,		\
 	int i;								\
 									\
 	if (dir) {							\
-		dpn = slave->prop.src_dpn_prop;				\
-		mask = slave->prop.source_ports;			\
+		dpn = peripheral->prop.src_dpn_prop;			\
+		mask = peripheral->prop.source_ports;			\
 	} else {							\
-		dpn = slave->prop.sink_dpn_prop;			\
-		mask = slave->prop.sink_ports;				\
+		dpn = peripheral->prop.sink_dpn_prop;			\
+		mask = peripheral->prop.sink_ports;			\
 	}								\
 									\
 	i = 0;								\
@@ -84,11 +84,11 @@ static ssize_t field##_show(struct device *dev,				\
 			    struct device_attribute *attr,		\
 			    char *buf)					\
 {									\
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);			\
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);	\
 	struct dpn_attribute *dpn_attr =				\
 		container_of(attr, struct dpn_attribute, dev_attr);	\
 									\
-	return field##_dpn_show(slave,					\
+	return field##_dpn_show(peripheral,				\
 				dpn_attr->N, dpn_attr->dir,		\
 				dpn_attr->format_string,		\
 				buf);					\
@@ -110,7 +110,7 @@ sdw_dpn_attr(port_encoding);
 
 #define sdw_dpn_array_attr(field)					\
 									\
-static ssize_t field##_dpn_show(struct sdw_slave *slave,		\
+static ssize_t field##_dpn_show(struct sdw_peripheral *peripheral,	\
 				int N,					\
 				int dir,				\
 				const char *format_string,		\
@@ -124,11 +124,11 @@ static ssize_t field##_dpn_show(struct sdw_slave *slave,		\
 	int j;								\
 									\
 	if (dir) {							\
-		dpn = slave->prop.src_dpn_prop;				\
-		mask = slave->prop.source_ports;			\
+		dpn = peripheral->prop.src_dpn_prop;			\
+		mask = peripheral->prop.source_ports;			\
 	} else {							\
-		dpn = slave->prop.sink_dpn_prop;			\
-		mask = slave->prop.sink_ports;				\
+		dpn = peripheral->prop.sink_dpn_prop;			\
+		mask = peripheral->prop.sink_ports;			\
 	}								\
 									\
 	i = 0;								\
@@ -149,11 +149,11 @@ static ssize_t field##_show(struct device *dev,				\
 			    struct device_attribute *attr,		\
 			    char *buf)					\
 {									\
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);			\
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);	\
 	struct dpn_attribute *dpn_attr =				\
 		container_of(attr, struct dpn_attribute, dev_attr);	\
 									\
-	return field##_dpn_show(slave,					\
+	return field##_dpn_show(peripheral,				\
 				dpn_attr->N, dpn_attr->dir,		\
 				dpn_attr->format_string,		\
 				buf);					\
@@ -277,22 +277,22 @@ static int add_all_attributes(struct device *dev, int N, int dir)
 	return 0;
 }
 
-int sdw_slave_sysfs_dpn_init(struct sdw_slave *slave)
+int sdw_peripheral_sysfs_dpn_init(struct sdw_peripheral *peripheral)
 {
 	unsigned long mask;
 	int ret;
 	int i;
 
-	mask = slave->prop.source_ports;
+	mask = peripheral->prop.source_ports;
 	for_each_set_bit(i, &mask, 32) {
-		ret = add_all_attributes(&slave->dev, i, 1);
+		ret = add_all_attributes(&peripheral->dev, i, 1);
 		if (ret < 0)
 			return ret;
 	}
 
-	mask = slave->prop.sink_ports;
+	mask = peripheral->prop.sink_ports;
 	for_each_set_bit(i, &mask, 32) {
-		ret = add_all_attributes(&slave->dev, i, 0);
+		ret = add_all_attributes(&peripheral->dev, i, 0);
 		if (ret < 0)
 			return ret;
 	}

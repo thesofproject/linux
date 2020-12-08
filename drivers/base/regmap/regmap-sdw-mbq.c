@@ -12,28 +12,28 @@
 static int regmap_sdw_mbq_write(void *context, unsigned int reg, unsigned int val)
 {
 	struct device *dev = context;
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);
 	int ret;
 
-	ret = sdw_write_no_pm(slave, SDW_SDCA_MBQ_CTL(reg), (val >> 8) & 0xff);
+	ret = sdw_write_no_pm(peripheral, SDW_SDCA_MBQ_CTL(reg), (val >> 8) & 0xff);
 	if (ret < 0)
 		return ret;
 
-	return sdw_write_no_pm(slave, reg, val & 0xff);
+	return sdw_write_no_pm(peripheral, reg, val & 0xff);
 }
 
 static int regmap_sdw_mbq_read(void *context, unsigned int reg, unsigned int *val)
 {
 	struct device *dev = context;
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);
 	int read0;
 	int read1;
 
-	read0 = sdw_read_no_pm(slave, reg);
+	read0 = sdw_read_no_pm(peripheral, reg);
 	if (read0 < 0)
 		return read0;
 
-	read1 = sdw_read_no_pm(slave, SDW_SDCA_MBQ_CTL(reg));
+	read1 = sdw_read_no_pm(peripheral, SDW_SDCA_MBQ_CTL(reg));
 	if (read1 < 0)
 		return read1;
 
@@ -65,7 +65,7 @@ static int regmap_sdw_mbq_config_check(const struct regmap_config *config)
 	return 0;
 }
 
-struct regmap *__regmap_init_sdw_mbq(struct sdw_slave *sdw,
+struct regmap *__regmap_init_sdw_mbq(struct sdw_peripheral *sdw,
 				     const struct regmap_config *config,
 				     struct lock_class_key *lock_key,
 				     const char *lock_name)
@@ -81,7 +81,7 @@ struct regmap *__regmap_init_sdw_mbq(struct sdw_slave *sdw,
 }
 EXPORT_SYMBOL_GPL(__regmap_init_sdw_mbq);
 
-struct regmap *__devm_regmap_init_sdw_mbq(struct sdw_slave *sdw,
+struct regmap *__devm_regmap_init_sdw_mbq(struct sdw_peripheral *sdw,
 					  const struct regmap_config *config,
 					  struct lock_class_key *lock_key,
 					  const char *lock_name)

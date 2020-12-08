@@ -138,18 +138,18 @@ static const struct regmap_config rt711_sdca_mbq_regmap = {
 	.use_single_write = true,
 };
 
-static int rt711_sdca_update_status(struct sdw_slave *slave,
-				enum sdw_slave_status status)
+static int rt711_sdca_update_status(struct sdw_peripheral *peripheral,
+				    enum sdw_peripheral_status status)
 {
-	struct rt711_sdca_priv *rt711 = dev_get_drvdata(&slave->dev);
+	struct rt711_sdca_priv *rt711 = dev_get_drvdata(&peripheral->dev);
 
 	/* Update the status */
 	rt711->status = status;
 
-	if (status == SDW_SLAVE_UNATTACHED)
+	if (status == SDW_PERIPHERAL_UNATTACHED)
 		rt711->hw_init = false;
 
-	if (status == SDW_SLAVE_ATTACHED) {
+	if (status == SDW_PERIPHERAL_ATTACHED) {
 		if (rt711->hs_jack) {
 			/*
 			 * Due to the SCP_SDCA_INTMASK will be cleared by any reset, and then
@@ -157,27 +157,27 @@ static int rt711_sdca_update_status(struct sdw_slave *slave,
 			 * It could avoid losing the jack detection interrupt.
 			 * This also could sync with the cache value as the rt711_sdca_jack_init set.
 			 */
-			sdw_write_no_pm(rt711->slave, SDW_SCP_SDCA_INTMASK1,
+			sdw_write_no_pm(rt711->peripheral, SDW_SCP_SDCA_INTMASK1,
 				SDW_SCP_SDCA_INTMASK_SDCA_0);
-			sdw_write_no_pm(rt711->slave, SDW_SCP_SDCA_INTMASK2,
+			sdw_write_no_pm(rt711->peripheral, SDW_SCP_SDCA_INTMASK2,
 				SDW_SCP_SDCA_INTMASK_SDCA_8);
 		}
 	}
 
 	/*
-	 * Perform initialization only if slave status is present and
+	 * Perform initialization only if peripheral status is present and
 	 * hw_init flag is false
 	 */
-	if (rt711->hw_init || rt711->status != SDW_SLAVE_ATTACHED)
+	if (rt711->hw_init || rt711->status != SDW_PERIPHERAL_ATTACHED)
 		return 0;
 
-	/* perform I/O transfers required for Slave initialization */
-	return rt711_sdca_io_init(&slave->dev, slave);
+	/* perform I/O transfers required for Peripheral initialization */
+	return rt711_sdca_io_init(&peripheral->dev, peripheral);
 }
 
-static int rt711_sdca_read_prop(struct sdw_slave *slave)
+static int rt711_sdca_read_prop(struct sdw_peripheral *peripheral)
 {
-	struct sdw_slave_prop *prop = &slave->prop;
+	struct sdw_peripheral_prop *prop = &peripheral->prop;
 	int nval;
 	int i, j;
 	u32 bit;
@@ -185,7 +185,7 @@ static int rt711_sdca_read_prop(struct sdw_slave *slave)
 	struct sdw_dpn_prop *dpn;
 
 	prop->scp_int1_mask = SDW_SCP_INT1_BUS_CLASH | SDW_SCP_INT1_PARITY;
-	prop->quirks = SDW_SLAVE_QUIRKS_INVALID_INITIAL_PARITY;
+	prop->quirks = SDW_PERIPHERAL_QUIRKS_INVALID_INITIAL_PARITY;
 	prop->is_sdca = true;
 
 	prop->paging_support = true;
@@ -195,8 +195,8 @@ static int rt711_sdca_read_prop(struct sdw_slave *slave)
 	prop->sink_ports = 0x8; /* BITMAP:  00001000 */
 
 	nval = hweight32(prop->source_ports);
-	prop->src_dpn_prop = devm_kcalloc(&slave->dev, nval,
-		sizeof(*prop->src_dpn_prop), GFP_KERNEL);
+	prop->src_dpn_prop = devm_kcalloc(&peripheral->dev, nval,
+					  sizeof(*prop->src_dpn_prop), GFP_KERNEL);
 	if (!prop->src_dpn_prop)
 		return -ENOMEM;
 
@@ -213,8 +213,8 @@ static int rt711_sdca_read_prop(struct sdw_slave *slave)
 
 	/* do this again for sink now */
 	nval = hweight32(prop->sink_ports);
-	prop->sink_dpn_prop = devm_kcalloc(&slave->dev, nval,
-		sizeof(*prop->sink_dpn_prop), GFP_KERNEL);
+	prop->sink_dpn_prop = devm_kcalloc(&peripheral->dev, nval,
+					   sizeof(*prop->sink_dpn_prop), GFP_KERNEL);
 	if (!prop->sink_dpn_prop)
 		return -ENOMEM;
 
@@ -238,20 +238,20 @@ static int rt711_sdca_read_prop(struct sdw_slave *slave)
 	return 0;
 }
 
-static int rt711_sdca_interrupt_callback(struct sdw_slave *slave,
-					struct sdw_slave_intr_status *status)
+static int rt711_sdca_interrupt_callback(struct sdw_peripheral *peripheral,
+					 struct sdw_peripheral_intr_status *status)
 {
-	struct rt711_sdca_priv *rt711 = dev_get_drvdata(&slave->dev);
+	struct rt711_sdca_priv *rt711 = dev_get_drvdata(&peripheral->dev);
 	int ret, stat;
 	int count = 0, retry = 3;
 	unsigned int sdca_cascade, scp_sdca_stat1, scp_sdca_stat2 = 0;
 
-	dev_dbg(&slave->dev,
+	dev_dbg(&peripheral->dev,
 		"%s control_port_stat=%x, sdca_cascade=%x", __func__,
 		status->control_port, status->sdca_cascade);
 
 	if (cancel_delayed_work_sync(&rt711->jack_detect_work)) {
-		dev_warn(&slave->dev, "%s the pending delayed_work was cancelled", __func__);
+		dev_warn(&peripheral->dev, "%s the pending delayed_work was cancelled", __func__);
 		/* avoid the HID owner doesn't change to device */
 		if (rt711->scp_sdca_stat2)
 			scp_sdca_stat2 = rt711->scp_sdca_stat2;
@@ -266,11 +266,11 @@ static int rt711_sdca_interrupt_callback(struct sdw_slave *slave,
 	 */
 	mutex_lock(&rt711->disable_irq_lock);
 
-	ret = sdw_read_no_pm(rt711->slave, SDW_SCP_SDCA_INT1);
+	ret = sdw_read_no_pm(rt711->peripheral, SDW_SCP_SDCA_INT1);
 	if (ret < 0)
 		goto io_error;
 	rt711->scp_sdca_stat1 = ret;
-	ret = sdw_read_no_pm(rt711->slave, SDW_SCP_SDCA_INT2);
+	ret = sdw_read_no_pm(rt711->peripheral, SDW_SCP_SDCA_INT2);
 	if (ret < 0)
 		goto io_error;
 	rt711->scp_sdca_stat2 = ret;
@@ -279,37 +279,37 @@ static int rt711_sdca_interrupt_callback(struct sdw_slave *slave,
 
 	do {
 		/* clear flag */
-		ret = sdw_read_no_pm(rt711->slave, SDW_SCP_SDCA_INT1);
+		ret = sdw_read_no_pm(rt711->peripheral, SDW_SCP_SDCA_INT1);
 		if (ret < 0)
 			goto io_error;
 		if (ret & SDW_SCP_SDCA_INTMASK_SDCA_0) {
-			ret = sdw_write_no_pm(rt711->slave, SDW_SCP_SDCA_INT1,
+			ret = sdw_write_no_pm(rt711->peripheral, SDW_SCP_SDCA_INT1,
 						SDW_SCP_SDCA_INTMASK_SDCA_0);
 			if (ret < 0)
 				goto io_error;
 		}
-		ret = sdw_read_no_pm(rt711->slave, SDW_SCP_SDCA_INT2);
+		ret = sdw_read_no_pm(rt711->peripheral, SDW_SCP_SDCA_INT2);
 		if (ret < 0)
 			goto io_error;
 		if (ret & SDW_SCP_SDCA_INTMASK_SDCA_8) {
-			ret = sdw_write_no_pm(rt711->slave, SDW_SCP_SDCA_INT2,
+			ret = sdw_write_no_pm(rt711->peripheral, SDW_SCP_SDCA_INT2,
 						SDW_SCP_SDCA_INTMASK_SDCA_8);
 			if (ret < 0)
 				goto io_error;
 		}
 
 		/* check if flag clear or not */
-		ret = sdw_read_no_pm(rt711->slave, SDW_DP0_INT);
+		ret = sdw_read_no_pm(rt711->peripheral, SDW_DP0_INT);
 		if (ret < 0)
 			goto io_error;
 		sdca_cascade = ret & SDW_DP0_SDCA_CASCADE;
 
-		ret = sdw_read_no_pm(rt711->slave, SDW_SCP_SDCA_INT1);
+		ret = sdw_read_no_pm(rt711->peripheral, SDW_SCP_SDCA_INT1);
 		if (ret < 0)
 			goto io_error;
 		scp_sdca_stat1 = ret & SDW_SCP_SDCA_INTMASK_SDCA_0;
 
-		ret = sdw_read_no_pm(rt711->slave, SDW_SCP_SDCA_INT2);
+		ret = sdw_read_no_pm(rt711->peripheral, SDW_SCP_SDCA_INT2);
 		if (ret < 0)
 			goto io_error;
 		scp_sdca_stat2 = ret & SDW_SCP_SDCA_INTMASK_SDCA_8;
@@ -320,9 +320,9 @@ static int rt711_sdca_interrupt_callback(struct sdw_slave *slave,
 	} while (stat != 0 && count < retry);
 
 	if (stat)
-		dev_warn(&slave->dev,
-			"%s scp_sdca_stat1=0x%x, scp_sdca_stat2=0x%x\n", __func__,
-			rt711->scp_sdca_stat1, rt711->scp_sdca_stat2);
+		dev_warn(&peripheral->dev,
+			 "%s scp_sdca_stat1=0x%x, scp_sdca_stat2=0x%x\n", __func__,
+			 rt711->scp_sdca_stat1, rt711->scp_sdca_stat2);
 
 	if (status->sdca_cascade && !rt711->disable_irq)
 		mod_delayed_work(system_power_efficient_wq,
@@ -338,32 +338,32 @@ io_error:
 	return ret;
 }
 
-static struct sdw_slave_ops rt711_sdca_slave_ops = {
+static struct sdw_peripheral_ops rt711_sdca_peripheral_ops = {
 	.read_prop = rt711_sdca_read_prop,
 	.interrupt_callback = rt711_sdca_interrupt_callback,
 	.update_status = rt711_sdca_update_status,
 };
 
-static int rt711_sdca_sdw_probe(struct sdw_slave *slave,
+static int rt711_sdca_sdw_probe(struct sdw_peripheral *peripheral,
 				const struct sdw_device_id *id)
 {
 	struct regmap *regmap, *mbq_regmap;
 
 	/* Regmap Initialization */
-	mbq_regmap = devm_regmap_init_sdw_mbq(slave, &rt711_sdca_mbq_regmap);
+	mbq_regmap = devm_regmap_init_sdw_mbq(peripheral, &rt711_sdca_mbq_regmap);
 	if (IS_ERR(mbq_regmap))
 		return PTR_ERR(mbq_regmap);
 
-	regmap = devm_regmap_init_sdw(slave, &rt711_sdca_regmap);
+	regmap = devm_regmap_init_sdw(peripheral, &rt711_sdca_regmap);
 	if (IS_ERR(regmap))
 		return PTR_ERR(regmap);
 
-	return rt711_sdca_init(&slave->dev, regmap, mbq_regmap, slave);
+	return rt711_sdca_init(&peripheral->dev, regmap, mbq_regmap, peripheral);
 }
 
-static int rt711_sdca_sdw_remove(struct sdw_slave *slave)
+static int rt711_sdca_sdw_remove(struct sdw_peripheral *peripheral)
 {
-	struct rt711_sdca_priv *rt711 = dev_get_drvdata(&slave->dev);
+	struct rt711_sdca_priv *rt711 = dev_get_drvdata(&peripheral->dev);
 
 	if (rt711->hw_init) {
 		cancel_delayed_work_sync(&rt711->jack_detect_work);
@@ -371,7 +371,7 @@ static int rt711_sdca_sdw_remove(struct sdw_slave *slave)
 	}
 
 	if (rt711->first_hw_init)
-		pm_runtime_disable(&slave->dev);
+		pm_runtime_disable(&peripheral->dev);
 
 	mutex_destroy(&rt711->calibrate_mutex);
 	mutex_destroy(&rt711->disable_irq_lock);
@@ -380,7 +380,7 @@ static int rt711_sdca_sdw_remove(struct sdw_slave *slave)
 }
 
 static const struct sdw_device_id rt711_sdca_id[] = {
-	SDW_SLAVE_ENTRY_EXT(0x025d, 0x711, 0x3, 0x1, 0),
+	SDW_PERIPHERAL_ENTRY_EXT(0x025d, 0x711, 0x3, 0x1, 0),
 	{},
 };
 MODULE_DEVICE_TABLE(sdw, rt711_sdca_id);
@@ -404,7 +404,7 @@ static int __maybe_unused rt711_sdca_dev_suspend(struct device *dev)
 static int __maybe_unused rt711_sdca_dev_system_suspend(struct device *dev)
 {
 	struct rt711_sdca_priv *rt711_sdca = dev_get_drvdata(dev);
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);
 	int ret1, ret2;
 
 	if (!rt711_sdca->hw_init)
@@ -417,15 +417,15 @@ static int __maybe_unused rt711_sdca_dev_system_suspend(struct device *dev)
 	 */
 	mutex_lock(&rt711_sdca->disable_irq_lock);
 	rt711_sdca->disable_irq = true;
-	ret1 = sdw_update_no_pm(slave, SDW_SCP_SDCA_INTMASK1,
+	ret1 = sdw_update_no_pm(peripheral, SDW_SCP_SDCA_INTMASK1,
 				SDW_SCP_SDCA_INTMASK_SDCA_0, 0);
-	ret2 = sdw_update_no_pm(slave, SDW_SCP_SDCA_INTMASK2,
+	ret2 = sdw_update_no_pm(peripheral, SDW_SCP_SDCA_INTMASK2,
 				SDW_SCP_SDCA_INTMASK_SDCA_8, 0);
 	mutex_unlock(&rt711_sdca->disable_irq_lock);
 
 	if (ret1 < 0 || ret2 < 0) {
 		/* log but don't prevent suspend from happening */
-		dev_dbg(&slave->dev, "%s: could not disable SDCA interrupts\n:", __func__);
+		dev_dbg(&peripheral->dev, "%s: could not disable SDCA interrupts\n:", __func__);
 	}
 
 	return rt711_sdca_dev_suspend(dev);
@@ -435,25 +435,25 @@ static int __maybe_unused rt711_sdca_dev_system_suspend(struct device *dev)
 
 static int __maybe_unused rt711_sdca_dev_resume(struct device *dev)
 {
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);
 	struct rt711_sdca_priv *rt711 = dev_get_drvdata(dev);
 	unsigned long time;
 
 	if (!rt711->first_hw_init)
 		return 0;
 
-	if (!slave->unattach_request)
+	if (!peripheral->unattach_request)
 		goto regmap_sync;
 
-	time = wait_for_completion_timeout(&slave->initialization_complete,
-				msecs_to_jiffies(RT711_PROBE_TIMEOUT));
+	time = wait_for_completion_timeout(&peripheral->initialization_complete,
+					   msecs_to_jiffies(RT711_PROBE_TIMEOUT));
 	if (!time) {
-		dev_err(&slave->dev, "Initialization not complete, timed out\n");
+		dev_err(&peripheral->dev, "Initialization not complete, timed out\n");
 		return -ETIMEDOUT;
 	}
 
 regmap_sync:
-	slave->unattach_request = 0;
+	peripheral->unattach_request = 0;
 	regcache_cache_only(rt711->regmap, false);
 	regcache_sync(rt711->regmap);
 	regcache_cache_only(rt711->mbq_regmap, false);
@@ -474,7 +474,7 @@ static struct sdw_driver rt711_sdca_sdw_driver = {
 	},
 	.probe = rt711_sdca_sdw_probe,
 	.remove = rt711_sdca_sdw_remove,
-	.ops = &rt711_sdca_slave_ops,
+	.ops = &rt711_sdca_peripheral_ops,
 	.id_table = rt711_sdca_id,
 };
 module_sdw_driver(rt711_sdca_sdw_driver);

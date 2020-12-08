@@ -19,7 +19,7 @@
 #include <sound/soc.h>
 
 struct  sdw_mockup_priv {
-	struct sdw_slave *slave;
+	struct sdw_peripheral *peripheral;
 };
 
 struct sdw_stream_data {
@@ -92,7 +92,7 @@ static int sdw_mockup_pcm_hw_params(struct snd_pcm_substream *substream,
 	if (!stream)
 		return -EINVAL;
 
-	if (!sdw_mockup->slave)
+	if (!sdw_mockup->peripheral)
 		return -EINVAL;
 
 	/* SoundWire specific configuration */
@@ -113,8 +113,8 @@ static int sdw_mockup_pcm_hw_params(struct snd_pcm_substream *substream,
 	port_config.ch_mask = (1 << num_channels) - 1;
 	port_config.num = port;
 
-	ret = sdw_stream_add_slave(sdw_mockup->slave, &stream_config,
-				   &port_config, 1, stream->sdw_stream);
+	ret = sdw_stream_add_peripheral(sdw_mockup->peripheral, &stream_config,
+					&port_config, 1, stream->sdw_stream);
 	if (ret)
 		dev_err(dai->dev, "Unable to configure port\n");
 
@@ -129,10 +129,10 @@ static int sdw_mockup_pcm_hw_free(struct snd_pcm_substream *substream,
 	struct sdw_stream_data *stream =
 		snd_soc_dai_get_dma_data(dai, substream);
 
-	if (!sdw_mockup->slave)
+	if (!sdw_mockup->peripheral)
 		return -EINVAL;
 
-	sdw_stream_remove_slave(sdw_mockup->slave, stream->sdw_stream);
+	sdw_stream_remove_peripheral(sdw_mockup->peripheral, stream->sdw_stream);
 	return 0;
 }
 
@@ -161,15 +161,15 @@ static struct snd_soc_dai_driver sdw_mockup_dai[] = {
 	},
 };
 
-static int sdw_mockup_update_status(struct sdw_slave *slave,
-				    enum sdw_slave_status status)
+static int sdw_mockup_update_status(struct sdw_peripheral *peripheral,
+				    enum sdw_peripheral_status status)
 {
 	return 0;
 }
 
-static int sdw_mockup_read_prop(struct sdw_slave *slave)
+static int sdw_mockup_read_prop(struct sdw_peripheral *peripheral)
 {
-	struct sdw_slave_prop *prop = &slave->prop;
+	struct sdw_peripheral_prop *prop = &peripheral->prop;
 	int nval;
 	int i, j;
 	u32 bit;
@@ -189,7 +189,7 @@ static int sdw_mockup_read_prop(struct sdw_slave *slave)
 	prop->sink_ports = BIT(1);
 
 	nval = hweight32(prop->source_ports);
-	prop->src_dpn_prop = devm_kcalloc(&slave->dev, nval,
+	prop->src_dpn_prop = devm_kcalloc(&peripheral->dev, nval,
 					  sizeof(*prop->src_dpn_prop),
 					  GFP_KERNEL);
 	if (!prop->src_dpn_prop)
@@ -207,7 +207,7 @@ static int sdw_mockup_read_prop(struct sdw_slave *slave)
 
 	/* do this again for sink now */
 	nval = hweight32(prop->sink_ports);
-	prop->sink_dpn_prop = devm_kcalloc(&slave->dev, nval,
+	prop->sink_dpn_prop = devm_kcalloc(&peripheral->dev, nval,
 					   sizeof(*prop->sink_dpn_prop),
 					   GFP_KERNEL);
 	if (!prop->sink_dpn_prop)
@@ -231,29 +231,29 @@ static int sdw_mockup_read_prop(struct sdw_slave *slave)
 	return 0;
 }
 
-static int sdw_mockup_bus_config(struct sdw_slave *slave,
+static int sdw_mockup_bus_config(struct sdw_peripheral *peripheral,
 				 struct sdw_bus_params *params)
 {
 	return 0;
 }
 
-static int sdw_mockup_interrupt_callback(struct sdw_slave *slave,
-					 struct sdw_slave_intr_status *status)
+static int sdw_mockup_interrupt_callback(struct sdw_peripheral *peripheral,
+					 struct sdw_peripheral_intr_status *status)
 {
 	return 0;
 }
 
-static const struct sdw_slave_ops sdw_mockup_slave_ops = {
+static const struct sdw_peripheral_ops sdw_mockup_peripheral_ops = {
 	.read_prop = sdw_mockup_read_prop,
 	.interrupt_callback = sdw_mockup_interrupt_callback,
 	.update_status = sdw_mockup_update_status,
 	.bus_config = sdw_mockup_bus_config,
 };
 
-static int sdw_mockup_sdw_probe(struct sdw_slave *slave,
+static int sdw_mockup_sdw_probe(struct sdw_peripheral *peripheral,
 				const struct sdw_device_id *id)
 {
-	struct device *dev = &slave->dev;
+	struct device *dev = &peripheral->dev;
 	struct sdw_mockup_priv *sdw_mockup;
 	int ret;
 
@@ -262,9 +262,9 @@ static int sdw_mockup_sdw_probe(struct sdw_slave *slave,
 		return -ENOMEM;
 
 	dev_set_drvdata(dev, sdw_mockup);
-	sdw_mockup->slave = slave;
+	sdw_mockup->peripheral = peripheral;
 
-	slave->is_mockup_device = true;
+	peripheral->is_mockup_device = true;
 
 	ret =  devm_snd_soc_register_component(dev,
 					       &snd_soc_sdw_mockup_component,
@@ -274,7 +274,7 @@ static int sdw_mockup_sdw_probe(struct sdw_slave *slave,
 	return ret;
 }
 
-static int sdw_mockup_sdw_remove(struct sdw_slave *slave)
+static int sdw_mockup_sdw_remove(struct sdw_peripheral *peripheral)
 {
 	return 0;
 }
@@ -288,10 +288,10 @@ static int sdw_mockup_sdw_remove(struct sdw_slave *slave)
  * 0x5555: mic codec (mock-up of RT715) - capture-only
  */
 static const struct sdw_device_id sdw_mockup_id[] = {
-	SDW_SLAVE_ENTRY_EXT(0x0105, 0xAAAA, 0x0, 0, 0),
-	SDW_SLAVE_ENTRY_EXT(0x0105, 0xAA55, 0x0, 0, 0),
-	SDW_SLAVE_ENTRY_EXT(0x0105, 0x55AA, 0x0, 0, 0),
-	SDW_SLAVE_ENTRY_EXT(0x0105, 0x5555, 0x0, 0, 0),
+	SDW_PERIPHERAL_ENTRY_EXT(0x0105, 0xAAAA, 0x0, 0, 0),
+	SDW_PERIPHERAL_ENTRY_EXT(0x0105, 0xAA55, 0x0, 0, 0),
+	SDW_PERIPHERAL_ENTRY_EXT(0x0105, 0x55AA, 0x0, 0, 0),
+	SDW_PERIPHERAL_ENTRY_EXT(0x0105, 0x5555, 0x0, 0, 0),
 	{},
 };
 MODULE_DEVICE_TABLE(sdw, sdw_mockup_id);
@@ -303,7 +303,7 @@ static struct sdw_driver sdw_mockup_sdw_driver = {
 	},
 	.probe = sdw_mockup_sdw_probe,
 	.remove = sdw_mockup_sdw_remove,
-	.ops = &sdw_mockup_slave_ops,
+	.ops = &sdw_mockup_peripheral_ops,
 	.id_table = sdw_mockup_id,
 };
 module_sdw_driver(sdw_mockup_sdw_driver);

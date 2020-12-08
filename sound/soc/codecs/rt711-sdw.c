@@ -314,31 +314,31 @@ static const struct regmap_config rt711_sdw_regmap = {
 	.use_single_write = true,
 };
 
-static int rt711_update_status(struct sdw_slave *slave,
-				enum sdw_slave_status status)
+static int rt711_update_status(struct sdw_peripheral *peripheral,
+			       enum sdw_peripheral_status status)
 {
-	struct rt711_priv *rt711 = dev_get_drvdata(&slave->dev);
+	struct rt711_priv *rt711 = dev_get_drvdata(&peripheral->dev);
 
 	/* Update the status */
 	rt711->status = status;
 
-	if (status == SDW_SLAVE_UNATTACHED)
+	if (status == SDW_PERIPHERAL_UNATTACHED)
 		rt711->hw_init = false;
 
 	/*
-	 * Perform initialization only if slave status is present and
+	 * Perform initialization only if peripheral status is present and
 	 * hw_init flag is false
 	 */
-	if (rt711->hw_init || rt711->status != SDW_SLAVE_ATTACHED)
+	if (rt711->hw_init || rt711->status != SDW_PERIPHERAL_ATTACHED)
 		return 0;
 
-	/* perform I/O transfers required for Slave initialization */
-	return rt711_io_init(&slave->dev, slave);
+	/* perform I/O transfers required for Peripheral initialization */
+	return rt711_io_init(&peripheral->dev, peripheral);
 }
 
-static int rt711_read_prop(struct sdw_slave *slave)
+static int rt711_read_prop(struct sdw_peripheral *peripheral)
 {
-	struct sdw_slave_prop *prop = &slave->prop;
+	struct sdw_peripheral_prop *prop = &peripheral->prop;
 	int nval;
 	int i, j;
 	u32 bit;
@@ -347,7 +347,7 @@ static int rt711_read_prop(struct sdw_slave *slave)
 
 	prop->scp_int1_mask = SDW_SCP_INT1_IMPL_DEF | SDW_SCP_INT1_BUS_CLASH |
 		SDW_SCP_INT1_PARITY;
-	prop->quirks = SDW_SLAVE_QUIRKS_INVALID_INITIAL_PARITY;
+	prop->quirks = SDW_PERIPHERAL_QUIRKS_INVALID_INITIAL_PARITY;
 
 	prop->paging_support = false;
 
@@ -356,9 +356,9 @@ static int rt711_read_prop(struct sdw_slave *slave)
 	prop->sink_ports = 0x8; /* BITMAP:  00001000 */
 
 	nval = hweight32(prop->source_ports);
-	prop->src_dpn_prop = devm_kcalloc(&slave->dev, nval,
-						sizeof(*prop->src_dpn_prop),
-						GFP_KERNEL);
+	prop->src_dpn_prop = devm_kcalloc(&peripheral->dev, nval,
+					  sizeof(*prop->src_dpn_prop),
+					  GFP_KERNEL);
 	if (!prop->src_dpn_prop)
 		return -ENOMEM;
 
@@ -375,9 +375,9 @@ static int rt711_read_prop(struct sdw_slave *slave)
 
 	/* do this again for sink now */
 	nval = hweight32(prop->sink_ports);
-	prop->sink_dpn_prop = devm_kcalloc(&slave->dev, nval,
-						sizeof(*prop->sink_dpn_prop),
-						GFP_KERNEL);
+	prop->sink_dpn_prop = devm_kcalloc(&peripheral->dev, nval,
+					   sizeof(*prop->sink_dpn_prop),
+					   GFP_KERNEL);
 	if (!prop->sink_dpn_prop)
 		return -ENOMEM;
 
@@ -401,27 +401,27 @@ static int rt711_read_prop(struct sdw_slave *slave)
 	return 0;
 }
 
-static int rt711_bus_config(struct sdw_slave *slave,
-				struct sdw_bus_params *params)
+static int rt711_bus_config(struct sdw_peripheral *peripheral,
+			    struct sdw_bus_params *params)
 {
-	struct rt711_priv *rt711 = dev_get_drvdata(&slave->dev);
+	struct rt711_priv *rt711 = dev_get_drvdata(&peripheral->dev);
 	int ret;
 
 	memcpy(&rt711->params, params, sizeof(*params));
 
-	ret = rt711_clock_config(&slave->dev);
+	ret = rt711_clock_config(&peripheral->dev);
 	if (ret < 0)
-		dev_err(&slave->dev, "Invalid clk config");
+		dev_err(&peripheral->dev, "Invalid clk config");
 
 	return ret;
 }
 
-static int rt711_interrupt_callback(struct sdw_slave *slave,
-					struct sdw_slave_intr_status *status)
+static int rt711_interrupt_callback(struct sdw_peripheral *peripheral,
+				    struct sdw_peripheral_intr_status *status)
 {
-	struct rt711_priv *rt711 = dev_get_drvdata(&slave->dev);
+	struct rt711_priv *rt711 = dev_get_drvdata(&peripheral->dev);
 
-	dev_dbg(&slave->dev,
+	dev_dbg(&peripheral->dev,
 		"%s control_port_stat=%x", __func__, status->control_port);
 
 	mutex_lock(&rt711->disable_irq_lock);
@@ -434,36 +434,36 @@ static int rt711_interrupt_callback(struct sdw_slave *slave,
 	return 0;
 }
 
-static const struct sdw_slave_ops rt711_slave_ops = {
+static const struct sdw_peripheral_ops rt711_peripheral_ops = {
 	.read_prop = rt711_read_prop,
 	.interrupt_callback = rt711_interrupt_callback,
 	.update_status = rt711_update_status,
 	.bus_config = rt711_bus_config,
 };
 
-static int rt711_sdw_probe(struct sdw_slave *slave,
-				const struct sdw_device_id *id)
+static int rt711_sdw_probe(struct sdw_peripheral *peripheral,
+			   const struct sdw_device_id *id)
 {
 	struct regmap *sdw_regmap, *regmap;
 
 	/* Regmap Initialization */
-	sdw_regmap = devm_regmap_init_sdw(slave, &rt711_sdw_regmap);
+	sdw_regmap = devm_regmap_init_sdw(peripheral, &rt711_sdw_regmap);
 	if (IS_ERR(sdw_regmap))
 		return PTR_ERR(sdw_regmap);
 
-	regmap = devm_regmap_init(&slave->dev, NULL,
-		&slave->dev, &rt711_regmap);
+	regmap = devm_regmap_init(&peripheral->dev, NULL,
+				  &peripheral->dev, &rt711_regmap);
 	if (IS_ERR(regmap))
 		return PTR_ERR(regmap);
 
-	rt711_init(&slave->dev, sdw_regmap, regmap, slave);
+	rt711_init(&peripheral->dev, sdw_regmap, regmap, peripheral);
 
 	return 0;
 }
 
-static int rt711_sdw_remove(struct sdw_slave *slave)
+static int rt711_sdw_remove(struct sdw_peripheral *peripheral)
 {
-	struct rt711_priv *rt711 = dev_get_drvdata(&slave->dev);
+	struct rt711_priv *rt711 = dev_get_drvdata(&peripheral->dev);
 
 	if (rt711->hw_init) {
 		cancel_delayed_work_sync(&rt711->jack_detect_work);
@@ -472,7 +472,7 @@ static int rt711_sdw_remove(struct sdw_slave *slave)
 	}
 
 	if (rt711->first_hw_init)
-		pm_runtime_disable(&slave->dev);
+		pm_runtime_disable(&peripheral->dev);
 
 	mutex_destroy(&rt711->calibrate_mutex);
 	mutex_destroy(&rt711->disable_irq_lock);
@@ -481,7 +481,7 @@ static int rt711_sdw_remove(struct sdw_slave *slave)
 }
 
 static const struct sdw_device_id rt711_id[] = {
-	SDW_SLAVE_ENTRY_EXT(0x025d, 0x711, 0x2, 0, 0),
+	SDW_PERIPHERAL_ENTRY_EXT(0x025d, 0x711, 0x2, 0, 0),
 	{},
 };
 MODULE_DEVICE_TABLE(sdw, rt711_id);
@@ -505,7 +505,7 @@ static int __maybe_unused rt711_dev_suspend(struct device *dev)
 static int __maybe_unused rt711_dev_system_suspend(struct device *dev)
 {
 	struct rt711_priv *rt711 = dev_get_drvdata(dev);
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);
 	int ret;
 
 	if (!rt711->hw_init)
@@ -518,13 +518,13 @@ static int __maybe_unused rt711_dev_system_suspend(struct device *dev)
 	 */
 	mutex_lock(&rt711->disable_irq_lock);
 	rt711->disable_irq = true;
-	ret = sdw_update_no_pm(slave, SDW_SCP_INTMASK1,
+	ret = sdw_update_no_pm(peripheral, SDW_SCP_INTMASK1,
 			       SDW_SCP_INT1_IMPL_DEF, 0);
 	mutex_unlock(&rt711->disable_irq_lock);
 
 	if (ret < 0) {
 		/* log but don't prevent suspend from happening */
-		dev_dbg(&slave->dev, "%s: could not disable imp-def interrupts\n:", __func__);
+		dev_dbg(&peripheral->dev, "%s: could not disable imp-def interrupts\n:", __func__);
 	}
 
 	return rt711_dev_suspend(dev);
@@ -534,25 +534,25 @@ static int __maybe_unused rt711_dev_system_suspend(struct device *dev)
 
 static int __maybe_unused rt711_dev_resume(struct device *dev)
 {
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);
 	struct rt711_priv *rt711 = dev_get_drvdata(dev);
 	unsigned long time;
 
 	if (!rt711->first_hw_init)
 		return 0;
 
-	if (!slave->unattach_request)
+	if (!peripheral->unattach_request)
 		goto regmap_sync;
 
-	time = wait_for_completion_timeout(&slave->initialization_complete,
-				msecs_to_jiffies(RT711_PROBE_TIMEOUT));
+	time = wait_for_completion_timeout(&peripheral->initialization_complete,
+					   msecs_to_jiffies(RT711_PROBE_TIMEOUT));
 	if (!time) {
-		dev_err(&slave->dev, "Initialization not complete, timed out\n");
+		dev_err(&peripheral->dev, "Initialization not complete, timed out\n");
 		return -ETIMEDOUT;
 	}
 
 regmap_sync:
-	slave->unattach_request = 0;
+	peripheral->unattach_request = 0;
 	regcache_cache_only(rt711->regmap, false);
 	regcache_sync_region(rt711->regmap, 0x3000, 0x8fff);
 	regcache_sync_region(rt711->regmap, 0x752009, 0x752091);
@@ -573,7 +573,7 @@ static struct sdw_driver rt711_sdw_driver = {
 	},
 	.probe = rt711_sdw_probe,
 	.remove = rt711_sdw_remove,
-	.ops = &rt711_slave_ops,
+	.ops = &rt711_peripheral_ops,
 	.id_table = rt711_id,
 };
 module_sdw_driver(rt711_sdw_driver);

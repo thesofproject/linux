@@ -652,7 +652,7 @@ enum {
 
 struct wcd938x_priv;
 struct wcd938x_sdw_priv {
-	struct sdw_slave *sdev;
+	struct sdw_peripheral *sdev;
 	struct sdw_stream_config sconfig;
 	struct sdw_stream_runtime *sruntime;
 	struct sdw_port_config port_config[WCD938X_MAX_SWR_PORTS];
@@ -662,7 +662,7 @@ struct wcd938x_sdw_priv {
 	int num_ports;
 	bool is_tx;
 	struct wcd938x_priv *wcd938x;
-	struct irq_domain *slave_irq;
+	struct irq_domain *peripheral_irq;
 };
 
 #if IS_ENABLED(CONFIG_SND_SOC_WCD938X_SDW)
@@ -678,7 +678,7 @@ int wcd938x_sdw_hw_params(struct wcd938x_sdw_priv *wcd,
 			  struct snd_soc_dai *dai);
 
 struct device *wcd938x_sdw_device_get(struct device_node *np);
-int wcd938x_swr_get_current_bank(struct sdw_slave *sdev);
+int wcd938x_swr_get_current_bank(struct sdw_peripheral *sdev);
 
 #else
 
@@ -709,7 +709,7 @@ static inline struct device *wcd938x_sdw_device_get(struct device_node *np)
 	return NULL;
 }
 
-static inline int wcd938x_swr_get_current_bank(struct sdw_slave *sdev)
+static inline int wcd938x_swr_get_current_bank(struct sdw_peripheral *sdev)
 {
 	return 0;
 }

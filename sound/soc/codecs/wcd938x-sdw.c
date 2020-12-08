@@ -89,7 +89,7 @@ struct device *wcd938x_sdw_device_get(struct device_node *np)
 }
 EXPORT_SYMBOL_GPL(wcd938x_sdw_device_get);
 
-int wcd938x_swr_get_current_bank(struct sdw_slave *sdev)
+int wcd938x_swr_get_current_bank(struct sdw_peripheral *sdev)
 {
 	int bank;
 
@@ -132,9 +132,9 @@ int wcd938x_sdw_hw_params(struct wcd938x_sdw_priv *wcd,
 
 	wcd->sconfig.type = SDW_STREAM_PCM;
 
-	return sdw_stream_add_slave(wcd->sdev, &wcd->sconfig,
-				    &port_config[0], wcd->active_ports,
-				    wcd->sruntime);
+	return sdw_stream_add_peripheral(wcd->sdev, &wcd->sconfig,
+					 &port_config[0], wcd->active_ports,
+					 wcd->sruntime);
 }
 EXPORT_SYMBOL_GPL(wcd938x_sdw_hw_params);
 
@@ -142,7 +142,7 @@ int wcd938x_sdw_free(struct wcd938x_sdw_priv *wcd,
 		     struct snd_pcm_substream *substream,
 		     struct snd_soc_dai *dai)
 {
-	sdw_stream_remove_slave(wcd->sdev, wcd->sruntime);
+	sdw_stream_remove_peripheral(wcd->sdev, wcd->sruntime);
 
 	return 0;
 }
@@ -158,30 +158,30 @@ int wcd938x_sdw_set_sdw_stream(struct wcd938x_sdw_priv *wcd,
 }
 EXPORT_SYMBOL_GPL(wcd938x_sdw_set_sdw_stream);
 
-static int wcd9380_update_status(struct sdw_slave *slave,
-				 enum sdw_slave_status status)
+static int wcd9380_update_status(struct sdw_peripheral *peripheral,
+				 enum sdw_peripheral_status status)
 {
 	return 0;
 }
 
-static int wcd9380_bus_config(struct sdw_slave *slave,
+static int wcd9380_bus_config(struct sdw_peripheral *peripheral,
 			      struct sdw_bus_params *params)
 {
-	sdw_write(slave, SWRS_SCP_HOST_CLK_DIV2_CTL_BANK(params->next_bank),  0x01);
+	sdw_write(peripheral, SWRS_SCP_HOST_CLK_DIV2_CTL_BANK(params->next_bank),  0x01);
 
 	return 0;
 }
 
-static int wcd9380_interrupt_callback(struct sdw_slave *slave,
-				      struct sdw_slave_intr_status *status)
+static int wcd9380_interrupt_callback(struct sdw_peripheral *peripheral,
+				      struct sdw_peripheral_intr_status *status)
 {
-	struct wcd938x_sdw_priv *wcd = dev_get_drvdata(&slave->dev);
-	struct irq_domain *slave_irq = wcd->slave_irq;
-	struct regmap *regmap = dev_get_regmap(&slave->dev, NULL);
+	struct wcd938x_sdw_priv *wcd = dev_get_drvdata(&peripheral->dev);
+	struct irq_domain *peripheral_irq = wcd->peripheral_irq;
+	struct regmap *regmap = dev_get_regmap(&peripheral->dev, NULL);
 	u32 sts1, sts2, sts3;
 
 	do {
-		handle_nested_irq(irq_find_mapping(slave_irq, 0));
+		handle_nested_irq(irq_find_mapping(peripheral_irq, 0));
 		regmap_read(regmap, WCD938X_DIGITAL_INTR_STATUS_0, &sts1);
 		regmap_read(regmap, WCD938X_DIGITAL_INTR_STATUS_1, &sts2);
 		regmap_read(regmap, WCD938X_DIGITAL_INTR_STATUS_2, &sts3);
@@ -191,7 +191,7 @@ static int wcd9380_interrupt_callback(struct sdw_slave *slave,
 	return IRQ_HANDLED;
 }
 
-static struct sdw_slave_ops wcd9380_slave_ops = {
+static struct sdw_peripheral_ops wcd9380_peripheral_ops = {
 	.update_status = wcd9380_update_status,
 	.interrupt_callback = wcd9380_interrupt_callback,
 	.bus_config = wcd9380_bus_config,
@@ -213,7 +213,7 @@ static const struct component_ops wcd938x_sdw_component_ops = {
 	.unbind = wcd938x_sdw_component_unbind,
 };
 
-static int wcd9380_probe(struct sdw_slave *pdev,
+static int wcd9380_probe(struct sdw_peripheral *pdev,
 			 const struct sdw_device_id *id)
 {
 	struct device *dev = &pdev->dev;
@@ -270,11 +270,11 @@ static int wcd9380_probe(struct sdw_slave *pdev,
 	return component_add(dev, &wcd938x_sdw_component_ops);
 }
 
-static const struct sdw_device_id wcd9380_slave_id[] = {
-	SDW_SLAVE_ENTRY(0x0217, 0x10d, 0),
+static const struct sdw_device_id wcd9380_peripheral_id[] = {
+	SDW_PERIPHERAL_ENTRY(0x0217, 0x10d, 0),
 	{},
 };
-MODULE_DEVICE_TABLE(sdw, wcd9380_slave_id);
+MODULE_DEVICE_TABLE(sdw, wcd9380_peripheral_id);
 
 static int __maybe_unused wcd938x_sdw_runtime_suspend(struct device *dev)
 {
@@ -308,8 +308,8 @@ static const struct dev_pm_ops wcd938x_sdw_pm_ops = {
 
 static struct sdw_driver wcd9380_codec_driver = {
 	.probe	= wcd9380_probe,
-	.ops = &wcd9380_slave_ops,
-	.id_table = wcd9380_slave_id,
+	.ops = &wcd9380_peripheral_ops,
+	.id_table = wcd9380_peripheral_id,
 	.driver = {
 		.name	= "wcd9380-codec",
 		.pm = &wcd938x_sdw_pm_ops,

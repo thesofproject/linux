@@ -14,8 +14,8 @@ struct  rt711_priv {
 	struct regmap *regmap;
 	struct regmap *sdw_regmap;
 	struct snd_soc_component *component;
-	struct sdw_slave *slave;
-	enum sdw_slave_status status;
+	struct sdw_peripheral *peripheral;
+	enum sdw_peripheral_status status;
 	struct sdw_bus_params params;
 	bool hw_init;
 	bool first_hw_init;
@@ -247,9 +247,9 @@ enum rt711_jd_src {
 	RT711_JD2_1P8V_1PORT
 };
 
-int rt711_io_init(struct device *dev, struct sdw_slave *slave);
+int rt711_io_init(struct device *dev, struct sdw_peripheral *peripheral);
 int rt711_init(struct device *dev, struct regmap *sdw_regmap,
-	       struct regmap *regmap, struct sdw_slave *slave);
+	       struct regmap *regmap, struct sdw_peripheral *peripheral);
 
 int rt711_jack_detect(struct rt711_priv *rt711, bool *hp, bool *mic);
 int rt711_clock_config(struct device *dev);

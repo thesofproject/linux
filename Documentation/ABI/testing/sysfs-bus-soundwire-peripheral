@@ -7,9 +7,9 @@ Contact:	Pierre-Louis Bossart <pierre-louis.bossart@linux.intel.com>
 		Bard Liao <yung-chuan.liao@linux.intel.com>
 		Vinod Koul <vkoul@kernel.org>
 
-Description:	SoundWire Slave status
+Description:	SoundWire Peripheral status
 
-		These properties report the Slave status, e.g. if it
+		These properties report the Peripheral status, e.g. if it
 		is UNATTACHED or not, and in the latter case show the
 		device_number. This status information is useful to
 		detect devices exposed by platform firmware but not
@@ -38,11 +38,11 @@ Contact:	Pierre-Louis Bossart <pierre-louis.bossart@linux.intel.com>
 		Bard Liao <yung-chuan.liao@linux.intel.com>
 		Vinod Koul <vkoul@kernel.org>
 
-Description:	SoundWire Slave DisCo properties.
+Description:	SoundWire Peripheral DisCo properties.
 		These properties are defined by MIPI DisCo Specification
 		for SoundWire. They define various properties of the
-		SoundWire Slave and are used by the bus to configure
-		the Slave
+		SoundWire Peripheral and are used by the bus to configure
+		the Peripheral
 
 
 What:		/sys/bus/soundwire/devices/sdw:.../dp0/max_word
@@ -58,7 +58,7 @@ Contact:	Pierre-Louis Bossart <pierre-louis.bossart@linux.intel.com>
 		Bard Liao <yung-chuan.liao@linux.intel.com>
 		Vinod Koul <vkoul@kernel.org>
 
-Description:	SoundWire Slave Data Port-0 DisCo properties.
+Description:	SoundWire Peripheral Data Port-0 DisCo properties.
 		These properties are defined by MIPI DisCo Specification
 		for the SoundWire. They define various properties of the
 		Data port 0 are used by the bus to configure the Data Port 0.
@@ -102,7 +102,7 @@ Contact:	Pierre-Louis Bossart <pierre-louis.bossart@linux.intel.com>
 		Bard Liao <yung-chuan.liao@linux.intel.com>
 		Vinod Koul <vkoul@kernel.org>
 
-Description:	SoundWire Slave Data Source/Sink Port-N DisCo properties.
+Description:	SoundWire Peripheral Data Source/Sink Port-N DisCo properties.
 		These properties are defined by MIPI DisCo Specification
 		for SoundWire. They define various properties of the
 		Source/Sink Data port N and are used by the bus to configure

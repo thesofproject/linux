@@ -169,7 +169,7 @@ static u8 tx_mode_bit[] = {
 };
 
 struct wcd938x_priv {
-	struct sdw_slave *tx_sdw_dev;
+	struct sdw_peripheral *tx_sdw_dev;
 	struct wcd938x_sdw_priv *sdw_priv[NUM_CODEC_DAIS];
 	struct device *txdev;
 	struct device *rxdev;
@@ -4367,14 +4367,14 @@ static int wcd938x_bind(struct device *dev)
 
 	ret = component_bind_all(dev, wcd938x);
 	if (ret) {
-		dev_err(dev, "%s: Slave bind failed, ret = %d\n",
+		dev_err(dev, "%s: Peripheral bind failed, ret = %d\n",
 			__func__, ret);
 		return ret;
 	}
 
 	wcd938x->rxdev = wcd938x_sdw_device_get(wcd938x->rxnode);
 	if (!wcd938x->rxdev) {
-		dev_err(dev, "could not find slave with matching of node\n");
+		dev_err(dev, "could not find peripheral with matching of node\n");
 		return -EINVAL;
 	}
 	wcd938x->sdw_priv[AIF1_PB] = dev_get_drvdata(wcd938x->rxdev);
@@ -4382,14 +4382,14 @@ static int wcd938x_bind(struct device *dev)
 
 	wcd938x->txdev = wcd938x_sdw_device_get(wcd938x->txnode);
 	if (!wcd938x->txdev) {
-		dev_err(dev, "could not find txslave with matching of node\n");
+		dev_err(dev, "could not find txperipheral with matching of node\n");
 		return -EINVAL;
 	}
 	wcd938x->sdw_priv[AIF1_CAP] = dev_get_drvdata(wcd938x->txdev);
 	wcd938x->sdw_priv[AIF1_CAP]->wcd938x = wcd938x;
 	wcd938x->tx_sdw_dev = dev_to_sdw_dev(wcd938x->txdev);
 	if (!wcd938x->tx_sdw_dev) {
-		dev_err(dev, "could not get txslave with matching of dev\n");
+		dev_err(dev, "could not get txperipheral with matching of dev\n");
 		return -EINVAL;
 	}
 
@@ -4425,8 +4425,8 @@ static int wcd938x_bind(struct device *dev)
 		return ret;
 	}
 
-	wcd938x->sdw_priv[AIF1_PB]->slave_irq = wcd938x->virq;
-	wcd938x->sdw_priv[AIF1_CAP]->slave_irq = wcd938x->virq;
+	wcd938x->sdw_priv[AIF1_PB]->peripheral_irq = wcd938x->virq;
+	wcd938x->sdw_priv[AIF1_CAP]->peripheral_irq = wcd938x->virq;
 
 	ret = wcd938x_set_micbias_data(wcd938x);
 	if (ret < 0) {
@@ -4460,9 +4460,9 @@ static const struct component_master_ops wcd938x_comp_ops = {
 	.unbind = wcd938x_unbind,
 };
 
-static int wcd938x_add_slave_components(struct wcd938x_priv *wcd938x,
-					struct device *dev,
-					struct component_match **matchptr)
+static int wcd938x_add_peripheral_components(struct wcd938x_priv *wcd938x,
+					     struct device *dev,
+					     struct component_match **matchptr)
 {
 	struct device_node *np;
 
@@ -4510,7 +4510,7 @@ static int wcd938x_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	ret = wcd938x_add_slave_components(wcd938x, dev, &match);
+	ret = wcd938x_add_peripheral_components(wcd938x, dev, &match);
 	if (ret)
 		return ret;
 

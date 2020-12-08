@@ -310,31 +310,31 @@ static const struct regmap_config rt700_sdw_regmap = {
 	.use_single_write = true,
 };
 
-static int rt700_update_status(struct sdw_slave *slave,
-					enum sdw_slave_status status)
+static int rt700_update_status(struct sdw_peripheral *peripheral,
+			       enum sdw_peripheral_status status)
 {
-	struct rt700_priv *rt700 = dev_get_drvdata(&slave->dev);
+	struct rt700_priv *rt700 = dev_get_drvdata(&peripheral->dev);
 
 	/* Update the status */
 	rt700->status = status;
 
-	if (status == SDW_SLAVE_UNATTACHED)
+	if (status == SDW_PERIPHERAL_UNATTACHED)
 		rt700->hw_init = false;
 
 	/*
-	 * Perform initialization only if slave status is present and
+	 * Perform initialization only if peripheral status is present and
 	 * hw_init flag is false
 	 */
-	if (rt700->hw_init || rt700->status != SDW_SLAVE_ATTACHED)
+	if (rt700->hw_init || rt700->status != SDW_PERIPHERAL_ATTACHED)
 		return 0;
 
-	/* perform I/O transfers required for Slave initialization */
-	return rt700_io_init(&slave->dev, slave);
+	/* perform I/O transfers required for Peripheral initialization */
+	return rt700_io_init(&peripheral->dev, peripheral);
 }
 
-static int rt700_read_prop(struct sdw_slave *slave)
+static int rt700_read_prop(struct sdw_peripheral *peripheral)
 {
-	struct sdw_slave_prop *prop = &slave->prop;
+	struct sdw_peripheral_prop *prop = &peripheral->prop;
 	int nval, i;
 	u32 bit;
 	unsigned long addr;
@@ -342,7 +342,7 @@ static int rt700_read_prop(struct sdw_slave *slave)
 
 	prop->scp_int1_mask = SDW_SCP_INT1_IMPL_DEF | SDW_SCP_INT1_BUS_CLASH |
 		SDW_SCP_INT1_PARITY;
-	prop->quirks = SDW_SLAVE_QUIRKS_INVALID_INITIAL_PARITY;
+	prop->quirks = SDW_PERIPHERAL_QUIRKS_INVALID_INITIAL_PARITY;
 
 	prop->paging_support = false;
 
@@ -351,9 +351,9 @@ static int rt700_read_prop(struct sdw_slave *slave)
 	prop->sink_ports = 0xA; /* BITMAP:  00001010 */
 
 	nval = hweight32(prop->source_ports);
-	prop->src_dpn_prop = devm_kcalloc(&slave->dev, nval,
-						sizeof(*prop->src_dpn_prop),
-						GFP_KERNEL);
+	prop->src_dpn_prop = devm_kcalloc(&peripheral->dev, nval,
+					  sizeof(*prop->src_dpn_prop),
+					  GFP_KERNEL);
 	if (!prop->src_dpn_prop)
 		return -ENOMEM;
 
@@ -370,9 +370,9 @@ static int rt700_read_prop(struct sdw_slave *slave)
 
 	/* do this again for sink now */
 	nval = hweight32(prop->sink_ports);
-	prop->sink_dpn_prop = devm_kcalloc(&slave->dev, nval,
-						sizeof(*prop->sink_dpn_prop),
-						GFP_KERNEL);
+	prop->sink_dpn_prop = devm_kcalloc(&peripheral->dev, nval,
+					   sizeof(*prop->sink_dpn_prop),
+					   GFP_KERNEL);
 	if (!prop->sink_dpn_prop)
 		return -ENOMEM;
 
@@ -396,27 +396,27 @@ static int rt700_read_prop(struct sdw_slave *slave)
 	return 0;
 }
 
-static int rt700_bus_config(struct sdw_slave *slave,
-				struct sdw_bus_params *params)
+static int rt700_bus_config(struct sdw_peripheral *peripheral,
+			    struct sdw_bus_params *params)
 {
-	struct rt700_priv *rt700 = dev_get_drvdata(&slave->dev);
+	struct rt700_priv *rt700 = dev_get_drvdata(&peripheral->dev);
 	int ret;
 
 	memcpy(&rt700->params, params, sizeof(*params));
 
-	ret = rt700_clock_config(&slave->dev);
+	ret = rt700_clock_config(&peripheral->dev);
 	if (ret < 0)
-		dev_err(&slave->dev, "Invalid clk config");
+		dev_err(&peripheral->dev, "Invalid clk config");
 
 	return ret;
 }
 
-static int rt700_interrupt_callback(struct sdw_slave *slave,
-					struct sdw_slave_intr_status *status)
+static int rt700_interrupt_callback(struct sdw_peripheral *peripheral,
+				    struct sdw_peripheral_intr_status *status)
 {
-	struct rt700_priv *rt700 = dev_get_drvdata(&slave->dev);
+	struct rt700_priv *rt700 = dev_get_drvdata(&peripheral->dev);
 
-	dev_dbg(&slave->dev,
+	dev_dbg(&peripheral->dev,
 		"%s control_port_stat=%x", __func__, status->control_port);
 
 	mutex_lock(&rt700->disable_irq_lock);
@@ -430,39 +430,39 @@ static int rt700_interrupt_callback(struct sdw_slave *slave,
 }
 
 /*
- * slave_ops: callbacks for get_clock_stop_mode, clock_stop and
+ * peripheral_ops: callbacks for get_clock_stop_mode, clock_stop and
  * port_prep are not defined for now
  */
-static const struct sdw_slave_ops rt700_slave_ops = {
+static const struct sdw_peripheral_ops rt700_peripheral_ops = {
 	.read_prop = rt700_read_prop,
 	.interrupt_callback = rt700_interrupt_callback,
 	.update_status = rt700_update_status,
 	.bus_config = rt700_bus_config,
 };
 
-static int rt700_sdw_probe(struct sdw_slave *slave,
-				const struct sdw_device_id *id)
+static int rt700_sdw_probe(struct sdw_peripheral *peripheral,
+			   const struct sdw_device_id *id)
 {
 	struct regmap *sdw_regmap, *regmap;
 
 	/* Regmap Initialization */
-	sdw_regmap = devm_regmap_init_sdw(slave, &rt700_sdw_regmap);
+	sdw_regmap = devm_regmap_init_sdw(peripheral, &rt700_sdw_regmap);
 	if (IS_ERR(sdw_regmap))
 		return PTR_ERR(sdw_regmap);
 
-	regmap = devm_regmap_init(&slave->dev, NULL,
-		&slave->dev, &rt700_regmap);
+	regmap = devm_regmap_init(&peripheral->dev, NULL,
+				  &peripheral->dev, &rt700_regmap);
 	if (IS_ERR(regmap))
 		return PTR_ERR(regmap);
 
-	rt700_init(&slave->dev, sdw_regmap, regmap, slave);
+	rt700_init(&peripheral->dev, sdw_regmap, regmap, peripheral);
 
 	return 0;
 }
 
-static int rt700_sdw_remove(struct sdw_slave *slave)
+static int rt700_sdw_remove(struct sdw_peripheral *peripheral)
 {
-	struct rt700_priv *rt700 = dev_get_drvdata(&slave->dev);
+	struct rt700_priv *rt700 = dev_get_drvdata(&peripheral->dev);
 
 	if (rt700->hw_init) {
 		cancel_delayed_work_sync(&rt700->jack_detect_work);
@@ -470,13 +470,13 @@ static int rt700_sdw_remove(struct sdw_slave *slave)
 	}
 
 	if (rt700->first_hw_init)
-		pm_runtime_disable(&slave->dev);
+		pm_runtime_disable(&peripheral->dev);
 
 	return 0;
 }
 
 static const struct sdw_device_id rt700_id[] = {
-	SDW_SLAVE_ENTRY_EXT(0x025d, 0x700, 0x1, 0, 0),
+	SDW_PERIPHERAL_ENTRY_EXT(0x025d, 0x700, 0x1, 0, 0),
 	{},
 };
 MODULE_DEVICE_TABLE(sdw, rt700_id);
@@ -498,7 +498,7 @@ static int __maybe_unused rt700_dev_suspend(struct device *dev)
 
 static int __maybe_unused rt700_dev_system_suspend(struct device *dev)
 {
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);
 	struct rt700_priv *rt700 = dev_get_drvdata(dev);
 	int ret;
 
@@ -512,13 +512,13 @@ static int __maybe_unused rt700_dev_system_suspend(struct device *dev)
 	 */
 	mutex_lock(&rt700->disable_irq_lock);
 	rt700->disable_irq = true;
-	ret = sdw_update_no_pm(slave, SDW_SCP_INTMASK1,
+	ret = sdw_update_no_pm(peripheral, SDW_SCP_INTMASK1,
 			       SDW_SCP_INT1_IMPL_DEF, 0);
 	mutex_unlock(&rt700->disable_irq_lock);
 
 	if (ret < 0) {
 		/* log but don't prevent suspend from happening */
-		dev_dbg(&slave->dev, "%s: could not disable imp-def interrupts\n:", __func__);
+		dev_dbg(&peripheral->dev, "%s: could not disable imp-def interrupts\n:", __func__);
 	}
 
 	return rt700_dev_suspend(dev);
@@ -528,25 +528,25 @@ static int __maybe_unused rt700_dev_system_suspend(struct device *dev)
 
 static int __maybe_unused rt700_dev_resume(struct device *dev)
 {
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);
 	struct rt700_priv *rt700 = dev_get_drvdata(dev);
 	unsigned long time;
 
 	if (!rt700->first_hw_init)
 		return 0;
 
-	if (!slave->unattach_request)
+	if (!peripheral->unattach_request)
 		goto regmap_sync;
 
-	time = wait_for_completion_timeout(&slave->initialization_complete,
-				msecs_to_jiffies(RT700_PROBE_TIMEOUT));
+	time = wait_for_completion_timeout(&peripheral->initialization_complete,
+					   msecs_to_jiffies(RT700_PROBE_TIMEOUT));
 	if (!time) {
-		dev_err(&slave->dev, "Initialization not complete, timed out\n");
+		dev_err(&peripheral->dev, "Initialization not complete, timed out\n");
 		return -ETIMEDOUT;
 	}
 
 regmap_sync:
-	slave->unattach_request = 0;
+	peripheral->unattach_request = 0;
 	regcache_cache_only(rt700->regmap, false);
 	regcache_sync_region(rt700->regmap, 0x3000, 0x8fff);
 	regcache_sync_region(rt700->regmap, 0x752010, 0x75206b);
@@ -567,7 +567,7 @@ static struct sdw_driver rt700_sdw_driver = {
 	},
 	.probe = rt700_sdw_probe,
 	.remove = rt700_sdw_remove,
-	.ops = &rt700_slave_ops,
+	.ops = &rt700_peripheral_ops,
 	.id_table = rt700_id,
 };
 module_sdw_driver(rt700_sdw_driver);

@@ -35,25 +35,25 @@ struct sdw_transport_data {
 	int sub_block_offset;
 };
 
-static void sdw_compute_slave_ports(struct sdw_manager_runtime *m_rt,
-				    struct sdw_transport_data *t_data)
+static void sdw_compute_peripheral_ports(struct sdw_manager_runtime *m_rt,
+					 struct sdw_transport_data *t_data)
 {
-	struct sdw_slave_runtime *s_rt = NULL;
+	struct sdw_peripheral_runtime *peri_rt = NULL;
 	struct sdw_port_runtime *p_rt;
 	int port_bo, sample_int;
 	unsigned int rate, bps, ch = 0;
-	unsigned int slave_total_ch;
+	unsigned int peripheral_total_ch;
 	struct sdw_bus_params *b_params = &m_rt->bus->params;
 
 	port_bo = t_data->block_offset;
 
-	list_for_each_entry(s_rt, &m_rt->slave_rt_list, m_rt_node) {
+	list_for_each_entry(peri_rt, &m_rt->peripheral_rt_list, m_rt_node) {
 		rate = m_rt->stream->params.rate;
 		bps = m_rt->stream->params.bps;
 		sample_int = (m_rt->bus->params.curr_dr_freq / rate);
-		slave_total_ch = 0;
+		peripheral_total_ch = 0;
 
-		list_for_each_entry(p_rt, &s_rt->port_list, port_node) {
+		list_for_each_entry(p_rt, &peri_rt->port_list, port_node) {
 			ch = sdw_ch_mask_to_ch(p_rt->ch_mask);
 
 			sdw_fill_xport_params(&p_rt->transport_params,
@@ -70,13 +70,13 @@ static void sdw_compute_slave_ports(struct sdw_manager_runtime *m_rt,
 					     b_params->s_data_mode);
 
 			port_bo += bps * ch;
-			slave_total_ch += ch;
+			peripheral_total_ch += ch;
 		}
 
 		if (m_rt->direction == SDW_DATA_DIR_TX &&
-		    m_rt->ch_count == slave_total_ch) {
+		    m_rt->ch_count == peripheral_total_ch) {
 			/*
-			 * Slave devices were configured to access all channels
+			 * Peripheral devices were configured to access all channels
 			 * of the stream, which indicates that they operate in
 			 * 'mirror mode'. Make sure we reset the port offset for
 			 * the next device in the list
@@ -136,7 +136,7 @@ static void sdw_compute_manager_ports(struct sdw_manager_runtime *m_rt,
 		port_bo += bps * ch;
 	}
 
-	sdw_compute_slave_ports(m_rt, &t_data);
+	sdw_compute_peripheral_ports(m_rt, &t_data);
 }
 
 static void _sdw_compute_port_params(struct sdw_bus *bus,
@@ -376,7 +376,7 @@ static int sdw_compute_bus_params(struct sdw_bus *bus)
 		break;
 
 		/*
-		 * TODO: Check all the Slave(s) port(s) audio modes and find
+		 * TODO: Check all the Peripheral(s) port(s) audio modes and find
 		 * whether given clock rate is supported with glitchless
 		 * transition.
 		 */

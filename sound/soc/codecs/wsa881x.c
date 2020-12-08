@@ -674,7 +674,7 @@ enum {
 struct wsa881x_priv {
 	struct regmap *regmap;
 	struct device *dev;
-	struct sdw_slave *slave;
+	struct sdw_peripheral *peripheral;
 	struct sdw_stream_config sconfig;
 	struct sdw_stream_runtime *sruntime;
 	struct sdw_port_config port_config[WSA881X_MAX_SWR_PORTS];
@@ -694,7 +694,7 @@ static void wsa881x_init(struct wsa881x_priv *wsa881x)
 	regmap_register_patch(wsa881x->regmap, wsa881x_rev_2_0,
 			      ARRAY_SIZE(wsa881x_rev_2_0));
 
-	/* Enable software reset output from soundwire slave */
+	/* Enable software reset output from soundwire peripheral */
 	regmap_update_bits(rm, WSA881X_SWR_RESET_EN, 0x07, 0x07);
 
 	/* Bring out of analog reset */
@@ -992,7 +992,7 @@ static int wsa881x_hw_params(struct snd_pcm_substream *substream,
 		wsa881x->active_ports++;
 	}
 
-	return sdw_stream_add_slave(wsa881x->slave, &wsa881x->sconfig,
+	return sdw_stream_add_peripheral(wsa881x->peripheral, &wsa881x->sconfig,
 				    wsa881x->port_config, wsa881x->active_ports,
 				    wsa881x->sruntime);
 }
@@ -1002,7 +1002,7 @@ static int wsa881x_hw_free(struct snd_pcm_substream *substream,
 {
 	struct wsa881x_priv *wsa881x = dev_get_drvdata(dai->dev);
 
-	sdw_stream_remove_slave(wsa881x->slave, wsa881x->sruntime);
+	sdw_stream_remove_peripheral(wsa881x->peripheral, wsa881x->sruntime);
 
 	return 0;
 }
@@ -1067,22 +1067,22 @@ static const struct snd_soc_component_driver wsa881x_component_drv = {
 	.endianness = 1,
 };
 
-static int wsa881x_update_status(struct sdw_slave *slave,
-				 enum sdw_slave_status status)
+static int wsa881x_update_status(struct sdw_peripheral *peripheral,
+				 enum sdw_peripheral_status status)
 {
-	struct wsa881x_priv *wsa881x = dev_get_drvdata(&slave->dev);
+	struct wsa881x_priv *wsa881x = dev_get_drvdata(&peripheral->dev);
 
-	if (status == SDW_SLAVE_ATTACHED && slave->dev_num > 0)
+	if (status == SDW_PERIPHERAL_ATTACHED && peripheral->dev_num > 0)
 		wsa881x_init(wsa881x);
 
 	return 0;
 }
 
-static int wsa881x_port_prep(struct sdw_slave *slave,
+static int wsa881x_port_prep(struct sdw_peripheral *peripheral,
 			     struct sdw_prepare_ch *prepare_ch,
 			     enum sdw_port_prep_ops state)
 {
-	struct wsa881x_priv *wsa881x = dev_get_drvdata(&slave->dev);
+	struct wsa881x_priv *wsa881x = dev_get_drvdata(&peripheral->dev);
 
 	if (state == SDW_OPS_PORT_POST_PREP)
 		wsa881x->port_prepared[prepare_ch->num - 1] = true;
@@ -1092,22 +1092,22 @@ static int wsa881x_port_prep(struct sdw_slave *slave,
 	return 0;
 }
 
-static int wsa881x_bus_config(struct sdw_slave *slave,
+static int wsa881x_bus_config(struct sdw_peripheral *peripheral,
 			      struct sdw_bus_params *params)
 {
-	sdw_write(slave, SWRS_SCP_HOST_CLK_DIV2_CTL_BANK(params->next_bank),
+	sdw_write(peripheral, SWRS_SCP_HOST_CLK_DIV2_CTL_BANK(params->next_bank),
 		  0x01);
 
 	return 0;
 }
 
-static struct sdw_slave_ops wsa881x_slave_ops = {
+static struct sdw_peripheral_ops wsa881x_peripheral_ops = {
 	.update_status = wsa881x_update_status,
 	.bus_config = wsa881x_bus_config,
 	.port_prep = wsa881x_port_prep,
 };
 
-static int wsa881x_probe(struct sdw_slave *pdev,
+static int wsa881x_probe(struct sdw_peripheral *pdev,
 			 const struct sdw_device_id *id)
 {
 	struct wsa881x_priv *wsa881x;
@@ -1125,7 +1125,7 @@ static int wsa881x_probe(struct sdw_slave *pdev,
 	}
 
 	dev_set_drvdata(&pdev->dev, wsa881x);
-	wsa881x->slave = pdev;
+	wsa881x->peripheral = pdev;
 	wsa881x->dev = &pdev->dev;
 	wsa881x->sconfig.ch_count = 1;
 	wsa881x->sconfig.bps = 1;
@@ -1170,13 +1170,13 @@ static int __maybe_unused wsa881x_runtime_suspend(struct device *dev)
 
 static int __maybe_unused wsa881x_runtime_resume(struct device *dev)
 {
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);
 	struct regmap *regmap = dev_get_regmap(dev, NULL);
 	struct wsa881x_priv *wsa881x = dev_get_drvdata(dev);
 
 	gpiod_direction_output(wsa881x->sd_n, 1);
 
-	wait_for_completion_timeout(&slave->initialization_complete,
+	wait_for_completion_timeout(&peripheral->initialization_complete,
 				    msecs_to_jiffies(WSA881X_PROBE_TIMEOUT));
 
 	regcache_cache_only(regmap, false);
@@ -1189,17 +1189,17 @@ static const struct dev_pm_ops wsa881x_pm_ops = {
 	SET_RUNTIME_PM_OPS(wsa881x_runtime_suspend, wsa881x_runtime_resume, NULL)
 };
 
-static const struct sdw_device_id wsa881x_slave_id[] = {
-	SDW_SLAVE_ENTRY(0x0217, 0x2010, 0),
-	SDW_SLAVE_ENTRY(0x0217, 0x2110, 0),
+static const struct sdw_device_id wsa881x_peripheral_id[] = {
+	SDW_PERIPHERAL_ENTRY(0x0217, 0x2010, 0),
+	SDW_PERIPHERAL_ENTRY(0x0217, 0x2110, 0),
 	{},
 };
-MODULE_DEVICE_TABLE(sdw, wsa881x_slave_id);
+MODULE_DEVICE_TABLE(sdw, wsa881x_peripheral_id);
 
 static struct sdw_driver wsa881x_codec_driver = {
 	.probe	= wsa881x_probe,
-	.ops = &wsa881x_slave_ops,
-	.id_table = wsa881x_slave_id,
+	.ops = &wsa881x_peripheral_ops,
+	.id_table = wsa881x_peripheral_id,
 	.driver = {
 		.name	= "wsa881x-codec",
 		.pm = &wsa881x_pm_ops,
