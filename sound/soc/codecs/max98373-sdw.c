@@ -265,6 +265,8 @@ static __maybe_unused int max98373_resume(struct device *dev)
 	if (!slave->unattach_request)
 		goto regmap_sync;
 
+	slave->unattach_request = 0;
+
 	time = wait_for_completion_timeout(&slave->initialization_complete,
 					   msecs_to_jiffies(MAX98373_PROBE_TIMEOUT));
 	if (!time) {
@@ -273,7 +275,6 @@ static __maybe_unused int max98373_resume(struct device *dev)
 	}
 
 regmap_sync:
-	slave->unattach_request = 0;
 	regcache_cache_only(max98373->regmap, false);
 	regcache_sync(max98373->regmap);
 
