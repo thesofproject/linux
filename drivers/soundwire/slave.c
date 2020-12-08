@@ -127,10 +127,10 @@ static bool find_slave(struct sdw_bus *bus,
 }
 
 /*
- * sdw_acpi_find_slaves() - Find Slave devices in Master ACPI node
+ * sdw_acpi_find_slaves() - Find Slave devices in Manager ACPI node
  * @bus: SDW bus instance
  *
- * Scans Master ACPI node for SDW child Slave devices and registers it.
+ * Scans Manager ACPI node for SDW child Slave devices and registers it.
  */
 int sdw_acpi_find_slaves(struct sdw_bus *bus)
 {
@@ -196,10 +196,10 @@ int sdw_acpi_find_slaves(struct sdw_bus *bus)
 #endif
 
 /*
- * sdw_of_find_slaves() - Find Slave devices in master device tree node
+ * sdw_of_find_slaves() - Find Slave devices in manager device tree node
  * @bus: SDW bus instance
  *
- * Scans Master DT node for SDW child Slave devices and registers it.
+ * Scans Manager DT node for SDW child Slave devices and registers it.
  */
 int sdw_of_find_slaves(struct sdw_bus *bus)
 {

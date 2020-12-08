@@ -22,8 +22,8 @@ struct sdw_slave;
 #define SDW_GROUP12_DEV_NUM		12
 #define SDW_GROUP13_DEV_NUM		13
 
-/* SDW Master Device Number, not supported yet */
-#define SDW_MASTER_DEV_NUM		14
+/* SDW Manager Device Number, not supported yet */
+#define SDW_MANAGER_DEV_NUM		14
 
 #define SDW_NUM_DEV_ID_REGISTERS	6
 /* frame shape defines */
@@ -183,7 +183,7 @@ enum sdw_clk_stop_reset_behave {
 };
 
 /**
- * enum sdw_p15_behave - Slave Port 15 behaviour when the Master attempts a
+ * enum sdw_p15_behave - Slave Port 15 behaviour when the Manager attempts a
  * read
  * @SDW_P15_READ_IGNORED: Read is ignored
  * @SDW_P15_CMD_OK: Command is ok
@@ -354,10 +354,10 @@ struct sdw_dpn_prop {
  * SCP_AddrPage2
  * @bank_delay_support: Slave implements bank delay/bridge support registers
  * SCP_BankDelay and SCP_NextFrame
- * @p15_behave: Slave behavior when the Master attempts a read to the Port15
+ * @p15_behave: Slave behavior when the Manager attempts a read to the Port15
  * alias
  * @lane_control_support: Slave supports lane control
- * @master_count: Number of Masters present on this Slave
+ * @manager_count: Number of Managers present on this Slave
  * @source_ports: Bitmap identifying source ports
  * @sink_ports: Bitmap identifying sink ports
  * @dp0_prop: Data Port 0 properties
@@ -381,7 +381,7 @@ struct sdw_slave_prop {
 	bool bank_delay_support;
 	enum sdw_p15_behave p15_behave;
 	bool lane_control_support;
-	u32 master_count;
+	u32 manager_count;
 	u32 source_ports;
 	u32 sink_ports;
 	struct sdw_dp0_prop *dp0_prop;
@@ -395,7 +395,7 @@ struct sdw_slave_prop {
 #define SDW_SLAVE_QUIRKS_INVALID_INITIAL_PARITY	BIT(0)
 
 /**
- * struct sdw_master_prop - Master properties
+ * struct sdw_manager_prop - Manager properties
  * @revision: MIPI spec version of the implementation
  * @clk_stop_modes: Bitmap, bit N set when clock-stop-modeN supported
  * @max_clk_freq: Maximum Bus clock frequency, in Hz
@@ -409,11 +409,11 @@ struct sdw_slave_prop {
  * @dynamic_frame: Dynamic frame shape supported
  * @err_threshold: Number of times that software may retry sending a single
  * command
- * @mclk_freq: clock reference passed to SoundWire Master, in Hz.
- * @hw_disabled: if true, the Master is not functional, typically due to pin-mux
+ * @mclk_freq: clock reference passed to SoundWire Manager, in Hz.
+ * @hw_disabled: if true, the Manager is not functional, typically due to pin-mux
  * @quirks: bitmask identifying optional behavior beyond the scope of the MIPI specification
  */
-struct sdw_master_prop {
+struct sdw_manager_prop {
 	u32 revision;
 	u32 clk_stop_modes;
 	u32 max_clk_freq;
@@ -431,7 +431,7 @@ struct sdw_master_prop {
 	u64 quirks;
 };
 
-/* Definitions for Master quirks */
+/* Definitions for Manager quirks */
 
 /*
  * In a number of platforms bus clashes are reported after a hardware
@@ -439,19 +439,19 @@ struct sdw_master_prop {
  * The following quirk will discard all initial bus clash interrupts
  * but will leave the detection on should real bus clashes happen
  */
-#define SDW_MASTER_QUIRKS_CLEAR_INITIAL_CLASH	BIT(0)
+#define SDW_MANAGER_QUIRKS_CLEAR_INITIAL_CLASH	BIT(0)
 
 /*
  * Some Slave devices have known issues with incorrect parity errors
  * reported after a hardware reset. However during integration unexplained
  * parity errors can be reported by Slave devices, possibly due to electrical
- * issues at the Master level.
+ * issues at the Manager level.
  * The following quirk will discard all initial parity errors but will leave
  * the detection on should real parity errors happen.
  */
-#define SDW_MASTER_QUIRKS_CLEAR_INITIAL_PARITY	BIT(1)
+#define SDW_MANAGER_QUIRKS_CLEAR_INITIAL_PARITY	BIT(1)
 
-int sdw_master_read_prop(struct sdw_bus *bus);
+int sdw_manager_read_prop(struct sdw_bus *bus);
 int sdw_slave_read_prop(struct sdw_slave *slave);
 
 /*
@@ -550,7 +550,7 @@ struct sdw_bus_conf {
  * @num: Port number
  * @ch_mask: Active channel mask
  * @prepare: Prepare (true) /de-prepare (false) channel
- * @bank: Register bank, which bank Slave/Master driver should program for
+ * @bank: Register bank, which bank Slave/Manager driver should program for
  * implementation defined registers. This is always updated to next_bank
  * value read from bus params.
  *
@@ -587,7 +587,7 @@ enum sdw_port_prep_ops {
  * @col: Active columns
  * @row: Active rows
  * @s_data_mode: NORMAL, STATIC or PRBS mode for all Slave ports
- * @m_data_mode: NORMAL, STATIC or PRBS mode for all Master ports. The value
+ * @m_data_mode: NORMAL, STATIC or PRBS mode for all Manager ports. The value
  * should be the same to detect transmission issues, but can be different to
  * test the interrupt reports
  */
@@ -656,8 +656,8 @@ struct sdw_slave_ops {
  * on startup between device enumeration and settings being restored
  * @unattach_request: mask field to keep track why the Slave re-attached and
  * was re-initialized. This is useful to deal with potential race conditions
- * between the Master suspending and the codec resuming, and make sure that
- * when the Master triggered a reset the Slave is properly enumerated and
+ * between the Manager suspending and the codec resuming, and make sure that
+ * when the Manager triggered a reset the Slave is properly enumerated and
  * initialized
  * @first_interrupt_done: status flag tracking if the interrupt handling
  * for a Slave happens for the first time after enumeration
@@ -689,17 +689,17 @@ struct sdw_slave {
 #define dev_to_sdw_dev(_dev) container_of(_dev, struct sdw_slave, dev)
 
 /**
- * struct sdw_master_device - SoundWire 'Master Device' representation
- * @dev: Linux device for this Master
+ * struct sdw_manager_device - SoundWire 'Manager Device' representation
+ * @dev: Linux device for this Manager
  * @bus: Bus handle shortcut
  */
-struct sdw_master_device {
+struct sdw_manager_device {
 	struct device dev;
 	struct sdw_bus *bus;
 };
 
-#define dev_to_sdw_master_device(d)	\
-	container_of(d, struct sdw_master_device, dev)
+#define dev_to_sdw_manager_device(d)	\
+	container_of(d, struct sdw_manager_device, dev)
 
 struct sdw_driver {
 	const char *name;
@@ -727,7 +727,7 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 			enum sdw_slave_status status[]);
 
 /*
- * SDW master structures and APIs
+ * SDW manager structures and APIs
  */
 
 /**
@@ -794,17 +794,17 @@ struct sdw_enable_ch {
 };
 
 /**
- * struct sdw_master_port_ops: Callback functions from bus to Master
- * driver to set Master Data ports.
+ * struct sdw_manager_port_ops: Callback functions from bus to Manager
+ * driver to set Manager Data ports.
  *
- * @dpn_set_port_params: Set the Port parameters for the Master Port.
+ * @dpn_set_port_params: Set the Port parameters for the Manager Port.
  * Mandatory callback
- * @dpn_set_port_transport_params: Set transport parameters for the Master
+ * @dpn_set_port_transport_params: Set transport parameters for the Manager
  * Port. Mandatory callback
- * @dpn_port_prep: Port prepare operations for the Master Data Port.
- * @dpn_port_enable_ch: Enable the channels of Master Port.
+ * @dpn_port_prep: Port prepare operations for the Manager Data Port.
+ * @dpn_port_enable_ch: Enable the channels of Manager Port.
  */
-struct sdw_master_port_ops {
+struct sdw_manager_port_ops {
 	int (*dpn_set_port_params)(struct sdw_bus *bus,
 			struct sdw_port_params *port_params,
 			unsigned int bank);
@@ -832,8 +832,8 @@ struct sdw_defer {
 };
 
 /**
- * struct sdw_master_ops - Master driver ops
- * @read_prop: Read Master properties
+ * struct sdw_manager_ops - Manager driver ops
+ * @read_prop: Read Manager properties
  * @override_adr: Override value read from firmware (quirk for buggy firmware)
  * @xfer_msg: Transfer message callback
  * @xfer_msg_defer: Defer version of transfer message callback
@@ -842,7 +842,7 @@ struct sdw_defer {
  * @pre_bank_switch: Callback for pre bank switch
  * @post_bank_switch: Callback for post bank switch
  */
-struct sdw_master_ops {
+struct sdw_manager_ops {
 	int (*read_prop)(struct sdw_bus *bus);
 	u64 (*override_adr)
 			(struct sdw_bus *bus, u64 addr);
@@ -863,8 +863,8 @@ struct sdw_master_ops {
 /**
  * struct sdw_bus - SoundWire bus
  * @dev: Shortcut to &bus->md->dev to avoid changing the entire code.
- * @md: Master device
- * @link_id: Link id number, can be 0 to N, unique for each Master
+ * @md: Manager device
+ * @link_id: Link id number, can be 0 to N, unique for each Manager
  * @id: bus system-wide unique id
  * @slaves: list of Slaves on this bus
  * @assigned: Bitmap for Slave device numbers.
@@ -872,11 +872,11 @@ struct sdw_master_ops {
  * @bus_lock: bus lock
  * @msg_lock: message lock
  * @compute_params: points to Bus resource management implementation
- * @ops: Master callback ops
- * @port_ops: Master port callback ops
+ * @ops: Manager callback ops
+ * @port_ops: Manager port callback ops
  * @params: Current bus parameters
- * @prop: Master properties
- * @m_rt_list: List of Master instance of all stream(s) running on Bus. This
+ * @prop: Manager properties
+ * @m_rt_list: List of Manager instance of all stream(s) running on Bus. This
  * is used to compute and program bus bandwidth, clock, frame shape,
  * transport and port parameters
  * @debugfs: Bus debugfs
@@ -894,7 +894,7 @@ struct sdw_master_ops {
  */
 struct sdw_bus {
 	struct device *dev;
-	struct sdw_master_device *md;
+	struct sdw_manager_device *md;
 	unsigned int link_id;
 	int id;
 	struct list_head slaves;
@@ -902,10 +902,10 @@ struct sdw_bus {
 	struct mutex bus_lock;
 	struct mutex msg_lock;
 	int (*compute_params)(struct sdw_bus *bus);
-	const struct sdw_master_ops *ops;
-	const struct sdw_master_port_ops *port_ops;
+	const struct sdw_manager_ops *ops;
+	const struct sdw_manager_port_ops *port_ops;
 	struct sdw_bus_params params;
-	struct sdw_master_prop prop;
+	struct sdw_manager_prop prop;
 	struct list_head m_rt_list;
 #ifdef CONFIG_DEBUG_FS
 	struct dentry *debugfs;
@@ -917,12 +917,12 @@ struct sdw_bus {
 	int hw_sync_min_links;
 };
 
-int sdw_bus_master_add(struct sdw_bus *bus, struct device *parent,
-		       struct fwnode_handle *fwnode);
-void sdw_bus_master_delete(struct sdw_bus *bus);
+int sdw_bus_manager_add(struct sdw_bus *bus, struct device *parent,
+			struct fwnode_handle *fwnode);
+void sdw_bus_manager_delete(struct sdw_bus *bus);
 
 /**
- * sdw_port_config: Master or Slave Port configuration
+ * sdw_port_config: Manager or Slave Port configuration
  *
  * @num: Port number
  * @ch_mask: channels mask for port
@@ -933,7 +933,7 @@ struct sdw_port_config {
 };
 
 /**
- * sdw_stream_config: Master or Slave stream configuration
+ * sdw_stream_config: Manager or Slave stream configuration
  *
  * @frame_rate: Audio frame rate of the stream, in Hz
  * @ch_count: Channel count of the stream
@@ -990,17 +990,17 @@ struct sdw_stream_params {
  * @params: Stream parameters
  * @state: Current state of the stream
  * @type: Stream type PCM or PDM
- * @master_list: List of Master runtime(s) in this stream.
- * master_list can contain only one m_rt per Master instance
+ * @manager_list: List of Manager runtime(s) in this stream.
+ * manager_list can contain only one m_rt per Manager instance
  * for a stream
- * @m_rt_count: Count of Master runtime(s) in this stream
+ * @m_rt_count: Count of Manager runtime(s) in this stream
  */
 struct sdw_stream_runtime {
 	const char *name;
 	struct sdw_stream_params params;
 	enum sdw_stream_state state;
 	enum sdw_stream_type type;
-	struct list_head master_list;
+	struct list_head manager_list;
 	int m_rt_count;
 };
 
@@ -1009,20 +1009,20 @@ void sdw_release_stream(struct sdw_stream_runtime *stream);
 
 int sdw_compute_params(struct sdw_bus *bus);
 
-int sdw_stream_add_master(struct sdw_bus *bus,
-		struct sdw_stream_config *stream_config,
-		struct sdw_port_config *port_config,
-		unsigned int num_ports,
-		struct sdw_stream_runtime *stream);
+int sdw_stream_add_manager(struct sdw_bus *bus,
+			   struct sdw_stream_config *stream_config,
+			   struct sdw_port_config *port_config,
+			   unsigned int num_ports,
+			   struct sdw_stream_runtime *stream);
 int sdw_stream_add_slave(struct sdw_slave *slave,
-		struct sdw_stream_config *stream_config,
-		struct sdw_port_config *port_config,
-		unsigned int num_ports,
-		struct sdw_stream_runtime *stream);
-int sdw_stream_remove_master(struct sdw_bus *bus,
-		struct sdw_stream_runtime *stream);
+			 struct sdw_stream_config *stream_config,
+			 struct sdw_port_config *port_config,
+			 unsigned int num_ports,
+			 struct sdw_stream_runtime *stream);
+int sdw_stream_remove_manager(struct sdw_bus *bus,
+			      struct sdw_stream_runtime *stream);
 int sdw_stream_remove_slave(struct sdw_slave *slave,
-		struct sdw_stream_runtime *stream);
+			    struct sdw_stream_runtime *stream);
 int sdw_startup_stream(void *sdw_substream);
 int sdw_prepare_stream(struct sdw_stream_runtime *stream);
 int sdw_enable_stream(struct sdw_stream_runtime *stream);

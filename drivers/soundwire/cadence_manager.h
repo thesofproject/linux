@@ -83,7 +83,7 @@ struct sdw_cdns_stream_config {
  * @pdi: PDI used for this dai
  * @bus: Bus handle
  * @stream_type: Stream type
- * @link_id: Master link id
+ * @link_id: Manager link id
  * @hw_params: hw_params to be applied in .prepare step
  * @suspended: status set when suspended, to be used in .prepare
  */
@@ -145,7 +145,7 @@ struct sdw_cdns {
 /* Exported symbols */
 
 int sdw_cdns_probe(struct sdw_cdns *cdns);
-extern struct sdw_master_ops sdw_cdns_master_ops;
+extern struct sdw_manager_ops sdw_cdns_manager_ops;
 
 irqreturn_t sdw_cdns_irq(int irq, void *dev_id);
 irqreturn_t sdw_cdns_thread(int irq, void *dev_id);

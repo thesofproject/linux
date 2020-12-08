@@ -18,8 +18,8 @@ void sdw_bus_debugfs_init(struct sdw_bus *bus)
 	if (!sdw_debugfs_root)
 		return;
 
-	/* create the debugfs master-N */
-	snprintf(name, sizeof(name), "master-%d", bus->link_id);
+	/* create the debugfs manager-N */
+	snprintf(name, sizeof(name), "manager-%d", bus->link_id);
 	bus->debugfs = debugfs_create_dir(name, sdw_debugfs_root);
 }
 
@@ -85,7 +85,7 @@ static int sdw_slave_reg_show(struct seq_file *s_file, void *data)
 
 	/*
 	 * SCP Bank 0/1 registers are read-only and cannot be
-	 * retrieved from the Slave. The Master typically keeps track
+	 * retrieved from the Slave. The Manager typically keeps track
 	 * of the current frame size so the information can be found
 	 * in other places
 	 */
@@ -120,15 +120,15 @@ DEFINE_SHOW_ATTRIBUTE(sdw_slave_reg);
 
 void sdw_slave_debugfs_init(struct sdw_slave *slave)
 {
-	struct dentry *master;
+	struct dentry *manager;
 	struct dentry *d;
 	char name[32];
 
-	master = slave->bus->debugfs;
+	manager = slave->bus->debugfs;
 
 	/* create the debugfs slave-name */
 	snprintf(name, sizeof(name), "%s", dev_name(&slave->dev));
-	d = debugfs_create_dir(name, master);
+	d = debugfs_create_dir(name, manager);
 
 	debugfs_create_file("registers", 0400, d, slave, &sdw_slave_reg_fops);
 

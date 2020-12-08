@@ -2,8 +2,8 @@
 // Copyright(c) 2015-17 Intel Corporation.
 
 /*
- * Cadence SoundWire Master module
- * Used by Master driver
+ * Cadence SoundWire Manager module
+ * Used by Manager driver
  */
 
 #include <linux/delay.h>
@@ -20,7 +20,7 @@
 #include <sound/soc.h>
 #include <linux/workqueue.h>
 #include "bus.h"
-#include "cadence_master.h"
+#include "cadence_manager.h"
 
 static int interrupt_mask;
 module_param_named(cnds_mcp_int_mask, interrupt_mask, int, 0444);
@@ -30,7 +30,7 @@ MODULE_PARM_DESC(cdns_mcp_int_mask, "Cadence MCP IntMask");
 
 #define CDNS_MCP_CONFIG_MCMD_RETRY		GENMASK(27, 24)
 #define CDNS_MCP_CONFIG_MPREQ_DELAY		GENMASK(20, 16)
-#define CDNS_MCP_CONFIG_MMASTER			BIT(7)
+#define CDNS_MCP_CONFIG_MMANAGER			BIT(7)
 #define CDNS_MCP_CONFIG_BUS_REL			BIT(6)
 #define CDNS_MCP_CONFIG_SNIFFER			BIT(5)
 #define CDNS_MCP_CONFIG_SSPMOD			BIT(4)
@@ -383,7 +383,7 @@ static int cdns_parity_error_injection(void *data, u64 value)
 	bus = &cdns->bus;
 
 	/*
-	 * Resume Master device. If this results in a bus reset, the
+	 * Resume Manager device. If this results in a bus reset, the
 	 * Slave devices will re-attach and be re-enumerated.
 	 */
 	ret = pm_runtime_get_sync(bus->dev);
@@ -438,7 +438,7 @@ static int cdns_parity_error_injection(void *data, u64 value)
 	add_taint(TAINT_USER, LOCKDEP_STILL_OK);
 
 	/*
-	 * allow Master device to enter pm_runtime suspend. This may
+	 * allow Manager device to enter pm_runtime suspend. This may
 	 * also result in Slave devices suspending.
 	 */
 	pm_runtime_mark_last_busy(bus->dev);
@@ -851,7 +851,7 @@ irqreturn_t sdw_cdns_irq(int irq, void *dev_id)
 	}
 
 	if (int_status & CDNS_MCP_INT_PARITY) {
-		/* Parity error detected by Master */
+		/* Parity error detected by Manager */
 		dev_err_ratelimited(cdns->dev, "Parity error\n");
 	}
 
@@ -892,7 +892,7 @@ irqreturn_t sdw_cdns_irq(int irq, void *dev_id)
 		 * Deal with possible race condition between interrupt
 		 * handling and disabling interrupts on suspend.
 		 *
-		 * If the master is in the process of disabling
+		 * If the manager is in the process of disabling
 		 * interrupts, don't schedule a workqueue
 		 */
 		if (cdns->interrupt_enabled)
@@ -1176,7 +1176,7 @@ static u32 cdns_set_initial_frame_shape(int n_rows, int n_cols)
 static void cdns_init_clock_ctrl(struct sdw_cdns *cdns)
 {
 	struct sdw_bus *bus = &cdns->bus;
-	struct sdw_master_prop *prop = &bus->prop;
+	struct sdw_manager_prop *prop = &bus->prop;
 	u32 val;
 	u32 ssp_interval;
 	int divider;
@@ -1241,8 +1241,8 @@ int sdw_cdns_init(struct sdw_cdns *cdns)
 	val &= ~CDNS_MCP_CONFIG_BUS_REL;
 
 	if (cdns->bus.multi_link)
-		/* Set Multi-master mode to take gsync into account */
-		val |= CDNS_MCP_CONFIG_MMASTER;
+		/* Set Multi-manager mode to take gsync into account */
+		val |= CDNS_MCP_CONFIG_MMANAGER;
 
 	/* leave frame delay to hardware default of 0x1F */
 
@@ -1257,7 +1257,7 @@ EXPORT_SYMBOL(sdw_cdns_init);
 
 int cdns_bus_conf(struct sdw_bus *bus, struct sdw_bus_params *params)
 {
-	struct sdw_master_prop *prop = &bus->prop;
+	struct sdw_manager_prop *prop = &bus->prop;
 	struct sdw_cdns *cdns = bus_to_cdns(bus);
 	int mcp_clkctrl_off;
 	int divider;
@@ -1316,7 +1316,7 @@ static int cdns_transport_params(struct sdw_bus *bus,
 	int dpn_samplectrl_off;
 
 	/*
-	 * Note: Only full data port is supported on the Master side for
+	 * Note: Only full data port is supported on the Manager side for
 	 * both PCM and PDM ports.
 	 */
 
@@ -1368,7 +1368,7 @@ static int cdns_port_enable(struct sdw_bus *bus,
 	return 0;
 }
 
-static const struct sdw_master_port_ops cdns_port_ops = {
+static const struct sdw_manager_port_ops cdns_port_ops = {
 	.dpn_set_port_params = cdns_port_params,
 	.dpn_set_port_transport_params = cdns_transport_params,
 	.dpn_port_enable_ch = cdns_port_enable,
@@ -1412,7 +1412,7 @@ int sdw_cdns_clock_stop(struct sdw_cdns *cdns, bool block_wake)
 
 	/*
 	 * For specific platforms, it is required to be able to put
-	 * master into a state in which it ignores wake-up trials
+	 * manager into a state in which it ignores wake-up trials
 	 * in clock stop state
 	 */
 	if (block_wake)

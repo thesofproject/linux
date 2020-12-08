@@ -4,7 +4,7 @@
 #
 
 #Bus Objs
-soundwire-bus-y := bus_type.o bus.o master.o slave.o mipi_disco.o stream.o  \
+soundwire-bus-y := bus_type.o bus.o manager.o slave.o mipi_disco.o stream.o  \
 			sysfs_slave.o sysfs_slave_dpn.o
 obj-$(CONFIG_SOUNDWIRE) += soundwire-bus.o
 
@@ -16,7 +16,7 @@ soundwire-bus-y += debugfs.o
 endif
 
 #Cadence Objs
-soundwire-cadence-y := cadence_master.o
+soundwire-cadence-y := cadence_manager.o
 obj-$(CONFIG_SOUNDWIRE_CADENCE) += soundwire-cadence.o
 
 #Intel driver

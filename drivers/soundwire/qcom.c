@@ -791,13 +791,13 @@ static int qcom_swrm_port_enable(struct sdw_bus *bus,
 	return ctrl->reg_write(ctrl, reg, val);
 }
 
-static const struct sdw_master_port_ops qcom_swrm_port_ops = {
+static const struct sdw_manager_port_ops qcom_swrm_port_ops = {
 	.dpn_set_port_params = qcom_swrm_port_params,
 	.dpn_set_port_transport_params = qcom_swrm_transport_params,
 	.dpn_port_enable_ch = qcom_swrm_port_enable,
 };
 
-static const struct sdw_master_ops qcom_swrm_ops = {
+static const struct sdw_manager_ops qcom_swrm_ops = {
 	.xfer_msg = qcom_swrm_xfer_msg,
 	.pre_bank_switch = qcom_swrm_pre_bank_switch,
 };
@@ -805,7 +805,7 @@ static const struct sdw_master_ops qcom_swrm_ops = {
 static int qcom_swrm_compute_params(struct sdw_bus *bus)
 {
 	struct qcom_swrm_ctrl *ctrl = to_qcom_sdw(bus);
-	struct sdw_master_runtime *m_rt;
+	struct sdw_manager_runtime *m_rt;
 	struct sdw_slave_runtime *s_rt;
 	struct sdw_port_runtime *p_rt;
 	struct qcom_swrm_port_config *pcfg;
@@ -868,13 +868,13 @@ static u32 qcom_swrm_freq_tbl[MAX_FREQ_NUM] = {
 static void qcom_swrm_stream_free_ports(struct qcom_swrm_ctrl *ctrl,
 					struct sdw_stream_runtime *stream)
 {
-	struct sdw_master_runtime *m_rt;
+	struct sdw_manager_runtime *m_rt;
 	struct sdw_port_runtime *p_rt;
 	unsigned long *port_mask;
 
 	mutex_lock(&ctrl->port_lock);
 
-	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
+	list_for_each_entry(m_rt, &stream->manager_list, stream_node) {
 		if (m_rt->direction == SDW_DATA_DIR_RX)
 			port_mask = &ctrl->dout_port_mask;
 		else
@@ -894,7 +894,7 @@ static int qcom_swrm_stream_alloc_ports(struct qcom_swrm_ctrl *ctrl,
 {
 	struct sdw_port_config pconfig[QCOM_SDW_MAX_PORTS];
 	struct sdw_stream_config sconfig;
-	struct sdw_master_runtime *m_rt;
+	struct sdw_manager_runtime *m_rt;
 	struct sdw_slave_runtime *s_rt;
 	struct sdw_port_runtime *p_rt;
 	struct sdw_slave *slave;
@@ -903,7 +903,7 @@ static int qcom_swrm_stream_alloc_ports(struct qcom_swrm_ctrl *ctrl,
 	unsigned int m_port;
 
 	mutex_lock(&ctrl->port_lock);
-	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
+	list_for_each_entry(m_rt, &stream->manager_list, stream_node) {
 		if (m_rt->direction == SDW_DATA_DIR_RX) {
 			maxport = ctrl->num_dout_ports;
 			port_mask = &ctrl->dout_port_mask;
@@ -945,8 +945,8 @@ static int qcom_swrm_stream_alloc_ports(struct qcom_swrm_ctrl *ctrl,
 	sconfig.frame_rate = params_rate(params);
 	sconfig.type = stream->type;
 	sconfig.bps = 1;
-	sdw_stream_add_master(&ctrl->bus, &sconfig, pconfig,
-			      nports, stream);
+	sdw_stream_add_manager(&ctrl->bus, &sconfig, pconfig,
+			       nports, stream);
 err:
 	if (ret) {
 		for (i = 0; i < nports; i++)
@@ -981,7 +981,7 @@ static int qcom_swrm_hw_free(struct snd_pcm_substream *substream,
 	struct sdw_stream_runtime *sruntime = ctrl->sruntime[dai->id];
 
 	qcom_swrm_stream_free_ports(ctrl, sruntime);
-	sdw_stream_remove_master(&ctrl->bus, sruntime);
+	sdw_stream_remove_manager(&ctrl->bus, sruntime);
 
 	return 0;
 }
@@ -1187,7 +1187,7 @@ static int qcom_swrm_get_port_config(struct qcom_swrm_ctrl *ctrl)
 static int qcom_swrm_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	struct sdw_master_prop *prop;
+	struct sdw_manager_prop *prop;
 	struct sdw_bus_params *params;
 	struct qcom_swrm_ctrl *ctrl;
 	const struct qcom_swrm_data *data;
@@ -1276,7 +1276,7 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 		goto err_clk;
 	}
 
-	ret = sdw_bus_master_add(&ctrl->bus, dev, dev->fwnode);
+	ret = sdw_bus_manager_add(&ctrl->bus, dev, dev->fwnode);
 	if (ret) {
 		dev_err(dev, "Failed to register Soundwire controller (%d)\n",
 			ret);
@@ -1288,7 +1288,7 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 				    msecs_to_jiffies(TIMEOUT_MS));
 	ret = qcom_swrm_register_dais(ctrl);
 	if (ret)
-		goto err_master_add;
+		goto err_manager_add;
 
 	dev_info(dev, "Qualcomm Soundwire controller v%x.%x.%x Registered\n",
 		 (ctrl->version >> 24) & 0xff, (ctrl->version >> 16) & 0xff,
@@ -1296,8 +1296,8 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 
 	return 0;
 
-err_master_add:
-	sdw_bus_master_delete(&ctrl->bus);
+err_manager_add:
+	sdw_bus_manager_delete(&ctrl->bus);
 err_clk:
 	clk_disable_unprepare(ctrl->hclk);
 err_init:
@@ -1308,7 +1308,7 @@ static int qcom_swrm_remove(struct platform_device *pdev)
 {
 	struct qcom_swrm_ctrl *ctrl = dev_get_drvdata(&pdev->dev);
 
-	sdw_bus_master_delete(&ctrl->bus);
+	sdw_bus_manager_delete(&ctrl->bus);
 	clk_disable_unprepare(ctrl->hclk);
 
 	return 0;

@@ -35,7 +35,7 @@ struct sdw_transport_data {
 	int sub_block_offset;
 };
 
-static void sdw_compute_slave_ports(struct sdw_master_runtime *m_rt,
+static void sdw_compute_slave_ports(struct sdw_manager_runtime *m_rt,
 				    struct sdw_transport_data *t_data)
 {
 	struct sdw_slave_runtime *s_rt = NULL;
@@ -86,9 +86,9 @@ static void sdw_compute_slave_ports(struct sdw_master_runtime *m_rt,
 	}
 }
 
-static void sdw_compute_master_ports(struct sdw_master_runtime *m_rt,
-				     struct sdw_group_params *params,
-				     int port_bo, int hstop)
+static void sdw_compute_manager_ports(struct sdw_manager_runtime *m_rt,
+				      struct sdw_group_params *params,
+				      int port_bo, int hstop)
 {
 	struct sdw_transport_data t_data = {0};
 	struct sdw_port_runtime *p_rt;
@@ -142,7 +142,7 @@ static void sdw_compute_master_ports(struct sdw_master_runtime *m_rt,
 static void _sdw_compute_port_params(struct sdw_bus *bus,
 				     struct sdw_group_params *params, int count)
 {
-	struct sdw_master_runtime *m_rt;
+	struct sdw_manager_runtime *m_rt;
 	int hstop = bus->params.col - 1;
 	int block_offset, port_bo, i;
 
@@ -152,8 +152,8 @@ static void _sdw_compute_port_params(struct sdw_bus *bus,
 		block_offset = 1;
 
 		list_for_each_entry(m_rt, &bus->m_rt_list, bus_node) {
-			sdw_compute_master_ports(m_rt, &params[i],
-						 port_bo, hstop);
+			sdw_compute_manager_ports(m_rt, &params[i],
+						  port_bo, hstop);
 
 			block_offset += m_rt->ch_count *
 					m_rt->stream->params.bps;
@@ -168,7 +168,7 @@ static int sdw_compute_group_params(struct sdw_bus *bus,
 				    struct sdw_group_params *params,
 				    int *rates, int count)
 {
-	struct sdw_master_runtime *m_rt;
+	struct sdw_manager_runtime *m_rt;
 	int sel_col = bus->params.col;
 	unsigned int rate, bps, ch;
 	int i, column_needed = 0;
@@ -238,7 +238,7 @@ static int sdw_add_element_group_count(struct sdw_group *group,
 static int sdw_get_group_count(struct sdw_bus *bus,
 			       struct sdw_group *group)
 {
-	struct sdw_master_runtime *m_rt;
+	struct sdw_manager_runtime *m_rt;
 	unsigned int rate;
 	int ret = 0;
 
@@ -251,7 +251,7 @@ static int sdw_get_group_count(struct sdw_bus *bus,
 	list_for_each_entry(m_rt, &bus->m_rt_list, bus_node) {
 		rate = m_rt->stream->params.rate;
 		if (m_rt == list_first_entry(&bus->m_rt_list,
-					     struct sdw_master_runtime,
+					     struct sdw_manager_runtime,
 					     bus_node)) {
 			group->rates[group->count++] = rate;
 
@@ -309,7 +309,7 @@ out:
 
 static int sdw_select_row_col(struct sdw_bus *bus, int clk_freq)
 {
-	struct sdw_master_prop *prop = &bus->prop;
+	struct sdw_manager_prop *prop = &bus->prop;
 	int frame_int, frame_freq;
 	int r, c;
 
@@ -343,7 +343,7 @@ static int sdw_select_row_col(struct sdw_bus *bus, int clk_freq)
 static int sdw_compute_bus_params(struct sdw_bus *bus)
 {
 	unsigned int max_dr_freq, curr_dr_freq = 0;
-	struct sdw_master_prop *mstr_prop = &bus->prop;
+	struct sdw_manager_prop *mstr_prop = &bus->prop;
 	int i, clk_values, ret;
 	bool is_gear = false;
 	u32 *clk_buf;

@@ -24,7 +24,7 @@ static int sdw_get_id(struct sdw_bus *bus)
 }
 
 /**
- * sdw_bus_master_add() - add a bus Master instance
+ * sdw_bus_manager_add() - add a bus Manager instance
  * @bus: bus instance
  * @parent: parent device
  * @fwnode: firmware node handle
@@ -32,10 +32,10 @@ static int sdw_get_id(struct sdw_bus *bus)
  * Initializes the bus instance, read properties and create child
  * devices.
  */
-int sdw_bus_master_add(struct sdw_bus *bus, struct device *parent,
-		       struct fwnode_handle *fwnode)
+int sdw_bus_manager_add(struct sdw_bus *bus, struct device *parent,
+			struct fwnode_handle *fwnode)
 {
-	struct sdw_master_prop *prop = NULL;
+	struct sdw_manager_prop *prop = NULL;
 	int ret;
 
 	if (!parent) {
@@ -49,9 +49,9 @@ int sdw_bus_master_add(struct sdw_bus *bus, struct device *parent,
 		return ret;
 	}
 
-	ret = sdw_master_device_add(bus, parent, fwnode);
+	ret = sdw_manager_device_add(bus, parent, fwnode);
 	if (ret < 0) {
-		dev_err(parent, "Failed to add master device at link %d\n",
+		dev_err(parent, "Failed to add manager device at link %d\n",
 			bus->link_id);
 		return ret;
 	}
@@ -91,7 +91,7 @@ int sdw_bus_master_add(struct sdw_bus *bus, struct device *parent,
 	/*
 	 * Device numbers in SoundWire are 0 through 15. Enumeration device
 	 * number (0), Broadcast device number (15), Group numbers (12 and
-	 * 13) and Master device number (14) are not used for assignment so
+	 * 13) and Manager device number (14) are not used for assignment so
 	 * mask these and other higher bits.
 	 */
 
@@ -102,10 +102,10 @@ int sdw_bus_master_add(struct sdw_bus *bus, struct device *parent,
 	set_bit(SDW_ENUM_DEV_NUM, bus->assigned);
 	set_bit(SDW_BROADCAST_DEV_NUM, bus->assigned);
 
-	/* Set group device numbers and master device number */
+	/* Set group device numbers and manager device number */
 	set_bit(SDW_GROUP12_DEV_NUM, bus->assigned);
 	set_bit(SDW_GROUP13_DEV_NUM, bus->assigned);
-	set_bit(SDW_MASTER_DEV_NUM, bus->assigned);
+	set_bit(SDW_MANAGER_DEV_NUM, bus->assigned);
 
 	/*
 	 * SDW is an enumerable bus, but devices can be powered off. So,
@@ -127,7 +127,7 @@ int sdw_bus_master_add(struct sdw_bus *bus, struct device *parent,
 	}
 
 	/*
-	 * Initialize clock values based on Master properties. The max
+	 * Initialize clock values based on Manager properties. The max
 	 * frequency is read from max_clk_freq property. Current assumption
 	 * is that the bus will start at highest clock frequency when
 	 * powered on.
@@ -143,7 +143,7 @@ int sdw_bus_master_add(struct sdw_bus *bus, struct device *parent,
 
 	return 0;
 }
-EXPORT_SYMBOL(sdw_bus_master_add);
+EXPORT_SYMBOL(sdw_bus_manager_add);
 
 static int sdw_delete_slave(struct device *dev, void *data)
 {
@@ -167,20 +167,20 @@ static int sdw_delete_slave(struct device *dev, void *data)
 }
 
 /**
- * sdw_bus_master_delete() - delete the bus master instance
+ * sdw_bus_manager_delete() - delete the bus manager instance
  * @bus: bus to be deleted
  *
  * Remove the instance, delete the child devices.
  */
-void sdw_bus_master_delete(struct sdw_bus *bus)
+void sdw_bus_manager_delete(struct sdw_bus *bus)
 {
 	device_for_each_child(bus->dev, NULL, sdw_delete_slave);
-	sdw_master_device_del(bus);
+	sdw_manager_device_del(bus);
 
 	sdw_bus_debugfs_exit(bus);
 	ida_free(&sdw_ida, bus->id);
 }
-EXPORT_SYMBOL(sdw_bus_master_delete);
+EXPORT_SYMBOL(sdw_bus_manager_delete);
 
 /*
  * SDW IO Calls
@@ -1266,7 +1266,7 @@ static int sdw_initialize_slave(struct sdw_slave *slave)
 	if (ret < 0)
 		return ret;
 
-	if (slave->bus->prop.quirks & SDW_MASTER_QUIRKS_CLEAR_INITIAL_CLASH) {
+	if (slave->bus->prop.quirks & SDW_MANAGER_QUIRKS_CLEAR_INITIAL_CLASH) {
 		/* Clear bus clash interrupt before enabling interrupt mask */
 		status = sdw_read_no_pm(slave, SDW_SCP_INT1);
 		if (status < 0) {
@@ -1284,7 +1284,7 @@ static int sdw_initialize_slave(struct sdw_slave *slave)
 			}
 		}
 	}
-	if ((slave->bus->prop.quirks & SDW_MASTER_QUIRKS_CLEAR_INITIAL_PARITY) &&
+	if ((slave->bus->prop.quirks & SDW_MANAGER_QUIRKS_CLEAR_INITIAL_PARITY) &&
 	    !(slave->prop.quirks & SDW_SLAVE_QUIRKS_INVALID_INITIAL_PARITY)) {
 		/* Clear parity interrupt before enabling interrupt mask */
 		status = sdw_read_no_pm(slave, SDW_SCP_INT1);
