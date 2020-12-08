@@ -1463,6 +1463,8 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 	bool parity_check;
 	bool parity_quirk;
 
+	dev_dbg(&slave->dev, "%s: start\n", __func__);
+
 	sdw_modify_slave_status(slave, SDW_SLAVE_ALERT);
 
 	ret = pm_runtime_get_sync(&slave->dev);
@@ -1499,6 +1501,8 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 	}
 
 	do {
+		dev_dbg(&slave->dev, "Interrupt loop count: %d\n", count);
+
 		slave_notify = false;
 
 		/*
@@ -1510,12 +1514,20 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 			parity_quirk = !slave->first_interrupt_done &&
 				(slave->prop.quirks & SDW_SLAVE_QUIRKS_INVALID_INITIAL_PARITY);
 
+			dev_dbg(&slave->dev,
+				"Parity: SDW_SCP_INT1 0x%02x INT1_MASK 0x%02x first_interrupt_done %d\n",
+				buf, slave->prop.scp_int1_mask, slave->first_interrupt_done);
+
 			if (parity_check && !parity_quirk)
 				dev_err(&slave->dev, "Parity error detected\n");
 			clear |= SDW_SCP_INT1_PARITY;
 		}
 
 		if (buf & SDW_SCP_INT1_BUS_CLASH) {
+			dev_dbg(&slave->dev,
+				"Bus Clash: SDW_SCP_INT1 0x%02x INT1_MASK 0x%02x first_interrupt_done %d\n",
+				buf, slave->prop.scp_int1_mask, slave->first_interrupt_done);
+
 			if (slave->prop.scp_int1_mask & SDW_SCP_INT1_BUS_CLASH)
 				dev_err(&slave->dev, "Bus clash detected\n");
 			clear |= SDW_SCP_INT1_BUS_CLASH;
@@ -1529,6 +1541,10 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 		 */
 
 		if (buf & SDW_SCP_INT1_IMPL_DEF) {
+			dev_dbg(&slave->dev,
+				"Imp-def interrupt: SDW_SCP_INT1 0x%02x INT1_MASK 0x%02x first_interrupt_done %d\n",
+				buf, slave->prop.scp_int1_mask, slave->first_interrupt_done);
+
 			if (slave->prop.scp_int1_mask & SDW_SCP_INT1_IMPL_DEF) {
 				dev_dbg(&slave->dev, "Slave impl defined interrupt\n");
 				slave_notify = true;
@@ -1594,7 +1610,10 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 		}
 
 		/* at this point all initial interrupt sources were handled */
-		slave->first_interrupt_done = true;
+		if (!slave->first_interrupt_done) {
+			slave->first_interrupt_done = true;
+			dev_dbg(&slave->dev, "first_interrupt_done set to true\n");
+		}
 
 		/*
 		 * Read status again to ensure no new interrupts arrived
@@ -1649,6 +1668,8 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 io_err:
 	pm_runtime_mark_last_busy(&slave->dev);
 	pm_runtime_put_autosuspend(&slave->dev);
+
+	dev_dbg(&slave->dev, "%s: done\n", __func__);
 
 	return ret;
 }
@@ -1830,6 +1851,7 @@ void sdw_clear_slave_status(struct sdw_bus *bus, u32 request)
 		if (slave->status != SDW_SLAVE_UNATTACHED) {
 			sdw_modify_slave_status(slave, SDW_SLAVE_UNATTACHED);
 			slave->first_interrupt_done = false;
+			dev_dbg(&slave->dev, "first_interrupt_done set to false\n");
 		}
 
 		/* keep track of request, used in pm_runtime resume */
