@@ -3,13 +3,13 @@
 
 /*
  * MIPI Discovery And Configuration (DisCo) Specification for SoundWire
- * specifies properties to be implemented for SoundWire Masters and Slaves.
+ * specifies properties to be implemented for SoundWire Managers and Slaves.
  * The DisCo spec doesn't mandate these properties. However, SDW bus cannot
  * work without knowing these values.
  *
- * The helper functions read the Master and Slave properties. Implementers
- * of Master or Slave drivers can use any of the below three mechanisms:
- *    a) Use these APIs here as .read_prop() callback for Master and Slave
+ * The helper functions read the Manager and Slave properties. Implementers
+ * of Manager or Slave drivers can use any of the below three mechanisms:
+ *    a) Use these APIs here as .read_prop() callback for Manager and Slave
  *    b) Implement own methods and set those as .read_prop(), but invoke
  *    APIs in this file for generic read and override the values with
  *    platform specific data
@@ -24,12 +24,12 @@
 #include "bus.h"
 
 /**
- * sdw_master_read_prop() - Read Master properties
+ * sdw_manager_read_prop() - Read Manager properties
  * @bus: SDW bus instance
  */
-int sdw_master_read_prop(struct sdw_bus *bus)
+int sdw_manager_read_prop(struct sdw_bus *bus)
 {
-	struct sdw_master_prop *prop = &bus->prop;
+	struct sdw_manager_prop *prop = &bus->prop;
 	struct fwnode_handle *link;
 	char name[32];
 	int nval, i;
@@ -38,13 +38,13 @@ int sdw_master_read_prop(struct sdw_bus *bus)
 				 "mipi-sdw-sw-interface-revision",
 				 &prop->revision);
 
-	/* Find master handle */
+	/* Find manager handle */
 	snprintf(name, sizeof(name),
 		 "mipi-sdw-link-%d-subproperties", bus->link_id);
 
 	link = device_get_named_child_node(bus->dev, name);
 	if (!link) {
-		dev_err(bus->dev, "Master node %s not found\n", name);
+		dev_err(bus->dev, "Manager node %s not found\n", name);
 		return -EIO;
 	}
 
@@ -118,7 +118,7 @@ int sdw_master_read_prop(struct sdw_bus *bus)
 
 	return 0;
 }
-EXPORT_SYMBOL(sdw_master_read_prop);
+EXPORT_SYMBOL(sdw_manager_read_prop);
 
 static int sdw_slave_read_dp0(struct sdw_slave *slave,
 			      struct fwnode_handle *port,
@@ -332,7 +332,7 @@ int sdw_slave_read_prop(struct sdw_slave *slave)
 			"mipi-sdw-port15-read-behavior", &prop->p15_behave);
 
 	device_property_read_u32(dev, "mipi-sdw-master-count",
-				 &prop->master_count);
+				 &prop->manager_count);
 
 	device_property_read_u32(dev, "mipi-sdw-source-port-list",
 				 &prop->source_ports);

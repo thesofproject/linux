@@ -15,7 +15,7 @@
 #include <linux/auxiliary_bus.h>
 #include <linux/pm_runtime.h>
 #include <linux/soundwire/sdw_intel.h>
-#include "cadence_master.h"
+#include "cadence_manager.h"
 #include "intel.h"
 
 static void intel_link_dev_release(struct device *dev)
@@ -311,7 +311,7 @@ sdw_intel_startup_controller(struct sdw_intel_ctx *ctx)
 	/* Check HW supported vs property value */
 	if (caps < ctx->count) {
 		dev_err(&adev->dev,
-			"BIOS master count is larger than hardware capabilities\n");
+			"BIOS manager count is larger than hardware capabilities\n");
 		return -EINVAL;
 	}
 
@@ -320,7 +320,7 @@ sdw_intel_startup_controller(struct sdw_intel_ctx *ctx)
 
 	link_mask = ctx->link_mask;
 
-	/* Startup SDW Master devices */
+	/* Startup SDW Manager devices */
 	for (i = 0; i < ctx->count; i++) {
 		if (!(link_mask & BIT(i)))
 			continue;
@@ -347,8 +347,8 @@ sdw_intel_startup_controller(struct sdw_intel_ctx *ctx)
  * sdw_intel_probe() - SoundWire Intel probe routine
  * @res: resource data
  *
- * This registers an auxiliary device for each Master handled by the controller,
- * and SoundWire Master and Slave devices will be created by the auxiliary
+ * This registers an auxiliary device for each link handled by the controller,
+ * and SoundWire Manager and Slave devices will be created by the auxiliary
  * device probe. All the information necessary is stored in the context, and
  * the res argument pointer can be freed after this step.
  * This function will be called after sdw_intel_acpi_scan() by SOF probe.
@@ -398,7 +398,7 @@ void sdw_intel_process_wakeen_event(struct sdw_intel_ctx *ctx)
 
 	link_mask = ctx->link_mask;
 
-	/* Startup SDW Master devices */
+	/* Startup SDW Manager devices */
 	for (i = 0; i < ctx->count; i++) {
 		if (!(link_mask & BIT(i)))
 			continue;

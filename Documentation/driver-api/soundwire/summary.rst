@@ -20,7 +20,7 @@ Broad level key features of SoundWire interface include:
  (3) Clock scaling and optional multiple data lanes to give wide flexibility
      in data rate to match system requirements.
 
- (4) Device status monitoring, including interrupt-style alerts to the Master.
+ (4) Device status monitoring, including interrupt-style alerts to the Manager.
 
 The SoundWire protocol supports up to eleven Slave interfaces. All the
 interfaces share the common Bus containing data and clock line. Each of the
@@ -32,12 +32,12 @@ direction is enabled by the specification).  Bandwidth restrictions to
 ~19.2..24.576Mbits/s don't however allow for 11*13*8 channels to be
 transmitted simultaneously.
 
-Below figure shows an example of connectivity between a SoundWire Master and
+Below figure shows an example of connectivity between a SoundWire Manager and
 two Slave devices. ::
 
         +---------------+                                       +---------------+
         |               |                       Clock Signal    |               |
-        |    Master     |-------+-------------------------------|    Slave      |
+        |    Manager     |-------+-------------------------------|    Slave      |
         |   Interface   |       |               Data Signal     |  Interface 1  |
         |               |-------|-------+-----------------------|               |
         +---------------+       |       |                       +---------------+
@@ -55,7 +55,7 @@ two Slave devices. ::
 Terminology
 ===========
 
-The MIPI SoundWire specification uses the term 'device' to refer to a Master
+The MIPI SoundWire specification uses the term 'device' to refer to a Manager
 or Slave interface, which of course can be confusing. In this summary and
 code we use the term interface only to refer to the hardware. We follow the
 Linux device model by mapping each Slave interface connected on the bus as a
@@ -75,37 +75,37 @@ can register to a Bus instance.
 
 Slave driver:
 Driver controlling the Slave device. MIPI-specified registers are controlled
-directly by the Bus (and transmitted through the Master driver/interface).
+directly by the Bus (and transmitted through the Manager driver/interface).
 Any implementation-defined Slave register is controlled by Slave driver. In
 practice, it is expected that the Slave driver relies on regmap and does not
 request direct register access.
 
-Programming interfaces (SoundWire Master interface Driver)
+Programming interfaces (SoundWire Manager interface Driver)
 ==========================================================
 
-SoundWire Bus supports programming interfaces for the SoundWire Master
+SoundWire Bus supports programming interfaces for the SoundWire Manager
 implementation and SoundWire Slave devices. All the code uses the "sdw"
 prefix commonly used by SoC designers and 3rd party vendors.
 
-Each of the SoundWire Master interfaces needs to be registered to the Bus.
-Bus implements API to read standard Master MIPI properties and also provides
-callback in Master ops for Master driver to implement its own functions that
+Each of the SoundWire Manager interfaces needs to be registered to the Bus.
+Bus implements API to read standard Manager MIPI properties and also provides
+callback in Manager ops for Manager driver to implement its own functions that
 provides capabilities information. DT support is not implemented at this
 time but should be trivial to add since capabilities are enabled with the
 ``device_property_`` API.
 
-The Master interface along with the Master interface capabilities are
+The Manager interface along with the Manager interface capabilities are
 registered based on board file, DT or ACPI.
 
 Following is the Bus API to register the SoundWire Bus:
 
 .. code-block:: c
 
-	int sdw_bus_master_add(struct sdw_bus *bus,
+	int sdw_bus_manager_add(struct sdw_bus *bus,
 				struct device *parent,
 				struct fwnode_handle)
 	{
-		sdw_master_device_add(bus, parent, fwnode);
+		sdw_manager_device_add(bus, parent, fwnode);
 
 		mutex_init(&bus->lock);
 		INIT_LIST_HEAD(&bus->slaves);
@@ -119,20 +119,20 @@ Following is the Bus API to register the SoundWire Bus:
 		return 0;
 	}
 
-This will initialize sdw_bus object for Master device. "sdw_master_ops" and
-"sdw_master_port_ops" callback functions are provided to the Bus.
+This will initialize sdw_bus object for Manager device. "sdw_manager_ops" and
+"sdw_manager_port_ops" callback functions are provided to the Bus.
 
-"sdw_master_ops" is used by Bus to control the Bus in the hardware specific
+"sdw_manager_ops" is used by Bus to control the Bus in the hardware specific
 way. It includes Bus control functions such as sending the SoundWire
 read/write messages on Bus, setting up clock frequency & Stream
-Synchronization Point (SSP). The "sdw_master_ops" structure abstracts the
-hardware details of the Master from the Bus.
+Synchronization Point (SSP). The "sdw_manager_ops" structure abstracts the
+hardware details of the Manager from the Bus.
 
-"sdw_master_port_ops" is used by Bus to setup the Port parameters of the
-Master interface Port. Master interface Port register map is not defined by
-MIPI specification, so Bus calls the "sdw_master_port_ops" callback
+"sdw_manager_port_ops" is used by Bus to setup the Port parameters of the
+Manager interface Port. Manager interface Port register map is not defined by
+MIPI specification, so Bus calls the "sdw_manager_port_ops" callback
 function to do Port operations like "Port Prepare", "Port Transport params
-set", "Port enable and disable". The implementation of the Master driver can
+set", "Port enable and disable". The implementation of the Manager driver can
 then perform hardware-specific configurations.
 
 Programming interfaces (SoundWire Slave Driver)
@@ -146,13 +146,13 @@ currently unused. Slave driver is written for a specific vendor and part
 identifier, Bus enumerates the Slave device based on these two ids.
 Slave device and driver match is done based on these two ids . Probe
 of the Slave driver is called by Bus on successful match between device and
-driver id. A parent/child relationship is enforced between Master and Slave
+driver id. A parent/child relationship is enforced between Manager and Slave
 devices (the logical representation is aligned with the physical
 connectivity).
 
-The information on Master/Slave dependencies is stored in platform data,
+The information on Manager/Slave dependencies is stored in platform data,
 board-file, ACPI or DT. The MIPI Software specification defines additional
-link_id parameters for controllers that have multiple Master interfaces. The
+link_id parameters for controllers that have multiple Manager interfaces. The
 dev_id registers are only unique in the scope of a link, and the link_id
 unique in the scope of a controller. Both dev_id and link_id are not
 necessarily unique at the system level but the parent/child information is

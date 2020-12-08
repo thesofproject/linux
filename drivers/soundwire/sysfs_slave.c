@@ -37,7 +37,7 @@
  *		|---- paging_support
  *		|---- bank_delay_support
  *		|---- p15_behave
- *		|---- master_count
+ *		|---- manager_count
  *		|---- source_ports
  *		|---- sink_ports
  *	|---- dp0
@@ -88,7 +88,7 @@ sdw_slave_attr(high_PHY_capable, "%d\n");
 sdw_slave_attr(paging_support, "%d\n");
 sdw_slave_attr(bank_delay_support, "%d\n");
 sdw_slave_attr(p15_behave, "%d\n");
-sdw_slave_attr(master_count, "%d\n");
+sdw_slave_attr(manager_count, "%d\n");
 sdw_slave_attr(source_ports, "0x%x\n");
 sdw_slave_attr(sink_ports, "0x%x\n");
 
@@ -120,7 +120,7 @@ static struct attribute *slave_dev_attrs[] = {
 	&dev_attr_paging_support.attr,
 	&dev_attr_bank_delay_support.attr,
 	&dev_attr_p15_behave.attr,
-	&dev_attr_master_count.attr,
+	&dev_attr_manager_count.attr,
 	&dev_attr_source_ports.attr,
 	&dev_attr_sink_ports.attr,
 	NULL,

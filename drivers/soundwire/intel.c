@@ -2,7 +2,7 @@
 // Copyright(c) 2015-17 Intel Corporation.
 
 /*
- * Soundwire Intel Master Driver
+ * Soundwire Intel Manager Driver
  */
 
 #include <linux/acpi.h>
@@ -18,31 +18,31 @@
 #include <linux/soundwire/sdw_registers.h>
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_intel.h>
-#include "cadence_master.h"
+#include "cadence_manager.h"
 #include "bus.h"
 #include "intel.h"
 
 /* IDA min selected to avoid conflicts with HDaudio/iDISP SDI values */
 #define INTEL_DEV_NUM_IDA_MIN           4
 
-#define INTEL_MASTER_SUSPEND_DELAY_MS	3000
-#define INTEL_MASTER_RESET_ITERATIONS	10
+#define INTEL_MANAGER_SUSPEND_DELAY_MS	3000
+#define INTEL_MANAGER_RESET_ITERATIONS	10
 
 /*
- * debug/config flags for the Intel SoundWire Master.
+ * debug/config flags for the Intel SoundWire Manager.
  *
- * Since we may have multiple masters active, we can have up to 8
- * flags reused in each byte, with master0 using the ls-byte, etc.
+ * Since we may have multiple managers active, we can have up to 8
+ * flags reused in each byte, with manager0 using the ls-byte, etc.
  */
 
-#define SDW_INTEL_MASTER_DISABLE_PM_RUNTIME		BIT(0)
-#define SDW_INTEL_MASTER_DISABLE_CLOCK_STOP		BIT(1)
-#define SDW_INTEL_MASTER_DISABLE_PM_RUNTIME_IDLE	BIT(2)
-#define SDW_INTEL_MASTER_DISABLE_MULTI_LINK		BIT(3)
+#define SDW_INTEL_MANAGER_DISABLE_PM_RUNTIME		BIT(0)
+#define SDW_INTEL_MANAGER_DISABLE_CLOCK_STOP		BIT(1)
+#define SDW_INTEL_MANAGER_DISABLE_PM_RUNTIME_IDLE	BIT(2)
+#define SDW_INTEL_MANAGER_DISABLE_MULTI_LINK		BIT(3)
 
 static int md_flags;
 module_param_named(sdw_md_flags, md_flags, int, 0444);
-MODULE_PARM_DESC(sdw_md_flags, "SoundWire Intel Master device flags (0x0 all off)");
+MODULE_PARM_DESC(sdw_md_flags, "SoundWire Intel Manager device flags (0x0 all off)");
 
 enum intel_pdi_type {
 	INTEL_PDI_IN = 0,
@@ -162,7 +162,7 @@ static int intel_reg_show(struct seq_file *s_file, void *data)
 		/*
 		 * the value 10 is the number of PDIs. We will need a
 		 * cleanup to remove hard-coded Intel configurations
-		 * from cadence_master.c
+		 * from cadence_manager.c
 		 */
 		for (j = 0; j < 10; j++) {
 			ret += intel_sprintf(s, false, buf, ret,
@@ -268,7 +268,7 @@ static int intel_link_power_up(struct sdw_intel *sdw)
 	void __iomem *shim = sdw->link_res->shim;
 	u32 *shim_mask = sdw->link_res->shim_mask;
 	struct sdw_bus *bus = &sdw->cdns.bus;
-	struct sdw_master_prop *prop = &bus->prop;
+	struct sdw_manager_prop *prop = &bus->prop;
 	u32 spa_mask, cpa_mask;
 	u32 link_control;
 	int ret = 0;
@@ -342,7 +342,7 @@ out:
 }
 
 /* this needs to be called with shim_lock */
-static void intel_shim_glue_to_master_ip(struct sdw_intel *sdw)
+static void intel_shim_glue_to_manager_ip(struct sdw_intel *sdw)
 {
 	void __iomem *shim = sdw->link_res->shim;
 	unsigned int link_id = sdw->instance;
@@ -368,11 +368,11 @@ static void intel_shim_glue_to_master_ip(struct sdw_intel *sdw)
 	intel_writew(shim, SDW_SHIM_IOCTL(link_id), ioctl);
 	usleep_range(10, 15);
 
-	/* at this point Master IP has full control of the I/Os */
+	/* at this point Manager IP has full control of the I/Os */
 }
 
 /* this needs to be called with shim_lock */
-static void intel_shim_master_ip_to_glue(struct sdw_intel *sdw)
+static void intel_shim_manager_ip_to_glue(struct sdw_intel *sdw)
 {
 	unsigned int link_id = sdw->instance;
 	void __iomem *shim = sdw->link_res->shim;
@@ -418,7 +418,7 @@ static int intel_shim_init(struct sdw_intel *sdw, bool clock_stop)
 	intel_writew(shim, SDW_SHIM_IOCTL(link_id), ioctl);
 	usleep_range(10, 15);
 
-	intel_shim_glue_to_master_ip(sdw);
+	intel_shim_glue_to_manager_ip(sdw);
 
 	u16p_replace_bits(&act, 0x1, SDW_SHIM_CTMCTL_DOAIS);
 	act |= SDW_SHIM_CTMCTL_DACTQE;
@@ -473,7 +473,7 @@ static int intel_link_power_down(struct sdw_intel *sdw)
 
 	sdw->cdns.link_up = false;
 
-	intel_shim_master_ip_to_glue(sdw);
+	intel_shim_manager_ip_to_glue(sdw);
 
 	*shim_mask &= ~BIT(link_id);
 
@@ -532,8 +532,8 @@ static int intel_shim_sync_go_unlocked(struct sdw_intel *sdw)
 
 	/*
 	 * Set SyncGO bit to synchronously trigger a bank switch for
-	 * all the masters. A write to SYNCGO bit clears CMDSYNC bit for all
-	 * the Masters.
+	 * all the managers. A write to SYNCGO bit clears CMDSYNC bit for all
+	 * the Managers.
 	 */
 	sync_reg |= SDW_SHIM_SYNC_SYNCGO;
 
@@ -771,11 +771,11 @@ static int intel_post_bank_switch(struct sdw_bus *bus)
 
 	/*
 	 * post_bank_switch() ops is called from the bus in loop for
-	 * all the Masters in the steam with the expectation that
-	 * we trigger the bankswitch for the only first Master in the list
-	 * and do nothing for the other Masters
+	 * all the Managers in the steam with the expectation that
+	 * we trigger the bankswitch for the only first Manager in the list
+	 * and do nothing for the other Managers
 	 *
-	 * So, set the SYNCGO bit only if CMDSYNC bit is set for any Master.
+	 * So, set the SYNCGO bit only if CMDSYNC bit is set for any Manager.
 	 */
 	if (!(sync_reg & SDW_SHIM_SYNC_CMDSYNC_MASK)) {
 		ret = 0;
@@ -877,10 +877,10 @@ static int intel_hw_params(struct snd_pcm_substream *substream,
 	pconfig->num = pdi->num;
 	pconfig->ch_mask = (1 << ch) - 1;
 
-	ret = sdw_stream_add_master(&cdns->bus, &sconfig,
-				    pconfig, 1, dma->stream);
+	ret = sdw_stream_add_manager(&cdns->bus, &sconfig,
+				     pconfig, 1, dma->stream);
 	if (ret)
-		dev_err(cdns->dev, "add master to stream failed:%d\n", ret);
+		dev_err(cdns->dev, "add manager to stream failed:%d\n", ret);
 
 	kfree(pconfig);
 error:
@@ -949,13 +949,13 @@ intel_hw_free(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
 
 	/*
 	 * The sdw stream state will transition to RELEASED when stream->
-	 * master_list is empty. So the stream state will transition to
+	 * manager_list is empty. So the stream state will transition to
 	 * DEPREPARED for the first cpu-dai and to RELEASED for the last
 	 * cpu-dai.
 	 */
-	ret = sdw_stream_remove_master(&cdns->bus, dma->stream);
+	ret = sdw_stream_remove_manager(&cdns->bus, dma->stream);
 	if (ret < 0) {
-		dev_err(dai->dev, "remove master from stream %s failed: %d\n",
+		dev_err(dai->dev, "remove manager from stream %s failed: %d\n",
 			dma->stream->name, ret);
 		return ret;
 	}
@@ -1206,20 +1206,20 @@ static int intel_register_dai(struct sdw_intel *sdw)
 					  dais, num_dai);
 }
 
-static int sdw_master_read_intel_prop(struct sdw_bus *bus)
+static int sdw_manager_read_intel_prop(struct sdw_bus *bus)
 {
-	struct sdw_master_prop *prop = &bus->prop;
+	struct sdw_manager_prop *prop = &bus->prop;
 	struct fwnode_handle *link;
 	char name[32];
 	u32 quirk_mask;
 
-	/* Find master handle */
+	/* Find manager handle */
 	snprintf(name, sizeof(name),
 		 "mipi-sdw-link-%d-subproperties", bus->link_id);
 
 	link = device_get_named_child_node(bus->dev, name);
 	if (!link) {
-		dev_err(bus->dev, "Master node %s not found\n", name);
+		dev_err(bus->dev, "Manager node %s not found\n", name);
 		return -EIO;
 	}
 
@@ -1237,8 +1237,8 @@ static int sdw_master_read_intel_prop(struct sdw_bus *bus)
 	if (quirk_mask & SDW_INTEL_QUIRK_MASK_BUS_DISABLE)
 		prop->hw_disabled = true;
 
-	prop->quirks = SDW_MASTER_QUIRKS_CLEAR_INITIAL_CLASH |
-		SDW_MASTER_QUIRKS_CLEAR_INITIAL_PARITY;
+	prop->quirks = SDW_MANAGER_QUIRKS_CLEAR_INITIAL_CLASH |
+		SDW_MANAGER_QUIRKS_CLEAR_INITIAL_PARITY;
 
 	return 0;
 }
@@ -1246,16 +1246,16 @@ static int sdw_master_read_intel_prop(struct sdw_bus *bus)
 static int intel_prop_read(struct sdw_bus *bus)
 {
 	/* Initialize with default handler to read all DisCo properties */
-	sdw_master_read_prop(bus);
+	sdw_manager_read_prop(bus);
 
 	/* read Intel-specific properties */
-	sdw_master_read_intel_prop(bus);
+	sdw_manager_read_intel_prop(bus);
 
 	return 0;
 }
 
-static struct sdw_master_ops sdw_intel_ops = {
-	.read_prop = sdw_master_read_prop,
+static struct sdw_manager_ops sdw_intel_ops = {
+	.read_prop = sdw_manager_read_prop,
 	.override_adr = sdw_dmi_override_adr,
 	.xfer_msg = cdns_xfer_msg,
 	.xfer_msg_defer = cdns_xfer_msg_defer,
@@ -1284,7 +1284,6 @@ static int intel_init(struct sdw_intel *sdw)
  */
 static int intel_link_probe(struct auxiliary_device *auxdev,
 			    const struct auxiliary_device_id *aux_dev_id)
-
 {
 	struct device *dev = &auxdev->dev;
 	struct sdw_intel_link_dev *ldev = auxiliary_dev_to_sdw_intel_link_dev(auxdev);
@@ -1325,15 +1324,15 @@ static int intel_link_probe(struct auxiliary_device *auxdev,
 	/* avoid resuming from pm_runtime suspend if it's not required */
 	dev_pm_set_driver_flags(dev, DPM_FLAG_SMART_SUSPEND);
 
-	ret = sdw_bus_master_add(bus, dev, dev->fwnode);
+	ret = sdw_bus_manager_add(bus, dev, dev->fwnode);
 	if (ret) {
-		dev_err(dev, "sdw_bus_master_add fail: %d\n", ret);
+		dev_err(dev, "sdw_bus_manager_add fail: %d\n", ret);
 		return ret;
 	}
 
 	if (bus->prop.hw_disabled)
 		dev_info(dev,
-			 "SoundWire master %d is disabled, will be ignored\n",
+			 "SoundWire manager %d is disabled, will be ignored\n",
 			 bus->link_id);
 	/*
 	 * Ignore BIOS err_threshold, it's a really bad idea when dealing
@@ -1358,13 +1357,13 @@ int intel_link_startup(struct auxiliary_device *auxdev)
 
 	if (bus->prop.hw_disabled) {
 		dev_info(dev,
-			 "SoundWire master %d is disabled, ignoring\n",
+			 "SoundWire manager %d is disabled, ignoring\n",
 			 sdw->instance);
 		return 0;
 	}
 
 	link_flags = md_flags >> (bus->link_id * 8);
-	multi_link = !(link_flags & SDW_INTEL_MASTER_DISABLE_MULTI_LINK);
+	multi_link = !(link_flags & SDW_INTEL_MANAGER_DISABLE_MULTI_LINK);
 	if (!multi_link) {
 		dev_dbg(dev, "Multi-link is disabled\n");
 		bus->multi_link = false;
@@ -1372,7 +1371,7 @@ int intel_link_startup(struct auxiliary_device *auxdev)
 		/*
 		 * hardware-based synchronization is required regardless
 		 * of the number of segments used by a stream: SSP-based
-		 * synchronization is gated by gsync when the multi-master
+		 * synchronization is gated by gsync when the multi-manager
 		 * mode is set.
 		 */
 		bus->multi_link = true;
@@ -1425,7 +1424,7 @@ int intel_link_startup(struct auxiliary_device *auxdev)
 		}
 	}
 	sdw_cdns_check_self_clearing_bits(cdns, __func__,
-					  true, INTEL_MASTER_RESET_ITERATIONS);
+					  true, INTEL_MANAGER_RESET_ITERATIONS);
 
 	/* Register DAIs */
 	ret = intel_register_dai(sdw);
@@ -1438,9 +1437,9 @@ int intel_link_startup(struct auxiliary_device *auxdev)
 	intel_debugfs_init(sdw);
 
 	/* Enable runtime PM */
-	if (!(link_flags & SDW_INTEL_MASTER_DISABLE_PM_RUNTIME)) {
+	if (!(link_flags & SDW_INTEL_MANAGER_DISABLE_PM_RUNTIME)) {
 		pm_runtime_set_autosuspend_delay(dev,
-						 INTEL_MASTER_SUSPEND_DELAY_MS);
+						 INTEL_MANAGER_SUSPEND_DELAY_MS);
 		pm_runtime_use_autosuspend(dev);
 		pm_runtime_mark_last_busy(dev);
 
@@ -1466,16 +1465,16 @@ int intel_link_startup(struct auxiliary_device *auxdev)
 	 * The runtime PM status of Slave devices is "Unsupported"
 	 * until they report as ATTACHED. If they don't, e.g. because
 	 * there are no Slave devices populated or if the power-on is
-	 * delayed or dependent on a power switch, the Master will
+	 * delayed or dependent on a power switch, the Manager will
 	 * remain active and prevent its parent from suspending.
 	 *
 	 * Conditionally force the pm_runtime core to re-evaluate the
-	 * Master status in the absence of any Slave activity. A quirk
+	 * Manager status in the absence of any Slave activity. A quirk
 	 * is provided to e.g. deal with Slaves that may be powered on
 	 * with a delay. A more complete solution would require the
-	 * definition of Master properties.
+	 * definition of Manager properties.
 	 */
-	if (!(link_flags & SDW_INTEL_MASTER_DISABLE_PM_RUNTIME_IDLE))
+	if (!(link_flags & SDW_INTEL_MANAGER_DISABLE_PM_RUNTIME_IDLE))
 		pm_runtime_idle(dev);
 
 	sdw->startup_done = true;
@@ -1504,7 +1503,8 @@ static void intel_link_remove(struct auxiliary_device *auxdev)
 		sdw_cdns_enable_interrupt(cdns, false);
 		snd_soc_unregister_component(dev);
 	}
-	sdw_bus_master_delete(bus);
+
+	sdw_bus_manager_delete(bus);
 }
 
 int intel_link_process_wakeen_event(struct auxiliary_device *auxdev)
@@ -1519,7 +1519,7 @@ int intel_link_process_wakeen_event(struct auxiliary_device *auxdev)
 	bus = &sdw->cdns.bus;
 
 	if (bus->prop.hw_disabled || !sdw->startup_done) {
-		dev_dbg(dev, "SoundWire master %d is disabled or not-started, ignoring\n",
+		dev_dbg(dev, "SoundWire manager %d is disabled or not-started, ignoring\n",
 			bus->link_id);
 		return 0;
 	}
@@ -1534,7 +1534,7 @@ int intel_link_process_wakeen_event(struct auxiliary_device *auxdev)
 	intel_shim_wake(sdw, false);
 
 	/*
-	 * resume the Master, which will generate a bus reset and result in
+	 * resume the Manager, which will generate a bus reset and result in
 	 * Slaves re-attaching and be re-enumerated. The SoundWire physical
 	 * device which generated the wake will trigger an interrupt, which
 	 * will in turn cause the corresponding Linux Slave device to be
@@ -1579,7 +1579,7 @@ static int __maybe_unused intel_pm_prepare(struct device *dev)
 	int ret;
 
 	if (bus->prop.hw_disabled || !sdw->startup_done) {
-		dev_dbg(dev, "SoundWire master %d is disabled or not-started, ignoring\n",
+		dev_dbg(dev, "SoundWire manager %d is disabled or not-started, ignoring\n",
 			bus->link_id);
 		return 0;
 	}
@@ -1639,7 +1639,7 @@ static int __maybe_unused intel_suspend(struct device *dev)
 	int ret;
 
 	if (bus->prop.hw_disabled || !sdw->startup_done) {
-		dev_dbg(dev, "SoundWire master %d is disabled or not-started, ignoring\n",
+		dev_dbg(dev, "SoundWire manager %d is disabled or not-started, ignoring\n",
 			bus->link_id);
 		return 0;
 	}
@@ -1692,7 +1692,7 @@ static int __maybe_unused intel_suspend_runtime(struct device *dev)
 	int ret;
 
 	if (bus->prop.hw_disabled || !sdw->startup_done) {
-		dev_dbg(dev, "SoundWire master %d is disabled or not-started, ignoring\n",
+		dev_dbg(dev, "SoundWire manager %d is disabled or not-started, ignoring\n",
 			bus->link_id);
 		return 0;
 	}
@@ -1757,13 +1757,13 @@ static int __maybe_unused intel_resume(struct device *dev)
 	int ret;
 
 	if (bus->prop.hw_disabled || !sdw->startup_done) {
-		dev_dbg(dev, "SoundWire master %d is disabled or not-started, ignoring\n",
+		dev_dbg(dev, "SoundWire manager %d is disabled or not-started, ignoring\n",
 			bus->link_id);
 		return 0;
 	}
 
 	link_flags = md_flags >> (bus->link_id * 8);
-	multi_link = !(link_flags & SDW_INTEL_MASTER_DISABLE_MULTI_LINK);
+	multi_link = !(link_flags & SDW_INTEL_MANAGER_DISABLE_MULTI_LINK);
 
 	if (pm_runtime_suspended(dev)) {
 		dev_dbg(dev, "pm_runtime status was suspended, forcing active\n");
@@ -1776,7 +1776,7 @@ static int __maybe_unused intel_resume(struct device *dev)
 
 		link_flags = md_flags >> (bus->link_id * 8);
 
-		if (!(link_flags & SDW_INTEL_MASTER_DISABLE_PM_RUNTIME_IDLE))
+		if (!(link_flags & SDW_INTEL_MANAGER_DISABLE_PM_RUNTIME_IDLE))
 			pm_runtime_idle(dev);
 	}
 
@@ -1790,7 +1790,7 @@ static int __maybe_unused intel_resume(struct device *dev)
 	 * make sure all Slaves are tagged as UNATTACHED and provide
 	 * reason for reinitialization
 	 */
-	sdw_clear_slave_status(bus, SDW_UNATTACH_REQUEST_MASTER_RESET);
+	sdw_clear_slave_status(bus, SDW_UNATTACH_REQUEST_MANAGER_RESET);
 
 	ret = sdw_cdns_enable_interrupt(cdns, true);
 	if (ret < 0) {
@@ -1825,14 +1825,14 @@ static int __maybe_unused intel_resume(struct device *dev)
 		}
 	}
 	sdw_cdns_check_self_clearing_bits(cdns, __func__,
-					  true, INTEL_MASTER_RESET_ITERATIONS);
+					  true, INTEL_MANAGER_RESET_ITERATIONS);
 
 	/*
 	 * after system resume, the pm_runtime suspend() may kick in
 	 * during the enumeration, before any children device force the
-	 * master device to remain active.  Using pm_runtime_get()
+	 * manager device to remain active.  Using pm_runtime_get()
 	 * routines is not really possible, since it'd prevent the
-	 * master from suspending.
+	 * manager from suspending.
 	 * A reasonable compromise is to update the pm_runtime
 	 * counters and delay the pm_runtime suspend by several
 	 * seconds, by when all enumeration should be complete.
@@ -1855,7 +1855,7 @@ static int __maybe_unused intel_resume_runtime(struct device *dev)
 	int ret;
 
 	if (bus->prop.hw_disabled || !sdw->startup_done) {
-		dev_dbg(dev, "SoundWire master %d is disabled or not-started, ignoring\n",
+		dev_dbg(dev, "SoundWire manager %d is disabled or not-started, ignoring\n",
 			bus->link_id);
 		return 0;
 	}
@@ -1864,7 +1864,7 @@ static int __maybe_unused intel_resume_runtime(struct device *dev)
 	intel_shim_wake(sdw, false);
 
 	link_flags = md_flags >> (bus->link_id * 8);
-	multi_link = !(link_flags & SDW_INTEL_MASTER_DISABLE_MULTI_LINK);
+	multi_link = !(link_flags & SDW_INTEL_MANAGER_DISABLE_MULTI_LINK);
 
 	clock_stop_quirks = sdw->link_res->clock_stop_quirks;
 
@@ -1879,7 +1879,7 @@ static int __maybe_unused intel_resume_runtime(struct device *dev)
 		 * make sure all Slaves are tagged as UNATTACHED and provide
 		 * reason for reinitialization
 		 */
-		sdw_clear_slave_status(bus, SDW_UNATTACH_REQUEST_MASTER_RESET);
+		sdw_clear_slave_status(bus, SDW_UNATTACH_REQUEST_MANAGER_RESET);
 
 		ret = sdw_cdns_enable_interrupt(cdns, true);
 		if (ret < 0) {
@@ -1914,7 +1914,7 @@ static int __maybe_unused intel_resume_runtime(struct device *dev)
 			}
 		}
 		sdw_cdns_check_self_clearing_bits(cdns, "intel_resume_runtime TEARDOWN",
-						  true, INTEL_MASTER_RESET_ITERATIONS);
+						  true, INTEL_MANAGER_RESET_ITERATIONS);
 
 	} else if (clock_stop_quirks & SDW_INTEL_CLK_STOP_BUS_RESET) {
 		ret = intel_init(sdw);
@@ -1925,9 +1925,9 @@ static int __maybe_unused intel_resume_runtime(struct device *dev)
 
 		/*
 		 * An exception condition occurs for the CLK_STOP_BUS_RESET
-		 * case if one or more masters remain active. In this condition,
-		 * all the masters are powered on for they are in the same power
-		 * domain. Master can preserve its context for clock stop0, so
+		 * case if one or more managers remain active. In this condition,
+		 * all the managers are powered on for they are in the same power
+		 * domain. Manager can preserve its context for clock stop0, so
 		 * there is no need to clear slave status and reset bus.
 		 */
 		clock_stop0 = sdw_cdns_is_clock_stop(&sdw->cdns);
@@ -1939,7 +1939,7 @@ static int __maybe_unused intel_resume_runtime(struct device *dev)
 			 * provide reason for reinitialization
 			 */
 
-			status = SDW_UNATTACH_REQUEST_MASTER_RESET;
+			status = SDW_UNATTACH_REQUEST_MANAGER_RESET;
 			sdw_clear_slave_status(bus, status);
 
 			ret = sdw_cdns_enable_interrupt(cdns, true);
@@ -1990,7 +1990,7 @@ static int __maybe_unused intel_resume_runtime(struct device *dev)
 			}
 		}
 		sdw_cdns_check_self_clearing_bits(cdns, "intel_resume_runtime BUS_RESET",
-						  true, INTEL_MASTER_RESET_ITERATIONS);
+						  true, INTEL_MANAGER_RESET_ITERATIONS);
 
 	} else if (!clock_stop_quirks) {
 
@@ -2012,12 +2012,12 @@ static int __maybe_unused intel_resume_runtime(struct device *dev)
 
 		ret = sdw_cdns_clock_restart(cdns, false);
 		if (ret < 0) {
-			dev_err(dev, "unable to resume master during resume\n");
+			dev_err(dev, "unable to resume manager during resume\n");
 			return ret;
 		}
 
 		sdw_cdns_check_self_clearing_bits(cdns, "intel_resume_runtime no_quirks",
-						  true, INTEL_MASTER_RESET_ITERATIONS);
+						  true, INTEL_MANAGER_RESET_ITERATIONS);
 	} else {
 		dev_err(dev, "%s clock_stop_quirks %x unsupported\n",
 			__func__, clock_stop_quirks);

@@ -6,7 +6,7 @@
 
 extern struct bus_type sdw_bus_type;
 extern struct device_type sdw_slave_type;
-extern struct device_type sdw_master_type;
+extern struct device_type sdw_manager_type;
 
 static inline int is_sdw_slave(const struct device *dev)
 {

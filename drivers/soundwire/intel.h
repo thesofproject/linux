@@ -18,8 +18,8 @@
  * @shim_mask: global pointer to check SHIM register initialization
  * @clock_stop_quirks: mask defining requested behavior on pm_suspend
  * @link_mask: global mask needed for power-up/down sequences
- * @cdns: Cadence master descriptor
- * @list: used to walk-through all masters exposed by the same controller
+ * @cdns: Cadence manager descriptor
+ * @list: used to walk-through all managers exposed by the same controller
  */
 struct sdw_intel_link_res {
 	void __iomem *mmio_base; /* not strictly needed, useful for debug */
