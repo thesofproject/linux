@@ -17,7 +17,7 @@ SoundWire Bus lock is a mutex and is part of Bus data structure
 (sdw_bus) which is used for every Bus instance. This lock is used to
 serialize each of the following operations(s) within SoundWire Bus instance.
 
-  - Addition and removal of Slave(s), changing Slave status.
+  - Addition and removal of Peripheral(s), changing Peripheral status.
 
   - Prepare, Enable, Disable and De-prepare stream operations.
 
@@ -41,7 +41,7 @@ Message transfer.
 
      a. Acquire Message lock.
 
-     b. Transfer message (Read/Write) to Slave1 or broadcast message on
+     b. Transfer message (Read/Write) to Peripheral1 or broadcast message on
         Bus in case of bank switch.
 
      c. Release Message lock
@@ -50,7 +50,7 @@ Message transfer.
 
 	+----------+                    +---------+
 	|          |                    |         |
-	|   Bus    |                    | Master  |
+	|   Bus    |                    | Manager |
 	|          |                    | Driver  |
 	|          |                    |         |
 	+----+-----+                    +----+----+
@@ -69,22 +69,22 @@ Example 2
 
 Prepare operation.
 
-  1. Acquire lock for Bus instance associated with Master 1.
+  1. Acquire lock for Bus instance associated with Manager 1.
 
   2. For every message transfer in Prepare operation
 
      a. Acquire Message lock.
 
-     b. Transfer message (Read/Write) to Slave1 or broadcast message on
+     b. Transfer message (Read/Write) to Peripheral1 or broadcast message on
         Bus in case of bank switch.
 
      c. Release Message lock.
 
-  3. Release lock for Bus instance associated with Master 1 ::
+  3. Release lock for Bus instance associated with Manager 1 ::
 
 	+----------+                    +---------+
 	|          |                    |         |
-	|   Bus    |                    | Master  |
+	|   Bus    |                    | Manager |
 	|          |                    | Driver  |
 	|          |                    |         |
 	+----+-----+                    +----+----+

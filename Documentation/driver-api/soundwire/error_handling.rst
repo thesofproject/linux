@@ -23,7 +23,7 @@ The errors can be detected with multiple mechanisms:
    slots) or electrical issues during the transmit/receive transition cannot
    be distinguished, although a recurring bus clash when audio is enabled is a
    indication of a bus allocation issue. The interrupt mechanism can also help
-   identify Slaves which detected a Bus Clash or a Parity Error, but they may
+   identify Peripherals which detected a Bus Clash or a Parity Error, but they may
    not be responsible for the errors so resetting them individually is not a
    viable recovery strategy.
 
@@ -32,8 +32,8 @@ The errors can be detected with multiple mechanisms:
    that the command was received and will be executed by the end of the
    current frame. A NAK indicates that the command was in error and will not
    be applied. In case of a bad programming (command sent to non-existent
-   Slave or to a non-implemented register) or electrical issue, no response
-   signals the command was ignored. Some Master implementations allow for a
+   Peripheral or to a non-implemented register) or electrical issue, no response
+   signals the command was ignored. Some Manager implementations allow for a
    command to be retransmitted several times.  If the retransmission fails,
    backtracking and restarting the entire programming sequence might be a
    solution. Alternatively some implementations might directly issue a bus
@@ -45,7 +45,7 @@ The errors can be detected with multiple mechanisms:
    does not define timeouts but the MIPI SoundWire DisCo document adds
    recommendation on timeouts. If such configurations do not complete, the
    driver will return a -ETIMEOUT. Such timeouts are symptoms of a faulty
-   Slave device and are likely impossible to recover from.
+   Peripheral device and are likely impossible to recover from.
 
 Errors during global reconfiguration sequences are extremely difficult to
 handle:
@@ -59,7 +59,7 @@ handle:
 
 Note that SoundWire does not provide a mechanism to detect illegal values
 written in valid registers. In a number of cases the standard even mentions
-that the Slave might behave in implementation-defined ways. The bus
-implementation does not provide a recovery mechanism for such errors, Slave
-or Master driver implementers are responsible for writing valid values in
+that the Peripheral might behave in implementation-defined ways. The bus
+implementation does not provide a recovery mechanism for such errors, Peripheral
+or Manager driver implementers are responsible for writing valid values in
 valid registers and implement additional range checking if needed.
