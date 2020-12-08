@@ -30,12 +30,12 @@ void sdw_bus_debugfs_exit(struct sdw_bus *bus)
 
 #define RD_BUF (3 * PAGE_SIZE)
 
-static ssize_t sdw_sprintf(struct sdw_slave *slave,
+static ssize_t sdw_sprintf(struct sdw_peripheral *peripheral,
 			   char *buf, size_t pos, unsigned int reg)
 {
 	int value;
 
-	value = sdw_read(slave, reg);
+	value = sdw_read(peripheral, reg);
 
 	if (value < 0)
 		return scnprintf(buf + pos, RD_BUF - pos, "%3x\tXX\n", reg);
@@ -44,9 +44,9 @@ static ssize_t sdw_sprintf(struct sdw_slave *slave,
 				"%3x\t%2x\n", reg, value);
 }
 
-static int sdw_slave_reg_show(struct seq_file *s_file, void *data)
+static int sdw_peripheral_reg_show(struct seq_file *s_file, void *data)
 {
-	struct sdw_slave *slave = s_file->private;
+	struct sdw_peripheral *peripheral = s_file->private;
 	char *buf;
 	ssize_t ret;
 	int i, j;
@@ -60,32 +60,32 @@ static int sdw_slave_reg_show(struct seq_file *s_file, void *data)
 	/* DP0 non-banked registers */
 	ret += scnprintf(buf + ret, RD_BUF - ret, "\nDP0\n");
 	for (i = SDW_DP0_INT; i <= SDW_DP0_PREPARECTRL; i++)
-		ret += sdw_sprintf(slave, buf, ret, i);
+		ret += sdw_sprintf(peripheral, buf, ret, i);
 
 	/* DP0 Bank 0 registers */
 	ret += scnprintf(buf + ret, RD_BUF - ret, "Bank0\n");
-	ret += sdw_sprintf(slave, buf, ret, SDW_DP0_CHANNELEN);
+	ret += sdw_sprintf(peripheral, buf, ret, SDW_DP0_CHANNELEN);
 	for (i = SDW_DP0_SAMPLECTRL1; i <= SDW_DP0_LANECTRL; i++)
-		ret += sdw_sprintf(slave, buf, ret, i);
+		ret += sdw_sprintf(peripheral, buf, ret, i);
 
 	/* DP0 Bank 1 registers */
 	ret += scnprintf(buf + ret, RD_BUF - ret, "Bank1\n");
-	ret += sdw_sprintf(slave, buf, ret,
+	ret += sdw_sprintf(peripheral, buf, ret,
 			SDW_DP0_CHANNELEN + SDW_BANK1_OFFSET);
 	for (i = SDW_DP0_SAMPLECTRL1 + SDW_BANK1_OFFSET;
 			i <= SDW_DP0_LANECTRL + SDW_BANK1_OFFSET; i++)
-		ret += sdw_sprintf(slave, buf, ret, i);
+		ret += sdw_sprintf(peripheral, buf, ret, i);
 
 	/* SCP registers */
 	ret += scnprintf(buf + ret, RD_BUF - ret, "\nSCP\n");
 	for (i = SDW_SCP_INT1; i <= SDW_SCP_BANKDELAY; i++)
-		ret += sdw_sprintf(slave, buf, ret, i);
+		ret += sdw_sprintf(peripheral, buf, ret, i);
 	for (i = SDW_SCP_DEVID_0; i <= SDW_SCP_DEVID_5; i++)
-		ret += sdw_sprintf(slave, buf, ret, i);
+		ret += sdw_sprintf(peripheral, buf, ret, i);
 
 	/*
 	 * SCP Bank 0/1 registers are read-only and cannot be
-	 * retrieved from the Slave. The Manager typically keeps track
+	 * retrieved from the Peripheral. The Manager typically keeps track
 	 * of the current frame size so the information can be found
 	 * in other places
 	 */
@@ -96,19 +96,19 @@ static int sdw_slave_reg_show(struct seq_file *s_file, void *data)
 		/* DPi registers */
 		ret += scnprintf(buf + ret, RD_BUF - ret, "\nDP%d\n", i);
 		for (j = SDW_DPN_INT(i); j <= SDW_DPN_PREPARECTRL(i); j++)
-			ret += sdw_sprintf(slave, buf, ret, j);
+			ret += sdw_sprintf(peripheral, buf, ret, j);
 
 		/* DPi Bank0 registers */
 		ret += scnprintf(buf + ret, RD_BUF - ret, "Bank0\n");
 		for (j = SDW_DPN_CHANNELEN_B0(i);
 		     j <= SDW_DPN_LANECTRL_B0(i); j++)
-			ret += sdw_sprintf(slave, buf, ret, j);
+			ret += sdw_sprintf(peripheral, buf, ret, j);
 
 		/* DPi Bank1 registers */
 		ret += scnprintf(buf + ret, RD_BUF - ret, "Bank1\n");
 		for (j = SDW_DPN_CHANNELEN_B1(i);
 		     j <= SDW_DPN_LANECTRL_B1(i); j++)
-			ret += sdw_sprintf(slave, buf, ret, j);
+			ret += sdw_sprintf(peripheral, buf, ret, j);
 	}
 
 	seq_printf(s_file, "%s", buf);
@@ -116,28 +116,28 @@ static int sdw_slave_reg_show(struct seq_file *s_file, void *data)
 
 	return 0;
 }
-DEFINE_SHOW_ATTRIBUTE(sdw_slave_reg);
+DEFINE_SHOW_ATTRIBUTE(sdw_peripheral_reg);
 
-void sdw_slave_debugfs_init(struct sdw_slave *slave)
+void sdw_peripheral_debugfs_init(struct sdw_peripheral *peripheral)
 {
 	struct dentry *manager;
 	struct dentry *d;
 	char name[32];
 
-	manager = slave->bus->debugfs;
+	manager = peripheral->bus->debugfs;
 
-	/* create the debugfs slave-name */
-	snprintf(name, sizeof(name), "%s", dev_name(&slave->dev));
+	/* create the debugfs peripheral-name */
+	snprintf(name, sizeof(name), "%s", dev_name(&peripheral->dev));
 	d = debugfs_create_dir(name, manager);
 
-	debugfs_create_file("registers", 0400, d, slave, &sdw_slave_reg_fops);
+	debugfs_create_file("registers", 0400, d, peripheral, &sdw_peripheral_reg_fops);
 
-	slave->debugfs = d;
+	peripheral->debugfs = d;
 }
 
-void sdw_slave_debugfs_exit(struct sdw_slave *slave)
+void sdw_peripheral_debugfs_exit(struct sdw_peripheral *peripheral)
 {
-	debugfs_remove_recursive(slave->debugfs);
+	debugfs_remove_recursive(peripheral->debugfs);
 }
 
 void sdw_debugfs_init(void)

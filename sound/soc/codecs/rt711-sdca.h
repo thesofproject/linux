@@ -18,8 +18,8 @@
 struct  rt711_sdca_priv {
 	struct regmap *regmap, *mbq_regmap;
 	struct snd_soc_component *component;
-	struct sdw_slave *slave;
-	enum sdw_slave_status status;
+	struct sdw_peripheral *peripheral;
+	enum sdw_peripheral_status status;
 	struct sdw_bus_params params;
 	bool hw_init;
 	bool first_hw_init;
@@ -230,9 +230,9 @@ enum rt711_sdca_ver {
 	RT711_VER_VD1
 };
 
-int rt711_sdca_io_init(struct device *dev, struct sdw_slave *slave);
+int rt711_sdca_io_init(struct device *dev, struct sdw_peripheral *peripheral);
 int rt711_sdca_init(struct device *dev, struct regmap *regmap,
-	       struct regmap *mbq_regmap, struct sdw_slave *slave);
+	       struct regmap *mbq_regmap, struct sdw_peripheral *peripheral);
 
 int rt711_sdca_jack_detect(struct rt711_sdca_priv *rt711, bool *hp, bool *mic);
 #endif /* __RT711_SDCA_H__ */

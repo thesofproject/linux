@@ -64,7 +64,7 @@ struct sdw_intel_link_dev;
 
 /*
  * Force the clock to remain on during pm_runtime suspend. This might
- * be needed if Slave devices do not have an alternate clock source or
+ * be needed if Peripheral devices do not have an alternate clock source or
  * if the latency requirements are very strict.
  */
 #define SDW_INTEL_CLK_STOP_NOT_ALLOWED		BIT(0)
@@ -72,13 +72,13 @@ struct sdw_intel_link_dev;
 /*
  * Stop the bus during pm_runtime suspend. If set, a complete bus
  * reset and re-enumeration will be performed when the bus
- * restarts. This mode shall not be used if Slave devices can generate
+ * restarts. This mode shall not be used if Peripheral devices can generate
  * in-band wakes.
  */
 #define SDW_INTEL_CLK_STOP_TEARDOWN		BIT(1)
 
 /*
- * Stop the bus during pm_suspend if Slaves are not wake capable
+ * Stop the bus during pm_suspend if Peripherals are not wake capable
  * (e.g. speaker amplifiers). The clock-stop mode is typically
  * slightly higher power than when the IP is completely powered-off.
  */
@@ -88,15 +88,15 @@ struct sdw_intel_link_dev;
  * Require a bus reset (and complete re-enumeration) when exiting
  * clock stop modes. This may be needed if the controller power was
  * turned off and all context lost. This quirk shall not be used if a
- * Slave device needs to remain enumerated and keep its context,
+ * Peripheral device needs to remain enumerated and keep its context,
  * e.g. to provide the reasons for the wake, report acoustic events or
  * pass a history buffer.
  */
 #define SDW_INTEL_CLK_STOP_BUS_RESET		BIT(3)
 
-struct sdw_intel_slave_id {
+struct sdw_intel_peripheral_id {
 	int link_id;
-	struct sdw_slave_id id;
+	struct sdw_peripheral_id id;
 };
 
 /**
@@ -107,11 +107,11 @@ struct sdw_intel_slave_id {
  * hardware capabilities after all power dependencies are settled.
  * @link_mask: bit-wise mask listing SoundWire links reported by the
  * Controller
- * @num_slaves: total number of devices exposed across all enabled links
+ * @num_peripherals: total number of devices exposed across all enabled links
  * @handle: ACPI parent handle
  * @ldev: information for each link (controller-specific and kept
  * opaque here)
- * @ids: array of slave_id, representing Slaves exposed across all enabled
+ * @ids: array of peripheral_id, representing Peripherals exposed across all enabled
  * links
  * @link_list: list to handle interrupts across all links
  * @shim_lock: mutex to handle concurrent rmw access to shared SHIM registers.
@@ -121,10 +121,10 @@ struct sdw_intel_ctx {
 	int count;
 	void __iomem *mmio_base;
 	u32 link_mask;
-	int num_slaves;
+	int num_peripherals;
 	acpi_handle handle;
 	struct sdw_intel_link_dev **ldev;
-	struct sdw_intel_slave_id *ids;
+	struct sdw_intel_peripheral_id *ids;
 	struct list_head link_list;
 	struct mutex shim_lock; /* lock for access to shared SHIM registers */
 	u32 shim_mask;

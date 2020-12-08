@@ -143,7 +143,7 @@ static int rt5682_sdw_hw_params(struct snd_pcm_substream *substream,
 	if (!stream)
 		return -ENOMEM;
 
-	if (!rt5682->slave)
+	if (!rt5682->peripheral)
 		return -EINVAL;
 
 	/* SoundWire specific configuration */
@@ -164,7 +164,7 @@ static int rt5682_sdw_hw_params(struct snd_pcm_substream *substream,
 	port_config.ch_mask = (1 << (num_channels)) - 1;
 	port_config.num = port;
 
-	retval = sdw_stream_add_slave(rt5682->slave, &stream_config,
+	retval = sdw_stream_add_peripheral(rt5682->peripheral, &stream_config,
 				      &port_config, 1, stream->sdw_stream);
 	if (retval) {
 		dev_err(dai->dev, "Unable to configure port\n");
@@ -262,10 +262,10 @@ static int rt5682_sdw_hw_free(struct snd_pcm_substream *substream,
 	struct sdw_stream_data *stream =
 		snd_soc_dai_get_dma_data(dai, substream);
 
-	if (!rt5682->slave)
+	if (!rt5682->peripheral)
 		return -EINVAL;
 
-	sdw_stream_remove_slave(rt5682->slave, stream->sdw_stream);
+	sdw_stream_remove_peripheral(rt5682->peripheral, stream->sdw_stream);
 	return 0;
 }
 
@@ -330,7 +330,7 @@ static struct snd_soc_dai_driver rt5682_dai[] = {
 };
 
 static int rt5682_sdw_init(struct device *dev, struct regmap *regmap,
-			   struct sdw_slave *slave)
+			   struct sdw_peripheral *peripheral)
 {
 	struct rt5682_priv *rt5682;
 	int ret;
@@ -340,7 +340,7 @@ static int rt5682_sdw_init(struct device *dev, struct regmap *regmap,
 		return -ENOMEM;
 
 	dev_set_drvdata(dev, rt5682);
-	rt5682->slave = slave;
+	rt5682->peripheral = peripheral;
 	rt5682->sdw_regmap = regmap;
 	rt5682->is_sdw = true;
 
@@ -367,12 +367,12 @@ static int rt5682_sdw_init(struct device *dev, struct regmap *regmap,
 	ret = devm_snd_soc_register_component(dev,
 					      &rt5682_soc_component_dev,
 					      rt5682_dai, ARRAY_SIZE(rt5682_dai));
-	dev_dbg(&slave->dev, "%s\n", __func__);
+	dev_dbg(&peripheral->dev, "%s\n", __func__);
 
 	return ret;
 }
 
-static int rt5682_io_init(struct device *dev, struct sdw_slave *slave)
+static int rt5682_io_init(struct device *dev, struct sdw_peripheral *peripheral)
 {
 	struct rt5682_priv *rt5682 = dev_get_drvdata(dev);
 	int ret = 0, loop = 10;
@@ -382,23 +382,23 @@ static int rt5682_io_init(struct device *dev, struct sdw_slave *slave)
 		return 0;
 
 	/*
-	 * PM runtime is only enabled when a Slave reports as Attached
+	 * PM runtime is only enabled when a Peripheral reports as Attached
 	 */
 	if (!rt5682->first_hw_init) {
 		/* set autosuspend parameters */
-		pm_runtime_set_autosuspend_delay(&slave->dev, 3000);
-		pm_runtime_use_autosuspend(&slave->dev);
+		pm_runtime_set_autosuspend_delay(&peripheral->dev, 3000);
+		pm_runtime_use_autosuspend(&peripheral->dev);
 
 		/* update count of parent 'active' children */
-		pm_runtime_set_active(&slave->dev);
+		pm_runtime_set_active(&peripheral->dev);
 
 		/* make sure the device does not suspend immediately */
-		pm_runtime_mark_last_busy(&slave->dev);
+		pm_runtime_mark_last_busy(&peripheral->dev);
 
-		pm_runtime_enable(&slave->dev);
+		pm_runtime_enable(&peripheral->dev);
 	}
 
-	pm_runtime_get_noresume(&slave->dev);
+	pm_runtime_get_noresume(&peripheral->dev);
 
 	while (loop > 0) {
 		regmap_read(rt5682->regmap, RT5682_DEVICE_ID, &val);
@@ -481,14 +481,14 @@ reinit:
 	mod_delayed_work(system_power_efficient_wq,
 		&rt5682->jack_detect_work, msecs_to_jiffies(250));
 
-	/* Mark Slave initialization complete */
+	/* Mark Peripheral initialization complete */
 	rt5682->hw_init = true;
 	rt5682->first_hw_init = true;
 
-	pm_runtime_mark_last_busy(&slave->dev);
-	pm_runtime_put_autosuspend(&slave->dev);
+	pm_runtime_mark_last_busy(&peripheral->dev);
+	pm_runtime_put_autosuspend(&peripheral->dev);
 
-	dev_dbg(&slave->dev, "%s hw_init complete\n", __func__);
+	dev_dbg(&peripheral->dev, "%s hw_init complete\n", __func__);
 
 	return ret;
 }
@@ -520,31 +520,31 @@ static const struct regmap_config rt5682_sdw_regmap = {
 	.use_single_write = true,
 };
 
-static int rt5682_update_status(struct sdw_slave *slave,
-					enum sdw_slave_status status)
+static int rt5682_update_status(struct sdw_peripheral *peripheral,
+					enum sdw_peripheral_status status)
 {
-	struct rt5682_priv *rt5682 = dev_get_drvdata(&slave->dev);
+	struct rt5682_priv *rt5682 = dev_get_drvdata(&peripheral->dev);
 
 	/* Update the status */
 	rt5682->status = status;
 
-	if (status == SDW_SLAVE_UNATTACHED)
+	if (status == SDW_PERIPHERAL_UNATTACHED)
 		rt5682->hw_init = false;
 
 	/*
-	 * Perform initialization only if slave status is present and
+	 * Perform initialization only if peripheral status is present and
 	 * hw_init flag is false
 	 */
-	if (rt5682->hw_init || rt5682->status != SDW_SLAVE_ATTACHED)
+	if (rt5682->hw_init || rt5682->status != SDW_PERIPHERAL_ATTACHED)
 		return 0;
 
-	/* perform I/O transfers required for Slave initialization */
-	return rt5682_io_init(&slave->dev, slave);
+	/* perform I/O transfers required for Peripheral initialization */
+	return rt5682_io_init(&peripheral->dev, peripheral);
 }
 
-static int rt5682_read_prop(struct sdw_slave *slave)
+static int rt5682_read_prop(struct sdw_peripheral *peripheral)
 {
-	struct sdw_slave_prop *prop = &slave->prop;
+	struct sdw_peripheral_prop *prop = &peripheral->prop;
 	int nval, i;
 	u32 bit;
 	unsigned long addr;
@@ -552,7 +552,7 @@ static int rt5682_read_prop(struct sdw_slave *slave)
 
 	prop->scp_int1_mask = SDW_SCP_INT1_IMPL_DEF | SDW_SCP_INT1_BUS_CLASH |
 		SDW_SCP_INT1_PARITY;
-	prop->quirks = SDW_SLAVE_QUIRKS_INVALID_INITIAL_PARITY;
+	prop->quirks = SDW_PERIPHERAL_QUIRKS_INVALID_INITIAL_PARITY;
 
 	prop->paging_support = false;
 
@@ -561,7 +561,7 @@ static int rt5682_read_prop(struct sdw_slave *slave)
 	prop->sink_ports = 0x2;		/* BITMAP: 00000010 */
 
 	nval = hweight32(prop->source_ports);
-	prop->src_dpn_prop = devm_kcalloc(&slave->dev, nval,
+	prop->src_dpn_prop = devm_kcalloc(&peripheral->dev, nval,
 					  sizeof(*prop->src_dpn_prop),
 					  GFP_KERNEL);
 	if (!prop->src_dpn_prop)
@@ -580,7 +580,7 @@ static int rt5682_read_prop(struct sdw_slave *slave)
 
 	/* do this again for sink now */
 	nval = hweight32(prop->sink_ports);
-	prop->sink_dpn_prop = devm_kcalloc(&slave->dev, nval,
+	prop->sink_dpn_prop = devm_kcalloc(&peripheral->dev, nval,
 					   sizeof(*prop->sink_dpn_prop),
 					   GFP_KERNEL);
 	if (!prop->sink_dpn_prop)
@@ -652,27 +652,27 @@ static int rt5682_clock_config(struct device *dev)
 	return 0;
 }
 
-static int rt5682_bus_config(struct sdw_slave *slave,
+static int rt5682_bus_config(struct sdw_peripheral *peripheral,
 					struct sdw_bus_params *params)
 {
-	struct rt5682_priv *rt5682 = dev_get_drvdata(&slave->dev);
+	struct rt5682_priv *rt5682 = dev_get_drvdata(&peripheral->dev);
 	int ret;
 
 	memcpy(&rt5682->params, params, sizeof(*params));
 
-	ret = rt5682_clock_config(&slave->dev);
+	ret = rt5682_clock_config(&peripheral->dev);
 	if (ret < 0)
-		dev_err(&slave->dev, "Invalid clk config");
+		dev_err(&peripheral->dev, "Invalid clk config");
 
 	return ret;
 }
 
-static int rt5682_interrupt_callback(struct sdw_slave *slave,
-					struct sdw_slave_intr_status *status)
+static int rt5682_interrupt_callback(struct sdw_peripheral *peripheral,
+					struct sdw_peripheral_intr_status *status)
 {
-	struct rt5682_priv *rt5682 = dev_get_drvdata(&slave->dev);
+	struct rt5682_priv *rt5682 = dev_get_drvdata(&peripheral->dev);
 
-	dev_dbg(&slave->dev,
+	dev_dbg(&peripheral->dev,
 		"%s control_port_stat=%x", __func__, status->control_port);
 
 	if (status->control_port & 0x4) {
@@ -683,31 +683,31 @@ static int rt5682_interrupt_callback(struct sdw_slave *slave,
 	return 0;
 }
 
-static const struct sdw_slave_ops rt5682_slave_ops = {
+static const struct sdw_peripheral_ops rt5682_peripheral_ops = {
 	.read_prop = rt5682_read_prop,
 	.interrupt_callback = rt5682_interrupt_callback,
 	.update_status = rt5682_update_status,
 	.bus_config = rt5682_bus_config,
 };
 
-static int rt5682_sdw_probe(struct sdw_slave *slave,
+static int rt5682_sdw_probe(struct sdw_peripheral *peripheral,
 			   const struct sdw_device_id *id)
 {
 	struct regmap *regmap;
 
 	/* Regmap Initialization */
-	regmap = devm_regmap_init_sdw(slave, &rt5682_sdw_regmap);
+	regmap = devm_regmap_init_sdw(peripheral, &rt5682_sdw_regmap);
 	if (IS_ERR(regmap))
 		return -EINVAL;
 
-	rt5682_sdw_init(&slave->dev, regmap, slave);
+	rt5682_sdw_init(&peripheral->dev, regmap, peripheral);
 
 	return 0;
 }
 
-static int rt5682_sdw_remove(struct sdw_slave *slave)
+static int rt5682_sdw_remove(struct sdw_peripheral *peripheral)
 {
-	struct rt5682_priv *rt5682 = dev_get_drvdata(&slave->dev);
+	struct rt5682_priv *rt5682 = dev_get_drvdata(&peripheral->dev);
 
 	if (rt5682 && rt5682->hw_init)
 		cancel_delayed_work_sync(&rt5682->jack_detect_work);
@@ -716,7 +716,7 @@ static int rt5682_sdw_remove(struct sdw_slave *slave)
 }
 
 static const struct sdw_device_id rt5682_id[] = {
-	SDW_SLAVE_ENTRY_EXT(0x025d, 0x5682, 0x2, 0, 0),
+	SDW_PERIPHERAL_ENTRY_EXT(0x025d, 0x5682, 0x2, 0, 0),
 	{},
 };
 MODULE_DEVICE_TABLE(sdw, rt5682_id);
@@ -738,25 +738,25 @@ static int __maybe_unused rt5682_dev_suspend(struct device *dev)
 
 static int __maybe_unused rt5682_dev_resume(struct device *dev)
 {
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);
 	struct rt5682_priv *rt5682 = dev_get_drvdata(dev);
 	unsigned long time;
 
 	if (!rt5682->hw_init)
 		return 0;
 
-	if (!slave->unattach_request)
+	if (!peripheral->unattach_request)
 		goto regmap_sync;
 
-	time = wait_for_completion_timeout(&slave->initialization_complete,
+	time = wait_for_completion_timeout(&peripheral->initialization_complete,
 				msecs_to_jiffies(RT5682_PROBE_TIMEOUT));
 	if (!time) {
-		dev_err(&slave->dev, "Initialization not complete, timed out\n");
+		dev_err(&peripheral->dev, "Initialization not complete, timed out\n");
 		return -ETIMEDOUT;
 	}
 
 regmap_sync:
-	slave->unattach_request = 0;
+	peripheral->unattach_request = 0;
 	regcache_cache_only(rt5682->regmap, false);
 	regcache_sync(rt5682->regmap);
 
@@ -776,7 +776,7 @@ static struct sdw_driver rt5682_sdw_driver = {
 	},
 	.probe = rt5682_sdw_probe,
 	.remove = rt5682_sdw_remove,
-	.ops = &rt5682_slave_ops,
+	.ops = &rt5682_peripheral_ops,
 	.id_table = rt5682_id,
 };
 module_sdw_driver(rt5682_sdw_driver);

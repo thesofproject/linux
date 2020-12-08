@@ -155,8 +155,8 @@ static const struct reg_default rt1308_reg_defaults[] = {
 struct rt1308_sdw_priv {
 	struct snd_soc_component *component;
 	struct regmap *regmap;
-	struct sdw_slave *sdw_slave;
-	enum sdw_slave_status status;
+	struct sdw_peripheral *sdw_peripheral;
+	enum sdw_peripheral_status status;
 	struct sdw_bus_params params;
 	bool hw_init;
 	bool first_hw_init;

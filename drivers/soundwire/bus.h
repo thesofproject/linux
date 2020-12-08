@@ -10,19 +10,19 @@
 u64 sdw_dmi_override_adr(struct sdw_bus *bus, u64 addr);
 
 #if IS_ENABLED(CONFIG_ACPI)
-int sdw_acpi_find_slaves(struct sdw_bus *bus);
+int sdw_acpi_find_peripherals(struct sdw_bus *bus);
 #else
-static inline int sdw_acpi_find_slaves(struct sdw_bus *bus)
+static inline int sdw_acpi_find_peripherals(struct sdw_bus *bus)
 {
 	return -ENOTSUPP;
 }
 #endif
 
-int sdw_of_find_slaves(struct sdw_bus *bus);
-void sdw_extract_slave_id(struct sdw_bus *bus,
-			  u64 addr, struct sdw_slave_id *id);
-int sdw_slave_add(struct sdw_bus *bus, struct sdw_slave_id *id,
-		  struct fwnode_handle *fwnode);
+int sdw_of_find_peripherals(struct sdw_bus *bus);
+void sdw_extract_peripheral_id(struct sdw_bus *bus,
+			       u64 addr, struct sdw_peripheral_id *id);
+int sdw_peripheral_add(struct sdw_bus *bus, struct sdw_peripheral_id *id,
+		       struct fwnode_handle *fwnode);
 int sdw_manager_device_add(struct sdw_bus *bus, struct device *parent,
 			   struct fwnode_handle *fwnode);
 int sdw_manager_device_del(struct sdw_bus *bus);
@@ -30,15 +30,15 @@ int sdw_manager_device_del(struct sdw_bus *bus);
 #ifdef CONFIG_DEBUG_FS
 void sdw_bus_debugfs_init(struct sdw_bus *bus);
 void sdw_bus_debugfs_exit(struct sdw_bus *bus);
-void sdw_slave_debugfs_init(struct sdw_slave *slave);
-void sdw_slave_debugfs_exit(struct sdw_slave *slave);
+void sdw_peripheral_debugfs_init(struct sdw_peripheral *peripheral);
+void sdw_peripheral_debugfs_exit(struct sdw_peripheral *peripheral);
 void sdw_debugfs_init(void);
 void sdw_debugfs_exit(void);
 #else
 static inline void sdw_bus_debugfs_init(struct sdw_bus *bus) {}
 static inline void sdw_bus_debugfs_exit(struct sdw_bus *bus) {}
-static inline void sdw_slave_debugfs_init(struct sdw_slave *slave) {}
-static inline void sdw_slave_debugfs_exit(struct sdw_slave *slave) {}
+static inline void sdw_peripheral_debugfs_init(struct sdw_peripheral *peripheral) {}
+static inline void sdw_peripheral_debugfs_exit(struct sdw_peripheral *peripheral) {}
 static inline void sdw_debugfs_init(void) {}
 static inline void sdw_debugfs_exit(void) {}
 #endif
@@ -50,11 +50,11 @@ enum {
 
 /**
  * struct sdw_msg - Message structure
- * @addr: Register address accessed in the Slave
+ * @addr: Register address accessed in the Peripheral
  * @len: number of messages
- * @dev_num: Slave device number
- * @addr_page1: SCP address page 1 Slave register
- * @addr_page2: SCP address page 2 Slave register
+ * @dev_num: Peripheral device number
+ * @addr_page1: SCP address page 1 Peripheral register
+ * @addr_page2: SCP address page 2 Peripheral register
  * @flags: transfer flags, indicate if xfer is read or write
  * @buf: message data buffer
  * @ssp_sync: Send message at SSP (Stream Synchronization Point)
@@ -82,14 +82,14 @@ int sdw_find_row_index(int row);
 int sdw_find_col_index(int col);
 
 /**
- * sdw_port_runtime: Runtime port parameters for Manager or Slave
+ * sdw_port_runtime: Runtime port parameters for Manager or Peripheral
  *
  * @num: Port number. For audio streams, valid port number ranges from
  * [1,14]
  * @ch_mask: Channel mask
  * @transport_params: Transport parameters
  * @port_params: Port parameters
- * @port_node: List node for Manager or Slave port_list
+ * @port_node: List node for Manager or Peripheral port_list
  *
  * SoundWire spec has no mention of ports for Manager interface but the
  * concept is logically extended.
@@ -103,17 +103,17 @@ struct sdw_port_runtime {
 };
 
 /**
- * sdw_slave_runtime: Runtime Stream parameters for Slave
+ * sdw_peripheral_runtime: Runtime Stream parameters for Peripheral
  *
- * @slave: Slave handle
- * @direction: Data direction for Slave
- * @ch_count: Number of channels handled by the Slave for
+ * @peripheral: Peripheral handle
+ * @direction: Data direction for Peripheral
+ * @ch_count: Number of channels handled by the Peripheral for
  * this stream
  * @m_rt_node: sdw_manager_runtime list node
- * @port_list: List of Slave Ports configured for this stream
+ * @port_list: List of Peripheral Ports configured for this stream
  */
-struct sdw_slave_runtime {
-	struct sdw_slave *slave;
+struct sdw_peripheral_runtime {
+	struct sdw_peripheral *peripheral;
 	enum sdw_data_direction direction;
 	unsigned int ch_count;
 	struct list_head m_rt_node;
@@ -128,7 +128,7 @@ struct sdw_slave_runtime {
  * @direction: Data direction for Manager
  * @ch_count: Number of channels handled by the Manager for
  * this stream, can be zero.
- * @slave_rt_list: Slave runtime list
+ * @peripheral_rt_list: Peripheral runtime list
  * @port_list: List of Manager Ports configured for this stream, can be zero.
  * @stream_node: sdw_stream_runtime manager_list node
  * @bus_node: sdw_bus m_rt_list node
@@ -138,16 +138,16 @@ struct sdw_manager_runtime {
 	struct sdw_stream_runtime *stream;
 	enum sdw_data_direction direction;
 	unsigned int ch_count;
-	struct list_head slave_rt_list;
+	struct list_head peripheral_rt_list;
 	struct list_head port_list;
 	struct list_head stream_node;
 	struct list_head bus_node;
 };
 
-struct sdw_dpn_prop *sdw_get_slave_dpn_prop(struct sdw_slave *slave,
-					    enum sdw_data_direction direction,
-					    unsigned int port_num);
-int sdw_configure_dpn_intr(struct sdw_slave *slave, int port,
+struct sdw_dpn_prop *sdw_get_peripheral_dpn_prop(struct sdw_peripheral *peripheral,
+						 enum sdw_data_direction direction,
+						 unsigned int port_num);
+int sdw_configure_dpn_intr(struct sdw_peripheral *peripheral, int port,
 			   bool enable, int mask);
 
 int sdw_transfer(struct sdw_bus *bus, struct sdw_msg *msg);
@@ -156,7 +156,7 @@ int sdw_transfer_defer(struct sdw_bus *bus, struct sdw_msg *msg,
 
 #define SDW_READ_INTR_CLEAR_RETRY	10
 
-int sdw_fill_msg(struct sdw_msg *msg, struct sdw_slave *slave,
+int sdw_fill_msg(struct sdw_msg *msg, struct sdw_peripheral *peripheral,
 		 u32 addr, size_t count, u16 dev_num, u8 flags, u8 *buf);
 
 /* Retrieve and return channel count from channel mask */
@@ -201,17 +201,17 @@ static inline void sdw_fill_port_params(struct sdw_port_params *params,
 	params->data_mode = data_mode;
 }
 
-/* Read-Modify-Write Slave register */
-static inline int sdw_update(struct sdw_slave *slave, u32 addr, u8 mask, u8 val)
+/* Read-Modify-Write Peripheral register */
+static inline int sdw_update(struct sdw_peripheral *peripheral, u32 addr, u8 mask, u8 val)
 {
 	int tmp;
 
-	tmp = sdw_read(slave, addr);
+	tmp = sdw_read(peripheral, addr);
 	if (tmp < 0)
 		return tmp;
 
 	tmp = (tmp & ~mask) | val;
-	return sdw_write(slave, addr, tmp);
+	return sdw_write(peripheral, addr, tmp);
 }
 
 /* broadcast read/write for tests */
@@ -224,8 +224,8 @@ int sdw_bwrite_no_pm_unlocked(struct sdw_bus *bus, u16 dev_num, u32 addr, u8 val
  */
 #define SDW_UNATTACH_REQUEST_MANAGER_RESET	BIT(0)
 
-void sdw_clear_slave_status(struct sdw_bus *bus, u32 request);
-int sdw_slave_modalias(const struct sdw_slave *slave, char *buf, size_t size);
+void sdw_clear_peripheral_status(struct sdw_bus *bus, u32 request);
+int sdw_peripheral_modalias(const struct sdw_peripheral *peripheral, char *buf, size_t size);
 
 #define sdw_dev_dbg_or_err(dev, is_err, fmt, ...)			\
 	do {								\

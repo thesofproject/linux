@@ -5,12 +5,12 @@
 #define __SOUNDWIRE_TYPES_H
 
 extern struct bus_type sdw_bus_type;
-extern struct device_type sdw_slave_type;
+extern struct device_type sdw_peripheral_type;
 extern struct device_type sdw_manager_type;
 
-static inline int is_sdw_slave(const struct device *dev)
+static inline int is_sdw_peripheral(const struct device *dev)
 {
-	return dev->type == &sdw_slave_type;
+	return dev->type == &sdw_peripheral_type;
 }
 
 #define drv_to_sdw_driver(_drv) container_of(_drv, struct sdw_driver, driver)
@@ -21,11 +21,11 @@ static inline int is_sdw_slave(const struct device *dev)
 int __sdw_register_driver(struct sdw_driver *drv, struct module *owner);
 void sdw_unregister_driver(struct sdw_driver *drv);
 
-int sdw_slave_uevent(struct device *dev, struct kobj_uevent_env *env);
+int sdw_peripheral_uevent(struct device *dev, struct kobj_uevent_env *env);
 
 /**
  * module_sdw_driver() - Helper macro for registering a Soundwire driver
- * @__sdw_driver: soundwire slave driver struct
+ * @__sdw_driver: soundwire peripheral driver struct
  *
  * Helper macro for Soundwire drivers which do not do anything special in
  * module init/exit. This eliminates a lot of boilerplate. Each module may only

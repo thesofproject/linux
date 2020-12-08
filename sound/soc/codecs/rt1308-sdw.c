@@ -115,16 +115,16 @@ static int rt1308_clock_config(struct device *dev)
 	return 0;
 }
 
-static int rt1308_read_prop(struct sdw_slave *slave)
+static int rt1308_read_prop(struct sdw_peripheral *peripheral)
 {
-	struct sdw_slave_prop *prop = &slave->prop;
+	struct sdw_peripheral_prop *prop = &peripheral->prop;
 	int nval, i;
 	u32 bit;
 	unsigned long addr;
 	struct sdw_dpn_prop *dpn;
 
 	prop->scp_int1_mask = SDW_SCP_INT1_BUS_CLASH | SDW_SCP_INT1_PARITY;
-	prop->quirks = SDW_SLAVE_QUIRKS_INVALID_INITIAL_PARITY;
+	prop->quirks = SDW_PERIPHERAL_QUIRKS_INVALID_INITIAL_PARITY;
 
 	prop->paging_support = true;
 
@@ -134,7 +134,7 @@ static int rt1308_read_prop(struct sdw_slave *slave)
 
 	/* for sink */
 	nval = hweight32(prop->sink_ports);
-	prop->sink_dpn_prop = devm_kcalloc(&slave->dev, nval,
+	prop->sink_dpn_prop = devm_kcalloc(&peripheral->dev, nval,
 						sizeof(*prop->sink_dpn_prop),
 						GFP_KERNEL);
 	if (!prop->sink_dpn_prop)
@@ -154,12 +154,12 @@ static int rt1308_read_prop(struct sdw_slave *slave)
 	/* set the timeout values */
 	prop->clk_stop_timeout = 20;
 
-	dev_dbg(&slave->dev, "%s\n", __func__);
+	dev_dbg(&peripheral->dev, "%s\n", __func__);
 
 	return 0;
 }
 
-static int rt1308_io_init(struct device *dev, struct sdw_slave *slave)
+static int rt1308_io_init(struct device *dev, struct sdw_peripheral *peripheral)
 {
 	struct rt1308_sdw_priv *rt1308 = dev_get_drvdata(dev);
 	int ret = 0;
@@ -175,23 +175,23 @@ static int rt1308_io_init(struct device *dev, struct sdw_slave *slave)
 	}
 
 	/*
-	 * PM runtime is only enabled when a Slave reports as Attached
+	 * PM runtime is only enabled when a Peripheral reports as Attached
 	 */
 	if (!rt1308->first_hw_init) {
 		/* set autosuspend parameters */
-		pm_runtime_set_autosuspend_delay(&slave->dev, 3000);
-		pm_runtime_use_autosuspend(&slave->dev);
+		pm_runtime_set_autosuspend_delay(&peripheral->dev, 3000);
+		pm_runtime_use_autosuspend(&peripheral->dev);
 
 		/* update count of parent 'active' children */
-		pm_runtime_set_active(&slave->dev);
+		pm_runtime_set_active(&peripheral->dev);
 
 		/* make sure the device does not suspend immediately */
-		pm_runtime_mark_last_busy(&slave->dev);
+		pm_runtime_mark_last_busy(&peripheral->dev);
 
-		pm_runtime_enable(&slave->dev);
+		pm_runtime_enable(&peripheral->dev);
 	}
 
-	pm_runtime_get_noresume(&slave->dev);
+	pm_runtime_get_noresume(&peripheral->dev);
 
 	/* sw reset */
 	regmap_write(rt1308->regmap, RT1308_SDW_RESET, 0);
@@ -222,9 +222,9 @@ static int rt1308_io_init(struct device *dev, struct sdw_slave *slave)
 	efuse_c_btl_r = tmp;
 	regmap_read(rt1308->regmap, 0xc872, &tmp);
 	efuse_c_btl_r = efuse_c_btl_r | (tmp << 8);
-	dev_dbg(&slave->dev, "%s m_btl_l=0x%x, m_btl_r=0x%x\n", __func__,
+	dev_dbg(&peripheral->dev, "%s m_btl_l=0x%x, m_btl_r=0x%x\n", __func__,
 		efuse_m_btl_l, efuse_m_btl_r);
-	dev_dbg(&slave->dev, "%s c_btl_l=0x%x, c_btl_r=0x%x\n", __func__,
+	dev_dbg(&peripheral->dev, "%s c_btl_l=0x%x, c_btl_r=0x%x\n", __func__,
 		efuse_c_btl_l, efuse_c_btl_r);
 
 	/* initial settings */
@@ -261,58 +261,58 @@ static int rt1308_io_init(struct device *dev, struct sdw_slave *slave)
 	} else
 		rt1308->first_hw_init = true;
 
-	/* Mark Slave initialization complete */
+	/* Mark Peripheral initialization complete */
 	rt1308->hw_init = true;
 
-	pm_runtime_mark_last_busy(&slave->dev);
-	pm_runtime_put_autosuspend(&slave->dev);
+	pm_runtime_mark_last_busy(&peripheral->dev);
+	pm_runtime_put_autosuspend(&peripheral->dev);
 
-	dev_dbg(&slave->dev, "%s hw_init complete\n", __func__);
+	dev_dbg(&peripheral->dev, "%s hw_init complete\n", __func__);
 
 	return ret;
 }
 
-static int rt1308_update_status(struct sdw_slave *slave,
-					enum sdw_slave_status status)
+static int rt1308_update_status(struct sdw_peripheral *peripheral,
+					enum sdw_peripheral_status status)
 {
-	struct  rt1308_sdw_priv *rt1308 = dev_get_drvdata(&slave->dev);
+	struct  rt1308_sdw_priv *rt1308 = dev_get_drvdata(&peripheral->dev);
 
 	/* Update the status */
 	rt1308->status = status;
 
-	if (status == SDW_SLAVE_UNATTACHED)
+	if (status == SDW_PERIPHERAL_UNATTACHED)
 		rt1308->hw_init = false;
 
 	/*
-	 * Perform initialization only if slave status is present and
+	 * Perform initialization only if peripheral status is present and
 	 * hw_init flag is false
 	 */
-	if (rt1308->hw_init || rt1308->status != SDW_SLAVE_ATTACHED)
+	if (rt1308->hw_init || rt1308->status != SDW_PERIPHERAL_ATTACHED)
 		return 0;
 
-	/* perform I/O transfers required for Slave initialization */
-	return rt1308_io_init(&slave->dev, slave);
+	/* perform I/O transfers required for Peripheral initialization */
+	return rt1308_io_init(&peripheral->dev, peripheral);
 }
 
-static int rt1308_bus_config(struct sdw_slave *slave,
+static int rt1308_bus_config(struct sdw_peripheral *peripheral,
 				struct sdw_bus_params *params)
 {
-	struct rt1308_sdw_priv *rt1308 = dev_get_drvdata(&slave->dev);
+	struct rt1308_sdw_priv *rt1308 = dev_get_drvdata(&peripheral->dev);
 	int ret;
 
 	memcpy(&rt1308->params, params, sizeof(*params));
 
-	ret = rt1308_clock_config(&slave->dev);
+	ret = rt1308_clock_config(&peripheral->dev);
 	if (ret < 0)
-		dev_err(&slave->dev, "Invalid clk config");
+		dev_err(&peripheral->dev, "Invalid clk config");
 
 	return ret;
 }
 
-static int rt1308_interrupt_callback(struct sdw_slave *slave,
-					struct sdw_slave_intr_status *status)
+static int rt1308_interrupt_callback(struct sdw_peripheral *peripheral,
+					struct sdw_peripheral_intr_status *status)
 {
-	dev_dbg(&slave->dev,
+	dev_dbg(&peripheral->dev,
 		"%s control_port_stat=%x", __func__, status->control_port);
 
 	return 0;
@@ -536,7 +536,7 @@ static int rt1308_sdw_hw_params(struct snd_pcm_substream *substream,
 	if (!stream)
 		return -EINVAL;
 
-	if (!rt1308->sdw_slave)
+	if (!rt1308->sdw_peripheral)
 		return -EINVAL;
 
 	/* SoundWire specific configuration */
@@ -564,7 +564,7 @@ static int rt1308_sdw_hw_params(struct snd_pcm_substream *substream,
 	port_config.ch_mask = ch_mask;
 	port_config.num = port;
 
-	retval = sdw_stream_add_slave(rt1308->sdw_slave, &stream_config,
+	retval = sdw_stream_add_peripheral(rt1308->sdw_peripheral, &stream_config,
 				&port_config, 1, stream->sdw_stream);
 	if (retval) {
 		dev_err(dai->dev, "Unable to configure port\n");
@@ -583,18 +583,18 @@ static int rt1308_sdw_pcm_hw_free(struct snd_pcm_substream *substream,
 	struct sdw_stream_data *stream =
 		snd_soc_dai_get_dma_data(dai, substream);
 
-	if (!rt1308->sdw_slave)
+	if (!rt1308->sdw_peripheral)
 		return -EINVAL;
 
-	sdw_stream_remove_slave(rt1308->sdw_slave, stream->sdw_stream);
+	sdw_stream_remove_peripheral(rt1308->sdw_peripheral, stream->sdw_stream);
 	return 0;
 }
 
 /*
- * slave_ops: callbacks for get_clock_stop_mode, clock_stop and
+ * peripheral_ops: callbacks for get_clock_stop_mode, clock_stop and
  * port_prep are not defined for now
  */
-static const struct sdw_slave_ops rt1308_slave_ops = {
+static const struct sdw_peripheral_ops rt1308_peripheral_ops = {
 	.read_prop = rt1308_read_prop,
 	.interrupt_callback = rt1308_interrupt_callback,
 	.update_status = rt1308_update_status,
@@ -638,7 +638,7 @@ static struct snd_soc_dai_driver rt1308_sdw_dai[] = {
 };
 
 static int rt1308_sdw_init(struct device *dev, struct regmap *regmap,
-				struct sdw_slave *slave)
+				struct sdw_peripheral *peripheral)
 {
 	struct rt1308_sdw_priv *rt1308;
 	int ret;
@@ -648,7 +648,7 @@ static int rt1308_sdw_init(struct device *dev, struct regmap *regmap,
 		return -ENOMEM;
 
 	dev_set_drvdata(dev, rt1308);
-	rt1308->sdw_slave = slave;
+	rt1308->sdw_peripheral = peripheral;
 	rt1308->regmap = regmap;
 
 	/*
@@ -663,28 +663,28 @@ static int rt1308_sdw_init(struct device *dev, struct regmap *regmap,
 				rt1308_sdw_dai,
 				ARRAY_SIZE(rt1308_sdw_dai));
 
-	dev_dbg(&slave->dev, "%s\n", __func__);
+	dev_dbg(&peripheral->dev, "%s\n", __func__);
 
 	return ret;
 }
 
-static int rt1308_sdw_probe(struct sdw_slave *slave,
+static int rt1308_sdw_probe(struct sdw_peripheral *peripheral,
 				const struct sdw_device_id *id)
 {
 	struct regmap *regmap;
 
 	/* Regmap Initialization */
-	regmap = devm_regmap_init_sdw(slave, &rt1308_sdw_regmap);
+	regmap = devm_regmap_init_sdw(peripheral, &rt1308_sdw_regmap);
 	if (IS_ERR(regmap))
 		return PTR_ERR(regmap);
 
-	rt1308_sdw_init(&slave->dev, regmap, slave);
+	rt1308_sdw_init(&peripheral->dev, regmap, peripheral);
 
 	return 0;
 }
 
 static const struct sdw_device_id rt1308_id[] = {
-	SDW_SLAVE_ENTRY_EXT(0x025d, 0x1308, 0x2, 0, 0),
+	SDW_PERIPHERAL_ENTRY_EXT(0x025d, 0x1308, 0x2, 0, 0),
 	{},
 };
 MODULE_DEVICE_TABLE(sdw, rt1308_id);
@@ -705,25 +705,25 @@ static int __maybe_unused rt1308_dev_suspend(struct device *dev)
 
 static int __maybe_unused rt1308_dev_resume(struct device *dev)
 {
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);
 	struct rt1308_sdw_priv *rt1308 = dev_get_drvdata(dev);
 	unsigned long time;
 
 	if (!rt1308->hw_init)
 		return 0;
 
-	if (!slave->unattach_request)
+	if (!peripheral->unattach_request)
 		goto regmap_sync;
 
-	time = wait_for_completion_timeout(&slave->initialization_complete,
+	time = wait_for_completion_timeout(&peripheral->initialization_complete,
 				msecs_to_jiffies(RT1308_PROBE_TIMEOUT));
 	if (!time) {
-		dev_err(&slave->dev, "Initialization not complete, timed out\n");
+		dev_err(&peripheral->dev, "Initialization not complete, timed out\n");
 		return -ETIMEDOUT;
 	}
 
 regmap_sync:
-	slave->unattach_request = 0;
+	peripheral->unattach_request = 0;
 	regcache_cache_only(rt1308->regmap, false);
 	regcache_sync_region(rt1308->regmap, 0xc000, 0xcfff);
 
@@ -742,7 +742,7 @@ static struct sdw_driver rt1308_sdw_driver = {
 		.pm = &rt1308_pm,
 	},
 	.probe = rt1308_sdw_probe,
-	.ops = &rt1308_slave_ops,
+	.ops = &rt1308_peripheral_ops,
 	.id_table = rt1308_id,
 };
 module_sdw_driver(rt1308_sdw_driver);

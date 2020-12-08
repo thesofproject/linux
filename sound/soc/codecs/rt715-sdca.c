@@ -39,7 +39,7 @@ static int rt715_sdca_index_write(struct rt715_sdca_priv *rt715,
 
 	ret = regmap_write(regmap, addr, value);
 	if (ret < 0)
-		dev_err(&rt715->slave->dev,
+		dev_err(&rt715->peripheral->dev,
 				"Failed to set private value: %08x <= %04x %d\n", ret, addr,
 				value);
 
@@ -57,7 +57,7 @@ static int rt715_sdca_index_read(struct rt715_sdca_priv *rt715,
 
 	ret = regmap_read(regmap, addr, value);
 	if (ret < 0)
-		dev_err(&rt715->slave->dev,
+		dev_err(&rt715->peripheral->dev,
 				"Failed to get private value: %06x => %04x ret=%d\n",
 				addr, *value, ret);
 
@@ -819,7 +819,7 @@ static int rt715_sdca_pcm_hw_params(struct snd_pcm_substream *substream,
 	if (!stream)
 		return -EINVAL;
 
-	if (!rt715->slave)
+	if (!rt715->peripheral)
 		return -EINVAL;
 
 	switch (dai->id) {
@@ -849,7 +849,7 @@ static int rt715_sdca_pcm_hw_params(struct snd_pcm_substream *substream,
 	port_config.ch_mask = GENMASK(num_channels - 1, 0);
 	port_config.num = port;
 
-	retval = sdw_stream_add_slave(rt715->slave, &stream_config,
+	retval = sdw_stream_add_peripheral(rt715->peripheral, &stream_config,
 					&port_config, 1, stream->sdw_stream);
 	if (retval) {
 		dev_err(component->dev, "Unable to configure port, retval:%d\n",
@@ -924,10 +924,10 @@ static int rt715_sdca_pcm_hw_free(struct snd_pcm_substream *substream,
 	struct rt715_sdw_stream_data *stream =
 		snd_soc_dai_get_dma_data(dai, substream);
 
-	if (!rt715->slave)
+	if (!rt715->peripheral)
 		return -EINVAL;
 
-	sdw_stream_remove_slave(rt715->slave, stream->sdw_stream);
+	sdw_stream_remove_peripheral(rt715->peripheral, stream->sdw_stream);
 	return 0;
 }
 
@@ -978,7 +978,7 @@ static struct snd_soc_dai_driver rt715_sdca_dai[] = {
 #define RT715_CLK_FREQ_12288000HZ 12288000
 
 int rt715_sdca_init(struct device *dev, struct regmap *mbq_regmap,
-	struct regmap *regmap, struct sdw_slave *slave)
+	struct regmap *regmap, struct sdw_peripheral *peripheral)
 {
 	struct rt715_sdca_priv *rt715;
 	int ret;
@@ -988,10 +988,10 @@ int rt715_sdca_init(struct device *dev, struct regmap *mbq_regmap,
 		return -ENOMEM;
 
 	dev_set_drvdata(dev, rt715);
-	rt715->slave = slave;
+	rt715->peripheral = peripheral;
 	rt715->regmap = regmap;
 	rt715->mbq_regmap = mbq_regmap;
-	rt715->hw_sdw_ver = slave->id.sdw_version;
+	rt715->hw_sdw_ver = peripheral->id.sdw_version;
 	/*
 	 * Mark hw_init to false
 	 * HW init will be performed when device reports present
@@ -1007,7 +1007,7 @@ int rt715_sdca_init(struct device *dev, struct regmap *mbq_regmap,
 	return ret;
 }
 
-int rt715_sdca_io_init(struct device *dev, struct sdw_slave *slave)
+int rt715_sdca_io_init(struct device *dev, struct sdw_peripheral *peripheral)
 {
 	struct rt715_sdca_priv *rt715 = dev_get_drvdata(dev);
 	unsigned int hw_ver;
@@ -1016,25 +1016,25 @@ int rt715_sdca_io_init(struct device *dev, struct sdw_slave *slave)
 		return 0;
 
 	/*
-	 * PM runtime is only enabled when a Slave reports as Attached
+	 * PM runtime is only enabled when a Peripheral reports as Attached
 	 */
 	if (!rt715->first_init) {
 		/* set autosuspend parameters */
-		pm_runtime_set_autosuspend_delay(&slave->dev, 3000);
-		pm_runtime_use_autosuspend(&slave->dev);
+		pm_runtime_set_autosuspend_delay(&peripheral->dev, 3000);
+		pm_runtime_use_autosuspend(&peripheral->dev);
 
 		/* update count of parent 'active' children */
-		pm_runtime_set_active(&slave->dev);
+		pm_runtime_set_active(&peripheral->dev);
 
 		/* make sure the device does not suspend immediately */
-		pm_runtime_mark_last_busy(&slave->dev);
+		pm_runtime_mark_last_busy(&peripheral->dev);
 
-		pm_runtime_enable(&slave->dev);
+		pm_runtime_enable(&peripheral->dev);
 
 		rt715->first_init = true;
 	}
 
-	pm_runtime_get_noresume(&slave->dev);
+	pm_runtime_get_noresume(&peripheral->dev);
 
 	rt715_sdca_index_read(rt715, RT715_VENDOR_REG,
 		RT715_PRODUCT_NUM, &hw_ver);
@@ -1061,11 +1061,11 @@ int rt715_sdca_io_init(struct device *dev, struct sdw_slave *slave)
 	/* SMPU-1 interrupt enable mask */
 	regmap_update_bits(rt715->regmap, RT715_INT_MASK, 0x1, 0x1);
 
-	/* Mark Slave initialization complete */
+	/* Mark Peripheral initialization complete */
 	rt715->hw_init = true;
 
-	pm_runtime_mark_last_busy(&slave->dev);
-	pm_runtime_put_autosuspend(&slave->dev);
+	pm_runtime_mark_last_busy(&peripheral->dev);
+	pm_runtime_put_autosuspend(&peripheral->dev);
 
 	return 0;
 }

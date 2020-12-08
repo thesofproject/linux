@@ -30,9 +30,9 @@
 #define SWRM_COMP_PARAMS_DIN_PORTS_MASK				GENMASK(9, 5)
 #define SWRM_INTERRUPT_STATUS					0x200
 #define SWRM_INTERRUPT_STATUS_RMSK				GENMASK(16, 0)
-#define SWRM_INTERRUPT_STATUS_SLAVE_PEND_IRQ			BIT(0)
-#define SWRM_INTERRUPT_STATUS_NEW_SLAVE_ATTACHED		BIT(1)
-#define SWRM_INTERRUPT_STATUS_CHANGE_ENUM_SLAVE_STATUS		BIT(2)
+#define SWRM_INTERRUPT_STATUS_PERIPHERAL_PEND_IRQ			BIT(0)
+#define SWRM_INTERRUPT_STATUS_NEW_PERIPHERAL_ATTACHED		BIT(1)
+#define SWRM_INTERRUPT_STATUS_CHANGE_ENUM_PERIPHERAL_STATUS		BIT(2)
 #define SWRM_INTERRUPT_STATUS_MASTER_CLASH_DET			BIT(3)
 #define SWRM_INTERRUPT_STATUS_RD_FIFO_OVERFLOW			BIT(4)
 #define SWRM_INTERRUPT_STATUS_RD_FIFO_UNDERFLOW			BIT(5)
@@ -61,8 +61,8 @@
 #define SWRM_CMD_FIFO_RD_FIFO_ADDR				0x318
 #define SWRM_RD_FIFO_CMD_ID_MASK				GENMASK(11, 8)
 #define SWRM_ENUMERATOR_CFG_ADDR				0x500
-#define SWRM_ENUMERATOR_SLAVE_DEV_ID_1(m)		(0x530 + 0x8 * (m))
-#define SWRM_ENUMERATOR_SLAVE_DEV_ID_2(m)		(0x534 + 0x8 * (m))
+#define SWRM_ENUMERATOR_PERIPHERAL_DEV_ID_1(m)		(0x530 + 0x8 * (m))
+#define SWRM_ENUMERATOR_PERIPHERAL_DEV_ID_2(m)		(0x534 + 0x8 * (m))
 #define SWRM_MCP_FRAME_CTRL_BANK_ADDR(m)		(0x101C + 0x40 * (m))
 #define SWRM_MCP_FRAME_CTRL_BANK_COL_CTRL_BMSK			GENMASK(2, 0)
 #define SWRM_MCP_FRAME_CTRL_BANK_ROW_CTRL_BMSK			GENMASK(7, 3)
@@ -129,7 +129,7 @@ struct qcom_swrm_ctrl {
 	void __iomem *mmio;
 	struct completion broadcast;
 	struct completion enumeration;
-	struct work_struct slave_work;
+	struct work_struct peripheral_work;
 	/* Port alloc/free lock */
 	struct mutex port_lock;
 	struct clk *hclk;
@@ -148,10 +148,10 @@ struct qcom_swrm_ctrl {
 	u8 wcmd_id;
 	struct qcom_swrm_port_config pconfig[QCOM_SDW_MAX_PORTS];
 	struct sdw_stream_runtime *sruntime[SWRM_MAX_DAIS];
-	enum sdw_slave_status status[SDW_MAX_DEVICES];
+	enum sdw_peripheral_status status[SDW_MAX_DEVICES];
 	int (*reg_read)(struct qcom_swrm_ctrl *ctrl, int reg, u32 *val);
 	int (*reg_write)(struct qcom_swrm_ctrl *ctrl, int reg, int val);
-	u32 slave_status;
+	u32 peripheral_status;
 	u32 wr_fifo_depth;
 	u32 rd_fifo_depth;
 };
@@ -384,7 +384,7 @@ static int qcom_swrm_cmd_fifo_rd_cmd(struct qcom_swrm_ctrl *swrm,
 	return SDW_CMD_IGNORED;
 }
 
-static int qcom_swrm_get_alert_slave_dev_num(struct qcom_swrm_ctrl *ctrl)
+static int qcom_swrm_get_alert_peripheral_dev_num(struct qcom_swrm_ctrl *ctrl)
 {
 	u32 val, status;
 	int dev_num;
@@ -394,7 +394,7 @@ static int qcom_swrm_get_alert_slave_dev_num(struct qcom_swrm_ctrl *ctrl)
 	for (dev_num = 0; dev_num < SDW_MAX_DEVICES; dev_num++) {
 		status = (val >> (dev_num * SWRM_MCP_SLV_STATUS_SZ));
 
-		if ((status & SWRM_MCP_SLV_STATUS_MASK) == SDW_SLAVE_ALERT) {
+		if ((status & SWRM_MCP_SLV_STATUS_MASK) == SDW_PERIPHERAL_ALERT) {
 			ctrl->status[dev_num] = status;
 			return dev_num;
 		}
@@ -409,7 +409,7 @@ static void qcom_swrm_get_device_status(struct qcom_swrm_ctrl *ctrl)
 	int i;
 
 	ctrl->reg_read(ctrl, SWRM_MCP_SLV_STATUS, &val);
-	ctrl->slave_status = val;
+	ctrl->peripheral_status = val;
 
 	for (i = 0; i < SDW_MAX_DEVICES; i++) {
 		u32 s;
@@ -420,8 +420,8 @@ static void qcom_swrm_get_device_status(struct qcom_swrm_ctrl *ctrl)
 	}
 }
 
-static void qcom_swrm_set_slave_dev_num(struct sdw_bus *bus,
-					struct sdw_slave *slave, int devnum)
+static void qcom_swrm_set_peripheral_dev_num(struct sdw_bus *bus,
+					struct sdw_peripheral *peripheral, int devnum)
 {
 	struct qcom_swrm_ctrl *ctrl = to_qcom_sdw(bus);
 	u32 status;
@@ -430,9 +430,9 @@ static void qcom_swrm_set_slave_dev_num(struct sdw_bus *bus,
 	status = (status >> (devnum * SWRM_MCP_SLV_STATUS_SZ));
 	status &= SWRM_MCP_SLV_STATUS_MASK;
 
-	if (status == SDW_SLAVE_ATTACHED) {
-		if (slave)
-			slave->dev_num = devnum;
+	if (status == SDW_PERIPHERAL_ATTACHED) {
+		if (peripheral)
+			peripheral->dev_num = devnum;
 		mutex_lock(&bus->bus_lock);
 		set_bit(devnum, bus->assigned);
 		mutex_unlock(&bus->bus_lock);
@@ -442,8 +442,8 @@ static void qcom_swrm_set_slave_dev_num(struct sdw_bus *bus,
 static int qcom_swrm_enumerate(struct sdw_bus *bus)
 {
 	struct qcom_swrm_ctrl *ctrl = to_qcom_sdw(bus);
-	struct sdw_slave *slave, *_s;
-	struct sdw_slave_id id;
+	struct sdw_peripheral *peripheral, *_p;
+	struct sdw_peripheral_id id;
 	u32 val1, val2;
 	bool found;
 	u64 addr;
@@ -452,10 +452,10 @@ static int qcom_swrm_enumerate(struct sdw_bus *bus)
 
 	for (i = 1; i <= SDW_MAX_DEVICES; i++) {
 		/*SCP_Devid5 - Devid 4*/
-		ctrl->reg_read(ctrl, SWRM_ENUMERATOR_SLAVE_DEV_ID_1(i), &val1);
+		ctrl->reg_read(ctrl, SWRM_ENUMERATOR_PERIPHERAL_DEV_ID_1(i), &val1);
 
 		/*SCP_Devid3 - DevId 2 Devid 1 Devid 0*/
-		ctrl->reg_read(ctrl, SWRM_ENUMERATOR_SLAVE_DEV_ID_2(i), &val2);
+		ctrl->reg_read(ctrl, SWRM_ENUMERATOR_PERIPHERAL_DEV_ID_2(i), &val2);
 
 		if (!val1 && !val2)
 			break;
@@ -464,20 +464,20 @@ static int qcom_swrm_enumerate(struct sdw_bus *bus)
 			((u64)buf1[2] << 24) | ((u64)buf1[1] << 32) |
 			((u64)buf1[0] << 40);
 
-		sdw_extract_slave_id(bus, addr, &id);
+		sdw_extract_peripheral_id(bus, addr, &id);
 		found = false;
 		/* Now compare with entries */
-		list_for_each_entry_safe(slave, _s, &bus->slaves, node) {
-			if (sdw_compare_devid(slave, id) == 0) {
-				qcom_swrm_set_slave_dev_num(bus, slave, i);
+		list_for_each_entry_safe(peripheral, _p, &bus->peripherals, node) {
+			if (sdw_compare_devid(peripheral, id) == 0) {
+				qcom_swrm_set_peripheral_dev_num(bus, peripheral, i);
 				found = true;
 				break;
 			}
 		}
 
 		if (!found) {
-			qcom_swrm_set_slave_dev_num(bus, NULL, i);
-			sdw_slave_add(bus, &id, NULL);
+			qcom_swrm_set_peripheral_dev_num(bus, NULL, i);
+			sdw_peripheral_add(bus, &id, NULL);
 		}
 	}
 
@@ -488,7 +488,7 @@ static int qcom_swrm_enumerate(struct sdw_bus *bus)
 static irqreturn_t qcom_swrm_irq_handler(int irq, void *dev_id)
 {
 	struct qcom_swrm_ctrl *swrm = dev_id;
-	u32 value, intr_sts, intr_sts_masked, slave_status;
+	u32 value, intr_sts, intr_sts_masked, peripheral_status;
 	u32 i;
 	int devnum;
 	int ret = IRQ_HANDLED;
@@ -503,28 +503,28 @@ static irqreturn_t qcom_swrm_irq_handler(int irq, void *dev_id)
 				continue;
 
 			switch (value) {
-			case SWRM_INTERRUPT_STATUS_SLAVE_PEND_IRQ:
-				devnum = qcom_swrm_get_alert_slave_dev_num(swrm);
+			case SWRM_INTERRUPT_STATUS_PERIPHERAL_PEND_IRQ:
+				devnum = qcom_swrm_get_alert_peripheral_dev_num(swrm);
 				if (devnum < 0) {
 					dev_err_ratelimited(swrm->dev,
-					    "no slave alert found.spurious interrupt\n");
+					    "no peripheral alert found.spurious interrupt\n");
 				} else {
-					sdw_handle_slave_status(&swrm->bus, swrm->status);
+					sdw_handle_peripheral_status(&swrm->bus, swrm->status);
 				}
 
 				break;
-			case SWRM_INTERRUPT_STATUS_NEW_SLAVE_ATTACHED:
-			case SWRM_INTERRUPT_STATUS_CHANGE_ENUM_SLAVE_STATUS:
-				dev_err_ratelimited(swrm->dev, "%s: SWR new slave attached\n",
+			case SWRM_INTERRUPT_STATUS_NEW_PERIPHERAL_ATTACHED:
+			case SWRM_INTERRUPT_STATUS_CHANGE_ENUM_PERIPHERAL_STATUS:
+				dev_err_ratelimited(swrm->dev, "%s: SWR new peripheral attached\n",
 					__func__);
-				swrm->reg_read(swrm, SWRM_MCP_SLV_STATUS, &slave_status);
-				if (swrm->slave_status == slave_status) {
-					dev_err(swrm->dev, "Slave status not changed %x\n",
-						slave_status);
+				swrm->reg_read(swrm, SWRM_MCP_SLV_STATUS, &peripheral_status);
+				if (swrm->peripheral_status == peripheral_status) {
+					dev_err(swrm->dev, "Peripheral status not changed %x\n",
+						peripheral_status);
 				} else {
 					qcom_swrm_get_device_status(swrm);
 					qcom_swrm_enumerate(&swrm->bus);
-					sdw_handle_slave_status(&swrm->bus, swrm->status);
+					sdw_handle_peripheral_status(&swrm->bus, swrm->status);
 				}
 				break;
 			case SWRM_INTERRUPT_STATUS_MASTER_CLASH_DET:
@@ -647,7 +647,7 @@ static int qcom_swrm_init(struct qcom_swrm_ctrl *ctrl)
 		ctrl->reg_write(ctrl, SWRM_INTERRUPT_CPU_EN,
 				SWRM_INTERRUPT_STATUS_RMSK);
 	}
-	ctrl->slave_status = 0;
+	ctrl->peripheral_status = 0;
 	ctrl->reg_read(ctrl, SWRM_COMP_PARAMS, &val);
 	ctrl->rd_fifo_depth = FIELD_GET(SWRM_COMP_PARAMS_RD_FIFO_DEPTH, val);
 	ctrl->wr_fifo_depth = FIELD_GET(SWRM_COMP_PARAMS_WR_FIFO_DEPTH, val);
@@ -806,10 +806,10 @@ static int qcom_swrm_compute_params(struct sdw_bus *bus)
 {
 	struct qcom_swrm_ctrl *ctrl = to_qcom_sdw(bus);
 	struct sdw_manager_runtime *m_rt;
-	struct sdw_slave_runtime *s_rt;
+	struct sdw_peripheral_runtime *peri_rt;
 	struct sdw_port_runtime *p_rt;
 	struct qcom_swrm_port_config *pcfg;
-	struct sdw_slave *slave;
+	struct sdw_peripheral *peripheral;
 	unsigned int m_port;
 	int i = 1;
 
@@ -826,10 +826,10 @@ static int qcom_swrm_compute_params(struct sdw_bus *bus)
 
 		}
 
-		list_for_each_entry(s_rt, &m_rt->slave_rt_list, m_rt_node) {
-			slave = s_rt->slave;
-			list_for_each_entry(p_rt, &s_rt->port_list, port_node) {
-				m_port = slave->m_port_map[p_rt->num];
+		list_for_each_entry(peri_rt, &m_rt->peripheral_rt_list, m_rt_node) {
+			peripheral = peri_rt->peripheral;
+			list_for_each_entry(p_rt, &peri_rt->port_list, port_node) {
+				m_port = peripheral->m_port_map[p_rt->num];
 				/* port config starts at offset 0 so -1 from actual port number */
 				if (m_port)
 					pcfg = &ctrl->pconfig[m_port];
@@ -895,9 +895,9 @@ static int qcom_swrm_stream_alloc_ports(struct qcom_swrm_ctrl *ctrl,
 	struct sdw_port_config pconfig[QCOM_SDW_MAX_PORTS];
 	struct sdw_stream_config sconfig;
 	struct sdw_manager_runtime *m_rt;
-	struct sdw_slave_runtime *s_rt;
+	struct sdw_peripheral_runtime *peri_rt;
 	struct sdw_port_runtime *p_rt;
-	struct sdw_slave *slave;
+	struct sdw_peripheral *peripheral;
 	unsigned long *port_mask;
 	int i, maxport, pn, nports = 0, ret = 0;
 	unsigned int m_port;
@@ -912,10 +912,10 @@ static int qcom_swrm_stream_alloc_ports(struct qcom_swrm_ctrl *ctrl,
 			port_mask = &ctrl->din_port_mask;
 		}
 
-		list_for_each_entry(s_rt, &m_rt->slave_rt_list, m_rt_node) {
-			slave = s_rt->slave;
-			list_for_each_entry(p_rt, &s_rt->port_list, port_node) {
-				m_port = slave->m_port_map[p_rt->num];
+		list_for_each_entry(peri_rt, &m_rt->peripheral_rt_list, m_rt_node) {
+			peripheral = peri_rt->peripheral;
+			list_for_each_entry(p_rt, &peri_rt->port_list, port_node) {
+				m_port = peripheral->m_port_map[p_rt->num];
 				/* Port numbers start from 1 - 14*/
 				if (m_port)
 					pn = m_port;

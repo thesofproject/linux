@@ -188,9 +188,9 @@ static void rt700_jack_detect_handler(struct work_struct *work)
 		rt700->jack_type = 0;
 	}
 
-	dev_dbg(&rt700->slave->dev,
+	dev_dbg(&rt700->peripheral->dev,
 		"in %s, jack_type=0x%x\n", __func__, rt700->jack_type);
-	dev_dbg(&rt700->slave->dev,
+	dev_dbg(&rt700->peripheral->dev,
 		"in %s, btn_type=0x%x\n", __func__, btn_type);
 
 	snd_soc_jack_report(rt700->hs_jack, rt700->jack_type | btn_type,
@@ -245,7 +245,7 @@ static void rt700_btn_check_handler(struct work_struct *work)
 	if ((reg & 0xf0) == 0xf0)
 		btn_type = 0;
 
-	dev_dbg(&rt700->slave->dev,
+	dev_dbg(&rt700->peripheral->dev,
 		"%s, btn_type=0x%x\n",	__func__, btn_type);
 	snd_soc_jack_report(rt700->hs_jack, rt700->jack_type | btn_type,
 			SND_JACK_HEADSET |
@@ -290,7 +290,7 @@ static void rt700_jack_init(struct rt700_priv *rt700)
 		rt700_index_write(rt700->regmap, 0x10, 0x2420);
 		rt700_index_write(rt700->regmap, 0x19, 0x2e11);
 
-		dev_dbg(&rt700->slave->dev, "in %s enable\n", __func__);
+		dev_dbg(&rt700->peripheral->dev, "in %s enable\n", __func__);
 
 		mod_delayed_work(system_power_efficient_wq,
 			&rt700->jack_detect_work, msecs_to_jiffies(250));
@@ -302,7 +302,7 @@ static void rt700_jack_init(struct rt700_priv *rt700)
 		regmap_write(rt700->regmap,
 			RT700_SET_INLINE_UNSOLICITED_ENABLE, 0x00);
 
-		dev_dbg(&rt700->slave->dev, "in %s disable\n", __func__);
+		dev_dbg(&rt700->peripheral->dev, "in %s disable\n", __func__);
 	}
 
 	/* power off */
@@ -319,7 +319,7 @@ static int rt700_set_jack_detect(struct snd_soc_component *component,
 	rt700->hs_jack = hs_jack;
 
 	if (!rt700->hw_init) {
-		dev_dbg(&rt700->slave->dev,
+		dev_dbg(&rt700->peripheral->dev,
 			"%s hw_init not ready yet\n", __func__);
 		return 0;
 	}
@@ -907,7 +907,7 @@ static int rt700_pcm_hw_params(struct snd_pcm_substream *substream,
 	if (!stream)
 		return -EINVAL;
 
-	if (!rt700->slave)
+	if (!rt700->peripheral)
 		return -EINVAL;
 
 	/* SoundWire specific configuration */
@@ -940,7 +940,7 @@ static int rt700_pcm_hw_params(struct snd_pcm_substream *substream,
 	port_config.ch_mask = (1 << (num_channels)) - 1;
 	port_config.num = port;
 
-	retval = sdw_stream_add_slave(rt700->slave, &stream_config,
+	retval = sdw_stream_add_peripheral(rt700->peripheral, &stream_config,
 					&port_config, 1, stream->sdw_stream);
 	if (retval) {
 		dev_err(dai->dev, "Unable to configure port\n");
@@ -991,10 +991,10 @@ static int rt700_pcm_hw_free(struct snd_pcm_substream *substream,
 	struct sdw_stream_data *stream =
 		snd_soc_dai_get_dma_data(dai, substream);
 
-	if (!rt700->slave)
+	if (!rt700->peripheral)
 		return -EINVAL;
 
-	sdw_stream_remove_slave(rt700->slave, stream->sdw_stream);
+	sdw_stream_remove_peripheral(rt700->peripheral, stream->sdw_stream);
 	return 0;
 }
 
@@ -1097,7 +1097,7 @@ int rt700_clock_config(struct device *dev)
 }
 
 int rt700_init(struct device *dev, struct regmap *sdw_regmap,
-			struct regmap *regmap, struct sdw_slave *slave)
+			struct regmap *regmap, struct sdw_peripheral *peripheral)
 
 {
 	struct rt700_priv *rt700;
@@ -1108,7 +1108,7 @@ int rt700_init(struct device *dev, struct regmap *sdw_regmap,
 		return -ENOMEM;
 
 	dev_set_drvdata(dev, rt700);
-	rt700->slave = slave;
+	rt700->peripheral = peripheral;
 	rt700->sdw_regmap = sdw_regmap;
 	rt700->regmap = regmap;
 
@@ -1124,12 +1124,12 @@ int rt700_init(struct device *dev, struct regmap *sdw_regmap,
 				rt700_dai,
 				ARRAY_SIZE(rt700_dai));
 
-	dev_dbg(&slave->dev, "%s\n", __func__);
+	dev_dbg(&peripheral->dev, "%s\n", __func__);
 
 	return ret;
 }
 
-int rt700_io_init(struct device *dev, struct sdw_slave *slave)
+int rt700_io_init(struct device *dev, struct sdw_peripheral *peripheral)
 {
 	struct rt700_priv *rt700 = dev_get_drvdata(dev);
 
@@ -1142,23 +1142,23 @@ int rt700_io_init(struct device *dev, struct sdw_slave *slave)
 	}
 
 	/*
-	 * PM runtime is only enabled when a Slave reports as Attached
+	 * PM runtime is only enabled when a Peripheral reports as Attached
 	 */
 	if (!rt700->first_hw_init) {
 		/* set autosuspend parameters */
-		pm_runtime_set_autosuspend_delay(&slave->dev, 3000);
-		pm_runtime_use_autosuspend(&slave->dev);
+		pm_runtime_set_autosuspend_delay(&peripheral->dev, 3000);
+		pm_runtime_use_autosuspend(&peripheral->dev);
 
 		/* update count of parent 'active' children */
-		pm_runtime_set_active(&slave->dev);
+		pm_runtime_set_active(&peripheral->dev);
 
 		/* make sure the device does not suspend immediately */
-		pm_runtime_mark_last_busy(&slave->dev);
+		pm_runtime_mark_last_busy(&peripheral->dev);
 
-		pm_runtime_enable(&slave->dev);
+		pm_runtime_enable(&peripheral->dev);
 	}
 
-	pm_runtime_get_noresume(&slave->dev);
+	pm_runtime_get_noresume(&peripheral->dev);
 
 	/* reset */
 	regmap_write(rt700->regmap, 0xff01, 0x0000);
@@ -1224,13 +1224,13 @@ int rt700_io_init(struct device *dev, struct sdw_slave *slave)
 	} else
 		rt700->first_hw_init = true;
 
-	/* Mark Slave initialization complete */
+	/* Mark Peripheral initialization complete */
 	rt700->hw_init = true;
 
-	pm_runtime_mark_last_busy(&slave->dev);
-	pm_runtime_put_autosuspend(&slave->dev);
+	pm_runtime_mark_last_busy(&peripheral->dev);
+	pm_runtime_put_autosuspend(&peripheral->dev);
 
-	dev_dbg(&slave->dev, "%s hw_init complete\n", __func__);
+	dev_dbg(&peripheral->dev, "%s hw_init complete\n", __func__);
 
 	return 0;
 }

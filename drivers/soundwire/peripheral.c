@@ -8,92 +8,91 @@
 #include "bus.h"
 #include "sysfs_local.h"
 
-static void sdw_slave_release(struct device *dev)
+static void sdw_peripheral_release(struct device *dev)
 {
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);
 
-	kfree(slave);
+	kfree(peripheral);
 }
 
-struct device_type sdw_slave_type = {
-	.name =		"sdw_slave",
-	.release =	sdw_slave_release,
-	.uevent =	sdw_slave_uevent,
+struct device_type sdw_peripheral_type = {
+	.name =		"sdw_peripheral",
+	.release =	sdw_peripheral_release,
+	.uevent =	sdw_peripheral_uevent,
 };
 
-int sdw_slave_add(struct sdw_bus *bus,
-		  struct sdw_slave_id *id, struct fwnode_handle *fwnode)
+int sdw_peripheral_add(struct sdw_bus *bus,
+		       struct sdw_peripheral_id *id, struct fwnode_handle *fwnode)
 {
-	struct sdw_slave *slave;
+	struct sdw_peripheral *peripheral;
 	int ret;
 	int i;
 
-	slave = kzalloc(sizeof(*slave), GFP_KERNEL);
-	if (!slave)
+	peripheral = kzalloc(sizeof(*peripheral), GFP_KERNEL);
+	if (!peripheral)
 		return -ENOMEM;
 
 	/* Initialize data structure */
-	memcpy(&slave->id, id, sizeof(*id));
-	slave->dev.parent = bus->dev;
-	slave->dev.fwnode = fwnode;
+	memcpy(&peripheral->id, id, sizeof(*id));
+	peripheral->dev.parent = bus->dev;
+	peripheral->dev.fwnode = fwnode;
 
 	if (id->unique_id == SDW_IGNORED_UNIQUE_ID) {
 		/* name shall be sdw:link:mfg:part:class */
-		dev_set_name(&slave->dev, "sdw:%x:%x:%x:%x",
+		dev_set_name(&peripheral->dev, "sdw:%x:%x:%x:%x",
 			     bus->link_id, id->mfg_id, id->part_id,
 			     id->class_id);
 	} else {
 		/* name shall be sdw:link:mfg:part:class:unique */
-		dev_set_name(&slave->dev, "sdw:%x:%x:%x:%x:%x",
+		dev_set_name(&peripheral->dev, "sdw:%x:%x:%x:%x:%x",
 			     bus->link_id, id->mfg_id, id->part_id,
 			     id->class_id, id->unique_id);
 	}
 
-	slave->dev.bus = &sdw_bus_type;
-	slave->dev.of_node = of_node_get(to_of_node(fwnode));
-	slave->dev.type = &sdw_slave_type;
-	slave->dev.groups = sdw_slave_status_attr_groups;
-	slave->bus = bus;
-	slave->status = SDW_SLAVE_UNATTACHED;
-	init_completion(&slave->enumeration_complete);
-	init_completion(&slave->initialization_complete);
-	slave->dev_num = 0;
-	init_completion(&slave->probe_complete);
-	slave->probed = false;
-	slave->first_interrupt_done = false;
+	peripheral->dev.bus = &sdw_bus_type;
+	peripheral->dev.of_node = of_node_get(to_of_node(fwnode));
+	peripheral->dev.type = &sdw_peripheral_type;
+	peripheral->dev.groups = sdw_peripheral_status_attr_groups;
+	peripheral->bus = bus;
+	peripheral->status = SDW_PERIPHERAL_UNATTACHED;
+	init_completion(&peripheral->enumeration_complete);
+	init_completion(&peripheral->initialization_complete);
+	peripheral->dev_num = 0;
+	init_completion(&peripheral->probe_complete);
+	peripheral->probed = false;
+	peripheral->first_interrupt_done = false;
 
 	for (i = 0; i < SDW_MAX_PORTS; i++)
-		init_completion(&slave->port_ready[i]);
+		init_completion(&peripheral->port_ready[i]);
 
-
-	ret = device_register(&slave->dev);
+	ret = device_register(&peripheral->dev);
 	if (ret) {
-		dev_err(bus->dev, "Failed to add slave: ret %d\n", ret);
+		dev_err(bus->dev, "Failed to add peripheral: ret %d\n", ret);
 
 		/*
 		 * On err, don't free but drop ref as this will be freed
 		 * when release method is invoked.
 		 */
-		put_device(&slave->dev);
+		put_device(&peripheral->dev);
 
 		return ret;
 	}
 
 	mutex_lock(&bus->bus_lock);
-	list_add_tail(&slave->node, &bus->slaves);
+	list_add_tail(&peripheral->node, &bus->peripherals);
 	mutex_unlock(&bus->bus_lock);
 
-	sdw_slave_debugfs_init(slave);
+	sdw_peripheral_debugfs_init(peripheral);
 
 	return ret;
 }
-EXPORT_SYMBOL(sdw_slave_add);
+EXPORT_SYMBOL(sdw_peripheral_add);
 
 #if IS_ENABLED(CONFIG_ACPI)
 
-static bool find_slave(struct sdw_bus *bus,
-		       struct acpi_device *adev,
-		       struct sdw_slave_id *id)
+static bool find_peripheral(struct sdw_bus *bus,
+			    struct acpi_device *adev,
+			    struct sdw_peripheral_id *id)
 {
 	u64 addr;
 	unsigned int link_id;
@@ -121,18 +120,18 @@ static bool find_slave(struct sdw_bus *bus,
 	if (link_id != bus->link_id)
 		return false;
 
-	sdw_extract_slave_id(bus, addr, id);
+	sdw_extract_peripheral_id(bus, addr, id);
 
 	return true;
 }
 
 /*
- * sdw_acpi_find_slaves() - Find Slave devices in Manager ACPI node
+ * sdw_acpi_find_peripherals() - Find Peripheral devices in Manager ACPI node
  * @bus: SDW bus instance
  *
- * Scans Manager ACPI node for SDW child Slave devices and registers it.
+ * Scans Manager ACPI node for SDW child Peripheral devices and registers it.
  */
-int sdw_acpi_find_slaves(struct sdw_bus *bus)
+int sdw_acpi_find_peripherals(struct sdw_bus *bus)
 {
 	struct acpi_device *adev, *parent;
 	struct acpi_device *adev2, *parent2;
@@ -144,11 +143,11 @@ int sdw_acpi_find_slaves(struct sdw_bus *bus)
 	}
 
 	list_for_each_entry(adev, &parent->children, node) {
-		struct sdw_slave_id id;
-		struct sdw_slave_id id2;
+		struct sdw_peripheral_id id;
+		struct sdw_peripheral_id id2;
 		bool ignore_unique_id = true;
 
-		if (!find_slave(bus, adev, &id))
+		if (!find_peripheral(bus, adev, &id))
 			continue;
 
 		/* brute-force O(N^2) search for duplicates */
@@ -158,7 +157,7 @@ int sdw_acpi_find_slaves(struct sdw_bus *bus)
 			if (adev == adev2)
 				continue;
 
-			if (!find_slave(bus, adev2, &id2))
+			if (!find_peripheral(bus, adev2, &id2))
 				continue;
 
 			if (id.sdw_version != id2.sdw_version ||
@@ -169,12 +168,12 @@ int sdw_acpi_find_slaves(struct sdw_bus *bus)
 
 			if (id.unique_id != id2.unique_id) {
 				dev_dbg(bus->dev,
-					"Valid unique IDs 0x%x 0x%x for Slave mfg_id 0x%04x, part_id 0x%04x\n",
+					"Valid unique IDs 0x%x 0x%x for Peripheral mfg_id 0x%04x, part_id 0x%04x\n",
 					id.unique_id, id2.unique_id, id.mfg_id, id.part_id);
 				ignore_unique_id = false;
 			} else {
 				dev_err(bus->dev,
-					"Invalid unique IDs 0x%x 0x%x for Slave mfg_id 0x%04x, part_id 0x%04x\n",
+					"Invalid unique IDs 0x%x 0x%x for Peripheral mfg_id 0x%04x, part_id 0x%04x\n",
 					id.unique_id, id2.unique_id, id.mfg_id, id.part_id);
 				return -ENODEV;
 			}
@@ -184,10 +183,10 @@ int sdw_acpi_find_slaves(struct sdw_bus *bus)
 			id.unique_id = SDW_IGNORED_UNIQUE_ID;
 
 		/*
-		 * don't error check for sdw_slave_add as we want to continue
-		 * adding Slaves
+		 * don't error check for sdw_peripheral_add as we want to continue
+		 * adding Peripherals
 		 */
-		sdw_slave_add(bus, &id, acpi_fwnode_handle(adev));
+		sdw_peripheral_add(bus, &id, acpi_fwnode_handle(adev));
 	}
 
 	return 0;
@@ -196,12 +195,12 @@ int sdw_acpi_find_slaves(struct sdw_bus *bus)
 #endif
 
 /*
- * sdw_of_find_slaves() - Find Slave devices in manager device tree node
+ * sdw_of_find_peripherals() - Find Peripheral devices in manager device tree node
  * @bus: SDW bus instance
  *
- * Scans Manager DT node for SDW child Slave devices and registers it.
+ * Scans Manager DT node for SDW child Peripheral devices and registers it.
  */
-int sdw_of_find_slaves(struct sdw_bus *bus)
+int sdw_of_find_peripherals(struct sdw_bus *bus)
 {
 	struct device *dev = bus->dev;
 	struct device_node *node;
@@ -210,7 +209,7 @@ int sdw_of_find_slaves(struct sdw_bus *bus)
 		int link_id, ret, len;
 		unsigned int sdw_version;
 		const char *compat = NULL;
-		struct sdw_slave_id id;
+		struct sdw_peripheral_id id;
 		const __be32 *addr;
 
 		compat = of_get_property(node, "compatible", NULL);
@@ -240,7 +239,7 @@ int sdw_of_find_slaves(struct sdw_bus *bus)
 		if (link_id != bus->link_id)
 			continue;
 
-		sdw_slave_add(bus, &id, of_fwnode_handle(node));
+		sdw_peripheral_add(bus, &id, of_fwnode_handle(node));
 	}
 
 	return 0;

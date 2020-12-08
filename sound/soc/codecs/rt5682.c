@@ -2854,7 +2854,7 @@ static int rt5682_register_dai_clks(struct snd_soc_component *component)
 static int rt5682_probe(struct snd_soc_component *component)
 {
 	struct rt5682_priv *rt5682 = snd_soc_component_get_drvdata(component);
-	struct sdw_slave *slave;
+	struct sdw_peripheral *peripheral;
 	unsigned long time;
 	struct snd_soc_dapm_context *dapm = &component->dapm;
 
@@ -2864,12 +2864,12 @@ static int rt5682_probe(struct snd_soc_component *component)
 	rt5682->component = component;
 
 	if (rt5682->is_sdw) {
-		slave = rt5682->slave;
+		peripheral = rt5682->peripheral;
 		time = wait_for_completion_timeout(
-			&slave->initialization_complete,
+			&peripheral->initialization_complete,
 			msecs_to_jiffies(RT5682_PROBE_TIMEOUT));
 		if (!time) {
-			dev_err(&slave->dev, "Initialization not complete, timed out\n");
+			dev_err(&peripheral->dev, "Initialization not complete, timed out\n");
 			return -ETIMEDOUT;
 		}
 	} else {

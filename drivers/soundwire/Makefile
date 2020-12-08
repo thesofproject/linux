@@ -4,8 +4,8 @@
 #
 
 #Bus Objs
-soundwire-bus-y := bus_type.o bus.o manager.o slave.o mipi_disco.o stream.o  \
-			sysfs_slave.o sysfs_slave_dpn.o
+soundwire-bus-y := bus_type.o bus.o manager.o peripheral.o mipi_disco.o stream.o  \
+			sysfs_peripheral.o sysfs_peripheral_dpn.o
 obj-$(CONFIG_SOUNDWIRE) += soundwire-bus.o
 
 soundwire-generic-allocation-objs := generic_bandwidth_allocation.o

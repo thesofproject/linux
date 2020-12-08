@@ -411,27 +411,27 @@ int hda_to_sdw(unsigned int nid, unsigned int verb, unsigned int payload,
 }
 EXPORT_SYMBOL(hda_to_sdw);
 
-static int rt715_update_status(struct sdw_slave *slave,
-				enum sdw_slave_status status)
+static int rt715_update_status(struct sdw_peripheral *peripheral,
+				enum sdw_peripheral_status status)
 {
-	struct rt715_priv *rt715 = dev_get_drvdata(&slave->dev);
+	struct rt715_priv *rt715 = dev_get_drvdata(&peripheral->dev);
 
 	/* Update the status */
 	rt715->status = status;
 	/*
-	 * Perform initialization only if slave status is present and
+	 * Perform initialization only if peripheral status is present and
 	 * hw_init flag is false
 	 */
-	if (rt715->hw_init || rt715->status != SDW_SLAVE_ATTACHED)
+	if (rt715->hw_init || rt715->status != SDW_PERIPHERAL_ATTACHED)
 		return 0;
 
-	/* perform I/O transfers required for Slave initialization */
-	return rt715_io_init(&slave->dev, slave);
+	/* perform I/O transfers required for Peripheral initialization */
+	return rt715_io_init(&peripheral->dev, peripheral);
 }
 
-static int rt715_read_prop(struct sdw_slave *slave)
+static int rt715_read_prop(struct sdw_peripheral *peripheral)
 {
-	struct sdw_slave_prop *prop = &slave->prop;
+	struct sdw_peripheral_prop *prop = &peripheral->prop;
 	int nval, i;
 	u32 bit;
 	unsigned long addr;
@@ -439,7 +439,7 @@ static int rt715_read_prop(struct sdw_slave *slave)
 
 	prop->scp_int1_mask = SDW_SCP_INT1_IMPL_DEF | SDW_SCP_INT1_BUS_CLASH |
 		SDW_SCP_INT1_PARITY;
-	prop->quirks = SDW_SLAVE_QUIRKS_INVALID_INITIAL_PARITY;
+	prop->quirks = SDW_PERIPHERAL_QUIRKS_INVALID_INITIAL_PARITY;
 
 	prop->paging_support = false;
 
@@ -448,7 +448,7 @@ static int rt715_read_prop(struct sdw_slave *slave)
 	prop->sink_ports = 0x0;	/* BITMAP:  00000000 */
 
 	nval = hweight32(prop->source_ports);
-	prop->src_dpn_prop = devm_kcalloc(&slave->dev, nval,
+	prop->src_dpn_prop = devm_kcalloc(&peripheral->dev, nval,
 					sizeof(*prop->src_dpn_prop),
 					GFP_KERNEL);
 	if (!prop->src_dpn_prop)
@@ -473,50 +473,50 @@ static int rt715_read_prop(struct sdw_slave *slave)
 	return 0;
 }
 
-static int rt715_bus_config(struct sdw_slave *slave,
+static int rt715_bus_config(struct sdw_peripheral *peripheral,
 				struct sdw_bus_params *params)
 {
-	struct rt715_priv *rt715 = dev_get_drvdata(&slave->dev);
+	struct rt715_priv *rt715 = dev_get_drvdata(&peripheral->dev);
 	int ret;
 
 	memcpy(&rt715->params, params, sizeof(*params));
 
-	ret = rt715_clock_config(&slave->dev);
+	ret = rt715_clock_config(&peripheral->dev);
 	if (ret < 0)
-		dev_err(&slave->dev, "Invalid clk config");
+		dev_err(&peripheral->dev, "Invalid clk config");
 
 	return 0;
 }
 
-static const struct sdw_slave_ops rt715_slave_ops = {
+static const struct sdw_peripheral_ops rt715_peripheral_ops = {
 	.read_prop = rt715_read_prop,
 	.update_status = rt715_update_status,
 	.bus_config = rt715_bus_config,
 };
 
-static int rt715_sdw_probe(struct sdw_slave *slave,
+static int rt715_sdw_probe(struct sdw_peripheral *peripheral,
 			   const struct sdw_device_id *id)
 {
 	struct regmap *sdw_regmap, *regmap;
 
 	/* Regmap Initialization */
-	sdw_regmap = devm_regmap_init_sdw(slave, &rt715_sdw_regmap);
+	sdw_regmap = devm_regmap_init_sdw(peripheral, &rt715_sdw_regmap);
 	if (IS_ERR(sdw_regmap))
 		return PTR_ERR(sdw_regmap);
 
-	regmap = devm_regmap_init(&slave->dev, NULL, &slave->dev,
+	regmap = devm_regmap_init(&peripheral->dev, NULL, &peripheral->dev,
 		&rt715_regmap);
 	if (IS_ERR(regmap))
 		return PTR_ERR(regmap);
 
-	rt715_init(&slave->dev, sdw_regmap, regmap, slave);
+	rt715_init(&peripheral->dev, sdw_regmap, regmap, peripheral);
 
 	return 0;
 }
 
 static const struct sdw_device_id rt715_id[] = {
-	SDW_SLAVE_ENTRY_EXT(0x025d, 0x714, 0x2, 0, 0),
-	SDW_SLAVE_ENTRY_EXT(0x025d, 0x715, 0x2, 0, 0),
+	SDW_PERIPHERAL_ENTRY_EXT(0x025d, 0x714, 0x2, 0, 0),
+	SDW_PERIPHERAL_ENTRY_EXT(0x025d, 0x715, 0x2, 0, 0),
 	{},
 };
 MODULE_DEVICE_TABLE(sdw, rt715_id);
@@ -537,25 +537,25 @@ static int __maybe_unused rt715_dev_suspend(struct device *dev)
 
 static int __maybe_unused rt715_dev_resume(struct device *dev)
 {
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);
 	struct rt715_priv *rt715 = dev_get_drvdata(dev);
 	unsigned long time;
 
 	if (!rt715->hw_init)
 		return 0;
 
-	if (!slave->unattach_request)
+	if (!peripheral->unattach_request)
 		goto regmap_sync;
 
-	time = wait_for_completion_timeout(&slave->initialization_complete,
+	time = wait_for_completion_timeout(&peripheral->initialization_complete,
 					   msecs_to_jiffies(RT715_PROBE_TIMEOUT));
 	if (!time) {
-		dev_err(&slave->dev, "Initialization not complete, timed out\n");
+		dev_err(&peripheral->dev, "Initialization not complete, timed out\n");
 		return -ETIMEDOUT;
 	}
 
 regmap_sync:
-	slave->unattach_request = 0;
+	peripheral->unattach_request = 0;
 	regcache_cache_only(rt715->regmap, false);
 	regcache_sync_region(rt715->regmap, 0x3000, 0x8fff);
 	regcache_sync_region(rt715->regmap, 0x752039, 0x752039);
@@ -575,7 +575,7 @@ static struct sdw_driver rt715_sdw_driver = {
 		   .pm = &rt715_pm,
 		   },
 	.probe = rt715_sdw_probe,
-	.ops = &rt715_slave_ops,
+	.ops = &rt715_peripheral_ops,
 	.id_table = rt715_id,
 };
 module_sdw_driver(rt715_sdw_driver);

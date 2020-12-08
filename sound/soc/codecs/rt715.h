@@ -14,11 +14,11 @@ struct rt715_priv {
 	struct regmap *regmap;
 	struct regmap *sdw_regmap;
 	struct snd_soc_codec *codec;
-	struct sdw_slave *slave;
+	struct sdw_peripheral *peripheral;
 	int dbg_nid;
 	int dbg_vid;
 	int dbg_payload;
-	enum sdw_slave_status status;
+	enum sdw_peripheral_status status;
 	struct sdw_bus_params params;
 	bool hw_init;
 	bool first_hw_init;
@@ -211,9 +211,9 @@ enum {
 
 #define RT715_POWER_UP_DELAY_MS 400
 
-int rt715_io_init(struct device *dev, struct sdw_slave *slave);
+int rt715_io_init(struct device *dev, struct sdw_peripheral *peripheral);
 int rt715_init(struct device *dev, struct regmap *sdw_regmap,
-	struct regmap *regmap, struct sdw_slave *slave);
+	struct regmap *regmap, struct sdw_peripheral *peripheral);
 
 int hda_to_sdw(unsigned int nid, unsigned int verb, unsigned int payload,
 	       unsigned int *sdw_addr_h, unsigned int *sdw_data_h,

@@ -81,11 +81,11 @@ MODULE_PARM_DESC(cdns_mcp_int_mask, "Cadence MCP IntMask");
 #define CDNS_MCP_INT_IRQ			BIT(31)
 #define CDNS_MCP_INT_RESERVED1			GENMASK(30, 17)
 #define CDNS_MCP_INT_WAKEUP			BIT(16)
-#define CDNS_MCP_INT_SLAVE_RSVD			BIT(15)
-#define CDNS_MCP_INT_SLAVE_ALERT		BIT(14)
-#define CDNS_MCP_INT_SLAVE_ATTACH		BIT(13)
-#define CDNS_MCP_INT_SLAVE_NATTACH		BIT(12)
-#define CDNS_MCP_INT_SLAVE_MASK			GENMASK(15, 12)
+#define CDNS_MCP_INT_PERIPHERAL_RSVD		BIT(15)
+#define CDNS_MCP_INT_PERIPHERAL_ALERT		BIT(14)
+#define CDNS_MCP_INT_PERIPHERAL_ATTACH		BIT(13)
+#define CDNS_MCP_INT_PERIPHERAL_NATTACH		BIT(12)
+#define CDNS_MCP_INT_PERIPHERAL_MASK		GENMASK(15, 12)
 #define CDNS_MCP_INT_DPINT			BIT(11)
 #define CDNS_MCP_INT_CTRL_CLASH			BIT(10)
 #define CDNS_MCP_INT_DATA_CLASH			BIT(9)
@@ -100,23 +100,23 @@ MODULE_PARM_DESC(cdns_mcp_int_mask, "Cadence MCP IntMask");
 
 #define CDNS_MCP_INTSET				0x4C
 
-#define CDNS_MCP_SLAVE_STAT			0x50
-#define CDNS_MCP_SLAVE_STAT_MASK		GENMASK(1, 0)
+#define CDNS_MCP_PERIPHERAL_STAT		0x50
+#define CDNS_MCP_PERIPHERAL_STAT_MASK		GENMASK(1, 0)
 
-#define CDNS_MCP_SLAVE_INTSTAT0			0x54
-#define CDNS_MCP_SLAVE_INTSTAT1			0x58
-#define CDNS_MCP_SLAVE_INTSTAT_NPRESENT		BIT(0)
-#define CDNS_MCP_SLAVE_INTSTAT_ATTACHED		BIT(1)
-#define CDNS_MCP_SLAVE_INTSTAT_ALERT		BIT(2)
-#define CDNS_MCP_SLAVE_INTSTAT_RESERVED		BIT(3)
-#define CDNS_MCP_SLAVE_STATUS_BITS		GENMASK(3, 0)
-#define CDNS_MCP_SLAVE_STATUS_NUM		4
+#define CDNS_MCP_PERIPHERAL_INTSTAT0		0x54
+#define CDNS_MCP_PERIPHERAL_INTSTAT1		0x58
+#define CDNS_MCP_PERIPHERAL_INTSTAT_NPRESENT	BIT(0)
+#define CDNS_MCP_PERIPHERAL_INTSTAT_ATTACHED	BIT(1)
+#define CDNS_MCP_PERIPHERAL_INTSTAT_ALERT	BIT(2)
+#define CDNS_MCP_PERIPHERAL_INTSTAT_RESERVED	BIT(3)
+#define CDNS_MCP_PERIPHERAL_STATUS_BITS		GENMASK(3, 0)
+#define CDNS_MCP_PERIPHERAL_STATUS_NUM		4
 
-#define CDNS_MCP_SLAVE_INTMASK0			0x5C
-#define CDNS_MCP_SLAVE_INTMASK1			0x60
+#define CDNS_MCP_PERIPHERAL_INTMASK0		0x5C
+#define CDNS_MCP_PERIPHERAL_INTMASK1		0x60
 
-#define CDNS_MCP_SLAVE_INTMASK0_MASK		GENMASK(31, 0)
-#define CDNS_MCP_SLAVE_INTMASK1_MASK		GENMASK(15, 0)
+#define CDNS_MCP_PERIPHERAL_INTMASK0_MASK	GENMASK(31, 0)
+#define CDNS_MCP_PERIPHERAL_INTMASK1_MASK	GENMASK(15, 0)
 
 #define CDNS_MCP_PORT_INTSTAT			0x64
 #define CDNS_MCP_PDI_STAT			0x6C
@@ -384,7 +384,7 @@ static int cdns_parity_error_injection(void *data, u64 value)
 
 	/*
 	 * Resume Manager device. If this results in a bus reset, the
-	 * Slave devices will re-attach and be re-enumerated.
+	 * Peripheral devices will re-attach and be re-enumerated.
 	 */
 	ret = pm_runtime_get_sync(bus->dev);
 	if (ret < 0 && ret != -EACCES) {
@@ -396,7 +396,7 @@ static int cdns_parity_error_injection(void *data, u64 value)
 	}
 
 	/*
-	 * wait long enough for Slave(s) to be in steady state. This
+	 * wait long enough for Peripheral(s) to be in steady state. This
 	 * does not need to be super precise.
 	 */
 	msleep(200);
@@ -439,7 +439,7 @@ static int cdns_parity_error_injection(void *data, u64 value)
 
 	/*
 	 * allow Manager device to enter pm_runtime suspend. This may
-	 * also result in Slave devices suspending.
+	 * also result in Peripheral devices suspending.
 	 */
 	pm_runtime_mark_last_busy(bus->dev);
 	pm_runtime_put_autosuspend(bus->dev);
@@ -492,12 +492,12 @@ cdns_fill_msg_resp(struct sdw_cdns *cdns,
 	}
 
 	if (nack) {
-		dev_err_ratelimited(cdns->dev, "Msg NACKed for Slave %d\n", msg->dev_num);
+		dev_err_ratelimited(cdns->dev, "Msg NACKed for Peripheral %d\n", msg->dev_num);
 		return SDW_CMD_FAIL;
 	}
 
 	if (no_ack) {
-		dev_dbg_ratelimited(cdns->dev, "Msg ignored for Slave %d\n", msg->dev_num);
+		dev_dbg_ratelimited(cdns->dev, "Msg ignored for Peripheral %d\n", msg->dev_num);
 		return SDW_CMD_IGNORED;
 	}
 
@@ -607,13 +607,13 @@ cdns_program_scp_addr(struct sdw_cdns *cdns, struct sdw_msg *msg)
 	/* For NACK, NO ack, don't return err if we are in Broadcast mode */
 	if (nack) {
 		dev_err_ratelimited(cdns->dev,
-				    "SCP_addrpage NACKed for Slave %d\n", msg->dev_num);
+				    "SCP_addrpage NACKed for Peripheral %d\n", msg->dev_num);
 		return SDW_CMD_FAIL;
 	}
 
 	if (no_ack) {
 		dev_dbg_ratelimited(cdns->dev,
-				    "SCP_addrpage ignored for Slave %d\n", msg->dev_num);
+				    "SCP_addrpage ignored for Peripheral %d\n", msg->dev_num);
 		return SDW_CMD_IGNORED;
 	}
 
@@ -733,82 +733,82 @@ static void cdns_read_response(struct sdw_cdns *cdns)
 	}
 }
 
-static int cdns_update_slave_status(struct sdw_cdns *cdns,
-				    u64 slave_intstat)
+static int cdns_update_peripheral_status(struct sdw_cdns *cdns,
+					 u64 peripheral_intstat)
 {
-	enum sdw_slave_status status[SDW_MAX_DEVICES + 1];
-	bool is_slave = false;
+	enum sdw_peripheral_status status[SDW_MAX_DEVICES + 1];
+	bool is_peripheral = false;
 	u32 mask;
 	int i, set_status;
 
 	memset(status, 0, sizeof(status));
 
 	for (i = 0; i <= SDW_MAX_DEVICES; i++) {
-		mask = (slave_intstat >> (i * CDNS_MCP_SLAVE_STATUS_NUM)) &
-			CDNS_MCP_SLAVE_STATUS_BITS;
+		mask = (peripheral_intstat >> (i * CDNS_MCP_PERIPHERAL_STATUS_NUM)) &
+			CDNS_MCP_PERIPHERAL_STATUS_BITS;
 		if (!mask)
 			continue;
 
-		is_slave = true;
+		is_peripheral = true;
 		set_status = 0;
 
-		if (mask & CDNS_MCP_SLAVE_INTSTAT_RESERVED) {
-			status[i] = SDW_SLAVE_RESERVED;
+		if (mask & CDNS_MCP_PERIPHERAL_INTSTAT_RESERVED) {
+			status[i] = SDW_PERIPHERAL_RESERVED;
 			set_status++;
 		}
 
-		if (mask & CDNS_MCP_SLAVE_INTSTAT_ATTACHED) {
-			status[i] = SDW_SLAVE_ATTACHED;
+		if (mask & CDNS_MCP_PERIPHERAL_INTSTAT_ATTACHED) {
+			status[i] = SDW_PERIPHERAL_ATTACHED;
 			set_status++;
 		}
 
-		if (mask & CDNS_MCP_SLAVE_INTSTAT_ALERT) {
-			status[i] = SDW_SLAVE_ALERT;
+		if (mask & CDNS_MCP_PERIPHERAL_INTSTAT_ALERT) {
+			status[i] = SDW_PERIPHERAL_ALERT;
 			set_status++;
 		}
 
-		if (mask & CDNS_MCP_SLAVE_INTSTAT_NPRESENT) {
-			status[i] = SDW_SLAVE_UNATTACHED;
+		if (mask & CDNS_MCP_PERIPHERAL_INTSTAT_NPRESENT) {
+			status[i] = SDW_PERIPHERAL_UNATTACHED;
 			set_status++;
 		}
 
-		/* first check if Slave reported multiple status */
+		/* first check if Peripheral reported multiple status */
 		if (set_status > 1) {
 			u32 val;
 
 			dev_warn_ratelimited(cdns->dev,
-					     "Slave %d reported multiple Status: %d\n",
+					     "Peripheral %d reported multiple Status: %d\n",
 					     i, mask);
 
 			/* check latest status extracted from PING commands */
-			val = cdns_readl(cdns, CDNS_MCP_SLAVE_STAT);
+			val = cdns_readl(cdns, CDNS_MCP_PERIPHERAL_STAT);
 			val >>= (i * 2);
 
 			switch (val & 0x3) {
 			case 0:
-				status[i] = SDW_SLAVE_UNATTACHED;
+				status[i] = SDW_PERIPHERAL_UNATTACHED;
 				break;
 			case 1:
-				status[i] = SDW_SLAVE_ATTACHED;
+				status[i] = SDW_PERIPHERAL_ATTACHED;
 				break;
 			case 2:
-				status[i] = SDW_SLAVE_ALERT;
+				status[i] = SDW_PERIPHERAL_ALERT;
 				break;
 			case 3:
 			default:
-				status[i] = SDW_SLAVE_RESERVED;
+				status[i] = SDW_PERIPHERAL_RESERVED;
 				break;
 			}
 
 			dev_warn_ratelimited(cdns->dev,
-					     "Slave %d status updated to %d\n",
+					     "Peripheral %d status updated to %d\n",
 					     i, status[i]);
 
 		}
 	}
 
-	if (is_slave)
-		return sdw_handle_slave_status(&cdns->bus, status);
+	if (is_peripheral)
+		return sdw_handle_peripheral_status(&cdns->bus, status);
 
 	return 0;
 }
@@ -856,14 +856,14 @@ irqreturn_t sdw_cdns_irq(int irq, void *dev_id)
 	}
 
 	if (int_status & CDNS_MCP_INT_CTRL_CLASH) {
-		/* Slave is driving bit slot during control word */
+		/* Peripheral is driving bit slot during control word */
 		dev_err_ratelimited(cdns->dev, "Bus clash for control word\n");
 	}
 
 	if (int_status & CDNS_MCP_INT_DATA_CLASH) {
 		/*
-		 * Multiple slaves trying to drive bit slot, or issue with
-		 * ownership of data bits or Slave gone bonkers
+		 * Multiple peripherals trying to drive bit slot, or issue with
+		 * ownership of data bits or Peripheral gone bonkers
 		 */
 		dev_err_ratelimited(cdns->dev, "Bus clash for data word\n");
 	}
@@ -881,12 +881,12 @@ irqreturn_t sdw_cdns_irq(int irq, void *dev_id)
 		cdns_writel(cdns, CDNS_MCP_PORT_INTSTAT, port_intstat);
 	}
 
-	if (int_status & CDNS_MCP_INT_SLAVE_MASK) {
-		/* Mask the Slave interrupt and wake thread */
+	if (int_status & CDNS_MCP_INT_PERIPHERAL_MASK) {
+		/* Mask the Peripheral interrupt and wake thread */
 		cdns_updatel(cdns, CDNS_MCP_INTMASK,
-			     CDNS_MCP_INT_SLAVE_MASK, 0);
+			     CDNS_MCP_INT_PERIPHERAL_MASK, 0);
 
-		int_status &= ~CDNS_MCP_INT_SLAVE_MASK;
+		int_status &= ~CDNS_MCP_INT_PERIPHERAL_MASK;
 
 		/*
 		 * Deal with possible race condition between interrupt
@@ -905,34 +905,34 @@ irqreturn_t sdw_cdns_irq(int irq, void *dev_id)
 EXPORT_SYMBOL(sdw_cdns_irq);
 
 /**
- * cdns_update_slave_status_work - update slave status in a work since we will need to handle
- * other interrupts eg. CDNS_MCP_INT_RX_WL during the update slave
+ * cdns_update_peripheral_status_work - update peripheral status in a work since we will need to handle
+ * other interrupts eg. CDNS_MCP_INT_RX_WL during the update peripheral
  * process.
  * @work: cdns worker thread
  */
-static void cdns_update_slave_status_work(struct work_struct *work)
+static void cdns_update_peripheral_status_work(struct work_struct *work)
 {
 	struct sdw_cdns *cdns =
 		container_of(work, struct sdw_cdns, work);
-	u32 slave0, slave1;
-	u64 slave_intstat;
+	u32 peripheral0, peripheral1;
+	u64 peripheral_intstat;
 
-	slave0 = cdns_readl(cdns, CDNS_MCP_SLAVE_INTSTAT0);
-	slave1 = cdns_readl(cdns, CDNS_MCP_SLAVE_INTSTAT1);
+	peripheral0 = cdns_readl(cdns, CDNS_MCP_PERIPHERAL_INTSTAT0);
+	peripheral1 = cdns_readl(cdns, CDNS_MCP_PERIPHERAL_INTSTAT1);
 
 	/* combine the two status */
-	slave_intstat = ((u64)slave1 << 32) | slave0;
+	peripheral_intstat = ((u64)peripheral1 << 32) | peripheral0;
 
-	dev_dbg_ratelimited(cdns->dev, "Slave status change: 0x%llx\n", slave_intstat);
+	dev_dbg_ratelimited(cdns->dev, "Peripheral status change: 0x%llx\n", peripheral_intstat);
 
-	cdns_update_slave_status(cdns, slave_intstat);
-	cdns_writel(cdns, CDNS_MCP_SLAVE_INTSTAT0, slave0);
-	cdns_writel(cdns, CDNS_MCP_SLAVE_INTSTAT1, slave1);
+	cdns_update_peripheral_status(cdns, peripheral_intstat);
+	cdns_writel(cdns, CDNS_MCP_PERIPHERAL_INTSTAT0, peripheral0);
+	cdns_writel(cdns, CDNS_MCP_PERIPHERAL_INTSTAT1, peripheral1);
 
-	/* clear and unmask Slave interrupt now */
-	cdns_writel(cdns, CDNS_MCP_INTSTAT, CDNS_MCP_INT_SLAVE_MASK);
+	/* clear and unmask Peripheral interrupt now */
+	cdns_writel(cdns, CDNS_MCP_INTSTAT, CDNS_MCP_INT_PERIPHERAL_MASK);
 	cdns_updatel(cdns, CDNS_MCP_INTMASK,
-		     CDNS_MCP_INT_SLAVE_MASK, CDNS_MCP_INT_SLAVE_MASK);
+		     CDNS_MCP_INT_PERIPHERAL_MASK, CDNS_MCP_INT_PERIPHERAL_MASK);
 
 }
 
@@ -968,19 +968,19 @@ int sdw_cdns_exit_reset(struct sdw_cdns *cdns)
 EXPORT_SYMBOL(sdw_cdns_exit_reset);
 
 /**
- * cdns_enable_slave_interrupts() - Enable SDW slave interrupts
+ * cdns_enable_peripheral_interrupts() - Enable SDW peripheral interrupts
  * @cdns: Cadence instance
  * @state: boolean for true/false
  */
-static void cdns_enable_slave_interrupts(struct sdw_cdns *cdns, bool state)
+static void cdns_enable_peripheral_interrupts(struct sdw_cdns *cdns, bool state)
 {
 	u32 mask;
 
 	mask = cdns_readl(cdns, CDNS_MCP_INTMASK);
 	if (state)
-		mask |= CDNS_MCP_INT_SLAVE_MASK;
+		mask |= CDNS_MCP_INT_PERIPHERAL_MASK;
 	else
-		mask &= ~CDNS_MCP_INT_SLAVE_MASK;
+		mask &= ~CDNS_MCP_INT_PERIPHERAL_MASK;
 
 	cdns_writel(cdns, CDNS_MCP_INTMASK, mask);
 }
@@ -992,18 +992,18 @@ static void cdns_enable_slave_interrupts(struct sdw_cdns *cdns, bool state)
  */
 int sdw_cdns_enable_interrupt(struct sdw_cdns *cdns, bool state)
 {
-	u32 slave_intmask0 = 0;
-	u32 slave_intmask1 = 0;
+	u32 peripheral_intmask0 = 0;
+	u32 peripheral_intmask1 = 0;
 	u32 mask = 0;
 
 	if (!state)
 		goto update_masks;
 
-	slave_intmask0 = CDNS_MCP_SLAVE_INTMASK0_MASK;
-	slave_intmask1 = CDNS_MCP_SLAVE_INTMASK1_MASK;
+	peripheral_intmask0 = CDNS_MCP_PERIPHERAL_INTMASK0_MASK;
+	peripheral_intmask1 = CDNS_MCP_PERIPHERAL_INTMASK1_MASK;
 
-	/* enable detection of all slave state changes */
-	mask = CDNS_MCP_INT_SLAVE_MASK;
+	/* enable detection of all peripheral state changes */
+	mask = CDNS_MCP_INT_PERIPHERAL_MASK;
 
 	/* enable detection of bus issues */
 	mask |= CDNS_MCP_INT_CTRL_CLASH | CDNS_MCP_INT_DATA_CLASH |
@@ -1026,14 +1026,14 @@ int sdw_cdns_enable_interrupt(struct sdw_cdns *cdns, bool state)
 		mask = interrupt_mask;
 
 update_masks:
-	/* clear slave interrupt status before enabling interrupt */
+	/* clear peripheral interrupt status before enabling interrupt */
 	if (state) {
-		u32 slave_state;
+		u32 peripheral_state;
 
-		slave_state = cdns_readl(cdns, CDNS_MCP_SLAVE_INTSTAT0);
-		cdns_writel(cdns, CDNS_MCP_SLAVE_INTSTAT0, slave_state);
-		slave_state = cdns_readl(cdns, CDNS_MCP_SLAVE_INTSTAT1);
-		cdns_writel(cdns, CDNS_MCP_SLAVE_INTSTAT1, slave_state);
+		peripheral_state = cdns_readl(cdns, CDNS_MCP_PERIPHERAL_INTSTAT0);
+		cdns_writel(cdns, CDNS_MCP_PERIPHERAL_INTSTAT0, peripheral_state);
+		peripheral_state = cdns_readl(cdns, CDNS_MCP_PERIPHERAL_INTSTAT1);
+		cdns_writel(cdns, CDNS_MCP_PERIPHERAL_INTSTAT1, peripheral_state);
 	}
 	cdns->interrupt_enabled = state;
 
@@ -1049,8 +1049,8 @@ update_masks:
 	if (!state)
 		cancel_work_sync(&cdns->work);
 
-	cdns_writel(cdns, CDNS_MCP_SLAVE_INTMASK0, slave_intmask0);
-	cdns_writel(cdns, CDNS_MCP_SLAVE_INTMASK1, slave_intmask1);
+	cdns_writel(cdns, CDNS_MCP_PERIPHERAL_INTMASK0, peripheral_intmask0);
+	cdns_writel(cdns, CDNS_MCP_PERIPHERAL_INTMASK1, peripheral_intmask1);
 	cdns_writel(cdns, CDNS_MCP_INTMASK, mask);
 
 	return 0;
@@ -1393,8 +1393,8 @@ EXPORT_SYMBOL(sdw_cdns_is_clock_stop);
  */
 int sdw_cdns_clock_stop(struct sdw_cdns *cdns, bool block_wake)
 {
-	bool slave_present = false;
-	struct sdw_slave *slave;
+	bool peripheral_present = false;
+	struct sdw_peripheral *peripheral;
 	int ret;
 
 	/* Check suspend status */
@@ -1404,11 +1404,11 @@ int sdw_cdns_clock_stop(struct sdw_cdns *cdns, bool block_wake)
 	}
 
 	/*
-	 * Before entering clock stop we mask the Slave
+	 * Before entering clock stop we mask the Peripheral
 	 * interrupts. This helps avoid having to deal with e.g. a
-	 * Slave becoming UNATTACHED while the clock is being stopped
+	 * Peripheral becoming UNATTACHED while the clock is being stopped
 	 */
-	cdns_enable_slave_interrupts(cdns, false);
+	cdns_enable_peripheral_interrupts(cdns, false);
 
 	/*
 	 * For specific platforms, it is required to be able to put
@@ -1420,10 +1420,10 @@ int sdw_cdns_clock_stop(struct sdw_cdns *cdns, bool block_wake)
 			     CDNS_MCP_CONTROL_BLOCK_WAKEUP,
 			     CDNS_MCP_CONTROL_BLOCK_WAKEUP);
 
-	list_for_each_entry(slave, &cdns->bus.slaves, node) {
-		if (slave->status == SDW_SLAVE_ATTACHED ||
-		    slave->status == SDW_SLAVE_ALERT) {
-			slave_present = true;
+	list_for_each_entry(peripheral, &cdns->bus.peripherals, node) {
+		if (peripheral->status == SDW_PERIPHERAL_ATTACHED ||
+		    peripheral->status == SDW_PERIPHERAL_ALERT) {
+			peripheral_present = true;
 			break;
 		}
 	}
@@ -1434,7 +1434,7 @@ int sdw_cdns_clock_stop(struct sdw_cdns *cdns, bool block_wake)
 	 * not set and there is a broadcast write then the command ignored
 	 * will be treated as a failure
 	 */
-	if (!slave_present)
+	if (!peripheral_present)
 		cdns_updatel(cdns, CDNS_MCP_CONTROL,
 			     CDNS_MCP_CONTROL_CMD_ACCEPT,
 			     CDNS_MCP_CONTROL_CMD_ACCEPT);
@@ -1449,8 +1449,8 @@ int sdw_cdns_clock_stop(struct sdw_cdns *cdns, bool block_wake)
 		return ret;
 	}
 
-	/* Prepare slaves for clock stop */
-	if (slave_present) {
+	/* Prepare peripherals for clock stop */
+	if (peripheral_present) {
 		ret = sdw_bus_prep_clk_stop(&cdns->bus);
 		if (ret < 0 && ret != -ENODATA) {
 			dev_err(cdns->dev, "prepare clock stop failed %d\n", ret);
@@ -1460,10 +1460,10 @@ int sdw_cdns_clock_stop(struct sdw_cdns *cdns, bool block_wake)
 
 	/*
 	 * Enter clock stop mode and only report errors if there are
-	 * Slave devices present (ALERT or ATTACHED)
+	 * Peripheral devices present (ALERT or ATTACHED)
 	 */
 	ret = sdw_bus_clk_stop(&cdns->bus);
-	if (ret < 0 && slave_present && ret != -ENODATA) {
+	if (ret < 0 && peripheral_present && ret != -ENODATA) {
 		dev_err(cdns->dev, "bus clock stop failed %d\n", ret);
 		return ret;
 	}
@@ -1489,8 +1489,8 @@ int sdw_cdns_clock_restart(struct sdw_cdns *cdns, bool bus_reset)
 {
 	int ret;
 
-	/* unmask Slave interrupts that were masked when stopping the clock */
-	cdns_enable_slave_interrupts(cdns, true);
+	/* unmask Peripheral interrupts that were masked when stopping the clock */
+	cdns_enable_peripheral_interrupts(cdns, true);
 
 	ret = cdns_clear_bit(cdns, CDNS_MCP_CONTROL,
 			     CDNS_MCP_CONTROL_CLK_STOP_CLR);
@@ -1545,7 +1545,7 @@ int sdw_cdns_probe(struct sdw_cdns *cdns)
 	init_completion(&cdns->tx_complete);
 	cdns->bus.port_ops = &cdns_port_ops;
 
-	INIT_WORK(&cdns->work, cdns_update_slave_status_work);
+	INIT_WORK(&cdns->work, cdns_update_peripheral_status_work);
 	return 0;
 }
 EXPORT_SYMBOL(sdw_cdns_probe);

@@ -224,7 +224,7 @@ struct max98373_priv {
 	struct max98373_cache *cache;
 	int cache_num;
 	/* variables to support soundwire */
-	struct sdw_slave *slave;
+	struct sdw_peripheral *peripheral;
 	bool hw_init;
 	bool pm_init_once;
 	int slot;

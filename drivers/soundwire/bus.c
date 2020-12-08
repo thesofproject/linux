@@ -69,7 +69,7 @@ int sdw_bus_manager_add(struct sdw_bus *bus, struct device *parent,
 
 	mutex_init(&bus->msg_lock);
 	mutex_init(&bus->bus_lock);
-	INIT_LIST_HEAD(&bus->slaves);
+	INIT_LIST_HEAD(&bus->peripherals);
 	INIT_LIST_HEAD(&bus->m_rt_list);
 
 	/*
@@ -111,18 +111,18 @@ int sdw_bus_manager_add(struct sdw_bus *bus, struct device *parent,
 	 * SDW is an enumerable bus, but devices can be powered off. So,
 	 * they won't be able to report as present.
 	 *
-	 * Create Slave devices based on Slaves described in
+	 * Create Peripheral devices based on Peripherals described in
 	 * the respective firmware (ACPI/DT)
 	 */
 	if (IS_ENABLED(CONFIG_ACPI) && ACPI_HANDLE(bus->dev))
-		ret = sdw_acpi_find_slaves(bus);
+		ret = sdw_acpi_find_peripherals(bus);
 	else if (IS_ENABLED(CONFIG_OF) && bus->dev->of_node)
-		ret = sdw_of_find_slaves(bus);
+		ret = sdw_of_find_peripherals(bus);
 	else
 		ret = -ENOTSUPP; /* No ACPI/DT so error out */
 
 	if (ret < 0) {
-		dev_err(bus->dev, "Finding slaves failed:%d\n", ret);
+		dev_err(bus->dev, "Finding peripherals failed:%d\n", ret);
 		return ret;
 	}
 
@@ -132,7 +132,7 @@ int sdw_bus_manager_add(struct sdw_bus *bus, struct device *parent,
 	 * is that the bus will start at highest clock frequency when
 	 * powered on.
 	 *
-	 * Default active bank will be 0 as out of reset the Slaves have
+	 * Default active bank will be 0 as out of reset the Peripherals have
 	 * to start with bank 0 (Table 40 of Spec)
 	 */
 	prop = &bus->prop;
@@ -145,21 +145,21 @@ int sdw_bus_manager_add(struct sdw_bus *bus, struct device *parent,
 }
 EXPORT_SYMBOL(sdw_bus_manager_add);
 
-static int sdw_delete_slave(struct device *dev, void *data)
+static int sdw_delete_peripheral(struct device *dev, void *data)
 {
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
-	struct sdw_bus *bus = slave->bus;
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);
+	struct sdw_bus *bus = peripheral->bus;
 
 	pm_runtime_disable(dev);
 
-	sdw_slave_debugfs_exit(slave);
+	sdw_peripheral_debugfs_exit(peripheral);
 
 	mutex_lock(&bus->bus_lock);
 
-	if (slave->dev_num) /* clear dev_num if assigned */
-		clear_bit(slave->dev_num, bus->assigned);
+	if (peripheral->dev_num) /* clear dev_num if assigned */
+		clear_bit(peripheral->dev_num, bus->assigned);
 
-	list_del_init(&slave->node);
+	list_del_init(&peripheral->node);
 	mutex_unlock(&bus->bus_lock);
 
 	device_unregister(dev);
@@ -174,7 +174,7 @@ static int sdw_delete_slave(struct device *dev, void *data)
  */
 void sdw_bus_manager_delete(struct sdw_bus *bus)
 {
-	device_for_each_child(bus->dev, NULL, sdw_delete_slave);
+	device_for_each_child(bus->dev, NULL, sdw_delete_peripheral);
 	sdw_manager_device_del(bus);
 
 	sdw_bus_debugfs_exit(bus);
@@ -267,7 +267,7 @@ static int sdw_transfer_unlocked(struct sdw_bus *bus, struct sdw_msg *msg)
 
 	ret = do_transfer(bus, msg);
 	if (ret != 0 && ret != -ENODATA)
-		dev_err(bus->dev, "trf on Slave %d failed:%d %s addr %x count %d\n",
+		dev_err(bus->dev, "trf on Peripheral %d failed:%d %s addr %x count %d\n",
 			msg->dev_num, ret,
 			(msg->flags & SDW_MSG_FLAG_WRITE) ? "write" : "read",
 			msg->addr, msg->len);
@@ -279,7 +279,7 @@ static int sdw_transfer_unlocked(struct sdw_bus *bus, struct sdw_msg *msg)
 }
 
 /**
- * sdw_transfer() - Synchronous transfer message to a SDW Slave device
+ * sdw_transfer() - Synchronous transfer message to a SDW Peripheral device
  * @bus: SDW bus
  * @msg: SDW message to be xfered
  */
@@ -297,7 +297,7 @@ int sdw_transfer(struct sdw_bus *bus, struct sdw_msg *msg)
 }
 
 /**
- * sdw_transfer_defer() - Asynchronously transfer message to a SDW Slave device
+ * sdw_transfer_defer() - Asynchronously transfer message to a SDW Peripheral device
  * @bus: SDW bus
  * @msg: SDW message to be xfered
  * @defer: Defer block for signal completion
@@ -314,7 +314,7 @@ int sdw_transfer_defer(struct sdw_bus *bus, struct sdw_msg *msg,
 
 	ret = do_transfer_defer(bus, msg, defer);
 	if (ret != 0 && ret != -ENODATA)
-		dev_err(bus->dev, "Defer trf on Slave %d failed:%d\n",
+		dev_err(bus->dev, "Defer trf on Peripheral %d failed:%d\n",
 			msg->dev_num, ret);
 
 	if (msg->page)
@@ -323,7 +323,7 @@ int sdw_transfer_defer(struct sdw_bus *bus, struct sdw_msg *msg,
 	return ret;
 }
 
-int sdw_fill_msg(struct sdw_msg *msg, struct sdw_slave *slave,
+int sdw_fill_msg(struct sdw_msg *msg, struct sdw_peripheral *peripheral,
 		 u32 addr, size_t count, u16 dev_num, u8 flags, u8 *buf)
 {
 	memset(msg, 0, sizeof(*msg));
@@ -342,7 +342,7 @@ int sdw_fill_msg(struct sdw_msg *msg, struct sdw_slave *slave,
 	}
 
 	if (addr < SDW_REG_OPTIONAL_PAGE) { /* 32k but no page */
-		if (slave && !slave->prop.paging_support)
+		if (peripheral && !peripheral->prop.paging_support)
 			return 0;
 		/* no need for else as that will fall-through to paging */
 	}
@@ -353,13 +353,13 @@ int sdw_fill_msg(struct sdw_msg *msg, struct sdw_slave *slave,
 		return -EINVAL;
 	}
 
-	if (!slave) {
-		pr_err("SDW: No slave for paging addr\n");
+	if (!peripheral) {
+		pr_err("SDW: No peripheral for paging addr\n");
 		return -EINVAL;
 	}
 
-	if (!slave->prop.paging_support) {
-		dev_err(&slave->dev,
+	if (!peripheral->prop.paging_support) {
+		dev_err(&peripheral->dev,
 			"address %x needs paging but no support\n", addr);
 		return -EINVAL;
 	}
@@ -380,36 +380,36 @@ int sdw_fill_msg(struct sdw_msg *msg, struct sdw_slave *slave,
  */
 
 static int
-sdw_nread_no_pm(struct sdw_slave *slave, u32 addr, size_t count, u8 *val)
+sdw_nread_no_pm(struct sdw_peripheral *peripheral, u32 addr, size_t count, u8 *val)
 {
 	struct sdw_msg msg;
 	int ret;
 
-	ret = sdw_fill_msg(&msg, slave, addr, count,
-			   slave->dev_num, SDW_MSG_FLAG_READ, val);
+	ret = sdw_fill_msg(&msg, peripheral, addr, count,
+			   peripheral->dev_num, SDW_MSG_FLAG_READ, val);
 	if (ret < 0)
 		return ret;
 
-	return sdw_transfer(slave->bus, &msg);
+	return sdw_transfer(peripheral->bus, &msg);
 }
 
 static int
-sdw_nwrite_no_pm(struct sdw_slave *slave, u32 addr, size_t count, u8 *val)
+sdw_nwrite_no_pm(struct sdw_peripheral *peripheral, u32 addr, size_t count, u8 *val)
 {
 	struct sdw_msg msg;
 	int ret;
 
-	ret = sdw_fill_msg(&msg, slave, addr, count,
-			   slave->dev_num, SDW_MSG_FLAG_WRITE, val);
+	ret = sdw_fill_msg(&msg, peripheral, addr, count,
+			   peripheral->dev_num, SDW_MSG_FLAG_WRITE, val);
 	if (ret < 0)
 		return ret;
 
-	return sdw_transfer(slave->bus, &msg);
+	return sdw_transfer(peripheral->bus, &msg);
 }
 
-int sdw_write_no_pm(struct sdw_slave *slave, u32 addr, u8 value)
+int sdw_write_no_pm(struct sdw_peripheral *peripheral, u32 addr, u8 value)
 {
-	return sdw_nwrite_no_pm(slave, addr, 1, &value);
+	return sdw_nwrite_no_pm(peripheral, addr, 1, &value);
 }
 EXPORT_SYMBOL(sdw_write_no_pm);
 
@@ -479,12 +479,12 @@ int sdw_bwrite_no_pm_unlocked(struct sdw_bus *bus, u16 dev_num, u32 addr, u8 val
 }
 EXPORT_SYMBOL(sdw_bwrite_no_pm_unlocked);
 
-int sdw_read_no_pm(struct sdw_slave *slave, u32 addr)
+int sdw_read_no_pm(struct sdw_peripheral *peripheral, u32 addr)
 {
 	u8 buf;
 	int ret;
 
-	ret = sdw_nread_no_pm(slave, addr, 1, &buf);
+	ret = sdw_nread_no_pm(peripheral, addr, 1, &buf);
 	if (ret < 0)
 		return ret;
 	else
@@ -492,81 +492,81 @@ int sdw_read_no_pm(struct sdw_slave *slave, u32 addr)
 }
 EXPORT_SYMBOL(sdw_read_no_pm);
 
-static int sdw_update_no_pm(struct sdw_slave *slave, u32 addr, u8 mask, u8 val)
+static int sdw_update_no_pm(struct sdw_peripheral *peripheral, u32 addr, u8 mask, u8 val)
 {
 	int tmp;
 
-	tmp = sdw_read_no_pm(slave, addr);
+	tmp = sdw_read_no_pm(peripheral, addr);
 	if (tmp < 0)
 		return tmp;
 
 	tmp = (tmp & ~mask) | val;
-	return sdw_write_no_pm(slave, addr, tmp);
+	return sdw_write_no_pm(peripheral, addr, tmp);
 }
 
 /**
- * sdw_nread() - Read "n" contiguous SDW Slave registers
- * @slave: SDW Slave
+ * sdw_nread() - Read "n" contiguous SDW Peripheral registers
+ * @peripheral: SDW Peripheral
  * @addr: Register address
  * @count: length
  * @val: Buffer for values to be read
  */
-int sdw_nread(struct sdw_slave *slave, u32 addr, size_t count, u8 *val)
+int sdw_nread(struct sdw_peripheral *peripheral, u32 addr, size_t count, u8 *val)
 {
 	int ret;
 
-	ret = pm_runtime_get_sync(&slave->dev);
+	ret = pm_runtime_get_sync(&peripheral->dev);
 	if (ret < 0 && ret != -EACCES) {
-		pm_runtime_put_noidle(&slave->dev);
+		pm_runtime_put_noidle(&peripheral->dev);
 		return ret;
 	}
 
-	ret = sdw_nread_no_pm(slave, addr, count, val);
+	ret = sdw_nread_no_pm(peripheral, addr, count, val);
 
-	pm_runtime_mark_last_busy(&slave->dev);
-	pm_runtime_put(&slave->dev);
+	pm_runtime_mark_last_busy(&peripheral->dev);
+	pm_runtime_put(&peripheral->dev);
 
 	return ret;
 }
 EXPORT_SYMBOL(sdw_nread);
 
 /**
- * sdw_nwrite() - Write "n" contiguous SDW Slave registers
- * @slave: SDW Slave
+ * sdw_nwrite() - Write "n" contiguous SDW Peripheral registers
+ * @peripheral: SDW Peripheral
  * @addr: Register address
  * @count: length
  * @val: Buffer for values to be read
  */
-int sdw_nwrite(struct sdw_slave *slave, u32 addr, size_t count, u8 *val)
+int sdw_nwrite(struct sdw_peripheral *peripheral, u32 addr, size_t count, u8 *val)
 {
 	int ret;
 
-	ret = pm_runtime_get_sync(&slave->dev);
+	ret = pm_runtime_get_sync(&peripheral->dev);
 	if (ret < 0 && ret != -EACCES) {
-		pm_runtime_put_noidle(&slave->dev);
+		pm_runtime_put_noidle(&peripheral->dev);
 		return ret;
 	}
 
-	ret = sdw_nwrite_no_pm(slave, addr, count, val);
+	ret = sdw_nwrite_no_pm(peripheral, addr, count, val);
 
-	pm_runtime_mark_last_busy(&slave->dev);
-	pm_runtime_put(&slave->dev);
+	pm_runtime_mark_last_busy(&peripheral->dev);
+	pm_runtime_put(&peripheral->dev);
 
 	return ret;
 }
 EXPORT_SYMBOL(sdw_nwrite);
 
 /**
- * sdw_read() - Read a SDW Slave register
- * @slave: SDW Slave
+ * sdw_read() - Read a SDW Peripheral register
+ * @peripheral: SDW Peripheral
  * @addr: Register address
  */
-int sdw_read(struct sdw_slave *slave, u32 addr)
+int sdw_read(struct sdw_peripheral *peripheral, u32 addr)
 {
 	u8 buf;
 	int ret;
 
-	ret = sdw_nread(slave, addr, 1, &buf);
+	ret = sdw_nread(peripheral, addr, 1, &buf);
 	if (ret < 0)
 		return ret;
 
@@ -575,14 +575,14 @@ int sdw_read(struct sdw_slave *slave, u32 addr)
 EXPORT_SYMBOL(sdw_read);
 
 /**
- * sdw_write() - Write a SDW Slave register
- * @slave: SDW Slave
+ * sdw_write() - Write a SDW Peripheral register
+ * @peripheral: SDW Peripheral
  * @addr: Register address
  * @value: Register value
  */
-int sdw_write(struct sdw_slave *slave, u32 addr, u8 value)
+int sdw_write(struct sdw_peripheral *peripheral, u32 addr, u8 value)
 {
-	return sdw_nwrite(slave, addr, 1, &value);
+	return sdw_nwrite(peripheral, addr, 1, &value);
 }
 EXPORT_SYMBOL(sdw_write);
 
@@ -591,25 +591,25 @@ EXPORT_SYMBOL(sdw_write);
  */
 
 /* called with bus_lock held */
-static struct sdw_slave *sdw_get_slave(struct sdw_bus *bus, int i)
+static struct sdw_peripheral *sdw_get_peripheral(struct sdw_bus *bus, int i)
 {
-	struct sdw_slave *slave;
+	struct sdw_peripheral *peripheral;
 
-	list_for_each_entry(slave, &bus->slaves, node) {
-		if (slave->dev_num == i)
-			return slave;
+	list_for_each_entry(peripheral, &bus->peripherals, node) {
+		if (peripheral->dev_num == i)
+			return peripheral;
 	}
 
 	return NULL;
 }
 
-int sdw_compare_devid(struct sdw_slave *slave, struct sdw_slave_id id)
+int sdw_compare_devid(struct sdw_peripheral *peripheral, struct sdw_peripheral_id id)
 {
-	if (slave->id.mfg_id != id.mfg_id ||
-	    slave->id.part_id != id.part_id ||
-	    slave->id.class_id != id.class_id ||
-	    (slave->id.unique_id != SDW_IGNORED_UNIQUE_ID &&
-	     slave->id.unique_id != id.unique_id))
+	if (peripheral->id.mfg_id != id.mfg_id ||
+	    peripheral->id.part_id != id.part_id ||
+	    peripheral->id.class_id != id.class_id ||
+	    (peripheral->id.unique_id != SDW_IGNORED_UNIQUE_ID &&
+	     peripheral->id.unique_id != id.unique_id))
 		return -ENODEV;
 
 	return 0;
@@ -617,61 +617,61 @@ int sdw_compare_devid(struct sdw_slave *slave, struct sdw_slave_id id)
 EXPORT_SYMBOL(sdw_compare_devid);
 
 /* called with bus_lock held */
-static int sdw_get_device_num(struct sdw_slave *slave)
+static int sdw_get_device_num(struct sdw_peripheral *peripheral)
 {
 	int bit;
 
-	bit = find_first_zero_bit(slave->bus->assigned, SDW_MAX_DEVICES);
+	bit = find_first_zero_bit(peripheral->bus->assigned, SDW_MAX_DEVICES);
 	if (bit == SDW_MAX_DEVICES) {
 		bit = -ENODEV;
 		goto err;
 	}
 
 	/*
-	 * Do not update dev_num in Slave data structure here,
+	 * Do not update dev_num in Peripheral data structure here,
 	 * Update once program dev_num is successful
 	 */
-	set_bit(bit, slave->bus->assigned);
+	set_bit(bit, peripheral->bus->assigned);
 
 err:
 	return bit;
 }
 
-static int sdw_assign_device_num(struct sdw_slave *slave)
+static int sdw_assign_device_num(struct sdw_peripheral *peripheral)
 {
-	struct sdw_bus *bus = slave->bus;
+	struct sdw_bus *bus = peripheral->bus;
 	int ret, dev_num;
 	bool new_device = false;
 
 	/* check first if device number is assigned, if so reuse that */
-	if (!slave->dev_num) {
-		if (!slave->dev_num_sticky) {
-			mutex_lock(&slave->bus->bus_lock);
-			dev_num = sdw_get_device_num(slave);
-			mutex_unlock(&slave->bus->bus_lock);
+	if (!peripheral->dev_num) {
+		if (!peripheral->dev_num_sticky) {
+			mutex_lock(&peripheral->bus->bus_lock);
+			dev_num = sdw_get_device_num(peripheral);
+			mutex_unlock(&peripheral->bus->bus_lock);
 			if (dev_num < 0) {
 				dev_err(bus->dev, "Get dev_num failed: %d\n",
 					dev_num);
 				return dev_num;
 			}
-			slave->dev_num = dev_num;
-			slave->dev_num_sticky = dev_num;
+			peripheral->dev_num = dev_num;
+			peripheral->dev_num_sticky = dev_num;
 			new_device = true;
 		} else {
-			slave->dev_num = slave->dev_num_sticky;
+			peripheral->dev_num = peripheral->dev_num_sticky;
 		}
 	}
 
 	if (!new_device)
 		dev_dbg(bus->dev,
-			"Slave already registered, reusing dev_num:%d\n",
-			slave->dev_num);
+			"Peripheral already registered, reusing dev_num:%d\n",
+			peripheral->dev_num);
 
-	/* Clear the slave->dev_num to transfer message on device 0 */
-	dev_num = slave->dev_num;
-	slave->dev_num = 0;
+	/* Clear the peripheral->dev_num to transfer message on device 0 */
+	dev_num = peripheral->dev_num;
+	peripheral->dev_num = 0;
 
-	ret = sdw_write_no_pm(slave, SDW_SCP_DEVNUMBER, dev_num);
+	ret = sdw_write_no_pm(peripheral, SDW_SCP_DEVNUMBER, dev_num);
 	if (ret < 0) {
 		dev_err(bus->dev, "Program device_num %d failed: %d\n",
 			dev_num, ret);
@@ -679,15 +679,15 @@ static int sdw_assign_device_num(struct sdw_slave *slave)
 	}
 
 	/* After xfer of msg, restore dev_num */
-	slave->dev_num = slave->dev_num_sticky;
+	peripheral->dev_num = peripheral->dev_num_sticky;
 
 	return 0;
 }
 
-void sdw_extract_slave_id(struct sdw_bus *bus,
-			  u64 addr, struct sdw_slave_id *id)
+void sdw_extract_peripheral_id(struct sdw_bus *bus,
+			       u64 addr, struct sdw_peripheral_id *id)
 {
-	dev_dbg(bus->dev, "SDW Slave Addr: %llx\n", addr);
+	dev_dbg(bus->dev, "SDW Peripheral Addr: %llx\n", addr);
 
 	id->sdw_version = SDW_VERSION(addr);
 	id->unique_id = SDW_UNIQUE_ID(addr);
@@ -696,22 +696,22 @@ void sdw_extract_slave_id(struct sdw_bus *bus,
 	id->class_id = SDW_CLASS_ID(addr);
 
 	dev_dbg(bus->dev,
-		"SDW Slave class_id 0x%02x, mfg_id 0x%04x, part_id 0x%04x, unique_id 0x%x, version 0x%x\n",
+		"SDW Peripheral class_id 0x%02x, mfg_id 0x%04x, part_id 0x%04x, unique_id 0x%x, version 0x%x\n",
 		id->class_id, id->mfg_id, id->part_id, id->unique_id, id->sdw_version);
 }
-EXPORT_SYMBOL(sdw_extract_slave_id);
+EXPORT_SYMBOL(sdw_extract_peripheral_id);
 
 static int sdw_program_device_num(struct sdw_bus *bus)
 {
 	u8 buf[SDW_NUM_DEV_ID_REGISTERS] = {0};
-	struct sdw_slave *slave, *_s;
-	struct sdw_slave_id id;
+	struct sdw_peripheral *peripheral, *_s;
+	struct sdw_peripheral_id id;
 	struct sdw_msg msg;
 	bool found;
 	int count = 0, ret;
 	u64 addr;
 
-	/* No Slave, so use raw xfer api */
+	/* No Peripheral, so use raw xfer api */
 	ret = sdw_fill_msg(&msg, NULL, SDW_SCP_DEVID_0,
 			   SDW_NUM_DEV_ID_REGISTERS, 0, SDW_MSG_FLAG_READ, buf);
 	if (ret < 0)
@@ -737,21 +737,21 @@ static int sdw_program_device_num(struct sdw_bus *bus)
 			((u64)buf[2] << 24) | ((u64)buf[1] << 32) |
 			((u64)buf[0] << 40);
 
-		sdw_extract_slave_id(bus, addr, &id);
+		sdw_extract_peripheral_id(bus, addr, &id);
 
 		found = false;
 		/* Now compare with entries */
-		list_for_each_entry_safe(slave, _s, &bus->slaves, node) {
-			if (sdw_compare_devid(slave, id) == 0) {
+		list_for_each_entry_safe(peripheral, _s, &bus->peripherals, node) {
+			if (sdw_compare_devid(peripheral, id) == 0) {
 				found = true;
 
 				/*
-				 * Assign a new dev_num to this Slave and
+				 * Assign a new dev_num to this Peripheral and
 				 * not mark it present. It will be marked
 				 * present after it reports ATTACHED on new
 				 * dev_num
 				 */
-				ret = sdw_assign_device_num(slave);
+				ret = sdw_assign_device_num(peripheral);
 				if (ret < 0) {
 					dev_err(bus->dev,
 						"Assign dev_num failed:%d\n",
@@ -767,14 +767,14 @@ static int sdw_program_device_num(struct sdw_bus *bus)
 			/* TODO: Park this device in Group 13 */
 
 			/*
-			 * add Slave device even if there is no platform
+			 * add Peripheral device even if there is no platform
 			 * firmware description. There will be no driver probe
 			 * but the user/integration will be able to see the
 			 * device, enumeration status and device number in sysfs
 			 */
-			sdw_slave_add(bus, &id, NULL);
+			sdw_peripheral_add(bus, &id, NULL);
 
-			dev_err(bus->dev, "Slave Entry not found\n");
+			dev_err(bus->dev, "Peripheral Entry not found\n");
 		}
 
 		count++;
@@ -790,49 +790,48 @@ static int sdw_program_device_num(struct sdw_bus *bus)
 	return ret;
 }
 
-static void sdw_modify_slave_status(struct sdw_slave *slave,
-				    enum sdw_slave_status status)
+static void sdw_modify_peripheral_status(struct sdw_peripheral *peripheral,
+					 enum sdw_peripheral_status status)
 {
-	struct sdw_bus *bus = slave->bus;
+	struct sdw_bus *bus = peripheral->bus;
 
 	mutex_lock(&bus->bus_lock);
 
 	dev_vdbg(bus->dev,
-		 "%s: changing status slave %d status %d new status %d\n",
-		 __func__, slave->dev_num, slave->status, status);
+		 "%s: changing status peripheral %d status %d new status %d\n",
+		 __func__, peripheral->dev_num, peripheral->status, status);
 
-	if (status == SDW_SLAVE_UNATTACHED) {
-		dev_dbg(&slave->dev,
-			"%s: initializing enumeration and init completion for Slave %d\n",
-			__func__, slave->dev_num);
+	if (status == SDW_PERIPHERAL_UNATTACHED) {
+		dev_dbg(&peripheral->dev,
+			"%s: initializing  enumeration and init completion for Peripheral %d\n",
+			__func__, peripheral->dev_num);
 
-		init_completion(&slave->enumeration_complete);
-		init_completion(&slave->initialization_complete);
+		init_completion(&peripheral->enumeration_complete);
+		init_completion(&peripheral->initialization_complete);
+	} else if ((status == SDW_PERIPHERAL_ATTACHED) &&
+		   (peripheral->status == SDW_PERIPHERAL_UNATTACHED)) {
+		dev_dbg(&peripheral->dev,
+			"%s: signaling enumeration completion for Peripheral %d\n",
+			__func__, peripheral->dev_num);
 
-	} else if ((status == SDW_SLAVE_ATTACHED) &&
-		   (slave->status == SDW_SLAVE_UNATTACHED)) {
-		dev_dbg(&slave->dev,
-			"%s: signaling enumeration completion for Slave %d\n",
-			__func__, slave->dev_num);
-
-		complete(&slave->enumeration_complete);
+		complete(&peripheral->enumeration_complete);
 	}
-	slave->status = status;
+	peripheral->status = status;
 	mutex_unlock(&bus->bus_lock);
 }
 
-static enum sdw_clk_stop_mode sdw_get_clk_stop_mode(struct sdw_slave *slave)
+static enum sdw_clk_stop_mode sdw_get_clk_stop_mode(struct sdw_peripheral *peripheral)
 {
 	enum sdw_clk_stop_mode mode;
 
 	/*
-	 * Query for clock stop mode if Slave implements
+	 * Query for clock stop mode if Peripheral implements
 	 * ops->get_clk_stop_mode, else read from property.
 	 */
-	if (slave->ops && slave->ops->get_clk_stop_mode) {
-		mode = slave->ops->get_clk_stop_mode(slave);
+	if (peripheral->ops && peripheral->ops->get_clk_stop_mode) {
+		mode = peripheral->ops->get_clk_stop_mode(peripheral);
 	} else {
-		if (slave->prop.clk_stop_mode1)
+		if (peripheral->prop.clk_stop_mode1)
 			mode = SDW_CLK_STOP_MODE1;
 		else
 			mode = SDW_CLK_STOP_MODE0;
@@ -841,16 +840,16 @@ static enum sdw_clk_stop_mode sdw_get_clk_stop_mode(struct sdw_slave *slave)
 	return mode;
 }
 
-static int sdw_slave_clk_stop_callback(struct sdw_slave *slave,
-				       enum sdw_clk_stop_mode mode,
-				       enum sdw_clk_stop_type type)
+static int sdw_peripheral_clk_stop_callback(struct sdw_peripheral *peripheral,
+					    enum sdw_clk_stop_mode mode,
+					    enum sdw_clk_stop_type type)
 {
 	int ret;
 
-	if (slave->ops && slave->ops->clk_stop) {
-		ret = slave->ops->clk_stop(slave, mode, type);
+	if (peripheral->ops && peripheral->ops->clk_stop) {
+		ret = peripheral->ops->clk_stop(peripheral, mode, type);
 		if (ret < 0) {
-			sdw_dev_dbg_or_err(&slave->dev, ret != -ENODATA,
+			sdw_dev_dbg_or_err(&peripheral->dev, ret != -ENODATA,
 					   "Clk Stop mode %d type =%d failed: %d\n",
 					   mode, type, ret);
 			return ret;
@@ -860,15 +859,15 @@ static int sdw_slave_clk_stop_callback(struct sdw_slave *slave,
 	return 0;
 }
 
-static int sdw_slave_clk_stop_prepare(struct sdw_slave *slave,
-				      enum sdw_clk_stop_mode mode,
-				      bool prepare)
+static int sdw_peripheral_clk_stop_prepare(struct sdw_peripheral *peripheral,
+					   enum sdw_clk_stop_mode mode,
+					   bool prepare)
 {
 	bool wake_en;
 	u32 val = 0;
 	int ret;
 
-	wake_en = slave->prop.wake_capable;
+	wake_en = peripheral->prop.wake_capable;
 
 	if (prepare) {
 		val = SDW_SCP_SYSTEMCTRL_CLK_STP_PREP;
@@ -879,9 +878,9 @@ static int sdw_slave_clk_stop_prepare(struct sdw_slave *slave,
 		if (wake_en)
 			val |= SDW_SCP_SYSTEMCTRL_WAKE_UP_EN;
 	} else {
-		ret = sdw_read_no_pm(slave, SDW_SCP_SYSTEMCTRL);
+		ret = sdw_read_no_pm(peripheral, SDW_SCP_SYSTEMCTRL);
 		if (ret < 0) {
-			sdw_dev_dbg_or_err(&slave->dev, ret != -ENODATA,
+			sdw_dev_dbg_or_err(&peripheral->dev, ret != -ENODATA,
 					   "SDW_SCP_SYSTEMCTRL read failed:%d\n", ret);
 			return ret;
 		}
@@ -889,10 +888,9 @@ static int sdw_slave_clk_stop_prepare(struct sdw_slave *slave,
 		val &= ~(SDW_SCP_SYSTEMCTRL_CLK_STP_PREP);
 	}
 
-	ret = sdw_write_no_pm(slave, SDW_SCP_SYSTEMCTRL, val);
-
+	ret = sdw_write_no_pm(peripheral, SDW_SCP_SYSTEMCTRL, val);
 	if (ret < 0)
-		sdw_dev_dbg_or_err(&slave->dev, ret != -ENODATA,
+		sdw_dev_dbg_or_err(&peripheral->dev, ret != -ENODATA,
 				   "SDW_SCP_SYSTEMCTRL write ignored:%d\n", ret);
 
 	return ret;
@@ -911,7 +909,7 @@ static int sdw_bus_wait_for_clk_prep_deprep(struct sdw_bus *bus, u16 dev_num)
 		}
 		val &= SDW_SCP_STAT_CLK_STP_NF;
 		if (!val) {
-			dev_dbg(bus->dev, "clock stop prep/de-prep done slave:%d\n",
+			dev_dbg(bus->dev, "clock stop prep/de-prep done peripheral:%d\n",
 				dev_num);
 			return 0;
 		}
@@ -920,67 +918,66 @@ static int sdw_bus_wait_for_clk_prep_deprep(struct sdw_bus *bus, u16 dev_num)
 		retry--;
 	} while (retry);
 
-	dev_err(bus->dev, "clock stop prep/de-prep failed slave:%d\n",
-		dev_num);
+	dev_err(bus->dev, "clock stop prep/de-prep failed peripheral:%d\n", dev_num);
 
 	return -ETIMEDOUT;
 }
 
 /**
- * sdw_bus_prep_clk_stop: prepare Slave(s) for clock stop
+ * sdw_bus_prep_clk_stop: prepare Peripheral(s) for clock stop
  *
  * @bus: SDW bus instance
  *
- * Query Slave for clock stop mode and prepare for that mode.
+ * Query Peripheral for clock stop mode and prepare for that mode.
  */
 int sdw_bus_prep_clk_stop(struct sdw_bus *bus)
 {
-	enum sdw_clk_stop_mode slave_mode;
+	enum sdw_clk_stop_mode peripheral_mode;
 	bool simple_clk_stop = true;
-	struct sdw_slave *slave;
-	bool is_slave = false;
+	struct sdw_peripheral *peripheral;
+	bool is_peripheral = false;
 	int ret = 0;
 
 	/*
 	 * In order to save on transition time, prepare
-	 * each Slave and then wait for all Slave(s) to be
+	 * each Peripheral and then wait for all Peripheral(s) to be
 	 * prepared for clock stop.
 	 */
-	list_for_each_entry(slave, &bus->slaves, node) {
-		if (!slave->dev_num)
+	list_for_each_entry(peripheral, &bus->peripherals, node) {
+		if (!peripheral->dev_num)
 			continue;
 
-		if (slave->status != SDW_SLAVE_ATTACHED &&
-		    slave->status != SDW_SLAVE_ALERT)
+		if (peripheral->status != SDW_PERIPHERAL_ATTACHED &&
+		    peripheral->status != SDW_PERIPHERAL_ALERT)
 			continue;
 
-		/* Identify if Slave(s) are available on Bus */
-		is_slave = true;
+		/* Identify if Peripheral(s) are available on Bus */
+		is_peripheral = true;
 
-		slave_mode = sdw_get_clk_stop_mode(slave);
-		slave->curr_clk_stop_mode = slave_mode;
+		peripheral_mode = sdw_get_clk_stop_mode(peripheral);
+		peripheral->curr_clk_stop_mode = peripheral_mode;
 
-		ret = sdw_slave_clk_stop_callback(slave, slave_mode, SDW_CLK_PRE_PREPARE);
+		ret = sdw_peripheral_clk_stop_callback(peripheral, peripheral_mode, SDW_CLK_PRE_PREPARE);
 		if (ret < 0) {
-			sdw_dev_dbg_or_err(&slave->dev, ret != -ENODATA,
+			sdw_dev_dbg_or_err(&peripheral->dev, ret != -ENODATA,
 					   "clock stop pre prepare cb failed:%d\n", ret);
 			return ret;
 		}
 
-		ret = sdw_slave_clk_stop_prepare(slave,
-						 slave_mode, true);
+		ret = sdw_peripheral_clk_stop_prepare(peripheral,
+						      peripheral_mode, true);
 		if (ret < 0) {
-			sdw_dev_dbg_or_err(&slave->dev, ret != -ENODATA,
+			sdw_dev_dbg_or_err(&peripheral->dev, ret != -ENODATA,
 					   "clock stop prepare failed:%d\n", ret);
 			return ret;
 		}
 
-		if (slave_mode == SDW_CLK_STOP_MODE1)
+		if (peripheral_mode == SDW_CLK_STOP_MODE1)
 			simple_clk_stop = false;
 	}
 
-	/* Skip remaining clock stop preparation if no Slave is attached */
-	if (!is_slave)
+	/* Skip remaining clock stop preparation if no Peripheral is attached */
+	if (!is_peripheral)
 		return ret;
 
 	if (!simple_clk_stop) {
@@ -990,21 +987,21 @@ int sdw_bus_prep_clk_stop(struct sdw_bus *bus)
 			return ret;
 	}
 
-	/* Inform slaves that prep is done */
-	list_for_each_entry(slave, &bus->slaves, node) {
-		if (!slave->dev_num)
+	/* Inform peripherals that prep is done */
+	list_for_each_entry(peripheral, &bus->peripherals, node) {
+		if (!peripheral->dev_num)
 			continue;
 
-		if (slave->status != SDW_SLAVE_ATTACHED &&
-		    slave->status != SDW_SLAVE_ALERT)
+		if (peripheral->status != SDW_PERIPHERAL_ATTACHED &&
+		    peripheral->status != SDW_PERIPHERAL_ALERT)
 			continue;
 
-		slave_mode = slave->curr_clk_stop_mode;
+		peripheral_mode = peripheral->curr_clk_stop_mode;
 
-		if (slave_mode == SDW_CLK_STOP_MODE1) {
-			ret = sdw_slave_clk_stop_callback(slave, slave_mode, SDW_CLK_POST_PREPARE);
+		if (peripheral_mode == SDW_CLK_STOP_MODE1) {
+			ret = sdw_peripheral_clk_stop_callback(peripheral, peripheral_mode, SDW_CLK_POST_PREPARE);
 			if (ret < 0) {
-				sdw_dev_dbg_or_err(&slave->dev, ret != -ENODATA,
+				sdw_dev_dbg_or_err(&peripheral->dev, ret != -ENODATA,
 						   "clock stop post-prepare cb failed:%d\n", ret);
 				return ret;
 			}
@@ -1020,7 +1017,7 @@ EXPORT_SYMBOL(sdw_bus_prep_clk_stop);
  *
  * @bus: SDW bus instance
  *
- * After preparing the Slaves for clock stop, stop the clock by broadcasting
+ * After preparing the Peripherals for clock stop, stop the clock by broadcasting
  * write to SCP_CTRL register.
  */
 int sdw_bus_clk_stop(struct sdw_bus *bus)
@@ -1028,7 +1025,7 @@ int sdw_bus_clk_stop(struct sdw_bus *bus)
 	int ret;
 
 	/*
-	 * broadcast clock stop now, attached Slaves will ACK this,
+	 * broadcast clock stop now, attached Peripherals will ACK this,
 	 * unattached will ignore
 	 */
 	ret = sdw_bwrite_no_pm(bus, SDW_BROADCAST_DEV_NUM,
@@ -1048,7 +1045,7 @@ EXPORT_SYMBOL(sdw_bus_clk_stop);
  *
  * @bus: SDW bus instance
  *
- * This De-prepares the Slaves by exiting Clock Stop Mode 0. For the Slaves
+ * This De-prepares the Peripherals by exiting Clock Stop Mode 0. For the Peripherals
  * exiting Clock Stop Mode 1, they will be de-prepared after they enumerate
  * back.
  */
@@ -1056,79 +1053,79 @@ int sdw_bus_exit_clk_stop(struct sdw_bus *bus)
 {
 	enum sdw_clk_stop_mode mode;
 	bool simple_clk_stop = true;
-	struct sdw_slave *slave;
-	bool is_slave = false;
+	struct sdw_peripheral *peripheral;
+	bool is_peripheral = false;
 	int ret;
 
 	/*
 	 * In order to save on transition time, de-prepare
-	 * each Slave and then wait for all Slave(s) to be
+	 * each Peripheral and then wait for all Peripheral(s) to be
 	 * de-prepared after clock resume.
 	 */
-	list_for_each_entry(slave, &bus->slaves, node) {
-		if (!slave->dev_num)
+	list_for_each_entry(peripheral, &bus->peripherals, node) {
+		if (!peripheral->dev_num)
 			continue;
 
-		if (slave->status != SDW_SLAVE_ATTACHED &&
-		    slave->status != SDW_SLAVE_ALERT)
+		if (peripheral->status != SDW_PERIPHERAL_ATTACHED &&
+		    peripheral->status != SDW_PERIPHERAL_ALERT)
 			continue;
 
-		/* Identify if Slave(s) are available on Bus */
-		is_slave = true;
+		/* Identify if Peripheral(s) are available on Bus */
+		is_peripheral = true;
 
-		mode = slave->curr_clk_stop_mode;
+		mode = peripheral->curr_clk_stop_mode;
 
 		if (mode == SDW_CLK_STOP_MODE1) {
 			simple_clk_stop = false;
 			continue;
 		}
 
-		ret = sdw_slave_clk_stop_callback(slave, mode, SDW_CLK_PRE_DEPREPARE);
+		ret = sdw_peripheral_clk_stop_callback(peripheral, mode, SDW_CLK_PRE_DEPREPARE);
 		if (ret < 0)
-			dev_warn(&slave->dev, "clock stop pre deprepare cb failed:%d\n", ret);
+			dev_warn(&peripheral->dev, "clock stop pre deprepare cb failed:%d\n", ret);
 
-		ret = sdw_slave_clk_stop_prepare(slave, mode, false);
+		ret = sdw_peripheral_clk_stop_prepare(peripheral, mode, false);
 		if (ret < 0)
-			dev_warn(&slave->dev, "clock stop deprepare failed:%d\n", ret);
+			dev_warn(&peripheral->dev, "clock stop deprepare failed:%d\n", ret);
 	}
 
-	/* Skip remaining clock stop de-preparation if no Slave is attached */
-	if (!is_slave)
+	/* Skip remaining clock stop de-preparation if no Peripheral is attached */
+	if (!is_peripheral)
 		return 0;
 
 	if (!simple_clk_stop) {
 		ret = sdw_bus_wait_for_clk_prep_deprep(bus, SDW_BROADCAST_DEV_NUM);
 		if (ret < 0)
-			dev_warn(&slave->dev, "clock stop deprepare wait failed:%d\n", ret);
+			dev_warn(&peripheral->dev, "clock stop deprepare wait failed:%d\n", ret);
 	}
 
-	list_for_each_entry(slave, &bus->slaves, node) {
-		if (!slave->dev_num)
+	list_for_each_entry(peripheral, &bus->peripherals, node) {
+		if (!peripheral->dev_num)
 			continue;
 
-		if (slave->status != SDW_SLAVE_ATTACHED &&
-		    slave->status != SDW_SLAVE_ALERT)
+		if (peripheral->status != SDW_PERIPHERAL_ATTACHED &&
+		    peripheral->status != SDW_PERIPHERAL_ALERT)
 			continue;
 
-		mode = slave->curr_clk_stop_mode;
-		ret = sdw_slave_clk_stop_callback(slave, mode, SDW_CLK_POST_DEPREPARE);
+		mode = peripheral->curr_clk_stop_mode;
+		ret = sdw_peripheral_clk_stop_callback(peripheral, mode, SDW_CLK_POST_DEPREPARE);
 		if (ret < 0)
-			dev_warn(&slave->dev, "clock stop post deprepare cb failed:%d\n", ret);
+			dev_warn(&peripheral->dev, "clock stop post deprepare cb failed:%d\n", ret);
 	}
 
 	return 0;
 }
 EXPORT_SYMBOL(sdw_bus_exit_clk_stop);
 
-int sdw_configure_dpn_intr(struct sdw_slave *slave,
+int sdw_configure_dpn_intr(struct sdw_peripheral *peripheral,
 			   int port, bool enable, int mask)
 {
 	u32 addr;
 	int ret;
 	u8 val = 0;
 
-	if (slave->bus->params.s_data_mode != SDW_PORT_DATA_MODE_NORMAL) {
-		dev_dbg(&slave->dev, "TEST FAIL interrupt %s\n",
+	if (peripheral->bus->params.s_data_mode != SDW_PORT_DATA_MODE_NORMAL) {
+		dev_dbg(&peripheral->dev, "TEST FAIL interrupt %s\n",
 			enable ? "on" : "off");
 		mask |= SDW_DPN_INT_TEST_FAIL;
 	}
@@ -1144,18 +1141,18 @@ int sdw_configure_dpn_intr(struct sdw_slave *slave,
 		val &= ~SDW_DPN_INT_PORT_READY;
 	}
 
-	ret = sdw_update(slave, addr, (mask | SDW_DPN_INT_PORT_READY), val);
+	ret = sdw_update(peripheral, addr, (mask | SDW_DPN_INT_PORT_READY), val);
 	if (ret < 0)
-		dev_err(&slave->dev,
+		dev_err(&peripheral->dev,
 			"SDW_DPN_INTMASK write failed:%d\n", val);
 
 	return ret;
 }
 
-static int sdw_slave_set_frequency(struct sdw_slave *slave)
+static int sdw_peripheral_set_frequency(struct sdw_peripheral *peripheral)
 {
-	u32 mclk_freq = slave->bus->prop.mclk_freq;
-	u32 curr_freq = slave->bus->params.curr_dr_freq >> 1;
+	u32 mclk_freq = peripheral->bus->prop.mclk_freq;
+	u32 curr_freq = peripheral->bus->params.curr_dr_freq >> 1;
 	unsigned int scale;
 	u8 scale_index;
 	u8 base;
@@ -1166,11 +1163,11 @@ static int sdw_slave_set_frequency(struct sdw_slave *slave)
 	 * devices. They may also be used for 1.2+/non-SDCA devices,
 	 * but we will need a DisCo property to cover this case
 	 */
-	if (!slave->id.class_id)
+	if (!peripheral->id.class_id)
 		return 0;
 
 	if (!mclk_freq) {
-		dev_err(&slave->dev,
+		dev_err(&peripheral->dev,
 			"no bus MCLK, cannot set SDW_SCP_BUS_CLOCK_BASE\n");
 		return -EINVAL;
 	}
@@ -1200,14 +1197,14 @@ static int sdw_slave_set_frequency(struct sdw_slave *slave)
 		mclk_freq = 32000000;
 		base = SDW_SCP_BASE_CLOCK_32000000_HZ;
 	} else {
-		dev_err(&slave->dev,
+		dev_err(&peripheral->dev,
 			"Unsupported clock base, mclk %d\n",
 			mclk_freq);
 		return -EINVAL;
 	}
 
 	if (mclk_freq % curr_freq) {
-		dev_err(&slave->dev,
+		dev_err(&peripheral->dev,
 			"mclk %d is not multiple of bus curr_freq %d\n",
 			mclk_freq, curr_freq);
 		return -EINVAL;
@@ -1222,82 +1219,82 @@ static int sdw_slave_set_frequency(struct sdw_slave *slave)
 	scale_index = ilog2(scale);
 
 	if (BIT(scale_index) != scale || scale_index > 6) {
-		dev_err(&slave->dev,
+		dev_err(&peripheral->dev,
 			"No match found for scale %d, bus mclk %d curr_freq %d\n",
 			scale, mclk_freq, curr_freq);
 		return -EINVAL;
 	}
 	scale_index++;
 
-	ret = sdw_write_no_pm(slave, SDW_SCP_BUS_CLOCK_BASE, base);
+	ret = sdw_write_no_pm(peripheral, SDW_SCP_BUS_CLOCK_BASE, base);
 	if (ret < 0) {
-		dev_err(&slave->dev,
+		dev_err(&peripheral->dev,
 			"SDW_SCP_BUS_CLOCK_BASE write failed:%d\n", ret);
 		return ret;
 	}
 
 	/* initialize scale for both banks */
-	ret = sdw_write_no_pm(slave, SDW_SCP_BUSCLOCK_SCALE_B0, scale_index);
+	ret = sdw_write_no_pm(peripheral, SDW_SCP_BUSCLOCK_SCALE_B0, scale_index);
 	if (ret < 0) {
-		dev_err(&slave->dev,
+		dev_err(&peripheral->dev,
 			"SDW_SCP_BUSCLOCK_SCALE_B0 write failed:%d\n", ret);
 		return ret;
 	}
-	ret = sdw_write_no_pm(slave, SDW_SCP_BUSCLOCK_SCALE_B1, scale_index);
+	ret = sdw_write_no_pm(peripheral, SDW_SCP_BUSCLOCK_SCALE_B1, scale_index);
 	if (ret < 0)
-		dev_err(&slave->dev,
+		dev_err(&peripheral->dev,
 			"SDW_SCP_BUSCLOCK_SCALE_B1 write failed:%d\n", ret);
 
-	dev_dbg(&slave->dev,
+	dev_dbg(&peripheral->dev,
 		"Configured bus base %d, scale %d, mclk %d, curr_freq %d\n",
 		base, scale_index, mclk_freq, curr_freq);
 
 	return ret;
 }
 
-static int sdw_initialize_slave(struct sdw_slave *slave)
+static int sdw_initialize_peripheral(struct sdw_peripheral *peripheral)
 {
-	struct sdw_slave_prop *prop = &slave->prop;
+	struct sdw_peripheral_prop *prop = &peripheral->prop;
 	int status;
 	int ret;
 	u8 val;
 
-	ret = sdw_slave_set_frequency(slave);
+	ret = sdw_peripheral_set_frequency(peripheral);
 	if (ret < 0)
 		return ret;
 
-	if (slave->bus->prop.quirks & SDW_MANAGER_QUIRKS_CLEAR_INITIAL_CLASH) {
+	if (peripheral->bus->prop.quirks & SDW_MANAGER_QUIRKS_CLEAR_INITIAL_CLASH) {
 		/* Clear bus clash interrupt before enabling interrupt mask */
-		status = sdw_read_no_pm(slave, SDW_SCP_INT1);
+		status = sdw_read_no_pm(peripheral, SDW_SCP_INT1);
 		if (status < 0) {
-			dev_err(&slave->dev,
+			dev_err(&peripheral->dev,
 				"SDW_SCP_INT1 (BUS_CLASH) read failed:%d\n", status);
 			return status;
 		}
 		if (status & SDW_SCP_INT1_BUS_CLASH) {
-			dev_warn(&slave->dev, "Bus clash detected before INT mask is enabled\n");
-			ret = sdw_write_no_pm(slave, SDW_SCP_INT1, SDW_SCP_INT1_BUS_CLASH);
+			dev_warn(&peripheral->dev, "Bus clash detected before INT mask is enabled\n");
+			ret = sdw_write_no_pm(peripheral, SDW_SCP_INT1, SDW_SCP_INT1_BUS_CLASH);
 			if (ret < 0) {
-				dev_err(&slave->dev,
+				dev_err(&peripheral->dev,
 					"SDW_SCP_INT1 (BUS_CLASH) write failed:%d\n", ret);
 				return ret;
 			}
 		}
 	}
-	if ((slave->bus->prop.quirks & SDW_MANAGER_QUIRKS_CLEAR_INITIAL_PARITY) &&
-	    !(slave->prop.quirks & SDW_SLAVE_QUIRKS_INVALID_INITIAL_PARITY)) {
+	if ((peripheral->bus->prop.quirks & SDW_MANAGER_QUIRKS_CLEAR_INITIAL_PARITY) &&
+	    !(peripheral->prop.quirks & SDW_PERIPHERAL_QUIRKS_INVALID_INITIAL_PARITY)) {
 		/* Clear parity interrupt before enabling interrupt mask */
-		status = sdw_read_no_pm(slave, SDW_SCP_INT1);
+		status = sdw_read_no_pm(peripheral, SDW_SCP_INT1);
 		if (status < 0) {
-			dev_err(&slave->dev,
+			dev_err(&peripheral->dev,
 				"SDW_SCP_INT1 (PARITY) read failed:%d\n", status);
 			return status;
 		}
 		if (status & SDW_SCP_INT1_PARITY) {
-			dev_warn(&slave->dev, "PARITY error detected before INT mask is enabled\n");
-			ret = sdw_write_no_pm(slave, SDW_SCP_INT1, SDW_SCP_INT1_PARITY);
+			dev_warn(&peripheral->dev, "PARITY error detected before INT mask is enabled\n");
+			ret = sdw_write_no_pm(peripheral, SDW_SCP_INT1, SDW_SCP_INT1_PARITY);
 			if (ret < 0) {
-				dev_err(&slave->dev,
+				dev_err(&peripheral->dev,
 					"SDW_SCP_INT1 (PARITY) write failed:%d\n", ret);
 				return ret;
 			}
@@ -1311,39 +1308,39 @@ static int sdw_initialize_slave(struct sdw_slave *slave)
 	 * device-dependent, it might e.g. only be enabled in
 	 * steady-state after a couple of frames.
 	 */
-	val = slave->prop.scp_int1_mask;
+	val = peripheral->prop.scp_int1_mask;
 
 	/* Enable SCP interrupts */
-	ret = sdw_update_no_pm(slave, SDW_SCP_INTMASK1, val, val);
+	ret = sdw_update_no_pm(peripheral, SDW_SCP_INTMASK1, val, val);
 	if (ret < 0) {
-		dev_err(&slave->dev,
+		dev_err(&peripheral->dev,
 			"SDW_SCP_INTMASK1 write failed:%d\n", ret);
 		return ret;
 	}
 
 	/* No need to continue if DP0 is not present */
-	if (!slave->prop.dp0_prop)
+	if (!peripheral->prop.dp0_prop)
 		return 0;
 
 	/* Enable DP0 interrupts */
 	val = prop->dp0_prop->imp_def_interrupts;
 	val |= SDW_DP0_INT_PORT_READY | SDW_DP0_INT_BRA_FAILURE;
 
-	ret = sdw_update_no_pm(slave, SDW_DP0_INTMASK, val, val);
+	ret = sdw_update_no_pm(peripheral, SDW_DP0_INTMASK, val, val);
 	if (ret < 0)
-		dev_err(&slave->dev,
+		dev_err(&peripheral->dev,
 			"SDW_DP0_INTMASK read failed:%d\n", ret);
 	return ret;
 }
 
-static int sdw_handle_dp0_interrupt(struct sdw_slave *slave, u8 *slave_status)
+static int sdw_handle_dp0_interrupt(struct sdw_peripheral *peripheral, u8 *peripheral_status)
 {
 	u8 clear, impl_int_mask;
 	int status, status2, ret, count = 0;
 
-	status = sdw_read_no_pm(slave, SDW_DP0_INT);
+	status = sdw_read_no_pm(peripheral, SDW_DP0_INT);
 	if (status < 0) {
-		dev_err(&slave->dev,
+		dev_err(&peripheral->dev,
 			"SDW_DP0_INT read failed:%d\n", status);
 		return status;
 	}
@@ -1352,7 +1349,7 @@ static int sdw_handle_dp0_interrupt(struct sdw_slave *slave, u8 *slave_status)
 		clear = status & ~SDW_DP0_INTERRUPTS;
 
 		if (status & SDW_DP0_INT_TEST_FAIL) {
-			dev_err(&slave->dev, "Test fail for port 0\n");
+			dev_err(&peripheral->dev, "Test fail for port 0\n");
 			clear |= SDW_DP0_INT_TEST_FAIL;
 		}
 
@@ -1362,12 +1359,12 @@ static int sdw_handle_dp0_interrupt(struct sdw_slave *slave, u8 *slave_status)
 		 */
 
 		if (status & SDW_DP0_INT_PORT_READY) {
-			complete(&slave->port_ready[0]);
+			complete(&peripheral->port_ready[0]);
 			clear |= SDW_DP0_INT_PORT_READY;
 		}
 
 		if (status & SDW_DP0_INT_BRA_FAILURE) {
-			dev_err(&slave->dev, "BRA failed\n");
+			dev_err(&peripheral->dev, "BRA failed\n");
 			clear |= SDW_DP0_INT_BRA_FAILURE;
 		}
 
@@ -1376,21 +1373,21 @@ static int sdw_handle_dp0_interrupt(struct sdw_slave *slave, u8 *slave_status)
 
 		if (status & impl_int_mask) {
 			clear |= impl_int_mask;
-			*slave_status = clear;
+			*peripheral_status = clear;
 		}
 
 		/* clear the interrupts but don't touch reserved and SDCA_CASCADE fields */
-		ret = sdw_write_no_pm(slave, SDW_DP0_INT, clear);
+		ret = sdw_write_no_pm(peripheral, SDW_DP0_INT, clear);
 		if (ret < 0) {
-			dev_err(&slave->dev,
+			dev_err(&peripheral->dev,
 				"SDW_DP0_INT write failed:%d\n", ret);
 			return ret;
 		}
 
 		/* Read DP0 interrupt again */
-		status2 = sdw_read_no_pm(slave, SDW_DP0_INT);
+		status2 = sdw_read_no_pm(peripheral, SDW_DP0_INT);
 		if (status2 < 0) {
-			dev_err(&slave->dev,
+			dev_err(&peripheral->dev,
 				"SDW_DP0_INT read failed:%d\n", status2);
 			return status2;
 		}
@@ -1403,25 +1400,25 @@ static int sdw_handle_dp0_interrupt(struct sdw_slave *slave, u8 *slave_status)
 	} while ((status & SDW_DP0_INTERRUPTS) && (count < SDW_READ_INTR_CLEAR_RETRY));
 
 	if (count == SDW_READ_INTR_CLEAR_RETRY)
-		dev_warn(&slave->dev, "Reached MAX_RETRY on DP0 read\n");
+		dev_warn(&peripheral->dev, "Reached MAX_RETRY on DP0 read\n");
 
 	return ret;
 }
 
-static int sdw_handle_port_interrupt(struct sdw_slave *slave,
-				     int port, u8 *slave_status)
+static int sdw_handle_port_interrupt(struct sdw_peripheral *peripheral,
+				     int port, u8 *peripheral_status)
 {
 	u8 clear, impl_int_mask;
 	int status, status2, ret, count = 0;
 	u32 addr;
 
 	if (port == 0)
-		return sdw_handle_dp0_interrupt(slave, slave_status);
+		return sdw_handle_dp0_interrupt(peripheral, peripheral_status);
 
 	addr = SDW_DPN_INT(port);
-	status = sdw_read_no_pm(slave, addr);
+	status = sdw_read_no_pm(peripheral, addr);
 	if (status < 0) {
-		dev_err(&slave->dev,
+		dev_err(&peripheral->dev,
 			"SDW_DPN_INT read failed:%d\n", status);
 
 		return status;
@@ -1431,7 +1428,7 @@ static int sdw_handle_port_interrupt(struct sdw_slave *slave,
 		clear = status & ~SDW_DPN_INTERRUPTS;
 
 		if (status & SDW_DPN_INT_TEST_FAIL) {
-			dev_err(&slave->dev, "Test fail for port:%d\n", port);
+			dev_err(&peripheral->dev, "Test fail for port:%d\n", port);
 			clear |= SDW_DPN_INT_TEST_FAIL;
 		}
 
@@ -1440,7 +1437,7 @@ static int sdw_handle_port_interrupt(struct sdw_slave *slave,
 		 * for ports implementing CP_SM.
 		 */
 		if (status & SDW_DPN_INT_PORT_READY) {
-			complete(&slave->port_ready[port]);
+			complete(&peripheral->port_ready[port]);
 			clear |= SDW_DPN_INT_PORT_READY;
 		}
 
@@ -1449,21 +1446,21 @@ static int sdw_handle_port_interrupt(struct sdw_slave *slave,
 
 		if (status & impl_int_mask) {
 			clear |= impl_int_mask;
-			*slave_status = clear;
+			*peripheral_status = clear;
 		}
 
 		/* clear the interrupt but don't touch reserved fields */
-		ret = sdw_write_no_pm(slave, addr, clear);
+		ret = sdw_write_no_pm(peripheral, addr, clear);
 		if (ret < 0) {
-			dev_err(&slave->dev,
+			dev_err(&peripheral->dev,
 				"SDW_DPN_INT write failed:%d\n", ret);
 			return ret;
 		}
 
 		/* Read DPN interrupt again */
-		status2 = sdw_read_no_pm(slave, addr);
+		status2 = sdw_read_no_pm(peripheral, addr);
 		if (status2 < 0) {
-			dev_err(&slave->dev,
+			dev_err(&peripheral->dev,
 				"SDW_DPN_INT read failed:%d\n", status2);
 			return status2;
 		}
@@ -1476,52 +1473,52 @@ static int sdw_handle_port_interrupt(struct sdw_slave *slave,
 	} while ((status & SDW_DPN_INTERRUPTS) && (count < SDW_READ_INTR_CLEAR_RETRY));
 
 	if (count == SDW_READ_INTR_CLEAR_RETRY)
-		dev_warn(&slave->dev, "Reached MAX_RETRY on port read");
+		dev_warn(&peripheral->dev, "Reached MAX_RETRY on port read");
 
 	return ret;
 }
 
-static int sdw_handle_slave_alerts(struct sdw_slave *slave)
+static int sdw_handle_peripheral_alerts(struct sdw_peripheral *peripheral)
 {
-	struct sdw_slave_intr_status slave_intr;
+	struct sdw_peripheral_intr_status peripheral_intr;
 	u8 clear = 0, bit, port_status[15] = {0};
 	int port_num, stat, ret, count = 0;
 	unsigned long port;
-	bool slave_notify;
+	bool peripheral_notify;
 	u8 sdca_cascade = 0;
 	u8 buf, buf2[2], _buf, _buf2[2];
 	bool parity_check;
 	bool parity_quirk;
 
-	sdw_modify_slave_status(slave, SDW_SLAVE_ALERT);
+	sdw_modify_peripheral_status(peripheral, SDW_PERIPHERAL_ALERT);
 
-	ret = pm_runtime_get_sync(&slave->dev);
+	ret = pm_runtime_get_sync(&peripheral->dev);
 	if (ret < 0 && ret != -EACCES) {
-		dev_err(&slave->dev, "Failed to resume device: %d\n", ret);
-		pm_runtime_put_noidle(&slave->dev);
+		dev_err(&peripheral->dev, "Failed to resume device: %d\n", ret);
+		pm_runtime_put_noidle(&peripheral->dev);
 		return ret;
 	}
 
 	/* Read Intstat 1, Intstat 2 and Intstat 3 registers */
-	ret = sdw_read_no_pm(slave, SDW_SCP_INT1);
+	ret = sdw_read_no_pm(peripheral, SDW_SCP_INT1);
 	if (ret < 0) {
-		dev_err(&slave->dev,
+		dev_err(&peripheral->dev,
 			"SDW_SCP_INT1 read failed:%d\n", ret);
 		goto io_err;
 	}
 	buf = ret;
 
-	ret = sdw_nread_no_pm(slave, SDW_SCP_INTSTAT2, 2, buf2);
+	ret = sdw_nread_no_pm(peripheral, SDW_SCP_INTSTAT2, 2, buf2);
 	if (ret < 0) {
-		dev_err(&slave->dev,
+		dev_err(&peripheral->dev,
 			"SDW_SCP_INT2/3 read failed:%d\n", ret);
 		goto io_err;
 	}
 
-	if (slave->prop.is_sdca) {
-		ret = sdw_read_no_pm(slave, SDW_DP0_INT);
+	if (peripheral->prop.is_sdca) {
+		ret = sdw_read_no_pm(peripheral, SDW_DP0_INT);
 		if (ret < 0) {
-			dev_err(&slave->dev,
+			dev_err(&peripheral->dev,
 				"SDW_DP0_INT read failed:%d\n", ret);
 			goto io_err;
 		}
@@ -1529,25 +1526,26 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 	}
 
 	do {
-		slave_notify = false;
+		peripheral_notify = false;
 
 		/*
-		 * Check parity, bus clash and Slave (impl defined)
+		 * Check parity, bus clash and Peripheral (impl defined)
 		 * interrupt
 		 */
 		if (buf & SDW_SCP_INT1_PARITY) {
-			parity_check = slave->prop.scp_int1_mask & SDW_SCP_INT1_PARITY;
-			parity_quirk = !slave->first_interrupt_done &&
-				(slave->prop.quirks & SDW_SLAVE_QUIRKS_INVALID_INITIAL_PARITY);
+			parity_check = peripheral->prop.scp_int1_mask & SDW_SCP_INT1_PARITY;
+			parity_quirk = !peripheral->first_interrupt_done &&
+				(peripheral->prop.quirks &
+				 SDW_PERIPHERAL_QUIRKS_INVALID_INITIAL_PARITY);
 
 			if (parity_check && !parity_quirk)
-				dev_err(&slave->dev, "Parity error detected\n");
+				dev_err(&peripheral->dev, "Parity error detected\n");
 			clear |= SDW_SCP_INT1_PARITY;
 		}
 
 		if (buf & SDW_SCP_INT1_BUS_CLASH) {
-			if (slave->prop.scp_int1_mask & SDW_SCP_INT1_BUS_CLASH)
-				dev_err(&slave->dev, "Bus clash detected\n");
+			if (peripheral->prop.scp_int1_mask & SDW_SCP_INT1_BUS_CLASH)
+				dev_err(&peripheral->dev, "Bus clash detected\n");
 			clear |= SDW_SCP_INT1_BUS_CLASH;
 		}
 
@@ -1559,16 +1557,16 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 		 */
 
 		if (buf & SDW_SCP_INT1_IMPL_DEF) {
-			if (slave->prop.scp_int1_mask & SDW_SCP_INT1_IMPL_DEF) {
-				dev_dbg(&slave->dev, "Slave impl defined interrupt\n");
-				slave_notify = true;
+			if (peripheral->prop.scp_int1_mask & SDW_SCP_INT1_IMPL_DEF) {
+				dev_dbg(&peripheral->dev, "Peripheral impl defined interrupt\n");
+				peripheral_notify = true;
 			}
 			clear |= SDW_SCP_INT1_IMPL_DEF;
 		}
 
 		/* the SDCA interrupts are cleared in the codec driver .interrupt_callback() */
 		if (sdca_cascade)
-			slave_notify = true;
+			peripheral_notify = true;
 
 		/* Check port 0 - 3 interrupts */
 		port = buf & SDW_SCP_INT1_PORT0_3;
@@ -1576,7 +1574,7 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 		/* To get port number corresponding to bits, shift it */
 		port = FIELD_GET(SDW_SCP_INT1_PORT0_3, port);
 		for_each_set_bit(bit, &port, 8) {
-			sdw_handle_port_interrupt(slave, bit,
+			sdw_handle_port_interrupt(peripheral, bit,
 						  &port_status[bit]);
 		}
 
@@ -1586,9 +1584,9 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 			for_each_set_bit(bit, &port, 8) {
 				/* scp2 ports start from 4 */
 				port_num = bit + 3;
-				sdw_handle_port_interrupt(slave,
-						port_num,
-						&port_status[port_num]);
+				sdw_handle_port_interrupt(peripheral,
+							  port_num,
+							  &port_status[port_num]);
 			}
 		}
 
@@ -1598,57 +1596,57 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 			for_each_set_bit(bit, &port, 8) {
 				/* scp3 ports start from 11 */
 				port_num = bit + 10;
-				sdw_handle_port_interrupt(slave,
-						port_num,
-						&port_status[port_num]);
+				sdw_handle_port_interrupt(peripheral,
+							  port_num,
+							  &port_status[port_num]);
 			}
 		}
 
-		/* Update the Slave driver */
-		if (slave_notify && slave->ops &&
-		    slave->ops->interrupt_callback) {
-			slave_intr.sdca_cascade = sdca_cascade;
-			slave_intr.control_port = clear;
-			memcpy(slave_intr.port, &port_status,
-			       sizeof(slave_intr.port));
+		/* Update the Peripheral driver */
+		if (peripheral_notify && peripheral->ops &&
+		    peripheral->ops->interrupt_callback) {
+			peripheral_intr.sdca_cascade = sdca_cascade;
+			peripheral_intr.control_port = clear;
+			memcpy(peripheral_intr.port, &port_status,
+			       sizeof(peripheral_intr.port));
 
-			slave->ops->interrupt_callback(slave, &slave_intr);
+			peripheral->ops->interrupt_callback(peripheral, &peripheral_intr);
 		}
 
 		/* Ack interrupt */
-		ret = sdw_write_no_pm(slave, SDW_SCP_INT1, clear);
+		ret = sdw_write_no_pm(peripheral, SDW_SCP_INT1, clear);
 		if (ret < 0) {
-			dev_err(&slave->dev,
+			dev_err(&peripheral->dev,
 				"SDW_SCP_INT1 write failed:%d\n", ret);
 			goto io_err;
 		}
 
 		/* at this point all initial interrupt sources were handled */
-		slave->first_interrupt_done = true;
+		peripheral->first_interrupt_done = true;
 
 		/*
 		 * Read status again to ensure no new interrupts arrived
 		 * while servicing interrupts.
 		 */
-		ret = sdw_read_no_pm(slave, SDW_SCP_INT1);
+		ret = sdw_read_no_pm(peripheral, SDW_SCP_INT1);
 		if (ret < 0) {
-			dev_err(&slave->dev,
+			dev_err(&peripheral->dev,
 				"SDW_SCP_INT1 recheck read failed:%d\n", ret);
 			goto io_err;
 		}
 		_buf = ret;
 
-		ret = sdw_nread_no_pm(slave, SDW_SCP_INTSTAT2, 2, _buf2);
+		ret = sdw_nread_no_pm(peripheral, SDW_SCP_INTSTAT2, 2, _buf2);
 		if (ret < 0) {
-			dev_err(&slave->dev,
+			dev_err(&peripheral->dev,
 				"SDW_SCP_INT2/3 recheck read failed:%d\n", ret);
 			goto io_err;
 		}
 
-		if (slave->prop.is_sdca) {
-			ret = sdw_read_no_pm(slave, SDW_DP0_INT);
+		if (peripheral->prop.is_sdca) {
+			ret = sdw_read_no_pm(peripheral, SDW_DP0_INT);
 			if (ret < 0) {
-				dev_err(&slave->dev,
+				dev_err(&peripheral->dev,
 					"SDW_DP0_INT recheck read failed:%d\n", ret);
 				goto io_err;
 			}
@@ -1665,7 +1663,7 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 		stat = buf || buf2[0] || buf2[1] || sdca_cascade;
 
 		/*
-		 * Exit loop if Slave is continuously in ALERT state even
+		 * Exit loop if Peripheral is continuously in ALERT state even
 		 * after servicing the interrupt multiple times.
 		 */
 		count++;
@@ -1674,57 +1672,57 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 	} while (stat != 0 && count < SDW_READ_INTR_CLEAR_RETRY);
 
 	if (count == SDW_READ_INTR_CLEAR_RETRY)
-		dev_warn(&slave->dev, "Reached MAX_RETRY on alert read\n");
+		dev_warn(&peripheral->dev, "Reached MAX_RETRY on alert read\n");
 
 io_err:
-	pm_runtime_mark_last_busy(&slave->dev);
-	pm_runtime_put_autosuspend(&slave->dev);
+	pm_runtime_mark_last_busy(&peripheral->dev);
+	pm_runtime_put_autosuspend(&peripheral->dev);
 
 	return ret;
 }
 
-static int sdw_update_slave_status(struct sdw_slave *slave,
-				   enum sdw_slave_status status)
+static int sdw_update_peripheral_status(struct sdw_peripheral *peripheral,
+					enum sdw_peripheral_status status)
 {
 	unsigned long time;
 
-	if (!slave->probed) {
+	if (!peripheral->probed) {
 		/*
-		 * the slave status update is typically handled in an
+		 * the peripheral status update is typically handled in an
 		 * interrupt thread, which can race with the driver
 		 * probe, e.g. when a module needs to be loaded.
 		 *
 		 * make sure the probe is complete before updating
 		 * status.
 		 */
-		time = wait_for_completion_timeout(&slave->probe_complete,
-				msecs_to_jiffies(DEFAULT_PROBE_TIMEOUT));
+		time = wait_for_completion_timeout(&peripheral->probe_complete,
+						   msecs_to_jiffies(DEFAULT_PROBE_TIMEOUT));
 		if (!time) {
-			dev_err(&slave->dev, "Probe not complete, timed out\n");
+			dev_err(&peripheral->dev, "Probe not complete, timed out\n");
 			return -ETIMEDOUT;
 		}
 	}
 
-	if (!slave->ops || !slave->ops->update_status)
+	if (!peripheral->ops || !peripheral->ops->update_status)
 		return 0;
 
-	return slave->ops->update_status(slave, status);
+	return peripheral->ops->update_status(peripheral, status);
 }
 
 /**
- * sdw_handle_slave_status() - Handle Slave status
+ * sdw_handle_peripheral_status() - Handle Peripheral status
  * @bus: SDW bus instance
- * @status: Status for all Slave(s)
+ * @status: Status for all Peripheral(s)
  */
-int sdw_handle_slave_status(struct sdw_bus *bus,
-			    enum sdw_slave_status status[])
+int sdw_handle_peripheral_status(struct sdw_bus *bus,
+				 enum sdw_peripheral_status status[])
 {
-	enum sdw_slave_status prev_status;
-	struct sdw_slave *slave;
+	enum sdw_peripheral_status prev_status;
+	struct sdw_peripheral *peripheral;
 	bool attached_initializing;
 	int i, ret = 0;
 
-	/* first check if any Slaves fell off the bus */
+	/* first check if any Peripherals fell off the bus */
 	for (i = 1; i <= SDW_MAX_DEVICES; i++) {
 		mutex_lock(&bus->bus_lock);
 		if (test_bit(i, bus->assigned) == false) {
@@ -1733,20 +1731,20 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 		}
 		mutex_unlock(&bus->bus_lock);
 
-		slave = sdw_get_slave(bus, i);
-		if (!slave)
+		peripheral = sdw_get_peripheral(bus, i);
+		if (!peripheral)
 			continue;
 
-		if (status[i] == SDW_SLAVE_UNATTACHED &&
-		    slave->status != SDW_SLAVE_UNATTACHED)
-			sdw_modify_slave_status(slave, SDW_SLAVE_UNATTACHED);
+		if (status[i] == SDW_PERIPHERAL_UNATTACHED &&
+		    peripheral->status != SDW_PERIPHERAL_UNATTACHED)
+			sdw_modify_peripheral_status(peripheral, SDW_PERIPHERAL_UNATTACHED);
 	}
 
-	if (status[0] == SDW_SLAVE_ATTACHED) {
-		dev_dbg(bus->dev, "Slave attached, programming device number\n");
+	if (status[0] == SDW_PERIPHERAL_ATTACHED) {
+		dev_dbg(bus->dev, "Peripheral attached, programming device number\n");
 		ret = sdw_program_device_num(bus);
 		if (ret < 0)
-			dev_err(bus->dev, "Slave attach failed: %d\n", ret);
+			dev_err(bus->dev, "Peripheral attach failed: %d\n", ret);
 		/*
 		 * programming a device number will have side effects,
 		 * so we deal with other devices at a later time
@@ -1754,7 +1752,7 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 		return ret;
 	}
 
-	/* Continue to check other slave statuses */
+	/* Continue to check other peripheral statuses */
 	for (i = 1; i <= SDW_MAX_DEVICES; i++) {
 		mutex_lock(&bus->bus_lock);
 		if (test_bit(i, bus->assigned) == false) {
@@ -1763,74 +1761,74 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 		}
 		mutex_unlock(&bus->bus_lock);
 
-		slave = sdw_get_slave(bus, i);
-		if (!slave)
+		peripheral = sdw_get_peripheral(bus, i);
+		if (!peripheral)
 			continue;
 
 		attached_initializing = false;
 
 		switch (status[i]) {
-		case SDW_SLAVE_UNATTACHED:
-			if (slave->status == SDW_SLAVE_UNATTACHED)
+		case SDW_PERIPHERAL_UNATTACHED:
+			if (peripheral->status == SDW_PERIPHERAL_UNATTACHED)
 				break;
 
-			sdw_modify_slave_status(slave, SDW_SLAVE_UNATTACHED);
+			sdw_modify_peripheral_status(peripheral, SDW_PERIPHERAL_UNATTACHED);
 			break;
 
-		case SDW_SLAVE_ALERT:
-			ret = sdw_handle_slave_alerts(slave);
+		case SDW_PERIPHERAL_ALERT:
+			ret = sdw_handle_peripheral_alerts(peripheral);
 			if (ret < 0)
-				dev_err(&slave->dev,
-					"Slave %d alert handling failed: %d\n",
+				dev_err(&peripheral->dev,
+					"Peripheral %d alert handling failed: %d\n",
 					i, ret);
 			break;
 
-		case SDW_SLAVE_ATTACHED:
-			if (slave->status == SDW_SLAVE_ATTACHED)
+		case SDW_PERIPHERAL_ATTACHED:
+			if (peripheral->status == SDW_PERIPHERAL_ATTACHED)
 				break;
 
-			prev_status = slave->status;
-			sdw_modify_slave_status(slave, SDW_SLAVE_ATTACHED);
+			prev_status = peripheral->status;
+			sdw_modify_peripheral_status(peripheral, SDW_PERIPHERAL_ATTACHED);
 
-			if (prev_status == SDW_SLAVE_ALERT)
+			if (prev_status == SDW_PERIPHERAL_ALERT)
 				break;
 
 			attached_initializing = true;
 
-			ret = sdw_initialize_slave(slave);
+			ret = sdw_initialize_peripheral(peripheral);
 			if (ret < 0)
-				dev_err(&slave->dev,
-					"Slave %d initialization failed: %d\n",
+				dev_err(&peripheral->dev,
+					"Peripheral %d initialization failed: %d\n",
 					i, ret);
 
 			break;
 
 		default:
-			dev_err(&slave->dev, "Invalid slave %d status:%d\n",
+			dev_err(&peripheral->dev, "Invalid peripheral %d status:%d\n",
 				i, status[i]);
 			break;
 		}
 
-		ret = sdw_update_slave_status(slave, status[i]);
+		ret = sdw_update_peripheral_status(peripheral, status[i]);
 		if (ret < 0)
-			dev_err(&slave->dev,
-				"Update Slave status failed:%d\n", ret);
+			dev_err(&peripheral->dev,
+				"Update Peripheral status failed:%d\n", ret);
 		if (attached_initializing) {
-			dev_dbg(&slave->dev,
-				"%s: signaling initialization completion for Slave %d\n",
-				__func__, slave->dev_num);
+			dev_dbg(&peripheral->dev,
+				"%s: signaling initialization completion for Peripheral %d\n",
+				__func__, peripheral->dev_num);
 
-			complete(&slave->initialization_complete);
+			complete(&peripheral->initialization_complete);
 		}
 	}
 
 	return ret;
 }
-EXPORT_SYMBOL(sdw_handle_slave_status);
+EXPORT_SYMBOL(sdw_handle_peripheral_status);
 
-void sdw_clear_slave_status(struct sdw_bus *bus, u32 request)
+void sdw_clear_peripheral_status(struct sdw_bus *bus, u32 request)
 {
-	struct sdw_slave *slave;
+	struct sdw_peripheral *peripheral;
 	int i;
 
 	/* Check all non-zero devices */
@@ -1842,17 +1840,17 @@ void sdw_clear_slave_status(struct sdw_bus *bus, u32 request)
 		}
 		mutex_unlock(&bus->bus_lock);
 
-		slave = sdw_get_slave(bus, i);
-		if (!slave)
+		peripheral = sdw_get_peripheral(bus, i);
+		if (!peripheral)
 			continue;
 
-		if (slave->status != SDW_SLAVE_UNATTACHED) {
-			sdw_modify_slave_status(slave, SDW_SLAVE_UNATTACHED);
-			slave->first_interrupt_done = false;
+		if (peripheral->status != SDW_PERIPHERAL_UNATTACHED) {
+			sdw_modify_peripheral_status(peripheral, SDW_PERIPHERAL_UNATTACHED);
+			peripheral->first_interrupt_done = false;
 		}
 
 		/* keep track of request, used in pm_runtime resume */
-		slave->unattach_request = request;
+		peripheral->unattach_request = request;
 	}
 }
-EXPORT_SYMBOL(sdw_clear_slave_status);
+EXPORT_SYMBOL(sdw_clear_peripheral_status);

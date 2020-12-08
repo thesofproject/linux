@@ -114,28 +114,28 @@ static const struct regmap_config rt715_sdca_mbq_regmap = {
 	.use_single_write = true,
 };
 
-static int rt715_sdca_update_status(struct sdw_slave *slave,
-				enum sdw_slave_status status)
+static int rt715_sdca_update_status(struct sdw_peripheral *peripheral,
+				enum sdw_peripheral_status status)
 {
-	struct rt715_sdca_priv *rt715 = dev_get_drvdata(&slave->dev);
+	struct rt715_sdca_priv *rt715 = dev_get_drvdata(&peripheral->dev);
 
 	/* Update the status */
 	rt715->status = status;
 
 	/*
-	 * Perform initialization only if slave status is present and
+	 * Perform initialization only if peripheral status is present and
 	 * hw_init flag is false
 	 */
-	if (rt715->hw_init || rt715->status != SDW_SLAVE_ATTACHED)
+	if (rt715->hw_init || rt715->status != SDW_PERIPHERAL_ATTACHED)
 		return 0;
 
-	/* perform I/O transfers required for Slave initialization */
-	return rt715_sdca_io_init(&slave->dev, slave);
+	/* perform I/O transfers required for Peripheral initialization */
+	return rt715_sdca_io_init(&peripheral->dev, peripheral);
 }
 
-static int rt715_sdca_read_prop(struct sdw_slave *slave)
+static int rt715_sdca_read_prop(struct sdw_peripheral *peripheral)
 {
-	struct sdw_slave_prop *prop = &slave->prop;
+	struct sdw_peripheral_prop *prop = &peripheral->prop;
 	int nval, i;
 	u32 bit;
 	unsigned long addr;
@@ -148,7 +148,7 @@ static int rt715_sdca_read_prop(struct sdw_slave *slave)
 	prop->sink_ports = 0x0;	/* BITMAP:  00000000 */
 
 	nval = hweight32(prop->source_ports);
-	prop->src_dpn_prop = devm_kcalloc(&slave->dev, nval,
+	prop->src_dpn_prop = devm_kcalloc(&peripheral->dev, nval,
 					sizeof(*prop->src_dpn_prop),
 					GFP_KERNEL);
 	if (!prop->src_dpn_prop)
@@ -170,33 +170,33 @@ static int rt715_sdca_read_prop(struct sdw_slave *slave)
 	return 0;
 }
 
-static struct sdw_slave_ops rt715_sdca_slave_ops = {
+static struct sdw_peripheral_ops rt715_sdca_peripheral_ops = {
 	.read_prop = rt715_sdca_read_prop,
 	.update_status = rt715_sdca_update_status,
 };
 
-static int rt715_sdca_sdw_probe(struct sdw_slave *slave,
+static int rt715_sdca_sdw_probe(struct sdw_peripheral *peripheral,
 			   const struct sdw_device_id *id)
 {
 	struct regmap *mbq_regmap, *regmap;
 
-	slave->ops = &rt715_sdca_slave_ops;
+	peripheral->ops = &rt715_sdca_peripheral_ops;
 
 	/* Regmap Initialization */
-	mbq_regmap = devm_regmap_init_sdw_mbq(slave, &rt715_sdca_mbq_regmap);
+	mbq_regmap = devm_regmap_init_sdw_mbq(peripheral, &rt715_sdca_mbq_regmap);
 	if (IS_ERR(mbq_regmap))
 		return PTR_ERR(mbq_regmap);
 
-	regmap = devm_regmap_init_sdw(slave, &rt715_sdca_regmap);
+	regmap = devm_regmap_init_sdw(peripheral, &rt715_sdca_regmap);
 	if (IS_ERR(regmap))
 		return PTR_ERR(regmap);
 
-	return rt715_sdca_init(&slave->dev, mbq_regmap, regmap, slave);
+	return rt715_sdca_init(&peripheral->dev, mbq_regmap, regmap, peripheral);
 }
 
 static const struct sdw_device_id rt715_sdca_id[] = {
-	SDW_SLAVE_ENTRY_EXT(0x025d, 0x715, 0x3, 0x1, 0),
-	SDW_SLAVE_ENTRY_EXT(0x025d, 0x714, 0x3, 0x1, 0),
+	SDW_PERIPHERAL_ENTRY_EXT(0x025d, 0x715, 0x3, 0x1, 0),
+	SDW_PERIPHERAL_ENTRY_EXT(0x025d, 0x714, 0x3, 0x1, 0),
 	{},
 };
 MODULE_DEVICE_TABLE(sdw, rt715_sdca_id);
@@ -220,25 +220,25 @@ static int __maybe_unused rt715_dev_suspend(struct device *dev)
 
 static int __maybe_unused rt715_dev_resume(struct device *dev)
 {
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);
 	struct rt715_sdca_priv *rt715 = dev_get_drvdata(dev);
 	unsigned long time;
 
 	if (!rt715->hw_init)
 		return 0;
 
-	if (!slave->unattach_request)
+	if (!peripheral->unattach_request)
 		goto regmap_sync;
 
-	time = wait_for_completion_timeout(&slave->enumeration_complete,
+	time = wait_for_completion_timeout(&peripheral->enumeration_complete,
 					   msecs_to_jiffies(RT715_PROBE_TIMEOUT));
 	if (!time) {
-		dev_err(&slave->dev, "Enumeration not complete, timed out\n");
+		dev_err(&peripheral->dev, "Enumeration not complete, timed out\n");
 		return -ETIMEDOUT;
 	}
 
 regmap_sync:
-	slave->unattach_request = 0;
+	peripheral->unattach_request = 0;
 	regcache_cache_only(rt715->regmap, false);
 	regcache_sync_region(rt715->regmap,
 		SDW_SDCA_CTL(FUN_JACK_CODEC, RT715_SDCA_ST_EN, RT715_SDCA_ST_CTRL,
@@ -268,7 +268,7 @@ static struct sdw_driver rt715_sdw_driver = {
 		.pm = &rt715_pm,
 	},
 	.probe = rt715_sdca_sdw_probe,
-	.ops = &rt715_sdca_slave_ops,
+	.ops = &rt715_sdca_peripheral_ops,
 	.id_table = rt715_sdca_id,
 };
 module_sdw_driver(rt715_sdw_driver);

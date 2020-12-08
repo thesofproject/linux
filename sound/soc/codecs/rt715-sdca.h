@@ -19,12 +19,12 @@ struct rt715_sdca_priv {
 	struct regmap *regmap;
 	struct regmap *mbq_regmap;
 	struct snd_soc_codec *codec;
-	struct sdw_slave *slave;
+	struct sdw_peripheral *peripheral;
 	struct delayed_work adc_mute_work;
 	int dbg_nid;
 	int dbg_vid;
 	int dbg_payload;
-	enum sdw_slave_status status;
+	enum sdw_peripheral_status status;
 	struct sdw_bus_params params;
 	bool hw_init;
 	bool first_init;
@@ -129,8 +129,8 @@ enum {
 	RT715_AIF2,
 };
 
-int rt715_sdca_io_init(struct device *dev, struct sdw_slave *slave);
+int rt715_sdca_io_init(struct device *dev, struct sdw_peripheral *peripheral);
 int rt715_sdca_init(struct device *dev, struct regmap *mbq_regmap,
-	struct regmap *regmap, struct sdw_slave *slave);
+	struct regmap *regmap, struct sdw_peripheral *peripheral);
 
 #endif /* __RT715_SDCA_H__ */

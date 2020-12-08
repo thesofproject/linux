@@ -8,7 +8,7 @@
 #include <linux/bitfield.h>
 
 struct sdw_bus;
-struct sdw_slave;
+struct sdw_peripheral;
 
 /* SDW spec defines and enums, as defined by MIPI 1.1. Spec */
 
@@ -68,17 +68,17 @@ enum {
 #define SDW_BLOCK_PACKG_PER_CH		BIT(1)
 
 /**
- * enum sdw_slave_status - Slave status
- * @SDW_SLAVE_UNATTACHED: Slave is not attached with the bus.
- * @SDW_SLAVE_ATTACHED: Slave is attached with bus.
- * @SDW_SLAVE_ALERT: Some alert condition on the Slave
- * @SDW_SLAVE_RESERVED: Reserved for future use
+ * enum sdw_peripheral_status - Peripheral status
+ * @SDW_PERIPHERAL_UNATTACHED: Peripheral is not attached with the bus.
+ * @SDW_PERIPHERAL_ATTACHED: Peripheral is attached with bus.
+ * @SDW_PERIPHERAL_ALERT: Some alert condition on the Peripheral
+ * @SDW_PERIPHERAL_RESERVED: Reserved for future use
  */
-enum sdw_slave_status {
-	SDW_SLAVE_UNATTACHED = 0,
-	SDW_SLAVE_ATTACHED = 1,
-	SDW_SLAVE_ALERT = 2,
-	SDW_SLAVE_RESERVED = 3,
+enum sdw_peripheral_status {
+	SDW_PERIPHERAL_UNATTACHED = 0,
+	SDW_PERIPHERAL_ATTACHED = 1,
+	SDW_PERIPHERAL_ALERT = 2,
+	SDW_PERIPHERAL_RESERVED = 3,
 };
 
 /**
@@ -183,7 +183,7 @@ enum sdw_clk_stop_reset_behave {
 };
 
 /**
- * enum sdw_p15_behave - Slave Port 15 behaviour when the Manager attempts a
+ * enum sdw_p15_behave - Peripheral Port 15 behaviour when the Manager attempts a
  * read
  * @SDW_P15_READ_IGNORED: Read is ignored
  * @SDW_P15_CMD_OK: Command is ok
@@ -210,9 +210,9 @@ enum sdw_dpn_type {
 
 /**
  * enum sdw_clk_stop_mode - Clock Stop modes
- * @SDW_CLK_STOP_MODE0: Slave can continue operation seamlessly on clock
+ * @SDW_CLK_STOP_MODE0: Peripheral can continue operation seamlessly on clock
  * restart
- * @SDW_CLK_STOP_MODE1: Slave may have entered a deeper power-saving mode,
+ * @SDW_CLK_STOP_MODE1: Peripheral may have entered a deeper power-saving mode,
  * not capable of continuing operation seamlessly when the clock restarts
  */
 enum sdw_clk_stop_mode {
@@ -228,7 +228,7 @@ enum sdw_clk_stop_mode {
  * (inclusive)
  * @num_words: number of wordlengths supported
  * @words: wordlengths supported
- * @BRA_flow_controlled: Slave implementation results in an OK_NotReady
+ * @BRA_flow_controlled: Peripheral implementation results in an OK_NotReady
  * response
  * @simple_ch_prep_sm: If channel prepare sequence is required
  * @imp_def_interrupts: If set, each bit corresponds to support for
@@ -337,7 +337,7 @@ struct sdw_dpn_prop {
 };
 
 /**
- * struct sdw_slave_prop - SoundWire Slave properties
+ * struct sdw_peripheral_prop - SoundWire Peripheral properties
  * @mipi_revision: Spec version of the implementation
  * @wake_capable: Wake-up events are supported
  * @test_mode_capable: If test mode is supported
@@ -347,17 +347,17 @@ struct sdw_dpn_prop {
  * Machine transitions, in milliseconds
  * @ch_prep_timeout: Worst-case latency of the Channel Prepare State Machine
  * transitions, in milliseconds
- * @reset_behave: Slave keeps the status of the SlaveStopClockPrepare
+ * @reset_behave: Peripheral keeps the status of the PeripheralStopClockPrepare
  * state machine (P=1 SCSP_SM) after exit from clock-stop mode1
- * @high_PHY_capable: Slave is HighPHY capable
- * @paging_support: Slave implements paging registers SCP_AddrPage1 and
+ * @high_PHY_capable: Peripheral is HighPHY capable
+ * @paging_support: Peripheral implements paging registers SCP_AddrPage1 and
  * SCP_AddrPage2
- * @bank_delay_support: Slave implements bank delay/bridge support registers
+ * @bank_delay_support: Peripheral implements bank delay/bridge support registers
  * SCP_BankDelay and SCP_NextFrame
- * @p15_behave: Slave behavior when the Manager attempts a read to the Port15
+ * @p15_behave: Peripheral behavior when the Manager attempts a read to the Port15
  * alias
- * @lane_control_support: Slave supports lane control
- * @manager_count: Number of Managers present on this Slave
+ * @lane_control_support: Peripheral supports lane control
+ * @manager_count: Number of Managers present on this Peripheral
  * @source_ports: Bitmap identifying source ports
  * @sink_ports: Bitmap identifying sink ports
  * @dp0_prop: Data Port 0 properties
@@ -365,9 +365,9 @@ struct sdw_dpn_prop {
  * @sink_dpn_prop: Sink Data Port N properties
  * @scp_int1_mask: SCP_INT1_MASK desired settings
  * @quirks: bitmask identifying deltas from the MIPI specification
- * @is_sdca: the Slave supports the SDCA specification
+ * @is_sdca: the Peripheral supports the SDCA specification
  */
-struct sdw_slave_prop {
+struct sdw_peripheral_prop {
 	u32 mipi_revision;
 	bool wake_capable;
 	bool test_mode_capable;
@@ -392,7 +392,7 @@ struct sdw_slave_prop {
 	bool is_sdca;
 };
 
-#define SDW_SLAVE_QUIRKS_INVALID_INITIAL_PARITY	BIT(0)
+#define SDW_PERIPHERAL_QUIRKS_INVALID_INITIAL_PARITY	BIT(0)
 
 /**
  * struct sdw_manager_prop - Manager properties
@@ -452,16 +452,16 @@ struct sdw_manager_prop {
 #define SDW_MANAGER_QUIRKS_CLEAR_INITIAL_PARITY	BIT(1)
 
 int sdw_manager_read_prop(struct sdw_bus *bus);
-int sdw_slave_read_prop(struct sdw_slave *slave);
+int sdw_peripheral_read_prop(struct sdw_peripheral *peripheral);
 
 /*
- * SDW Slave Structures and APIs
+ * SDW Peripheral Structures and APIs
  */
 
 #define SDW_IGNORED_UNIQUE_ID 0xFF
 
 /**
- * struct sdw_slave_id - Slave ID
+ * struct sdw_peripheral_id - Peripheral ID
  * @mfg_id: MIPI Manufacturer ID
  * @part_id: Device Part ID
  * @class_id: MIPI Class ID (defined starting with SoundWire 1.2 spec)
@@ -470,7 +470,7 @@ int sdw_slave_read_prop(struct sdw_slave *slave);
  *
  * The order of the IDs here does not follow the DisCo spec definitions
  */
-struct sdw_slave_id {
+struct sdw_peripheral_id {
 	__u16 mfg_id;
 	__u16 part_id;
 	__u8 class_id;
@@ -508,16 +508,16 @@ struct sdw_slave_id {
 #define SDW_CLASS_ID(addr)	FIELD_GET(SDW_CLASS_ID_MASK, addr)
 
 /**
- * struct sdw_slave_intr_status - Slave interrupt status
- * @sdca_cascade: set if the Slave device reports an SDCA interrupt
+ * struct sdw_peripheral_intr_status - Peripheral interrupt status
+ * @sdca_cascade: set if the Peripheral device reports an SDCA interrupt
  * @control_port: control port status
  * @port: data port status
  */
-struct sdw_slave_intr_status {
-	bool sdca_cascade;
-	u8 control_port;
-	u8 port[15];
-};
+	struct sdw_peripheral_intr_status {
+		bool sdca_cascade;
+		u8 control_port;
+		u8 port[15];
+	};
 
 /**
  * sdw_reg_bank - SoundWire register banks
@@ -550,7 +550,7 @@ struct sdw_bus_conf {
  * @num: Port number
  * @ch_mask: Active channel mask
  * @prepare: Prepare (true) /de-prepare (false) channel
- * @bank: Register bank, which bank Slave/Manager driver should program for
+ * @bank: Register bank, which bank Peripheral/Manager driver should program for
  * implementation defined registers. This is always updated to next_bank
  * value read from bus params.
  *
@@ -586,7 +586,7 @@ enum sdw_port_prep_ops {
  * @bandwidth: Current bandwidth
  * @col: Active columns
  * @row: Active rows
- * @s_data_mode: NORMAL, STATIC or PRBS mode for all Slave ports
+ * @s_data_mode: NORMAL, STATIC or PRBS mode for all Peripheral ports
  * @m_data_mode: NORMAL, STATIC or PRBS mode for all Manager ports. The value
  * should be the same to detect transmission issues, but can be different to
  * test the interrupt reports
@@ -604,71 +604,71 @@ struct sdw_bus_params {
 };
 
 /**
- * struct sdw_slave_ops: Slave driver callback ops
+ * struct sdw_peripheral_ops: Peripheral driver callback ops
  *
- * @read_prop: Read Slave properties
+ * @read_prop: Read Peripheral properties
  * @interrupt_callback: Device interrupt notification (invoked in thread
  * context)
- * @update_status: Update Slave status
- * @bus_config: Update the bus config for Slave
+ * @update_status: Update Peripheral status
+ * @bus_config: Update the bus config for Peripheral
  * @port_prep: Prepare the port with parameters
  */
-struct sdw_slave_ops {
-	int (*read_prop)(struct sdw_slave *sdw);
-	int (*interrupt_callback)(struct sdw_slave *slave,
-				  struct sdw_slave_intr_status *status);
-	int (*update_status)(struct sdw_slave *slave,
-			     enum sdw_slave_status status);
-	int (*bus_config)(struct sdw_slave *slave,
+struct sdw_peripheral_ops {
+	int (*read_prop)(struct sdw_peripheral *sdw);
+	int (*interrupt_callback)(struct sdw_peripheral *peripheral,
+				  struct sdw_peripheral_intr_status *status);
+	int (*update_status)(struct sdw_peripheral *peripheral,
+			     enum sdw_peripheral_status status);
+	int (*bus_config)(struct sdw_peripheral *peripheral,
 			  struct sdw_bus_params *params);
-	int (*port_prep)(struct sdw_slave *slave,
+	int (*port_prep)(struct sdw_peripheral *peripheral,
 			 struct sdw_prepare_ch *prepare_ch,
 			 enum sdw_port_prep_ops pre_ops);
-	int (*get_clk_stop_mode)(struct sdw_slave *slave);
-	int (*clk_stop)(struct sdw_slave *slave,
+	int (*get_clk_stop_mode)(struct sdw_peripheral *peripheral);
+	int (*clk_stop)(struct sdw_peripheral *peripheral,
 			enum sdw_clk_stop_mode mode,
 			enum sdw_clk_stop_type type);
 
 };
 
 /**
- * struct sdw_slave - SoundWire Slave
+ * struct sdw_peripheral - SoundWire Peripheral
  * @id: MIPI device ID
  * @dev: Linux device
- * @status: Status reported by the Slave
+ * @status: Status reported by the Peripheral
  * @bus: Bus handle
- * @ops: Slave callback ops
- * @prop: Slave properties
- * @debugfs: Slave debugfs
+ * @ops: Peripheral callback ops
+ * @prop: Peripheral properties
+ * @debugfs: Peripheral debugfs
  * @node: node for bus list
- * @port_ready: Port ready completion flag for each Slave port
- * @m_port_map: static Master port map for each Slave port
+ * @port_ready: Port ready completion flag for each Peripheral port
+ * @m_port_map: static Master port map for each Peripheral port
  * @dev_num: Current Device Number, values can be 0 or dev_num_sticky
  * @dev_num_sticky: one-time static Device Number assigned by Bus
  * @probed: boolean tracking driver state
  * @probe_complete: completion utility to control potential races
  * on startup between driver probe/initialization and SoundWire
- * Slave state changes/implementation-defined interrupts
+ * Peripheral state changes/implementation-defined interrupts
  * @enumeration_complete: completion utility to control potential races
  * on startup between device enumeration and read/write access to the
- * Slave device
+ * Peripheral device
  * @initialization_complete: completion utility to control potential races
  * on startup between device enumeration and settings being restored
- * @unattach_request: mask field to keep track why the Slave re-attached and
+ * @unattach_request: mask field to keep track why the Peripheral re-attached and
  * was re-initialized. This is useful to deal with potential race conditions
  * between the Manager suspending and the codec resuming, and make sure that
- * when the Manager triggered a reset the Slave is properly enumerated and
+ * when the Manager triggered a reset the Peripheral is properly enumerated and
  * initialized
  * @first_interrupt_done: status flag tracking if the interrupt handling
- * for a Slave happens for the first time after enumeration
+ * for a Peripheral happens for the first time after enumeration
  */
-struct sdw_slave {
-	struct sdw_slave_id id;
+struct sdw_peripheral {
+	struct sdw_peripheral_id id;
 	struct device dev;
-	enum sdw_slave_status status;
+	enum sdw_peripheral_status status;
 	struct sdw_bus *bus;
-	const struct sdw_slave_ops *ops;
-	struct sdw_slave_prop prop;
+	const struct sdw_peripheral_ops *ops;
+	struct sdw_peripheral_prop prop;
 #ifdef CONFIG_DEBUG_FS
 	struct dentry *debugfs;
 #endif
@@ -686,7 +686,7 @@ struct sdw_slave {
 	bool first_interrupt_done;
 };
 
-#define dev_to_sdw_dev(_dev) container_of(_dev, struct sdw_slave, dev)
+#define dev_to_sdw_dev(_dev) container_of(_dev, struct sdw_peripheral, dev)
 
 /**
  * struct sdw_manager_device - SoundWire 'Manager Device' representation
@@ -698,33 +698,33 @@ struct sdw_manager_device {
 	struct sdw_bus *bus;
 };
 
-#define dev_to_sdw_manager_device(d)	\
+#define dev_to_sdw_manager_device(d)			\
 	container_of(d, struct sdw_manager_device, dev)
 
 struct sdw_driver {
 	const char *name;
 
-	int (*probe)(struct sdw_slave *sdw,
-			const struct sdw_device_id *id);
-	int (*remove)(struct sdw_slave *sdw);
-	void (*shutdown)(struct sdw_slave *sdw);
+	int (*probe)(struct sdw_peripheral *sdw,
+		     const struct sdw_device_id *id);
+	int (*remove)(struct sdw_peripheral *sdw);
+	void (*shutdown)(struct sdw_peripheral *sdw);
 
 	const struct sdw_device_id *id_table;
-	const struct sdw_slave_ops *ops;
+	const struct sdw_peripheral_ops *ops;
 
 	struct device_driver driver;
 };
 
-#define SDW_SLAVE_ENTRY_EXT(_mfg_id, _part_id, _version, _c_id, _drv_data) \
-	{ .mfg_id = (_mfg_id), .part_id = (_part_id),		\
-	  .sdw_version = (_version), .class_id = (_c_id),	\
-	  .driver_data = (unsigned long)(_drv_data) }
+#define SDW_PERIPHERAL_ENTRY_EXT(_mfg_id, _part_id, _version, _c_id, _drv_data) \
+	{ .mfg_id = (_mfg_id), .part_id = (_part_id),			\
+			.sdw_version = (_version), .class_id = (_c_id),	\
+			.driver_data = (unsigned long)(_drv_data) }
 
-#define SDW_SLAVE_ENTRY(_mfg_id, _part_id, _drv_data)	\
-	SDW_SLAVE_ENTRY_EXT((_mfg_id), (_part_id), 0, 0, (_drv_data))
+#define SDW_PERIPHERAL_ENTRY(_mfg_id, _part_id, _drv_data)		\
+	SDW_PERIPHERAL_ENTRY_EXT((_mfg_id), (_part_id), 0, 0, (_drv_data))
 
-int sdw_handle_slave_status(struct sdw_bus *bus,
-			enum sdw_slave_status status[]);
+int sdw_handle_peripheral_status(struct sdw_bus *bus,
+				 enum sdw_peripheral_status status[]);
 
 /*
  * SDW manager structures and APIs
@@ -806,15 +806,15 @@ struct sdw_enable_ch {
  */
 struct sdw_manager_port_ops {
 	int (*dpn_set_port_params)(struct sdw_bus *bus,
-			struct sdw_port_params *port_params,
-			unsigned int bank);
+				   struct sdw_port_params *port_params,
+				   unsigned int bank);
 	int (*dpn_set_port_transport_params)(struct sdw_bus *bus,
-			struct sdw_transport_params *transport_params,
-			enum sdw_reg_bank bank);
+					     struct sdw_transport_params *transport_params,
+					     enum sdw_reg_bank bank);
 	int (*dpn_port_prep)(struct sdw_bus *bus,
-			struct sdw_prepare_ch *prepare_ch);
+			     struct sdw_prepare_ch *prepare_ch);
 	int (*dpn_port_enable_ch)(struct sdw_bus *bus,
-			struct sdw_enable_ch *enable_ch, unsigned int bank);
+				  struct sdw_enable_ch *enable_ch, unsigned int bank);
 };
 
 struct sdw_msg;
@@ -847,14 +847,14 @@ struct sdw_manager_ops {
 	u64 (*override_adr)
 			(struct sdw_bus *bus, u64 addr);
 	enum sdw_command_response (*xfer_msg)
-			(struct sdw_bus *bus, struct sdw_msg *msg);
+	(struct sdw_bus *bus, struct sdw_msg *msg);
 	enum sdw_command_response (*xfer_msg_defer)
-			(struct sdw_bus *bus, struct sdw_msg *msg,
-			struct sdw_defer *defer);
+	(struct sdw_bus *bus, struct sdw_msg *msg,
+	 struct sdw_defer *defer);
 	enum sdw_command_response (*reset_page_addr)
-			(struct sdw_bus *bus, unsigned int dev_num);
+	(struct sdw_bus *bus, unsigned int dev_num);
 	int (*set_bus_conf)(struct sdw_bus *bus,
-			struct sdw_bus_params *params);
+			    struct sdw_bus_params *params);
 	int (*pre_bank_switch)(struct sdw_bus *bus);
 	int (*post_bank_switch)(struct sdw_bus *bus);
 
@@ -866,8 +866,8 @@ struct sdw_manager_ops {
  * @md: Manager device
  * @link_id: Link id number, can be 0 to N, unique for each Manager
  * @id: bus system-wide unique id
- * @slaves: list of Slaves on this bus
- * @assigned: Bitmap for Slave device numbers.
+ * @peripherals: list of Peripherals on this bus
+ * @assigned: Bitmap for Peripheral device numbers.
  * Bit set implies used number, bit clear implies unused number.
  * @bus_lock: bus lock
  * @msg_lock: message lock
@@ -897,7 +897,7 @@ struct sdw_bus {
 	struct sdw_manager_device *md;
 	unsigned int link_id;
 	int id;
-	struct list_head slaves;
+	struct list_head peripherals;
 	DECLARE_BITMAP(assigned, SDW_MAX_DEVICES);
 	struct mutex bus_lock;
 	struct mutex msg_lock;
@@ -922,7 +922,7 @@ int sdw_bus_manager_add(struct sdw_bus *bus, struct device *parent,
 void sdw_bus_manager_delete(struct sdw_bus *bus);
 
 /**
- * sdw_port_config: Manager or Slave Port configuration
+ * sdw_port_config: Manager or Peripheral Port configuration
  *
  * @num: Port number
  * @ch_mask: channels mask for port
@@ -933,7 +933,7 @@ struct sdw_port_config {
 };
 
 /**
- * sdw_stream_config: Manager or Slave stream configuration
+ * sdw_stream_config: Manager or Peripheral stream configuration
  *
  * @frame_rate: Audio frame rate of the stream, in Hz
  * @ch_count: Channel count of the stream
@@ -1014,15 +1014,15 @@ int sdw_stream_add_manager(struct sdw_bus *bus,
 			   struct sdw_port_config *port_config,
 			   unsigned int num_ports,
 			   struct sdw_stream_runtime *stream);
-int sdw_stream_add_slave(struct sdw_slave *slave,
-			 struct sdw_stream_config *stream_config,
-			 struct sdw_port_config *port_config,
-			 unsigned int num_ports,
-			 struct sdw_stream_runtime *stream);
+int sdw_stream_add_peripheral(struct sdw_peripheral *peripheral,
+			      struct sdw_stream_config *stream_config,
+			      struct sdw_port_config *port_config,
+			      unsigned int num_ports,
+			      struct sdw_stream_runtime *stream);
 int sdw_stream_remove_manager(struct sdw_bus *bus,
 			      struct sdw_stream_runtime *stream);
-int sdw_stream_remove_slave(struct sdw_slave *slave,
-			    struct sdw_stream_runtime *stream);
+int sdw_stream_remove_peripheral(struct sdw_peripheral *peripheral,
+				 struct sdw_stream_runtime *stream);
 int sdw_startup_stream(void *sdw_substream);
 int sdw_prepare_stream(struct sdw_stream_runtime *stream);
 int sdw_enable_stream(struct sdw_stream_runtime *stream);
@@ -1035,13 +1035,13 @@ int sdw_bus_exit_clk_stop(struct sdw_bus *bus);
 
 /* messaging and data APIs */
 
-int sdw_read(struct sdw_slave *slave, u32 addr);
-int sdw_write(struct sdw_slave *slave, u32 addr, u8 value);
-int sdw_write_no_pm(struct sdw_slave *slave, u32 addr, u8 value);
-int sdw_read_no_pm(struct sdw_slave *slave, u32 addr);
-int sdw_nread(struct sdw_slave *slave, u32 addr, size_t count, u8 *val);
-int sdw_nwrite(struct sdw_slave *slave, u32 addr, size_t count, u8 *val);
-int sdw_compare_devid(struct sdw_slave *slave, struct sdw_slave_id id);
-void sdw_extract_slave_id(struct sdw_bus *bus, u64 addr, struct sdw_slave_id *id);
+int sdw_read(struct sdw_peripheral *peripheral, u32 addr);
+int sdw_write(struct sdw_peripheral *peripheral, u32 addr, u8 value);
+int sdw_write_no_pm(struct sdw_peripheral *peripheral, u32 addr, u8 value);
+int sdw_read_no_pm(struct sdw_peripheral *peripheral, u32 addr);
+int sdw_nread(struct sdw_peripheral *peripheral, u32 addr, size_t count, u8 *val);
+int sdw_nwrite(struct sdw_peripheral *peripheral, u32 addr, size_t count, u8 *val);
+int sdw_compare_devid(struct sdw_peripheral *peripheral, struct sdw_peripheral_id id);
+void sdw_extract_peripheral_id(struct sdw_bus *bus, u64 addr, struct sdw_peripheral_id *id);
 
 #endif /* __SOUNDWIRE_H */

@@ -267,17 +267,17 @@ static __maybe_unused int max98373_suspend(struct device *dev)
 
 static __maybe_unused int max98373_resume(struct device *dev)
 {
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);
 	struct max98373_priv *max98373 = dev_get_drvdata(dev);
 	unsigned long time;
 
 	if (!max98373->hw_init)
 		return 0;
 
-	if (!slave->unattach_request)
+	if (!peripheral->unattach_request)
 		goto regmap_sync;
 
-	time = wait_for_completion_timeout(&slave->initialization_complete,
+	time = wait_for_completion_timeout(&peripheral->initialization_complete,
 					   msecs_to_jiffies(MAX98373_PROBE_TIMEOUT));
 	if (!time) {
 		dev_err(dev, "Initialization not complete, timed out\n");
@@ -285,7 +285,7 @@ static __maybe_unused int max98373_resume(struct device *dev)
 	}
 
 regmap_sync:
-	slave->unattach_request = 0;
+	peripheral->unattach_request = 0;
 	regcache_cache_only(max98373->regmap, false);
 	regcache_sync(max98373->regmap);
 
@@ -297,9 +297,9 @@ static const struct dev_pm_ops max98373_pm = {
 	SET_RUNTIME_PM_OPS(max98373_suspend, max98373_resume, NULL)
 };
 
-static int max98373_read_prop(struct sdw_slave *slave)
+static int max98373_read_prop(struct sdw_peripheral *peripheral)
 {
-	struct sdw_slave_prop *prop = &slave->prop;
+	struct sdw_peripheral_prop *prop = &peripheral->prop;
 	int nval, i;
 	u32 bit;
 	unsigned long addr;
@@ -315,7 +315,7 @@ static int max98373_read_prop(struct sdw_slave *slave)
 	prop->clk_stop_timeout = 20;
 
 	nval = hweight32(prop->source_ports);
-	prop->src_dpn_prop = devm_kcalloc(&slave->dev, nval,
+	prop->src_dpn_prop = devm_kcalloc(&peripheral->dev, nval,
 					  sizeof(*prop->src_dpn_prop),
 					  GFP_KERNEL);
 	if (!prop->src_dpn_prop)
@@ -334,7 +334,7 @@ static int max98373_read_prop(struct sdw_slave *slave)
 
 	/* do this again for sink now */
 	nval = hweight32(prop->sink_ports);
-	prop->sink_dpn_prop = devm_kcalloc(&slave->dev, nval,
+	prop->sink_dpn_prop = devm_kcalloc(&peripheral->dev, nval,
 					   sizeof(*prop->sink_dpn_prop),
 					   GFP_KERNEL);
 	if (!prop->sink_dpn_prop)
@@ -357,9 +357,9 @@ static int max98373_read_prop(struct sdw_slave *slave)
 	return 0;
 }
 
-static int max98373_io_init(struct sdw_slave *slave)
+static int max98373_io_init(struct sdw_peripheral *peripheral)
 {
-	struct device *dev = &slave->dev;
+	struct device *dev = &peripheral->dev;
 	struct max98373_priv *max98373 = dev_get_drvdata(dev);
 
 	if (max98373->pm_init_once) {
@@ -368,7 +368,7 @@ static int max98373_io_init(struct sdw_slave *slave)
 	}
 
 	/*
-	 * PM runtime is only enabled when a Slave reports as Attached
+	 * PM runtime is only enabled when a Peripheral reports as Attached
 	 */
 	if (!max98373->pm_init_once) {
 		/* set autosuspend parameters */
@@ -476,7 +476,7 @@ static int max98373_io_init(struct sdw_slave *slave)
 	return 0;
 }
 
-static int max98373_clock_calculate(struct sdw_slave *slave,
+static int max98373_clock_calculate(struct sdw_peripheral *peripheral,
 				    unsigned int clk_freq)
 {
 	int x, y;
@@ -491,15 +491,15 @@ static int max98373_clock_calculate(struct sdw_slave *slave,
 				return (x << 3) + y;
 
 	/* Set default clock (12.288 Mhz) if the value is not in the list */
-	dev_err(&slave->dev, "Requested clock not found. (clk_freq = %d)\n",
+	dev_err(&peripheral->dev, "Requested clock not found. (clk_freq = %d)\n",
 		clk_freq);
 	return 0x5;
 }
 
-static int max98373_clock_config(struct sdw_slave *slave,
+static int max98373_clock_config(struct sdw_peripheral *peripheral,
 				 struct sdw_bus_params *params)
 {
-	struct device *dev = &slave->dev;
+	struct device *dev = &peripheral->dev;
 	struct max98373_priv *max98373 = dev_get_drvdata(dev);
 	unsigned int clk_freq, value;
 
@@ -510,7 +510,7 @@ static int max98373_clock_config(struct sdw_slave *slave,
 	 *	requested clock. If the value is not in the list,
 	 *	use reasonable default - 12.288 Mhz
 	 */
-	value = max98373_clock_calculate(slave, clk_freq);
+	value = max98373_clock_calculate(peripheral, clk_freq);
 
 	/* SWCLK */
 	regmap_write(max98373->regmap, MAX98373_R2036_SOUNDWIRE_CTRL, value);
@@ -543,7 +543,7 @@ static int max98373_sdw_dai_hw_params(struct snd_pcm_substream *substream,
 	if (!stream)
 		return -EINVAL;
 
-	if (!max98373->slave)
+	if (!max98373->peripheral)
 		return -EINVAL;
 
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
@@ -571,7 +571,7 @@ static int max98373_sdw_dai_hw_params(struct snd_pcm_substream *substream,
 		port_config.ch_mask = GENMASK((int)stream_config.ch_count - 1, 0);
 	}
 
-	ret = sdw_stream_add_slave(max98373->slave, &stream_config,
+	ret = sdw_stream_add_peripheral(max98373->peripheral, &stream_config,
 				   &port_config, 1, stream->sdw_stream);
 	if (ret) {
 		dev_err(dai->dev, "Unable to configure port\n");
@@ -674,10 +674,10 @@ static int max98373_pcm_hw_free(struct snd_pcm_substream *substream,
 	struct sdw_stream_data *stream =
 		snd_soc_dai_get_dma_data(dai, substream);
 
-	if (!max98373->slave)
+	if (!max98373->peripheral)
 		return -EINVAL;
 
-	sdw_stream_remove_slave(max98373->slave, stream->sdw_stream);
+	sdw_stream_remove_peripheral(max98373->peripheral, stream->sdw_stream);
 	return 0;
 }
 
@@ -767,12 +767,12 @@ static struct snd_soc_dai_driver max98373_sdw_dai[] = {
 	}
 };
 
-static int max98373_init(struct sdw_slave *slave, struct regmap *regmap)
+static int max98373_init(struct sdw_peripheral *peripheral, struct regmap *regmap)
 {
 	struct max98373_priv *max98373;
 	int ret;
 	int i;
-	struct device *dev = &slave->dev;
+	struct device *dev = &peripheral->dev;
 
 	/*  Allocate and assign private driver data structure  */
 	max98373 = devm_kzalloc(dev, sizeof(*max98373), GFP_KERNEL);
@@ -781,7 +781,7 @@ static int max98373_init(struct sdw_slave *slave, struct regmap *regmap)
 
 	dev_set_drvdata(dev, max98373);
 	max98373->regmap = regmap;
-	max98373->slave = slave;
+	max98373->peripheral = peripheral;
 
 	max98373->cache_num = ARRAY_SIZE(max98373_sdw_cache_reg);
 	max98373->cache = devm_kcalloc(dev, max98373->cache_num,
@@ -807,57 +807,57 @@ static int max98373_init(struct sdw_slave *slave, struct regmap *regmap)
 	return ret;
 }
 
-static int max98373_update_status(struct sdw_slave *slave,
-				  enum sdw_slave_status status)
+static int max98373_update_status(struct sdw_peripheral *peripheral,
+				  enum sdw_peripheral_status status)
 {
-	struct max98373_priv *max98373 = dev_get_drvdata(&slave->dev);
+	struct max98373_priv *max98373 = dev_get_drvdata(&peripheral->dev);
 
-	if (status == SDW_SLAVE_UNATTACHED)
+	if (status == SDW_PERIPHERAL_UNATTACHED)
 		max98373->hw_init = false;
 
 	/*
-	 * Perform initialization only if slave status is SDW_SLAVE_ATTACHED
+	 * Perform initialization only if peripheral status is SDW_PERIPHERAL_ATTACHED
 	 */
-	if (max98373->hw_init || status != SDW_SLAVE_ATTACHED)
+	if (max98373->hw_init || status != SDW_PERIPHERAL_ATTACHED)
 		return 0;
 
-	/* perform I/O transfers required for Slave initialization */
-	return max98373_io_init(slave);
+	/* perform I/O transfers required for Peripheral initialization */
+	return max98373_io_init(peripheral);
 }
 
-static int max98373_bus_config(struct sdw_slave *slave,
+static int max98373_bus_config(struct sdw_peripheral *peripheral,
 			       struct sdw_bus_params *params)
 {
 	int ret;
 
-	ret = max98373_clock_config(slave, params);
+	ret = max98373_clock_config(peripheral, params);
 	if (ret < 0)
-		dev_err(&slave->dev, "Invalid clk config");
+		dev_err(&peripheral->dev, "Invalid clk config");
 
 	return ret;
 }
 
 /*
- * slave_ops: callbacks for get_clock_stop_mode, clock_stop and
+ * peripheral_ops: callbacks for get_clock_stop_mode, clock_stop and
  * port_prep are not defined for now
  */
-static struct sdw_slave_ops max98373_slave_ops = {
+static struct sdw_peripheral_ops max98373_peripheral_ops = {
 	.read_prop = max98373_read_prop,
 	.update_status = max98373_update_status,
 	.bus_config = max98373_bus_config,
 };
 
-static int max98373_sdw_probe(struct sdw_slave *slave,
+static int max98373_sdw_probe(struct sdw_peripheral *peripheral,
 			      const struct sdw_device_id *id)
 {
 	struct regmap *regmap;
 
 	/* Regmap Initialization */
-	regmap = devm_regmap_init_sdw(slave, &max98373_sdw_regmap);
+	regmap = devm_regmap_init_sdw(peripheral, &max98373_sdw_regmap);
 	if (IS_ERR(regmap))
 		return PTR_ERR(regmap);
 
-	return max98373_init(slave, regmap);
+	return max98373_init(peripheral, regmap);
 }
 
 #if defined(CONFIG_OF)
@@ -877,7 +877,7 @@ MODULE_DEVICE_TABLE(acpi, max98373_acpi_match);
 #endif
 
 static const struct sdw_device_id max98373_id[] = {
-	SDW_SLAVE_ENTRY(0x019F, 0x8373, 0),
+	SDW_PERIPHERAL_ENTRY(0x019F, 0x8373, 0),
 	{},
 };
 MODULE_DEVICE_TABLE(sdw, max98373_id);
@@ -892,7 +892,7 @@ static struct sdw_driver max98373_sdw_driver = {
 	},
 	.probe = max98373_sdw_probe,
 	.remove = NULL,
-	.ops = &max98373_slave_ops,
+	.ops = &max98373_peripheral_ops,
 	.id_table = max98373_id,
 };
 

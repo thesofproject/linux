@@ -3,13 +3,13 @@
 
 /*
  * MIPI Discovery And Configuration (DisCo) Specification for SoundWire
- * specifies properties to be implemented for SoundWire Managers and Slaves.
+ * specifies properties to be implemented for SoundWire Managers and Peripherals.
  * The DisCo spec doesn't mandate these properties. However, SDW bus cannot
  * work without knowing these values.
  *
- * The helper functions read the Manager and Slave properties. Implementers
- * of Manager or Slave drivers can use any of the below three mechanisms:
- *    a) Use these APIs here as .read_prop() callback for Manager and Slave
+ * The helper functions read the Manager and Peripheral properties. Implementers
+ * of Manager or Peripheral drivers can use any of the below three mechanisms:
+ *    a) Use these APIs here as .read_prop() callback for Manager and Peripheral
  *    b) Implement own methods and set those as .read_prop(), but invoke
  *    APIs in this file for generic read and override the values with
  *    platform specific data
@@ -120,9 +120,9 @@ int sdw_manager_read_prop(struct sdw_bus *bus)
 }
 EXPORT_SYMBOL(sdw_manager_read_prop);
 
-static int sdw_slave_read_dp0(struct sdw_slave *slave,
-			      struct fwnode_handle *port,
-			      struct sdw_dp0_prop *dp0)
+static int sdw_peripheral_read_dp0(struct sdw_peripheral *peripheral,
+				   struct fwnode_handle *port,
+				   struct sdw_dp0_prop *dp0)
 {
 	int nval;
 
@@ -136,7 +136,7 @@ static int sdw_slave_read_dp0(struct sdw_slave *slave,
 	if (nval > 0) {
 
 		dp0->num_words = nval;
-		dp0->words = devm_kcalloc(&slave->dev,
+		dp0->words = devm_kcalloc(&peripheral->dev,
 					  dp0->num_words, sizeof(*dp0->words),
 					  GFP_KERNEL);
 		if (!dp0->words)
@@ -159,9 +159,9 @@ static int sdw_slave_read_dp0(struct sdw_slave *slave,
 	return 0;
 }
 
-static int sdw_slave_read_dpn(struct sdw_slave *slave,
-			      struct sdw_dpn_prop *dpn, int count, int ports,
-			      char *type)
+static int sdw_peripheral_read_dpn(struct sdw_peripheral *peripheral,
+				   struct sdw_dpn_prop *dpn, int count, int ports,
+				   char *type)
 {
 	struct fwnode_handle *node;
 	u32 bit, i = 0;
@@ -179,9 +179,9 @@ static int sdw_slave_read_dpn(struct sdw_slave *slave,
 
 		dpn[i].num = bit;
 
-		node = device_get_named_child_node(&slave->dev, name);
+		node = device_get_named_child_node(&peripheral->dev, name);
 		if (!node) {
-			dev_err(&slave->dev, "%s dpN not found\n", name);
+			dev_err(&peripheral->dev, "%s dpN not found\n", name);
 			return -EIO;
 		}
 
@@ -193,7 +193,7 @@ static int sdw_slave_read_dpn(struct sdw_slave *slave,
 		nval = fwnode_property_count_u32(node, "mipi-sdw-port-wordlength-configs");
 		if (nval > 0) {
 			dpn[i].num_words = nval;
-			dpn[i].words = devm_kcalloc(&slave->dev,
+			dpn[i].words = devm_kcalloc(&peripheral->dev,
 						    dpn[i].num_words,
 						    sizeof(*dpn[i].words),
 						    GFP_KERNEL);
@@ -232,7 +232,7 @@ static int sdw_slave_read_dpn(struct sdw_slave *slave,
 		nval = fwnode_property_count_u32(node, "mipi-sdw-channel-number-list");
 		if (nval > 0) {
 			dpn[i].num_channels = nval;
-			dpn[i].channels = devm_kcalloc(&slave->dev,
+			dpn[i].channels = devm_kcalloc(&peripheral->dev,
 						       dpn[i].num_channels,
 						       sizeof(*dpn[i].channels),
 						 GFP_KERNEL);
@@ -247,7 +247,7 @@ static int sdw_slave_read_dpn(struct sdw_slave *slave,
 		nval = fwnode_property_count_u32(node, "mipi-sdw-channel-combination-list");
 		if (nval > 0) {
 			dpn[i].num_ch_combinations = nval;
-			dpn[i].ch_combinations = devm_kcalloc(&slave->dev,
+			dpn[i].ch_combinations = devm_kcalloc(&peripheral->dev,
 					dpn[i].num_ch_combinations,
 					sizeof(*dpn[i].ch_combinations),
 					GFP_KERNEL);
@@ -281,13 +281,13 @@ static int sdw_slave_read_dpn(struct sdw_slave *slave,
 }
 
 /**
- * sdw_slave_read_prop() - Read Slave properties
- * @slave: SDW Slave
+ * sdw_peripheral_read_prop() - Read Peripheral properties
+ * @peripheral: SDW Peripheral
  */
-int sdw_slave_read_prop(struct sdw_slave *slave)
+int sdw_peripheral_read_prop(struct sdw_peripheral *peripheral)
 {
-	struct sdw_slave_prop *prop = &slave->prop;
-	struct device *dev = &slave->dev;
+	struct sdw_peripheral_prop *prop = &peripheral->prop;
+	struct device *dev = &peripheral->dev;
 	struct fwnode_handle *port;
 	int nval;
 
@@ -345,13 +345,13 @@ int sdw_slave_read_prop(struct sdw_slave *slave)
 	if (!port) {
 		dev_dbg(dev, "DP0 node not found!!\n");
 	} else {
-		prop->dp0_prop = devm_kzalloc(&slave->dev,
+		prop->dp0_prop = devm_kzalloc(&peripheral->dev,
 					      sizeof(*prop->dp0_prop),
 					      GFP_KERNEL);
 		if (!prop->dp0_prop)
 			return -ENOMEM;
 
-		sdw_slave_read_dp0(slave, port, prop->dp0_prop);
+		sdw_peripheral_read_dp0(peripheral, port, prop->dp0_prop);
 	}
 
 	/*
@@ -361,27 +361,27 @@ int sdw_slave_read_prop(struct sdw_slave *slave)
 
 	/* Allocate memory for set bits in port lists */
 	nval = hweight32(prop->source_ports);
-	prop->src_dpn_prop = devm_kcalloc(&slave->dev, nval,
+	prop->src_dpn_prop = devm_kcalloc(&peripheral->dev, nval,
 					  sizeof(*prop->src_dpn_prop),
 					  GFP_KERNEL);
 	if (!prop->src_dpn_prop)
 		return -ENOMEM;
 
 	/* Read dpn properties for source port(s) */
-	sdw_slave_read_dpn(slave, prop->src_dpn_prop, nval,
-			   prop->source_ports, "source");
+	sdw_peripheral_read_dpn(peripheral, prop->src_dpn_prop, nval,
+				prop->source_ports, "source");
 
 	nval = hweight32(prop->sink_ports);
-	prop->sink_dpn_prop = devm_kcalloc(&slave->dev, nval,
+	prop->sink_dpn_prop = devm_kcalloc(&peripheral->dev, nval,
 					   sizeof(*prop->sink_dpn_prop),
 					   GFP_KERNEL);
 	if (!prop->sink_dpn_prop)
 		return -ENOMEM;
 
 	/* Read dpn properties for sink port(s) */
-	sdw_slave_read_dpn(slave, prop->sink_dpn_prop, nval,
-			   prop->sink_ports, "sink");
+	sdw_peripheral_read_dpn(peripheral, prop->sink_dpn_prop, nval,
+				prop->sink_ports, "sink");
 
 	return 0;
 }
-EXPORT_SYMBOL(sdw_slave_read_prop);
+EXPORT_SYMBOL(sdw_peripheral_read_prop);

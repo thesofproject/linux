@@ -58,10 +58,10 @@ int sdw_find_row_index(int row)
 }
 EXPORT_SYMBOL(sdw_find_row_index);
 
-static int _sdw_program_slave_port_params(struct sdw_bus *bus,
-					  struct sdw_slave *slave,
-					  struct sdw_transport_params *t_params,
-					  enum sdw_dpn_type type)
+static int _sdw_program_peripheral_port_params(struct sdw_bus *bus,
+					       struct sdw_peripheral *peripheral,
+					       struct sdw_transport_params *t_params,
+					       enum sdw_dpn_type type)
 {
 	u32 addr1, addr2, addr3, addr4;
 	int ret;
@@ -80,14 +80,14 @@ static int _sdw_program_slave_port_params(struct sdw_bus *bus,
 	}
 
 	/* Program DPN_OffsetCtrl2 registers */
-	ret = sdw_write(slave, addr1, t_params->offset2);
+	ret = sdw_write(peripheral, addr1, t_params->offset2);
 	if (ret < 0) {
 		dev_err(bus->dev, "DPN_OffsetCtrl2 register write failed\n");
 		return ret;
 	}
 
 	/* Program DPN_BlockCtrl3 register */
-	ret = sdw_write(slave, addr2, t_params->blk_pkg_mode);
+	ret = sdw_write(peripheral, addr2, t_params->blk_pkg_mode);
 	if (ret < 0) {
 		dev_err(bus->dev, "DPN_BlockCtrl3 register write failed\n");
 		return ret;
@@ -104,7 +104,7 @@ static int _sdw_program_slave_port_params(struct sdw_bus *bus,
 	/* Program DPN_SampleCtrl2 register */
 	wbuf = FIELD_GET(SDW_DPN_SAMPLECTRL_HIGH, t_params->sample_interval - 1);
 
-	ret = sdw_write(slave, addr3, wbuf);
+	ret = sdw_write(peripheral, addr3, wbuf);
 	if (ret < 0) {
 		dev_err(bus->dev, "DPN_SampleCtrl2 register write failed\n");
 		return ret;
@@ -114,28 +114,28 @@ static int _sdw_program_slave_port_params(struct sdw_bus *bus,
 	wbuf = FIELD_PREP(SDW_DPN_HCTRL_HSTART, t_params->hstart);
 	wbuf |= FIELD_PREP(SDW_DPN_HCTRL_HSTOP, t_params->hstop);
 
-	ret = sdw_write(slave, addr4, wbuf);
+	ret = sdw_write(peripheral, addr4, wbuf);
 	if (ret < 0)
 		dev_err(bus->dev, "DPN_HCtrl register write failed\n");
 
 	return ret;
 }
 
-static int sdw_program_slave_port_params(struct sdw_bus *bus,
-					 struct sdw_slave_runtime *s_rt,
-					 struct sdw_port_runtime *p_rt)
+static int sdw_program_peripheral_port_params(struct sdw_bus *bus,
+					      struct sdw_peripheral_runtime *peri_rt,
+					      struct sdw_port_runtime *p_rt)
 {
 	struct sdw_transport_params *t_params = &p_rt->transport_params;
 	struct sdw_port_params *p_params = &p_rt->port_params;
-	struct sdw_slave_prop *slave_prop = &s_rt->slave->prop;
+	struct sdw_peripheral_prop *peripheral_prop = &peri_rt->peripheral->prop;
 	u32 addr1, addr2, addr3, addr4, addr5, addr6;
 	struct sdw_dpn_prop *dpn_prop;
 	int ret;
 	u8 wbuf;
 
-	dpn_prop = sdw_get_slave_dpn_prop(s_rt->slave,
-					  s_rt->direction,
-					  t_params->port_num);
+	dpn_prop = sdw_get_peripheral_dpn_prop(peri_rt->peripheral,
+					       peri_rt->direction,
+					       t_params->port_num);
 	if (!dpn_prop)
 		return -EINVAL;
 
@@ -159,9 +159,9 @@ static int sdw_program_slave_port_params(struct sdw_bus *bus,
 	wbuf = FIELD_PREP(SDW_DPN_PORTCTRL_DATAMODE, p_params->data_mode);
 	wbuf |= FIELD_PREP(SDW_DPN_PORTCTRL_FLOWMODE, p_params->flow_mode);
 
-	ret = sdw_update(s_rt->slave, addr1, 0xF, wbuf);
+	ret = sdw_update(peri_rt->peripheral, addr1, 0xF, wbuf);
 	if (ret < 0) {
-		dev_err(&s_rt->slave->dev,
+		dev_err(&peri_rt->peripheral->dev,
 			"DPN_PortCtrl register write failed for port %d\n",
 			t_params->port_num);
 		return ret;
@@ -169,9 +169,9 @@ static int sdw_program_slave_port_params(struct sdw_bus *bus,
 
 	if (!dpn_prop->read_only_wordlength) {
 		/* Program DPN_BlockCtrl1 register */
-		ret = sdw_write(s_rt->slave, addr2, (p_params->bps - 1));
+		ret = sdw_write(peri_rt->peripheral, addr2, (p_params->bps - 1));
 		if (ret < 0) {
-			dev_err(&s_rt->slave->dev,
+			dev_err(&peri_rt->peripheral->dev,
 				"DPN_BlockCtrl1 register write failed for port %d\n",
 				t_params->port_num);
 			return ret;
@@ -180,18 +180,18 @@ static int sdw_program_slave_port_params(struct sdw_bus *bus,
 
 	/* Program DPN_SampleCtrl1 register */
 	wbuf = (t_params->sample_interval - 1) & SDW_DPN_SAMPLECTRL_LOW;
-	ret = sdw_write(s_rt->slave, addr3, wbuf);
+	ret = sdw_write(peri_rt->peripheral, addr3, wbuf);
 	if (ret < 0) {
-		dev_err(&s_rt->slave->dev,
+		dev_err(&peri_rt->peripheral->dev,
 			"DPN_SampleCtrl1 register write failed for port %d\n",
 			t_params->port_num);
 		return ret;
 	}
 
 	/* Program DPN_OffsetCtrl1 registers */
-	ret = sdw_write(s_rt->slave, addr4, t_params->offset1);
+	ret = sdw_write(peri_rt->peripheral, addr4, t_params->offset1);
 	if (ret < 0) {
-		dev_err(&s_rt->slave->dev,
+		dev_err(&peri_rt->peripheral->dev,
 			"DPN_OffsetCtrl1 register write failed for port %d\n",
 			t_params->port_num);
 		return ret;
@@ -199,9 +199,9 @@ static int sdw_program_slave_port_params(struct sdw_bus *bus,
 
 	/* Program DPN_BlockCtrl2 register*/
 	if (t_params->blk_grp_ctrl_valid) {
-		ret = sdw_write(s_rt->slave, addr5, t_params->blk_grp_ctrl);
+		ret = sdw_write(peri_rt->peripheral, addr5, t_params->blk_grp_ctrl);
 		if (ret < 0) {
-			dev_err(&s_rt->slave->dev,
+			dev_err(&peri_rt->peripheral->dev,
 				"DPN_BlockCtrl2 reg write failed for port %d\n",
 				t_params->port_num);
 			return ret;
@@ -209,10 +209,10 @@ static int sdw_program_slave_port_params(struct sdw_bus *bus,
 	}
 
 	/* program DPN_LaneCtrl register */
-	if (slave_prop->lane_control_support) {
-		ret = sdw_write(s_rt->slave, addr6, t_params->lane_ctrl);
+	if (peripheral_prop->lane_control_support) {
+		ret = sdw_write(peri_rt->peripheral, addr6, t_params->lane_ctrl);
 		if (ret < 0) {
-			dev_err(&s_rt->slave->dev,
+			dev_err(&peri_rt->peripheral->dev,
 				"DPN_LaneCtrl register write failed for port %d\n",
 				t_params->port_num);
 			return ret;
@@ -220,10 +220,10 @@ static int sdw_program_slave_port_params(struct sdw_bus *bus,
 	}
 
 	if (dpn_prop->type != SDW_DPN_SIMPLE) {
-		ret = _sdw_program_slave_port_params(bus, s_rt->slave,
-						     t_params, dpn_prop->type);
+		ret = _sdw_program_peripheral_port_params(bus, peri_rt->peripheral,
+							  t_params, dpn_prop->type);
 		if (ret < 0)
-			dev_err(&s_rt->slave->dev,
+			dev_err(&peri_rt->peripheral->dev,
 				"Transport reg write failed for port: %d\n",
 				t_params->port_num);
 	}
@@ -255,21 +255,21 @@ static int sdw_program_manager_port_params(struct sdw_bus *bus,
 
 /**
  * sdw_program_port_params() - Programs transport parameters of Manager(s)
- * and Slave(s)
+ * and Peripheral(s)
  *
  * @m_rt: Manager stream runtime
  */
 static int sdw_program_port_params(struct sdw_manager_runtime *m_rt)
 {
-	struct sdw_slave_runtime *s_rt;
+	struct sdw_peripheral_runtime *peri_rt;
 	struct sdw_bus *bus = m_rt->bus;
 	struct sdw_port_runtime *p_rt;
 	int ret = 0;
 
-	/* Program transport & port parameters for Slave(s) */
-	list_for_each_entry(s_rt, &m_rt->slave_rt_list, m_rt_node) {
-		list_for_each_entry(p_rt, &s_rt->port_list, port_node) {
-			ret = sdw_program_slave_port_params(bus, s_rt, p_rt);
+	/* Program transport & port parameters for Peripheral(s) */
+	list_for_each_entry(peri_rt, &m_rt->peripheral_rt_list, m_rt_node) {
+		list_for_each_entry(p_rt, &peri_rt->port_list, port_node) {
+			ret = sdw_program_peripheral_port_params(bus, peri_rt, p_rt);
 			if (ret < 0)
 				return ret;
 		}
@@ -286,20 +286,20 @@ static int sdw_program_port_params(struct sdw_manager_runtime *m_rt)
 }
 
 /**
- * sdw_enable_disable_slave_ports: Enable/disable slave data port
+ * sdw_enable_disable_peripheral_ports: Enable/disable peripheral data port
  *
  * @bus: bus instance
- * @s_rt: slave runtime
+ * @peri_rt: peripheral runtime
  * @p_rt: port runtime
  * @en: enable or disable operation
  *
  * This function only sets the enable/disable bits in the relevant bank, the
  * actual enable/disable is done with a bank switch
  */
-static int sdw_enable_disable_slave_ports(struct sdw_bus *bus,
-					  struct sdw_slave_runtime *s_rt,
-					  struct sdw_port_runtime *p_rt,
-					  bool en)
+static int sdw_enable_disable_peripheral_ports(struct sdw_bus *bus,
+					       struct sdw_peripheral_runtime *peri_rt,
+					       struct sdw_port_runtime *p_rt,
+					       bool en)
 {
 	struct sdw_transport_params *t_params = &p_rt->transport_params;
 	u32 addr;
@@ -315,13 +315,13 @@ static int sdw_enable_disable_slave_ports(struct sdw_bus *bus,
 	 * it is safe to reset this register
 	 */
 	if (en)
-		ret = sdw_write(s_rt->slave, addr, p_rt->ch_mask);
+		ret = sdw_write(peri_rt->peripheral, addr, p_rt->ch_mask);
 	else
-		ret = sdw_write(s_rt->slave, addr, 0x0);
+		ret = sdw_write(peri_rt->peripheral, addr, 0x0);
 
 	if (ret < 0)
-		dev_err(&s_rt->slave->dev,
-			"Slave chn_en reg write failed:%d port:%d\n",
+		dev_err(&peri_rt->peripheral->dev,
+			"Peripheral chn_en reg write failed:%d port:%d\n",
 			ret, t_params->port_num);
 
 	return ret;
@@ -363,7 +363,7 @@ static int sdw_enable_disable_manager_ports(struct sdw_manager_runtime *m_rt,
 
 /**
  * sdw_enable_disable_ports() - Enable/disable port(s) for Manager and
- * Slave(s)
+ * Peripheral(s)
  *
  * @m_rt: Manager stream runtime
  * @en: mode (enable/disable)
@@ -371,14 +371,14 @@ static int sdw_enable_disable_manager_ports(struct sdw_manager_runtime *m_rt,
 static int sdw_enable_disable_ports(struct sdw_manager_runtime *m_rt, bool en)
 {
 	struct sdw_port_runtime *s_port, *m_port;
-	struct sdw_slave_runtime *s_rt;
+	struct sdw_peripheral_runtime *peri_rt;
 	int ret = 0;
 
-	/* Enable/Disable Slave port(s) */
-	list_for_each_entry(s_rt, &m_rt->slave_rt_list, m_rt_node) {
-		list_for_each_entry(s_port, &s_rt->port_list, port_node) {
-			ret = sdw_enable_disable_slave_ports(m_rt->bus, s_rt,
-							     s_port, en);
+	/* Enable/Disable Peripheral port(s) */
+	list_for_each_entry(peri_rt, &m_rt->peripheral_rt_list, m_rt_node) {
+		list_for_each_entry(s_port, &peri_rt->port_list, port_node) {
+			ret = sdw_enable_disable_peripheral_ports(m_rt->bus, peri_rt,
+								  s_port, en);
 			if (ret < 0)
 				return ret;
 		}
@@ -394,18 +394,18 @@ static int sdw_enable_disable_ports(struct sdw_manager_runtime *m_rt, bool en)
 	return 0;
 }
 
-static int sdw_do_port_prep(struct sdw_slave_runtime *s_rt,
+static int sdw_do_port_prep(struct sdw_peripheral_runtime *peri_rt,
 			    struct sdw_prepare_ch prep_ch,
 			    enum sdw_port_prep_ops cmd)
 {
-	const struct sdw_slave_ops *ops = s_rt->slave->ops;
+	const struct sdw_peripheral_ops *ops = peri_rt->peripheral->ops;
 	int ret;
 
 	if (ops->port_prep) {
-		ret = ops->port_prep(s_rt->slave, &prep_ch, cmd);
+		ret = ops->port_prep(peri_rt->peripheral, &prep_ch, cmd);
 		if (ret < 0) {
-			dev_err(&s_rt->slave->dev,
-				"Slave Port Prep cmd %d failed: %d\n",
+			dev_err(&peri_rt->peripheral->dev,
+				"Peripheral Port Prep cmd %d failed: %d\n",
 				cmd, ret);
 			return ret;
 		}
@@ -414,10 +414,10 @@ static int sdw_do_port_prep(struct sdw_slave_runtime *s_rt,
 	return 0;
 }
 
-static int sdw_prep_deprep_slave_ports(struct sdw_bus *bus,
-				       struct sdw_slave_runtime *s_rt,
-				       struct sdw_port_runtime *p_rt,
-				       bool prep)
+static int sdw_prep_deprep_peripheral_ports(struct sdw_bus *bus,
+					    struct sdw_peripheral_runtime *peri_rt,
+					    struct sdw_port_runtime *p_rt,
+					    bool prep)
 {
 	struct completion *port_ready;
 	struct sdw_dpn_prop *dpn_prop;
@@ -430,12 +430,12 @@ static int sdw_prep_deprep_slave_ports(struct sdw_bus *bus,
 	prep_ch.num = p_rt->num;
 	prep_ch.ch_mask = p_rt->ch_mask;
 
-	dpn_prop = sdw_get_slave_dpn_prop(s_rt->slave,
-					  s_rt->direction,
-					  prep_ch.num);
+	dpn_prop = sdw_get_peripheral_dpn_prop(peri_rt->peripheral,
+					       peri_rt->direction,
+					       prep_ch.num);
 	if (!dpn_prop) {
 		dev_err(bus->dev,
-			"Slave Port:%d properties not found\n", prep_ch.num);
+			"Peripheral Port:%d properties not found\n", prep_ch.num);
 		return -EINVAL;
 	}
 
@@ -453,50 +453,50 @@ static int sdw_prep_deprep_slave_ports(struct sdw_bus *bus,
 	 * was prepared earlier
 	 */
 	if (prep && intr) {
-		ret = sdw_configure_dpn_intr(s_rt->slave, p_rt->num, prep,
+		ret = sdw_configure_dpn_intr(peri_rt->peripheral, p_rt->num, prep,
 					     dpn_prop->imp_def_interrupts);
 		if (ret < 0)
 			return ret;
 	}
 
-	/* Inform slave about the impending port prepare */
-	sdw_do_port_prep(s_rt, prep_ch, SDW_OPS_PORT_PRE_PREP);
+	/* Inform peripheral about the impending port prepare */
+	sdw_do_port_prep(peri_rt, prep_ch, SDW_OPS_PORT_PRE_PREP);
 
-	/* Prepare Slave port implementing CP_SM */
+	/* Prepare Peripheral port implementing CP_SM */
 	if (!dpn_prop->simple_ch_prep_sm) {
 		addr = SDW_DPN_PREPARECTRL(p_rt->num);
 
 		if (prep)
-			ret = sdw_write(s_rt->slave, addr, p_rt->ch_mask);
+			ret = sdw_write(peri_rt->peripheral, addr, p_rt->ch_mask);
 		else
-			ret = sdw_write(s_rt->slave, addr, 0x0);
+			ret = sdw_write(peri_rt->peripheral, addr, 0x0);
 
 		if (ret < 0) {
-			dev_err(&s_rt->slave->dev,
-				"Slave prep_ctrl reg write failed\n");
+			dev_err(&peri_rt->peripheral->dev,
+				"Peripheral prep_ctrl reg write failed\n");
 			return ret;
 		}
 
 		/* Wait for completion on port ready */
-		port_ready = &s_rt->slave->port_ready[prep_ch.num];
+		port_ready = &peri_rt->peripheral->port_ready[prep_ch.num];
 		time_left = wait_for_completion_timeout(port_ready,
-				msecs_to_jiffies(dpn_prop->ch_prep_timeout));
+						msecs_to_jiffies(dpn_prop->ch_prep_timeout));
 
-		val = sdw_read(s_rt->slave, SDW_DPN_PREPARESTATUS(p_rt->num));
+		val = sdw_read(peri_rt->peripheral, SDW_DPN_PREPARESTATUS(p_rt->num));
 		val &= p_rt->ch_mask;
 		if (!time_left || val) {
-			dev_err(&s_rt->slave->dev,
+			dev_err(&peri_rt->peripheral->dev,
 				"Chn prep failed for port:%d\n", prep_ch.num);
 			return -ETIMEDOUT;
 		}
 	}
 
-	/* Inform slaves about ports prepared */
-	sdw_do_port_prep(s_rt, prep_ch, SDW_OPS_PORT_POST_PREP);
+	/* Inform peripherals about ports prepared */
+	sdw_do_port_prep(peri_rt, prep_ch, SDW_OPS_PORT_POST_PREP);
 
 	/* Disable interrupt after Port de-prepare */
 	if (!prep && intr)
-		ret = sdw_configure_dpn_intr(s_rt->slave, p_rt->num, prep,
+		ret = sdw_configure_dpn_intr(peri_rt->peripheral, p_rt->num, prep,
 					     dpn_prop->imp_def_interrupts);
 
 	return ret;
@@ -532,22 +532,22 @@ static int sdw_prep_deprep_manager_ports(struct sdw_manager_runtime *m_rt,
 
 /**
  * sdw_prep_deprep_ports() - Prepare/De-prepare port(s) for Manager(s) and
- * Slave(s)
+ * Peripheral(s)
  *
  * @m_rt: Manager runtime handle
  * @prep: Prepare or De-prepare
  */
 static int sdw_prep_deprep_ports(struct sdw_manager_runtime *m_rt, bool prep)
 {
-	struct sdw_slave_runtime *s_rt;
+	struct sdw_peripheral_runtime *peri_rt;
 	struct sdw_port_runtime *p_rt;
 	int ret = 0;
 
-	/* Prepare/De-prepare Slave port(s) */
-	list_for_each_entry(s_rt, &m_rt->slave_rt_list, m_rt_node) {
-		list_for_each_entry(p_rt, &s_rt->port_list, port_node) {
-			ret = sdw_prep_deprep_slave_ports(m_rt->bus, s_rt,
-							  p_rt, prep);
+	/* Prepare/De-prepare Peripheral port(s) */
+	list_for_each_entry(peri_rt, &m_rt->peripheral_rt_list, m_rt_node) {
+		list_for_each_entry(p_rt, &peri_rt->port_list, port_node) {
+			ret = sdw_prep_deprep_peripheral_ports(m_rt->bus, peri_rt,
+							       p_rt, prep);
 			if (ret < 0)
 				return ret;
 		}
@@ -568,14 +568,14 @@ static int sdw_prep_deprep_ports(struct sdw_manager_runtime *m_rt, bool prep)
  *
  * @m_rt: Manager runtime handle
  *
- * This function notifies the Manager(s) and Slave(s) of the
+ * This function notifies the Manager(s) and Peripheral(s) of the
  * new bus configuration.
  */
 static int sdw_notify_config(struct sdw_manager_runtime *m_rt)
 {
-	struct sdw_slave_runtime *s_rt;
+	struct sdw_peripheral_runtime *peri_rt;
 	struct sdw_bus *bus = m_rt->bus;
-	struct sdw_slave *slave;
+	struct sdw_peripheral *peripheral;
 	int ret = 0;
 
 	if (bus->ops->set_bus_conf) {
@@ -584,14 +584,14 @@ static int sdw_notify_config(struct sdw_manager_runtime *m_rt)
 			return ret;
 	}
 
-	list_for_each_entry(s_rt, &m_rt->slave_rt_list, m_rt_node) {
-		slave = s_rt->slave;
+	list_for_each_entry(peri_rt, &m_rt->peripheral_rt_list, m_rt_node) {
+		peripheral = peri_rt->peripheral;
 
-		if (slave->ops->bus_config) {
-			ret = slave->ops->bus_config(slave, &bus->params);
+		if (peripheral->ops->bus_config) {
+			ret = peripheral->ops->bus_config(peripheral, &bus->params);
 			if (ret < 0) {
-				dev_err(bus->dev, "Notify Slave: %d failed\n",
-					slave->dev_num);
+				dev_err(bus->dev, "Notify Peripheral: %d failed\n",
+					peripheral->dev_num);
 				return ret;
 			}
 		}
@@ -602,7 +602,7 @@ static int sdw_notify_config(struct sdw_manager_runtime *m_rt)
 
 /**
  * sdw_program_params() - Program transport and port parameters for Manager(s)
- * and Slave(s)
+ * and Peripheral(s)
  *
  * @bus: SDW bus instance
  * @prepare: true if sdw_program_params() is called by _prepare.
@@ -699,7 +699,7 @@ static int sdw_bank_switch(struct sdw_bus *bus, int m_rt_count)
 		ret = sdw_transfer(bus, wr_msg);
 
 	if (ret < 0) {
-		dev_err(bus->dev, "Slave frame_ctrl reg write failed\n");
+		dev_err(bus->dev, "Peripheral frame_ctrl reg write failed\n");
 		goto error;
 	}
 
@@ -934,7 +934,7 @@ static struct sdw_manager_runtime
 	struct sdw_manager_runtime *m_rt;
 
 	/*
-	 * check if Manager is already allocated (as a result of Slave adding
+	 * check if Manager is already allocated (as a result of Peripheral adding
 	 * it first), if so skip allocation and go to configure
 	 */
 	m_rt = sdw_find_manager_rt(bus, stream);
@@ -947,7 +947,7 @@ static struct sdw_manager_runtime
 
 	/* Initialization of Manager runtime handle */
 	INIT_LIST_HEAD(&m_rt->port_list);
-	INIT_LIST_HEAD(&m_rt->slave_rt_list);
+	INIT_LIST_HEAD(&m_rt->peripheral_rt_list);
 	list_add_tail(&m_rt->stream_node, &stream->manager_list);
 
 	list_add_tail(&m_rt->bus_node, &bus->m_rt_list);
@@ -962,31 +962,31 @@ stream_config:
 }
 
 /**
- * sdw_alloc_slave_rt() - Allocate and initialize Slave runtime handle.
+ * sdw_alloc_peripheral_rt() - Allocate and initialize Peripheral runtime handle.
  *
- * @slave: Slave handle
+ * @peripheral: Peripheral handle
  * @stream_config: Stream configuration
  * @stream: Stream runtime handle
  *
  * This function is to be called with bus_lock held.
  */
-static struct sdw_slave_runtime
-*sdw_alloc_slave_rt(struct sdw_slave *slave,
-		    struct sdw_stream_config *stream_config,
-		    struct sdw_stream_runtime *stream)
+static struct sdw_peripheral_runtime
+*sdw_alloc_peripheral_rt(struct sdw_peripheral *peripheral,
+			 struct sdw_stream_config *stream_config,
+			 struct sdw_stream_runtime *stream)
 {
-	struct sdw_slave_runtime *s_rt;
+	struct sdw_peripheral_runtime *peri_rt;
 
-	s_rt = kzalloc(sizeof(*s_rt), GFP_KERNEL);
-	if (!s_rt)
+	peri_rt = kzalloc(sizeof(*peri_rt), GFP_KERNEL);
+	if (!peri_rt)
 		return NULL;
 
-	INIT_LIST_HEAD(&s_rt->port_list);
-	s_rt->ch_count = stream_config->ch_count;
-	s_rt->direction = stream_config->direction;
-	s_rt->slave = slave;
+	INIT_LIST_HEAD(&peri_rt->port_list);
+	peri_rt->ch_count = stream_config->ch_count;
+	peri_rt->direction = stream_config->direction;
+	peri_rt->peripheral = peripheral;
 
-	return s_rt;
+	return peri_rt;
 }
 
 static void sdw_manager_port_release(struct sdw_bus *bus,
@@ -1000,21 +1000,21 @@ static void sdw_manager_port_release(struct sdw_bus *bus,
 	}
 }
 
-static void sdw_slave_port_release(struct sdw_bus *bus,
-				   struct sdw_slave *slave,
-				   struct sdw_stream_runtime *stream)
+static void sdw_peripheral_port_release(struct sdw_bus *bus,
+					struct sdw_peripheral *peripheral,
+					struct sdw_stream_runtime *stream)
 {
 	struct sdw_port_runtime *p_rt, *_p_rt;
 	struct sdw_manager_runtime *m_rt;
-	struct sdw_slave_runtime *s_rt;
+	struct sdw_peripheral_runtime *peri_rt;
 
 	list_for_each_entry(m_rt, &stream->manager_list, stream_node) {
-		list_for_each_entry(s_rt, &m_rt->slave_rt_list, m_rt_node) {
-			if (s_rt->slave != slave)
+		list_for_each_entry(peri_rt, &m_rt->peripheral_rt_list, m_rt_node) {
+			if (peri_rt->peripheral != peripheral)
 				continue;
 
 			list_for_each_entry_safe(p_rt, _p_rt,
-						 &s_rt->port_list, port_node) {
+						 &peri_rt->port_list, port_node) {
 				list_del(&p_rt->port_node);
 				kfree(p_rt);
 			}
@@ -1023,26 +1023,26 @@ static void sdw_slave_port_release(struct sdw_bus *bus,
 }
 
 /**
- * sdw_release_slave_stream() - Free Slave(s) runtime handle
+ * sdw_release_peripheral_stream() - Free Peripheral(s) runtime handle
  *
- * @slave: Slave handle.
+ * @peripheral: Peripheral handle.
  * @stream: Stream runtime handle.
  *
  * This function is to be called with bus_lock held.
  */
-static void sdw_release_slave_stream(struct sdw_slave *slave,
-				     struct sdw_stream_runtime *stream)
+static void sdw_release_peripheral_stream(struct sdw_peripheral *peripheral,
+					  struct sdw_stream_runtime *stream)
 {
-	struct sdw_slave_runtime *s_rt, *_s_rt;
+	struct sdw_peripheral_runtime *peri_rt, *_peri_rt;
 	struct sdw_manager_runtime *m_rt;
 
 	list_for_each_entry(m_rt, &stream->manager_list, stream_node) {
-		/* Retrieve Slave runtime handle */
-		list_for_each_entry_safe(s_rt, _s_rt,
-					 &m_rt->slave_rt_list, m_rt_node) {
-			if (s_rt->slave == slave) {
-				list_del(&s_rt->m_rt_node);
-				kfree(s_rt);
+		/* Retrieve Peripheral runtime handle */
+		list_for_each_entry_safe(peri_rt, _peri_rt,
+					 &m_rt->peripheral_rt_list, m_rt_node) {
+			if (peri_rt->peripheral == peripheral) {
+				list_del(&peri_rt->m_rt_node);
+				kfree(peri_rt);
 				return;
 			}
 		}
@@ -1056,18 +1056,18 @@ static void sdw_release_slave_stream(struct sdw_slave *slave,
  * @stream: Stream runtime handle.
  *
  * This function is to be called with bus_lock held
- * It frees the Manager runtime handle and associated Slave(s) runtime
- * handle. If this is called first then sdw_release_slave_stream() will have
- * no effect as Slave(s) runtime handle would already be freed up.
+ * It frees the Manager runtime handle and associated Peripheral(s) runtime
+ * handle. If this is called first then sdw_release_peripheral_stream() will have
+ * no effect as Peripheral(s) runtime handle would already be freed up.
  */
 static void sdw_release_manager_stream(struct sdw_manager_runtime *m_rt,
 				       struct sdw_stream_runtime *stream)
 {
-	struct sdw_slave_runtime *s_rt, *_s_rt;
+	struct sdw_peripheral_runtime *peri_rt, *_peri_rt;
 
-	list_for_each_entry_safe(s_rt, _s_rt, &m_rt->slave_rt_list, m_rt_node) {
-		sdw_slave_port_release(s_rt->slave->bus, s_rt->slave, stream);
-		sdw_release_slave_stream(s_rt->slave, stream);
+	list_for_each_entry_safe(peri_rt, _peri_rt, &m_rt->peripheral_rt_list, m_rt_node) {
+		sdw_peripheral_port_release(peri_rt->peripheral->bus, peri_rt->peripheral, stream);
+		sdw_release_peripheral_stream(peri_rt->peripheral, stream);
 	}
 
 	list_del(&m_rt->stream_node);
@@ -1110,26 +1110,26 @@ int sdw_stream_remove_manager(struct sdw_bus *bus,
 EXPORT_SYMBOL(sdw_stream_remove_manager);
 
 /**
- * sdw_stream_remove_slave() - Remove slave from sdw_stream
+ * sdw_stream_remove_peripheral() - Remove peripheral from sdw_stream
  *
- * @slave: SDW Slave instance
+ * @peripheral: SDW Peripheral instance
  * @stream: SoundWire stream
  *
- * This removes and frees port_rt and slave_rt from a stream
+ * This removes and frees port_rt and peripheral_rt from a stream
  */
-int sdw_stream_remove_slave(struct sdw_slave *slave,
-			    struct sdw_stream_runtime *stream)
+int sdw_stream_remove_peripheral(struct sdw_peripheral *peripheral,
+				 struct sdw_stream_runtime *stream)
 {
-	mutex_lock(&slave->bus->bus_lock);
+	mutex_lock(&peripheral->bus->bus_lock);
 
-	sdw_slave_port_release(slave->bus, slave, stream);
-	sdw_release_slave_stream(slave, stream);
+	sdw_peripheral_port_release(peripheral->bus, peripheral, stream);
+	sdw_release_peripheral_stream(peripheral, stream);
 
-	mutex_unlock(&slave->bus->bus_lock);
+	mutex_unlock(&peripheral->bus->bus_lock);
 
 	return 0;
 }
-EXPORT_SYMBOL(sdw_stream_remove_slave);
+EXPORT_SYMBOL(sdw_stream_remove_peripheral);
 
 /**
  * sdw_config_stream() - Configure the allocated stream
@@ -1137,14 +1137,14 @@ EXPORT_SYMBOL(sdw_stream_remove_slave);
  * @dev: SDW device
  * @stream: SoundWire stream
  * @stream_config: Stream configuration for audio stream
- * @is_slave: is API called from Slave or Manager
+ * @is_peripheral: is API called from Peripheral or Manager
  *
  * This function is to be called with bus_lock held.
  */
 static int sdw_config_stream(struct device *dev,
 			     struct sdw_stream_runtime *stream,
 			     struct sdw_stream_config *stream_config,
-			     bool is_slave)
+			     bool is_peripheral)
 {
 	/*
 	 * Update the stream rate, channel and bps based on data
@@ -1171,7 +1171,7 @@ static int sdw_config_stream(struct device *dev,
 	stream->params.bps = stream_config->bps;
 
 	/* TODO: Update this check during Device-device support */
-	if (is_slave)
+	if (is_peripheral)
 		stream->params.ch_count += stream_config->ch_count;
 
 	return 0;
@@ -1231,25 +1231,25 @@ static int sdw_manager_port_config(struct sdw_bus *bus,
 	return 0;
 }
 
-static int sdw_slave_port_config(struct sdw_slave *slave,
-				 struct sdw_slave_runtime *s_rt,
-				 struct sdw_port_config *port_config,
-				 unsigned int num_config)
+static int sdw_peripheral_port_config(struct sdw_peripheral *peripheral,
+				      struct sdw_peripheral_runtime *peri_rt,
+				      struct sdw_port_config *port_config,
+				      unsigned int num_config)
 {
 	struct sdw_port_runtime *p_rt;
 	int i, ret;
 
 	/* Iterate for number of ports to perform initialization */
 	for (i = 0; i < num_config; i++) {
-		p_rt = sdw_port_alloc(&slave->dev, port_config, i);
+		p_rt = sdw_port_alloc(&peripheral->dev, port_config, i);
 		if (!p_rt)
 			return -ENOMEM;
 
 		/*
 		 * TODO: Check valid port range as defined by DisCo/
-		 * slave
+		 * peripheral
 		 */
-		ret = sdw_is_valid_port_range(&slave->dev, p_rt);
+		ret = sdw_is_valid_port_range(&peripheral->dev, p_rt);
 		if (ret < 0) {
 			kfree(p_rt);
 			return ret;
@@ -1260,7 +1260,7 @@ static int sdw_slave_port_config(struct sdw_slave *slave,
 		 * configuration (audio mode support)
 		 */
 
-		list_add_tail(&p_rt->port_node, &s_rt->port_list);
+		list_add_tail(&p_rt->port_node, &peri_rt->port_list);
 	}
 
 	return 0;
@@ -1328,74 +1328,74 @@ unlock:
 EXPORT_SYMBOL(sdw_stream_add_manager);
 
 /**
- * sdw_stream_add_slave() - Allocate and add manager/slave runtime to a stream
+ * sdw_stream_add_peripheral() - Allocate and add manager/peripheral runtime to a stream
  *
- * @slave: SDW Slave instance
+ * @peripheral: SDW Peripheral instance
  * @stream_config: Stream configuration for audio stream
  * @stream: SoundWire stream
  * @port_config: Port configuration for audio stream
  * @num_ports: Number of ports
  *
- * It is expected that Slave is added before adding Manager
+ * It is expected that Peripheral is added before adding Manager
  * to the Stream.
  *
  */
-int sdw_stream_add_slave(struct sdw_slave *slave,
-			 struct sdw_stream_config *stream_config,
-			 struct sdw_port_config *port_config,
-			 unsigned int num_ports,
-			 struct sdw_stream_runtime *stream)
+int sdw_stream_add_peripheral(struct sdw_peripheral *peripheral,
+			      struct sdw_stream_config *stream_config,
+			      struct sdw_port_config *port_config,
+			      unsigned int num_ports,
+			      struct sdw_stream_runtime *stream)
 {
-	struct sdw_slave_runtime *s_rt;
+	struct sdw_peripheral_runtime *peri_rt;
 	struct sdw_manager_runtime *m_rt;
 	int ret;
 
-	mutex_lock(&slave->bus->bus_lock);
+	mutex_lock(&peripheral->bus->bus_lock);
 
 	/*
-	 * If this API is invoked by Slave first then m_rt is not valid.
-	 * So, allocate m_rt and add Slave to it.
+	 * If this API is invoked by Peripheral first then m_rt is not valid.
+	 * So, allocate m_rt and add Peripheral to it.
 	 */
-	m_rt = sdw_alloc_manager_rt(slave->bus, stream_config, stream);
+	m_rt = sdw_alloc_manager_rt(peripheral->bus, stream_config, stream);
 	if (!m_rt) {
-		dev_err(&slave->dev,
+		dev_err(&peripheral->dev,
 			"alloc manager runtime failed for stream:%s\n",
 			stream->name);
 		ret = -ENOMEM;
 		goto error;
 	}
 
-	s_rt = sdw_alloc_slave_rt(slave, stream_config, stream);
-	if (!s_rt) {
-		dev_err(&slave->dev,
-			"Slave runtime config failed for stream:%s\n",
+	peri_rt = sdw_alloc_peripheral_rt(peripheral, stream_config, stream);
+	if (!peri_rt) {
+		dev_err(&peripheral->dev,
+			"Peripheral runtime config failed for stream:%s\n",
 			stream->name);
 		ret = -ENOMEM;
 		goto stream_error;
 	}
 
-	ret = sdw_config_stream(&slave->dev, stream, stream_config, true);
+	ret = sdw_config_stream(&peripheral->dev, stream, stream_config, true);
 	if (ret) {
 		/*
-		 * sdw_release_master_stream will release s_rt in slave_rt_list in
-		 * stream_error case, but s_rt is only added to slave_rt_list
-		 * when sdw_config_stream is successful, so free s_rt explicitly
+		 * sdw_release_manager_stream will release peri_rt in peripheral_rt_list in
+		 * stream_error case, but peri_rt is only added to peripheral_rt_list
+		 * when sdw_config_stream is successful, so free peri_rt explicitly
 		 * when sdw_config_stream is failed.
 		 */
-		kfree(s_rt);
+		kfree(peri_rt);
 		goto stream_error;
 	}
 
-	list_add_tail(&s_rt->m_rt_node, &m_rt->slave_rt_list);
+	list_add_tail(&peri_rt->m_rt_node, &m_rt->peripheral_rt_list);
 
-	ret = sdw_slave_port_config(slave, s_rt, port_config, num_ports);
+	ret = sdw_peripheral_port_config(peripheral, peri_rt, port_config, num_ports);
 	if (ret)
 		goto stream_error;
 
 	/*
-	 * Change stream state to CONFIGURED on first Slave add.
-	 * Bus is not aware of number of Slave(s) in a stream at this
-	 * point so cannot depend on all Slave(s) to be added in order to
+	 * Change stream state to CONFIGURED on first Peripheral add.
+	 * Bus is not aware of number of Peripheral(s) in a stream at this
+	 * point so cannot depend on all Peripheral(s) to be added in order to
 	 * change stream state to CONFIGURED.
 	 */
 	stream->state = SDW_STREAM_CONFIGURED;
@@ -1403,37 +1403,37 @@ int sdw_stream_add_slave(struct sdw_slave *slave,
 
 stream_error:
 	/*
-	 * we hit error so cleanup the stream, release all Slave(s) and
+	 * we hit error so cleanup the stream, release all Peripheral(s) and
 	 * Manager runtime
 	 */
 	sdw_release_manager_stream(m_rt, stream);
 error:
-	mutex_unlock(&slave->bus->bus_lock);
+	mutex_unlock(&peripheral->bus->bus_lock);
 	return ret;
 }
-EXPORT_SYMBOL(sdw_stream_add_slave);
+EXPORT_SYMBOL(sdw_stream_add_peripheral);
 
 /**
- * sdw_get_slave_dpn_prop() - Get Slave port capabilities
+ * sdw_get_peripheral_dpn_prop() - Get Peripheral port capabilities
  *
- * @slave: Slave handle
+ * @peripheral: Peripheral handle
  * @direction: Data direction.
  * @port_num: Port number
  */
-struct sdw_dpn_prop *sdw_get_slave_dpn_prop(struct sdw_slave *slave,
-					    enum sdw_data_direction direction,
-					    unsigned int port_num)
+struct sdw_dpn_prop *sdw_get_peripheral_dpn_prop(struct sdw_peripheral *peripheral,
+						 enum sdw_data_direction direction,
+						 unsigned int port_num)
 {
 	struct sdw_dpn_prop *dpn_prop;
 	u8 num_ports;
 	int i;
 
 	if (direction == SDW_DATA_DIR_TX) {
-		num_ports = hweight32(slave->prop.source_ports);
-		dpn_prop = slave->prop.src_dpn_prop;
+		num_ports = hweight32(peripheral->prop.source_ports);
+		dpn_prop = peripheral->prop.src_dpn_prop;
 	} else {
-		num_ports = hweight32(slave->prop.sink_ports);
-		dpn_prop = slave->prop.sink_dpn_prop;
+		num_ports = hweight32(peripheral->prop.sink_ports);
+		dpn_prop = peripheral->prop.sink_dpn_prop;
 	}
 
 	for (i = 0; i < num_ports; i++) {
@@ -1497,7 +1497,7 @@ static int _sdw_prepare_stream(struct sdw_stream_runtime *stream,
 	struct sdw_bus_params params;
 	int ret;
 
-	/* Prepare  Manager(s) and Slave(s) port(s) associated with stream */
+	/* Prepare  Manager(s) and Peripheral(s) port(s) associated with stream */
 	list_for_each_entry(m_rt, &stream->manager_list, stream_node) {
 		bus = m_rt->bus;
 		prop = &bus->prop;
@@ -1624,7 +1624,7 @@ static int _sdw_enable_stream(struct sdw_stream_runtime *stream)
 	struct sdw_bus *bus = NULL;
 	int ret;
 
-	/* Enable Manager(s) and Slave(s) port(s) associated with stream */
+	/* Enable Manager(s) and Peripheral(s) port(s) associated with stream */
 	list_for_each_entry(m_rt, &stream->manager_list, stream_node) {
 		bus = m_rt->bus;
 

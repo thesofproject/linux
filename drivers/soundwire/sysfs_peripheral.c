@@ -11,11 +11,11 @@
 #include "sysfs_local.h"
 
 /*
- * Slave sysfs
+ * Peripheral sysfs
  */
 
 /*
- * The sysfs for Slave reflects the MIPI description as given
+ * The sysfs for Peripheral reflects the MIPI description as given
  * in the MIPI DisCo spec.
  * status and device_number come directly from the MIPI SoundWire
  * 1.x specification.
@@ -66,48 +66,48 @@
  *
  */
 
-#define sdw_slave_attr(field, format_string)			\
-static ssize_t field##_show(struct device *dev,			\
-			    struct device_attribute *attr,	\
-			    char *buf)				\
-{								\
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);		\
-	return sprintf(buf, format_string, slave->prop.field);	\
-}								\
+#define sdw_peripheral_attr(field, format_string)			\
+static ssize_t field##_show(struct device *dev,				\
+			    struct device_attribute *attr,		\
+			    char *buf)					\
+{									\
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);	\
+	return sprintf(buf, format_string, peripheral->prop.field);	\
+}									\
 static DEVICE_ATTR_RO(field)
 
-sdw_slave_attr(mipi_revision, "0x%x\n");
-sdw_slave_attr(wake_capable, "%d\n");
-sdw_slave_attr(test_mode_capable, "%d\n");
-sdw_slave_attr(clk_stop_mode1, "%d\n");
-sdw_slave_attr(simple_clk_stop_capable, "%d\n");
-sdw_slave_attr(clk_stop_timeout, "%d\n");
-sdw_slave_attr(ch_prep_timeout, "%d\n");
-sdw_slave_attr(reset_behave, "%d\n");
-sdw_slave_attr(high_PHY_capable, "%d\n");
-sdw_slave_attr(paging_support, "%d\n");
-sdw_slave_attr(bank_delay_support, "%d\n");
-sdw_slave_attr(p15_behave, "%d\n");
-sdw_slave_attr(manager_count, "%d\n");
-sdw_slave_attr(source_ports, "0x%x\n");
-sdw_slave_attr(sink_ports, "0x%x\n");
+sdw_peripheral_attr(mipi_revision, "0x%x\n");
+sdw_peripheral_attr(wake_capable, "%d\n");
+sdw_peripheral_attr(test_mode_capable, "%d\n");
+sdw_peripheral_attr(clk_stop_mode1, "%d\n");
+sdw_peripheral_attr(simple_clk_stop_capable, "%d\n");
+sdw_peripheral_attr(clk_stop_timeout, "%d\n");
+sdw_peripheral_attr(ch_prep_timeout, "%d\n");
+sdw_peripheral_attr(reset_behave, "%d\n");
+sdw_peripheral_attr(high_PHY_capable, "%d\n");
+sdw_peripheral_attr(paging_support, "%d\n");
+sdw_peripheral_attr(bank_delay_support, "%d\n");
+sdw_peripheral_attr(p15_behave, "%d\n");
+sdw_peripheral_attr(manager_count, "%d\n");
+sdw_peripheral_attr(source_ports, "0x%x\n");
+sdw_peripheral_attr(sink_ports, "0x%x\n");
 
 static ssize_t modalias_show(struct device *dev,
 			     struct device_attribute *attr, char *buf)
 {
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);
 
-	return sdw_slave_modalias(slave, buf, 256);
+	return sdw_peripheral_modalias(peripheral, buf, 256);
 }
 static DEVICE_ATTR_RO(modalias);
 
-static struct attribute *slave_attrs[] = {
+static struct attribute *peripheral_attrs[] = {
 	&dev_attr_modalias.attr,
 	NULL,
 };
-ATTRIBUTE_GROUPS(slave);
+ATTRIBUTE_GROUPS(peripheral);
 
-static struct attribute *slave_dev_attrs[] = {
+static struct attribute *peripheral_dev_attrs[] = {
 	&dev_attr_mipi_revision.attr,
 	&dev_attr_wake_capable.attr,
 	&dev_attr_test_mode_capable.attr,
@@ -130,8 +130,8 @@ static struct attribute *slave_dev_attrs[] = {
  * we don't use ATTRIBUTES_GROUP here since we want to add a subdirectory
  * for device-level properties
  */
-static const struct attribute_group sdw_slave_dev_attr_group = {
-	.attrs	= slave_dev_attrs,
+static const struct attribute_group sdw_peripheral_dev_attr_group = {
+	.attrs	= peripheral_dev_attrs,
 	.name = "dev-properties",
 };
 
@@ -139,14 +139,14 @@ static const struct attribute_group sdw_slave_dev_attr_group = {
  * DP0 sysfs
  */
 
-#define sdw_dp0_attr(field, format_string)				\
-static ssize_t field##_show(struct device *dev,				\
-			    struct device_attribute *attr,		\
-			    char *buf)					\
-{									\
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);			\
-	return sprintf(buf, format_string, slave->prop.dp0_prop->field);\
-}									\
+#define sdw_dp0_attr(field, format_string)					\
+static ssize_t field##_show(struct device *dev,					\
+			    struct device_attribute *attr,			\
+			    char *buf)						\
+{										\
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);		\
+	return sprintf(buf, format_string, peripheral->prop.dp0_prop->field);	\
+}										\
 static DEVICE_ATTR_RO(field)
 
 sdw_dp0_attr(max_word, "%d\n");
@@ -158,13 +158,13 @@ sdw_dp0_attr(imp_def_interrupts, "0x%x\n");
 static ssize_t words_show(struct device *dev,
 			  struct device_attribute *attr, char *buf)
 {
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);
 	ssize_t size = 0;
 	int i;
 
-	for (i = 0; i < slave->prop.dp0_prop->num_words; i++)
+	for (i = 0; i < peripheral->prop.dp0_prop->num_words; i++)
 		size += sprintf(buf + size, "%d ",
-				slave->prop.dp0_prop->words[i]);
+				peripheral->prop.dp0_prop->words[i]);
 	size += sprintf(buf + size, "\n");
 
 	return size;
@@ -190,26 +190,26 @@ static const struct attribute_group dp0_group = {
 	.name = "dp0",
 };
 
-int sdw_slave_sysfs_init(struct sdw_slave *slave)
+int sdw_peripheral_sysfs_init(struct sdw_peripheral *peripheral)
 {
 	int ret;
 
-	ret = devm_device_add_groups(&slave->dev, slave_groups);
+	ret = devm_device_add_groups(&peripheral->dev, peripheral_groups);
 	if (ret < 0)
 		return ret;
 
-	ret = devm_device_add_group(&slave->dev, &sdw_slave_dev_attr_group);
+	ret = devm_device_add_group(&peripheral->dev, &sdw_peripheral_dev_attr_group);
 	if (ret < 0)
 		return ret;
 
-	if (slave->prop.dp0_prop) {
-		ret = devm_device_add_group(&slave->dev, &dp0_group);
+	if (peripheral->prop.dp0_prop) {
+		ret = devm_device_add_group(&peripheral->dev, &dp0_group);
 		if (ret < 0)
 			return ret;
 	}
 
-	if (slave->prop.source_ports || slave->prop.sink_ports) {
-		ret = sdw_slave_sysfs_dpn_init(slave);
+	if (peripheral->prop.source_ports || peripheral->prop.sink_ports) {
+		ret = sdw_peripheral_sysfs_dpn_init(peripheral);
 		if (ret < 0)
 			return ret;
 	}
@@ -222,35 +222,35 @@ int sdw_slave_sysfs_init(struct sdw_slave *slave)
  * on purpose, to highligh users to the fact that these status values
  * are not expected.
  */
-static const char *const slave_status[] = {
-	[SDW_SLAVE_UNATTACHED] =  "UNATTACHED",
-	[SDW_SLAVE_ATTACHED] = "Attached",
-	[SDW_SLAVE_ALERT] = "Alert",
-	[SDW_SLAVE_RESERVED] = "RESERVED",
+static const char *const peripheral_status[] = {
+	[SDW_PERIPHERAL_UNATTACHED] =  "UNATTACHED",
+	[SDW_PERIPHERAL_ATTACHED] = "Attached",
+	[SDW_PERIPHERAL_ALERT] = "Alert",
+	[SDW_PERIPHERAL_RESERVED] = "RESERVED",
 };
 
 static ssize_t status_show(struct device *dev,
 			   struct device_attribute *attr, char *buf)
 {
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);
 
-	return sprintf(buf, "%s\n", slave_status[slave->status]);
+	return sprintf(buf, "%s\n", peripheral_status[peripheral->status]);
 }
 static DEVICE_ATTR_RO(status);
 
 static ssize_t device_number_show(struct device *dev,
 				  struct device_attribute *attr, char *buf)
 {
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);
 
-	if (slave->status == SDW_SLAVE_UNATTACHED)
+	if (peripheral->status == SDW_PERIPHERAL_UNATTACHED)
 		return sprintf(buf, "%s", "N/A");
 	else
-		return sprintf(buf, "%d", slave->dev_num);
+		return sprintf(buf, "%d", peripheral->dev_num);
 }
 static DEVICE_ATTR_RO(device_number);
 
-static struct attribute *slave_status_attrs[] = {
+static struct attribute *peripheral_status_attrs[] = {
 	&dev_attr_status.attr,
 	&dev_attr_device_number.attr,
 	NULL,
@@ -260,11 +260,11 @@ static struct attribute *slave_status_attrs[] = {
  * we don't use ATTRIBUTES_GROUP here since the group is used in a
  * separate file and can't be handled as a static.
  */
-static const struct attribute_group sdw_slave_status_attr_group = {
-	.attrs	= slave_status_attrs,
+static const struct attribute_group sdw_peripheral_status_attr_group = {
+	.attrs	= peripheral_status_attrs,
 };
 
-const struct attribute_group *sdw_slave_status_attr_groups[] = {
-	&sdw_slave_status_attr_group,
+const struct attribute_group *sdw_peripheral_status_attr_groups[] = {
+	&sdw_peripheral_status_attr_group,
 	NULL
 };

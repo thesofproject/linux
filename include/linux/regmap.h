@@ -34,7 +34,7 @@ struct regmap;
 struct regmap_range_cfg;
 struct regmap_field;
 struct snd_ac97;
-struct sdw_slave;
+struct sdw_peripheral;
 
 /* An enum of all the supported cache types */
 enum regcache_type {
@@ -571,11 +571,11 @@ struct regmap *__regmap_init_ac97(struct snd_ac97 *ac97,
 				  const struct regmap_config *config,
 				  struct lock_class_key *lock_key,
 				  const char *lock_name);
-struct regmap *__regmap_init_sdw(struct sdw_slave *sdw,
+struct regmap *__regmap_init_sdw(struct sdw_peripheral *sdw,
 				 const struct regmap_config *config,
 				 struct lock_class_key *lock_key,
 				 const char *lock_name);
-struct regmap *__regmap_init_sdw_mbq(struct sdw_slave *sdw,
+struct regmap *__regmap_init_sdw_mbq(struct sdw_peripheral *sdw,
 				     const struct regmap_config *config,
 				     struct lock_class_key *lock_key,
 				     const char *lock_name);
@@ -624,11 +624,11 @@ struct regmap *__devm_regmap_init_ac97(struct snd_ac97 *ac97,
 				       const struct regmap_config *config,
 				       struct lock_class_key *lock_key,
 				       const char *lock_name);
-struct regmap *__devm_regmap_init_sdw(struct sdw_slave *sdw,
+struct regmap *__devm_regmap_init_sdw(struct sdw_peripheral *sdw,
 				 const struct regmap_config *config,
 				 struct lock_class_key *lock_key,
 				 const char *lock_name);
-struct regmap *__devm_regmap_init_sdw_mbq(struct sdw_slave *sdw,
+struct regmap *__devm_regmap_init_sdw_mbq(struct sdw_peripheral *sdw,
 					  const struct regmap_config *config,
 					  struct lock_class_key *lock_key,
 					  const char *lock_name);

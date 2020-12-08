@@ -1503,15 +1503,15 @@ int intel_link_startup(struct auxiliary_device *auxdev)
 	}
 
 	/*
-	 * The runtime PM status of Slave devices is "Unsupported"
+	 * The runtime PM status of Peripheral devices is "Unsupported"
 	 * until they report as ATTACHED. If they don't, e.g. because
-	 * there are no Slave devices populated or if the power-on is
+	 * there are no Peripheral devices populated or if the power-on is
 	 * delayed or dependent on a power switch, the Manager will
 	 * remain active and prevent its parent from suspending.
 	 *
 	 * Conditionally force the pm_runtime core to re-evaluate the
-	 * Manager status in the absence of any Slave activity. A quirk
-	 * is provided to e.g. deal with Slaves that may be powered on
+	 * Manager status in the absence of any Peripheral activity. A quirk
+	 * is provided to e.g. deal with Peripherals that may be powered on
 	 * with a delay. A more complete solution would require the
 	 * definition of Manager properties.
 	 */
@@ -1574,10 +1574,10 @@ int intel_link_process_wakeen_event(struct auxiliary_device *auxdev)
 
 	/*
 	 * resume the Manager, which will generate a bus reset and result in
-	 * Slaves re-attaching and be re-enumerated. The SoundWire physical
+	 * Peripherals re-attaching and be re-enumerated. The SoundWire physical
 	 * device which generated the wake will trigger an interrupt, which
-	 * will in turn cause the corresponding Linux Slave device to be
-	 * resumed and the Slave codec driver to check the status.
+	 * will in turn cause the corresponding Linux Peripheral device to be
+	 * resumed and the Peripheral codec driver to check the status.
 	 */
 	pm_request_resume(dev);
 
@@ -1746,10 +1746,10 @@ static int __maybe_unused intel_resume(struct device *dev)
 	}
 
 	/*
-	 * make sure all Slaves are tagged as UNATTACHED and provide
+	 * make sure all Peripherals are tagged as UNATTACHED and provide
 	 * reason for reinitialization
 	 */
-	sdw_clear_slave_status(bus, SDW_UNATTACH_REQUEST_MANAGER_RESET);
+	sdw_clear_peripheral_status(bus, SDW_UNATTACH_REQUEST_MANAGER_RESET);
 
 	ret = sdw_cdns_enable_interrupt(cdns, true);
 	if (ret < 0) {
@@ -1830,10 +1830,10 @@ static int __maybe_unused intel_resume_runtime(struct device *dev)
 		}
 
 		/*
-		 * make sure all Slaves are tagged as UNATTACHED and provide
+		 * make sure all Peripherals are tagged as UNATTACHED and provide
 		 * reason for reinitialization
 		 */
-		sdw_clear_slave_status(bus, SDW_UNATTACH_REQUEST_MANAGER_RESET);
+		sdw_clear_peripheral_status(bus, SDW_UNATTACH_REQUEST_MANAGER_RESET);
 
 		ret = sdw_cdns_enable_interrupt(cdns, true);
 		if (ret < 0) {
@@ -1879,19 +1879,19 @@ static int __maybe_unused intel_resume_runtime(struct device *dev)
 		 * case if one or more managers remain active. In this condition,
 		 * all the managers are powered on for they are in the same power
 		 * domain. Manager can preserve its context for clock stop0, so
-		 * there is no need to clear slave status and reset bus.
+		 * there is no need to clear peripheral status and reset bus.
 		 */
 		clock_stop0 = sdw_cdns_is_clock_stop(&sdw->cdns);
 
 		if (!clock_stop0) {
 
 			/*
-			 * make sure all Slaves are tagged as UNATTACHED and
+			 * make sure all Peripherals are tagged as UNATTACHED and
 			 * provide reason for reinitialization
 			 */
 
 			status = SDW_UNATTACH_REQUEST_MANAGER_RESET;
-			sdw_clear_slave_status(bus, status);
+			sdw_clear_peripheral_status(bus, status);
 
 			ret = sdw_cdns_enable_interrupt(cdns, true);
 			if (ret < 0) {

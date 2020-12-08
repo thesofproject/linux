@@ -175,11 +175,11 @@ static struct sdw_intel_ctx
 	struct sdw_intel_link_dev *ldev;
 	struct sdw_intel_ctx *ctx;
 	struct acpi_device *adev;
-	struct sdw_slave *slave;
+	struct sdw_peripheral *peripheral;
 	struct list_head *node;
 	struct sdw_bus *bus;
 	u32 link_mask;
-	int num_slaves = 0;
+	int num_peripherals = 0;
 	int count;
 	int i;
 
@@ -261,21 +261,22 @@ static struct sdw_intel_ctx
 		}
 		list_add_tail(&link->list, &ctx->link_list);
 		bus = &link->cdns->bus;
-		/* Calculate number of slaves */
-		list_for_each(node, &bus->slaves)
-			num_slaves++;
+		/* Calculate number of peripherals */
+		list_for_each(node, &bus->peripherals)
+			num_peripherals++;
 	}
 
-	ctx->ids = kcalloc(num_slaves, sizeof(*ctx->ids), GFP_KERNEL);
+
+	ctx->ids = kcalloc(num_peripherals, sizeof(*ctx->ids), GFP_KERNEL);
 	if (!ctx->ids)
 		goto err;
 
-	ctx->num_slaves = num_slaves;
+	ctx->num_peripherals = num_peripherals;
 	i = 0;
 	list_for_each_entry(link, &ctx->link_list, list) {
 		bus = &link->cdns->bus;
-		list_for_each_entry(slave, &bus->slaves, node) {
-			ctx->ids[i].id = slave->id;
+		list_for_each_entry(peripheral, &bus->peripherals, node) {
+			ctx->ids[i].id = peripheral->id;
 			ctx->ids[i].link_id = bus->link_id;
 			i++;
 		}
@@ -351,7 +352,7 @@ sdw_intel_startup_controller(struct sdw_intel_ctx *ctx)
  * @res: resource data
  *
  * This registers an auxiliary device for each link handled by the controller,
- * and SoundWire Manager and Slave devices will be created by the auxiliary
+ * and SoundWire Manager and Peripheral devices will be created by the auxiliary
  * device probe. All the information necessary is stored in the context, and
  * the res argument pointer can be freed after this step.
  * This function will be called after sdw_intel_acpi_scan() by SOF probe.

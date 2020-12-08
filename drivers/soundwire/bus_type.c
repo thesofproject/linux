@@ -11,24 +11,24 @@
 
 /**
  * sdw_get_device_id - find the matching SoundWire device id
- * @slave: SoundWire Slave Device
- * @drv: SoundWire Slave Driver
+ * @peripheral: SoundWire Peripheral Device
+ * @drv: SoundWire Peripheral Driver
  *
  * The match is done by comparing the mfg_id and part_id from the
  * struct sdw_device_id.
  */
 static const struct sdw_device_id *
-sdw_get_device_id(struct sdw_slave *slave, struct sdw_driver *drv)
+sdw_get_device_id(struct sdw_peripheral *peripheral, struct sdw_driver *drv)
 {
 	const struct sdw_device_id *id;
 
 	for (id = drv->id_table; id && id->mfg_id; id++)
-		if (slave->id.mfg_id == id->mfg_id &&
-		    slave->id.part_id == id->part_id  &&
+		if (peripheral->id.mfg_id == id->mfg_id &&
+		    peripheral->id.part_id == id->part_id  &&
 		    (!id->sdw_version ||
-		     slave->id.sdw_version == id->sdw_version) &&
+		     peripheral->id.sdw_version == id->sdw_version) &&
 		    (!id->class_id ||
-		     slave->id.class_id == id->class_id))
+		     peripheral->id.class_id == id->class_id))
 			return id;
 
 	return NULL;
@@ -36,34 +36,34 @@ sdw_get_device_id(struct sdw_slave *slave, struct sdw_driver *drv)
 
 static int sdw_bus_match(struct device *dev, struct device_driver *ddrv)
 {
-	struct sdw_slave *slave;
+	struct sdw_peripheral *peripheral;
 	struct sdw_driver *drv;
 	int ret = 0;
 
-	if (is_sdw_slave(dev)) {
-		slave = dev_to_sdw_dev(dev);
+	if (is_sdw_peripheral(dev)) {
+		peripheral = dev_to_sdw_dev(dev);
 		drv = drv_to_sdw_driver(ddrv);
 
-		ret = !!sdw_get_device_id(slave, drv);
+		ret = !!sdw_get_device_id(peripheral, drv);
 	}
 	return ret;
 }
 
-int sdw_slave_modalias(const struct sdw_slave *slave, char *buf, size_t size)
+int sdw_peripheral_modalias(const struct sdw_peripheral *peripheral, char *buf, size_t size)
 {
 	/* modalias is sdw:m<mfg_id>p<part_id>v<version>c<class_id> */
 
 	return snprintf(buf, size, "sdw:m%04Xp%04Xv%02Xc%02X\n",
-			slave->id.mfg_id, slave->id.part_id,
-			slave->id.sdw_version, slave->id.class_id);
+			peripheral->id.mfg_id, peripheral->id.part_id,
+			peripheral->id.sdw_version, peripheral->id.class_id);
 }
 
-int sdw_slave_uevent(struct device *dev, struct kobj_uevent_env *env)
+int sdw_peripheral_uevent(struct device *dev, struct kobj_uevent_env *env)
 {
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);
 	char modalias[32];
 
-	sdw_slave_modalias(slave, modalias, sizeof(modalias));
+	sdw_peripheral_modalias(peripheral, modalias, sizeof(modalias));
 
 	if (add_uevent_var(env, "MODALIAS=%s", modalias))
 		return -ENOMEM;
@@ -79,7 +79,7 @@ EXPORT_SYMBOL_GPL(sdw_bus_type);
 
 static int sdw_drv_probe(struct device *dev)
 {
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);
 	struct sdw_driver *drv = drv_to_sdw_driver(dev->driver);
 	const struct sdw_device_id *id;
 	const char *name;
@@ -94,11 +94,11 @@ static int sdw_drv_probe(struct device *dev)
 	if (!IS_ENABLED(CONFIG_ACPI) && !dev->of_node)
 		return -ENODEV;
 
-	id = sdw_get_device_id(slave, drv);
+	id = sdw_get_device_id(peripheral, drv);
 	if (!id)
 		return -ENODEV;
 
-	slave->ops = drv->ops;
+	peripheral->ops = drv->ops;
 
 	/*
 	 * attach to power domain but don't turn on (last arg)
@@ -107,7 +107,7 @@ static int sdw_drv_probe(struct device *dev)
 	if (ret)
 		return ret;
 
-	ret = drv->probe(slave, id);
+	ret = drv->probe(peripheral, id);
 	if (ret) {
 		name = drv->name;
 		if (!name)
@@ -118,13 +118,13 @@ static int sdw_drv_probe(struct device *dev)
 	}
 
 	/* device is probed so let's read the properties now */
-	if (slave->ops && slave->ops->read_prop)
-		slave->ops->read_prop(slave);
+	if (peripheral->ops && peripheral->ops->read_prop)
+		peripheral->ops->read_prop(peripheral);
 
 	/* init the sysfs as we have properties now */
-	ret = sdw_slave_sysfs_init(slave);
+	ret = sdw_peripheral_sysfs_init(peripheral);
 	if (ret < 0)
-		dev_warn(dev, "Slave sysfs init failed:%d\n", ret);
+		dev_warn(dev, "Peripheral sysfs init failed:%d\n", ret);
 
 	/*
 	 * Check for valid clk_stop_timeout, use DisCo worst case value of
@@ -132,14 +132,14 @@ static int sdw_drv_probe(struct device *dev)
 	 *
 	 * TODO: check the timeouts and driver removal case
 	 */
-	if (slave->prop.clk_stop_timeout == 0)
-		slave->prop.clk_stop_timeout = 300;
+	if (peripheral->prop.clk_stop_timeout == 0)
+		peripheral->prop.clk_stop_timeout = 300;
 
-	slave->bus->clk_stop_timeout = max_t(u32, slave->bus->clk_stop_timeout,
-					     slave->prop.clk_stop_timeout);
+	peripheral->bus->clk_stop_timeout = max_t(u32, peripheral->bus->clk_stop_timeout,
+						  peripheral->prop.clk_stop_timeout);
 
-	slave->probed = true;
-	complete(&slave->probe_complete);
+	peripheral->probed = true;
+	complete(&peripheral->probe_complete);
 
 	dev_dbg(dev, "probe complete\n");
 
@@ -148,12 +148,12 @@ static int sdw_drv_probe(struct device *dev)
 
 static int sdw_drv_remove(struct device *dev)
 {
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);
 	struct sdw_driver *drv = drv_to_sdw_driver(dev->driver);
 	int ret = 0;
 
 	if (drv->remove)
-		ret = drv->remove(slave);
+		ret = drv->remove(peripheral);
 
 	dev_pm_domain_detach(dev, false);
 
@@ -162,15 +162,15 @@ static int sdw_drv_remove(struct device *dev)
 
 static void sdw_drv_shutdown(struct device *dev)
 {
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	struct sdw_peripheral *peripheral = dev_to_sdw_dev(dev);
 	struct sdw_driver *drv = drv_to_sdw_driver(dev->driver);
 
 	if (drv->shutdown)
-		drv->shutdown(slave);
+		drv->shutdown(peripheral);
 }
 
 /**
- * __sdw_register_driver() - register a SoundWire Slave driver
+ * __sdw_register_driver() - register a SoundWire Peripheral driver
  * @drv: driver to register
  * @owner: owning module/driver
  *
@@ -205,7 +205,7 @@ int __sdw_register_driver(struct sdw_driver *drv, struct module *owner)
 EXPORT_SYMBOL_GPL(__sdw_register_driver);
 
 /**
- * sdw_unregister_driver() - unregisters the SoundWire Slave driver
+ * sdw_unregister_driver() - unregisters the SoundWire Peripheral driver
  * @drv: driver to unregister
  */
 void sdw_unregister_driver(struct sdw_driver *drv)

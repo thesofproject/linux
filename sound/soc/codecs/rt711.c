@@ -268,9 +268,9 @@ static void rt711_jack_detect_handler(struct work_struct *work)
 		rt711->jack_type = 0;
 	}
 
-	dev_dbg(&rt711->slave->dev,
+	dev_dbg(&rt711->peripheral->dev,
 		"in %s, jack_type=0x%x\n", __func__, rt711->jack_type);
-	dev_dbg(&rt711->slave->dev,
+	dev_dbg(&rt711->peripheral->dev,
 		"in %s, btn_type=0x%x\n", __func__, btn_type);
 
 	snd_soc_jack_report(rt711->hs_jack, rt711->jack_type | btn_type,
@@ -326,7 +326,7 @@ static void rt711_btn_check_handler(struct work_struct *work)
 	if ((reg & 0xf0) == 0xf0)
 		btn_type = 0;
 
-	dev_dbg(&rt711->slave->dev,
+	dev_dbg(&rt711->peripheral->dev,
 		"%s, btn_type=0x%x\n",	__func__, btn_type);
 	snd_soc_jack_report(rt711->hs_jack, rt711->jack_type | btn_type,
 			SND_JACK_HEADSET |
@@ -394,7 +394,7 @@ static void rt711_jack_init(struct rt711_priv *rt711)
 			break;
 		}
 
-		dev_dbg(&rt711->slave->dev, "in %s enable\n", __func__);
+		dev_dbg(&rt711->peripheral->dev, "in %s enable\n", __func__);
 
 		mod_delayed_work(system_power_efficient_wq,
 			&rt711->jack_detect_work, msecs_to_jiffies(250));
@@ -406,7 +406,7 @@ static void rt711_jack_init(struct rt711_priv *rt711)
 		regmap_write(rt711->regmap,
 			RT711_SET_INLINE_UNSOLICITED_ENABLE, 0x00);
 
-		dev_dbg(&rt711->slave->dev, "in %s disable\n", __func__);
+		dev_dbg(&rt711->peripheral->dev, "in %s disable\n", __func__);
 	}
 
 	/* power off */
@@ -424,7 +424,7 @@ static int rt711_set_jack_detect(struct snd_soc_component *component,
 	rt711->hs_jack = hs_jack;
 
 	if (!rt711->hw_init) {
-		dev_dbg(&rt711->slave->dev,
+		dev_dbg(&rt711->peripheral->dev,
 			"%s hw_init not ready yet\n", __func__);
 		return 0;
 	}
@@ -889,7 +889,7 @@ static int rt711_probe(struct snd_soc_component *component)
 {
 	struct rt711_priv *rt711 = snd_soc_component_get_drvdata(component);
 
-	rt711_parse_dt(rt711, &rt711->slave->dev);
+	rt711_parse_dt(rt711, &rt711->peripheral->dev);
 	rt711->component = component;
 
 	return 0;
@@ -967,7 +967,7 @@ static int rt711_pcm_hw_params(struct snd_pcm_substream *substream,
 	if (!stream)
 		return -EINVAL;
 
-	if (!rt711->slave)
+	if (!rt711->peripheral)
 		return -EINVAL;
 
 	/* SoundWire specific configuration */
@@ -993,7 +993,7 @@ static int rt711_pcm_hw_params(struct snd_pcm_substream *substream,
 	port_config.ch_mask = (1 << (num_channels)) - 1;
 	port_config.num = port;
 
-	retval = sdw_stream_add_slave(rt711->slave, &stream_config,
+	retval = sdw_stream_add_peripheral(rt711->peripheral, &stream_config,
 					&port_config, 1, stream->sdw_stream);
 	if (retval) {
 		dev_err(dai->dev, "Unable to configure port\n");
@@ -1045,10 +1045,10 @@ static int rt711_pcm_hw_free(struct snd_pcm_substream *substream,
 	struct sdw_stream_data *stream =
 		snd_soc_dai_get_dma_data(dai, substream);
 
-	if (!rt711->slave)
+	if (!rt711->peripheral)
 		return -EINVAL;
 
-	sdw_stream_remove_slave(rt711->slave, stream->sdw_stream);
+	sdw_stream_remove_peripheral(rt711->peripheral, stream->sdw_stream);
 	return 0;
 }
 
@@ -1152,7 +1152,7 @@ static void rt711_calibration_work(struct work_struct *work)
 }
 
 int rt711_init(struct device *dev, struct regmap *sdw_regmap,
-			struct regmap *regmap, struct sdw_slave *slave)
+			struct regmap *regmap, struct sdw_peripheral *peripheral)
 {
 	struct rt711_priv *rt711;
 	int ret;
@@ -1162,7 +1162,7 @@ int rt711_init(struct device *dev, struct regmap *sdw_regmap,
 		return -ENOMEM;
 
 	dev_set_drvdata(dev, rt711);
-	rt711->slave = slave;
+	rt711->peripheral = peripheral;
 	rt711->sdw_regmap = sdw_regmap;
 	rt711->regmap = regmap;
 
@@ -1181,12 +1181,12 @@ int rt711_init(struct device *dev, struct regmap *sdw_regmap,
 				rt711_dai,
 				ARRAY_SIZE(rt711_dai));
 
-	dev_dbg(&slave->dev, "%s\n", __func__);
+	dev_dbg(&peripheral->dev, "%s\n", __func__);
 
 	return ret;
 }
 
-int rt711_io_init(struct device *dev, struct sdw_slave *slave)
+int rt711_io_init(struct device *dev, struct sdw_peripheral *peripheral)
 {
 	struct rt711_priv *rt711 = dev_get_drvdata(dev);
 
@@ -1199,23 +1199,23 @@ int rt711_io_init(struct device *dev, struct sdw_slave *slave)
 	}
 
 	/*
-	 * PM runtime is only enabled when a Slave reports as Attached
+	 * PM runtime is only enabled when a Peripheral reports as Attached
 	 */
 	if (!rt711->first_hw_init) {
 		/* set autosuspend parameters */
-		pm_runtime_set_autosuspend_delay(&slave->dev, 3000);
-		pm_runtime_use_autosuspend(&slave->dev);
+		pm_runtime_set_autosuspend_delay(&peripheral->dev, 3000);
+		pm_runtime_use_autosuspend(&peripheral->dev);
 
 		/* update count of parent 'active' children */
-		pm_runtime_set_active(&slave->dev);
+		pm_runtime_set_active(&peripheral->dev);
 
 		/* make sure the device does not suspend immediately */
-		pm_runtime_mark_last_busy(&slave->dev);
+		pm_runtime_mark_last_busy(&peripheral->dev);
 
-		pm_runtime_enable(&slave->dev);
+		pm_runtime_enable(&peripheral->dev);
 	}
 
-	pm_runtime_get_noresume(&slave->dev);
+	pm_runtime_get_noresume(&peripheral->dev);
 
 	rt711_reset(rt711->regmap);
 
@@ -1294,13 +1294,13 @@ int rt711_io_init(struct device *dev, struct sdw_slave *slave)
 	} else
 		rt711->first_hw_init = true;
 
-	/* Mark Slave initialization complete */
+	/* Mark Peripheral initialization complete */
 	rt711->hw_init = true;
 
-	pm_runtime_mark_last_busy(&slave->dev);
-	pm_runtime_put_autosuspend(&slave->dev);
+	pm_runtime_mark_last_busy(&peripheral->dev);
+	pm_runtime_put_autosuspend(&peripheral->dev);
 
-	dev_dbg(&slave->dev, "%s hw_init complete\n", __func__);
+	dev_dbg(&peripheral->dev, "%s hw_init complete\n", __func__);
 	return 0;
 }
 

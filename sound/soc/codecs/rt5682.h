@@ -1416,8 +1416,8 @@ struct rt5682_priv {
 	struct delayed_work jack_detect_work;
 	struct delayed_work jd_check_work;
 	struct mutex calibrate_mutex;
-	struct sdw_slave *slave;
-	enum sdw_slave_status status;
+	struct sdw_peripheral *peripheral;
+	enum sdw_peripheral_status status;
 	struct sdw_bus_params params;
 	bool hw_init;
 	bool first_hw_init;
