@@ -719,6 +719,8 @@ static int __maybe_unused rt1316_dev_resume(struct device *dev)
 	if (!slave->unattach_request)
 		goto regmap_sync;
 
+	slave->unattach_request = 0;
+
 	time = wait_for_completion_timeout(&slave->initialization_complete,
 				msecs_to_jiffies(RT1316_PROBE_TIMEOUT));
 	if (!time) {
@@ -727,7 +729,6 @@ static int __maybe_unused rt1316_dev_resume(struct device *dev)
 	}
 
 regmap_sync:
-	slave->unattach_request = 0;
 	regcache_cache_only(rt1316->regmap, false);
 	regcache_sync(rt1316->regmap);
 

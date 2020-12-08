@@ -230,6 +230,8 @@ static int __maybe_unused rt715_dev_resume(struct device *dev)
 	if (!slave->unattach_request)
 		goto regmap_sync;
 
+	slave->unattach_request = 0;
+
 	time = wait_for_completion_timeout(&slave->enumeration_complete,
 					   msecs_to_jiffies(RT715_PROBE_TIMEOUT));
 	if (!time) {
@@ -238,7 +240,6 @@ static int __maybe_unused rt715_dev_resume(struct device *dev)
 	}
 
 regmap_sync:
-	slave->unattach_request = 0;
 	regcache_cache_only(rt715->regmap, false);
 	regcache_sync_region(rt715->regmap,
 		SDW_SDCA_CTL(FUN_JACK_CODEC, RT715_SDCA_ST_EN, RT715_SDCA_ST_CTRL,
