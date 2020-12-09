@@ -510,6 +510,16 @@ int snd_sof_trace_update_pos(struct snd_sof_dev *sdev,
 	if (!sdev->dtrace_is_supported)
 		return 0;
 
+	/* If DMA trace buffer position update IPC comes when HOST is sending
+	 * CTX_SAVE, the position info in mailbox may be invalid. Drop the
+	 * invalid position to avoid wrong overflow error.
+	 * TODO: Fix the race condition of IPC RX when IPC TX with CTX_SAVE
+	 */
+	if (posn->overflow == 0xFFFFFFFF && posn->messages == 0xFFFFFFFF) {
+		dev_warn(sdev->dev, "Drop invalid trace position update");
+		return 0;
+	}
+
 	if (sdev->dtrace_is_enabled && sdev->host_offset != posn->host_offset) {
 		sdev->host_offset = posn->host_offset;
 		wake_up(&sdev->trace_sleep);
