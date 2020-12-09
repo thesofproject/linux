@@ -18,6 +18,56 @@
 #include <sound/initval.h>
 #include "rt1316-sdw.h"
 
+static const struct reg_default rt1316_reg_defaults[] = {
+	{ 0x3004, 0x00 },
+	{ 0x3005, 0x00 },
+	{ 0x3206, 0x00 },
+	{ 0xc001, 0x00 },
+	{ 0xc002, 0x00 },
+	{ 0xc003, 0x00 },
+	{ 0xc004, 0x00 },
+	{ 0xc005, 0x00 },
+	{ 0xc006, 0x00 },
+	{ 0xc007, 0x00 },
+	{ 0xc008, 0x00 },
+	{ 0xc009, 0x00 },
+	{ 0xc00a, 0x00 },
+	{ 0xc00b, 0x00 },
+	{ 0xc00c, 0x00 },
+	{ 0xc00d, 0x00 },
+	{ 0xc00e, 0x00 },
+	{ 0xc00f, 0x00 },
+	{ 0xc010, 0xa5 },
+	{ 0xc011, 0x00 },
+	{ 0xc012, 0xff },
+	{ 0xc013, 0xff },
+	{ 0xc014, 0x40 },
+	{ 0xc015, 0x00 },
+	{ 0xc016, 0x00 },
+	{ 0xc017, 0x00 },
+	{ 0xc605, 0x30 },
+	{ 0xc700, 0x0a },
+	{ 0xc701, 0xaa },
+	{ 0xc702, 0x1a },
+	{ 0xc703, 0x0a },
+	{ 0xc710, 0x80 },
+	{ 0xc711, 0x00 },
+	{ 0xc712, 0x3e },
+	{ 0xc713, 0x80 },
+	{ 0xc714, 0x80 },
+	{ 0xc715, 0x06 },
+	{ 0xd101, 0x00 },
+	{ 0xd102, 0x30 },
+	{ 0xd103, 0x00 },
+	{ SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_UDMPU21, RT1316_SDCA_CTL_UDMPU_CLUSTER, 0), 0x00 },
+	{ SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_FU21, RT1316_SDCA_CTL_FU_MUTE, CH_L), 0x01 },
+	{ SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_FU21, RT1316_SDCA_CTL_FU_MUTE, CH_R), 0x01 },
+	{ SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_XU24, RT1316_SDCA_CTL_BYPASS, 0), 0x01 },
+	{ SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_PDE23, RT1316_SDCA_CTL_REQ_POWER_STATE, 0), 0x03 },
+	{ SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_PDE22, RT1316_SDCA_CTL_REQ_POWER_STATE, 0), 0x03 },
+	{ SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_PDE24, RT1316_SDCA_CTL_REQ_POWER_STATE, 0), 0x03 },
+};
+
 static bool rt1316_readable_register(struct device *dev, unsigned int reg)
 {
 	switch (reg) {
@@ -27,13 +77,13 @@ static bool rt1316_readable_register(struct device *dev, unsigned int reg)
 	case 0xc000 ... 0xc7b4:
 	case 0xcf00 ... 0xcf03:
 	case 0xd101 ... 0xd103:
-	case SDW_SDCA_CTL(FUN_SMART_AMP, RT1316_SDCA_ENT_UDMPU21, RT1316_SDCA_CTL_UDMPU_CLUSTER, 0):
-	case SDW_SDCA_CTL(FUN_SMART_AMP, RT1316_SDCA_ENT_FU21, RT1316_SDCA_CTL_FU_MUTE, CH_L):
-	case SDW_SDCA_CTL(FUN_SMART_AMP, RT1316_SDCA_ENT_FU21, RT1316_SDCA_CTL_FU_MUTE, CH_R):
-	case SDW_SDCA_CTL(FUN_SMART_AMP, RT1316_SDCA_ENT_PDE23, RT1316_SDCA_CTL_REQ_POWER_STATE, 0):
-	case SDW_SDCA_CTL(FUN_SMART_AMP, RT1316_SDCA_ENT_PDE27, RT1316_SDCA_CTL_REQ_POWER_STATE, 0):
-	case SDW_SDCA_CTL(FUN_SMART_AMP, RT1316_SDCA_ENT_PDE22, RT1316_SDCA_CTL_REQ_POWER_STATE, 0):
-	case SDW_SDCA_CTL(FUN_SMART_AMP, RT1316_SDCA_ENT_PDE24, RT1316_SDCA_CTL_REQ_POWER_STATE, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_UDMPU21, RT1316_SDCA_CTL_UDMPU_CLUSTER, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_FU21, RT1316_SDCA_CTL_FU_MUTE, CH_L):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_FU21, RT1316_SDCA_CTL_FU_MUTE, CH_R):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_PDE23, RT1316_SDCA_CTL_REQ_POWER_STATE, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_PDE27, RT1316_SDCA_CTL_REQ_POWER_STATE, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_PDE22, RT1316_SDCA_CTL_REQ_POWER_STATE, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_PDE24, RT1316_SDCA_CTL_REQ_POWER_STATE, 0):
 		return true;
 	default:
 		return false;
@@ -215,7 +265,7 @@ static int rt1316_io_init(struct device *dev, struct sdw_slave *slave)
 	regmap_write(rt1316->regmap, 0x3202, 0x02);
 
 	regmap_write(rt1316->regmap,
-		SDW_SDCA_CTL(FUN_SMART_AMP, RT1316_SDCA_ENT_XU24, RT1316_SDCA_CTL_BYPASS, 0), 0x00);
+		SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_XU24, RT1316_SDCA_CTL_BYPASS, 0), 0x00);
 
 	/* for IV sense */
 	regmap_write(rt1316->regmap, 0x2232, 0x80);
@@ -284,35 +334,36 @@ static int rt1316_classd_event(struct snd_soc_dapm_widget *w,
 	struct snd_soc_component *component =
 		snd_soc_dapm_to_component(w->dapm);
 	struct rt1316_sdw_priv *rt1316 = snd_soc_component_get_drvdata(component);
+	unsigned char ps0 = 0x0, ps3 = 0x3;
 
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
 		regmap_write(rt1316->regmap,
-			SDW_SDCA_CTL(FUN_SMART_AMP, RT1316_SDCA_ENT_PDE23,
+			SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_PDE23,
 				RT1316_SDCA_CTL_REQ_POWER_STATE, 0),
-				PS0);
+				ps0);
 		regmap_write(rt1316->regmap,
-			SDW_SDCA_CTL(FUN_SMART_AMP, RT1316_SDCA_ENT_PDE27,
+			SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_PDE27,
 				RT1316_SDCA_CTL_REQ_POWER_STATE, 0),
-				PS0);
+				ps0);
 		regmap_write(rt1316->regmap,
-			SDW_SDCA_CTL(FUN_SMART_AMP, RT1316_SDCA_ENT_PDE22,
+			SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_PDE22,
 				RT1316_SDCA_CTL_REQ_POWER_STATE, 0),
-				PS0);
+				ps0);
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
 		regmap_write(rt1316->regmap,
-			SDW_SDCA_CTL(FUN_SMART_AMP, RT1316_SDCA_ENT_PDE23,
+			SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_PDE23,
 				RT1316_SDCA_CTL_REQ_POWER_STATE, 0),
-				PS3);
+				ps3);
 		regmap_write(rt1316->regmap,
-			SDW_SDCA_CTL(FUN_SMART_AMP, RT1316_SDCA_ENT_PDE27,
+			SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_PDE27,
 				RT1316_SDCA_CTL_REQ_POWER_STATE, 0),
-				PS3);
+				ps3);
 		regmap_write(rt1316->regmap,
-			SDW_SDCA_CTL(FUN_SMART_AMP, RT1316_SDCA_ENT_PDE22,
+			SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_PDE22,
 				RT1316_SDCA_CTL_REQ_POWER_STATE, 0),
-				PS3);
+				ps3);
 		break;
 
 	default:
@@ -328,19 +379,20 @@ static int rt1316_pde24_event(struct snd_soc_dapm_widget *w,
 	struct snd_soc_component *component =
 		snd_soc_dapm_to_component(w->dapm);
 	struct rt1316_sdw_priv *rt1316 = snd_soc_component_get_drvdata(component);
+	unsigned char ps0 = 0x0, ps3 = 0x3;
 
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
 		regmap_write(rt1316->regmap,
-			SDW_SDCA_CTL(FUN_SMART_AMP, RT1316_SDCA_ENT_PDE24,
+			SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_PDE24,
 				RT1316_SDCA_CTL_REQ_POWER_STATE, 0),
-				PS0);
+				ps0);
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
 		regmap_write(rt1316->regmap,
-			SDW_SDCA_CTL(FUN_SMART_AMP, RT1316_SDCA_ENT_PDE24,
+			SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_PDE24,
 				RT1316_SDCA_CTL_REQ_POWER_STATE, 0),
-				PS3);
+				ps3);
 		break;
 	}
 	return 0;
@@ -360,7 +412,7 @@ static const char * const rt1316_rx_data_ch_select[] = {
 };
 
 static SOC_ENUM_SINGLE_DECL(rt1316_rx_data_ch_enum,
-	SDW_SDCA_CTL(FUN_SMART_AMP, RT1316_SDCA_ENT_UDMPU21, RT1316_SDCA_CTL_UDMPU_CLUSTER, 0), 0,
+	SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_UDMPU21, RT1316_SDCA_CTL_UDMPU_CLUSTER, 0), 0,
 	rt1316_rx_data_ch_select);
 
 static const char * const rt1316_xu24_bypass_ctl[] = {
@@ -369,7 +421,7 @@ static const char * const rt1316_xu24_bypass_ctl[] = {
 };
 
 static SOC_ENUM_SINGLE_DECL(rt1316_xu24_bypass_enum,
-	SDW_SDCA_CTL(FUN_SMART_AMP, RT1316_SDCA_ENT_XU24, RT1316_SDCA_CTL_BYPASS, 0), 0,
+	SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_XU24, RT1316_SDCA_CTL_BYPASS, 0), 0,
 	rt1316_xu24_bypass_ctl);
 
 static const char * const rt1316_lr_iv_sel[] = {
@@ -398,7 +450,7 @@ static const struct snd_kcontrol_new rt1316_snd_controls[] = {
 	SOC_ENUM("RX Channel Select", rt1316_rx_data_ch_enum),
 
 	/* XU24 Bypass Control */
-	SOC_ENUM("XU24 Bypass Control", rt1316_xu24_bypass_enum),
+	SOC_ENUM("XU24 Bypass Switch", rt1316_xu24_bypass_enum),
 
 	/* Left/Right IV tag */
 	SOC_ENUM("Left V Tag Select", rt1316_l_v_tag_enum),
@@ -413,12 +465,12 @@ static const struct snd_kcontrol_new rt1316_snd_controls[] = {
 
 static const struct snd_kcontrol_new rt1316_sto_dac_l =
 	SOC_DAPM_SINGLE_AUTODISABLE("Switch",
-		SDW_SDCA_CTL(FUN_SMART_AMP, RT1316_SDCA_ENT_FU21, RT1316_SDCA_CTL_FU_MUTE, CH_L),
+		SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_FU21, RT1316_SDCA_CTL_FU_MUTE, CH_L),
 		0, 1, 1);
 
 static const struct snd_kcontrol_new rt1316_sto_dac_r =
 	SOC_DAPM_SINGLE_AUTODISABLE("Switch",
-		SDW_SDCA_CTL(FUN_SMART_AMP, RT1316_SDCA_ENT_FU21, RT1316_SDCA_CTL_FU_MUTE, CH_R),
+		SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, RT1316_SDCA_ENT_FU21, RT1316_SDCA_CTL_FU_MUTE, CH_R),
 		0, 1, 1);
 
 static const struct snd_soc_dapm_widget rt1316_dapm_widgets[] = {
