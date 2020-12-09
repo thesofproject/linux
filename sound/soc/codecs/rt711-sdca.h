@@ -164,10 +164,10 @@ struct sdw_stream_data {
 #define RT711_BUF_ADDR_HID1			0x44030000
 #define RT711_BUF_ADDR_HID2			0x44030020
 
-/* RT711 SDCA function topology */
-#define FUN_JACK_CODEC 0x01
-#define FUN_MIC_ARRAY 0x02
-#define FUN_HID 0x03
+/* RT711 SDCA Control - function number */
+#define FUNC_NUM_JACK_CODEC 0x01
+#define FUNC_NUM_MIC_ARRAY 0x02
+#define FUNC_NUM_HID 0x03
 
 /* RT711 SDCA entity */
 #define RT711_SDCA_ENT_HID01 0x01
@@ -206,14 +206,6 @@ struct sdw_stream_data {
 /* RT711 SDCA channel */
 #define CH_L 0x01
 #define CH_R 0x02
-
-/* Power State */
-#define PS0 0x00
-#define PS3 0x03
-
-/* Mute Control */
-#define UNMUTE 0x00
-#define MUTE 0x01
 
 /* sample frequency index */
 #define RT711_SDCA_RATE_44100HZ		0x08
