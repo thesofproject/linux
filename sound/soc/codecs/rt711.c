@@ -544,9 +544,12 @@ static int rt711_set_amp_gain_put(struct snd_kcontrol *kcontrol,
 			break;
 	}
 
+	mutex_lock(&rt711->calibrate_mutex);
 	if (dapm->bias_level <= SND_SOC_BIAS_STANDBY)
 		regmap_write(rt711->regmap,
 				RT711_SET_AUDIO_POWER_STATE, AC_PWRST_D3);
+	mutex_unlock(&rt711->calibrate_mutex);
+
 	return 0;
 }
 
