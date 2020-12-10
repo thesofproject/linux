@@ -562,7 +562,9 @@ static struct acpi_device *acpi_primary_dev_companion(struct acpi_device *adev,
 {
 	const struct device *phys_dev = acpi_get_first_physical_node(adev);
 
-	return phys_dev && phys_dev == dev ? adev : NULL;
+	if (!strcmp(dev_name(phys_dev), dev_name(dev)))
+		return adev;
+	return NULL;
 }
 
 /**
