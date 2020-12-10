@@ -468,11 +468,9 @@ static void rt711_sdca_jack_init(struct rt711_sdca_priv *rt711)
 		}
 
 		/* set SCP_SDCA_IntMask1[0]=1 */
-		regmap_write(rt711->regmap, SDW_SCP_SDCA_INTMASK1,
-			SDW_SCP_SDCA_INTMASK_SDCA_0);
+		sdw_write_no_pm(rt711->slave, SDW_SCP_SDCA_INTMASK1, SDW_SCP_SDCA_INTMASK_SDCA_0);
 		/* set SCP_SDCA_IntMask2[0]=1 */
-		regmap_write(rt711->regmap, SDW_SCP_SDCA_INTMASK2,
-			SDW_SCP_SDCA_INTMASK_SDCA_8);
+		sdw_write_no_pm(rt711->slave, SDW_SCP_SDCA_INTMASK2, SDW_SCP_SDCA_INTMASK_SDCA_8);
 		dev_dbg(&rt711->slave->dev, "in %s enable\n", __func__);
 	} else {
 		/* disable HID 1/2 event */
@@ -480,9 +478,9 @@ static void rt711_sdca_jack_init(struct rt711_sdca_priv *rt711)
 			RT711_GE_MODE_RELATED_CTL, 0x0c00, 0x0000);
 
 		/* set SCP_SDCA_IntMask1[0]=0 */
-		regmap_write(rt711->regmap, SDW_SCP_SDCA_INTMASK1, 0);
-		/* set SCP_SDCA_IntMask2[0]=0 */
-		regmap_write(rt711->regmap, SDW_SCP_SDCA_INTMASK2, 0);
+		sdw_write_no_pm(rt711->slave, SDW_SCP_SDCA_INTMASK1, 0);
+		/* set SCP_SDCA_IntMask2[0]=1 */
+		sdw_write_no_pm(rt711->slave, SDW_SCP_SDCA_INTMASK2, 0);
 		dev_dbg(&rt711->slave->dev, "in %s disable\n", __func__);
 	}
 
