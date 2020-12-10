@@ -37,6 +37,26 @@ config SND_SOC_COMPRESS
 config SND_SOC_TOPOLOGY
 	bool
 
+if SND_SOC_TOPOLOGY
+
+config SND_SOC_TOPOLOGY_KUNIT_TESTS
+	tristate "KUnit tests for SoC topology" if !KUNIT_ALL_TESTS
+	depends on KUNIT
+	default KUNIT_ALL_TESTS
+	help
+	  If you want to perform tests on ALSA SoC topology support say Y here.
+
+	  This builds a module which can be later manually loaded to run KUNIT
+	  test cases against soc-topology.c API. This should be primarly used by
+	  developers to test their changes to ASoC.
+
+	  Do note that it creates fake playback devices which do not interact
+	  well with userspace. When running tests one may want to disable
+	  userspace applications such as pulseaudio, to prevent unnecessary
+	  problems.
+
+endif   # SND_SOC_TOPOLOGY
+
 config SND_SOC_ACPI
 	tristate
 
