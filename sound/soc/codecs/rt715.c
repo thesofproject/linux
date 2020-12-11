@@ -80,85 +80,106 @@ static int rt715_set_amp_gain_put(struct snd_kcontrol *kcontrol,
 	struct soc_mixer_control *mc =
 		(struct soc_mixer_control *)kcontrol->private_value;
 	struct rt715_priv *rt715 = snd_soc_component_get_drvdata(component);
+	unsigned int capture_reg_H[] = {RT715_SET_GAIN_MIC_ADC_H,
+		RT715_SET_GAIN_LINE_ADC_H, RT715_SET_GAIN_MIX_ADC_H,
+		RT715_SET_GAIN_MIX_ADC2_H};
+	unsigned int capture_reg_L[] = {RT715_SET_GAIN_MIC_ADC_L,
+		RT715_SET_GAIN_LINE_ADC_L, RT715_SET_GAIN_MIX_ADC_L,
+		RT715_SET_GAIN_MIX_ADC2_L};
 	unsigned int addr_h, addr_l, val_h, val_ll, val_lr;
-	unsigned int read_ll, read_rl;
-	int i;
+	unsigned int read_ll, read_rl, i, j, loop_cnt;
 
-	/* Can't use update bit function, so read the original value first */
-	addr_h = mc->reg;
-	addr_l = mc->rreg;
-	if (mc->shift == RT715_DIR_OUT_SFT) /* output */
-		val_h = 0x80;
-	else /* input */
-		val_h = 0x0;
+	if (strstr(ucontrol->id.name, "Main Capture Switch") ||
+		strstr(ucontrol->id.name, "Main Capture Volume"))
+		loop_cnt = 4;
+	else
+		loop_cnt = 1;
 
-	rt715_get_gain(rt715, addr_h, addr_l, val_h, &read_rl, &read_ll);
-
-	/* L Channel */
-	if (mc->invert) {
-		/* for mute */
-		val_ll = (mc->max - ucontrol->value.integer.value[0]) << 7;
-		/* keep gain */
-		read_ll = read_ll & 0x7f;
-		val_ll |= read_ll;
-	} else {
-		/* for gain */
-		val_ll = ((ucontrol->value.integer.value[0]) & 0x7f);
-		if (val_ll > mc->max)
-			val_ll = mc->max;
-		/* keep mute status */
-		read_ll = read_ll & 0x80;
-		val_ll |= read_ll;
-	}
-
-	/* R Channel */
-	if (mc->invert) {
-		regmap_write(rt715->regmap,
-			     RT715_SET_AUDIO_POWER_STATE, AC_PWRST_D0);
-		/* for mute */
-		val_lr = (mc->max - ucontrol->value.integer.value[1]) << 7;
-		/* keep gain */
-		read_rl = read_rl & 0x7f;
-		val_lr |= read_rl;
-	} else {
-		/* for gain */
-		val_lr = ((ucontrol->value.integer.value[1]) & 0x7f);
-		if (val_lr > mc->max)
-			val_lr = mc->max;
-		/* keep mute status */
-		read_rl = read_rl & 0x80;
-		val_lr |= read_rl;
-	}
-
-	for (i = 0; i < 3; i++) { /* retry 3 times at most */
-
-		if (val_ll == val_lr) {
-			/* Set both L/R channels at the same time */
-			val_h = (1 << mc->shift) | (3 << 4);
-			regmap_write(rt715->regmap, addr_h,
-				(val_h << 8 | val_ll));
-			regmap_write(rt715->regmap, addr_l,
-				(val_h << 8 | val_ll));
+	for (j = 0; j < loop_cnt; j++) {
+		/* Can't use update bit function, so read the original value first */
+		if (loop_cnt == 1) {
+			addr_h = mc->reg;
+			addr_l = mc->rreg;
 		} else {
-			/* Lch*/
-			val_h = (1 << mc->shift) | (1 << 5);
-			regmap_write(rt715->regmap, addr_h,
-				(val_h << 8 | val_ll));
-			/* Rch */
-			val_h = (1 << mc->shift) | (1 << 4);
-			regmap_write(rt715->regmap, addr_l,
-				(val_h << 8 | val_lr));
+			addr_h = capture_reg_H[j];
+			addr_l = capture_reg_L[j];
 		}
-		/* check result */
+
 		if (mc->shift == RT715_DIR_OUT_SFT) /* output */
 			val_h = 0x80;
 		else /* input */
 			val_h = 0x0;
 
-		rt715_get_gain(rt715, addr_h, addr_l, val_h,
-			       &read_rl, &read_ll);
-		if (read_rl == val_lr && read_ll == val_ll)
-			break;
+		rt715_get_gain(rt715, addr_h, addr_l, val_h, &read_rl, &read_ll);
+
+		if (dapm->bias_level <= SND_SOC_BIAS_STANDBY)
+			regmap_write(rt715->regmap,
+					RT715_SET_AUDIO_POWER_STATE, AC_PWRST_D0);
+
+		/* L Channel */
+		if (mc->invert) {
+			/* for mute */
+			val_ll = (mc->max - ucontrol->value.integer.value[0]) << 7;
+			/* keep gain */
+			read_ll = read_ll & 0x7f;
+			val_ll |= read_ll;
+		} else {
+			/* for gain */
+			val_ll = ((ucontrol->value.integer.value[0]) & 0x7f);
+			if (val_ll > mc->max)
+				val_ll = mc->max;
+			/* keep mute status */
+			read_ll = read_ll & 0x80;
+			val_ll |= read_ll;
+		}
+
+		/* R Channel */
+		if (mc->invert) {
+			/* for mute */
+			val_lr = (mc->max - ucontrol->value.integer.value[1]) << 7;
+			/* keep gain */
+			read_rl = read_rl & 0x7f;
+			val_lr |= read_rl;
+		} else {
+			/* for gain */
+			val_lr = ((ucontrol->value.integer.value[1]) & 0x7f);
+			if (val_lr > mc->max)
+				val_lr = mc->max;
+			/* keep mute status */
+			read_rl = read_rl & 0x80;
+			val_lr |= read_rl;
+		}
+
+		for (i = 0; i < 3; i++) { /* retry 3 times at most */
+
+			if (val_ll == val_lr) {
+				/* Set both L/R channels at the same time */
+				val_h = (1 << mc->shift) | (3 << 4);
+				regmap_write(rt715->regmap, addr_h,
+					(val_h << 8 | val_ll));
+				regmap_write(rt715->regmap, addr_l,
+					(val_h << 8 | val_ll));
+			} else {
+				/* Lch*/
+				val_h = (1 << mc->shift) | (1 << 5);
+				regmap_write(rt715->regmap, addr_h,
+					(val_h << 8 | val_ll));
+				/* Rch */
+				val_h = (1 << mc->shift) | (1 << 4);
+				regmap_write(rt715->regmap, addr_l,
+					(val_h << 8 | val_lr));
+			}
+			/* check result */
+			if (mc->shift == RT715_DIR_OUT_SFT) /* output */
+				val_h = 0x80;
+			else /* input */
+				val_h = 0x0;
+
+			rt715_get_gain(rt715, addr_h, addr_l, val_h,
+					&read_rl, &read_ll);
+			if (read_rl == val_lr && read_ll == val_ll)
+				break;
+		}
 	}
 	/* D0:power on state, D3: power saving mode */
 	if (dapm->bias_level <= SND_SOC_BIAS_STANDBY)
@@ -226,6 +247,13 @@ static const struct snd_kcontrol_new rt715_snd_controls[] = {
 	SOC_DOUBLE_R_EXT("ADC 27 Capture Switch", RT715_SET_GAIN_MIX_ADC2_H,
 			RT715_SET_GAIN_MIX_ADC2_L, RT715_DIR_IN_SFT, 1, 1,
 			rt715_set_amp_gain_get, rt715_set_amp_gain_put),
+	/*
+	 * "Main Capture Switch" looks the same as "ADC 07 Capture Switch",
+	 * but the callback has different action internally.
+	 */
+	SOC_DOUBLE_R_EXT("Main Capture Switch", RT715_SET_GAIN_MIC_ADC_H,
+			RT715_SET_GAIN_MIC_ADC_L, RT715_DIR_IN_SFT, 1, 1,
+			rt715_set_amp_gain_get, rt715_set_amp_gain_put),
 	/* Volume Control */
 	SOC_DOUBLE_R_EXT_TLV("ADC 07 Capture Volume", RT715_SET_GAIN_MIC_ADC_H,
 			RT715_SET_GAIN_MIC_ADC_L, RT715_DIR_IN_SFT, 0x3f, 0,
@@ -241,6 +269,14 @@ static const struct snd_kcontrol_new rt715_snd_controls[] = {
 			in_vol_tlv),
 	SOC_DOUBLE_R_EXT_TLV("ADC 27 Capture Volume", RT715_SET_GAIN_MIX_ADC2_H,
 			RT715_SET_GAIN_MIX_ADC2_L, RT715_DIR_IN_SFT, 0x3f, 0,
+			rt715_set_amp_gain_get, rt715_set_amp_gain_put,
+			in_vol_tlv),
+	/*
+	 * "Main Capture Volume" looks the same as "ADC 07 Capture Volume",
+	 * but the callback has different action internally.
+	 */
+	SOC_DOUBLE_R_EXT_TLV("Main Capture Volume", RT715_SET_GAIN_MIC_ADC_H,
+			RT715_SET_GAIN_MIC_ADC_L, RT715_DIR_IN_SFT, 0x3f, 0,
 			rt715_set_amp_gain_get, rt715_set_amp_gain_put,
 			in_vol_tlv),
 	/* MIC Boost Control */
