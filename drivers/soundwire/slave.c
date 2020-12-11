@@ -35,7 +35,6 @@ int sdw_slave_add(struct sdw_bus *bus,
 	/* Initialize data structure */
 	memcpy(&slave->id, id, sizeof(*id));
 	slave->dev.parent = bus->dev;
-	slave->dev.fwnode = fwnode;
 
 	if (id->unique_id == SDW_IGNORED_UNIQUE_ID) {
 		/* name shall be sdw:link:mfg:part:class */
@@ -53,6 +52,9 @@ int sdw_slave_add(struct sdw_bus *bus,
 	slave->dev.of_node = of_node_get(to_of_node(fwnode));
 	slave->dev.type = &sdw_slave_type;
 	slave->dev.groups = sdw_slave_status_attr_groups;
+	/* To make sure fwnode is a primary fwnode */
+	fwnode->secondary = NULL;
+	set_primary_fwnode(&slave->dev, fwnode);
 	slave->bus = bus;
 	slave->status = SDW_SLAVE_UNATTACHED;
 	init_completion(&slave->enumeration_complete);
