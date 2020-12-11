@@ -143,6 +143,8 @@ int sdw_master_device_add(struct sdw_bus *bus, struct device *parent,
 	md->dev.groups = master_node_groups;
 	md->dev.of_node = parent->of_node;
 	md->dev.fwnode = fwnode;
+	/* make sure ACPI companion is set based on parent */
+	ACPI_COMPANION_SET(&md->dev, ACPI_COMPANION(parent));
 	md->dev.dma_mask = parent->dma_mask;
 
 	dev_set_name(&md->dev, "sdw-master-%d", bus->id);

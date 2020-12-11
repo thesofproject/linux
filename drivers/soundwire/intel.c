@@ -1341,6 +1341,9 @@ static int intel_master_probe(struct platform_device *pdev)
 	if (!sdw)
 		return -ENOMEM;
 
+	/* FIXME: is this needed for platform devices? */
+	ACPI_COMPANION_SET(dev, ACPI_COMPANION(dev->parent));
+
 	cdns = &sdw->cdns;
 	bus = &cdns->bus;
 
