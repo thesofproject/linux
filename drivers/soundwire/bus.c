@@ -862,7 +862,9 @@ static int sdw_slave_clk_stop_prepare(struct sdw_slave *slave,
 {
 	bool wake_en;
 	u32 val = 0;
-	int ret;
+	int ret, ret2;
+	struct sdw_msg msg;
+	u8 buf;
 
 	wake_en = slave->prop.wake_capable;
 
@@ -885,6 +887,26 @@ static int sdw_slave_clk_stop_prepare(struct sdw_slave *slave,
 	if (ret != 0)
 		dev_err(&slave->dev,
 			"Clock Stop prepare failed for slave: %d", ret);
+
+	if (ret == -ENODATA) {
+		ret2 = sdw_fill_msg(&msg, slave, SDW_SCP_DEVNUMBER, 1,
+				0, SDW_MSG_FLAG_READ, &buf);
+		if (ret2 < 0)
+			dev_info(&slave->dev, "ID=0, sdw_fill_msg, ret = %d", ret2);
+		ret2 = sdw_transfer(slave->bus, &msg);
+		if (ret2 < 0)
+			dev_info(&slave->dev, "ID=0, sdw_transfer, ret = %d", ret2);
+		dev_info(&slave->dev, "ID=0, Slave Device Number = %d", buf);
+
+		ret2 = sdw_fill_msg(&msg, slave, SDW_SCP_DEVNUMBER, 1,
+				slave->dev_num, SDW_MSG_FLAG_READ, &buf);
+		if (ret2 < 0)
+			dev_info(&slave->dev, "ID=%d,sdw_fill_msg, ret = %d", slave->dev_num, ret2);
+		ret2 = sdw_transfer(slave->bus, &msg);
+		if (ret2 < 0)
+			dev_info(&slave->dev, "ID=%d, sdw_transfer, ret = %d", slave->dev_num, ret2);
+		dev_info(&slave->dev, "ID=%d, Slave Device Number = %d", slave->dev_num, buf);
+	}
 
 	return ret;
 }
