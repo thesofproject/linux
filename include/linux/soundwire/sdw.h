@@ -426,6 +426,7 @@ struct sdw_master_prop {
 };
 
 #define SDW_MASTER_QUIRKS_CLEAR_INITIAL_CLASH	BIT(0)
+#define SDW_MASTER_QUIRKS_CLEAR_INITIAL_PARITY	BIT(1)
 
 int sdw_master_read_prop(struct sdw_bus *bus);
 int sdw_slave_read_prop(struct sdw_slave *slave);
