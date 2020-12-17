@@ -1109,6 +1109,14 @@ static int rt711_sdca_probe(struct snd_soc_component *component)
 	return 0;
 }
 
+void rt711_sdca_remove(struct snd_soc_component *component)
+{
+	struct rt711_sdca_priv *rt711 = snd_soc_component_get_drvdata(component);
+
+	regcache_cache_only(rt711->regmap, true);
+	regcache_cache_only(rt711->mbq_regmap, true);
+}
+
 static const struct snd_soc_component_driver soc_sdca_dev_rt711 = {
 	.probe = rt711_sdca_probe,
 	.controls = rt711_sdca_snd_controls,
@@ -1118,6 +1126,7 @@ static const struct snd_soc_component_driver soc_sdca_dev_rt711 = {
 	.dapm_routes = rt711_sdca_audio_map,
 	.num_dapm_routes = ARRAY_SIZE(rt711_sdca_audio_map),
 	.set_jack = rt711_sdca_set_jack_detect,
+	.remove = rt711_sdca_remove,
 };
 
 static int rt711_sdca_set_sdw_stream(struct snd_soc_dai *dai, void *sdw_stream,
