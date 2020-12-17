@@ -144,16 +144,16 @@ static int rt711_sdca_update_status(struct sdw_slave *slave,
 
 	if (status == SDW_SLAVE_ATTACHED) {
 		if (rt711->hs_jack) {
-			regcache_cache_only(rt711->regmap, false);
-			regcache_cache_bypass(rt711->regmap, true);
-			regmap_write(rt711->regmap, SDW_SCP_SDCA_INTMASK1,
+			/*
+			 * Due to the SCP_SDCA_INTMASK will be cleared by any reset, and then
+			 * if the device attached again, we will need to set the setting back.
+			 * It could avoid losing the jack detection interrupt.
+			 * This also could sync with the cache value as the rt711_sdca_jack_init set.
+			 */
+			sdw_write_no_pm(rt711->slave, SDW_SCP_SDCA_INTMASK1,
 				SDW_SCP_SDCA_INTMASK_SDCA_0);
-			regmap_write(rt711->regmap, SDW_SCP_SDCA_INTMASK2,
+			sdw_write_no_pm(rt711->slave, SDW_SCP_SDCA_INTMASK2,
 				SDW_SCP_SDCA_INTMASK_SDCA_8);
-			regcache_cache_bypass(rt711->regmap, false);
-		} else {
-			regmap_write(rt711->regmap, SDW_SCP_SDCA_INTMASK1, 0);
-			regmap_write(rt711->regmap, SDW_SCP_SDCA_INTMASK2, 0);
 		}
 	}
 
