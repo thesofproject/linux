@@ -4259,6 +4259,12 @@ static inline bool fwnode_is_primary(struct fwnode_handle *fwnode)
  *
  * Set the device's firmware node pointer to @fwnode, but if a secondary
  * firmware node of the device is present, preserve it.
+ *
+ * Valid fwnode cases are:
+ *  - primary --> secondary --> -ENODEV
+ *  - primary --> NULL
+ *  - secondary --> -ENODEV
+ *  - NULL
  */
 void set_primary_fwnode(struct device *dev, struct fwnode_handle *fwnode)
 {
@@ -4277,6 +4283,7 @@ void set_primary_fwnode(struct device *dev, struct fwnode_handle *fwnode)
 	} else {
 		if (fwnode_is_primary(fn)) {
 			dev->fwnode = fn->secondary;
+			/* Set fn->secondary = NULL to keep fn as a primary fwnode */
 			if (!(parent && fn == parent->fwnode))
 				fn->secondary = NULL;
 		} else {
