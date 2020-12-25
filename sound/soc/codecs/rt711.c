@@ -895,7 +895,7 @@ static int rt711_probe(struct snd_soc_component *component)
 	return 0;
 }
 
-void rt711_remove(struct snd_soc_component *component)
+static void rt711_remove(struct snd_soc_component *component)
 {
 	struct rt711_priv *rt711 = snd_soc_component_get_drvdata(component);
 
