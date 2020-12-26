@@ -12,6 +12,7 @@
 #include <linux/version.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
+#include <linux/leds.h>
 #include <linux/pm_runtime.h>
 #include <linux/pm.h>
 #include <linux/soundwire/sdw.h>
@@ -268,6 +269,7 @@ static int rt715_sdca_put_volsw(struct snd_kcontrol *kcontrol,
 	unsigned int reg2 = mc->rreg;
 	unsigned int reg = mc->reg;
 	unsigned int max = mc->max;
+	unsigned int val0, val1;
 	int err;
 
 	val = ucontrol->value.integer.value[0];
@@ -286,7 +288,22 @@ static int rt715_sdca_put_volsw(struct snd_kcontrol *kcontrol,
 		if (err < 0)
 			return err;
 	}
-
+#if IS_ENABLED(CONFIG_DELL_PRIVACY)
+	/* Privacy LED Trigger State Changed by muted/unmute switch */
+	if (mc->invert) {
+		val0 = ucontrol->value.integer.value[0];
+		val1 = ucontrol->value.integer.value[1];
+		if (val0 == 1 && val1 == 1) {
+			rt715->micmute_led = LED_OFF;
+			ledtrig_audio_set(LED_AUDIO_MICMUTE,
+					rt715->micmute_led ? LED_ON : LED_OFF);
+		} else if (val0 == 0 && val1 == 0) {
+			rt715->micmute_led = LED_ON;
+			ledtrig_audio_set(LED_AUDIO_MICMUTE,
+					rt715->micmute_led ? LED_ON : LED_OFF);
+		}
+	}
+#endif
 	return 0;
 }
 

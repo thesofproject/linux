@@ -13,6 +13,7 @@
 #include <linux/init.h>
 #include <linux/delay.h>
 #include <linux/i2c.h>
+#include <linux/leds.h>
 #include <linux/pm_runtime.h>
 #include <linux/pm.h>
 #include <linux/soundwire/sdw.h>
@@ -88,13 +89,29 @@ static int rt715_set_amp_gain_put(struct snd_kcontrol *kcontrol,
 		RT715_SET_GAIN_MIX_ADC2_L};
 	unsigned int addr_h, addr_l, val_h, val_ll, val_lr;
 	unsigned int read_ll, read_rl, i, j, loop_cnt;
+	unsigned int val0, val1;
 
 	if (strstr(ucontrol->id.name, "Main Capture Switch") ||
 		strstr(ucontrol->id.name, "Main Capture Volume"))
 		loop_cnt = 4;
 	else
 		loop_cnt = 1;
-
+#if IS_ENABLED(CONFIG_DELL_PRIVACY)
+	/*  Privacy micmute led trigger for  muted/unmute switch */
+	if (mc->invert) {
+		val0 = ucontrol->value.integer.value[0];
+		val1 = ucontrol->value.integer.value[1];
+		if (val0 == 1 && val1 == 1) {
+			rt715->micmute_led = LED_OFF;
+			ledtrig_audio_set(LED_AUDIO_MICMUTE,
+					rt715->micmute_led ? LED_ON : LED_OFF);
+		} else if (val0 == 0 && val1 == 0) {
+			rt715->micmute_led = LED_ON;
+			ledtrig_audio_set(LED_AUDIO_MICMUTE,
+					rt715->micmute_led ? LED_ON : LED_OFF);
+		}
+	}
+#endif
 	for (j = 0; j < loop_cnt; j++) {
 		/* Can't use update bit function, so read the original value first */
 		if (loop_cnt == 1) {
