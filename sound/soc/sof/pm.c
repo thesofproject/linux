@@ -100,6 +100,9 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 	if (sdev->first_boot)
 		return 0;
 
+	/* set DSP power state target */
+	sdev->dsp_power_state_target = SOF_DSP_PM_D0;
+
 	/*
 	 * if the runtime_resume flag is set, call the runtime_resume routine
 	 * or else call the system resume routine
@@ -207,6 +210,9 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 	/* Skip to platform-specific suspend if DSP is entering D0 */
 	if (target_state == SOF_DSP_PM_D0)
 		goto suspend;
+
+	/* set DSP power state target */
+	sdev->dsp_power_state_target = target_state;
 
 	/* release trace */
 	snd_sof_release_trace(sdev);
