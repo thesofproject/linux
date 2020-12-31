@@ -374,6 +374,11 @@ void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev)
 	u32 cmd, type;
 	int err = 0;
 
+	if (sdev->dsp_power_state_target == SOF_DSP_PM_D3) {
+		dev_warn(sdev->dev, "warn: ignore ipc rx when entering D3\n");
+		return;
+	}
+
 	/* read back header */
 	snd_sof_ipc_msg_data(sdev, NULL, &hdr, sizeof(hdr));
 	ipc_log_header(sdev->dev, "ipc rx", hdr.cmd);
