@@ -1012,36 +1012,60 @@ out:
 
 static int soc_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 {
-	int ret = -EINVAL;
+	int ret = -EINVAL, _ret = 0;
+	int rollback = 0;
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_RESUME:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
-		ret = snd_soc_link_trigger(substream, cmd);
+		ret = snd_soc_link_trigger(substream, cmd, 0);
 		if (ret < 0)
-			break;
+			goto start_err;
 
-		ret = snd_soc_pcm_component_trigger(substream, cmd);
+		ret = snd_soc_pcm_component_trigger(substream, cmd, 0);
 		if (ret < 0)
-			break;
+			goto start_err;
 
-		ret = snd_soc_pcm_dai_trigger(substream, cmd);
-		break;
+		ret = snd_soc_pcm_dai_trigger(substream, cmd, 0);
+start_err:
+		if (ret < 0)
+			rollback = 1;
+	}
+
+	if (rollback) {
+		_ret = ret;
+		switch (cmd) {
+		case SNDRV_PCM_TRIGGER_START:
+			cmd = SNDRV_PCM_TRIGGER_STOP;
+			break;
+		case SNDRV_PCM_TRIGGER_RESUME:
+			cmd = SNDRV_PCM_TRIGGER_SUSPEND;
+			break;
+		case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+			cmd = SNDRV_PCM_TRIGGER_PAUSE_PUSH;
+			break;
+		}
+	}
+
+	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_STOP:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
-		ret = snd_soc_pcm_dai_trigger(substream, cmd);
+		ret = snd_soc_pcm_dai_trigger(substream, cmd, rollback);
 		if (ret < 0)
 			break;
 
-		ret = snd_soc_pcm_component_trigger(substream, cmd);
+		ret = snd_soc_pcm_component_trigger(substream, cmd, rollback);
 		if (ret < 0)
 			break;
 
-		ret = snd_soc_link_trigger(substream, cmd);
+		ret = snd_soc_link_trigger(substream, cmd, rollback);
 		break;
 	}
+
+	if (_ret)
+		ret = _ret;
 
 	return ret;
 }
@@ -1860,6 +1884,9 @@ static int dpcm_fe_dai_shutdown(struct snd_pcm_substream *substream)
 	/* now shutdown the frontend */
 	soc_pcm_close(substream);
 
+	/* run the stream stop event */
+	dpcm_dapm_stream_event(fe, stream, SND_SOC_DAPM_STREAM_STOP);
+
 	fe->dpcm[stream].state = SND_SOC_DPCM_STATE_CLOSE;
 	dpcm_set_fe_update_state(fe, stream, SND_SOC_DPCM_UPDATE_NO);
 	return 0;
@@ -2047,21 +2074,6 @@ out:
 	return ret;
 }
 
-static int dpcm_do_trigger(struct snd_soc_dpcm *dpcm,
-		struct snd_pcm_substream *substream, int cmd)
-{
-	int ret;
-
-	dev_dbg(dpcm->be->dev, "ASoC: trigger BE %s cmd %d\n",
-			dpcm->be->dai_link->name, cmd);
-
-	ret = soc_pcm_trigger(substream, cmd);
-	if (ret < 0)
-		dev_err(dpcm->be->dev,"ASoC: trigger BE failed %d\n", ret);
-
-	return ret;
-}
-
 int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 			       int cmd)
 {
@@ -2078,6 +2090,9 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 		if (!snd_soc_dpcm_be_can_update(fe, be, stream))
 			continue;
 
+		dev_dbg(be->dev, "ASoC: trigger BE %s cmd %d\n",
+			be->dai_link->name, cmd);
+
 		switch (cmd) {
 		case SNDRV_PCM_TRIGGER_START:
 			if ((be->dpcm[stream].state != SND_SOC_DPCM_STATE_PREPARE) &&
@@ -2085,7 +2100,7 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 			    (be->dpcm[stream].state != SND_SOC_DPCM_STATE_PAUSED))
 				continue;
 
-			ret = dpcm_do_trigger(dpcm, be_substream, cmd);
+			ret = soc_pcm_trigger(be_substream, cmd);
 			if (ret)
 				return ret;
 
@@ -2095,7 +2110,7 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 			if ((be->dpcm[stream].state != SND_SOC_DPCM_STATE_SUSPEND))
 				continue;
 
-			ret = dpcm_do_trigger(dpcm, be_substream, cmd);
+			ret = soc_pcm_trigger(be_substream, cmd);
 			if (ret)
 				return ret;
 
@@ -2105,7 +2120,7 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 			if ((be->dpcm[stream].state != SND_SOC_DPCM_STATE_PAUSED))
 				continue;
 
-			ret = dpcm_do_trigger(dpcm, be_substream, cmd);
+			ret = soc_pcm_trigger(be_substream, cmd);
 			if (ret)
 				return ret;
 
@@ -2119,7 +2134,7 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 			if (!snd_soc_dpcm_can_be_free_stop(fe, be, stream))
 				continue;
 
-			ret = dpcm_do_trigger(dpcm, be_substream, cmd);
+			ret = soc_pcm_trigger(be_substream, cmd);
 			if (ret)
 				return ret;
 
@@ -2132,7 +2147,7 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 			if (!snd_soc_dpcm_can_be_free_stop(fe, be, stream))
 				continue;
 
-			ret = dpcm_do_trigger(dpcm, be_substream, cmd);
+			ret = soc_pcm_trigger(be_substream, cmd);
 			if (ret)
 				return ret;
 
@@ -2145,7 +2160,7 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 			if (!snd_soc_dpcm_can_be_free_stop(fe, be, stream))
 				continue;
 
-			ret = dpcm_do_trigger(dpcm, be_substream, cmd);
+			ret = soc_pcm_trigger(be_substream, cmd);
 			if (ret)
 				return ret;
 

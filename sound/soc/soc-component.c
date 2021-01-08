@@ -421,8 +421,7 @@ EXPORT_SYMBOL_GPL(snd_soc_component_exit_regmap);
 
 #endif
 
-int snd_soc_component_compr_open(struct snd_compr_stream *cstream,
-				 struct snd_soc_component **last)
+int snd_soc_component_compr_open(struct snd_compr_stream *cstream)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_soc_component *component;
@@ -432,32 +431,32 @@ int snd_soc_component_compr_open(struct snd_compr_stream *cstream,
 		if (component->driver->compress_ops &&
 		    component->driver->compress_ops->open) {
 			ret = component->driver->compress_ops->open(component, cstream);
-			if (ret < 0) {
-				*last = component;
+			if (ret < 0)
 				return soc_component_ret(component, ret);
-			}
 		}
+		soc_component_mark_push(component, cstream, compr_open);
 	}
 
-	*last = NULL;
 	return 0;
 }
 EXPORT_SYMBOL_GPL(snd_soc_component_compr_open);
 
 void snd_soc_component_compr_free(struct snd_compr_stream *cstream,
-				  struct snd_soc_component *last)
+				  int rollback)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_soc_component *component;
 	int i;
 
 	for_each_rtd_components(rtd, i, component) {
-		if (component == last)
-			break;
+		if (rollback && !soc_component_mark_match(component, cstream, compr_open))
+			continue;
 
 		if (component->driver->compress_ops &&
 		    component->driver->compress_ops->free)
 			component->driver->compress_ops->free(component, cstream);
+
+		soc_component_mark_pop(component, cstream, compr_open);
 	}
 }
 EXPORT_SYMBOL_GPL(snd_soc_component_compr_free);
@@ -1076,22 +1075,51 @@ void snd_soc_pcm_component_hw_free(struct snd_pcm_substream *substream,
 	}
 }
 
+static int soc_component_trigger(struct snd_soc_component *component,
+				 struct snd_pcm_substream *substream,
+				 int cmd)
+{
+	int ret = 0;
+
+	if (component->driver->trigger)
+		ret = component->driver->trigger(component, substream, cmd);
+
+	return soc_component_ret(component, ret);
+}
+
 int snd_soc_pcm_component_trigger(struct snd_pcm_substream *substream,
-				  int cmd)
+				  int cmd, int rollback)
 {
 	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
 	struct snd_soc_component *component;
-	int i, ret;
+	int i, r, ret = 0;
 
-	for_each_rtd_components(rtd, i, component) {
-		if (component->driver->trigger) {
-			ret = component->driver->trigger(component, substream, cmd);
+	switch (cmd) {
+	case SNDRV_PCM_TRIGGER_START:
+	case SNDRV_PCM_TRIGGER_RESUME:
+	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+		for_each_rtd_components(rtd, i, component) {
+			ret = soc_component_trigger(component, substream, cmd);
 			if (ret < 0)
-				return soc_component_ret(component, ret);
+				break;
+			soc_component_mark_push(component, substream, trigger);
+		}
+		break;
+	case SNDRV_PCM_TRIGGER_STOP:
+	case SNDRV_PCM_TRIGGER_SUSPEND:
+	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+		for_each_rtd_components(rtd, i, component) {
+			if (rollback && !soc_component_mark_match(component, substream, trigger))
+				continue;
+
+			r = soc_component_trigger(component, substream, cmd);
+			if (r < 0)
+				ret = r; /* use last ret */
+			soc_component_mark_pop(component, substream, trigger);
 		}
 	}
 
-	return 0;
+	return ret;
 }
 
 int snd_soc_pcm_component_pm_runtime_get(struct snd_soc_pcm_runtime *rtd,

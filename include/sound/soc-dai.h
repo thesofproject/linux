@@ -189,14 +189,16 @@ int snd_soc_pcm_dai_probe(struct snd_soc_pcm_runtime *rtd, int order);
 int snd_soc_pcm_dai_remove(struct snd_soc_pcm_runtime *rtd, int order);
 int snd_soc_pcm_dai_new(struct snd_soc_pcm_runtime *rtd);
 int snd_soc_pcm_dai_prepare(struct snd_pcm_substream *substream);
-int snd_soc_pcm_dai_trigger(struct snd_pcm_substream *substream, int cmd);
+int snd_soc_pcm_dai_trigger(struct snd_pcm_substream *substream, int cmd,
+			    int rollback);
 int snd_soc_pcm_dai_bespoke_trigger(struct snd_pcm_substream *substream,
 				    int cmd);
 
 int snd_soc_dai_compr_startup(struct snd_soc_dai *dai,
 			      struct snd_compr_stream *cstream);
 void snd_soc_dai_compr_shutdown(struct snd_soc_dai *dai,
-				struct snd_compr_stream *cstream);
+				struct snd_compr_stream *cstream,
+				int rollback);
 int snd_soc_dai_compr_trigger(struct snd_soc_dai *dai,
 			      struct snd_compr_stream *cstream, int cmd);
 int snd_soc_dai_compr_set_params(struct snd_soc_dai *dai,
@@ -400,6 +402,8 @@ struct snd_soc_dai {
 	/* function mark */
 	struct snd_pcm_substream *mark_startup;
 	struct snd_pcm_substream *mark_hw_params;
+	struct snd_pcm_substream *mark_trigger;
+	struct snd_compr_stream  *mark_compr_startup;
 
 	/* bit field */
 	unsigned int probed:1;

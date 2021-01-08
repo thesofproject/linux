@@ -141,7 +141,7 @@ void snd_soc_link_hw_free(struct snd_pcm_substream *substream, int rollback)
 	soc_link_mark_pop(rtd, substream, hw_params);
 }
 
-int snd_soc_link_trigger(struct snd_pcm_substream *substream, int cmd)
+static int soc_link_trigger(struct snd_pcm_substream *substream, int cmd)
 {
 	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
 	int ret = 0;
@@ -153,6 +153,34 @@ int snd_soc_link_trigger(struct snd_pcm_substream *substream, int cmd)
 	return soc_link_ret(rtd, ret);
 }
 
+int snd_soc_link_trigger(struct snd_pcm_substream *substream, int cmd,
+			 int rollback)
+{
+	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
+	int ret = 0;
+
+	switch (cmd) {
+	case SNDRV_PCM_TRIGGER_START:
+	case SNDRV_PCM_TRIGGER_RESUME:
+	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+		ret = soc_link_trigger(substream, cmd);
+		if (ret < 0)
+			break;
+		soc_link_mark_push(rtd, substream, trigger);
+		break;
+	case SNDRV_PCM_TRIGGER_STOP:
+	case SNDRV_PCM_TRIGGER_SUSPEND:
+	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+		if (rollback && !soc_link_mark_match(rtd, substream, trigger))
+			break;
+
+		ret = soc_link_trigger(substream, cmd);
+		soc_link_mark_pop(rtd, substream, startup);
+	}
+
+	return ret;
+}
+
 int snd_soc_link_compr_startup(struct snd_compr_stream *cstream)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
@@ -162,17 +190,26 @@ int snd_soc_link_compr_startup(struct snd_compr_stream *cstream)
 	    rtd->dai_link->compr_ops->startup)
 		ret = rtd->dai_link->compr_ops->startup(cstream);
 
+	if (ret == 0)
+		soc_link_mark_push(rtd, cstream, compr_startup);
+
 	return soc_link_ret(rtd, ret);
 }
 EXPORT_SYMBOL_GPL(snd_soc_link_compr_startup);
 
-void snd_soc_link_compr_shutdown(struct snd_compr_stream *cstream)
+void snd_soc_link_compr_shutdown(struct snd_compr_stream *cstream,
+				 int rollback)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
+
+	if (rollback && !soc_link_mark_match(rtd, cstream, compr_startup))
+		return;
 
 	if (rtd->dai_link->compr_ops &&
 	    rtd->dai_link->compr_ops->shutdown)
 		rtd->dai_link->compr_ops->shutdown(cstream);
+
+	soc_link_mark_pop(rtd, cstream, compr_startup);
 }
 EXPORT_SYMBOL_GPL(snd_soc_link_compr_shutdown);
 
