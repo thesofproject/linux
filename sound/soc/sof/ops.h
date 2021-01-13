@@ -316,6 +316,12 @@ static inline int snd_sof_dsp_send_msg(struct snd_sof_dev *sdev,
 	return sof_ops(sdev)->send_msg(sdev, msg);
 }
 
+static inline void snd_sof_dsp_receive_msg(struct snd_sof_dev *sdev, u32 msg_cmd)
+{
+	if (sof_ops(sdev)->receive_msg)
+		sof_ops(sdev)->receive_msg(sdev, msg_cmd);
+}
+
 /* host DMA trace */
 static inline int snd_sof_dma_trace_init(struct snd_sof_dev *sdev,
 					 u32 *stream_tag)

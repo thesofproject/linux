@@ -15,6 +15,8 @@
  * Hardware interface for generic Intel audio DSP HDA IP
  */
 
+#include <sound/sof/stream.h>
+#include <sound/sof/control.h>
 #include "../ops.h"
 #include "hda.h"
 
@@ -271,6 +273,27 @@ void hda_ipc_msg_data(struct snd_sof_dev *sdev,
 		if (hstream)
 			sof_mailbox_read(sdev, hda_stream->stream.posn_offset,
 					 p, sz);
+	}
+}
+
+void hda_ipc_receive_msg(struct snd_sof_dev *sdev, u32 msg_cmd)
+{
+	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+	struct sof_ipc_comp_event event;
+	u32 cmd;
+
+	cmd = msg_cmd & SOF_GLB_TYPE_MASK;
+
+	switch (cmd) {
+	case SOF_IPC_GLB_COMP_MSG:
+		snd_sof_ipc_msg_data(sdev, NULL, &event, sizeof(event));
+
+		/* reschedule D0i3 work if keyword detected */
+		if (event.event_type == SOF_CTRL_EVENT_KD)
+			mod_delayed_work(system_wq, &hdev->d0i3_work,
+					 msecs_to_jiffies(SOF_HDA_D0I3_WORK_DELAY_MS));
+	default:
+		break;
 	}
 }
 

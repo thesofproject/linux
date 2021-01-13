@@ -399,10 +399,11 @@ void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev)
 			wake_up(&sdev->boot_wait);
 		}
 		break;
+	case SOF_IPC_GLB_COMP_MSG:
+		snd_sof_dsp_receive_msg(sdev, hdr.cmd);
 	case SOF_IPC_GLB_COMPOUND:
 	case SOF_IPC_GLB_TPLG_MSG:
 	case SOF_IPC_GLB_PM_MSG:
-	case SOF_IPC_GLB_COMP_MSG:
 		break;
 	case SOF_IPC_GLB_STREAM_MSG:
 		/* need to pass msg id into the function */
