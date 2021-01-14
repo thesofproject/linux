@@ -12,8 +12,6 @@
 #include <linux/soundwire/sdw_registers.h>
 
 static const struct reg_default rt711_sdca_reg_defaults[] = {
-	{ 0x005c, 0x00 },
-	{ 0x005d, 0x00 },
 	{ 0x201a, 0x00 },
 	{ 0x201e, 0x00 },
 	{ 0x201f, 0x00 },

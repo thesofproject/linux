@@ -18,8 +18,6 @@
 static bool rt711_sdca_readable_register(struct device *dev, unsigned int reg)
 {
 	switch (reg) {
-	case SDW_DP0_INT:
-	case SDW_SCP_SDCA_INT1 ... SDW_SCP_SDCA_INTMASK4:
 	case 0x201a ... 0x2027:
 	case 0x2029 ... 0x202a:
 	case 0x202d ... 0x2034:
@@ -46,8 +44,6 @@ static bool rt711_sdca_readable_register(struct device *dev, unsigned int reg)
 static bool rt711_sdca_volatile_register(struct device *dev, unsigned int reg)
 {
 	switch (reg) {
-	case SDW_DP0_INT:
-	case SDW_SCP_SDCA_INT1 ... SDW_SCP_SDCA_INT4:
 	case 0x201b:
 	case 0x201c:
 	case 0x201d:
@@ -235,10 +231,9 @@ static int rt711_sdca_interrupt_callback(struct sdw_slave *slave,
 					struct sdw_slave_intr_status *status)
 {
 	struct rt711_sdca_priv *rt711 = dev_get_drvdata(&slave->dev);
-	int ret, stat;
+	int ret, stat, buf;
 	int count = 0, retry = 3;
 	unsigned int sdca_cascade, scp_sdca_stat1, scp_sdca_stat2 = 0;
-	unsigned int buf;
 
 	dev_dbg(&slave->dev,
 		"%s control_port_stat=%x, sdca_cascade=%x", __func__,
@@ -251,47 +246,51 @@ static int rt711_sdca_interrupt_callback(struct sdw_slave *slave,
 			scp_sdca_stat2 = rt711->scp_sdca_stat2;
 	}
 
-	ret = regmap_read(rt711->regmap, SDW_SCP_SDCA_INT1, &rt711->scp_sdca_stat1);
-	if (ret < 0)
+	buf = sdw_read_no_pm(rt711->slave, SDW_SCP_SDCA_INT1);
+	if (buf < 0)
 		goto io_error;
-	ret = regmap_read(rt711->regmap, SDW_SCP_SDCA_INT2, &rt711->scp_sdca_stat2);
-	if (ret < 0)
+	rt711->scp_sdca_stat1 = buf;
+	buf = sdw_read_no_pm(rt711->slave, SDW_SCP_SDCA_INT2);
+	if (buf < 0)
 		goto io_error;
+	rt711->scp_sdca_stat2 = buf;
 	if (scp_sdca_stat2)
 		rt711->scp_sdca_stat2 |= scp_sdca_stat2;
 
 	do {
 		/* clear flag */
-		ret = regmap_read(rt711->regmap, SDW_SCP_SDCA_INT1, &buf);
-		if (ret < 0)
+		buf = sdw_read_no_pm(rt711->slave, SDW_SCP_SDCA_INT1);
+		if (buf < 0)
 			goto io_error;
 		if (buf & SDW_SCP_SDCA_INTMASK_SDCA_0) {
-			ret = regmap_write(rt711->regmap, SDW_SCP_SDCA_INT1, SDW_SCP_SDCA_INTMASK_SDCA_0);
+			ret = sdw_write_no_pm(rt711->slave, SDW_SCP_SDCA_INT1,
+						SDW_SCP_SDCA_INTMASK_SDCA_0);
 			if (ret < 0)
 				goto io_error;
 		}
-		ret = regmap_read(rt711->regmap, SDW_SCP_SDCA_INT2, &buf);
-		if (ret < 0)
+		buf = sdw_read_no_pm(rt711->slave, SDW_SCP_SDCA_INT2);
+		if (buf < 0)
 			goto io_error;
 		if (buf & SDW_SCP_SDCA_INTMASK_SDCA_8) {
-			ret = regmap_write(rt711->regmap, SDW_SCP_SDCA_INT2, SDW_SCP_SDCA_INTMASK_SDCA_8);
+			ret = sdw_write_no_pm(rt711->slave, SDW_SCP_SDCA_INT2,
+						SDW_SCP_SDCA_INTMASK_SDCA_8);
 			if (ret < 0)
 				goto io_error;
 		}
 
 		/* check if flag clear or not */
-		ret = regmap_read(rt711->regmap, SDW_DP0_INT, &buf);
-		if (ret < 0)
+		buf = sdw_read_no_pm(rt711->slave, SDW_DP0_INT);
+		if (buf < 0)
 			goto io_error;
 		sdca_cascade = buf & SDW_DP0_SDCA_CASCADE;
 
-		ret = regmap_read(rt711->regmap, SDW_SCP_SDCA_INT1, &buf);
-		if (ret < 0)
+		buf = sdw_read_no_pm(rt711->slave, SDW_SCP_SDCA_INT1);
+		if (buf < 0)
 			goto io_error;
 		scp_sdca_stat1 = buf & SDW_SCP_SDCA_INTMASK_SDCA_0;
 
-		ret = regmap_read(rt711->regmap, SDW_SCP_SDCA_INT2, &buf);
-		if (ret < 0)
+		buf = sdw_read_no_pm(rt711->slave, SDW_SCP_SDCA_INT2);
+		if (buf < 0)
 			goto io_error;
 		scp_sdca_stat2 = buf & SDW_SCP_SDCA_INTMASK_SDCA_8;
 
