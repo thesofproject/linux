@@ -453,6 +453,9 @@ struct sof_intel_hda_dev {
 
 	/* FW clock config, 0:HPRO, 1:LPRO */
 	bool clk_config_lpro;
+
+	/* iDisp link powered off in S0 */
+	bool idisp_link_off_in_S0;
 };
 
 static inline struct hdac_bus *sof_to_bus(struct snd_sof_dev *s)
