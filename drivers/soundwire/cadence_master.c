@@ -1410,6 +1410,12 @@ int sdw_cdns_clock_stop(struct sdw_cdns *cdns, bool block_wake)
 	 */
 	cdns_enable_slave_interrupts(cdns, false);
 
+	ret = cdns_set_wait(cdns, CDNS_MCP_CONTROL, CDNS_MCP_CONTROL_HW_RST, 0);
+	if (ret < 0) {
+		dev_err(cdns->dev, "cdns HW reset not finished yet %d\n", ret);
+		return ret;
+	}
+
 	/*
 	 * For specific platforms, it is required to be able to put
 	 * master into a state in which it ignores wake-up trials
