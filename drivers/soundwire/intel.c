@@ -625,6 +625,8 @@ static int intel_shim_sync_go(struct sdw_intel *sdw)
 
 	mutex_unlock(sdw->link_res->shim_lock);
 
+	ret = sdw_cdns_check_hw_rst(&sdw->cdns);
+
 	return ret;
 }
 

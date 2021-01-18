@@ -940,6 +940,31 @@ static void cdns_update_slave_status_work(struct work_struct *work)
  * init routines
  */
 
+int sdw_cdns_check_hw_rst(struct sdw_cdns *cdns)
+{
+	int i;
+	int ret;
+
+	ret = cdns_set_wait(cdns, CDNS_MCP_CONFIG_UPDATE, CDNS_MCP_CONFIG_UPDATE_BIT, 0);
+	if (ret < 0) {
+		dev_err(cdns->dev, "%s wait for config update timed out\n", __func__);
+		return ret;
+	}
+
+	for (i = 0; i < 10; i++) {
+		ret = cdns_set_wait(cdns, CDNS_MCP_CONTROL, CDNS_MCP_CONTROL_HW_RST, 0);
+		if (!ret)
+			return 0;
+		dev_warn(cdns->dev, "%s HW reset not ready yet, iteration %d\n", __func__, i);
+		usleep_range(100, 110);
+	}
+	if (ret < 0)
+		dev_err(cdns->dev, "%s wait for HW reset timed out\n", __func__);
+
+	return ret;
+}
+EXPORT_SYMBOL(sdw_cdns_check_hw_rst);
+
 /**
  * sdw_cdns_exit_reset() - Program reset parameters and start bus operations
  * @cdns: Cadence instance
