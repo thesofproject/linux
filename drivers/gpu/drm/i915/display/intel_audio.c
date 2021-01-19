@@ -1266,6 +1266,15 @@ static const struct component_ops i915_audio_component_bind_ops = {
 	.unbind	= i915_audio_component_unbind,
 };
 
+#define AUD_FREQ_TMODE_SHIFT	14
+#define AUD_FREQ_4T		0
+#define AUD_FREQ_8T		(2 << AUD_FREQ_TMODE_SHIFT)
+#define AUD_FREQ_PULLCLKS(x)	(((x) & 0x3) << 11)
+#define AUD_FREQ_BCLK_96M	BIT(4)
+
+#define AUD_FREQ_DEFAULTS       (AUD_FREQ_BCLK_96M)
+#define AUD_FREQ_TGL_BROKEN     (AUD_FREQ_8T | AUD_FREQ_PULLCLKS(2) | AUD_FREQ_BCLK_96M)
+
 /**
  * i915_audio_component_init - initialize and register the audio component
  * @dev_priv: i915 device instance
@@ -1284,6 +1293,7 @@ static const struct component_ops i915_audio_component_bind_ops = {
  */
 static void i915_audio_component_init(struct drm_i915_private *dev_priv)
 {
+	u32 aud_freq = AUD_FREQ_DEFAULTS, aud_freq_init = 0;
 	int ret;
 
 	ret = component_add_typed(dev_priv->drm.dev,
@@ -1296,13 +1306,24 @@ static void i915_audio_component_init(struct drm_i915_private *dev_priv)
 		return;
 	}
 
-	if (INTEL_GEN(dev_priv) >= 9) {
-		dev_priv->audio_freq_cntrl = intel_de_read(dev_priv,
-							   AUD_FREQ_CNTRL);
-		drm_dbg_kms(&dev_priv->drm,
-			    "init value of AUD_FREQ_CNTRL of 0x%x\n",
-			    dev_priv->audio_freq_cntrl);
-	}
+	if (INTEL_GEN(dev_priv) >= 9)
+		aud_freq_init = intel_de_read(dev_priv, AUD_FREQ_CNTRL);
+
+	if (IS_DG1_REVID(dev_priv, DG1_REVID_A0, DG1_REVID_A0))
+		aud_freq |= AUD_FREQ_4T | AUD_FREQ_PULLCLKS(0);
+	else if (IS_TGL_DISP_REVID(dev_priv, TGL_REVID_A0, TGL_REVID_A0))
+		aud_freq |= AUD_FREQ_4T | AUD_FREQ_PULLCLKS(1);
+	else if (IS_TIGERLAKE(dev_priv) && aud_freq_init != AUD_FREQ_TGL_BROKEN)
+		/* do not override unless register has known bad value */
+		aud_freq = aud_freq_init;
+	else if (INTEL_GEN(dev_priv) >= 12)
+		aud_freq |= AUD_FREQ_8T | AUD_FREQ_PULLCLKS(0);
+	else
+		aud_freq = aud_freq_init;
+
+	drm_dbg_kms(&dev_priv->drm, "use AUD_FREQ_CNTRL of 0x%x (init value 0x%x)\n",
+		    aud_freq, aud_freq_init);
+	dev_priv->audio_freq_cntrl = aud_freq;
 
 	dev_priv->audio_component_registered = true;
 }
