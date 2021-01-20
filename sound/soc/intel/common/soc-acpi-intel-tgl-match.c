@@ -6,6 +6,7 @@
  *
  */
 
+#include <linux/dmi.h>
 #include <sound/soc-acpi.h>
 #include <sound/soc-acpi-intel-match.h>
 
@@ -44,6 +45,16 @@ static const struct snd_soc_acpi_adr_device rt711_0_adr[] = {
 	}
 };
 
+static const struct snd_soc_acpi_adr_device workaround_rt711_0_adr[] = {
+	{
+		.adr = 0x000010025D070100,
+		.adr_override = 0x000020025D071100, /* same as rt711_0_adr */
+		.num_endpoints = 1,
+		.endpoints = &single_endpoint,
+		.name_prefix = "rt711"
+	}
+};
+
 static const struct snd_soc_acpi_adr_device rt711_1_adr[] = {
 	{
 		.adr = 0x000120025D071100,
@@ -71,6 +82,16 @@ static const struct snd_soc_acpi_adr_device rt1308_1_dual_adr[] = {
 static const struct snd_soc_acpi_adr_device rt1308_1_single_adr[] = {
 	{
 		.adr = 0x000120025D130800,
+		.num_endpoints = 1,
+		.endpoints = &single_endpoint,
+		.name_prefix = "rt1308-1"
+	}
+};
+
+static const struct snd_soc_acpi_adr_device workaround_rt1308_1_single_adr[] = {
+	{
+		.adr = 0x000110025d070100,
+		.adr_override = 0x000120025D130800, /* same as rt1308_1_single_adr */
 		.num_endpoints = 1,
 		.endpoints = &single_endpoint,
 		.name_prefix = "rt1308-1"
@@ -281,6 +302,20 @@ static const struct snd_soc_acpi_link_adr tgl_sdw_rt711_link1_rt1308_link2_rt715
 	{}
 };
 
+static const struct snd_soc_acpi_link_adr workaround_tgl_hp[] = {
+	{
+		.mask = BIT(0),
+		.num_adr = ARRAY_SIZE(workaround_rt711_0_adr),
+		.adr_d = workaround_rt711_0_adr,
+	},
+	{
+		.mask = BIT(1),
+		.num_adr = ARRAY_SIZE(workaround_rt1308_1_single_adr),
+		.adr_d = workaround_rt1308_1_single_adr,
+	},
+	{}
+};
+
 static const struct snd_soc_acpi_link_adr tgl_3_in_1_sdca[] = {
 	{
 		.mask = BIT(0),
@@ -352,6 +387,29 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_tgl_machines[] = {
 };
 EXPORT_SYMBOL_GPL(snd_soc_acpi_intel_tgl_machines);
 
+/* DMI quirks */
+static const struct dmi_system_id tgl_quirk_table[] = {
+	{
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "HP"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "HP Spectre x360 Convertible 13-aw2xxx"),
+		},
+	},
+	{}
+};
+
+static struct snd_soc_acpi_mach *tgl_quirk(void *arg)
+{
+	struct snd_soc_acpi_mach *mach = arg;
+	const struct dmi_system_id *dmi_id;
+
+	dmi_id = dmi_first_match(tgl_quirk_table);
+	if (!dmi_id)
+		return NULL;
+
+	return mach;
+}
+
 /* this table is used when there is no I2S codec present */
 struct snd_soc_acpi_mach snd_soc_acpi_intel_tgl_sdw_machines[] = {
 	{
@@ -400,6 +458,14 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_tgl_sdw_machines[] = {
 		.links = tgl_chromebook_base,
 		.drv_name = "sof_sdw",
 		.sof_tplg_filename = "sof-tgl-rt5682.tplg",
+	},
+	/* workaround, this shall remain last to avoid matching on the wrong platforms */
+	{
+		.link_mask = 0x3, /* rt711 on link 0 and rt1308 on link 1 */
+		.links = workaround_tgl_hp,
+		.machine_quirk = tgl_quirk,
+		.drv_name = "sof_sdw",
+		.sof_tplg_filename = "sof-tgl-rt711-rt1308.tplg",
 	},
 	{},
 };
