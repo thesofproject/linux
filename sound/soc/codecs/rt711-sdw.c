@@ -8,6 +8,7 @@
 
 #include <linux/delay.h>
 #include <linux/device.h>
+#include <linux/dmi.h>
 #include <linux/mod_devicetable.h>
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_type.h>
@@ -438,10 +439,42 @@ static struct sdw_slave_ops rt711_slave_ops = {
 	.bus_config = rt711_bus_config,
 };
 
+#define RT701_WORKAROUND_LINK0 0
+
+/* DMI quirks */
+static const struct dmi_system_id rt701_quirk_table[] = {
+	{
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "HP"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "HP Spectre x360 Convertible 13-aw2xxx"),
+		},
+		.driver_data = (void *)(RT701_WORKAROUND_LINK0),
+
+	},
+	{}
+};
+
 static int rt711_sdw_probe(struct sdw_slave *slave,
 				const struct sdw_device_id *id)
 {
 	struct regmap *sdw_regmap, *regmap;
+	const struct dmi_system_id *dmi_id;
+	unsigned long link_id;
+
+	/* only allow BIOS work-around in specific configurations */
+	if (id->part_id == 0x701) {
+		dmi_id = dmi_first_match(rt701_quirk_table);
+		if (!dmi_id) {
+			dev_dbg(&slave->dev, "%s: probe workaround requires DMI quirk\n", __func__);
+			return -ENODEV;
+		}
+		link_id = (unsigned long)dmi_id->driver_data;
+		if (link_id != slave->bus->link_id) {
+			dev_dbg(&slave->dev, "%s: probe workaround on link %d not supported\n",
+				__func__, slave->bus->link_id);
+			return -ENODEV;
+		}
+	}
 
 	/* Regmap Initialization */
 	sdw_regmap = devm_regmap_init_sdw(slave, &rt711_sdw_regmap);
@@ -453,6 +486,7 @@ static int rt711_sdw_probe(struct sdw_slave *slave,
 	if (IS_ERR(regmap))
 		return PTR_ERR(regmap);
 
+	slave->id.part_id = 0x711;
 	rt711_init(&slave->dev, sdw_regmap, regmap, slave);
 
 	return 0;
@@ -473,6 +507,8 @@ static int rt711_sdw_remove(struct sdw_slave *slave)
 
 static const struct sdw_device_id rt711_id[] = {
 	SDW_SLAVE_ENTRY_EXT(0x025d, 0x711, 0x2, 0, 0),
+	/* fake part_id to work-around incorrect _ADR in DSDT */
+	SDW_SLAVE_ENTRY_EXT(0x025d, 0x701, 0x1, 0, 0),
 	{},
 };
 MODULE_DEVICE_TABLE(sdw, rt711_id);
