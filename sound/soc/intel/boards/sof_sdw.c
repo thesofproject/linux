@@ -424,7 +424,11 @@ static int get_sdw_dailink_info(const struct snd_soc_acpi_link_adr *links,
 		int stream;
 		u64 adr;
 
-		adr = link->adr_d->adr;
+		if (link->adr_d->adr_override)
+			adr = link->adr_d->adr_override;
+		else
+			adr = link->adr_d->adr;
+
 		codec_index = find_codec_info_part(adr);
 		if (codec_index < 0)
 			return codec_index;
@@ -562,6 +566,15 @@ static int create_codec_dai_name(struct device *dev,
 		if (!codec[comp_index].name)
 			return -ENOMEM;
 
+		/*
+		 * special case: we override the _ADR only here since
+		 * the codec component name above needs to use a name
+		 * made after the firmware _ADR. All other case
+		 * override the _ADR directly.
+		 */
+		if (link->adr_d[i].adr_override)
+			adr = link->adr_d[i].adr_override;
+
 		codec_index = find_codec_info_part(adr);
 		if (codec_index < 0)
 			return codec_index;
@@ -592,8 +605,14 @@ static int set_codec_init_func(const struct snd_soc_acpi_link_adr *link,
 		 */
 		for (i = 0; i < link->num_adr; i++) {
 			int codec_index;
+			u64 adr;
 
-			codec_index = find_codec_info_part(link->adr_d[i].adr);
+			if (link->adr_d[i].adr_override)
+				adr = link->adr_d[i].adr_override;
+			else
+				adr = link->adr_d[i].adr;
+
+			codec_index = find_codec_info_part(adr);
 
 			if (codec_index < 0)
 				return codec_index;
@@ -707,6 +726,7 @@ static int create_sdw_dailink(struct device *dev, int *be_index,
 	int codec_num;
 	int stream;
 	int ret;
+	u64 adr;
 	int k;
 
 	ret = get_slave_info(link, dev, cpu_dai_id, &cpu_dai_num, &codec_num,
@@ -743,7 +763,12 @@ static int create_sdw_dailink(struct device *dev, int *be_index,
 	}
 
 	/* find codec info to create BE DAI */
-	codec_index = find_codec_info_part(link->adr_d[0].adr);
+	if (link->adr_d[0].adr_override)
+		adr = link->adr_d[0].adr_override;
+	else
+		adr = link->adr_d[0].adr;
+
+	codec_index = find_codec_info_part(adr);
 	if (codec_index < 0)
 		return codec_index;
 
