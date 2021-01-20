@@ -91,12 +91,14 @@ struct snd_soc_acpi_endpoint {
 /**
  * snd_soc_acpi_adr_device - descriptor for _ADR-enumerated device
  * @adr: 64 bit ACPI _ADR value
+ * @adr_override: used when @adr is not correct in platform firmware
  * @num_endpoints: number of endpoints for this device
  * @endpoints: array of endpoints
  * @name_prefix: string used for codec controls
  */
 struct snd_soc_acpi_adr_device {
 	const u64 adr;
+	const u64 adr_override;
 	const u8 num_endpoints;
 	const struct snd_soc_acpi_endpoint *endpoints;
 	const char *name_prefix;
