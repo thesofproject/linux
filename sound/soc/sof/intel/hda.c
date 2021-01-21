@@ -1125,8 +1125,18 @@ static int hda_sdw_machine_select(struct snd_sof_dev *sdev)
 					break;
 			}
 			/* Found if all Slaves are checked */
-			if (i == hdev->info.count || !link->num_adr)
+			if (i == hdev->info.count || !link->num_adr) {
+				/* last paranoia check on machine_quirk */
+				if (mach->machine_quirk) {
+					struct snd_soc_acpi_mach *mach_alt;
+
+					mach_alt = mach->machine_quirk(mach);
+					if (!mach_alt)
+						continue; /* not full match, ignore */
+					mach = mach_alt;
+				}
 				break;
+			}
 		}
 		if (mach && mach->link_mask) {
 			int dmic_num = 0;
