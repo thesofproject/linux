@@ -375,6 +375,18 @@ struct snd_sof_ipc_msg {
 	bool ipc_complete;
 };
 
+/* SOF generic IPC data */
+struct snd_sof_ipc {
+	struct snd_sof_dev *sdev;
+
+	/* protects messages and the disable flag */
+	struct mutex tx_mutex;
+	/* disables further sending of ipc's */
+	bool disable_ipc_tx;
+
+	struct snd_sof_ipc_msg msg;
+};
+
 enum snd_sof_fw_state {
 	SOF_FW_BOOT_NOT_STARTED = 0,
 	SOF_FW_BOOT_PREPARE,
