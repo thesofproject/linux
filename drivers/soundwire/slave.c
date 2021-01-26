@@ -2,6 +2,7 @@
 // Copyright(c) 2015-17 Intel Corporation.
 
 #include <linux/acpi.h>
+#include <linux/dmi.h>
 #include <linux/of.h>
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_type.h>
@@ -91,10 +92,44 @@ int sdw_slave_add(struct sdw_bus *bus,
 
 #if IS_ENABLED(CONFIG_ACPI)
 
+struct adr_remap {
+	u64 adr;
+	u64 remapped_adr;
+};
+
+/*
+ * HP Spectre 360 Convertible devices do not expose the correct _ADR
+ * in the DSDT.
+ * Remap the bad _ADR values to the ones reported by hardware
+ */
+static const struct adr_remap hp_spectre_360[] = {
+	{
+		0x000010025D070100,
+		0x000020025D071100
+	},
+	{
+		0x000110025d070100,
+		0x000120025D130800
+	},
+	{}
+};
+
+static const struct dmi_system_id adr_remap_quirk_table[] = {
+	{
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "HP"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "HP Spectre x360 Convertible"),
+		},
+		.driver_data = (void *)hp_spectre_360,
+	},
+	{}
+};
+
 static bool find_slave(struct sdw_bus *bus,
 		       struct acpi_device *adev,
 		       struct sdw_slave_id *id)
 {
+	const struct dmi_system_id *dmi_id;
 	unsigned long long addr;
 	unsigned int link_id;
 	acpi_status status;
@@ -106,6 +141,21 @@ static bool find_slave(struct sdw_bus *bus,
 		dev_err(bus->dev, "_ADR resolution failed: %x\n",
 			status);
 		return false;
+	}
+
+	/* check if any address remap quirk applies */
+	dmi_id = dmi_first_match(adr_remap_quirk_table);
+	if (dmi_id) {
+		struct adr_remap *map = dmi_id->driver_data;
+
+		for (map = dmi_id->driver_data; map->adr; map++) {
+			if (map->adr == addr) {
+				dev_dbg(bus->dev, "remapped _ADR 0x%llx as 0x%llx\n",
+					addr, map->remapped_adr);
+				addr = map->remapped_adr;
+				break;
+			}
+		}
 	}
 
 	/* Extract link id from ADR, Bit 51 to 48 (included) */
