@@ -199,34 +199,34 @@ static unsigned int rt711_sdca_button_detect(struct rt711_sdca_priv *rt711)
 	if (buf[0] == 0x11) {
 		switch (buf[1] & 0xf0) {
 		case 0x10:
-			btn_type |= SND_JACK_BTN_0;
-			break;
-		case 0x20:
-			btn_type |= SND_JACK_BTN_1;
-			break;
-		case 0x40:
 			btn_type |= SND_JACK_BTN_2;
 			break;
-		case 0x80:
+		case 0x20:
 			btn_type |= SND_JACK_BTN_3;
+			break;
+		case 0x40:
+			btn_type |= SND_JACK_BTN_0;
+			break;
+		case 0x80:
+			btn_type |= SND_JACK_BTN_1;
 			break;
 		}
 		switch (buf[2]) {
 		case 0x01:
 		case 0x10:
-			btn_type |= SND_JACK_BTN_0;
+			btn_type |= SND_JACK_BTN_2;
 			break;
 		case 0x02:
 		case 0x20:
-			btn_type |= SND_JACK_BTN_1;
+			btn_type |= SND_JACK_BTN_3;
 			break;
 		case 0x04:
 		case 0x40:
-			btn_type |= SND_JACK_BTN_2;
+			btn_type |= SND_JACK_BTN_0;
 			break;
 		case 0x08:
 		case 0x80:
-			btn_type |= SND_JACK_BTN_3;
+			btn_type |= SND_JACK_BTN_1;
 			break;
 		}
 	}
@@ -370,34 +370,34 @@ static void rt711_sdca_btn_check_handler(struct work_struct *work)
 		if (buf[0] == 0x11) {
 			switch (buf[1] & 0xf0) {
 			case 0x10:
-				btn_type |= SND_JACK_BTN_0;
-				break;
-			case 0x20:
-				btn_type |= SND_JACK_BTN_1;
-				break;
-			case 0x40:
 				btn_type |= SND_JACK_BTN_2;
 				break;
-			case 0x80:
+			case 0x20:
 				btn_type |= SND_JACK_BTN_3;
+				break;
+			case 0x40:
+				btn_type |= SND_JACK_BTN_0;
+				break;
+			case 0x80:
+				btn_type |= SND_JACK_BTN_1;
 				break;
 			}
 			switch (buf[2]) {
 			case 0x01:
 			case 0x10:
-				btn_type |= SND_JACK_BTN_0;
+				btn_type |= SND_JACK_BTN_2;
 				break;
 			case 0x02:
 			case 0x20:
-				btn_type |= SND_JACK_BTN_1;
+				btn_type |= SND_JACK_BTN_3;
 				break;
 			case 0x04:
 			case 0x40:
-				btn_type |= SND_JACK_BTN_2;
+				btn_type |= SND_JACK_BTN_0;
 				break;
 			case 0x08:
 			case 0x80:
-				btn_type |= SND_JACK_BTN_3;
+				btn_type |= SND_JACK_BTN_1;
 				break;
 			}
 		}
