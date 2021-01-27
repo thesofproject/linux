@@ -1021,7 +1021,8 @@ static bool link_slaves_found(struct snd_sof_dev *sdev,
 	struct sdw_intel_slave_id *ids = sdw->ids;
 	int num_slaves = sdw->num_slaves;
 	unsigned int part_id, link_id, unique_id, mfg_id;
-	int i, j;
+	int slaves_count;
+	int i, j, k;
 
 	for (i = 0; i < link->num_adr; i++) {
 		u64 adr = link->adr_d[i].adr;
@@ -1029,6 +1030,23 @@ static bool link_slaves_found(struct snd_sof_dev *sdev,
 		mfg_id = SDW_MFG_ID(adr);
 		part_id = SDW_PART_ID(adr);
 		link_id = SDW_DISCO_LINK_ID(adr);
+		slaves_count = 0;
+		for (j = 0; j < num_slaves; j++)
+			//FIXME
+			//rt700 and rt701 are common seen on BIOS, but they only exist on Intel
+			//RVP but not on any real product. Don't count here can make real product
+			//happy, but it will break Intel RVP support.
+			if (ids[j].link_id == link_id &&
+			    ids[j].id.part_id != 0x700 &&
+			    ids[j].id.part_id != 0x701)
+				slaves_count++;
+
+		if (slaves_count != link->num_adr) {
+			dev_dbg(bus->dev,
+				"wrong machine descriptor: Slave number %d doesn't match on link %d\n",
+				slaves_count, link_id);
+			return false;
+		}
 		for (j = 0; j < num_slaves; j++) {
 			if (ids[j].link_id != link_id ||
 			    ids[j].id.part_id != part_id ||
@@ -1041,11 +1059,29 @@ static bool link_slaves_found(struct snd_sof_dev *sdev,
 			 */
 			unique_id = SDW_UNIQUE_ID(adr);
 			if (link->num_adr == 1 ||
-			    ids[j].id.unique_id == SDW_IGNORED_UNIQUE_ID ||
 			    ids[j].id.unique_id == unique_id) {
 				dev_dbg(bus->dev,
 					"found %x at link %d\n",
 					part_id, link_id);
+				break;
+			} else if (ids[j].id.unique_id == SDW_IGNORED_UNIQUE_ID) {
+				unsigned int part_id2;
+
+				/* make sure there is no the same codec on the link */
+				for (k = 0; k < link->num_adr; k++) {
+					if (k == i)
+						continue;
+					part_id2 = SDW_PART_ID(link->adr_d[k].adr);
+					if (part_id2 == part_id) {
+						dev_dbg(bus->dev,
+							"wrong machine descriptor: link %d has duplicate part_id %d already tagged as unique\n",
+							link_id, part_id);
+						return false;
+					}
+				}
+				dev_dbg(bus->dev,
+					"found %x at link %d k %d link->num_adr %d\n",
+					part_id, link_id, k, link->num_adr);
 				break;
 			}
 		}
