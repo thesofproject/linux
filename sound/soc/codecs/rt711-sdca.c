@@ -477,10 +477,6 @@ static void rt711_sdca_jack_init(struct rt711_sdca_priv *rt711)
 		rt711_sdca_index_update_bits(rt711, RT711_VENDOR_HDA_CTL,
 			RT711_GE_MODE_RELATED_CTL, 0x0c00, 0x0000);
 
-		/* set SCP_SDCA_IntMask1[0]=0 */
-		sdw_write_no_pm(rt711->slave, SDW_SCP_SDCA_INTMASK1, 0);
-		/* set SCP_SDCA_IntMask2[0]=0 */
-		sdw_write_no_pm(rt711->slave, SDW_SCP_SDCA_INTMASK2, 0);
 		dev_dbg(&rt711->slave->dev, "in %s disable\n", __func__);
 	}
 
