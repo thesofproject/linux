@@ -1,0 +1,187 @@
+name: build test
+
+# yamllint disable-line rule:truthy
+on:
+  push:
+    branches:
+      - topic/sof-dev
+  pull_request:
+    branches:
+      - topic/sof-dev
+
+jobs:
+  sparse-check:
+    name: "Sparse check"
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Fetch kconfig
+        uses: actions/checkout@v2
+        with:
+          repository: 'thesofproject/kconfig'
+          path: 'kconfig'
+
+      - name: Install libelf
+        run: |
+          sudo apt update
+          sudo apt install -y libelf-dev
+
+      - name: Install sparse
+        run: |
+          git clone git://git.kernel.org/pub/scm/devel/sparse/sparse.git
+          git -C sparse reset --hard ce1a6720
+          BINDIR=$(pwd)/bin make -C sparse install
+          echo "$(pwd)/bin" >> $GITHUB_PATH
+
+      - name: build start
+        run: |
+          export ARCH=x86_64 CF="-Wsparse-error -Wsparse-all -Wno-bitwise-pointer -Wno-pointer-arith -Wno-typesign -Wnoshadow -Wnoflexible-array-array -Wnoflexible-array-nested -Wnoflexible-array-sizeof -Wnoflexible-array-union -Wnotautological-compare -Wno-transparent-union"
+          make allmodconfig
+          make modules_prepare
+          make -k sound/soc/sof/ C=2
+          make -k sound/soc/intel/common/ C=2
+          make -k sound/soc/intel/boards/ C=2
+          make -k sound/soc/amd/ C=2
+          make -k drivers/soundwire/ C=2
+
+  gcc-sof-x86_64-W1:
+    name: "GCC build X86_64 with W=1"
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Fetch kconfig
+        uses: actions/checkout@v2
+        with:
+          repository: 'thesofproject/kconfig'
+          path: 'kconfig'
+
+      - name: Install libelf
+        run: |
+          sudo apt update
+          sudo apt install -y libelf-dev
+
+      - name: build start
+        run: |
+          export ARCH=x86_64 KCFLAGS="-Wall -Werror"
+          export MAKEFLAGS=j"$(nproc)"
+          bash kconfig/kconfig-sof-default.sh
+          make sound/ W=1
+          make drivers/soundwire/ W=1
+
+  gcc-sof-x86_64:
+    name: "GCC build X86_64"
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Fetch kconfig
+        uses: actions/checkout@v2
+        with:
+          repository: 'thesofproject/kconfig'
+          path: 'kconfig'
+
+      - name: Install libelf
+        run: |
+          sudo apt update
+          sudo apt install -y libelf-dev
+
+      - name: build start
+        run: |
+          export ARCH=x86_64 KCFLAGS="-Wall -Werror"
+          export MAKEFLAGS=j"$(nproc)"
+          bash kconfig/kconfig-sof-default.sh
+          make
+          make bindeb-pkg
+
+  gcc-sof-i386:
+    name: "GCC build i386"
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Fetch kconfig
+        uses: actions/checkout@v2
+        with:
+          repository: 'thesofproject/kconfig'
+          path: 'kconfig'
+
+      - name: build start
+        run: |
+          export ARCH=i386 KCFLAGS="-Wall -Werror"
+          export MAKEFLAGS=j"$(nproc)"
+          bash kconfig/kconfig-sof-default.sh
+          make sound/
+          make drivers/soundwire/
+          make
+
+  gcc-sof-arm64:
+    name: "GCC build arm64"
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Fetch kconfig
+        uses: actions/checkout@v2
+        with:
+          repository: 'thesofproject/kconfig'
+          path: 'kconfig'
+
+      - name: Install arm64 cross compiler
+        run: |
+          sudo apt update
+          sudo apt install -y gcc-aarch64-linux-gnu
+
+      - name: build start
+        run: |
+          export ARCH=arm64 CROSS_COMPILE=/usr/bin/aarch64-linux-gnu- KCFLAGS="-Wall -Werror"
+          export MAKEFLAGS=j"$(nproc)"
+          bash kconfig/kconfig-sof-arm64.sh
+          make sound/
+          make drivers/soundwire/
+          make
+
+  gcc-sof-arm64-allmodconfig:
+    name: "GCC build arm64 allmodconfig"
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Install arm64 cross compiler
+        run: |
+          sudo apt update
+          sudo apt install -y gcc-aarch64-linux-gnu
+
+      - name: build start
+        run: |
+          export ARCH=arm64 CROSS_COMPILE=/usr/bin/aarch64-linux-gnu- KCFLAGS="-Wall -Werror"
+          export MAKEFLAGS=j"$(nproc)"
+          make allmodconfig
+          make sound/soc/sof/
+
+  clang-sof-x86_64:
+    name: "Clang build x86_64"
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Fetch kconfig
+        uses: actions/checkout@v2
+        with:
+          repository: 'thesofproject/kconfig'
+          path: 'kconfig'
+
+      - name: Install libelf
+        run: |
+          sudo apt update
+          sudo apt install -y libelf-dev
+
+      - name: build start
+        run: |
+          export ARCH=x86_64 CC=clang KCFLAGS="-Wall -Werror"
+          export MAKEFLAGS=j"$(nproc)"
+          bash kconfig/kconfig-sof-default.sh
+          make sound/
+          make drivers/soundwire/
+          make
