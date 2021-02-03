@@ -553,9 +553,9 @@ static int dmic_topology_fixup(struct snd_sof_dev *sdev,
 			       const char *idisp_str,
 			       int *dmic_found)
 {
-	const char *dmic_str;
 	const char *default_tplg_filename = *tplg_filename;
 	const char *fixed_tplg_filename;
+	const char *dmic_str;
 	int dmic_num;
 
 	/* first check NHLT for DMICs */
