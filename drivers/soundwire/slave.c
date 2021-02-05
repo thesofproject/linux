@@ -91,9 +91,8 @@ int sdw_slave_add(struct sdw_bus *bus,
 
 #if IS_ENABLED(CONFIG_ACPI)
 
-static bool _find_slave(struct sdw_bus *bus,
-		        struct acpi_device *adev,
-		        struct sdw_slave_id *id)
+static unsigned long long _find_slave(struct sdw_bus *bus,
+				      struct acpi_device *adev)
 {
 	unsigned long long addr;
 	acpi_status status;
@@ -104,7 +103,7 @@ static bool _find_slave(struct sdw_bus *bus,
 	if (ACPI_FAILURE(status)) {
 		dev_err(bus->dev, "_ADR resolution failed: %x\n",
 			status);
-		return false;
+		return 0;
 	}
 
 	return addr;
@@ -118,9 +117,9 @@ static bool find_slave(struct sdw_bus *bus,
 	unsigned int link_id;
 
 	if (bus->ops->override_adr)
-		addr = bus->ops->override_adr(bus);
+		addr = bus->ops->override_adr(bus, adev);
 	else
-		addr = _find_slave(bus, adev, id);
+		addr = _find_slave(bus, adev);
 
 	if (!addr)
 		return false;

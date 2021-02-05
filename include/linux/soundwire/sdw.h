@@ -820,8 +820,8 @@ struct sdw_defer {
  */
 struct sdw_master_ops {
 	int (*read_prop)(struct sdw_bus *bus);
-	unsigned long long (*override_adr)(struct sdw_bus *bus);
-
+	unsigned long long (*override_adr)
+			(struct sdw_bus *bus, struct acpi_device *adev);
 	enum sdw_command_response (*xfer_msg)
 			(struct sdw_bus *bus, struct sdw_msg *msg);
 	enum sdw_command_response (*xfer_msg_defer)
