@@ -430,6 +430,11 @@ static irqreturn_t da7219_aad_irq_thread(int irq, void *data)
 	} else {
 		/* Jack removal */
 		if (events[DA7219_AAD_IRQ_REG_A] & DA7219_E_JACK_REMOVED_MASK) {
+
+			/* Cancel any pending work */
+			cancel_work_sync(&da7219_aad->btn_det_work);
+			cancel_work_sync(&da7219_aad->hptest_work);
+
 			report = 0;
 			mask |= DA7219_AAD_REPORT_ALL_MASK;
 			da7219_aad->jack_inserted = false;
