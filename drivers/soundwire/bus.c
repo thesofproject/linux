@@ -1253,22 +1253,12 @@ static int sdw_slave_set_frequency(struct sdw_slave *slave)
 static int sdw_initialize_slave(struct sdw_slave *slave)
 {
 	struct sdw_slave_prop *prop = &slave->prop;
-	int status;
 	int ret;
 	u8 val;
 
 	ret = sdw_slave_set_frequency(slave);
 	if (ret < 0)
 		return ret;
-
-	if (slave->bus->prop.quirks & SDW_MASTER_QUIRKS_CLEAR_INITIAL_CLASH) {
-		/* Clear bus clash interrupt before enabling interrupt mask */
-		status = sdw_read_no_pm(slave, SDW_SCP_INT1);
-		if (status & SDW_SCP_INT1_BUS_CLASH) {
-			dev_warn(&slave->dev, "Bus clash detected before INT mask is enabled\n");
-			sdw_write_no_pm(slave, SDW_SCP_INT1, SDW_SCP_INT1_BUS_CLASH);
-		}
-	}
 
 	/*
 	 * Set SCP_INT1_MASK register, typically bus clash and
