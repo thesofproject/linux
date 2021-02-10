@@ -906,8 +906,8 @@ static int sdw_bus_wait_for_clk_prep_deprep(struct sdw_bus *bus, u16 dev_num)
 			return val;
 		}
 		if (!val) {
-			dev_dbg(bus->dev, "clock stop prep/de-prep done slave:%d",
-				dev_num);
+			dev_info(bus->dev, "clock stop prep/de-prep done slave:%d",
+				 dev_num);
 			return 0;
 		}
 
