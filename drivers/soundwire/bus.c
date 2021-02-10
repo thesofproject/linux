@@ -1279,12 +1279,7 @@ static int sdw_initialize_slave(struct sdw_slave *slave)
 		}
 		if (status & SDW_SCP_INT1_BUS_CLASH) {
 			dev_warn(&slave->dev, "Bus clash detected before INT mask is enabled\n");
-			ret = sdw_write_no_pm(slave, SDW_SCP_INT1, SDW_SCP_INT1_BUS_CLASH);
-			if (ret < 0) {
-				dev_err(&slave->dev,
-					"SDW_SCP_INT1 write failed:%d\n", ret);
-				return ret;
-			}
+			sdw_write_no_pm(slave, SDW_SCP_INT1, SDW_SCP_INT1_BUS_CLASH);
 		}
 	}
 	if ((slave->bus->prop.quirks & SDW_MASTER_QUIRKS_CLEAR_INITIAL_PARITY) &&
@@ -1298,13 +1293,7 @@ static int sdw_initialize_slave(struct sdw_slave *slave)
 		}
 		if (status & SDW_SCP_INT1_PARITY) {
 			dev_warn(&slave->dev, "PARITY error detected before INT mask is enabled\n");
-			ret = sdw_write_no_pm(slave, SDW_SCP_INT1, SDW_SCP_INT1_PARITY);
-			if (ret < 0) {
-				dev_err(&slave->dev,
-					"SDW_SCP_INT1 write failed:%d\n", ret);
-				return ret;
-			}
-
+			sdw_write_no_pm(slave, SDW_SCP_INT1, SDW_SCP_INT1_PARITY);
 		}
 	}
 
