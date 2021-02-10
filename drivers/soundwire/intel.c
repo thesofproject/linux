@@ -1284,8 +1284,7 @@ static int sdw_master_read_intel_prop(struct sdw_bus *bus)
 	if (quirk_mask & SDW_INTEL_QUIRK_MASK_BUS_DISABLE)
 		prop->hw_disabled = true;
 
-	prop->quirks = SDW_MASTER_QUIRKS_CLEAR_INITIAL_CLASH |
-		SDW_MASTER_QUIRKS_CLEAR_INITIAL_PARITY;
+	prop->quirks = SDW_MASTER_QUIRKS_CLEAR_INITIAL_CLASH;
 
 	return 0;
 }
