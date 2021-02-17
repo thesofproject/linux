@@ -1366,10 +1366,10 @@ static int rsnd_dai_probe(struct rsnd_priv *priv)
 		for_each_endpoint_of_node(dai_node, dai_np) {
 			__rsnd_dai_probe(priv, dai_np, dai_i);
 			if (rsnd_is_gen3(priv)) {
-				struct rsnd_dai *rdai = rsnd_rdai_get(priv, dai_i);
+				struct rsnd_dai *dai = rsnd_rdai_get(priv, dai_i);
 
-				rsnd_parse_connect_graph(priv, &rdai->playback, dai_np);
-				rsnd_parse_connect_graph(priv, &rdai->capture,  dai_np);
+				rsnd_parse_connect_graph(priv, &dai->playback, dai_np);
+				rsnd_parse_connect_graph(priv, &dai->capture,  dai_np);
 			}
 			dai_i++;
 		}
@@ -1377,10 +1377,10 @@ static int rsnd_dai_probe(struct rsnd_priv *priv)
 		for_each_child_of_node(dai_node, dai_np) {
 			__rsnd_dai_probe(priv, dai_np, dai_i);
 			if (rsnd_is_gen3(priv)) {
-				struct rsnd_dai *rdai = rsnd_rdai_get(priv, dai_i);
+				struct rsnd_dai *dai = rsnd_rdai_get(priv, dai_i);
 
-				rsnd_parse_connect_simple(priv, &rdai->playback, dai_np);
-				rsnd_parse_connect_simple(priv, &rdai->capture,  dai_np);
+				rsnd_parse_connect_simple(priv, &dai->playback, dai_np);
+				rsnd_parse_connect_simple(priv, &dai->capture,  dai_np);
 			}
 			dai_i++;
 		}
