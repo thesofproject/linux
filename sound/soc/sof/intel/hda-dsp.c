@@ -704,6 +704,11 @@ static int hda_resume(struct snd_sof_dev *sdev, bool runtime_resume)
 	hda_dsp_ctrl_ppcap_enable(sdev, true);
 	hda_dsp_ctrl_ppcap_int_enable(sdev, true);
 
+	/* turn off display power as link access is done.
+	display codec driver will turn On for pcm ops */
+	if(runtime_resume)
+		hda_codec_i915_display_power(sdev, false);
+
 	return 0;
 }
 
