@@ -80,6 +80,53 @@ static int rt715_sdca_index_update_bits(struct rt715_sdca_priv *rt715,
 	return rt715_sdca_index_write(rt715, nid, reg, tmp);
 }
 
+static inline unsigned int rt715_sdca_vol_gain(unsigned int u_ctrl_val,
+		unsigned int vol_max, unsigned int vol_gain_sft)
+{
+	unsigned int val;
+
+	if (u_ctrl_val > vol_max)
+		u_ctrl_val = vol_max;
+	val = u_ctrl_val;
+	u_ctrl_val =
+		((abs(u_ctrl_val - vol_gain_sft) * RT715_SDCA_DB_STEP) << 8) / 1000;
+	if (val <= vol_gain_sft) {
+		u_ctrl_val = ~u_ctrl_val;
+		u_ctrl_val += 1;
+	}
+	u_ctrl_val &= 0xffff;
+
+	return u_ctrl_val;
+}
+
+static inline unsigned int rt715_sdca_boost_gain(unsigned int u_ctrl_val,
+		unsigned int b_max, unsigned int b_gain_sft)
+{
+	if (u_ctrl_val > b_max)
+		u_ctrl_val = b_max;
+
+	return (u_ctrl_val * 10) << b_gain_sft;
+}
+
+static inline unsigned int rt715_sdca_get_gain(unsigned int reg_val,
+		unsigned int gain_sft)
+{
+	unsigned int neg_flag = 0;
+
+	if (reg_val & BIT(15)) {
+		reg_val = ~(reg_val - 1) & 0xffff;
+		neg_flag = 1;
+	}
+	reg_val *= 1000;
+	reg_val >>= 8;
+	if (neg_flag)
+		reg_val = gain_sft - reg_val / RT715_SDCA_DB_STEP;
+	else
+		reg_val = gain_sft + reg_val / RT715_SDCA_DB_STEP;
+
+	return reg_val;
+}
+
 /* SDCA Volume/Boost control */
 static int rt715_sdca_set_amp_gain_put(struct snd_kcontrol *kcontrol,
 		struct snd_ctl_elem_value *ucontrol)
@@ -88,77 +135,102 @@ static int rt715_sdca_set_amp_gain_put(struct snd_kcontrol *kcontrol,
 	struct soc_mixer_control *mc =
 		(struct soc_mixer_control *)kcontrol->private_value;
 	struct rt715_sdca_priv *rt715 = snd_soc_component_get_drvdata(component);
-	unsigned int val_l, val_r, gain_l_val, gain_r_val, loop_cnt, i, reg;
+	unsigned int gain_val, i, k_changed = 0;
 	int ret;
 
-	if (strstr(ucontrol->id.name, "FU02 Capture Volume") ||
-		strstr(ucontrol->id.name, "FU06 Capture Volume"))
-		loop_cnt = 2;
-	else if (strstr(ucontrol->id.name, "FU0E Boost") ||
-		strstr(ucontrol->id.name, "FU0C Boost"))
-		loop_cnt = 4;
-	else
-		loop_cnt = 1;
-
-	/* control value to 2s complement */
-	/* L channel */
-	gain_l_val = ucontrol->value.integer.value[0];
-	if (gain_l_val > mc->max)
-		gain_l_val = mc->max;
-	val_l = gain_l_val;
-
-	if (mc->shift == 8) {
-		gain_l_val = (gain_l_val * 10) << mc->shift;
-	} else {
-		gain_l_val =
-			((abs(gain_l_val - mc->shift) * RT715_SDCA_DB_STEP) << 8) / 1000;
-		if (val_l <= mc->shift) {
-			gain_l_val = ~gain_l_val;
-			gain_l_val += 1;
+	for (i = 0; i < 2; i++) {
+		if (ucontrol->value.integer.value[i] != rt715->kctl_2ch_orig[i]) {
+			k_changed = 1;
+			break;
 		}
-		gain_l_val &= 0xffff;
 	}
 
-	/* R channel */
-	gain_r_val = ucontrol->value.integer.value[1];
-	if (gain_r_val > mc->max)
-		gain_r_val = mc->max;
-	val_r = gain_r_val;
-
-	if (mc->shift == 8) {
-		gain_r_val = (gain_r_val * 10) << mc->shift;
-	} else {
-		gain_r_val =
-			((abs(gain_r_val - mc->shift) * RT715_SDCA_DB_STEP) << 8) / 1000;
-		if (val_r <= mc->shift) {
-			gain_r_val = ~gain_r_val;
-			gain_r_val += 1;
-		}
-		gain_r_val &= 0xffff;
-	}
-
-	/* Lch*/
-	for (i = 0; i < loop_cnt; i++) {
-		ret = regmap_write(rt715->mbq_regmap, mc->reg + i * 2, gain_l_val);
+	for (i = 0; i < 2; i++) {
+		rt715->kctl_2ch_orig[i] = ucontrol->value.integer.value[i];
+		gain_val =
+			rt715_sdca_vol_gain(ucontrol->value.integer.value[i], mc->max,
+				mc->shift);
+		ret = regmap_write(rt715->mbq_regmap, mc->reg + i, gain_val);
 		if (ret != 0) {
 			dev_err(component->dev, "Failed to write 0x%x=0x%x\n",
-				mc->reg + i * 2, gain_l_val);
+				mc->reg + i, gain_val);
 			return ret;
 		}
 	}
 
-	/* Rch */
-	for (i = 0; i < loop_cnt; i++) {
-		reg = (i == 3) ? (mc->rreg - 2) | BIT(15) : mc->rreg + i * 2;
-		ret = regmap_write(rt715->mbq_regmap, reg, gain_r_val);
+	return k_changed;
+}
+
+static int rt715_sdca_set_amp_gain_4ch_put(struct snd_kcontrol *kcontrol,
+		struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct rt715_sdca_priv *rt715 = snd_soc_component_get_drvdata(component);
+	struct rt715_sdca_kcontrol_private *p =
+		(struct rt715_sdca_kcontrol_private *)kcontrol->private_value;
+	unsigned int reg_base = p->reg_base, k_changed = 0;
+	const unsigned int gain_sft = 0x2f;
+	unsigned int gain_val, i;
+	int ret;
+
+	for (i = 0; i < 4; i++) {
+		if (ucontrol->value.integer.value[i] != rt715->kctl_4ch_orig[i]) {
+			k_changed = 1;
+			break;
+		}
+	}
+
+	for (i = 0; i < 4; i++) {
+		rt715->kctl_4ch_orig[i] = ucontrol->value.integer.value[i];
+		gain_val =
+			rt715_sdca_vol_gain(ucontrol->value.integer.value[i], p->max,
+				gain_sft);
+		ret = regmap_write(rt715->mbq_regmap, reg_base + i,
+				gain_val);
 		if (ret != 0) {
 			dev_err(component->dev, "Failed to write 0x%x=0x%x\n",
-				reg, gain_r_val);
+				reg_base + i, gain_val);
 			return ret;
 		}
 	}
 
-	return 0;
+	return k_changed;
+}
+
+static int rt715_sdca_set_amp_gain_8ch_put(struct snd_kcontrol *kcontrol,
+		struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct rt715_sdca_priv *rt715 = snd_soc_component_get_drvdata(component);
+	struct rt715_sdca_kcontrol_private *p =
+		(struct rt715_sdca_kcontrol_private *)kcontrol->private_value;
+	unsigned int reg_base = p->reg_base, i, k_changed = 0;
+	const unsigned int gain_sft = 8;
+	unsigned int gain_val, reg;
+	int ret;
+
+	for (i = 0; i < 8; i++) {
+		if (ucontrol->value.integer.value[i] != rt715->kctl_8ch_orig[i]) {
+			k_changed = 1;
+			break;
+		}
+	}
+
+	for (i = 0; i < 8; i++) {
+		rt715->kctl_8ch_orig[i] = ucontrol->value.integer.value[i];
+		gain_val =
+			rt715_sdca_boost_gain(ucontrol->value.integer.value[i], p->max,
+				gain_sft);
+		reg = i < 7 ? reg_base + i : (reg_base - 1) | BIT(15);
+		ret = regmap_write(rt715->mbq_regmap, reg, gain_val);
+		if (ret != 0) {
+			dev_err(component->dev, "Failed to write 0x%x=0x%x\n",
+				reg, gain_val);
+			return ret;
+		}
+	}
+
+	return k_changed;
 }
 
 static int rt715_sdca_set_amp_gain_get(struct snd_kcontrol *kcontrol,
@@ -168,54 +240,78 @@ static int rt715_sdca_set_amp_gain_get(struct snd_kcontrol *kcontrol,
 	struct soc_mixer_control *mc =
 		(struct soc_mixer_control *)kcontrol->private_value;
 	struct rt715_sdca_priv *rt715 = snd_soc_component_get_drvdata(component);
-	unsigned int val_l, val_r, ctl_l, ctl_r, neg_flag = 0;
+	unsigned int val, i;
 	int ret;
 
-	ret = regmap_read(rt715->mbq_regmap, mc->reg, &val_l);
-	if (ret < 0)
-		dev_err(component->dev, "Failed to read 0x%x, ret=%d\n", mc->reg, ret);
-	ret = regmap_read(rt715->mbq_regmap, mc->rreg, &val_r);
-	if (ret < 0)
-		dev_err(component->dev, "Failed to read 0x%x, ret=%d\n", mc->rreg,
-				ret);
-
-	/* L channel */
-	if (mc->shift == 8) {
-		ctl_l = (val_l >> mc->shift) / 10;
-	} else {
-		ctl_l = val_l;
-		if (ctl_l & BIT(15)) {
-			ctl_l = ~(val_l - 1) & 0xffff;
-			neg_flag = 1;
+	for (i = 0; i < 2; i++) {
+		ret = regmap_read(rt715->mbq_regmap, mc->reg + i, &val);
+		if (ret < 0) {
+			dev_err(component->dev, "Failed to read 0x%x, ret=%d\n",
+				mc->reg + i, ret);
+			return ret;
 		}
-		ctl_l *= 1000;
-		ctl_l >>= 8;
-		if (neg_flag)
-			ctl_l = mc->shift - ctl_l / RT715_SDCA_DB_STEP;
-		else
-			ctl_l = mc->shift + ctl_l / RT715_SDCA_DB_STEP;
+		ucontrol->value.integer.value[i] = rt715_sdca_get_gain(val, mc->shift);
 	}
 
-	neg_flag = 0;
-	/* R channel */
-	if (mc->shift == 8) {
-		ctl_r = (val_r >> mc->shift) / 10;
-	} else {
-		ctl_r = val_r;
-		if (ctl_r & BIT(15)) {
-			ctl_r = ~(val_r - 1) & 0xffff;
-			neg_flag = 1;
+	return 0;
+}
+
+static int rt715_sdca_set_amp_gain_4ch_get(struct snd_kcontrol *kcontrol,
+		struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct rt715_sdca_priv *rt715 = snd_soc_component_get_drvdata(component);
+	struct rt715_sdca_kcontrol_private *p =
+		(struct rt715_sdca_kcontrol_private *)kcontrol->private_value;
+	unsigned int reg_base = p->reg_base, i;
+	const unsigned int gain_sft = 0x2f;
+	unsigned int val;
+	int ret;
+
+	for (i = 0; i < 4; i++) {
+		ret = regmap_read(rt715->mbq_regmap, reg_base + i, &val);
+		if (ret < 0) {
+			dev_err(component->dev, "Failed to read 0x%x, ret=%d\n",
+				reg_base + i, ret);
+			return ret;
 		}
-		ctl_r *= 1000;
-		ctl_r >>= 8;
-		if (neg_flag)
-			ctl_r = mc->shift - ctl_r / RT715_SDCA_DB_STEP;
-		else
-			ctl_r = mc->shift + ctl_r / RT715_SDCA_DB_STEP;
+		ucontrol->value.integer.value[i] = rt715_sdca_get_gain(val, gain_sft);
 	}
 
-	ucontrol->value.integer.value[0] = ctl_l;
-	ucontrol->value.integer.value[1] = ctl_r;
+	return 0;
+}
+
+static int rt715_sdca_set_amp_gain_8ch_get(struct snd_kcontrol *kcontrol,
+		struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct rt715_sdca_priv *rt715 = snd_soc_component_get_drvdata(component);
+	struct rt715_sdca_kcontrol_private *p =
+		(struct rt715_sdca_kcontrol_private *)kcontrol->private_value;
+	unsigned int reg_base = p->reg_base;
+	const unsigned int gain_sft = 8;
+	unsigned int val_l, val_r;
+	unsigned int i, reg;
+	int ret;
+
+	for (i = 0; i < 8; i += 2) {
+		ret = regmap_read(rt715->mbq_regmap, reg_base + i, &val_l);
+		if (ret < 0) {
+			dev_err(component->dev, "Failed to read 0x%x, ret=%d\n",
+					reg_base + i, ret);
+			return ret;
+		}
+		ucontrol->value.integer.value[i] = (val_l >> gain_sft) / 10;
+
+		reg = (i == 6) ? (reg_base - 1) | BIT(15) : reg_base + 1 + i;
+		ret = regmap_read(rt715->mbq_regmap, reg, &val_r);
+		if (ret < 0) {
+			dev_err(component->dev, "Failed to read 0x%x, ret=%d\n",
+					reg, ret);
+			return ret;
+		}
+		ucontrol->value.integer.value[i + 1] = (val_r >> gain_sft) / 10;
+	}
 
 	return 0;
 }
@@ -223,36 +319,28 @@ static int rt715_sdca_set_amp_gain_get(struct snd_kcontrol *kcontrol,
 static const DECLARE_TLV_DB_SCALE(in_vol_tlv, -17625, 375, 0);
 static const DECLARE_TLV_DB_SCALE(mic_vol_tlv, 0, 1000, 0);
 
-static int rt715_sdca_fu_info(struct snd_kcontrol *kcontrol,
-			 struct snd_ctl_elem_info *uinfo)
-{
-	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
-	uinfo->count = 2;
-	uinfo->value.integer.min = 0;
-	uinfo->value.integer.max = 1;
-
-	return 0;
-}
-
 static int rt715_sdca_get_volsw(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
-	struct soc_mixer_control *mc =
-		(struct soc_mixer_control *)kcontrol->private_value;
-	unsigned int invert = mc->invert;
-	unsigned int max = mc->max;
+	struct rt715_sdca_kcontrol_private *p =
+		(struct rt715_sdca_kcontrol_private *)kcontrol->private_value;
+	unsigned int reg_base = p->reg_base;
+	unsigned int invert = p->invert, i;
 	int val;
 
-	val = snd_soc_component_read(component, mc->reg);
-	if (val < 0)
-		return -EINVAL;
-	ucontrol->value.integer.value[0] = invert ? max - val : val;
+	for (i = 0; i < p->count; i += 2) {
+		val = snd_soc_component_read(component, reg_base + i);
+		if (val < 0)
+			return -EINVAL;
+		ucontrol->value.integer.value[i] = invert ? p->max - val : val;
 
-	val = snd_soc_component_read(component, mc->rreg);
-	if (val < 0)
-		return -EINVAL;
-	ucontrol->value.integer.value[1] = invert ? max - val : val;
+		val = snd_soc_component_read(component, reg_base + 1 + i);
+		if (val < 0)
+			return -EINVAL;
+		ucontrol->value.integer.value[i + 1] =
+			invert ? p->max - val : val;
+	}
 
 	return 0;
 }
@@ -261,47 +349,83 @@ static int rt715_sdca_put_volsw(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
-	struct soc_mixer_control *mc =
-		(struct soc_mixer_control *)kcontrol->private_value;
-	unsigned int val, val2, loop_cnt = 2, i;
-	unsigned int invert = mc->invert;
-	unsigned int reg2 = mc->rreg;
-	unsigned int reg = mc->reg;
-	unsigned int max = mc->max;
+	struct rt715_sdca_priv *rt715 = snd_soc_component_get_drvdata(component);
+	struct rt715_sdca_kcontrol_private *p =
+		(struct rt715_sdca_kcontrol_private *)kcontrol->private_value;
+	unsigned int val[4] = {0}, val_mask, i, k_changed = 0;
+	unsigned int reg = p->reg_base;
+	unsigned int shift = p->shift;
+	unsigned int max = p->max;
+	unsigned int mask = (1 << fls(max)) - 1;
+	unsigned int invert = p->invert;
 	int err;
 
-	val = ucontrol->value.integer.value[0];
-	if (invert)
-		val = max - val;
+	for (i = 0; i < 4; i++) {
+		if (ucontrol->value.integer.value[i] != rt715->kctl_switch_orig[i]) {
+			k_changed = 1;
+			break;
+		}
+	}
 
-	val2 = ucontrol->value.integer.value[1];
-	if (invert)
-		val2 = max - val2;
+	for (i = 0; i < 2; i++) {
+		rt715->kctl_switch_orig[i * 2] = ucontrol->value.integer.value[i * 2];
+		val[i * 2] = ucontrol->value.integer.value[i * 2] & mask;
+		if (invert)
+			val[i * 2] = max - val[i * 2];
+		val_mask = mask << shift;
+		val[i * 2] <<= shift;
 
-	for (i = 0; i < loop_cnt; i++) {
-		err = snd_soc_component_write(component, reg + i * 2, val);
+		rt715->kctl_switch_orig[i * 2 + 1] =
+			ucontrol->value.integer.value[i * 2 + 1];
+		val[i * 2 + 1] =
+			ucontrol->value.integer.value[i * 2 + 1] & mask;
+		if (invert)
+			val[i * 2 + 1] = max - val[i * 2 + 1];
+
+		val[i * 2 + 1] <<=  shift;
+
+		err = snd_soc_component_update_bits(component, reg + i * 2, val_mask,
+				val[i * 2]);
 		if (err < 0)
 			return err;
-		err = snd_soc_component_write(component, reg2 + i * 2, val2);
+
+		err = snd_soc_component_update_bits(component, reg + 1 + i * 2,
+			val_mask, val[i * 2 + 1]);
 		if (err < 0)
 			return err;
 	}
 
+	return k_changed;
+}
+
+static int rt715_sdca_fu_info(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_info *uinfo)
+{
+	struct rt715_sdca_kcontrol_private *p =
+		(struct rt715_sdca_kcontrol_private *)kcontrol->private_value;
+
+	if (p->max == 1)
+		uinfo->type = SNDRV_CTL_ELEM_TYPE_BOOLEAN;
+	else
+		uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+	uinfo->count = p->count;
+	uinfo->value.integer.min = 0;
+	uinfo->value.integer.max = p->max;
 	return 0;
 }
 
-#define RT715_SDCA_FU_VALUE(xlreg, xrreg, xshift, xmax, xinvert) \
-	((unsigned long)&(struct soc_mixer_control) \
-	{.reg = xlreg, .rreg = xrreg, .shift = xshift, \
-	.max = xmax, .invert = xinvert})
+#define RT715_SDCA_PR_VALUE(xreg_base, xcount, xmax, xshift, xinvert) \
+	((unsigned long)&(struct rt715_sdca_kcontrol_private) \
+		{.reg_base = xreg_base, .count = xcount, .max = xmax, \
+		.shift = xshift, .invert = xinvert})
 
-#define RT715_SDCA_FU_CTRL(xname, reg_left, reg_right, xshift, xmax, xinvert) \
+#define RT715_SDCA_FU_CTRL(xname, reg_base, xshift, xmax, xinvert, xcount) \
 {	.iface = SNDRV_CTL_ELEM_IFACE_MIXER, .name = (xname), \
 	.info = rt715_sdca_fu_info, \
 	.get = rt715_sdca_get_volsw, \
 	.put = rt715_sdca_put_volsw, \
-	.private_value = RT715_SDCA_FU_VALUE(reg_left, reg_right, xshift, \
-					    xmax, xinvert)}
+	.private_value = RT715_SDCA_PR_VALUE(reg_base, xcount, xmax, \
+					xshift, xinvert)}
 
 #define SOC_DOUBLE_R_EXT(xname, reg_left, reg_right, xshift, xmax, xinvert,\
 	 xhandler_get, xhandler_put) \
@@ -310,6 +434,26 @@ static int rt715_sdca_put_volsw(struct snd_kcontrol *kcontrol,
 	.get = xhandler_get, .put = xhandler_put, \
 	.private_value = SOC_DOUBLE_R_VALUE(reg_left, reg_right, xshift, \
 					    xmax, xinvert) }
+
+#define RT715_SDCA_EXT_TLV(xname, reg_base, xhandler_get,\
+	 xhandler_put, tlv_array, xcount, xmax) \
+{	.iface = SNDRV_CTL_ELEM_IFACE_MIXER, .name = (xname), \
+	.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ | \
+		 SNDRV_CTL_ELEM_ACCESS_READWRITE, \
+	.tlv.p = (tlv_array), \
+	.info = rt715_sdca_fu_info, \
+	.get = xhandler_get, .put = xhandler_put, \
+	.private_value = RT715_SDCA_PR_VALUE(reg_base, xcount, xmax, 0, 0) }
+
+#define RT715_SDCA_BOOST_EXT_TLV(xname, reg_base, xhandler_get,\
+	 xhandler_put, tlv_array, xcount, xmax) \
+{	.iface = SNDRV_CTL_ELEM_IFACE_MIXER, .name = (xname), \
+	.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ | \
+		 SNDRV_CTL_ELEM_ACCESS_READWRITE, \
+	.tlv.p = (tlv_array), \
+	.info = rt715_sdca_fu_info, \
+	.get = xhandler_get, .put = xhandler_put, \
+	.private_value = RT715_SDCA_PR_VALUE(reg_base, xcount, xmax, 0, 0) }
 
 static const struct snd_kcontrol_new rt715_sdca_snd_controls[] = {
 	/* Capture switch */
@@ -322,15 +466,11 @@ static const struct snd_kcontrol_new rt715_sdca_snd_controls[] = {
 	RT715_SDCA_FU_CTRL("FU02 Capture Switch",
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC8_9_VOL,
 			RT715_SDCA_FU_MUTE_CTRL, CH_01),
-		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC8_9_VOL,
-			RT715_SDCA_FU_MUTE_CTRL, CH_02),
-			0, 1, 1),
+			0, 1, 1, 4),
 	RT715_SDCA_FU_CTRL("FU06 Capture Switch",
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC10_11_VOL,
 			RT715_SDCA_FU_MUTE_CTRL, CH_01),
-		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC10_11_VOL,
-			RT715_SDCA_FU_MUTE_CTRL, CH_02),
-			0, 1, 1),
+			0, 1, 1, 4),
 	/* Volume Control */
 	SOC_DOUBLE_R_EXT_TLV("FU0A Capture Volume",
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC7_27_VOL,
@@ -340,42 +480,31 @@ static const struct snd_kcontrol_new rt715_sdca_snd_controls[] = {
 			0x2f, 0x7f, 0,
 		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
 		in_vol_tlv),
-	SOC_DOUBLE_R_EXT_TLV("FU02 Capture Volume",
+	RT715_SDCA_EXT_TLV("FU02 Capture Volume",
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC8_9_VOL,
 			RT715_SDCA_FU_VOL_CTRL, CH_01),
-		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC8_9_VOL,
-			RT715_SDCA_FU_VOL_CTRL, CH_02),
-			0x2f, 0x7f, 0,
-		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
-		in_vol_tlv),
-	SOC_DOUBLE_R_EXT_TLV("FU06 Capture Volume",
+		rt715_sdca_set_amp_gain_4ch_get,
+		rt715_sdca_set_amp_gain_4ch_put,
+		in_vol_tlv, 4, 0x7f),
+	RT715_SDCA_EXT_TLV("FU06 Capture Volume",
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC10_11_VOL,
-			RT715_SDCA_FU_VOL_CTRL,
-			CH_01),
-		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_ADC10_11_VOL,
-			RT715_SDCA_FU_VOL_CTRL,
-			CH_02), 0x2f, 0x7f, 0,
-		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
-		in_vol_tlv),
+			RT715_SDCA_FU_VOL_CTRL, CH_01),
+		rt715_sdca_set_amp_gain_4ch_get,
+		rt715_sdca_set_amp_gain_4ch_put,
+		in_vol_tlv, 4, 0x7f),
 	/* MIC Boost Control */
-	SOC_DOUBLE_R_EXT_TLV("FU0E Boost",
+	RT715_SDCA_BOOST_EXT_TLV("FU0E Boost",
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_DMIC_GAIN_EN,
-			RT715_SDCA_FU_DMIC_GAIN_CTRL,
-			CH_01),
-		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_DMIC_GAIN_EN,
-			RT715_SDCA_FU_DMIC_GAIN_CTRL,
-			CH_02), 8, 3, 0,
-		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
-		mic_vol_tlv),
-	SOC_DOUBLE_R_EXT_TLV("FU0C Boost",
+			RT715_SDCA_FU_DMIC_GAIN_CTRL, CH_01),
+			rt715_sdca_set_amp_gain_8ch_get,
+			rt715_sdca_set_amp_gain_8ch_put,
+			mic_vol_tlv, 8, 3),
+	RT715_SDCA_BOOST_EXT_TLV("FU0C Boost",
 		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_AMIC_GAIN_EN,
-			RT715_SDCA_FU_DMIC_GAIN_CTRL,
-			CH_01),
-		SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_FU_AMIC_GAIN_EN,
-			RT715_SDCA_FU_DMIC_GAIN_CTRL,
-			CH_02), 8, 3, 0,
-		rt715_sdca_set_amp_gain_get, rt715_sdca_set_amp_gain_put,
-		mic_vol_tlv),
+			RT715_SDCA_FU_DMIC_GAIN_CTRL, CH_01),
+			rt715_sdca_set_amp_gain_8ch_get,
+			rt715_sdca_set_amp_gain_8ch_put,
+			mic_vol_tlv, 8, 3),
 };
 
 static int rt715_sdca_mux_get(struct snd_kcontrol *kcontrol,

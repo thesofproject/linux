@@ -31,10 +31,22 @@ struct rt715_sdca_priv {
 	int l_is_unmute;
 	int r_is_unmute;
 	int hw_sdw_ver;
+	int kctl_switch_orig[4];
+	int kctl_2ch_orig[2];
+	int kctl_4ch_orig[4];
+	int kctl_8ch_orig[8];
 };
 
 struct rt715_sdw_stream_data {
 	struct sdw_stream_runtime *sdw_stream;
+};
+
+struct rt715_sdca_kcontrol_private {
+	unsigned int reg_base;
+	unsigned int count;
+	unsigned int max;
+	unsigned int shift;
+	unsigned int invert;
 };
 
 /* MIPI Register */
