@@ -151,14 +151,15 @@ static int hda_link_dma_params(struct hdac_ext_stream *stream,
 	return 0;
 }
 
-/* Send DAI_CONFIG IPC to the DAI that matches the dai_name and direction */
-static int hda_link_config_ipc(struct sof_intel_hda_stream *hda_stream,
-			       const char *dai_name, int channel, int dir)
+/*
+ * Update DAI_CONFIG for the DAI that matches the dai_name and direction. The IPC will be sent
+ * during FE hw_params.
+ */
+static int hda_link_update_config(struct sof_intel_hda_stream *hda_stream,
+				  const char *dai_name, int channel, int dir)
 {
 	struct sof_ipc_dai_config *config;
 	struct snd_sof_dai *sof_dai;
-	struct sof_ipc_reply reply;
-	int ret = 0;
 
 	list_for_each_entry(sof_dai, &hda_stream->sdev->dai_list, list) {
 		if (!sof_dai->cpu_dai_name)
@@ -178,18 +179,7 @@ static int hda_link_config_ipc(struct sof_intel_hda_stream *hda_stream,
 			/* update config with stream tag */
 			config->hda.link_dma_ch = channel;
 
-			/* send IPC */
-			ret = sof_ipc_tx_message(hda_stream->sdev->ipc,
-						 config->hdr.cmd,
-						 config,
-						 config->hdr.size,
-						 &reply, sizeof(reply));
-
-			if (ret < 0)
-				dev_err(hda_stream->sdev->dev,
-					"error: failed to set dai config for %s\n",
-					sof_dai->name);
-			return ret;
+			return 0;
 		}
 	}
 
@@ -226,8 +216,7 @@ static int hda_link_hw_params(struct snd_pcm_substream *substream,
 	hda_stream = hstream_to_sof_hda_stream(link_dev);
 
 	/* update the DSP with the new tag */
-	ret = hda_link_config_ipc(hda_stream, dai->name, stream_tag - 1,
-				  substream->stream);
+	ret = hda_link_update_config(hda_stream, dai->name, stream_tag - 1, substream->stream);
 	if (ret < 0)
 		return ret;
 
@@ -321,8 +310,8 @@ static int hda_link_pcm_trigger(struct snd_pcm_substream *substream,
 		 * clear link DMA channel. It will be assigned when
 		 * hw_params is set up again after resume.
 		 */
-		ret = hda_link_config_ipc(hda_stream, dai->name,
-					  DMA_CHAN_INVALID, substream->stream);
+		ret = hda_link_update_config(hda_stream, dai->name, DMA_CHAN_INVALID,
+					     substream->stream);
 		if (ret < 0)
 			return ret;
 
@@ -369,8 +358,7 @@ static int hda_link_hw_free(struct snd_pcm_substream *substream,
 	hda_stream = hstream_to_sof_hda_stream(link_dev);
 
 	/* free the link DMA channel in the FW */
-	ret = hda_link_config_ipc(hda_stream, dai->name, DMA_CHAN_INVALID,
-				  substream->stream);
+	ret = hda_link_update_config(hda_stream, dai->name, DMA_CHAN_INVALID, substream->stream);
 	if (ret < 0)
 		return ret;
 

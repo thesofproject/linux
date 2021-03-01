@@ -160,6 +160,67 @@ static int sof_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget *swi
 	return ret;
 }
 
+/* Temporary function to be removed when sof_widget_list_setup/free() are updated */
+static int sof_widget_list_dai_config_setup(struct snd_sof_dev *sdev,
+					    struct snd_soc_dapm_widget_list *list)
+{
+	struct snd_soc_dapm_widget *widget;
+	int ret, i;
+
+	for_each_dapm_widgets(list, i, widget) {
+		struct snd_sof_widget *swidget = widget->dobj.private;
+		struct snd_sof_dai *dai;
+		struct sof_ipc_dai_config *dai_config;
+
+		if (!swidget)
+			continue;
+
+		if  (!WIDGET_IS_DAI(swidget->id))
+			continue;
+
+		dai = swidget->private;
+		dai_config = dai->dai_config;
+
+		/* only send the config for HDA/ALH type DAIs */
+		if (dai_config->type != SOF_DAI_INTEL_HDA &&
+		    dai_config->type != SOF_DAI_INTEL_ALH)
+			continue;
+
+		ret = sof_dai_config_setup(sdev, dai);
+		if (ret < 0) {
+			dev_err(sdev->dev, "error: failed to load dai config for DAI %s\n",
+				swidget->widget->name);
+			return ret;
+		}
+	}
+
+	return 0;
+}
+
+/* placeholder for now. Will be updated in the following patches */
+int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, int dir)
+{
+	struct snd_soc_dapm_widget_list *list = spcm->stream[dir].list;
+
+	/* nothing to set up */
+	if (!list)
+		return 0;
+
+	return sof_widget_list_dai_config_setup(sdev, list);
+}
+
+/* placeholder for now. Will be updated in the following patches */
+int sof_widget_list_free(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, int dir)
+{
+	struct snd_soc_dapm_widget_list *list = spcm->stream[dir].list;
+
+	/* nothing to free */
+	if (!list)
+		return 0;
+
+	return sof_widget_list_dai_config_setup(sdev, list);
+}
+
 /*
  * helper to determine if there are only D0i3 compatible
  * streams active
