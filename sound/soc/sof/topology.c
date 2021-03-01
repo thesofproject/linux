@@ -2332,6 +2332,7 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 	swidget->id = w->id;
 	swidget->pipeline_id = index;
 	swidget->private = NULL;
+
 	memset(&reply, 0, sizeof(reply));
 
 	dev_dbg(scomp->dev, "tplg: ready widget id %d pipe %d type %d name : %s stream %s\n",
@@ -2456,6 +2457,7 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 
 	w->dobj.private = swidget;
 	list_add(&swidget->list, &sdev->widget_list);
+
 	return ret;
 }
 

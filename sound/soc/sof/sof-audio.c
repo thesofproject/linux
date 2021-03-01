@@ -94,6 +94,10 @@ static int sof_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget *swid
 	struct sof_ipc_reply reply;
 	int ret;
 
+	/* only free when refcount is 0 */
+	if (--swidget->use_count)
+		return;
+
 	if (!swidget->private)
 		return 0;
 
@@ -113,6 +117,7 @@ static int sof_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget *swid
 				 &reply, sizeof(reply));
 	if (ret < 0) {
 		dev_err(sdev->dev, "error: failed to free widget %s\n", swidget->widget->name);
+		swidget->use_count++;
 		return ret;
 	}
 
@@ -132,6 +137,10 @@ static int sof_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget *swi
 	size_t ipc_size;
 	int ret;
 
+	/* widget already set up */
+	if (++swidget->use_count > 1)
+		return 0;
+
 	/* skip if there is no private data */
 	if (!swidget->private)
 		return 0;
@@ -140,7 +149,7 @@ static int sof_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget *swi
 	if (ret < 0) {
 		dev_err(sdev->dev, "error: failed to enable target core: %d for widget %s\n",
 			ret, swidget->widget->name);
-		return ret;
+		goto use_count_free;
 	}
 
 	switch (swidget->id) {
@@ -171,9 +180,9 @@ static int sof_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget *swi
 					 &r, sizeof(r));
 		break;
 	}
-	if (ret < 0)
+	if (ret < 0) {
 		dev_err(sdev->dev, "error: failed to load widget %s\n", swidget->widget->name);
-		return ret;
+		goto use_count_free;
 	}
 
 	/* restore kcontrols for widget */
@@ -186,6 +195,10 @@ static int sof_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget *swi
 
 	dev_dbg(sdev->dev, "widget %s setup complete\n", swidget->widget->name);
 
+	return 0;
+
+use_count_free:
+	swidget->use_count--;
 	return ret;
 }
 
@@ -358,6 +371,9 @@ int sof_set_up_pipelines(struct device *dev)
 
 	/* restore pipeline components */
 	list_for_each_entry_reverse(swidget, &sdev->widget_list, list) {
+		/* reset widget use_count after resuming */
+		swidget->use_count = 0;
+
 		ret = sof_widget_setup(sdev, swidget);
 		if (ret < 0)
 			return ret;

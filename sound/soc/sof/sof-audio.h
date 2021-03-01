@@ -11,6 +11,7 @@
 #ifndef __SOUND_SOC_SOF_AUDIO_H
 #define __SOUND_SOC_SOF_AUDIO_H
 
+ #include <linux/mutex.h>
 #include <linux/workqueue.h>
 
 #include <sound/soc.h>
@@ -86,6 +87,7 @@ struct snd_sof_widget {
 	int comp_id;
 	int pipeline_id;
 	int complete;
+	int use_count;
 	int core;
 	int id;
 
