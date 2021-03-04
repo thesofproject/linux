@@ -3437,9 +3437,56 @@ int snd_sof_complete_pipeline(struct device *dev,
 	return 1;
 }
 
+/* set pipe_widget for comp */
+static int sof_set_comp_pipe_widget(struct snd_sof_dev *sdev, struct snd_sof_widget *pipe_widget,
+				    struct snd_sof_widget *comp_swidget)
+{
+	struct snd_sof_control *scontrol;
+
+	/* set the pipe_widget and apply the dynamic_pipeline_widget_flag */
+	comp_swidget->pipe_widget = pipe_widget;
+	comp_swidget->dynamic_pipeline_widget = pipe_widget->dynamic_pipeline_widget;
+
+	if (!comp_swidget->dynamic_pipeline_widget)
+		return 0;
+
+	/* dynamic widgets cannot have volatile kcontrols */
+	list_for_each_entry(scontrol, &sdev->kcontrol_list, list)
+		if (scontrol->comp_id == comp_swidget->comp_id) {
+			if (scontrol->access & SNDRV_CTL_ELEM_ACCESS_VOLATILE) {
+				dev_err(sdev->dev, "error: volatile control found for dynamic widget %s\n",
+					comp_swidget->widget->sname);
+				return -EINVAL;
+			}
+		}
+
+	return 0;
+}
+
 /* completion - called at completion of firmware loading */
 static int sof_complete(struct snd_soc_component *scomp)
 {
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_widget *swidget, *comp_swidget;
+	int ret;
+
+	/* set pipe_widget for all widgets with same pipeline_id */
+	list_for_each_entry(swidget, &sdev->widget_list, list) {
+		switch (swidget->id) {
+		case snd_soc_dapm_scheduler:
+			list_for_each_entry_reverse(comp_swidget, &sdev->widget_list, list)
+				if (comp_swidget->pipeline_id == swidget->pipeline_id) {
+					ret = sof_set_comp_pipe_widget(sdev, swidget,
+								       comp_swidget);
+					if (ret < 0)
+						return ret;
+				}
+			break;
+		default:
+			break;
+		}
+	}
+
 	/* set up the static pipelines */
 	return sof_set_up_pipelines(scomp->dev);
 }
