@@ -3515,6 +3515,8 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 		sroute->route = route;
 		dobj->private = sroute;
 		sroute->private = connect;
+		sroute->src_widget = source_swidget;
+		sroute->sink_widget = sink_swidget;
 
 		/* add route to route list */
 		list_add(&sroute->list, &sdev->route_list);

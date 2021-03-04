@@ -104,6 +104,8 @@ struct snd_sof_route {
 
 	struct snd_soc_dapm_route *route;
 	struct list_head list;	/* list in sdev route list */
+	struct snd_sof_widget *src_widget;
+	struct snd_sof_widget *sink_widget;
 
 	void *private;
 };
