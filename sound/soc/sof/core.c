@@ -400,6 +400,15 @@ int snd_sof_device_shutdown(struct device *dev)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 
+	/*
+	 * Let's check if the sdev is valid or not.
+	 * If probe is not completed and sdev is NULL,
+	 * it means audio is not enabled and we should skip
+	 * the shutdown.
+	 */
+	if (!sdev)
+		return 0;
+
 	return snd_sof_shutdown(sdev);
 }
 EXPORT_SYMBOL(snd_sof_device_shutdown);
