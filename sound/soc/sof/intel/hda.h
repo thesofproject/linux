@@ -16,7 +16,9 @@
 #include <sound/compress_driver.h>
 #include <sound/hda_codec.h>
 #include <sound/hdaudio_ext.h>
+#include <sound/sof/dai.h>
 #include "shim.h"
+#include "../sof-audio.h"
 
 /* PCI registers */
 #define PCI_TCSEL			0x44
@@ -767,5 +769,8 @@ void hda_set_mach_params(const struct snd_soc_acpi_mach *mach,
 
 /* PCI driver selection and probe */
 int hda_pci_intel_probe(struct pci_dev *pci, const struct pci_device_id *pci_id);
+
+int hda_dai_widget_update(struct snd_sof_dev *sdev, struct snd_sof_dai *sof_dai,
+			  struct sof_ipc_dai_config *config, bool setup, int dir);
 
 #endif

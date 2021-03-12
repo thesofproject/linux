@@ -153,47 +153,41 @@ static int hda_link_dma_params(struct hdac_ext_stream *stream,
 
 /* Send DAI_CONFIG IPC to the DAI that matches the dai_name and direction */
 static int hda_link_config_ipc(struct sof_intel_hda_stream *hda_stream,
-			       const char *dai_name, int channel, int dir)
+			       const char *dai_name, int channel, int dir, bool setup)
 {
+	struct snd_sof_dev *sdev = hda_stream->sdev;
 	struct sof_ipc_dai_config *config;
 	struct snd_sof_dai *sof_dai;
-	struct sof_ipc_reply reply;
-	int ret = 0;
+	bool found = false;
 
-	list_for_each_entry(sof_dai, &hda_stream->sdev->dai_list, list) {
+	/* find snd_sof_dai matching the BE CPU DAI name */
+	list_for_each_entry(sof_dai, &sdev->dai_list, list) {
 		if (!sof_dai->cpu_dai_name)
 			continue;
 
 		if (!strcmp(dai_name, sof_dai->cpu_dai_name) &&
 		    dir == sof_dai->comp_dai.direction) {
-			config = sof_dai->dai_config;
-
-			if (!config) {
-				dev_err(hda_stream->sdev->dev,
-					"error: no config for DAI %s\n",
-					sof_dai->name);
-				return -EINVAL;
-			}
-
-			/* update config with stream tag */
-			config->hda.link_dma_ch = channel;
-
-			/* send IPC */
-			ret = sof_ipc_tx_message(hda_stream->sdev->ipc,
-						 config->hdr.cmd,
-						 config,
-						 config->hdr.size,
-						 &reply, sizeof(reply));
-
-			if (ret < 0)
-				dev_err(hda_stream->sdev->dev,
-					"error: failed to set dai config for %s\n",
-					sof_dai->name);
-			return ret;
+			found = true;
+			break;
 		}
 	}
 
-	return -EINVAL;
+	if (!found) {
+		dev_err(sdev->dev, "error: failed to find SOF DAI for: %s\n", dai_name);
+		return -EINVAL;
+	}
+
+	config = sof_dai->dai_config;
+	if (!config) {
+		dev_err(sdev->dev, "error: no config for DAI %s\n", sof_dai->name);
+		return -EINVAL;
+	}
+
+	/* update config with stream tag */
+	config->hda.link_dma_ch = channel;
+
+	return hda_dai_widget_update(sdev, sof_dai, config, setup, dir);
+
 }
 
 static int hda_link_hw_params(struct snd_pcm_substream *substream,
@@ -227,7 +221,7 @@ static int hda_link_hw_params(struct snd_pcm_substream *substream,
 
 	/* update the DSP with the new tag */
 	ret = hda_link_config_ipc(hda_stream, dai->name, stream_tag - 1,
-				  substream->stream);
+				  substream->stream, true);
 	if (ret < 0)
 		return ret;
 
@@ -281,7 +275,6 @@ static int hda_link_pcm_trigger(struct snd_pcm_substream *substream,
 {
 	struct hdac_ext_stream *link_dev =
 				snd_soc_dai_get_dma_data(dai, substream);
-	struct sof_intel_hda_stream *hda_stream;
 	struct snd_soc_pcm_runtime *rtd;
 	struct hdac_ext_link *link;
 	struct hdac_stream *hstream;
@@ -296,8 +289,6 @@ static int hda_link_pcm_trigger(struct snd_pcm_substream *substream,
 	link = snd_hdac_ext_bus_get_link(bus, asoc_rtd_to_codec(rtd, 0)->component->name);
 	if (!link)
 		return -EINVAL;
-
-	hda_stream = hstream_to_sof_hda_stream(link_dev);
 
 	dev_dbg(dai->dev, "In %s cmd=%d\n", __func__, cmd);
 	switch (cmd) {
@@ -317,15 +308,6 @@ static int hda_link_pcm_trigger(struct snd_pcm_substream *substream,
 		break;
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_STOP:
-		/*
-		 * clear link DMA channel. It will be assigned when
-		 * hw_params is set up again after resume.
-		 */
-		ret = hda_link_config_ipc(hda_stream, dai->name,
-					  DMA_CHAN_INVALID, substream->stream);
-		if (ret < 0)
-			return ret;
-
 		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 			stream_tag = hdac_stream(link_dev)->stream_tag;
 			snd_hdac_ext_link_clear_stream_id(link, stream_tag);
@@ -370,7 +352,7 @@ static int hda_link_hw_free(struct snd_pcm_substream *substream,
 
 	/* free the link DMA channel in the FW */
 	ret = hda_link_config_ipc(hda_stream, dai->name, DMA_CHAN_INVALID,
-				  substream->stream);
+				  substream->stream, false);
 	if (ret < 0)
 		return ret;
 

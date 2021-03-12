@@ -53,67 +53,109 @@ static int sdw_clock_stop_quirks = SDW_INTEL_CLK_STOP_BUS_RESET;
 module_param(sdw_clock_stop_quirks, int, 0444);
 MODULE_PARM_DESC(sdw_clock_stop_quirks, "SOF SoundWire clock stop quirks");
 
+int hda_dai_widget_update(struct snd_sof_dev *sdev, struct snd_sof_dai *sof_dai,
+			  struct sof_ipc_dai_config *config, bool setup, int dir)
+{
+	struct snd_sof_widget *swidget;
+	struct sof_ipc_reply reply;
+	bool found = false;
+	int ret;
+
+	/* find snd_sof_widget of type DAI with matching sname as that of snd_sof_dai name */
+	list_for_each_entry(swidget, &sdev->widget_list, list) {
+		if (dir == SNDRV_PCM_STREAM_PLAYBACK && swidget->id != snd_soc_dapm_dai_in)
+			continue;
+
+		if (dir == SNDRV_PCM_STREAM_CAPTURE && swidget->id != snd_soc_dapm_dai_out)
+			continue;
+
+		if (!strcmp(sof_dai->name, swidget->widget->sname)) {
+			found = true;
+			break;
+		}
+	}
+
+	if (!found) {
+		dev_err(sdev->dev, "error: failed to find DAI widget for: %s\n",
+			sof_dai->cpu_dai_name);
+		return -EINVAL;
+	}
+
+	/*
+	 * For static pipelines, the DAI widget would already be set up and calling
+	 * sof_widget_setup()/free() would simply return without doing anything.
+	 * For dynamic pipelines, the DAI widget would be set up or freed here.
+	 */
+	if (setup)
+		ret = sof_widget_setup(sdev, swidget);
+	else
+		ret = sof_widget_free(sdev, swidget);
+	if (ret < 0)
+		return ret;
+
+	/* send DAI_CONFIG IPC */
+	return sof_ipc_tx_message(sdev->ipc, config->hdr.cmd, config, config->hdr.size, &reply,
+				  sizeof(reply));
+}
+
+static int sdw_dai_config_ipc(struct snd_sof_dev *sdev, struct snd_soc_dai *d,
+			      int link_id, int alh_stream_id, bool setup, int dir)
+{
+	struct sof_ipc_dai_config *config;
+	struct snd_sof_dai *sof_dai;
+	bool found = false;
+
+	/* find snd_sof_dai matching the BE CPU DAI name */
+	list_for_each_entry(sof_dai, &sdev->dai_list, list) {
+		if (!sof_dai->cpu_dai_name)
+			continue;
+
+		if (!strcmp(d->name, sof_dai->cpu_dai_name)) {
+			found = true;
+			break;
+		}
+	}
+
+	if (!found) {
+		dev_err(sdev->dev, "error: failed to find SOF DAI for: %s\n", d->name);
+		return -EINVAL;
+	}
+
+	found = false;
+
+	config = sof_dai->dai_config;
+	if (!config) {
+		dev_err(sdev->dev, "error: no config for DAI %s\n", sof_dai->name);
+		return -EINVAL;
+	}
+
+	/* update config with link and stream ID */
+	config->dai_index = (link_id << 8) | d->id;
+	config->alh.stream_id = alh_stream_id;
+
+	return hda_dai_widget_update(sdev, sof_dai, config, setup, dir);
+}
+
 static int sdw_params_stream(struct device *dev,
 			     struct sdw_intel_stream_params_data *params_data)
 {
+	struct snd_pcm_substream *substream = params_data->substream;
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	struct snd_soc_dai *d = params_data->dai;
-	struct sof_ipc_dai_config config;
-	struct sof_ipc_reply reply;
-	int link_id = params_data->link_id;
-	int alh_stream_id = params_data->alh_stream_id;
-	int ret;
-	u32 size = sizeof(config);
 
-	memset(&config, 0, size);
-	config.hdr.size = size;
-	config.hdr.cmd = SOF_IPC_GLB_DAI_MSG | SOF_IPC_DAI_CONFIG;
-	config.type = SOF_DAI_INTEL_ALH;
-	config.dai_index = (link_id << 8) | (d->id);
-	config.alh.stream_id = alh_stream_id;
-
-	/* send message to DSP */
-	ret = sof_ipc_tx_message(sdev->ipc,
-				 config.hdr.cmd, &config, size, &reply,
-				 sizeof(reply));
-	if (ret < 0) {
-		dev_err(sdev->dev,
-			"error: failed to set DAI hw_params for link %d dai->id %d ALH %d\n",
-			link_id, d->id, alh_stream_id);
-	}
-
-	return ret;
+	return sdw_dai_config_ipc(sdev, d, params_data->link_id, params_data->alh_stream_id,
+				  true, substream->stream);
 }
 
 static int sdw_free_stream(struct device *dev,
 			   struct sdw_intel_stream_free_data *free_data)
 {
+	struct snd_pcm_substream *substream = free_data->substream;
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	struct snd_soc_dai *d = free_data->dai;
-	struct sof_ipc_dai_config config;
-	struct sof_ipc_reply reply;
-	int link_id = free_data->link_id;
-	int ret;
-	u32 size = sizeof(config);
 
-	memset(&config, 0, size);
-	config.hdr.size = size;
-	config.hdr.cmd = SOF_IPC_GLB_DAI_MSG | SOF_IPC_DAI_CONFIG;
-	config.type = SOF_DAI_INTEL_ALH;
-	config.dai_index = (link_id << 8) | d->id;
-	config.alh.stream_id = 0xFFFF; /* invalid value on purpose */
-
-	/* send message to DSP */
-	ret = sof_ipc_tx_message(sdev->ipc,
-				 config.hdr.cmd, &config, size, &reply,
-				 sizeof(reply));
-	if (ret < 0) {
-		dev_err(sdev->dev,
-			"error: failed to free stream for link %d dai->id %d\n",
-			link_id, d->id);
-	}
-
-	return ret;
+	/* send invalid stream_id */
+	return sdw_dai_config_ipc(sdev, d, free_data->link_id, 0xFFFF, false, substream->stream);
 }
 
 static const struct sdw_intel_ops sdw_callback = {
