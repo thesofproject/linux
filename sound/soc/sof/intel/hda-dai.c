@@ -151,49 +151,77 @@ static int hda_link_dma_params(struct hdac_ext_stream *stream,
 	return 0;
 }
 
-/* Send DAI_CONFIG IPC to the DAI that matches the dai_name and direction */
-static int hda_link_config_ipc(struct sof_intel_hda_stream *hda_stream,
-			       const char *dai_name, int channel, int dir)
+/* find the snd_sof_dai matching the BE CPU DAI name and update its config */
+static struct snd_sof_dai *hda_get_sof_dai(struct sof_intel_hda_stream *hda_stream,
+					   const char *dai_name, int channel, int dir)
 {
+	struct snd_sof_dev *sdev = hda_stream->sdev;
 	struct sof_ipc_dai_config *config;
 	struct snd_sof_dai *sof_dai;
-	struct sof_ipc_reply reply;
-	int ret = 0;
+	bool found = false;
 
-	list_for_each_entry(sof_dai, &hda_stream->sdev->dai_list, list) {
+	/* find snd_sof_dai matching the BE CPU DAI name */
+	list_for_each_entry(sof_dai, &sdev->dai_list, list) {
 		if (!sof_dai->cpu_dai_name)
 			continue;
 
 		if (!strcmp(dai_name, sof_dai->cpu_dai_name) &&
 		    dir == sof_dai->comp_dai.direction) {
-			config = sof_dai->dai_config;
-
-			if (!config) {
-				dev_err(hda_stream->sdev->dev,
-					"error: no config for DAI %s\n",
-					sof_dai->name);
-				return -EINVAL;
-			}
-
-			/* update config with stream tag */
-			config->hda.link_dma_ch = channel;
-
-			/* send IPC */
-			ret = sof_ipc_tx_message(hda_stream->sdev->ipc,
-						 config->hdr.cmd,
-						 config,
-						 config->hdr.size,
-						 &reply, sizeof(reply));
-
-			if (ret < 0)
-				dev_err(hda_stream->sdev->dev,
-					"error: failed to set dai config for %s\n",
-					sof_dai->name);
-			return ret;
+			found = true;
+			break;
 		}
 	}
 
-	return -EINVAL;
+	if (!found) {
+		dev_err(sdev->dev, "error: failed to find SOF DAI for: %s\n", dai_name);
+		return ERR_PTR(-ENOENT);
+	}
+
+	config = sof_dai->dai_config;
+	if (!config) {
+		dev_err(sdev->dev, "error: no config for DAI %s\n", sof_dai->name);
+		return ERR_PTR(-ENOENT);
+	}
+
+	/* update config with stream tag */
+	config->hda.link_dma_ch = channel;
+
+	return sof_dai;
+}
+
+static int hda_link_config_ipc(struct sof_intel_hda_stream *hda_stream,
+			       const char *dai_name, int channel, int dir)
+{
+	struct snd_sof_dev *sdev = hda_stream->sdev;
+	struct sof_ipc_dai_config *config;
+	struct snd_sof_dai *sof_dai;
+	struct sof_ipc_reply reply;
+
+	sof_dai = hda_get_sof_dai(hda_stream, dai_name, channel, dir);
+	if (IS_ERR(sof_dai))
+		return PTR_ERR(sof_dai);
+
+	config = sof_dai->dai_config;
+
+	/* send DAI_CONFIG IPC */
+	return sof_ipc_tx_message(sdev->ipc, config->hdr.cmd, config, config->hdr.size,
+					   &reply, sizeof(reply));
+}
+
+static int hda_link_dai_widget_update(struct sof_intel_hda_stream *hda_stream,
+				      const char *dai_name, int channel, int dir,
+				      bool widget_setup)
+{
+	struct snd_sof_dev *sdev = hda_stream->sdev;
+	struct snd_sof_dai *sof_dai;
+
+	sof_dai = hda_get_sof_dai(hda_stream, dai_name, channel, dir);
+	if (IS_ERR(sof_dai))
+		return PTR_ERR(sof_dai);
+
+	/* set up/free DAI widget and send DAI_CONFIG IPC */
+	return hda_ctrl_dai_widget_setup(sdev, sof_dai, sof_dai->dai_config, widget_setup, dir);
+
 }
 
 static int hda_link_hw_params(struct snd_pcm_substream *substream,
@@ -225,9 +253,9 @@ static int hda_link_hw_params(struct snd_pcm_substream *substream,
 
 	hda_stream = hstream_to_sof_hda_stream(link_dev);
 
-	/* update the DSP with the new tag */
-	ret = hda_link_config_ipc(hda_stream, dai->name, stream_tag - 1,
-				  substream->stream);
+	/* set up the DAI widget and send the DAI_CONFIG with the new tag */
+	ret = hda_link_dai_widget_update(hda_stream, dai->name, stream_tag - 1,
+					 substream->stream, true);
 	if (ret < 0)
 		return ret;
 
@@ -368,9 +396,9 @@ static int hda_link_hw_free(struct snd_pcm_substream *substream,
 
 	hda_stream = hstream_to_sof_hda_stream(link_dev);
 
-	/* free the link DMA channel in the FW */
-	ret = hda_link_config_ipc(hda_stream, dai->name, DMA_CHAN_INVALID,
-				  substream->stream);
+	/* free the link DMA channel in the FW and the DAI widget */
+	ret = hda_link_dai_widget_update(hda_stream, dai->name, DMA_CHAN_INVALID,
+					 substream->stream, false);
 	if (ret < 0)
 		return ret;
 
@@ -414,42 +442,47 @@ static struct snd_soc_cdai_ops sof_probe_compr_ops = {
 #endif
 #endif
 
-static int ssp_dai_hw_params(struct snd_pcm_substream *substream,
-			     struct snd_pcm_hw_params *params,
-			     struct snd_soc_dai *dai)
+static int ssp_dai_config_update(struct snd_pcm_substream *substream, struct snd_soc_dai *dai,
+				 bool widget_setup, int direction)
 {
 	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
 	struct snd_soc_component *component = snd_soc_rtdcom_lookup(rtd, SOF_AUDIO_PCM_DRV_NAME);
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
 	struct sof_ipc_dai_config *config;
 	struct snd_sof_dai *sof_dai;
-	struct sof_ipc_reply reply;
-	int ret;
 
 	list_for_each_entry(sof_dai, &sdev->dai_list, list) {
 		if (!sof_dai->cpu_dai_name || !sof_dai->dai_config)
 			continue;
 
 		if (!strcmp(dai->name, sof_dai->cpu_dai_name) &&
-		    substream->stream == sof_dai->comp_dai.direction) {
+		    direction == sof_dai->comp_dai.direction) {
 			config = &sof_dai->dai_config[sof_dai->current_config];
 
-			/* send IPC */
-			ret = sof_ipc_tx_message(sdev->ipc, config->hdr.cmd, config,
-						 config->hdr.size, &reply, sizeof(reply));
-
-			if (ret < 0)
-				dev_err(sdev->dev, "error: failed to set DAI config for %s\n",
-					sof_dai->name);
-			return ret;
+			return hda_ctrl_dai_widget_setup(sdev, sof_dai, config, widget_setup,
+						    direction);
 		}
 	}
 
 	return 0;
 }
 
+static int ssp_dai_hw_params(struct snd_pcm_substream *substream,
+			     struct snd_pcm_hw_params *params,
+			     struct snd_soc_dai *dai)
+{
+	return ssp_dai_config_update(substream, dai, true, substream->stream);
+}
+
+static int ssp_dai_hw_free(struct snd_pcm_substream *substream,
+			   struct snd_soc_dai *dai)
+{
+	return ssp_dai_config_update(substream, dai, false, substream->stream);
+}
+
 static const struct snd_soc_dai_ops ssp_dai_ops = {
 	.hw_params = ssp_dai_hw_params,
+	.hw_free = ssp_dai_hw_free,
 };
 
 /*

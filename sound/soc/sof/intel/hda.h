@@ -768,4 +768,9 @@ void hda_set_mach_params(const struct snd_soc_acpi_mach *mach,
 /* PCI driver selection and probe */
 int hda_pci_intel_probe(struct pci_dev *pci, const struct pci_device_id *pci_id);
 
+struct snd_sof_dai;
+struct sof_ipc_dai_config;
+int hda_ctrl_dai_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_dai *sof_dai,
+			      struct sof_ipc_dai_config *config, bool setup, int dir);
+
 #endif
