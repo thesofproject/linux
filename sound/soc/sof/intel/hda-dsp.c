@@ -227,7 +227,7 @@ bool hda_dsp_core_is_enabled(struct snd_sof_dev *sdev,
 	val = snd_sof_dsp_read(sdev, HDA_DSP_BAR, HDA_DSP_REG_ADSPCS);
 
 #define MASK_IS_EQUAL(v, m, field) ({	\
-	uint32_t _m = field(m);		\
+	u32 _m = field(m);		\
 	((v) & _m) == _m;		\
 })
 
