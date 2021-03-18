@@ -53,6 +53,16 @@ int sdw_slave_add(struct sdw_bus *bus,
 	slave->dev.of_node = of_node_get(to_of_node(fwnode));
 	slave->dev.type = &sdw_slave_type;
 	slave->dev.groups = sdw_slave_status_attr_groups;
+
+	ret = device_register(&slave->dev);
+	if (ret) {
+		dev_err(bus->dev, "Failed to register slave->dev: ret %d\n", ret);
+
+		/* On err, free the slave device. */
+		kfree(slave);
+		return ret;
+	}
+
 	slave->bus = bus;
 	slave->status = SDW_SLAVE_UNATTACHED;
 	init_completion(&slave->enumeration_complete);
@@ -69,21 +79,6 @@ int sdw_slave_add(struct sdw_bus *bus,
 	list_add_tail(&slave->node, &bus->slaves);
 	mutex_unlock(&bus->bus_lock);
 
-	ret = device_register(&slave->dev);
-	if (ret) {
-		dev_err(bus->dev, "Failed to add slave: ret %d\n", ret);
-
-		/*
-		 * On err, don't free but drop ref as this will be freed
-		 * when release method is invoked.
-		 */
-		mutex_lock(&bus->bus_lock);
-		list_del(&slave->node);
-		mutex_unlock(&bus->bus_lock);
-		put_device(&slave->dev);
-
-		return ret;
-	}
 	sdw_slave_debugfs_init(slave);
 
 	return ret;
