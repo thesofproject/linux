@@ -106,7 +106,7 @@ struct snd_sof_route {
 };
 
 /* ASoC DAI device */
-struct snd_sof_dai {
+struct snd_sof_dai_link {
 	struct snd_soc_component *scomp;
 	const char *name;
 	const char *cpu_dai_name;
@@ -174,8 +174,8 @@ struct snd_sof_widget *snd_sof_find_swidget(struct snd_soc_component *scomp,
 struct snd_sof_widget *
 snd_sof_find_swidget_sname(struct snd_soc_component *scomp,
 			   const char *pcm_name, int dir);
-struct snd_sof_dai *snd_sof_find_dai(struct snd_soc_component *scomp,
-				     const char *name);
+struct snd_sof_dai_link *snd_sof_find_dai_link(struct snd_soc_component *scomp,
+					  const char *name);
 
 static inline
 struct snd_sof_pcm *snd_sof_find_spcm_dai(struct snd_soc_component *scomp,

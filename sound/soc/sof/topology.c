@@ -1386,7 +1386,7 @@ int sof_pipeline_core_enable(struct snd_sof_dev *sdev,
 static int sof_connect_dai_widget(struct snd_soc_component *scomp,
 				  struct snd_soc_dapm_widget *w,
 				  struct snd_soc_tplg_dapm_widget *tw,
-				  struct snd_sof_dai *dai)
+				  struct snd_sof_dai_link *dai_link)
 {
 	struct snd_soc_card *card = scomp->card;
 	struct snd_soc_pcm_runtime *rtd;
@@ -1423,7 +1423,7 @@ static int sof_connect_dai_widget(struct snd_soc_component *scomp,
 
 				return -EINVAL;
 			}
-			dai->name = rtd->dai_link->name;
+			dai_link->name = rtd->dai_link->name;
 			dev_dbg(scomp->dev, "tplg: connected widget %s -> DAI link %s\n",
 				w->name, rtd->dai_link->name);
 			break;
@@ -1445,7 +1445,7 @@ static int sof_connect_dai_widget(struct snd_soc_component *scomp,
 
 				return -EINVAL;
 			}
-			dai->name = rtd->dai_link->name;
+			dai_link->name = rtd->dai_link->name;
 			dev_dbg(scomp->dev, "tplg: connected widget %s -> DAI link %s\n",
 				w->name, rtd->dai_link->name);
 			break;
@@ -1455,7 +1455,7 @@ static int sof_connect_dai_widget(struct snd_soc_component *scomp,
 	}
 
 	/* check we have a connection */
-	if (!dai->name) {
+	if (!dai_link->name) {
 		dev_err(scomp->dev, "error: can't connect DAI %s stream %s\n",
 			w->name, w->sname);
 		return -EINVAL;
@@ -1511,7 +1511,7 @@ static int sof_widget_load_dai(struct snd_soc_component *scomp, int index,
 			       struct snd_sof_widget *swidget,
 			       struct snd_soc_tplg_dapm_widget *tw,
 			       struct sof_ipc_comp_reply *r,
-			       struct snd_sof_dai *dai)
+			       struct snd_sof_dai_link *dai_link)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_tplg_private *private = &tw->priv;
@@ -1553,15 +1553,15 @@ static int sof_widget_load_dai(struct snd_soc_component *scomp, int index,
 	ret = sof_ipc_tx_message(sdev->ipc, comp_dai->comp.hdr.cmd,
 				 comp_dai, ipc_size, r, sizeof(*r));
 
-	if (ret == 0 && dai) {
-		dai->scomp = scomp;
+	if (ret == 0 && dai_link) {
+		dai_link->scomp = scomp;
 
 		/*
 		 * copy only the sof_ipc_comp_dai to avoid collapsing
-		 * the snd_sof_dai, the extended data is kept in the
+		 * the snd_sof_dai_link, the extended data is kept in the
 		 * snd_sof_widget.
 		 */
-		memcpy(&dai->comp_dai, comp_dai, sizeof(*comp_dai));
+		memcpy(&dai_link->comp_dai, comp_dai, sizeof(*comp_dai));
 	}
 
 finish:
@@ -2387,7 +2387,7 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_sof_widget *swidget;
-	struct snd_sof_dai *dai;
+	struct snd_sof_dai_link *dai_link;
 	struct sof_ipc_comp_reply reply;
 	struct snd_sof_control *scontrol;
 	struct sof_ipc_comp comp = {
@@ -2447,19 +2447,19 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 	switch (w->id) {
 	case snd_soc_dapm_dai_in:
 	case snd_soc_dapm_dai_out:
-		dai = kzalloc(sizeof(*dai), GFP_KERNEL);
-		if (!dai) {
+		dai_link = kzalloc(sizeof(*dai_link), GFP_KERNEL);
+		if (!dai_link) {
 			kfree(swidget);
 			return -ENOMEM;
 		}
 
-		ret = sof_widget_load_dai(scomp, index, swidget, tw, &reply, dai);
+		ret = sof_widget_load_dai(scomp, index, swidget, tw, &reply, dai_link);
 		if (ret == 0) {
-			sof_connect_dai_widget(scomp, w, tw, dai);
-			list_add(&dai->list, &sdev->dai_list);
-			swidget->private = dai;
+			sof_connect_dai_widget(scomp, w, tw, dai_link);
+			list_add(&dai_link->list, &sdev->dai_link_list);
+			swidget->private = dai_link;
 		} else {
-			kfree(dai);
+			kfree(dai_link);
 		}
 		break;
 	case snd_soc_dapm_mixer:
@@ -2569,7 +2569,7 @@ static int sof_widget_unload(struct snd_soc_component *scomp,
 	struct snd_sof_widget *swidget;
 	struct soc_mixer_control *sm;
 	struct soc_bytes_ext *sbe;
-	struct snd_sof_dai *dai;
+	struct snd_sof_dai_link *dai_link;
 	struct soc_enum *se;
 	int ret = 0;
 	int i;
@@ -2583,12 +2583,12 @@ static int sof_widget_unload(struct snd_soc_component *scomp,
 	switch (swidget->id) {
 	case snd_soc_dapm_dai_in:
 	case snd_soc_dapm_dai_out:
-		dai = swidget->private;
+		dai_link = swidget->private;
 
-		if (dai) {
+		if (dai_link) {
 			/* free dai config */
-			kfree(dai->dai_config);
-			list_del(&dai->list);
+			kfree(dai_link->dai_config);
+			list_del(&dai_link->list);
 		}
 		break;
 	case snd_soc_dapm_scheduler:
@@ -2815,14 +2815,14 @@ static int sof_set_dai_config(struct snd_sof_dev *sdev, u32 size,
 			      struct snd_soc_dai_link *link,
 			      struct sof_ipc_dai_config *config)
 {
-	struct snd_sof_dai *dai;
+	struct snd_sof_dai_link *dai_link;
 	int found = 0;
 
-	list_for_each_entry(dai, &sdev->dai_list, list) {
-		if (!dai->name)
+	list_for_each_entry(dai_link, &sdev->dai_link_list, list) {
+		if (!dai_link->name)
 			continue;
 
-		if (strcmp(link->name, dai->name) == 0) {
+		if (strcmp(link->name, dai_link->name) == 0) {
 			struct sof_ipc_reply reply;
 			int ret;
 
@@ -2832,7 +2832,7 @@ static int sof_set_dai_config(struct snd_sof_dev *sdev, u32 size,
 			 * dai config's dai_index match to the component's
 			 * dai_index.
 			 */
-			config->dai_index = dai->comp_dai.dai_index;
+			config->dai_index = dai_link->comp_dai.dai_index;
 
 			/* send message to DSP */
 			ret = sof_ipc_tx_message(sdev->ipc,
@@ -2841,15 +2841,15 @@ static int sof_set_dai_config(struct snd_sof_dev *sdev, u32 size,
 
 			if (ret < 0) {
 				dev_err(sdev->dev, "error: failed to set DAI config for %s index %d\n",
-					dai->name, config->dai_index);
+					dai_link->name, config->dai_index);
 				return ret;
 			}
-			dai->dai_config = kmemdup(config, size, GFP_KERNEL);
-			if (!dai->dai_config)
+			dai_link->dai_config = kmemdup(config, size, GFP_KERNEL);
+			if (!dai_link->dai_config)
 				return -ENOMEM;
 
 			/* set cpu_dai_name */
-			dai->cpu_dai_name = link->cpus->dai_name;
+			dai_link->cpu_dai_name = link->cpus->dai_name;
 
 			found = 1;
 		}
@@ -3363,18 +3363,18 @@ static int sof_link_unload(struct snd_soc_component *scomp,
 	struct snd_soc_dai_link *link =
 		container_of(dobj, struct snd_soc_dai_link, dobj);
 
-	struct snd_sof_dai *sof_dai;
+	struct snd_sof_dai_link *sof_dai_link;
 	int ret = 0;
 
 	/* only BE link is loaded by sof */
 	if (!link->no_pcm)
 		return 0;
 
-	list_for_each_entry(sof_dai, &sdev->dai_list, list) {
-		if (!sof_dai->name)
+	list_for_each_entry(sof_dai_link, &sdev->dai_link_list, list) {
+		if (!sof_dai_link->name)
 			continue;
 
-		if (strcmp(link->name, sof_dai->name) == 0)
+		if (strcmp(link->name, sof_dai_link->name) == 0)
 			goto found;
 	}
 
@@ -3383,7 +3383,7 @@ static int sof_link_unload(struct snd_soc_component *scomp,
 	return -EINVAL;
 found:
 
-	switch (sof_dai->dai_config->type) {
+	switch (sof_dai_link->dai_config->type) {
 	case SOF_DAI_INTEL_SSP:
 	case SOF_DAI_INTEL_DMIC:
 	case SOF_DAI_INTEL_ALH:
@@ -3396,7 +3396,7 @@ found:
 		break;
 	default:
 		dev_err(scomp->dev, "error: invalid DAI type %d\n",
-			sof_dai->dai_config->type);
+			sof_dai_link->dai_config->type);
 		ret = -EINVAL;
 		break;
 	}

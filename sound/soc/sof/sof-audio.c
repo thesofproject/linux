@@ -164,7 +164,7 @@ int sof_restore_pipelines(struct device *dev)
 	struct snd_sof_widget *swidget;
 	struct snd_sof_route *sroute;
 	struct sof_ipc_pipe_new *pipeline;
-	struct snd_sof_dai *dai;
+	struct snd_sof_dai_link *dai_link;
 	struct sof_ipc_cmd_hdr *hdr;
 	struct sof_ipc_comp *comp;
 	size_t ipc_size;
@@ -196,8 +196,8 @@ int sof_restore_pipelines(struct device *dev)
 			if (!comp)
 				return -ENOMEM;
 
-			dai = swidget->private;
-			memcpy(comp, &dai->comp_dai,
+			dai_link = swidget->private;
+			memcpy(comp, &dai_link->comp_dai,
 			       sizeof(struct sof_ipc_comp_dai));
 
 			/* append extended data to the end of the component */
@@ -265,13 +265,13 @@ int sof_restore_pipelines(struct device *dev)
 	}
 
 	/* restore dai links */
-	list_for_each_entry_reverse(dai, &sdev->dai_list, list) {
+	list_for_each_entry_reverse(dai_link, &sdev->dai_link_list, list) {
 		struct sof_ipc_reply reply;
-		struct sof_ipc_dai_config *config = dai->dai_config;
+		struct sof_ipc_dai_config *config = dai_link->dai_config;
 
 		if (!config) {
 			dev_err(dev, "error: no config for DAI %s\n",
-				dai->name);
+				dai_link->name);
 			continue;
 		}
 
@@ -292,7 +292,7 @@ int sof_restore_pipelines(struct device *dev)
 		if (ret < 0) {
 			dev_err(dev,
 				"error: failed to set dai config for %s\n",
-				dai->name);
+				dai_link->name);
 
 			return ret;
 		}
@@ -419,15 +419,15 @@ snd_sof_find_swidget_sname(struct snd_soc_component *scomp,
 	return NULL;
 }
 
-struct snd_sof_dai *snd_sof_find_dai(struct snd_soc_component *scomp,
-				     const char *name)
+struct snd_sof_dai_link *snd_sof_find_dai_link(struct snd_soc_component *scomp,
+					       const char *name)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
-	struct snd_sof_dai *dai;
+	struct snd_sof_dai_link *dai_link;
 
-	list_for_each_entry(dai, &sdev->dai_list, list) {
-		if (dai->name && (strcmp(name, dai->name) == 0))
-			return dai;
+	list_for_each_entry(dai_link, &sdev->dai_link_list, list) {
+		if (dai_link->name && (strcmp(name, dai_link->name) == 0))
+			return dai_link;
 	}
 
 	return NULL;
@@ -441,20 +441,20 @@ int sof_dai_get_mclk(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_component *component =
 		snd_soc_rtdcom_lookup(rtd, SOF_AUDIO_PCM_DRV_NAME);
-	struct snd_sof_dai *dai =
-		snd_sof_find_dai(component, (char *)rtd->dai_link->name);
+	struct snd_sof_dai_link *dai_link =
+		snd_sof_find_dai_link(component, (char *)rtd->dai_link->name);
 
 	/* use the tplg configured mclk if existed */
-	if (!dai || !dai->dai_config)
+	if (!dai_link || !dai_link->dai_config)
 		return 0;
 
-	switch (dai->dai_config->type) {
+	switch (dai_link->dai_config->type) {
 	case SOF_DAI_INTEL_SSP:
-		return dai->dai_config->ssp.mclk_rate;
+		return dai_link->dai_config->ssp.mclk_rate;
 	default:
 		/* not yet implemented for platforms other than the above */
 		dev_err(rtd->dev, "mclk for dai_config->type %d not supported yet!\n",
-			dai->dai_config->type);
+			dai_link->dai_config->type);
 		return -EINVAL;
 	}
 }

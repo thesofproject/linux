@@ -629,12 +629,12 @@ int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_pa
 	struct snd_mask *fmt = hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT);
 	struct snd_soc_component *component =
 		snd_soc_rtdcom_lookup(rtd, SOF_AUDIO_PCM_DRV_NAME);
-	struct snd_sof_dai *dai =
-		snd_sof_find_dai(component, (char *)rtd->dai_link->name);
+	struct snd_sof_dai_link *dai_link =
+		snd_sof_find_dai_link(component, (char *)rtd->dai_link->name);
 	struct snd_soc_dpcm *dpcm;
 
 	/* no topology exists for this BE, try a common configuration */
-	if (!dai) {
+	if (!dai_link) {
 		dev_warn(component->dev,
 			 "warning: no topology found for BE DAI %s config\n",
 			 rtd->dai_link->name);
@@ -655,7 +655,7 @@ int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_pa
 	/* read format from topology */
 	snd_mask_none(fmt);
 
-	switch (dai->comp_dai.config.frame_fmt) {
+	switch (dai_link->comp_dai.config.frame_fmt) {
 	case SOF_IPC_FRAME_S16_LE:
 		snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S16_LE);
 		break;
@@ -671,12 +671,12 @@ int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_pa
 	}
 
 	/* read rate and channels from topology */
-	switch (dai->dai_config->type) {
+	switch (dai_link->dai_config->type) {
 	case SOF_DAI_INTEL_SSP:
-		rate->min = dai->dai_config->ssp.fsync_rate;
-		rate->max = dai->dai_config->ssp.fsync_rate;
-		channels->min = dai->dai_config->ssp.tdm_slots;
-		channels->max = dai->dai_config->ssp.tdm_slots;
+		rate->min = dai_link->dai_config->ssp.fsync_rate;
+		rate->max = dai_link->dai_config->ssp.fsync_rate;
+		channels->min = dai_link->dai_config->ssp.tdm_slots;
+		channels->max = dai_link->dai_config->ssp.tdm_slots;
 
 		dev_dbg(component->dev,
 			"rate_min: %d rate_max: %d\n", rate->min, rate->max);
@@ -687,11 +687,11 @@ int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_pa
 		break;
 	case SOF_DAI_INTEL_DMIC:
 		/* DMIC only supports 16 or 32 bit formats */
-		if (dai->comp_dai.config.frame_fmt == SOF_IPC_FRAME_S24_4LE) {
+		if (dai_link->comp_dai.config.frame_fmt == SOF_IPC_FRAME_S24_4LE) {
 			dev_err(component->dev,
 				"error: invalid fmt %d for DAI type %d\n",
-				dai->comp_dai.config.frame_fmt,
-				dai->dai_config->type);
+				dai_link->comp_dai.config.frame_fmt,
+				dai_link->dai_config->type);
 		}
 		break;
 	case SOF_DAI_INTEL_HDA:
@@ -711,14 +711,14 @@ int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_pa
 		 * Dai could run with different channel count compared with
 		 * front end, so get dai channel count from topology
 		 */
-		channels->min = dai->dai_config->alh.channels;
-		channels->max = dai->dai_config->alh.channels;
+		channels->min = dai_link->dai_config->alh.channels;
+		channels->max = dai_link->dai_config->alh.channels;
 		break;
 	case SOF_DAI_IMX_ESAI:
-		rate->min = dai->dai_config->esai.fsync_rate;
-		rate->max = dai->dai_config->esai.fsync_rate;
-		channels->min = dai->dai_config->esai.tdm_slots;
-		channels->max = dai->dai_config->esai.tdm_slots;
+		rate->min = dai_link->dai_config->esai.fsync_rate;
+		rate->max = dai_link->dai_config->esai.fsync_rate;
+		channels->min = dai_link->dai_config->esai.tdm_slots;
+		channels->max = dai_link->dai_config->esai.tdm_slots;
 
 		dev_dbg(component->dev,
 			"rate_min: %d rate_max: %d\n", rate->min, rate->max);
@@ -727,10 +727,10 @@ int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_pa
 			channels->min, channels->max);
 		break;
 	case SOF_DAI_IMX_SAI:
-		rate->min = dai->dai_config->sai.fsync_rate;
-		rate->max = dai->dai_config->sai.fsync_rate;
-		channels->min = dai->dai_config->sai.tdm_slots;
-		channels->max = dai->dai_config->sai.tdm_slots;
+		rate->min = dai_link->dai_config->sai.fsync_rate;
+		rate->max = dai_link->dai_config->sai.fsync_rate;
+		channels->min = dai_link->dai_config->sai.tdm_slots;
+		channels->max = dai_link->dai_config->sai.tdm_slots;
 
 		dev_dbg(component->dev,
 			"rate_min: %d rate_max: %d\n", rate->min, rate->max);
@@ -740,7 +740,7 @@ int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_pa
 		break;
 	default:
 		dev_err(component->dev, "error: invalid DAI type %d\n",
-			dai->dai_config->type);
+			dai_link->dai_config->type);
 		break;
 	}
 

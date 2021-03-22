@@ -156,22 +156,22 @@ static int hda_link_config_ipc(struct sof_intel_hda_stream *hda_stream,
 			       const char *dai_name, int channel, int dir)
 {
 	struct sof_ipc_dai_config *config;
-	struct snd_sof_dai *sof_dai;
+	struct snd_sof_dai_link *sof_dai_link;
 	struct sof_ipc_reply reply;
 	int ret = 0;
 
-	list_for_each_entry(sof_dai, &hda_stream->sdev->dai_list, list) {
-		if (!sof_dai->cpu_dai_name)
+	list_for_each_entry(sof_dai_link, &hda_stream->sdev->dai_link_list, list) {
+		if (!sof_dai_link->cpu_dai_name)
 			continue;
 
-		if (!strcmp(dai_name, sof_dai->cpu_dai_name) &&
-		    dir == sof_dai->comp_dai.direction) {
-			config = sof_dai->dai_config;
+		if (!strcmp(dai_name, sof_dai_link->cpu_dai_name) &&
+		    dir == sof_dai_link->comp_dai.direction) {
+			config = sof_dai_link->dai_config;
 
 			if (!config) {
 				dev_err(hda_stream->sdev->dev,
-					"error: no config for DAI %s\n",
-					sof_dai->name);
+					"error: no config for DAI link %s\n",
+					sof_dai_link->name);
 				return -EINVAL;
 			}
 
@@ -188,7 +188,7 @@ static int hda_link_config_ipc(struct sof_intel_hda_stream *hda_stream,
 			if (ret < 0)
 				dev_err(hda_stream->sdev->dev,
 					"error: failed to set dai config for %s\n",
-					sof_dai->name);
+					sof_dai_link->name);
 			return ret;
 		}
 	}
