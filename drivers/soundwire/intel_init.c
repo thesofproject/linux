@@ -24,7 +24,7 @@
 #define SDW_LINK_BASE		0x30000
 #define SDW_LINK_SIZE		0x10000
 
-static void intel_link_auxdev_release(struct device *dev)
+static void intel_link_dev_release(struct device *dev)
 {
 	struct auxiliary_device *auxdev = to_auxiliary_dev(dev);
 	struct sdw_intel_link_dev *ldev = auxiliary_dev_to_sdw_intel_link_dev(auxdev);
@@ -32,30 +32,73 @@ static void intel_link_auxdev_release(struct device *dev)
 	kfree(ldev);
 }
 
-static int intel_link_dev_init(struct sdw_intel_link_dev *ldev,
-			       struct device *parent,
-			       struct fwnode_handle *fwnode,
-			       const char *name,
-			       int link_id)
+/* alloc, init and add link devices */
+static struct sdw_intel_link_dev *intel_link_dev_register(struct sdw_intel_res *res,
+							  struct sdw_intel_ctx *ctx,
+							  struct fwnode_handle *fwnode,
+							  const char *name,
+							  int link_id)
 {
+	struct sdw_intel_link_dev *ldev;
+	struct sdw_intel_link_res *link;
 	struct auxiliary_device *auxdev;
 	int ret;
 
+	ldev = kzalloc(sizeof(*ldev), GFP_KERNEL);
+	if (!ldev)
+		return ERR_PTR(-ENOMEM);
+
 	auxdev = &ldev->auxdev;
 	auxdev->name = name;
-	auxdev->dev.parent = parent;
+	auxdev->dev.parent = res->parent;
 	auxdev->dev.fwnode = fwnode;
-	auxdev->dev.release = intel_link_auxdev_release;
+	auxdev->dev.release = intel_link_dev_release;
 
 	/* we don't use an IDA since we already have a link ID */
 	auxdev->id = link_id;
 
-	ret = auxiliary_device_init(auxdev);
-	if (ret < 0)
-		dev_err(parent, "failed to initialize link dev %s link_id %d\n",
-			name, link_id);
+	/*
+	 * keep a handle on the allocated memory, to be used in all other functions.
+	 * Since the same pattern is used to skip links that are not enabled, there is
+	 * no need to check if ctx->ldev[i] is NULL later on.
+	 */
+	ctx->ldev[link_id] = ldev;
 
-	return ret;
+	/* Add link information used in the driver probe */
+	link = &ldev->link_res;
+	link->mmio_base = res->mmio_base;
+	link->registers = res->mmio_base + SDW_LINK_BASE
+		+ (SDW_LINK_SIZE * link_id);
+	link->shim = res->mmio_base + SDW_SHIM_BASE;
+	link->alh = res->mmio_base + SDW_ALH_BASE;
+
+	link->ops = res->ops;
+	link->dev = res->dev;
+
+	link->clock_stop_quirks = res->clock_stop_quirks;
+	link->shim_lock = &ctx->shim_lock;
+	link->shim_mask = &ctx->shim_mask;
+	link->link_mask = ctx->link_mask;
+
+	/* now follow the two-step init/add sequence */
+	ret = auxiliary_device_init(auxdev);
+	if (ret < 0) {
+		dev_err(res->parent, "failed to initialize link dev %s link_id %d\n",
+			name, link_id);
+		kfree(ldev);
+		return ERR_PTR(ret);
+	}
+
+	ret = auxiliary_device_add(&ldev->auxdev);
+	if (ret < 0) {
+		dev_err(res->parent, "failed to add link dev %s link_id %d\n",
+			ldev->auxdev.name, link_id);
+		/* ldev will be freed with the put_device() and .release sequence */
+		auxiliary_device_uninit(&ldev->auxdev);
+		return ERR_PTR(ret);
+	}
+
+	return ldev;
 }
 
 static void intel_link_dev_unregister(struct sdw_intel_link_dev *ldev)
@@ -139,7 +182,6 @@ static struct sdw_intel_ctx
 	int num_slaves = 0;
 	int count;
 	int i;
-	int ret;
 
 	if (!res)
 		return NULL;
@@ -190,58 +232,22 @@ static struct sdw_intel_ctx
 		if (!(link_mask & BIT(i)))
 			continue;
 
-		/* Alloc and init devices */
-		ldev = kzalloc(sizeof(*ldev), GFP_KERNEL);
-		if (!ldev)
-			goto err;
-
 		/*
-		 * keep a handle on the allocated memory, to be used in all other functions.
-		 * Since the same pattern is used to skip links that are not enabled, there is
-		 * not need to check if ctx->ldev[i] is NULL later on.
+		 * init and add a device for each link
+		 *
+		 * The name of the device will be soundwire_intel.link.[i],
+		 * with the "soundwire_intel" module prefix automatically added
+		 * by the auxiliary bus core.
 		 */
-		ctx->ldev[i] = ldev;
-
-		ret = intel_link_dev_init(ldev,
-					  res->parent,
-					  acpi_fwnode_handle(adev),
-					  "link", /* prefixed by core with "soundwire_intel." */
-					  i);
-		if (ret < 0) {
-			/*
-			 * We need to free the memory allocated in the current iteration
-			 */
-			kfree(ldev);
-
+		ldev = intel_link_dev_register(res,
+					       ctx,
+					       acpi_fwnode_handle(adev),
+					       "link",
+					       i);
+		if (IS_ERR(ldev))
 			goto err;
-		}
 
 		link = &ldev->link_res;
-
-		/* now set link information */
-		link->mmio_base = res->mmio_base;
-		link->registers = res->mmio_base + SDW_LINK_BASE
-			+ (SDW_LINK_SIZE * i);
-		link->shim = res->mmio_base + SDW_SHIM_BASE;
-		link->alh = res->mmio_base + SDW_ALH_BASE;
-
-		link->ops = res->ops;
-		link->dev = res->dev;
-
-		link->clock_stop_quirks = res->clock_stop_quirks;
-		link->shim_lock = &ctx->shim_lock;
-		link->shim_mask = &ctx->shim_mask;
-		link->link_mask = link_mask;
-
-		ret = auxiliary_device_add(&ldev->auxdev);
-		if (ret < 0) {
-			dev_err(&adev->dev, "failed to add link dev %s link_id %d\n",
-				ldev->auxdev.name, i);
-			/* ldev will be freed with the put_device() and .release sequence */
-			auxiliary_device_uninit(&ldev->auxdev);
-			goto err;
-		}
-
 		link->cdns = dev_get_drvdata(&ldev->auxdev.dev);
 
 		if (!link->cdns) {

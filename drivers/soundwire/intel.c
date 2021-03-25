@@ -1327,9 +1327,11 @@ static int intel_init(struct sdw_intel *sdw)
 }
 
 /*
- * probe and init
+ * probe and init (aux_dev_id argument is required by function prototype but not used)
  */
-static int intel_link_probe(struct auxiliary_device *auxdev, const struct auxiliary_device_id *id)
+static int intel_link_probe(struct auxiliary_device *auxdev,
+			    const struct auxiliary_device_id *aux_dev_id)
+
 {
 	struct device *dev = &auxdev->dev;
 	struct sdw_intel_link_dev *ldev = auxiliary_dev_to_sdw_intel_link_dev(auxdev);
