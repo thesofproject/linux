@@ -759,6 +759,7 @@ extern const struct sof_intel_dsp_desc tglh_chip_info;
 extern const struct sof_intel_dsp_desc ehl_chip_info;
 extern const struct sof_intel_dsp_desc jsl_chip_info;
 extern const struct sof_intel_dsp_desc adls_chip_info;
+extern const struct sof_intel_dsp_desc adlp_chip_info;
 
 /* machine driver select */
 void hda_machine_select(struct snd_sof_dev *sdev);
