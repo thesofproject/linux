@@ -196,6 +196,52 @@ int __auxiliary_device_add(struct auxiliary_device *auxdev, const char *modname)
 EXPORT_SYMBOL_GPL(__auxiliary_device_add);
 
 /**
+ * __auxiliary_device_register - register an auxiliary bus device
+ * @auxdev: auxiliary bus device to add to the bus
+ * @auxdev_container: pointer to structure containing @auxdev
+ * @modname: name of the parent device's driver module
+ *
+ * This routine combines the first (init) and second (add) steps together.
+ * The header is different from traditional _register function. The auxiliary
+ * device is typically embedded in a larger structure, and we need to free that
+ * larger structure if @auxiliary_device_init fails.
+ *
+ * All errors are handled internally, i.e. kfree is called after a failure of
+ * @auxiliary_device_init() and auxiliary_device_uninit() is called if
+ * @auxiliary_device_add fails. The container is assumed to be allocated
+ * normally, i.e. not be device-managed.
+ *
+ * The expectation is that users will call the "auxiliary_device_register" macro
+ * so that the caller's KBUILD_MODNAME is automatically inserted for the modname
+ * parameter.  Only if a user requires a custom name would this version be
+ * called directly.
+ */
+int __auxiliary_device_register(struct auxiliary_device *auxdev,
+				void *auxdev_container,
+				const char *modname)
+{
+	int ret;
+
+	if (!auxdev || !auxdev_container)
+		return -EINVAL;
+
+	ret = auxiliary_device_init(auxdev);
+	if (ret < 0) {
+		kfree(auxdev_container);
+		return ret;
+	}
+
+	ret = auxiliary_device_add(auxdev);
+	if (ret < 0) {
+		auxiliary_device_uninit(auxdev);
+		return ret;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(__auxiliary_device_register);
+
+/**
  * auxiliary_find_device - auxiliary device iterator for locating a particular device.
  * @start: Device to begin with
  * @data: Data to pass to match function

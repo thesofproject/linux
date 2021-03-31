@@ -42,6 +42,12 @@ int auxiliary_device_init(struct auxiliary_device *auxdev);
 int __auxiliary_device_add(struct auxiliary_device *auxdev, const char *modname);
 #define auxiliary_device_add(auxdev) __auxiliary_device_add(auxdev, KBUILD_MODNAME)
 
+int __auxiliary_device_register(struct auxiliary_device *auxdev,
+				void *auxdev_container,
+				const char *modname);
+#define auxiliary_device_register(auxdev, auxdev_container)		\
+	__auxiliary_device_register(auxdev, auxdev_container, KBUILD_MODNAME)
+
 static inline void auxiliary_device_uninit(struct auxiliary_device *auxdev)
 {
 	put_device(&auxdev->dev);
@@ -50,6 +56,12 @@ static inline void auxiliary_device_uninit(struct auxiliary_device *auxdev)
 static inline void auxiliary_device_delete(struct auxiliary_device *auxdev)
 {
 	device_del(&auxdev->dev);
+}
+
+static inline void auxiliary_device_unregister(struct auxiliary_device *auxdev)
+{
+	auxiliary_device_delete(auxdev);
+	auxiliary_device_uninit(auxdev);
 }
 
 int __auxiliary_driver_register(struct auxiliary_driver *auxdrv, struct module *owner,
