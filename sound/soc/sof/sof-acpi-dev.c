@@ -47,6 +47,9 @@ static void sof_acpi_probe_complete(struct device *dev)
 {
 	dev_dbg(dev, "Completing SOF ACPI probe");
 
+	if (IS_ENABLED(CONFIG_SND_SOC_SOF_NOCODEC))
+		BUG_ON(0);
+
 	if (sof_acpi_debug & SOF_ACPI_DISABLE_PM_RUNTIME)
 		return;
 
