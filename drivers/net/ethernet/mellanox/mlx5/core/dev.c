@@ -278,24 +278,16 @@ static struct mlx5_adev *add_adev(struct mlx5_core_dev *dev, int idx)
 	madev->mdev = dev;
 	madev->idx = idx;
 
-	ret = auxiliary_device_init(adev);
-	if (ret) {
-		kfree(madev);
+	ret = auxiliary_device_register(adev, madev);
+	if (ret)
 		return ERR_PTR(ret);
-	}
 
-	ret = auxiliary_device_add(adev);
-	if (ret) {
-		auxiliary_device_uninit(adev);
-		return ERR_PTR(ret);
-	}
 	return madev;
 }
 
 static void del_adev(struct auxiliary_device *adev)
 {
-	auxiliary_device_delete(adev);
-	auxiliary_device_uninit(adev);
+	auxiliary_device_unregister(adev);
 }
 
 int mlx5_attach_device(struct mlx5_core_dev *dev)
