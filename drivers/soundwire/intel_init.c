@@ -80,21 +80,10 @@ static struct sdw_intel_link_dev *intel_link_dev_register(struct sdw_intel_res *
 	link->shim_mask = &ctx->shim_mask;
 	link->link_mask = ctx->link_mask;
 
-	/* now follow the two-step init/add sequence */
-	ret = auxiliary_device_init(auxdev);
+	ret = auxiliary_device_register(auxdev, ldev);
 	if (ret < 0) {
-		dev_err(res->parent, "failed to initialize link dev %s link_id %d\n",
+		dev_err(res->parent, "failed to register link dev %s link_id %d\n",
 			name, link_id);
-		kfree(ldev);
-		return ERR_PTR(ret);
-	}
-
-	ret = auxiliary_device_add(&ldev->auxdev);
-	if (ret < 0) {
-		dev_err(res->parent, "failed to add link dev %s link_id %d\n",
-			ldev->auxdev.name, link_id);
-		/* ldev will be freed with the put_device() and .release sequence */
-		auxiliary_device_uninit(&ldev->auxdev);
 		return ERR_PTR(ret);
 	}
 
@@ -103,8 +92,7 @@ static struct sdw_intel_link_dev *intel_link_dev_register(struct sdw_intel_res *
 
 static void intel_link_dev_unregister(struct sdw_intel_link_dev *ldev)
 {
-	auxiliary_device_delete(&ldev->auxdev);
-	auxiliary_device_uninit(&ldev->auxdev);
+	auxiliary_device_unregister(&ldev->auxdev);
 }
 
 static int sdw_intel_cleanup(struct sdw_intel_ctx *ctx)
