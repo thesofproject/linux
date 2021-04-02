@@ -850,9 +850,8 @@ static int sdw_slave_clk_stop_callback(struct sdw_slave *slave,
 	if (slave->ops && slave->ops->clk_stop) {
 		ret = slave->ops->clk_stop(slave, mode, type);
 		if (ret < 0) {
-			sdw_dev_dbg_or_err(&slave->dev, ret != -ENODATA,
-					   "Clk Stop mode %d type =%d failed: %d\n",
-					   mode, type, ret);
+			dev_err(&slave->dev,
+				"Clk Stop type =%d failed: %d\n", type, ret);
 			return ret;
 		}
 	}
@@ -881,8 +880,7 @@ static int sdw_slave_clk_stop_prepare(struct sdw_slave *slave,
 	} else {
 		ret = sdw_read_no_pm(slave, SDW_SCP_SYSTEMCTRL);
 		if (ret < 0) {
-			sdw_dev_dbg_or_err(&slave->dev, ret != -ENODATA,
-					   "SDW_SCP_SYSTEMCTRL read failed:%d\n", ret);
+			dev_err(&slave->dev, "SDW_SCP_SYSTEMCTRL read failed:%d\n", ret);
 			return ret;
 		}
 		val = ret;
@@ -892,8 +890,8 @@ static int sdw_slave_clk_stop_prepare(struct sdw_slave *slave,
 	ret = sdw_write_no_pm(slave, SDW_SCP_SYSTEMCTRL, val);
 
 	if (ret < 0)
-		sdw_dev_dbg_or_err(&slave->dev, ret != -ENODATA,
-				   "SDW_SCP_SYSTEMCTRL write ignored:%d\n", ret);
+		dev_err(&slave->dev,
+			"Clock Stop prepare failed for slave: %d", ret);
 
 	return ret;
 }
@@ -911,7 +909,7 @@ static int sdw_bus_wait_for_clk_prep_deprep(struct sdw_bus *bus, u16 dev_num)
 		}
 		val &= SDW_SCP_STAT_CLK_STP_NF;
 		if (!val) {
-			dev_dbg(bus->dev, "clock stop prep/de-prep done slave:%d\n",
+			dev_dbg(bus->dev, "clock stop prep/de-prep done slave:%d",
 				dev_num);
 			return 0;
 		}
@@ -920,7 +918,7 @@ static int sdw_bus_wait_for_clk_prep_deprep(struct sdw_bus *bus, u16 dev_num)
 		retry--;
 	} while (retry);
 
-	dev_err(bus->dev, "clock stop prep/de-prep failed slave:%d\n",
+	dev_err(bus->dev, "clock stop prep/de-prep failed slave:%d",
 		dev_num);
 
 	return -ETIMEDOUT;
@@ -960,18 +958,19 @@ int sdw_bus_prep_clk_stop(struct sdw_bus *bus)
 		slave_mode = sdw_get_clk_stop_mode(slave);
 		slave->curr_clk_stop_mode = slave_mode;
 
-		ret = sdw_slave_clk_stop_callback(slave, slave_mode, SDW_CLK_PRE_PREPARE);
+		ret = sdw_slave_clk_stop_callback(slave, slave_mode,
+						  SDW_CLK_PRE_PREPARE);
 		if (ret < 0) {
-			sdw_dev_dbg_or_err(&slave->dev, ret != -ENODATA,
-					   "clock stop pre prepare cb failed:%d\n", ret);
+			dev_err(&slave->dev,
+				"pre-prepare failed:%d", ret);
 			return ret;
 		}
 
 		ret = sdw_slave_clk_stop_prepare(slave,
 						 slave_mode, true);
 		if (ret < 0) {
-			sdw_dev_dbg_or_err(&slave->dev, ret != -ENODATA,
-					   "clock stop prepare failed:%d\n", ret);
+			dev_err(&slave->dev,
+				"pre-prepare failed:%d", ret);
 			return ret;
 		}
 
@@ -1002,11 +1001,13 @@ int sdw_bus_prep_clk_stop(struct sdw_bus *bus)
 		slave_mode = slave->curr_clk_stop_mode;
 
 		if (slave_mode == SDW_CLK_STOP_MODE1) {
-			ret = sdw_slave_clk_stop_callback(slave, slave_mode, SDW_CLK_POST_PREPARE);
+			ret = sdw_slave_clk_stop_callback(slave,
+							  slave_mode,
+							  SDW_CLK_POST_PREPARE);
+
 			if (ret < 0) {
-				sdw_dev_dbg_or_err(&slave->dev, ret != -ENODATA,
-						   "clock stop post-prepare cb failed:%d\n", ret);
-				return ret;
+				dev_err(&slave->dev,
+					"post-prepare failed:%d", ret);
 			}
 		}
 	}
@@ -1034,8 +1035,12 @@ int sdw_bus_clk_stop(struct sdw_bus *bus)
 	ret = sdw_bwrite_no_pm(bus, SDW_BROADCAST_DEV_NUM,
 			       SDW_SCP_CTRL, SDW_SCP_CTRL_CLK_STP_NOW);
 	if (ret < 0) {
-		sdw_dev_dbg_or_err(bus->dev, ret != -ENODATA,
-				   "ClockStopNow Broadcast msg failed %d\n", ret);
+		if (ret == -ENODATA)
+			dev_dbg(bus->dev,
+				"ClockStopNow Broadcast msg ignored %d", ret);
+		else
+			dev_err(bus->dev,
+				"ClockStopNow Broadcast msg failed %d", ret);
 		return ret;
 	}
 
@@ -1083,24 +1088,26 @@ int sdw_bus_exit_clk_stop(struct sdw_bus *bus)
 			continue;
 		}
 
-		ret = sdw_slave_clk_stop_callback(slave, mode, SDW_CLK_PRE_DEPREPARE);
+		ret = sdw_slave_clk_stop_callback(slave, mode,
+						  SDW_CLK_PRE_DEPREPARE);
 		if (ret < 0)
-			dev_warn(&slave->dev, "clock stop pre deprepare cb failed:%d\n", ret);
+			dev_warn(&slave->dev,
+				 "clk stop deprep failed:%d", ret);
 
-		ret = sdw_slave_clk_stop_prepare(slave, mode, false);
+		ret = sdw_slave_clk_stop_prepare(slave, mode,
+						 false);
+
 		if (ret < 0)
-			dev_warn(&slave->dev, "clock stop deprepare failed:%d\n", ret);
+			dev_warn(&slave->dev,
+				 "clk stop deprep failed:%d", ret);
 	}
 
 	/* Skip remaining clock stop de-preparation if no Slave is attached */
 	if (!is_slave)
 		return 0;
 
-	if (!simple_clk_stop) {
-		ret = sdw_bus_wait_for_clk_prep_deprep(bus, SDW_BROADCAST_DEV_NUM);
-		if (ret < 0)
-			dev_warn(&slave->dev, "clock stop deprepare wait failed:%d\n", ret);
-	}
+	if (!simple_clk_stop)
+		sdw_bus_wait_for_clk_prep_deprep(bus, SDW_BROADCAST_DEV_NUM);
 
 	list_for_each_entry(slave, &bus->slaves, node) {
 		if (!slave->dev_num)
@@ -1111,9 +1118,8 @@ int sdw_bus_exit_clk_stop(struct sdw_bus *bus)
 			continue;
 
 		mode = slave->curr_clk_stop_mode;
-		ret = sdw_slave_clk_stop_callback(slave, mode, SDW_CLK_POST_DEPREPARE);
-		if (ret < 0)
-			dev_warn(&slave->dev, "clock stop post deprepare cb failed:%d\n", ret);
+		sdw_slave_clk_stop_callback(slave, mode,
+					    SDW_CLK_POST_DEPREPARE);
 	}
 
 	return 0;
