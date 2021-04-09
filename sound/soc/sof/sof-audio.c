@@ -581,8 +581,12 @@ int sof_set_up_pipelines(struct device *dev, bool verify)
 		/* update DAI config. The IPC will be sent in sof_widget_setup() */
 		if (WIDGET_IS_DAI(swidget->id)) {
 			struct snd_sof_dai *dai = swidget->private;
-			struct sof_ipc_dai_config *config = dai->dai_config;
+			struct sof_ipc_dai_config *config;
 
+			if (!dai || !dai->dai_config)
+				continue;
+
+			config = dai->dai_config;
 			/*
 			 * The link DMA channel would be invalidated for running
 			 * streams but not for streams that were in the PAUSED
