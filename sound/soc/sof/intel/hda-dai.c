@@ -151,77 +151,67 @@ static int hda_link_dma_params(struct hdac_ext_stream *stream,
 	return 0;
 }
 
-/* find the snd_sof_dai matching the BE CPU DAI name and update its config */
-static struct snd_sof_dai *hda_get_sof_dai(struct sof_intel_hda_stream *hda_stream,
-					   const char *dai_name, int channel, int dir)
+/* Update config for the DAI widget */
+static struct sof_ipc_dai_config *hda_dai_update_config(struct snd_soc_dapm_widget *w,
+							int channel)
 {
-	struct snd_sof_dev *sdev = hda_stream->sdev;
+	struct snd_sof_widget *swidget = w->dobj.private;
 	struct sof_ipc_dai_config *config;
 	struct snd_sof_dai *sof_dai;
-	bool found = false;
 
-	/* find snd_sof_dai matching the BE CPU DAI name */
-	list_for_each_entry(sof_dai, &sdev->dai_list, list) {
-		if (!sof_dai->cpu_dai_name)
-			continue;
-
-		if (!strcmp(dai_name, sof_dai->cpu_dai_name) &&
-		    dir == sof_dai->comp_dai.direction) {
-			found = true;
-			break;
-		}
+	if (!swidget) {
+		dev_err(swidget->scomp->dev, "error: No private data for widget %s\n", w->name);
+		return NULL;
 	}
 
-	if (!found) {
-		dev_err(sdev->dev, "error: failed to find SOF DAI for: %s\n", dai_name);
-		return ERR_PTR(-ENOENT);
+	sof_dai = swidget->private;
+
+	if (!sof_dai || !sof_dai->dai_config) {
+		dev_err(swidget->scomp->dev, "error: No config for DAI %s\n", w->name);
+		return NULL;
 	}
 
-	config = sof_dai->dai_config;
-	if (!config) {
-		dev_err(sdev->dev, "error: no config for DAI %s\n", sof_dai->name);
-		return ERR_PTR(-ENOENT);
-	}
+	config = &sof_dai->dai_config[sof_dai->current_config];
 
 	/* update config with stream tag */
 	config->hda.link_dma_ch = channel;
 
-	return sof_dai;
+	return config;
 }
 
 static int hda_link_config_ipc(struct sof_intel_hda_stream *hda_stream,
-			       const char *dai_name, int channel, int dir)
+			      struct snd_soc_dapm_widget *w, int channel)
 {
 	struct snd_sof_dev *sdev = hda_stream->sdev;
 	struct sof_ipc_dai_config *config;
-	struct snd_sof_dai *sof_dai;
 	struct sof_ipc_reply reply;
 
-	sof_dai = hda_get_sof_dai(hda_stream, dai_name, channel, dir);
-	if (IS_ERR(sof_dai))
-		return PTR_ERR(sof_dai);
-
-	config = sof_dai->dai_config;
+	config = hda_dai_update_config(w, channel);
+	if (!config) {
+		dev_err(sdev->dev, "error: no config for DAI %s\n", w->name);
+		return -ENOENT;
+	}
 
 	/* send DAI_CONFIG IPC */
 	return sof_ipc_tx_message(sdev->ipc, config->hdr.cmd, config, config->hdr.size,
-					   &reply, sizeof(reply));
+				  &reply, sizeof(reply));
 }
 
 static int hda_link_dai_widget_update(struct sof_intel_hda_stream *hda_stream,
-				      const char *dai_name, int channel, int dir,
-				      bool widget_setup)
+				      struct snd_soc_dapm_widget *w,
+				      int channel, bool widget_setup)
 {
 	struct snd_sof_dev *sdev = hda_stream->sdev;
-	struct snd_sof_dai *sof_dai;
+	struct sof_ipc_dai_config *config;
 
-	sof_dai = hda_get_sof_dai(hda_stream, dai_name, channel, dir);
-	if (IS_ERR(sof_dai))
-		return PTR_ERR(sof_dai);
+	config = hda_dai_update_config(w, channel);
+	if (!config) {
+		dev_err(sdev->dev, "error: no config for DAI %s\n", w->name);
+		return -ENOENT;
+	}
 
 	/* set up/free DAI widget and send DAI_CONFIG IPC */
-	return hda_ctrl_dai_widget_setup(sdev, sof_dai, sof_dai->dai_config, widget_setup, dir);
-
+	return hda_ctrl_dai_widget_setup(w, widget_setup);
 }
 
 static int hda_link_hw_params(struct snd_pcm_substream *substream,
@@ -235,6 +225,7 @@ static int hda_link_hw_params(struct snd_pcm_substream *substream,
 	struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(rtd, 0);
 	struct sof_intel_hda_stream *hda_stream;
 	struct hda_pipe_params p_params = {0};
+	struct snd_soc_dapm_widget *w;
 	struct hdac_ext_link *link;
 	int stream_tag;
 	int ret;
@@ -253,9 +244,13 @@ static int hda_link_hw_params(struct snd_pcm_substream *substream,
 
 	hda_stream = hstream_to_sof_hda_stream(link_dev);
 
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		w = dai->playback_widget;
+	else
+		w = dai->capture_widget;
+
 	/* set up the DAI widget and send the DAI_CONFIG with the new tag */
-	ret = hda_link_dai_widget_update(hda_stream, dai->name, stream_tag - 1,
-					 substream->stream, true);
+	ret = hda_link_dai_widget_update(hda_stream, w, stream_tag - 1, true);
 	if (ret < 0)
 		return ret;
 
@@ -311,6 +306,7 @@ static int hda_link_pcm_trigger(struct snd_pcm_substream *substream,
 				snd_soc_dai_get_dma_data(dai, substream);
 	struct sof_intel_hda_stream *hda_stream;
 	struct snd_soc_pcm_runtime *rtd;
+	struct snd_soc_dapm_widget *w;
 	struct hdac_ext_link *link;
 	struct hdac_stream *hstream;
 	struct hdac_bus *bus;
@@ -345,12 +341,16 @@ static int hda_link_pcm_trigger(struct snd_pcm_substream *substream,
 		break;
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_STOP:
+		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+			w = dai->playback_widget;
+		else
+			w = dai->capture_widget;
+
 		/*
 		 * clear link DMA channel. It will be assigned when
 		 * hw_params is set up again after resume.
 		 */
-		ret = hda_link_config_ipc(hda_stream, dai->name,
-					  DMA_CHAN_INVALID, substream->stream);
+		ret = hda_link_config_ipc(hda_stream, w, DMA_CHAN_INVALID);
 		if (ret < 0)
 			return ret;
 
@@ -381,6 +381,7 @@ static int hda_link_hw_free(struct snd_pcm_substream *substream,
 	struct hdac_stream *hstream;
 	struct snd_soc_pcm_runtime *rtd;
 	struct hdac_ext_stream *link_dev;
+	struct snd_soc_dapm_widget *w;
 	int ret;
 
 	hstream = substream->runtime->private_data;
@@ -396,9 +397,13 @@ static int hda_link_hw_free(struct snd_pcm_substream *substream,
 
 	hda_stream = hstream_to_sof_hda_stream(link_dev);
 
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		w = dai->playback_widget;
+	else
+		w = dai->capture_widget;
+
 	/* free the link DMA channel in the FW and the DAI widget */
-	ret = hda_link_dai_widget_update(hda_stream, dai->name, DMA_CHAN_INVALID,
-					 substream->stream, false);
+	ret = hda_link_dai_widget_update(hda_stream, w, DMA_CHAN_INVALID, false);
 	if (ret < 0)
 		return ret;
 
@@ -443,41 +448,29 @@ static struct snd_soc_cdai_ops sof_probe_compr_ops = {
 #endif
 
 static int ssp_dai_config_update(struct snd_pcm_substream *substream, struct snd_soc_dai *dai,
-				 bool widget_setup, int direction)
+				 bool widget_setup)
 {
-	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
-	struct snd_soc_component *component = snd_soc_rtdcom_lookup(rtd, SOF_AUDIO_PCM_DRV_NAME);
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
-	struct sof_ipc_dai_config *config;
-	struct snd_sof_dai *sof_dai;
+	struct snd_soc_dapm_widget *w;
 
-	list_for_each_entry(sof_dai, &sdev->dai_list, list) {
-		if (!sof_dai->cpu_dai_name || !sof_dai->dai_config)
-			continue;
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		w = dai->playback_widget;
+	else
+		w = dai->capture_widget;
 
-		if (!strcmp(dai->name, sof_dai->cpu_dai_name) &&
-		    direction == sof_dai->comp_dai.direction) {
-			config = &sof_dai->dai_config[sof_dai->current_config];
-
-			return hda_ctrl_dai_widget_setup(sdev, sof_dai, config, widget_setup,
-						    direction);
-		}
-	}
-
-	return 0;
+	return hda_ctrl_dai_widget_setup(w, widget_setup);
 }
 
 static int ssp_dai_hw_params(struct snd_pcm_substream *substream,
 			     struct snd_pcm_hw_params *params,
 			     struct snd_soc_dai *dai)
 {
-	return ssp_dai_config_update(substream, dai, true, substream->stream);
+	return ssp_dai_config_update(substream, dai, true);
 }
 
 static int ssp_dai_hw_free(struct snd_pcm_substream *substream,
 			   struct snd_soc_dai *dai)
 {
-	return ssp_dai_config_update(substream, dai, false, substream->stream);
+	return ssp_dai_config_update(substream, dai, false);
 }
 
 static const struct snd_soc_dai_ops ssp_dai_ops = {
