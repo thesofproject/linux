@@ -2837,6 +2837,12 @@ static void intel_pin_eld_notify(void *audio_ptr, int port, int pipe)
 	pin_nid = intel_port2pin(codec, port);
 	if (!pin_nid)
 		return;
+
+	codec_info(codec, "DEBUG: %s: power_state %08X (card %08X, rt-suspend %d)\n",
+		   __func__, codec->core.dev.power.power_state.event,
+		   snd_power_get_state(codec->card),
+		   pm_runtime_status_suspended(&codec->core.dev));
+
 	/* skip notification during system suspend (but not in runtime PM);
 	 * the state will be updated at resume
 	 */
