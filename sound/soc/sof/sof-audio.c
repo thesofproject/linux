@@ -45,10 +45,11 @@ static int sof_kcontrol_setup(struct snd_sof_dev *sdev, struct snd_sof_control *
 
 static int sof_dai_config_setup(struct snd_sof_dev *sdev, struct snd_sof_dai *dai)
 {
+	struct sof_ipc_dai_config *config;
 	struct sof_ipc_reply reply;
-	struct sof_ipc_dai_config *config = dai->dai_config;
 	int ret;
 
+	config = &dai->dai_config[dai->current_config];
 	if (!config) {
 		dev_err(sdev->dev, "error: no config for DAI %s\n", dai->name);
 		return -EINVAL;
