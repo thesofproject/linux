@@ -550,11 +550,6 @@ void snd_sof_handle_fw_exception(struct snd_sof_dev *sdev);
 int snd_sof_dbg_memory_info_init(struct snd_sof_dev *sdev);
 
 /*
- * Platform specific ops.
- */
-extern struct snd_compress_ops sof_compressed_ops;
-
-/*
  * DSP Architectures.
  */
 static inline void sof_stack(struct snd_sof_dev *sdev, void *oops, u32 *stack,
