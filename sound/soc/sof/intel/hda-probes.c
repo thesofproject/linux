@@ -11,6 +11,7 @@
 #include <sound/hdaudio_ext.h>
 #include <sound/soc.h>
 #include "../sof-priv.h"
+#include "../sof-client-probes.h"
 #include "hda.h"
 
 static inline struct hdac_ext_stream *
@@ -19,7 +20,7 @@ hda_compr_get_stream(struct snd_compr_stream *cstream)
 	return cstream->runtime->private_data;
 }
 
-int hda_probe_compr_assign(struct snd_sof_dev *sdev,
+static int hda_probe_compr_assign(struct snd_sof_dev *sdev,
 			   struct snd_compr_stream *cstream,
 			   struct snd_soc_dai *dai)
 {
@@ -36,7 +37,7 @@ int hda_probe_compr_assign(struct snd_sof_dev *sdev,
 	return hdac_stream(stream)->stream_tag;
 }
 
-int hda_probe_compr_free(struct snd_sof_dev *sdev,
+static int hda_probe_compr_free(struct snd_sof_dev *sdev,
 			 struct snd_compr_stream *cstream,
 			 struct snd_soc_dai *dai)
 {
@@ -56,7 +57,7 @@ int hda_probe_compr_free(struct snd_sof_dev *sdev,
 	return 0;
 }
 
-int hda_probe_compr_set_params(struct snd_sof_dev *sdev,
+static int hda_probe_compr_set_params(struct snd_sof_dev *sdev,
 			       struct snd_compr_stream *cstream,
 			       struct snd_compr_params *params,
 			       struct snd_soc_dai *dai)
@@ -89,7 +90,7 @@ int hda_probe_compr_set_params(struct snd_sof_dev *sdev,
 	return 0;
 }
 
-int hda_probe_compr_trigger(struct snd_sof_dev *sdev,
+static int hda_probe_compr_trigger(struct snd_sof_dev *sdev,
 			    struct snd_compr_stream *cstream, int cmd,
 			    struct snd_soc_dai *dai)
 {
@@ -98,7 +99,7 @@ int hda_probe_compr_trigger(struct snd_sof_dev *sdev,
 	return hda_dsp_stream_trigger(sdev, stream, cmd);
 }
 
-int hda_probe_compr_pointer(struct snd_sof_dev *sdev,
+static int hda_probe_compr_pointer(struct snd_sof_dev *sdev,
 			    struct snd_compr_stream *cstream,
 			    struct snd_compr_tstamp *tstamp,
 			    struct snd_soc_dai *dai)
@@ -112,3 +113,13 @@ int hda_probe_compr_pointer(struct snd_sof_dev *sdev,
 
 	return 0;
 }
+
+/* SOF client implementation */
+const struct sof_probes_ops hda_probe_ops = {
+	.assign = hda_probe_compr_assign,
+	.free = hda_probe_compr_free,
+	.set_params = hda_probe_compr_set_params,
+	.trigger = hda_probe_compr_trigger,
+	.pointer = hda_probe_compr_pointer,
+};
+EXPORT_SYMBOL_NS(hda_probe_ops, SND_SOC_SOF_INTEL_HDA_COMMON);

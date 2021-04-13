@@ -30,3 +30,7 @@ obj-$(CONFIG_SND_SOC_SOF_INTEL_APL) += snd-sof-pci-intel-apl.o
 obj-$(CONFIG_SND_SOC_SOF_INTEL_CNL) += snd-sof-pci-intel-cnl.o
 obj-$(CONFIG_SND_SOC_SOF_INTEL_ICL) += snd-sof-pci-intel-icl.o
 obj-$(CONFIG_SND_SOC_SOF_INTEL_TGL) += snd-sof-pci-intel-tgl.o
+
+snd-sof-client-intel-probes-objs := client-intel-probes.o
+
+obj-$(CONFIG_SND_SOC_SOF_INTEL_PROBES) += snd-sof-client-intel-probes.o
