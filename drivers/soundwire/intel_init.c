@@ -350,8 +350,8 @@ sdw_intel_startup_controller(struct sdw_intel_ctx *ctx)
  * sdw_intel_probe() - SoundWire Intel probe routine
  * @res: resource data
  *
- * This registers a platform device for each Master handled by the controller,
- * and SoundWire Master and Slave devices will be created by the platform
+ * This registers an auxiliary device for each Master handled by the controller,
+ * and SoundWire Master and Slave devices will be created by the auxiliary
  * device probe. All the information necessary is stored in the context, and
  * the res argument pointer can be freed after this step.
  * This function will be called after sdw_intel_acpi_scan() by SOF probe.
