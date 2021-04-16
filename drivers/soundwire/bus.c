@@ -983,10 +983,15 @@ int sdw_bus_prep_clk_stop(struct sdw_bus *bus)
 		return ret;
 
 	if (!simple_clk_stop) {
+
+		dev_err(bus->dev, "test failed, clk_prep_deprep is not called\n");
+
 		ret = sdw_bus_wait_for_clk_prep_deprep(bus,
 						       SDW_BROADCAST_DEV_NUM);
 		if (ret < 0)
 			return ret;
+	} else {
+		dev_dbg(bus->dev, "test skipped, clk_prep_deprep is not called\n");
 	}
 
 	/* Inform slaves that prep is done */
