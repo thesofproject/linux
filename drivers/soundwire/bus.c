@@ -969,9 +969,7 @@ int sdw_bus_prep_clk_stop(struct sdw_bus *bus)
 						       SDW_BROADCAST_DEV_NUM);
 		/*
 		 * if there are no Slave devices present and the reply is
-		 * Command_Ignored/-ENODATA, we don't need to continue with the
-		 * flow and can just return here. The error code is not modified
-		 * and its handling left as an exercise for the caller.
+		 * Command_Ignored/-ENODATA, we can stop the sequence here
 		 */
 		if (ret < 0)
 			return ret;
