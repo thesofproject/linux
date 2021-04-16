@@ -181,8 +181,6 @@ int snd_sof_complete_pipeline(struct device *dev,
 int sof_load_pipeline_ipc(struct device *dev,
 			  struct sof_ipc_pipe_new *pipeline,
 			  struct sof_ipc_comp_reply *r);
-int sof_pipeline_core_enable(struct snd_sof_dev *sdev,
-			     const struct snd_sof_widget *swidget);
 
 /*
  * Stream IPC

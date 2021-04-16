@@ -136,6 +136,13 @@ int sof_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
 	swidget->complete = 0;
 	dev_dbg(sdev->dev, "widget %s freed\n", swidget->widget->name);
 
+	ret = snd_sof_dsp_core_put(sdev, swidget->core);
+	if (ret < 0) {
+		dev_err(sdev->dev, "error: failed to disable target core: %d for widget %s\n",
+			ret, swidget->widget->name);
+		return ret;
+	}
+
 	return 0;
 }
 EXPORT_SYMBOL(sof_widget_free);
@@ -158,7 +165,7 @@ int sof_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
 	if (++swidget->use_count > 1)
 		return 0;
 
-	ret = sof_pipeline_core_enable(sdev, swidget);
+	ret = snd_sof_dsp_core_get(sdev, swidget->core);
 	if (ret < 0) {
 		dev_err(sdev->dev, "error: failed to enable target core: %d for widget %s\n",
 			ret, swidget->widget->name);
