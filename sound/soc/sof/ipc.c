@@ -268,7 +268,6 @@ static int sof_ipc_tx_message_unlocked(struct snd_sof_ipc *ipc, u32 header,
 	/* initialise the message */
 	msg = &ipc->msg;
 
-	msg->header = header;
 	msg->msg_size = msg_bytes;
 	msg->reply_size = reply_bytes;
 	msg->reply_error = 0;
@@ -293,7 +292,7 @@ static int sof_ipc_tx_message_unlocked(struct snd_sof_ipc *ipc, u32 header,
 		return ret;
 	}
 
-	ipc_log_header(sdev->dev, "ipc tx", msg->header);
+	ipc_log_header(sdev->dev, "ipc tx", header);
 
 	/* now wait for completion */
 	if (!ret)
