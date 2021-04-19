@@ -122,10 +122,10 @@ static int sdw_intel_cleanup(struct sdw_intel_ctx *ctx)
 		ldev = ctx->ldev[i];
 
 		pm_runtime_disable(&ldev->auxdev.dev);
-		intel_link_dev_unregister(ldev);
-
 		if (!ldev->link_res.clock_stop_quirks)
 			pm_runtime_put_noidle(ldev->link_res.dev);
+
+		intel_link_dev_unregister(ldev);
 	}
 
 	return 0;
