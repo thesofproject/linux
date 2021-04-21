@@ -335,8 +335,8 @@ int sof_ipc_tx_message_no_pm(struct snd_sof_ipc *ipc, u32 header,
 {
 	int ret;
 
-	if (msg_bytes > SOF_IPC_MSG_MAX_SIZE ||
-	    reply_bytes > SOF_IPC_MSG_MAX_SIZE)
+	if (msg_bytes > ipc->sdev->host_box.size ||
+	    reply_bytes > ipc->sdev->host_box.size)
 		return -ENOBUFS;
 
 	/* Serialise IPC TX */
@@ -554,7 +554,8 @@ int snd_sof_ipc_stream_posn(struct snd_soc_component *scomp,
 }
 EXPORT_SYMBOL(snd_sof_ipc_stream_posn);
 
-static int sof_get_ctrl_copy_params(enum sof_ipc_ctrl_type ctrl_type,
+static int sof_get_ctrl_copy_params(struct snd_sof_dev *sdev,
+				    enum sof_ipc_ctrl_type ctrl_type,
 				    struct sof_ipc_ctrl_data *src,
 				    struct sof_ipc_ctrl_data *dst,
 				    struct sof_ipc_ctrl_data_params *sparams)
@@ -580,7 +581,7 @@ static int sof_get_ctrl_copy_params(enum sof_ipc_ctrl_type ctrl_type,
 	}
 
 	/* calculate payload size and number of messages */
-	sparams->pl_size = SOF_IPC_MSG_MAX_SIZE - sparams->hdr_bytes;
+	sparams->pl_size = sdev->host_box.size - sparams->hdr_bytes;
 	sparams->num_msg = DIV_ROUND_UP(sparams->msg_bytes, sparams->pl_size);
 
 	return 0;
@@ -600,15 +601,15 @@ static int sof_set_get_large_ctrl_data(struct snd_sof_dev *sdev,
 	int i;
 
 	/* allocate max ipc size because we have at least one */
-	partdata = kzalloc(SOF_IPC_MSG_MAX_SIZE, GFP_KERNEL);
+	partdata = kzalloc(sdev->host_box.size, GFP_KERNEL);
 	if (!partdata)
 		return -ENOMEM;
 
 	if (send)
-		err = sof_get_ctrl_copy_params(cdata->type, cdata, partdata,
+		err = sof_get_ctrl_copy_params(sdev, cdata->type, cdata, partdata,
 					       sparams);
 	else
-		err = sof_get_ctrl_copy_params(cdata->type, partdata, cdata,
+		err = sof_get_ctrl_copy_params(sdev, cdata->type, partdata, cdata,
 					       sparams);
 	if (err < 0) {
 		kfree(partdata);
@@ -752,7 +753,7 @@ int snd_sof_ipc_set_get_comp_data(struct snd_sof_control *scontrol,
 	cdata->elems_remaining = 0;
 
 	/* send normal size ipc in one part */
-	if (cdata->rhdr.hdr.size <= SOF_IPC_MSG_MAX_SIZE) {
+	if (cdata->rhdr.hdr.size <= sdev->host_box.size) {
 		err = sof_ipc_tx_message(sdev->ipc, cdata->rhdr.hdr.cmd, cdata,
 					 cdata->rhdr.hdr.size, cdata,
 					 cdata->rhdr.hdr.size);
@@ -851,6 +852,22 @@ int snd_sof_ipc_valid(struct snd_sof_dev *sdev)
 }
 EXPORT_SYMBOL(snd_sof_ipc_valid);
 
+int sof_ipc_init_msg_memory(struct snd_sof_dev *sdev)
+{
+	struct snd_sof_ipc_msg *msg;
+
+	msg = &sdev->ipc->msg;
+	msg->msg_data = devm_kzalloc(sdev->dev, sdev->host_box.size, GFP_KERNEL);
+	if (!msg->msg_data)
+		return -ENOMEM;
+
+	msg->reply_data = devm_kzalloc(sdev->dev, sdev->host_box.size, GFP_KERNEL);
+	if (!msg->reply_data)
+		return -ENOMEM;
+
+	return 0;
+}
+
 struct snd_sof_ipc *snd_sof_ipc_init(struct snd_sof_dev *sdev)
 {
 	struct snd_sof_ipc *ipc;
@@ -866,17 +883,6 @@ struct snd_sof_ipc *snd_sof_ipc_init(struct snd_sof_dev *sdev)
 
 	/* indicate that we aren't sending a message ATM */
 	msg->ipc_complete = true;
-
-	/* pre-allocate message data */
-	msg->msg_data = devm_kzalloc(sdev->dev, SOF_IPC_MSG_MAX_SIZE,
-				     GFP_KERNEL);
-	if (!msg->msg_data)
-		return NULL;
-
-	msg->reply_data = devm_kzalloc(sdev->dev, SOF_IPC_MSG_MAX_SIZE,
-				       GFP_KERNEL);
-	if (!msg->reply_data)
-		return NULL;
 
 	init_waitqueue_head(&msg->waitq);
 

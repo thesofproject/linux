@@ -81,14 +81,14 @@ static int sof_ipc_probe_info(struct snd_sof_dev *sdev, unsigned int cmd,
 	*params = NULL;
 	*num_params = 0;
 
-	reply = kzalloc(SOF_IPC_MSG_MAX_SIZE, GFP_KERNEL);
+	reply = kzalloc(sdev->host_box.size, GFP_KERNEL);
 	if (!reply)
 		return -ENOMEM;
 	msg.rhdr.hdr.size = sizeof(msg);
 	msg.rhdr.hdr.cmd = SOF_IPC_GLB_PROBE | cmd;
 
 	ret = sof_ipc_tx_message(sdev->ipc, msg.rhdr.hdr.cmd, &msg,
-			msg.rhdr.hdr.size, reply, SOF_IPC_MSG_MAX_SIZE);
+			msg.rhdr.hdr.size, reply, sdev->host_box.size);
 	if (ret < 0 || reply->rhdr.error < 0)
 		goto exit;
 

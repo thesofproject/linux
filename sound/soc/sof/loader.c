@@ -14,6 +14,7 @@
 #include <sound/sof.h>
 #include <sound/sof/ext_manifest.h>
 #include "ops.h"
+#include "sof-priv.h"
 
 static int get_ext_windows(struct snd_sof_dev *sdev,
 			   const struct sof_ipc_ext_data_hdr *ext_hdr)
@@ -465,7 +466,7 @@ static void sof_get_windows(struct snd_sof_dev *sdev)
 		}
 	}
 
-	if (outbox_size == 0 || inbox_size == 0) {
+	if (outbox_size == 0 || outbox_size > SOF_IPC_MSG_MAX_SIZE || inbox_size == 0) {
 		dev_err(sdev->dev, "error: get illegal mailbox window\n");
 		return;
 	}
@@ -530,7 +531,7 @@ int sof_fw_ready(struct snd_sof_dev *sdev, u32 msg_id)
 
 	sof_get_windows(sdev);
 
-	return 0;
+	return sof_ipc_init_msg_memory(sdev);
 }
 EXPORT_SYMBOL(sof_fw_ready);
 
