@@ -300,6 +300,51 @@ static int sof_route_setup(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget 
 	return ret;
 }
 
+static int sof_route_free(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *wsource,
+			  struct snd_soc_dapm_widget *wsink)
+{
+	struct snd_sof_widget *src_widget = wsource->dobj.private;
+	struct snd_sof_widget *sink_widget = wsink->dobj.private;
+	struct snd_sof_route *sroute;
+	bool route_found = false;
+
+	/* ignore routes involving virtual widgets in topology */
+	switch (src_widget->id) {
+	case snd_soc_dapm_out_drv:
+	case snd_soc_dapm_output:
+	case snd_soc_dapm_input:
+		return 0;
+	default:
+		break;
+	}
+
+	switch (sink_widget->id) {
+	case snd_soc_dapm_out_drv:
+	case snd_soc_dapm_output:
+	case snd_soc_dapm_input:
+		return 0;
+	default:
+		break;
+	}
+
+	/* find route matching source and sink widgets */
+	list_for_each_entry(sroute, &sdev->route_list, list)
+		if (sroute->src_widget == src_widget && sroute->sink_widget == sink_widget) {
+			route_found = true;
+			break;
+		}
+
+	if (!route_found) {
+		dev_err(sdev->dev, "error: cannot find SOF route for source %s -> %s sink\n",
+			wsource->name, wsink->name);
+		return -EINVAL;
+	}
+
+	sroute->setup = false;
+
+	return 0;
+}
+
 static int sof_setup_pipeline_connections(struct snd_sof_dev *sdev,
 					  struct snd_soc_dapm_widget_list *list, int dir)
 {
@@ -334,6 +379,49 @@ static int sof_setup_pipeline_connections(struct snd_sof_dev *sdev,
 			snd_soc_dapm_widget_for_each_source_path(widget, p)
 				if (p->source->dobj.private) {
 					ret = sof_route_setup(sdev, p->source, widget);
+					if (ret < 0)
+						return ret;
+				}
+		}
+	}
+
+	return 0;
+}
+
+static int sof_free_pipeline_connections(struct snd_sof_dev *sdev,
+					 struct snd_soc_dapm_widget_list *list, int dir)
+{
+	struct snd_soc_dapm_widget *widget;
+	struct snd_soc_dapm_path *p;
+	int ret;
+	int i;
+
+	/*
+	 * Free connections between widgets in the sink/source paths based on direction.
+	 * Some non-SOF widgets exist in topology either for compatibility or for the
+	 * purpose of connecting a pipeline from a host to a DAI in order to receive the DAPM
+	 * events. But they are not handled by the firmware. So ignore them.
+	 */
+	if (dir == SNDRV_PCM_STREAM_PLAYBACK) {
+		for_each_dapm_widgets(list, i, widget) {
+			if (!widget->dobj.private)
+				continue;
+
+			snd_soc_dapm_widget_for_each_sink_path(widget, p)
+				if (p->sink->dobj.private) {
+					ret = sof_route_free(sdev, widget, p->sink);
+					if (ret < 0)
+						return ret;
+				}
+		}
+	} else {
+		for_each_dapm_widgets(list, i, widget) {
+			if (!widget->dobj.private)
+				continue;
+
+			snd_soc_dapm_widget_for_each_source_path(widget, p)
+				if (p->source->dobj.private) {
+					ret = sof_route_free(sdev, p->source, widget);
 					if (ret < 0)
 						return ret;
 				}
@@ -445,6 +533,11 @@ int sof_widget_list_free(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, int
 	/* nothing to free */
 	if (!list)
 		return 0;
+
+	/* free connections first */
+	ret = sof_free_pipeline_connections(sdev, list, dir);
+	if (ret < 0)
+		return ret;
 
 	/*
 	 * Free widgets in the list. This can fail but continue freeing other widgets to keep
