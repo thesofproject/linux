@@ -20,6 +20,7 @@
 #include "ops.h"
 
 //Fred: testing a security feature
+//	this is 2nd patch
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_PROBES)
 #include "probe.h"
 
