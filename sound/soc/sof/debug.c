@@ -22,6 +22,8 @@
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_PROBES)
 #include "probe.h"
 
+// Fred: testing security feature
+
 /**
  * strsplit_u32 - Split string into sequence of u32 tokens
  * @buf:	String to split into tokens.
