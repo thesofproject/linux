@@ -19,6 +19,7 @@
 #include "sof-priv.h"
 #include "ops.h"
 
+//Fred: testing a security feature
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_PROBES)
 #include "probe.h"
 
