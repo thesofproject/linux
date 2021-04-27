@@ -630,8 +630,8 @@ static int hda_suspend(struct snd_sof_dev *sdev, bool runtime_suspend)
 	snd_hdac_ext_bus_link_power_down_all(bus);
 #endif
 
-	/* power down DSP */
-	ret = snd_sof_dsp_core_power_down(sdev, chip->host_managed_cores_mask);
+	/* power down all DSP cores */
+	ret = snd_sof_dsp_core_power_down(sdev, GENMASK(chip->cores_num - 1, 0));
 	if (ret < 0) {
 		dev_err(sdev->dev,
 			"error: failed to power down core during suspend\n");
