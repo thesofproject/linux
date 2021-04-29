@@ -661,6 +661,16 @@ struct sdw_slave_ops {
  * initialized
  * @first_interrupt_done: status flag tracking if the interrupt handling
  * for a Slave happens for the first time after enumeration
+ * @w_transactions: total transactions, should be @read_transactions+@write_transactions
+ * @read_transactions: total read transactions
+ * @write_transactions: total write transactions
+ * @paged_transactions: total transactions that require page registers
+ * @local_page_transactions: total consecutive transactions in the same page
+ * @page_changes: transaction targeting different pages. This includes changes
+ * from paged to non-paged transactions, e.g. when dealing with interrupts or
+ * standard registers.
+ * @last_addr_page1: context to track page changes
+ * @last_addr_page2: context to track page changes
  */
 struct sdw_slave {
 	struct sdw_slave_id id;
@@ -683,6 +693,15 @@ struct sdw_slave {
 	struct completion initialization_complete;
 	u32 unattach_request;
 	bool first_interrupt_done;
+
+	u32 rw_transactions;
+	u32 read_transactions;
+	u32 write_transactions;
+	u32 paged_transactions;
+	u32 paged_transactions_local;
+	u32 paged_transactions_nonlocal;
+	u8 last_addr_page1;
+	u8 last_addr_page2;
 };
 
 #define dev_to_sdw_dev(_dev) container_of(_dev, struct sdw_slave, dev)

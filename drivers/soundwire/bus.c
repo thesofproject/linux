@@ -326,12 +326,23 @@ int sdw_transfer_defer(struct sdw_bus *bus, struct sdw_msg *msg,
 int sdw_fill_msg(struct sdw_msg *msg, struct sdw_slave *slave,
 		 u32 addr, size_t count, u16 dev_num, u8 flags, u8 *buf)
 {
+	u8 addr_page1;
+	u8 addr_page2;
+
 	memset(msg, 0, sizeof(*msg));
 	msg->addr = addr; /* addr is 16 bit and truncated here */
 	msg->len = count;
 	msg->dev_num = dev_num;
 	msg->flags = flags;
 	msg->buf = buf;
+
+	if (slave) {
+		slave->rw_transactions++;
+		if (flags & SDW_MSG_FLAG_READ)
+			slave->read_transactions++;
+		if (flags & SDW_MSG_FLAG_WRITE)
+			slave->write_transactions++;
+	}
 
 	if (addr < SDW_REG_NO_PAGE) /* no paging area */
 		return 0;
@@ -364,10 +375,22 @@ int sdw_fill_msg(struct sdw_msg *msg, struct sdw_slave *slave,
 		return -EINVAL;
 	}
 
-	msg->addr_page1 = FIELD_GET(SDW_SCP_ADDRPAGE1_MASK, addr);
-	msg->addr_page2 = FIELD_GET(SDW_SCP_ADDRPAGE2_MASK, addr);
+	addr_page1 = FIELD_GET(SDW_SCP_ADDRPAGE1_MASK, addr);
+	addr_page2 = FIELD_GET(SDW_SCP_ADDRPAGE2_MASK, addr);
+
+	msg->addr_page1 = addr_page1;
+	msg->addr_page2 = addr_page2;
 	msg->addr |= BIT(15);
 	msg->page = true;
+	slave->paged_transactions++;
+	if (addr_page1 != slave->last_addr_page1 ||
+	    addr_page2 != slave->last_addr_page2) {
+		slave->last_addr_page1 = addr_page1;
+		slave->last_addr_page2 = addr_page2;
+		slave->paged_transactions_nonlocal++;
+	} else {
+		slave->paged_transactions_local++;
+	}
 
 	return 0;
 }

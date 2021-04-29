@@ -118,6 +118,32 @@ static int sdw_slave_reg_show(struct seq_file *s_file, void *data)
 }
 DEFINE_SHOW_ATTRIBUTE(sdw_slave_reg);
 
+#define sdw_slave_transaction_attr(field)				\
+static int field##_show(struct seq_file *s_file, void *data) 		\
+{									\
+	struct sdw_slave *slave = s_file->private;			\
+	char *buf;							\
+	ssize_t ret;							\
+									\
+	buf = kzalloc(RD_BUF, GFP_KERNEL);				\
+	if (!buf)							\
+		return -ENOMEM;						\
+									\
+	ret = scnprintf(buf, RD_BUF, "%d\n", slave->field);		\
+	seq_printf(s_file, "%s", buf);					\
+									\
+	kfree(buf);							\
+	return 0;							\
+}									\
+DEFINE_SHOW_ATTRIBUTE(field)
+
+sdw_slave_transaction_attr(rw_transactions);
+sdw_slave_transaction_attr(read_transactions);
+sdw_slave_transaction_attr(write_transactions);
+sdw_slave_transaction_attr(paged_transactions);
+sdw_slave_transaction_attr(paged_transactions_local);
+sdw_slave_transaction_attr(paged_transactions_nonlocal);
+
 void sdw_slave_debugfs_init(struct sdw_slave *slave)
 {
 	struct dentry *master;
@@ -131,6 +157,13 @@ void sdw_slave_debugfs_init(struct sdw_slave *slave)
 	d = debugfs_create_dir(name, master);
 
 	debugfs_create_file("registers", 0400, d, slave, &sdw_slave_reg_fops);
+
+	debugfs_create_file("rw_transactions", 0400, d, slave, &rw_transactions_fops);
+	debugfs_create_file("read_transactions", 0400, d, slave, &read_transactions_fops);
+	debugfs_create_file("write_transactions", 0400, d, slave, &write_transactions_fops);
+	debugfs_create_file("paged_transactions", 0400, d, slave, &paged_transactions_fops);
+	debugfs_create_file("paged_transactions_local", 0400, d, slave, &paged_transactions_local_fops);
+	debugfs_create_file("paged_transactions_nonlocal", 0400, d, slave, &paged_transactions_nonlocal_fops);
 
 	slave->debugfs = d;
 }
