@@ -60,7 +60,8 @@ void imx8_dump(struct snd_sof_dev *sdev, u32 flags)
 	/* Get information about the panic status from the debug box area.
 	 * Compute the trace point based on the status.
 	 */
-	sof_mailbox_read(sdev, sdev->debug_box.offset + 0x4, &status, 4);
+	if (sizeof(status) + 4 <= sdev->debug_box.size)
+		sof_mailbox_read(sdev, sdev->debug_box.offset + 0x4, &status, 4);
 
 	/* Get information about the registers, the filename and line
 	 * number and the stack.

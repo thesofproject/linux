@@ -119,7 +119,8 @@ static void imx8_dsp_handle_request(struct imx_dsp_ipc *ipc)
 	u32 p; /* panic code */
 
 	/* Read the message from the debug box. */
-	sof_mailbox_read(priv->sdev, priv->sdev->debug_box.offset + 4, &p, sizeof(p));
+	if (sizeof(p) + 4 <= priv->sdev->debug_box.size)
+		sof_mailbox_read(priv->sdev, priv->sdev->debug_box.offset + 4, &p, sizeof(p));
 
 	/* Check to see if the message is a panic code (0x0dead***) */
 	if ((p & SOF_IPC_PANIC_MAGIC_MASK) == SOF_IPC_PANIC_MAGIC)
