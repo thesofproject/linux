@@ -30,9 +30,23 @@ void intel_ipc_msg_data(struct snd_sof_dev *sdev,
 			void *p, size_t sz)
 {
 	if (!substream || !sdev->stream_box.size) {
+		if (sz > sdev->dsp_box.size) {
+			dev_err(sdev->dev, "error: dsp_box read size %zu is out of range %zu",
+				sz, sdev->dsp_box.size);
+
+			return;
+		}
+
 		sof_mailbox_read(sdev, sdev->dsp_box.offset, p, sz);
 	} else {
 		struct intel_stream *stream = substream->runtime->private_data;
+
+		if (sz + stream->posn_offset > sdev->stream_box.size + sdev->stream_box.offset) {
+			dev_err(sdev->dev, "error: stream_box read size %zu is out of range %zu",
+				sz, sdev->stream_box.size);
+
+			return;
+		}
 
 		/* The stream might already be closed */
 		if (stream)

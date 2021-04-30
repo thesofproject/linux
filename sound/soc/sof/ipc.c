@@ -377,7 +377,8 @@ void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev)
 	int err = 0;
 
 	/* read back header */
-	snd_sof_ipc_msg_data(sdev, NULL, &hdr, sizeof(hdr));
+	if (sdev->fw_state == SOF_FW_BOOT_COMPLETE)
+		snd_sof_ipc_msg_data(sdev, NULL, &hdr, sizeof(hdr));
 	ipc_log_header(sdev->dev, "ipc rx", hdr.cmd);
 
 	cmd = hdr.cmd & SOF_GLB_TYPE_MASK;
