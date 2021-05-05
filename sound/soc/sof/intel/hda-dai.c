@@ -211,7 +211,10 @@ static int hda_link_dai_widget_update(struct sof_intel_hda_stream *hda_stream,
 	}
 
 	/* set up/free DAI widget and send DAI_CONFIG IPC */
-	return hda_ctrl_dai_widget_setup(w, widget_setup);
+	if (widget_setup)
+		return hda_ctrl_dai_widget_setup(w);
+
+	return hda_ctrl_dai_widget_free(w);
 }
 
 static int hda_link_hw_params(struct snd_pcm_substream *substream,
@@ -447,8 +450,9 @@ static struct snd_soc_cdai_ops sof_probe_compr_ops = {
 #endif
 #endif
 
-static int ssp_dai_config_update(struct snd_pcm_substream *substream, struct snd_soc_dai *dai,
-				 bool widget_setup)
+static int ssp_dai_hw_params(struct snd_pcm_substream *substream,
+			     struct snd_pcm_hw_params *params,
+			     struct snd_soc_dai *dai)
 {
 	struct snd_soc_dapm_widget *w;
 
@@ -457,20 +461,20 @@ static int ssp_dai_config_update(struct snd_pcm_substream *substream, struct snd
 	else
 		w = dai->capture_widget;
 
-	return hda_ctrl_dai_widget_setup(w, widget_setup);
-}
-
-static int ssp_dai_hw_params(struct snd_pcm_substream *substream,
-			     struct snd_pcm_hw_params *params,
-			     struct snd_soc_dai *dai)
-{
-	return ssp_dai_config_update(substream, dai, true);
+	return hda_ctrl_dai_widget_setup(w);
 }
 
 static int ssp_dai_hw_free(struct snd_pcm_substream *substream,
 			   struct snd_soc_dai *dai)
 {
-	return ssp_dai_config_update(substream, dai, false);
+	struct snd_soc_dapm_widget *w;
+
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		w = dai->playback_widget;
+	else
+		w = dai->capture_widget;
+
+	return hda_ctrl_dai_widget_free(w);
 }
 
 static const struct snd_soc_dai_ops ssp_dai_ops = {
