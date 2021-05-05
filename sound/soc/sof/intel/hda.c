@@ -72,23 +72,23 @@ int hda_ctrl_dai_widget_setup(struct snd_soc_dapm_widget *w, bool setup)
 	if (setup) {
 		ret = sof_widget_setup(sdev, swidget);
 		if (ret < 0) {
-			dev_err(sdev->dev, "error: setting up DAI widget %s\n", w->name);
+			dev_err(sdev->dev, "error: failed setting up DAI widget %s\n", w->name);
 			return ret;
 		}
-
-		/* send DAI_CONFIG IPC */
-		return sof_ipc_tx_message(sdev->ipc, config->hdr.cmd, config, config->hdr.size,
-					  &reply, sizeof(reply));
 	}
 
+	/* send DAI_CONFIG IPC */
 	ret = sof_ipc_tx_message(sdev->ipc, config->hdr.cmd, config, config->hdr.size,
 				  &reply, sizeof(reply));
 	if (ret < 0) {
-		dev_err(sdev->dev, "error: updating DAI config for %s\n", w->name);
+		dev_err(sdev->dev, "error: failed updating DAI config for %s\n", w->name);
 		return ret;
 	}
 
-	return sof_widget_free(sdev, swidget);
+	if (!setup)
+		return sof_widget_free(sdev, swidget);
+
+	return 0;
 }
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_SOUNDWIRE)
