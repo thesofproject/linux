@@ -440,22 +440,26 @@ static struct sof_sdw_codec_info codec_info_list[] = {
 	},
 };
 
-static inline int find_codec_info_part(u64 adr)
+static inline int find_codec_info_part(u64 adr, const char *dai_name)
 {
 	unsigned int part_id, sdw_version;
 	int i;
 
 	part_id = SDW_PART_ID(adr);
 	sdw_version = SDW_VERSION(adr);
-	for (i = 0; i < ARRAY_SIZE(codec_info_list); i++)
+	for (i = 0; i < ARRAY_SIZE(codec_info_list); i++) {
 		/*
 		 * A codec info is for all sdw version with the part id if
 		 * version_id is not specified in the codec info.
 		 */
 		if (part_id == codec_info_list[i].part_id &&
 		    (!codec_info_list[i].version_id ||
-		     sdw_version == codec_info_list[i].version_id))
-			return i;
+		     sdw_version == codec_info_list[i].version_id) &&
+		    (!dai_name || !strcmp(dai_name, "") ||
+		     !strncmp(dai_name, codec_info_list[i].dai_name, 64)))
+				return i;
+
+	}
 
 	return -EINVAL;
 
@@ -509,7 +513,7 @@ static int get_sdw_dailink_info(const struct snd_soc_acpi_link_adr *links,
 		u64 adr;
 
 		adr = link->adr_d->adr;
-		codec_index = find_codec_info_part(adr);
+		codec_index = find_codec_info_part(adr, link->adr_d->dai_name);
 		if (codec_index < 0)
 			return codec_index;
 
@@ -644,7 +648,7 @@ static int create_codec_dai_name(struct device *dev,
 		if (!codec[comp_index].name)
 			return -ENOMEM;
 
-		codec_index = find_codec_info_part(adr);
+		codec_index = find_codec_info_part(adr, link->adr_d[i].dai_name);
 		if (codec_index < 0)
 			return codec_index;
 
@@ -675,7 +679,7 @@ static int set_codec_init_func(const struct snd_soc_acpi_link_adr *link,
 		for (i = 0; i < link->num_adr; i++) {
 			int codec_index;
 
-			codec_index = find_codec_info_part(link->adr_d[i].adr);
+			codec_index = find_codec_info_part(link->adr_d[i].adr, link->adr_d[i].dai_name);
 
 			if (codec_index < 0)
 				return codec_index;
@@ -826,7 +830,7 @@ static int create_sdw_dailink(struct device *dev, int *be_index,
 	}
 
 	/* find codec info to create BE DAI */
-	codec_index = find_codec_info_part(link->adr_d[0].adr);
+	codec_index = find_codec_info_part(link->adr_d[0].adr, link->adr_d[0].dai_name);
 	if (codec_index < 0)
 		return codec_index;
 
@@ -840,14 +844,20 @@ static int create_sdw_dailink(struct device *dev, int *be_index,
 		static const char * const sdw_stream_name[] = {
 			"SDW%d-Playback",
 			"SDW%d-Capture",
+			"SDW%d-Playback-%s",
+			"SDW%d-Capture-%s",
 		};
 
 		if (!codec_info_list[codec_index].direction[stream])
 			continue;
+		if (!strcmp(link->adr_d[0].dai_name, ""))
+			/* create stream name according to first link id */
+			name = devm_kasprintf(dev, GFP_KERNEL,
+					      sdw_stream_name[stream], cpu_dai_id[0]);
+		else
+			name = devm_kasprintf(dev, GFP_KERNEL,
+					      sdw_stream_name[stream + 2], cpu_dai_id[0], link->adr_d[0].dai_name);
 
-		/* create stream name according to first link id */
-		name = devm_kasprintf(dev, GFP_KERNEL,
-				      sdw_stream_name[stream], cpu_dai_id[0]);
 		if (!name)
 			return -ENOMEM;
 
