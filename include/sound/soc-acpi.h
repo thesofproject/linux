@@ -104,6 +104,7 @@ struct snd_soc_acpi_adr_device {
 	const u8 num_endpoints;
 	const struct snd_soc_acpi_endpoint *endpoints;
 	const char *name_prefix;
+	const char dai_name[64];
 };
 
 /**
