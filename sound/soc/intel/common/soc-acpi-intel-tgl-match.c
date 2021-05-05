@@ -54,6 +54,26 @@ static const struct snd_soc_acpi_adr_device rt711_1_adr[] = {
 	}
 };
 
+static const struct snd_soc_acpi_adr_device rt711_1_aif1_adr[] = {
+	{
+		.adr = 0x000120025D071100,
+		.dai_name = "rt711-aif1",
+		.num_endpoints = 1,
+		.endpoints = &single_endpoint,
+		.name_prefix = "rt711"
+	}
+};
+
+static const struct snd_soc_acpi_adr_device rt711_1_aif2_adr[] = {
+	{
+		.adr = 0x000120025D071100,
+		.dai_name = "rt711-aif2",
+		.num_endpoints = 1,
+		.endpoints = &single_endpoint,
+		.name_prefix = "rt711"
+	}
+};
+
 static const struct snd_soc_acpi_adr_device rt1308_1_dual_adr[] = {
 	{
 		.adr = 0x000120025D130800ull,
@@ -271,19 +291,27 @@ static const struct snd_soc_acpi_link_adr tgl_3_in_1_mono_amp[] = {
 static const struct snd_soc_acpi_link_adr tgl_sdw_rt711_link1_rt1308_link2_rt715_link0[] = {
 	{
 		.mask = BIT(1),
-		.num_adr = ARRAY_SIZE(rt711_1_adr),
-		.adr_d = rt711_1_adr,
+		.num_adr = ARRAY_SIZE(rt711_1_aif1_adr),
+		.adr_d = rt711_1_aif1_adr,
 	},
 	{
 		.mask = BIT(2),
 		.num_adr = ARRAY_SIZE(rt1308_2_single_adr),
 		.adr_d = rt1308_2_single_adr,
 	},
+#if 0
 	{
 		.mask = BIT(0),
 		.num_adr = ARRAY_SIZE(rt715_0_adr),
 		.adr_d = rt715_0_adr,
 	},
+#else
+	{
+		.mask = BIT(1),
+		.num_adr = ARRAY_SIZE(rt711_1_aif2_adr),
+		.adr_d = rt711_1_aif2_adr,
+	},
+#endif
 	{}
 };
 
