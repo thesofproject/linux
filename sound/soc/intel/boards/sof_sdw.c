@@ -352,6 +352,14 @@ static struct sof_sdw_codec_info codec_info_list[] = {
 		.exit = sof_sdw_rt711_exit,
 	},
 	{
+		.part_id = 0x711,
+		.version_id = 2,
+		.direction = {false, true},
+		.dai_name = "rt711-aif2",
+		.init = sof_sdw_rt711_init,
+		.exit = sof_sdw_rt711_exit,
+	},
+	{
 		.part_id = 0x1308,
 		.acpi_id = "10EC1308",
 		.direction = {true, false},
