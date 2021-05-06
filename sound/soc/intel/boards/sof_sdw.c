@@ -874,6 +874,9 @@ static int create_sdw_dailink(struct device *dev, int *be_index,
 		 * PIN ID with offset of 2 according to sdw dai driver.
 		 */
 		for (k = 0; k < cpu_dai_num; k++) {
+			/* FIXME: j should keep increasing when the same link id is used */
+			if (!strcmp(link->adr_d[0].dai_name, "rt711-aif2"))
+				j = 2;
 			cpu_name = devm_kasprintf(dev, GFP_KERNEL,
 						  "SDW%d Pin%d", cpu_dai_id[k],
 						  j + SDW_INTEL_BIDIR_PDI_BASE);
