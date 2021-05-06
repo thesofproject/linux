@@ -184,6 +184,14 @@ err:
 		flags |= SOF_DBG_DUMP_FORCE_ERR_LEVEL;
 
 	hda_dsp_dump(sdev, flags);
+
+	if (hda->boot_iteration == HDA_FW_BOOT_ATTEMPTS) {
+		dev_err(sdev->dev, "ROM error=0x%x: FW status=0x%x\n",
+			snd_sof_dsp_read(sdev, HDA_DSP_BAR,
+					 HDA_DSP_SRAM_REG_ROM_ERROR),
+			snd_sof_dsp_read(sdev, HDA_DSP_BAR,
+					 HDA_DSP_SRAM_REG_ROM_STATUS));
+	}
 	snd_sof_dsp_core_power_down(sdev, chip->host_managed_cores_mask);
 
 	return ret;
@@ -385,11 +393,6 @@ int hda_dsp_cl_boot_firmware(struct snd_sof_dev *sdev)
 	if (i == HDA_FW_BOOT_ATTEMPTS) {
 		dev_err(sdev->dev, "error: dsp init failed after %d attempts with err: %d\n",
 			i, ret);
-		dev_err(sdev->dev, "ROM error=0x%x: FW status=0x%x\n",
-			snd_sof_dsp_read(sdev, HDA_DSP_BAR,
-					 HDA_DSP_SRAM_REG_ROM_ERROR),
-			snd_sof_dsp_read(sdev, HDA_DSP_BAR,
-					 HDA_DSP_SRAM_REG_ROM_STATUS));
 		goto cleanup;
 	}
 
