@@ -340,7 +340,6 @@ int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, in
 {
 	struct snd_soc_dapm_widget_list *list = spcm->stream[dir].list;
 	struct snd_soc_dapm_widget *widget;
-	int num_pipe_widgets = 0;
 	int i, ret, num_widgets;
 
 	/* nothing to set up */
@@ -350,13 +349,36 @@ int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, in
 	/* set up widgets in the list */
 	for_each_dapm_widgets(list, num_widgets, widget) {
 		struct snd_sof_widget *swidget = widget->dobj.private;
+		struct snd_sof_widget *pipe_widget;
 
 		if (!swidget)
 			continue;
 
-		ret = sof_widget_setup(sdev, swidget);
+		/*
+		 * The scheduler widget for a pipeline is not part of the connected DAPM
+		 * widget list and it needs to be set up before the widgets in the pipeline
+		 * are set up. The use_count for the scheduler widget is incremented for every
+		 * widget in a given pipeline to ensure that it is freed only after the last
+		 * widget in the pipeline is freed.
+		 */
+		pipe_widget = swidget->pipe_widget;
+		if (!pipe_widget) {
+			dev_err(sdev->dev, "error: no pipeline widget found for %s\n",
+				swidget->widget->name);
+			ret = -EINVAL;
+			goto widget_free;
+		}
+
+		ret = sof_widget_setup(sdev, pipe_widget);
 		if (ret < 0)
 			goto widget_free;
+
+		/* set up the widget */
+		ret = sof_widget_setup(sdev, swidget);
+		if (ret < 0) {
+			sof_widget_free(sdev, pipe_widget);
+			goto widget_free;
+		}
 	}
 
 	/*
@@ -367,7 +389,7 @@ int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, in
 	if (ret < 0)
 		goto widget_free;
 
-	/* setup pipeline widgets and complete pipelines */
+	/* complete pipelines */
 	for_each_dapm_widgets(list, i, widget) {
 		struct snd_sof_widget *swidget = widget->dobj.private;
 		struct snd_sof_widget *pipe_widget;
@@ -380,14 +402,8 @@ int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, in
 			dev_err(sdev->dev, "error: no pipeline widget found for %s\n",
 				swidget->widget->name);
 			ret = -EINVAL;
-			goto pipe_free;
+			goto widget_free;
 		}
-
-		ret = sof_widget_setup(sdev, pipe_widget);
-		if (ret < 0)
-			goto pipe_free;
-
-		num_pipe_widgets++;
 
 		if (pipe_widget->complete)
 			continue;
@@ -395,34 +411,25 @@ int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, in
 		pipe_widget->complete = snd_sof_complete_pipeline(sdev->dev, pipe_widget);
 		if (pipe_widget->complete < 0) {
 			ret = pipe_widget->complete;
-			goto pipe_free;
+			goto widget_free;
 		}
 	}
 
 	return 0;
 
-pipe_free:
-	/* free the pipe widgets that were set up successfully */
+widget_free:
+	/* free all widgets that have been set up successfully */
 	for_each_dapm_widgets(list, i, widget) {
 		struct snd_sof_widget *swidget = widget->dobj.private;
 
 		if (!swidget)
 			continue;
 
-		if (!num_pipe_widgets--)
-			break;
-
-		sof_widget_free(sdev, swidget->pipe_widget);
-	}
-
-widget_free:
-	/* free all widgets that have been set up successfully */
-	for_each_dapm_widgets(list, i, widget) {
 		if (!num_widgets--)
 			break;
 
-		if (widget->dobj.private)
-			sof_widget_free(sdev, widget->dobj.private);
+		sof_widget_free(sdev, swidget);
+		sof_widget_free(sdev, swidget->pipe_widget);
 	}
 
 	return ret;
