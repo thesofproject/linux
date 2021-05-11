@@ -640,7 +640,7 @@ static int memory_info_update(struct snd_sof_dev *sdev, char *buf, size_t buff_s
 	int ret;
 	int i;
 
-	reply = kmalloc(sdev->host_box.size, GFP_KERNEL);
+	reply = kmalloc(SOF_IPC_MSG_MAX_SIZE, GFP_KERNEL);
 	if (!reply)
 		return -ENOMEM;
 
@@ -651,7 +651,7 @@ static int memory_info_update(struct snd_sof_dev *sdev, char *buf, size_t buff_s
 		goto error;
 	}
 
-	ret = sof_ipc_tx_message(sdev->ipc, msg.cmd, &msg, msg.size, reply, sdev->host_box.size);
+	ret = sof_ipc_tx_message(sdev->ipc, msg.cmd, &msg, msg.size, reply, SOF_IPC_MSG_MAX_SIZE);
 	pm_runtime_mark_last_busy(sdev->dev);
 	pm_runtime_put_autosuspend(sdev->dev);
 	if (ret < 0 || reply->rhdr.error < 0) {

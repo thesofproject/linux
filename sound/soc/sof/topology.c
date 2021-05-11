@@ -2156,7 +2156,6 @@ static int sof_process_load(struct snd_soc_component *scomp, int index,
 			    struct snd_soc_tplg_dapm_widget *tw,
 			    int type)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_dapm_widget *widget = swidget->widget;
 	struct snd_soc_tplg_private *private = &tw->priv;
 	struct sof_ipc_comp_process *process;
@@ -2187,7 +2186,7 @@ static int sof_process_load(struct snd_soc_component *scomp, int index,
 	ipc_size = sizeof(struct sof_ipc_comp_process) + ipc_data_size;
 
 	/* we are exceeding max ipc size, config needs to be sent separately */
-	if (ipc_size > sdev->host_box.size) {
+	if (ipc_size > SOF_IPC_MSG_MAX_SIZE) {
 		ipc_size -= ipc_data_size;
 		ipc_data_size = 0;
 	}

@@ -132,7 +132,7 @@ static int sof_ipc_trace_update_filter(struct snd_sof_dev *sdev, int num_elems,
 	int ret;
 
 	size = struct_size(msg, elems, num_elems);
-	if (size > sdev->host_box.size)
+	if (size > SOF_IPC_MSG_MAX_SIZE)
 		return -EINVAL;
 
 	msg = kmalloc(size, GFP_KERNEL);
