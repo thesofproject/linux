@@ -135,6 +135,14 @@ struct snd_sof_dsp_ops {
 			    u32 offset, void *src,
 			    size_t size); /* mandatory */
 
+	/* Mailbox IO */
+	void (*mailbox_read)(struct snd_sof_dev *sof_dev,
+			     u32 offset, void *dest,
+			     size_t size); /* mandatory */
+	void (*mailbox_write)(struct snd_sof_dev *sof_dev,
+			      u32 offset, void *src,
+			      size_t size); /* mandatory */
+
 	/* doorbell */
 	irqreturn_t (*irq_handler)(int irq, void *context); /* optional */
 	irqreturn_t (*irq_thread)(int irq, void *context); /* optional */
