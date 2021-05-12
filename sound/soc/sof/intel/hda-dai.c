@@ -450,31 +450,46 @@ static struct snd_soc_cdai_ops sof_probe_compr_ops = {
 #endif
 #endif
 
-static int ssp_dai_hw_params(struct snd_pcm_substream *substream,
-			     struct snd_pcm_hw_params *params,
-			     struct snd_soc_dai *dai)
+static int ssp_dai_setup_or_free(struct snd_pcm_substream *substream, struct snd_soc_dai *dai,
+				 bool setup)
 {
+	struct snd_soc_component *component;
+	struct snd_sof_widget *swidget;
 	struct snd_soc_dapm_widget *w;
+	struct sof_ipc_fw_version *v;
+	struct snd_sof_dev *sdev;
 
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
 		w = dai->playback_widget;
 	else
 		w = dai->capture_widget;
 
-	return hda_ctrl_dai_widget_setup(w);
+	swidget = w->dobj.private;
+	component = swidget->scomp;
+	sdev = snd_soc_component_get_drvdata(component);
+	v = &sdev->fw_ready.version;
+
+	/* DAI_CONFIG IPC during hw_params is not supported in older firmware */
+	if (v->abi_version < SOF_ABI_VER(3, 18, 0))
+		return 0;
+
+	if (setup)
+		return hda_ctrl_dai_widget_setup(w);
+
+	return hda_ctrl_dai_widget_free(w);
+}
+
+static int ssp_dai_hw_params(struct snd_pcm_substream *substream,
+			     struct snd_pcm_hw_params *params,
+			     struct snd_soc_dai *dai)
+{
+	return ssp_dai_setup_or_free(substream, dai, true);
 }
 
 static int ssp_dai_hw_free(struct snd_pcm_substream *substream,
 			   struct snd_soc_dai *dai)
 {
-	struct snd_soc_dapm_widget *w;
-
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		w = dai->playback_widget;
-	else
-		w = dai->capture_widget;
-
-	return hda_ctrl_dai_widget_free(w);
+	return ssp_dai_setup_or_free(substream, dai, false);
 }
 
 static const struct snd_soc_dai_ops ssp_dai_ops = {
