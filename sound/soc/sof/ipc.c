@@ -374,10 +374,14 @@ void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev)
 {
 	struct sof_ipc_cmd_hdr hdr;
 	u32 cmd, type;
-	int err = 0;
+	int err;
 
 	/* read back header */
-	snd_sof_ipc_msg_data(sdev, NULL, &hdr, sizeof(hdr));
+	err = snd_sof_ipc_msg_data(sdev, NULL, &hdr, sizeof(hdr));
+	if (err < 0) {
+		dev_warn(sdev->dev, "failed to read IPC header: %d\n", err);
+		return;
+	}
 	ipc_log_header(sdev->dev, "ipc rx", hdr.cmd);
 
 	cmd = hdr.cmd & SOF_GLB_TYPE_MASK;
@@ -429,12 +433,16 @@ EXPORT_SYMBOL(snd_sof_ipc_msgs_rx);
 static void ipc_trace_message(struct snd_sof_dev *sdev, u32 msg_id)
 {
 	struct sof_ipc_dma_trace_posn posn;
+	int ret;
 
 	switch (msg_id) {
 	case SOF_IPC_TRACE_DMA_POSITION:
 		/* read back full message */
-		snd_sof_ipc_msg_data(sdev, NULL, &posn, sizeof(posn));
-		snd_sof_trace_update_pos(sdev, &posn);
+		ret = snd_sof_ipc_msg_data(sdev, NULL, &posn, sizeof(posn));
+		if (ret < 0)
+			dev_warn(sdev->dev, "failed to read trace position: %d\n", ret);
+		else
+			snd_sof_trace_update_pos(sdev, &posn);
 		break;
 	default:
 		dev_err(sdev->dev, "error: unhandled trace message %x\n",
@@ -453,7 +461,7 @@ static void ipc_period_elapsed(struct snd_sof_dev *sdev, u32 msg_id)
 	struct snd_sof_pcm_stream *stream;
 	struct sof_ipc_stream_posn posn;
 	struct snd_sof_pcm *spcm;
-	int direction;
+	int direction, ret;
 
 	spcm = snd_sof_find_spcm_comp(scomp, msg_id, &direction);
 	if (!spcm) {
@@ -464,7 +472,11 @@ static void ipc_period_elapsed(struct snd_sof_dev *sdev, u32 msg_id)
 	}
 
 	stream = &spcm->stream[direction];
-	snd_sof_ipc_msg_data(sdev, stream->substream, &posn, sizeof(posn));
+	ret = snd_sof_ipc_msg_data(sdev, stream->substream, &posn, sizeof(posn));
+	if (ret < 0) {
+		dev_warn(sdev->dev, "failed to read stream position: %d\n", ret);
+		return;
+	}
 
 	dev_vdbg(sdev->dev, "posn : host 0x%llx dai 0x%llx wall 0x%llx\n",
 		 posn.host_posn, posn.dai_posn, posn.wallclock);
@@ -483,7 +495,7 @@ static void ipc_xrun(struct snd_sof_dev *sdev, u32 msg_id)
 	struct snd_sof_pcm_stream *stream;
 	struct sof_ipc_stream_posn posn;
 	struct snd_sof_pcm *spcm;
-	int direction;
+	int direction, ret;
 
 	spcm = snd_sof_find_spcm_comp(scomp, msg_id, &direction);
 	if (!spcm) {
@@ -493,7 +505,11 @@ static void ipc_xrun(struct snd_sof_dev *sdev, u32 msg_id)
 	}
 
 	stream = &spcm->stream[direction];
-	snd_sof_ipc_msg_data(sdev, stream->substream, &posn, sizeof(posn));
+	ret = snd_sof_ipc_msg_data(sdev, stream->substream, &posn, sizeof(posn));
+	if (ret < 0) {
+		dev_warn(sdev->dev, "failed to read overrun position: %d\n", ret);
+		return;
+	}
 
 	dev_dbg(sdev->dev,  "posn XRUN: host %llx comp %d size %d\n",
 		posn.host_posn, posn.xrun_comp_id, posn.xrun_size);
