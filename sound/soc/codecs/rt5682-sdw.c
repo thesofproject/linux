@@ -742,9 +742,6 @@ static int __maybe_unused rt5682_dev_resume(struct device *dev)
 	struct rt5682_priv *rt5682 = dev_get_drvdata(dev);
 	unsigned long time;
 
-	if (!rt5682->hw_init)
-		return 0;
-
 	if (!slave->unattach_request)
 		goto regmap_sync;
 
@@ -754,6 +751,9 @@ static int __maybe_unused rt5682_dev_resume(struct device *dev)
 		dev_err(&slave->dev, "Initialization not complete, timed out\n");
 		return -ETIMEDOUT;
 	}
+
+	if (!rt5682->hw_init)
+		return 0;
 
 regmap_sync:
 	slave->unattach_request = 0;

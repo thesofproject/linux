@@ -541,9 +541,6 @@ static int __maybe_unused rt715_dev_resume(struct device *dev)
 	struct rt715_priv *rt715 = dev_get_drvdata(dev);
 	unsigned long time;
 
-	if (!rt715->hw_init)
-		return 0;
-
 	if (!slave->unattach_request)
 		goto regmap_sync;
 
@@ -553,6 +550,9 @@ static int __maybe_unused rt715_dev_resume(struct device *dev)
 		dev_err(&slave->dev, "Initialization not complete, timed out\n");
 		return -ETIMEDOUT;
 	}
+
+	if (!rt715->hw_init)
+		return 0;
 
 regmap_sync:
 	slave->unattach_request = 0;
