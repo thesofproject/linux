@@ -16,8 +16,13 @@
 #include <sound/soc-acpi.h>
 #include <sound/soc-acpi-intel-match.h>
 #include <sound/sof.h>
+#include <sound/sof/dai.h>
+#include "sof-dai-clk.h"
 #include "ops.h"
 #include "sof-pci-dev.h"
+
+/* platform specific devices */
+#include "intel/shim.h"
 
 static char *fw_path;
 module_param(fw_path, charp, 0444);
@@ -110,11 +115,40 @@ static void sof_pci_probe_complete(struct device *dev)
 	pm_runtime_put_noidle(dev);
 }
 
+static struct sof_dai_clk sof_dai_clks[] = {
+	{.name = "ssp0_mclk", .type = SOF_DAI_INTEL_SSP, .dai_index = 0,
+	 .clk_id = SOF_DAI_INTEL_CLKCTRL_MCLK},
+	{.name = "ssp0_sclk", .type = SOF_DAI_INTEL_SSP, .dai_index = 0,
+	 .clk_id = SOF_DAI_INTEL_CLKCTRL_BCLK},
+	{.name = "ssp1_mclk", .type = SOF_DAI_INTEL_SSP, .dai_index = 1,
+	 .clk_id = SOF_DAI_INTEL_CLKCTRL_MCLK},
+	{.name = "ssp1_sclk", .type = SOF_DAI_INTEL_SSP, .dai_index = 1,
+	 .clk_id = SOF_DAI_INTEL_CLKCTRL_BCLK},
+	{.name = "ssp2_mclk", .type = SOF_DAI_INTEL_SSP, .dai_index = 2,
+	 .clk_id = SOF_DAI_INTEL_CLKCTRL_MCLK},
+	{.name = "ssp2_sclk", .type = SOF_DAI_INTEL_SSP, .dai_index = 2,
+	 .clk_id = SOF_DAI_INTEL_CLKCTRL_BCLK},
+	{.name = "ssp3_mclk", .type = SOF_DAI_INTEL_SSP, .dai_index = 3,
+	 .clk_id = SOF_DAI_INTEL_CLKCTRL_MCLK},
+	{.name = "ssp3_sclk", .type = SOF_DAI_INTEL_SSP, .dai_index = 3,
+	 .clk_id = SOF_DAI_INTEL_CLKCTRL_BCLK},
+	{.name = "ssp4_mclk", .type = SOF_DAI_INTEL_SSP, .dai_index = 4,
+	 .clk_id = SOF_DAI_INTEL_CLKCTRL_MCLK},
+	{.name = "ssp4_sclk", .type = SOF_DAI_INTEL_SSP, .dai_index = 4,
+	 .clk_id = SOF_DAI_INTEL_CLKCTRL_BCLK},
+	{.name = "ssp5_mclk", .type = SOF_DAI_INTEL_SSP, .dai_index = 5,
+	 .clk_id = SOF_DAI_INTEL_CLKCTRL_MCLK},
+	{.name = "ssp5_sclk", .type = SOF_DAI_INTEL_SSP, .dai_index = 5,
+	 .clk_id = SOF_DAI_INTEL_CLKCTRL_BCLK},
+};
+
 int sof_pci_probe(struct pci_dev *pci, const struct pci_device_id *pci_id)
 {
 	struct device *dev = &pci->dev;
 	const struct sof_dev_desc *desc =
 		(const struct sof_dev_desc *)pci_id->driver_data;
+	const struct sof_intel_dsp_desc *chip =
+		(const struct sof_intel_dsp_desc *)desc->chip_info;
 	struct snd_sof_pdata *sof_pdata;
 	int ret;
 
@@ -176,6 +210,10 @@ int sof_pci_probe(struct pci_dev *pci, const struct pci_device_id *pci_id)
 	else
 		sof_pdata->tplg_filename_prefix =
 			sof_pdata->desc->default_tplg_path;
+
+	/* 2 clocks per SSP port: mclk and bclk */
+	sof_pdata->dai_clks = sof_dai_clks;
+	sof_pdata->num_clks = 2 * chip->ssp_count;
 
 	dmi_check_system(sof_tplg_table);
 	if (sof_override_tplg_name)

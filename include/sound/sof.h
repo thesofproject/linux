@@ -15,6 +15,7 @@
 #include <sound/soc.h>
 #include <sound/soc-acpi.h>
 
+struct sof_dai_clk;
 struct snd_sof_dsp_ops;
 
 /*
@@ -51,6 +52,10 @@ struct snd_sof_pdata {
 	/* machine */
 	struct platform_device *pdev_mach;
 	const struct snd_soc_acpi_mach *machine;
+
+	/* dai clocks */
+	struct sof_dai_clk *dai_clks;
+	int num_clks;
 
 	void *hw_pdata;
 };

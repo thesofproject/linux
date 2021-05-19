@@ -862,11 +862,22 @@ static int sof_pcm_probe(struct snd_soc_component *component)
 		return ret;
 	}
 
+	/* Register DAI clock control */
+	ret = snd_sof_dai_clks_probe(component);
+	if (ret) {
+		dev_err(component->dev, "error: failed to register clock control %d\n",
+			ret);
+		return ret;
+	}
+
 	return ret;
 }
 
 static void sof_pcm_remove(struct snd_soc_component *component)
 {
+	/* remove DAI clock control */
+	snd_sof_dai_clks_remove(component);
+
 	/* remove topology */
 	snd_soc_tplg_component_remove(component);
 }

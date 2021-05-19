@@ -52,6 +52,16 @@
 /* DMIC max. four controllers for eight microphone channels */
 #define SOF_DAI_INTEL_DMIC_NUM_CTRL			4
 
+/* SSP clocks to enable/disable
+ *
+ * Macros for clk_id field in sof_ipc_dai_ssp_clkctrl struct.
+ */
+
+/* mclk */
+#define SOF_DAI_INTEL_CLKCTRL_MCLK			1
+/* bclk */
+#define SOF_DAI_INTEL_CLKCTRL_BCLK			2
+
 /* SSP Configuration Request - SOF_IPC_DAI_SSP_CONFIG */
 struct sof_ipc_dai_ssp_params {
 	struct sof_ipc_hdr hdr;

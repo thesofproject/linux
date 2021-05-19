@@ -47,6 +47,8 @@ extern int sof_core_debug;
 #define SOF_IPC_DSP_REPLY		0
 #define SOF_IPC_HOST_REPLY		1
 
+#define SOF_DAI_CLKS			12
+
 /* convenience constructor for DAI driver streams */
 #define SOF_DAI_STREAM(sname, scmin, scmax, srates, sfmt) \
 	{.stream_name = sname, .channels_min = scmin, .channels_max = scmax, \
@@ -457,6 +459,10 @@ struct snd_sof_dev {
 	bool dtrace_error;
 	bool dtrace_draining;
 
+	/* DAI clock control */
+	struct clk_lookup *dai_clks_lookup[SOF_DAI_CLKS];
+	int num_clks;
+
 	bool msi_enabled;
 
 	void *private;			/* core does not touch this */
@@ -485,6 +491,9 @@ void snd_sof_new_platform_drv(struct snd_sof_dev *sdev);
 int snd_sof_create_page_table(struct device *dev,
 			      struct snd_dma_buffer *dmab,
 			      unsigned char *page_table, size_t size);
+
+int snd_sof_dai_clks_probe(struct snd_soc_component *component);
+void snd_sof_dai_clks_remove(struct snd_soc_component *component);
 
 /*
  * Firmware loading.
