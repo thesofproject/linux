@@ -2078,21 +2078,127 @@ err:
 	return ret;
 }
 
+static int sof_get_control_data(struct snd_soc_component *scomp,
+				struct snd_soc_dapm_widget *widget,
+				struct sof_widget_data *wdata,
+				size_t *size)
+{
+	const struct snd_kcontrol_new *kc;
+	struct soc_mixer_control *sm;
+	struct soc_bytes_ext *sbe;
+	struct soc_enum *se;
+	int i;
+
+	*size = 0;
+
+	for (i = 0; i < widget->num_kcontrols; i++) {
+		kc = &widget->kcontrol_news[i];
+
+		switch (widget->dobj.widget.kcontrol_type[i]) {
+		case SND_SOC_TPLG_TYPE_MIXER:
+			sm = (struct soc_mixer_control *)kc->private_value;
+			wdata[i].control = sm->dobj.private;
+			break;
+		case SND_SOC_TPLG_TYPE_BYTES:
+			sbe = (struct soc_bytes_ext *)kc->private_value;
+			wdata[i].control = sbe->dobj.private;
+			break;
+		case SND_SOC_TPLG_TYPE_ENUM:
+			se = (struct soc_enum *)kc->private_value;
+			wdata[i].control = se->dobj.private;
+			break;
+		default:
+			dev_err(scomp->dev, "error: unknown kcontrol type %u in widget %s\n",
+				widget->dobj.widget.kcontrol_type[i],
+				widget->name);
+			return -EINVAL;
+		}
+
+		if (!wdata[i].control) {
+			dev_err(scomp->dev, "error: no scontrol for widget %s\n",
+				widget->name);
+			return -EINVAL;
+		}
+
+		wdata[i].pdata = wdata[i].control->control_data->data;
+		if (!wdata[i].pdata)
+			return -EINVAL;
+
+		/* make sure data is valid - data can be updated at runtime */
+		if (widget->dobj.widget.kcontrol_type[i] == SND_SOC_TPLG_TYPE_BYTES &&
+		    wdata[i].pdata->magic != SOF_ABI_MAGIC)
+			return -EINVAL;
+
+		*size += wdata[i].pdata->size;
+
+		/* get data type */
+		switch (wdata[i].control->cmd) {
+		case SOF_CTRL_CMD_VOLUME:
+		case SOF_CTRL_CMD_ENUM:
+		case SOF_CTRL_CMD_SWITCH:
+			wdata[i].ipc_cmd = SOF_IPC_COMP_SET_VALUE;
+			wdata[i].ctrl_type = SOF_CTRL_TYPE_VALUE_CHAN_SET;
+			break;
+		case SOF_CTRL_CMD_BINARY:
+			wdata[i].ipc_cmd = SOF_IPC_COMP_SET_DATA;
+			wdata[i].ctrl_type = SOF_CTRL_TYPE_DATA_SET;
+			break;
+		default:
+			break;
+		}
+	}
+
+	return 0;
+}
+
 static int sof_process_load(struct snd_soc_component *scomp, int index,
 			    struct snd_sof_widget *swidget,
 			    struct snd_soc_tplg_dapm_widget *tw,
 			    int type)
 {
-	size_t ipc_size = sizeof(struct sof_ipc_comp_process);
+	struct snd_soc_dapm_widget *widget = swidget->widget;
 	struct snd_soc_tplg_private *private = &tw->priv;
 	struct sof_ipc_comp_process *process;
+	struct sof_widget_data *wdata = NULL;
+	size_t ipc_data_size = 0;
+	size_t ipc_size;
+	int offset = 0;
 	int ret;
+	int i;
 
-	process = (struct sof_ipc_comp_process *)sof_comp_alloc(swidget, &ipc_size, index);
-	if (!process)
-		return -ENOMEM;
+	/* allocate struct for widget control data sizes and types */
+	if (widget->num_kcontrols) {
+		wdata = kcalloc(widget->num_kcontrols,
+				sizeof(*wdata),
+				GFP_KERNEL);
 
-	/* configure process IPC message */
+		if (!wdata)
+			return -ENOMEM;
+
+		/* get possible component controls and get size of all pdata */
+		ret = sof_get_control_data(scomp, widget, wdata,
+					   &ipc_data_size);
+
+		if (ret < 0)
+			goto out;
+	}
+
+	ipc_size = sizeof(struct sof_ipc_comp_process) + ipc_data_size;
+
+	/* we are exceeding max ipc size, config needs to be sent separately */
+	if (ipc_size > SOF_IPC_MSG_MAX_SIZE) {
+		ipc_size -= ipc_data_size;
+		ipc_data_size = 0;
+	}
+
+	process = (struct sof_ipc_comp_process *)
+		  sof_comp_alloc(swidget, &ipc_size, index);
+	if (!process) {
+		ret = -ENOMEM;
+		goto out;
+	}
+
+	/* configure iir IPC message */
 	process->comp.type = type;
 	process->config.hdr.size = sizeof(process->config);
 
@@ -2102,16 +2208,32 @@ static int sof_process_load(struct snd_soc_component *scomp, int index,
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse process.cfg tokens failed %d\n",
 			le32_to_cpu(private->size));
-		kfree(process);
-		return ret;
+		goto err;
 	}
 
 	sof_dbg_comp_config(scomp, &process->config);
 
-	/* process data will be sent in the related kcontrol */
-	process->size = ipc_size;
-	swidget->private = process;
+	/*
+	 * found private data in control, so copy it.
+	 * get possible component controls - get size of all pdata,
+	 * then memcpy with headers
+	 */
+	if (ipc_data_size) {
+		for (i = 0; i < widget->num_kcontrols; i++) {
+			memcpy(&process->data + offset,
+			       wdata[i].pdata->data,
+			       wdata[i].pdata->size);
+			offset += wdata[i].pdata->size;
+		}
+	}
 
+	process->size = ipc_data_size;
+	swidget->private = process;
+err:
+	if (ret < 0)
+		kfree(process);
+out:
+	kfree(wdata);
 	return ret;
 }
 
