@@ -229,6 +229,25 @@ static const struct snd_soc_acpi_link_adr cml_3_in_1_default[] = {
 	{}
 };
 
+static const struct snd_soc_acpi_link_adr cml_uv2[] = {
+	{
+		.mask = BIT(0),
+		.num_adr = ARRAY_SIZE(rt711_0_adr),
+		.adr_d = rt711_0_adr,
+	},
+	{
+		.mask = BIT(1),
+		.num_adr = ARRAY_SIZE(rt1308_1_group1_adr),
+		.adr_d = rt1308_1_group1_adr,
+	},
+	{
+		.mask = BIT(2),
+		.num_adr = ARRAY_SIZE(rt1308_2_group1_adr),
+		.adr_d = rt1308_2_group1_adr,
+	},
+	{}
+};
+
 static const struct snd_soc_acpi_link_adr cml_3_in_1_mono_amp[] = {
 	{
 		.mask = BIT(0),
@@ -298,6 +317,13 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_cml_sdw_machines[] = {
 		.drv_name = "sof_sdw",
 		.sof_fw_filename = "sof-cml.ri",
 		.sof_tplg_filename = "sof-cml-rt711-rt1308-mono-rt715.tplg",
+	},
+	{
+		.link_mask = 0x7, /* rt711 on link 0, rt1308-1 on link 1 and rt1308-2 on link 2 */
+		.links = cml_uv2,
+		.drv_name = "sof_sdw",
+		.sof_fw_filename = "sof-cml.ri",
+		.sof_tplg_filename = "sof-cml-rt711-rt1308.tplg",
 	},
 	{
 		.link_mask = 0x2, /* RT700 connected on Link1 */
