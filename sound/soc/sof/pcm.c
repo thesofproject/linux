@@ -288,9 +288,41 @@ static int sof_pcm_hw_free(struct snd_soc_component *component,
 	struct snd_sof_pcm *spcm;
 	int ret, err = 0;
 
-	/* nothing to do for BE */
-	if (rtd->dai_link->no_pcm)
+	if (rtd->dai_link->no_pcm) {
+		struct snd_sof_dai *sdai;
+		struct sof_ipc_dai_config *dai_config;
+		struct sof_ipc_dai_hw_free dai_hw_free;
+		struct sof_ipc_reply reply;
+
+		sdai = snd_sof_find_dai(component, rtd->dai_link->name);
+		if (!sdai)
+			return -EINVAL;
+
+		dai_config = sdai->dai_config;
+
+		dev_dbg(component->dev, "dai: free dai type %d index %d\n",
+			dai_config->type, dai_config->dai_index);
+
+		memset(&dai_hw_free, 0, sizeof(dai_hw_free));
+
+		dai_hw_free.hdr.size = sizeof(dai_hw_free);
+		dai_hw_free.hdr.cmd = SOF_IPC_GLB_DAI_MSG | SOF_IPC_DAI_HW_FREE;
+		dai_hw_free.type = dai_config->type;
+		dai_hw_free.dai_index = dai_config->dai_index;
+
+		/* send IPC to the DSP */
+		ret = sof_ipc_tx_message(sdev->ipc, dai_hw_free.hdr.cmd,
+					 &dai_hw_free, sizeof(dai_hw_free),
+					 &reply, sizeof(reply));
+		if (ret < 0) {
+			dev_err(component->dev,
+				"error: hw free ipc failed for dai type %d index %d\n",
+				dai_config->type, dai_config->dai_index);
+			return ret;
+		}
+
 		return 0;
+	}
 
 	spcm = snd_sof_find_spcm_dai(component, rtd);
 	if (!spcm)

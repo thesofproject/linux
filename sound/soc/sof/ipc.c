@@ -168,6 +168,8 @@ static void ipc_log_header(struct device *dev, u8 *text, u32 cmd)
 			str2 = "CONFIG"; break;
 		case SOF_IPC_DAI_LOOPBACK:
 			str2 = "LOOPBACK"; break;
+		case SOF_IPC_DAI_HW_FREE:
+			str2 = "HW_FREE"; break;
 		default:
 			str2 = "unknown type"; break;
 		}
