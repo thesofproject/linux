@@ -15,6 +15,7 @@
 #include <linux/module.h>
 #include <linux/regmap.h>
 #include <sound/soc.h>
+#include <sound/hda_verbs.h>
 #include "rt700.h"
 #include "rt700-sdw.h"
 
@@ -485,6 +486,23 @@ static int __maybe_unused rt700_dev_suspend(struct device *dev)
 	cancel_delayed_work_sync(&rt700->jack_detect_work);
 	cancel_delayed_work_sync(&rt700->jack_btn_check_work);
 
+	if (rt700->hs_jack) {
+		regmap_write(rt700->regmap,
+			RT700_SET_AUDIO_POWER_STATE, AC_PWRST_D0);
+
+		regmap_write(rt700->regmap,
+			RT700_SET_MIC2_UNSOLICITED_ENABLE, 0x00);
+		regmap_write(rt700->regmap,
+			RT700_SET_HP_UNSOLICITED_ENABLE, 0x00);
+		regmap_write(rt700->regmap,
+			RT700_SET_INLINE_UNSOLICITED_ENABLE, 0x00);
+
+		dev_dbg(dev, "in %s jd disable\n", __func__);
+
+		regmap_write(rt700->regmap,
+			RT700_SET_AUDIO_POWER_STATE, AC_PWRST_D3);
+	}
+
 	regcache_cache_only(rt700->regmap, true);
 
 	return 0;
@@ -516,6 +534,23 @@ regmap_sync:
 	regcache_cache_only(rt700->regmap, false);
 	regcache_sync_region(rt700->regmap, 0x3000, 0x8fff);
 	regcache_sync_region(rt700->regmap, 0x752010, 0x75206b);
+
+	if (!slave->unattach_request && rt700->hs_jack) {
+		regmap_write(rt700->regmap,
+			RT700_SET_AUDIO_POWER_STATE, AC_PWRST_D0);
+
+		regmap_write(rt700->regmap,
+			RT700_SET_MIC2_UNSOLICITED_ENABLE, 0x82);
+		regmap_write(rt700->regmap,
+			RT700_SET_HP_UNSOLICITED_ENABLE, 0x81);
+		regmap_write(rt700->regmap,
+			RT700_SET_INLINE_UNSOLICITED_ENABLE, 0x83);
+
+		dev_dbg(dev, "in %s jd enable\n", __func__);
+
+		regmap_write(rt700->regmap,
+			RT700_SET_AUDIO_POWER_STATE, AC_PWRST_D3);
+	}
 
 	return 0;
 }
