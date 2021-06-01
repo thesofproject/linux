@@ -286,17 +286,17 @@ struct snd_sof_dsp_ops {
 	/* ALSA HW info flags, will be stored in snd_pcm_runtime.hw.info */
 	u32 hw_info;
 
-	const struct sof_arch_ops *arch_ops;
+	const struct dsp_arch_ops *dsp_arch_ops;
 };
 
 /* DSP architecture specific callbacks for oops and stack dumps */
-struct sof_arch_ops {
+struct dsp_arch_ops {
 	void (*dsp_oops)(struct snd_sof_dev *sdev, void *oops);
 	void (*dsp_stack)(struct snd_sof_dev *sdev, void *oops,
 			  u32 *stack, u32 stack_words);
 };
 
-#define sof_arch_ops(sdev) ((sdev)->pdata->desc->ops->arch_ops)
+#define sof_dsp_arch_ops(sdev) ((sdev)->pdata->desc->ops->dsp_arch_ops)
 
 /* DSP device HW descriptor mapping between bus ID and ops */
 struct sof_ops_table {
@@ -553,16 +553,16 @@ extern struct snd_compress_ops sof_compressed_ops;
 static inline void sof_stack(struct snd_sof_dev *sdev, void *oops, u32 *stack,
 			     u32 stack_words)
 {
-		sof_arch_ops(sdev)->dsp_stack(sdev, oops, stack, stack_words);
+		sof_dsp_arch_ops(sdev)->dsp_stack(sdev, oops, stack, stack_words);
 }
 
 static inline void sof_oops(struct snd_sof_dev *sdev, void *oops)
 {
-	if (sof_arch_ops(sdev)->dsp_oops)
-		sof_arch_ops(sdev)->dsp_oops(sdev, oops);
+	if (sof_dsp_arch_ops(sdev)->dsp_oops)
+		sof_dsp_arch_ops(sdev)->dsp_oops(sdev, oops);
 }
 
-extern const struct sof_arch_ops sof_xtensa_arch_ops;
+extern const struct dsp_arch_ops sof_xtensa_arch_ops;
 
 /*
  * Utilities
