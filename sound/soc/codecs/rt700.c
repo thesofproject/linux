@@ -159,6 +159,8 @@ static void rt700_jack_detect_handler(struct work_struct *work)
 	int btn_type = 0, ret;
 	unsigned int jack_status = 0, reg;
 
+	dev_dbg(&rt700->slave->dev, "plb: %s: start\n", __func__);
+
 	if (!rt700->hs_jack)
 		return;
 
@@ -209,6 +211,8 @@ static void rt700_jack_detect_handler(struct work_struct *work)
 			&rt700->jack_btn_check_work, msecs_to_jiffies(200));
 	}
 
+	dev_dbg(&rt700->slave->dev, "plb: %s: end\n", __func__);
+
 	return;
 
 io_error:
@@ -221,6 +225,8 @@ static void rt700_btn_check_handler(struct work_struct *work)
 		jack_btn_check_work.work);
 	int btn_type = 0, ret;
 	unsigned int jack_status = 0, reg;
+
+	dev_dbg(&rt700->slave->dev, "plb: %s: start\n", __func__);
 
 	reg = RT700_VERB_GET_PIN_SENSE | RT700_HP_OUT;
 	ret = regmap_read(rt700->regmap, reg, &jack_status);
@@ -262,6 +268,8 @@ static void rt700_btn_check_handler(struct work_struct *work)
 		mod_delayed_work(system_power_efficient_wq,
 			&rt700->jack_btn_check_work, msecs_to_jiffies(200));
 	}
+
+	dev_dbg(&rt700->slave->dev, "plb: %s: end\n", __func__);
 
 	return;
 
