@@ -493,7 +493,7 @@ MODULE_DEVICE_TABLE(platform, board_ids);
 static struct platform_driver sof_audio = {
 	.probe = sof_audio_probe,
 	.driver = {
-		.name = "sof_cs42l42",
+		.name = "cs42l42",
 		.pm = &snd_soc_pm_ops,
 	},
 	.id_table = board_ids,
