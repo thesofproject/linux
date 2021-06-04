@@ -478,6 +478,9 @@ static int rt5682_io_init(struct device *dev, struct sdw_slave *slave)
 		RT5682_JD1_EN | RT5682_JD1_IRQ_PUL);
 
 reinit:
+	/* re-enable interrupt callback if it was disabled */
+	slave->disable_interrupt_callback = false;
+
 	mod_delayed_work(system_power_efficient_wq,
 		&rt5682->jack_detect_work, msecs_to_jiffies(250));
 
@@ -736,6 +739,24 @@ static int __maybe_unused rt5682_dev_suspend(struct device *dev)
 	return 0;
 }
 
+static int __maybe_unused rt5682_dev_system_suspend(struct device *dev)
+{
+	struct rt5682_priv *rt5682 = dev_get_drvdata(dev);
+	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+
+	if (!rt5682->hw_init)
+		return 0;
+
+	/*
+	 * prevent new interrupts from being handled after the
+	 * deferred work completes and before the parent disables
+	 * interrupts on the link
+	 */
+	slave->disable_interrupt_callback = true;
+
+	return rt5682_dev_suspend(dev);
+}
+
 static int __maybe_unused rt5682_dev_resume(struct device *dev)
 {
 	struct sdw_slave *slave = dev_to_sdw_dev(dev);
@@ -764,7 +785,7 @@ regmap_sync:
 }
 
 static const struct dev_pm_ops rt5682_pm = {
-	SET_SYSTEM_SLEEP_PM_OPS(rt5682_dev_suspend, rt5682_dev_resume)
+	SET_SYSTEM_SLEEP_PM_OPS(rt5682_dev_system_suspend, rt5682_dev_resume)
 	SET_RUNTIME_PM_OPS(rt5682_dev_suspend, rt5682_dev_resume, NULL)
 };
 
