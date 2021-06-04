@@ -1227,6 +1227,9 @@ int rt700_io_init(struct device *dev, struct sdw_slave *slave)
 	/* Mark Slave initialization complete */
 	rt700->hw_init = true;
 
+	/* re-enable interrupt callback if it was disabled */
+	slave->disable_interrupt_callback = false;
+
 	pm_runtime_mark_last_busy(&slave->dev);
 	pm_runtime_put_autosuspend(&slave->dev);
 

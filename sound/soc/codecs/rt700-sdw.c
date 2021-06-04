@@ -490,6 +490,24 @@ static int __maybe_unused rt700_dev_suspend(struct device *dev)
 	return 0;
 }
 
+static int __maybe_unused rt700_dev_system_suspend(struct device *dev)
+{
+	struct rt700_priv *rt700 = dev_get_drvdata(dev);
+	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+
+	if (!rt700->hw_init)
+		return 0;
+
+	/*
+	 * prevent new interrupts from being handled after the
+	 * deferred work completes and before the parent disables
+	 * interrupts on the link
+	 */
+	slave->disable_interrupt_callback = true;
+
+	return rt700_dev_suspend(dev);
+}
+
 #define RT700_PROBE_TIMEOUT 5000
 
 static int __maybe_unused rt700_dev_resume(struct device *dev)
@@ -521,7 +539,7 @@ regmap_sync:
 }
 
 static const struct dev_pm_ops rt700_pm = {
-	SET_SYSTEM_SLEEP_PM_OPS(rt700_dev_suspend, rt700_dev_resume)
+	SET_SYSTEM_SLEEP_PM_OPS(rt700_dev_system_suspend, rt700_dev_resume)
 	SET_RUNTIME_PM_OPS(rt700_dev_suspend, rt700_dev_resume, NULL)
 };
 
