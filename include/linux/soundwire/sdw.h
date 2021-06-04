@@ -659,6 +659,8 @@ struct sdw_slave_ops {
  * between the Master suspending and the codec resuming, and make sure that
  * when the Master triggered a reset the Slave is properly enumerated and
  * initialized
+ * @disable_interrupt_callback: status flag tracking if the interrupt callback
+ * is temporarily disabled to prevent race conditions.
  * @first_interrupt_done: status flag tracking if the interrupt handling
  * for a Slave happens for the first time after enumeration
  * @is_mockup_device: status flag used to squelch errors in the command/control
@@ -684,6 +686,7 @@ struct sdw_slave {
 	struct completion enumeration_complete;
 	struct completion initialization_complete;
 	u32 unattach_request;
+	bool disable_interrupt_callback;
 	bool first_interrupt_done;
 	bool is_mockup_device;
 };

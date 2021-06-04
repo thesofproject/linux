@@ -1602,7 +1602,8 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 
 		/* Update the Slave driver */
 		if (slave_notify && slave->ops &&
-		    slave->ops->interrupt_callback) {
+		    slave->ops->interrupt_callback &&
+		    !slave->disable_interrupt_callback) {
 			slave_intr.sdca_cascade = sdca_cascade;
 			slave_intr.control_port = clear;
 			memcpy(slave_intr.port, &port_status,
