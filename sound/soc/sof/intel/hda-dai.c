@@ -313,6 +313,7 @@ static int hda_link_pcm_trigger(struct snd_pcm_substream *substream,
 	struct hdac_ext_link *link;
 	struct hdac_stream *hstream;
 	struct hdac_bus *bus;
+	bool free_dai_widget = false;
 	int stream_tag;
 	int ret;
 
@@ -343,6 +344,9 @@ static int hda_link_pcm_trigger(struct snd_pcm_substream *substream,
 		snd_hdac_ext_link_stream_start(link_dev);
 		break;
 	case SNDRV_PCM_TRIGGER_SUSPEND:
+		free_dai_widget = true;
+
+		fallthrough;
 	case SNDRV_PCM_TRIGGER_STOP:
 		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
 			w = dai->playback_widget;
@@ -350,12 +354,18 @@ static int hda_link_pcm_trigger(struct snd_pcm_substream *substream,
 			w = dai->capture_widget;
 
 		/*
-		 * clear link DMA channel. It will be assigned when
-		 * hw_params is set up again after resume.
+		 * free the link DMA channel in the FW for both STOP and SUSPEND triggers but
+		 * free the DAI widget in the case of suspend
 		 */
-		ret = hda_link_config_ipc(hda_stream, w, DMA_CHAN_INVALID);
-		if (ret < 0)
-			return ret;
+		if (free_dai_widget) {
+			ret = hda_link_dai_widget_update(hda_stream, w, DMA_CHAN_INVALID, false);
+			if (ret < 0)
+				return ret;
+		} else {
+			ret = hda_link_config_ipc(hda_stream, w, DMA_CHAN_INVALID);
+			if (ret < 0)
+				return ret;
+		}
 
 		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 			stream_tag = hdac_stream(link_dev)->stream_tag;
@@ -492,9 +502,20 @@ static int ssp_dai_hw_free(struct snd_pcm_substream *substream,
 	return ssp_dai_setup_or_free(substream, dai, false);
 }
 
+/* handle SUSPEND trigger to free the DAI widget during suspend */
+static int ssp_dai_trigger(struct snd_pcm_substream *substream,
+				int cmd, struct snd_soc_dai *dai)
+{
+	if (cmd == SNDRV_PCM_TRIGGER_SUSPEND)
+		return ssp_dai_setup_or_free(substream, dai, false);
+
+	return 0;
+}
+
 static const struct snd_soc_dai_ops ssp_dai_ops = {
 	.hw_params = ssp_dai_hw_params,
 	.hw_free = ssp_dai_hw_free,
+	.trigger = ssp_dai_trigger,
 };
 
 /*
