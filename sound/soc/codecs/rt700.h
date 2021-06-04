@@ -23,6 +23,7 @@ struct  rt700_priv {
 	struct delayed_work jack_detect_work;
 	struct delayed_work jack_btn_check_work;
 	int jack_type;
+	bool disable_interrupts;
 };
 
 struct sdw_stream_data {

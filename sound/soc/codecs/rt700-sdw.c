@@ -417,6 +417,12 @@ static int rt700_interrupt_callback(struct sdw_slave *slave,
 
 	dev_dbg(&slave->dev, "plb: %s: start\n", __func__);
 
+	if (rt700->disable_interrupts) {
+		dev_dbg(&slave->dev,
+			"%s: interrupts disabled, ignoring", __func__);
+		return 0;
+	}
+
 	dev_dbg(&slave->dev,
 		"%s control_port_stat=%x", __func__, status->control_port);
 
@@ -502,9 +508,12 @@ static int __maybe_unused rt700_dev_suspend(struct device *dev)
 
 static int __maybe_unused rt700_dev_system_suspend(struct device *dev)
 {
+	struct rt700_priv *rt700 = dev_get_drvdata(dev);
 	int ret;
 
 	dev_dbg(dev, "plb: %s: start\n", __func__);
+
+	rt700->disable_interrupts = true;
 
 	ret = rt700_dev_suspend(dev);
 
@@ -558,6 +567,8 @@ static int __maybe_unused rt700_dev_resume(struct device *dev)
 	dev_dbg(dev, "plb: %s: end wait for completion\n", __func__);
 
 regmap_sync:
+	rt700->disable_interrupts = false;
+
 	slave->unattach_request = 0;
 	regcache_cache_only(rt700->regmap, false);
 	regcache_sync_region(rt700->regmap, 0x3000, 0x8fff);

@@ -167,6 +167,9 @@ static void rt700_jack_detect_handler(struct work_struct *work)
 	if (!rt700->component->card->instantiated)
 		return;
 
+	if (rt700->disable_interrupts)
+		return;
+
 	reg = RT700_VERB_GET_PIN_SENSE | RT700_HP_OUT;
 	ret = regmap_read(rt700->regmap, reg, &jack_status);
 	if (ret < 0)
@@ -227,6 +230,9 @@ static void rt700_btn_check_handler(struct work_struct *work)
 	unsigned int jack_status = 0, reg;
 
 	dev_dbg(&rt700->slave->dev, "plb: %s: start\n", __func__);
+
+	if (rt700->disable_interrupts)
+		return;
 
 	reg = RT700_VERB_GET_PIN_SENSE | RT700_HP_OUT;
 	ret = regmap_read(rt700->regmap, reg, &jack_status);
