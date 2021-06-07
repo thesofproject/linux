@@ -605,3 +605,9 @@ int sof_machine_check(struct snd_sof_dev *sdev);
 	} while (0)
 
 #endif
+
+#define SDEV_DBG(sdev, fmt, ...)	dev_dbg(sdev->dev, fmt, ##__VA_ARGS__)
+#define SDEV_VDBG(sdev, fmt, ...)	dev_vdbg(sdev->dev, fmt, ##__VA_ARGS__)
+#define SDEV_INFO(sdev, fmt, ...)	dev_info(sdev->dev, fmt, ##__VA_ARGS__)
+#define SDEV_WARN(sdev, fmt, ...)	dev_warn(sdev->dev, "warning: " fmt, ##__VA_ARGS__)
+#define SDEV_ERR(sdev, fmt, ...)	dev_err(sdev->dev, "error: " fmt, ##__VA_ARGS__)
