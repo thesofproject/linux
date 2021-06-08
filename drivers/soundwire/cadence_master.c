@@ -1112,7 +1112,7 @@ void sdw_cdns_check_self_clearing_bits(struct sdw_cdns *cdns, const char *string
 			break;
 		}
 
-		dev_dbg(cdns->dev, "%s: MCP_CONTROL_HW_RST is not cleared at iteration %d\n", string, i);
+		dev_err(cdns->dev, "%s: MCP_CONTROL_HW_RST is not cleared at iteration %d\n", string, i);
 		i++;
 
 		usleep_range(1000, 1500);
