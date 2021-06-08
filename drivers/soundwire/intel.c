@@ -23,6 +23,7 @@
 #include "intel.h"
 
 #define INTEL_MASTER_SUSPEND_DELAY_MS	3000
+#define INTEL_MASTER_RESET_ITERATIONS	10
 
 /*
  * debug/config flags for the Intel SoundWire Master.
@@ -1467,8 +1468,8 @@ int intel_link_startup(struct auxiliary_device *auxdev)
 			goto err_interrupt;
 		}
 	}
-	usleep_range(1000, 1500);
-	sdw_cdns_check_self_clearing_bits(cdns, __func__);
+	sdw_cdns_check_self_clearing_bits(cdns, __func__,
+					  true, INTEL_MASTER_RESET_ITERATIONS);
 
 	/* Register DAIs */
 	ret = intel_register_dai(sdw);
@@ -1785,8 +1786,8 @@ static int __maybe_unused intel_resume(struct device *dev)
 			return ret;
 		}
 	}
-	usleep_range(1000, 1500);
-	sdw_cdns_check_self_clearing_bits(cdns, __func__);
+	sdw_cdns_check_self_clearing_bits(cdns, __func__,
+					  true, INTEL_MASTER_RESET_ITERATIONS);
 
 	/*
 	 * after system resume, the pm_runtime suspend() may kick in
@@ -1871,8 +1872,8 @@ static int __maybe_unused intel_resume_runtime(struct device *dev)
 				return ret;
 			}
 		}
-		usleep_range(1000, 1500);
-		sdw_cdns_check_self_clearing_bits(cdns, "intel_resume_runtime TEARDOWN");
+		sdw_cdns_check_self_clearing_bits(cdns, "intel_resume_runtime TEARDOWN",
+						  true, INTEL_MASTER_RESET_ITERATIONS);
 
 	} else if (clock_stop_quirks & SDW_INTEL_CLK_STOP_BUS_RESET) {
 		ret = intel_init(sdw);
@@ -1947,8 +1948,8 @@ static int __maybe_unused intel_resume_runtime(struct device *dev)
 				}
 			}
 		}
-		usleep_range(1000, 1500);
-		sdw_cdns_check_self_clearing_bits(cdns, "intel_resume_runtime BUS_RESET");
+		sdw_cdns_check_self_clearing_bits(cdns, "intel_resume_runtime BUS_RESET",
+						  true, INTEL_MASTER_RESET_ITERATIONS);
 
 	} else if (!clock_stop_quirks) {
 
@@ -1974,8 +1975,8 @@ static int __maybe_unused intel_resume_runtime(struct device *dev)
 			return ret;
 		}
 
-		usleep_range(1000, 1500);
-		sdw_cdns_check_self_clearing_bits(cdns, "intel_resume_runtime no_quirks");
+		sdw_cdns_check_self_clearing_bits(cdns, "intel_resume_runtime no_quirks",
+						  true, INTEL_MASTER_RESET_ITERATIONS);
 	} else {
 		dev_err(dev, "%s clock_stop_quirks %x unsupported\n",
 			__func__, clock_stop_quirks);
