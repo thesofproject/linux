@@ -18,7 +18,7 @@
 #include "sof-audio.h"
 #include "ops.h"
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_PROBES)
-#include "compress.h"
+#include "sof-probes.h"
 #endif
 
 static bool pcm_disable_pause = IS_ENABLED(CONFIG_SND_SOC_SOF_PCM_DISABLE_PAUSE);
