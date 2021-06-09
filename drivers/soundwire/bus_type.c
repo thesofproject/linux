@@ -65,6 +65,7 @@ int sdw_slave_uevent(struct device *dev, struct kobj_uevent_env *env)
 
 	sdw_slave_modalias(slave, modalias, sizeof(modalias));
 
+	dev_info_once(dev, "plb: setting modalias %s\n", modalias);
 	if (add_uevent_var(env, "MODALIAS=%s", modalias))
 		return -ENOMEM;
 
@@ -140,6 +141,7 @@ static int sdw_drv_probe(struct device *dev)
 
 	slave->probed = true;
 	complete(&slave->probe_complete);
+	dev_info(dev, "plb: probe complete\n");
 
 	dev_dbg(dev, "probe complete\n");
 
@@ -199,6 +201,11 @@ int __sdw_register_driver(struct sdw_driver *drv, struct module *owner)
 
 	if (drv->shutdown)
 		drv->driver.shutdown = sdw_drv_shutdown;
+
+	if (drv->name)
+		pr_info("plb: registering driver %s\n", drv->name);
+	else
+		pr_info("plb: registering driver %s\n", drv->driver.name);
 
 	return driver_register(&drv->driver);
 }
