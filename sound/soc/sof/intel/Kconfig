@@ -242,7 +242,7 @@ config SND_SOC_SOF_HDA_AUDIO_CODEC
 
 config SND_SOC_SOF_HDA_PROBES
 	bool "SOF enable probes over HDA"
-	depends on SND_SOC_SOF_DEBUG_PROBES
+	select SND_SOC_SOF_DEBUG_PROBES
 	help
 	  This option enables the data probing for Intel(R)
 	  Skylake and newer platforms.
