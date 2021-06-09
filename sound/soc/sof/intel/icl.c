@@ -88,6 +88,16 @@ static int icl_dsp_post_fw_run(struct snd_sof_dev *sdev)
 	return hda_dsp_ctrl_clock_power_gating(sdev, true);
 }
 
+static int icl_register_clients(struct snd_sof_dev *sdev)
+{
+	return hda_probes_register(sdev);
+}
+
+static void icl_unregister_clients(struct snd_sof_dev *sdev)
+{
+	hda_probes_unregister(sdev);
+}
+
 /* Icelake ops */
 const struct snd_sof_dsp_ops sof_icl_ops = {
 	/* probe/remove/shutdown */
@@ -142,15 +152,6 @@ const struct snd_sof_dsp_ops sof_icl_ops = {
 	.pcm_trigger	= hda_dsp_pcm_trigger,
 	.pcm_pointer	= hda_dsp_pcm_pointer,
 
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_PROBES)
-	/* probe callbacks */
-	.probe_assign	= hda_probe_compr_assign,
-	.probe_free	= hda_probe_compr_free,
-	.probe_set_params	= hda_probe_compr_set_params,
-	.probe_trigger	= hda_probe_compr_trigger,
-	.probe_pointer	= hda_probe_compr_pointer,
-#endif
-
 	/* firmware loading */
 	.load_firmware = snd_sof_load_firmware_raw,
 
@@ -173,6 +174,10 @@ const struct snd_sof_dsp_ops sof_icl_ops = {
 	.trace_init = hda_dsp_trace_init,
 	.trace_release = hda_dsp_trace_release,
 	.trace_trigger = hda_dsp_trace_trigger,
+
+	/* client ops */
+	.register_ipc_clients = icl_register_clients,
+	.unregister_ipc_clients = icl_unregister_clients,
 
 	/* DAI drivers */
 	.drv		= skl_dai,
