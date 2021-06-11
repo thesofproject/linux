@@ -24,7 +24,7 @@ static int max98373_dac_event(struct snd_soc_dapm_widget *w,
 	struct max98373_priv *max98373 = snd_soc_component_get_drvdata(component);
 
 	switch (event) {
-	case SND_SOC_DAPM_POST_PMU:
+	case SND_SOC_DAPM_PRE_PMU:
 		regmap_update_bits(max98373->regmap,
 			MAX98373_R20FF_GLOBAL_SHDN,
 			MAX98373_GLOBAL_EN_MASK, 1);
