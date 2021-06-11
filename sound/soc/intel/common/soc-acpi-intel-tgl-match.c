@@ -323,6 +323,12 @@ static const struct snd_soc_acpi_codecs tgl_rt1011_amp = {
 
 struct snd_soc_acpi_mach snd_soc_acpi_intel_tgl_machines[] = {
 	{
+		.id = "10EC1308",
+		.drv_name = "tgl_rt1308",
+		.sof_fw_filename = "sof-tgl.ri",
+		.sof_tplg_filename = "sof-tgl-rt1308.tplg"
+	},
+	{
 		.id = "10EC5682",
 		.drv_name = "tgl_mx98357a_rt5682",
 		.machine_quirk = snd_soc_acpi_codec_list,
