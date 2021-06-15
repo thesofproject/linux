@@ -442,7 +442,7 @@ static void ipc_trace_message(struct snd_sof_dev *sdev, u32 msg_type)
 			snd_sof_trace_update_pos(sdev, &posn);
 		break;
 	default:
-		dev_err(sdev->dev, "error: unhandled trace message %x\n", msg_type);
+		dev_err(sdev->dev, "error: unhandled trace message %#x\n", msg_type);
 		break;
 	}
 }
@@ -532,7 +532,7 @@ static void ipc_stream_message(struct snd_sof_dev *sdev, u32 msg_cmd)
 		ipc_xrun(sdev, msg_id);
 		break;
 	default:
-		dev_err(sdev->dev, "error: unhandled stream message %x\n",
+		dev_err(sdev->dev, "error: unhandled stream message %#x\n",
 			msg_id);
 		break;
 	}
