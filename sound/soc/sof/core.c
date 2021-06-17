@@ -67,8 +67,8 @@ void snd_sof_get_status(struct snd_sof_dev *sdev, u32 panic_code,
 
 	/* is firmware dead ? */
 	if ((panic_code & SOF_IPC_PANIC_MAGIC_MASK) != SOF_IPC_PANIC_MAGIC) {
-		dev_err(sdev->dev, "error: unexpected fault 0x%8.8x trace 0x%8.8x\n",
-			panic_code, tracep_code);
+		SDEV_ERR(sdev, "unexpected fault 0x%8.8x trace 0x%8.8x\n",
+			 panic_code, tracep_code);
 		return; /* no fault ? */
 	}
 
@@ -76,20 +76,19 @@ void snd_sof_get_status(struct snd_sof_dev *sdev, u32 panic_code,
 
 	for (i = 0; i < ARRAY_SIZE(panic_msg); i++) {
 		if (panic_msg[i].id == code) {
-			dev_err(sdev->dev, "error: %s\n", panic_msg[i].msg);
-			dev_err(sdev->dev, "error: trace point %8.8x\n",
-				tracep_code);
+			SDEV_ERR(sdev, "%s\n", panic_msg[i].msg);
+			SDEV_ERR(sdev, "trace point %8.8x\n", tracep_code);
 			goto out;
 		}
 	}
 
 	/* unknown error */
-	dev_err(sdev->dev, "error: unknown reason %8.8x\n", panic_code);
-	dev_err(sdev->dev, "error: trace point %8.8x\n", tracep_code);
+	SDEV_ERR(sdev, "unknown reason %8.8x\n", panic_code);
+	SDEV_ERR(sdev, "trace point %8.8x\n", tracep_code);
 
 out:
-	dev_err(sdev->dev, "error: panic at %s:%d\n",
-		panic_info->filename, panic_info->linenum);
+	SDEV_ERR(sdev, "panic at %s:%d\n", panic_info->filename,
+		 panic_info->linenum);
 	sof_oops(sdev, oops);
 	sof_stack(sdev, oops, stack, stack_words);
 }
@@ -143,7 +142,7 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	/* probe the DSP hardware */
 	ret = snd_sof_probe(sdev);
 	if (ret < 0) {
-		dev_err(sdev->dev, "error: failed to probe DSP %d\n", ret);
+		SDEV_ERR(sdev, "failed to probe DSP %d\n", ret);
 		return ret;
 	}
 
@@ -152,8 +151,7 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	/* check machine info */
 	ret = sof_machine_check(sdev);
 	if (ret < 0) {
-		dev_err(sdev->dev, "error: failed to get machine info %d\n",
-			ret);
+		SDEV_ERR(sdev, "failed to get machine info %d\n", ret);
 		goto dsp_err;
 	}
 
@@ -168,8 +166,7 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 		 * we cannot rely on debugfs
 		 * here we trap errors due to memory allocation only.
 		 */
-		dev_err(sdev->dev, "error: failed to init DSP trace/debug %d\n",
-			ret);
+		SDEV_ERR(sdev, "failed to init DSP trace/debug %d\n", ret);
 		goto dbg_err;
 	}
 
@@ -177,15 +174,14 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	sdev->ipc = snd_sof_ipc_init(sdev);
 	if (!sdev->ipc) {
 		ret = -ENOMEM;
-		dev_err(sdev->dev, "error: failed to init DSP IPC %d\n", ret);
+		SDEV_ERR(sdev, "failed to init DSP IPC %d\n", ret);
 		goto ipc_err;
 	}
 
 	/* load the firmware */
 	ret = snd_sof_load_firmware(sdev);
 	if (ret < 0) {
-		dev_err(sdev->dev, "error: failed to load DSP firmware %d\n",
-			ret);
+		SDEV_ERR(sdev, "failed to load DSP firmware %d\n", ret);
 		goto fw_load_err;
 	}
 
@@ -197,8 +193,7 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	 */
 	ret = snd_sof_run_firmware(sdev);
 	if (ret < 0) {
-		dev_err(sdev->dev, "error: failed to boot DSP firmware %d\n",
-			ret);
+		SDEV_ERR(sdev, "failed to boot DSP firmware %d\n", ret);
 		goto fw_run_err;
 	}
 
@@ -210,12 +205,10 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 		ret = snd_sof_init_trace(sdev);
 		if (ret < 0) {
 			/* non fatal */
-			dev_warn(sdev->dev,
-				 "warning: failed to initialize trace %d\n",
-				 ret);
+			SDEV_WARN(sdev, "failed to initialize trace %d\n", ret);
 		}
 	} else {
-		dev_dbg(sdev->dev, "SOF firmware trace disabled\n");
+		SDEV_DBG(sdev, "SOF firmware trace disabled\n");
 	}
 
 	/* hereafter all FW boot flows are for PM reasons */
@@ -226,15 +219,13 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 					      sof_ops(sdev)->drv,
 					      sof_ops(sdev)->num_drv);
 	if (ret < 0) {
-		dev_err(sdev->dev,
-			"error: failed to register DSP DAI driver %d\n", ret);
+		SDEV_ERR(sdev, "failed to register DSP DAI driver %d\n", ret);
 		goto fw_trace_err;
 	}
 
 	ret = snd_sof_machine_register(sdev, plat_data);
 	if (ret < 0) {
-		dev_err(sdev->dev,
-			"error: failed to register machine driver %d\n", ret);
+		SDEV_ERR(sdev, "failed to register machine driver %d\n", ret);
 		goto fw_trace_err;
 	}
 
@@ -281,7 +272,7 @@ static void sof_probe_work(struct work_struct *work)
 	ret = sof_probe_continue(sdev);
 	if (ret < 0) {
 		/* errors cannot be propagated, log */
-		dev_err(sdev->dev, "error: %s failed err: %d\n", __func__, ret);
+		SDEV_ERR(sdev, "%s failed err: %d\n", __func__, ret);
 	}
 }
 
@@ -313,7 +304,7 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 	    !sof_ops(sdev)->send_msg || !sof_ops(sdev)->load_firmware ||
 	    !sof_ops(sdev)->ipc_msg_data || !sof_ops(sdev)->ipc_pcm_params ||
 	    !sof_ops(sdev)->fw_ready) {
-		dev_err(dev, "error: missing mandatory ops\n");
+		SDEV_ERR(sdev, "missing mandatory ops\n");
 		return -EINVAL;
 	}
 
@@ -366,8 +357,8 @@ int snd_sof_device_remove(struct device *dev)
 	if (sdev->fw_state > SOF_FW_BOOT_NOT_STARTED) {
 		ret = snd_sof_dsp_power_down_notify(sdev);
 		if (ret < 0)
-			dev_warn(dev, "error: %d failed to prepare DSP for device removal",
-				 ret);
+			SDEV_WARN(sdev,
+				  "failed to prepare DSP for device removal: %d", ret);
 
 		snd_sof_fw_unload(sdev);
 		snd_sof_ipc_free(sdev);
