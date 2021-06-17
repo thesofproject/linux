@@ -26,7 +26,7 @@ static int get_ext_windows(struct snd_sof_dev *sdev,
 
 	if (sdev->info_window) {
 		if (memcmp(sdev->info_window, w, ext_hdr->hdr.size)) {
-			dev_err(sdev->dev, "error: mismatch between window descriptor from extended manifest and mailbox");
+			SDEV_ERR(sdev, "mismatch between window descriptor from extended manifest and mailbox");
 			return -EINVAL;
 		}
 		return 0;
@@ -51,15 +51,14 @@ static int get_cc_info(struct snd_sof_dev *sdev,
 
 	if (sdev->cc_version) {
 		if (memcmp(sdev->cc_version, cc, cc->ext_hdr.hdr.size)) {
-			dev_err(sdev->dev, "error: receive diverged cc_version descriptions");
+			SDEV_ERR(sdev, "receive diverged cc_version descriptions");
 			return -EINVAL;
 		}
 		return 0;
 	}
 
-	dev_dbg(sdev->dev, "Firmware info: used compiler %s %d:%d:%d%s used optimization flags %s\n",
-		cc->name, cc->major, cc->minor, cc->micro, cc->desc,
-		cc->optim);
+	SDEV_DBG(sdev, "Firmware info: used compiler %s %d:%d:%d%s used optimization flags %s\n",
+		 cc->name, cc->major, cc->minor, cc->micro, cc->desc, cc->optim);
 
 	/* create read-only cc_version debugfs to store compiler version info */
 	/* use local copy of the cc_version to prevent data corruption */
@@ -77,7 +76,7 @@ static int get_cc_info(struct snd_sof_dev *sdev,
 
 		/* errors are only due to memory allocation, not debugfs */
 		if (ret < 0) {
-			dev_err(sdev->dev, "error: snd_sof_debugfs_buf_item failed\n");
+			SDEV_ERR(sdev, "snd_sof_debugfs_buf_item failed\n");
 			return ret;
 		}
 	}
@@ -108,8 +107,8 @@ static int snd_sof_fw_parse_ext_data(struct snd_sof_dev *sdev, u32 offset)
 				       (void *)((u8 *)ext_data + sizeof(*ext_hdr)),
 				       ext_hdr->hdr.size - sizeof(*ext_hdr));
 
-		dev_dbg(sdev->dev, "found ext header type %d size 0x%x\n",
-			ext_hdr->type, ext_hdr->hdr.size);
+		SDEV_DBG(sdev, "found ext header type %d size 0x%x\n",
+			 ext_hdr->type, ext_hdr->hdr.size);
 
 		/* process structure data */
 		switch (ext_hdr->type) {
@@ -125,15 +124,15 @@ static int snd_sof_fw_parse_ext_data(struct snd_sof_dev *sdev, u32 offset)
 			/* They are supported but we don't do anything here */
 			break;
 		default:
-			dev_info(sdev->dev, "unknown ext header type %d size 0x%x\n",
-				 ext_hdr->type, ext_hdr->hdr.size);
+			SDEV_INFO(sdev, "unknown ext header type %d size 0x%x\n",
+				  ext_hdr->type, ext_hdr->hdr.size);
 			ret = 0;
 			break;
 		}
 
 		if (ret < 0) {
-			dev_err(sdev->dev, "error: failed to parse ext data type %d\n",
-				ext_hdr->type);
+			SDEV_ERR(sdev, "failed to parse ext data type %d\n",
+				 ext_hdr->type);
 			break;
 		}
 
@@ -188,11 +187,11 @@ static int ext_man_get_dbg_abi_info(struct snd_sof_dev *sdev,
 		container_of(hdr, struct ext_man_dbg_abi, hdr);
 
 	if (sdev->first_boot)
-		dev_dbg(sdev->dev,
-			"Firmware: DBG_ABI %d:%d:%d\n",
-			SOF_ABI_VERSION_MAJOR(dbg_abi->dbg_abi.abi_dbg_version),
-			SOF_ABI_VERSION_MINOR(dbg_abi->dbg_abi.abi_dbg_version),
-			SOF_ABI_VERSION_PATCH(dbg_abi->dbg_abi.abi_dbg_version));
+		SDEV_DBG(sdev,
+			 "Firmware: DBG_ABI %d:%d:%d\n",
+			 SOF_ABI_VERSION_MAJOR(dbg_abi->dbg_abi.abi_dbg_version),
+			 SOF_ABI_VERSION_MINOR(dbg_abi->dbg_abi.abi_dbg_version),
+			 SOF_ABI_VERSION_PATCH(dbg_abi->dbg_abi.abi_dbg_version));
 
 	return 0;
 }
@@ -212,13 +211,13 @@ static int ext_man_get_config_data(struct snd_sof_dev *sdev,
 	elems_size = config->hdr.size - sizeof(struct sof_ext_man_elem_header);
 	elems_counter = elems_size / sizeof(struct sof_config_elem);
 
-	dev_dbg(sdev->dev, "%s can hold up to %d config elements\n",
-		__func__, elems_counter);
+	SDEV_DBG(sdev, "%s can hold up to %d config elements\n", __func__,
+		 elems_counter);
 
 	for (i = 0; i < elems_counter; ++i) {
 		elem = &config->elems[i];
-		dev_dbg(sdev->dev, "%s get index %d token %d val %d\n",
-			__func__, i, elem->token, elem->value);
+		SDEV_DBG(sdev, "%s get index %d token %d val %d\n", __func__, i,
+			 elem->token, elem->value);
 		switch (elem->token) {
 		case SOF_EXT_MAN_CONFIG_EMPTY:
 			/* unused memory space is zero filled - mapped to EMPTY elements */
@@ -231,13 +230,13 @@ static int ext_man_get_config_data(struct snd_sof_dev *sdev,
 				ret = snd_sof_dbg_memory_info_init(sdev);
 			break;
 		default:
-			dev_info(sdev->dev, "Unknown firmware configuration token %d value %d",
-				 elem->token, elem->value);
+			SDEV_INFO(sdev, "Unknown firmware configuration token %d value %d",
+				  elem->token, elem->value);
 			break;
 		}
 		if (ret < 0) {
-			dev_err(sdev->dev, "error: processing sof_ext_man_config_data failed for token %d value 0x%x, %d\n",
-				elem->token, elem->value, ret);
+			SDEV_ERR(sdev, "processing sof_ext_man_config_data failed for token %d value 0x%x, %d\n",
+				 elem->token, elem->value, ret);
 			return ret;
 		}
 	}
@@ -292,8 +291,8 @@ static int snd_sof_fw_ext_man_parse(struct snd_sof_dev *sdev,
 	/* incompatible version */
 	if (SOF_EXT_MAN_VERSION_INCOMPATIBLE(SOF_EXT_MAN_VERSION,
 					     head->header_version)) {
-		dev_err(sdev->dev, "error: extended manifest version 0x%X differ from used 0x%X\n",
-			head->header_version, SOF_EXT_MAN_VERSION);
+		SDEV_ERR(sdev, "extended manifest version 0x%X differ from used 0x%X\n",
+			 head->header_version, SOF_EXT_MAN_VERSION);
 		return -EINVAL;
 	}
 
@@ -303,13 +302,13 @@ static int snd_sof_fw_ext_man_parse(struct snd_sof_dev *sdev,
 	while (remaining > sizeof(*elem_hdr)) {
 		elem_hdr = (struct sof_ext_man_elem_header *)iptr;
 
-		dev_dbg(sdev->dev, "found sof_ext_man header type %d size 0x%X\n",
-			elem_hdr->type, elem_hdr->size);
+		SDEV_DBG(sdev, "found sof_ext_man header type %d size 0x%X\n",
+			 elem_hdr->type, elem_hdr->size);
 
 		if (elem_hdr->size < sizeof(*elem_hdr) ||
 		    elem_hdr->size > remaining) {
-			dev_err(sdev->dev, "error: invalid sof_ext_man header size, type %d size 0x%X\n",
-				elem_hdr->type, elem_hdr->size);
+			SDEV_ERR(sdev, "invalid sof_ext_man header size, type %d size 0x%X\n",
+				 elem_hdr->type, elem_hdr->size);
 			return -EINVAL;
 		}
 
@@ -334,14 +333,14 @@ static int snd_sof_fw_ext_man_parse(struct snd_sof_dev *sdev,
 			ret = snd_sof_dsp_parse_platform_ext_manifest(sdev, elem_hdr);
 			break;
 		default:
-			dev_info(sdev->dev, "unknown sof_ext_man header type %d size 0x%X\n",
-				 elem_hdr->type, elem_hdr->size);
+			SDEV_INFO(sdev, "unknown sof_ext_man header type %d size 0x%X\n",
+				  elem_hdr->type, elem_hdr->size);
 			break;
 		}
 
 		if (ret < 0) {
-			dev_err(sdev->dev, "error: failed to parse sof_ext_man header type %d size 0x%X\n",
-				elem_hdr->type, elem_hdr->size);
+			SDEV_ERR(sdev, "failed to parse sof_ext_man header type %d size 0x%X\n",
+				 elem_hdr->type, elem_hdr->size);
 			return ret;
 		}
 
@@ -350,7 +349,7 @@ static int snd_sof_fw_ext_man_parse(struct snd_sof_dev *sdev,
 	}
 
 	if (remaining) {
-		dev_err(sdev->dev, "error: sof_ext_man header is inconsistent\n");
+		SDEV_ERR(sdev, "sof_ext_man header is inconsistent\n");
 		return -EINVAL;
 	}
 
@@ -375,7 +374,7 @@ static void sof_get_windows(struct snd_sof_dev *sdev)
 	int i;
 
 	if (!sdev->info_window) {
-		dev_err(sdev->dev, "error: have no window info\n");
+		SDEV_ERR(sdev, "have no window info\n");
 		return;
 	}
 
@@ -384,8 +383,7 @@ static void sof_get_windows(struct snd_sof_dev *sdev)
 
 		window_offset = snd_sof_dsp_get_window_offset(sdev, elem->id);
 		if (window_offset < 0) {
-			dev_warn(sdev->dev, "warn: no offset for window %d\n",
-				 elem->id);
+			SDEV_WARN(sdev, "no offset for window %d\n", elem->id);
 			continue;
 		}
 
@@ -442,13 +440,13 @@ static void sof_get_windows(struct snd_sof_dev *sdev)
 							SOF_DEBUGFS_ACCESS_D0_ONLY);
 			break;
 		default:
-			dev_err(sdev->dev, "error: get illegal window info\n");
+			SDEV_ERR(sdev, "get illegal window info\n");
 			return;
 		}
 	}
 
 	if (outbox_size == 0 || inbox_size == 0) {
-		dev_err(sdev->dev, "error: get illegal mailbox window\n");
+		SDEV_ERR(sdev, "get illegal mailbox window\n");
 		return;
 	}
 
@@ -464,14 +462,14 @@ static void sof_get_windows(struct snd_sof_dev *sdev)
 	sdev->debug_box.offset = debug_offset;
 	sdev->debug_box.size = debug_size;
 
-	dev_dbg(sdev->dev, " mailbox upstream 0x%x - size 0x%x\n",
-		inbox_offset, inbox_size);
-	dev_dbg(sdev->dev, " mailbox downstream 0x%x - size 0x%x\n",
-		outbox_offset, outbox_size);
-	dev_dbg(sdev->dev, " stream region 0x%x - size 0x%x\n",
-		stream_offset, stream_size);
-	dev_dbg(sdev->dev, " debug region 0x%x - size 0x%x\n",
-		debug_offset, debug_size);
+	SDEV_DBG(sdev, " mailbox upstream 0x%x - size 0x%x\n",
+		 inbox_offset, inbox_size);
+	SDEV_DBG(sdev, " mailbox downstream 0x%x - size 0x%x\n",
+		 outbox_offset, outbox_size);
+	SDEV_DBG(sdev, " stream region 0x%x - size 0x%x\n",
+		 stream_offset, stream_size);
+	SDEV_DBG(sdev, " debug region 0x%x - size 0x%x\n",
+		 debug_offset, debug_size);
 }
 
 /* check for ABI compatibility and create memory windows on first boot */
@@ -484,12 +482,11 @@ int sof_fw_ready(struct snd_sof_dev *sdev, u32 msg_id)
 	/* mailbox must be on 4k boundary */
 	offset = snd_sof_dsp_get_mailbox_offset(sdev);
 	if (offset < 0) {
-		dev_err(sdev->dev, "error: have no mailbox offset\n");
+		SDEV_ERR(sdev, "have no mailbox offset\n");
 		return offset;
 	}
 
-	dev_dbg(sdev->dev, "ipc: DSP is ready 0x%8.8x offset 0x%x\n",
-		msg_id, offset);
+	SDEV_DBG(sdev, "ipc: DSP is ready 0x%8.8x offset 0x%x\n", msg_id, offset);
 
 	/* no need to re-check version/ABI for subsequent boots */
 	if (!sdev->first_boot)
@@ -502,8 +499,7 @@ int sof_fw_ready(struct snd_sof_dev *sdev, u32 msg_id)
 	ret = snd_sof_dsp_block_read(sdev, SOF_FW_BLK_TYPE_SRAM, offset, fw_ready,
 				     sizeof(*fw_ready));
 	if (ret) {
-		dev_err(sdev->dev,
-			"error: unable to read fw_ready, read from TYPE_SRAM failed\n");
+		SDEV_ERR(sdev, "unable to read fw_ready, read from TYPE_SRAM failed\n");
 		return ret;
 	}
 
@@ -530,8 +526,8 @@ int snd_sof_parse_module_memcpy(struct snd_sof_dev *sdev,
 	u32 offset;
 	size_t remaining;
 
-	dev_dbg(sdev->dev, "new module size 0x%x blocks 0x%x type 0x%x\n",
-		module->size, module->num_blocks, module->type);
+	SDEV_DBG(sdev, "new module size 0x%x blocks 0x%x type 0x%x\n",
+		 module->size, module->num_blocks, module->type);
 
 	block = (struct snd_sof_blk_hdr *)((u8 *)module + sizeof(*module));
 
@@ -540,7 +536,7 @@ int snd_sof_parse_module_memcpy(struct snd_sof_dev *sdev,
 	for (count = 0; count < module->num_blocks; count++) {
 		/* check for wrap */
 		if (remaining < sizeof(*block)) {
-			dev_err(sdev->dev, "error: not enough data remaining\n");
+			SDEV_ERR(sdev, "not enough data remaining\n");
 			return -EINVAL;
 		}
 
@@ -548,10 +544,9 @@ int snd_sof_parse_module_memcpy(struct snd_sof_dev *sdev,
 		remaining -= sizeof(*block);
 
 		if (block->size == 0) {
-			dev_warn(sdev->dev,
-				 "warning: block %d size zero\n", count);
-			dev_warn(sdev->dev, " type 0x%x offset 0x%x\n",
-				 block->type, block->offset);
+			SDEV_WARN(sdev, "block %d size zero\n", count);
+			SDEV_WARN(sdev, " type 0x%x offset 0x%x\n",
+				  block->type, block->offset);
 			continue;
 		}
 
@@ -565,31 +560,29 @@ int snd_sof_parse_module_memcpy(struct snd_sof_dev *sdev,
 			offset = block->offset;
 			break;
 		default:
-			dev_err(sdev->dev, "error: bad type 0x%x for block 0x%x\n",
-				block->type, count);
+			SDEV_ERR(sdev, "bad type 0x%x for block 0x%x\n",
+				 block->type, count);
 			return -EINVAL;
 		}
 
-		dev_dbg(sdev->dev,
-			"block %d type 0x%x size 0x%x ==>  offset 0x%x\n",
-			count, block->type, block->size, offset);
+		SDEV_DBG(sdev, "block %d type 0x%x size 0x%x ==>  offset 0x%x\n",
+			 count, block->type, block->size, offset);
 
 		/* checking block->size to avoid unaligned access */
 		if (block->size % sizeof(u32)) {
-			dev_err(sdev->dev, "error: invalid block size 0x%x\n",
-				block->size);
+			SDEV_ERR(sdev, "invalid block size 0x%x\n", block->size);
 			return -EINVAL;
 		}
 		ret = snd_sof_dsp_block_write(sdev, block->type, offset,
 					      block + 1, block->size);
 		if (ret < 0) {
-			dev_err(sdev->dev, "error: write to block type 0x%x failed\n",
-				block->type);
+			SDEV_ERR(sdev, "write to block type 0x%x failed\n",
+				 block->type);
 			return ret;
 		}
 
 		if (remaining < block->size) {
-			dev_err(sdev->dev, "error: not enough data remaining\n");
+			SDEV_ERR(sdev, "not enough data remaining\n");
 			return -EINVAL;
 		}
 
@@ -611,7 +604,7 @@ static int check_header(struct snd_sof_dev *sdev, const struct firmware *fw,
 	size_t fw_size = fw->size - fw_offset;
 
 	if (fw->size <= fw_offset) {
-		dev_err(sdev->dev, "error: firmware size must be greater than firmware offset\n");
+		SDEV_ERR(sdev, "firmware size must be greater than firmware offset\n");
 		return -EINVAL;
 	}
 
@@ -620,20 +613,20 @@ static int check_header(struct snd_sof_dev *sdev, const struct firmware *fw,
 
 	/* verify FW sig */
 	if (strncmp(header->sig, SND_SOF_FW_SIG, SND_SOF_FW_SIG_SIZE) != 0) {
-		dev_err(sdev->dev, "error: invalid firmware signature\n");
+		SDEV_ERR(sdev, "invalid firmware signature\n");
 		return -EINVAL;
 	}
 
 	/* check size is valid */
 	if (fw_size != header->file_size + sizeof(*header)) {
-		dev_err(sdev->dev, "error: invalid filesize mismatch got 0x%zx expected 0x%zx\n",
-			fw_size, header->file_size + sizeof(*header));
+		SDEV_ERR(sdev, "invalid filesize mismatch got 0x%zx expected 0x%zx\n",
+			 fw_size, header->file_size + sizeof(*header));
 		return -EINVAL;
 	}
 
-	dev_dbg(sdev->dev, "header size=0x%x modules=0x%x abi=0x%x size=%zu\n",
-		header->file_size, header->num_modules,
-		header->abi, sizeof(*header));
+	SDEV_DBG(sdev, "header size=0x%x modules=0x%x abi=0x%x size=%zu\n",
+		 header->file_size, header->num_modules,
+		 header->abi, sizeof(*header));
 
 	return 0;
 }
@@ -659,14 +652,14 @@ static int load_modules(struct snd_sof_dev *sdev, const struct firmware *fw,
 	remaining = fw->size - sizeof(*header) - fw_offset;
 	/* check for wrap */
 	if (remaining > fw->size) {
-		dev_err(sdev->dev, "error: fw size smaller than header size\n");
+		SDEV_ERR(sdev, "fw size smaller than header size\n");
 		return -EINVAL;
 	}
 
 	for (count = 0; count < header->num_modules; count++) {
 		/* check for wrap */
 		if (remaining < sizeof(*module)) {
-			dev_err(sdev->dev, "error: not enough data remaining\n");
+			SDEV_ERR(sdev, "not enough data remaining\n");
 			return -EINVAL;
 		}
 
@@ -676,12 +669,12 @@ static int load_modules(struct snd_sof_dev *sdev, const struct firmware *fw,
 		/* module */
 		ret = load_module(sdev, module);
 		if (ret < 0) {
-			dev_err(sdev->dev, "error: invalid module %d\n", count);
+			SDEV_ERR(sdev, "invalid module %d\n", count);
 			return ret;
 		}
 
 		if (remaining < module->size) {
-			dev_err(sdev->dev, "error: not enough data remaining\n");
+			SDEV_ERR(sdev, "not enough data remaining\n");
 			return -EINVAL;
 		}
 
@@ -714,14 +707,13 @@ int snd_sof_load_firmware_raw(struct snd_sof_dev *sdev)
 	ret = request_firmware(&plat_data->fw, fw_filename, sdev->dev);
 
 	if (ret < 0) {
-		dev_err(sdev->dev, "error: request firmware %s failed err: %d\n",
-			fw_filename, ret);
-		dev_err(sdev->dev,
+		SDEV_ERR(sdev, "request firmware %s failed err: %d\n",
+			 fw_filename, ret);
+		SDEV_ERR(sdev,
 			"you may need to download the firmware from https://github.com/thesofproject/sof-bin/\n");
 		goto err;
 	} else {
-		dev_dbg(sdev->dev, "request_firmware %s successful\n",
-			fw_filename);
+		SDEV_DBG(sdev, "request_firmware %s successful\n", fw_filename);
 	}
 
 	/* check for extended manifest */
@@ -731,11 +723,11 @@ int snd_sof_load_firmware_raw(struct snd_sof_dev *sdev)
 		plat_data->fw_offset = ext_man_size;
 	} else if (!ext_man_size) {
 		/* No extended manifest, so nothing to skip during FW load */
-		dev_dbg(sdev->dev, "firmware doesn't contain extended manifest\n");
+		SDEV_DBG(sdev, "firmware doesn't contain extended manifest\n");
 	} else {
 		ret = ext_man_size;
-		dev_err(sdev->dev, "error: firmware %s contains unsupported or invalid extended manifest: %d\n",
-			fw_filename, ret);
+		SDEV_ERR(sdev, "firmware %s contains unsupported or invalid extended manifest: %d\n",
+			 fw_filename, ret);
 	}
 
 err:
@@ -757,21 +749,21 @@ int snd_sof_load_firmware_memcpy(struct snd_sof_dev *sdev)
 	/* make sure the FW header and file is valid */
 	ret = check_header(sdev, plat_data->fw, plat_data->fw_offset);
 	if (ret < 0) {
-		dev_err(sdev->dev, "error: invalid FW header\n");
+		SDEV_ERR(sdev, "invalid FW header\n");
 		goto error;
 	}
 
 	/* prepare the DSP for FW loading */
 	ret = snd_sof_dsp_reset(sdev);
 	if (ret < 0) {
-		dev_err(sdev->dev, "error: failed to reset DSP\n");
+		SDEV_ERR(sdev, "failed to reset DSP\n");
 		goto error;
 	}
 
 	/* parse and load firmware modules to DSP */
 	ret = load_modules(sdev, plat_data->fw, plat_data->fw_offset);
 	if (ret < 0) {
-		dev_err(sdev->dev, "error: invalid FW modules\n");
+		SDEV_ERR(sdev, "invalid FW modules\n");
 		goto error;
 	}
 
@@ -798,7 +790,7 @@ int snd_sof_run_firmware(struct snd_sof_dev *sdev)
 					       "fw_version", 0444);
 		/* errors are only due to memory allocation, not debugfs */
 		if (ret < 0) {
-			dev_err(sdev->dev, "error: snd_sof_debugfs_buf_item failed\n");
+			SDEV_ERR(sdev, "snd_sof_debugfs_buf_item failed\n");
 			return ret;
 		}
 	}
@@ -806,16 +798,16 @@ int snd_sof_run_firmware(struct snd_sof_dev *sdev)
 	/* perform pre fw run operations */
 	ret = snd_sof_dsp_pre_fw_run(sdev);
 	if (ret < 0) {
-		dev_err(sdev->dev, "error: failed pre fw run op\n");
+		SDEV_ERR(sdev, "failed pre fw run op\n");
 		return ret;
 	}
 
-	dev_dbg(sdev->dev, "booting DSP firmware\n");
+	SDEV_DBG(sdev, "booting DSP firmware\n");
 
 	/* boot the firmware on the DSP */
 	ret = snd_sof_dsp_run(sdev);
 	if (ret < 0) {
-		dev_err(sdev->dev, "error: failed to reset DSP\n");
+		SDEV_ERR(sdev, "failed to reset DSP\n");
 		return ret;
 	}
 
@@ -829,7 +821,7 @@ int snd_sof_run_firmware(struct snd_sof_dev *sdev)
 				 sdev->fw_state > SOF_FW_BOOT_IN_PROGRESS,
 				 msecs_to_jiffies(sdev->boot_timeout));
 	if (ret == 0) {
-		dev_err(sdev->dev, "error: firmware boot failure\n");
+		SDEV_ERR(sdev, "firmware boot failure\n");
 		snd_sof_dsp_dbg_dump(sdev, SOF_DBG_DUMP_REGS | SOF_DBG_DUMP_MBOX |
 			SOF_DBG_DUMP_TEXT | SOF_DBG_DUMP_PCI | SOF_DBG_DUMP_FORCE_ERR_LEVEL);
 		sdev->fw_state = SOF_FW_BOOT_FAILED;
@@ -837,14 +829,14 @@ int snd_sof_run_firmware(struct snd_sof_dev *sdev)
 	}
 
 	if (sdev->fw_state == SOF_FW_BOOT_COMPLETE)
-		dev_dbg(sdev->dev, "firmware boot complete\n");
+		SDEV_DBG(sdev, "firmware boot complete\n");
 	else
 		return -EIO; /* FW boots but fw_ready op failed */
 
 	/* perform post fw run operations */
 	ret = snd_sof_dsp_post_fw_run(sdev);
 	if (ret < 0) {
-		dev_err(sdev->dev, "error: failed post fw run op\n");
+		SDEV_ERR(sdev, "failed post fw run op\n");
 		return ret;
 	}
 
