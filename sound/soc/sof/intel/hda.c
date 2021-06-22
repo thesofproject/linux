@@ -1296,6 +1296,13 @@ static struct snd_soc_acpi_mach *hda_sdw_machine_select(struct snd_sof_dev *sdev
 
 				pdata->tplg_filename = tplg_filename;
 			}
+			/* allow for module parameter override */
+			if (hda_dmic_num != -1) {
+				dev_dbg(sdev->dev,
+					"overriding DMICs detected in NHLT tables %d by kernel param %d\n",
+					dmic_num, hda_dmic_num);
+				dmic_num = hda_dmic_num;
+			}
 			mach->mach_params.dmic_num = dmic_num;
 
 			dev_dbg(sdev->dev,
