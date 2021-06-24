@@ -23,7 +23,9 @@ jobs:
           path: 'kconfig'
 
       - name: Install libelf
-        run: sudo apt install -y libelf-dev
+        run: |
+          sudo apt update
+          sudo apt install -y libelf-dev
 
       - name: Install sparse
         run: |
@@ -54,7 +56,9 @@ jobs:
           path: 'kconfig'
 
       - name: Install libelf
-        run: sudo apt install -y libelf-dev
+        run: |
+          sudo apt update
+          sudo apt install -y libelf-dev
 
       - name: build start
         run: |
@@ -77,7 +81,9 @@ jobs:
           path: 'kconfig'
 
       - name: Install libelf
-        run: sudo apt install -y libelf-dev
+        run: |
+          sudo apt update
+          sudo apt install -y libelf-dev
 
       - name: build start
         run: |
@@ -121,7 +127,9 @@ jobs:
           path: 'kconfig'
 
       - name: Install arm64 cross compiler
-        run: sudo apt install -y gcc-aarch64-linux-gnu
+        run: |
+          sudo apt update
+          sudo apt install -y gcc-aarch64-linux-gnu
 
       - name: build start
         run: |
@@ -145,7 +153,9 @@ jobs:
           path: 'kconfig'
 
       - name: Install libelf
-        run: sudo apt install -y libelf-dev
+        run: |
+          sudo apt update
+          sudo apt install -y libelf-dev
 
       - name: build start
         run: |
