@@ -6789,6 +6789,7 @@ unsigned long try_to_free_mem_cgroup_pages(struct mem_cgroup *memcg,
 	return 0;
 }
 #endif
+EXPORT_SYMBOL_GPL(try_to_free_mem_cgroup_pages);
 
 static void kswapd_age_node(struct pglist_data *pgdat, struct scan_control *sc)
 {
