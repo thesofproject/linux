@@ -20,6 +20,21 @@ static const struct snd_sof_debugfs_map tgl_dsp_debugfs[] = {
 	{"dsp", HDA_DSP_BAR,  0, 0x10000, SOF_DEBUGFS_ACCESS_ALWAYS},
 };
 
+static int tgl_dsp_secondary_core_enable(struct snd_sof_dev *sdev, u32 core_mask)
+{
+	struct sof_ipc_pm_core_config pm_core_config = {
+		.hdr = {
+			.cmd = SOF_IPC_GLB_PM_MSG | SOF_IPC_PM_CORE_ENABLE,
+			.size = sizeof(pm_core_config),
+		},
+		.enable_mask = core_mask,
+	};
+
+	return sof_ipc_tx_message(sdev->ipc, pm_core_config.hdr.cmd,
+				 &pm_core_config, sizeof(pm_core_config),
+				 &pm_core_config, sizeof(pm_core_config));
+}
+
 /* Tigerlake ops */
 const struct snd_sof_dsp_ops sof_tgl_ops = {
 	/* probe/remove/shutdown */
@@ -93,6 +108,7 @@ const struct snd_sof_dsp_ops sof_tgl_ops = {
 	/* dsp core power up/down */
 	.core_power_up = hda_dsp_enable_core,
 	.core_power_down = hda_dsp_core_reset_power_down,
+	.secondary_core_enable = tgl_dsp_secondary_core_enable,
 
 	/* firmware run */
 	.run = hda_dsp_cl_boot_firmware_iccmax,

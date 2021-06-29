@@ -218,6 +218,14 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 	if (runtime_suspend)
 		sof_cache_debugfs(sdev);
 #endif
+
+	/* disable secondary cores */
+	ret = snd_sof_dsp_secondary_core_enable(sdev, BIT(0));
+	if (ret < 0) {
+		dev_err(sdev->dev, "failed to disable secondary cores\n");
+		return ret;
+	}
+
 	/* notify DSP of upcoming power down */
 	ret = sof_send_pm_ctx_ipc(sdev, SOF_IPC_PM_CTX_SAVE);
 	if (ret == -EBUSY || ret == -EAGAIN) {

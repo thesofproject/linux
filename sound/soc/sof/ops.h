@@ -103,6 +103,18 @@ static inline int snd_sof_dsp_core_power_down(struct snd_sof_dev *sdev,
 	return ret;
 }
 
+/*
+ * Enable/Disable secondary cores. Cores set in the core mask are enabled and the rest will
+ * be disabled
+ */
+static inline int snd_sof_dsp_secondary_core_enable(struct snd_sof_dev *sdev, u32 core_mask)
+{
+	if (sof_ops(sdev)->secondary_core_enable)
+		return sof_ops(sdev)->secondary_core_enable(sdev, core_mask);
+
+	return 0;
+}
+
 /* pre/post fw load */
 static inline int snd_sof_dsp_pre_fw_run(struct snd_sof_dev *sdev)
 {
