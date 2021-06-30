@@ -3432,7 +3432,7 @@ static int sof_set_pipe_widget(struct snd_sof_dev *sdev, struct snd_sof_widget *
 			    (scontrol->access & SNDRV_CTL_ELEM_ACCESS_VOLATILE)) {
 				dev_err(sdev->dev,
 					"error: volatile control found for dynamic widget %s\n",
-					swidget->widget->sname);
+					swidget->widget->name);
 				return -EINVAL;
 			}
 	}
