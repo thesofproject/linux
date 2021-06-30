@@ -119,11 +119,13 @@ int hda_ctrl_dai_widget_free(struct snd_soc_dapm_widget *w)
 
 	ret = sof_ipc_tx_message(sdev->ipc, config->hdr.cmd, config, config->hdr.size,
 				  &reply, sizeof(reply));
-	if (ret < 0) {
+	if (ret < 0)
 		dev_err(sdev->dev, "error: failed resetting DAI config for %s\n", w->name);
-		return ret;
-	}
 
+	/*
+	 * Reset the configured_flag and free the widget even if the IPC fails to keep
+	 * the widget use_count balanced
+	 */
 	sof_dai->configured = false;
 
 	return sof_widget_free(sdev, swidget);
