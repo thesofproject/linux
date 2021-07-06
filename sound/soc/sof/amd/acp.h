@@ -211,9 +211,8 @@ extern const struct snd_sof_dsp_ops sof_renoir_ops;
 int snd_amd_acp_find_config(struct pci_dev *pci);
 
 /* Trace */
-int acp_sof_trace_init(struct snd_sof_dev *sdev,
-		       struct sof_ipc_dma_trace_params_ext *dtrace_params);
-int acp_sof_trace_release(struct snd_sof_dev *sdev);
+int acp_sof_trace_register(struct snd_sof_dev *sdev);
+void acp_sof_trace_unregister(struct snd_sof_dev *sdev);
 
 struct sof_amd_acp_desc {
 	unsigned int host_bridge_id;
@@ -225,4 +224,9 @@ static inline const struct sof_amd_acp_desc *get_chip_info(struct snd_sof_pdata 
 
 	return desc->chip_info;
 }
+
+/* SOF client registration */
+int acp_sof_register_clients(struct snd_sof_dev *sdev);
+void acp_sof_unregister_clients(struct snd_sof_dev *sdev);
+
 #endif

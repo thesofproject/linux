@@ -640,14 +640,6 @@ static inline int hda_codec_i915_exit(struct snd_sof_dev *sdev) { return 0; }
 #endif
 
 /*
- * Trace Control.
- */
-int hda_dsp_trace_init(struct snd_sof_dev *sdev,
-		       struct sof_ipc_dma_trace_params_ext *dtrace_params);
-int hda_dsp_trace_release(struct snd_sof_dev *sdev);
-int hda_dsp_trace_trigger(struct snd_sof_dev *sdev, int cmd);
-
-/*
  * SoundWire support
  */
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_SOUNDWIRE)
@@ -714,6 +706,20 @@ static inline void hda_probes_unregister(struct snd_sof_dev *sdev)
 {
 }
 #endif /* CONFIG_SND_SOC_SOF_HDA_PROBES */
+
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_DMA_TRACE)
+int hda_dma_trace_register(struct snd_sof_dev *sdev);
+void hda_dma_trace_unregister(struct snd_sof_dev *sdev);
+#else
+static inline int hda_dma_trace_register(struct snd_sof_dev *sdev)
+{
+	return 0;
+}
+
+static inline void hda_dma_trace_unregister(struct snd_sof_dev *sdev)
+{
+}
+#endif /* CONFIG_SND_SOC_SOF_HDA_DMA_TRACE */
 
 /* SOF client registration for HDA platforms */
 int hda_register_clients(struct snd_sof_dev *sdev);

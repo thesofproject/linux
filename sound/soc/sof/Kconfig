@@ -62,6 +62,16 @@ config SND_SOC_SOF_DEBUG_PROBES
 	  This option is not user-selectable but automagically handled by
 	  'select' statements at a higher level.
 
+config SND_SOC_SOF_DEBUG_DMA_TRACE
+	tristate
+	select SND_SOC_SOF_CLIENT
+	help
+	  This option enables the dma-trace feature that can be used to
+	  gather trace information in close to real time from firmware, backed
+	  by DMA.
+	  This option is not user-selectable but automagically handled by
+	  'select' statements at a higher level.
+
 config SND_SOC_SOF_CLIENT
 	tristate
 	select AUXILIARY_BUS
@@ -190,8 +200,8 @@ config SND_SOC_SOF_DEBUG_ENABLE_FIRMWARE_TRACE
 	bool "SOF enable firmware trace"
 	help
 	  The firmware trace can be enabled either at build-time with
-	  this option, or dynamically by setting flags in the SOF core
-	  module parameter (similar to dynamic debug).
+	  this option, or dynamically by setting the 'enable' module parameter
+	  for the snd_sof_dma_trace module.
 	  If unsure, select "N".
 
 config SND_SOC_SOF_DEBUG_IPC_FLOOD_TEST

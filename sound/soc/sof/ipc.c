@@ -20,7 +20,6 @@
 
 typedef void (*ipc_rx_callback)(struct snd_sof_dev *sdev, void *msg_buf);
 
-static void ipc_trace_message(struct snd_sof_dev *sdev, void *msg_buf);
 static void ipc_stream_message(struct snd_sof_dev *sdev, void *msg_buf);
 
 /*
@@ -523,6 +522,7 @@ void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev)
 			wake_up(&sdev->boot_wait);
 		}
 		break;
+	case SOF_IPC_GLB_TRACE_MSG:
 	case SOF_IPC_GLB_COMPOUND:
 	case SOF_IPC_GLB_TPLG_MSG:
 	case SOF_IPC_GLB_PM_MSG:
@@ -532,9 +532,6 @@ void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev)
 		break;
 	case SOF_IPC_GLB_STREAM_MSG:
 		rx_callback = ipc_stream_message;
-		break;
-	case SOF_IPC_GLB_TRACE_MSG:
-		rx_callback = ipc_trace_message;
 		break;
 	default:
 		dev_err(sdev->dev, "%s: Unknown DSP message: 0x%x\n", __func__, cmd);
@@ -563,25 +560,6 @@ void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev)
 	ipc_log_header(sdev->dev, "ipc rx done", hdr.cmd);
 }
 EXPORT_SYMBOL(snd_sof_ipc_msgs_rx);
-
-/*
- * IPC trace mechanism.
- */
-
-static void ipc_trace_message(struct snd_sof_dev *sdev, void *msg_buf)
-{
-	struct sof_ipc_cmd_hdr *hdr = msg_buf;
-	u32 msg_type = hdr->cmd & SOF_CMD_TYPE_MASK;
-
-	switch (msg_type) {
-	case SOF_IPC_TRACE_DMA_POSITION:
-		snd_sof_trace_update_pos(sdev, msg_buf);
-		break;
-	default:
-		dev_err(sdev->dev, "error: unhandled trace message %#x\n", msg_type);
-		break;
-	}
-}
 
 /*
  * IPC stream position.

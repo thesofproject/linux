@@ -149,15 +149,6 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 		return ret;
 	}
 
-	/* resume DMA trace, only need send ipc */
-	ret = snd_sof_init_trace_ipc(sdev);
-	if (ret < 0) {
-		/* non fatal */
-		dev_warn(sdev->dev,
-			 "warning: failed to init trace after resume %d\n",
-			 ret);
-	}
-
 	/* restore pipelines */
 	ret = sof_set_up_pipelines(sdev, false);
 	if (ret < 0) {
@@ -219,9 +210,6 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 	}
 
 	sof_tear_down_pipelines(sdev, false);
-
-	/* release trace */
-	snd_sof_release_trace(sdev);
 
 	/* Notify clients not managed by pm framework about core suspend */
 	sof_suspend_clients(sdev, pm_state);

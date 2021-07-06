@@ -7,6 +7,7 @@
 #include <linux/module.h>
 #include <sound/sof/xtensa.h>
 #include "../ops.h"
+#include "../sof-client-dma-trace.h"
 
 #include "imx-common.h"
 
@@ -97,5 +98,19 @@ void imx8_disable_clocks(struct snd_sof_dev *sdev, struct imx_clocks *clks)
 	clk_bulk_disable_unprepare(clks->num_dsp_clks, clks->dsp_clks);
 }
 EXPORT_SYMBOL(imx8_disable_clocks);
+
+int imx8_dma_trace_register(struct snd_sof_dev *sdev)
+{
+	return sof_client_dev_register(sdev, "sof-dma-trace", 0, NULL, 0);
+}
+EXPORT_SYMBOL(imx8_dma_trace_register);
+
+void imx8_dma_trace_unregister(struct snd_sof_dev *sdev)
+{
+	sof_client_dev_unregister(sdev, "sof-dma-trace", 0);
+}
+EXPORT_SYMBOL(imx8_dma_trace_unregister);
+
+MODULE_IMPORT_NS(SND_SOC_SOF_CLIENT);
 
 MODULE_LICENSE("Dual BSD/GPL");

@@ -442,5 +442,17 @@ int amd_sof_acp_remove(struct snd_sof_dev *sdev)
 }
 EXPORT_SYMBOL_NS(amd_sof_acp_remove, SND_SOC_SOF_AMD_COMMON);
 
+int acp_sof_register_clients(struct snd_sof_dev *sdev)
+{
+	return acp_sof_trace_register(sdev);
+}
+EXPORT_SYMBOL_NS(acp_sof_register_clients, SND_SOC_SOF_AMD_COMMON);
+
+void acp_sof_unregister_clients(struct snd_sof_dev *sdev)
+{
+	acp_sof_trace_unregister(sdev);
+}
+EXPORT_SYMBOL_NS(acp_sof_unregister_clients, SND_SOC_SOF_AMD_COMMON);
+
 MODULE_DESCRIPTION("AMD ACP sof driver");
 MODULE_LICENSE("Dual BSD/GPL");

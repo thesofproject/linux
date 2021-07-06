@@ -53,9 +53,6 @@ bool sof_debug_check_flag(int mask);
 /* time in ms for runtime suspend delay */
 #define SND_SOF_SUSPEND_DELAY_MS	2000
 
-/* DMA buffer size for trace */
-#define DMA_BUF_SIZE_FOR_TRACE (PAGE_SIZE * 16)
-
 #define SOF_IPC_DSP_REPLY		0
 #define SOF_IPC_HOST_REPLY		1
 
@@ -241,13 +238,6 @@ struct snd_sof_dsp_ops {
 				       enum snd_sof_fw_blk_type blk_type, u32 offset,
 				       size_t size, const char *name,
 				       enum sof_debugfs_access_type access_type); /* optional */
-
-	/* host DMA trace initialization */
-	int (*trace_init)(struct snd_sof_dev *sdev,
-			  struct sof_ipc_dma_trace_params_ext *dtrace_params); /* optional */
-	int (*trace_release)(struct snd_sof_dev *sdev); /* optional */
-	int (*trace_trigger)(struct snd_sof_dev *sdev,
-			     int cmd); /* optional */
 
 	/* misc */
 	int (*get_bar_index)(struct snd_sof_dev *sdev,
@@ -437,16 +427,8 @@ struct snd_sof_dev {
 	int ipc_timeout;
 	int boot_timeout;
 
-	/* DMA for Trace */
-	struct snd_dma_buffer dmatb;
-	struct snd_dma_buffer dmatp;
-	int dma_trace_pages;
-	wait_queue_head_t trace_sleep;
-	u32 host_offset;
-	bool dtrace_is_supported; /* set with Kconfig or module parameter */
-	bool dtrace_is_enabled;
-	bool dtrace_error;
-	bool dtrace_draining;
+	/* dtrace client is available */
+	bool dtrace_is_available;
 
 	bool msi_enabled;
 
@@ -552,22 +534,15 @@ static inline void snd_sof_ipc_process_reply(struct snd_sof_dev *sdev, u32 msg_i
 /*
  * Trace/debug
  */
-int snd_sof_init_trace(struct snd_sof_dev *sdev);
-void snd_sof_release_trace(struct snd_sof_dev *sdev);
-void snd_sof_free_trace(struct snd_sof_dev *sdev);
 int snd_sof_dbg_init(struct snd_sof_dev *sdev);
 void snd_sof_free_debug(struct snd_sof_dev *sdev);
 int snd_sof_debugfs_buf_item(struct snd_sof_dev *sdev,
 			     void *base, size_t size,
 			     const char *name, mode_t mode);
-int snd_sof_trace_update_pos(struct snd_sof_dev *sdev,
-			     struct sof_ipc_dma_trace_posn *posn);
-void snd_sof_trace_notify_for_error(struct snd_sof_dev *sdev);
 void sof_print_oops_and_stack(struct snd_sof_dev *sdev, const char *level,
 			      u32 panic_code, u32 tracep_code, void *oops,
 			      struct sof_ipc_panic_info *panic_info,
 			      void *stack, size_t stack_words);
-int snd_sof_init_trace_ipc(struct snd_sof_dev *sdev);
 void snd_sof_handle_fw_exception(struct snd_sof_dev *sdev);
 int snd_sof_dbg_memory_info_init(struct snd_sof_dev *sdev);
 int snd_sof_debugfs_add_region_item_iomem(struct snd_sof_dev *sdev,

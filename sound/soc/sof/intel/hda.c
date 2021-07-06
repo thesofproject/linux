@@ -1433,12 +1433,23 @@ EXPORT_SYMBOL_NS(hda_pci_intel_probe, SND_SOC_SOF_INTEL_HDA_COMMON);
 
 int hda_register_clients(struct snd_sof_dev *sdev)
 {
-	return hda_probes_register(sdev);
+	int ret;
+
+	ret = hda_probes_register(sdev);
+	if (ret)
+		return ret;
+
+	ret = hda_dma_trace_register(sdev);
+	if (ret)
+		hda_probes_unregister(sdev);
+
+	return ret;
 }
 
 void hda_unregister_clients(struct snd_sof_dev *sdev)
 {
 	hda_probes_unregister(sdev);
+	hda_dma_trace_unregister(sdev);
 }
 
 MODULE_LICENSE("Dual BSD/GPL");

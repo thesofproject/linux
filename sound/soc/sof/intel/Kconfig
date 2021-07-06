@@ -15,6 +15,13 @@ config SND_SOC_SOF_INTEL_HIFI_EP_IPC
 	  This option is not user-selectable but automagically handled by
 	  'select' statements at a higher level.
 
+config SND_SOC_SOF_HDA_DMA_TRACE
+	bool
+	select SND_SOC_SOF_DEBUG_DMA_TRACE
+	help
+	  This option is not user-selectable but following the higher level
+	  SND_SOC_SOF_DEBUG_ENABLE_FIRMWARE_TRACE option.
+
 config SND_SOC_SOF_INTEL_ATOM_HIFI_EP
 	tristate
 	select SND_SOC_SOF_INTEL_COMMON
@@ -31,6 +38,7 @@ config SND_SOC_SOF_INTEL_COMMON
 	select SND_SOC_INTEL_MACH
 	select SND_SOC_ACPI if ACPI
 	select SND_INTEL_DSP_CONFIG
+	select SND_SOC_SOF_DEBUG_DMA_TRACE
 	help
 	  This option is not user-selectable but automagically handled by
 	  'select' statements at a higher level.
@@ -216,6 +224,7 @@ config SND_SOC_SOF_HDA_COMMON
 	select SND_INTEL_DSP_CONFIG
 	select SND_SOC_SOF_HDA_LINK_BASELINE
 	select SND_SOC_SOF_HDA_PROBES
+	select SND_SOC_SOF_HDA_DMA_TRACE
 	help
 	  This option is not user-selectable but automagically handled by
 	  'select' statements at a higher level.

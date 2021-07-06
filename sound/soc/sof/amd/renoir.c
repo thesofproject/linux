@@ -155,6 +155,10 @@ const struct snd_sof_dsp_ops sof_renoir_ops = {
 	.irq_thread		= acp_sof_ipc_irq_thread,
 	.fw_ready		= sof_fw_ready,
 
+	/* client ops */
+	.register_ipc_clients	= acp_sof_register_clients,
+	.unregister_ipc_clients = acp_sof_unregister_clients,
+
 	/* DAI drivers */
 	.drv			= renoir_sof_dai,
 	.num_drv		= ARRAY_SIZE(renoir_sof_dai),
@@ -174,10 +178,6 @@ const struct snd_sof_dsp_ops sof_renoir_ops = {
 	.machine_select		= amd_sof_machine_select,
 	.machine_register	= sof_machine_register,
 	.machine_unregister	= sof_machine_unregister,
-
-	/* Trace Logger */
-	.trace_init		= acp_sof_trace_init,
-	.trace_release		= acp_sof_trace_release,
 };
 EXPORT_SYMBOL(sof_renoir_ops);
 

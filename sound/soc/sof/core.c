@@ -249,20 +249,9 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 		goto fw_run_err;
 	}
 
-	if (sof_debug_check_flag(SOF_DBG_ENABLE_TRACE)) {
-		sdev->dtrace_is_supported = true;
-
-		/* init DMA trace */
-		ret = snd_sof_init_trace(sdev);
-		if (ret < 0) {
-			/* non fatal */
-			dev_warn(sdev->dev,
-				 "warning: failed to initialize trace %d\n",
-				 ret);
-		}
-	} else {
-		dev_dbg(sdev->dev, "SOF firmware trace disabled\n");
-	}
+	if (sof_debug_check_flag(SOF_DBG_ENABLE_TRACE))
+		dev_dbg(sdev->dev,
+			"Please use 'options snd_sof_dma_trace enable=1' instead\n");
 
 	/* hereafter all FW boot flows are for PM reasons */
 	sdev->first_boot = false;
@@ -274,14 +263,14 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	if (ret < 0) {
 		dev_err(sdev->dev,
 			"error: failed to register DSP DAI driver %d\n", ret);
-		goto fw_trace_err;
+		goto fw_run_err;
 	}
 
 	ret = snd_sof_machine_register(sdev, plat_data);
 	if (ret < 0) {
 		dev_err(sdev->dev,
 			"error: failed to register machine driver %d\n", ret);
-		goto fw_trace_err;
+		goto fw_run_err;
 	}
 
 	ret = sof_register_clients(sdev);
@@ -307,8 +296,6 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 
 sof_machine_err:
 	snd_sof_machine_unregister(sdev, plat_data);
-fw_trace_err:
-	snd_sof_free_trace(sdev);
 fw_run_err:
 	snd_sof_fw_unload(sdev);
 fw_load_err:
@@ -434,7 +421,6 @@ int snd_sof_device_remove(struct device *dev)
 	snd_sof_machine_unregister(sdev, pdata);
 
 	if (sdev->fw_state > SOF_FW_BOOT_NOT_STARTED) {
-		snd_sof_free_trace(sdev);
 		ret = snd_sof_dsp_power_down_notify(sdev);
 		if (ret < 0)
 			dev_warn(dev, "error: %d failed to prepare DSP for device removal",

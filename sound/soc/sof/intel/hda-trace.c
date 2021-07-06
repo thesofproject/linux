@@ -17,6 +17,8 @@
 
 #include <sound/hdaudio_ext.h>
 #include "../ops.h"
+#include "../sof-client-dma-trace.h"
+#include "../sof-client.h"
 #include "hda.h"
 
 static int hda_dsp_trace_prepare(struct snd_sof_dev *sdev, struct snd_dma_buffer *dmab)
@@ -31,14 +33,15 @@ static int hda_dsp_trace_prepare(struct snd_sof_dev *sdev, struct snd_dma_buffer
 
 	ret = hda_dsp_stream_hw_params(sdev, stream, dmab, NULL);
 	if (ret < 0)
-		dev_err(sdev->dev, "error: hdac prepare failed: %d\n", ret);
+		dev_err(sdev->dev, "hdac prepare failed: %d\n", ret);
 
 	return ret;
 }
 
-int hda_dsp_trace_init(struct snd_sof_dev *sdev,
-		       struct sof_ipc_dma_trace_params_ext *dtrace_params)
+static int hda_dma_trace_init(struct sof_client_dev *cdev, struct snd_dma_buffer *dmab,
+			      struct sof_ipc_dma_trace_params_ext *dtrace_params)
 {
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	int ret;
 
@@ -46,8 +49,7 @@ int hda_dsp_trace_init(struct snd_sof_dev *sdev,
 						SOF_HDA_STREAM_DMI_L1_COMPATIBLE);
 
 	if (!hda->dtrace_stream) {
-		dev_err(sdev->dev,
-			"error: no available capture stream for DMA trace\n");
+		dev_err(sdev->dev, "no available capture stream for DMA trace\n");
 		return -ENODEV;
 	}
 
@@ -57,9 +59,9 @@ int hda_dsp_trace_init(struct snd_sof_dev *sdev,
 	 * initialize capture stream, set BDL address and return corresponding
 	 * stream tag which will be sent to the firmware by IPC message.
 	 */
-	ret = hda_dsp_trace_prepare(sdev, &sdev->dmatb);
+	ret = hda_dsp_trace_prepare(sdev, dmab);
 	if (ret < 0) {
-		dev_err(sdev->dev, "error: hdac trace init failed: %d\n", ret);
+		dev_err(sdev->dev, "hdac trace init failed: %d\n", ret);
 		hda_dsp_stream_put(sdev, SNDRV_PCM_STREAM_CAPTURE,
 				   dtrace_params->stream_tag);
 		hda->dtrace_stream = NULL;
@@ -69,27 +71,68 @@ int hda_dsp_trace_init(struct snd_sof_dev *sdev,
 	return ret;
 }
 
-int hda_dsp_trace_release(struct snd_sof_dev *sdev)
+static int hda_dma_trace_release(struct sof_client_dev *cdev)
 {
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct hdac_stream *hstream;
 
-	if (hda->dtrace_stream) {
-		hstream = &hda->dtrace_stream->hstream;
-		hda_dsp_stream_put(sdev,
-				   SNDRV_PCM_STREAM_CAPTURE,
-				   hstream->stream_tag);
-		hda->dtrace_stream = NULL;
-		return 0;
+	if (!hda->dtrace_stream) {
+		dev_dbg(sdev->dev, "DMA trace stream is not opened!\n");
+		return -ENODEV;
 	}
 
-	dev_dbg(sdev->dev, "DMA trace stream is not opened!\n");
-	return -ENODEV;
+	hstream = &hda->dtrace_stream->hstream;
+	hda_dsp_stream_put(sdev, SNDRV_PCM_STREAM_CAPTURE, hstream->stream_tag);
+	hda->dtrace_stream = NULL;
+
+	return 0;
 }
 
-int hda_dsp_trace_trigger(struct snd_sof_dev *sdev, int cmd)
+static int hda_dsp_trace_trigger(struct sof_client_dev *cdev, int cmd)
 {
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 
 	return hda_dsp_stream_trigger(sdev, hda->dtrace_stream, cmd);
 }
+
+static int hda_dma_trace_start(struct sof_client_dev *cdev)
+{
+	return hda_dsp_trace_trigger(cdev, SNDRV_PCM_TRIGGER_START);
+}
+
+static int hda_dma_trace_stop(struct sof_client_dev *cdev)
+{
+	return hda_dsp_trace_trigger(cdev, SNDRV_PCM_TRIGGER_STOP);
+}
+
+static void hda_dma_trace_is_available(struct sof_client_dev *cdev,
+				       bool available)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	sdev->dtrace_is_available = available;
+}
+
+static const struct sof_dma_trace_host_ops hda_dma_trace_ops = {
+	.init = hda_dma_trace_init,
+	.release = hda_dma_trace_release,
+	.start = hda_dma_trace_start,
+	.stop = hda_dma_trace_stop,
+
+	.available = hda_dma_trace_is_available,
+};
+
+int hda_dma_trace_register(struct snd_sof_dev *sdev)
+{
+	return sof_client_dev_register(sdev, "host-assisted-dma-trace", 0,
+				       &hda_dma_trace_ops, sizeof(hda_dma_trace_ops));
+}
+
+void hda_dma_trace_unregister(struct snd_sof_dev *sdev)
+{
+	sof_client_dev_unregister(sdev, "host-assisted-dma-trace", 0);
+}
+
+MODULE_IMPORT_NS(SND_SOC_SOF_CLIENT);

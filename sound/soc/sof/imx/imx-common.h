@@ -24,4 +24,7 @@ int imx8_parse_clocks(struct snd_sof_dev *sdev, struct imx_clocks *clks);
 int imx8_enable_clocks(struct snd_sof_dev *sdev, struct imx_clocks *clks);
 void imx8_disable_clocks(struct snd_sof_dev *sdev, struct imx_clocks *clks);
 
+int imx8_dma_trace_register(struct snd_sof_dev *sdev);
+void imx8_dma_trace_unregister(struct snd_sof_dev *sdev);
+
 #endif
