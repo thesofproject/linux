@@ -25,6 +25,7 @@
 enum {
 	SOF_RT711_JD_SRC_JD1 = 1,
 	SOF_RT711_JD_SRC_JD2 = 2,
+	SOF_RT711_JD_SRC_JD2_100K = 3,
 };
 
 enum {
