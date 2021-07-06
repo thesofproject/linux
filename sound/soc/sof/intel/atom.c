@@ -23,6 +23,7 @@
 #include "atom.h"
 #include "../sof-acpi-dev.h"
 #include "../sof-audio.h"
+#include "../sof-client-dma-trace.h"
 #include "../../intel/common/soc-intel-quirks.h"
 
 static void atom_host_done(struct snd_sof_dev *sdev);
@@ -457,4 +458,17 @@ void atom_set_mach_params(const struct snd_soc_acpi_mach *mach,
 }
 EXPORT_SYMBOL_NS(atom_set_mach_params, SND_SOC_SOF_INTEL_ATOM_HIFI_EP);
 
+int atom_dma_trace_register(struct snd_sof_dev *sdev)
+{
+	return sof_client_dev_register(sdev, "atom-dma-trace", 0, NULL, 0);
+}
+EXPORT_SYMBOL_NS(atom_dma_trace_register, SND_SOC_SOF_INTEL_ATOM_HIFI_EP);
+
+void atom_dma_trace_unregister(struct snd_sof_dev *sdev)
+{
+	sof_client_dev_unregister(sdev, "atom-dma-trace", 0);
+}
+EXPORT_SYMBOL_NS(atom_dma_trace_unregister, SND_SOC_SOF_INTEL_ATOM_HIFI_EP);
+
+MODULE_IMPORT_NS(SND_SOC_SOF_CLIENT);
 MODULE_LICENSE("Dual BSD/GPL");

@@ -713,6 +713,20 @@ static inline void hda_probes_unregister(struct snd_sof_dev *sdev)
 }
 #endif /* CONFIG_SND_SOC_SOF_HDA_PROBES */
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_DMA_TRACE)
+int hda_dma_trace_register(struct snd_sof_dev *sdev);
+void hda_dma_trace_unregister(struct snd_sof_dev *sdev);
+#else
+static inline int hda_dma_trace_register(struct snd_sof_dev *sdev)
+{
+	return 0;
+}
+
+static inline void hda_dma_trace_unregister(struct snd_sof_dev *sdev)
+{
+}
+#endif /* CONFIG_SND_SOC_SOF_HDA_DMA_TRACE */
+
 /* machine driver select */
 void hda_machine_select(struct snd_sof_dev *sdev);
 void hda_set_mach_params(const struct snd_soc_acpi_mach *mach,

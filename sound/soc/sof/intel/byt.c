@@ -278,6 +278,10 @@ static const struct snd_sof_dsp_ops sof_byt_ops = {
 	.suspend = byt_suspend,
 	.resume = byt_resume,
 
+	/* client ops */
+	.register_ipc_clients = atom_dma_trace_register,
+	.unregister_ipc_clients = atom_dma_trace_unregister,
+
 	/* DAI drivers */
 	.drv = atom_dai,
 	.num_drv = 3, /* we have only 3 SSPs on byt*/
@@ -359,6 +363,10 @@ static const struct snd_sof_dsp_ops sof_cht_ops = {
 	/* PM */
 	.suspend = byt_suspend,
 	.resume = byt_resume,
+
+	/* client ops */
+	.register_ipc_clients = atom_dma_trace_register,
+	.unregister_ipc_clients = atom_dma_trace_unregister,
 
 	/* DAI drivers */
 	.drv = atom_dai,

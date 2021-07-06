@@ -216,6 +216,10 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 		goto fw_run_err;
 	}
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_DMA_TRACE)
+	/* trace support via SOF client */
+	sdev->dtrace_is_supported = false;
+#else
 	if (sof_core_debug & SOF_DBG_ENABLE_TRACE) {
 		sdev->dtrace_is_supported = true;
 
@@ -230,6 +234,7 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	} else {
 		dev_dbg(sdev->dev, "SOF firmware trace disabled\n");
 	}
+#endif
 
 	/* hereafter all FW boot flows are for PM reasons */
 	sdev->first_boot = false;

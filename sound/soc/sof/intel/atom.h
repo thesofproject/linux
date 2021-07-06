@@ -71,4 +71,7 @@ void atom_set_mach_params(const struct snd_soc_acpi_mach *mach,
 
 extern struct snd_soc_dai_driver atom_dai[];
 
+int atom_dma_trace_register(struct snd_sof_dev *sdev);
+void atom_dma_trace_unregister(struct snd_sof_dev *sdev);
+
 #endif

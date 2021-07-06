@@ -22,6 +22,7 @@
 #include "shim.h"
 #include "../sof-acpi-dev.h"
 #include "../sof-audio.h"
+#include "../sof-client-dma-trace.h"
 
 /* BARs */
 #define BDW_DSP_BAR 0
@@ -580,6 +581,16 @@ static void bdw_set_mach_params(const struct snd_soc_acpi_mach *mach,
 	mach_params->dai_drivers = desc->ops->drv;
 }
 
+static int bdw_dma_trace_register(struct snd_sof_dev *sdev)
+{
+	return sof_client_dev_register(sdev, "bdw-dma-trace", 0, NULL, 0);
+}
+
+static void bdw_dma_trace_unregister(struct snd_sof_dev *sdev)
+{
+	sof_client_dev_unregister(sdev, "bdw-dma-trace", 0);
+}
+
 /* Broadwell DAIs */
 static struct snd_soc_dai_driver bdw_dai[] = {
 {
@@ -660,6 +671,10 @@ static const struct snd_sof_dsp_ops sof_bdw_ops = {
 	/*Firmware loading */
 	.load_firmware	= snd_sof_load_firmware_memcpy,
 
+	/* client ops */
+	.register_ipc_clients = bdw_dma_trace_register,
+	.unregister_ipc_clients = bdw_dma_trace_unregister,
+
 	/* DAI drivers */
 	.drv = bdw_dai,
 	.num_drv = ARRAY_SIZE(bdw_dai),
@@ -739,3 +754,4 @@ MODULE_LICENSE("Dual BSD/GPL");
 MODULE_IMPORT_NS(SND_SOC_SOF_INTEL_HIFI_EP_IPC);
 MODULE_IMPORT_NS(SND_SOC_SOF_XTENSA);
 MODULE_IMPORT_NS(SND_SOC_SOF_ACPI_DEV);
+MODULE_IMPORT_NS(SND_SOC_SOF_CLIENT);

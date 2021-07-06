@@ -90,12 +90,19 @@ static int icl_dsp_post_fw_run(struct snd_sof_dev *sdev)
 
 static int icl_register_clients(struct snd_sof_dev *sdev)
 {
-	return hda_probes_register(sdev);
+	int ret;
+
+	ret = hda_probes_register(sdev);
+	if (ret)
+		return ret;
+
+	return hda_dma_trace_register(sdev);
 }
 
 static void icl_unregister_clients(struct snd_sof_dev *sdev)
 {
 	hda_probes_unregister(sdev);
+	hda_dma_trace_unregister(sdev);
 }
 
 /* Icelake ops */
