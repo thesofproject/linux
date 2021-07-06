@@ -13,6 +13,20 @@
 #include "sof-client.h"
 #include "sof-priv.h"
 
+/**
+ * struct sof_event_entry - IPC client event description
+ * @ipc_msg_type:	IPC msg type of the event the client is interested
+ * @cdev:		sof_client_dev of the requesting client
+ * @callback:		Callback function of the client
+ * @list:		item in SOF core client event list
+ */
+struct sof_event_entry {
+	u32 ipc_msg_type;
+	struct sof_client_dev *cdev;
+	sof_client_event_callback callback;
+	struct list_head list;
+};
+
 static void sof_client_auxdev_release(struct device *dev)
 {
 	struct auxiliary_device *auxdev = to_auxiliary_dev(dev);
@@ -200,3 +214,67 @@ struct device *sof_client_get_dma_dev(struct sof_client_dev *cdev)
 	return cdev->sdev->dev;
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_get_dma_dev, SND_SOC_SOF_CLIENT);
+
+/* IPC event handling */
+void sof_client_ipc_rx_dispatcher(struct snd_sof_dev *sdev, void *full_msg)
+{
+	struct sof_ipc_cmd_hdr *hdr = full_msg;
+	u32 msg_type = hdr->cmd & SOF_GLB_TYPE_MASK;
+	struct sof_event_entry *event;
+
+	mutex_lock(&sdev->ipc_event_handler_mutex);
+
+	list_for_each_entry(event, &sdev->ipc_event_handler_list, list) {
+		if (event->ipc_msg_type == msg_type)
+			event->callback(event->cdev, full_msg);
+	}
+
+	mutex_unlock(&sdev->ipc_event_handler_mutex);
+}
+
+int sof_client_register_ipc_rx_handler(struct sof_client_dev *cdev,
+				       u32 ipc_msg_type,
+				       sof_client_event_callback callback)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+	struct sof_event_entry *event;
+
+	if (!callback || !(ipc_msg_type & SOF_GLB_TYPE_MASK))
+		return -EINVAL;
+
+	event = kmalloc(sizeof(*event), GFP_KERNEL);
+	if (!event)
+		return -ENOMEM;
+
+	event->ipc_msg_type = ipc_msg_type;
+	event->cdev = cdev;
+	event->callback = callback;
+
+	/* add to list of SOF client devices */
+	mutex_lock(&sdev->ipc_event_handler_mutex);
+	list_add(&event->list, &sdev->ipc_event_handler_list);
+	mutex_unlock(&sdev->ipc_event_handler_mutex);
+
+	return 0;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_register_ipc_rx_handler, SND_SOC_SOF_CLIENT);
+
+void sof_client_unregister_ipc_rx_handler(struct sof_client_dev *cdev,
+					  u32 ipc_msg_type)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+	struct sof_event_entry *event;
+
+	mutex_lock(&sdev->ipc_event_handler_mutex);
+
+	list_for_each_entry(event, &sdev->ipc_event_handler_list, list) {
+		if (event->cdev == cdev && event->ipc_msg_type == ipc_msg_type) {
+			list_del(&event->list);
+			kfree(event);
+			break;
+		}
+	}
+
+	mutex_unlock(&sdev->ipc_event_handler_mutex);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_unregister_ipc_rx_handler, SND_SOC_SOF_CLIENT);

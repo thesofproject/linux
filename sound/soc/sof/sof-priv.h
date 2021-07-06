@@ -452,6 +452,10 @@ struct snd_sof_dev {
 	/* mutex to protect client list */
 	struct mutex ipc_client_mutex;
 
+	/* Used for tracking the IPC client's event requests */
+	struct list_head ipc_event_handler_list;
+	struct mutex ipc_event_handler_mutex; /* to protect the event handler list */
+
 	void *private;			/* core does not touch this */
 };
 
@@ -586,6 +590,7 @@ int sof_client_dev_register(struct snd_sof_dev *sdev, const char *name, u32 id,
 void sof_client_dev_unregister(struct snd_sof_dev *sdev, const char *name, u32 id);
 int sof_register_clients(struct snd_sof_dev *sdev);
 void sof_unregister_clients(struct snd_sof_dev *sdev);
+void sof_client_ipc_rx_dispatcher(struct snd_sof_dev *sdev, void *full_msg);
 #else /* CONFIG_SND_SOC_SOF_CLIENT */
 static inline int sof_client_dev_register(struct snd_sof_dev *sdev, const char *name,
 					  u32 id, const void *data, size_t size)
@@ -604,6 +609,11 @@ static inline int sof_register_clients(struct snd_sof_dev *sdev)
 }
 
 static inline  void sof_unregister_clients(struct snd_sof_dev *sdev)
+{
+}
+
+static inline void sof_client_ipc_rx_dispatcher(struct snd_sof_dev *sdev,
+						void *full_msg)
 {
 }
 #endif /* CONFIG_SND_SOC_SOF_CLIENT */

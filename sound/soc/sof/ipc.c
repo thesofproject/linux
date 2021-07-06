@@ -463,20 +463,24 @@ void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev)
 		break;
 	}
 
-	if (rx_callback) {
-		/* read the full message as there we have rx handler for it */
-		full_msg = kmalloc(hdr.size, GFP_KERNEL);
-		if (!full_msg)
-			return;
+	/* read the full message as there we have rx handler for it */
+	full_msg = kmalloc(hdr.size, GFP_KERNEL);
+	if (!full_msg)
+		return;
 
-		err = snd_sof_ipc_msg_data(sdev, NULL, full_msg, hdr.size);
-		if (err < 0)
-			dev_err(sdev->dev, "failed to read message\n");
-		else
+	err = snd_sof_ipc_msg_data(sdev, NULL, full_msg, hdr.size);
+	if (err < 0) {
+		dev_err(sdev->dev, "failed to read message\n");
+	} else {
+		/* Call local handler for the message */
+		if (rx_callback)
 			rx_callback(sdev, full_msg);
 
-		kfree(full_msg);
+		/* Notify registered clients */
+		sof_client_ipc_rx_dispatcher(sdev, full_msg);
 	}
+
+	kfree(full_msg);
 
 	ipc_log_header(sdev->dev, "ipc rx done", hdr.cmd);
 }
