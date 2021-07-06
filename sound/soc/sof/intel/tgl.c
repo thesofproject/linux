@@ -22,12 +22,19 @@ static const struct snd_sof_debugfs_map tgl_dsp_debugfs[] = {
 
 static int tgl_register_clients(struct snd_sof_dev *sdev)
 {
-	return hda_probes_register(sdev);
+	int ret;
+
+	ret = hda_probes_register(sdev);
+	if (ret)
+		return ret;
+
+	return hda_dma_trace_register(sdev);
 }
 
 static void tgl_unregister_clients(struct snd_sof_dev *sdev)
 {
 	hda_probes_unregister(sdev);
+	hda_dma_trace_unregister(sdev);
 }
 
 /* Tigerlake ops */
