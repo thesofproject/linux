@@ -95,6 +95,23 @@ out:
 }
 EXPORT_SYMBOL(snd_sof_get_status);
 
+/* Helper to manage DSP state */
+void sof_set_fw_state(struct snd_sof_dev *sdev, enum snd_sof_fw_state new_state)
+{
+	sdev->fw_state = new_state;
+
+	switch (new_state) {
+	case SOF_FW_BOOT_NOT_STARTED:
+	case SOF_FW_BOOT_COMPLETE:
+	case SOF_FW_CRASHED:
+		sof_client_fw_state_dispatcher(sdev);
+		fallthrough;
+	default:
+		break;
+	}
+}
+EXPORT_SYMBOL(sof_set_fw_state);
+
 /*
  *			FW Boot State Transition Diagram
  *
@@ -308,7 +325,6 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 
 	sdev->pdata = plat_data;
 	sdev->first_boot = true;
-	sof_set_fw_state(sdev, SOF_FW_BOOT_NOT_STARTED);
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_PROBES)
 	sdev->extractor_stream_tag = SOF_PROBE_INVALID_NODE_ID;
 #endif
@@ -330,10 +346,13 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 	INIT_LIST_HEAD(&sdev->dai_list);
 	INIT_LIST_HEAD(&sdev->route_list);
 	INIT_LIST_HEAD(&sdev->ipc_client_list);
+	INIT_LIST_HEAD(&sdev->ipc_rx_handler_list);
+	INIT_LIST_HEAD(&sdev->fw_state_handler_list);
 	spin_lock_init(&sdev->ipc_lock);
 	spin_lock_init(&sdev->hw_lock);
 	mutex_init(&sdev->power_state_access);
 	mutex_init(&sdev->ipc_client_mutex);
+	mutex_init(&sdev->client_event_handler_mutex);
 
 	/* set default timeouts if none provided */
 	if (plat_data->desc->ipc_timeout == 0)
@@ -344,6 +363,8 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 		sdev->boot_timeout = TIMEOUT_DEFAULT_BOOT_MS;
 	else
 		sdev->boot_timeout = plat_data->desc->boot_timeout;
+
+	sof_set_fw_state(sdev, SOF_FW_BOOT_NOT_STARTED);
 
 	if (IS_ENABLED(CONFIG_SND_SOC_SOF_PROBE_WORK_QUEUE)) {
 		INIT_WORK(&sdev->probe_work, sof_probe_work);

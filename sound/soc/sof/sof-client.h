@@ -6,7 +6,9 @@
 #include <linux/auxiliary_bus.h>
 #include <linux/device.h>
 #include <linux/list.h>
+#include <sound/sof.h>
 
+struct sof_ipc_cmd_hdr;
 struct snd_sof_dev;
 struct dentry;
 
@@ -37,5 +39,24 @@ int sof_client_ipc_tx_message(struct sof_client_dev *cdev, void *ipc_msg,
 
 struct dentry *sof_client_get_debugfs_root(struct sof_client_dev *cdev);
 struct device *sof_client_get_dma_dev(struct sof_client_dev *cdev);
+
+/* IPC notification */
+typedef void (*sof_client_event_callback)(struct sof_client_dev *cdev,
+					  void *full_msg);
+
+int sof_client_register_ipc_rx_handler(struct sof_client_dev *cdev,
+				       u32 ipc_msg_type,
+				       sof_client_event_callback callback);
+void sof_client_unregister_ipc_rx_handler(struct sof_client_dev *cdev,
+					  u32 ipc_msg_type);
+
+/* DSP state notification and query */
+typedef void (*sof_client_fw_state_callback)(struct sof_client_dev *cdev,
+					     enum snd_sof_fw_state state);
+
+int sof_client_register_fw_state_handler(struct sof_client_dev *cdev,
+					 sof_client_fw_state_callback callback);
+void sof_client_unregister_fw_state_handler(struct sof_client_dev *cdev);
+enum snd_sof_fw_state sof_client_get_fw_state(struct sof_client_dev *cdev);
 
 #endif /* __SOC_SOF_CLIENT_H */

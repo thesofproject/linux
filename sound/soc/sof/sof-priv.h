@@ -493,6 +493,21 @@ struct snd_sof_dev {
 	/* mutex to protect client list */
 	struct mutex ipc_client_mutex;
 
+	/*
+	 * Used for tracking the IPC client's RX registration for DSP initiated
+	 * message handling.
+	 */
+	struct list_head ipc_rx_handler_list;
+
+	/*
+	 * Used for tracking the IPC client's registration for DSP state change
+	 * notification
+	 */
+	struct list_head fw_state_handler_list;
+
+	/* to protect the ipc_rx_handler_list  and  dsp_state_handler_list list */
+	struct mutex client_event_handler_mutex;
+
 	void *private;			/* core does not touch this */
 };
 
@@ -592,11 +607,7 @@ extern const struct dsp_arch_ops sof_xtensa_arch_ops;
 /*
  * Firmware state tracking
  */
-static inline void sof_set_fw_state(struct snd_sof_dev *sdev,
-				    enum snd_sof_fw_state new_state)
-{
-	sdev->fw_state = new_state;
-}
+void sof_set_fw_state(struct snd_sof_dev *sdev, enum snd_sof_fw_state new_state);
 
 /*
  * Utilities
@@ -637,6 +648,8 @@ int sof_client_dev_register(struct snd_sof_dev *sdev, const char *name, u32 id,
 void sof_client_dev_unregister(struct snd_sof_dev *sdev, const char *name, u32 id);
 int sof_register_clients(struct snd_sof_dev *sdev);
 void sof_unregister_clients(struct snd_sof_dev *sdev);
+void sof_client_ipc_rx_dispatcher(struct snd_sof_dev *sdev, void *full_msg);
+void sof_client_fw_state_dispatcher(struct snd_sof_dev *sdev);
 #else /* CONFIG_SND_SOC_SOF_CLIENT */
 static inline int sof_client_dev_register(struct snd_sof_dev *sdev, const char *name,
 					  u32 id, const void *data, size_t size)
@@ -655,6 +668,15 @@ static inline int sof_register_clients(struct snd_sof_dev *sdev)
 }
 
 static inline  void sof_unregister_clients(struct snd_sof_dev *sdev)
+{
+}
+
+static inline void sof_client_ipc_rx_dispatcher(struct snd_sof_dev *sdev,
+						void *full_msg)
+{
+}
+
+static inline void sof_client_fw_state_dispatcher(struct snd_sof_dev *sdev)
 {
 }
 #endif /* CONFIG_SND_SOC_SOF_CLIENT */
