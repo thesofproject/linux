@@ -31,14 +31,20 @@ static int regmap_mdio_c22_read(void *context, unsigned int reg, unsigned int *v
 {
 	struct mdio_device *mdio_dev = context;
 
-	return regmap_mdio_read(mdio_dev, reg & REGNUM_C22_MASK, val);
+	if (unlikely(reg & ~REGNUM_C22_MASK))
+		return -ENXIO;
+
+	return regmap_mdio_read(mdio_dev, reg, val);
 }
 
 static int regmap_mdio_c22_write(void *context, unsigned int reg, unsigned int val)
 {
 	struct mdio_device *mdio_dev = context;
 
-	return regmap_mdio_write(mdio_dev, reg & REGNUM_C22_MASK, val);
+	if (unlikely(reg & ~REGNUM_C22_MASK))
+		return -ENXIO;
+
+	return mdiobus_write(mdio_dev->bus, mdio_dev->addr, reg, val);
 }
 
 static const struct regmap_bus regmap_mdio_c22_bus = {
@@ -50,14 +56,20 @@ static int regmap_mdio_c45_read(void *context, unsigned int reg, unsigned int *v
 {
 	struct mdio_device *mdio_dev = context;
 
-	return regmap_mdio_read(mdio_dev, MII_ADDR_C45 | (reg & REGNUM_C45_MASK), val);
+	if (unlikely(reg & ~REGNUM_C45_MASK))
+		return -ENXIO;
+
+	return regmap_mdio_read(mdio_dev, MII_ADDR_C45 | reg, val);
 }
 
 static int regmap_mdio_c45_write(void *context, unsigned int reg, unsigned int val)
 {
 	struct mdio_device *mdio_dev = context;
 
-	return regmap_mdio_write(mdio_dev, MII_ADDR_C45 | (reg & REGNUM_C45_MASK), val);
+	if (unlikely(reg & ~REGNUM_C45_MASK))
+		return -ENXIO;
+
+	return regmap_mdio_write(mdio_dev, MII_ADDR_C45 | reg, val);
 }
 
 static const struct regmap_bus regmap_mdio_c45_bus = {
@@ -69,7 +81,7 @@ struct regmap *__regmap_init_mdio(struct mdio_device *mdio_dev,
 	const struct regmap_config *config, struct lock_class_key *lock_key,
 	const char *lock_name)
 {
-	struct regmap_bus *bus;
+	const struct regmap_bus *bus;
 
 	if (config->reg_bits == 5 && config->val_bits == 16)
 		bus = &regmap_mdio_c22_bus;
