@@ -14,16 +14,28 @@
 #include "sof-priv.h"
 
 /**
- * struct sof_event_entry - IPC client event description
+ * struct sof_ipc_event_entry - IPC client event description
  * @ipc_msg_type:	IPC msg type of the event the client is interested
  * @cdev:		sof_client_dev of the requesting client
  * @callback:		Callback function of the client
  * @list:		item in SOF core client event list
  */
-struct sof_event_entry {
+struct sof_ipc_event_entry {
 	u32 ipc_msg_type;
 	struct sof_client_dev *cdev;
 	sof_client_event_callback callback;
+	struct list_head list;
+};
+
+/**
+ * struct sof_panic_event_entry - DSP panic event subscription entry
+ * @cdev:		sof_client_dev of the requesting client
+ * @callback:		Callback function of the client
+ * @list:		item in SOF core client event list
+ */
+struct sof_panic_event_entry {
+	struct sof_client_dev *cdev;
+	sof_client_dsp_panic_callback callback;
 	struct list_head list;
 };
 
@@ -220,16 +232,16 @@ void sof_client_ipc_rx_dispatcher(struct snd_sof_dev *sdev, void *full_msg)
 {
 	struct sof_ipc_cmd_hdr *hdr = full_msg;
 	u32 msg_type = hdr->cmd & SOF_GLB_TYPE_MASK;
-	struct sof_event_entry *event;
+	struct sof_ipc_event_entry *event;
 
-	mutex_lock(&sdev->ipc_event_handler_mutex);
+	mutex_lock(&sdev->client_event_handler_mutex);
 
 	list_for_each_entry(event, &sdev->ipc_event_handler_list, list) {
 		if (event->ipc_msg_type == msg_type)
 			event->callback(event->cdev, full_msg);
 	}
 
-	mutex_unlock(&sdev->ipc_event_handler_mutex);
+	mutex_unlock(&sdev->client_event_handler_mutex);
 }
 
 int sof_client_register_ipc_rx_handler(struct sof_client_dev *cdev,
@@ -237,7 +249,7 @@ int sof_client_register_ipc_rx_handler(struct sof_client_dev *cdev,
 				       sof_client_event_callback callback)
 {
 	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
-	struct sof_event_entry *event;
+	struct sof_ipc_event_entry *event;
 
 	if (!callback || !(ipc_msg_type & SOF_GLB_TYPE_MASK))
 		return -EINVAL;
@@ -251,9 +263,9 @@ int sof_client_register_ipc_rx_handler(struct sof_client_dev *cdev,
 	event->callback = callback;
 
 	/* add to list of SOF client devices */
-	mutex_lock(&sdev->ipc_event_handler_mutex);
+	mutex_lock(&sdev->client_event_handler_mutex);
 	list_add(&event->list, &sdev->ipc_event_handler_list);
-	mutex_unlock(&sdev->ipc_event_handler_mutex);
+	mutex_unlock(&sdev->client_event_handler_mutex);
 
 	return 0;
 }
@@ -263,9 +275,9 @@ void sof_client_unregister_ipc_rx_handler(struct sof_client_dev *cdev,
 					  u32 ipc_msg_type)
 {
 	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
-	struct sof_event_entry *event;
+	struct sof_ipc_event_entry *event;
 
-	mutex_lock(&sdev->ipc_event_handler_mutex);
+	mutex_lock(&sdev->client_event_handler_mutex);
 
 	list_for_each_entry(event, &sdev->ipc_event_handler_list, list) {
 		if (event->cdev == cdev && event->ipc_msg_type == ipc_msg_type) {
@@ -275,6 +287,63 @@ void sof_client_unregister_ipc_rx_handler(struct sof_client_dev *cdev,
 		}
 	}
 
-	mutex_unlock(&sdev->ipc_event_handler_mutex);
+	mutex_unlock(&sdev->client_event_handler_mutex);
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_unregister_ipc_rx_handler, SND_SOC_SOF_CLIENT);
+
+/* DSP panic handling */
+void sof_client_dsp_panic_dispatcher(struct snd_sof_dev *sdev)
+{
+	struct sof_panic_event_entry *event;
+
+	mutex_lock(&sdev->client_event_handler_mutex);
+
+	list_for_each_entry(event, &sdev->dsp_panic_handler_list, list)
+		event->callback(event->cdev);
+
+	mutex_unlock(&sdev->client_event_handler_mutex);
+}
+
+int sof_client_register_dsp_panic_handler(struct sof_client_dev *cdev,
+					  sof_client_dsp_panic_callback callback)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+	struct sof_panic_event_entry *event;
+
+	if (!callback)
+		return -EINVAL;
+
+	event = kmalloc(sizeof(*event), GFP_KERNEL);
+	if (!event)
+		return -ENOMEM;
+
+	event->cdev = cdev;
+	event->callback = callback;
+
+	/* add to list of SOF client devices */
+	mutex_lock(&sdev->client_event_handler_mutex);
+	list_add(&event->list, &sdev->dsp_panic_handler_list);
+	mutex_unlock(&sdev->client_event_handler_mutex);
+
+	return 0;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_register_dsp_panic_handler, SND_SOC_SOF_CLIENT);
+
+void sof_client_unregister_dsp_panic_handler(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+	struct sof_panic_event_entry *event;
+
+	mutex_lock(&sdev->client_event_handler_mutex);
+
+	list_for_each_entry(event, &sdev->dsp_panic_handler_list, list) {
+		if (event->cdev == cdev) {
+			list_del(&event->list);
+			kfree(event);
+			break;
+		}
+	}
+
+	mutex_unlock(&sdev->client_event_handler_mutex);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_unregister_dsp_panic_handler, SND_SOC_SOF_CLIENT);

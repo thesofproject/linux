@@ -454,7 +454,9 @@ struct snd_sof_dev {
 
 	/* Used for tracking the IPC client's event requests */
 	struct list_head ipc_event_handler_list;
-	struct mutex ipc_event_handler_mutex; /* to protect the event handler list */
+	/* Used for tracking the IPC client's dsp panic handlers */
+	struct list_head dsp_panic_handler_list;
+	struct mutex client_event_handler_mutex; /* to protect the event handler lists */
 
 	void *private;			/* core does not touch this */
 };
@@ -591,6 +593,7 @@ void sof_client_dev_unregister(struct snd_sof_dev *sdev, const char *name, u32 i
 int sof_register_clients(struct snd_sof_dev *sdev);
 void sof_unregister_clients(struct snd_sof_dev *sdev);
 void sof_client_ipc_rx_dispatcher(struct snd_sof_dev *sdev, void *full_msg);
+void sof_client_dsp_panic_dispatcher(struct snd_sof_dev *sdev);
 #else /* CONFIG_SND_SOC_SOF_CLIENT */
 static inline int sof_client_dev_register(struct snd_sof_dev *sdev, const char *name,
 					  u32 id, const void *data, size_t size)
@@ -614,6 +617,10 @@ static inline  void sof_unregister_clients(struct snd_sof_dev *sdev)
 
 static inline void sof_client_ipc_rx_dispatcher(struct snd_sof_dev *sdev,
 						void *full_msg)
+{
+}
+
+static inline void sof_client_dsp_panic_dispatcher(struct snd_sof_dev *sdev)
 {
 }
 #endif /* CONFIG_SND_SOC_SOF_CLIENT */

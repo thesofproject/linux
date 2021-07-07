@@ -49,4 +49,11 @@ int sof_client_register_ipc_rx_handler(struct sof_client_dev *cdev,
 void sof_client_unregister_ipc_rx_handler(struct sof_client_dev *cdev,
 					  u32 ipc_msg_type);
 
+/* DSP panic notification */
+typedef void (*sof_client_dsp_panic_callback)(struct sof_client_dev *cdev);
+
+int sof_client_register_dsp_panic_handler(struct sof_client_dev *cdev,
+					  sof_client_dsp_panic_callback callback);
+void sof_client_unregister_dsp_panic_handler(struct sof_client_dev *cdev);
+
 #endif /* __SOC_SOF_CLIENT_H */
