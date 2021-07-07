@@ -1900,10 +1900,20 @@ static int pci_enable_device_flags(struct pci_dev *dev, unsigned long flags)
 	int err;
 	int i, bars = 0;
 
-	if (atomic_inc_return(&dev->enable_cnt) > 1) {
-		pci_update_current_state(dev, dev->current_state);
-		return 0;		/* already enabled */
+	/*
+	 * Power state could be unknown at this point, either due to a fresh
+	 * boot or a device removal call.  So get the current power state
+	 * so that things like MSI message writing will behave as expected
+	 * (e.g. if the device really is in D0 at enable time).
+	 */
+	if (dev->pm_cap) {
+		u16 pmcsr;
+		pci_read_config_word(dev, dev->pm_cap + PCI_PM_CTRL, &pmcsr);
+		dev->current_state = (pmcsr & PCI_PM_CTRL_STATE_MASK);
 	}
+
+	if (atomic_inc_return(&dev->enable_cnt) > 1)
+		return 0;		/* already enabled */
 
 	bridge = pci_upstream_bridge(dev);
 	if (bridge)
@@ -5028,7 +5038,7 @@ static void pci_dev_lock(struct pci_dev *dev)
 }
 
 /* Return 1 on successful lock, 0 on contention */
-static int pci_dev_trylock(struct pci_dev *dev)
+int pci_dev_trylock(struct pci_dev *dev)
 {
 	if (pci_cfg_access_trylock(dev)) {
 		if (device_trylock(&dev->dev))
@@ -5038,12 +5048,14 @@ static int pci_dev_trylock(struct pci_dev *dev)
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(pci_dev_trylock);
 
-static void pci_dev_unlock(struct pci_dev *dev)
+void pci_dev_unlock(struct pci_dev *dev)
 {
 	device_unlock(&dev->dev);
 	pci_cfg_access_unlock(dev);
 }
+EXPORT_SYMBOL_GPL(pci_dev_unlock);
 
 static void pci_dev_save_and_disable(struct pci_dev *dev)
 {
