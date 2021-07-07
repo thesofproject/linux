@@ -8,6 +8,7 @@
 #include <linux/list.h>
 #include <sound/sof.h>
 
+struct sof_ipc_fw_version;
 struct sof_ipc_cmd_hdr;
 struct snd_sof_dev;
 struct dentry;
@@ -39,6 +40,7 @@ int sof_client_ipc_tx_message(struct sof_client_dev *cdev, void *ipc_msg,
 
 struct dentry *sof_client_get_debugfs_root(struct sof_client_dev *cdev);
 struct device *sof_client_get_dma_dev(struct sof_client_dev *cdev);
+const struct sof_ipc_fw_version *sof_client_get_fw_version(struct sof_client_dev *cdev);
 
 /* IPC notification */
 typedef void (*sof_client_event_callback)(struct sof_client_dev *cdev,

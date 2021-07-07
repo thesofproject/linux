@@ -223,6 +223,14 @@ struct device *sof_client_get_dma_dev(struct sof_client_dev *cdev)
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_get_dma_dev, SND_SOC_SOF_CLIENT);
 
+const struct sof_ipc_fw_version *sof_client_get_fw_version(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	return &sdev->fw_ready.version;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_get_fw_version, SND_SOC_SOF_CLIENT);
+
 /* IPC event handling */
 void sof_client_ipc_rx_dispatcher(struct snd_sof_dev *sdev, void *full_msg)
 {
