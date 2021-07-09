@@ -165,6 +165,9 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 		return ret;
 	}
 
+	/* Notify clients about core resume */
+	sof_resume_clients(sdev);
+
 	/* notify DSP of system resume */
 	ret = sof_send_pm_ctx_ipc(sdev, SOF_IPC_PM_CTX_RESTORE);
 	if (ret < 0)
@@ -178,6 +181,7 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 static int sof_suspend(struct device *dev, bool runtime_suspend)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
+	pm_message_t pm_state = {};
 	u32 target_state = 0;
 	int ret;
 
@@ -215,6 +219,9 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 
 	/* release trace */
 	snd_sof_release_trace(sdev);
+
+	/* Notify clients about core suspend */
+	sof_suspend_clients(sdev, pm_state);
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_ENABLE_DEBUGFS_CACHE)
 	/* cache debugfs contents during runtime suspend */
