@@ -672,6 +672,7 @@ static int sof_probes_client_probe(struct auxiliary_device *auxdev,
 	struct snd_soc_dai_link *links;
 	int ret;
 
+	dev_info(&auxdev->dev, "%s: ENTER\n", __func__);
 	if (!dev->platform_data) {
 		dev_err(dev, "error: missing platform data\n");
 		return -ENODEV;
@@ -769,6 +770,7 @@ static void sof_probes_client_remove(struct auxiliary_device *auxdev)
 	struct sof_client_dev *cdev = auxiliary_dev_to_sof_client_dev(auxdev);
 	struct sof_probes_priv *priv = cdev->data;
 
+	dev_info(&auxdev->dev, "%s: ENTER\n", __func__);
 	pm_runtime_disable(&auxdev->dev);
 	debugfs_remove(priv->dfs_points);
 	debugfs_remove(priv->dfs_points_remove);

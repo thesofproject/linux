@@ -272,15 +272,21 @@ int snd_register_device(int type, struct snd_card *card, int dev,
 	mutex_lock(&sound_mutex);
 	minor = snd_find_free_minor(type, card, dev);
 	if (minor < 0) {
+		dev_info(device, "%s (%s): failed to get minor for type: %d\n",
+			 __func__, card->shortname, type);
 		err = minor;
 		goto error;
 	}
+	dev_info(device, "%s (%s): got minor (%d) for type: %d\n", __func__,
+		 card->shortname, minor, type);
 
 	preg->dev = device;
 	device->devt = MKDEV(major, minor);
 	err = device_add(device);
-	if (err < 0)
+	if (err < 0) {
+		dev_info(device, "%s: device_add failed: %d\n", __func__, err);
 		goto error;
+	}
 
 	snd_minors[minor] = preg;
  error:
@@ -309,6 +315,8 @@ int snd_unregister_device(struct device *dev)
 	for (minor = 0; minor < ARRAY_SIZE(snd_minors); ++minor) {
 		preg = snd_minors[minor];
 		if (preg && preg->dev == dev) {
+			dev_info(dev, "%s (%s): free minor (%d) for type: %d\n",
+				 __func__, preg->card_ptr->shortname, minor, preg->type);
 			snd_minors[minor] = NULL;
 			device_del(dev);
 			kfree(preg);

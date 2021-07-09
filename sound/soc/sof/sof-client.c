@@ -44,6 +44,7 @@ static void sof_client_auxdev_release(struct device *dev)
 	struct auxiliary_device *auxdev = to_auxiliary_dev(dev);
 	struct sof_client_dev *cdev = auxiliary_dev_to_sof_client_dev(auxdev);
 
+	dev_info(dev, "%s: ENTER\n", __func__);
 	kfree(cdev->auxdev.dev.platform_data);
 	kfree(cdev);
 }
@@ -193,6 +194,8 @@ void sof_client_dev_unregister(struct snd_sof_dev *sdev, const char *name, u32 i
 	 */
 	list_for_each_entry(cdev, &sdev->ipc_client_list, list) {
 		if (!strcmp(cdev->auxdev.name, name) && cdev->auxdev.id == id) {
+			dev_info(&cdev->auxdev.dev, "%s: unregistering this device\n",
+				 __func__);
 			list_del(&cdev->list);
 			auxiliary_device_delete(&cdev->auxdev);
 			auxiliary_device_uninit(&cdev->auxdev);
