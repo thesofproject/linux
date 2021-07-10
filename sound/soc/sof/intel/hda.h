@@ -697,6 +697,12 @@ static inline void hda_sdw_int_enable(struct snd_sof_dev *sdev, bool enable)
 static inline void hda_sdw_process_wakeen(struct snd_sof_dev *sdev)
 {
 }
+
+static inline bool hda_common_check_sdw_irq(struct snd_sof_dev *sdev)
+{
+	return false;
+}
+
 #endif
 
 /* common dai driver */
