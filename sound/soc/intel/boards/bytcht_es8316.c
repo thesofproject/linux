@@ -38,7 +38,6 @@ struct byt_cht_es8316_private {
 	struct snd_soc_jack jack;
 	struct gpio_desc *speaker_en_gpio;
 	bool speaker_en;
-	struct device *codec_dev;
 };
 
 enum {
@@ -462,7 +461,6 @@ static int snd_byt_cht_es8316_mc_probe(struct platform_device *pdev)
 	const struct dmi_system_id *dmi_id;
 	struct device *dev = &pdev->dev;
 	struct snd_soc_acpi_mach *mach;
-	struct fwnode_handle *fwnode;
 	const char *platform_name;
 	struct acpi_device *adev;
 	struct device *codec_dev;
@@ -545,16 +543,7 @@ static int snd_byt_cht_es8316_mc_probe(struct platform_device *pdev)
 		props[cnt++] = PROPERTY_ENTRY_BOOL("everest,jack-detect-inverted");
 
 	if (cnt) {
-		fwnode = fwnode_create_software_node(props, NULL);
-		if (IS_ERR(fwnode)) {
-			put_device(codec_dev);
-			return PTR_ERR(fwnode);
-		}
-
-		ret = device_add_software_node(codec_dev, to_software_node(fwnode));
-
-		fwnode_handle_put(fwnode);
-
+		ret = device_add_properties(codec_dev, props);
 		if (ret) {
 			put_device(codec_dev);
 			return ret;
@@ -567,7 +556,6 @@ static int snd_byt_cht_es8316_mc_probe(struct platform_device *pdev)
 				/* see comment in byt_cht_es8316_resume */
 				GPIOD_OUT_LOW | GPIOD_FLAGS_BIT_NONEXCLUSIVE);
 	put_device(codec_dev);
-	priv->codec_dev = codec_dev;
 
 	if (IS_ERR(priv->speaker_en_gpio)) {
 		ret = PTR_ERR(priv->speaker_en_gpio);
@@ -579,7 +567,7 @@ static int snd_byt_cht_es8316_mc_probe(struct platform_device *pdev)
 			dev_err(dev, "get speaker GPIO failed: %d\n", ret);
 			fallthrough;
 		case -EPROBE_DEFER:
-			goto err;
+			return ret;
 		}
 	}
 
@@ -617,15 +605,10 @@ static int snd_byt_cht_es8316_mc_probe(struct platform_device *pdev)
 	if (ret) {
 		gpiod_put(priv->speaker_en_gpio);
 		dev_err(dev, "snd_soc_register_card failed: %d\n", ret);
-		goto err;
+		return ret;
 	}
 	platform_set_drvdata(pdev, &byt_cht_es8316_card);
 	return 0;
-
-err:
-	device_remove_software_node(priv->codec_dev);
-
-	return ret;
 }
 
 static int snd_byt_cht_es8316_mc_remove(struct platform_device *pdev)
@@ -634,8 +617,6 @@ static int snd_byt_cht_es8316_mc_remove(struct platform_device *pdev)
 	struct byt_cht_es8316_private *priv = snd_soc_card_get_drvdata(card);
 
 	gpiod_put(priv->speaker_en_gpio);
-	device_remove_software_node(priv->codec_dev);
-
 	return 0;
 }
 
