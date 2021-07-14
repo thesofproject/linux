@@ -50,7 +50,6 @@ config SND_SOC_SOF_DEBUG_PROBES
 	tristate
 	select SND_SOC_SOF_CLIENT
 	select SND_SOC_COMPRESS
-	select SND_DYNAMIC_MINORS
 	help
 	  This option enables the data probing feature that can be used to
 	  gather data directly from specific points of the audio pipeline.
