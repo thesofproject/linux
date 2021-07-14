@@ -66,6 +66,7 @@ static int auxiliary_bus_probe(struct device *dev)
 	struct auxiliary_device *auxdev = to_auxiliary_dev(dev);
 	int ret;
 
+	dev_info(dev, "%s: ENTER\n", __func__);
 	ret = dev_pm_domain_attach(dev, true);
 	if (ret) {
 		dev_warn(dev, "Failed to attach to PM Domain : %d\n", ret);
@@ -84,6 +85,7 @@ static int auxiliary_bus_remove(struct device *dev)
 	struct auxiliary_driver *auxdrv = to_auxiliary_drv(dev->driver);
 	struct auxiliary_device *auxdev = to_auxiliary_dev(dev);
 
+	dev_info(dev, "%s: ENTER\n", __func__);
 	if (auxdrv->remove)
 		auxdrv->remove(auxdev);
 	dev_pm_domain_detach(dev, true);
@@ -187,6 +189,7 @@ int __auxiliary_device_add(struct auxiliary_device *auxdev, const char *modname)
 		return ret;
 	}
 
+	dev_info(dev, "%s: ENTER\n", __func__);
 	ret = device_add(dev);
 	if (ret)
 		dev_err(dev, "adding auxiliary device failed!: %d\n", ret);
@@ -242,6 +245,8 @@ int __auxiliary_driver_register(struct auxiliary_driver *auxdrv,
 	if (!auxdrv->driver.name)
 		return -ENOMEM;
 
+	pr_info("%s: ENTER for %s\n", __func__, auxdrv->driver.name);
+
 	auxdrv->driver.owner = owner;
 	auxdrv->driver.bus = &auxiliary_bus_type;
 	auxdrv->driver.mod_name = modname;
@@ -256,6 +261,7 @@ EXPORT_SYMBOL_GPL(__auxiliary_driver_register);
  */
 void auxiliary_driver_unregister(struct auxiliary_driver *auxdrv)
 {
+	pr_info("%s: ENTER for %s\n", __func__, auxdrv->driver.name);
 	driver_unregister(&auxdrv->driver);
 	kfree(auxdrv->driver.name);
 }

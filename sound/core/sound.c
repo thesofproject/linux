@@ -229,8 +229,18 @@ static int snd_find_free_minor(int type, struct snd_card *card, int dev)
 	}
 	if (snd_BUG_ON(minor < 0 || minor >= SNDRV_OS_MINORS))
 		return -EINVAL;
-	if (snd_minors[minor])
+	if (snd_minors[minor]) {
+		if (snd_minors[minor]->card_ptr)
+			dev_info(snd_minors[minor]->dev,
+				 "%s: Heh? minor %d is already taken for card %s, device_name %s\n",
+				__func__, minor,
+				snd_minors[minor]->card_ptr->shortname, dev_name(snd_minors[minor]->card_ptr->dev));
+		else
+			dev_info(snd_minors[minor]->dev,
+				 "%s: Heh? minor %d is already taken for NO card\n",
+				__func__, minor);
 		return -EBUSY;
+	}
 	return minor;
 }
 #endif
@@ -259,6 +269,12 @@ int snd_register_device(int type, struct snd_card *card, int dev,
 
 	if (snd_BUG_ON(!device))
 		return -EINVAL;
+
+	if (card)
+		pr_info("%s: ENTER for card %s, device_name %s\n", __func__,
+			card->shortname, dev_name(card->dev));
+	else
+		pr_info("%s: ENTER for NO card\n", __func__);
 
 	preg = kmalloc(sizeof *preg, GFP_KERNEL);
 	if (preg == NULL)
@@ -289,10 +305,21 @@ int snd_register_device(int type, struct snd_card *card, int dev,
 	}
 
 	snd_minors[minor] = preg;
+	if (card)
+		pr_info("%s: LEAVE for card %s, device_name %s, minor: %d\n", __func__,
+			card->shortname, dev_name(card->dev), minor);
+	else
+		pr_info("%s: LEAVE for NO card, minor: %d\n", __func__, minor);
  error:
 	mutex_unlock(&sound_mutex);
-	if (err < 0)
+	if (err < 0) {
 		kfree(preg);
+		if (card)
+			pr_info("%s: LEAVE for card %s, device_name %s, error: %d\n", __func__,
+				card->shortname, dev_name(card->dev), err);
+		else
+			pr_info("%s: LEAVE for NO card, error: %d\n", __func__, err);
+	}
 	return err;
 }
 EXPORT_SYMBOL(snd_register_device);

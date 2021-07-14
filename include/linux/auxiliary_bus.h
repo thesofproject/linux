@@ -44,11 +44,13 @@ int __auxiliary_device_add(struct auxiliary_device *auxdev, const char *modname)
 
 static inline void auxiliary_device_uninit(struct auxiliary_device *auxdev)
 {
+	dev_info(&auxdev->dev, "%s: ENTER\n", __func__);
 	put_device(&auxdev->dev);
 }
 
 static inline void auxiliary_device_delete(struct auxiliary_device *auxdev)
 {
+	dev_info(&auxdev->dev, "%s: ENTER\n", __func__);
 	device_del(&auxdev->dev);
 }
 
