@@ -60,6 +60,22 @@ properties:
       used by DSP (see bindings/reserved-memory/reserved-memory.txt)
     maxItems: 1
 
+  firmware-name:
+    $ref: /schemas/types.yaml#/definitions/string
+    description:
+      If present, name of the file withing the firmware search path containing
+      the DSP firmware loaded by SOF at DSP boot time.
+
+  tplg-name:
+    $ref: /schemas/types.yaml#/definitions/string
+    description:
+      Should contain the audio topology file name loaded by SOF driver.
+
+  machine-drv-name:
+    $ref: /schemas/types.yaml#/definitions/string
+    description:
+      Contains the ASoC machine driver name used by SOF to handle DSP audio scenario.
+
 required:
   - compatible
   - reg
@@ -69,6 +85,8 @@ required:
   - mboxes
   - mbox-names
   - memory-region
+  - tplg-name
+  - machine-drv-name
 
 additionalProperties: false
 
@@ -90,4 +108,6 @@ examples:
         mbox-names = "txdb0", "txdb1", "rxdb0", "rxdb1";
         mboxes = <&lsio_mu13 2 0>, <&lsio_mu13 2 1>, <&lsio_mu13 3 0>, <&lsio_mu13 3 1>;
         memory-region = <&dsp_reserved>;
+        tplg-name = "sof-imx8-wm8960.tplg";
+        machine-drv-name = "asoc-simple-card";
     };
