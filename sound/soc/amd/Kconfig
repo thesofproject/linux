@@ -61,3 +61,9 @@ config SND_SOC_AMD_ACP5x
 
 	 By enabling this flag build will trigger for ACP PCI driver,
 	 ACP DMA driver, CPU DAI driver.
+
+config SND_AMD_ACP_CONFIG
+	tristate "AMD ACP configuration selection"
+	help
+	 This option adds an auto detection to determine which ACP
+	 driver modules to use
