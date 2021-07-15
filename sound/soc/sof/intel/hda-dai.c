@@ -471,8 +471,9 @@ static int ssp_dai_setup_or_free(struct snd_pcm_substream *substream, struct snd
 	return hda_ctrl_dai_widget_free(w);
 }
 
-static int ssp_dai_prepare(struct snd_pcm_substream *substream,
-			   struct snd_soc_dai *dai)
+static int ssp_dai_hw_params(struct snd_pcm_substream *substream,
+			     struct snd_pcm_hw_params *params,
+			     struct snd_soc_dai *dai)
 {
 	return ssp_dai_setup_or_free(substream, dai, true);
 }
@@ -484,7 +485,7 @@ static int ssp_dai_hw_free(struct snd_pcm_substream *substream,
 }
 
 static const struct snd_soc_dai_ops ssp_dai_ops = {
-	.prepare = ssp_dai_prepare,
+	.hw_params = ssp_dai_hw_params,
 	.hw_free = ssp_dai_hw_free,
 };
 
