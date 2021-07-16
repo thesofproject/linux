@@ -923,6 +923,8 @@ struct snd_sof_ipc *snd_sof_ipc_init(struct snd_sof_dev *sdev)
 	if (!msg->msg_data)
 		return NULL;
 
+	msg->msg_data_size = SOF_IPC_MSG_MAX_SIZE;
+
 	msg->reply_data = devm_kzalloc(sdev->dev, SOF_IPC_MSG_MAX_SIZE,
 				       GFP_KERNEL);
 	if (!msg->reply_data)
