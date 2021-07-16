@@ -74,7 +74,8 @@ static int trace_filter_parse_entry(struct sof_client_dev *cdev, const char *lin
 	if (!ret && read == len)
 		return len;
 
-	ret = sscanf(line, " %d %x %d %d %n", &log_level, &uuid_id, &pipe_id, &comp_id, &read);
+	ret = sscanf(line, " %d %x %d %d %n",
+		     &log_level, &uuid_id, &pipe_id, &comp_id, &read);
 	if (ret != TRACE_FILTER_ELEMENTS_PER_ENTRY || read != len) {
 		dev_err(priv->dev, "invalid trace filter entry '%s'\n", line);
 		return -EINVAL;
@@ -135,12 +136,12 @@ static int trace_filter_parse(struct sof_client_dev *cdev, char *string,
 	if (!*out)
 		return -ENOMEM;
 
-	/* split input string by ';', and parse each entry separately in trace_filter_parse_entry */
+	/* split input string by ';', and parse each entry separately */
 	while ((entry = strsep(&string, entry_delimiter))) {
 		entry_len = trace_filter_parse_entry(cdev, entry, *out, capacity, &cnt);
 		if (entry_len < 0) {
-			dev_err(priv->dev, "%s failed for '%s', %d\n", __func__, entry,
-				entry_len);
+			dev_err(priv->dev, "%s failed for '%s', %d\n", __func__,
+				entry, entry_len);
 			return -EINVAL;
 		}
 	}
@@ -178,7 +179,8 @@ static int sof_ipc_trace_update_filter(struct sof_client_dev *cdev, int num_elem
 	return ret ? ret : reply.error;
 }
 
-static ssize_t sof_dfsentry_trace_filter_write(struct file *file, const char __user *from,
+static ssize_t sof_dfsentry_trace_filter_write(struct file *file,
+					       const char __user *from,
 					       size_t count, loff_t *ppos)
 {
 	struct sof_client_dev *cdev = file->private_data;
@@ -194,8 +196,8 @@ static ssize_t sof_dfsentry_trace_filter_write(struct file *file, const char __u
 	}
 
 	if (count > TRACE_FILTER_MAX_CONFIG_STRING_LENGTH) {
-		dev_err(priv->dev, "%s too long input, %zu > %d\n", __func__, count,
-			TRACE_FILTER_MAX_CONFIG_STRING_LENGTH);
+		dev_err(priv->dev, "%s too long input, %zu > %d\n", __func__,
+			count, TRACE_FILTER_MAX_CONFIG_STRING_LENGTH);
 		return -EINVAL;
 	}
 
@@ -236,8 +238,8 @@ static const struct file_operations sof_dtrace_filter_fops = {
 	.owner = THIS_MODULE,
 };
 
-static size_t sof_trace_avail(struct sof_client_dev *cdev,
-			      loff_t pos, size_t buffer_size)
+static size_t sof_trace_avail(struct sof_client_dev *cdev, loff_t pos,
+			      size_t buffer_size)
 {
 	struct sof_dtrace_priv *priv = cdev->data;
 	loff_t host_offset = READ_ONCE(priv->host_offset);
@@ -257,8 +259,8 @@ static size_t sof_trace_avail(struct sof_client_dev *cdev,
 	return 0;
 }
 
-static size_t sof_wait_trace_avail(struct sof_client_dev *cdev,
-				   loff_t pos, size_t buffer_size)
+static size_t sof_wait_trace_avail(struct sof_client_dev *cdev, loff_t pos,
+				   size_t buffer_size)
 {
 	size_t ret = sof_trace_avail(cdev, pos, buffer_size);
 	struct sof_dtrace_priv *priv = cdev->data;
