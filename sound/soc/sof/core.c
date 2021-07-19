@@ -216,25 +216,8 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 		goto fw_run_err;
 	}
 
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_DMA_TRACE)
-	/* trace support via SOF client */
-	sdev->dtrace_is_supported = false;
-#else
-	if (sof_core_debug & SOF_DBG_ENABLE_TRACE) {
-		sdev->dtrace_is_supported = true;
-
-		/* init DMA trace */
-		ret = snd_sof_init_trace(sdev);
-		if (ret < 0) {
-			/* non fatal */
-			dev_warn(sdev->dev,
-				 "warning: failed to initialize trace %d\n",
-				 ret);
-		}
-	} else {
-		dev_dbg(sdev->dev, "SOF firmware trace disabled\n");
-	}
-#endif
+	if (sof_core_debug & SOF_DBG_ENABLE_TRACE)
+		dev_dbg(sdev->dev, "SOF_DBG_ENABLE_TRACE is no longer used\n");
 
 	/* hereafter all FW boot flows are for PM reasons */
 	sdev->first_boot = false;
@@ -246,14 +229,14 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	if (ret < 0) {
 		dev_err(sdev->dev,
 			"error: failed to register DSP DAI driver %d\n", ret);
-		goto fw_trace_err;
+		goto fw_run_err;
 	}
 
 	ret = snd_sof_machine_register(sdev, plat_data);
 	if (ret < 0) {
 		dev_err(sdev->dev,
 			"error: failed to register machine driver %d\n", ret);
-		goto fw_trace_err;
+		goto fw_run_err;
 	}
 
 	ret = sof_register_clients(sdev);
@@ -279,8 +262,6 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 
 sof_machine_err:
 	snd_sof_machine_unregister(sdev, plat_data);
-fw_trace_err:
-	snd_sof_free_trace(sdev);
 fw_run_err:
 	snd_sof_fw_unload(sdev);
 fw_load_err:
@@ -413,7 +394,6 @@ int snd_sof_device_remove(struct device *dev)
 
 		snd_sof_ipc_free(sdev);
 		snd_sof_free_debug(sdev);
-		snd_sof_free_trace(sdev);
 	}
 
 	/*

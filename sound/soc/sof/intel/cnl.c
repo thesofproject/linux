@@ -319,11 +319,6 @@ const struct snd_sof_dsp_ops sof_cnl_ops = {
 	/* firmware run */
 	.run = hda_dsp_cl_boot_firmware,
 
-	/* trace callback */
-	.trace_init = hda_dsp_trace_init,
-	.trace_release = hda_dsp_trace_release,
-	.trace_trigger = hda_dsp_trace_trigger,
-
 	/* client ops */
 	.register_ipc_clients = cnl_register_clients,
 	.unregister_ipc_clients = cnl_unregister_clients,

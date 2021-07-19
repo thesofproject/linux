@@ -639,13 +639,6 @@ static inline int hda_codec_i915_exit(struct snd_sof_dev *sdev) { return 0; }
 #endif
 
 /*
- * Trace Control.
- */
-int hda_dsp_trace_init(struct snd_sof_dev *sdev, u32 *stream_tag);
-int hda_dsp_trace_release(struct snd_sof_dev *sdev);
-int hda_dsp_trace_trigger(struct snd_sof_dev *sdev, int cmd);
-
-/*
  * SoundWire support
  */
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_SOUNDWIRE)

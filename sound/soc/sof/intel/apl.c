@@ -114,11 +114,6 @@ const struct snd_sof_dsp_ops sof_apl_ops = {
 	.core_get = hda_dsp_core_get,
 	.core_put = hda_dsp_core_put,
 
-	/* trace callback */
-	.trace_init = hda_dsp_trace_init,
-	.trace_release = hda_dsp_trace_release,
-	.trace_trigger = hda_dsp_trace_trigger,
-
 	/* client ops */
 	.register_ipc_clients = apl_register_clients,
 	.unregister_ipc_clients = apl_unregister_clients,
