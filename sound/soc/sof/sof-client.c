@@ -231,6 +231,26 @@ const struct sof_ipc_fw_version *sof_client_get_fw_version(struct sof_client_dev
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_get_fw_version, SND_SOC_SOF_CLIENT);
 
+/* module refcount management of SOF core */
+int sof_client_core_module_get(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	if (!try_module_get(sdev->dev->driver->owner))
+		return -ENODEV;
+
+	return 0;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_core_module_get, SND_SOC_SOF_CLIENT);
+
+void sof_client_core_module_put(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	module_put(sdev->dev->driver->owner);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_core_module_put, SND_SOC_SOF_CLIENT);
+
 /* IPC event handling */
 void sof_client_ipc_rx_dispatcher(struct snd_sof_dev *sdev, void *full_msg)
 {

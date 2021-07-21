@@ -42,6 +42,10 @@ struct dentry *sof_client_get_debugfs_root(struct sof_client_dev *cdev);
 struct device *sof_client_get_dma_dev(struct sof_client_dev *cdev);
 const struct sof_ipc_fw_version *sof_client_get_fw_version(struct sof_client_dev *cdev);
 
+/* module refcount management of SOF core */
+int sof_client_core_module_get(struct sof_client_dev *cdev);
+void sof_client_core_module_put(struct sof_client_dev *cdev);
+
 /* IPC notification */
 typedef void (*sof_client_event_callback)(struct sof_client_dev *cdev,
 					  void *full_msg);
