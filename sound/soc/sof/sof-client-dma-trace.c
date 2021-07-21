@@ -291,6 +291,21 @@ static size_t sof_wait_trace_avail(struct sof_client_dev *cdev,
 	return sof_trace_avail(cdev, pos, buffer_size);
 }
 
+static int sof_dfsentry_trace_open(struct inode *inode, struct file *file)
+{
+	int ret;
+
+	ret = debugfs_file_get(file->f_path.dentry);
+	if (unlikely(ret))
+		return ret;
+
+	ret = simple_open(inode, file);
+	if (ret)
+		debugfs_file_put(file->f_path.dentry);
+
+	return ret;
+}
+
 static ssize_t sof_dfsentry_trace_read(struct file *file, char __user *buffer,
 				       size_t count, loff_t *ppos)
 {
@@ -348,11 +363,12 @@ static int sof_dfsentry_trace_release(struct inode *inode, struct file *file)
 	if (!priv->dtrace_is_enabled)
 		priv->host_offset = 0;
 
+	debugfs_file_put(file->f_path.dentry);
 	return 0;
 }
 
 static const struct file_operations sof_dtrace_trace_fops = {
-	.open = simple_open,
+	.open = sof_dfsentry_trace_open,
 	.read = sof_dfsentry_trace_read,
 	.llseek = default_llseek,
 	.release = sof_dfsentry_trace_release,
