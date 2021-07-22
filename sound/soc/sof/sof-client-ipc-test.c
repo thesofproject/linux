@@ -31,6 +31,21 @@ struct sof_ipc_client_data {
 	char *buf;
 };
 
+static int sof_ipc_dfsentry_open(struct inode *inode, struct file *file)
+{
+	int ret;
+
+	ret = debugfs_file_get(file->f_path.dentry);
+	if (unlikely(ret))
+		return ret;
+
+	ret = simple_open(inode, file);
+	if (ret)
+		debugfs_file_put(file->f_path.dentry);
+
+	return ret;
+}
+
 /*
  * helper function to perform the flood test. Only one of the two params, ipc_duration_ms
  * or ipc_count, will be non-zero and will determine the type of test
@@ -250,11 +265,19 @@ static ssize_t sof_ipc_dfsentry_read(struct file *file, char __user *buffer,
 	return count;
 }
 
+static int sof_ipc_dfsentry_release(struct inode *inode, struct file *file)
+{
+	debugfs_file_put(file->f_path.dentry);
+
+	return 0;
+}
+
 static const struct file_operations sof_ipc_dfs_fops = {
-	.open = simple_open,
+	.open = sof_ipc_dfsentry_open,
 	.read = sof_ipc_dfsentry_read,
 	.llseek = default_llseek,
 	.write = sof_ipc_dfsentry_write,
+	.release = sof_ipc_dfsentry_release,
 
 	.owner = THIS_MODULE,
 };
