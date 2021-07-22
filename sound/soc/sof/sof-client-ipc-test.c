@@ -25,13 +25,13 @@
 #define DEBUGFS_IPC_FLOOD_COUNT		"ipc_flood_count"
 #define DEBUGFS_IPC_FLOOD_DURATION	"ipc_flood_duration_ms"
 
-struct sof_ipc_client_data {
+struct sof_ipc_test_priv {
 	struct dentry *dfs_root;
 	struct dentry *dfs_link[2];
 	char *buf;
 };
 
-static int sof_ipc_dfsentry_open(struct inode *inode, struct file *file)
+static int sof_ipc_test_dfs_open(struct inode *inode, struct file *file)
 {
 	struct sof_client_dev *cdev = inode->i_private;
 	int ret;
@@ -59,7 +59,7 @@ static int sof_debug_ipc_flood_test(struct sof_client_dev *cdev,
 				    unsigned long ipc_duration_ms,
 				    unsigned long ipc_count)
 {
-	struct sof_ipc_client_data *ipc_client_data = cdev->data;
+	struct sof_ipc_test_priv *priv = cdev->data;
 	struct device *dev = &cdev->auxdev.dev;
 	struct sof_ipc_cmd_hdr hdr;
 	struct sof_ipc_reply reply;
@@ -108,7 +108,7 @@ static int sof_debug_ipc_flood_test(struct sof_client_dev *cdev,
 	}
 
 	if (ret < 0)
-		dev_err(dev, "error: ipc flood test failed at %d iterations\n", i);
+		dev_err(dev, "ipc flood test failed at %d iterations\n", i);
 
 	/* return if the first IPC fails */
 	if (!i)
@@ -118,26 +118,27 @@ static int sof_debug_ipc_flood_test(struct sof_client_dev *cdev,
 	do_div(avg_response_time, i);
 
 	/* clear previous test output */
-	memset(ipc_client_data->buf, 0, IPC_FLOOD_TEST_RESULT_LEN);
+	memset(priv->buf, 0, IPC_FLOOD_TEST_RESULT_LEN);
 
 	if (!ipc_count) {
 		dev_dbg(dev, "IPC Flood test duration: %lums\n", ipc_duration_ms);
-		snprintf(ipc_client_data->buf, IPC_FLOOD_TEST_RESULT_LEN,
+		snprintf(priv->buf, IPC_FLOOD_TEST_RESULT_LEN,
 			 "IPC Flood test duration: %lums\n", ipc_duration_ms);
 	}
 
-	dev_dbg(dev,
-		"IPC Flood count: %d, Avg response time: %lluns\n", i, avg_response_time);
+	dev_dbg(dev, "IPC Flood count: %d, Avg response time: %lluns\n",
+		i, avg_response_time);
 	dev_dbg(dev, "Max response time: %lluns\n", max_response_time);
 	dev_dbg(dev, "Min response time: %lluns\n", min_response_time);
 
 	/* format output string and save test results */
-	snprintf(ipc_client_data->buf + strlen(ipc_client_data->buf),
-		 IPC_FLOOD_TEST_RESULT_LEN - strlen(ipc_client_data->buf),
-		 "IPC Flood count: %d\nAvg response time: %lluns\n", i, avg_response_time);
+	snprintf(priv->buf + strlen(priv->buf),
+		 IPC_FLOOD_TEST_RESULT_LEN - strlen(priv->buf),
+		 "IPC Flood count: %d\nAvg response time: %lluns\n",
+		 i, avg_response_time);
 
-	snprintf(ipc_client_data->buf + strlen(ipc_client_data->buf),
-		 IPC_FLOOD_TEST_RESULT_LEN - strlen(ipc_client_data->buf),
+	snprintf(priv->buf + strlen(priv->buf),
+		 IPC_FLOOD_TEST_RESULT_LEN - strlen(priv->buf),
 		 "Max response time: %lluns\nMin response time: %lluns\n",
 		 max_response_time, min_response_time);
 
@@ -148,7 +149,7 @@ static int sof_debug_ipc_flood_test(struct sof_client_dev *cdev,
  * Writing to the debugfs entry initiates the IPC flood test based on
  * the IPC count or the duration specified by the user.
  */
-static ssize_t sof_ipc_dfsentry_write(struct file *file, const char __user *buffer,
+static ssize_t sof_ipc_test_dfs_write(struct file *file, const char __user *buffer,
 				      size_t count, loff_t *ppos)
 {
 	struct sof_client_dev *cdev = file->private_data;
@@ -216,9 +217,7 @@ static ssize_t sof_ipc_dfsentry_write(struct file *file, const char __user *buff
 
 	ret = pm_runtime_get_sync(dev);
 	if (ret < 0 && ret != -EACCES) {
-		dev_err_ratelimited(dev,
-				    "error: debugfs write failed to resume %d\n",
-				    ret);
+		dev_err_ratelimited(dev, "debugfs write failed to resume %d\n", ret);
 		pm_runtime_put_noidle(dev);
 		goto out;
 	}
@@ -230,9 +229,7 @@ static ssize_t sof_ipc_dfsentry_write(struct file *file, const char __user *buff
 	pm_runtime_mark_last_busy(dev);
 	err = pm_runtime_put_autosuspend(dev);
 	if (err < 0)
-		dev_err_ratelimited(dev,
-				    "error: debugfs write failed to idle %d\n",
-				    err);
+		dev_err_ratelimited(dev, "debugfs write failed to idle %d\n", err);
 
 	/* return size if test is successful */
 	if (ret >= 0)
@@ -243,11 +240,11 @@ out:
 }
 
 /* return the result of the last IPC flood test */
-static ssize_t sof_ipc_dfsentry_read(struct file *file, char __user *buffer,
+static ssize_t sof_ipc_test_dfs_read(struct file *file, char __user *buffer,
 				     size_t count, loff_t *ppos)
 {
 	struct sof_client_dev *cdev = file->private_data;
-	struct sof_ipc_client_data *ipc_client_data = cdev->data;
+	struct sof_ipc_test_priv *priv = cdev->data;
 	size_t size_ret;
 
 	struct dentry *dentry;
@@ -258,8 +255,8 @@ static ssize_t sof_ipc_dfsentry_read(struct file *file, char __user *buffer,
 		if (*ppos)
 			return 0;
 
-		count = min_t(size_t, count, strlen(ipc_client_data->buf));
-		size_ret = copy_to_user(buffer, ipc_client_data->buf, count);
+		count = min_t(size_t, count, strlen(priv->buf));
+		size_ret = copy_to_user(buffer, priv->buf, count);
 		if (size_ret)
 			return -EFAULT;
 
@@ -269,19 +266,19 @@ static ssize_t sof_ipc_dfsentry_read(struct file *file, char __user *buffer,
 	return count;
 }
 
-static int sof_ipc_dfsentry_release(struct inode *inode, struct file *file)
+static int sof_ipc_test_dfs_release(struct inode *inode, struct file *file)
 {
 	debugfs_file_put(file->f_path.dentry);
 
 	return 0;
 }
 
-static const struct file_operations sof_ipc_dfs_fops = {
-	.open = sof_ipc_dfsentry_open,
-	.read = sof_ipc_dfsentry_read,
+static const struct file_operations sof_ipc_test_fops = {
+	.open = sof_ipc_test_dfs_open,
+	.read = sof_ipc_test_dfs_read,
 	.llseek = default_llseek,
-	.write = sof_ipc_dfsentry_write,
-	.release = sof_ipc_dfsentry_release,
+	.write = sof_ipc_test_dfs_write,
+	.release = sof_ipc_test_dfs_release,
 
 	.owner = THIS_MODULE,
 };
@@ -299,30 +296,31 @@ static int sof_ipc_test_probe(struct auxiliary_device *auxdev,
 			      const struct auxiliary_device_id *id)
 {
 	struct sof_client_dev *cdev = auxiliary_dev_to_sof_client_dev(auxdev);
-	struct sof_ipc_client_data *ipc_client_data;
 	struct dentry *debugfs_root = sof_client_get_debugfs_root(cdev);
+	struct sof_ipc_test_priv *priv;
 
 	/* allocate memory for client data */
-	ipc_client_data = devm_kzalloc(&auxdev->dev, sizeof(*ipc_client_data), GFP_KERNEL);
-	if (!ipc_client_data)
+	priv = devm_kzalloc(&auxdev->dev, sizeof(*priv), GFP_KERNEL);
+	if (!priv)
 		return -ENOMEM;
 
-	ipc_client_data->buf = devm_kzalloc(&auxdev->dev, IPC_FLOOD_TEST_RESULT_LEN, GFP_KERNEL);
-	if (!ipc_client_data->buf)
+	priv->buf = devm_kzalloc(&auxdev->dev, IPC_FLOOD_TEST_RESULT_LEN,
+				 GFP_KERNEL);
+	if (!priv->buf)
 		return -ENOMEM;
 
-	cdev->data = ipc_client_data;
+	cdev->data = priv;
 
 	/* create debugfs root folder with device name under parent SOF dir */
-	ipc_client_data->dfs_root = debugfs_create_dir(dev_name(&auxdev->dev), debugfs_root);
-	if (!IS_ERR_OR_NULL(ipc_client_data->dfs_root)) {
+	priv->dfs_root = debugfs_create_dir(dev_name(&auxdev->dev), debugfs_root);
+	if (!IS_ERR_OR_NULL(priv->dfs_root)) {
 		/* create read-write ipc_flood_count debugfs entry */
-		debugfs_create_file(DEBUGFS_IPC_FLOOD_COUNT, 0644,
-				    ipc_client_data->dfs_root, cdev, &sof_ipc_dfs_fops);
+		debugfs_create_file(DEBUGFS_IPC_FLOOD_COUNT, 0644, priv->dfs_root,
+				    cdev, &sof_ipc_test_fops);
 
 		/* create read-write ipc_flood_duration_ms debugfs entry */
 		debugfs_create_file(DEBUGFS_IPC_FLOOD_DURATION, 0644,
-				    ipc_client_data->dfs_root, cdev, &sof_ipc_dfs_fops);
+				    priv->dfs_root, cdev, &sof_ipc_test_fops);
 
 		if (auxdev->id == 0) {
 			/*
@@ -333,13 +331,13 @@ static int sof_ipc_test_probe(struct auxiliary_device *auxdev,
 
 			snprintf(target, 100, "%s/" DEBUGFS_IPC_FLOOD_COUNT,
 				 dev_name(&auxdev->dev));
-			ipc_client_data->dfs_link[0] =
+			priv->dfs_link[0] =
 				debugfs_create_symlink(DEBUGFS_IPC_FLOOD_COUNT,
 						       debugfs_root, target);
 
 			snprintf(target, 100, "%s/" DEBUGFS_IPC_FLOOD_DURATION,
 				 dev_name(&auxdev->dev));
-			ipc_client_data->dfs_link[1] =
+			priv->dfs_link[1] =
 				debugfs_create_symlink(DEBUGFS_IPC_FLOOD_DURATION,
 						       debugfs_root, target);
 		}
@@ -358,16 +356,16 @@ static int sof_ipc_test_probe(struct auxiliary_device *auxdev,
 static void sof_ipc_test_remove(struct auxiliary_device *auxdev)
 {
 	struct sof_client_dev *cdev = auxiliary_dev_to_sof_client_dev(auxdev);
-	struct sof_ipc_client_data *ipc_client_data = cdev->data;
+	struct sof_ipc_test_priv *priv = cdev->data;
 
 	pm_runtime_disable(&auxdev->dev);
 
 	if (auxdev->id == 0) {
-		debugfs_remove(ipc_client_data->dfs_link[0]);
-		debugfs_remove(ipc_client_data->dfs_link[1]);
+		debugfs_remove(priv->dfs_link[0]);
+		debugfs_remove(priv->dfs_link[1]);
 	}
 
-	debugfs_remove_recursive(ipc_client_data->dfs_root);
+	debugfs_remove_recursive(priv->dfs_root);
 }
 
 static const struct auxiliary_device_id sof_ipc_test_client_id_table[] = {
