@@ -482,8 +482,8 @@ exit:
 	return ret;
 }
 
-static ssize_t probe_points_read(struct file *file, char __user *to,
-				 size_t count, loff_t *ppos)
+static ssize_t sof_probes_dfs_points_read(struct file *file, char __user *to,
+					  size_t count, loff_t *ppos)
 {
 	struct sof_client_dev *cdev = file->private_data;
 	struct sof_probes_priv *priv = cdev->data;
@@ -505,7 +505,7 @@ static ssize_t probe_points_read(struct file *file, char __user *to,
 
 	ret = pm_runtime_get_sync(dev);
 	if (ret < 0 && ret != -EACCES) {
-		dev_err_ratelimited(dev, "error: debugfs read failed to resume %d\n", ret);
+		dev_err_ratelimited(dev, "debugfs read failed to resume %d\n", ret);
 		pm_runtime_put_noidle(dev);
 		goto exit;
 	}
@@ -517,7 +517,7 @@ static ssize_t probe_points_read(struct file *file, char __user *to,
 	pm_runtime_mark_last_busy(dev);
 	err = pm_runtime_put_autosuspend(dev);
 	if (err < 0)
-		dev_err_ratelimited(dev, "error: debugfs read failed to idle %d\n", err);
+		dev_err_ratelimited(dev, "debugfs read failed to idle %d\n", err);
 
 	for (i = 0; i < num_desc; i++) {
 		remaining = PAGE_SIZE - strlen(buf);
@@ -540,8 +540,9 @@ exit:
 	return ret;
 }
 
-static ssize_t probe_points_write(struct file *file, const char __user *from,
-				  size_t count, loff_t *ppos)
+static ssize_t
+sof_probes_dfs_points_write(struct file *file, const char __user *from,
+			    size_t count, loff_t *ppos)
 {
 	struct sof_client_dev *cdev = file->private_data;
 	struct sof_probes_priv *priv = cdev->data;
@@ -569,7 +570,7 @@ static ssize_t probe_points_write(struct file *file, const char __user *from,
 
 	ret = pm_runtime_get_sync(dev);
 	if (ret < 0 && ret != -EACCES) {
-		dev_err_ratelimited(dev, "error: debugfs write failed to resume %d\n", ret);
+		dev_err_ratelimited(dev, "debugfs write failed to resume %d\n", ret);
 		pm_runtime_put_noidle(dev);
 		goto exit;
 	}
@@ -581,24 +582,24 @@ static ssize_t probe_points_write(struct file *file, const char __user *from,
 	pm_runtime_mark_last_busy(dev);
 	err = pm_runtime_put_autosuspend(dev);
 	if (err < 0)
-		dev_err_ratelimited(dev, "error: debugfs write failed to idle %d\n", err);
+		dev_err_ratelimited(dev, "debugfs write failed to idle %d\n", err);
 exit:
 	kfree(tkns);
 	return ret;
 }
 
-static const struct file_operations probe_points_fops = {
+static const struct file_operations sof_probes_points_fops = {
 	.open = simple_open,
-	.read = probe_points_read,
-	.write = probe_points_write,
+	.read = sof_probes_dfs_points_read,
+	.write = sof_probes_dfs_points_write,
 	.llseek = default_llseek,
 
 	.owner = THIS_MODULE,
 };
 
 static ssize_t
-probe_points_remove_write(struct file *file, const char __user *from,
-			  size_t count, loff_t *ppos)
+sof_probes_dfs_points_remove_write(struct file *file, const char __user *from,
+				   size_t count, loff_t *ppos)
 {
 	struct sof_client_dev *cdev = file->private_data;
 	struct sof_probes_priv *priv = cdev->data;
@@ -622,7 +623,7 @@ probe_points_remove_write(struct file *file, const char __user *from,
 
 	ret = pm_runtime_get_sync(dev);
 	if (ret < 0) {
-		dev_err_ratelimited(dev, "error: debugfs write failed to resume %d\n", ret);
+		dev_err_ratelimited(dev, "debugfs write failed to resume %d\n", ret);
 		pm_runtime_put_noidle(dev);
 		goto exit;
 	}
@@ -634,15 +635,15 @@ probe_points_remove_write(struct file *file, const char __user *from,
 	pm_runtime_mark_last_busy(dev);
 	err = pm_runtime_put_autosuspend(dev);
 	if (err < 0)
-		dev_err_ratelimited(dev, "error: debugfs write failed to idle %d\n", err);
+		dev_err_ratelimited(dev, "debugfs write failed to idle %d\n", err);
 exit:
 	kfree(tkns);
 	return ret;
 }
 
-static const struct file_operations probe_points_remove_fops = {
+static const struct file_operations sof_probes_points_remove_fops = {
 	.open = simple_open,
-	.write = probe_points_remove_write,
+	.write = sof_probes_dfs_points_remove_write,
 	.llseek = default_llseek,
 
 	.owner = THIS_MODULE,
@@ -695,7 +696,7 @@ static int sof_probes_client_probe(struct auxiliary_device *auxdev,
 		return -ENXIO;
 
 	if (!dev->platform_data) {
-		dev_err(dev, "error: missing platform data\n");
+		dev_err(dev, "missing platform data\n");
 		return -ENODEV;
 	}
 
@@ -707,7 +708,7 @@ static int sof_probes_client_probe(struct auxiliary_device *auxdev,
 
 	if (!ops->assign || !ops->free || !ops->set_params || !ops->trigger ||
 	    !ops->pointer) {
-		dev_err(dev, "error: missing platform callback(s)\n");
+		dev_err(dev, "missing platform callback(s)\n");
 		return -ENODEV;
 	}
 
@@ -719,7 +720,7 @@ static int sof_probes_client_probe(struct auxiliary_device *auxdev,
 					      sof_probes_dai_drv,
 					      ARRAY_SIZE(sof_probes_dai_drv));
 	if (ret < 0) {
-		dev_err(dev, "error: failed to register SOF probes DAI driver %d\n", ret);
+		dev_err(dev, "failed to register SOF probes DAI driver %d\n", ret);
 		return ret;
 	}
 
@@ -728,12 +729,12 @@ static int sof_probes_client_probe(struct auxiliary_device *auxdev,
 
 	/* create read-write probes_points debugfs entry */
 	priv->dfs_points = debugfs_create_file("probe_points", 0644, dfsroot,
-					       cdev, &probe_points_fops);
+					       cdev, &sof_probes_points_fops);
 
 	/* create read-write probe_points_remove debugfs entry */
 	priv->dfs_points_remove = debugfs_create_file("probe_points_remove", 0644,
 						      dfsroot, cdev,
-						      &probe_points_remove_fops);
+						      &sof_probes_points_remove_fops);
 
 	links = devm_kcalloc(dev, SOF_PROBES_NUM_DAI_LINKS, sizeof(*links), GFP_KERNEL);
 	cpus = devm_kcalloc(dev, SOF_PROBES_NUM_DAI_LINKS, sizeof(*cpus), GFP_KERNEL);
@@ -772,7 +773,7 @@ static int sof_probes_client_probe(struct auxiliary_device *auxdev,
 	if (ret < 0) {
 		debugfs_remove(priv->dfs_points);
 		debugfs_remove(priv->dfs_points_remove);
-		dev_err(dev, "error: Probes card register failed %d\n", ret);
+		dev_err(dev, "Probes card register failed %d\n", ret);
 		return ret;
 	}
 
