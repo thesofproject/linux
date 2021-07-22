@@ -262,10 +262,15 @@ static int sof_probes_compr_startup(struct snd_compr_stream *cstream,
 	const struct sof_probes_host_ops *ops = priv->host_ops;
 	int ret;
 
+	ret = sof_client_core_module_get(cdev);
+	if (ret)
+		return ret;
+
 	ret = ops->assign(cdev, cstream, dai, &priv->extractor_stream_tag);
 	if (ret) {
 		dev_err(dai->dev, "Failed to assign probe stream: %d\n", ret);
 		priv->extractor_stream_tag = SOF_PROBES_INVALID_NODE_ID;
+		sof_client_core_module_put(cdev);
 	}
 
 	return ret;
@@ -301,7 +306,11 @@ exit:
 	priv->extractor_stream_tag = SOF_PROBES_INVALID_NODE_ID;
 	snd_compr_free_pages(cstream);
 
-	return ops->free(cdev, cstream, dai);
+	ret = ops->free(cdev, cstream, dai);
+
+	sof_client_core_module_put(cdev);
+
+	return ret;
 }
 
 static int sof_probes_compr_set_params(struct snd_compr_stream *cstream,
