@@ -179,9 +179,8 @@ static int sof_ipc_trace_update_filter(struct sof_client_dev *cdev, int num_elem
 	return ret ? ret : reply.error;
 }
 
-static ssize_t sof_dfsentry_trace_filter_write(struct file *file,
-					       const char __user *from,
-					       size_t count, loff_t *ppos)
+static ssize_t sof_dtrace_dfs_filter_write(struct file *file, const char __user *from,
+					   size_t count, loff_t *ppos)
 {
 	struct sof_client_dev *cdev = file->private_data;
 	struct sof_ipc_trace_filter_elem *elems = NULL;
@@ -232,7 +231,7 @@ error:
 
 static const struct file_operations sof_dtrace_filter_fops = {
 	.open = simple_open,
-	.write = sof_dfsentry_trace_filter_write,
+	.write = sof_dtrace_dfs_filter_write,
 	.llseek = default_llseek,
 
 	.owner = THIS_MODULE,
@@ -293,7 +292,7 @@ static size_t sof_wait_trace_avail(struct sof_client_dev *cdev, loff_t pos,
 	return sof_trace_avail(cdev, pos, buffer_size);
 }
 
-static int sof_dfsentry_trace_open(struct inode *inode, struct file *file)
+static int sof_dtrace_dfs_trace_open(struct inode *inode, struct file *file)
 {
 	struct sof_client_dev *cdev = inode->i_private;
 	int ret;
@@ -312,8 +311,8 @@ static int sof_dfsentry_trace_open(struct inode *inode, struct file *file)
 	return ret;
 }
 
-static ssize_t sof_dfsentry_trace_read(struct file *file, char __user *buffer,
-				       size_t count, loff_t *ppos)
+static ssize_t sof_dtrace_dfs_trace_read(struct file *file, char __user *buffer,
+					 size_t count, loff_t *ppos)
 {
 	struct sof_client_dev *cdev = file->private_data;
 	struct sof_dtrace_priv *priv = cdev->data;
@@ -358,7 +357,7 @@ static ssize_t sof_dfsentry_trace_read(struct file *file, char __user *buffer,
 	return count;
 }
 
-static int sof_dfsentry_trace_release(struct inode *inode, struct file *file)
+static int sof_dtrace_dfs_trace_release(struct inode *inode, struct file *file)
 {
 	struct sof_client_dev *cdev = inode->i_private;
 	struct sof_dtrace_priv *priv = cdev->data;
@@ -372,10 +371,10 @@ static int sof_dfsentry_trace_release(struct inode *inode, struct file *file)
 }
 
 static const struct file_operations sof_dtrace_trace_fops = {
-	.open = sof_dfsentry_trace_open,
-	.read = sof_dfsentry_trace_read,
+	.open = sof_dtrace_dfs_trace_open,
+	.read = sof_dtrace_dfs_trace_read,
 	.llseek = default_llseek,
-	.release = sof_dfsentry_trace_release,
+	.release = sof_dtrace_dfs_trace_release,
 
 	.owner = THIS_MODULE,
 };
