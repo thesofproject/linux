@@ -425,23 +425,49 @@ EXPORT_SYMBOL_GPL(snd_soc_component_exit_regmap);
 
 #endif
 
+static int snd_soc_component_compr_module_get(struct snd_soc_component *component,
+					      struct snd_compr_stream *cstream)
+{
+	int ret = 0;
+
+	if (component->driver->module_get_upon_open == 1 &&
+	    !try_module_get(component->dev->driver->owner))
+		ret = -ENODEV;
+
+	return soc_component_ret(component, ret);
+}
+
+static void snd_soc_component_compr_module_put(struct snd_soc_component *component,
+					       struct snd_compr_stream *cstream)
+{
+	if (component->driver->module_get_upon_open == 1)
+		module_put(component->dev->driver->owner);
+}
+
 int snd_soc_component_compr_open(struct snd_compr_stream *cstream)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_soc_component *component;
-	int i, ret;
+	int ret = 0;
+	int i;
 
 	for_each_rtd_components(rtd, i, component) {
+		ret = snd_soc_component_compr_module_get(component, cstream);
+		if (ret < 0)
+			break;
+
 		if (component->driver->compress_ops &&
 		    component->driver->compress_ops->open) {
 			ret = component->driver->compress_ops->open(component, cstream);
-			if (ret < 0)
-				return soc_component_ret(component, ret);
+			if (ret < 0) {
+				snd_soc_component_compr_module_put(component, cstream);
+				break;
+			}
 		}
 		soc_component_mark_push(component, cstream, compr_open);
 	}
 
-	return 0;
+	return soc_component_ret(component, ret);
 }
 EXPORT_SYMBOL_GPL(snd_soc_component_compr_open);
 
@@ -461,6 +487,7 @@ void snd_soc_component_compr_free(struct snd_compr_stream *cstream,
 			component->driver->compress_ops->free(component, cstream);
 
 		soc_component_mark_pop(component, cstream, compr_open);
+		snd_soc_component_compr_module_put(component, cstream);
 	}
 }
 EXPORT_SYMBOL_GPL(snd_soc_component_compr_free);
