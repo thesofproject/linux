@@ -10,9 +10,11 @@
 // Generic firmware loader.
 //
 
+#include <linux/bitops.h>
 #include <linux/firmware.h>
 #include <sound/sof.h>
 #include <sound/sof/ext_manifest.h>
+#include <sound/sof/ext_manifest4.h>
 #include "sof-priv.h"
 #include "ops.h"
 
@@ -272,8 +274,8 @@ static ssize_t snd_sof_ext_man_size(const struct firmware *fw)
 }
 
 /* parse extended FW manifest data structures */
-static int snd_sof_fw_ext_man_parse(struct snd_sof_dev *sdev,
-				    const struct firmware *fw)
+static int snd_sof_fw_ext_man3_parse(struct snd_sof_dev *sdev,
+				     const struct firmware *fw)
 {
 	const struct sof_ext_man_elem_header *elem_hdr;
 	const struct sof_ext_man_header *head;
@@ -356,6 +358,109 @@ static int snd_sof_fw_ext_man_parse(struct snd_sof_dev *sdev,
 	}
 
 	return ext_man_size;
+}
+
+static int snd_sof_fw_ext_man4_parse(struct snd_sof_dev *sdev, const struct firmware *fw)
+{
+	struct snd_sof_pdata *sof_pdata = sdev->pdata;
+	const struct sof_dev_desc *desc = sof_pdata->desc;
+	const struct snd_sof_ext_man_pdata *ext_man_pdata = desc->ext_man_pdata;
+	struct sof_ipc4_fw_modules *module_entry;
+	struct sof_man4_fw_binary_header *fw_header;
+	struct sof_ext_manifest4_hdr *hdr;
+	struct sof_man4_module_config *fm_config;
+	struct sof_man4_module *fm_entry;
+	ssize_t remaining;
+	u32 fw_hdr_offset;
+	int i;
+
+	remaining = fw->size;
+	if (remaining <= sizeof(*hdr)) {
+		dev_err(sdev->dev, "Invalid fw size\n");
+		return -EINVAL;
+	}
+
+	hdr = (struct sof_ext_manifest4_hdr *)fw->data;
+
+	if (ext_man_pdata)
+		fw_hdr_offset = ext_man_pdata->fw_hdr_offset;
+	else
+		fw_hdr_offset = SOF_MAN4_FW_HDR_OFFSET;
+
+	if (remaining <= hdr->len + fw_hdr_offset + sizeof(*fw_header)) {
+		dev_err(sdev->dev, "Invalid hdr->len %d\n", hdr->len);
+		return -EINVAL;
+	}
+
+	fw_header = (struct sof_man4_fw_binary_header *)(fw->data + hdr->len +
+							 fw_hdr_offset);
+	remaining -= (hdr->len + fw_hdr_offset);
+
+	if (remaining <= fw_header->len) {
+		dev_err(sdev->dev, "Invalid fw_header->len %d\n", fw_header->len);
+		return -EINVAL;
+	}
+
+	dev_dbg(sdev->dev, " fw %s: header length %x, module num %d", fw_header->name,
+		fw_header->len, fw_header->num_module_entries);
+
+	sdev->fw_modules = devm_kmalloc_array(sdev->dev, fw_header->num_module_entries,
+					      sizeof(*module_entry), GFP_KERNEL);
+	if (!sdev->fw_modules)
+		return -ENOMEM;
+
+	sdev->fw_module_num = fw_header->num_module_entries;
+	module_entry = sdev->fw_modules;
+
+	fm_entry = (struct sof_man4_module *)((u8 *)fw_header + fw_header->len);
+	remaining -= fw_header->len;
+
+	if (remaining < fw_header->num_module_entries * sizeof(*fm_entry)) {
+		dev_err(sdev->dev, "Invalid num_module_entries %d\n",
+			fw_header->num_module_entries);
+		return -EINVAL;
+	}
+
+	fm_config = (struct sof_man4_module_config *)(fm_entry + fw_header->num_module_entries);
+	remaining -= (fw_header->num_module_entries * sizeof(*fm_entry));
+	for (i = 0; i < fw_header->num_module_entries; i++) {
+		dev_dbg(sdev->dev, "module %s : UUID %pUL, ", fm_entry->name,
+			fm_entry->uuid);
+
+		memcpy(&module_entry->man4_module_entry, fm_entry, sizeof(*fm_entry));
+
+		if (fm_entry->cfg_count) {
+			if (remaining < (fm_entry->cfg_offset + fm_entry->cfg_count) *
+			    sizeof(*fm_config)) {
+				dev_err(sdev->dev, "Invalid cfg_offset %d\n", fm_entry->cfg_offset);
+				return -EINVAL;
+			}
+
+			module_entry->bss_size = fm_config[fm_entry->cfg_offset].is_bytes;
+		}
+
+		module_entry->man4_module_entry.id = i;
+
+		module_entry++;
+		fm_entry++;
+	}
+
+	return hdr->len;
+}
+
+static int snd_sof_fw_ext_man_parse(struct snd_sof_dev *sdev,
+				    const struct firmware *fw)
+{
+	const struct sof_ext_manifest4_hdr *hdr = (struct sof_ext_manifest4_hdr *)fw->data;
+
+	/*
+	 * The fw size should be at least larger than the size of *hdr, and then
+	 * we can check the hdr->id to see if it is a manifest4 firmware.
+	 */
+	if (fw->size > sizeof(*hdr) && hdr->id == SOF_MAN4_MAGIC_NUMBER)
+		return snd_sof_fw_ext_man4_parse(sdev, fw);
+
+	return snd_sof_fw_ext_man3_parse(sdev, fw);
 }
 
 /*

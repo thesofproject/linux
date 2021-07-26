@@ -19,6 +19,7 @@
 #include <sound/sof/trace.h>
 #include <uapi/sound/sof/fw.h>
 #include <sound/sof/ext_manifest.h>
+#include <sound/sof/ext_manifest4.h>
 #include <uapi/sound/sof/abi.h>
 
 /* Flag definitions used in sof_core_debug (sof_debug module parameter) */
@@ -392,6 +393,12 @@ struct snd_sof_ipc {
 	struct snd_sof_ipc_msg msg;
 };
 
+struct sof_ipc4_fw_modules {
+	struct sof_man4_module man4_module_entry;
+	u32 bss_size;
+	void *private;
+};
+
 /*
  * SOF Device Level.
  */
@@ -467,6 +474,10 @@ struct snd_sof_dev {
 
 	/* FW configuration */
 	struct sof_ipc_window *info_window;
+
+	/* FW module info */
+	int fw_module_num;
+	void *fw_modules;
 
 	/* IPC timeouts in ms */
 	int ipc_timeout;
