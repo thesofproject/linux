@@ -1477,8 +1477,6 @@ static int soc_tplg_dapm_widget_create(struct soc_tplg *tplg,
 		goto widget;
 	}
 
-	control_hdr = (struct snd_soc_tplg_ctl_hdr *)tplg->pos;
-
 	template.num_kcontrols = le32_to_cpu(w->num_kcontrols);
 	kc = devm_kcalloc(tplg->dev, le32_to_cpu(w->num_kcontrols), sizeof(*kc), GFP_KERNEL);
 	if (!kc)
