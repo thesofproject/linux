@@ -114,6 +114,32 @@ jobs:
           make drivers/soundwire/
           make
 
+  clang-sof-x86_64:
+    name: "Clang build x86_64"
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Fetch kconfig
+        uses: actions/checkout@v2
+        with:
+          repository: 'thesofproject/kconfig'
+          path: 'kconfig'
+
+      - name: Install libelf
+        run: |
+          sudo apt update
+          sudo apt install -y libelf-dev
+
+      - name: build start
+        run: |
+          export ARCH=x86_64 CC=clang KCFLAGS="-Wall -Werror"
+          export MAKEFLAGS=j"$(nproc)"
+          bash kconfig/kconfig-sof-default.sh
+          make sound/
+          make drivers/soundwire/
+          make
+
   gcc-sof-arm64:
     name: "GCC build arm64"
     runs-on: ubuntu-20.04
@@ -140,8 +166,8 @@ jobs:
           make drivers/soundwire/
           make
 
-  clang-sof-x86_64:
-    name: "Clang build x86_64"
+  gcc-sof-arm32:
+    name: "GCC build arm32"
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v2
@@ -152,16 +178,17 @@ jobs:
           repository: 'thesofproject/kconfig'
           path: 'kconfig'
 
-      - name: Install libelf
+      - name: Install arm32 cross compiler
         run: |
           sudo apt update
-          sudo apt install -y libelf-dev
+          sudo apt install -y gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi
 
       - name: build start
         run: |
-          export ARCH=x86_64 CC=clang KCFLAGS="-Wall -Werror"
+          export ARCH=arm CROSS_COMPILE=/usr/bin/arm-linux-gnueabi- KCFLAGS="-Wall -Werror"
           export MAKEFLAGS=j"$(nproc)"
-          bash kconfig/kconfig-sof-default.sh
+          bash kconfig/kconfig-sof-arm64.sh
+          make olddefconfig
           make sound/
           make drivers/soundwire/
           make
