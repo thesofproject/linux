@@ -8,6 +8,7 @@
 // Author: Ranjani Sridharan <ranjani.sridharan@linux.intel.com>
 //
 
+#include <linux/bitfield.h>
 #include "sof-audio.h"
 #include "ops.h"
 
@@ -56,9 +57,7 @@ static int sof_dai_config_setup(struct snd_sof_dev *sdev, struct snd_sof_dai *da
 	}
 
 	/* set NONE flag to clear all previous settings */
-	set_mask_bits(&config->flags,
-		      SOF_DAI_CONFIG_FLAGS_MASK,
-		      SOF_DAI_CONFIG_FLAGS_NONE);
+	config->flags = FIELD_PREP(SOF_DAI_CONFIG_FLAGS_MASK, SOF_DAI_CONFIG_FLAGS_NONE);
 
 	ret = sof_ipc_tx_message(sdev->ipc, config->hdr.cmd, config, config->hdr.size,
 				 &reply, sizeof(reply));

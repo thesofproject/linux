@@ -72,9 +72,7 @@ int hda_ctrl_dai_widget_setup(struct snd_soc_dapm_widget *w)
 	}
 
 	/* set HW_PARAMS flag */
-	set_mask_bits(&config->flags,
-		      SOF_DAI_CONFIG_FLAGS_MASK,
-		      SOF_DAI_CONFIG_FLAGS_HW_PARAMS);
+	config->flags = FIELD_PREP(SOF_DAI_CONFIG_FLAGS_MASK, SOF_DAI_CONFIG_FLAGS_HW_PARAMS);
 
 	/* send DAI_CONFIG IPC */
 	ret = sof_ipc_tx_message(sdev->ipc, config->hdr.cmd, config, config->hdr.size,
@@ -113,9 +111,7 @@ int hda_ctrl_dai_widget_free(struct snd_soc_dapm_widget *w)
 	config = &sof_dai->dai_config[sof_dai->current_config];
 
 	/* set HW_FREE flag */
-	set_mask_bits(&config->flags,
-		      SOF_DAI_CONFIG_FLAGS_MASK,
-		      SOF_DAI_CONFIG_FLAGS_HW_FREE);
+	config->flags = FIELD_PREP(SOF_DAI_CONFIG_FLAGS_MASK, SOF_DAI_CONFIG_FLAGS_HW_FREE);
 
 	ret = sof_ipc_tx_message(sdev->ipc, config->hdr.cmd, config, config->hdr.size,
 				  &reply, sizeof(reply));
