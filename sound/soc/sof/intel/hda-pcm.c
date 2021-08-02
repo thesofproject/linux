@@ -221,7 +221,6 @@ int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
 		     struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
-	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct snd_soc_component *scomp = sdev->component;
 	struct hdac_ext_stream *dsp_stream;
 	struct snd_sof_pcm *spcm;
@@ -234,13 +233,7 @@ int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
 		return -EINVAL;
 	}
 
-	/*
-	 * All playback and D0i3 compatible streams are DMI L1 capable, others need
-	 * pause push/release to be disabled
-	 */
-	if (!(runtime->hw.info & SNDRV_PCM_INFO_PAUSE))
-		hda_always_enable_dmi_l1 = true;
-
+	/* All playback and D0i3 compatible streams are DMI L1 capable */
 	if (hda_always_enable_dmi_l1 ||
 	    direction == SNDRV_PCM_STREAM_PLAYBACK ||
 	    spcm->stream[substream->stream].d0i3_compatible)
