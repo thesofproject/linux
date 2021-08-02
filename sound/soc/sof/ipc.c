@@ -18,7 +18,7 @@
 #include "sof-audio.h"
 #include "ops.h"
 
-static void ipc_trace_message(struct snd_sof_dev *sdev, u32 msg_id);
+static void ipc_trace_message(struct snd_sof_dev *sdev, u32 msg_type);
 static void ipc_stream_message(struct snd_sof_dev *sdev, u32 msg_cmd);
 
 /*
