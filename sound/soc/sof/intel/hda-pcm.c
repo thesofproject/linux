@@ -15,7 +15,6 @@
  * Hardware interface for generic Intel audio DSP HDA IP
  */
 
-#include <linux/moduleparam.h>
 #include <sound/hda_register.h>
 #include <sound/pcm_params.h>
 #include "../sof-audio.h"
@@ -27,10 +26,6 @@
 #define SDnFMT_DIV(x)	(((x) - 1) << 8)
 #define SDnFMT_BITS(x)	((x) << 4)
 #define SDnFMT_CHAN(x)	((x) << 0)
-
-static bool hda_always_enable_dmi_l1;
-module_param_named(always_enable_dmi_l1, hda_always_enable_dmi_l1, bool, 0444);
-MODULE_PARM_DESC(always_enable_dmi_l1, "SOF HDA always enable DMI l1");
 
 u32 hda_dsp_get_mult_div(struct snd_sof_dev *sdev, int rate)
 {
@@ -234,7 +229,7 @@ int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
 	}
 
 	/* All playback and D0i3 compatible streams are DMI L1 capable */
-	if (hda_always_enable_dmi_l1 ||
+	if (IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_ALWAYS_ENABLE_DMI_L1) ||
 	    direction == SNDRV_PCM_STREAM_PLAYBACK ||
 	    spcm->stream[substream->stream].d0i3_compatible)
 		flags |= SOF_HDA_STREAM_DMI_L1_COMPATIBLE;
