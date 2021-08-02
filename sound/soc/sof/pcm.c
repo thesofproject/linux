@@ -10,7 +10,6 @@
 // PCM Layer, interface between ALSA and IPC.
 //
 
-#include <linux/moduleparam.h>
 #include <linux/pm_runtime.h>
 #include <sound/pcm_params.h>
 #include <sound/sof.h>
@@ -20,10 +19,6 @@
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_PROBES)
 #include "sof-probes.h"
 #endif
-
-static bool pcm_disable_pause = IS_ENABLED(CONFIG_SND_SOC_SOF_PCM_DISABLE_PAUSE);
-module_param_named(disable_pause, pcm_disable_pause, bool, 0444);
-MODULE_PARM_DESC(disable_pause, "SOF HDA disable pause");
 
 /* Create DMA buffer page table for DSP */
 static int create_page_table(struct snd_soc_component *component,
@@ -539,8 +534,6 @@ static int sof_pcm_open(struct snd_soc_component *component,
 
 	/* set runtime config */
 	runtime->hw.info = ops->hw_info; /* platform-specific */
-	if (pcm_disable_pause)
-		runtime->hw.info &= ~SNDRV_PCM_INFO_PAUSE;
 
 	/* set any runtime constraints based on topology */
 	runtime->hw.formats = le64_to_cpu(caps->formats);

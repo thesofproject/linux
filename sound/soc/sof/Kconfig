@@ -55,15 +55,6 @@ config SND_SOC_SOF_DEBUG_PROBES
 	  Say Y if you want to enable probes.
 	  If unsure, select "N".
 
-config SND_SOC_SOF_PCM_DISABLE_PAUSE
-	bool "SOF disable pause push/release"
-	help
-	  This option disables ALSA pause push/release capabilities for
-	  SOF drivers. These capabilities are not used by typical
-	  sound servers such as PulseAudio, PipeWire and CRAS.
-	  Say Y if you want to disable pause push/release
-	  If unsure, select "N".
-
 config SND_SOC_SOF_DEVELOPER_SUPPORT
 	bool "SOF developer options support"
 	depends on EXPERT
