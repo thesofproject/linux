@@ -51,8 +51,7 @@ enum hdac_ext_stream_type {
  * @decoupled: stream host and link is decoupled
  * @link_locked: link is locked
  * @link_prepared: link is prepared
- * @link_substream: link substream
- * @old_appl_ptr: last appl_ptr to double-check rewinds when SPIB is used.
+ * link_substream: link substream
  */
 struct hdac_ext_stream {
 	struct hdac_stream hstream;
@@ -72,8 +71,6 @@ struct hdac_ext_stream {
 	bool link_prepared;
 
 	struct snd_pcm_substream *link_substream;
-
-	snd_pcm_uframes_t old_appl_ptr;
 };
 
 #define hdac_stream(s)		(&(s)->hstream)

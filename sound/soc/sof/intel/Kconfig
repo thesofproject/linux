@@ -249,16 +249,6 @@ config SND_SOC_SOF_HDA_PROBES
 	  Say Y if you want to enable probes.
 	  If unsure, select "N".
 
-config SND_SOC_SOF_HDA_DISABLE_REWINDS
-	bool "SOF Intel-HDA disable rewinds"
-	help
-	  This option disables ALSA rewinds for HDaudio platforms, which
-	  will help enable power savings capabilities.
-	  ALSA rewinds are only used by PulseAudio, so can be disabled
-	  for all distributions relying on PipeWire, JACK or CRAS.
-	  Say Y if you want to disable rewinds.
-	  If unsure, select "N".
-
 endif ## SND_SOC_SOF_HDA_COMMON
 
 config SND_SOC_SOF_HDA_LINK_BASELINE
