@@ -3798,13 +3798,11 @@ static int snd_pcm_mmap(struct file *file, struct vm_area_struct *area)
 	struct snd_pcm_file * pcm_file;
 	struct snd_pcm_substream *substream;	
 	unsigned long offset;
-	unsigned int info;
 	
 	pcm_file = file->private_data;
 	substream = pcm_file->substream;
 	if (PCM_RUNTIME_CHECK(substream))
 		return -ENXIO;
-	info = substream->runtime->hw.info;
 
 	offset = area->vm_pgoff << PAGE_SHIFT;
 	switch (offset) {
@@ -3815,13 +3813,6 @@ static int snd_pcm_mmap(struct file *file, struct vm_area_struct *area)
 	case SNDRV_PCM_MMAP_OFFSET_STATUS_NEW:
 		if (!pcm_status_mmap_allowed(pcm_file))
 			return -ENXIO;
-		/*
-		 * force fallback to ioctl if driver doesn't support status
-		 * and control mmap.
-		 */
-		if (info & SNDRV_PCM_INFO_NO_STATUS_MMAP)
-			return -ENXIO;
-
 		return snd_pcm_mmap_status(substream, file, area);
 	case SNDRV_PCM_MMAP_OFFSET_CONTROL_OLD:
 		if (pcm_file->no_compat_mmap || !IS_ENABLED(CONFIG_64BIT))
@@ -3830,14 +3821,6 @@ static int snd_pcm_mmap(struct file *file, struct vm_area_struct *area)
 	case SNDRV_PCM_MMAP_OFFSET_CONTROL_NEW:
 		if (!pcm_control_mmap_allowed(pcm_file))
 			return -ENXIO;
-
-		/*
-		 * force fallback to ioctl if driver doesn't support status
-		 * and control mmap.
-		 */
-		if (info & SNDRV_PCM_INFO_NO_STATUS_MMAP)
-			return -ENXIO;
-
 		return snd_pcm_mmap_control(substream, file, area);
 	default:
 		return snd_pcm_mmap_data(substream, file, area);
