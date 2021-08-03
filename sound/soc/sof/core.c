@@ -251,6 +251,9 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 
 	sdev->probe_completed = true;
 
+	/* kick-off re-probing of deferred devices */
+	driver_deferred_probe_trigger();
+
 	return 0;
 
 fw_trace_err:
