@@ -718,6 +718,7 @@ static struct platform_driver snd_sof_acpi_intel_bdw_driver = {
 		.name = "sof-audio-acpi-intel-bdw",
 		.pm = &sof_acpi_pm,
 		.acpi_match_table = sof_broadwell_match,
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS
 	},
 };
 module_platform_driver(snd_sof_acpi_intel_bdw_driver);

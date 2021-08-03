@@ -70,6 +70,7 @@ static struct pci_driver snd_sof_pci_intel_apl_driver = {
 	.shutdown = sof_pci_shutdown,
 	.driver = {
 		.pm = &sof_pci_pm,
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS
 	},
 };
 module_pci_driver(snd_sof_pci_intel_apl_driver);

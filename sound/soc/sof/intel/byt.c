@@ -448,6 +448,7 @@ static struct platform_driver snd_sof_acpi_intel_byt_driver = {
 		.name = "sof-audio-acpi-intel-byt",
 		.pm = &sof_acpi_pm,
 		.acpi_match_table = sof_baytrail_match,
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS
 	},
 };
 module_platform_driver(snd_sof_acpi_intel_byt_driver);
