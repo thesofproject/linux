@@ -36,7 +36,7 @@ jobs:
       - name: build start
         run: |
           export ARCH=x86_64 CF="-Wsparse-error -Wsparse-all -Wno-bitwise-pointer -Wno-pointer-arith -Wno-typesign -Wnoshadow"
-          bash kconfig/kconfig-sof-default.sh
+          make allmodconfig
           make modules_prepare
           make -k sound/soc/sof/ C=2
           make -k sound/soc/intel/common/ C=2
