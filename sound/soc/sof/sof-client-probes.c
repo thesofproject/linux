@@ -23,6 +23,10 @@
 
 #define SOF_PROBES_INVALID_NODE_ID UINT_MAX
 
+static bool __read_mostly sof_probes_enabled;
+module_param_named(enable, sof_probes_enabled, bool, 0444);
+MODULE_PARM_DESC(enable, "Enable SOF probes support");
+
 struct sof_probes_priv {
 	struct dentry *dfs_points;
 	struct dentry *dfs_points_remove;
@@ -674,6 +678,10 @@ static int sof_probes_client_probe(struct auxiliary_device *auxdev,
 	struct snd_soc_dai_link *links;
 	int ret;
 
+	/* do not set up the probes support if it is not enabled */
+	if (!sof_probes_enabled)
+		return -ENXIO;
+
 	if (!dev->platform_data) {
 		dev_err(dev, "error: missing platform data\n");
 		return -ENODEV;
@@ -770,6 +778,9 @@ static void sof_probes_client_remove(struct auxiliary_device *auxdev)
 {
 	struct sof_client_dev *cdev = auxiliary_dev_to_sof_client_dev(auxdev);
 	struct sof_probes_priv *priv = cdev->data;
+
+	if (!sof_probes_enabled)
+		return;
 
 	pm_runtime_disable(&auxdev->dev);
 	debugfs_remove(priv->dfs_points);
