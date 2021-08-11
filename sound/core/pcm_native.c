@@ -2897,6 +2897,8 @@ static snd_pcm_sframes_t snd_pcm_rewind(struct snd_pcm_substream *substream,
 
 	if (frames == 0)
 		return 0;
+	if (substream->runtime->info & SNDRV_PCM_INFO_NO_REWINDS)
+		return 0;
 
 	snd_pcm_stream_lock_irq(substream);
 	ret = do_pcm_hwsync(substream);
