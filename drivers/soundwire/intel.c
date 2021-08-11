@@ -1567,30 +1567,25 @@ static int __maybe_unused intel_pm_prepare(struct device *dev)
 	if ((clock_stop_quirks & SDW_INTEL_CLK_STOP_BUS_RESET) ||
 	    !clock_stop_quirks) {
 		/*
-		 * If any operation in this block fails, we keep going since we don't want
+		 * Try to resume the entire bus (parent + child devices) to exit
+		 * the clock stop mode. If this fails, we keep going since we don't want
 		 * to prevent system suspend from happening and errors should be recoverable
 		 * on resume.
-		 */
-
-		/*
-		 * first resume the device for this link. This will also resume the
-		 * PCI parent device, if needed.
-		 */
-		ret = pm_request_resume(dev);
-		if (ret < 0) {
-			dev_err(dev, "%s: pm_request_resume failed: %d\n", __func__, ret);
-			return 0;
-		}
-
-		/*
-		 * Continue resuming the entire bus (parent + child devices) to exit
-		 * the clock stop mode. If there are no devices connected on this link
-		 * this is a no-op
 		 */
 		ret = device_for_each_child(bus->dev, NULL, intel_resume_child_device);
 
 		if (ret < 0)
 			dev_err(dev, "%s: intel_resume_child_device failed: %d\n", __func__, ret);
+
+		/*
+		 * in the case where a link was started but does not have anything connected,
+		 * we still need to resume to keep link power up/down sequences balanced.
+		 * This is a no-op if a child device was present, since resuming the child
+		 * device would also resume the parent
+		 */
+		ret = pm_request_resume(dev);
+		if (ret < 0)
+			dev_err(dev, "%s: pm_request_resume failed: %d\n", __func__, ret);
 	}
 
 	return 0;
