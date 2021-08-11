@@ -14,6 +14,7 @@ include/sound/sof/control.h			@ranj063 @singalsu @dbaluta
 include/sound/sof/dai.h				@ranj063 @singalsu @juimonen @dbaluta
 include/sound/sof/dai-imx.h			@ranj063 @singalsu @juimonen @dbaluta
 include/sound/sof/dai-intel.h			@ranj063 @singalsu @juimonen
+include/sound/sof/dai-amd.h			@ajitkupandey @bhiregoudar @sunilkumardommati @vijendarmukunda
 include/sound/sof/ext_manifest.h		@lyakh @ranj063 @keyonjie @juimonen
 include/sound/sof/header.h			@lyakh @ranj063 @keyonjie @juimonen
 include/sound/sof/info.h			@lyakh @ranj063 @keyonjie @juimonen
@@ -68,6 +69,9 @@ sound/soc/sof/intel/intel-ipc.c			@keyonjie @libinyang @bardliao @lyakh
 sound/soc/sof/intel/Kconfig			@keyonjie @libinyang
 sound/soc/sof/intel/Makefile			@keyonjie @libinyang
 sound/soc/sof/intel/shim.h			@keyonjie @libinyang @bardliao @lyakh @juimonen
+
+# amd parts
+sound/soc/sof/amd/*				@ajitkupandey @bhiregoudar @sunilkumardommati @vijendarmukunda
 
 # SoundWire parts
 drivers/soundwire				@RanderWang @shumingfan @oder-chiou @jack-cy-yu @ryans-lee
