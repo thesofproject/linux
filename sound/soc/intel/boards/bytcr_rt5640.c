@@ -1321,9 +1321,6 @@ static int snd_byt_rt5640_mc_probe(struct platform_device *pdev)
 			 "i2c-%s", acpi_dev_name(adev));
 		put_device(&adev->dev);
 		byt_rt5640_dais[dai_index].codecs->name = byt_rt5640_codec_name;
-	} else {
-		dev_err(&pdev->dev, "Error cannot find '%s' dev\n", mach->id);
-		return -ENXIO;
 	}
 
 	/*
