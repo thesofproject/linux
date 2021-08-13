@@ -275,16 +275,48 @@ use_count_dec:
 }
 EXPORT_SYMBOL(sof_widget_setup);
 
+static int sof_route_setup_ipc(struct snd_sof_dev *sdev, struct snd_sof_route *sroute)
+{
+	struct sof_ipc_pipe_comp_connect *connect;
+	struct sof_ipc_reply reply;
+	int ret;
+
+	/* skip if there's no private data */
+	if (!sroute->private)
+		return 0;
+
+	/* nothing to do if route is already set up */
+	if (sroute->setup)
+		return 0;
+
+	connect = sroute->private;
+
+	dev_dbg(sdev->dev, "setting up route %s -> %s\n",
+		sroute->src_widget->widget->name,
+		sroute->sink_widget->widget->name);
+
+	/* send ipc */
+	ret = sof_ipc_tx_message(sdev->ipc,
+				 connect->hdr.cmd,
+				 connect, sizeof(*connect),
+				 &reply, sizeof(reply));
+	if (ret < 0) {
+		dev_err(sdev->dev, "%s: route setup failed %d\n", __func__, ret);
+		return ret;
+	}
+
+	sroute->setup = true;
+
+	return 0;
+}
+
 static int sof_route_setup(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *wsource,
 			   struct snd_soc_dapm_widget *wsink)
 {
 	struct snd_sof_widget *src_widget = wsource->dobj.private;
 	struct snd_sof_widget *sink_widget = wsink->dobj.private;
-	struct sof_ipc_pipe_comp_connect *connect;
 	struct snd_sof_route *sroute;
-	struct sof_ipc_reply reply;
 	bool route_found = false;
-	int ret;
 
 	/* ignore routes involving virtual widgets in topology */
 	switch (src_widget->id) {
@@ -318,24 +350,7 @@ static int sof_route_setup(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget 
 		return -EINVAL;
 	}
 
-	/* nothing to do if route is already set up */
-	if (sroute->setup)
-		return 0;
-
-	connect = sroute->private;
-
-	/* send ipc */
-	ret = sof_ipc_tx_message(sdev->ipc, connect->hdr.cmd, connect, sizeof(*connect),
-				 &reply, sizeof(reply));
-	if (ret < 0) {
-		dev_err(sdev->dev, "error: failed to load route source %s -> %s sink\n",
-			wsource->name, wsink->name);
-	} else {
-		dev_dbg(sdev->dev, "route %s -> %s setup complete\n", wsource->name, wsink->name);
-		sroute->setup = true;
-	}
-
-	return ret;
+	return sof_route_setup_ipc(sdev, sroute);
 }
 
 static int sof_setup_pipeline_connections(struct snd_sof_dev *sdev,
@@ -665,37 +680,17 @@ int sof_set_up_pipelines(struct snd_sof_dev *sdev, bool verify)
 
 	/* restore pipeline connections */
 	list_for_each_entry(sroute, &sdev->route_list, list) {
-		struct sof_ipc_pipe_comp_connect *connect;
-		struct sof_ipc_reply reply;
-
-		/* skip if there's no private data */
-		if (!sroute->private)
-			continue;
 
 		/* only set up routes belonging to static pipelines */
 		if (!verify && (sroute->src_widget->dynamic_pipeline_widget ||
 				sroute->sink_widget->dynamic_pipeline_widget))
 			continue;
 
-		connect = sroute->private;
-
-		/* send ipc */
-		ret = sof_ipc_tx_message(sdev->ipc,
-					 connect->hdr.cmd,
-					 connect, sizeof(*connect),
-					 &reply, sizeof(reply));
+		ret = sof_route_setup_ipc(sdev, sroute);
 		if (ret < 0) {
-			dev_err(sdev->dev,
-				"error: failed to load route sink %s control %s source %s\n",
-				sroute->route->sink,
-				sroute->route->control ? sroute->route->control
-					: "none",
-				sroute->route->source);
-
+			dev_err(sdev->dev, "%s: restore pipeline connections failed\n", __func__);
 			return ret;
 		}
-
-		sroute->setup = true;
 	}
 
 	/* complete pipeline */
