@@ -149,17 +149,6 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 
 	sdev->fw_state = SOF_FW_BOOT_PREPARE;
 
-	/* check machine info */
-	ret = sof_machine_check(sdev);
-	if (ret < 0) {
-		dev_err(sdev->dev, "error: failed to get machine info %d\n",
-			ret);
-		goto dsp_err;
-	}
-
-	/* set up platform component driver */
-	snd_sof_new_platform_drv(sdev);
-
 	/* register any debug/trace capabilities */
 	ret = snd_sof_dbg_init(sdev);
 	if (ret < 0) {
@@ -173,14 +162,6 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 		goto dbg_err;
 	}
 
-	/* init the IPC */
-	sdev->ipc = snd_sof_ipc_init(sdev);
-	if (!sdev->ipc) {
-		ret = -ENOMEM;
-		dev_err(sdev->dev, "error: failed to init DSP IPC %d\n", ret);
-		goto ipc_err;
-	}
-
 	/* load the firmware */
 	ret = snd_sof_load_firmware(sdev);
 	if (ret < 0) {
@@ -190,6 +171,24 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	}
 
 	sdev->fw_state = SOF_FW_BOOT_IN_PROGRESS;
+	/* check machine info */
+	ret = sof_machine_check(sdev);
+	if (ret < 0) {
+		dev_err(sdev->dev, "error: failed to get machine info %d\n",
+			ret);
+		goto dsp_err;
+	}
+
+	/* set up platform component driver */
+	snd_sof_new_platform_drv(sdev);
+
+	/* init the IPC */
+	sdev->ipc = snd_sof_ipc_init(sdev);
+	if (!sdev->ipc) {
+		ret = -ENOMEM;
+		dev_err(sdev->dev, "error: failed to init DSP IPC %d\n", ret);
+		goto ipc_err;
+	}
 
 	/*
 	 * Boot the firmware. The FW boot status will be modified
@@ -255,13 +254,13 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 fw_trace_err:
 	snd_sof_free_trace(sdev);
 fw_run_err:
-	snd_sof_fw_unload(sdev);
-fw_load_err:
 	snd_sof_ipc_free(sdev);
 ipc_err:
-dbg_err:
-	snd_sof_free_debug(sdev);
 dsp_err:
+	snd_sof_fw_unload(sdev);
+fw_load_err:
+	snd_sof_free_debug(sdev);
+dbg_err:
 	snd_sof_remove(sdev);
 
 	/* all resources freed, update state to match */
