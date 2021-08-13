@@ -13,6 +13,7 @@
 #include <linux/firmware.h>
 #include <sound/sof.h>
 #include <sound/sof/ext_manifest.h>
+#include <sound/sof/ipc4_ext_manifest.h>
 #include "ops.h"
 
 static int get_ext_windows(struct snd_sof_dev *sdev,
@@ -271,7 +272,7 @@ static ssize_t snd_sof_ext_man_size(const struct firmware *fw)
 }
 
 /* parse extended FW manifest data structures */
-static int snd_sof_fw_ext_man_parse(struct snd_sof_dev *sdev,
+static int snd_sof_fw_ext_man_parse_ipc3(struct snd_sof_dev *sdev,
 				    const struct firmware *fw)
 {
 	const struct sof_ext_man_elem_header *elem_hdr;
@@ -355,6 +356,29 @@ static int snd_sof_fw_ext_man_parse(struct snd_sof_dev *sdev,
 	}
 
 	return ext_man_size;
+}
+
+static int snd_sof_fw_ext_man_parse_ipc4(struct snd_sof_dev *sdev,
+				    const struct firmware *fw)
+{
+	//TODO: parse ipc4 firmware binary
+	return 0;
+}
+
+static int snd_sof_fw_ext_man_parse(struct snd_sof_dev *sdev,
+				    const struct firmware *fw)
+{
+	const struct sof_ipc4_ext_manifest_hdr *hdr;
+
+	hdr = (struct sof_ipc4_ext_manifest_hdr *)fw->data;
+	if (hdr->id == SOF_IPC4_EXT_MAN_MAGIC_NUMBER) {
+		dev_dbg(sdev->dev, "%s IPC4 fw is detected\n", __func__);
+		return snd_sof_fw_ext_man_parse_ipc4(sdev, fw);
+	}
+
+	/* fallback to ipc3 */
+	return snd_sof_fw_ext_man_parse_ipc3(sdev, fw);
+
 }
 
 /*
