@@ -1989,11 +1989,15 @@ out:
 	return ret;
 }
 
+static int snd_soc_dpcm_can_be_free_stop_locked(struct snd_soc_pcm_runtime *fe,
+						struct snd_soc_pcm_runtime *be, int stream);
+
 int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 			       int cmd)
 {
 	struct snd_soc_pcm_runtime *be;
 	struct snd_soc_dpcm *dpcm;
+	enum snd_soc_dpcm_state state;
 	int ret = 0;
 
 	for_each_dpcm_be(fe, stream, dpcm) {
@@ -2011,76 +2015,135 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 
 		switch (cmd) {
 		case SNDRV_PCM_TRIGGER_START:
+			mutex_lock(&fe->card->dpcm_mutex);
 			if ((be->dpcm[stream].state != SND_SOC_DPCM_STATE_PREPARE) &&
 			    (be->dpcm[stream].state != SND_SOC_DPCM_STATE_STOP) &&
-			    (be->dpcm[stream].state != SND_SOC_DPCM_STATE_PAUSED))
+			    (be->dpcm[stream].state != SND_SOC_DPCM_STATE_PAUSED)) {
+				mutex_unlock(&fe->card->dpcm_mutex);
 				continue;
+			}
+			state = be->dpcm[stream].state;
+			be->dpcm[stream].state = SND_SOC_DPCM_STATE_START;
 
 			ret = soc_pcm_trigger(be_substream, cmd);
-			if (ret)
+			if (ret) {
+				be->dpcm[stream].state = state;
+				mutex_unlock(&fe->card->dpcm_mutex);
 				goto end;
+			}
+			mutex_unlock(&fe->card->dpcm_mutex);
 
-			be->dpcm[stream].state = SND_SOC_DPCM_STATE_START;
 			break;
 		case SNDRV_PCM_TRIGGER_RESUME:
-			if ((be->dpcm[stream].state != SND_SOC_DPCM_STATE_SUSPEND))
+			mutex_lock(&fe->card->dpcm_mutex);
+			if (be->dpcm[stream].state != SND_SOC_DPCM_STATE_SUSPEND) {
+				mutex_unlock(&fe->card->dpcm_mutex);
 				continue;
+			}
+
+			state = be->dpcm[stream].state;
+			be->dpcm[stream].state = SND_SOC_DPCM_STATE_START;
 
 			ret = soc_pcm_trigger(be_substream, cmd);
-			if (ret)
+			if (ret) {
+				be->dpcm[stream].state = state;
+				mutex_unlock(&fe->card->dpcm_mutex);
 				goto end;
+			}
+			mutex_unlock(&fe->card->dpcm_mutex);
 
-			be->dpcm[stream].state = SND_SOC_DPCM_STATE_START;
 			break;
 		case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
-			if ((be->dpcm[stream].state != SND_SOC_DPCM_STATE_PAUSED))
+			mutex_lock(&fe->card->dpcm_mutex);
+			if (be->dpcm[stream].state != SND_SOC_DPCM_STATE_PAUSED) {
+				mutex_unlock(&fe->card->dpcm_mutex);
 				continue;
+			}
+
+			state = be->dpcm[stream].state;
+			be->dpcm[stream].state = SND_SOC_DPCM_STATE_START;
 
 			ret = soc_pcm_trigger(be_substream, cmd);
-			if (ret)
+			if (ret) {
+				be->dpcm[stream].state = state;
+				mutex_unlock(&fe->card->dpcm_mutex);
 				goto end;
+			}
+			mutex_unlock(&fe->card->dpcm_mutex);
 
-			be->dpcm[stream].state = SND_SOC_DPCM_STATE_START;
 			break;
 		case SNDRV_PCM_TRIGGER_STOP:
+			mutex_lock(&fe->card->dpcm_mutex);
 			if ((be->dpcm[stream].state != SND_SOC_DPCM_STATE_START) &&
-			    (be->dpcm[stream].state != SND_SOC_DPCM_STATE_PAUSED))
+			    (be->dpcm[stream].state != SND_SOC_DPCM_STATE_PAUSED)) {
+				mutex_unlock(&fe->card->dpcm_mutex);
 				continue;
+			}
 
-			if (!snd_soc_dpcm_can_be_free_stop(fe, be, stream))
+			if (!snd_soc_dpcm_can_be_free_stop_locked(fe, be, stream)) {
+				mutex_unlock(&fe->card->dpcm_mutex);
 				continue;
+			}
+
+			state = be->dpcm[stream].state;
+			be->dpcm[stream].state = SND_SOC_DPCM_STATE_STOP;
 
 			ret = soc_pcm_trigger(be_substream, cmd);
-			if (ret)
+			if (ret) {
+				be->dpcm[stream].state = state;
+				mutex_unlock(&fe->card->dpcm_mutex);
 				goto end;
+			}
+			mutex_unlock(&fe->card->dpcm_mutex);
 
-			be->dpcm[stream].state = SND_SOC_DPCM_STATE_STOP;
 			break;
 		case SNDRV_PCM_TRIGGER_SUSPEND:
-			if (be->dpcm[stream].state != SND_SOC_DPCM_STATE_START)
+			mutex_lock(&fe->card->dpcm_mutex);
+			if (be->dpcm[stream].state != SND_SOC_DPCM_STATE_START) {
+				mutex_unlock(&fe->card->dpcm_mutex);
 				continue;
+			}
 
-			if (!snd_soc_dpcm_can_be_free_stop(fe, be, stream))
+			if (!snd_soc_dpcm_can_be_free_stop_locked(fe, be, stream)) {
+				mutex_unlock(&fe->card->dpcm_mutex);
 				continue;
+			}
+
+			state = be->dpcm[stream].state;
+			be->dpcm[stream].state = SND_SOC_DPCM_STATE_STOP;
 
 			ret = soc_pcm_trigger(be_substream, cmd);
-			if (ret)
+			if (ret) {
+				be->dpcm[stream].state = state;
+				mutex_unlock(&fe->card->dpcm_mutex);
 				goto end;
+			}
+			mutex_unlock(&fe->card->dpcm_mutex);
 
-			be->dpcm[stream].state = SND_SOC_DPCM_STATE_SUSPEND;
 			break;
 		case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
-			if (be->dpcm[stream].state != SND_SOC_DPCM_STATE_START)
+			mutex_lock(&fe->card->dpcm_mutex);
+			if (be->dpcm[stream].state != SND_SOC_DPCM_STATE_START) {
+				mutex_unlock(&fe->card->dpcm_mutex);
 				continue;
+			}
 
-			if (!snd_soc_dpcm_can_be_free_stop(fe, be, stream))
+			if (!snd_soc_dpcm_can_be_free_stop_locked(fe, be, stream)) {
+				mutex_unlock(&fe->card->dpcm_mutex);
 				continue;
+			}
+
+			state = be->dpcm[stream].state;
+			be->dpcm[stream].state = SND_SOC_DPCM_STATE_PAUSED;
 
 			ret = soc_pcm_trigger(be_substream, cmd);
-			if (ret)
+			if (ret) {
+				be->dpcm[stream].state = state;
+				mutex_unlock(&fe->card->dpcm_mutex);
 				goto end;
+			}
+			mutex_unlock(&fe->card->dpcm_mutex);
 
-			be->dpcm[stream].state = SND_SOC_DPCM_STATE_PAUSED;
 			break;
 		}
 	}
@@ -2829,18 +2892,18 @@ struct snd_pcm_substream *
 }
 EXPORT_SYMBOL_GPL(snd_soc_dpcm_get_substream);
 
-static int snd_soc_dpcm_check_state(struct snd_soc_pcm_runtime *fe,
-				    struct snd_soc_pcm_runtime *be,
-				    int stream,
-				    const enum snd_soc_dpcm_state *states,
-				    int num_states)
+/* This must be called with fe->card->dpcm_mutex held */
+static int snd_soc_dpcm_check_state_locked(struct snd_soc_pcm_runtime *fe,
+					   struct snd_soc_pcm_runtime *be,
+					   int stream,
+					   const enum snd_soc_dpcm_state *states,
+					   int num_states)
 {
 	struct snd_soc_dpcm *dpcm;
 	int state;
 	int ret = 1;
 	int i;
 
-	mutex_lock(&fe->card->dpcm_mutex);
 	for_each_dpcm_fe(be, stream, dpcm) {
 
 		if (dpcm->fe == fe)
@@ -2854,18 +2917,33 @@ static int snd_soc_dpcm_check_state(struct snd_soc_pcm_runtime *fe,
 			}
 		}
 	}
-	mutex_unlock(&fe->card->dpcm_mutex);
 
 	/* it's safe to do this BE DAI */
+	return ret;
+}
+
+static int snd_soc_dpcm_check_state(struct snd_soc_pcm_runtime *fe,
+				    struct snd_soc_pcm_runtime *be,
+				    int stream,
+				    const enum snd_soc_dpcm_state *states,
+				    int num_states)
+{
+	int ret;
+
+	mutex_lock(&fe->card->dpcm_mutex);
+	ret = snd_soc_dpcm_check_state_locked(fe, be, stream, states, num_states);
+	mutex_unlock(&fe->card->dpcm_mutex);
+
 	return ret;
 }
 
 /*
  * We can only hw_free, stop, pause or suspend a BE DAI if any of it's FE
  * are not running, paused or suspended for the specified stream direction.
+ * This must be called with fe->card->dpcm_mutex held.
  */
-int snd_soc_dpcm_can_be_free_stop(struct snd_soc_pcm_runtime *fe,
-		struct snd_soc_pcm_runtime *be, int stream)
+static int snd_soc_dpcm_can_be_free_stop_locked(struct snd_soc_pcm_runtime *fe,
+						struct snd_soc_pcm_runtime *be, int stream)
 {
 	const enum snd_soc_dpcm_state state[] = {
 		SND_SOC_DPCM_STATE_START,
@@ -2873,7 +2951,19 @@ int snd_soc_dpcm_can_be_free_stop(struct snd_soc_pcm_runtime *fe,
 		SND_SOC_DPCM_STATE_SUSPEND,
 	};
 
-	return snd_soc_dpcm_check_state(fe, be, stream, state, ARRAY_SIZE(state));
+	return snd_soc_dpcm_check_state_locked(fe, be, stream, state, ARRAY_SIZE(state));
+}
+
+int snd_soc_dpcm_can_be_free_stop(struct snd_soc_pcm_runtime *fe,
+				  struct snd_soc_pcm_runtime *be, int stream)
+{
+	int ret;
+
+	mutex_lock(&fe->card->dpcm_mutex);
+	ret = snd_soc_dpcm_can_be_free_stop_locked(fe, be, stream);
+	mutex_unlock(&fe->card->dpcm_mutex);
+
+	return ret;
 }
 EXPORT_SYMBOL_GPL(snd_soc_dpcm_can_be_free_stop);
 
