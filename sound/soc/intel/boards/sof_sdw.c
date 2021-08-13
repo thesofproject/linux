@@ -363,8 +363,7 @@ static const struct snd_soc_ops sdw_ops = {
 	.shutdown = sdw_shutdown,
 };
 
-static int sof_sdw_mic_codec_mockup_init(struct snd_soc_card *card,
-					 const struct snd_soc_acpi_link_adr *link,
+static int sof_sdw_mic_codec_mockup_init(const struct snd_soc_acpi_link_adr *link,
 					 struct snd_soc_dai_link *dai_links,
 					 struct sof_sdw_codec_info *info,
 					 bool playback)
@@ -709,8 +708,7 @@ static int create_codec_dai_name(struct device *dev,
 	return 0;
 }
 
-static int set_codec_init_func(struct snd_soc_card *card,
-			       const struct snd_soc_acpi_link_adr *link,
+static int set_codec_init_func(const struct snd_soc_acpi_link_adr *link,
 			       struct snd_soc_dai_link *dai_links,
 			       bool playback, int group_id)
 {
@@ -733,8 +731,7 @@ static int set_codec_init_func(struct snd_soc_card *card,
 			if (link->adr_d[i].endpoints->group_id != group_id)
 				continue;
 			if (codec_info_list[codec_index].init)
-				codec_info_list[codec_index].init(card,
-						link,
+				codec_info_list[codec_index].init(link,
 						dai_links,
 						&codec_info_list[codec_index],
 						playback);
@@ -819,8 +816,7 @@ static int get_slave_info(const struct snd_soc_acpi_link_adr *adr_link,
 	return 0;
 }
 
-static int create_sdw_dailink(struct snd_soc_card *card,
-			      struct device *dev, int *be_index,
+static int create_sdw_dailink(struct device *dev, int *be_index,
 			      struct snd_soc_dai_link *dai_links,
 			      int sdw_be_num, int sdw_cpu_dai_num,
 			      struct snd_soc_dai_link_component *cpus,
@@ -946,7 +942,7 @@ static int create_sdw_dailink(struct snd_soc_card *card,
 		 */
 		dai_links[*be_index].nonatomic = true;
 
-		ret = set_codec_init_func(card, link, dai_links + (*be_index)++,
+		ret = set_codec_init_func(link, dai_links + (*be_index)++,
 					  playback, group_id);
 		if (ret < 0) {
 			dev_err(dev, "failed to init codec %d", codec_index);
@@ -1127,7 +1123,7 @@ static int sof_card_dai_links_create(struct device *dev,
 		    group_generated[endpoint->group_id])
 			continue;
 
-		ret = create_sdw_dailink(card, dev, &be_id, links, sdw_be_num,
+		ret = create_sdw_dailink(dev, &be_id, links, sdw_be_num,
 					 sdw_cpu_dai_num, cpus, adr_link,
 					 &cpu_id, group_generated,
 					 codec_conf, codec_conf_count,
@@ -1190,7 +1186,7 @@ SSP:
 			      ssp_components, 1,
 			      NULL, info->ops);
 
-		ret = info->init(card, NULL, links + link_id, info, 0);
+		ret = info->init(NULL, links + link_id, info, 0);
 		if (ret < 0)
 			return ret;
 
@@ -1413,7 +1409,7 @@ static int mc_remove(struct platform_device *pdev)
 		for_each_card_prelinks(card, j, link) {
 			if (!strcmp(link->codecs[0].dai_name,
 				    codec_info_list[i].dai_name)) {
-				ret = codec_info_list[i].exit(card, link);
+				ret = codec_info_list[i].exit(&pdev->dev, link);
 				if (ret)
 					dev_warn(&pdev->dev,
 						 "codec exit failed %d\n",
