@@ -462,7 +462,6 @@ static int snd_byt_cht_es8316_mc_probe(struct platform_device *pdev)
 	const struct dmi_system_id *dmi_id;
 	struct device *dev = &pdev->dev;
 	struct snd_soc_acpi_mach *mach;
-	struct fwnode_handle *fwnode;
 	const char *platform_name;
 	struct acpi_device *adev;
 	struct device *codec_dev;
@@ -549,16 +548,7 @@ static int snd_byt_cht_es8316_mc_probe(struct platform_device *pdev)
 		props[cnt++] = PROPERTY_ENTRY_BOOL("everest,jack-detect-inverted");
 
 	if (cnt) {
-		fwnode = fwnode_create_software_node(props, NULL);
-		if (IS_ERR(fwnode)) {
-			put_device(codec_dev);
-			return PTR_ERR(fwnode);
-		}
-
-		ret = device_add_software_node(codec_dev, to_software_node(fwnode));
-
-		fwnode_handle_put(fwnode);
-
+		ret = device_add_properties(codec_dev, props);
 		if (ret) {
 			put_device(codec_dev);
 			return ret;
@@ -625,7 +615,7 @@ static int snd_byt_cht_es8316_mc_probe(struct platform_device *pdev)
 	return 0;
 
 err:
-	device_remove_software_node(priv->codec_dev);
+	device_remove_properties(priv->codec_dev);
 	put_device(priv->codec_dev);
 	return ret;
 }
@@ -636,7 +626,7 @@ static int snd_byt_cht_es8316_mc_remove(struct platform_device *pdev)
 	struct byt_cht_es8316_private *priv = snd_soc_card_get_drvdata(card);
 
 	gpiod_put(priv->speaker_en_gpio);
-	device_remove_software_node(priv->codec_dev);
+	device_remove_properties(priv->codec_dev);
 	put_device(priv->codec_dev);
 	return 0;
 }
