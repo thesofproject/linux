@@ -1530,7 +1530,7 @@ int dpcm_be_dai_startup(struct snd_soc_pcm_runtime *fe, int stream)
 			be->dpcm[stream].state = SND_SOC_DPCM_STATE_CLOSE;
 			goto unwind;
 		}
-
+		be->dpcm[stream].be_start = 0;
 		be->dpcm[stream].state = SND_SOC_DPCM_STATE_OPEN;
 		count++;
 	}
@@ -1998,6 +1998,7 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 	struct snd_soc_pcm_runtime *be;
 	struct snd_soc_dpcm *dpcm;
 	enum snd_soc_dpcm_state state;
+	bool do_trigger;
 	int ret = 0;
 
 	for_each_dpcm_be(fe, stream, dpcm) {
@@ -2013,21 +2014,33 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 		dev_dbg(be->dev, "ASoC: trigger BE %s cmd %d\n",
 			be->dai_link->name, cmd);
 
+		do_trigger = false;
 		switch (cmd) {
 		case SNDRV_PCM_TRIGGER_START:
 			mutex_lock(&fe->card->dpcm_mutex);
-			if ((be->dpcm[stream].state != SND_SOC_DPCM_STATE_PREPARE) &&
+			if (!be->dpcm[stream].be_start &&
+			    (be->dpcm[stream].state != SND_SOC_DPCM_STATE_PREPARE) &&
 			    (be->dpcm[stream].state != SND_SOC_DPCM_STATE_STOP) &&
 			    (be->dpcm[stream].state != SND_SOC_DPCM_STATE_PAUSED)) {
 				mutex_unlock(&fe->card->dpcm_mutex);
 				continue;
 			}
 			state = be->dpcm[stream].state;
+			be->dpcm[stream].be_start++;
+			if (be->dpcm[stream].be_start == 1)
+				do_trigger = true;
+
 			be->dpcm[stream].state = SND_SOC_DPCM_STATE_START;
+
+			if (!do_trigger) {
+				mutex_unlock(&fe->card->dpcm_mutex);
+				continue;
+			}
 
 			ret = soc_pcm_trigger(be_substream, cmd);
 			if (ret) {
 				be->dpcm[stream].state = state;
+				be->dpcm[stream].be_start--;
 				mutex_unlock(&fe->card->dpcm_mutex);
 				goto end;
 			}
@@ -2042,11 +2055,21 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 			}
 
 			state = be->dpcm[stream].state;
+			be->dpcm[stream].be_start++;
+			if (be->dpcm[stream].be_start == 1)
+				do_trigger = true;
+
 			be->dpcm[stream].state = SND_SOC_DPCM_STATE_START;
+
+			if (!do_trigger) {
+				mutex_unlock(&fe->card->dpcm_mutex);
+				continue;
+			}
 
 			ret = soc_pcm_trigger(be_substream, cmd);
 			if (ret) {
 				be->dpcm[stream].state = state;
+				be->dpcm[stream].be_start--;
 				mutex_unlock(&fe->card->dpcm_mutex);
 				goto end;
 			}
@@ -2061,11 +2084,21 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 			}
 
 			state = be->dpcm[stream].state;
+			be->dpcm[stream].be_start++;
+			if (be->dpcm[stream].be_start == 1)
+				do_trigger = true;
+
 			be->dpcm[stream].state = SND_SOC_DPCM_STATE_START;
+
+			if (!do_trigger) {
+				mutex_unlock(&fe->card->dpcm_mutex);
+				continue;
+			}
 
 			ret = soc_pcm_trigger(be_substream, cmd);
 			if (ret) {
 				be->dpcm[stream].state = state;
+				be->dpcm[stream].be_start--;
 				mutex_unlock(&fe->card->dpcm_mutex);
 				goto end;
 			}
@@ -2080,7 +2113,13 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 				continue;
 			}
 
-			if (!snd_soc_dpcm_can_be_free_stop_locked(fe, be, stream)) {
+			if (be->dpcm[stream].state == SND_SOC_DPCM_STATE_START)
+				be->dpcm[stream].be_start--;
+
+			if (be->dpcm[stream].be_start == 0)
+				do_trigger = true;
+
+			if (!do_trigger) {
 				mutex_unlock(&fe->card->dpcm_mutex);
 				continue;
 			}
@@ -2091,6 +2130,8 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 			ret = soc_pcm_trigger(be_substream, cmd);
 			if (ret) {
 				be->dpcm[stream].state = state;
+				if (be->dpcm[stream].state == SND_SOC_DPCM_STATE_START)
+					be->dpcm[stream].be_start++;
 				mutex_unlock(&fe->card->dpcm_mutex);
 				goto end;
 			}
@@ -2104,7 +2145,11 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 				continue;
 			}
 
-			if (!snd_soc_dpcm_can_be_free_stop_locked(fe, be, stream)) {
+			be->dpcm[stream].be_start--;
+			if (be->dpcm[stream].be_start == 0)
+				do_trigger = true;
+
+			if (!do_trigger) {
 				mutex_unlock(&fe->card->dpcm_mutex);
 				continue;
 			}
@@ -2115,6 +2160,7 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 			ret = soc_pcm_trigger(be_substream, cmd);
 			if (ret) {
 				be->dpcm[stream].state = state;
+				be->dpcm[stream].be_start++;
 				mutex_unlock(&fe->card->dpcm_mutex);
 				goto end;
 			}
@@ -2128,7 +2174,11 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 				continue;
 			}
 
-			if (!snd_soc_dpcm_can_be_free_stop_locked(fe, be, stream)) {
+			be->dpcm[stream].be_start--;
+			if (be->dpcm[stream].be_start == 0)
+				do_trigger = true;
+
+			if (!do_trigger) {
 				mutex_unlock(&fe->card->dpcm_mutex);
 				continue;
 			}
@@ -2139,6 +2189,7 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 			ret = soc_pcm_trigger(be_substream, cmd);
 			if (ret) {
 				be->dpcm[stream].state = state;
+				be->dpcm[stream].be_start++;
 				mutex_unlock(&fe->card->dpcm_mutex);
 				goto end;
 			}
