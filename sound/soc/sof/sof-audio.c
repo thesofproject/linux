@@ -655,7 +655,7 @@ int sof_set_up_pipelines(struct snd_sof_dev *sdev, bool verify)
 	}
 
 	/* restore pipeline connections */
-	list_for_each_entry_reverse(sroute, &sdev->route_list, list) {
+	list_for_each_entry(sroute, &sdev->route_list, list) {
 		struct sof_ipc_pipe_comp_connect *connect;
 		struct sof_ipc_reply reply;
 
