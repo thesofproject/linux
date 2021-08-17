@@ -41,6 +41,7 @@ jobs:
           make -k sound/soc/sof/ C=2
           make -k sound/soc/intel/common/ C=2
           make -k sound/soc/intel/boards/ C=2
+          make -k sound/soc/amd/ C=2
           make -k drivers/soundwire/ C=2
 
   gcc-sof-x86_64-W1:
