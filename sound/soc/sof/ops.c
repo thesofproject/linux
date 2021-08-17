@@ -158,6 +158,7 @@ void snd_sof_dsp_panic(struct snd_sof_dev *sdev, u32 offset)
 			sdev->dsp_oops_offset, offset);
 
 	snd_sof_dsp_dbg_dump(sdev, SOF_DBG_DUMP_REGS | SOF_DBG_DUMP_MBOX);
+	sof_set_fw_state(sdev, SOF_FW_CRASHED);
 	snd_sof_trace_notify_for_error(sdev);
 }
 EXPORT_SYMBOL(snd_sof_dsp_panic);
