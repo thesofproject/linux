@@ -865,6 +865,7 @@ void snd_sof_handle_fw_exception(struct snd_sof_dev *sdev)
 	/* dump vital information to the logs */
 	snd_sof_ipc_dump(sdev);
 	snd_sof_dsp_dbg_dump(sdev, SOF_DBG_DUMP_REGS | SOF_DBG_DUMP_MBOX);
+	sof_set_fw_state(sdev, SOF_FW_CRASHED);
 	snd_sof_trace_notify_for_error(sdev);
 }
 EXPORT_SYMBOL(snd_sof_handle_fw_exception);
