@@ -831,6 +831,7 @@ void snd_sof_dsp_dbg_dump(struct snd_sof_dev *sdev, u32 flags)
 
 	if (sof_ops(sdev)->dbg_dump && !sdev->dbg_dump_printed) {
 		dev_err(sdev->dev, "------------[ DSP dump start ]------------\n");
+		dev_err(sdev->dev, "DSP firmware state: %d\n", sdev->fw_state);
 		sof_ops(sdev)->dbg_dump(sdev, flags);
 		dev_err(sdev->dev, "------------[ DSP dump end ]------------\n");
 		if (!print_all)
