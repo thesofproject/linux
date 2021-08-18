@@ -433,6 +433,10 @@ struct snd_sof_dsp_ops sof_imx8_ops = {
 	/* firmware loading */
 	.load_firmware	= snd_sof_load_firmware_memcpy,
 
+	/* client ops */
+	.register_ipc_clients = imx8_dma_trace_register,
+	.unregister_ipc_clients = imx8_dma_trace_unregister,
+
 	/* Debug information */
 	.dbg_dump = imx8_dump,
 	.debugfs_add_region_item = snd_sof_debugfs_add_region_item_iomem,
@@ -487,6 +491,10 @@ struct snd_sof_dsp_ops sof_imx8x_ops = {
 	.get_bar_index	= imx8_get_bar_index,
 	/* firmware loading */
 	.load_firmware	= snd_sof_load_firmware_memcpy,
+
+	/* client ops */
+	.register_ipc_clients = imx8_dma_trace_register,
+	.unregister_ipc_clients = imx8_dma_trace_unregister,
 
 	/* Debug information */
 	.dbg_dump = imx8_dump,

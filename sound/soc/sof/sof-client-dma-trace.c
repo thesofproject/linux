@@ -626,6 +626,7 @@ static const struct auxiliary_device_id sof_dtrace_client_id_table[] = {
 	{ .name = "snd_sof.atom-dma-trace", },
 	{ .name = "snd_sof.bdw-dma-trace", },
 	{ .name = "snd_sof.hda-dma-trace", },
+	{ .name = "snd_sof.imx8-dma-trace", },
 	{},
 };
 MODULE_DEVICE_TABLE(auxiliary, sof_dtrace_client_id_table);

@@ -13,4 +13,7 @@ void imx8_get_registers(struct snd_sof_dev *sdev,
 
 void imx8_dump(struct snd_sof_dev *sdev, u32 flags);
 
+int imx8_dma_trace_register(struct snd_sof_dev *sdev);
+void imx8_dma_trace_unregister(struct snd_sof_dev *sdev);
+
 #endif
