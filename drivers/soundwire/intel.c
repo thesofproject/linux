@@ -846,6 +846,12 @@ static int intel_hw_params(struct snd_pcm_substream *substream,
 	if (!dma)
 		return -EIO;
 
+	if (dma->hw_params) {
+		/* reconfiguration is currently not supported */
+		ret = 0;
+		goto error;
+	}
+
 	ch = params_channels(params);
 	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
 		dir = SDW_DATA_DIR_RX;
