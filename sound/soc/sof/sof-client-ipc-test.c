@@ -33,7 +33,11 @@ struct sof_ipc_client_data {
 
 static int sof_ipc_dfsentry_open(struct inode *inode, struct file *file)
 {
+	struct sof_client_dev *cdev = inode->i_private;
 	int ret;
+
+	if (sof_client_get_fw_state(cdev) == SOF_FW_CRASHED)
+		return -ENODEV;
 
 	ret = debugfs_file_get(file->f_path.dentry);
 	if (unlikely(ret))
