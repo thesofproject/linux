@@ -293,7 +293,11 @@ static size_t sof_wait_trace_avail(struct sof_client_dev *cdev,
 
 static int sof_dfsentry_trace_open(struct inode *inode, struct file *file)
 {
+	struct sof_client_dev *cdev = inode->i_private;
 	int ret;
+
+	if (sof_client_get_fw_state(cdev) == SOF_FW_CRASHED)
+		return -ENODEV;
 
 	ret = debugfs_file_get(file->f_path.dentry);
 	if (unlikely(ret))
