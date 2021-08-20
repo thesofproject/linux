@@ -30,7 +30,7 @@ int sof_ipc_msg_data(struct snd_sof_dev *sdev,
 		     void *p, size_t sz)
 {
 	if (!substream || !sdev->stream_box.size) {
-		sof_mailbox_read(sdev, sdev->dsp_box.offset, p, sz);
+		snd_sof_dsp_mailbox_read(sdev, sdev->dsp_box.offset, p, sz);
 	} else {
 		struct sof_stream *stream = substream->runtime->private_data;
 
@@ -38,7 +38,7 @@ int sof_ipc_msg_data(struct snd_sof_dev *sdev,
 		if (!stream)
 			return -ESTRPIPE;
 
-		sof_mailbox_read(sdev, stream->posn_offset, p, sz);
+		snd_sof_dsp_mailbox_read(sdev, stream->posn_offset, p, sz);
 	}
 
 	return 0;
