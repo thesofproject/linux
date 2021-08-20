@@ -262,6 +262,9 @@ static int sof_probes_compr_startup(struct snd_compr_stream *cstream,
 	const struct sof_probes_host_ops *ops = priv->host_ops;
 	int ret;
 
+	if (sof_client_get_fw_state(cdev) == SOF_FW_CRASHED)
+		return -ENODEV;
+
 	ret = sof_client_core_module_get(cdev);
 	if (ret)
 		return ret;
