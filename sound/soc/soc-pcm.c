@@ -2078,7 +2078,9 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 			break;
 		case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
 			spin_lock_irqsave(&fe->card->dpcm_lock, flags);
-			if (be->dpcm[stream].state != SND_SOC_DPCM_STATE_PAUSED) {
+			if (be->dpcm[stream].state != SND_SOC_DPCM_STATE_START &&
+			    be->dpcm[stream].state != SND_SOC_DPCM_STATE_STOP &&
+			    be->dpcm[stream].state != SND_SOC_DPCM_STATE_PAUSED) {
 				spin_unlock_irqrestore(&fe->card->dpcm_lock, flags);
 				continue;
 			}
