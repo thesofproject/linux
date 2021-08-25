@@ -181,12 +181,11 @@ static int sdw_dai_config_ipc(struct snd_sof_dev *sdev,
 static int sdw_params_stream(struct device *dev,
 			     struct sdw_intel_stream_params_data *params_data)
 {
-	struct snd_pcm_substream *substream = params_data->substream;
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	struct snd_soc_dai *d = params_data->dai;
 	struct snd_soc_dapm_widget *w;
 
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+	if (params_data->stream == SNDRV_PCM_STREAM_PLAYBACK)
 		w = d->playback_widget;
 	else
 		w = d->capture_widget;
@@ -198,12 +197,11 @@ static int sdw_params_stream(struct device *dev,
 static int sdw_free_stream(struct device *dev,
 			   struct sdw_intel_stream_free_data *free_data)
 {
-	struct snd_pcm_substream *substream = free_data->substream;
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	struct snd_soc_dai *d = free_data->dai;
 	struct snd_soc_dapm_widget *w;
 
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+	if (free_data->stream == SNDRV_PCM_STREAM_PLAYBACK)
 		w = d->playback_widget;
 	else
 		w = d->capture_widget;
