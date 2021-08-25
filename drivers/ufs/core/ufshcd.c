@@ -9132,6 +9132,7 @@ static int ufshcd_probe_hba(struct ufs_hba *hba, bool init_dev_params)
 	if (hba->ee_usr_mask)
 		ufshcd_write_ee_control(hba);
 	ufshcd_configure_auto_hibern8(hba);
+	trace_android_rvh_ufs_complete_init(hba);
 
 	return 0;
 }
