@@ -24,6 +24,7 @@ struct snd_sof_dsp_ops;
  * @SOF_FW_BOOT_IN_PROGRESS:	firmware boot is in progress
  * @SOF_FW_BOOT_FAILED:		firmware boot failed
  * @SOF_FW_BOOT_READY_FAILED:	firmware booted but fw_ready op failed
+ * @SOF_FW_BOOT_READY_OK:	firmware booted and fw_ready op is OK
  * @SOF_FW_BOOT_COMPLETE:	firmware is booted up and functional
  * @SOF_FW_CRASHED:		firmware crashed after successful boot
  */
@@ -33,6 +34,7 @@ enum snd_sof_fw_state {
 	SOF_FW_BOOT_IN_PROGRESS,
 	SOF_FW_BOOT_FAILED,
 	SOF_FW_BOOT_READY_FAILED,
+	SOF_FW_BOOT_READY_OK,
 	SOF_FW_BOOT_COMPLETE,
 	SOF_FW_CRASHED,
 };
