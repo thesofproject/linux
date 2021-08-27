@@ -913,7 +913,8 @@ void snd_sof_new_platform_drv(struct snd_sof_dev *sdev)
 	pd->compress_ops = &sof_probe_compressed_ops;
 #endif
 	pd->pcm_construct = sof_pcm_new;
-	pd->ignore_machine = drv_name;
+	if (!plat_data->desc->no_ignore_machine)
+		pd->ignore_machine = drv_name;
 	pd->be_hw_params_fixup = sof_pcm_dai_link_fixup;
 	pd->be_pcm_base = SOF_BE_PCM_BASE;
 	pd->use_dai_pcm_id = true;
