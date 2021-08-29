@@ -155,7 +155,9 @@ int sof_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
 	/* reset route setup status for all routes that contain this widget */
 	sof_reset_route_setup_status(sdev, swidget);
 	swidget->complete = 0;
-	dev_dbg(sdev->dev, "widget %s freed\n", swidget->widget->name);
+
+	if (!ret)
+		dev_dbg(sdev->dev, "widget %s freed\n", swidget->widget->name);
 
 	return ret;
 }
