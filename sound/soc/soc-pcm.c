@@ -453,16 +453,6 @@ static void soc_pcm_apply_msb(struct snd_pcm_substream *substream)
 	int i;
 	unsigned int bits = 0, cpu_bits = 0;
 
-	for_each_rtd_codec_dais(rtd, i, codec_dai) {
-		struct snd_soc_pcm_stream *pcm_codec = snd_soc_dai_get_pcm_stream(codec_dai, stream);
-
-		if (pcm_codec->sig_bits == 0) {
-			bits = 0;
-			break;
-		}
-		bits = max(pcm_codec->sig_bits, bits);
-	}
-
 	for_each_rtd_cpu_dais(rtd, i, cpu_dai) {
 		struct snd_soc_pcm_stream *pcm_cpu = snd_soc_dai_get_pcm_stream(cpu_dai, stream);
 
@@ -472,9 +462,18 @@ static void soc_pcm_apply_msb(struct snd_pcm_substream *substream)
 		}
 		cpu_bits = max(pcm_cpu->sig_bits, cpu_bits);
 	}
-
-	soc_pcm_set_msb(substream, bits);
 	soc_pcm_set_msb(substream, cpu_bits);
+
+	for_each_rtd_codec_dais(rtd, i, codec_dai) {
+		struct snd_soc_pcm_stream *pcm_codec = snd_soc_dai_get_pcm_stream(codec_dai, stream);
+
+		if (pcm_codec->sig_bits == 0) {
+			bits = 0;
+			break;
+		}
+		bits = max(pcm_codec->sig_bits, bits);
+	}
+	soc_pcm_set_msb(substream, bits);
 }
 
 static void soc_pcm_hw_init(struct snd_pcm_hardware *hw)
@@ -940,6 +939,23 @@ static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 	if (ret < 0)
 		goto out;
 
+	for_each_rtd_cpu_dais(rtd, i, cpu_dai) {
+		/*
+		 * Skip CPUs which don't support the current stream
+		 * type. See soc_pcm_init_runtime_hw() for more details
+		 */
+		if (!snd_soc_dai_stream_valid(cpu_dai, substream->stream))
+			continue;
+
+		ret = snd_soc_dai_hw_params(cpu_dai, substream, params);
+		if (ret < 0)
+			goto out;
+
+		/* store the parameters for each DAI */
+		soc_pcm_set_dai_params(cpu_dai, params);
+		snd_soc_dapm_update_dai(substream, params, cpu_dai);
+	}
+
 	for_each_rtd_codec_dais(rtd, i, codec_dai) {
 		struct snd_pcm_hw_params codec_params;
 
@@ -981,23 +997,6 @@ static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 
 		soc_pcm_set_dai_params(codec_dai, &codec_params);
 		snd_soc_dapm_update_dai(substream, &codec_params, codec_dai);
-	}
-
-	for_each_rtd_cpu_dais(rtd, i, cpu_dai) {
-		/*
-		 * Skip CPUs which don't support the current stream
-		 * type. See soc_pcm_init_runtime_hw() for more details
-		 */
-		if (!snd_soc_dai_stream_valid(cpu_dai, substream->stream))
-			continue;
-
-		ret = snd_soc_dai_hw_params(cpu_dai, substream, params);
-		if (ret < 0)
-			goto out;
-
-		/* store the parameters for each DAI */
-		soc_pcm_set_dai_params(cpu_dai, params);
-		snd_soc_dapm_update_dai(substream, params, cpu_dai);
 	}
 
 	ret = snd_soc_pcm_component_hw_params(substream, params);
