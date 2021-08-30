@@ -806,8 +806,9 @@ int sof_tear_down_pipelines(struct snd_sof_dev *sdev, bool verify)
 	/*
 	 * Tear down all pipelines associated with PCMs that did not get suspended
 	 * and unset the prepare flag so that they can be set up again during resume.
+	 * Skip this step for older firmware.
 	 */
-	if (!verify) {
+	if (!verify && v->abi_version >= SOF_ABI_VER(3, 19, 0)) {
 		ret = sof_tear_down_left_over_pipelines(sdev);
 		if (ret < 0) {
 			dev_err(sdev->dev, "failed to tear down paused pipelines\n");
