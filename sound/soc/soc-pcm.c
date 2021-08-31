@@ -981,9 +981,11 @@ static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 
 		/* fixup params based on TDM slot masks */
 		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK &&
-		    codec_dai->tx_mask)
-			soc_pcm_codec_params_fixup(&codec_params,
-						   codec_dai->tx_mask);
+		    codec_dai->tx_mask) {
+			dev_info(codec_dai->dev, "%s: plb: stream tag is %d, ignored\n", __func__, codec_dai->tx_mask);
+			//soc_pcm_codec_params_fixup(&codec_params,
+			//			   codec_dai->tx_mask);
+		}
 
 		if (substream->stream == SNDRV_PCM_STREAM_CAPTURE &&
 		    codec_dai->rx_mask)
