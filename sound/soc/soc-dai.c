@@ -392,10 +392,13 @@ int snd_soc_dai_hw_params(struct snd_soc_dai *dai,
 
 	if (dai->driver->ops &&
 	    dai->driver->ops->hw_params) {
+		dev_info(dai->dev, "%s: plb before snd_soc_link_be_hw_params_fixup\n", __func__);
+
 		/* perform any topology hw_params fixups before DAI  */
 		ret = snd_soc_link_be_hw_params_fixup(rtd, params);
 		if (ret < 0)
 			goto end;
+		dev_info(dai->dev, "%s: plb after snd_soc_link_be_hw_params_fixup\n", __func__);
 
 		ret = dai->driver->ops->hw_params(substream, params, dai);
 	}

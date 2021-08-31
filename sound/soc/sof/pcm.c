@@ -717,6 +717,8 @@ int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_pa
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
 	struct snd_soc_dpcm *dpcm;
 
+	dev_info(component->dev, "plb: %s: start\n", __func__);
+
 	/* no topology exists for this BE, try a common configuration */
 	if (!dai) {
 		dev_warn(component->dev,
@@ -830,6 +832,8 @@ int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_pa
 			dai->dai_config->type);
 		break;
 	}
+
+	dev_info(component->dev, "plb: %s: done\n", __func__);
 
 	return 0;
 }

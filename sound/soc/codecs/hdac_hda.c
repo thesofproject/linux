@@ -208,6 +208,8 @@ static int hdac_hda_dai_hw_params(struct snd_pcm_substream *substream,
 	unsigned int format_val;
 	unsigned int maxbps;
 
+	dev_info(component->dev, "plb: %s: start dai %s\n", __func__, dai->name);
+
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
 		maxbps = dai->driver->playback.sig_bits;
 	else
@@ -229,6 +231,9 @@ static int hdac_hda_dai_hw_params(struct snd_pcm_substream *substream,
 	}
 
 	hda_pvt->pcm[dai->id].format_val[substream->stream] = format_val;
+
+	dev_info(component->dev, "plb: %s: done %s\n", __func__, dai->name);
+
 	return 0;
 }
 

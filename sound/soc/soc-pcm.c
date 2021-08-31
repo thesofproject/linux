@@ -1901,9 +1901,11 @@ int dpcm_be_dai_hw_params(struct snd_soc_pcm_runtime *fe, int stream)
 				sizeof(struct snd_pcm_hw_params));
 
 		/* perform any hw_params fixups */
+		dev_info(be->dev, "%s: plb before snd_soc_link_be_hw_params_fixup\n", __func__);
 		ret = snd_soc_link_be_hw_params_fixup(be, &dpcm->hw_params);
 		if (ret < 0)
 			goto unwind;
+		dev_info(be->dev, "%s: plb after snd_soc_link_be_hw_params_fixup\n", __func__);
 
 		/* copy the fixed-up hw params for BE dai */
 		memcpy(&be->dpcm[stream].hw_params, &dpcm->hw_params,

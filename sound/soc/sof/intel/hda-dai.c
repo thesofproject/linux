@@ -279,11 +279,17 @@ static int hda_dai_hw_params(struct snd_pcm_substream *substream,
 {
 	int ret;
 
+	dev_info(dai->dev, "plb: %s: start dai %s\n", __func__, dai->name);
+
 	ret = hda_dai_link_hw_params(substream, params);
 	if (ret < 0)
 		return ret;
 
-	return hda_dai_hw_params_update(substream, params, dai);
+	ret = hda_dai_hw_params_update(substream, params, dai);
+
+	dev_info(dai->dev, "plb: %s: done dai %s\n", __func__, dai->name);
+
+	return ret;
 }
 
 static int hda_dai_link_prepare(struct snd_pcm_substream *substream)
