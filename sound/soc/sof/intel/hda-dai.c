@@ -183,16 +183,15 @@ static struct sof_ipc_dai_config *hda_dai_update_config(struct snd_soc_dapm_widg
 	return config;
 }
 
-static int hda_dai_widget_update(struct sof_intel_hda_stream *hda_stream,
+static int hda_dai_widget_update(struct device *dev,
 				 struct snd_soc_dapm_widget *w,
 				 int channel, bool widget_setup)
 {
-	struct snd_sof_dev *sdev = hda_stream->sdev;
 	struct sof_ipc_dai_config *config;
 
 	config = hda_dai_update_config(w, channel);
 	if (!config) {
-		dev_err(sdev->dev, "error: no config for DAI %s\n", w->name);
+		dev_err(dev, "%s: no config for DAI %s\n", __func__, w->name);
 		return -ENOENT;
 	}
 
@@ -236,7 +235,7 @@ static int hda_dai_hw_params(struct snd_pcm_substream *substream,
 	w = snd_soc_dai_get_widget(dai, substream->stream);
 
 	/* set up the DAI widget and send the DAI_CONFIG with the new tag */
-	ret = hda_dai_widget_update(hda_stream, w, stream_tag - 1, true);
+	ret = hda_dai_widget_update(dai->dev, w, stream_tag - 1, true);
 	if (ret < 0)
 		return ret;
 
@@ -321,7 +320,7 @@ static int hda_dai_trigger(struct snd_pcm_substream *substream,
 		/*
 		 * free DAI widget during stop/suspend to keep widget use_count's balanced.
 		 */
-		ret = hda_dai_widget_update(hda_stream, w, DMA_CHAN_INVALID, false);
+		ret = hda_dai_widget_update(dai->dev, w, DMA_CHAN_INVALID, false);
 		if (ret < 0)
 			return ret;
 
@@ -371,7 +370,7 @@ static int hda_dai_hw_free(struct snd_pcm_substream *substream,
 	w = snd_soc_dai_get_widget(dai, substream->stream);
 
 	/* free the link DMA channel in the FW and the DAI widget */
-	ret = hda_dai_widget_update(hda_stream, w, DMA_CHAN_INVALID, false);
+	ret = hda_dai_widget_update(dai->dev, w, DMA_CHAN_INVALID, false);
 	if (ret < 0)
 		return ret;
 
