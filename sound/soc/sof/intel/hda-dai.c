@@ -233,10 +233,7 @@ static int hda_link_hw_params(struct snd_pcm_substream *substream,
 
 	hda_stream = hstream_to_sof_hda_stream(link_dev);
 
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		w = dai->playback_widget;
-	else
-		w = dai->capture_widget;
+	w = snd_soc_dai_get_widget(dai, substream->stream);
 
 	/* set up the DAI widget and send the DAI_CONFIG with the new tag */
 	ret = hda_link_dai_widget_update(hda_stream, w, stream_tag - 1, true);
@@ -330,10 +327,7 @@ static int hda_link_pcm_trigger(struct snd_pcm_substream *substream,
 		break;
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_STOP:
-		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-			w = dai->playback_widget;
-		else
-			w = dai->capture_widget;
+		w = snd_soc_dai_get_widget(dai, substream->stream);
 
 		/*
 		 * free DAI widget during stop/suspend to keep widget use_count's balanced.
@@ -385,10 +379,7 @@ static int hda_link_hw_free(struct snd_pcm_substream *substream,
 
 	hda_stream = hstream_to_sof_hda_stream(link_dev);
 
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		w = dai->playback_widget;
-	else
-		w = dai->capture_widget;
+	w = snd_soc_dai_get_widget(dai, substream->stream);
 
 	/* free the link DMA channel in the FW and the DAI widget */
 	ret = hda_link_dai_widget_update(hda_stream, w, DMA_CHAN_INVALID, false);
@@ -437,10 +428,7 @@ static int ssp_dai_setup_or_free(struct snd_pcm_substream *substream, struct snd
 	struct sof_ipc_fw_version *v;
 	struct snd_sof_dev *sdev;
 
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		w = dai->playback_widget;
-	else
-		w = dai->capture_widget;
+	w = snd_soc_dai_get_widget(dai, substream->stream);
 
 	swidget = w->dobj.private;
 	component = swidget->scomp;
