@@ -605,6 +605,7 @@ static void init_dai_link(struct device *dev, struct snd_soc_dai_link *dai_links
 	dai_links->dpcm_capture = capture;
 	dai_links->init = init;
 	dai_links->ops = ops;
+	dai_links->cpu_dai_hw_params_first = 1;
 }
 
 static bool is_unique_device(const struct snd_soc_acpi_link_adr *link,
