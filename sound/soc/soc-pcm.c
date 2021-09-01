@@ -917,28 +917,13 @@ static int soc_pcm_hw_free(struct snd_pcm_substream *substream)
 	return soc_pcm_hw_clean(substream, 0);
 }
 
-/*
- * Called by ALSA when the hardware params are set by application. This
- * function can also be called multiple times and can allocate buffers
- * (using snd_pcm_lib_* ). It's non-atomic.
- */
-static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
-				struct snd_pcm_hw_params *params)
+static int soc_pcm_rtd_codec_dais_hw_params(struct snd_pcm_substream *substream,
+					    struct snd_pcm_hw_params *params)
 {
 	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
-	struct snd_soc_dai *cpu_dai;
 	struct snd_soc_dai *codec_dai;
-	int i, ret = 0;
-
-	mutex_lock_nested(&rtd->card->pcm_mutex, rtd->card->pcm_subclass);
-
-	ret = soc_pcm_params_symmetry(substream, params);
-	if (ret)
-		goto out;
-
-	ret = snd_soc_link_hw_params(substream, params);
-	if (ret < 0)
-		goto out;
+	int ret = 0;
+	int i;
 
 	for_each_rtd_codec_dais(rtd, i, codec_dai) {
 		struct snd_pcm_hw_params codec_params;
@@ -982,6 +967,17 @@ static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 		soc_pcm_set_dai_params(codec_dai, &codec_params);
 		snd_soc_dapm_update_dai(substream, &codec_params, codec_dai);
 	}
+out:
+	return ret;
+}
+
+static int soc_pcm_rtd_cpu_dais_hw_params(struct snd_pcm_substream *substream,
+					  struct snd_pcm_hw_params *params)
+{
+	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
+	struct snd_soc_dai *cpu_dai;
+	int ret = 0;
+	int i;
 
 	for_each_rtd_cpu_dais(rtd, i, cpu_dai) {
 		/*
@@ -999,6 +995,38 @@ static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 		soc_pcm_set_dai_params(cpu_dai, params);
 		snd_soc_dapm_update_dai(substream, params, cpu_dai);
 	}
+out:
+	return ret;
+}
+
+/*
+ * Called by ALSA when the hardware params are set by application. This
+ * function can also be called multiple times and can allocate buffers
+ * (using snd_pcm_lib_* ). It's non-atomic.
+ */
+static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
+			     struct snd_pcm_hw_params *params)
+{
+	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
+	int ret;
+
+	mutex_lock_nested(&rtd->card->pcm_mutex, rtd->card->pcm_subclass);
+
+	ret = soc_pcm_params_symmetry(substream, params);
+	if (ret)
+		goto out;
+
+	ret = snd_soc_link_hw_params(substream, params);
+	if (ret < 0)
+		goto out;
+
+	ret = soc_pcm_rtd_codec_dais_hw_params(substream, params);
+	if (ret < 0)
+		goto out;
+
+	ret = soc_pcm_rtd_cpu_dais_hw_params(substream, params);
+	if (ret < 0)
+		goto out;
 
 	ret = snd_soc_pcm_component_hw_params(substream, params);
 out:
