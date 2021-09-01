@@ -1008,6 +1008,7 @@ static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 			     struct snd_pcm_hw_params *params)
 {
 	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
+	struct snd_soc_dai_link *link = rtd->dai_link;
 	int ret;
 
 	mutex_lock_nested(&rtd->card->pcm_mutex, rtd->card->pcm_subclass);
@@ -1020,13 +1021,21 @@ static int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 	if (ret < 0)
 		goto out;
 
-	ret = soc_pcm_rtd_codec_dais_hw_params(substream, params);
-	if (ret < 0)
-		goto out;
+	if (!link->cpu_dai_hw_params_first) {
+		ret = soc_pcm_rtd_codec_dais_hw_params(substream, params);
+		if (ret < 0)
+			goto out;
+	}
 
 	ret = soc_pcm_rtd_cpu_dais_hw_params(substream, params);
 	if (ret < 0)
 		goto out;
+
+	if (link->cpu_dai_hw_params_first) {
+		ret = soc_pcm_rtd_codec_dais_hw_params(substream, params);
+		if (ret < 0)
+			goto out;
+	}
 
 	ret = snd_soc_pcm_component_hw_params(substream, params);
 out:
