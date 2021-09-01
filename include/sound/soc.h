@@ -718,6 +718,12 @@ struct snd_soc_dai_link {
 	 */
 	unsigned int stop_dma_first:1;
 
+	/* This flag will change default order in BE hw_params, by first
+	 * handling the cpu_dai(s) hw_params() and second the codec_dai(s)
+	 * hw_params().
+	 */
+	unsigned int cpu_dai_hw_params_first:1;
+
 #ifdef CONFIG_SND_SOC_TOPOLOGY
 	struct snd_soc_dobj dobj; /* For topology */
 #endif
