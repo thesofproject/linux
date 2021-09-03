@@ -295,6 +295,8 @@ static int cl_copy_fw(struct snd_sof_dev *sdev, struct hdac_ext_stream *stream)
 	return status;
 }
 
+#define LTRP_GB_OVERRIDE 5
+
 int hda_dsp_cl_boot_firmware_iccmax(struct snd_sof_dev *sdev)
 {
 	struct snd_sof_pdata *plat_data = sdev->pdata;
@@ -336,6 +338,9 @@ int hda_dsp_cl_boot_firmware_iccmax(struct snd_sof_dev *sdev)
 		if (!ret)
 			ret = ret1;
 	}
+
+	dev_warn(sdev->dev, "Overriding LTRP_GB hw default of %d with %d\n", original_gb, LTRP_GB_OVERRIDE);
+	original_gb = LTRP_GB_OVERRIDE;
 
 	/* restore the original guardband value after FW boot */
 	snd_hdac_chip_updateb(bus, VS_LTRP, HDA_VS_INTEL_LTRP_GB_MASK, original_gb);
