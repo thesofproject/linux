@@ -22,6 +22,7 @@
 #include <sound/sof/xtensa.h>
 #include "mt8195.h"
 #include "mt8195-clk.h"
+#include "mt8195-ipc.h"
 #include "../adsp_helper.h"
 #include "../../ops.h"
 #include "../../sof-audio.h"
@@ -53,6 +54,30 @@ void __iomem *get_mbox_reg_base(u32 id)
 	return adsp->va_mboxreg[id];
 }
 EXPORT_SYMBOL(get_mbox_reg_base);
+
+static int mt8195_get_mailbox_offset(struct snd_sof_dev *sdev)
+{
+	return MBOX_OFFSET;
+}
+
+static int mt8195_get_window_offset(struct snd_sof_dev *sdev, u32 id)
+{
+	return MBOX_OFFSET;
+}
+
+static int mt8195_ipi_init(struct snd_sof_dev *sdev)
+{
+	return mt8195_mbox_init(sdev);
+}
+
+static int mt8195_send_msg(struct snd_sof_dev *sdev,
+			   struct snd_sof_ipc_msg *msg)
+{
+	sof_mailbox_write(sdev, sdev->host_box.offset, msg->msg_data,
+			  msg->msg_size);
+
+	return adsp_ipi_send(sdev, ADSP_IPI_MBOX_REQ, ADSP_IPI_OP_REQ);
+}
 
 static int platform_parse_resource(struct platform_device *pdev, void *data)
 {
@@ -238,10 +263,31 @@ static int mt8195_run(struct snd_sof_dev *sdev)
 	return 0;
 }
 
+static u32 dram_remap_to_dsp(u32 dram_addr)
+{
+	struct adsp_chip_info *adsp = get_adsp_chip_data();
+	u32 dsp_dram_addr;
+
+	dsp_dram_addr = dram_addr - adsp->dram_offset;
+
+	return dsp_dram_addr;
+}
+
+static u32 dram_remap_to_ap(u32 dram_addr)
+{
+	struct adsp_chip_info *adsp = get_adsp_chip_data();
+	u32 dsp_dram_addr;
+
+	dsp_dram_addr = dram_addr + adsp->dram_offset;
+
+	return dsp_dram_addr;
+}
+
 static int mt8195_dsp_probe(struct snd_sof_dev *sdev)
 {
 	struct platform_device *pdev = container_of(sdev->dev, struct platform_device, dev);
 	struct adsp_priv *priv;
+	struct adsp_mem share_dram;
 	int ret, mailbox_type;
 
 	priv = devm_kzalloc(&pdev->dev, sizeof(*priv), GFP_KERNEL);
@@ -289,6 +335,12 @@ static int mt8195_dsp_probe(struct snd_sof_dev *sdev)
 		goto err_adsp_sram_power_off;
 	}
 
+	ret = mt8195_ipi_init(sdev);
+	if (ret < 0) {
+		dev_err(sdev->dev, "failed to init adsp ipi:%d\n", ret);
+		goto err_adsp_sram_power_off;
+	}
+
 	sdev->bar[SOF_FW_BLK_TYPE_IRAM] = devm_ioremap(sdev->dev,
 						       priv->adsp->pa_sram,
 						       priv->adsp->srammsize);
@@ -317,8 +369,26 @@ static int mt8195_dsp_probe(struct snd_sof_dev *sdev)
 		goto err_adsp_sram_power_off;
 	}
 
+	sdev->bar[DSP_REG_BAR] = adsp_info->va_cfgreg;
+
 	sdev->mmio_bar = mailbox_type;
 	sdev->mailbox_bar = mailbox_type;
+
+	/* set default mailbox offset for FW ready message */
+	sdev->dsp_box.offset = mt8195_get_mailbox_offset(sdev);
+
+	priv->adsp2ap_addr = dram_remap_to_ap;
+	priv->ap2adsp_addr = dram_remap_to_dsp;
+	share_dram.phy_addr = priv->adsp->pa_shared_dram;
+	share_dram.va_addr = (unsigned long long)priv->adsp->shared_dram;
+	share_dram.vir_addr = (unsigned char *)priv->adsp->shared_dram;
+	share_dram.size = SIZE_SHARED_DRAM_UL + SIZE_SHARED_DRAM_DL;
+
+	ret = adsp_genpool_create(&priv->mem_pool, &share_dram);
+	if (ret) {
+		dev_err(sdev->dev, "adsp_genpool_create fail!\n");
+		goto err_adsp_sram_power_off;
+	}
 
 	return 0;
 
@@ -335,10 +405,12 @@ err_pm_disable:
 static int mt8195_dsp_remove(struct snd_sof_dev *sdev)
 {
 	struct platform_device *pdev = container_of(sdev->dev, struct platform_device, dev);
+	struct adsp_priv *priv = sdev->pdata->hw_pdata;
 
 	adsp_clock_off(&pdev->dev);
 	adsp_sram_power_on(&pdev->dev, false);
 	pm_runtime_disable(&pdev->dev);
+	adsp_genpool_destroy(&priv->mem_pool);
 	return 0;
 }
 
@@ -376,6 +448,22 @@ static int mt8195_dsp_resume(struct snd_sof_dev *sdev)
 		dev_err(sdev->dev, "[ADSP] adsp_sram_power_on fail!\n");
 
 	return ret;
+}
+
+static int mt8195_ipc_msg_data(struct snd_sof_dev *sdev,
+			       struct snd_pcm_substream *substream,
+			       void *p, size_t sz)
+{
+	sof_mailbox_read(sdev, sdev->dsp_box.offset, p, sz);
+
+	return 0;
+}
+
+static int mt8195_ipc_pcm_params(struct snd_sof_dev *sdev,
+				 struct snd_pcm_substream *substream,
+				 const struct sof_ipc_pcm_params_reply *reply)
+{
+	return 0;
 }
 
 static void mt8195_machine_select(struct snd_sof_dev *sdev)
@@ -453,6 +541,15 @@ struct snd_sof_dsp_ops sof_mt8195_ops = {
 	.read		= sof_io_read,
 	.write64	= sof_io_write64,
 	.read64		= sof_io_read64,
+
+	/* ipc */
+	.send_msg	= mt8195_send_msg,
+	.fw_ready	= sof_fw_ready,
+	.get_mailbox_offset	= mt8195_get_mailbox_offset,
+	.get_window_offset	= mt8195_get_window_offset,
+
+	.ipc_msg_data	= mt8195_ipc_msg_data,
+	.ipc_pcm_params	= mt8195_ipc_pcm_params,
 
 	/* machine driver */
 	.machine_select = mt8195_machine_select,

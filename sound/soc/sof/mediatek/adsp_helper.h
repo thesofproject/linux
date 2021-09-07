@@ -8,11 +8,10 @@
 #define __ADSP_HELPER_H__
 
 #include "adsp_pcm.h"
+#include "adsp_ipc.h"
 /*
  * Global important adsp data structure.
  */
-#define DSP_MBOX_NUM	3
-
 struct adsp_chip_info {
 	phys_addr_t pa_sram;
 	phys_addr_t pa_dram; /* adsp dram physical base */
@@ -38,6 +37,7 @@ struct adsp_priv {
 
 	/* DSP IPC handler */
 	struct mbox_controller *adsp_mbox;
+	struct mtk_adsp_ipi ipi[DSP_MBOX_NUM];
 
 	/* Power domain handling */
 	int num_domains;
