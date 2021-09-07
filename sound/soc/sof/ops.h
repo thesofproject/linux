@@ -100,6 +100,8 @@ static inline int snd_sof_dsp_core_get(struct snd_sof_dev *sdev, int core)
 
 		/* and update enabled_cores_mask */
 		sdev->enabled_cores_mask |= BIT(core);
+
+		dev_dbg(sdev->dev, "Core %d powered up\n", core);
 	}
 
 	return 0;
@@ -127,6 +129,8 @@ static inline int snd_sof_dsp_core_put(struct snd_sof_dev *sdev, int core)
 
 		/* and update enabled_cores_mask */
 		sdev->enabled_cores_mask &= ~BIT(core);
+
+		dev_dbg(sdev->dev, "Core %d powered down\n", core);
 	}
 
 	return 0;
