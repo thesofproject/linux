@@ -28,6 +28,12 @@
 
 static struct adsp_chip_info *adsp_info;
 
+static struct snd_soc_acpi_mach sof_mt8195_mach = {
+	.id = "819501",
+	.drv_name = "mt8195_mt6359_rt1019_rt5682",
+	.sof_tplg_filename = "sof-mt8195-mt6359-rt1019-rt5682.tplg",
+};
+
 static void *get_adsp_chip_data(void)
 {
 	return (void *)adsp_info;
@@ -324,6 +330,26 @@ static int mt8195_dsp_remove(struct snd_sof_dev *sdev)
 	return 0;
 }
 
+static void mt8195_machine_select(struct snd_sof_dev *sdev)
+{
+	struct snd_sof_pdata *sof_pdata = sdev->pdata;
+	struct snd_soc_acpi_mach *mach;
+
+	mach = &sof_mt8195_mach;
+	if (!mach) {
+		dev_warn(sdev->dev, "No matching ASoC machine driver found\n");
+		return;
+	}
+
+	sof_pdata->tplg_filename = mach->sof_tplg_filename;
+	sof_pdata->machine = mach;
+
+	/* get machine node and save it to mach->pdata */
+	mach->pdata = of_get_child_by_name(sdev->dev->of_node, "sound");
+	if (!mach->pdata)
+		dev_warn(sdev->dev, "get child machine node \"sound\" failed\n");
+}
+
 static int mt8195_get_bar_index(struct snd_sof_dev *sdev, u32 type)
 {
 	return type;
@@ -344,6 +370,10 @@ struct snd_sof_dsp_ops sof_mt8195_ops = {
 	.read		= sof_io_read,
 	.write64	= sof_io_write64,
 	.read64		= sof_io_read64,
+
+	/* machine driver */
+	.machine_select = mt8195_machine_select,
+	.machine_register = sof_machine_register,
 
 	/* misc */
 	.get_bar_index	= mt8195_get_bar_index,
