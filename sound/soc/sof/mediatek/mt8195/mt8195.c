@@ -342,6 +342,42 @@ static int mt8195_dsp_remove(struct snd_sof_dev *sdev)
 	return 0;
 }
 
+static int mt8195_dsp_suspend(struct snd_sof_dev *sdev, u32 target_state)
+{
+	struct platform_device *pdev = container_of(sdev->dev, struct platform_device, dev);
+
+	/* stall and reset dsp */
+	hifixdsp_shutdown(sdev);
+
+	/* turn off adsp clock */
+	adsp_clock_off(&pdev->dev);
+
+	/* power down adsp sram */
+	adsp_sram_power_on(&pdev->dev, false);
+
+	return 0;
+}
+
+static int mt8195_dsp_resume(struct snd_sof_dev *sdev)
+{
+	struct platform_device *pdev = container_of(sdev->dev, struct platform_device, dev);
+	int ret;
+
+	/* turn on adsp clock */
+	ret = adsp_clock_on(&pdev->dev);
+	if (ret) {
+		dev_err(sdev->dev, "adsp_clock_on fail!\n");
+		return ret;
+	}
+
+	/* power on adsp sram */
+	ret = adsp_sram_power_on(sdev->dev, true);
+	if (ret)
+		dev_err(sdev->dev, "[ADSP] adsp_sram_power_on fail!\n");
+
+	return ret;
+}
+
 static void mt8195_machine_select(struct snd_sof_dev *sdev)
 {
 	struct snd_sof_pdata *sof_pdata = sdev->pdata;
@@ -440,6 +476,10 @@ struct snd_sof_dsp_ops sof_mt8195_ops = {
 	/* DAI drivers */
 	.drv = mt8195_dai,
 	.num_drv = ARRAY_SIZE(mt8195_dai),
+
+	/* PM */
+	.suspend		= mt8195_dsp_suspend,
+	.resume			= mt8195_dsp_resume,
 
 	/* ALSA HW info flags */
 	.hw_info =	SNDRV_PCM_INFO_MMAP |
