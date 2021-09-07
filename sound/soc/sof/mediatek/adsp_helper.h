@@ -7,6 +7,7 @@
 #ifndef __ADSP_HELPER_H__
 #define __ADSP_HELPER_H__
 
+#include "adsp_pcm.h"
 /*
  * Global important adsp data structure.
  */
@@ -47,6 +48,8 @@ struct adsp_priv {
 
 	u32 (*ap2adsp_addr)(u32 addr);
 	u32 (*adsp2ap_addr)(u32 addr);
+
+	struct adsp_mem_pool mem_pool;
 
 	void *private_data;
 };

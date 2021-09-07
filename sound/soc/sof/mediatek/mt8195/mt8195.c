@@ -427,6 +427,10 @@ struct snd_sof_dsp_ops sof_mt8195_ops = {
 	/* firmware loading */
 	.load_firmware	= snd_sof_load_firmware_memcpy,
 
+	/* stream callbacks */
+	.pcm_hw_params	= adsp_pcm_hw_params,
+	.pcm_hw_free	= adsp_pcm_hw_free,
+
 	/* misc */
 	.get_bar_index	= mt8195_get_bar_index,
 
@@ -436,6 +440,13 @@ struct snd_sof_dsp_ops sof_mt8195_ops = {
 	/* DAI drivers */
 	.drv = mt8195_dai,
 	.num_drv = ARRAY_SIZE(mt8195_dai),
+
+	/* ALSA HW info flags */
+	.hw_info =	SNDRV_PCM_INFO_MMAP |
+			SNDRV_PCM_INFO_MMAP_VALID |
+			SNDRV_PCM_INFO_INTERLEAVED |
+			SNDRV_PCM_INFO_PAUSE |
+			SNDRV_PCM_INFO_NO_PERIOD_WAKEUP,
 };
 EXPORT_SYMBOL(sof_mt8195_ops);
 
