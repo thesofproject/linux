@@ -148,4 +148,6 @@ void __iomem *get_mbox_reg_base(u32 id);
 #define SRAM_PHYS_BASE_FROM_DSP_VIEW  (0x40000000) /* MT8195 DSP view */
 #define DRAM_PHYS_BASE_FROM_DSP_VIEW  (0x60000000) /* MT8195 DSP view */
 
+void hifixdsp_boot_sequence(void *pdev, u32 boot_addr);
+void hifixdsp_shutdown(void *pdev);
 #endif
