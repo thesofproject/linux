@@ -350,10 +350,42 @@ static void mt8195_machine_select(struct snd_sof_dev *sdev)
 		dev_warn(sdev->dev, "get child machine node \"sound\" failed\n");
 }
 
+/* on MT8195 there is 1 to 1 match between type and BAR idx*/
 static int mt8195_get_bar_index(struct snd_sof_dev *sdev, u32 type)
 {
 	return type;
 }
+
+static struct snd_soc_dai_driver mt8195_dai[] = {
+{
+	.name = "SOF_DL2",
+	.playback = {
+		.channels_min = 1,
+		.channels_max = 2,
+	},
+},
+{
+	.name = "SOF_DL3",
+	.playback = {
+		.channels_min = 1,
+		.channels_max = 2,
+	},
+},
+{
+	.name = "SOF_UL4",
+	.capture = {
+		.channels_min = 1,
+		.channels_max = 2,
+	},
+},
+{
+	.name = "SOF_UL5",
+	.capture = {
+		.channels_min = 1,
+		.channels_max = 2,
+	},
+},
+};
 
 /* mt8195 ops */
 struct snd_sof_dsp_ops sof_mt8195_ops = {
@@ -380,6 +412,10 @@ struct snd_sof_dsp_ops sof_mt8195_ops = {
 
 	/* Firmware ops */
 	.dsp_arch_ops = &sof_xtensa_arch_ops,
+
+	/* DAI drivers */
+	.drv = mt8195_dai,
+	.num_drv = ARRAY_SIZE(mt8195_dai),
 };
 EXPORT_SYMBOL(sof_mt8195_ops);
 
