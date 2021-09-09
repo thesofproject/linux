@@ -1843,29 +1843,27 @@ int sdw_stream_add_master(struct sdw_bus *bus,
 		ret = -ENOMEM;
 		goto unlock;
 	}
+skip_alloc_master_rt:
+
+	ret = sdw_master_port_alloc(m_rt, num_ports);
+	if (ret)
+		goto alloc_error;
+
+	stream->m_rt_count++;
 
 	ret = sdw_master_rt_config(m_rt, stream_config);
 	if (ret < 0)
 		goto unlock;
 
-skip_alloc_master_rt:
 	ret = sdw_config_stream(bus->dev, stream, stream_config, false);
 	if (ret)
-		goto stream_error;
-
-	ret = sdw_master_port_alloc(m_rt, num_ports);
-	if (ret)
-		goto stream_error;
+		goto unlock;
 
 	ret = sdw_master_port_config(m_rt, port_config);
-	if (ret)
-		goto stream_error;
-
-	stream->m_rt_count++;
 
 	goto unlock;
 
-stream_error:
+alloc_error:
 	sdw_master_rt_free(m_rt, stream);
 unlock:
 	mutex_unlock(&bus->bus_lock);
@@ -1928,6 +1926,9 @@ int sdw_stream_add_slave(struct sdw_slave *slave,
 {
 	struct sdw_slave_runtime *s_rt;
 	struct sdw_master_runtime *m_rt;
+	bool alloc_master_rt = true;
+	bool alloc_slave_rt = true;
+
 	int ret;
 
 	mutex_lock(&slave->bus->bus_lock);
@@ -1937,8 +1938,10 @@ int sdw_stream_add_slave(struct sdw_slave *slave,
 	 * and go to configuration
 	 */
 	m_rt = sdw_master_rt_find(slave->bus, stream);
-	if (m_rt)
+	if (m_rt) {
+		alloc_master_rt = false;
 		goto skip_alloc_master_rt;
+	}
 
 	/*
 	 * If this API is invoked by Slave first then m_rt is not valid.
@@ -1950,9 +1953,8 @@ int sdw_stream_add_slave(struct sdw_slave *slave,
 			"alloc master runtime failed for stream:%s\n",
 			stream->name);
 		ret = -ENOMEM;
-		goto error;
+		goto unlock;
 	}
-	ret =  sdw_master_rt_config(m_rt, stream_config);
 
 skip_alloc_master_rt:
 	s_rt = sdw_slave_rt_alloc(slave, m_rt);
@@ -1960,25 +1962,30 @@ skip_alloc_master_rt:
 		dev_err(&slave->dev,
 			"Slave runtime alloc failed for stream:%s\n",
 			stream->name);
+		alloc_slave_rt = false;
 		ret = -ENOMEM;
-		goto stream_error;
+		goto alloc_error;
 	}
-
-	ret = sdw_slave_rt_config(s_rt, stream_config);
-	if (ret)
-		goto stream_error;
-
-	ret = sdw_config_stream(&slave->dev, stream, stream_config, true);
-	if (ret)
-		goto stream_error;
 
 	ret = sdw_slave_port_alloc(slave, s_rt, num_ports);
 	if (ret)
-		goto stream_error;
+		goto alloc_error;
+
+	ret =  sdw_master_rt_config(m_rt, stream_config);
+	if (ret)
+		goto unlock;
+
+	ret = sdw_slave_rt_config(s_rt, stream_config);
+	if (ret)
+		goto unlock;
+
+	ret = sdw_config_stream(&slave->dev, stream, stream_config, true);
+	if (ret)
+		goto unlock;
 
 	ret = sdw_slave_port_config(slave, s_rt, port_config);
 	if (ret)
-		goto stream_error;
+		goto unlock;
 
 	/*
 	 * Change stream state to CONFIGURED on first Slave add.
@@ -1987,15 +1994,17 @@ skip_alloc_master_rt:
 	 * change stream state to CONFIGURED.
 	 */
 	stream->state = SDW_STREAM_CONFIGURED;
-	goto error;
+	goto unlock;
 
-stream_error:
+alloc_error:
 	/*
-	 * we hit error so cleanup the stream, release all Slave(s) and
-	 * Master runtime
+	 * we only cleanup what was allocated in this routine
 	 */
-	sdw_master_rt_free(m_rt, stream);
-error:
+	if (alloc_master_rt)
+		sdw_master_rt_free(m_rt, stream);
+	else if (alloc_slave_rt)
+		sdw_slave_rt_free(slave, stream);
+unlock:
 	mutex_unlock(&slave->bus->bus_lock);
 	return ret;
 }
@@ -2022,4 +2031,3 @@ int sdw_stream_remove_slave(struct sdw_slave *slave,
 	return 0;
 }
 EXPORT_SYMBOL(sdw_stream_remove_slave);
-
