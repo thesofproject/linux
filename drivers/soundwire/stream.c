@@ -1019,11 +1019,13 @@ static int sdw_master_port_config(struct sdw_master_runtime *m_rt,
  * sdw_slave_rt_alloc() - Allocate a Slave runtime handle.
  *
  * @slave: Slave handle
+ * @m_rt: Master runtime handle
  *
  * This function is to be called with bus_lock held.
  */
 static struct sdw_slave_runtime
-*sdw_slave_rt_alloc(struct sdw_slave *slave)
+*sdw_slave_rt_alloc(struct sdw_slave *slave,
+		    struct sdw_master_runtime *m_rt)
 {
 	struct sdw_slave_runtime *s_rt;
 
@@ -1033,6 +1035,8 @@ static struct sdw_slave_runtime
 
 	INIT_LIST_HEAD(&s_rt->port_list);
 	s_rt->slave = slave;
+
+	list_add_tail(&s_rt->m_rt_node, &m_rt->slave_rt_list);
 
 	return s_rt;
 }
@@ -1951,7 +1955,7 @@ int sdw_stream_add_slave(struct sdw_slave *slave,
 	ret =  sdw_master_rt_config(m_rt, stream_config);
 
 skip_alloc_master_rt:
-	s_rt = sdw_slave_rt_alloc(slave);
+	s_rt = sdw_slave_rt_alloc(slave, m_rt);
 	if (!s_rt) {
 		dev_err(&slave->dev,
 			"Slave runtime alloc failed for stream:%s\n",
@@ -1959,7 +1963,6 @@ skip_alloc_master_rt:
 		ret = -ENOMEM;
 		goto stream_error;
 	}
-	list_add_tail(&s_rt->m_rt_node, &m_rt->slave_rt_list);
 
 	ret = sdw_slave_rt_config(s_rt, stream_config);
 	if (ret)
