@@ -1219,13 +1219,10 @@ static int sdw_is_valid_port_range(struct device *dev, int num)
 	return 0;
 }
 
-static int sdw_master_port_config(struct sdw_bus *bus,
-				  struct sdw_master_runtime *m_rt,
-				  struct sdw_port_config *port_config,
-				  unsigned int num_ports)
+static int sdw_master_port_alloc(struct sdw_master_runtime *m_rt,
+				 unsigned int num_ports)
 {
 	struct sdw_port_runtime *p_rt;
-	int ret;
 	int i;
 
 	/* Iterate for number of ports to perform initialization */
@@ -1234,6 +1231,16 @@ static int sdw_master_port_config(struct sdw_bus *bus,
 		if (!p_rt)
 			return -ENOMEM;
 	}
+
+	return 0;
+}
+
+static int sdw_master_port_config(struct sdw_master_runtime *m_rt,
+				  struct sdw_port_config *port_config)
+{
+	struct sdw_port_runtime *p_rt;
+	int ret;
+	int i;
 
 	i = 0;
 	list_for_each_entry(p_rt, &m_rt->port_list, port_node) {
@@ -1246,13 +1253,12 @@ static int sdw_master_port_config(struct sdw_bus *bus,
 	return 0;
 }
 
-static int sdw_slave_port_config(struct sdw_slave *slave,
-				 struct sdw_slave_runtime *s_rt,
-				 struct sdw_port_config *port_config,
-				 unsigned int num_config)
+static int sdw_slave_port_alloc(struct sdw_slave *slave,
+				struct sdw_slave_runtime *s_rt,
+				unsigned int num_config)
 {
 	struct sdw_port_runtime *p_rt;
-	int i, ret;
+	int i;
 
 	/* Iterate for number of ports to perform initialization */
 	for (i = 0; i < num_config; i++) {
@@ -1260,6 +1266,16 @@ static int sdw_slave_port_config(struct sdw_slave *slave,
 		if (!p_rt)
 			return -ENOMEM;
 	}
+
+	return 0;
+}
+
+static int sdw_slave_port_config(struct sdw_slave *slave,
+				 struct sdw_slave_runtime *s_rt,
+				 struct sdw_port_config *port_config)
+{
+	struct sdw_port_runtime *p_rt;
+	int i, ret;
 
 	i = 0;
 	list_for_each_entry(p_rt, &s_rt->port_list, port_node) {
@@ -1325,7 +1341,11 @@ int sdw_stream_add_master(struct sdw_bus *bus,
 	if (ret)
 		goto stream_error;
 
-	ret = sdw_master_port_config(bus, m_rt, port_config, num_ports);
+	ret = sdw_master_port_alloc(m_rt, num_ports);
+	if (ret)
+		goto stream_error;
+
+	ret = sdw_master_port_config(m_rt, port_config);
 	if (ret)
 		goto stream_error;
 
@@ -1393,7 +1413,11 @@ int sdw_stream_add_slave(struct sdw_slave *slave,
 	if (ret)
 		goto stream_error;
 
-	ret = sdw_slave_port_config(slave, s_rt, port_config, num_ports);
+	ret = sdw_slave_port_alloc(slave, s_rt, num_ports);
+	if (ret)
+		goto stream_error;
+
+	ret = sdw_slave_port_config(slave, s_rt, port_config);
 	if (ret)
 		goto stream_error;
 
