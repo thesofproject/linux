@@ -1002,6 +1002,8 @@ int sof_ipc_init_msg_memory(struct snd_sof_dev *sdev)
 	if (!msg->reply_data)
 		return -ENOMEM;
 
+	msg->max_payload_size = SOF_IPC_MSG_MAX_SIZE;
+
 	return 0;
 }
 
