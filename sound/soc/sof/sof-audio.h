@@ -141,6 +141,8 @@ struct snd_sof_dai {
 	bool configured; /* DAI configured during BE hw_params */
 	struct sof_ipc_dai_config *dai_config;
 	struct list_head list;	/* list in sdev dai list */
+
+	void *private;
 };
 
 /*

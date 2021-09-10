@@ -20,6 +20,7 @@
 #include "sof-audio.h"
 #include "ops.h"
 #include "topology-tokens.h"
+#include "ipc4-topology.h"
 
 /*
  * Constants used in the computation of linear volume gain
@@ -624,7 +625,10 @@ static int sof_control_load(struct snd_soc_component *scomp, int index,
 	case SND_SOC_TPLG_CTL_VOLSW_XR_SX:
 		sm = (struct soc_mixer_control *)kc->private_value;
 		dobj = &sm->dobj;
-		ret = sof_control_load_volume(scomp, scontrol, kc, hdr);
+		if (sof_get_abi_major(sdev) >= 4)
+			ret = sof_ipc4_control_load_volume(scomp, scontrol, kc, hdr);
+		else
+			ret = sof_control_load_volume(scomp, scontrol, kc, hdr);
 		break;
 	case SND_SOC_TPLG_CTL_BYTES:
 		sbe = (struct soc_bytes_ext *)kc->private_value;
@@ -1663,7 +1667,10 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 			return -ENOMEM;
 		}
 
-		ret = sof_widget_load_dai(scomp, index, swidget, tw, dai);
+		if (sof_get_abi_major(sdev) <= 3)
+			ret = sof_widget_load_dai(scomp, index, swidget, tw, dai);
+		else
+			ret = sof_ipc4_widget_load_dai(scomp, index, swidget, tw, dai);
 		if (!ret)
 			ret = sof_connect_dai_widget(scomp, w, tw, dai);
 		if (ret < 0) {
@@ -1674,24 +1681,41 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 		swidget->private = dai;
 		break;
 	case snd_soc_dapm_mixer:
-		ret = sof_widget_load_mixer(scomp, index, swidget, tw);
+		if (sof_get_abi_major(sdev) <= 3)
+			ret = sof_widget_load_mixer(scomp, index, swidget, tw);
+		else
+			ret = sof_ipc4_widget_load_mixer(scomp, index, swidget, tw);
 		break;
 	case snd_soc_dapm_pga:
-		ret = sof_widget_load_pga(scomp, index, swidget, tw);
+		if (sof_get_abi_major(sdev) <= 3)
+			ret = sof_widget_load_pga(scomp, index, swidget, tw);
+		else
+			ret = sof_ipc4_widget_load_pga(scomp, index, swidget, tw);
 		break;
 	case snd_soc_dapm_buffer:
 		ret = sof_widget_load_buffer(scomp, index, swidget, tw);
 		break;
 	case snd_soc_dapm_scheduler:
-		ret = sof_widget_load_pipeline(scomp, index, swidget, tw);
+		if (sof_get_abi_major(sdev) <= 3)
+			ret = sof_widget_load_pipeline(scomp, index, swidget, tw);
+		else
+			ret = sof_ipc4_widget_load_pipeline(scomp, index, swidget, tw);
 		break;
 	case snd_soc_dapm_aif_out:
-		ret = sof_widget_load_pcm(scomp, index, swidget,
-					  SOF_IPC_STREAM_CAPTURE, tw);
+		if (sof_get_abi_major(sdev) <= 3)
+			ret = sof_widget_load_pcm(scomp, index, swidget,
+						  SOF_IPC_STREAM_CAPTURE, tw);
+		else
+			ret = sof_ipc4_widget_load_pcm(scomp, index, swidget,
+						       SOF_IPC_STREAM_CAPTURE, tw);
 		break;
 	case snd_soc_dapm_aif_in:
-		ret = sof_widget_load_pcm(scomp, index, swidget,
-					  SOF_IPC_STREAM_PLAYBACK, tw);
+		if (sof_get_abi_major(sdev) <= 3)
+			ret = sof_widget_load_pcm(scomp, index, swidget,
+						  SOF_IPC_STREAM_PLAYBACK, tw);
+		else
+			ret = sof_ipc4_widget_load_pcm(scomp, index, swidget,
+						       SOF_IPC_STREAM_PLAYBACK, tw);
 		break;
 	case snd_soc_dapm_src:
 		ret = sof_widget_load_src(scomp, index, swidget, tw);
@@ -2776,7 +2800,8 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 	 * FW, others are reported as error, add check in route function,
 	 * do not send it to FW when both source and sink are not buffer
 	 */
-	if (source_swidget->id != snd_soc_dapm_buffer &&
+	if (sof_get_abi_major(sdev) <= 3 &&
+	    source_swidget->id != snd_soc_dapm_buffer &&
 	    sink_swidget->id != snd_soc_dapm_buffer) {
 		dev_dbg(scomp->dev, "warning: neither Linked source component %s nor sink component %s is of buffer type, ignoring link\n",
 			route->source, route->sink);
@@ -2883,6 +2908,9 @@ static int sof_complete(struct snd_soc_component *scomp)
 			break;
 		}
 	}
+
+	if (sof_get_abi_major(sdev) >= 4)
+		return 0;
 
 	/* verify topology components loading including dynamic pipelines */
 	if (sof_debug_check_flag(SOF_DBG_VERIFY_TPLG)) {

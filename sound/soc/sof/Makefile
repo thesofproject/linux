@@ -2,7 +2,7 @@
 
 snd-sof-objs := core.o ops.o loader.o ipc.o pcm.o pm.o debug.o topology.o\
 		control.o trace.o utils.o sof-audio.o stream-ipc.o ipc4.o \
-		topology-tokens.o
+		topology-tokens.o ipc4-topology.o
 
 snd-sof-$(CONFIG_SND_SOC_SOF_DEBUG_PROBES) += sof-probes.o
 snd-sof-$(CONFIG_SND_SOC_SOF_COMPRESS) += compress.o

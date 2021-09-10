@@ -11,6 +11,8 @@
 #ifndef SOF_TOPOLOGY_COMMON_H
 #define SOF_TOPOLOGY_COMMON_H
 
+#include "ipc4-topology.h"
+
 #define COMP_ID_UNASSIGNED		0xffffffff
 
 /*
@@ -444,6 +446,27 @@ static const __maybe_unused struct sof_topology_token sched_tokens[] = {
 		offsetof(struct sof_ipc_pipe_new, frames_per_sched), 0},
 	{SOF_TKN_SCHED_TIME_DOMAIN, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
 		offsetof(struct sof_ipc_pipe_new, time_domain), 0},
+};
+
+static const __maybe_unused struct sof_topology_token ipc4_sched_tokens[] = {
+	{SOF_TKN_SCHED_LP_MODE, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc4_pipeline, lp_mode), 0}
+};
+
+/* gain */
+static const __maybe_unused struct sof_topology_token gain_tokens[] = {
+	{SOF_TKN_GAIN_RAMP_TYPE, SND_SOC_TPLG_TUPLE_TYPE_WORD,
+		get_token_u32, offsetof(struct sof_ipc4_gain_data, curve_type), 0},
+	{SOF_TKN_GAIN_RAMP_DURATION,
+		SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc4_gain_data, curve_duration), 0},
+	{SOF_TKN_GAIN_VAL, SND_SOC_TPLG_TUPLE_TYPE_WORD,
+		get_token_u32, offsetof(struct sof_ipc4_gain_data, init_val), 0},
+};
+
+static const __maybe_unused struct sof_topology_token ipc4_mixer_tokens[] = {
+	{SOF_TKN_MIXER_TYPE, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc4_mixer, type), 0},
 };
 
 #endif //SOF_TOPOLOGY_COMMON_H
