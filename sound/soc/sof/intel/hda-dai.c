@@ -457,6 +457,63 @@ static const struct snd_soc_dai_ops hda_dai_ops = {
 	.prepare = hda_dai_prepare,
 };
 
+static int hda_dai_suspend(struct hdac_bus *bus)
+{
+	struct snd_soc_pcm_runtime *rtd;
+	struct hdac_ext_stream *he_stream;
+	struct hdac_ext_link *link;
+	struct hdac_stream *s;
+	const char *name;
+	int stream_tag;
+	int ret;
+
+	/* set internal flag for BE */
+	list_for_each_entry(s, &bus->stream_list, list) {
+		he_stream = stream_to_hdac_ext_stream(s);
+
+		if (!he_stream)
+			return -EINVAL;
+
+		/*
+		 * clear stream. This should already be taken care for running
+		 * streams when the SUSPEND trigger is called. But paused
+		 * streams do not get suspended, so this needs to be done
+		 * explicitly during suspend.
+		 */
+		if (he_stream->link_substream) {
+			struct snd_soc_dai *cpu_dai;
+			struct snd_soc_dai *codec_dai;
+
+			rtd = asoc_substream_to_rtd(he_stream->link_substream);
+			cpu_dai = asoc_rtd_to_cpu(rtd, 0);
+			codec_dai = asoc_rtd_to_codec(rtd, 0);
+			name = codec_dai->component->name;
+			link = snd_hdac_ext_bus_get_link(bus, name);
+			if (!link)
+				return -EINVAL;
+
+			if (hdac_stream(he_stream)->direction == SNDRV_PCM_STREAM_PLAYBACK) {
+				stream_tag = hdac_stream(he_stream)->stream_tag;
+				snd_hdac_ext_link_clear_stream_id(link, stream_tag);
+			}
+
+			he_stream->link_prepared = 0;
+
+			/*
+			 * we don't need to call snd_hdac_ext_link_stream_clear(he_stream)
+			 * since we can only reach this case in the pause_push state, and
+			 * the TRIGGER_PAUSE_PUSH already stops the DMA
+			 */
+
+			/* for consistency with TRIGGER_SUSPEND we free DAI resources */
+			ret = hda_dai_hw_free_ipc(hdac_stream(he_stream)->direction, cpu_dai);
+			if (ret < 0)
+				return ret;
+		}
+	}
+
+	return 0;
+}
 #endif
 
 /* only one flag used so far to harden hw_params/hw_free/trigger/prepare */
@@ -759,3 +816,22 @@ struct snd_soc_dai_driver skl_dai[] = {
 #endif
 #endif
 };
+
+int hda_dsp_dais_suspend(struct snd_sof_dev *sdev)
+{
+	/*
+	 * In the corner case where a SUSPEND happens during a PAUSE, the ALSA core
+	 * does not throw the TRIGGER_SUSPEND. This leaves the DAIs in an unbalanced state.
+	 * Since the component suspend is called last, we can trap this corner case
+	 * and force the DAIs to release their resources.
+	 */
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
+	int ret;
+
+	ret = hda_dai_suspend(sof_to_bus(sdev));
+	if (ret < 0)
+		return ret;
+#endif
+
+	return 0;
+}
