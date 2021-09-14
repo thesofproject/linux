@@ -22,15 +22,15 @@
 static int hda_dsp_trace_prepare(struct snd_sof_dev *sdev)
 {
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
-	struct hdac_ext_stream *stream = hda->dtrace_stream;
-	struct hdac_stream *hstream = &stream->hstream;
+	struct hdac_ext_stream *he_stream = hda->dtrace_stream;
+	struct hdac_stream *hstream = &he_stream->hstream;
 	struct snd_dma_buffer *dmab = &sdev->dmatb;
 	int ret;
 
 	hstream->period_bytes = 0;/* initialize period_bytes */
 	hstream->bufsize = sdev->dmatb.bytes;
 
-	ret = hda_dsp_stream_hw_params(sdev, stream, dmab, NULL);
+	ret = hda_dsp_stream_hw_params(sdev, he_stream, dmab, NULL);
 	if (ret < 0)
 		dev_err(sdev->dev, "error: hdac prepare failed: %d\n", ret);
 
