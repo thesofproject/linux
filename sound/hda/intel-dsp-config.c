@@ -370,7 +370,7 @@ static const struct config_entry *snd_intel_dsp_find_config
 			continue;
 		if (table->dmi_table && !dmi_check_system(table->dmi_table))
 			continue;
-		if (!acpi_dev_present(table->codec_hid, NULL, -1))
+		if (table->codec_hid[0] && !acpi_dev_present(table->codec_hid, NULL, -1))
 			continue;
 		return table;
 	}
