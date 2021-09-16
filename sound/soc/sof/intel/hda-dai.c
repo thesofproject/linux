@@ -230,6 +230,9 @@ static int hda_link_dma_trigger(struct snd_pcm_substream *substream, int cmd)
 		return -EINVAL;
 
 	dev_dbg(cpu_dai->dev, "%s: cmd=%d\n", __func__, cmd);
+	if (!hext_stream)
+		return 0;
+
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
@@ -243,8 +246,10 @@ static int hda_link_dma_trigger(struct snd_pcm_substream *substream, int cmd)
 			stream_tag = hdac_stream(hext_stream)->stream_tag;
 			snd_hdac_ext_link_clear_stream_id(link, stream_tag);
 		}
-
+		snd_soc_dai_set_dma_data(cpu_dai, substream, NULL);
+		snd_hdac_ext_stream_release(hext_stream, HDAC_EXT_STREAM_TYPE_LINK);
 		hext_stream->link_prepared = 0;
+
 		break;
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 		snd_hdac_ext_link_stream_clear(hext_stream);
@@ -409,7 +414,7 @@ static int hda_dai_prepare(struct snd_pcm_substream *substream,
 	int stream = substream->stream;
 	int ret;
 
-	if (hext_stream->link_prepared)
+	if (hext_stream && hext_stream->link_prepared)
 		return 0;
 
 	dev_dbg(sdev->dev, "%s: prepare stream dir %d\n", __func__, substream->stream);
@@ -504,6 +509,8 @@ static int hda_dai_suspend(struct hdac_bus *bus)
 
 	/* set internal flag for BE */
 	list_for_each_entry(s, &bus->stream_list, list) {
+		struct sof_intel_hda_stream *hda_stream;
+
 		hext_stream = stream_to_hdac_ext_stream(s);
 
 		if (!hext_stream)
@@ -532,6 +539,8 @@ static int hda_dai_suspend(struct hdac_bus *bus)
 				snd_hdac_ext_link_clear_stream_id(link, stream_tag);
 			}
 
+			snd_soc_dai_set_dma_data(cpu_dai, hext_stream->link_substream, NULL);
+			snd_hdac_ext_stream_release(hext_stream, HDAC_EXT_STREAM_TYPE_LINK);
 			hext_stream->link_prepared = 0;
 
 			/*
@@ -545,6 +554,10 @@ static int hda_dai_suspend(struct hdac_bus *bus)
 			if (ret < 0)
 				return ret;
 		}
+
+		/* free the host DMA channel reserved by hostless streams */
+		hda_stream = hstream_to_sof_hda_stream(hext_stream);
+		hda_stream->host_reserved = 0;
 	}
 
 	return 0;
