@@ -556,7 +556,6 @@ void snd_sof_release_trace(struct snd_sof_dev *sdev)
 
 	sdev->dtrace_is_enabled = false;
 	sdev->dtrace_draining = true;
-	wake_up(&sdev->trace_sleep);
 }
 EXPORT_SYMBOL(snd_sof_release_trace);
 
