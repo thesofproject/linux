@@ -114,13 +114,16 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 		return ret;
 	}
 
-	/*
-	 * Nothing further to be done for platforms that support the low power
-	 * D0 substate.
-	 */
+	/* Only resume trace when resuming from low-power D0 substate */
 	if (!runtime_resume && sof_ops(sdev)->set_power_state &&
-	    old_state == SOF_DSP_PM_D0)
+	    old_state == SOF_DSP_PM_D0) {
+		/* this is not fatal */
+		ret = snd_sof_init_trace_ipc(sdev);
+		if (ret < 0)
+			dev_warn(sdev->dev, "failed to init trace after resume %d\n", ret);
+
 		return 0;
+	}
 
 	sdev->fw_state = SOF_FW_BOOT_PREPARE;
 
@@ -204,14 +207,14 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 
 	target_state = snd_sof_dsp_power_target(sdev);
 
+	/* release trace */
+	snd_sof_release_trace(sdev);
+
 	/* Skip to platform-specific suspend if DSP is entering D0 */
 	if (target_state == SOF_DSP_PM_D0)
 		goto suspend;
 
 	sof_tear_down_pipelines(sdev, false);
-
-	/* release trace */
-	snd_sof_release_trace(sdev);
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_ENABLE_DEBUGFS_CACHE)
 	/* cache debugfs contents during runtime suspend */
