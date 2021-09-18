@@ -904,6 +904,7 @@ int hda_dsp_set_hw_params_upon_resume(struct snd_sof_dev *sdev)
 {
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
 	struct hdac_bus *bus = sof_to_bus(sdev);
+	struct sof_intel_hda_stream *hda_stream;
 	struct snd_soc_pcm_runtime *rtd;
 	struct hdac_ext_stream *stream;
 	struct hdac_ext_link *link;
@@ -922,16 +923,23 @@ int hda_dsp_set_hw_params_upon_resume(struct snd_sof_dev *sdev)
 		 * explicitly during suspend.
 		 */
 		if (stream->link_substream) {
+			struct snd_soc_dai *cpu_dai;
+
 			rtd = asoc_substream_to_rtd(stream->link_substream);
+			cpu_dai = asoc_rtd_to_cpu(rtd, 0);
 			name = asoc_rtd_to_codec(rtd, 0)->component->name;
 			link = snd_hdac_ext_bus_get_link(bus, name);
 			if (!link)
 				return -EINVAL;
 
+			snd_soc_dai_set_dma_data(cpu_dai, stream->link_substream, NULL);
+			snd_hdac_ext_stream_release(stream, HDAC_EXT_STREAM_TYPE_LINK);
 			stream->link_prepared = 0;
 
-			if (hdac_stream(stream)->direction ==
-				SNDRV_PCM_STREAM_CAPTURE)
+			hda_stream = hstream_to_sof_hda_stream(stream);
+			hda_stream->host_reserved = 0;
+
+			if (hdac_stream(stream)->direction == SNDRV_PCM_STREAM_CAPTURE)
 				continue;
 
 			stream_tag = hdac_stream(stream)->stream_tag;

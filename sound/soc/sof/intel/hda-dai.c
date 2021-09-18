@@ -279,7 +279,7 @@ static int hda_link_pcm_prepare(struct snd_pcm_substream *substream,
 	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
 	int stream = substream->stream;
 
-	if (link_dev->link_prepared)
+	if (link_dev && link_dev->link_prepared)
 		return 0;
 
 	dev_dbg(sdev->dev, "hda: prepare stream dir %d\n", substream->stream);
@@ -305,6 +305,10 @@ static int hda_link_pcm_trigger(struct snd_pcm_substream *substream,
 	hstream = substream->runtime->private_data;
 	bus = hstream->bus;
 	rtd = asoc_substream_to_rtd(substream);
+
+	/* when paused streams are never released after system resume, link_dev would be NULL. */
+	if (!link_dev)
+		return 0;
 
 	link = snd_hdac_ext_bus_get_link(bus, asoc_rtd_to_codec(rtd, 0)->component->name);
 	if (!link)
@@ -347,7 +351,10 @@ static int hda_link_pcm_trigger(struct snd_pcm_substream *substream,
 			snd_hdac_ext_link_clear_stream_id(link, stream_tag);
 		}
 
+		snd_soc_dai_set_dma_data(dai, substream, NULL);
+		snd_hdac_ext_stream_release(link_dev, HDAC_EXT_STREAM_TYPE_LINK);
 		link_dev->link_prepared = 0;
+		hda_stream->host_reserved = 0;
 
 		fallthrough;
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
@@ -377,11 +384,8 @@ static int hda_link_hw_free(struct snd_pcm_substream *substream,
 	rtd = asoc_substream_to_rtd(substream);
 	link_dev = snd_soc_dai_get_dma_data(dai, substream);
 
-	if (!link_dev) {
-		dev_dbg(dai->dev,
-			"%s: link_dev is not assigned\n", __func__);
-		return -EINVAL;
-	}
+	if (!link_dev)
+		return 0;
 
 	hda_stream = hstream_to_sof_hda_stream(link_dev);
 
