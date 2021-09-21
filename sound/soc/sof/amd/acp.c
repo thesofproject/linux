@@ -92,7 +92,7 @@ static int acpbus_dma_start(struct acp_dev_data *adata, unsigned int ch,
 			    unsigned int dscr_count, struct dma_descriptor *dscr_info)
 {
 	struct snd_sof_dev *sdev = adata->dev;
-	int ret = 0;
+	int ret;
 	u16 dscr;
 
 	if (!dscr_info || !dscr_count)
