@@ -163,10 +163,8 @@ static struct sof_ipc_dai_config *hda_dai_update_config(struct snd_soc_dapm_widg
 	struct sof_ipc_dai_config *config;
 	struct snd_sof_dai *sof_dai;
 
-	if (!swidget) {
-		dev_err(swidget->scomp->dev, "error: No private data for widget %s\n", w->name);
+	if (!swidget)
 		return NULL;
-	}
 
 	sof_dai = swidget->private;
 
