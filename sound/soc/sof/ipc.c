@@ -378,7 +378,7 @@ void snd_sof_ipc_get_reply(struct snd_sof_dev *sdev)
 {
 	struct snd_sof_ipc_msg *msg = sdev->msg;
 	struct sof_ipc_reply reply;
-	int ret;
+	int ret = 0;
 
 	/*
 	 * Sometimes, there is unexpected reply ipc arriving. The reply
@@ -387,8 +387,7 @@ void snd_sof_ipc_get_reply(struct snd_sof_dev *sdev)
 	 */
 	if (!msg) {
 		dev_warn(sdev->dev, "unexpected ipc interrupt raised!\n");
-		ret = 0;
-		goto out;
+		return;
 	}
 
 	/* get the generic reply */
@@ -431,7 +430,6 @@ void snd_sof_ipc_get_reply(struct snd_sof_dev *sdev)
 						 msg->reply_data, msg->reply_size);
 	}
 
-out:
 	msg->reply_error = ret;
 }
 EXPORT_SYMBOL(snd_sof_ipc_get_reply);
