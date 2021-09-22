@@ -255,6 +255,42 @@ int sof_set_hw_params_upon_resume(struct device *dev);
 bool snd_sof_stream_suspend_ignored(struct snd_sof_dev *sdev);
 bool snd_sof_dsp_only_d0i3_compatible_stream_active(struct snd_sof_dev *sdev);
 
+/*
+ * Helper function to determine the target DSP state during
+ * system suspend. This function only cares about the device
+ * D-states. Platform-specific substates, if any, should be
+ * handled by the platform-specific parts.
+ */
+static inline u32 snd_sof_dsp_power_target(struct snd_sof_dev *sdev)
+{
+	u32 target_dsp_state;
+
+	switch (sdev->system_suspend_target) {
+	case SOF_SUSPEND_S3:
+		/* DSP should be in D3 if the system is suspending to S3 */
+		target_dsp_state = SOF_DSP_PM_D3;
+		break;
+	case SOF_SUSPEND_S0IX:
+		/*
+		 * Currently, the only criterion for retaining the DSP in D0
+		 * is that there are streams that ignored the suspend trigger.
+		 * Additional criteria such Soundwire clock-stop mode and
+		 * device suspend latency considerations will be added later.
+		 */
+		if (snd_sof_stream_suspend_ignored(sdev))
+			target_dsp_state = SOF_DSP_PM_D0;
+		else
+			target_dsp_state = SOF_DSP_PM_D3;
+		break;
+	default:
+		/* This case would be during runtime suspend */
+		target_dsp_state = SOF_DSP_PM_D3;
+		break;
+	}
+
+	return target_dsp_state;
+}
+
 /* Machine driver enumeration */
 int sof_machine_register(struct snd_sof_dev *sdev, void *pdata);
 void sof_machine_unregister(struct snd_sof_dev *sdev, void *pdata);

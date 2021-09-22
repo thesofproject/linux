@@ -12,42 +12,6 @@
 #include "sof-priv.h"
 #include "sof-audio.h"
 
-/*
- * Helper function to determine the target DSP state during
- * system suspend. This function only cares about the device
- * D-states. Platform-specific substates, if any, should be
- * handled by the platform-specific parts.
- */
-static u32 snd_sof_dsp_power_target(struct snd_sof_dev *sdev)
-{
-	u32 target_dsp_state;
-
-	switch (sdev->system_suspend_target) {
-	case SOF_SUSPEND_S3:
-		/* DSP should be in D3 if the system is suspending to S3 */
-		target_dsp_state = SOF_DSP_PM_D3;
-		break;
-	case SOF_SUSPEND_S0IX:
-		/*
-		 * Currently, the only criterion for retaining the DSP in D0
-		 * is that there are streams that ignored the suspend trigger.
-		 * Additional criteria such Soundwire clock-stop mode and
-		 * device suspend latency considerations will be added later.
-		 */
-		if (snd_sof_stream_suspend_ignored(sdev))
-			target_dsp_state = SOF_DSP_PM_D0;
-		else
-			target_dsp_state = SOF_DSP_PM_D3;
-		break;
-	default:
-		/* This case would be during runtime suspend */
-		target_dsp_state = SOF_DSP_PM_D3;
-		break;
-	}
-
-	return target_dsp_state;
-}
-
 static int sof_send_pm_ctx_ipc(struct snd_sof_dev *sdev, int cmd)
 {
 	struct sof_ipc_pm_ctx pm_ctx;
@@ -147,8 +111,8 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 		return ret;
 	}
 
-	/* resume DMA trace, only need send ipc */
-	ret = snd_sof_init_trace_ipc(sdev);
+	/* Re-enable DMA trace */
+	ret = snd_sof_enable_trace(sdev);
 	if (ret < 0) {
 		/* non fatal */
 		dev_warn(sdev->dev,
