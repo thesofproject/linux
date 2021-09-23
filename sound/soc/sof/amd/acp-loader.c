@@ -62,7 +62,9 @@ int acp_dsp_block_write(struct snd_sof_dev *sdev, enum snd_sof_fw_blk_type blk_t
 			size_fw = plat_data->fw->size;
 			page_count = PAGE_ALIGN(size_fw) >> PAGE_SHIFT;
 			dma_size = page_count * ACP_PAGE_SIZE;
-			adata->bin_buf = pci_alloc_consistent(pci, dma_size, &adata->sha_dma_addr);
+			adata->bin_buf = dma_alloc_coherent(&pci->dev, dma_size,
+							    &adata->sha_dma_addr,
+							    GFP_ATOMIC);
 			if (!adata->bin_buf)
 				return -ENOMEM;
 			memset(adata->bin_buf, 0, dma_size);
@@ -72,8 +74,10 @@ int acp_dsp_block_write(struct snd_sof_dev *sdev, enum snd_sof_fw_blk_type blk_t
 		break;
 	case SOF_FW_BLK_TYPE_DRAM:
 		if (!adata->data_buf) {
-			adata->data_buf = pci_alloc_consistent(pci, ACP_DEFAULT_DRAM_LENGTH,
-							       &adata->dma_addr);
+			adata->data_buf = dma_alloc_coherent(&pci->dev,
+							     ACP_DEFAULT_DRAM_LENGTH,
+							     &adata->dma_addr,
+							     GFP_ATOMIC);
 			if (!adata->data_buf)
 				return -ENOMEM;
 			memset(adata->data_buf, 0, ACP_DEFAULT_DRAM_LENGTH);
@@ -173,8 +177,8 @@ int acp_dsp_pre_fw_run(struct snd_sof_dev *sdev)
 		dev_err(sdev->dev, "acp dma transfer status: %d\n", ret);
 
 	/* Free memory once DMA is complete */
-	pci_free_consistent(pci, size_fw, &adata->bin_buf, adata->sha_dma_addr);
-	pci_free_consistent(pci, ACP_DEFAULT_DRAM_LENGTH, &adata->data_buf, adata->dma_addr);
+	dma_free_coherent(&pci->dev, size_fw, &adata->bin_buf, adata->sha_dma_addr);
+	dma_free_coherent(&pci->dev, ACP_DEFAULT_DRAM_LENGTH, &adata->data_buf, adata->dma_addr);
 
 	return ret;
 }
