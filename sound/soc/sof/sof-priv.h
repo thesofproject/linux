@@ -19,6 +19,7 @@
 #include <sound/sof/trace.h>
 #include <uapi/sound/sof/fw.h>
 #include <sound/sof/ext_manifest.h>
+#include <uapi/sound/sof/abi.h>
 
 /* debug flags */
 #define SOF_DBG_ENABLE_TRACE	BIT(0)
@@ -652,4 +653,9 @@ int sof_stream_pcm_close(struct snd_sof_dev *sdev,
 			 struct snd_pcm_substream *substream);
 
 int sof_machine_check(struct snd_sof_dev *sdev);
+
+static inline int sof_get_abi_major(struct snd_sof_dev *sdev)
+{
+	return SOF_ABI_VERSION_MAJOR(sdev->fw_ready.version.abi_version);
+}
 #endif
