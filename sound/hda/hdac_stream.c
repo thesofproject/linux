@@ -333,6 +333,7 @@ void snd_hdac_stream_release(struct hdac_stream *azx_dev)
 	spin_lock_irq(&bus->reg_lock);
 	azx_dev->opened = 0;
 	azx_dev->running = 0;
+	azx_dev->assigned_key = 0;
 	azx_dev->substream = NULL;
 	spin_unlock_irq(&bus->reg_lock);
 }
