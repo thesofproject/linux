@@ -231,6 +231,12 @@ int sof_ipc4_init_msg_memory(struct snd_sof_dev *sdev)
 	if (!msg->reply_data)
 		return -ENOMEM;
 
+	/*
+	 * TODO: Currently we are not able to wake DSP up once it is suspended.
+	 * Calling pm_runtime_get_sync() here to prevent it from entering
+	 * suspend. This should be removed once power management is implemented
+	 */
+	pm_runtime_get_sync(sdev->dev);
 	return 0;
 }
 EXPORT_SYMBOL(sof_ipc4_init_msg_memory);
