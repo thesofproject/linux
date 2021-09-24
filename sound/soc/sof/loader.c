@@ -863,5 +863,15 @@ void snd_sof_fw_unload(struct snd_sof_dev *sdev)
 	/* TODO: support module unloading at runtime */
 	release_firmware(sdev->pdata->fw);
 	sdev->pdata->fw = NULL;
+
+	/*
+	 * TODO: Currently we are not able to wake DSP up once it is suspended.
+	 * Therefore pm_runtime_get_sync() is called by sof_ipc4_init_msg_memory()
+	 * to prevent DSP from entering suspend. Call pm_runtime_put_noidle()
+	 * here to balance it.
+	 */
+	if (sof_get_abi_major(sdev) >= 4)
+		pm_runtime_put_noidle(sdev->dev);
+
 }
 EXPORT_SYMBOL(snd_sof_fw_unload);
