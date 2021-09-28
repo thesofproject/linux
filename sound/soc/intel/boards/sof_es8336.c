@@ -467,8 +467,6 @@ static int sof_es8336_probe(struct platform_device *pdev)
 	if (!priv)
 		return -ENOMEM;
 
-	mach = pdev->dev.platform_data;
-
 	card = &sof_es8336_card;
 	card->dev = dev;
 
