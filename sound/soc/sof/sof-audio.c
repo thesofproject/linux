@@ -656,20 +656,20 @@ int sof_set_up_pipelines(struct snd_sof_dev *sdev, bool verify)
 		if (!verify && swidget->dynamic_pipeline_widget)
 			continue;
 
+		/*
+		 * For older firmware, skip scheduler widgets in this loop,
+		 * sof_widget_setup() will be called in the 'complete pipeline' loop
+		 */
+		if (v->abi_version < SOF_ABI_VER(3, 19, 0) &&
+		    swidget->id == snd_soc_dapm_scheduler)
+			continue;
+
 		/* update DAI config. The IPC will be sent in sof_widget_setup() */
 		if (WIDGET_IS_DAI(swidget->id)) {
 			struct snd_sof_dai *dai = swidget->private;
 			struct sof_ipc_dai_config *config;
 
 			if (!dai || !dai->dai_config)
-				continue;
-
-			/*
-			 * For older firmware, skip scheduler widgets in this loop,
-			 * sof_widget_setup() will be called in the 'complete pipeline' loop
-			 */
-			if (v->abi_version < SOF_ABI_VER(3, 19, 0) &&
-			    swidget->id == snd_soc_dapm_scheduler)
 				continue;
 
 			config = dai->dai_config;
