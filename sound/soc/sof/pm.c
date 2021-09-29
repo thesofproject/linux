@@ -80,11 +80,18 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 
 	/*
 	 * Nothing further to be done for platforms that support the low power
-	 * D0 substate.
+	 * D0 substate, and we need to re-enable the DMA trace if it was stopped
 	 */
 	if (!runtime_resume && sof_ops(sdev)->set_power_state &&
-	    old_state == SOF_DSP_PM_D0)
+	    old_state == SOF_DSP_PM_D0) {
+		ret = snd_sof_enable_trace(sdev);
+		if (ret < 0)
+			/* non fatal */
+			dev_warn(sdev->dev,
+				 "failed to enable trace after resume %d\n",
+				 ret);
 		return 0;
+	}
 
 	sdev->fw_state = SOF_FW_BOOT_PREPARE;
 
@@ -174,9 +181,6 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 
 	sof_tear_down_pipelines(sdev, false);
 
-	/* release trace */
-	snd_sof_release_trace(sdev);
-
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_ENABLE_DEBUGFS_CACHE)
 	/* cache debugfs contents during runtime suspend */
 	if (runtime_suspend)
@@ -201,6 +205,9 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 	}
 
 suspend:
+
+	/* release trace */
+	snd_sof_release_trace(sdev);
 
 	/* return if the DSP was not probed successfully */
 	if (sdev->fw_state == SOF_FW_BOOT_NOT_STARTED)
