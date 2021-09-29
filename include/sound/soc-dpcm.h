@@ -151,4 +151,7 @@ bool dpcm_end_walk_at_be(struct snd_soc_dapm_widget *widget, enum snd_soc_dapm_d
 #define dpcm_be_dai_startup_unwind(fe, stream)	dpcm_be_dai_stop(fe, stream, 0, NULL)
 #define dpcm_be_dai_shutdown(fe, stream)	dpcm_be_dai_stop(fe, stream, 1, NULL)
 
+void snd_soc_dpcm_fe_lock_irq(struct snd_soc_pcm_runtime *fe, int stream);
+void snd_soc_dpcm_fe_unlock_irq(struct snd_soc_pcm_runtime *fe, int stream);
+
 #endif
