@@ -163,7 +163,6 @@ const struct snd_sof_dsp_ops sof_icl_ops = {
 
 	/* dsp core get/put */
 	.core_get = hda_dsp_core_get,
-	.core_put = hda_dsp_core_put,
 
 	/* firmware run */
 	.run = hda_dsp_cl_boot_firmware_iccmax,
