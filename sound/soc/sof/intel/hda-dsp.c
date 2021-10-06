@@ -1007,19 +1007,3 @@ power_down:
 
 	return ret;
 }
-
-int hda_dsp_core_put(struct snd_sof_dev *sdev, int core)
-{
-	int ret;
-
-	/*
-	 * Due to limitations with powering on/off secondary cores dynamically on some platforms,
-	 * skip sending IPC for secondary core power off
-	 */
-	ret = hda_dsp_core_reset_power_down(sdev, BIT(core));
-	if (ret < 0)
-		dev_err(sdev->dev, "failed to power down core: %d with err: %d\n",
-			core, ret);
-
-	return ret;
-}
