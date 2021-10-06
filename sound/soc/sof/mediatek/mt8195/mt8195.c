@@ -278,6 +278,8 @@ static int mt8195_dsp_probe(struct snd_sof_dev *sdev)
 	sdev->mmio_bar = SOF_FW_BLK_TYPE_SRAM;
 	sdev->mailbox_bar = SOF_FW_BLK_TYPE_SRAM;
 
+	return 0;
+
 err_adsp_sram_power_off:
 	adsp_sram_power_on(&pdev->dev, false);
 
