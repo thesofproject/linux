@@ -140,6 +140,7 @@ static int soc_compr_open_fe(struct snd_compr_stream *cstream)
 	struct snd_soc_dpcm *dpcm;
 	struct snd_soc_dapm_widget_list *list;
 	int stream = cstream->direction; /* SND_COMPRESS_xxx is same as SNDRV_PCM_STREAM_xxx */
+	unsigned long flags;
 	int ret;
 
 	mutex_lock_nested(&fe->card->mutex, SND_SOC_CARD_CLASS_RUNTIME);
@@ -158,8 +159,10 @@ static int soc_compr_open_fe(struct snd_compr_stream *cstream)
 	ret = dpcm_be_dai_startup(fe, stream);
 	if (ret < 0) {
 		/* clean up all links */
+		snd_soc_dpcm_fe_lock_irqsave(fe, stream, flags);
 		for_each_dpcm_be(fe, stream, dpcm)
 			dpcm->state = SND_SOC_DPCM_LINK_STATE_FREE;
+		snd_soc_dpcm_fe_unlock_irqrestore(fe, stream, flags);
 
 		dpcm_be_disconnect(fe, stream);
 		fe->dpcm[stream].runtime = NULL;
@@ -210,6 +213,7 @@ static int soc_compr_free_fe(struct snd_compr_stream *cstream)
 	struct snd_soc_dai *cpu_dai = asoc_rtd_to_cpu(fe, 0);
 	struct snd_soc_dpcm *dpcm;
 	int stream = cstream->direction; /* SND_COMPRESS_xxx is same as SNDRV_PCM_STREAM_xxx */
+	unsigned long flags;
 
 	mutex_lock_nested(&fe->card->mutex, SND_SOC_CARD_CLASS_RUNTIME);
 
@@ -224,8 +228,10 @@ static int soc_compr_free_fe(struct snd_compr_stream *cstream)
 	dpcm_be_dai_shutdown(fe, stream);
 
 	/* mark FE's links ready to prune */
+	snd_soc_dpcm_fe_lock_irqsave(fe, stream, flags);
 	for_each_dpcm_be(fe, stream, dpcm)
 		dpcm->state = SND_SOC_DPCM_LINK_STATE_FREE;
+	snd_soc_dpcm_fe_unlock_irqrestore(fe, stream, flags);
 
 	dpcm_dapm_stream_event(fe, stream, SND_SOC_DAPM_STREAM_STOP);
 
