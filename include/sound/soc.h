@@ -893,7 +893,8 @@ struct snd_soc_card {
 	struct mutex pcm_mutex;
 	enum snd_soc_pcm_subclass pcm_subclass;
 
-	spinlock_t dpcm_lock;
+	struct mutex dpcm_mutex; /* protects DPCM operations with non-atomic FEs */
+	spinlock_t dpcm_lock;   /* protects DPCM operations with atomic FEs */
 
 	int (*probe)(struct snd_soc_card *card);
 	int (*late_probe)(struct snd_soc_card *card);

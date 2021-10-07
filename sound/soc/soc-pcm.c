@@ -31,13 +31,19 @@
 
 void snd_soc_dpcm_lock(struct snd_soc_pcm_runtime *fe)
 {
-	spin_lock_irq(&fe->card->dpcm_lock);
+	if (fe->dai_link->nonatomic)
+		mutex_lock(&fe->card->dpcm_mutex);
+	else
+		spin_lock_irq(&fe->card->dpcm_lock);
 }
 EXPORT_SYMBOL_GPL(snd_soc_dpcm_lock);
 
 void snd_soc_dpcm_unlock(struct snd_soc_pcm_runtime *fe)
 {
-	spin_unlock_irq(&fe->card->dpcm_lock);
+	if (fe->dai_link->nonatomic)
+		mutex_unlock(&fe->card->dpcm_mutex);
+	else
+		spin_unlock_irq(&fe->card->dpcm_lock);
 }
 EXPORT_SYMBOL_GPL(snd_soc_dpcm_unlock);
 
