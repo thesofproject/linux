@@ -151,6 +151,7 @@ static int fsl_asrc_dma_hw_params(struct snd_soc_component *component,
 	int ret, width;
 
 	/* Fetch the Back-End dma_data from DPCM */
+	snd_soc_dpcm_fe_lock_irq(rtd, stream);
 	for_each_dpcm_be(rtd, stream, dpcm) {
 		struct snd_soc_pcm_runtime *be = dpcm->be;
 		struct snd_pcm_substream *substream_be;
@@ -164,6 +165,7 @@ static int fsl_asrc_dma_hw_params(struct snd_soc_component *component,
 		dev_be = dai->dev;
 		break;
 	}
+	snd_soc_dpcm_fe_unlock_irq(rtd, stream);
 
 	if (!dma_params_be) {
 		dev_err(dev, "failed to get the substream of Back-End\n");
