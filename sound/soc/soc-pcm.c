@@ -51,9 +51,6 @@ EXPORT_SYMBOL_GPL(snd_soc_dpcm_unlock);
 static int snd_soc_dpcm_can_be_free_stop(struct snd_soc_pcm_runtime *fe,
 					 struct snd_soc_pcm_runtime *be, int stream);
 
-static int snd_soc_dpcm_can_be_free_stop_unlocked(struct snd_soc_pcm_runtime *fe,
-						  struct snd_soc_pcm_runtime *be, int stream);
-
 /* can this BE perform a hw_params() */
 static int snd_soc_dpcm_can_be_params(struct snd_soc_pcm_runtime *fe,
 				      struct snd_soc_pcm_runtime *be, int stream);
@@ -2066,6 +2063,7 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 	struct snd_soc_dpcm *dpcm;
 	int ret = 0;
 
+	snd_soc_dpcm_lock(fe);
 	for_each_dpcm_be(fe, stream, dpcm) {
 		struct snd_pcm_substream *be_substream;
 
@@ -2117,7 +2115,7 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 			    (be->dpcm[stream].state != SND_SOC_DPCM_STATE_PAUSED))
 				continue;
 
-			if (!snd_soc_dpcm_can_be_free_stop_unlocked(fe, be, stream))
+			if (!snd_soc_dpcm_can_be_free_stop(fe, be, stream))
 				continue;
 
 			ret = soc_pcm_trigger(be_substream, cmd);
@@ -2130,7 +2128,7 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 			if (be->dpcm[stream].state != SND_SOC_DPCM_STATE_START)
 				continue;
 
-			if (!snd_soc_dpcm_can_be_free_stop_unlocked(fe, be, stream))
+			if (!snd_soc_dpcm_can_be_free_stop(fe, be, stream))
 				continue;
 
 			ret = soc_pcm_trigger(be_substream, cmd);
@@ -2143,7 +2141,7 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 			if (be->dpcm[stream].state != SND_SOC_DPCM_STATE_START)
 				continue;
 
-			if (!snd_soc_dpcm_can_be_free_stop_unlocked(fe, be, stream))
+			if (!snd_soc_dpcm_can_be_free_stop(fe, be, stream))
 				continue;
 
 			ret = soc_pcm_trigger(be_substream, cmd);
@@ -2155,6 +2153,8 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 		}
 	}
 end:
+	snd_soc_dpcm_unlock(fe);
+
 	if (ret < 0)
 		dev_err(fe->dev, "ASoC: %s() failed at %s (%d)\n",
 			__func__, be->dai_link->name, ret);
@@ -2938,18 +2938,6 @@ static int snd_soc_dpcm_can_be_free_stop(struct snd_soc_pcm_runtime *fe,
 	};
 
 	return snd_soc_dpcm_check_state(fe, be, stream, state, ARRAY_SIZE(state));
-}
-
-static int snd_soc_dpcm_can_be_free_stop_unlocked(struct snd_soc_pcm_runtime *fe,
-		struct snd_soc_pcm_runtime *be, int stream)
-{
-	int ret;
-
-	snd_soc_dpcm_lock(fe);
-	ret = snd_soc_dpcm_can_be_free_stop(fe, be, stream);
-	snd_soc_dpcm_unlock(fe);
-
-	return ret;
 }
 
 /*
