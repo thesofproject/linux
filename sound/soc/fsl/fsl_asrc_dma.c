@@ -148,9 +148,11 @@ static int fsl_asrc_dma_hw_params(struct snd_soc_component *component,
 	struct device *dev_be;
 	u8 dir = tx ? OUT : IN;
 	dma_cap_mask_t mask;
+	unsigned long flags;
 	int ret, width;
 
 	/* Fetch the Back-End dma_data from DPCM */
+	snd_soc_dpcm_fe_lock_irqsave(rtd, stream, flags);
 	for_each_dpcm_be(rtd, stream, dpcm) {
 		struct snd_soc_pcm_runtime *be = dpcm->be;
 		struct snd_pcm_substream *substream_be;
@@ -164,6 +166,7 @@ static int fsl_asrc_dma_hw_params(struct snd_soc_component *component,
 		dev_be = dai->dev;
 		break;
 	}
+	snd_soc_dpcm_fe_unlock_irqrestore(rtd, stream, flags);
 
 	if (!dma_params_be) {
 		dev_err(dev, "failed to get the substream of Back-End\n");
