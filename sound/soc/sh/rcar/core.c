@@ -1510,7 +1510,9 @@ static int rsnd_hw_params(struct snd_soc_component *component,
 		struct device *dev = rsnd_priv_to_dev(priv);
 		struct snd_soc_dpcm *dpcm;
 		int stream = substream->stream;
+		unsigned long flags;
 
+		snd_soc_dpcm_fe_lock_irqsave(fe, stream, flags);
 		for_each_dpcm_be(fe, stream, dpcm) {
 			struct snd_pcm_hw_params *be_params = &dpcm->hw_params;
 
@@ -1519,6 +1521,7 @@ static int rsnd_hw_params(struct snd_soc_component *component,
 			if (params_rate(hw_params) != params_rate(be_params))
 				io->converted_rate = params_rate(be_params);
 		}
+		snd_soc_dpcm_fe_unlock_irqrestore(fe, stream, flags);
 		if (io->converted_chan)
 			dev_dbg(dev, "convert channels = %d\n", io->converted_chan);
 		if (io->converted_rate) {
