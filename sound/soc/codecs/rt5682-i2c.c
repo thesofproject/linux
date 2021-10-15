@@ -139,8 +139,6 @@ static int rt5682_i2c_probe(struct i2c_client *i2c,
 
 	i2c_set_clientdata(i2c, rt5682);
 
-	rt5682->i2c_dev = &i2c->dev;
-
 	rt5682->pdata = i2s_default_platform_data;
 
 	if (pdata)
