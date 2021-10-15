@@ -29,12 +29,6 @@
 
 #define DPCM_MAX_BE_USERS	8
 
-#define snd_soc_dpcm_fe_lock_irqsave(fe, stream, flags) \
-	snd_pcm_stream_lock_irqsave(snd_soc_dpcm_get_substream(fe, stream), flags)
-
-#define snd_soc_dpcm_fe_unlock_irqrestore(fe, stream, flags) \
-	snd_pcm_stream_unlock_irqrestore(snd_soc_dpcm_get_substream(fe, stream), flags)
-
 /* can this BE stop and free */
 static int snd_soc_dpcm_can_be_free_stop_locked(struct snd_soc_pcm_runtime *fe,
 						struct snd_soc_pcm_runtime *be, int stream);
