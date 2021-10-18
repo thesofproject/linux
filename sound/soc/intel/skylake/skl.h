@@ -67,7 +67,7 @@ struct skl_dev {
 	struct snd_soc_component *component;
 	struct snd_soc_dai_driver *dais;
 
-	struct nhlt_acpi_table *nhlt; /* nhlt ptr */
+	struct acpi_table_nhlt *nhlt; /* nhlt ptr */
 
 	struct list_head ppl_list;
 	struct list_head bind_list;

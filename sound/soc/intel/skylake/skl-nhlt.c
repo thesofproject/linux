@@ -88,7 +88,7 @@ struct nhlt_specific_cfg
 	struct hdac_bus *bus = skl_to_bus(skl);
 	struct device *dev = bus->dev;
 	struct nhlt_specific_cfg *sp_config;
-	struct nhlt_acpi_table *nhlt = skl->nhlt;
+	struct acpi_table_nhlt *nhlt = skl->nhlt;
 	u16 bps = (s_fmt == 16) ? 16 : 32;
 	u8 j;
 
@@ -132,7 +132,7 @@ static void skl_nhlt_trim_space(char *trim)
 
 int skl_nhlt_update_topology_bin(struct skl_dev *skl)
 {
-	struct nhlt_acpi_table *nhlt = (struct nhlt_acpi_table *)skl->nhlt;
+	struct acpi_table_nhlt *nhlt = (struct acpi_table_nhlt *)skl->nhlt;
 	struct hdac_bus *bus = skl_to_bus(skl);
 	struct device *dev = bus->dev;
 
@@ -155,7 +155,7 @@ static ssize_t platform_id_show(struct device *dev,
 	struct pci_dev *pci = to_pci_dev(dev);
 	struct hdac_bus *bus = pci_get_drvdata(pci);
 	struct skl_dev *skl = bus_to_skl(bus);
-	struct nhlt_acpi_table *nhlt = (struct nhlt_acpi_table *)skl->nhlt;
+	struct acpi_table_nhlt *nhlt = (struct acpi_table_nhlt *)skl->nhlt;
 	char platform_id[32];
 
 	sprintf(platform_id, "%x-%.6s-%.8s-%d", skl->pci_id,
@@ -335,7 +335,7 @@ static void skl_get_mclk(struct skl_dev *skl, struct skl_ssp_clk *mclk,
 
 void skl_get_clks(struct skl_dev *skl, struct skl_ssp_clk *ssp_clks)
 {
-	struct nhlt_acpi_table *nhlt = (struct nhlt_acpi_table *)skl->nhlt;
+	struct acpi_table_nhlt *nhlt = (struct acpi_table_nhlt *)skl->nhlt;
 	struct nhlt_endpoint *epnt;
 	struct nhlt_fmt *fmt;
 	int i;

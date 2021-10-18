@@ -4,9 +4,9 @@
 #include <linux/acpi.h>
 #include <sound/intel-nhlt.h>
 
-struct nhlt_acpi_table *intel_nhlt_init(struct device *dev)
+struct acpi_table_nhlt *intel_nhlt_init(struct device *dev)
 {
-	struct nhlt_acpi_table *nhlt;
+	struct acpi_table_nhlt *nhlt;
 	acpi_status status;
 
 	status = acpi_get_table(ACPI_SIG_NHLT, 0,
@@ -20,13 +20,13 @@ struct nhlt_acpi_table *intel_nhlt_init(struct device *dev)
 }
 EXPORT_SYMBOL_GPL(intel_nhlt_init);
 
-void intel_nhlt_free(struct nhlt_acpi_table *nhlt)
+void intel_nhlt_free(struct acpi_table_nhlt *nhlt)
 {
 	acpi_put_table((struct acpi_table_header *)nhlt);
 }
 EXPORT_SYMBOL_GPL(intel_nhlt_free);
 
-int intel_nhlt_get_dmic_geo(struct device *dev, struct nhlt_acpi_table *nhlt)
+int intel_nhlt_get_dmic_geo(struct device *dev, struct acpi_table_nhlt *nhlt)
 {
 	struct nhlt_endpoint *epnt;
 	struct nhlt_dmic_array_config *cfg;

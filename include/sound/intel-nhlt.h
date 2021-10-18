@@ -77,7 +77,7 @@ struct nhlt_endpoint {
 	struct nhlt_specific_cfg config;
 } __packed;
 
-struct nhlt_acpi_table {
+struct acpi_table_nhlt {
 	struct acpi_table_header header;
 	u8 endpoint_count;
 	struct nhlt_endpoint desc[];
@@ -126,27 +126,27 @@ enum {
 	NHLT_MIC_ARRAY_VENDOR_DEFINED = 0xf,
 };
 
-struct nhlt_acpi_table *intel_nhlt_init(struct device *dev);
+struct acpi_table_nhlt *intel_nhlt_init(struct device *dev);
 
-void intel_nhlt_free(struct nhlt_acpi_table *addr);
+void intel_nhlt_free(struct acpi_table_nhlt *addr);
 
-int intel_nhlt_get_dmic_geo(struct device *dev, struct nhlt_acpi_table *nhlt);
+int intel_nhlt_get_dmic_geo(struct device *dev, struct acpi_table_nhlt *nhlt);
 
 #else
 
-struct nhlt_acpi_table;
+struct acpi_table_nhlt;
 
-static inline struct nhlt_acpi_table *intel_nhlt_init(struct device *dev)
+static inline struct acpi_table_nhlt *intel_nhlt_init(struct device *dev)
 {
 	return NULL;
 }
 
-static inline void intel_nhlt_free(struct nhlt_acpi_table *addr)
+static inline void intel_nhlt_free(struct acpi_table_nhlt *addr)
 {
 }
 
 static inline int intel_nhlt_get_dmic_geo(struct device *dev,
-					  struct nhlt_acpi_table *nhlt)
+					  struct acpi_table_nhlt *nhlt)
 {
 	return 0;
 }
