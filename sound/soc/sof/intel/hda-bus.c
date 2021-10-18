@@ -8,6 +8,7 @@
 // Authors: Keyon Jie <yang.jie@linux.intel.com>
 
 #include <linux/io.h>
+#include <linux/pci.h>
 #include <sound/hdaudio.h>
 #include <sound/hda_i915.h>
 #include "../sof-priv.h"
@@ -53,24 +54,25 @@ static const struct hdac_bus_ops bus_core_ops = {
 /*
  * This can be used for both with/without hda link support.
  */
-void sof_hda_bus_init(struct hdac_bus *bus, struct device *dev)
+void sof_hda_bus_init(struct hda_bus *bus, struct pci_dev *pdev,
+		      const char *model)
 {
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
-	snd_hdac_ext_bus_init(bus, dev, &bus_core_ops, sof_hda_ext_ops);
+	snd_hda_ext_bus_init(bus, pdev, &bus_core_ops, sof_hda_ext_ops, model);
 #else /* CONFIG_SND_SOC_SOF_HDA */
 	memset(bus, 0, sizeof(*bus));
-	bus->dev = dev;
+	bus->core.dev = &pdev->dev;
 
-	INIT_LIST_HEAD(&bus->stream_list);
+	INIT_LIST_HEAD(&bus->core.stream_list);
 
-	bus->irq = -1;
+	bus->core.irq = -1;
 
 	/*
 	 * There is only one HDA bus atm. keep the index as 0.
 	 * Need to fix when there are more than one HDA bus.
 	 */
-	bus->idx = 0;
+	bus->core.idx = 0;
 
-	spin_lock_init(&bus->reg_lock);
+	spin_lock_init(&bus->core.reg_lock);
 #endif /* CONFIG_SND_SOC_SOF_HDA */
 }

@@ -10,15 +10,17 @@
  */
 
 #include <linux/module.h>
+#include <linux/pci.h>
 #include <linux/slab.h>
 #include <linux/io.h>
 #include <sound/hdaudio_ext.h>
+#include <sound/hda_codec.h>
 
 MODULE_DESCRIPTION("HDA extended core");
 MODULE_LICENSE("GPL v2");
 
 /**
- * snd_hdac_ext_bus_init - initialize a HD-audio extended bus
+ * snd_hda_ext_bus_init - initialize a HD-audio extended bus
  * @bus: the pointer to HDAC bus object
  * @dev: device pointer
  * @ops: bus verb operators
@@ -26,28 +28,37 @@ MODULE_LICENSE("GPL v2");
  *
  * Returns 0 if successful, or a negative error code.
  */
-int snd_hdac_ext_bus_init(struct hdac_bus *bus, struct device *dev,
-			const struct hdac_bus_ops *ops,
-			const struct hdac_ext_bus_ops *ext_ops)
+int snd_hda_ext_bus_init(struct hda_bus *bus, struct pci_dev *pdev,
+			 const struct hdac_bus_ops *ops,
+			 const struct hdac_ext_bus_ops *ext_ops,
+			 const char *model)
 {
+	struct hdac_bus *base = &bus->core;
 	int ret;
 
-	ret = snd_hdac_bus_init(bus, dev, ops);
+	ret = snd_hdac_bus_init(base, &pdev->dev, ops);
 	if (ret < 0)
 		return ret;
 
-	bus->ext_ops = ext_ops;
+	base->ext_ops = ext_ops;
 	/* FIXME:
 	 * Currently only one bus is supported, if there is device with more
 	 * buses, bus->idx should be greater than 0, but there needs to be a
 	 * reliable way to always assign same number.
 	 */
-	bus->idx = 0;
-	bus->cmd_dma_state = true;
+	base->idx = 0;
+	base->cmd_dma_state = true;
+	base->use_posbuf = 1;
+	base->bdl_pos_adj = 0;
+	base->sync_write = 1;
+	bus->pci = pdev;
+	bus->modelname = model;
+	bus->mixer_assigned = -1;
+	mutex_init(&bus->prepare_mutex);
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(snd_hdac_ext_bus_init);
+EXPORT_SYMBOL_GPL(snd_hda_ext_bus_init);
 
 /**
  * snd_hdac_ext_bus_exit - clean up a HD-audio extended bus

@@ -2,11 +2,14 @@
 #ifndef __SOUND_HDAUDIO_EXT_H
 #define __SOUND_HDAUDIO_EXT_H
 
+#include <linux/pci.h>
 #include <sound/hdaudio.h>
+#include <sound/hda_codec.h>
 
-int snd_hdac_ext_bus_init(struct hdac_bus *bus, struct device *dev,
-		      const struct hdac_bus_ops *ops,
-		      const struct hdac_ext_bus_ops *ext_ops);
+int snd_hda_ext_bus_init(struct hda_bus *bus, struct pci_dev *pdev,
+			 const struct hdac_bus_ops *ops,
+			 const struct hdac_ext_bus_ops *ext_ops,
+			 const char *model);
 
 void snd_hdac_ext_bus_exit(struct hdac_bus *bus);
 int snd_hdac_ext_bus_device_init(struct hdac_bus *bus, int addr,

@@ -886,16 +886,9 @@ static int skl_create(struct pci_dev *pci,
 #if IS_ENABLED(CONFIG_SND_SOC_INTEL_SKYLAKE_HDAUDIO_CODEC)
 	ext_ops = snd_soc_hdac_hda_get_ops();
 #endif
-	snd_hdac_ext_bus_init(bus, &pci->dev, NULL, ext_ops);
-	bus->use_posbuf = 1;
+	snd_hda_ext_bus_init(hbus, pci, NULL, ext_ops, "sklbus");
 	skl->pci = pci;
 	INIT_WORK(&skl->probe_work, skl_probe_work);
-	bus->bdl_pos_adj = 0;
-
-	mutex_init(&hbus->prepare_mutex);
-	hbus->pci = pci;
-	hbus->mixer_assigned = -1;
-	hbus->modelname = "sklbus";
 
 	*rskl = skl;
 
