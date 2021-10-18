@@ -268,6 +268,7 @@ snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_sof_dev *sdev,
 	default:
 		dev_err_once(sdev->dev, "hda_position_quirk value %d not supported\n",
 			     sof_hda_position_quirk);
+		pos = 0;
 		break;
 	}
 
