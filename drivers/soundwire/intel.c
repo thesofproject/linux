@@ -258,7 +258,9 @@ static void intel_debugfs_exit(struct sdw_intel *sdw) {}
 /*
  * shim ops
  */
+static int intel_shim_init(struct sdw_intel *sdw, unsigned int link_id);
 
+/* this needs to be called with shim_lock */
 static int intel_link_power_up(struct sdw_intel *sdw)
 {
 	unsigned int link_id = sdw->instance;
@@ -267,12 +269,12 @@ static int intel_link_power_up(struct sdw_intel *sdw)
 	struct sdw_bus *bus = &sdw->cdns.bus;
 	struct sdw_master_prop *prop = &bus->prop;
 	u32 spa_mask, cpa_mask;
+	unsigned long bitmask;
 	u32 link_control;
-	int ret = 0;
 	u32 syncprd;
 	u32 sync_reg;
-
-	mutex_lock(sdw->link_res->shim_lock);
+	int bit;
+	int ret = 0;
 
 	/*
 	 * The hardware relies on an internal counter, typically 4kHz,
@@ -327,22 +329,25 @@ static int intel_link_power_up(struct sdw_intel *sdw)
 				"Failed to set SHIM_SYNC: %d\n", ret);
 			goto out;
 		}
+
+		/* initialize all IOs */
+		bitmask = sdw->link_res->link_mask;
+		for_each_set_bit(bit, &bitmask, 32)
+			intel_shim_init(sdw, bit);
 	}
 
 	*shim_mask |= BIT(link_id);
 
 	sdw->cdns.link_up = true;
 out:
-	mutex_unlock(sdw->link_res->shim_lock);
 
 	return ret;
 }
 
 /* this needs to be called with shim_lock */
-static void intel_shim_glue_to_master_ip(struct sdw_intel *sdw)
+static void intel_shim_glue_to_master_ip(struct sdw_intel *sdw, unsigned int link_id)
 {
 	void __iomem *shim = sdw->link_res->shim;
-	unsigned int link_id = sdw->instance;
 	u16 ioctl;
 
 	/* Switch to MIP from Glue logic */
@@ -369,9 +374,8 @@ static void intel_shim_glue_to_master_ip(struct sdw_intel *sdw)
 }
 
 /* this needs to be called with shim_lock */
-static void intel_shim_master_ip_to_glue(struct sdw_intel *sdw)
+static void intel_shim_master_ip_to_glue(struct sdw_intel *sdw, unsigned int link_id)
 {
-	unsigned int link_id = sdw->instance;
 	void __iomem *shim = sdw->link_res->shim;
 	u16 ioctl;
 
@@ -389,14 +393,12 @@ static void intel_shim_master_ip_to_glue(struct sdw_intel *sdw)
 	/* at this point Integration Glue has full control of the I/Os */
 }
 
-static int intel_shim_init(struct sdw_intel *sdw)
+/* this needs to be called with shim_lock */
+static int intel_shim_init(struct sdw_intel *sdw, unsigned int link_id)
 {
 	void __iomem *shim = sdw->link_res->shim;
-	unsigned int link_id = sdw->instance;
 	int ret = 0;
 	u16 ioctl = 0, act = 0;
-
-	mutex_lock(sdw->link_res->shim_lock);
 
 	/* Initialize Shim */
 	ioctl |= SDW_SHIM_IOCTL_BKE;
@@ -415,15 +417,13 @@ static int intel_shim_init(struct sdw_intel *sdw)
 	intel_writew(shim, SDW_SHIM_IOCTL(link_id), ioctl);
 	usleep_range(10, 15);
 
-	intel_shim_glue_to_master_ip(sdw);
+	intel_shim_glue_to_master_ip(sdw, link_id);
 
 	u16p_replace_bits(&act, 0x1, SDW_SHIM_CTMCTL_DOAIS);
 	act |= SDW_SHIM_CTMCTL_DACTQE;
 	act |= SDW_SHIM_CTMCTL_DODS;
 	intel_writew(shim, SDW_SHIM_CTMCTL(link_id), act);
 	usleep_range(10, 15);
-
-	mutex_unlock(sdw->link_res->shim_lock);
 
 	return ret;
 }
@@ -460,6 +460,8 @@ static int intel_link_power_down(struct sdw_intel *sdw)
 	unsigned int link_id = sdw->instance;
 	void __iomem *shim = sdw->link_res->shim;
 	u32 *shim_mask = sdw->link_res->shim_mask;
+	unsigned long bitmask;
+	int bit;
 	int ret = 0;
 
 	mutex_lock(sdw->link_res->shim_lock);
@@ -470,11 +472,14 @@ static int intel_link_power_down(struct sdw_intel *sdw)
 
 	sdw->cdns.link_up = false;
 
-	intel_shim_master_ip_to_glue(sdw);
-
 	*shim_mask &= ~BIT(link_id);
 
 	if (!*shim_mask) {
+
+		/* de-initialize all IOs */
+		bitmask = sdw->link_res->link_mask;
+		for_each_set_bit(bit, &bitmask, 32)
+			intel_shim_master_ip_to_glue(sdw, bit);
 
 		dev_dbg(sdw->cdns.dev, "%s: powering down all links\n", __func__);
 
@@ -1249,10 +1254,12 @@ static struct sdw_master_ops sdw_intel_ops = {
 
 static int intel_init(struct sdw_intel *sdw)
 {
+	mutex_lock(sdw->link_res->shim_lock);
+
 	/* Initialize shim and controller */
 	intel_link_power_up(sdw);
 
-	intel_shim_init(sdw);
+	mutex_unlock(sdw->link_res->shim_lock);
 
 	return 0;
 }
