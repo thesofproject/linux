@@ -943,13 +943,17 @@ static const struct soc_fw_state_info {
 	{SOF_FW_CRASHED, "SOF_FW_CRASHED"},
 };
 
-static void snd_sof_dbg_print_fw_state(struct snd_sof_dev *sdev)
+static void snd_sof_dbg_print_fw_state(struct snd_sof_dev *sdev, u32 flags)
 {
 	int i;
+	char *level;
+
+	level = flags & SOF_DBG_DUMP_OPTIONAL ? KERN_WARNING : KERN_ERR;
 
 	for (i = 0; i < ARRAY_SIZE(fw_state_dbg); i++) {
 		if (sdev->fw_state == fw_state_dbg[i].state) {
-			dev_err(sdev->dev, "fw_state: %s (%d)\n", fw_state_dbg[i].name, i);
+			dev_printk(level, sdev->dev, "fw_state: %s (%d)\n",
+				fw_state_dbg[i].name, i);
 			return;
 		}
 	}
@@ -960,19 +964,22 @@ static void snd_sof_dbg_print_fw_state(struct snd_sof_dev *sdev)
 void snd_sof_dsp_dbg_dump(struct snd_sof_dev *sdev, const char *msg, u32 flags)
 {
 	bool print_all = sof_debug_check_flag(SOF_DBG_PRINT_ALL_DUMPS);
+	char *level = flags & SOF_DBG_DUMP_OPTIONAL ? KERN_WARNING : KERN_ERR;
 
 	if (flags & SOF_DBG_DUMP_OPTIONAL && !print_all)
 		return;
 
 	if (sof_ops(sdev)->dbg_dump && !sdev->dbg_dump_printed) {
-		dev_err(sdev->dev, "------------[ DSP dump start ]------------\n");
+		dev_printk(level, sdev->dev, "------------[ DSP dump start ]------------\n");
 		if (msg)
-			dev_err(sdev->dev, "%s\n", msg);
-		snd_sof_dbg_print_fw_state(sdev);
+			dev_printk(level, sdev->dev, "%s\n", msg);
+		snd_sof_dbg_print_fw_state(sdev, flags);
 		sof_ops(sdev)->dbg_dump(sdev, flags);
-		dev_err(sdev->dev, "------------[ DSP dump end ]------------\n");
-		if (!print_all)
+		dev_printk(level, sdev->dev, "------------[ DSP dump end ]------------\n");
+
+		if (!print_all && !(flags & SOF_DBG_DUMP_OPTIONAL))
 			sdev->dbg_dump_printed = true;
+
 	} else if (msg) {
 		dev_err(sdev->dev, "%s\n", msg);
 	}

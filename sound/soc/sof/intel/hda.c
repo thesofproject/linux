@@ -471,17 +471,19 @@ static const struct hda_dsp_msg_code hda_dsp_rom_msg[] = {
 	{HDA_DSP_ROM_NULL_FW_ENTRY,	"error: null FW entry point"},
 };
 
-static void hda_dsp_get_status(struct snd_sof_dev *sdev)
+static void hda_dsp_get_status(struct snd_sof_dev *sdev, u32 flags)
 {
 	u32 status;
 	int i;
+	char *level;
 
+	level = flags & SOF_DBG_DUMP_OPTIONAL ? KERN_WARNING : KERN_ERR;
 	status = snd_sof_dsp_read(sdev, HDA_DSP_BAR,
 				  HDA_DSP_SRAM_REG_ROM_STATUS);
 
 	for (i = 0; i < ARRAY_SIZE(hda_dsp_rom_msg); i++) {
 		if (status == hda_dsp_rom_msg[i].code) {
-			dev_err(sdev->dev, "%s - code %8.8x\n",
+			dev_printk(level, sdev->dev, "%s - code %8.8x\n",
 				hda_dsp_rom_msg[i].msg, status);
 			return;
 		}
@@ -526,14 +528,15 @@ static void hda_dsp_dump_ext_rom_status(struct snd_sof_dev *sdev, u32 flags)
 	int len = 0;
 	u32 value;
 	int i;
+	char *level;
 
 	for (i = 0; i < HDA_EXT_ROM_STATUS_SIZE; i++) {
 		value = snd_sof_dsp_read(sdev, HDA_DSP_BAR, HDA_DSP_SRAM_REG_ROM_STATUS + i * 0x4);
 		len += snprintf(msg + len, sizeof(msg) - len, " 0x%x", value);
 	}
 
-	dev_err(sdev->dev, "extended rom status: %s", msg);
-
+	level = flags & SOF_DBG_DUMP_OPTIONAL ? KERN_WARNING : KERN_ERR;
+	dev_printk(level, sdev->dev, "extended rom status: %s", msg);
 }
 
 void hda_dsp_dump(struct snd_sof_dev *sdev, u32 flags)
@@ -543,7 +546,7 @@ void hda_dsp_dump(struct snd_sof_dev *sdev, u32 flags)
 	u32 stack[HDA_DSP_STACK_DUMP_SIZE];
 
 	/* print ROM/FW status */
-	hda_dsp_get_status(sdev);
+	hda_dsp_get_status(sdev, flags);
 
 	if (flags & SOF_DBG_DUMP_REGS) {
 		u32 status = snd_sof_dsp_read(sdev, HDA_DSP_BAR, HDA_DSP_SRAM_REG_FW_STATUS);
