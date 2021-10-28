@@ -142,9 +142,10 @@ static void configure_pte_for_fw_loading(int type, int num_pages, struct acp_dev
 int acp_dsp_pre_fw_run(struct snd_sof_dev *sdev)
 {
 	struct pci_dev *pci = to_pci_dev(sdev->dev);
+	struct snd_sof_pdata *plat_data = sdev->pdata;
 	struct acp_dev_data *adata;
 	unsigned int src_addr, size_fw;
-	u32 page_count;
+	u32 page_count, dma_size;
 	int ret;
 
 	adata = sdev->pdata->hw_pdata;
@@ -175,8 +176,11 @@ int acp_dsp_pre_fw_run(struct snd_sof_dev *sdev)
 		dev_err(sdev->dev, "acp dma transfer status: %d\n", ret);
 
 	/* Free memory once DMA is complete */
-	dma_free_coherent(&pci->dev, size_fw, &adata->bin_buf, adata->sha_dma_addr);
-	dma_free_coherent(&pci->dev, ACP_DEFAULT_DRAM_LENGTH, &adata->data_buf, adata->dma_addr);
+	dma_size =  (PAGE_ALIGN(plat_data->fw->size) >> PAGE_SHIFT) * ACP_PAGE_SIZE;
+	dma_free_coherent(&pci->dev, dma_size, adata->bin_buf, adata->sha_dma_addr);
+	dma_free_coherent(&pci->dev, ACP_DEFAULT_DRAM_LENGTH, adata->data_buf, adata->dma_addr);
+	adata->bin_buf = NULL;
+	adata->data_buf = NULL;
 
 	return ret;
 }
