@@ -16,6 +16,7 @@
 #include <linux/module.h>
 #include <linux/pci.h>
 
+#include "../sof/amd/acp.h"
 #include "mach-config.h"
 
 static int acp_quirk_data;
@@ -48,7 +49,7 @@ static const struct config_entry config_table[] = {
 	},
 };
 
-static int snd_amd_acp_find_config(struct pci_dev *pci)
+int snd_amd_acp_find_config(struct pci_dev *pci)
 {
 	const struct config_entry *table = config_table;
 	u16 device = pci->device;
