@@ -49,12 +49,38 @@ struct sof_dtrace_priv {
 	struct dentry *dfs_filter;
 	struct device *dev;
 
+	struct list_head msg_cache_list;
+	/* protecting the msg_cache list */
+	struct mutex msg_cache_lock;
+
 	int dtrace_pages;
 	u32 host_offset;
 	bool dtrace_is_enabled;
 	bool dtrace_error;
 	bool dtrace_draining;
 };
+
+struct sof_dtrace_filter_entry {
+	struct list_head node;
+	struct sof_ipc_trace_filter msg;
+};
+
+static void sof_dtrace_flush_msg_cache(struct sof_client_dev *cdev, bool send)
+{
+	struct sof_dtrace_filter_entry *filter, *_filter;
+	struct sof_dtrace_priv *priv = cdev->data;
+	struct sof_ipc_reply reply;
+
+	mutex_lock(&priv->msg_cache_lock);
+	list_for_each_entry_safe(filter, _filter, &priv->msg_cache_list, node) {
+		if (send)
+			sof_client_ipc_tx_message(cdev, &filter->msg, &reply,
+						  sizeof(reply));
+		list_del(&filter->node);
+		kfree(filter);
+	}
+	mutex_unlock(&priv->msg_cache_lock);
+}
 
 static int trace_filter_append_elem(u32 key, u32 value,
 				    struct sof_ipc_trace_filter_elem *elem_list,
@@ -165,27 +191,38 @@ static int trace_filter_parse(struct sof_client_dev *cdev, char *string,
 static int sof_ipc_trace_update_filter(struct sof_client_dev *cdev, int num_elems,
 				       struct sof_ipc_trace_filter_elem *elems)
 {
+	struct sof_dtrace_priv *priv = cdev->data;
+	struct sof_dtrace_filter_entry *filter;
 	struct sof_ipc_trace_filter *msg;
 	struct sof_ipc_reply reply;
-	size_t size;
-	int ret;
+	size_t size, alloc_size;
+	int ret = 0;
 
 	size = struct_size(msg, elems, num_elems);
 	if (size > SOF_IPC_MSG_MAX_SIZE)
 		return -EINVAL;
 
-	msg = kmalloc(size, GFP_KERNEL);
-	if (!msg)
+	alloc_size = struct_size(filter, msg.elems, num_elems);
+	filter = kmalloc(alloc_size, GFP_KERNEL);
+	if (!filter)
 		return -ENOMEM;
 
+	msg = &filter->msg;
 	msg->hdr.size = size;
 	msg->hdr.cmd = SOF_IPC_GLB_TRACE_MSG | SOF_IPC_TRACE_FILTER_UPDATE;
 	msg->elem_cnt = num_elems;
 	memcpy(&msg->elems[0], elems, num_elems * sizeof(*elems));
 
-	ret = sof_client_ipc_tx_message(cdev, msg, &reply, sizeof(reply));
-
-	kfree(msg);
+	if (sof_client_get_fw_state(cdev) == SOF_FW_BOOT_COMPLETE) {
+		/* Send the filter update */
+		ret = sof_client_ipc_tx_message(cdev, msg, &reply, sizeof(reply));
+		kfree(filter);
+	} else {
+		/* Save the filter to be sent when the DSP is booted up */
+		mutex_lock(&priv->msg_cache_lock);
+		list_add(&filter->node, &priv->msg_cache_list);
+		mutex_unlock(&priv->msg_cache_lock);
+	}
 
 	return ret ? ret : reply.error;
 }
@@ -199,12 +236,6 @@ static ssize_t sof_dtrace_dfs_filter_write(struct file *file, const char __user 
 	int num_elems, ret;
 	loff_t pos = 0;
 	char *string;
-
-	if (sof_client_get_fw_state(cdev) != SOF_FW_BOOT_COMPLETE) {
-		dev_info(priv->dev,
-			 "Filter can not be updated when the DSP is not powered\n");
-		return -EBUSY;
-	}
 
 	if (count > TRACE_FILTER_MAX_CONFIG_STRING_LENGTH) {
 		dev_err(priv->dev, "%s too long input, %zu > %d\n", __func__,
@@ -571,6 +602,9 @@ static int sof_dtrace_client_probe(struct auxiliary_device *auxdev,
 	priv->dev = dev;
 	cdev->data = priv;
 
+	INIT_LIST_HEAD(&priv->msg_cache_list);
+	mutex_init(&priv->msg_cache_lock);
+
 	/* allocate trace page table buffer */
 	ret = snd_dma_alloc_pages(SNDRV_DMA_TYPE_DEV, dma_dev, PAGE_SIZE,
 				  &priv->dmatp);
@@ -658,6 +692,8 @@ static void sof_dtrace_client_remove(struct auxiliary_device *auxdev)
 
 	snd_dma_free_pages(&priv->dmatb);
 	snd_dma_free_pages(&priv->dmatp);
+
+	sof_dtrace_flush_msg_cache(cdev, false);
 }
 
 static int sof_dtrace_client_resume(struct auxiliary_device *auxdev)
@@ -665,6 +701,7 @@ static int sof_dtrace_client_resume(struct auxiliary_device *auxdev)
 	struct sof_client_dev *cdev = auxiliary_dev_to_sof_client_dev(auxdev);
 
 	sof_dtrace_init_ipc(cdev);
+	sof_dtrace_flush_msg_cache(cdev, true);
 
 	return 0;
 }
