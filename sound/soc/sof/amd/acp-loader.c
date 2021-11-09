@@ -67,7 +67,6 @@ int acp_dsp_block_write(struct snd_sof_dev *sdev, enum snd_sof_fw_blk_type blk_t
 							    GFP_ATOMIC);
 			if (!adata->bin_buf)
 				return -ENOMEM;
-			memset(adata->bin_buf, 0, dma_size);
 		}
 		adata->fw_bin_size = size + offset;
 		dest = adata->bin_buf + offset;
@@ -80,7 +79,6 @@ int acp_dsp_block_write(struct snd_sof_dev *sdev, enum snd_sof_fw_blk_type blk_t
 							     GFP_ATOMIC);
 			if (!adata->data_buf)
 				return -ENOMEM;
-			memset(adata->data_buf, 0, ACP_DEFAULT_DRAM_LENGTH);
 		}
 		dest = adata->data_buf + offset;
 		adata->fw_data_bin_size = size + offset;
