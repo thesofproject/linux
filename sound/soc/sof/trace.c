@@ -131,6 +131,11 @@ static int sof_ipc_trace_update_filter(struct snd_sof_dev *sdev, int num_elems,
 	size_t size;
 	int ret;
 
+	if (sdev->fw_state != SOF_FW_BOOT_COMPLETE) {
+		dev_info(sdev->dev, "Not sending filter update\n");
+		return 0;
+	}
+
 	size = struct_size(msg, elems, num_elems);
 	if (size > SOF_IPC_MSG_MAX_SIZE)
 		return -EINVAL;
@@ -144,18 +149,9 @@ static int sof_ipc_trace_update_filter(struct snd_sof_dev *sdev, int num_elems,
 	msg->elem_cnt = num_elems;
 	memcpy(&msg->elems[0], elems, num_elems * sizeof(*elems));
 
-	ret = pm_runtime_get_sync(sdev->dev);
-	if (ret < 0 && ret != -EACCES) {
-		pm_runtime_put_noidle(sdev->dev);
-		dev_err(sdev->dev, "error: enabling device failed: %d\n", ret);
-		goto error;
-	}
 	ret = sof_ipc_tx_message(sdev->ipc, msg->hdr.cmd, msg, msg->hdr.size,
 				 &reply, sizeof(reply));
-	pm_runtime_mark_last_busy(sdev->dev);
-	pm_runtime_put_autosuspend(sdev->dev);
 
-error:
 	kfree(msg);
 	return ret ? ret : reply.error;
 }
