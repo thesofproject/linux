@@ -2564,12 +2564,6 @@ int __init acpi_scan_init(void)
 		}
 	}
 
-	/*
-	 * Make sure that power management resources are not blocked by ACPI
-	 * device objects with no users.
-	 */
-	bus_for_each_dev(&acpi_bus_type, NULL, NULL, acpi_dev_turn_off_if_unused);
-
 	acpi_turn_off_unused_power_resources();
 
 	acpi_scan_initialized = true;
@@ -2578,6 +2572,22 @@ int __init acpi_scan_init(void)
 	mutex_unlock(&acpi_scan_lock);
 	return result;
 }
+
+static int acpi_turn_off_unused_devices(void)
+{
+	mutex_lock(&acpi_scan_lock);
+
+	/*
+	 * Make sure that power management resources are not blocked by ACPI
+	 * device objects with no users.
+	 */
+	bus_for_each_dev(&acpi_bus_type, NULL, NULL, acpi_dev_turn_off_if_unused);
+
+	mutex_unlock(&acpi_scan_lock);
+
+	return 0;
+}
+late_initcall(acpi_turn_off_unused_devices);
 
 static struct acpi_probe_entry *ape;
 static int acpi_probe_count;
