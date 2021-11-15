@@ -47,7 +47,7 @@ static const struct sof_dev_desc jsl_desc = {
 	.default_tplg_path = "intel/sof-tplg",
 	.default_fw_filename = "sof-jsl.ri",
 	.nocodec_tplg_filename = "sof-jsl-nocodec.tplg",
-	.ops = &sof_icl_ops,
+	.ops = &sof_cnl_ops,
 };
 
 /* PCI IDs */
