@@ -77,6 +77,11 @@ struct snd_sof_pdata {
 	void *hw_pdata;
 };
 
+struct snd_sof_ext_man_pdata {
+	int default_ops_index;
+	u32 fw_hdr_offset;
+};
+
 /*
  * Descriptor used for setting up SOF platform data. This is used when
  * ACPI/PCI data is missing or mapped differently.
@@ -115,6 +120,8 @@ struct sof_dev_desc {
 	const char *default_fw_filename;
 
 	const struct snd_sof_dsp_ops *ops;
+
+	const struct snd_sof_ext_man_pdata *ext_man_pdata;
 };
 
 int sof_dai_get_mclk(struct snd_soc_pcm_runtime *rtd);
