@@ -93,9 +93,9 @@ int hda_probe_compr_trigger(struct snd_sof_dev *sdev,
 			    struct snd_compr_stream *cstream, int cmd,
 			    struct snd_soc_dai *dai)
 {
-	struct hdac_ext_stream *stream = hda_compr_get_stream(cstream);
+	struct hdac_ext_stream *hext_stream = hda_compr_get_stream(cstream);
 
-	return hda_dsp_stream_trigger(sdev, stream, cmd);
+	return hda_dsp_stream_trigger(sdev, hext_stream, cmd);
 }
 
 int hda_probe_compr_pointer(struct snd_sof_dev *sdev,
