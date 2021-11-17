@@ -781,18 +781,6 @@ int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_pa
 				dai->dai_config->type);
 		}
 		break;
-	case SOF_DAI_INTEL_HDA:
-		/*
-		 * HDAudio does not follow the default trigger
-		 * sequence due to firmware implementation
-		 */
-		for_each_dpcm_fe(rtd, SNDRV_PCM_STREAM_PLAYBACK, dpcm) {
-			struct snd_soc_pcm_runtime *fe = dpcm->fe;
-
-			fe->dai_link->trigger[SNDRV_PCM_STREAM_PLAYBACK] =
-				SND_SOC_DPCM_TRIGGER_POST;
-		}
-		break;
 	case SOF_DAI_INTEL_ALH:
 		/*
 		 * Dai could run with different channel count compared with
