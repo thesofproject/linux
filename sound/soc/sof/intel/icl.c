@@ -18,7 +18,6 @@
 #include "hda-ipc.h"
 #include "../sof-audio.h"
 
-
 #define ICL_DSP_HPRO_CORE_ID 3
 
 static const struct snd_sof_debugfs_map icl_dsp_debugfs[] = {
