@@ -336,7 +336,6 @@ struct snd_sof_ipc_msg {
 	u32 extension;
 	void *msg_data;
 	void *reply_data;
-	int max_payload_size;
 	size_t msg_size;
 	size_t reply_size;
 	int reply_error;
@@ -353,6 +352,9 @@ struct snd_sof_ipc {
 	struct mutex tx_mutex;
 	/* disables further sending of ipc's */
 	bool disable_ipc_tx;
+
+	/* Maximum allowed size of a single IPC message/reply */
+	size_t max_payload_size;
 
 	struct snd_sof_ipc_msg msg;
 };
