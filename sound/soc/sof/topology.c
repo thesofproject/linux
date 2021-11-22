@@ -465,73 +465,67 @@ static enum sof_comp_type find_process_comp_type(enum sof_ipc_process_type type)
 	return SOF_COMP_NONE;
 }
 
-/*
- * Topology Token Parsing.
- * New tokens should be added to headers and parsing tables below.
- */
-
-struct sof_topology_token {
-	u32 token;
-	u32 type;
-	int (*get_token)(void *elem, void *object, u32 offset, u32 size);
-	u32 offset;
-	u32 size;
-};
-
-static int get_token_u32(void *elem, void *object, u32 offset, u32 size)
+u32 get_token_u32(void *elem, void *object, u32 offset, u32 size)
 {
 	struct snd_soc_tplg_vendor_value_elem *velem = elem;
 	u32 *val = (u32 *)((u8 *)object + offset);
 
 	*val = le32_to_cpu(velem->value);
-	return 0;
+	return *val;
 }
 
-static int get_token_u16(void *elem, void *object, u32 offset, u32 size)
+static u32 get_token_u16(void *elem, void *object, u32 offset, u32 size)
 {
 	struct snd_soc_tplg_vendor_value_elem *velem = elem;
 	u16 *val = (u16 *)((u8 *)object + offset);
 
 	*val = (u16)le32_to_cpu(velem->value);
-	return 0;
+	return *val;
 }
 
-static int get_token_uuid(void *elem, void *object, u32 offset, u32 size)
+static u32 get_token_uuid(void *elem, void *object, u32 offset, u32 size)
 {
 	struct snd_soc_tplg_vendor_uuid_elem *velem = elem;
 	u8 *dst = (u8 *)object + offset;
 
 	memcpy(dst, velem->uuid, UUID_SIZE);
 
-	return 0;
+	return *dst;
 }
 
-static int get_token_comp_format(void *elem, void *object, u32 offset, u32 size)
+u32 get_token_comp_format(void *elem, void *object, u32 offset, u32 size)
 {
 	struct snd_soc_tplg_vendor_string_elem *velem = elem;
 	u32 *val = (u32 *)((u8 *)object + offset);
 
 	*val = find_format(velem->string);
-	return 0;
+	return *val;
 }
 
-static int get_token_dai_type(void *elem, void *object, u32 offset, u32 size)
+u32 get_token_comp_format_new(void *elem, void *object, u32 offset, u32 size)
+{
+	struct snd_soc_tplg_vendor_string_elem *velem = elem;
+
+	return find_format(velem->string);
+}
+
+static u32 get_token_dai_type(void *elem, void *object, u32 offset, u32 size)
 {
 	struct snd_soc_tplg_vendor_string_elem *velem = elem;
 	u32 *val = (u32 *)((u8 *)object + offset);
 
 	*val = find_dai(velem->string);
-	return 0;
+	return *val;
 }
 
-static int get_token_process_type(void *elem, void *object, u32 offset,
+static u32 get_token_process_type(void *elem, void *object, u32 offset,
 				  u32 size)
 {
 	struct snd_soc_tplg_vendor_string_elem *velem = elem;
 	u32 *val = (u32 *)((u8 *)object + offset);
 
 	*val = find_process(velem->string);
-	return 0;
+	return *val;
 }
 
 /* Buffers */
@@ -625,10 +619,12 @@ static const struct sof_topology_token process_tokens[] = {
 };
 
 /* PCM */
-static const struct sof_topology_token pcm_tokens[] = {
+const struct sof_topology_token pcm_tokens[] = {
 	{SOF_TKN_PCM_DMAC_CONFIG, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
-		offsetof(struct sof_ipc_comp_host, dmac_config), 0},
+	 offsetof(struct sof_ipc_comp_host, dmac_config), 0},
 };
+
+int pcm_token_size = ARRAY_SIZE(pcm_tokens);
 
 /* PCM */
 static const struct sof_topology_token stream_tokens[] = {
@@ -641,17 +637,32 @@ static const struct sof_topology_token stream_tokens[] = {
 };
 
 /* Generic components */
-static const struct sof_topology_token comp_tokens[] = {
+const struct sof_topology_token comp_tokens[] = {
 	{SOF_TKN_COMP_PERIOD_SINK_COUNT,
-		SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
-		offsetof(struct sof_ipc_comp_config, periods_sink), 0},
+	 SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+	 offsetof(struct sof_ipc_comp_config, periods_sink), 0},
 	{SOF_TKN_COMP_PERIOD_SOURCE_COUNT,
-		SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
-		offsetof(struct sof_ipc_comp_config, periods_source), 0},
+	 SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+	 offsetof(struct sof_ipc_comp_config, periods_source), 0},
 	{SOF_TKN_COMP_FORMAT,
-		SND_SOC_TPLG_TUPLE_TYPE_STRING, get_token_comp_format,
-		offsetof(struct sof_ipc_comp_config, frame_fmt), 0},
+	 SND_SOC_TPLG_TUPLE_TYPE_STRING, get_token_comp_format,
+	 offsetof(struct sof_ipc_comp_config, frame_fmt), 0},
 };
+
+/* this should replace comp_tokens[] after switch all token parsing */
+const struct sof_topology_token comp_tokens_new[] = {
+	{SOF_TKN_COMP_PERIOD_SINK_COUNT,
+	 SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+	 offsetof(struct sof_ipc_comp_config, periods_sink), 0},
+	{SOF_TKN_COMP_PERIOD_SOURCE_COUNT,
+	 SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+	 offsetof(struct sof_ipc_comp_config, periods_source), 0},
+	{SOF_TKN_COMP_FORMAT,
+	 SND_SOC_TPLG_TUPLE_TYPE_STRING, get_token_comp_format_new,
+	 offsetof(struct sof_ipc_comp_config, frame_fmt), 0},
+};
+
+int comp_token_size = ARRAY_SIZE(comp_tokens_new);
 
 /* SSP */
 static const struct sof_topology_token ssp_tokens[] = {
@@ -894,6 +905,65 @@ static int sof_parse_string_tokens(struct snd_soc_component *scomp,
 	return found;
 }
 
+/* this should replace sof_parse_string_tokens() after switch all token parsing */
+static int sof_parse_string_tokens_new(struct snd_soc_component *scomp,
+				   const struct sof_topology_token *tokens,
+				   int count, struct snd_soc_tplg_vendor_array *array,
+				   struct snd_sof_tuple **tuples, int *num_tuples)
+{
+	struct snd_soc_tplg_vendor_string_elem *elem;
+	int found = 0;
+	int i, j;
+	u32 value;
+
+	/* parse element by element */
+	for (i = 0; i < le32_to_cpu(array->num_elems); i++) {
+		elem = &array->string[i];
+
+		/* search for token */
+		for (j = 0; j < count; j++) {
+			struct snd_sof_tuple *new_tuples;
+
+			/* match token type */
+			if (tokens[j].type != SND_SOC_TPLG_TUPLE_TYPE_STRING)
+				continue;
+
+			/* match token id */
+			if (tokens[j].token != le32_to_cpu(elem->token))
+				continue;
+
+			/* matched - get value */
+			value = tokens[j].get_token(elem, NULL, 0, tokens[j].size);
+
+			if (!tuples && !num_tuples)
+				continue;
+
+			/* save token in the tuple array */
+			if (!(*num_tuples)) {
+				new_tuples = devm_kzalloc(scomp->dev, sizeof(struct snd_sof_tuple),
+							  GFP_KERNEL);
+				if (!new_tuples)
+					return -ENOMEM;
+			} else {
+				new_tuples = devm_krealloc(scomp->dev, *tuples,
+							    sizeof(struct snd_sof_tuple) *
+							    (*num_tuples + 1),
+							    GFP_KERNEL);
+				if (!new_tuples)
+		                        return -ENOMEM;
+			}
+
+			new_tuples[*num_tuples].token = tokens[j].token;
+			new_tuples[*num_tuples].value = value;
+			*tuples = new_tuples;
+			(*num_tuples)++;
+			found++;
+		}
+	}
+
+	return found;
+}
+
 static int sof_parse_word_tokens(struct snd_soc_component *scomp,
 				 void *object,
 				 const struct sof_topology_token *tokens,
@@ -927,6 +997,65 @@ static int sof_parse_word_tokens(struct snd_soc_component *scomp,
 					    offset + tokens[j].offset,
 					    tokens[j].size);
 
+			found++;
+		}
+	}
+
+	return found;
+}
+
+/* this should replace sof_parse_word_tokens() after switch all token parsing */
+static int sof_parse_word_tokens_new(struct snd_soc_component *scomp,
+				 const struct sof_topology_token *tokens,
+				 int count,
+				 struct snd_soc_tplg_vendor_array *array,
+				 struct snd_sof_tuple **tuples, int *num_tuples)
+{
+	struct snd_soc_tplg_vendor_value_elem *elem;
+	int found = 0;
+	int i, j;
+
+	/* parse element by element */
+	for (i = 0; i < le32_to_cpu(array->num_elems); i++) {
+		elem = &array->value[i];
+
+		/* search for token */
+		for (j = 0; j < count; j++) {
+			struct snd_sof_tuple *new_tuples;
+
+			/* match token type */
+			if (!(tokens[j].type == SND_SOC_TPLG_TUPLE_TYPE_WORD ||
+			      tokens[j].type == SND_SOC_TPLG_TUPLE_TYPE_SHORT ||
+			      tokens[j].type == SND_SOC_TPLG_TUPLE_TYPE_BYTE ||
+			      tokens[j].type == SND_SOC_TPLG_TUPLE_TYPE_BOOL))
+				continue;
+
+			/* match token id */
+			if (tokens[j].token != le32_to_cpu(elem->token))
+				continue;
+
+			if (!tuples && !num_tuples)
+				continue;
+
+			/* save token in the tuple array */
+			if (!(*num_tuples)) {
+				new_tuples = devm_kzalloc(scomp->dev, sizeof(struct snd_sof_tuple),
+							  GFP_KERNEL);
+				if (!new_tuples)
+					return -ENOMEM;
+			} else {
+				new_tuples = devm_krealloc(scomp->dev, *tuples,
+							    sizeof(struct snd_sof_tuple) *
+							    (*num_tuples + 1),
+							    GFP_KERNEL);
+				if (!new_tuples)
+		                        return -ENOMEM;
+			}
+
+			new_tuples[*num_tuples].token = tokens[j].token;
+			new_tuples[*num_tuples].value = le32_to_cpu(elem->value);
+			*tuples = new_tuples;
+			(*num_tuples)++;
 			found++;
 		}
 	}
@@ -1016,6 +1145,90 @@ static int sof_parse_token_sets(struct snd_soc_component *scomp,
 	return 0;
 }
 
+/* this should replace sof_parse_token_sets() after all token parsing is switched */
+static int sof_parse_token_sets_new(struct snd_soc_component *scomp,
+				    void *object, const struct sof_topology_token *tokens,
+				    int count, struct snd_soc_tplg_vendor_array *array,
+				    int priv_size, int sets, size_t object_size,
+				    struct snd_sof_tuple **tuples, int *num_tuples)
+{
+	size_t offset = 0;
+	int found = 0;
+	int total = 0;
+	int asize;
+
+	while (priv_size > 0 && total < count * sets) {
+		asize = le32_to_cpu(array->size);
+
+		/* validate asize */
+		if (asize < 0) { /* FIXME: A zero-size array makes no sense */
+			dev_err(scomp->dev, "error: invalid array size 0x%x\n",
+				asize);
+			return -EINVAL;
+		}
+
+		/* make sure there is enough data before parsing */
+		priv_size -= asize;
+		if (priv_size < 0) {
+			dev_err(scomp->dev, "error: invalid array size 0x%x\n",
+				asize);
+			return -EINVAL;
+		}
+
+		/* call correct parser depending on type */
+		switch (le32_to_cpu(array->type)) {
+		case SND_SOC_TPLG_TUPLE_TYPE_UUID:
+			found += sof_parse_uuid_tokens(scomp, object, tokens, count, array,
+						       offset);
+			break;
+		case SND_SOC_TPLG_TUPLE_TYPE_STRING:
+			found += sof_parse_string_tokens_new(scomp, tokens, count, array,
+							     tuples, num_tuples);
+			break;
+		case SND_SOC_TPLG_TUPLE_TYPE_BOOL:
+		case SND_SOC_TPLG_TUPLE_TYPE_BYTE:
+		case SND_SOC_TPLG_TUPLE_TYPE_WORD:
+		case SND_SOC_TPLG_TUPLE_TYPE_SHORT:
+			found += sof_parse_word_tokens_new(scomp, tokens, count, array, tuples,
+							   num_tuples);
+			break;
+		default:
+			dev_err(scomp->dev, "error: unknown token type %d\n",
+				array->type);
+			return -EINVAL;
+		}
+
+		/* next array */
+		array = (struct snd_soc_tplg_vendor_array *)((u8 *)array
+			+ asize);
+
+		/* move to next target struct */
+		if (found >= count) {
+			offset += object_size;
+			total += found;
+			found = 0;
+		}
+	}
+
+	return 0;
+}
+
+/* this should replace sof_parse_tokens() after switch all token parsing */
+static int sof_parse_tokens_new(struct snd_soc_component *scomp, void *object,
+				 const struct sof_topology_token *tokens, int count,
+				 struct snd_soc_tplg_vendor_array *array,
+				 int priv_size, struct snd_sof_tuple **tuples, int *num_tuples)
+{
+	/*
+	 * sof_parse_tokens is used when topology contains only a single set of
+	 * identical tuples arrays. So additional parameters to
+	 * sof_parse_token_sets are sets = 1 (only 1 set) and
+	 * object_size = 0 (irrelevant).
+	 */
+	return sof_parse_token_sets_new(scomp, object, tokens, count, array,
+					priv_size, 1, 0, tuples, num_tuples);
+}
+
 static int sof_parse_tokens(struct snd_soc_component *scomp,
 			    void *object,
 			    const struct sof_topology_token *tokens,
@@ -1033,8 +1246,7 @@ static int sof_parse_tokens(struct snd_soc_component *scomp,
 				    priv_size, 1, 0);
 }
 
-static void sof_dbg_comp_config(struct snd_soc_component *scomp,
-				struct sof_ipc_comp_config *config)
+void sof_dbg_comp_config(struct snd_soc_component *scomp, struct sof_ipc_comp_config *config)
 {
 	dev_dbg(scomp->dev, " config: periods snk %d src %d fmt %d\n",
 		config->periods_sink, config->periods_source,
@@ -1436,8 +1648,7 @@ static int sof_connect_dai_widget(struct snd_soc_component *scomp,
  *
  * Return: The pointer to the new allocated component, NULL if failed.
  */
-static struct sof_ipc_comp *sof_comp_alloc(struct snd_sof_widget *swidget,
-					   size_t *ipc_size, int index)
+struct sof_ipc_comp *sof_comp_alloc(struct snd_sof_widget *swidget, size_t *ipc_size, int index)
 {
 	u8 nil_uuid[SOF_UUID_SIZE] = {0};
 	struct sof_ipc_comp *comp;
@@ -1598,47 +1809,25 @@ static int sof_widget_load_pcm(struct snd_soc_component *scomp, int index,
 			       struct snd_soc_tplg_dapm_widget *tw)
 {
 	struct snd_soc_tplg_private *private = &tw->priv;
-	struct sof_ipc_comp_host *host;
-	size_t ipc_size = sizeof(*host);
 	int ret;
 
-	host = (struct sof_ipc_comp_host *)
-	       sof_comp_alloc(swidget, &ipc_size, index);
-	if (!host)
-		return -ENOMEM;
-
-	/* configure host comp IPC message */
-	host->comp.type = SOF_COMP_HOST;
-	host->direction = dir;
-	host->config.hdr.size = sizeof(host->config);
-
-	ret = sof_parse_tokens(scomp, host, pcm_tokens,
-			       ARRAY_SIZE(pcm_tokens), private->array,
-			       le32_to_cpu(private->size));
+	ret = sof_parse_tokens_new(scomp, NULL, pcm_tokens, ARRAY_SIZE(pcm_tokens), private->array,
+				   le32_to_cpu(private->size), &swidget->tuples,
+				   &swidget->num_tuples);
 	if (ret != 0) {
-		dev_err(scomp->dev, "error: parse host tokens failed %d\n",
-			private->size);
-		goto err;
+		dev_err(scomp->dev, "parsing host tokens failed %d\n", ret);
+		return ret;
 	}
 
-	ret = sof_parse_tokens(scomp, &host->config, comp_tokens,
-			       ARRAY_SIZE(comp_tokens), private->array,
-			       le32_to_cpu(private->size));
+	ret = sof_parse_tokens_new(scomp, NULL, comp_tokens_new, ARRAY_SIZE(comp_tokens_new),
+				    private->array, le32_to_cpu(private->size), &swidget->tuples,
+				    &swidget->num_tuples);
 	if (ret != 0) {
-		dev_err(scomp->dev, "error: parse host.cfg tokens failed %d\n",
-			le32_to_cpu(private->size));
-		goto err;
+		dev_err(scomp->dev, "parsing host comp tokens failed %d\n", ret);
+		return ret;
 	}
-
-	dev_dbg(scomp->dev, "loaded host %s\n", swidget->widget->name);
-	sof_dbg_comp_config(scomp, &host->config);
-
-	swidget->private = host;
 
 	return 0;
-err:
-	kfree(host);
-	return ret;
 }
 
 /*
@@ -3520,6 +3709,18 @@ static int sof_complete(struct snd_soc_component *scomp)
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_sof_widget *swidget, *comp_swidget;
 	int ret;
+
+	/* now update all ipc based on the widget tuple array for host components */
+	list_for_each_entry(swidget, &sdev->widget_list, list) {
+		switch (swidget->id) {
+		case snd_soc_dapm_aif_in:
+		case snd_soc_dapm_aif_out:
+			sof_widget_update_ipc_comp_host(scomp, swidget);
+			break;
+		default:
+			break;
+		}
+	}
 
 	/* set the pipe_widget and apply the dynamic_pipeline_widget_flag */
 	list_for_each_entry(swidget, &sdev->widget_list, list) {

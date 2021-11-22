@@ -19,6 +19,7 @@
 #include <sound/sof/control.h>
 #include <sound/sof/dai.h>
 #include <sound/sof/topology.h>
+#include <uapi/sound/sof/tokens.h>
 #include "sof-priv.h"
 
 #define SOF_AUDIO_PCM_DRV_NAME	"sof-audio-component"
@@ -29,6 +30,31 @@
 #define DMA_CHAN_INVALID	0xFFFFFFFF
 
 #define WIDGET_IS_DAI(id) ((id) == snd_soc_dapm_dai_in || (id) == snd_soc_dapm_dai_out)
+
+struct snd_sof_widget;
+struct sof_ipc_comp *sof_comp_alloc(struct snd_sof_widget *swidget, size_t *ipc_size, int index);
+
+/*
+ * Topology Token Parsing.
+ * New tokens should be added to headers and parsing tables below.
+ */
+
+struct sof_topology_token {
+	u32 token;
+	u32 type;
+	u32 (*get_token)(void *elem, void *object, u32 offset, u32 size);
+	u32 offset;
+	u32 size;
+};
+
+struct snd_sof_tuple {
+	u32 token;
+	u32 value;
+};
+
+extern const struct sof_topology_token pcm_tokens[];
+extern int pcm_token_size, comp_token_size;
+extern const struct sof_topology_token comp_tokens_new[];
 
 /* PCM stream, mapped to FW component  */
 struct snd_sof_pcm_stream {
@@ -55,6 +81,8 @@ struct snd_sof_pcm {
 	struct list_head list;	/* list in sdev pcm list */
 	struct snd_pcm_hw_params params[2];
 	bool prepared[2]; /* PCM_PARAMS set successfully */
+	int num_tuples;
+	struct snd_sof_tuple *tuples;
 };
 
 struct snd_sof_led_control {
@@ -82,9 +110,10 @@ struct snd_sof_control {
 
 	/* if true, the control's data needs to be updated from Firmware */
 	bool comp_data_dirty;
-};
 
-struct snd_sof_widget;
+	int num_tuples;
+	struct snd_sof_tuple *tuples;
+};
 
 /* ASoC SOF DAPM widget */
 struct snd_sof_widget {
@@ -95,6 +124,7 @@ struct snd_sof_widget {
 	int use_count; /* use_count will be protected by the PCM mutex held by the core */
 	int core;
 	int id;
+	int num_tuples;
 
 	/*
 	 * Flag indicating if the widget should be set up dynamically when a PCM is opened.
@@ -112,6 +142,8 @@ struct snd_sof_widget {
 
 	/* extended data for UUID components */
 	struct sof_ipc_comp_ext comp_ext;
+
+	struct snd_sof_tuple *tuples;
 
 	void *private;		/* core does not touch this */
 };
@@ -133,6 +165,7 @@ struct snd_sof_route {
 struct snd_sof_dai {
 	struct snd_soc_component *scomp;
 	const char *name;
+	int num_tuples;
 
 	struct sof_ipc_comp_dai comp_dai;
 	int number_configs;
@@ -140,6 +173,7 @@ struct snd_sof_dai {
 	bool configured; /* DAI configured during BE hw_params */
 	struct sof_ipc_dai_config *dai_config;
 	struct list_head list;	/* list in sdev dai list */
+	struct snd_sof_tuple *tuples;
 };
 
 /*
@@ -264,4 +298,7 @@ int sof_pcm_dsp_pcm_free(struct snd_pcm_substream *substream, struct snd_sof_dev
 			 struct snd_sof_pcm *spcm);
 int sof_pcm_stream_free(struct snd_sof_dev *sdev, struct snd_pcm_substream *substream,
 			struct snd_sof_pcm *spcm, int dir, bool free_widget_list);
+int sof_widget_update_ipc_comp_host(struct snd_soc_component *scomp,
+				    struct snd_sof_widget *swidget);
+void sof_dbg_comp_config(struct snd_soc_component *scomp, struct sof_ipc_comp_config *config);
 #endif
