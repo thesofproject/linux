@@ -302,4 +302,7 @@ int sof_pcm_stream_free(struct snd_sof_dev *sdev, struct snd_pcm_substream *subs
 int sof_widget_update_ipc_comp_host(struct snd_soc_component *scomp,
 				    struct snd_sof_widget *swidget);
 void sof_dbg_comp_config(struct snd_soc_component *scomp, struct sof_ipc_comp_config *config);
+void sof_update_ipc_object(void *object, const struct sof_topology_token *tokens, int count,
+			   int num_tuples, struct snd_sof_tuple *tuples,
+			   size_t object_size, int num_sets);
 #endif

@@ -12,55 +12,6 @@
 #include "sof-audio.h"
 #include "ops.h"
 
-/*
- * update the IPC struct based on the tuple array.
- */
-static void sof_update_ipc_object(void *object, const struct sof_topology_token *tokens, int count,
-				  int num_tuples, struct snd_sof_tuple *tuples,
-				  size_t object_size, int num_sets)
-{
-	int i,j;
-	int num_tokens_matched = 0;
-	int offset = 0;
-
-	for (i = 0; i < count; i++) {
-		for (j = 0; j < num_tuples; j++) {
-			if (tokens[i].token == tuples[j].token) {
-				switch (tokens[i].type) {
-				case SND_SOC_TPLG_TUPLE_TYPE_WORD:
-				{
-					u32 *val = (u32 *)((u8 *)object + tokens[i].offset +
-							   offset);
-
-					*val = tuples[j].value;
-					break;
-				}
-				case SND_SOC_TPLG_TUPLE_TYPE_SHORT:
-				case SND_SOC_TPLG_TUPLE_TYPE_BOOL:
-				{
-					u16 *val = (u16 *)((u8 *)object + tokens[i].offset +
-							    offset);
-
-					*val = (u16) tuples[j].value;
-					break;
-				}
-				default:
-					break;
-				}
-
-				num_tokens_matched++;
-				if (!(num_tokens_matched % count)) {
-					/* found all required tokens */
-					if ((num_tokens_matched / count) == num_sets)
-						return;
-					/* move to the next set */
-					offset += object_size;
-				}
-			}
-		}
-	}
-}
-
 int sof_widget_update_ipc_comp_host(struct snd_soc_component *scomp,
 				    struct snd_sof_widget *swidget)
 {
