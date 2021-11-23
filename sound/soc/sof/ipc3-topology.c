@@ -161,3 +161,46 @@ int sof_widget_update_ipc_comp_mixer(struct snd_soc_component *scomp,
 
 	return 0;
 }
+int sof_widget_update_ipc_comp_pga(struct snd_soc_component *scomp,
+				   struct snd_sof_widget *swidget)
+{
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct sof_ipc_comp_volume *volume;
+	struct snd_sof_control *scontrol;
+	size_t ipc_size = sizeof(*volume);
+	int min_step;
+	int max_step;
+
+	volume = (struct sof_ipc_comp_volume *)
+		 sof_comp_alloc(swidget, &ipc_size, swidget->pipeline_id);
+	if (!volume)
+		return -ENOMEM;
+
+	/* configure volume IPC message */
+	volume->comp.type = SOF_COMP_VOLUME;
+	volume->config.hdr.size = sizeof(volume->config);
+
+	sof_update_ipc_object(volume, volume_tokens, volume_token_size, swidget->num_tuples,
+			      swidget->tuples, sizeof(*volume), 1);
+
+	sof_update_ipc_object(&volume->config, comp_tokens_new, comp_token_size, swidget->num_tuples,
+			      swidget->tuples, sizeof(volume->config), 1);
+
+	sof_dbg_comp_config(scomp, &volume->config);
+
+	swidget->private = volume;
+
+	list_for_each_entry(scontrol, &sdev->kcontrol_list, list) {
+		if (scontrol->comp_id == swidget->comp_id &&
+		    scontrol->volume_table) {
+			min_step = scontrol->min_volume_step;
+			max_step = scontrol->max_volume_step;
+			volume->min_value = scontrol->volume_table[min_step];
+			volume->max_value = scontrol->volume_table[max_step];
+			volume->channels = scontrol->num_channels;
+			break;
+		}
+	}
+
+	return 0;
+}

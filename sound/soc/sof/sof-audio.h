@@ -56,12 +56,14 @@ extern const struct sof_topology_token pcm_tokens[];
 extern const struct sof_topology_token dai_tokens_new[];
 extern const struct sof_topology_token sched_tokens[];
 extern const struct sof_topology_token pipeline_tokens[];
+extern const struct sof_topology_token volume_tokens[];
 extern const struct sof_topology_token comp_tokens_new[];
 extern int pcm_token_size;
 extern int comp_token_size;
 extern int dai_token_size;
 extern int sched_token_size;
 extern int pipeline_token_size;
+extern int volume_token_size;
 
 /* PCM stream, mapped to FW component  */
 struct snd_sof_pcm_stream {
@@ -315,6 +317,8 @@ int sof_widget_update_ipc_comp_pipeline(struct snd_soc_component *scomp,
 					struct snd_sof_widget *swidget);
 int sof_widget_update_ipc_comp_mixer(struct snd_soc_component *scomp,
 				     struct snd_sof_widget *swidget);
+int sof_widget_update_ipc_comp_pga(struct snd_soc_component *scomp,
+				   struct snd_sof_widget *swidget);
 void sof_dbg_comp_config(struct snd_soc_component *scomp, struct sof_ipc_comp_config *config);
 void sof_update_ipc_object(void *object, const struct sof_topology_token *tokens, int count,
 			   int num_tuples, struct snd_sof_tuple *tuples,
