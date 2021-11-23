@@ -136,3 +136,28 @@ int sof_widget_update_ipc_comp_pipeline(struct snd_soc_component *scomp,
 
 	return 0;
 }
+
+int sof_widget_update_ipc_comp_mixer(struct snd_soc_component *scomp,
+				     struct snd_sof_widget *swidget)
+{
+	struct sof_ipc_comp_mixer *mixer;
+	size_t ipc_size = sizeof(*mixer);
+
+	mixer = (struct sof_ipc_comp_mixer *)
+		sof_comp_alloc(swidget, &ipc_size, swidget->pipeline_id);
+	if (!mixer)
+		return -ENOMEM;
+
+	/* configure mixer IPC message */
+	mixer->comp.type = SOF_COMP_MIXER;
+	mixer->config.hdr.size = sizeof(mixer->config);
+
+	sof_update_ipc_object(&mixer->config, comp_tokens_new, comp_token_size, swidget->num_tuples,
+			      swidget->tuples, sizeof(mixer->config), 1);
+
+	sof_dbg_comp_config(scomp, &mixer->config);
+
+	swidget->private = mixer;
+
+	return 0;
+}

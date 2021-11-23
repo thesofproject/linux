@@ -1921,32 +1921,17 @@ static int sof_widget_load_mixer(struct snd_soc_component *scomp, int index,
 				 struct snd_soc_tplg_dapm_widget *tw)
 {
 	struct snd_soc_tplg_private *private = &tw->priv;
-	struct sof_ipc_comp_mixer *mixer;
-	size_t ipc_size = sizeof(*mixer);
 	int ret;
 
-	mixer = (struct sof_ipc_comp_mixer *)
-		sof_comp_alloc(swidget, &ipc_size, index);
-	if (!mixer)
-		return -ENOMEM;
-
-	/* configure mixer IPC message */
-	mixer->comp.type = SOF_COMP_MIXER;
-	mixer->config.hdr.size = sizeof(mixer->config);
-
-	ret = sof_parse_tokens(scomp, &mixer->config, comp_tokens,
-			       ARRAY_SIZE(comp_tokens), private->array,
-			       le32_to_cpu(private->size));
+	ret = sof_parse_tokens_new(scomp, NULL, comp_tokens,
+			           ARRAY_SIZE(comp_tokens), private->array,
+			           le32_to_cpu(private->size), &swidget->tuples,
+				   &swidget->num_tuples);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse mixer.cfg tokens failed %d\n",
 			private->size);
-		kfree(mixer);
 		return ret;
 	}
-
-	sof_dbg_comp_config(scomp, &mixer->config);
-
-	swidget->private = mixer;
 
 	return 0;
 }
@@ -3728,6 +3713,9 @@ static int sof_complete(struct snd_soc_component *scomp)
 			break;
 		case snd_soc_dapm_scheduler:
 			sof_widget_update_ipc_comp_pipeline(scomp, swidget);
+			break;
+		case snd_soc_dapm_mixer:
+			sof_widget_update_ipc_comp_mixer(scomp, swidget);
 			break;
 		default:
 			break;
