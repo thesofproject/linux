@@ -518,6 +518,13 @@ static u32 get_token_dai_type(void *elem, void *object, u32 offset, u32 size)
 	return *val;
 }
 
+static u32 get_token_dai_type_new(void *elem, void *object, u32 offset, u32 size)
+{
+	struct snd_soc_tplg_vendor_string_elem *velem = elem;
+
+	return find_dai(velem->string);
+}
+
 static u32 get_token_process_type(void *elem, void *object, u32 offset,
 				  u32 size)
 {
@@ -537,7 +544,7 @@ static const struct sof_topology_token buffer_tokens[] = {
 };
 
 /* DAI */
-static const struct sof_topology_token dai_tokens[] = {
+const struct sof_topology_token dai_tokens[] = {
 	{SOF_TKN_DAI_TYPE, SND_SOC_TPLG_TUPLE_TYPE_STRING, get_token_dai_type,
 		offsetof(struct sof_ipc_comp_dai, type), 0},
 	{SOF_TKN_DAI_INDEX, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
@@ -545,6 +552,16 @@ static const struct sof_topology_token dai_tokens[] = {
 	{SOF_TKN_DAI_DIRECTION, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
 		offsetof(struct sof_ipc_comp_dai, direction), 0},
 };
+
+const struct sof_topology_token dai_tokens_new[] = {
+	{SOF_TKN_DAI_TYPE, SND_SOC_TPLG_TUPLE_TYPE_STRING, get_token_dai_type_new,
+		offsetof(struct sof_ipc_comp_dai, type), 0},
+	{SOF_TKN_DAI_INDEX, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc_comp_dai, dai_index), 0},
+	{SOF_TKN_DAI_DIRECTION, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc_comp_dai, direction), 0},
+};
+int dai_token_size = ARRAY_SIZE(dai_tokens_new);
 
 /* BE DAI link */
 static const struct sof_topology_token dai_link_tokens[] = {
@@ -1269,6 +1286,7 @@ void sof_update_ipc_object(void *object, const struct sof_topology_token *tokens
 			if (tokens[i].token == tuples[j].token) {
 				switch (tokens[i].type) {
 				case SND_SOC_TPLG_TUPLE_TYPE_WORD:
+				case SND_SOC_TPLG_TUPLE_TYPE_STRING:
 				{
 					u32 *val = (u32 *)((u8 *)object + tokens[i].offset +
 							   offset);
@@ -1736,54 +1754,31 @@ static int sof_widget_load_dai(struct snd_soc_component *scomp, int index,
 			       struct snd_sof_dai *dai)
 {
 	struct snd_soc_tplg_private *private = &tw->priv;
-	struct sof_ipc_comp_dai *comp_dai;
-	size_t ipc_size = sizeof(*comp_dai);
 	int ret;
 
-	comp_dai = (struct sof_ipc_comp_dai *)
-		   sof_comp_alloc(swidget, &ipc_size, index);
-	if (!comp_dai)
-		return -ENOMEM;
-
-	/* configure dai IPC message */
-	comp_dai->comp.type = SOF_COMP_DAI;
-	comp_dai->config.hdr.size = sizeof(comp_dai->config);
-
-	ret = sof_parse_tokens(scomp, comp_dai, dai_tokens,
-			       ARRAY_SIZE(dai_tokens), private->array,
-			       le32_to_cpu(private->size));
+	ret = sof_parse_tokens_new(scomp, NULL, dai_tokens_new,
+			           ARRAY_SIZE(dai_tokens_new), private->array,
+			           le32_to_cpu(private->size), &dai->tuples,
+				   &dai->num_tuples);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse dai tokens failed %d\n",
 			le32_to_cpu(private->size));
-		goto finish;
+		return ret;
 	}
 
-	ret = sof_parse_tokens(scomp, &comp_dai->config, comp_tokens,
-			       ARRAY_SIZE(comp_tokens), private->array,
-			       le32_to_cpu(private->size));
+	ret = sof_parse_tokens_new(scomp, NULL, comp_tokens_new,
+			           ARRAY_SIZE(comp_tokens_new), private->array,
+			           le32_to_cpu(private->size), &dai->tuples,
+				   &dai->num_tuples);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse dai.cfg tokens failed %d\n",
 			private->size);
-		goto finish;
+		return ret;
 	}
 
-	dev_dbg(scomp->dev, "dai %s: type %d index %d\n",
-		swidget->widget->name, comp_dai->type, comp_dai->dai_index);
-	sof_dbg_comp_config(scomp, &comp_dai->config);
-
-	if (dai) {
+	if (dai)
 		dai->scomp = scomp;
 
-		/*
-		 * copy only the sof_ipc_comp_dai to avoid collapsing
-		 * the snd_sof_dai, the extended data is kept in the
-		 * snd_sof_widget.
-		 */
-		memcpy(&dai->comp_dai, comp_dai, sizeof(*comp_dai));
-	}
-
-finish:
-	kfree(comp_dai);
 	return ret;
 }
 
@@ -2567,6 +2562,7 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 		}
 		list_add(&dai->list, &sdev->dai_list);
 		swidget->private = dai;
+		sof_widget_update_ipc_comp_dai(scomp, swidget);
 		break;
 	case snd_soc_dapm_mixer:
 		ret = sof_widget_load_mixer(scomp, index, swidget, tw);

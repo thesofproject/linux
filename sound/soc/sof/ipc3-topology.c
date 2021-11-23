@@ -46,3 +46,41 @@ int sof_widget_update_ipc_comp_host(struct snd_soc_component *scomp,
 
 	return 0;
 }
+
+
+int sof_widget_update_ipc_comp_dai(struct snd_soc_component *scomp,
+				    struct snd_sof_widget *swidget)
+{
+	struct sof_ipc_comp_dai *comp_dai;
+	size_t ipc_size = sizeof(*comp_dai);
+	struct snd_sof_dai *dai = swidget->private;
+
+	comp_dai = (struct sof_ipc_comp_dai *)
+	       sof_comp_alloc(swidget, &ipc_size, swidget->pipeline_id);
+	if (!comp_dai)
+		return -ENOMEM;
+
+	/* configure dai IPC message */
+	comp_dai->comp.type = SOF_COMP_DAI;
+	comp_dai->config.hdr.size = sizeof(comp_dai->config);
+
+	/* update dai_tokens */
+	sof_update_ipc_object(comp_dai, dai_tokens_new, dai_token_size, dai->num_tuples,
+			      dai->tuples, sizeof(*comp_dai), 1);
+
+	/* update comp_tokens */
+	sof_update_ipc_object(&comp_dai->config, comp_tokens_new, comp_token_size, dai->num_tuples,
+			      dai->tuples, sizeof(comp_dai->config), 1);
+
+	/*
+	 * copy only the sof_ipc_comp_dai to avoid collapsing
+	 * the snd_sof_dai, the extended data is kept in the
+	 * snd_sof_widget.
+	 */
+	memcpy(&dai->comp_dai, comp_dai, sizeof(*comp_dai));
+
+	dev_dbg(scomp->dev, "%s dai %s: type %d index %d\n",
+		__func__, swidget->widget->name, comp_dai->type, comp_dai->dai_index);
+	sof_dbg_comp_config(scomp, &comp_dai->config);
+	return 0;
+}
