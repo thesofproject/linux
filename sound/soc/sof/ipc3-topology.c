@@ -50,9 +50,10 @@ static void sof_update_ipc_object(void *object, const struct sof_topology_token 
 
 				num_tokens_matched++;
 				if (!(num_tokens_matched % count)) {
-					if (num_sets == 1)
+					/* found all required tokens */
+					if ((num_tokens_matched / count) == num_sets)
 						return;
-
+					/* move to the next set */
 					offset += object_size;
 				}
 			}
