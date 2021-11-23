@@ -53,8 +53,9 @@ struct snd_sof_tuple {
 };
 
 extern const struct sof_topology_token pcm_tokens[];
-extern int pcm_token_size, comp_token_size;
 extern const struct sof_topology_token comp_tokens_new[];
+extern int pcm_token_size;
+extern int comp_token_size;
 
 /* PCM stream, mapped to FW component  */
 struct snd_sof_pcm_stream {
