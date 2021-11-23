@@ -572,7 +572,7 @@ static const struct sof_topology_token dai_link_tokens[] = {
 };
 
 /* scheduling */
-static const struct sof_topology_token sched_tokens[] = {
+const struct sof_topology_token sched_tokens[] = {
 	{SOF_TKN_SCHED_PERIOD, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
 		offsetof(struct sof_ipc_pipe_new, period), 0},
 	{SOF_TKN_SCHED_PRIORITY, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
@@ -586,12 +586,14 @@ static const struct sof_topology_token sched_tokens[] = {
 	{SOF_TKN_SCHED_TIME_DOMAIN, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
 		offsetof(struct sof_ipc_pipe_new, time_domain), 0},
 };
+int sched_token_size = ARRAY_SIZE(sched_tokens);
 
-static const struct sof_topology_token pipeline_tokens[] = {
+const struct sof_topology_token pipeline_tokens[] = {
 	{SOF_TKN_SCHED_DYNAMIC_PIPELINE, SND_SOC_TPLG_TUPLE_TYPE_BOOL, get_token_u16,
 		offsetof(struct snd_sof_widget, dynamic_pipeline_widget), 0},
 
 };
+int pipeline_token_size = ARRAY_SIZE(pipeline_tokens);
 
 /* volume */
 static const struct sof_topology_token volume_tokens[] = {
@@ -1882,70 +1884,32 @@ static int sof_widget_load_pipeline(struct snd_soc_component *scomp, int index,
 				    struct snd_soc_tplg_dapm_widget *tw)
 {
 	struct snd_soc_tplg_private *private = &tw->priv;
-	struct sof_ipc_pipe_new *pipeline;
-	struct snd_sof_widget *comp_swidget;
 	int ret;
 
-	pipeline = kzalloc(sizeof(*pipeline), GFP_KERNEL);
-	if (!pipeline)
-		return -ENOMEM;
+	memcpy(swidget->sname, tw->sname, sizeof(tw->sname));
 
-	/* configure dai IPC message */
-	pipeline->hdr.size = sizeof(*pipeline);
-	pipeline->hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_PIPE_NEW;
-	pipeline->pipeline_id = index;
-	pipeline->comp_id = swidget->comp_id;
-
-	/* component at start of pipeline is our stream id */
-	comp_swidget = snd_sof_find_swidget(scomp, tw->sname);
-	if (!comp_swidget) {
-		dev_err(scomp->dev, "error: widget %s refers to non existent widget %s\n",
-			tw->name, tw->sname);
-		ret = -EINVAL;
-		goto err;
-	}
-
-	pipeline->sched_id = comp_swidget->comp_id;
-
-	dev_dbg(scomp->dev, "tplg: pipeline id %d comp %d scheduling comp id %d\n",
-		pipeline->pipeline_id, pipeline->comp_id, pipeline->sched_id);
-
-	ret = sof_parse_tokens(scomp, pipeline, sched_tokens,
-			       ARRAY_SIZE(sched_tokens), private->array,
-			       le32_to_cpu(private->size));
+	ret = sof_parse_tokens_new(scomp, NULL, sched_tokens,
+				   ARRAY_SIZE(sched_tokens), private->array,
+				   le32_to_cpu(private->size), &swidget->tuples,
+				   &swidget->num_tuples);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse pipeline tokens failed %d\n",
 			private->size);
-		goto err;
+		return ret;
 	}
 
-	ret = sof_parse_tokens(scomp, swidget, pipeline_tokens,
-			       ARRAY_SIZE(pipeline_tokens), private->array,
-			       le32_to_cpu(private->size));
+	ret = sof_parse_tokens_new(scomp, NULL, pipeline_tokens,
+				   ARRAY_SIZE(pipeline_tokens), private->array,
+				   le32_to_cpu(private->size), &swidget->tuples,
+				   &swidget->num_tuples);
 	if (ret != 0) {
 		dev_err(scomp->dev, "error: parse dynamic pipeline token failed %d\n",
 			private->size);
-		goto err;
+		return ret;
 	}
 
-	if (sof_debug_check_flag(SOF_DBG_DISABLE_MULTICORE))
-		pipeline->core = SOF_DSP_PRIMARY_CORE;
-
-	if (sof_debug_check_flag(SOF_DBG_DYNAMIC_PIPELINES_OVERRIDE))
-		swidget->dynamic_pipeline_widget =
-			sof_debug_check_flag(SOF_DBG_DYNAMIC_PIPELINES_ENABLE);
-
-	dev_dbg(scomp->dev, "pipeline %s: period %d pri %d mips %d core %d frames %d dynamic %d\n",
-		swidget->widget->name, pipeline->period, pipeline->priority,
-		pipeline->period_mips, pipeline->core, pipeline->frames_per_sched,
-		swidget->dynamic_pipeline_widget);
-
-	swidget->private = pipeline;
 
 	return 0;
-err:
-	kfree(pipeline);
-	return ret;
 }
 
 /*
@@ -3761,6 +3725,9 @@ static int sof_complete(struct snd_soc_component *scomp)
 		case snd_soc_dapm_aif_in:
 		case snd_soc_dapm_aif_out:
 			sof_widget_update_ipc_comp_host(scomp, swidget);
+			break;
+		case snd_soc_dapm_scheduler:
+			sof_widget_update_ipc_comp_pipeline(scomp, swidget);
 			break;
 		default:
 			break;

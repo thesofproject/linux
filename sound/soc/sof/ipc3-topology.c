@@ -84,3 +84,55 @@ int sof_widget_update_ipc_comp_dai(struct snd_soc_component *scomp,
 	sof_dbg_comp_config(scomp, &comp_dai->config);
 	return 0;
 }
+
+int sof_widget_update_ipc_comp_pipeline(struct snd_soc_component *scomp,
+					struct snd_sof_widget *swidget)
+{
+	struct sof_ipc_pipe_new *pipeline;
+	struct snd_sof_widget *comp_swidget;
+	size_t ipc_size = sizeof(*pipeline);
+
+	pipeline = (struct sof_ipc_pipe_new *)
+	       sof_comp_alloc(swidget, &ipc_size, swidget->pipeline_id);
+	if (!pipeline)
+		return -ENOMEM;
+
+	/* configure dai IPC message */
+	pipeline->hdr.size = sizeof(*pipeline);
+	pipeline->hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_PIPE_NEW;
+	pipeline->pipeline_id = swidget->pipeline_id;
+	pipeline->comp_id = swidget->comp_id;
+
+	/* component at start of pipeline is our stream id */
+	comp_swidget = snd_sof_find_swidget(scomp, swidget->sname);;
+
+	if (!comp_swidget) {
+		dev_err(scomp->dev, "error: widget %s refers to non existent widget %s\n",
+			swidget->widget->name, swidget->sname);
+		return -EINVAL;
+	}
+
+	pipeline->sched_id = comp_swidget->comp_id;
+
+	sof_update_ipc_object(pipeline, sched_tokens, sched_token_size, swidget->num_tuples,
+			      swidget->tuples, sizeof(*pipeline), 1);
+
+	sof_update_ipc_object(swidget, pipeline_tokens, pipeline_token_size, swidget->num_tuples,
+			      swidget->tuples, sizeof(*swidget), 1);
+
+	if (sof_debug_check_flag(SOF_DBG_DISABLE_MULTICORE))
+		pipeline->core = SOF_DSP_PRIMARY_CORE;
+
+	if (sof_debug_check_flag(SOF_DBG_DYNAMIC_PIPELINES_OVERRIDE))
+		swidget->dynamic_pipeline_widget =
+			sof_debug_check_flag(SOF_DBG_DYNAMIC_PIPELINES_ENABLE);
+
+	dev_dbg(scomp->dev, "pipeline %s: period %d pri %d mips %d core %d frames %d dynamic %d\n",
+		swidget->widget->name, pipeline->period, pipeline->priority,
+		pipeline->period_mips, pipeline->core, pipeline->frames_per_sched,
+		swidget->dynamic_pipeline_widget);
+
+	swidget->private = pipeline;
+
+	return 0;
+}
