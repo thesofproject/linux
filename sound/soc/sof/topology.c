@@ -3580,11 +3580,8 @@ static int sof_manifest(struct snd_soc_component *scomp, int index,
 		return -EINVAL;
 	}
 
-	dev_info(scomp->dev,
-		 "Topology: ABI %d:%d:%d Kernel ABI %d:%d:%d\n",
-		 man->priv.data[0], man->priv.data[1],
-		 man->priv.data[2], SOF_ABI_MAJOR, SOF_ABI_MINOR,
-		 SOF_ABI_PATCH);
+	dev_info(scomp->dev, "Topology: ABI %d:%d:%d\n",
+		 man->priv.data[0], man->priv.data[1], man->priv.data[2]);
 
 	abi_version = SOF_ABI_VER(man->priv.data[0],
 				  man->priv.data[1],
@@ -3593,15 +3590,6 @@ static int sof_manifest(struct snd_soc_component *scomp, int index,
 	if (SOF_ABI_VERSION_INCOMPATIBLE(SOF_ABI_VERSION, abi_version)) {
 		dev_err(scomp->dev, "error: incompatible topology ABI version\n");
 		return -EINVAL;
-	}
-
-	if (SOF_ABI_VERSION_MINOR(abi_version) > SOF_ABI_MINOR) {
-		if (!IS_ENABLED(CONFIG_SND_SOC_SOF_STRICT_ABI_CHECKS)) {
-			dev_warn(scomp->dev, "warn: topology ABI is more recent than kernel\n");
-		} else {
-			dev_err(scomp->dev, "error: topology ABI is more recent than kernel\n");
-			return -EINVAL;
-		}
 	}
 
 	return 0;

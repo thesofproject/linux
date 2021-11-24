@@ -73,6 +73,9 @@ bool sof_debug_check_flag(int mask);
 /* max number of DSP cores */
 #define SOF_MAX_DSP_NUM_CORES 8
 
+/* IPC interface version implemented in driver */
+#define SOF_ABI_VERSION SOF_ABI_VER(3, 0, 0)
+
 struct sof_dsp_power_state {
 	u32 state;
 	u32 substate; /* platform-specific */

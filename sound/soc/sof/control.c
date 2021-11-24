@@ -15,6 +15,9 @@
 #include "sof-priv.h"
 #include "sof-audio.h"
 
+/* Interface version implemented for controls IPC */
+#define SOF_CONTROL_ABI_VERSION SOF_ABI_VER(3, 18, 0)
+
 static void update_mute_led(struct snd_sof_control *scontrol,
 			    struct snd_kcontrol *kcontrol,
 			    struct snd_ctl_elem_value *ucontrol)
@@ -79,7 +82,7 @@ static void snd_sof_refresh_control(struct snd_sof_control *scontrol)
 
 	/* set the ABI header values */
 	cdata->data->magic = SOF_ABI_MAGIC;
-	cdata->data->abi = SOF_ABI_VERSION;
+	cdata->data->abi = SOF_CONTROL_ABI_VERSION;
 
 	/* refresh the component data from DSP */
 	scontrol->comp_data_dirty = false;
@@ -433,7 +436,8 @@ int snd_sof_bytes_ext_volatile_get(struct snd_kcontrol *kcontrol, unsigned int _
 
 	/* set the ABI header values */
 	cdata->data->magic = SOF_ABI_MAGIC;
-	cdata->data->abi = SOF_ABI_VERSION;
+	cdata->data->abi = SOF_CONTROL_ABI_VERSION;
+
 	/* get all the component data from DSP */
 	ret = snd_sof_ipc_set_get_comp_data(scontrol, false);
 	if (ret < 0)
@@ -500,7 +504,7 @@ int snd_sof_bytes_ext_get(struct snd_kcontrol *kcontrol,
 
 	/* set the ABI header values */
 	cdata->data->magic = SOF_ABI_MAGIC;
-	cdata->data->abi = SOF_ABI_VERSION;
+	cdata->data->abi = SOF_CONTROL_ABI_VERSION;
 
 	/* check data size doesn't exceed max coming from topology */
 	if (cdata->data->size > be->max - sizeof(struct sof_abi_hdr)) {
