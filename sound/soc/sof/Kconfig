@@ -53,14 +53,13 @@ config SND_SOC_SOF_COMPRESS
 	select SND_SOC_COMPRESS
 
 config SND_SOC_SOF_DEBUG_PROBES
-	tristate
-	select SND_SOC_SOF_CLIENT
+	bool "SOF enable data probing"
 	select SND_SOC_COMPRESS
 	help
 	  This option enables the data probing feature that can be used to
 	  gather data directly from specific points of the audio pipeline.
-	  This option is not user-selectable but automagically handled by
-	  'select' statements at a higher level.
+	  Say Y if you want to enable probes.
+	  If unsure, select "N".
 
 config SND_SOC_SOF_CLIENT
 	tristate
