@@ -143,6 +143,7 @@ enum sof_volume_ramp {
 	SOF_VOLUME_LOG,
 	SOF_VOLUME_LINEAR_ZC,
 	SOF_VOLUME_LOG_ZC,
+	SOF_VOLUME_WINDOWS_FADE,
 };
 
 /* generic volume component */
@@ -225,6 +226,7 @@ enum sof_ipc_process_type {
 	SOF_PROCESS_DEMUX,
 	SOF_PROCESS_DCBLOCK,
 	SOF_PROCESS_SMART_AMP,	/**< Smart Amplifier */
+	SOF_COMP_CODEC_ADAPTOR,	/**< codec adaptor */
 };
 
 /* generic "effect", "codec" or proprietary processing component */
