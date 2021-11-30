@@ -303,9 +303,4 @@ enum sof_event_types {
 	SOF_KEYWORD_DETECT_DAPM_EVENT,
 };
 
-/* extended data struct for UUID components */
-struct sof_ipc_comp_ext {
-	uint8_t uuid[SOF_UUID_SIZE];
-}  __packed;
-
 #endif
