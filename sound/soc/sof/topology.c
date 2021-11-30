@@ -3323,7 +3323,6 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 			  struct snd_soc_dapm_route *route)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
-	struct sof_ipc_pipe_comp_connect *connect;
 	struct snd_sof_widget *source_swidget, *sink_swidget;
 	struct snd_soc_dobj *dobj = &route->dobj;
 	struct snd_sof_route *sroute;
@@ -3335,16 +3334,6 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 		return -ENOMEM;
 
 	sroute->scomp = scomp;
-
-	connect = kzalloc(sizeof(*connect), GFP_KERNEL);
-	if (!connect) {
-		kfree(sroute);
-		return -ENOMEM;
-	}
-
-	connect->hdr.size = sizeof(*connect);
-	connect->hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_COMP_CONNECT;
-
 	dev_dbg(scomp->dev, "sink %s control %s source %s\n",
 		route->sink, route->control ? route->control : "none",
 		route->source);
@@ -3368,8 +3357,6 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 	    source_swidget->id == snd_soc_dapm_output)
 		goto err;
 
-	connect->source_id = source_swidget->comp_id;
-
 	/* sink component */
 	sink_swidget = snd_sof_find_swidget(scomp, (char *)route->sink);
 	if (!sink_swidget) {
@@ -3387,8 +3374,6 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 	    sink_swidget->id == snd_soc_dapm_output)
 		goto err;
 
-	connect->sink_id = sink_swidget->comp_id;
-
 	/*
 	 * For virtual routes, both sink and source are not
 	 * buffer. Since only buffer linked to component is supported by
@@ -3403,7 +3388,6 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 	} else {
 		sroute->route = route;
 		dobj->private = sroute;
-		sroute->private = connect;
 		sroute->src_widget = source_swidget;
 		sroute->sink_widget = sink_swidget;
 
@@ -3414,7 +3398,6 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 	}
 
 err:
-	kfree(connect);
 	kfree(sroute);
 	return ret;
 }
