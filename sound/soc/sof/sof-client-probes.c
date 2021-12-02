@@ -489,8 +489,8 @@ static ssize_t sof_probes_dfs_points_read(struct file *file, char __user *to,
 	struct sof_probes_priv *priv = cdev->data;
 	struct device *dev = &cdev->auxdev.dev;
 	struct sof_probe_point_desc *desc;
+	int remaining, offset;
 	size_t num_desc;
-	int remaining;
 	char *buf;
 	int i, ret, err;
 
@@ -520,20 +520,20 @@ static ssize_t sof_probes_dfs_points_read(struct file *file, char __user *to,
 		dev_err_ratelimited(dev, "debugfs read failed to idle %d\n", err);
 
 	for (i = 0; i < num_desc; i++) {
-		remaining = PAGE_SIZE - strlen(buf);
-		if (remaining > 0) {
-			ret = snprintf(buf + strlen(buf), remaining,
-				       "Id: %#010x  Purpose: %u  Node id: %#x\n",
-				       desc[i].buffer_id, desc[i].purpose, desc[i].stream_tag);
-			if (ret < 0)
-				goto free_desc;
-		} else {
+		offset = strlen(buf);
+		remaining = PAGE_SIZE - offset;
+		ret = snprintf(buf + offset, remaining,
+			       "Id: %#010x  Purpose: %u  Node id: %#x\n",
+				desc[i].buffer_id, desc[i].purpose, desc[i].stream_tag);
+		if (ret < 0 || ret >= remaining) {
+			/* truncate the output buffer at the last full line */
+			buf[offset] = '\0';
 			break;
 		}
 	}
 
 	ret = simple_read_from_buffer(to, count, ppos, buf, strlen(buf));
-free_desc:
+
 	kfree(desc);
 exit:
 	kfree(buf);
