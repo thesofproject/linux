@@ -46,33 +46,14 @@ int hda_ctrl_dai_widget_setup(struct snd_soc_dapm_widget *w, unsigned int quirk_
 	struct snd_sof_widget *swidget = w->dobj.private;
 	struct snd_soc_component *component = swidget->scomp;
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
-	struct sof_ipc_dai_config *config;
-	struct sof_dai_private_data *private;
-	struct snd_sof_dai *sof_dai;
-	struct sof_ipc_reply reply;
+	const struct ipc_tplg_ops *tplg_ops = sdev->ipc->ops->tplg;
+	struct snd_sof_dai *sof_dai = swidget->private;
 	int ret;
 
-	sof_dai = swidget->private;
-
-	if (!sof_dai || !sof_dai->private) {
-		dev_err(sdev->dev, "%s: No private data for DAI %s\n", __func__, w->name);
+	if (!sof_dai) {
+		dev_err(sdev->dev, "%s: No DAI for DAI widget %s\n", __func__, w->name);
 		return -EINVAL;
 	}
-
-	private = sof_dai->private;
-	if (!private->dai_config) {
-		dev_err(sdev->dev, "%s: No config for DAI %s\n", __func__, w->name);
-		return -EINVAL;
-	}
-
-	/* DAI already configured, reset it before reconfiguring it */
-	if (sof_dai->configured) {
-		ret = hda_ctrl_dai_widget_free(w, SOF_DAI_CONFIG_FLAGS_NONE);
-		if (ret < 0)
-			return ret;
-	}
-
-	config = &private->dai_config[sof_dai->current_config];
 
 	/*
 	 * For static pipelines, the DAI widget would already be set up and calling
@@ -81,24 +62,26 @@ int hda_ctrl_dai_widget_setup(struct snd_soc_dapm_widget *w, unsigned int quirk_
 	 */
 	ret = sof_widget_setup(sdev, swidget);
 	if (ret < 0) {
-		dev_err(sdev->dev, "error: failed setting up DAI widget %s\n", w->name);
+		dev_err(sdev->dev, "%s: Failed setting up DAI widget %s\n", __func__, w->name);
 		return ret;
 	}
 
-	/* set HW_PARAMS flag along with quirks */
-	config->flags = SOF_DAI_CONFIG_FLAGS_HW_PARAMS |
-		       quirk_flags << SOF_DAI_CONFIG_FLAGS_QUIRK_SHIFT;
+	if (tplg_ops->dai_config) {
+		unsigned int flags;
 
+		/* set HW_PARAMS flag along with quirks */
+		flags = SOF_DAI_CONFIG_FLAGS_HW_PARAMS |
+			quirk_flags << SOF_DAI_CONFIG_FLAGS_QUIRK_SHIFT;
 
-	/* send DAI_CONFIG IPC */
-	ret = sof_ipc_tx_message(sdev->ipc, config->hdr.cmd, config, config->hdr.size,
-				 &reply, sizeof(reply));
-	if (ret < 0) {
-		dev_err(sdev->dev, "error: failed setting DAI config for %s\n", w->name);
-		return ret;
+		ret = tplg_ops->dai_config(sdev, swidget, flags);
+		if (ret < 0) {
+			dev_err(sdev->dev, "%s: DAI config failed for widget %s\n", __func__,
+				w->name);
+			return ret;
+		}
+
+		sof_dai->configured = true;
 	}
-
-	sof_dai->configured = true;
 
 	return 0;
 }
@@ -108,22 +91,11 @@ int hda_ctrl_dai_widget_free(struct snd_soc_dapm_widget *w, unsigned int quirk_f
 	struct snd_sof_widget *swidget = w->dobj.private;
 	struct snd_soc_component *component = swidget->scomp;
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
-	struct sof_dai_private_data *private;
-	struct sof_ipc_dai_config *config;
-	struct snd_sof_dai *sof_dai;
-	struct sof_ipc_reply reply;
-	int ret;
+	const struct ipc_tplg_ops *tplg_ops = sdev->ipc->ops->tplg;
+	struct snd_sof_dai *sof_dai = swidget->private;
 
-	sof_dai = swidget->private;
-
-	if (!sof_dai || !sof_dai->private) {
-		dev_err(sdev->dev, "%s: No private data for DAI %s\n", __func__, w->name);
-		return -EINVAL;
-	}
-
-	private = sof_dai->private;
-	if (!private->dai_config) {
-		dev_err(sdev->dev, "%s: No config for DAI %s\n", __func__, w->name);
+	if (!sof_dai) {
+		dev_err(sdev->dev, "%s: No DAI for BE DAI widget %s\n", __func__, w->name);
 		return -EINVAL;
 	}
 
@@ -131,16 +103,19 @@ int hda_ctrl_dai_widget_free(struct snd_soc_dapm_widget *w, unsigned int quirk_f
 	if (!sof_dai->configured)
 		return 0;
 
-	config = &private->dai_config[sof_dai->current_config];
+	if (tplg_ops->dai_config) {
+		unsigned int flags;
+		int ret;
 
-	/* set HW_FREE flag along with any quirks */
-	config->flags = SOF_DAI_CONFIG_FLAGS_HW_FREE |
-		       quirk_flags << SOF_DAI_CONFIG_FLAGS_QUIRK_SHIFT;
+		/* set HW_FREE flag along with any quirks */
+		flags = SOF_DAI_CONFIG_FLAGS_HW_FREE |
+			quirk_flags << SOF_DAI_CONFIG_FLAGS_QUIRK_SHIFT;
 
-	ret = sof_ipc_tx_message(sdev->ipc, config->hdr.cmd, config, config->hdr.size,
-				 &reply, sizeof(reply));
-	if (ret < 0)
-		dev_err(sdev->dev, "error: failed resetting DAI config for %s\n", w->name);
+		ret = tplg_ops->dai_config(sdev, swidget, flags);
+		if (ret < 0)
+			dev_err(sdev->dev, "%s: DAI config failed for widget '%s'\n", __func__,
+				w->name);
+	}
 
 	/*
 	 * Reset the configured_flag and free the widget even if the IPC fails to keep
