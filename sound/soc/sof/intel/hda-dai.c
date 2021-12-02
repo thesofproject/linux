@@ -302,34 +302,15 @@ static int hda_link_dai_config_pause_push_ipc(struct snd_soc_dapm_widget *w)
 	struct snd_sof_widget *swidget = w->dobj.private;
 	struct snd_soc_component *component = swidget->scomp;
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
-	struct sof_dai_private_data *private;
-	struct sof_ipc_dai_config *config;
-	struct snd_sof_dai *sof_dai;
-	struct sof_ipc_reply reply;
-	int ret;
+	const struct ipc_tplg_ops *tplg_ops = sdev->ipc->ops->tplg;
+	int ret = 0;
 
-	sof_dai = swidget->private;
-
-	if (!sof_dai || !sof_dai->private) {
-		dev_err(sdev->dev, "%s: No private data for DAI %s\n", __func__, w->name);
-		return -EINVAL;
+	if (tplg_ops->dai_config) {
+		ret = tplg_ops->dai_config(sdev, swidget, SOF_DAI_CONFIG_FLAGS_PAUSE);
+		if (ret < 0)
+			dev_err(sdev->dev, "%s: DAI config failed for widget %s\n", __func__,
+				w->name);
 	}
-
-	private = sof_dai->private;
-	if (!private->dai_config) {
-		dev_err(sdev->dev, "%s: No config for DAI %s\n", __func__, w->name);
-		return -EINVAL;
-	}
-
-	config = &private->dai_config[sof_dai->current_config];
-
-	/* set PAUSE command flag */
-	config->flags = FIELD_PREP(SOF_DAI_CONFIG_FLAGS_CMD_MASK, SOF_DAI_CONFIG_FLAGS_PAUSE);
-
-	ret = sof_ipc_tx_message(sdev->ipc, config->hdr.cmd, config, config->hdr.size,
-				 &reply, sizeof(reply));
-	if (ret < 0)
-		dev_err(sdev->dev, "DAI config for %s failed during pause push\n", w->name);
 
 	return ret;
 }
@@ -470,25 +451,12 @@ struct ssp_dai_dma_data {
 static int ssp_dai_setup_or_free(struct snd_pcm_substream *substream, struct snd_soc_dai *dai,
 				 bool setup)
 {
-	struct snd_soc_component *component;
-	struct snd_sof_widget *swidget;
 	struct snd_soc_dapm_widget *w;
-	struct sof_ipc_fw_version *v;
-	struct snd_sof_dev *sdev;
 
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
 		w = dai->playback_widget;
 	else
 		w = dai->capture_widget;
-
-	swidget = w->dobj.private;
-	component = swidget->scomp;
-	sdev = snd_soc_component_get_drvdata(component);
-	v = &sdev->fw_ready.version;
-
-	/* DAI_CONFIG IPC during hw_params is not supported in older firmware */
-	if (v->abi_version < SOF_ABI_VER(3, 18, 0))
-		return 0;
 
 	if (setup)
 		return hda_ctrl_dai_widget_setup(w, SOF_DAI_CONFIG_FLAGS_NONE);
