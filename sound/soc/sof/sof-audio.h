@@ -69,6 +69,9 @@ struct ipc_tplg_widget_ops {
  * @control_setup: Function pointer for setting up kcontrol IPC-specific data
  * @control_free: Function pointer for freeing kcontrol IPC-specific data
  * @pipeline_complete: Function pointer for pipeline complete IPC
+ * @widget_setup: Function pointer for setting up setup in the DSP
+ * @widget_free: Function pointer for freeing widget in the DSP
+ * @dai_config: Function pointer for sending DAI config IPC to the DSP
  */
 struct ipc_tplg_ops {
 	const struct ipc_tplg_widget_ops *widget;
@@ -77,6 +80,10 @@ struct ipc_tplg_ops {
 	int (*control_setup)(struct snd_sof_dev *sdev, struct snd_sof_control *scontrol);
 	int (*control_free)(struct snd_sof_dev *sdev, struct snd_sof_control *scontrol);
 	int (*pipeline_complete)(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget);
+	int (*widget_setup)(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget);
+	int (*widget_free)(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget);
+	int (*dai_config)(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget,
+			  unsigned int flags);
 };
 
 /** struct snd_sof_tuple - Tuple info
