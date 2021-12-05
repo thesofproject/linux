@@ -797,6 +797,38 @@ static int sof_widget_update_ipc_comp_process(struct snd_sof_widget *swidget)
 	return sof_process_load(scomp, swidget, find_process_comp_type(config.type));
 }
 
+static int sof_ipc3_route_setup(struct snd_sof_dev *sdev, struct snd_sof_route *sroute)
+{
+	struct sof_ipc_pipe_comp_connect connect;
+	struct sof_ipc_reply reply;
+	int ret;
+
+	/* nothing to do if route is already set up */
+	if (sroute->setup)
+		return 0;
+
+	connect.hdr.size = sizeof(connect);
+	connect.hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_COMP_CONNECT;
+	connect.source_id = sroute->src_widget->comp_id;
+	connect.sink_id = sroute->sink_widget->comp_id;
+
+	dev_dbg(sdev->dev, "setting up route %s -> %s\n",
+		sroute->src_widget->widget->name,
+		sroute->sink_widget->widget->name);
+
+	/* send ipc */
+	ret = sof_ipc_tx_message(sdev->ipc, connect.hdr.cmd, &connect, sizeof(connect),
+				 &reply, sizeof(reply));
+	if (ret < 0) {
+		dev_err(sdev->dev, "%s: route setup failed %d\n", __func__, ret);
+		return ret;
+	}
+
+	sroute->setup = true;
+
+	return 0;
+}
+
 /* token list for each topology object */
 static enum sof_tokens host_token_list[] = {
 	SOF_CORE_TOKENS,
@@ -882,6 +914,7 @@ static const struct ipc_tplg_widget_ops tplg_ipc3_widget_ops[SND_SOC_DAPM_TYPE_C
 
 static const struct ipc_tplg_ops ipc3_tplg_ops = {
 	.widget = tplg_ipc3_widget_ops,
+	.route_setup = sof_ipc3_route_setup,
 	.token_list = ipc3_token_list,
 };
 
