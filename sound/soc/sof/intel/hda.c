@@ -999,6 +999,8 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 
 	INIT_DELAYED_WORK(&hdev->d0i3_work, hda_dsp_d0i3_work);
 
+	init_waitqueue_head(&hdev->waitq);
+
 	return 0;
 
 free_ipc_irq:
