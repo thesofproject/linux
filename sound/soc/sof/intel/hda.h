@@ -359,6 +359,7 @@
 #endif
 
 /* Intel HD Audio SRAM Window 0*/
+#define HDA_DSP_SRAM_REG_ROM_STATUS_SKL	0x8000
 #define HDA_ADSP_SRAM0_BASE_SKL		0x8000
 
 /* Firmware status window */
@@ -449,6 +450,9 @@ struct sof_intel_hda_dev {
 
 	/* FW clock config, 0:HPRO, 1:LPRO */
 	bool clk_config_lpro;
+
+	wait_queue_head_t waitq;
+	bool code_loading;
 };
 
 static inline struct hdac_bus *sof_to_bus(struct snd_sof_dev *s)
@@ -497,6 +501,7 @@ int hda_dsp_core_reset_power_down(struct snd_sof_dev *sdev,
 int hda_dsp_core_get(struct snd_sof_dev *sdev, int core);
 void hda_dsp_ipc_int_enable(struct snd_sof_dev *sdev);
 void hda_dsp_ipc_int_disable(struct snd_sof_dev *sdev);
+bool hda_dsp_core_is_enabled(struct snd_sof_dev *sdev, unsigned int core_mask);
 
 int hda_dsp_set_power_state(struct snd_sof_dev *sdev,
 			    const struct sof_dsp_power_state *target_state);
@@ -697,6 +702,8 @@ extern struct snd_soc_dai_driver skl_dai[];
  */
 extern struct snd_sof_dsp_ops sof_hda_common_ops;
 
+extern struct snd_sof_dsp_ops sof_skl_ops;
+int sof_skl_ops_init(struct snd_sof_dev *sdev);
 extern struct snd_sof_dsp_ops sof_apl_ops;
 int sof_apl_ops_init(struct snd_sof_dev *sdev);
 extern struct snd_sof_dsp_ops sof_cnl_ops;
@@ -706,6 +713,7 @@ int sof_tgl_ops_init(struct snd_sof_dev *sdev);
 extern struct snd_sof_dsp_ops sof_icl_ops;
 int sof_icl_ops_init(struct snd_sof_dev *sdev);
 
+extern const struct sof_intel_dsp_desc skl_chip_info;
 extern const struct sof_intel_dsp_desc apl_chip_info;
 extern const struct sof_intel_dsp_desc cnl_chip_info;
 extern const struct sof_intel_dsp_desc icl_chip_info;
@@ -754,5 +762,9 @@ int hda_ctrl_dai_widget_free(struct snd_soc_dapm_widget *w, unsigned int quirk_f
 #define SOF_HDA_POSITION_QUIRK_USE_DPIB_DDR_UPDATE	(2) /* recommended with VC0 or VC1 */
 
 extern int sof_hda_position_quirk;
+
+/* SKL/KBL */
+int hda_dsp_cl_boot_firmware_skl(struct snd_sof_dev *sdev);
+int hda_dsp_core_stall_reset(struct snd_sof_dev *sdev, unsigned int core_mask);
 
 #endif
