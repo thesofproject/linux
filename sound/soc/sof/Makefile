@@ -27,9 +27,12 @@ obj-$(CONFIG_SND_SOC_SOF_ACPI_DEV) += snd-sof-acpi.o
 obj-$(CONFIG_SND_SOC_SOF_OF_DEV) += snd-sof-of.o
 obj-$(CONFIG_SND_SOC_SOF_PCI_DEV) += snd-sof-pci.o
 
+# Build the SOF client drivers only if the SOF core is enabled
+ifneq ($(CONFIG_SND_SOC_SOF),)
 obj-$(CONFIG_SND_SOC_SOF_DEBUG_IPC_FLOOD_TEST) += snd-sof-ipc-flood-test.o
 obj-$(CONFIG_SND_SOC_SOF_DEBUG_IPC_MSG_INJECTOR) += snd-sof-ipc-msg-injector.o
 obj-$(CONFIG_SND_SOC_SOF_DEBUG_PROBES) += snd-sof-probes.o
+endif
 
 obj-$(CONFIG_SND_SOC_SOF_INTEL_TOPLEVEL) += intel/
 obj-$(CONFIG_SND_SOC_SOF_IMX_TOPLEVEL) += imx/
