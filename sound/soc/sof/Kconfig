@@ -71,7 +71,7 @@ config SND_SOC_SOF_CLIENT
 
 config SND_SOC_SOF_DEVELOPER_SUPPORT
 	bool "SOF developer options support"
-	depends on EXPERT
+	depends on EXPERT && SND_SOC_SOF
 	help
 	  This option unlocks SOF developer options for debug/performance/
 	  code hardening.
