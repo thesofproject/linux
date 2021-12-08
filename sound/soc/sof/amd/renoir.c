@@ -158,6 +158,7 @@ struct snd_sof_dsp_ops sof_renoir_ops = {
 	.pcm_open		= acp_pcm_open,
 	.pcm_close		= acp_pcm_close,
 	.pcm_hw_params		= acp_pcm_hw_params,
+	.pcm_pointer		= acp_pcm_pointer,
 
 	.hw_info		= SNDRV_PCM_INFO_MMAP |
 				  SNDRV_PCM_INFO_MMAP_VALID |
