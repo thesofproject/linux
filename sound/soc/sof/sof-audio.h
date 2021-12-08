@@ -41,6 +41,23 @@ struct snd_sof_route;
 struct snd_sof_control;
 
 /**
+ * struct ipc_pcm_ops - IPC-specific PCM ops
+ * @hw_params: Function pointer for hw_params
+ * @hw_free: Function pointer for hw_free
+ * @trigger: Function pointer for trigger
+ * @dai_link_fixup: Function pointer for DAI link fixup
+ */
+struct ipc_pcm_ops {
+	int (*hw_params)(struct snd_soc_component *component, struct snd_pcm_substream *substream,
+			 struct snd_pcm_hw_params *params,
+			 struct snd_sof_platform_stream_params *platform_params);
+	int (*hw_free)(struct snd_soc_component *component, struct snd_pcm_substream *substream);
+	int (*trigger)(struct snd_soc_component *component,  struct snd_pcm_substream *substream,
+		       int cmd);
+	int (*dai_link_fixup)(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_params *params);
+};
+
+/**
  * struct ipc_tplg_control_ops - IPC-specific ops for topology kcontrol IO
  */
 struct ipc_tplg_control_ops {
