@@ -257,6 +257,7 @@ int pkvm_init_host_vm(struct kvm *kvm, unsigned long type)
 
 	kvm->arch.pkvm.handle = ret;
 	kvm->arch.pkvm.is_protected = (type & KVM_VM_TYPE_ARM_PROTECTED);
+	kvm->arch.pkvm.pvmfw_load_addr = PVMFW_INVALID_LOAD_ADDR;
 
 	return 0;
 }
@@ -363,6 +364,57 @@ static int __init pkvm_firmware_rmem_clear(void)
 	return 0;
 }
 device_initcall_sync(pkvm_firmware_rmem_clear);
+
+static int pkvm_vm_ioctl_set_fw_ipa(struct kvm *kvm, u64 ipa)
+{
+	int ret = 0;
+
+	if (!pkvm_firmware_mem)
+		return -EINVAL;
+
+	mutex_lock(&kvm->lock);
+	if (pkvm_hyp_vm_is_created(kvm)) {
+		ret = -EBUSY;
+		goto out_unlock;
+	}
+
+	kvm->arch.pkvm.pvmfw_load_addr = ipa;
+out_unlock:
+	mutex_unlock(&kvm->lock);
+	return ret;
+}
+
+static int pkvm_vm_ioctl_info(struct kvm *kvm,
+			      struct kvm_protected_vm_info __user *info)
+{
+	struct kvm_protected_vm_info kinfo = {
+		.firmware_size = pkvm_firmware_mem ?
+				 pkvm_firmware_mem->size :
+				 0,
+	};
+
+	return copy_to_user(info, &kinfo, sizeof(kinfo)) ? -EFAULT : 0;
+}
+
+int pkvm_vm_ioctl_enable_cap(struct kvm *kvm, struct kvm_enable_cap *cap)
+{
+	if (!kvm_vm_is_protected(kvm))
+		return -EINVAL;
+
+	if (cap->args[1] || cap->args[2] || cap->args[3])
+		return -EINVAL;
+
+	switch (cap->flags) {
+	case KVM_CAP_ARM_PROTECTED_VM_FLAGS_SET_FW_IPA:
+		return pkvm_vm_ioctl_set_fw_ipa(kvm, cap->args[0]);
+	case KVM_CAP_ARM_PROTECTED_VM_FLAGS_INFO:
+		return pkvm_vm_ioctl_info(kvm, (void __force __user *)cap->args[0]);
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
 
 static u64 __pkvm_mapping_start(struct pkvm_mapping *m)
 {
