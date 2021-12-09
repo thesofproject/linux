@@ -453,6 +453,7 @@ static void init_pkvm_hyp_vm(struct kvm *host_kvm, struct pkvm_hyp_vm *hyp_vm,
 	hyp_vm->kvm.created_vcpus = nr_vcpus;
 	hyp_vm->kvm.arch.pkvm.is_protected = READ_ONCE(host_kvm->arch.pkvm.is_protected);
 	hyp_vm->kvm.arch.pkvm.is_created = true;
+	hyp_vm->kvm.arch.pkvm.pvmfw_load_addr = PVMFW_INVALID_LOAD_ADDR;
 	hyp_vm->kvm.arch.flags = 0;
 	pkvm_init_features_from_host(hyp_vm, host_kvm);
 
@@ -1001,6 +1002,37 @@ int __pkvm_finalize_teardown_vm(pkvm_handle_t handle)
 err_unlock:
 	hyp_write_unlock(&vm_table_lock);
 	return err;
+}
+
+int pkvm_load_pvmfw_pages(struct pkvm_hyp_vm *vm, u64 ipa, phys_addr_t phys,
+			  u64 size)
+{
+	struct kvm_protected_vm *pkvm = &vm->kvm.arch.pkvm;
+	u64 npages, offset = ipa - pkvm->pvmfw_load_addr;
+	void *src = hyp_phys_to_virt(pvmfw_base) + offset;
+
+	if (offset >= pvmfw_size)
+		return -EINVAL;
+
+	size = min(size, pvmfw_size - offset);
+	if (!PAGE_ALIGNED(size) || !PAGE_ALIGNED(src))
+		return -EINVAL;
+
+	npages = size >> PAGE_SHIFT;
+	while (npages--) {
+		/*
+		 * No need for cache maintenance here, as the pgtable code will
+		 * take care of this when installing the pte in the guest's
+		 * stage-2 page table.
+		 */
+		memcpy(hyp_fixmap_map(phys), src, PAGE_SIZE);
+		hyp_fixmap_unmap();
+
+		src += PAGE_SIZE;
+		phys += PAGE_SIZE;
+	}
+
+	return 0;
 }
 
 void pkvm_poison_pvmfw_pages(void)
