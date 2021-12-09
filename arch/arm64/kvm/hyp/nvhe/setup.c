@@ -21,6 +21,9 @@
 
 unsigned long hyp_nr_cpus;
 
+phys_addr_t pvmfw_base;
+phys_addr_t pvmfw_size;
+
 #define hyp_percpu_size ((unsigned long)__per_cpu_end - \
 			 (unsigned long)__per_cpu_start)
 
@@ -100,6 +103,7 @@ static int recreate_hyp_mappings(phys_addr_t phys, unsigned long size,
 {
 	void *start, *end, *virt = hyp_phys_to_virt(phys);
 	unsigned long pgt_size = hyp_s1_pgtable_pages() << PAGE_SHIFT;
+	enum kvm_pgtable_prot prot;
 	int ret, i;
 
 	/* Recreate the hyp page-table using the early page allocator */
@@ -155,7 +159,18 @@ static int recreate_hyp_mappings(phys_addr_t phys, unsigned long size,
 			return ret;
 	}
 
-	return pkvm_create_host_sve_mappings();
+	ret = pkvm_create_host_sve_mappings();
+	if (ret)
+		return ret;
+
+	start = hyp_phys_to_virt(pvmfw_base);
+	end = start + pvmfw_size;
+	prot = pkvm_mkstate(PAGE_HYP_RO, PKVM_PAGE_OWNED);
+	ret = pkvm_create_mappings(start, end, prot);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static void update_nvhe_init_params(void)
