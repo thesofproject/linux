@@ -853,7 +853,7 @@ static irqreturn_t hda_dsp_interrupt_thread(int irq, void *context)
 		hda_dsp_stream_threaded_handler(irq, sdev);
 
 	if (hda_dsp_check_ipc_irq(sdev))
-		sof_ops(sdev)->irq_thread(irq, sdev);
+		sof_dsp_ipc_ops(sdev)->irq_thread(irq, sdev);
 
 	if (hda_dsp_check_sdw_irq(sdev))
 		hda_dsp_sdw_thread(irq, hdev->sdw);

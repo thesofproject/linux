@@ -566,9 +566,34 @@ static struct snd_soc_dai_driver bdw_dai[] = {
 },
 };
 
+static const struct snd_sof_dsp_ipc_ops sof_bdw_ipc_ops[SOF_IPC_TYPE_COUNT] = {
+	[SOF_IPC] = {
+		/* ipc */
+		.send_msg	= bdw_send_msg,
+		.fw_ready	= sof_fw_ready,
+
+		.ipc_msg_data	= sof_ipc_msg_data,
+		.set_stream_data_offset = sof_set_stream_data_offset,
+	},
+};
+
+static const struct snd_sof_dsp_fw_ops sof_bdw_fw_ops[SOF_IPC_TYPE_COUNT] = {
+	[SOF_IPC] = {
+		/* module loading */
+		.load_module	= snd_sof_parse_module_memcpy,
+
+		/* Firmware loading */
+		.load_firmware	= snd_sof_load_firmware_memcpy,
+	},
+};
+
 /* broadwell ops */
 static const struct snd_sof_dsp_ops sof_bdw_ops = {
-	/*Device init */
+	/* lower-level abstraction */
+	.ipc_ops	= sof_bdw_ipc_ops,
+	.fw_ops		= sof_bdw_fw_ops,
+
+	/* Device init */
 	.probe          = bdw_probe,
 
 	/* DSP Core Control */
@@ -589,14 +614,8 @@ static const struct snd_sof_dsp_ops sof_bdw_ops = {
 	.mailbox_read	= sof_mailbox_read,
 	.mailbox_write	= sof_mailbox_write,
 
-	/* ipc */
-	.send_msg	= bdw_send_msg,
-	.fw_ready	= sof_fw_ready,
 	.get_mailbox_offset = bdw_get_mailbox_offset,
 	.get_window_offset = bdw_get_window_offset,
-
-	.ipc_msg_data	= sof_ipc_msg_data,
-	.set_stream_data_offset = sof_set_stream_data_offset,
 
 	/* machine driver */
 	.machine_select = bdw_machine_select,
@@ -613,12 +632,6 @@ static const struct snd_sof_dsp_ops sof_bdw_ops = {
 	/* stream callbacks */
 	.pcm_open	= sof_stream_pcm_open,
 	.pcm_close	= sof_stream_pcm_close,
-
-	/* Module loading */
-	.load_module    = snd_sof_parse_module_memcpy,
-
-	/*Firmware loading */
-	.load_firmware	= snd_sof_load_firmware_memcpy,
 
 	/* DAI drivers */
 	.drv = bdw_dai,

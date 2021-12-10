@@ -132,7 +132,36 @@ irq:
 	return ret;
 }
 
+static const struct snd_sof_dsp_ipc_ops sof_tng_ipc_ops[] = {
+	{
+		/* doorbell */
+		.irq_handler	= atom_irq_handler,
+		.irq_thread	= atom_irq_thread,
+
+		/* ipc */
+		.send_msg	= atom_send_msg,
+		.fw_ready	= sof_fw_ready,
+
+		.ipc_msg_data	= sof_ipc_msg_data,
+		.set_stream_data_offset = sof_set_stream_data_offset,
+	},
+};
+
+static const struct snd_sof_dsp_fw_ops sof_tng_fw_ops[] = {
+	{
+		/* module loading */
+		.load_module	= snd_sof_parse_module_memcpy,
+
+		/* Firmware loading */
+		.load_firmware	= snd_sof_load_firmware_memcpy,
+	},
+};
+
 const struct snd_sof_dsp_ops sof_tng_ops = {
+	/* lower-level abstraction */
+	.ipc_ops	= sof_tng_ipc_ops,
+	.fw_ops		= sof_tng_fw_ops,
+
 	/* device init */
 	.probe		= tangier_pci_probe,
 
@@ -154,18 +183,9 @@ const struct snd_sof_dsp_ops sof_tng_ops = {
 	.mailbox_read	= sof_mailbox_read,
 	.mailbox_write	= sof_mailbox_write,
 
-	/* doorbell */
-	.irq_handler	= atom_irq_handler,
-	.irq_thread	= atom_irq_thread,
-
-	/* ipc */
-	.send_msg	= atom_send_msg,
-	.fw_ready	= sof_fw_ready,
 	.get_mailbox_offset = atom_get_mailbox_offset,
 	.get_window_offset = atom_get_window_offset,
 
-	.ipc_msg_data	= sof_ipc_msg_data,
-	.set_stream_data_offset = sof_set_stream_data_offset,
 
 	/* machine driver */
 	.machine_select = atom_machine_select,
@@ -182,12 +202,6 @@ const struct snd_sof_dsp_ops sof_tng_ops = {
 	/* stream callbacks */
 	.pcm_open	= sof_stream_pcm_open,
 	.pcm_close	= sof_stream_pcm_close,
-
-	/* module loading */
-	.load_module	= snd_sof_parse_module_memcpy,
-
-	/*Firmware loading */
-	.load_firmware	= snd_sof_load_firmware_memcpy,
 
 	/* DAI drivers */
 	.drv = atom_dai,

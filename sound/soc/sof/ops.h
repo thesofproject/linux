@@ -21,6 +21,15 @@
 #define sof_ops(sdev) \
 	((sdev)->pdata->desc->ops)
 
+#define sof_dsp_ipc_ops(sdev) \
+	((sdev)->pdata->desc->ops->ipc_ops)
+
+#define sof_dsp_fw_ops(sdev) \
+	((sdev)->pdata->desc->ops->fw_ops)
+
+#define sof_dsp_trace_ops(sdev)			\
+	((sdev)->pdata->desc->ops->trace_ops)
+
 /* Mandatory operations are verified during probing */
 
 /* init */
@@ -157,8 +166,8 @@ static inline int snd_sof_dsp_post_fw_run(struct snd_sof_dev *sdev)
 static inline int snd_sof_dsp_parse_platform_ext_manifest(struct snd_sof_dev *sdev,
 							  const struct sof_ext_man_elem_header *hdr)
 {
-	if (sof_ops(sdev)->parse_platform_ext_manifest)
-		return sof_ops(sdev)->parse_platform_ext_manifest(sdev, hdr);
+	if (sof_dsp_fw_ops(sdev)->parse_platform_ext_manifest)
+		return sof_dsp_fw_ops(sdev)->parse_platform_ext_manifest(sdev, hdr);
 
 	return 0;
 }
@@ -364,31 +373,31 @@ static inline void snd_sof_dsp_mailbox_write(struct snd_sof_dev *sdev,
 static inline int snd_sof_dsp_send_msg(struct snd_sof_dev *sdev,
 				       struct snd_sof_ipc_msg *msg)
 {
-	return sof_ops(sdev)->send_msg(sdev, msg);
+	return sof_dsp_ipc_ops(sdev)->send_msg(sdev, msg);
 }
 
 /* host DMA trace */
 static inline int snd_sof_dma_trace_init(struct snd_sof_dev *sdev,
 					 struct sof_ipc_dma_trace_params_ext *dtrace_params)
 {
-	if (sof_ops(sdev)->trace_init)
-		return sof_ops(sdev)->trace_init(sdev, dtrace_params);
+	if (sof_dsp_trace_ops(sdev) && sof_dsp_trace_ops(sdev)->trace_init)
+		return sof_dsp_trace_ops(sdev)->trace_init(sdev, dtrace_params);
 
 	return 0;
 }
 
 static inline int snd_sof_dma_trace_release(struct snd_sof_dev *sdev)
 {
-	if (sof_ops(sdev)->trace_release)
-		return sof_ops(sdev)->trace_release(sdev);
+	if (sof_dsp_trace_ops(sdev) && sof_dsp_trace_ops(sdev)->trace_release)
+		return sof_dsp_trace_ops(sdev)->trace_release(sdev);
 
 	return 0;
 }
 
 static inline int snd_sof_dma_trace_trigger(struct snd_sof_dev *sdev, int cmd)
 {
-	if (sof_ops(sdev)->trace_trigger)
-		return sof_ops(sdev)->trace_trigger(sdev, cmd);
+	if (sof_dsp_trace_ops(sdev) && sof_dsp_trace_ops(sdev)->trace_trigger)
+		return sof_dsp_trace_ops(sdev)->trace_trigger(sdev, cmd);
 
 	return 0;
 }
@@ -456,7 +465,7 @@ static inline int snd_sof_load_firmware(struct snd_sof_dev *sdev)
 {
 	dev_dbg(sdev->dev, "loading firmware\n");
 
-	return sof_ops(sdev)->load_firmware(sdev);
+	return sof_dsp_fw_ops(sdev)->load_firmware(sdev);
 }
 
 /* host DSP message data */
@@ -464,7 +473,7 @@ static inline int snd_sof_ipc_msg_data(struct snd_sof_dev *sdev,
 				       struct snd_pcm_substream *substream,
 				       void *p, size_t sz)
 {
-	return sof_ops(sdev)->ipc_msg_data(sdev, substream, p, sz);
+	return sof_dsp_ipc_ops(sdev)->ipc_msg_data(sdev, substream, p, sz);
 }
 /* host side configuration of the stream's data offset in stream mailbox area */
 static inline int
@@ -472,8 +481,8 @@ snd_sof_set_stream_data_offset(struct snd_sof_dev *sdev,
 			       struct snd_pcm_substream *substream,
 			       size_t posn_offset)
 {
-	if (sof_ops(sdev) && sof_ops(sdev)->set_stream_data_offset)
-		return sof_ops(sdev)->set_stream_data_offset(sdev, substream,
+	if (sof_dsp_ipc_ops(sdev)->set_stream_data_offset)
+		return sof_dsp_ipc_ops(sdev)->set_stream_data_offset(sdev, substream,
 							     posn_offset);
 
 	return 0;

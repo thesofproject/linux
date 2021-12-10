@@ -520,7 +520,7 @@ void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev)
 	case SOF_IPC_FW_READY:
 		/* check for FW boot completion */
 		if (sdev->fw_state == SOF_FW_BOOT_IN_PROGRESS) {
-			err = sof_ops(sdev)->fw_ready(sdev, cmd);
+			err = sof_dsp_ipc_ops(sdev)->fw_ready(sdev, cmd);
 			if (err < 0)
 				sof_set_fw_state(sdev, SOF_FW_BOOT_READY_FAILED);
 			else

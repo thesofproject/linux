@@ -420,9 +420,9 @@ EXPORT_SYMBOL(snd_sof_dsp_dbg_dump);
 
 static void snd_sof_ipc_dump(struct snd_sof_dev *sdev)
 {
-	if (sof_ops(sdev)->ipc_dump  && !sdev->ipc_dump_printed) {
+	if (sof_dsp_ipc_ops(sdev) && sof_dsp_ipc_ops(sdev)->ipc_dump  && !sdev->ipc_dump_printed) {
 		dev_err(sdev->dev, "------------[ IPC dump start ]------------\n");
-		sof_ops(sdev)->ipc_dump(sdev);
+		sof_dsp_ipc_ops(sdev)->ipc_dump(sdev);
 		dev_err(sdev->dev, "------------[ IPC dump end ]------------\n");
 		if (!sof_debug_check_flag(SOF_DBG_PRINT_ALL_DUMPS))
 			sdev->ipc_dump_printed = true;

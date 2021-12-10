@@ -121,6 +121,52 @@ struct snd_sof_platform_stream_params {
 	bool no_ipc_position;
 };
 
+struct snd_sof_dsp_ipc_ops {
+	/* doorbell */
+	irqreturn_t (*irq_handler)(int irq, void *context); /* optional */
+	irqreturn_t (*irq_thread)(int irq, void *context); /* optional */
+
+	/* ipc */
+	int (*send_msg)(struct snd_sof_dev *sof_dev,
+			struct snd_sof_ipc_msg *msg); /* mandatory */
+
+	/*
+	 * FW ready checks for ABI compatibility and creates
+	 * memory windows at first boot
+	 */
+	int (*fw_ready)(struct snd_sof_dev *sdev, u32 msg_id); /* mandatory */
+
+	/* host side configuration of the stream's data offset in stream mailbox area */
+	int (*set_stream_data_offset)(struct snd_sof_dev *sdev,
+				      struct snd_pcm_substream *substream,
+				      size_t posn_offset); /* optional */
+
+	/* host read DSP stream data */
+	int (*ipc_msg_data)(struct snd_sof_dev *sdev,
+			    struct snd_pcm_substream *substream,
+			    void *p, size_t sz); /* mandatory */
+
+	void (*ipc_dump)(struct snd_sof_dev *sof_dev); /* optional */
+};
+
+struct snd_sof_dsp_fw_ops {
+	/* FW loading */
+	int (*load_firmware)(struct snd_sof_dev *sof_dev); /* mandatory */
+	int (*load_module)(struct snd_sof_dev *sof_dev,
+			   struct snd_sof_mod_hdr *hdr); /* optional */
+	/* parse platform specific extended manifest, optional */
+	int (*parse_platform_ext_manifest)(struct snd_sof_dev *sof_dev,
+					   const struct sof_ext_man_elem_header *hdr);
+};
+
+struct snd_sof_dsp_trace_ops {
+	int (*trace_init)(struct snd_sof_dev *sdev,
+			  struct sof_ipc_dma_trace_params_ext *dtrace_params); /* optional */
+	int (*trace_release)(struct snd_sof_dev *sdev); /* optional */
+	int (*trace_trigger)(struct snd_sof_dev *sdev,
+			     int cmd); /* optional */
+};
+
 /*
  * SOF DSP HW abstraction operations.
  * Used to abstract DSP HW architecture and any IO busses between host CPU
@@ -170,23 +216,11 @@ struct snd_sof_dsp_ops {
 			      u32 offset, void *src,
 			      size_t size); /* optional */
 
-	/* doorbell */
-	irqreturn_t (*irq_handler)(int irq, void *context); /* optional */
-	irqreturn_t (*irq_thread)(int irq, void *context); /* optional */
+	/* IPC */
+	const struct snd_sof_dsp_ipc_ops *ipc_ops;
 
-	/* ipc */
-	int (*send_msg)(struct snd_sof_dev *sof_dev,
-			struct snd_sof_ipc_msg *msg); /* mandatory */
-
-	/* FW loading */
-	int (*load_firmware)(struct snd_sof_dev *sof_dev); /* mandatory */
-	int (*load_module)(struct snd_sof_dev *sof_dev,
-			   struct snd_sof_mod_hdr *hdr); /* optional */
-	/*
-	 * FW ready checks for ABI compatibility and creates
-	 * memory windows at first boot
-	 */
-	int (*fw_ready)(struct snd_sof_dev *sdev, u32 msg_id); /* mandatory */
+	/* firmware handling */
+	const struct snd_sof_dsp_fw_ops *fw_ops;
 
 	/* connect pcm substream to a host stream */
 	int (*pcm_open)(struct snd_sof_dev *sdev,
@@ -217,23 +251,10 @@ struct snd_sof_dsp_ops {
 	/* pcm ack */
 	int (*pcm_ack)(struct snd_sof_dev *sdev, struct snd_pcm_substream *substream); /* optional */
 
-	/* host read DSP stream data */
-	int (*ipc_msg_data)(struct snd_sof_dev *sdev,
-			    struct snd_pcm_substream *substream,
-			    void *p, size_t sz); /* mandatory */
-
-	/* host side configuration of the stream's data offset in stream mailbox area */
-	int (*set_stream_data_offset)(struct snd_sof_dev *sdev,
-				      struct snd_pcm_substream *substream,
-				      size_t posn_offset); /* optional */
 
 	/* pre/post firmware run */
 	int (*pre_fw_run)(struct snd_sof_dev *sof_dev); /* optional */
 	int (*post_fw_run)(struct snd_sof_dev *sof_dev); /* optional */
-
-	/* parse platform specific extended manifest, optional */
-	int (*parse_platform_ext_manifest)(struct snd_sof_dev *sof_dev,
-					   const struct sof_ext_man_elem_header *hdr);
 
 	/* DSP PM */
 	int (*suspend)(struct snd_sof_dev *sof_dev,
@@ -254,18 +275,13 @@ struct snd_sof_dsp_ops {
 	int debug_map_count; /* optional */
 	void (*dbg_dump)(struct snd_sof_dev *sof_dev,
 			 u32 flags); /* optional */
-	void (*ipc_dump)(struct snd_sof_dev *sof_dev); /* optional */
 	int (*debugfs_add_region_item)(struct snd_sof_dev *sdev,
 				       enum snd_sof_fw_blk_type blk_type, u32 offset,
 				       size_t size, const char *name,
 				       enum sof_debugfs_access_type access_type); /* optional */
 
 	/* host DMA trace initialization */
-	int (*trace_init)(struct snd_sof_dev *sdev,
-			  struct sof_ipc_dma_trace_params_ext *dtrace_params); /* optional */
-	int (*trace_release)(struct snd_sof_dev *sdev); /* optional */
-	int (*trace_trigger)(struct snd_sof_dev *sdev,
-			     int cmd); /* optional */
+	const struct snd_sof_dsp_trace_ops *trace_ops;
 
 	/* misc */
 	int (*get_bar_index)(struct snd_sof_dev *sdev,

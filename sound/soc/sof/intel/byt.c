@@ -215,8 +215,37 @@ irq:
 	return ret;
 }
 
+static const struct snd_sof_dsp_ipc_ops sof_byt_ipc_ops[SOF_IPC_TYPE_COUNT] = {
+	[SOF_IPC] = {
+		/* doorbell */
+		.irq_handler	= atom_irq_handler,
+		.irq_thread	= atom_irq_thread,
+
+		/* ipc */
+		.send_msg	= atom_send_msg,
+		.fw_ready	= sof_fw_ready,
+
+		.ipc_msg_data	= sof_ipc_msg_data,
+		.set_stream_data_offset = sof_set_stream_data_offset,
+	},
+};
+
+static const struct snd_sof_dsp_fw_ops sof_byt_fw_ops[SOF_IPC_TYPE_COUNT] = {
+	[SOF_IPC] = {
+		/* module loading */
+		.load_module	= snd_sof_parse_module_memcpy,
+
+		/* Firmware loading */
+		.load_firmware	= snd_sof_load_firmware_memcpy,
+	},
+};
+
 /* baytrail ops */
 static const struct snd_sof_dsp_ops sof_byt_ops = {
+	/* lower-level abstraction */
+	.ipc_ops	= sof_byt_ipc_ops,
+	.fw_ops		= sof_byt_fw_ops,
+
 	/* device init */
 	.probe		= byt_acpi_probe,
 	.remove		= byt_remove,
@@ -239,18 +268,8 @@ static const struct snd_sof_dsp_ops sof_byt_ops = {
 	.mailbox_read	= sof_mailbox_read,
 	.mailbox_write	= sof_mailbox_write,
 
-	/* doorbell */
-	.irq_handler	= atom_irq_handler,
-	.irq_thread	= atom_irq_thread,
-
-	/* ipc */
-	.send_msg	= atom_send_msg,
-	.fw_ready	= sof_fw_ready,
 	.get_mailbox_offset = atom_get_mailbox_offset,
 	.get_window_offset = atom_get_window_offset,
-
-	.ipc_msg_data	= sof_ipc_msg_data,
-	.set_stream_data_offset = sof_set_stream_data_offset,
 
 	/* machine driver */
 	.machine_select = atom_machine_select,
@@ -267,12 +286,6 @@ static const struct snd_sof_dsp_ops sof_byt_ops = {
 	/* stream callbacks */
 	.pcm_open	= sof_stream_pcm_open,
 	.pcm_close	= sof_stream_pcm_close,
-
-	/* module loading */
-	.load_module	= snd_sof_parse_module_memcpy,
-
-	/*Firmware loading */
-	.load_firmware	= snd_sof_load_firmware_memcpy,
 
 	/* PM */
 	.suspend = byt_suspend,
@@ -299,6 +312,10 @@ static const struct sof_intel_dsp_desc byt_chip_info = {
 
 /* cherrytrail and braswell ops */
 static const struct snd_sof_dsp_ops sof_cht_ops = {
+	/* lower-level abstraction */
+	.ipc_ops	= sof_byt_ipc_ops,
+	.fw_ops		= sof_byt_fw_ops,
+
 	/* device init */
 	.probe		= byt_acpi_probe,
 	.remove		= byt_remove,
@@ -321,18 +338,8 @@ static const struct snd_sof_dsp_ops sof_cht_ops = {
 	.mailbox_read	= sof_mailbox_read,
 	.mailbox_write	= sof_mailbox_write,
 
-	/* doorbell */
-	.irq_handler	= atom_irq_handler,
-	.irq_thread	= atom_irq_thread,
-
-	/* ipc */
-	.send_msg	= atom_send_msg,
-	.fw_ready	= sof_fw_ready,
 	.get_mailbox_offset = atom_get_mailbox_offset,
 	.get_window_offset = atom_get_window_offset,
-
-	.ipc_msg_data	= sof_ipc_msg_data,
-	.set_stream_data_offset = sof_set_stream_data_offset,
 
 	/* machine driver */
 	.machine_select = atom_machine_select,
@@ -349,12 +356,6 @@ static const struct snd_sof_dsp_ops sof_cht_ops = {
 	/* stream callbacks */
 	.pcm_open	= sof_stream_pcm_open,
 	.pcm_close	= sof_stream_pcm_close,
-
-	/* module loading */
-	.load_module	= snd_sof_parse_module_memcpy,
-
-	/*Firmware loading */
-	.load_firmware	= snd_sof_load_firmware_memcpy,
 
 	/* PM */
 	.suspend = byt_suspend,

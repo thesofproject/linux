@@ -650,7 +650,9 @@ static int load_modules(struct snd_sof_dev *sdev, const struct firmware *fw,
 	size_t remaining;
 
 	header = (struct snd_sof_fw_header *)(fw->data + fw_offset);
-	load_module = sof_ops(sdev)->load_module;
+	if (!sof_dsp_fw_ops(sdev))
+		return -EINVAL;
+	load_module = sof_dsp_fw_ops(sdev)->load_module;
 	if (!load_module)
 		return -EINVAL;
 

@@ -122,8 +122,39 @@ static struct snd_soc_acpi_mach *amd_sof_machine_select(struct snd_sof_dev *sdev
 	return mach;
 }
 
+static const struct snd_sof_dsp_ipc_ops sof_renoir_ipc_ops[SOF_IPC_TYPE_COUNT] = {
+	[SOF_IPC] = {
+		.send_msg		= acp_sof_ipc_send_msg,
+		.ipc_msg_data		= acp_sof_ipc_msg_data,
+		.irq_thread		= acp_sof_ipc_irq_thread,
+		.fw_ready		= sof_fw_ready,
+	},
+};
+
+static const struct snd_sof_dsp_fw_ops sof_renoir_fw_ops[SOF_IPC_TYPE_COUNT] = {
+	[SOF_IPC] = {
+		/* Module loading */
+		.load_module		= snd_sof_parse_module_memcpy,
+
+		.load_firmware		= snd_sof_load_firmware_memcpy,
+	},
+};
+
+static const struct snd_sof_dsp_trace_ops sof_renoir_trace_ops[SOF_IPC_TYPE_COUNT] = {
+	[SOF_IPC] = {
+		/* Trace Logger */
+		.trace_init		= acp_sof_trace_init,
+		.trace_release		= acp_sof_trace_release,
+	},
+};
+
 /* AMD Renoir DSP ops */
 const struct snd_sof_dsp_ops sof_renoir_ops = {
+	/* lower-level abstraction */
+	.ipc_ops		= sof_renoir_ipc_ops,
+	.fw_ops			= sof_renoir_fw_ops,
+	.trace_ops		= sof_renoir_trace_ops,
+
 	/* probe and remove */
 	.probe			= amd_sof_acp_probe,
 	.remove			= amd_sof_acp_remove,
@@ -136,11 +167,7 @@ const struct snd_sof_dsp_ops sof_renoir_ops = {
 	.block_read		= acp_dsp_block_read,
 	.block_write		= acp_dsp_block_write,
 
-	/* Module loading */
-	.load_module		= snd_sof_parse_module_memcpy,
-
 	/*Firmware loading */
-	.load_firmware		= snd_sof_load_firmware_memcpy,
 	.pre_fw_run		= acp_dsp_pre_fw_run,
 	.get_bar_index		= acp_get_bar_index,
 
@@ -148,11 +175,7 @@ const struct snd_sof_dsp_ops sof_renoir_ops = {
 	.run			= acp_sof_dsp_run,
 
 	/*IPC */
-	.send_msg		= acp_sof_ipc_send_msg,
-	.ipc_msg_data		= acp_sof_ipc_msg_data,
 	.get_mailbox_offset	= acp_sof_ipc_get_mailbox_offset,
-	.irq_thread		= acp_sof_ipc_irq_thread,
-	.fw_ready		= sof_fw_ready,
 
 	/* DAI drivers */
 	.drv			= renoir_sof_dai,
@@ -174,9 +197,6 @@ const struct snd_sof_dsp_ops sof_renoir_ops = {
 	.machine_register	= sof_machine_register,
 	.machine_unregister	= sof_machine_unregister,
 
-	/* Trace Logger */
-	.trace_init		= acp_sof_trace_init,
-	.trace_release		= acp_sof_trace_release,
 };
 EXPORT_SYMBOL(sof_renoir_ops);
 

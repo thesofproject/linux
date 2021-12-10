@@ -284,7 +284,7 @@ static irqreturn_t acp_irq_thread(int irq, void *context)
 
 	val = snd_sof_dsp_read(sdev, ACP_DSP_BAR, ACP_DSP_SW_INTR_STAT);
 	if (val & ACP_DSP_TO_HOST_IRQ) {
-		sof_ops(sdev)->irq_thread(irq, sdev);
+		sof_dsp_ipc_ops(sdev)->irq_thread(irq, sdev);
 		val |= ACP_DSP_TO_HOST_IRQ;
 		snd_sof_dsp_write(sdev, ACP_DSP_BAR, ACP_DSP_SW_INTR_STAT, val);
 		return IRQ_HANDLED;
