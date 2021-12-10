@@ -22,13 +22,13 @@
 	((sdev)->pdata->desc->ops)
 
 #define sof_dsp_ipc_ops(sdev) \
-	((sdev)->pdata->desc->ops->ipc_ops)
+	(&((sdev)->pdata->desc->ops->ipc_ops[sdev->ipc_type]))
 
 #define sof_dsp_fw_ops(sdev) \
-	((sdev)->pdata->desc->ops->fw_ops)
+	(&((sdev)->pdata->desc->ops->fw_ops[sdev->ipc_type]))
 
 #define sof_dsp_trace_ops(sdev)			\
-	((sdev)->pdata->desc->ops->trace_ops)
+	(&((sdev)->pdata->desc->ops->trace_ops[sdev->ipc_type]))
 
 /* Mandatory operations are verified during probing */
 

@@ -433,6 +433,9 @@ struct snd_sof_dev {
 	spinlock_t ipc_lock;	/* lock for IPC users */
 	spinlock_t hw_lock;	/* lock for HW IO access */
 
+	/* IPC selection */
+	enum sof_ipc_type ipc_type;
+
 	/*
 	 * ASoC components. plat_drv fields are set dynamically so
 	 * can't use const
