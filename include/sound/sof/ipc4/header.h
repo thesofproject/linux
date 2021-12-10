@@ -224,7 +224,7 @@ struct sof_ipc4_audio_format {
 	(((x) & SOF_IPC4_AUDIO_FORMAT_CFG_SAMPLE_TYPE_MASK) >>  \
 	 SOF_IPC4_AUDIO_FORMAT_CFG_SAMPLE_TYPE_SHIFT)
 
-struct sof_ipc4_basic_module_cfg {
+struct sof_ipc4_base_module_cfg {
 	uint32_t cpc; /* the max count of Cycles Per Chunk processing */
 	uint32_t ibs; /* input Buffer Size (in bytes)  */
 	uint32_t obs; /* output Buffer Size (in bytes) */
