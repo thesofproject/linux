@@ -220,6 +220,7 @@ static int sof_route_setup(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget 
 	struct snd_sof_widget *sink_widget = wsink->dobj.private;
 	struct snd_sof_route *sroute;
 	bool route_found = false;
+	int ret;
 
 	/* ignore routes involving virtual widgets in topology */
 	switch (src_widget->id) {
@@ -253,7 +254,12 @@ static int sof_route_setup(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget 
 		return -EINVAL;
 	}
 
-	return ipc_tplg_ops->route_setup(sdev, sroute);
+	ret = ipc_tplg_ops->route_setup(sdev, sroute);
+	if (ret < 0)
+		return ret;
+
+	sroute->setup = true;
+	return 0;
 }
 
 static int sof_setup_pipeline_connections(struct snd_sof_dev *sdev,

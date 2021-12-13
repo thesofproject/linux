@@ -1558,14 +1558,11 @@ static int sof_ipc3_route_setup(struct snd_sof_dev *sdev, struct snd_sof_route *
 	/* send ipc */
 	ret = sof_ipc_tx_message(sdev->ipc, connect.hdr.cmd, &connect, sizeof(connect),
 				 &reply, sizeof(reply));
-	if (ret < 0) {
-		dev_err(sdev->dev, "%s: route setup failed %d\n", __func__, ret);
-		return ret;
-	}
+	if (ret < 0)
+		dev_err(sdev->dev, "%s: route %s -> %s failed\n", __func__,
+			sroute->src_widget->widget->name, sroute->sink_widget->widget->name);
 
-	sroute->setup = true;
-
-	return 0;
+	return ret;
 }
 
 static int sof_ipc3_control_load_bytes(struct snd_sof_dev *sdev, struct snd_sof_control *scontrol)
