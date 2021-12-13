@@ -1902,21 +1902,28 @@ static int sof_complete(struct snd_soc_component *scomp)
 
 	/* verify topology components loading including dynamic pipelines */
 	if (sof_debug_check_flag(SOF_DBG_VERIFY_TPLG)) {
-		ret = sof_set_up_pipelines(sdev, true);
-		if (ret < 0) {
-			dev_err(sdev->dev, "error: topology verification failed %d\n", ret);
-			return ret;
-		}
+		if (ipc_tplg_ops->set_up_all_pipelines && ipc_tplg_ops->tear_down_all_pipelines) {
+			ret = ipc_tplg_ops->set_up_all_pipelines(sdev, true);
+			if (ret < 0) {
+				dev_err(sdev->dev, "Failed to set up all topology pipelines: %d\n",
+					ret);
+				return ret;
+			}
 
-		ret = sof_tear_down_pipelines(sdev, true);
-		if (ret < 0) {
-			dev_err(sdev->dev, "error: topology tear down pipelines failed %d\n", ret);
-			return ret;
+			ret = ipc_tplg_ops->tear_down_all_pipelines(sdev, true);
+			if (ret < 0) {
+				dev_err(sdev->dev, "Failed to tear down topology pipelines: %d\n",
+					ret);
+				return ret;
+			}
 		}
 	}
 
 	/* set up static pipelines */
-	return sof_set_up_pipelines(sdev, false);
+	if (ipc_tplg_ops->set_up_all_pipelines)
+		return ipc_tplg_ops->set_up_all_pipelines(sdev, false);
+
+	return 0;
 }
 
 /* manifest - optional to inform component of manifest */
