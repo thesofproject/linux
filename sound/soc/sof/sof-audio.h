@@ -86,6 +86,8 @@ struct ipc_tplg_control_ops {
  * @token_list: List of token ID's that should be parsed for the widget
  * @token_list_size: number of elements in token_list
  * @bind_event: Function pointer for binding events to the widget
+ * @set_up_all_pipelines: Function pointer for setting up all topology pipelines
+ * @tear_down_all_pipelines: Function pointer for tearing down all topology pipelines
  */
 struct ipc_tplg_widget_ops {
 	int (*ipc_setup)(struct snd_sof_widget *swidget);
@@ -125,6 +127,8 @@ struct ipc_tplg_ops {
 	int (*widget_free)(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget);
 	int (*dai_config)(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget,
 			  unsigned int flags);
+	int (*set_up_all_pipelines)(struct snd_sof_dev *sdev, bool verify);
+	int (*tear_down_all_pipelines)(struct snd_sof_dev *sdev, bool verify);
 };
 
 /** struct snd_sof_tuple - Tuple info
@@ -425,8 +429,6 @@ int snd_sof_ipc_set_get_comp_data(struct snd_sof_control *scontrol, bool set);
 int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_params *params);
 
 /* PM */
-int sof_set_up_pipelines(struct snd_sof_dev *sdev, bool verify);
-int sof_tear_down_pipelines(struct snd_sof_dev *sdev, bool verify);
 int sof_set_hw_params_upon_resume(struct device *dev);
 bool snd_sof_stream_suspend_ignored(struct snd_sof_dev *sdev);
 bool snd_sof_dsp_only_d0i3_compatible_stream_active(struct snd_sof_dev *sdev);
