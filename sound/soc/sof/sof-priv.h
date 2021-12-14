@@ -375,11 +375,25 @@ struct ipc_pcm_ops;
  * @tplg:	Pointer to IPC-specific topology ops
  * @pm:		Pointer to PM ops
  * @pcm:	Pointer to PCM ops
+ *
+ * @tx_msg:	Function pointer for sending an IPC message
+ * @rx_msg:	Function pointer for handling a received message
+ * @set_get_data: Function pointer for set/get data, supporting large messages
+ * @get_reply:	Function pointer for fetching the reply to
+ *		sdev->ipc->msg.replay_data
  */
 struct ipc_ops {
 	const struct ipc_tplg_ops *tplg;
 	const struct ipc_pm_ops *pm;
 	const struct ipc_pcm_ops *pcm;
+
+	int (*tx_msg)(struct snd_sof_dev *sdev, void *msg_data, size_t msg_bytes,
+		      void *reply_data, size_t reply_bytes, bool no_pm);
+	void (*rx_msg)(struct snd_sof_dev *sdev);
+	int (*set_get_data)(struct snd_sof_dev *sdev, void *data, size_t data_bytes,
+			    bool set);
+
+	int (*get_reply)(struct snd_sof_dev *sdev);
 };
 
 /* SOF generic IPC data */
