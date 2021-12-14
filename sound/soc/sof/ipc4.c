@@ -142,11 +142,10 @@ static int sof_ipc4_tx_message_unlocked(struct snd_sof_ipc *ipc, u32 header,
 	/* attach any data */
 	msg->header = header;
 	msg->extension = extension;
+	msg->msg_data = msg_data;
 	msg->msg_size = msg_bytes;
 	msg->reply_size = reply_bytes;
 	msg->reply_error = 0;
-
-	memcpy(msg->msg_data, msg_data, msg_bytes);
 
 	sdev->msg = msg;
 
@@ -220,11 +219,6 @@ int sof_ipc4_init_msg_memory(struct snd_sof_dev *sdev)
 
 	/* TODO: get max_payload_size from firmware */
 	sdev->ipc->max_payload_size = SOF_IPC4_MSG_MAX_SIZE;
-
-	msg->msg_data = devm_kzalloc(sdev->dev, sdev->ipc->max_payload_size,
-				     GFP_KERNEL);
-	if (!msg->msg_data)
-		return -ENOMEM;
 
 	msg->reply_data = devm_kzalloc(sdev->dev, sdev->ipc->max_payload_size,
 				       GFP_KERNEL);
