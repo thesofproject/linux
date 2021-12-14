@@ -582,7 +582,11 @@ struct snd_sof_ipc *snd_sof_ipc_init(struct snd_sof_dev *sdev);
 void snd_sof_ipc_free(struct snd_sof_dev *sdev);
 void snd_sof_ipc_get_reply(struct snd_sof_dev *sdev);
 void snd_sof_ipc_reply(struct snd_sof_dev *sdev, u32 msg_id);
-void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev);
+static inline void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev)
+{
+	sdev->ipc->ops->rx_msg(sdev);
+}
+
 void snd_sof_ipc4_msgs_rx(struct snd_sof_dev *sdev);
 int snd_sof_ipc_valid(struct snd_sof_dev *sdev);
 int sof_ipc_tx_message(struct snd_sof_ipc *ipc, void *msg_data, size_t msg_bytes,
