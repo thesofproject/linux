@@ -17,6 +17,28 @@
  *  @{
  */
 
+/**
+ * struct sof_ipc4_msg - Placeholder of an IPC4 message
+ * @header_u64:		IPC4 header as single u64 number
+ * @primary:		Primary, mandatory part of the header
+ * @extension:		Extended part of the header, if not used it should be
+ *			set to 0
+ * @data_size:		Size of data in bytes pointed by @data_ptr
+ * @data_ptr:		Pointer to the optional payload of a message
+ */
+struct sof_ipc4_msg {
+	union {
+		u64 header_u64;
+		struct {
+			u32 primary;
+			u32 extension;
+		};
+	};
+
+	size_t data_size;
+	void *data_ptr;
+};
+
 /*
  * IPC4 messages have two 32 bit identifier made up as follows :-
  *
