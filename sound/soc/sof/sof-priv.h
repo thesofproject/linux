@@ -577,6 +577,8 @@ int sof_ipc4_tx_message(struct snd_sof_ipc *ipc, void *msg_data, size_t msg_byte
 			void *reply_data, size_t reply_bytes);
 int sof_ipc_tx_message_no_pm(struct snd_sof_ipc *ipc, void *msg_data, size_t msg_bytes,
 			     void *reply_data, size_t reply_bytes);
+int sof_ipc_prepare_send_msg(struct snd_sof_dev *sdev,
+			     void *msg_data, size_t msg_bytes, size_t reply_bytes);
 int sof_ipc_init_msg_memory(struct snd_sof_dev *sdev);
 int sof_ipc4_init_msg_memory(struct snd_sof_dev *sdev);
 
