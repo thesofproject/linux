@@ -127,6 +127,9 @@ static int sof_ipc4_tx_message_unlocked(struct snd_sof_ipc *ipc, u32 header,
 	if (ipc->disable_ipc_tx || sdev->fw_state != SOF_FW_BOOT_COMPLETE)
 		return -ENODEV;
 
+	if (msg_bytes > ipc->max_payload_size || reply_bytes > ipc->max_payload_size)
+		return -EINVAL;
+
 	/*
 	 * The spin-lock is also still needed to protect message objects against
 	 * other atomic contexts.
@@ -136,17 +139,12 @@ static int sof_ipc4_tx_message_unlocked(struct snd_sof_ipc *ipc, u32 header,
 	/* initialise the message */
 	msg = &ipc->msg;
 
+	/* attach any data */
 	msg->header = header;
 	msg->extension = extension;
 	msg->msg_size = msg_bytes;
 	msg->reply_size = reply_bytes;
 	msg->reply_error = 0;
-
-	/* attach any data */
-	if (msg_bytes > ipc->max_payload_size || reply_bytes > ipc->max_payload_size) {
-		spin_unlock_irq(&sdev->ipc_lock);
-		return -EINVAL;
-	}
 
 	memcpy(msg->msg_data, msg_data, msg_bytes);
 
