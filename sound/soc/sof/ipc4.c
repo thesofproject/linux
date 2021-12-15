@@ -97,6 +97,7 @@ EXPORT_SYMBOL(sof_ipc4_process_reply);
 static int ipc4_tx_wait_done(struct snd_sof_ipc *ipc, struct snd_sof_ipc_msg *msg,
 			     void *reply_data)
 {
+	struct sof_ipc4_msg *ipc4_msg = msg->msg_data;
 	struct snd_sof_dev *sdev = ipc->sdev;
 	int ret;
 
@@ -105,19 +106,19 @@ static int ipc4_tx_wait_done(struct snd_sof_ipc *ipc, struct snd_sof_ipc_msg *ms
 				 msecs_to_jiffies(sdev->ipc_timeout));
 	if (ret == 0) {
 		dev_err(sdev->dev, "ipc timed out for header:0x%x extension:0x%x",
-			msg->header, msg->extension);
+			ipc4_msg->primary, ipc4_msg->extension);
 		return -ETIMEDOUT;
 	} else if (msg->reply_error) {
 		dev_err(sdev->dev, "ipc error for msg 0x%x : 0x%x\n",
-			msg->header, msg->extension);
+			ipc4_msg->primary, ipc4_msg->extension);
 		return -EIO;
 	}
 
 	return 0;
 }
 
-static int sof_ipc4_tx_message_unlocked(struct snd_sof_ipc *ipc, u32 header,
-					u32 extension, void *msg_data, size_t msg_bytes,
+static int sof_ipc4_tx_message_unlocked(struct snd_sof_ipc *ipc,
+					void *msg_data, size_t msg_bytes,
 					void *reply_data, size_t reply_bytes)
 {
 	struct snd_sof_dev *sdev = ipc->sdev;
@@ -140,8 +141,6 @@ static int sof_ipc4_tx_message_unlocked(struct snd_sof_ipc *ipc, u32 header,
 	msg = &ipc->msg;
 
 	/* attach any data */
-	msg->header = header;
-	msg->extension = extension;
 	msg->msg_data = msg_data;
 	msg->msg_size = msg_bytes;
 	msg->reply_size = reply_bytes;
@@ -165,16 +164,19 @@ static int sof_ipc4_tx_message_unlocked(struct snd_sof_ipc *ipc, u32 header,
 	return ipc4_tx_wait_done(ipc, msg, reply_data);
 }
 
-int sof_ipc4_tx_message(struct snd_sof_ipc *ipc, u32 header, u32 extension,
+int sof_ipc4_tx_message(struct snd_sof_ipc *ipc,
 			void *msg_data, size_t msg_bytes, void *reply_data,
 			size_t reply_bytes)
 {
 	int ret;
 
+	if (!msg_data)
+		return -EINVAL;
+
 	/* Serialise IPC TX */
 	mutex_lock(&ipc->tx_mutex);
 
-	ret = sof_ipc4_tx_message_unlocked(ipc, header, extension, msg_data, msg_bytes,
+	ret = sof_ipc4_tx_message_unlocked(ipc, msg_data, msg_bytes,
 					   reply_data, reply_bytes);
 
 	mutex_unlock(&ipc->tx_mutex);
@@ -183,18 +185,19 @@ int sof_ipc4_tx_message(struct snd_sof_ipc *ipc, u32 header, u32 extension,
 }
 EXPORT_SYMBOL(sof_ipc4_tx_message);
 
-void snd_sof_ipc4_msgs_rx(struct snd_sof_dev *sdev, u32 msg, u32 msg_ext)
+void snd_sof_ipc4_msgs_rx(struct snd_sof_dev *sdev)
 {
+	struct sof_ipc4_msg *ipc4_msg = sdev->ipc->msg.reply_data;
 	int err;
 
-	if (!SOF_IPC4_GLB_NOTIFY_MSG_TYPE(msg))
+	if (!SOF_IPC4_GLB_NOTIFY_MSG_TYPE(ipc4_msg->primary))
 		return;
 
-	switch (SOF_IPC4_GLB_NOTIFY_TYPE(msg)) {
+	switch (SOF_IPC4_GLB_NOTIFY_TYPE(ipc4_msg->primary)) {
 	case SOF_IPC4_GLB_NOTIFY_FW_READY:
 		/* check for FW boot completion */
 		if (sdev->fw_state == SOF_FW_BOOT_IN_PROGRESS) {
-			err = sof_ops(sdev)->fw_ready(sdev, msg);
+			err = sof_ops(sdev)->fw_ready(sdev, ipc4_msg->primary);
 			if (err < 0)
 				sof_set_fw_state(sdev, SOF_FW_BOOT_READY_FAILED);
 			else
@@ -213,6 +216,7 @@ EXPORT_SYMBOL(snd_sof_ipc4_msgs_rx);
 
 int sof_ipc4_init_msg_memory(struct snd_sof_dev *sdev)
 {
+	struct sof_ipc4_msg *ipc4_msg;
 	struct snd_sof_ipc_msg *msg;
 
 	msg = &sdev->ipc->msg;
@@ -220,10 +224,14 @@ int sof_ipc4_init_msg_memory(struct snd_sof_dev *sdev)
 	/* TODO: get max_payload_size from firmware */
 	sdev->ipc->max_payload_size = SOF_IPC4_MSG_MAX_SIZE;
 
-	msg->reply_data = devm_kzalloc(sdev->dev, sdev->ipc->max_payload_size,
-				       GFP_KERNEL);
+	/* Allocate memory for the ipc4 container and the maximum payload */
+	msg->reply_data = devm_kzalloc(sdev->dev, sdev->ipc->max_payload_size +
+				       sizeof(struct sof_ipc4_msg), GFP_KERNEL);
 	if (!msg->reply_data)
 		return -ENOMEM;
+
+	ipc4_msg = msg->reply_data;
+	ipc4_msg->data_ptr = msg->reply_data + sizeof(struct sof_ipc4_msg);
 
 	/*
 	 * TODO: Currently we are not able to wake DSP up once it is suspended.
