@@ -242,10 +242,7 @@ static int hda_dai_hw_params(struct snd_pcm_substream *substream,
 
 	stream_tag = hdac_stream(hext_stream)->stream_tag;
 
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		w = dai->playback_widget;
-	else
-		w = dai->capture_widget;
+	w = snd_soc_dai_get_widget(dai, substream->stream);
 
 	/* set up the DAI widget and send the DAI_CONFIG with the new tag */
 	ret = hda_dai_widget_update(dai->dev, w, stream_tag - 1, true);
@@ -397,10 +394,7 @@ static int hda_dai_hw_free(struct snd_pcm_substream *substream,
 
 	hda_stream = hstream_to_sof_hda_stream(hext_stream);
 
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		w = dai->playback_widget;
-	else
-		w = dai->capture_widget;
+	w = snd_soc_dai_get_widget(dai, substream->stream);
 
 	/* free the link DMA channel in the FW and the DAI widget */
 	ret = hda_dai_widget_update(dai->dev, w, DMA_CHAN_INVALID, false);
@@ -445,10 +439,7 @@ static int ssp_dai_setup_or_free(struct snd_pcm_substream *substream, struct snd
 {
 	struct snd_soc_dapm_widget *w;
 
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		w = dai->playback_widget;
-	else
-		w = dai->capture_widget;
+	w = snd_soc_dai_get_widget(dai, substream->stream);
 
 	if (setup)
 		return hda_ctrl_dai_widget_setup(w, SOF_DAI_CONFIG_FLAGS_NONE);
