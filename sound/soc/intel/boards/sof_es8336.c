@@ -247,6 +247,18 @@ static const struct dmi_system_id sof_es8336_quirk_table[] = {
 					SOF_ES8336_TGL_GPIO_QUIRK |
 					SOF_ES8336_ENABLE_DMIC)
 	},
+	{
+		/* Teclast F7plus 3 has no generic information to select from */
+		.callback = sof_es8336_quirk_cb,
+		.matches = {
+			DMI_MATCH(DMI_BIOS_VENDOR, "American Megatrends Inc."),
+			DMI_MATCH(DMI_BIOS_VERSION, "Tpad3.04"),
+			DMI_MATCH(DMI_PRODUCT_SKU, "B1A1_A1"),
+			DMI_MATCH(DMI_PRODUCT_SERIAL, "8350S213360037"),
+		},
+		.driver_data = (void *)(SOF_ES8336_SSP_CODEC(0) |
+					SOF_ES8336_TGL_GPIO_QUIRK),
+	},
 	{}
 };
 
