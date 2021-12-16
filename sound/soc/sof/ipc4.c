@@ -122,42 +122,20 @@ static int ipc4_tx_msg_unlocked(struct snd_sof_ipc *ipc,
 				void *msg_data, size_t msg_bytes,
 				void *reply_data, size_t reply_bytes)
 {
+	struct sof_ipc4_msg *ipc4_msg = msg_data;
 	struct snd_sof_dev *sdev = ipc->sdev;
 	struct snd_sof_ipc_msg *msg;
 	int ret;
 
-	if (ipc->disable_ipc_tx || sdev->fw_state != SOF_FW_BOOT_COMPLETE)
-		return -ENODEV;
-
 	if (msg_bytes > ipc->max_payload_size || reply_bytes > ipc->max_payload_size)
 		return -EINVAL;
 
-	/*
-	 * The spin-lock is also still needed to protect message objects against
-	 * other atomic contexts.
-	 */
-	spin_lock_irq(&sdev->ipc_lock);
-
-	/* initialise the message */
-	msg = &ipc->msg;
-
-	/* attach any data */
-	msg->msg_data = msg_data;
-	msg->msg_size = msg_bytes;
-	msg->reply_size = reply_bytes;
-	msg->reply_error = 0;
-
-	sdev->msg = msg;
-
-	ret = snd_sof_dsp_send_msg(sdev, msg);
-	/* Next reply that we receive will be related to this message */
-	if (!ret)
-		msg->ipc_complete = false;
-
-	spin_unlock_irq(&sdev->ipc_lock);
+	ret = sof_ipc_prepare_send_msg(sdev, msg_data, msg_bytes, reply_bytes);
 
 	if (ret) {
-		dev_err_ratelimited(sdev->dev, "ipc tx failed with error %d", ret);
+		dev_err_ratelimited(sdev->dev,
+				    "%s: ipc message send for %#x|%#x failed: %d\n",
+				    __func__, ipc4_msg->primary, ipc4_msg->extension, ret);
 		return ret;
 	}
 
