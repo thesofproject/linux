@@ -11,6 +11,7 @@
 #include <sound/sof/ipc4/header.h>
 #include "sof-priv.h"
 #include "sof-audio.h"
+#include "ipc4-ops.h"
 #include "ipc4.h"
 #include "ops.h"
 
@@ -117,9 +118,9 @@ static int ipc4_tx_wait_done(struct snd_sof_ipc *ipc, struct snd_sof_ipc_msg *ms
 	return 0;
 }
 
-static int sof_ipc4_tx_message_unlocked(struct snd_sof_ipc *ipc,
-					void *msg_data, size_t msg_bytes,
-					void *reply_data, size_t reply_bytes)
+static int ipc4_tx_msg_unlocked(struct snd_sof_ipc *ipc,
+				void *msg_data, size_t msg_bytes,
+				void *reply_data, size_t reply_bytes)
 {
 	struct snd_sof_dev *sdev = ipc->sdev;
 	struct snd_sof_ipc_msg *msg;
@@ -164,10 +165,10 @@ static int sof_ipc4_tx_message_unlocked(struct snd_sof_ipc *ipc,
 	return ipc4_tx_wait_done(ipc, msg, reply_data);
 }
 
-int sof_ipc4_tx_message(struct snd_sof_ipc *ipc,
-			void *msg_data, size_t msg_bytes, void *reply_data,
-			size_t reply_bytes)
+static int sof_ipc4_tx_msg(struct snd_sof_dev *sdev, void *msg_data, size_t msg_bytes,
+			   void *reply_data, size_t reply_bytes, bool no_pm)
 {
+	struct snd_sof_ipc *ipc = sdev->ipc;
 	int ret;
 
 	if (!msg_data)
@@ -176,16 +177,14 @@ int sof_ipc4_tx_message(struct snd_sof_ipc *ipc,
 	/* Serialise IPC TX */
 	mutex_lock(&ipc->tx_mutex);
 
-	ret = sof_ipc4_tx_message_unlocked(ipc, msg_data, msg_bytes,
-					   reply_data, reply_bytes);
+	ret = ipc4_tx_msg_unlocked(ipc, msg_data, msg_bytes, reply_data, reply_bytes);
 
 	mutex_unlock(&ipc->tx_mutex);
 
 	return ret;
 }
-EXPORT_SYMBOL(sof_ipc4_tx_message);
 
-void snd_sof_ipc4_msgs_rx(struct snd_sof_dev *sdev)
+static void sof_ipc4_rx_msg(struct snd_sof_dev *sdev)
 {
 	struct sof_ipc4_msg *ipc4_msg = sdev->ipc->msg.reply_data;
 	int err;
@@ -212,7 +211,6 @@ void snd_sof_ipc4_msgs_rx(struct snd_sof_dev *sdev)
 		break;
 	}
 }
-EXPORT_SYMBOL(snd_sof_ipc4_msgs_rx);
 
 int sof_ipc4_init_msg_memory(struct snd_sof_dev *sdev)
 {
@@ -243,3 +241,7 @@ int sof_ipc4_init_msg_memory(struct snd_sof_dev *sdev)
 }
 EXPORT_SYMBOL(sof_ipc4_init_msg_memory);
 
+const struct ipc_ops ipc4_ops = {
+	.tx_msg = sof_ipc4_tx_msg,
+	.rx_msg = sof_ipc4_rx_msg,
+};
