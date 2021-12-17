@@ -162,40 +162,10 @@ static int sof_ipc4_tx_msg(struct snd_sof_dev *sdev, void *msg_data, size_t msg_
 	return ret;
 }
 
-static void sof_ipc4_rx_msg(struct snd_sof_dev *sdev)
-{
-	struct sof_ipc4_msg *ipc4_msg = sdev->ipc->msg.reply_data;
-	int err;
-
-	if (!SOF_IPC4_GLB_NOTIFY_MSG_TYPE(ipc4_msg->primary))
-		return;
-
-	switch (SOF_IPC4_GLB_NOTIFY_TYPE(ipc4_msg->primary)) {
-	case SOF_IPC4_GLB_NOTIFY_FW_READY:
-		/* check for FW boot completion */
-		if (sdev->fw_state == SOF_FW_BOOT_IN_PROGRESS) {
-			err = sof_ops(sdev)->fw_ready(sdev, ipc4_msg->primary);
-			if (err < 0)
-				sof_set_fw_state(sdev, SOF_FW_BOOT_READY_FAILED);
-			else
-				sof_set_fw_state(sdev, SOF_FW_BOOT_READY_OK);
-
-			/* wake up firmware loader */
-			wake_up(&sdev->boot_wait);
-		}
-
-		break;
-	default:
-		break;
-	}
-}
-
-int sof_ipc4_init_msg_memory(struct snd_sof_dev *sdev)
+static int sof_ipc4_init_msg_memory(struct snd_sof_dev *sdev)
 {
 	struct sof_ipc4_msg *ipc4_msg;
-	struct snd_sof_ipc_msg *msg;
-
-	msg = &sdev->ipc->msg;
+	struct snd_sof_ipc_msg *msg = &sdev->ipc->msg;
 
 	/* TODO: get max_payload_size from firmware */
 	sdev->ipc->max_payload_size = SOF_IPC4_MSG_MAX_SIZE;
@@ -217,7 +187,41 @@ int sof_ipc4_init_msg_memory(struct snd_sof_dev *sdev)
 	pm_runtime_get_sync(sdev->dev);
 	return 0;
 }
-EXPORT_SYMBOL(sof_ipc4_init_msg_memory);
+
+static int ipc4_fw_ready(struct snd_sof_dev *sdev, struct sof_ipc4_msg *ipc4_msg)
+{
+	dev_dbg(sdev->dev, "%s: Not implemented\n", __func__);
+
+	return sof_ipc4_init_msg_memory(sdev);
+}
+
+static void sof_ipc4_rx_msg(struct snd_sof_dev *sdev)
+{
+	struct sof_ipc4_msg *ipc4_msg = sdev->ipc->msg.reply_data;
+	int err;
+
+	if (!SOF_IPC4_GLB_NOTIFY_MSG_TYPE(ipc4_msg->primary))
+		return;
+
+	switch (SOF_IPC4_GLB_NOTIFY_TYPE(ipc4_msg->primary)) {
+	case SOF_IPC4_GLB_NOTIFY_FW_READY:
+		/* check for FW boot completion */
+		if (sdev->fw_state == SOF_FW_BOOT_IN_PROGRESS) {
+			err = ipc4_fw_ready(sdev, ipc4_msg);
+			if (err < 0)
+				sof_set_fw_state(sdev, SOF_FW_BOOT_READY_FAILED);
+			else
+				sof_set_fw_state(sdev, SOF_FW_BOOT_READY_OK);
+
+			/* wake up firmware loader */
+			wake_up(&sdev->boot_wait);
+		}
+
+		break;
+	default:
+		break;
+	}
+}
 
 const struct ipc_ops ipc4_ops = {
 	.tx_msg = sof_ipc4_tx_msg,
