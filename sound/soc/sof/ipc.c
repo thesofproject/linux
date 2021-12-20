@@ -973,25 +973,11 @@ int snd_sof_ipc_valid(struct snd_sof_dev *sdev)
 }
 EXPORT_SYMBOL(snd_sof_ipc_valid);
 
-int sof_ipc_init_msg_memory(struct snd_sof_dev *sdev)
-{
-	struct snd_sof_ipc_msg *msg;
-
-	msg = &sdev->ipc->msg;
-
-	msg->rx_data = devm_kzalloc(sdev->dev, SOF_IPC_MSG_MAX_SIZE, GFP_KERNEL);
-	if (!msg->rx_data)
-		return -ENOMEM;
-
-	sdev->ipc->max_payload_size = SOF_IPC_MSG_MAX_SIZE;
-
-	return 0;
-}
-
 struct snd_sof_ipc *snd_sof_ipc_init(struct snd_sof_dev *sdev)
 {
 	struct snd_sof_ipc *ipc;
 	struct snd_sof_ipc_msg *msg;
+	int ret = 0;
 
 	ipc = devm_kzalloc(sdev->dev, sizeof(*ipc), GFP_KERNEL);
 	if (!ipc)
@@ -1019,7 +1005,10 @@ struct snd_sof_ipc *snd_sof_ipc_init(struct snd_sof_dev *sdev)
 		return NULL;
 	}
 
-	return ipc;
+	if (ipc->ops->init)
+		ret = ipc->ops->init(ipc);
+
+	return ret ? NULL : ipc;
 }
 EXPORT_SYMBOL(snd_sof_ipc_init);
 

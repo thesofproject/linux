@@ -518,7 +518,7 @@ int sof_fw_ready(struct snd_sof_dev *sdev, u32 msg_id)
 
 	sof_get_windows(sdev);
 
-	return sof_ipc_init_msg_memory(sdev);
+	return 0;
 }
 EXPORT_SYMBOL(sof_fw_ready);
 
