@@ -351,10 +351,7 @@ struct snd_sof_ipc_msg {
 	u32 extension;
 	void *msg_data;
 	size_t msg_size;
-	union {
-		void *reply_data;
-		void *rx_data;
-	};
+	void *rx_data;
 	size_t reply_size;
 	int reply_error;
 
