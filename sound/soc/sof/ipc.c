@@ -491,26 +491,27 @@ static void ipc_comp_notification(struct snd_sof_dev *sdev, void *msg_buf)
 void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev)
 {
 	ipc_rx_callback rx_callback = NULL;
-	struct sof_ipc_cmd_hdr hdr;
-	void *msg_buf;
+	void *msg_buf = sdev->ipc->msg.rx_data;
+	struct sof_ipc_cmd_hdr *hdr = msg_buf;
 	u32 cmd;
 	int err;
 
 	/* read back header */
-	err = snd_sof_ipc_msg_data(sdev, NULL, &hdr, sizeof(hdr));
+	err = snd_sof_ipc_msg_data(sdev, NULL, hdr, sizeof(*hdr));
 	if (err < 0) {
 		dev_warn(sdev->dev, "failed to read IPC header: %d\n", err);
 		return;
 	}
 
-	if (hdr.size < sizeof(hdr)) {
-		dev_err(sdev->dev, "The received message size is invalid\n");
+	if (hdr->size < sizeof(*hdr) || hdr->size > sdev->ipc->max_payload_size) {
+		dev_err(sdev->dev, "The received message size is invalid: %u\n",
+			hdr->size);
 		return;
 	}
 
-	ipc_log_header(sdev->dev, "ipc rx", hdr.cmd);
+	ipc_log_header(sdev->dev, "ipc rx", hdr->cmd);
 
-	cmd = hdr.cmd & SOF_GLB_TYPE_MASK;
+	cmd = hdr->cmd & SOF_GLB_TYPE_MASK;
 
 	/* check message type */
 	switch (cmd) {
@@ -548,15 +549,15 @@ void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev)
 		break;
 	}
 
-	/* read the full message */
-	msg_buf = kmalloc(hdr.size, GFP_KERNEL);
-	if (!msg_buf)
-		return;
 
-	err = snd_sof_ipc_msg_data(sdev, NULL, msg_buf, hdr.size);
-	if (err < 0) {
-		dev_err(sdev->dev, "%s: Failed to read message: %d\n", __func__, err);
-	} else {
+	if (hdr->size > sizeof(*hdr)) {
+		err = snd_sof_ipc_msg_data(sdev, NULL, msg_buf, hdr->size);
+		if (err < 0)
+			dev_err(sdev->dev, "%s: Failed to read message: %d\n",
+				__func__, err);
+	}
+
+	if (!err) {
 		/* Call local handler for the message */
 		if (rx_callback)
 			rx_callback(sdev, msg_buf);
@@ -565,9 +566,7 @@ void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev)
 		sof_client_ipc_rx_dispatcher(sdev, msg_buf);
 	}
 
-	kfree(msg_buf);
-
-	ipc_log_header(sdev->dev, "ipc rx done", hdr.cmd);
+	ipc_log_header(sdev->dev, "ipc rx done", hdr->cmd);
 }
 EXPORT_SYMBOL(snd_sof_ipc_msgs_rx);
 
