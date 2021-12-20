@@ -10,6 +10,20 @@
 #include "sof-priv.h"
 #include "ipc3-ops.h"
 
+static int sof_ipc3_init(struct snd_sof_ipc *ipc)
+{
+	struct snd_sof_ipc_msg *msg = &ipc->msg;
+	struct snd_sof_dev *sdev = ipc->sdev;
+
+	msg->rx_data = devm_kzalloc(sdev->dev, SOF_IPC_MSG_MAX_SIZE, GFP_KERNEL);
+	if (!msg->rx_data)
+		return -ENOMEM;
+
+	ipc->max_payload_size = SOF_IPC_MSG_MAX_SIZE;
+
+	return 0;
+}
+
 static int sof_ipc3_ctx_ipc(struct snd_sof_dev *sdev, int cmd)
 {
 	struct sof_ipc_pm_ctx pm_ctx = {
@@ -42,4 +56,6 @@ const struct ipc_ops ipc3_ops = {
 	.tplg = &ipc3_tplg_ops,
 	.pm = &ipc3_pm_ops,
 	.pcm = &ipc3_pcm_ops,
+
+	.init = sof_ipc3_init,
 };
