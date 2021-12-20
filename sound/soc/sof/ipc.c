@@ -270,8 +270,7 @@ static int tx_wait_done(struct snd_sof_ipc *ipc, struct snd_sof_ipc_msg *msg,
 			ipc_log_header(sdev->dev, "ipc tx succeeded", hdr->cmd);
 			if (msg->reply_size)
 				/* copy the data returned from DSP */
-				memcpy(reply_data, msg->reply_data,
-				       msg->reply_size);
+				memcpy(reply_data, msg->rx_data, msg->reply_size);
 		}
 
 		/* re-enable dumps after successful IPC tx */
@@ -407,7 +406,7 @@ void snd_sof_ipc_get_reply(struct snd_sof_dev *sdev)
 	}
 
 	/* get the generic reply */
-	reply = msg->reply_data;
+	reply = msg->rx_data;
 	snd_sof_dsp_mailbox_read(sdev, sdev->host_box.offset, reply, sizeof(*reply));
 
 	if (reply->error < 0) {
@@ -445,7 +444,7 @@ void snd_sof_ipc_get_reply(struct snd_sof_dev *sdev)
 		 */
 		if (!ret && msg->reply_size > sizeof(*reply))
 			snd_sof_dsp_mailbox_read(sdev, sdev->host_box.offset,
-						 msg->reply_data, msg->reply_size);
+						 msg->rx_data, msg->reply_size);
 	}
 
 	msg->reply_error = ret;
@@ -981,8 +980,8 @@ int sof_ipc_init_msg_memory(struct snd_sof_dev *sdev)
 
 	msg = &sdev->ipc->msg;
 
-	msg->reply_data = devm_kzalloc(sdev->dev, SOF_IPC_MSG_MAX_SIZE, GFP_KERNEL);
-	if (!msg->reply_data)
+	msg->rx_data = devm_kzalloc(sdev->dev, SOF_IPC_MSG_MAX_SIZE, GFP_KERNEL);
+	if (!msg->rx_data)
 		return -ENOMEM;
 
 	sdev->ipc->max_payload_size = SOF_IPC_MSG_MAX_SIZE;
