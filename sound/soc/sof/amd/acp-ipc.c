@@ -100,13 +100,13 @@ static void acp_dsp_ipc_get_reply(struct snd_sof_dev *sdev)
 		reply.error = 0;
 		reply.hdr.cmd = SOF_IPC_GLB_REPLY;
 		reply.hdr.size = sizeof(reply);
-		memcpy(msg->reply_data, &reply, sizeof(reply));
+		memcpy(msg->rx_data, &reply, sizeof(reply));
 		goto out;
 	}
 	/* get IPC reply from DSP in the mailbox */
 	acp_mailbox_read(sdev, offset, &reply, sizeof(reply));
 	if (reply.error < 0) {
-		memcpy(msg->reply_data, &reply, sizeof(reply));
+		memcpy(msg->rx_data, &reply, sizeof(reply));
 		ret = reply.error;
 	} else {
 		/* reply correct size ? */
@@ -118,7 +118,7 @@ static void acp_dsp_ipc_get_reply(struct snd_sof_dev *sdev)
 		}
 		/* read the message */
 		if (msg->reply_size > 0)
-			acp_mailbox_read(sdev, offset, msg->reply_data, msg->reply_size);
+			acp_mailbox_read(sdev, offset, msg->rx_data, msg->reply_size);
 	}
 out:
 	msg->reply_error = ret;
