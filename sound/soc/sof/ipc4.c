@@ -228,9 +228,9 @@ int sof_ipc4_init_msg_memory(struct snd_sof_dev *sdev)
 	if (!msg->msg_data)
 		return -ENOMEM;
 
-	msg->reply_data = devm_kzalloc(sdev->dev, sdev->ipc->max_payload_size,
-				       GFP_KERNEL);
-	if (!msg->reply_data)
+	msg->rx_data = devm_kzalloc(sdev->dev, sdev->ipc->max_payload_size,
+				    GFP_KERNEL);
+	if (!msg->rx_data)
 		return -ENOMEM;
 
 	/*
