@@ -377,11 +377,14 @@ struct ipc_pcm_ops;
  * @tplg:	Pointer to IPC-specific topology ops
  * @pm:		Pointer to PM ops
  * @pcm:	Pointer to PCM ops
+ * @init:	Function pointer for IPC related initialization function
  */
 struct ipc_ops {
 	const struct ipc_tplg_ops *tplg;
 	const struct ipc_pm_ops *pm;
 	const struct ipc_pcm_ops *pcm;
+
+	int (*init)(struct snd_sof_ipc *ipc);
 };
 
 /* SOF generic IPC data */
