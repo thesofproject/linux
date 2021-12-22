@@ -187,6 +187,7 @@ EXPORT_SYMBOL(snd_sof_ipc_valid);
 
 struct snd_sof_ipc *snd_sof_ipc_init(struct snd_sof_dev *sdev)
 {
+	const struct ipc_ops *ops;
 	struct snd_sof_ipc *ipc;
 	struct snd_sof_ipc_msg *msg;
 
@@ -208,12 +209,27 @@ struct snd_sof_ipc *snd_sof_ipc_init(struct snd_sof_dev *sdev)
 	 * versions, this will need to be modified to use the selected version at runtime.
 	 */
 	ipc->ops = &ipc3_ops;
+	ops = ipc->ops;
 
 	/* check for mandatory ops */
-	if (!ipc->ops->tx_msg || !ipc->ops->rx_msg || !ipc->ops->set_get_data ||
-	    !ipc->ops->get_reply || !ipc->ops->pcm || !ipc->ops->tplg ||
-	    !ipc->ops->tplg->widget || !ipc->ops->tplg->control) {
-		dev_err(sdev->dev, "Invalid IPC ops\n");
+	if (!ops->tx_msg || !ops->rx_msg || !ops->set_get_data || !ops->get_reply) {
+		dev_err(sdev->dev, "Missing IPC message handling ops\n");
+		return NULL;
+	}
+
+	if (!ops->fw_loader || !ops->fw_loader->validate ||
+	    !ops->fw_loader->parse_ext_manifest || !ops->fw_loader->load_modules) {
+		dev_err(sdev->dev, "Missing IPC firmware loading ops\n");
+		return NULL;
+	}
+
+	if (!ops->pcm) {
+		dev_err(sdev->dev, "Missing IPC PCM ops\n");
+		return NULL;
+	}
+
+	if (!ops->tplg || !ops->tplg->widget || !ops->tplg->control) {
+		dev_err(sdev->dev, "Missing IPC topology ops\n");
 		return NULL;
 	}
 
