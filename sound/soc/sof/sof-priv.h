@@ -362,6 +362,18 @@ struct ipc_pm_ops {
 	int (*ctx_restore)(struct snd_sof_dev *sdev);
 };
 
+/**
+ * struct ipc_fw_loader_ops - IPC/FW-specific loader ops
+ * @validate:		Function pointer for validating the firmware image
+ * @parse_ext_manifest:	Function pointer for parsing the manifest of the firmware
+ * @load_modules:	Function pointer for loading firmware modules
+ */
+struct ipc_fw_loader_ops {
+	int (*validate)(struct snd_sof_dev *sdev);
+	size_t (*parse_ext_manifest)(struct snd_sof_dev *sdev);
+	int (*load_modules)(struct snd_sof_dev *sdev);
+};
+
 struct ipc_tplg_ops;
 struct ipc_pcm_ops;
 
@@ -370,6 +382,7 @@ struct ipc_pcm_ops;
  * @tplg:	Pointer to IPC-specific topology ops
  * @pm:		Pointer to PM ops
  * @pcm:	Pointer to PCM ops
+ * @fw_loader:	Pointer to Firmware Loader ops
  *
  * @tx_msg:	Function pointer for sending an IPC message
  * @rx_msg:	Function pointer for handling a received message
@@ -381,6 +394,7 @@ struct ipc_ops {
 	const struct ipc_tplg_ops *tplg;
 	const struct ipc_pm_ops *pm;
 	const struct ipc_pcm_ops *pcm;
+	const struct ipc_fw_loader_ops *fw_loader;
 
 	int (*tx_msg)(struct snd_sof_dev *sdev, void *msg_data, size_t msg_bytes,
 		      void *reply_data, size_t reply_bytes, bool no_pm);
