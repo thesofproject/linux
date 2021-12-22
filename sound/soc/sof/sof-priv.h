@@ -580,8 +580,6 @@ void snd_sof_new_platform_drv(struct snd_sof_dev *sdev);
 int snd_sof_load_firmware_raw(struct snd_sof_dev *sdev);
 int snd_sof_load_firmware_memcpy(struct snd_sof_dev *sdev);
 int snd_sof_run_firmware(struct snd_sof_dev *sdev);
-int snd_sof_parse_module_memcpy(struct snd_sof_dev *sdev,
-				struct snd_sof_mod_hdr *module);
 void snd_sof_fw_unload(struct snd_sof_dev *sdev);
 
 /*
