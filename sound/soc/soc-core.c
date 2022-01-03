@@ -1782,7 +1782,7 @@ match:
 			dlc = asoc_link_to_cpu(dai_link, 0);
 			dai = snd_soc_find_dai(dlc);
 
-			if (!dai || dai->component != component)
+			if (dai && dai->component != component)
 				continue;
 
 			/* ignore this FE */
