@@ -67,22 +67,11 @@ static ssize_t sof_msg_inject_dfs_read(struct file *file, char __user *buffer,
 	return count;
 }
 
-static ssize_t sof_msg_inject_dfs_write(struct file *file, const char __user *buffer,
-					size_t count, loff_t *ppos)
+static int sof_msg_inject_send_message(struct sof_client_dev *cdev)
 {
-	struct sof_client_dev *cdev = file->private_data;
 	struct sof_msg_inject_priv *priv = cdev->data;
 	struct device *dev = &cdev->auxdev.dev;
 	int ret, err;
-	size_t size;
-
-	if (*ppos)
-		return 0;
-
-	size = simple_write_to_buffer(priv->tx_buffer, priv->max_msg_size,
-				      ppos, buffer, count);
-	if (size != count)
-		return size > 0 ? -EFAULT : size;
 
 	ret = pm_runtime_get_sync(dev);
 	if (ret < 0 && ret != -EACCES) {
@@ -92,19 +81,44 @@ static ssize_t sof_msg_inject_dfs_write(struct file *file, const char __user *bu
 	}
 
 	/* send the message */
-	memset(priv->rx_buffer, 0, priv->max_msg_size);
 	ret = sof_client_ipc_tx_message(cdev, priv->tx_buffer, priv->rx_buffer,
 					priv->max_msg_size);
+	if (ret)
+		dev_err(dev, "IPC message send failed: %d\n", ret);
+
 	pm_runtime_mark_last_busy(dev);
 	err = pm_runtime_put_autosuspend(dev);
 	if (err < 0)
 		dev_err_ratelimited(dev, "debugfs write failed to idle %d\n", err);
 
-	/* return size if test is successful */
-	if (ret >= 0)
-		ret = size;
-
 	return ret;
+}
+
+static ssize_t sof_msg_inject_dfs_write(struct file *file, const char __user *buffer,
+					size_t count, loff_t *ppos)
+{
+	struct sof_client_dev *cdev = file->private_data;
+	struct sof_msg_inject_priv *priv = cdev->data;
+	size_t size;
+	int ret;
+
+	if (*ppos)
+		return 0;
+
+	size = simple_write_to_buffer(priv->tx_buffer, priv->max_msg_size,
+				      ppos, buffer, count);
+	if (size != count)
+		return size > 0 ? -EFAULT : size;
+
+	memset(priv->rx_buffer, 0, priv->max_msg_size);
+
+	ret = sof_msg_inject_send_message(cdev);
+
+	/* return the error code if test failed */
+	if (ret < 0)
+		size = ret;
+
+	return size;
 };
 
 static int sof_msg_inject_dfs_release(struct inode *inode, struct file *file)
