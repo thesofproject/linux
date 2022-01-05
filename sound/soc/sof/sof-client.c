@@ -109,9 +109,6 @@ static inline void sof_unregister_ipc_flood_test(struct snd_sof_dev *sdev) {}
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_IPC_MSG_INJECTOR)
 static int sof_register_ipc_msg_injector(struct snd_sof_dev *sdev)
 {
-	if (sdev->pdata->ipc_type != SOF_IPC)
-		return 0;
-
 	return sof_client_dev_register(sdev, "msg_injector", 0, NULL, 0);
 }
 
