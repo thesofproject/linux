@@ -1902,20 +1902,20 @@ print_circular_bug_header(struct lock_list *entry, unsigned int depth,
 	if (debug_locks_silent)
 		return;
 
-	pr_warn("\n");
-	pr_warn("======================================================\n");
-	pr_warn("WARNING: possible circular locking dependency detected\n");
+	pr_err("\n");
+	pr_err("======================================================\n");
+	pr_err("WARNING: possible circular locking dependency detected\n");
 	print_kernel_ident();
-	pr_warn("------------------------------------------------------\n");
-	pr_warn("%s/%d is trying to acquire lock:\n",
+	pr_err("------------------------------------------------------\n");
+	pr_err("%s/%d is trying to acquire lock:\n",
 		curr->comm, task_pid_nr(curr));
 	print_lock(check_src);
 
-	pr_warn("\nbut task is already holding lock:\n");
+	pr_err("\nbut task is already holding lock:\n");
 
 	print_lock(check_tgt);
-	pr_warn("\nwhich lock already depends on the new lock.\n\n");
-	pr_warn("\nthe existing dependency chain (in reverse order) is:\n");
+	pr_err("\nwhich lock already depends on the new lock.\n\n");
+	pr_err("\nthe existing dependency chain (in reverse order) is:\n");
 
 	print_circular_bug_entry(entry, depth);
 }
@@ -2521,13 +2521,13 @@ print_bad_irq_dependency(struct task_struct *curr,
 	if (!debug_locks_off_graph_unlock() || debug_locks_silent)
 		return;
 
-	pr_warn("\n");
-	pr_warn("=====================================================\n");
-	pr_warn("WARNING: %s-safe -> %s-unsafe lock order detected\n",
+	pr_err("\n");
+	pr_err("=====================================================\n");
+	pr_err("WARNING: %s-safe -> %s-unsafe lock order detected\n",
 		irqclass, irqclass);
 	print_kernel_ident();
-	pr_warn("-----------------------------------------------------\n");
-	pr_warn("%s/%d [HC%u[%lu]:SC%u[%lu]:HE%u:SE%u] is trying to acquire:\n",
+	pr_err("-----------------------------------------------------\n");
+	pr_err("%s/%d [HC%u[%lu]:SC%u[%lu]:HE%u:SE%u] is trying to acquire:\n",
 		curr->comm, task_pid_nr(curr),
 		lockdep_hardirq_context(), hardirq_count() >> HARDIRQ_SHIFT,
 		curr->softirq_context, softirq_count() >> SOFTIRQ_SHIFT,
@@ -2535,45 +2535,45 @@ print_bad_irq_dependency(struct task_struct *curr,
 		curr->softirqs_enabled);
 	print_lock(next);
 
-	pr_warn("\nand this task is already holding:\n");
+	pr_err("\nand this task is already holding:\n");
 	print_lock(prev);
-	pr_warn("which would create a new lock dependency:\n");
+	pr_err("which would create a new lock dependency:\n");
 	print_lock_name(hlock_class(prev));
 	pr_cont(" ->");
 	print_lock_name(hlock_class(next));
 	pr_cont("\n");
 
-	pr_warn("\nbut this new dependency connects a %s-irq-safe lock:\n",
+	pr_err("\nbut this new dependency connects a %s-irq-safe lock:\n",
 		irqclass);
 	print_lock_name(backwards_entry->class);
-	pr_warn("\n... which became %s-irq-safe at:\n", irqclass);
+	pr_err("\n... which became %s-irq-safe at:\n", irqclass);
 
 	print_lock_trace(backwards_entry->class->usage_traces[bit1], 1);
 
-	pr_warn("\nto a %s-irq-unsafe lock:\n", irqclass);
+	pr_err("\nto a %s-irq-unsafe lock:\n", irqclass);
 	print_lock_name(forwards_entry->class);
-	pr_warn("\n... which became %s-irq-unsafe at:\n", irqclass);
-	pr_warn("...");
+	pr_err("\n... which became %s-irq-unsafe at:\n", irqclass);
+	pr_err("...");
 
 	print_lock_trace(forwards_entry->class->usage_traces[bit2], 1);
 
-	pr_warn("\nother info that might help us debug this:\n\n");
+	pr_err("\nother info that might help us debug this:\n\n");
 	print_irq_lock_scenario(backwards_entry, forwards_entry,
 				hlock_class(prev), hlock_class(next));
 
 	lockdep_print_held_locks(curr);
 
-	pr_warn("\nthe dependencies between %s-irq-safe lock and the holding lock:\n", irqclass);
+	pr_err("\nthe dependencies between %s-irq-safe lock and the holding lock:\n", irqclass);
 	print_shortest_lock_dependencies_backwards(backwards_entry, prev_root);
 
-	pr_warn("\nthe dependencies between the lock to be acquired");
-	pr_warn(" and %s-irq-unsafe lock:\n", irqclass);
+	pr_err("\nthe dependencies between the lock to be acquired");
+	pr_err(" and %s-irq-unsafe lock:\n", irqclass);
 	next_root->trace = save_trace();
 	if (!next_root->trace)
 		return;
 	print_shortest_lock_dependencies(forwards_entry, next_root);
 
-	pr_warn("\nstack backtrace:\n");
+	pr_err("\nstack backtrace:\n");
 	dump_stack();
 }
 
@@ -2937,22 +2937,22 @@ print_deadlock_bug(struct task_struct *curr, struct held_lock *prev,
 	if (!debug_locks_off_graph_unlock() || debug_locks_silent)
 		return;
 
-	pr_warn("\n");
-	pr_warn("============================================\n");
-	pr_warn("WARNING: possible recursive locking detected\n");
+	pr_err("\n");
+	pr_err("============================================\n");
+	pr_err("WARNING: possible recursive locking detected\n");
 	print_kernel_ident();
-	pr_warn("--------------------------------------------\n");
-	pr_warn("%s/%d is trying to acquire lock:\n",
+	pr_err("--------------------------------------------\n");
+	pr_err("%s/%d is trying to acquire lock:\n",
 		curr->comm, task_pid_nr(curr));
 	print_lock(next);
-	pr_warn("\nbut task is already holding lock:\n");
+	pr_err("\nbut task is already holding lock:\n");
 	print_lock(prev);
 
-	pr_warn("\nother info that might help us debug this:\n");
+	pr_err("\nother info that might help us debug this:\n");
 	print_deadlock_scenario(next, prev);
 	lockdep_print_held_locks(curr);
 
-	pr_warn("\nstack backtrace:\n");
+	pr_err("\nstack backtrace:\n");
 	dump_stack();
 }
 
@@ -3539,21 +3539,21 @@ static void print_collision(struct task_struct *curr,
 			struct held_lock *hlock_next,
 			struct lock_chain *chain)
 {
-	pr_warn("\n");
-	pr_warn("============================\n");
-	pr_warn("WARNING: chain_key collision\n");
+	pr_err("\n");
+	pr_err("============================\n");
+	pr_err("WARNING: chain_key collision\n");
 	print_kernel_ident();
-	pr_warn("----------------------------\n");
-	pr_warn("%s/%d: ", current->comm, task_pid_nr(current));
-	pr_warn("Hash chain already cached but the contents don't match!\n");
+	pr_err("----------------------------\n");
+	pr_err("%s/%d: ", current->comm, task_pid_nr(current));
+	pr_err("Hash chain already cached but the contents don't match!\n");
 
-	pr_warn("Held locks:");
+	pr_err("Held locks:");
 	print_chain_keys_held_locks(curr, hlock_next);
 
-	pr_warn("Locks in cached chain:");
+	pr_err("Locks in cached chain:");
 	print_chain_keys_chain(chain);
 
-	pr_warn("\nstack backtrace:\n");
+	pr_err("\nstack backtrace:\n");
 	dump_stack();
 }
 #endif
@@ -3903,16 +3903,16 @@ print_usage_bug(struct task_struct *curr, struct held_lock *this,
 	if (!debug_locks_off() || debug_locks_silent)
 		return;
 
-	pr_warn("\n");
-	pr_warn("================================\n");
-	pr_warn("WARNING: inconsistent lock state\n");
+	pr_err("\n");
+	pr_err("================================\n");
+	pr_err("WARNING: inconsistent lock state\n");
 	print_kernel_ident();
-	pr_warn("--------------------------------\n");
+	pr_err("--------------------------------\n");
 
-	pr_warn("inconsistent {%s} -> {%s} usage.\n",
+	pr_err("inconsistent {%s} -> {%s} usage.\n",
 		usage_str[prev_bit], usage_str[new_bit]);
 
-	pr_warn("%s/%d [HC%u[%lu]:SC%u[%lu]:HE%u:SE%u] takes:\n",
+	pr_err("%s/%d [HC%u[%lu]:SC%u[%lu]:HE%u:SE%u] takes:\n",
 		curr->comm, task_pid_nr(curr),
 		lockdep_hardirq_context(), hardirq_count() >> HARDIRQ_SHIFT,
 		lockdep_softirq_context(curr), softirq_count() >> SOFTIRQ_SHIFT,
@@ -3920,16 +3920,16 @@ print_usage_bug(struct task_struct *curr, struct held_lock *this,
 		lockdep_softirqs_enabled(curr));
 	print_lock(this);
 
-	pr_warn("{%s} state was registered at:\n", usage_str[prev_bit]);
+	pr_err("{%s} state was registered at:\n", usage_str[prev_bit]);
 	print_lock_trace(hlock_class(this)->usage_traces[prev_bit], 1);
 
 	print_irqtrace_events(curr);
-	pr_warn("\nother info that might help us debug this:\n");
+	pr_err("\nother info that might help us debug this:\n");
 	print_usage_bug_scenario(this);
 
 	lockdep_print_held_locks(curr);
 
-	pr_warn("\nstack backtrace:\n");
+	pr_err("\nstack backtrace:\n");
 	dump_stack();
 }
 
@@ -3965,28 +3965,28 @@ print_irq_inversion_bug(struct task_struct *curr,
 	if (!debug_locks_off_graph_unlock() || debug_locks_silent)
 		return;
 
-	pr_warn("\n");
-	pr_warn("========================================================\n");
-	pr_warn("WARNING: possible irq lock inversion dependency detected\n");
+	pr_err("\n");
+	pr_err("========================================================\n");
+	pr_err("WARNING: possible irq lock inversion dependency detected\n");
 	print_kernel_ident();
-	pr_warn("--------------------------------------------------------\n");
-	pr_warn("%s/%d just changed the state of lock:\n",
+	pr_err("--------------------------------------------------------\n");
+	pr_err("%s/%d just changed the state of lock:\n",
 		curr->comm, task_pid_nr(curr));
 	print_lock(this);
 	if (forwards)
-		pr_warn("but this lock took another, %s-unsafe lock in the past:\n", irqclass);
+		pr_err("but this lock took another, %s-unsafe lock in the past:\n", irqclass);
 	else
-		pr_warn("but this lock was taken by another, %s-safe lock in the past:\n", irqclass);
+		pr_err("but this lock was taken by another, %s-safe lock in the past:\n", irqclass);
 	print_lock_name(other->class);
-	pr_warn("\n\nand interrupts could create inverse lock ordering between them.\n\n");
+	pr_err("\n\nand interrupts could create inverse lock ordering between them.\n\n");
 
-	pr_warn("\nother info that might help us debug this:\n");
+	pr_err("\nother info that might help us debug this:\n");
 
 	/* Find a middle lock (if one exists) */
 	depth = get_lock_depth(other);
 	do {
 		if (depth == 0 && (entry != root)) {
-			pr_warn("lockdep:%s bad path found in chain graph\n", __func__);
+			pr_err("lockdep:%s bad path found in chain graph\n", __func__);
 			break;
 		}
 		middle = entry;
@@ -4002,13 +4002,13 @@ print_irq_inversion_bug(struct task_struct *curr,
 
 	lockdep_print_held_locks(curr);
 
-	pr_warn("\nthe shortest dependencies between 2nd lock and 1st lock:\n");
+	pr_err("\nthe shortest dependencies between 2nd lock and 1st lock:\n");
 	root->trace = save_trace();
 	if (!root->trace)
 		return;
 	print_shortest_lock_dependencies(other, root);
 
-	pr_warn("\nstack backtrace:\n");
+	pr_err("\nstack backtrace:\n");
 	dump_stack();
 }
 
@@ -4658,23 +4658,23 @@ print_lock_invalid_wait_context(struct task_struct *curr,
 	if (debug_locks_silent)
 		return 0;
 
-	pr_warn("\n");
-	pr_warn("=============================\n");
-	pr_warn("[ BUG: Invalid wait context ]\n");
+	pr_err("\n");
+	pr_err("=============================\n");
+	pr_err("[ BUG: Invalid wait context ]\n");
 	print_kernel_ident();
-	pr_warn("-----------------------------\n");
+	pr_err("-----------------------------\n");
 
-	pr_warn("%s/%d is trying to lock:\n", curr->comm, task_pid_nr(curr));
+	pr_err("%s/%d is trying to lock:\n", curr->comm, task_pid_nr(curr));
 	print_lock(hlock);
 
-	pr_warn("other info that might help us debug this:\n");
+	pr_err("other info that might help us debug this:\n");
 
 	curr_inner = task_wait_context(curr);
-	pr_warn("context-{%d:%d}\n", curr_inner, curr_inner);
+	pr_err("context-{%d:%d}\n", curr_inner, curr_inner);
 
 	lockdep_print_held_locks(curr);
 
-	pr_warn("stack backtrace:\n");
+	pr_err("stack backtrace:\n");
 	dump_stack();
 
 	return 0;
@@ -4846,25 +4846,25 @@ print_lock_nested_lock_not_held(struct task_struct *curr,
 	if (debug_locks_silent)
 		return;
 
-	pr_warn("\n");
-	pr_warn("==================================\n");
-	pr_warn("WARNING: Nested lock was not taken\n");
+	pr_err("\n");
+	pr_err("==================================\n");
+	pr_err("WARNING: Nested lock was not taken\n");
 	print_kernel_ident();
-	pr_warn("----------------------------------\n");
+	pr_err("----------------------------------\n");
 
-	pr_warn("%s/%d is trying to lock:\n", curr->comm, task_pid_nr(curr));
+	pr_err("%s/%d is trying to lock:\n", curr->comm, task_pid_nr(curr));
 	print_lock(hlock);
 
-	pr_warn("\nbut this task is not holding:\n");
-	pr_warn("%s\n", hlock->nest_lock->name);
+	pr_err("\nbut this task is not holding:\n");
+	pr_err("%s\n", hlock->nest_lock->name);
 
-	pr_warn("\nstack backtrace:\n");
+	pr_err("\nstack backtrace:\n");
 	dump_stack();
 
-	pr_warn("\nother info that might help us debug this:\n");
+	pr_err("\nother info that might help us debug this:\n");
 	lockdep_print_held_locks(curr);
 
-	pr_warn("\nstack backtrace:\n");
+	pr_err("\nstack backtrace:\n");
 	dump_stack();
 }
 
@@ -5062,21 +5062,21 @@ static void print_unlock_imbalance_bug(struct task_struct *curr,
 	if (debug_locks_silent)
 		return;
 
-	pr_warn("\n");
-	pr_warn("=====================================\n");
-	pr_warn("WARNING: bad unlock balance detected!\n");
+	pr_err("\n");
+	pr_err("=====================================\n");
+	pr_err("WARNING: bad unlock balance detected!\n");
 	print_kernel_ident();
-	pr_warn("-------------------------------------\n");
-	pr_warn("%s/%d is trying to release lock (",
+	pr_err("-------------------------------------\n");
+	pr_err("%s/%d is trying to release lock (",
 		curr->comm, task_pid_nr(curr));
 	print_lockdep_cache(lock);
 	pr_cont(") at:\n");
 	print_ip_sym(KERN_WARNING, ip);
-	pr_warn("but there are no more locks to release!\n");
-	pr_warn("\nother info that might help us debug this:\n");
+	pr_err("but there are no more locks to release!\n");
+	pr_err("\nother info that might help us debug this:\n");
 	lockdep_print_held_locks(curr);
 
-	pr_warn("\nstack backtrace:\n");
+	pr_err("\nstack backtrace:\n");
 	dump_stack();
 }
 
@@ -5750,21 +5750,21 @@ static void print_lock_contention_bug(struct task_struct *curr,
 	if (debug_locks_silent)
 		return;
 
-	pr_warn("\n");
-	pr_warn("=================================\n");
-	pr_warn("WARNING: bad contention detected!\n");
+	pr_err("\n");
+	pr_err("=================================\n");
+	pr_err("WARNING: bad contention detected!\n");
 	print_kernel_ident();
-	pr_warn("---------------------------------\n");
-	pr_warn("%s/%d is trying to contend lock (",
+	pr_err("---------------------------------\n");
+	pr_err("%s/%d is trying to contend lock (",
 		curr->comm, task_pid_nr(curr));
 	print_lockdep_cache(lock);
 	pr_cont(") at:\n");
 	print_ip_sym(KERN_WARNING, ip);
-	pr_warn("but there are no locks held!\n");
-	pr_warn("\nother info that might help us debug this:\n");
+	pr_err("but there are no locks held!\n");
+	pr_err("\nother info that might help us debug this:\n");
 	lockdep_print_held_locks(curr);
 
-	pr_warn("\nstack backtrace:\n");
+	pr_err("\nstack backtrace:\n");
 	dump_stack();
 }
 
@@ -6374,17 +6374,17 @@ print_freed_lock_bug(struct task_struct *curr, const void *mem_from,
 	if (debug_locks_silent)
 		return;
 
-	pr_warn("\n");
-	pr_warn("=========================\n");
-	pr_warn("WARNING: held lock freed!\n");
+	pr_err("\n");
+	pr_err("=========================\n");
+	pr_err("WARNING: held lock freed!\n");
 	print_kernel_ident();
-	pr_warn("-------------------------\n");
-	pr_warn("%s/%d is freeing memory %px-%px, with a lock still held there!\n",
+	pr_err("-------------------------\n");
+	pr_err("%s/%d is freeing memory %px-%px, with a lock still held there!\n",
 		curr->comm, task_pid_nr(curr), mem_from, mem_to-1);
 	print_lock(hlock);
 	lockdep_print_held_locks(curr);
 
-	pr_warn("\nstack backtrace:\n");
+	pr_err("\nstack backtrace:\n");
 	dump_stack();
 }
 
@@ -6432,14 +6432,14 @@ static void print_held_locks_bug(void)
 	if (debug_locks_silent)
 		return;
 
-	pr_warn("\n");
-	pr_warn("====================================\n");
-	pr_warn("WARNING: %s/%d still has locks held!\n",
+	pr_err("\n");
+	pr_err("====================================\n");
+	pr_err("WARNING: %s/%d still has locks held!\n",
 	       current->comm, task_pid_nr(current));
 	print_kernel_ident();
-	pr_warn("------------------------------------\n");
+	pr_err("------------------------------------\n");
 	lockdep_print_held_locks(current);
-	pr_warn("\nstack backtrace:\n");
+	pr_err("\nstack backtrace:\n");
 	dump_stack();
 }
 
@@ -6456,10 +6456,10 @@ void debug_show_all_locks(void)
 	struct task_struct *g, *p;
 
 	if (unlikely(!debug_locks)) {
-		pr_warn("INFO: lockdep is turned off.\n");
+		pr_err("INFO: lockdep is turned off.\n");
 		return;
 	}
-	pr_warn("\nShowing all locks held in the system:\n");
+	pr_err("\nShowing all locks held in the system:\n");
 
 	rcu_read_lock();
 	for_each_process_thread(g, p) {
@@ -6471,8 +6471,8 @@ void debug_show_all_locks(void)
 	}
 	rcu_read_unlock();
 
-	pr_warn("\n");
-	pr_warn("=============================================\n\n");
+	pr_err("\n");
+	pr_err("=============================================\n\n");
 }
 EXPORT_SYMBOL_GPL(debug_show_all_locks);
 #endif
@@ -6498,12 +6498,12 @@ asmlinkage __visible void lockdep_sys_exit(void)
 	if (unlikely(curr->lockdep_depth)) {
 		if (!debug_locks_off())
 			return;
-		pr_warn("\n");
-		pr_warn("================================================\n");
-		pr_warn("WARNING: lock held when returning to user space!\n");
+		pr_err("\n");
+		pr_err("================================================\n");
+		pr_err("WARNING: lock held when returning to user space!\n");
 		print_kernel_ident();
-		pr_warn("------------------------------------------------\n");
-		pr_warn("%s/%d is leaving the kernel with locks still held!\n",
+		pr_err("------------------------------------------------\n");
+		pr_err("%s/%d is leaving the kernel with locks still held!\n",
 				curr->comm, curr->pid);
 		lockdep_print_held_locks(curr);
 	}
@@ -6521,14 +6521,14 @@ void lockdep_rcu_suspicious(const char *file, const int line, const char *s)
 	int dl = READ_ONCE(debug_locks);
 
 	/* Note: the following can be executed concurrently, so be careful. */
-	pr_warn("\n");
-	pr_warn("=============================\n");
-	pr_warn("WARNING: suspicious RCU usage\n");
+	pr_err("\n");
+	pr_err("=============================\n");
+	pr_err("WARNING: suspicious RCU usage\n");
 	print_kernel_ident();
-	pr_warn("-----------------------------\n");
-	pr_warn("%s:%d %s!\n", file, line, s);
-	pr_warn("\nother info that might help us debug this:\n\n");
-	pr_warn("\n%srcu_scheduler_active = %d, debug_locks = %d\n%s",
+	pr_err("-----------------------------\n");
+	pr_err("%s:%d %s!\n", file, line, s);
+	pr_err("\nother info that might help us debug this:\n\n");
+	pr_err("\n%srcu_scheduler_active = %d, debug_locks = %d\n%s",
 	       !rcu_lockdep_current_cpu_online()
 			? "RCU used illegally from offline CPU!\n"
 			: "",
@@ -6554,10 +6554,10 @@ void lockdep_rcu_suspicious(const char *file, const int line, const char *s)
 	 * rcu_read_lock_bh() and so on from extended quiescent states.
 	 */
 	if (!rcu_is_watching())
-		pr_warn("RCU used illegally from extended quiescent state!\n");
+		pr_err("RCU used illegally from extended quiescent state!\n");
 
 	lockdep_print_held_locks(curr);
-	pr_warn("\nstack backtrace:\n");
+	pr_err("\nstack backtrace:\n");
 	dump_stack();
 }
 EXPORT_SYMBOL_GPL(lockdep_rcu_suspicious);
