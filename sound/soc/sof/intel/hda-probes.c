@@ -11,6 +11,7 @@
 //  Peter Ujfalusi <peter.ujfalusi@linux.intel.com>
 //
 
+#include <linux/module.h>
 #include <sound/hdaudio_ext.h>
 #include <sound/soc.h>
 #include "../sof-priv.h"
