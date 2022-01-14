@@ -643,16 +643,20 @@ int snd_soc_suspend(struct device *dev)
 }
 EXPORT_SYMBOL_GPL(snd_soc_suspend);
 
-/*
- * deferred resume work, so resume can complete before we finished
- * setting our codec back up, which can be very slow on I2C
- */
-static void soc_resume_deferred(struct work_struct *work)
+/* powers up audio subsystem after a suspend */
+int snd_soc_resume(struct device *dev)
 {
-	struct snd_soc_card *card =
-			container_of(work, struct snd_soc_card,
-				     deferred_resume_work);
+	struct snd_soc_card *card = dev_get_drvdata(dev);
 	struct snd_soc_component *component;
+
+	/* If the card is not initialized yet there is nothing to do */
+	if (!card->instantiated)
+		return 0;
+
+	/* activate pins from sleep state */
+	for_each_card_components(card, component)
+		if (snd_soc_component_active(component))
+			pinctrl_pm_select_default_state(component->dev);
 
 	/*
 	 * our power state is still SNDRV_CTL_POWER_D3hot from suspend time,
@@ -686,40 +690,14 @@ static void soc_resume_deferred(struct work_struct *work)
 
 	/* userspace can access us now we are back as we were before */
 	snd_power_change_state(card->snd_card, SNDRV_CTL_POWER_D0);
-}
-
-/* powers up audio subsystem after a suspend */
-int snd_soc_resume(struct device *dev)
-{
-	struct snd_soc_card *card = dev_get_drvdata(dev);
-	struct snd_soc_component *component;
-
-	/* If the card is not initialized yet there is nothing to do */
-	if (!card->instantiated)
-		return 0;
-
-	/* activate pins from sleep state */
-	for_each_card_components(card, component)
-		if (snd_soc_component_active(component))
-			pinctrl_pm_select_default_state(component->dev);
-
-	dev_dbg(dev, "ASoC: Scheduling resume work\n");
-	if (!schedule_work(&card->deferred_resume_work))
-		dev_err(dev, "ASoC: resume work item may be lost\n");
 
 	return 0;
 }
 EXPORT_SYMBOL_GPL(snd_soc_resume);
 
-static void soc_resume_init(struct snd_soc_card *card)
-{
-	/* deferred resume work */
-	INIT_WORK(&card->deferred_resume_work, soc_resume_deferred);
-}
 #else
 #define snd_soc_suspend NULL
 #define snd_soc_resume NULL
-static inline void soc_resume_init(struct snd_soc_card *card) { }
 #endif
 
 static struct device_node
@@ -1958,8 +1936,6 @@ static int snd_soc_bind_card(struct snd_soc_card *card)
 	}
 
 	soc_init_card_debugfs(card);
-
-	soc_resume_init(card);
 
 	ret = snd_soc_dapm_new_controls(&card->dapm, card->dapm_widgets,
 					card->num_dapm_widgets);
