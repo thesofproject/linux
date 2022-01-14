@@ -456,8 +456,8 @@ int snd_soc_component_open(struct snd_soc_component *component,
 int snd_soc_component_close(struct snd_soc_component *component,
 			    struct snd_pcm_substream *substream,
 			    int rollback);
-void snd_soc_component_suspend(struct snd_soc_component *component);
-void snd_soc_component_resume(struct snd_soc_component *component);
+int snd_soc_component_suspend(struct snd_soc_component *component);
+int snd_soc_component_resume(struct snd_soc_component *component);
 int snd_soc_component_is_suspended(struct snd_soc_component *component);
 int snd_soc_component_probe(struct snd_soc_component *component);
 void snd_soc_component_remove(struct snd_soc_component *component);

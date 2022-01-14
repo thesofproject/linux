@@ -318,18 +318,27 @@ int snd_soc_component_close(struct snd_soc_component *component,
 	return soc_component_ret(component, ret);
 }
 
-void snd_soc_component_suspend(struct snd_soc_component *component)
+int snd_soc_component_suspend(struct snd_soc_component *component)
 {
+	int ret = 0;
+
 	if (component->driver->suspend)
-		component->driver->suspend(component);
-	component->suspended = 1;
+		ret = component->driver->suspend(component);
+	if (!ret)
+		component->suspended = 1;
+
+	return soc_component_ret(component, ret);
 }
 
-void snd_soc_component_resume(struct snd_soc_component *component)
+int snd_soc_component_resume(struct snd_soc_component *component)
 {
+	int ret = 0;
 	if (component->driver->resume)
-		component->driver->resume(component);
-	component->suspended = 0;
+		ret = component->driver->resume(component);
+	if (!ret)
+		component->suspended = 0;
+
+	return soc_component_ret(component, ret);
 }
 
 int snd_soc_component_is_suspended(struct snd_soc_component *component)
