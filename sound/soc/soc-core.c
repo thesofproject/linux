@@ -550,6 +550,7 @@ int snd_soc_suspend(struct device *dev)
 	struct snd_soc_card *card = dev_get_drvdata(dev);
 	struct snd_soc_component *component;
 	struct snd_soc_pcm_runtime *rtd;
+	int ret = 0;
 	int i;
 
 	/* If the card is not initialized yet there is nothing to do */
@@ -623,7 +624,14 @@ int snd_soc_suspend(struct device *dev)
 				fallthrough;
 
 			case SND_SOC_BIAS_OFF:
-				snd_soc_component_suspend(component);
+				ret = snd_soc_component_suspend(component);
+				if (ret) {
+					dev_err(component->dev,
+						"ASoC: Failed component %s suspend\n",
+						component->name);
+					goto exit;
+				}
+
 				if (component->regmap)
 					regcache_mark_dirty(component->regmap);
 				/* deactivate pins to sleep state */
@@ -639,7 +647,8 @@ int snd_soc_suspend(struct device *dev)
 
 	snd_soc_card_suspend_post(card);
 
-	return 0;
+exit:
+	return ret;
 }
 EXPORT_SYMBOL_GPL(snd_soc_suspend);
 
@@ -648,6 +657,7 @@ int snd_soc_resume(struct device *dev)
 {
 	struct snd_soc_card *card = dev_get_drvdata(dev);
 	struct snd_soc_component *component;
+	int ret = 0;
 
 	/* If the card is not initialized yet there is nothing to do */
 	if (!card->instantiated)
@@ -671,8 +681,14 @@ int snd_soc_resume(struct device *dev)
 	snd_soc_card_resume_pre(card);
 
 	for_each_card_components(card, component) {
-		if (snd_soc_component_is_suspended(component))
-			snd_soc_component_resume(component);
+		if (snd_soc_component_is_suspended(component)) {
+			ret = snd_soc_component_resume(component);
+			if (ret) {
+				dev_err(component->dev, "ASoC: Failed component %s resume\n",
+					component->name);
+				goto exit;
+			}
+		}
 	}
 
 	soc_dapm_suspend_resume(card, SND_SOC_DAPM_STREAM_RESUME);
@@ -691,7 +707,8 @@ int snd_soc_resume(struct device *dev)
 	/* userspace can access us now we are back as we were before */
 	snd_power_change_state(card->snd_card, SNDRV_CTL_POWER_D0);
 
-	return 0;
+exit:
+	return ret;
 }
 EXPORT_SYMBOL_GPL(snd_soc_resume);
 
