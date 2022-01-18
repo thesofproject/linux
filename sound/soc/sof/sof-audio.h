@@ -40,6 +40,11 @@ struct snd_sof_widget;
 struct snd_sof_route;
 struct snd_sof_control;
 
+struct snd_sof_dai_config_data {
+	int dai_index;
+	int dai_data; /* contains DAI-specific information */
+};
+
 /**
  * struct ipc_pcm_ops - IPC-specific PCM ops
  * @hw_params: Function pointer for hw_params
@@ -126,7 +131,7 @@ struct ipc_tplg_ops {
 	int (*widget_setup)(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget);
 	int (*widget_free)(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget);
 	int (*dai_config)(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget,
-			  unsigned int flags);
+			  unsigned int flags, struct snd_sof_dai_config_data *data);
 	int (*set_up_all_pipelines)(struct snd_sof_dev *sdev, bool verify);
 	int (*tear_down_all_pipelines)(struct snd_sof_dev *sdev, bool verify);
 };
