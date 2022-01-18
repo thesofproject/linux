@@ -413,7 +413,7 @@ int amd_sof_acp_probe(struct snd_sof_dev *sdev)
 
 	sdev->ipc_irq = pci->irq;
 	ret = request_threaded_irq(sdev->ipc_irq, acp_irq_handler, acp_irq_thread,
-				   IRQF_SHARED, "AudioDSP", sdev);
+				   IRQF_SHARED | IRQF_ONESHOT, "AudioDSP", sdev);
 	if (ret < 0) {
 		dev_err(sdev->dev, "failed to register IRQ %d\n",
 			sdev->ipc_irq);
