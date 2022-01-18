@@ -1120,13 +1120,18 @@ int snd_power_ref_and_wait(struct snd_card *card)
 		return 0;
 	init_waitqueue_entry(&wait, current);
 	add_wait_queue(&card->power_sleep, &wait);
+	dev_warn(card->dev, "plb: %s: starting loop, power state %d\n", __func__,
+		 snd_power_get_state(card));
 	while (1) {
 		if (card->shutdown) {
 			result = -ENODEV;
+			dev_warn(card->dev, "plb: %s: stopping loop, nodev\n", __func__);
 			break;
 		}
-		if (snd_power_get_state(card) == SNDRV_CTL_POWER_D0)
+		if (snd_power_get_state(card) == SNDRV_CTL_POWER_D0) {
 			break;
+			dev_warn(card->dev, "plb: %s: stopping loop, D0 reached\n", __func__);
+		}
 		snd_power_unref(card);
 		set_current_state(TASK_UNINTERRUPTIBLE);
 		schedule_timeout(30 * HZ);
