@@ -162,58 +162,19 @@ static int hda_link_dma_params(struct hdac_ext_stream *hext_stream,
 	return 0;
 }
 
-/* Update config for the DAI widget */
-static struct sof_ipc_dai_config *hda_dai_update_config(struct snd_soc_dapm_widget *w,
-							int channel)
-{
-	struct snd_sof_widget *swidget = w->dobj.private;
-	struct sof_dai_private_data *private;
-	struct sof_ipc_dai_config *config;
-	struct snd_sof_dai *sof_dai;
-
-	if (!swidget)
-		return NULL;
-
-	sof_dai = swidget->private;
-
-	if (!sof_dai || !sof_dai->private) {
-		dev_err(swidget->scomp->dev, "%s: No private data for DAI %s\n", __func__,
-			w->name);
-		return NULL;
-	}
-
-	private = sof_dai->private;
-	if (!private->dai_config) {
-		dev_err(swidget->scomp->dev, "%s: No config for DAI %s\n", __func__, w->name);
-		return NULL;
-	}
-
-	config = &private->dai_config[sof_dai->current_config];
-
-	/* update config with stream tag */
-	config->hda.link_dma_ch = channel;
-
-	return config;
-}
-
 static int hda_link_dai_widget_update(struct sof_intel_hda_stream *hda_stream,
 				      struct snd_soc_dapm_widget *w,
 				      int channel, bool widget_setup)
 {
-	struct snd_sof_dev *sdev = hda_stream->sdev;
-	struct sof_ipc_dai_config *config;
+	struct snd_sof_dai_config_data data;
 
-	config = hda_dai_update_config(w, channel);
-	if (!config) {
-		dev_err(sdev->dev, "error: no config for DAI %s\n", w->name);
-		return -ENOENT;
-	}
+	data.dai_data = channel;
 
 	/* set up/free DAI widget and send DAI_CONFIG IPC */
 	if (widget_setup)
-		return hda_ctrl_dai_widget_setup(w, SOF_DAI_CONFIG_FLAGS_2_STEP_STOP);
+		return hda_ctrl_dai_widget_setup(w, SOF_DAI_CONFIG_FLAGS_2_STEP_STOP, &data);
 
-	return hda_ctrl_dai_widget_free(w, SOF_DAI_CONFIG_FLAGS_NONE);
+	return hda_ctrl_dai_widget_free(w, SOF_DAI_CONFIG_FLAGS_NONE, &data);
 }
 
 static int hda_link_hw_params(struct snd_pcm_substream *substream,
@@ -306,7 +267,7 @@ static int hda_link_dai_config_pause_push_ipc(struct snd_soc_dapm_widget *w)
 	int ret = 0;
 
 	if (tplg_ops->dai_config) {
-		ret = tplg_ops->dai_config(sdev, swidget, SOF_DAI_CONFIG_FLAGS_PAUSE);
+		ret = tplg_ops->dai_config(sdev, swidget, SOF_DAI_CONFIG_FLAGS_PAUSE, NULL);
 		if (ret < 0)
 			dev_err(sdev->dev, "%s: DAI config failed for widget %s\n", __func__,
 				w->name);
@@ -459,9 +420,9 @@ static int ssp_dai_setup_or_free(struct snd_pcm_substream *substream, struct snd
 		w = dai->capture_widget;
 
 	if (setup)
-		return hda_ctrl_dai_widget_setup(w, SOF_DAI_CONFIG_FLAGS_NONE);
+		return hda_ctrl_dai_widget_setup(w, SOF_DAI_CONFIG_FLAGS_NONE, NULL);
 
-	return hda_ctrl_dai_widget_free(w, SOF_DAI_CONFIG_FLAGS_NONE);
+	return hda_ctrl_dai_widget_free(w, SOF_DAI_CONFIG_FLAGS_NONE, NULL);
 }
 
 static int ssp_dai_startup(struct snd_pcm_substream *substream,

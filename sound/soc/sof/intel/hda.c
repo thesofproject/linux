@@ -41,7 +41,8 @@
 #define EXCEPT_MAX_HDR_SIZE	0x400
 #define HDA_EXT_ROM_STATUS_SIZE 8
 
-int hda_ctrl_dai_widget_setup(struct snd_soc_dapm_widget *w, unsigned int quirk_flags)
+int hda_ctrl_dai_widget_setup(struct snd_soc_dapm_widget *w, unsigned int quirk_flags,
+			      struct snd_sof_dai_config_data *data)
 {
 	struct snd_sof_widget *swidget = w->dobj.private;
 	struct snd_soc_component *component = swidget->scomp;
@@ -73,7 +74,7 @@ int hda_ctrl_dai_widget_setup(struct snd_soc_dapm_widget *w, unsigned int quirk_
 		flags = SOF_DAI_CONFIG_FLAGS_HW_PARAMS |
 			quirk_flags << SOF_DAI_CONFIG_FLAGS_QUIRK_SHIFT;
 
-		ret = tplg_ops->dai_config(sdev, swidget, flags);
+		ret = tplg_ops->dai_config(sdev, swidget, flags, data);
 		if (ret < 0) {
 			dev_err(sdev->dev, "%s: DAI config failed for widget %s\n", __func__,
 				w->name);
@@ -86,7 +87,8 @@ int hda_ctrl_dai_widget_setup(struct snd_soc_dapm_widget *w, unsigned int quirk_
 	return 0;
 }
 
-int hda_ctrl_dai_widget_free(struct snd_soc_dapm_widget *w, unsigned int quirk_flags)
+int hda_ctrl_dai_widget_free(struct snd_soc_dapm_widget *w, unsigned int quirk_flags,
+			     struct snd_sof_dai_config_data *data)
 {
 	struct snd_sof_widget *swidget = w->dobj.private;
 	struct snd_soc_component *component = swidget->scomp;
@@ -111,7 +113,7 @@ int hda_ctrl_dai_widget_free(struct snd_soc_dapm_widget *w, unsigned int quirk_f
 		flags = SOF_DAI_CONFIG_FLAGS_HW_FREE |
 			quirk_flags << SOF_DAI_CONFIG_FLAGS_QUIRK_SHIFT;
 
-		ret = tplg_ops->dai_config(sdev, swidget, flags);
+		ret = tplg_ops->dai_config(sdev, swidget, flags, data);
 		if (ret < 0)
 			dev_err(sdev->dev, "%s: DAI config failed for widget '%s'\n", __func__,
 				w->name);
@@ -138,69 +140,34 @@ static int sdw_clock_stop_quirks = SDW_INTEL_CLK_STOP_BUS_RESET;
 module_param(sdw_clock_stop_quirks, int, 0444);
 MODULE_PARM_DESC(sdw_clock_stop_quirks, "SOF SoundWire clock stop quirks");
 
-static int sdw_dai_config_ipc(struct snd_sof_dev *sdev,
-			      struct snd_soc_dapm_widget *w,
-			      int link_id, int alh_stream_id, int dai_id, bool setup)
-{
-	struct snd_sof_widget *swidget = w->dobj.private;
-	struct sof_dai_private_data *private;
-	struct sof_ipc_dai_config *config;
-	struct snd_sof_dai *sof_dai;
-
-	if (!swidget) {
-		dev_err(sdev->dev, "error: No private data for widget %s\n", w->name);
-		return -EINVAL;
-	}
-
-	sof_dai = swidget->private;
-
-	if (!sof_dai || !sof_dai->private) {
-		dev_err(sdev->dev, "%s: No private data for DAI %s\n", __func__, w->name);
-		return -EINVAL;
-	}
-
-	private = sof_dai->private;
-	if (!private->dai_config) {
-		dev_err(sdev->dev, "%s: No config for DAI %s\n", __func__, w->name);
-		return -EINVAL;
-	}
-
-	config = &private->dai_config[sof_dai->current_config];
-
-	/* update config with link and stream ID */
-	config->dai_index = (link_id << 8) | dai_id;
-	config->alh.stream_id = alh_stream_id;
-
-	if (setup)
-		return hda_ctrl_dai_widget_setup(w, SOF_DAI_CONFIG_FLAGS_NONE);
-
-	return hda_ctrl_dai_widget_free(w, SOF_DAI_CONFIG_FLAGS_NONE);
-}
-
 static int sdw_params_stream(struct device *dev,
 			     struct sdw_intel_stream_params_data *params_data)
 {
-	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	struct snd_soc_dai *d = params_data->dai;
+	struct snd_sof_dai_config_data data;
 	struct snd_soc_dapm_widget *w;
 
 	w = snd_soc_dai_get_widget(d, params_data->stream);
+	data.dai_index = (params_data->link_id << 8) | d->id;
+	data.dai_data = params_data->alh_stream_id;
 
-	return sdw_dai_config_ipc(sdev, w, params_data->link_id, params_data->alh_stream_id,
-				  d->id, true);
+	return hda_ctrl_dai_widget_setup(w, SOF_DAI_CONFIG_FLAGS_NONE, &data);
 }
 
 static int sdw_free_stream(struct device *dev,
 			   struct sdw_intel_stream_free_data *free_data)
 {
-	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	struct snd_soc_dai *d = free_data->dai;
+	struct snd_sof_dai_config_data data;
 	struct snd_soc_dapm_widget *w;
 
 	w = snd_soc_dai_get_widget(d, free_data->stream);
+	data.dai_index = (free_data->link_id << 8) | d->id;
 
 	/* send invalid stream_id */
-	return sdw_dai_config_ipc(sdev, w, free_data->link_id, 0xFFFF, d->id, false);
+	data.dai_data = 0xFFFF;
+
+	return hda_ctrl_dai_widget_free(w, SOF_DAI_CONFIG_FLAGS_NONE, &data);
 }
 
 static const struct sdw_intel_ops sdw_callback = {

@@ -1953,7 +1953,7 @@ static int sof_ipc3_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget 
 }
 
 static int sof_ipc3_dai_config(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget,
-			       unsigned int flags)
+			       unsigned int flags, struct snd_sof_dai_config_data *data)
 {
 	struct sof_ipc_fw_version *v = &sdev->fw_ready.version;
 	struct snd_sof_dai *dai = swidget->private;
@@ -1979,13 +1979,30 @@ static int sof_ipc3_dai_config(struct snd_sof_dev *sdev, struct snd_sof_widget *
 		return -EINVAL;
 	}
 
-	/*
-	 * DAI_CONFIG IPC during hw_params/hw_free for SSP DAI's is not supported in older
-	 * firmware
-	 */
-	if (v->abi_version < SOF_ABI_VER(3, 18, 0) && config->type == SOF_DAI_INTEL_SSP &&
-	    ((flags & SOF_DAI_CONFIG_FLAGS_HW_PARAMS) || (flags & SOF_DAI_CONFIG_FLAGS_HW_FREE)))
-		return 0;
+	switch (config->type) {
+	case SOF_DAI_INTEL_SSP:
+		/*
+		 * DAI_CONFIG IPC during hw_params/hw_free for SSP DAI's is not supported in older
+		 * firmware
+		 */
+		if (v->abi_version < SOF_ABI_VER(3, 18, 0) &&
+		    ((flags & SOF_DAI_CONFIG_FLAGS_HW_PARAMS) ||
+		     (flags & SOF_DAI_CONFIG_FLAGS_HW_FREE)))
+			return 0;
+		break;
+	case SOF_DAI_INTEL_HDA:
+		if (data)
+			config->hda.link_dma_ch = data->dai_data;
+		break;
+	case SOF_DAI_INTEL_ALH:
+		if (data) {
+			config->dai_index = data->dai_index;
+			config->alh.stream_id = data->dai_data;
+		}
+		break;
+	default:
+		break;
+	}
 
 	config->flags = flags;
 
