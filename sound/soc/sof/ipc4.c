@@ -211,6 +211,8 @@ void snd_sof_ipc4_msgs_rx(struct snd_sof_dev *sdev)
 
 		break;
 	default:
+		dev_dbg(sdev->dev, "%s: Unknown DSP message: %#x|%#x\n", __func__,
+			ipc4_msg->primary, ipc4_msg->extension);
 		break;
 	}
 }
