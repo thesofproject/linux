@@ -177,7 +177,7 @@ int sof_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
 
 		dai->configured = false;
 		if (tplg_ops->dai_config) {
-			ret = tplg_ops->dai_config(sdev, swidget, flags);
+			ret = tplg_ops->dai_config(sdev, swidget, flags, NULL);
 			if (ret < 0)
 				goto widget_free;
 		}
