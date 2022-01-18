@@ -80,13 +80,15 @@ void sof_ipc4_process_reply(struct snd_sof_dev *sdev, u32 msg)
 	if (status) {
 		for (i = 0; i < ARRAY_SIZE(ipc4_status); i++) {
 			if (ipc4_status[i].status == status) {
-				dev_err(sdev->dev, "FW reported error: %s", ipc4_status[i].msg);
+				dev_err(sdev->dev, "FW reported error: %s\n",
+					ipc4_status[i].msg);
 				break;
 			}
 		}
 
 		if (i == ARRAY_SIZE(ipc4_status))
-			dev_err(sdev->dev, "FW reported unknown error, status = %d", status);
+			dev_err(sdev->dev,
+				"FW reported unknown error, status = %d\n", status);
 	}
 
 	snd_sof_ipc_reply(sdev, msg);
@@ -156,7 +158,7 @@ static int sof_ipc4_tx_message_unlocked(struct snd_sof_ipc *ipc,
 	spin_unlock_irq(&sdev->ipc_lock);
 
 	if (ret) {
-		dev_err_ratelimited(sdev->dev, "ipc tx failed with error %d", ret);
+		dev_err_ratelimited(sdev->dev, "ipc tx failed with error %d\n", ret);
 		return ret;
 	}
 
