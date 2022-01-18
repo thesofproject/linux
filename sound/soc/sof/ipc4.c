@@ -105,11 +105,11 @@ static int ipc4_tx_wait_done(struct snd_sof_ipc *ipc, struct snd_sof_ipc_msg *ms
 	ret = wait_event_timeout(msg->waitq, msg->ipc_complete,
 				 msecs_to_jiffies(sdev->ipc_timeout));
 	if (ret == 0) {
-		dev_err(sdev->dev, "ipc timed out for header:0x%x extension:0x%x",
+		dev_err(sdev->dev, "ipc timed out for %#x|%#x\n",
 			ipc4_msg->primary, ipc4_msg->extension);
 		return -ETIMEDOUT;
 	} else if (msg->reply_error) {
-		dev_err(sdev->dev, "ipc error for msg 0x%x : 0x%x\n",
+		dev_err(sdev->dev, "ipc error for msg %#x|%#x\n",
 			ipc4_msg->primary, ipc4_msg->extension);
 		return -EIO;
 	}
