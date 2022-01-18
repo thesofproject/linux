@@ -151,8 +151,12 @@ static inline unsigned int snd_power_get_state(struct snd_card *card)
 
 static inline void snd_power_change_state(struct snd_card *card, unsigned int state)
 {
+	dev_warn(card->dev, "plb: snd_power_change_state: requesting state %d in %s\n",
+		 state, __func__);
 	WRITE_ONCE(card->power_state, state);
+	dev_warn(card->dev, "plb: snd_power_change_state: waking up power_sleep in %s\n", __func__);
 	wake_up(&card->power_sleep);
+	dev_warn(card->dev, "plb: snd_power_change_state: done in %s\n", __func__);
 }
 
 /**
