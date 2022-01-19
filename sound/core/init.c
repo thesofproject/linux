@@ -1119,6 +1119,10 @@ int snd_power_ref_and_wait(struct snd_card *card)
 	/* fastpath */
 	if (snd_power_get_state(card) == SNDRV_CTL_POWER_D0)
 		return 0;
+
+	dev_warn(card->dev, "plb: %s: starting wait, power state %d\n", __func__,
+		 snd_power_get_state(card));
+
 	lock_system_sleep();
 	init_waitqueue_entry(&wait, current);
 	add_wait_queue(&card->power_sleep, &wait);
@@ -1136,6 +1140,10 @@ int snd_power_ref_and_wait(struct snd_card *card)
 	}
 	remove_wait_queue(&card->power_sleep, &wait);
 	unlock_system_sleep();
+
+	dev_warn(card->dev, "plb: %s: wait complete, power state %d\n", __func__,
+		 snd_power_get_state(card));
+
 	return result;
 }
 EXPORT_SYMBOL_GPL(snd_power_ref_and_wait);
