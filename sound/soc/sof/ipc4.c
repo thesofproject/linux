@@ -108,9 +108,9 @@ static int ipc4_tx_wait_done(struct snd_sof_ipc *ipc, struct snd_sof_ipc_msg *ms
 			msg->header, msg->extension);
 		return -ETIMEDOUT;
 	} else if (msg->reply_error) {
-		dev_err(sdev->dev, "ipc error for msg 0x%x : 0x%x\n",
-			msg->header, msg->extension);
-		return -EIO;
+		dev_err(sdev->dev, "ipc error for msg: 0x%x extension: 0x%x : %d\n",
+			msg->header, msg->extension, msg->reply_error);
+		return msg->reply_error;
 	}
 
 	return 0;
