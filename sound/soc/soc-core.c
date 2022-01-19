@@ -662,35 +662,61 @@ static void soc_resume_deferred(struct work_struct *work)
 	 * our power state is still SNDRV_CTL_POWER_D3hot from suspend time,
 	 * so userspace apps are blocked from touching us
 	 */
-
+	pr_warn("plb: %s: start\n", __func__);
 	dev_dbg(card->dev, "ASoC: starting resume work\n");
 
 	/* Bring us up into D2 so that DAPM starts enabling things */
 	snd_power_change_state(card->snd_card, SNDRV_CTL_POWER_D2);
 
+	pr_warn("plb: %s: 1\n", __func__);
+
 	snd_soc_card_resume_pre(card);
+
+	pr_warn("plb: %s: 2\n", __func__);
 
 	for_each_card_components(card, component) {
 		if (snd_soc_component_is_suspended(component))
 			snd_soc_component_resume(component);
 	}
 
+	pr_warn("plb: %s: 3\n", __func__);
+
 	soc_dapm_suspend_resume(card, SND_SOC_DAPM_STREAM_RESUME);
+
+	pr_warn("plb: %s: 4\n", __func__);
 
 	/* unmute any active DACs */
 	soc_playback_digital_mute(card, 0);
 
+	pr_warn("plb: %s: 5\n", __func__);
+
 	snd_soc_card_resume_post(card);
+
+	pr_warn("plb: %s: 6\n", __func__);
 
 	dev_dbg(card->dev, "ASoC: resume work completed\n");
 
+	pr_warn("plb: %s: 7\n", __func__);
+
 	/* Recheck all endpoints too, their state is affected by suspend */
 	dapm_mark_endpoints_dirty(card);
+
+	pr_warn("plb: %s: 7.5\n", __func__);
+
 	snd_soc_dapm_sync(&card->dapm);
 
+	pr_warn("plb: %s: 8\n", __func__);
+
 	/* userspace can access us now we are back as we were before */
-	if (!card->in_suspend)
+	if (!card->in_suspend) {
+		pr_warn("plb: %s: 9\n", __func__);
+
 		snd_power_change_state(card->snd_card, SNDRV_CTL_POWER_D0);
+
+		pr_warn("plb: %s: 10\n", __func__);
+	}
+
+	pr_warn("plb: %s: done\n", __func__);
 }
 
 /* powers up audio subsystem after a suspend */
