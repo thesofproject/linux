@@ -1965,6 +1965,7 @@ static int dapm_power_widgets(struct snd_soc_card *card, int event)
 	enum snd_soc_bias_level bias;
 	int ret;
 
+	pr_warn("plb: %s: start\n", __func__);
 	lockdep_assert_held(&card->dapm_mutex);
 
 	trace_snd_soc_dapm_start(card);
@@ -1976,7 +1977,11 @@ static int dapm_power_widgets(struct snd_soc_card *card, int event)
 			d->target_bias_level = SND_SOC_BIAS_STANDBY;
 	}
 
+	pr_warn("plb: %s: 1\n", __func__);
+
 	dapm_reset(card);
+
+	pr_warn("plb: %s: 2\n", __func__);
 
 	/* Check which widgets we need to power and store them in
 	 * lists indicating if they should be powered up or down.  We
@@ -1987,6 +1992,8 @@ static int dapm_power_widgets(struct snd_soc_card *card, int event)
 	list_for_each_entry(w, &card->dapm_dirty, dirty) {
 		dapm_power_one_widget(w, &up_list, &down_list);
 	}
+
+	pr_warn("plb: %s: 3\n", __func__);
 
 	for_each_card_widgets(card, w) {
 		switch (w->id) {
@@ -2029,6 +2036,8 @@ static int dapm_power_widgets(struct snd_soc_card *card, int event)
 
 	}
 
+	pr_warn("plb: %s: 4\n", __func__);
+
 	/* Force all contexts in the card to the same bias state if
 	 * they're not ground referenced.
 	 */
@@ -2042,15 +2051,25 @@ static int dapm_power_widgets(struct snd_soc_card *card, int event)
 
 	trace_snd_soc_dapm_walk_done(card);
 
+	pr_warn("plb: %s: 5\n", __func__);
+
 	/* Run card bias changes at first */
 	dapm_pre_sequence_async(&card->dapm, 0);
+
+	pr_warn("plb: %s: 6\n", __func__);
+
 	/* Run other bias changes in parallel */
 	for_each_card_dapms(card, d) {
 		if (d != &card->dapm && d->bias_level != d->target_bias_level)
 			async_schedule_domain(dapm_pre_sequence_async, d,
 						&async_domain);
 	}
+
+	pr_warn("plb: %s: 7\n", __func__);
+
 	async_synchronize_full_domain(&async_domain);
+
+	pr_warn("plb: %s: 8\n", __func__);
 
 	list_for_each_entry(w, &down_list, power_list) {
 		dapm_seq_check_event(card, w, SND_SOC_DAPM_WILL_PMD);
@@ -2060,13 +2079,19 @@ static int dapm_power_widgets(struct snd_soc_card *card, int event)
 		dapm_seq_check_event(card, w, SND_SOC_DAPM_WILL_PMU);
 	}
 
+	pr_warn("plb: %s: 9\n", __func__);
+
 	/* Power down widgets first; try to avoid amplifying pops. */
 	dapm_seq_run(card, &down_list, event, false);
 
 	dapm_widget_update(card);
 
+	pr_warn("plb: %s: 10\n", __func__);
+
 	/* Now power up. */
 	dapm_seq_run(card, &up_list, event, true);
+
+	pr_warn("plb: %s: 11\n", __func__);
 
 	/* Run all the bias changes in parallel */
 	for_each_card_dapms(card, d) {
@@ -2075,8 +2100,13 @@ static int dapm_power_widgets(struct snd_soc_card *card, int event)
 						&async_domain);
 	}
 	async_synchronize_full_domain(&async_domain);
+
+	pr_warn("plb: %s: 12\n", __func__);
+
 	/* Run card bias changes at last */
 	dapm_post_sequence_async(&card->dapm, 0);
+
+	pr_warn("plb: %s: 13\n", __func__);
 
 	/* do we need to notify any clients that DAPM event is complete */
 	for_each_card_dapms(card, d) {
@@ -2088,10 +2118,13 @@ static int dapm_power_widgets(struct snd_soc_card *card, int event)
 			return ret;
 	}
 
+	pr_warn("plb: %s: 15\n", __func__);
+
 	pop_dbg(card->dev, card->pop_time,
 		"DAPM sequencing finished, waiting %dms\n", card->pop_time);
 	pop_wait(card->pop_time);
 
+	pr_warn("plb: %s: done\n", __func__);
 	trace_snd_soc_dapm_done(card);
 
 	return 0;
@@ -2640,9 +2673,11 @@ int snd_soc_dapm_sync(struct snd_soc_dapm_context *dapm)
 {
 	int ret;
 
+	pr_warn("plb: %s: start\n", __func__);
 	mutex_lock_nested(&dapm->card->dapm_mutex, SND_SOC_DAPM_CLASS_RUNTIME);
 	ret = snd_soc_dapm_sync_unlocked(dapm);
 	mutex_unlock(&dapm->card->dapm_mutex);
+	pr_warn("plb: %s: done\n", __func__);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(snd_soc_dapm_sync);
