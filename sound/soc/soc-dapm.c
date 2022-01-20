@@ -1652,10 +1652,14 @@ static void dapm_seq_run(struct snd_soc_card *card,
 	int i;
 	int *sort;
 
+	pr_warn("plb: %s: start\n", __func__);
+
 	if (power_up)
 		sort = dapm_up_seq;
 	else
 		sort = dapm_down_seq;
+
+	pr_warn("plb: %s: 1\n", __func__);
 
 	list_for_each_entry_safe(w, n, list, power_list) {
 		int ret = 0;
@@ -1726,8 +1730,12 @@ static void dapm_seq_run(struct snd_soc_card *card,
 				"ASoC: Failed to apply widget power: %d\n", ret);
 	}
 
+	pr_warn("plb: %s: 2\n", __func__);
+
 	if (!list_empty(&pending))
 		dapm_seq_run_coalesced(card, &pending);
+
+	pr_warn("plb: %s: 3\n", __func__);
 
 	if (cur_dapm && cur_dapm->component) {
 		for (i = 0; i < ARRAY_SIZE(dapm_up_seq); i++)
@@ -1737,8 +1745,12 @@ static void dapm_seq_run(struct snd_soc_card *card,
 					i, cur_subseq);
 	}
 
+	pr_warn("plb: %s: 4\n", __func__);
+
 	for_each_card_dapms(card, d)
 		soc_dapm_async_complete(d);
+
+	pr_warn("plb: %s: done\n", __func__);
 }
 
 static void dapm_widget_update(struct snd_soc_card *card)
