@@ -2312,6 +2312,7 @@ int snd_soc_register_card(struct snd_soc_card *card)
 	INIT_LIST_HEAD(&card->dobj_list);
 
 	card->instantiated = 0;
+	card->pop_time = 1;
 	mutex_init(&card->mutex);
 	mutex_init(&card->dapm_mutex);
 	mutex_init(&card->pcm_mutex);
