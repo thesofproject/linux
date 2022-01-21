@@ -1166,15 +1166,15 @@ void rt5682_jack_detect_handler(struct work_struct *work)
 		rt5682->irq_work_delay_time = 50;
 	}
 
-	snd_soc_jack_report(rt5682->hs_jack, rt5682->jack_type,
-		SND_JACK_HEADSET |
-		SND_JACK_BTN_0 | SND_JACK_BTN_1 |
-		SND_JACK_BTN_2 | SND_JACK_BTN_3);
-
 	pr_warn("LDP: %s (%s, %d): LEAVE (calibrate_mutex)\n", __func__, __FILE__, __LINE__);
 	mutex_unlock(&rt5682->calibrate_mutex);
 	pr_warn("LDP: %s (%s, %d): LEAVE (jdet_mutex)\n", __func__, __FILE__, __LINE__);
 	mutex_unlock(&rt5682->jdet_mutex);
+
+	snd_soc_jack_report(rt5682->hs_jack, rt5682->jack_type,
+		SND_JACK_HEADSET |
+		SND_JACK_BTN_0 | SND_JACK_BTN_1 |
+		SND_JACK_BTN_2 | SND_JACK_BTN_3);
 
 	if (!rt5682->is_sdw) {
 		if (rt5682->jack_type & (SND_JACK_BTN_0 | SND_JACK_BTN_1 |
