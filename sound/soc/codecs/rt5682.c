@@ -929,6 +929,7 @@ int rt5682_headset_detect(struct snd_soc_component *component, int jack_insert)
 	unsigned int val, count;
 
 	if (jack_insert) {
+		pr_warn("LDP: %s (%s, %d): ENTER (dapm)\n", __func__, __FILE__, __LINE__);
 		snd_soc_dapm_mutex_lock(dapm);
 
 		snd_soc_component_update_bits(component, RT5682_PWR_ANLG_1,
@@ -982,6 +983,7 @@ int rt5682_headset_detect(struct snd_soc_component *component, int jack_insert)
 			RT5682_PWR_CLK25M_MASK | RT5682_PWR_CLK1M_MASK,
 			RT5682_PWR_CLK25M_PU | RT5682_PWR_CLK1M_PU);
 
+		pr_warn("LDP: %s (%s, %d): LEAVE (dapm)\n", __func__, __FILE__, __LINE__);
 		snd_soc_dapm_mutex_unlock(dapm);
 	} else {
 		rt5682_enable_push_button_irq(component, false);
@@ -1102,7 +1104,9 @@ void rt5682_jack_detect_handler(struct work_struct *work)
 	while (!rt5682->component->card->instantiated)
 		usleep_range(10000, 15000);
 
+	pr_warn("LDP: %s (%s, %d): ENTER (jdet_mutex)\n", __func__, __FILE__, __LINE__);
 	mutex_lock(&rt5682->jdet_mutex);
+	pr_warn("LDP: %s (%s, %d): ENTER (calibrate_mutex)\n", __func__, __FILE__, __LINE__);
 	mutex_lock(&rt5682->calibrate_mutex);
 
 	val = snd_soc_component_read(rt5682->component, RT5682_AJD1_CTRL)
@@ -1175,7 +1179,9 @@ void rt5682_jack_detect_handler(struct work_struct *work)
 			cancel_delayed_work_sync(&rt5682->jd_check_work);
 	}
 
+	pr_warn("LDP: %s (%s, %d): LEAVE (calibrate_mutex)\n", __func__, __FILE__, __LINE__);
 	mutex_unlock(&rt5682->calibrate_mutex);
+	pr_warn("LDP: %s (%s, %d): LEAVE (jdet_mutex)\n", __func__, __FILE__, __LINE__);
 	mutex_unlock(&rt5682->jdet_mutex);
 }
 EXPORT_SYMBOL_GPL(rt5682_jack_detect_handler);
@@ -1539,6 +1545,7 @@ static int rt5682_hp_event(struct snd_soc_dapm_widget *w,
 		snd_soc_component_update_bits(component,
 			RT5682_DAC_ADC_DIG_VOL1, 0x00c0, 0x0080);
 
+		pr_warn("LDP: %s (%s, %d): ENTER (jdet_mutex)\n", __func__, __FILE__, __LINE__);
 		mutex_lock(&rt5682->jdet_mutex);
 
 		snd_soc_component_update_bits(component, RT5682_HP_CTRL_2,
@@ -1548,6 +1555,7 @@ static int rt5682_hp_event(struct snd_soc_dapm_widget *w,
 		snd_soc_component_update_bits(component, RT5682_CHARGE_PUMP_1,
 			RT5682_CP_SW_SIZE_MASK, RT5682_CP_SW_SIZE_L);
 
+		pr_warn("LDP: %s (%s, %d): LEAVE (jdet_mutex)\n", __func__, __FILE__, __LINE__);
 		mutex_unlock(&rt5682->jdet_mutex);
 		break;
 
@@ -2588,6 +2596,7 @@ static int rt5682_wclk_prepare(struct clk_hw *hw)
 	component = rt5682->component;
 	dapm = snd_soc_component_get_dapm(component);
 
+	pr_warn("LDP: %s (%s, %d): ENTER (dapm)\n", __func__, __FILE__, __LINE__);
 	snd_soc_dapm_mutex_lock(dapm);
 
 	snd_soc_dapm_force_enable_pin_unlocked(dapm, "MICBIAS");
@@ -2607,6 +2616,7 @@ static int rt5682_wclk_prepare(struct clk_hw *hw)
 	snd_soc_dapm_force_enable_pin_unlocked(dapm, "PLL2B");
 	snd_soc_dapm_sync_unlocked(dapm);
 
+	pr_warn("LDP: %s (%s, %d): ENTER (dapm)\n", __func__, __FILE__, __LINE__);
 	snd_soc_dapm_mutex_unlock(dapm);
 
 	return 0;
@@ -2626,6 +2636,7 @@ static void rt5682_wclk_unprepare(struct clk_hw *hw)
 	component = rt5682->component;
 	dapm = snd_soc_component_get_dapm(component);
 
+	pr_warn("LDP: %s (%s, %d): ENTER (dapm)\n", __func__, __FILE__, __LINE__);
 	snd_soc_dapm_mutex_lock(dapm);
 
 	snd_soc_dapm_disable_pin_unlocked(dapm, "MICBIAS");
@@ -2640,6 +2651,7 @@ static void rt5682_wclk_unprepare(struct clk_hw *hw)
 	snd_soc_dapm_disable_pin_unlocked(dapm, "PLL2B");
 	snd_soc_dapm_sync_unlocked(dapm);
 
+	pr_warn("LDP: %s (%s, %d): ENTER (dapm)\n", __func__, __FILE__, __LINE__);
 	snd_soc_dapm_mutex_unlock(dapm);
 }
 
@@ -3105,6 +3117,7 @@ void rt5682_calibrate(struct rt5682_priv *rt5682)
 {
 	int value, count;
 
+	pr_warn("LDP: %s (%s, %d): ENTER (calibrate_mutex)\n", __func__, __FILE__, __LINE__);
 	mutex_lock(&rt5682->calibrate_mutex);
 
 	rt5682_reset(rt5682);
@@ -3150,6 +3163,7 @@ void rt5682_calibrate(struct rt5682_priv *rt5682)
 	regmap_write(rt5682->regmap, RT5682_STO1_ADC_MIXER, 0xc0c4);
 	regmap_write(rt5682->regmap, RT5682_CAL_REC, 0x0c0c);
 
+	pr_warn("LDP: %s (%s, %d): LEAVE (calibrate_mutex)\n", __func__, __FILE__, __LINE__);
 	mutex_unlock(&rt5682->calibrate_mutex);
 }
 EXPORT_SYMBOL_GPL(rt5682_calibrate);
