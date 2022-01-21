@@ -1171,6 +1171,11 @@ void rt5682_jack_detect_handler(struct work_struct *work)
 		SND_JACK_BTN_0 | SND_JACK_BTN_1 |
 		SND_JACK_BTN_2 | SND_JACK_BTN_3);
 
+	pr_warn("LDP: %s (%s, %d): LEAVE (calibrate_mutex)\n", __func__, __FILE__, __LINE__);
+	mutex_unlock(&rt5682->calibrate_mutex);
+	pr_warn("LDP: %s (%s, %d): LEAVE (jdet_mutex)\n", __func__, __FILE__, __LINE__);
+	mutex_unlock(&rt5682->jdet_mutex);
+
 	if (!rt5682->is_sdw) {
 		if (rt5682->jack_type & (SND_JACK_BTN_0 | SND_JACK_BTN_1 |
 			SND_JACK_BTN_2 | SND_JACK_BTN_3))
@@ -1178,11 +1183,6 @@ void rt5682_jack_detect_handler(struct work_struct *work)
 		else
 			cancel_delayed_work_sync(&rt5682->jd_check_work);
 	}
-
-	pr_warn("LDP: %s (%s, %d): LEAVE (calibrate_mutex)\n", __func__, __FILE__, __LINE__);
-	mutex_unlock(&rt5682->calibrate_mutex);
-	pr_warn("LDP: %s (%s, %d): LEAVE (jdet_mutex)\n", __func__, __FILE__, __LINE__);
-	mutex_unlock(&rt5682->jdet_mutex);
 }
 EXPORT_SYMBOL_GPL(rt5682_jack_detect_handler);
 
