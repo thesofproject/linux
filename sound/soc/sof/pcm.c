@@ -159,8 +159,8 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 
 	/* create compressed page table for audio firmware */
 	if (runtime->buffer_changed) {
-		int ret = create_page_table(component, substream, runtime->dma_area,
-					    runtime->dma_bytes);
+		ret = create_page_table(component, substream, runtime->dma_area,
+					runtime->dma_bytes);
 
 		if (ret < 0)
 			return ret;
