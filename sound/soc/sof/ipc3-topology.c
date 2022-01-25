@@ -2081,10 +2081,13 @@ static int sof_ipc3_set_up_all_pipelines(struct snd_sof_dev *sdev, bool verify)
 		/* update DAI config. The IPC will be sent in sof_widget_setup() */
 		if (WIDGET_IS_DAI(swidget->id)) {
 			struct snd_sof_dai *dai = swidget->private;
-			struct sof_dai_private_data *private = dai->private;
+			struct sof_dai_private_data *private;
 			struct sof_ipc_dai_config *config;
 
-			if (!dai || !private || !private->dai_config)
+			if (!dai || !dai->private)
+				continue;
+			private = dai->private;
+			if (!private->dai_config)
 				continue;
 
 			config = private->dai_config;
