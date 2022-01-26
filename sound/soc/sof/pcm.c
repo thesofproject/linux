@@ -350,8 +350,6 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 	if (!ret && reset_hw_params) {
 		ret = sof_pcm_stream_free(sdev, substream, spcm, substream->stream,
 					  free_widget_list);
-		if (ret < 0)
-			return ret;
 	}
 
 	return ret;
