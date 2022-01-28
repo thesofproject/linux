@@ -132,7 +132,6 @@
 
 /* maximum message size for mailbox Tx/Rx */
 #define SOF_IPC_MSG_MAX_SIZE			384
-#define SOF_IPC4_MSG_MAX_SIZE			4096
 
 /*
  * Structure Header - Header for all IPC structures except command structs.
