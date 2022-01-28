@@ -18,6 +18,7 @@
 #include "sof-audio.h"
 #include "ops.h"
 #include "ipc3-ops.h"
+#include "ipc4-ops.h"
 
 /**
  * sof_ipc_send_msg - generic function to prepare and send one IPC message
@@ -156,12 +157,18 @@ struct snd_sof_ipc *snd_sof_ipc_init(struct snd_sof_dev *sdev)
 
 	init_waitqueue_head(&msg->waitq);
 
-	/*
-	 * Use IPC3 ops as it is the only available version now. With the addition of new IPC
-	 * versions, this will need to be modified to use the selected version at runtime.
-	 */
-	ipc->ops = &ipc3_ops;
-	ops = ipc->ops;
+	switch (sdev->pdata->ipc_type) {
+	case SOF_IPC:
+		ops = &ipc3_ops;
+		break;
+	case SOF_INTEL_IPC4:
+		ops = &ipc4_ops;
+		break;
+	default:
+		dev_err(sdev->dev, "Not supported IPC version: %d\n",
+			sdev->pdata->ipc_type);
+		return NULL;
+	}
 
 	/* check for mandatory ops */
 	if (!ops->tx_msg || !ops->rx_msg || !ops->set_get_data || !ops->get_reply) {
@@ -184,6 +191,8 @@ struct snd_sof_ipc *snd_sof_ipc_init(struct snd_sof_dev *sdev)
 		dev_err(sdev->dev, "Missing IPC topology ops\n");
 		return NULL;
 	}
+
+	ipc->ops = ops;
 
 	return ipc;
 }
