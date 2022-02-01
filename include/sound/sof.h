@@ -134,6 +134,7 @@ struct sof_dev_desc {
 
 	/* default firmware name */
 	const char *default_fw_filename[SOF_IPC_TYPE_COUNT];
+	const char *default_tplg_filename[SOF_IPC_TYPE_COUNT];
 
 	const struct snd_sof_dsp_ops *ops;
 };
