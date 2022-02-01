@@ -18,6 +18,10 @@ static char *fw_path;
 module_param(fw_path, charp, 0444);
 MODULE_PARM_DESC(fw_path, "alternate path for SOF firmware.");
 
+static char *fw_filename;
+module_param(fw_filename, charp, 0444);
+MODULE_PARM_DESC(fw_path, "alternate filename for SOF firmware.");
+
 static char *tplg_path;
 module_param(tplg_path, charp, 0444);
 MODULE_PARM_DESC(tplg_path, "alternate path for SOF topology.");
@@ -64,7 +68,14 @@ int sof_of_probe(struct platform_device *pdev)
 
 	sof_pdata->desc = desc;
 	sof_pdata->dev = &pdev->dev;
-	sof_pdata->fw_filename = desc->default_fw_filename[SOF_IPC];
+
+	if (fw_filename) {
+		sof_pdata->fw_filename = fw_filename;
+		dev_dbg(dev, "Module parameter used, change fw filename to %s\n",
+			sof_pdata->fw_filename);
+	} else {
+		sof_pdata->fw_filename = desc->default_fw_filename[SOF_IPC];
+	}
 
 	if (fw_path)
 		sof_pdata->fw_filename_prefix = fw_path;
