@@ -26,6 +26,10 @@ static char *tplg_path;
 module_param(tplg_path, charp, 0444);
 MODULE_PARM_DESC(tplg_path, "alternate path for SOF topology.");
 
+static char *tplg_filename;
+module_param(tplg_filename, charp, 0444);
+MODULE_PARM_DESC(tplg_filename, "alternate filename for SOF topology.");
+
 const struct dev_pm_ops sof_of_pm = {
 	.prepare = snd_sof_prepare,
 	.complete = snd_sof_complete,
@@ -77,7 +81,13 @@ int sof_of_probe(struct platform_device *pdev)
 		sof_pdata->fw_filename = desc->default_fw_filename[SOF_IPC];
 	}
 
-	sof_pdata->tplg_filename = desc->default_tplg_filename[SOF_IPC];
+	if (tplg_filename) {
+		sof_pdata->tplg_filename = tplg_filename;
+		dev_dbg(dev, "Module parameter used, change tplg filename to %s\n",
+			sof_pdata->tplg_filename);
+	} else {
+		sof_pdata->tplg_filename = desc->default_tplg_filename[SOF_IPC];
+	}
 
 	if (fw_path)
 		sof_pdata->fw_filename_prefix = fw_path;
