@@ -1539,7 +1539,7 @@ static int sof_link_load(struct snd_soc_component *scomp, int index, struct snd_
 			 struct snd_soc_tplg_link_config *cfg)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
-	const struct ipc_tplg_ops *ipc_tplg_ops = sdev->ipc->ops->tplg;
+	const struct sof_ipc_tplg_ops *ipc_tplg_ops = sdev->ipc->ops->tplg;
 	const struct sof_token_info *token_list = ipc_tplg_ops->token_list;
 	struct snd_soc_tplg_private *private = &cfg->priv;
 	struct snd_sof_dai_link *slink;
