@@ -96,7 +96,7 @@ struct ipc_tplg_control_ops {
 };
 
 /**
- * struct ipc_tplg_widget_ops - IPC-specific ops for topology widgets
+ * struct sof_ipc_tplg_widget_ops - IPC-specific ops for topology widgets
  * @ipc_setup: Function pointer for setting up widget IPC params
  * @ipc_free: Function pointer for freeing widget IPC params
  * @token_list: List of token ID's that should be parsed for the widget
@@ -105,7 +105,7 @@ struct ipc_tplg_control_ops {
  * @set_up_all_pipelines: Function pointer for setting up all topology pipelines
  * @tear_down_all_pipelines: Function pointer for tearing down all topology pipelines
  */
-struct ipc_tplg_widget_ops {
+struct sof_ipc_tplg_widget_ops {
 	int (*ipc_setup)(struct snd_sof_widget *swidget);
 	void (*ipc_free)(struct snd_sof_widget *swidget);
 	enum sof_tokens *token_list;
@@ -115,7 +115,7 @@ struct ipc_tplg_widget_ops {
 };
 
 /**
- * struct ipc_tplg_ops - IPC-specific topology ops
+ * struct sof_ipc_tplg_ops - IPC-specific topology ops
  * @widget: Array of pointers to IPC-specific ops for widgets. This should always be of size
  *	    SND_SOF_DAPM_TYPE_COUNT i.e one per widget type. Unsupported widget types will be
  *	    initialized to 0.
@@ -131,8 +131,8 @@ struct ipc_tplg_widget_ops {
  * @widget_free: Function pointer for freeing widget in the DSP
  * @dai_config: Function pointer for sending DAI config IPC to the DSP
  */
-struct ipc_tplg_ops {
-	const struct ipc_tplg_widget_ops *widget;
+struct sof_ipc_tplg_ops {
+	const struct sof_ipc_tplg_widget_ops *widget;
 	const struct ipc_tplg_control_ops *control;
 	int (*route_setup)(struct snd_sof_dev *sdev, struct snd_sof_route *sroute);
 	const struct sof_token_info *token_list;

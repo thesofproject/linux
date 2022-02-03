@@ -370,11 +370,11 @@ struct ipc_pm_ops {
 	int (*ctx_restore)(struct snd_sof_dev *sdev);
 };
 
-struct ipc_tplg_ops;
+struct sof_ipc_tplg_ops;
 struct ipc_pcm_ops;
 
 /**
- * struct ipc_ops - IPC-specific ops
+ * struct sof_ipc_ops - IPC-specific ops
  * @tplg:	Pointer to IPC-specific topology ops
  * @pm:		Pointer to PM ops
  * @pcm:	Pointer to PCM ops
@@ -393,8 +393,8 @@ struct ipc_pcm_ops;
  * via @set_get_data is a single transfer even if at the hardware level it is
  * handled with multiple chunks.
  */
-struct ipc_ops {
-	const struct ipc_tplg_ops *tplg;
+struct sof_ipc_ops {
+	const struct sof_ipc_tplg_ops *tplg;
 	const struct ipc_pm_ops *pm;
 	const struct ipc_pcm_ops *pcm;
 
@@ -421,7 +421,7 @@ struct snd_sof_ipc {
 	struct snd_sof_ipc_msg msg;
 
 	/* IPC ops based on version */
-	const struct ipc_ops *ops;
+	const struct sof_ipc_ops *ops;
 };
 
 enum sof_dtrace_state {
