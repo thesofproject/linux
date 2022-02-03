@@ -166,7 +166,7 @@ EXPORT_SYMBOL(sof_widget_setup);
 int sof_route_setup(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *wsource,
 		    struct snd_soc_dapm_widget *wsink)
 {
-	const struct ipc_tplg_ops *ipc_tplg_ops = sdev->ipc->ops->tplg;
+	const struct sof_ipc_tplg_ops *ipc_tplg_ops = sdev->ipc->ops->tplg;
 	struct snd_sof_widget *src_widget = wsource->dobj.private;
 	struct snd_sof_widget *sink_widget = wsink->dobj.private;
 	struct snd_sof_route *sroute;
