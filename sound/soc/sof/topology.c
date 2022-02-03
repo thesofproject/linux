@@ -957,7 +957,7 @@ static int sof_control_unload(struct snd_soc_component *scomp,
 			      struct snd_soc_dobj *dobj)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
-	const struct ipc_tplg_ops *ipc_tplg_ops = sdev->ipc->ops->tplg;
+	const struct sof_ipc_tplg_ops *ipc_tplg_ops = sdev->ipc->ops->tplg;
 	struct snd_sof_control *scontrol = dobj->private;
 	int ret = 0;
 
