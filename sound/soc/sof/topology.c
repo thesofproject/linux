@@ -57,7 +57,7 @@ int sof_update_ipc_object(struct snd_soc_component *scomp, void *object, enum so
 			  size_t object_size, int token_instance_num)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
-	const struct ipc_tplg_ops *ipc_tplg_ops = sdev->ipc->ops->tplg;
+	const struct sof_ipc_tplg_ops *ipc_tplg_ops = sdev->ipc->ops->tplg;
 	const struct sof_token_info *token_list = ipc_tplg_ops->token_list;
 	const struct sof_topology_token *tokens;
 	int i, j;
