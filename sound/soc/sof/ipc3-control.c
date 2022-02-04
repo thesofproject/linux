@@ -711,7 +711,7 @@ sof_ipc3_set_up_volume_table(struct snd_sof_control *scontrol, int tlv[SOF_TLV_I
 	return 0;
 }
 
-const struct ipc_tplg_control_ops tplg_ipc3_control_ops = {
+const struct sof_ipc_tplg_control_ops tplg_ipc3_control_ops = {
 	.volume_put = sof_ipc3_volume_put,
 	.volume_get = sof_ipc3_volume_get,
 	.switch_put = sof_ipc3_switch_put,
