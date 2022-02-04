@@ -371,7 +371,7 @@ struct sof_ipc_pm_ops {
 };
 
 struct sof_ipc_tplg_ops;
-struct ipc_pcm_ops;
+struct sof_ipc_pcm_ops;
 
 /**
  * struct sof_ipc_ops - IPC-specific ops
@@ -396,7 +396,7 @@ struct ipc_pcm_ops;
 struct sof_ipc_ops {
 	const struct sof_ipc_tplg_ops *tplg;
 	const struct sof_ipc_pm_ops *pm;
-	const struct ipc_pcm_ops *pcm;
+	const struct sof_ipc_pcm_ops *pcm;
 
 	int (*tx_msg)(struct snd_sof_dev *sdev, void *msg_data, size_t msg_bytes,
 		      void *reply_data, size_t reply_bytes, bool no_pm);
