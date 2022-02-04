@@ -567,7 +567,7 @@ static void ipc3_stream_message(struct snd_sof_dev *sdev, void *msg_buf)
 /* component notifications from firmware */
 static void ipc3_comp_notification(struct snd_sof_dev *sdev, void *msg_buf)
 {
-	const struct ipc_tplg_ops *tplg_ops = sdev->ipc->ops->tplg;
+	const struct sof_ipc_tplg_ops *tplg_ops = sdev->ipc->ops->tplg;
 	struct sof_ipc_cmd_hdr *hdr = msg_buf;
 	u32 msg_type = hdr->cmd & SOF_CMD_TYPE_MASK;
 
