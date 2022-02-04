@@ -361,11 +361,11 @@ struct snd_sof_ipc_msg {
 };
 
 /**
- * struct ipc_pm_ops - IPC-specific PM ops
+ * struct sof_ipc_pm_ops - IPC-specific PM ops
  * @ctx_save:		Function pointer for context save
  * @ctx_restore:	Function pointer for context restore
  */
-struct ipc_pm_ops {
+struct sof_ipc_pm_ops {
 	int (*ctx_save)(struct snd_sof_dev *sdev);
 	int (*ctx_restore)(struct snd_sof_dev *sdev);
 };
@@ -395,7 +395,7 @@ struct ipc_pcm_ops;
  */
 struct sof_ipc_ops {
 	const struct sof_ipc_tplg_ops *tplg;
-	const struct ipc_pm_ops *pm;
+	const struct sof_ipc_pm_ops *pm;
 	const struct ipc_pcm_ops *pcm;
 
 	int (*tx_msg)(struct snd_sof_dev *sdev, void *msg_data, size_t msg_bytes,
