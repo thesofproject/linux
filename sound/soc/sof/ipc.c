@@ -207,7 +207,7 @@ struct snd_sof_ipc *snd_sof_ipc_init(struct snd_sof_dev *sdev)
 {
 	struct snd_sof_ipc *ipc;
 	struct snd_sof_ipc_msg *msg;
-	const struct ipc_ops *ops;
+	const struct sof_ipc_ops *ops;
 
 	ipc = devm_kzalloc(sdev->dev, sizeof(*ipc), GFP_KERNEL);
 	if (!ipc)
