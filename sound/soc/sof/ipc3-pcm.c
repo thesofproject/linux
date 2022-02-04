@@ -216,6 +216,9 @@ static int sof_ipc3_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 	struct sof_dai_private_data *private = dai->private;
 	struct snd_soc_dpcm *dpcm;
 
+	/* read format from topology */
+	snd_mask_none(fmt);
+
 	switch (private->comp_dai->config.frame_fmt) {
 	case SOF_IPC_FRAME_S16_LE:
 		snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S16_LE);

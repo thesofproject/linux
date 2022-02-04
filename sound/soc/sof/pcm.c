@@ -587,9 +587,6 @@ int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_pa
 		return 0;
 	}
 
-	/* read format from topology */
-	snd_mask_none(fmt);
-
 	if (pcm_ops->dai_link_fixup)
 		return pcm_ops->dai_link_fixup(rtd, params);
 
