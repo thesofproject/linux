@@ -14,8 +14,8 @@
 #include "sof-priv.h"
 
 extern const struct ipc_pcm_ops ipc3_pcm_ops;
-extern const struct ipc_tplg_ops ipc3_tplg_ops;
+extern const struct sof_ipc_tplg_ops ipc3_tplg_ops;
 extern const struct ipc_tplg_control_ops tplg_ipc3_control_ops;
-extern const struct ipc_ops ipc3_ops;
+extern const struct sof_ipc_ops ipc3_ops;
 
 #endif
