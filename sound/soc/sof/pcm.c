@@ -122,7 +122,7 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
 	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
 	struct snd_sof_platform_stream_params platform_params = { 0 };
-	const struct ipc_pcm_ops *pcm_ops = sdev->ipc->ops->pcm;
+	const struct sof_ipc_pcm_ops *pcm_ops = sdev->ipc->ops->pcm;
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct snd_sof_pcm *spcm;
 	int ret;
@@ -191,7 +191,7 @@ static int sof_pcm_hw_free(struct snd_soc_component *component,
 {
 	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
-	const struct ipc_pcm_ops *pcm_ops = sdev->ipc->ops->pcm;
+	const struct sof_ipc_pcm_ops *pcm_ops = sdev->ipc->ops->pcm;
 	struct snd_sof_pcm *spcm;
 	int ret, err = 0;
 

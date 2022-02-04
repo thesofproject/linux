@@ -349,7 +349,7 @@ static int sof_ipc3_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 	return 0;
 }
 
-const struct ipc_pcm_ops ipc3_pcm_ops = {
+const struct sof_ipc_pcm_ops ipc3_pcm_ops = {
 	.hw_params = sof_ipc3_pcm_hw_params,
 	.hw_free = sof_ipc3_pcm_hw_free,
 	.trigger = sof_ipc3_pcm_trigger,
