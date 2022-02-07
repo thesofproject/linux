@@ -485,6 +485,7 @@ static int rt5682_io_init(struct device *dev, struct sdw_slave *slave)
 		RT5682_JD1_EN | RT5682_JD1_IRQ_PUL);
 
 reinit:
+	dev_dbg(&slave->dev, "%s schedule jack_detect_work\n", __func__);
 	mod_delayed_work(system_power_efficient_wq,
 		&rt5682->jack_detect_work, msecs_to_jiffies(250));
 
@@ -685,6 +686,7 @@ static int rt5682_interrupt_callback(struct sdw_slave *slave,
 
 	mutex_lock(&rt5682->disable_irq_lock);
 	if (status->control_port & 0x4 && !rt5682->disable_irq) {
+		dev_dbg(&slave->dev, "%s schedule jack_detect_work\n", __func__);
 		mod_delayed_work(system_power_efficient_wq,
 			&rt5682->jack_detect_work, msecs_to_jiffies(rt5682->irq_work_delay_time));
 	}
