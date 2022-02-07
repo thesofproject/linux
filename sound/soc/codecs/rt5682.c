@@ -1064,6 +1064,7 @@ static int rt5682_set_jack_detect(struct snd_soc_component *component,
 			regmap_update_bits(rt5682->regmap, RT5682_4BTN_IL_CMD_7,
 				0x7f7f, (rt5682->pdata.btndet_delay << 8 |
 				rt5682->pdata.btndet_delay));
+			dev_dbg(component->dev, "%s schedule jack_detect_work\n", __func__);
 			mod_delayed_work(system_power_efficient_wq,
 				&rt5682->jack_detect_work,
 				msecs_to_jiffies(250));
@@ -1100,7 +1101,9 @@ void rt5682_jack_detect_handler(struct work_struct *work)
 
 	dapm = snd_soc_component_get_dapm(rt5682->component);
 
+	dev_dbg(rt5682->component->dev, "%s: lock dapm_mutex\n", __func__);
 	snd_soc_dapm_mutex_lock(dapm);
+	dev_dbg(rt5682->component->dev, "%s: lock calibrate_mutex\n", __func__);
 	mutex_lock(&rt5682->calibrate_mutex);
 
 	val = snd_soc_component_read(rt5682->component, RT5682_AJD1_CTRL)
@@ -1160,7 +1163,9 @@ void rt5682_jack_detect_handler(struct work_struct *work)
 		rt5682->irq_work_delay_time = 50;
 	}
 
+	dev_dbg(rt5682->component->dev, "%s: unlock calibrate_mutex\n", __func__);
 	mutex_unlock(&rt5682->calibrate_mutex);
+	dev_dbg(rt5682->component->dev, "%s: unlock dapm_mutex\n", __func__);
 	snd_soc_dapm_mutex_unlock(dapm);
 
 	snd_soc_jack_report(rt5682->hs_jack, rt5682->jack_type,
@@ -2914,6 +2919,8 @@ static int rt5682_probe(struct snd_soc_component *component)
 	unsigned long time;
 	struct snd_soc_dapm_context *dapm = &component->dapm;
 
+	dev_dbg(component->dev, "%s\n", __func__);
+
 	rt5682->component = component;
 
 	if (rt5682->is_sdw) {
@@ -2936,6 +2943,8 @@ static int rt5682_probe(struct snd_soc_component *component)
 static void rt5682_remove(struct snd_soc_component *component)
 {
 	struct rt5682_priv *rt5682 = snd_soc_component_get_drvdata(component);
+
+	dev_dbg(component->dev, "%s\n", __func__);
 
 	rt5682_reset(rt5682);
 }
@@ -3014,6 +3023,7 @@ static int rt5682_resume(struct snd_soc_component *component)
 	}
 
 	rt5682->jack_type = 0;
+	dev_dbg(component->dev, "%s schedule jack_detect_work\n", __func__);
 	mod_delayed_work(system_power_efficient_wq,
 		&rt5682->jack_detect_work, msecs_to_jiffies(0));
 
