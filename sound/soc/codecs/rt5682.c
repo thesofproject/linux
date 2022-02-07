@@ -2949,6 +2949,8 @@ static void rt5682_remove(struct snd_soc_component *component)
 	dev_dbg(component->dev, "%s\n", __func__);
 
 	rt5682_reset(rt5682);
+
+	rt5682->component = NULL;
 }
 
 #ifdef CONFIG_PM
