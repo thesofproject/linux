@@ -464,9 +464,9 @@ int sof_pcm_stream_free(struct snd_sof_dev *sdev, struct snd_pcm_substream *subs
 		ret = pcm_ops->hw_free(sdev->component, substream);
 		if (ret < 0)
 			return ret;
-
-		spcm->prepared[substream->stream] = false;
 	}
+
+	spcm->prepared[substream->stream] = false;
 
 	/* stop the DMA */
 	ret = snd_sof_pcm_platform_hw_free(sdev, substream);
