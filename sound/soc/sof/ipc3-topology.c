@@ -2003,10 +2003,13 @@ static int sof_ipc3_dai_config(struct snd_sof_dev *sdev, struct snd_sof_widget *
 
 	config->flags = flags;
 
-	ret = sof_ipc_tx_message(sdev->ipc, config, config->hdr.size,
-				 &reply, sizeof(reply));
-	if (ret < 0)
-		dev_err(sdev->dev, "Failed to set dai config for %s\n", dai->name);
+	/* only send the IPC if the widget is set up in the DSP */
+	if (swidget->use_count > 0) {
+		ret = sof_ipc_tx_message(sdev->ipc, config, config->hdr.size,
+					 &reply, sizeof(reply));
+		if (ret < 0)
+			dev_err(sdev->dev, "Failed to set dai config for %s\n", dai->name);
+	}
 
 	return ret;
 }

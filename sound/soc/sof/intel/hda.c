@@ -56,17 +56,6 @@ int hda_ctrl_dai_widget_setup(struct snd_soc_dapm_widget *w, unsigned int quirk_
 		return -EINVAL;
 	}
 
-	/*
-	 * For static pipelines, the DAI widget would already be set up and calling
-	 * sof_widget_setup() simply returns without doing anything.
-	 * For dynamic pipelines, the DAI widget will be set up now.
-	 */
-	ret = sof_widget_setup(sdev, swidget);
-	if (ret < 0) {
-		dev_err(sdev->dev, "%s: Failed setting up DAI widget %s\n", __func__, w->name);
-		return ret;
-	}
-
 	if (tplg_ops->dai_config) {
 		unsigned int flags;
 
@@ -125,7 +114,7 @@ int hda_ctrl_dai_widget_free(struct snd_soc_dapm_widget *w, unsigned int quirk_f
 	 */
 	sof_dai->configured = false;
 
-	return sof_widget_free(sdev, swidget);
+	return 0;
 }
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_SOUNDWIRE)
