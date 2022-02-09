@@ -811,130 +811,6 @@ static int sof_ipc4_init_audio_fmt(struct snd_sof_dev *sdev,
 	return i;
 }
 
-static int sof_ipc4_get_ssp_vendor_blob(struct snd_sof_dev *sdev, struct nhlt_endpoint *ep,
-				       uint32_t **dst, uint32_t *len)
-{
-	struct nhlt_specific_cfg cfg;
-	u8 *byte_p = (u8 *)ep;
-	struct nhlt_fmt *formats_config;
-	struct nhlt_fmt_cfg *fmt_cfg;
-	int i;
-
-	/* jump over possible specific config description */
-	cfg = ep->config;
-	byte_p += sizeof(struct nhlt_endpoint) + cfg.size;
-
-	/* jump over formats config */
-	formats_config = (struct nhlt_fmt *)byte_p;
-	dev_dbg(sdev->dev, "%s found %u formats", __func__, formats_config->fmt_count);
-	byte_p += sizeof(struct nhlt_fmt);
-
-	for (i = 0; i < formats_config->fmt_count; i++) {
-
-		fmt_cfg = (struct nhlt_fmt_cfg *)byte_p;
-
-		dev_dbg(sdev->dev, "%s fmt_tag %u", __func__, fmt_cfg->fmt_ext.fmt.fmt_tag);
-		dev_dbg(sdev->dev, "%s channels %u", __func__, fmt_cfg->fmt_ext.fmt.channels);
-		dev_dbg(sdev->dev, "%s samples_per_sec %u", __func__,
-			fmt_cfg->fmt_ext.fmt.samples_per_sec);
-		dev_dbg(sdev->dev, "%s avg_bytes_per_sec %u", __func__,
-			fmt_cfg->fmt_ext.fmt.avg_bytes_per_sec);
-		dev_dbg(sdev->dev, "%s block_align %u", __func__,
-			fmt_cfg->fmt_ext.fmt.block_align);
-		dev_dbg(sdev->dev, "%s bits_per_sample %u", __func__,
-			fmt_cfg->fmt_ext.fmt.bits_per_sample);
-		dev_dbg(sdev->dev, "%s cb_size %u", __func__,
-			fmt_cfg->fmt_ext.fmt.cb_size);
-		dev_dbg(sdev->dev, "%s valid_bits_per_sample %u", __func__,
-			fmt_cfg->fmt_ext.sample.valid_bits_per_sample);
-		dev_dbg(sdev->dev, "%s channel_mask %u", __func__,
-			fmt_cfg->fmt_ext.channel_mask);
-
-		/* finally we should be at vendor blob*/
-		cfg = fmt_cfg->config;
-		byte_p += sizeof(struct nhlt_fmt_cfg);
-		*dst = (uint32_t *)byte_p;
-		*len = cfg.size;
-		byte_p += cfg.size;
-
-		dev_dbg(sdev->dev, "%s found blob with length %u", __func__, *len);
-	}
-
-	return 0;
-}
-
-static int sof_ipc4_get_dmic_vendor_blob(struct snd_sof_dev *sdev, struct nhlt_endpoint *ep,
-					 u32 **dst, uint32_t *len)
-{
-	struct nhlt_specific_cfg cfg;
-	u8 *byte_p = (u8 *)ep;
-	struct nhlt_fmt_cfg *fmt_cfg;
-
-	/* jump over possible specific config description */
-	cfg = ep->config;
-	byte_p += sizeof(struct nhlt_endpoint) + cfg.size;
-
-	/* jump over formats config */
-	byte_p += sizeof(struct nhlt_fmt);
-	fmt_cfg = (struct nhlt_fmt_cfg *)byte_p;
-
-	/* finally we should be at vendor blob*/
-	cfg = fmt_cfg->config;
-	byte_p += sizeof(struct nhlt_fmt_cfg);
-	*dst = (uint32_t *)byte_p;
-	*len = cfg.size;
-
-	dev_dbg(sdev->dev, "%s: found blob with length %u", __func__, *len);
-
-	return 0;
-}
-
-static int snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, u32 dai_index, u32 linktype,
-					  u32 **dst, u32 *len)
-{
-	struct nhlt_acpi_table *top = (struct nhlt_acpi_table *)sdev->nhlt_blob;
-	u8 *byte_p = sdev->nhlt_blob + sizeof(struct nhlt_acpi_table);
-	struct nhlt_endpoint *ep;
-	bool found = false;
-	int ret = 0;
-	int i;
-
-	if (!top)
-		return -EINVAL;
-
-	dev_dbg(sdev->dev, "%s endpoint_count %u", __func__, top->endpoint_count);
-
-	for (i = 0; i < top->endpoint_count; i++) {
-		ep = (struct nhlt_endpoint *)byte_p;
-		dev_dbg(sdev->dev, "%s ep_link %u", __func__, ep->linktype);
-		dev_dbg(sdev->dev, "%s link req %u", __func__, linktype);
-		dev_dbg(sdev->dev, "%s len %u", __func__, ep->length);
-		dev_dbg(sdev->dev, "%s dai_index %u", __func__, dai_index);
-		dev_dbg(sdev->dev, "%s virtual id %u", __func__, ep->virtual_bus_id);
-		if (ep->linktype == linktype && ep->virtual_bus_id == dai_index) {
-			switch (linktype) {
-			case NHLT_LINK_DMIC:
-				ret = sof_ipc4_get_dmic_vendor_blob(sdev, ep, dst, len);
-				found = true;
-				break;
-			case NHLT_LINK_SSP:
-				ret = sof_ipc4_get_ssp_vendor_blob(sdev, ep, dst, len);
-				found = true;
-				break;
-			default:
-				dev_warn(sdev->dev, "%s unknown linktype %u", __func__, linktype);
-				return -EINVAL;
-			}
-		}
-		if (found)
-			break;
-
-		byte_p += ep->length;
-	}
-
-	return ret;
-}
-
 static void sof_ipc4_unprepare_copier_module(struct snd_sof_widget *swidget)
 {
 	struct sof_ipc4_fw_module *fw_module = swidget->module_info;
@@ -949,7 +825,7 @@ static void sof_ipc4_unprepare_copier_module(struct snd_sof_widget *swidget)
 
 	if (WIDGET_IS_AIF(swidget->id)) {
 		ipc4_copier = swidget->private;
-	} else if (WIDGET_IS_DAI(swidget->id)) {
+	} else {
 		struct snd_sof_dai *dai = swidget->private;
 
 		ipc4_copier = dai->private;
@@ -960,6 +836,128 @@ static void sof_ipc4_unprepare_copier_module(struct snd_sof_widget *swidget)
 	ipc4_copier->ipc_config_size = 0;
 
 	ida_free(&fw_module->m_ida, swidget->instance_id);
+}
+
+static int snd_sof_get_pcm_hw_params(struct snd_sof_dev *sdev, struct snd_pcm_hw_params *params,
+				     int *sample_rate, int *channel_count, int *bit_depth)
+{
+	int depth;
+
+	switch (params_format(params)) {
+	case SNDRV_PCM_FORMAT_S16_LE:
+		depth = 16;
+		break;
+	case SNDRV_PCM_FORMAT_S24_LE:
+		depth = 24;
+		break;
+	case SNDRV_PCM_FORMAT_S32_LE:
+		depth = 32;
+		break;
+	default:
+		dev_err(sdev->dev, "invalid pcm frame format %d\n", params_format(params));
+		return -EINVAL;
+	}
+
+	*bit_depth = depth;
+	*channel_count = params_channels(params);
+	*sample_rate = params_rate(params);
+
+	dev_dbg(sdev->dev, "%s rate %d channels %d sample_valid_bytes %d\n",
+		__func__, *sample_rate, *channel_count, *bit_depth);
+
+	return 0;
+}
+
+static int snd_sof_get_hw_config_params(struct snd_sof_dev *sdev, struct snd_sof_dai *dai,
+					int *sample_rate, int *channel_count, int *bit_depth)
+{
+	struct snd_soc_tplg_hw_config *hw_config;
+	struct snd_sof_dai_link *slink;
+	bool dai_link_found = false;
+	bool hw_cfg_found = false;
+	int i;
+
+	/* get current hw_config from link */
+	list_for_each_entry(slink, &sdev->dai_link_list, list) {
+		if (!strcmp(slink->link->name, dai->name)) {
+			dai_link_found = true;
+			break;
+		}
+	}
+
+	if (!dai_link_found) {
+		dev_err(sdev->dev, "no DAI link found for DAI %s\n", dai->name);
+		return -EINVAL;
+	}
+
+	for (i = 0; i < slink->num_hw_configs; i++) {
+		hw_config = &slink->hw_configs[i];
+		if (dai->current_config == le32_to_cpu(hw_config->id)) {
+			hw_cfg_found = true;
+			break;
+		}
+	}
+
+	if (!hw_cfg_found) {
+		dev_err(sdev->dev, "no matching hw_config found for DAI %s\n", dai->name);
+		return -EINVAL;
+	}
+
+	*bit_depth = hw_config->tdm_slot_width;
+	*channel_count = hw_config->tdm_slots;
+	*sample_rate = hw_config->fsync_rate;
+
+	dev_dbg(sdev->dev, "%s rate %d channels %d sample_valid_bytes %d\n",
+		__func__, *sample_rate, *channel_count, *bit_depth);
+
+	return 0;
+}
+
+static int snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, struct snd_sof_dai *dai,
+					  struct snd_pcm_hw_params *params, u32 dai_index,
+					  u32 linktype, u8 dir, u32 **dst, u32 *len)
+{
+	struct nhlt_specific_cfg *cfg;
+	u32 nhlt_type;
+	int sample_rate;
+	int channel_count;
+	int bit_depth;
+	int ret;
+
+	/* convert to nhlt type */
+	switch (linktype) {
+	case SOF_DAI_INTEL_DMIC:
+		nhlt_type = NHLT_LINK_DMIC;
+		ret = snd_sof_get_pcm_hw_params(sdev, params, &sample_rate, &channel_count,
+						&bit_depth);
+		break;
+	case SOF_DAI_INTEL_SSP:
+		nhlt_type = NHLT_LINK_SSP;
+		ret = snd_sof_get_hw_config_params(sdev, dai, &sample_rate, &channel_count,
+						   &bit_depth);
+		break;
+	default:
+		return 0;
+	}
+
+	if (ret < 0)
+		return ret;
+
+	dev_dbg(sdev->dev, "%s dai_index %d nhlt_type %d dir %d\n",
+		__func__, dai_index, nhlt_type, dir);
+
+	/* try to find matching blob against hw_config params */
+	cfg = intel_nhlt_get_endpoint_blob(sdev->dev, sdev->nhlt, dai_index, nhlt_type, bit_depth,
+					   bit_depth, channel_count, sample_rate, dir, 0);
+
+	if (!cfg)
+		return -EINVAL;
+
+	/* at this point amount of dwords */
+	*len = cfg->size >> 2;
+	*dst = (u32*)cfg->caps;
+
+	return 0;
 }
 
 static int
@@ -1046,32 +1044,13 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 
 		ref_params = pipeline_params;
 
-		dev_dbg(sdev->dev, "copier prepare search for dai_type %d index %d",
-			ipc4_copier->dai_type, ipc4_copier->dai_index);
-		switch (ipc4_copier->dai_type) {
-		case SOF_DAI_INTEL_DMIC:
-			if (snd_sof_get_nhlt_endpoint_data(sdev, 0, NHLT_LINK_DMIC,
-							   &ipc4_copier->copier_config,
-							   &copier_data->gtw_cfg.config_length))
-				return -EINVAL;
-			/* at this point amount of dwords */
-			copier_data->gtw_cfg.config_length >>= 2;
-			break;
-		case SOF_DAI_INTEL_SSP:
-			if (snd_sof_get_nhlt_endpoint_data(sdev, ipc4_copier->dai_index,
-							   NHLT_LINK_SSP,
-							   &ipc4_copier->copier_config,
-							   &copier_data->gtw_cfg.config_length))
-				return -EINVAL;
-			/* at this point amount of dwords */
-			copier_data->gtw_cfg.config_length >>= 2;
-			copier_data->gtw_cfg.node_id &= ~(0xFF);
-			copier_data->gtw_cfg.node_id |= SOF_IPC4_NODE_INDEX(ipc4_copier->dai_index);
-			break;
-		default:
-			break;
-		}
-
+		dev_dbg(sdev->dev, "copier prepare search for dai_type");
+		ret = snd_sof_get_nhlt_endpoint_data(sdev, dai, fe_params, ipc4_copier->dai_index,
+						     ipc4_copier->dai_type, dir,
+						     &ipc4_copier->copier_config,
+						     &copier_data->gtw_cfg.config_length);
+		if (ret < 0)
+			return ret;
 		break;
 	}
 	default:
