@@ -1969,20 +1969,14 @@ static int sof_complete(struct snd_soc_component *scomp)
 static int sof_manifest(struct snd_soc_component *scomp, int index,
 			struct snd_soc_tplg_manifest *man)
 {
-	u32 size;
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	u32 size = le32_to_cpu(man->priv.size);
 	u32 abi_version;
-
-	size = le32_to_cpu(man->priv.size);
 
 	/* backward compatible with tplg without ABI info */
 	if (!size) {
 		dev_dbg(scomp->dev, "No topology ABI info\n");
 		return 0;
-	}
-
-	if (size != SOF_TPLG_ABI_SIZE) {
-		dev_err(scomp->dev, "error: invalid topology ABI size\n");
-		return -EINVAL;
 	}
 
 	dev_info(scomp->dev,
@@ -2007,6 +2001,14 @@ static int sof_manifest(struct snd_soc_component *scomp, int index,
 			dev_err(scomp->dev, "error: topology ABI is more recent than kernel\n");
 			return -EINVAL;
 		}
+	}
+
+	/* copy nhlt blob after that should be after ABI data */
+	if (size > SOF_TPLG_ABI_SIZE) {
+		sdev->nhlt_blob = devm_kmemdup(sdev->dev, &man->priv.data[SOF_TPLG_ABI_SIZE],
+					       size - SOF_TPLG_ABI_SIZE, GFP_KERNEL);
+		if (!sdev->nhlt_blob)
+			return -ENOMEM;
 	}
 
 	return 0;

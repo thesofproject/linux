@@ -9,6 +9,7 @@
 #include <uapi/sound/sof/tokens.h>
 #include <sound/pcm_params.h>
 #include <sound/sof/ext_manifest4.h>
+#include <sound/intel-nhlt.h>
 #include "sof-priv.h"
 #include "sof-audio.h"
 #include "ipc4-priv.h"
@@ -792,6 +793,74 @@ static int sof_ipc4_init_audio_fmt(struct snd_sof_dev *sdev,
 	return i;
 }
 
+static int sof_ipc4_get_dmic_vendor_blob(struct snd_sof_dev *sdev, struct nhlt_endpoint *ep,
+					 u32 **dst, uint32_t *len)
+{
+	struct nhlt_specific_cfg cfg;
+	u8 *byte_p = (u8 *)ep;
+	struct nhlt_fmt_cfg *fmt_cfg;
+
+	/* jump over possible specific config description */
+	cfg = ep->config;
+	byte_p += sizeof(struct nhlt_endpoint) + cfg.size;
+
+	/* jump over formats config */
+	byte_p += sizeof(struct nhlt_fmt);
+	fmt_cfg = (struct nhlt_fmt_cfg *)byte_p;
+
+	/* finally we should be at vendor blob*/
+	cfg = fmt_cfg->config;
+	byte_p += sizeof(struct nhlt_fmt_cfg);
+	*dst = (uint32_t *)byte_p;
+	*len = cfg.size;
+
+	dev_dbg(sdev->dev, "%s: found blob with length %u", __func__, *len);
+
+	return 0;
+}
+
+static int snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, u32 dai_index, u32 linktype,
+					  u32 **dst, u32 *len)
+{
+	struct nhlt_acpi_table *top = (struct nhlt_acpi_table *)sdev->nhlt_blob;
+	u8 *byte_p = sdev->nhlt_blob + sizeof(struct nhlt_acpi_table);
+	struct nhlt_endpoint *ep;
+	bool found = false;
+	int ret = 0;
+	int i;
+
+	if (!top)
+		return -EINVAL;
+
+	dev_dbg(sdev->dev, "%s endpoint_count %u", __func__, top->endpoint_count);
+
+	for (i = 0; i < top->endpoint_count; i++) {
+		ep = (struct nhlt_endpoint *)byte_p;
+		dev_dbg(sdev->dev, "%s ep_link %u", __func__, ep->linktype);
+		dev_dbg(sdev->dev, "%s link req %u", __func__, linktype);
+		dev_dbg(sdev->dev, "%s len %u", __func__, ep->length);
+		dev_dbg(sdev->dev, "%s dai_index %u", __func__, dai_index);
+		dev_dbg(sdev->dev, "%s virtual id %u", __func__, ep->virtual_bus_id);
+		if (ep->linktype == linktype && ep->virtual_bus_id == dai_index) {
+			switch (linktype) {
+			case NHLT_LINK_DMIC:
+				ret = sof_ipc4_get_dmic_vendor_blob(sdev, ep, dst, len);
+				found = true;
+				break;
+			default:
+				dev_warn(sdev->dev, "%s unknown linktype %u", __func__, linktype);
+				return -EINVAL;
+			}
+		}
+		if (found)
+			break;
+
+		byte_p += ep->length;
+	}
+
+	return ret;
+}
+
 static void sof_ipc4_unprepare_copier_module(struct snd_sof_widget *swidget)
 {
 	struct sof_ipc4_fw_module *fw_module = swidget->module_info;
@@ -902,6 +971,20 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		}
 
 		ref_params = pipeline_params;
+
+		dev_dbg(sdev->dev, "copier prepare search for dai_type");
+		switch (ipc4_copier->dai_type) {
+		case SOF_DAI_INTEL_DMIC:
+			if (snd_sof_get_nhlt_endpoint_data(sdev, 0, NHLT_LINK_DMIC,
+							   &ipc4_copier->copier_config,
+							   &copier_data->gtw_cfg.config_length))
+				return -EINVAL;
+			/* at this point amount of dwords */
+			copier_data->gtw_cfg.config_length >>= 2;
+			break;
+		default:
+			break;
+		}
 
 		break;
 	}
