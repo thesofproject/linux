@@ -102,8 +102,6 @@ struct sof_ipc_tplg_control_ops {
  * @token_list: List of token ID's that should be parsed for the widget
  * @token_list_size: number of elements in token_list
  * @bind_event: Function pointer for binding events to the widget
- * @set_up_all_pipelines: Function pointer for setting up all topology pipelines
- * @tear_down_all_pipelines: Function pointer for tearing down all topology pipelines
  */
 struct sof_ipc_tplg_widget_ops {
 	int (*ipc_setup)(struct snd_sof_widget *swidget);
@@ -130,6 +128,8 @@ struct sof_ipc_tplg_widget_ops {
  * @widget_setup: Function pointer for setting up setup in the DSP
  * @widget_free: Function pointer for freeing widget in the DSP
  * @dai_config: Function pointer for sending DAI config IPC to the DSP
+ * @set_up_all_pipelines: Function pointer for setting up all topology pipelines
+ * @tear_down_all_pipelines: Function pointer for tearing down all topology pipelines
  */
 struct sof_ipc_tplg_ops {
 	const struct sof_ipc_tplg_widget_ops *widget;
