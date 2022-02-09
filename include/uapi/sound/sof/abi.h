@@ -24,6 +24,8 @@
 #ifndef __INCLUDE_UAPI_SOUND_SOF_ABI_H__
 #define __INCLUDE_UAPI_SOUND_SOF_ABI_H__
 
+#include <linux/types.h>
+
 /* SOF ABI version major, minor and patch numbers */
 #define SOF_ABI_MAJOR 3
 #define SOF_ABI_MINOR 19
@@ -58,5 +60,21 @@
 
 /* SOF ABI magic number "SOF\0". */
 #define SOF_ABI_MAGIC		0x00464F53
+
+#define SOF_MANIFEST_DATA_TYPE_NHLT 1
+
+struct sof_manifest_tlv {
+	__u32 type; /* type of data */
+	__u32 size; /* size of the following bytes excluding size of this struct */
+	__u8 data[]; /* payload data */
+};
+
+struct sof_manifest {
+	__u8 abi_major;
+	__u8 abi_minor;
+	__u8 abi_patch;
+	__u8 count; /* count of tlv items that follow */
+	struct sof_manifest_tlv items[]; /* consecutive variable size tlv items */
+};
 
 #endif
