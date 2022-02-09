@@ -1971,7 +1971,12 @@ static int sof_manifest(struct snd_soc_component *scomp, int index,
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	u32 size = le32_to_cpu(man->priv.size);
+	struct sof_manifest_tlv *manifest_tlv;
+	struct sof_manifest *manifest;
 	u32 abi_version;
+	u32 len_check;
+	u8 *man_ptr;
+	int i;
 
 	/* backward compatible with tplg without ABI info */
 	if (!size) {
@@ -2003,12 +2008,29 @@ static int sof_manifest(struct snd_soc_component *scomp, int index,
 		}
 	}
 
-	/* copy nhlt blob after that should be after ABI data */
+	/* we have more data in manifest than just abi number, so parse it */
 	if (size > SOF_TPLG_ABI_SIZE) {
-		sdev->nhlt_blob = devm_kmemdup(sdev->dev, &man->priv.data[SOF_TPLG_ABI_SIZE],
-					       size - SOF_TPLG_ABI_SIZE, GFP_KERNEL);
-		if (!sdev->nhlt_blob)
-			return -ENOMEM;
+		man_ptr = man->priv.data;
+		manifest = (struct sof_manifest *)man_ptr;
+		manifest_tlv = manifest->items;
+		len_check = sizeof(struct sof_manifest);
+		for (i = 0; i < manifest->count; i++) {
+			len_check += sizeof(struct sof_manifest_tlv) + manifest_tlv->size;
+			if (len_check > size)
+				return -EINVAL;
+			switch (manifest_tlv->type) {
+			case SOF_MANIFEST_DATA_TYPE_NHLT:
+				sdev->nhlt = devm_kmemdup(sdev->dev, manifest_tlv->data,
+							  manifest_tlv->size, GFP_KERNEL);
+				if (!sdev->nhlt)
+					return -ENOMEM;
+				break;
+			default:
+				return -EINVAL;
+			}
+			man_ptr += sizeof(struct sof_manifest_tlv) + manifest_tlv->size;
+			manifest_tlv = (struct sof_manifest_tlv *)man_ptr;
+		}
 	}
 
 	return 0;

@@ -521,7 +521,7 @@ struct snd_sof_dev {
 	struct list_head route_list;
 	struct snd_soc_component *component;
 	u32 enabled_cores_mask; /* keep track of enabled cores */
-	void *nhlt_blob;
+	void *nhlt;
 
 	/* FW configuration */
 	struct sof_ipc_window *info_window;
