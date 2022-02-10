@@ -206,6 +206,10 @@ int sof_route_setup(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *wsourc
 		return -EINVAL;
 	}
 
+	/* nothing to do if route is already set up */
+	if (sroute->setup)
+		return 0;
+
 	ret = ipc_tplg_ops->route_setup(sdev, sroute);
 	if (ret < 0)
 		return ret;
