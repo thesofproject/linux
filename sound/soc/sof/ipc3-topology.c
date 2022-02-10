@@ -1542,10 +1542,6 @@ static int sof_ipc3_route_setup(struct snd_sof_dev *sdev, struct snd_sof_route *
 	struct sof_ipc_reply reply;
 	int ret;
 
-	/* nothing to do if route is already set up */
-	if (sroute->setup)
-		return 0;
-
 	connect.hdr.size = sizeof(connect);
 	connect.hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_COMP_CONNECT;
 	connect.source_id = sroute->src_widget->comp_id;
