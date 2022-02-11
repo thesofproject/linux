@@ -69,8 +69,6 @@ int hda_ctrl_dai_widget_setup(struct snd_soc_dapm_widget *w, unsigned int quirk_
 				w->name);
 			return ret;
 		}
-
-		sof_dai->configured = true;
 	}
 
 	return 0;
@@ -90,10 +88,6 @@ int hda_ctrl_dai_widget_free(struct snd_soc_dapm_widget *w, unsigned int quirk_f
 		return -EINVAL;
 	}
 
-	/* nothing to do if hw_free() is called without restarting the stream after resume. */
-	if (!sof_dai->configured)
-		return 0;
-
 	if (tplg_ops->dai_config) {
 		unsigned int flags;
 		int ret;
@@ -107,12 +101,6 @@ int hda_ctrl_dai_widget_free(struct snd_soc_dapm_widget *w, unsigned int quirk_f
 			dev_err(sdev->dev, "%s: DAI config failed for widget '%s'\n", __func__,
 				w->name);
 	}
-
-	/*
-	 * Reset the configured_flag and free the widget even if the IPC fails to keep
-	 * the widget use_count balanced
-	 */
-	sof_dai->configured = false;
 
 	return 0;
 }
