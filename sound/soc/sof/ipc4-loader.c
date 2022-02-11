@@ -7,6 +7,7 @@
 
 #include <linux/firmware.h>
 #include <sound/sof/ext_manifest4.h>
+#include <sound/sof/ipc4/header.h>
 #include "ipc4-ops.h"
 #include "ops.h"
 #include "sof-priv.h"
@@ -104,7 +105,34 @@ static int sof_ipc4_validate_firmware(struct snd_sof_dev *sdev)
 	return 0;
 }
 
+static void sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev)
+{
+	const struct sof_ipc_ops *iops = sdev->ipc->ops;
+	struct sof_ipc4_msg msg;
+	int ret;
+
+	msg.primary = SOF_IPC4_GLB_MSG_TARGET(SOF_IPC4_MODULE_MSG);
+	msg.primary |= SOF_IPC4_GLB_MSG_DIR(SOF_IPC4_MSG_REQUEST);
+	msg.primary |= SOF_IPC4_MOD_INSTANCE(0);
+	msg.primary |= SOF_IPC4_MOD_ID(0);
+	msg.extension = SOF_IPC4_MOD_EXT_MSG_PARAM_ID(7);
+
+	msg.data_size = sdev->ipc->max_payload_size;
+	msg.data_ptr = kzalloc(msg.data_size, GFP_KERNEL);
+	if (!msg.data_ptr)
+		return;
+
+	ret = iops->set_get_data(sdev, &msg, msg.data_size, false);
+	if (ret)
+		return;
+
+	/* TODO: parse the received information */
+
+	kfree(msg.data_ptr);
+}
+
 const struct sof_ipc_fw_loader_ops ipc4_loader_ops = {
 	.validate = sof_ipc4_validate_firmware,
 	.parse_ext_manifest = sof_ipc4_fw_parse_ext_man,
+	.query_fw_configuration = sof_ipc4_query_fw_configuration,
 };
