@@ -345,7 +345,6 @@ struct snd_sof_dai {
 
 	int number_configs;
 	int current_config;
-	bool configured; /* DAI configured during BE hw_params */
 	struct list_head list;	/* list in sdev dai list */
 	void *private;
 };
