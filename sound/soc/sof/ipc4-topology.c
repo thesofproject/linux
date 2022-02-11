@@ -1246,7 +1246,7 @@ static int sof_ipc4_dai_config(struct snd_sof_dev *sdev, struct snd_sof_widget *
 	copier_data = &ipc4_copier->data;
 
 	/* pause DAI pipeline */
-	if (flags & SOF_DAI_CONFIG_FLAGS_PRE_RESET) {
+	if (swidget->use_count > 0 && (flags & SOF_DAI_CONFIG_FLAGS_PRE_RESET)) {
 		ret = sof_ipc4_set_pipeline_state(sdev, swidget->pipeline_id,
 						  SOF_IPC4_PIPE_PAUSED);
 		if (ret < 0)
@@ -1277,7 +1277,7 @@ static int sof_ipc4_dai_config(struct snd_sof_dev *sdev, struct snd_sof_widget *
 	}
 
 	/* reset DAI pipeline */
-	if (flags & SOF_DAI_CONFIG_FLAGS_HW_FREE) {
+	if (swidget->use_count > 0 && (flags & SOF_DAI_CONFIG_FLAGS_HW_FREE)) {
 		ret = sof_ipc4_set_pipeline_state(sdev, swidget->pipeline_id,
 						  SOF_IPC4_PIPE_RESET);
 		if (ret < 0)
