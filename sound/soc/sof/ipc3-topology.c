@@ -1953,7 +1953,7 @@ static int sof_ipc3_dai_config(struct snd_sof_dev *sdev, struct snd_sof_widget *
 	struct sof_dai_private_data *private;
 	struct sof_ipc_dai_config *config;
 	struct sof_ipc_reply reply;
-	int ret;
+	int ret = 0;
 
 	if (!dai || !dai->private) {
 		dev_err(sdev->dev, "No private data for DAI %s\n", swidget->widget->name);
