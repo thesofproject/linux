@@ -113,12 +113,22 @@ struct snd_sof_pdata;
  * @phy_addr:		Platform dependent address to be used, if  @use_phy_addr
  *			is true
  * @no_ipc_position:	Disable position update IPC from firmware
+ * @rate:		Sample rate
+ * @sample_valid_bytes: Number of valid bytes in sample
+ * @channels:		Number of channels
+ * @direction:		Stream directions
+ * @frame_fmt:		Frame format
  */
 struct snd_sof_platform_stream_params {
 	u16 stream_tag;
 	bool use_phy_address;
 	u32 phy_addr;
 	bool no_ipc_position;
+	u32 rate;
+	u16 sample_valid_bytes;
+	u16 channels;
+	int direction;
+	int frame_fmt;
 };
 
 /*
