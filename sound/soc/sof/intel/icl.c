@@ -91,7 +91,7 @@ static int icl_dsp_post_fw_run(struct snd_sof_dev *sdev)
 struct snd_sof_dsp_ops sof_icl_ops;
 EXPORT_SYMBOL_NS(sof_icl_ops, SND_SOC_SOF_INTEL_HDA_COMMON);
 
-void sof_icl_ops_init(struct snd_sof_dev *sdev)
+int sof_icl_ops_init(struct snd_sof_dev *sdev)
 {
 	/* common defaults */
 	memcpy(&sof_icl_ops, &sof_hda_common_ops, sizeof(struct snd_sof_dsp_ops));
@@ -119,6 +119,8 @@ void sof_icl_ops_init(struct snd_sof_dev *sdev)
 
 	/* dsp core get/put */
 	sof_icl_ops.core_get = hda_dsp_core_get;
+
+	return 0;
 };
 EXPORT_SYMBOL_NS(sof_icl_ops_init, SND_SOC_SOF_INTEL_HDA_COMMON);
 

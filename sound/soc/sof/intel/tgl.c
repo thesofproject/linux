@@ -62,7 +62,7 @@ static int tgl_dsp_core_put(struct snd_sof_dev *sdev, int core)
 struct snd_sof_dsp_ops sof_tgl_ops;
 EXPORT_SYMBOL_NS(sof_tgl_ops, SND_SOC_SOF_INTEL_HDA_COMMON);
 
-void sof_tgl_ops_init(struct snd_sof_dev *sdev)
+int sof_tgl_ops_init(struct snd_sof_dev *sdev)
 {
 	/* common defaults */
 	memcpy(&sof_tgl_ops, &sof_hda_common_ops, sizeof(struct snd_sof_dsp_ops));
@@ -90,6 +90,8 @@ void sof_tgl_ops_init(struct snd_sof_dev *sdev)
 	/* dsp core get/put */
 	sof_tgl_ops.core_get = tgl_dsp_core_get;
 	sof_tgl_ops.core_put = tgl_dsp_core_put;
+
+	return 0;
 };
 EXPORT_SYMBOL_NS(sof_tgl_ops_init, SND_SOC_SOF_INTEL_HDA_COMMON);
 
