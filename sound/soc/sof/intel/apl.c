@@ -29,7 +29,7 @@ static const struct snd_sof_debugfs_map apl_dsp_debugfs[] = {
 struct snd_sof_dsp_ops sof_apl_ops;
 EXPORT_SYMBOL_NS(sof_apl_ops, SND_SOC_SOF_INTEL_HDA_COMMON);
 
-void sof_apl_ops_init(struct snd_sof_dev *sdev)
+int sof_apl_ops_init(struct snd_sof_dev *sdev)
 {
 	/* common defaults */
 	memcpy(&sof_apl_ops, &sof_hda_common_ops, sizeof(struct snd_sof_dsp_ops));
@@ -56,6 +56,8 @@ void sof_apl_ops_init(struct snd_sof_dev *sdev)
 
 	/* dsp core get/put */
 	sof_apl_ops.core_get = hda_dsp_core_get;
+
+	return 0;
 };
 EXPORT_SYMBOL_NS(sof_apl_ops_init, SND_SOC_SOF_INTEL_HDA_COMMON);
 
