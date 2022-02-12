@@ -137,7 +137,7 @@ struct sof_dev_desc {
 	const char *default_fw_filename[SOF_IPC_TYPE_COUNT];
 
 	struct snd_sof_dsp_ops *ops;
-	void (*ops_init)(struct snd_sof_dev *sdev);
+	int (*ops_init)(struct snd_sof_dev *sdev);
 };
 
 int sof_dai_get_mclk(struct snd_soc_pcm_runtime *rtd);
