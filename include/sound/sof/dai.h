@@ -63,6 +63,7 @@
 #define SOF_DAI_CONFIG_FLAGS_HW_FREE	BIT(1) /**< DAI_CONFIG sent during hw_free stage */
 /**< DAI_CONFIG sent during pause trigger. Only available ABI 3.20 onwards */
 #define SOF_DAI_CONFIG_FLAGS_PAUSE	BIT(2)
+#define SOF_DAI_CONFIG_FLAGS_PRE_RESET	BIT(3)
 #define SOF_DAI_CONFIG_FLAGS_QUIRK_SHIFT 4
 #define SOF_DAI_CONFIG_FLAGS_QUIRK_MASK  (0xF << SOF_DAI_CONFIG_FLAGS_QUIRK_SHIFT)
 /*

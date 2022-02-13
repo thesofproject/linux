@@ -1955,6 +1955,10 @@ static int sof_ipc3_dai_config(struct snd_sof_dev *sdev, struct snd_sof_widget *
 	struct sof_ipc_reply reply;
 	int ret = 0;
 
+	/* nothing to do for pre-reset */
+	if (flags == SOF_DAI_CONFIG_FLAGS_PRE_RESET)
+		return 0;
+
 	if (!dai || !dai->private) {
 		dev_err(sdev->dev, "No private data for DAI %s\n", swidget->widget->name);
 		return -EINVAL;

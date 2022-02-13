@@ -279,8 +279,10 @@ static int hda_link_dai_config_pause_push_ipc(struct snd_soc_dapm_widget *w)
 static int hda_link_pcm_trigger(struct snd_pcm_substream *substream,
 				int cmd, struct snd_soc_dai *dai)
 {
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(dai->component);
 	struct hdac_ext_stream *hext_stream =
 				snd_soc_dai_get_dma_data(dai, substream);
+	const struct sof_ipc_tplg_ops *tplg_ops = sdev->ipc->ops->tplg;
 	struct sof_intel_hda_stream *hda_stream;
 	struct snd_soc_pcm_runtime *rtd;
 	struct snd_soc_dapm_widget *w;
@@ -311,6 +313,16 @@ static int hda_link_pcm_trigger(struct snd_pcm_substream *substream,
 		break;
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_STOP:
+		if (tplg_ops->dai_config) {
+			ret = tplg_ops->dai_config(sdev, w->dobj.private,
+						   SOF_DAI_CONFIG_FLAGS_PRE_RESET, NULL);
+			if (ret < 0) {
+				dev_err(sdev->dev, "%s: DAI config reset failed for widget %s\n",
+					__func__, w->name);
+				return ret;
+			}
+		}
+
 		snd_hdac_ext_link_stream_clear(hext_stream);
 
 		/*
@@ -328,6 +340,16 @@ static int hda_link_pcm_trigger(struct snd_pcm_substream *substream,
 		hext_stream->link_prepared = 0;
 		break;
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+		if (tplg_ops->dai_config) {
+			ret = tplg_ops->dai_config(sdev, w->dobj.private,
+						   SOF_DAI_CONFIG_FLAGS_PRE_RESET, NULL);
+			if (ret < 0) {
+				dev_err(sdev->dev, "%s: DAI config reset failed for widget %s\n",
+					__func__, w->name);
+				return ret;
+			}
+		}
+
 		snd_hdac_ext_link_stream_clear(hext_stream);
 
 		ret = hda_link_dai_config_pause_push_ipc(w);
