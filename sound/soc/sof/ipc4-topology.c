@@ -979,6 +979,177 @@ static int sof_ipc4_control_setup(struct snd_sof_dev *sdev, struct snd_sof_contr
 	return 0;
 }
 
+static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
+{
+	struct sof_ipc4_msg *msg;
+	void *ipc_data = NULL;
+	u32 ipc_size = 0;
+	int ret;
+
+	dev_dbg(sdev->dev, "Create widget %s instance %d - pipe %d - core %d\n",
+		swidget->widget->name, swidget->instance_id, swidget->pipeline_id, swidget->core);
+
+	switch (swidget->id) {
+	case snd_soc_dapm_aif_in:
+	case snd_soc_dapm_aif_out:
+	{
+		struct snd_sof_widget *pipe_widget = swidget->pipe_widget;
+		struct sof_ipc4_pipeline *pipeline = pipe_widget->private;
+		struct sof_ipc4_copier *ipc4_copier;
+
+		ipc4_copier = swidget->private;
+		ipc_size = ipc4_copier->ipc_config_size;
+		ipc_data = ipc4_copier->ipc_config_data;
+
+		msg = &ipc4_copier->msg;
+		msg->primary &= ~SOF_IPC4_MOD_INSTANCE_MASK;
+		msg->primary |= SOF_IPC4_MOD_INSTANCE(swidget->instance_id);
+
+		msg->extension |= ipc_size >> 2;
+		msg->extension |= SOF_IPC4_MOD_EXT_DOMAIN(pipeline->lp_mode);
+		break;
+	}
+	case snd_soc_dapm_dai_in:
+	case snd_soc_dapm_dai_out:
+	{
+		struct snd_sof_widget *pipe_widget = swidget->pipe_widget;
+		struct sof_ipc4_pipeline *pipeline = pipe_widget->private;
+		struct sof_ipc4_copier *ipc4_copier;
+		struct snd_sof_dai *dai;
+
+		dai = swidget->private;
+		ipc4_copier = dai->private;
+		ipc_size = ipc4_copier->ipc_config_size;
+		ipc_data = ipc4_copier->ipc_config_data;
+
+		msg = &ipc4_copier->msg;
+		msg->primary &= ~SOF_IPC4_MOD_INSTANCE_MASK;
+		msg->primary |= SOF_IPC4_MOD_INSTANCE(swidget->instance_id);
+
+		msg->extension |= ipc_size >> 2;
+		msg->extension |= SOF_IPC4_MOD_EXT_DOMAIN(pipeline->lp_mode);
+		break;
+	}
+	case snd_soc_dapm_scheduler:
+	{
+		struct sof_ipc4_pipeline *pipeline = swidget->private;
+
+		dev_dbg(sdev->dev, "pipeline: %d memory pages: %d\n", swidget->pipeline_id,
+			pipeline->mem_usage);
+
+		msg = &pipeline->msg;
+		msg->primary |= pipeline->mem_usage;
+		break;
+	}
+	case snd_soc_dapm_pga:
+	{
+		struct snd_sof_widget *pipe_widget = swidget->pipe_widget;
+		struct sof_ipc4_pipeline *pipeline = pipe_widget->private;
+		struct sof_ipc4_gain *gain = swidget->private;
+
+		ipc_size = sizeof(struct sof_ipc4_base_module_cfg) +
+			   sizeof(struct sof_ipc4_gain_data);
+		ipc_data = gain;
+
+		msg = &gain->msg;
+		msg->primary &= ~SOF_IPC4_MOD_INSTANCE_MASK;
+		msg->primary |= SOF_IPC4_MOD_INSTANCE(swidget->instance_id);
+
+		msg->extension |= ipc_size >> 2;
+		msg->extension |= SOF_IPC4_MOD_EXT_DOMAIN(pipeline->lp_mode);
+		break;
+	}
+	case snd_soc_dapm_mixer:
+	{
+		struct snd_sof_widget *pipe_widget = swidget->pipe_widget;
+		struct sof_ipc4_pipeline *pipeline = pipe_widget->private;
+		struct sof_ipc4_mixer *mixer = swidget->private;
+
+		ipc_size = sizeof(mixer->base_config);
+		ipc_data = &mixer->base_config;
+
+		msg = &mixer->msg;
+		msg->primary &= ~SOF_IPC4_MOD_INSTANCE_MASK;
+		msg->primary |= SOF_IPC4_MOD_INSTANCE(swidget->instance_id);
+
+		msg->extension |= ipc_size >> 2;
+		msg->extension |= SOF_IPC4_MOD_EXT_DOMAIN(pipeline->lp_mode);
+		break;
+	}
+	default:
+		dev_err(sdev->dev, "widget type %d not supported", swidget->id);
+		return -EINVAL;
+	}
+
+	msg->data_size = ipc_size;
+	msg->data_ptr = ipc_data;
+
+	ret = sof_ipc_tx_message(sdev->ipc, msg, ipc_size, NULL, 0);
+	if (ret < 0)
+		dev_err(sdev->dev, "failed to create module %s\n", swidget->widget->name);
+
+	return ret;
+}
+
+static int sof_ipc4_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
+{
+	struct sof_ipc4_fw_module *fw_module = swidget->module_info;
+	int ret;
+
+	switch (swidget->id) {
+	case snd_soc_dapm_scheduler:
+	{
+		struct sof_ipc4_pipeline *pipeline = swidget->private;
+		struct sof_ipc4_msg msg = {{ 0 }};
+		u32 header;
+
+		header = SOF_IPC4_GLB_PIPE_INSTANCE_ID(swidget->pipeline_id);
+		header |= SOF_IPC4_GLB_MSG_TYPE(SOF_IPC4_GLB_DELETE_PIPELINE);
+		header |= SOF_IPC4_GLB_MSG_DIR(SOF_IPC4_MSG_REQUEST);
+		header |= SOF_IPC4_GLB_MSG_TARGET(SOF_IPC4_FW_GEN_MSG);
+
+		msg.primary = header;
+
+		ret = sof_ipc_tx_message(sdev->ipc, &msg, 0, NULL, 0);
+		if (ret < 0)
+			dev_err(sdev->dev, "failed to delete pipeline %d", swidget->pipeline_id);
+
+		pipeline->mem_usage = 0;
+		break;
+	}
+	case snd_soc_dapm_aif_in:
+	case snd_soc_dapm_aif_out:
+	case snd_soc_dapm_dai_in:
+	case snd_soc_dapm_dai_out:
+	{
+		struct sof_ipc4_copier *ipc4_copier;
+
+		if (swidget->id == snd_soc_dapm_aif_in ||
+		    swidget->id == snd_soc_dapm_aif_out) {
+			ipc4_copier = swidget->private;
+		} else {
+			struct snd_sof_dai *dai = swidget->private;
+
+			ipc4_copier = dai->private;
+		}
+
+		kfree(ipc4_copier->ipc_config_data);
+		ipc4_copier->ipc_config_data = NULL;
+		ipc4_copier->ipc_config_size = 0;
+		dev_vdbg(sdev->dev, "copier %s ipc_config_data freed\n", swidget->widget->name);
+	}
+	fallthrough;
+	default:
+		ida_free(&fw_module->m_ida, swidget->instance_id);
+		break;
+	}
+
+	dev_dbg(sdev->dev, "widget %s instance %d freed\n", swidget->widget->name,
+		swidget->instance_id);
+
+	return 0;
+}
+
 static enum sof_tokens host_token_list[] = {
 	SOF_IPC4_COMP_TOKENS,
 	SOF_IPC4_AUDIO_FMT_NUM_TOKENS,
@@ -1054,4 +1225,6 @@ const struct sof_ipc_tplg_ops ipc4_tplg_ops = {
 	.token_list = ipc4_token_list,
 	.control_setup = sof_ipc4_control_setup,
 	.control = &tplg_ipc4_control_ops,
+	.widget_setup = sof_ipc4_widget_setup,
+	.widget_free = sof_ipc4_widget_free,
 };
