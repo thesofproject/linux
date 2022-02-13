@@ -192,4 +192,5 @@ struct sof_ipc4_mixer {
 	struct sof_ipc4_msg msg;
 };
 
+int sof_ipc4_set_pipeline_state(struct snd_sof_dev *sdev, u32 id, u32 state);
 #endif
