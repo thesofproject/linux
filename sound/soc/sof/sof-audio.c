@@ -253,6 +253,72 @@ static int sof_setup_pipeline_connections(struct snd_sof_dev *sdev,
 	return 0;
 }
 
+static void
+sof_unprepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *widget)
+{
+	const struct sof_ipc_tplg_ops *ipc_tplg_ops = sdev->ipc->ops->tplg;
+	const struct sof_ipc_tplg_widget_ops *widget_ops = ipc_tplg_ops->widget;
+	struct snd_sof_widget *swidget = widget->dobj.private;
+	struct snd_soc_dapm_path *p;
+
+	if (!widget_ops[widget->id].unprepare || !swidget->complete)
+		goto sink_unprepare;
+
+	widget_ops[widget->id].unprepare(swidget);
+	swidget->complete = false;
+
+sink_unprepare:
+	snd_soc_dapm_widget_for_each_sink_path(widget, p) {
+		if (!p->walking && p->sink->dobj.private) {
+			p->walking = true;
+			sof_unprepare_widgets_in_path(sdev, p->sink);
+			p->walking = false;
+		}
+	}
+}
+
+static int
+sof_prepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *widget,
+			    struct snd_sof_platform_stream_params *platform_params,
+			    struct snd_pcm_hw_params *runtime_params,
+			    struct snd_pcm_hw_params *input_params, int dir)
+{
+	const struct sof_ipc_tplg_ops *ipc_tplg_ops = sdev->ipc->ops->tplg;
+	const struct sof_ipc_tplg_widget_ops *widget_ops = ipc_tplg_ops->widget;
+	struct snd_sof_widget *swidget = widget->dobj.private;
+	struct snd_soc_dapm_path *p;
+	int ret;
+
+	if (!widget_ops[widget->id].prepare || swidget->complete)
+		goto sink_prepare;
+
+	ret = widget_ops[widget->id].prepare(swidget, platform_params, runtime_params,
+					     input_params, dir);
+	if (ret < 0) {
+		dev_err(sdev->dev, "failed to prepare widget %s\n", widget->name);
+		return ret;
+	}
+
+	swidget->complete = true;
+sink_prepare:
+	snd_soc_dapm_widget_for_each_sink_path(widget, p) {
+		if (!p->walking && p->sink->dobj.private) {
+			p->walking = true;
+			ret = sof_prepare_widgets_in_path(sdev, p->sink, platform_params,
+							  runtime_params, input_params, dir);
+			p->walking = false;
+			if (ret < 0) {
+				if (!widget_ops[widget->id].unprepare)
+					widget_ops[widget->id].unprepare(swidget);
+				swidget->complete = false;
+				return ret;
+			}
+		}
+	}
+
+	return ret;
+}
+
 /*
  * free all widgets in the sink path starting from the source widget
  * (DAI type for capture, AIF type for playback)
@@ -332,11 +398,15 @@ out:
 }
 
 static int
-sof_setup_or_free_widgets_in_order(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget_list *list,
-				   bool dir, enum sof_widget_op op)
+sof_walk_widgets_in_order(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget_list *list,
+			  struct snd_sof_platform_stream_params *platform_params,
+			  struct snd_pcm_hw_params *runtime_params, int dir,
+			  enum sof_widget_op op)
 {
 	struct snd_soc_dapm_widget *widget;
-	int ret, i;
+	char *str;
+	int ret = 0;
+	int i;
 
 	for_each_dapm_widgets(list, i, widget) {
 		/* starting widget for playback is AIF type */
@@ -350,17 +420,41 @@ sof_setup_or_free_widgets_in_order(struct snd_sof_dev *sdev, struct snd_soc_dapm
 		switch (op) {
 		case SOF_WIDGET_SETUP:
 			ret = sof_set_up_widgets_in_path(sdev, widget, dir);
+			str = "set up";
 			break;
 		case SOF_WIDGET_FREE:
 			ret = sof_free_widgets_in_path(sdev, widget, dir);
+			str = "free";
+			break;
+		case SOF_WIDGET_PREPARE:
+		{
+			struct snd_pcm_hw_params *input_params;
+
+			/*
+			 * When walking the list of connected widgets, the input_params for each
+			 * widget is modified by the source widget in the path. Use a local
+			 * copy of the runtime params as the input_params so that the runtime
+			 * params does not get overwritten.
+			 */
+			input_params = kmemdup(runtime_params, sizeof(*runtime_params),
+					       GFP_KERNEL);
+			if (!input_params)
+				return -ENOMEM;
+			ret = sof_prepare_widgets_in_path(sdev, widget, platform_params,
+							  runtime_params, input_params, dir);
+			kfree(input_params);
+			str = "prepare";
+			break;
+		}
+		case SOF_WIDGET_UNPREPARE:
+			sof_unprepare_widgets_in_path(sdev, widget);
 			break;
 		default:
 			dev_err(sdev->dev, "Invalid widget op %d\n", op);
 			return -EINVAL;
 		}
 		if (ret < 0) {
-			dev_err(sdev->dev, "Failed to %s connected widgets\n",
-				op == SOF_WIDGET_SETUP ? "set up" : "free");
+			dev_err(sdev->dev, "Failed to %s connected widgets\n", str);
 			return ret;
 		}
 	}
@@ -368,7 +462,9 @@ sof_setup_or_free_widgets_in_order(struct snd_sof_dev *sdev, struct snd_soc_dapm
 	return 0;
 }
 
-int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, int dir)
+int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
+			  struct snd_sof_platform_stream_params *platform_params,
+			  struct snd_pcm_hw_params *runtime_params, int dir)
 {
 	const struct sof_ipc_tplg_ops *ipc_tplg_ops = sdev->ipc->ops->tplg;
 	struct snd_soc_dapm_widget_list *list = spcm->stream[dir].list;
@@ -379,9 +475,19 @@ int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, in
 	if (!list)
 		return 0;
 
-	ret = sof_setup_or_free_widgets_in_order(sdev, list, dir, SOF_WIDGET_SETUP);
+	/* prepare widgets for set up */
+	ret = sof_walk_widgets_in_order(sdev, list, platform_params, runtime_params,
+					dir, SOF_WIDGET_PREPARE);
 	if (ret < 0)
 		return ret;
+
+	ret = sof_walk_widgets_in_order(sdev, list, platform_params, runtime_params,
+					dir, SOF_WIDGET_SETUP);
+	if (ret < 0) {
+		ret = sof_walk_widgets_in_order(sdev, list, platform_params, runtime_params,
+						dir, SOF_WIDGET_UNPREPARE);
+		return ret;
+	}
 
 	/*
 	 * error in setting pipeline connections will result in route status being reset for
@@ -422,7 +528,8 @@ int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, in
 	return 0;
 
 widget_free:
-	sof_setup_or_free_widgets_in_order(sdev, list, dir, SOF_WIDGET_FREE);
+	sof_walk_widgets_in_order(sdev, list, platform_params, runtime_params, dir,
+				  SOF_WIDGET_FREE);
 
 	return ret;
 }
@@ -436,7 +543,7 @@ int sof_widget_list_free(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, int
 	if (!list)
 		return 0;
 
-	ret = sof_setup_or_free_widgets_in_order(sdev, list, dir, SOF_WIDGET_FREE);
+	ret = sof_walk_widgets_in_order(sdev, list, NULL, NULL, dir, SOF_WIDGET_FREE);
 
 	snd_soc_dapm_dai_free_widgets(&list);
 	spcm->stream[dir].list = NULL;
