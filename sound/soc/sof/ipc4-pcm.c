@@ -13,7 +13,7 @@
 #include "ipc4-ops.h"
 #include "ipc4-topology.h"
 
-static int sof_ipc4_set_pipeline_state(struct snd_sof_dev *sdev, u32 id, u32 state)
+int sof_ipc4_set_pipeline_state(struct snd_sof_dev *sdev, u32 id, u32 state)
 {
 	struct sof_ipc4_msg msg = {{ 0 }};
 	u32 primary;
