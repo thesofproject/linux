@@ -15,6 +15,21 @@
 #include "ipc4-ops.h"
 #include "ops.h"
 
+static void sof_ipc4_dump_config(struct snd_sof_dev *sdev, void *ipc_data, u32 size)
+{
+	int *data = (int *)ipc_data;
+	int i, dw_size;
+	char buffer[36];
+
+	dw_size = size >> 2;
+	for (i = 0; i < dw_size; i += 4) {
+		int len = (i + 4 < dw_size) ? 16 : (dw_size - i) * 4;
+
+		hex_dump_to_buffer(data + i, len, 16, 4, buffer, sizeof(buffer), false);
+		dev_dbg(sdev->dev, "%s", buffer);
+	}
+}
+
 static const struct sof_ipc4_fw_status {
 	int status;
 	char *msg;
@@ -418,6 +433,12 @@ static int sof_ipc4_tx_msg(struct snd_sof_dev *sdev, void *msg_data, size_t msg_
 
 	mutex_unlock(&ipc->tx_mutex);
 
+	if (msg_bytes) {
+		struct sof_ipc4_msg *msg = msg_data;
+
+		sof_ipc4_dump_config(sdev, msg->data_ptr, msg->data_size);
+	}
+
 	return ret;
 }
 
@@ -499,6 +520,8 @@ static int sof_ipc4_set_get_data(struct snd_sof_dev *sdev, void *data,
 			goto out;
 		}
 
+		sof_ipc4_dump_config(sdev, tx.data_ptr, tx.data_size);
+
 		if (!set && rx.extension & SOF_IPC4_MOD_EXT_MSG_FIRST_BLOCK_MASK) {
 			/* Verify the firmware reported total payload size */
 			rx_size = rx.extension & SOF_IPC4_MOD_EXT_MSG_SIZE_MASK;
@@ -526,6 +549,8 @@ static int sof_ipc4_set_get_data(struct snd_sof_dev *sdev, void *data,
 	/* Adjust the received data size if needed */
 	if (!set && payload_bytes != offset)
 		ipc4_msg->data_size = offset;
+
+	sof_ipc4_dump_config(sdev, ipc4_msg->data_ptr, ipc4_msg->data_size);
 
 out:
 	mutex_unlock(&sdev->ipc->tx_mutex);
