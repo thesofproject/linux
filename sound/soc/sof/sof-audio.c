@@ -14,11 +14,29 @@
 
 static void sof_reset_route_setup_status(struct snd_sof_dev *sdev, struct snd_sof_widget *widget)
 {
+	const struct sof_ipc_tplg_ops *tplg_ops = sdev->ipc->ops->tplg;
+	struct snd_sof_widget *route_endpoint_widget;
 	struct snd_sof_route *sroute;
 
 	list_for_each_entry(sroute, &sdev->route_list, list)
-		if (sroute->src_widget == widget || sroute->sink_widget == widget)
+		if (sroute->src_widget == widget || sroute->sink_widget == widget) {
+			if (sroute->src_widget == widget)
+				route_endpoint_widget = sroute->sink_widget;
+
+			if (sroute->sink_widget == widget)
+				route_endpoint_widget = sroute->src_widget;
+
+			/* only free the route if the other endpoint widget's use_count is 0 */
+			if (route_endpoint_widget->use_count) {
+				sroute->setup = false;
+				continue;
+			}
+
+			if (sroute->setup && tplg_ops->route_free)
+				tplg_ops->route_free(sdev, sroute);
+
 			sroute->setup = false;
+		}
 }
 
 int sof_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)

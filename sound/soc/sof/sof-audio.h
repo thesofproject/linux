@@ -151,6 +151,7 @@ struct sof_ipc_tplg_widget_ops {
  *	    initialized to 0.
  * @control: Pointer to the IPC-specific ops for topology kcontrol IO
  * @route_setup: Function pointer for setting up pipeline connections
+ * @route_free: Function pointer for freeing pipeline connections
  * @token_list: List of all tokens supported by the IPC version. The size of the token_list
  *		array should be SOF_TOKEN_COUNT. The unused elements in the array will be
  *		initialized to 0.
@@ -168,6 +169,7 @@ struct sof_ipc_tplg_ops {
 	const struct sof_ipc_tplg_widget_ops *widget;
 	const struct sof_ipc_tplg_control_ops *control;
 	int (*route_setup)(struct snd_sof_dev *sdev, struct snd_sof_route *sroute);
+	int (*route_free)(struct snd_sof_dev *sdev, struct snd_sof_route *sroute);
 	const struct sof_token_info *token_list;
 	int (*control_setup)(struct snd_sof_dev *sdev, struct snd_sof_control *scontrol);
 	int (*control_free)(struct snd_sof_dev *sdev, struct snd_sof_control *scontrol);
