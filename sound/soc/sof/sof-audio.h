@@ -38,6 +38,7 @@
 enum sof_widget_op {
 	SOF_WIDGET_FREE,
 	SOF_WIDGET_SETUP,
+	SOF_WIDGET_PREPARE,
 };
 
 /*
@@ -129,6 +130,7 @@ struct sof_ipc_tplg_control_ops {
  * @token_list: List of token ID's that should be parsed for the widget
  * @token_list_size: number of elements in token_list
  * @bind_event: Function pointer for binding events to the widget
+ * @prepare: Function pointer for preparing widget for set up
  */
 struct sof_ipc_tplg_widget_ops {
 	int (*ipc_setup)(struct snd_sof_widget *swidget);
@@ -137,6 +139,9 @@ struct sof_ipc_tplg_widget_ops {
 	int token_list_size;
 	int (*bind_event)(struct snd_soc_component *scomp, struct snd_sof_widget *swidget,
 			  u16 event_type);
+	int (*prepare)(struct snd_sof_widget *swidget,
+		       struct snd_sof_platform_stream_params *runtime_params,
+		       struct snd_sof_platform_stream_params *input_params);
 };
 
 /**
@@ -481,8 +486,10 @@ int sof_route_setup(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *wsourc
 		    struct snd_soc_dapm_widget *wsink);
 
 /* PCM */
-int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, int dir);
-int sof_widget_list_free(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, int dir);
+int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
+			  struct snd_sof_platform_stream_params *params);
+int sof_widget_list_free(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
+			 struct snd_sof_platform_stream_params *params);
 int sof_pcm_dsp_pcm_free(struct snd_pcm_substream *substream, struct snd_sof_dev *sdev,
 			 struct snd_sof_pcm *spcm);
 int sof_pcm_stream_free(struct snd_sof_dev *sdev, struct snd_pcm_substream *substream,

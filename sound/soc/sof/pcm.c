@@ -82,33 +82,35 @@ void snd_sof_pcm_period_elapsed(struct snd_pcm_substream *substream)
 }
 EXPORT_SYMBOL(snd_sof_pcm_period_elapsed);
 
-int sof_pcm_setup_connected_widgets(struct snd_sof_dev *sdev, struct snd_soc_pcm_runtime *rtd,
-				    struct snd_sof_pcm *spcm, int dir)
+static int
+sof_pcm_setup_connected_widgets(struct snd_sof_dev *sdev, struct snd_soc_pcm_runtime *rtd,
+				struct snd_sof_pcm *spcm,
+				struct snd_sof_platform_stream_params *params)
 {
+	struct snd_soc_dapm_widget_list *list;
 	struct snd_soc_dai *dai;
 	int ret, j;
 
 	/* query DAPM for list of connected widgets and set them up */
 	for_each_rtd_cpu_dais(rtd, j, dai) {
-		struct snd_soc_dapm_widget_list *list;
-
-		ret = snd_soc_dapm_dai_get_connected_widgets(dai, dir, &list,
+		ret = snd_soc_dapm_dai_get_connected_widgets(dai, params->direction, &list,
 							     dpcm_end_walk_at_be);
 		if (ret < 0) {
 			dev_err(sdev->dev, "error: dai %s has no valid %s path\n", dai->name,
-				dir == SNDRV_PCM_STREAM_PLAYBACK ? "playback" : "capture");
+				params->direction == SNDRV_PCM_STREAM_PLAYBACK ?
+				"playback" : "capture");
 			return ret;
 		}
 
-		spcm->stream[dir].list = list;
+		spcm->stream[params->direction].list = list;
 
-		ret = sof_widget_list_setup(sdev, spcm, dir);
+		ret = sof_widget_list_setup(sdev, spcm, params);
 		if (ret < 0) {
 			dev_err(sdev->dev, "error: failed widget list set up for pcm %d dir %d\n",
-				spcm->pcm.pcm_id, dir);
-			spcm->stream[dir].list = NULL;
-			snd_soc_dapm_dai_free_widgets(&list);
-			return ret;
+				spcm->pcm.pcm_id, params->direction);
+				spcm->stream[params->direction].list = NULL;
+				snd_soc_dapm_dai_free_widgets(&list);
+				return ret;
 		}
 	}
 
@@ -180,7 +182,7 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 
 	/* if this is a repeated hw_params without hw_free, skip setting up widgets */
 	if (!spcm->stream[substream->stream].list) {
-		ret = sof_pcm_setup_connected_widgets(sdev, rtd, spcm, substream->stream);
+		ret = sof_pcm_setup_connected_widgets(sdev, rtd, spcm, &platform_params);
 		if (ret < 0)
 			return ret;
 	}
@@ -214,6 +216,7 @@ static int sof_pcm_hw_free(struct snd_soc_component *component,
 	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
 	const struct sof_ipc_pcm_ops *pcm_ops = sdev->ipc->ops->pcm;
+	struct snd_sof_platform_stream_params params;
 	struct snd_sof_pcm *spcm;
 	int ret, err = 0;
 
@@ -244,8 +247,10 @@ static int sof_pcm_hw_free(struct snd_soc_component *component,
 		err = ret;
 	}
 
+	params.direction = substream->stream;
+
 	/* free the DAPM widget list */
-	ret = sof_widget_list_free(sdev, spcm, substream->stream);
+	ret = sof_widget_list_free(sdev, spcm, &params);
 	if (ret < 0)
 		err = ret;
 
