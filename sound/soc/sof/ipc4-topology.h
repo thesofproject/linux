@@ -173,4 +173,23 @@ struct sof_ipc4_gain {
 	struct sof_ipc4_msg msg;
 };
 
+enum sof_ipc4_mixer_type {
+	sof_ipc4_mix_in,
+	sof_ipc4_mix_out
+};
+
+/**
+ * struct sof_ipc4_mixer - mixer config data
+ * @base_config: IPC base config data
+ * @type: mixer type (in or out)
+ * @available_fmt: Available audio format
+ * @msg: IPC4 message struct containing header and data info
+ */
+struct sof_ipc4_mixer {
+	struct sof_ipc4_base_module_cfg base_config;
+	enum sof_ipc4_mixer_type type;
+	struct sof_ipc4_available_audio_format available_fmt;
+	struct sof_ipc4_msg msg;
+};
+
 #endif
