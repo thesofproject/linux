@@ -105,6 +105,10 @@ static const struct sof_topology_token gain_tokens[] = {
 		get_token_u32, offsetof(struct sof_ipc4_gain_data, init_val)},
 };
 
+static const struct sof_topology_token ipc4_mixer_tokens[] = {
+	{SOF_TKN_MIXER_TYPE, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32, 0},
+};
+
 static const struct sof_token_info ipc4_token_list[SOF_TOKEN_COUNT] = {
 	[SOF_DAI_TOKENS] = {"DAI tokens", dai_tokens, ARRAY_SIZE(dai_tokens)},
 	[SOF_PIPELINE_TOKENS] = {"Pipeline tokens", pipeline_tokens, ARRAY_SIZE(pipeline_tokens)},
@@ -128,6 +132,8 @@ static const struct sof_token_info ipc4_token_list[SOF_TOKEN_COUNT] = {
 	[SOF_IPC4_AUDIO_FMT_NUM_TOKENS] = {"IPC4 Audio format number tokens",
 		ipc4_audio_fmt_num_tokens, ARRAY_SIZE(ipc4_audio_fmt_num_tokens)},
 	[SOF_GAIN_TOKENS] = {"Gain tokens", gain_tokens, ARRAY_SIZE(gain_tokens)},
+	[SOF_IPC4_MIXER_TOKENS] = {"IPC4 Mixer tokens", ipc4_mixer_tokens,
+		ARRAY_SIZE(ipc4_mixer_tokens)},
 };
 
 void sof_ipc4_dbg_audio_format(struct device *dev, struct sof_ipc4_audio_format *format,
@@ -591,6 +597,45 @@ err:
 	return ret;
 }
 
+static int sof_ipc4_widget_setup_comp_mixer(struct snd_sof_widget *swidget)
+{
+	struct snd_soc_component *scomp = swidget->scomp;
+	struct sof_ipc4_mixer *mixer;
+	int ret;
+
+	dev_dbg(scomp->dev, "Updating IPC structures for %s\n", swidget->widget->name);
+
+	mixer = kzalloc(sizeof(*mixer), GFP_KERNEL);
+	if (!mixer)
+		return -ENOMEM;
+
+	swidget->private = mixer;
+
+	/* The out_audio_fmt in topology is ignored as it is not required to be sent to the FW */
+	ret = sof_ipc4_get_audio_fmt(scomp, swidget, &mixer->available_fmt, false);
+	if (ret != 0)
+		goto err;
+
+	ret = sof_update_ipc_object(scomp, &mixer->type, SOF_IPC4_MIXER_TOKENS,
+				    swidget->tuples, swidget->num_tuples,
+				    sizeof(*mixer), 1);
+	if (ret != 0) {
+		dev_err(scomp->dev, "parse mixer tokens failed\n");
+		goto err;
+	}
+
+	dev_dbg(scomp->dev, "mixer type %d", mixer->type);
+
+	ret = sof_ipc4_widget_setup_msg(swidget, &mixer->msg);
+	if (ret < 0)
+		goto err;
+
+	return 0;
+err:
+	kfree(mixer);
+	return ret;
+}
+
 static void
 sof_ipc4_update_pipeline_mem_usage(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget,
 				   struct sof_ipc4_base_module_cfg *base_config)
@@ -861,6 +906,32 @@ static int sof_ipc4_prepare_gain_module(struct snd_sof_widget *swidget,
 	return sof_ipc4_widget_assign_instance_id(sdev, swidget);
 }
 
+static int sof_ipc4_prepare_mixer_module(struct snd_sof_widget *swidget,
+					 struct snd_sof_platform_stream_params *runtime_params,
+					 struct snd_sof_platform_stream_params *input_params)
+{
+	struct snd_soc_component *scomp = swidget->scomp;
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct sof_ipc4_mixer *mixer = swidget->private;
+	int ret;
+
+	/* only 32bit is supported by mixer */
+	mixer->available_fmt.ref_audio_fmt = &mixer->available_fmt.base_config->audio_fmt;
+
+	/* output format is not required to be sent to the FW for mixer */
+	ret = sof_ipc4_init_audio_fmt(sdev, swidget, &mixer->base_config,
+				      NULL, input_params, &mixer->available_fmt,
+				      sizeof(mixer->base_config));
+	if (ret < 0)
+		return ret;
+
+	/* update pipeline memory usage */
+	sof_ipc4_update_pipeline_mem_usage(sdev, swidget, &mixer->base_config);
+
+	/* assign instance ID */
+	return sof_ipc4_widget_assign_instance_id(sdev, swidget);
+}
+
 static enum sof_tokens host_token_list[] = {
 	SOF_IPC4_COMP_TOKENS,
 	SOF_IPC4_AUDIO_FMT_NUM_TOKENS,
@@ -898,6 +969,15 @@ static enum sof_tokens pga_token_list[] = {
 	SOF_COMP_EXT_TOKENS,
 };
 
+static enum sof_tokens mixer_token_list[] = {
+	SOF_IPC4_COMP_TOKENS,
+	SOF_IPC4_MIXER_TOKENS,
+	SOF_IPC4_AUDIO_FMT_NUM_TOKENS,
+	SOF_IPC4_IN_AUDIO_FORMAT_TOKENS,
+	SOF_IPC4_AUDIO_FORMAT_BUFFER_SIZE_TOKENS,
+	SOF_COMP_EXT_TOKENS,
+};
+
 static const struct sof_ipc_tplg_widget_ops tplg_ipc4_widget_ops[SND_SOC_DAPM_TYPE_COUNT] = {
 	[snd_soc_dapm_aif_in] =  {sof_ipc4_widget_setup_pcm, sof_ipc4_widget_free_comp,
 				  host_token_list, ARRAY_SIZE(host_token_list), NULL,
@@ -917,6 +997,9 @@ static const struct sof_ipc_tplg_widget_ops tplg_ipc4_widget_ops[SND_SOC_DAPM_TY
 	[snd_soc_dapm_pga] = {sof_ipc4_widget_setup_comp_pga, sof_ipc4_widget_free_comp,
 			      pga_token_list, ARRAY_SIZE(pga_token_list), NULL,
 			      sof_ipc4_prepare_gain_module},
+	[snd_soc_dapm_mixer] = {sof_ipc4_widget_setup_comp_mixer, sof_ipc4_widget_free_comp,
+				mixer_token_list, ARRAY_SIZE(mixer_token_list),
+				NULL, sof_ipc4_prepare_mixer_module},
 };
 
 const struct sof_ipc_tplg_ops ipc4_tplg_ops = {
