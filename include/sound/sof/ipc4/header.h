@@ -215,15 +215,17 @@ struct sof_ipc4_audio_format {
 #define SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT_SHIFT	0
 #define SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT_MASK	GENMASK(7, 0)
 #define SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(x)	\
-	((x) << SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT_SHIFT)
+	((x) & SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT_MASK)
 #define SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH_SHIFT	8
 #define SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH_MASK	GENMASK(15, 8)
 #define SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(x)	\
-	((x) << SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH_SHIFT)
+	(((x) & SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH_MASK) >> \
+	 SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH_SHIFT)
 #define SOF_IPC4_AUDIO_FORMAT_CFG_SAMPLE_TYPE_SHIFT	16
 #define SOF_IPC4_AUDIO_FORMAT_CFG_SAMPLE_TYPE_MASK	GENMASK(23, 16)
 #define SOF_IPC4_AUDIO_FORMAT_CFG_SAMPLE_TYPE(x)	\
-	((x) << SOF_IPC4_AUDIO_FORMAT_CFG_SAMPLE_TYPE_SHIFT)
+	(((x) & SOF_IPC4_AUDIO_FORMAT_CFG_SAMPLE_TYPE_MASK) >>  \
+	 SOF_IPC4_AUDIO_FORMAT_CFG_SAMPLE_TYPE_SHIFT)
 
 /* Module message type specific field definitions */
 
@@ -242,7 +244,7 @@ enum sof_ipc4_module_type {
 	SOF_IPC4_MOD_DELETE_INSTANCE,
 };
 
-struct sof_ipc4_basic_module_cfg {
+struct sof_ipc4_base_module_cfg {
 	uint32_t cpc; /* the max count of Cycles Per Chunk processing */
 	uint32_t ibs; /* input Buffer Size (in bytes)  */
 	uint32_t obs; /* output Buffer Size (in bytes) */
