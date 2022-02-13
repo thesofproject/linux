@@ -15,6 +15,9 @@
  * Hardware interface for audio DSP on Cannonlake.
  */
 
+#include <sound/sof/ext_manifest4.h>
+#include <sound/sof/ipc4/header.h>
+#include "../ipc4-ops.h"
 #include "../ops.h"
 #include "hda.h"
 #include "hda-ipc.h"
@@ -28,6 +31,87 @@ static const struct snd_sof_debugfs_map cnl_dsp_debugfs[] = {
 
 static void cnl_ipc_host_done(struct snd_sof_dev *sdev);
 static void cnl_ipc_dsp_done(struct snd_sof_dev *sdev);
+
+irqreturn_t cnl_ipc4_irq_thread(int irq, void *context)
+{
+	struct snd_sof_dev *sdev = context;
+	u32 hipci;
+	u32 hipcida;
+	u32 hipctdr;
+	u32 hipctdd;
+	u32 msg;
+	u32 msg_ext;
+	bool ipc_irq = false;
+
+	hipcida = snd_sof_dsp_read(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCIDA);
+	hipctdr = snd_sof_dsp_read(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCTDR);
+	hipctdd = snd_sof_dsp_read(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCTDD);
+	hipci = snd_sof_dsp_read(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCIDR);
+
+	/* reply message from DSP */
+	if (hipcida & CNL_DSP_REG_HIPCIDA_DONE) {
+		msg_ext = hipci & CNL_DSP_REG_HIPCIDR_MSG_MASK;
+		msg = hipcida & CNL_DSP_REG_HIPCIDA_MSG_MASK;
+
+		dev_vdbg(sdev->dev,
+			 "ipc: firmware response, msg:0x%x, msg_ext:0x%x\n",
+			 msg, msg_ext);
+
+		/* mask Done interrupt */
+		snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR,
+					CNL_DSP_REG_HIPCCTL,
+					CNL_DSP_REG_HIPCCTL_DONE, 0);
+
+		spin_lock_irq(&sdev->ipc_lock);
+
+		cnl_ipc_dsp_done(sdev);
+
+		spin_unlock_irq(&sdev->ipc_lock);
+
+		ipc_irq = true;
+	}
+
+	/* new message from DSP */
+	if (hipctdr & CNL_DSP_REG_HIPCTDR_BUSY) {
+		msg = hipctdr & CNL_DSP_REG_HIPCTDR_MSG_MASK;
+		msg_ext = hipctdd & CNL_DSP_REG_HIPCTDD_MSG_MASK;
+
+		dev_vdbg(sdev->dev, "ipc: firmware initiated, msg:0x%x, msg_ext:0x%x\n",
+			 msg, msg_ext);
+
+		if (hipctdr & SOF_IPC4_GLB_MSG_DIR_MASK) {
+			struct sof_ipc4_msg *data = sdev->ipc->msg.reply_data;
+
+			data->primary = msg;
+			data->extension = msg_ext;
+			snd_sof_ipc_get_reply(sdev);
+			snd_sof_ipc_reply(sdev, msg);
+		} else {
+			struct sof_ipc4_msg data = {{ 0 }};
+
+			data.primary = msg;
+			data.extension = msg_ext;
+
+			sdev->ipc->msg.rx_data = &data;
+			snd_sof_ipc_msgs_rx(sdev);
+			sdev->ipc->msg.rx_data = NULL;
+		}
+
+		cnl_ipc_host_done(sdev);
+
+		ipc_irq = true;
+	}
+
+	if (!ipc_irq) {
+		/*
+		 * This interrupt is not shared so no need to return IRQ_NONE.
+		 */
+		dev_dbg_ratelimited(sdev->dev,
+				    "nothing to do in IPC IRQ thread\n");
+	}
+
+	return IRQ_HANDLED;
+}
 
 irqreturn_t cnl_ipc_irq_thread(int irq, void *context)
 {
@@ -61,9 +145,11 @@ irqreturn_t cnl_ipc_irq_thread(int irq, void *context)
 
 		spin_lock_irq(&sdev->ipc_lock);
 
-		/* handle immediate reply from DSP core */
-		hda_dsp_ipc_get_reply(sdev);
-		snd_sof_ipc_reply(sdev, msg);
+		if (sdev->pdata->ipc_type == SOF_IPC) {
+			/* handle immediate reply from DSP core */
+			hda_dsp_ipc_get_reply(sdev);
+			snd_sof_ipc_reply(sdev, msg);
+		}
 
 		cnl_ipc_dsp_done(sdev);
 
@@ -100,6 +186,25 @@ irqreturn_t cnl_ipc_irq_thread(int irq, void *context)
 
 			snd_sof_dsp_panic(sdev, HDA_DSP_PANIC_OFFSET(msg_ext),
 					  non_recoverable);
+		} else if (sdev->pdata->ipc_type == SOF_INTEL_IPC4) {
+			/* TODO: This is hacky. How do we pass the header for IPC4? IPC3 reads it
+			 * from the mailbox, so no need to pass anything
+			 */
+			struct sof_ipc4_msg data;
+
+			data.primary = msg;
+			data.extension = msg_ext;
+
+			if (hipctdr & SOF_IPC4_GLB_MSG_DIR_MASK) {
+				sdev->ipc->msg.reply_data = &data;
+				snd_sof_ipc_get_reply(sdev);
+				snd_sof_ipc_reply(sdev, msg);
+			} else {
+				sdev->ipc->msg.rx_data = &data;
+				snd_sof_ipc_msgs_rx(sdev);
+			}
+
+			sdev->ipc->msg.rx_data = NULL;
 		} else {
 			snd_sof_ipc_msgs_rx(sdev);
 		}
@@ -174,6 +279,22 @@ static bool cnl_compact_ipc_compress(struct snd_sof_ipc_msg *msg,
 	}
 
 	return false;
+}
+
+int cnl_ipc4_send_msg(struct snd_sof_dev *sdev, struct snd_sof_ipc_msg *msg)
+{
+	struct sof_ipc4_msg *msg_data = msg->msg_data;
+
+	/* send the message via mailbox */
+	if (msg_data->data_size)
+		sof_mailbox_write(sdev, sdev->host_box.offset, msg_data->data_ptr,
+				  msg_data->data_size);
+
+	snd_sof_dsp_write(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCIDD, msg_data->extension);
+	snd_sof_dsp_write(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCIDR,
+			  msg_data->primary | CNL_DSP_REG_HIPCIDR_BUSY);
+
+	return 0;
 }
 
 int cnl_ipc_send_msg(struct snd_sof_dev *sdev, struct snd_sof_ipc_msg *msg)
@@ -255,11 +376,31 @@ int sof_cnl_ops_init(struct snd_sof_dev *sdev)
 	/* probe/remove/shutdown */
 	sof_cnl_ops.shutdown	= hda_dsp_shutdown;
 
-	/* doorbell */
-	sof_cnl_ops.irq_thread	= cnl_ipc_irq_thread;
-
 	/* ipc */
-	sof_cnl_ops.send_msg	= cnl_ipc_send_msg;
+	if (sdev->pdata->ipc_type == SOF_IPC) {
+		/* doorbell */
+		sof_cnl_ops.irq_thread	= cnl_ipc_irq_thread;
+
+		/* ipc */
+		sof_cnl_ops.send_msg	= cnl_ipc_send_msg;
+	}
+
+	if (sdev->pdata->ipc_type == SOF_INTEL_IPC4) {
+		struct sof_ipc4_data *ipc4_data;
+
+		sdev->private = devm_kzalloc(sdev->dev, sizeof(struct sof_ipc4_data), GFP_KERNEL);
+		if (!sdev->private)
+			return -ENOMEM;
+
+		ipc4_data = sdev->private;
+		ipc4_data->manifest_fw_hdr_offset = SOF_MAN4_FW_HDR_OFFSET;
+
+		/* doorbell */
+		sof_cnl_ops.irq_thread	= cnl_ipc4_irq_thread;
+
+		/* ipc */
+		sof_cnl_ops.send_msg	= cnl_ipc4_send_msg;
+	}
 
 	/* debug */
 	sof_cnl_ops.debug_map	= cnl_dsp_debugfs;
