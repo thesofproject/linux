@@ -42,5 +42,6 @@ extern const struct sof_ipc_ops ipc4_ops;
 extern const struct sof_ipc_fw_loader_ops ipc4_loader_ops;
 extern const struct sof_ipc_tplg_ops ipc4_tplg_ops;
 extern const struct sof_ipc_tplg_control_ops tplg_ipc4_control_ops;
+extern const struct sof_ipc_pcm_ops ipc4_pcm_ops;
 
 #endif
