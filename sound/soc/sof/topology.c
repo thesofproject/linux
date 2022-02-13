@@ -1778,13 +1778,12 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 		goto err;
 
 	/*
-	 * For virtual routes, both sink and source are not
-	 * buffer. Since only buffer linked to component is supported by
-	 * FW, others are reported as error, add check in route function,
-	 * do not send it to FW when both source and sink are not buffer
+	 * For virtual routes, both sink and source are not buffers. Since only buffer to
+	 * component or component to buffer type routes are supported by the FW with IPC3,
+	 * report others as error. IPC4 does not have this restriction.
 	 */
-	if (source_swidget->id != snd_soc_dapm_buffer &&
-	    sink_swidget->id != snd_soc_dapm_buffer) {
+	if (sdev->pdata->ipc_type == SOF_IPC && (source_swidget->id != snd_soc_dapm_buffer &&
+						 sink_swidget->id != snd_soc_dapm_buffer)) {
 		dev_dbg(scomp->dev, "warning: neither Linked source component %s nor sink component %s is of buffer type, ignoring link\n",
 			route->source, route->sink);
 		goto err;
