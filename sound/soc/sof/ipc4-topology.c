@@ -710,7 +710,7 @@ static int sof_ipc4_init_audio_fmt(struct snd_sof_dev *sdev,
 	int i;
 
 	dev_dbg(sdev->dev, "%s rate %d channels %d sample_valid_bytes %d direction %d\n",
-		__func__, params->rate, params->channels,
+		__func__, params->sample_rate, params->channels,
 		params->sample_valid_bytes, params->direction);
 
 	if (!available_fmt->audio_fmt_num) {
@@ -728,7 +728,7 @@ static int sof_ipc4_init_audio_fmt(struct snd_sof_dev *sdev,
 		rate = fmt->sampling_frequency;
 		channels = SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(fmt->fmt_cfg);
 		valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(fmt->fmt_cfg);
-		if (params->rate == rate && params->channels == channels &&
+		if (params->sample_rate == rate && params->channels == channels &&
 		    (params->sample_valid_bytes << 3) == valid_bits) {
 			dev_dbg(sdev->dev, "%s audio format matched %d rate %d channel %d valid_bits %d\n",
 				__func__, i, rate, channels, valid_bits);
@@ -747,7 +747,7 @@ static int sof_ipc4_init_audio_fmt(struct snd_sof_dev *sdev,
 
 	if (i == available_fmt->audio_fmt_num) {
 		dev_err(sdev->dev, "Unsupported rate %d channels %d sample_valid_bytes %d\n",
-			params->rate, params->channels, params->sample_valid_bytes);
+			params->sample_rate, params->channels, params->sample_valid_bytes);
 		return -EINVAL;
 	}
 
@@ -846,7 +846,7 @@ static int sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		return ret;
 
 	/* modify the input_params for the next widget */
-	input_params->rate = copier_data->out_format.sampling_frequency;
+	input_params->sample_rate = copier_data->out_format.sampling_frequency;
 	input_params->channels =
 		SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(copier_data->out_format.fmt_cfg);
 	input_params->sample_valid_bytes =
