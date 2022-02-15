@@ -26,8 +26,15 @@ static void sof_reset_route_setup_status(struct snd_sof_dev *sdev, struct snd_so
 			if (sroute->sink_widget == widget)
 				route_endpoint_widget = sroute->src_widget;
 
-			/* only free the route if the other endpoint widget's use_count is 0 */
-			if (route_endpoint_widget->use_count) {
+			/*
+			 * do not free routes when the route_endpoint_widget belongs to a different
+			 * pipeline and is in use by another pipeline as well. For ex: when two
+			 * pipelines are connected via a mixer and one of the pipelines is stopped
+			 * when the other one is still active, the route connecting the first
+			 * pipeline to the mixer should not be freed.
+			 */
+			if (route_endpoint_widget->pipeline_id != widget->pipeline_id &&
+			    route_endpoint_widget->use_count > 1) {
 				sroute->setup = false;
 				continue;
 			}
