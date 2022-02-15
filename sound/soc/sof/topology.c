@@ -1815,29 +1815,15 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 	    sink_swidget->id == snd_soc_dapm_output)
 		goto err;
 
-	/*
-	 * For virtual routes, both sink and source are not
-	 * buffer. Since only buffer linked to component is supported by
-	 * FW, others are reported as error, add check in route function,
-	 * do not send it to FW when both source and sink are not buffer
-	 */
-	if (source_swidget->id != snd_soc_dapm_buffer &&
-	    sink_swidget->id != snd_soc_dapm_buffer) {
-		dev_dbg(scomp->dev, "warning: neither Linked source component %s nor sink component %s is of buffer type, ignoring link\n",
-			route->source, route->sink);
-		goto err;
-	} else {
-		sroute->route = route;
-		dobj->private = sroute;
-		sroute->src_widget = source_swidget;
-		sroute->sink_widget = sink_swidget;
+	sroute->route = route;
+	dobj->private = sroute;
+	sroute->src_widget = source_swidget;
+	sroute->sink_widget = sink_swidget;
 
-		/* add route to route list */
-		list_add(&sroute->list, &sdev->route_list);
+	/* add route to route list */
+	list_add(&sroute->list, &sdev->route_list);
 
-		return 0;
-	}
-
+	return 0;
 err:
 	kfree(sroute);
 	return ret;
