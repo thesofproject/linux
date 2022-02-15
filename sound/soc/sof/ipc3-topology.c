@@ -2116,6 +2116,15 @@ static int sof_ipc3_set_up_all_pipelines(struct snd_sof_dev *sdev, bool verify)
 				sroute->sink_widget->dynamic_pipeline_widget))
 			continue;
 
+		/*
+		 * For virtual routes, both sink and source are not
+		 * buffer. IPC3 only supports connections between buffers and components. Ignore
+		 * the rest.
+		 */
+		if (sroute->src_widget->id != snd_soc_dapm_buffer &&
+		    sroute->sink_widget->id != snd_soc_dapm_buffer)
+			continue;
+
 		ret = sof_route_setup(sdev, sroute->src_widget->widget,
 				      sroute->sink_widget->widget);
 		if (ret < 0) {
