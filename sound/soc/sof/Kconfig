@@ -194,6 +194,14 @@ config SND_SOC_SOF_DEBUG_ENABLE_FIRMWARE_TRACE
 	  module parameter (similar to dynamic debug).
 	  If unsure, select "N".
 
+config SND_SOC_SOF_DEBUG_ENABLE_IPC4_FW_TRACE
+	bool "SOF enable ipc4 firmware trace"
+	help
+	  The ipc4 firmware trace can be enabled either at build-time with
+	  this option, or dynamically by setting flags in the SOF core
+	  module parameter (similar to dynamic debug).
+	  If unsure, select "N".
+
 config SND_SOC_SOF_DEBUG_IPC_FLOOD_TEST
 	tristate "SOF enable IPC flood test"
 	select SND_SOC_SOF_CLIENT
