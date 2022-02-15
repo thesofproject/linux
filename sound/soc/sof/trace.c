@@ -14,6 +14,7 @@
 #include "sof-audio.h"
 #include "ops.h"
 #include "sof-utils.h"
+#include "ipc4-trace.h"
 
 #define TRACE_FILTER_ELEMENTS_PER_ENTRY 4
 #define TRACE_FILTER_MAX_CONFIG_STRING_LENGTH 1024
@@ -599,13 +600,32 @@ out:
 
 void snd_sof_trace_suspend(struct snd_sof_dev *sdev, pm_message_t pm_state)
 {
-	snd_sof_release_trace(sdev, pm_state.event == SOF_DSP_PM_D0);
+	switch(sdev->pdata->ipc_type) {
+	case SOF_IPC:
+		snd_sof_release_trace(sdev, pm_state.event == SOF_DSP_PM_D0);
+		break;
+	case SOF_INTEL_IPC4:
+		sof_ipc4_disable_mtrace(sdev, SOF_IPC4_BASE_FW);
+		break;
+	default:
+		dev_err(sdev->dev, "Unknown ipc_type %d\n", sdev->pdata->ipc_type);
+		break;
+	}
 }
 EXPORT_SYMBOL(snd_sof_trace_suspend);
 
 int snd_sof_trace_resume(struct snd_sof_dev *sdev)
 {
-	return snd_sof_enable_trace(sdev);
+	switch(sdev->pdata->ipc_type) {
+	case SOF_IPC:
+		return snd_sof_enable_trace(sdev);
+	case SOF_INTEL_IPC4:
+		sof_ipc4_enable_mtrace(sdev, SOF_IPC4_BASE_FW);
+		return 0;
+	default:
+		dev_err(sdev->dev, "Unknown ipc_type %d\n", sdev->pdata->ipc_type);
+		return -EINVAL;
+	}
 }
 EXPORT_SYMBOL(snd_sof_trace_resume);
 
