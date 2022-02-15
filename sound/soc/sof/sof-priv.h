@@ -46,6 +46,7 @@
 #define SOF_DBG_DUMP_PCI		BIT(3)
 /* Output this dump (at the DEBUG level) only when SOF_DBG_PRINT_ALL_DUMPS is set */
 #define SOF_DBG_DUMP_OPTIONAL		BIT(4)
+#define SOF_DBG_ENABLE_MTRACE		BIT(8)
 
 /* global debug state set by SOF_DBG_ flags */
 bool sof_debug_check_flag(int mask);
@@ -560,6 +561,14 @@ struct snd_sof_dev {
 	enum sof_dtrace_state dtrace_state;
 
 	bool msi_enabled;
+
+	/* ipc4 trace */
+	bool mtrace_is_supported;
+	bool mtrace_is_enabled;
+	u32 mtrace_setting;
+	atomic_t use_count;
+	u32 host_read_ptr;
+	u32 dsp_write_ptr;
 
 	/* DSP core context */
 	u32 num_cores;
