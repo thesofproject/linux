@@ -14,6 +14,7 @@
 #include <sound/sof.h>
 #include "sof-priv.h"
 #include "ops.h"
+#include "ipc4-trace.h"
 
 /* see SOF_DBG_ flags */
 static int sof_core_debug =  IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_ENABLE_FIRMWARE_TRACE);
@@ -259,6 +260,16 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 			dev_warn(sdev->dev,
 				 "warning: failed to initialize trace %d\n",
 				 ret);
+		}
+	} else if (IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_ENABLE_IPC4_FW_TRACE) ||
+	    (sof_core_debug & SOF_DBG_ENABLE_MTRACE)) {
+		sdev->mtrace_is_supported = true;
+
+		/* init ipc4 trace */
+		ret = sof_ipc4_init_mtrace(sdev);
+		if (ret < 0) {
+			/* non fatal */
+			dev_warn(sdev->dev, "warning: failed to initialize ipc4 trace %d\n", ret);
 		}
 	} else {
 		dev_dbg(sdev->dev, "SOF firmware trace disabled\n");
