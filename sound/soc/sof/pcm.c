@@ -159,7 +159,7 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 	}
 
 	platform_params.sample_valid_bytes = params_width(params) >> 3;
-	platform_params.rate = params_rate(params);
+	platform_params.sample_rate = params_rate(params);
 	platform_params.channels = params_channels(params);
 	platform_params.direction = substream->stream;
 
@@ -177,7 +177,8 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 		platform_params.frame_fmt = SOF_IPC_FRAME_FLOAT;
 		break;
 	default:
-		break;
+		dev_err(component->dev, "invalid frame format %d failed\n", params_format(params));
+		return -EINVAL;
 	}
 
 	/* if this is a repeated hw_params without hw_free, skip setting up widgets */
