@@ -73,6 +73,17 @@ int sof_apl_ops_init(struct snd_sof_dev *sdev)
 
 		/* ipc */
 		sof_apl_ops.send_msg	= hda_dsp_ipc4_send_msg;
+
+		/* set DAI ops */
+		for (i = 0; i < sof_apl_ops.num_drv; i++) {
+			if (strstr(sof_apl_ops.drv[i].name, "DMIC"))
+				sof_apl_ops.drv[i].ops = &ipc4_dmic_dai_ops;
+
+			if (strstr(sof_apl_ops.drv[i].name, "iDisp") ||
+			    strstr(sof_apl_ops.drv[i].name, "Analog") ||
+			    strstr(sof_apl_ops.drv[i].name, "Digital"))
+				sof_apl_ops.drv[i].ops = &ipc4_hda_link_dai_ops;
+		}
 	}
 
 	/* debug */
