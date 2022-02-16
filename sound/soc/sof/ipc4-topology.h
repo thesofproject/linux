@@ -10,6 +10,7 @@
 #define __INCLUDE_SOUND_SOF_IPC4_TOPOLOGY_H__
 
 #include <sound/sof/ipc4/header.h>
+#include <uapi/sound/sof/header.h>
 
 #define SOF_IPC4_FW_PAGE_SIZE BIT(12)
 #define SOF_IPC4_FW_PAGE(x) ((((x) + BIT(12) - 1) & ~(BIT(12) - 1)) >> 12)
@@ -191,6 +192,4 @@ struct sof_ipc4_mixer {
 	struct sof_ipc4_available_audio_format available_fmt;
 	struct sof_ipc4_msg msg;
 };
-
-int sof_ipc4_set_pipeline_state(struct snd_sof_dev *sdev, u32 id, u32 state);
 #endif
