@@ -925,9 +925,23 @@ irqreturn_t sdw_cdns_irq(int irq, void *dev_id)
 	}
 
 	if (int_status & CDNS_MCP_INT_SLAVE_MASK) {
+
+		u32 slv_mask;
+
+		slv_mask = cdns_readl(cdns, CDNS_MCP_INTMASK);
+
+		/* FIXME: there must be a clever way to do this in one shot */
+		if (int_status & CDNS_MCP_INT_SLAVE_RSVD)
+			slv_mask &= ~CDNS_MCP_INT_SLAVE_RSVD;
+		if (int_status & CDNS_MCP_INT_SLAVE_ALERT)
+			slv_mask &= ~CDNS_MCP_INT_SLAVE_ALERT;
+		if (int_status & CDNS_MCP_INT_SLAVE_ATTACH)
+			slv_mask &= ~CDNS_MCP_INT_SLAVE_ATTACH;
+		if (int_status & CDNS_MCP_INT_SLAVE_NATTACH)
+			slv_mask &= ~CDNS_MCP_INT_SLAVE_NATTACH;
+
 		/* Mask the Slave interrupt and wake thread */
-		cdns_updatel(cdns, CDNS_MCP_INTMASK,
-			     CDNS_MCP_INT_SLAVE_MASK, 0);
+		cdns_writel(cdns, CDNS_MCP_INTMASK, slv_mask);
 
 		int_status &= ~CDNS_MCP_INT_SLAVE_MASK;
 
