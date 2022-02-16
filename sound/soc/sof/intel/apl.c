@@ -33,6 +33,8 @@ EXPORT_SYMBOL_NS(sof_apl_ops, SND_SOC_SOF_INTEL_HDA_COMMON);
 
 int sof_apl_ops_init(struct snd_sof_dev *sdev)
 {
+	int i;
+
 	/* common defaults */
 	memcpy(&sof_apl_ops, &sof_hda_common_ops, sizeof(struct snd_sof_dsp_ops));
 
@@ -45,6 +47,15 @@ int sof_apl_ops_init(struct snd_sof_dev *sdev)
 
 		/* ipc */
 		sof_apl_ops.send_msg	= hda_dsp_ipc_send_msg;
+
+		for (i = 0; i < sof_apl_ops.num_drv; i++) {
+			if (strstr(sof_apl_ops.drv[i].name, "SSP"))
+				sof_apl_ops.drv[i].ops = &ipc3_ssp_dai_ops;
+			if (strstr(sof_apl_ops.drv[i].name, "iDisp") ||
+			    strstr(sof_apl_ops.drv[i].name, "Analog") ||
+			    strstr(sof_apl_ops.drv[i].name, "Digital"))
+				sof_apl_ops.drv[i].ops = &ipc3_hda_link_dai_ops;
+		}
 	}
 
 	if (sdev->pdata->ipc_type == SOF_INTEL_IPC4) {

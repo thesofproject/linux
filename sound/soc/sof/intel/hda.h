@@ -713,6 +713,9 @@ int sof_tgl_ops_init(struct snd_sof_dev *sdev);
 extern struct snd_sof_dsp_ops sof_icl_ops;
 int sof_icl_ops_init(struct snd_sof_dev *sdev);
 
+extern const struct snd_soc_dai_ops ipc3_hda_link_dai_ops;
+extern const struct snd_soc_dai_ops ipc3_ssp_dai_ops;
+
 extern const struct sof_intel_dsp_desc skl_chip_info;
 extern const struct sof_intel_dsp_desc apl_chip_info;
 extern const struct sof_intel_dsp_desc cnl_chip_info;

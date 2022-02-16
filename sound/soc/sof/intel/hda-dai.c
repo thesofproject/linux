@@ -276,8 +276,8 @@ static int hda_link_dai_config_pause_push_ipc(struct snd_soc_dapm_widget *w)
 	return ret;
 }
 
-static int hda_link_pcm_trigger(struct snd_pcm_substream *substream,
-				int cmd, struct snd_soc_dai *dai)
+static int ipc3_hda_link_pcm_trigger(struct snd_pcm_substream *substream,
+				     int cmd, struct snd_soc_dai *dai)
 {
 	struct hdac_ext_stream *hext_stream =
 				snd_soc_dai_get_dma_data(dai, substream);
@@ -395,10 +395,10 @@ static int hda_link_hw_free(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static const struct snd_soc_dai_ops hda_link_dai_ops = {
+const struct snd_soc_dai_ops ipc3_hda_link_dai_ops = {
 	.hw_params = hda_link_hw_params,
 	.hw_free = hda_link_hw_free,
-	.trigger = hda_link_pcm_trigger,
+	.trigger = ipc3_hda_link_pcm_trigger,
 	.prepare = hda_link_pcm_prepare,
 };
 
@@ -478,8 +478,8 @@ static int ssp_dai_prepare(struct snd_pcm_substream *substream,
 	return ssp_dai_setup(substream, dai, true);
 }
 
-static int ssp_dai_trigger(struct snd_pcm_substream *substream,
-			   int cmd, struct snd_soc_dai *dai)
+static int ipc3_ssp_dai_trigger(struct snd_pcm_substream *substream,
+				int cmd, struct snd_soc_dai *dai)
 {
 	if (cmd != SNDRV_PCM_TRIGGER_SUSPEND)
 		return 0;
@@ -507,11 +507,11 @@ static void ssp_dai_shutdown(struct snd_pcm_substream *substream,
 	kfree(dma_data);
 }
 
-static const struct snd_soc_dai_ops ssp_dai_ops = {
+const struct snd_soc_dai_ops ipc3_ssp_dai_ops = {
 	.startup = ssp_dai_startup,
 	.hw_params = ssp_dai_hw_params,
 	.prepare = ssp_dai_prepare,
-	.trigger = ssp_dai_trigger,
+	.trigger = ipc3_ssp_dai_trigger,
 	.hw_free = ssp_dai_hw_free,
 	.shutdown = ssp_dai_shutdown,
 };
@@ -524,7 +524,6 @@ static const struct snd_soc_dai_ops ssp_dai_ops = {
 struct snd_soc_dai_driver skl_dai[] = {
 {
 	.name = "SSP0 Pin",
-	.ops = &ssp_dai_ops,
 	.playback = {
 		.channels_min = 1,
 		.channels_max = 8,
@@ -536,7 +535,6 @@ struct snd_soc_dai_driver skl_dai[] = {
 },
 {
 	.name = "SSP1 Pin",
-	.ops = &ssp_dai_ops,
 	.playback = {
 		.channels_min = 1,
 		.channels_max = 8,
@@ -548,7 +546,6 @@ struct snd_soc_dai_driver skl_dai[] = {
 },
 {
 	.name = "SSP2 Pin",
-	.ops = &ssp_dai_ops,
 	.playback = {
 		.channels_min = 1,
 		.channels_max = 8,
@@ -560,7 +557,6 @@ struct snd_soc_dai_driver skl_dai[] = {
 },
 {
 	.name = "SSP3 Pin",
-	.ops = &ssp_dai_ops,
 	.playback = {
 		.channels_min = 1,
 		.channels_max = 8,
@@ -572,7 +568,6 @@ struct snd_soc_dai_driver skl_dai[] = {
 },
 {
 	.name = "SSP4 Pin",
-	.ops = &ssp_dai_ops,
 	.playback = {
 		.channels_min = 1,
 		.channels_max = 8,
@@ -584,7 +579,6 @@ struct snd_soc_dai_driver skl_dai[] = {
 },
 {
 	.name = "SSP5 Pin",
-	.ops = &ssp_dai_ops,
 	.playback = {
 		.channels_min = 1,
 		.channels_max = 8,
@@ -611,7 +605,6 @@ struct snd_soc_dai_driver skl_dai[] = {
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
 {
 	.name = "iDisp1 Pin",
-	.ops = &hda_link_dai_ops,
 	.playback = {
 		.channels_min = 1,
 		.channels_max = 8,
@@ -619,7 +612,6 @@ struct snd_soc_dai_driver skl_dai[] = {
 },
 {
 	.name = "iDisp2 Pin",
-	.ops = &hda_link_dai_ops,
 	.playback = {
 		.channels_min = 1,
 		.channels_max = 8,
@@ -627,7 +619,6 @@ struct snd_soc_dai_driver skl_dai[] = {
 },
 {
 	.name = "iDisp3 Pin",
-	.ops = &hda_link_dai_ops,
 	.playback = {
 		.channels_min = 1,
 		.channels_max = 8,
@@ -635,7 +626,6 @@ struct snd_soc_dai_driver skl_dai[] = {
 },
 {
 	.name = "iDisp4 Pin",
-	.ops = &hda_link_dai_ops,
 	.playback = {
 		.channels_min = 1,
 		.channels_max = 8,
@@ -643,7 +633,6 @@ struct snd_soc_dai_driver skl_dai[] = {
 },
 {
 	.name = "Analog CPU DAI",
-	.ops = &hda_link_dai_ops,
 	.playback = {
 		.channels_min = 1,
 		.channels_max = 16,
@@ -655,7 +644,6 @@ struct snd_soc_dai_driver skl_dai[] = {
 },
 {
 	.name = "Digital CPU DAI",
-	.ops = &hda_link_dai_ops,
 	.playback = {
 		.channels_min = 1,
 		.channels_max = 16,
@@ -667,7 +655,6 @@ struct snd_soc_dai_driver skl_dai[] = {
 },
 {
 	.name = "Alt Analog CPU DAI",
-	.ops = &hda_link_dai_ops,
 	.playback = {
 		.channels_min = 1,
 		.channels_max = 16,

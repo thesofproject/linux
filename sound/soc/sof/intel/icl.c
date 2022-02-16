@@ -93,6 +93,8 @@ EXPORT_SYMBOL_NS(sof_icl_ops, SND_SOC_SOF_INTEL_HDA_COMMON);
 
 int sof_icl_ops_init(struct snd_sof_dev *sdev)
 {
+	int i;
+
 	/* common defaults */
 	memcpy(&sof_icl_ops, &sof_hda_common_ops, sizeof(struct snd_sof_dsp_ops));
 
@@ -119,6 +121,16 @@ int sof_icl_ops_init(struct snd_sof_dev *sdev)
 
 	/* dsp core get/put */
 	sof_icl_ops.core_get = hda_dsp_core_get;
+
+	/* set DAI ops */
+	for (i = 0; i < sof_icl_ops.num_drv; i++) {
+		if (strstr(sof_icl_ops.drv[i].name, "SSP"))
+			sof_icl_ops.drv[i].ops = &ipc3_ssp_dai_ops;
+		if (strstr(sof_icl_ops.drv[i].name, "iDisp") ||
+		    strstr(sof_icl_ops.drv[i].name, "Analog") ||
+		    strstr(sof_icl_ops.drv[i].name, "Digital"))
+			sof_icl_ops.drv[i].ops = &ipc3_hda_link_dai_ops;
+	}
 
 	return 0;
 };
