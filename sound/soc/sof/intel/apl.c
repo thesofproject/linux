@@ -47,6 +47,9 @@ int sof_apl_ops_init(struct snd_sof_dev *sdev)
 		sof_apl_ops.send_msg	= hda_dsp_ipc_send_msg;
 	}
 
+	/* set DAI driver ops */
+	hda_set_dai_drv_ops(sdev, &sof_apl_ops);
+
 	if (sdev->pdata->ipc_type == SOF_INTEL_IPC4) {
 		struct sof_ipc4_data *ipc4_data;
 
