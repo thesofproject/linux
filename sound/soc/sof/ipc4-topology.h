@@ -10,6 +10,7 @@
 #define __INCLUDE_SOUND_SOF_IPC4_TOPOLOGY_H__
 
 #include <sound/sof/ipc4/header.h>
+#include <uapi/sound/sof/header.h>
 
 #define SOF_IPC4_FW_PAGE_SIZE BIT(12)
 #define SOF_IPC4_FW_PAGE(x) ((((x) + BIT(12) - 1) & ~(BIT(12) - 1)) >> 12)
