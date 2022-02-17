@@ -793,6 +793,58 @@ static int sof_ipc4_init_audio_fmt(struct snd_sof_dev *sdev,
 	return i;
 }
 
+static int sof_ipc4_get_ssp_vendor_blob(struct snd_sof_dev *sdev, struct nhlt_endpoint *ep,
+				       uint32_t **dst, uint32_t *len)
+{
+	struct nhlt_specific_cfg cfg;
+	u8 *byte_p = (u8 *)ep;
+	struct nhlt_fmt *formats_config;
+	struct nhlt_fmt_cfg *fmt_cfg;
+	int i;
+
+	/* jump over possible specific config description */
+	cfg = ep->config;
+	byte_p += sizeof(struct nhlt_endpoint) + cfg.size;
+
+	/* jump over formats config */
+	formats_config = (struct nhlt_fmt *)byte_p;
+	dev_dbg(sdev->dev, "%s found %u formats", __func__, formats_config->fmt_count);
+	byte_p += sizeof(struct nhlt_fmt);
+
+	for (i = 0; i < formats_config->fmt_count; i++) {
+
+		fmt_cfg = (struct nhlt_fmt_cfg *)byte_p;
+
+		dev_dbg(sdev->dev, "%s fmt_tag %u", __func__, fmt_cfg->fmt_ext.fmt.fmt_tag);
+		dev_dbg(sdev->dev, "%s channels %u", __func__, fmt_cfg->fmt_ext.fmt.channels);
+		dev_dbg(sdev->dev, "%s samples_per_sec %u", __func__,
+			fmt_cfg->fmt_ext.fmt.samples_per_sec);
+		dev_dbg(sdev->dev, "%s avg_bytes_per_sec %u", __func__,
+			fmt_cfg->fmt_ext.fmt.avg_bytes_per_sec);
+		dev_dbg(sdev->dev, "%s block_align %u", __func__,
+			fmt_cfg->fmt_ext.fmt.block_align);
+		dev_dbg(sdev->dev, "%s bits_per_sample %u", __func__,
+			fmt_cfg->fmt_ext.fmt.bits_per_sample);
+		dev_dbg(sdev->dev, "%s cb_size %u", __func__,
+			fmt_cfg->fmt_ext.fmt.cb_size);
+		dev_dbg(sdev->dev, "%s valid_bits_per_sample %u", __func__,
+			fmt_cfg->fmt_ext.sample.valid_bits_per_sample);
+		dev_dbg(sdev->dev, "%s channel_mask %u", __func__,
+			fmt_cfg->fmt_ext.channel_mask);
+
+		/* finally we should be at vendor blob*/
+		cfg = fmt_cfg->config;
+		byte_p += sizeof(struct nhlt_fmt_cfg);
+		*dst = (uint32_t *)byte_p;
+		*len = cfg.size;
+		byte_p += cfg.size;
+
+		dev_dbg(sdev->dev, "%s found blob with length %u", __func__, *len);
+	}
+
+	return 0;
+}
+
 static int sof_ipc4_get_dmic_vendor_blob(struct snd_sof_dev *sdev, struct nhlt_endpoint *ep,
 					 u32 **dst, uint32_t *len)
 {
@@ -845,6 +897,10 @@ static int snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, u32 dai_inde
 			switch (linktype) {
 			case NHLT_LINK_DMIC:
 				ret = sof_ipc4_get_dmic_vendor_blob(sdev, ep, dst, len);
+				found = true;
+				break;
+			case NHLT_LINK_SSP:
+				ret = sof_ipc4_get_ssp_vendor_blob(sdev, ep, dst, len);
 				found = true;
 				break;
 			default:
@@ -972,7 +1028,8 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 
 		ref_params = pipeline_params;
 
-		dev_dbg(sdev->dev, "copier prepare search for dai_type");
+		dev_dbg(sdev->dev, "copier prepare search for dai_type %d index %d",
+			ipc4_copier->dai_type, ipc4_copier->dai_index);
 		switch (ipc4_copier->dai_type) {
 		case SOF_DAI_INTEL_DMIC:
 			if (snd_sof_get_nhlt_endpoint_data(sdev, 0, NHLT_LINK_DMIC,
@@ -981,6 +1038,17 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 				return -EINVAL;
 			/* at this point amount of dwords */
 			copier_data->gtw_cfg.config_length >>= 2;
+			break;
+		case SOF_DAI_INTEL_SSP:
+			if (snd_sof_get_nhlt_endpoint_data(sdev, ipc4_copier->dai_index,
+							   NHLT_LINK_SSP,
+							   &ipc4_copier->copier_config,
+							   &copier_data->gtw_cfg.config_length))
+				return -EINVAL;
+			/* at this point amount of dwords */
+			copier_data->gtw_cfg.config_length >>= 2;
+			copier_data->gtw_cfg.node_id &= ~(0xFF);
+			copier_data->gtw_cfg.node_id |= SOF_IPC4_NODE_INDEX(ipc4_copier->dai_index);
 			break;
 		default:
 			break;
