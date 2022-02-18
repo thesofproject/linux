@@ -110,6 +110,9 @@ int sof_tgl_ops_init(struct snd_sof_dev *sdev)
 
 		/* set DAI ops */
 		for (i = 0; i < sof_tgl_ops.num_drv; i++) {
+			if (strstr(sof_tgl_ops.drv[i].name, "SSP"))
+				sof_tgl_ops.drv[i].ops = &ipc4_ssp_dai_ops;
+
 			if (strstr(sof_tgl_ops.drv[i].name, "DMIC"))
 				sof_tgl_ops.drv[i].ops = &ipc4_dmic_dai_ops;
 

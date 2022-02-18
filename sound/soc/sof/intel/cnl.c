@@ -418,6 +418,9 @@ int sof_cnl_ops_init(struct snd_sof_dev *sdev)
 			if (strstr(sof_cnl_ops.drv[i].name, "DMIC"))
 				sof_cnl_ops.drv[i].ops = &ipc4_dmic_dai_ops;
 
+			if (strstr(sof_cnl_ops.drv[i].name, "SSP"))
+				sof_cnl_ops.drv[i].ops = &ipc4_ssp_dai_ops;
+
 			if (strstr(sof_cnl_ops.drv[i].name, "iDisp") ||
 			    strstr(sof_cnl_ops.drv[i].name, "Analog") ||
 			    strstr(sof_cnl_ops.drv[i].name, "Digital"))

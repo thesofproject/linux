@@ -717,6 +717,7 @@ extern const struct snd_soc_dai_ops ipc3_hda_link_dai_ops;
 extern const struct snd_soc_dai_ops ipc3_ssp_dai_ops;
 extern const struct snd_soc_dai_ops ipc4_hda_link_dai_ops;
 extern const struct snd_soc_dai_ops ipc4_dmic_dai_ops;
+extern const struct snd_soc_dai_ops ipc4_ssp_dai_ops;
 
 extern const struct sof_intel_dsp_desc skl_chip_info;
 extern const struct sof_intel_dsp_desc apl_chip_info;

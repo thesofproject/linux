@@ -613,8 +613,8 @@ const struct snd_soc_dai_ops ipc3_ssp_dai_ops = {
 	.shutdown = ssp_dai_shutdown,
 };
 
-static int ipc4_dmic_dai_trigger(struct snd_pcm_substream *substream,
-				 int cmd, struct snd_soc_dai *dai)
+static int ipc4_be_dai_trigger(struct snd_pcm_substream *substream,
+			       int cmd, struct snd_soc_dai *dai)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(dai->component);
 	struct snd_soc_dapm_widget *w;
@@ -662,8 +662,12 @@ static int ipc4_dmic_dai_trigger(struct snd_pcm_substream *substream,
 	return 0;
 }
 
+const struct snd_soc_dai_ops ipc4_ssp_dai_ops = {
+	.trigger = ipc4_be_dai_trigger,
+};
+
 const struct snd_soc_dai_ops ipc4_dmic_dai_ops = {
-	.trigger = ipc4_dmic_dai_trigger,
+	.trigger = ipc4_be_dai_trigger,
 };
 
 /*
