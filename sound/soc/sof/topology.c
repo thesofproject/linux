@@ -112,6 +112,7 @@ int sof_update_ipc_object(struct snd_soc_component *scomp, void *object, enum so
 
 					tokens[i].get_token((void *)tuples[j].value.s, object,
 							    tokens[i].offset + offset);
+					break;
 				}
 				default:
 					break;
