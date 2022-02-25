@@ -1588,8 +1588,15 @@ static int sof_link_load(struct snd_soc_component *scomp, int index, struct snd_
 	if (!slink)
 		return -ENOMEM;
 
-	slink->hw_configs = cfg->hw_config;
 	slink->num_hw_configs = le32_to_cpu(cfg->num_hw_configs);
+	slink->hw_configs = kmemdup(cfg->hw_config,
+				    sizeof(*slink->hw_configs) * slink->num_hw_configs,
+				    GFP_KERNEL);
+	if (!slink->hw_configs) {
+		kfree(slink);
+		return -ENOMEM;
+	}
+
 	slink->default_hw_cfg_id = le32_to_cpu(cfg->default_hw_config_id);
 	slink->link = link;
 
@@ -1601,6 +1608,7 @@ static int sof_link_load(struct snd_soc_component *scomp, int index, struct snd_
 			       private->array, le32_to_cpu(private->size));
 	if (ret < 0) {
 		dev_err(scomp->dev, "Failed tp parse common DAI link tokens\n");
+		kfree(slink->hw_configs);
 		kfree(slink);
 		return ret;
 	}
@@ -1651,6 +1659,7 @@ static int sof_link_load(struct snd_soc_component *scomp, int index, struct snd_
 	size = sizeof(struct snd_sof_tuple) * num_tuples;
 	slink->tuples = kzalloc(size, GFP_KERNEL);
 	if (!slink->tuples) {
+		kfree(slink->hw_configs);
 		kfree(slink);
 		return -ENOMEM;
 	}
@@ -1707,6 +1716,7 @@ out:
 
 err:
 	kfree(slink->tuples);
+	kfree(slink->hw_configs);
 	kfree(slink);
 
 	return ret;
@@ -1721,6 +1731,7 @@ static int sof_link_unload(struct snd_soc_component *scomp, struct snd_soc_dobj 
 
 	kfree(slink->tuples);
 	list_del(&slink->list);
+	kfree(slink->hw_configs);
 	kfree(slink);
 	dobj->private = NULL;
 
