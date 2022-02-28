@@ -1545,7 +1545,7 @@ static int sof_link_load(struct snd_soc_component *scomp, int index, struct snd_
 	struct snd_soc_tplg_private *private = &cfg->priv;
 	struct snd_sof_dai_link *slink;
 	size_t size;
-	u32 token_id;
+	u32 token_id = 0;
 	int num_tuples = 0;
 	int ret, num_sets;
 
@@ -1676,7 +1676,8 @@ static int sof_link_load(struct snd_soc_component *scomp, int index, struct snd_
 		}
 	}
 
-	if (!token_list[token_id].tokens)
+	/* nothing more to do if there are no DAI type-specific tokens defined */
+	if (!token_id || !token_list[token_id].tokens)
 		goto out;
 
 	/* parse "num_sets" sets of DAI-specific tokens */

@@ -1224,7 +1224,7 @@ static int sof_link_ssp_load(struct snd_soc_component *scomp, struct snd_sof_dai
 	struct snd_soc_tplg_hw_config *hw_config = slink->hw_configs;
 	struct sof_dai_private_data *private = dai->private;
 	u32 size = sizeof(*config);
-	int current_config;
+	int current_config = 0;
 	int i, ret;
 
 	/*
@@ -1402,7 +1402,6 @@ static int sof_ipc3_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 
 	private->comp_dai = sof_comp_alloc(swidget, &ipc_size, swidget->pipeline_id);
 	if (!private->comp_dai) {
-		kfree(private);
 		ret = -ENOMEM;
 		goto free;
 	}
