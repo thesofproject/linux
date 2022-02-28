@@ -385,7 +385,8 @@ static int sof_ipc3_set_get_data(struct snd_sof_dev *sdev, void *data, size_t da
 	size_t offset = 0;
 	u8 *src, *dst;
 	u32 num_msg;
-	int ret, i;
+	int ret = 0;
+	int i;
 
 	if (!cdata || data_bytes < sizeof(*cdata))
 		return -EINVAL;
