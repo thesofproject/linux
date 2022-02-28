@@ -213,8 +213,21 @@ static int sof_ipc3_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 	struct snd_interval *rate = hw_param_interval(params, SNDRV_PCM_HW_PARAM_RATE);
 	struct snd_mask *fmt = hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT);
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
-	struct sof_dai_private_data *private = dai->private;
+	struct sof_dai_private_data *private;
 	struct snd_soc_dpcm *dpcm;
+
+	if (!dai) {
+		dev_err(component->dev, "%s: No DAI found with name %s\n", __func__,
+			rtd->dai_link->name);
+		return -EINVAL;
+	}
+
+	private = dai->private;
+	if (!private) {
+		dev_err(component->dev, "%s: No private data found for DAI %s\n", __func__,
+			rtd->dai_link->name);
+		return -EINVAL;
+	}
 
 	/* read format from topology */
 	snd_mask_none(fmt);
