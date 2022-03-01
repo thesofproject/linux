@@ -1054,6 +1054,41 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 	if (ret < 0)
 		return ret;
 
+	switch (swidget->id) {
+	case snd_soc_dapm_dai_in:
+	case snd_soc_dapm_dai_out:
+	{
+		switch (ipc4_copier->dai_type) {
+		case SOF_DAI_INTEL_ALH:
+		{
+			struct sof_ipc4_alh_configuration_blob *blob;
+			u32 ch_map;
+			int i;
+
+			blob = kzalloc(sizeof(*blob), GFP_KERNEL);
+			if (!blob)
+				return -ENOMEM;
+
+			blob->alh_cfg.count = 1;
+			blob->alh_cfg.mapping[0].alh_id = copier_data->gtw_cfg.node_id;
+			blob->gw_attr.lp_buffer_alloc = 0;
+			copier_data->gtw_cfg.config_length = sizeof(*blob) >> 2;
+
+			/* Get channel_mask from ch_map */
+			ch_map = copier_data->base_config.audio_fmt.ch_map;
+			for (i = 0; ch_map > 0; i++) {
+				if ((ch_map & 0xf) != 0xf)
+					 blob->alh_cfg.mapping[0].channel_mask |= BIT(i);
+				ch_map >>= 4;
+			}
+
+			ipc4_copier->copier_config = (uint32_t *)blob;
+			break;
+		}
+		}
+	}
+	}
+
 	/* modify the input params for the next widget */
 	fmt = hw_param_mask(pipeline_params, SNDRV_PCM_HW_PARAM_FORMAT);
 	out_sample_valid_bits =
@@ -1098,6 +1133,10 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 	if (copier_data->gtw_cfg.config_length)
 		memcpy(*ipc_config_data + sizeof(*copier_data),
 		       *data, copier_data->gtw_cfg.config_length * 4);
+
+	/* copier_config is no longer needed after memcpy */
+	kfree(ipc4_copier->copier_config);
+	ipc4_copier->copier_config = NULL;
 
 	/* update pipeline memory usage */
 	sof_ipc4_update_pipeline_mem_usage(sdev, swidget, &copier_data->base_config);
