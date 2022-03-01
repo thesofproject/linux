@@ -476,6 +476,18 @@ static int sof_ipc4_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 	ipc4_copier->data.gtw_cfg.node_id = SOF_IPC4_NODE_TYPE(node_type);
 
 	switch (ipc4_copier->dai_type) {
+	case SOF_DAI_INTEL_ALH:
+	{
+		struct sof_ipc4_alh_configuration_blob *blob;
+		blob = kzalloc(sizeof(*blob), GFP_KERNEL);
+		if (!blob) {
+			ret = -ENOMEM;
+			goto err;
+		}
+
+		ipc4_copier->copier_config = (uint32_t *)blob;
+		break;
+	}
 	case SOF_DAI_INTEL_SSP:
 		/* set SSP DAI index as the node_id */
 		ipc4_copier->data.gtw_cfg.node_id |=
@@ -1043,6 +1055,36 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 				      available_fmt, ref_audio_fmt_size);
 	if (ret < 0)
 		return ret;
+
+	switch (swidget->id) {
+	case snd_soc_dapm_dai_in:
+	case snd_soc_dapm_dai_out:
+	{
+		switch (ipc4_copier->dai_type) {
+		case SOF_DAI_INTEL_ALH:
+		{
+			struct sof_ipc4_alh_configuration_blob *blob;
+			u32 ch_map;
+			int i;
+
+			blob = (struct sof_ipc4_alh_configuration_blob *)ipc4_copier->copier_config;
+			blob->alh_cfg.count = 1;
+			blob->alh_cfg.mapping[0].alh_id = copier_data->gtw_cfg.node_id;
+			blob->gw_attr.lp_buffer_alloc = 0;
+			copier_data->gtw_cfg.config_length = sizeof(*blob) >> 2;
+
+			/* Get channel_mask from ch_map */
+			ch_map = copier_data->base_config.audio_fmt.ch_map;
+			for (i = 0; ch_map > 0; i++) {
+				if ((ch_map & 0xf) != 0xf)
+					 blob->alh_cfg.mapping[0].channel_mask |= BIT(i);
+				ch_map >>= 4;
+			}
+			break;
+		}
+		}
+	}
+	}
 
 	/* modify the input params for the next widget */
 	fmt = hw_param_mask(pipeline_params, SNDRV_PCM_HW_PARAM_FORMAT);
