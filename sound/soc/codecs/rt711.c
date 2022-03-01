@@ -245,10 +245,13 @@ static void rt711_jack_detect_handler(struct work_struct *work)
 	if (!rt711->component->card->instantiated)
 		return;
 
+	dev_info(&rt711->slave->dev, "%s: reading jack status\n", __func__);
 	reg = RT711_VERB_GET_PIN_SENSE | RT711_HP_OUT;
 	ret = regmap_read(rt711->regmap, reg, &jack_status);
-	if (ret < 0)
+	if (ret < 0) {
+		dev_err(&rt711->slave->dev, "%s: reading jack status failed\n", __func__);
 		goto io_error;
+	}
 
 	/* pin attached */
 	if (jack_status & (1 << 31)) {
@@ -292,7 +295,7 @@ static void rt711_jack_detect_handler(struct work_struct *work)
 	return;
 
 io_error:
-	pr_err_ratelimited("IO error in %s, ret %d\n", __func__, ret);
+	dev_err_ratelimited(&rt711->slave->dev, "IO error in %s, ret %d\n", __func__, ret);
 }
 
 static void rt711_btn_check_handler(struct work_struct *work)
