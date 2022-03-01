@@ -9,6 +9,7 @@
  * Hardware interface for audio DSP on Tigerlake.
  */
 
+#include <sound/sof/ipc4/header.h>
 #include <sound/sof/ext_manifest4.h>
 #include "../ipc4-priv.h"
 #include "../ops.h"
@@ -60,6 +61,47 @@ static int tgl_dsp_core_put(struct snd_sof_dev *sdev, int core)
 				 &pm_core_config, sizeof(pm_core_config));
 }
 
+// Fred: WIP: IPC4 multicore
+// Move to header file?
+struct sof_ipc4_dx_info {
+	u32 core_mask;
+	u32 dx_mask;
+};
+
+static int tgl_dsp_ipc4_core_get(struct snd_sof_dev *sdev, int core)
+{
+	struct sof_ipc4_msg msg;
+	struct sof_ipc4_dx_info dx_info;
+
+	dx_info.core_mask = BIT(core);
+	dx_info.dx_mask = BIT(core);
+	msg.primary = SOF_IPC4_MSG_TYPE_SET(SOF_IPC4_MOD_SET_DX);
+	msg.primary |= SOF_IPC4_MSG_DIR(SOF_IPC4_MSG_REQUEST);
+	msg.primary |= SOF_IPC4_MSG_TARGET(SOF_IPC4_MODULE_MSG);
+	msg.data_ptr = &dx_info;
+	msg.data_size = sizeof(dx_info);
+
+	/* now send the iPC */
+	return sof_ipc_tx_message(sdev->ipc, &msg, 0, NULL, 0);
+}
+
+static int tgl_dsp_ipc4_core_put(struct snd_sof_dev *sdev, int core)
+{
+	struct sof_ipc4_msg msg;
+	struct sof_ipc4_dx_info dx_info;
+
+	dx_info.core_mask = BIT(core);
+	dx_info.dx_mask = ~BIT(core);
+	msg.primary = SOF_IPC4_MSG_TYPE_SET(SOF_IPC4_MOD_SET_DX);
+	msg.primary |= SOF_IPC4_MSG_DIR(SOF_IPC4_MSG_REQUEST);
+	msg.primary |= SOF_IPC4_MSG_TARGET(SOF_IPC4_MODULE_MSG);
+	msg.data_ptr = &dx_info;
+	msg.data_size = sizeof(dx_info);
+
+	/* now send the iPC */
+	return sof_ipc_tx_message(sdev->ipc, &msg, 0, NULL, 0);
+}
+
 /* Tigerlake ops */
 struct snd_sof_dsp_ops sof_tgl_ops;
 EXPORT_SYMBOL_NS(sof_tgl_ops, SND_SOC_SOF_INTEL_HDA_COMMON);
@@ -78,6 +120,10 @@ int sof_tgl_ops_init(struct snd_sof_dev *sdev)
 
 		/* ipc */
 		sof_tgl_ops.send_msg	= cnl_ipc_send_msg;
+
+		/* dsp core get/put */
+		sof_tgl_ops.core_get = tgl_dsp_core_get;
+		sof_tgl_ops.core_put = tgl_dsp_core_put;
 	}
 
 	if (sdev->pdata->ipc_type == SOF_INTEL_IPC4) {
@@ -95,6 +141,10 @@ int sof_tgl_ops_init(struct snd_sof_dev *sdev)
 
 		/* ipc */
 		sof_tgl_ops.send_msg	= cnl_ipc4_send_msg;
+
+		/* dsp core get/put */
+		sof_tgl_ops.core_get = tgl_dsp_ipc4_core_get;
+		sof_tgl_ops.core_put = tgl_dsp_ipc4_core_put;
 	}
 
 	/* set DAI driver ops */
@@ -110,10 +160,6 @@ int sof_tgl_ops_init(struct snd_sof_dev *sdev)
 
 	/* firmware run */
 	sof_tgl_ops.run = hda_dsp_cl_boot_firmware_iccmax;
-
-	/* dsp core get/put */
-	sof_tgl_ops.core_get = tgl_dsp_core_get;
-	sof_tgl_ops.core_put = tgl_dsp_core_put;
 
 	return 0;
 };
