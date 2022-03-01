@@ -248,5 +248,4 @@ struct sof_ipc4_src {
 	struct sof_ipc4_available_audio_format available_fmt;
 	struct sof_ipc4_msg msg;
 };
-
 #endif
