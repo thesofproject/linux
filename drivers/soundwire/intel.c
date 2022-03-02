@@ -1005,8 +1005,12 @@ static int intel_trigger(struct snd_pcm_substream *substream, int cmd, struct sn
 {
 	struct sdw_cdns *cdns = snd_soc_dai_get_drvdata(dai);
 	struct sdw_intel *sdw = cdns_to_intel(cdns);
+	struct sdw_intel_link_res *res = sdw->link_res;
 	struct sdw_cdns_dma_data *dma;
 	int ret = 0;
+
+	if (res->ops && res->ops->trigger)
+		res->ops->trigger(substream, cmd, dai);
 
 	dma = snd_soc_dai_get_dma_data(dai, substream);
 	if (!dma) {
