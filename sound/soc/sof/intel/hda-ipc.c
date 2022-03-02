@@ -15,6 +15,7 @@
  * Hardware interface for generic Intel audio DSP HDA IP
  */
 
+#include <sound/sof/ipc4/header.h>
 #include "../ops.h"
 #include "hda.h"
 
@@ -65,6 +66,22 @@ int hda_dsp_ipc_send_msg(struct snd_sof_dev *sdev, struct snd_sof_ipc_msg *msg)
 	return 0;
 }
 
+int hda_dsp_ipc4_send_msg(struct snd_sof_dev *sdev, struct snd_sof_ipc_msg *msg)
+{
+	struct sof_ipc4_msg *msg_data = msg->msg_data;
+
+	/* send the message via mailbox */
+	if (msg_data->data_size)
+		sof_mailbox_write(sdev, sdev->host_box.offset, msg_data->data_ptr,
+				  msg_data->data_size);
+
+	snd_sof_dsp_write(sdev, HDA_DSP_BAR, HDA_DSP_REG_HIPCIE, msg_data->extension);
+	snd_sof_dsp_write(sdev, HDA_DSP_BAR, HDA_DSP_REG_HIPCI,
+			  msg_data->primary | HDA_DSP_REG_HIPCI_BUSY);
+
+	return 0;
+}
+
 void hda_dsp_ipc_get_reply(struct snd_sof_dev *sdev)
 {
 	struct snd_sof_ipc_msg *msg = sdev->msg;
@@ -98,6 +115,80 @@ void hda_dsp_ipc_get_reply(struct snd_sof_dev *sdev)
 	} else {
 		snd_sof_ipc_get_reply(sdev);
 	}
+}
+
+irqreturn_t hda_dsp_ipc4_irq_thread(int irq, void *context)
+{
+	struct snd_sof_dev *sdev = context;
+	u32 hipcie;
+	u32 hipct;
+	u32 hipcte;
+	bool ipc_irq = false;
+
+	/* read IPC status */
+	hipcie = snd_sof_dsp_read(sdev, HDA_DSP_BAR, HDA_DSP_REG_HIPCIE);
+	hipct = snd_sof_dsp_read(sdev, HDA_DSP_BAR, HDA_DSP_REG_HIPCT);
+	hipcte = snd_sof_dsp_read(sdev, HDA_DSP_BAR, HDA_DSP_REG_HIPCTE);
+
+	if (hipcie & HDA_DSP_REG_HIPCIE_DONE)
+		/* mask Done interrupt */
+		snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR, HDA_DSP_REG_HIPCCTL,
+					HDA_DSP_REG_HIPCCTL_DONE, 0);
+
+	/* is this a new message from DSP */
+	if (hipct & HDA_DSP_REG_HIPCT_BUSY) {
+		u32 msg = hipct & HDA_DSP_REG_HIPCT_MSG_MASK;
+		u32 msg_ext = hipcte & HDA_DSP_REG_HIPCTE_MSG_MASK;
+
+		/* mask BUSY interrupt */
+		snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR, HDA_DSP_REG_HIPCCTL,
+					HDA_DSP_REG_HIPCCTL_BUSY, 0);
+
+		if (hipct & SOF_IPC4_MSG_DIR_MASK) {
+			struct sof_ipc4_msg *data = sdev->ipc->msg.reply_data;
+
+			data->primary = msg;
+			data->extension = msg_ext;
+
+			/*
+			 * Make sure the interrupt thread cannot be preempted
+			 * between waking up the sender and re-enabling the
+			 * interrupt. Also protect against a theoretical race
+			 * with sof_ipc_tx_message():
+			 * if the DSP is fast enough to receive an IPC message,
+			 * reply to it, and the host interrupt processing calls
+			 * this function on a different core from the one, where
+			 * the sending is taking place, the message might not
+			 * yet be marked as expecting a reply.
+			 */
+			spin_lock_irq(&sdev->ipc_lock);
+
+			snd_sof_ipc_get_reply(sdev);
+			snd_sof_ipc_reply(sdev, data->primary);
+
+			/* set the done bit */
+			hda_dsp_ipc_dsp_done(sdev);
+
+			spin_unlock_irq(&sdev->ipc_lock);
+		} else {
+			struct sof_ipc4_msg data = {{ 0 }};
+
+			data.primary = msg;
+			data.extension = msg_ext;
+			sdev->ipc->msg.rx_data = &data;
+			snd_sof_ipc_msgs_rx(sdev);
+		}
+
+		hda_dsp_ipc_host_done(sdev);
+
+		ipc_irq = true;
+	}
+
+	if (!ipc_irq)
+		/* This interrupt is not shared so no need to return IRQ_NONE. */
+		dev_dbg_ratelimited(sdev->dev, "nothing to do in IPC IRQ thread\n");
+
+	return IRQ_HANDLED;
 }
 
 /* IPC handler thread */
