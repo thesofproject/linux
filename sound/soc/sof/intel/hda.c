@@ -147,7 +147,7 @@ static int sdw_free_stream(struct device *dev,
 	return hda_ctrl_dai_widget_free(w, SOF_DAI_CONFIG_FLAGS_NONE, &data);
 }
 
-static const struct sdw_intel_ops sdw_callback = {
+static struct sdw_intel_ops sdw_callback = {
 	.params_stream = sdw_params_stream,
 	.free_stream = sdw_free_stream,
 };
@@ -184,6 +184,10 @@ static int hda_sdw_probe(struct snd_sof_dev *sdev)
 	hdev = sdev->pdata->hw_pdata;
 
 	memset(&res, 0, sizeof(res));
+
+	/* sdw trigger callback is only needed for IPC4 */
+	if (sdev->pdata->ipc_type == SOF_INTEL_IPC4)
+		sdw_callback.trigger = ipc4_be_dai_trigger;
 
 	res.mmio_base = sdev->bar[HDA_DSP_BAR];
 	res.shim_base = hdev->desc->sdw_shim_base;
