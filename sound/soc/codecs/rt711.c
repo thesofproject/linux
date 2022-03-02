@@ -429,6 +429,8 @@ static void rt711_jack_init(struct rt711_priv *rt711)
 
 		dev_dbg(&rt711->slave->dev, "in %s enable\n", __func__);
 
+		dev_dbg(&rt711->slave->dev, "%s: plb: scheduling jack detect work\n", __func__);
+
 		mod_delayed_work(system_power_efficient_wq,
 			&rt711->jack_detect_work, msecs_to_jiffies(250));
 	} else {

@@ -425,6 +425,8 @@ static int rt711_interrupt_callback(struct sdw_slave *slave,
 
 	mutex_lock(&rt711->disable_irq_lock);
 	if (status->control_port & 0x4 && !rt711->disable_irq) {
+		dev_dbg(&slave->dev, "%s: plb: scheduling jack detect work with interrupts enabled\n", __func__);
+
 		mod_delayed_work(system_power_efficient_wq,
 			&rt711->jack_detect_work, msecs_to_jiffies(250));
 	}
@@ -483,14 +485,20 @@ static int __maybe_unused rt711_dev_suspend(struct device *dev)
 {
 	struct rt711_priv *rt711 = dev_get_drvdata(dev);
 
+	dev_dbg(dev, "%s: plb: start\n", __func__);
 	if (!rt711->hw_init)
 		return 0;
 
+	dev_dbg(dev, "%s: plb: canceling jack_detect_work\n", __func__);
 	cancel_delayed_work_sync(&rt711->jack_detect_work);
+	dev_dbg(dev, "%s: plb: canceling jack_detect_work done\n", __func__);
+
 	cancel_delayed_work_sync(&rt711->jack_btn_check_work);
 	cancel_work_sync(&rt711->calibration_work);
 
 	regcache_cache_only(rt711->regmap, true);
+
+	dev_dbg(dev, "%s: plb: done\n", __func__);
 
 	return 0;
 }
@@ -504,6 +512,8 @@ static int __maybe_unused rt711_dev_system_suspend(struct device *dev)
 	if (!rt711->hw_init)
 		return 0;
 
+	dev_dbg(dev, "%s: plb: start\n", __func__);
+
 	/*
 	 * prevent new interrupts from being handled after the
 	 * deferred work completes and before the parent disables
@@ -511,6 +521,8 @@ static int __maybe_unused rt711_dev_system_suspend(struct device *dev)
 	 */
 	mutex_lock(&rt711->disable_irq_lock);
 	rt711->disable_irq = true;
+	dev_dbg(dev, "%s: plb: interrupts disabled\n", __func__);
+
 	ret = sdw_update_no_pm(slave, SDW_SCP_INTMASK1,
 			       SDW_SCP_INT1_IMPL_DEF, 0);
 	mutex_unlock(&rt711->disable_irq_lock);
@@ -520,7 +532,12 @@ static int __maybe_unused rt711_dev_system_suspend(struct device *dev)
 		dev_dbg(&slave->dev, "%s: could not disable imp-def interrupts\n:", __func__);
 	}
 
-	return rt711_dev_suspend(dev);
+	ret = rt711_dev_suspend(dev);
+
+	dev_dbg(dev, "%s: plb: done\n", __func__);
+
+	return ret;
+
 }
 
 #define RT711_PROBE_TIMEOUT 5000
@@ -530,6 +547,8 @@ static int __maybe_unused rt711_dev_resume(struct device *dev)
 	struct sdw_slave *slave = dev_to_sdw_dev(dev);
 	struct rt711_priv *rt711 = dev_get_drvdata(dev);
 	unsigned long time;
+
+	dev_dbg(dev, "%s: plb: start\n", __func__);
 
 	if (!rt711->first_hw_init)
 		return 0;
@@ -549,6 +568,8 @@ regmap_sync:
 	regcache_cache_only(rt711->regmap, false);
 	regcache_sync_region(rt711->regmap, 0x3000, 0x8fff);
 	regcache_sync_region(rt711->regmap, 0x752009, 0x752091);
+
+	dev_dbg(dev, "%s: plb: done\n", __func__);
 
 	return 0;
 }
