@@ -145,6 +145,9 @@ int sof_tgl_ops_init(struct snd_sof_dev *sdev)
 		/* dsp core get/put */
 		sof_tgl_ops.core_get = tgl_dsp_ipc4_core_get;
 		sof_tgl_ops.core_put = tgl_dsp_ipc4_core_put;
+
+		/* module library */
+		sof_tgl_ops.load_library = hda_dsp_ipc4_load_library;
 	}
 
 	/* set DAI driver ops */

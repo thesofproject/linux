@@ -183,6 +183,7 @@ struct snd_sof_dsp_ops {
 	int (*load_firmware)(struct snd_sof_dev *sof_dev); /* mandatory */
 	int (*load_module)(struct snd_sof_dev *sof_dev,
 			   struct snd_sof_mod_hdr *hdr); /* optional */
+	int (*load_library)(struct snd_sof_dev *sdev, struct firmware *fw, u32 id); /* optional */
 
 	/* connect pcm substream to a host stream */
 	int (*pcm_open)(struct snd_sof_dev *sdev,
@@ -380,12 +381,14 @@ struct sof_ipc_pm_ops {
  * @query_fw_configuration: Optional function pointer to query information and
  *			configuration from the booted firmware.
  *			Executed after the first succesfull firmware boot.
+ * @load_library: Optional function pointer to load libraries for 3rd party modules
  */
 struct sof_ipc_fw_loader_ops {
 	int (*validate)(struct snd_sof_dev *sdev);
 	size_t (*parse_ext_manifest)(struct snd_sof_dev *sdev);
 	int (*load_fw_to_dsp)(struct snd_sof_dev *sdev);
 	void (*query_fw_configuration)(struct snd_sof_dev *sdev);
+	int (*load_library)(struct snd_sof_dev *sdev, u8 uuid[UUID_SIZE]);
 };
 
 struct sof_ipc_tplg_ops;

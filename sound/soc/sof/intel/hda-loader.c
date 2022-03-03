@@ -19,6 +19,7 @@
 #include <sound/hdaudio_ext.h>
 #include <sound/hda_register.h>
 #include <sound/sof.h>
+#include <sound/sof/ipc4/header.h>
 #include "ext_manifest.h"
 #include "../ops.h"
 #include "../sof-priv.h"
@@ -384,6 +385,58 @@ static int hda_dsp_boot_imr(struct snd_sof_dev *sdev)
 
 	/* process wakes */
 	hda_sdw_process_wakeen(sdev);
+
+	return ret;
+}
+
+int hda_dsp_ipc4_load_library(struct snd_sof_dev *sdev, struct firmware *stripped_firmware, u32 id)
+{
+	struct hdac_ext_stream *hext_stream;
+	struct snd_dma_buffer dmab;
+	struct sof_ipc4_msg msg;
+	int ret, ret1;
+
+	/* prepare DMA for code loader stream */
+	hext_stream = hda_cl_stream_prepare(sdev, HDA_CL_STREAM_FORMAT,
+					    stripped_firmware->size,
+					    &dmab, SNDRV_PCM_STREAM_PLAYBACK);
+	if (IS_ERR(hext_stream)) {
+		dev_err(sdev->dev, "%s: dma prepare for library loading failed\n", __func__);
+		return PTR_ERR(hext_stream);
+	}
+
+	memcpy(dmab.area, stripped_firmware->data, stripped_firmware->size);
+
+	msg.primary = hext_stream->hstream.stream_tag - 1;
+	msg.primary |= SOF_IPC4_MSG_TYPE_SET(SOF_IPC4_GLB_LOAD_LIBRARY);
+	msg.primary |= SOF_IPC4_MSG_DIR(SOF_IPC4_MSG_REQUEST);
+	msg.primary |= SOF_IPC4_MSG_TARGET(SOF_IPC4_FW_GEN_MSG);
+	msg.primary |= SOF_IPC4_GLB_LOAD_LIBRARY_LIB_ID(id);
+
+	ret = cl_trigger(sdev, hext_stream, SNDRV_PCM_TRIGGER_START);
+	if (ret < 0) {
+		dev_err(sdev->dev, "%s: DMA trigger start failed\n", __func__);
+		return ret;
+	}
+
+	ret = sof_ipc_tx_message(sdev->ipc, &msg, 0, NULL, 0);
+
+	ret1 = cl_trigger(sdev, hext_stream, SNDRV_PCM_TRIGGER_STOP);
+	if (ret1 < 0) {
+		dev_err(sdev->dev, "%s: DMA trigger stop failed\n", __func__);
+		if (!ret)
+			ret = ret1;
+	}
+
+	/* clean up even in case of error and return the first error */
+	ret1 = hda_cl_cleanup(sdev, &dmab, hext_stream);
+	if (ret1 < 0) {
+		dev_err(sdev->dev, "%s: Code loader DSP cleanup failed\n", __func__);
+
+		/* set return value to indicate cleanup failure */
+		if (!ret)
+			ret = ret1;
+	}
 
 	return ret;
 }
