@@ -94,13 +94,14 @@ static int sof_ipc4_check_reply_status(struct snd_sof_dev *sdev, u32 status)
 
 	for (i = 0; i < ARRAY_SIZE(ipc4_status); i++) {
 		if (ipc4_status[i].status == status) {
-			dev_err(sdev->dev, "FW reported error: %s\n", ipc4_status[i].msg);
+			dev_err(sdev->dev, "FW reported error: %u - %s\n",
+				status, ipc4_status[i].msg);
 			goto to_errno;
 		}
 	}
 
 	if (i == ARRAY_SIZE(ipc4_status))
-		dev_err(sdev->dev, "FW reported unknown error, status = %d\n", status);
+		dev_err(sdev->dev, "FW reported error: %u - Unknown\n", status);
 
 to_errno:
 	switch (status) {
