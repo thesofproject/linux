@@ -142,6 +142,7 @@ static int sof_ipc4_validate_firmware(struct snd_sof_dev *sdev)
 static void sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev)
 {
 	const struct sof_ipc_ops *iops = sdev->ipc->ops;
+	struct sof_ipc4_data *ipc4_data = sdev->private;
 	struct sof_ipc4_fw_version *fw_ver;
 	struct sof_ipc4_tuple *tuple;
 	struct sof_ipc4_msg msg;
@@ -185,6 +186,13 @@ static void sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev)
 			break;
 		case SOF_IPC4_FW_CFG_TRACE_LOG_BYTES:
 			dev_vdbg(sdev->dev, "Trace log size: %u\n", *tuple->value);
+			break;
+		case SOF_IPC4_FW_CFG_MAX_LIBS_COUNT:
+			ipc4_data->max_fw_libs = *tuple->value;
+			ipc4_data->fw_lib_names = devm_kcalloc(sdev->dev, ipc4_data->max_fw_libs,
+							       LIBRARY_FILENAME_LEN, GFP_KERNEL);
+
+			/* TODO: check if mem alloc is successful and return err */
 			break;
 		default:
 			break;
