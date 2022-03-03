@@ -116,9 +116,9 @@ enum sof_ipc4_global_msg {
 	/* Notification (FW to SW driver) */
 	SOF_IPC4_GLB_NOTIFICATION,
 
-	/* 28 .. 30: RESERVED - do not use */
+	/* 28 .. 31: RESERVED - do not use */
 
-	SOF_IPC4_GLB_MAX_IXC_MESSAGE_TYPE = 31
+	SOF_IPC4_GLB_TYPE_LAST,
 };
 
 /* Value of response field - must fit into 1 bit */
@@ -263,6 +263,8 @@ enum sof_ipc4_module_type {
 	SOF_IPC4_MOD_ENTER_MODULE_RESTORE,
 	SOF_IPC4_MOD_EXIT_MODULE_RESTORE,
 	SOF_IPC4_MOD_DELETE_INSTANCE,
+
+	SOF_IPC4_MOD_TYPE_LAST,
 };
 
 struct sof_ipc4_base_module_cfg {
@@ -426,6 +428,8 @@ enum sof_ipc4_notification_type {
 	SOF_IPC4_NOTIFY_PROBE_DATA_AVAILABLE = 14,
 	/* AM module notifications */
 	SOF_IPC4_NOTIFY_ASYNC_MSG_SRVC_MESSAGE,
+
+	SOF_IPC4_NOTIFY_TYPE_LAST,
 };
 
 struct sof_ipc4_notify_resource_data {
