@@ -182,19 +182,21 @@ static void sof_ipc4_log_header(struct device *dev, u8 *text, struct sof_ipc4_ms
 {
 	u32 val, type;
 	const u8 *str2 = NULL;
-	const u8 *str;
+	const u8 *str = NULL;
 
 	val = msg->primary & SOF_IPC4_MSG_TARGET_MASK;
 	type = SOF_IPC4_MSG_TYPE_GET(msg->primary);
 
 	if (val == SOF_IPC4_MSG_TARGET(SOF_IPC4_MODULE_MSG)) {
 		/* Module message */
-		str = ipc4_dbg_mod_msg_type[type];
+		if (type < SOF_IPC4_MOD_TYPE_LAST)
+			str = ipc4_dbg_mod_msg_type[type];
 		if (!str)
 			str = "Unknown Module message type";
 	} else {
 		/* Global FW message */
-		str = ipc4_dbg_glb_msg_type[type];
+		if (type < SOF_IPC4_GLB_TYPE_LAST)
+			str = ipc4_dbg_glb_msg_type[type];
 		if (!str)
 			str = "Unknown Global message type";
 
@@ -202,7 +204,8 @@ static void sof_ipc4_log_header(struct device *dev, u8 *text, struct sof_ipc4_ms
 			/* Notification message */
 			u32 notif = SOF_IPC4_NOTIFICATION_TYPE_GET(msg->primary);
 
-			str2 = ipc4_dbg_notification_type[notif];
+			if (notif < SOF_IPC4_NOTIFY_TYPE_LAST)
+				str2 = ipc4_dbg_notification_type[notif];
 			if (!str2)
 				str2 = "Unknown Global notification";
 		}
