@@ -91,7 +91,7 @@ struct sof_ipc4_copier_data {
 };
 
 /**
- * struct sof_gtw_attributes: Gateway attributes
+ * struct sof_ipc4_gtw_attributes: Gateway attributes
  * @lp_buffer_alloc: Gateway data requested in low power memory
  * @alloc_from_reg_file: Gateway data requested in register file memory
  * @rsvd: reserved for future use
