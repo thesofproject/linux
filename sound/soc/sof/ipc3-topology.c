@@ -2048,7 +2048,6 @@ static int sof_ipc3_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 					 &reply, sizeof(reply));
 		break;
 	}
-
 	}
 	if (ret < 0)
 		dev_err(sdev->dev, "Failed to setup widget %s\n", swidget->widget->name);
