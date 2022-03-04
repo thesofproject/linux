@@ -152,7 +152,6 @@ static void sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev)
 	/* Get the firmware configuration */
 	msg.primary = SOF_IPC4_MSG_TARGET(SOF_IPC4_MODULE_MSG);
 	msg.primary |= SOF_IPC4_MSG_DIR(SOF_IPC4_MSG_REQUEST);
-	msg.primary |= SOF_IPC4_MSG_TYPE_SET(SOF_IPC4_MOD_INIT_INSTANCE);
 	msg.primary |= SOF_IPC4_MOD_ID(SOF_IPC4_MOD_INIT_BASEFW_MOD_ID);
 	msg.primary |= SOF_IPC4_MOD_INSTANCE(SOF_IPC4_MOD_INIT_BASEFW_INSTANCE_ID);
 	msg.extension = SOF_IPC4_MOD_EXT_MSG_PARAM_ID(SOF_IPC4_FW_PARAM_FW_CONFIG);
@@ -163,8 +162,10 @@ static void sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev)
 		return;
 
 	ret = iops->set_get_data(sdev, &msg, msg.data_size, false);
-	if (ret)
+	if (ret) {
+		kfree(msg.data_ptr);
 		return;
+	}
 
 	while (offset < msg.data_size) {
 		tuple = (struct sof_ipc4_tuple *)((u8 *)msg.data_ptr + offset);
