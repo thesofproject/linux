@@ -360,9 +360,39 @@ static int sof_ipc4_load_library(struct snd_sof_dev *sdev, u8 uuid[UUID_SIZE])
 	return ret;
 }
 
+static int sof_ipc4_get_modules_info(struct snd_sof_dev *sdev)
+{
+	const struct sof_ipc_ops *iops = sdev->ipc->ops;
+	struct sof_ipc4_msg msg;
+	int ret;
+
+	/* Get the modules information */
+	msg.primary = SOF_IPC4_MSG_TARGET(SOF_IPC4_MODULE_MSG);
+	msg.primary |= SOF_IPC4_MSG_DIR(SOF_IPC4_MSG_REQUEST);
+	msg.primary |= SOF_IPC4_MOD_ID(SOF_IPC4_MOD_INIT_BASEFW_MOD_ID);
+	msg.primary |= SOF_IPC4_MOD_INSTANCE(SOF_IPC4_MOD_INIT_BASEFW_INSTANCE_ID);
+	msg.extension = SOF_IPC4_MOD_EXT_MSG_PARAM_ID(SOF_IPC4_FW_PARAM_MODULES_INFO_GET);
+
+	msg.data_size = sdev->ipc->max_payload_size;
+	msg.data_ptr = kzalloc(msg.data_size, GFP_KERNEL);
+	if (!msg.data_ptr)
+		return -ENOMEM;
+
+	ret = iops->set_get_data(sdev, &msg, msg.data_size, false);
+	if (ret < 0)
+		return ret;
+
+	dev_dbg(sdev->dev, "module info size %ld\n", msg.data_size);
+
+	kfree(msg.data_ptr);
+
+	return 0;
+}
+
 const struct sof_ipc_fw_loader_ops ipc4_loader_ops = {
 	.validate = sof_ipc4_validate_firmware,
 	.parse_ext_manifest = sof_ipc4_fw_parse_ext_man,
 	.query_fw_configuration = sof_ipc4_query_fw_configuration,
 	.load_library = sof_ipc4_load_library,
+	.get_modules_info = sof_ipc4_get_modules_info,
 };

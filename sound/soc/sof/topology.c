@@ -1913,6 +1913,13 @@ static int sof_complete(struct snd_soc_component *scomp)
 		}
 	}
 
+	/* get all module information from the firmware */
+	if (sdev->ipc->ops->fw_loader->get_modules_info) {
+		ret = sdev->ipc->ops->fw_loader->get_modules_info(sdev);
+		if (ret < 0)
+			return ret;
+	}
+
 	/*
 	 * then update all widget IPC structures. If any of the ipc_setup callbacks fail, the
 	 * topology will be removed and all widgets will be unloaded resulting in freeing all
