@@ -147,7 +147,7 @@ static int sof_compr_free(struct snd_soc_component *component,
 	stream.comp_id = spcm->stream[cstream->direction].comp_id;
 
 	if (spcm->prepared[cstream->direction]) {
-		ret = sof_ipc_tx_message(sdev->ipc,&stream, sizeof(stream),
+		ret = sof_ipc_tx_message(sdev->ipc, &stream, sizeof(stream),
 					 &reply, sizeof(reply));
 		if (!ret)
 			spcm->prepared[cstream->direction] = false;
