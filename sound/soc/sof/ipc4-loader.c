@@ -66,6 +66,11 @@ static size_t sof_ipc4_fw_parse_ext_man(struct snd_sof_dev *sdev)
 	if (!ipc4_data->fw_modules)
 		return -ENOMEM;
 
+	ipc4_data->base_fw_module_uuids = devm_kcalloc(sdev->dev, fw_header->num_module_entries,
+						       sizeof(UUID_SIZE), GFP_KERNEL);
+	if (!ipc4_data->base_fw_module_uuids)
+		return -ENOMEM;
+
 	ipc4_data->num_fw_modules = fw_header->num_module_entries;
 	fw_module = ipc4_data->fw_modules;
 
@@ -94,11 +99,12 @@ static size_t sof_ipc4_fw_parse_ext_man(struct snd_sof_dev *sdev)
 
 			/* a module's config is always the same size */
 			fw_module->bss_size = fm_config[fm_entry->cfg_offset].is_bytes;
+			memcpy(ipc4_data->base_fw_module_uuids[i], fm_entry->uuid, UUID_SIZE);
 
 			dev_dbg(sdev->dev,
 				"module %s: UUID %pUL cfg_count: %u, bss_size: %#x\n",
-				fm_entry->name, fm_entry->uuid, fm_entry->cfg_count,
-				fw_module->bss_size);
+				fm_entry->name, ipc4_data->base_fw_module_uuids[i],
+				fm_entry->cfg_count, fw_module->bss_size);
 		} else {
 			fw_module->bss_size = 0;
 

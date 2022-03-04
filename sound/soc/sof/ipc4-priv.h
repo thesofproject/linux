@@ -22,6 +22,7 @@
  * @manifest_fw_hdr_offset: FW header offset in the manifest
  * @max_fw_libs: Maximum number of module libraries supported by the FW
  * @fw_lib_names: Array of module library names. This does not include the base FW
+ * @base_fw_module_uuids: List of UUIDs belonging to modules in the base FW
  */
 struct sof_ipc4_data {
 	int num_fw_modules;
@@ -29,6 +30,7 @@ struct sof_ipc4_data {
 	u32 manifest_fw_hdr_offset;
 	u32 max_fw_libs;
 	char (*fw_lib_names)[LIBRARY_FILENAME_LEN];
+	u8 (*base_fw_module_uuids)[UUID_SIZE];
 };
 
 /**
