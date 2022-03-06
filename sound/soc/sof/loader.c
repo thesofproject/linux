@@ -176,7 +176,7 @@ int snd_sof_run_firmware(struct snd_sof_dev *sdev)
 	sof_set_fw_state(sdev, SOF_FW_BOOT_COMPLETE);
 
 	if (sdev->first_boot && sdev->ipc->ops->fw_loader->query_fw_configuration)
-		sdev->ipc->ops->fw_loader->query_fw_configuration(sdev);
+		return sdev->ipc->ops->fw_loader->query_fw_configuration(sdev);
 
 	return 0;
 }
