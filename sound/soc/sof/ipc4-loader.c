@@ -139,7 +139,7 @@ static int sof_ipc4_validate_firmware(struct snd_sof_dev *sdev)
 	return 0;
 }
 
-static void sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev)
+static int sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev)
 {
 	const struct sof_ipc_ops *iops = sdev->ipc->ops;
 	struct sof_ipc4_fw_version *fw_ver;
@@ -159,11 +159,11 @@ static void sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev)
 	msg.data_size = sdev->ipc->max_payload_size;
 	msg.data_ptr = kzalloc(msg.data_size, GFP_KERNEL);
 	if (!msg.data_ptr)
-		return;
+		return -ENOMEM;
 
 	ret = iops->set_get_data(sdev, &msg, msg.data_size, false);
 	if (ret)
-		return;
+		return ret;
 
 	while (offset < msg.data_size) {
 		tuple = (struct sof_ipc4_tuple *)((u8 *)msg.data_ptr + offset);
@@ -194,6 +194,7 @@ static void sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev)
 	}
 
 	kfree(msg.data_ptr);
+	return 0;
 }
 
 const struct sof_ipc_fw_loader_ops ipc4_loader_ops = {
