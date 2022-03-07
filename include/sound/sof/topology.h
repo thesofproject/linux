@@ -87,9 +87,6 @@ struct sof_ipc_comp {
  */
 #define SOF_BUF_UNDERRUN_PERMITTED	BIT(1)
 
-/* the UUID size in bytes, shared between FW and host */
-#define SOF_UUID_SIZE	16
-
 /* create new component buffer - SOF_IPC_TPLG_BUFFER_NEW */
 struct sof_ipc_buffer {
 	struct sof_ipc_comp comp;
