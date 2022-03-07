@@ -466,7 +466,21 @@ static int sof_ipc4_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 	if (!ipc4_copier->gtw_attr)
 		return -ENOMEM;
 
-	ipc4_copier->copier_config = (uint32_t *)ipc4_copier->gtw_attr;
+	switch (ipc4_copier->dai_type) {
+		case SOF_DAI_INTEL_ALH:
+		{
+			struct sof_ipc4_alh_configuration_blob *blob;
+			blob = kzalloc(sizeof(*blob), GFP_KERNEL);
+			if (!blob)
+				return -ENOMEM;
+
+			ipc4_copier->copier_config = (uint32_t *)blob;
+			break;
+		}
+		default:
+			ipc4_copier->copier_config = (uint32_t *)ipc4_copier->gtw_attr;
+			break;
+	}
 	ipc4_copier->data.gtw_cfg.config_length = sizeof(struct sof_ipc4_gtw_attributes) >> 2;
 
 	dai->scomp = scomp;
@@ -1075,10 +1089,7 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 			u32 ch_map;
 			int i;
 
-			blob = kzalloc(sizeof(*blob), GFP_KERNEL);
-			if (!blob)
-				return -ENOMEM;
-
+			blob = (struct sof_ipc4_alh_configuration_blob *)ipc4_copier->copier_config;
 			blob->alh_cfg.count = 1;
 			blob->alh_cfg.mapping[0].alh_id = copier_data->gtw_cfg.node_id;
 			blob->gw_attr.lp_buffer_alloc = 0;
@@ -1091,8 +1102,6 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 					 blob->alh_cfg.mapping[0].channel_mask |= BIT(i);
 				ch_map >>= 4;
 			}
-
-			ipc4_copier->copier_config = (uint32_t *)blob;
 			break;
 		}
 		}
@@ -1143,10 +1152,6 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 	if (copier_data->gtw_cfg.config_length)
 		memcpy(*ipc_config_data + sizeof(*copier_data),
 		       *data, copier_data->gtw_cfg.config_length * 4);
-
-	/* copier_config is no longer needed after memcpy */
-	kfree(ipc4_copier->copier_config);
-	ipc4_copier->copier_config = NULL;
 
 	/* update pipeline memory usage */
 	sof_ipc4_update_pipeline_mem_usage(sdev, swidget, &copier_data->base_config);
