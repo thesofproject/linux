@@ -228,7 +228,7 @@ struct snd_sof_widget {
 	struct list_head list;	/* list in sdev widget list */
 	struct snd_sof_widget *pipe_widget;
 
-	u8 uuid[SOF_UUID_SIZE];
+	const guid_t uuid;
 
 	int num_tuples;
 	struct snd_sof_tuple *tuples;
