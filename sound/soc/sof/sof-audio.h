@@ -370,7 +370,7 @@ struct snd_sof_widget {
 	struct snd_sof_widget *pipe_widget;
 	void *module_info;
 
-	u8 uuid[SOF_UUID_SIZE];
+	const guid_t uuid;
 
 	int num_tuples;
 	struct snd_sof_tuple *tuples;
