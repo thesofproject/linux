@@ -310,13 +310,12 @@ static const struct sof_token_info ipc3_token_list[SOF_TOKEN_COUNT] = {
 static void *sof_comp_alloc(struct snd_sof_widget *swidget, size_t *ipc_size,
 			    int index)
 {
-	u8 nil_uuid[SOF_UUID_SIZE] = {0};
 	struct sof_ipc_comp *comp;
 	size_t total_size = *ipc_size;
 	size_t ext_size = sizeof(swidget->uuid);
 
 	/* only non-zero UUID is valid */
-	if (memcmp(swidget->uuid, nil_uuid, SOF_UUID_SIZE))
+	if (guid_is_null(&swidget->uuid))
 		total_size += ext_size;
 
 	comp = kzalloc(total_size, GFP_KERNEL);
@@ -333,7 +332,7 @@ static void *sof_comp_alloc(struct snd_sof_widget *swidget, size_t *ipc_size,
 	/* handle the extended data if needed */
 	if (total_size > *ipc_size) {
 		/* append extended data to the end of the component */
-		memcpy((u8 *)comp + *ipc_size, swidget->uuid, ext_size);
+		memcpy((u8 *)comp + *ipc_size, &swidget->uuid, ext_size);
 		comp->ext_data_length = ext_size;
 	}
 
