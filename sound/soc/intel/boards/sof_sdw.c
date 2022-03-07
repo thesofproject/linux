@@ -1229,6 +1229,18 @@ static int sof_card_dai_links_create(struct device *dev,
 		}
 	}
 
+	/*
+	 * BE id fixup
+	 * AMP is always assigned one capture BE ID no matter
+	 * it has capture link or not
+	 * So if be_id is SDW_AMP_DAI_ID + 1, it mean
+	 * the AMP capture BE ID is not reserved. Let's
+	 * adjust it to the proper value before going through
+	 * the other links.
+	 */
+	if (be_id == SDW_AMP_DAI_ID + 1)
+		be_id++;
+
 SSP:
 	/* SSP */
 	if (!ssp_num)
