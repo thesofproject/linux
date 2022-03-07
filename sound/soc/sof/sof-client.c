@@ -382,6 +382,10 @@ void sof_client_ipc_rx_dispatcher(struct snd_sof_dev *sdev, void *msg_buf)
 		struct sof_ipc4_msg *msg = msg_buf;
 
 		msg_type = SOF_IPC4_NOTIFICATION_TYPE_GET(msg->primary);
+	} else {
+		dev_dbg_once(sdev->dev, "%s: Not supported IPC version: %d\n",
+			     __func__, sdev->pdata->ipc_type);
+		return;
 	}
 
 	mutex_lock(&sdev->client_event_handler_mutex);
@@ -404,14 +408,17 @@ int sof_client_register_ipc_rx_handler(struct sof_client_dev *cdev,
 	if (!callback)
 		return -EINVAL;
 
-	if (cdev->sdev->pdata->ipc_type == SOF_IPC &&
-	    !(ipc_msg_type & SOF_GLB_TYPE_MASK))
+	if (cdev->sdev->pdata->ipc_type == SOF_IPC) {
+		if (!(ipc_msg_type & SOF_GLB_TYPE_MASK))
+			return -EINVAL;
+	} else if (cdev->sdev->pdata->ipc_type == SOF_INTEL_IPC4) {
+		if (!(ipc_msg_type & SOF_IPC4_NOTIFICATION_TYPE_MASK))
+			return -EINVAL;
+	} else {
+		dev_warn(sdev->dev, "%s: Not supported IPC version: %d\n",
+			 __func__, sdev->pdata->ipc_type);
 		return -EINVAL;
-
-	if (cdev->sdev->pdata->ipc_type == SOF_INTEL_IPC4 &&
-	    !(ipc_msg_type & (SOF_IPC4_NOTIFICATION_TYPE_MASK >>
-			      SOF_IPC4_NOTIFICATION_TYPE_SHIFT)))
-		return -EINVAL;
+	}
 
 	event = kmalloc(sizeof(*event), GFP_KERNEL);
 	if (!event)
