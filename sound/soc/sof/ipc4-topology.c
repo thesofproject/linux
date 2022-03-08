@@ -1067,7 +1067,8 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 
 		ref_params = pipeline_params;
 
-		dev_dbg(sdev->dev, "copier prepare search for dai_type");
+		dev_dbg(sdev->dev, "copier prepare search for dai_type %d index %d",
+			ipc4_copier->dai_type, ipc4_copier->dai_index);
 		switch (ipc4_copier->dai_type) {
 		case SOF_DAI_INTEL_DMIC:
 			if (snd_sof_get_nhlt_endpoint_data(sdev, 0, NHLT_LINK_DMIC,
@@ -1085,6 +1086,8 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 				return -EINVAL;
 			/* at this point amount of dwords */
 			copier_data->gtw_cfg.config_length >>= 2;
+			copier_data->gtw_cfg.node_id &= ~(0xFF);
+			copier_data->gtw_cfg.node_id |= SOF_IPC4_NODE_INDEX(ipc4_copier->dai_index);
 			break;
 		default:
 			break;
@@ -1536,7 +1539,6 @@ static int sof_ipc4_dai_config(struct snd_sof_dev *sdev, struct snd_sof_widget *
 
 	copier_data->gtw_cfg.node_id &= ~(0xFF);
 
-	/* TODO: add SSP case */
 	switch (ipc4_copier->dai_type) {
 	case SOF_DAI_INTEL_HDA:
 		gtw_attr = ipc4_copier->gtw_attr;
@@ -1546,6 +1548,7 @@ static int sof_ipc4_dai_config(struct snd_sof_dev *sdev, struct snd_sof_widget *
 		copier_data->gtw_cfg.node_id |= SOF_IPC4_NODE_INDEX(data->dai_data);
 		break;
 	case SOF_DAI_INTEL_DMIC:
+	case SOF_DAI_INTEL_SSP:
 		break;
 	default:
 		dev_warn(sdev->dev, "unsupported dai type %d\n", ipc4_copier->dai_type);
