@@ -36,49 +36,53 @@ irqreturn_t cnl_ipc4_irq_thread(int irq, void *context)
 {
 	struct snd_sof_dev *sdev = context;
 	bool ipc_irq = false;
-	u32 hipcida;
-	u32 hipctdr;
-	u32 hipctdd;
+	u32 hipcida, hipctdr;
 
 	hipcida = snd_sof_dsp_read(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCIDA);
-	hipctdr = snd_sof_dsp_read(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCTDR);
-	hipctdd = snd_sof_dsp_read(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCTDD);
-
-	if (hipcida & CNL_DSP_REG_HIPCIDA_DONE)
-		/* mask Done interrupt */
-		snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCCTL,
+	if (hipcida & CNL_DSP_REG_HIPCIDA_DONE) {
+		/* DSP received the message */
+		snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR,
+					CNL_DSP_REG_HIPCCTL,
 					CNL_DSP_REG_HIPCCTL_DONE, 0);
+		cnl_ipc_dsp_done(sdev);
 
-	/* new message from DSP */
+		ipc_irq = true;
+	}
+
+	hipctdr = snd_sof_dsp_read(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCTDR);
 	if (hipctdr & CNL_DSP_REG_HIPCTDR_BUSY) {
-		u32 msg = hipctdr & CNL_DSP_REG_HIPCTDR_MSG_MASK;
-		u32 msg_ext = hipctdd & CNL_DSP_REG_HIPCTDD_MSG_MASK;
+		/* Message from DSP (reply or notification) */
+		u32 hipctdd = snd_sof_dsp_read(sdev, HDA_DSP_BAR,
+					       CNL_DSP_REG_HIPCTDD);
+		u32 primary = hipctdr & CNL_DSP_REG_HIPCTDR_MSG_MASK;
+		u32 extension = hipctdd & CNL_DSP_REG_HIPCTDD_MSG_MASK;
 
-		if (hipctdr & SOF_IPC4_MSG_DIR_MASK) {
+		if (primary & SOF_IPC4_MSG_DIR_MASK) {
+			/* Reply received */
 			struct sof_ipc4_msg *data = sdev->ipc->msg.reply_data;
 
-			data->primary = msg;
-			data->extension = msg_ext;
+			data->primary = primary;
+			data->extension = extension;
 
 			spin_lock_irq(&sdev->ipc_lock);
 
 			snd_sof_ipc_get_reply(sdev);
 			snd_sof_ipc_reply(sdev, data->primary);
 
-			cnl_ipc_dsp_done(sdev);
-
 			spin_unlock_irq(&sdev->ipc_lock);
 		} else {
+			/* Notification received */
 			struct sof_ipc4_msg data = {{ 0 }};
 
-			data.primary = msg;
-			data.extension = msg_ext;
+			data.primary = primary;
+			data.extension = extension;
 
 			sdev->ipc->msg.rx_data = &data;
 			snd_sof_ipc_msgs_rx(sdev);
 			sdev->ipc->msg.rx_data = NULL;
 		}
 
+		/* Let DSP know that we have finished processing the message */
 		cnl_ipc_host_done(sdev);
 
 		ipc_irq = true;

@@ -120,65 +120,56 @@ void hda_dsp_ipc_get_reply(struct snd_sof_dev *sdev)
 irqreturn_t hda_dsp_ipc4_irq_thread(int irq, void *context)
 {
 	struct snd_sof_dev *sdev = context;
-	u32 hipcie;
-	u32 hipct;
-	u32 hipcte;
 	bool ipc_irq = false;
+	u32 hipcie, hipct;
 
-	/* read IPC status */
 	hipcie = snd_sof_dsp_read(sdev, HDA_DSP_BAR, HDA_DSP_REG_HIPCIE);
-	hipct = snd_sof_dsp_read(sdev, HDA_DSP_BAR, HDA_DSP_REG_HIPCT);
-	hipcte = snd_sof_dsp_read(sdev, HDA_DSP_BAR, HDA_DSP_REG_HIPCTE);
-
-	if (hipcie & HDA_DSP_REG_HIPCIE_DONE)
-		/* mask Done interrupt */
+	if (hipcie & HDA_DSP_REG_HIPCIE_DONE) {
+		/* DSP received the message */
 		snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR, HDA_DSP_REG_HIPCCTL,
 					HDA_DSP_REG_HIPCCTL_DONE, 0);
+		hda_dsp_ipc_dsp_done(sdev);
 
-	/* is this a new message from DSP */
+		ipc_irq = true;
+	}
+
+	hipct = snd_sof_dsp_read(sdev, HDA_DSP_BAR, HDA_DSP_REG_HIPCT);
 	if (hipct & HDA_DSP_REG_HIPCT_BUSY) {
-		u32 msg = hipct & HDA_DSP_REG_HIPCT_MSG_MASK;
-		u32 msg_ext = hipcte & HDA_DSP_REG_HIPCTE_MSG_MASK;
+		/* Message from DSP (reply or notification) */
+		u32 hipcte = snd_sof_dsp_read(sdev, HDA_DSP_BAR,
+					      HDA_DSP_REG_HIPCTE);
+		u32 primary = hipct & HDA_DSP_REG_HIPCT_MSG_MASK;
+		u32 extension = hipcte & HDA_DSP_REG_HIPCTE_MSG_MASK;
 
 		/* mask BUSY interrupt */
 		snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR, HDA_DSP_REG_HIPCCTL,
 					HDA_DSP_REG_HIPCCTL_BUSY, 0);
 
-		if (hipct & SOF_IPC4_MSG_DIR_MASK) {
+		if (primary & SOF_IPC4_MSG_DIR_MASK) {
+			/* Reply received */
 			struct sof_ipc4_msg *data = sdev->ipc->msg.reply_data;
 
-			data->primary = msg;
-			data->extension = msg_ext;
+			data->primary = primary;
+			data->extension = extension;
 
-			/*
-			 * Make sure the interrupt thread cannot be preempted
-			 * between waking up the sender and re-enabling the
-			 * interrupt. Also protect against a theoretical race
-			 * with sof_ipc_tx_message():
-			 * if the DSP is fast enough to receive an IPC message,
-			 * reply to it, and the host interrupt processing calls
-			 * this function on a different core from the one, where
-			 * the sending is taking place, the message might not
-			 * yet be marked as expecting a reply.
-			 */
 			spin_lock_irq(&sdev->ipc_lock);
 
 			snd_sof_ipc_get_reply(sdev);
 			snd_sof_ipc_reply(sdev, data->primary);
 
-			/* set the done bit */
-			hda_dsp_ipc_dsp_done(sdev);
-
 			spin_unlock_irq(&sdev->ipc_lock);
 		} else {
+			/* Notification received */
 			struct sof_ipc4_msg data = {{ 0 }};
 
-			data.primary = msg;
-			data.extension = msg_ext;
+			data.primary = primary;
+			data.extension = extension;
 			sdev->ipc->msg.rx_data = &data;
 			snd_sof_ipc_msgs_rx(sdev);
+			sdev->ipc->msg.rx_data = NULL;
 		}
 
+		/* Let DSP know that we have finished processing the message */
 		hda_dsp_ipc_host_done(sdev);
 
 		ipc_irq = true;
