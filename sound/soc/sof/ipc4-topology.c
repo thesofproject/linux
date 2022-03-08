@@ -480,26 +480,30 @@ static int sof_ipc4_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 		node_type, ipc4_copier->dai_type, ipc4_copier->dai_index);
 
 	ipc4_copier->data.gtw_cfg.node_id = SOF_IPC4_NODE_TYPE(node_type);
-	ipc4_copier->gtw_attr = kzalloc(sizeof(*ipc4_copier->gtw_attr), GFP_KERNEL);
-	if (!ipc4_copier->gtw_attr) {
-		ret = -ENOMEM;
-		goto err;
-	}
-
 	switch (ipc4_copier->dai_type) {
-		case SOF_DAI_INTEL_ALH:
-		{
-			struct sof_ipc4_alh_configuration_blob *blob;
-			blob = kzalloc(sizeof(*blob), GFP_KERNEL);
-			if (!blob)
-				return -ENOMEM;
-
-			ipc4_copier->copier_config = (uint32_t *)blob;
-			break;
+	case SOF_DAI_INTEL_ALH:
+	{
+		struct sof_ipc4_alh_configuration_blob *blob;
+		blob = kzalloc(sizeof(*blob), GFP_KERNEL);
+		if (!blob) {
+			ret = -ENOMEM;
+			goto err;
 		}
-		default:
-			ipc4_copier->copier_config = (uint32_t *)ipc4_copier->gtw_attr;
-			break;
+
+		ipc4_copier->copier_config = (uint32_t *)blob;
+		break;
+	}
+	default:
+	{
+		ipc4_copier->gtw_attr = kzalloc(sizeof(*ipc4_copier->gtw_attr), GFP_KERNEL);
+		if (!ipc4_copier->gtw_attr) {
+			ret = -ENOMEM;
+			goto err;
+		}
+
+		ipc4_copier->copier_config = (uint32_t *)ipc4_copier->gtw_attr;
+		break;
+	}
 	}
 	ipc4_copier->data.gtw_cfg.config_length = sizeof(struct sof_ipc4_gtw_attributes) >> 2;
 
