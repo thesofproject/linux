@@ -1616,7 +1616,7 @@ static int sof_link_load(struct snd_soc_component *scomp, int index, struct snd_
 	if (!token_list)
 		goto out;
 
-	/* calculate size of tuples aray */
+	/* calculate size of tuples array */
 	num_tuples += token_list[SOF_DAI_LINK_TOKENS].count;
 	num_sets = slink->num_hw_configs;
 	switch (slink->type) {
