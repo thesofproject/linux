@@ -464,6 +464,13 @@ static int rt711_set_jack_detect(struct snd_soc_component *component,
 		return 0;
 	}
 
+	if (pm_runtime_suspended(&rt711->slave->dev)) {
+		dev_dbg(&rt711->slave->dev, "%s pm_runtime suspended before jack-init\n", __func__);
+	} else {
+		dev_dbg(&rt711->slave->dev, "%s pm_runtime active before jack init\n", __func__);
+	}
+	dev_dbg(&rt711->slave->dev, "%s now calling jack init\n", __func__);
+
 	rt711_jack_init(rt711);
 
 	return 0;
@@ -1324,8 +1331,15 @@ int rt711_io_init(struct device *dev, struct sdw_slave *slave)
 	 * if set_jack callback occurred early than io_init,
 	 * we set up the jack detection function now
 	 */
-	if (rt711->hs_jack)
+	if (rt711->hs_jack) {
+		if (pm_runtime_suspended(&slave->dev)) {
+			dev_dbg(&slave->dev, "%s pm_runtime suspended before jack-init\n", __func__);
+		} else {
+			dev_dbg(&slave->dev, "%s om_runtime active before jack init\n", __func__);
+		}
+		dev_dbg(&slave->dev, "%s now calling jack init\n", __func__);
 		rt711_jack_init(rt711);
+	}
 
 	if (rt711->first_hw_init) {
 		regcache_cache_bypass(rt711->regmap, false);
