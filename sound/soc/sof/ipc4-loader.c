@@ -97,13 +97,13 @@ static size_t sof_ipc4_fw_parse_ext_man(struct snd_sof_dev *sdev)
 
 			dev_dbg(sdev->dev,
 				"module %s: UUID %pUL cfg_count: %u, bss_size: %#x\n",
-				fm_entry->name, fm_entry->uuid, fm_entry->cfg_count,
+				fm_entry->name, &fm_entry->uuid, fm_entry->cfg_count,
 				fw_module->bss_size);
 		} else {
 			fw_module->bss_size = 0;
 
 			dev_dbg(sdev->dev, "module %s: UUID %pUL\n", fm_entry->name,
-				fm_entry->uuid);
+				&fm_entry->uuid);
 		}
 
 		fw_module->man4_module_entry.id = i;
