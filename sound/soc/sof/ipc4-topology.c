@@ -536,6 +536,7 @@ static void sof_ipc4_widget_free_comp_dai(struct snd_sof_widget *swidget)
 	case snd_soc_dapm_dai_in:
 	case snd_soc_dapm_dai_out:
 	{
+		struct sof_ipc4_available_audio_format *available_fmt;
 		struct snd_sof_dai *dai = swidget->private;
 		struct sof_ipc4_copier *ipc4_copier;
 
@@ -543,9 +544,15 @@ static void sof_ipc4_widget_free_comp_dai(struct snd_sof_widget *swidget)
 			return;
 
 		ipc4_copier = dai->private;
+		available_fmt = &ipc4_copier->available_fmt;
+
+		kfree(available_fmt->dma_buffer_size);
+		kfree(available_fmt->base_config);
+		kfree(available_fmt->out_audio_fmt);
 		kfree(ipc4_copier->copier_config);
 		kfree(dai->private);
 		kfree(dai);
+		swidget->private = NULL;
 		break;
 	}
 	default:
