@@ -290,8 +290,7 @@ static int sof_ipc4_widget_set_module_info(struct snd_sof_widget *swidget)
 	/* set module info */
 	if (fw_modules) {
 		for (i = 0; i < ipc4_data->num_fw_modules; i++) {
-			if (!memcmp(swidget->uuid, fw_modules[i].man4_module_entry.uuid,
-				    UUID_SIZE)) {
+			if (guid_equal(&swidget->uuid, &fw_modules[i].man4_module_entry.uuid)) {
 				swidget->module_info = &fw_modules[i];
 				return 0;
 			}
@@ -299,7 +298,7 @@ static int sof_ipc4_widget_set_module_info(struct snd_sof_widget *swidget)
 	}
 
 	dev_err(sdev->dev, "failed to find module info for widget %s with UUID %pUL\n",
-		swidget->widget->name, swidget->uuid);
+		swidget->widget->name, &swidget->uuid);
 	return -EINVAL;
 }
 
