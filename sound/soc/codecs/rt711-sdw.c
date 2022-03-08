@@ -509,10 +509,12 @@ static int __maybe_unused rt711_dev_system_suspend(struct device *dev)
 	struct sdw_slave *slave = dev_to_sdw_dev(dev);
 	int ret;
 
+	dev_dbg(dev, "%s: plb: start\n", __func__);
+
 	if (!rt711->hw_init)
 		return 0;
 
-	dev_dbg(dev, "%s: plb: start\n", __func__);
+	dev_dbg(dev, "%s: plb: start1\n", __func__);
 
 	/*
 	 * prevent new interrupts from being handled after the
