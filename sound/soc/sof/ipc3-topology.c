@@ -315,7 +315,7 @@ static void *sof_comp_alloc(struct snd_sof_widget *swidget, size_t *ipc_size,
 	size_t ext_size = sizeof(swidget->uuid);
 
 	/* only non-zero UUID is valid */
-	if (guid_is_null(&swidget->uuid))
+	if (!guid_is_null(&swidget->uuid))
 		total_size += ext_size;
 
 	comp = kzalloc(total_size, GFP_KERNEL);
