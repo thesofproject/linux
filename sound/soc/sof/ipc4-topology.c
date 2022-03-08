@@ -276,6 +276,20 @@ err_in:
 
 static void sof_ipc4_widget_free_comp(struct snd_sof_widget *swidget)
 {
+
+	switch (swidget->id) {
+	case snd_soc_dapm_aif_in:
+	case snd_soc_dapm_aif_out:
+	{
+		struct sof_ipc4_copier *ipc4_copier = swidget->private;
+
+		if (!ipc4_copier)
+			return;
+		kfree(ipc4_copier->gtw_attr);
+		break;
+	}
+	}
+
 	kfree(swidget->private);
 }
 
@@ -379,8 +393,10 @@ static int sof_ipc4_widget_setup_pcm(struct snd_sof_widget *swidget)
 
 	ipc4_copier->data.gtw_cfg.node_id = SOF_IPC4_NODE_TYPE(node_type);
 	ipc4_copier->gtw_attr = kzalloc(sizeof(*ipc4_copier->gtw_attr), GFP_KERNEL);
-	if (!ipc4_copier->gtw_attr)
-		return -ENOMEM;
+	if (!ipc4_copier->gtw_attr) {
+		ret = -ENOMEM;
+		goto err;
+	}
 
 	ipc4_copier->copier_config = (uint32_t *)ipc4_copier->gtw_attr;
 	ipc4_copier->data.gtw_cfg.config_length =
@@ -389,10 +405,12 @@ static int sof_ipc4_widget_setup_pcm(struct snd_sof_widget *swidget)
 	/* set up module info and message header */
 	ret = sof_ipc4_widget_setup_msg(swidget, &ipc4_copier->msg);
 	if (ret < 0)
-		goto err;
+		goto free_gtw_attr;
 
 	return 0;
 
+free_gtw_attr:
+	kfree(ipc4_copier->gtw_attr);
 err:
 	kfree(available_fmt->dma_buffer_size);
 free_copier:
