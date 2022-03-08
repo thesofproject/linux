@@ -2007,6 +2007,8 @@ static int __maybe_unused intel_resume_runtime(struct device *dev)
 		ret = -EINVAL;
 	}
 
+	pm_runtime_mark_last_busy(dev);
+
 	dev_dbg(dev, "%s: plb: done\n", __func__);
 
 	return ret;
