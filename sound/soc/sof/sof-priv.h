@@ -378,7 +378,7 @@ struct sof_ipc_pm_ops {
  *			of loading the initial firmware and its modules (if any).
  * @query_fw_configuration: Optional function pointer to query information and
  *			configuration from the booted firmware.
- *			Executed after the first succesfull firmware boot.
+ *			Executed after the first successful firmware boot.
  */
 struct sof_ipc_fw_loader_ops {
 	int (*validate)(struct snd_sof_dev *sdev);
