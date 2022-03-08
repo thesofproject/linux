@@ -93,7 +93,7 @@ struct sof_man4_segment_desc {
 struct sof_man4_module {
 	uint32_t id;
 	uint8_t name[MAX_MODULE_NAME_LEN];
-	uint8_t uuid[UUID_SIZE];
+	const guid_t uuid;
 	uint32_t type;
 	uint8_t hash[DEFAULT_HASH_SHA256_LEN];
 	uint32_t entry_point;
