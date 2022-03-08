@@ -276,20 +276,6 @@ err_in:
 
 static void sof_ipc4_widget_free_comp(struct snd_sof_widget *swidget)
 {
-
-	switch (swidget->id) {
-	case snd_soc_dapm_aif_in:
-	case snd_soc_dapm_aif_out:
-	{
-		struct sof_ipc4_copier *ipc4_copier = swidget->private;
-
-		if (!ipc4_copier)
-			return;
-		kfree(ipc4_copier->gtw_attr);
-		break;
-	}
-	}
-
 	kfree(swidget->private);
 }
 
@@ -416,6 +402,24 @@ err:
 free_copier:
 	kfree(ipc4_copier);
 	return ret;
+}
+
+static void sof_ipc4_widget_free_comp_pcm(struct snd_sof_widget *swidget)
+{
+
+	struct sof_ipc4_copier *ipc4_copier = swidget->private;
+	struct sof_ipc4_available_audio_format *available_fmt;
+
+	if (!ipc4_copier)
+		return;
+
+	available_fmt = &ipc4_copier->available_fmt;
+	kfree(available_fmt->dma_buffer_size);
+	kfree(available_fmt->base_config);
+	kfree(available_fmt->out_audio_fmt);
+	kfree(ipc4_copier->gtw_attr);
+	kfree(ipc4_copier);
+	swidget->private = NULL;
 }
 
 static int sof_ipc4_widget_setup_comp_dai(struct snd_sof_widget *swidget)
@@ -1662,11 +1666,11 @@ static enum sof_tokens mixer_token_list[] = {
 };
 
 static const struct sof_ipc_tplg_widget_ops tplg_ipc4_widget_ops[SND_SOC_DAPM_TYPE_COUNT] = {
-	[snd_soc_dapm_aif_in] =  {sof_ipc4_widget_setup_pcm, sof_ipc4_widget_free_comp,
+	[snd_soc_dapm_aif_in] =  {sof_ipc4_widget_setup_pcm, sof_ipc4_widget_free_comp_pcm,
 				  host_token_list, ARRAY_SIZE(host_token_list), NULL,
 				  sof_ipc4_prepare_copier_module,
 				  sof_ipc4_unprepare_copier_module},
-	[snd_soc_dapm_aif_out] = {sof_ipc4_widget_setup_pcm, sof_ipc4_widget_free_comp,
+	[snd_soc_dapm_aif_out] = {sof_ipc4_widget_setup_pcm, sof_ipc4_widget_free_comp_pcm,
 				  host_token_list, ARRAY_SIZE(host_token_list), NULL,
 				  sof_ipc4_prepare_copier_module,
 				  sof_ipc4_unprepare_copier_module},
