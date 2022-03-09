@@ -117,6 +117,11 @@ static const struct sof_topology_token src_tokens[] = {
 		offsetof(struct sof_ipc4_src, sink_rate)},
 };
 
+/* Core tokens */
+static const struct sof_topology_token ipc4_core_tokens[] = {
+       {SOF_TKN_COMP_CORE_ID, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32, 0},
+};
+
 static const struct sof_token_info ipc4_token_list[SOF_TOKEN_COUNT] = {
 	[SOF_DAI_TOKENS] = {"DAI tokens", dai_tokens, ARRAY_SIZE(dai_tokens)},
 	[SOF_PIPELINE_TOKENS] = {"Pipeline tokens", pipeline_tokens, ARRAY_SIZE(pipeline_tokens)},
@@ -141,6 +146,7 @@ static const struct sof_token_info ipc4_token_list[SOF_TOKEN_COUNT] = {
 		ipc4_audio_fmt_num_tokens, ARRAY_SIZE(ipc4_audio_fmt_num_tokens)},
 	[SOF_GAIN_TOKENS] = {"Gain tokens", gain_tokens, ARRAY_SIZE(gain_tokens)},
 	[SOF_SRC_TOKENS] = {"SRC tokens", src_tokens, ARRAY_SIZE(src_tokens)},
+	[SOF_CORE_TOKENS] = {"Core tokens", ipc4_core_tokens, ARRAY_SIZE(ipc4_core_tokens)},
 };
 
 static void sof_ipc4_dbg_audio_format(struct device *dev,
@@ -1799,6 +1805,7 @@ static enum sof_tokens host_token_list[] = {
 	SOF_COPIER_GATEWAY_CFG_TOKENS,
 	SOF_COPIER_TOKENS,
 	SOF_COMP_EXT_TOKENS,
+	SOF_CORE_TOKENS,
 };
 
 static enum sof_tokens pipeline_token_list[] = {
@@ -1816,6 +1823,7 @@ static enum sof_tokens dai_token_list[] = {
 	SOF_COPIER_TOKENS,
 	SOF_DAI_TOKENS,
 	SOF_COMP_EXT_TOKENS,
+	SOF_CORE_TOKENS,
 };
 
 static enum sof_tokens pga_token_list[] = {
@@ -1825,6 +1833,7 @@ static enum sof_tokens pga_token_list[] = {
 	SOF_AUDIO_FORMAT_BUFFER_SIZE_TOKENS,
 	SOF_IN_AUDIO_FORMAT_TOKENS,
 	SOF_COMP_EXT_TOKENS,
+	SOF_CORE_TOKENS,
 };
 
 static enum sof_tokens mixer_token_list[] = {
@@ -1842,6 +1851,7 @@ static enum sof_tokens src_token_list[] = {
 	SOF_IN_AUDIO_FORMAT_TOKENS,
 	SOF_AUDIO_FORMAT_BUFFER_SIZE_TOKENS,
 	SOF_COMP_EXT_TOKENS,
+	SOF_CORE_TOKENS,
 };
 
 static const struct sof_ipc_tplg_widget_ops tplg_ipc4_widget_ops[SND_SOC_DAPM_TYPE_COUNT] = {
