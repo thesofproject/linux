@@ -110,6 +110,8 @@ struct sdw_intel_stream_free_data {
 	int link_id;
 };
 
+struct snd_pcm_substream;
+
 /**
  * struct sdw_intel_ops: Intel audio driver callback ops
  *
