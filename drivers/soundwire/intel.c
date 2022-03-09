@@ -1576,12 +1576,15 @@ static int __maybe_unused intel_pm_prepare(struct device *dev)
 		 * first resume the device for this link. This will also by construction
 		 * resume the PCI parent device.
 		 */
+		dev_dbg(dev, "%s: pm_request_resume start\n", __func__);
 		ret = pm_runtime_resume(dev);
 		if (ret < 0) {
 			dev_err(dev, "%s: pm_request_resume failed: %d\n", __func__, ret);
 			return 0;
 		}
+		dev_dbg(dev, "%s: pm_request_resume done\n", __func__);
 
+		dev_dbg(dev, "%s: resuming child device start\n", __func__);
 		/*
 		 * Continue resuming the entire bus (parent + child devices) to exit
 		 * the clock stop mode. If there are no devices connected on this link
@@ -1595,6 +1598,7 @@ static int __maybe_unused intel_pm_prepare(struct device *dev)
 
 		if (ret < 0)
 			dev_err(dev, "%s: intel_resume_child_device failed: %d\n", __func__, ret);
+		dev_dbg(dev, "%s: resuming child device done\n", __func__);
 	}
 
 	dev_dbg(dev, "%s: plb: done\n", __func__);
