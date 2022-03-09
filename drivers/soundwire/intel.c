@@ -1499,8 +1499,10 @@ int intel_link_process_wakeen_event(struct auxiliary_device *auxdev)
 	shim = sdw->link_res->shim;
 	wake_sts = intel_readw(shim, SDW_SHIM_WAKESTS);
 
-	if (!(wake_sts & BIT(sdw->instance)))
+	if (!(wake_sts & BIT(sdw->instance))) {
+		dev_dbg(dev, "%s: done nothing to do\n", __func__);
 		return 0;
+	}
 
 	/* disable WAKEEN interrupt ASAP to prevent interrupt flood */
 	intel_shim_wake(sdw, false);
@@ -1512,7 +1514,9 @@ int intel_link_process_wakeen_event(struct auxiliary_device *auxdev)
 	 * will in turn cause the corresponding Linux Slave device to be
 	 * resumed and the Slave codec driver to check the status.
 	 */
+	dev_dbg(dev, "%s: pm_request_resume start\n", __func__);
 	pm_request_resume(dev);
+	dev_dbg(dev, "%s: pm_request_resume done\n", __func__);
 
 	return 0;
 }
