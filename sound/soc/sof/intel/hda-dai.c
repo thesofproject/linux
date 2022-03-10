@@ -706,7 +706,8 @@ static const struct snd_soc_dai_ops ipc3_ssp_dai_ops = {
 	.shutdown = ssp_dai_shutdown,
 };
 
-int ipc4_be_dai_trigger(struct snd_pcm_substream *substream, int cmd, struct snd_soc_dai *dai)
+
+int ipc4_sdw_trigger(struct snd_soc_dai *dai, int cmd, int stream)
 {
 	struct snd_sof_widget *pipe_widget;
 	struct sof_ipc4_pipeline *pipeline;
@@ -715,7 +716,7 @@ int ipc4_be_dai_trigger(struct snd_pcm_substream *substream, int cmd, struct snd
 	struct snd_sof_dev *sdev;
 	int ret;
 
-	w = snd_soc_dai_get_widget(dai, substream->stream);
+	w = snd_soc_dai_get_widget(dai, stream);
 	swidget = w->dobj.private;
 	pipe_widget = swidget->pipe_widget;
 	pipeline = pipe_widget->private;
@@ -748,6 +749,12 @@ int ipc4_be_dai_trigger(struct snd_pcm_substream *substream, int cmd, struct snd
 	}
 
 	return 0;
+}
+
+static int ipc4_be_dai_trigger(struct snd_pcm_substream *substream,
+			       int cmd, struct snd_soc_dai *dai)
+{
+	return ipc4_sdw_trigger(dai, cmd, substream->stream);
 }
 
 static const struct snd_soc_dai_ops ipc4_dmic_dai_ops = {

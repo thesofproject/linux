@@ -187,7 +187,7 @@ static int hda_sdw_probe(struct snd_sof_dev *sdev)
 
 	/* sdw trigger callback is only needed for IPC4 */
 	if (sdev->pdata->ipc_type == SOF_INTEL_IPC4)
-		sdw_callback.trigger = ipc4_be_dai_trigger;
+		sdw_callback.trigger = ipc4_sdw_trigger;
 
 	res.mmio_base = sdev->bar[HDA_DSP_BAR];
 	res.shim_base = hdev->desc->sdw_shim_base;
