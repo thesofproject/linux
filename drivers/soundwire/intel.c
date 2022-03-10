@@ -441,6 +441,8 @@ static void intel_shim_wake(struct sdw_intel *sdw, bool wake_enable)
 		/* Enable the wakeup */
 		wake_en |= (SDW_SHIM_WAKEEN_ENABLE << link_id);
 		intel_writew(shim, SDW_SHIM_WAKEEN, wake_en);
+
+		dev_dbg(sdw->cdns.dev, "%s: plb: WAKEEN enabled for link %d\n", __func__, link_id);
 	} else {
 		/* Disable the wake up interrupt */
 		wake_en &= ~(SDW_SHIM_WAKEEN_ENABLE << link_id);
@@ -450,6 +452,8 @@ static void intel_shim_wake(struct sdw_intel *sdw, bool wake_enable)
 		wake_sts = intel_readw(shim, SDW_SHIM_WAKESTS);
 		wake_sts |= (SDW_SHIM_WAKESTS_STATUS << link_id);
 		intel_writew(shim, SDW_SHIM_WAKESTS, wake_sts);
+
+		dev_dbg(sdw->cdns.dev, "%s: plb: WAKEEN disabled for link %d\n", __func__, link_id);
 	}
 	mutex_unlock(sdw->link_res->shim_lock);
 }
