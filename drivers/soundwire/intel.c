@@ -1010,7 +1010,7 @@ static int intel_trigger(struct snd_pcm_substream *substream, int cmd, struct sn
 	int ret = 0;
 
 	if (res->ops && res->ops->trigger)
-		res->ops->trigger(substream, cmd, dai);
+		res->ops->trigger(dai, cmd, substream->stream);
 
 	dma = snd_soc_dai_get_dma_data(dai, substream);
 	if (!dma) {
