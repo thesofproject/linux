@@ -1382,6 +1382,13 @@ static void acpi_set_pnp_ids(acpi_handle handle, struct acpi_device_pnp *pnp,
 				for (i = 0; i < cid_list->count; i++)
 					acpi_add_id(pnp, cid_list->ids[i].string);
 			}
+		} else if (info->valid & ACPI_VALID_CID) {
+			cid_list = &info->compatible_id_list;
+			pr_info("%s: CID without HID for hardware_id.string: %s, count: %d\n",
+				__func__, info->hardware_id.string, cid_list->count);
+			for (i = 0; i < cid_list->count; i++)
+				pr_info("%s: CID #%d: string: %s\n",
+					__func__, i, cid_list->ids[i].string);
 		}
 		if (info->valid & ACPI_VALID_ADR) {
 			pnp->bus_address = info->address;
