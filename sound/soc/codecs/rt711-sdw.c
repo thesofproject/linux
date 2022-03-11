@@ -313,6 +313,15 @@ static const struct regmap_config rt711_sdw_regmap = {
 	.use_single_write = true,
 };
 
+static void rt711_detach(struct rt711_priv *rt711)
+{
+	cancel_delayed_work_sync(&rt711->jack_detect_work);
+	cancel_delayed_work_sync(&rt711->jack_btn_check_work);
+	cancel_work_sync(&rt711->calibration_work);
+
+	regcache_cache_only(rt711->regmap, true);
+}
+
 static int rt711_update_status(struct sdw_slave *slave,
 				enum sdw_slave_status status)
 {
@@ -321,8 +330,10 @@ static int rt711_update_status(struct sdw_slave *slave,
 	/* Update the status */
 	rt711->status = status;
 
-	if (status == SDW_SLAVE_UNATTACHED)
+	if (status == SDW_SLAVE_UNATTACHED) {
 		rt711->hw_init = false;
+		rt711_detach(rt711);
+	}
 
 	/*
 	 * Perform initialization only if slave status is present and
@@ -486,11 +497,7 @@ static int __maybe_unused rt711_dev_suspend(struct device *dev)
 	if (!rt711->hw_init)
 		return 0;
 
-	cancel_delayed_work_sync(&rt711->jack_detect_work);
-	cancel_delayed_work_sync(&rt711->jack_btn_check_work);
-	cancel_work_sync(&rt711->calibration_work);
-
-	regcache_cache_only(rt711->regmap, true);
+	rt711_detach(rt711);
 
 	return 0;
 }
