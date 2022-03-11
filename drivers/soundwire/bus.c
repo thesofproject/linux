@@ -1850,6 +1850,7 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 			 * by e.g. the ALSA/ASoC framework.
 			 */
 			pm_request_resume(&slave->dev);
+			dev_dbg(&slave->dev, "%s: plb: pm_request_resume on attach/init done\n", __func__);
 		}
 	}
 
