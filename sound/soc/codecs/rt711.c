@@ -239,6 +239,9 @@ static void rt711_jack_detect_handler(struct work_struct *work)
 	int btn_type = 0, ret;
 	unsigned int jack_status = 0, reg;
 
+	if (!rt711->hw_init || rt711->status != SDW_SLAVE_ATTACHED)
+		return;
+
 	if (!rt711->hs_jack)
 		return;
 
@@ -301,6 +304,9 @@ static void rt711_btn_check_handler(struct work_struct *work)
 		jack_btn_check_work.work);
 	int btn_type = 0, ret;
 	unsigned int jack_status = 0, reg;
+
+	if (!rt711->hw_init || rt711->status != SDW_SLAVE_ATTACHED)
+		return;
 
 	reg = RT711_VERB_GET_PIN_SENSE | RT711_HP_OUT;
 	ret = regmap_read(rt711->regmap, reg, &jack_status);
@@ -1177,6 +1183,9 @@ static void rt711_calibration_work(struct work_struct *work)
 {
 	struct rt711_priv *rt711 =
 		container_of(work, struct rt711_priv, calibration_work);
+
+	if (!rt711->hw_init || rt711->status != SDW_SLAVE_ATTACHED)
+		return;
 
 	rt711_calibration(rt711);
 }
