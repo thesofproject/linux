@@ -340,6 +340,10 @@ static ssize_t sof_dfsentry_trace_read(struct file *file, char __user *buffer,
 		return -EIO;
 	}
 
+	/* no new trace data */
+	if (!avail)
+		return 0;
+
 	/* make sure count is <= avail */
 	if (count > avail)
 		count = avail;
