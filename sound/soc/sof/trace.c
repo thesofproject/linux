@@ -242,6 +242,21 @@ static int trace_debugfs_filter_create(struct snd_sof_dev *sdev)
 	return 0;
 }
 
+static bool sof_trace_set_host_offset(struct snd_sof_dev *sdev, u32 new_offset)
+{
+	u32 host_offset = READ_ONCE(sdev->host_offset);
+
+	if (host_offset != new_offset) {
+		/* This is a bit paranoid and unlikely that it is needed */
+		u32 ret = cmpxchg(&sdev->host_offset, host_offset, new_offset);
+
+		if (ret == host_offset)
+			return true;
+	}
+
+	return false;
+}
+
 static size_t sof_trace_avail(struct snd_sof_dev *sdev,
 			      loff_t pos, size_t buffer_size)
 {
@@ -354,7 +369,7 @@ static int sof_dfsentry_trace_release(struct inode *inode, struct file *file)
 
 	/* avoid duplicate traces at next open */
 	if (sdev->dtrace_state != SOF_DTRACE_ENABLED)
-		sdev->host_offset = 0;
+		sof_trace_set_host_offset(sdev, 0);
 
 	return 0;
 }
@@ -426,7 +441,7 @@ static int snd_sof_enable_trace(struct snd_sof_dev *sdev)
 	params.buffer.pages = sdev->dma_trace_pages;
 	params.stream_tag = 0;
 
-	sdev->host_offset = 0;
+	sof_trace_set_host_offset(sdev, 0);
 	sdev->dtrace_draining = false;
 
 	ret = snd_sof_dma_trace_init(sdev, &params);
@@ -534,9 +549,9 @@ int snd_sof_trace_update_pos(struct snd_sof_dev *sdev,
 	if (!sdev->dtrace_is_supported)
 		return 0;
 
-	if (trace_pos_update_expected(sdev) && sdev->host_offset != posn->host_offset) {
-		sdev->host_offset = posn->host_offset;
-		wake_up(&sdev->trace_sleep);
+	if (trace_pos_update_expected(sdev)) {
+		if (sof_trace_set_host_offset(sdev, posn->host_offset))
+			wake_up(&sdev->trace_sleep);
 	}
 
 	if (posn->overflow != 0)
