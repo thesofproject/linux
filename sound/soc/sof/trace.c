@@ -250,8 +250,10 @@ static bool sof_trace_set_host_offset(struct snd_sof_dev *sdev, u32 new_offset)
 		/* This is a bit paranoid and unlikely that it is needed */
 		u32 ret = cmpxchg(&sdev->host_offset, host_offset, new_offset);
 
-		if (ret == host_offset)
+		if (ret == host_offset) {
+			dev_dbg(sdev->dev, "trace: new host_offset: %#x\n", new_offset);
 			return true;
+		}
 	}
 
 	return false;
