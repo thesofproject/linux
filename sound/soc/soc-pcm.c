@@ -1254,8 +1254,9 @@ static void dpcm_be_reparent(struct snd_soc_pcm_runtime *fe,
 	be_substream = snd_soc_dpcm_get_substream(be, stream);
 
 	for_each_dpcm_fe(be, stream, dpcm) {
+		/* Re-parent only when first FE client on the list is disconnecting. */
 		if (dpcm->fe == fe)
-			continue;
+			break;
 
 		dev_dbg(fe->dev, "reparent %s path %s %s %s\n",
 			stream ? "capture" : "playback",
