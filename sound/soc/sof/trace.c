@@ -322,6 +322,8 @@ static ssize_t sof_dfsentry_trace_read(struct file *file, char __user *buffer,
 	size_t avail, buffer_size = dfse->size;
 	u64 lpos_64;
 
+	dev_dbg(sdev->dev, "trace: %s: ENTER (count: %zu, lpos: %llu)\n", __func__, count, lpos);
+
 	/* make sure we know about any failures on the DSP side */
 	sdev->dtrace_error = false;
 
@@ -343,8 +345,10 @@ static ssize_t sof_dfsentry_trace_read(struct file *file, char __user *buffer,
 	}
 
 	/* no new trace data */
-	if (!avail)
+	if (!avail) {
+		dev_dbg(sdev->dev, "trace: nothing to copy\n");
 		return 0;
+	}
 
 	/* make sure count is <= avail */
 	if (count > avail)
@@ -358,6 +362,8 @@ static ssize_t sof_dfsentry_trace_read(struct file *file, char __user *buffer,
 	 */
 	snd_dma_buffer_sync(&sdev->dmatb, SNDRV_DMA_SYNC_CPU);
 	/* copy available trace data to debugfs */
+	dev_dbg(sdev->dev, "trace: copy to user from offset : %#llx, count: %#zx\n",
+		lpos, count);
 	rem = copy_to_user(buffer, ((u8 *)(dfse->buf) + lpos), count);
 	if (rem)
 		return -EFAULT;
