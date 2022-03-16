@@ -446,6 +446,7 @@ struct snd_sof_ipc {
 enum sof_dtrace_state {
 	SOF_DTRACE_DISABLED,
 	SOF_DTRACE_STOPPED,
+	SOF_DTRACE_INITIALIZING,
 	SOF_DTRACE_ENABLED,
 };
 

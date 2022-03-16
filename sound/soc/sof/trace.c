@@ -18,6 +18,15 @@
 #define TRACE_FILTER_ELEMENTS_PER_ENTRY 4
 #define TRACE_FILTER_MAX_CONFIG_STRING_LENGTH 1024
 
+static bool trace_pos_update_expected(struct snd_sof_dev *sdev)
+{
+	if (sdev->dtrace_state == SOF_DTRACE_ENABLED ||
+	    sdev->dtrace_state == SOF_DTRACE_INITIALIZING)
+		return true;
+
+	return false;
+}
+
 static int trace_filter_append_elem(struct snd_sof_dev *sdev, uint32_t key, uint32_t value,
 				    struct sof_ipc_trace_filter_elem *elem_list,
 				    int capacity, int *counter)
@@ -263,7 +272,7 @@ static size_t sof_wait_trace_avail(struct snd_sof_dev *sdev,
 	if (ret)
 		return ret;
 
-	if (sdev->dtrace_state != SOF_DTRACE_ENABLED && sdev->dtrace_draining) {
+	if (sdev->dtrace_draining && !trace_pos_update_expected(sdev)) {
 		/*
 		 * tracing has ended and all traces have been
 		 * read by client, return EOF
@@ -429,6 +438,7 @@ static int snd_sof_enable_trace(struct snd_sof_dev *sdev)
 	dev_dbg(sdev->dev, "%s: stream_tag: %d\n", __func__, params.stream_tag);
 
 	/* send IPC to the DSP */
+	sdev->dtrace_state = SOF_DTRACE_INITIALIZING;
 	ret = sof_ipc_tx_message(sdev->ipc, &params, sizeof(params), &ipc_reply, sizeof(ipc_reply));
 	if (ret < 0) {
 		dev_err(sdev->dev,
@@ -437,14 +447,14 @@ static int snd_sof_enable_trace(struct snd_sof_dev *sdev)
 	}
 
 start:
+	sdev->dtrace_state = SOF_DTRACE_ENABLED;
+
 	ret = snd_sof_dma_trace_trigger(sdev, SNDRV_PCM_TRIGGER_START);
 	if (ret < 0) {
 		dev_err(sdev->dev,
 			"error: snd_sof_dma_trace_trigger: start: %d\n", ret);
 		goto trace_release;
 	}
-
-	sdev->dtrace_state = SOF_DTRACE_ENABLED;
 
 	return 0;
 
@@ -524,8 +534,7 @@ int snd_sof_trace_update_pos(struct snd_sof_dev *sdev,
 	if (!sdev->dtrace_is_supported)
 		return 0;
 
-	if (sdev->dtrace_state == SOF_DTRACE_ENABLED &&
-	    sdev->host_offset != posn->host_offset) {
+	if (trace_pos_update_expected(sdev) && sdev->host_offset != posn->host_offset) {
 		sdev->host_offset = posn->host_offset;
 		wake_up(&sdev->trace_sleep);
 	}
