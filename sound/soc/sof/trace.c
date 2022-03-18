@@ -374,11 +374,22 @@ static ssize_t sof_dfsentry_trace_read(struct file *file, char __user *buffer,
 	return count;
 }
 
+static int sof_dfsentry_trace_open(struct inode *inode, struct file *file)
+{
+	struct snd_sof_dfsentry *dfse = inode->i_private;
+	struct snd_sof_dev *sdev = dfse->sdev;
+
+	dev_dbg(sdev->dev, "trace: %s: ENTER\n", __func__);
+
+	return simple_open(inode, file);
+}
+
 static int sof_dfsentry_trace_release(struct inode *inode, struct file *file)
 {
 	struct snd_sof_dfsentry *dfse = inode->i_private;
 	struct snd_sof_dev *sdev = dfse->sdev;
 
+	dev_dbg(sdev->dev, "trace: %s: ENTER\n", __func__);
 	/* avoid duplicate traces at next open */
 	if (sdev->dtrace_state != SOF_DTRACE_ENABLED)
 		sof_trace_set_host_offset(sdev, 0);
@@ -387,7 +398,7 @@ static int sof_dfsentry_trace_release(struct inode *inode, struct file *file)
 }
 
 static const struct file_operations sof_dfs_trace_fops = {
-	.open = simple_open,
+	.open = sof_dfsentry_trace_open,
 	.read = sof_dfsentry_trace_read,
 	.llseek = default_llseek,
 	.release = sof_dfsentry_trace_release,
