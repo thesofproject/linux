@@ -53,6 +53,8 @@ struct sof_ipc4_pipeline {
  * @base_config: Available base config
  * @out_audio_fmt: Available output audio format
  * @ref_audio_fmt: Reference audio format to match runtime audio format
+ * @dma_buffer_size: Available Gateway DMA buffer size (in bytes)
+ * @audio_fmt_num: Number of available audio formats
  */
 struct sof_ipc4_available_audio_format {
 	struct sof_ipc4_base_module_cfg *base_config;
@@ -104,11 +106,15 @@ struct sof_ipc4_gtw_attributes {
 
 /**
  * struct sof_ipc4_copier - copier config data
- * @copier: IPC copier data
+ * @data: IPC copier data
  * @copier_config: Copier + blob
  * @ipc_config_size: Size of copier_config
  * @available_fmt: Available audio format
  * @frame_fmt: frame format
+ * @msg: message structure for copier
+ * @gtw_attr: Gateway attributes for copier blob
+ * @dai_type: DAI type
+ * @dai_index: DAI index
  */
 struct sof_ipc4_copier {
 	struct sof_ipc4_copier_data data;
