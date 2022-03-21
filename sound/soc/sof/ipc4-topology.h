@@ -38,6 +38,7 @@
  * @lp_mode: Low power mode
  * @mem_usage: Memory usage
  * @state: Pipeline state
+ * @msg: message structure for pipeline
  */
 struct sof_ipc4_pipeline {
 	uint32_t priority;
