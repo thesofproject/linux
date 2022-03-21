@@ -189,7 +189,6 @@ struct sof_ipc4_gain {
 /**
  * struct sof_ipc4_mixer - mixer config data
  * @base_config: IPC base config data
- * @type: mixer type (in or out)
  * @available_fmt: Available audio format
  * @msg: IPC4 message struct containing header and data info
  */
