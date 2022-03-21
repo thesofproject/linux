@@ -158,6 +158,11 @@ struct sof_ipc4_control_data {
 
 /**
  * struct sof_ipc4_gain_data - IPC gain blob
+ * @channels: Channels
+ * @init_val: Initial value
+ * @curve_type: Curve type
+ * @reserved: reserved for future use
+ * @curve_duration: Curve duration
  */
 struct sof_ipc4_gain_data {
 	uint32_t channels;
@@ -172,6 +177,7 @@ struct sof_ipc4_gain_data {
  * @base_config: IPC base config data
  * @data: IPC gain blob
  * @available_fmt: Available audio format
+ * @msg: message structure for gain
  */
 struct sof_ipc4_gain {
 	struct sof_ipc4_base_module_cfg base_config;
