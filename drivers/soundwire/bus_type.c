@@ -109,6 +109,8 @@ static int sdw_drv_probe(struct device *dev)
 
 	ret = drv->probe(slave, id);
 	if (ret) {
+		slave->ops = NULL;
+
 		name = drv->name;
 		if (!name)
 			name = drv->driver.name;
@@ -152,6 +154,9 @@ static int sdw_drv_remove(struct device *dev)
 	struct sdw_driver *drv = drv_to_sdw_driver(dev->driver);
 	int ret = 0;
 
+	slave->ops = NULL;
+	slave->probed = false;
+
 	if (drv->remove)
 		ret = drv->remove(slave);
 
@@ -164,6 +169,9 @@ static void sdw_drv_shutdown(struct device *dev)
 {
 	struct sdw_slave *slave = dev_to_sdw_dev(dev);
 	struct sdw_driver *drv = drv_to_sdw_driver(dev->driver);
+
+	slave->ops = NULL;
+	slave->probed = false;
 
 	if (drv->shutdown)
 		drv->shutdown(slave);
