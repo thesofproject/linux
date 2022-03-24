@@ -15,6 +15,7 @@
 #include <linux/workqueue.h>
 #include <sound/tlv.h>
 #include <uapi/sound/sof/tokens.h>
+#include <sound/intel-nhlt.h>
 #include "sof-priv.h"
 #include "sof-audio.h"
 #include "ops.h"
@@ -1959,6 +1960,14 @@ static int sof_complete(struct snd_soc_component *scomp)
 	return 0;
 }
 
+/*
+ * The default method is to fetch nhlt from bios. With this parameter set
+ * it is possible to override that with nhlt blob in sof topology manifest.
+ */
+static int sof_use_tplg_nhlt = 0;
+module_param(sof_use_tplg_nhlt, int, 0444);
+MODULE_PARM_DESC(sof_use_tplg_nhlt, "SOF topology nhlt override");
+
 /* manifest - optional to inform component of manifest */
 static int sof_manifest(struct snd_soc_component *scomp, int index,
 			struct snd_soc_tplg_manifest *man)
@@ -2002,6 +2011,10 @@ static int sof_manifest(struct snd_soc_component *scomp, int index,
 		}
 	}
 
+	/* get nhlt from bios if exists and no override set */
+	if (!sof_use_tplg_nhlt)
+		sdev->nhlt = intel_nhlt_init(sdev->dev);
+
 	/* we have more data in manifest than just abi number, so parse it */
 	if (size > SOF_TPLG_ABI_SIZE) {
 		man_ptr = man->priv.data;
@@ -2014,10 +2027,13 @@ static int sof_manifest(struct snd_soc_component *scomp, int index,
 				return -EINVAL;
 			switch (manifest_tlv->type) {
 			case SOF_MANIFEST_DATA_TYPE_NHLT:
-				sdev->nhlt = devm_kmemdup(sdev->dev, manifest_tlv->data,
-							  manifest_tlv->size, GFP_KERNEL);
-				if (!sdev->nhlt)
-					return -ENOMEM;
+				/* no nhlt in bios so take from manifest */
+				if (!sdev->nhlt) {
+					sdev->nhlt = devm_kmemdup(sdev->dev, manifest_tlv->data,
+								  manifest_tlv->size, GFP_KERNEL);
+					if (!sdev->nhlt)
+						return -ENOMEM;
+				}
 				break;
 			default:
 				return -EINVAL;
