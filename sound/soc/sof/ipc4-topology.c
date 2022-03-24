@@ -486,6 +486,11 @@ static int sof_ipc4_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 		ipc4_copier->copier_config = (uint32_t *)blob;
 		break;
 	}
+	case SOF_DAI_INTEL_SSP:
+		/* set SSP dai index as the node_id */
+		ipc4_copier->data.gtw_cfg.node_id |=
+			SOF_IPC4_NODE_INDEX_INTEL_SSP(ipc4_copier->dai_index);
+		break;
 	default:
 	{
 		ipc4_copier->gtw_attr = kzalloc(sizeof(*ipc4_copier->gtw_attr), GFP_KERNEL);
