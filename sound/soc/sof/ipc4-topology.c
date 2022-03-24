@@ -868,7 +868,7 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 			available_fmt->ref_audio_fmt = available_fmt->out_audio_fmt;
 			ref_audio_fmt_size = sizeof(struct sof_ipc4_audio_format);
 		}
-		copier_data->gtw_cfg.node_id &= ~(0xFF);
+		copier_data->gtw_cfg.node_id &= ~SOF_IPC4_NODE_INDEX_MASK;
 		copier_data->gtw_cfg.node_id |=
 			SOF_IPC4_NODE_INDEX(platform_params->stream_tag - 1);
 

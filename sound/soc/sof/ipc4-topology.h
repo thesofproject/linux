@@ -26,7 +26,9 @@
 #define SOF_IPC4_FW_MAX_PAGE_COUNT 20
 #define SOF_IPC4_FW_MAX_QUEUE_COUNT 8
 
-#define SOF_IPC4_NODE_INDEX(x)	((x) & 0xff)
+/* Node index and mask applicable for host copier */
+#define SOF_IPC4_NODE_INDEX_MASK	0xFF
+#define SOF_IPC4_NODE_INDEX(x)	((x) & SOF_IPC4_NODE_INDEX_MASK)
 #define SOF_IPC4_NODE_TYPE(x)  ((x) << 8)
 
 #define SOF_IPC4_GAIN_ALL_CHANNELS_MASK 0xffffffff
