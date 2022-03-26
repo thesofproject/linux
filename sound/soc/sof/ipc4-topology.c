@@ -491,8 +491,10 @@ static int sof_ipc4_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 		ipc4_copier->data.gtw_cfg.node_id |=
 			SOF_IPC4_NODE_INDEX_INTEL_SSP(ipc4_copier->dai_index);
 		break;
+	case SOF_DAI_INTEL_DMIC:
+		/* TODO: set DMIC node id */
+		break;
 	default:
-	{
 		ipc4_copier->gtw_attr = kzalloc(sizeof(*ipc4_copier->gtw_attr), GFP_KERNEL);
 		if (!ipc4_copier->gtw_attr) {
 			ret = -ENOMEM;
@@ -501,7 +503,6 @@ static int sof_ipc4_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 
 		ipc4_copier->copier_config = (uint32_t *)ipc4_copier->gtw_attr;
 		break;
-	}
 	}
 	ipc4_copier->data.gtw_cfg.config_length = sizeof(struct sof_ipc4_gtw_attributes) >> 2;
 
@@ -539,7 +540,14 @@ static void sof_ipc4_widget_free_comp_dai(struct snd_sof_widget *swidget)
 	kfree(available_fmt->dma_buffer_size);
 	kfree(available_fmt->base_config);
 	kfree(available_fmt->out_audio_fmt);
-	kfree(ipc4_copier->copier_config);
+	switch (ipc4_copier->dai_type) {
+	case SOF_DAI_INTEL_ALH:
+	case SOF_DAI_INTEL_HDA:
+		kfree(ipc4_copier->copier_config);
+		break;
+	default:
+		break;
+	}
 	kfree(dai->private);
 	kfree(dai);
 	swidget->private = NULL;
