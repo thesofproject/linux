@@ -11,7 +11,6 @@
 
 #include <linux/firmware.h>
 #include <sound/sof/ipc4/header.h>
-#include <trace/events/sof_intel.h>
 #include "../ipc4-priv.h"
 #include "../ops.h"
 #include "hda.h"
@@ -63,8 +62,6 @@ static bool mtl_dsp_check_ipc_irq(struct snd_sof_dev *sdev)
 	/* read Interrupt IP Pointer */
 	hfintipptr = snd_sof_dsp_read(sdev, HDA_DSP_BAR, MTL_HFINTIPPTR) & MTL_HFINTIPPTR_PTR_MASK;
 	irq_status = snd_sof_dsp_read(sdev, HDA_DSP_BAR, hfintipptr + MTL_DSP_IRQSTS);
-
-	trace_sof_intel_hda_irq_ipc_check(sdev, irq_status);
 
 	if (irq_status != U32_MAX && (irq_status & MTL_DSP_IRQSTS_IPC))
 		return true;
