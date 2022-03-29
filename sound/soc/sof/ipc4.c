@@ -617,7 +617,13 @@ static int sof_ipc4_set_core_state(struct snd_sof_dev *sdev, int core_idx, bool 
 	return sof_ipc4_tx_msg(sdev, &msg, msg.data_size, NULL, 0, false);
 }
 
+static int sof_ipc4_ctx_save(struct snd_sof_dev *sdev)
+{
+	return sof_ipc4_set_core_state(sdev, SOF_DSP_PRIMARY_CORE, false);
+}
+
 static const struct sof_ipc_pm_ops ipc4_pm_ops = {
+	.ctx_save = sof_ipc4_ctx_save,
 	.set_core_state = sof_ipc4_set_core_state,
 };
 
