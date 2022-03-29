@@ -15,19 +15,19 @@ include/sound/sof/dai.h				@ranj063 @singalsu @juimonen @dbaluta
 include/sound/sof/dai-imx.h			@ranj063 @singalsu @juimonen @dbaluta
 include/sound/sof/dai-intel.h			@ranj063 @singalsu @juimonen
 include/sound/sof/dai-amd.h			@ajitkupandey @bhiregoudar @sunilkumardommati @vijendarmukunda
-include/sound/sof/ext_manifest.h		@lyakh @ranj063 @keyonjie @juimonen
-include/sound/sof/header.h			@lyakh @ranj063 @keyonjie @juimonen
-include/sound/sof/info.h			@lyakh @ranj063 @keyonjie @juimonen
-include/sound/sof/pm.h				@lyakh @ranj063 @keyonjie @juimonen
-include/sound/sof/stream.h			@lyakh @ranj063 @keyonjie @juimonen
+include/sound/sof/ext_manifest.h		@lyakh @ranj063 @juimonen
+include/sound/sof/header.h			@lyakh @ranj063 @juimonen
+include/sound/sof/info.h			@lyakh @ranj063 @juimonen
+include/sound/sof/pm.h				@lyakh @ranj063 @juimonen
+include/sound/sof/stream.h			@lyakh @ranj063 @juimonen
 include/sound/sof/topology.h			@ranj063 @singalsu @bardliao @juimonen
 include/sound/sof/trace.h			@juimonen @lyakh @kv2019i
 include/sound/sof/xtensa.h			@lyakh @xiulipan
 
 include/uapi/sound/sof/abi.h			@lyakh @juimonen @dbaluta
-include/uapi/sound/sof/fw.h			@lyakh @ranj063 @keyonjie @juimonen
-include/uapi/sound/sof/header.h			@lyakh @ranj063 @keyonjie @juimonen
-include/uapi/sound/sof/tokens.h			@lyakh @ranj063 @keyonjie @juimonen
+include/uapi/sound/sof/fw.h			@lyakh @ranj063 @juimonen
+include/uapi/sound/sof/header.h			@lyakh @ranj063 @juimonen
+include/uapi/sound/sof/tokens.h			@lyakh @ranj063 @juimonen
 
 # core parts
 sound/soc/sof/control.c				@ranj063 @singalsu
@@ -35,40 +35,40 @@ sound/soc/sof/core.c				@plbossart @dbaluta
 sound/soc/sof/debug.c				@ranj063 @xiulipan
 sound/soc/sof/ipc.c				@lyakh @dbaluta
 sound/soc/sof/Kconfig				@lyakh @dbaluta
-sound/soc/sof/loader.c				@lyakh @ranj063 @keyonjie @juimonen
+sound/soc/sof/loader.c				@lyakh @ranj063 @juimonen
 sound/soc/sof/Makefile				@lyakh @dbaluta
 sound/soc/sof/nocodec.c				@bardliao @libinyang
-sound/soc/sof/ops.*				@lyakh @ranj063 @keyonjie
-sound/soc/sof/pcm.c				@lyakh @ranj063 @keyonjie @juimonen
-sound/soc/sof/pm.c				@lyakh @ranj063 @keyonjie @juimonen
+sound/soc/sof/ops.*				@lyakh @ranj063
+sound/soc/sof/pcm.c				@lyakh @ranj063 @juimonen
+sound/soc/sof/pm.c				@lyakh @ranj063 @juimonen
 sound/soc/sof/sof-acpi-dev.c			@juimonen @RanderWang
 sound/soc/sof/sof-pci-dev.c			@lyakh @bardliao @libinyang
-sound/soc/sof/sof-priv.h			@lyakh @ranj063 @keyonjie @juimonen
+sound/soc/sof/sof-priv.h			@lyakh @ranj063 @juimonen
 sound/soc/sof/topology.c			@ranj063 @singalsu @bardliao @juimonen
 sound/soc/sof/trace.c				@juimonen @lyakh @kv2019i
 sound/soc/sof/utils.c				@juimonen @lyakh @kv2019i
 
 # intel parts
-sound/soc/sof/intel/apl.c			@keyonjie @libinyang @bardliao @lyakh
-sound/soc/sof/intel/bdw.c			@RanderWang @keyonjie
-sound/soc/sof/intel/byt.c			@juimonen @keyonjie
-sound/soc/sof/intel/cnl.c			@keyonjie @libinyang @bardliao @RanderWang
-sound/soc/sof/intel/hda-bus.c			@keyonjie @libinyang @bardliao
-sound/soc/sof/intel/hda.c			@keyonjie @libinyang @bardliao
-sound/soc/sof/intel/hda-codec.c			@keyonjie @libinyang @bardliao
-sound/soc/sof/intel/hda-ctrl.c			@keyonjie @libinyang @bardliao
-sound/soc/sof/intel/hda-dai.c			@keyonjie @libinyang @bardliao @RanderWang
-sound/soc/sof/intel/hda-dsp.c			@keyonjie @libinyang @bardliao
-sound/soc/sof/intel/hda.h			@keyonjie @libinyang @bardliao @lyakh
-sound/soc/sof/intel/hda-ipc.c			@keyonjie @libinyang @bardliao @lyakh
-sound/soc/sof/intel/hda-loader.c		@keyonjie @libinyang @bardliao @lyakh
-sound/soc/sof/intel/hda-pcm.c			@keyonjie @libinyang @bardliao @lyakh
-sound/soc/sof/intel/hda-stream.c		@keyonjie @libinyang @bardliao @lyakh
-sound/soc/sof/intel/hda-trace.c			@keyonjie @libinyang @bardliao @lyakh
-sound/soc/sof/intel/intel-ipc.c			@keyonjie @libinyang @bardliao @lyakh
-sound/soc/sof/intel/Kconfig			@keyonjie @libinyang
-sound/soc/sof/intel/Makefile			@keyonjie @libinyang
-sound/soc/sof/intel/shim.h			@keyonjie @libinyang @bardliao @lyakh @juimonen
+sound/soc/sof/intel/apl.c			@libinyang @bardliao @lyakh
+sound/soc/sof/intel/bdw.c			@RanderWang
+sound/soc/sof/intel/byt.c			@juimonen
+sound/soc/sof/intel/cnl.c			@libinyang @bardliao @RanderWang
+sound/soc/sof/intel/hda-bus.c			@libinyang @bardliao
+sound/soc/sof/intel/hda.c			@libinyang @bardliao
+sound/soc/sof/intel/hda-codec.c			@libinyang @bardliao
+sound/soc/sof/intel/hda-ctrl.c			@libinyang @bardliao
+sound/soc/sof/intel/hda-dai.c			@libinyang @bardliao @RanderWang
+sound/soc/sof/intel/hda-dsp.c			@libinyang @bardliao
+sound/soc/sof/intel/hda.h			@libinyang @bardliao @lyakh
+sound/soc/sof/intel/hda-ipc.c			@libinyang @bardliao @lyakh
+sound/soc/sof/intel/hda-loader.c		 @libinyang @bardliao @lyakh
+sound/soc/sof/intel/hda-pcm.c			 @libinyang @bardliao @lyakh
+sound/soc/sof/intel/hda-stream.c		 @libinyang @bardliao @lyakh
+sound/soc/sof/intel/hda-trace.c			@libinyang @bardliao @lyakh
+sound/soc/sof/intel/intel-ipc.c			@libinyang @bardliao @lyakh
+sound/soc/sof/intel/Kconfig			 @libinyang
+sound/soc/sof/intel/Makefile			 @libinyang
+sound/soc/sof/intel/shim.h			 @libinyang @bardliao @lyakh @juimonen
 
 # amd parts
 sound/soc/sof/amd/*				@ajitkupandey @bhiregoudar @sunilkumardommati @vijendarmukunda
