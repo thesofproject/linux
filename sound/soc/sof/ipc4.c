@@ -365,9 +365,9 @@ static int sof_ipc4_tx_msg(struct snd_sof_dev *sdev, void *msg_data, size_t msg_
 #ifdef DEBUG_VERBOSE
 	/* payload is indicated by non zero msg/reply_bytes */
 	if (msg_bytes)
-		*msg = msg_data;
+		msg = msg_data;
 	else if (reply_bytes)
-		*msg = reply_data;
+		msg = reply_data;
 
 	if (msg)
 		sof_ipc4_dump_payload(sdev, msg->data_ptr, msg->data_size);
