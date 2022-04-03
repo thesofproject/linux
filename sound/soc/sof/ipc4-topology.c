@@ -795,7 +795,7 @@ static int sof_ipc4_init_audio_fmt(struct snd_sof_dev *sdev,
 static void sof_ipc4_unprepare_copier_module(struct snd_sof_widget *swidget)
 {
 	struct sof_ipc4_fw_module *fw_module = swidget->module_info;
-	struct sof_ipc4_copier *ipc4_copier;
+	struct sof_ipc4_copier *ipc4_copier = NULL;
 	struct snd_sof_widget *pipe_widget;
 	struct sof_ipc4_pipeline *pipeline;
 
@@ -812,9 +812,11 @@ static void sof_ipc4_unprepare_copier_module(struct snd_sof_widget *swidget)
 		ipc4_copier = dai->private;
 	}
 
-	kfree(ipc4_copier->ipc_config_data);
-	ipc4_copier->ipc_config_data = NULL;
-	ipc4_copier->ipc_config_size = 0;
+	if (ipc4_copier) {
+		kfree(ipc4_copier->ipc_config_data);
+		ipc4_copier->ipc_config_data = NULL;
+		ipc4_copier->ipc_config_size = 0;
+	}
 
 	ida_free(&fw_module->m_ida, swidget->instance_id);
 }
