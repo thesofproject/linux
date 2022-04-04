@@ -66,6 +66,7 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 		case SOF_IPC4_PIPE_RESET:
 			if (!WIDGET_IS_AIF(swidget->id))
 				continue;
+			break;
 		default:
 			break;
 		}
