@@ -383,7 +383,7 @@ struct sof_ipc4_fw_version {
 	uint16_t minor;
 	uint16_t hotfix;
 	uint16_t build;
-};
+} __packed;
 
 /* Reply messages */
 
