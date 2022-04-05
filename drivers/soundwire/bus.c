@@ -7,6 +7,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/soundwire/sdw_registers.h>
 #include <linux/soundwire/sdw.h>
+#include <linux/soundwire/sdw_type.h>
 #include "bus.h"
 #include "sysfs_local.h"
 
@@ -842,12 +843,12 @@ static int sdw_slave_clk_stop_callback(struct sdw_slave *slave,
 				       enum sdw_clk_stop_mode mode,
 				       enum sdw_clk_stop_type type)
 {
-	int ret;
+	if (slave->driver_bound)  {
+		struct device *dev = &slave->dev;
+		struct sdw_driver *drv = drv_to_sdw_driver(dev->driver);
 
-	if (slave->ops && slave->ops->clk_stop) {
-		ret = slave->ops->clk_stop(slave, mode, type);
-		if (ret < 0)
-			return ret;
+		if (drv->ops && drv->ops->clk_stop)
+			return drv->ops->clk_stop(slave, mode, type);
 	}
 
 	return 0;
@@ -1611,14 +1612,20 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 		}
 
 		/* Update the Slave driver */
-		if (slave_notify && slave->ops &&
-		    slave->ops->interrupt_callback) {
-			slave_intr.sdca_cascade = sdca_cascade;
-			slave_intr.control_port = clear;
-			memcpy(slave_intr.port, &port_status,
-			       sizeof(slave_intr.port));
+		if (slave_notify) {
+			if (slave->driver_bound) {
+				struct device *dev = &slave->dev;
+				struct sdw_driver *drv = drv_to_sdw_driver(dev->driver);
 
-			slave->ops->interrupt_callback(slave, &slave_intr);
+				if (drv->ops && drv->ops->interrupt_callback) {
+					slave_intr.sdca_cascade = sdca_cascade;
+					slave_intr.control_port = clear;
+					memcpy(slave_intr.port, &port_status,
+					       sizeof(slave_intr.port));
+
+					drv->ops->interrupt_callback(slave, &slave_intr);
+				}
+			}
 		}
 
 		/* Ack interrupt */
@@ -1711,10 +1718,15 @@ static int sdw_update_slave_status(struct sdw_slave *slave,
 		}
 	}
 
-	if (!slave->ops || !slave->ops->update_status)
-		return 0;
+	if (slave->driver_bound) {
+		struct device *dev = &slave->dev;
+		struct sdw_driver *drv = drv_to_sdw_driver(dev->driver);
 
-	return slave->ops->update_status(slave, status);
+		if (drv->ops && drv->ops->update_status)
+			return drv->ops->update_status(slave, status);
+	}
+
+	return 0;
 }
 
 /**

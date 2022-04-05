@@ -98,8 +98,6 @@ static int sdw_drv_probe(struct device *dev)
 	if (!id)
 		return -ENODEV;
 
-	slave->ops = drv->ops;
-
 	/*
 	 * attach to power domain but don't turn on (last arg)
 	 */
@@ -118,8 +116,8 @@ static int sdw_drv_probe(struct device *dev)
 	}
 
 	/* device is probed so let's read the properties now */
-	if (slave->ops && slave->ops->read_prop)
-		slave->ops->read_prop(slave);
+	if (drv->ops && drv->ops->read_prop)
+		drv->ops->read_prop(slave);
 
 	/* init the sysfs as we have properties now */
 	ret = sdw_slave_sysfs_init(slave);
