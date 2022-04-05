@@ -7,6 +7,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/soundwire/sdw_registers.h>
 #include <linux/soundwire/sdw.h>
+#include <linux/soundwire/sdw_type.h>
 #include "bus.h"
 #include "sysfs_local.h"
 
@@ -846,15 +847,21 @@ static int sdw_slave_clk_stop_callback(struct sdw_slave *slave,
 				       enum sdw_clk_stop_mode mode,
 				       enum sdw_clk_stop_type type)
 {
-	int ret;
+	struct device *dev = &slave->dev;
+	struct sdw_driver *drv;
+	int ret = 0;
 
-	if (slave->ops && slave->ops->clk_stop) {
-		ret = slave->ops->clk_stop(slave, mode, type);
-		if (ret < 0)
-			return ret;
+	device_lock(dev);
+
+	if (dev->driver) {
+		drv = drv_to_sdw_driver(dev->driver);
+		if (drv->ops && drv->ops->clk_stop)
+			ret = drv->ops->clk_stop(slave, mode, type);
 	}
 
-	return 0;
+	device_unlock(dev);
+
+	return ret;
 }
 
 static int sdw_slave_clk_stop_prepare(struct sdw_slave *slave,
@@ -1616,14 +1623,25 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 		}
 
 		/* Update the Slave driver */
-		if (slave_notify && slave->ops &&
-		    slave->ops->interrupt_callback) {
-			slave_intr.sdca_cascade = sdca_cascade;
-			slave_intr.control_port = clear;
-			memcpy(slave_intr.port, &port_status,
-			       sizeof(slave_intr.port));
+		if (slave_notify) {
+			struct device *dev = &slave->dev;
+			struct sdw_driver *drv;
 
-			slave->ops->interrupt_callback(slave, &slave_intr);
+			device_lock(dev);
+
+			if (dev->driver) {
+				drv = drv_to_sdw_driver(dev->driver);
+				if (drv->ops && drv->ops->interrupt_callback) {
+					slave_intr.sdca_cascade = sdca_cascade;
+					slave_intr.control_port = clear;
+					memcpy(slave_intr.port, &port_status,
+					       sizeof(slave_intr.port));
+
+					drv->ops->interrupt_callback(slave, &slave_intr);
+				}
+			}
+
+			device_unlock(dev);
 		}
 
 		/* Ack interrupt */
@@ -1697,7 +1715,11 @@ io_err:
 static int sdw_update_slave_status(struct sdw_slave *slave,
 				   enum sdw_slave_status status)
 {
+	struct device *dev = &slave->dev;
+	struct sdw_driver *drv;
 	unsigned long time;
+
+	device_lock_assert(dev);
 
 	if (!slave->probed) {
 		/*
@@ -1716,10 +1738,13 @@ static int sdw_update_slave_status(struct sdw_slave *slave,
 		}
 	}
 
-	if (!slave->ops || !slave->ops->update_status)
-		return 0;
+	if (dev->driver) {
+		drv = drv_to_sdw_driver(dev->driver);
+		if (drv->ops && drv->ops->update_status)
+			return drv->ops->update_status(slave, status);
+	}
 
-	return slave->ops->update_status(slave, status);
+	return 0;
 }
 
 /**
@@ -1828,7 +1853,10 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 			break;
 		}
 
+		device_lock(&slave->dev);
 		ret = sdw_update_slave_status(slave, status[i]);
+		device_unlock(&slave->dev);
+
 		if (ret < 0)
 			dev_err(&slave->dev,
 				"Update Slave status failed:%d\n", ret);
@@ -1860,6 +1888,7 @@ EXPORT_SYMBOL(sdw_handle_slave_status);
 void sdw_clear_slave_status(struct sdw_bus *bus, u32 request)
 {
 	struct sdw_slave *slave;
+	bool lock;
 	int i;
 
 	/* Check all non-zero devices */
@@ -1878,7 +1907,23 @@ void sdw_clear_slave_status(struct sdw_bus *bus, u32 request)
 		if (slave->status != SDW_SLAVE_UNATTACHED) {
 			sdw_modify_slave_status(slave, SDW_SLAVE_UNATTACHED);
 			slave->first_interrupt_done = false;
+
+			lock = device_trylock(&slave->dev);
+
+			/*
+			 * this bus/manager-level function can only be called from
+			 * a resume sequence. If the peripheral device (child of the
+			 *  manager device) is locked, this indicates a resume operation
+			 * initiated by the device core to deal with .remove() or .shutdown()
+			 * at the peripheral level. With the parent-child order enforced
+			 * by PM frameworks on resume, the peripheral resume has not started
+			 * yet, so it's safe to assume the lock will not be released while
+			 * the update_status callback is invoked.
+			 */
 			sdw_update_slave_status(slave, SDW_SLAVE_UNATTACHED);
+
+			if (lock)
+				device_unlock(&slave->dev);
 		}
 
 		/* keep track of request, used in pm_runtime resume */
