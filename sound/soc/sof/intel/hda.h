@@ -453,6 +453,9 @@ struct sof_intel_hda_dev {
 
 	wait_queue_head_t waitq;
 	bool code_loading;
+
+	/* Intel NHLT information */
+	struct nhlt_acpi_table *nhlt;
 };
 
 static inline struct hdac_bus *sof_to_bus(struct snd_sof_dev *s)
