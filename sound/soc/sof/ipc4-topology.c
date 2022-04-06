@@ -533,7 +533,8 @@ static void sof_ipc4_widget_free_comp_dai(struct snd_sof_widget *swidget)
 	kfree(available_fmt->dma_buffer_size);
 	kfree(available_fmt->base_config);
 	kfree(available_fmt->out_audio_fmt);
-	if (ipc4_copier->dai_type == SOF_DAI_INTEL_HDA)
+	if (ipc4_copier->dai_type != SOF_DAI_INTEL_SSP &&
+	    ipc4_copier->dai_type != SOF_DAI_INTEL_DMIC)
 		kfree(ipc4_copier->copier_config);
 	kfree(dai->private);
 	kfree(dai);
