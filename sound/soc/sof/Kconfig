@@ -63,7 +63,7 @@ config SND_SOC_SOF_DEBUG_PROBES
 	  'select' statements at a higher level.
 
 config SND_SOC_SOF_CLIENT
-	tristate
+	bool
 	select AUXILIARY_BUS
 	help
 	  This option is not user-selectable but automagically handled by
