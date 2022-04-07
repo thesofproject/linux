@@ -1472,7 +1472,7 @@ static int sof_ipc4_parse_manifest(struct snd_soc_component *scomp, int index,
 	if (size <= SOF_IPC4_TPLG_ABI_SIZE)
 		return 0;
 
-	manifest_tlv = manifest->items;
+	manifest_tlv = (struct sof_manifest_tlv *)manifest->items;
 	len_check = sizeof(struct sof_manifest);
 	for (i = 0; i < le16_to_cpu(manifest->count); i++) {
 		len_check += sizeof(struct sof_manifest_tlv) + le32_to_cpu(manifest_tlv->size);

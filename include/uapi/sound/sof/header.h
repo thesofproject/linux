@@ -46,14 +46,14 @@ struct sof_manifest_tlv {
  * @abi_minor: Minor ABI version
  * @abi_patch: ABI patch
  * @count: count of tlv items
- * @items: consecutive variable size tlv items
+ * @items: consecutive variable size tlv items (struct sof_manifest_tlv)
  */
 struct sof_manifest {
 	__le16 abi_major;
 	__le16 abi_minor;
 	__le16 abi_patch;
 	__le16 count;
-	struct sof_manifest_tlv items[];
+	__u8 items[];
 };
 
 #endif
