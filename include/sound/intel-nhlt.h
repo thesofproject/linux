@@ -80,7 +80,7 @@ struct nhlt_endpoint {
 struct nhlt_acpi_table {
 	struct acpi_table_header header;
 	u8 endpoint_count;
-	struct nhlt_endpoint desc[];
+	u8 desc[]; /* flexible array of 'struct nhlt_endpoint' */
 } __packed;
 
 struct nhlt_resource_desc  {

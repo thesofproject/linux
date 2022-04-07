@@ -44,8 +44,9 @@ int intel_nhlt_get_dmic_geo(struct device *dev, struct nhlt_acpi_table *nhlt)
 		return 0;
 	}
 
-	for (j = 0, epnt = nhlt->desc; j < nhlt->endpoint_count; j++,
-	     epnt = (struct nhlt_endpoint *)((u8 *)epnt + epnt->length)) {
+	for (j = 0, epnt = (struct nhlt_endpoint *)nhlt->desc;
+	     j < nhlt->endpoint_count;
+	     j++, epnt = (struct nhlt_endpoint *)((u8 *)epnt + epnt->length)) {
 
 		if (epnt->linktype != NHLT_LINK_DMIC)
 			continue;
