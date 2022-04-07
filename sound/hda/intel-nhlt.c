@@ -56,11 +56,12 @@ int intel_nhlt_get_dmic_geo(struct device *dev, struct nhlt_acpi_table *nhlt)
 
 		/* find max number of channels based on format_configuration */
 		if (fmt_configs->fmt_count) {
-			struct nhlt_fmt_cfg *fmt_cfg = fmt_configs->fmt_config;
+			struct nhlt_fmt_cfg *fmt_cfg;
 
 			dev_dbg(dev, "found %d format definitions\n",
 				fmt_configs->fmt_count);
 
+			fmt_cfg = (struct nhlt_fmt_cfg *)fmt_configs->fmt_config;
 			for (i = 0; i < fmt_configs->fmt_count; i++) {
 				struct wav_fmt_ext *fmt_ext;
 
@@ -189,7 +190,7 @@ int intel_nhlt_ssp_mclk_mask(struct nhlt_acpi_table *nhlt, int ssp_num)
 		    epnt->virtual_bus_id == ssp_num) {
 
 			fmt = (struct nhlt_fmt *)(epnt->config.caps + epnt->config.size);
-			cfg = fmt->fmt_config;
+			cfg = (struct nhlt_fmt_cfg *)fmt->fmt_config;
 
 			/*
 			 * In theory all formats should use the same MCLK but it doesn't hurt to
@@ -241,7 +242,7 @@ static struct nhlt_specific_cfg *
 nhlt_get_specific_cfg(struct device *dev, struct nhlt_fmt *fmt, u8 num_ch,
 		      u32 rate, u8 vbps, u8 bps)
 {
-	struct nhlt_fmt_cfg *cfg = fmt->fmt_config;
+	struct nhlt_fmt_cfg *cfg = (struct nhlt_fmt_cfg *)fmt->fmt_config;
 	struct wav_fmt *wfmt;
 	u16 _bps, _vbps;
 	int i;

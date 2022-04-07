@@ -58,7 +58,7 @@ struct nhlt_fmt_cfg {
 
 struct nhlt_fmt {
 	u8 fmt_count;
-	struct nhlt_fmt_cfg fmt_config[];
+	u8 fmt_config[];  /* flexible array of 'struct nhlt_fmt_cfg' */
 } __packed;
 
 struct nhlt_endpoint {
