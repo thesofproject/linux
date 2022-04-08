@@ -262,7 +262,6 @@ static const struct sof_topology_token afe_tokens[] = {
 		offsetof(struct sof_ipc_dai_mtk_afe_params, format)},
 };
 
-
 /* ACPDMIC */
 static const struct sof_topology_token acpdmic_tokens[] = {
 	{SOF_TKN_AMD_ACPDMIC_RATE,
