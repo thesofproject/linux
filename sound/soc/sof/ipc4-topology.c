@@ -1368,7 +1368,7 @@ static int sof_ipc4_parse_manifest(struct snd_soc_component *scomp, int index,
 			break;
 		default:
 			dev_warn(scomp->dev, "Skipping unknown manifest data type %d\n",
-				manifest_tlv->type);
+				 manifest_tlv->type);
 			break;
 		}
 		man_ptr += sizeof(struct sof_manifest_tlv) + le32_to_cpu(manifest_tlv->size);
