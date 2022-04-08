@@ -40,7 +40,8 @@
 #define SOF_IPC4_GAIN_ALL_CHANNELS_MASK 0xffffffff
 #define SOF_IPC4_VOL_ZERO_DB	0x7fffffff
 
-#define ALH_MAX_NUMBER_OF_GTW   1
+#define ALH_MAX_NUMBER_OF_GTW   16
+#define ALH_MULTI_GTW_BASE	0x50
 
 /**
  * struct sof_ipc4_pipeline - pipeline config data

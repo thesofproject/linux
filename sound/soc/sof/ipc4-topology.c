@@ -478,13 +478,23 @@ static int sof_ipc4_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 	switch (ipc4_copier->dai_type) {
 	case SOF_DAI_INTEL_ALH:
 	{
+		struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 		struct sof_ipc4_alh_configuration_blob *blob;
+		struct snd_sof_widget *w;
+
 		blob = kzalloc(sizeof(*blob), GFP_KERNEL);
 		if (!blob) {
 			ret = -ENOMEM;
 			goto err;
 		}
 
+		list_for_each_entry(w, &sdev->widget_list, list) {
+			if (w->widget->sname &&
+			    strcmp(w->widget->sname, swidget->widget->sname))
+				continue;
+
+			blob->alh_cfg.count++;
+		}
 		ipc4_copier->copier_config = (uint32_t *)blob;
 		break;
 	}
@@ -962,6 +972,7 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 	struct sof_ipc4_copier_data *copier_data;
 	struct snd_pcm_hw_params *ref_params;
 	struct sof_ipc4_copier *ipc4_copier;
+	struct snd_sof_dai *dai;
 	struct snd_mask *fmt;
 	int out_sample_valid_bits;
 	size_t ref_audio_fmt_size;
@@ -1011,7 +1022,7 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 	case snd_soc_dapm_dai_in:
 	case snd_soc_dapm_dai_out:
 	{
-		struct snd_sof_dai *dai = swidget->private;
+		dai = swidget->private;
 
 		ipc4_copier = (struct sof_ipc4_copier *)dai->private;
 		copier_data = &ipc4_copier->data;
@@ -1064,12 +1075,15 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		case SOF_DAI_INTEL_ALH:
 		{
 			struct sof_ipc4_alh_configuration_blob *blob;
+			struct sof_ipc4_copier_data *alh_data;
+			struct sof_ipc4_copier *alh_copier;
+			struct snd_sof_widget *w;
+			u32 ch_mask = 0;
 			u32 ch_map;
 			int i;
 
 			blob = (struct sof_ipc4_alh_configuration_blob *)ipc4_copier->copier_config;
-			blob->alh_cfg.count = 1;
-			blob->alh_cfg.mapping[0].alh_id = copier_data->gtw_cfg.node_id;
+
 			blob->gw_attr.lp_buffer_alloc = 0;
 			copier_data->gtw_cfg.config_length = sizeof(*blob) >> 2;
 
@@ -1077,9 +1091,35 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 			ch_map = copier_data->base_config.audio_fmt.ch_map;
 			for (i = 0; ch_map > 0; i++) {
 				if ((ch_map & 0xf) != 0xf)
-					 blob->alh_cfg.mapping[0].channel_mask |= BIT(i);
+					ch_mask |= BIT(i);
 				ch_map >>= 4;
 			}
+
+			/*
+			 * Set each gtw_cfg.node_id to blob->alh_cfg.mapping[]
+			 * for all widgets with the same stream name
+			 */
+			i = 0;
+			list_for_each_entry(w, &sdev->widget_list, list) {
+				if (w->widget->sname &&
+				    strcmp(w->widget->sname, swidget->widget->sname))
+					continue;
+
+				dai = w->private;
+				alh_copier = (struct sof_ipc4_copier *)dai->private;
+				alh_data = &alh_copier->data;
+				blob->alh_cfg.mapping[i].alh_id = alh_data->gtw_cfg.node_id;
+				blob->alh_cfg.mapping[i].channel_mask = ch_mask;
+				i++;
+			}
+
+			/* aggregation mode */
+			if (blob->alh_cfg.count > 1) {
+				copier_data->gtw_cfg.node_id &= ~SOF_IPC4_NODE_INDEX_MASK;
+				copier_data->gtw_cfg.node_id |=
+					SOF_IPC4_NODE_INDEX(ALH_MULTI_GTW_BASE);
+			}
+
 			break;
 		}
 		}
