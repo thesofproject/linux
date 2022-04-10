@@ -258,6 +258,7 @@ config SND_SOC_SOF_IPC3
 
 config SND_SOC_SOF_INTEL_IPC4
 	bool
+	select SND_INTEL_NHLT
 
 source "sound/soc/sof/amd/Kconfig"
 source "sound/soc/sof/imx/Kconfig"
