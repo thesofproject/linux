@@ -840,6 +840,7 @@ static void sof_ipc4_unprepare_copier_module(struct snd_sof_widget *swidget)
 	ida_free(&fw_module->m_ida, swidget->instance_id);
 }
 
+#if IS_ENABLED(CONFIG_ACPI) && IS_ENABLED(CONFIG_SND_INTEL_NHLT)
 static int snd_sof_get_hw_config_params(struct snd_sof_dev *sdev, struct snd_sof_dai *dai,
 					int *sample_rate, int *channel_count, int *bit_depth)
 {
@@ -937,6 +938,14 @@ static int snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, struct snd_s
 
 	return 0;
 }
+#else
+static int snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, struct snd_sof_dai *dai,
+					  struct snd_pcm_hw_params *params, u32 dai_index,
+					  u32 linktype, u8 dir, u32 **dst, u32 *len)
+{
+	return 0;
+}
+#endif
 
 static int
 sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
