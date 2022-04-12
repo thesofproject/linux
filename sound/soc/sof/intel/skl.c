@@ -46,7 +46,7 @@ static int skl_dsp_ipc_get_window_offset(struct snd_sof_dev *sdev, u32 id)
 
 static int skl_dsp_ipc_get_mailbox_offset(struct snd_sof_dev *sdev)
 {
-	return SRAM_MEMORY_WINDOW_BASE;
+	return SRAM_MEMORY_WINDOW_BASE + 0x1000;
 }
 
 /* skylake ops */
