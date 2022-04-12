@@ -1454,7 +1454,8 @@ static int sof_ipc4_parse_manifest(struct snd_soc_component *scomp, int index,
 	int i;
 
 	if (!size || size < SOF_IPC4_TPLG_ABI_SIZE) {
-		dev_err(scomp->dev, "%s: Invalid topology ABI size\n", __func__);
+		dev_err(scomp->dev, "%s: Invalid topology ABI size: %u\n",
+			__func__, size);
 		return -EINVAL;
 	}
 
