@@ -378,10 +378,12 @@ struct sof_ipc_fw_tracing_ops {
  * struct sof_ipc_pm_ops - IPC-specific PM ops
  * @ctx_save:		Function pointer for context save
  * @ctx_restore:	Function pointer for context restore
+ * @set_core_state:	Function pointer for turning on/off a DSP core
  */
 struct sof_ipc_pm_ops {
 	int (*ctx_save)(struct snd_sof_dev *sdev);
 	int (*ctx_restore)(struct snd_sof_dev *sdev);
+	int (*set_core_state)(struct snd_sof_dev *sdev, int core_idx, bool on);
 };
 
 /**
