@@ -454,6 +454,9 @@ struct sof_intel_hda_dev {
 	/* FW clock config, 0:HPRO, 1:LPRO */
 	bool clk_config_lpro;
 
+	wait_queue_head_t waitq;
+	bool code_loading;
+
 	/* Intel NHLT information */
 	struct nhlt_acpi_table *nhlt;
 };
@@ -766,6 +769,8 @@ extern int sof_hda_position_quirk;
 void hda_set_dai_drv_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops *ops);
 void hda_ops_free(struct snd_sof_dev *sdev);
 
+/* SKL/KBL */
+int hda_dsp_cl_boot_firmware_skl(struct snd_sof_dev *sdev);
 int hda_dsp_core_stall_reset(struct snd_sof_dev *sdev, unsigned int core_mask);
 
 /* IPC4 */
