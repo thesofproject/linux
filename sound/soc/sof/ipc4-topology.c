@@ -487,6 +487,7 @@ static int sof_ipc4_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 		}
 
 		ipc4_copier->copier_config = (uint32_t *)blob;
+		ipc4_copier->data.gtw_cfg.config_length = sizeof(*blob) >> 2;
 		break;
 	}
 	case SOF_DAI_INTEL_SSP:
@@ -1085,11 +1086,10 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 			blob->alh_cfg.count = 1;
 			blob->alh_cfg.mapping[0].alh_id = copier_data->gtw_cfg.node_id;
 			blob->gw_attr.lp_buffer_alloc = 0;
-			copier_data->gtw_cfg.config_length = sizeof(*blob) >> 2;
 
 			/* Get channel_mask from ch_map */
 			ch_map = copier_data->base_config.audio_fmt.ch_map;
-			for (i = 0; ch_map > 0; i++) {
+			for (i = 0; ch_map; i++) {
 				if ((ch_map & 0xf) != 0xf)
 					blob->alh_cfg.mapping[0].channel_mask |= BIT(i);
 				ch_map >>= 4;
