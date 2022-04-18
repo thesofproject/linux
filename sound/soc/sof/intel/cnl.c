@@ -34,6 +34,7 @@ static void cnl_ipc_dsp_done(struct snd_sof_dev *sdev);
 
 irqreturn_t cnl_ipc4_irq_thread(int irq, void *context)
 {
+	struct sof_ipc4_msg notification_data = {{ 0 }};
 	struct snd_sof_dev *sdev = context;
 	bool ipc_irq = false;
 	u32 hipcida, hipctdr;
@@ -72,12 +73,10 @@ irqreturn_t cnl_ipc4_irq_thread(int irq, void *context)
 			spin_unlock_irq(&sdev->ipc_lock);
 		} else {
 			/* Notification received */
-			struct sof_ipc4_msg data = {{ 0 }};
+			notification_data.primary = primary;
+			notification_data.extension = extension;
 
-			data.primary = primary;
-			data.extension = extension;
-
-			sdev->ipc->msg.rx_data = &data;
+			sdev->ipc->msg.rx_data = &notification_data;
 			snd_sof_ipc_msgs_rx(sdev);
 			sdev->ipc->msg.rx_data = NULL;
 		}

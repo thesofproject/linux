@@ -119,6 +119,7 @@ void hda_dsp_ipc_get_reply(struct snd_sof_dev *sdev)
 
 irqreturn_t hda_dsp_ipc4_irq_thread(int irq, void *context)
 {
+	struct sof_ipc4_msg notification_data = {{ 0 }};
 	struct snd_sof_dev *sdev = context;
 	bool ipc_irq = false;
 	u32 hipcie, hipct;
@@ -160,11 +161,10 @@ irqreturn_t hda_dsp_ipc4_irq_thread(int irq, void *context)
 			spin_unlock_irq(&sdev->ipc_lock);
 		} else {
 			/* Notification received */
-			struct sof_ipc4_msg data = {{ 0 }};
 
-			data.primary = primary;
-			data.extension = extension;
-			sdev->ipc->msg.rx_data = &data;
+			notification_data.primary = primary;
+			notification_data.extension = extension;
+			sdev->ipc->msg.rx_data = &notification_data;
 			snd_sof_ipc_msgs_rx(sdev);
 			sdev->ipc->msg.rx_data = NULL;
 		}
