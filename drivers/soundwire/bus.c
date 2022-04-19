@@ -1772,6 +1772,7 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 	struct sdw_slave *slave;
 	bool attached_initializing;
 	int i, ret = 0;
+	bool lock;
 
 	/* first check if any Slaves fell off the bus */
 	for (i = 1; i <= SDW_MAX_DEVICES; i++) {
@@ -1808,6 +1809,8 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 
 	/* Continue to check other slave statuses */
 	for (i = 1; i <= SDW_MAX_DEVICES; i++) {
+		lock = false;
+
 		mutex_lock(&bus->bus_lock);
 		if (test_bit(i, bus->assigned) == false) {
 			mutex_unlock(&bus->bus_lock);
@@ -1866,13 +1869,32 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 			break;
 		}
 
-		dev_info(&slave->dev, "%s: plb: taking lock\n", __func__);
-		device_lock(&slave->dev);
-		dev_info(&slave->dev, "%s: plb: taken lock\n", __func__);
+		/*
+		 * if the device lock is taken while attaching, this means a resume
+		 * operation started. In this case, we don't want to take a lock since
+		 * the resume will time out. Using trylock() works since the resume function
+		 * should wait on the initialization_complete signal, so there's no risk
+		 * of the lock being released while sdw_update_slave_status() is invoked
+		 */
+		if (attached_initializing) {
+			dev_info(&slave->dev, "%s: plb: try taking lock\n", __func__);
+			lock = device_trylock(&slave->dev);
+			if (!lock)
+				dev_dbg(&slave->dev, "%s: lock already taken\n", __func__);
+			else
+				dev_info(&slave->dev, "%s: plb: taken lock\n", __func__);
+		} else {
+			dev_info(&slave->dev, "%s: plb: taking lock\n", __func__);
+			device_lock(&slave->dev);
+			dev_info(&slave->dev, "%s: plb: taken lock\n", __func__);
+		}
 
 		ret = sdw_update_slave_status(slave, status[i]);
-		device_unlock(&slave->dev);
-		dev_info(&slave->dev, "%s: plb: releasing lock\n", __func__);
+
+		if (!attached_initializing || lock) {
+			device_unlock(&slave->dev);
+			dev_info(&slave->dev, "%s: plb: releasing lock\n", __func__);
+		}
 
 		if (ret < 0)
 			dev_err(&slave->dev,
