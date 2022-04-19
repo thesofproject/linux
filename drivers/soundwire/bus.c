@@ -537,11 +537,13 @@ int sdw_nread(struct sdw_slave *slave, u32 addr, size_t count, u8 *val)
 {
 	int ret;
 
+	dev_info(&slave->dev, "%s: plb: pm_runtime_get_sync start\n", __func__);
 	ret = pm_runtime_get_sync(&slave->dev);
 	if (ret < 0 && ret != -EACCES) {
 		pm_runtime_put_noidle(&slave->dev);
 		return ret;
 	}
+	dev_info(&slave->dev, "%s: plb: pm_runtime_get_sync done\n", __func__);
 
 	ret = sdw_nread_no_pm(slave, addr, count, val);
 
@@ -563,11 +565,13 @@ int sdw_nwrite(struct sdw_slave *slave, u32 addr, size_t count, const u8 *val)
 {
 	int ret;
 
+	dev_info(&slave->dev, "%s: plb: pm_runtime_get_sync start\n", __func__);
 	ret = pm_runtime_get_sync(&slave->dev);
 	if (ret < 0 && ret != -EACCES) {
 		pm_runtime_put_noidle(&slave->dev);
 		return ret;
 	}
+	dev_info(&slave->dev, "%s: plb: pm_runtime_get_sync done\n", __func__);
 
 	ret = sdw_nwrite_no_pm(slave, addr, count, val);
 
@@ -1516,12 +1520,14 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 
 	sdw_modify_slave_status(slave, SDW_SLAVE_ALERT);
 
+	dev_info(&slave->dev, "%s: plb: pm_runtime_get_sync start\n", __func__);
 	ret = pm_runtime_get_sync(&slave->dev);
 	if (ret < 0 && ret != -EACCES) {
 		dev_err(&slave->dev, "Failed to resume device: %d\n", ret);
 		pm_runtime_put_noidle(&slave->dev);
 		return ret;
 	}
+	dev_info(&slave->dev, "%s: plb: pm_runtime_get_sync done\n", __func__);
 
 	/* Read Intstat 1, Intstat 2 and Intstat 3 registers */
 	ret = sdw_read_no_pm(slave, SDW_SCP_INT1);
@@ -1919,6 +1925,7 @@ void sdw_clear_slave_status(struct sdw_bus *bus, u32 request)
 			sdw_modify_slave_status(slave, SDW_SLAVE_UNATTACHED);
 			slave->first_interrupt_done = false;
 
+			dev_info(&slave->dev, "%s: plb: device trylock\n", __func__);
 			lock = device_trylock(&slave->dev);
 
 			/*
@@ -1933,8 +1940,10 @@ void sdw_clear_slave_status(struct sdw_bus *bus, u32 request)
 			 */
 			sdw_update_slave_status(slave, SDW_SLAVE_UNATTACHED);
 
-			if (lock)
+			if (lock) {
 				device_unlock(&slave->dev);
+				dev_info(&slave->dev, "%s: plb: device unlock done\n", __func__);
+			}
 		}
 
 		/* keep track of request, used in pm_runtime resume */
