@@ -851,7 +851,9 @@ static int sdw_slave_clk_stop_callback(struct sdw_slave *slave,
 	struct sdw_driver *drv;
 	int ret = 0;
 
+	dev_info(dev, "%s: plb: taking lock\n", __func__);
 	device_lock(dev);
+	dev_info(dev, "%s: plb: taken lock\n", __func__);
 
 	if (dev->driver) {
 		drv = drv_to_sdw_driver(dev->driver);
@@ -860,6 +862,7 @@ static int sdw_slave_clk_stop_callback(struct sdw_slave *slave,
 	}
 
 	device_unlock(dev);
+	dev_info(dev, "%s: plb: releasing lock\n", __func__);
 
 	return ret;
 }
@@ -1627,7 +1630,9 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 			struct device *dev = &slave->dev;
 			struct sdw_driver *drv;
 
+			dev_info(dev, "%s: plb: taking lock\n", __func__);
 			device_lock(dev);
+			dev_info(dev, "%s: plb: taken lock\n", __func__);
 
 			if (dev->driver) {
 				drv = drv_to_sdw_driver(dev->driver);
@@ -1642,6 +1647,8 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 			}
 
 			device_unlock(dev);
+			dev_info(dev, "%s: plb: releasing lock\n", __func__);
+
 		}
 
 		/* Ack interrupt */
@@ -1853,9 +1860,13 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 			break;
 		}
 
+		dev_info(&slave->dev, "%s: plb: taking lock\n", __func__);
 		device_lock(&slave->dev);
+		dev_info(&slave->dev, "%s: plb: taken lock\n", __func__);
+
 		ret = sdw_update_slave_status(slave, status[i]);
 		device_unlock(&slave->dev);
+		dev_info(&slave->dev, "%s: plb: releasing lock\n", __func__);
 
 		if (ret < 0)
 			dev_err(&slave->dev,
