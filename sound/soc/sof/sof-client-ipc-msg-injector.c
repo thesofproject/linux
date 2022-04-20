@@ -118,10 +118,9 @@ static int sof_msg_inject_send_message(struct sof_client_dev *cdev)
 	struct device *dev = &cdev->auxdev.dev;
 	int ret, err;
 
-	ret = pm_runtime_get_sync(dev);
+	ret = pm_runtime_resume_and_get(dev);
 	if (ret < 0 && ret != -EACCES) {
 		dev_err_ratelimited(dev, "debugfs write failed to resume %d\n", ret);
-		pm_runtime_put_noidle(dev);
 		return ret;
 	}
 
