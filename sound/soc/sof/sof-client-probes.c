@@ -504,10 +504,9 @@ static ssize_t sof_probes_dfs_points_read(struct file *file, char __user *to,
 	if (!buf)
 		return -ENOMEM;
 
-	ret = pm_runtime_get_sync(dev);
+	ret = pm_runtime_resume_and_get(dev);
 	if (ret < 0 && ret != -EACCES) {
 		dev_err_ratelimited(dev, "debugfs read failed to resume %d\n", ret);
-		pm_runtime_put_noidle(dev);
 		goto exit;
 	}
 
@@ -569,10 +568,9 @@ sof_probes_dfs_points_write(struct file *file, const char __user *from,
 
 	desc = (struct sof_probe_point_desc *)tkns;
 
-	ret = pm_runtime_get_sync(dev);
+	ret = pm_runtime_resume_and_get(dev);
 	if (ret < 0 && ret != -EACCES) {
 		dev_err_ratelimited(dev, "debugfs write failed to resume %d\n", ret);
-		pm_runtime_put_noidle(dev);
 		goto exit;
 	}
 
@@ -622,10 +620,9 @@ sof_probes_dfs_points_remove_write(struct file *file, const char __user *from,
 		goto exit;
 	}
 
-	ret = pm_runtime_get_sync(dev);
+	ret = pm_runtime_resume_and_get(dev);
 	if (ret < 0) {
 		dev_err_ratelimited(dev, "debugfs write failed to resume %d\n", ret);
-		pm_runtime_put_noidle(dev);
 		goto exit;
 	}
 
