@@ -7,6 +7,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/soundwire/sdw_registers.h>
 #include <linux/soundwire/sdw.h>
+#include <linux/soundwire/sdw_type.h>
 #include "bus.h"
 #include "sysfs_local.h"
 
@@ -846,15 +847,24 @@ static int sdw_slave_clk_stop_callback(struct sdw_slave *slave,
 				       enum sdw_clk_stop_mode mode,
 				       enum sdw_clk_stop_type type)
 {
-	int ret;
+	struct device *dev = &slave->dev;
+	struct sdw_driver *drv;
+	int ret = 0;
 
-	if (slave->ops && slave->ops->clk_stop) {
-		ret = slave->ops->clk_stop(slave, mode, type);
-		if (ret < 0)
-			return ret;
+	dev_info(dev, "%s: plb: taking lock\n", __func__);
+	device_lock(dev);
+	dev_info(dev, "%s: plb: taken lock\n", __func__);
+
+	if (dev->driver) {
+		drv = drv_to_sdw_driver(dev->driver);
+		if (drv->ops && drv->ops->clk_stop)
+			ret = drv->ops->clk_stop(slave, mode, type);
 	}
 
-	return 0;
+	device_unlock(dev);
+	dev_info(dev, "%s: plb: releasing lock\n", __func__);
+
+	return ret;
 }
 
 static int sdw_slave_clk_stop_prepare(struct sdw_slave *slave,
