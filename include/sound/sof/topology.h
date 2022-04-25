@@ -237,6 +237,18 @@ struct sof_ipc_comp_process {
 	uint8_t data[];
 } __packed;
 
+/* IPC file component used by testbench only */
+struct sof_ipc_comp_file {
+	struct sof_ipc_comp comp;
+	struct sof_ipc_comp_config config;
+	uint32_t rate;
+	uint32_t channels;
+	char *fn;
+	uint32_t mode;
+	uint32_t frame_fmt;
+	uint32_t direction;	/**< SOF_IPC_STREAM_ */
+} __packed;
+
 /* frees components, buffers and pipelines
  * SOF_IPC_TPLG_COMP_FREE, SOF_IPC_TPLG_PIPE_FREE, SOF_IPC_TPLG_BUFFER_FREE
  */
