@@ -1062,6 +1062,10 @@ struct kvm_vcpu_arch {
 /* SError pending for nested guest */
 #define NESTED_SERROR_PENDING	__vcpu_single_flag(sflags, BIT(8))
 
+/* vcpu running in HYP context (VHE-only) */
+#define VCPU_HYP_CONTEXT	__vcpu_single_flag(iflags, BIT(7))
+/* pKVM host vcpu state is dirty, needs resync (nVHE-only) */
+#define PKVM_HOST_STATE_DIRTY	__vcpu_single_flag(iflags, BIT(7))
 
 /* Pointer to the vcpu's SVE FFR for sve_{save,load}_state() */
 #define vcpu_sve_pffr(vcpu) (kern_hyp_va((vcpu)->arch.sve_state) +	\
