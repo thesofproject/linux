@@ -152,12 +152,6 @@ static int cl_dsp_init(struct snd_sof_dev *sdev, int stream_tag, bool imr_boot)
 		goto err;
 	}
 
-	/* set DONE bit to clear the reply IPC message */
-	snd_sof_dsp_update_bits_forced(sdev, HDA_DSP_BAR,
-				       chip->ipc_ack,
-				       chip->ipc_ack_mask,
-				       chip->ipc_ack_mask);
-
 	/* step 5: power down cores that are no longer needed */
 	ret = hda_dsp_core_reset_power_down(sdev, chip->host_managed_cores_mask &
 					   ~(chip->init_core_mask));
