@@ -369,10 +369,56 @@ int hda_dsp_cl_boot_firmware_iccmax(struct snd_sof_dev *sdev)
 
 static int hda_dsp_boot_imr(struct snd_sof_dev *sdev)
 {
-	int ret;
+	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
+	const struct sof_intel_dsp_desc *chip = hda->desc;
+	unsigned int status;
+	unsigned long mask;
+	int i, ret;
 
-	ret = cl_dsp_init(sdev, 0, true);
-	if (ret >= 0)
+	if (sdev->pdata->ipc_type == SOF_INTEL_IPC4) {
+		/*
+		 * For IPC4 the IMR boot flow follows the normal boot with subtle
+		 * differences
+		 */
+		ret = cl_dsp_init(sdev, 0, true);
+		if (ret >= 0)
+			hda_sdw_process_wakeen(sdev);
+
+		return ret;
+	}
+
+	/*
+	 * For IPC3 the IMR boot sequence is much simpler and straight forward,
+	 * no ROM message is needed to be sent for example
+	 */
+
+	/* step 1: power up & unstall/run the cores to run the firmware */
+	ret = hda_dsp_enable_core(sdev, chip->init_core_mask);
+	if (ret < 0) {
+		dev_err(sdev->dev, "dsp core start failed %d\n", ret);
+		return -EIO;
+	}
+
+	/* set enabled cores mask and increment ref count for cores in init_core_mask */
+	sdev->enabled_cores_mask |= chip->init_core_mask;
+	mask = sdev->enabled_cores_mask;
+	for_each_set_bit(i, &mask, SOF_MAX_DSP_NUM_CORES)
+		sdev->dsp_core_ref_count[i]++;
+
+	hda_ssp_set_cbp_cfp(sdev);
+
+	/* step 2: enable IPC interrupts */
+	hda_dsp_ipc_int_enable(sdev);
+
+	/* Step 3: Wait for FW_ENTERED state */
+	ret = snd_sof_dsp_read_poll_timeout(sdev, HDA_DSP_BAR,
+					chip->rom_status_reg, status,
+					((status & HDA_DSP_ROM_STS_MASK)
+						== HDA_DSP_ROM_FW_ENTERED),
+					HDA_DSP_REG_POLL_INTERVAL_US,
+					chip->rom_init_timeout *
+					USEC_PER_MSEC);
+	if (!ret)
 		hda_sdw_process_wakeen(sdev);
 
 	return ret;
