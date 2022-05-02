@@ -19,7 +19,8 @@
 #include <trace/events/sof.h>
 
 /* see SOF_DBG_ flags */
-static int sof_core_debug =  IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_ENABLE_FIRMWARE_TRACE);
+static int sof_core_debug =  IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_ENABLE_FIRMWARE_TRACE) |
+				SOF_DBG_SQUELCH_DMA_POSITION_UPDATE_LOGS;
 module_param_named(sof_debug, sof_core_debug, int, 0444);
 MODULE_PARM_DESC(sof_debug, "SOF core debug options (0x0 all off)");
 
