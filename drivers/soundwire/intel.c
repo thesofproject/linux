@@ -1336,8 +1336,8 @@ int intel_link_startup(struct auxiliary_device *auxdev)
 
 	if (bus->prop.hw_disabled) {
 		dev_info(dev,
-			 "SoundWire master %d is disabled, ignoring\n",
-			 sdw->instance);
+			 "%s: SoundWire master %d is disabled, ignoring\n",
+			 __func__, sdw->instance);
 		return 0;
 	}
 
@@ -1497,8 +1497,8 @@ int intel_link_process_wakeen_event(struct auxiliary_device *auxdev)
 	bus = &sdw->cdns.bus;
 
 	if (bus->prop.hw_disabled || !sdw->startup_done) {
-		dev_dbg(dev, "SoundWire master %d is disabled or not-started, ignoring\n",
-			bus->link_id);
+		dev_dbg(dev, "%s: SoundWire master %d is disabled or not-started, ignoring\n",
+			__func__, bus->link_id);
 		return 0;
 	}
 
@@ -1557,8 +1557,8 @@ static int __maybe_unused intel_pm_prepare(struct device *dev)
 	int ret;
 
 	if (bus->prop.hw_disabled || !sdw->startup_done) {
-		dev_dbg(dev, "SoundWire master %d is disabled or not-started, ignoring\n",
-			bus->link_id);
+		dev_dbg(dev, "%s: SoundWire master %d is disabled or not-started, ignoring\n",
+			__func__, bus->link_id);
 		return 0;
 	}
 
@@ -1617,8 +1617,8 @@ static int __maybe_unused intel_suspend(struct device *dev)
 	int ret;
 
 	if (bus->prop.hw_disabled || !sdw->startup_done) {
-		dev_dbg(dev, "SoundWire master %d is disabled or not-started, ignoring\n",
-			bus->link_id);
+		dev_dbg(dev, "%s: SoundWire master %d is disabled or not-started, ignoring\n",
+			__func__, bus->link_id);
 		return 0;
 	}
 
@@ -1670,8 +1670,8 @@ static int __maybe_unused intel_suspend_runtime(struct device *dev)
 	int ret;
 
 	if (bus->prop.hw_disabled || !sdw->startup_done) {
-		dev_dbg(dev, "SoundWire master %d is disabled or not-started, ignoring\n",
-			bus->link_id);
+		dev_dbg(dev, "%s: SoundWire master %d is disabled or not-started, ignoring\n",
+			__func__, bus->link_id);
 		return 0;
 	}
 
@@ -1735,8 +1735,8 @@ static int __maybe_unused intel_resume(struct device *dev)
 	int ret;
 
 	if (bus->prop.hw_disabled || !sdw->startup_done) {
-		dev_dbg(dev, "SoundWire master %d is disabled or not-started, ignoring\n",
-			bus->link_id);
+		dev_dbg(dev, "%s: SoundWire master %d is disabled or not-started, ignoring\n",
+			__func__, bus->link_id);
 		return 0;
 	}
 
@@ -1833,8 +1833,8 @@ static int __maybe_unused intel_resume_runtime(struct device *dev)
 	int ret;
 
 	if (bus->prop.hw_disabled || !sdw->startup_done) {
-		dev_dbg(dev, "SoundWire master %d is disabled or not-started, ignoring\n",
-			bus->link_id);
+		dev_dbg(dev, "%s: SoundWire master %d is disabled or not-started, ignoring\n",
+			__func__, bus->link_id);
 		return 0;
 	}
 
