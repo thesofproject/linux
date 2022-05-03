@@ -464,6 +464,9 @@ static int ipc4_hda_link_dma_trigger(struct snd_pcm_substream *substream,
 	struct snd_soc_dai *cpu_dai;
 	int ret;
 
+	dev_dbg(dai->dev, "%s: cmd=%d dai %s direction %d\n", __func__, cmd,
+		dai->name, substream->stream);
+
 	hstream = substream->runtime->private_data;
 	rtd = asoc_substream_to_rtd(substream);
 	cpu_dai = asoc_rtd_to_cpu(rtd, 0);
