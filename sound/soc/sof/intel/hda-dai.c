@@ -450,8 +450,12 @@ static int ipc3_hda_dai_trigger(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static int ipc4_hda_link_dma_trigger(struct snd_pcm_substream *substream,
-				     int cmd, struct snd_soc_dai *dai)
+/*
+ * In contrast to IPC3, the dai trigger in IPC4 mixes pipeline state changes
+ * (over IPC channel) and DMA state change (direct host register changes).
+ */
+static int ipc4_hda_dai_trigger(struct snd_pcm_substream *substream,
+				int cmd, struct snd_soc_dai *dai)
 {
 	struct hdac_ext_stream *hext_stream = snd_soc_dai_get_dma_data(dai, substream);
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(dai->component);
@@ -591,7 +595,7 @@ static int hda_dai_suspend(struct hdac_bus *bus)
 static const struct snd_soc_dai_ops ipc4_hda_dai_ops = {
 	.hw_params = hda_dai_hw_params,
 	.hw_free = hda_dai_hw_free,
-	.trigger = ipc4_hda_link_dma_trigger,
+	.trigger = ipc4_hda_dai_trigger,
 	.prepare = hda_dai_prepare,
 };
 
