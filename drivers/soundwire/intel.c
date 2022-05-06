@@ -1502,6 +1502,8 @@ int intel_link_process_wakeen_event(struct auxiliary_device *auxdev)
 		return 0;
 	}
 
+	dev_info(dev, "%s: plb: start\n", __func__);
+
 	shim = sdw->link_res->shim;
 	wake_sts = intel_readw(shim, SDW_SHIM_WAKESTS);
 
@@ -1519,6 +1521,8 @@ int intel_link_process_wakeen_event(struct auxiliary_device *auxdev)
 	 * resumed and the Slave codec driver to check the status.
 	 */
 	pm_request_resume(dev);
+
+	dev_info(dev, "%s: plb: end\n", __func__);
 
 	return 0;
 }
@@ -1562,12 +1566,18 @@ static int __maybe_unused intel_pm_prepare(struct device *dev)
 		return 0;
 	}
 
+	dev_info(dev, "%s: plb: start\n", __func__);
+
 	clock_stop_quirks = sdw->link_res->clock_stop_quirks;
 
 	if (pm_runtime_suspended(dev) &&
 	    pm_runtime_suspended(dev->parent) &&
 	    ((clock_stop_quirks & SDW_INTEL_CLK_STOP_BUS_RESET) ||
 	     !clock_stop_quirks)) {
+
+		dev_info(dev, "%s: plb: pm_runtime_suspended\n", __func__);
+		dev_info(dev->parent, "%s: plb: pm_runtime_suspended\n", __func__);
+
 		/*
 		 * if we've enabled clock stop, and the parent is suspended, the SHIM registers
 		 * are not accessible and the shim wake cannot be disabled.
@@ -1605,6 +1615,8 @@ static int __maybe_unused intel_pm_prepare(struct device *dev)
 			dev_err(dev, "%s: intel_resume_child_device failed: %d\n", __func__, ret);
 	}
 
+	dev_info(dev, "%s: plb: end\n", __func__);
+
 	return 0;
 }
 
@@ -1621,6 +1633,8 @@ static int __maybe_unused intel_suspend(struct device *dev)
 			bus->link_id);
 		return 0;
 	}
+
+	dev_info(dev, "%s: plb: start\n", __func__);
 
 	if (pm_runtime_suspended(dev)) {
 		dev_dbg(dev, "%s: pm_runtime status: suspended\n", __func__);
@@ -1641,6 +1655,8 @@ static int __maybe_unused intel_suspend(struct device *dev)
 			}
 		}
 
+		dev_info(dev, "%s: plb: end1\n", __func__);
+
 		return 0;
 	}
 
@@ -1658,6 +1674,8 @@ static int __maybe_unused intel_suspend(struct device *dev)
 
 	intel_shim_wake(sdw, false);
 
+	dev_info(dev, "%s: plb: end2\n", __func__);
+
 	return 0;
 }
 
@@ -1674,6 +1692,8 @@ static int __maybe_unused intel_suspend_runtime(struct device *dev)
 			bus->link_id);
 		return 0;
 	}
+
+	dev_info(dev, "%s: plb: start\n", __func__);
 
 	clock_stop_quirks = sdw->link_res->clock_stop_quirks;
 
@@ -1722,6 +1742,8 @@ static int __maybe_unused intel_suspend_runtime(struct device *dev)
 		ret = -EINVAL;
 	}
 
+	dev_info(dev, "%s: plb: end\n", __func__);
+
 	return ret;
 }
 
@@ -1739,6 +1761,8 @@ static int __maybe_unused intel_resume(struct device *dev)
 			bus->link_id);
 		return 0;
 	}
+
+	dev_info(dev, "%s: plb: start\n", __func__);
 
 	link_flags = md_flags >> (bus->link_id * 8);
 	multi_link = !(link_flags & SDW_INTEL_MASTER_DISABLE_MULTI_LINK);
@@ -1817,6 +1841,8 @@ static int __maybe_unused intel_resume(struct device *dev)
 	 */
 	pm_runtime_mark_last_busy(dev);
 
+	dev_info(dev, "%s: plb: end\n", __func__);
+
 	return ret;
 }
 
@@ -1837,6 +1863,8 @@ static int __maybe_unused intel_resume_runtime(struct device *dev)
 			bus->link_id);
 		return 0;
 	}
+
+	dev_info(dev, "%s: plb: start\n", __func__);
 
 	/* unconditionally disable WAKEEN interrupt */
 	intel_shim_wake(sdw, false);
@@ -2001,6 +2029,8 @@ static int __maybe_unused intel_resume_runtime(struct device *dev)
 			__func__, clock_stop_quirks);
 		ret = -EINVAL;
 	}
+
+	dev_info(dev, "%s: plb: end\n", __func__);
 
 	return ret;
 }
