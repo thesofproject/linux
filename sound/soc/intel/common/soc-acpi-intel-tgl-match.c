@@ -422,59 +422,91 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_tgl_sdw_machines[] = {
 		.links = sdw_mockup_headset_2amps_mic,
 		.drv_name = "sof_sdw",
 		.sof_tplg_filename = "sof-tgl-rt711-rt1308-rt715.tplg",
+		.mach_params = {
+			.link_mask = GENMASK(3, 0),
+			.links = sdw_mockup_headset_2amps_mic,
+		},
 	},
 	{
 		.link_mask = BIT(0) | BIT(1) | BIT(3),
 		.links = sdw_mockup_headset_1amp_mic,
 		.drv_name = "sof_sdw",
 		.sof_tplg_filename = "sof-tgl-rt711-rt1308-mono-rt715.tplg",
+		.mach_params = {
+			.link_mask = BIT(0) | BIT(1) | BIT(3),
+			.links = sdw_mockup_headset_1amp_mic,
+		},
 	},
 	{
 		.link_mask = BIT(0) | BIT(1) | BIT(2),
 		.links = sdw_mockup_mic_headset_1amp,
 		.drv_name = "sof_sdw",
 		.sof_tplg_filename = "sof-tgl-rt715-rt711-rt1308-mono.tplg",
+		.mach_params = {
+			.link_mask = BIT(0) | BIT(1) | BIT(2),
+			.links = sdw_mockup_mic_headset_1amp,
+		},
 	},
 	{
 		.link_mask = 0x7,
 		.links = tgl_sdw_rt711_link1_rt1308_link2_rt715_link0,
 		.drv_name = "sof_sdw",
 		.sof_tplg_filename = "sof-tgl-rt715-rt711-rt1308-mono.tplg",
+		.mach_params = {
+			.link_mask = 0x7,
+			.links = tgl_sdw_rt711_link1_rt1308_link2_rt715_link0,
+		},
 	},
 	{
 		.link_mask = 0xF, /* 4 active links required */
 		.links = tgl_3_in_1_default,
 		.drv_name = "sof_sdw",
 		.sof_tplg_filename = "sof-tgl-rt711-rt1308-rt715.tplg",
+		.mach_params = {
+			.link_mask = 0xF, /* 4 active links required */
+			.links = tgl_3_in_1_default,
+		},
 	},
 	{
+		.link_mask = 0xF,
+		.links = tgl_3_in_1_mono_amp,
+		.drv_name = "sof_sdw",
+		.sof_tplg_filename = "sof-tgl-rt711-rt1308-mono-rt715.tplg",
 		/*
 		 * link_mask should be 0xB, but all links are enabled by BIOS.
 		 * This entry will be selected if there is no rt1308 exposed
 		 * on link2 since it will fail to match the above entry.
 		 */
-		.link_mask = 0xF,
-		.links = tgl_3_in_1_mono_amp,
-		.drv_name = "sof_sdw",
-		.sof_tplg_filename = "sof-tgl-rt711-rt1308-mono-rt715.tplg",
+		.mach_params = {
+			.link_mask = 0xF,
+			.links = tgl_3_in_1_mono_amp,
+		},
 	},
 	{
 		.link_mask = 0xF, /* 4 active links required */
 		.links = tgl_3_in_1_sdca,
 		.drv_name = "sof_sdw",
 		.sof_tplg_filename = "sof-tgl-rt711-rt1316-rt714.tplg",
+		.mach_params = {
+			.link_mask = 0xF, /* 4 active links required */
+			.links = tgl_3_in_1_sdca,
+		},
 	},
 	{
+		.link_mask = 0xF, /* 4 active links required */
+		.links = tgl_3_in_1_sdca_mono,
+		.drv_name = "sof_sdw",
+		.sof_tplg_filename = "sof-tgl-rt711-l0-rt1316-l1-mono-rt714-l3.tplg",
 		/*
 		 * link_mask should be 0xB, but all links are enabled by BIOS.
 		 * This entry will be selected if there is no rt1316 amplifier exposed
 		 * on link2 since it will fail to match the above entry.
 		 */
 
-		.link_mask = 0xF, /* 4 active links required */
-		.links = tgl_3_in_1_sdca_mono,
-		.drv_name = "sof_sdw",
-		.sof_tplg_filename = "sof-tgl-rt711-l0-rt1316-l1-mono-rt714-l3.tplg",
+		.mach_params = {
+			.link_mask = 0xF, /* 4 active links required */
+			.links = tgl_3_in_1_sdca_mono,
+		},
 	},
 
 	{
@@ -482,24 +514,40 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_tgl_sdw_machines[] = {
 		.links = tgl_hp,
 		.drv_name = "sof_sdw",
 		.sof_tplg_filename = "sof-tgl-rt711-rt1308.tplg",
+		.mach_params = {
+			.link_mask = 0x3, /* rt711 on link 0 and 1 rt1308 on link 1 */
+			.links = tgl_hp,
+		},
 	},
 	{
 		.link_mask = 0x3, /* rt711 on link 0 and 2 rt1308s on link 1 */
 		.links = tgl_rvp,
 		.drv_name = "sof_sdw",
 		.sof_tplg_filename = "sof-tgl-rt711-rt1308.tplg",
+		.mach_params = {
+			.link_mask = 0x3, /* rt711 on link 0 and 2 rt1308s on link 1 */
+			.links = tgl_rvp,
+		},
 	},
 	{
 		.link_mask = 0x3, /* rt5682 on link0 & 2xmax98373 on link 1 */
 		.links = tgl_chromebook_base,
 		.drv_name = "sof_sdw",
 		.sof_tplg_filename = "sof-tgl-sdw-max98373-rt5682.tplg",
+		.mach_params = {
+			.link_mask = 0x3, /* rt5682 on link0 & 2xmax98373 on link 1 */
+			.links = tgl_chromebook_base,
+		},
 	},
 	{
 		.link_mask = 0x1, /* rt711 on link 0 */
 		.links = tgl_rvp_headset_only,
 		.drv_name = "sof_sdw",
 		.sof_tplg_filename = "sof-tgl-rt711.tplg",
+		.mach_params = {
+			.link_mask = 0x1, /* rt711 on link 0 */
+			.links = tgl_rvp_headset_only,
+		},
 	},
 	{},
 };
