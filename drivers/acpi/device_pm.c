@@ -999,8 +999,11 @@ static bool acpi_dev_needs_resume(struct device *dev, struct acpi_device *adev)
 		return true;
 
 	ret = acpi_dev_pm_get_state(dev, adev, sys_target, NULL, &state);
-	if (ret)
+	if (ret) {
+		if (ret == -ENODATA)
+			dev_warn(dev, "%s: broken DSDT: acpi_dev_pm_get_state returned -ENODATA\n", __func__);
 		return true;
+	}
 
 	return state != adev->power.state;
 }
