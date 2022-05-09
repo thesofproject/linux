@@ -663,6 +663,7 @@ struct sdw_slave_ops {
  * for a Slave happens for the first time after enumeration
  * @is_mockup_device: status flag used to squelch errors in the command/control
  * protocol for SoundWire mockup devices
+ * @driver_bound: status set by bus notifier on driver bind/unbind
  */
 struct sdw_slave {
 	struct sdw_slave_id id;
@@ -686,6 +687,7 @@ struct sdw_slave {
 	u32 unattach_request;
 	bool first_interrupt_done;
 	bool is_mockup_device;
+	bool driver_bound;
 };
 
 #define dev_to_sdw_dev(_dev) container_of(_dev, struct sdw_slave, dev)

@@ -214,15 +214,51 @@ void sdw_unregister_driver(struct sdw_driver *drv)
 }
 EXPORT_SYMBOL_GPL(sdw_unregister_driver);
 
+static int sdw_bind_notifier(struct notifier_block *nb,
+			     unsigned long action, void *data)
+{
+	struct device *dev = data;
+
+	if (is_sdw_slave(dev)) {
+		struct sdw_slave *slv = dev_to_sdw_dev(dev);
+
+		switch (action) {
+		case BUS_NOTIFY_BOUND_DRIVER:
+			slv->driver_bound = true;
+			break;
+
+		case BUS_NOTIFY_UNBIND_DRIVER:
+			slv->driver_bound = false;
+			break;
+		default:
+			break;
+		}
+	}
+
+	return 0;
+}
+
+static struct notifier_block sdw_notifier = {
+	.notifier_call = sdw_bind_notifier,
+};
+
 static int __init sdw_bus_init(void)
 {
+	int ret;
+
 	sdw_debugfs_init();
-	return bus_register(&sdw_bus_type);
+	ret = bus_register(&sdw_bus_type);
+	if (ret < 0)
+		return ret;
+
+	bus_register_notifier(&sdw_bus_type, &sdw_notifier);
+	return 0;
 }
 
 static void __exit sdw_bus_exit(void)
 {
 	sdw_debugfs_exit();
+	bus_unregister_notifier(&sdw_bus_type, &sdw_notifier);
 	bus_unregister(&sdw_bus_type);
 }
 
