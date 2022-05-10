@@ -99,11 +99,11 @@ out_put:
  * status on core 1, so power up core 1 also momentarily, keep it in
  * reset/stall and then turn it off
  */
-static int cl_dsp_init(struct snd_sof_dev *sdev, int stream_tag, bool imr_boot)
+static int cl_dsp_init(struct snd_sof_dev *sdev, int stream_tag)
 {
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	const struct sof_intel_dsp_desc *chip = hda->desc;
-	unsigned int status, target_status;
+	unsigned int status;
 	u32 flags, ipc_hdr, j;
 	unsigned long mask;
 	char *dump_msg;
@@ -121,8 +121,7 @@ static int cl_dsp_init(struct snd_sof_dev *sdev, int stream_tag, bool imr_boot)
 
 	/* step 2: Send ROM_CONTROL command (stream_tag is ignored for IMR boot) */
 	ipc_hdr = chip->ipc_req_mask | HDA_DSP_ROM_IPC_CONTROL;
-	if (!imr_boot)
-		ipc_hdr |= HDA_DSP_ROM_IPC_PURGE_FW | ((stream_tag - 1) << 9);
+	ipc_hdr |= HDA_DSP_ROM_IPC_PURGE_FW | ((stream_tag - 1) << 9);
 
 	snd_sof_dsp_write(sdev, HDA_DSP_BAR, chip->ipc_req, ipc_hdr);
 
@@ -171,20 +170,11 @@ static int cl_dsp_init(struct snd_sof_dev *sdev, int stream_tag, bool imr_boot)
 	/* step 6: enable IPC interrupts */
 	hda_dsp_ipc_int_enable(sdev);
 
-	/*
-	 * step 7:
-	 * - Cold/Full boot: wait for ROM init to proceed to download the firmware
-	 * - IMR boot: wait for ROM firmware entered (firmware booted up from IMR)
-	 */
-	if (imr_boot)
-		target_status = HDA_DSP_ROM_FW_ENTERED;
-	else
-		target_status = HDA_DSP_ROM_INIT;
-
+	/* step 7: wait for ROM init to proceed to download the firmware */
 	ret = snd_sof_dsp_read_poll_timeout(sdev, HDA_DSP_BAR,
 					chip->rom_status_reg, status,
 					((status & HDA_DSP_ROM_STS_MASK)
-						== target_status),
+						== HDA_DSP_ROM_INIT),
 					HDA_DSP_REG_POLL_INTERVAL_US,
 					chip->rom_init_timeout *
 					USEC_PER_MSEC);
@@ -369,9 +359,38 @@ int hda_dsp_cl_boot_firmware_iccmax(struct snd_sof_dev *sdev)
 
 static int hda_dsp_boot_imr(struct snd_sof_dev *sdev)
 {
-	int ret;
+	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
+	const struct sof_intel_dsp_desc *chip = hda->desc;
+	unsigned int status;
+	unsigned long mask;
+	int i, ret;
 
-	ret = cl_dsp_init(sdev, 0, true);
+	/* step 1: power up & unstall/run the cores to run the firmware */
+	ret = hda_dsp_enable_core(sdev, chip->init_core_mask);
+	if (ret) {
+		dev_err(sdev->dev, "dsp core start failed %d\n", ret);
+		return -EIO;
+	}
+
+	/* set enabled cores mask and increment ref count for cores in init_core_mask */
+	sdev->enabled_cores_mask |= chip->init_core_mask;
+	mask = sdev->enabled_cores_mask;
+	for_each_set_bit(i, &mask, SOF_MAX_DSP_NUM_CORES)
+		sdev->dsp_core_ref_count[i]++;
+
+	hda_ssp_set_cbp_cfp(sdev);
+
+	/* step 2: enable IPC interrupts */
+	hda_dsp_ipc_int_enable(sdev);
+
+	/* Step 3: Wait for FW_ENTERED state */
+	ret = snd_sof_dsp_read_poll_timeout(sdev, HDA_DSP_BAR,
+					chip->rom_status_reg, status,
+					((status & HDA_DSP_ROM_STS_MASK)
+						== HDA_DSP_ROM_FW_ENTERED),
+					HDA_DSP_REG_POLL_INTERVAL_US,
+					chip->rom_init_timeout *
+					USEC_PER_MSEC);
 	if (!ret)
 		hda_sdw_process_wakeen(sdev);
 
@@ -430,7 +449,7 @@ int hda_dsp_cl_boot_firmware(struct snd_sof_dev *sdev)
 			"Attempting iteration %d of Core En/ROM load...\n", i);
 
 		hda->boot_iteration = i + 1;
-		ret = cl_dsp_init(sdev, hext_stream->hstream.stream_tag, false);
+		ret = cl_dsp_init(sdev, hext_stream->hstream.stream_tag);
 
 		/* don't retry anymore if successful */
 		if (!ret)
