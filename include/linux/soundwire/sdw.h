@@ -644,7 +644,6 @@ struct sdw_slave_ops {
  * @m_port_map: static Master port map for each Slave port
  * @dev_num: Current Device Number, values can be 0 or dev_num_sticky
  * @dev_num_sticky: one-time static Device Number assigned by Bus
- * @probed: boolean tracking driver state
  * @probe_complete: completion utility to control potential races
  * on startup between driver probe/initialization and SoundWire
  * Slave state changes/implementation-defined interrupts
@@ -678,7 +677,6 @@ struct sdw_slave {
 	unsigned int m_port_map[SDW_MAX_PORTS];
 	u16 dev_num;
 	u16 dev_num_sticky;
-	bool probed;
 	struct completion probe_complete;
 	struct completion enumeration_complete;
 	struct completion initialization_complete;

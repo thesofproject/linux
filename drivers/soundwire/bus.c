@@ -1700,8 +1700,10 @@ static int sdw_update_slave_status(struct sdw_slave *slave,
 				   enum sdw_slave_status status)
 {
 	unsigned long time;
+	struct device *dev = &slave->dev;
+	struct sdw_driver *drv;
 
-	if (!slave->probed) {
+	if (!slave->driver_bound) {
 		/*
 		 * the slave status update is typically handled in an
 		 * interrupt thread, which can race with the driver
@@ -1713,18 +1715,14 @@ static int sdw_update_slave_status(struct sdw_slave *slave,
 		time = wait_for_completion_timeout(&slave->probe_complete,
 				msecs_to_jiffies(DEFAULT_PROBE_TIMEOUT));
 		if (!time) {
-			dev_err(&slave->dev, "Probe not complete, timed out\n");
+			dev_err(dev, "Probe not complete, timed out\n");
 			return -ETIMEDOUT;
 		}
 	}
 
-	if (slave->driver_bound) {
-		struct device *dev = &slave->dev;
-		struct sdw_driver *drv = drv_to_sdw_driver(dev->driver);
-
-		if (drv->ops && drv->ops->update_status)
-			return drv->ops->update_status(slave, status);
-	}
+	drv = drv_to_sdw_driver(dev->driver);
+	if (drv->ops && drv->ops->update_status)
+		return drv->ops->update_status(slave, status);
 
 	return 0;
 }

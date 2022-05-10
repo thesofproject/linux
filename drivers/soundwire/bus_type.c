@@ -136,9 +136,6 @@ static int sdw_drv_probe(struct device *dev)
 	slave->bus->clk_stop_timeout = max_t(u32, slave->bus->clk_stop_timeout,
 					     slave->prop.clk_stop_timeout);
 
-	slave->probed = true;
-	complete(&slave->probe_complete);
-
 	dev_dbg(dev, "probe complete\n");
 
 	return 0;
@@ -223,10 +220,12 @@ static int sdw_bind_notifier(struct notifier_block *nb,
 		switch (action) {
 		case BUS_NOTIFY_BOUND_DRIVER:
 			slv->driver_bound = true;
+			complete(&slv->probe_complete);
 			break;
 
 		case BUS_NOTIFY_UNBIND_DRIVER:
 			slv->driver_bound = false;
+			init_completion(&slv->probe_complete);
 			break;
 		default:
 			break;

@@ -1532,8 +1532,8 @@ static int intel_resume_child_device(struct device *dev, void *data)
 	int ret;
 	struct sdw_slave *slave = dev_to_sdw_dev(dev);
 
-	if (!slave->probed) {
-		dev_dbg(dev, "%s: skipping device, no probed driver\n", __func__);
+	if (!slave->driver_bound) {
+		dev_dbg(dev, "%s: skipping device, no driver bound\n", __func__);
 		return 0;
 	}
 	if (!slave->dev_num_sticky) {

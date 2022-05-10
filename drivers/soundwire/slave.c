@@ -59,7 +59,6 @@ int sdw_slave_add(struct sdw_bus *bus,
 	init_completion(&slave->initialization_complete);
 	slave->dev_num = 0;
 	init_completion(&slave->probe_complete);
-	slave->probed = false;
 	slave->first_interrupt_done = false;
 
 	for (i = 0; i < SDW_MAX_PORTS; i++)
