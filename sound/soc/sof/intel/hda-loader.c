@@ -158,6 +158,12 @@ static int cl_dsp_init(struct snd_sof_dev *sdev, int stream_tag, bool imr_boot)
 				       chip->ipc_ack_mask,
 				       chip->ipc_ack_mask);
 
+	/*
+	 * Clear the IPC message register to make sure that the ROM_CONTROL
+	 * message will not be sent again if ROM fails to clear the BUSY bit
+	 */
+	snd_sof_dsp_write(sdev, HDA_DSP_BAR, chip->ipc_req, 0);
+
 	/* step 5: power down cores that are no longer needed */
 	ret = hda_dsp_core_reset_power_down(sdev, chip->host_managed_cores_mask &
 					   ~(chip->init_core_mask));
