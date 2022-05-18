@@ -339,18 +339,35 @@ int snd_soc_component_is_suspended(struct snd_soc_component *component)
 
 int snd_soc_component_probe(struct snd_soc_component *component)
 {
-	int ret = 0;
+	int ret;
 
+	ret = pm_runtime_resume_and_get(component->dev);
+	if (ret < 0 && ret != -EACCES)
+		return soc_component_ret(component, ret);
+
+	ret = 0;
 	if (component->driver->probe)
 		ret = component->driver->probe(component);
+
+	pm_runtime_mark_last_busy(component->dev);
+	pm_runtime_put_autosuspend(component->dev);
 
 	return soc_component_ret(component, ret);
 }
 
 void snd_soc_component_remove(struct snd_soc_component *component)
 {
+	int ret;
+
+	ret = pm_runtime_resume_and_get(component->dev);
+	if (ret < 0 && ret != -EACCES)
+		soc_component_ret(component, ret);
+
 	if (component->driver->remove)
 		component->driver->remove(component);
+
+	pm_runtime_mark_last_busy(component->dev);
+	pm_runtime_put_autosuspend(component->dev);
 }
 
 int snd_soc_component_of_xlate_dai_id(struct snd_soc_component *component,
