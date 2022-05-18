@@ -950,13 +950,12 @@ static int snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, struct snd_s
 		nhlt_type = NHLT_LINK_SSP;
 		ret = snd_sof_get_hw_config_params(sdev, dai, &sample_rate, &channel_count,
 						   &bit_depth);
+		if (ret < 0)
+			return ret;
 		break;
 	default:
 		return 0;
 	}
-
-	if (ret < 0)
-		return ret;
 
 	dev_dbg(sdev->dev, "%s: dai index %d nhlt type %d direction %d\n",
 		__func__, dai_index, nhlt_type, dir);
