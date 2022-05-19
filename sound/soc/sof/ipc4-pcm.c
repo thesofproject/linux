@@ -181,8 +181,21 @@ static int sof_ipc4_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 	struct snd_sof_dai *dai = snd_sof_find_dai(component, rtd->dai_link->name);
 	struct snd_mask *fmt = hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT);
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
-	struct sof_ipc4_copier *ipc4_copier = dai->private;
+	struct sof_ipc4_copier *ipc4_copier;
 	struct snd_soc_dpcm *dpcm;
+
+	if (!dai) {
+		dev_err(component->dev, "%s: No DAI found with name %s\n", __func__,
+			rtd->dai_link->name);
+		return -EINVAL;
+	}
+
+	ipc4_copier = dai->private;
+	if (!ipc4_copier) {
+		dev_err(component->dev, "%s: No private data found for DAI %s\n",
+			__func__, rtd->dai_link->name);
+		return -EINVAL;
+	}
 
 	/* always set BE format to 32-bits for both playback and capture */
 	snd_mask_none(fmt);
