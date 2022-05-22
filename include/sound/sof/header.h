@@ -53,6 +53,7 @@
 #define SOF_IPC_GLB_TEST_MSG			SOF_GLB_TYPE(0xBU)
 #define SOF_IPC_GLB_PROBE			SOF_GLB_TYPE(0xCU)
 #define SOF_IPC_GLB_DEBUG			SOF_GLB_TYPE(0xDU)
+#define SOF_IPC_GLB_INPUT_EVENT			SOF_GLB_TYPE(0xFU)
 
 /*
  * DSP Command Message Types
@@ -126,6 +127,9 @@
 
 /* test */
 #define SOF_IPC_TEST_IPC_FLOOD			SOF_CMD_TYPE(0x001)
+
+/* input event */
+#define SOF_IPC_INPUT_EVENT			SOF_CMD_TYPE(0x001)
 
 /* Get message component id */
 #define SOF_IPC_MESSAGE_ID(x)			((x) & 0xffff)
