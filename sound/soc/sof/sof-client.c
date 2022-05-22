@@ -125,6 +125,25 @@ static inline int sof_register_ipc_msg_injector(struct snd_sof_dev *sdev)
 static inline void sof_unregister_ipc_msg_injector(struct snd_sof_dev *sdev) {}
 #endif /* CONFIG_SND_SOC_SOF_DEBUG_IPC_MSG_INJECTOR */
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_INPUT_DEVICE)
+static int sof_register_input_device(struct snd_sof_dev *sdev)
+{
+	return sof_client_dev_register(sdev, "input_device", 0, NULL, 0);
+}
+
+static void sof_unregister_input_device(struct snd_sof_dev *sdev)
+{
+	sof_client_dev_unregister(sdev, "input_device", 0);
+}
+#else
+static inline int sof_register_input_device(struct snd_sof_dev *sdev)
+{
+	return 0;
+}
+
+static inline void sof_unregister_input_device(struct snd_sof_dev *sdev) {}
+#endif /* CONFIG_SND_SOC_SOF_DEBUG_IPC_MSG_INJECTOR */
+
 int sof_register_clients(struct snd_sof_dev *sdev)
 {
 	int ret;
@@ -142,6 +161,12 @@ int sof_register_clients(struct snd_sof_dev *sdev)
 		goto err_msg_injector;
 	}
 
+	ret = sof_register_input_device(sdev);
+	if (ret) {
+		dev_err(sdev->dev, "Input device client registration failed\n");
+		goto err_input_device;
+	}
+
 	/* Platform depndent client device registration */
 
 	if (sof_ops(sdev) && sof_ops(sdev)->register_ipc_clients)
@@ -150,6 +175,9 @@ int sof_register_clients(struct snd_sof_dev *sdev)
 	if (!ret)
 		return 0;
 
+	sof_unregister_input_device(sdev);
+
+err_input_device:
 	sof_unregister_ipc_msg_injector(sdev);
 
 err_msg_injector:

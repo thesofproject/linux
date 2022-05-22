@@ -69,6 +69,12 @@ config SND_SOC_SOF_CLIENT
 	  This option is not user-selectable but automagically handled by
 	  'select' statements at a higher level.
 
+config SND_SOC_SOF_INPUT_DEVICE
+	tristate "SOF Input device"
+	depends on INPUT
+	help
+	  This option enables SOF input device support.
+
 config SND_SOC_SOF_DEVELOPER_SUPPORT
 	bool "SOF developer options support"
 	depends on EXPERT && SND_SOC_SOF
