@@ -40,6 +40,7 @@ enum sof_widget_op {
 	SOF_WIDGET_SETUP,
 	SOF_WIDGET_FREE,
 	SOF_WIDGET_UNPREPARE,
+	SOF_WIDGET_LARGE_CONFIG,
 };
 
 /*
@@ -133,6 +134,7 @@ struct sof_ipc_tplg_control_ops {
  * @bind_event: Function pointer for binding events to the widget
  * @ipc_prepare: Optional op for preparing a widget for set up
  * @ipc_unprepare: Optional op for unpreparing a widget
+ * @ipc_large_config: Optional op for large configure a widget
  */
 struct sof_ipc_tplg_widget_ops {
 	int (*ipc_setup)(struct snd_sof_widget *swidget);
@@ -146,6 +148,7 @@ struct sof_ipc_tplg_widget_ops {
 			   struct snd_sof_platform_stream_params *platform_params,
 			   struct snd_pcm_hw_params *source_params, int dir);
 	void (*ipc_unprepare)(struct snd_sof_widget *swidget);
+	int (*ipc_large_config)(struct snd_sof_widget *swidget);
 };
 
 /**
@@ -358,6 +361,7 @@ struct snd_sof_widget {
 	 * up in the DSP.
 	 */
 	bool prepared;
+	bool large_configured;
 	int use_count; /* use_count will be protected by the PCM mutex held by the core */
 	int core;
 	int id; /* id is the DAPM widget type */

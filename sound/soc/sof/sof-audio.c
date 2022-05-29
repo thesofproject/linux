@@ -335,6 +335,47 @@ sink_prepare:
 	return 0;
 }
 
+static int
+sof_large_config_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *widget,
+			    int dir)
+{
+	const struct sof_ipc_tplg_ops *ipc_tplg_ops = sdev->ipc->ops->tplg;
+	const struct sof_ipc_tplg_widget_ops *widget_ops = ipc_tplg_ops->widget;
+	struct snd_sof_widget *swidget = widget->dobj.private;
+	struct snd_soc_dapm_path *p;
+	int ret;
+
+	if (!widget_ops[widget->id].ipc_large_config || swidget->large_configured)
+		goto sink_config;
+
+	/* config the source widget */
+	ret = widget_ops[widget->id].ipc_large_config(swidget);
+	if (ret < 0) {
+		dev_err(sdev->dev, "failed to config widget %s\n", widget->name);
+		return ret;
+	}
+
+	swidget->large_configured = true;
+
+sink_config:
+	/* configure all widgets in the sink paths */
+	snd_soc_dapm_widget_for_each_sink_path(widget, p) {
+		if (!p->walking && p->sink->dobj.private) {
+			p->walking = true;
+			ret = sof_large_config_widgets_in_path(sdev, p->sink, dir);
+			p->walking = false;
+			if (ret < 0) {
+				/* unconfigure the source widget */
+				//TODO
+				return ret;
+			}
+		}
+	}
+
+	return 0;
+}
+
+
 /*
  * free all widgets in the sink path starting from the source widget
  * (DAI type for capture, AIF type for playback)
@@ -462,6 +503,10 @@ sof_walk_widgets_in_order(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget_l
 		case SOF_WIDGET_UNPREPARE:
 			sof_unprepare_widgets_in_path(sdev, widget);
 			break;
+		case SOF_WIDGET_LARGE_CONFIG:
+			ret = sof_large_config_widgets_in_path(sdev, widget, dir);
+			str = "large config";
+			break;
 		default:
 			dev_err(sdev->dev, "Invalid widget op %d\n", op);
 			return -EINVAL;
@@ -515,6 +560,15 @@ int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
 	if (ret < 0)
 		goto widget_free;
 
+	ret = sof_walk_widgets_in_order(sdev, list, fe_params, platform_params,
+					dir, SOF_WIDGET_LARGE_CONFIG);
+	if (ret < 0)
+		goto widget_free;
+
+	for_each_dapm_widgets(list, i, widget) {
+		struct snd_sof_widget *swidget = widget->dobj.private;
+		swidget->large_configured = false; /* to find a proper point */
+	}
 	/* complete pipelines */
 	for_each_dapm_widgets(list, i, widget) {
 		struct snd_sof_widget *swidget = widget->dobj.private;
