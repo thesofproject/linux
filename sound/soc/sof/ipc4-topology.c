@@ -1153,14 +1153,6 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		if (dir == SNDRV_PCM_STREAM_CAPTURE) {
 			available_fmt->ref_audio_fmt = available_fmt->out_audio_fmt;
 			ref_audio_fmt_size = sizeof(struct sof_ipc4_audio_format);
-
-			/*
-			 * modify the input params for the dai copier as it only supports
-			 * 32-bit always
-			 */
-			fmt = hw_param_mask(pipeline_params, SNDRV_PCM_HW_PARAM_FORMAT);
-			snd_mask_none(fmt);
-			snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S32_LE);
 		} else {
 			available_fmt->ref_audio_fmt = &available_fmt->base_config->audio_fmt;
 			ref_audio_fmt_size = sizeof(struct sof_ipc4_base_module_cfg);
