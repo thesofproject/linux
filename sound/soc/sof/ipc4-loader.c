@@ -147,6 +147,7 @@ static int sof_ipc4_validate_firmware(struct snd_sof_dev *sdev)
 
 static int sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev)
 {
+	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	const struct sof_ipc_ops *iops = sdev->ipc->ops;
 	struct sof_ipc4_fw_version *fw_ver;
 	struct sof_ipc4_tuple *tuple;
@@ -190,6 +191,7 @@ static int sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev)
 			break;
 		case SOF_IPC4_FW_CFG_TRACE_LOG_BYTES:
 			trace_sof_ipc4_fw_config(sdev, "Trace log size", *tuple->value);
+			ipc4_data->mtrace_log_bytes = *tuple->value;
 			break;
 		default:
 			break;
