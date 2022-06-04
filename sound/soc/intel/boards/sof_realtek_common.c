@@ -14,6 +14,7 @@
 #include <uapi/sound/asound.h>
 #include "../../codecs/rt1011.h"
 #include "../../codecs/rt1015.h"
+#include "../../codecs/rt1019.h"
 #include "../../codecs/rt1308.h"
 #include "sof_realtek_common.h"
 
@@ -497,6 +498,87 @@ void sof_rt1019p_dai_link(struct snd_soc_dai_link *link)
 	link->init = rt1019p_init;
 }
 EXPORT_SYMBOL_NS(sof_rt1019p_dai_link, SND_SOC_INTEL_SOF_REALTEK_COMMON);
+
+/*
+ * RT1019 audio amplifier
+ */
+
+static int rt1019_hw_params(struct snd_pcm_substream *substream,
+			    struct snd_pcm_hw_params *params)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *codec_dai;
+	int i, ret = 0;
+
+	for_each_rtd_codec_dais(rtd, i, codec_dai) {
+		ret = snd_soc_dai_set_pll(codec_dai, 0, RT1019_PLL_S_BCLK,
+					  64 * params_rate(params),
+					  256 * params_rate(params));
+		if (ret < 0)
+			return ret;
+
+		ret = snd_soc_dai_set_sysclk(codec_dai, RT1019_SCLK_S_PLL,
+					     256 * params_rate(params),
+					     SND_SOC_CLOCK_IN);
+		if (ret < 0)
+			return ret;
+	}
+
+	return 0;
+}
+
+static const struct snd_soc_ops rt1019_ops = {
+	.hw_params = rt1019_hw_params,
+};
+
+static const struct snd_soc_dapm_route rt1019_map_lr[] = {
+	{ "Left Spk", NULL, "Left SPO" },
+	{ "Right Spk", NULL, "Right SPO" },
+};
+
+static struct snd_soc_codec_conf rt1019_amp_conf[] = {
+	{
+		.dlc = COMP_CODEC_CONF(RT1019_DEV0_NAME),
+		.name_prefix = "Left",
+	},
+	{
+		.dlc = COMP_CODEC_CONF(RT1019_DEV1_NAME),
+		.name_prefix = "Right",
+	},
+};
+
+static struct snd_soc_dai_link_component rt1019_components[] = {
+	{
+		.name = RT1019_DEV0_NAME,
+		.dai_name = RT1019_CODEC_DAI,
+	},
+	{
+		.name = RT1019_DEV1_NAME,
+		.dai_name = RT1019_CODEC_DAI,
+	},
+};
+
+static int rt1019_init(struct snd_soc_pcm_runtime *rtd)
+{
+	return snd_soc_dapm_add_routes(&rtd->card->dapm, rt1019_map_lr,
+				       ARRAY_SIZE(rt1019_map_lr));
+}
+
+void sof_rt1019_dai_link(struct snd_soc_dai_link *link)
+{
+	link->codecs = rt1019_components;
+	link->num_codecs = ARRAY_SIZE(rt1019_components);
+	link->init = rt1019_init;
+	link->ops = &rt1019_ops;
+}
+EXPORT_SYMBOL_NS(sof_rt1019_dai_link, SND_SOC_INTEL_SOF_REALTEK_COMMON);
+
+void sof_rt1019_codec_conf(struct snd_soc_card *card)
+{
+	card->codec_conf = rt1019_amp_conf;
+	card->num_configs = ARRAY_SIZE(rt1019_amp_conf);
+}
+EXPORT_SYMBOL_NS(sof_rt1019_codec_conf, SND_SOC_INTEL_SOF_REALTEK_COMMON);
 
 MODULE_DESCRIPTION("ASoC Intel SOF Realtek helpers");
 MODULE_LICENSE("GPL");

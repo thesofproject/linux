@@ -44,4 +44,11 @@ void sof_rt1308_dai_link(struct snd_soc_dai_link *link);
 
 void sof_rt1019p_dai_link(struct snd_soc_dai_link *link);
 
+#define RT1019_CODEC_DAI	"rt1019-aif"
+#define RT1019_DEV0_NAME	"i2c-10EC1019:00"
+#define RT1019_DEV1_NAME	"i2c-10EC1019:01"
+
+void sof_rt1019_dai_link(struct snd_soc_dai_link *link);
+void sof_rt1019_codec_conf(struct snd_soc_card *card);
+
 #endif /* __SOF_REALTEK_COMMON_H */
