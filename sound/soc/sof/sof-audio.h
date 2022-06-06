@@ -387,6 +387,9 @@ struct snd_sof_widget {
 	struct snd_sof_widget *pipe_widget;
 	void *module_info;
 
+	struct snd_pcm_hw_params out_params;
+	int out_params_set;
+
 	const guid_t uuid;
 
 	int num_tuples;

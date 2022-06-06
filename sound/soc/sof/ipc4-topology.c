@@ -200,6 +200,72 @@ static void sof_ipc4_dbg_audio_format(struct device *dev,
 	}
 }
 
+/*
+ * Some ALSA internal helper functions
+ */
+static int snd_interval_force_set(struct snd_interval *i, unsigned int val)
+{
+	int changed = 0;
+	i->empty = 0;
+	if (i->min != val)
+		changed = 1;
+	if (i->max != val)
+		changed = 1;
+	i->min = i->max = val;
+	i->openmin = i->openmax = 0;
+	i->integer = 1;
+	return changed;
+}
+
+static int _snd_pcm_hw_param_force_set(struct snd_pcm_hw_params *params,
+				 snd_pcm_hw_param_t var, unsigned int val,
+				 int dir)
+{
+	int changed;
+	if (hw_is_mask(var)) {
+		struct snd_mask *m = hw_param_mask(params, var);
+		if (val == 0 && dir < 0) {
+			changed = -EINVAL;
+			snd_mask_none(m);
+		} else {
+			if (dir > 0)
+				val++;
+			else if (dir < 0)
+				val--;
+			changed = !snd_mask_single(hw_param_mask(params, var));
+			snd_mask_set_format(hw_param_mask(params, var), val);
+		}
+	} else if (hw_is_interval(var)) {
+		struct snd_interval *i = hw_param_interval(params, var);
+		if (val == 0 && dir < 0) {
+			changed = -EINVAL;
+			snd_interval_none(i);
+		} else if (dir == 0)
+			changed = snd_interval_force_set(i, val);
+		else {
+			struct snd_interval t;
+			t.openmin = 1;
+			t.openmax = 1;
+			t.empty = 0;
+			t.integer = 0;
+			if (dir < 0) {
+				t.min = val - 1;
+				t.max = val;
+			} else {
+				t.min = val;
+				t.max = val+1;
+			}
+			changed = snd_interval_refine(i, &t);
+		}
+	} else
+		return -EINVAL;
+	if (changed > 0) {
+		params->cmask |= 1 << var;
+		params->rmask |= 1 << var;
+	}
+	return changed;
+}
+
 /**
  * sof_ipc4_get_audio_fmt - get available audio formats from swidget->tuples
  * @scomp: pointer to pointer to SOC component
@@ -922,6 +988,36 @@ static int sof_ipc4_widget_assign_instance_id(struct snd_sof_dev *sdev,
 	return 0;
 }
 
+static void update_output_fmt(struct snd_sof_dev *sdev, struct snd_pcm_hw_params *out_params,
+			      struct sof_ipc4_audio_format *fmt)
+{
+	int channels, snd_fmt, rate, valid_bits;
+
+	rate = fmt->sampling_frequency;
+	channels = SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(fmt->fmt_cfg);
+	valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(fmt->fmt_cfg);
+
+	switch (valid_bits) {
+	case 16:
+		snd_fmt = SNDRV_PCM_FORMAT_S16_LE;
+		break;
+	case 24:
+		snd_fmt = SNDRV_PCM_FORMAT_S24_LE;
+		break;
+	case 32:
+		snd_fmt = SNDRV_PCM_FORMAT_S32_LE;
+		break;
+	default:
+		dev_warn(sdev->dev, "invalid pcm valid_bits %d\n", valid_bits);
+		snd_fmt = SNDRV_PCM_FORMAT_S32_LE; /* fixme: set to 32 as default */
+		break;
+	}
+
+	_snd_pcm_hw_param_force_set(out_params, SNDRV_PCM_HW_PARAM_CHANNELS, channels, 0);
+	_snd_pcm_hw_param_force_set(out_params, SNDRV_PCM_HW_PARAM_FORMAT, snd_fmt, 0);
+	_snd_pcm_hw_param_force_set(out_params, SNDRV_PCM_HW_PARAM_RATE, rate, 0);
+}
+
 static int sof_ipc4_init_audio_fmt(struct snd_sof_dev *sdev,
 				   struct snd_sof_widget *swidget,
 				   struct sof_ipc4_base_module_cfg *base_config,
@@ -982,11 +1078,25 @@ static int sof_ipc4_init_audio_fmt(struct snd_sof_dev *sdev,
 			       sizeof(struct sof_ipc4_base_module_cfg));
 
 			/* copy output format */
-			if (out_format)
+			if (out_format) {
+				swidget->out_params = *params;
+				update_output_fmt(sdev, &swidget->out_params, &available_fmt->out_audio_fmt[i]);
+				swidget->out_params_set = 1;
 				memcpy(out_format, &available_fmt->out_audio_fmt[i],
 				       sizeof(struct sof_ipc4_audio_format));
+			} else {
+				swidget->out_params_set = 1;
+				swidget->out_params = *params; /* propagated from original parameter */
+			}
+
 			break;
 		}
+		/* the parameter never match hw_params because micsel will change the default params */
+		/* if (!strcmp(swidget->widget->name, "intelwov.15.1")) { */
+		/* 	memcpy(base_config, &available_fmt->base_config[i], */
+		/* 	       sizeof(struct sof_ipc4_base_module_cfg)); */
+		/* 	break; */
+		/* } */
 	}
 
 	if (i == available_fmt->audio_fmt_num) {
@@ -1044,6 +1154,9 @@ static void sof_ipc4_unprepare_copier_module(struct snd_sof_widget *swidget)
 		ipc4_copier->ipc_config_data = NULL;
 		ipc4_copier->ipc_config_size = 0;
 	}
+
+	swidget->out_params = (struct snd_pcm_hw_params){0};
+	swidget->out_params_set = 0;
 
 	ida_free(&fw_module->m_ida, swidget->instance_id);
 }
@@ -1153,6 +1266,23 @@ static int snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, struct snd_s
 	return 0;
 }
 #endif
+
+struct snd_pcm_hw_params *get_pre_params(struct snd_sof_widget *swidget)
+{
+	struct snd_soc_dapm_widget *widget = swidget->widget;
+	/* TBD */
+	struct snd_soc_dapm_path *p;
+	snd_soc_dapm_widget_for_each_source_path(widget, p) {
+		struct snd_soc_dapm_widget *src_widget;
+		struct snd_sof_widget *src_swidget;
+		src_widget = p->source;
+		src_swidget = src_widget->dobj.private;
+		if (src_swidget->out_params_set)
+			return &src_swidget->out_params;
+	}
+
+	return NULL;
+}
 
 static int
 sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
@@ -1381,6 +1511,8 @@ static void sof_ipc4_unprepare_generic_module(struct snd_sof_widget *swidget)
 {
 	struct sof_ipc4_fw_module *fw_module = swidget->module_info;
 
+	swidget->out_params = (struct snd_pcm_hw_params){0};
+	swidget->out_params_set = 0;
 	ida_free(&fw_module->m_ida, swidget->instance_id);
 }
 
@@ -1392,13 +1524,17 @@ static int sof_ipc4_prepare_gain_module(struct snd_sof_widget *swidget,
 	struct snd_soc_component *scomp = swidget->scomp;
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct sof_ipc4_gain *gain = swidget->private;
+	struct snd_pcm_hw_params *params;
 	int ret;
 
 	gain->available_fmt.ref_audio_fmt = &gain->available_fmt.base_config->audio_fmt;
 
+	params = get_pre_params(swidget);
+	if (!params)
+		params = pipeline_params;
 	/* output format is not required to be sent to the FW for gain */
 	ret = sof_ipc4_init_audio_fmt(sdev, swidget, &gain->base_config,
-				      NULL, pipeline_params, &gain->available_fmt,
+				      NULL, params, &gain->available_fmt,
 				      sizeof(gain->base_config));
 	if (ret < 0)
 		return ret;
@@ -1418,14 +1554,18 @@ static int sof_ipc4_prepare_mixer_module(struct snd_sof_widget *swidget,
 	struct snd_soc_component *scomp = swidget->scomp;
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct sof_ipc4_mixer *mixer = swidget->private;
+	struct snd_pcm_hw_params *params;
 	int ret;
 
 	/* only 32bit is supported by mixer */
 	mixer->available_fmt.ref_audio_fmt = &mixer->available_fmt.base_config->audio_fmt;
 
+	params = get_pre_params(swidget);
+	if (!params)
+		params = pipeline_params;
 	/* output format is not required to be sent to the FW for mixer */
 	ret = sof_ipc4_init_audio_fmt(sdev, swidget, &mixer->base_config,
-				      NULL, pipeline_params, &mixer->available_fmt,
+				      NULL, params, &mixer->available_fmt,
 				      sizeof(mixer->base_config));
 	if (ret < 0)
 		return ret;
@@ -1445,13 +1585,18 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 	struct snd_soc_component *scomp = swidget->scomp;
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct sof_ipc4_process *process = swidget->private;
+	struct snd_pcm_hw_params *params;
 	int ret;
 
 	process->available_fmt.ref_audio_fmt = &process->available_fmt.base_config->audio_fmt;
 
+	params = get_pre_params(swidget);
+	if (!params)
+		params = pipeline_params;
+
 	/* output format is not required to be sent to the FW for kpb */
 	ret = sof_ipc4_init_audio_fmt(sdev, swidget, &process->base_config,
-				      NULL, pipeline_params, &process->available_fmt,
+				      NULL, params, &process->available_fmt,
 				      sizeof(process->base_config));
 	if (ret < 0)
 		return ret;
@@ -1460,6 +1605,10 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 	sof_ipc4_update_pipeline_mem_usage(sdev, swidget, &process->base_config);
 	switch (process->process_type) {
 	case SOF_PROCESS_MICSEL:
+		swidget->out_params = *pipeline_params;
+		dev_info(scomp->dev, "update %s output params\n", swidget->widget->name);
+		update_output_fmt(sdev, &swidget->out_params, process->available_fmt.out_audio_fmt);
+		swidget->out_params_set = 1;
 		memcpy(&process->output_format, process->available_fmt.out_audio_fmt,
 		       sizeof(struct sof_ipc4_audio_format));
 		process->ipc_config_data = &process->base_config;
@@ -1675,6 +1824,10 @@ static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 		msg->extension |= ipc_size >> 2;
 		msg->extension &= ~SOF_IPC4_MOD_EXT_DOMAIN_MASK;
 		msg->extension |= SOF_IPC4_MOD_EXT_DOMAIN(pipeline->lp_mode);
+	}
+	/* libin: change lp_mode */
+	if (!strcmp(swidget->widget->name, "intelwov.15.1")) {
+		msg->extension |= SOF_IPC4_MOD_EXT_DOMAIN(1);
 	}
 
 	msg->data_size = ipc_size;
