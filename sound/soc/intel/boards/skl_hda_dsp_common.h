@@ -18,7 +18,7 @@
 #include "../../codecs/hdac_hda.h"
 #include "hda_dsp_common.h"
 
-#define HDA_DSP_MAX_BE_DAI_LINKS 7
+#define HDA_DSP_MAX_BE_DAI_LINKS 8
 
 struct skl_hda_hdmi_pcm {
 	struct list_head head;

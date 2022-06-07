@@ -56,6 +56,11 @@ SND_SOC_DAILINK_DEF(idisp3_cpu,
 SND_SOC_DAILINK_DEF(idisp3_codec,
 	DAILINK_COMP_ARRAY(COMP_CODEC("ehdaudio0D2", "intel-hdmi-hifi3")));
 
+SND_SOC_DAILINK_DEF(idisp4_cpu,
+	DAILINK_COMP_ARRAY(COMP_CPU("iDisp4 Pin")));
+SND_SOC_DAILINK_DEF(idisp4_codec,
+	DAILINK_COMP_ARRAY(COMP_CODEC("ehdaudio0D2", "intel-hdmi-hifi4")));
+
 SND_SOC_DAILINK_DEF(analog_cpu,
 	DAILINK_COMP_ARRAY(COMP_CPU("Analog CPU DAI")));
 SND_SOC_DAILINK_DEF(analog_codec,
@@ -102,6 +107,14 @@ struct snd_soc_dai_link skl_hda_be_dai_links[HDA_DSP_MAX_BE_DAI_LINKS] = {
 		.no_pcm = 1,
 		SND_SOC_DAILINK_REG(idisp3_cpu, idisp3_codec, platform),
 	},
+	{
+		.name = "iDisp4",
+		.id = 8, /* discontinuity is intentional to deal with legacy topologies */
+		.dpcm_playback = 1,
+		.no_pcm = 1,
+		SND_SOC_DAILINK_REG(idisp4_cpu, idisp4_codec, platform),
+	},
+
 	{
 		.name = "Analog Playback and Capture",
 		.id = 4,
