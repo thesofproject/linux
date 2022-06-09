@@ -208,9 +208,7 @@ int sdw_acpi_find_slaves(struct sdw_bus *bus)
 		return -ENODEV;
 	}
 
-	acpi_dev_for_each_child(parent, sdw_acpi_find_one, bus);
-
-	return 0;
+	return	acpi_dev_for_each_child(parent, sdw_acpi_find_one, bus);
 }
 
 #endif
