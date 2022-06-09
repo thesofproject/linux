@@ -1113,6 +1113,7 @@ int acpi_dev_for_each_child(struct acpi_device *adev,
 
 	return device_for_each_child(&adev->dev, &adwc, acpi_dev_for_one_check);
 }
+EXPORT_SYMBOL_GPL(acpi_dev_for_each_child);
 
 /* --------------------------------------------------------------------------
                              Initialization/Cleanup
