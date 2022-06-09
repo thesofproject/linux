@@ -497,9 +497,6 @@ static int sof_ipc4_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 
 			blob->alh_cfg.count++;
 		}
-		/* Set blob->alh_cfg.count = 0 if the widget is not aggregated */
-		if (blob->alh_cfg.count == 1)
-			blob->alh_cfg.count = 0;
 
 		ipc4_copier->copier_config = (uint32_t *)blob;
 		ipc4_copier->data.gtw_cfg.config_length = sizeof(*blob) >> 2;
