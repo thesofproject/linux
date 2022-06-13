@@ -242,4 +242,11 @@ struct sof_ipc4_mixer {
 	struct sof_ipc4_msg msg;
 };
 
+struct sof_ipc4_src {
+	struct sof_ipc4_base_module_cfg base_config;
+	uint32_t sink_rate;
+	struct sof_ipc4_available_audio_format available_fmt;
+	struct sof_ipc4_msg msg;
+};
+
 #endif
