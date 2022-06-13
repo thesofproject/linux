@@ -304,6 +304,7 @@ static int sof_ipc4_widget_set_module_info(struct snd_sof_widget *swidget)
 static int sof_ipc4_widget_setup_msg(struct snd_sof_widget *swidget, struct sof_ipc4_msg *msg)
 {
 	struct sof_ipc4_fw_module *fw_module;
+	uint32_t type;
 	int ret;
 
 	ret = sof_ipc4_widget_set_module_info(swidget);
@@ -319,6 +320,8 @@ static int sof_ipc4_widget_setup_msg(struct snd_sof_widget *swidget, struct sof_
 
 	msg->extension = SOF_IPC4_MOD_EXT_PPL_ID(swidget->pipeline_id);
 	msg->extension |= SOF_IPC4_MOD_EXT_CORE_ID(swidget->core);
+	type = fw_module->man4_module_entry.type;
+	msg->extension |= SOF_IPC4_MOD_EXT_DOMAIN(SOF_IPC4_MODULE_DOMAIN_DP(type));
 
 	return 0;
 }
@@ -1510,8 +1513,6 @@ static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 
 		msg->extension &= ~SOF_IPC4_MOD_EXT_PARAM_SIZE_MASK;
 		msg->extension |= ipc_size >> 2;
-		msg->extension &= ~SOF_IPC4_MOD_EXT_DOMAIN_MASK;
-		msg->extension |= SOF_IPC4_MOD_EXT_DOMAIN(pipeline->lp_mode);
 	}
 
 	msg->data_size = ipc_size;

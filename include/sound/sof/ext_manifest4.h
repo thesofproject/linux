@@ -90,6 +90,21 @@ struct sof_man4_segment_desc {
 	uint32_t file_offset;
 } __packed;
 
+/*
+ * bit definition for type in sof_man4_module
+ * uint32_t     load_type : 4;  MT_BUILTIN, MT_LOADABLE
+ * uint32_t     auto_start : 1; 0 - manually created, 1 - single instance created by Module Manager
+ * uint32_t     domain_ll : 1;  support LL domain
+ * uint32_t     domain_dp : 1;  support DP domain
+ * uint32_t     lib_code : 1;   determines if module is place holder for common library code
+ * uint32_t     _rsvd : 24;
+ */
+#define SOF_IPC4_MODULE_LOAD_TYPE(x)		((x) & 0xf)
+#define SOF_IPC4_MODULE_AUTO_START(x)		(((x) >> 4) & 0x1)
+#define SOF_IPC4_MODULE_DOMAIN_LL(x)		(((x) >> 5) & 0x1)
+#define SOF_IPC4_MODULE_DOMAIN_DP(x)		(((x) >> 6) & 0x1)
+#define SOF_IPC4_MODULE_LIB_CODE(x)		(((x) >> 7) & 0x1)
+
 struct sof_man4_module {
 	uint32_t id;
 	uint8_t name[MAX_MODULE_NAME_LEN];
