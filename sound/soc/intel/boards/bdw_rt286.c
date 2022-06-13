@@ -199,43 +199,33 @@ static struct snd_soc_dai_link card_dai_links[] = {
 	},
 };
 
-static void broadwell_disable_jack(struct snd_soc_card *card)
+static int card_set_jack(struct snd_soc_card *card, struct snd_soc_jack *jack)
 {
-	struct snd_soc_component *component;
+	struct snd_soc_dai *codec_dai = snd_soc_card_get_codec_dai(card, "rt286-aif1");
 
-	for_each_card_components(card, component) {
-		if (!strcmp(component->name, "i2c-INT343A:00")) {
-			dev_dbg(component->dev, "disabling jack detect before going to suspend.\n");
-			snd_soc_component_set_jack(component, NULL, NULL);
-			break;
-		}
-	}
+	return snd_soc_component_set_jack(codec_dai->component, jack, NULL);
+}
+
+static int card_remove(struct snd_soc_card *card)
+{
+	return card_set_jack(card, NULL);
 }
 
 static int card_suspend_pre(struct snd_soc_card *card)
 {
-	broadwell_disable_jack(card);
-
-	return 0;
+	return card_set_jack(card, NULL);
 }
 
 static int card_resume_post(struct snd_soc_card *card)
 {
-	struct snd_soc_component *component;
-
-	for_each_card_components(card, component) {
-		if (!strcmp(component->name, "i2c-INT343A:00")) {
-			dev_dbg(component->dev, "enabling jack detect for resume.\n");
-			snd_soc_component_set_jack(component, &card_headset, NULL);
-			break;
-		}
-	}
-
-	return 0;
+	return card_set_jack(card, &card_headset);
 }
 
 static struct snd_soc_card bdw_rt286_card = {
 	.owner = THIS_MODULE,
+	.remove = card_remove,
+	.suspend_pre = card_suspend_pre,
+	.resume_post = card_resume_post,
 	.dai_link = card_dai_links,
 	.num_links = ARRAY_SIZE(card_dai_links),
 	.controls = card_controls,
@@ -245,8 +235,6 @@ static struct snd_soc_card bdw_rt286_card = {
 	.dapm_routes = card_routes,
 	.num_dapm_routes = ARRAY_SIZE(card_routes),
 	.fully_routed = true,
-	.suspend_pre = card_suspend_pre,
-	.resume_post = card_resume_post,
 };
 
 /* Use space before codec name to simplify card ID, and simplify driver name. */
@@ -278,18 +266,8 @@ static int bdw_rt286_probe(struct platform_device *pdev)
 	return devm_snd_soc_register_card(dev, &bdw_rt286_card);
 }
 
-static int bdw_rt286_remove(struct platform_device *pdev)
-{
-	struct snd_soc_card *card = platform_get_drvdata(pdev);
-
-	broadwell_disable_jack(card);
-
-	return 0;
-}
-
 static struct platform_driver bdw_rt286_driver = {
 	.probe = bdw_rt286_probe,
-	.remove = bdw_rt286_remove,
 	.driver = {
 		.name = "bdw_rt286",
 		.pm = &snd_soc_pm_ops
