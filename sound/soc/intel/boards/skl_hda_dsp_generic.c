@@ -108,7 +108,7 @@ static struct snd_soc_card hda_soc_card = {
 
 static char hda_soc_components[30];
 
-#define IDISP_DAI_COUNT		3
+#define IDISP_DAI_COUNT		4
 #define HDAC_DAI_COUNT		2
 #define DMIC_DAI_COUNT		2
 
