@@ -1060,7 +1060,9 @@ static int intel_component_probe(struct snd_soc_component *component)
 
 	/*
 	 * make sure the device is pm_runtime_active before initiating
-	 * bus transactions during the card registration
+	 * bus transactions during the card registration.
+	 * We use pm_runtime_resume() here, without taking a reference
+	 * and releasing it immediately.
 	 */
 	ret = pm_runtime_resume(component->dev);
 	if (ret < 0 && ret != -EACCES)
