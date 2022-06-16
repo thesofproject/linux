@@ -327,12 +327,14 @@ int snd_sof_prepare(struct device *dev)
 	sdev->system_suspend_target = SOF_SUSPEND_S3;
 
 	/*
-	 * if the firmware is crashed or boot failed then we try to aim for S3
-	 * to reboot the firmware
+	 * if the firmware is crashed or boot failed then we try to aim for S4
+	 * to re-initialize the DSP and force re-load the firmware
 	 */
 	if (sdev->fw_state == SOF_FW_CRASHED ||
-	    sdev->fw_state == SOF_FW_BOOT_FAILED)
+	    sdev->fw_state == SOF_FW_BOOT_FAILED) {
+		sdev->system_suspend_target = SOF_SUSPEND_S4;
 		return 0;
+	}
 
 	if (!desc->use_acpi_target_states)
 		return 0;
