@@ -190,7 +190,7 @@ int snd_soc_info_volsw(struct snd_kcontrol *kcontrol,
 			vol_string = NULL;
 	}
 
-	if (!vol_string)
+	if (!vol_string && max == 1)
 		uinfo->type = SNDRV_CTL_ELEM_TYPE_BOOLEAN;
 	else
 		uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
