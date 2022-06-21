@@ -29,7 +29,7 @@ static bool is_link_enabled(struct fwnode_handle *fw_node, int i)
 	char name[32];
 	u32 quirk_mask = 0;
 
-	/* Find master handle */
+	/* Find manager handle */
 	snprintf(name, sizeof(name),
 		 "mipi-sdw-link-%d-subproperties", i);
 
