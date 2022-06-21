@@ -369,8 +369,8 @@ static int cl_dsp_init_skl(struct snd_sof_dev *sdev,
 	/* polling the ROM init status information. */
 	ret = snd_sof_dsp_read_poll_timeout(sdev, HDA_DSP_BAR,
 					    chip->rom_status_reg, status,
-					    ((status & HDA_DSP_ROM_STS_MASK)
-					     == HDA_DSP_ROM_INIT),
+					    (FSR_TO_STATE_CODE(status)
+					     == FSR_STATE_INIT_DONE),
 					    HDA_DSP_REG_POLL_INTERVAL_US,
 					    chip->rom_init_timeout *
 					    USEC_PER_MSEC);
@@ -550,8 +550,8 @@ int hda_dsp_cl_boot_firmware_skl(struct snd_sof_dev *sdev)
 
 	ret = snd_sof_dsp_read_poll_timeout(sdev, HDA_DSP_BAR,
 					    chip->rom_status_reg, reg,
-					    ((reg & HDA_DSP_ROM_STS_MASK)
-					     == HDA_DSP_ROM_RFW_START),
+					    (FSR_TO_STATE_CODE(reg)
+					     == FSR_STATE_ROM_BASEFW_ENTERED),
 					    HDA_DSP_REG_POLL_INTERVAL_US,
 					    HDA_DSP_BASEFW_TIMEOUT_US);
 
