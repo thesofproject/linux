@@ -384,6 +384,10 @@ DECLARE_HOOK(android_vh_save_vmalloc_stack,
 DECLARE_HOOK(android_vh_show_stack_hash,
 	TP_PROTO(struct seq_file *m, struct vm_struct *v),
 	TP_ARGS(m, v));
+DECLARE_HOOK(android_vh_calc_alloc_flags,
+	TP_PROTO(gfp_t gfp_mask, unsigned int *alloc_flags,
+		bool *bypass),
+	TP_ARGS(gfp_mask, alloc_flags, bypass));
 #endif /* _TRACE_HOOK_MM_H */
 
 /* This part must be outside protection */
