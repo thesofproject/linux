@@ -35,6 +35,7 @@ endif
 ifneq ($(CONFIG_SND_SOC_SOF_IPC4),)
 snd-sof-probes-y += sof-client-probes-ipc4.o
 endif
+snd-sof-fw-gdb-objs := sof-client-fw-gdb.o
 
 snd-sof-nocodec-y := nocodec.o
 
@@ -53,6 +54,7 @@ obj-$(CONFIG_SND_SOC_SOF_DEBUG_IPC_FLOOD_TEST) += snd-sof-ipc-flood-test.o
 obj-$(CONFIG_SND_SOC_SOF_DEBUG_IPC_MSG_INJECTOR) += snd-sof-ipc-msg-injector.o
 obj-$(CONFIG_SND_SOC_SOF_DEBUG_IPC_KERNEL_INJECTOR) += snd-sof-ipc-kernel-injector.o
 obj-$(CONFIG_SND_SOC_SOF_DEBUG_PROBES) += snd-sof-probes.o
+obj-$(CONFIG_SND_SOC_SOF_DEBUG_FW_GDB) += snd-sof-fw-gdb.o
 
 obj-$(CONFIG_SND_SOC_SOF_INTEL_TOPLEVEL) += intel/
 obj-$(CONFIG_SND_SOC_SOF_IMX_TOPLEVEL) += imx/
