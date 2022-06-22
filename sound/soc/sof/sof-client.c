@@ -167,6 +167,25 @@ static inline int sof_register_ipc_kernel_injector(struct snd_sof_dev *sdev)
 static inline void sof_unregister_ipc_kernel_injector(struct snd_sof_dev *sdev) {}
 #endif /* CONFIG_SND_SOC_SOF_DEBUG_IPC_KERNEL_INJECTOR */
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_FW_GDB)
+static int sof_register_fw_gdb(struct snd_sof_dev *sdev)
+{
+	return sof_client_dev_register(sdev, "fw_gdb", 0, NULL, 0);
+}
+
+static void sof_unregister_fw_gdb(struct snd_sof_dev *sdev)
+{
+	sof_client_dev_unregister(sdev, "fw_gdb", 0);
+}
+#else
+static inline int sof_register_fw_gdb(struct snd_sof_dev *sdev)
+{
+	return 0;
+}
+
+static inline void sof_unregister_fw_gdb(struct snd_sof_dev *sdev) {}
+#endif /* CONFIG_SND_SOC_SOF_DEBUG_FW_GDB */
+
 int sof_register_clients(struct snd_sof_dev *sdev)
 {
 	int ret;
@@ -193,6 +212,12 @@ int sof_register_clients(struct snd_sof_dev *sdev)
 		goto err_kernel_injector;
 	}
 
+	ret = sof_register_fw_gdb(sdev);
+	if (ret) {
+		dev_err(sdev->dev, "Firmware GDB client registration failed\n");
+		goto err_fw_gdb;
+	}
+
 	/* Platform dependent client device registration */
 
 	if (sof_ops(sdev) && sof_ops(sdev)->register_ipc_clients)
@@ -202,6 +227,9 @@ int sof_register_clients(struct snd_sof_dev *sdev)
 		return 0;
 
 	sof_unregister_ipc_kernel_injector(sdev);
+
+err_fw_gdb:
+	sof_unregister_fw_gdb(sdev);
 
 err_kernel_injector:
 	sof_unregister_ipc_msg_injector(sdev);
@@ -220,6 +248,7 @@ void sof_unregister_clients(struct snd_sof_dev *sdev)
 	sof_unregister_ipc_kernel_injector(sdev);
 	sof_unregister_ipc_msg_injector(sdev);
 	sof_unregister_ipc_flood_test(sdev);
+	sof_unregister_fw_gdb(sdev);
 }
 
 int sof_client_dev_register(struct snd_sof_dev *sdev, const char *name, u32 id,
