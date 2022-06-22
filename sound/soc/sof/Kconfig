@@ -258,6 +258,19 @@ config SND_SOC_SOF_DEBUG_IPC_KERNEL_INJECTOR
 	  Say Y if you want to enable the IPC kernel injector.
 	  If unsure, select "N".
 
+config SND_SOC_SOF_DEBUG_FW_GDB
+	tristate "SOF enable Firmware GDB debugging"
+	depends on SND_SOC_SOF
+	select SND_SOC_SOF_CLIENT
+	help
+	  This enables GDB debugging of the SOF firmware. If selected, this
+	  will make the kernel create a debugfs file, that can be used to
+	  communicate with the firmware GDB stub. When the file is opened, the
+	  kernel sends a command to the firmware to switch to the GDB mode and
+	  to wait for GDB commands. socat can be used to connect that file to a
+	  socket, to which GDB can then connect.
+	  If unsure, select "N".
+
 config SND_SOC_SOF_DEBUG_RETAIN_DSP_CONTEXT
 	bool "SOF retain DSP context on any FW exceptions"
 	help
