@@ -1011,7 +1011,8 @@ static int intel_trigger(struct snd_pcm_substream *substream, int cmd, struct sn
 	struct sdw_cdns_dma_data *dma;
 	int ret = 0;
 
-	/* The .trigger callback is used to send required IPC to audio
+	/*
+	 * The .trigger callback is used to send required IPC to audio
 	 * firmware. The .free_stream callback will still be called
 	 * by intel_free_stream() in the TRIGGER_SUSPEND case.
 	 */
