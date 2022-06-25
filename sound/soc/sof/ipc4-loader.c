@@ -270,8 +270,91 @@ out:
 	return sof_ipc4_fw_parse_ext_man(sdev, plat_data->fw, 0, 0);
 }
 
+static int sof_ipc4_load_library(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
+{
+	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
+	struct snd_sof_pdata *plat_data = sdev->pdata;
+	const guid_t *widget_uuid = &swidget->uuid;
+	const char *fw_filename;
+	size_t fw_offset;
+	int ret, i;
+
+	/* nothing to do if widget UUID is not set */
+	if (!guid_is_null(&swidget->uuid))
+		return 0;
+
+	/* check if the platform supports load_library */
+	if (sof_ops(sdev)->load_library) {
+		dev_err(sdev->dev, "Loading module libraries not supported\n");
+		return -EINVAL;
+	}
+
+	/* nothing to do if module library is already loaded */
+	for (i = 0; i < ipc4_data->num_fw_modules; i++)
+		if (guid_equal(&ipc4_data->module_uuids[i], widget_uuid)) {
+			dev_dbg(sdev->dev, "Module library already loaded for %s\n",
+				swidget->widget->name);
+			return 0;
+		}
+
+	/*
+	 * The required 3rd party module libraries are dictated by the topology. So they should be
+	 * bundled in the same folder along with the topology binary
+	 */
+	fw_filename = kasprintf(GFP_KERNEL, "%s/%pUL.bin",
+				plat_data->tplg_filename_prefix, widget_uuid);
+	if (!fw_filename)
+		return -ENOMEM;
+
+	/* Index 0 is reserved for base firmware */
+	for (i = 1; i < ipc4_data->max_fw_libs; i++)
+		if (!ipc4_data->module_lib_info[i].id)
+			break;
+
+	if (i >= ipc4_data->max_fw_libs) {
+		dev_err(sdev->dev, "Library ID: %u exceeds max value %u\n",
+			i, ipc4_data->max_fw_libs);
+		ret = -EBUSY;
+		goto err;
+	}
+
+	ipc4_data->module_lib_info[i].id = i;
+	swidget->lib_info = &ipc4_data->module_lib_info[i];
+
+	ret = request_firmware(&ipc4_data->module_lib_info[i].fw, fw_filename, sdev->dev);
+	if (ret < 0) {
+		dev_err(sdev->dev, "Library file '%s' not found\n", fw_filename);
+		goto err;
+	}
+
+	fw_offset = sof_ipc4_fw_parse_ext_man(sdev, ipc4_data->module_lib_info[i].fw, i, 0);
+	if (fw_offset < 0)
+		goto release;
+
+	ipc4_data->module_lib_info[i].fw_offset = fw_offset;
+
+	ret = sof_ops(sdev)->load_library(sdev, &ipc4_data->module_lib_info[i]);
+	if (ret < 0) {
+		ipc4_data->module_lib_info[i].fw_offset = 0;
+		goto release;
+	}
+	
+	dev_dbg(sdev->dev, "Loaded module library %s\n", fw_filename);
+
+	kfree(fw_filename);
+	return 0;
+
+release:
+	release_firmware(ipc4_data->module_lib_info[i].fw);
+	ipc4_data->module_lib_info[i].id = 0;
+err:
+	kfree(fw_filename);
+	return ret;
+}
+
 const struct sof_ipc_fw_loader_ops ipc4_loader_ops = {
 	.validate = sof_ipc4_validate_firmware,
 	.parse_ext_manifest = sof_ipc4_fw_parse_ext_man,
 	.query_fw_configuration = sof_ipc4_query_fw_configuration,
+	.load_library = sof_ipc4_load_library,
 };

@@ -387,6 +387,8 @@ struct snd_sof_widget {
 	int num_tuples;
 	struct snd_sof_tuple *tuples;
 
+	struct snd_sof_module_library_info *lib_info;
+
 	void *private;		/* core does not touch this */
 };
 

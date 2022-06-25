@@ -413,6 +413,7 @@ struct sof_ipc_pm_ops {
 
 /* Flag used when parsing the firmware extended manifest before firmware boot is complete */
 #define SOF_FW_PARSE_MANIFEST_PRE_BOOT	BIT(1)
+struct snd_sof_widget;
 
 /**
  * struct sof_ipc_fw_loader_ops - IPC/FW-specific loader ops
@@ -425,6 +426,7 @@ struct sof_ipc_pm_ops {
  * @query_fw_configuration: Optional function pointer to query information and
  *			configuration from the booted firmware.
  *			Executed after the first successful firmware boot.
+ * @load_library: Optional function pointer to load a 3rd party module library
  */
 struct sof_ipc_fw_loader_ops {
 	int (*validate)(struct snd_sof_dev *sdev);
@@ -432,6 +434,7 @@ struct sof_ipc_fw_loader_ops {
 				     u32 lib_index, u32 flags);
 	int (*load_fw_to_dsp)(struct snd_sof_dev *sdev);
 	int (*query_fw_configuration)(struct snd_sof_dev *sdev);
+	int (*load_library)(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget);
 };
 
 struct sof_ipc_tplg_ops;

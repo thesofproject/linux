@@ -1382,6 +1382,11 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 
 	w->dobj.private = swidget;
 	list_add(&swidget->list, &sdev->widget_list);
+
+	/* load module library if needed */
+	if (sdev->ipc->ops->fw_loader->load_library)
+		return sdev->ipc->ops->fw_loader->load_library(sdev, swidget);
+
 	return ret;
 }
 
@@ -1408,6 +1413,7 @@ static int sof_widget_unload(struct snd_soc_component *scomp,
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	const struct sof_ipc_tplg_ops *ipc_tplg_ops = sdev->ipc->ops->tplg;
 	const struct sof_ipc_tplg_widget_ops *widget_ops = ipc_tplg_ops->widget;
+	struct snd_sof_module_library_info *lib_info;
 	const struct snd_kcontrol_new *kc;
 	struct snd_soc_dapm_widget *widget;
 	struct snd_sof_control *scontrol;
@@ -1422,6 +1428,7 @@ static int sof_widget_unload(struct snd_soc_component *scomp,
 	if (!swidget)
 		return 0;
 
+	lib_info = swidget->lib_info;
 	widget = swidget->widget;
 
 	switch (swidget->id) {
@@ -1471,6 +1478,12 @@ out:
 		widget_ops[swidget->id].ipc_free(swidget);
 
 	kfree(swidget->tuples);
+
+	/* release module firmware */
+	release_firmware(lib_info->fw);
+	lib_info->fw = NULL;
+	lib_info->id = 0;
+	lib_info->fw_offset = 0;
 
 	/* remove and free swidget object */
 	list_del(&swidget->list);
