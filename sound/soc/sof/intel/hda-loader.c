@@ -538,7 +538,6 @@ int hda_dsp_cl_boot_firmware(struct snd_sof_dev *sdev)
 	ret = hda_cl_copy_fw(sdev, hext_stream);
 	if (!ret) {
 		dev_dbg(sdev->dev, "Firmware download successful, booting...\n");
-		hda->skip_imr_boot = false;
 	} else {
 		snd_sof_dsp_dbg_dump(sdev, "Firmware download failed",
 				     SOF_DBG_DUMP_PCI | SOF_DBG_DUMP_MBOX);
@@ -584,6 +583,7 @@ int hda_dsp_pre_fw_run(struct snd_sof_dev *sdev)
 /* post fw run operations */
 int hda_dsp_post_fw_run(struct snd_sof_dev *sdev)
 {
+	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	int ret;
 
 	if (sdev->first_boot) {
@@ -601,7 +601,16 @@ int hda_dsp_post_fw_run(struct snd_sof_dev *sdev)
 		    (sdev->fw_ready.flags & SOF_IPC_INFO_D3_PERSISTENT ||
 		     sdev->pdata->ipc_type == SOF_INTEL_IPC4))
 			hdev->imrboot_supported = true;
+	} else {
+		/* reload all 3rd party module libraries during cold boot */
+		if (!hda->imrboot_supported || hda->skip_imr_boot) {
+			ret = sdev->ipc->ops->fw_loader->reload_libraries(sdev);
+			if (ret < 0)
+				return ret;
+		}
 	}
+
+	hda->skip_imr_boot = false;
 
 	hda_sdw_int_enable(sdev, true);
 

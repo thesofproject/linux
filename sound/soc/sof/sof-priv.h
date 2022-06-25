@@ -427,6 +427,7 @@ struct snd_sof_widget;
  *			configuration from the booted firmware.
  *			Executed after the first successful firmware boot.
  * @load_library: Optional function pointer to load a 3rd party module library
+ * @reload_libraries: Optional function pointer to reload all needed 3rd party module libraries
  */
 struct sof_ipc_fw_loader_ops {
 	int (*validate)(struct snd_sof_dev *sdev);
@@ -435,6 +436,7 @@ struct sof_ipc_fw_loader_ops {
 	int (*load_fw_to_dsp)(struct snd_sof_dev *sdev);
 	int (*query_fw_configuration)(struct snd_sof_dev *sdev);
 	int (*load_library)(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget);
+	int (*reload_libraries)(struct snd_sof_dev *sdev);
 };
 
 struct sof_ipc_tplg_ops;

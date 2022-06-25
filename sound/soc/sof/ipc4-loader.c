@@ -352,9 +352,39 @@ err:
 	return ret;
 }
 
+static int sof_ipc4_reload_libraries(struct snd_sof_dev *sdev)
+{
+	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
+	int i, ret;
+
+	if (sof_ops(sdev)->load_library) {
+		dev_err(sdev->dev, "Loading module libraries not supported\n");
+		return -EINVAL;
+	}
+
+	/* Index 0 is reserved for base firmware */
+	for (i = 1; i < ipc4_data->max_fw_libs; i++) {
+		if (!ipc4_data->module_lib_info[i].id)
+			break;
+
+		ret = sof_ops(sdev)->load_library(sdev, &ipc4_data->module_lib_info[i]);
+		if (ret < 0) {
+			dev_err(sdev->dev, "Failed loading module FW library: %s\n",
+				ipc4_data->module_lib_info[i].name);
+			return ret;
+		}
+
+		dev_dbg(sdev->dev, "Loaded FW library for module: %s\n",
+			ipc4_data->module_lib_info[i].name);
+	}
+
+	return 0;
+}
+
 const struct sof_ipc_fw_loader_ops ipc4_loader_ops = {
 	.validate = sof_ipc4_validate_firmware,
 	.parse_ext_manifest = sof_ipc4_fw_parse_ext_man,
 	.query_fw_configuration = sof_ipc4_query_fw_configuration,
 	.load_library = sof_ipc4_load_library,
+	.reload_libraries = sof_ipc4_reload_libraries,
 };
