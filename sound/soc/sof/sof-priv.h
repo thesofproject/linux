@@ -12,6 +12,7 @@
 #define __SOUND_SOC_SOF_PRIV_H
 
 #include <linux/device.h>
+#include <linux/firmware.h>
 #include <sound/hdaudio.h>
 #include <sound/sof.h>
 #include <sound/sof/info.h>
@@ -126,6 +127,20 @@ struct snd_sof_platform_stream_params {
 	bool use_phy_address;
 	u32 phy_addr;
 	bool no_ipc_position;
+};
+
+/**
+ * struct snd_sof_module_library_info: 3rd party module library information
+ * @fw: Pointer to the 3rd party module firmware
+ * @fw_offset: Offset of the firmware within the firmware file
+ * @name: 3rd party module firmware name
+ * @id: ID of the module library
+ */
+struct snd_sof_module_library_info {
+	const struct firmware *fw;
+	size_t fw_offset;
+	char *name;
+	u32 id;
 };
 
 /*

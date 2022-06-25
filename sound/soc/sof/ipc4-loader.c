@@ -14,6 +14,8 @@
 #include "sof-priv.h"
 #include "ops.h"
 
+#define SOF_IPC4_MAX_FIRMWARE_LIBS	32
+
 static size_t sof_ipc4_fw_parse_ext_man(struct snd_sof_dev *sdev)
 {
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
@@ -149,6 +151,7 @@ static int sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev)
 {
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	const struct sof_ipc_ops *iops = sdev->ipc->ops;
+	struct snd_sof_pdata *plat_data = sdev->pdata;
 	struct sof_ipc4_fw_version *fw_ver;
 	struct sof_ipc4_tuple *tuple;
 	struct sof_ipc4_msg msg;
@@ -193,6 +196,26 @@ static int sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev)
 			trace_sof_ipc4_fw_config(sdev, "Trace log size", *tuple->value);
 			ipc4_data->mtrace_log_bytes = *tuple->value;
 			break;
+		case SOF_IPC4_FW_CFG_MAX_LIBS_COUNT:
+		{
+			size_t size = sizeof(struct snd_sof_module_library_info);
+
+			ipc4_data->max_fw_libs = *tuple->value;
+
+			/* limit maximum number of libraries supported */
+			if (ipc4_data->max_fw_libs > SOF_IPC4_MAX_FIRMWARE_LIBS)
+				ipc4_data->max_fw_libs = SOF_IPC4_MAX_FIRMWARE_LIBS;
+
+			if (!ipc4_data->max_fw_libs)
+				break;
+
+			ipc4_data->module_lib_info = devm_kcalloc(sdev->dev,
+								  ipc4_data->max_fw_libs,
+								  size, GFP_KERNEL);
+			if (!ipc4_data->module_lib_info)
+				return -ENOMEM;
+			break;
+		}
 		default:
 			break;
 		}
