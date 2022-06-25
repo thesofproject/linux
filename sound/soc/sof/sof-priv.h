@@ -409,6 +409,9 @@ struct sof_ipc_pm_ops {
 	int (*set_core_state)(struct snd_sof_dev *sdev, int core_idx, bool on);
 };
 
+/* Flag used when parsing the firmware extended manifest before firmware boot is complete */
+#define SOF_FW_PARSE_MANIFEST_PRE_BOOT	BIT(1)
+
 /**
  * struct sof_ipc_fw_loader_ops - IPC/FW-specific loader ops
  * @validate:		Function pointer for validating the firmware image
@@ -423,7 +426,8 @@ struct sof_ipc_pm_ops {
  */
 struct sof_ipc_fw_loader_ops {
 	int (*validate)(struct snd_sof_dev *sdev);
-	size_t (*parse_ext_manifest)(struct snd_sof_dev *sdev);
+	size_t (*parse_ext_manifest)(struct snd_sof_dev *sdev, const struct firmware *fw,
+				     u32 lib_index, u32 flags);
 	int (*load_fw_to_dsp)(struct snd_sof_dev *sdev);
 	int (*query_fw_configuration)(struct snd_sof_dev *sdev);
 };

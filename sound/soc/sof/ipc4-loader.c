@@ -15,19 +15,20 @@
 #include "ops.h"
 
 #define SOF_IPC4_MAX_FIRMWARE_LIBS	32
+#define SOF_IPC4_MODULE_LIBARY_OFFSET	0x1000
 
-static size_t sof_ipc4_fw_parse_ext_man(struct snd_sof_dev *sdev)
+static size_t sof_ipc4_fw_parse_ext_man(struct snd_sof_dev *sdev, const struct firmware *fw,
+					u32 lib_index, u32 flags)
 {
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
-	struct snd_sof_pdata *plat_data = sdev->pdata;
 	struct sof_man4_fw_binary_header *fw_header;
-	const struct firmware *fw = plat_data->fw;
 	struct sof_ext_manifest4_hdr *ext_man_hdr;
 	struct sof_man4_module_config *fm_config;
 	struct sof_ipc4_fw_module *fw_module;
 	struct sof_man4_module *fm_entry;
 	ssize_t remaining;
 	u32 fw_hdr_offset;
+	int num_modules = 0;
 	int i;
 
 	if (!ipc4_data) {
@@ -62,20 +63,40 @@ static size_t sof_ipc4_fw_parse_ext_man(struct snd_sof_dev *sdev)
 		return -EINVAL;
 	}
 
+	/* return the extended manifest header length if SOF_FW_PARSE_MANIFEST_PRE_BOOT is set */
+	if (flags & SOF_FW_PARSE_MANIFEST_PRE_BOOT)
+		return ext_man_hdr->len;
+
 	dev_info(sdev->dev, "Loaded firmware version: %u.%u.%u.%u\n",
 		 fw_header->major_version, fw_header->minor_version,
 		 fw_header->hotfix_version, fw_header->build_version);
 	dev_dbg(sdev->dev, "Firmware name: %s, header length: %u, module count: %u\n",
 		fw_header->name, fw_header->len, fw_header->num_module_entries);
 
-	ipc4_data->fw_modules = devm_kmalloc_array(sdev->dev,
-						   fw_header->num_module_entries,
-						   sizeof(*fw_module), GFP_KERNEL);
-	if (!ipc4_data->fw_modules)
-		return -ENOMEM;
+	/*
+	 * allocate memory for the number of modules in the base FW + the max libraries
+	 * supported by the firmware. This assumes that there is a 1:1 mapping between libraries
+	 * and module UUID's for modules that are not already part of the base firmware.
+	 */
+	if (!lib_index) {
+		/* max_fw_libs includes the base firmware */
+		int num_total_modules = fw_header->num_module_entries + ipc4_data->max_fw_libs - 1;
 
-	ipc4_data->num_fw_modules = fw_header->num_module_entries;
-	fw_module = ipc4_data->fw_modules;
+		ipc4_data->fw_modules = devm_kmalloc_array(sdev->dev, num_total_modules,
+							   sizeof(*fw_module), GFP_KERNEL);
+		if (!ipc4_data->fw_modules)
+			return -ENOMEM;
+
+		ipc4_data->module_uuids = devm_kcalloc(sdev->dev, num_total_modules,
+						       sizeof(guid_t), GFP_KERNEL);
+		if (!ipc4_data->module_uuids)
+			return -ENOMEM;
+	} else {
+		/* set the firmware name */
+		ipc4_data->module_lib_info[lib_index].name = fw_header->name;
+	}
+
+	fw_module = ipc4_data->fw_modules + ipc4_data->num_fw_modules;
 
 	fm_entry = (struct sof_man4_module *)((u8 *)fw_header + fw_header->len);
 	remaining -= fw_header->len;
@@ -90,7 +111,11 @@ static size_t sof_ipc4_fw_parse_ext_man(struct snd_sof_dev *sdev)
 				(fm_entry + fw_header->num_module_entries);
 	remaining -= (fw_header->num_module_entries * sizeof(*fm_entry));
 	for (i = 0; i < fw_header->num_module_entries; i++) {
-		memcpy(&fw_module->man4_module_entry, fm_entry, sizeof(*fm_entry));
+		/* ignore modules with null UUID */
+		if (guid_is_null(&fm_entry->uuid)) {
+			fm_entry++;
+			continue;
+		}
 
 		if (fm_entry->cfg_count) {
 			if (remaining < (fm_entry->cfg_offset + fm_entry->cfg_count) *
@@ -103,10 +128,14 @@ static size_t sof_ipc4_fw_parse_ext_man(struct snd_sof_dev *sdev)
 			/* a module's config is always the same size */
 			fw_module->bss_size = fm_config[fm_entry->cfg_offset].is_bytes;
 
+			guid_copy(&ipc4_data->module_uuids[ipc4_data->num_fw_modules + i],
+				  &fm_entry->uuid);
+
 			dev_dbg(sdev->dev,
 				"module %s: UUID %pUL cfg_count: %u, bss_size: %#x\n",
-				fm_entry->name, &fm_entry->uuid, fm_entry->cfg_count,
-				fw_module->bss_size);
+				fm_entry->name,
+				&ipc4_data->module_uuids[i + ipc4_data->num_fw_modules],
+				fm_entry->cfg_count, fw_module->bss_size);
 		} else {
 			fw_module->bss_size = 0;
 
@@ -114,13 +143,18 @@ static size_t sof_ipc4_fw_parse_ext_man(struct snd_sof_dev *sdev)
 				&fm_entry->uuid);
 		}
 
-		fw_module->man4_module_entry.id = i;
+		memcpy(&fw_module->man4_module_entry, fm_entry, sizeof(*fm_entry));
+
+		fw_module->man4_module_entry.id = SOF_IPC4_MODULE_LIBARY_OFFSET * lib_index + i;
 		ida_init(&fw_module->m_ida);
 		fw_module->private = NULL;
 
 		fw_module++;
 		fm_entry++;
+		num_modules++;
 	}
+
+	ipc4_data->num_fw_modules += num_modules;
 
 	return ext_man_hdr->len;
 }
@@ -226,7 +260,14 @@ static int sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev)
 out:
 	kfree(msg.data_ptr);
 
-	return ret;
+	if (ret)
+		return ret;
+
+	/*
+	 * Unset the SOF_FW_PARSE_MANIFEST_PRE_BOOT flag to allow parsing the extended manifest in
+	 * the base firmware (id: 0)
+	 */
+	return sof_ipc4_fw_parse_ext_man(sdev, plat_data->fw, 0, 0);
 }
 
 const struct sof_ipc_fw_loader_ops ipc4_loader_ops = {

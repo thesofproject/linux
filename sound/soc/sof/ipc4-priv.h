@@ -35,6 +35,7 @@ enum sof_ipc4_mtrace_type {
  * @max_fw_libs: Maximum number of FW libraries support by the FW including the base firmware
  * @module_lib_info: Array of struct snd_sof_module_library_info containing information
  *		     about all 3rd party modules
+ * @module_uuids: List of module UUIDs
  */
 struct sof_ipc4_fw_data {
 	u32 manifest_fw_hdr_offset;
@@ -45,6 +46,7 @@ struct sof_ipc4_fw_data {
 	u32 mtrace_log_bytes;
 	u32 max_fw_libs;
 	struct snd_sof_module_library_info *module_lib_info;
+	guid_t *module_uuids;
 };
 
 /**

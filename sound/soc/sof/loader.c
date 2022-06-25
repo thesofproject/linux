@@ -17,6 +17,7 @@
 int snd_sof_load_firmware_raw(struct snd_sof_dev *sdev)
 {
 	struct snd_sof_pdata *plat_data = sdev->pdata;
+	const struct sof_ipc_ops *ipc_ops =  sdev->ipc->ops;
 	const char *fw_filename;
 	ssize_t ext_man_size;
 	int ret;
@@ -44,8 +45,12 @@ int snd_sof_load_firmware_raw(struct snd_sof_dev *sdev)
 			fw_filename);
 	}
 
-	/* check for extended manifest */
-	ext_man_size = sdev->ipc->ops->fw_loader->parse_ext_manifest(sdev);
+	/*
+	 * check for extended manifest. Set the SOF_FW_PARSE_MANIFEST_PRE_BOOT flag and pass 0
+	 * for the library index of the base firmware.
+	 */
+	ext_man_size = ipc_ops->fw_loader->parse_ext_manifest(sdev, plat_data->fw, 0,
+							      SOF_FW_PARSE_MANIFEST_PRE_BOOT);
 	if (ext_man_size > 0) {
 		/* when no error occurred, drop extended manifest */
 		plat_data->fw_offset = ext_man_size;

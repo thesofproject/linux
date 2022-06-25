@@ -136,10 +136,9 @@ static ssize_t ipc3_fw_ext_man_size(struct snd_sof_dev *sdev, const struct firmw
 	return 0;
 }
 
-static size_t sof_ipc3_fw_parse_ext_man(struct snd_sof_dev *sdev)
+static size_t sof_ipc3_fw_parse_ext_man(struct snd_sof_dev *sdev, const struct firmware *fw,
+					u32 lib_index, u32 flags)
 {
-	struct snd_sof_pdata *plat_data = sdev->pdata;
-	const struct firmware *fw = plat_data->fw;
 	const struct sof_ext_man_elem_header *elem_hdr;
 	const struct sof_ext_man_header *head;
 	ssize_t ext_man_size;
