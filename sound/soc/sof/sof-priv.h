@@ -204,6 +204,8 @@ struct snd_sof_dsp_ops {
 	int (*load_firmware)(struct snd_sof_dev *sof_dev); /* mandatory */
 	int (*load_module)(struct snd_sof_dev *sof_dev,
 			   struct snd_sof_mod_hdr *hdr); /* optional */
+	int (*load_library)(struct snd_sof_dev *sdev,
+			    struct snd_sof_module_library_info *lib_info); /* optional */
 
 	/* connect pcm substream to a host stream */
 	int (*pcm_open)(struct snd_sof_dev *sdev,
