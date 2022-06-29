@@ -190,6 +190,13 @@ static ssize_t sof_ipc4_mtrace_dfs_read(struct file *file, char __user *buffer,
 	if (!count || count < sizeof(avail))
 		return 0;
 
+	/*
+	 * FIXME: temporary measure to force checking the DSP writeptr
+	 *        with early SOF FW mtrace implementation that is not
+	 *        able to send SOF_IPC4_NOTIFY_LOG_BUFFER_STATUS
+	 */
+	sof_ipc4_mtrace_update_pos(sdev, 0);
+
 	/* get available count based on current host offset */
 	if (!sof_wait_mtrace_avail(core_data)) {
 		/* No data available */
@@ -426,8 +433,11 @@ static int ipc4_mtrace_enable(struct snd_sof_dev *sdev)
 	msg.data_size = sizeof(system_time);
 	msg.data_ptr = &system_time;
 	ret = iops->set_get_data(sdev, &msg, msg.data_size, true);
-	if (ret)
-		return ret;
+	if (ret) {
+		/* FIXME: temporary until SOF supports this IPC */
+		dev_warn(sdev->dev, "SOF_IPC4_FW_PARAM_SYSTEM_TIME failed %d, ignoring\n");
+		/* return ret; */
+	}
 
 	msg.extension = SOF_IPC4_MOD_EXT_MSG_PARAM_ID(SOF_IPC4_FW_PARAM_ENABLE_LOGS);
 
@@ -439,8 +449,10 @@ static int ipc4_mtrace_enable(struct snd_sof_dev *sdev)
 	priv->mtrace_state = SOF_MTRACE_INITIALIZING;
 	ret = iops->set_get_data(sdev, &msg, msg.data_size, true);
 	if (ret) {
-		priv->mtrace_state = SOF_MTRACE_DISABLED;
-		return ret;
+		/* FIXME: temporary until SOF supports this IPC */
+		dev_warn(sdev->dev, "SOF_IPC4_FW_PARAM_ENABLE_LOGS failed %d, ignoring\n");
+		/* priv->mtrace_state = SOF_MTRACE_DISABLED; */
+		/* return ret; */
 	}
 
 	priv->mtrace_state = SOF_MTRACE_ENABLED;
