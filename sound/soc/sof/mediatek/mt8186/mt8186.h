@@ -52,7 +52,8 @@ struct snd_sof_dev;
 #define ADSP_PRID			0x0
 #define ADSP_ALTVEC_C0			0x04
 #define ADSP_ALTVECSEL			0x0C
-#define ADSP_ALTVECSEL_C0		BIT(1)
+/* BIT(1) for mt8186. BIT(0) for mt8188 */
+#define ADSP_ALTVECSEL_C0		(BIT(0) | BIT(1))
 
 /* dsp bus */
 #define ADSP_SRAM_POOL_CON		0x190
