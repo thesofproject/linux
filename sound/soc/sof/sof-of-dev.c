@@ -31,6 +31,29 @@ const struct dev_pm_ops sof_of_pm = {
 };
 EXPORT_SYMBOL(sof_of_pm);
 
+struct snd_sof_of_mach *sof_of_machine_select(struct snd_sof_dev *sdev)
+{
+	struct snd_sof_pdata *sof_pdata = sdev->pdata;
+	const struct sof_dev_desc *desc = sof_pdata->desc;
+	struct snd_sof_of_mach *mach = desc->of_machines;
+
+	if (!mach)
+		return NULL;
+
+	for (; mach->board; mach++) {
+		if (of_machine_is_compatible(mach->board)) {
+			sof_pdata->tplg_filename = mach->sof_tplg_filename;
+			if (mach->fw_filename)
+				sof_pdata->fw_filename = mach->fw_filename;
+
+			return mach;
+		}
+	}
+
+	return NULL;
+}
+EXPORT_SYMBOL(sof_of_machine_select);
+
 static void sof_of_probe_complete(struct device *dev)
 {
 	/* allow runtime_pm */

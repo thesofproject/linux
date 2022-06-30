@@ -283,6 +283,7 @@ struct snd_sof_dsp_ops {
 	void (*machine_unregister)(struct snd_sof_dev *sdev,
 				   void *pdata); /* optional */
 	struct snd_soc_acpi_mach * (*machine_select)(struct snd_sof_dev *sdev); /* optional */
+	struct snd_sof_of_mach * (*of_machine_select)(struct snd_sof_dev *sdev); /* optional */
 	void (*set_mach_params)(struct snd_soc_acpi_mach *mach,
 				struct snd_sof_dev *sdev); /* optional */
 
