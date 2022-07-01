@@ -524,6 +524,9 @@ static struct snd_sof_dsp_ops sof_mt8186_ops = {
 	/* misc */
 	.get_bar_index	= mt8186_get_bar_index,
 
+	/* machine driver */
+	.of_machine_select = sof_of_machine_select,
+
 	/* stream callbacks */
 	.pcm_open       = sof_stream_pcm_open,
 	.pcm_close      = sof_stream_pcm_close,
@@ -550,7 +553,24 @@ static struct snd_sof_dsp_ops sof_mt8186_ops = {
 			SNDRV_PCM_INFO_NO_PERIOD_WAKEUP,
 };
 
+static struct snd_sof_of_mach sof_mt8186_machs[] = {
+	{
+		.board = "google,kingler",
+		.sof_tplg_filename = "sof-mt8186-mt6366-da7219-max98357.tplg",
+	},
+	{
+		.board = "google,krabby",
+		.sof_tplg_filename = "sof-mt8186-mt6366-rt1019-rt5682s.tplg",
+	},
+	{
+		.board = "google,steelix",
+		.sof_tplg_filename = "sof-mt8186-mt6366-rt1019-rt5682s.tplg",
+	},
+	{}
+};
+
 static const struct sof_dev_desc sof_of_mt8186_desc = {
+	.of_machines = sof_mt8186_machs,
 	.ipc_supported_mask	= BIT(SOF_IPC),
 	.ipc_default		= SOF_IPC,
 	.default_fw_path = {
