@@ -1480,6 +1480,31 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 	return sof_ipc4_widget_assign_instance_id(sdev, swidget);
 }
 
+static int sof_ipc4_large_config_kpb(struct snd_sof_widget *swidget)
+{
+	/* To be implemented later */
+	return 0;
+}
+
+static int sof_ipc4_large_config_process_module(struct snd_sof_widget *swidget)
+{
+	struct sof_ipc4_process *process = swidget->private;
+	int ret = 0;
+
+	if (!process)
+		return -EINVAL;
+
+	switch (process->process_type) {
+	case SOF_PROCESS_KPB:
+		ret = sof_ipc4_large_config_kpb(swidget);
+		break;
+	default:
+		break;
+	}
+
+	return ret;
+}
+
 static int sof_ipc4_control_load_volume(struct snd_sof_dev *sdev, struct snd_sof_control *scontrol)
 {
 	struct sof_ipc4_control_data *control_data;
@@ -1980,7 +2005,8 @@ static const struct sof_ipc_tplg_widget_ops tplg_ipc4_widget_ops[SND_SOC_DAPM_TY
 				sof_ipc4_widget_free_comp_process,
 				process_token_list, ARRAY_SIZE(process_token_list),
 				NULL, sof_ipc4_prepare_process_module,
-				sof_ipc4_unprepare_generic_module},
+				sof_ipc4_unprepare_generic_module,
+				sof_ipc4_large_config_process_module},
 };
 
 const struct sof_ipc_tplg_ops ipc4_tplg_ops = {
