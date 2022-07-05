@@ -243,6 +243,16 @@ struct sof_ipc4_mixer {
 };
 
 /**
+ * struct sof_process_intelwov_cfg - intelwov config data
+ * @base_config: IPC base config data
+ * @cpc_low_power_mode: cpc in low power mode
+ */
+struct sof_process_intelwov_cfg {
+	struct sof_ipc4_base_module_cfg base_config;
+	int cpc_low_power_mode;
+};
+
+/**
  * struct sof_ipc4_process - process config data
  * @base_config: IPC base config data
  * @output_format: output audio format
@@ -250,6 +260,7 @@ struct sof_ipc4_mixer {
  * @process_type: the effect widget type
  * @ipc_config_data: process_config
  * @ipc_config_size: Size of process_config
+ * @cpc_low_power_mode: cpc in low power mode
  * @msg: IPC4 message struct containing header and data info
  */
 struct sof_ipc4_process {
@@ -259,6 +270,7 @@ struct sof_ipc4_process {
 	int process_type;
 	void *ipc_config_data;
 	uint32_t ipc_config_size;
+	int cpc_low_power_mode;
 	struct sof_ipc4_msg msg;
 };
 

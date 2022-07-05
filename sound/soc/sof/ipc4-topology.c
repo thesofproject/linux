@@ -120,6 +120,7 @@ struct sof_process_types {
 static const struct sof_process_types sof_process[] = {
 	{"MICSEL", SOF_PROCESS_MICSEL, SOF_COMP_MICSEL},
 	{"KPB", SOF_PROCESS_KPB, SOF_COMP_KPB},
+	{"KEYWORD_DETECT", SOF_PROCESS_KEYWORD_DETECT, SOF_COMP_KEYWORD_DETECT},
 };
 
 static enum sof_ipc_process_type find_process(const char *name)
@@ -146,6 +147,8 @@ static int get_token_process_type(void *elem, void *object, u32 offset)
 static const struct sof_topology_token process_tokens[] = {
 	{SOF_TKN_EFFECT_TYPE, SND_SOC_TPLG_TUPLE_TYPE_STRING, get_token_process_type,
 		offsetof(struct sof_ipc4_process, process_type)},
+	{SOF_TKN_EFFECT_CPC_LP, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc4_process, cpc_low_power_mode)},
 };
 
 static const struct sof_token_info ipc4_token_list[SOF_TOKEN_COUNT] = {
@@ -813,11 +816,31 @@ static int sof_ipc4_widget_setup_comp_process(struct snd_sof_widget *swidget)
 		goto free_available_fmt;
 	}
 
+	switch (process->process_type) {
+	case SOF_PROCESS_KEYWORD_DETECT: 
+	{
+		struct sof_process_intelwov_cfg *cfg;
+
+		cfg = kzalloc(sizeof(struct sof_process_intelwov_cfg), GFP_KERNEL);
+		if (!cfg)
+			goto free_available_fmt;
+		process->ipc_config_data = cfg;
+		break;
+	}
+	case SOF_PROCESS_MICSEL:	/* fallback */
+	case SOF_PROCESS_KPB:	/* fallback */
+	default:
+		/* nothing to do */
+		break;
+	}
+
 	ret = sof_ipc4_widget_setup_msg(swidget, &process->msg);
 	if (ret)
-		goto free_available_fmt;
+		goto free_config_data;
 
 	return 0;
+free_config_data:
+	kfree(process->ipc_config_data);
 free_available_fmt:
 	sof_ipc4_free_audio_fmt(&process->available_fmt);
 err:
@@ -833,6 +856,7 @@ static void sof_ipc4_widget_free_comp_process(struct snd_sof_widget *swidget)
 	if (!process)
 		return;
 
+	kfree(process->ipc_config_data);
 	sof_ipc4_free_audio_fmt(&process->available_fmt);
 	kfree(swidget->private);
 	swidget->private = NULL;
@@ -1437,6 +1461,16 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 		process->ipc_config_data = &process->base_config;
 		process->ipc_config_size = sizeof(struct sof_ipc4_base_module_cfg);
 		break;
+	case SOF_PROCESS_KEYWORD_DETECT:
+	{
+		/* ipc_config_data is already set in ipc_setup(). */
+		struct sof_process_intelwov_cfg *cfg = process->ipc_config_data;
+		memcpy(&cfg->base_config, &process->base_config, sizeof(process->base_config));
+		cfg->cpc_low_power_mode = process->cpc_low_power_mode;
+		dev_err(scomp->dev, "in %s %d ylb, prepare KWD, cpc_in_lp: %d\n", __func__, __LINE__, cfg->cpc_low_power_mode);
+		process->ipc_config_size = sizeof(struct sof_process_intelwov_cfg);
+		break;
+	}
 	default:
 		dev_err(scomp->dev, "process type %d not supported\n", process->process_type);
 		return -EINVAL;
