@@ -126,6 +126,7 @@
 
 /* for backward compatibility */
 #define SOF_TKN_EFFECT_TYPE	SOF_TKN_PROCESS_TYPE
+#define SOF_TKN_EFFECT_CPC_LP			901
 
 /* SAI */
 #define SOF_TKN_IMX_SAI_MCLK_ID			1000
