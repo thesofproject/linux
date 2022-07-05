@@ -39,6 +39,7 @@ enum sof_comp_type {
 	SOF_COMP_ASRC,		/**< Asynchronous sample rate converter */
 	SOF_COMP_DCBLOCK,
 	SOF_COMP_SMART_AMP,             /**< smart amplifier component */
+	SOF_COMP_MICSEL,		/* micsel component */
 	/* keep FILEREAD/FILEWRITE as the last ones */
 	SOF_COMP_FILEREAD = 10000,	/**< host test based file IO */
 	SOF_COMP_FILEWRITE = 10001,	/**< host test based file IO */
@@ -222,6 +223,7 @@ enum sof_ipc_process_type {
 	SOF_PROCESS_DEMUX,
 	SOF_PROCESS_DCBLOCK,
 	SOF_PROCESS_SMART_AMP,	/**< Smart Amplifier */
+	SOF_PROCESS_MICSEL,
 };
 
 /* generic "effect", "codec" or proprietary processing component */

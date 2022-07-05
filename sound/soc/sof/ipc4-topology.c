@@ -118,7 +118,7 @@ struct sof_process_types {
 };
 
 static const struct sof_process_types sof_process[] = {
-	{ },
+	{"MICSEL", SOF_PROCESS_MICSEL, SOF_COMP_MICSEL},
 };
 
 static enum sof_ipc_process_type find_process(const char *name)
@@ -1425,6 +1425,13 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 	/* update pipeline memory usage */
 	sof_ipc4_update_pipeline_mem_usage(sdev, swidget, &process->base_config);
 	switch (process->process_type) {
+	case SOF_PROCESS_MICSEL:
+		memcpy(&micsel->output_format, micsel->available_fmt.out_audio_fmt,
+		       sizeof(struct sof_ipc4_audio_format));
+		process->ipc_config_data = &process->base_config;
+		process->ipc_config_size = sizeof(struct sof_ipc4_base_module_cfg) +
+			sizeof(struct sof_ipc4_audio_format);
+		break;
 	default:
 		dev_err(scomp->dev, "process type %d not supported\n", process->process_type);
 		return -EINVAL;
