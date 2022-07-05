@@ -1697,6 +1697,12 @@ static int sof_ipc4_route_setup(struct snd_sof_dev *sdev, struct snd_sof_route *
 	dev_dbg(sdev->dev, "bind %s -> %s\n",
 		src_widget->widget->name, sink_widget->widget->name);
 
+	if (!strcmp(src_widget->widget->name, "kpb.14.1")) {
+		if (!strcmp(sink_widget->widget->name, "copier.host.13.1"))
+			src_queue = 1;
+		if (!strcmp(sink_widget->widget->name, "micsel.15.1"))
+			src_queue = 0;
+	}
 	header = src_fw_module->man4_module_entry.id;
 	header |= SOF_IPC4_MOD_INSTANCE(src_widget->instance_id);
 	header |= SOF_IPC4_MSG_TYPE_SET(SOF_IPC4_MOD_BIND);
@@ -1744,6 +1750,10 @@ static int sof_ipc4_route_free(struct snd_sof_dev *sdev, struct snd_sof_route *s
 	extension |= SOF_IPC4_MOD_EXT_DST_MOD_INSTANCE(sink_widget->instance_id);
 	extension |= SOF_IPC4_MOD_EXT_DST_MOD_QUEUE_ID(dst_queue);
 	extension |= SOF_IPC4_MOD_EXT_SRC_MOD_QUEUE_ID(src_queue);
+
+	if (!strcmp(src_widget->widget->name, "kpb.14.1")) {
+		dev_err(sdev->dev, "in %s %d ylb, bind kpb to %s, extension: %#x\n", __func__, __LINE__, sink_widget->widget->name, extension);
+	}
 
 	msg.primary = header;
 	msg.extension = extension;
