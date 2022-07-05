@@ -111,6 +111,42 @@ static const struct sof_topology_token gain_tokens[] = {
 		get_token_u32, offsetof(struct sof_ipc4_gain_data, init_val)},
 };
 
+struct sof_process_types {
+	const char *name;
+	enum sof_ipc_process_type type;
+	enum sof_comp_type comp_type;
+};
+
+static const struct sof_process_types sof_process[] = {
+	{ },
+};
+
+static enum sof_ipc_process_type find_process(const char *name)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(sof_process); i++) {
+		if (strcmp(name, sof_process[i].name) == 0)
+			return sof_process[i].type;
+	}
+
+	return SOF_PROCESS_NONE;
+}
+
+static int get_token_process_type(void *elem, void *object, u32 offset)
+{
+	u32 *val = (u32 *)((u8 *)object + offset);
+
+	*val = find_process((const char *)elem);
+	return 0;
+}
+
+/* EFFECT */
+static const struct sof_topology_token process_tokens[] = {
+	{SOF_TKN_EFFECT_TYPE, SND_SOC_TPLG_TUPLE_TYPE_STRING, get_token_process_type,
+		offsetof(struct sof_ipc4_process, process_type)},
+};
+
 static const struct sof_token_info ipc4_token_list[SOF_TOKEN_COUNT] = {
 	[SOF_DAI_TOKENS] = {"DAI tokens", dai_tokens, ARRAY_SIZE(dai_tokens)},
 	[SOF_PIPELINE_TOKENS] = {"Pipeline tokens", pipeline_tokens, ARRAY_SIZE(pipeline_tokens)},
@@ -134,6 +170,7 @@ static const struct sof_token_info ipc4_token_list[SOF_TOKEN_COUNT] = {
 	[SOF_AUDIO_FMT_NUM_TOKENS] = {"IPC4 Audio format number tokens",
 		ipc4_audio_fmt_num_tokens, ARRAY_SIZE(ipc4_audio_fmt_num_tokens)},
 	[SOF_GAIN_TOKENS] = {"Gain tokens", gain_tokens, ARRAY_SIZE(gain_tokens)},
+	[SOF_PROCESS_TOKENS] = {"Process tokens", process_tokens, ARRAY_SIZE(process_tokens)},
 };
 
 static void sof_ipc4_dbg_audio_format(struct device *dev,
@@ -752,6 +789,54 @@ static void sof_ipc4_widget_free_comp_mixer(struct snd_sof_widget *swidget)
 	swidget->private = NULL;
 }
 
+static int sof_ipc4_widget_setup_comp_process(struct snd_sof_widget *swidget)
+{
+	struct snd_soc_component *scomp = swidget->scomp;
+	struct sof_ipc4_process *process;
+	int ret;
+
+	process = kzalloc(sizeof(*process), GFP_KERNEL);
+	if (!process)
+		return -ENOMEM;
+
+	swidget->private = process;
+
+	ret = sof_ipc4_get_audio_fmt(scomp, swidget, &process->available_fmt, true);
+	if (ret)
+		goto err;
+
+	ret = sof_update_ipc_object(scomp, process, SOF_PROCESS_TOKENS, swidget->tuples,
+				    swidget->num_tuples, sizeof(*process), 1);
+	if (ret) {
+		dev_err(scomp->dev, "parsing process tokens failed\n");
+		goto free_available_fmt;
+	}
+
+	ret = sof_ipc4_widget_setup_msg(swidget, &process->msg);
+	if (ret)
+		goto free_available_fmt;
+
+	return 0;
+free_available_fmt:
+	sof_ipc4_free_audio_fmt(&process->available_fmt);
+err:
+	kfree(process);
+	swidget->private = NULL;
+	return ret;
+}
+
+static void sof_ipc4_widget_free_comp_process(struct snd_sof_widget *swidget)
+{
+	struct sof_ipc4_process *process = swidget->private;
+
+	if (!process)
+		return;
+
+	sof_ipc4_free_audio_fmt(&process->available_fmt);
+	kfree(swidget->private);
+	swidget->private = NULL;
+}
+
 static void
 sof_ipc4_update_pipeline_mem_usage(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget,
 				   struct sof_ipc4_base_module_cfg *base_config)
@@ -1318,6 +1403,37 @@ static int sof_ipc4_prepare_mixer_module(struct snd_sof_widget *swidget,
 	return sof_ipc4_widget_assign_instance_id(sdev, swidget);
 }
 
+static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
+					 struct snd_pcm_hw_params *fe_params,
+					 struct snd_sof_platform_stream_params *platform_params,
+					 struct snd_pcm_hw_params *pipeline_params, int dir)
+{
+	struct snd_soc_component *scomp = swidget->scomp;
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct sof_ipc4_process *process = swidget->private;
+	int ret;
+
+	process->available_fmt.ref_audio_fmt = &process->available_fmt.base_config->audio_fmt;
+
+	/* output format is not required to be sent to the FW for kpb */
+	ret = sof_ipc4_init_audio_fmt(sdev, swidget, &process->base_config,
+				      NULL, pipeline_params, &process->available_fmt,
+				      sizeof(process->base_config));
+	if (ret < 0)
+		return ret;
+
+	/* update pipeline memory usage */
+	sof_ipc4_update_pipeline_mem_usage(sdev, swidget, &process->base_config);
+	switch (process->process_type) {
+	default:
+		dev_err(scomp->dev, "process type %d not supported\n", process->process_type);
+		return -EINVAL;
+	}
+
+	/* assign instance ID */
+	return sof_ipc4_widget_assign_instance_id(sdev, swidget);
+}
+
 static int sof_ipc4_control_load_volume(struct snd_sof_dev *sdev, struct snd_sof_control *scontrol)
 {
 	struct sof_ipc4_control_data *control_data;
@@ -1428,6 +1544,16 @@ static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 		ipc_data = &mixer->base_config;
 
 		msg = &mixer->msg;
+		break;
+	}
+	case snd_soc_dapm_effect:
+	{
+		struct sof_ipc4_process *process = swidget->private;
+
+		ipc_size = process->ipc_config_size;
+		ipc_data = process->ipc_config_data;
+
+		msg = &process->msg;
 		break;
 	}
 	default:
@@ -1766,6 +1892,16 @@ static enum sof_tokens mixer_token_list[] = {
 	SOF_COMP_EXT_TOKENS,
 };
 
+static enum sof_tokens process_token_list[] = {
+	SOF_COMP_TOKENS,
+	SOF_AUDIO_FMT_NUM_TOKENS,
+	SOF_IN_AUDIO_FORMAT_TOKENS,
+	SOF_OUT_AUDIO_FORMAT_TOKENS,
+	SOF_AUDIO_FORMAT_BUFFER_SIZE_TOKENS,
+	SOF_PROCESS_TOKENS,
+	SOF_COMP_EXT_TOKENS,
+};
+
 static const struct sof_ipc_tplg_widget_ops tplg_ipc4_widget_ops[SND_SOC_DAPM_TYPE_COUNT] = {
 	[snd_soc_dapm_aif_in] =  {sof_ipc4_widget_setup_pcm, sof_ipc4_widget_free_comp_pcm,
 				  host_token_list, ARRAY_SIZE(host_token_list), NULL,
@@ -1793,6 +1929,11 @@ static const struct sof_ipc_tplg_widget_ops tplg_ipc4_widget_ops[SND_SOC_DAPM_TY
 	[snd_soc_dapm_mixer] = {sof_ipc4_widget_setup_comp_mixer, sof_ipc4_widget_free_comp_mixer,
 				mixer_token_list, ARRAY_SIZE(mixer_token_list),
 				NULL, sof_ipc4_prepare_mixer_module,
+				sof_ipc4_unprepare_generic_module},
+	[snd_soc_dapm_effect] = {sof_ipc4_widget_setup_comp_process,
+				sof_ipc4_widget_free_comp_process,
+				process_token_list, ARRAY_SIZE(process_token_list),
+				NULL, sof_ipc4_prepare_process_module,
 				sof_ipc4_unprepare_generic_module},
 };
 
