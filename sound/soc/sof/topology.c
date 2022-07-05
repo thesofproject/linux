@@ -1275,6 +1275,10 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 	swidget->id = w->id;
 	swidget->pipeline_id = index;
 	swidget->private = NULL;
+	swidget->num_source_pins = 1;
+	swidget->num_sink_pins = 1;
+	ida_init(&swidget->source_queue_ida);
+	ida_init(&swidget->sink_queue_ida);
 
 	dev_dbg(scomp->dev, "tplg: ready widget id %d pipe %d type %d name : %s stream %s\n",
 		swidget->comp_id, index, swidget->id, tw->name,
