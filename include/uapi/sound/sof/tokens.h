@@ -54,6 +54,7 @@
 #define SOF_TKN_SCHED_DYNAMIC_PIPELINE		206
 #define SOF_TKN_SCHED_LP_MODE			207
 #define SOF_TKN_SCHED_MEM_USAGE			208
+#define SOF_TKN_SCHED_HEAP_SIZE			209 /* maybe get the heap size from FW manifest */
 
 /* volume */
 #define SOF_TKN_VOLUME_RAMP_STEP_TYPE		250
