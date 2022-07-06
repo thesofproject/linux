@@ -25,7 +25,9 @@ static DEFINE_IDA(alh_group_ida);
 
 static const struct sof_topology_token ipc4_sched_tokens[] = {
 	{SOF_TKN_SCHED_LP_MODE, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
-		offsetof(struct sof_ipc4_pipeline, lp_mode)}
+		offsetof(struct sof_ipc4_pipeline, lp_mode)},
+	{SOF_TKN_SCHED_PRIORITY, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc4_pipeline, priority)},
 };
 
 static const struct sof_topology_token pipeline_tokens[] = {
@@ -660,9 +662,6 @@ static int sof_ipc4_widget_setup_comp_pipeline(struct snd_sof_widget *swidget)
 		goto err;
 	}
 
-	/* TODO: Get priority from topology */
-	pipeline->priority = 0;
-
 	dev_dbg(scomp->dev, "pipeline '%s': id %d pri %d lp mode %d\n",
 		swidget->widget->name, swidget->pipeline_id,
 		pipeline->priority, pipeline->lp_mode);
@@ -817,6 +816,13 @@ static int sof_ipc4_widget_setup_comp_process(struct snd_sof_widget *swidget)
 				    swidget->num_tuples, sizeof(*process), 1);
 	if (ret) {
 		dev_err(scomp->dev, "parsing process tokens failed\n");
+		goto free_available_fmt;
+	}
+
+	ret = sof_update_ipc_object(scomp, swidget, SOF_PIPELINE_TOKENS, swidget->tuples,
+				    swidget->num_tuples, sizeof(*swidget), 1);
+	if (ret) {
+		dev_err(scomp->dev, "parsing pipeline tokens failed\n");
 		goto free_available_fmt;
 	}
 
