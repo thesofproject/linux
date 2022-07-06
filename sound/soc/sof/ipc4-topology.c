@@ -31,6 +31,8 @@ static const struct sof_topology_token ipc4_sched_tokens[] = {
 static const struct sof_topology_token pipeline_tokens[] = {
 	{SOF_TKN_SCHED_DYNAMIC_PIPELINE, SND_SOC_TPLG_TUPLE_TYPE_BOOL, get_token_u16,
 		offsetof(struct snd_sof_widget, dynamic_pipeline_widget)},
+	{SOF_TKN_SCHED_HEAP_SIZE, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct snd_sof_widget, heap_size)},
 };
 
 static const struct sof_topology_token ipc4_comp_tokens[] = {
@@ -872,13 +874,12 @@ sof_ipc4_update_pipeline_mem_usage(struct snd_sof_dev *sdev, struct snd_sof_widg
 	struct snd_sof_widget *pipe_widget;
 	struct sof_ipc4_pipeline *pipeline;
 	int task_mem, queue_mem;
-	int ibs, bss, total;
+	int ibs, total;
 
 	ibs = base_config->ibs;
-	bss = base_config->is_pages;
 
 	task_mem = SOF_IPC4_PIPELINE_OBJECT_SIZE;
-	task_mem += SOF_IPC4_MODULE_INSTANCE_LIST_ITEM_SIZE + bss;
+	task_mem += SOF_IPC4_MODULE_INSTANCE_LIST_ITEM_SIZE;
 
 	if (fw_module->man4_module_entry.type & SOF_IPC4_MODULE_LL) {
 		task_mem += SOF_IPC4_FW_ROUNDUP(SOF_IPC4_LL_TASK_OBJECT_SIZE);
@@ -892,7 +893,7 @@ sof_ipc4_update_pipeline_mem_usage(struct snd_sof_dev *sdev, struct snd_sof_widg
 	ibs = SOF_IPC4_FW_ROUNDUP(ibs);
 	queue_mem = SOF_IPC4_FW_MAX_QUEUE_COUNT * (SOF_IPC4_DATA_QUEUE_OBJECT_SIZE +  ibs);
 
-	total = SOF_IPC4_FW_PAGE(task_mem + queue_mem);
+	total = SOF_IPC4_FW_PAGE(task_mem + queue_mem) + swidget->heap_size;
 
 	pipe_widget = swidget->pipe_widget;
 	pipeline = pipe_widget->private;
@@ -2006,6 +2007,7 @@ static enum sof_tokens process_token_list[] = {
 	SOF_IN_AUDIO_FORMAT_TOKENS,
 	SOF_OUT_AUDIO_FORMAT_TOKENS,
 	SOF_AUDIO_FORMAT_BUFFER_SIZE_TOKENS,
+	SOF_PIPELINE_TOKENS,
 	SOF_PROCESS_TOKENS,
 	SOF_COMP_EXT_TOKENS,
 };
