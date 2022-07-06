@@ -10,11 +10,13 @@
 #include <sound/pcm_params.h>
 #include <sound/sof/ext_manifest4.h>
 #include <sound/intel-nhlt.h>
+#include <linux/firmware.h>
 #include "sof-priv.h"
 #include "sof-audio.h"
 #include "ipc4-priv.h"
 #include "ipc4-topology.h"
 #include "ops.h"
+#include "intelwov.h"
 
 #define SOF_IPC4_GAIN_PARAM_ID  0
 #define SOF_IPC4_TPLG_ABI_SIZE 6
@@ -1486,6 +1488,28 @@ static int sof_ipc4_large_config_kpb(struct snd_sof_widget *swidget)
 	return 0;
 }
 
+static int sof_ipc4_large_config_intelwov(struct snd_sof_widget *swidget)
+{
+	/* To be implemented later */
+	return 0;
+}
+
+static int sof_ipc4_large_config_wov(struct snd_sof_widget *swidget)
+{
+	int ret = 0;
+	char uuid[UUID_STRING_LEN+1];
+
+	/* different modules have different config data */
+	snprintf(uuid, UUID_STRING_LEN+1, "%pUL", &swidget->uuid);
+
+	if (!strcmp(uuid, "EC774FA9-28D3-424A-90E4-69F984F1EEB7")) {
+		dev_err(swidget->scomp->dev, "in %s %d ylb, uuid: %pUL\n", __func__, __LINE__, &swidget->uuid);
+		ret = sof_ipc4_large_config_intelwov(swidget);
+	}
+
+	return ret;
+}
+
 static int sof_ipc4_large_config_process_module(struct snd_sof_widget *swidget)
 {
 	struct sof_ipc4_process *process = swidget->private;
@@ -1497,6 +1521,9 @@ static int sof_ipc4_large_config_process_module(struct snd_sof_widget *swidget)
 	switch (process->process_type) {
 	case SOF_PROCESS_KPB:
 		ret = sof_ipc4_large_config_kpb(swidget);
+		break;
+	case SOF_PROCESS_KEYWORD_DETECT:
+		ret = sof_ipc4_large_config_wov(swidget);
 		break;
 	default:
 		break;
