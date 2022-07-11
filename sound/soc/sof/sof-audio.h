@@ -390,6 +390,18 @@ struct snd_sof_widget {
 	u32 num_source_pins;
 	u32 num_sink_pins;
 
+	struct ida source_queue_ida;
+	struct ida sink_queue_ida;
+
+	/*
+	 * array containing names of connecting source/sink widgets for size equal to the num
+	 * source/sink pins
+	 * TODO: This array should be populated when parsing the pin_widget_binding tokens from
+	 * topology
+	 */
+	char **widget_source_pin_binding;
+	char **widget_sink_pin_binding;
+
 	void *private;		/* core does not touch this */
 };
 
@@ -402,6 +414,9 @@ struct snd_sof_route {
 	struct snd_sof_widget *src_widget;
 	struct snd_sof_widget *sink_widget;
 	bool setup;
+
+	int src_queue_id;
+	int sink_queue_id;
 
 	void *private;
 };

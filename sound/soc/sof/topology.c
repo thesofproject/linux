@@ -1283,6 +1283,8 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 	swidget->id = w->id;
 	swidget->pipeline_id = index;
 	swidget->private = NULL;
+	ida_init(&swidget->source_queue_ida);
+	ida_init(&swidget->sink_queue_ida);
 
 	ret = sof_parse_tokens(scomp, swidget, pin_tokens,
 			       ARRAY_SIZE(pin_tokens), private->array,
