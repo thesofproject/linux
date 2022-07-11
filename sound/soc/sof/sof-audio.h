@@ -387,6 +387,9 @@ struct snd_sof_widget {
 	int num_tuples;
 	struct snd_sof_tuple *tuples;
 
+	u32 num_source_pins;
+	u32 num_sink_pins;
+
 	void *private;		/* core does not touch this */
 };
 
