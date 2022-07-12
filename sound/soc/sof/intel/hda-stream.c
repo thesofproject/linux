@@ -186,6 +186,7 @@ hda_dsp_stream_get(struct snd_sof_dev *sdev, int direction, u32 flags)
 	struct sof_intel_hda_stream *hda_stream;
 	struct hdac_ext_stream *hext_stream = NULL;
 	struct hdac_stream *s;
+	u32 mask;
 
 	spin_lock_irq(&bus->reg_lock);
 
@@ -205,15 +206,25 @@ hda_dsp_stream_get(struct snd_sof_dev *sdev, int direction, u32 flags)
 		}
 	}
 
-	spin_unlock_irq(&bus->reg_lock);
-
 	/* stream found ? */
 	if (!hext_stream) {
+		spin_unlock_irq(&bus->reg_lock);
 		dev_err(sdev->dev, "error: no free %s streams\n",
 			direction == SNDRV_PCM_STREAM_PLAYBACK ?
 			"playback" : "capture");
+
 		return hext_stream;
 	}
+
+	s = &hext_stream->hstream;
+	mask = 0x1 << s->index;
+
+	/* decouple host and link DMA, enable DSP features */
+	snd_sof_dsp_update_bits(sdev, HDA_DSP_PP_BAR, SOF_HDA_REG_PP_PPCTL,
+				mask, mask);
+	hext_stream->decoupled = true;
+
+	spin_unlock_irq(&bus->reg_lock);
 
 	hda_stream->flags = flags;
 
@@ -239,6 +250,7 @@ int hda_dsp_stream_put(struct snd_sof_dev *sdev, int direction, int stream_tag)
 	struct hdac_stream *s;
 	bool dmi_l1_enable = true;
 	bool found = false;
+	u32 mask;
 
 	spin_lock_irq(&bus->reg_lock);
 
@@ -261,6 +273,14 @@ int hda_dsp_stream_put(struct snd_sof_dev *sdev, int direction, int stream_tag)
 		}
 	}
 
+	/* couple host and link DMA if link DMA channel is idle */
+	s = &hext_stream->hstream;
+	mask = 0x1 << s->index;
+	if (!hext_stream->link_locked) {
+		snd_sof_dsp_update_bits(sdev, HDA_DSP_PP_BAR,
+					SOF_HDA_REG_PP_PPCTL, mask, 0);
+		hext_stream->decoupled = false;
+	}
 	spin_unlock_irq(&bus->reg_lock);
 
 	/* Enable DMI L1 if permitted */
@@ -402,7 +422,6 @@ int hda_dsp_iccmax_stream_hw_params(struct snd_sof_dev *sdev, struct hdac_ext_st
 	struct hdac_stream *hstream = &hext_stream->hstream;
 	int sd_offset = SOF_STREAM_SD_OFFSET(hstream);
 	int ret;
-	u32 mask = 0x1 << hstream->index;
 
 	if (!hext_stream) {
 		dev_err(sdev->dev, "error: no stream available\n");
@@ -451,9 +470,6 @@ int hda_dsp_iccmax_stream_hw_params(struct snd_sof_dev *sdev, struct hdac_ext_st
 				sd_offset + SOF_HDA_ADSP_REG_CL_SD_LVI,
 				0xffff, (hstream->frags - 1));
 
-	/* decouple host and link DMA, enable DSP features */
-	snd_sof_dsp_update_bits(sdev, HDA_DSP_PP_BAR, SOF_HDA_REG_PP_PPCTL,
-				mask, mask);
 
 	/* Follow HW recommendation to set the guardband value to 95us during FW boot */
 	snd_hdac_chip_updateb(bus, VS_LTRP, HDA_VS_INTEL_LTRP_GB_MASK, HDA_LTRP_GB_VALUE_US);
@@ -492,11 +508,6 @@ int hda_dsp_stream_hw_params(struct snd_sof_dev *sdev,
 		dev_err(sdev->dev, "error: no dma buffer allocated!\n");
 		return -ENODEV;
 	}
-
-	/* decouple host and link DMA */
-	mask = 0x1 << hstream->index;
-	snd_sof_dsp_update_bits(sdev, HDA_DSP_PP_BAR, SOF_HDA_REG_PP_PPCTL,
-				mask, mask);
 
 	/* clear stream status */
 	snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR, sd_offset,
@@ -596,6 +607,7 @@ int hda_dsp_stream_hw_params(struct snd_sof_dev *sdev,
 	 * 3. Set PPCTL.PROCEN bit for corresponding stream index to
 	 *    enable decoupled mode
 	 */
+	mask = 0x1 << hstream->index;
 
 	if (chip->quirks & SOF_INTEL_PROCEN_FMT_QUIRK) {
 		/* couple host and link DMA, disable DSP features */
@@ -666,20 +678,11 @@ int hda_dsp_stream_hw_free(struct snd_sof_dev *sdev,
 	struct hdac_ext_stream *hext_stream = container_of(hstream,
 							 struct hdac_ext_stream,
 							 hstream);
-	struct hdac_bus *bus = sof_to_bus(sdev);
-	u32 mask = 0x1 << hstream->index;
 	int ret;
 
 	ret = hda_dsp_stream_reset(sdev, hstream);
 	if (ret < 0)
 		return ret;
-
-	spin_lock_irq(&bus->reg_lock);
-	/* couple host and link DMA if link DMA channel is idle */
-	if (!hext_stream->link_locked)
-		snd_sof_dsp_update_bits(sdev, HDA_DSP_PP_BAR,
-					SOF_HDA_REG_PP_PPCTL, mask, 0);
-	spin_unlock_irq(&bus->reg_lock);
 
 	hda_dsp_stream_spib_config(sdev, hext_stream, HDA_DSP_SPIB_DISABLE, 0);
 
@@ -999,8 +1002,6 @@ void hda_dsp_stream_free(struct snd_sof_dev *sdev)
 #endif
 
 	list_for_each_entry_safe(s, _s, &bus->stream_list, list) {
-		/* TODO: decouple */
-
 		/* free bdl buffer */
 		if (s->bdl.area)
 			snd_dma_free_pages(&s->bdl);
