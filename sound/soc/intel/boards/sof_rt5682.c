@@ -61,6 +61,11 @@
 #define SOF_MAX98390_SPEAKER_AMP_PRESENT	BIT(24)
 #define SOF_MAX98390_TWEETER_SPEAKER_PRESENT	BIT(25)
 #define SOF_RT1019_SPEAKER_AMP_PRESENT	BIT(26)
+#define SOF_DUMMY_ECHO_REF_SHIFT		27
+#define SOF_DUMMY_ECHO_REF_MASK                 (GENMASK(29, 27))
+#define SOF_DUMMY_ECHO_REF(quirk)	\
+	(((quirk) << SOF_DUMMY_ECHO_REF_SHIFT) & SOF_DUMMY_ECHO_REF_MASK)
+#define SOF_DUMMY_ECHO_REF_PRESENT	BIT(30)
 
 
 /* Default: MCLK on, MCLK 19.2M, SSP0  */
@@ -821,6 +826,27 @@ static struct snd_soc_dai_link *sof_card_dai_links_create(struct device *dev,
 		links[id].dpcm_capture = 1;
 		links[id].no_pcm = 1;
 		links[id].num_cpus = 1;
+		id++;
+	}
+
+	/* create dummy dailink for echo-ref */
+	if (sof_rt5682_quirk & SOF_DUMMY_ECHO_REF_PRESENT) {
+		int dummy_codec = (sof_rt5682_quirk & SOF_DUMMY_ECHO_REF_MASK) >>
+				SOF_DUMMY_ECHO_REF_SHIFT;
+		links[id].name = "SSP-dummy-capture";
+		links[id].cpus = &cpus[id];
+		links[id].cpus->dai_name = devm_kasprintf(dev, GFP_KERNEL,
+							  "SSP%d Pin", dummy_codec);
+		if (!links[id].cpus->dai_name)
+			goto devm_err;
+		links[id].codecs = dummy_component;
+		links[id].platforms = platform_component;
+		links[id].num_cpus = 1;
+		links[id].num_codecs = ARRAY_SIZE(dummy_component);
+		links[id].num_platforms = ARRAY_SIZE(platform_component);
+		links[id].id = id;
+		links[id].no_pcm = 1;
+		links[id].dpcm_capture = 1;
 	}
 
 	return links;
@@ -932,6 +958,9 @@ static int sof_audio_probe(struct platform_device *pdev)
 	if (sof_rt5682_quirk & SOF_SSP_BT_OFFLOAD_PRESENT)
 		sof_audio_card_rt5682.num_links++;
 
+	if (sof_rt5682_quirk & SOF_DUMMY_ECHO_REF_PRESENT)
+		sof_audio_card_rt5682.num_links++;
+
 	dai_links = sof_card_dai_links_create(&pdev->dev, ssp_codec, ssp_amp,
 					      dmic_be_num, hdmi_num, ctx->idisp_codec);
 	if (!dai_links)
@@ -972,7 +1001,9 @@ static const struct platform_device_id board_ids[] = {
 					SOF_RT5682_SSP_AMP(1) |
 					SOF_RT5682_NUM_HDMIDEV(4) |
 					SOF_BT_OFFLOAD_SSP(2) |
-					SOF_SSP_BT_OFFLOAD_PRESENT),
+					SOF_SSP_BT_OFFLOAD_PRESENT |
+					SOF_DUMMY_ECHO_REF(3) |
+					SOF_DUMMY_ECHO_REF_PRESENT),
 	},
 	{
 		.name = "jsl_rt5682_rt1015",
@@ -1050,7 +1081,9 @@ static const struct platform_device_id board_ids[] = {
 					SOF_RT5682_SSP_CODEC(0) |
 					SOF_SPEAKER_AMP_PRESENT |
 					SOF_RT5682_SSP_AMP(2) |
-					SOF_RT5682_NUM_HDMIDEV(4)),
+					SOF_RT5682_NUM_HDMIDEV(4) |
+					SOF_DUMMY_ECHO_REF(1) |
+					SOF_DUMMY_ECHO_REF_PRESENT),
 	},
 	{
 		.name = "adl_max98390_rt5682",
