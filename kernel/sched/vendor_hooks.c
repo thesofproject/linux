@@ -109,3 +109,4 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_sched_pelt_multiplier);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_post_init_entity_util_avg);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_task_cmdline_prio_inherit);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_task_cmdline_prio_restore);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_mmput);
