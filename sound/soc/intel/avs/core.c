@@ -529,10 +529,7 @@ static void avs_pci_remove(struct pci_dev *pci)
 	/* Firmware is not needed anymore */
 	avs_release_firmwares(adev);
 
-	/* pm_runtime_forbid() can rpm_resume() which we do not want */
-	pm_runtime_disable(&pci->dev);
-	pm_runtime_forbid(&pci->dev);
-	pm_runtime_enable(&pci->dev);
+	/* follow recommendation in pci-driver.c to increment usage counter */
 	pm_runtime_get_noresume(&pci->dev);
 }
 
