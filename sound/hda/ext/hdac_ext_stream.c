@@ -247,6 +247,14 @@ void snd_hdac_ext_link_clear_stream_id(struct hdac_ext_link *link,
 }
 EXPORT_SYMBOL_GPL(snd_hdac_ext_link_clear_stream_id);
 
+static bool check_link_locked(struct hdac_stream *azx_dev)
+{
+	struct hdac_ext_stream *hext_stream = container_of(azx_dev,
+							   struct hdac_ext_stream,
+							   hstream);
+	return hext_stream->link_locked;
+}
+
 static struct hdac_ext_stream *
 hdac_ext_link_stream_assign(struct hdac_bus *bus,
 			    struct snd_pcm_substream *substream)
@@ -268,7 +276,7 @@ hdac_ext_link_stream_assign(struct hdac_bus *bus,
 			continue;
 
 		/* check if link stream is available */
-		if (!hext_stream->link_locked) {
+		if (!hext_stream->coupled_reserved && !hext_stream->link_locked) {
 			res = hext_stream;
 			break;
 		}
@@ -303,7 +311,7 @@ hdac_ext_host_stream_assign(struct hdac_bus *bus,
 		if (hstream->direction != substream->stream)
 			continue;
 
-		if (!hstream->opened) {
+		if (!hext_stream->coupled_reserved && !hstream->opened) {
 			res = hext_stream;
 			break;
 		}
@@ -345,11 +353,13 @@ struct hdac_ext_stream *snd_hdac_ext_stream_assign(struct hdac_bus *bus,
 
 	switch (type) {
 	case HDAC_EXT_STREAM_TYPE_COUPLED:
-		hstream = snd_hdac_stream_assign(bus, substream);
-		if (hstream)
+		hstream = snd_hdac_stream_assign_cb(bus, substream, check_link_locked);
+		if (hstream) {
 			hext_stream = container_of(hstream,
 						   struct hdac_ext_stream,
 						   hstream);
+			hext_stream->coupled_reserved = true;
+		}
 		return hext_stream;
 
 	case HDAC_EXT_STREAM_TYPE_HOST:
@@ -377,7 +387,10 @@ void snd_hdac_ext_stream_release(struct hdac_ext_stream *hext_stream, int type)
 
 	switch (type) {
 	case HDAC_EXT_STREAM_TYPE_COUPLED:
-		snd_hdac_stream_release(&hext_stream->hstream);
+		spin_lock_irq(&bus->reg_lock);
+		snd_hdac_stream_release_locked(&hext_stream->hstream);
+		hext_stream->coupled_reserved = false;
+		spin_unlock_irq(&bus->reg_lock);
 		break;
 
 	case HDAC_EXT_STREAM_TYPE_HOST:

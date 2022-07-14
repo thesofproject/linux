@@ -51,6 +51,7 @@ enum hdac_ext_stream_type {
  * @dpibr_addr: DMA position in buffer resume pointer
  * @dpib: DMA position in buffer
  * @lpib: Linear position in buffer
+ * @coupled_reserved: stream host and link cannot be decoupled
  * @decoupled: stream host and link is decoupled
  * @link_locked: link is locked
  * @link_prepared: link is prepared
@@ -69,6 +70,7 @@ struct hdac_ext_stream {
 
 	u32 dpib;
 	u32 lpib;
+	bool coupled_reserved:1;
 	bool decoupled:1;
 	bool link_locked:1;
 	bool link_prepared;
