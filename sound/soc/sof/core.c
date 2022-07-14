@@ -208,6 +208,11 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	/* set up platform component driver */
 	snd_sof_new_platform_drv(sdev);
 
+	if (sof_debug_check_flag(SOF_DBG_DSPLESS_MODE)) {
+		sof_set_fw_state(sdev, SOF_DSPLESS_MODE);
+		goto skip_dsp_init;
+	}
+
 	/* register any debug/trace capabilities */
 	ret = snd_sof_dbg_init(sdev);
 	if (ret < 0) {
@@ -266,6 +271,7 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 		dev_dbg(sdev->dev, "SOF firmware trace disabled\n");
 	}
 
+skip_dsp_init:
 	/* hereafter all FW boot flows are for PM reasons */
 	sdev->first_boot = false;
 
@@ -388,12 +394,18 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 		return ret;
 
 	/* check all mandatory ops */
-	if (!sof_ops(sdev) || !sof_ops(sdev)->probe || !sof_ops(sdev)->run ||
-	    !sof_ops(sdev)->block_read || !sof_ops(sdev)->block_write ||
-	    !sof_ops(sdev)->send_msg || !sof_ops(sdev)->load_firmware ||
-	    !sof_ops(sdev)->ipc_msg_data) {
+	if (!sof_ops(sdev) || !sof_ops(sdev)->probe) {
 		sof_ops_free(sdev);
 		dev_err(dev, "error: missing mandatory ops\n");
+		return -EINVAL;
+	}
+
+	if (!sof_debug_check_flag(SOF_DBG_DSPLESS_MODE) &&
+	    (!sof_ops(sdev)->run || !sof_ops(sdev)->block_read ||
+	     !sof_ops(sdev)->block_write || !sof_ops(sdev)->send_msg ||
+	     !sof_ops(sdev)->load_firmware || !sof_ops(sdev)->ipc_msg_data)) {
+		sof_ops_free(sdev);
+		dev_err(dev, "error: missing mandatory DSP ops\n");
 		return -EINVAL;
 	}
 
