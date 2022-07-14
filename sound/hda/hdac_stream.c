@@ -335,18 +335,14 @@ void snd_hdac_stream_cleanup(struct hdac_stream *azx_dev)
 EXPORT_SYMBOL_GPL(snd_hdac_stream_cleanup);
 
 /**
- * snd_hdac_stream_assign - assign a stream for the PCM
+ * snd_hdac_stream_assign_cb - conditionally assign a stream for the PCM
  * @bus: HD-audio core bus
  * @substream: PCM substream to assign
- *
- * Look for an unused stream for the given PCM substream, assign it
- * and return the stream object.  If no stream is free, returns NULL.
- * The function tries to keep using the same stream object when it's used
- * beforehand.  Also, when bus->reverse_assign flag is set, the last free
- * or matching entry is returned.  This is needed for some strange codecs.
+ * @callback: optional callback to check if stream is acceptable
  */
-struct hdac_stream *snd_hdac_stream_assign(struct hdac_bus *bus,
-					   struct snd_pcm_substream *substream)
+struct hdac_stream *snd_hdac_stream_assign_cb(struct hdac_bus *bus,
+					      struct snd_pcm_substream *substream,
+					      bool (*callback)(struct hdac_stream *azx_dev))
 {
 	struct hdac_stream *azx_dev;
 	struct hdac_stream *res = NULL;
@@ -360,6 +356,8 @@ struct hdac_stream *snd_hdac_stream_assign(struct hdac_bus *bus,
 		if (azx_dev->direction != substream->stream)
 			continue;
 		if (azx_dev->opened)
+			continue;
+		if (callback && callback(azx_dev))
 			continue;
 		if (azx_dev->assigned_key == key) {
 			res = azx_dev;
@@ -376,6 +374,24 @@ struct hdac_stream *snd_hdac_stream_assign(struct hdac_bus *bus,
 	}
 	spin_unlock_irq(&bus->reg_lock);
 	return res;
+}
+EXPORT_SYMBOL_GPL(snd_hdac_stream_assign_cb);
+
+/**
+ * snd_hdac_stream_assign - assign a stream for the PCM
+ * @bus: HD-audio core bus
+ * @substream: PCM substream to assign
+ *
+ * Look for an unused stream for the given PCM substream, assign it
+ * and return the stream object.  If no stream is free, returns NULL.
+ * The function tries to keep using the same stream object when it's used
+ * beforehand.  Also, when bus->reverse_assign flag is set, the last free
+ * or matching entry is returned.  This is needed for some strange codecs.
+ */
+struct hdac_stream *snd_hdac_stream_assign(struct hdac_bus *bus,
+					   struct snd_pcm_substream *substream)
+{
+	return snd_hdac_stream_assign_cb(bus, substream, NULL);
 }
 EXPORT_SYMBOL_GPL(snd_hdac_stream_assign);
 
