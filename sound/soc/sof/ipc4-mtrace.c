@@ -314,8 +314,8 @@ static ssize_t sof_ipc4_priority_mask_dfs_read(struct file *file, char __user *t
 	for (i = 0; i < MAX_ALLOWED_LIBRARIES; i++) {
 		offset = strlen(buf);
 		remaining = 241 - offset;
-		ret = snprintf(buf + offset, remaining, "%2d: 0x%08x\n", i,
-			       priv->state_info.logs_priorities_mask[i]);
+		snprintf(buf + offset, remaining, "%2d: 0x%08x\n", i,
+			 priv->state_info.logs_priorities_mask[i]);
 	}
 
 	ret = simple_read_from_buffer(to, count, ppos, buf, strlen(buf));
