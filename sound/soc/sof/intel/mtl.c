@@ -749,6 +749,9 @@ int sof_mtl_ops_init(struct snd_sof_dev *sdev)
 	/* parse platform specific extended manifest */
 	sof_mtl_ops.parse_platform_ext_manifest = NULL;
 
+	/* module library load */
+	sof_mtl_ops.load_library = hda_dsp_ipc4_load_library;
+
 	/* dsp core get/put */
 	/* TODO: add core_get and core_put */
 
