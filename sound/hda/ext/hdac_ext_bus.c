@@ -12,6 +12,7 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/io.h>
+#include <sound/hda_codec.h>
 #include <sound/hdaudio_ext.h>
 
 MODULE_DESCRIPTION("HDA extended core");
@@ -67,39 +68,34 @@ static void default_release(struct device *dev)
 
 /**
  * snd_hdac_ext_bus_device_init - initialize the HDA extended codec base device
- * @bus: hdac bus to attach to
+ * @bus: hda bus to attach to
  * @addr: codec address
- * @hdev: hdac device to init
  * @type: codec type (HDAC_DEV_*) to use for this device
  *
- * Returns zero for success or a negative error code.
+ * Returns pointer to newly created codec or ERR_PTR.
  */
-int snd_hdac_ext_bus_device_init(struct hdac_bus *bus, int addr,
-				 struct hdac_device *hdev, int type)
+struct hda_codec *
+snd_hdac_ext_bus_device_init(struct hdac_bus *bus, int addr, int type)
 {
-	char name[15];
+	struct hda_codec *codec;
 	int ret;
 
-	hdev->bus = bus;
-
-	snprintf(name, sizeof(name), "ehdaudio%dD%d", bus->idx, addr);
-
-	ret  = snd_hdac_device_init(hdev, bus, name, addr);
-	if (ret < 0) {
+	codec = snd_hda_codec_device_init(to_hda_bus(bus), addr, "ehdaudio%dD%d", bus->idx, addr);
+	if (IS_ERR(codec)) {
 		dev_err(bus->dev, "device init failed for hdac device\n");
-		return ret;
+		return codec;
 	}
-	hdev->type = type;
-	hdev->dev.release = default_release;
+	codec->core.type = type;
+	codec->core.dev.release = default_release;
 
-	ret = snd_hdac_device_register(hdev);
+	ret = snd_hdac_device_register(&codec->core);
 	if (ret) {
 		dev_err(bus->dev, "failed to register hdac device\n");
-		snd_hdac_ext_bus_device_exit(hdev);
-		return ret;
+		snd_hdac_ext_bus_device_exit(&codec->core);
+		return ERR_PTR(ret);
 	}
 
-	return 0;
+	return codec;
 }
 EXPORT_SYMBOL_GPL(snd_hdac_ext_bus_device_init);
 

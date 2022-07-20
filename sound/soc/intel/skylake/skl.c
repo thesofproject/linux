@@ -700,9 +700,8 @@ static int probe_codec(struct hdac_bus *bus, int addr)
 	struct skl_dev *skl = bus_to_skl(bus);
 #if IS_ENABLED(CONFIG_SND_SOC_INTEL_SKYLAKE_HDAUDIO_CODEC)
 	struct hdac_hda_priv *hda_codec;
-	int err;
 #endif
-	struct hdac_device *hdev;
+	struct hda_codec *codec;
 
 	mutex_lock(&bus->cmd_mutex);
 	snd_hdac_bus_send_cmd(bus, cmd);
@@ -718,25 +717,22 @@ static int probe_codec(struct hdac_bus *bus, int addr)
 	if (!hda_codec)
 		return -ENOMEM;
 
-	hda_codec->codec->bus = skl_to_hbus(skl);
-	hdev = &hda_codec->codec->core;
+	codec = snd_hdac_ext_bus_device_init(bus, addr, HDA_DEV_ASOC);
+	if (IS_ERR(codec))
+		return PTR_ERR(codec);
 
-	err = snd_hdac_ext_bus_device_init(bus, addr, hdev, HDA_DEV_ASOC);
-	if (err < 0)
-		return err;
+	hda_codec->codec = codec;
+	dev_set_drvdata(&codec->core.dev, hda_codec);
 
 	/* use legacy bus only for HDA codecs, idisp uses ext bus */
 	if ((res & 0xFFFF0000) != IDISP_INTEL_VENDOR_ID) {
-		hdev->type = HDA_DEV_LEGACY;
-		load_codec_module(hda_codec->codec);
+		codec->core.type = HDA_DEV_LEGACY;
+		load_codec_module(codec);
 	}
 	return 0;
 #else
-	hdev = devm_kzalloc(&skl->pci->dev, sizeof(*hdev), GFP_KERNEL);
-	if (!hdev)
-		return -ENOMEM;
-
-	return snd_hdac_ext_bus_device_init(bus, addr, hdev, HDA_DEV_ASOC);
+	codec = snd_hdac_ext_bus_device_init(bus, addr, HDA_DEV_ASOC);
+	return PTR_ERR_OR_ZERO(codec);
 #endif /* CONFIG_SND_SOC_INTEL_SKYLAKE_HDAUDIO_CODEC */
 }
 
