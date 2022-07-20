@@ -64,6 +64,9 @@ int sof_apl_ops_init(struct snd_sof_dev *sdev)
 
 		/* ipc */
 		sof_apl_ops.send_msg	= hda_dsp_ipc4_send_msg;
+
+		/* module library load */
+		sof_apl_ops.load_library = hda_dsp_ipc4_load_library;
 	}
 
 	/* set DAI driver ops */
