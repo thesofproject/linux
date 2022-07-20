@@ -370,6 +370,9 @@ int sof_cnl_ops_init(struct snd_sof_dev *sdev)
 
 		/* ipc */
 		sof_cnl_ops.send_msg	= cnl_ipc4_send_msg;
+
+		/* module library load */
+		sof_cnl_ops.load_library = hda_dsp_ipc4_load_library;
 	}
 
 	/* set DAI driver ops */
