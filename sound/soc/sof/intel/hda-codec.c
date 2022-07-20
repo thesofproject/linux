@@ -142,9 +142,9 @@ static int hda_codec_probe(struct snd_sof_dev *sdev, int address,
 	if (!hda_priv)
 		return -ENOMEM;
 
-	hda_priv->codec.bus = hbus;
-	hdev = &hda_priv->codec.core;
-	codec = &hda_priv->codec;
+	hda_priv->codec->bus = hbus;
+	hdev = &hda_priv->codec->core;
+	codec = hda_priv->codec;
 
 	/* only probe ASoC codec drivers for HDAC-HDMI */
 	if (!hda_codec_use_common_hdmi && (resp & 0xFFFF0000) == IDISP_VID_INTEL)

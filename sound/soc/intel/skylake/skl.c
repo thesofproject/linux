@@ -718,8 +718,8 @@ static int probe_codec(struct hdac_bus *bus, int addr)
 	if (!hda_codec)
 		return -ENOMEM;
 
-	hda_codec->codec.bus = skl_to_hbus(skl);
-	hdev = &hda_codec->codec.core;
+	hda_codec->codec->bus = skl_to_hbus(skl);
+	hdev = &hda_codec->codec->core;
 
 	err = snd_hdac_ext_bus_device_init(bus, addr, hdev, HDA_DEV_ASOC);
 	if (err < 0)
@@ -728,7 +728,7 @@ static int probe_codec(struct hdac_bus *bus, int addr)
 	/* use legacy bus only for HDA codecs, idisp uses ext bus */
 	if ((res & 0xFFFF0000) != IDISP_INTEL_VENDOR_ID) {
 		hdev->type = HDA_DEV_LEGACY;
-		load_codec_module(&hda_codec->codec);
+		load_codec_module(hda_codec->codec);
 	}
 	return 0;
 #else
