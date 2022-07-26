@@ -1311,6 +1311,7 @@ static int intel_link_probe(struct auxiliary_device *auxdev,
 
 	bus->link_id = auxdev->id;
 	bus->dev_num_ida_min = INTEL_DEV_NUM_IDA_MIN;
+	bus->recheck_unattached = true;
 
 	sdw_cdns_probe(cdns);
 
