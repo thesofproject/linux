@@ -1797,8 +1797,8 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 
 		if (status[i] == SDW_SLAVE_UNATTACHED &&
 		    slave->status != SDW_SLAVE_UNATTACHED) {
-			dev_warn(&slave->dev, "Slave %d state check1: UNATTACHED, status was %d\n",
-				 i, slave->status);
+			dev_err(&slave->dev, "Slave %d state check1: UNATTACHED, status was %d\n",
+				i, slave->status);
 
 			if (bus->recheck_unattached && bus->ops->read_ping_status) {
 				u32 ping_status;
@@ -1813,8 +1813,8 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 				ping_status &= 0x3;
 
 				if (ping_status != 0) {
-					dev_warn(&slave->dev, "Slave %d state in PING frame is %d, ignoring earlier detection\n",
-						 i, ping_status);
+					dev_err(&slave->dev, "Slave %d state in PING frame is %d, ignoring earlier detection\n",
+						i, ping_status);
 					continue;
 				}
 			}
