@@ -895,6 +895,8 @@ struct sdw_master_ops {
  * @dev_num_ida_min: if set, defines the minimum values for the IDA
  * used to allocate system-unique device numbers. This value needs to be
  * identical across all SoundWire bus in the system.
+ * @recheck_unattached: if set, double-check UNATTACHED status changes
+ * by reading PING frame status.
  */
 struct sdw_bus {
 	struct device *dev;
@@ -920,6 +922,7 @@ struct sdw_bus {
 	bool multi_link;
 	int hw_sync_min_links;
 	int dev_num_ida_min;
+	bool recheck_unattached;
 };
 
 int sdw_bus_master_add(struct sdw_bus *bus, struct device *parent,
