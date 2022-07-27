@@ -13,6 +13,7 @@
 #include "sof-priv.h"
 #include "sof-audio.h"
 #include "ipc4-priv.h"
+#include "ipc3-priv.h" /* for tracing ops */
 #include "ops.h"
 
 #ifdef DEBUG_VERBOSE
@@ -557,6 +558,8 @@ static int ipc4_fw_ready(struct snd_sof_dev *sdev, struct sof_ipc4_msg *ipc4_msg
 	return sof_ipc4_init_msg_memory(sdev);
 }
 
+int ipc3_dtrace_posn_inc(struct snd_sof_dev *sdev, size_t written);
+
 static void sof_ipc4_rx_msg(struct snd_sof_dev *sdev)
 {
 	struct sof_ipc4_msg *ipc4_msg = sdev->ipc->msg.rx_data;
@@ -665,5 +668,5 @@ const struct sof_ipc_ops ipc4_ops = {
 	.fw_loader = &ipc4_loader_ops,
 	.tplg = &ipc4_tplg_ops,
 	.pcm = &ipc4_pcm_ops,
-	.fw_tracing = &ipc4_mtrace_ops,
+	.fw_tracing = &ipc3_dtrace_ops,
 };

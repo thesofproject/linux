@@ -709,7 +709,7 @@ bool hda_dsp_check_stream_irq(struct snd_sof_dev *sdev)
 	return ret;
 }
 
-static void
+static u64
 hda_dsp_compr_bytes_transferred(struct hdac_stream *hstream, int direction)
 {
 	u64 buffer_size = hstream->bufsize;
@@ -724,7 +724,11 @@ hda_dsp_compr_bytes_transferred(struct hdac_stream *hstream, int direction)
 		num_bytes = pos - prev_pos;
 
 	hstream->curr_pos += num_bytes;
+
+	return num_bytes;
 }
+
+int ipc3_dtrace_posn_inc(struct snd_sof_dev *sdev, size_t written);
 
 static bool hda_dsp_stream_check(struct hdac_bus *bus, u32 status)
 {
@@ -742,6 +746,28 @@ static bool hda_dsp_stream_check(struct hdac_bus *bus, u32 status)
 			snd_hdac_stream_writeb(s, SD_STS, sd_status);
 
 			active = true;
+
+			/* DMA trace data */
+			if (!s->substream && !s->cstream) {
+				struct snd_sof_dev *sdev;
+				struct hdac_ext_stream *hext_stream;
+				struct sof_intel_hda_stream *hda_stream;
+				u64 num_bytes;
+
+				hext_stream = stream_to_hdac_ext_stream(s);
+				hda_stream = container_of(hext_stream, struct sof_intel_hda_stream,
+							  hext_stream);
+				sdev = hda_stream->sdev;
+
+				num_bytes =
+					hda_dsp_compr_bytes_transferred(s,
+									SNDRV_PCM_STREAM_CAPTURE);
+				ipc3_dtrace_posn_inc(sdev, num_bytes);
+
+				dev_dbg(sdev->dev, "stream-check: new pos %lld, %lld written\n",
+					s->curr_pos, num_bytes);
+			}
+
 			if ((!s->substream && !s->cstream) ||
 			    !s->running ||
 			    (sd_status & SOF_HDA_CL_DMA_SD_INT_COMPLETE) == 0)

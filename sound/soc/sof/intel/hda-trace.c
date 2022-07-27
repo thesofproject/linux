@@ -26,7 +26,12 @@ static int hda_dsp_trace_prepare(struct snd_sof_dev *sdev, struct snd_dma_buffer
 	struct hdac_stream *hstream = &hext_stream->hstream;
 	int ret;
 
-	hstream->period_bytes = 0;/* initialize period_bytes */
+	/* initialize period_bytes */
+	/* use a low period size to work with firmware versions
+	 * that do not send IPC messages when traces are transferred
+	 * via DMA and we need to rely on HDA DMA interrupts
+	 */
+	hstream->period_bytes = 256;
 	hstream->bufsize = dmab->bytes;
 
 	ret = hda_dsp_stream_hw_params(sdev, hext_stream, dmab, NULL);

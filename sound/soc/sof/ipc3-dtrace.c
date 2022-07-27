@@ -15,6 +15,8 @@
 #define TRACE_FILTER_ELEMENTS_PER_ENTRY 4
 #define TRACE_FILTER_MAX_CONFIG_STRING_LENGTH 1024
 
+#define ZEPHYR_HDA_DMA_LOGGING_BACKEND 1
+
 enum sof_dtrace_state {
 	SOF_DTRACE_DISABLED,
 	SOF_DTRACE_STOPPED,
@@ -172,7 +174,9 @@ static int ipc3_trace_update_filter(struct snd_sof_dev *sdev, int num_elems,
 		dev_err(sdev->dev, "enabling device failed: %d\n", ret);
 		goto error;
 	}
+#if !ZEPHYR_HDA_DMA_LOGGING_BACKEND
 	ret = sof_ipc_tx_message(sdev->ipc, msg, msg->hdr.size, &reply, sizeof(reply));
+#endif
 	pm_runtime_mark_last_busy(sdev->dev);
 	pm_runtime_put_autosuspend(sdev->dev);
 
@@ -347,6 +351,7 @@ static ssize_t dfsentry_dtrace_read(struct file *file, char __user *buffer,
 
 	/* get available count based on current host offset */
 	avail = sof_wait_dtrace_avail(sdev, lpos, buffer_size);
+
 	if (priv->dtrace_error) {
 		dev_err(sdev->dev, "trace IO error\n");
 		return -EIO;
@@ -428,6 +433,35 @@ static int debugfs_create_dtrace(struct snd_sof_dev *sdev)
 	return 0;
 }
 
+#if ZEPHYR_HDA_DMA_LOGGING_BACKEND
+
+#include <sound/sof/ipc4/header.h>
+#include "ipc4-priv.h"
+
+static int ipc4_mtrace_enable(struct snd_sof_dev *sdev)
+{
+	const struct sof_ipc_ops *iops = sdev->ipc->ops;
+	struct sof_ipc_dma_trace_params_ext params;
+	struct sof_ipc4_msg msg;
+	const int ZEPHYR_HDA_DMA_LOGGING_EXT = 0xA;
+	int ret;
+
+	msg.primary = SOF_IPC4_MSG_TARGET(SOF_IPC4_FW_GEN_MSG);
+	msg.primary |= SOF_IPC4_MSG_DIR(SOF_IPC4_MSG_REQUEST);
+	msg.primary |= SOF_IPC4_GLB_PIPE_STATE_ID(0);
+	msg.primary |= SOF_IPC4_MSG_TYPE_SET(SOF_IPC4_GLB_SET_PIPELINE_STATE);
+
+	msg.extension = ZEPHYR_HDA_DMA_LOGGING_EXT;
+
+	msg.data_size = 0;
+	msg.data_ptr = 0;
+
+	ret = iops->tx_msg(sdev, &msg, msg.data_size, NULL, 0, false);
+
+	return ret;
+}
+#endif
+
 static int ipc3_dtrace_enable(struct snd_sof_dev *sdev)
 {
 	struct sof_dtrace_priv *priv = sdev->fw_trace_data;
@@ -474,7 +508,12 @@ static int ipc3_dtrace_enable(struct snd_sof_dev *sdev)
 
 	/* send IPC to the DSP */
 	priv->dtrace_state = SOF_DTRACE_INITIALIZING;
+	sof_mailbox_write(sdev, sdev->host_box.offset, &params,
+			  sizeof(params));
+	ret = ipc4_mtrace_enable(sdev);
+#if !ZEPHYR_HDA_DMA_LOGGING_BACKEND
 	ret = sof_ipc_tx_message(sdev->ipc, &params, sizeof(params), &ipc_reply, sizeof(ipc_reply));
+#endif
 	if (ret < 0) {
 		dev_err(sdev->dev, "can't set params for DMA for trace %d\n", ret);
 		goto trace_release;
@@ -502,9 +541,11 @@ static int ipc3_dtrace_init(struct snd_sof_dev *sdev)
 	struct sof_dtrace_priv *priv;
 	int ret;
 
+#if !ZEPHYR_HDA_DMA_LOGGING_BACKEND
 	/* dtrace is only supported with SOF_IPC */
 	if (sdev->pdata->ipc_type != SOF_IPC)
 		return -EOPNOTSUPP;
+#endif
 
 	if (sdev->fw_trace_data) {
 		dev_err(sdev->dev, "fw_trace_data has been already allocated\n");
@@ -567,6 +608,26 @@ page_err:
 	return ret;
 }
 
+int ipc3_dtrace_posn_inc(struct snd_sof_dev *sdev,
+			 size_t written)
+{
+	struct sof_dtrace_priv *priv = sdev->fw_trace_data;
+	u32 new_offset = priv->host_offset + written;
+
+	if (!sdev->fw_trace_is_supported)
+		return 0;
+
+	if (new_offset >= priv->dmatb.bytes)
+		new_offset = new_offset - priv->dmatb.bytes;
+
+	if (trace_pos_update_expected(priv) &&
+	    sof_dtrace_set_host_offset(priv, new_offset))
+		wake_up(&priv->trace_sleep);
+
+	return 0;
+}
+EXPORT_SYMBOL(ipc3_dtrace_posn_inc);
+
 int ipc3_dtrace_posn_update(struct snd_sof_dev *sdev,
 			    struct sof_ipc_dma_trace_posn *posn)
 {
@@ -613,12 +674,15 @@ static void ipc3_dtrace_release(struct snd_sof_dev *sdev, bool only_stop)
 	ret = sof_dtrace_host_trigger(sdev, SNDRV_PCM_TRIGGER_STOP);
 	if (ret < 0)
 		dev_err(sdev->dev, "Host dtrace trigger stop failed: %d\n", ret);
+
 	priv->dtrace_state = SOF_DTRACE_STOPPED;
 
 	/*
 	 * stop and free trace DMA in the DSP. TRACE_DMA_FREE is only supported from
 	 * ABI 3.20.0 onwards
+
 	 */
+#if !ZEPHYR_HDA_DMA_LOGGING_BACKEND
 	if (v->abi_version >= SOF_ABI_VER(3, 20, 0)) {
 		hdr.size = sizeof(hdr);
 		hdr.cmd = SOF_IPC_GLB_TRACE_MSG | SOF_IPC_TRACE_DMA_FREE;
@@ -628,6 +692,7 @@ static void ipc3_dtrace_release(struct snd_sof_dev *sdev, bool only_stop)
 		if (ret < 0)
 			dev_err(sdev->dev, "DMA_TRACE_FREE failed with error: %d\n", ret);
 	}
+#endif
 
 	if (only_stop)
 		goto out;
