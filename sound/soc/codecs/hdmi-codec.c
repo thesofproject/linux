@@ -20,35 +20,6 @@
 
 #define HDMI_CODEC_CHMAP_IDX_UNKNOWN  -1
 
-struct hdmi_codec_channel_map_table {
-	unsigned char map;	/* ALSA API channel map position */
-};
-
-/*
- * CEA speaker placement for HDMI 1.4:
- *
- *  FL  FLC   FC   FRC   FR   FRW
- *
- *                                  LFE
- *
- *  RL  RLC   RC   RRC   RR
- *
- *  Speaker placement has to be extended to support HDMI 2.0
- */
-enum hdmi_codec_cea_spk_placement {
-	FL  = BIT(0),	/* Front Left           */
-	FC  = BIT(1),	/* Front Center         */
-	FR  = BIT(2),	/* Front Right          */
-	FLC = BIT(3),	/* Front Left Center    */
-	FRC = BIT(4),	/* Front Right Center   */
-	RL  = BIT(5),	/* Rear Left            */
-	RC  = BIT(6),	/* Rear Center          */
-	RR  = BIT(7),	/* Rear Right           */
-	RLC = BIT(8),	/* Rear Left Center     */
-	RRC = BIT(9),	/* Rear Right Center    */
-	LFE = BIT(10),	/* Low Frequency Effect */
-};
-
 /*
  * cea Speaker allocation structure
  */
