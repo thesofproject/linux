@@ -174,6 +174,16 @@ static ssize_t words_show(struct device *dev,
 }
 static DEVICE_ATTR_RO(words);
 
+static umode_t dp0_is_visible(struct kobject *kobj, struct attribute *attr,
+			      int n)
+{
+	struct sdw_slave *slave = dev_to_sdw_dev(kobj_to_dev(kobj));
+
+	if (slave->prop.dp0_prop)
+		return attr->mode;
+	return 0;
+}
+
 static struct attribute *dp0_attrs[] = {
 	&dev_attr_max_word.attr,
 	&dev_attr_min_word.attr,
@@ -190,12 +200,14 @@ static struct attribute *dp0_attrs[] = {
  */
 static const struct attribute_group dp0_group = {
 	.attrs = dp0_attrs,
+	.is_visible = dp0_is_visible,
 	.name = "dp0",
 };
 
 static const struct attribute_group *slave_groups[] = {
 	&slave_attr_group,
 	&sdw_slave_dev_attr_group,
+	&dp0_group,
 	NULL,
 };
 
@@ -206,12 +218,6 @@ int sdw_slave_sysfs_init(struct sdw_slave *slave)
 	ret = devm_device_add_groups(&slave->dev, slave_groups);
 	if (ret < 0)
 		return ret;
-
-	if (slave->prop.dp0_prop) {
-		ret = devm_device_add_group(&slave->dev, &dp0_group);
-		if (ret < 0)
-			return ret;
-	}
 
 	if (slave->prop.source_ports || slave->prop.sink_ports) {
 		ret = sdw_slave_sysfs_dpn_init(slave);
