@@ -932,6 +932,26 @@ int snd_soc_pcm_component_pointer(struct snd_pcm_substream *substream)
 	return 0;
 }
 
+int snd_soc_pcm_component_get_time_info(struct snd_pcm_substream *substream,
+					struct timespec64 *system_ts, struct timespec64 *audio_ts,
+					struct snd_pcm_audio_tstamp_config *audio_tstamp_config,
+					struct snd_pcm_audio_tstamp_report *audio_tstamp_report)
+{
+	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
+	struct snd_soc_component *component;
+	int i;
+
+	/* FIXME: use 1st get_time_info */
+	for_each_rtd_components(rtd, i, component)
+		if (component->driver->get_time_info)
+			return component->driver->get_time_info(component, substream,
+								system_ts, audio_ts,
+								audio_tstamp_config,
+								audio_tstamp_report);
+
+	return 0;
+}
+
 static bool snd_soc_component_is_codec_on_rtd(struct snd_soc_pcm_runtime *rtd,
 					      struct snd_soc_component *component)
 {

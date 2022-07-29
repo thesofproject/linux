@@ -491,6 +491,12 @@ int snd_soc_component_compr_get_metadata(struct snd_compr_stream *cstream,
 					 struct snd_compr_metadata *metadata);
 
 int snd_soc_pcm_component_pointer(struct snd_pcm_substream *substream);
+
+int snd_soc_pcm_component_get_time_info(struct snd_pcm_substream *substream,
+					struct timespec64 *system_ts, struct timespec64 *audio_ts,
+					struct snd_pcm_audio_tstamp_config *audio_tstamp_config,
+					struct snd_pcm_audio_tstamp_report *audio_tstamp_report);
+
 int snd_soc_pcm_component_ioctl(struct snd_pcm_substream *substream,
 				unsigned int cmd, void *arg);
 int snd_soc_pcm_component_sync_stop(struct snd_pcm_substream *substream);

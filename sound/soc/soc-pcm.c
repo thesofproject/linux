@@ -2947,6 +2947,8 @@ int soc_new_pcm(struct snd_soc_pcm_runtime *rtd, int num)
 			rtd->ops.mmap		= snd_soc_pcm_component_mmap;
 		if (drv->ack)
 			rtd->ops.ack            = snd_soc_pcm_component_ack;
+		if (drv->get_time_info)
+			rtd->ops.get_time_info	= snd_soc_pcm_component_get_time_info;
 	}
 
 	if (playback)
