@@ -3903,6 +3903,7 @@ extern void check_class_changed(struct rq *rq, struct task_struct *p,
 
 extern struct balance_callback *splice_balance_callbacks(struct rq *rq);
 extern void balance_callbacks(struct rq *rq, struct balance_callback *head);
+extern void __balance_callbacks(struct rq *rq);
 
 #ifdef CONFIG_SCHED_CLASS_EXT
 /*
