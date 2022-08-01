@@ -10,6 +10,8 @@
 #include "sof-audio.h"
 #include "sof-priv.h"
 
+#define GET_FORMAT_BYTE_COUNT(fmt_width) ((fmt_width) >> 3)
+
 static void sof_set_transferred_bytes(struct sof_compr_stream *sstream,
 				      u64 host_pos, u64 buffer_size)
 {
@@ -299,15 +301,43 @@ int sof_compr_copy(struct snd_soc_component *component,
 	return count - ret;
 }
 
+static int compute_frame_size(uint16_t channels, uint32_t frame_fmt)
+{
+	int pcm_format_width;
+
+	switch(frame_fmt) {
+		case SOF_IPC_FRAME_S32_LE:
+			pcm_format_width = snd_pcm_format_width(SNDRV_PCM_FORMAT_S32_LE);
+			break;
+		default:
+			return -EINVAL;
+	}
+
+	return GET_FORMAT_BYTE_COUNT(pcm_format_width) * channels;
+}
+
 static int sof_compr_pointer(struct snd_soc_component *component,
 			     struct snd_compr_stream *cstream,
 			     struct snd_compr_tstamp *tstamp)
 {
 	struct snd_compr_runtime *runtime = cstream->runtime;
 	struct sof_compr_stream *sstream = runtime->private_data;
+	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
+	struct snd_sof_pcm *spcm;
+	int frame_size;
+
+	spcm = snd_sof_find_spcm_dai(component, rtd);
+	if (!spcm)
+		return -EINVAL;
+
+	frame_size = compute_frame_size(sstream->channels, sstream->frame_fmt);
+	if (frame_size < 0)
+		return frame_size;
 
 	tstamp->sampling_rate = sstream->sample_rate;
 	tstamp->copied_total = sstream->copied_total;
+	tstamp->pcm_io_frames = div_u64(spcm->stream[cstream->direction].posn.dai_posn,
+					frame_size);
 
 	return 0;
 }
