@@ -898,6 +898,35 @@ static void ipc3_xrun(struct snd_sof_dev *sdev, u32 msg_id)
 #endif
 }
 
+static void ipc3_drain(struct snd_sof_dev *sdev, u32 msg_id)
+{
+	struct snd_soc_component *scomp = sdev->component;
+	struct snd_sof_pcm *spcm;
+	struct snd_sof_pcm_stream *stream;
+	struct sof_ipc_stream_drain drain;
+	int direction;
+
+	spcm = snd_sof_find_spcm_comp(scomp, msg_id, &direction);
+	if (!spcm) {
+		dev_err(sdev->dev,
+			"error: drain for unknown stream, msg_id %d\n",
+			msg_id);
+		return;
+	}
+
+	stream = &spcm->stream[direction];
+	snd_sof_ipc_msg_data(sdev, stream->substream, &drain, sizeof(drain));
+
+	/* since struct sof_ipc_stream drain only contains the reply
+	 * header there's no need for additional checks.
+	 *
+	 * we're assuming that since we're receiving the drain-related
+	 * reply then the drain operation finished successfully.
+	 */
+	if (spcm->pcm.compress)
+		snd_compr_drain_notify(stream->cstream);
+}
+
 /* stream notifications from firmware */
 static void ipc3_stream_message(struct snd_sof_dev *sdev, void *msg_buf)
 {
@@ -911,6 +940,9 @@ static void ipc3_stream_message(struct snd_sof_dev *sdev, void *msg_buf)
 		break;
 	case SOF_IPC_STREAM_TRIG_XRUN:
 		ipc3_xrun(sdev, msg_id);
+		break;
+	case SOF_IPC_STREAM_TRIG_DRAIN:
+		ipc3_drain(sdev, msg_id);
 		break;
 	default:
 		dev_err(sdev->dev, "unhandled stream message %#x\n",
