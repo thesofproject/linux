@@ -148,4 +148,8 @@ struct sof_ipc_stream_posn {
 	int32_t xrun_size;	/**< XRUN size in bytes */
 }  __packed;
 
+struct sof_ipc_stream_drain {
+	struct sof_ipc_reply rhdr;
+}  __packed;
+
 #endif
