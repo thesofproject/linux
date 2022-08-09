@@ -47,15 +47,30 @@ struct sdw_intel {
 #endif
 };
 
-int intel_link_startup(struct auxiliary_device *auxdev);
-int intel_link_process_wakeen_event(struct auxiliary_device *auxdev);
+#define cdns_to_intel(_cdns) container_of(_cdns, struct sdw_intel, cdns)
 
-struct sdw_intel_link_dev {
-	struct auxiliary_device auxdev;
-	struct sdw_intel_link_res link_res;
-};
+#define INTEL_MASTER_RESET_ITERATIONS	10
 
-#define auxiliary_dev_to_sdw_intel_link_dev(auxiliary_dev) \
-	container_of(auxiliary_dev, struct sdw_intel_link_dev, auxdev)
+/* functions needed for ops */
+int intel_pre_bank_switch(struct sdw_bus *bus);
+int intel_post_bank_switch(struct sdw_bus *bus);
+
+/* interface with intel-device */
+void intel_debugfs_init(struct sdw_intel *sdw);
+void intel_debugfs_exit(struct sdw_intel *sdw);
+
+int intel_register_dai(struct sdw_intel *sdw);
+
+void intel_check_clock_stop(struct sdw_intel *sdw);
+int intel_start_bus(struct sdw_intel *sdw);
+int intel_start_bus_after_reset(struct sdw_intel *sdw);
+int intel_start_bus_after_clock_stop(struct sdw_intel *sdw);
+int intel_stop_bus(struct sdw_intel *sdw, bool clock_stop);
+
+int intel_link_power_up(struct sdw_intel *sdw);
+int intel_link_power_down(struct sdw_intel *sdw);
+
+int  intel_shim_check_wake(struct sdw_intel *sdw);
+void intel_shim_wake(struct sdw_intel *sdw, bool wake_enable);
 
 #endif /* __SDW_INTEL_LOCAL_H */
