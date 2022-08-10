@@ -18,6 +18,7 @@
 #include <linux/soundwire/sdw.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
+#include <sound/soc-dai.h>
 #include <linux/workqueue.h>
 #include "bus.h"
 #include "cadence_master.h"
@@ -1703,10 +1704,7 @@ int cdns_set_sdw_stream(struct snd_soc_dai *dai,
 
 	if (stream) {
 		/* first paranoia check */
-		if (direction == SNDRV_PCM_STREAM_PLAYBACK)
-			dma = dai->playback_dma_data;
-		else
-			dma = dai->capture_dma_data;
+		dma = snd_soc_dai_get_dma_data(dai, stream);
 
 		if (dma) {
 			dev_err(dai->dev,
@@ -1727,10 +1725,7 @@ int cdns_set_sdw_stream(struct snd_soc_dai *dai,
 
 		dma->stream = stream;
 
-		if (direction == SNDRV_PCM_STREAM_PLAYBACK)
-			dai->playback_dma_data = dma;
-		else
-			dai->capture_dma_data = dma;
+		snd_soc_dai_set_dma_data(dai, stream, dma);
 	} else {
 		/* for NULL stream we release allocated dma_data */
 		if (direction == SNDRV_PCM_STREAM_PLAYBACK) {
