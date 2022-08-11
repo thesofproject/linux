@@ -589,6 +589,8 @@ intel_pdi_get_ch_cap(struct sdw_intel *sdw, unsigned int pdi_num)
 
 	count = intel_readw(shim, SDW_SHIM_PCMSYCHC(link_id, pdi_num));
 
+	dev_err(sdw->cdns.dev, "plb: pdi %d count %d \n", pdi_num, count);
+
 	/*
 	 * WORKAROUND: on all existing Intel controllers, pdi
 	 * number 2 reports channel count as 1 even though it
