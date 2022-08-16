@@ -1419,6 +1419,46 @@ static int sof_ipc4_control_load_volume(struct snd_sof_dev *sdev, struct snd_sof
 	return 0;
 }
 
+static int sof_ipc4_control_load_bytes(struct snd_sof_dev *sdev, struct snd_sof_control *scontrol)
+{
+	struct sof_ipc4_control_data *control_data;
+	int ret;
+
+	scontrol->size = sizeof(struct sof_ipc4_control_data) + scontrol->priv_size;
+
+	scontrol->ipc_control_data = kzalloc(scontrol->size, GFP_KERNEL);
+	if (!scontrol->ipc_control_data)
+		return -ENOMEM;
+
+	control_data = scontrol->ipc_control_data;
+	control_data->index = scontrol->index;
+	if (scontrol->priv_size > 0) {
+		memcpy(control_data->data, scontrol->priv, scontrol->priv_size);
+
+		if (control_data->data->magic != SOF_IPC4_ABI_MAGIC) {
+			dev_err(sdev->dev, "Wrong ABI magic 0x%08x.\n", control_data->data->magic);
+			ret = -EINVAL;
+			goto err;
+		}
+
+		/* TODO: check the ABI version */
+
+		if (control_data->data->size + sizeof(struct sof_ipc4_abi_hdr) !=
+		    scontrol->priv_size) {
+			dev_err(sdev->dev, "Conflict in bytes vs. priv size.\n");
+			ret = -EINVAL;
+			goto err;
+		}
+	}
+
+	return 0;
+
+err:
+	kfree(scontrol->ipc_control_data);
+	scontrol->ipc_control_data = NULL;
+	return ret;
+}
+
 static int sof_ipc4_control_setup(struct snd_sof_dev *sdev, struct snd_sof_control *scontrol)
 {
 	switch (scontrol->info_type) {
@@ -1426,6 +1466,8 @@ static int sof_ipc4_control_setup(struct snd_sof_dev *sdev, struct snd_sof_contr
 	case SND_SOC_TPLG_CTL_VOLSW_SX:
 	case SND_SOC_TPLG_CTL_VOLSW_XR_SX:
 		return sof_ipc4_control_load_volume(sdev, scontrol);
+	case SND_SOC_TPLG_CTL_BYTES:
+		return sof_ipc4_control_load_bytes(sdev, scontrol);
 	default:
 		break;
 	}
