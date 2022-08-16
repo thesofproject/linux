@@ -403,6 +403,13 @@ struct snd_sof_widget {
 	 * from D3.
 	 */
 	bool dynamic_pipeline_widget;
+	/*
+	 * payload_with_output_fmt is used to describe whether there is output format
+	 * (struct sof_ipc4_audio_format output_format) in the module init instance
+	 * ipc message payload.
+	 * Please see ipc4-topology.h for each module's init instance ipc message payload format.
+	 */
+	bool payload_with_output_fmt;
 
 	struct snd_soc_dapm_widget *widget;
 	struct list_head list;	/* list in sdev widget list */
