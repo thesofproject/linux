@@ -11,9 +11,6 @@ int snd_hdac_ext_bus_init(struct hdac_bus *bus, struct device *dev,
 		      const struct hdac_ext_bus_ops *ext_ops);
 
 void snd_hdac_ext_bus_exit(struct hdac_bus *bus);
-int snd_hdac_ext_bus_device_init(struct hdac_bus *bus, int addr,
-				struct hdac_device *hdev, int type);
-void snd_hdac_ext_bus_device_exit(struct hdac_device *hdev);
 void snd_hdac_ext_bus_device_remove(struct hdac_bus *bus);
 
 #define HDA_CODEC_REV_EXT_ENTRY(_vid, _rev, _name, drv_data) \
@@ -187,12 +184,6 @@ void snd_hdac_ext_bus_link_power(struct hdac_device *codec, bool enable);
 			   delay_us, timeout_us)
 #define snd_hdac_adsp_readq_poll(chip, reg, val, cond, delay_us, timeout_us) \
 	readq_poll_timeout((chip)->dsp_ba + (reg), val, cond, \
-			   delay_us, timeout_us)
-#define snd_hdac_stream_readb_poll(strm, reg, val, cond, delay_us, timeout_us) \
-	readb_poll_timeout((strm)->sd_addr + AZX_REG_ ## reg, val, cond, \
-			   delay_us, timeout_us)
-#define snd_hdac_stream_readl_poll(strm, reg, val, cond, delay_us, timeout_us) \
-	readl_poll_timeout((strm)->sd_addr + AZX_REG_ ## reg, val, cond, \
 			   delay_us, timeout_us)
 
 struct hdac_ext_device;
