@@ -17,7 +17,7 @@
 /* Intel SHIM Registers Definition */
 /* LCAP */
 #define SDW_SHIM_LCAP			0x0
-#define SDW_SHIM_LCAP_LCOUNT_MASK	GENMASK(2, 0);
+#define SDW_SHIM_LCAP_LCOUNT_MASK	GENMASK(2, 0)
 
 /* LCTL */
 #define SDW_SHIM_LCTL			0x4
