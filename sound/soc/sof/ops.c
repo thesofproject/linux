@@ -8,6 +8,8 @@
 // Author: Liam Girdwood <liam.r.girdwood@linux.intel.com>
 //
 
+// TEST SOF CI
+
 #include <linux/pci.h>
 #include "ops.h"
 
