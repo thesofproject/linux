@@ -31,12 +31,14 @@ static void remove_files(struct kernfs_node *parent,
 			kernfs_remove_by_name(parent, (*bin_attr)->attr.name);
 }
 
+/* returns -ERROR if error, or >= 0 for number of files actually created */
 static int create_files(struct kernfs_node *parent, struct kobject *kobj,
 			kuid_t uid, kgid_t gid,
 			const struct attribute_group *grp, int update)
 {
 	struct attribute *const *attr;
 	struct bin_attribute *const *bin_attr;
+	int files_created = 0;
 	int error = 0, i;
 
 	if (grp->attrs) {
@@ -65,6 +67,8 @@ static int create_files(struct kernfs_node *parent, struct kobject *kobj,
 						       gid, NULL);
 			if (unlikely(error))
 				break;
+
+			files_created++;
 		}
 		if (error) {
 			remove_files(parent, grp);
@@ -95,12 +99,15 @@ static int create_files(struct kernfs_node *parent, struct kobject *kobj,
 							   NULL);
 			if (error)
 				break;
+			files_created++;
 		}
 		if (error)
 			remove_files(parent, grp);
 	}
 exit:
-	return error;
+	if (error)
+		return error;
+	return files_created;
 }
 
 
@@ -146,10 +153,16 @@ static int internal_create_group(struct kobject *kobj, int update,
 		kn = kobj->sd;
 	kernfs_get(kn);
 	error = create_files(kn, kobj, uid, gid, grp, update);
-	if (error) {
+	if (error <= 0) {
+		/*
+		 * If an error happened _OR_ if no files were created in the
+		 * attribute group, and we have a name for this group, delete
+		 * the name so there's not an empty directory.
+		 */
 		if (grp->name)
 			kernfs_remove(kn);
-	}
+	} else
+		error = 0;
 	kernfs_put(kn);
 
 	if (grp->name && update)
