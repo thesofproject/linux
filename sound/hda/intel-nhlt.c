@@ -159,9 +159,12 @@ EXPORT_SYMBOL(intel_nhlt_ssp_endpoint_mask);
 
 #define SSP_BLOB_V1_0_SIZE		84
 #define SSP_BLOB_V1_0_MDIVC_OFFSET	19 /* offset in u32 */
+
 #define SSP_BLOB_V1_5_SIZE		96
 #define SSP_BLOB_V1_5_MDIVC_OFFSET	21 /* offset in u32 */
 #define SSP_BLOB_VER_1_5		0xEE000105
+
+#define SSP_BLOB_V2_0_SIZE		88
 #define SSP_BLOB_V2_0_MDIVC_OFFSET	20 /* offset in u32 */
 #define SSP_BLOB_VER_2_0		0xEE000200
 
@@ -194,25 +197,40 @@ int intel_nhlt_ssp_mclk_mask(struct nhlt_acpi_table *nhlt, int ssp_num)
 			for (j = 0; j < fmt->fmt_count; j++) {
 				u32 *blob;
 				int mdivc_offset;
+				int size;
 
-				if (cfg->config.size >= SSP_BLOB_V1_0_SIZE) {
-					blob = (u32 *)cfg->config.caps;
+				/* first check we have enough data to read the blob type */
+				if (cfg->config.size < 8)
+					return -EINVAL;
 
-					if (blob[1] == SSP_BLOB_VER_2_0)
-						mdivc_offset = SSP_BLOB_V2_0_MDIVC_OFFSET;
-					else if (blob[1] == SSP_BLOB_VER_1_5)
-						mdivc_offset = SSP_BLOB_V1_5_MDIVC_OFFSET;
-					else
-						mdivc_offset = SSP_BLOB_V1_0_MDIVC_OFFSET;
+				blob = (u32 *)cfg->config.caps;
 
-					mclk_mask |=  blob[mdivc_offset] & GENMASK(1, 0);
+				if (blob[1] == SSP_BLOB_VER_2_0) {
+					mdivc_offset = SSP_BLOB_V2_0_MDIVC_OFFSET;
+					size = SSP_BLOB_V2_0_SIZE;
+				} else if (blob[1] == SSP_BLOB_VER_1_5) {
+					mdivc_offset = SSP_BLOB_V1_5_MDIVC_OFFSET;
+					size = SSP_BLOB_V1_5_SIZE;
+				} else {
+					mdivc_offset = SSP_BLOB_V1_0_MDIVC_OFFSET;
+					size = SSP_BLOB_V1_0_SIZE;
 				}
+
+				/* make sure we have enough data for the fixed part of the blob */
+				if (cfg->config.size < size)
+					return -EINVAL;
+
+				mclk_mask |=  blob[mdivc_offset] & GENMASK(1, 0);
 
 				cfg = (struct nhlt_fmt_cfg *)(cfg->config.caps + cfg->config.size);
 			}
 		}
 		epnt = (struct nhlt_endpoint *)((u8 *)epnt + epnt->length);
 	}
+
+	/* make sure only one MCLK is used */
+	if (hweight_long(mclk_mask) != 1)
+		return -EINVAL;
 
 	return mclk_mask;
 }
