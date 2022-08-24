@@ -1594,9 +1594,14 @@ struct snd_soc_acpi_mach *hda_machine_select(struct snd_sof_dev *sdev)
 
 			mclk_mask = check_nhlt_ssp_mclk_mask(sdev, ssp_num);
 
+			if (mclk_mask < 0) {
+				dev_err(sdev->dev, "Invalid MCLK configuration\n");
+				return NULL;
+			}
+
 			dev_dbg(sdev->dev, "MCLK mask %#x found in NHLT\n", mclk_mask);
 
-			if (mclk_mask && mclk_mask != GENMASK(1, 0)) {
+			if (mclk_mask) {
 				dev_info(sdev->dev, "Overriding topology with MCLK mask %#x from NHLT\n", mclk_mask);
 				sdev->mclk_id_override = true;
 				sdev->mclk_id_quirk = (mclk_mask & BIT(0)) ? 0 : 1;
