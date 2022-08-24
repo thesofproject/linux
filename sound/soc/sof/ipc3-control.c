@@ -87,7 +87,7 @@ static int sof_ipc3_set_get_kcontrol_data(struct snd_sof_control *scontrol, bool
 	cdata->rhdr.hdr.size = msg_bytes;
 	cdata->elems_remaining = 0;
 
-	return iops->set_get_data(sdev, cdata, cdata->rhdr.hdr.size, set);
+	return iops->set_get_data(sdev, cdata, cdata->rhdr.hdr.size, set, false);
 }
 
 static void snd_sof_refresh_control(struct snd_sof_control *scontrol)

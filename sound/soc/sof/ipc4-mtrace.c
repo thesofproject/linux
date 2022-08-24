@@ -440,7 +440,7 @@ static int ipc4_mtrace_enable(struct snd_sof_dev *sdev)
 	system_time = ktime_to_us(kt);
 	msg.data_size = sizeof(system_time);
 	msg.data_ptr = &system_time;
-	ret = iops->set_get_data(sdev, &msg, msg.data_size, true);
+	ret = iops->set_get_data(sdev, &msg, msg.data_size, true, true);
 	if (ret)
 		return ret;
 
@@ -452,7 +452,7 @@ static int ipc4_mtrace_enable(struct snd_sof_dev *sdev)
 	msg.data_ptr = &priv->state_info;
 
 	priv->mtrace_state = SOF_MTRACE_INITIALIZING;
-	ret = iops->set_get_data(sdev, &msg, msg.data_size, true);
+	ret = iops->set_get_data(sdev, &msg, msg.data_size, true, true);
 	if (ret) {
 		priv->mtrace_state = SOF_MTRACE_DISABLED;
 		return ret;
@@ -483,7 +483,7 @@ static void ipc4_mtrace_disable(struct snd_sof_dev *sdev)
 
 	msg.data_size = sizeof(priv->state_info);
 	msg.data_ptr = &priv->state_info;
-	iops->set_get_data(sdev, &msg, msg.data_size, true);
+	iops->set_get_data(sdev, &msg, msg.data_size, true, true);
 
 	priv->mtrace_state = SOF_MTRACE_DISABLED;
 

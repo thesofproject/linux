@@ -46,7 +46,7 @@ static int sof_ipc4_set_get_kcontrol_data(struct snd_sof_control *scontrol, bool
 	msg->primary &= ~SOF_IPC4_MOD_INSTANCE_MASK;
 	msg->primary |= SOF_IPC4_MOD_INSTANCE(swidget->instance_id);
 
-	return iops->set_get_data(sdev, msg, msg->data_size, set);
+	return iops->set_get_data(sdev, msg, msg->data_size, set, true);
 }
 
 static int

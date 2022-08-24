@@ -391,7 +391,7 @@ static int sof_ipc4_tx_msg(struct snd_sof_dev *sdev, void *msg_data, size_t msg_
 }
 
 static int sof_ipc4_set_get_data(struct snd_sof_dev *sdev, void *data,
-				 size_t payload_bytes, bool set)
+				 size_t payload_bytes, bool set, bool large)
 {
 	size_t payload_limit = sdev->ipc->max_payload_size;
 	struct sof_ipc4_msg *ipc4_msg = data;
@@ -412,6 +412,32 @@ static int sof_ipc4_set_get_data(struct snd_sof_dev *sdev, void *data,
 	ipc4_msg->primary &= ~SOF_IPC4_MSG_TYPE_MASK;
 	tx.primary = ipc4_msg->primary;
 	tx.extension = ipc4_msg->extension;
+
+	if (!large) {
+		size_t tx_size, rx_size;
+
+		if (set) {
+			tx.primary |= SOF_IPC4_MSG_TYPE_SET(SOF_IPC4_MOD_CONFIG_SET);
+			tx.data_size = payload_bytes;
+			tx.data_ptr = ipc4_msg->data_ptr;
+			tx_size = payload_bytes;
+			rx_size = 0;
+		} else {
+			tx.primary |= SOF_IPC4_MSG_TYPE_SET(SOF_IPC4_MOD_CONFIG_GET);
+			rx.primary = 0;
+			rx.extension = 0;
+			rx.data_size = payload_bytes;
+			rx.data_ptr = ipc4_msg->data_ptr;
+			tx_size = 0;
+			rx_size = payload_bytes;
+		}
+		mutex_lock(&sdev->ipc->tx_mutex);
+		ret = ipc4_tx_msg_unlocked(sdev->ipc, &tx, tx_size, &rx, rx_size);
+		mutex_unlock(&sdev->ipc->tx_mutex);
+		if (ret < 0)
+			dev_err(sdev->dev, "config %s failed %d\n", set ? "set" : "get", ret);
+		return ret;
+	}
 
 	if (set)
 		tx.primary |= SOF_IPC4_MSG_TYPE_SET(SOF_IPC4_MOD_LARGE_CONFIG_SET);

@@ -350,7 +350,7 @@ int sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev)
 	if (!msg.data_ptr)
 		return -ENOMEM;
 
-	ret = iops->set_get_data(sdev, &msg, msg.data_size, false);
+	ret = iops->set_get_data(sdev, &msg, msg.data_size, false, true);
 	if (ret)
 		goto out;
 

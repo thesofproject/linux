@@ -380,7 +380,7 @@ static int sof_ipc3_tx_msg(struct snd_sof_dev *sdev, void *msg_data, size_t msg_
 }
 
 static int sof_ipc3_set_get_data(struct snd_sof_dev *sdev, void *data, size_t data_bytes,
-				 bool set)
+				 bool set, bool __maybe_unused large)
 {
 	size_t msg_bytes, hdr_bytes, payload_size, send_bytes;
 	struct sof_ipc_ctrl_data *cdata = data;

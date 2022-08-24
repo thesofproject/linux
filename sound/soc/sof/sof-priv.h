@@ -445,7 +445,7 @@ struct sof_ipc_pcm_ops;
  *		boot.
  *
  * @tx_msg:	Function pointer for sending a 'short' IPC message
- * @set_get_data: Function pointer for set/get data ('large' IPC message). This
+ * @set_get_data: Function pointer for set/get data (IPC configuration message). This
  *		function may split up the 'large' message and use the @tx_msg
  *		path to transfer individual chunks, or use other means to transfer
  *		the message.
@@ -472,7 +472,7 @@ struct sof_ipc_ops {
 	int (*tx_msg)(struct snd_sof_dev *sdev, void *msg_data, size_t msg_bytes,
 		      void *reply_data, size_t reply_bytes, bool no_pm);
 	int (*set_get_data)(struct snd_sof_dev *sdev, void *data, size_t data_bytes,
-			    bool set);
+			    bool set, bool large);
 	int (*get_reply)(struct snd_sof_dev *sdev);
 	void (*rx_msg)(struct snd_sof_dev *sdev);
 };
