@@ -762,7 +762,8 @@ void sdw_extract_slave_id(struct sdw_bus *bus,
 }
 EXPORT_SYMBOL(sdw_extract_slave_id);
 
-static int sdw_program_device_num(struct sdw_bus *bus)
+static int sdw_program_device_num(struct sdw_bus *bus,
+				  enum sdw_slave_status status[])
 {
 	u8 buf[SDW_NUM_DEV_ID_REGISTERS] = {0};
 	struct sdw_slave *slave, *_s;
@@ -819,6 +820,12 @@ static int sdw_program_device_num(struct sdw_bus *bus)
 						ret);
 					return ret;
 				}
+
+				/*
+				 * It could have dropped off the bus since the
+				 * PING response so update the status array.
+				 */
+				status[slave->dev_num] = SDW_SLAVE_UNATTACHED;
 
 				break;
 			}
@@ -1779,10 +1786,21 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 {
 	enum sdw_slave_status prev_status;
 	struct sdw_slave *slave;
+	bool programmed_dev_num = false;
 	bool attached_initializing;
 	int i, ret = 0;
 
-	/* first check if any Slaves fell off the bus */
+	/* Handle any unenumerated peripherals */
+	if (status[0] == SDW_SLAVE_ATTACHED) {
+		dev_dbg(bus->dev, "Slave attached, programming device number\n");
+		ret = sdw_program_device_num(bus, status);
+		if (ret < 0)
+			dev_warn(bus->dev, "Slave attach failed: %d\n", ret);
+
+		programmed_dev_num = true;
+	}
+
+	/* Check if any fell off the bus */
 	for (i = 1; i <= SDW_MAX_DEVICES; i++) {
 		mutex_lock(&bus->bus_lock);
 		if (test_bit(i, bus->assigned) == false) {
@@ -1808,17 +1826,12 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 		}
 	}
 
-	if (status[0] == SDW_SLAVE_ATTACHED) {
-		dev_dbg(bus->dev, "Slave attached, programming device number\n");
-		ret = sdw_program_device_num(bus);
-		if (ret < 0)
-			dev_err(bus->dev, "Slave attach failed: %d\n", ret);
-		/*
-		 * programming a device number will have side effects,
-		 * so we deal with other devices at a later time
-		 */
-		return ret;
-	}
+	/*
+	 * programming a device number will have side effects,
+	 * so we deal with other devices at a later time
+	 */
+	if (programmed_dev_num)
+		return 0;
 
 	/* Continue to check other slave statuses */
 	for (i = 1; i <= SDW_MAX_DEVICES; i++) {
