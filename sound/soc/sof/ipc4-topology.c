@@ -286,34 +286,12 @@ static void sof_ipc4_widget_free_comp_pipeline(struct snd_sof_widget *swidget)
 	kfree(swidget->private);
 }
 
-static void sof_ipc4_load_a_hack(struct snd_sof_dev *sdev)
-{
-#if 0
-	/* ACA: 88881111-2222-3333-4444-555566667777 */
-	guid_t uuid = GUID_INIT(0x88881111, 0x2222, 0x3333,
-				0x44, 0x44, 0x55, 0x55, 0x66, 0x66, 0x77, 0x77);
-#else
-	/* GDB: 5842A646-15AC-4CA4-BD0B-53D5D40822BB */
-	guid_t uuid = GUID_INIT(0x5842A646, 0x15AC, 0x4CA4,
-				0xBD, 0x0B, 0x53, 0xD5, 0xD4, 0x08, 0x22, 0xBB);
-#endif
-	struct sof_ipc4_fw_module *fw_module;
-
-	fw_module = sof_ipc4_find_module_by_uuid(sdev, &uuid);
-	if (fw_module)
-		pr_warn("%s: got module for UUID %pUL\n", __func__, &uuid);
-	else
-		pr_warn("%s: no module for UUID %pUL\n", __func__, &uuid);
-}
-
 static int sof_ipc4_widget_set_module_info(struct snd_sof_widget *swidget)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 
 	swidget->module_info = sof_ipc4_find_module_by_uuid(sdev, &swidget->uuid);
-
-	sof_ipc4_load_a_hack(sdev);
 
 	if (swidget->module_info)
 		return 0;
