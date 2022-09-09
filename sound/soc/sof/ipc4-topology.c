@@ -1686,6 +1686,8 @@ static int sof_ipc4_route_setup(struct snd_sof_dev *sdev, struct snd_sof_route *
 	if (sroute->dst_queue_id < 0) {
 		dev_err(sdev->dev, "failed to get queue ID for sink widget: %s\n",
 			sink_widget->widget->name);
+		sof_ipc4_put_queue_id(src_widget, sroute->src_queue_id,
+				      SOF_PIN_TYPE_SOURCE);
 		return sroute->dst_queue_id;
 	}
 
@@ -1708,9 +1710,15 @@ static int sof_ipc4_route_setup(struct snd_sof_dev *sdev, struct snd_sof_route *
 	msg.extension = extension;
 
 	ret = sof_ipc_tx_message(sdev->ipc, &msg, 0, NULL, 0);
-	if (ret < 0)
+	if (ret < 0) {
 		dev_err(sdev->dev, "%s: failed to bind modules %s -> %s\n",
 			__func__, src_widget->widget->name, sink_widget->widget->name);
+
+		sof_ipc4_put_queue_id(src_widget, sroute->src_queue_id,
+				      SOF_PIN_TYPE_SOURCE);
+		sof_ipc4_put_queue_id(sink_widget, sroute->dst_queue_id,
+				      SOF_PIN_TYPE_SINK);
+	}
 
 	return ret;
 }
