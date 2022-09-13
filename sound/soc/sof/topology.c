@@ -1404,6 +1404,12 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 		return ret;
 	}
 
+	/* Fixup pin count in case they are not specified in topology */
+	if (!swidget->num_sink_pins)
+		swidget->num_sink_pins = 1;
+	if (!swidget->num_source_pins)
+		swidget->num_source_pins = 1;
+
 	if (swidget->num_sink_pins > SOF_WIDGET_MAX_NUM_PINS ||
 	    swidget->num_source_pins > SOF_WIDGET_MAX_NUM_PINS) {
 		dev_err(scomp->dev, "invalid pins for %s: [sink: %d, src: %d]\n",
