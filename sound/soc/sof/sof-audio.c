@@ -264,7 +264,8 @@ static int sof_setup_pipeline_connections(struct snd_sof_dev *sdev,
 }
 
 static void
-sof_unprepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *widget)
+sof_unprepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *widget,
+			      struct snd_soc_dapm_widget_list *list)
 {
 	const struct sof_ipc_tplg_ops *ipc_tplg_ops = sdev->ipc->ops->tplg;
 	const struct sof_ipc_tplg_widget_ops *widget_ops = ipc_tplg_ops->widget;
@@ -283,9 +284,11 @@ sof_unprepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widg
 
 	/* unprepare all widgets in the sink paths */
 	snd_soc_dapm_widget_for_each_sink_path(widget, p) {
+		if (!widget_in_list(list, p->sink))
+			continue;
 		if (!p->walking && p->sink->dobj.private) {
 			p->walking = true;
-			sof_unprepare_widgets_in_path(sdev, p->sink);
+			sof_unprepare_widgets_in_path(sdev, p->sink, list);
 			p->walking = false;
 		}
 	}
@@ -295,7 +298,8 @@ static int
 sof_prepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *widget,
 			    struct snd_pcm_hw_params *fe_params,
 			    struct snd_sof_platform_stream_params *platform_params,
-			    struct snd_pcm_hw_params *pipeline_params, int dir)
+			    struct snd_pcm_hw_params *pipeline_params, int dir,
+			    struct snd_soc_dapm_widget_list *list)
 {
 	const struct sof_ipc_tplg_ops *ipc_tplg_ops = sdev->ipc->ops->tplg;
 	const struct sof_ipc_tplg_widget_ops *widget_ops = ipc_tplg_ops->widget;
@@ -319,10 +323,13 @@ sof_prepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget
 sink_prepare:
 	/* prepare all widgets in the sink paths */
 	snd_soc_dapm_widget_for_each_sink_path(widget, p) {
+		if (!widget_in_list(list, p->sink))
+			continue;
 		if (!p->walking && p->sink->dobj.private) {
 			p->walking = true;
 			ret = sof_prepare_widgets_in_path(sdev, p->sink,  fe_params,
-							  platform_params, pipeline_params, dir);
+							  platform_params, pipeline_params, dir,
+							  list);
 			p->walking = false;
 			if (ret < 0) {
 				/* unprepare the source widget */
@@ -343,7 +350,7 @@ sink_prepare:
  * (DAI type for capture, AIF type for playback)
  */
 static int sof_free_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *widget,
-				    int dir)
+				    int dir, struct snd_soc_dapm_widget_list *list)
 {
 	struct snd_soc_dapm_path *p;
 	int err;
@@ -358,9 +365,12 @@ static int sof_free_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dap
 	/* free all widgets in the sink paths even in case of error to keep use counts balanced */
 	snd_soc_dapm_widget_for_each_sink_path(widget, p) {
 		if (!p->walking) {
+			if (!widget_in_list(list, p->sink))
+				continue;
+
 			p->walking = true;
 
-			err = sof_free_widgets_in_path(sdev, p->sink, dir);
+			err = sof_free_widgets_in_path(sdev, p->sink, dir, list);
 			if (err < 0)
 				ret = err;
 			p->walking = false;
@@ -376,7 +386,7 @@ static int sof_free_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dap
  * The error path in this function ensures that all successfully set up widgets getting freed.
  */
 static int sof_set_up_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *widget,
-				      int dir)
+				      int dir, struct snd_soc_dapm_widget_list *list)
 {
 	struct snd_soc_dapm_path *p;
 	int ret;
@@ -389,9 +399,12 @@ static int sof_set_up_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_d
 
 	snd_soc_dapm_widget_for_each_sink_path(widget, p) {
 		if (!p->walking) {
+			if (!widget_in_list(list, p->sink))
+				continue;
+
 			p->walking = true;
 
-			ret = sof_set_up_widgets_in_path(sdev, p->sink, dir);
+			ret = sof_set_up_widgets_in_path(sdev, p->sink, dir, list);
 			p->walking = false;
 			if (ret < 0) {
 				if (widget->dobj.private)
@@ -426,11 +439,11 @@ sof_walk_widgets_in_order(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget_l
 
 		switch (op) {
 		case SOF_WIDGET_SETUP:
-			ret = sof_set_up_widgets_in_path(sdev, widget, dir);
+			ret = sof_set_up_widgets_in_path(sdev, widget, dir, list);
 			str = "set up";
 			break;
 		case SOF_WIDGET_FREE:
-			ret = sof_free_widgets_in_path(sdev, widget, dir);
+			ret = sof_free_widgets_in_path(sdev, widget, dir, list);
 			str = "free";
 			break;
 		case SOF_WIDGET_PREPARE:
@@ -446,12 +459,12 @@ sof_walk_widgets_in_order(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget_l
 			 */
 			memcpy(&pipeline_params, fe_params, sizeof(*fe_params));
 
-			ret = sof_prepare_widgets_in_path(sdev, widget, fe_params,
-							  platform_params, &pipeline_params, dir);
+			ret = sof_prepare_widgets_in_path(sdev, widget, fe_params, platform_params,
+							  &pipeline_params, dir, list);
 			break;
 		}
 		case SOF_WIDGET_UNPREPARE:
-			sof_unprepare_widgets_in_path(sdev, widget);
+			sof_unprepare_widgets_in_path(sdev, widget, list);
 			break;
 		default:
 			dev_err(sdev->dev, "Invalid widget op %d\n", op);
