@@ -26,6 +26,30 @@ struct sof_abi_hdr {
 	__u32 data[];		/**< Component data - opaque to core */
 }  __packed;
 
+/*
+ * Identifies data type, size and ABI for IPC4.
+ * Used by any bespoke component data structures or binary blobs.
+ */
+struct sof_ipc4_abi_hdr {
+	__u32 magic;		/**< 'S', 'O', 'F', '4' */
+	__u32 rsvd1;
+	__u32 size;		/**< size in bytes of data excl. this struct */
+	__u32 abi;		/**< SOF ABI version */
+	__u32 ipc_blob_type;	/** IPC4 type. 0: init, 2: config, 4: large_config */
+	/*
+	 * ipc_extension is used in ipc4 message extension field. Please check
+	 * struct sof_ipc4_msg for the ipc4 message structure details.
+	 * ipc_extension in this structure is used by module config/large_config
+	 * ipc message. Module config message uses extension to send the configure
+	 * data while module large_config message uses extension to describe
+	 * the message payload size, param_id and etc. If the extension is not
+	 * used, it should be set to 0.
+	 */
+	__u32 ipc_extension;
+	__u32 rsvd2[2];	/**< reserved for future use */
+	__u32 data[];		/**< Component data - opaque to core */
+}  __packed;
+
 #define SOF_MANIFEST_DATA_TYPE_NHLT 1
 
 /**
