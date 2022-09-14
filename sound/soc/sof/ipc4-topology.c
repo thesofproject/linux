@@ -1659,6 +1659,61 @@ static void sof_ipc4_put_queue_id(struct snd_sof_widget *swidget, int queue_id,
 	ida_free(queue_ida, queue_id);
 }
 
+static int sof_ipc4_widget_set_configuration(struct snd_sof_dev *sdev,
+					     struct snd_sof_widget *swidget)
+{
+	struct snd_sof_control *scontrol = NULL;
+	struct snd_soc_dapm_widget *widget = swidget->widget;
+	const struct snd_kcontrol_new *kc;
+	struct soc_bytes_ext *sbe;
+	struct sof_ipc4_control_data *control_data;
+	struct sof_ipc4_msg *msg;
+	struct sof_ipc4_fw_module *fw_module;
+	int i, ret;
+
+	fw_module = swidget->module_info;
+
+	for (i = 0; i < widget->num_kcontrols; i++) {
+		kc = &widget->kcontrol_news[i];
+		if (!kc)
+			return -ENODEV;
+
+		/* configuration IPC payload uses byte kcontrol */
+		if (widget->dobj.widget.kcontrol_type[i] != SND_SOC_TPLG_TYPE_BYTES)
+			continue;
+		sbe = (struct soc_bytes_ext *)kc->private_value;
+		scontrol = sbe->dobj.private;
+		if (!scontrol)
+			continue;
+		control_data = scontrol->ipc_control_data;
+		if (control_data->data->ipc_blob_type != SOF_IPC4_MOD_CONFIG_SET &&
+		    control_data->data->ipc_blob_type == SOF_IPC4_MOD_LARGE_CONFIG_SET)
+			continue;
+
+		msg = &control_data->msg;
+		msg->primary = fw_module->man4_module_entry.id;
+		msg->primary |= SOF_IPC4_MOD_INSTANCE(swidget->instance_id);
+		msg->primary |= SOF_IPC4_MSG_DIR(SOF_IPC4_MSG_REQUEST);
+		msg->primary |= SOF_IPC4_MSG_TARGET(SOF_IPC4_MODULE_MSG);
+		msg->extension = control_data->data->ipc_extension;
+		msg->data_ptr = control_data->data->data;
+		msg->data_size = control_data->data->size;
+		if (control_data->data->ipc_blob_type == SOF_IPC4_MOD_CONFIG_SET) {
+			msg->primary |= SOF_IPC4_MSG_TYPE_SET(SOF_IPC4_MOD_CONFIG_SET);
+			ret = sdev->ipc->ops->set_get_data(sdev, msg, msg->data_size, true, false);
+			if (ret)
+				return ret;
+		} else if (control_data->data->ipc_blob_type == SOF_IPC4_MOD_LARGE_CONFIG_SET) {
+			msg->primary |= SOF_IPC4_MSG_TYPE_SET(SOF_IPC4_MOD_LARGE_CONFIG_SET);
+			ret = sdev->ipc->ops->set_get_data(sdev, msg, msg->data_size, true, true);
+			if (ret)
+				return ret;
+		}
+	}
+
+	return 0;
+}
+
 static int sof_ipc4_route_setup(struct snd_sof_dev *sdev, struct snd_sof_route *sroute)
 {
 	struct snd_sof_widget *src_widget = sroute->src_widget;
@@ -2048,6 +2103,7 @@ const struct sof_ipc_tplg_ops ipc4_tplg_ops = {
 	.control = &tplg_ipc4_control_ops,
 	.widget_setup = sof_ipc4_widget_setup,
 	.widget_free = sof_ipc4_widget_free,
+	.widget_set_configuration = sof_ipc4_widget_set_configuration,
 	.route_setup = sof_ipc4_route_setup,
 	.route_free = sof_ipc4_route_free,
 	.dai_config = sof_ipc4_dai_config,
