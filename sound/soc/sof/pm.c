@@ -265,14 +265,17 @@ suspend:
 			ret);
 
 	/* Do not reset FW state if DSP is in D0 */
-	if (target_state == SOF_DSP_PM_D0)
-		return ret;
+	if (ret == 0 && target_state == SOF_DSP_PM_D0)
+		return 0;
 
 	/* reset FW state */
 	sof_set_fw_state(sdev, SOF_FW_BOOT_NOT_STARTED);
 	sdev->enabled_cores_mask = 0;
 
-	return ret;
+	/* Don't report failure!  It aborts the system suspend, and we
+	 * will recover naturally on resume anyway.
+	 */
+	return 0;
 }
 
 int snd_sof_dsp_power_down_notify(struct snd_sof_dev *sdev)
