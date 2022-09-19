@@ -93,7 +93,7 @@
 
 /* Buffer Descriptor List Lower Base Address */
 #define HDA_CL_SD_BDLPLBA_SHIFT		7
-#define HDA_CL_SD_BDLPLBA_MASK		GENMASK(31,7)
+#define HDA_CL_SD_BDLPLBA_MASK		GENMASK(31, 7)
 #define HDA_CL_SD_BDLPLBA(x)		\
 	((BDL_ALIGN(lower_32_bits(x)) << HDA_CL_SD_BDLPLBA_SHIFT) & \
 	 HDA_CL_SD_BDLPLBA_MASK)
