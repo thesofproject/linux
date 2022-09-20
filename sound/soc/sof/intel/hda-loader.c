@@ -318,8 +318,26 @@ int hda_cl_copy_fw(struct snd_sof_dev *sdev, struct hdac_ext_stream *hext_stream
 	return status;
 }
 
+static int hda_dsp_boot_imr(struct snd_sof_dev *sdev)
+{
+	const struct sof_intel_dsp_desc *chip_info;
+	int ret;
+
+	chip_info = get_chip_info(sdev->pdata);
+	if (chip_info->cl_init)
+		ret = chip_info->cl_init(sdev, 0, true);
+	else
+		ret = -EINVAL;
+
+	if (!ret)
+		hda_sdw_process_wakeen(sdev);
+
+	return ret;
+}
+
 int hda_dsp_cl_boot_firmware_iccmax(struct snd_sof_dev *sdev)
 {
+	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct hdac_ext_stream *iccmax_stream;
 	struct hdac_bus *bus = sof_to_bus(sdev);
 	struct firmware stripped_firmware;
@@ -329,6 +347,22 @@ int hda_dsp_cl_boot_firmware_iccmax(struct snd_sof_dev *sdev)
 
 	/* save the original LTRP guardband value */
 	original_gb = snd_hdac_chip_readb(bus, VS_LTRP) & HDA_VS_INTEL_LTRP_GB_MASK;
+
+	if (hda->imrboot_supported && !sdev->first_boot && !hda->skip_imr_boot) {
+		dev_dbg(sdev->dev, "IMR restore supported, booting from IMR directly\n");
+		hda->boot_iteration = 0;
+		ret = hda_dsp_boot_imr(sdev);
+		if (!ret) {
+			/* restore the original guardband value after FW boot */
+			snd_hdac_chip_updateb(bus, VS_LTRP, HDA_VS_INTEL_LTRP_GB_MASK, original_gb);
+
+			hda->booted_from_imr = true;
+			return 0;
+		}
+
+		dev_warn(sdev->dev, "IMR restore failed, trying to cold boot\n");
+		hda->skip_imr_boot = true;
+	}
 
 	if (sdev->basefw.fw->size <= sdev->basefw.payload_offset) {
 		dev_err(sdev->dev, "error: firmware size must be greater than firmware offset\n");
@@ -362,23 +396,6 @@ int hda_dsp_cl_boot_firmware_iccmax(struct snd_sof_dev *sdev)
 
 	/* restore the original guardband value after FW boot */
 	snd_hdac_chip_updateb(bus, VS_LTRP, HDA_VS_INTEL_LTRP_GB_MASK, original_gb);
-
-	return ret;
-}
-
-static int hda_dsp_boot_imr(struct snd_sof_dev *sdev)
-{
-	const struct sof_intel_dsp_desc *chip_info;
-	int ret;
-
-	chip_info = get_chip_info(sdev->pdata);
-	if (chip_info->cl_init)
-		ret = chip_info->cl_init(sdev, 0, true);
-	else
-		ret = -EINVAL;
-
-	if (!ret)
-		hda_sdw_process_wakeen(sdev);
 
 	return ret;
 }
