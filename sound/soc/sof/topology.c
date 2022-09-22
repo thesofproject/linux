@@ -415,12 +415,12 @@ static const struct sof_topology_token comp_pin_tokens[] = {
 };
 
 static const struct sof_topology_token comp_sink_pin_binding_tokens[] = {
-	{SOF_TKN_COMP_SINK_PIN_BINGING_WNAME, SND_SOC_TPLG_TUPLE_TYPE_STRING,
+	{SOF_TKN_COMP_SINK_PIN_BINDING_WNAME, SND_SOC_TPLG_TUPLE_TYPE_STRING,
 		get_token_string, 0},
 };
 
 static const struct sof_topology_token comp_src_pin_binding_tokens[] = {
-	{SOF_TKN_COMP_SRC_PIN_BINGING_WNAME, SND_SOC_TPLG_TUPLE_TYPE_STRING,
+	{SOF_TKN_COMP_SRC_PIN_BINDING_WNAME, SND_SOC_TPLG_TUPLE_TYPE_STRING,
 		get_token_string, 0},
 };
 
