@@ -94,8 +94,8 @@
  * The token for sink/source pin binding, it specifies the widget
  * name that the sink/source pin is connected from/to.
  */
-#define SOF_TKN_COMP_SINK_PIN_BINGING_WNAME	413
-#define SOF_TKN_COMP_SRC_PIN_BINGING_WNAME	414
+#define SOF_TKN_COMP_SINK_PIN_BINDING_WNAME	413
+#define SOF_TKN_COMP_SRC_PIN_BINDING_WNAME	414
 
 
 /* SSP */
