@@ -46,6 +46,9 @@ int sof_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
 	/* reset route setup status for all routes that contain this widget */
 	sof_reset_route_setup_status(sdev, swidget);
 
+	/* set swidget not configured */
+	swidget->configured = false;
+
 	/* continue to disable core even if IPC fails */
 	if (tplg_ops->widget_free)
 		err = tplg_ops->widget_free(sdev, swidget);
@@ -345,6 +348,43 @@ sink_prepare:
 	return 0;
 }
 
+static int
+sof_config_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *widget, int dir)
+{
+	const struct sof_ipc_tplg_ops *ipc_tplg_ops = sdev->ipc->ops->tplg;
+	struct snd_sof_widget *swidget = widget->dobj.private;
+	struct snd_soc_dapm_path *p;
+	int ret;
+
+	if (!ipc_tplg_ops->widget_set_configuration || swidget->configured)
+		goto sink_config;
+
+	/* configure the source widget */
+	ret = ipc_tplg_ops->widget_set_configuration(sdev, swidget);
+	if (ret < 0) {
+		dev_err(sdev->dev, "failed to configure widget %s\n", widget->name);
+		return ret;
+	}
+
+	swidget->configured = true;
+
+sink_config:
+	/* configure all widgets in the sink paths */
+	snd_soc_dapm_widget_for_each_sink_path(widget, p) {
+		if (!p->walking && p->sink->dobj.private) {
+			p->walking = true;
+			ret = sof_config_widgets_in_path(sdev, p->sink, dir);
+			p->walking = false;
+			if (ret < 0) {
+				/* TODO:  unconfigure the source widget */
+				return ret;
+			}
+		}
+	}
+
+	return 0;
+}
+
 /*
  * free all widgets in the sink path starting from the source widget
  * (DAI type for capture, AIF type for playback)
@@ -466,6 +506,10 @@ sof_walk_widgets_in_order(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget_l
 		case SOF_WIDGET_UNPREPARE:
 			sof_unprepare_widgets_in_path(sdev, widget, list);
 			break;
+		case SOF_WIDGET_CONFIGURATIONS:
+			ret = sof_config_widgets_in_path(sdev, widget, dir);
+			str = "large config";
+			break;
 		default:
 			dev_err(sdev->dev, "Invalid widget op %d\n", op);
 			return -EINVAL;
@@ -519,6 +563,11 @@ int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
 	if (ret < 0)
 		goto widget_free;
 
+	ret = sof_walk_widgets_in_order(sdev, list, fe_params, platform_params,
+					dir, SOF_WIDGET_CONFIGURATIONS);
+	if (ret < 0)
+		goto widget_free;
+
 	/* complete pipelines */
 	for_each_dapm_widgets(list, i, widget) {
 		struct snd_sof_widget *swidget = widget->dobj.private;
@@ -532,7 +581,7 @@ int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
 			dev_err(sdev->dev, "error: no pipeline widget found for %s\n",
 				swidget->widget->name);
 			ret = -EINVAL;
-			goto widget_free;
+			goto widget_unconfig;
 		}
 
 		if (pipe_widget->complete)
@@ -542,13 +591,21 @@ int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
 			pipe_widget->complete = ipc_tplg_ops->pipeline_complete(sdev, pipe_widget);
 			if (pipe_widget->complete < 0) {
 				ret = pipe_widget->complete;
-				goto widget_free;
+				goto widget_unconfig;
 			}
 		}
 	}
 
 	return 0;
 
+widget_unconfig:
+	for_each_dapm_widgets(list, i, widget) {
+		struct snd_sof_widget *swidget = widget->dobj.private;
+
+		if (!swidget)
+			continue;
+		swidget->configured = false;
+	}
 widget_free:
 	sof_walk_widgets_in_order(sdev, list, fe_params, platform_params, dir,
 				  SOF_WIDGET_FREE);

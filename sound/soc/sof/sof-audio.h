@@ -51,6 +51,7 @@ enum sof_widget_op {
 	SOF_WIDGET_SETUP,
 	SOF_WIDGET_FREE,
 	SOF_WIDGET_UNPREPARE,
+	SOF_WIDGET_CONFIGURATIONS, /* config/large_config */
 };
 
 /*
@@ -175,6 +176,7 @@ struct sof_ipc_tplg_widget_ops {
  * @pipeline_complete: Function pointer for pipeline complete IPC
  * @widget_setup: Function pointer for setting up setup in the DSP
  * @widget_free: Function pointer for freeing widget in the DSP
+ * @widget_set_configuration: Function pointer for sending config/large_config IPC to DSP
  * @dai_config: Function pointer for sending DAI config IPC to the DSP
  * @dai_get_clk: Function pointer for getting the DAI clock setting
  * @set_up_all_pipelines: Function pointer for setting up all topology pipelines
@@ -192,6 +194,7 @@ struct sof_ipc_tplg_ops {
 	int (*pipeline_complete)(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget);
 	int (*widget_setup)(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget);
 	int (*widget_free)(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget);
+	int (*widget_set_configuration)(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget);
 	int (*dai_config)(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget,
 			  unsigned int flags, struct snd_sof_dai_config_data *data);
 	int (*dai_get_clk)(struct snd_sof_dev *sdev, struct snd_sof_dai *dai, int clk_type);
@@ -369,6 +372,7 @@ struct snd_sof_widget {
 	 * up in the DSP.
 	 */
 	bool prepared;
+	bool configured;
 	int use_count; /* use_count will be protected by the PCM mutex held by the core */
 	int core;
 	int id; /* id is the DAPM widget type */
