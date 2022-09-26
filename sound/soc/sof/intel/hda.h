@@ -710,7 +710,7 @@ void hda_dsp_ctrl_stop_chip(struct snd_sof_dev *sdev);
  */
 void sof_hda_bus_init(struct hdac_bus *bus, struct device *dev);
 
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_AUDIO_CODEC)
 /*
  * HDA Codec operations.
  */
@@ -718,9 +718,15 @@ void hda_codec_probe_bus(struct snd_sof_dev *sdev);
 void hda_codec_jack_wake_enable(struct snd_sof_dev *sdev, bool enable);
 void hda_codec_jack_check(struct snd_sof_dev *sdev);
 
-#endif /* CONFIG_SND_SOC_SOF_HDA */
+#else
 
-#if IS_ENABLED(CONFIG_SND_SOC_HDA_AUDIO_CODEC) && IS_ENABLED(CONFIG_SND_HDA_CODEC_HDMI)
+static inline void hda_codec_probe_bus(struct snd_sof_dev *sdev) { }
+static inline void hda_codec_jack_wake_enable(struct snd_sof_dev *sdev, bool enable) { }
+static inline void hda_codec_jack_check(struct snd_sof_dev *sdev) { }
+
+#endif /* CONFIG_SND_SOC_SOF_HDA_AUDO_CODEC */
+
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_AUDIO_CODEC) && IS_ENABLED(CONFIG_SND_HDA_CODEC_HDMI)
 
 void hda_codec_i915_display_power(struct snd_sof_dev *sdev, bool enable);
 int hda_codec_i915_init(struct snd_sof_dev *sdev);
