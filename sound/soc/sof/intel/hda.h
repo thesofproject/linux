@@ -718,6 +718,7 @@ void hda_codec_jack_wake_enable(struct snd_sof_dev *sdev, bool enable);
 void hda_codec_jack_check(struct snd_sof_dev *sdev);
 void hda_codec_check_for_state_change(struct snd_sof_dev *sdev);
 void hda_codec_init_cmd_io(struct snd_sof_dev *sdev);
+void hda_codec_stop_cmd_io(struct snd_sof_dev *sdev);
 void hda_codec_detect_mask(struct snd_sof_dev *sdev);
 void hda_codec_rirb_status_clear(struct snd_sof_dev *sdev);
 void hda_codec_set_codec_wakeup(struct snd_sof_dev *sdev, bool status);
@@ -730,6 +731,7 @@ static inline void hda_codec_jack_wake_enable(struct snd_sof_dev *sdev, bool ena
 static inline void hda_codec_jack_check(struct snd_sof_dev *sdev) { }
 static inline void hda_codec_check_for_state_change(struct snd_sof_dev *sdev) { }
 static inline void hda_codec_init_cmd_io(struct snd_sof_dev *sdev) { }
+static inline void hda_codec_stop_cmd_io(struct snd_sof_dev *sdev) { }
 static inline void hda_codec_detect_mask(struct snd_sof_dev *sdev) { }
 static inline void hda_codec_rirb_status_clear(struct snd_sof_dev *sdev) { }
 static inline void hda_codec_set_codec_wakeup(struct snd_sof_dev *sdev, bool status) { }
