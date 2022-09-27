@@ -427,6 +427,62 @@ static void sof_ipc4_widget_free_comp_pcm(struct snd_sof_widget *swidget)
 	swidget->private = NULL;
 }
 
+static int sof_ipc4_widget_setup_comp_buffer(struct snd_sof_widget *swidget)
+{
+	struct sof_ipc4_available_audio_format *available_fmt;
+	struct snd_soc_component *scomp = swidget->scomp;
+	struct sof_ipc4_copier *ipc4_copier;
+	int ret;
+
+	ipc4_copier = kzalloc(sizeof(*ipc4_copier), GFP_KERNEL);
+	if (!ipc4_copier)
+		return -ENOMEM;
+
+	swidget->private = ipc4_copier;
+	available_fmt = &ipc4_copier->available_fmt;
+
+	dev_dbg(scomp->dev, "Updating IPC structure for %s\n", swidget->widget->name);
+
+	ret = sof_ipc4_get_audio_fmt(scomp, swidget, available_fmt, true);
+	if (ret)
+		goto free_copier;
+
+	available_fmt->dma_buffer_size = kcalloc(available_fmt->audio_fmt_num, sizeof(u32),
+						 GFP_KERNEL);
+	if (!available_fmt->dma_buffer_size) {
+		ret = -ENOMEM;
+		goto free_available_fmt;
+	}
+
+	ipc4_copier->gtw_attr = kzalloc(sizeof(*ipc4_copier->gtw_attr), GFP_KERNEL);
+	if (!ipc4_copier->gtw_attr) {
+		ret = -ENOMEM;
+		goto free_dma_buffer_size;
+	}
+
+	/* set invalid gtw_cfg for module type copier */
+	ipc4_copier->copier_config = (uint32_t *)ipc4_copier->gtw_attr;
+	ipc4_copier->data.gtw_cfg.node_id = SOF_IPC4_INVALID_NODE_ID;
+	ipc4_copier->data.gtw_cfg.config_length = 1;
+	ipc4_copier->ipc_config_size = 0;
+
+	/* set up module info and message header */
+	ret = sof_ipc4_widget_setup_msg(swidget, &ipc4_copier->msg);
+	if (ret)
+		goto free_dma_buffer_size;
+
+	return 0;
+
+free_dma_buffer_size:
+	kfree(available_fmt->dma_buffer_size);
+free_available_fmt:
+	sof_ipc4_free_audio_fmt(available_fmt);
+free_copier:
+	kfree(ipc4_copier);
+	swidget->private = NULL;
+	return ret;
+}
+
 static int sof_ipc4_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 {
 	struct sof_ipc4_available_audio_format *available_fmt;
@@ -1177,6 +1233,29 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 
 		break;
 	}
+	case snd_soc_dapm_buffer:
+	{
+		ipc4_copier = (struct sof_ipc4_copier *)swidget->private;
+		copier_data = &ipc4_copier->data;
+		available_fmt = &ipc4_copier->available_fmt;
+
+		/*
+		 * base_config->audio_fmt and out_audio_fmt represent the input and output audio
+		 * formats. Use the input format as the reference to match pcm params for playback
+		 * and the output format as reference for capture.
+		 */
+		if (dir == SNDRV_PCM_STREAM_PLAYBACK) {
+			available_fmt->ref_audio_fmt = &available_fmt->base_config->audio_fmt;
+			ref_audio_fmt_size = sizeof(struct sof_ipc4_base_module_cfg);
+		} else {
+			available_fmt->ref_audio_fmt = available_fmt->out_audio_fmt;
+			ref_audio_fmt_size = sizeof(struct sof_ipc4_audio_format);
+		}
+
+		ref_params = pipeline_params;
+
+		break;
+	}
 	default:
 		dev_err(sdev->dev, "unsupported type %d for copier %s",
 			swidget->id, swidget->widget->name);
@@ -1465,6 +1544,7 @@ static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 		break;
 	case snd_soc_dapm_aif_in:
 	case snd_soc_dapm_aif_out:
+	case snd_soc_dapm_buffer:
 	{
 		struct sof_ipc4_copier *ipc4_copier = swidget->private;
 
@@ -2060,6 +2140,12 @@ static const struct sof_ipc_tplg_widget_ops tplg_ipc4_widget_ops[SND_SOC_DAPM_TY
 				  dai_token_list, ARRAY_SIZE(dai_token_list), NULL,
 				  sof_ipc4_prepare_copier_module,
 				  sof_ipc4_unprepare_copier_module},
+	[snd_soc_dapm_buffer] = {sof_ipc4_widget_setup_comp_buffer,
+				 /* sof_ipc4_widget_free_comp_pcm can be reuse */
+				 sof_ipc4_widget_free_comp_pcm,
+				 dai_token_list, ARRAY_SIZE(dai_token_list), NULL,
+				 sof_ipc4_prepare_copier_module,
+				 sof_ipc4_unprepare_copier_module},
 	[snd_soc_dapm_scheduler] = {sof_ipc4_widget_setup_comp_pipeline,
 				    sof_ipc4_widget_free_comp_pipeline,
 				    pipeline_token_list, ARRAY_SIZE(pipeline_token_list), NULL,
