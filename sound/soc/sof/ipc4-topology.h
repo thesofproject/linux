@@ -9,6 +9,7 @@
 #ifndef __INCLUDE_SOUND_SOF_IPC4_TOPOLOGY_H__
 #define __INCLUDE_SOUND_SOF_IPC4_TOPOLOGY_H__
 
+#include <linux/stddef.h>
 #include <sound/sof/ipc4/header.h>
 
 #define SOF_IPC4_FW_PAGE_SIZE BIT(12)
@@ -206,8 +207,10 @@ struct sof_ipc4_control_data {
 	int index;
 
 	union {
-		struct sof_ipc4_ctrl_value_chan chanv[0];
-		struct sof_abi_hdr data[0];
+		DECLARE_FLEX_ARRAY(struct sof_ipc4_ctrl_value_chan, chanv);
+		DECLARE_FLEX_ARRAY(u8, data); /* flexible array of
+					       * 'struct sof_abi_hdr'
+					       */
 	};
 };
 

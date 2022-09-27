@@ -149,7 +149,9 @@ struct sof_ipc_comp_event {
 	/* control data - add new types if needed */
 	union {
 		/* data can be used by binary controls */
-		struct sof_abi_hdr data[0];
+		DECLARE_FLEX_ARRAY(u8, data); /* flexible array of
+					       * 'struct sof_abi_hdr'
+					       */
 		/* event specific values */
 		uint32_t event_value;
 	};
