@@ -356,6 +356,9 @@ static int sof_ipc4_widget_setup_pcm(struct snd_sof_widget *swidget)
 		goto free_available_fmt;
 	}
 
+	if (!WIDGET_IS_AIF(swidget->id))
+		goto skip_gtw_cfg;
+
 	ret = sof_update_ipc_object(scomp, available_fmt->dma_buffer_size,
 				    SOF_COPIER_GATEWAY_CFG_TOKENS, swidget->tuples,
 				    swidget->num_tuples, sizeof(u32),
@@ -382,7 +385,7 @@ static int sof_ipc4_widget_setup_pcm(struct snd_sof_widget *swidget)
 	}
 	dev_dbg(scomp->dev, "host copier '%s' node_type %u\n", swidget->widget->name, node_type);
 
-	ipc4_copier->data.gtw_cfg.node_id = SOF_IPC4_NODE_TYPE(node_type);
+skip_gtw_cfg:
 	ipc4_copier->gtw_attr = kzalloc(sizeof(*ipc4_copier->gtw_attr), GFP_KERNEL);
 	if (!ipc4_copier->gtw_attr) {
 		ret = -ENOMEM;
@@ -392,6 +395,21 @@ static int sof_ipc4_widget_setup_pcm(struct snd_sof_widget *swidget)
 	ipc4_copier->copier_config = (uint32_t *)ipc4_copier->gtw_attr;
 	ipc4_copier->data.gtw_cfg.config_length =
 		sizeof(struct sof_ipc4_gtw_attributes) >> 2;
+
+	switch (swidget->id) {
+	case snd_soc_dapm_aif_in:
+	case snd_soc_dapm_aif_out:
+		ipc4_copier->data.gtw_cfg.node_id = SOF_IPC4_NODE_TYPE(node_type);
+		break;
+	case snd_soc_dapm_buffer:
+		ipc4_copier->data.gtw_cfg.node_id = SOF_IPC4_INVALID_NODE_ID;
+		ipc4_copier->ipc_config_size = 0;
+		break;
+	default:
+		dev_err(scomp->dev, "invalid widget type %d\n", swidget->id);
+		ret = -EINVAL;
+		goto free_gtw_attr;
+	}
 
 	/* set up module info and message header */
 	ret = sof_ipc4_widget_setup_msg(swidget, &ipc4_copier->msg);
@@ -1256,6 +1274,29 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 
 		break;
 	}
+	case snd_soc_dapm_buffer:
+	{
+		ipc4_copier = (struct sof_ipc4_copier *)swidget->private;
+		copier_data = &ipc4_copier->data;
+		available_fmt = &ipc4_copier->available_fmt;
+
+		/*
+		 * base_config->audio_fmt and out_audio_fmt represent the input and output audio
+		 * formats. Use the input format as the reference to match pcm params for playback
+		 * and the output format as reference for capture.
+		 */
+		if (dir == SNDRV_PCM_STREAM_PLAYBACK) {
+			available_fmt->ref_audio_fmt = &available_fmt->base_config->audio_fmt;
+			ref_audio_fmt_size = sizeof(struct sof_ipc4_base_module_cfg);
+		} else {
+			available_fmt->ref_audio_fmt = available_fmt->out_audio_fmt;
+			ref_audio_fmt_size = sizeof(struct sof_ipc4_audio_format);
+		}
+
+		ref_params = pipeline_params;
+
+		break;
+	}
 	default:
 		dev_err(sdev->dev, "unsupported type %d for copier %s",
 			swidget->id, swidget->widget->name);
@@ -1679,6 +1720,7 @@ static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 		break;
 	case snd_soc_dapm_aif_in:
 	case snd_soc_dapm_aif_out:
+	case snd_soc_dapm_buffer:
 	{
 		struct sof_ipc4_copier *ipc4_copier = swidget->private;
 
@@ -2233,7 +2275,7 @@ static int sof_ipc4_link_setup(struct snd_sof_dev *sdev, struct snd_soc_dai_link
 	return 0;
 }
 
-static enum sof_tokens host_token_list[] = {
+static enum sof_tokens common_copier_token_list[] = {
 	SOF_COMP_TOKENS,
 	SOF_AUDIO_FMT_NUM_TOKENS,
 	SOF_AUDIO_FORMAT_BUFFER_SIZE_TOKENS,
@@ -2298,12 +2340,12 @@ static enum sof_tokens process_token_list[] = {
 
 static const struct sof_ipc_tplg_widget_ops tplg_ipc4_widget_ops[SND_SOC_DAPM_TYPE_COUNT] = {
 	[snd_soc_dapm_aif_in] =  {sof_ipc4_widget_setup_pcm, sof_ipc4_widget_free_comp_pcm,
-				  host_token_list, ARRAY_SIZE(host_token_list), NULL,
-				  sof_ipc4_prepare_copier_module,
+				  common_copier_token_list, ARRAY_SIZE(common_copier_token_list),
+				  NULL, sof_ipc4_prepare_copier_module,
 				  sof_ipc4_unprepare_copier_module},
 	[snd_soc_dapm_aif_out] = {sof_ipc4_widget_setup_pcm, sof_ipc4_widget_free_comp_pcm,
-				  host_token_list, ARRAY_SIZE(host_token_list), NULL,
-				  sof_ipc4_prepare_copier_module,
+				  common_copier_token_list, ARRAY_SIZE(common_copier_token_list),
+				  NULL, sof_ipc4_prepare_copier_module,
 				  sof_ipc4_unprepare_copier_module},
 	[snd_soc_dapm_dai_in] = {sof_ipc4_widget_setup_comp_dai, sof_ipc4_widget_free_comp_dai,
 				 dai_token_list, ARRAY_SIZE(dai_token_list), NULL,
@@ -2313,6 +2355,10 @@ static const struct sof_ipc_tplg_widget_ops tplg_ipc4_widget_ops[SND_SOC_DAPM_TY
 				  dai_token_list, ARRAY_SIZE(dai_token_list), NULL,
 				  sof_ipc4_prepare_copier_module,
 				  sof_ipc4_unprepare_copier_module},
+	[snd_soc_dapm_buffer] = {sof_ipc4_widget_setup_pcm, sof_ipc4_widget_free_comp_pcm,
+				 common_copier_token_list, ARRAY_SIZE(common_copier_token_list),
+				 NULL, sof_ipc4_prepare_copier_module,
+				 sof_ipc4_unprepare_copier_module},
 	[snd_soc_dapm_scheduler] = {sof_ipc4_widget_setup_comp_pipeline,
 				    sof_ipc4_widget_free_comp_pipeline,
 				    pipeline_token_list, ARRAY_SIZE(pipeline_token_list), NULL,
