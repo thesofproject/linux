@@ -324,6 +324,27 @@ static inline void snd_sof_dsp_write64(struct snd_sof_dev *sdev, u32 bar,
 	dev_err_ratelimited(sdev->dev, "error: %s not defined\n", __func__);
 }
 
+static inline void snd_sof_dsp_writeb(struct snd_sof_dev *sdev, u32 bar,
+				      u32 offset, u8 value)
+{
+	if (sof_ops(sdev)->writeb) {
+		sof_ops(sdev)->writeb(sdev, sdev->bar[bar] + offset, value);
+		return;
+	}
+
+	dev_err_ratelimited(sdev->dev, "error: %s not defined\n", __func__);
+}
+
+static inline u8 snd_sof_dsp_readb(struct snd_sof_dev *sdev, u32 bar,
+				   u32 offset)
+{
+	if (sof_ops(sdev)->readb)
+		return sof_ops(sdev)->readb(sdev, sdev->bar[bar] + offset);
+
+	dev_err(sdev->dev, "error: %s not defined\n", __func__);
+	return (char)-EOPNOTSUPP;
+}
+
 static inline u32 snd_sof_dsp_read(struct snd_sof_dev *sdev, u32 bar,
 				   u32 offset)
 {

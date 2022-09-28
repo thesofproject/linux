@@ -20,6 +20,8 @@ struct snd_sof_dsp_ops sof_hda_common_ops = {
 	.remove		= hda_dsp_remove,
 
 	/* Register IO */
+	.writeb		= sof_io_writeb,
+	.readb		= sof_io_readb,
 	.write		= sof_io_write,
 	.read		= sof_io_read,
 	.write64	= sof_io_write64,

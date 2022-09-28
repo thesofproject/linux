@@ -23,6 +23,17 @@
  * structures and cannot be inlined.
  */
 
+u8 sof_io_readb(struct snd_sof_dev *sdev, void __iomem *addr)
+{
+	return readb(addr);
+}
+EXPORT_SYMBOL(sof_io_readb);
+void sof_io_writeb(struct snd_sof_dev *sdev, void __iomem *addr, u8 value)
+{
+	writeb(value, addr);
+}
+EXPORT_SYMBOL(sof_io_writeb);
+
 void sof_io_write(struct snd_sof_dev *sdev, void __iomem *addr, u32 value)
 {
 	writel(value, addr);
