@@ -425,6 +425,9 @@ struct snd_sof_widget {
 	struct ida src_queue_ida;
 	struct ida sink_queue_ida;
 
+	/* whether widget is on a BE pipeline or not */
+	int on_be_ppl;
+
 	void *private;		/* core does not touch this */
 };
 
