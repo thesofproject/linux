@@ -348,8 +348,11 @@ void hda_dsp_ipc_int_disable(struct snd_sof_dev *sdev)
 static int hda_dsp_wait_d0i3c_done(struct snd_sof_dev *sdev)
 {
 	int retry = HDA_DSP_REG_POLL_RETRY_COUNT;
+	struct snd_sof_pdata *pdata = sdev->pdata;
+	const struct sof_intel_dsp_desc *chip;
 
-	while (snd_sof_dsp_readb(sdev, HDA_DSP_HDA_BAR, SOF_HDA_VS_D0I3C) &
+	chip = get_chip_info(pdata);
+	while (snd_sof_dsp_readb(sdev, HDA_DSP_HDA_BAR, chip->d0i3_offset) &
 		SOF_HDA_VS_D0I3C_CIP) {
 		if (!retry--)
 			return -ETIMEDOUT;
@@ -378,7 +381,11 @@ static int hda_dsp_send_pm_gate_ipc(struct snd_sof_dev *sdev, u32 flags)
 
 static int hda_dsp_update_d0i3c_register(struct snd_sof_dev *sdev, u8 value)
 {
+	struct snd_sof_pdata *pdata = sdev->pdata;
+	const struct sof_intel_dsp_desc *chip;
 	int ret;
+
+	chip = get_chip_info(pdata);
 
 	/* Write to D0I3C after Command-In-Progress bit is cleared */
 	ret = hda_dsp_wait_d0i3c_done(sdev);
@@ -388,7 +395,7 @@ static int hda_dsp_update_d0i3c_register(struct snd_sof_dev *sdev, u8 value)
 	}
 
 	/* Update D0I3C register */
-	snd_sof_dsp_writeb(sdev, HDA_DSP_HDA_BAR, SOF_HDA_VS_D0I3C, value);
+	snd_sof_dsp_writeb(sdev, HDA_DSP_HDA_BAR, chip->d0i3_offset, value);
 
 	/* Wait for cmd in progress to be cleared before exiting the function */
 	ret = hda_dsp_wait_d0i3c_done(sdev);
@@ -398,7 +405,7 @@ static int hda_dsp_update_d0i3c_register(struct snd_sof_dev *sdev, u8 value)
 	}
 
 	trace_sof_intel_D0I3C_updated(sdev,
-				      snd_sof_dsp_readb(sdev, HDA_DSP_HDA_BAR, SOF_HDA_VS_D0I3C));
+				      snd_sof_dsp_readb(sdev, HDA_DSP_HDA_BAR, chip->d0i3_offset));
 
 	return 0;
 }
