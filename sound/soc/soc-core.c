@@ -1838,21 +1838,22 @@ match:
 	}
 }
 
-#define soc_setup_card_name(name, name1, name2, norm)		\
-	__soc_setup_card_name(name, sizeof(name), name1, name2, norm)
-static void __soc_setup_card_name(char *name, int len,
-				  const char *name1, const char *name2,
-				  int normalization)
+#define soc_setup_card_name(card, name, name1, name2) \
+	__soc_setup_card_name(card, name, sizeof(name), name1, name2)
+static void __soc_setup_card_name(struct snd_soc_card *card,
+				  char *name, int len,
+				  const char *name1, const char *name2)
 {
+	const char *src = name1 ? name1 : name2;
 	int i;
 
-	snprintf(name, len, "%s", name1 ? name1 : name2);
+	snprintf(name, len, "%s", src);
 
-	if (!normalization)
+	if (name != card->snd_card->driver)
 		return;
 
 	/*
-	 * Name normalization
+	 * Name normalization (driver field)
 	 *
 	 * The driver name is somewhat special, as it's used as a key for
 	 * searches in the user-space.
@@ -1872,6 +1873,14 @@ static void __soc_setup_card_name(char *name, int len,
 			break;
 		}
 	}
+
+	/*
+	 * The driver field should contain a valid string from the user view.
+	 * The wrapping usually does not work so well here. Set a smaller string
+	 * in the specific ASoC driver.
+	 */
+	if (strlen(src) > len - 1)
+		dev_err(card->dev, "ASoC: driver name too long '%s' -> '%s'\n", src, name);
 }
 
 static void soc_cleanup_card_resources(struct snd_soc_card *card)
@@ -1926,6 +1935,7 @@ static int snd_soc_bind_card(struct snd_soc_card *card)
 	struct snd_soc_pcm_runtime *rtd;
 	struct snd_soc_component *component;
 	struct snd_soc_dai_link *dai_link;
+	const char *fallback;
 	int ret, i;
 
 	mutex_lock(&client_mutex);
@@ -2039,12 +2049,15 @@ static int snd_soc_bind_card(struct snd_soc_card *card)
 	/* try to set some sane longname if DMI is available */
 	snd_soc_set_dmi_name(card, NULL);
 
-	soc_setup_card_name(card->snd_card->shortname,
-			    card->name, NULL, 0);
-	soc_setup_card_name(card->snd_card->longname,
-			    card->long_name, card->name, 0);
-	soc_setup_card_name(card->snd_card->driver,
-			    card->driver_name, card->name, 1);
+	soc_setup_card_name(card, card->snd_card->shortname,
+			    card->name, NULL);
+	fallback = card->name;
+	soc_setup_card_name(card, card->snd_card->longname,
+			    card->long_name, fallback);
+	if (card->long_name == card->dmi_longname)
+		fallback = "ASoC-DMI";
+	soc_setup_card_name(card, card->snd_card->driver,
+			    card->driver_name, fallback);
 
 	if (card->components) {
 		/* the current implementation of snd_component_add() accepts */
