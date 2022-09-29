@@ -209,6 +209,9 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 	target_state = snd_sof_dsp_power_target(sdev);
 	pm_state.event = target_state;
 
+	if (tplg_ops->tear_down_all_pipelines)
+		tplg_ops->tear_down_all_pipelines(sdev, false);
+
 	/* Skip to platform-specific suspend if DSP is entering D0 */
 	if (target_state == SOF_DSP_PM_D0) {
 		sof_fw_trace_suspend(sdev, pm_state);
@@ -216,9 +219,6 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 		sof_suspend_clients(sdev, pm_state);
 		goto suspend;
 	}
-
-	if (tplg_ops->tear_down_all_pipelines)
-		tplg_ops->tear_down_all_pipelines(sdev, false);
 
 	/* suspend DMA trace */
 	sof_fw_trace_suspend(sdev, pm_state);
