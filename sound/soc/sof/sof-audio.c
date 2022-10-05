@@ -239,24 +239,32 @@ static int sof_setup_pipeline_connections(struct snd_sof_dev *sdev,
 			if (!widget->dobj.private)
 				continue;
 
-			snd_soc_dapm_widget_for_each_sink_path(widget, p)
+			snd_soc_dapm_widget_for_each_sink_path(widget, p) {
+				if (!widget_in_list(list, p->sink))
+					continue;
+
 				if (p->sink->dobj.private) {
 					ret = sof_route_setup(sdev, widget, p->sink);
 					if (ret < 0)
 						return ret;
 				}
+			}
 		}
 	} else {
 		for_each_dapm_widgets(list, i, widget) {
 			if (!widget->dobj.private)
 				continue;
 
-			snd_soc_dapm_widget_for_each_source_path(widget, p)
+			snd_soc_dapm_widget_for_each_source_path(widget, p) {
+				if (!widget_in_list(list, p->source))
+					continue;
+
 				if (p->source->dobj.private) {
 					ret = sof_route_setup(sdev, p->source, widget);
 					if (ret < 0)
 						return ret;
 				}
+			}
 		}
 	}
 
