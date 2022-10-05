@@ -832,7 +832,9 @@ int sof_machine_check(struct snd_sof_dev *sdev)
 	const struct sof_dev_desc *desc = sof_pdata->desc;
 	struct snd_soc_acpi_mach *mach;
 
-	if (!IS_ENABLED(CONFIG_SND_SOC_SOF_FORCE_NOCODEC_MODE)) {
+	if (!IS_ENABLED(CONFIG_SND_SOC_SOF_FORCE_NOCODEC_MODE) ||
+	    !(IS_ENABLED(CONFIG_SND_SOC_SOF_NOCODEC_DEBUG_SUPPORT) &&
+	      sof_debug_check_flag(SOF_DBG_FORCE_NOCODEC))) {
 		const struct snd_sof_of_mach *of_mach;
 
 		/* find machine */
