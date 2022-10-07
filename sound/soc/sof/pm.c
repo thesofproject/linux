@@ -192,6 +192,9 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 	if (runtime_suspend && !sof_ops(sdev)->runtime_suspend)
 		return 0;
 
+	target_state = snd_sof_dsp_power_target(sdev);
+	pm_state.event = target_state;
+
 	if (sdev->fw_state != SOF_FW_BOOT_COMPLETE)
 		goto suspend;
 
@@ -205,9 +208,6 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 			return ret;
 		}
 	}
-
-	target_state = snd_sof_dsp_power_target(sdev);
-	pm_state.event = target_state;
 
 	if (tplg_ops && tplg_ops->tear_down_all_pipelines)
 		tplg_ops->tear_down_all_pipelines(sdev, false);
