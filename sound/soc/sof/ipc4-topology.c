@@ -1972,7 +1972,7 @@ static int sof_ipc4_tear_down_all_pipelines(struct snd_sof_dev *sdev, bool verif
 
 static int sof_ipc4_link_setup(struct snd_sof_dev *sdev, struct snd_soc_dai_link *link)
 {
-	if (!link->no_pcm)
+	if (link->no_pcm)
 		return 0;
 
 	/*
