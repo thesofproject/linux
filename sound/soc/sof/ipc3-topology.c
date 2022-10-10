@@ -2400,7 +2400,7 @@ static int sof_ipc3_parse_manifest(struct snd_soc_component *scomp, int index,
 
 static int sof_ipc3_link_setup(struct snd_sof_dev *sdev, struct snd_soc_dai_link *link)
 {
-	if (!link->no_pcm)
+	if (link->no_pcm)
 		return 0;
 
 	/*
