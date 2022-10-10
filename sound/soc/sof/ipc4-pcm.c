@@ -58,6 +58,10 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 		if (!swidget)
 			continue;
 
+		/* find pipeline widget for the pipeline that this widget belongs to */
+		pipeline_widget = swidget->pipe_widget;
+		pipeline = pipeline_widget->private;
+
 		/*
 		 * set pipeline state for both FE and BE pipelines for RUNNING state.
 		 * For PAUSE/RESET, set the pipeline state only for the FE pipeline.
@@ -65,16 +69,11 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 		switch (state) {
 		case SOF_IPC4_PIPE_PAUSED:
 		case SOF_IPC4_PIPE_RESET:
-			if (!WIDGET_IS_AIF(swidget->id))
+			if (pipeline->is_backend)
 				continue;
-			break;
 		default:
 			break;
 		}
-
-		/* find pipeline widget for the pipeline that this widget belongs to */
-		pipeline_widget = swidget->pipe_widget;
-		pipeline = (struct sof_ipc4_pipeline *)pipeline_widget->private;
 
 		if (pipeline->state == state)
 			continue;

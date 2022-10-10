@@ -71,12 +71,14 @@
  * @mem_usage: Memory usage
  * @state: Pipeline state
  * @msg: message structure for pipeline
+ * @is_backend: flag indicating it is a backend pipeline containing a dai_in/dai_out widget
  */
 struct sof_ipc4_pipeline {
 	uint32_t priority;
 	uint32_t lp_mode;
 	uint32_t mem_usage;
 	int state;
+	bool is_backend;
 	struct sof_ipc4_msg msg;
 };
 

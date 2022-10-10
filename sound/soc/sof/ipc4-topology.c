@@ -1480,6 +1480,10 @@ static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 		struct snd_sof_dai *dai = swidget->private;
 		struct sof_ipc4_copier *ipc4_copier = dai->private;
 
+		/* set the pipeline that the DAI widget belongs to as a backend pipeline */
+		pipeline = pipe_widget->private;
+		pipeline->is_backend = true;
+
 		ipc_size = ipc4_copier->ipc_config_size;
 		ipc_data = ipc4_copier->ipc_config_data;
 
