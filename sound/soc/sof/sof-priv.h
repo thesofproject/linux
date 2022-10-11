@@ -46,6 +46,7 @@
 #define SOF_DBG_FORCE_NOCODEC			BIT(10) /* ignore all codec-related
 							 * configurations
 							 */
+#define SOF_DBG_DSPLESS_MODE			BIT(15) /* Do not initialize and use the DSP */
 
 /* Flag definitions used for controlling the DSP dump behavior */
 #define SOF_DBG_DUMP_REGS		BIT(0)
@@ -524,6 +525,16 @@ struct snd_sof_dev {
 	struct device *dev;
 	spinlock_t ipc_lock;	/* lock for IPC users */
 	spinlock_t hw_lock;	/* lock for HW IO access */
+
+	/*
+	 * When true the DSP is not used.
+	 * It is set under the following condition:
+	 * User sets the SOF_DBG_DSPLESS_MODE flag in sof_debug module parameter
+	 * and
+	 * the platform advertises that it can support such mode
+	 * pdata->desc->dspless_mode_supported is true.
+	 */
+	bool dspless_mode_selected;
 
 	/* Main, Base firmware image */
 	struct sof_firmware basefw;
