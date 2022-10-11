@@ -362,6 +362,16 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 	sdev->first_boot = true;
 	dev_set_drvdata(dev, sdev);
 
+	if (sof_debug_check_flag(SOF_DBG_DSPLESS_MODE)) {
+		if (plat_data->desc->dspless_mode_supported) {
+			dev_info(dev, "Switching to DSPless mode\n");
+		} else {
+			dev_info(dev, "DSPless mode is not supported by the platform\n");
+			/* Clear the DSPless mode flag, it is not supported  */
+			sof_core_debug &= ~SOF_DBG_DSPLESS_MODE;
+		}
+	}
+
 	if (sof_core_debug)
 		dev_info(dev, "sof_debug value: %#x\n", sof_core_debug);
 
