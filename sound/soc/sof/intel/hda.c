@@ -1046,6 +1046,9 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	hdev->no_ipc_position = sof_ops(sdev)->pcm_pointer ? 1 : 0;
 #endif
 
+	if (sof_debug_check_flag(SOF_DBG_DSPLESS_MODE))
+		hdev->no_ipc_position = 1;
+
 	/* set up HDA base */
 	bus = sof_to_bus(sdev);
 	ret = hda_init(sdev);

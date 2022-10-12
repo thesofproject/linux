@@ -603,6 +603,88 @@ static const struct snd_soc_dai_ops ipc4_hda_dai_ops = {
 	.prepare = hda_dai_prepare,
 };
 
+static int dspless_hda_dai_hw_params(struct snd_pcm_substream *substream,
+				     struct snd_pcm_hw_params *params,
+				     struct snd_soc_dai *dai)
+{
+	struct hdac_stream *hstream = substream->runtime->private_data;
+	struct hdac_ext_stream *hext_stream = stream_to_hdac_ext_stream(hstream);
+	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
+	struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(rtd, 0);
+	struct hdac_bus *bus = hstream->bus;
+	struct hdac_ext_link *hlink;
+	int sig_bits;
+
+	hlink = snd_hdac_ext_bus_get_hlink_by_name(bus, codec_dai->component->name);
+	if (!hlink)
+		return -EINVAL;
+
+	/* set the hdac_stream in the codec dai */
+	snd_soc_dai_set_stream(codec_dai, hdac_stream(hext_stream), substream->stream);
+
+	if (hext_stream->hstream.direction == SNDRV_PCM_STREAM_PLAYBACK) {
+		snd_hdac_ext_bus_link_set_stream_id(hlink, hstream->stream_tag);
+	} else {
+	}
+
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		sig_bits = codec_dai->driver->playback.sig_bits;
+	else
+		sig_bits = codec_dai->driver->capture.sig_bits;
+
+	/* Save the format required for the codec */
+	hstream->format_val = snd_hdac_calc_stream_format(params_rate(params),
+							  params_channels(params),
+							  params_format(params),
+							  sig_bits, 0);
+	hext_stream->link_prepared = 1;
+
+	return 0;
+}
+
+static int dspless_hda_dai_hw_free(struct snd_pcm_substream *substream,
+				   struct snd_soc_dai *dai)
+{
+	struct hdac_stream *hstream = substream->runtime->private_data;
+	struct hdac_ext_stream *hext_stream = stream_to_hdac_ext_stream(hstream);
+	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
+	struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(rtd, 0);
+	struct hdac_bus *bus = hstream->bus;
+	struct hdac_ext_link *hlink;
+
+	hlink = snd_hdac_ext_bus_get_hlink_by_name(bus, codec_dai->component->name);
+	if (!hlink)
+		return -EINVAL;
+
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		snd_hdac_ext_bus_link_clear_stream_id(hlink, hstream->stream_tag);
+
+	hext_stream->link_prepared = 0;
+
+	return 0;
+}
+
+static const struct snd_soc_dai_ops dspless_hda_dai_ops = {
+	.hw_params = dspless_hda_dai_hw_params,
+	.hw_free = dspless_hda_dai_hw_free,
+};
+
+static int dspless_hda_dai_suspend(struct hdac_bus *bus)
+{
+	struct hdac_ext_stream *hext_stream;
+	struct hdac_stream *s;
+
+	/* set internal flag for BE */
+	list_for_each_entry(s, &bus->stream_list, list) {
+		hext_stream = stream_to_hdac_ext_stream(s);
+
+		if (hext_stream->link_substream)
+			hext_stream->link_prepared = 0;
+	}
+
+	return 0;
+}
+
 #endif
 
 /* only one flag used so far to harden hw_params/hw_free/trigger/prepare */
@@ -717,6 +799,18 @@ static const struct snd_soc_dai_ops ipc3_ssp_dai_ops = {
 void hda_set_dai_drv_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops *ops)
 {
 	int i;
+
+	if (sof_debug_check_flag(SOF_DBG_DSPLESS_MODE)) {
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
+		for (i = 0; i < ops->num_drv; i++) {
+			if (strstr(ops->drv[i].name, "iDisp") ||
+			    strstr(ops->drv[i].name, "Analog") ||
+			    strstr(ops->drv[i].name, "Digital"))
+				ops->drv[i].ops = &dspless_hda_dai_ops;
+		}
+#endif
+		return;
+	}
 
 	switch (sdev->pdata->ipc_type) {
 	case SOF_IPC:
@@ -929,7 +1023,11 @@ int hda_dsp_dais_suspend(struct snd_sof_dev *sdev)
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_AUDIO_CODEC)
 	int ret;
 
-	ret = hda_dai_suspend(sof_to_bus(sdev));
+	if (sof_debug_check_flag(SOF_DBG_DSPLESS_MODE))
+		ret = dspless_hda_dai_suspend(sof_to_bus(sdev));
+	else
+		ret = hda_dai_suspend(sof_to_bus(sdev));
+
 	if (ret < 0)
 		return ret;
 #endif

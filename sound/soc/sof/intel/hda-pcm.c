@@ -111,7 +111,10 @@ int hda_dsp_pcm_hw_params(struct snd_sof_dev *sdev,
 
 	dmab = substream->runtime->dma_buffer_p;
 
-	hstream->format_val = rate | bits | (params_channels(params) - 1);
+	/* Use the codec required format val when the DSP is not in use */
+	if (!sof_debug_check_flag(SOF_DBG_DSPLESS_MODE))
+		hstream->format_val = rate | bits | (params_channels(params) - 1);
+
 	hstream->bufsize = size;
 	hstream->period_bytes = params_period_bytes(params);
 	hstream->no_period_wakeup  =

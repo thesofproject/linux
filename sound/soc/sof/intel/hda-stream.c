@@ -480,7 +480,7 @@ int hda_dsp_stream_hw_params(struct snd_sof_dev *sdev,
 	int sd_offset = SOF_STREAM_SD_OFFSET(hstream);
 	int ret;
 	u32 dma_start = SOF_HDA_SD_CTL_DMA_START;
-	u32 mask;
+	u32 mask = 0x1 << hstream->index;
 	u32 run;
 
 	if (!hext_stream) {
@@ -493,10 +493,10 @@ int hda_dsp_stream_hw_params(struct snd_sof_dev *sdev,
 		return -ENODEV;
 	}
 
-	/* decouple host and link DMA */
-	mask = 0x1 << hstream->index;
-	snd_sof_dsp_update_bits(sdev, HDA_DSP_PP_BAR, SOF_HDA_REG_PP_PPCTL,
-				mask, mask);
+	/* decouple host and link DMA if the DSP is used */
+	if (!sof_debug_check_flag(SOF_DBG_DSPLESS_MODE))
+		snd_sof_dsp_update_bits(sdev, HDA_DSP_PP_BAR, SOF_HDA_REG_PP_PPCTL,
+					mask, mask);
 
 	/* clear stream status */
 	snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR, sd_offset,
@@ -597,7 +597,8 @@ int hda_dsp_stream_hw_params(struct snd_sof_dev *sdev,
 	 *    enable decoupled mode
 	 */
 
-	if (chip->quirks & SOF_INTEL_PROCEN_FMT_QUIRK) {
+	if ((!sof_debug_check_flag(SOF_DBG_DSPLESS_MODE)) &&
+	    chip->quirks & SOF_INTEL_PROCEN_FMT_QUIRK) {
 		/* couple host and link DMA, disable DSP features */
 		snd_sof_dsp_update_bits(sdev, HDA_DSP_PP_BAR, SOF_HDA_REG_PP_PPCTL,
 					mask, 0);
@@ -609,7 +610,8 @@ int hda_dsp_stream_hw_params(struct snd_sof_dev *sdev,
 				SOF_HDA_ADSP_REG_SD_FORMAT,
 				0xffff, hstream->format_val);
 
-	if (chip->quirks & SOF_INTEL_PROCEN_FMT_QUIRK) {
+	if ((!sof_debug_check_flag(SOF_DBG_DSPLESS_MODE)) &&
+	    chip->quirks & SOF_INTEL_PROCEN_FMT_QUIRK) {
 		/* decouple host and link DMA, enable DSP features */
 		snd_sof_dsp_update_bits(sdev, HDA_DSP_PP_BAR, SOF_HDA_REG_PP_PPCTL,
 					mask, mask);
@@ -666,20 +668,23 @@ int hda_dsp_stream_hw_free(struct snd_sof_dev *sdev,
 	struct hdac_ext_stream *hext_stream = container_of(hstream,
 							 struct hdac_ext_stream,
 							 hstream);
-	struct hdac_bus *bus = sof_to_bus(sdev);
-	u32 mask = 0x1 << hstream->index;
 	int ret;
 
 	ret = hda_dsp_stream_reset(sdev, hstream);
 	if (ret < 0)
 		return ret;
 
-	spin_lock_irq(&bus->reg_lock);
-	/* couple host and link DMA if link DMA channel is idle */
-	if (!hext_stream->link_locked)
-		snd_sof_dsp_update_bits(sdev, HDA_DSP_PP_BAR,
-					SOF_HDA_REG_PP_PPCTL, mask, 0);
-	spin_unlock_irq(&bus->reg_lock);
+	if (!sof_debug_check_flag(SOF_DBG_DSPLESS_MODE)) {
+		struct hdac_bus *bus = sof_to_bus(sdev);
+		u32 mask = 0x1 << hstream->index;
+
+		spin_lock_irq(&bus->reg_lock);
+		/* couple host and link DMA if link DMA channel is idle */
+		if (!hext_stream->link_locked)
+			snd_sof_dsp_update_bits(sdev, HDA_DSP_PP_BAR,
+						SOF_HDA_REG_PP_PPCTL, mask, 0);
+		spin_unlock_irq(&bus->reg_lock);
+	}
 
 	hda_dsp_stream_spib_config(sdev, hext_stream, HDA_DSP_SPIB_DISABLE, 0);
 
