@@ -304,6 +304,7 @@ sof_prepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget
 	const struct sof_ipc_tplg_ops *ipc_tplg_ops = sdev->ipc->ops->tplg;
 	const struct sof_ipc_tplg_widget_ops *widget_ops = ipc_tplg_ops->widget;
 	struct snd_sof_widget *swidget = widget->dobj.private;
+	struct snd_pcm_hw_params params;
 	struct snd_soc_dapm_path *p;
 	int ret;
 
@@ -327,8 +328,9 @@ sink_prepare:
 			continue;
 		if (!p->walking && p->sink->dobj.private) {
 			p->walking = true;
+			memcpy(&params, pipeline_params, sizeof(*pipeline_params));
 			ret = sof_prepare_widgets_in_path(sdev, p->sink,  fe_params,
-							  platform_params, pipeline_params, dir,
+							  platform_params, &params, dir,
 							  list);
 			p->walking = false;
 			if (ret < 0) {
