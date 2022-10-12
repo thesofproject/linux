@@ -111,7 +111,13 @@ int hda_dsp_pcm_hw_params(struct snd_sof_dev *sdev,
 
 	dmab = substream->runtime->dma_buffer_p;
 
-	hstream->format_val = rate | bits | (params_channels(params) - 1);
+	/*
+	 * Use the codec required format val (which is link_bps adjusted) when
+	 * the DSP is not in use
+	 */
+	if (!sdev->dspless_mode_selected)
+		hstream->format_val = rate | bits | (params_channels(params) - 1);
+
 	hstream->bufsize = size;
 	hstream->period_bytes = params_period_bytes(params);
 	hstream->no_period_wakeup  =
@@ -248,6 +254,11 @@ int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
 	/* avoid circular buffer wrap in middle of period */
 	snd_pcm_hw_constraint_integer(substream->runtime,
 				      SNDRV_PCM_HW_PARAM_PERIODS);
+
+	/* Only S16 and S32 supported by HDA hardware when used without DSP */
+	if (sdev->dspless_mode_selected)
+		snd_pcm_hw_constraint_mask64(substream->runtime, SNDRV_PCM_HW_PARAM_FORMAT,
+					     SNDRV_PCM_FMTBIT_S16 | SNDRV_PCM_FMTBIT_S32);
 
 	/* binding pcm substream to hda stream */
 	substream->runtime->private_data = &dsp_stream->hstream;
