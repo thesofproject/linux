@@ -993,6 +993,51 @@ static int sof_ipc4_widget_assign_instance_id(struct snd_sof_dev *sdev,
 	return 0;
 }
 
+/* update hw_params based on the audio stream format */
+static int sof_ipc4_update_hw_params(struct snd_sof_dev *sdev, struct snd_pcm_hw_params *params,
+				     struct sof_ipc4_audio_format *fmt)
+{
+	struct snd_interval *i;
+	struct snd_mask *m;
+	snd_pcm_format_t snd_fmt;
+	unsigned int channels, rate;
+	int valid_bits;
+
+	/* update rate */
+	rate = fmt->sampling_frequency;
+	i = hw_param_interval(params, SNDRV_PCM_HW_PARAM_RATE);
+	i->min = rate;
+	i->max = rate;
+
+	/* update channel */
+	channels = SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(fmt->fmt_cfg);
+	i = hw_param_interval(params, SNDRV_PCM_HW_PARAM_CHANNELS);
+	i->min = channels;
+	i->max = channels;
+
+	/* update fmt */
+	valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(fmt->fmt_cfg);
+	switch (valid_bits) {
+	case 16:
+		snd_fmt = SNDRV_PCM_FORMAT_S16_LE;
+		break;
+	case 24:
+		snd_fmt = SNDRV_PCM_FORMAT_S24_LE;
+		break;
+	case 32:
+		snd_fmt = SNDRV_PCM_FORMAT_S32_LE;
+		break;
+	default:
+		dev_err(sdev->dev, "invalid pcm valid_bits %d\n", valid_bits);
+		return -EINVAL;
+	}
+	m = hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT);
+	snd_mask_none(m);
+	snd_mask_set_format(m, snd_fmt);
+
+	return 0;
+}
+
 static int sof_ipc4_init_audio_fmt(struct snd_sof_dev *sdev,
 				   struct snd_sof_widget *swidget,
 				   struct sof_ipc4_base_module_cfg *base_config,
@@ -1657,6 +1702,13 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 					      sizeof(struct sof_ipc4_base_module_cfg));
 	if (ret < 0)
 		return ret;
+
+	if  (process->payload_with_output_fmt) {
+		ret = sof_ipc4_update_hw_params(sdev, pipeline_params,
+						&process->output_format);
+		if (ret)
+			return ret;
+	}
 
 	/* update pipeline memory usage */
 	sof_ipc4_update_pipeline_mem_usage(sdev, swidget, &process->base_config);
