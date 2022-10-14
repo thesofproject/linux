@@ -185,6 +185,8 @@ struct sof_intel_dsp_desc {
 	u32 d0i3_offset;
 	u32 quirks;
 	enum sof_intel_hw_ip_version hw_ip_version;
+	u32 interface_mask;		/* supported: BIT(SOF_DAI_INTEL_XXX) set */
+	u32 interface_mask_dsp_only;	/* supported only by DSP: BIT(SOF_DAI_INTEL_XXX) set */
 	bool (*check_sdw_irq)(struct snd_sof_dev *sdev);
 	bool (*check_ipc_irq)(struct snd_sof_dev *sdev);
 	int (*power_down_dsp)(struct snd_sof_dev *sdev);

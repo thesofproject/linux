@@ -116,5 +116,8 @@ const struct sof_intel_dsp_desc apl_chip_info = {
 	.power_down_dsp = hda_power_down_dsp,
 	.disable_interrupts = hda_dsp_disable_interrupts,
 	.hw_ip_version = SOF_INTEL_CAVS_1_5_PLUS,
+	.interface_mask = BIT(SOF_DAI_INTEL_SSP) | BIT(SOF_DAI_INTEL_DMIC) |
+				BIT(SOF_DAI_INTEL_HDA),
+	.interface_mask_dsp_only = BIT(SOF_DAI_INTEL_SSP) | BIT(SOF_DAI_INTEL_DMIC),
 };
 EXPORT_SYMBOL_NS(apl_chip_info, SND_SOC_SOF_INTEL_HDA_COMMON);

@@ -203,6 +203,8 @@ const struct sof_intel_dsp_desc tng_chip_info = {
 	.cores_num = 1,
 	.host_managed_cores_mask = 1,
 	.hw_ip_version = SOF_INTEL_TANGIER,
+	.interface_mask = BIT(SOF_DAI_INTEL_SSP),
+	.interface_mask_dsp_only = BIT(SOF_DAI_INTEL_SSP),
 };
 
 static const struct sof_dev_desc tng_desc = {
