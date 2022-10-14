@@ -877,6 +877,7 @@ static int hda_init_caps(struct snd_sof_dev *sdev)
 {
 	struct hdac_bus *bus = sof_to_bus(sdev);
 	struct snd_sof_pdata *pdata = sdev->pdata;
+	const struct sof_intel_dsp_desc *chip;
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
 	struct hdac_ext_link *hlink;
 #endif
@@ -895,6 +896,11 @@ static int hda_init_caps(struct snd_sof_dev *sdev)
 			ret);
 		return ret;
 	}
+
+	/* Skip SoundWire if is not supported by this SOC */
+	chip = get_chip_info(pdata);
+	if (!(chip->interface_mask & BIT(SOF_DAI_INTEL_ALH)))
+		goto skip_soundwire;
 
 	/* scan SoundWire capabilities exposed by DSDT */
 	ret = hda_sdw_acpi_scan(sdev);
@@ -1427,11 +1433,17 @@ static bool link_slaves_found(struct snd_sof_dev *sdev,
 static struct snd_soc_acpi_mach *hda_sdw_machine_select(struct snd_sof_dev *sdev)
 {
 	struct snd_sof_pdata *pdata = sdev->pdata;
+	const struct sof_intel_dsp_desc *chip;
 	const struct snd_soc_acpi_link_adr *link;
 	struct snd_soc_acpi_mach *mach;
 	struct sof_intel_hda_dev *hdev;
 	u32 link_mask;
 	int i;
+
+	/* bail if SoundWire is not supported by this SOC */
+	chip = get_chip_info(pdata);
+	if (!(chip->interface_mask & BIT(SOF_DAI_INTEL_ALH)))
+		return NULL;
 
 	hdev = pdata->hw_pdata;
 	link_mask = hdev->info.link_mask;
