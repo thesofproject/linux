@@ -37,7 +37,7 @@ static int sof_ipc4_set_multi_pipeline_state(struct snd_sof_dev *sdev, u32 state
 	msg.data_size = ipc_size;
 	msg.data_ptr = trigger_list;
 
-	return sof_ipc_tx_message(sdev->ipc, &msg, ipc_size, NULL, 0);
+	return sof_ipc_tx_message_no_reply(sdev->ipc, &msg, ipc_size);
 }
 
 int sof_ipc4_set_pipeline_state(struct snd_sof_dev *sdev, u32 id, u32 state)
@@ -55,7 +55,7 @@ int sof_ipc4_set_pipeline_state(struct snd_sof_dev *sdev, u32 id, u32 state)
 
 	msg.primary = primary;
 
-	return sof_ipc_tx_message(sdev->ipc, &msg, 0, NULL, 0);
+	return sof_ipc_tx_message_no_reply(sdev->ipc, &msg, 0);
 }
 EXPORT_SYMBOL(sof_ipc4_set_pipeline_state);
 

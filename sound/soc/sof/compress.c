@@ -134,7 +134,6 @@ static int sof_compr_free(struct snd_soc_component *component,
 	struct sof_compr_stream *sstream = cstream->runtime->private_data;
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct sof_ipc_stream stream;
-	struct sof_ipc_reply reply;
 	struct snd_sof_pcm *spcm;
 	int ret = 0;
 
@@ -147,8 +146,7 @@ static int sof_compr_free(struct snd_soc_component *component,
 	stream.comp_id = spcm->stream[cstream->direction].comp_id;
 
 	if (spcm->prepared[cstream->direction]) {
-		ret = sof_ipc_tx_message(sdev->ipc, &stream, sizeof(stream),
-					 &reply, sizeof(reply));
+		ret = sof_ipc_tx_message_no_reply(sdev->ipc, &stream, sizeof(stream));
 		if (!ret)
 			spcm->prepared[cstream->direction] = false;
 	}
@@ -166,7 +164,6 @@ static int sof_compr_set_params(struct snd_soc_component *component,
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_compr_runtime *crtd = cstream->runtime;
-	struct sof_ipc_pcm_params_reply ipc_params_reply;
 	struct sof_ipc_fw_ready *ready = &sdev->fw_ready;
 	struct sof_ipc_fw_version *v = &ready->version;
 	struct sof_compr_stream *sstream;
@@ -230,8 +227,7 @@ static int sof_compr_set_params(struct snd_soc_component *component,
 
 	memcpy((u8 *)pcm->params.ext_data, &params->codec, ext_data_size);
 
-	ret = sof_ipc_tx_message(sdev->ipc, pcm, sizeof(*pcm) + ext_data_size,
-				 &ipc_params_reply, sizeof(ipc_params_reply));
+	ret = sof_ipc_tx_message_no_reply(sdev->ipc, pcm, sizeof(*pcm) + ext_data_size);
 	if (ret < 0) {
 		dev_err(component->dev, "error ipc failed\n");
 		goto out;
@@ -264,7 +260,6 @@ static int sof_compr_trigger(struct snd_soc_component *component,
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct sof_ipc_stream stream;
-	struct sof_ipc_reply reply;
 	struct snd_sof_pcm *spcm;
 
 	spcm = snd_sof_find_spcm_dai(component, rtd);
@@ -293,8 +288,7 @@ static int sof_compr_trigger(struct snd_soc_component *component,
 		break;
 	}
 
-	return sof_ipc_tx_message(sdev->ipc, &stream, sizeof(stream),
-				  &reply, sizeof(reply));
+	return sof_ipc_tx_message_no_reply(sdev->ipc, &stream, sizeof(stream));
 }
 
 static int sof_compr_copy_playback(struct snd_compr_runtime *rtd,
