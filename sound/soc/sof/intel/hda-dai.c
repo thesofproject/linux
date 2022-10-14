@@ -916,6 +916,17 @@ struct snd_soc_dai_driver skl_dai[] = {
 	},
 },
 #endif
+{
+	.name = "SOF Dummy",
+	.playback = {
+		.channels_min = 1,
+		.channels_max = 8,
+	},
+	.capture = {
+		.channels_min = 1,
+		.channels_max = 8,
+	},
+},
 };
 
 int hda_dsp_dais_suspend(struct snd_sof_dev *sdev)
