@@ -873,7 +873,7 @@ static int hda_init_caps(struct snd_sof_dev *sdev)
 	struct snd_sof_pdata *pdata = sdev->pdata;
 	struct sof_intel_hda_dev *hdev = pdata->hw_pdata;
 	u32 link_mask;
-	int ret = 0;
+	int ret;
 
 	/* check if dsp is there */
 	if (bus->ppcap)
@@ -909,8 +909,8 @@ static int hda_init_caps(struct snd_sof_dev *sdev)
 	 */
 	ret = hda_sdw_probe(sdev);
 	if (ret < 0) {
-		dev_err(sdev->dev, "error: SoundWire probe error\n");
-		return ret;
+		dev_err(sdev->dev, "SoundWire probe error: %d\n", ret);
+		goto err;
 	}
 
 skip_soundwire:
@@ -920,12 +920,13 @@ skip_soundwire:
 	/* create codec instances */
 	hda_codec_probe_bus(sdev);
 
+err:
 	if (!HDA_IDISP_CODEC(bus->codec_mask))
 		hda_codec_i915_display_power(sdev, false);
 
 	hda_bus_ml_put_all(bus);
 
-	return 0;
+	return ret;
 }
 
 static irqreturn_t hda_dsp_interrupt_handler(int irq, void *context)
