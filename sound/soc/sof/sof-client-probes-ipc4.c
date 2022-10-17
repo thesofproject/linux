@@ -185,7 +185,7 @@ static int ipc4_probes_points_info(struct sof_client_dev *cdev,
  * @num_desc:	Number of elements in @desc
  * @return:	0 on success, negative error code on error
  *
- * Transaltes the generic probe point prepresentation to an IPC4
+ * Translates the generic probe point presentation to an IPC4
  * message to dynamically connect the provided set of endpoints.
  */
 static int ipc4_probes_points_add(struct sof_client_dev *cdev,
