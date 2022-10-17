@@ -220,8 +220,9 @@ static int hda_sdw_probe(struct snd_sof_dev *sdev)
 	return 0;
 }
 
-int hda_sdw_startup(struct snd_sof_dev *sdev)
+int hda_sdw_startup_after_probe(struct snd_sof_dev *sdev)
 {
+	const struct sof_intel_dsp_desc *chip;
 	struct sof_intel_hda_dev *hdev;
 	struct snd_sof_pdata *pdata = sdev->pdata;
 
@@ -233,7 +234,32 @@ int hda_sdw_startup(struct snd_sof_dev *sdev)
 	if (pdata->machine && !pdata->machine->mach_params.link_mask)
 		return 0;
 
+	chip = get_chip_info(sdev->pdata);
+	if (chip->hw_ip_version < SOF_INTEL_ACE_1_0)
+		return 0;
+
 	return sdw_intel_startup(hdev->sdw);
+}
+
+int hda_sdw_startup(struct snd_sof_dev *sdev)
+{
+	const struct sof_intel_dsp_desc *chip;
+	struct sof_intel_hda_dev *hdev;
+	struct snd_sof_pdata *pdata = sdev->pdata;
+
+	hdev = sdev->pdata->hw_pdata;
+
+	if (!hdev->sdw)
+		return 0;
+
+	if (pdata->machine && !pdata->machine->mach_params.link_mask)
+		return 0;
+
+	chip = get_chip_info(sdev->pdata);
+	if (chip->hw_ip_version < SOF_INTEL_ACE_1_0)
+		return sdw_intel_startup(hdev->sdw);
+
+	return 0;
 }
 
 static int hda_sdw_exit(struct snd_sof_dev *sdev)
@@ -912,6 +938,13 @@ static int hda_init_caps(struct snd_sof_dev *sdev)
 	ret = hda_sdw_probe(sdev);
 	if (ret < 0) {
 		dev_err(sdev->dev, "SoundWire probe error: %d\n", ret);
+		goto err;
+	}
+
+	ret = hda_sdw_startup_after_probe(sdev);
+	if (ret < 0) {
+		dev_err(sdev->dev, "SoundWire startup error: %d\n", ret);
+		hda_sdw_exit(sdev);
 		goto err;
 	}
 
