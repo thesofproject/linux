@@ -71,6 +71,7 @@
  * @mem_usage: Memory usage
  * @state: Pipeline state
  * @msg: message structure for pipeline
+ * @skip_during_fe_trigger: skip triggering this pipeline during the FE DAI trigger
  */
 struct sof_ipc4_pipeline {
 	uint32_t priority;
@@ -78,6 +79,7 @@ struct sof_ipc4_pipeline {
 	uint32_t mem_usage;
 	int state;
 	struct sof_ipc4_msg msg;
+	bool skip_during_fe_trigger;
 };
 
 /**
