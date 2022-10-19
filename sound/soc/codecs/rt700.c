@@ -1127,6 +1127,7 @@ int rt700_init(struct device *dev, struct regmap *sdw_regmap,
 	rt700->slave = slave;
 	rt700->sdw_regmap = sdw_regmap;
 	rt700->regmap = regmap;
+	regcache_cache_only(rt700->regmap, true);
 
 	mutex_init(&rt700->disable_irq_lock);
 
@@ -1161,8 +1162,8 @@ int rt700_io_init(struct device *dev, struct sdw_slave *slave)
 	if (rt700->hw_init)
 		return 0;
 
+	regcache_cache_only(rt700->regmap, false);
 	if (rt700->first_hw_init) {
-		regcache_cache_only(rt700->regmap, false);
 		regcache_cache_bypass(rt700->regmap, true);
 	} else {
 		/*

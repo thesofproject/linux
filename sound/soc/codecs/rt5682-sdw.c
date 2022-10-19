@@ -355,6 +355,8 @@ static int rt5682_sdw_init(struct device *dev, struct regmap *regmap,
 		return ret;
 	}
 
+	regcache_cache_only(rt5682->regmap, true);
+
 	/*
 	 * Mark hw_init to false
 	 * HW init will be performed when device reports present
@@ -385,8 +387,8 @@ static int rt5682_io_init(struct device *dev, struct sdw_slave *slave)
 	if (rt5682->hw_init)
 		return 0;
 
+	regcache_cache_only(rt5682->regmap, false);
 	if (rt5682->first_hw_init) {
-		regcache_cache_only(rt5682->regmap, false);
 		regcache_cache_bypass(rt5682->regmap, true);
 	} else {
 		/*
@@ -407,7 +409,6 @@ static int rt5682_io_init(struct device *dev, struct sdw_slave *slave)
 	}
 
 	pm_runtime_get_noresume(&slave->dev);
-
 
 	while (loop > 0) {
 		regmap_read(rt5682->regmap, RT5682_DEVICE_ID, &val);
