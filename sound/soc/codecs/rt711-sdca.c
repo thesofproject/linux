@@ -1432,8 +1432,10 @@ int rt711_sdca_init(struct device *dev, struct regmap *regmap,
 	 * Mark hw_init to false
 	 * HW init will be performed when device reports present
 	 */
-	rt711->hw_init = false;
 	rt711->first_hw_init = false;
+	rt711->hw_init = false;
+	rt711->unattached_init = false;
+
 	rt711->fu0f_dapm_mute = true;
 	rt711->fu1e_dapm_mute = true;
 	rt711->fu0f_mixer_l_mute = rt711->fu0f_mixer_r_mute = true;
@@ -1582,10 +1584,15 @@ int rt711_sdca_io_init(struct device *dev, struct sdw_slave *slave)
 		regcache_cache_bypass(rt711->mbq_regmap, false);
 		regcache_mark_dirty(rt711->mbq_regmap);
 	}
+	if (rt711->unattached_init) {
+		regcache_sync(rt711->regmap);
+		regcache_sync(rt711->mbq_regmap);
+	}
 
 	/* Mark Slave initialization complete */
 	rt711->first_hw_init = true;
 	rt711->hw_init = true;
+	rt711->unattached_init = false;
 
 	pm_runtime_mark_last_busy(&slave->dev);
 	pm_runtime_put_autosuspend(&slave->dev);

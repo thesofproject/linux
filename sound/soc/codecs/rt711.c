@@ -1226,6 +1226,7 @@ int rt711_init(struct device *dev, struct regmap *sdw_regmap,
 	 */
 	rt711->hw_init = false;
 	rt711->first_hw_init = false;
+	rt711->unattached_init = false;
 
 	/* JD source uses JD2 in default */
 	rt711->jd_src = RT711_JD2;
@@ -1340,10 +1341,15 @@ int rt711_io_init(struct device *dev, struct sdw_slave *slave)
 		regcache_cache_bypass(rt711->regmap, false);
 		regcache_mark_dirty(rt711->regmap);
 	}
+	if (rt711->unattached_init) {
+		regcache_sync_region(rt711->regmap, 0x3000, 0x8fff);
+		regcache_sync_region(rt711->regmap, 0x752009, 0x752091);
+	}
 
 	/* Mark Slave initialization complete */
 	rt711->first_hw_init = true;
 	rt711->hw_init = true;
+	rt711->unattached_init = false;
 
 	pm_runtime_mark_last_busy(&slave->dev);
 	pm_runtime_put_autosuspend(&slave->dev);

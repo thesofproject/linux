@@ -1097,10 +1097,15 @@ int rt715_io_init(struct device *dev, struct sdw_slave *slave)
 
 	if (rt715->first_hw_init)
 		regcache_mark_dirty(rt715->regmap);
+	if (rt715->unattached_init) {
+		regcache_sync_region(rt715->regmap, 0x3000, 0x8fff);
+		regcache_sync_region(rt715->regmap, 0x752039, 0x752039);
+	}
 
 	/* Mark Slave initialization complete */
 	rt715->first_hw_init = true;
 	rt715->hw_init = true;
+	rt715->unattached_init = false;
 
 	pm_runtime_mark_last_busy(&slave->dev);
 	pm_runtime_put_autosuspend(&slave->dev);

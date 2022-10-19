@@ -227,6 +227,7 @@ struct max98373_priv {
 	struct sdw_slave *slave;
 	bool hw_init;
 	bool first_hw_init;
+	bool unattached_init;
 	int slot;
 	unsigned int rx_mask;
 };

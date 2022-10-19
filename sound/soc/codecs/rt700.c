@@ -1142,6 +1142,7 @@ int rt700_init(struct device *dev, struct regmap *sdw_regmap,
 	 */
 	rt700->hw_init = false;
 	rt700->first_hw_init = false;
+	rt700->unattached_init = false;
 
 	ret =  devm_snd_soc_register_component(dev,
 				&soc_codec_dev_rt700,
@@ -1240,10 +1241,15 @@ int rt700_io_init(struct device *dev, struct sdw_slave *slave)
 		regcache_cache_bypass(rt700->regmap, false);
 		regcache_mark_dirty(rt700->regmap);
 	}
+	if (rt700->unattached_init) {
+		regcache_sync_region(rt700->regmap, 0x3000, 0x8fff);
+		regcache_sync_region(rt700->regmap, 0x752010, 0x75206b);
+	}
 
 	/* Mark Slave initialization complete */
 	rt700->first_hw_init = true;
 	rt700->hw_init = true;
+	rt700->unattached_init = false;
 
 	pm_runtime_mark_last_busy(&slave->dev);
 	pm_runtime_put_autosuspend(&slave->dev);

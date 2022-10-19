@@ -1015,6 +1015,7 @@ int rt715_sdca_init(struct device *dev, struct regmap *mbq_regmap,
 	 */
 	rt715->hw_init = false;
 	rt715->first_hw_init = false;
+	rt715->unattached_init = false;
 
 	ret = devm_snd_soc_register_component(dev,
 			&soc_codec_dev_rt715_sdca,
@@ -1082,9 +1083,28 @@ int rt715_sdca_io_init(struct device *dev, struct sdw_slave *slave)
 	/* SMPU-1 interrupt enable mask */
 	regmap_update_bits(rt715->regmap, RT715_INT_MASK, 0x1, 0x1);
 
+	if (rt715->first_hw_init) {
+		regcache_mark_dirty(rt715->regmap);
+		regcache_mark_dirty(rt715->mbq_regmap);
+	}
+	if (rt715->unattached_init) {
+		regcache_sync_region(rt715->regmap,
+				     SDW_SDCA_CTL(FUN_JACK_CODEC, RT715_SDCA_ST_EN, RT715_SDCA_ST_CTRL,
+						  CH_00),
+				     SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_SMPU_TRIG_ST_EN,
+						  RT715_SDCA_SMPU_TRIG_ST_CTRL, CH_00));
+		regcache_sync_region(rt715->mbq_regmap, 0x2000000, 0x61020ff);
+		regcache_sync_region(rt715->mbq_regmap,
+				     SDW_SDCA_CTL(FUN_JACK_CODEC, RT715_SDCA_ST_EN, RT715_SDCA_ST_CTRL,
+			CH_00),
+				     SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_SMPU_TRIG_ST_EN,
+						  RT715_SDCA_SMPU_TRIG_ST_CTRL, CH_00));
+	}
+
 	/* Mark Slave initialization complete */
 	rt715->first_hw_init = true;
 	rt715->hw_init = true;
+	rt715->unattached_init = false;
 
 	pm_runtime_mark_last_busy(&slave->dev);
 	pm_runtime_put_autosuspend(&slave->dev);

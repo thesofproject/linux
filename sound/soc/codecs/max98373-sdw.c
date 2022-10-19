@@ -467,9 +467,12 @@ static int max98373_io_init(struct sdw_slave *slave)
 		regcache_cache_bypass(max98373->regmap, false);
 		regcache_mark_dirty(max98373->regmap);
 	}
+	if (max98373->unattached_init)
+		regcache_sync(max98373->regmap);
 
 	max98373->first_hw_init = true;
 	max98373->hw_init = true;
+	max98373->unattached_init = false;
 
 	pm_runtime_mark_last_busy(dev);
 	pm_runtime_put_autosuspend(dev);
@@ -800,6 +803,7 @@ static int max98373_init(struct sdw_slave *slave, struct regmap *regmap)
 
 	max98373->hw_init = false;
 	max98373->first_hw_init = false;
+	max98373->unattached_init = false;
 
 	/* codec registration  */
 	ret = devm_snd_soc_register_component(dev, &soc_codec_dev_max98373_sdw,
@@ -816,8 +820,10 @@ static int max98373_update_status(struct sdw_slave *slave,
 {
 	struct max98373_priv *max98373 = dev_get_drvdata(&slave->dev);
 
-	if (status == SDW_SLAVE_UNATTACHED)
+	if (status == SDW_SLAVE_UNATTACHED) {
 		max98373->hw_init = false;
+		max98373->unattached_init = true;
+	}
 
 	/*
 	 * Perform initialization only if slave status is SDW_SLAVE_ATTACHED

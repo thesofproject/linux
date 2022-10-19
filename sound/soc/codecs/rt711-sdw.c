@@ -322,8 +322,10 @@ static int rt711_update_status(struct sdw_slave *slave,
 	/* Update the status */
 	rt711->status = status;
 
-	if (status == SDW_SLAVE_UNATTACHED)
+	if (status == SDW_SLAVE_UNATTACHED) {
 		rt711->hw_init = false;
+		rt711->unattached_init = true;
+	}
 
 	/*
 	 * Perform initialization only if slave status is present and

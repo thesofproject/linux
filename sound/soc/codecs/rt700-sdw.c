@@ -318,8 +318,10 @@ static int rt700_update_status(struct sdw_slave *slave,
 	/* Update the status */
 	rt700->status = status;
 
-	if (status == SDW_SLAVE_UNATTACHED)
+	if (status == SDW_SLAVE_UNATTACHED) {
 		rt700->hw_init = false;
+		rt700->unattached_init = true;
+	}
 
 	/*
 	 * Perform initialization only if slave status is present and

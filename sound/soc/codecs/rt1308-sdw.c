@@ -262,10 +262,13 @@ static int rt1308_io_init(struct device *dev, struct sdw_slave *slave)
 		regcache_cache_bypass(rt1308->regmap, false);
 		regcache_mark_dirty(rt1308->regmap);
 	}
+	if (rt1308->unattached_init)
+		regcache_sync_region(rt1308->regmap, 0xc000, 0xcfff);
 
 	/* Mark Slave initialization complete */
 	rt1308->first_hw_init = true;
 	rt1308->hw_init = true;
+	rt1308->unattached_init = false;
 
 	pm_runtime_mark_last_busy(&slave->dev);
 	pm_runtime_put_autosuspend(&slave->dev);
@@ -283,8 +286,10 @@ static int rt1308_update_status(struct sdw_slave *slave,
 	/* Update the status */
 	rt1308->status = status;
 
-	if (status == SDW_SLAVE_UNATTACHED)
+	if (status == SDW_SLAVE_UNATTACHED) {
 		rt1308->hw_init = false;
+		rt1308->unattached_init = true;
+	}
 
 	/*
 	 * Perform initialization only if slave status is present and
