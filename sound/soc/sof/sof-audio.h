@@ -283,13 +283,13 @@ struct sof_token_info {
 };
 
 /**
- * struct snd_sof_pipeline_trigger_info - PCM stream trigger info
- * @count: number of pipelines to be triggered
- * @pipeline_list: array of pipeline widgets to be triggered
+ * struct snd_sof_pcm_stream_pipeline_list - List of pipelines associated with a PCM stream
+ * @count: number of pipeline widgets in the @pipe_widgets array
+ * @pipe_widgets: array of pipeline widgets
  */
-struct snd_sof_pcm_stream_trigger_info {
+struct snd_sof_pcm_stream_pipeline_list {
 	uint32_t count;
-	struct snd_sof_widget **pipeline_list;
+	struct snd_sof_widget **pipe_widgets;
 };
 
 /* PCM stream, mapped to FW component  */
@@ -307,7 +307,7 @@ struct snd_sof_pcm_stream {
 	 * active or not while suspending the stream
 	 */
 	bool suspend_ignored;
-	struct snd_sof_pcm_stream_trigger_info trigger_info;
+	struct snd_sof_pcm_stream_pipeline_list pipeline_list;
 };
 
 /* ALSA SOF PCM device */
