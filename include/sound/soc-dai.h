@@ -468,6 +468,8 @@ struct snd_soc_dai {
 
 	/* bit field */
 	unsigned int probed:1;
+
+	void *private; /* core does not touch this */
 };
 
 static inline struct snd_soc_pcm_stream *
