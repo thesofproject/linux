@@ -81,6 +81,7 @@ struct sdw_cdns_stream_config {
  * @hw_params: hw_params to be applied in .prepare step
  * @suspended: status set when suspended, to be used in .prepare
  * @paused: status set in .trigger, to be used in suspend
+ * @direction: stream direction
  */
 struct sdw_cdns_dai_runtime {
 	char *name;
@@ -92,6 +93,7 @@ struct sdw_cdns_dai_runtime {
 	struct snd_pcm_hw_params *hw_params;
 	bool suspended;
 	bool paused;
+	int direction;
 };
 
 /**

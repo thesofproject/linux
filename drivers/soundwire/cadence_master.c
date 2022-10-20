@@ -1711,10 +1711,7 @@ int cdns_set_sdw_stream(struct snd_soc_dai *dai,
 
 	if (stream) {
 		/* first paranoia check */
-		if (direction == SNDRV_PCM_STREAM_PLAYBACK)
-			dai_runtime = dai->playback_dma_data;
-		else
-			dai_runtime = dai->capture_dma_data;
+		dai_runtime = dai->private;
 
 		if (dai_runtime) {
 			dev_err(dai->dev,
@@ -1734,20 +1731,13 @@ int cdns_set_sdw_stream(struct snd_soc_dai *dai,
 		dai_runtime->link_id = cdns->instance;
 
 		dai_runtime->stream = stream;
+		dai_runtime->direction = direction;
 
-		if (direction == SNDRV_PCM_STREAM_PLAYBACK)
-			dai->playback_dma_data = dai_runtime;
-		else
-			dai->capture_dma_data = dai_runtime;
+		dai->private = dai_runtime;
 	} else {
 		/* for NULL stream we release allocated dai_runtime */
-		if (direction == SNDRV_PCM_STREAM_PLAYBACK) {
-			kfree(dai->playback_dma_data);
-			dai->playback_dma_data = NULL;
-		} else {
-			kfree(dai->capture_dma_data);
-			dai->capture_dma_data = NULL;
-		}
+		kfree(dai->private);
+		dai->private = NULL;
 	}
 	return 0;
 }
