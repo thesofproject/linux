@@ -64,7 +64,7 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
 	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
-	struct snd_sof_pcm_stream_trigger_info *trigger_info;
+	struct snd_sof_pcm_stream_pipeline_list *pipeline_list;
 	struct ipc4_pipeline_set_state_data *data;
 	struct snd_sof_widget *pipe_widget;
 	struct sof_ipc4_pipeline *pipeline;
@@ -76,14 +76,14 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 	if (!spcm)
 		return -EINVAL;
 
-	trigger_info = &spcm->stream[substream->stream].trigger_info;
+	pipeline_list = &spcm->stream[substream->stream].pipeline_list;
 
 	/* nothing to trigger if the list is empty */
-	if (!trigger_info->pipeline_list)
+	if (!pipeline_list->pipe_widgets)
 		return 0;
 
-	/* allocate data for the pipeline ID's and the count of pipelines to be triggered */
-	data = kzalloc(sizeof(u32) * (trigger_info->count + 1), GFP_KERNEL);
+	/* allocate memory for the pipeline data */
+	data = kzalloc(struct_size(data, pipeline_ids, pipeline_list->count), GFP_KERNEL);
 	if (!data)
 		return -ENOMEM;
 
@@ -95,8 +95,8 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 	 * between the left/right paths will be indeterministic. But the sink->source trigger order
 	 * sink->source would still be guaranteed for each fork independently.
 	 */
-	for (i = trigger_info->count - 1; i >= 0; i--) {
-		pipe_widget = trigger_info->pipeline_list[i];
+	for (i = pipeline_list->count - 1; i >= 0; i--) {
+		pipe_widget = pipeline_list->pipe_widgets[i];
 		pipeline = pipe_widget->private;
 		if (pipeline->state != state && !pipeline->skip_during_fe_trigger)
 			data->pipeline_ids[data->count++] = pipe_widget->instance_id;
@@ -121,8 +121,8 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 
 	/* update PAUSED state for all pipelines that were just triggered */
 	for (i = 0; i < data->count; i++) {
-		for (j = 0; j < trigger_info->count; j++) {
-			pipe_widget = trigger_info->pipeline_list[j];
+		for (j = 0; j < pipeline_list->count; j++) {
+			pipe_widget = pipeline_list->pipe_widgets[j];
 			pipeline = pipe_widget->private;
 
 			if (data->pipeline_ids[i] == pipe_widget->instance_id) {
@@ -145,8 +145,8 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 
 	/* update final state for all pipelines that were just triggered */
 	for (i = 0; i < data->count; i++) {
-		for (j = 0; j < trigger_info->count; j++) {
-			pipe_widget = trigger_info->pipeline_list[j];
+		for (j = 0; j < pipeline_list->count; j++) {
+			pipe_widget = pipeline_list->pipe_widgets[j];
 			pipeline = pipe_widget->private;
 
 			if (data->pipeline_ids[i] == pipe_widget->instance_id) {
