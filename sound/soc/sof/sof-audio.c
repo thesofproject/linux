@@ -397,7 +397,7 @@ static int sof_free_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dap
 static int sof_set_up_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *widget,
 				      int dir, struct snd_sof_pcm *spcm)
 {
-	struct snd_sof_pcm_stream_trigger_info *trigger_info = &spcm->stream[dir].trigger_info;
+	struct snd_sof_pcm_stream_pipeline_list *pipeline_list = &spcm->stream[dir].pipeline_list;
 	struct snd_soc_dapm_widget_list *list = spcm->stream[dir].list;
 	struct snd_sof_widget *swidget = widget->dobj.private;
 	struct snd_sof_widget *pipe_widget;
@@ -411,8 +411,8 @@ static int sof_set_up_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_d
 		if (ret < 0)
 			return ret;
 
-		/* skip populating the pipeline_list array if it is NULL */
-		if (!trigger_info->pipeline_list)
+		/* skip populating the pipe_widgets array if it is NULL */
+		if (!pipeline_list->pipe_widgets)
 			goto sink_setup;
 
 		/*
@@ -420,15 +420,15 @@ static int sof_set_up_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_d
 		 * already in the list. This will result in the pipelines getting added in the
 		 * order source to sink.
 		 */
-		for (i = 0; i < trigger_info->count; i++) {
-			pipe_widget = trigger_info->pipeline_list[i];
+		for (i = 0; i < pipeline_list->count; i++) {
+			pipe_widget = pipeline_list->pipe_widgets[i];
 			if (pipe_widget == swidget->pipe_widget)
 				break;
 		}
 
-		if (i == trigger_info->count) {
-			trigger_info->count++;
-			trigger_info->pipeline_list[i] = swidget->pipe_widget;
+		if (i == pipeline_list->count) {
+			pipeline_list->count++;
+			pipeline_list->pipe_widgets[i] = swidget->pipe_widget;
 		}
 	}
 
@@ -599,7 +599,7 @@ widget_free:
 
 int sof_widget_list_free(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, int dir)
 {
-	struct snd_sof_pcm_stream_trigger_info *trigger_info = &spcm->stream[dir].trigger_info;
+	struct snd_sof_pcm_stream_pipeline_list *pipeline_list = &spcm->stream[dir].pipeline_list;
 	struct snd_soc_dapm_widget_list *list = spcm->stream[dir].list;
 	int ret;
 
@@ -616,7 +616,7 @@ int sof_widget_list_free(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, int
 	snd_soc_dapm_dai_free_widgets(&list);
 	spcm->stream[dir].list = NULL;
 
-	trigger_info->count = 0;
+	pipeline_list->count = 0;
 
 	return ret;
 }
