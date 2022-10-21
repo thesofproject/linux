@@ -35,6 +35,9 @@ int sof_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
 	int err = 0;
 	int ret;
 
+	if (swidget->dir == SOF_WIDGET_DIR_NONE)
+		return 0;
+
 	if (!swidget->private)
 		return 0;
 
@@ -90,6 +93,9 @@ int sof_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
 {
 	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
 	int ret;
+
+	if (swidget->dir == SOF_WIDGET_DIR_NONE)
+		return 0;
 
 	/* skip if there is no private data */
 	if (!swidget->private)
@@ -255,6 +261,9 @@ static int sof_setup_pipeline_connections(struct snd_sof_dev *sdev,
 				if (!swidget)
 					continue;
 
+				if (swidget->dir == SOF_WIDGET_DIR_NONE)
+					continue;
+
 				/* We need to connect the widget that is in use */
 				if (swidget->dir != dir && !swidget->use_count)
 					continue;
@@ -277,6 +286,9 @@ static int sof_setup_pipeline_connections(struct snd_sof_dev *sdev,
 
 				swidget = p->source->dobj.private;
 				if (!swidget)
+					continue;
+
+				if (swidget->dir == SOF_WIDGET_DIR_NONE)
 					continue;
 
 				/* We need to connect the widget that is in use */
