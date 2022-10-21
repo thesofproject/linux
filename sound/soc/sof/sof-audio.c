@@ -255,7 +255,8 @@ static int sof_setup_pipeline_connections(struct snd_sof_dev *sdev,
 				if (!swidget)
 					continue;
 
-				if (swidget->dir != dir)
+				/* We need to connect the widget that is in use */
+				if (swidget->dir != dir && !swidget->use_count)
 					continue;
 
 				if (p->sink->dobj.private) {
@@ -278,7 +279,8 @@ static int sof_setup_pipeline_connections(struct snd_sof_dev *sdev,
 				if (!swidget)
 					continue;
 
-				if (swidget->dir != dir)
+				/* We need to connect the widget that is in use */
+				if (swidget->dir != dir && !swidget->use_count)
 					continue;
 
 				if (p->source->dobj.private) {
