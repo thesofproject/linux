@@ -1515,6 +1515,11 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 		break;
 	}
 
+	if (swidget->id == snd_soc_dapm_aif_in || swidget->id == snd_soc_dapm_dai_in)
+		swidget->dir = SNDRV_PCM_STREAM_PLAYBACK;
+	else if (swidget->id == snd_soc_dapm_aif_out || swidget->id == snd_soc_dapm_dai_out)
+		swidget->dir = SNDRV_PCM_STREAM_CAPTURE;
+
 	/* check token parsing reply */
 	if (ret < 0) {
 		dev_err(scomp->dev,
@@ -2138,6 +2143,18 @@ static int sof_set_widget_pipeline(struct snd_sof_dev *sdev, struct snd_sof_pipe
 	swidget->spipe = spipe;
 	swidget->dynamic_pipeline_widget = pipe_widget->dynamic_pipeline_widget;
 
+	/* set pipeline dir */
+	switch (swidget->id) {
+	case snd_soc_dapm_aif_in:
+	case snd_soc_dapm_aif_out:
+	case snd_soc_dapm_dai_in:
+	case snd_soc_dapm_dai_out:
+		pipe_widget->dir = swidget->dir;
+		break;
+	default:
+		break;
+	}
+
 	return 0;
 }
 
@@ -2197,6 +2214,20 @@ static int sof_complete(struct snd_soc_component *scomp)
 				if (ret < 0)
 					return ret;
 			}
+	}
+
+	/* set wisgets dir */
+	list_for_each_entry(swidget, &sdev->widget_list, list) {
+		switch (swidget->id) {
+		case snd_soc_dapm_aif_in:
+		case snd_soc_dapm_aif_out:
+		case snd_soc_dapm_dai_in:
+		case snd_soc_dapm_dai_out:
+			break;
+		default:
+			swidget->dir = swidget->spipe->pipe_widget->dir;
+			break;
+		}
 	}
 
 	/* verify topology components loading including dynamic pipelines */
