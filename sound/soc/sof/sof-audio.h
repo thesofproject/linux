@@ -377,6 +377,12 @@ struct snd_sof_dai_link {
 	struct list_head list;
 };
 
+enum {
+	SOF_WIDGET_DIR_PLAYBACK = SNDRV_PCM_STREAM_PLAYBACK,
+	SOF_WIDGET_DIR_CAPTURE = SNDRV_PCM_STREAM_CAPTURE,
+	SOF_WIDGET_DIR_NONE,
+};
+
 /* ASoC SOF DAPM widget */
 struct snd_sof_widget {
 	struct snd_soc_component *scomp;
@@ -419,6 +425,9 @@ struct snd_sof_widget {
 	void *module_info;
 
 	const guid_t uuid;
+
+	/* The direction of the widget, none means the widget should be ignored */
+	int dir;
 
 	int num_tuples;
 	struct snd_sof_tuple *tuples;
