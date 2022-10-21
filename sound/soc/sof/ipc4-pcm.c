@@ -98,8 +98,23 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 	for (i = pipeline_list->count - 1; i >= 0; i--) {
 		pipe_widget = pipeline_list->pipe_widgets[i];
 		pipeline = pipe_widget->private;
-		if (pipeline->state != state && !pipeline->skip_during_fe_trigger)
-			data->pipeline_ids[data->count++] = pipe_widget->instance_id;
+
+		if (pipeline->skip_during_fe_trigger)
+			continue;
+
+		switch (state) {
+		case SOF_IPC4_PIPE_RUNNING:
+		case SOF_IPC4_PIPE_RESET:
+			/* Do not RESET or repeat RUNNING if the pipeline is in use */
+			if (!pipe_widget->trigger_count)
+				data->pipeline_ids[data->count++] = pipe_widget->instance_id;
+			break;
+		default:
+			/* Pause a pipeline if only one PCM stream is using it */
+			if (pipe_widget->trigger_count == 1)
+				data->pipeline_ids[data->count++] = pipe_widget->instance_id;
+			break;
+		}
 	}
 
 	/* return if all pipelines are in the requested state already */
@@ -120,11 +135,18 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 	}
 
 	/* update PAUSED state for all pipelines that were just triggered */
-	for (i = 0; i < data->count; i++) {
-		for (j = 0; j < pipeline_list->count; j++) {
-			pipe_widget = pipeline_list->pipe_widgets[j];
-			pipeline = pipe_widget->private;
+	for (j = 0; j < pipeline_list->count; j++) {
+		pipe_widget = pipeline_list->pipe_widgets[j];
+		pipeline = pipe_widget->private;
 
+		/*
+		 * decrement trigger_count for the pipeline even if it isn't in the data's
+		 * list of pipelines that are triggered in this callback.
+		 */
+		if (!pipeline->skip_during_fe_trigger && state == SOF_IPC4_PIPE_PAUSED)
+			pipe_widget->trigger_count--;
+
+		for (i = 0; i < data->count; i++) {
 			if (data->pipeline_ids[i] == pipe_widget->instance_id) {
 				pipeline->state = SOF_IPC4_PIPE_PAUSED;
 				break;
@@ -144,11 +166,19 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 	}
 
 	/* update final state for all pipelines that were just triggered */
-	for (i = 0; i < data->count; i++) {
-		for (j = 0; j < pipeline_list->count; j++) {
-			pipe_widget = pipeline_list->pipe_widgets[j];
-			pipeline = pipe_widget->private;
+	for (j = 0; j < pipeline_list->count; j++) {
+		pipe_widget = pipeline_list->pipe_widgets[j];
+		pipeline = pipe_widget->private;
 
+		/*
+		 * increment trigger_count for the pipeline even if it isn't in the data's
+		 * list of pipelines that are triggered in this callback to count the number
+		 * of PCM streams that are using the pipeline currently.
+		 */
+		if (!pipeline->skip_during_fe_trigger && state == SOF_IPC4_PIPE_RUNNING)
+			pipe_widget->trigger_count++;
+
+		for (i = 0; i < data->count; i++) {
 			if (data->pipeline_ids[i] == pipe_widget->instance_id) {
 				pipeline->state = state;
 				break;

@@ -390,6 +390,11 @@ struct snd_sof_widget {
 	 */
 	bool prepared;
 	int use_count; /* use_count will be protected by the PCM mutex held by the core */
+	/*
+	 * trigger_count is only applicable for snd_soc_dapm_scheduler type widgets and will be
+	 * protected by the PCM mutex held by the core
+	 */
+	int trigger_count;
 	int core;
 	int id; /* id is the DAPM widget type */
 	/*
