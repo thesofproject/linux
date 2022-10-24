@@ -714,6 +714,80 @@ static const struct snd_soc_dai_ops ipc3_ssp_dai_ops = {
 	.shutdown = ssp_dai_shutdown,
 };
 
+static int ipc4_be_dai_common_trigger(struct snd_soc_dai *dai, int cmd, int stream)
+{
+	struct snd_sof_widget *pipe_widget;
+	struct sof_ipc4_pipeline *pipeline;
+	struct snd_sof_widget *swidget;
+	struct snd_soc_dapm_widget *w;
+	struct snd_sof_dev *sdev;
+	int ret;
+
+	w = snd_soc_dai_get_widget(dai, stream);
+	swidget = w->dobj.private;
+	pipe_widget = swidget->pipe_widget;
+	pipeline = pipe_widget->private;
+	sdev = snd_soc_component_get_drvdata(swidget->scomp);
+
+	switch (cmd) {
+	case SNDRV_PCM_TRIGGER_START:
+	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+		if (pipeline->state != SOF_IPC4_PIPE_PAUSED) {
+			ret = sof_ipc4_set_pipeline_state(sdev, pipe_widget->instance_id,
+							  SOF_IPC4_PIPE_PAUSED);
+			if (ret < 0)
+				return ret;
+			pipeline->state = SOF_IPC4_PIPE_PAUSED;
+		}
+
+		ret = sof_ipc4_set_pipeline_state(sdev, pipe_widget->instance_id,
+						  SOF_IPC4_PIPE_RUNNING);
+		if (ret < 0)
+			return ret;
+		pipeline->state = SOF_IPC4_PIPE_RUNNING;
+		break;
+	case SNDRV_PCM_TRIGGER_SUSPEND:
+	case SNDRV_PCM_TRIGGER_STOP:
+		ret = sof_ipc4_set_pipeline_state(sdev, pipe_widget->instance_id,
+						  SOF_IPC4_PIPE_PAUSED);
+		if (ret < 0)
+			return ret;
+		pipeline->state = SOF_IPC4_PIPE_PAUSED;
+
+		ret = sof_ipc4_set_pipeline_state(sdev, pipe_widget->instance_id,
+						  SOF_IPC4_PIPE_RESET);
+		if (ret < 0)
+			return ret;
+		pipeline->state = SOF_IPC4_PIPE_RESET;
+		break;
+	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+		ret = sof_ipc4_set_pipeline_state(sdev, pipe_widget->instance_id,
+						  SOF_IPC4_PIPE_PAUSED);
+		if (ret < 0)
+			return ret;
+		pipeline->state = SOF_IPC4_PIPE_PAUSED;
+		break;
+	default:
+		break;
+	}
+
+	return 0;
+}
+
+static int ipc4_be_dai_trigger(struct snd_pcm_substream *substream,
+			       int cmd, struct snd_soc_dai *dai)
+{
+	return ipc4_be_dai_common_trigger(dai, cmd, substream->stream);
+}
+
+static const struct snd_soc_dai_ops ipc4_dmic_dai_ops = {
+	.trigger = ipc4_be_dai_trigger,
+};
+
+static const struct snd_soc_dai_ops ipc4_ssp_dai_ops = {
+	.trigger = ipc4_be_dai_trigger,
+};
+
 void hda_set_dai_drv_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops *ops)
 {
 	int i;
@@ -738,6 +812,14 @@ void hda_set_dai_drv_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops *ops)
 		struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 
 		for (i = 0; i < ops->num_drv; i++) {
+			if (strstr(ops->drv[i].name, "DMIC")) {
+				ops->drv[i].ops = &ipc4_dmic_dai_ops;
+				continue;
+			}
+			if (strstr(ops->drv[i].name, "SSP")) {
+				ops->drv[i].ops = &ipc4_ssp_dai_ops;
+				continue;
+			}
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_AUDIO_CODEC)
 			if (strstr(ops->drv[i].name, "iDisp") ||
 			    strstr(ops->drv[i].name, "Analog") ||
@@ -748,6 +830,9 @@ void hda_set_dai_drv_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops *ops)
 
 		if (!hda_use_tplg_nhlt)
 			ipc4_data->nhlt = intel_nhlt_init(sdev->dev);
+
+		if (IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_SOUNDWIRE))
+			sdw_callback.trigger = ipc4_be_dai_common_trigger;
 
 		break;
 	}
