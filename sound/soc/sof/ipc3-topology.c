@@ -2233,9 +2233,9 @@ static int sof_ipc3_set_up_all_pipelines(struct snd_sof_dev *sdev, bool verify)
 					return ret;
 			}
 
-			swidget->complete = sof_ipc3_complete_pipeline(sdev, swidget);
-			if (swidget->complete < 0)
-				return swidget->complete;
+			swidget->spipe->complete = sof_ipc3_complete_pipeline(sdev, swidget);
+			if (swidget->spipe->complete < 0)
+				return swidget->spipe->complete;
 			break;
 		default:
 			break;
@@ -2314,7 +2314,7 @@ static int sof_ipc3_tear_down_all_pipelines(struct snd_sof_dev *sdev, bool verif
 		if (!verify && !swidget->dynamic_pipeline_widget &&
 		    v->abi_version < SOF_ABI_VER(3, 19, 0)) {
 			swidget->use_count = 0;
-			swidget->complete = 0;
+			swidget->spipe->complete = 0;
 			continue;
 		}
 
