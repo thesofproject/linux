@@ -1848,6 +1848,7 @@ static int sof_link_load(struct snd_soc_component *scomp, int index, struct snd_
 	struct snd_soc_tplg_private *private = &cfg->priv;
 	const struct sof_token_info *token_list;
 	struct snd_sof_dai_link *slink;
+	struct snd_sof_widget *swidget;
 	u32 token_id = 0;
 	int num_tuples = 0;
 	int ret, num_sets;
@@ -1954,6 +1955,17 @@ static int sof_link_load(struct snd_soc_component *scomp, int index, struct snd_
 	case SOF_DAI_AMD_HS_VIRTUAL:
 		token_id = SOF_ACPI2S_TOKENS;
 		num_tuples += token_list[SOF_ACPI2S_TOKENS].count;
+		break;
+	case SOF_DAI_INTEL_NONE:
+		/*
+		 * A SOF_DAI_INTEL_NONE type dai is a dummy dai, we should
+		 * set swidget->dir = SOF_WIDGET_DIR_NONE to ignore the swidget
+		 */
+		list_for_each_entry(swidget, &sdev->widget_list, list) {
+			if (!strcmp(swidget->widget->sname, slink->link->stream_name) &&
+				    WIDGET_IS_DAI(swidget->id))
+				swidget->dir = SOF_WIDGET_DIR_NONE;
+		}
 		break;
 	default:
 		break;
@@ -2226,7 +2238,8 @@ static int sof_complete(struct snd_soc_component *scomp)
 		case snd_soc_dapm_dai_out:
 			break;
 		default:
-			swidget->dir = swidget->spipe->pipe_widget->dir;
+			if (swidget->dir != SOF_WIDGET_DIR_NONE)
+				swidget->dir = swidget->spipe->pipe_widget->dir;
 			break;
 		}
 	}
