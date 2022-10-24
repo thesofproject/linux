@@ -448,6 +448,22 @@ struct snd_sof_widget {
 	void *private;		/* core does not touch this */
 };
 
+/** struct snd_sof_pipeline - ASoC SOF pipeline
+ * @pipe_widget: Pointer to the pipeline widget
+ * @started_count: Count of number of PCM's that have started this pipeline
+ * @paused_count: Count of number of PCM's that have started and have currently paused this
+		  pipeline
+ * @complete: flag used to indicate that pipeline set up is complete.
+ * @list: List item in sdev pipeline_list
+ */
+struct snd_sof_pipeline {
+	struct snd_sof_widget *pipe_widget;
+	int started_count;
+	int paused_count;
+	int complete;
+	struct list_head list;
+};
+
 /* ASoC SOF DAPM route */
 struct snd_sof_route {
 	struct snd_soc_component *scomp;

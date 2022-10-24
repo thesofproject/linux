@@ -1536,6 +1536,23 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 		}
 	}
 
+	/* create and add pipeline for scheduler type widgets */
+	if (w->id == snd_soc_dapm_scheduler) {
+		struct snd_sof_pipeline *spipe;
+
+		spipe = kzalloc(sizeof(*spipe), GFP_KERNEL);
+		if (!spipe) {
+			kfree(swidget->private);
+			kfree(swidget->tuples);
+			kfree(swidget);
+			return -ENOMEM;
+		}
+
+		spipe->pipe_widget = swidget;
+		swidget->spipe = spipe;
+		list_add(&spipe->list, &sdev->pipeline_list);
+	}
+
 	w->dobj.private = swidget;
 	list_add(&swidget->list, &sdev->widget_list);
 	return ret;
@@ -1591,6 +1608,15 @@ static int sof_widget_unload(struct snd_soc_component *scomp,
 		sof_disconnect_dai_widget(scomp, widget);
 
 		break;
+	case snd_soc_dapm_scheduler:
+	{
+		struct snd_sof_pipeline *spipe = swidget->spipe;
+
+		list_del(&spipe->list);
+		kfree(spipe);
+		swidget->spipe = NULL;
+		break;
+	}
 	default:
 		break;
 	}
