@@ -285,11 +285,11 @@ struct sof_token_info {
 /**
  * struct snd_sof_pcm_stream_pipeline_list - List of pipelines associated with a PCM stream
  * @count: number of pipeline widgets in the @pipe_widgets array
- * @pipe_widgets: array of pipeline widgets
+ * @pipelines: array of pipelines
  */
 struct snd_sof_pcm_stream_pipeline_list {
 	uint32_t count;
-	struct snd_sof_widget **pipe_widgets;
+	struct snd_sof_pipeline **pipelines;
 };
 
 /* PCM stream, mapped to FW component  */
@@ -380,11 +380,6 @@ struct snd_sof_widget {
 	int comp_id;
 	int pipeline_id;
 	/*
-	 * complete flag is used to indicate that pipeline set up is complete for scheduler type
-	 * widgets. It is unused for all other widget types.
-	 */
-	int complete;
-	/*
 	 * the prepared flag is used to indicate that a widget has been prepared for getting set
 	 * up in the DSP.
 	 */
@@ -410,7 +405,7 @@ struct snd_sof_widget {
 
 	struct snd_soc_dapm_widget *widget;
 	struct list_head list;	/* list in sdev widget list */
-	struct snd_sof_widget *pipe_widget;
+	struct snd_sof_pipeline *spipe;
 	void *module_info;
 
 	const guid_t uuid;
