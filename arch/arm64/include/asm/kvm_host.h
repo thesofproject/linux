@@ -1208,6 +1208,7 @@ void vcpu_write_sys_reg(struct kvm_vcpu *, u64, enum vcpu_sysreg);
 struct kvm_vm_stat {
 	struct kvm_vm_stat_generic generic;
 	atomic64_t protected_hyp_mem;
+	atomic64_t protected_shared_mem;
 };
 
 struct kvm_vcpu_stat {
