@@ -1043,8 +1043,6 @@ int rt715_sdca_io_init(struct device *dev, struct sdw_slave *slave)
 		pm_runtime_mark_last_busy(&slave->dev);
 
 		pm_runtime_enable(&slave->dev);
-
-		rt715->first_hw_init = true;
 	}
 
 	pm_runtime_get_noresume(&slave->dev);
@@ -1078,6 +1076,7 @@ int rt715_sdca_io_init(struct device *dev, struct sdw_slave *slave)
 	regmap_update_bits(rt715->regmap, RT715_INT_MASK, 0x1, 0x1);
 
 	/* Mark Slave initialization complete */
+	rt715->first_hw_init = true;
 	rt715->hw_init = true;
 
 	pm_runtime_mark_last_busy(&slave->dev);

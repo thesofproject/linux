@@ -1093,10 +1093,9 @@ int rt715_io_init(struct device *dev, struct sdw_slave *slave)
 
 	if (rt715->first_hw_init)
 		regcache_mark_dirty(rt715->regmap);
-	else
-		rt715->first_hw_init = true;
 
 	/* Mark Slave initialization complete */
+	rt715->first_hw_init = true;
 	rt715->hw_init = true;
 
 	pm_runtime_mark_last_busy(&slave->dev);

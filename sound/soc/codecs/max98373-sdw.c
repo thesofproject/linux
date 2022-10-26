@@ -367,12 +367,11 @@ static int max98373_io_init(struct sdw_slave *slave)
 	if (max98373->first_hw_init) {
 		regcache_cache_only(max98373->regmap, false);
 		regcache_cache_bypass(max98373->regmap, true);
-	}
+	} else {
+		/*
+		 * PM runtime is only enabled when a Slave reports as Attached
+		 */
 
-	/*
-	 * PM runtime is only enabled when a Slave reports as Attached
-	 */
-	if (!max98373->first_hw_init) {
 		/* set autosuspend parameters */
 		pm_runtime_set_autosuspend_delay(dev, 3000);
 		pm_runtime_use_autosuspend(dev);

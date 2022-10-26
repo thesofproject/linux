@@ -294,10 +294,10 @@ static int rt1316_io_init(struct device *dev, struct sdw_slave *slave)
 	if (rt1316->first_hw_init) {
 		regcache_cache_bypass(rt1316->regmap, false);
 		regcache_mark_dirty(rt1316->regmap);
-	} else
-		rt1316->first_hw_init = true;
+	}
 
 	/* Mark Slave initialization complete */
+	rt1316->first_hw_init = true;
 	rt1316->hw_init = true;
 
 	pm_runtime_mark_last_busy(&slave->dev);

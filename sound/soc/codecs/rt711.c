@@ -1250,12 +1250,11 @@ int rt711_io_init(struct device *dev, struct sdw_slave *slave)
 	if (rt711->first_hw_init) {
 		regcache_cache_only(rt711->regmap, false);
 		regcache_cache_bypass(rt711->regmap, true);
-	}
+	} else {
+		/*
+		 * PM runtime is only enabled when a Slave reports as Attached
+		 */
 
-	/*
-	 * PM runtime is only enabled when a Slave reports as Attached
-	 */
-	if (!rt711->first_hw_init) {
 		/* set autosuspend parameters */
 		pm_runtime_set_autosuspend_delay(&slave->dev, 3000);
 		pm_runtime_use_autosuspend(&slave->dev);
@@ -1338,10 +1337,10 @@ int rt711_io_init(struct device *dev, struct sdw_slave *slave)
 	if (rt711->first_hw_init) {
 		regcache_cache_bypass(rt711->regmap, false);
 		regcache_mark_dirty(rt711->regmap);
-	} else
-		rt711->first_hw_init = true;
+	}
 
 	/* Mark Slave initialization complete */
+	rt711->first_hw_init = true;
 	rt711->hw_init = true;
 
 	pm_runtime_mark_last_busy(&slave->dev);

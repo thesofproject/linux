@@ -207,12 +207,11 @@ static int rt1308_io_init(struct device *dev, struct sdw_slave *slave)
 	if (rt1308->first_hw_init) {
 		regcache_cache_only(rt1308->regmap, false);
 		regcache_cache_bypass(rt1308->regmap, true);
-	}
+	} else {
+		/*
+		 * PM runtime is only enabled when a Slave reports as Attached
+		 */
 
-	/*
-	 * PM runtime is only enabled when a Slave reports as Attached
-	 */
-	if (!rt1308->first_hw_init) {
 		/* set autosuspend parameters */
 		pm_runtime_set_autosuspend_delay(&slave->dev, 3000);
 		pm_runtime_use_autosuspend(&slave->dev);
@@ -262,10 +261,10 @@ static int rt1308_io_init(struct device *dev, struct sdw_slave *slave)
 	if (rt1308->first_hw_init) {
 		regcache_cache_bypass(rt1308->regmap, false);
 		regcache_mark_dirty(rt1308->regmap);
-	} else
-		rt1308->first_hw_init = true;
+	}
 
 	/* Mark Slave initialization complete */
+	rt1308->first_hw_init = true;
 	rt1308->hw_init = true;
 
 	pm_runtime_mark_last_busy(&slave->dev);
