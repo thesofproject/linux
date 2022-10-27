@@ -142,6 +142,24 @@ jobs:
           make drivers/soundwire/
           make
 
+  gcc-sof-arm64-allmodconfig:
+    name: "GCC build arm64 allmodconfig"
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Install arm64 cross compiler
+        run: |
+          sudo apt update
+          sudo apt install -y gcc-aarch64-linux-gnu
+
+      - name: build start
+        run: |
+          export ARCH=arm64 CROSS_COMPILE=/usr/bin/aarch64-linux-gnu- KCFLAGS="-Wall -Werror"
+          export MAKEFLAGS=j"$(nproc)"
+          make allmodconfig
+          make sound/soc/sof/
+
   clang-sof-x86_64:
     name: "Clang build x86_64"
     runs-on: ubuntu-20.04
