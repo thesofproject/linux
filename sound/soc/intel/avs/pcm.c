@@ -1411,18 +1411,17 @@ static int avs_component_hda_open(struct snd_soc_component *component,
 				  struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
+	struct snd_pcm_hardware hwparams;
 
-	if (!rtd->dai_link->no_pcm) {
-		struct snd_pcm_hardware hwparams = avs_pcm_hardware;
+	if (rtd->dai_link->no_pcm)
+		return 0;
 
-		/* RESUME unsupported for de-coupled HD-Audio capture. */
-		if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
-			hwparams.info &= ~SNDRV_PCM_INFO_RESUME;
+	hwparams = avs_pcm_hardware;
+	/* RESUME unsupported for de-coupled HD-Audio capture. */
+	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
+		hwparams.info &= ~SNDRV_PCM_INFO_RESUME;
 
-		return snd_soc_set_runtime_hwparams(substream, &hwparams);
-	}
-
-	return 0;
+	return snd_soc_set_runtime_hwparams(substream, &hwparams);
 }
 
 static const struct snd_soc_component_driver avs_hda_component_driver = {
