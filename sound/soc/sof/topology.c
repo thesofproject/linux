@@ -2165,25 +2165,19 @@ static int sof_complete(struct snd_soc_component *scomp)
 			}
 		}
 
-	/*
-	 * then update all widget IPC structures. If any of the ipc_setup callbacks fail, the
-	 * topology will be removed and all widgets will be unloaded resulting in freeing all
-	 * associated memories.
-	 */
-	list_for_each_entry(swidget, &sdev->widget_list, list) {
-		if (widget_ops && widget_ops[swidget->id].ipc_setup) {
-			ret = widget_ops[swidget->id].ipc_setup(swidget);
-			if (ret < 0) {
-				dev_err(sdev->dev, "failed updating IPC struct for %s\n",
-					swidget->widget->name);
-				return ret;
-			}
-		}
-	}
-
 	/* set the pipe_widget and apply the dynamic_pipeline_widget_flag */
 	list_for_each_entry(spipe, &sdev->pipeline_list, list) {
 		struct snd_sof_widget *pipe_widget = spipe->pipe_widget;
+
+		/* Update the scheduler widget's IPC structure */
+		if (widget_ops[pipe_widget->id].ipc_setup) {
+			ret = widget_ops[pipe_widget->id].ipc_setup(pipe_widget);
+			if (ret < 0) {
+				dev_err(sdev->dev, "failed updating IPC struct for %s\n",
+					pipe_widget->widget->name);
+				return ret;
+			}
+		}
 
 		/*
 		 * Apply the dynamic_pipeline_widget flag and set the pipe_widget field
@@ -2197,6 +2191,22 @@ static int sof_complete(struct snd_soc_component *scomp)
 				if (ret < 0)
 					return ret;
 			}
+	}
+
+	/*
+	 * finally update all widget IPC structures. If any of the ipc_setup callbacks fail, the
+	 * topology will be removed and all widgets will be unloaded resulting in freeing all
+	 * associated memories.
+	 */
+	list_for_each_entry(swidget, &sdev->widget_list, list) {
+		if (swidget->id != snd_soc_dapm_scheduler && widget_ops[swidget->id].ipc_setup) {
+			ret = widget_ops[swidget->id].ipc_setup(swidget);
+			if (ret < 0) {
+				dev_err(sdev->dev, "failed updating IPC struct for %s\n",
+					swidget->widget->name);
+				return ret;
+			}
+		}
 	}
 
 	/* verify topology components loading including dynamic pipelines */
