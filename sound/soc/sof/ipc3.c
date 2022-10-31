@@ -744,6 +744,7 @@ int sof_ipc3_validate_fw_version(struct snd_sof_dev *sdev)
 	struct sof_ipc_fw_ready *ready = &sdev->fw_ready;
 	struct sof_ipc_fw_version *v = &ready->version;
 
+	dev_info(sdev->dev, "Test build KV#4 for PR3971\n");
 	dev_info(sdev->dev,
 		 "Firmware info: version %d:%d:%d-%s\n",  v->major, v->minor,
 		 v->micro, v->tag);
