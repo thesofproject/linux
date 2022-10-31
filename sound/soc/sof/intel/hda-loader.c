@@ -326,7 +326,7 @@ int hda_dsp_cl_boot_firmware_iccmax(struct snd_sof_dev *sdev)
 	u8 original_gb;
 
 	/* save the original LTRP guardband value */
-	original_gb = snd_sof_dsp_readb(sdev, HDA_DSP_HDA_BAR, HDA_VS_INTEL_LTRP) &
+	original_gb = snd_sof_dsp_read8(sdev, HDA_DSP_HDA_BAR, HDA_VS_INTEL_LTRP) &
 		HDA_VS_INTEL_LTRP_GB_MASK;
 
 	/*
