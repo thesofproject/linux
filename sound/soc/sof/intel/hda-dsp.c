@@ -352,7 +352,7 @@ static int hda_dsp_wait_d0i3c_done(struct snd_sof_dev *sdev)
 	const struct sof_intel_dsp_desc *chip;
 
 	chip = get_chip_info(pdata);
-	while (snd_sof_dsp_readb(sdev, HDA_DSP_HDA_BAR, chip->d0i3_offset) &
+	while (snd_sof_dsp_read8(sdev, HDA_DSP_HDA_BAR, chip->d0i3_offset) &
 		SOF_HDA_VS_D0I3C_CIP) {
 		if (!retry--)
 			return -ETIMEDOUT;
@@ -406,7 +406,7 @@ static int hda_dsp_update_d0i3c_register(struct snd_sof_dev *sdev, u8 value)
 		return ret;
 	}
 
-	reg = snd_sof_dsp_readb(sdev, HDA_DSP_HDA_BAR, chip->d0i3_offset);
+	reg = snd_sof_dsp_read8(sdev, HDA_DSP_HDA_BAR, chip->d0i3_offset);
 	trace_sof_intel_D0I3C_updated(sdev, reg);
 
 	return 0;
