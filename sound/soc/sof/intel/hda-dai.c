@@ -840,6 +840,50 @@ struct snd_soc_dai_driver skl_dai[] = {
 	},
 },
 {
+	.name = "SSP-HP Pin",
+	.playback = {
+		.channels_min = 1,
+		.channels_max = 8,
+	},
+	.capture = {
+		.channels_min = 1,
+		.channels_max = 8,
+	},
+},
+{
+	.name = "SSP-SPK Pin",
+	.playback = {
+		.channels_min = 1,
+		.channels_max = 8,
+	},
+	.capture = {
+		.channels_min = 1,
+		.channels_max = 8,
+	},
+},
+{
+	.name = "SSP-BT Pin",
+	.playback = {
+		.channels_min = 1,
+		.channels_max = 8,
+	},
+	.capture = {
+		.channels_min = 1,
+		.channels_max = 8,
+	},
+},
+{
+	.name = "SSP-AUX Pin",
+	.playback = {
+		.channels_min = 1,
+		.channels_max = 8,
+	},
+	.capture = {
+		.channels_min = 1,
+		.channels_max = 8,
+	},
+},
+{
 	.name = "DMIC01 Pin",
 	.capture = {
 		.channels_min = 1,
