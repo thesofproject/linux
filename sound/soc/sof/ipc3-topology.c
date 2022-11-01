@@ -2211,8 +2211,8 @@ static int sof_ipc3_set_up_all_pipelines(struct snd_sof_dev *sdev, bool verify)
 		    sroute->sink_widget->id != snd_soc_dapm_buffer)
 			continue;
 
-		ret = sof_route_setup(sdev, sroute->src_widget->widget,
-				      sroute->sink_widget->widget);
+		ret = sof_route_setup_or_free(sdev, sroute->src_widget->widget,
+					      sroute->sink_widget->widget, true);
 		if (ret < 0) {
 			dev_err(sdev->dev, "%s: route set up failed\n", __func__);
 			return ret;

@@ -166,8 +166,8 @@ use_count_dec:
 }
 EXPORT_SYMBOL(sof_widget_setup);
 
-int sof_route_setup(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *wsource,
-		    struct snd_soc_dapm_widget *wsink)
+int sof_route_setup_or_free(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *wsource,
+			    struct snd_soc_dapm_widget *wsink, bool setup)
 {
 	const struct sof_ipc_tplg_ops *ipc_tplg_ops = sdev->ipc->ops->tplg;
 	struct snd_sof_widget *src_widget = wsource->dobj.private;
@@ -209,19 +209,32 @@ int sof_route_setup(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *wsourc
 	}
 
 	/* nothing to do if route is already set up */
-	if (sroute->setup)
-		return 0;
+	if (setup) {
+		if (sroute->setup)
+			return 0;
 
-	ret = ipc_tplg_ops->route_setup(sdev, sroute);
-	if (ret < 0)
-		return ret;
+		ret = ipc_tplg_ops->route_setup(sdev, sroute);
+		if (ret < 0)
+			return ret;
+		sroute->setup = true;
+	} else {
+		if (!sroute->setup)
+			return 0;
 
-	sroute->setup = true;
+		if (ipc_tplg_ops->route_free) {
+			ret = ipc_tplg_ops->route_free(sdev, sroute);
+			if (ret < 0)
+				return ret;
+		}
+		sroute->setup = false;
+	}
+
 	return 0;
 }
 
-static int sof_setup_pipeline_connections(struct snd_sof_dev *sdev,
-					  struct snd_soc_dapm_widget_list *list, int dir)
+static int sof_setup_or_free_pipeline_connections(struct snd_sof_dev *sdev,
+						  struct snd_soc_dapm_widget_list *list, int dir,
+						  bool setup)
 {
 	struct snd_soc_dapm_widget *widget;
 	struct snd_soc_dapm_path *p;
@@ -244,7 +257,7 @@ static int sof_setup_pipeline_connections(struct snd_sof_dev *sdev,
 					continue;
 
 				if (p->sink->dobj.private) {
-					ret = sof_route_setup(sdev, widget, p->sink);
+					ret = sof_route_setup_or_free(sdev, widget, p->sink, setup);
 					if (ret < 0)
 						return ret;
 				}
@@ -260,7 +273,8 @@ static int sof_setup_pipeline_connections(struct snd_sof_dev *sdev,
 					continue;
 
 				if (p->source->dobj.private) {
-					ret = sof_route_setup(sdev, p->source, widget);
+					ret = sof_route_setup_or_free(sdev, p->source, widget,
+								      setup);
 					if (ret < 0)
 						return ret;
 				}
@@ -555,7 +569,7 @@ int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
 	 * error in setting pipeline connections will result in route status being reset for
 	 * routes that were successfully set up when the widgets are freed.
 	 */
-	ret = sof_setup_pipeline_connections(sdev, list, dir);
+	ret = sof_setup_or_free_pipeline_connections(sdev, list, dir, true);
 	if (ret < 0)
 		goto widget_free;
 
@@ -601,14 +615,18 @@ int sof_widget_list_free(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, int
 {
 	struct snd_sof_pcm_stream_pipeline_list *pipeline_list = &spcm->stream[dir].pipeline_list;
 	struct snd_soc_dapm_widget_list *list = spcm->stream[dir].list;
-	int ret;
+	int ret, ret1;
 
 	/* nothing to free */
 	if (!list)
 		return 0;
 
+	ret1 = sof_setup_or_free_pipeline_connections(sdev, list, dir, false);
+
 	/* send IPC to free widget in the DSP */
 	ret = sof_walk_widgets_in_order(sdev, spcm, NULL, NULL, dir, SOF_WIDGET_FREE);
+	if (ret < 0)
+		ret1 = ret;
 
 	/* unprepare the widget */
 	sof_walk_widgets_in_order(sdev, spcm, NULL, NULL, dir, SOF_WIDGET_UNPREPARE);
@@ -618,7 +636,7 @@ int sof_widget_list_free(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, int
 
 	pipeline_list->count = 0;
 
-	return ret;
+	return ret1;
 }
 
 /*
