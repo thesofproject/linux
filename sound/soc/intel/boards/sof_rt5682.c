@@ -60,6 +60,7 @@
 #define SOF_MAX98390_SPEAKER_AMP_PRESENT	BIT(24)
 #define SOF_MAX98390_TWEETER_SPEAKER_PRESENT	BIT(25)
 #define SOF_RT1019_SPEAKER_AMP_PRESENT	BIT(26)
+#define SOF_RT5682_VIRTUAL_SSP_DAI	BIT(27)
 
 
 /* Default: MCLK on, MCLK 19.2M, SSP0  */
@@ -618,10 +619,14 @@ static struct snd_soc_dai_link *sof_card_dai_links_create(struct device *dev,
 		goto devm_err;
 
 	/* codec SSP */
-	links[id].name = devm_kasprintf(dev, GFP_KERNEL,
-					"SSP%d-Codec", ssp_codec);
-	if (!links[id].name)
-		goto devm_err;
+	if (sof_rt5682_quirk & SOF_RT5682_VIRTUAL_SSP_DAI)
+		links[id].name = "SSP-HP";
+	else {
+		links[id].name = devm_kasprintf(dev, GFP_KERNEL,
+						"SSP%d-Codec", ssp_codec);
+		if (!links[id].name)
+			goto devm_err;
+	}
 
 	links[id].id = id;
 	if (sof_rt5682_quirk & SOF_RT5682S_HEADPHONE_CODEC_PRESENT) {
@@ -658,11 +663,15 @@ static struct snd_soc_dai_link *sof_card_dai_links_create(struct device *dev,
 		 * It can be removed once we can control MCLK by driver.
 		 */
 		links[id].ignore_pmdown_time = 1;
-		links[id].cpus->dai_name = devm_kasprintf(dev, GFP_KERNEL,
-							  "SSP%d Pin",
-							  ssp_codec);
-		if (!links[id].cpus->dai_name)
-			goto devm_err;
+		if (sof_rt5682_quirk & SOF_RT5682_VIRTUAL_SSP_DAI)
+			links[id].cpus->dai_name = "SSP-HP Pin";
+		else {
+			links[id].cpus->dai_name = devm_kasprintf(dev, GFP_KERNEL,
+								  "SSP%d Pin",
+								  ssp_codec);
+			if (!links[id].cpus->dai_name)
+				goto devm_err;
+		}
 	}
 	id++;
 
@@ -743,10 +752,14 @@ static struct snd_soc_dai_link *sof_card_dai_links_create(struct device *dev,
 
 	/* speaker amp */
 	if (sof_rt5682_quirk & SOF_SPEAKER_AMP_PRESENT) {
-		links[id].name = devm_kasprintf(dev, GFP_KERNEL,
-						"SSP%d-Codec", ssp_amp);
-		if (!links[id].name)
-			goto devm_err;
+		if (sof_rt5682_quirk & SOF_RT5682_VIRTUAL_SSP_DAI)
+			links[id].name = "SSP-SPK";
+		else {
+			links[id].name = devm_kasprintf(dev, GFP_KERNEL,
+							"SSP%d-Codec", ssp_amp);
+			if (!links[id].name)
+				goto devm_err;
+		}
 
 		links[id].id = id;
 		if (sof_rt5682_quirk & SOF_RT1015_SPEAKER_AMP_PRESENT) {
@@ -800,11 +813,15 @@ static struct snd_soc_dai_link *sof_card_dai_links_create(struct device *dev,
 				goto devm_err;
 
 		} else {
-			links[id].cpus->dai_name = devm_kasprintf(dev, GFP_KERNEL,
-								  "SSP%d Pin",
-								  ssp_amp);
-			if (!links[id].cpus->dai_name)
-				goto devm_err;
+			if (sof_rt5682_quirk & SOF_RT5682_VIRTUAL_SSP_DAI)
+				links[id].cpus->dai_name = "SSP-SPK Pin";
+			else {
+				links[id].cpus->dai_name = devm_kasprintf(dev, GFP_KERNEL,
+									  "SSP%d Pin",
+									  ssp_amp);
+				if (!links[id].cpus->dai_name)
+					goto devm_err;
+			}
 		}
 		id++;
 	}
@@ -816,13 +833,20 @@ static struct snd_soc_dai_link *sof_card_dai_links_create(struct device *dev,
 
 		links[id].id = id;
 		links[id].cpus = &cpus[id];
-		links[id].cpus->dai_name = devm_kasprintf(dev, GFP_KERNEL,
-							  "SSP%d Pin", port);
-		if (!links[id].cpus->dai_name)
-			goto devm_err;
-		links[id].name = devm_kasprintf(dev, GFP_KERNEL, "SSP%d-BT", port);
-		if (!links[id].name)
-			goto devm_err;
+
+		if (sof_rt5682_quirk & SOF_RT5682_VIRTUAL_SSP_DAI){
+			links[id].name = "SSP-BT";
+			links[id].cpus->dai_name = "SSP-BT Pin";
+		} else {
+			links[id].name = devm_kasprintf(dev, GFP_KERNEL, "SSP%d-BT", port);
+			if (!links[id].name)
+				goto devm_err;
+
+			links[id].cpus->dai_name = devm_kasprintf(dev, GFP_KERNEL,
+								  "SSP%d Pin", port);
+			if (!links[id].cpus->dai_name)
+				goto devm_err;
+		}
 		links[id].codecs = dummy_component;
 		links[id].num_codecs = ARRAY_SIZE(dummy_component);
 		links[id].platforms = platform_component;
