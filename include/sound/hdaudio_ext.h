@@ -66,6 +66,8 @@ struct hdac_ext_stream {
 #define hdac_stream(s)		(&(s)->hstream)
 #define stream_to_hdac_ext_stream(s) \
 	container_of(s, struct hdac_ext_stream, hstream)
+#define snd_substream_to_hext_stream(substream) \
+	stream_to_hdac_ext_stream(snd_substream_to_hstream(substream))
 
 int snd_hdac_ext_stream_init_all(struct hdac_bus *bus, int start_idx,
 				 int num_stream, int dir);
