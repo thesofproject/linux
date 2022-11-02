@@ -296,7 +296,7 @@ static int avs_dai_hda_be_hw_params(struct snd_pcm_substream *substream,
 	if (data->path)
 		return 0;
 
-	link_stream = substream->runtime->private_data;
+	link_stream = snd_substream_to_hext_stream(substream);
 
 	return avs_dai_be_hw_params(substream, hw_params, dai,
 				    hdac_stream(link_stream)->stream_tag - 1);
@@ -316,7 +316,7 @@ static int avs_dai_hda_be_hw_free(struct snd_pcm_substream *substream, struct sn
 	if (!data->path)
 		return 0;
 
-	link_stream = substream->runtime->private_data;
+	link_stream = snd_substream_to_hext_stream(substream);
 	link_stream->link_prepared = false;
 	avs_path_free(data->path);
 	data->path = NULL;
@@ -337,13 +337,14 @@ static int avs_dai_hda_be_prepare(struct snd_pcm_substream *substream, struct sn
 {
 	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
 	struct snd_pcm_runtime *runtime = substream->runtime;
-	struct hdac_ext_stream *link_stream = runtime->private_data;
+	struct hdac_ext_stream *link_stream;
 	struct hdac_ext_link *link;
 	struct hda_codec *codec;
 	struct hdac_bus *bus;
 	unsigned int format_val;
 	int ret;
 
+	link_stream = snd_substream_to_hext_stream(substream);
 	if (link_stream->link_prepared)
 		return 0;
 
@@ -382,7 +383,7 @@ static int avs_dai_hda_be_trigger(struct snd_pcm_substream *substream, int cmd,
 	dev_dbg(dai->dev, "entry %s cmd=%d\n", __func__, cmd);
 
 	data = snd_soc_dai_get_dma_data(dai, substream);
-	link_stream = substream->runtime->private_data;
+	link_stream = snd_substream_to_hext_stream(substream);
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_RESUME:
@@ -1422,7 +1423,7 @@ static int avs_component_hda_close(struct snd_soc_component *component,
 	if (!rtd->dai_link->no_pcm)
 		return 0;
 
-	link_stream = substream->runtime->private_data;
+	link_stream = snd_substream_to_hext_stream(substream);
 	snd_hdac_ext_stream_release(link_stream, HDAC_EXT_STREAM_TYPE_LINK);
 	substream->runtime->private_data = NULL;
 
