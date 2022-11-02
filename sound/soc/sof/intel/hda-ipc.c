@@ -367,7 +367,7 @@ int hda_ipc_msg_data(struct snd_sof_dev *sdev,
 	if (!substream || !sdev->stream_box.size) {
 		sof_mailbox_read(sdev, sdev->dsp_box.offset, p, sz);
 	} else {
-		struct hdac_stream *hstream = substream->runtime->private_data;
+		struct hdac_stream *hstream = snd_substream_to_hstream(substream);
 		struct sof_intel_hda_stream *hda_stream;
 
 		hda_stream = container_of(hstream,
@@ -388,7 +388,7 @@ int hda_set_stream_data_offset(struct snd_sof_dev *sdev,
 			       struct snd_pcm_substream *substream,
 			       size_t posn_offset)
 {
-	struct hdac_stream *hstream = substream->runtime->private_data;
+	struct hdac_stream *hstream = snd_substream_to_hstream(substream);
 	struct sof_intel_hda_stream *hda_stream;
 
 	hda_stream = container_of(hstream, struct sof_intel_hda_stream,

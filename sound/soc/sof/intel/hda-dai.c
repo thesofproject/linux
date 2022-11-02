@@ -51,7 +51,7 @@ static bool hda_check_fes(struct snd_soc_pcm_runtime *rtd,
 
 	for_each_dpcm_fe(rtd, dir, dpcm) {
 		fe_substream = snd_soc_dpcm_get_substream(dpcm->fe, dir);
-		fe_hstream = fe_substream->runtime->private_data;
+		fe_hstream = snd_substream_to_hstream(fe_substream);
 		if (fe_hstream->stream_tag == stream_tag)
 			return true;
 	}

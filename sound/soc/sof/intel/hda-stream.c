@@ -662,7 +662,7 @@ int hda_dsp_stream_hw_params(struct snd_sof_dev *sdev,
 int hda_dsp_stream_hw_free(struct snd_sof_dev *sdev,
 			   struct snd_pcm_substream *substream)
 {
-	struct hdac_stream *hstream = substream->runtime->private_data;
+	struct hdac_stream *hstream = snd_substream_to_hstream(substream);
 	struct hdac_ext_stream *hext_stream = container_of(hstream,
 							 struct hdac_ext_stream,
 							 hstream);

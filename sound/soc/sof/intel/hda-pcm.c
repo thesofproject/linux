@@ -96,7 +96,7 @@ int hda_dsp_pcm_hw_params(struct snd_sof_dev *sdev,
 			  struct snd_pcm_hw_params *params,
 			  struct snd_sof_platform_stream_params *platform_params)
 {
-	struct hdac_stream *hstream = substream->runtime->private_data;
+	struct hdac_stream *hstream = snd_substream_to_hstream(substream);
 	struct hdac_ext_stream *hext_stream = stream_to_hdac_ext_stream(hstream);
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct snd_dma_buffer *dmab;
@@ -141,7 +141,7 @@ int hda_dsp_pcm_hw_params(struct snd_sof_dev *sdev,
 /* update SPIB register with appl position */
 int hda_dsp_pcm_ack(struct snd_sof_dev *sdev, struct snd_pcm_substream *substream)
 {
-	struct hdac_stream *hstream = substream->runtime->private_data;
+	struct hdac_stream *hstream = snd_substream_to_hstream(substream);
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	ssize_t appl_pos, buf_size;
 	u32 spib;
@@ -163,7 +163,7 @@ int hda_dsp_pcm_ack(struct snd_sof_dev *sdev, struct snd_pcm_substream *substrea
 int hda_dsp_pcm_trigger(struct snd_sof_dev *sdev,
 			struct snd_pcm_substream *substream, int cmd)
 {
-	struct hdac_stream *hstream = substream->runtime->private_data;
+	struct hdac_stream *hstream = snd_substream_to_hstream(substream);
 	struct hdac_ext_stream *hext_stream = stream_to_hdac_ext_stream(hstream);
 
 	return hda_dsp_stream_trigger(sdev, hext_stream, cmd);
@@ -174,7 +174,7 @@ snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_sof_dev *sdev,
 {
 	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
 	struct snd_soc_component *scomp = sdev->component;
-	struct hdac_stream *hstream = substream->runtime->private_data;
+	struct hdac_stream *hstream = snd_substream_to_hstream(substream);
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct snd_sof_pcm *spcm;
 	snd_pcm_uframes_t pos;
@@ -257,7 +257,7 @@ int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
 int hda_dsp_pcm_close(struct snd_sof_dev *sdev,
 		      struct snd_pcm_substream *substream)
 {
-	struct hdac_stream *hstream = substream->runtime->private_data;
+	struct hdac_stream *hstream = snd_substream_to_hstream(substream);
 	int direction = substream->stream;
 	int ret;
 
