@@ -79,7 +79,7 @@ static int hda_codec_dai_prepare(struct snd_pcm_substream *substream, struct snd
 	int ret;
 
 	codec = dev_to_hda_codec(dai->dev);
-	stream = substream->runtime->private_data;
+	stream = snd_substream_to_hstream(substream);
 	stream_info = snd_soc_dai_get_dma_data(dai, substream);
 	format = snd_hdac_calc_stream_format(runtime->rate, runtime->channels, runtime->format,
 					     runtime->sample_bits, 0);
