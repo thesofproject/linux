@@ -75,6 +75,10 @@ int sof_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
 			err = ret;
 	}
 
+	/* clear pipeline complete */
+	if (swidget->id == snd_soc_dapm_scheduler)
+		swidget->spipe->complete = 0;
+
 	if (!err)
 		dev_dbg(sdev->dev, "widget %s freed\n", swidget->widget->name);
 
