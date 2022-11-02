@@ -712,7 +712,7 @@ static int soc_pcm_clean(struct snd_soc_pcm_runtime *rtd,
 	if (!rollback)
 		snd_soc_runtime_deactivate(rtd, substream->stream);
 
-	for_each_rtd_dais(rtd, i, dai)
+	for_each_rtd_dais_reverse(rtd, i, dai)
 		snd_soc_dai_shutdown(dai, substream, rollback);
 
 	snd_soc_link_shutdown(substream, rollback);
