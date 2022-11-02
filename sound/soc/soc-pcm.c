@@ -2894,13 +2894,8 @@ int soc_new_pcm(struct snd_soc_pcm_runtime *rtd, int num)
 	pcm->private_data = rtd;
 	pcm->no_device_suspend = true;
 
-	if (rtd->dai_link->no_pcm || rtd->dai_link->params) {
-		if (playback)
-			pcm->streams[SNDRV_PCM_STREAM_PLAYBACK].substream->private_data = rtd;
-		if (capture)
-			pcm->streams[SNDRV_PCM_STREAM_CAPTURE].substream->private_data = rtd;
+	if (rtd->dai_link->no_pcm || rtd->dai_link->params)
 		goto out;
-	}
 
 	/* ASoC PCM operations */
 	if (rtd->dai_link->dynamic) {
