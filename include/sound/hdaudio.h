@@ -605,7 +605,7 @@ int snd_hdac_stream_set_lpib(struct hdac_stream *azx_dev, u32 value);
 /*
  * macros for easy use
  */
-#define snd_substream_to_hstream(substream)	(substream)->runtime->private_data
+#define snd_substream_to_hstream(substream)	(substream)->private_data
 
 /* read/write a register, pass without AZX_REG_ prefix */
 #define snd_hdac_stream_writel(dev, reg, value) \

@@ -250,7 +250,7 @@ int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
 				      SNDRV_PCM_HW_PARAM_PERIODS);
 
 	/* binding pcm substream to hda stream */
-	substream->runtime->private_data = &dsp_stream->hstream;
+	substream->private_data = &dsp_stream->hstream;
 	return 0;
 }
 
@@ -269,6 +269,6 @@ int hda_dsp_pcm_close(struct snd_sof_dev *sdev,
 	}
 
 	/* unbinding pcm substream to hda stream */
-	substream->runtime->private_data = NULL;
+	substream->private_data = NULL;
 	return 0;
 }

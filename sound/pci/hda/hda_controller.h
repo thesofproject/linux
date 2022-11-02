@@ -181,7 +181,7 @@ static inline bool azx_snoop(struct azx *chip)
 /* PCM setup */
 static inline struct azx_dev *get_azx_dev(struct snd_pcm_substream *substream)
 {
-	return substream->runtime->private_data;
+	return substream->private_data;
 }
 unsigned int azx_get_position(struct azx *chip, struct azx_dev *azx_dev);
 unsigned int azx_get_pos_lpib(struct azx *chip, struct azx_dev *azx_dev);

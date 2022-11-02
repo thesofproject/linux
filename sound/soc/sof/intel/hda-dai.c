@@ -223,6 +223,7 @@ static int hda_link_dma_hw_params(struct snd_pcm_substream *substream,
 			return -EBUSY;
 
 		snd_soc_dai_set_dma_data(cpu_dai, substream, (void *)hext_stream);
+		substream->private_data = hext_stream;
 	}
 
 	hlink = snd_hdac_ext_bus_get_hlink_by_name(bus, codec_dai->component->name);

@@ -1409,7 +1409,7 @@ static int avs_component_hda_open(struct snd_soc_component *component,
 	if (!link_stream)
 		return -EBUSY;
 
-	substream->runtime->private_data = link_stream;
+	substream->private_data = link_stream;
 	return 0;
 }
 
@@ -1425,7 +1425,7 @@ static int avs_component_hda_close(struct snd_soc_component *component,
 
 	link_stream = snd_substream_to_hext_stream(substream);
 	snd_hdac_ext_stream_release(link_stream, HDAC_EXT_STREAM_TYPE_LINK);
-	substream->runtime->private_data = NULL;
+	substream->private_data = NULL;
 
 	return 0;
 }

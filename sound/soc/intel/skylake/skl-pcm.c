@@ -236,7 +236,7 @@ static int skl_pcm_open(struct snd_pcm_substream *substream,
 		runtime->hw.info &= ~SNDRV_PCM_INFO_HAS_LINK_ATIME;
 	}
 
-	runtime->private_data = stream;
+	substream->private_data = stream;
 
 	dma_params = kzalloc(sizeof(*dma_params), GFP_KERNEL);
 	if (!dma_params)
@@ -556,6 +556,7 @@ static int skl_link_hw_params(struct snd_pcm_substream *substream,
 		return -EBUSY;
 
 	snd_soc_dai_set_dma_data(dai, substream, (void *)link_dev);
+	substream->private_data = link_dev;
 
 	link = snd_hdac_ext_bus_get_hlink_by_name(bus, codec_dai->component->name);
 	if (!link)

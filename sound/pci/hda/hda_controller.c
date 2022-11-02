@@ -592,7 +592,7 @@ static int azx_pcm_open(struct snd_pcm_substream *substream)
 		err = -EBUSY;
 		goto unlock;
 	}
-	runtime->private_data = azx_dev;
+	substream->private_data = azx_dev;
 
 	runtime->hw = azx_pcm_hw;
 	if (chip->gts_present)
