@@ -48,6 +48,7 @@
 	(((quirk) << SOF_CS42L42_SSP_BT_SHIFT) & SOF_CS42L42_SSP_BT_MASK)
 #define SOF_MAX98357A_SPEAKER_AMP_PRESENT	BIT(29)
 #define SOF_MAX98360A_SPEAKER_AMP_PRESENT	BIT(30)
+#define SOF_CS42L42_VIRTUAL_SSP_DAI		BIT(31)
 
 enum {
 	LINK_NONE = 0,
@@ -314,11 +315,15 @@ static int create_spk_amp_dai_links(struct device *dev,
 	if (!(sof_cs42l42_quirk & SOF_SPEAKER_AMP_PRESENT))
 		return 0;
 
-	links[*id].name = devm_kasprintf(dev, GFP_KERNEL, "SSP%d-Codec",
-					 ssp_amp);
-	if (!links[*id].name) {
-		ret = -ENOMEM;
-		goto devm_err;
+	if (sof_cs42l42_quirk & SOF_CS42L42_VIRTUAL_SSP_DAI)
+		links[*id].name = "SSP-SPK";
+	else {
+		links[*id].name = devm_kasprintf(dev, GFP_KERNEL, "SSP%d-Codec",
+						 ssp_amp);
+		if (!links[*id].name) {
+			ret = -ENOMEM;
+			goto devm_err;
+		}
 	}
 
 	links[*id].id = *id;
@@ -340,11 +345,15 @@ static int create_spk_amp_dai_links(struct device *dev,
 	links[*id].cpus = &cpus[*id];
 	links[*id].num_cpus = 1;
 
-	links[*id].cpus->dai_name = devm_kasprintf(dev, GFP_KERNEL,
-						   "SSP%d Pin", ssp_amp);
-	if (!links[*id].cpus->dai_name) {
-		ret = -ENOMEM;
-		goto devm_err;
+	if (sof_cs42l42_quirk & SOF_CS42L42_VIRTUAL_SSP_DAI)
+		links[*id].cpus->dai_name = "SSP-SPK Pin";
+	else {
+		links[*id].cpus->dai_name = devm_kasprintf(dev, GFP_KERNEL,
+							   "SSP%d Pin", ssp_amp);
+		if (!links[*id].cpus->dai_name) {
+			ret = -ENOMEM;
+			goto devm_err;
+		}
 	}
 
 	(*id)++;
@@ -359,10 +368,14 @@ static int create_hp_codec_dai_links(struct device *dev,
 				     int *id, int ssp_codec)
 {
 	/* codec SSP */
-	links[*id].name = devm_kasprintf(dev, GFP_KERNEL, "SSP%d-Codec",
-					 ssp_codec);
-	if (!links[*id].name)
-		goto devm_err;
+	if (sof_cs42l42_quirk & SOF_CS42L42_VIRTUAL_SSP_DAI)
+		links[*id].name = "SSP-HP";
+	else {
+		links[*id].name = devm_kasprintf(dev, GFP_KERNEL, "SSP%d-Codec",
+						 ssp_codec);
+		if (!links[*id].name)
+			goto devm_err;
+	}
 
 	links[*id].id = *id;
 	links[*id].codecs = cs42l42_component;
@@ -378,11 +391,15 @@ static int create_hp_codec_dai_links(struct device *dev,
 	links[*id].cpus = &cpus[*id];
 	links[*id].num_cpus = 1;
 
-	links[*id].cpus->dai_name = devm_kasprintf(dev, GFP_KERNEL,
-						   "SSP%d Pin",
-						   ssp_codec);
-	if (!links[*id].cpus->dai_name)
-		goto devm_err;
+	if (sof_cs42l42_quirk & SOF_CS42L42_VIRTUAL_SSP_DAI)
+		links[*id].cpus->dai_name = "SSP-HP Pin";
+	else {
+		links[*id].cpus->dai_name = devm_kasprintf(dev, GFP_KERNEL,
+							   "SSP%d Pin",
+							   ssp_codec);
+		if (!links[*id].cpus->dai_name)
+			goto devm_err;
+	}
 
 	(*id)++;
 
@@ -501,10 +518,14 @@ static int create_bt_offload_dai_links(struct device *dev,
 	if (!(sof_cs42l42_quirk & SOF_BT_OFFLOAD_PRESENT))
 		return 0;
 
-	links[*id].name = devm_kasprintf(dev, GFP_KERNEL, "SSP%d-BT",
-					 ssp_bt);
-	if (!links[*id].name)
-		goto devm_err;
+	if (sof_cs42l42_quirk & SOF_CS42L42_VIRTUAL_SSP_DAI)
+		links[*id].name = "SSP-BT";
+	else {
+		links[*id].name = devm_kasprintf(dev, GFP_KERNEL, "SSP%d-BT",
+						 ssp_bt);
+		if (!links[*id].name)
+			goto devm_err;
+	}
 
 	links[*id].id = *id;
 	links[*id].codecs = dummy_component;
@@ -518,11 +539,15 @@ static int create_bt_offload_dai_links(struct device *dev,
 	links[*id].cpus = &cpus[*id];
 	links[*id].num_cpus = 1;
 
-	links[*id].cpus->dai_name = devm_kasprintf(dev, GFP_KERNEL,
-						   "SSP%d Pin",
-						   ssp_bt);
-	if (!links[*id].cpus->dai_name)
-		goto devm_err;
+	if (sof_cs42l42_quirk & SOF_CS42L42_VIRTUAL_SSP_DAI)
+		links[*id].cpus->dai_name = "SSP-BT Pin";
+	else {
+		links[*id].cpus->dai_name = devm_kasprintf(dev, GFP_KERNEL,
+							   "SSP%d Pin",
+							   ssp_bt);
+		if (!links[*id].cpus->dai_name)
+			goto devm_err;
+	}
 
 	(*id)++;
 
