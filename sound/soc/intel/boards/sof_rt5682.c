@@ -502,16 +502,12 @@ static int sof_card_late_probe(struct snd_soc_card *card)
 static const struct snd_kcontrol_new sof_controls[] = {
 	SOC_DAPM_PIN_SWITCH("Headphone Jack"),
 	SOC_DAPM_PIN_SWITCH("Headset Mic"),
-	SOC_DAPM_PIN_SWITCH("Left Spk"),
-	SOC_DAPM_PIN_SWITCH("Right Spk"),
 
 };
 
 static const struct snd_soc_dapm_widget sof_widgets[] = {
 	SND_SOC_DAPM_HP("Headphone Jack", NULL),
 	SND_SOC_DAPM_MIC("Headset Mic", NULL),
-	SND_SOC_DAPM_SPK("Left Spk", NULL),
-	SND_SOC_DAPM_SPK("Right Spk", NULL),
 };
 
 static const struct snd_soc_dapm_widget dmic_widgets[] = {
@@ -755,12 +751,11 @@ static struct snd_soc_dai_link *sof_card_dai_links_create(struct device *dev,
 			sof_rt1015p_dai_link(&links[id]);
 		} else if (sof_rt5682_quirk & SOF_RT1019_SPEAKER_AMP_PRESENT) {
 			sof_rt1019p_dai_link(&links[id]);
-		} else if (sof_rt5682_quirk &
-				SOF_MAX98373_SPEAKER_AMP_PRESENT) {
-			links[id].codecs = max_98373_components;
-			links[id].num_codecs = ARRAY_SIZE(max_98373_components);
-			links[id].init = max_98373_spk_codec_init;
-			links[id].ops = &max_98373_ops;
+		} else if ((sof_rt5682_quirk &
+				SOF_MAX98373_SPEAKER_AMP_PRESENT) ||
+			(sof_rt5682_quirk &
+				SOF_MAX98390_SPEAKER_AMP_PRESENT)) {
+			maxim_dai_link(&links[id]);
 			/* feedback stream */
 			links[id].dpcm_capture = 1;
 		} else if (sof_rt5682_quirk &
@@ -769,20 +764,6 @@ static struct snd_soc_dai_link *sof_card_dai_links_create(struct device *dev,
 		} else if (sof_rt5682_quirk &
 				SOF_RT1011_SPEAKER_AMP_PRESENT) {
 			sof_rt1011_dai_link(&links[id]);
-		} else if (sof_rt5682_quirk &
-				SOF_MAX98390_SPEAKER_AMP_PRESENT) {
-			if (sof_rt5682_quirk &
-				SOF_MAX98390_TWEETER_SPEAKER_PRESENT) {
-				links[id].codecs = max_98390_4spk_components;
-				links[id].num_codecs = ARRAY_SIZE(max_98390_4spk_components);
-			} else {
-				links[id].codecs = max_98390_components;
-				links[id].num_codecs = ARRAY_SIZE(max_98390_components);
-			}
-			links[id].init = max_98390_spk_codec_init;
-			links[id].ops = &max_98390_ops;
-			links[id].dpcm_capture = 1;
-
 		} else {
 			max_98357a_dai_link(&links[id]);
 		}
@@ -924,20 +905,13 @@ static int sof_audio_probe(struct platform_device *pdev)
 	if (sof_rt5682_quirk & SOF_SPEAKER_AMP_PRESENT)
 		sof_audio_card_rt5682.num_links++;
 
-	if (sof_rt5682_quirk & SOF_MAX98373_SPEAKER_AMP_PRESENT)
-		max_98373_set_codec_conf(&sof_audio_card_rt5682);
+	if ((sof_rt5682_quirk & SOF_MAX98373_SPEAKER_AMP_PRESENT) ||
+		(sof_rt5682_quirk & SOF_MAX98390_SPEAKER_AMP_PRESENT))
+		maxim_set_codec_conf(&sof_audio_card_rt5682);
 	else if (sof_rt5682_quirk & SOF_RT1011_SPEAKER_AMP_PRESENT)
 		sof_rt1011_codec_conf(&sof_audio_card_rt5682);
 	else if (sof_rt5682_quirk & SOF_RT1015P_SPEAKER_AMP_PRESENT)
 		sof_rt1015p_codec_conf(&sof_audio_card_rt5682);
-	else if (sof_rt5682_quirk & SOF_MAX98390_SPEAKER_AMP_PRESENT) {
-		if (sof_rt5682_quirk & SOF_MAX98390_TWEETER_SPEAKER_PRESENT)
-			max_98390_set_codec_conf(&sof_audio_card_rt5682,
-						 ARRAY_SIZE(max_98390_4spk_components));
-		else
-			max_98390_set_codec_conf(&sof_audio_card_rt5682,
-						 ARRAY_SIZE(max_98390_components));
-	}
 
 	if (sof_rt5682_quirk & SOF_SSP_BT_OFFLOAD_PRESENT)
 		sof_audio_card_rt5682.num_links++;

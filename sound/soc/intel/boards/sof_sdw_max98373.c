@@ -48,7 +48,7 @@ static int spk_init(struct snd_soc_pcm_runtime *rtd)
 		return ret;
 	}
 
-	ret = snd_soc_dapm_add_routes(&card->dapm, max_98373_dapm_routes, 2);
+	ret = snd_soc_dapm_add_routes(&card->dapm, maxim_dapm_routes, 2);
 	if (ret)
 		dev_err(rtd->dev, "failed to add first SPK map: %d\n", ret);
 

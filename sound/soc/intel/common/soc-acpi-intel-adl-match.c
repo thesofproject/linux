@@ -531,6 +531,7 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_adl_machines[] = {
 		.quirk_data = &adl_max98360a_amp,
 		.sof_tplg_filename = "sof-adl-max98360a-cs42l42.tplg",
 	},
+
 	/* place amp-only boards in the end of table */
 	{
 		.id = "CSC3541",

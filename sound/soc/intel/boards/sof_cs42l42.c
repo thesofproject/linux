@@ -655,6 +655,7 @@ static int sof_audio_probe(struct platform_device *pdev)
 
 	if (sof_cs42l42_quirk & SOF_SPEAKER_AMP_PRESENT)
 		sof_audio_card_cs42l42.num_links++;
+
 	if (sof_cs42l42_quirk & SOF_BT_OFFLOAD_PRESENT)
 		sof_audio_card_cs42l42.num_links++;
 

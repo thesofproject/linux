@@ -211,8 +211,6 @@ static int sof_card_late_probe(struct snd_soc_card *card)
 static const struct snd_kcontrol_new sof_controls[] = {
 	SOC_DAPM_PIN_SWITCH("Headphone Jack"),
 	SOC_DAPM_PIN_SWITCH("Headset Mic"),
-	SOC_DAPM_PIN_SWITCH("Left Spk"),
-	SOC_DAPM_PIN_SWITCH("Right Spk"),
 };
 
 static const struct snd_kcontrol_new speaker_controls[] = {
@@ -222,8 +220,6 @@ static const struct snd_kcontrol_new speaker_controls[] = {
 static const struct snd_soc_dapm_widget sof_widgets[] = {
 	SND_SOC_DAPM_HP("Headphone Jack", NULL),
 	SND_SOC_DAPM_MIC("Headset Mic", NULL),
-	SND_SOC_DAPM_SPK("Left Spk", NULL),
-	SND_SOC_DAPM_SPK("Right Spk", NULL),
 };
 
 static const struct snd_soc_dapm_widget speaker_widgets[] = {
@@ -475,10 +471,7 @@ static struct snd_soc_dai_link *sof_card_dai_links_create(struct device *dev,
 			links[id].init = speaker_codec_init;
 		} else if (sof_nau8825_quirk &
 				SOF_MAX98373_SPEAKER_AMP_PRESENT) {
-			links[id].codecs = max_98373_components;
-			links[id].num_codecs = ARRAY_SIZE(max_98373_components);
-			links[id].init = max_98373_spk_codec_init;
-			links[id].ops = &max_98373_ops;
+			maxim_dai_link(&links[id]);
 			/* feedback stream */
 			links[id].dpcm_capture = 1;
 		} else if (sof_nau8825_quirk &
@@ -578,7 +571,7 @@ static int sof_audio_probe(struct platform_device *pdev)
 		sof_audio_card_nau8825.num_links++;
 
 	if (sof_nau8825_quirk & SOF_MAX98373_SPEAKER_AMP_PRESENT)
-		max_98373_set_codec_conf(&sof_audio_card_nau8825);
+		maxim_set_codec_conf(&sof_audio_card_nau8825);
 	else if (sof_nau8825_quirk & SOF_RT1015P_SPEAKER_AMP_PRESENT)
 		sof_rt1015p_codec_conf(&sof_audio_card_nau8825);
 
