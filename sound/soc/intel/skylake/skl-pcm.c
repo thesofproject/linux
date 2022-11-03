@@ -56,7 +56,7 @@ static const struct snd_pcm_hardware azx_pcm_hw = {
 static inline
 struct hdac_ext_stream *get_hdac_ext_stream(struct snd_pcm_substream *substream)
 {
-	return substream->runtime->private_data;
+	return snd_substream_to_hext_stream(substream);
 }
 
 static struct hdac_bus *get_bus_ctx(struct snd_pcm_substream *substream)
