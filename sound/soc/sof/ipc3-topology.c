@@ -2317,7 +2317,8 @@ static int sof_ipc3_tear_down_all_pipelines(struct snd_sof_dev *sdev, bool verif
 		if (!verify && !swidget->dynamic_pipeline_widget &&
 		    SOF_FW_VER(v->major, v->minor, v->micro) < SOF_FW_VER(2, 2, 0)) {
 			swidget->use_count = 0;
-			swidget->spipe->complete = 0;
+			if (swidget->spipe)
+				swidget->spipe->complete = 0;
 			continue;
 		}
 
