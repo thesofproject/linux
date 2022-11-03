@@ -1414,14 +1414,15 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 	if (ret < 0) {
 		dev_err(scomp->dev, "failed to parse component pin tokens for %s\n",
 			w->name);
-		return ret;
+		goto widget_free;
 	}
 
 	if (swidget->num_sink_pins > SOF_WIDGET_MAX_NUM_PINS ||
 	    swidget->num_source_pins > SOF_WIDGET_MAX_NUM_PINS) {
 		dev_err(scomp->dev, "invalid pins for %s: [sink: %d, src: %d]\n",
 			swidget->widget->name, swidget->num_sink_pins, swidget->num_source_pins);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto widget_free;
 	}
 
 	if (swidget->num_sink_pins > 1) {
@@ -1430,7 +1431,7 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 		if (ret < 0) {
 			dev_err(scomp->dev, "failed to parse sink pin binding for %s\n",
 				w->name);
-			return ret;
+			goto widget_free;
 		}
 	}
 
@@ -1440,7 +1441,7 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 		if (ret < 0) {
 			dev_err(scomp->dev, "failed to parse source pin binding for %s\n",
 				w->name);
-			return ret;
+			goto widget_free;
 		}
 	}
 
@@ -1462,9 +1463,8 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 	case snd_soc_dapm_dai_out:
 		dai = kzalloc(sizeof(*dai), GFP_KERNEL);
 		if (!dai) {
-			kfree(swidget);
-			return -ENOMEM;
-
+			ret = -ENOMEM;
+			goto widget_free;
 		}
 
 		ret = sof_widget_parse_tokens(scomp, swidget, tw, token_list, token_list_size);
@@ -1522,8 +1522,7 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 			tw->shift, swidget->id, tw->name,
 			strnlen(tw->sname, SNDRV_CTL_ELEM_ID_NAME_MAXLEN) > 0
 				? tw->sname : "none");
-		kfree(swidget);
-		return ret;
+		goto widget_free;
 	}
 
 	if (sof_debug_check_flag(SOF_DBG_DISABLE_MULTICORE)) {
@@ -1544,10 +1543,7 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 			if (ret) {
 				dev_err(scomp->dev, "widget event binding failed for %s\n",
 					swidget->widget->name);
-				kfree(swidget->private);
-				kfree(swidget->tuples);
-				kfree(swidget);
-				return ret;
+				goto free;
 			}
 		}
 	}
@@ -1558,10 +1554,8 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 
 		spipe = kzalloc(sizeof(*spipe), GFP_KERNEL);
 		if (!spipe) {
-			kfree(swidget->private);
-			kfree(swidget->tuples);
-			kfree(swidget);
-			return -ENOMEM;
+			ret = -ENOMEM;
+			goto free;
 		}
 
 		spipe->pipe_widget = swidget;
@@ -1571,6 +1565,12 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 
 	w->dobj.private = swidget;
 	list_add(&swidget->list, &sdev->widget_list);
+	return ret;
+free:
+	kfree(swidget->private);
+	kfree(swidget->tuples);
+widget_free:
+	kfree(swidget);
 	return ret;
 }
 
