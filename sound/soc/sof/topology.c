@@ -1512,7 +1512,7 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 	case snd_soc_dapm_kcontrol:
 	default:
 		dev_dbg(scomp->dev, "widget type %d name %s not handled\n", swidget->id, tw->name);
-		goto widget_free;
+		break;
 	}
 
 	/* check token parsing reply */
