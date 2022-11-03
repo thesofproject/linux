@@ -404,6 +404,19 @@ static struct snd_soc_dai_link_component dmic_component[] = {
 	}
 };
 
+static struct snd_soc_dai_link_component dummy_component[] = {
+	{
+		.name = "snd-soc-dummy",
+		.dai_name = "snd-soc-dummy-dai",
+	}
+};
+
+static struct snd_soc_dai_link_component sof_dummy_component[] = {
+	{
+		.dai_name = "SOF Dummy",
+	}
+};
+
 static struct snd_soc_dai_link_component platform_component[] = {
 	{
 		/* name might be overridden during probe */
@@ -1243,8 +1256,8 @@ static int sof_card_dai_links_create(struct device *dev,
 	dev_dbg(dev, "sdw %d, ssp %d, dmic %d, hdmi %d", sdw_be_num, ssp_num,
 		dmic_num, ctx->idisp_codec ? hdmi_num : 0);
 
-	/* allocate BE dailinks */
-	num_links = comp_num + sdw_be_num;
+	/* allocate BE dailinks, + 1 for echo reference BE dailink */
+	num_links = comp_num + sdw_be_num + 1;
 	links = devm_kcalloc(dev, num_links, sizeof(*links), GFP_KERNEL);
 
 	/* allocated CPU DAIs */
@@ -1443,6 +1456,9 @@ HDMI:
 		init_dai_link(dev, links + link_index, be_id, name, 1, 1,
 				cpus + cpu_id, 1, ssp_components, 1, NULL, NULL);
 	}
+	/* Echo reference */
+	init_dai_link(dev, links + link_index, be_id, "Echo-reference", 0, 1,
+			sof_dummy_component, 1, dummy_component, 1, NULL, NULL);
 
 	card->dai_link = links;
 	card->num_links = num_links;
