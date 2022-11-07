@@ -356,6 +356,10 @@ static int sof_ipc4_widget_setup_pcm(struct snd_sof_widget *swidget)
 		goto free_available_fmt;
 	}
 
+	/*
+	 * This callback is used by host copier and module-to-module copier,
+	 * and only host copier needs to set gtw_cfg.
+	 */
 	if (!WIDGET_IS_AIF(swidget->id))
 		goto skip_gtw_cfg;
 
