@@ -468,8 +468,8 @@ static int hdac_hdmi_set_hw_params(struct snd_pcm_substream *substream,
 	dai_map = &hdmi->dai_map[dai->id];
 
 	format = snd_hdac_calc_stream_format(params_rate(hparams),
-			params_channels(hparams), params_format(hparams),
-			dai->driver->playback.sig_bits, 0);
+					     params_channels(hparams), params_format(hparams),
+					     params_physical_width(hparams), 0);
 
 	pcm = hdac_hdmi_get_pcm_from_cvt(hdmi, dai_map->cvt);
 	if (!pcm)

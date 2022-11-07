@@ -323,11 +323,7 @@ static int skl_pcm_hw_params(struct snd_pcm_substream *substream,
 	p_params.host_dma_id = dma_id;
 	p_params.stream = substream->stream;
 	p_params.format = params_format(params);
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		p_params.host_bps = dai->driver->playback.sig_bits;
-	else
-		p_params.host_bps = dai->driver->capture.sig_bits;
-
+	p_params.host_bps = params_physical_width(params);
 
 	m_cfg = skl_tplg_fe_get_cpr_module(dai, p_params.stream);
 	if (m_cfg)
@@ -574,11 +570,7 @@ static int skl_link_hw_params(struct snd_pcm_substream *substream,
 	p_params.link_dma_id = stream_tag - 1;
 	p_params.link_index = link->index;
 	p_params.format = params_format(params);
-
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		p_params.link_bps = codec_dai->driver->playback.sig_bits;
-	else
-		p_params.link_bps = codec_dai->driver->capture.sig_bits;
+	p_params.link_bps = params_physical_width(params);
 
 	return skl_tplg_be_update_params(dai, &p_params);
 }
