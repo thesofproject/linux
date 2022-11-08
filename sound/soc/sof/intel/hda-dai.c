@@ -237,10 +237,7 @@ static int hda_link_dma_hw_params(struct snd_pcm_substream *substream,
 	p_params.link_index = hlink->index;
 	p_params.format = params_format(params);
 
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		p_params.link_bps = codec_dai->driver->playback.sig_bits;
-	else
-		p_params.link_bps = codec_dai->driver->capture.sig_bits;
+	p_params.link_bps = params_physical_width(params);
 
 	return hda_link_dma_params(hext_stream, &p_params);
 }
