@@ -1957,6 +1957,47 @@ static void sof_ipc4_put_queue_id(struct snd_sof_widget *swidget, int queue_id,
 	ida_free(queue_ida, queue_id);
 }
 
+static int sof_ipc4_set_copier_sink_format(struct snd_sof_dev *sdev,
+					   struct snd_sof_widget *src_widget,
+					   struct snd_sof_widget *sink_widget,
+					   int sink_id)
+{
+	struct sof_ipc4_base_module_cfg *src_config = src_widget->private;
+	struct sof_ipc4_base_module_cfg *sink_config = sink_widget->private;
+	struct sof_ipc4_copier_config_set_sink_format format;
+	struct sof_ipc4_fw_module *fw_module;
+	struct sof_ipc4_msg msg = {{ 0 }};
+	u32 header, extension;
+
+	dev_dbg(sdev->dev, "%s set copier sink %d format\n",
+		src_widget->widget->name, sink_id);
+
+	fw_module = src_widget->module_info;
+
+	format.sink_id = sink_id;
+	memcpy(&format.source_fmt, &src_config->audio_fmt, sizeof(format.source_fmt));
+	memcpy(&format.sink_fmt, &sink_config->audio_fmt, sizeof(format.sink_fmt));
+	msg.data_size = sizeof(format);
+	msg.data_ptr = &format;
+
+	header = fw_module->man4_module_entry.id;
+	header |= SOF_IPC4_MOD_INSTANCE(src_widget->instance_id);
+	header |= SOF_IPC4_MSG_TYPE_SET(SOF_IPC4_MOD_LARGE_CONFIG_SET);
+	header |= SOF_IPC4_MSG_DIR(SOF_IPC4_MSG_REQUEST);
+	header |= SOF_IPC4_MSG_TARGET(SOF_IPC4_MODULE_MSG);
+
+	extension = SOF_IPC4_MOD_EXT_MSG_SIZE(msg.data_size);
+	extension |=
+		SOF_IPC4_MOD_EXT_MSG_PARAM_ID(SOF_IPC4_COPIER_MODULE_CFG_PARAM_SET_SINK_FORMAT);
+	extension |= SOF_IPC4_MOD_EXT_MSG_LAST_BLOCK(1);
+	extension |= SOF_IPC4_MOD_EXT_MSG_FIRST_BLOCK(1);
+
+	msg.primary = header;
+	msg.extension = extension;
+
+	return sof_ipc_tx_message(sdev->ipc, &msg, msg.data_size, NULL, 0);
+}
+
 static int sof_ipc4_route_setup(struct snd_sof_dev *sdev, struct snd_sof_route *sroute)
 {
 	struct snd_sof_widget *src_widget = sroute->src_widget;
@@ -2014,6 +2055,11 @@ static int sof_ipc4_route_setup(struct snd_sof_dev *sdev, struct snd_sof_route *
 		sof_ipc4_put_queue_id(sink_widget, sroute->dst_queue_id,
 				      SOF_PIN_TYPE_SINK);
 	}
+
+	/* Pin 0 format is already set during copier module init */
+	if (sroute->src_queue_id > 0 && WIDGET_IS_COPIER(src_widget->id))
+		sof_ipc4_set_copier_sink_format(sdev, src_widget, sink_widget,
+						sroute->src_queue_id);
 
 	return ret;
 }
