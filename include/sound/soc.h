@@ -912,6 +912,7 @@ struct snd_soc_card {
 	char dmi_longname[80];
 #endif /* CONFIG_DMI */
 	char topology_shortname[32];
+	char driver_shortname[16];
 
 	struct device *dev;
 	struct snd_card *snd_card;
@@ -1014,6 +1015,7 @@ struct snd_soc_card {
 	/* bit field */
 	unsigned int instantiated:1;
 	unsigned int topology_shortname_created:1;
+	unsigned int driver_shortname_created:1;
 	unsigned int fully_routed:1;
 	unsigned int disable_route_checks:1;
 	unsigned int probed:1;

@@ -1830,8 +1830,22 @@ match:
 				card->topology_shortname_created = true;
 			}
 
+			/* driver shortname created? */
+			if (IS_ENABLED(CONFIG_SND_SOC_SET_CARD_DRIVER_NAME_AS_TOPOLOGY_PREFIX) &&
+			    !card->driver_shortname_created) {
+				comp_drv = component->driver;
+
+				snprintf(card->driver_shortname, 16, "%s",
+					 comp_drv->topology_name_prefix);
+
+				card->driver_shortname_created = true;
+			}
+
 			/* use topology shortname */
 			card->name = card->topology_shortname;
+
+			/* use driver shortname */
+			card->driver_name = card->driver_shortname;
 		}
 	}
 }

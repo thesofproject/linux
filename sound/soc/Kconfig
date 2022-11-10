@@ -65,6 +65,26 @@ config SND_SOC_UTILS_KUNIT_TEST
 config SND_SOC_ACPI
 	tristate
 
+config SND_SOC_SET_CARD_DRIVER_NAME_AS_TOPOLOGY_PREFIX
+	bool "Use topology prefix as user friendly card driver name"
+	depends on SND_SOC_TOPOLOGY
+	help
+	  ASoC drivers typically don't set the driver name when creating
+	  a card, as a result the driver name is a truncated version of the
+	  card name.
+
+	  This option will set a user-friendly driver name to the
+	  topology prefix, if used, but should only be set when
+	  related UCM card-lookup changes have been applied by the
+	  distribution or end-user.
+
+	  Do not use this option without matching UCM changes, otherwise
+	  devices will not be reported to PulseAudio/
+
+	  Select Y if userspace like UCM (Use Case Manager) supports lookup with
+	  driver names.
+	  If unsure select N.
+
 # All the supported SoCs
 source "sound/soc/adi/Kconfig"
 source "sound/soc/amd/Kconfig"
