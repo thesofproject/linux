@@ -49,9 +49,27 @@ int sof_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
 	/* reset route setup status for all routes that contain this widget */
 	sof_reset_route_setup_status(sdev, swidget);
 
+	/* free DAI config and continue to free widget even if it fails */
+	if (WIDGET_IS_DAI(swidget->id)) {
+		struct snd_sof_dai_config_data data;
+		unsigned int flags = SOF_DAI_CONFIG_FLAGS_HW_FREE;
+
+		data.dai_data = DMA_CHAN_INVALID;
+
+		if (tplg_ops && tplg_ops->dai_config) {
+			err = tplg_ops->dai_config(sdev, swidget, flags, &data);
+			if (err < 0)
+				dev_err(sdev->dev, "failed to free config for widget %s\n",
+					swidget->widget->name);
+		}
+	}
+
 	/* continue to disable core even if IPC fails */
-	if (tplg_ops && tplg_ops->widget_free)
-		err = tplg_ops->widget_free(sdev, swidget);
+	if (tplg_ops && tplg_ops->widget_free) {
+		ret = tplg_ops->widget_free(sdev, swidget);
+		if (ret < 0 && !err)
+			err = ret;
+	}
 
 	/*
 	 * disable widget core. continue to route setup status and complete flag
@@ -137,8 +155,12 @@ int sof_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
 
 	/* send config for DAI components */
 	if (WIDGET_IS_DAI(swidget->id)) {
-		unsigned int flags = SOF_DAI_CONFIG_FLAGS_NONE;
+		unsigned int flags = SOF_DAI_CONFIG_FLAGS_HW_PARAMS;
 
+		/*
+		 * The config flags saved during BE DAI hw_params will be used for IPC3. IPC4 does
+		 * not use the flags argument.
+		 */
 		if (tplg_ops && tplg_ops->dai_config) {
 			ret = tplg_ops->dai_config(sdev, swidget, flags, NULL);
 			if (ret < 0)
