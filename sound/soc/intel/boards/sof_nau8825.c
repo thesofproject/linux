@@ -47,6 +47,7 @@
 #define SOF_RT1019P_SPEAKER_AMP_PRESENT	BIT(14)
 #define SOF_MAX98373_SPEAKER_AMP_PRESENT	BIT(15)
 #define SOF_MAX98360A_SPEAKER_AMP_PRESENT	BIT(16)
+#define SOF_NAU8825_VIRTUAL_SSP_DAI		BIT(17)
 
 static unsigned long sof_nau8825_quirk = SOF_NAU8825_SSP_CODEC(0);
 
@@ -363,10 +364,14 @@ static struct snd_soc_dai_link *sof_card_dai_links_create(struct device *dev,
 		goto devm_err;
 
 	/* codec SSP */
-	links[id].name = devm_kasprintf(dev, GFP_KERNEL,
-					"SSP%d-Codec", ssp_codec);
-	if (!links[id].name)
-		goto devm_err;
+	if (sof_nau8825_quirk & SOF_NAU8825_VIRTUAL_SSP_DAI)
+		links[id].name = "SSP-HP";
+	else {
+		links[id].name = devm_kasprintf(dev, GFP_KERNEL,
+						"SSP%d-Codec", ssp_codec);
+		if (!links[id].name)
+			goto devm_err;
+	}
 
 	links[id].id = id;
 	links[id].codecs = nau8825_component;
@@ -382,11 +387,15 @@ static struct snd_soc_dai_link *sof_card_dai_links_create(struct device *dev,
 	links[id].cpus = &cpus[id];
 	links[id].num_cpus = 1;
 
-	links[id].cpus->dai_name = devm_kasprintf(dev, GFP_KERNEL,
-						  "SSP%d Pin",
-						  ssp_codec);
-	if (!links[id].cpus->dai_name)
-		goto devm_err;
+	if (sof_nau8825_quirk & SOF_NAU8825_VIRTUAL_SSP_DAI)
+		links[id].cpus->dai_name = "SSP-HP Pin";
+	else {
+		links[id].cpus->dai_name = devm_kasprintf(dev, GFP_KERNEL,
+							  "SSP%d Pin",
+							  ssp_codec);
+		if (!links[id].cpus->dai_name)
+			goto devm_err;
+	}
 
 	id++;
 
@@ -462,10 +471,14 @@ static struct snd_soc_dai_link *sof_card_dai_links_create(struct device *dev,
 
 	/* speaker amp */
 	if (sof_nau8825_quirk & SOF_SPEAKER_AMP_PRESENT) {
-		links[id].name = devm_kasprintf(dev, GFP_KERNEL,
-						"SSP%d-Codec", ssp_amp);
-		if (!links[id].name)
-			goto devm_err;
+		if (sof_nau8825_quirk & SOF_NAU8825_VIRTUAL_SSP_DAI)
+			links[id].name = "SSP-SPK";
+		else {
+			links[id].name = devm_kasprintf(dev, GFP_KERNEL,
+							"SSP%d-Codec", ssp_amp);
+			if (!links[id].name)
+				goto devm_err;
+		}
 
 		links[id].id = id;
 		if (sof_nau8825_quirk & SOF_RT1019P_SPEAKER_AMP_PRESENT) {
@@ -493,11 +506,17 @@ static struct snd_soc_dai_link *sof_card_dai_links_create(struct device *dev,
 		links[id].no_pcm = 1;
 		links[id].cpus = &cpus[id];
 		links[id].num_cpus = 1;
-		links[id].cpus->dai_name = devm_kasprintf(dev, GFP_KERNEL,
-							  "SSP%d Pin",
-							  ssp_amp);
-		if (!links[id].cpus->dai_name)
-			goto devm_err;
+
+		if (sof_nau8825_quirk & SOF_NAU8825_VIRTUAL_SSP_DAI)
+			links[id].cpus->dai_name = "SSP-SPK Pin";
+		else {
+			links[id].cpus->dai_name = devm_kasprintf(dev, GFP_KERNEL,
+								  "SSP%d Pin",
+								  ssp_amp);
+			if (!links[id].cpus->dai_name)
+				goto devm_err;
+		}
+
 		id++;
 	}
 
@@ -508,13 +527,21 @@ static struct snd_soc_dai_link *sof_card_dai_links_create(struct device *dev,
 
 		links[id].id = id;
 		links[id].cpus = &cpus[id];
-		links[id].cpus->dai_name = devm_kasprintf(dev, GFP_KERNEL,
-							  "SSP%d Pin", port);
-		if (!links[id].cpus->dai_name)
-			goto devm_err;
-		links[id].name = devm_kasprintf(dev, GFP_KERNEL, "SSP%d-BT", port);
-		if (!links[id].name)
-			goto devm_err;
+
+		if (sof_nau8825_quirk & SOF_NAU8825_VIRTUAL_SSP_DAI) {
+			links[id].name = "SSP-BT";
+			links[id].cpus->dai_name = "SSP-BT Pin";
+		} else {
+			links[id].name = devm_kasprintf(dev, GFP_KERNEL, "SSP%d-BT", port);
+			if (!links[id].name)
+				goto devm_err;
+
+			links[id].cpus->dai_name = devm_kasprintf(dev, GFP_KERNEL,
+								  "SSP%d Pin", port);
+			if (!links[id].cpus->dai_name)
+				goto devm_err;
+		}
+
 		links[id].codecs = dummy_component;
 		links[id].num_codecs = ARRAY_SIZE(dummy_component);
 		links[id].platforms = platform_component;
