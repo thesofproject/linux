@@ -1251,7 +1251,7 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		ipc4_copier = (struct sof_ipc4_copier *)dai->private;
 		copier_data = &ipc4_copier->data;
 		available_fmt = &ipc4_copier->available_fmt;
-		if (dir == SNDRV_PCM_STREAM_CAPTURE) {
+		if (dir == SNDRV_PCM_STREAM_CAPTURE || ipc4_copier->dai_type == SOF_DAI_INTEL_SSP) {
 			available_fmt->ref_audio_fmt = available_fmt->out_audio_fmt;
 			ref_audio_fmt_size = sizeof(struct sof_ipc4_audio_format);
 
