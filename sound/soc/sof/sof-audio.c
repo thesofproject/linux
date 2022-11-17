@@ -309,9 +309,9 @@ sof_unprepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widg
 	const struct sof_ipc_tplg_widget_ops *widget_ops;
 	struct snd_soc_dapm_path *p;
 
-	/* return if the widget is in use or if it is already unprepared */
+	/* skip if the widget is in use or if it is already unprepared */
 	if (!swidget->prepared || swidget->use_count > 0)
-		return;
+		goto sink_unprepare;
 
 	widget_ops = tplg_ops ? tplg_ops->widget : NULL;
 	if (widget_ops && widget_ops[widget->id].ipc_unprepare)
@@ -320,6 +320,7 @@ sof_unprepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widg
 
 	swidget->prepared = false;
 
+sink_unprepare:
 	/* unprepare all widgets in the sink paths */
 	snd_soc_dapm_widget_for_each_sink_path(widget, p) {
 		if (!widget_in_list(list, p->sink))
@@ -347,7 +348,7 @@ sof_prepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget
 
 	widget_ops = tplg_ops ? tplg_ops->widget : NULL;
 	if (!widget_ops)
-		return 0;
+		goto sink_prepare;
 
 	if (!widget_ops[widget->id].ipc_prepare || swidget->prepared)
 		goto sink_prepare;
