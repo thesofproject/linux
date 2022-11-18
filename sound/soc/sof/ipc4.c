@@ -16,6 +16,7 @@
 #include "ipc4-priv.h"
 #include "ops.h"
 
+#define DEBUG_VERBOSE
 #ifdef DEBUG_VERBOSE
 #define sof_ipc4_dump_payload(sdev, ipc_data, size)			\
 		print_hex_dump_debug("Message payload: ",		\
