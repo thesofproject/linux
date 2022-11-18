@@ -1052,7 +1052,7 @@ static void sof_ipc4_unprepare_copier_module(struct snd_sof_widget *swidget)
 	pipeline = pipe_widget->private;
 	pipeline->mem_usage = 0;
 
-	if (WIDGET_IS_AIF(swidget->id)) {
+	if (WIDGET_IS_AIF(swidget->id) || swidget->id == snd_soc_dapm_buffer) {
 		ipc4_copier = swidget->private;
 	} else if (WIDGET_IS_DAI(swidget->id)) {
 		struct snd_sof_dai *dai = swidget->private;
