@@ -411,6 +411,8 @@ int __pkvm_prot_finalize(void)
 	dsb(nsh);
 	isb();
 
+	__pkvm_close_module_registration();
+
 	return 0;
 }
 
