@@ -383,11 +383,6 @@ struct snd_sof_widget {
 	struct snd_soc_component *scomp;
 	int comp_id;
 	int pipeline_id;
-	/*
-	 * the prepared flag is used to indicate that a widget has been prepared for getting set
-	 * up in the DSP.
-	 */
-	bool prepared;
 	int use_count; /* use_count will be protected by the PCM mutex held by the core */
 	int core;
 	int id; /* id is the DAPM widget type */

@@ -310,15 +310,13 @@ sof_unprepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widg
 	struct snd_soc_dapm_path *p;
 
 	/* skip if the widget is in use or if it is already unprepared */
-	if (!swidget->prepared || swidget->use_count > 0)
+	if (swidget->use_count > 0)
 		goto sink_unprepare;
 
 	widget_ops = tplg_ops ? tplg_ops->widget : NULL;
 	if (widget_ops && widget_ops[widget->id].ipc_unprepare)
 		/* unprepare the source widget */
 		widget_ops[widget->id].ipc_unprepare(swidget);
-
-	swidget->prepared = false;
 
 sink_unprepare:
 	/* unprepare all widgets in the sink paths */
@@ -350,7 +348,7 @@ sof_prepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget
 	if (!widget_ops)
 		goto sink_prepare;
 
-	if (!widget_ops[widget->id].ipc_prepare || swidget->prepared)
+	if (!widget_ops[widget->id].ipc_prepare && !swidget->use_count)
 		goto sink_prepare;
 
 	/* prepare the source widget */
@@ -360,8 +358,6 @@ sof_prepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget
 		dev_err(sdev->dev, "failed to prepare widget %s\n", widget->name);
 		return ret;
 	}
-
-	swidget->prepared = true;
 
 sink_prepare:
 	/* prepare all widgets in the sink paths */
@@ -376,10 +372,8 @@ sink_prepare:
 			p->walking = false;
 			if (ret < 0) {
 				/* unprepare the source widget */
-				if (widget_ops[widget->id].ipc_unprepare && swidget->prepared) {
+				if (widget_ops[widget->id].ipc_unprepare)
 					widget_ops[widget->id].ipc_unprepare(swidget);
-					swidget->prepared = false;
-				}
 				return ret;
 			}
 		}
