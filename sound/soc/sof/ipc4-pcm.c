@@ -193,7 +193,7 @@ sof_ipc4_update_pipeline_state(struct snd_sof_dev *sdev, int state, int cmd,
 
 static int sof_ipc4_chain_dma_send_msg(struct snd_sof_dev *sdev,
 				       struct snd_sof_pcm_stream_pipeline_list *pipeline_list,
-				       bool allocate, bool enable)
+				       bool allocate, bool enable, int cmd)
 {
 	struct sof_ipc4_msg msg = {{ 0 }};
 	int i;
@@ -221,7 +221,8 @@ static int sof_ipc4_chain_dma_send_msg(struct snd_sof_dev *sdev,
 
 		msg.primary |= pipeline->msg.primary;
 
-		if (allocate)
+		if (allocate && enable &&
+		    (cmd == SNDRV_PCM_TRIGGER_START || cmd == SNDRV_PCM_TRIGGER_RESUME))
 			msg.extension |= pipeline->msg.extension;
 	}
 
@@ -245,18 +246,18 @@ static int sof_ipc4_chain_dma_send_msg(struct snd_sof_dev *sdev,
 
 static int sof_ipc4_chain_dma_trigger(struct snd_sof_dev *sdev,
 				      struct snd_sof_pcm_stream_pipeline_list *pipeline_list,
-				      int state)
+				      int state, int cmd)
 {
 	switch (state) {
 	case SOF_IPC4_PIPE_RUNNING:
 		/* Set allocate and enable bits to configure and enable chain DMA. */
-		return sof_ipc4_chain_dma_send_msg(sdev, pipeline_list, true, true);
+		return sof_ipc4_chain_dma_send_msg(sdev, pipeline_list, true, true, cmd);
 	case SOF_IPC4_PIPE_PAUSED:
 		/* Disable chained DMA. Keep allocate bit, but not enable bit. */
-		return sof_ipc4_chain_dma_send_msg(sdev, pipeline_list, true, false);
+		return sof_ipc4_chain_dma_send_msg(sdev, pipeline_list, true, false, cmd);
 	case SOF_IPC4_PIPE_RESET:
 		/* Disable and free chained DMA. Zero allocate and enable bits. */
-		return sof_ipc4_chain_dma_send_msg(sdev, pipeline_list, false, false);
+		return sof_ipc4_chain_dma_send_msg(sdev, pipeline_list, false, false, cmd);
 	default:
 		dev_err(sdev->dev, "Unexpected state %d", state);
 		return -EINVAL;
@@ -306,7 +307,7 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 		 * chained DMA trigger function that handles the rest for the substream.
 		 */
 		if (pipeline->use_chain_dma)
-			return sof_ipc4_chain_dma_trigger(sdev, pipeline_list, state);
+			return sof_ipc4_chain_dma_trigger(sdev, pipeline_list, state, cmd);
 	}
 
 	/* allocate memory for the pipeline data */
