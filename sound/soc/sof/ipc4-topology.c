@@ -105,6 +105,8 @@ static const struct sof_topology_token comp_ext_tokens[] = {
 		offsetof(struct snd_sof_widget, uuid)},
 	{SOF_TKN_COMP_PAYLOAD_WITH_OUTPUT_FMT, SND_SOC_TPLG_TUPLE_TYPE_BOOL, get_token_u16,
 		offsetof(struct snd_sof_widget, payload_with_output_fmt)},
+	{SOF_TKN_COMP_INIT_BLOB_STYLE, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct snd_sof_widget, init_blob_style)},
 };
 
 static const struct sof_topology_token gain_tokens[] = {
