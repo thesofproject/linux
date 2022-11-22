@@ -349,4 +349,40 @@ struct sof_ipc4_process {
 	struct sof_ipc4_msg msg;
 };
 
+/**
+ * struct sof_ipc4_pin_format - widget's pin format
+ * @pin_index: pin index for the widget
+ * @ibs: input buffer size for input pin
+ * @obs: output buffer size for output pin
+ * @audio_fmt: audio format for the pin
+ */
+struct sof_ipc4_pin_format {
+	u32 pin_index;
+	union {
+		u32 ibs;
+		u32 obs;
+	};
+	struct sof_ipc4_audio_format audio_fmt;
+};
+
+/**
+ * struct sof_ipc4_base_module_cfg_ext - base module config extension
+ * @num_sink_pin_fmts: size of sink_pin_fmt array
+ * @num_source_pin_fmts: size of source_pin_fmt array
+ * @reserved: reserved for future use
+ * @priv_param_len: length of optional module specific parameters (priv)
+ * @sink_pin_fmt: pin format array for sink pins
+ * @source_pin_fmt: pin format array for source pins
+ * @priv: module specific parameters follow this structure
+ */
+struct sof_ipc4_base_module_cfg_ext {
+	u16 num_sink_pin_fmts;
+	u16 num_source_pin_fmts;
+	u8 reserved[8];
+	u32 priv_param_len;
+	struct sof_ipc4_pin_format sink_pin_fmt[0];
+	struct sof_ipc4_pin_format source_pin_fmt[0];
+	u8 priv[0];
+};
+
 #endif
