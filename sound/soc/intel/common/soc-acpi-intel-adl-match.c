@@ -445,6 +445,11 @@ static const struct snd_soc_acpi_codecs adl_max98390_amp = {
 	.codecs = {"MX98390"}
 };
 
+static const struct snd_soc_acpi_codecs adl_max98396_amp = {
+	.num_codecs = 1,
+	.codecs = {"ADS8396"}
+};
+
 static const struct snd_soc_acpi_codecs adl_lt6911_hdmi = {
 	.num_codecs = 1,
 	.codecs = {"INTC10B0"}
@@ -530,6 +535,13 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_adl_machines[] = {
 		.machine_quirk = snd_soc_acpi_codec_list,
 		.quirk_data = &adl_max98360a_amp,
 		.sof_tplg_filename = "sof-adl-max98360a-cs42l42.tplg",
+	},
+	{
+		.id = "10134242",
+		.drv_name = "adl_mx98396_cs4242",
+		.machine_quirk = snd_soc_acpi_codec_list,
+		.quirk_data = &adl_max98396_amp,
+		.sof_tplg_filename = "sof-adl-max98396-cs42l42.tplg",
 	},
 
 	/* place amp-only boards in the end of table */

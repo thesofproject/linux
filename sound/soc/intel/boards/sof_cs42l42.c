@@ -48,6 +48,7 @@
 	(((quirk) << SOF_CS42L42_SSP_BT_SHIFT) & SOF_CS42L42_SSP_BT_MASK)
 #define SOF_MAX98357A_SPEAKER_AMP_PRESENT	BIT(29)
 #define SOF_MAX98360A_SPEAKER_AMP_PRESENT	BIT(30)
+#define SOF_MAX98396_SPEAKER_AMP_PRESENT	BIT(31)
 
 enum {
 	LINK_NONE = 0,
@@ -327,6 +328,8 @@ static int create_spk_amp_dai_links(struct device *dev,
 		max_98357a_dai_link(&links[*id]);
 	} else if (sof_cs42l42_quirk & SOF_MAX98360A_SPEAKER_AMP_PRESENT) {
 		max_98360a_dai_link(&links[*id]);
+	} else if (sof_cs42l42_quirk & SOF_MAX98396_SPEAKER_AMP_PRESENT) {
+		maxim_dai_link(&links[*id]);
 	} else {
 		dev_err(dev, "no amp defined\n");
 		ret = -EINVAL;
@@ -655,6 +658,9 @@ static int sof_audio_probe(struct platform_device *pdev)
 
 	if (sof_cs42l42_quirk & SOF_SPEAKER_AMP_PRESENT)
 		sof_audio_card_cs42l42.num_links++;
+
+	if (sof_cs42l42_quirk & SOF_MAX98396_SPEAKER_AMP_PRESENT)
+		maxim_set_codec_conf(&sof_audio_card_cs42l42);
 
 	if (sof_cs42l42_quirk & SOF_BT_OFFLOAD_PRESENT)
 		sof_audio_card_cs42l42.num_links++;

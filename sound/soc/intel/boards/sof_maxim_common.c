@@ -201,8 +201,8 @@ EXPORT_SYMBOL_NS(maxim_spk_codec_init, SND_SOC_INTEL_SOF_MAXIM_COMMON);
 static int maxim_compute_codec_conf(void)
 {
 	const char * const uid_strings[] = { "0", "1", "2", "3" };
-	const char * const MAXIM_HID[] = {"MX98373", "MX98390"};
-	const char * const CODEC_DAI[] = {"max98373", "max98390"};
+	const char * const MAXIM_HID[] = {"MX98373", "MX98390", "ADS8396"};
+	const char * const CODEC_DAI[] = {"max98373", "max98390", "max98396"};
 
 	unsigned int uid, amp_nums = 0;
 	unsigned int hid, cur = 0;
