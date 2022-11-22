@@ -875,7 +875,8 @@ static int sof_ipc4_widget_setup_comp_process(struct snd_sof_widget *swidget)
 		goto err;
 
 	cfg_size = sizeof(struct sof_ipc4_base_module_cfg);
-	if (swidget->payload_with_output_fmt)
+	if (swidget->init_blob_style == SOF_INIT_BLOB_BASE_WITH_MOD_EXT &&
+	    swidget->payload_with_output_fmt)
 		cfg_size += sizeof(struct sof_ipc4_audio_format);
 
 	/* allocate memory for module config */
@@ -1600,16 +1601,19 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 	void *cfg = process->ipc_config_data;
 	const struct snd_kcontrol_new *kc;
 	struct soc_bytes_ext *sbe;
+	int data_size;
 	void *data;
 	int ret, i;
 
 	available_fmt->ref_audio_fmt = &available_fmt->base_config->audio_fmt;
 
 	/*
-	 * Output format is optional for process modules.
-	 * Process modules setup the output format based on audio format tokens in topology.
+	 * Output format is only valid and optional for modules with base module config +
+	 * module specific extension style init blob. it will be setup based on audio format
+	 * tokens in topology,
 	 */
-	if (swidget->payload_with_output_fmt)
+	if (swidget->init_blob_style == SOF_INIT_BLOB_BASE_WITH_MOD_EXT &&
+	    swidget->payload_with_output_fmt)
 		ret = sof_ipc4_init_audio_fmt(sdev, swidget, &process->base_config,
 					      &process->output_format, pipeline_params,
 					      available_fmt,
@@ -1632,7 +1636,8 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 	cfg += sizeof(struct sof_ipc4_base_module_cfg);
 
 	/* copy output format to configure data payload */
-	if (swidget->payload_with_output_fmt) {
+	if (swidget->init_blob_style == SOF_INIT_BLOB_BASE_WITH_MOD_EXT &&
+	    swidget->payload_with_output_fmt) {
 		memcpy(cfg, &process->output_format, sizeof(struct sof_ipc4_audio_format));
 		cfg += sizeof(struct sof_ipc4_audio_format);
 	}
@@ -1650,12 +1655,31 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 		control_data = scontrol->ipc_control_data;
 		if (control_data->data->blob_type != SOF_IPC4_MOD_INIT_INSTANCE)
 			continue;
-
+		data_size = control_data->data->size;
 		data = (void *)control_data->data->data;
-		memcpy(cfg, data, control_data->data->size);
+
 		break;
 	}
 
+	/* Make sure we have enough data for base module extension structure */
+	if (swidget->init_blob_style == SOF_INIT_BLOB_BASE_WITH_BASE_EXT) {
+		struct sof_ipc4_base_module_cfg_ext *base_ext;
+		int size;
+
+		base_ext = (struct sof_ipc4_base_module_cfg_ext *)data;
+		size = sizeof(struct sof_ipc4_base_module_cfg_ext) +
+					base_ext->priv_param_len +
+					(base_ext->num_sink_pin_fmts +
+					base_ext->num_source_pin_fmts) *
+					sizeof(struct sof_ipc4_pin_format);
+		if (data_size != size) {
+			dev_err(sdev->dev, "Insufficient data for widget %s initialization\n",
+				swidget->widget->name);
+			return -EINVAL;
+		}
+	}
+
+	memcpy(cfg, data, control_data->data->size);
 	return 0;
 }
 
