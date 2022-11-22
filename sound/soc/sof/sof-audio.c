@@ -603,6 +603,13 @@ int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
 			continue;
 
 		spipe = swidget->spipe;
+		if (!spipe) {
+			dev_err(sdev->dev, "no pipeline found for %s\n",
+				swidget->widget->name);
+			ret = -EINVAL;
+			goto widget_free;
+		}
+
 		pipe_widget = spipe->pipe_widget;
 		if (!pipe_widget) {
 			dev_err(sdev->dev, "error: no pipeline widget found for %s\n",
