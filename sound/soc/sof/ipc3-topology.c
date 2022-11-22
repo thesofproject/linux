@@ -2081,8 +2081,13 @@ static int sof_ipc3_dai_config(struct snd_sof_dev *sdev, struct snd_sof_widget *
 		break;
 	case SOF_DAI_INTEL_ALH:
 		if (data) {
+			struct sof_dai_private_data *dai_data = dai->private;
+			struct sof_ipc_comp_dai *comp_dai = dai_data->comp_dai;
+
 			config->dai_index = data->dai_index;
 			config->alh.stream_id = data->dai_data;
+			/* comp_dai->dai_index was from topology, overwrite with the right index. */
+			comp_dai->dai_index = config->dai_index;
 		}
 		break;
 	default:
