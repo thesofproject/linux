@@ -114,6 +114,9 @@ struct sof_mtrace_core_data {
 	/* pos update IPC arrived before the slot offset is known, queried */
 	bool delayed_pos_update;
 	wait_queue_head_t trace_sleep;
+
+	struct delayed_work poller_work;
+	int poller_idle;
 };
 
 struct sof_mtrace_priv {
@@ -293,6 +296,7 @@ static int sof_ipc4_mtrace_dfs_release(struct inode *inode, struct file *file)
 	debugfs_file_put(file->f_path.dentry);
 
 	mutex_lock(&core_data->buffer_lock);
+	cancel_delayed_work_sync(&core_data->poller_work);
 	kfree(core_data->log_buffer);
 	core_data->log_buffer = NULL;
 	mutex_unlock(&core_data->buffer_lock);
@@ -308,6 +312,38 @@ static const struct file_operations sof_dfs_mtrace_fops = {
 
 	.owner = THIS_MODULE,
 };
+
+static void sof_ipc4_mtrace_work(struct work_struct *work)
+{
+	struct sof_mtrace_core_data *core_data =
+		container_of(work, struct sof_mtrace_core_data, poller_work.work);
+	struct snd_sof_dev *sdev = core_data->sdev;
+	u32 new_ptr, old_ptr;
+
+	old_ptr = core_data->dsp_write_ptr;
+
+	/* TODO: use share helped function with sof_ipc4_mtrace_update_pos() */
+
+	sof_mailbox_read(sdev, core_data->slot_offset + sizeof(u32),
+			 &new_ptr, 4);
+	new_ptr -= new_ptr % 4;
+	if (new_ptr != old_ptr) {
+		core_data->dsp_write_ptr = new_ptr;
+		if (sof_debug_check_flag(SOF_DBG_PRINT_DMA_POSITION_UPDATE_LOGS))
+			dev_dbg(sdev->dev, "core%d, host read: %#x, dsp write: %#x, burst%d",
+				core_data->id, core_data->host_read_ptr, core_data->dsp_write_ptr, core_data->poller_idle);
+
+		wake_up(&core_data->trace_sleep);
+	}
+	else {
+		++core_data->poller_idle;
+	}
+
+	if (core_data->poller_idle < 100)
+		mod_delayed_work(system_wq, &core_data->poller_work, 1);
+	else
+		dev_dbg(sdev->dev, "no more mtrace data, stopping poller\n");
+}
 
 static ssize_t sof_ipc4_priority_mask_dfs_read(struct file *file, char __user *to,
 					       size_t count, loff_t *ppos)
@@ -493,6 +529,7 @@ static void ipc4_mtrace_disable(struct snd_sof_dev *sdev)
 		core_data->host_read_ptr = 0;
 		core_data->dsp_write_ptr = 0;
 		wake_up(&core_data->trace_sleep);
+		cancel_delayed_work_sync(&core_data->poller_work);
 	}
 }
 
@@ -578,6 +615,7 @@ static int ipc4_mtrace_init(struct snd_sof_dev *sdev)
 		struct sof_mtrace_core_data *core_data = &priv->cores[i];
 
 		init_waitqueue_head(&core_data->trace_sleep);
+		INIT_DELAYED_WORK(&core_data->poller_work, sof_ipc4_mtrace_work);
 		mutex_init(&core_data->buffer_lock);
 		core_data->sdev = sdev;
 		core_data->id = i;
@@ -627,6 +665,8 @@ int sof_ipc4_mtrace_update_pos(struct snd_sof_dev *sdev, int core)
 		return 0;
 	}
 
+	cancel_delayed_work_sync(&core_data->poller_work);
+
 	/* Read out the dsp_write_ptr from the slot for this core */
 	sof_mailbox_read(sdev, core_data->slot_offset + sizeof(u32),
 			 &core_data->dsp_write_ptr, 4);
@@ -637,6 +677,10 @@ int sof_ipc4_mtrace_update_pos(struct snd_sof_dev *sdev, int core)
 			core, core_data->host_read_ptr, core_data->dsp_write_ptr);
 
 	wake_up(&core_data->trace_sleep);
+
+	/* poll for a while in case DSP sends more data */
+	core_data->poller_idle = 0;
+	mod_delayed_work(system_wq, &core_data->poller_work, 1);
 
 	return 0;
 }
