@@ -2081,7 +2081,9 @@ static int sof_ipc3_dai_config(struct snd_sof_dev *sdev, struct snd_sof_widget *
 		break;
 	case SOF_DAI_INTEL_ALH:
 		if (data) {
-			config->dai_index = data->dai_index;
+			/* save the dai_index during hw_params and reuse it for hw_free */
+			if (flags & SOF_DAI_CONFIG_FLAGS_HW_PARAMS)
+				config->dai_index = data->dai_index;
 			config->alh.stream_id = data->dai_data;
 		}
 		break;
