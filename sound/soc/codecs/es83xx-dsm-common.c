@@ -45,44 +45,18 @@ out:
 	return ret;
 }
 
-int es83xx_dsm_dump(struct device *dev)
+int es83xx_dsm_jack_inverted(struct device *dev)
 {
 	int value;
 	int ret;
 
-	ret = es83xx_dsm(dev, PLATFORM_MAINMIC_TYPE_ARG, &value);
+	ret = es83xx_dsm(dev,  PLATFORM_HPDET_INV_ARG, &value);
 	if (ret < 0)
 		return ret;
-	dev_info(dev, "PLATFORM_MAINMIC_TYPE %#x\n", value);
-
-	ret = es83xx_dsm(dev, PLATFORM_HPMIC_TYPE_ARG, &value);
-	if (ret < 0)
-		return ret;
-	dev_info(dev, "PLATFORM_HPMIC_TYPE %#x\n", value);
-
-	ret = es83xx_dsm(dev, PLATFORM_SPK_TYPE_ARG, &value);
-	if (ret < 0)
-		return ret;
-	dev_info(dev, "PLATFORM_SPK_TYPE %#x\n", value);
-
-	ret = es83xx_dsm(dev, PLATFORM_HPDET_INV_ARG, &value);
-	if (ret < 0)
-		return ret;
-	dev_info(dev, "PLATFORM_HPDET_INV %#x\n", value);
-
-	ret = es83xx_dsm(dev, PLATFORM_PCM_TYPE_ARG, &value);
-	if (ret < 0)
-		return ret;
-	dev_info(dev, "PLATFORM_PCM_TYPE %#x\n", value);
-
-	ret = es83xx_dsm(dev, PLATFORM_MIC_DE_POP_ARG, &value);
-	if (ret < 0)
-		return ret;
-	dev_info(dev, "PLATFORM_MIC_DE_POP %#x\n", value);
-
-	return 0;
+	dev_info(dev, "HP jack detect inverted %d\n", value);
+	return value;
 }
-EXPORT_SYMBOL_GPL(es83xx_dsm_dump);
+EXPORT_SYMBOL_GPL(es83xx_dsm_jack_inverted);
 
 MODULE_DESCRIPTION("Everest Semi ES83xx DSM helpers");
 MODULE_LICENSE("GPL");
