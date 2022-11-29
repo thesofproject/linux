@@ -117,6 +117,7 @@ struct sof_ipc4_copier_config_set_sink_format {
  * @priority: Priority of this pipeline
  * @lp_mode: Low power mode
  * @mem_usage: Memory usage
+ * @core_id: Target core for the pipeline
  * @state: Pipeline state
  * @use_chain_dma: flag to indicate if the firmware shall use chained DMA
  * @msg: message structure for pipeline
@@ -126,6 +127,7 @@ struct sof_ipc4_pipeline {
 	uint32_t priority;
 	uint32_t lp_mode;
 	uint32_t mem_usage;
+	uint32_t core_id;
 	int state;
 	bool use_chain_dma;
 	struct sof_ipc4_msg msg;
