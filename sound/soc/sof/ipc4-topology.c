@@ -1962,8 +1962,8 @@ static int sof_ipc4_set_copier_sink_format(struct snd_sof_dev *sdev,
 					   struct snd_sof_widget *sink_widget,
 					   int sink_id)
 {
-	struct sof_ipc4_base_module_cfg *src_config = src_widget->private;
 	struct sof_ipc4_base_module_cfg *sink_config = sink_widget->private;
+	struct sof_ipc4_base_module_cfg *src_config;
 	struct sof_ipc4_copier_config_set_sink_format format;
 	struct sof_ipc4_fw_module *fw_module;
 	struct sof_ipc4_msg msg = {{ 0 }};
@@ -1971,6 +1971,14 @@ static int sof_ipc4_set_copier_sink_format(struct snd_sof_dev *sdev,
 
 	dev_dbg(sdev->dev, "%s set copier sink %d format\n",
 		src_widget->widget->name, sink_id);
+
+	if (WIDGET_IS_DAI(src_widget->id)) {
+		struct snd_sof_dai *dai = src_widget->private;
+
+		src_config = dai->private;
+	} else {
+		src_config = src_widget->private;
+	}
 
 	fw_module = src_widget->module_info;
 
