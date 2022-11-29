@@ -22,6 +22,7 @@
 #include <sound/tlv.h>
 #include <sound/jack.h>
 #include "es8316.h"
+#include "es83xx-dsm-common.h"
 
 /* In slave mode at single speed, the codec is documented as accepting 5
  * MCLK/LRCK ratios, but we also add ratio 400, which is commonly used on
@@ -832,6 +833,14 @@ static int es8316_i2c_probe(struct i2c_client *i2c_client)
 			      GFP_KERNEL);
 	if (es8316 == NULL)
 		return -ENOMEM;
+
+	/* read jack information from _DSM */
+	ret = es83xx_dsm_jack_inverted(dev);
+	if (ret < 0)
+		dev_warn(dev, "%s: Could not get jack detection information with ACPI _DSM method\n",
+			 __func__);
+	else
+		es8316->jd_inverted = ret;
 
 	i2c_set_clientdata(i2c_client, es8316);
 
