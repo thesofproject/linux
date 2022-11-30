@@ -561,14 +561,14 @@ static int sof_ipc4_get_stream_start_offset(struct snd_sof_dev *sdev,
 	struct sof_ipc4_pipeline_registers ppl_reg;
 	u64 stream_start_position;
 	u32 dai_sample_size;
-	u32 ch, node_id;
+	u32 ch, node_index;
 	u32 offset;
 
-	node_id = SOF_IPC4_NODE_INDEX(host_copier->data.gtw_cfg.node_id);
-	if (node_id == SOF_IPC4_INVALID_NODE_ID)
+	if (host_copier->data.gtw_cfg.node_id == SOF_IPC4_INVALID_NODE_ID)
 		return -EINVAL;
 
-	offset = offsetof(struct sof_ipc4_fw_registers, pipeline_regs) + node_id * sizeof(ppl_reg);
+	node_index = SOF_IPC4_NODE_INDEX(host_copier->data.gtw_cfg.node_id);
+	offset = offsetof(struct sof_ipc4_fw_registers, pipeline_regs) + node_index * sizeof(ppl_reg);
 	sof_mailbox_read(sdev, sdev->fw_info_box.offset + offset, &ppl_reg, sizeof(ppl_reg));
 	if (ppl_reg.stream_start_offset == SOF_IPC4_INVALID_STREAM_POSITION)
 		return -EINVAL;
