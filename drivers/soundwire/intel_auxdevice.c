@@ -84,6 +84,13 @@ static int sdw_master_read_intel_prop(struct sdw_bus *bus)
 	/* the values reported by BIOS are the 2x clock, not the bus clock */
 	prop->mclk_freq /= 2;
 
+	/* hack: force bus frequency higher */
+	dev_info(bus->dev, "plb: initial max_clk %d\n", prop->max_clk_freq);
+	prop->max_clk_freq = prop->mclk_freq;
+	while (prop->max_clk_freq > 12288000)
+		prop->max_clk_freq /= 2;
+	dev_info(bus->dev, "plb: updated max_clk %d\n", prop->max_clk_freq);
+
 	fwnode_property_read_u32(link,
 				 "intel-quirk-mask",
 				 &quirk_mask);
