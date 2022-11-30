@@ -98,6 +98,7 @@ static const struct dmi_system_id dmi_platform_data[] = {
 		},
 		.driver_data = (void *)&dell_0b00_platform_data,
 	},
+	{},
 };
 
 static int rt_amp_add_device_props(struct device *sdw_dev)
