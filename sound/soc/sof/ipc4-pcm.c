@@ -600,6 +600,12 @@ static void sof_ipc4_build_time_info(struct snd_sof_dev *sdev, struct snd_sof_pc
 		}
 	}
 
+	/* both host and dai copier must be valid for time_info */
+	if (!host_copier || !dai_copier) {
+		dev_err(sdev->dev, "host or dai copier are not found\n");
+		return;
+	}
+
 	info = spcm->private;
 	info->host_copier = host_copier;
 	info->dai_copier = dai_copier;
@@ -678,6 +684,9 @@ static int sof_ipc4_get_stream_start_offset(struct snd_sof_dev *sdev,
 	u32 dai_sample_size;
 	u32 ch, node_index;
 	u32 offset;
+
+	if (!host_copier || !dai_copier)
+		return -EINVAL;
 
 	if (host_copier->data.gtw_cfg.node_id == SOF_IPC4_INVALID_NODE_ID)
 		return -EINVAL;
