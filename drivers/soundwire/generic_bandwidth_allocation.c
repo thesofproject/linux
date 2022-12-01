@@ -363,7 +363,7 @@ static int sdw_compute_bus_params(struct sdw_bus *bus)
 	max_dr_freq = mstr_prop->max_clk_freq * SDW_DOUBLE_RATE_FACTOR;
 
 	for (i = 0; i < clk_values; i++) {
-		if (!clk_buf)
+		if (1) // !clk_buf)
 			curr_dr_freq = max_dr_freq;
 		else
 			curr_dr_freq = (is_gear) ?
