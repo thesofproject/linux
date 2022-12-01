@@ -66,6 +66,7 @@ static int sdw_master_read_intel_prop(struct sdw_bus *bus)
 	struct fwnode_handle *link;
 	char name[32];
 	u32 quirk_mask;
+	int initial_clock;
 
 	/* Find master handle */
 	snprintf(name, sizeof(name),
@@ -86,10 +87,15 @@ static int sdw_master_read_intel_prop(struct sdw_bus *bus)
 
 	/* hack: force bus frequency higher */
 	dev_info(bus->dev, "plb: initial max_clk %d\n", prop->max_clk_freq);
+	initial_clock = prop->max_clk_freq;
 	prop->max_clk_freq = prop->mclk_freq;
 	while (prop->max_clk_freq > 12288000)
 		prop->max_clk_freq /= 2;
 	dev_info(bus->dev, "plb: updated max_clk %d\n", prop->max_clk_freq);
+
+	dev_info(bus->dev, "plb: initial columns%d\n", prop->default_col);
+	prop->default_col *= (prop->max_clk_freq / initial_clock);
+	dev_info(bus->dev, "plb: updated columns %d\n", prop->default_col);
 
 	fwnode_property_read_u32(link,
 				 "intel-quirk-mask",
