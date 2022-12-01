@@ -2170,7 +2170,7 @@ static int sof_complete(struct snd_soc_component *scomp)
 		struct snd_sof_widget *swidget;
 
 		/* Update the scheduler widget's IPC structure */
-		if (widget_ops[pipe_widget->id].ipc_setup) {
+		if (widget_ops && widget_ops[pipe_widget->id].ipc_setup) {
 			ret = widget_ops[pipe_widget->id].ipc_setup(pipe_widget);
 			if (ret < 0) {
 				dev_err(sdev->dev, "failed updating IPC struct for %s\n",
@@ -2187,7 +2187,7 @@ static int sof_complete(struct snd_soc_component *scomp)
 				if (ret < 0)
 					return ret;
 
-				if (widget_ops[swidget->id].ipc_setup) {
+				if (widget_ops && widget_ops[swidget->id].ipc_setup) {
 					ret = widget_ops[swidget->id].ipc_setup(swidget);
 					if (ret < 0) {
 						dev_err(sdev->dev,
