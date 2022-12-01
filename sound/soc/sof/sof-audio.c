@@ -348,7 +348,7 @@ sof_prepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget
 
 	widget_ops = tplg_ops ? tplg_ops->widget : NULL;
 	if (!widget_ops)
-		goto sink_prepare;
+		return 0;
 
 	if (!widget_ops[widget->id].ipc_prepare || swidget->prepared)
 		goto sink_prepare;
