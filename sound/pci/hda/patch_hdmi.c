@@ -42,8 +42,7 @@ static bool enable_acomp = true;
 module_param(enable_acomp, bool, 0444);
 MODULE_PARM_DESC(enable_acomp, "Enable audio component binding (default=yes)");
 
-static bool enable_silent_stream =
-IS_ENABLED(CONFIG_SND_HDA_INTEL_HDMI_SILENT_STREAM);
+static bool enable_silent_stream = true;
 module_param(enable_silent_stream, bool, 0644);
 MODULE_PARM_DESC(enable_silent_stream, "Enable Silent Stream for HDMI devices");
 
