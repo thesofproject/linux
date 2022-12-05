@@ -272,7 +272,7 @@ static int sof_ipc4_chain_dma_trigger(struct snd_sof_dev *sdev,
 	if (enable)
 		msg.primary |= SOF_IPC4_GLB_CHAIN_DMA_ENABLE_MASK;
 
-	return sof_ipc_tx_message(sdev->ipc, &msg, 0, NULL, 0);
+	return sof_ipc_tx_message_no_reply(sdev->ipc, &msg, 0);
 }
 
 static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
