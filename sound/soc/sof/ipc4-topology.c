@@ -2139,6 +2139,17 @@ static int sof_ipc4_route_setup(struct snd_sof_dev *sdev, struct snd_sof_route *
 		return sroute->dst_queue_id;
 	}
 
+	/* Pin 0 format is already set during copier module init */
+	if (sroute->src_queue_id > 0 && WIDGET_IS_COPIER(src_widget->id)) {
+		ret = sof_ipc4_set_copier_sink_format(sdev, src_widget, sink_widget,
+						      sroute->src_queue_id);
+		if (ret < 0) {
+			dev_err(sdev->dev, "failed to set sink format for %s source queue ID %d\n",
+				src_widget->widget->name, sroute->src_queue_id);
+			goto out;
+		}
+	}
+
 	dev_dbg(sdev->dev, "bind %s:%d -> %s:%d\n",
 		src_widget->widget->name, sroute->src_queue_id,
 		sink_widget->widget->name, sroute->dst_queue_id);
@@ -2163,17 +2174,6 @@ static int sof_ipc4_route_setup(struct snd_sof_dev *sdev, struct snd_sof_route *
 			src_widget->widget->name, sroute->src_queue_id,
 			sink_widget->widget->name, sroute->dst_queue_id);
 		goto out;
-	}
-
-	/* Pin 0 format is already set during copier module init */
-	if (sroute->src_queue_id > 0 && WIDGET_IS_COPIER(src_widget->id)) {
-		ret = sof_ipc4_set_copier_sink_format(sdev, src_widget, sink_widget,
-						      sroute->src_queue_id);
-		if (ret < 0) {
-			dev_err(sdev->dev, "failed to set sink format for %s source queue ID %d\n",
-				src_widget->widget->name, sroute->src_queue_id);
-			goto out;
-		}
 	}
 
 	return ret;
