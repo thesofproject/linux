@@ -17,6 +17,7 @@
 #include <sound/soc-dapm.h>
 #include <sound/tlv.h>
 #include "es8326.h"
+#include "es83xx-dsm-common.h"
 
 struct es8326_priv {
 	struct clk *mclk;
@@ -816,12 +817,21 @@ static const struct snd_soc_component_driver soc_component_dev_es8326 = {
 
 static int es8326_i2c_probe(struct i2c_client *i2c)
 {
+	struct device *dev = &i2c->dev;
 	struct es8326_priv *es8326;
 	int ret;
 
 	es8326 = devm_kzalloc(&i2c->dev, sizeof(struct es8326_priv), GFP_KERNEL);
 	if (!es8326)
 		return -ENOMEM;
+
+	/* read jack information from _DSM */
+	ret = es83xx_dsm_jack_inverted(dev);
+	if (ret < 0)
+		dev_warn(dev, "%s: Could not get jack detection information with ACPI _DSM method\n",
+			 __func__);
+	else
+		es8326->jd_inverted = ret;
 
 	i2c_set_clientdata(i2c, es8326);
 	es8326->i2c = i2c;
