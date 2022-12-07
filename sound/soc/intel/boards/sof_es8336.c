@@ -27,8 +27,6 @@
 #define SOF_ES8336_SSP_CODEC(quirk)		((quirk) & GENMASK(3, 0))
 #define SOF_ES8336_SSP_CODEC_MASK		(GENMASK(3, 0))
 
-#define SOF_ES8336_SPEAKERS_EN_GPIO1_QUIRK	BIT(4)
-
 /* HDMI capture*/
 #define SOF_SSP_HDMI_CAPTURE_PRESENT		BIT(14)
 #define SOF_NO_OF_HDMI_CAPTURE_SSP_SHIFT		15
@@ -48,7 +46,6 @@
 
 #define SOF_ES8336_ENABLE_DMIC			BIT(5)
 #define SOF_ES8336_JD_INVERTED			BIT(6)
-#define SOF_ES8336_HEADPHONE_GPIO		BIT(7)
 #define SOC_ES8336_HEADSET_MIC1			BIT(8)
 
 static unsigned long quirk;
@@ -75,24 +72,9 @@ struct sof_hdmi_pcm {
 static const struct acpi_gpio_params enable_gpio0 = { 0, 0, true };
 static const struct acpi_gpio_params enable_gpio1 = { 1, 0, true };
 
-static const struct acpi_gpio_mapping acpi_speakers_enable_gpio0[] = {
-	{ "speakers-enable-gpios", &enable_gpio0, 1, ACPI_GPIO_QUIRK_ONLY_GPIOIO },
-	{ }
-};
-
-static const struct acpi_gpio_mapping acpi_speakers_enable_gpio1[] = {
-	{ "speakers-enable-gpios", &enable_gpio1, 1, ACPI_GPIO_QUIRK_ONLY_GPIOIO },
-};
-
 static const struct acpi_gpio_mapping acpi_enable_both_gpios[] = {
 	{ "speakers-enable-gpios", &enable_gpio0, 1, ACPI_GPIO_QUIRK_ONLY_GPIOIO },
 	{ "headphone-enable-gpios", &enable_gpio1, 1, ACPI_GPIO_QUIRK_ONLY_GPIOIO },
-	{ }
-};
-
-static const struct acpi_gpio_mapping acpi_enable_both_gpios_rev_order[] = {
-	{ "speakers-enable-gpios", &enable_gpio1, 1, ACPI_GPIO_QUIRK_ONLY_GPIOIO },
-	{ "headphone-enable-gpios", &enable_gpio0, 1, ACPI_GPIO_QUIRK_ONLY_GPIOIO },
 	{ }
 };
 
@@ -102,10 +84,6 @@ static void log_quirks(struct device *dev)
 	dev_info(dev, "quirk SSP%ld\n",  SOF_ES8336_SSP_CODEC(quirk));
 	if (quirk & SOF_ES8336_ENABLE_DMIC)
 		dev_info(dev, "quirk DMIC enabled\n");
-	if (quirk & SOF_ES8336_SPEAKERS_EN_GPIO1_QUIRK)
-		dev_info(dev, "Speakers GPIO1 quirk enabled\n");
-	if (quirk & SOF_ES8336_HEADPHONE_GPIO)
-		dev_info(dev, "quirk headphone GPIO enabled\n");
 	if (quirk & SOF_ES8336_JD_INVERTED)
 		dev_info(dev, "quirk JD inverted enabled\n");
 	if (quirk & SOC_ES8336_HEADSET_MIC1)
@@ -119,8 +97,7 @@ static void pcm_pop_work_events(struct work_struct *work)
 
 	gpiod_set_value_cansleep(priv->gpio_speakers, priv->speaker_en);
 
-	if (quirk & SOF_ES8336_HEADPHONE_GPIO)
-		gpiod_set_value_cansleep(priv->gpio_headphone, priv->speaker_en);
+	gpiod_set_value_cansleep(priv->gpio_headphone, !priv->speaker_en);
 
 }
 
@@ -143,6 +120,7 @@ static int sof_8336_trigger(struct snd_pcm_substream *substream, int cmd)
 			if (substream->stream == 0) {
 				cancel_delayed_work(&priv->pcm_pop_work);
 				gpiod_set_value_cansleep(priv->gpio_speakers, true);
+				gpiod_set_value_cansleep(priv->gpio_headphone, false);
 			}
 		break;
 	default:
@@ -335,19 +313,10 @@ static const struct dmi_system_id sof_es8336_quirk_table[] = {
 	{
 		.callback = sof_es8336_quirk_cb,
 		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "IP3 tech"),
-			DMI_MATCH(DMI_BOARD_NAME, "WN1"),
-		},
-		.driver_data = (void *)(SOF_ES8336_SPEAKERS_EN_GPIO1_QUIRK)
-	},
-	{
-		.callback = sof_es8336_quirk_cb,
-		.matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "HUAWEI"),
 			DMI_MATCH(DMI_BOARD_NAME, "BOHB-WAX9-PCB-B2"),
 		},
-		.driver_data = (void *)(SOF_ES8336_HEADPHONE_GPIO |
-					SOC_ES8336_HEADSET_MIC1)
+		.driver_data = (void *)(SOC_ES8336_HEADSET_MIC1)
 	},
 	{}
 };
@@ -723,16 +692,7 @@ static int sof_es8336_probe(struct platform_device *pdev)
 	}
 
 	/* get speaker enable GPIO */
-	if (quirk & SOF_ES8336_HEADPHONE_GPIO) {
-		if (quirk & SOF_ES8336_SPEAKERS_EN_GPIO1_QUIRK)
-			gpio_mapping = acpi_enable_both_gpios;
-		else
-			gpio_mapping = acpi_enable_both_gpios_rev_order;
-	} else if (quirk & SOF_ES8336_SPEAKERS_EN_GPIO1_QUIRK) {
-		gpio_mapping = acpi_speakers_enable_gpio1;
-	} else {
-		gpio_mapping = acpi_speakers_enable_gpio0;
-	}
+	gpio_mapping = acpi_enable_both_gpios;
 
 	ret = devm_acpi_dev_add_driver_gpios(codec_dev, gpio_mapping);
 	if (ret)
@@ -802,7 +762,6 @@ static const struct platform_device_id board_ids[] = {
 					SOF_HDMI_CAPTURE_1_SSP(0) |
 					SOF_HDMI_CAPTURE_2_SSP(2) |
 					SOF_SSP_HDMI_CAPTURE_PRESENT |
-					SOF_ES8336_SPEAKERS_EN_GPIO1_QUIRK |
 					SOF_ES8336_JD_INVERTED),
 	},
 	{ }
