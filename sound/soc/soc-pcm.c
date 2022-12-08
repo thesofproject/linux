@@ -1203,12 +1203,12 @@ static int dpcm_be_connect(struct snd_soc_pcm_runtime *fe,
 	fe_substream = snd_soc_dpcm_get_substream(fe, stream);
 	be_substream = snd_soc_dpcm_get_substream(be, stream);
 
-	if (!fe_substream->pcm->nonatomic && be_substream->pcm->nonatomic) {
+	if (be_substream && !fe_substream->pcm->nonatomic && be_substream->pcm->nonatomic) {
 		dev_err(be->dev, "%s: FE is atomic but BE is nonatomic, invalid configuration\n",
 			__func__);
 		return -EINVAL;
 	}
-	if (fe_substream->pcm->nonatomic && !be_substream->pcm->nonatomic) {
+	if (be_substream && fe_substream->pcm->nonatomic && !be_substream->pcm->nonatomic) {
 		dev_dbg(be->dev, "FE is nonatomic but BE is not, forcing BE as nonatomic\n");
 		be_substream->pcm->nonatomic = 1;
 	}
