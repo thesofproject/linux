@@ -71,17 +71,6 @@ static u32 kvm_pgd_pages(u32 ia_bits, s8 start_level)
 	return kvm_pgd_page_idx(&pgt, -1ULL) + 1;
 }
 
-static bool kvm_pte_table(kvm_pte_t pte, s8 level)
-{
-	if (level == KVM_PGTABLE_LAST_LEVEL)
-		return false;
-
-	if (!kvm_pte_valid(pte))
-		return false;
-
-	return FIELD_GET(KVM_PTE_TYPE, pte) == KVM_PTE_TYPE_TABLE;
-}
-
 static void kvm_clear_pte(kvm_pte_t *ptep)
 {
 	WRITE_ONCE(*ptep, 0);
