@@ -299,7 +299,7 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 	pipeline_list = &spcm->stream[substream->stream].pipeline_list;
 
 	/* nothing to trigger if the list is empty */
-	if (!pipeline_list->pipelines)
+	if (!pipeline_list->pipelines || !pipeline_list->count)
 		return 0;
 
 	spipe = pipeline_list->pipelines[0];
