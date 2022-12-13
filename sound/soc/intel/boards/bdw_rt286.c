@@ -183,16 +183,30 @@ static struct snd_soc_dai_link card_dai_links[] = {
 	},
 };
 
+#define CODEC_DAI_NAME "rt286-aif1"
+
 static int card_suspend_pre(struct snd_soc_card *card)
 {
-	struct snd_soc_dai *codec_dai = snd_soc_card_get_codec_dai(card, "rt286-aif1");
+	struct snd_soc_dai *codec_dai = snd_soc_card_get_codec_dai(card, CODEC_DAI_NAME);
+
+	if (!codec_dai) {
+		dev_err(card->dev, "Codec DAI %s not found for card %s", CODEC_DAI_NAME,
+			card->name);
+		return -EINVAL;
+	}
 
 	return snd_soc_component_set_jack(codec_dai->component, NULL, NULL);
 }
 
 static int card_resume_post(struct snd_soc_card *card)
 {
-	struct snd_soc_dai *codec_dai = snd_soc_card_get_codec_dai(card, "rt286-aif1");
+	struct snd_soc_dai *codec_dai = snd_soc_card_get_codec_dai(card, CODEC_DAI_NAME);
+
+	if (!codec_dai) {
+		dev_err(card->dev, "Codec DAI %s not found for card %s", CODEC_DAI_NAME,
+			card->name);
+		return -EINVAL;
+	}
 
 	return snd_soc_component_set_jack(codec_dai->component, &card_headset, NULL);
 }
