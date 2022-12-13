@@ -1665,6 +1665,7 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 	struct snd_soc_dapm_widget *widget = swidget->widget;
 	struct sof_ipc4_process *process = swidget->private;
 	struct sof_ipc4_available_audio_format *available_fmt = &process->available_fmt;
+	const struct sof_ipc4_audio_format *out_fmt;
 	struct sof_ipc4_control_data *control_data;
 	struct snd_sof_control *scontrol = NULL;
 	void *cfg = process->ipc_config_data;
@@ -1749,6 +1750,15 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 	}
 
 	memcpy(cfg, data, control_data->data->size);
+
+	/* Update pipeline params from output format */
+	out_fmt = sof_ipc4_get_widget_pin_format(swidget, SOF_PIN_TYPE_SOURCE, 0);
+	/* Currently, only smart amp module needs to update channels */
+	hw_param_interval(pipeline_params, SNDRV_PCM_HW_PARAM_CHANNELS)->min =
+		SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(out_fmt->fmt_cfg);
+	hw_param_interval(pipeline_params, SNDRV_PCM_HW_PARAM_CHANNELS)->max =
+		SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(out_fmt->fmt_cfg);
+
 	return 0;
 }
 
