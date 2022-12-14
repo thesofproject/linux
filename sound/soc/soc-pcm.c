@@ -1571,8 +1571,11 @@ void dpcm_be_dai_stop(struct snd_soc_pcm_runtime *fe, int stream,
 			}
 		}
 
-		__soc_pcm_close(be, be_substream);
-		be_substream->runtime = NULL;
+		if (be_substream) {
+			__soc_pcm_close(be, be_substream);
+			be_substream->runtime = NULL;
+		}
+
 		be->dpcm[stream].state = SND_SOC_DPCM_STATE_CLOSE;
 	}
 }
@@ -1940,7 +1943,8 @@ void dpcm_be_dai_hw_free(struct snd_soc_pcm_runtime *fe, int stream)
 		dev_dbg(be->dev, "ASoC: hw_free BE %s\n",
 			be->dai_link->name);
 
-		__soc_pcm_hw_free(be, be_substream);
+		if (be_substream)
+			__soc_pcm_hw_free(be, be_substream);
 
 		be->dpcm[stream].state = SND_SOC_DPCM_STATE_HW_FREE;
 	}
@@ -2009,6 +2013,9 @@ int dpcm_be_dai_hw_params(struct snd_soc_pcm_runtime *fe, int stream)
 		    (be->dpcm[stream].state != SND_SOC_DPCM_STATE_HW_FREE))
 			continue;
 
+		if (!be_substream)
+			continue;
+
 		dev_dbg(be->dev, "ASoC: hw_params BE %s\n",
 			be->dai_link->name);
 
@@ -2040,6 +2047,9 @@ unwind:
 		   (be->dpcm[stream].state != SND_SOC_DPCM_STATE_HW_PARAMS) &&
 		   (be->dpcm[stream].state != SND_SOC_DPCM_STATE_HW_FREE) &&
 		   (be->dpcm[stream].state != SND_SOC_DPCM_STATE_STOP))
+			continue;
+
+		if (!be_substream)
 			continue;
 
 		__soc_pcm_hw_free(be, be_substream);
@@ -2413,6 +2423,9 @@ int dpcm_be_dai_prepare(struct snd_soc_pcm_runtime *fe, int stream)
 
 		dev_dbg(be->dev, "ASoC: prepare BE %s\n",
 			be->dai_link->name);
+
+		if (!be_substream)
+			continue;
 
 		ret = __soc_pcm_prepare(be, be_substream);
 		if (ret < 0)
