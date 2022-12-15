@@ -105,8 +105,6 @@ static const struct sof_topology_token dai_tokens[] = {
 static const struct sof_topology_token comp_ext_tokens[] = {
 	{SOF_TKN_COMP_UUID, SND_SOC_TPLG_TUPLE_TYPE_UUID, get_token_uuid,
 		offsetof(struct snd_sof_widget, uuid)},
-	{SOF_TKN_COMP_PAYLOAD_WITH_OUTPUT_FMT, SND_SOC_TPLG_TUPLE_TYPE_BOOL, get_token_u16,
-		offsetof(struct snd_sof_widget, payload_with_output_fmt)},
 };
 
 static const struct sof_topology_token gain_tokens[] = {
@@ -123,6 +121,11 @@ static const struct sof_topology_token gain_tokens[] = {
 static const struct sof_topology_token src_tokens[] = {
 	{SOF_TKN_SRC_RATE_OUT, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
 		offsetof(struct sof_ipc4_src, sink_rate)},
+};
+
+static const struct sof_topology_token process_tokens[] = {
+	{SOF_TKN_PROCESS_PAYLOAD_WITH_OUTPUT_FMT, SND_SOC_TPLG_TUPLE_TYPE_BOOL, get_token_u16,
+		offsetof(struct sof_ipc4_process, payload_with_output_fmt)},
 };
 
 static const struct sof_token_info ipc4_token_list[SOF_TOKEN_COUNT] = {
@@ -149,6 +152,8 @@ static const struct sof_token_info ipc4_token_list[SOF_TOKEN_COUNT] = {
 		ipc4_audio_fmt_num_tokens, ARRAY_SIZE(ipc4_audio_fmt_num_tokens)},
 	[SOF_GAIN_TOKENS] = {"Gain tokens", gain_tokens, ARRAY_SIZE(gain_tokens)},
 	[SOF_SRC_TOKENS] = {"SRC tokens", src_tokens, ARRAY_SIZE(src_tokens)},
+	[SOF_PROCESS_TOKENS] = {"IPC4 process module tokens", process_tokens,
+		ARRAY_SIZE(process_tokens)},
 };
 
 static void sof_ipc4_dbg_audio_format(struct device *dev,
@@ -877,8 +882,15 @@ static int sof_ipc4_widget_setup_comp_process(struct snd_sof_widget *swidget)
 	if (ret)
 		goto err;
 
+	ret = sof_update_ipc_object(scomp, process, SOF_PROCESS_TOKENS, swidget->tuples,
+				    swidget->num_tuples, sizeof(*process), 1);
+	if (ret) {
+		dev_err(scomp->dev, "parse process token failed\n");
+		goto err;
+	}
+
 	cfg_size = sizeof(struct sof_ipc4_base_module_cfg);
-	if (swidget->payload_with_output_fmt)
+	if (process->payload_with_output_fmt)
 		cfg_size += sizeof(struct sof_ipc4_audio_format);
 
 	/* allocate memory for module config */
@@ -1612,7 +1624,7 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 	 * Output format is optional for process modules.
 	 * Process modules setup the output format based on audio format tokens in topology.
 	 */
-	if (swidget->payload_with_output_fmt)
+	if (process->payload_with_output_fmt)
 		ret = sof_ipc4_init_audio_fmt(sdev, swidget, &process->base_config,
 					      &process->output_format, pipeline_params,
 					      available_fmt,
@@ -1635,7 +1647,7 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 	cfg += sizeof(struct sof_ipc4_base_module_cfg);
 
 	/* copy output format to configure data payload */
-	if (swidget->payload_with_output_fmt) {
+	if (process->payload_with_output_fmt) {
 		memcpy(cfg, &process->output_format, sizeof(struct sof_ipc4_audio_format));
 		cfg += sizeof(struct sof_ipc4_audio_format);
 	}
@@ -2531,6 +2543,7 @@ static enum sof_tokens process_token_list[] = {
 	SOF_OUT_AUDIO_FORMAT_TOKENS,
 	SOF_AUDIO_FORMAT_BUFFER_SIZE_TOKENS,
 	SOF_COMP_EXT_TOKENS,
+	SOF_PROCESS_TOKENS,
 };
 
 static const struct sof_ipc_tplg_widget_ops tplg_ipc4_widget_ops[SND_SOC_DAPM_TYPE_COUNT] = {
