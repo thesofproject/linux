@@ -257,6 +257,7 @@ static int sof_setup_pipeline_connections(struct snd_sof_dev *sdev,
 					  struct snd_soc_dapm_widget_list *list, int dir)
 {
 	struct snd_soc_dapm_widget *widget;
+	struct snd_sof_route *sroute;
 	struct snd_soc_dapm_path *p;
 	int ret;
 	int i;
@@ -300,6 +301,24 @@ static int sof_setup_pipeline_connections(struct snd_sof_dev *sdev,
 			}
 		}
 	}
+
+	/*
+	 * During route setup above, playback stream routes are set up by going
+	 * through sink path, capture stream routes are set up by going through
+	 * source path. Obviously, feedback route from a widget in the capture
+	 * stream to another widget in the playback stream is not able to be setup.
+	 *
+	 * The feedback route is setup here if widgets on both sides of the route
+	 * are active.
+	 */
+	list_for_each_entry(sroute, &sdev->route_list, list)
+		if (sroute->src_widget->use_count && sroute->sink_widget->use_count &&
+		    !sroute->setup) {
+			ret = sof_route_setup(sdev, sroute->src_widget->widget,
+					      sroute->sink_widget->widget);
+			if (ret < 0)
+				return ret;
+		}
 
 	return 0;
 }
