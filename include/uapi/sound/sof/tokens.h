@@ -97,7 +97,6 @@
  */
 #define SOF_TKN_COMP_SINK_PIN_BINDING_WNAME	413
 #define SOF_TKN_COMP_SRC_PIN_BINDING_WNAME	414
-#define SOF_TKN_COMP_PAYLOAD_WITH_OUTPUT_FMT	415
 
 /* SSP */
 #define SOF_TKN_INTEL_SSP_CLKS_CONTROL		500
@@ -133,6 +132,7 @@
 
 /* Processing Components */
 #define SOF_TKN_PROCESS_TYPE                    900
+#define SOF_TKN_PROCESS_PAYLOAD_WITH_OUTPUT_FMT 901
 
 /* for backward compatibility */
 #define SOF_TKN_EFFECT_TYPE	SOF_TKN_PROCESS_TYPE
