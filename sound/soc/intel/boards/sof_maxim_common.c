@@ -13,6 +13,16 @@
 
 #define MAX_98373_PIN_NAME 16
 
+static const struct snd_kcontrol_new maxim_kcontrols[] = {
+	SOC_DAPM_PIN_SWITCH("Left Spk"),
+	SOC_DAPM_PIN_SWITCH("Right Spk"),
+};
+
+static const struct snd_soc_dapm_widget maxim_dapm_widgets[] = {
+	SND_SOC_DAPM_SPK("Left Spk", NULL),
+	SND_SOC_DAPM_SPK("Right Spk", NULL),
+};
+
 const struct snd_soc_dapm_route max_98373_dapm_routes[] = {
 	/* speaker */
 	{ "Left Spk", NULL, "Left BE_OUT" },
@@ -118,6 +128,21 @@ int max_98373_spk_codec_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_card *card = rtd->card;
 	int ret;
+
+	ret = snd_soc_add_card_controls(card, maxim_kcontrols,
+					ARRAY_SIZE(maxim_kcontrols));
+	if (ret) {
+		dev_err(rtd->dev, "unable to add card controls, ret %d\n", ret);
+		return ret;
+	}
+
+	ret = snd_soc_dapm_new_controls(&card->dapm, maxim_dapm_widgets,
+					ARRAY_SIZE(maxim_dapm_widgets));
+
+	if (ret) {
+		dev_err(rtd->dev, "unable to add widgets controls, ret %d\n", ret);
+		return ret;
+	}
 
 	ret = snd_soc_dapm_add_routes(&card->dapm, max_98373_dapm_routes,
 				      ARRAY_SIZE(max_98373_dapm_routes));

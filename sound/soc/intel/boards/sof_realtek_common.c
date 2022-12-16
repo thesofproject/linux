@@ -18,6 +18,39 @@
 #include "sof_realtek_common.h"
 
 /*
+ * common stereo speakers configuration
+ */
+static const struct snd_kcontrol_new speaker_kcontrols[] = {
+	SOC_DAPM_PIN_SWITCH("Left Spk"),
+	SOC_DAPM_PIN_SWITCH("Right Spk"),
+};
+
+static const struct snd_soc_dapm_widget speaker_widgets[] = {
+	SND_SOC_DAPM_SPK("Left Spk", NULL),
+	SND_SOC_DAPM_SPK("Right Spk", NULL),
+};
+
+static int speaker_common_init(struct snd_soc_pcm_runtime *rtd)
+{
+	struct snd_soc_card *card = rtd->card;
+	int ret;
+
+	ret = snd_soc_dapm_new_controls(&card->dapm, speaker_widgets,
+					ARRAY_SIZE(speaker_widgets));
+	if (ret) {
+		dev_err(rtd->dev, "fail to add dapm controls, ret %d\n", ret);
+		return ret;
+	}
+
+	ret = snd_soc_add_card_controls(card, speaker_kcontrols,
+					ARRAY_SIZE(speaker_kcontrols));
+	if (ret)
+		dev_err(rtd->dev, "fail to add card controls, ret %d\n", ret);
+
+	return ret;
+}
+
+/*
  * Current only 2-amp configuration is supported for rt1011
  */
 static const struct snd_soc_dapm_route speaker_map_lr[] = {
@@ -120,6 +153,7 @@ static int rt1011_init(struct snd_soc_pcm_runtime *rtd)
 	struct snd_soc_card *card = rtd->card;
 	int ret;
 
+	speaker_common_init(rtd);
 	ret = snd_soc_dapm_add_routes(&card->dapm, speaker_map_lr,
 				      ARRAY_SIZE(speaker_map_lr));
 	if (ret)
@@ -219,6 +253,7 @@ static int rt1015p_init(struct snd_soc_pcm_runtime *rtd)
 	struct snd_soc_card *card = rtd->card;
 	int ret;
 
+	speaker_common_init(rtd);
 	if (rt1015p_get_num_codecs() == 1)
 		ret = snd_soc_dapm_add_routes(&card->dapm, rt1015p_1dev_dapm_routes,
 					      ARRAY_SIZE(rt1015p_1dev_dapm_routes));
@@ -348,6 +383,7 @@ static struct snd_soc_dai_link_component rt1015_components[] = {
 
 static int speaker_codec_init_lr(struct snd_soc_pcm_runtime *rtd)
 {
+	speaker_common_init(rtd);
 	return snd_soc_dapm_add_routes(&rtd->card->dapm, speaker_map_lr,
 					ARRAY_SIZE(speaker_map_lr));
 }
@@ -486,6 +522,7 @@ static int rt1019p_init(struct snd_soc_pcm_runtime *rtd)
 	struct snd_soc_card *card = rtd->card;
 	int ret;
 
+	speaker_common_init(rtd);
 	ret = snd_soc_dapm_add_routes(&card->dapm, rt1019p_dapm_routes,
 				      ARRAY_SIZE(rt1019p_dapm_routes));
 	if (ret) {
