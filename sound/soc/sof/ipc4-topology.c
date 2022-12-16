@@ -230,7 +230,7 @@ static int sof_ipc4_get_audio_fmt(struct snd_soc_component *scomp,
 
 	ret = sof_update_ipc_object(scomp, &base_config->audio_fmt,
 				    SOF_IN_AUDIO_FORMAT_TOKENS, swidget->tuples,
-				    swidget->num_tuples, sizeof(*base_config),
+				    swidget->num_tuples, sizeof(base_config->audio_fmt),
 				    available_fmt->audio_fmt_num);
 	if (ret) {
 		dev_err(scomp->dev, "parse base_config audio_fmt tokens failed %d\n", ret);
@@ -510,7 +510,7 @@ static int sof_ipc4_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 
 	ret = sof_update_ipc_object(scomp, ipc4_copier,
 				    SOF_DAI_TOKENS, swidget->tuples,
-				    swidget->num_tuples, sizeof(u32), 1);
+				    swidget->num_tuples, sizeof(ipc4_copier), 1);
 	if (ret) {
 		dev_err(scomp->dev, "parse dai copier node token failed %d\n", ret);
 		goto err;
