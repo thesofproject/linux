@@ -48,7 +48,6 @@
 	(((quirk) << SOF_HDMI_CAPTURE_2_SSP_SHIFT) & SOF_HDMI_CAPTURE_2_SSP_MASK)
 
 #define SOF_ES8336_ENABLE_DMIC			BIT(5)
-#define SOF_ES8336_JD_INVERTED			BIT(6)
 #define SOC_ES8336_HEADSET_MIC1			BIT(8)
 
 static unsigned long quirk;
@@ -83,8 +82,6 @@ static void log_quirks(struct device *dev)
 		dev_info(dev, "quirk DMIC enabled\n");
 	if (quirk & SOF_ES8336_SPEAKERS_EN_GPIO1_QUIRK)
 		dev_info(dev, "Speakers GPIO1 quirk enabled\n");
-	if (quirk & SOF_ES8336_JD_INVERTED)
-		dev_info(dev, "quirk JD inverted enabled\n");
 	if (quirk & SOC_ES8336_HEADSET_MIC1)
 		dev_info(dev, "quirk headset at mic1 port enabled\n");
 }
@@ -676,9 +673,6 @@ static int sof_es8336_probe(struct platform_device *pdev)
 		return -EPROBE_DEFER;
 	priv->codec_dev = get_device(codec_dev);
 
-	if (quirk & SOF_ES8336_JD_INVERTED)
-		props[cnt++] = PROPERTY_ENTRY_BOOL("everest,jack-detect-inverted");
-
 	if (cnt) {
 		fwnode = fwnode_create_software_node(props, NULL);
 		if (IS_ERR(fwnode)) {
@@ -810,8 +804,7 @@ static const struct platform_device_id board_ids[] = {
 					SOF_HDMI_CAPTURE_1_SSP(0) |
 					SOF_HDMI_CAPTURE_2_SSP(2) |
 					SOF_SSP_HDMI_CAPTURE_PRESENT |
-					SOF_ES8336_SPEAKERS_EN_GPIO1_QUIRK |
-					SOF_ES8336_JD_INVERTED),
+					SOF_ES8336_SPEAKERS_EN_GPIO1_QUIRK),
 	},
 	{ }
 };
