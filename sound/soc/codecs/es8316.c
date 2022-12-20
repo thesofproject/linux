@@ -834,6 +834,8 @@ static int es8316_i2c_probe(struct i2c_client *i2c_client)
 	if (es8316 == NULL)
 		return -ENOMEM;
 
+	es83xx_dsm_dump(dev);
+
 	/* read jack information from _DSM */
 	ret = es83xx_dsm_jack_inverted(dev);
 	if (ret < 0)

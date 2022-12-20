@@ -388,8 +388,10 @@
  */
 
 #if IS_ENABLED(CONFIG_ACPI)
+void es83xx_dsm_dump(struct device *dev);
 int es83xx_dsm_jack_inverted(struct device *dev);
 #else
+static inline void es83xx_dsm_dump(struct device *dev) {};
 static inline int es83xx_dsm_jack_inverted(struct device *dev) { return 0; }
 #endif
 
