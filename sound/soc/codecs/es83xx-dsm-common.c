@@ -333,5 +333,38 @@ int es83xx_dsm_is_gpio_level_low(struct device *dev, bool is_spk)
 }
 EXPORT_SYMBOL_GPL(es83xx_dsm_is_gpio_level_low);
 
+int es83xx_dsm_mic_type(struct device *dev, bool is_main)
+{
+	int value;
+	int ret;
+	const char *type;
+
+	if (is_main) {
+		type = "main";
+		ret = es83xx_dsm(dev, PLATFORM_MAINMIC_TYPE_ARG, &value);
+	} else {
+		type = "headset";
+		ret = es83xx_dsm(dev, PLATFORM_HPMIC_TYPE_ARG, &value);
+	}
+
+	if (ret < 0) {
+		dev_err(dev, "Can't read %s microphone type\n", type);
+		return ret;
+	}
+
+	switch (value) {
+	case PLATFORM_MIC_DMIC_HIGH_LEVEL:
+	case PLATFORM_MIC_DMIC_LOW_LEVEL:
+	case PLATFORM_MIC_AMIC_LIN1RIN1:
+	case PLATFORM_MIC_AMIC_LIN2RIN2:
+		return value;
+	default:
+		dev_err(dev, "Invalid value for %s microphone type (%d)\n",
+			type, value);
+		return -EINVAL;
+	}
+}
+EXPORT_SYMBOL_GPL(es83xx_dsm_mic_type);
+
 MODULE_DESCRIPTION("Everest Semi ES83xx DSM helpers");
 MODULE_LICENSE("GPL");
