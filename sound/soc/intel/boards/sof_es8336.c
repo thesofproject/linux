@@ -48,7 +48,6 @@
 	(((quirk) << SOF_HDMI_CAPTURE_2_SSP_SHIFT) & SOF_HDMI_CAPTURE_2_SSP_MASK)
 
 #define SOF_ES8336_ENABLE_DMIC			BIT(5)
-#define SOC_ES8336_HEADSET_MIC1			BIT(8)
 
 static unsigned long quirk;
 
@@ -66,6 +65,7 @@ struct sof_es8336_private {
 
 	struct acpi_gpio_params enable_spk_gpio, enable_hp_gpio;
 	struct acpi_gpio_mapping gpio_mapping[3];
+	struct snd_soc_dapm_route mic_map[2];
 };
 
 struct sof_hdmi_pcm {
@@ -82,8 +82,6 @@ static void log_quirks(struct device *dev)
 		dev_info(dev, "quirk DMIC enabled\n");
 	if (quirk & SOF_ES8336_SPEAKERS_EN_GPIO1_QUIRK)
 		dev_info(dev, "Speakers GPIO1 quirk enabled\n");
-	if (quirk & SOC_ES8336_HEADSET_MIC1)
-		dev_info(dev, "quirk headset at mic1 port enabled\n");
 }
 
 static void pcm_pop_work_events(struct work_struct *work)
@@ -167,16 +165,6 @@ static const struct snd_soc_dapm_route sof_es8316_audio_map[] = {
 	{"Speaker", NULL, "Speaker Power"},
 };
 
-static const struct snd_soc_dapm_route sof_es8316_headset_mic2_map[] = {
-	{"MIC1", NULL, "Internal Mic"},
-	{"MIC2", NULL, "Headset Mic"},
-};
-
-static const struct snd_soc_dapm_route sof_es8316_headset_mic1_map[] = {
-	{"MIC2", NULL, "Internal Mic"},
-	{"MIC1", NULL, "Headset Mic"},
-};
-
 static const struct snd_soc_dapm_route dmic_map[] = {
 	/* digital mics */
 	{"DMic", NULL, "SoC DMIC"},
@@ -244,21 +232,44 @@ static int sof_es8316_init(struct snd_soc_pcm_runtime *runtime)
 	struct snd_soc_component *codec = asoc_rtd_to_codec(runtime, 0)->component;
 	struct snd_soc_card *card = runtime->card;
 	struct sof_es8336_private *priv = snd_soc_card_get_drvdata(card);
-	const struct snd_soc_dapm_route *custom_map;
-	int num_routes;
-	int ret;
+	int num_routes = 0;
+	int i, ret;
 
 	card->dapm.idle_bias_off = true;
 
-	if (quirk & SOC_ES8336_HEADSET_MIC1) {
-		custom_map = sof_es8316_headset_mic1_map;
-		num_routes = ARRAY_SIZE(sof_es8316_headset_mic1_map);
-	} else {
-		custom_map = sof_es8316_headset_mic2_map;
-		num_routes = ARRAY_SIZE(sof_es8316_headset_mic2_map);
+	/*
+	 * Need to check if DMIC is not enabled, as the _DSM table may be
+	 * reporting a non-existent AMIC.
+	 */
+	if (!(quirk & SOF_ES8336_ENABLE_DMIC)) {
+		ret = es83xx_dsm_mic_type(priv->codec_dev, true);
+		if (ret == PLATFORM_MIC_AMIC_LIN1RIN1) {
+			priv->mic_map[num_routes].sink = "MIC1";
+			priv->mic_map[num_routes].source = "Internal Mic";
+			num_routes++;
+		} else if (ret == PLATFORM_MIC_AMIC_LIN2RIN2) {
+			priv->mic_map[num_routes].sink = "MIC2";
+			priv->mic_map[num_routes].source = "Internal Mic";
+			num_routes++;
+		}
 	}
 
-	ret = snd_soc_dapm_add_routes(&card->dapm, custom_map, num_routes);
+	ret = es83xx_dsm_mic_type(priv->codec_dev, false);
+	if (ret == PLATFORM_MIC_AMIC_LIN1RIN1) {
+		priv->mic_map[num_routes].sink = "MIC1";
+		priv->mic_map[num_routes].source = "Headset Mic";
+		num_routes++;
+	} else if (ret == PLATFORM_MIC_AMIC_LIN2RIN2) {
+		priv->mic_map[num_routes].sink = "MIC2";
+		priv->mic_map[num_routes].source = "Headset Mic";
+		num_routes++;
+	}
+
+	for (i = 0; i < num_routes; i++)
+		dev_info(card->dev, "%s is %s\n",
+			 priv->mic_map[i].source, priv->mic_map[i].sink);
+
+	ret = snd_soc_dapm_add_routes(&card->dapm, priv->mic_map, num_routes);
 	if (ret)
 		return ret;
 
@@ -318,8 +329,7 @@ static const struct dmi_system_id sof_es8336_quirk_table[] = {
 			DMI_MATCH(DMI_SYS_VENDOR, "HUAWEI"),
 			DMI_MATCH(DMI_BOARD_NAME, "BOHB-WAX9-PCB-B2"),
 		},
-		.driver_data = (void *)(SOF_ES8336_SPEAKERS_EN_GPIO1_QUIRK |
-					SOC_ES8336_HEADSET_MIC1)
+		.driver_data = (void *)(SOF_ES8336_SPEAKERS_EN_GPIO1_QUIRK)
 	},
 	{}
 };
