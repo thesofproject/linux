@@ -300,5 +300,38 @@ int es83xx_dsm_jack_inverted(struct device *dev)
 }
 EXPORT_SYMBOL_GPL(es83xx_dsm_jack_inverted);
 
+int es83xx_dsm_is_gpio_level_low(struct device *dev, bool is_spk)
+{
+	int value;
+	int ret;
+	const char *type;
+
+	if (is_spk) {
+		type = "Speaker";
+		ret = es83xx_dsm(dev, SPK_CTL_IO_LEVEL_ARG, &value);
+	} else {
+		type = "Headphone";
+		ret = es83xx_dsm(dev, HP_CTL_IO_LEVEL_ARG, &value);
+	}
+
+	if (ret < 0) {
+		dev_err(dev, "%s: Can't read I/O ctl level argument\n", type);
+		return ret;
+	}
+
+	switch (value) {
+	case GPIO_CTL_IO_LEVEL_HIGH:
+	case 0xff:
+		return 0;
+	case GPIO_CTL_IO_LEVEL_LOW:
+		return 1;
+	default:
+		dev_err(dev, "%s: invalid I/O ctl level argument (%d)\n",
+			type, value);
+		return -EINVAL;
+	}
+}
+EXPORT_SYMBOL_GPL(es83xx_dsm_is_gpio_level_low);
+
 MODULE_DESCRIPTION("Everest Semi ES83xx DSM helpers");
 MODULE_LICENSE("GPL");
