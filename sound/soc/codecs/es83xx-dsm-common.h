@@ -391,11 +391,13 @@
 void es83xx_dsm_dump(struct device *dev);
 int es83xx_dsm_jack_inverted(struct device *dev);
 int es83xx_dsm_is_gpio_level_low(struct device *dev, bool is_spk);
+int es83xx_dsm_mic_type(struct device *dev, bool is_main);
 
 #else
 static inline void es83xx_dsm_dump(struct device *dev) {};
 static inline int es83xx_dsm_jack_inverted(struct device *dev) { return 0; }
 static inline int es83xx_dsm_is_gpio_level_low(struct device *dev, bool is_spk) { return 0; }
+static inline int es83xx_dsm_mic_type(struct device *dev, bool is_main) { return 0; }
 #endif
 
 #endif
