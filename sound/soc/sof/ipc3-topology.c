@@ -1728,6 +1728,9 @@ static int sof_ipc3_control_load_volume(struct snd_sof_dev *sdev, struct snd_sof
 	/* set cmd for mixer control */
 	if (scontrol->max == 1) {
 		cdata->cmd = SOF_CTRL_CMD_SWITCH;
+		/* Set default switch value to On */
+		for (i = 0; i < scontrol->num_channels; i++)
+			cdata->chanv[i].value = 1;
 		return 0;
 	}
 
