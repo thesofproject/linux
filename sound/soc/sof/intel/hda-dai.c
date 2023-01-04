@@ -43,7 +43,7 @@ int hda_dai_config(struct snd_soc_dapm_widget *w, unsigned int flags,
 	sdev = snd_soc_component_get_drvdata(component);
 	tplg_ops = sof_ipc_get_ops(sdev, tplg);
 
-	if (swidget && tplg_ops && tplg_ops->dai_config) {
+	if (tplg_ops && tplg_ops->dai_config) {
 		ret = tplg_ops->dai_config(sdev, swidget, flags, data);
 		if (ret < 0) {
 			dev_err(sdev->dev, "DAI config with flags %x failed for widget %s\n",
