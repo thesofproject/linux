@@ -1236,6 +1236,35 @@ static int snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, struct snd_s
 }
 #endif
 
+static inline void
+sof_ipc4_apply_fe_params_to_dai(struct snd_sof_widget *swidget,
+			       struct snd_pcm_hw_params *fe_params,
+			       struct sof_ipc4_copier_data *copier_data,
+			       struct sof_ipc4_copier *ipc4_copier)
+{
+	int valid_bits, container_size;
+
+	/* skip ssp since it is fix up in dai link fixup */
+	if (ipc4_copier->dai_type == SOF_DAI_INTEL_SSP)
+		return;
+
+	container_size = params_physical_width(fe_params);
+	valid_bits = params_width(fe_params);
+
+	if(ipc4_copier->dai_type == SOF_DAI_INTEL_ALH)
+		container_size = snd_pcm_format_physical_width(SNDRV_PCM_FORMAT_S32_LE);
+
+	if (swidget->id == snd_soc_dapm_dai_in) {
+		copier_data->out_format.fmt_cfg &= ~SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH_MASK;
+		copier_data->out_format.fmt_cfg |= valid_bits << SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH_SHIFT;
+		copier_data->out_format.bit_depth = container_size;
+	} else {
+		copier_data->base_config.audio_fmt.fmt_cfg &= ~SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH_MASK;
+		copier_data->base_config.audio_fmt.fmt_cfg |= valid_bits << SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH_SHIFT;
+		copier_data->base_config.audio_fmt.bit_depth = container_size;
+	}
+}
+
 static int
 sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 			       struct snd_pcm_hw_params *fe_params,
@@ -1464,6 +1493,10 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 				copier_data->gtw_cfg.node_id |= SOF_IPC4_NODE_INDEX(group_id);
 			}
 		}
+
+		if (hw_param_mask(pipeline_params, SNDRV_PCM_HW_PARAM_FORMAT) !=
+			hw_param_mask(fe_params, SNDRV_PCM_HW_PARAM_FORMAT))
+			sof_ipc4_apply_fe_params_to_dai(swidget, fe_params, copier_data, ipc4_copier);
 	}
 	}
 

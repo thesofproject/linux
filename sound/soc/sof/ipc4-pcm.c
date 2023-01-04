@@ -465,10 +465,7 @@ static int sof_ipc4_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 	struct snd_interval *rate = hw_param_interval(params, SNDRV_PCM_HW_PARAM_RATE);
 	struct snd_mask *fmt = hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT);
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
-	struct snd_soc_dai *cpu_dai = asoc_rtd_to_cpu(rtd, 0);
 	struct sof_ipc4_copier *ipc4_copier;
-	bool use_chain_dma = false;
-	int dir;
 
 	if (!dai) {
 		dev_err(component->dev, "%s: No DAI found with name %s\n", __func__,
@@ -483,32 +480,14 @@ static int sof_ipc4_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 		return -EINVAL;
 	}
 
-	for_each_pcm_streams(dir) {
-		struct snd_soc_dapm_widget *w = snd_soc_dai_get_widget(cpu_dai, dir);
-
-		if (w) {
-			struct snd_sof_widget *swidget = w->dobj.private;
-			struct snd_sof_widget *pipe_widget = swidget->spipe->pipe_widget;
-			struct sof_ipc4_pipeline *pipeline = pipe_widget->private;
-
-			if (pipeline->use_chain_dma)
-				use_chain_dma = true;
-		}
-	}
-	/*
-	 * Always set BE format to 32-bits for both playback and capture, except if chained
-	 * DMA is in use. In chained DMA case the back-end and front-end format must match.
-	 */
-	if (!use_chain_dma) {
-		snd_mask_none(fmt);
-		snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S32_LE);
-	}
-
 	rate->min = ipc4_copier->available_fmt.base_config->audio_fmt.sampling_frequency;
 	rate->max = rate->min;
 
 	switch (ipc4_copier->dai_type) {
 	case SOF_DAI_INTEL_SSP:
+		/* Always set BE format to 32-bits for both playback and capture in SSP case */
+		snd_mask_none(fmt);
+		snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S32_LE);
 		ipc4_ssp_dai_config_pcm_params_match(sdev, (char *)rtd->dai_link->name, params);
 		break;
 	default:
