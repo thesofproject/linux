@@ -10,6 +10,7 @@
 #include "sof-audio.h"
 #include "sof-priv.h"
 #include "sof-utils.h"
+#include "ops.h"
 
 static void sof_set_transferred_bytes(struct sof_compr_stream *sstream,
 				      u64 host_pos, u64 buffer_size)
@@ -164,6 +165,7 @@ static int sof_compr_set_params(struct snd_soc_component *component,
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_compr_runtime *crtd = cstream->runtime;
+	struct sof_ipc_pcm_params_reply ipc_params_reply;
 	struct sof_ipc_fw_ready *ready = &sdev->fw_ready;
 	struct sof_ipc_fw_version *v = &ready->version;
 	struct sof_compr_stream *sstream;
@@ -227,9 +229,18 @@ static int sof_compr_set_params(struct snd_soc_component *component,
 
 	memcpy((u8 *)pcm->params.ext_data, &params->codec, ext_data_size);
 
-	ret = sof_ipc_tx_message_no_reply(sdev->ipc, pcm, sizeof(*pcm) + ext_data_size);
+	ret = sof_ipc_tx_message(sdev->ipc, pcm, sizeof(*pcm) + ext_data_size,
+				 &ipc_params_reply, sizeof(ipc_params_reply));
 	if (ret < 0) {
 		dev_err(component->dev, "error ipc failed\n");
+		goto out;
+	}
+
+	ret = snd_sof_set_stream_data_offset(sdev, &spcm->stream[cstream->direction],
+					     ipc_params_reply.posn_offset);
+	if (ret < 0) {
+		dev_err(component->dev, "Invalid stream data offset for Compr %d\n",
+			spcm->pcm.pcm_id);
 		goto out;
 	}
 
