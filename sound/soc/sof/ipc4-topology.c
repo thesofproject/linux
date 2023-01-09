@@ -1374,18 +1374,11 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		available_fmt = &ipc4_copier->available_fmt;
 
 		/*
-		 * base_config->audio_fmt and out_audio_fmt represent the input and output audio
-		 * formats. Use the input format as the reference to match pcm params for playback
-		 * and the output format as reference for capture.
+		 * base_config->audio_fmt represent the input audio formats. Use
+		 * the input format as the reference to match pcm params
 		 */
-		if (dir == SNDRV_PCM_STREAM_PLAYBACK) {
-			available_fmt->ref_audio_fmt = &available_fmt->base_config->audio_fmt;
-			ref_audio_fmt_size = sizeof(struct sof_ipc4_base_module_cfg);
-		} else {
-			available_fmt->ref_audio_fmt = available_fmt->out_audio_fmt;
-			ref_audio_fmt_size = sizeof(struct sof_ipc4_audio_format);
-		}
-
+		available_fmt->ref_audio_fmt = &available_fmt->base_config->audio_fmt;
+		ref_audio_fmt_size = sizeof(struct sof_ipc4_base_module_cfg);
 		ref_params = pipeline_params;
 
 		break;
