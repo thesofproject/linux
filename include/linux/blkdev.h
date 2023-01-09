@@ -348,12 +348,18 @@ typedef unsigned int __bitwise blk_features_t;
 	((__force blk_features_t)(1u << 16))
 
 /*
+ * The request order is preserved per hardware queue by the block driver and by
+ * the block device. Set by the block driver.
+ */
+#define BLK_FEAT_ORDERED_HWQ		((__force blk_features_t)(1u << 30))
+
+/*
  * Flags automatically inherited when stacking limits.
  */
 #define BLK_FEAT_INHERIT_MASK \
 	(BLK_FEAT_WRITE_CACHE | BLK_FEAT_FUA | BLK_FEAT_ROTATIONAL | \
 	 BLK_FEAT_STABLE_WRITES | BLK_FEAT_ZONED | \
-	 BLK_FEAT_RAID_PARTIAL_STRIPES_EXPENSIVE)
+	 BLK_FEAT_RAID_PARTIAL_STRIPES_EXPENSIVE | BLK_FEAT_ORDERED_HWQ)
 
 /* internal flags in queue_limits.flags */
 typedef unsigned int __bitwise blk_flags_t;
