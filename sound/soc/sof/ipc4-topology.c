@@ -219,6 +219,46 @@ static int sof_ipc4_setup_process_set_cdata(struct snd_sof_widget *swidget)
 	return 0;
 }
 
+static const struct sof_ipc4_audio_format
+*sof_ipc4_get_sink_pin_fmt(struct snd_sof_widget *swidget, int pin_id)
+{
+	struct sof_ipc4_process *process;
+
+	if (swidget->id != snd_soc_dapm_effect) {
+		struct sof_ipc4_base_module_cfg *base = swidget->private;
+
+		/* For non-process modules, base module config format is used for all sink pins */
+		return &base->audio_fmt;
+	}
+
+	process = swidget->private;
+	if (process->init_payload_format == INIT_PAYLOAD_WITH_BASE_CFG_EXT &&
+	    process->cdata) {
+		struct sof_ipc4_base_module_cfg_ext *base_ext;
+		struct sof_ipc4_control_data *control_data;
+		const struct sof_ipc4_pin_format *pin_fmt;
+		int i;
+
+		control_data = process->cdata;
+		base_ext = (struct sof_ipc4_base_module_cfg_ext *)control_data->data->data;
+		pin_fmt = (struct sof_ipc4_pin_format *)base_ext->data;
+
+		for (i = 0; i < base_ext->num_sink_pin_fmts; i++) {
+			if (pin_fmt[i].pin_index == pin_id)
+				return &pin_fmt[i].audio_fmt;
+		}
+	} else {
+		/*
+		 * For process modules don't have base module config extension in
+		 * the instance initialization payload, base module config format is
+		 * used for all sink pins.
+		 */
+		return &process->base_config.audio_fmt;
+	}
+
+	return NULL;
+}
+
 /**
  * sof_ipc4_get_audio_fmt - get available audio formats from swidget->tuples
  * @scomp: pointer to pointer to SOC component
@@ -2104,9 +2144,9 @@ static int sof_ipc4_set_copier_sink_format(struct snd_sof_dev *sdev,
 					   struct snd_sof_widget *sink_widget,
 					   int sink_id)
 {
-	struct sof_ipc4_base_module_cfg *sink_config = sink_widget->private;
-	struct sof_ipc4_base_module_cfg *src_config;
 	struct sof_ipc4_copier_config_set_sink_format format;
+	struct sof_ipc4_base_module_cfg *src_config;
+	const struct sof_ipc4_audio_format *pin_fmt;
 	struct sof_ipc4_fw_module *fw_module;
 	struct sof_ipc4_msg msg = {{ 0 }};
 	u32 header, extension;
@@ -2126,7 +2166,16 @@ static int sof_ipc4_set_copier_sink_format(struct snd_sof_dev *sdev,
 
 	format.sink_id = sink_id;
 	memcpy(&format.source_fmt, &src_config->audio_fmt, sizeof(format.source_fmt));
-	memcpy(&format.sink_fmt, &sink_config->audio_fmt, sizeof(format.sink_fmt));
+
+	pin_fmt = sof_ipc4_get_sink_pin_fmt(sink_widget, sink_id);
+	if (!pin_fmt) {
+		dev_err(sdev->dev, "Unable to get pin %d format for %s",
+			sink_id, sink_widget->widget->name);
+		return -EINVAL;
+	}
+
+	memcpy(&format.sink_fmt, pin_fmt, sizeof(format.sink_fmt));
+
 	msg.data_size = sizeof(format);
 	msg.data_ptr = &format;
 
