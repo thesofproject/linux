@@ -507,6 +507,26 @@ int sdw_trigger(struct snd_pcm_substream *substream, int cmd)
 	return ret;
 }
 
+static int sdw_hw_params(struct snd_pcm_substream *substream,
+			   struct snd_pcm_hw_params *params)
+{
+	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
+	struct snd_interval *channels;
+
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		return 0;
+
+	/*
+	 * The captured data will be combined from each cpu DAI if the dai
+	 * link has more than one cpu DAIs. Therefore, the channel number
+	 * should divide by num_cpus for each CPU/codec DAI.
+	 */
+	channels = hw_param_interval(params, SNDRV_PCM_HW_PARAM_CHANNELS);
+	channels->min /= rtd->dai_link->num_cpus;
+	channels->max = channels->min;
+	return 0;
+}
+
 int sdw_hw_free(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
@@ -535,6 +555,7 @@ static const struct snd_soc_ops sdw_ops = {
 	.startup = sdw_startup,
 	.prepare = sdw_prepare,
 	.trigger = sdw_trigger,
+	.hw_params = sdw_hw_params,
 	.hw_free = sdw_hw_free,
 	.shutdown = sdw_shutdown,
 };
