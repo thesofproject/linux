@@ -10,6 +10,27 @@
 #include <linux/stddef.h>
 #include <linux/acpi.h>
 
+enum snd_soc_acpi_intel_codec {
+	NONE = 0,
+
+	/* headphone */
+	CS42L42,
+	NAU8825,
+	RT5682,
+	RT5682S,
+
+	/* amplifier */
+	CS35L41,
+	MAX98357A,
+	MAX98360A,
+	MAX98373,
+	MAX98390,
+	RT1011,
+	RT1015,
+	RT1015P,
+	RT1019P,
+};
+
 /*
  * these tables are not constants, some fields can be used for
  * pdata or machine ops
@@ -46,5 +67,10 @@ extern struct snd_soc_acpi_mach snd_soc_acpi_intel_mtl_sdw_machines[];
  * additional ACPI-enumerated codecs
  */
 extern struct snd_soc_acpi_mach snd_soc_acpi_intel_hda_machines[];
+
+/*
+ * a machine quirk function to detect codec configuration
+ */
+struct snd_soc_acpi_mach *snd_soc_acpi_intel_codec_search(void *arg);
 
 #endif

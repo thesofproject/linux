@@ -67,6 +67,10 @@ static inline struct snd_soc_acpi_mach *snd_soc_acpi_codec_list(void *arg)
  * @i2s_link_mask: I2S/TDM links enabled on the board
  * @num_dai_drivers: number of elements in @dai_drivers
  * @dai_drivers: pointer to dai_drivers, used e.g. in nocodec mode
+ * @codec_type: type of headphone codec
+ * @codec_ssp: ssp port id of headphone codec
+ * @amp_type: type of speaker amplifier
+ * @amp_ssp: ssp port id of speaker amplifier
  */
 struct snd_soc_acpi_mach_params {
 	u32 acpi_ipc_irq_index;
@@ -79,6 +83,10 @@ struct snd_soc_acpi_mach_params {
 	u32 i2s_link_mask;
 	u32 num_dai_drivers;
 	struct snd_soc_dai_driver *dai_drivers;
+	int codec_type;
+	int codec_ssp;
+	int amp_type;
+	int amp_ssp;
 };
 
 /**
