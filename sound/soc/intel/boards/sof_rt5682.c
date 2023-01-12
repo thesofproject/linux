@@ -16,6 +16,8 @@
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
+#include <sound/soc-acpi.h>
+#include <sound/soc-acpi-intel-match.h>
 #include <sound/sof.h>
 #include <sound/rt5682.h>
 #include <sound/rt5682s.h>
@@ -60,7 +62,7 @@
 #define SOF_MAX98390_SPEAKER_AMP_PRESENT	BIT(24)
 #define SOF_MAX98390_TWEETER_SPEAKER_PRESENT	BIT(25)
 #define SOF_RT1019_SPEAKER_AMP_PRESENT	BIT(26)
-
+#define SOF_RT5682_DATA_FROM_ACPI	BIT(27)
 
 /* Default: MCLK on, MCLK 19.2M, SSP0  */
 static unsigned long sof_rt5682_quirk = SOF_RT5682_MCLK_EN |
@@ -909,10 +911,57 @@ static int sof_audio_probe(struct platform_device *pdev)
 
 	dev_dbg(&pdev->dev, "sof_rt5682_quirk = %lx\n", sof_rt5682_quirk);
 
-	ssp_amp = (sof_rt5682_quirk & SOF_RT5682_SSP_AMP_MASK) >>
-			SOF_RT5682_SSP_AMP_SHIFT;
+	if (sof_rt5682_quirk & SOF_RT5682_DATA_FROM_ACPI) {
+		ssp_amp = mach->mach_params.amp_ssp;
+		ssp_codec = mach->mach_params.codec_ssp;
 
-	ssp_codec = sof_rt5682_quirk & SOF_RT5682_SSP_CODEC_MASK;
+		if (mach->mach_params.codec_type == RT5682S)
+			sof_rt5682_quirk |= SOF_RT5682S_HEADPHONE_CODEC_PRESENT;
+
+		if (mach->mach_params.amp_type != NONE) {
+			switch (mach->mach_params.amp_type) {
+			case MAX98357A:
+				break;
+			case MAX98360A:
+				sof_rt5682_quirk |= SOF_MAX98360A_SPEAKER_AMP_PRESENT;
+				break;
+			case MAX98373:
+				sof_rt5682_quirk |= SOF_MAX98373_SPEAKER_AMP_PRESENT;
+				break;
+			case MAX98390:
+				sof_rt5682_quirk |= SOF_MAX98390_SPEAKER_AMP_PRESENT;
+				break;
+			case RT1011:
+				sof_rt5682_quirk |= SOF_RT1011_SPEAKER_AMP_PRESENT;
+				break;
+			case RT1015:
+				sof_rt5682_quirk |= SOF_RT1015_SPEAKER_AMP_PRESENT;
+				break;
+			case RT1015P:
+				sof_rt5682_quirk |= SOF_RT1015P_SPEAKER_AMP_PRESENT;
+				break;
+			case RT1019P:
+				sof_rt5682_quirk |= SOF_RT1019_SPEAKER_AMP_PRESENT;
+				break;
+			default:
+				return -EINVAL;
+			}
+
+			sof_rt5682_quirk |= SOF_SPEAKER_AMP_PRESENT;
+		}
+
+		if (sof_rt5682_quirk & SOF_SSP_BT_OFFLOAD_PRESENT) {
+			/* default SSP1 on MTL */
+			if (ssp_amp != 1)
+				sof_rt5682_quirk |= SOF_BT_OFFLOAD_SSP(1);
+			else
+				sof_rt5682_quirk |= SOF_BT_OFFLOAD_SSP(2);
+		}
+	} else {
+		ssp_amp = (sof_rt5682_quirk & SOF_RT5682_SSP_AMP_MASK) >>
+				SOF_RT5682_SSP_AMP_SHIFT;
+		ssp_codec = sof_rt5682_quirk & SOF_RT5682_SSP_CODEC_MASK;
+	}
 
 	/* compute number of dai links */
 	sof_audio_card_rt5682.num_links = 1 + dmic_be_num + hdmi_num;
@@ -1109,6 +1158,13 @@ static const struct platform_device_id board_ids[] = {
 		.driver_data = (kernel_ulong_t)(SOF_RT5682_MCLK_EN |
 					SOF_RT5682_MCLK_24MHZ |
 					SOF_RT5682_SSP_CODEC(0)),
+	},
+	{
+		.name = "mtl_acpi_rt5682",
+		.driver_data = (kernel_ulong_t)(SOF_RT5682_MCLK_EN |
+					SOF_RT5682_NUM_HDMIDEV(4) |
+					SOF_SSP_BT_OFFLOAD_PRESENT |
+					SOF_RT5682_DATA_FROM_ACPI),
 	},
 	{ }
 };
