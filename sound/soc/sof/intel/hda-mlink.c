@@ -13,18 +13,7 @@
 #include <sound/hdaudio_ext.h>
 #include <sound/hda_register.h>
 
-#include <linux/acpi.h>
 #include <linux/module.h>
-#include <linux/soundwire/sdw.h>
-#include <linux/soundwire/sdw_intel.h>
-#include <sound/intel-dsp-config.h>
-#include <sound/intel-nhlt.h>
-#include <sound/sof.h>
-#include <sound/sof/xtensa.h>
-#include "../sof-audio.h"
-#include "../sof-pci-dev.h"
-#include "../ops.h"
-#include "hda.h"
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
 
