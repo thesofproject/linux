@@ -2012,6 +2012,14 @@ int dpcm_be_dai_hw_params(struct snd_soc_pcm_runtime *fe, int stream)
 		dev_dbg(be->dev, "ASoC: hw_params BE %s\n",
 			be->dai_link->name);
 
+		if (be->dai_link->flags[stream] & SND_SOC_DAI_LINK_EVEN_CHANNEL) {
+			struct snd_interval *channels;
+
+			channels = hw_param_interval(&hw_params, SNDRV_PCM_HW_PARAM_CHANNELS);
+			channels->min /= be->dai_link->num_cpus;
+			channels->max = channels->min;
+		}
+
 		ret = __soc_pcm_hw_params(be, be_substream, &hw_params);
 		if (ret < 0)
 			goto unwind;

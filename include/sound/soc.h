@@ -646,6 +646,9 @@ struct snd_soc_dai_link_component {
 	const char *dai_name;
 };
 
+/* Split channels between cpu DAIs equally */
+#define SND_SOC_DAI_LINK_EVEN_CHANNEL	BIT(0)
+
 struct snd_soc_dai_link {
 	/* config - must be set by machine driver */
 	const char *name;			/* Codec name */
@@ -690,6 +693,8 @@ struct snd_soc_dai_link {
 	unsigned int dai_fmt;           /* format to set on init */
 
 	enum snd_soc_dpcm_trigger trigger[2]; /* trigger type for DPCM */
+
+	unsigned int flags[SNDRV_PCM_STREAM_LAST + 1]; /* dai_link flags */
 
 	/* codec/machine specific init - e.g. add machine controls */
 	int (*init)(struct snd_soc_pcm_runtime *rtd);
