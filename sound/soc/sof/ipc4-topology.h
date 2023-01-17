@@ -55,6 +55,8 @@
 
 #define SOF_IPC4_INVALID_NODE_ID	0xffffffff
 
+#define INIT_PAYLOAD_WITH_OUTPUT_FMT	BIT(0)
+
 /*
  * The base of multi-gateways. Multi-gateways addressing starts from
  * ALH_MULTI_GTW_BASE and there are ALH_MULTI_GTW_COUNT multi-sources
@@ -350,11 +352,13 @@ struct sof_ipc4_process {
 	uint32_t ipc_config_size;
 	struct sof_ipc4_msg msg;
 	/*
-	 * payload_with_output_fmt is used to describe whether there is output format
-	 * (struct sof_ipc4_audio_format output_format) in the module init instance
-	 * ipc message payload blob.
+	 * init_payload_format is used to describe the module instance initialization
+	 * payload format.
+	 *
+	 * Bit 0: Module has output format in its instance init payload if set.
+	 * Bits 1~31: Reserved for future use.
 	 */
-	bool payload_with_output_fmt;
+	u32 init_payload_format;
 };
 
 #endif
