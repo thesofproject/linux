@@ -29,23 +29,26 @@
 int hda_dsp_ctrl_link_reset(struct snd_sof_dev *sdev, bool reset)
 {
 	unsigned long timeout;
+	int cycle_count = 10;
 	u32 gctl = 0;
 	u32 val;
 
 	/* 0 to enter reset and 1 to exit reset */
 	val = reset ? 0 : SOF_HDA_GCTL_RESET;
 
-	/* enter/exit HDA controller reset */
-	snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR, SOF_HDA_GCTL,
-				SOF_HDA_GCTL_RESET, val);
+	while (cycle_count--) {
+		/* enter/exit HDA controller reset */
+		snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR, SOF_HDA_GCTL,
+					SOF_HDA_GCTL_RESET, val);
 
-	/* wait to enter/exit reset */
-	timeout = jiffies + msecs_to_jiffies(HDA_DSP_CTRL_RESET_TIMEOUT);
-	while (time_before(jiffies, timeout)) {
-		gctl = snd_sof_dsp_read(sdev, HDA_DSP_HDA_BAR, SOF_HDA_GCTL);
-		if ((gctl & SOF_HDA_GCTL_RESET) == val)
-			return 0;
-		usleep_range(500, 1000);
+		/* wait to enter/exit reset */
+		timeout = jiffies + msecs_to_jiffies(HDA_DSP_CTRL_RESET_TIMEOUT);
+		while (time_before(jiffies, timeout)) {
+			gctl = snd_sof_dsp_read(sdev, HDA_DSP_HDA_BAR, SOF_HDA_GCTL);
+			if ((gctl & SOF_HDA_GCTL_RESET) == val)
+				return 0;
+			usleep_range(500, 1000);
+		}
 	}
 
 	/* enter/exit reset failed */
