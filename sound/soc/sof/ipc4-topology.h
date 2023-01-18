@@ -364,4 +364,42 @@ struct sof_ipc4_process {
 	u32 init_payload_format;
 };
 
+/**
+ * struct sof_ipc4_pin_format - widgets pin format
+ * @pin_index: input/output pin index for the widget
+ * @iobs: input/output buffer size for input/output pin
+ * @audio_fmt: audio format for the pin
+ *
+ * This structure can be used for both source or sink pin cases,
+ * and the pin_index is relative to the type of pin being used.
+ */
+struct sof_ipc4_pin_format {
+	u32 pin_index;
+	u32 iobs;
+	struct sof_ipc4_audio_format audio_fmt;
+};
+
+/**
+ * struct sof_ipc4_base_module_cfg_ext - base module config extension
+ * @num_sink_pin_fmts: number of sink pin formats in the data member
+ * @num_source_pin_fmts: number of source pin formats in the data member
+ * @reserved: reserved for future use
+ * @priv_param_len: length of optional module specific parameters in the data member
+ * @data: consist of three parts:
+ *        a) num_sink_pin_fmts * sof_ipc4_pin_format followed by
+ *        b) num_source_pin_fmts * sof_ipc4_pin_format, and then followed by
+ *        c) priv_param_len bytes of module specific parameters.
+ */
+struct sof_ipc4_base_module_cfg_ext {
+	/*
+	 * Modules with this structure in their instance initialization payload
+	 * should have one or more sink and source pins
+	 */
+	u16 num_sink_pin_fmts;
+	u16 num_source_pin_fmts;
+	u8 reserved[8];
+	u32 priv_param_len;
+	u8 data[];
+} __packed;
+
 #endif
