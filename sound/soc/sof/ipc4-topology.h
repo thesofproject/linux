@@ -56,6 +56,7 @@
 #define SOF_IPC4_INVALID_NODE_ID	0xffffffff
 
 #define INIT_PAYLOAD_WITH_OUTPUT_FMT	BIT(0)
+#define INIT_PAYLOAD_WITH_BASE_CFG_EXT	BIT(1)
 
 /*
  * The base of multi-gateways. Multi-gateways addressing starts from
@@ -359,7 +360,8 @@ struct sof_ipc4_process {
 	 * payload format.
 	 *
 	 * Bit 0: Module has output format in its instance init payload if set.
-	 * Bits 1~31: Reserved for future use.
+	 * Bit 1: Module has base module config extension in its instance init payload if set.
+	 * Bits 2~31: Reserved for future use.
 	 */
 	u32 init_payload_format;
 };
