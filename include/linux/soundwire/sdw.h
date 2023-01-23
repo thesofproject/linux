@@ -839,7 +839,6 @@ struct sdw_defer {
  * @xfer_msg: Transfer message callback
  * @xfer_msg_defer: Defer version of transfer message callback. The message is handled with the
  * bus struct @sdw_defer
- * @reset_page_addr: Reset the SCP page address registers
  * @set_bus_conf: Set the bus configuration
  * @pre_bank_switch: Callback for pre bank switch
  * @post_bank_switch: Callback for post bank switch
@@ -854,8 +853,6 @@ struct sdw_master_ops {
 			(struct sdw_bus *bus, struct sdw_msg *msg);
 	enum sdw_command_response (*xfer_msg_defer)
 			(struct sdw_bus *bus);
-	enum sdw_command_response (*reset_page_addr)
-			(struct sdw_bus *bus, unsigned int dev_num);
 	int (*set_bus_conf)(struct sdw_bus *bus,
 			struct sdw_bus_params *params);
 	int (*pre_bank_switch)(struct sdw_bus *bus);
