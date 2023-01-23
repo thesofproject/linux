@@ -101,11 +101,6 @@ int hda_dsp_pcm_hw_params(struct snd_sof_dev *sdev,
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct snd_dma_buffer *dmab;
 	int ret;
-	u32 size, rate, bits;
-
-	size = params_buffer_bytes(params);
-	rate = hda_dsp_get_mult_div(sdev, params_rate(params));
-	bits = hda_dsp_get_bits(sdev, params_width(params));
 
 	hstream->substream = substream;
 
@@ -115,10 +110,14 @@ int hda_dsp_pcm_hw_params(struct snd_sof_dev *sdev,
 	 * Use the codec required format val (which is link_bps adjusted) when
 	 * the DSP is not in use
 	 */
-	if (!sdev->dspless_mode_selected)
-		hstream->format_val = rate | bits | (params_channels(params) - 1);
+	if (!sdev->dspless_mode_selected) {
+		u32 rate = hda_dsp_get_mult_div(sdev, params_rate(params));
+		u32 bits = hda_dsp_get_bits(sdev, params_width(params));
 
-	hstream->bufsize = size;
+		hstream->format_val = rate | bits | (params_channels(params) - 1);
+	}
+
+	hstream->bufsize = params_buffer_bytes(params);
 	hstream->period_bytes = params_period_bytes(params);
 	hstream->no_period_wakeup  =
 			(params->info & SNDRV_PCM_INFO_NO_PERIOD_WAKEUP) &&
