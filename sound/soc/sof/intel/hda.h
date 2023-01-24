@@ -938,6 +938,7 @@ int hda_dsp_ipc4_load_library(struct snd_sof_dev *sdev,
  * @codec_dai_set_hext_stream: Function pointer to set codec-side stream information
  * @calc_stream_format: Function pointer to determine stream format from hw_params and
  * possibly codec DAI .sig bits
+ * @get_hlink: Mandatory function pointer to retrieve hlink, mainly to program LOSIDV
  */
 struct hda_dai_widget_dma_ops {
 	struct hdac_ext_stream *(*get_hext_stream)(struct snd_sof_dev *sdev,
@@ -963,6 +964,9 @@ struct hda_dai_widget_dma_ops {
 	unsigned int (*calc_stream_format)(struct snd_sof_dev *sdev,
 					   struct snd_pcm_substream *substream,
 					   struct snd_pcm_hw_params *params);
+	struct hdac_ext_link * (*get_hlink)(struct snd_sof_dev *sdev,
+					    struct snd_soc_dai *cpu_dai,
+					    struct snd_pcm_substream *substream);
 };
 
 const struct hda_dai_widget_dma_ops *

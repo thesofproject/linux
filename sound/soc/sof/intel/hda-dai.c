@@ -93,18 +93,15 @@ hda_dai_get_ops(struct snd_pcm_substream *substream, struct snd_soc_dai *cpu_dai
 
 static int hda_link_dma_cleanup(struct snd_pcm_substream *substream,
 				struct hdac_ext_stream *hext_stream,
-				struct snd_soc_dai *cpu_dai,
-				struct snd_soc_dai *codec_dai)
+				struct snd_soc_dai *cpu_dai)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(cpu_dai->component);
 	const struct hda_dai_widget_dma_ops *ops = hda_dai_get_ops(substream, cpu_dai);
-	struct hdac_stream *hstream = &hext_stream->hstream;
-	struct hdac_bus *bus = hstream->bus;
 	struct sof_intel_hda_stream *hda_stream;
 	struct hdac_ext_link *hlink;
 	int stream_tag;
 
-	hlink = snd_hdac_ext_bus_get_hlink_by_name(bus, codec_dai->component->name);
+	hlink = ops->get_hlink(sdev, cpu_dai, substream);
 	if (!hlink)
 		return -EINVAL;
 
@@ -129,17 +126,13 @@ static int hda_link_dma_hw_params(struct snd_pcm_substream *substream,
 				  struct snd_pcm_hw_params *params, struct snd_soc_dai *cpu_dai)
 {
 	const struct hda_dai_widget_dma_ops *ops = hda_dai_get_ops(substream, cpu_dai);
-	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
-	struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(rtd, 0);
 	struct hdac_ext_stream *hext_stream;
 	struct hdac_stream *hstream;
 	struct hdac_ext_link *hlink;
 	struct snd_sof_dev *sdev;
-	struct hdac_bus *bus;
 	int stream_tag;
 
 	sdev = snd_soc_component_get_drvdata(cpu_dai->component);
-	bus = sof_to_bus(sdev);
 
 	hext_stream = ops->get_hext_stream(sdev, cpu_dai, substream);
 
@@ -153,7 +146,7 @@ static int hda_link_dma_hw_params(struct snd_pcm_substream *substream,
 
 	hstream = &hext_stream->hstream;
 	stream_tag = hstream->stream_tag;
-	hlink = snd_hdac_ext_bus_get_hlink_by_name(bus, codec_dai->component->name);
+	hlink = ops->get_hlink(sdev, cpu_dai, substream);
 	if (!hlink)
 		return -EINVAL;
 
@@ -191,8 +184,6 @@ static int hda_dai_hw_free(struct snd_pcm_substream *substream, struct snd_soc_d
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(cpu_dai->component);
 	const struct hda_dai_widget_dma_ops *ops = hda_dai_get_ops(substream, cpu_dai);
-	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
-	struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(rtd, 0);
 	struct hdac_ext_stream *hext_stream;
 
 	if (!ops) {
@@ -204,7 +195,7 @@ static int hda_dai_hw_free(struct snd_pcm_substream *substream, struct snd_soc_d
 	if (!hext_stream)
 		return 0;
 
-	return hda_link_dma_cleanup(substream, hext_stream, cpu_dai, codec_dai);
+	return hda_link_dma_cleanup(substream, hext_stream, cpu_dai);
 }
 
 static int hda_dai_hw_params(struct snd_pcm_substream *substream,
@@ -277,8 +268,6 @@ static int hda_dai_trigger(struct snd_pcm_substream *substream, int cmd, struct 
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(dai->component);
 	const struct hda_dai_widget_dma_ops *ops = hda_dai_get_ops(substream, dai);
 	struct hdac_ext_stream *hext_stream;
-	struct snd_soc_pcm_runtime *rtd;
-	struct snd_soc_dai *codec_dai;
 	int ret;
 
 	dev_dbg(dai->dev, "cmd=%d dai %s direction %d\n", cmd,
@@ -287,9 +276,6 @@ static int hda_dai_trigger(struct snd_pcm_substream *substream, int cmd, struct 
 	hext_stream = ops->get_hext_stream(sdev, dai, substream);
 	if (!hext_stream)
 		return -EINVAL;
-
-	rtd = asoc_substream_to_rtd(substream);
-	codec_dai = asoc_rtd_to_codec(rtd, 0);
 
 	if (ops->pre_trigger) {
 		ret = ops->pre_trigger(sdev, dai, substream, cmd);
@@ -312,7 +298,7 @@ static int hda_dai_trigger(struct snd_pcm_substream *substream, int cmd, struct 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_STOP:
-		ret = hda_link_dma_cleanup(substream, hext_stream, dai, codec_dai);
+		ret = hda_link_dma_cleanup(substream, hext_stream, dai);
 		if (ret < 0) {
 			dev_err(sdev->dev, "%s: failed to clean up link DMA\n", __func__);
 			return ret;
@@ -354,14 +340,12 @@ static int hda_dai_suspend(struct hdac_bus *bus)
 			const struct hda_dai_widget_dma_ops *ops;
 			struct snd_sof_widget *swidget;
 			struct snd_soc_dapm_widget *w;
-			struct snd_soc_dai *codec_dai;
 			struct snd_soc_dai *cpu_dai;
 			struct snd_sof_dev *sdev;
 			struct snd_sof_dai *sdai;
 
 			rtd = asoc_substream_to_rtd(hext_stream->link_substream);
 			cpu_dai = asoc_rtd_to_cpu(rtd, 0);
-			codec_dai = asoc_rtd_to_codec(rtd, 0);
 			w = snd_soc_dai_get_widget(cpu_dai, hdac_stream(hext_stream)->direction);
 			swidget = w->dobj.private;
 			sdev = snd_soc_component_get_drvdata(swidget->scomp);
@@ -370,7 +354,7 @@ static int hda_dai_suspend(struct hdac_bus *bus)
 
 			ret = hda_link_dma_cleanup(hext_stream->link_substream,
 						   hext_stream,
-						   cpu_dai, codec_dai);
+						   cpu_dai);
 			if (ret < 0)
 				return ret;
 
