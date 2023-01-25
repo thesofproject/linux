@@ -143,6 +143,10 @@ static int hda_link_dma_hw_params(struct snd_pcm_substream *substream,
 	sdev = snd_soc_component_get_drvdata(cpu_dai->component);
 	bus = sof_to_bus(sdev);
 
+	hlink = snd_hdac_ext_bus_get_hlink_by_name(bus, codec_dai->component->name);
+	if (!hlink)
+		return -EINVAL;
+
 	hext_stream = ops->get_hext_stream(sdev, cpu_dai, substream);
 
 	if (!hext_stream) {
@@ -155,9 +159,6 @@ static int hda_link_dma_hw_params(struct snd_pcm_substream *substream,
 
 	hstream = &hext_stream->hstream;
 	stream_tag = hstream->stream_tag;
-	hlink = snd_hdac_ext_bus_get_hlink_by_name(bus, codec_dai->component->name);
-	if (!hlink)
-		return -EINVAL;
 
 	if (hext_stream->hstream.direction == SNDRV_PCM_STREAM_PLAYBACK)
 		snd_hdac_ext_bus_link_set_stream_id(hlink, stream_tag);
