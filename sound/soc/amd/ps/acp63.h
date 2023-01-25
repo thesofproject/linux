@@ -88,6 +88,7 @@ struct pdm_stream_instance {
 struct pdm_dev_data {
 	u32 pdm_irq;
 	void __iomem *acp63_base;
+	struct mutex *acp_lock;
 	struct snd_pcm_substream *capture_stream;
 };
 
@@ -104,8 +105,8 @@ static inline void acp63_writel(u32 val, void __iomem *base_addr)
 struct acp63_dev_data {
 	void __iomem *acp63_base;
 	struct resource *res;
-	bool acp63_audio_mode;
 	struct platform_device *pdev[ACP63_DEVS];
+	struct mutex acp_lock; /* protect shared registers */
 	u16 pdev_mask;
 	u16 pdev_count;
 	u16 pdm_dev_index;
