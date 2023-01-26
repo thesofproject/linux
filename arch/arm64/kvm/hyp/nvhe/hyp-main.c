@@ -1406,6 +1406,7 @@ void handle_trap(struct kvm_cpu_context *host_ctxt)
 		break;
 	case ESR_ELx_EC_FP_ASIMD:
 	case ESR_ELx_EC_SVE:
+	case ESR_ELx_EC_SME:
 		/* TODO: This should never trigger. Future patches will clean it up.*/
 		BUG();
 		break;
