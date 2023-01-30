@@ -590,37 +590,50 @@ static void __host_update_page_state(phys_addr_t addr, u64 size, enum pkvm_page_
 		set_host_state(page, state);
 }
 
-#define KVM_MAX_OWNER_ID		3
+#define KVM_MAX_OWNER_ID		PKVM_ID_MAX
 
 static kvm_pte_t kvm_init_invalid_leaf_owner(u8 owner_id)
 {
 	return FIELD_PREP(KVM_INVALID_PTE_OWNER_MASK, owner_id);
 }
 
-int host_stage2_set_owner_locked(phys_addr_t addr, u64 size, u8 owner_id)
+static int __host_stage2_set_owner_locked(phys_addr_t addr, u64 size, u8 owner_id, bool is_memory,
+					  enum pkvm_page_state nopage_state)
 {
 	kvm_pte_t annotation;
+	enum kvm_pgtable_prot prot;
 	int ret;
 
 	if (owner_id > KVM_MAX_OWNER_ID)
 		return -EINVAL;
 
-	if (!range_is_memory(addr, addr + size))
-		return -EPERM;
+	if (owner_id == PKVM_ID_HOST) {
+		prot = default_host_prot(range_is_memory(addr, addr + size));
+		ret = host_stage2_idmap_locked(addr, size, prot);
+	} else {
+		annotation = kvm_init_invalid_leaf_owner(owner_id);
+		ret = host_stage2_try(kvm_pgtable_stage2_annotate,
+				&host_mmu.pgt,
+				addr, size, &host_s2_pool, annotation);
+	}
 
-	annotation = kvm_init_invalid_leaf_owner(owner_id);
-	ret = host_stage2_try(kvm_pgtable_stage2_annotate, &host_mmu.pgt,
-			      addr, size, &host_s2_pool, annotation);
 	if (ret)
 		return ret;
+
+	if (!is_memory)
+		return 0;
 
 	/* Don't forget to update the vmemmap tracking for the host */
 	if (owner_id == PKVM_ID_HOST)
 		__host_update_page_state(addr, size, PKVM_PAGE_OWNED);
 	else
-		__host_update_page_state(addr, size, PKVM_NOPAGE);
+		__host_update_page_state(addr, size, PKVM_NOPAGE | nopage_state);
 
 	return 0;
+}
+int host_stage2_set_owner_locked(phys_addr_t addr, u64 size, u8 owner_id)
+{
+	return __host_stage2_set_owner_locked(addr, size, owner_id, addr_is_memory(addr), 0);
 }
 
 static bool host_stage2_force_pte_cb(u64 addr, u64 end, enum kvm_pgtable_prot prot)
@@ -1036,6 +1049,87 @@ unlock:
 	hyp_unlock_component();
 	host_unlock_component();
 
+	return ret;
+}
+
+#define MODULE_PROT_ALLOWLIST (KVM_PGTABLE_PROT_RWX |		\
+			       KVM_PGTABLE_PROT_DEVICE |	\
+			       KVM_PGTABLE_PROT_NORMAL_NC)
+
+int module_change_host_page_prot(u64 pfn, enum kvm_pgtable_prot prot, u64 nr_pages)
+{
+	u64 i, end, addr = hyp_pfn_to_phys(pfn);
+	struct hyp_page *page = NULL;
+	struct kvm_mem_range range;
+	struct memblock_region *reg;
+	int ret;
+
+	if ((prot & MODULE_PROT_ALLOWLIST) != prot)
+		return -EINVAL;
+
+	if (check_shl_overflow(nr_pages, PAGE_SHIFT, &end) ||
+			check_add_overflow(addr, end, &end))
+		return -EINVAL;
+
+	reg = find_mem_range(addr, &range);
+	if (end > range.end) {
+		/* Specified range not in a single mmio or memory block. */
+		return -EPERM;
+	}
+
+	host_lock_component();
+	/*
+	 * There is no hyp_vmemmap covering MMIO regions, which makes tracking
+	 * of module-owned MMIO regions hard, so we trust the modules not to
+	 * mess things up.
+	 */
+	if (!reg)
+		goto update;
+
+	/* Range is memory: we can track module ownership. */
+	page = hyp_phys_to_page(addr);
+
+	/*
+	 * Modules can only modify pages they already own, and pristine host
+	 * pages. The entire range must be consistently one or the other.
+	 */
+	if (get_host_state(page) & PKVM_MODULE_OWNED_PAGE) {
+		/* The entire range must be module-owned. */
+		ret = -EPERM;
+		for (i = 1; i < nr_pages; i++) {
+			if (!(get_host_state(&page[i]) & PKVM_MODULE_OWNED_PAGE))
+				goto unlock;
+		}
+	} else {
+		/* The entire range must be pristine. */
+		ret = ___host_check_page_state_range(
+				addr, nr_pages << PAGE_SHIFT, PKVM_PAGE_OWNED, reg, true);
+		if (ret)
+			goto unlock;
+	}
+
+update:
+	if (!prot) {
+		ret = __host_stage2_set_owner_locked(addr, nr_pages << PAGE_SHIFT,
+				PKVM_ID_PROTECTED, !!reg,
+				PKVM_MODULE_OWNED_PAGE);
+	} else {
+		ret = host_stage2_idmap_locked(
+				addr, nr_pages << PAGE_SHIFT, prot);
+	}
+
+	if (WARN_ON(ret) || !page || !prot)
+		goto unlock;
+
+	for (i = 0; i < nr_pages; i++) {
+		if (prot != KVM_PGTABLE_PROT_RWX)
+			set_host_state(&page[i], PKVM_MODULE_OWNED_PAGE);
+		else
+			set_host_state(&page[i], PKVM_PAGE_OWNED);
+	}
+
+unlock:
+	host_unlock_component();
 	return ret;
 }
 
