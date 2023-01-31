@@ -271,7 +271,7 @@ struct sof_ipc4_control_data {
 
 	union {
 		struct sof_ipc4_ctrl_value_chan chanv[0];
-		struct sof_ipc4_abi_hdr data[0];
+		struct sof_abi_hdr data[0];
 	};
 };
 
@@ -349,12 +349,6 @@ struct sof_ipc4_process {
 	void *ipc_config_data;
 	uint32_t ipc_config_size;
 	struct sof_ipc4_msg msg;
-	/*
-	 * payload_with_output_fmt is used to describe whether there is output format
-	 * (struct sof_ipc4_audio_format output_format) in the module init instance
-	 * ipc message payload blob.
-	 */
-	bool payload_with_output_fmt;
 };
 
 #endif

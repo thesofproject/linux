@@ -123,11 +123,6 @@ static const struct sof_topology_token src_tokens[] = {
 		offsetof(struct sof_ipc4_src, sink_rate)},
 };
 
-static const struct sof_topology_token process_tokens[] = {
-	{SOF_TKN_PROCESS_PAYLOAD_WITH_OUTPUT_FMT, SND_SOC_TPLG_TUPLE_TYPE_BOOL, get_token_u16,
-		offsetof(struct sof_ipc4_process, payload_with_output_fmt)},
-};
-
 static const struct sof_token_info ipc4_token_list[SOF_TOKEN_COUNT] = {
 	[SOF_DAI_TOKENS] = {"DAI tokens", dai_tokens, ARRAY_SIZE(dai_tokens)},
 	[SOF_PIPELINE_TOKENS] = {"Pipeline tokens", pipeline_tokens, ARRAY_SIZE(pipeline_tokens)},
@@ -152,8 +147,6 @@ static const struct sof_token_info ipc4_token_list[SOF_TOKEN_COUNT] = {
 		ipc4_audio_fmt_num_tokens, ARRAY_SIZE(ipc4_audio_fmt_num_tokens)},
 	[SOF_GAIN_TOKENS] = {"Gain tokens", gain_tokens, ARRAY_SIZE(gain_tokens)},
 	[SOF_SRC_TOKENS] = {"SRC tokens", src_tokens, ARRAY_SIZE(src_tokens)},
-	[SOF_PROCESS_TOKENS] = {"IPC4 process module tokens", process_tokens,
-		ARRAY_SIZE(process_tokens)},
 };
 
 static void sof_ipc4_dbg_audio_format(struct device *dev,
@@ -864,10 +857,7 @@ static void sof_ipc4_widget_free_comp_mixer(struct snd_sof_widget *swidget)
 static int sof_ipc4_widget_setup_comp_process(struct snd_sof_widget *swidget)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
-	struct sof_ipc4_control_data *control_data;
 	struct sof_ipc4_process *process;
-	struct snd_sof_control *scontrol;
 	int cfg_size;
 	void *cfg;
 	int ret;
@@ -882,28 +872,7 @@ static int sof_ipc4_widget_setup_comp_process(struct snd_sof_widget *swidget)
 	if (ret)
 		goto err;
 
-	ret = sof_update_ipc_object(scomp, process, SOF_PROCESS_TOKENS, swidget->tuples,
-				    swidget->num_tuples, sizeof(*process), 1);
-	if (ret) {
-		dev_err(scomp->dev, "parse process token failed\n");
-		goto err;
-	}
-
 	cfg_size = sizeof(struct sof_ipc4_base_module_cfg);
-	if (process->payload_with_output_fmt)
-		cfg_size += sizeof(struct sof_ipc4_audio_format);
-
-	/* allocate memory for module config */
-	list_for_each_entry(scontrol, &sdev->kcontrol_list, list) {
-		if (scontrol->comp_id == swidget->comp_id) {
-			control_data = scontrol->ipc_control_data;
-
-			if (control_data->data->blob_type == SOF_IPC4_MOD_INIT_INSTANCE) {
-				cfg_size += control_data->data->size;
-				break;
-			}
-		}
-	}
 
 	cfg = kzalloc(cfg_size, GFP_KERNEL);
 	if (!cfg) {
@@ -1622,32 +1591,16 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 {
 	struct snd_soc_component *scomp = swidget->scomp;
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
-	struct snd_soc_dapm_widget *widget = swidget->widget;
 	struct sof_ipc4_process *process = swidget->private;
 	struct sof_ipc4_available_audio_format *available_fmt = &process->available_fmt;
-	struct sof_ipc4_control_data *control_data;
-	struct snd_sof_control *scontrol = NULL;
 	void *cfg = process->ipc_config_data;
-	const struct snd_kcontrol_new *kc;
-	struct soc_bytes_ext *sbe;
-	void *data;
-	int ret, i;
+	int ret;
 
 	available_fmt->ref_audio_fmt = &available_fmt->base_config->audio_fmt;
 
-	/*
-	 * Output format is optional for process modules.
-	 * Process modules setup the output format based on audio format tokens in topology.
-	 */
-	if (process->payload_with_output_fmt)
-		ret = sof_ipc4_init_audio_fmt(sdev, swidget, &process->base_config,
-					      &process->output_format, pipeline_params,
-					      available_fmt,
-					      sizeof(struct sof_ipc4_base_module_cfg));
-	else
-		ret = sof_ipc4_init_audio_fmt(sdev, swidget, &process->base_config,
-					      NULL, pipeline_params, available_fmt,
-					      sizeof(struct sof_ipc4_base_module_cfg));
+	ret = sof_ipc4_init_audio_fmt(sdev, swidget, &process->base_config,
+				      NULL, pipeline_params, available_fmt,
+				      sizeof(struct sof_ipc4_base_module_cfg));
 	if (ret < 0)
 		return ret;
 
@@ -1660,31 +1613,6 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 	 */
 	memcpy(cfg, &process->base_config, sizeof(struct sof_ipc4_base_module_cfg));
 	cfg += sizeof(struct sof_ipc4_base_module_cfg);
-
-	/* copy output format to configure data payload */
-	if (process->payload_with_output_fmt) {
-		memcpy(cfg, &process->output_format, sizeof(struct sof_ipc4_audio_format));
-		cfg += sizeof(struct sof_ipc4_audio_format);
-	}
-
-	for (i = 0; i < widget->num_kcontrols; i++) {
-		kc = &widget->kcontrol_news[i];
-
-		/* payload uses byte kcontrol */
-		if (widget->dobj.widget.kcontrol_type[i] != SND_SOC_TPLG_TYPE_BYTES)
-			continue;
-		sbe = (struct soc_bytes_ext *)kc->private_value;
-		scontrol = sbe->dobj.private;
-		if (!scontrol)
-			continue;
-		control_data = scontrol->ipc_control_data;
-		if (control_data->data->blob_type != SOF_IPC4_MOD_INIT_INSTANCE)
-			continue;
-
-		data = (void *)control_data->data->data;
-		memcpy(cfg, data, control_data->data->size);
-		break;
-	}
 
 	return 0;
 }
@@ -1726,7 +1654,7 @@ static int sof_ipc4_control_load_bytes(struct snd_sof_dev *sdev, struct snd_sof_
 	struct sof_ipc4_control_data *control_data;
 	int ret;
 
-	if (scontrol->max_size < (sizeof(*control_data) + sizeof(struct sof_ipc4_abi_hdr))) {
+	if (scontrol->max_size < (sizeof(*control_data) + sizeof(struct sof_abi_hdr))) {
 		dev_err(sdev->dev, "insufficient size for a bytes control %s: %zu.\n",
 			scontrol->name, scontrol->max_size);
 		return -EINVAL;
@@ -1761,11 +1689,11 @@ static int sof_ipc4_control_load_bytes(struct snd_sof_dev *sdev, struct snd_sof_
 
 		/* TODO: check the ABI version */
 
-		if (control_data->data->size + sizeof(struct sof_ipc4_abi_hdr) !=
+		if (control_data->data->size + sizeof(struct sof_abi_hdr) !=
 		    scontrol->priv_size) {
 			dev_err(sdev->dev, "Control %s conflict in bytes %zu vs. priv size %zu.\n",
 				scontrol->name,
-				control_data->data->size + sizeof(struct sof_ipc4_abi_hdr),
+				control_data->data->size + sizeof(struct sof_abi_hdr),
 				scontrol->priv_size);
 			ret = -EINVAL;
 			goto err;
@@ -2566,7 +2494,6 @@ static enum sof_tokens process_token_list[] = {
 	SOF_OUT_AUDIO_FORMAT_TOKENS,
 	SOF_AUDIO_FORMAT_BUFFER_SIZE_TOKENS,
 	SOF_COMP_EXT_TOKENS,
-	SOF_PROCESS_TOKENS,
 };
 
 static const struct sof_ipc_tplg_widget_ops tplg_ipc4_widget_ops[SND_SOC_DAPM_TYPE_COUNT] = {
