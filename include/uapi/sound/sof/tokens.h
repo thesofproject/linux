@@ -131,7 +131,6 @@
 
 /* Processing Components */
 #define SOF_TKN_PROCESS_TYPE                    900
-#define SOF_TKN_PROCESS_PAYLOAD_WITH_OUTPUT_FMT 901
 
 /* for backward compatibility */
 #define SOF_TKN_EFFECT_TYPE	SOF_TKN_PROCESS_TYPE
