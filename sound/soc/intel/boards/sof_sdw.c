@@ -869,16 +869,16 @@ static int create_codec_dai_name(struct device *dev,
 		comp_index = i + offset;
 		if (is_unique_device(link, sdw_version, mfg_id, part_id,
 				     class_id, i)) {
-			codec_str = "sdw:%01x:%04x:%04x:%02x";
+			codec_str = "sdw:%01x:%01x:%04x:%04x:%02x";
 			codec[comp_index].name =
 				devm_kasprintf(dev, GFP_KERNEL, codec_str,
-					       link_id, mfg_id, part_id,
+					       link_id, link_id, mfg_id, part_id,
 					       class_id);
 		} else {
-			codec_str = "sdw:%01x:%04x:%04x:%02x:%01x";
+			codec_str = "sdw:%01x:%01x:%04x:%04x:%02x:%01x";
 			codec[comp_index].name =
 				devm_kasprintf(dev, GFP_KERNEL, codec_str,
-					       link_id, mfg_id, part_id,
+					       link_id, link_id, mfg_id, part_id,
 					       class_id, unique_id);
 		}
 
