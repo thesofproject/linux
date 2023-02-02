@@ -715,10 +715,10 @@ static snd_pcm_sframes_t sof_ipc4_pcm_delay(struct snd_soc_component *component,
 	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
 	struct sof_ipc4_timestamp_info *time_info;
 	struct sof_ipc4_llp_reading_slot llp;
+	snd_pcm_uframes_t head_ptr, tail_ptr;
 	struct snd_sof_pcm_stream *stream;
 	struct snd_sof_pcm *spcm;
-	snd_pcm_uframes_t host_ptr;
-	u64 link_ptr, tmp_ptr;
+	u64 tmp_ptr;
 	int ret;
 
 	spcm = snd_sof_find_spcm_dai(component, rtd);
@@ -763,18 +763,20 @@ static snd_pcm_sframes_t sof_ipc4_pcm_delay(struct snd_soc_component *component,
 	 */
 	tmp_ptr -= time_info->stream_start_offset;
 
-	/*
-	 * Handle 32-bit counter wrap around, which would happen
-	 * for a 48khz 2ch stream in 24.855 hours
-	 */
-	link_ptr = tmp_ptr & UINT_MAX;
+	/* Calculate the delay taking into account that both pointer can wrap */
+	div64_u64_rem(tmp_ptr, substream->runtime->boundary, &tmp_ptr);
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+		head_ptr = substream->runtime->status->hw_ptr;
+		tail_ptr = tmp_ptr;
+	} else {
+		head_ptr = tmp_ptr;
+		tail_ptr = substream->runtime->status->hw_ptr;
+	}
 
-	host_ptr = substream->runtime->status->hw_ptr;
+	if (head_ptr < tail_ptr)
+		return substream->runtime->boundary - tail_ptr + head_ptr;
 
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		return host_ptr - link_ptr;
-
-	return link_ptr - host_ptr;
+	return head_ptr - tail_ptr;
 }
 
 const struct sof_ipc_pcm_ops ipc4_pcm_ops = {
