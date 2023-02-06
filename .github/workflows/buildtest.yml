@@ -14,10 +14,10 @@ jobs:
     name: "Sparse check"
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
 
       - name: Fetch kconfig
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           repository: 'thesofproject/kconfig'
           path: 'kconfig'
@@ -49,10 +49,10 @@ jobs:
     name: "GCC build X86_64 with W=1"
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
 
       - name: Fetch kconfig
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           repository: 'thesofproject/kconfig'
           path: 'kconfig'
@@ -74,10 +74,10 @@ jobs:
     name: "GCC build X86_64"
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
 
       - name: Fetch kconfig
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           repository: 'thesofproject/kconfig'
           path: 'kconfig'
@@ -99,10 +99,10 @@ jobs:
     name: "GCC build i386"
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
 
       - name: Fetch kconfig
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           repository: 'thesofproject/kconfig'
           path: 'kconfig'
@@ -120,10 +120,10 @@ jobs:
     name: "GCC build arm64"
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
 
       - name: Fetch kconfig
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           repository: 'thesofproject/kconfig'
           path: 'kconfig'
@@ -146,7 +146,7 @@ jobs:
     name: "GCC build arm64 allmodconfig"
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
 
       - name: Install arm64 cross compiler
         run: |
@@ -164,10 +164,10 @@ jobs:
     name: "Clang build x86_64"
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
 
       - name: Fetch kconfig
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           repository: 'thesofproject/kconfig'
           path: 'kconfig'
