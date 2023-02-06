@@ -600,15 +600,15 @@ sof_walk_widgets_in_order(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
 			continue;
 
 		switch (op) {
-		case SOF_WIDGET_SETUP:
+		case SOF_IPC_TPLG_SETUP:
 			ret = sof_set_up_widgets_in_path(sdev, widget, dir, spcm);
 			str = "set up";
 			break;
-		case SOF_WIDGET_FREE:
+		case SOF_IPC_TPLG_FREE:
 			ret = sof_free_widgets_in_path(sdev, widget, dir, spcm);
 			str = "free";
 			break;
-		case SOF_WIDGET_PREPARE:
+		case SOF_IPC_TPLG_WIDGET_PREPARE:
 		{
 			struct snd_pcm_hw_params pipeline_params;
 
@@ -625,7 +625,7 @@ sof_walk_widgets_in_order(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
 							  &pipeline_params, dir, list);
 			break;
 		}
-		case SOF_WIDGET_UNPREPARE:
+		case SOF_IPC_TPLG_WIDGET_UNPREPARE:
 			sof_unprepare_widgets_in_path(sdev, widget, list);
 			break;
 		default:
@@ -660,16 +660,16 @@ int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
 	 * instance ID and pick the widget configuration based on the runtime PCM params.
 	 */
 	ret = sof_walk_widgets_in_order(sdev, spcm, fe_params, platform_params,
-					dir, SOF_WIDGET_PREPARE);
+					dir, SOF_IPC_TPLG_WIDGET_PREPARE);
 	if (ret < 0)
 		return ret;
 
 	/* Set up is used to send the IPC to the DSP to create the widget */
 	ret = sof_walk_widgets_in_order(sdev, spcm, fe_params, platform_params,
-					dir, SOF_WIDGET_SETUP);
+					dir, SOF_IPC_TPLG_SETUP);
 	if (ret < 0) {
 		ret = sof_walk_widgets_in_order(sdev, spcm, fe_params, platform_params,
-						dir, SOF_WIDGET_UNPREPARE);
+						dir, SOF_IPC_TPLG_WIDGET_UNPREPARE);
 		return ret;
 	}
 
@@ -722,8 +722,8 @@ int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
 
 widget_free:
 	sof_walk_widgets_in_order(sdev, spcm, fe_params, platform_params, dir,
-				  SOF_WIDGET_FREE);
-	sof_walk_widgets_in_order(sdev, spcm, NULL, NULL, dir, SOF_WIDGET_UNPREPARE);
+				  SOF_IPC_TPLG_FREE);
+	sof_walk_widgets_in_order(sdev, spcm, NULL, NULL, dir, SOF_IPC_TPLG_WIDGET_UNPREPARE);
 
 	return ret;
 }
@@ -739,10 +739,10 @@ int sof_widget_list_free(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, int
 		return 0;
 
 	/* send IPC to free widget in the DSP */
-	ret = sof_walk_widgets_in_order(sdev, spcm, NULL, NULL, dir, SOF_WIDGET_FREE);
+	ret = sof_walk_widgets_in_order(sdev, spcm, NULL, NULL, dir, SOF_IPC_TPLG_FREE);
 
 	/* unprepare the widget */
-	sof_walk_widgets_in_order(sdev, spcm, NULL, NULL, dir, SOF_WIDGET_UNPREPARE);
+	sof_walk_widgets_in_order(sdev, spcm, NULL, NULL, dir, SOF_IPC_TPLG_WIDGET_UNPREPARE);
 
 	snd_soc_dapm_dai_free_widgets(&list);
 	spcm->stream[dir].list = NULL;

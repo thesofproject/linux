@@ -47,11 +47,17 @@
 #define SOF_DAI_CLK_INTEL_SSP_MCLK	0
 #define SOF_DAI_CLK_INTEL_SSP_BCLK	1
 
+/* sof_widget_op definitions cover two types of abstractions:
+ * 1) sof_ipc_tplg_widget_ops
+ * 2) sof_ipc_tplg_ops
+ */
 enum sof_widget_op {
-	SOF_WIDGET_PREPARE,
-	SOF_WIDGET_SETUP,
-	SOF_WIDGET_FREE,
-	SOF_WIDGET_UNPREPARE,
+	SOF_IPC_TPLG_WIDGET_SETUP, /* added for consistency, handled in topology loading only */
+	SOF_IPC_TPLG_WIDGET_PREPARE,
+	SOF_IPC_TPLG_SETUP,
+	SOF_IPC_TPLG_FREE,
+	SOF_IPC_TPLG_WIDGET_UNPREPARE,
+	SOF_IPC_TPLG_WIDGET_FREE, /* added for consistency, handled in topology unloading only */
 };
 
 /*
