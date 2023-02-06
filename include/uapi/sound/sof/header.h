@@ -20,7 +20,8 @@
  *	  for IPC3: Component specific type
  *	  for IPC4: parameter ID (param_id) of the data
  * @size: The size in bytes of the data, excluding this struct
- * @abi: SOF ABI version
+ * @abi: SOF ABI version. The version is valid in scope of the 'magic', IPC3 and
+ *	 IPC4 ABI version numbers have no relationship.
  * @reserved: Reserved for future use
  * @data: Component data - opaque to core
  *
