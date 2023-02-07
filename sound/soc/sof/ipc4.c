@@ -13,6 +13,7 @@
 #include <sound/sof/ipc4/header.h>
 #include "sof-priv.h"
 #include "sof-audio.h"
+#include "ipc4-fw-reg.h"
 #include "ipc4-priv.h"
 #include "ops.h"
 
@@ -542,6 +543,8 @@ static int ipc4_fw_ready(struct snd_sof_dev *sdev, struct sof_ipc4_msg *ipc4_msg
 	outbox_offset = snd_sof_dsp_get_window_offset(sdev, SOF_IPC4_OUTBOX_WINDOW_IDX);
 	outbox_size = SOF_IPC4_MSG_MAX_SIZE;
 
+	sdev->fw_info_box.offset = snd_sof_dsp_get_window_offset(sdev, SOF_IPC4_INBOX_WINDOW_IDX);
+	sdev->fw_info_box.size = sizeof(struct sof_ipc4_fw_registers);
 	sdev->dsp_box.offset = inbox_offset;
 	sdev->dsp_box.size = inbox_size;
 	sdev->host_box.offset = outbox_offset;
@@ -661,6 +664,8 @@ static const struct sof_ipc_pm_ops ipc4_pm_ops = {
 static int sof_ipc4_init(struct snd_sof_dev *sdev)
 {
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
+
+	mutex_init(&ipc4_data->pipeline_state_mutex);
 
 	xa_init_flags(&ipc4_data->fw_lib_xa, XA_FLAGS_ALLOC);
 
