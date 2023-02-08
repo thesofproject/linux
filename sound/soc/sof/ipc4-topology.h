@@ -140,7 +140,7 @@ struct sof_ipc4_pipeline {
  * @pipeline_ids: Flexible array of IDs of the pipelines to be triggered
  */
 struct ipc4_pipeline_set_state_data {
-	uint32_t count;
+	u32 count;
 	DECLARE_FLEX_ARRAY(u32, pipeline_ids);
 } __packed;
 

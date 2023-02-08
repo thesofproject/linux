@@ -295,7 +295,7 @@ struct sof_token_info {
  * @pipelines: array of pipelines
  */
 struct snd_sof_pcm_stream_pipeline_list {
-	uint32_t count;
+	u32 count;
 	struct snd_sof_pipeline **pipelines;
 };
 
