@@ -13,7 +13,6 @@ int intel_start_bus(struct sdw_intel *sdw)
 {
 	struct device *dev = sdw->cdns.dev;
 	struct sdw_cdns *cdns = &sdw->cdns;
-	struct sdw_bus *bus = &cdns->bus;
 	int ret;
 
 	ret = sdw_cdns_enable_interrupt(cdns, true);
@@ -21,13 +20,6 @@ int intel_start_bus(struct sdw_intel *sdw)
 		dev_err(dev, "%s: cannot enable interrupts: %d\n", __func__, ret);
 		return ret;
 	}
-
-	/*
-	 * follow recommended programming flows to avoid timeouts when
-	 * gsync is enabled
-	 */
-	if (bus->multi_link)
-		sdw_intel_sync_arm(sdw);
 
 	ret = sdw_cdns_init(cdns);
 	if (ret < 0) {
@@ -41,13 +33,6 @@ int intel_start_bus(struct sdw_intel *sdw)
 		goto err_interrupt;
 	}
 
-	if (bus->multi_link) {
-		ret = sdw_intel_sync_go(sdw);
-		if (ret < 0) {
-			dev_err(dev, "%s: sync go failed: %d\n", __func__, ret);
-			goto err_interrupt;
-		}
-	}
 	sdw_cdns_check_self_clearing_bits(cdns, __func__,
 					  true, INTEL_MASTER_RESET_ITERATIONS);
 
@@ -93,13 +78,6 @@ int intel_start_bus_after_reset(struct sdw_intel *sdw)
 		}
 
 		/*
-		 * follow recommended programming flows to avoid
-		 * timeouts when gsync is enabled
-		 */
-		if (bus->multi_link)
-			sdw_intel_sync_arm(sdw);
-
-		/*
 		 * Re-initialize the IP since it was powered-off
 		 */
 		sdw_cdns_init(&sdw->cdns);
@@ -123,14 +101,6 @@ int intel_start_bus_after_reset(struct sdw_intel *sdw)
 		if (ret < 0) {
 			dev_err(dev, "unable to exit bus reset sequence during resume\n");
 			goto err_interrupt;
-		}
-
-		if (bus->multi_link) {
-			ret = sdw_intel_sync_go(sdw);
-			if (ret < 0) {
-				dev_err(sdw->cdns.dev, "sync go failed during resume\n");
-				goto err_interrupt;
-			}
 		}
 	}
 	sdw_cdns_check_self_clearing_bits(cdns, __func__, true, INTEL_MASTER_RESET_ITERATIONS);
