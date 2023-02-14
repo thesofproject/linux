@@ -1737,8 +1737,11 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 	if (ret < 0)
 		return ret;
 
-	memcpy(&process->output_format, &available_fmt->output_pin_fmts[ret].audio_fmt,
-	       sizeof(struct sof_ipc4_audio_format));
+	/* copy Pin 0 output format */
+	if (available_fmt->num_output_formats && ret < available_fmt->num_output_formats &&
+	    !available_fmt->output_pin_fmts[ret].pin_index)
+		memcpy(&process->output_format, &available_fmt->output_pin_fmts[ret].audio_fmt,
+		       sizeof(struct sof_ipc4_audio_format));
 
 	/* update pipeline memory usage */
 	sof_ipc4_update_pipeline_mem_usage(sdev, swidget, &process->base_config);
