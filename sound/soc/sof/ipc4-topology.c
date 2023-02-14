@@ -1053,15 +1053,19 @@ static int sof_ipc4_init_audio_fmt(struct snd_sof_dev *sdev,
 	}
 
 	/* copy input format */
-	memcpy(&base_config->audio_fmt, &available_fmt->input_pin_fmts[i].audio_fmt,
-	       sizeof(struct sof_ipc4_audio_format));
+	if (available_fmt->num_input_formats && i < available_fmt->num_input_formats) {
+		memcpy(&base_config->audio_fmt, &available_fmt->input_pin_fmts[i].audio_fmt,
+		       sizeof(struct sof_ipc4_audio_format));
 
-	/* set base_cfg ibs/obs */
-	base_config->ibs = available_fmt->input_pin_fmts[i].buffer_size;
-	base_config->obs = available_fmt->output_pin_fmts[i].buffer_size;
+		/* set base_cfg ibs/obs */
+		base_config->ibs = available_fmt->input_pin_fmts[i].buffer_size;
 
-	dev_dbg(sdev->dev, "Init input audio formats for %s\n", swidget->widget->name);
-	sof_ipc4_dbg_audio_format(sdev->dev, &available_fmt->input_pin_fmts[i], 1);
+		dev_dbg(sdev->dev, "Init input audio formats for %s\n", swidget->widget->name);
+		sof_ipc4_dbg_audio_format(sdev->dev, &available_fmt->input_pin_fmts[i], 1);
+	}
+
+	if (available_fmt->num_output_formats && i < available_fmt->num_output_formats)
+		base_config->obs = available_fmt->output_pin_fmts[i].buffer_size;
 
 	/* Return the index of the matched format */
 	return i;
