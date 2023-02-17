@@ -399,7 +399,7 @@ static int sdw_enable_disable_ports(struct sdw_master_runtime *m_rt, bool en)
 }
 
 static int sdw_do_port_prep(struct sdw_slave_runtime *s_rt,
-			    struct sdw_prepare_ch prep_ch,
+			    struct sdw_prepare_ch *prep_ch,
 			    enum sdw_port_prep_ops cmd)
 {
 	int ret = 0;
@@ -412,7 +412,7 @@ static int sdw_do_port_prep(struct sdw_slave_runtime *s_rt,
 		struct sdw_driver *drv = drv_to_sdw_driver(dev->driver);
 
 		if (drv->ops && drv->ops->port_prep) {
-			ret = drv->ops->port_prep(slave, &prep_ch, cmd);
+			ret = drv->ops->port_prep(slave, prep_ch, cmd);
 			if (ret < 0)
 				dev_err(dev, "Slave Port Prep cmd %d failed: %d\n",
 					cmd, ret);
@@ -469,7 +469,7 @@ static int sdw_prep_deprep_slave_ports(struct sdw_bus *bus,
 	}
 
 	/* Inform slave about the impending port prepare */
-	sdw_do_port_prep(s_rt, prep_ch, prep ? SDW_OPS_PORT_PRE_PREP : SDW_OPS_PORT_PRE_DEPREP);
+	sdw_do_port_prep(s_rt, &prep_ch, prep ? SDW_OPS_PORT_PRE_PREP : SDW_OPS_PORT_PRE_DEPREP);
 
 	/* Prepare Slave port implementing CP_SM */
 	if (!dpn_prop->simple_ch_prep_sm) {
@@ -501,7 +501,7 @@ static int sdw_prep_deprep_slave_ports(struct sdw_bus *bus,
 	}
 
 	/* Inform slaves about ports prepared */
-	sdw_do_port_prep(s_rt, prep_ch, prep ? SDW_OPS_PORT_POST_PREP : SDW_OPS_PORT_POST_DEPREP);
+	sdw_do_port_prep(s_rt, &prep_ch, prep ? SDW_OPS_PORT_POST_PREP : SDW_OPS_PORT_POST_DEPREP);
 
 	/* Disable interrupt after Port de-prepare */
 	if (!prep && intr)
