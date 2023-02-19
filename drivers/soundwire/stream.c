@@ -412,6 +412,8 @@ static int sdw_do_port_prep(struct sdw_slave_runtime *s_rt,
 		struct sdw_driver *drv = drv_to_sdw_driver(dev->driver);
 
 		if (drv->ops && drv->ops->port_prep) {
+			dev_warn(dev, "[NOWAY] Calling port_prep of %s with cmd: %d\n",
+				 drv->name, cmd);
 			ret = drv->ops->port_prep(slave, &prep_ch, cmd);
 			if (ret < 0)
 				dev_err(dev, "Slave Port Prep cmd %d failed: %d\n",
