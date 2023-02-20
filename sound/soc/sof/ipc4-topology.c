@@ -866,6 +866,8 @@ static int sof_ipc4_widget_setup_comp_process(struct snd_sof_widget *swidget)
 	if (ret)
 		goto free_cfg_data;
 
+	sof_ipc4_widget_update_kcontrol_module_id(swidget);
+
 	return 0;
 free_cfg_data:
 	kfree(process->ipc_config_data);
