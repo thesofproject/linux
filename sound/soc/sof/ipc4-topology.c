@@ -31,6 +31,8 @@ static const struct sof_topology_token ipc4_sched_tokens[] = {
 		offsetof(struct sof_ipc4_pipeline, use_chain_dma)},
 	{SOF_TKN_SCHED_CORE, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
 		offsetof(struct sof_ipc4_pipeline, core_id)},
+	{SOF_TKN_SCHED_PIPELINE_KCPS, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc4_pipeline, kcps)},
 };
 
 static const struct sof_topology_token pipeline_tokens[] = {
@@ -1976,12 +1978,30 @@ static int sof_ipc4_control_setup(struct snd_sof_dev *sdev, struct snd_sof_contr
 	return 0;
 }
 
+static int sof_ipc4_send_kcps(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget,
+			      __s32 delta_kcps)
+{
+	const struct sof_ipc_ops *iops = sdev->ipc->ops;
+	struct sof_ipc4_msg msg = {
+		.primary = SOF_IPC4_MSG_TARGET(SOF_IPC4_MODULE_MSG) |
+			SOF_IPC4_MSG_DIR(SOF_IPC4_MSG_REQUEST) |
+			SOF_IPC4_MOD_ID(SOF_IPC4_MOD_INIT_BASEFW_MOD_ID) |
+			SOF_IPC4_MOD_INSTANCE(SOF_IPC4_MOD_INIT_BASEFW_INSTANCE_ID),
+		.extension = SOF_IPC4_MOD_EXT_MSG_PARAM_ID(SOF_IPC4_FW_PARAM_REGISTER_KCPS),
+		.data_size = sizeof(delta_kcps),
+		.data_ptr = &delta_kcps,
+	};
+
+	return iops->set_get_data(sdev, &msg, msg.data_size, true);
+}
+
 static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
 {
 	struct snd_sof_widget *pipe_widget = swidget->spipe->pipe_widget;
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	struct sof_ipc4_pipeline *pipeline;
 	struct sof_ipc4_msg *msg;
+	__s32 delta_kcps = 0;
 	void *ipc_data = NULL;
 	u32 ipc_size = 0;
 	int ret;
@@ -2008,6 +2028,7 @@ static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 		}
 		msg->primary &= ~SOF_IPC4_GLB_PIPE_INSTANCE_MASK;
 		msg->primary |= SOF_IPC4_GLB_PIPE_INSTANCE_ID(swidget->instance_id);
+		delta_kcps = pipeline->kcps;
 		break;
 	case snd_soc_dapm_aif_in:
 	case snd_soc_dapm_aif_out:
@@ -2127,6 +2148,12 @@ static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 		} else {
 			ida_free(&pipeline_ida, swidget->instance_id);
 		}
+	} else if (delta_kcps) {
+		ret = sof_ipc4_send_kcps(sdev, swidget, delta_kcps);
+		if (ret < 0) {
+			dev_warn(sdev->dev, "failed to increase KCPS: %d, continuing\n", ret);
+			ret = 0;
+		}
 	}
 
 	return ret;
@@ -2160,6 +2187,13 @@ static int sof_ipc4_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget 
 		if (ret < 0)
 			dev_err(sdev->dev, "failed to free pipeline widget %s\n",
 				swidget->widget->name);
+
+		if (pipeline->kcps) {
+			ret = sof_ipc4_send_kcps(sdev, swidget, -pipeline->kcps);
+			if (ret < 0)
+				dev_warn(sdev->dev,
+					 "failed to decrease KCPS: %d, continuing\n", ret);
+		}
 
 		pipeline->mem_usage = 0;
 		pipeline->state = SOF_IPC4_PIPE_UNINITIALIZED;

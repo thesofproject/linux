@@ -389,6 +389,7 @@ enum sof_ipc4_base_fw_params {
 	SOF_IPC4_FW_PARAM_MODULES_INFO_GET,
 	SOF_IPC4_FW_PARAM_LIBRARIES_INFO_GET = 16,
 	SOF_IPC4_FW_PARAM_SYSTEM_TIME = 20,
+	SOF_IPC4_FW_PARAM_REGISTER_KCPS = 22,
 };
 
 enum sof_ipc4_fw_config_params {
