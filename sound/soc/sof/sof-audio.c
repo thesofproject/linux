@@ -759,30 +759,7 @@ int sof_widget_list_free(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, int
  */
 bool snd_sof_dsp_only_d0i3_compatible_stream_active(struct snd_sof_dev *sdev)
 {
-	struct snd_pcm_substream *substream;
-	struct snd_sof_pcm *spcm;
-	bool d0i3_compatible_active = false;
-	int dir;
-
-	list_for_each_entry(spcm, &sdev->pcm_list, list) {
-		for_each_pcm_streams(dir) {
-			substream = spcm->stream[dir].substream;
-			if (!substream || !substream->runtime)
-				continue;
-
-			/*
-			 * substream->runtime being not NULL indicates
-			 * that the stream is open. No need to check the
-			 * stream state.
-			 */
-			if (!spcm->stream[dir].d0i3_compatible)
-				return false;
-
-			d0i3_compatible_active = true;
-		}
-	}
-
-	return d0i3_compatible_active;
+	return true;
 }
 EXPORT_SYMBOL(snd_sof_dsp_only_d0i3_compatible_stream_active);
 
