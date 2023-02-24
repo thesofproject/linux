@@ -471,7 +471,7 @@ struct sof_intel_dsp_bdl {
  * This has been deliberately chosen to be long to avoid race conditions.
  * Could be optimized in future.
  */
-#define SOF_HDA_D0I3_WORK_DELAY_MS	5000
+#define SOF_HDA_D0I3_WORK_DELAY_MS	2500
 
 /* HDA DSP D0 substate */
 enum sof_hda_D0_substate {
