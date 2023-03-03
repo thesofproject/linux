@@ -212,14 +212,12 @@ static int hda_dai_hw_free(struct snd_pcm_substream *substream, struct snd_soc_d
 	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
 	struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(rtd, 0);
 	struct hdac_ext_stream *hext_stream;
-	struct snd_sof_dev *sdev;
+	struct snd_sof_dev *sdev = dai_to_sdev(substream, cpu_dai);
 
 	if (!ops) {
 		dev_err(sdev->dev, "DAI widget ops not set\n");
 		return -EINVAL;
 	}
-
-	sdev = dai_to_sdev(substream, cpu_dai);
 
 	hext_stream = ops->get_hext_stream(sdev, cpu_dai, substream);
 	if (!hext_stream)
@@ -237,15 +235,13 @@ static int hda_dai_hw_params(struct snd_pcm_substream *substream,
 	struct hdac_ext_stream *hext_stream;
 	struct snd_sof_dai_config_data data = { 0 };
 	unsigned int flags = SOF_DAI_CONFIG_FLAGS_HW_PARAMS;
-	struct snd_sof_dev *sdev;
+	struct snd_sof_dev *sdev = widget_to_sdev(w);
 	int ret;
 
 	if (!ops) {
 		dev_err(sdev->dev, "DAI widget ops not set\n");
 		return -EINVAL;
 	}
-
-	sdev = widget_to_sdev(w);
 
 	hext_stream = ops->get_hext_stream(sdev, dai, substream);
 	if (hext_stream && hext_stream->link_prepared)
