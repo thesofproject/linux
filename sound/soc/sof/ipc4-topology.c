@@ -123,6 +123,8 @@ static const struct sof_topology_token gain_tokens[] = {
 		offsetof(struct sof_ipc4_gain_data, curve_duration_l)},
 	{SOF_TKN_GAIN_VAL, SND_SOC_TPLG_TUPLE_TYPE_WORD,
 		get_token_u32, offsetof(struct sof_ipc4_gain_data, init_val)},
+	{SOF_TKN_GAIN_NAME_NO_PREFIX, SND_SOC_TPLG_TUPLE_TYPE_BOOL,
+		get_token_void, 0},
 };
 
 /* SRC */
@@ -700,7 +702,7 @@ static int sof_ipc4_widget_setup_comp_pga(struct snd_sof_widget *swidget)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
 	struct sof_ipc4_gain *gain;
-	int ret;
+	int ret, i;
 
 	gain = kzalloc(sizeof(*gain), GFP_KERNEL);
 	if (!gain)
@@ -732,6 +734,10 @@ static int sof_ipc4_widget_setup_comp_pga(struct snd_sof_widget *swidget)
 		goto err;
 
 	sof_ipc4_widget_update_kcontrol_module_id(swidget);
+
+	for (i = 0; i < swidget->num_tuples; i++ )
+		if (swidget->tuples[i].token == SOF_TKN_GAIN_NAME_NO_PREFIX)
+			swidget->widget->no_wname_in_long_name = swidget->tuples[i].value.v;
 
 	return 0;
 err:
