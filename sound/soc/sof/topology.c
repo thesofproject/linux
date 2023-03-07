@@ -399,6 +399,11 @@ int get_token_dai_type(void *elem, void *object, u32 offset)
 	return 0;
 }
 
+int get_token_void(void *elem, void *object, u32 offset)
+{
+	return 0;
+}
+
 /* PCM */
 static const struct sof_topology_token stream_tokens[] = {
 	{SOF_TKN_STREAM_PLAYBACK_COMPATIBLE_D0I3, SND_SOC_TPLG_TUPLE_TYPE_BOOL, get_token_u16,
