@@ -107,6 +107,11 @@ enum sof_ipc4_copier_module_config_params {
 	SOF_IPC4_COPIER_MODULE_CFG_ATTENUATION,
 };
 
+struct sof_ipc4_copier_parameter_tuples {
+	u32 deep_buffer_dma_ms;
+	bool fast_mode;
+};
+
 struct sof_ipc4_copier_config_set_sink_format {
 /* Id of sink */
 	u32 sink_id;

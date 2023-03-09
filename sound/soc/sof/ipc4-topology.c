@@ -85,8 +85,11 @@ static const struct sof_topology_token ipc4_out_audio_format_tokens[] = {
 		offsetof(struct sof_ipc4_pin_format, buffer_size)},
 };
 
-static const struct sof_topology_token ipc4_copier_deep_buffer_tokens[] = {
-	{SOF_TKN_INTEL_COPIER_DEEP_BUFFER_DMA_MS, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32, 0},
+static const struct sof_topology_token ipc4_copier_parameter_tokens[] = {
+	{SOF_TKN_INTEL_COPIER_DEEP_BUFFER_DMA_MS, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+	 offsetof(struct sof_ipc4_copier_parameter_tuples, deep_buffer_dma_ms)},
+	{SOF_TKN_INTEL_COPIER_FAST_MODE, SND_SOC_TPLG_TUPLE_TYPE_BOOL, get_token_u16,
+	 offsetof(struct sof_ipc4_copier_parameter_tuples, fast_mode)},
 };
 
 static const struct sof_topology_token ipc4_copier_tokens[] = {
@@ -144,8 +147,8 @@ static const struct sof_token_info ipc4_token_list[SOF_TOKEN_COUNT] = {
 		ipc4_in_audio_format_tokens, ARRAY_SIZE(ipc4_in_audio_format_tokens)},
 	[SOF_OUT_AUDIO_FORMAT_TOKENS] = {"IPC4 Output Audio format tokens",
 		ipc4_out_audio_format_tokens, ARRAY_SIZE(ipc4_out_audio_format_tokens)},
-	[SOF_COPIER_DEEP_BUFFER_TOKENS] = {"IPC4 Copier deep buffer tokens",
-		ipc4_copier_deep_buffer_tokens, ARRAY_SIZE(ipc4_copier_deep_buffer_tokens)},
+	[SOF_COPIER_PARAMETER_TOKENS] = {"IPC4 Copier parameter tokens",
+		ipc4_copier_parameter_tokens, ARRAY_SIZE(ipc4_copier_parameter_tokens)},
 	[SOF_COPIER_TOKENS] = {"IPC4 Copier tokens", ipc4_copier_tokens,
 		ARRAY_SIZE(ipc4_copier_tokens)},
 	[SOF_AUDIO_FMT_NUM_TOKENS] = {"IPC4 Audio format number tokens",
@@ -1341,6 +1344,7 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 	struct snd_soc_component *scomp = swidget->scomp;
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct sof_ipc4_pin_format *format_list_to_search;
+	struct sof_ipc4_copier_parameter_tuples tuples = { 0, false };
 	struct sof_ipc4_copier_data *copier_data;
 	struct snd_pcm_hw_params *ref_params;
 	struct sof_ipc4_copier *ipc4_copier;
@@ -1351,7 +1355,6 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 	int *ipc_config_size;
 	u32 **data;
 	int ipc_size, ret;
-	u32 deep_buffer_dma_ms = 0;
 	u32 format_list_count;
 
 	dev_dbg(sdev->dev, "copier %s, type %d", swidget->widget->name, swidget->id);
@@ -1364,9 +1367,9 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		struct snd_sof_widget *pipe_widget;
 		struct sof_ipc4_pipeline *pipeline;
 
-		/* parse the deep buffer dma size */
-		ret = sof_update_ipc_object(scomp, &deep_buffer_dma_ms,
-					    SOF_COPIER_DEEP_BUFFER_TOKENS, swidget->tuples,
+		/* parse the deep buffer dma size and fast_mode flag */
+		ret = sof_update_ipc_object(scomp, &tuples,
+					    SOF_COPIER_PARAMETER_TOKENS, swidget->tuples,
 					    swidget->num_tuples, sizeof(u32), 1);
 		if (ret) {
 			dev_err(scomp->dev, "Failed to parse deep buffer dma size for %s\n",
@@ -1427,6 +1430,12 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		copier_data->gtw_cfg.node_id &= ~SOF_IPC4_NODE_INDEX_MASK;
 		copier_data->gtw_cfg.node_id |=
 			SOF_IPC4_NODE_INDEX(platform_params->stream_tag - 1);
+
+		if (tuples.fast_mode) {
+			dev_dbg(scomp->dev, "Setting fast_mode bit in %s's feature flags\n",
+				swidget->widget->name);
+			copier_data->copier_feature_mask = BIT(0);
+		}
 
 		/* set gateway attributes */
 		gtw_attr->lp_buffer_alloc = pipeline->lp_mode;
@@ -1615,7 +1624,7 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		break;
 	case snd_soc_dapm_aif_in:
 			copier_data->gtw_cfg.dma_buffer_size =
-				max((u32)SOF_IPC4_MIN_DMA_BUFFER_SIZE, deep_buffer_dma_ms) *
+				max((u32)SOF_IPC4_MIN_DMA_BUFFER_SIZE, tuples.deep_buffer_dma_ms) *
 					copier_data->base_config.ibs;
 		break;
 	case snd_soc_dapm_dai_out:
@@ -2690,7 +2699,7 @@ static enum sof_tokens common_copier_token_list[] = {
 	SOF_AUDIO_FMT_NUM_TOKENS,
 	SOF_IN_AUDIO_FORMAT_TOKENS,
 	SOF_OUT_AUDIO_FORMAT_TOKENS,
-	SOF_COPIER_DEEP_BUFFER_TOKENS,
+	SOF_COPIER_PARAMETER_TOKENS,
 	SOF_COPIER_TOKENS,
 	SOF_COMP_EXT_TOKENS,
 };
