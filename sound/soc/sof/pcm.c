@@ -298,12 +298,22 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+			ipc_first = false;
+		else
+			ipc_first = true;
 		break;
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
-		ipc_first = true;
+		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+			ipc_first = true;
+		else
+			ipc_first = false;
 		break;
 	case SNDRV_PCM_TRIGGER_START:
-		ipc_first = true;
+		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+			ipc_first = true;
+		else
+			ipc_first = false;
 		if (spcm->stream[substream->stream].suspend_ignored) {
 			/*
 			 * This case will be triggered when INFO_RESUME is
@@ -328,6 +338,10 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 		}
 		fallthrough;
 	case SNDRV_PCM_TRIGGER_STOP:
+		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+			ipc_first = false;
+		else
+			ipc_first = true;
 		reset_hw_params = true;
 		break;
 	default:
