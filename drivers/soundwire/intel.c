@@ -663,25 +663,6 @@ static int intel_params_stream(struct sdw_intel *sdw,
 	return -EIO;
 }
 
-static int intel_free_stream(struct sdw_intel *sdw,
-			     int stream,
-			     struct snd_soc_dai *dai,
-			     int link_id)
-{
-	struct sdw_intel_link_res *res = sdw->link_res;
-	struct sdw_intel_stream_free_data free_data;
-
-	free_data.stream = stream; /* direction */
-	free_data.dai = dai;
-	free_data.link_id = link_id;
-
-	if (res->ops && res->ops->free_stream && res->dev)
-		return res->ops->free_stream(res->dev,
-					     &free_data);
-
-	return 0;
-}
-
 /*
  * DAI routines
  */
@@ -813,7 +794,6 @@ static int
 intel_hw_free(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
 {
 	struct sdw_cdns *cdns = snd_soc_dai_get_drvdata(dai);
-	struct sdw_intel *sdw = cdns_to_intel(cdns);
 	struct sdw_cdns_dai_runtime *dai_runtime;
 	int ret;
 
@@ -831,12 +811,6 @@ intel_hw_free(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
 	if (ret < 0) {
 		dev_err(dai->dev, "remove master from stream %s failed: %d\n",
 			dai_runtime->stream->name, ret);
-		return ret;
-	}
-
-	ret = intel_free_stream(sdw, substream->stream, dai, sdw->instance);
-	if (ret < 0) {
-		dev_err(dai->dev, "intel_free_stream: failed %d\n", ret);
 		return ret;
 	}
 
@@ -868,7 +842,6 @@ static void *intel_get_sdw_stream(struct snd_soc_dai *dai,
 static int intel_trigger(struct snd_pcm_substream *substream, int cmd, struct snd_soc_dai *dai)
 {
 	struct sdw_cdns *cdns = snd_soc_dai_get_drvdata(dai);
-	struct sdw_intel *sdw = cdns_to_intel(cdns);
 	struct sdw_cdns_dai_runtime *dai_runtime;
 	int ret = 0;
 
@@ -891,7 +864,6 @@ static int intel_trigger(struct snd_pcm_substream *substream, int cmd, struct sn
 
 		dai_runtime->suspended = true;
 
-		ret = intel_free_stream(sdw, substream->stream, dai, sdw->instance);
 		break;
 
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
@@ -937,9 +909,7 @@ static int intel_component_dais_suspend(struct snd_soc_component *component)
 	 */
 	for_each_component_dais(component, dai) {
 		struct sdw_cdns *cdns = snd_soc_dai_get_drvdata(dai);
-		struct sdw_intel *sdw = cdns_to_intel(cdns);
 		struct sdw_cdns_dai_runtime *dai_runtime;
-		int ret;
 
 		dai_runtime = cdns->dai_runtime_array[dai->id];
 
@@ -949,13 +919,8 @@ static int intel_component_dais_suspend(struct snd_soc_component *component)
 		if (dai_runtime->suspended)
 			continue;
 
-		if (dai_runtime->paused) {
+		if (dai_runtime->paused)
 			dai_runtime->suspended = true;
-
-			ret = intel_free_stream(sdw, dai_runtime->direction, dai, sdw->instance);
-			if (ret < 0)
-				return ret;
-		}
 	}
 
 	return 0;
