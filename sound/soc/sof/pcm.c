@@ -281,7 +281,6 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
 	const struct sof_ipc_pcm_ops *pcm_ops = sof_ipc_get_ops(sdev, pcm);
 	struct snd_sof_pcm *spcm;
-	bool reset_hw_params = false;
 	bool ipc_first = false;
 	int ret = 0;
 
@@ -332,7 +331,6 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 		fallthrough;
 	case SNDRV_PCM_TRIGGER_STOP:
 		ipc_first = true;
-		reset_hw_params = true;
 		break;
 	default:
 		dev_err(component->dev, "Unhandled trigger cmd %d\n", cmd);
@@ -352,10 +350,6 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 	/* need to STOP DMA even if trigger IPC failed */
 	if (ipc_first)
 		snd_sof_pcm_platform_trigger(sdev, substream, cmd);
-
-	/* free PCM if reset_hw_params is set and the STOP IPC is successful */
-	if (!ret && reset_hw_params)
-		ret = sof_pcm_stream_free(sdev, substream, spcm, substream->stream, false);
 
 	return ret;
 }
