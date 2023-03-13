@@ -611,7 +611,15 @@ sof_walk_widgets_in_order(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
 			break;
 		case SOF_WIDGET_PREPARE:
 		{
+			struct snd_sof_widget *swidget = widget->dobj.private;
 			struct snd_pcm_hw_params pipeline_params;
+
+			/* In case that feedback buffer is shared between two stream, a prepared
+			 * widget in another stream for producing feedback buffer should be skipped
+			 * since pipeline_params is built based on the current stream, not feedback stream.
+			 */
+			if (swidget->prepared)
+				continue;
 
 			str = "prepare";
 			/*
