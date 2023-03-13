@@ -758,6 +758,8 @@ static int intel_prepare(struct snd_pcm_substream *substream,
 		return -EIO;
 	}
 
+	dev_info(dai->dev, "%s: plb: start\n", __func__);
+
 	if (dai_runtime->suspended) {
 		dai_runtime->suspended = false;
 
