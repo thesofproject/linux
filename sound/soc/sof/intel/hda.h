@@ -502,7 +502,7 @@ struct sof_intel_hda_dev {
 	u32 stream_max;
 
 	/* PM related */
-	bool l1_support_changed;/* during suspend, is L1SEN changed or not */
+	bool l1_disabled;/* is DMI link L1 disabled? */
 
 	/* DMIC device */
 	struct platform_device *dmic_dev;
@@ -763,26 +763,6 @@ static inline int hda_codec_i915_exit(struct snd_sof_dev *sdev) { return 0; }
 
 #endif
 
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
-
-void hda_bus_ml_get_capabilities(struct hdac_bus *bus);
-void hda_bus_ml_free(struct hdac_bus *bus);
-void hda_bus_ml_put_all(struct hdac_bus *bus);
-void hda_bus_ml_reset_losidv(struct hdac_bus *bus);
-int hda_bus_ml_resume(struct hdac_bus *bus);
-int hda_bus_ml_suspend(struct hdac_bus *bus);
-
-#else
-
-static inline void hda_bus_ml_get_capabilities(struct hdac_bus *bus) { }
-static inline void hda_bus_ml_free(struct hdac_bus *bus) { }
-static inline void hda_bus_ml_put_all(struct hdac_bus *bus) { }
-static inline void hda_bus_ml_reset_losidv(struct hdac_bus *bus) { }
-static inline int hda_bus_ml_resume(struct hdac_bus *bus) { return 0; }
-static inline int hda_bus_ml_suspend(struct hdac_bus *bus) { return 0; }
-
-#endif /* CONFIG_SND_SOC_SOF_HDA */
-
 /*
  * Trace Control.
  */
@@ -896,10 +876,6 @@ int hda_pci_intel_probe(struct pci_dev *pci, const struct pci_device_id *pci_id)
 
 struct snd_sof_dai;
 struct sof_ipc_dai_config;
-int hda_ctrl_dai_widget_setup(struct snd_soc_dapm_widget *w, unsigned int quirk_flags,
-			      struct snd_sof_dai_config_data *data);
-int hda_ctrl_dai_widget_free(struct snd_soc_dapm_widget *w, unsigned int quirk_flags,
-			     struct snd_sof_dai_config_data *data);
 
 #define SOF_HDA_POSITION_QUIRK_USE_SKYLAKE_LEGACY	(0) /* previous implementation */
 #define SOF_HDA_POSITION_QUIRK_USE_DPIB_REGISTERS	(1) /* recommended if VC0 only */
@@ -928,4 +904,54 @@ extern struct sdw_intel_ops sdw_callback;
 struct sof_ipc4_fw_library;
 int hda_dsp_ipc4_load_library(struct snd_sof_dev *sdev,
 			      struct sof_ipc4_fw_library *fw_lib, bool reload);
+
+/**
+ * struct hda_dai_widget_dma_ops - DAI DMA ops optional by default unless specified otherwise
+ * @get_hext_stream: Mandatory function pointer to get the saved pointer to struct hdac_ext_stream
+ * @assign_hext_stream: Function pointer to assign a hdac_ext_stream
+ * @release_hext_stream: Function pointer to release the hdac_ext_stream
+ * @setup_hext_stream: Function pointer for hdac_ext_stream setup
+ * @reset_hext_stream: Function pointer for hdac_ext_stream reset
+ * @pre_trigger: Function pointer for DAI DMA pre-trigger actions
+ * @trigger: Function pointer for DAI DMA trigger actions
+ * @post_trigger: Function pointer for DAI DMA post-trigger actions
+ * @codec_dai_set_stream: Function pointer to set codec-side stream information
+ * @calc_stream_format: Function pointer to determine stream format from hw_params and
+ * for HDaudio codec DAI from the .sig bits
+ * @get_hlink: Mandatory function pointer to retrieve hlink, mainly to program LOSIDV
+ * for legacy HDaudio links or program HDaudio Extended Link registers.
+ */
+struct hda_dai_widget_dma_ops {
+	struct hdac_ext_stream *(*get_hext_stream)(struct snd_sof_dev *sdev,
+						   struct snd_soc_dai *cpu_dai,
+						   struct snd_pcm_substream *substream);
+	struct hdac_ext_stream *(*assign_hext_stream)(struct snd_sof_dev *sdev,
+						      struct snd_soc_dai *cpu_dai,
+						      struct snd_pcm_substream *substream);
+	void (*release_hext_stream)(struct snd_sof_dev *sdev, struct snd_soc_dai *cpu_dai,
+				    struct snd_pcm_substream *substream);
+	void (*setup_hext_stream)(struct snd_sof_dev *sdev, struct hdac_ext_stream *hext_stream,
+				  unsigned int format_val);
+	void (*reset_hext_stream)(struct snd_sof_dev *sdev, struct hdac_ext_stream *hext_sream);
+	int (*pre_trigger)(struct snd_sof_dev *sdev, struct snd_soc_dai *cpu_dai,
+			   struct snd_pcm_substream *substream, int cmd);
+	int (*trigger)(struct snd_sof_dev *sdev, struct snd_soc_dai *cpu_dai,
+		       struct snd_pcm_substream *substream, int cmd);
+	int (*post_trigger)(struct snd_sof_dev *sdev, struct snd_soc_dai *cpu_dai,
+			    struct snd_pcm_substream *substream, int cmd);
+	void (*codec_dai_set_stream)(struct snd_sof_dev *sdev,
+				     struct snd_pcm_substream *substream,
+				     struct hdac_stream *hstream);
+	unsigned int (*calc_stream_format)(struct snd_sof_dev *sdev,
+					   struct snd_pcm_substream *substream,
+					   struct snd_pcm_hw_params *params);
+	struct hdac_ext_link * (*get_hlink)(struct snd_sof_dev *sdev,
+					    struct snd_pcm_substream *substream);
+};
+
+const struct hda_dai_widget_dma_ops *
+hda_select_dai_widget_ops(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget);
+int hda_dai_config(struct snd_soc_dapm_widget *w, unsigned int flags,
+		   struct snd_sof_dai_config_data *data);
+
 #endif
