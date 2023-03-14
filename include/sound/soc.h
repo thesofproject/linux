@@ -691,6 +691,15 @@ struct snd_soc_dai_link {
 
 	enum snd_soc_dpcm_trigger trigger[2]; /* trigger type for DPCM */
 
+	/*
+	 * soc-pcm will by default prepare the RTD dailink, then the DAIs.
+	 * This can be problematic in a multi-dai configuration such as SoundWire
+	 * where the hardware IPs need to be configured by the DAIs .prepare callback
+	 * first.
+	 * This flag inverts the default logic.
+	 */
+	int prepare_dais_first;
+
 	/* codec/machine specific init - e.g. add machine controls */
 	int (*init)(struct snd_soc_pcm_runtime *rtd);
 

@@ -889,7 +889,10 @@ static int __soc_pcm_prepare(struct snd_soc_pcm_runtime *rtd,
 
 	snd_soc_dpcm_mutex_assert_held(rtd);
 
-	ret = snd_soc_link_prepare(substream);
+	if (!rtd->dai_link->prepare_dais_first)
+		ret = snd_soc_link_prepare(substream);
+	else
+		ret = snd_soc_pcm_dai_prepare(substream);
 	if (ret < 0)
 		goto out;
 
@@ -897,7 +900,10 @@ static int __soc_pcm_prepare(struct snd_soc_pcm_runtime *rtd,
 	if (ret < 0)
 		goto out;
 
-	ret = snd_soc_pcm_dai_prepare(substream);
+	if (rtd->dai_link->prepare_dais_first)
+		ret = snd_soc_link_prepare(substream);
+	else
+		ret = snd_soc_pcm_dai_prepare(substream);
 	if (ret < 0)
 		goto out;
 
