@@ -1155,6 +1155,7 @@ static int create_sdw_dailink(struct snd_soc_card *card,
 		 * based on wait_for_completion(), tag them as 'nonatomic'.
 		 */
 		dai_links[*link_index].nonatomic = true;
+		dai_links[*link_index].prepare_dais_first = true;
 
 		ret = set_codec_init_func(card, link, dai_links + (*link_index)++,
 					  playback, group_id);
