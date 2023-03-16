@@ -1,9 +1,11 @@
 .. SPDX-License-Identifier: (GPL-2.0-only OR BSD-3-Clause)
-:Copyright: |copy| 2023 Intel Corporation
+.. include:: <isonum.txt>
 
 ================================================
 HDAudio multi-link extensions on Intel platforms
 ================================================
+
+:Copyright: |copy| 2023 Intel Corporation
 
 This file documents the 'multi-link structure' introduced in 2015 with
 the Skylake processor and recently extended in newer Intel platforms
