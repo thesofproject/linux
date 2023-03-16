@@ -706,7 +706,7 @@ static int intel_hw_params(struct snd_pcm_substream *substream,
 	dai_runtime->paused = false;
 	dai_runtime->suspended = false;
 	dai_runtime->pdi = pdi;
-	dai_runtime->hw_params = *params;
+	dai_runtime->hw_params = params;
 
 	/* Inform DSP about PDI stream number */
 	ret = intel_params_stream(sdw, substream, dai, params,
@@ -758,12 +758,8 @@ static int intel_prepare(struct snd_pcm_substream *substream,
 		return -EIO;
 	}
 
-	//usleep_range(1, 2); // works
-
 	if (dai_runtime->suspended) {
 		dai_runtime->suspended = false;
-
-		//usleep_range(1, 2); // works
 
 		/*
 		 * .prepare() is called after system resume, where we
@@ -774,23 +770,19 @@ static int intel_prepare(struct snd_pcm_substream *substream,
 		 */
 
 		/* configure stream */
-		ch = params_channels(&dai_runtime->hw_params);
+		ch = params_channels(dai_runtime->hw_params);
 		if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
 			dir = SDW_DATA_DIR_RX;
 		else
 			dir = SDW_DATA_DIR_TX;
 
-		// usleep_range(1000, 2000); // Does not work !!
-
 		intel_pdi_shim_configure(sdw, dai_runtime->pdi);
 		intel_pdi_alh_configure(sdw, dai_runtime->pdi);
 		sdw_cdns_config_stream(cdns, ch, dir, dai_runtime->pdi);
 
-		// usleep_range(1, 2); // Does not work!!
-
 		/* Inform DSP about PDI stream number */
 		ret = intel_params_stream(sdw, substream, dai,
-					  &dai_runtime->hw_params,
+					  dai_runtime->hw_params,
 					  sdw->instance,
 					  dai_runtime->pdi->intel_alh_id);
 	}
@@ -822,6 +814,7 @@ intel_hw_free(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
 		return ret;
 	}
 
+	dai_runtime->hw_params = NULL;
 	dai_runtime->pdi = NULL;
 
 	return 0;
