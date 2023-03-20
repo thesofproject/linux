@@ -347,8 +347,15 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 		goto free;
 	}
 
-	/* no need to pause before reset or before pause release */
-	if (state == SOF_IPC4_PIPE_RESET || cmd == SNDRV_PCM_TRIGGER_PAUSE_RELEASE)
+	spipe = pipeline_list->pipelines[0];
+	pipe_widget = spipe->pipe_widget;
+	pipeline = pipe_widget->private;
+
+	/*
+	 * Do not send the IPC if the pipelines are already paused. It is enough to check the
+	 * first pipeline state as all pipelines in the trigger list are triggered together.
+	 */
+	if (pipeline->state == SOF_IPC4_PIPE_PAUSED)
 		goto skip_pause_transition;
 
 	/*
@@ -368,10 +375,11 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 					       trigger_list);
 	}
 
+skip_pause_transition:
 	/* return if this is the final state */
 	if (state == SOF_IPC4_PIPE_PAUSED)
 		goto free;
-skip_pause_transition:
+
 	/* else set the RUNNING/RESET state in the DSP */
 	ret = sof_ipc4_set_multi_pipeline_state(sdev, state, trigger_list);
 	if (ret < 0) {
