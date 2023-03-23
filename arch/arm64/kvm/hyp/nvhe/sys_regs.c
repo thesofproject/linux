@@ -166,6 +166,22 @@ static const struct pvm_ftr_bits pvmid_aa64isar2[] = {
 	FEAT_END
 };
 
+static const struct pvm_ftr_bits pvmid_aa64zfr0[] = {
+	MAX_FEAT(ID_AA64ZFR0_EL1, SVEver, SVE2p2),
+	MAX_FEAT(ID_AA64ZFR0_EL1, AES, AES2),
+	MAX_FEAT(ID_AA64ZFR0_EL1, EltPerm, IMP),
+	MAX_FEAT(ID_AA64ZFR0_EL1, BitPerm, IMP),
+	MAX_FEAT(ID_AA64ZFR0_EL1, BF16, EBF16),
+	MAX_FEAT(ID_AA64ZFR0_EL1, B16B16, IMP),
+	MAX_FEAT(ID_AA64ZFR0_EL1, SHA3, IMP),
+	MAX_FEAT(ID_AA64ZFR0_EL1, SM4, IMP),
+	MAX_FEAT(ID_AA64ZFR0_EL1, I8MM, IMP),
+	MAX_FEAT(ID_AA64ZFR0_EL1, F16MM, IMP),
+	MAX_FEAT(ID_AA64ZFR0_EL1, F32MM, IMP),
+	MAX_FEAT(ID_AA64ZFR0_EL1, F64MM, IMP),
+	FEAT_END
+};
+
 /*
  * None of the features in ID_AA64DFR0_EL1 nor ID_AA64MMFR4_EL1 are supported.
  * However, both have Not-Implemented values that are non-zero. Define them
@@ -233,6 +249,8 @@ static u64 pvm_calc_id_reg(const struct kvm_vcpu *vcpu, u32 id)
 		return get_restricted_features(vcpu, id_aa64mmfr1_el1_sys_val, pvmid_aa64mmfr1);
 	case SYS_ID_AA64MMFR2_EL1:
 		return get_restricted_features(vcpu, id_aa64mmfr2_el1_sys_val, pvmid_aa64mmfr2);
+	case SYS_ID_AA64ZFR0_EL1:
+		return get_restricted_features(vcpu, id_aa64zfr0_el1_sys_val, pvmid_aa64zfr0);
 	case SYS_ID_AA64DFR0_EL1:
 		return ID_AA64DFR0_EL1_NONZERO_NI;
 	case SYS_ID_AA64MMFR4_EL1:
