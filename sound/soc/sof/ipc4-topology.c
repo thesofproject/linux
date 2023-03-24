@@ -1108,6 +1108,12 @@ static int sof_ipc4_init_audio_fmt(struct snd_sof_dev *sdev,
 	if (available_fmt->num_output_formats && i < available_fmt->num_output_formats)
 		base_config->obs = available_fmt->output_pin_fmts[i].buffer_size;
 
+	/* Update base_config->cpc from the module manifest */
+	sof_ipc4_update_cpc_from_manifest(sdev, swidget->module_info, base_config);
+	dev_dbg(sdev->dev, "ibs / obs / cpc for %s: %u / %u / %u\n",
+		swidget->widget->name, base_config->ibs, base_config->obs,
+		base_config->cpc);
+
 	/* Return the index of the matched format */
 	return i;
 }
