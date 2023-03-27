@@ -97,7 +97,10 @@ struct snd_sof_dai_config_data {
  * struct sof_ipc_pcm_ops - IPC-specific PCM ops
  * @hw_params: Function pointer for hw_params
  * @hw_free: Function pointer for hw_free
- * @trigger: Function pointer for trigger
+ * @pre_trigger: Function pointer pre-trigger actions involving pipeline state changes that need
+ *		 to happen before the host DMA is triggered.
+ * @post_trigger: Function pointer pre-trigger actions involving pipeline state changes that need
+ *		 to happen after the host DMA is triggered.
  * @dai_link_fixup: Function pointer for DAI link fixup
  * @pcm_setup: Function pointer for IPC-specific PCM set up that can be used for allocating
  *	       additional memory in the SOF PCM stream structure
@@ -106,23 +109,22 @@ struct snd_sof_dai_config_data {
  * @delay: Function pointer for pcm delay calculation
  * @reset_hw_params_during_stop: Flag indicating whether the hw_params should be reset during the
  *				 STOP pcm trigger
- * @ipc_first_on_start: Send IPC before invoking platform trigger during
- *				START/PAUSE_RELEASE triggers
  */
 struct sof_ipc_pcm_ops {
 	int (*hw_params)(struct snd_soc_component *component, struct snd_pcm_substream *substream,
 			 struct snd_pcm_hw_params *params,
 			 struct snd_sof_platform_stream_params *platform_params);
 	int (*hw_free)(struct snd_soc_component *component, struct snd_pcm_substream *substream);
-	int (*trigger)(struct snd_soc_component *component,  struct snd_pcm_substream *substream,
-		       int cmd);
+	int (*pre_trigger)(struct snd_soc_component *component,
+			   struct snd_pcm_substream *substream, int cmd);
+	int (*post_trigger)(struct snd_soc_component *component,
+			    struct snd_pcm_substream *substream, int cmd);
 	int (*dai_link_fixup)(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_params *params);
 	int (*pcm_setup)(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm);
 	void (*pcm_free)(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm);
 	snd_pcm_sframes_t (*delay)(struct snd_soc_component *component,
 				   struct snd_pcm_substream *substream);
 	bool reset_hw_params_during_stop;
-	bool ipc_first_on_start;
 };
 
 /**

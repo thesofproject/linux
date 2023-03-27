@@ -282,7 +282,6 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 	const struct sof_ipc_pcm_ops *pcm_ops = sof_ipc_get_ops(sdev, pcm);
 	struct snd_sof_pcm *spcm;
 	bool reset_hw_params = false;
-	bool ipc_first = false;
 	int ret = 0;
 
 	/* nothing to do for BE */
@@ -298,11 +297,8 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
-		ipc_first = true;
 		break;
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
-		if (pcm_ops && pcm_ops->ipc_first_on_start)
-			ipc_first = true;
 		break;
 	case SNDRV_PCM_TRIGGER_START:
 		if (spcm->stream[substream->stream].suspend_ignored) {
@@ -314,9 +310,6 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 			spcm->stream[substream->stream].suspend_ignored = false;
 			return 0;
 		}
-
-		if (pcm_ops && pcm_ops->ipc_first_on_start)
-			ipc_first = true;
 		break;
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 		if (sdev->system_suspend_target == SOF_SUSPEND_S0IX &&
@@ -332,7 +325,6 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 		}
 		fallthrough;
 	case SNDRV_PCM_TRIGGER_STOP:
-		ipc_first = true;
 		if (pcm_ops && pcm_ops->reset_hw_params_during_stop)
 			reset_hw_params = true;
 		break;
@@ -341,30 +333,33 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 		return -EINVAL;
 	}
 
-	if (!ipc_first)
-		snd_sof_pcm_platform_trigger(sdev, substream, cmd);
-
-	if (pcm_ops && pcm_ops->trigger)
-		ret = pcm_ops->trigger(component, substream, cmd);
+	/* Host DMA pre-trigger actions */
+	if (pcm_ops && pcm_ops->pre_trigger)
+		ret = pcm_ops->pre_trigger(component, substream, cmd);
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
 	case SNDRV_PCM_TRIGGER_START:
-		/* invoke platform trigger to start DMA only if pcm_ops is successful */
-		if (ipc_first && !ret)
-			snd_sof_pcm_platform_trigger(sdev, substream, cmd);
+		/* invoke platform trigger to start DMA only if pre_trigger is successful */
+		if (ret < 0)
+			return ret;
+		snd_sof_pcm_platform_trigger(sdev, substream, cmd);
 		break;
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 	case SNDRV_PCM_TRIGGER_STOP:
-		/* invoke platform trigger to stop DMA even if pcm_ops failed */
+		/* invoke platform trigger to stop DMA even if pre_trigger failed */
 		snd_sof_pcm_platform_trigger(sdev, substream, cmd);
 		break;
 	default:
 		break;
 	}
 
-	/* free PCM if reset_hw_params is set and the STOP IPC is successful */
+	/* Host DMA post-trigger actions if pre-trigger was successful */
+	if (!ret && pcm_ops && pcm_ops->post_trigger)
+		ret = pcm_ops->post_trigger(component, substream, cmd);
+
+	/* free PCM if reset_hw_params is set and both pre/post trigger ops were successful */
 	if (!ret && reset_hw_params)
 		ret = sof_pcm_stream_free(sdev, substream, spcm, substream->stream, false);
 
