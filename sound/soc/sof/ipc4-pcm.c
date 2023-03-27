@@ -275,31 +275,37 @@ static int sof_ipc4_chain_dma_trigger(struct snd_sof_dev *sdev,
 	return sof_ipc_tx_message_no_reply(sdev->ipc, &msg, 0);
 }
 
+static struct snd_sof_pcm_stream_pipeline_list *
+sof_ipc4_get_pipeline_list(struct snd_soc_component *component, struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
+	struct snd_sof_pcm *spcm = snd_sof_find_spcm_dai(component, rtd);
+
+	if (!spcm)
+		return NULL;
+
+	return &spcm->stream[substream->stream].pipeline_list;
+}
+
 static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 				      struct snd_pcm_substream *substream, int state, int cmd)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
-	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
 	struct snd_sof_pcm_stream_pipeline_list *pipeline_list;
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	struct ipc4_pipeline_set_state_data *trigger_list;
 	struct snd_sof_widget *pipe_widget;
 	struct sof_ipc4_pipeline *pipeline;
 	struct snd_sof_pipeline *spipe;
-	struct snd_sof_pcm *spcm;
 	int ret;
 	int i;
 
 	dev_dbg(sdev->dev, "trigger cmd: %d state: %d\n", cmd, state);
 
-	spcm = snd_sof_find_spcm_dai(component, rtd);
-	if (!spcm)
-		return -EINVAL;
-
-	pipeline_list = &spcm->stream[substream->stream].pipeline_list;
+	pipeline_list = sof_ipc4_get_pipeline_list(component, substream);
 
 	/* nothing to trigger if the list is empty */
-	if (!pipeline_list->pipelines || !pipeline_list->count)
+	if (!pipeline_list || !pipeline_list->pipelines || !pipeline_list->count)
 		return 0;
 
 	spipe = pipeline_list->pipelines[0];
