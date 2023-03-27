@@ -294,8 +294,6 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 	struct snd_sof_pcm_stream_pipeline_list *pipeline_list;
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	struct ipc4_pipeline_set_state_data *trigger_list;
-	struct snd_sof_widget *pipe_widget;
-	struct sof_ipc4_pipeline *pipeline;
 	struct snd_sof_pipeline *spipe;
 	int ret;
 	int i;
@@ -307,17 +305,6 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 	/* nothing to trigger if the list is empty */
 	if (!pipeline_list || !pipeline_list->pipelines || !pipeline_list->count)
 		return 0;
-
-	spipe = pipeline_list->pipelines[0];
-	pipe_widget = spipe->pipe_widget;
-	pipeline = pipe_widget->private;
-
-	/*
-	 * If use_chain_dma attribute is set we proceed to chained DMA
-	 * trigger function that handles the rest for the substream.
-	 */
-	if (pipeline->use_chain_dma)
-		return sof_ipc4_chain_dma_trigger(sdev, pipeline_list, state, cmd);
 
 	/* allocate memory for the pipeline data */
 	trigger_list = kzalloc(struct_size(trigger_list, pipeline_ids, pipeline_list->count),
@@ -397,9 +384,24 @@ free:
 	return ret;
 }
 
+static int sof_ipc4_is_chain_dma_in_use(struct snd_sof_pcm_stream_pipeline_list *pipeline_list)
+{
+	struct snd_sof_widget *pipe_widget;
+	struct sof_ipc4_pipeline *pipeline;
+	struct snd_sof_pipeline *spipe;
+
+	spipe = pipeline_list->pipelines[0];
+	pipe_widget = spipe->pipe_widget;
+	pipeline = pipe_widget->private;
+
+	return pipeline->use_chain_dma;
+}
+
 static int sof_ipc4_pcm_trigger(struct snd_soc_component *component,
 				struct snd_pcm_substream *substream, int cmd)
 {
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct snd_sof_pcm_stream_pipeline_list *pipeline_list;
 	int state;
 
 	/* determine the pipeline state */
@@ -421,6 +423,19 @@ static int sof_ipc4_pcm_trigger(struct snd_soc_component *component,
 		return -EINVAL;
 	}
 
+	pipeline_list = sof_ipc4_get_pipeline_list(component, substream);
+
+	/* nothing to trigger if the list is empty */
+	if (!pipeline_list || !pipeline_list->pipelines || !pipeline_list->count)
+		return 0;
+
+	/*
+	 * If use_chain_dma attribute is set we proceed to chained DMA
+	 * trigger function that handles the rest for the substream.
+	 */
+	if (sof_ipc4_is_chain_dma_in_use(pipeline_list))
+		return sof_ipc4_chain_dma_trigger(sdev, pipeline_list, state, cmd);
+
 	/* set the pipeline state */
 	return sof_ipc4_trigger_pipelines(component, substream, state, cmd);
 }
@@ -428,6 +443,22 @@ static int sof_ipc4_pcm_trigger(struct snd_soc_component *component,
 static int sof_ipc4_pcm_hw_free(struct snd_soc_component *component,
 				struct snd_pcm_substream *substream)
 {
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct snd_sof_pcm_stream_pipeline_list *pipeline_list;
+
+	pipeline_list = sof_ipc4_get_pipeline_list(component, substream);
+
+	/* nothing to trigger if the list is empty */
+	if (!pipeline_list || !pipeline_list->pipelines || !pipeline_list->count)
+		return 0;
+
+	/*
+	 * If use_chain_dma attribute is set we proceed to chained DMA
+	 * trigger function that handles the rest for the substream.
+	 */
+	if (sof_ipc4_is_chain_dma_in_use(pipeline_list))
+		return sof_ipc4_chain_dma_trigger(sdev, pipeline_list, SOF_IPC4_PIPE_RESET, 0);
+
 	/* command is not relevant with RESET, so just pass 0 */
 	return sof_ipc4_trigger_pipelines(component, substream, SOF_IPC4_PIPE_RESET, 0);
 }
