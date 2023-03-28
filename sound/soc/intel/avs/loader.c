@@ -662,6 +662,12 @@ int avs_dsp_first_boot_firmware(struct avs_dev *adev)
 		}
 	}
 
+	ret = avs_dsp_op(adev, reset, AVS_MAIN_CORE_MASK, true);
+	if (ret < 0) {
+		dev_err(adev->dev, "reset main core failed: %d\n", ret);
+		return ret;
+	}
+
 	ret = avs_dsp_boot_firmware(adev, true);
 	if (ret < 0) {
 		dev_err(adev->dev, "firmware boot failed: %d\n", ret);
