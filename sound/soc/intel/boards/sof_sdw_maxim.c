@@ -17,16 +17,6 @@ static int maxim_part_id;
 #define SOF_SDW_PART_ID_MAX98363 0x8363
 #define SOF_SDW_PART_ID_MAX98373 0x8373
 
-static const struct snd_soc_dapm_widget maxim_widgets[] = {
-	SND_SOC_DAPM_SPK("Left Spk", NULL),
-	SND_SOC_DAPM_SPK("Right Spk", NULL),
-};
-
-static const struct snd_kcontrol_new maxim_controls[] = {
-	SOC_DAPM_PIN_SWITCH("Left Spk"),
-	SOC_DAPM_PIN_SWITCH("Right Spk"),
-};
-
 static int spk_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_card *card = rtd->card;
@@ -41,21 +31,22 @@ static int spk_init(struct snd_soc_pcm_runtime *rtd)
 	dev_dbg(card->dev, "soundwire maxim card components assigned : %s\n",
 		card->components);
 
-	ret = snd_soc_add_card_controls(card, maxim_controls,
-					ARRAY_SIZE(maxim_controls));
+	ret = snd_soc_add_card_controls(card, maxim_kcontrols,
+					ARRAY_SIZE(maxim_kcontrols));
 	if (ret) {
 		dev_err(card->dev, "mx%04x ctrls addition failed: %d\n", maxim_part_id, ret);
 		return ret;
 	}
 
-	ret = snd_soc_dapm_new_controls(&card->dapm, maxim_widgets,
-					ARRAY_SIZE(maxim_widgets));
+	ret = snd_soc_dapm_new_controls(&card->dapm, maxim_dapm_widgets,
+					ARRAY_SIZE(maxim_dapm_widgets));
 	if (ret) {
 		dev_err(card->dev, "mx%04x widgets addition failed: %d\n", maxim_part_id, ret);
 		return ret;
 	}
 
-	ret = snd_soc_dapm_add_routes(&card->dapm, max_98373_dapm_routes, 2);
+	ret = snd_soc_dapm_add_routes(&card->dapm, maxim_dapm_routes,
+				      ARRAY_SIZE(maxim_dapm_routes));
 	if (ret)
 		dev_err(rtd->dev, "failed to add first SPK map: %d\n", ret);
 
