@@ -718,7 +718,7 @@ static int sof_ipc4_pcm_hw_params(struct snd_soc_component *component,
 
 	sof_ipc4_build_time_info(sdev, &spcm->stream[substream->stream]);
 
-	return 0;
+	return sof_ipc4_trigger_pipelines(component, substream, SOF_IPC4_PIPE_RESET, 0);
 }
 
 static int sof_ipc4_get_stream_start_offset(struct snd_sof_dev *sdev,
