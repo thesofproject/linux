@@ -2312,11 +2312,28 @@ static int sof_dspless_widget_ready(struct snd_soc_component *scomp, int index,
 				    struct snd_soc_tplg_dapm_widget *tw)
 {
 	if (WIDGET_IS_DAI(w->id)) {
+		struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+		struct snd_sof_widget *swidget;
 		struct snd_sof_dai dai;
+		int ret;
+
+		swidget = kzalloc(sizeof(*swidget), GFP_KERNEL);
+		if (!swidget)
+			return -ENOMEM;
 
 		memset(&dai, 0, sizeof(dai));
 
-		return sof_connect_dai_widget(scomp, w, tw, &dai);
+		ret = sof_connect_dai_widget(scomp, w, tw, &dai);
+		if (ret) {
+			kfree(swidget);
+			return ret;
+		}
+
+		swidget->scomp = scomp;
+		swidget->widget = w;
+		mutex_init(&swidget->setup_mutex);
+		w->dobj.private = swidget;
+		list_add(&swidget->list, &sdev->widget_list);
 	}
 
 	return 0;
@@ -2327,8 +2344,18 @@ static int sof_dspless_widget_unload(struct snd_soc_component *scomp,
 {
 	struct snd_soc_dapm_widget *w = container_of(dobj, struct snd_soc_dapm_widget, dobj);
 
-	if (WIDGET_IS_DAI(w->id))
+	if (WIDGET_IS_DAI(w->id)) {
+		struct snd_sof_widget *swidget = dobj->private;
+
 		sof_disconnect_dai_widget(scomp, w);
+
+		if (!swidget)
+			return 0;
+
+		/* remove and free swidget object */
+		list_del(&swidget->list);
+		kfree(swidget);
+	}
 
 	return 0;
 }
