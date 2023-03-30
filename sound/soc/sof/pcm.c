@@ -330,6 +330,11 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 			spcm->stream[substream->stream].suspend_ignored = true;
 			return 0;
 		}
+
+		/* On suspend the DMA must be stopped in DSPless mode */
+		if (sdev->dspless_mode_selected)
+			reset_hw_params = true;
+
 		fallthrough;
 	case SNDRV_PCM_TRIGGER_STOP:
 		ipc_first = true;
