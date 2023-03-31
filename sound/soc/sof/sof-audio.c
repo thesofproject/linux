@@ -807,7 +807,7 @@ int sof_pcm_stream_free(struct snd_sof_dev *sdev, struct snd_pcm_substream *subs
 
 	if (spcm->prepared[substream->stream]) {
 		/* stop DMA first if needed */
-		if (pcm_ops && pcm_ops->delayed_platform_trigger)
+		if (pcm_ops && pcm_ops->platform_stop_during_hw_free)
 			snd_sof_pcm_platform_trigger(sdev, substream, SNDRV_PCM_TRIGGER_STOP);
 
 		/* Send PCM_FREE IPC to reset pipeline */

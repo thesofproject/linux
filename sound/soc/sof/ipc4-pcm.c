@@ -837,5 +837,5 @@ const struct sof_ipc_pcm_ops ipc4_pcm_ops = {
 	.pcm_free = sof_ipc4_pcm_free,
 	.delay = sof_ipc4_pcm_delay,
 	.ipc_first_on_start = true,
-	.delayed_platform_trigger = true,
+	.platform_stop_during_hw_free = true,
 };
