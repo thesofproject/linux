@@ -285,8 +285,8 @@ static const struct snd_soc_acpi_link_adr rpl_sdw_rt1316_link12_rt714_link0[] = 
 };
 
 static const struct snd_soc_acpi_codecs rpl_rt5682_hp = {
-	.num_codecs = 1,
-	.codecs = {"10EC5682"},
+	.num_codecs = 2,
+	.codecs = {"10EC5682", "RTL5682"},
 };
 
 static const struct snd_soc_acpi_codecs rpl_max98360a_amp = {
