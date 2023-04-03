@@ -428,10 +428,12 @@ int sof_ipc4_reload_fw_libraries(struct snd_sof_dev *sdev)
  * @sdev: SOF device
  * @fw_module: pointer struct sof_ipc4_fw_module to parse
  * @basecfg: Pointer to the base_config to update
+ * @exact_match: Only consider exact matches based on obs/ibs
  */
 void sof_ipc4_update_cpc_from_manifest(struct snd_sof_dev *sdev,
 				       struct sof_ipc4_fw_module *fw_module,
-				       struct sof_ipc4_base_module_cfg *basecfg)
+				       struct sof_ipc4_base_module_cfg *basecfg,
+				       bool exact_match)
 {
 	const struct sof_man4_module_config *fw_mod_cfg;
 	u32 cpc_pick = 0;
@@ -457,6 +459,9 @@ void sof_ipc4_update_cpc_from_manifest(struct snd_sof_dev *sdev,
 	}
 
 	if (!cpc_pick) {
+		if (exact_match)
+			return;
+
 		dev_dbg(sdev->dev,
 			"%s: No exact CPC match from manifest (ibs/obs: %u/%u)\n",
 			fw_module->man4_module_entry.name, basecfg->ibs, basecfg->obs);

@@ -1254,6 +1254,12 @@ static int sof_widget_parse_tokens(struct snd_soc_component *scomp, struct snd_s
 				goto err;
 			}
 			break;
+		case SOF_MOD_CFG_TOKENS:
+			num_sets = sof_get_token_value(SOF_TKN_COMP_NUM_MOD_CFGS,
+						       swidget->tuples, swidget->num_tuples);
+			if (num_sets < 0)
+				continue; /* num_mod_cfgs not defined, assume 0 */
+			break;
 		default:
 			break;
 		}
