@@ -167,17 +167,38 @@ struct sof_ipc4_pin_format {
 };
 
 /**
+ * struct sof_ipc4_tplg_mod_cfg - module configuration entry from topology
+ * @ibs: Input Buffer Size
+ * @obs: Output Buffer Size
+ * @cpc: Cycles Per Chunk
+ *
+ * Used to map a CPC value to IBS/OBS pair
+ */
+struct sof_ipc4_tplg_mod_cfg {
+	u32 ibs;
+	u32 obs;
+	u32 cpc;
+};
+
+/**
  * struct sof_ipc4_module_params - Common parameters for modules
  * @output_pin_fmts: Available output pin formats
  * @input_pin_fmts: Available input pin formats
+ * @mod_cfgs: Module configuration from topology
  * @num_input_formats: Number of input pin formats
  * @num_output_formats: Number of output pin formats
+ * @num_mod_cfg: Number of configurations
+ * @cpc: CPC value override for the module
  */
 struct sof_ipc4_module_params {
 	struct sof_ipc4_pin_format *output_pin_fmts;
 	struct sof_ipc4_pin_format *input_pin_fmts;
+	struct sof_ipc4_tplg_mod_cfg *mod_cfgs;
 	u32 num_input_formats;
 	u32 num_output_formats;
+	u32 num_mod_cfgs;
+
+	u32 cpc;
 };
 
 /**

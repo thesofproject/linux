@@ -428,10 +428,12 @@ int sof_ipc4_reload_fw_libraries(struct snd_sof_dev *sdev)
  * @sdev: SOF device
  * @fw_module: pointer struct sof_ipc4_fw_module to parse
  * @basecfg: Pointer to the base_config to update
+ * @exact_match: Only consider exact matches based on obs/ibs
  */
 void sof_ipc4_update_cpc_from_manifest(struct snd_sof_dev *sdev,
 				       struct sof_ipc4_fw_module *fw_module,
-				       struct sof_ipc4_base_module_cfg *basecfg)
+				       struct sof_ipc4_base_module_cfg *basecfg,
+				       bool exact_match)
 {
 	const struct sof_man4_module_config *fw_mod_cfg;
 	u32 cpc_pick = 0;
@@ -473,10 +475,19 @@ void sof_ipc4_update_cpc_from_manifest(struct snd_sof_dev *sdev,
 	 * No matching IBS/OBS found, the firmware manifest is missing
 	 * information in the module's module configuration table.
 	 */
-	if (!max_cpc)
+	if (!max_cpc) {
 		msg = "No CPC value available in the firmware file's manifest";
-	else if (!cpc_pick)
+	} else if (!cpc_pick) {
 		msg = "No CPC match in the firmware file's manifest";
+
+		/*
+		 * No matching IBS/OBS found, use the maximum CPC value we have
+		 * encountered while parsing the module config entries if
+		 * nonexact match is allowed
+		 */
+		if (!exact_match)
+			basecfg->cpc = max_cpc;
+	}
 
 no_cpc:
 	dev_warn(sdev->dev, "%s (UUID: %pUL): %s (ibs/obs: %u/%u)\n",

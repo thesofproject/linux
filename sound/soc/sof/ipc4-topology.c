@@ -96,6 +96,8 @@ static const struct sof_topology_token ipc4_module_params_num_tokens[] = {
 		offsetof(struct sof_ipc4_module_params, num_input_formats)},
 	{SOF_TKN_COMP_NUM_OUTPUT_AUDIO_FORMATS, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
 		offsetof(struct sof_ipc4_module_params, num_output_formats)},
+	{SOF_TKN_COMP_NUM_MOD_CFGS, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc4_module_params, num_mod_cfgs)},
 };
 
 static const struct sof_topology_token dai_tokens[] = {
@@ -129,6 +131,16 @@ static const struct sof_topology_token src_tokens[] = {
 		offsetof(struct sof_ipc4_src, sink_rate)},
 };
 
+/* module configuration */
+static const struct sof_topology_token ipc4_mod_cfg_tokens[] = {
+	{SOF_TKN_MOD_CFG_IBS, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc4_tplg_mod_cfg, ibs)},
+	{SOF_TKN_MOD_CFG_OBS, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc4_tplg_mod_cfg, obs)},
+	{SOF_TKN_MOD_CFG_CPC, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc4_tplg_mod_cfg, cpc)},
+};
+
 static const struct sof_token_info ipc4_token_list[SOF_TOKEN_COUNT] = {
 	[SOF_DAI_TOKENS] = {"DAI tokens", dai_tokens, ARRAY_SIZE(dai_tokens)},
 	[SOF_PIPELINE_TOKENS] = {"Pipeline tokens", pipeline_tokens, ARRAY_SIZE(pipeline_tokens)},
@@ -150,6 +162,8 @@ static const struct sof_token_info ipc4_token_list[SOF_TOKEN_COUNT] = {
 		ipc4_module_params_num_tokens, ARRAY_SIZE(ipc4_module_params_num_tokens)},
 	[SOF_GAIN_TOKENS] = {"Gain tokens", gain_tokens, ARRAY_SIZE(gain_tokens)},
 	[SOF_SRC_TOKENS] = {"SRC tokens", src_tokens, ARRAY_SIZE(src_tokens)},
+	[SOF_MOD_CFG_TOKENS] = {"IPC4 module configuration tokens",
+		ipc4_mod_cfg_tokens, ARRAY_SIZE(ipc4_mod_cfg_tokens)},
 };
 
 static void sof_ipc4_dbg_audio_format(struct device *dev, struct sof_ipc4_pin_format *pin_fmt,
@@ -215,7 +229,8 @@ static int sof_ipc4_get_module_params(struct snd_soc_component *scomp,
 				      struct sof_ipc4_base_module_cfg *module_base_cfg)
 {
 	struct sof_ipc4_pin_format *in_format = NULL;
-	struct sof_ipc4_pin_format *out_format;
+	struct sof_ipc4_pin_format *out_format = NULL;
+	struct sof_ipc4_tplg_mod_cfg *mod_cfgs;
 	int ret;
 
 	ret = sof_update_ipc_object(scomp, module_params,
@@ -246,6 +261,9 @@ static int sof_ipc4_get_module_params(struct snd_soc_component *scomp,
 
 	dev_dbg(scomp->dev, "widget %s: is_pages: %d\n", swidget->widget->name,
 		module_base_cfg->is_pages);
+
+	/* Save the CPC override value */
+	module_params->cpc = module_base_cfg->cpc;
 
 	if (module_params->num_input_formats) {
 		in_format = kcalloc(module_params->num_input_formats,
@@ -291,10 +309,35 @@ static int sof_ipc4_get_module_params(struct snd_soc_component *scomp,
 					  module_params->num_output_formats);
 	}
 
+	if (module_params->num_mod_cfgs) {
+		mod_cfgs = kcalloc(module_params->num_mod_cfgs, sizeof(*mod_cfgs),
+				   GFP_KERNEL);
+		if (!mod_cfgs) {
+			ret = -ENOMEM;
+			goto err_out;
+		}
+
+		ret = sof_update_ipc_object(scomp, mod_cfgs, SOF_MOD_CFG_TOKENS,
+					    swidget->tuples, swidget->num_tuples,
+					    sizeof(*mod_cfgs),
+					    module_params->num_mod_cfgs);
+		if (ret) {
+			dev_err(scomp->dev, "parse mod_cfg tokens failed\n");
+			goto err_mod_cfg;
+		}
+
+		module_params->mod_cfgs = mod_cfgs;
+		dev_dbg(scomp->dev, "Number of mod_cfgs for %s: %u\n",
+			swidget->widget->name, module_params->num_mod_cfgs);
+	}
+
 	return 0;
 
+err_mod_cfg:
+	kfree(mod_cfgs);
 err_out:
 	kfree(out_format);
+	module_params->output_pin_fmts = NULL;
 err_in:
 	kfree(in_format);
 	module_params->input_pin_fmts = NULL;
@@ -309,6 +352,8 @@ static void sof_ipc4_free_audio_fmt(struct sof_ipc4_module_params *module_params
 	module_params->output_pin_fmts = NULL;
 	kfree(module_params->input_pin_fmts);
 	module_params->input_pin_fmts = NULL;
+	kfree(module_params->mod_cfgs);
+	module_params->mod_cfgs = NULL;
 }
 
 static void sof_ipc4_widget_free_comp_pipeline(struct snd_sof_widget *swidget)
@@ -938,7 +983,66 @@ static void sof_ipc4_widget_free_comp_process(struct snd_sof_widget *swidget)
 }
 
 static void
+sof_ipc4_update_cpc_from_tplg(struct snd_sof_dev *sdev,
+			      struct snd_sof_widget *swidget,
+			      struct sof_ipc4_module_params *module_params,
+			      struct sof_ipc4_base_module_cfg *basecfg,
+			      bool exact_match)
+{
+	struct sof_ipc4_tplg_mod_cfg *tplg_mod_cfgs = module_params->mod_cfgs;
+	u32 cpc_pick = 0;
+	u32 max_cpc = 0;
+	int i;
+
+	/*
+	 * No mod_cfg present for the module or the CPC is already set, no need
+	 * to proceed further
+	 */
+	if (!tplg_mod_cfgs || basecfg->cpc)
+		return;
+
+	/*
+	 * Find the best matching (highest) CPC value based on the module's
+	 * external configuration (IBS/OBS).
+	 * The CPC value in each module config entry has been measured and
+	 * recorded as a IBS/OBS/CPC triplet.
+	 *
+	 * In case of multiple IBS/OBS matches, use the highest CPC number.
+	 */
+	for (i = 0; i < module_params->num_mod_cfgs; i++) {
+		if (basecfg->obs == tplg_mod_cfgs[i].obs &&
+		    basecfg->ibs == tplg_mod_cfgs[i].ibs &&
+		    cpc_pick < tplg_mod_cfgs[i].cpc)
+			cpc_pick = tplg_mod_cfgs[i].cpc;
+
+		if (max_cpc < tplg_mod_cfgs[i].cpc)
+			max_cpc = tplg_mod_cfgs[i].cpc;
+	}
+
+	if (!cpc_pick) {
+		if (exact_match)
+			return;
+
+		/*
+		 * No matching IBS/OBS found, use the maximum CPC value we have
+		 * encountered while parsing the module config entries
+		 */
+		dev_dbg(sdev->dev,
+			"%s: No exact CPC match from tplg mod_cfg (ibs/obs: %u/%u)\n",
+			swidget->widget->name, basecfg->ibs, basecfg->obs);
+
+		cpc_pick = max_cpc;
+	}
+
+	dev_dbg(sdev->dev, "%s: CPC from tplg mod_cfg: %u\n",
+		swidget->widget->name, cpc_pick);
+
+	basecfg->cpc = cpc_pick;
+}
+
+static void
 sof_ipc4_update_resource_usage(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget,
+			       struct sof_ipc4_module_params *module_params,
 			       struct sof_ipc4_base_module_cfg *base_config)
 {
 	struct sof_ipc4_fw_module *fw_module = swidget->module_info;
@@ -971,9 +1075,33 @@ sof_ipc4_update_resource_usage(struct snd_sof_dev *sdev, struct snd_sof_widget *
 	pipeline = pipe_widget->private;
 	pipeline->mem_usage += total;
 
-	/* Update base_config->cpc from the module manifest */
-	sof_ipc4_update_cpc_from_manifest(sdev, fw_module, base_config);
+	/*
+	 * Initialize the module's cpc with the stored global value from
+	 * topology
+	 */
+	base_config->cpc = module_params->cpc;
+	if (base_config->cpc)
+		goto out;
 
+	/* Update base_config->cpc from topology mod_cfg - direct match */
+	sof_ipc4_update_cpc_from_tplg(sdev, swidget, module_params, base_config, true);
+	if (base_config->cpc)
+		goto out;
+
+	/* Update base_config->cpc from the module manifest - direct match  */
+	sof_ipc4_update_cpc_from_manifest(sdev, swidget->module_info, base_config, true);
+	if (base_config->cpc)
+		goto out;
+
+	/* Update base_config->cpc from topology mod_cfg - max CPC value */
+	sof_ipc4_update_cpc_from_tplg(sdev, swidget, module_params, base_config, false);
+	if (base_config->cpc)
+		goto out;
+
+	/* Update the base_config->cpc from the module manifest - max CPC value */
+	sof_ipc4_update_cpc_from_manifest(sdev, swidget->module_info, base_config, false);
+
+out:
 	dev_dbg(sdev->dev, "%s: ibs / obs / cpc: %u / %u / %u\n",
 		swidget->widget->name, base_config->ibs, base_config->obs,
 		base_config->cpc);
@@ -1723,7 +1851,8 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		       &ipc4_copier->dma_config_tlv, dma_config_tlv_size);
 
 	/* update pipeline memory usage */
-	sof_ipc4_update_resource_usage(sdev, swidget, &copier_data->base_config);
+	sof_ipc4_update_resource_usage(sdev, swidget, module_params,
+				       &copier_data->base_config);
 
 	return 0;
 }
@@ -1760,7 +1889,7 @@ static int sof_ipc4_prepare_gain_module(struct snd_sof_widget *swidget,
 	}
 
 	/* update pipeline memory usage */
-	sof_ipc4_update_resource_usage(sdev, swidget, &gain->base_config);
+	sof_ipc4_update_resource_usage(sdev, swidget, module_params, &gain->base_config);
 
 	return 0;
 }
@@ -1797,7 +1926,7 @@ static int sof_ipc4_prepare_mixer_module(struct snd_sof_widget *swidget,
 	}
 
 	/* update pipeline memory usage */
-	sof_ipc4_update_resource_usage(sdev, swidget, &mixer->base_config);
+	sof_ipc4_update_resource_usage(sdev, swidget, module_params, &mixer->base_config);
 
 	return 0;
 }
@@ -1852,7 +1981,7 @@ static int sof_ipc4_prepare_src_module(struct snd_sof_widget *swidget,
 	}
 
 	/* update pipeline memory usage */
-	sof_ipc4_update_resource_usage(sdev, swidget, &src->base_config);
+	sof_ipc4_update_resource_usage(sdev, swidget, module_params, &src->base_config);
 
 	out_audio_fmt = &module_params->output_pin_fmts[output_format_index].audio_fmt;
 	src->sink_rate = out_audio_fmt->sampling_frequency;
@@ -1988,7 +2117,7 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 	}
 
 	/* update pipeline memory usage */
-	sof_ipc4_update_resource_usage(sdev, swidget, &process->base_config);
+	sof_ipc4_update_resource_usage(sdev, swidget, module_params, &process->base_config);
 
 	/* ipc_config_data is composed of the base_config followed by an optional extension */
 	memcpy(cfg, &process->base_config, sizeof(struct sof_ipc4_base_module_cfg));
@@ -2847,6 +2976,7 @@ static enum sof_tokens common_copier_token_list[] = {
 	SOF_COPIER_DEEP_BUFFER_TOKENS,
 	SOF_COPIER_TOKENS,
 	SOF_COMP_EXT_TOKENS,
+	SOF_MOD_CFG_TOKENS,
 };
 
 static enum sof_tokens pipeline_token_list[] = {
@@ -2862,6 +2992,7 @@ static enum sof_tokens dai_token_list[] = {
 	SOF_COPIER_TOKENS,
 	SOF_DAI_TOKENS,
 	SOF_COMP_EXT_TOKENS,
+	SOF_MOD_CFG_TOKENS,
 };
 
 static enum sof_tokens pga_token_list[] = {
@@ -2871,6 +3002,7 @@ static enum sof_tokens pga_token_list[] = {
 	SOF_IN_AUDIO_FORMAT_TOKENS,
 	SOF_OUT_AUDIO_FORMAT_TOKENS,
 	SOF_COMP_EXT_TOKENS,
+	SOF_MOD_CFG_TOKENS,
 };
 
 static enum sof_tokens mixer_token_list[] = {
@@ -2879,6 +3011,7 @@ static enum sof_tokens mixer_token_list[] = {
 	SOF_IN_AUDIO_FORMAT_TOKENS,
 	SOF_OUT_AUDIO_FORMAT_TOKENS,
 	SOF_COMP_EXT_TOKENS,
+	SOF_MOD_CFG_TOKENS,
 };
 
 static enum sof_tokens src_token_list[] = {
@@ -2888,6 +3021,7 @@ static enum sof_tokens src_token_list[] = {
 	SOF_IN_AUDIO_FORMAT_TOKENS,
 	SOF_OUT_AUDIO_FORMAT_TOKENS,
 	SOF_COMP_EXT_TOKENS,
+	SOF_MOD_CFG_TOKENS,
 };
 
 static enum sof_tokens process_token_list[] = {
@@ -2896,6 +3030,7 @@ static enum sof_tokens process_token_list[] = {
 	SOF_IN_AUDIO_FORMAT_TOKENS,
 	SOF_OUT_AUDIO_FORMAT_TOKENS,
 	SOF_COMP_EXT_TOKENS,
+	SOF_MOD_CFG_TOKENS,
 };
 
 static const struct sof_ipc_tplg_widget_ops tplg_ipc4_widget_ops[SND_SOC_DAPM_TYPE_COUNT] = {
