@@ -167,13 +167,13 @@ struct sof_ipc4_pin_format {
 };
 
 /**
- * struct sof_ipc4_available_audio_format - Available audio formats
+ * struct sof_ipc4_module_params - Common parameters for modules
  * @output_pin_fmts: Available output pin formats
  * @input_pin_fmts: Available input pin formats
  * @num_input_formats: Number of input pin formats
  * @num_output_formats: Number of output pin formats
  */
-struct sof_ipc4_available_audio_format {
+struct sof_ipc4_module_params {
 	struct sof_ipc4_pin_format *output_pin_fmts;
 	struct sof_ipc4_pin_format *input_pin_fmts;
 	u32 num_input_formats;
@@ -294,7 +294,7 @@ struct sof_ipc4_alh_configuration_blob {
  * @data: IPC copier data
  * @copier_config: Copier + blob
  * @ipc_config_size: Size of copier_config
- * @available_fmt: Available audio format
+ * @module_params: Common module parameters
  * @frame_fmt: frame format
  * @msg: message structure for copier
  * @gtw_attr: Gateway attributes for copier blob
@@ -307,7 +307,7 @@ struct sof_ipc4_copier {
 	u32 *copier_config;
 	uint32_t ipc_config_size;
 	void *ipc_config_data;
-	struct sof_ipc4_available_audio_format available_fmt;
+	struct sof_ipc4_module_params module_params;
 	u32 frame_fmt;
 	struct sof_ipc4_msg msg;
 	struct sof_ipc4_gtw_attributes *gtw_attr;
@@ -365,25 +365,25 @@ struct sof_ipc4_gain_data {
  * struct sof_ipc4_gain - gain config data
  * @base_config: IPC base config data
  * @data: IPC gain blob
- * @available_fmt: Available audio format
+ * @module_params: Common module parameters
  * @msg: message structure for gain
  */
 struct sof_ipc4_gain {
 	struct sof_ipc4_base_module_cfg base_config;
 	struct sof_ipc4_gain_data data;
-	struct sof_ipc4_available_audio_format available_fmt;
+	struct sof_ipc4_module_params module_params;
 	struct sof_ipc4_msg msg;
 };
 
 /**
  * struct sof_ipc4_mixer - mixer config data
  * @base_config: IPC base config data
- * @available_fmt: Available audio format
+ * @module_params: Common module parameters
  * @msg: IPC4 message struct containing header and data info
  */
 struct sof_ipc4_mixer {
 	struct sof_ipc4_base_module_cfg base_config;
-	struct sof_ipc4_available_audio_format available_fmt;
+	struct sof_ipc4_module_params module_params;
 	struct sof_ipc4_msg msg;
 };
 
@@ -391,13 +391,13 @@ struct sof_ipc4_mixer {
  * struct sof_ipc4_src SRC config data
  * @base_config: IPC base config data
  * @sink_rate: Output rate for sink module
- * @available_fmt: Available audio format
+ * @module_params: Common module parameters
  * @msg: IPC4 message struct containing header and data info
  */
 struct sof_ipc4_src {
 	struct sof_ipc4_base_module_cfg base_config;
 	uint32_t sink_rate;
-	struct sof_ipc4_available_audio_format available_fmt;
+	struct sof_ipc4_module_params module_params;
 	struct sof_ipc4_msg msg;
 };
 
@@ -423,7 +423,7 @@ struct sof_ipc4_base_module_cfg_ext {
  * @base_config: IPC base config data
  * @base_config_ext: Base config extension data for module init
  * @output_format: Output audio format
- * @available_fmt: Available audio format
+ * @module_params: Common module parameters
  * @ipc_config_data: Process module config data
  * @ipc_config_size: Size of process module config data
  * @msg: IPC4 message struct containing header and data info
@@ -434,7 +434,7 @@ struct sof_ipc4_process {
 	struct sof_ipc4_base_module_cfg base_config;
 	struct sof_ipc4_base_module_cfg_ext *base_config_ext;
 	struct sof_ipc4_audio_format output_format;
-	struct sof_ipc4_available_audio_format available_fmt;
+	struct sof_ipc4_module_params module_params;
 	void *ipc_config_data;
 	uint32_t ipc_config_size;
 	struct sof_ipc4_msg msg;

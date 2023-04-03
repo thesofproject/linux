@@ -465,9 +465,9 @@ static int sof_ipc4_pcm_dai_link_fixup_rate(struct snd_sof_dev *sdev,
 					    struct snd_pcm_hw_params *params,
 					    struct sof_ipc4_copier *ipc4_copier)
 {
-	struct sof_ipc4_pin_format *pin_fmts = ipc4_copier->available_fmt.input_pin_fmts;
+	struct sof_ipc4_pin_format *pin_fmts = ipc4_copier->module_params.input_pin_fmts;
 	struct snd_interval *rate = hw_param_interval(params, SNDRV_PCM_HW_PARAM_RATE);
-	int num_input_formats = ipc4_copier->available_fmt.num_input_formats;
+	int num_input_formats = ipc4_copier->module_params.num_input_formats;
 	unsigned int fe_rate = params_rate(params);
 	bool fe_be_rate_match = false;
 	bool single_be_rate = true;
