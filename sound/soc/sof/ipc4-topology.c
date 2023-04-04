@@ -2017,8 +2017,11 @@ static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 	case snd_soc_dapm_scheduler:
 		pipeline = swidget->private;
 
-		if (pipeline->use_chain_dma)
+		if (pipeline->use_chain_dma) {
+			dev_warn(sdev->dev, "use_chain_dma set for scheduler %s",
+				 swidget->widget->name);
 			return 0;
+		}
 
 		dev_dbg(sdev->dev, "pipeline: %d memory pages: %d\n", swidget->pipeline_id,
 			pipeline->mem_usage);
@@ -2173,8 +2176,12 @@ static int sof_ipc4_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget 
 		struct sof_ipc4_msg msg = {{ 0 }};
 		u32 header;
 
-		if (pipeline->use_chain_dma)
+		if (pipeline->use_chain_dma) {
+			dev_warn(sdev->dev, "use_chain_dma set for scheduler %s",
+				 swidget->widget->name);
+			mutex_unlock(&ipc4_data->pipeline_state_mutex);
 			return 0;
+		}
 
 		header = SOF_IPC4_GLB_PIPE_INSTANCE_ID(swidget->instance_id);
 		header |= SOF_IPC4_MSG_TYPE_SET(SOF_IPC4_GLB_DELETE_PIPELINE);
@@ -2363,10 +2370,12 @@ static int sof_ipc4_route_setup(struct snd_sof_dev *sdev, struct snd_sof_route *
 	}
 
 	if (!src_fw_module || !sink_fw_module) {
-		/* The NULL module will print as "(efault)" */
-		dev_err(sdev->dev, "source %s or sink %s widget weren't set up properly\n",
-			src_fw_module->man4_module_entry.name,
-			sink_fw_module->man4_module_entry.name);
+		dev_err(sdev->dev,
+			"cannot bind %s -> %s, no firmware module for: %s%s\n",
+			src_widget->widget->name, sink_widget->widget->name,
+			src_fw_module ? "" : " source",
+			sink_fw_module ? "" : " sink");
+
 		return -ENODEV;
 	}
 

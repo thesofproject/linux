@@ -50,8 +50,8 @@ struct sdw_slave;
 enum regcache_type {
 	REGCACHE_NONE,
 	REGCACHE_RBTREE,
-	REGCACHE_COMPRESSED,
 	REGCACHE_FLAT,
+	REGCACHE_MAPLE,
 };
 
 /**
