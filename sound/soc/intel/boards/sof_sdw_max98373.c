@@ -130,8 +130,6 @@ int sof_sdw_mx8373_init(struct snd_soc_card *card,
 	if (info->amp_num == 2)
 		dai_links->init = spk_init;
 
-	info->late_probe = true;
-
 	dai_links->ops = &max_98373_sdw_ops;
 
 	return 0;

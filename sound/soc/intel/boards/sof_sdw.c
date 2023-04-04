@@ -1500,12 +1500,12 @@ static int sof_sdw_card_late_probe(struct snd_soc_card *card)
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(codec_info_list); i++) {
-		if (!codec_info_list[i].late_probe)
-			continue;
+		if (codec_info_list[i].codec_card_late_probe) {
+			ret = codec_info_list[i].codec_card_late_probe(card);
 
-		ret = codec_info_list[i].codec_card_late_probe(card);
-		if (ret < 0)
-			return ret;
+			if (ret < 0)
+				return ret;
+		}
 	}
 
 	if (ctx->idisp_codec)
