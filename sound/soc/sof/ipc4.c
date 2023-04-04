@@ -17,7 +17,7 @@
 #include "ipc4-priv.h"
 #include "ops.h"
 
-#ifdef DEBUG_VERBOSE
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_VERBOSE_IPC)
 #define sof_ipc4_dump_payload(sdev, ipc_data, size)			\
 		print_hex_dump_debug("Message payload: ",		\
 				     DUMP_PREFIX_OFFSET,		\
@@ -362,7 +362,7 @@ static int sof_ipc4_tx_msg(struct snd_sof_dev *sdev, void *msg_data, size_t msg_
 			   void *reply_data, size_t reply_bytes, bool no_pm)
 {
 	struct snd_sof_ipc *ipc = sdev->ipc;
-#ifdef DEBUG_VERBOSE
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_VERBOSE_IPC)
 	struct sof_ipc4_msg *msg = NULL;
 #endif
 	int ret;
@@ -388,7 +388,7 @@ static int sof_ipc4_tx_msg(struct snd_sof_dev *sdev, void *msg_data, size_t msg_
 
 	mutex_unlock(&ipc->tx_mutex);
 
-#ifdef DEBUG_VERBOSE
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_VERBOSE_IPC)
 	/* payload is indicated by non zero msg/reply_bytes */
 	if (msg_bytes)
 		msg = msg_data;
