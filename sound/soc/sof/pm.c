@@ -156,7 +156,12 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 
 	/* restore pipelines */
 	if (tplg_ops->set_up_all_pipelines) {
+		static int counter = 0;
 		ret = tplg_ops->set_up_all_pipelines(sdev, false);
+		if (++counter == 5) {
+			ret = -EINVAL;
+			snd_sof_handle_fw_exception(sdev, "forced panic");
+		}
 		if (ret < 0) {
 			dev_err(sdev->dev, "Failed to restore pipeline after resume %d\n", ret);
 			goto setup_fail;
