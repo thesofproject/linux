@@ -112,6 +112,19 @@ static void xtensa_dsp_oops(struct snd_sof_dev *sdev, const char *level, void *o
 		   xoops->eps6, xoops->eps7, xoops->intenable, xoops->interrupt);
 }
 
+static void xtensa_dump_ar_regs(struct snd_sof_dev *sdev, const char *level,
+				struct sof_ipc_dsp_oops_xtensa *xoops)
+{
+	int i;
+
+	dev_printk(level, sdev->dev, "dump ar register number %d\n", xoops->plat_hdr.numaregs);
+
+	/* ar register number is multiple size of 4 */
+	for (i = 0; i < xoops->plat_hdr.numaregs; i += 4)
+		dev_printk(level, sdev->dev, "[%02d]: %#08x %#08x %#08x %#08x\n", i, xoops->ar[i],
+			   xoops->ar[i + 1], xoops->ar[i + 2], xoops->ar[i + 3]);
+}
+
 static void xtensa_stack(struct snd_sof_dev *sdev, const char *level, void *oops,
 			 u32 *stack, u32 stack_words)
 {
@@ -132,6 +145,9 @@ static void xtensa_stack(struct snd_sof_dev *sdev, const char *level, void *oops
 				   buf, sizeof(buf), false);
 		dev_printk(level, sdev->dev, "0x%08x: %s\n", stack_ptr + i * 4, buf);
 	}
+
+	if (xoops->plat_hdr.numaregs)
+		xtensa_dump_ar_regs(sdev, level, xoops);
 }
 
 const struct dsp_arch_ops sof_xtensa_arch_ops = {
