@@ -64,6 +64,25 @@ jobs:
           make sound/ W=1
           make drivers/soundwire/ W=1
 
+  gcc-sof-x86_64-W1-allmodconfig:
+    name: "GCC build X86_64 with W=1 allmodconfig"
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install libelf
+        run: |
+          sudo apt update
+          sudo apt install -y libelf-dev
+
+      - name: build start
+        run: |
+          export ARCH=x86_64 KCFLAGS="-Wall -Werror"
+          export MAKEFLAGS=j"$(nproc)"
+          make allmodconfig
+          make sound/soc/sof/ W=1
+          make drivers/soundwire/ W=1
+
   gcc-sof-x86_64:
     name: "GCC build X86_64"
     runs-on: ubuntu-20.04
