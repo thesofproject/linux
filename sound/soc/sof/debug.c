@@ -431,8 +431,10 @@ static void snd_sof_ipc_dump(struct snd_sof_dev *sdev)
 	}
 }
 
-void snd_sof_handle_fw_exception(struct snd_sof_dev *sdev, const char *msg)
+void snd_sof_handle_fw_exception(struct snd_sof_dev *sdev, u32 core, const char *msg)
 {
+	u32 flags;
+
 	if (IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_RETAIN_DSP_CONTEXT) ||
 	    sof_debug_check_flag(SOF_DBG_RETAIN_CTX)) {
 		/* should we prevent DSP entering D3 ? */
@@ -444,7 +446,8 @@ void snd_sof_handle_fw_exception(struct snd_sof_dev *sdev, const char *msg)
 
 	/* dump vital information to the logs */
 	snd_sof_ipc_dump(sdev);
-	snd_sof_dsp_dbg_dump(sdev, msg, SOF_DBG_DUMP_REGS | SOF_DBG_DUMP_MBOX);
+	flags = SOF_DBG_DUMP_REGS | SOF_DBG_DUMP_MBOX | SOF_DBG_DUMP_CORE(core);
+	snd_sof_dsp_dbg_dump(sdev, msg, flags);
 	sof_fw_trace_fw_crashed(sdev);
 }
 EXPORT_SYMBOL(snd_sof_handle_fw_exception);

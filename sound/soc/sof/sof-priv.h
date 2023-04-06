@@ -57,6 +57,10 @@ struct snd_sof_pcm_stream;
 #define SOF_DBG_DUMP_PCI		BIT(3)
 /* Output this dump (at the DEBUG level) only when SOF_DBG_PRINT_ALL_DUMPS is set */
 #define SOF_DBG_DUMP_OPTIONAL		BIT(4)
+/* add core id in dump flag */
+#define SOF_DBG_DUMP_CORE_SHIFT		5
+#define SOF_DBG_DUMP_CORE_MASK		GENMASK(8, 5)
+#define SOF_DBG_DUMP_CORE(x)		(((x) << SOF_DBG_DUMP_CORE_SHIFT) & SOF_DBG_DUMP_CORE_MASK)
 
 /* global debug state set by SOF_DBG_ flags */
 bool sof_debug_check_flag(int mask);
@@ -746,7 +750,7 @@ void sof_print_oops_and_stack(struct snd_sof_dev *sdev, const char *level,
 			      u32 panic_code, u32 tracep_code, void *oops,
 			      struct sof_ipc_panic_info *panic_info,
 			      void *stack, size_t stack_words);
-void snd_sof_handle_fw_exception(struct snd_sof_dev *sdev, const char *msg);
+void snd_sof_handle_fw_exception(struct snd_sof_dev *sdev, u32 core, const char *msg);
 int snd_sof_dbg_memory_info_init(struct snd_sof_dev *sdev);
 int snd_sof_debugfs_add_region_item_iomem(struct snd_sof_dev *sdev,
 		enum snd_sof_fw_blk_type blk_type, u32 offset, size_t size,
