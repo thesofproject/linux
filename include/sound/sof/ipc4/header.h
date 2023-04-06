@@ -472,6 +472,9 @@ struct sof_ipc4_dx_state_info {
 #define SOF_IPC4_LOG_CORE_GET(x)		(((x) & SOF_IPC4_LOG_CORE_MASK) >> \
 						 SOF_IPC4_LOG_CORE_SHIFT)
 
+#define SOF_IPC4_EXCEPTION_CORE_MASK		GENMASK(1, 0)
+#define SOF_IPC4_EXCEPTION_CORE_GET(x)		((x) & SOF_IPC4_EXCEPTION_CORE_MASK)
+
 /* Value of notification type field - must fit into 8 bits */
 enum sof_ipc4_notification_type {
 	/* Phrase detected (notification from WoV module) */
