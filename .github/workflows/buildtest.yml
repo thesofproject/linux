@@ -16,12 +16,6 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Fetch kconfig
-        uses: actions/checkout@v3
-        with:
-          repository: 'thesofproject/kconfig'
-          path: 'kconfig'
-
       - name: Install libelf
         run: |
           sudo apt update
