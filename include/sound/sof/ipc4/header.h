@@ -508,6 +508,18 @@ struct sof_ipc4_notify_resource_data {
 	uint32_t data[6];
 } __packed __aligned(4);
 
+#define SOF_IPC4_DEBUG_DESCRIPTOR_SIZE		12 /* 3 x u32 */
+#define SOF_IPC4_INVALID_SLOT_OFFSET		0xffffffff
+#define SOF_IPC4_MAX_DEBUG_SLOTS		15
+#define SOF_IPC4_DEBUG_SLOT_SIZE		0x1000
+
+/* debug log slot types */
+#define SOF_IPC4_DEBUG_SLOT_UNUSED		0x00000000
+#define SOF_IPC4_DEBUG_SLOT_CRITICAL_LOG	0x54524300
+#define SOF_IPC4_DEBUG_SLOT_DEBUG_LOG		0x474f4c00
+#define SOF_IPC4_DEBUG_SLOT_GDB_STUB		0x42444700
+#define SOF_IPC4_DEBUG_SLOT_TELEMETRY		0x4c455400
+
 /** @}*/
 
 #endif
