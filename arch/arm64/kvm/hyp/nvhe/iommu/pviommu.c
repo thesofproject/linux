@@ -10,6 +10,7 @@
 #include <nvhe/mem_protect.h>
 #include <nvhe/pkvm.h>
 #include <nvhe/pviommu.h>
+#include <nvhe/pviommu-host.h>
 
 static DEFINE_HYP_SPINLOCK(pviommu_guest_domain_lock);
 
@@ -59,14 +60,84 @@ static bool pkvm_guest_iommu_unmap(struct pkvm_hyp_vcpu *hyp_vcpu)
 	return false;
 }
 
-static bool pkvm_guest_iommu_attach_dev(struct pkvm_hyp_vcpu *hyp_vcpu)
+static void pkvm_pviommu_hyp_req(u64 *exit_code)
 {
-	return false;
+	write_sysreg_el2(read_sysreg_el2(SYS_ELR) - 4, SYS_ELR);
+	*exit_code = ARM_EXCEPTION_HYP_REQ;
+}
+
+static bool pkvm_guest_iommu_attach_dev(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
+{
+	int ret;
+	struct kvm_vcpu *vcpu = &hyp_vcpu->vcpu;
+	u64 iommu_id = smccc_get_arg2(vcpu);
+	u64 sid = smccc_get_arg3(vcpu);
+	u64 pasid = smccc_get_arg4(vcpu);
+	u64 domain_id = smccc_get_arg5(vcpu);
+	u64 pasid_bits = smccc_get_arg6(vcpu);
+	struct pviommu_route route;
+	struct pkvm_hyp_vm *vm = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
+
+	ret = pkvm_pviommu_get_route(vm, iommu_id, sid, &route);
+	if (ret)
+		goto out_ret;
+	iommu_id = route.iommu;
+	sid = route.sid;
+
+	ret = kvm_iommu_alloc_domain(pviommu_drv_id, iommu_id, domain_id, KVM_IOMMU_DOMAIN_ANY_TYPE);
+	if (ret == -ENOMEM) {
+		pkvm_pviommu_hyp_req(exit_code);
+		return false;
+	} else if (ret) {
+		goto out_ret;
+	}
+
+	ret = kvm_iommu_attach_dev(iommu_id, domain_id, sid, pasid, pasid_bits, 0);
+	if (ret == -ENOMEM) {
+		WARN_ON(kvm_iommu_free_domain(domain_id));
+		/*
+		 * The driver will request memory when returning -ENOMEM, so go back to host to
+		 * fulfill the request and repeat the HVC.
+		 */
+		pkvm_pviommu_hyp_req(exit_code);
+		return false;
+	}
+
+out_ret:
+	smccc_set_retval(vcpu, ret ?  SMCCC_RET_INVALID_PARAMETER : SMCCC_RET_SUCCESS,
+			 0, 0, 0);
+	return true;
 }
 
 static bool pkvm_guest_iommu_detach_dev(struct pkvm_hyp_vcpu *hyp_vcpu)
 {
-	return false;
+	int ret;
+	struct kvm_vcpu *vcpu = &hyp_vcpu->vcpu;
+	u64 iommu_id = smccc_get_arg2(vcpu);
+	u64 sid = smccc_get_arg3(vcpu);
+	u64 pasid = smccc_get_arg4(vcpu);
+	u64 domain_id = smccc_get_arg5(vcpu);
+	struct pviommu_route route;
+	struct pkvm_hyp_vm *vm = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
+
+	/* MBZ */
+	if (smccc_get_arg6(vcpu)) {
+		ret = -EINVAL;
+		goto out_ret;
+	}
+
+	ret = pkvm_pviommu_get_route(vm, iommu_id, sid, &route);
+	if (ret)
+		goto out_ret;
+	iommu_id = route.iommu;
+	sid = route.sid;
+
+	ret = kvm_iommu_detach_dev(iommu_id, domain_id, sid, pasid);
+
+out_ret:
+	smccc_set_retval(vcpu, ret ?  SMCCC_RET_INVALID_PARAMETER : SMCCC_RET_SUCCESS,
+			 0, 0, 0);
+	return true;
 }
 
 static bool pkvm_guest_iommu_alloc_domain(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
@@ -140,7 +211,7 @@ bool kvm_handle_pviommu_hvc(struct kvm_vcpu *vcpu, u64 *exit_code)
 	case KVM_PVIOMMU_OP_FREE_DOMAIN:
 		return pkvm_guest_iommu_free_domain(hyp_vcpu);
 	case KVM_PVIOMMU_OP_ATTACH_DEV:
-		return pkvm_guest_iommu_attach_dev(hyp_vcpu);
+		return pkvm_guest_iommu_attach_dev(hyp_vcpu, exit_code);
 	case KVM_PVIOMMU_OP_DETACH_DEV:
 		return pkvm_guest_iommu_detach_dev(hyp_vcpu);
 	case KVM_PVIOMMU_OP_MAP_PAGES:

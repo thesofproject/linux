@@ -464,12 +464,15 @@ int kvm_iommu_attach_dev(pkvm_handle_t iommu_id, pkvm_handle_t domain_id,
 	int ret;
 	struct kvm_hyp_iommu_domain *domain;
 	struct kvm_iommu_ops *kvm_iommu_ops;
+	struct pkvm_hyp_vcpu *hyp_vcpu = __get_vcpu();
+	struct pkvm_hyp_vm *vm = NULL;
 
+	if (hyp_vcpu)
+		vm = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
 	/*
-	 * At the moment the IOMMU in EL2 is not aware of guests and pvIOMMU
-	 * doesn't exist yet, so all attaches come from host, this should change soon.
+	 * Make sure device can't transition to/from VMs while in the middle of attach.
 	 */
-	ret = pkvm_devices_get_context(iommu_id, endpoint_id);
+	ret = pkvm_devices_get_context(iommu_id, endpoint_id, vm);
 	if (ret)
 		return ret;
 
@@ -504,9 +507,13 @@ int kvm_iommu_detach_dev(pkvm_handle_t iommu_id, pkvm_handle_t domain_id,
 	int ret;
 	struct kvm_hyp_iommu_domain *domain;
 	struct kvm_iommu_ops *kvm_iommu_ops;
+	struct pkvm_hyp_vcpu *hyp_vcpu = __get_vcpu();
+	struct pkvm_hyp_vm *vm = NULL;
 
+	if (hyp_vcpu)
+		vm = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
 	/* See kvm_iommu_attach_dev(). */
-	ret = pkvm_devices_get_context(iommu_id, endpoint_id);
+	ret = pkvm_devices_get_context(iommu_id, endpoint_id, vm);
 	if (ret)
 		return ret;
 
@@ -652,7 +659,9 @@ int kvm_iommu_set_identity(pkvm_handle_t drv_id, pkvm_handle_t iommu,
 
 	if (!kvm_iommu_ops || !kvm_iommu_ops->set_identity)
 		return -ENODEV;
-	ret = pkvm_devices_get_context(iommu, dev);
+
+	/* set_identity not exposed to guests. */
+	ret = pkvm_devices_get_context(iommu, dev, NULL);
 	if (ret)
 		return ret;
 	ret = kvm_iommu_ops->set_identity(iommu, dev, on);
