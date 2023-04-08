@@ -1028,6 +1028,48 @@ static int sof_ipc4_update_hw_params(struct snd_sof_dev *sdev, struct snd_pcm_hw
 	return 0;
 }
 
+static int sof_ipc4_get_output_format(struct snd_sof_dev *sdev,
+				      struct snd_sof_widget *swidget,
+				      struct sof_ipc4_available_audio_format *available_fmt,
+				      struct snd_soc_dapm_widget_list *list)
+{
+	struct snd_soc_dapm_path *p;
+	char **output_pin_binding = swidget->output_pin_binding;
+	int num_output_pins = swidget->num_output_pins;
+	int pin_index = -EINVAL;
+	int i;
+
+	/* find pin_index of the sink widget belonging to the DAPM widget list */
+	snd_soc_dapm_widget_for_each_sink_path(swidget->widget, p) {
+		if (!widget_in_list(list, p->sink))
+			continue;
+
+		for (i = 0; i < num_output_pins; i++) {
+			if (!strcmp(output_pin_binding[i], p->sink->name)) {
+				pin_index = i;
+				break;
+			}
+		}
+
+		if (pin_index >= 0)
+			break;
+	}
+
+	if (pin_index < 0) {
+		dev_err(sdev->dev, "No matching output pin index found for widget %s\n",
+			swidget->widget->name);
+		return -EINVAL;
+	}
+
+	for (i = 0; i < available_fmt->num_output_formats; i++)
+		if (available_fmt->output_pin_fmts[i].pin_index == pin_index)
+			return i;
+
+	dev_err(sdev->dev, "No matching output pin format found for widget %s with pin index %d\n",
+		swidget->widget->name, pin_index);
+	return -EINVAL;
+}
+
 static int sof_ipc4_init_audio_fmt(struct snd_sof_dev *sdev,
 				   struct snd_sof_widget *swidget,
 				   struct sof_ipc4_base_module_cfg *base_config,
@@ -1038,13 +1080,11 @@ static int sof_ipc4_init_audio_fmt(struct snd_sof_dev *sdev,
 				   struct snd_soc_dapm_widget_list *list)
 {
 	char **output_pin_binding = swidget->output_pin_binding;
-	int num_output_pins = swidget->num_output_pins;
-	struct snd_soc_dapm_path *p;
-	int pin_index = -EINVAL;
 	u32 valid_bits;
 	u32 channels;
 	u32 rate;
 	int sample_valid_bits;
+	int ret;
 	int i;
 
 	if (!pin_fmts) {
@@ -1130,38 +1170,12 @@ static int sof_ipc4_init_audio_fmt(struct snd_sof_dev *sdev,
 		return i;
 	}
 
-	/* find pin_index of the sink widget belonging to the DAPM widget list */
-	snd_soc_dapm_widget_for_each_sink_path(swidget->widget, p) {
-		if (!widget_in_list(list, p->sink))
-			continue;
+	/* Return format index of the output format based on output pin binding */
+	ret = sof_ipc4_get_output_format(sdev, swidget, available_fmt, list);
+	if (ret >= 0)
+		base_config->obs = available_fmt->output_pin_fmts[ret].buffer_size;
 
-		for (i = 0; i < num_output_pins; i++) {
-			if (!strcmp(output_pin_binding[i], p->sink->name)) {
-				pin_index = i;
-				break;
-			}
-		}
-
-		if (pin_index >= 0)
-			break;
-	}
-
-	if (pin_index < 0) {
-		dev_err(sdev->dev, "No matching output pin index found for widget %s\n",
-			swidget->widget->name);
-		return -EINVAL;
-	}
-
-	for (i = 0; i < available_fmt->num_output_formats; i++) {
-		if (available_fmt->output_pin_fmts[i].pin_index == pin_index) {
-			base_config->obs = available_fmt->output_pin_fmts[i].buffer_size;
-			return i;
-		}
-	}
-
-	dev_err(sdev->dev, "No matching output pin format found for widget %s with pin index %d\n",
-		swidget->widget->name, pin_index);
-	return -EINVAL;
+	return ret;
 }
 
 static void sof_ipc4_unprepare_copier_module(struct snd_sof_widget *swidget)
@@ -1410,7 +1424,48 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 	u32 deep_buffer_dma_ms = 0;
 	u32 format_list_count;
 
-	dev_dbg(sdev->dev, "copier %s, type %d", swidget->widget->name, swidget->id);
+	/* just modify the input params for the next widget if the widget is already prepared */
+	if (swidget->prepared) {
+		struct sof_ipc4_audio_format *out_fmt;
+		char **output_pin_binding = swidget->output_pin_binding;
+
+		switch (swidget->id) {
+		case snd_soc_dapm_aif_in:
+		case snd_soc_dapm_aif_out:
+		case snd_soc_dapm_buffer:
+			ipc4_copier = (struct sof_ipc4_copier *)swidget->private;
+			copier_data = &ipc4_copier->data;
+			break;
+		case snd_soc_dapm_dai_in:
+		case snd_soc_dapm_dai_out:
+			dai = swidget->private;
+			ipc4_copier = (struct sof_ipc4_copier *)dai->private;
+			copier_data = &ipc4_copier->data;
+			break;
+		default:
+			return -EINVAL;
+		}
+
+		available_fmt = &ipc4_copier->available_fmt;
+
+		if (!output_pin_binding) {
+			out_fmt = &copier_data->out_format;
+		} else {
+			ret = sof_ipc4_get_output_format(sdev, swidget, available_fmt, list);
+			if (ret < 0)
+				return ret;
+
+			out_fmt = &available_fmt->output_pin_fmts[ret].audio_fmt;
+		}
+
+		fmt = hw_param_mask(pipeline_params, SNDRV_PCM_HW_PARAM_FORMAT);
+		out_sample_valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(out_fmt->fmt_cfg);
+		snd_mask_none(fmt);
+
+		return ipc4_set_fmt_mask(fmt, out_sample_valid_bits);
+	}
+
+	dev_dbg(sdev->dev, "prepare copier %s, type %d", swidget->widget->name, swidget->id);
 
 	switch (swidget->id) {
 	case snd_soc_dapm_aif_in:
@@ -1749,6 +1804,9 @@ static int sof_ipc4_prepare_gain_module(struct snd_sof_widget *swidget,
 	struct sof_ipc4_available_audio_format *available_fmt = &gain->available_fmt;
 	int ret;
 
+	if (swidget->prepared)
+		return 0;
+
 	ret = sof_ipc4_init_audio_fmt(sdev, swidget, &gain->base_config,
 				      pipeline_params, available_fmt,
 				      available_fmt->input_pin_fmts,
@@ -1773,6 +1831,9 @@ static int sof_ipc4_prepare_mixer_module(struct snd_sof_widget *swidget,
 	struct sof_ipc4_mixer *mixer = swidget->private;
 	struct sof_ipc4_available_audio_format *available_fmt = &mixer->available_fmt;
 	int ret;
+
+	if (swidget->prepared)
+		return 0;
 
 	ret = sof_ipc4_init_audio_fmt(sdev, swidget, &mixer->base_config,
 				      pipeline_params, available_fmt,
@@ -1800,6 +1861,9 @@ static int sof_ipc4_prepare_src_module(struct snd_sof_widget *swidget,
 	struct snd_interval *rate;
 	int ret;
 
+	if (swidget->prepared)
+		goto params_update;
+
 	ret = sof_ipc4_init_audio_fmt(sdev, swidget, &src->base_config,
 				      pipeline_params, available_fmt,
 				      available_fmt->input_pin_fmts,
@@ -1810,6 +1874,7 @@ static int sof_ipc4_prepare_src_module(struct snd_sof_widget *swidget,
 	/* update pipeline memory usage */
 	sof_ipc4_update_pipeline_mem_usage(sdev, swidget, &src->base_config);
 
+params_update:
 	/* update pipeline_params for sink widgets */
 	rate = hw_param_interval(pipeline_params, SNDRV_PCM_HW_PARAM_RATE);
 	rate->min = src->sink_rate;
@@ -1908,6 +1973,9 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 	struct sof_ipc4_available_audio_format *available_fmt = &process->available_fmt;
 	void *cfg = process->ipc_config_data;
 	int ret;
+
+	if (swidget->prepared)
+		return sof_ipc4_update_hw_params(sdev, pipeline_params, &process->output_format);
 
 	ret = sof_ipc4_init_audio_fmt(sdev, swidget, &process->base_config,
 				      pipeline_params, available_fmt,
