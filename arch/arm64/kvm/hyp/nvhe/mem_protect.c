@@ -1855,8 +1855,7 @@ static int get_valid_guest_pte(struct pkvm_hyp_vm *vm, u64 ipa, kvm_pte_t *ptep,
 
 /* Return PA for an owned guest IPA or request it, and repeat the guest HVC */
 int pkvm_get_guest_pa_request(struct pkvm_hyp_vcpu *hyp_vcpu, u64 ipa,
-			      size_t ipa_size_request, u64 *out_pa, s8 *out_level,
-			      u64 *exit_code)
+			      size_t ipa_size_request, u64 *out_pa, s8 *out_level)
 {
 	struct kvm_hyp_req *req;
 	kvm_pte_t pte;
@@ -1874,9 +1873,6 @@ int pkvm_get_guest_pa_request(struct pkvm_hyp_vcpu *hyp_vcpu, u64 ipa,
 
 		req->map.guest_ipa = ipa;
 		req->map.size = ipa_size_request;
-		*exit_code = ARM_EXCEPTION_HYP_REQ;
-		/* Repeat next time. */
-		write_sysreg_el2(read_sysreg_el2(SYS_ELR) - 4, SYS_ELR);
 		return -ENOENT;
 	}
 
@@ -3081,4 +3077,21 @@ int __pkvm_unuse_dma(phys_addr_t phys, size_t size, struct pkvm_hyp_vcpu *hyp_vc
 
 	host_unlock_component();
 	return 0;
+}
+
+/* Get a PA and use the page for DMA */
+int pkvm_get_guest_pa_request_use_dma(struct pkvm_hyp_vcpu *hyp_vcpu, u64 ipa,
+                                     size_t ipa_size_request, u64 *out_pa, s8 *level)
+{
+	int ret;
+
+	host_lock_component();
+	ret = pkvm_get_guest_pa_request(hyp_vcpu, ipa, ipa_size_request,
+					out_pa, level);
+	if (ret)
+		goto out_ret;
+	WARN_ON(__pkvm_use_dma_locked(*out_pa, kvm_granule_size(*level), hyp_vcpu));
+out_ret:
+	host_unlock_component();
+	return ret;
 }
