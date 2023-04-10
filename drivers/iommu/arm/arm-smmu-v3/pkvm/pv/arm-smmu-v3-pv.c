@@ -356,7 +356,7 @@ static void smmu_flush_deferred_unuse(struct kvm_smmu_unmapped *unmapped)
 {
 	while (unmapped->ptr) {
 		unmapped->ptr--;
-		WARN_ON(__pkvm_host_unuse_dma(unmapped->phys[unmapped->ptr],
+		WARN_ON(iommu_pkvm_unuse_dma(unmapped->phys[unmapped->ptr],
 					      unmapped->size[unmapped->ptr]));
 	}
 }
@@ -857,7 +857,7 @@ static int smmu_map_pages(struct kvm_hyp_iommu_domain *domain, unsigned long iov
 	if (!IS_ALIGNED(iova | paddr | pgsize, granule))
 		return -EINVAL;
 
-	ret = __pkvm_host_use_dma(paddr, size);
+	ret = iommu_pkvm_use_dma(paddr, size);
 	if (ret)
 		return ret;
 
@@ -877,7 +877,7 @@ static int smmu_map_pages(struct kvm_hyp_iommu_domain *domain, unsigned long iov
 
 	hyp_spin_unlock(&smmu_domain->pgt_lock);
 	if (*total_mapped != size)
-		WARN_ON(__pkvm_host_unuse_dma(paddr, size - *total_mapped));
+		WARN_ON(iommu_pkvm_unuse_dma(paddr, size - *total_mapped));
 
 	return ret;
 }

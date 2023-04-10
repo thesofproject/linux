@@ -85,6 +85,10 @@ void kvm_iommu_reclaim_pages(void *p, u8 order);
 #define kvm_iommu_donate_page()		kvm_iommu_donate_pages(0, 0)
 #define kvm_iommu_reclaim_page(p)		kvm_iommu_reclaim_pages(p, 0)
 
+/* IOMMU variants for drivers which are clueless about VCPUs. */
+int iommu_pkvm_use_dma(u64 phys_addr, size_t size);
+int iommu_pkvm_unuse_dma(u64 phys_addr, size_t size);
+
 void kvm_iommu_iotlb_gather_add_page(struct kvm_hyp_iommu_domain *domain,
 				     struct iommu_iotlb_gather *gather,
 				     unsigned long iova, size_t size);
