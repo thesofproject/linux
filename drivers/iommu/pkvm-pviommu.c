@@ -44,18 +44,68 @@ static int smccc_to_linux_ret(u64 smccc_ret)
 	return -ENODEV;
 }
 
+static u64 __linux_prot_smccc(int iommu_prot)
+{
+	int prot = 0;
+
+	if (iommu_prot & IOMMU_READ)
+		prot |= ARM_SMCCC_KVM_PVIOMMU_READ;
+	if (iommu_prot & IOMMU_WRITE)
+		prot |= ARM_SMCCC_KVM_PVIOMMU_WRITE;
+	if (iommu_prot & IOMMU_CACHE)
+		prot |= ARM_SMCCC_KVM_PVIOMMU_CACHE;
+	if (iommu_prot & IOMMU_NOEXEC)
+		prot |= ARM_SMCCC_KVM_PVIOMMU_NOEXEC;
+	if (iommu_prot & IOMMU_MMIO)
+		prot |= ARM_SMCCC_KVM_PVIOMMU_MMIO;
+	if (iommu_prot & IOMMU_PRIV)
+		prot |= ARM_SMCCC_KVM_PVIOMMU_PRIV;
+
+	return prot;
+}
+
 static int pviommu_map_pages(struct iommu_domain *domain, unsigned long iova,
 			     phys_addr_t paddr, size_t pgsize, size_t pgcount,
 			     int prot, gfp_t gfp, size_t *mapped)
 {
-	return 0;
+	struct pviommu_domain *pv_domain = container_of(domain, struct pviommu_domain, domain);
+	struct arm_smccc_res res;
+	size_t requested_size = pgsize * pgcount, cur_mapped;
+
+	*mapped = 0;
+	while (*mapped < requested_size) {
+		arm_smccc_1_1_hvc(ARM_SMCCC_VENDOR_HYP_KVM_PVIOMMU_OP_FUNC_ID,
+				  KVM_PVIOMMU_OP_MAP_PAGES, pv_domain->id, iova,
+				  paddr, requested_size - *mapped, __linux_prot_smccc(prot), &res);
+		cur_mapped = res.a1;
+		*mapped += cur_mapped;
+		if (res.a0 != SMCCC_RET_SUCCESS)
+			break;
+		iova += cur_mapped;
+		paddr += cur_mapped;
+	}
+	return smccc_to_linux_ret(res.a0);
 }
 
 static size_t pviommu_unmap_pages(struct iommu_domain *domain, unsigned long iova,
 				  size_t pgsize, size_t pgcount,
 				  struct iommu_iotlb_gather *gather)
 {
-	return 0;
+	struct pviommu_domain *pv_domain = container_of(domain, struct pviommu_domain, domain);
+	struct arm_smccc_res res;
+	size_t total_unmapped = 0, unmapped, requested_size = pgsize * pgcount;
+
+	while (total_unmapped < requested_size) {
+		arm_smccc_1_1_hvc(ARM_SMCCC_VENDOR_HYP_KVM_PVIOMMU_OP_FUNC_ID,
+				  KVM_PVIOMMU_OP_UNMAP_PAGES, pv_domain->id, iova,
+				  requested_size - total_unmapped, 0, 0, &res);
+		unmapped = res.a1;
+		total_unmapped += unmapped;
+		if (res.a0 != SMCCC_RET_SUCCESS)
+			break;
+		iova += unmapped;
+	}
+	return total_unmapped;
 }
 
 static phys_addr_t pviommu_iova_to_phys(struct iommu_domain *domain, dma_addr_t iova)
