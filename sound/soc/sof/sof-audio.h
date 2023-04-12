@@ -178,7 +178,8 @@ struct sof_ipc_tplg_widget_ops {
 	int (*ipc_prepare)(struct snd_sof_widget *swidget,
 			   struct snd_pcm_hw_params *fe_params,
 			   struct snd_sof_platform_stream_params *platform_params,
-			   struct snd_pcm_hw_params *source_params, int dir);
+			   struct snd_pcm_hw_params *source_params, int dir,
+			   struct snd_soc_dapm_widget_list *list);
 	void (*ipc_unprepare)(struct snd_sof_widget *swidget);
 };
 
