@@ -6,9 +6,48 @@
 
 #include <kvm/arm_hypercalls.h>
 
+#include <nvhe/iommu.h>
 #include <nvhe/mem_protect.h>
 #include <nvhe/pkvm.h>
 #include <nvhe/pviommu.h>
+
+static DEFINE_HYP_SPINLOCK(pviommu_guest_domain_lock);
+
+#define KVM_IOMMU_MAX_GUEST_DOMAINS		(KVM_IOMMU_MAX_DOMAINS >> 1)
+static unsigned long guest_domains[KVM_IOMMU_MAX_GUEST_DOMAINS / BITS_PER_LONG];
+
+/*
+ * Guests doens't have separate domain space as the host, but they share the upper half
+ * of the domain ids, so they would ask for a domain and get a domain id as a return.
+ * This is a rare operation for guests, so bruteforcing the domain space should be fine
+ * for now, however we can improve this by having a hint for last allocated domain_id or
+ * use a pseudo-random number.
+ */
+static int pkvm_guest_iommu_alloc_id(void)
+{
+	int i;
+
+	for (i = 0 ; i < ARRAY_SIZE(guest_domains) ; ++i) {
+		if (guest_domains[i] != ~0UL) {
+			int domain_off = ffz(guest_domains[i]);
+
+			guest_domains[i] |= (1UL << domain_off);
+			return domain_off + i * BITS_PER_LONG +
+			       (KVM_IOMMU_MAX_DOMAINS >> 1);
+		}
+	}
+
+	return -EBUSY;
+}
+
+static void pkvm_guest_iommu_free_id(int domain_id)
+{
+	domain_id -= (KVM_IOMMU_MAX_DOMAINS >> 1);
+	if (WARN_ON(domain_id < 0) || (domain_id >= KVM_IOMMU_MAX_GUEST_DOMAINS))
+		return;
+
+	guest_domains[domain_id / BITS_PER_LONG] &= ~(1UL << (domain_id % BITS_PER_LONG));
+}
 
 static bool pkvm_guest_iommu_map(struct pkvm_hyp_vcpu *hyp_vcpu)
 {
@@ -30,14 +69,58 @@ static bool pkvm_guest_iommu_detach_dev(struct pkvm_hyp_vcpu *hyp_vcpu)
 	return false;
 }
 
-static bool pkvm_guest_iommu_alloc_domain(struct pkvm_hyp_vcpu *hyp_vcpu)
+static bool pkvm_guest_iommu_alloc_domain(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 {
-	return false;
+	int domain_id = 0;
+	struct kvm_vcpu *vcpu = &hyp_vcpu->vcpu;
+
+	/* MBZ */
+	if (smccc_get_arg2(vcpu) || smccc_get_arg3(vcpu) || smccc_get_arg4(vcpu) ||
+	    smccc_get_arg5(vcpu) || smccc_get_arg6(vcpu))
+		goto out_inval;
+
+	hyp_spin_lock(&pviommu_guest_domain_lock);
+	domain_id = pkvm_guest_iommu_alloc_id();
+	if (domain_id < 0)
+		goto out_inval;
+
+	/*
+	 * Starting from Android17-6.18 the IOMMU requires an IOMMU to alloc the domain,
+	 * which is different from the HVC interface for pvIOMMU, so we defer domain alloction
+	 * till the attach call.
+	 */
+	hyp_spin_unlock(&pviommu_guest_domain_lock);
+	smccc_set_retval(vcpu, SMCCC_RET_SUCCESS, domain_id, 0, 0);
+	return true;
+
+out_inval:
+	hyp_spin_unlock(&pviommu_guest_domain_lock);
+	smccc_set_retval(vcpu, SMCCC_RET_INVALID_PARAMETER, 0, 0, 0);
+	return true;
 }
 
 static bool pkvm_guest_iommu_free_domain(struct pkvm_hyp_vcpu *hyp_vcpu)
 {
-	return false;
+	int ret;
+	struct kvm_vcpu *vcpu = &hyp_vcpu->vcpu;
+	u64 domain_id = smccc_get_arg2(vcpu);
+
+	if (smccc_get_arg3(vcpu) || smccc_get_arg4(vcpu) || smccc_get_arg5(vcpu) ||
+	    smccc_get_arg6(vcpu)) {
+		ret = -EINVAL;
+		goto out_ret;
+	}
+
+	hyp_spin_lock(&pviommu_guest_domain_lock);
+	ret = kvm_iommu_free_domain(domain_id);
+	if (!ret)
+		pkvm_guest_iommu_free_id(domain_id);
+	hyp_spin_unlock(&pviommu_guest_domain_lock);
+
+out_ret:
+	smccc_set_retval(vcpu, ret ?  SMCCC_RET_INVALID_PARAMETER : SMCCC_RET_SUCCESS,
+			 0, 0, 0);
+	return true;
 }
 
 bool kvm_handle_pviommu_hvc(struct kvm_vcpu *vcpu, u64 *exit_code)
@@ -53,7 +136,7 @@ bool kvm_handle_pviommu_hvc(struct kvm_vcpu *vcpu, u64 *exit_code)
 	refill_hyp_pool(&vm->iommu_pool, &hyp_vcpu->host_vcpu->arch.iommu_mc);
 	switch (iommu_op) {
 	case KVM_PVIOMMU_OP_ALLOC_DOMAIN:
-		return pkvm_guest_iommu_alloc_domain(hyp_vcpu);
+		return pkvm_guest_iommu_alloc_domain(hyp_vcpu, exit_code);
 	case KVM_PVIOMMU_OP_FREE_DOMAIN:
 		return pkvm_guest_iommu_free_domain(hyp_vcpu);
 	case KVM_PVIOMMU_OP_ATTACH_DEV:
