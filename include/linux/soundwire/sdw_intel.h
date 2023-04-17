@@ -187,6 +187,7 @@ struct sdw_intel_stream_params_data {
 	struct snd_pcm_hw_params *hw_params;
 	int link_id;
 	int alh_stream_id;
+	int index_in_dailink;
 };
 
 /**

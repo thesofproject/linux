@@ -646,7 +646,8 @@ static int intel_params_stream(struct sdw_intel *sdw,
 			       struct snd_pcm_substream *substream,
 			       struct snd_soc_dai *dai,
 			       struct snd_pcm_hw_params *hw_params,
-			       int link_id, int alh_stream_id)
+			       int link_id, int alh_stream_id,
+			       int index_in_dailink)
 {
 	struct sdw_intel_link_res *res = sdw->link_res;
 	struct sdw_intel_stream_params_data params_data;
@@ -656,6 +657,7 @@ static int intel_params_stream(struct sdw_intel *sdw,
 	params_data.hw_params = hw_params;
 	params_data.link_id = link_id;
 	params_data.alh_stream_id = alh_stream_id;
+	params_data.index_in_dailink = index_in_dailink;
 
 	if (res->ops && res->ops->params_stream && res->dev)
 		return res->ops->params_stream(res->dev,
@@ -671,18 +673,29 @@ static int intel_hw_params(struct snd_pcm_substream *substream,
 			   struct snd_pcm_hw_params *params,
 			   struct snd_soc_dai *dai)
 {
+	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
 	struct sdw_cdns *cdns = snd_soc_dai_get_drvdata(dai);
 	struct sdw_intel *sdw = cdns_to_intel(cdns);
 	struct sdw_cdns_dai_runtime *dai_runtime;
 	struct sdw_cdns_pdi *pdi;
 	struct sdw_stream_config sconfig;
 	struct sdw_port_config *pconfig;
+	struct snd_soc_dai *cpu_dai;
+	int index_in_dailink;
 	int ch, dir;
 	int ret;
 
 	dai_runtime = cdns->dai_runtime_array[dai->id];
 	if (!dai_runtime)
 		return -EIO;
+
+	/* find cpu_dai index in dailink */
+	for_each_rtd_cpu_dais(rtd, index_in_dailink, cpu_dai)
+		if (cpu_dai == dai)
+			break;
+
+	dev_dbg(dai->dev, "hw_params for DAI %s index_in_dailink %d\n",
+		dai->name, index_in_dailink);
 
 	ch = params_channels(params);
 	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
@@ -710,7 +723,8 @@ static int intel_hw_params(struct snd_pcm_substream *substream,
 	/* Inform DSP about PDI stream number */
 	ret = intel_params_stream(sdw, substream, dai, params,
 				  sdw->instance,
-				  pdi->intel_alh_id);
+				  pdi->intel_alh_id,
+				  index_in_dailink);
 	if (ret)
 		goto error;
 
@@ -760,6 +774,13 @@ static int intel_prepare(struct snd_pcm_substream *substream,
 	if (dai_runtime->suspended) {
 		struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
 		struct snd_pcm_hw_params *hw_params;
+		struct snd_soc_dai *cpu_dai;
+		int index_in_dailink;
+
+		/* find cpu_dai index in dailink */
+		for_each_rtd_cpu_dais(rtd, index_in_dailink, cpu_dai)
+			if (cpu_dai == dai)
+				break;
 
 		hw_params = &rtd->dpcm[substream->stream].hw_params;
 
@@ -788,7 +809,8 @@ static int intel_prepare(struct snd_pcm_substream *substream,
 		ret = intel_params_stream(sdw, substream, dai,
 					  hw_params,
 					  sdw->instance,
-					  dai_runtime->pdi->intel_alh_id);
+					  dai_runtime->pdi->intel_alh_id,
+					  index_in_dailink);
 	}
 
 	return ret;
