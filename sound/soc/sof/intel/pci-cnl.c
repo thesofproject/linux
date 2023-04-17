@@ -66,10 +66,10 @@ static const struct sof_dev_desc cfl_desc = {
 	.dspless_mode_supported	= true,		/* Only supported for HDaudio */
 	.default_fw_path = {
 		[SOF_IPC_TYPE_3] = "intel/sof",
-		[SOF_IPC_TYPE_4] = "intel/avs/cnl",
+		[SOF_IPC_TYPE_4] = "intel/avs/cfl",
 	},
 	.default_lib_path = {
-		[SOF_IPC_TYPE_4] = "intel/avs-lib/cnl",
+		[SOF_IPC_TYPE_4] = "intel/avs-lib/cfl",
 	},
 	.default_tplg_path = {
 		[SOF_IPC_TYPE_3] = "intel/sof-tplg",
@@ -99,10 +99,10 @@ static const struct sof_dev_desc cml_desc = {
 	.dspless_mode_supported	= true,		/* Only supported for HDaudio */
 	.default_fw_path = {
 		[SOF_IPC_TYPE_3] = "intel/sof",
-		[SOF_IPC_TYPE_4] = "intel/avs/cnl",
+		[SOF_IPC_TYPE_4] = "intel/avs/cml",
 	},
 	.default_lib_path = {
-		[SOF_IPC_TYPE_4] = "intel/avs-lib/cnl",
+		[SOF_IPC_TYPE_4] = "intel/avs-lib/cml",
 	},
 	.default_tplg_path = {
 		[SOF_IPC_TYPE_3] = "intel/sof-tplg",
