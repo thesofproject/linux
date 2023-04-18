@@ -391,6 +391,27 @@ int sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev)
 				goto out;
 			}
 			break;
+		case SOF_IPC4_FW_CFG_FAST_CLOCK_FREQ_HZ:
+			trace_sof_ipc4_fw_config(sdev, "Fast clock Hz", *tuple->value);
+			ipc4_data->max_core_frequency = *tuple->value;
+			/*
+			 * If the reported value is 0, try to get the maximum
+			 * frequency from platform code
+			 */
+			if (!ipc4_data->max_core_frequency) {
+				unsigned long max_freq;
+
+				max_freq = snd_sof_dsp_get_max_frequency(sdev);
+				if (unlikely(max_freq > U32_MAX)) {
+					dev_warn(sdev->dev,
+						"out of range frequency: %lu\n",
+						max_freq);
+					ipc4_data->max_core_frequency = U32_MAX;
+				} else {
+					ipc4_data->max_core_frequency = max_freq;
+				}
+			}
+			break;
 		default:
 			break;
 		}
