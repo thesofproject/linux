@@ -608,9 +608,13 @@ static struct snd_sof_dsp_ops sof_imx8x_ops = {
 			SNDRV_PCM_INFO_NO_PERIOD_WAKEUP
 };
 
+static const char vendor_string[] = "imx";
+
 static struct sof_dev_desc sof_of_imx8qxp_desc = {
 	.ipc_supported_mask	= BIT(SOF_IPC_TYPE_3),
 	.ipc_default		= SOF_IPC_TYPE_3,
+	.vendor			= vendor_string,
+	.platform		= "imx8x",
 	.default_fw_path = {
 		[SOF_IPC_TYPE_3] = "imx/sof",
 	},
@@ -627,6 +631,8 @@ static struct sof_dev_desc sof_of_imx8qxp_desc = {
 static struct sof_dev_desc sof_of_imx8qm_desc = {
 	.ipc_supported_mask	= BIT(SOF_IPC_TYPE_3),
 	.ipc_default		= SOF_IPC_TYPE_3,
+	.vendor			= vendor_string,
+	.platform		= "imx8",
 	.default_fw_path = {
 		[SOF_IPC_TYPE_3] = "imx/sof",
 	},
