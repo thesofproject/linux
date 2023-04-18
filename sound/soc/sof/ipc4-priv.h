@@ -69,6 +69,7 @@ struct sof_ipc4_fw_library {
  * @max_num_pipelines: max number of pipelines
  * @max_libs_count: Maximum number of libraries support by the FW including the
  *		    base firmware
+ * @max_kcps: maximum cycles per second * 1000, iow the maximum core frequency
  *
  * @load_library: Callback function for platform dependent library loading
  * @pipeline_state_mutex: Mutex to protect pipeline triggers, ref counts, states and deletion
@@ -81,6 +82,7 @@ struct sof_ipc4_fw_data {
 	u32 mtrace_log_bytes;
 	int max_num_pipelines;
 	u32 max_libs_count;
+	u32 max_kcps;
 
 	int (*load_library)(struct snd_sof_dev *sdev,
 			    struct sof_ipc4_fw_library *fw_lib, bool reload);
