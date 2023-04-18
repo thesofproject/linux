@@ -183,10 +183,12 @@ static void sof_pci_probe_complete(struct device *dev)
 
 int sof_pci_probe(struct pci_dev *pci, const struct pci_device_id *pci_id)
 {
+	struct sof_fw_layout_profile *fw_profile;
 	struct device *dev = &pci->dev;
 	const struct sof_dev_desc *desc =
 		(const struct sof_dev_desc *)pci_id->driver_data;
 	struct snd_sof_pdata *sof_pdata;
+	char *fw_path_postfix = NULL;
 	int ret;
 
 	dev_dbg(&pci->dev, "PCI DSP detected");
@@ -217,8 +219,6 @@ int sof_pci_probe(struct pci_dev *pci, const struct pci_device_id *pci_id)
 	sof_pdata->desc = desc;
 	sof_pdata->dev = dev;
 
-	sof_pdata->ipc_type = desc->ipc_default;
-
 	if (sof_pci_ipc_type < 0) {
 		sof_pdata->ipc_type = desc->ipc_default;
 	} else {
@@ -238,13 +238,41 @@ int sof_pci_probe(struct pci_dev *pci, const struct pci_device_id *pci_id)
 		sof_pdata->ipc_type = sof_pci_ipc_type;
 	}
 
+	if (dmi_check_system(community_key_platforms) && sof_dmi_use_community_key) {
+		fw_path_postfix = "community";
+		dev_dbg(dev,
+			"Platform uses community key, changing paths accordingly\n");
+	}
+
+	fw_profile = &sof_pdata->default_fw_profile;
+	ret = sof_create_default_fw_layout_profile(dev, sof_pdata->ipc_type,
+						   desc, fw_path_postfix,
+						   fw_profile);
+	if (!ret) {
+		if (sof_pdata->ipc_type != fw_profile->ipc_type) {
+			dev_info(dev,
+				 "IPC type %d is not supported, using IPC type %d\n",
+				 sof_pdata->ipc_type, fw_profile->ipc_type);
+			sof_pdata->ipc_type = fw_profile->ipc_type;
+		}
+		dev_dbg(dev, "Default firmware paths, filename:\n");
+		dev_dbg(dev, "firmware path:\t\t%s\n", fw_profile->fw_path);
+		if (fw_profile->fw_lib_path)
+			dev_dbg(dev, "firmware library path:\t%s\n",
+				fw_profile->fw_lib_path);
+		dev_dbg(dev, "topology path:\t\t%s\n", fw_profile->tplg_path);
+		dev_dbg(dev, "firmware name:\t\t%s\n", fw_profile->fw_name);
+	} else {
+		goto out;
+	}
+
 	if (fw_filename) {
 		sof_pdata->fw_filename = fw_filename;
 
 		dev_dbg(dev, "Module parameter used, changed fw filename to %s\n",
 			sof_pdata->fw_filename);
 	} else {
-		sof_pdata->fw_filename = desc->default_fw_filename[sof_pdata->ipc_type];
+		sof_pdata->fw_filename = fw_profile->fw_name;
 	}
 
 	/*
@@ -261,19 +289,8 @@ int sof_pci_probe(struct pci_dev *pci, const struct pci_device_id *pci_id)
 		dev_dbg(dev,
 			"Module parameter used, changed fw path to %s\n",
 			sof_pdata->fw_filename_prefix);
-
-	} else if (dmi_check_system(community_key_platforms) && sof_dmi_use_community_key) {
-		sof_pdata->fw_filename_prefix =
-			devm_kasprintf(dev, GFP_KERNEL, "%s/%s",
-				       sof_pdata->desc->default_fw_path[sof_pdata->ipc_type],
-				       "community");
-
-		dev_dbg(dev,
-			"Platform uses community key, changed fw path to %s\n",
-			sof_pdata->fw_filename_prefix);
 	} else {
-		sof_pdata->fw_filename_prefix =
-			sof_pdata->desc->default_fw_path[sof_pdata->ipc_type];
+		sof_pdata->fw_filename_prefix = fw_profile->fw_path;
 	}
 
 	if (lib_path) {
@@ -282,27 +299,14 @@ int sof_pci_probe(struct pci_dev *pci, const struct pci_device_id *pci_id)
 		dev_dbg(dev, "Module parameter used, changed fw_lib path to %s\n",
 			sof_pdata->fw_lib_prefix);
 
-	} else if (sof_pdata->desc->default_lib_path[sof_pdata->ipc_type]) {
-		if (dmi_check_system(community_key_platforms) && sof_dmi_use_community_key) {
-			sof_pdata->fw_lib_prefix =
-				devm_kasprintf(dev, GFP_KERNEL, "%s/%s",
-					sof_pdata->desc->default_lib_path[sof_pdata->ipc_type],
-					"community");
-
-			dev_dbg(dev,
-				"Platform uses community key, changed fw_lib path to %s\n",
-				sof_pdata->fw_lib_prefix);
-		} else {
-			sof_pdata->fw_lib_prefix =
-				sof_pdata->desc->default_lib_path[sof_pdata->ipc_type];
-		}
+	} else {
+		sof_pdata->fw_lib_prefix = fw_profile->fw_lib_path;
 	}
 
 	if (tplg_path)
 		sof_pdata->tplg_filename_prefix = tplg_path;
 	else
-		sof_pdata->tplg_filename_prefix =
-			sof_pdata->desc->default_tplg_path[sof_pdata->ipc_type];
+		sof_pdata->tplg_filename_prefix = fw_profile->tplg_path;
 
 	/*
 	 * the topology filename will be provided in the machine descriptor, unless
