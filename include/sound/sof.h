@@ -50,11 +50,57 @@ enum sof_dsp_power_states {
 	SOF_DSP_PM_D3,
 };
 
+/**
+ * enum sof_fw_layout_type - pre-defined file-layout for loadable fw files
+ * @SOF_FW_LAYOUT_VENDOR_IPC3:
+ *	firmware path:		<vendor>/sof</fw_path_postfix>
+ *	firmware name:		sof-<platform>.ri
+ *	topology path:		<vendor>/sof-tplg/
+ * @SOF_FW_LAYOUT_VENDOR_IPC4_SOF:
+ *	firmware path:		<vendor>/sof-ipc4/<platform></fw_path_postfix>
+ *	firmware name:		sof-<platform>.ri
+ *	firmware lib path:	<vendor>/sof-ipc4-lib/<platform></fw_path_postfix>
+ *      topology path:		<vendor>/sof-ipc4-tplg/
+ * @SOF_FW_LAYOUT_VENDOR_IPC4_INTEL_AVS:
+ *	firmware path:		intel/avs/<platform></fw_path_postfix>
+ *	firmware name:		dsp_basefw.bin
+ *	firmware lib path:	intel/avs-lib/<platform></fw_path_postfix>
+ *	topology path:		intel/avs-tplg/
+ * @SOF_FW_LAYOUT_VENDOR_IPC4_INTEL_ACE:
+ *	firmware path:		intel/sof-ipc4/<platform></fw_path_postfix>
+ *	firmware name:		sof-<platform>.ri
+ *	firmware lib path:	intel/sof-ipc4-lib/<platform></fw_path_postfix>
+ *	topology path:		intel/sof-ace-tplg/
+ */
+enum sof_fw_layout_type {
+	SOF_FW_LAYOUT_VENDOR_IPC3,
+	SOF_FW_LAYOUT_VENDOR_IPC4_SOF,
+	SOF_FW_LAYOUT_VENDOR_IPC4_INTEL_AVS,
+	SOF_FW_LAYOUT_VENDOR_IPC4_INTEL_ACE,
+	SOF_FW_LAYOUT_COUNT,
+};
+
 /* Definitions for multiple IPCs */
 enum sof_ipc_type {
 	SOF_IPC_TYPE_3,
 	SOF_IPC_TYPE_4,
 	SOF_IPC_TYPE_COUNT
+};
+
+/**
+ * struct sof_fw_layout_profile - Description of a firmware layout and type
+ * @ipc_type:		IPC type of the profile
+ * @fw_path:		Path where the @fw_filename resides
+ * @fw_lib_path:	Path where the external libraries can be found (IPC4 only)
+ * @fw_name:		Name of the frmware file
+ * @tplg_path:		Path where to look for the topology files
+ */
+struct sof_fw_layout_profile {
+	enum sof_ipc_type ipc_type;
+	const char *fw_path;
+	const char *fw_lib_path;
+	const char *fw_name;
+	const char *tplg_path;
 };
 
 /*
@@ -79,6 +125,8 @@ struct snd_sof_pdata {
 	const struct sof_dev_desc *desc;
 
 	/* firmware and topology filenames */
+	struct sof_fw_layout_profile default_fw_profile;
+
 	const char *fw_filename_prefix;
 	const char *fw_filename;
 	const char *tplg_filename_prefix;
@@ -142,6 +190,10 @@ struct sof_dev_desc {
 
 	/* default firmware name */
 	const char *default_fw_filename[SOF_IPC_TYPE_COUNT];
+
+	/* strings used for the firmware layout path/filename creation */
+	const char *vendor;
+	const char *platform;
 
 	struct snd_sof_dsp_ops *ops;
 	int (*ops_init)(struct snd_sof_dev *sdev);
