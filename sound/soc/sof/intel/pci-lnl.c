@@ -34,15 +34,6 @@ static const struct sof_dev_desc lnl_desc = {
 	.dspless_mode_supported	= true,
 	.vendor			= "intel",
 	.platform		= "lnl",
-	.default_fw_path = {
-		[SOF_IPC_TYPE_4] = "intel/sof-ipc4/lnl",
-	},
-	.default_tplg_path = {
-		[SOF_IPC_TYPE_4] = "intel/sof-ace-tplg",
-	},
-	.default_fw_filename = {
-		[SOF_IPC_TYPE_4] = "sof-lnl.ri",
-	},
 	.nocodec_tplg_filename = "sof-lnl-nocodec.tplg",
 	.ops = &sof_lnl_ops,
 	.ops_init = sof_lnl_ops_init,
