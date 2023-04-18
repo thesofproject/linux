@@ -58,8 +58,10 @@ static void sof_acpi_probe_complete(struct device *dev)
 
 int sof_acpi_probe(struct platform_device *pdev, const struct sof_dev_desc *desc)
 {
+	struct sof_fw_layout_profile *fw_profile;
 	struct device *dev = &pdev->dev;
 	struct snd_sof_pdata *sof_pdata;
+	int ret;
 
 	dev_dbg(dev, "ACPI DSP detected");
 
@@ -74,18 +76,26 @@ int sof_acpi_probe(struct platform_device *pdev, const struct sof_dev_desc *desc
 
 	sof_pdata->desc = desc;
 	sof_pdata->dev = &pdev->dev;
-	sof_pdata->fw_filename = desc->default_fw_filename[SOF_IPC_TYPE_3];
+	sof_pdata->ipc_type = desc->ipc_default;
+
+	fw_profile = &sof_pdata->default_fw_profile;
+	ret = sof_create_default_fw_layout_profile(dev, sof_pdata->ipc_type,
+						   desc, NULL, fw_profile);
+	if (ret)
+		return ret;
+
+	sof_pdata->fw_filename = fw_profile->fw_name;
 
 	/* alternate fw and tplg filenames ? */
 	if (fw_path)
 		sof_pdata->fw_filename_prefix = fw_path;
 	else
-		sof_pdata->fw_filename_prefix = desc->default_fw_path[SOF_IPC_TYPE_3];
+		sof_pdata->fw_filename_prefix = fw_profile->fw_path;
 
 	if (tplg_path)
 		sof_pdata->tplg_filename_prefix = tplg_path;
 	else
-		sof_pdata->tplg_filename_prefix = desc->default_tplg_path[SOF_IPC_TYPE_3];
+		sof_pdata->tplg_filename_prefix = fw_profile->tplg_path;
 
 	/* set callback to be called on successful device probe to enable runtime_pm */
 	sof_pdata->sof_probe_complete = sof_acpi_probe_complete;
