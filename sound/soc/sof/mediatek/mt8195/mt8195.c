@@ -673,15 +673,6 @@ static const struct sof_dev_desc sof_of_mt8195_desc = {
 	.ipc_default		= SOF_IPC_TYPE_3,
 	.vendor			= "mediatek",
 	.platform		= "mt8195",
-	.default_fw_path = {
-		[SOF_IPC_TYPE_3] = "mediatek/sof",
-	},
-	.default_tplg_path = {
-		[SOF_IPC_TYPE_3] = "mediatek/sof-tplg",
-	},
-	.default_fw_filename = {
-		[SOF_IPC_TYPE_3] = "sof-mt8195.ri",
-	},
 	.nocodec_tplg_filename = "sof-mt8195-nocodec.tplg",
 	.ops = &sof_mt8195_ops,
 	.ipc_timeout = 1000,

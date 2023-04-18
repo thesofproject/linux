@@ -619,15 +619,6 @@ static const struct sof_dev_desc sof_of_mt8186_desc = {
 	.ipc_default		= SOF_IPC_TYPE_3,
 	.vendor			= vendor_string,
 	.platform		= "mt8186",
-	.default_fw_path = {
-		[SOF_IPC_TYPE_3] = "mediatek/sof",
-	},
-	.default_tplg_path = {
-		[SOF_IPC_TYPE_3] = "mediatek/sof-tplg",
-	},
-	.default_fw_filename = {
-		[SOF_IPC_TYPE_3] = "sof-mt8186.ri",
-	},
 	.nocodec_tplg_filename = "sof-mt8186-nocodec.tplg",
 	.ops = &sof_mt8186_ops,
 };
@@ -637,15 +628,6 @@ static const struct sof_dev_desc sof_of_mt8188_desc = {
 	.ipc_default		= SOF_IPC_TYPE_3,
 	.vendor			= vendor_string,
 	.platform		= "mt8188",
-	.default_fw_path = {
-		[SOF_IPC_TYPE_3] = "mediatek/sof",
-	},
-	.default_tplg_path = {
-		[SOF_IPC_TYPE_3] = "mediatek/sof-tplg",
-	},
-	.default_fw_filename = {
-		[SOF_IPC_TYPE_3] = "sof-mt8188.ri",
-	},
 	.nocodec_tplg_filename = "sof-mt8188-nocodec.tplg",
 	.ops = &sof_mt8186_ops,
 };
