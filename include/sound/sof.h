@@ -165,6 +165,10 @@ struct sof_dev_desc {
 	/* default firmware name */
 	const char *default_fw_filename[SOF_IPC_TYPE_COUNT];
 
+	/* strings used for the firmware layout path/filename creation */
+	const char *vendor;
+	const char *platform;
+
 	struct snd_sof_dsp_ops *ops;
 	int (*ops_init)(struct snd_sof_dev *sdev);
 	void (*ops_free)(struct snd_sof_dev *sdev);
