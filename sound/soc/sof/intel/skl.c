@@ -72,6 +72,9 @@ int sof_skl_ops_init(struct snd_sof_dev *sdev)
 
 	ipc4_data->mtrace_type = SOF_IPC4_MTRACE_INTEL_CAVS_1_5;
 
+	/* Maximum core frequency is 400MHz */
+	ipc4_data->max_kcps = 400000;
+
 	sof_skl_ops.get_window_offset = skl_dsp_ipc_get_window_offset;
 	sof_skl_ops.get_mailbox_offset = skl_dsp_ipc_get_mailbox_offset;
 
