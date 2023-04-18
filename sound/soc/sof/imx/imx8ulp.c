@@ -480,6 +480,8 @@ static struct snd_sof_dsp_ops sof_imx8ulp_ops = {
 static struct sof_dev_desc sof_of_imx8ulp_desc = {
 	.ipc_supported_mask     = BIT(SOF_IPC_TYPE_3),
 	.ipc_default            = SOF_IPC_TYPE_3,
+	.vendor			= "imx",
+	.platform		= "imx8ulp",
 	.default_fw_path = {
 		[SOF_IPC_TYPE_3] = "imx/sof",
 	},
