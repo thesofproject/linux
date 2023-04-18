@@ -34,18 +34,6 @@ static const struct sof_dev_desc mtl_desc = {
 	.dspless_mode_supported	= true,		/* Only supported for HDaudio */
 	.vendor			= "intel",
 	.platform		= "mtl",
-	.default_fw_path = {
-		[SOF_IPC_TYPE_4] = "intel/sof-ipc4/mtl",
-	},
-	.default_lib_path = {
-		[SOF_IPC_TYPE_4] = "intel/sof-ipc4-lib/mtl",
-	},
-	.default_tplg_path = {
-		[SOF_IPC_TYPE_4] = "intel/sof-ace-tplg",
-	},
-	.default_fw_filename = {
-		[SOF_IPC_TYPE_4] = "sof-mtl.ri",
-	},
 	.nocodec_tplg_filename = "sof-mtl-nocodec.tplg",
 	.ops = &sof_mtl_ops,
 	.ops_init = sof_mtl_ops_init,

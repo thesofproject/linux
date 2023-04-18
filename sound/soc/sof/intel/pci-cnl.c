@@ -35,21 +35,6 @@ static const struct sof_dev_desc cnl_desc = {
 	.dspless_mode_supported	= true,		/* Only supported for HDaudio */
 	.vendor			= vendor_string,
 	.platform		= "cnl",
-	.default_fw_path = {
-		[SOF_IPC_TYPE_3] = "intel/sof",
-		[SOF_IPC_TYPE_4] = "intel/avs/cnl",
-	},
-	.default_lib_path = {
-		[SOF_IPC_TYPE_4] = "intel/avs-lib/cnl",
-	},
-	.default_tplg_path = {
-		[SOF_IPC_TYPE_3] = "intel/sof-tplg",
-		[SOF_IPC_TYPE_4] = "intel/avs-tplg",
-	},
-	.default_fw_filename = {
-		[SOF_IPC_TYPE_3] = "sof-cnl.ri",
-		[SOF_IPC_TYPE_4] = "dsp_basefw.bin",
-	},
 	.nocodec_tplg_filename = "sof-cnl-nocodec.tplg",
 	.ops = &sof_cnl_ops,
 	.ops_init = sof_cnl_ops_init,
@@ -70,21 +55,6 @@ static const struct sof_dev_desc cfl_desc = {
 	.dspless_mode_supported	= true,		/* Only supported for HDaudio */
 	.vendor			= vendor_string,
 	.platform		= "cfl",
-	.default_fw_path = {
-		[SOF_IPC_TYPE_3] = "intel/sof",
-		[SOF_IPC_TYPE_4] = "intel/avs/cfl",
-	},
-	.default_lib_path = {
-		[SOF_IPC_TYPE_4] = "intel/avs-lib/cfl",
-	},
-	.default_tplg_path = {
-		[SOF_IPC_TYPE_3] = "intel/sof-tplg",
-		[SOF_IPC_TYPE_4] = "intel/avs-tplg",
-	},
-	.default_fw_filename = {
-		[SOF_IPC_TYPE_3] = "sof-cfl.ri",
-		[SOF_IPC_TYPE_4] = "dsp_basefw.bin",
-	},
 	.nocodec_tplg_filename = "sof-cnl-nocodec.tplg",
 	.ops = &sof_cnl_ops,
 	.ops_init = sof_cnl_ops_init,
@@ -105,21 +75,6 @@ static const struct sof_dev_desc cml_desc = {
 	.dspless_mode_supported	= true,		/* Only supported for HDaudio */
 	.vendor			= vendor_string,
 	.platform		= "cml",
-	.default_fw_path = {
-		[SOF_IPC_TYPE_3] = "intel/sof",
-		[SOF_IPC_TYPE_4] = "intel/avs/cml",
-	},
-	.default_lib_path = {
-		[SOF_IPC_TYPE_4] = "intel/avs-lib/cml",
-	},
-	.default_tplg_path = {
-		[SOF_IPC_TYPE_3] = "intel/sof-tplg",
-		[SOF_IPC_TYPE_4] = "intel/avs-tplg",
-	},
-	.default_fw_filename = {
-		[SOF_IPC_TYPE_3] = "sof-cml.ri",
-		[SOF_IPC_TYPE_4] = "dsp_basefw.bin",
-	},
 	.nocodec_tplg_filename = "sof-cnl-nocodec.tplg",
 	.ops = &sof_cnl_ops,
 	.ops_init = sof_cnl_ops_init,

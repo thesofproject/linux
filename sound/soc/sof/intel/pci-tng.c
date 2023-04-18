@@ -212,15 +212,6 @@ static const struct sof_dev_desc tng_desc = {
 	.ipc_default		= SOF_IPC_TYPE_3,
 	.vendor			= "intel",
 	.platform		= "byt",
-	.default_fw_path = {
-		[SOF_IPC_TYPE_3] = "intel/sof",
-	},
-	.default_tplg_path = {
-		[SOF_IPC_TYPE_3] = "intel/sof-tplg",
-	},
-	.default_fw_filename = {
-		[SOF_IPC_TYPE_3] = "sof-byt.ri",
-	},
 	.nocodec_tplg_filename = "sof-byt.tplg",
 	.ops = &sof_tng_ops,
 };
