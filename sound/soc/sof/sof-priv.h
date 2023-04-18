@@ -691,6 +691,15 @@ void snd_sof_new_platform_drv(struct snd_sof_dev *sdev);
 extern struct snd_compress_ops sof_compressed_ops;
 
 /*
+ * Firmware layout profile handling
+ */
+int sof_create_default_fw_layout_profile(struct device *dev,
+					 const enum sof_ipc_type ipc_type,
+					 const struct sof_dev_desc *desc,
+					 const char *fw_path_postfix,
+					 struct sof_fw_layout_profile *out_layout);
+
+/*
  * Firmware loading.
  */
 int snd_sof_load_firmware_raw(struct snd_sof_dev *sdev);
