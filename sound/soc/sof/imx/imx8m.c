@@ -475,15 +475,6 @@ static struct sof_dev_desc sof_of_imx8mp_desc = {
 	.ipc_default		= SOF_IPC_TYPE_3,
 	.vendor			= "imx",
 	.platform		= "imx8m",
-	.default_fw_path = {
-		[SOF_IPC_TYPE_3] = "imx/sof",
-	},
-	.default_tplg_path = {
-		[SOF_IPC_TYPE_3] = "imx/sof-tplg",
-	},
-	.default_fw_filename = {
-		[SOF_IPC_TYPE_3] = "sof-imx8m.ri",
-	},
 	.nocodec_tplg_filename = "sof-imx8-nocodec.tplg",
 	.ops = &sof_imx8m_ops,
 };
