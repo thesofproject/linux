@@ -119,11 +119,20 @@ static int gzvm_drv_probe(struct platform_device *pdev)
 		gzvm_drv.hyp_version.major, gzvm_drv.hyp_version.minor,
 		gzvm_drv.hyp_version.sub);
 
+	ret = gzvm_drv_irqfd_init();
+	if (ret)
+		goto err_deregister;
+
 	return 0;
+
+err_deregister:
+	misc_deregister(&gzvm_dev);
+	return ret;
 }
 
 static void gzvm_drv_remove(struct platform_device *pdev)
 {
+	gzvm_drv_irqfd_exit();
 	misc_deregister(&gzvm_dev);
 }
 
