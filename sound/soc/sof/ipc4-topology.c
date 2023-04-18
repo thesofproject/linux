@@ -1103,6 +1103,20 @@ sof_ipc4_update_resource_usage(struct snd_sof_dev *sdev, struct snd_sof_widget *
 	/* Update the base_config->cpc from the module manifest - max CPC value */
 	sof_ipc4_update_cpc_from_manifest(sdev, swidget->module_info, base_config, false);
 
+	if (!base_config->cpc) {
+		struct sof_ipc4_fw_data *ipc4_data = sdev->private;
+
+		/*
+		 * Request maximum DSP speed to avoid underpowering the DSP in
+		 * case the CPC value remained 0. Assuming 1ms chunk time
+		 */
+		base_config->cpc = ipc4_data->max_core_frequency / MSEC_PER_SEC;
+
+		dev_warn_once(sdev->dev,
+			      "CPC value for %s is missing, using: %u\n",
+			      swidget->widget->name, base_config->cpc);
+	}
+
 out:
 	dev_dbg(sdev->dev, "%s: ibs / obs / cpc: %u / %u / %u\n",
 		swidget->widget->name, base_config->ibs, base_config->obs,
