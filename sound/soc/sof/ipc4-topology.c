@@ -1231,6 +1231,23 @@ sof_ipc4_init_base_module_cfg(struct snd_sof_dev *sdev,
 	/* Update the base_config->cpc from the module manifest - max CPC value */
 	sof_ipc4_update_cpc_from_manifest(sdev, swidget->module_info, base_config, false);
 
+	if (!base_config->cpc) {
+		struct sof_ipc4_fw_data *ipc4_data = sdev->private;
+
+		/*
+		 * Use platform maximum CPS value to avoid underclocking
+		 * If max_kcps is not set, assume a DSP core speed of 400MHz
+		 */
+		if (ipc4_data->max_kcps)
+			base_config->cpc = ipc4_data->max_kcps * 1000;
+		else
+			base_config->cpc = 400000000;
+
+		dev_warn_once(sdev->dev,
+			      "CPC value for %s is missing, using: %u\n",
+			      swidget->widget->name, base_config->cpc);
+	}
+
 out:
 	dev_dbg(sdev->dev, "ibs / obs / cpc for %s: %u / %u / %u\n",
 		swidget->widget->name, base_config->ibs, base_config->obs,
