@@ -210,6 +210,8 @@ static const struct sof_dev_desc tng_desc = {
 	.chip_info = &tng_chip_info,
 	.ipc_supported_mask	= BIT(SOF_IPC_TYPE_3),
 	.ipc_default		= SOF_IPC_TYPE_3,
+	.vendor			= "intel",
+	.platform		= "byt",
 	.default_fw_path = {
 		[SOF_IPC_TYPE_3] = "intel/sof",
 	},

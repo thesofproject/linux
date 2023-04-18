@@ -19,6 +19,8 @@
 /* platform specific devices */
 #include "hda.h"
 
+static const char vendor_string[] = "intel";
+
 static const struct sof_dev_desc cnl_desc = {
 	.machines		= snd_soc_acpi_intel_cnl_machines,
 	.alt_machines		= snd_soc_acpi_intel_cnl_sdw_machines,
@@ -31,6 +33,8 @@ static const struct sof_dev_desc cnl_desc = {
 	.ipc_supported_mask	= BIT(SOF_IPC_TYPE_3) | BIT(SOF_IPC_TYPE_4),
 	.ipc_default		= SOF_IPC_TYPE_3,
 	.dspless_mode_supported	= true,		/* Only supported for HDaudio */
+	.vendor			= vendor_string,
+	.platform		= "cnl",
 	.default_fw_path = {
 		[SOF_IPC_TYPE_3] = "intel/sof",
 		[SOF_IPC_TYPE_4] = "intel/avs/cnl",
@@ -64,6 +68,8 @@ static const struct sof_dev_desc cfl_desc = {
 	.ipc_supported_mask	= BIT(SOF_IPC_TYPE_3) | BIT(SOF_IPC_TYPE_4),
 	.ipc_default		= SOF_IPC_TYPE_3,
 	.dspless_mode_supported	= true,		/* Only supported for HDaudio */
+	.vendor			= vendor_string,
+	.platform		= "cfl",
 	.default_fw_path = {
 		[SOF_IPC_TYPE_3] = "intel/sof",
 		[SOF_IPC_TYPE_4] = "intel/avs/cfl",
@@ -97,6 +103,8 @@ static const struct sof_dev_desc cml_desc = {
 	.ipc_supported_mask	= BIT(SOF_IPC_TYPE_3) | BIT(SOF_IPC_TYPE_4),
 	.ipc_default		= SOF_IPC_TYPE_3,
 	.dspless_mode_supported	= true,		/* Only supported for HDaudio */
+	.vendor			= vendor_string,
+	.platform		= "cml",
 	.default_fw_path = {
 		[SOF_IPC_TYPE_3] = "intel/sof",
 		[SOF_IPC_TYPE_4] = "intel/avs/cml",

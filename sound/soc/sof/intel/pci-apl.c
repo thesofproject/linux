@@ -19,6 +19,8 @@
 /* platform specific devices */
 #include "hda.h"
 
+static const char vendor_string[] = "intel";
+
 static const struct sof_dev_desc bxt_desc = {
 	.machines		= snd_soc_acpi_intel_bxt_machines,
 	.use_acpi_target_states	= true,
@@ -30,6 +32,8 @@ static const struct sof_dev_desc bxt_desc = {
 	.ipc_supported_mask	= BIT(SOF_IPC_TYPE_3) | BIT(SOF_IPC_TYPE_4),
 	.ipc_default		= SOF_IPC_TYPE_3,
 	.dspless_mode_supported	= true,		/* Only supported for HDaudio */
+	.vendor			= vendor_string,
+	.platform		= "apl",
 	.default_fw_path = {
 		[SOF_IPC_TYPE_3] = "intel/sof",
 		[SOF_IPC_TYPE_4] = "intel/avs/apl",
@@ -62,6 +66,8 @@ static const struct sof_dev_desc glk_desc = {
 	.ipc_supported_mask	= BIT(SOF_IPC_TYPE_3) | BIT(SOF_IPC_TYPE_4),
 	.ipc_default		= SOF_IPC_TYPE_3,
 	.dspless_mode_supported	= true,		/* Only supported for HDaudio */
+	.vendor			= vendor_string,
+	.platform		= "glk",
 	.default_fw_path = {
 		[SOF_IPC_TYPE_3] = "intel/sof",
 		[SOF_IPC_TYPE_4] = "intel/avs/glk",
