@@ -49,15 +49,6 @@ static const struct sof_dev_desc rembrandt_desc = {
 	.ipc_default            = SOF_IPC_TYPE_3,
 	.vendor			= "amd",
 	.platform		= "rmb",
-	.default_fw_path	= {
-		[SOF_IPC_TYPE_3] = "amd/sof",
-	},
-	.default_tplg_path	= {
-		[SOF_IPC_TYPE_3] = "amd/sof-tplg",
-	},
-	.default_fw_filename	= {
-		[SOF_IPC_TYPE_3] = "sof-rmb.ri",
-	},
 	.nocodec_tplg_filename	= "sof-acp.tplg",
 	.ops			= &sof_rembrandt_ops,
 	.ops_init		= sof_rembrandt_ops_init,
