@@ -2,7 +2,7 @@
 //
 // rt722-sdca-sdw.c -- rt722 SDCA ALSA SoC audio driver
 //
-// Copyright(c) 2022 Realtek Semiconductor Corp.
+// Copyright(c) 2023 Realtek Semiconductor Corp.
 //
 //
 

@@ -28,9 +28,9 @@
 int rt722_sdca_index_write(struct rt722_sdca_priv *rt722,
 		unsigned int nid, unsigned int reg, unsigned int value)
 {
-	int ret;
 	struct regmap *regmap = rt722->mbq_regmap;
 	unsigned int addr = (nid << 20) | reg;
+	int ret;
 
 	ret = regmap_write(regmap, addr, value);
 	if (ret < 0)
