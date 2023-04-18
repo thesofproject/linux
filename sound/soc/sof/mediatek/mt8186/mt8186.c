@@ -611,10 +611,14 @@ static struct snd_sof_of_mach sof_mt8186_machs[] = {
 	{}
 };
 
+static const char vendor_string[] = "mediatek";
+
 static const struct sof_dev_desc sof_of_mt8186_desc = {
 	.of_machines = sof_mt8186_machs,
 	.ipc_supported_mask	= BIT(SOF_IPC_TYPE_3),
 	.ipc_default		= SOF_IPC_TYPE_3,
+	.vendor			= vendor_string,
+	.platform		= "mt8186",
 	.default_fw_path = {
 		[SOF_IPC_TYPE_3] = "mediatek/sof",
 	},
@@ -631,6 +635,8 @@ static const struct sof_dev_desc sof_of_mt8186_desc = {
 static const struct sof_dev_desc sof_of_mt8188_desc = {
 	.ipc_supported_mask	= BIT(SOF_IPC_TYPE_3),
 	.ipc_default		= SOF_IPC_TYPE_3,
+	.vendor			= vendor_string,
+	.platform		= "mt8188",
 	.default_fw_path = {
 		[SOF_IPC_TYPE_3] = "mediatek/sof",
 	},

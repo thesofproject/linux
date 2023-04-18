@@ -671,6 +671,8 @@ static const struct sof_dev_desc sof_of_mt8195_desc = {
 	.of_machines = sof_mt8195_machs,
 	.ipc_supported_mask	= BIT(SOF_IPC_TYPE_3),
 	.ipc_default		= SOF_IPC_TYPE_3,
+	.vendor			= "mediatek",
+	.platform		= "mt8195",
 	.default_fw_path = {
 		[SOF_IPC_TYPE_3] = "mediatek/sof",
 	},
