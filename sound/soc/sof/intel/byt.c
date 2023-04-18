@@ -366,6 +366,8 @@ static const struct sof_intel_dsp_desc cht_chip_info = {
 	.hw_ip_version = SOF_INTEL_BAYTRAIL,
 };
 
+static const char vendor_string[] = "intel";
+
 /* BYTCR uses different IRQ index */
 static const struct sof_dev_desc sof_acpi_baytrailcr_desc = {
 	.machines = snd_soc_acpi_intel_baytrail_machines,
@@ -376,6 +378,8 @@ static const struct sof_dev_desc sof_acpi_baytrailcr_desc = {
 	.chip_info = &byt_chip_info,
 	.ipc_supported_mask = BIT(SOF_IPC_TYPE_3),
 	.ipc_default = SOF_IPC_TYPE_3,
+	.vendor = vendor_string,
+	.platform = "byt",
 	.default_fw_path = {
 		[SOF_IPC_TYPE_3] = "intel/sof",
 	},
@@ -398,6 +402,8 @@ static const struct sof_dev_desc sof_acpi_baytrail_desc = {
 	.chip_info = &byt_chip_info,
 	.ipc_supported_mask = BIT(SOF_IPC_TYPE_3),
 	.ipc_default = SOF_IPC_TYPE_3,
+	.vendor = vendor_string,
+	.platform = "byt",
 	.default_fw_path = {
 		[SOF_IPC_TYPE_3] = "intel/sof",
 	},
@@ -420,6 +426,8 @@ static const struct sof_dev_desc sof_acpi_cherrytrail_desc = {
 	.chip_info = &cht_chip_info,
 	.ipc_supported_mask = BIT(SOF_IPC_TYPE_3),
 	.ipc_default = SOF_IPC_TYPE_3,
+	.vendor = vendor_string,
+	.platform = "cht",
 	.default_fw_path = {
 		[SOF_IPC_TYPE_3] = "intel/sof",
 	},
