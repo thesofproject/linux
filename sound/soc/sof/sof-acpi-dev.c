@@ -89,6 +89,10 @@ int sof_acpi_probe(struct platform_device *pdev, const struct sof_dev_desc *desc
 		sof_pdata->tplg_filename_prefix =
 			sof_pdata->desc->default_tplg_path[SOF_IPC];
 
+	sof_pdata->ipc_file_profile_base.ipc_type = desc->ipc_default;
+	sof_pdata->ipc_file_profile_base.fw_path = fw_path;
+	sof_pdata->ipc_file_profile_base.tplg_path = tplg_path;
+
 	/* set callback to be called on successful device probe to enable runtime_pm */
 	sof_pdata->sof_probe_complete = sof_acpi_probe_complete;
 
