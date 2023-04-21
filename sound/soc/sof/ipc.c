@@ -40,7 +40,13 @@ int sof_ipc_send_msg(struct snd_sof_dev *sdev, void *msg_data, size_t msg_bytes,
 	struct snd_sof_ipc_msg *msg;
 	int ret;
 
-	if (ipc->disable_ipc_tx || sdev->fw_state != SOF_FW_BOOT_COMPLETE)
+	/* if init_fw_ready is set to true then that means the host will
+	 * try to send SOF_IPC_FW_READY to FW before it has been
+	 * confirmed that the FW has booted in which case its state can
+	 * be != SOF_FW_BOOT_COMPLETE.
+	 */
+	if (ipc->disable_ipc_tx || (sdev->fw_state != SOF_FW_BOOT_COMPLETE
+				    && !sdev->init_fw_ready))
 		return -ENODEV;
 
 	/*
@@ -210,6 +216,11 @@ struct snd_sof_ipc *snd_sof_ipc_init(struct snd_sof_dev *sdev)
 
 	if (ops->init && ops->init(sdev))
 		return NULL;
+
+	if (!ops->init_reply_data_buffer && sdev->init_fw_ready) {
+		dev_err(sdev->dev, "Missing init_reply_data_buffer IPC op\n");
+		return NULL;
+	}
 
 	ipc->ops = ops;
 

@@ -474,6 +474,10 @@ struct sof_ipc_pcm_ops;
  * @get_reply:	Function pointer for fetching the reply to
  *		sdev->ipc->msg.reply_data
  * @rx_msg:	Function pointer for handling a received message
+ * @init_reply_data_buffer:	Optional pointer for IPC reply data
+ *				initialization. Used for cases where
+ *				the host needs to initialize the
+ *				SOF_IPC_FW_READY sequence.
  *
  * Note: both @tx_msg and @set_get_data considered as TX functions and they are
  * serialized for the duration of the instructed transfer. A large message sent
@@ -497,6 +501,17 @@ struct sof_ipc_ops {
 			    bool set);
 	int (*get_reply)(struct snd_sof_dev *sdev);
 	void (*rx_msg)(struct snd_sof_dev *sdev);
+	/* this operation is required for cases where the host might
+	 * want to send the firmware a message before SOF_IPC_FW_READY
+	 * is received.
+	 *
+	 * One of these cases is on i.MX93 platform which requires the
+	 * host to send a SOF_IPC_FW_READY message to firmware in order
+	 * to receive the data expected from SOF_IPC_FW_READY. This time
+	 * said data will be received as a reply so the reply_data
+	 * buffer needs to be prepared.
+	 */
+	int (*init_reply_data_buffer)(struct snd_sof_dev *sdev);
 };
 
 /* SOF generic IPC data */
@@ -663,6 +678,10 @@ struct snd_sof_dev {
 	u16  mclk_id_quirk; /* same size as in IPC3 definitions */
 
 	void *private;			/* core does not touch this */
+	/* set to true if the host needs to initiate
+	 * the SOF_IPC_FW_READY sequence.
+	 */
+	bool init_fw_ready;
 };
 
 /*
@@ -727,6 +746,11 @@ static inline int sof_ipc_tx_message_no_pm_no_reply(struct snd_sof_ipc *ipc, voi
 }
 int sof_ipc_send_msg(struct snd_sof_dev *sdev, void *msg_data, size_t msg_bytes,
 		     size_t reply_bytes);
+
+static inline int snd_sof_ipc_init_reply_data_buffer(struct snd_sof_dev *sdev)
+{
+	return sdev->ipc->ops->init_reply_data_buffer(sdev);
+}
 
 static inline void snd_sof_ipc_process_reply(struct snd_sof_dev *sdev, u32 msg_id)
 {

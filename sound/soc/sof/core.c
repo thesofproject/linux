@@ -366,6 +366,11 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 
 	sdev->pdata = plat_data;
 	sdev->first_boot = true;
+	/* this will be set to true by platforms for which
+	 * the SOF_IPC_FW_READY sequence needs to be initiated by
+	 * them instead of the FW.
+	 */
+	sdev->init_fw_ready = false;
 	dev_set_drvdata(dev, sdev);
 
 	if (sof_core_debug)

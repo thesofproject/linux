@@ -746,6 +746,13 @@ static int ipc3_fw_ready(struct snd_sof_dev *sdev, u32 cmd)
 		return offset;
 	}
 
+	/* when the host sends SOF_IPC_FW_READY, we need to
+	 * skip the reply structure in order to get to the
+	 * sof_ipc_fw_ready data.
+	 */
+	if (sdev->init_fw_ready)
+		offset += sizeof(struct sof_ipc_reply);
+
 	dev_dbg(sdev->dev, "DSP is ready 0x%8.8x offset 0x%x\n", cmd, offset);
 
 	/* no need to re-check version/ABI for subsequent boots */
@@ -774,6 +781,10 @@ static int ipc3_fw_ready(struct snd_sof_dev *sdev, u32 cmd)
 
 	ipc3_get_windows(sdev);
 
+	/* reply buffer is already initialized at this point */
+	if (sdev->init_fw_ready)
+		return 0;
+
 	return ipc3_init_reply_data_buffer(sdev);
 }
 
@@ -781,6 +792,7 @@ static int sof_ipc3_get_reply(struct snd_sof_dev *sdev)
 {
 	struct snd_sof_ipc_msg *msg = sdev->msg;
 	struct sof_ipc_reply *reply;
+	u32 cmd;
 	int ret = 0;
 
 	/* get the generic reply */
@@ -800,6 +812,25 @@ static int sof_ipc3_get_reply(struct snd_sof_dev *sdev)
 			dev_err(sdev->dev, "empty reply received\n");
 
 		return -EINVAL;
+	}
+
+	if (!ret && sdev->init_fw_ready &&
+	    sdev->fw_state == SOF_FW_BOOT_IN_PROGRESS) {
+		cmd = reply->hdr.cmd & SOF_GLB_TYPE_MASK;
+
+		/* check if host received a reply for the
+		 * SOF_IPC_FW_READY message it has sent to
+		 * the FW.
+		 */
+		if (cmd == SOF_IPC_FW_READY) {
+			ret = ipc3_fw_ready(sdev, cmd);
+			if (ret < 0)
+				sof_set_fw_state(sdev, SOF_FW_BOOT_READY_FAILED);
+			else
+				sof_set_fw_state(sdev, SOF_FW_BOOT_READY_OK);
+
+			return 0;
+		}
 	}
 
 	if (msg->reply_size > 0) {
@@ -1108,4 +1139,5 @@ const struct sof_ipc_ops ipc3_ops = {
 	.rx_msg = sof_ipc3_rx_msg,
 	.set_get_data = sof_ipc3_set_get_data,
 	.get_reply = sof_ipc3_get_reply,
+	.init_reply_data_buffer = ipc3_init_reply_data_buffer,
 };

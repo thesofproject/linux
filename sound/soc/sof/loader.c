@@ -109,6 +109,8 @@ EXPORT_SYMBOL(snd_sof_load_firmware_memcpy);
 int snd_sof_run_firmware(struct snd_sof_dev *sdev)
 {
 	int ret;
+	struct sof_ipc_cmd_hdr hdr;
+	struct sof_ipc_reply reply;
 
 	init_waitqueue_head(&sdev->boot_wait);
 
@@ -145,20 +147,41 @@ int snd_sof_run_firmware(struct snd_sof_dev *sdev)
 		return ret;
 	}
 
-	/*
-	 * now wait for the DSP to boot. There are 3 possible outcomes:
-	 * 1. Boot wait times out indicating FW boot failure.
-	 * 2. FW boots successfully and fw_ready op succeeds.
-	 * 3. FW boots but fw_ready op fails.
-	 */
-	ret = wait_event_timeout(sdev->boot_wait,
-				 sdev->fw_state > SOF_FW_BOOT_IN_PROGRESS,
-				 msecs_to_jiffies(sdev->boot_timeout));
-	if (ret == 0) {
-		snd_sof_dsp_dbg_dump(sdev, "Firmware boot failure due to timeout",
-				     SOF_DBG_DUMP_REGS | SOF_DBG_DUMP_MBOX |
-				     SOF_DBG_DUMP_TEXT | SOF_DBG_DUMP_PCI);
-		return -EIO;
+	if (!sdev->init_fw_ready) {
+		/*
+		 * now wait for the DSP to boot. There are 3 possible outcomes:
+		 * 1. Boot wait times out indicating FW boot failure.
+		 * 2. FW boots successfully and fw_ready op succeeds.
+		 * 3. FW boots but fw_ready op fails.
+		 */
+		ret = wait_event_timeout(sdev->boot_wait,
+					 sdev->fw_state > SOF_FW_BOOT_IN_PROGRESS,
+					 msecs_to_jiffies(sdev->boot_timeout));
+		if (ret == 0) {
+			snd_sof_dsp_dbg_dump(sdev, "Firmware boot failure due to timeout",
+					     SOF_DBG_DUMP_REGS | SOF_DBG_DUMP_MBOX |
+					     SOF_DBG_DUMP_TEXT | SOF_DBG_DUMP_PCI);
+			return -EIO;
+		}
+	} else {
+		/* initialize IPC reply buffer if need be */
+		if (!sdev->ipc->max_payload_size) {
+			ret = snd_sof_ipc_init_reply_data_buffer(sdev);
+			if (ret < 0)
+				return ret;
+		}
+
+		/* host needs to initiate SOF_IPC_FW_READY. The
+		 * sof_ipc_fw_ready data that was previously signaled by
+		 * a FW-initiated IPC will come as a reply to host's
+		 * IPC.
+		 */
+		hdr.cmd = SOF_IPC_FW_READY;
+		hdr.size = sizeof(reply);
+
+		ret = sof_ipc_tx_message(sdev->ipc, &hdr, hdr.size, &reply, sizeof(reply));
+		if (ret < 0)
+			return ret;
 	}
 
 	if (sdev->fw_state == SOF_FW_BOOT_READY_FAILED)
