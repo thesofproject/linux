@@ -223,59 +223,6 @@ static inline void ipc3_log_header(struct device *dev, u8 *text, u32 cmd)
 }
 #endif
 
-static int sof_ipc3_get_reply(struct snd_sof_dev *sdev)
-{
-	struct snd_sof_ipc_msg *msg = sdev->msg;
-	struct sof_ipc_reply *reply;
-	int ret = 0;
-
-	/* get the generic reply */
-	reply = msg->reply_data;
-	snd_sof_dsp_mailbox_read(sdev, sdev->host_box.offset, reply, sizeof(*reply));
-
-	if (reply->error < 0)
-		return reply->error;
-
-	if (!reply->hdr.size) {
-		/* Reply should always be >= sizeof(struct sof_ipc_reply) */
-		if (msg->reply_size)
-			dev_err(sdev->dev,
-				"empty reply received, expected %zu bytes\n",
-				msg->reply_size);
-		else
-			dev_err(sdev->dev, "empty reply received\n");
-
-		return -EINVAL;
-	}
-
-	if (msg->reply_size > 0) {
-		if (reply->hdr.size == msg->reply_size) {
-			ret = 0;
-		} else if (reply->hdr.size < msg->reply_size) {
-			dev_dbg(sdev->dev,
-				"reply size (%u) is less than expected (%zu)\n",
-				reply->hdr.size, msg->reply_size);
-
-			msg->reply_size = reply->hdr.size;
-			ret = 0;
-		} else {
-			dev_err(sdev->dev,
-				"reply size (%u) exceeds the buffer size (%zu)\n",
-				reply->hdr.size, msg->reply_size);
-			ret = -EINVAL;
-		}
-
-		/*
-		 * get the full message if reply->hdr.size <= msg->reply_size
-		 * and the reply->hdr.size > sizeof(struct sof_ipc_reply)
-		 */
-		if (!ret && msg->reply_size > sizeof(*reply))
-			snd_sof_dsp_mailbox_read(sdev, sdev->host_box.offset,
-						 msg->reply_data, msg->reply_size);
-	}
-
-	return ret;
-}
 
 /* wait for IPC message reply */
 static int ipc3_wait_tx_done(struct snd_sof_ipc *ipc, void *reply_data)
@@ -828,6 +775,60 @@ static int ipc3_fw_ready(struct snd_sof_dev *sdev, u32 cmd)
 	ipc3_get_windows(sdev);
 
 	return ipc3_init_reply_data_buffer(sdev);
+}
+
+static int sof_ipc3_get_reply(struct snd_sof_dev *sdev)
+{
+	struct snd_sof_ipc_msg *msg = sdev->msg;
+	struct sof_ipc_reply *reply;
+	int ret = 0;
+
+	/* get the generic reply */
+	reply = msg->reply_data;
+	snd_sof_dsp_mailbox_read(sdev, sdev->host_box.offset, reply, sizeof(*reply));
+
+	if (reply->error < 0)
+		return reply->error;
+
+	if (!reply->hdr.size) {
+		/* Reply should always be >= sizeof(struct sof_ipc_reply) */
+		if (msg->reply_size)
+			dev_err(sdev->dev,
+				"empty reply received, expected %zu bytes\n",
+				msg->reply_size);
+		else
+			dev_err(sdev->dev, "empty reply received\n");
+
+		return -EINVAL;
+	}
+
+	if (msg->reply_size > 0) {
+		if (reply->hdr.size == msg->reply_size) {
+			ret = 0;
+		} else if (reply->hdr.size < msg->reply_size) {
+			dev_dbg(sdev->dev,
+				"reply size (%u) is less than expected (%zu)\n",
+				reply->hdr.size, msg->reply_size);
+
+			msg->reply_size = reply->hdr.size;
+			ret = 0;
+		} else {
+			dev_err(sdev->dev,
+				"reply size (%u) exceeds the buffer size (%zu)\n",
+				reply->hdr.size, msg->reply_size);
+			ret = -EINVAL;
+		}
+
+		/*
+		 * get the full message if reply->hdr.size <= msg->reply_size
+		 * and the reply->hdr.size > sizeof(struct sof_ipc_reply)
+		 */
+		if (!ret && msg->reply_size > sizeof(*reply))
+			snd_sof_dsp_mailbox_read(sdev, sdev->host_box.offset,
+						 msg->reply_data, msg->reply_size);
+	}
+
+	return ret;
 }
 
 /* IPC stream position. */
