@@ -23,6 +23,7 @@
 #include <nvhe/modules.h>
 #include <nvhe/mm.h>
 #include <nvhe/pkvm.h>
+#include <nvhe/pviommu-host.h>
 #include <nvhe/trap_handler.h>
 
 /* Used by icache_is_aliasing(). */
@@ -946,6 +947,10 @@ int __pkvm_init_vm(struct kvm *host_kvm, unsigned long pgd_hva)
 	if (ret)
 		goto err_remove_mappings;
 
+	ret = pkvm_pviommu_finalise(hyp_vm);
+	if (ret)
+		goto err_remove_mappings;
+
 	/* Must be called last since this publishes the VM. */
 	ret = insert_vm_table_entry(handle, hyp_vm);
 	if (ret)
@@ -1119,6 +1124,8 @@ int __pkvm_finalize_teardown_vm(pkvm_handle_t handle)
 	WARN_ON(err);
 
 	pkvm_devices_teardown(hyp_vm);
+
+	pkvm_pviommu_teardown(hyp_vm);
 
 	/*
 	 * At this point, the VM has been detached from the VM table and
