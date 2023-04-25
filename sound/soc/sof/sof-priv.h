@@ -290,9 +290,6 @@ struct snd_sof_dsp_ops {
 	int (*set_power_state)(struct snd_sof_dev *sdev,
 			       const struct sof_dsp_power_state *target_state); /* optional */
 
-	/* DSP clocking */
-	int (*set_clk)(struct snd_sof_dev *sof_dev, u32 freq); /* optional */
-
 	/* debug */
 	const struct snd_sof_debugfs_map *debug_map; /* optional */
 	int debug_map_count; /* optional */

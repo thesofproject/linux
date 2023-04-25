@@ -263,14 +263,6 @@ static inline int snd_sof_dsp_hw_params_upon_resume(struct snd_sof_dev *sdev)
 	return 0;
 }
 
-static inline int snd_sof_dsp_set_clk(struct snd_sof_dev *sdev, u32 freq)
-{
-	if (sof_ops(sdev)->set_clk)
-		return sof_ops(sdev)->set_clk(sdev, freq);
-
-	return 0;
-}
-
 static inline int
 snd_sof_dsp_set_power_state(struct snd_sof_dev *sdev,
 			    const struct sof_dsp_power_state *target_state)
