@@ -20,6 +20,7 @@ static const struct {
 } maxim_codec_info[] = {
 	{.hid = "MX98373", .dai_name = "max98373-aif1"},
 	{.hid = "MX98390", .dai_name = "max98390-aif1"},
+	{.hid = "ADS8396", .dai_name = "max98396-aif1"},
 };
 
 static struct snd_soc_codec_conf codec_conf[MAXIM_MAX_CODECS];
@@ -68,11 +69,13 @@ static int max_98373_hw_params(struct snd_pcm_substream *substream,
 	int j;
 
 	for_each_rtd_codec_dais(rtd, j, codec_dai) {
-		if (!strcmp(codec_dai->component->name, MAX_98373_DEV0_NAME)) {
+		if (!strcmp(codec_dai->component->name, MAX_98373_DEV0_NAME) ||
+		    !strcmp(codec_dai->component->name, MAX_98396_DEV0_NAME)) {
 			/* DEV0 tdm slot configuration */
 			snd_soc_dai_set_tdm_slot(codec_dai, 0x03, 3, 8, 32);
 		}
-		if (!strcmp(codec_dai->component->name, MAX_98373_DEV1_NAME)) {
+		if (!strcmp(codec_dai->component->name, MAX_98373_DEV1_NAME) ||
+		    !strcmp(codec_dai->component->name, MAX_98396_DEV1_NAME)) {
 			/* DEV1 tdm slot configuration */
 			snd_soc_dai_set_tdm_slot(codec_dai, 0x0C, 3, 8, 32);
 		}
@@ -319,6 +322,30 @@ void sof_max98390_codec_conf(struct snd_soc_card *card)
 	card->num_configs = ARRAY_SIZE(codec_conf);
 }
 EXPORT_SYMBOL_NS(sof_max98390_codec_conf, SND_SOC_INTEL_SOF_MAXIM_COMMON);
+
+/*
+ * Maxim MAX98396
+ */
+static const struct snd_soc_ops max_98396_ops = {
+	.hw_params = max_98373_hw_params,
+	.trigger = max_98373_trigger,
+};
+
+void max_98396_dai_link(struct snd_soc_dai_link *link)
+{
+	link->codecs = codec_component;
+	link->num_codecs = get_num_codecs("ADS8396");
+	link->init = maxim_spk_codec_init;
+	link->ops = &max_98396_ops;
+}
+EXPORT_SYMBOL_NS(max_98396_dai_link, SND_SOC_INTEL_SOF_MAXIM_COMMON);
+
+void sof_max98396_codec_conf(struct snd_soc_card *card)
+{
+	card->codec_conf = codec_conf;
+	card->num_configs = ARRAY_SIZE(codec_conf);
+}
+EXPORT_SYMBOL_NS(sof_max98396_codec_conf, SND_SOC_INTEL_SOF_MAXIM_COMMON);
 
 /*
  * Maxim MAX98357A/MAX98360A

@@ -34,6 +34,15 @@ void max_98390_dai_link(struct snd_soc_dai_link *link);
 void sof_max98390_codec_conf(struct snd_soc_card *card);
 
 /*
+ * Maxim MAX98396
+ */
+#define MAX_98396_DEV0_NAME     "i2c-ADS8396-00"
+#define MAX_98396_DEV1_NAME     "i2c-ADS8396-01"
+
+void max_98396_dai_link(struct snd_soc_dai_link *link);
+void sof_max98396_codec_conf(struct snd_soc_card *card);
+
+/*
  * Maxim MAX98357A/MAX98360A
  */
 #define MAX_98357A_CODEC_DAI	"HiFi"
