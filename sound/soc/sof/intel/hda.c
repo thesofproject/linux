@@ -1776,6 +1776,12 @@ void hda_unregister_clients(struct snd_sof_dev *sdev)
 	hda_probes_unregister(sdev);
 }
 
+unsigned long hda_get_max_frequency(struct snd_sof_dev *sdev)
+{
+	/* The DSP is running at 400 MHz in all HDA platforms */
+	return 400000000;
+}
+
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_IMPORT_NS(SND_SOC_SOF_PCI_DEV);
 MODULE_IMPORT_NS(SND_SOC_SOF_HDA_AUDIO_CODEC);

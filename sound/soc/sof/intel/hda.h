@@ -877,6 +877,9 @@ static inline void hda_probes_unregister(struct snd_sof_dev *sdev)
 int hda_register_clients(struct snd_sof_dev *sdev);
 void hda_unregister_clients(struct snd_sof_dev *sdev);
 
+/* get maximum DSP core frequency */
+unsigned long hda_get_max_frequency(struct snd_sof_dev *sdev);
+
 /* machine driver select */
 struct snd_soc_acpi_mach *hda_machine_select(struct snd_sof_dev *sdev);
 void hda_set_mach_params(struct snd_soc_acpi_mach *mach,

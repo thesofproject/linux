@@ -90,6 +90,9 @@ struct snd_sof_dsp_ops sof_hda_common_ops = {
 	.runtime_idle		= hda_dsp_runtime_idle,
 	.set_hw_params_upon_resume = hda_dsp_set_hw_params_upon_resume,
 
+	/* DSP clocking */
+	.get_max_frequency = hda_get_max_frequency,
+
 	/* ALSA HW info flags */
 	.hw_info =	SNDRV_PCM_INFO_MMAP |
 			SNDRV_PCM_INFO_MMAP_VALID |
