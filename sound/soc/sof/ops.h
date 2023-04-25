@@ -263,6 +263,15 @@ static inline int snd_sof_dsp_hw_params_upon_resume(struct snd_sof_dev *sdev)
 	return 0;
 }
 
+static inline unsigned long
+snd_sof_dsp_get_max_frequency(struct snd_sof_dev *sdev)
+{
+	if (sof_ops(sdev)->get_max_frequency)
+		return sof_ops(sdev)->get_max_frequency(sdev);
+
+	return 0;
+}
+
 static inline int
 snd_sof_dsp_set_power_state(struct snd_sof_dev *sdev,
 			    const struct sof_dsp_power_state *target_state)
