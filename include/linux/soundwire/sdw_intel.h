@@ -190,12 +190,25 @@ struct sdw_intel_stream_params_data {
 };
 
 /**
+ * struct sdw_intel_stream_free_data: configuration passed during
+ * the @free_stream callback, e.g. for interaction with DSP
+ * firmware.
+ */
+struct sdw_intel_stream_free_data {
+	struct snd_pcm_substream *substream;
+	struct snd_soc_dai *dai;
+	int link_id;
+};
+
+/**
  * struct sdw_intel_ops: Intel audio driver callback ops
  *
  */
 struct sdw_intel_ops {
 	int (*params_stream)(struct device *dev,
 			     struct sdw_intel_stream_params_data *params_data);
+	int (*free_stream)(struct device *dev,
+			   struct sdw_intel_stream_free_data *free_data);
 };
 
 /**
