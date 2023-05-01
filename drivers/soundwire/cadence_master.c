@@ -198,6 +198,16 @@ MODULE_PARM_DESC(cdns_mcp_int_mask, "Cadence MCP IntMask");
 #define CDNS_SCP_RX_FIFOLEVEL			0x2
 
 /*
+ * The peripheral_status_mask will be ignored if interrupt_mask is set.
+ * This parameter provides a simpler easier-to-use way of controlling which
+ * peripheral states will generate an interrupt on the host side, e.g. to
+ * disable jack detection for tests
+ */
+static int peripheral_int_status_mask = CDNS_MCP_INT_SLAVE_MASK;
+module_param_named(cnds_mcp_int_peripheral_status_mask, peripheral_int_status_mask, int, 0444);
+MODULE_PARM_DESC(cdns_mcp_int_peripheral_status_mask, "Cadence MCP peripheral status Mask");
+
+/*
  * register accessor helpers
  */
 static inline u32 cdns_readl(struct sdw_cdns *cdns, int offset)
@@ -966,12 +976,12 @@ irqreturn_t sdw_cdns_irq(int irq, void *dev_id)
 		cdns_writel(cdns, CDNS_MCP_PORT_INTSTAT, port_intstat);
 	}
 
-	if (int_status & CDNS_MCP_INT_SLAVE_MASK) {
+	if (int_status & peripheral_int_status_mask) {
 		/* Mask the Slave interrupt and wake thread */
 		cdns_updatel(cdns, CDNS_MCP_INTMASK,
-			     CDNS_MCP_INT_SLAVE_MASK, 0);
+			     peripheral_int_status_mask, 0);
 
-		int_status &= ~CDNS_MCP_INT_SLAVE_MASK;
+		int_status &= ~peripheral_int_status_mask;
 
 		/*
 		 * Deal with possible race condition between interrupt
@@ -1008,7 +1018,7 @@ static void cdns_update_slave_status_work(struct work_struct *work)
 	 * Clear main interrupt first so we don't lose any assertions
 	 * that happen during this function.
 	 */
-	cdns_writel(cdns, CDNS_MCP_INTSTAT, CDNS_MCP_INT_SLAVE_MASK);
+	cdns_writel(cdns, CDNS_MCP_INTSTAT, peripheral_int_status_mask);
 
 	slave0 = cdns_readl(cdns, CDNS_MCP_SLAVE_INTSTAT0);
 	slave1 = cdns_readl(cdns, CDNS_MCP_SLAVE_INTSTAT1);
@@ -1069,7 +1079,7 @@ update_status:
 
 	/* unmask Slave interrupt now */
 	cdns_updatel(cdns, CDNS_MCP_INTMASK,
-		     CDNS_MCP_INT_SLAVE_MASK, CDNS_MCP_INT_SLAVE_MASK);
+		     peripheral_int_status_mask, peripheral_int_status_mask);
 
 }
 
@@ -1155,9 +1165,9 @@ static void cdns_enable_slave_interrupts(struct sdw_cdns *cdns, bool state)
 
 	mask = cdns_readl(cdns, CDNS_MCP_INTMASK);
 	if (state)
-		mask |= CDNS_MCP_INT_SLAVE_MASK;
+		mask |= peripheral_int_status_mask;
 	else
-		mask &= ~CDNS_MCP_INT_SLAVE_MASK;
+		mask &= ~peripheral_int_status_mask;
 
 	cdns_writel(cdns, CDNS_MCP_INTMASK, mask);
 }
@@ -1180,7 +1190,7 @@ int sdw_cdns_enable_interrupt(struct sdw_cdns *cdns, bool state)
 	slave_intmask1 = CDNS_MCP_SLAVE_INTMASK1_MASK;
 
 	/* enable detection of all slave state changes */
-	mask = CDNS_MCP_INT_SLAVE_MASK;
+	mask = peripheral_int_status_mask;
 
 	/* enable detection of bus issues */
 	mask |= CDNS_MCP_INT_CTRL_CLASH | CDNS_MCP_INT_DATA_CLASH |
@@ -1199,8 +1209,10 @@ int sdw_cdns_enable_interrupt(struct sdw_cdns *cdns, bool state)
 	 */
 	mask |= CDNS_MCP_INT_IRQ;
 
-	if (interrupt_mask) /* parameter override */
+	if (interrupt_mask) { /* parameter override */
 		mask = interrupt_mask;
+		peripheral_int_status_mask = interrupt_mask & CDNS_MCP_INT_SLAVE_MASK;
+	}
 
 update_masks:
 	/* clear slave interrupt status before enabling interrupt */
