@@ -203,7 +203,7 @@ MODULE_PARM_DESC(cdns_mcp_int_mask, "Cadence MCP IntMask");
  * peripheral states will generate an interrupt on the host side, e.g. to
  * disable jack detection for tests
  */
-static int peripheral_int_status_mask = CDNS_MCP_INT_SLAVE_MASK;
+static int peripheral_int_status_mask = 0x2000;
 module_param_named(cnds_mcp_int_peripheral_status_mask, peripheral_int_status_mask, int, 0444);
 MODULE_PARM_DESC(cdns_mcp_int_peripheral_status_mask, "Cadence MCP peripheral status Mask");
 
