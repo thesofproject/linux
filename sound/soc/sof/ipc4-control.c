@@ -506,3 +506,61 @@ const struct sof_ipc_tplg_control_ops tplg_ipc4_control_ops = {
 	.widget_kcontrol_setup = sof_ipc4_widget_kcontrol_setup,
 	.set_up_volume_table = sof_ipc4_set_up_volume_table,
 };
+
+static int sof_ipc4_boost_get(struct snd_kcontrol *kcontrol,
+			      struct snd_ctl_elem_value *value)
+{
+	struct snd_sof_dev *sdev = kcontrol->private_data;
+	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
+
+	value->value.integer.value[0] = ipc4_data->boost;
+
+	return 0;
+}
+
+static int sof_ipc4_boost_put(struct snd_kcontrol *kcontrol,
+			      struct snd_ctl_elem_value *value)
+{
+	struct snd_sof_dev *sdev = kcontrol->private_data;
+	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
+	s32 kcps_change;
+
+	if (ipc4_data->boost == value->value.integer.value[0])
+		return 0;
+
+	kcps_change = (s32)(ipc4_data->max_core_frequency / 1000);
+	if (value->value.integer.value[0] == 0)
+		kcps_change *= -1;
+
+	/*
+	 * Send the KCPS change to firmware only if it is powered on.
+	 * If the message fails, return with no change and do not update the
+	 * boost flag.
+	 */
+	if (pm_runtime_active(sdev->dev) &&
+	    sof_ipc4_send_kcps(sdev, kcps_change))
+			return 0;
+
+	ipc4_data->boost = value->value.integer.value[0];
+
+	return 1;
+}
+
+int sof_ipc4_add_boost_kcontrol(struct snd_soc_component *scomp)
+{
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_kcontrol_new knew = {
+		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.name = "DSP Frequency Boost Switch",
+		.info = snd_ctl_boolean_mono_info,
+		.get = sof_ipc4_boost_get,
+		.put = sof_ipc4_boost_put,
+	};
+	int ret;
+
+	ret = snd_ctl_add(scomp->card->snd_card, snd_ctl_new1(&knew, sdev));
+	if (ret < 0)
+		return ret;
+
+	return 0;
+}

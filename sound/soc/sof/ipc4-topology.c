@@ -2984,6 +2984,11 @@ static int sof_ipc4_link_setup(struct snd_sof_dev *sdev, struct snd_soc_dai_link
 	return 0;
 }
 
+static int sof_ipc4_complete(struct snd_soc_component *scomp)
+{
+	return sof_ipc4_add_boost_kcontrol(scomp);
+}
+
 static enum sof_tokens common_copier_token_list[] = {
 	SOF_COMP_TOKENS,
 	SOF_MODULE_PARAM_NUM_TOKENS,
@@ -3107,4 +3112,5 @@ const struct sof_ipc_tplg_ops ipc4_tplg_ops = {
 	.dai_get_clk = sof_ipc4_dai_get_clk,
 	.tear_down_all_pipelines = sof_ipc4_tear_down_all_pipelines,
 	.link_setup = sof_ipc4_link_setup,
+	.complete = sof_ipc4_complete,
 };

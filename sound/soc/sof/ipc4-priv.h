@@ -70,6 +70,7 @@ struct sof_ipc4_fw_library {
  * @max_libs_count: Maximum number of libraries support by the FW including the
  *		    base firmware
  * @max_core_frequency: Maximum frequency of the DSP cores
+ * @boost: The DSP frequency boost is requested (true) or not (false)
  *
  * @load_library: Callback function for platform dependent library loading
  * @pipeline_state_mutex: Mutex to protect pipeline triggers, ref counts, states and deletion
@@ -83,6 +84,7 @@ struct sof_ipc4_fw_data {
 	int max_num_pipelines;
 	u32 max_libs_count;
 	u32 max_core_frequency;
+	bool boost;
 
 	int (*load_library)(struct snd_sof_dev *sdev,
 			    struct sof_ipc4_fw_library *fw_lib, bool reload);
@@ -123,6 +125,7 @@ void sof_ipc4_update_cpc_from_manifest(struct snd_sof_dev *sdev,
 				       struct sof_ipc4_base_module_cfg *basecfg,
 				       bool exact_match);
 
+int sof_ipc4_add_boost_kcontrol(struct snd_soc_component *scomp);
 int sof_ipc4_send_kcps(struct snd_sof_dev *sdev, s32 kcps);
 
 #endif

@@ -724,8 +724,20 @@ static void sof_ipc4_exit(struct snd_sof_dev *sdev)
 
 static int sof_ipc4_post_boot(struct snd_sof_dev *sdev)
 {
+	struct sof_ipc4_fw_data *ipc4_data;
+
 	if (sdev->first_boot)
 		return sof_ipc4_query_fw_configuration(sdev);
+
+	ipc4_data = sdev->private;
+	if (ipc4_data->boost) {
+		s32 kcps = (s32)(ipc4_data->max_core_frequency / 1000);
+		int ret;
+
+		ret = sof_ipc4_send_kcps(sdev, kcps);
+		if (ret)
+			return ret;
+	}
 
 	return sof_ipc4_reload_fw_libraries(sdev);
 }
