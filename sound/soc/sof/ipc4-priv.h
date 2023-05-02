@@ -123,4 +123,6 @@ void sof_ipc4_update_cpc_from_manifest(struct snd_sof_dev *sdev,
 				       struct sof_ipc4_base_module_cfg *basecfg,
 				       bool exact_match);
 
+int sof_ipc4_send_kcps(struct snd_sof_dev *sdev, s32 kcps);
+
 #endif

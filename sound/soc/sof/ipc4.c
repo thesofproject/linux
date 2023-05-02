@@ -744,3 +744,18 @@ const struct sof_ipc_ops ipc4_ops = {
 	.pcm = &ipc4_pcm_ops,
 	.fw_tracing = &ipc4_mtrace_ops,
 };
+
+int sof_ipc4_send_kcps(struct snd_sof_dev *sdev, s32 kcps)
+{
+	struct sof_ipc4_msg msg;
+
+	msg.primary = SOF_IPC4_MSG_TARGET(SOF_IPC4_MODULE_MSG);
+	msg.primary |= SOF_IPC4_MSG_DIR(SOF_IPC4_MSG_REQUEST);
+	msg.primary |= SOF_IPC4_MOD_ID(SOF_IPC4_MOD_INIT_BASEFW_MOD_ID);
+	msg.primary |= SOF_IPC4_MOD_INSTANCE(SOF_IPC4_MOD_INIT_BASEFW_INSTANCE_ID);
+	msg.extension = SOF_IPC4_MOD_EXT_MSG_PARAM_ID(SOF_IPC4_FW_PARAM_REGISTER_KCPS);
+	msg.data_size = sizeof(kcps);
+	msg.data_ptr = &kcps;
+
+	return sof_ipc4_set_get_data(sdev, &msg, msg.data_size, true);
+}
