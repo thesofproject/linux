@@ -394,6 +394,9 @@ int sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev)
 				goto out;
 			}
 			break;
+		case SOF_IPC4_FW_CFG_MAX_ASTATE_COUNT:
+			dev_err(sdev->dev, "ASTATE_COUNT %d\n", *tuple->value);
+			break;
 		default:
 			break;
 		}
