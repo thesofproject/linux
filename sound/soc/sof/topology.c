@@ -2214,8 +2214,14 @@ static int sof_complete(struct snd_soc_component *scomp)
 	}
 
 	/* set up static pipelines */
-	if (tplg_ops && tplg_ops->set_up_all_pipelines)
-		return tplg_ops->set_up_all_pipelines(sdev, false);
+	if (tplg_ops && tplg_ops->set_up_all_pipelines) {
+		ret = tplg_ops->set_up_all_pipelines(sdev, false);
+		if (ret)
+			return ret;
+	}
+
+	if (tplg_ops && tplg_ops->complete)
+		return tplg_ops->complete(scomp);
 
 	return 0;
 }
