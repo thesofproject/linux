@@ -92,6 +92,8 @@ static void update_pm_runtime_accounting(struct device *dev)
 
 static void __update_runtime_status(struct device *dev, enum rpm_status status)
 {
+	dev_info(dev, "%s status %d\n", __func__, status);
+	dump_stack();
 	update_pm_runtime_accounting(dev);
 	dev->power.runtime_status = status;
 }
@@ -1307,6 +1309,9 @@ int __pm_runtime_set_status(struct device *dev, unsigned int status)
 			dev_err(dev, "runtime PM trying to activate child device %s but parent (%s) is not active\n",
 				dev_name(dev),
 				dev_name(parent));
+			dev_err(dev, " status %d, parent runtime_status %d\n",
+				status, parent->power.runtime_status);
+			dump_stack();
 			error = -EBUSY;
 		} else if (dev->power.runtime_status == RPM_SUSPENDED) {
 			atomic_inc(&parent->power.child_count);
