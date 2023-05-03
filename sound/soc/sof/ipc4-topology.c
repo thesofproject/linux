@@ -1543,7 +1543,11 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		out_ref_channels = params_channels(fe_params);
 		break;
 	default:
-		break;
+		/*
+		 * Unsupported type should be caught by the former switch default
+		 * case, this should never happen in reality.
+		 */
+		return -EINVAL;
 	}
 
 	output_fmt_index = sof_ipc4_init_output_audio_fmt(sdev, &copier_data->base_config,
