@@ -1213,9 +1213,12 @@ int rt711_init(struct device *dev, struct regmap *sdw_regmap,
 int rt711_io_init(struct device *dev, struct sdw_slave *slave)
 {
 	struct rt711_priv *rt711 = dev_get_drvdata(dev);
+	struct device *parent = dev->parent;
 
 	rt711->disable_irq = false;
 
+	dev_info(dev, "bard: %s start hw_init %d first_hw_init %d parent %s rumtime_status %d\n",
+		__func__, rt711->hw_init, rt711->first_hw_init, dev_name(parent), parent->power.runtime_status);
 	if (rt711->hw_init)
 		return 0;
 
@@ -1228,6 +1231,7 @@ int rt711_io_init(struct device *dev, struct sdw_slave *slave)
 	 * PM runtime is only enabled when a Slave reports as Attached
 	 */
 	if (!rt711->first_hw_init) {
+
 		/* set autosuspend parameters */
 		pm_runtime_set_autosuspend_delay(&slave->dev, 3000);
 		pm_runtime_use_autosuspend(&slave->dev);
