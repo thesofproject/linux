@@ -1234,6 +1234,8 @@ int snd_soc_pcm_component_pm_runtime_get(struct snd_soc_pcm_runtime *rtd,
 
 	for_each_rtd_components(rtd, i, component) {
 		int ret = pm_runtime_get_sync(component->dev);
+		dev_info(component->dev, "bard: %s i %d called pm_runtime_get_sync ret %d\n",
+			__func__, i, ret);
 		if (ret < 0 && ret != -EACCES) {
 			pm_runtime_put_noidle(component->dev);
 			return soc_component_ret(component, ret);
