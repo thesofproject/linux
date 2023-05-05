@@ -356,6 +356,12 @@ static int non_hda_dai_hw_params(struct snd_pcm_substream *substream,
 	int stream_id;
 	int ret;
 
+	ops = hda_dai_get_ops(substream, cpu_dai);
+	if (!ops) {
+		dev_err(cpu_dai->dev, "DAI widget ops not set\n");
+		return -EINVAL;
+	}
+
 	/* use HDaudio stream handling */
 	ret = hda_dai_hw_params(substream, params, cpu_dai);
 	if (ret < 0) {
@@ -364,7 +370,6 @@ static int non_hda_dai_hw_params(struct snd_pcm_substream *substream,
 	}
 
 	/* get stream_id */
-	ops = hda_dai_get_ops(substream, cpu_dai);
 	sdev = widget_to_sdev(w);
 	hext_stream = ops->get_hext_stream(sdev, cpu_dai, substream);
 
