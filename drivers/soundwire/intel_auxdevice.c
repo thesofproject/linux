@@ -326,6 +326,8 @@ int intel_link_startup(struct auxiliary_device *auxdev)
 
 		pm_runtime_set_active(dev);
 		pm_runtime_enable(dev);
+
+		pm_runtime_resume(bus->dev);
 	}
 
 	/* start bus */
@@ -363,6 +365,7 @@ int intel_link_startup(struct auxiliary_device *auxdev)
 	 * definition of Master properties.
 	 */
 	if (!(link_flags & SDW_INTEL_MASTER_DISABLE_PM_RUNTIME_IDLE)) {
+		pm_runtime_mark_last_busy(bus->dev);
 		pm_runtime_mark_last_busy(dev);
 		pm_runtime_idle(dev);
 	}
@@ -626,6 +629,8 @@ static int __maybe_unused intel_resume(struct device *dev)
 		pm_runtime_mark_last_busy(dev);
 		pm_runtime_enable(dev);
 
+		pm_runtime_resume(bus->dev);
+
 		link_flags = md_flags >> (bus->link_id * 8);
 
 		if (!(link_flags & SDW_INTEL_MASTER_DISABLE_PM_RUNTIME_IDLE))
@@ -661,6 +666,7 @@ static int __maybe_unused intel_resume(struct device *dev)
 	 * counters and delay the pm_runtime suspend by several
 	 * seconds, by when all enumeration should be complete.
 	 */
+	pm_runtime_mark_last_busy(bus->dev);
 	pm_runtime_mark_last_busy(dev);
 
 	return 0;
