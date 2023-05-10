@@ -100,6 +100,11 @@ jobs:
           sudo apt update
           sudo apt install -y libelf-dev
 
+      - name: Install debhelper
+        run: |
+          sudo apt update
+          sudo apt install -y debhelper
+
       - name: build start
         run: |
           export ARCH=x86_64 KCFLAGS="-Wall -Werror"
