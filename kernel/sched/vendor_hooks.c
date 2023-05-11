@@ -129,3 +129,4 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_set_iowait);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_util_fits_cpu);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_set_task_comm);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_update_rt_rq_load_avg);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_uclamp_validate);
