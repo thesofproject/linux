@@ -39,6 +39,8 @@ static const struct sof_topology_token pipeline_tokens[] = {
 };
 
 static const struct sof_topology_token ipc4_comp_tokens[] = {
+	{SOF_TKN_COMP_CPC, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc4_base_module_cfg, cpc)},
 	{SOF_TKN_COMP_IS_PAGES, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
 		offsetof(struct sof_ipc4_base_module_cfg, is_pages)},
 };
@@ -250,7 +252,7 @@ static int sof_ipc4_get_module_params(struct snd_soc_component *scomp,
 		"Number of input audio formats: %d. Number of output audio formats: %d\n",
 		module_params->num_input_formats, module_params->num_output_formats);
 
-	/* set is_pages in the module's base_config */
+	/* set cpc and is_pages in the module's base_config */
 	ret = sof_update_ipc_object(scomp, module_base_cfg, SOF_COMP_TOKENS, swidget->tuples,
 				    swidget->num_tuples, sizeof(*module_base_cfg), 1);
 	if (ret) {
@@ -259,8 +261,8 @@ static int sof_ipc4_get_module_params(struct snd_soc_component *scomp,
 		return ret;
 	}
 
-	dev_dbg(scomp->dev, "widget %s: is_pages: %d\n", swidget->widget->name,
-		module_base_cfg->is_pages);
+	dev_dbg(scomp->dev, "widget %s cpc: %d is_pages: %d\n",
+		swidget->widget->name, module_base_cfg->cpc, module_base_cfg->is_pages);
 
 	/* Save the CPC override value */
 	module_params->cpc = module_base_cfg->cpc;
@@ -769,9 +771,9 @@ static int sof_ipc4_widget_setup_comp_pga(struct snd_sof_widget *swidget)
 	}
 
 	dev_dbg(scomp->dev,
-		"pga widget %s: ramp type: %d, ramp duration %d, initial gain value: %#x\n",
+		"pga widget %s: ramp type: %d, ramp duration %d, initial gain value: %#x, cpc %d\n",
 		swidget->widget->name, gain->data.curve_type, gain->data.curve_duration_l,
-		gain->data.init_val);
+		gain->data.init_val, gain->base_config.cpc);
 
 	ret = sof_ipc4_widget_setup_msg(swidget, &gain->msg);
 	if (ret)
