@@ -23,8 +23,12 @@
 #include "intel.h"
 #include "intel_auxdevice.h"
 
-/* IDA min selected to avoid conflicts with HDaudio/iDISP SDI values */
-#define INTEL_DEV_NUM_IDA_MIN           4
+/*
+ * IDA min selected to allow for 5 unconstrained devices per link,
+ * and 6 system-unique Device Numbers for wake-capable devices.
+ */
+
+#define INTEL_DEV_NUM_IDA_MIN           6
 
 #define INTEL_MASTER_SUSPEND_DELAY_MS	3000
 
@@ -66,9 +70,20 @@ static void generic_new_peripheral_assigned(struct sdw_bus *bus,
 {
 	struct sdw_cdns *cdns = bus_to_cdns(bus);
 	struct sdw_intel *sdw = cdns_to_intel(cdns);
+	int min_dev = 1;
+	int max_dev = SDW_MAX_DEVICES;
+
+	if (bus->dev_num_alloc == SDW_DEV_NUM_ALLOC_IDA) {
+		min_dev = INTEL_DEV_NUM_IDA_MIN;
+	} else if (bus->dev_num_alloc == SDW_DEV_NUM_ALLOC_IDA_WAKE_ONLY) {
+		if (slave->prop.wake_capable)
+			min_dev = INTEL_DEV_NUM_IDA_MIN;
+		else
+			max_dev = INTEL_DEV_NUM_IDA_MIN - 1;
+	}
 
 	/* paranoia check, this should never happen */
-	if (dev_num < INTEL_DEV_NUM_IDA_MIN || dev_num > SDW_MAX_DEVICES)  {
+	if (dev_num < min_dev || dev_num > max_dev)  {
 		dev_err(bus->dev, "%s: invalid dev_num %d\n", __func__, dev_num);
 		return;
 	}
@@ -167,7 +182,7 @@ static int intel_link_probe(struct auxiliary_device *auxdev,
 	cdns->msg_count = 0;
 
 	bus->link_id = auxdev->id;
-	bus->dev_num_alloc = SDW_DEV_NUM_ALLOC_IDA;
+	bus->dev_num_alloc = SDW_DEV_NUM_ALLOC_IDA_WAKE_ONLY;
 	bus->dev_num_ida_min = INTEL_DEV_NUM_IDA_MIN;
 	bus->clk_stop_timeout = 1;
 
