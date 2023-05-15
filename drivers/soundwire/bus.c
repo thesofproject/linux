@@ -159,7 +159,9 @@ static int sdw_delete_slave(struct device *dev, void *data)
 
 	if (slave->dev_num) { /* clear dev_num if assigned */
 		clear_bit(slave->dev_num, bus->assigned);
-		if (bus->dev_num_alloc == SDW_DEV_NUM_ALLOC_IDA)
+		if (bus->dev_num_alloc == SDW_DEV_NUM_ALLOC_IDA ||
+		    (bus->dev_num_alloc == SDW_DEV_NUM_ALLOC_IDA_WAKE_ONLY &&
+		     slave->prop.wake_capable))
 			ida_free(&sdw_peripheral_ida, slave->dev_num);
 	}
 	list_del_init(&slave->node);
@@ -699,17 +701,31 @@ EXPORT_SYMBOL(sdw_compare_devid);
 /* called with bus_lock held */
 static int sdw_get_device_num(struct sdw_slave *slave)
 {
+	struct sdw_bus *bus = slave->bus;
 	int bit;
 
-	if (slave->bus->dev_num_alloc == SDW_DEV_NUM_ALLOC_IDA) {
+	if (bus->dev_num_alloc == SDW_DEV_NUM_ALLOC_IDA ||
+	    (bus->dev_num_alloc == SDW_DEV_NUM_ALLOC_IDA_WAKE_ONLY &&
+	     slave->prop.wake_capable)) {
 		bit = ida_alloc_range(&sdw_peripheral_ida,
-				      slave->bus->dev_num_ida_min, SDW_MAX_DEVICES,
+				      bus->dev_num_ida_min, SDW_MAX_DEVICES,
 				      GFP_KERNEL);
 		if (bit < 0)
 			goto err;
 	} else {
-		bit = find_first_zero_bit(slave->bus->assigned, SDW_MAX_DEVICES);
-		if (bit == SDW_MAX_DEVICES) {
+		int max_devices = SDW_MAX_DEVICES;
+
+		if (bus->dev_num_alloc == SDW_DEV_NUM_ALLOC_IDA_WAKE_ONLY &&
+		    !slave->prop.wake_capable) {
+			max_devices = bus->dev_num_ida_min - 1;
+
+			/* range check */
+			if (max_devices < 1 || max_devices > SDW_MAX_DEVICES)
+				return -EINVAL;
+		}
+
+		bit = find_first_zero_bit(bus->assigned, max_devices);
+		if (bit == max_devices) {
 			bit = -ENODEV;
 			goto err;
 		}
