@@ -159,7 +159,7 @@ static int sdw_delete_slave(struct device *dev, void *data)
 
 	if (slave->dev_num) { /* clear dev_num if assigned */
 		clear_bit(slave->dev_num, bus->assigned);
-		if (bus->dev_num_ida_min)
+		if (bus->dev_num_alloc == SDW_DEV_NUM_ALLOC_IDA)
 			ida_free(&sdw_peripheral_ida, slave->dev_num);
 	}
 	list_del_init(&slave->node);
@@ -701,7 +701,7 @@ static int sdw_get_device_num(struct sdw_slave *slave)
 {
 	int bit;
 
-	if (slave->bus->dev_num_ida_min) {
+	if (slave->bus->dev_num_alloc == SDW_DEV_NUM_ALLOC_IDA) {
 		bit = ida_alloc_range(&sdw_peripheral_ida,
 				      slave->bus->dev_num_ida_min, SDW_MAX_DEVICES,
 				      GFP_KERNEL);
