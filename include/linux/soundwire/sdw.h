@@ -869,10 +869,14 @@ struct sdw_master_ops {
  * @SDW_DEV_NUM_ALLOC_DEFAULT: unconstrained first-come-first-serve allocation,
  * using range [1, 11]
  * @SDW_DEV_NUM_ALLOC_IDA: IDA-based allocation, using range [ida_min, 11]
+ * @SDW_DEV_NUM_ALLOC_IDA_WAKE_ONLY: Hybrid allocation where wake-capable devices rely on
+ * IDA-based allocation and range [ida_min, 11], while regular devices rely on default
+ * allocation in range [1, ida_min - 1]
  */
 enum sdw_dev_num_alloc {
 	SDW_DEV_NUM_ALLOC_DEFAULT = 0,
 	SDW_DEV_NUM_ALLOC_IDA,
+	SDW_DEV_NUM_ALLOC_IDA_WAKE_ONLY,
 };
 
 /**
