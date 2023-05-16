@@ -156,7 +156,7 @@ static char *extra_init_args;
 
 #ifdef CONFIG_BOOT_CONFIG
 /* Is bootconfig on command line? */
-static bool bootconfig_found = IS_ENABLED(CONFIG_BOOT_CONFIG_FORCE);
+static bool bootconfig_found;
 static size_t initargs_offs;
 #else
 # define bootconfig_found false
@@ -429,7 +429,7 @@ static void __init setup_boot_config(void)
 	err = parse_args("bootconfig", tmp_cmdline, NULL, 0, 0, 0, NULL,
 			 bootconfig_params);
 
-	if (IS_ERR(err) || !bootconfig_found)
+	if (IS_ERR(err) || !(bootconfig_found || IS_ENABLED(CONFIG_BOOT_CONFIG_FORCE)))
 		return;
 
 	/* parse_args() stops at the next param of '--' and returns an address */
@@ -437,7 +437,11 @@ static void __init setup_boot_config(void)
 		initargs_offs = err - tmp_cmdline;
 
 	if (!data) {
-		pr_err("'bootconfig' found on command line, but no bootconfig found\n");
+		/* If user intended to use bootconfig, show an error level message */
+		if (bootconfig_found)
+			pr_err("'bootconfig' found on command line, but no bootconfig found\n");
+		else
+			pr_info("No bootconfig data provided, so skipping bootconfig");
 		return;
 	}
 
@@ -707,7 +711,7 @@ noinline void __ref rest_init(void)
 	rcu_read_unlock();
 
 	numa_default_policy();
-	pid = kernel_thread(kthreadd, NULL, CLONE_FS | CLONE_FILES);
+	pid = kernel_thread(kthreadd, NULL, NULL, CLONE_FS | CLONE_FILES);
 	rcu_read_lock();
 	kthreadd_task = find_task_by_pid_ns(pid, &init_pid_ns);
 	rcu_read_unlock();
@@ -1088,14 +1092,6 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	 */
 	locking_selftest();
 
-	/*
-	 * This needs to be called before any devices perform DMA
-	 * operations that might use the SWIOTLB bounce buffers. It will
-	 * mark the bounce buffers as decrypted so that their usage will
-	 * not cause "plain-text" data to be decrypted when accessed.
-	 */
-	mem_encrypt_init();
-
 #ifdef CONFIG_BLK_DEV_INITRD
 	if (initrd_start && !initrd_below_start_ok &&
 	    page_to_pfn(virt_to_page((void *)initrd_start)) < min_low_pfn) {
@@ -1112,6 +1108,17 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 		late_time_init();
 	sched_clock_init();
 	calibrate_delay();
+
+	/*
+	 * This needs to be called before any devices perform DMA
+	 * operations that might use the SWIOTLB bounce buffers. It will
+	 * mark the bounce buffers as decrypted so that their usage will
+	 * not cause "plain-text" data to be decrypted when accessed. It
+	 * must be called after late_time_init() so that Hyper-V x86/x64
+	 * hypercalls work when the SWIOTLB bounce buffers are decrypted.
+	 */
+	mem_encrypt_init();
+
 	pid_idr_init();
 	anon_vma_init();
 #ifdef CONFIG_X86

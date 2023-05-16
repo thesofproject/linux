@@ -16,7 +16,6 @@
 #include <linux/fs.h>
 #include <linux/mman.h>
 #include <linux/sched.h>
-#include <linux/kmemleak.h>
 #include <linux/kvm.h>
 #include <linux/kvm_irqfd.h>
 #include <linux/irqbypass.h>
@@ -46,7 +45,6 @@
 #include <kvm/arm_psci.h>
 
 static enum kvm_mode kvm_mode = KVM_MODE_DEFAULT;
-DEFINE_STATIC_KEY_FALSE(kvm_protected_mode_initialized);
 
 DECLARE_KVM_HYP_PER_CPU(unsigned long, kvm_hyp_vector);
 
@@ -220,6 +218,7 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
 	case KVM_CAP_VCPU_ATTRIBUTES:
 	case KVM_CAP_PTP_KVM:
 	case KVM_CAP_ARM_SYSTEM_SUSPEND:
+	case KVM_CAP_IRQFD_RESAMPLE:
 		r = 1;
 		break;
 	case KVM_CAP_SET_GUEST_DEBUG2:
@@ -1889,9 +1888,33 @@ static int __init do_pkvm_init(u32 hyp_va_bits)
 	return ret;
 }
 
+static u64 get_hyp_id_aa64pfr0_el1(void)
+{
+	/*
+	 * Track whether the system isn't affected by spectre/meltdown in the
+	 * hypervisor's view of id_aa64pfr0_el1, used for protected VMs.
+	 * Although this is per-CPU, we make it global for simplicity, e.g., not
+	 * to have to worry about vcpu migration.
+	 *
+	 * Unlike for non-protected VMs, userspace cannot override this for
+	 * protected VMs.
+	 */
+	u64 val = read_sanitised_ftr_reg(SYS_ID_AA64PFR0_EL1);
+
+	val &= ~(ARM64_FEATURE_MASK(ID_AA64PFR0_EL1_CSV2) |
+		 ARM64_FEATURE_MASK(ID_AA64PFR0_EL1_CSV3));
+
+	val |= FIELD_PREP(ARM64_FEATURE_MASK(ID_AA64PFR0_EL1_CSV2),
+			  arm64_get_spectre_v2_state() == SPECTRE_UNAFFECTED);
+	val |= FIELD_PREP(ARM64_FEATURE_MASK(ID_AA64PFR0_EL1_CSV3),
+			  arm64_get_meltdown_state() == SPECTRE_UNAFFECTED);
+
+	return val;
+}
+
 static void kvm_hyp_init_symbols(void)
 {
-	kvm_nvhe_sym(id_aa64pfr0_el1_sys_val) = read_sanitised_ftr_reg(SYS_ID_AA64PFR0_EL1);
+	kvm_nvhe_sym(id_aa64pfr0_el1_sys_val) = get_hyp_id_aa64pfr0_el1();
 	kvm_nvhe_sym(id_aa64pfr1_el1_sys_val) = read_sanitised_ftr_reg(SYS_ID_AA64PFR1_EL1);
 	kvm_nvhe_sym(id_aa64isar0_el1_sys_val) = read_sanitised_ftr_reg(SYS_ID_AA64ISAR0_EL1);
 	kvm_nvhe_sym(id_aa64isar1_el1_sys_val) = read_sanitised_ftr_reg(SYS_ID_AA64ISAR1_EL1);
@@ -2105,41 +2128,6 @@ out_err:
 	return err;
 }
 
-static void __init _kvm_host_prot_finalize(void *arg)
-{
-	int *err = arg;
-
-	if (WARN_ON(kvm_call_hyp_nvhe(__pkvm_prot_finalize)))
-		WRITE_ONCE(*err, -EINVAL);
-}
-
-static int __init pkvm_drop_host_privileges(void)
-{
-	int ret = 0;
-
-	/*
-	 * Flip the static key upfront as that may no longer be possible
-	 * once the host stage 2 is installed.
-	 */
-	static_branch_enable(&kvm_protected_mode_initialized);
-	on_each_cpu(_kvm_host_prot_finalize, &ret, 1);
-	return ret;
-}
-
-static int __init finalize_hyp_mode(void)
-{
-	if (!is_protected_kvm_enabled())
-		return 0;
-
-	/*
-	 * Exclude HYP sections from kmemleak so that they don't get peeked
-	 * at, which would end badly once inaccessible.
-	 */
-	kmemleak_free_part(__hyp_bss_start, __hyp_bss_end - __hyp_bss_start);
-	kmemleak_free_part_phys(hyp_mem_base, hyp_mem_size);
-	return pkvm_drop_host_privileges();
-}
-
 struct kvm_vcpu *kvm_mpidr_to_vcpu(struct kvm *kvm, unsigned long mpidr)
 {
 	struct kvm_vcpu *vcpu;
@@ -2256,14 +2244,6 @@ static __init int kvm_arm_init(void)
 	err = init_subsystems();
 	if (err)
 		goto out_hyp;
-
-	if (!in_hyp_mode) {
-		err = finalize_hyp_mode();
-		if (err) {
-			kvm_err("Failed to finalize Hyp protection\n");
-			goto out_subs;
-		}
-	}
 
 	if (is_protected_kvm_enabled()) {
 		kvm_info("Protected nVHE mode initialized successfully\n");
