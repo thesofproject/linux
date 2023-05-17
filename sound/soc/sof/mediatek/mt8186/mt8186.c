@@ -691,10 +691,10 @@ static struct snd_sof_dsp_ops sof_mt8188_ops;
 static int sof_mt8188_ops_init(struct snd_sof_dev *sdev)
 {
 	/* common defaults */
-	memcpy(&sof_mt8188_ops, &sof_mt8186_ops, sizeof(struct snd_sof_dsp_ops));
+	memcpy(&sof_mt8188_ops, &sof_mt8186_ops, sizeof(sof_mt8188_ops));
 
 	sof_mt8188_ops.drv = mt8188_dai;
-	sof_mt8186_ops.num_drv = ARRAY_SIZE(mt8188_dai);
+	sof_mt8188_ops.num_drv = ARRAY_SIZE(mt8188_dai);
 
 	return 0;
 }
