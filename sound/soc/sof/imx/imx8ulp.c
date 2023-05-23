@@ -477,7 +477,17 @@ static struct snd_sof_dsp_ops sof_imx8ulp_ops = {
 	.set_power_state	= imx8ulp_dsp_set_power_state,
 };
 
+static struct snd_sof_of_mach sof_imx8ulp_machs[] = {
+	{
+		.compatible = "fsl,imx8ulp",
+		.drv_name = "asoc-simple-card",
+		.sof_tplg_filename = "sof-imx8ulp.tplg",
+	},
+	{}
+};
+
 static struct sof_dev_desc sof_of_imx8ulp_desc = {
+	.of_machines = sof_imx8ulp_machs,
 	.ipc_supported_mask     = BIT(SOF_IPC),
 	.ipc_default            = SOF_IPC,
 	.default_fw_path = {

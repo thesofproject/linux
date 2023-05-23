@@ -470,7 +470,17 @@ static struct snd_sof_dsp_ops sof_imx8m_ops = {
 		SNDRV_PCM_INFO_NO_PERIOD_WAKEUP,
 };
 
+static struct snd_sof_of_mach sof_imx8m_machs[] = {
+	{
+		.compatible = "fsl,imx8mp",
+		.drv_name = "asoc-simple-card",
+		.sof_tplg_filename = "sof-imx8mp.tplg",
+	},
+	{}
+};
+
 static struct sof_dev_desc sof_of_imx8mp_desc = {
+	.of_machines = sof_imx8m_machs,
 	.ipc_supported_mask	= BIT(SOF_IPC),
 	.ipc_default		= SOF_IPC,
 	.default_fw_path = {
