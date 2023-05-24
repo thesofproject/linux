@@ -103,6 +103,8 @@ static const struct sof_topology_token dai_tokens[] = {
 		offsetof(struct sof_ipc4_copier, dai_type)},
 	{SOF_TKN_DAI_INDEX, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
 		offsetof(struct sof_ipc4_copier, dai_index)},
+	{SOF_TKN_COMP_FORMAT, SND_SOC_TPLG_TUPLE_TYPE_STRING, get_token_comp_format,
+		offsetof(struct sof_ipc4_copier, frame_fmt)},
 };
 
 /* Component extended tokens */
@@ -502,6 +504,8 @@ static int sof_ipc4_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 		goto free_available_fmt;
 	}
 
+	/* Set initial value, so that we won't fixup the format if the format is not specified */
+	ipc4_copier->frame_fmt = -1;
 	ret = sof_update_ipc_object(scomp, ipc4_copier,
 				    SOF_DAI_TOKENS, swidget->tuples,
 				    swidget->num_tuples, sizeof(u32), 1);
