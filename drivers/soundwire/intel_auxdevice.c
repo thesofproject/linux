@@ -131,6 +131,11 @@ static int sdw_master_read_intel_prop(struct sdw_bus *bus)
 		prop->default_col = 4;
 	}
 
+	dev_dbg(bus->dev, "%s: mclk %d\n", __func__, prop->mclk_freq);
+	dev_dbg(bus->dev, "%s: clk %d\n", __func__, prop->clk_freq[0]);
+	dev_dbg(bus->dev, "%s: row %d\n", __func__, prop->default_row);
+	dev_dbg(bus->dev, "%s: col %d\n", __func__, prop->default_col);
+
 	fwnode_property_read_u32(link,
 				 "intel-quirk-mask",
 				 &quirk_mask);
