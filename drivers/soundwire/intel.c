@@ -361,10 +361,13 @@ static int intel_link_power_up(struct sdw_intel *sdw)
 	 * (CNL/CML) or 38.4 MHz (ICL/TGL+).
 	 */
 	if (prop->mclk_freq % 6000000) {
-		if (prop->mclk_freq % 3072000)
+		if (prop->mclk_freq % 3072000) {
 			syncprd = SDW_SHIM_SYNC_SYNCPRD_VAL_38_4;
-		else
+			dev_dbg(sdw->cdns.dev, "%s: using 38.4\n", __func__);
+		} else {
 			syncprd = SDW_SHIM_SYNC_SYNCPRD_VAL_24_576;
+			dev_dbg(sdw->cdns.dev, "%s: using 24.576\n", __func__);
+		}
 	} else {
 		syncprd = SDW_SHIM_SYNC_SYNCPRD_VAL_24;
 	}
@@ -374,6 +377,8 @@ static int intel_link_power_up(struct sdw_intel *sdw)
 		u32p_replace_bits(&link_control, SDW_SHIM_LCTL_MLCS_CARDINAL_CLK,
 				  SDW_SHIM_LCTL_MLCS_MASK);
 		intel_writel(shim, SDW_SHIM_LCTL, link_control);
+
+		dev_dbg(sdw->cdns.dev, "%s: link_control %#x\n", __func__, link_control);
 	}
 
 	if (!*shim_mask) {
