@@ -30,12 +30,15 @@
 #define SDW_SHIM_LCTL_SPA_MASK		GENMASK(3, 0)
 #define SDW_SHIM_LCTL_CPA		BIT(8)
 #define SDW_SHIM_LCTL_CPA_MASK		GENMASK(11, 8)
+#define SDW_SHIM_LCTL_MLCS_MASK		GENMASK(29, 27)
+#define SDW_SHIM_LCTL_MLCS_CARDINAL_CLK 0x1
 
 /* SYNC */
 #define SDW_SHIM_SYNC			0xC
 
-#define SDW_SHIM_SYNC_SYNCPRD_VAL_24	(24000 / SDW_CADENCE_GSYNC_KHZ - 1)
-#define SDW_SHIM_SYNC_SYNCPRD_VAL_38_4	(38400 / SDW_CADENCE_GSYNC_KHZ - 1)
+#define SDW_SHIM_SYNC_SYNCPRD_VAL_24		(24000 / SDW_CADENCE_GSYNC_KHZ - 1)
+#define SDW_SHIM_SYNC_SYNCPRD_VAL_24_576	(24576 / SDW_CADENCE_GSYNC_KHZ - 1)
+#define SDW_SHIM_SYNC_SYNCPRD_VAL_38_4		(38400 / SDW_CADENCE_GSYNC_KHZ - 1)
 #define SDW_SHIM_SYNC_SYNCPRD		GENMASK(14, 0)
 #define SDW_SHIM_SYNC_SYNCCPU		BIT(15)
 #define SDW_SHIM_SYNC_CMDSYNC_MASK	GENMASK(19, 16)
@@ -329,6 +332,7 @@ struct sdw_intel_ctx {
  * @hbus: hdac_bus pointer, needed for power management
  * @eml_lock: mutex protecting shared registers in the HDaudio multi-link
  * space
+ * @clock_source_mask: mask representing
  */
 struct sdw_intel_res {
 	const struct sdw_intel_hw_ops *hw_ops;

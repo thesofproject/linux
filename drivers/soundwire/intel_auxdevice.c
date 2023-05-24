@@ -94,6 +94,9 @@ static void generic_new_peripheral_assigned(struct sdw_bus *bus,
 
 static int sdw_master_read_intel_prop(struct sdw_bus *bus)
 {
+
+	struct sdw_cdns *cdns = bus_to_cdns(bus);
+	struct sdw_intel *sdw = cdns_to_intel(cdns);
 	struct sdw_master_prop *prop = &bus->prop;
 	struct fwnode_handle *link;
 	char name[32];
@@ -109,12 +112,24 @@ static int sdw_master_read_intel_prop(struct sdw_bus *bus)
 		return -EIO;
 	}
 
-	fwnode_property_read_u32(link,
-				 "intel-sdw-ip-clock",
-				 &prop->mclk_freq);
+	if (!sdw->link_res->cardinal_clock_capable) {
+		fwnode_property_read_u32(link,
+					 "intel-sdw-ip-clock",
+					 &prop->mclk_freq);
 
-	/* the values reported by BIOS are the 2x clock, not the bus clock */
-	prop->mclk_freq /= 2;
+		/* the values reported by BIOS are the 2x clock, not the bus clock */
+		prop->mclk_freq /= 2;
+	} else {
+		/*
+		 * FIXME: we need to figure out what the mclk_freq is supposed
+		 * to represent
+		 */
+		prop->mclk_freq = 24576000 / 2;
+		prop->clk_freq[0] = 6144000;
+		prop->max_clk_freq = 6144000;
+		prop->default_row = 64;
+		prop->default_col = 4;
+	}
 
 	fwnode_property_read_u32(link,
 				 "intel-quirk-mask",

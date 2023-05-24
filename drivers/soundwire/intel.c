@@ -360,10 +360,21 @@ static int intel_link_power_up(struct sdw_intel *sdw)
 	 * tables. The values reported are based on either 24MHz
 	 * (CNL/CML) or 38.4 MHz (ICL/TGL+).
 	 */
-	if (prop->mclk_freq % 6000000)
-		syncprd = SDW_SHIM_SYNC_SYNCPRD_VAL_38_4;
-	else
+	if (prop->mclk_freq % 6000000) {
+		if (prop->mclk_freq % 3072000)
+			syncprd = SDW_SHIM_SYNC_SYNCPRD_VAL_38_4;
+		else
+			syncprd = SDW_SHIM_SYNC_SYNCPRD_VAL_24_576;
+	} else {
 		syncprd = SDW_SHIM_SYNC_SYNCPRD_VAL_24;
+	}
+
+	if (sdw->link_res->cardinal_clock_capable) {
+		link_control = intel_readl(shim, SDW_SHIM_LCTL);
+		u32p_replace_bits(&link_control, SDW_SHIM_LCTL_MLCS_CARDINAL_CLK,
+				  SDW_SHIM_LCTL_MLCS_MASK);
+		intel_writel(shim, SDW_SHIM_LCTL, link_control);
+	}
 
 	if (!*shim_mask) {
 		dev_dbg(sdw->cdns.dev, "powering up all links\n");

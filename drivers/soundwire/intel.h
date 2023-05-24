@@ -23,6 +23,8 @@ struct hdac_bus;
  * @shim_mask: global pointer to check SHIM register initialization
  * @clock_stop_quirks: mask defining requested behavior on pm_suspend
  * @link_mask: global mask needed for power-up/down sequences
+ * @cardinal_clock_capable: indicates that the IP can rely on 24.576MHz
+ * audio cardinal frequency instead of oscillator.
  * @cdns: Cadence master descriptor
  * @list: used to walk-through all masters exposed by the same controller
  * @hbus: hdac_bus pointer, needed for power management
@@ -43,6 +45,7 @@ struct sdw_intel_link_res {
 	u32 *shim_mask;
 	u32 clock_stop_quirks;
 	u32 link_mask;
+	bool cardinal_clock_capable;
 	struct sdw_cdns *cdns;
 	struct list_head list;
 	struct hdac_bus *hbus;

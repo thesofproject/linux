@@ -70,12 +70,18 @@ static struct sdw_intel_link_dev *intel_link_dev_register(struct sdw_intel_res *
 		link->shim = res->mmio_base + res->shim_base;
 		link->alh = res->mmio_base + res->alh_base;
 		link->shim_lock = &ctx->shim_lock;
+
+		if (res->shim_base == 0x38000)
+			link->cardinal_clock_capable = true;
+
 	} else {
 		link->registers = res->mmio_base + SDW_IP_BASE(link_id);
 		link->ip_offset = SDW_CADENCE_MCP_IP_OFFSET;
 		link->shim = res->mmio_base +  SDW_SHIM2_GENERIC_BASE(link_id);
 		link->shim_vs = res->mmio_base + SDW_SHIM2_VS_BASE(link_id);
 		link->shim_lock = res->eml_lock;
+
+		link->cardinal_clock_capable = true;
 	}
 
 	link->ops = res->ops;
