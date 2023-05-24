@@ -302,6 +302,7 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_do_mmap_map_count);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_do_new_mount_fc);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_do_read_fault);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_do_send_sig_info);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_do_shrink_slab);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_do_swap_page);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_do_swap_page_folio_lock_check);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_do_swap_page_wait);
