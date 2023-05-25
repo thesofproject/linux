@@ -2760,12 +2760,6 @@ static int soc_get_playback_capture(struct snd_soc_pcm_runtime *rtd,
 		cpu_playback = SNDRV_PCM_STREAM_CAPTURE;
 	}
 
-	/* REMOVE ME */
-	if (dai_link->dpcm_playback && !dai_link->dpcm_capture)
-		dai_link->playback_only = 1;
-	if (!dai_link->dpcm_playback && dai_link->dpcm_capture)
-		dai_link->capture_only = 1;
-
 	for_each_rtd_cpu_dais(rtd, i, cpu_dai) {
 		codec_dai = asoc_rtd_to_codec(rtd, i); /* get paired codec */
 
