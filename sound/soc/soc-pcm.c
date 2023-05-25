@@ -2735,7 +2735,10 @@ static int soc_get_playback_capture(struct snd_soc_pcm_runtime *rtd,
 				    int *playback, int *capture)
 {
 	struct snd_soc_dai_link *dai_link = rtd->dai_link;
+	struct snd_soc_dai *codec_dai;
 	struct snd_soc_dai *cpu_dai;
+	int cpu_capture  = SNDRV_PCM_STREAM_CAPTURE;
+	int cpu_playback = SNDRV_PCM_STREAM_PLAYBACK;
 	int has_playback = 0;
 	int has_capture  = 0;
 	int i;
@@ -2751,61 +2754,34 @@ static int soc_get_playback_capture(struct snd_soc_pcm_runtime *rtd,
 		return -EINVAL;
 	}
 
-	if (dai_link->dynamic || dai_link->no_pcm) {
-		int stream;
+	/* Adapt stream for codec2codec links */
+	if (dai_link->c2c_params) {
+		cpu_capture  = SNDRV_PCM_STREAM_PLAYBACK;
+		cpu_playback = SNDRV_PCM_STREAM_CAPTURE;
+	}
 
-		if (dai_link->dpcm_playback) {
-			stream = SNDRV_PCM_STREAM_PLAYBACK;
+	/* REMOVE ME */
+	if (dai_link->dpcm_playback && !dai_link->dpcm_capture)
+		dai_link->playback_only = 1;
+	if (!dai_link->dpcm_playback && dai_link->dpcm_capture)
+		dai_link->capture_only = 1;
 
-			for_each_rtd_cpu_dais(rtd, i, cpu_dai) {
-				if (snd_soc_dai_stream_valid(cpu_dai, stream)) {
-					has_playback = 1;
-					break;
-				}
-			}
-			if (!has_playback) {
-				dev_err(rtd->card->dev,
-					"No CPU DAIs support playback for stream %s\n",
-					dai_link->stream_name);
-				return -EINVAL;
-			}
-		}
-		if (dai_link->dpcm_capture) {
-			stream = SNDRV_PCM_STREAM_CAPTURE;
+	for_each_rtd_cpu_dais(rtd, i, cpu_dai) {
+		codec_dai = asoc_rtd_to_codec(rtd, i); /* get paired codec */
 
-			for_each_rtd_cpu_dais(rtd, i, cpu_dai) {
-				if (snd_soc_dai_stream_valid(cpu_dai, stream)) {
-					has_capture = 1;
-					break;
-				}
-			}
-
-			if (!has_capture) {
-				dev_err(rtd->card->dev,
-					"No CPU DAIs support capture for stream %s\n",
-					dai_link->stream_name);
-				return -EINVAL;
-			}
-		}
-	} else {
-		struct snd_soc_dai *codec_dai;
-
-		/* Adapt stream for codec2codec links */
-		int cpu_capture = dai_link->c2c_params ?
-			SNDRV_PCM_STREAM_PLAYBACK : SNDRV_PCM_STREAM_CAPTURE;
-		int cpu_playback = dai_link->c2c_params ?
-			SNDRV_PCM_STREAM_CAPTURE : SNDRV_PCM_STREAM_PLAYBACK;
-
-		for_each_rtd_codec_dais(rtd, i, codec_dai) {
-			cpu_dai = asoc_rtd_to_cpu(rtd, i);
-
-			if (snd_soc_dai_stream_valid(codec_dai, SNDRV_PCM_STREAM_PLAYBACK) &&
-			    snd_soc_dai_stream_valid(cpu_dai,   cpu_playback))
-				has_playback = 1;
-			if (snd_soc_dai_stream_valid(codec_dai, SNDRV_PCM_STREAM_CAPTURE) &&
-			    snd_soc_dai_stream_valid(cpu_dai,   cpu_capture))
-				has_capture = 1;
-		}
+		/*
+		 * FIXME
+		 *
+		 * DPCM BE Codec has been no checked before.
+		 * It should be checked, but it breaks compatibility.
+		 * It ignores BE Codec here, so far.
+		 */
+		if (snd_soc_dai_stream_valid(cpu_dai,   cpu_playback) &&
+		    (dai_link->no_pcm || snd_soc_dai_stream_valid(codec_dai, SNDRV_PCM_STREAM_PLAYBACK)))
+			has_playback = 1;
+		if (snd_soc_dai_stream_valid(cpu_dai,   cpu_capture) &&
+		    (dai_link->no_pcm || snd_soc_dai_stream_valid(codec_dai, SNDRV_PCM_STREAM_CAPTURE)))
+			has_capture = 1;
 	}
 
 	if (dai_link->playback_only)
