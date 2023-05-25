@@ -505,8 +505,10 @@ void snd_soc_dai_link_set_capabilities(struct snd_soc_dai_link *dai_link)
 		supported[direction] = supported_cpu && supported_codec;
 	}
 
-	dai_link->dpcm_playback = supported[SNDRV_PCM_STREAM_PLAYBACK];
-	dai_link->dpcm_capture  = supported[SNDRV_PCM_STREAM_CAPTURE];
+	dai_link->playback_only = supported[SNDRV_PCM_STREAM_PLAYBACK] &&
+				 !supported[SNDRV_PCM_STREAM_CAPTURE];
+	dai_link->capture_only  = supported[SNDRV_PCM_STREAM_CAPTURE] &&
+				 !supported[SNDRV_PCM_STREAM_PLAYBACK];
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_link_set_capabilities);
 
