@@ -237,6 +237,36 @@ static unsigned int generic_calc_stream_format(struct snd_sof_dev *sdev,
 	return format_val;
 }
 
+static unsigned int dmic_calc_stream_format(struct snd_sof_dev *sdev,
+					    struct snd_pcm_substream *substream,
+					    struct snd_pcm_hw_params *params)
+{
+	unsigned int format_val;
+	snd_pcm_format_t format;
+	unsigned int channels;
+	unsigned int width;
+
+	channels = params_channels(params);
+	format = params_format(params);
+	width = params_physical_width(params);
+
+	if (format == SNDRV_PCM_FORMAT_S16_LE) {
+		format = SNDRV_PCM_FORMAT_S32_LE;
+		channels /= 2;
+		width = 32;
+	}
+
+	format_val = snd_hdac_calc_stream_format(params_rate(params), channels,
+						 format,
+						 width,
+						 0);
+
+	dev_dbg(sdev->dev, "format_val=%#x, rate=%d, ch=%d, format=%d\n", format_val,
+		params_rate(params), channels, format);
+
+	return format_val;
+}
+
 static struct hdac_ext_link *ssp_get_hlink(struct snd_sof_dev *sdev,
 					   struct snd_pcm_substream *substream)
 {
@@ -414,7 +444,7 @@ static const struct hda_dai_widget_dma_ops dmic_ipc4_dma_ops = {
 	.pre_trigger = hda_ipc4_pre_trigger,
 	.trigger = hda_trigger,
 	.post_trigger = hda_ipc4_post_trigger,
-	.calc_stream_format = generic_calc_stream_format,
+	.calc_stream_format = dmic_calc_stream_format,
 	.get_hlink = dmic_get_hlink,
 };
 
