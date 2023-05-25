@@ -2745,6 +2745,12 @@ static int soc_get_playback_capture(struct snd_soc_pcm_runtime *rtd,
 		return -EINVAL;
 	}
 
+	if (dai_link->num_cpus != dai_link->num_codecs) {
+		dev_err(rtd->dev, "%s: %d cpus to %d codecs link is not supported yet\n",
+			dai_link->name, dai_link->num_cpus, dai_link->num_codecs);
+		return -EINVAL;
+	}
+
 	if (dai_link->dynamic || dai_link->no_pcm) {
 		int stream;
 
@@ -2795,10 +2801,6 @@ static int soc_get_playback_capture(struct snd_soc_pcm_runtime *rtd,
 				cpu_dai = asoc_rtd_to_cpu(rtd, 0);
 			} else if (dai_link->num_cpus == dai_link->num_codecs) {
 				cpu_dai = asoc_rtd_to_cpu(rtd, i);
-			} else {
-				dev_err(rtd->card->dev,
-					"N cpus to M codecs link is not supported yet\n");
-				return -EINVAL;
 			}
 
 			if (snd_soc_dai_stream_valid(codec_dai, SNDRV_PCM_STREAM_PLAYBACK) &&
