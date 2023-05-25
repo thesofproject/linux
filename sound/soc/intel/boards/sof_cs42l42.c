@@ -328,10 +328,6 @@ static int create_spk_amp_dai_links(struct device *dev,
 
 	links[*id].platforms = platform_component;
 	links[*id].num_platforms = ARRAY_SIZE(platform_component);
-	links[*id].dpcm_playback = 1;
-	/* firmware-generated echo reference */
-	links[*id].dpcm_capture = 1;
-
 	links[*id].no_pcm = 1;
 	links[*id].cpus = &cpus[*id];
 	links[*id].num_cpus = 1;
@@ -368,8 +364,6 @@ static int create_hp_codec_dai_links(struct device *dev,
 	links[*id].init = sof_cs42l42_init;
 	links[*id].exit = sof_cs42l42_exit;
 	links[*id].ops = &sof_cs42l42_ops;
-	links[*id].dpcm_playback = 1;
-	links[*id].dpcm_capture = 1;
 	links[*id].no_pcm = 1;
 	links[*id].cpus = &cpus[*id];
 	links[*id].num_cpus = 1;
@@ -420,7 +414,7 @@ static int create_dmic_dai_links(struct device *dev,
 		links[*id].platforms = platform_component;
 		links[*id].num_platforms = ARRAY_SIZE(platform_component);
 		links[*id].ignore_suspend = 1;
-		links[*id].dpcm_capture = 1;
+		links[*id].capture_only = 1;
 		links[*id].no_pcm = 1;
 
 		(*id)++;
@@ -476,7 +470,7 @@ static int create_hdmi_dai_links(struct device *dev,
 		links[*id].platforms = platform_component;
 		links[*id].num_platforms = ARRAY_SIZE(platform_component);
 		links[*id].init = sof_hdmi_init;
-		links[*id].dpcm_playback = 1;
+		links[*id].playback_only = 1;
 		links[*id].no_pcm = 1;
 
 		(*id)++;
@@ -508,8 +502,6 @@ static int create_bt_offload_dai_links(struct device *dev,
 	links[*id].platforms = platform_component;
 	links[*id].num_platforms = ARRAY_SIZE(platform_component);
 
-	links[*id].dpcm_playback = 1;
-	links[*id].dpcm_capture = 1;
 	links[*id].no_pcm = 1;
 	links[*id].cpus = &cpus[*id];
 	links[*id].num_cpus = 1;
