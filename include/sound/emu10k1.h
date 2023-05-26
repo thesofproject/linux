@@ -64,6 +64,9 @@
 #define REG_VAL_GET(r, v) ((v & REG_MASK(r)) >> REG_SHIFT(r))
 #define REG_VAL_PUT(r, v) ((v) << REG_SHIFT(r))
 
+// List terminator for snd_emu10k1_ptr_write_multiple()
+#define REGLIST_END ~0
+
 // Audigy specify registers are prefixed with 'A_'
 
 /************************************************************************************************/
@@ -116,6 +119,10 @@
 #define IPR_MIDITRANSBUFEMPTY	0x00000100	/* MIDI UART transmit buffer empty		*/
 #define IPR_MIDIRECVBUFEMPTY	0x00000080	/* MIDI UART receive buffer empty		*/
 #define IPR_CHANNELLOOP		0x00000040	/* Channel (half) loop interrupt(s) pending	*/
+						/* The interrupt is triggered shortly after	*/
+						/* CCR_READADDRESS has crossed the boundary;	*/
+						/* due to the cache, this runs ahead of the	*/
+						/* actual playback position.			*/
 #define IPR_CHANNELNUMBERMASK	0x0000003f	/* When IPR_CHANNELLOOP is set, indicates the	*/
 						/* highest set channel in CLIPL, CLIPH, HLIPL,  */
 						/* or HLIPH.  When IPR is written with CL set,	*/
@@ -415,7 +422,8 @@ SUB_REG(HCFG, LOCKTANKCACHE,	0x00000004)	/* 1 = Cancel bustmaster accesses to ta
 #define CPF			0x00		/* Current pitch and fraction register			*/
 SUB_REG(CPF, CURRENTPITCH,	0xffff0000)	/* Current pitch (linear, 0x4000 == unity pitch shift) 	*/
 #define CPF_STEREO_MASK		0x00008000	/* 1 = Even channel interleave, odd channel locked	*/
-#define CPF_STOP_MASK		0x00004000	/* 1 = Current pitch forced to 0			*/
+SUB_REG(CPF, STOP,		0x00004000)	/* 1 = Current pitch forced to 0			*/
+						/* Can be set only while matching bit in SOLEx is 1	*/
 #define CPF_FRACADDRESS_MASK	0x00003fff	/* Linear fractional address of the current channel	*/
 
 #define PTRX			0x01		/* Pitch target and send A/B amounts register		*/
@@ -586,24 +594,22 @@ SUB_REG(PEFE, FILTERAMOUNT,	0x000000ff)	/* Filter envlope amount				*/
 
 /* 0x1f: not used */
 
-#define CD0			0x20		/* Cache data 0 register				*/
-#define CD1			0x21		/* Cache data 1 register				*/
-#define CD2			0x22		/* Cache data 2 register				*/
-#define CD3			0x23		/* Cache data 3 register				*/
-#define CD4			0x24		/* Cache data 4 register				*/
-#define CD5			0x25		/* Cache data 5 register				*/
-#define CD6			0x26		/* Cache data 6 register				*/
-#define CD7			0x27		/* Cache data 7 register				*/
-#define CD8			0x28		/* Cache data 8 register				*/
-#define CD9			0x29		/* Cache data 9 register				*/
-#define CDA			0x2a		/* Cache data A register				*/
-#define CDB			0x2b		/* Cache data B register				*/
-#define CDC			0x2c		/* Cache data C register				*/
-#define CDD			0x2d		/* Cache data D register				*/
-#define CDE			0x2e		/* Cache data E register				*/
-#define CDF			0x2f		/* Cache data F register				*/
-
-/* 0x30-3f seem to be the same as 0x20-2f */
+// 32 cache registers (== 128 bytes) per channel follow.
+// In stereo mode, the two channels' caches are concatenated into one,
+// and hold the interleaved frames.
+// The cache holds 64 frames, so the upper half is not used in 8-bit mode.
+// All registers mentioned below count in frames.
+// The cache is a ring buffer; CCR_READADDRESS operates modulo 64.
+// The cache is filled from (CCCA_CURRADDR - CCR_CACHEINVALIDSIZE)
+// into (CCR_READADDRESS - CCR_CACHEINVALIDSIZE).
+// The engine has a fetch threshold of 32 bytes, so it tries to keep
+// CCR_CACHEINVALIDSIZE below 8 (16-bit stereo), 16 (16-bit mono,
+// 8-bit stereo), or 32 (8-bit mono). The actual transfers are pretty
+// unpredictable, especially if several voices are running.
+// Frames are consumed at CCR_READADDRESS, which is incremented afterwards,
+// along with CCCA_CURRADDR and CCR_CACHEINVALIDSIZE. This implies that the
+// actual playback position always lags CCCA_CURRADDR by exactly 64 frames.
+#define CD0			0x20		/* Cache data registers 0 .. 0x1f			*/
 
 #define PTB			0x40		/* Page table base register				*/
 #define PTB_MASK		0xfffff000	/* Physical address of the page table in host memory	*/
@@ -704,6 +710,8 @@ SUB_REG(PEFE, FILTERAMOUNT,	0x000000ff)	/* Filter envlope amount				*/
 #define ADCBS_BUFSIZE_57344	0x0000001e
 #define ADCBS_BUFSIZE_65536	0x0000001f
 
+// On Audigy, the FX send amounts are not applied instantly, but determine
+// targets towards which the following registers swerve gradually.
 #define A_CSBA			0x4c		/* FX send B & A current amounts			*/
 #define A_CSDC			0x4d		/* FX send D & C current amounts			*/
 #define A_CSFE			0x4e		/* FX send F & E current amounts			*/
@@ -764,6 +772,9 @@ SUB_REG(PEFE, FILTERAMOUNT,	0x000000ff)	/* Filter envlope amount				*/
 #define CLIPL			0x5a		/* Channel loop interrupt pending low register	*/
 #define CLIPH			0x5b		/* Channel loop interrupt pending high register	*/
 
+// These cause CPF_STOP_MASK to be set shortly after CCCA_CURRADDR passes DSL_LOOPENDADDR.
+// Subsequent changes to the address registers don't resume; clearing the bit here or in CPF does.
+// The registers are NOT synchronized; the next serviced channel picks up immediately.
 #define SOLEL			0x5c		/* Stop on loop enable low register		*/
 #define SOLEH			0x5d		/* Stop on loop enable high register		*/
 
@@ -1432,21 +1443,22 @@ SUB_REG_NC(A_EHC, A_I2S_CAPTURE_RATE, 0x00000e00)  /* This sets the capture PCM 
 /* ------------------- STRUCTURES -------------------- */
 
 enum {
+	EMU10K1_UNUSED,  // This must be zero
 	EMU10K1_EFX,
+	EMU10K1_EFX_IRQ,
 	EMU10K1_PCM,
+	EMU10K1_PCM_IRQ,
 	EMU10K1_SYNTH,
-	EMU10K1_MIDI
+	EMU10K1_NUM_TYPES
 };
 
 struct snd_emu10k1;
 
 struct snd_emu10k1_voice {
-	int number;
-	unsigned int use: 1,
-	    pcm: 1,
-	    efx: 1,
-	    synth: 1,
-	    midi: 1;
+	unsigned char number;
+	unsigned char use;
+	unsigned char dirty;
+	unsigned char last;
 	void (*interrupt)(struct snd_emu10k1 *emu, struct snd_emu10k1_voice *pvoice);
 
 	struct snd_emu10k1_pcm *epcm;
@@ -1468,6 +1480,7 @@ struct snd_emu10k1_pcm {
 	struct snd_emu10k1_voice *extra;
 	unsigned short running;
 	unsigned short first_ptr;
+	snd_pcm_uframes_t resume_pos;
 	struct snd_util_memblk *memblk;
 	unsigned int start_addr;
 	unsigned int ccca_start_addr;
@@ -1670,7 +1683,6 @@ struct snd_emu10k1 {
 	unsigned int address_mode;		/* address mode */
 	unsigned long dma_mask;			/* PCI DMA mask */
 	bool iommu_workaround;			/* IOMMU workaround needed */
-	unsigned int delay_pcm_irq;		/* in samples */
 	int max_cache_pages;			/* max memory size / PAGE_SIZE */
 	struct snd_dma_buffer silent_page;	/* silent page */
 	struct snd_dma_buffer ptb_pages;	/* page table pages */
@@ -1792,6 +1804,7 @@ int snd_emu10k1_done(struct snd_emu10k1 * emu);
 /* I/O functions */
 unsigned int snd_emu10k1_ptr_read(struct snd_emu10k1 * emu, unsigned int reg, unsigned int chn);
 void snd_emu10k1_ptr_write(struct snd_emu10k1 *emu, unsigned int reg, unsigned int chn, unsigned int data);
+void snd_emu10k1_ptr_write_multiple(struct snd_emu10k1 *emu, unsigned int chn, ...);
 unsigned int snd_emu10k1_ptr20_read(struct snd_emu10k1 * emu, unsigned int reg, unsigned int chn);
 void snd_emu10k1_ptr20_write(struct snd_emu10k1 *emu, unsigned int reg, unsigned int chn, unsigned int data);
 int snd_emu10k1_spi_write(struct snd_emu10k1 * emu, unsigned int data);
@@ -1812,6 +1825,9 @@ void snd_emu10k1_voice_half_loop_intr_ack(struct snd_emu10k1 *emu, unsigned int 
 void snd_emu10k1_voice_set_loop_stop(struct snd_emu10k1 *emu, unsigned int voicenum);
 void snd_emu10k1_voice_clear_loop_stop(struct snd_emu10k1 *emu, unsigned int voicenum);
 #endif
+void snd_emu10k1_voice_set_loop_stop_multiple(struct snd_emu10k1 *emu, u64 voices);
+void snd_emu10k1_voice_clear_loop_stop_multiple(struct snd_emu10k1 *emu, u64 voices);
+int snd_emu10k1_voice_clear_loop_stop_multiple_atomic(struct snd_emu10k1 *emu, u64 voices);
 void snd_emu10k1_wait(struct snd_emu10k1 *emu, unsigned int wait);
 static inline unsigned int snd_emu10k1_wc(struct snd_emu10k1 *emu) { return (inl(emu->port + WC) >> 6) & 0xfffff; }
 unsigned short snd_emu10k1_ac97_read(struct snd_ac97 *ac97, unsigned short reg);
@@ -1843,7 +1859,8 @@ int snd_emu10k1_synth_copy_from_user(struct snd_emu10k1 *emu, struct snd_util_me
 int snd_emu10k1_memblk_map(struct snd_emu10k1 *emu, struct snd_emu10k1_memblk *blk);
 
 /* voice allocation */
-int snd_emu10k1_voice_alloc(struct snd_emu10k1 *emu, int type, int pair, struct snd_emu10k1_voice **rvoice);
+int snd_emu10k1_voice_alloc(struct snd_emu10k1 *emu, int type, int count, int channels,
+			    struct snd_emu10k1_pcm *epcm, struct snd_emu10k1_voice **rvoice);
 int snd_emu10k1_voice_free(struct snd_emu10k1 *emu, struct snd_emu10k1_voice *pvoice);
 
 /* MIDI uart */

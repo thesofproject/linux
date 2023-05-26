@@ -94,6 +94,37 @@ void snd_emu10k1_ptr_write(struct snd_emu10k1 *emu, unsigned int reg, unsigned i
 
 EXPORT_SYMBOL(snd_emu10k1_ptr_write);
 
+void snd_emu10k1_ptr_write_multiple(struct snd_emu10k1 *emu, unsigned int chn, ...)
+{
+	va_list va;
+	u32 addr_mask;
+	unsigned long flags;
+
+	if (snd_BUG_ON(!emu))
+		return;
+	if (snd_BUG_ON(chn & ~PTR_CHANNELNUM_MASK))
+		return;
+	addr_mask = ~((emu->audigy ? A_PTR_ADDRESS_MASK : PTR_ADDRESS_MASK) >> 16);
+
+	va_start(va, chn);
+	spin_lock_irqsave(&emu->emu_lock, flags);
+	for (;;) {
+		u32 data;
+		u32 reg = va_arg(va, u32);
+		if (reg == REGLIST_END)
+			break;
+		data = va_arg(va, u32);
+		if (snd_BUG_ON(reg & addr_mask))  // Only raw registers supported here
+			continue;
+		outl((reg << 16) | chn, emu->port + PTR);
+		outl(data, emu->port + DATA);
+	}
+	spin_unlock_irqrestore(&emu->emu_lock, flags);
+	va_end(va);
+}
+
+EXPORT_SYMBOL(snd_emu10k1_ptr_write_multiple);
+
 unsigned int snd_emu10k1_ptr20_read(struct snd_emu10k1 * emu, 
 					  unsigned int reg, 
 					  unsigned int chn)
@@ -473,6 +504,88 @@ void snd_emu10k1_voice_clear_loop_stop(struct snd_emu10k1 *emu, unsigned int voi
 	spin_unlock_irqrestore(&emu->emu_lock, flags);
 }
 #endif
+
+void snd_emu10k1_voice_set_loop_stop_multiple(struct snd_emu10k1 *emu, u64 voices)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&emu->emu_lock, flags);
+	outl(SOLEL << 16, emu->port + PTR);
+	outl(inl(emu->port + DATA) | (u32)voices, emu->port + DATA);
+	outl(SOLEH << 16, emu->port + PTR);
+	outl(inl(emu->port + DATA) | (u32)(voices >> 32), emu->port + DATA);
+	spin_unlock_irqrestore(&emu->emu_lock, flags);
+}
+
+void snd_emu10k1_voice_clear_loop_stop_multiple(struct snd_emu10k1 *emu, u64 voices)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&emu->emu_lock, flags);
+	outl(SOLEL << 16, emu->port + PTR);
+	outl(inl(emu->port + DATA) & (u32)~voices, emu->port + DATA);
+	outl(SOLEH << 16, emu->port + PTR);
+	outl(inl(emu->port + DATA) & (u32)(~voices >> 32), emu->port + DATA);
+	spin_unlock_irqrestore(&emu->emu_lock, flags);
+}
+
+int snd_emu10k1_voice_clear_loop_stop_multiple_atomic(struct snd_emu10k1 *emu, u64 voices)
+{
+	unsigned long flags;
+	u32 soll, solh;
+	int ret = -EIO;
+
+	spin_lock_irqsave(&emu->emu_lock, flags);
+
+	outl(SOLEL << 16, emu->port + PTR);
+	soll = inl(emu->port + DATA);
+	outl(SOLEH << 16, emu->port + PTR);
+	solh = inl(emu->port + DATA);
+
+	soll &= (u32)~voices;
+	solh &= (u32)(~voices >> 32);
+
+	for (int tries = 0; tries < 1000; tries++) {
+		const u32 quart = 1U << (REG_SIZE(WC_CURRENTCHANNEL) - 2);
+		// First we wait for the third quarter of the sample cycle ...
+		u32 wc = inl(emu->port + WC);
+		u32 cc = REG_VAL_GET(WC_CURRENTCHANNEL, wc);
+		if (cc >= quart * 2 && cc < quart * 3) {
+			// ... and release the low voices, while the high ones are serviced.
+			outl(SOLEL << 16, emu->port + PTR);
+			outl(soll, emu->port + DATA);
+			// Then we wait for the first quarter of the next sample cycle ...
+			for (; tries < 1000; tries++) {
+				cc = REG_VAL_GET(WC_CURRENTCHANNEL, inl(emu->port + WC));
+				if (cc < quart)
+					goto good;
+				// We will block for 10+ us with interrupts disabled. This is
+				// not nice at all, but necessary for reasonable reliability.
+				udelay(1);
+			}
+			break;
+		good:
+			// ... and release the high voices, while the low ones are serviced.
+			outl(SOLEH << 16, emu->port + PTR);
+			outl(solh, emu->port + DATA);
+			// Finally we verify that nothing interfered in fact.
+			if (REG_VAL_GET(WC_SAMPLECOUNTER, inl(emu->port + WC)) ==
+			    ((REG_VAL_GET(WC_SAMPLECOUNTER, wc) + 1) & REG_MASK0(WC_SAMPLECOUNTER))) {
+				ret = 0;
+			} else {
+				ret = -EAGAIN;
+			}
+			break;
+		}
+		// Don't block for too long
+		spin_unlock_irqrestore(&emu->emu_lock, flags);
+		udelay(1);
+		spin_lock_irqsave(&emu->emu_lock, flags);
+	}
+
+	spin_unlock_irqrestore(&emu->emu_lock, flags);
+	return ret;
+}
 
 void snd_emu10k1_wait(struct snd_emu10k1 *emu, unsigned int wait)
 {
