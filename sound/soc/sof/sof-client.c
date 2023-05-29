@@ -200,6 +200,7 @@ void sof_unregister_clients(struct snd_sof_dev *sdev)
 	if (sof_ops(sdev) && sof_ops(sdev)->unregister_ipc_clients)
 		sof_ops(sdev)->unregister_ipc_clients(sdev);
 
+	sof_unregister_ipc_kernel_injector(sdev);
 	sof_unregister_ipc_msg_injector(sdev);
 	sof_unregister_ipc_flood_test(sdev);
 }
