@@ -610,3 +610,50 @@ enum sof_fw_state sof_client_get_fw_state(struct sof_client_dev *cdev)
 	return sdev->fw_state;
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_get_fw_state, SND_SOC_SOF_CLIENT);
+
+int sof_client_load_firmware(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	return snd_sof_load_firmware(sdev);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_load_firmware, SND_SOC_SOF_CLIENT);
+
+void sof_client_unload_firmware(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	snd_sof_fw_unload(sdev);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_unload_firmware, SND_SOC_SOF_CLIENT);
+
+int sof_client_run_firmware(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	if (!sdev->basefw.fw) {
+		dev_err(sdev->dev, "Firmware not loaded yet\n");
+		return -EINVAL;
+	}
+
+	sof_set_fw_state(sdev, SOF_FW_BOOT_IN_PROGRESS);
+	return snd_sof_run_firmware(sdev);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_run_firmware, SND_SOC_SOF_CLIENT);
+
+int sof_client_set_power_state(struct sof_client_dev *cdev, char *state)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+	u32 target_state;
+
+	if (!strcmp(state, "D0"))
+		return snd_sof_dsp_resume(sdev);
+
+	if (!strcmp(state, "D3"))
+		target_state = SOF_DSP_PM_D3;
+	if (!strcmp(state, "D0I3"))
+		target_state = SOF_DSP_PM_D0;
+
+	return snd_sof_dsp_suspend(sdev, target_state);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_set_power_state, SND_SOC_SOF_CLIENT);

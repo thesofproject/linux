@@ -77,4 +77,9 @@ void sof_client_unregister_fw_state_handler(struct sof_client_dev *cdev);
 enum sof_fw_state sof_client_get_fw_state(struct sof_client_dev *cdev);
 int sof_client_ipc_rx_message(struct sof_client_dev *cdev, void *ipc_msg, void *msg_buf);
 
+int sof_client_load_firmware(struct sof_client_dev *cdev);
+void sof_client_unload_firmware(struct sof_client_dev *cdev);
+int sof_client_run_firmware(struct sof_client_dev *cdev);
+int sof_client_set_power_state(struct sof_client_dev *cdev, char *state);
+
 #endif /* __SOC_SOF_CLIENT_H */
