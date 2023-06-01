@@ -247,6 +247,16 @@ config SND_SOC_SOF_DEBUG_IPC_KERNEL_INJECTOR
 	  Say Y if you want to enable the IPC kernel injector.
 	  If unsure, select "N".
 
+config SND_SOC_SOF_DEBUG_DSP_OPS_TESTER
+	tristate "SOF enable DSP ops tester"
+	depends on SND_SOC_SOF
+	select SND_SOC_SOF_CLIENT
+	help
+	  This option enables a separate client device for testing the DSP ops
+	  which can be used to test ops like FW load, DSP D0/D3 etc
+	  Say Y if you want to enable the DSP ops tester.
+	  If unsure, select "N".
+
 config SND_SOC_SOF_DEBUG_RETAIN_DSP_CONTEXT
 	bool "SOF retain DSP context on any FW exceptions"
 	help
