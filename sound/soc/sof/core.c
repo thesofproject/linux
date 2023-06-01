@@ -143,6 +143,18 @@ void sof_set_fw_state(struct snd_sof_dev *sdev, enum sof_fw_state new_state)
 }
 EXPORT_SYMBOL(sof_set_fw_state);
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_DSP_OPS_TESTER)
+static int sof_register_dsp_ops_tester(struct snd_sof_dev *sdev)
+{
+	return sof_client_dev_register(sdev, "dsp_ops_tester", 0, NULL, 0);
+}
+
+static void sof_unregister_dsp_ops_tester(struct snd_sof_dev *sdev)
+{
+	sof_client_dev_unregister(sdev, "dsp_ops_tester", 0);
+}
+#endif
+
 /*
  *			FW Boot State Transition Diagram
  *
@@ -234,6 +246,20 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 		goto ipc_err;
 	}
 
+	/* Register DSP ops tester in DSP mode, skip everything else and complete probe */
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_DSP_OPS_TESTER)
+	ret = sof_register_dsp_ops_tester(sdev);
+	if (ret) {
+		dev_err(sdev->dev, "DSP ops tester client registration failed\n");
+		goto tester_err;
+	}
+
+	/* No need to enable runtime PM when the DSP Ops tester is enabled */
+	sdev->probe_completed = true;
+
+	return 0;
+#endif
+
 	/* load the firmware */
 	ret = snd_sof_load_firmware(sdev);
 	if (ret < 0) {
@@ -320,6 +346,10 @@ fw_trace_err:
 fw_run_err:
 	snd_sof_fw_unload(sdev);
 fw_load_err:
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_DSP_OPS_TESTER)
+	sof_unregister_dsp_ops_tester(sdev);
+tester_err:
+#endif
 	snd_sof_ipc_free(sdev);
 ipc_err:
 dbg_err:
@@ -463,6 +493,9 @@ int snd_sof_device_remove(struct device *dev)
 	if (IS_ENABLED(CONFIG_SND_SOC_SOF_PROBE_WORK_QUEUE))
 		cancel_work_sync(&sdev->probe_work);
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_DSP_OPS_TESTER)
+	sof_unregister_dsp_ops_tester(sdev);
+#endif
 	/*
 	 * Unregister any registered client device first before IPC and debugfs
 	 * to allow client drivers to be removed cleanly
