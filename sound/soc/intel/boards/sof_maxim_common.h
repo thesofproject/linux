@@ -12,7 +12,6 @@
 
 #include <sound/soc.h>
 
-#define MAX_98373_CODEC_DAI	"max98373-aif1"
 #define MAX_98373_DEV0_NAME	"i2c-MX98373:00"
 #define MAX_98373_DEV1_NAME	"i2c-MX98373:01"
 
@@ -26,7 +25,6 @@ void sof_max98373_codec_conf(struct snd_soc_card *card);
 /*
  * Maxim MAX98390
  */
-#define MAX_98390_CODEC_DAI     "max98390-aif1"
 #define MAX_98390_DEV0_NAME     "i2c-MX98390:00"
 #define MAX_98390_DEV1_NAME     "i2c-MX98390:01"
 #define MAX_98390_DEV2_NAME     "i2c-MX98390:02"
