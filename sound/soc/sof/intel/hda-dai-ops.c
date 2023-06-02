@@ -283,7 +283,6 @@ static struct hdac_ext_link *dmic_get_hlink(struct snd_sof_dev *sdev,
 	return hdac_bus_eml_dmic_get_hlink(bus);
 }
 
-
 static int hda_ipc4_pre_trigger(struct snd_sof_dev *sdev, struct snd_soc_dai *cpu_dai,
 				struct snd_pcm_substream *substream, int cmd)
 {
