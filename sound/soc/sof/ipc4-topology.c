@@ -1065,9 +1065,14 @@ static int sof_ipc4_init_output_audio_fmt(struct snd_sof_dev *sdev,
 					  struct sof_ipc4_base_module_cfg *base_config,
 					  struct sof_ipc4_available_audio_format *available_fmt,
 					  u32 out_ref_rate, u32 out_ref_channels,
-					  u32 out_ref_valid_bits)
+					  u32 out_ref_valid_bits,
+					  struct snd_sof_widget *swidget,
+					  struct snd_soc_dapm_widget_list *list)
 {
+	char **output_pin_binding = swidget->output_pin_binding;
 	struct sof_ipc4_audio_format *out_fmt;
+	struct snd_soc_dapm_path *p;
+	int pin_index = -EINVAL;
 	bool single_format;
 	int i;
 
@@ -1083,12 +1088,42 @@ static int sof_ipc4_init_output_audio_fmt(struct snd_sof_dev *sdev,
 		return 0;
 	}
 
+	/* if module has no output_pin_binding specified in topology, use pin 0 output formats */
+	if (output_pin_binding) {
+		/* find pin_index of the sink widget belonging to the DAPM widget list */
+		snd_soc_dapm_widget_for_each_sink_path(swidget->widget, p) {
+			if (!widget_in_list(list, p->sink))
+				continue;
+
+			for (i = 0; i < swidget->num_output_pins; i++) {
+				if (!strcmp(output_pin_binding[i], p->sink->name)) {
+					pin_index = i;
+					break;
+				}
+			}
+
+			if (pin_index >= 0)
+				break;
+		}
+	} else {
+		pin_index = 0;
+	}
+
+	if (pin_index < 0) {
+		dev_err(sdev->dev, "Invalid sink pin index for widget %s\n",
+			swidget->widget->name);
+		return -EINVAL;
+	}
+
 	/*
 	 * if there are multiple output formats, then choose the output format that matches
-	 * the reference params
+	 * the reference params and pin index
 	 */
 	for (i = 0; i < available_fmt->num_output_formats; i++) {
 		u32 _out_rate, _out_channels, _out_valid_bits;
+
+		if (available_fmt->output_pin_fmts[i].pin_index != pin_index)
+			continue;
 
 		out_fmt = &available_fmt->output_pin_fmts[i].audio_fmt;
 		_out_rate = out_fmt->sampling_frequency;
@@ -1378,7 +1413,8 @@ static int
 sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 			       struct snd_pcm_hw_params *fe_params,
 			       struct snd_sof_platform_stream_params *platform_params,
-			       struct snd_pcm_hw_params *pipeline_params, int dir)
+			       struct snd_pcm_hw_params *pipeline_params, int dir,
+			       struct snd_soc_dapm_widget_list *list)
 {
 	struct sof_ipc4_available_audio_format *available_fmt;
 	struct snd_soc_component *scomp = swidget->scomp;
@@ -1584,7 +1620,8 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 
 	output_fmt_index = sof_ipc4_init_output_audio_fmt(sdev, &copier_data->base_config,
 							  available_fmt, out_ref_rate,
-							  out_ref_channels, out_ref_valid_bits);
+							  out_ref_channels, out_ref_valid_bits,
+							  swidget, list);
 	if (output_fmt_index < 0) {
 		dev_err(sdev->dev, "Failed to initialize output format for %s",
 			swidget->widget->name);
@@ -1775,7 +1812,8 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 static int sof_ipc4_prepare_gain_module(struct snd_sof_widget *swidget,
 					struct snd_pcm_hw_params *fe_params,
 					struct snd_sof_platform_stream_params *platform_params,
-					struct snd_pcm_hw_params *pipeline_params, int dir)
+					struct snd_pcm_hw_params *pipeline_params, int dir,
+					struct snd_soc_dapm_widget_list *list)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
@@ -1796,7 +1834,8 @@ static int sof_ipc4_prepare_gain_module(struct snd_sof_widget *swidget,
 	out_ref_valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(in_fmt->fmt_cfg);
 
 	ret = sof_ipc4_init_output_audio_fmt(sdev, &gain->base_config, available_fmt,
-					     out_ref_rate, out_ref_channels, out_ref_valid_bits);
+					     out_ref_rate, out_ref_channels, out_ref_valid_bits,
+					     swidget, list);
 	if (ret < 0) {
 		dev_err(sdev->dev, "Failed to initialize output format for %s",
 			swidget->widget->name);
@@ -1812,7 +1851,8 @@ static int sof_ipc4_prepare_gain_module(struct snd_sof_widget *swidget,
 static int sof_ipc4_prepare_mixer_module(struct snd_sof_widget *swidget,
 					 struct snd_pcm_hw_params *fe_params,
 					 struct snd_sof_platform_stream_params *platform_params,
-					 struct snd_pcm_hw_params *pipeline_params, int dir)
+					 struct snd_pcm_hw_params *pipeline_params, int dir,
+					 struct snd_soc_dapm_widget_list *list)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
@@ -1833,7 +1873,8 @@ static int sof_ipc4_prepare_mixer_module(struct snd_sof_widget *swidget,
 	out_ref_valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(in_fmt->fmt_cfg);
 
 	ret = sof_ipc4_init_output_audio_fmt(sdev, &mixer->base_config, available_fmt,
-					     out_ref_rate, out_ref_channels, out_ref_valid_bits);
+					     out_ref_rate, out_ref_channels, out_ref_valid_bits,
+					     swidget, list);
 	if (ret < 0) {
 		dev_err(sdev->dev, "Failed to initialize output format for %s",
 			swidget->widget->name);
@@ -1849,7 +1890,8 @@ static int sof_ipc4_prepare_mixer_module(struct snd_sof_widget *swidget,
 static int sof_ipc4_prepare_src_module(struct snd_sof_widget *swidget,
 				       struct snd_pcm_hw_params *fe_params,
 				       struct snd_sof_platform_stream_params *platform_params,
-				       struct snd_pcm_hw_params *pipeline_params, int dir)
+				       struct snd_pcm_hw_params *pipeline_params, int dir,
+				       struct snd_soc_dapm_widget_list *list)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
@@ -1892,7 +1934,8 @@ static int sof_ipc4_prepare_src_module(struct snd_sof_widget *swidget,
 
 	output_format_index = sof_ipc4_init_output_audio_fmt(sdev, &src->base_config,
 							     available_fmt, out_ref_rate,
-							     out_ref_channels, out_ref_valid_bits);
+							     out_ref_channels, out_ref_valid_bits,
+							     swidget, list);
 	if (output_format_index < 0) {
 		dev_err(sdev->dev, "Failed to initialize output format for %s",
 			swidget->widget->name);
@@ -1990,7 +2033,8 @@ static int sof_ipc4_process_add_base_cfg_extn(struct snd_sof_widget *swidget)
 static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 					   struct snd_pcm_hw_params *fe_params,
 					   struct snd_sof_platform_stream_params *platform_params,
-					   struct snd_pcm_hw_params *pipeline_params, int dir)
+					   struct snd_pcm_hw_params *pipeline_params, int dir,
+					   struct snd_soc_dapm_widget_list *list)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
@@ -2014,7 +2058,8 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 
 	output_fmt_index = sof_ipc4_init_output_audio_fmt(sdev, &process->base_config,
 							  available_fmt, out_ref_rate,
-							  out_ref_channels, out_ref_valid_bits);
+							  out_ref_channels, out_ref_valid_bits,
+							  swidget, list);
 	if (output_fmt_index < 0 && available_fmt->num_output_formats) {
 		dev_err(sdev->dev, "Failed to initialize output format for %s",
 			swidget->widget->name);

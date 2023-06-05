@@ -448,7 +448,7 @@ sof_prepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget
 
 	/* prepare the source widget */
 	ret = widget_ops[widget->id].ipc_prepare(swidget, fe_params, platform_params,
-					     pipeline_params, dir);
+					     pipeline_params, dir, list);
 	if (ret < 0) {
 		dev_err(sdev->dev, "failed to prepare widget %s\n", widget->name);
 		return ret;
