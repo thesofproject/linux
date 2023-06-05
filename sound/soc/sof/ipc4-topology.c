@@ -1410,6 +1410,67 @@ static bool sof_ipc4_copier_is_single_format(struct snd_sof_dev *sdev,
 }
 
 static int
+sof_ipc4_prepare_copier_set_out_ref_params(struct snd_sof_widget *swidget,
+					   struct sof_ipc4_available_audio_format *available_fmt,
+					   struct sof_ipc4_base_module_cfg *base_config,
+					   struct snd_pcm_hw_params *fe_params,
+					   int *out_ref_valid_bits,
+					   u32 *out_ref_channels,
+					   u32 *out_ref_rate)
+{
+	struct snd_soc_component *scomp = swidget->scomp;
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	bool single_output_format;
+
+	single_output_format = sof_ipc4_copier_is_single_format(sdev,
+								available_fmt->output_pin_fmts,
+								available_fmt->num_output_formats);
+	switch (swidget->id) {
+	case snd_soc_dapm_aif_in:
+	case snd_soc_dapm_dai_out:
+	case snd_soc_dapm_buffer:
+	{
+		struct sof_ipc4_audio_format *in_fmt;
+
+		in_fmt = &base_config->audio_fmt;
+		*out_ref_rate = in_fmt->sampling_frequency;
+		*out_ref_channels = SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(in_fmt->fmt_cfg);
+
+		if (!single_output_format)
+			*out_ref_valid_bits =
+				SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(in_fmt->fmt_cfg);
+		break;
+	}
+	case snd_soc_dapm_aif_out:
+	case snd_soc_dapm_dai_in:
+		*out_ref_rate = params_rate(fe_params);
+		*out_ref_channels = params_channels(fe_params);
+		if (!single_output_format) {
+			*out_ref_valid_bits = sof_ipc4_get_valid_bits(sdev, fe_params);
+			if (*out_ref_valid_bits < 0)
+				return *out_ref_valid_bits;
+		}
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	/*
+	 * if the output format is the same across all available output formats, choose
+	 * that as the reference.
+	 */
+	if (single_output_format) {
+		struct sof_ipc4_audio_format *out_fmt;
+
+		out_fmt = &available_fmt->output_pin_fmts[0].audio_fmt;
+		*out_ref_valid_bits =
+			SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(out_fmt->fmt_cfg);
+	}
+
+	return 0;
+}
+
+static int
 sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 			       struct snd_pcm_hw_params *fe_params,
 			       struct snd_sof_platform_stream_params *platform_params,
@@ -1432,7 +1493,6 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 	u32 out_ref_rate, out_ref_channels;
 	u32 deep_buffer_dma_ms = 0;
 	int output_fmt_index;
-	bool single_output_format;
 
 	dev_dbg(sdev->dev, "copier %s, type %d", swidget->widget->name, swidget->id);
 
@@ -1566,54 +1626,12 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		return ret;
 
 	/* set the reference params for output format selection */
-	single_output_format = sof_ipc4_copier_is_single_format(sdev,
-								available_fmt->output_pin_fmts,
-								available_fmt->num_output_formats);
-	switch (swidget->id) {
-	case snd_soc_dapm_aif_in:
-	case snd_soc_dapm_dai_out:
-	case snd_soc_dapm_buffer:
-	{
-		struct sof_ipc4_audio_format *in_fmt;
-
-		in_fmt = &available_fmt->input_pin_fmts[ret].audio_fmt;
-		out_ref_rate = in_fmt->sampling_frequency;
-		out_ref_channels = SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(in_fmt->fmt_cfg);
-
-		if (!single_output_format)
-			out_ref_valid_bits =
-				SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(in_fmt->fmt_cfg);
-		break;
-	}
-	case snd_soc_dapm_aif_out:
-	case snd_soc_dapm_dai_in:
-		out_ref_rate = params_rate(fe_params);
-		out_ref_channels = params_channels(fe_params);
-		if (!single_output_format) {
-			out_ref_valid_bits = sof_ipc4_get_valid_bits(sdev, fe_params);
-			if (out_ref_valid_bits < 0)
-				return out_ref_valid_bits;
-		}
-		break;
-	default:
-		/*
-		 * Unsupported type should be caught by the former switch default
-		 * case, this should never happen in reality.
-		 */
-		return -EINVAL;
-	}
-
-	/*
-	 * if the output format is the same across all available output formats, choose
-	 * that as the reference.
-	 */
-	if (single_output_format) {
-		struct sof_ipc4_audio_format *out_fmt;
-
-		out_fmt = &available_fmt->output_pin_fmts[0].audio_fmt;
-		out_ref_valid_bits =
-			SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(out_fmt->fmt_cfg);
-	}
+	ret = sof_ipc4_prepare_copier_set_out_ref_params(swidget, available_fmt,
+							 &copier_data->base_config,
+							 fe_params, &out_ref_valid_bits,
+							 &out_ref_channels, &out_ref_rate);
+	if (ret < 0)
+		return ret;
 
 	dev_dbg(sdev->dev, "copier %s: reference output rate %d, channels %d valid_bits %d\n",
 		swidget->widget->name, out_ref_rate, out_ref_channels, out_ref_valid_bits);
