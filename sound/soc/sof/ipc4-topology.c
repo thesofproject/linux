@@ -1494,6 +1494,53 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 	u32 deep_buffer_dma_ms = 0;
 	int output_fmt_index;
 
+	/* just modify the input params for the next widget if the widget is already prepared */
+	if (swidget->prepared) {
+		struct sof_ipc4_audio_format *out_fmt;
+
+		switch (swidget->id) {
+		case snd_soc_dapm_aif_in:
+		case snd_soc_dapm_aif_out:
+		case snd_soc_dapm_buffer:
+			ipc4_copier = (struct sof_ipc4_copier *)swidget->private;
+			copier_data = &ipc4_copier->data;
+			break;
+		case snd_soc_dapm_dai_in:
+		case snd_soc_dapm_dai_out:
+			dai = swidget->private;
+			ipc4_copier = (struct sof_ipc4_copier *)dai->private;
+			copier_data = &ipc4_copier->data;
+			break;
+		default:
+			return -EINVAL;
+		}
+
+		available_fmt = &ipc4_copier->available_fmt;
+
+		/* set the reference params for output format selection */
+		ret = sof_ipc4_prepare_copier_set_out_ref_params(swidget, available_fmt,
+								 &copier_data->base_config,
+								 fe_params, &out_ref_valid_bits,
+								 &out_ref_channels, &out_ref_rate);
+		if (ret < 0)
+			return ret;
+
+		output_fmt_index = sof_ipc4_init_output_audio_fmt(sdev, &copier_data->base_config,
+								  available_fmt, out_ref_rate,
+								  out_ref_channels,
+								  out_ref_valid_bits,
+								  swidget, list);
+		if (output_fmt_index < 0) {
+			dev_err(sdev->dev, "Invalid output format index for widget %s",
+				swidget->widget->name);
+			return output_fmt_index;
+		}
+
+		out_fmt = &available_fmt->output_pin_fmts[output_fmt_index].audio_fmt;
+
+		return sof_ipc4_update_hw_params(sdev, pipeline_params, out_fmt);
+	}
+
 	dev_dbg(sdev->dev, "copier %s, type %d", swidget->widget->name, swidget->id);
 
 	switch (swidget->id) {
