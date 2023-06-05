@@ -1888,12 +1888,14 @@ static int sof_ipc4_prepare_gain_module(struct snd_sof_widget *swidget,
 	u32 out_ref_rate, out_ref_channels, out_ref_valid_bits;
 	int ret;
 
-	ret = sof_ipc4_init_input_audio_fmt(sdev, swidget, &gain->base_config,
-					    pipeline_params, available_fmt);
-	if (ret < 0)
-		return ret;
+	if (!swidget->prepared) {
+		ret = sof_ipc4_init_input_audio_fmt(sdev, swidget, &gain->base_config,
+						    pipeline_params, available_fmt);
+		if (ret < 0)
+			return ret;
+	}
 
-	in_fmt = &available_fmt->input_pin_fmts[ret].audio_fmt;
+	in_fmt = &gain->base_config.audio_fmt;
 	out_ref_rate = in_fmt->sampling_frequency;
 	out_ref_channels = SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(in_fmt->fmt_cfg);
 	out_ref_valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(in_fmt->fmt_cfg);
@@ -1908,7 +1910,8 @@ static int sof_ipc4_prepare_gain_module(struct snd_sof_widget *swidget,
 	}
 
 	/* update pipeline memory usage */
-	sof_ipc4_update_resource_usage(sdev, swidget, &gain->base_config);
+	if (!swidget->prepared)
+		sof_ipc4_update_resource_usage(sdev, swidget, &gain->base_config);
 
 	return 0;
 }
@@ -1927,12 +1930,14 @@ static int sof_ipc4_prepare_mixer_module(struct snd_sof_widget *swidget,
 	u32 out_ref_rate, out_ref_channels, out_ref_valid_bits;
 	int ret;
 
-	ret = sof_ipc4_init_input_audio_fmt(sdev, swidget, &mixer->base_config,
-					    pipeline_params, available_fmt);
-	if (ret < 0)
-		return ret;
+	if (!swidget->prepared) {
+		ret = sof_ipc4_init_input_audio_fmt(sdev, swidget, &mixer->base_config,
+						    pipeline_params, available_fmt);
+		if (ret < 0)
+			return ret;
+	}
 
-	in_fmt = &available_fmt->input_pin_fmts[ret].audio_fmt;
+	in_fmt = &mixer->base_config.audio_fmt;
 	out_ref_rate = in_fmt->sampling_frequency;
 	out_ref_channels = SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(in_fmt->fmt_cfg);
 	out_ref_valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(in_fmt->fmt_cfg);
@@ -1947,9 +1952,34 @@ static int sof_ipc4_prepare_mixer_module(struct snd_sof_widget *swidget,
 	}
 
 	/* update pipeline memory usage */
-	sof_ipc4_update_resource_usage(sdev, swidget, &mixer->base_config);
+	if (!swidget->prepared)
+		sof_ipc4_update_resource_usage(sdev, swidget, &mixer->base_config);
 
 	return 0;
+}
+
+static void sof_ipc4_prepare_src_output_ref_params(struct snd_sof_widget *swidget,
+						   struct snd_pcm_hw_params *fe_params,
+						   u32 *out_ref_rate,
+						   u32 *out_ref_channels,
+						   u32 *out_ref_valid_bits)
+{
+	struct sof_ipc4_src *src = swidget->private;
+	struct sof_ipc4_audio_format *in_audio_fmt = &src->base_config.audio_fmt;
+
+	/*
+	 * SRC does not perform format conversion, so the output channels and valid bit depth must
+	 * be the same as that of the input.
+	 */
+	*out_ref_channels = SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(in_audio_fmt->fmt_cfg);
+	*out_ref_valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(in_audio_fmt->fmt_cfg);
+
+	/*
+	 * For capture, the SRC module should convert the rate to match the rate requested by the
+	 * PCM hw_params. Set the reference params based on the fe_params unconditionally as it
+	 * will be ignored for playback anyway.
+	 */
+	*out_ref_rate = params_rate(fe_params);
 }
 
 static int sof_ipc4_prepare_src_module(struct snd_sof_widget *swidget,
@@ -1963,11 +1993,31 @@ static int sof_ipc4_prepare_src_module(struct snd_sof_widget *swidget,
 	struct sof_ipc4_src *src = swidget->private;
 	struct sof_ipc4_available_audio_format *available_fmt = &src->available_fmt;
 	struct sof_ipc4_audio_format *out_audio_fmt;
-	struct sof_ipc4_audio_format *in_audio_fmt;
 	u32 out_ref_rate, out_ref_channels, out_ref_valid_bits;
 	int output_format_index, input_format_index;
 
-	input_format_index = sof_ipc4_init_input_audio_fmt(sdev, swidget, &src->base_config,
+	/* Update the pipeline params if the widget is already prepared */
+	if (swidget->prepared) {
+		sof_ipc4_prepare_src_output_ref_params(swidget, fe_params, &out_ref_rate,
+						       &out_ref_channels, &out_ref_valid_bits);
+
+		output_format_index = sof_ipc4_init_output_audio_fmt(sdev, &src->base_config,
+								     available_fmt, out_ref_rate,
+								     out_ref_channels,
+								     out_ref_valid_bits,
+								     swidget, list);
+		if (output_format_index < 0) {
+			dev_err(sdev->dev, "Failed to initialize output format for %s",
+				swidget->widget->name);
+			return output_format_index;
+		}
+
+		out_audio_fmt = &available_fmt->output_pin_fmts[output_format_index].audio_fmt;
+		return sof_ipc4_update_hw_params(sdev, pipeline_params, out_audio_fmt);
+	}
+
+	input_format_index = sof_ipc4_init_input_audio_fmt(sdev, swidget,
+							   &src->base_config,
 							   pipeline_params, available_fmt);
 	if (input_format_index < 0)
 		return input_format_index;
@@ -1982,20 +2032,8 @@ static int sof_ipc4_prepare_src_module(struct snd_sof_widget *swidget,
 		return -EINVAL;
 	}
 
-	/*
-	 * SRC does not perform format conversion, so the output channels and valid bit depth must
-	 * be the same as that of the input.
-	 */
-	in_audio_fmt = &available_fmt->input_pin_fmts[input_format_index].audio_fmt;
-	out_ref_channels = SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(in_audio_fmt->fmt_cfg);
-	out_ref_valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(in_audio_fmt->fmt_cfg);
-
-	/*
-	 * For capture, the SRC module should convert the rate to match the rate requested by the
-	 * PCM hw_params. Set the reference params based on the fe_params unconditionally as it
-	 * will be ignored for playback anyway.
-	 */
-	out_ref_rate = params_rate(fe_params);
+	sof_ipc4_prepare_src_output_ref_params(swidget, fe_params, &out_ref_rate,
+					       &out_ref_channels, &out_ref_valid_bits);
 
 	output_format_index = sof_ipc4_init_output_audio_fmt(sdev, &src->base_config,
 							     available_fmt, out_ref_rate,
@@ -2110,6 +2148,9 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 	void *cfg = process->ipc_config_data;
 	int output_fmt_index;
 	int ret;
+
+	if (swidget->prepared)
+		return sof_ipc4_update_hw_params(sdev, pipeline_params, &process->output_format);
 
 	ret = sof_ipc4_init_input_audio_fmt(sdev, swidget, &process->base_config,
 					    pipeline_params, available_fmt);
