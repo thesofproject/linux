@@ -1859,12 +1859,11 @@ static int sof_ipc4_prepare_src_module(struct snd_sof_widget *swidget,
 	struct sof_ipc4_audio_format *in_audio_fmt;
 	u32 out_ref_rate, out_ref_channels, out_ref_valid_bits;
 	int output_format_index, input_format_index;
-	int ret;
 
 	input_format_index = sof_ipc4_init_input_audio_fmt(sdev, swidget, &src->base_config,
 							   pipeline_params, available_fmt);
 	if (input_format_index < 0)
-		return ret;
+		return input_format_index;
 
 	/*
 	 * For playback, the SRC sink rate will be configured based on the requested output
