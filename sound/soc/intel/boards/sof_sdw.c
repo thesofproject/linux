@@ -533,7 +533,6 @@ int sdw_prepare(struct snd_pcm_substream *substream)
 	dai = asoc_rtd_to_cpu(rtd, 0);
 
 	sdw_stream = snd_soc_dai_get_stream(dai, substream->stream);
-
 	if (IS_ERR(sdw_stream)) {
 		dev_err(rtd->dev, "no stream found for DAI %s", dai->name);
 		return PTR_ERR(sdw_stream);
@@ -553,7 +552,6 @@ int sdw_trigger(struct snd_pcm_substream *substream, int cmd)
 	dai = asoc_rtd_to_cpu(rtd, 0);
 
 	sdw_stream = snd_soc_dai_get_stream(dai, substream->stream);
-
 	if (IS_ERR(sdw_stream)) {
 		dev_err(rtd->dev, "no stream found for DAI %s", dai->name);
 		return PTR_ERR(sdw_stream);
@@ -641,7 +639,6 @@ int sdw_hw_free(struct snd_pcm_substream *substream)
 	dai = asoc_rtd_to_cpu(rtd, 0);
 
 	sdw_stream = snd_soc_dai_get_stream(dai, substream->stream);
-
 	if (IS_ERR(sdw_stream)) {
 		dev_err(rtd->dev, "no stream found for DAI %s", dai->name);
 		return PTR_ERR(sdw_stream);
@@ -1117,8 +1114,7 @@ static bool is_unique_device(const struct snd_soc_acpi_link_adr *adr_link,
 			     unsigned int mfg_id,
 			     unsigned int part_id,
 			     unsigned int class_id,
-			     int index_in_link
-			    )
+			     int index_in_link)
 {
 	int i;
 
@@ -1242,7 +1238,6 @@ static int set_codec_init_func(struct snd_soc_card *card,
 			int codec_index;
 
 			codec_index = find_codec_info_part(adr_link->adr_d[i].adr);
-
 			if (codec_index < 0)
 				return codec_index;
 
