@@ -255,7 +255,8 @@ struct pkvm_mapping {
 };
 
 int pkvm_pgtable_stage2_init(struct kvm_pgtable *pgt, struct kvm_s2_mmu *mmu,
-			     struct kvm_pgtable_mm_ops *mm_ops);
+			     struct kvm_pgtable_mm_ops *mm_ops,
+			     struct kvm_pgtable_pte_ops *pte_ops);
 void pkvm_pgtable_stage2_destroy(struct kvm_pgtable *pgt);
 int pkvm_pgtable_stage2_map(struct kvm_pgtable *pgt, u64 addr, u64 size, u64 phys,
 			    enum kvm_pgtable_prot prot, void *mc,
@@ -270,7 +271,9 @@ void pkvm_pgtable_stage2_mkyoung(struct kvm_pgtable *pgt, u64 addr,
 				 enum kvm_pgtable_walk_flags flags);
 int pkvm_pgtable_stage2_split(struct kvm_pgtable *pgt, u64 addr, u64 size,
 			      struct kvm_mmu_memory_cache *mc);
-void pkvm_pgtable_stage2_free_unlinked(struct kvm_pgtable_mm_ops *mm_ops, void *pgtable, s8 level);
+void pkvm_pgtable_stage2_free_unlinked(struct kvm_pgtable_mm_ops *mm_ops,
+				       struct kvm_pgtable_pte_ops *pte_ops, void *pgtable,
+				       s8 level);
 kvm_pte_t *pkvm_pgtable_stage2_create_unlinked(struct kvm_pgtable *pgt, u64 phys, s8 level,
 					       enum kvm_pgtable_prot prot, void *mc,
 					       bool force_pte);
