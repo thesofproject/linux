@@ -19,6 +19,7 @@
 #include <linux/kvm_irqfd.h>
 #include <linux/irqbypass.h>
 #include <linux/sched/stat.h>
+#include <linux/shrinker.h>
 #include <linux/psci.h>
 #include <trace/events/kvm.h>
 
@@ -2515,9 +2516,24 @@ static void kvm_hyp_init_symbols(void)
 				kvm_ksym_ref(__hyp_bss_end) - kvm_ksym_ref(__hyp_bss_start));
 }
 
+static unsigned long kvm_hyp_shrinker_count(struct shrinker *shrinker,
+					    struct shrink_control *sc)
+{
+	unsigned long reclaimable = kvm_call_hyp_nvhe(__pkvm_hyp_alloc_reclaimable);
+
+	return reclaimable ? reclaimable : SHRINK_EMPTY;
+}
+
+static unsigned long kvm_hyp_shrinker_scan(struct shrinker *shrinker,
+					   struct shrink_control *sc)
+{
+	return __pkvm_reclaim_hyp_alloc(sc->nr_to_scan);
+}
+
 static int __init kvm_hyp_init_protection(u32 hyp_va_bits)
 {
 	void *addr = phys_to_virt(hyp_mem_base);
+	struct shrinker *shrinker;
 	int ret;
 
 	ret = create_hyp_mappings(addr, addr + hyp_mem_size, PAGE_HYP);
@@ -2529,6 +2545,17 @@ static int __init kvm_hyp_init_protection(u32 hyp_va_bits)
 		return ret;
 
 	free_hyp_pgds();
+
+	shrinker = shrinker_alloc(0, "pkvm");
+	if (!shrinker) {
+		pr_warn("Failed to register pKVM shrinker");
+	} else {
+		shrinker->count_objects = kvm_hyp_shrinker_count;
+		shrinker->scan_objects = kvm_hyp_shrinker_scan;
+		shrinker->seeks = DEFAULT_SEEKS;
+
+		shrinker_register(shrinker);
+	}
 
 	return 0;
 }
