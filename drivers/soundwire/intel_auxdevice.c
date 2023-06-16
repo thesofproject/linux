@@ -23,8 +23,11 @@
 #include "intel.h"
 #include "intel_auxdevice.h"
 
-/* IDA min selected to avoid conflicts with HDaudio/iDISP SDI values */
-#define INTEL_DEV_NUM_IDA_MIN           4
+/*
+ * IDA min selected to allow for 5 unconstrained devices per link,
+ * and 6 system-unique Device Numbers for wake-capable devices.
+ */
+#define INTEL_DEV_NUM_IDA_MIN           6
 
 #define INTEL_MASTER_SUSPEND_DELAY_MS	3000
 
@@ -65,10 +68,13 @@ static void generic_new_peripheral_assigned(struct sdw_slave *slave, int dev_num
 	struct sdw_bus *bus = slave->bus;
 	struct sdw_cdns *cdns = bus_to_cdns(bus);
 	struct sdw_intel *sdw = cdns_to_intel(cdns);
+	int dev_num_min = slave->prop.wake_capable ? INTEL_DEV_NUM_IDA_MIN : 1;
+	int dev_num_max = slave->prop.wake_capable ? SDW_MAX_DEVICES : INTEL_DEV_NUM_IDA_MIN - 1;
 
 	/* paranoia check, this should never happen */
-	if (dev_num < INTEL_DEV_NUM_IDA_MIN || dev_num > SDW_MAX_DEVICES)  {
-		dev_err(bus->dev, "%s: invalid dev_num %d\n", __func__, dev_num);
+	if (dev_num < dev_num_min || dev_num > dev_num_max)  {
+		dev_err(bus->dev, "%s: invalid dev_num %d, wake supported %d\n",
+			__func__, dev_num, slave->prop.wake_capable);
 		return;
 	}
 
@@ -128,14 +134,24 @@ static DEFINE_IDA(intel_peripheral_ida);
 
 static int intel_get_device_num_ida(struct sdw_slave *slave)
 {
-	return ida_alloc_range(&intel_peripheral_ida,
-			       INTEL_DEV_NUM_IDA_MIN, SDW_MAX_DEVICES,
-			       GFP_KERNEL);
+	int bit;
+
+	if (slave->prop.wake_capable)
+		return ida_alloc_range(&intel_peripheral_ida,
+				       INTEL_DEV_NUM_IDA_MIN, SDW_MAX_DEVICES,
+				       GFP_KERNEL);
+
+	bit = find_first_zero_bit(slave->bus->assigned, SDW_MAX_DEVICES);
+	if (bit == SDW_MAX_DEVICES)
+		return -ENODEV;
+
+	return bit;
 }
 
 static void intel_put_device_num_ida(struct sdw_slave *slave)
 {
-	return ida_free(&intel_peripheral_ida, slave->dev_num);
+	if (slave->prop.wake_capable)
+		ida_free(&intel_peripheral_ida, slave->dev_num);
 }
 
 static struct sdw_master_ops sdw_intel_ops = {
