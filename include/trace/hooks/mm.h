@@ -106,6 +106,10 @@ DECLARE_HOOK(android_vh_kmalloc_large_alloced,
 DECLARE_HOOK(android_vh_count_workingset_refault,
 	TP_PROTO(struct folio *folio),
 	TP_ARGS(folio));
+DECLARE_HOOK(android_vh_tune_mmap_readaround,
+	TP_PROTO(unsigned int ra_pages, pgoff_t pgoff,
+		pgoff_t *start, unsigned int *size, unsigned int *async_size),
+	TP_ARGS(ra_pages, pgoff, start, size, async_size));
 DECLARE_HOOK(android_vh_page_should_be_protected,
 	TP_PROTO(struct folio *folio, unsigned long nr_scanned,
 	s8 priority, int *should_protect),
