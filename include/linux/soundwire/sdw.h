@@ -865,17 +865,6 @@ struct sdw_master_ops {
 };
 
 /**
- * enum sdw_dev_num_alloc - Device Number allocation strategies
- * @SDW_DEV_NUM_ALLOC_DEFAULT: unconstrained first-come-first-serve allocation,
- * using range [1, 11]
- * @SDW_DEV_NUM_ALLOC_IDA: IDA-based allocation, using range [ida_min, 11]
- */
-enum sdw_dev_num_alloc {
-	SDW_DEV_NUM_ALLOC_DEFAULT = 0,
-	SDW_DEV_NUM_ALLOC_IDA,
-};
-
-/**
  * struct sdw_bus - SoundWire bus
  * @dev: Shortcut to &bus->md->dev to avoid changing the entire code.
  * @md: Master device
@@ -906,11 +895,9 @@ enum sdw_dev_num_alloc {
  * meaningful if multi_link is set. If set to 1, hardware-based
  * synchronization will be used even if a stream only uses a single
  * SoundWire segment.
- * @dev_num_alloc: bus-specific device number allocation
  * @dev_num_ida_min: if set, defines the minimum values for the IDA
  * used to allocate system-unique device numbers. This value needs to be
- * identical across all SoundWire bus in the system. Only used if @sdw_num_alloc
- * is not default.
+ * identical across all SoundWire bus in the system.
  */
 struct sdw_bus {
 	struct device *dev;
@@ -935,7 +922,6 @@ struct sdw_bus {
 	u32 bank_switch_timeout;
 	bool multi_link;
 	int hw_sync_min_links;
-	enum sdw_dev_num_alloc dev_num_alloc;
 	int dev_num_ida_min;
 };
 
