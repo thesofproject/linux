@@ -773,6 +773,48 @@ static int sdw_assign_device_num(struct sdw_slave *slave)
 	return 0;
 }
 
+/**
+ * sdw_slave_redo_enumeration() - Clear current device number, force the device to drop off
+ * the bus and reenumerate
+ * @slave: SDW Slave
+ *
+ */
+int sdw_slave_redo_enumeration(struct sdw_slave *slave)
+{
+	struct sdw_bus *bus = slave->bus;
+	int dev_num;
+	int ret = 0;
+
+	mutex_lock(&bus->bus_lock);
+
+	/* only deal with already enumerated device */
+	if (!slave->dev_num)
+		goto unlock;
+
+	dev_dbg(&slave->dev, "%s: device %d forcing reset to redo enumeration\n",
+		__func__, slave->dev_num);
+
+	ret = sdw_write_no_pm(slave, SDW_SCP_CTRL,  SDW_SCP_CTRL_FORCE_RESET);
+	if (ret < 0) {
+		dev_err(bus->dev, "device_num %d force reset failed: %d\n",
+			dev_num, ret);
+		goto unlock;
+	}
+
+	/* clear the existing allocation */
+	clear_bit(slave->dev_num, bus->assigned);
+	if (bus->ops && bus->ops->put_device_num)
+		bus->ops->put_device_num(bus, slave);
+
+	slave->dev_num = dev_num;
+	slave->dev_num_sticky = dev_num;
+
+unlock:
+	mutex_unlock(&bus->bus_lock);
+	return ret;
+}
+EXPORT_SYMBOL(sdw_slave_redo_enumeration);
+
 void sdw_extract_slave_id(struct sdw_bus *bus,
 			  u64 addr, struct sdw_slave_id *id)
 {
