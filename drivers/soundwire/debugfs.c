@@ -137,6 +137,62 @@ static int sdw_slave_reg_show(struct seq_file *s_file, void *data)
 }
 DEFINE_SHOW_ATTRIBUTE(sdw_slave_reg);
 
+static ssize_t sdw_slave_dev_num_read(struct file *file,
+				      char __user *to, size_t count, loff_t *ppos)
+{
+	struct sdw_slave *slave = file->private_data;
+	char buf[8] = { 0 };
+	int len;
+
+	len = scnprintf(buf, sizeof(buf), "%d\n", slave->dev_num);
+
+	return simple_read_from_buffer(to, count, ppos, buf, len);
+}
+
+static ssize_t sdw_slave_dev_num_write(struct file *file,
+				       const char __user *from, size_t count, loff_t *ppos)
+{
+	struct sdw_slave *slave = file->private_data;
+	char buf[8] = { 0 };
+	u8 dev_num = 0;
+	int ret, err;
+
+	ret = simple_write_to_buffer(buf, sizeof(buf) - 1, ppos, from, count);
+	err = kstrtou8(buf, 0, &dev_num);
+	if (err)
+		return err;
+
+	if (dev_num > SDW_MAX_DEVICES)
+		return -EINVAL;
+
+	if (!dev_num)
+		return -EINVAL;
+
+	/* make sure the device is active */
+	err = pm_runtime_get_sync(&slave->dev);
+	if (err < 0 && err != -EACCES) {
+		pm_runtime_put_noidle(&slave->dev);
+		return err;
+	}
+
+	err = sdw_reassign_device_num(slave, dev_num);
+
+	pm_runtime_mark_last_busy(&slave->dev);
+	pm_runtime_put(&slave->dev);
+
+	if (err)
+		return err;
+
+	return ret;
+}
+
+static const struct file_operations sdw_slave_dev_num_fops = {
+	.open = simple_open,
+	.read = sdw_slave_dev_num_read,
+	.write = sdw_slave_dev_num_write,
+	.llseek = default_llseek,
+};
+
 void sdw_slave_debugfs_init(struct sdw_slave *slave)
 {
 	struct dentry *master;
@@ -150,6 +206,8 @@ void sdw_slave_debugfs_init(struct sdw_slave *slave)
 	d = debugfs_create_dir(name, master);
 
 	debugfs_create_file("registers", 0400, d, slave, &sdw_slave_reg_fops);
+
+	debugfs_create_file("device_number", 0644, d, slave, &sdw_slave_dev_num_fops);
 
 	slave->debugfs = d;
 }
