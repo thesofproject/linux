@@ -773,6 +773,63 @@ static int sdw_assign_device_num(struct sdw_slave *slave)
 	return 0;
 }
 
+/**
+ * sdw_reassign_device_num() - Clear and reassign the device number
+ * @slave: SDW Slave
+ * @new_dev_num: new value requested. When zero the bus allocation will be
+ * used, otherwise this is an override for debugfs with no checks.
+ *
+ */
+int sdw_reassign_device_num(struct sdw_slave *slave, int new_dev_num)
+{
+	struct sdw_bus *bus = slave->bus;
+	int dev_num;
+	int ret = 0;
+
+	mutex_lock(&bus->bus_lock);
+
+	/* only re-assign a device_num after enumeration */
+	if (!slave->dev_num)
+		goto unlock;
+
+	/* first clear the existing allocation */
+	clear_bit(slave->dev_num, bus->assigned);
+	if (bus->ops && bus->ops->put_device_num)
+		bus->ops->put_device_num(slave);
+
+	if (!new_dev_num) {
+		/* get a new device number allocated */
+		dev_num = sdw_get_device_num(slave);
+		if (dev_num < 0) {
+			dev_err(bus->dev, "Get dev_num failed: %d\n",
+				dev_num);
+			ret = dev_num;
+			goto unlock;
+		}
+	} else {
+		/* no sanity check is handled for this */
+		dev_num = new_dev_num;
+	}
+
+	ret = sdw_write_no_pm(slave, SDW_SCP_DEVNUMBER, dev_num);
+	if (ret < 0) {
+		dev_err(bus->dev, "Program device_num %d failed: %d\n",
+			dev_num, ret);
+		goto unlock;
+	}
+
+	slave->dev_num = dev_num;
+	slave->dev_num_sticky = dev_num;
+
+	if (bus->ops && bus->ops->new_peripheral_assigned)
+		bus->ops->new_peripheral_assigned(slave, dev_num);
+
+unlock:
+	mutex_unlock(&bus->bus_lock);
+	return ret;
+}
+EXPORT_SYMBOL(sdw_reassign_device_num);
+
 void sdw_extract_slave_id(struct sdw_bus *bus,
 			  u64 addr, struct sdw_slave_id *id)
 {
