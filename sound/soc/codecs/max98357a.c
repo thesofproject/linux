@@ -33,6 +33,9 @@ static int max98357a_daiops_trigger(struct snd_pcm_substream *substream,
 	struct max98357a_priv *max98357a =
 		snd_soc_component_get_drvdata(component);
 
+	if (substream->stream != SNDRV_PCM_STREAM_PLAYBACK)
+		return 0;
+
 	if (!max98357a->sdmode)
 		return 0;
 
