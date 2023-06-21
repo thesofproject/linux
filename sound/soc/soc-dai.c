@@ -619,6 +619,9 @@ static int soc_dai_trigger(struct snd_soc_dai *dai,
 {
 	int ret = 0;
 
+	if (!snd_soc_dai_stream_valid(dai, substream->stream))
+		return 0;
+
 	if (dai->driver->ops &&
 	    dai->driver->ops->trigger)
 		ret = dai->driver->ops->trigger(substream, cmd, dai);
