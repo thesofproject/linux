@@ -185,7 +185,8 @@ static int max98363_io_init(struct sdw_slave *slave)
 		/* make sure the device does not suspend immediately */
 		pm_runtime_mark_last_busy(dev);
 
-		pm_runtime_enable(dev);
+		if (!pm_runtime_enabled(dev))
+			pm_runtime_enable(dev);
 	}
 
 	pm_runtime_get_noresume(dev);
