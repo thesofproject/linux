@@ -81,6 +81,7 @@ static int sdw_drv_probe(struct device *dev)
 {
 	struct sdw_slave *slave = dev_to_sdw_dev(dev);
 	struct sdw_driver *drv = drv_to_sdw_driver(dev->driver);
+	struct sdw_bus *bus;
 	const struct sdw_device_id *id;
 	const char *name;
 	int ret;
@@ -116,7 +117,9 @@ static int sdw_drv_probe(struct device *dev)
 		return ret;
 	}
 
-	mutex_lock(&slave->sdw_dev_lock);
+	bus = slave->bus;
+	if (bus->ops && bus->ops->force_reenumeration_on_probe)
+		bus->ops->force_reenumeration_on_probe(bus, slave);
 
 	/* device is probed so let's read the properties now */
 	if (drv->ops && drv->ops->read_prop)

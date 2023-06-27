@@ -155,6 +155,11 @@ static void intel_put_device_num_ida(struct sdw_bus *bus, struct sdw_slave *slav
 		ida_free(&intel_peripheral_ida, slave->dev_num);
 }
 
+static void intel_force_reenumeration_on_probe(struct sdw_bus *bus, struct sdw_slave *slave)
+{
+	sdw_slave_redo_enumeration(slave);
+}
+
 static struct sdw_master_ops sdw_intel_ops = {
 	.read_prop = intel_prop_read,
 	.override_adr = sdw_dmi_override_adr,
@@ -166,6 +171,7 @@ static struct sdw_master_ops sdw_intel_ops = {
 	.read_ping_status = cdns_read_ping_status,
 	.get_device_num =  intel_get_device_num_ida,
 	.put_device_num = intel_put_device_num_ida,
+	.force_reenumeration_on_probe =  intel_force_reenumeration_on_probe,
 	.new_peripheral_assigned = generic_new_peripheral_assigned,
 };
 

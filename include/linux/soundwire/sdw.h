@@ -848,6 +848,8 @@ struct sdw_defer {
  * Bits 31:24 are reserved.
  * @get_device_num: Callback for vendor-specific device_number allocation
  * @put_device_num: Callback for vendor-specific device_number release
+ * @force_reenumeration_on_probe: discard the initial enumeration and force the peripheral
+ * to enumerate again after the driver probe.
  * @new_peripheral_assigned: Callback to handle enumeration of new peripheral.
  */
 struct sdw_master_ops {
@@ -865,6 +867,7 @@ struct sdw_master_ops {
 	u32 (*read_ping_status)(struct sdw_bus *bus);
 	int (*get_device_num)(struct sdw_bus *bus, struct sdw_slave *slave);
 	void (*put_device_num)(struct sdw_bus *bus, struct sdw_slave *slave);
+	void (*force_reenumeration_on_probe)(struct sdw_bus *bus, struct sdw_slave *slave);
 	void (*new_peripheral_assigned)(struct sdw_bus *bus,
 					struct sdw_slave *slave,
 					int dev_num);
