@@ -10,7 +10,7 @@
 #include <asm/kvm_pkvm.h>
 
 #include <nvhe/gfp.h>
-#include <nvhe/spinlock.h>
+#include <nvhe/rwlock.h>
 
 /*
  * Holds the relevant data for maintaining the vcpu state completely at hyp.
@@ -66,7 +66,7 @@ struct pkvm_hyp_vm {
 	struct pkvm_hyp_vcpu *vcpus[];
 };
 
-extern hyp_spinlock_t vm_table_lock;
+extern hyp_rwlock_t vm_table_lock;
 
 static inline struct pkvm_hyp_vm *
 pkvm_hyp_vcpu_to_hyp_vm(struct pkvm_hyp_vcpu *hyp_vcpu)

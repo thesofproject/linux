@@ -591,8 +591,6 @@ void kvm_init_pvm_id_regs(struct kvm_vcpu *vcpu)
 	struct kvm_arch *ka = &kvm->arch;
 	u32 r;
 
-	hyp_assert_lock_held(&vm_table_lock);
-
 	if (test_bit(KVM_ARCH_FLAG_ID_REGS_INITIALIZED, &kvm->arch.flags))
 		return;
 
