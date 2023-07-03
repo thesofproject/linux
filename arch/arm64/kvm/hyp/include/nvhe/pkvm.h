@@ -53,7 +53,7 @@ struct pkvm_hyp_vm {
 	struct kvm_pgtable pgt;
 	struct kvm_pgtable_mm_ops mm_ops;
 	struct hyp_pool pool;
-	hyp_spinlock_t lock;
+	hyp_spinlock_t pgtable_lock;
 
 	/*
 	 * True when the guest is being torn down. When in this state, the
