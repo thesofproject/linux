@@ -495,7 +495,8 @@ struct sof_ipc_ops {
 	int (*post_fw_boot)(struct snd_sof_dev *sdev);
 
 	int (*tx_msg)(struct snd_sof_dev *sdev, void *msg_data, size_t msg_bytes,
-		      void *reply_data, size_t reply_bytes, bool no_pm);
+		      void *reply_data, size_t reply_bytes, bool no_pm,
+		      void (*kick)(void *arg), void *kick_arg);
 	int (*set_get_data)(struct snd_sof_dev *sdev, void *data, size_t data_bytes,
 			    bool set);
 	int (*get_reply)(struct snd_sof_dev *sdev);
@@ -712,6 +713,9 @@ static inline void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev)
 {
 	sdev->ipc->ops->rx_msg(sdev);
 }
+int sof_ipc_tx_message_with_kick(struct snd_sof_ipc *ipc, void *msg_data, size_t msg_bytes,
+				 void *reply_data, size_t reply_bytes,
+				 void (*kick)(void *arg), void *kick_arg);
 int sof_ipc_tx_message(struct snd_sof_ipc *ipc, void *msg_data, size_t msg_bytes,
 		       void *reply_data, size_t reply_bytes);
 static inline int sof_ipc_tx_message_no_reply(struct snd_sof_ipc *ipc, void *msg_data,

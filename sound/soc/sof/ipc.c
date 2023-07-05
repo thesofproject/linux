@@ -72,6 +72,19 @@ int sof_ipc_send_msg(struct snd_sof_dev *sdev, void *msg_data, size_t msg_bytes,
 }
 
 /* send IPC message from host to DSP */
+int sof_ipc_tx_message_with_kick(struct snd_sof_ipc *ipc, void *msg_data, size_t msg_bytes,
+				 void *reply_data, size_t reply_bytes,
+				 void (*kick)(void *arg), void *kick_arg)
+{
+	if (msg_bytes > ipc->max_payload_size ||
+	    reply_bytes > ipc->max_payload_size)
+		return -ENOBUFS;
+
+	return ipc->ops->tx_msg(ipc->sdev, msg_data, msg_bytes, reply_data,
+				reply_bytes, false, kick, kick_arg);
+}
+EXPORT_SYMBOL(sof_ipc_tx_message_with_kick);
+
 int sof_ipc_tx_message(struct snd_sof_ipc *ipc, void *msg_data, size_t msg_bytes,
 		       void *reply_data, size_t reply_bytes)
 {
@@ -80,7 +93,7 @@ int sof_ipc_tx_message(struct snd_sof_ipc *ipc, void *msg_data, size_t msg_bytes
 		return -ENOBUFS;
 
 	return ipc->ops->tx_msg(ipc->sdev, msg_data, msg_bytes, reply_data,
-				reply_bytes, false);
+				reply_bytes, false, NULL, NULL);
 }
 EXPORT_SYMBOL(sof_ipc_tx_message);
 
@@ -105,7 +118,7 @@ int sof_ipc_tx_message_no_pm(struct snd_sof_ipc *ipc, void *msg_data, size_t msg
 		return -ENOBUFS;
 
 	return ipc->ops->tx_msg(ipc->sdev, msg_data, msg_bytes, reply_data,
-				reply_bytes, true);
+				reply_bytes, true, NULL, NULL);
 }
 EXPORT_SYMBOL(sof_ipc_tx_message_no_pm);
 

@@ -331,9 +331,9 @@ static int ipc4_wait_tx_done(struct snd_sof_ipc *ipc, void *reply_data)
 	return ret;
 }
 
-static int ipc4_tx_msg_unlocked(struct snd_sof_ipc *ipc,
-				void *msg_data, size_t msg_bytes,
-				void *reply_data, size_t reply_bytes)
+static int ipc4_tx_msg_unlocked_nowait(struct snd_sof_ipc *ipc,
+				       void *msg_data, size_t msg_bytes,
+				       size_t reply_bytes)
 {
 	struct sof_ipc4_msg *ipc4_msg = msg_data;
 	struct snd_sof_dev *sdev = ipc->sdev;
@@ -345,19 +345,30 @@ static int ipc4_tx_msg_unlocked(struct snd_sof_ipc *ipc,
 	sof_ipc4_log_header(sdev->dev, "ipc tx      ", msg_data, true);
 
 	ret = sof_ipc_send_msg(sdev, msg_data, msg_bytes, reply_bytes);
-	if (ret) {
+	if (ret < 0)
 		dev_err_ratelimited(sdev->dev,
 				    "%s: ipc message send for %#x|%#x failed: %d\n",
 				    __func__, ipc4_msg->primary, ipc4_msg->extension, ret);
-		return ret;
-	}
+
+	return ret;
+}
+
+static int ipc4_tx_msg_unlocked(struct snd_sof_ipc *ipc,
+				void *msg_data, size_t msg_bytes,
+				void *reply_data, size_t reply_bytes)
+{
+	int ret = ipc4_tx_msg_unlocked_nowait(ipc, msg_data, msg_bytes, reply_bytes);
 
 	/* now wait for completion */
-	return ipc4_wait_tx_done(ipc, reply_data);
+	if (!ret)
+		ret = ipc4_wait_tx_done(ipc, reply_data);
+
+	return ret;
 }
 
 static int sof_ipc4_tx_msg(struct snd_sof_dev *sdev, void *msg_data, size_t msg_bytes,
-			   void *reply_data, size_t reply_bytes, bool no_pm)
+			   void *reply_data, size_t reply_bytes, bool no_pm,
+			   void (*kick)(void *arg), void *kick_arg)
 {
 	struct snd_sof_ipc *ipc = sdev->ipc;
 	int ret;
@@ -379,7 +390,13 @@ static int sof_ipc4_tx_msg(struct snd_sof_dev *sdev, void *msg_data, size_t msg_
 	/* Serialise IPC TX */
 	mutex_lock(&ipc->tx_mutex);
 
-	ret = ipc4_tx_msg_unlocked(ipc, msg_data, msg_bytes, reply_data, reply_bytes);
+	ret = ipc4_tx_msg_unlocked_nowait(ipc, msg_data, msg_bytes, reply_bytes);
+	if (!ret) {
+		if (kick)
+			kick(kick_arg);
+
+		ret = ipc4_wait_tx_done(ipc, reply_data);
+	}
 
 	if (sof_debug_check_flag(SOF_DBG_DUMP_IPC_MESSAGE_PAYLOAD)) {
 		struct sof_ipc4_msg *msg = NULL;
@@ -656,7 +673,7 @@ static int sof_ipc4_set_core_state(struct snd_sof_dev *sdev, int core_idx, bool 
 	msg.data_ptr = &dx_state;
 	msg.data_size = sizeof(dx_state);
 
-	return sof_ipc4_tx_msg(sdev, &msg, msg.data_size, NULL, 0, false);
+	return sof_ipc4_tx_msg(sdev, &msg, msg.data_size, NULL, 0, false, NULL, NULL);
 }
 
 /*
@@ -682,7 +699,7 @@ static int sof_ipc4_set_pm_gate(struct snd_sof_dev *sdev, u32 flags)
 	msg.primary |= SOF_IPC4_MSG_TARGET(SOF_IPC4_MODULE_MSG);
 	msg.extension = flags;
 
-	return sof_ipc4_tx_msg(sdev, &msg, 0, NULL, 0, true);
+	return sof_ipc4_tx_msg(sdev, &msg, 0, NULL, 0, true, NULL, NULL);
 }
 
 static const struct sof_ipc_pm_ops ipc4_pm_ops = {

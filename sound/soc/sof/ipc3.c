@@ -353,7 +353,8 @@ static int ipc3_tx_msg_unlocked(struct snd_sof_ipc *ipc,
 }
 
 static int sof_ipc3_tx_msg(struct snd_sof_dev *sdev, void *msg_data, size_t msg_bytes,
-			   void *reply_data, size_t reply_bytes, bool no_pm)
+			   void *reply_data, size_t reply_bytes, bool no_pm,
+			   void (*kick)(void *arg), void *kick_arg)
 {
 	struct snd_sof_ipc *ipc = sdev->ipc;
 	int ret;
@@ -435,7 +436,7 @@ static int sof_ipc3_set_get_data(struct snd_sof_dev *sdev, void *data, size_t da
 	/* send normal size ipc in one part */
 	if (cdata->rhdr.hdr.size <= ipc->max_payload_size)
 		return sof_ipc3_tx_msg(sdev, cdata, cdata->rhdr.hdr.size,
-				       cdata, cdata->rhdr.hdr.size, false);
+				       cdata, cdata->rhdr.hdr.size, false, NULL, NULL);
 
 	cdata_chunk = kzalloc(ipc->max_payload_size, GFP_KERNEL);
 	if (!cdata_chunk)
@@ -1104,7 +1105,7 @@ static int sof_ipc3_set_core_state(struct snd_sof_dev *sdev, int core_idx, bool 
 	else
 		core_cfg.enable_mask = sdev->enabled_cores_mask & ~BIT(core_idx);
 
-	return sof_ipc3_tx_msg(sdev, &core_cfg, sizeof(core_cfg), NULL, 0, false);
+	return sof_ipc3_tx_msg(sdev, &core_cfg, sizeof(core_cfg), NULL, 0, false, NULL, NULL);
 }
 
 static int sof_ipc3_ctx_ipc(struct snd_sof_dev *sdev, int cmd)
@@ -1115,7 +1116,7 @@ static int sof_ipc3_ctx_ipc(struct snd_sof_dev *sdev, int cmd)
 	};
 
 	/* send ctx save ipc to dsp */
-	return sof_ipc3_tx_msg(sdev, &pm_ctx, sizeof(pm_ctx), NULL, 0, false);
+	return sof_ipc3_tx_msg(sdev, &pm_ctx, sizeof(pm_ctx), NULL, 0, false, NULL, NULL);
 }
 
 static int sof_ipc3_ctx_save(struct snd_sof_dev *sdev)
