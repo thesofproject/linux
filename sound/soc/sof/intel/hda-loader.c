@@ -516,11 +516,29 @@ cleanup:
 	return ret;
 }
 
+struct hda_lib_load_data {
+	struct snd_sof_dev *sdev;
+	struct hdac_ext_stream *hext_stream;
+};
+
+static void hda_lib_load_start(void *arg) {
+	struct hda_lib_load_data *data = arg;
+	int ret;
+
+	msleep(10);
+
+	dev_dbg(data->sdev->dev, "%s(): start HDA DMA\n", __func__);
+	ret = cl_trigger(data->sdev, data->hext_stream, SNDRV_PCM_TRIGGER_START);
+	if (ret < 0)
+		dev_err(data->sdev->dev, "%s: DMA trigger start failed\n", __func__);
+}
+
 int hda_dsp_ipc4_load_library(struct snd_sof_dev *sdev,
 			      struct sof_ipc4_fw_library *fw_lib, bool reload)
 {
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct hdac_ext_stream *hext_stream;
+	struct hda_lib_load_data start_arg;
 	struct firmware stripped_firmware;
 	struct sof_ipc4_msg msg = {};
 	struct snd_dma_buffer dmab;
@@ -551,13 +569,10 @@ int hda_dsp_ipc4_load_library(struct snd_sof_dev *sdev,
 	msg.primary |= SOF_IPC4_MSG_TARGET(SOF_IPC4_FW_GEN_MSG);
 	msg.primary |= SOF_IPC4_GLB_LOAD_LIBRARY_LIB_ID(fw_lib->id);
 
-	ret = cl_trigger(sdev, hext_stream, SNDRV_PCM_TRIGGER_START);
-	if (ret < 0) {
-		dev_err(sdev->dev, "%s: DMA trigger start failed\n", __func__);
-		goto cleanup;
-	}
-
-	ret = sof_ipc_tx_message_no_reply(sdev->ipc, &msg, 0);
+	start_arg.sdev = sdev;
+	start_arg.hext_stream = hext_stream;
+	ret = sof_ipc_tx_message_with_kick(sdev->ipc, &msg, 0, NULL, 0,
+					   hda_lib_load_start, &start_arg);
 
 	ret1 = cl_trigger(sdev, hext_stream, SNDRV_PCM_TRIGGER_STOP);
 	if (ret1 < 0) {
@@ -566,7 +581,6 @@ int hda_dsp_ipc4_load_library(struct snd_sof_dev *sdev,
 			ret = ret1;
 	}
 
-cleanup:
 	/* clean up even in case of error and return the first error */
 	ret1 = hda_cl_cleanup(sdev, &dmab, hext_stream);
 	if (ret1 < 0) {
