@@ -319,6 +319,9 @@ static int hda_ipc4_pre_trigger(struct snd_sof_dev *sdev, struct snd_soc_dai *cp
 	pipe_widget = swidget->spipe->pipe_widget;
 	pipeline = pipe_widget->private;
 
+	if (pipe_widget->instance_id < 0)
+		return 0;
+
 	mutex_lock(&ipc4_data->pipeline_state_mutex);
 
 	switch (cmd) {
@@ -381,6 +384,9 @@ static int hda_ipc4_post_trigger(struct snd_sof_dev *sdev, struct snd_soc_dai *c
 	swidget = w->dobj.private;
 	pipe_widget = swidget->spipe->pipe_widget;
 	pipeline = pipe_widget->private;
+
+	if (pipe_widget->instance_id < 0)
+		return 0;
 
 	mutex_lock(&ipc4_data->pipeline_state_mutex);
 
