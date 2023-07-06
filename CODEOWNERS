@@ -2,7 +2,7 @@
 # Each line is a file pattern followed by one or more owners.
 
 # These owners will be the default owners for everything in the repo.
-*	@lgirdwood @plbossart @ranj063 @kv2019i @dbaluta @bardliao @ujfalusi @ajitkupandey @kuanhsuncheng @yaochunhung
+*	@lgirdwood @plbossart @ranj063 @kv2019i @dbaluta @bardliao @ujfalusi @vijendarmukunda @kuanhsuncheng @yaochunhung
 
 # Order is important. The last matching pattern has the most precedence.
 # So if a pull request only touches javascript files, only these owners
@@ -14,7 +14,7 @@ include/sound/sof/control.h			@ranj063 @singalsu @dbaluta
 include/sound/sof/dai.h				@ranj063 @singalsu @juimonen @dbaluta
 include/sound/sof/dai-imx.h			@ranj063 @singalsu @juimonen @dbaluta
 include/sound/sof/dai-intel.h			@ranj063 @singalsu @juimonen
-include/sound/sof/dai-amd.h			@ajitkupandey @bhiregoudar @sunilkumardommati @vijendarmukunda
+include/sound/sof/dai-amd.h			@bhiregoudar @sunilkumardommati @vijendarmukunda
 include/sound/sof/ext_manifest.h		@lyakh @ranj063 @juimonen
 include/sound/sof/header.h			@lyakh @ranj063 @juimonen
 include/sound/sof/info.h			@lyakh @ranj063 @juimonen
@@ -71,15 +71,15 @@ sound/soc/sof/intel/Makefile			 @libinyang
 sound/soc/sof/intel/shim.h			 @libinyang @bardliao @lyakh @juimonen
 
 # amd parts
-sound/soc/sof/amd/*				@ajitkupandey @bhiregoudar @sunilkumardommati @vijendarmukunda
+sound/soc/sof/amd/*				@bhiregoudar @sunilkumardommati @vijendarmukunda
 
 # mtk parts
 sound/soc/sof/mtk/*				@yaochunhung @kuanhsuncheng
 include/sound/sof/dai-mediatek.h		@yaochunhung @kuanhsuncheng
 
 # SoundWire parts
-drivers/soundwire				@RanderWang @shumingfan @oder-chiou @jack-cy-yu @ryans-lee
-include/linux/soundwire				@RanderWang @shumingfan @oder-chiou @jack-cy-yu @ryans-lee
+drivers/soundwire				@RanderWang @shumingfan @oder-chiou @jack-cy-yu @ryans-lee @vijendarmukunda
+include/linux/soundwire				@RanderWang @shumingfan @oder-chiou @jack-cy-yu @ryans-lee @vijendarmukunda
 
 # Codecs
 sound/soc/codecs/rt*				@RanderWang @shumingfan @oder-chiou @jack-cy-yu
