@@ -158,11 +158,14 @@ static int max98363_io_init(struct sdw_slave *slave)
 {
 	struct device *dev = &slave->dev;
 	struct max98363_priv *max98363 = dev_get_drvdata(dev);
+	bool cache_bypass = false;
 	int ret, reg;
 
 	regcache_cache_only(max98363->regmap, false);
-	if (max98363->first_hw_init)
+	if (max98363->first_hw_init) {
 		regcache_cache_bypass(max98363->regmap, true);
+		cache_bypass = true;
+	}
 
 	/*
 	 * PM runtime status is marked as 'active' only when a Slave reports as Attached
@@ -171,6 +174,7 @@ static int max98363_io_init(struct sdw_slave *slave)
 		/* update count of parent 'active' children */
 		pm_runtime_set_active(dev);
 
+	max98363->first_hw_init = true;
 	pm_runtime_get_noresume(dev);
 
 	ret = regmap_read(max98363->regmap, MAX98363_R21FF_REV_ID, &reg);
@@ -179,12 +183,11 @@ static int max98363_io_init(struct sdw_slave *slave)
 		return ret;
 	}
 
-	if (max98363->first_hw_init) {
+	if (cache_bypass) {
 		regcache_cache_bypass(max98363->regmap, false);
 		regcache_mark_dirty(max98363->regmap);
 	}
 
-	max98363->first_hw_init = true;
 	max98363->hw_init = true;
 
 	pm_runtime_mark_last_busy(dev);
