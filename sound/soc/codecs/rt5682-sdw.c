@@ -311,8 +311,6 @@ static int rt5682_sdw_init(struct device *dev, struct regmap *regmap,
 	rt5682->sdw_regmap = regmap;
 	rt5682->is_sdw = true;
 
-	regcache_cache_only(rt5682->sdw_regmap, true);
-
 	mutex_init(&rt5682->disable_irq_lock);
 
 	rt5682->regmap = devm_regmap_init(dev, NULL, dev,
@@ -323,6 +321,9 @@ static int rt5682_sdw_init(struct device *dev, struct regmap *regmap,
 			ret);
 		return ret;
 	}
+
+	regcache_cache_only(rt5682->sdw_regmap, true);
+	regcache_cache_only(rt5682->regmap, true);
 
 	/*
 	 * Mark hw_init to false
@@ -372,6 +373,7 @@ static int rt5682_io_init(struct device *dev, struct sdw_slave *slave)
 	if (rt5682->hw_init)
 		return 0;
 
+	regcache_cache_only(rt5682->sdw_regmap, false);
 	regcache_cache_only(rt5682->regmap, false);
 	if (rt5682->first_hw_init)
 		regcache_cache_bypass(rt5682->regmap, true);
@@ -713,6 +715,7 @@ static int __maybe_unused rt5682_dev_suspend(struct device *dev)
 
 	cancel_delayed_work_sync(&rt5682->jack_detect_work);
 
+	regcache_cache_only(rt5682->sdw_regmap, true);
 	regcache_cache_only(rt5682->regmap, true);
 	regcache_mark_dirty(rt5682->regmap);
 
@@ -770,6 +773,7 @@ static int __maybe_unused rt5682_dev_resume(struct device *dev)
 
 regmap_sync:
 	slave->unattach_request = 0;
+	regcache_cache_only(rt5682->sdw_regmap, false);
 	regcache_cache_only(rt5682->regmap, false);
 	regcache_sync(rt5682->regmap);
 
