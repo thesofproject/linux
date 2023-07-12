@@ -311,8 +311,6 @@ static int rt5682_sdw_init(struct device *dev, struct regmap *regmap,
 	rt5682->sdw_regmap = regmap;
 	rt5682->is_sdw = true;
 
-	regcache_cache_only(rt5682->sdw_regmap, true);
-
 	mutex_init(&rt5682->disable_irq_lock);
 
 	rt5682->regmap = devm_regmap_init(dev, NULL, dev,
@@ -323,6 +321,8 @@ static int rt5682_sdw_init(struct device *dev, struct regmap *regmap,
 			ret);
 		return ret;
 	}
+
+	regcache_cache_only(rt5682->regmap, true);
 
 	/*
 	 * Mark hw_init to false
@@ -625,8 +625,8 @@ static int rt5682_clock_config(struct device *dev)
 		return -EINVAL;
 	}
 
-	regmap_write(rt5682->sdw_regmap, 0xe0, value);
-	regmap_write(rt5682->sdw_regmap, 0xf0, value);
+	sdw_write_no_pm(rt5682->slave, 0xe0, value);
+	sdw_write_no_pm(rt5682->slave, 0xf0, value);
 
 	dev_dbg(dev, "%s complete, clk_freq=%d\n", __func__, clk_freq);
 
