@@ -549,7 +549,17 @@ int hda_dsp_ipc4_load_library(struct snd_sof_dev *sdev,
 	msg.primary |= SOF_IPC4_MSG_TYPE_SET(SOF_IPC4_GLB_LOAD_LIBRARY);
 	msg.primary |= SOF_IPC4_MSG_DIR(SOF_IPC4_MSG_REQUEST);
 	msg.primary |= SOF_IPC4_MSG_TARGET(SOF_IPC4_FW_GEN_MSG);
-	msg.primary |= SOF_IPC4_GLB_LOAD_LIBRARY_LIB_ID(fw_lib->id);
+
+	/*
+	 * LOAD_LIBRARY 1st stage
+	 * message with valid dma_id and invalid (0) lib_id
+	 * Firmware can respond with error if it is not prepared for the two
+	 * stage library loading, the second stage message will in both case
+	 * going to complete the loading.
+	 * Error from sof_ipc_tx_message_no_reply() is ignored at this stage.
+	 */
+	msg.primary |= SOF_IPC4_GLB_LOAD_LIBRARY_LIB_ID(0);
+	sof_ipc_tx_message_no_reply(sdev->ipc, &msg, 0);
 
 	ret = cl_trigger(sdev, hext_stream, SNDRV_PCM_TRIGGER_START);
 	if (ret < 0) {
@@ -557,6 +567,8 @@ int hda_dsp_ipc4_load_library(struct snd_sof_dev *sdev,
 		goto cleanup;
 	}
 
+	/* LOAD_LIBRARY 2st stage: message with valid dma_id and valid lib_id */
+	msg.primary |= SOF_IPC4_GLB_LOAD_LIBRARY_LIB_ID(fw_lib->id);
 	ret = sof_ipc_tx_message_no_reply(sdev->ipc, &msg, 0);
 
 	ret1 = cl_trigger(sdev, hext_stream, SNDRV_PCM_TRIGGER_STOP);
