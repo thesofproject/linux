@@ -151,7 +151,7 @@ static int i915_gfx_present(struct pci_dev *hdac_pci)
  *
  * Returns zero for success or a negative error code.
  */
-int snd_hdac_i915_init(struct hdac_bus *bus)
+int snd_hdac_i915_init(struct hdac_bus *bus, bool allow_modprobe)
 {
 	struct drm_audio_component *acomp;
 	int err;
@@ -167,7 +167,7 @@ int snd_hdac_i915_init(struct hdac_bus *bus)
 	acomp = bus->audio_component;
 	if (!acomp)
 		return -ENODEV;
-	if (!acomp->ops) {
+	if (allow_modprobe && !acomp->ops) {
 		if (!IS_ENABLED(CONFIG_MODULES) ||
 		    !request_module("i915")) {
 			/* 60s timeout */
@@ -176,9 +176,12 @@ int snd_hdac_i915_init(struct hdac_bus *bus)
 		}
 	}
 	if (!acomp->ops) {
-		dev_info(bus->dev, "couldn't bind with audio component\n");
+		if (allow_modprobe)
+			dev_info(bus->dev, "couldn't bind with audio component\n");
+		else
+			dev_dbg(bus->dev, "couldn't bind with audio component\n");
 		snd_hdac_acomp_exit(bus);
-		return -ENODEV;
+		return allow_modprobe ? -ENODEV : -EPROBE_DEFER;
 	}
 	return 0;
 }
