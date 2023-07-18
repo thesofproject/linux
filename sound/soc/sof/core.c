@@ -191,7 +191,8 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	/* probe the DSP hardware */
 	ret = snd_sof_probe(sdev);
 	if (ret < 0) {
-		dev_err(sdev->dev, "error: failed to probe DSP %d\n", ret);
+		if (ret != -EPROBE_DEFER)
+			dev_err(sdev->dev, "error: failed to probe DSP %d\n", ret);
 		goto probe_err;
 	}
 
@@ -309,8 +310,6 @@ skip_dsp_init:
 	if (plat_data->sof_probe_complete)
 		plat_data->sof_probe_complete(sdev->dev);
 
-	sdev->probe_completed = true;
-
 	return 0;
 
 sof_machine_err:
@@ -334,19 +333,6 @@ probe_err:
 	sdev->first_boot = true;
 
 	return ret;
-}
-
-static void sof_probe_work(struct work_struct *work)
-{
-	struct snd_sof_dev *sdev =
-		container_of(work, struct snd_sof_dev, probe_work);
-	int ret;
-
-	ret = sof_probe_continue(sdev);
-	if (ret < 0) {
-		/* errors cannot be propagated, log */
-		dev_err(sdev->dev, "error: %s failed err: %d\n", __func__, ret);
-	}
 }
 
 int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
@@ -436,32 +422,15 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 
 	sof_set_fw_state(sdev, SOF_FW_BOOT_NOT_STARTED);
 
-	if (IS_ENABLED(CONFIG_SND_SOC_SOF_PROBE_WORK_QUEUE)) {
-		INIT_WORK(&sdev->probe_work, sof_probe_work);
-		schedule_work(&sdev->probe_work);
-		return 0;
-	}
-
 	return sof_probe_continue(sdev);
 }
 EXPORT_SYMBOL(snd_sof_device_probe);
-
-bool snd_sof_device_probe_completed(struct device *dev)
-{
-	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
-
-	return sdev->probe_completed;
-}
-EXPORT_SYMBOL(snd_sof_device_probe_completed);
 
 int snd_sof_device_remove(struct device *dev)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	struct snd_sof_pdata *pdata = sdev->pdata;
 	int ret;
-
-	if (IS_ENABLED(CONFIG_SND_SOC_SOF_PROBE_WORK_QUEUE))
-		cancel_work_sync(&sdev->probe_work);
 
 	/*
 	 * Unregister any registered client device first before IPC and debugfs
@@ -500,9 +469,6 @@ EXPORT_SYMBOL(snd_sof_device_remove);
 int snd_sof_device_shutdown(struct device *dev)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
-
-	if (IS_ENABLED(CONFIG_SND_SOC_SOF_PROBE_WORK_QUEUE))
-		cancel_work_sync(&sdev->probe_work);
 
 	if (sdev->fw_state == SOF_FW_BOOT_COMPLETE) {
 		sof_fw_trace_free(sdev);

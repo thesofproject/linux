@@ -82,17 +82,6 @@ config SND_SOC_SOF_DEVELOPER_SUPPORT
 
 if SND_SOC_SOF_DEVELOPER_SUPPORT
 
-config SND_SOC_SOF_FORCE_PROBE_WORKQUEUE
-	bool "SOF force probe workqueue"
-	select SND_SOC_SOF_PROBE_WORK_QUEUE
-	help
-	  This option forces the use of a probe workqueue, which is only used
-	  when HDaudio is enabled due to module dependencies. Forcing this
-	  option is intended for debug only, but this should not add any
-	  functional issues in nominal cases.
-	  Say Y if you are involved in SOF development and need this option.
-	  If not, select N.
-
 config SND_SOC_SOF_NOCODEC
 	tristate
 
@@ -270,14 +259,6 @@ config SND_SOC_SOF
 	  The selection is made at the top level and does not exactly follow
 	  module dependencies but since the module or built-in type is decided
 	  at the top level it doesn't matter.
-
-config SND_SOC_SOF_PROBE_WORK_QUEUE
-	bool
-	help
-	  This option is not user-selectable but automagically handled by
-	  'select' statements at a higher level.
-	  When selected, the probe is handled in two steps, for example to
-	  avoid lockdeps if request_module is used in the probe.
 
 # Supported IPC versions
 config SND_SOC_SOF_IPC3

@@ -564,10 +564,6 @@ struct snd_sof_dev {
 	enum sof_fw_state fw_state;
 	bool first_boot;
 
-	/* work queue in case the probe is implemented in two steps */
-	struct work_struct probe_work;
-	bool probe_completed;
-
 	/* DSP HW differentiation */
 	struct snd_sof_pdata *pdata;
 
@@ -675,7 +671,6 @@ struct snd_sof_dev {
 int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data);
 int snd_sof_device_remove(struct device *dev);
 int snd_sof_device_shutdown(struct device *dev);
-bool snd_sof_device_probe_completed(struct device *dev);
 
 int snd_sof_runtime_suspend(struct device *dev);
 int snd_sof_runtime_resume(struct device *dev);
