@@ -68,6 +68,7 @@
 #define SOF_SSP_HDMI_CAPTURE_PRESENT_MASK (GENMASK(30, 27))
 #define SOF_HDMI_CAPTURE_SSP_MASK(quirk)   \
 	(((quirk) << SOF_NO_OF_HDMI_CAPTURE_SSP_SHIFT) & SOF_SSP_HDMI_CAPTURE_PRESENT_MASK)
+#define SOF_TPLG_NHLT_SSP_DETECT	BIT(31)
 
 /* Default: MCLK on, MCLK 19.2M, SSP0  */
 static unsigned long sof_rt5682_quirk = SOF_RT5682_MCLK_EN |
@@ -560,6 +561,22 @@ static int sof_card_late_probe(struct snd_soc_card *card)
 	return hdac_hdmi_jack_port_init(component, &card->dapm);
 }
 
+static int soc_card_add_dai_link(struct snd_soc_card *card,
+				 struct snd_soc_dai_link *dai_link)
+{
+	if (!strcmp(dai_link->name, "NHLT-RENDER-CAPTURE") ||
+	    !strcmp(dai_link->name, "NHLT-RENDER-ONLY") ||
+	    !strcmp(dai_link->name, "NHLT-CAPTURE-ONLY") ||
+	    !strcmp(dai_link->name, "NHLT-BT")) {
+		/* fixup and register this dai link later when we receive NHLT
+		 * table from IPC4 topology
+		 */
+		dai_link->ignore = true;
+	}
+
+	return 0;
+}
+
 static const struct snd_kcontrol_new sof_controls[] = {
 	SOC_DAPM_PIN_SWITCH("Headphone Jack"),
 	SOC_DAPM_PIN_SWITCH("Headset Mic"),
@@ -703,8 +720,12 @@ static struct snd_soc_dai_link *sof_card_dai_links_create(struct device *dev,
 		goto devm_err;
 
 	/* codec SSP */
-	links[id].name = devm_kasprintf(dev, GFP_KERNEL,
-					"SSP%d-Codec", ssp_codec);
+	if (sof_rt5682_quirk & SOF_TPLG_NHLT_SSP_DETECT)
+		links[id].name = devm_kasprintf(dev, GFP_KERNEL,
+						"NHLT-RENDER-CAPTURE");
+	else
+		links[id].name = devm_kasprintf(dev, GFP_KERNEL, "SSP%d-Codec",
+						ssp_codec);
 	if (!links[id].name)
 		goto devm_err;
 
@@ -830,8 +851,12 @@ static struct snd_soc_dai_link *sof_card_dai_links_create(struct device *dev,
 
 	/* speaker amp */
 	if (sof_rt5682_quirk & SOF_SPEAKER_AMP_PRESENT) {
-		links[id].name = devm_kasprintf(dev, GFP_KERNEL,
-						"SSP%d-Codec", ssp_amp);
+		if (sof_rt5682_quirk & SOF_TPLG_NHLT_SSP_DETECT)
+			links[id].name = devm_kasprintf(dev, GFP_KERNEL,
+							"NHLT-RENDER-ONLY");
+		else
+			links[id].name = devm_kasprintf(dev, GFP_KERNEL,
+							"SSP%d-Codec", ssp_amp);
 		if (!links[id].name)
 			goto devm_err;
 
@@ -906,15 +931,22 @@ static struct snd_soc_dai_link *sof_card_dai_links_create(struct device *dev,
 		int port = (sof_rt5682_quirk & SOF_BT_OFFLOAD_SSP_MASK) >>
 				SOF_BT_OFFLOAD_SSP_SHIFT;
 
+		if (sof_rt5682_quirk & SOF_TPLG_NHLT_SSP_DETECT)
+			links[id].name = devm_kasprintf(dev, GFP_KERNEL,
+							"NHLT-BT");
+		else
+			links[id].name = devm_kasprintf(dev, GFP_KERNEL,
+							"SSP%d-BT", port);
+		if (!links[id].name)
+			goto devm_err;
+
 		links[id].id = id;
 		links[id].cpus = &cpus[id];
 		links[id].cpus->dai_name = devm_kasprintf(dev, GFP_KERNEL,
 							  "SSP%d Pin", port);
 		if (!links[id].cpus->dai_name)
 			goto devm_err;
-		links[id].name = devm_kasprintf(dev, GFP_KERNEL, "SSP%d-BT", port);
-		if (!links[id].name)
-			goto devm_err;
+		links[id].num_cpus = 1;
 		links[id].codecs = &asoc_dummy_dlc;
 		links[id].num_codecs = 1;
 		links[id].platforms = platform_component;
@@ -922,7 +954,6 @@ static struct snd_soc_dai_link *sof_card_dai_links_create(struct device *dev,
 		links[id].dpcm_playback = 1;
 		links[id].dpcm_capture = 1;
 		links[id].no_pcm = 1;
-		links[id].num_cpus = 1;
 	}
 
 	/* HDMI-In SSP */
@@ -1078,6 +1109,9 @@ static int sof_audio_probe(struct platform_device *pdev)
 
 	if (sof_rt5682_quirk & SOF_RT1015_SPEAKER_AMP_PRESENT)
 		sof_rt1015_codec_conf(&sof_audio_card_rt5682);
+
+	if (sof_rt5682_quirk & SOF_TPLG_NHLT_SSP_DETECT)
+		sof_audio_card_rt5682.add_dai_link = soc_card_add_dai_link;
 
 	INIT_LIST_HEAD(&ctx->hdmi_pcm_list);
 
