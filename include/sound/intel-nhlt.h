@@ -25,6 +25,12 @@ enum nhlt_device_type {
 	NHLT_DEVICE_INVALID
 };
 
+enum nhlt_direction_type {
+	NHLT_DIRECTION_RENDER = 0,
+	NHLT_DIRECTION_CAPTURE = 1,
+	NHLT_DIRECTION_INVALID
+};
+
 struct wav_fmt {
 	u16 fmt_tag;
 	u16 channels;
@@ -112,7 +118,9 @@ struct nhlt_vendor_dmic_array_config {
 
 enum {
 	NHLT_CONFIG_TYPE_GENERIC = 0,
-	NHLT_CONFIG_TYPE_MIC_ARRAY = 1
+	NHLT_CONFIG_TYPE_MIC_ARRAY = 1,
+	NHLT_CONFIG_TYPE_RENDER_WITH_LOOPBACK = 2,
+	NHLT_CONFIG_TYPE_RENDER_FEEDBACK = 3,
 };
 
 enum {
@@ -142,6 +150,9 @@ struct nhlt_specific_cfg *
 intel_nhlt_get_endpoint_blob(struct device *dev, struct nhlt_acpi_table *nhlt,
 			     u32 bus_id, u8 link_type, u8 vbps, u8 bps,
 			     u8 num_ch, u32 rate, u8 dir, u8 dev_type);
+
+int intel_nhlt_ssp_dir_mask(struct device *dev, struct nhlt_acpi_table *nhlt,
+			    u8 dir);
 
 #else
 
@@ -182,6 +193,12 @@ intel_nhlt_get_endpoint_blob(struct device *dev, struct nhlt_acpi_table *nhlt,
 			     u8 num_ch, u32 rate, u8 dir, u8 dev_type)
 {
 	return NULL;
+}
+
+static inline int intel_nhlt_ssp_dir_mask(struct device *dev,
+					  struct nhlt_acpi_table *nhlt, u8 dir)
+{
+	return 0;
 }
 
 #endif
