@@ -165,7 +165,7 @@ static int lnl_dsp_disable_interrupts(struct snd_sof_dev *sdev)
 }
 
 const struct sof_intel_dsp_desc lnl_chip_info = {
-	.cores_num = 4,
+	.cores_num = 5,
 	.init_core_mask = BIT(0),
 	.host_managed_cores_mask = BIT(0),
 	.ipc_req = MTL_DSP_REG_HFIPCXIDR,
