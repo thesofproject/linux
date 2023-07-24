@@ -318,3 +318,49 @@ intel_nhlt_get_endpoint_blob(struct device *dev, struct nhlt_acpi_table *nhlt,
 	return NULL;
 }
 EXPORT_SYMBOL(intel_nhlt_get_endpoint_blob);
+
+int intel_nhlt_ssp_dir_mask(struct device *dev, struct nhlt_acpi_table *nhlt,
+			    u8 dir)
+{
+	struct nhlt_endpoint *epnt;
+	struct nhlt_device_specific_config *cfg;
+	int dir_mask = 0;
+	int i;
+
+	if (!nhlt)
+		return 0;
+
+	epnt = (struct nhlt_endpoint *)nhlt->desc;
+	for (i = 0; i < nhlt->endpoint_count; i++) {
+		/* we only care about endpoints connected to an audio codec over SSP */
+		if (epnt->linktype == NHLT_LINK_SSP &&
+		    epnt->device_type == NHLT_DEVICE_I2S &&
+		    epnt->direction == dir) {
+			switch (epnt->direction) {
+			case NHLT_DIRECTION_CAPTURE:
+				if (epnt->config.size) {
+					cfg = (struct nhlt_device_specific_config *)(epnt->config.caps);
+					/* smartamp feedback or FW-generated echo
+					 * reference do not count
+					 */
+					if (cfg->config_type == NHLT_CONFIG_TYPE_RENDER_FEEDBACK)
+						break;
+				} else
+					dev_warn(dev, "%s: missing device specific config, vbus=%d\n",
+						 __func__, epnt->virtual_bus_id);
+				fallthrough;
+			case NHLT_DIRECTION_RENDER:
+				/* for SSP the virtual bus id is the SSP port */
+				dir_mask |= BIT(epnt->virtual_bus_id);
+				break;
+			default:
+				break;
+			}
+		}
+
+		epnt = (struct nhlt_endpoint *)((u8 *)epnt + epnt->length);
+	}
+
+	return dir_mask;
+}
+EXPORT_SYMBOL(intel_nhlt_ssp_dir_mask);
