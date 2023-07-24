@@ -2732,6 +2732,78 @@ static int sof_ipc4_dai_config(struct snd_sof_dev *sdev, struct snd_sof_widget *
 	return 0;
 }
 
+static int sof_ipc4_nhlt_register_dai_links(struct snd_soc_component *scomp)
+{
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
+	struct snd_soc_card *card = scomp->card;
+	struct snd_soc_dai_link *dai_link = card->dai_link;
+	int capture_mask, render_mask;
+	int ssp_mask, ssp_num;
+	int i, is_bt, ret;
+
+	capture_mask = intel_nhlt_ssp_dir_mask(scomp->dev, ipc4_data->nhlt, NHLT_DIRECTION_CAPTURE);
+	render_mask = intel_nhlt_ssp_dir_mask(scomp->dev, ipc4_data->nhlt, NHLT_DIRECTION_RENDER);
+
+	for (i = 0; i < card->num_links; i++, dai_link++) {
+		if (!strcmp(dai_link->name, "NHLT-RENDER-CAPTURE")) {
+			/* headset codec */
+			ssp_mask = render_mask & capture_mask;
+			is_bt = 0;
+		} else if (!strcmp(dai_link->name, "NHLT-RENDER-ONLY")) {
+			/* speaker amplifier */
+			ssp_mask = render_mask & ~capture_mask;
+			is_bt = 0;
+		} else if (!strcmp(dai_link->name, "NHLT-CAPTURE-ONLY")) {
+			/* HDMI in */
+			ssp_mask = ~render_mask & capture_mask;
+			is_bt = 0;
+		} else if (!strcmp(dai_link->name, "NHLT-BT")) {
+			/* bluetooth sideband */
+			ssp_mask = intel_nhlt_ssp_endpoint_mask(ipc4_data->nhlt,
+								NHLT_DEVICE_BT);
+			is_bt = 1;
+		} else
+			continue;
+
+		if (hweight32(ssp_mask) != 1) {
+			dev_warn(scomp->dev, "Invalid mask 0x%x for dai link %s\n",
+				 ssp_mask, dai_link->name);
+			continue;
+		}
+
+		ssp_num = ffs(ssp_mask) - 1; /* ffs returns 1-based result */
+
+		if (is_bt)
+			dai_link->name = devm_kasprintf(card->dev, GFP_KERNEL,
+							"SSP%d-BT", ssp_num);
+		else
+			dai_link->name = devm_kasprintf(card->dev, GFP_KERNEL,
+							"SSP%d-Codec", ssp_num);
+		if (!dai_link->name)
+			return -ENOMEM;
+
+		/* stream_name is initialized in soc_check_tplg_fes() function
+		 * with dai link name */
+		dai_link->stream_name = devm_kstrdup(card->dev, dai_link->name,
+						     GFP_KERNEL);
+		if (!dai_link->stream_name)
+			return -ENOMEM;
+
+		dai_link->cpus->dai_name = devm_kasprintf(card->dev, GFP_KERNEL,
+							  "SSP%d Pin", ssp_num);
+		if (!dai_link->cpus->dai_name)
+			return -ENOMEM;
+
+		dai_link->ignore = false;
+		ret = snd_soc_add_pcm_runtimes(card, dai_link, 1);
+		if (ret < 0)
+			return ret;
+	}
+
+	return 0;
+}
+
 static int sof_ipc4_parse_manifest(struct snd_soc_component *scomp, int index,
 				   struct snd_soc_tplg_manifest *man)
 {
@@ -2742,7 +2814,7 @@ static int sof_ipc4_parse_manifest(struct snd_soc_component *scomp, int index,
 	u32 size = le32_to_cpu(man->priv.size);
 	u8 *man_ptr = man->priv.data;
 	u32 len_check;
-	int i;
+	int i, ret;
 
 	if (!size || size < SOF_IPC4_TPLG_ABI_SIZE) {
 		dev_err(scomp->dev, "%s: Invalid topology ABI size: %u\n",
@@ -2780,6 +2852,13 @@ static int sof_ipc4_parse_manifest(struct snd_soc_component *scomp, int index,
 						       le32_to_cpu(manifest_tlv->size), GFP_KERNEL);
 			if (!ipc4_data->nhlt)
 				return -ENOMEM;
+
+			/* register 'ignored' dai links which link name and
+			 * codec dai name need fixup with info from NHLT table
+			 */
+			ret = sof_ipc4_nhlt_register_dai_links(scomp);
+			if (ret)
+				return ret;
 			break;
 		default:
 			dev_warn(scomp->dev, "Skipping unknown manifest data type %d\n",
