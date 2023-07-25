@@ -1297,8 +1297,9 @@ static int snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, struct snd_s
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	struct nhlt_specific_cfg *cfg;
 	int sample_rate, channel_count;
-	int bit_depth, ret;
+	int bit_depth, ret, i;
 	u32 nhlt_type;
+	static const u8 nhlt_devices[] = {NHLT_DEVICE_I2S, NHLT_DEVICE_BT};
 
 	/* convert to NHLT type */
 	switch (linktype) {
@@ -1323,9 +1324,15 @@ static int snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, struct snd_s
 		dai_index, nhlt_type, dir);
 
 	/* find NHLT blob with matching params */
-	cfg = intel_nhlt_get_endpoint_blob(sdev->dev, ipc4_data->nhlt, dai_index, nhlt_type,
-					   bit_depth, bit_depth, channel_count, sample_rate,
-					   dir, 0);
+	for (i = 0; i < ARRAY_SIZE(nhlt_devices); i++) {
+		cfg = intel_nhlt_get_endpoint_blob(sdev->dev, ipc4_data->nhlt,
+						   dai_index, nhlt_type, bit_depth,
+						   bit_depth, channel_count, sample_rate,
+						   dir, nhlt_devices[i]);
+		if (cfg || (linktype == SOF_DAI_INTEL_DMIC))
+			goto cfg_found;
+	}
+cfg_found:
 
 	if (!cfg) {
 		dev_err(sdev->dev,
