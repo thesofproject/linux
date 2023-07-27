@@ -540,7 +540,6 @@ static int sof_ipc4_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 		return -EINVAL;
 	}
 
-
 	for_each_pcm_streams(dir) {
 		struct snd_soc_dapm_widget *w = snd_soc_dai_get_widget(cpu_dai, dir);
 
