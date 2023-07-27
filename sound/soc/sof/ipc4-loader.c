@@ -331,7 +331,8 @@ int sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev)
 	const struct sof_ipc_ops *iops = sdev->ipc->ops;
 	struct sof_ipc4_fw_version *fw_ver;
 	struct sof_ipc4_tuple *tuple;
-	struct sof_ipc4_msg msg;
+	struct sof_ipc4_msg msg = { .callback_after_send = NULL, };
+
 	size_t offset = 0;
 	int ret;
 
