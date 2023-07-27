@@ -641,7 +641,7 @@ static void sof_ipc4_rx_msg(struct snd_sof_dev *sdev)
 static int sof_ipc4_set_core_state(struct snd_sof_dev *sdev, int core_idx, bool on)
 {
 	struct sof_ipc4_dx_state_info dx_state;
-	struct sof_ipc4_msg msg;
+	struct sof_ipc4_msg msg = { .callback_after_send = NULL, };
 
 	dx_state.core_mask = BIT(core_idx);
 	if (on)
