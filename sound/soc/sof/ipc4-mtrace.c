@@ -422,7 +422,7 @@ static int ipc4_mtrace_enable(struct snd_sof_dev *sdev)
 {
 	struct sof_mtrace_priv *priv = sdev->fw_trace_data;
 	const struct sof_ipc_ops *iops = sdev->ipc->ops;
-	struct sof_ipc4_msg msg;
+	struct sof_ipc4_msg msg = { .callback_after_send = NULL, };
 	u64 system_time;
 	ktime_t kt;
 	int ret;
@@ -468,7 +468,7 @@ static void ipc4_mtrace_disable(struct snd_sof_dev *sdev)
 {
 	struct sof_mtrace_priv *priv = sdev->fw_trace_data;
 	const struct sof_ipc_ops *iops = sdev->ipc->ops;
-	struct sof_ipc4_msg msg;
+	struct sof_ipc4_msg msg = { .callback_after_send = NULL, };
 	int i;
 
 	if (priv->mtrace_state == SOF_MTRACE_DISABLED)
