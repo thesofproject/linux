@@ -516,10 +516,48 @@ cleanup:
 	return ret;
 }
 
+struct ipc4_load_library_data {
+	struct hdac_ext_stream *hext_stream;
+	bool dma_started;
+};
+
+static void hda_dsp_ipc4_load_library_dma_trigger(struct snd_sof_dev *sdev,
+						  void *data)
+{
+	struct ipc4_load_library_data *loader_data = data;
+	unsigned int status;
+	int sd_offset;
+	int ret;
+
+	sd_offset = SOF_STREAM_SD_OFFSET(&loader_data->hext_stream->hstream);
+
+	/*
+	 * Wait for firmware to set the GEN bit, the SDxFIFOS register FIFO size
+	 * will change to a non zero value.
+	 */
+	ret = snd_sof_dsp_read_poll_timeout(sdev, HDA_DSP_HDA_BAR,
+					    sd_offset + SOF_HDA_ADSP_REG_SD_FIFOSIZE,
+					    status,
+					    (status & SOF_HDA_SD_FIFOSIZE_FIFOS_MASK),
+					    HDA_DSP_REG_POLL_INTERVAL_US,
+					    HDA_DSP_BASEFW_TIMEOUT_US);
+
+	if (ret < 0)
+		dev_warn(sdev->dev, "%s: timeout waiting for FIFOS\n", __func__);
+
+	/* Start the host DMA regardless of a timeout */
+	ret = cl_trigger(sdev, loader_data->hext_stream, SNDRV_PCM_TRIGGER_START);
+	if (ret < 0)
+		dev_warn(sdev->dev, "%s: DMA trigger start failed\n", __func__);
+	else
+		loader_data->dma_started = true;
+}
+
 int hda_dsp_ipc4_load_library(struct snd_sof_dev *sdev,
 			      struct sof_ipc4_fw_library *fw_lib, bool reload)
 {
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
+	struct ipc4_load_library_data loader_data;
 	struct hdac_ext_stream *hext_stream;
 	struct firmware stripped_firmware;
 	struct sof_ipc4_msg msg = {};
@@ -551,22 +589,26 @@ int hda_dsp_ipc4_load_library(struct snd_sof_dev *sdev,
 	msg.primary |= SOF_IPC4_MSG_TARGET(SOF_IPC4_FW_GEN_MSG);
 	msg.primary |= SOF_IPC4_GLB_LOAD_LIBRARY_LIB_ID(fw_lib->id);
 
-	ret = cl_trigger(sdev, hext_stream, SNDRV_PCM_TRIGGER_START);
-	if (ret < 0) {
-		dev_err(sdev->dev, "%s: DMA trigger start failed\n", __func__);
-		goto cleanup;
-	}
-
+	loader_data.hext_stream = hext_stream;
+	loader_data.dma_started = false;
+	msg.callback_data = &loader_data;
+	msg.callback_after_send = hda_dsp_ipc4_load_library_dma_trigger;
 	ret = sof_ipc_tx_message_no_reply(sdev->ipc, &msg, 0);
 
-	ret1 = cl_trigger(sdev, hext_stream, SNDRV_PCM_TRIGGER_STOP);
-	if (ret1 < 0) {
-		dev_err(sdev->dev, "%s: DMA trigger stop failed\n", __func__);
-		if (!ret)
-			ret = ret1;
+	if (loader_data.dma_started) {
+		/*
+		 * We need to stop the running DMA.
+		 * It was started in hda_dsp_ipc4_load_library_dma_trigger()
+		 * callback during the message sending.
+		 */
+		ret1 = cl_trigger(sdev, hext_stream, SNDRV_PCM_TRIGGER_STOP);
+		if (ret1 < 0) {
+			dev_err(sdev->dev, "%s: DMA trigger stop failed\n", __func__);
+			if (!ret)
+				ret = ret1;
+		}
 	}
 
-cleanup:
 	/* clean up even in case of error and return the first error */
 	ret1 = hda_cl_cleanup(sdev, &dmab, hext_stream);
 	if (ret1 < 0) {
