@@ -107,7 +107,7 @@ static int ipc4_probes_init(struct sof_client_dev *cdev, u32 stream_tag,
 			    size_t buffer_size)
 {
 	struct sof_man4_module *mentry = sof_ipc4_probe_get_module_info(cdev);
-	struct sof_ipc4_msg msg;
+	struct sof_ipc4_msg msg = { .callback_after_send = NULL, };
 	struct sof_ipc4_probe_cfg cfg;
 
 	if (!mentry)
@@ -144,7 +144,7 @@ static int ipc4_probes_init(struct sof_client_dev *cdev, u32 stream_tag,
 static int ipc4_probes_deinit(struct sof_client_dev *cdev)
 {
 	struct sof_man4_module *mentry = sof_ipc4_probe_get_module_info(cdev);
-	struct sof_ipc4_msg msg;
+	struct sof_ipc4_msg msg = { .callback_after_send = NULL, };
 
 	if (!mentry)
 		return -ENODEV;
@@ -197,7 +197,7 @@ static int ipc4_probes_points_add(struct sof_client_dev *cdev,
 {
 	struct sof_man4_module *mentry = sof_ipc4_probe_get_module_info(cdev);
 	struct sof_ipc4_probe_point *points;
-	struct sof_ipc4_msg msg;
+	struct sof_ipc4_msg msg = { .callback_after_send = NULL, };
 	int i, ret;
 
 	if (!mentry)
@@ -249,7 +249,7 @@ static int ipc4_probes_points_remove(struct sof_client_dev *cdev,
 				     unsigned int *buffer_id, size_t num_buffer_id)
 {
 	struct sof_man4_module *mentry = sof_ipc4_probe_get_module_info(cdev);
-	struct sof_ipc4_msg msg;
+	struct sof_ipc4_msg msg = { .callback_after_send = NULL, };
 	u32 *probe_point_ids;
 	int i, ret;
 
