@@ -352,6 +352,9 @@ static int ipc4_tx_msg_unlocked(struct snd_sof_ipc *ipc,
 		return ret;
 	}
 
+	if (ipc4_msg->callback_after_send)
+		ipc4_msg->callback_after_send(sdev, ipc4_msg->callback_data);
+
 	/* now wait for completion */
 	return ipc4_wait_tx_done(ipc, reply_data);
 }
