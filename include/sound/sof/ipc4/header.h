@@ -20,6 +20,8 @@
  *  @{
  */
 
+struct snd_sof_dev;
+
 /**
  * struct sof_ipc4_msg - Placeholder of an IPC4 message
  * @header_u64:		IPC4 header as single u64 number
@@ -28,6 +30,11 @@
  *			set to 0
  * @data_size:		Size of data in bytes pointed by @data_ptr
  * @data_ptr:		Pointer to the optional payload of a message
+ *
+ * @callback_after_send: Optional callback function to be called after the
+ *			 message has been sent and before starting to wait for
+ *			 the response from the firmware
+ * @callback_data:	data to be passed to the @callback_after_send function
  */
 struct sof_ipc4_msg {
 	union {
@@ -40,6 +47,9 @@ struct sof_ipc4_msg {
 
 	size_t data_size;
 	void *data_ptr;
+
+	void (*callback_after_send)(struct snd_sof_dev *sdev, void *data);
+	void *callback_data;
 };
 
 /**
