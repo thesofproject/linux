@@ -280,6 +280,7 @@ static int sof_msg_inject_probe(struct auxiliary_device *auxdev,
 
 		ipc4_msg = priv->tx_buffer;
 		ipc4_msg->data_ptr = priv->tx_buffer + sizeof(struct sof_ipc4_msg);
+		ipc4_msg->callback_after_send = NULL;
 
 		ipc4_msg = priv->rx_buffer;
 		ipc4_msg->data_ptr = priv->rx_buffer + sizeof(struct sof_ipc4_msg);
