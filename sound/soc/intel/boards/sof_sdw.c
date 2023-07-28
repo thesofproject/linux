@@ -1063,6 +1063,10 @@ static int get_dailink_info(struct device *dev,
 		int stream;
 		u64 adr;
 
+		/* make sure the link mask has a single bit set */
+		if (!is_power_of_2(adr_link->mask))
+			return -EINVAL;
+
 		for (i = 0; i < adr_link->num_adr; i++) {
 			adr = adr_link->adr_d[i].adr;
 			codec_index = find_codec_info_part(adr);
@@ -1312,10 +1316,6 @@ static int get_slave_info(const struct snd_soc_acpi_link_adr *adr_link,
 	no_aggregation = sof_sdw_quirk & SOF_SDW_NO_AGGREGATION;
 	adr_d = &adr_link->adr_d[adr_index];
 
-	/* make sure the link mask has a single bit set */
-	if (!is_power_of_2(adr_link->mask))
-		return -EINVAL;
-
 	cpu_dai_id[index++] = ffs(adr_link->mask) - 1;
 	if (!adr_d->endpoints->aggregated || no_aggregation) {
 		*cpu_dai_num = 1;
@@ -1343,10 +1343,6 @@ static int get_slave_info(const struct snd_soc_acpi_link_adr *adr_link,
 		if (!endpoint->aggregated ||
 		    endpoint->group_id != *group_id)
 			continue;
-
-		/* make sure the link mask has a single bit set */
-		if (!is_power_of_2(adr_next->mask))
-			return -EINVAL;
 
 		if (index >= SDW_MAX_CPU_DAIS) {
 			dev_err(dev, "cpu_dai_id array overflows\n");
