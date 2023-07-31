@@ -48,8 +48,7 @@ static const struct sof_dev_desc lnl_desc = {
 
 /* PCI IDs */
 static const struct pci_device_id sof_pci_ids[] = {
-	{ PCI_DEVICE(0x8086, 0xa828), /* LNL */
-		.driver_data = (unsigned long)&lnl_desc},
+	{ PCI_DEVICE_DATA(INTEL, HDA_LNL_P, &lnl_desc) }, /* LNL-P */
 	{ 0, }
 };
 MODULE_DEVICE_TABLE(pci, sof_pci_ids);
