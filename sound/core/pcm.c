@@ -265,6 +265,9 @@ static const char * const snd_pcm_access_names[] = {
 
 static const char * const snd_pcm_subformat_names[] = {
 	SUBFORMAT(STD), 
+	SUBFORMAT(MSBITS_20),
+	SUBFORMAT(MSBITS_24),
+	SUBFORMAT(MSBITS_32),
 };
 
 static const char * const snd_pcm_tstamp_mode_names[] = {
