@@ -1456,8 +1456,15 @@ static int avs_dai_load(struct snd_soc_component *comp, int index,
 			struct snd_soc_dai_driver *dai_drv, struct snd_soc_tplg_pcm *pcm,
 			struct snd_soc_dai *dai)
 {
-	if (pcm)
+	u64 subformats = SNDRV_PCM_SUBFMTBIT_MSBITS_20 |
+			 SNDRV_PCM_SUBFMTBIT_MSBITS_24;
+
+	if (pcm) {
 		dai_drv->ops = &avs_dai_fe_ops;
+		dai_drv->capture.subformats |= subformats;
+		dai_drv->playback.subformats |= subformats;
+	}
+
 	return 0;
 }
 
