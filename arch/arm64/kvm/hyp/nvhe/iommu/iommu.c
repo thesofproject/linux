@@ -46,6 +46,7 @@ static int __snapshot_host_stage2(const struct kvm_pgtable_visit_ctx *ctx,
 	u32 level = ctx->level;
 	u64 end = start + kvm_granule_size(level);
 	int prot = IOMMU_READ | IOMMU_WRITE;
+	struct kvm_iommu_ops *ops = (struct kvm_iommu_ops *)ctx->arg;
 
 	/* Keep unmapped. */
 	if (pte && !kvm_pte_valid(pte))
@@ -56,16 +57,17 @@ static int __snapshot_host_stage2(const struct kvm_pgtable_visit_ctx *ctx,
 	else if (!addr_is_memory(start))
 		prot |= IOMMU_MMIO;
 
-	kvm_iommu_ops->host_stage2_idmap(start, end, prot);
+	ops->host_stage2_idmap(start, end, prot);
 	return 0;
 }
 
-static int kvm_iommu_snapshot_host_stage2(void)
+static int kvm_iommu_snapshot_host_stage2(struct kvm_iommu_ops *ops)
 {
 	int ret;
 	struct kvm_pgtable_walker walker = {
 		.cb	= __snapshot_host_stage2,
 		.flags	= KVM_PGTABLE_WALK_LEAF,
+		.arg = ops,
 	};
 	struct kvm_pgtable *pgt = &host_mmu.pgt;
 
@@ -80,23 +82,32 @@ static int kvm_iommu_snapshot_host_stage2(void)
 
 int kvm_iommu_init(void *pool_base, size_t nr_pages)
 {
-	int ret;
-
-	if (!kvm_iommu_ops || !kvm_iommu_ops->init ||
-	    !kvm_iommu_ops->host_stage2_idmap)
-		return -ENODEV;
-
 	if (nr_pages) {
-		ret = hyp_pool_init(&iommu_pages_pool, hyp_virt_to_pfn(pool_base),
-				    nr_pages, 0);
-		if (ret)
-			return ret;
+		return hyp_pool_init(&iommu_pages_pool, hyp_virt_to_pfn(pool_base),
+				     nr_pages, 0);
 	}
 
-	ret = kvm_iommu_ops->init();
+	return 0;
+}
+
+int kvm_iommu_register_ops(struct kvm_iommu_ops *ops)
+{
+	int ret;
+
+	if (!ops || !ops->init ||
+	    !ops->host_stage2_idmap)
+		return -ENODEV;
+
+	ret = ops->init();
 	if (ret)
 		return ret;
-	return kvm_iommu_snapshot_host_stage2();
+
+	ret = kvm_iommu_snapshot_host_stage2(ops);
+	if (ret)
+		return ret;
+
+	kvm_iommu_ops = ops;
+	return 0;
 }
 
 void kvm_iommu_host_stage2_idmap(phys_addr_t start, phys_addr_t end,

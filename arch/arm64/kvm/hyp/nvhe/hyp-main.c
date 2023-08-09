@@ -19,6 +19,7 @@
 
 #include <nvhe/alloc.h>
 #include <nvhe/alloc_mgt.h>
+#include <nvhe/iommu.h>
 #include <nvhe/ffa.h>
 #include <nvhe/mem_protect.h>
 #include <nvhe/modules.h>
@@ -1686,6 +1687,13 @@ static void handle___pkvm_host_get_ffa_version(struct kvm_cpu_context *host_ctxt
 	cpu_reg(host_ctxt, 1) = ffa_get_hypervisor_version();
 }
 
+static void handle___pkvm_iommu_register_ops(struct kvm_cpu_context *host_ctxt)
+{
+	DECLARE_REG(struct kvm_iommu_ops *, ops, host_ctxt, 1);
+
+	cpu_reg(host_ctxt, 1) = kvm_iommu_register_ops(ops);
+}
+
 typedef void (*hcall_t)(struct kvm_cpu_context *);
 
 #define HANDLE_FUNC(x)	[__KVM_HOST_SMCCC_FUNC_##x] = (hcall_t)handle_##x
@@ -1709,6 +1717,7 @@ static const hcall_t host_hcall[] = {
 	HANDLE_FUNC(__pkvm_unmap_module_page),
 	HANDLE_FUNC(__pkvm_init_module),
 	HANDLE_FUNC(__pkvm_register_hcall),
+	HANDLE_FUNC(__pkvm_iommu_register_ops),
 	HANDLE_FUNC(__pkvm_prot_finalize),
 
 	HANDLE_FUNC(__pkvm_host_share_hyp),
