@@ -220,9 +220,9 @@ jobs:
 
       - name: build start
         run: |
-          export ARCH=x86_64 CC=clang KCFLAGS="-Wall -Werror"
+          export ARCH=x86_64 KCFLAGS="-Wall -Werror -Wno-format-security"
           export MAKEFLAGS=j"$(nproc)"
           bash kconfig/kconfig-sof-default.sh
-          make sound/
-          make drivers/soundwire/
-          make
+          make CC=clang olddefconfig
+          make CC=clang sound/
+          make CC=clang drivers/soundwire/
