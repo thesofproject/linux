@@ -526,6 +526,7 @@ static void soc_pcm_hw_init(struct snd_pcm_hardware *hw)
 	hw->channels_min	= 0;
 	hw->channels_max	= UINT_MAX;
 	hw->formats		= ULLONG_MAX;
+	hw->subformats		= ULLONG_MAX;
 }
 
 static void soc_pcm_hw_update_rate(struct snd_pcm_hardware *hw,
@@ -552,6 +553,12 @@ static void soc_pcm_hw_update_format(struct snd_pcm_hardware *hw,
 				     struct snd_soc_pcm_stream *p)
 {
 	hw->formats &= p->formats;
+}
+
+static void soc_pcm_hw_update_subformat(struct snd_pcm_hardware *hw,
+					struct snd_soc_pcm_stream *p)
+{
+	hw->subformats &= p->subformats;
 }
 
 /**
@@ -592,6 +599,7 @@ int snd_soc_runtime_calc_hw(struct snd_soc_pcm_runtime *rtd,
 		soc_pcm_hw_update_chan(hw, cpu_stream);
 		soc_pcm_hw_update_rate(hw, cpu_stream);
 		soc_pcm_hw_update_format(hw, cpu_stream);
+		soc_pcm_hw_update_subformat(hw, cpu_stream);
 	}
 	cpu_chan_min = hw->channels_min;
 	cpu_chan_max = hw->channels_max;
@@ -613,6 +621,7 @@ int snd_soc_runtime_calc_hw(struct snd_soc_pcm_runtime *rtd,
 		soc_pcm_hw_update_chan(hw, codec_stream);
 		soc_pcm_hw_update_rate(hw, codec_stream);
 		soc_pcm_hw_update_format(hw, codec_stream);
+		soc_pcm_hw_update_subformat(hw, codec_stream);
 	}
 
 	/* Verify both a valid CPU DAI and a valid CODEC DAI were found */
@@ -637,6 +646,7 @@ static void soc_pcm_init_runtime_hw(struct snd_pcm_substream *substream)
 {
 	struct snd_pcm_hardware *hw = &substream->runtime->hw;
 	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
+	u64 subformats = hw->subformats;
 	u64 formats = hw->formats;
 
 	/*
@@ -648,6 +658,8 @@ static void soc_pcm_init_runtime_hw(struct snd_pcm_substream *substream)
 
 	if (formats)
 		hw->formats &= formats;
+	if (subformats)
+		hw->subformats &= subformats;
 }
 
 static int soc_pcm_components_open(struct snd_pcm_substream *substream)
@@ -1676,6 +1688,7 @@ static void dpcm_runtime_setup_fe(struct snd_pcm_substream *substream)
 	struct snd_pcm_hardware *hw = &runtime->hw;
 	struct snd_soc_dai *dai;
 	int stream = substream->stream;
+	u64 subformats = hw->subformats;
 	u64 formats = hw->formats;
 	int i;
 
@@ -1683,6 +1696,8 @@ static void dpcm_runtime_setup_fe(struct snd_pcm_substream *substream)
 
 	if (formats)
 		hw->formats &= formats;
+	if (subformats)
+		hw->subformats &= subformats;
 
 	for_each_rtd_cpu_dais(fe, i, dai) {
 		struct snd_soc_pcm_stream *cpu_stream;
@@ -1699,6 +1714,7 @@ static void dpcm_runtime_setup_fe(struct snd_pcm_substream *substream)
 		soc_pcm_hw_update_rate(hw, cpu_stream);
 		soc_pcm_hw_update_chan(hw, cpu_stream);
 		soc_pcm_hw_update_format(hw, cpu_stream);
+		soc_pcm_hw_update_subformat(hw, cpu_stream);
 	}
 
 }
@@ -1736,6 +1752,7 @@ static void dpcm_runtime_setup_be_format(struct snd_pcm_substream *substream)
 			codec_stream = snd_soc_dai_get_pcm_stream(dai, stream);
 
 			soc_pcm_hw_update_format(hw, codec_stream);
+			soc_pcm_hw_update_subformat(hw, codec_stream);
 		}
 	}
 }
