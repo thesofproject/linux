@@ -68,6 +68,9 @@ static inline struct snd_soc_acpi_mach *snd_soc_acpi_codec_list(void *arg)
  * @i2s_link_mask: I2S/TDM links enabled on the board
  * @num_dai_drivers: number of elements in @dai_drivers
  * @dai_drivers: pointer to dai_drivers, used e.g. in nocodec mode
+ * @nhlt_bt_mask: SSP links for BT Sideband device
+ * @nhlt_render_mask: SSP links supporting render direction
+ * @nhlt_capture_mask: SSP links supporting capture direction (feedback not included)
  */
 struct snd_soc_acpi_mach_params {
 	u32 acpi_ipc_irq_index;
@@ -80,6 +83,9 @@ struct snd_soc_acpi_mach_params {
 	u32 i2s_link_mask;
 	u32 num_dai_drivers;
 	struct snd_soc_dai_driver *dai_drivers;
+	u32 nhlt_bt_mask;
+	u32 nhlt_render_mask;
+	u32 nhlt_capture_mask;
 };
 
 /**

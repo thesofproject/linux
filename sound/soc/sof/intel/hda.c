@@ -885,23 +885,36 @@ static int check_dmic_num(struct snd_sof_dev *sdev)
 	return dmic_num;
 }
 
-static int check_nhlt_ssp_mask(struct snd_sof_dev *sdev)
+static void check_nhlt_ssp_masks(struct snd_sof_dev *sdev, struct snd_soc_acpi_mach_params *mach_params)
 {
 	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
 	struct nhlt_acpi_table *nhlt;
-	int ssp_mask = 0;
+
+	mach_params->i2s_link_mask = 0;
+	mach_params->nhlt_bt_mask = 0;
+	mach_params->nhlt_render_mask = 0;
+	mach_params->nhlt_capture_mask = 0;
 
 	nhlt = hdev->nhlt;
 	if (!nhlt)
-		return ssp_mask;
+		return;
 
-	if (intel_nhlt_has_endpoint_type(nhlt, NHLT_LINK_SSP)) {
-		ssp_mask = intel_nhlt_ssp_endpoint_mask(nhlt, NHLT_DEVICE_I2S);
-		if (ssp_mask)
-			dev_info(sdev->dev, "NHLT_DEVICE_I2S detected, ssp_mask %#x\n", ssp_mask);
-	}
+	if (!intel_nhlt_has_endpoint_type(nhlt, NHLT_LINK_SSP))
+		return;
 
-	return ssp_mask;
+	mach_params->i2s_link_mask = intel_nhlt_ssp_endpoint_mask(nhlt, NHLT_DEVICE_I2S);
+	mach_params->nhlt_bt_mask = intel_nhlt_ssp_endpoint_mask(nhlt, NHLT_DEVICE_BT);
+	mach_params->nhlt_render_mask = intel_nhlt_ssp_dir_mask(sdev->dev, nhlt,
+								NHLT_DIRECTION_RENDER);
+	mach_params->nhlt_capture_mask = intel_nhlt_ssp_dir_mask(sdev->dev, nhlt,
+								 NHLT_DIRECTION_CAPTURE);
+
+	dev_info(sdev->dev, "nhlt device i2s/bt mask %#x/%#x\n",
+		 mach_params->i2s_link_mask, mach_params->nhlt_bt_mask);
+	dev_info(sdev->dev, "nhlt direction render/capture mask %#x/%#x\n",
+		 mach_params->nhlt_render_mask, mach_params->nhlt_capture_mask);
+
+	return;
 }
 
 static int check_nhlt_ssp_mclk_mask(struct snd_sof_dev *sdev, int ssp_num)
@@ -1650,7 +1663,7 @@ struct snd_soc_acpi_mach *hda_machine_select(struct snd_sof_dev *sdev)
 		}
 
 		/* report SSP link mask to machine driver */
-		mach->mach_params.i2s_link_mask = check_nhlt_ssp_mask(sdev);
+		check_nhlt_ssp_masks(sdev, &mach->mach_params);
 
 		if (tplg_fixup &&
 		    mach->tplg_quirk_mask & SND_SOC_ACPI_TPLG_INTEL_SSP_NUMBER &&
