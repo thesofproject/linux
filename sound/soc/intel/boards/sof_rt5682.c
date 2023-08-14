@@ -664,18 +664,16 @@ static struct snd_soc_dai_link_component dmic_component[] = {
 
 #define IDISP_CODEC_MASK	0x4
 
-static struct snd_soc_dai_link *sof_card_dai_links_create(struct device *dev,
-							  int ssp_codec,
-							  int ssp_amp,
-							  int dmic_be_num,
-							  int hdmi_num,
-							  bool idisp_codec)
+static struct snd_soc_dai_link *
+sof_card_dai_links_create(struct device *dev, struct snd_soc_acpi_mach_params *mach_params,
+			  int dmic_be_num, int hdmi_num, bool idisp_codec)
 {
 	struct snd_soc_dai_link_component *idisp_components;
 	struct snd_soc_dai_link_component *cpus;
 	struct snd_soc_dai_link *links;
 	int i, id = 0;
 	int hdmi_id_offset = 0;
+	int ssp_amp, ssp_codec, ssp_bt, ssp_mask, new_port;
 
 	links = devm_kcalloc(dev, sof_audio_card_rt5682.num_links,
 			    sizeof(struct snd_soc_dai_link), GFP_KERNEL);
@@ -685,6 +683,19 @@ static struct snd_soc_dai_link *sof_card_dai_links_create(struct device *dev,
 		goto devm_err;
 
 	/* codec SSP */
+	ssp_codec = sof_rt5682_quirk & SOF_RT5682_SSP_CODEC_MASK;
+
+	/* direction: both render and capture */
+	ssp_mask = mach_params->nhlt_render_mask & mach_params->nhlt_capture_mask;
+	if (hweight32(ssp_mask) == 1) {
+		new_port = ffs(ssp_mask) - 1;
+		if (new_port != ssp_codec) {
+			dev_info(dev, "nhlt overwrites codec ssp %d->%d\n",
+				 ssp_codec, new_port);
+			ssp_codec = new_port;
+		}
+	}
+
 	links[id].name = devm_kasprintf(dev, GFP_KERNEL,
 					"SSP%d-Codec", ssp_codec);
 	if (!links[id].name)
@@ -812,6 +823,20 @@ static struct snd_soc_dai_link *sof_card_dai_links_create(struct device *dev,
 
 	/* speaker amp */
 	if (sof_rt5682_quirk & SOF_SPEAKER_AMP_PRESENT) {
+		ssp_amp = (sof_rt5682_quirk & SOF_RT5682_SSP_AMP_MASK) >>
+				SOF_RT5682_SSP_AMP_SHIFT;
+
+		/* direction: render only */
+		ssp_mask = mach_params->nhlt_render_mask & ~mach_params->nhlt_capture_mask;
+		if (hweight32(ssp_mask) == 1) {
+			new_port = ffs(ssp_mask) - 1;
+			if (new_port != ssp_amp) {
+				dev_info(dev, "nhlt overwrites amp ssp %d->%d\n",
+					 ssp_amp, new_port);
+				ssp_amp = new_port;
+			}
+		}
+
 		links[id].name = devm_kasprintf(dev, GFP_KERNEL,
 						"SSP%d-Codec", ssp_amp);
 		if (!links[id].name)
@@ -875,16 +900,27 @@ static struct snd_soc_dai_link *sof_card_dai_links_create(struct device *dev,
 
 	/* BT audio offload */
 	if (sof_rt5682_quirk & SOF_SSP_BT_OFFLOAD_PRESENT) {
-		int port = (sof_rt5682_quirk & SOF_BT_OFFLOAD_SSP_MASK) >>
+		ssp_bt = (sof_rt5682_quirk & SOF_BT_OFFLOAD_SSP_MASK) >>
 				SOF_BT_OFFLOAD_SSP_SHIFT;
+
+		/* device type: bt sideband */
+		ssp_mask = mach_params->nhlt_bt_mask;
+		if (hweight32(ssp_mask) == 1) {
+			new_port = ffs(ssp_mask) - 1;
+			if (new_port != ssp_bt) {
+				dev_info(dev, "nhlt overwrites bt ssp %d->%d\n",
+					 ssp_bt, new_port);
+				ssp_bt = new_port;
+			}
+		}
 
 		links[id].id = id;
 		links[id].cpus = &cpus[id];
 		links[id].cpus->dai_name = devm_kasprintf(dev, GFP_KERNEL,
-							  "SSP%d Pin", port);
+							  "SSP%d Pin", ssp_bt);
 		if (!links[id].cpus->dai_name)
 			goto devm_err;
-		links[id].name = devm_kasprintf(dev, GFP_KERNEL, "SSP%d-BT", port);
+		links[id].name = devm_kasprintf(dev, GFP_KERNEL, "SSP%d-BT", ssp_bt);
 		if (!links[id].name)
 			goto devm_err;
 		links[id].codecs = &asoc_dummy_dlc;
@@ -936,7 +972,7 @@ static int sof_audio_probe(struct platform_device *pdev)
 	struct snd_soc_acpi_mach *mach;
 	struct sof_card_private *ctx;
 	int dmic_be_num, hdmi_num;
-	int ret, ssp_amp, ssp_codec;
+	int ret;
 
 	ctx = devm_kzalloc(&pdev->dev, sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
@@ -1007,11 +1043,6 @@ static int sof_audio_probe(struct platform_device *pdev)
 
 	dev_dbg(&pdev->dev, "sof_rt5682_quirk = %lx\n", sof_rt5682_quirk);
 
-	ssp_amp = (sof_rt5682_quirk & SOF_RT5682_SSP_AMP_MASK) >>
-			SOF_RT5682_SSP_AMP_SHIFT;
-
-	ssp_codec = sof_rt5682_quirk & SOF_RT5682_SSP_CODEC_MASK;
-
 	/* compute number of dai links */
 	sof_audio_card_rt5682.num_links = 1 + dmic_be_num + hdmi_num;
 
@@ -1036,7 +1067,7 @@ static int sof_audio_probe(struct platform_device *pdev)
 			hweight32((sof_rt5682_quirk & SOF_SSP_HDMI_CAPTURE_PRESENT_MASK) >>
 					SOF_NO_OF_HDMI_CAPTURE_SSP_SHIFT);
 
-	dai_links = sof_card_dai_links_create(&pdev->dev, ssp_codec, ssp_amp,
+	dai_links = sof_card_dai_links_create(&pdev->dev, &mach->mach_params,
 					      dmic_be_num, hdmi_num, ctx->idisp_codec);
 	if (!dai_links)
 		return -ENOMEM;
