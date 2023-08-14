@@ -7,6 +7,7 @@
  * codec drivers using hdac_ext_bus_ops ops.
  */
 
+#include <linux/firmware.h>
 #include <linux/init.h>
 #include <linux/delay.h>
 #include <linux/module.h>
@@ -34,6 +35,13 @@
 				 SNDRV_PCM_RATE_48000 | SNDRV_PCM_RATE_88200 |\
 				 SNDRV_PCM_RATE_96000 | SNDRV_PCM_RATE_176400 |\
 				 SNDRV_PCM_RATE_192000)
+
+#ifdef CONFIG_SND_HDA_PATCH_LOADER
+static char *patch[SNDRV_CARDS];
+
+module_param_array(patch, charp, NULL, 0444);
+MODULE_PARM_DESC(patch, "Patch file for Intel HD audio interface.");
+#endif
 
 static int hdac_hda_dai_open(struct snd_pcm_substream *substream,
 			     struct snd_soc_dai *dai);
@@ -423,6 +431,16 @@ static int hdac_hda_codec_probe(struct snd_soc_component *component)
 		dev_err(&hdev->dev, "failed to create hda codec %d\n", ret);
 		goto error_no_pm;
 	}
+
+#ifdef CONFIG_SND_HDA_PATCH_LOADER
+	if (hda_pvt->fw) {
+		ret = snd_hda_load_patch(hcodec->bus, hda_pvt->fw->size, hda_pvt->fw->data);
+		if (ret < 0) {
+			dev_err(&hdev->dev, "failed to load hda patch %d\n", ret);
+			goto error_no_pm;
+		}
+	}
+#endif
 	/*
 	 * Overwrite type to HDA_DEV_ASOC since it is a ASoC driver
 	 * hda_codec.c will check this flag to determine if unregister
@@ -578,11 +596,45 @@ static const struct snd_soc_component_driver hdac_hda_codec = {
 	.endianness		= 1,
 };
 
+#ifdef CONFIG_SND_HDA_PATCH_LOADER
+/* callback from request_firmware_nowait() */
+static void hda_codec_firmware_cb(const struct firmware *fw, void *context)
+{
+	struct hdac_device *hdev = context;
+	struct hdac_hda_priv *hda_pvt = dev_get_drvdata(&hdev->dev);
+
+	if (fw)
+		hda_pvt->fw = fw;
+	else
+		dev_err(&hdev->dev, "%s: Cannot load firmware, continue without patching\n",
+			__func__);
+}
+#endif
+
+static DECLARE_BITMAP(probed_devs, SNDRV_CARDS);
+
 static int hdac_hda_dev_probe(struct hdac_device *hdev)
 {
+	struct hdac_hda_priv *hda_pvt = dev_get_drvdata(&hdev->dev);
 	struct hdac_ext_link *hlink;
 	int ret;
+	int dev;
 
+	dev = find_first_zero_bit(probed_devs, SNDRV_CARDS);
+	if (dev >= SNDRV_CARDS)
+		return -ENODEV;
+
+#ifdef CONFIG_SND_HDA_PATCH_LOADER
+	if (patch[dev] && *patch[dev]) {
+		dev_info(&hdev->dev, "Applying patch firmware '%s'\n",
+			 patch[dev]);
+		ret = request_firmware_nowait(THIS_MODULE, true, patch[dev],
+					      &hdev->dev, GFP_KERNEL, hdev,
+					      hda_codec_firmware_cb);
+		if (ret < 0)
+			return ret;
+	}
+#endif /* CONFIG_SND_HDA_PATCH_LOADER */
 	/* hold the ref while we probe */
 	hlink = snd_hdac_ext_bus_get_hlink_by_name(hdev->bus, dev_name(&hdev->dev));
 	if (!hlink) {
@@ -602,15 +654,24 @@ static int hdac_hda_dev_probe(struct hdac_device *hdev)
 
 	snd_hdac_ext_bus_link_put(hdev->bus, hlink);
 
+	set_bit(dev, probed_devs);
+	hda_pvt->dev_index = dev;
+
 	return ret;
 }
 
 static int hdac_hda_dev_remove(struct hdac_device *hdev)
 {
-	/*
-	 * Resources are freed in hdac_hda_codec_remove(). This
-	 * function is kept to keep hda_codec_driver_remove() happy.
-	 */
+	struct hdac_hda_priv *hda_pvt = dev_get_drvdata(&hdev->dev);
+
+	/* Resources are freed in hdac_hda_codec_remove(). */
+
+	clear_bit(hda_pvt->dev_index, probed_devs);
+
+#ifdef CONFIG_SND_HDA_PATCH_LOADER
+	release_firmware(hda_pvt->fw);
+#endif
+
 	return 0;
 }
 
