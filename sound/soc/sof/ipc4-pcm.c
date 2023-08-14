@@ -522,10 +522,9 @@ static int sof_ipc4_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 	struct snd_soc_dai *cpu_dai = asoc_rtd_to_cpu(rtd, 0);
 	struct sof_ipc4_audio_format *ipc4_fmt;
 	struct sof_ipc4_copier *ipc4_copier;
-	bool use_chain_dma = false;
 	bool single_fmt = false;
 	u32 valid_bits = 0;
-	int dir;
+	int dir, ret;
 
 	if (!dai) {
 		dev_err(component->dev, "%s: No DAI found with name %s\n", __func__,
@@ -549,6 +548,11 @@ static int sof_ipc4_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 			struct snd_sof_widget *swidget = w->dobj.private;
 			struct snd_sof_widget *pipe_widget = swidget->spipe->pipe_widget;
 			struct sof_ipc4_pipeline *pipeline = pipe_widget->private;
+
+			/* Chain DMA does not use copiers, so no fixup needed */
+			if (pipeline->use_chain_dma)
+				return 0;
+
 			if (dir == SNDRV_PCM_STREAM_PLAYBACK) {
 				if (sof_ipc4_copier_is_single_format(sdev,
 					available_fmt->output_pin_fmts,
@@ -564,19 +568,12 @@ static int sof_ipc4_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 					single_fmt = true;
 				}
 			}
-
-			if (pipeline->use_chain_dma)
-				use_chain_dma = true;
 		}
 	}
 
-	/* Chain DMA does not use copiers, so no fixup needed */
-	if (!use_chain_dma) {
-		int ret = sof_ipc4_pcm_dai_link_fixup_rate(sdev, params, ipc4_copier);
-
-		if (ret)
-			return ret;
-	}
+	ret = sof_ipc4_pcm_dai_link_fixup_rate(sdev, params, ipc4_copier);
+	if (ret)
+		return ret;
 
 	if (single_fmt) {
 		snd_mask_none(fmt);
