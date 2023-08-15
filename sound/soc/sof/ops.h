@@ -38,6 +38,14 @@ static inline void sof_ops_free(struct snd_sof_dev *sdev)
 /* Mandatory operations are verified during probing */
 
 /* init */
+static inline int snd_sof_probe_no_wq(struct snd_sof_dev *sdev)
+{
+	if (sof_ops(sdev)->probe_no_wq)
+		return sof_ops(sdev)->probe_no_wq(sdev);
+
+	return 0;
+}
+
 static inline int snd_sof_probe(struct snd_sof_dev *sdev)
 {
 	return sof_ops(sdev)->probe(sdev);
