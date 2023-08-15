@@ -16,6 +16,7 @@
 
 struct snd_sof_dsp_ops sof_hda_common_ops = {
 	/* probe/remove/shutdown */
+	.probe_no_wq	= hda_dsp_probe_no_wq,
 	.probe		= hda_dsp_probe,
 	.remove		= hda_dsp_remove,
 
