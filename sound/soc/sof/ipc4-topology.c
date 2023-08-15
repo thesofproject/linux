@@ -517,10 +517,12 @@ static int sof_ipc4_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 
 	pipe_widget = swidget->spipe->pipe_widget;
 	pipeline = pipe_widget->private;
-	if (pipeline->use_chain_dma && ipc4_copier->dai_type != SOF_DAI_INTEL_HDA) {
+	if (pipeline->use_chain_dma &&
+	    ((ipc4_copier->dai_type != SOF_DAI_INTEL_HDA) ||
+	     (ipc4_copier->dai_type != SOF_DAI_INTEL_ALH))) {
 		dev_err(scomp->dev,
-			"Bad DAI type '%d', Chained DMA is only supported by HDA DAIs (%d).\n",
-			ipc4_copier->dai_type, SOF_DAI_INTEL_HDA);
+			"Bad DAI type '%d', Chained DMA is only supported by HDA/ALH DAIs (%d %d).\n",
+			ipc4_copier->dai_type, SOF_DAI_INTEL_HDA, SOF_DAI_INTEL_ALH);
 		ret = -ENODEV;
 		goto free_available_fmt;
 	}
