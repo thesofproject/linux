@@ -38,6 +38,7 @@ enum pkvm_page_state {
 	 * the hyp_vmemmap entry for the host)
 	 */
 	PKVM_PAGE_RESTRICTED_PROT	= BIT(3),
+	PKVM_MMIO			= BIT(4),
 };
 #define PKVM_PAGE_STATE_MASK		(BIT(0) | BIT(1))
 
