@@ -82,4 +82,8 @@ extern size_t kvm_nvhe_sym(kvm_hyp_arm_smmu_v3_count);
 extern struct hyp_arm_smmu_v3_device *kvm_nvhe_sym(kvm_hyp_arm_smmu_v3_smmus);
 #define kvm_hyp_arm_smmu_v3_smmus kvm_nvhe_sym(kvm_hyp_arm_smmu_v3_smmus)
 
+#ifdef MODULE
+int smmu_init_hyp_module(const struct pkvm_module_ops *ops);
+#endif
+
 #endif /* __KVM_ARM_SMMU_V3_H */

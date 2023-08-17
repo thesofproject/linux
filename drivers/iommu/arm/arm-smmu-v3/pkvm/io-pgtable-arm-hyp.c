@@ -6,6 +6,7 @@
 
 #include <linux/io-pgtable.h>
 #include "../../../io-pgtable-arm.h"
+#include "arm-smmu-v3-module.h"
 
 struct io_pgtable_ops *kvm_alloc_io_pgtable_ops(enum io_pgtable_fmt fmt,
 						struct io_pgtable_cfg *cfg,
@@ -66,3 +67,12 @@ void __arm_lpae_free_data(void *p)
 {
 	return kvm_iommu_reclaim_pages(p);
 }
+
+#if IS_ENABLED(CONFIG_IOMMUFD_DRIVER)
+void iova_bitmap_set(struct iova_bitmap *bitmap,
+		     unsigned long iova, size_t length)
+{
+	/* Dirty bit not supported */
+	BUG();
+}
+#endif
