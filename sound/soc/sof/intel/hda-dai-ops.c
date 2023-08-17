@@ -239,15 +239,39 @@ static unsigned int generic_calc_stream_format(struct snd_sof_dev *sdev,
 					       struct snd_pcm_substream *substream,
 					       struct snd_pcm_hw_params *params)
 {
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_dai *codec_dai;
 	unsigned int format_val;
 	unsigned int bits;
+	int num_channels;
+	int codec_dai_id;
+	u32 ch_mask;
+
+	/*
+	 * if the multiple dais are handled by the same dailink, we may need to update the
+	 * stream channel count - the params are modified in soc-pcm based on the codec_ch_maps info
+	 */
+	num_channels = params_channels(params);
+	if (rtd->dai_link->codec_ch_maps) {
+		ch_mask = 0;
+		for_each_rtd_codec_dais(rtd, codec_dai_id, codec_dai) {
+			ch_mask |= rtd->dai_link->codec_ch_maps[codec_dai_id].ch_mask;
+		}
+		if (ch_mask)
+			num_channels = hweight_long(ch_mask);
+	}
+
+	if (num_channels != params_channels(params))
+		dev_dbg(sdev->dev, "configuring stream format for %d channels, params_channels was %d\n",
+			num_channels, params_channels(params));
 
 	bits = snd_hdac_stream_format_bits(params_format(params), SNDRV_PCM_SUBFORMAT_STD,
 					   params_physical_width(params));
-	format_val = snd_hdac_stream_format(params_channels(params), bits, params_rate(params));
+
+	format_val = snd_hdac_stream_format(num_channels, bits, params_rate(params));
 
 	dev_dbg(sdev->dev, "format_val=%#x, rate=%d, ch=%d, format=%d\n", format_val,
-		params_rate(params), params_channels(params), params_format(params));
+		params_rate(params), num_channels, params_format(params));
 
 	return format_val;
 }
