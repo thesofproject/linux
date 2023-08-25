@@ -483,8 +483,8 @@ sink_prepare:
 }
 
 /*
- * free all widgets in the sink path starting from the source widget
- * (DAI type for capture, AIF type for playback)
+ * free all widgets in the source path starting from the sink widget
+ * (AIF type for capture, DAI type for playback)
  */
 static int sof_free_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *widget,
 				    int dir, struct snd_sof_pcm *spcm)
@@ -503,15 +503,15 @@ static int sof_free_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dap
 			ret = err;
 	}
 
-	/* free all widgets in the sink paths even in case of error to keep use counts balanced */
-	snd_soc_dapm_widget_for_each_sink_path(widget, p) {
+	/* free all widgets in the source paths even in case of error to keep use counts balanced */
+	snd_soc_dapm_widget_for_each_source_path(widget, p) {
 		if (!p->walking) {
-			if (!widget_in_list(list, p->sink))
+			if (!widget_in_list(list, p->source))
 				continue;
 
 			p->walking = true;
 
-			err = sof_free_widgets_in_path(sdev, p->sink, dir, spcm);
+			err = sof_free_widgets_in_path(sdev, p->source, dir, spcm);
 			if (err < 0)
 				ret = err;
 			p->walking = false;
@@ -522,8 +522,8 @@ static int sof_free_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dap
 }
 
 /*
- * set up all widgets in the sink path starting from the source widget
- * (DAI type for capture, AIF type for playback).
+ * set up all widgets in the source path starting from the sink widget
+ * (AIF type for capture, DAI type for playback).
  * The error path in this function ensures that all successfully set up widgets getting freed.
  */
 static int sof_set_up_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *widget,
@@ -548,7 +548,7 @@ static int sof_set_up_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_d
 
 		/* skip populating the pipe_widgets array if it is NULL */
 		if (!pipeline_list->pipelines)
-			goto sink_setup;
+			goto source_setup;
 
 		/*
 		 * Add the widget's pipe_widget to the list of pipelines to be triggered if not
@@ -567,15 +567,15 @@ static int sof_set_up_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_d
 		}
 	}
 
-sink_setup:
-	snd_soc_dapm_widget_for_each_sink_path(widget, p) {
+source_setup:
+	snd_soc_dapm_widget_for_each_source_path(widget, p) {
 		if (!p->walking) {
-			if (!widget_in_list(list, p->sink))
+			if (!widget_in_list(list, p->source))
 				continue;
 
 			p->walking = true;
 
-			ret = sof_set_up_widgets_in_path(sdev, p->sink, dir, spcm);
+			ret = sof_set_up_widgets_in_path(sdev, p->source, dir, spcm);
 			p->walking = false;
 			if (ret < 0) {
 				if (swidget)
@@ -607,13 +607,28 @@ sof_walk_widgets_in_order(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
 		if (is_virtual_widget(sdev, widget, __func__))
 			continue;
 
-		/* starting widget for playback is AIF type */
-		if (dir == SNDRV_PCM_STREAM_PLAYBACK && widget->id != snd_soc_dapm_aif_in)
-			continue;
+		/*
+		 * set up/free widgets in the order sink->source so that the pipelines will be
+		 * added to the list in the same order as well. All other ops need to follow the
+		 * source->sink order.
+		 */
+		if (op == SOF_WIDGET_SETUP || op == SOF_WIDGET_FREE) {
+			/* starting widget for playback is DAI type */
+			if (dir == SNDRV_PCM_STREAM_PLAYBACK && widget->id != snd_soc_dapm_dai_in)
+				continue;
 
-		/* starting widget for capture is DAI type */
-		if (dir == SNDRV_PCM_STREAM_CAPTURE && widget->id != snd_soc_dapm_dai_out)
-			continue;
+			/* starting widget for capture is AIF type */
+			if (dir == SNDRV_PCM_STREAM_CAPTURE && widget->id != snd_soc_dapm_aif_out)
+				continue;
+		} else {
+			/* starting widget for playback is AIF type */
+			if (dir == SNDRV_PCM_STREAM_PLAYBACK && widget->id != snd_soc_dapm_aif_in)
+				continue;
+
+			/* starting widget for capture is DAI type */
+			if (dir == SNDRV_PCM_STREAM_CAPTURE && widget->id != snd_soc_dapm_dai_out)
+				continue;
+		}
 
 		switch (op) {
 		case SOF_WIDGET_SETUP:

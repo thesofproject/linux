@@ -332,12 +332,12 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 	 * guaranteed for each fork independently.
 	 */
 	if (state == SOF_IPC4_PIPE_RUNNING || state == SOF_IPC4_PIPE_RESET)
-		for (i = pipeline_list->count - 1; i >= 0; i--) {
+		for (i = 0; i < pipeline_list->count; i++) {
 			spipe = pipeline_list->pipelines[i];
 			sof_ipc4_add_pipeline_to_trigger_list(sdev, state, spipe, trigger_list);
 		}
 	else
-		for (i = 0; i < pipeline_list->count; i++) {
+		for (i = pipeline_list->count - 1; i >= 0; i--) {
 			spipe = pipeline_list->pipelines[i];
 			sof_ipc4_add_pipeline_to_trigger_list(sdev, state, spipe, trigger_list);
 		}
