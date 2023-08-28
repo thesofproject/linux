@@ -64,6 +64,11 @@ struct snd_sof_pdata {
 	const char *name;
 	const char *platform;
 
+	/* PCI SSID */
+	unsigned short subsystem_vendor;
+	unsigned short subsystem_device;
+	bool subsystem_id_valid;
+
 	struct device *dev;
 
 	/*

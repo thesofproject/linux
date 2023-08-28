@@ -214,6 +214,10 @@ int sof_pci_probe(struct pci_dev *pci, const struct pci_device_id *pci_id)
 		return ret;
 
 	sof_pdata->name = pci_name(pci);
+	sof_pdata->subsystem_vendor = pci->subsystem_vendor;
+	sof_pdata->subsystem_device = pci->subsystem_device;
+	sof_pdata->subsystem_id_valid = true;
+
 	sof_pdata->desc = desc;
 	sof_pdata->dev = dev;
 
