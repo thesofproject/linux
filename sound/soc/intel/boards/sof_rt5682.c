@@ -508,7 +508,7 @@ static int sof_card_late_probe(struct snd_soc_card *card)
 	struct sof_hdmi_pcm *pcm;
 	int err;
 
-	if (ctx->codec_type == CODEC_MAX98373) {
+	if (ctx->amp_type == CODEC_MAX98373) {
 		/* Disable Left and Right Spk pin after boot */
 		snd_soc_dapm_disable_pin(dapm, "Left Spk");
 		snd_soc_dapm_disable_pin(dapm, "Right Spk");
