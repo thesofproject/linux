@@ -419,6 +419,31 @@ struct sof_ipc4_src {
 };
 
 /**
+ * struct sof_ipc4_asrc_data - IPC data for ASRC
+ * @base_config: IPC base config data
+ * @sink_rate: Output rate for sink module
+ * @asynchronous_mode: synchronous 0, asynchronous 1. When 1 the ASRC tracks and
+ *		       compensates for drift. When 0 can test ASRC with DAI endpoint
+ *		       without timestamps capability.
+ * @operation_mode: push 0, pull 1. In push mode the  ASRC consumes a defined number
+ *		    of frames at input, with varying number of frames at output. In pull mode the
+ *		    ASRC outputs a defined number of frames while number of input frames varies
+ */
+
+struct sof_ipc4_asrc_data {
+	struct sof_ipc4_base_module_cfg base_config;
+	u32 sink_rate;
+	u32 asynchronous_mode;
+	u32 operation_mode;
+} __packed __aligned(4);
+
+struct sof_ipc4_asrc {
+	struct sof_ipc4_asrc_data data;
+	struct sof_ipc4_available_audio_format available_fmt;
+	struct sof_ipc4_msg msg;
+};
+
+/**
  * struct sof_ipc4_base_module_cfg_ext - base module config extension containing the pin format
  * information for the module. Both @num_input_pin_fmts and @num_output_pin_fmts cannot be 0 for a
  * module.

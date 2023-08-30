@@ -142,6 +142,16 @@ static const struct sof_topology_token src_tokens[] = {
 		offsetof(struct sof_ipc4_src, sink_rate)},
 };
 
+/* ASRC */
+static const struct sof_topology_token asrc_tokens[] = {
+	{SOF_TKN_ASRC_RATE_OUT, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc4_asrc_data, sink_rate)},
+	{SOF_TKN_ASRC_ASYNCHRONOUS_MODE, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc4_asrc_data, asynchronous_mode)},
+	{SOF_TKN_ASRC_OPERATION_MODE, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc4_asrc_data, operation_mode)},
+};
+
 static const struct sof_token_info ipc4_token_list[SOF_TOKEN_COUNT] = {
 	[SOF_DAI_TOKENS] = {"DAI tokens", dai_tokens, ARRAY_SIZE(dai_tokens)},
 	[SOF_PIPELINE_TOKENS] = {"Pipeline tokens", pipeline_tokens, ARRAY_SIZE(pipeline_tokens)},
@@ -163,6 +173,7 @@ static const struct sof_token_info ipc4_token_list[SOF_TOKEN_COUNT] = {
 		ipc4_audio_fmt_num_tokens, ARRAY_SIZE(ipc4_audio_fmt_num_tokens)},
 	[SOF_GAIN_TOKENS] = {"Gain tokens", gain_tokens, ARRAY_SIZE(gain_tokens)},
 	[SOF_SRC_TOKENS] = {"SRC tokens", src_tokens, ARRAY_SIZE(src_tokens)},
+	[SOF_ASRC_TOKENS] = {"ASRC tokens", asrc_tokens, ARRAY_SIZE(asrc_tokens)},
 };
 
 static void sof_ipc4_dbg_audio_format(struct device *dev, struct sof_ipc4_pin_format *pin_fmt,
@@ -846,6 +857,59 @@ static void sof_ipc4_widget_free_comp_src(struct snd_sof_widget *swidget)
 	swidget->private = NULL;
 }
 
+static int sof_ipc4_widget_setup_comp_asrc(struct snd_sof_widget *swidget)
+{
+	struct snd_soc_component *scomp = swidget->scomp;
+	struct sof_ipc4_asrc *asrc;
+	int ret;
+
+	dev_dbg(scomp->dev, "Updating IPC structure for %s\n", swidget->widget->name);
+
+	asrc = kzalloc(sizeof(*asrc), GFP_KERNEL);
+	if (!asrc)
+		return -ENOMEM;
+
+	swidget->private = asrc;
+
+	ret = sof_ipc4_get_audio_fmt(scomp, swidget, &asrc->available_fmt, &asrc->data.base_config);
+	if (ret)
+		goto free_asrc;
+
+	ret = sof_update_ipc_object(scomp, &asrc->data, SOF_ASRC_TOKENS, swidget->tuples,
+				    swidget->num_tuples, sizeof(asrc->data), 1);
+	if (ret) {
+		dev_err(scomp->dev, "Parsing ASRC tokens failed\n");
+		goto err;
+	}
+
+	dev_dbg(scomp->dev, "ASRC sink_rate %d, asynchronous_mode %d, operation_mode %d\n",
+		asrc->data.sink_rate, asrc->data.asynchronous_mode, asrc->data.operation_mode);
+
+	ret = sof_ipc4_widget_setup_msg(swidget, &asrc->msg);
+	if (ret)
+		goto err;
+
+	return 0;
+
+err:
+	sof_ipc4_free_audio_fmt(&asrc->available_fmt);
+free_asrc:
+	kfree(asrc);
+	swidget->private = NULL;
+	return ret;
+}
+
+static void sof_ipc4_widget_free_comp_asrc(struct snd_sof_widget *swidget)
+{
+	struct sof_ipc4_asrc *asrc = swidget->private;
+
+	if (!asrc)
+		return;
+
+	sof_ipc4_free_audio_fmt(&asrc->available_fmt);
+	kfree(swidget->private);
+	swidget->private = NULL;
+}
 static void sof_ipc4_widget_free_comp_mixer(struct snd_sof_widget *swidget)
 {
 	struct sof_ipc4_mixer *mixer = swidget->private;
@@ -1940,6 +2004,68 @@ static int sof_ipc4_prepare_src_module(struct snd_sof_widget *swidget,
 	return sof_ipc4_update_hw_params(sdev, pipeline_params, out_audio_fmt);
 }
 
+static int sof_ipc4_prepare_asrc_module(struct snd_sof_widget *swidget,
+					struct snd_pcm_hw_params *fe_params,
+					struct snd_sof_platform_stream_params *platform_params,
+					struct snd_pcm_hw_params *pipeline_params, int dir)
+{
+	struct snd_soc_component *scomp = swidget->scomp;
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct sof_ipc4_asrc *asrc = swidget->private;
+	struct sof_ipc4_available_audio_format *available_fmt = &asrc->available_fmt;
+	struct sof_ipc4_audio_format *out_audio_fmt;
+	struct sof_ipc4_audio_format *in_audio_fmt;
+	u32 out_ref_rate, out_ref_channels, out_ref_valid_bits;
+	int output_format_index, input_format_index;
+
+	input_format_index = sof_ipc4_init_input_audio_fmt(sdev, swidget, &asrc->data.base_config,
+							   pipeline_params, available_fmt);
+	if (input_format_index < 0)
+		return input_format_index;
+
+	/*
+	 * For playback, the ASRC sink rate will be configured based on the requested output
+	 * format, which is restricted to only deal with DAI's with a single format for now.
+	 */
+	if (dir == SNDRV_PCM_STREAM_PLAYBACK && available_fmt->num_output_formats > 1) {
+		dev_err(sdev->dev, "Invalid number of output formats: %d for ASRC %s\n",
+			available_fmt->num_output_formats, swidget->widget->name);
+		return -EINVAL;
+	}
+	/*
+	 * ASRC does not perform format conversion, so the output channels and valid bit depth must
+	 * be the same as that of the input.
+	 */
+	in_audio_fmt = &available_fmt->input_pin_fmts[input_format_index].audio_fmt;
+	out_ref_channels = SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(in_audio_fmt->fmt_cfg);
+	out_ref_valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(in_audio_fmt->fmt_cfg);
+
+	/*
+	 * For capture, the ASRC module should convert the rate to match the rate requested by the
+	 * PCM hw_params. Set the reference params based on the fe_params unconditionally as it
+	 * will be ignored for playback anyway.
+	 */
+	out_ref_rate = params_rate(fe_params);
+
+	output_format_index = sof_ipc4_init_output_audio_fmt(sdev, &asrc->data.base_config,
+							     available_fmt, out_ref_rate,
+							     out_ref_channels, out_ref_valid_bits);
+	if (output_format_index < 0) {
+		dev_err(sdev->dev, "Failed to initialize ASRC output format for %s",
+			swidget->widget->name);
+		return output_format_index;
+	}
+
+	/* update pipeline memory usage */
+	sof_ipc4_update_resource_usage(sdev, swidget, &asrc->data.base_config);
+
+	out_audio_fmt = &available_fmt->output_pin_fmts[output_format_index].audio_fmt;
+	asrc->data.sink_rate = out_audio_fmt->sampling_frequency;
+
+	/* update pipeline_params for sink widgets */
+	return sof_ipc4_update_hw_params(sdev, pipeline_params, out_audio_fmt);
+}
+
 static int
 sof_ipc4_process_set_pin_formats(struct snd_sof_widget *swidget, int pin_type)
 {
@@ -2339,6 +2465,16 @@ static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 		ipc_data = src;
 
 		msg = &src->msg;
+		break;
+	}
+	case snd_soc_dapm_asrc:
+	{
+		struct sof_ipc4_asrc *asrc = swidget->private;
+
+		ipc_size = sizeof(asrc->data);
+		ipc_data = &asrc->data;
+
+		msg = &asrc->msg;
 		break;
 	}
 	case snd_soc_dapm_effect:
@@ -3013,6 +3149,15 @@ static enum sof_tokens src_token_list[] = {
 	SOF_COMP_EXT_TOKENS,
 };
 
+static enum sof_tokens asrc_token_list[] = {
+	SOF_COMP_TOKENS,
+	SOF_ASRC_TOKENS,
+	SOF_AUDIO_FMT_NUM_TOKENS,
+	SOF_IN_AUDIO_FORMAT_TOKENS,
+	SOF_OUT_AUDIO_FORMAT_TOKENS,
+	SOF_COMP_EXT_TOKENS,
+};
+
 static enum sof_tokens process_token_list[] = {
 	SOF_COMP_TOKENS,
 	SOF_AUDIO_FMT_NUM_TOKENS,
@@ -3058,6 +3203,9 @@ static const struct sof_ipc_tplg_widget_ops tplg_ipc4_widget_ops[SND_SOC_DAPM_TY
 				src_token_list, ARRAY_SIZE(src_token_list),
 				NULL, sof_ipc4_prepare_src_module,
 				NULL},
+	[snd_soc_dapm_asrc] = {sof_ipc4_widget_setup_comp_asrc, sof_ipc4_widget_free_comp_asrc,
+			      asrc_token_list, ARRAY_SIZE(asrc_token_list),
+			      NULL, sof_ipc4_prepare_asrc_module, NULL},
 	[snd_soc_dapm_effect] = {sof_ipc4_widget_setup_comp_process,
 				sof_ipc4_widget_free_comp_process,
 				process_token_list, ARRAY_SIZE(process_token_list),
