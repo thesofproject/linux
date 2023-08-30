@@ -206,13 +206,18 @@ sof_missing_firmware_notification(struct snd_sof_dev *sdev,
 	struct snd_sof_pdata *plat_data = sdev->pdata;
 	const struct sof_dev_desc *desc = plat_data->desc;
 	struct device *dev = sdev->dev;
+	int ipc_type_count, i;
 	char *marker;
-	int i;
 
 	dev_err(dev, "SOF firmware and/or topology file not found.\n");
 	dev_info(dev, "Supported default profiles\n");
 
-	for (i = 0; i < SOF_IPC_TYPE_COUNT; i++) {
+	if (IS_ENABLED(CONFIG_SND_SOC_SOF_ALLOW_FALLBACK_TO_NEWER_IPC_VERSION))
+		ipc_type_count = SOF_IPC_TYPE_COUNT - 1;
+	else
+		ipc_type_count = base_profile->ipc_type;
+
+	for (i = 0; i <= ipc_type_count; i++) {
 		if (!(desc->ipc_supported_mask & BIT(i)))
 			continue;
 
@@ -270,7 +275,7 @@ int sof_create_ipc_file_profile(struct snd_sof_dev *sdev,
 				struct sof_loadable_file_profile *out_profile)
 {
 	const struct sof_dev_desc *desc = sdev->pdata->desc;
-	int ret, i;
+	int ipc_fallback_start, ret, i;
 
 	memset(out_profile, 0, sizeof(*out_profile));
 
@@ -280,10 +285,18 @@ int sof_create_ipc_file_profile(struct snd_sof_dev *sdev,
 		goto out;
 
 	/*
-	 * No firmware file was found for the requested IPC type, check all
-	 * IPC types as fallback
+	 * No firmware file was found for the requested IPC type, as fallback
+	 * if SND_SOC_SOF_ALLOW_FALLBACK_TO_NEWER_IPC_VERSION is selected, check
+	 * all IPC versions in a backwards direction (from newer to older)
+	 * if SND_SOC_SOF_ALLOW_FALLBACK_TO_NEWER_IPC_VERSION is not selected,
+	 * check only older IPC versions than the selected/default version
 	 */
-	for (i = 0; i < SOF_IPC_TYPE_COUNT; i++) {
+	if (IS_ENABLED(CONFIG_SND_SOC_SOF_ALLOW_FALLBACK_TO_NEWER_IPC_VERSION))
+		ipc_fallback_start = SOF_IPC_TYPE_COUNT - 1;
+	else
+		ipc_fallback_start = (int)base_profile->ipc_type - 1;
+
+	for (i = ipc_fallback_start; i >= 0 ; i--) {
 		if (i == base_profile->ipc_type ||
 		    !(desc->ipc_supported_mask & BIT(i)))
 			continue;
