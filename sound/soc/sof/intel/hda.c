@@ -1644,11 +1644,6 @@ struct snd_soc_acpi_mach *hda_machine_select(struct snd_sof_dev *sdev)
 			add_extension = true;
 		}
 
-		if (mach->link_mask) {
-			mach->mach_params.links = mach->links;
-			mach->mach_params.link_mask = mach->link_mask;
-		}
-
 		/* report SSP link mask to machine driver */
 		mach->mach_params.i2s_link_mask = check_nhlt_ssp_mask(sdev);
 
