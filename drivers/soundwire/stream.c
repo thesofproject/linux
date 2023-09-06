@@ -131,6 +131,7 @@ static int sdw_program_slave_port_params(struct sdw_bus *bus,
 	struct sdw_slave_prop *slave_prop = &s_rt->slave->prop;
 	u32 addr1, addr2, addr3, addr4, addr5, addr6;
 	struct sdw_dpn_prop *dpn_prop;
+	unsigned long time;
 	int ret;
 	u8 wbuf;
 
@@ -142,6 +143,21 @@ static int sdw_program_slave_port_params(struct sdw_bus *bus,
 					  t_params->port_num);
 	if (!dpn_prop)
 		return -EINVAL;
+
+	/*
+	 * bus_lock was locked by each stream operation, and sdw_handle_slave_status will wait for
+	 * the lock to check if the bus is assigned. We should unlock the lock to allow other
+	 * function to access the lock while we are waiting for initialization_complete.
+	 */
+	mutex_unlock(&bus->bus_lock);
+	time = wait_for_completion_timeout(&s_rt->slave->initialization_complete,
+					   msecs_to_jiffies(3000));
+	if (!time) {
+		dev_err(&s_rt->slave->dev, "%s Initialization not complete, timed out\n", __func__);
+
+		return -ETIMEDOUT;
+	}
+	mutex_lock(&bus->bus_lock);
 
 	addr1 = SDW_DPN_PORTCTRL(t_params->port_num);
 	addr2 = SDW_DPN_BLOCKCTRL1(t_params->port_num);
