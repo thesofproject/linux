@@ -446,6 +446,10 @@ int sdw_hda_dai_hw_params(struct snd_pcm_substream *substream,
 	}
 
 	ops = hda_dai_get_ops(substream, cpu_dai);
+	if (!ops) {
+		dev_err(cpu_dai->dev, "DAI widget ops not set\n");
+		return -EINVAL;
+	}
 	sdev = widget_to_sdev(w);
 	hext_stream = ops->get_hext_stream(sdev, cpu_dai, substream);
 
