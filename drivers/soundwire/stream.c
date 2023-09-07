@@ -700,8 +700,11 @@ static int sdw_bank_switch(struct sdw_bus *bus, int m_rt_count)
 	else
 		addr = SDW_SCP_FRAMECTRL_B0;
 
-	sdw_fill_msg(wr_msg, NULL, addr, 1, SDW_BROADCAST_DEV_NUM,
-		     SDW_MSG_FLAG_WRITE, wbuf);
+	ret = sdw_fill_msg(wr_msg, NULL, addr, 1, SDW_BROADCAST_DEV_NUM,
+			   SDW_MSG_FLAG_WRITE, wbuf);
+	if (ret < 0)
+		return ret;
+
 	wr_msg->ssp_sync = true;
 
 	/*
