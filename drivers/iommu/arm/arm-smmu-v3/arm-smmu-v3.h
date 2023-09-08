@@ -9,8 +9,10 @@
 #define _ARM_SMMU_V3_H
 
 #include <linux/bitfield.h>
+#include <linux/delay.h>
 #include <linux/iommu.h>
 #include <linux/iommufd.h>
+#include <linux/irqreturn.h>
 #include <linux/kernel.h>
 #include <linux/mmzone.h>
 #include <linux/platform_device.h>
@@ -1286,6 +1288,21 @@ int arm_smmu_fw_probe(struct platform_device *pdev,
 int arm_smmu_register_iommu(struct arm_smmu_device *smmu,
 			    const struct iommu_ops *ops, phys_addr_t ioaddr);
 void arm_smmu_unregister_iommu(struct arm_smmu_device *smmu);
+void arm_smmu_probe_irq(struct platform_device *pdev,
+			struct arm_smmu_device *smmu);
+int arm_smmu_setup_irqs(struct arm_smmu_device *smmu,
+			irqreturn_t combined_thrd(int irq, void *dev),
+			irqreturn_t combined_irq(int irq, void *dev),
+			irqreturn_t evtqirq(int irq, void *dev),
+			irqreturn_t gerrorirq(int irq, void *dev),
+			irqreturn_t priirq(int irq, void *dev));
+
+enum arm_smmu_msi_index {
+	EVTQ_MSI_INDEX,
+	GERROR_MSI_INDEX,
+	PRIQ_MSI_INDEX,
+	ARM_SMMU_MAX_MSIS,
+};
 
 #ifdef CONFIG_ARM_SMMU_V3_SVA
 bool arm_smmu_sva_supported(struct arm_smmu_device *smmu);
