@@ -30,6 +30,10 @@ struct gzvm_driver {
 	struct gzvm_version drv_version;
 
 	struct device *dev;
+
+	u32 demand_paging_batch_pages;
+
+	struct dentry *gzvm_debugfs_dir;
 };
 
 /*
@@ -61,7 +65,11 @@ struct gzvm_driver {
 #define GZVM_MAX_VCPUS		 8
 #define GZVM_MAX_MEM_REGION	10
 
-#define GZVM_VCPU_RUN_MAP_SIZE		(PAGE_SIZE * 2)
+#define GZVM_VCPU_RUN_MAP_SIZE			(PAGE_SIZE * 2)
+
+#define GZVM_BLOCK_BASED_DEMAND_PAGE_SIZE	(PMD_SIZE) /* 2MB */
+#define GZVM_DRV_DEMAND_PAGING_BATCH_PAGES	\
+	(GZVM_BLOCK_BASED_DEMAND_PAGE_SIZE / PAGE_SIZE)
 
 enum gzvm_demand_paging_mode {
 	GZVM_FULLY_POPULATED = 0,
@@ -148,6 +156,11 @@ struct gzvm_pinned_page {
  * @pinned_pages: use rb-tree to record pin/unpin page
  * @mem_lock: lock for memory operations
  * @mem_alloc_mode: memory allocation mode - fully allocated or demand paging
+ * @demand_page_gran: demand page granularity: how much memory we allocate for
+ * VM in a single page fault
+ * @demand_page_buffer: the mailbox for transferring large portion pages
+ * @demand_paging_lock: lock for preventing multiple cpu using the same demand
+ * page mailbox at the same time
  */
 struct gzvm {
 	struct gzvm_driver *gzvm_drv;
@@ -178,6 +191,10 @@ struct gzvm {
 
 	struct rb_root pinned_pages;
 	struct mutex mem_lock;
+
+	u32 demand_page_gran;
+	u64 *demand_page_buffer;
+	struct mutex  demand_paging_lock;
 };
 
 long gzvm_dev_ioctl_check_extension(struct gzvm *gzvm, unsigned long args);
@@ -192,6 +209,9 @@ void gzvm_destroy_vcpus(struct gzvm *gzvm);
 /* arch-dependant functions */
 int gzvm_arch_probe(struct gzvm_version drv_version,
 		    struct gzvm_version *hyp_version);
+int gzvm_arch_query_hyp_batch_pages(struct gzvm_enable_cap *cap,
+				    void __user *argp);
+
 int gzvm_arch_set_memregion(u16 vm_id, size_t buf_size,
 			    phys_addr_t region);
 int gzvm_arch_check_extension(struct gzvm *gzvm, __u64 cap, void __user *argp);
@@ -199,6 +219,7 @@ int gzvm_arch_create_vm(unsigned long vm_type);
 int gzvm_arch_destroy_vm(u16 vm_id);
 int gzvm_arch_map_guest(u16 vm_id, int memslot_id, u64 pfn, u64 gfn,
 			u64 nr_pages);
+int gzvm_arch_map_guest_block(u16 vm_id, int memslot_id, u64 gfn, u64 nr_pages);
 void gzvm_vm_put(struct gzvm *gzvm);
 void gzvm_vm_get(struct gzvm *gzvm);
 int gzvm_vm_ioctl_arch_enable_cap(struct gzvm *gzvm,

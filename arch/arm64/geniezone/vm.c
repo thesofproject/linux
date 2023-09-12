@@ -182,6 +182,35 @@ static int gzvm_vm_arch_enable_cap(struct gzvm *gzvm,
 				    res);
 }
 
+static int gzvm_arch_enable_cap(struct gzvm_enable_cap *cap,
+				struct arm_smccc_res *res)
+{
+	return gzvm_hypcall_wrapper(MT_HVC_GZVM_ENABLE_CAP, 0,
+				    cap->cap, cap->args[0], cap->args[1],
+				    cap->args[2], cap->args[3], cap->args[4],
+				    res);
+}
+
+int gzvm_arch_query_hyp_batch_pages(struct gzvm_enable_cap *cap,
+				    void __user *argp)
+{
+	struct arm_smccc_res res = {0};
+	int ret;
+
+	ret = gzvm_arch_enable_cap(cap, &res);
+
+	if (ret)
+		return ret;
+
+	if (res.a1 == 0 ||
+	    GZVM_BLOCK_BASED_DEMAND_PAGE_SIZE % (PAGE_SIZE * res.a1) != 0)
+		return -EFAULT;
+
+	cap->args[0] = res.a1;
+
+	return ret;
+}
+
 /**
  * gzvm_vm_ioctl_get_pvmfw_size() - Get pvmfw size from hypervisor, return
  *				    in x1, and return to userspace in args
@@ -355,10 +384,12 @@ static int gzvm_vm_ioctl_cap_pvm(struct gzvm *gzvm,
 	switch (cap->args[0]) {
 	case GZVM_CAP_PVM_SET_PROTECTED_VM:
 		/*
-		 * To improve performance for protected VM, we have to populate
-		 * VM's memory before VM booting
+		 * If the hypervisor doesn't support block-based demand paging,
+		 * we populate memory in advance to improve performance for
+		 * protected VM.
 		 */
-		populate_all_mem_regions(gzvm);
+		if (gzvm->demand_page_gran == PAGE_SIZE)
+			populate_all_mem_regions(gzvm);
 		fallthrough;
 		/*
 		 * GZVM_CAP_PVM_SET_PVMFW_GPA is similar to
@@ -388,6 +419,14 @@ int gzvm_vm_ioctl_arch_enable_cap(struct gzvm *gzvm,
 	case GZVM_CAP_PROTECTED_VM:
 		return gzvm_vm_ioctl_cap_pvm(gzvm, cap, argp);
 	case GZVM_CAP_ENABLE_DEMAND_PAGING:
+		/*
+		 * Both GZVM_CAP_ENABLE_DEMAND_PAGING and
+		 * GZVM_CAP_BLOCK_BASED_DEMAND_PAGING share the same function
+		 * call flow. The key difference is that block-based demaned
+		 * paging allows the hypervisor to handle multiple pages in
+		 * a single batch.
+		 */
+	case GZVM_CAP_BLOCK_BASED_DEMAND_PAGING:
 		return gzvm_vm_arch_enable_cap(gzvm, cap, &res);
 	default:
 		break;
@@ -403,4 +442,12 @@ int gzvm_arch_map_guest(u16 vm_id, int memslot_id, u64 pfn, u64 gfn,
 
 	return gzvm_hypcall_wrapper(MT_HVC_GZVM_MAP_GUEST, vm_id, memslot_id,
 				    pfn, gfn, nr_pages, 0, 0, &res);
+}
+
+int gzvm_arch_map_guest_block(u16 vm_id, int memslot_id, u64 gfn, u64 nr_pages)
+{
+	struct arm_smccc_res res;
+
+	return gzvm_hypcall_wrapper(MT_HVC_GZVM_MAP_GUEST_BLOCK, vm_id,
+				    memslot_id, gfn, nr_pages, 0, 0, 0, &res);
 }
