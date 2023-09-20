@@ -11,6 +11,47 @@
 #include <sound/sof/ext_manifest4.h>
 #include "sof-priv.h"
 
+/**
+ * enum sof_fw_layout_type - pre-defined file-layout for loadable fw files
+ * @SOF_FW_LAYOUT_IPC3_SOF:
+ *	firmware path:		<vendor>/sof</fw_path_postfix>
+ *	firmware name:		sof-<platform>.ri
+ *	topology path:		<vendor>/sof-tplg/
+ * @SOF_FW_LAYOUT_IPC4_SOF:
+ *	firmware path:		<vendor>/sof-ipc4/<platform></fw_path_postfix>
+ *	firmware name:		sof-<platform>.ri
+ *	firmware lib path:	<vendor>/sof-ipc4-lib/<platform></fw_path_postfix>
+ *      topology path:		<vendor>/sof-ipc4-tplg/
+ * @SOF_FW_LAYOUT_IPC4_INTEL_ACE:
+ *	firmware path:		intel/sof-ipc4/<platform></fw_path_postfix>
+ *	firmware name:		sof-<platform>.ri
+ *	firmware lib path:	intel/sof-ipc4-lib/<platform></fw_path_postfix>
+ *	topology path:		intel/sof-ace-tplg/
+ * @SOF_FW_LAYOUT_IPC4_INTEL_AVS:
+ *	firmware path:		intel/avs/<platform></fw_path_postfix>
+ *	firmware name:		dsp_basefw.bin
+ *	firmware lib path:	intel/avs/<platform></fw_path_postfix>
+ *	topology path:		intel/avs-tplg/
+ */
+enum sof_fw_layout_type {
+	SOF_FW_LAYOUT_IPC3_SOF,
+	SOF_FW_LAYOUT_IPC4_SOF,
+	SOF_FW_LAYOUT_IPC4_INTEL_ACE,
+	SOF_FW_LAYOUT_IPC4_INTEL_AVS,
+};
+
+struct sof_fw_layout_map {
+	enum sof_ipc_type ipc_type;
+	char *layout_name;
+};
+
+static const struct sof_fw_layout_map fw_layouts[] = {
+	{ .ipc_type = SOF_IPC_TYPE_3, .layout_name = "SOF IPC3", },
+	{ .ipc_type = SOF_IPC_TYPE_4, .layout_name = "SOF IPC4", },
+	{ .ipc_type = SOF_IPC_TYPE_4, .layout_name = "SOF IPC4 for Intel ACE platforms", },
+	{ .ipc_type = SOF_IPC_TYPE_4, .layout_name = "Intel AVS IPC4", },
+};
+
 static int sof_test_firmware_file(struct device *dev,
 				  struct sof_loadable_file_profile *profile,
 				  enum sof_ipc_type *ipc_type_to_adjust)
@@ -90,38 +131,27 @@ static int sof_test_topology_file(struct device *dev,
 }
 
 static int
-sof_file_profile_for_ipc_type(struct snd_sof_dev *sdev,
-			      enum sof_ipc_type ipc_type,
-			      const struct sof_dev_desc *desc,
-			      struct sof_loadable_file_profile *base_profile,
-			      struct sof_loadable_file_profile *out_profile)
+sof_create_fw_profile(struct snd_sof_dev *sdev, const struct sof_dev_desc *desc,
+		      struct sof_loadable_file_profile *default_profile,
+		      struct sof_loadable_file_profile *base_profile,
+		      struct sof_loadable_file_profile *out_profile)
 {
+	enum sof_ipc_type ipc_type = default_profile->ipc_type;
 	struct snd_sof_pdata *plat_data = sdev->pdata;
-	bool fw_lib_path_allocated = false;
 	struct device *dev = sdev->dev;
-	bool fw_path_allocated = false;
 	int ret = 0;
 
 	/* firmware path */
-	if (base_profile->fw_path) {
+	if (base_profile->fw_path)
 		out_profile->fw_path = base_profile->fw_path;
-	} else if (base_profile->fw_path_postfix) {
-		out_profile->fw_path = devm_kasprintf(dev, GFP_KERNEL, "%s/%s",
-							desc->default_fw_path[ipc_type],
-							base_profile->fw_path_postfix);
-		if (!out_profile->fw_path)
-			return -ENOMEM;
-
-		fw_path_allocated = true;
-	} else {
-		out_profile->fw_path = desc->default_fw_path[ipc_type];
-	}
+	else
+		out_profile->fw_path = default_profile->fw_path;
 
 	/* firmware filename */
 	if (base_profile->fw_name)
 		out_profile->fw_name = base_profile->fw_name;
 	else
-		out_profile->fw_name = desc->default_fw_filename[ipc_type];
+		out_profile->fw_name = default_profile->fw_name;
 
 	/*
 	 * Check the custom firmware path/filename and adjust the ipc_type to
@@ -144,24 +174,10 @@ sof_file_profile_for_ipc_type(struct snd_sof_dev *sdev,
 	}
 
 	/* firmware library path */
-	if (base_profile->fw_lib_path) {
+	if (base_profile->fw_lib_path)
 		out_profile->fw_lib_path = base_profile->fw_lib_path;
-	} else if (desc->default_lib_path[ipc_type]) {
-		if (base_profile->fw_path_postfix) {
-			out_profile->fw_lib_path = devm_kasprintf(dev,
-							GFP_KERNEL, "%s/%s",
-							desc->default_lib_path[ipc_type],
-							base_profile->fw_path_postfix);
-			if (!out_profile->fw_lib_path) {
-				ret = -ENOMEM;
-				goto out;
-			}
-
-			fw_lib_path_allocated = true;
-		} else {
-			out_profile->fw_lib_path = desc->default_lib_path[ipc_type];
-		}
-	}
+	else if (default_profile->fw_lib_path)
+		out_profile->fw_lib_path = default_profile->fw_lib_path;
 
 	if (base_profile->fw_path_postfix)
 		out_profile->fw_path_postfix = base_profile->fw_path_postfix;
@@ -170,7 +186,7 @@ sof_file_profile_for_ipc_type(struct snd_sof_dev *sdev,
 	if (base_profile->tplg_path)
 		out_profile->tplg_path = base_profile->tplg_path;
 	else
-		out_profile->tplg_path = desc->default_tplg_path[ipc_type];
+		out_profile->tplg_path = default_profile->tplg_path;
 
 	/* topology name */
 	out_profile->tplg_name = plat_data->tplg_filename;
@@ -184,18 +200,231 @@ sof_file_profile_for_ipc_type(struct snd_sof_dev *sdev,
 	if (!ret)
 		ret = sof_test_topology_file(dev, out_profile);
 
-out:
-	if (ret) {
-		/* Free up path strings created with devm_kasprintf */
-		if (fw_path_allocated)
-			devm_kfree(dev, out_profile->fw_path);
-		if (fw_lib_path_allocated)
-			devm_kfree(dev, out_profile->fw_lib_path);
-
+	if (ret)
 		memset(out_profile, 0, sizeof(*out_profile));
-	}
 
 	return ret;
+}
+
+static void sof_free_profile_strings(struct device *dev,
+				     struct sof_loadable_file_profile *profile)
+{
+	devm_kfree(dev, profile->fw_path);
+	devm_kfree(dev, profile->fw_lib_path);
+	devm_kfree(dev, profile->fw_name);
+	devm_kfree(dev, profile->tplg_path);
+
+	memset(profile, 0, sizeof(*profile));
+}
+
+static int
+sof_default_fw_layout(struct device *dev, const enum sof_fw_layout_type layout_type,
+		      const char *vendor, const char *platform,
+		      const char *fw_path_postfix,
+		      struct sof_loadable_file_profile *default_profile)
+{
+	int ret = -ENOMEM;
+	const char *str;
+
+	switch (layout_type) {
+	case SOF_FW_LAYOUT_IPC3_SOF:
+		default_profile->ipc_type = SOF_IPC_TYPE_3;
+		/*
+		 * firmware path: <vendor>/sof</fw_path_postfix>
+		 * firmware name: sof-<platform>.ri
+		 * topology path: <vendor>/sof-tplg/
+		 */
+		if (fw_path_postfix)
+			str = devm_kasprintf(dev, GFP_KERNEL, "%s/sof/%s",
+					     vendor, fw_path_postfix);
+		else
+			str = devm_kasprintf(dev, GFP_KERNEL, "%s/sof", vendor);
+		if (!str)
+			return -ENOMEM;
+
+		default_profile->fw_path = str;
+
+		default_profile->fw_name = devm_kasprintf(dev, GFP_KERNEL,
+							  "sof-%s.ri", platform);
+		if (!default_profile->fw_name)
+			goto err;
+
+		default_profile->tplg_path = devm_kasprintf(dev, GFP_KERNEL,
+							    "%s/sof-tplg", vendor);
+		if (!default_profile->tplg_path)
+			goto err;
+		break;
+	case SOF_FW_LAYOUT_IPC4_SOF:
+		default_profile->ipc_type = SOF_IPC_TYPE_4;
+		/*
+		 * firmware path: <vendor>/sof-ipc4/<platform></fw_path_postfix>
+		 * firmware name: sof-<platform>.ri
+		 * firmware lib path: <vendor>/sof-ipc4-lib/<platform></fw_path_postfix>
+		 * topology path: <vendor>/sof-ipc4-tplg/
+		 */
+		if (fw_path_postfix)
+			str = devm_kasprintf(dev, GFP_KERNEL, "%s/sof-ipc4/%s/%s",
+					     vendor, platform, fw_path_postfix);
+		else
+			str = devm_kasprintf(dev, GFP_KERNEL, "%s/sof-ipc4/%s",
+					     vendor, platform);
+		if (!str)
+			return -ENOMEM;
+
+		default_profile->fw_path = str;
+
+		default_profile->fw_name = devm_kasprintf(dev, GFP_KERNEL,
+							  "sof-%s.ri", platform);
+		if (!default_profile->fw_name)
+			goto err;
+
+		if (fw_path_postfix)
+			str = devm_kasprintf(dev, GFP_KERNEL, "%s/sof-ipc4-lib/%s/%s",
+					     vendor, platform, fw_path_postfix);
+		else
+			str = devm_kasprintf(dev, GFP_KERNEL, "%s/sof-ipc4-lib/%s",
+					     vendor, platform);
+		if (!str)
+			goto err;
+
+		default_profile->fw_lib_path = str;
+
+		default_profile->tplg_path = devm_kasprintf(dev, GFP_KERNEL,
+							    "%s/sof-ipc4-tplg", vendor);
+		if (!default_profile->tplg_path)
+			goto err;
+		break;
+	case SOF_FW_LAYOUT_IPC4_INTEL_ACE:
+		default_profile->ipc_type = SOF_IPC_TYPE_4;
+		/*
+		 * firmware path: intel/sof-ipc4/<platform></fw_path_postfix>
+		 * firmware name: sof-<platform>.ri
+		 * firmware lib path: intel/sof-ipc4-lib/<platform></fw_path_postfix>
+		 * topology path: intel/sof-ace-tplg/
+		 */
+		if (fw_path_postfix)
+			str = devm_kasprintf(dev, GFP_KERNEL, "intel/sof-ipc4/%s/%s",
+					     platform, fw_path_postfix);
+		else
+			str = devm_kasprintf(dev, GFP_KERNEL, "intel/sof-ipc4/%s",
+					     platform);
+		if (!str)
+			return -ENOMEM;
+
+		default_profile->fw_path = str;
+
+		default_profile->fw_name = devm_kasprintf(dev, GFP_KERNEL,
+							  "sof-%s.ri", platform);
+		if (!default_profile->fw_name)
+			goto err;
+
+		if (fw_path_postfix)
+			str = devm_kasprintf(dev, GFP_KERNEL, "intel/sof-ipc4-lib/%s/%s",
+					     platform, fw_path_postfix);
+		else
+			str = devm_kasprintf(dev, GFP_KERNEL, "intel/sof-ipc4-lib/%s",
+					     platform);
+		if (!str)
+			goto err;
+
+		default_profile->fw_lib_path = str;
+
+		default_profile->tplg_path = devm_kstrdup(dev, "intel/sof-ace-tplg",
+							  GFP_KERNEL);
+		if (!default_profile->tplg_path)
+			goto err;
+		break;
+	case SOF_FW_LAYOUT_IPC4_INTEL_AVS:
+		default_profile->ipc_type = SOF_IPC_TYPE_4;
+		/*
+		 * firmware path: intel/avs/<platform></fw_path_postfix>
+		 * firmware name: dsp_basefw.bin
+		 * firmware lib path: intel/avs-lib/<platform></fw_path_postfix>
+		 * topology path: intel/avs-tplg/
+		 */
+		if (fw_path_postfix)
+			str = devm_kasprintf(dev, GFP_KERNEL, "intel/avs/%s/%s",
+					     platform, fw_path_postfix);
+		else
+			str = devm_kasprintf(dev, GFP_KERNEL, "intel/avs/%s",
+					     platform);
+		if (!str)
+			return -ENOMEM;
+
+		default_profile->fw_path = str;
+
+		default_profile->fw_name = devm_kstrdup(dev, "dsp_basefw.bin",
+							GFP_KERNEL);
+		if (!default_profile->fw_name)
+			goto err;
+
+		if (fw_path_postfix)
+			str = devm_kasprintf(dev, GFP_KERNEL, "intel/avs/%s/%s",
+					     platform, fw_path_postfix);
+		else
+			str = devm_kasprintf(dev, GFP_KERNEL, "intel/avs/%s",
+					     platform);
+		if (!str)
+			goto err;
+
+		default_profile->fw_lib_path = str;
+
+		default_profile->tplg_path = devm_kstrdup(dev, "intel/avs-tplg",
+							  GFP_KERNEL);
+		if (!default_profile->tplg_path)
+			goto err;
+		break;
+	default:
+		dev_err(dev, "Invalid firmware layout type: %d\n", layout_type);
+		return -EINVAL;
+	}
+
+	return 0;
+
+err:
+	sof_free_profile_strings(dev, default_profile);
+
+	return ret;
+}
+
+static int
+sof_file_profile_for_ipc_type(struct snd_sof_dev *sdev,
+			      enum sof_ipc_type ipc_type,
+			      const struct sof_dev_desc *desc,
+			      struct sof_loadable_file_profile *base_profile,
+			      struct sof_loadable_file_profile *out_profile)
+{
+	struct sof_loadable_file_profile default_profile = { 0 };
+	bool found = false;
+	int i, ret;
+
+	memset(out_profile, 0, sizeof(*out_profile));
+
+	for (i = 0; i < ARRAY_SIZE(fw_layouts); i++) {
+		if (fw_layouts[i].ipc_type != ipc_type)
+			continue;
+
+		ret = sof_default_fw_layout(sdev->dev, i, desc->vendor,
+					    desc->platform,
+					    base_profile->fw_path_postfix,
+					    &default_profile);
+		if (ret)
+			return ret;
+
+		ret = sof_create_fw_profile(sdev, desc, &default_profile,
+					    base_profile, out_profile);
+		if (!ret) {
+			found = true;
+			break;
+		}
+
+		sof_free_profile_strings(sdev->dev, &default_profile);
+	}
+
+	if (!found)
+		return -ENOENT;
+
+	return 0;
 }
 
 static void
@@ -203,10 +432,11 @@ sof_missing_firmware_notification(struct snd_sof_dev *sdev,
 				  enum sof_ipc_type ipc_type,
 				  struct sof_loadable_file_profile *base_profile)
 {
+	struct sof_loadable_file_profile default_profile = { 0 };
 	struct snd_sof_pdata *plat_data = sdev->pdata;
 	const struct sof_dev_desc *desc = plat_data->desc;
 	struct device *dev = sdev->dev;
-	int ipc_type_count, i;
+	int ipc_type_count, i, j, ret;
 	char *marker;
 
 	dev_err(dev, "SOF firmware and/or topology file not found.\n");
@@ -227,19 +457,26 @@ sof_missing_firmware_notification(struct snd_sof_dev *sdev,
 			marker = "Fallback";
 
 		dev_info(dev, "- ipc type %d (%s):\n", i, marker);
-		if (base_profile->fw_path_postfix)
-			dev_info(dev, " Firmware file: %s/%s/%s\n",
-				 desc->default_fw_path[i],
-				 base_profile->fw_path_postfix,
-				 desc->default_fw_filename[i]);
-		else
-			dev_info(dev, " Firmware file: %s/%s\n",
-				 desc->default_fw_path[i],
-				 desc->default_fw_filename[i]);
+		for (j = 0; j < ARRAY_SIZE(fw_layouts); j++) {
+			if (fw_layouts[j].ipc_type != i)
+				continue;
 
-		dev_info(dev, " Topology file: %s/%s\n",
-			 desc->default_tplg_path[i],
-			 plat_data->tplg_filename);
+			ret = sof_default_fw_layout(sdev->dev, j, desc->vendor,
+						    desc->platform,
+						    base_profile->fw_path_postfix,
+						    &default_profile);
+			if (ret)
+				return;
+
+			dev_info(dev, " Firmware layout: %s\n",
+				 fw_layouts[j].layout_name);
+			dev_info(dev, "  Firmware file: %s/%s\n",
+				default_profile.fw_path, default_profile.fw_name);
+			dev_info(dev, "  Topology file: %s/%s\n",
+				 default_profile.tplg_path, plat_data->tplg_filename);
+
+			sof_free_profile_strings(sdev->dev, &default_profile);
+		}
 	}
 
 	if (base_profile->fw_path || base_profile->fw_name ||
@@ -276,8 +513,6 @@ int sof_create_ipc_file_profile(struct snd_sof_dev *sdev,
 {
 	const struct sof_dev_desc *desc = sdev->pdata->desc;
 	int ipc_fallback_start, ret, i;
-
-	memset(out_profile, 0, sizeof(*out_profile));
 
 	ret = sof_file_profile_for_ipc_type(sdev, base_profile->ipc_type, desc,
 					    base_profile, out_profile);
