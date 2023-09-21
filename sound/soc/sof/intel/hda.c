@@ -1076,6 +1076,13 @@ static irqreturn_t hda_dsp_interrupt_handler(int irq, void *context)
 {
 	struct snd_sof_dev *sdev = context;
 
+	/* Check GIE bit before proceeding */
+	if (!(snd_sof_dsp_read(sdev, HDA_DSP_HDA_BAR, SOF_HDA_INTCTL) &
+	    SOF_HDA_INT_GLOBAL_EN)) {
+		pr_warn_once("%s: spurious interrupt\n", __func__);
+		return IRQ_NONE;
+	}
+
 	/*
 	 * Get global interrupt status. It includes all hardware interrupt
 	 * sources in the Intel HD Audio controller.
