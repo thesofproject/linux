@@ -187,10 +187,7 @@ reconfigurations.
 Future enhancements to be done
 ==============================
 
- (1) Bulk Register Access (BRA) transfers.
-
-
- (2) Multiple data lane support.
+ (1) Multiple data lane support.
 
 Links
 =====
