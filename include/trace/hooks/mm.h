@@ -108,6 +108,9 @@ DECLARE_HOOK(android_vh_page_should_be_protected,
 	TP_PROTO(struct folio *folio, unsigned long nr_scanned,
 	s8 priority, int *should_protect),
 	TP_ARGS(folio, nr_scanned, priority, should_protect));
+DECLARE_HOOK(android_vh_slab_folio_alloced,
+	TP_PROTO(unsigned int order, gfp_t flags),
+	TP_ARGS(order, flags));
 #endif /* _TRACE_HOOK_MM_H */
 
 /* This part must be outside protection */
