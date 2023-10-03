@@ -279,7 +279,6 @@ kvm_pte_t *pkvm_pgtable_stage2_create_unlinked(struct kvm_pgtable *pgt, u64 phys
 					       bool force_pte);
 
 int __pkvm_topup_hyp_alloc(unsigned long nr_pages);
-unsigned long __pkvm_reclaim_hyp_alloc(unsigned long nr_pages);
 
 #define kvm_call_refill_hyp_nvhe(f, ...)				\
 ({									\
