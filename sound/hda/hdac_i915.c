@@ -11,10 +11,6 @@
 #include <sound/hda_i915.h>
 #include <sound/hda_register.h>
 
-static int hdac_i915_timeout_ms = 60;
-module_param(hdac_i915_timeout_ms, int, 0444);
-MODULE_PARM_DESC(hdac_i915_timeout_ms, "i915 initialization timeout");
-
 /**
  * snd_hdac_i915_set_bclk - Reprogram BCLK for HSW/BDW
  * @bus: HDA core bus
@@ -169,8 +165,9 @@ int snd_hdac_i915_init(struct hdac_bus *bus)
 	if (!acomp->ops) {
 		if (!IS_ENABLED(CONFIG_MODULES) ||
 		    !request_module("i915")) {
+			/* 60s timeout */
 			wait_for_completion_killable_timeout(&acomp->master_bind_complete,
-						     msecs_to_jiffies(hdac_i915_timeout_ms * 1000));
+							     msecs_to_jiffies(60 * 1000));
 		}
 	}
 	if (!acomp->ops) {
