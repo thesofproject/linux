@@ -158,6 +158,16 @@ bool snd_hdac_check_power_state(struct hdac_device *hdac,
 		hda_nid_t nid, unsigned int target_state);
 unsigned int snd_hdac_sync_power_state(struct hdac_device *hdac,
 		      hda_nid_t nid, unsigned int target_state);
+
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_AUDIO_CODEC)
+bool snd_hda_device_is_hdmi(struct hdac_device *hdev);
+#else
+static inline bool snd_hda_device_is_hdmi(struct hdac_device *hdev)
+{
+	return false;
+}
+#endif
+
 /**
  * snd_hdac_read_parm - read a codec parameter
  * @codec: the codec object
