@@ -4645,6 +4645,19 @@ HDA_CODEC_ENTRY(HDA_CODEC_ID_GENERIC_HDMI, "Generic HDMI", patch_generic_hdmi),
 };
 MODULE_DEVICE_TABLE(hdaudio, snd_hda_id_hdmi);
 
+bool snd_hda_device_is_hdmi(struct hdac_device *hdev)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(snd_hda_id_hdmi); i++) {
+		if (snd_hda_id_hdmi[i].vendor_id == hdev->vendor_id)
+			return true;
+	}
+
+	return false;
+}
+EXPORT_SYMBOL_GPL(snd_hda_device_is_hdmi);
+
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("HDMI HD-audio codec");
 MODULE_ALIAS("snd-hda-codec-intelhdmi");
