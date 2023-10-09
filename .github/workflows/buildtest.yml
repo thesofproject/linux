@@ -43,7 +43,9 @@ jobs:
     name: "GCC static -fanalyzer"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+        with:
+          filter: tree:0
 
       - name: Install libelf
         run: |
@@ -66,7 +68,9 @@ jobs:
     name: "GCC build X86_64 with W=1"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+        with:
+          filter: tree:0
 
       - name: Fetch kconfig
         uses: actions/checkout@v3
@@ -91,7 +95,10 @@ jobs:
     name: "GCC build X86_64 with W=1 allmodconfig"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+        with:
+          filter: tree:0
+          fetch-depth: 0
 
       - name: Install libelf
         run: |
@@ -110,7 +117,10 @@ jobs:
     name: "GCC build X86_64"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+        with:
+          filter: tree:0
+          fetch-depth: 0
 
       - name: Fetch kconfig
         uses: actions/checkout@v3
@@ -140,7 +150,10 @@ jobs:
     name: "GCC build i386"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+        with:
+          filter: tree:0
+          fetch-depth: 1
 
       - name: Fetch kconfig
         uses: actions/checkout@v3
@@ -161,7 +174,9 @@ jobs:
     name: "GCC build arm64"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Fetch kconfig
         uses: actions/checkout@v3
@@ -206,6 +221,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
 
       - name: Fetch kconfig
         uses: actions/checkout@v3
