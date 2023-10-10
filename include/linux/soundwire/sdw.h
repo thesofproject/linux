@@ -835,6 +835,15 @@ struct sdw_defer {
 	struct sdw_msg *msg;
 };
 
+/*
+ * Add a practical limit to BPT transfer sizes. BPT is typically used
+ * to transfer firmware, and larger firmware transfers will increase
+ * the cold latency beyond typical OS or user requirements.
+ */
+#define SDW_BPT_MSG_MAX_BYTES  (1024 * 1024)
+
+struct sdw_bpt_msg;
+
 /**
  * struct sdw_master_ops - Master driver ops
  * @read_prop: Read Master properties
@@ -850,6 +859,10 @@ struct sdw_defer {
  * @get_device_num: Callback for vendor-specific device_number allocation
  * @put_device_num: Callback for vendor-specific device_number release
  * @new_peripheral_assigned: Callback to handle enumeration of new peripheral.
+ * @bpt_send_async: reserve resources for BPT stream and send message
+ * using BTP protocol
+ * @bpt_wait: wait for message completion using BTP protocol
+ * and release resources
  */
 struct sdw_master_ops {
 	int (*read_prop)(struct sdw_bus *bus);
@@ -869,6 +882,12 @@ struct sdw_master_ops {
 	void (*new_peripheral_assigned)(struct sdw_bus *bus,
 					struct sdw_slave *slave,
 					int dev_num);
+	int (*bpt_send_async)(struct sdw_bus *bus,
+			      struct sdw_slave *slave,
+			      struct sdw_bpt_msg *msg);
+	int (*bpt_wait)(struct sdw_bus *bus,
+			struct sdw_slave *slave,
+			struct sdw_bpt_msg *msg);
 };
 
 /**
@@ -905,6 +924,8 @@ struct sdw_master_ops {
  * synchronization will be used even if a stream only uses a single
  * SoundWire segment.
  * @stream_refcount: number of streams currently using this bus
+ * @btp_stream_refcount: number of BTP streams currently using this bus (should
+ * be zero or one, multiple streams per link is not supported).
  */
 struct sdw_bus {
 	struct device *dev;
@@ -935,6 +956,7 @@ struct sdw_bus {
 	bool multi_link;
 	int hw_sync_min_links;
 	int stream_refcount;
+	int bpt_stream_refcount;
 };
 
 int sdw_bus_master_add(struct sdw_bus *bus, struct device *parent,
@@ -1051,6 +1073,13 @@ int sdw_bus_exit_clk_stop(struct sdw_bus *bus);
 
 int sdw_compare_devid(struct sdw_slave *slave, struct sdw_slave_id id);
 void sdw_extract_slave_id(struct sdw_bus *bus, u64 addr, struct sdw_slave_id *id);
+
+int sdw_bpt_send_async(struct sdw_bus *bus,
+		       struct sdw_slave *slave,
+		       struct sdw_bpt_msg *msg);
+int sdw_bpt_wait(struct sdw_bus *bus,
+		 struct sdw_slave *slave,
+		 struct sdw_bpt_msg *msg);
 
 #if IS_ENABLED(CONFIG_SOUNDWIRE)
 
