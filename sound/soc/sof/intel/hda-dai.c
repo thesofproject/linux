@@ -476,8 +476,8 @@ int sdw_hda_dai_hw_params(struct snd_pcm_substream *substream,
 
 	ch_mask = 0;
 	for_each_rtd_codec_dais(rtd, j, codec_dai) {
-		if (rtd->dai_link->codec_ch_maps[j].connected_cpu_id == cpu_dai_id)
-			ch_mask |= rtd->dai_link->codec_ch_maps[j].ch_mask;
+		if (rtd->dai_link->ch_maps[j].connected_node == cpu_dai_id)
+			ch_mask |= rtd->dai_link->ch_maps[j].ch_mask;
 	}
 
 	ret = hdac_bus_eml_sdw_map_stream_ch(sof_to_bus(sdev), link_id, cpu_dai->id,
