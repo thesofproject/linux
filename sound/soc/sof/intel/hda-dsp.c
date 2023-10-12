@@ -1040,10 +1040,9 @@ int hda_dsp_set_hw_params_upon_resume(struct snd_sof_dev *sdev)
 
 void hda_dsp_d0i3_work(struct work_struct *work)
 {
-	struct sof_intel_hda_dev *hdev = container_of(work,
-						      struct sof_intel_hda_dev,
-						      d0i3_work.work);
-	struct hdac_bus *bus = &hdev->hbus.core;
+	struct sof_intel_hda_dev *hda = container_of(work, struct sof_intel_hda_dev,
+						     d0i3_work.work);
+	struct hdac_bus *bus = &hda->hbus.core;
 	struct snd_sof_dev *sdev = dev_get_drvdata(bus->dev);
 	struct sof_dsp_power_state target_state = {
 		.state = SOF_DSP_PM_D0,

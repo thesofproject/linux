@@ -80,7 +80,7 @@ static inline bool hda_dsp_ipc4_pm_msg(u32 primary)
 	return false;
 }
 
-void hda_dsp_ipc4_schedule_d0i3_work(struct sof_intel_hda_dev *hdev,
+void hda_dsp_ipc4_schedule_d0i3_work(struct sof_intel_hda_dev *hda,
 				     struct snd_sof_ipc_msg *msg)
 {
 	struct sof_ipc4_msg *msg_data = msg->msg_data;
@@ -89,21 +89,21 @@ void hda_dsp_ipc4_schedule_d0i3_work(struct sof_intel_hda_dev *hdev,
 	if (hda_dsp_ipc4_pm_msg(msg_data->primary))
 		return;
 
-	mod_delayed_work(system_wq, &hdev->d0i3_work,
+	mod_delayed_work(system_wq, &hda->d0i3_work,
 			 msecs_to_jiffies(SOF_HDA_D0I3_WORK_DELAY_MS));
 }
 
 int hda_dsp_ipc4_send_msg(struct snd_sof_dev *sdev, struct snd_sof_ipc_msg *msg)
 {
-	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct sof_ipc4_msg *msg_data = msg->msg_data;
 
 	if (hda_ipc4_tx_is_busy(sdev)) {
-		hdev->delayed_ipc_tx_msg = msg;
+		hda->delayed_ipc_tx_msg = msg;
 		return 0;
 	}
 
-	hdev->delayed_ipc_tx_msg = NULL;
+	hda->delayed_ipc_tx_msg = NULL;
 
 	/* send the message via mailbox */
 	if (msg_data->data_size)
@@ -114,7 +114,7 @@ int hda_dsp_ipc4_send_msg(struct snd_sof_dev *sdev, struct snd_sof_ipc_msg *msg)
 	snd_sof_dsp_write(sdev, HDA_DSP_BAR, HDA_DSP_REG_HIPCI,
 			  msg_data->primary | HDA_DSP_REG_HIPCI_BUSY);
 
-	hda_dsp_ipc4_schedule_d0i3_work(hdev, msg);
+	hda_dsp_ipc4_schedule_d0i3_work(hda, msg);
 
 	return 0;
 }
@@ -227,10 +227,10 @@ irqreturn_t hda_dsp_ipc4_irq_thread(int irq, void *context)
 		dev_dbg_ratelimited(sdev->dev, "nothing to do in IPC IRQ thread\n");
 
 	if (ack_received) {
-		struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+		struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 
-		if (hdev->delayed_ipc_tx_msg)
-			hda_dsp_ipc4_send_msg(sdev, hdev->delayed_ipc_tx_msg);
+		if (hda->delayed_ipc_tx_msg)
+			hda_dsp_ipc4_send_msg(sdev, hda->delayed_ipc_tx_msg);
 	}
 
 	return IRQ_HANDLED;

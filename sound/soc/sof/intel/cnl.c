@@ -102,10 +102,10 @@ irqreturn_t cnl_ipc4_irq_thread(int irq, void *context)
 		dev_dbg_ratelimited(sdev->dev, "nothing to do in IPC IRQ thread\n");
 
 	if (ack_received) {
-		struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+		struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 
-		if (hdev->delayed_ipc_tx_msg)
-			cnl_ipc4_send_msg(sdev, hdev->delayed_ipc_tx_msg);
+		if (hda->delayed_ipc_tx_msg)
+			cnl_ipc4_send_msg(sdev, hda->delayed_ipc_tx_msg);
 	}
 
 	return IRQ_HANDLED;
@@ -261,15 +261,15 @@ static bool cnl_compact_ipc_compress(struct snd_sof_ipc_msg *msg,
 
 int cnl_ipc4_send_msg(struct snd_sof_dev *sdev, struct snd_sof_ipc_msg *msg)
 {
-	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct sof_ipc4_msg *msg_data = msg->msg_data;
 
 	if (hda_ipc4_tx_is_busy(sdev)) {
-		hdev->delayed_ipc_tx_msg = msg;
+		hda->delayed_ipc_tx_msg = msg;
 		return 0;
 	}
 
-	hdev->delayed_ipc_tx_msg = NULL;
+	hda->delayed_ipc_tx_msg = NULL;
 
 	/* send the message via mailbox */
 	if (msg_data->data_size)
@@ -280,14 +280,14 @@ int cnl_ipc4_send_msg(struct snd_sof_dev *sdev, struct snd_sof_ipc_msg *msg)
 	snd_sof_dsp_write(sdev, HDA_DSP_BAR, CNL_DSP_REG_HIPCIDR,
 			  msg_data->primary | CNL_DSP_REG_HIPCIDR_BUSY);
 
-	hda_dsp_ipc4_schedule_d0i3_work(hdev, msg);
+	hda_dsp_ipc4_schedule_d0i3_work(hda, msg);
 
 	return 0;
 }
 
 int cnl_ipc_send_msg(struct snd_sof_dev *sdev, struct snd_sof_ipc_msg *msg)
 {
-	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct sof_ipc_cmd_hdr *hdr;
 	u32 dr = 0;
 	u32 dd = 0;
@@ -326,7 +326,7 @@ int cnl_ipc_send_msg(struct snd_sof_dev *sdev, struct snd_sof_ipc_msg *msg)
 	 * CTX_SAVE IPC, which is sent before the DSP enters D3.
 	 */
 	if (hdr->cmd != (SOF_IPC_GLB_PM_MSG | SOF_IPC_PM_CTX_SAVE))
-		mod_delayed_work(system_wq, &hdev->d0i3_work,
+		mod_delayed_work(system_wq, &hda->d0i3_work,
 				 msecs_to_jiffies(SOF_HDA_D0I3_WORK_DELAY_MS));
 
 	return 0;

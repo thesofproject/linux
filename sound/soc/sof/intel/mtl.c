@@ -94,15 +94,15 @@ static bool mtl_dsp_check_sdw_irq(struct snd_sof_dev *sdev)
 
 int mtl_ipc_send_msg(struct snd_sof_dev *sdev, struct snd_sof_ipc_msg *msg)
 {
-	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct sof_ipc4_msg *msg_data = msg->msg_data;
 
 	if (hda_ipc4_tx_is_busy(sdev)) {
-		hdev->delayed_ipc_tx_msg = msg;
+		hda->delayed_ipc_tx_msg = msg;
 		return 0;
 	}
 
-	hdev->delayed_ipc_tx_msg = NULL;
+	hda->delayed_ipc_tx_msg = NULL;
 
 	/* send the message via mailbox */
 	if (msg_data->data_size)
@@ -114,7 +114,7 @@ int mtl_ipc_send_msg(struct snd_sof_dev *sdev, struct snd_sof_ipc_msg *msg)
 	snd_sof_dsp_write(sdev, HDA_DSP_BAR, MTL_DSP_REG_HFIPCXIDR,
 			  msg_data->primary | MTL_DSP_REG_HFIPCXIDR_BUSY);
 
-	hda_dsp_ipc4_schedule_d0i3_work(hdev, msg);
+	hda_dsp_ipc4_schedule_d0i3_work(hda, msg);
 
 	return 0;
 }
@@ -233,7 +233,7 @@ int mtl_enable_interrupts(struct snd_sof_dev *sdev, bool enable)
 /* pre fw run operations */
 int mtl_dsp_pre_fw_run(struct snd_sof_dev *sdev)
 {
-	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	u32 dsphfpwrsts;
 	u32 dsphfdsscs;
 	u32 cpa;
@@ -273,7 +273,7 @@ int mtl_dsp_pre_fw_run(struct snd_sof_dev *sdev)
 		dev_err(sdev->dev, "failed to power up gated DSP domain\n");
 
 	/* if SoundWire is used, make sure it is not power-gated */
-	if (hdev->info.handle && hdev->info.link_mask > 0)
+	if (hda->info.handle && hda->info.link_mask > 0)
 		snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR, MTL_HFPWRCTL,
 					MTL_HfPWRCTL_WPIOXPG(1), MTL_HfPWRCTL_WPIOXPG(1));
 
@@ -285,7 +285,7 @@ int mtl_dsp_post_fw_run(struct snd_sof_dev *sdev)
 	int ret;
 
 	if (sdev->first_boot) {
-		struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+		struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 
 		ret = hda_sdw_startup(sdev);
 		if (ret < 0) {
@@ -295,7 +295,7 @@ int mtl_dsp_post_fw_run(struct snd_sof_dev *sdev)
 
 		/* Check if IMR boot is usable */
 		if (!sof_debug_check_flag(SOF_DBG_IGNORE_D3_PERSISTENT))
-			hdev->imrboot_supported = true;
+			hda->imrboot_supported = true;
 	}
 
 	hda_sdw_int_enable(sdev, true);
@@ -572,10 +572,10 @@ irqreturn_t mtl_ipc_irq_thread(int irq, void *context)
 	}
 
 	if (ack_received) {
-		struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+		struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 
-		if (hdev->delayed_ipc_tx_msg)
-			mtl_ipc_send_msg(sdev, hdev->delayed_ipc_tx_msg);
+		if (hda->delayed_ipc_tx_msg)
+			mtl_ipc_send_msg(sdev, hda->delayed_ipc_tx_msg);
 	}
 
 	return IRQ_HANDLED;
