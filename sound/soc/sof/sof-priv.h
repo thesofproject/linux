@@ -53,6 +53,8 @@ struct snd_sof_pcm_stream;
 							 */
 #define SOF_DBG_DSPLESS_MODE			BIT(15) /* Do not initialize and use the DSP */
 
+#define SOF_DBG_D3_CONTEXT_LOST		BIT(16) /* initialize fw upon D3 exit */
+
 /* Flag definitions used for controlling the DSP dump behavior */
 #define SOF_DBG_DUMP_REGS		BIT(0)
 #define SOF_DBG_DUMP_MBOX		BIT(1)
