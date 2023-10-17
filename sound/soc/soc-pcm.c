@@ -1056,7 +1056,11 @@ static int __soc_pcm_hw_params(struct snd_soc_pcm_runtime *rtd,
 		/* copy params for each cpu */
 		tmp_params = *params;
 
-		/*
+		/* ch_map is only set in BE dai link */
+		if (rtd->dai_link->dynamic)
+			goto run;
+
+	       /*
 		 * construct cpu channel mask by combining ch_mask of each
 		 * codec which maps to the cpu.
 		 * see
@@ -1070,6 +1074,7 @@ static int __soc_pcm_hw_params(struct snd_soc_pcm_runtime *rtd,
 		if (ch_mask)
 			soc_pcm_codec_params_fixup(&tmp_params, ch_mask);
 
+run:
 		ret = snd_soc_dai_hw_params(cpu_dai, substream, &tmp_params);
 		if (ret < 0)
 			goto out;
