@@ -525,8 +525,8 @@ int hda_dsp_ipc4_load_library(struct snd_sof_dev *sdev,
 	struct snd_dma_buffer dmab;
 	int ret, ret1;
 
-	/* IMR booting will restore the libraries as well, skip the loading */
-	if (reload && hda->booted_from_imr)
+	/* if IMR booting and D3 context save are supported, skip the loading */
+	if (reload && hda->booted_from_imr && sdev->fw_ready.flags & SOF_IPC_INFO_CONTEXT_SAVE)
 		return 0;
 
 	/* the fw_lib has been verified during loading, we can trust the validity here */
