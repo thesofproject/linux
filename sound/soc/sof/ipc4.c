@@ -574,6 +574,8 @@ EXPORT_SYMBOL(sof_ipc4_find_debug_slot_offset_by_type);
 static int ipc4_fw_ready(struct snd_sof_dev *sdev, struct sof_ipc4_msg *ipc4_msg)
 {
 	int inbox_offset, inbox_size, outbox_offset, outbox_size;
+	struct sof_ipc_fw_ready *fw_ready = &sdev->fw_ready;
+	int ret;
 
 	/* no need to re-check version/ABI for subsequent boots */
 	if (!sdev->first_boot)
@@ -598,6 +600,13 @@ static int ipc4_fw_ready(struct snd_sof_dev *sdev, struct sof_ipc4_msg *ipc4_msg
 
 	sdev->debug_box.offset = snd_sof_dsp_get_window_offset(sdev,
 							SOF_IPC4_DEBUG_WINDOW_IDX);
+
+	ret = snd_sof_dsp_block_read(sdev, SOF_FW_BLK_TYPE_SRAM, inbox_offset, fw_ready,
+				     sizeof(*fw_ready));
+	if (ret) {
+		dev_err(sdev->dev, "Unable to read fw_ready, read from TYPE_SRAM failed\n");
+		return ret;
+	}
 
 	sof_ipc4_create_exception_debugfs_node(sdev);
 
