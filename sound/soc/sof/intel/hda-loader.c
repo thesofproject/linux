@@ -630,7 +630,7 @@ int hda_dsp_post_fw_run(struct snd_sof_dev *sdev)
 	int ret;
 
 	if (sdev->first_boot) {
-		struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
+		struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
 
 		ret = hda_sdw_startup(sdev);
 		if (ret < 0) {
@@ -643,7 +643,7 @@ int hda_dsp_post_fw_run(struct snd_sof_dev *sdev)
 		if (!sof_debug_check_flag(SOF_DBG_IGNORE_D3_PERSISTENT) &&
 		    (sdev->fw_ready.flags & SOF_IPC_INFO_D3_PERSISTENT ||
 		     sdev->pdata->ipc_type == SOF_IPC_TYPE_4))
-			hda->imrboot_supported = true;
+			hdev->imrboot_supported = true;
 	}
 
 	hda_sdw_int_enable(sdev, true);

@@ -182,11 +182,11 @@ static struct sdw_intel_ops sdw_ace2x_callback = {
 
 void hda_common_enable_sdw_irq(struct snd_sof_dev *sdev, bool enable)
 {
-	struct sof_intel_hda_dev *hda;
+	struct sof_intel_hda_dev *hdev;
 
-	hda = sdev->pdata->hw_pdata;
+	hdev = sdev->pdata->hw_pdata;
 
-	if (!hda->sdw)
+	if (!hdev->sdw)
 		return;
 
 	snd_sof_dsp_update_bits(sdev, HDA_DSP_BAR, HDA_DSP_REG_ADSPIC2,
@@ -210,7 +210,7 @@ void hda_sdw_int_enable(struct snd_sof_dev *sdev, bool enable)
 static int hda_sdw_acpi_scan(struct snd_sof_dev *sdev)
 {
 	u32 interface_mask = hda_get_interface_mask(sdev);
-	struct sof_intel_hda_dev *hda;
+	struct sof_intel_hda_dev *hdev;
 	acpi_handle handle;
 	int ret;
 
@@ -220,9 +220,9 @@ static int hda_sdw_acpi_scan(struct snd_sof_dev *sdev)
 	handle = ACPI_HANDLE(sdev->dev);
 
 	/* save ACPI info for the probe step */
-	hda = sdev->pdata->hw_pdata;
+	hdev = sdev->pdata->hw_pdata;
 
-	ret = sdw_intel_acpi_scan(handle, &hda->info);
+	ret = sdw_intel_acpi_scan(handle, &hdev->info);
 	if (ret < 0)
 		return -EINVAL;
 
@@ -232,11 +232,11 @@ static int hda_sdw_acpi_scan(struct snd_sof_dev *sdev)
 static int hda_sdw_probe(struct snd_sof_dev *sdev)
 {
 	const struct sof_intel_dsp_desc *chip;
-	struct sof_intel_hda_dev *hda;
+	struct sof_intel_hda_dev *hdev;
 	struct sdw_intel_res res;
 	void *sdw;
 
-	hda = sdev->pdata->hw_pdata;
+	hdev = sdev->pdata->hw_pdata;
 
 	memset(&res, 0, sizeof(res));
 
@@ -244,8 +244,8 @@ static int hda_sdw_probe(struct snd_sof_dev *sdev)
 	if (chip->hw_ip_version < SOF_INTEL_ACE_2_0) {
 		res.mmio_base = sdev->bar[HDA_DSP_BAR];
 		res.hw_ops = &sdw_intel_cnl_hw_ops;
-		res.shim_base = hda->desc->sdw_shim_base;
-		res.alh_base = hda->desc->sdw_alh_base;
+		res.shim_base = hdev->desc->sdw_shim_base;
+		res.alh_base = hdev->desc->sdw_alh_base;
 		res.ext = false;
 		res.ops = &sdw_callback;
 	} else {
@@ -269,7 +269,7 @@ static int hda_sdw_probe(struct snd_sof_dev *sdev)
 
 	}
 	res.irq = sdev->ipc_irq;
-	res.handle = hda->info.handle;
+	res.handle = hdev->info.handle;
 	res.parent = sdev->dev;
 
 	res.dev = sdev->dev;
@@ -283,8 +283,8 @@ static int hda_sdw_probe(struct snd_sof_dev *sdev)
 	 */
 
 	/* we could filter links here if needed, e.g for quirks */
-	res.count = hda->info.count;
-	res.link_mask = hda->info.link_mask;
+	res.count = hdev->info.count;
+	res.link_mask = hdev->info.link_mask;
 
 	sdw = sdw_intel_probe(&res);
 	if (!sdw) {
@@ -293,19 +293,19 @@ static int hda_sdw_probe(struct snd_sof_dev *sdev)
 	}
 
 	/* save context */
-	hda->sdw = sdw;
+	hdev->sdw = sdw;
 
 	return 0;
 }
 
 int hda_sdw_check_lcount_common(struct snd_sof_dev *sdev)
 {
-	struct sof_intel_hda_dev *hda;
+	struct sof_intel_hda_dev *hdev;
 	struct sdw_intel_ctx *ctx;
 	u32 caps;
 
-	hda = sdev->pdata->hw_pdata;
-	ctx = hda->sdw;
+	hdev = sdev->pdata->hw_pdata;
+	ctx = hdev->sdw;
 
 	caps = snd_sof_dsp_read(sdev, HDA_DSP_BAR, ctx->shim_base + SDW_SHIM_LCAP);
 	caps &= SDW_SHIM_LCAP_LCOUNT_MASK;
@@ -323,15 +323,15 @@ int hda_sdw_check_lcount_common(struct snd_sof_dev *sdev)
 
 int hda_sdw_check_lcount_ext(struct snd_sof_dev *sdev)
 {
-	struct sof_intel_hda_dev *hda;
+	struct sof_intel_hda_dev *hdev;
 	struct sdw_intel_ctx *ctx;
 	struct hdac_bus *bus;
 	u32 slcount;
 
 	bus = sof_to_bus(sdev);
 
-	hda = sdev->pdata->hw_pdata;
-	ctx = hda->sdw;
+	hdev = sdev->pdata->hw_pdata;
+	ctx = hdev->sdw;
 
 	slcount = hdac_bus_eml_get_count(bus, true, AZX_REG_ML_LEPTR_ID_SDW);
 
@@ -359,13 +359,13 @@ static int hda_sdw_check_lcount(struct snd_sof_dev *sdev)
 
 int hda_sdw_startup(struct snd_sof_dev *sdev)
 {
-	struct sof_intel_hda_dev *hda;
+	struct sof_intel_hda_dev *hdev;
 	struct snd_sof_pdata *pdata = sdev->pdata;
 	int ret;
 
-	hda = sdev->pdata->hw_pdata;
+	hdev = sdev->pdata->hw_pdata;
 
-	if (!hda->sdw)
+	if (!hdev->sdw)
 		return 0;
 
 	if (pdata->machine && !pdata->machine->mach_params.link_mask)
@@ -375,33 +375,33 @@ int hda_sdw_startup(struct snd_sof_dev *sdev)
 	if (ret < 0)
 		return ret;
 
-	return sdw_intel_startup(hda->sdw);
+	return sdw_intel_startup(hdev->sdw);
 }
 
 static int hda_sdw_exit(struct snd_sof_dev *sdev)
 {
-	struct sof_intel_hda_dev *hda;
+	struct sof_intel_hda_dev *hdev;
 
-	hda = sdev->pdata->hw_pdata;
+	hdev = sdev->pdata->hw_pdata;
 
 	hda_sdw_int_enable(sdev, false);
 
-	if (hda->sdw)
-		sdw_intel_exit(hda->sdw);
-	hda->sdw = NULL;
+	if (hdev->sdw)
+		sdw_intel_exit(hdev->sdw);
+	hdev->sdw = NULL;
 
 	return 0;
 }
 
 bool hda_common_check_sdw_irq(struct snd_sof_dev *sdev)
 {
-	struct sof_intel_hda_dev *hda;
+	struct sof_intel_hda_dev *hdev;
 	bool ret = false;
 	u32 irq_status;
 
-	hda = sdev->pdata->hw_pdata;
+	hdev = sdev->pdata->hw_pdata;
 
-	if (!hda->sdw)
+	if (!hdev->sdw)
 		return ret;
 
 	/* store status */
@@ -441,12 +441,12 @@ static irqreturn_t hda_dsp_sdw_thread(int irq, void *context)
 
 bool hda_sdw_check_wakeen_irq_common(struct snd_sof_dev *sdev)
 {
-	struct sof_intel_hda_dev *hda;
+	struct sof_intel_hda_dev *hdev;
 
-	hda = sdev->pdata->hw_pdata;
-	if (hda->sdw &&
+	hdev = sdev->pdata->hw_pdata;
+	if (hdev->sdw &&
 	    snd_sof_dsp_read(sdev, HDA_DSP_BAR,
-			     hda->desc->sdw_shim_base + SDW_SHIM_WAKESTS))
+			     hdev->desc->sdw_shim_base + SDW_SHIM_WAKESTS))
 		return true;
 
 	return false;
@@ -470,16 +470,16 @@ static bool hda_sdw_check_wakeen_irq(struct snd_sof_dev *sdev)
 void hda_sdw_process_wakeen(struct snd_sof_dev *sdev)
 {
 	u32 interface_mask = hda_get_interface_mask(sdev);
-	struct sof_intel_hda_dev *hda;
+	struct sof_intel_hda_dev *hdev;
 
 	if (!(interface_mask & BIT(SOF_DAI_INTEL_ALH)))
 		return;
 
-	hda = sdev->pdata->hw_pdata;
-	if (!hda->sdw)
+	hdev = sdev->pdata->hw_pdata;
+	if (!hdev->sdw)
 		return;
 
-	sdw_intel_process_wakeen_event(hda->sdw);
+	sdw_intel_process_wakeen_event(hdev->sdw);
 }
 
 #else /* IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_SOUNDWIRE) */
@@ -914,11 +914,11 @@ static int hda_init(struct snd_sof_dev *sdev)
 
 static int check_dmic_num(struct snd_sof_dev *sdev)
 {
-	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
+	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
 	struct nhlt_acpi_table *nhlt;
 	int dmic_num = 0;
 
-	nhlt = hda->nhlt;
+	nhlt = hdev->nhlt;
 	if (nhlt)
 		dmic_num = intel_nhlt_get_dmic_geo(sdev->dev, nhlt);
 
@@ -940,11 +940,11 @@ static int check_dmic_num(struct snd_sof_dev *sdev)
 
 static int check_nhlt_ssp_mask(struct snd_sof_dev *sdev)
 {
-	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
+	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
 	struct nhlt_acpi_table *nhlt;
 	int ssp_mask = 0;
 
-	nhlt = hda->nhlt;
+	nhlt = hdev->nhlt;
 	if (!nhlt)
 		return ssp_mask;
 
@@ -959,10 +959,10 @@ static int check_nhlt_ssp_mask(struct snd_sof_dev *sdev)
 
 static int check_nhlt_ssp_mclk_mask(struct snd_sof_dev *sdev, int ssp_num)
 {
-	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
+	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
 	struct nhlt_acpi_table *nhlt;
 
-	nhlt = hda->nhlt;
+	nhlt = hdev->nhlt;
 	if (!nhlt)
 		return 0;
 
@@ -1050,7 +1050,7 @@ static int hda_init_caps(struct snd_sof_dev *sdev)
 	u32 interface_mask = hda_get_interface_mask(sdev);
 	struct hdac_bus *bus = sof_to_bus(sdev);
 	struct snd_sof_pdata *pdata = sdev->pdata;
-	struct sof_intel_hda_dev *hda = pdata->hw_pdata;
+	struct sof_intel_hda_dev *hdev = pdata->hw_pdata;
 	u32 link_mask;
 	int ret = 0;
 
@@ -1079,7 +1079,7 @@ static int hda_init_caps(struct snd_sof_dev *sdev)
 		goto skip_soundwire;
 	}
 
-	link_mask = hda->info.link_mask;
+	link_mask = hdev->info.link_mask;
 	if (!link_mask) {
 		dev_dbg(sdev->dev, "skipping SoundWire, no links enabled\n");
 		goto skip_soundwire;
@@ -1137,7 +1137,7 @@ static irqreturn_t hda_dsp_interrupt_handler(int irq, void *context)
 static irqreturn_t hda_dsp_interrupt_thread(int irq, void *context)
 {
 	struct snd_sof_dev *sdev = context;
-	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
+	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
 
 	/* deal with streams and controller first */
 	if (hda_dsp_check_stream_irq(sdev)) {
@@ -1152,7 +1152,7 @@ static irqreturn_t hda_dsp_interrupt_thread(int irq, void *context)
 
 	if (hda_dsp_check_sdw_irq(sdev)) {
 		trace_sof_intel_hda_irq(sdev, "sdw");
-		hda_dsp_sdw_thread(irq, hda->sdw);
+		hda_dsp_sdw_thread(irq, hdev->sdw);
 	}
 
 	if (hda_sdw_check_wakeen_irq(sdev)) {
@@ -1174,7 +1174,7 @@ static irqreturn_t hda_dsp_interrupt_thread(int irq, void *context)
 int hda_dsp_probe(struct snd_sof_dev *sdev)
 {
 	struct pci_dev *pci = to_pci_dev(sdev->dev);
-	struct sof_intel_hda_dev *hda;
+	struct sof_intel_hda_dev *hdev;
 	struct hdac_bus *bus;
 	const struct sof_intel_dsp_desc *chip;
 	int ret = 0;
@@ -1209,18 +1209,18 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 
 	sdev->num_cores = chip->cores_num;
 
-	hda = devm_kzalloc(sdev->dev, sizeof(*hda), GFP_KERNEL);
-	if (!hda)
+	hdev = devm_kzalloc(sdev->dev, sizeof(*hdev), GFP_KERNEL);
+	if (!hdev)
 		return -ENOMEM;
-	sdev->pdata->hw_pdata = hda;
-	hda->desc = chip;
+	sdev->pdata->hw_pdata = hdev;
+	hdev->desc = chip;
 
-	hda->dmic_dev = platform_device_register_data(sdev->dev, "dmic-codec",
-						      PLATFORM_DEVID_NONE,
-						      NULL, 0);
-	if (IS_ERR(hda->dmic_dev)) {
+	hdev->dmic_dev = platform_device_register_data(sdev->dev, "dmic-codec",
+						       PLATFORM_DEVID_NONE,
+						       NULL, 0);
+	if (IS_ERR(hdev->dmic_dev)) {
 		dev_err(sdev->dev, "error: failed to create DMIC device\n");
-		return PTR_ERR(hda->dmic_dev);
+		return PTR_ERR(hdev->dmic_dev);
 	}
 
 	/*
@@ -1228,13 +1228,13 @@ int hda_dsp_probe(struct snd_sof_dev *sdev)
 	 * or we don't have other choice
 	 */
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_FORCE_IPC_POSITION)
-	hda->no_ipc_position = 0;
+	hdev->no_ipc_position = 0;
 #else
-	hda->no_ipc_position = sof_ops(sdev)->pcm_pointer ? 1 : 0;
+	hdev->no_ipc_position = sof_ops(sdev)->pcm_pointer ? 1 : 0;
 #endif
 
 	if (sdev->dspless_mode_selected)
-		hda->no_ipc_position = 1;
+		hdev->no_ipc_position = 1;
 
 	/* set up HDA base */
 	bus = sof_to_bus(sdev);
@@ -1329,12 +1329,12 @@ skip_dsp_setup:
 		/* set default mailbox offset for FW ready message */
 		sdev->dsp_box.offset = HDA_DSP_MBOX_UPLINK_OFFSET;
 
-		INIT_DELAYED_WORK(&hda->d0i3_work, hda_dsp_d0i3_work);
+		INIT_DELAYED_WORK(&hdev->d0i3_work, hda_dsp_d0i3_work);
 	}
 
-	init_waitqueue_head(&hda->waitq);
+	init_waitqueue_head(&hdev->waitq);
 
-	hda->nhlt = intel_nhlt_init(sdev->dev);
+	hdev->nhlt = intel_nhlt_init(sdev->dev);
 
 	return 0;
 
@@ -1349,7 +1349,7 @@ free_streams:
 	if (!sdev->dspless_mode_selected)
 		iounmap(sdev->bar[HDA_DSP_BAR]);
 hdac_bus_unmap:
-	platform_device_unregister(hda->dmic_dev);
+	platform_device_unregister(hdev->dmic_dev);
 	iounmap(bus->remap_addr);
 	hda_codec_i915_exit(sdev);
 err:
@@ -1500,9 +1500,9 @@ static void hda_generic_machine_select(struct snd_sof_dev *sdev,
 				 * was detected. This will not create a SoundWire card but
 				 * will help detect if any SoundWire codec reports as ATTACHED.
 				 */
-				struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
+				struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
 
-				hda_mach->mach_params.link_mask = hda->info.link_mask;
+				hda_mach->mach_params.link_mask = hdev->info.link_mask;
 			}
 
 			*mach = hda_mach;
@@ -1530,12 +1530,12 @@ static struct snd_soc_acpi_mach *hda_sdw_machine_select(struct snd_sof_dev *sdev
 	struct snd_sof_pdata *pdata = sdev->pdata;
 	const struct snd_soc_acpi_link_adr *link;
 	struct snd_soc_acpi_mach *mach;
-	struct sof_intel_hda_dev *hda;
+	struct sof_intel_hda_dev *hdev;
 	u32 link_mask;
 	int i;
 
-	hda = pdata->hw_pdata;
-	link_mask = hda->info.link_mask;
+	hdev = pdata->hw_pdata;
+	link_mask = hdev->info.link_mask;
 
 	/*
 	 * Select SoundWire machine driver if needed using the
@@ -1562,19 +1562,19 @@ static struct snd_soc_acpi_mach *hda_sdw_machine_select(struct snd_sof_dev *sdev
 				break;
 
 			link = mach->links;
-			for (i = 0; i < hda->info.count && link->num_adr;
+			for (i = 0; i < hdev->info.count && link->num_adr;
 			     i++, link++) {
 				/*
 				 * Try next machine if any expected Slaves
 				 * are not found on this link.
 				 */
 				if (!snd_soc_acpi_sdw_link_slaves_found(sdev->dev, link,
-									hda->sdw->ids,
-									hda->sdw->num_slaves))
+									hdev->sdw->ids,
+									hdev->sdw->num_slaves))
 					break;
 			}
 			/* Found if all Slaves are checked */
-			if (i == hda->info.count || !link->num_adr)
+			if (i == hdev->info.count || !link->num_adr)
 				break;
 		}
 		if (mach && mach->link_mask) {

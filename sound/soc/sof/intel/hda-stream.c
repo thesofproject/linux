@@ -750,7 +750,7 @@ hda_dsp_compr_bytes_transferred(struct hdac_stream *hstream, int direction)
 
 static bool hda_dsp_stream_check(struct hdac_bus *bus, u32 status)
 {
-	struct sof_intel_hda_dev *hda = bus_to_sof_hda(bus);
+	struct sof_intel_hda_dev *sof_hda = bus_to_sof_hda(bus);
 	struct hdac_stream *s;
 	bool active = false;
 	u32 sd_status;
@@ -770,7 +770,7 @@ static bool hda_dsp_stream_check(struct hdac_bus *bus, u32 status)
 				continue;
 
 			/* Inform ALSA only in case not do that with IPC */
-			if (s->substream && hda->no_ipc_position) {
+			if (s->substream && sof_hda->no_ipc_position) {
 				snd_sof_pcm_period_elapsed(s->substream);
 			} else if (s->cstream) {
 				hda_dsp_compr_bytes_transferred(s, s->cstream->direction);
@@ -818,7 +818,7 @@ int hda_dsp_stream_init(struct snd_sof_dev *sdev)
 	struct hdac_ext_stream *hext_stream;
 	struct hdac_stream *hstream;
 	struct pci_dev *pci = to_pci_dev(sdev->dev);
-	struct sof_intel_hda_dev *hda = bus_to_sof_hda(bus);
+	struct sof_intel_hda_dev *sof_hda = bus_to_sof_hda(bus);
 	int sd_offset;
 	int i, num_playback, num_capture, num_total, ret;
 	u32 gcap;
@@ -935,7 +935,7 @@ int hda_dsp_stream_init(struct snd_sof_dev *sdev)
 	}
 
 	/* store total stream count (playback + capture) from GCAP */
-	hda->stream_max = num_total;
+	sof_hda->stream_max = num_total;
 
 	return 0;
 }
