@@ -10,6 +10,7 @@
  */
 
 #include <linux/firmware.h>
+#include <sound/hda_i915.h>
 #include <sound/sof/ipc4/header.h>
 #include <trace/events/sof_intel.h>
 #include "../ipc4-priv.h"
@@ -672,12 +673,21 @@ static int mtl_dsp_core_put(struct snd_sof_dev *sdev, int core)
 struct snd_sof_dsp_ops sof_mtl_ops;
 EXPORT_SYMBOL_NS(sof_mtl_ops, SND_SOC_SOF_INTEL_HDA_COMMON);
 
+static int mtl_hda_dsp_probe_early(struct snd_sof_dev *sdev)
+{
+	snd_hdac_i915_bind(sof_to_bus(sdev), 0);
+	return hda_dsp_probe_early(sdev);
+}
+
 int sof_mtl_ops_init(struct snd_sof_dev *sdev)
 {
 	struct sof_ipc4_fw_data *ipc4_data;
 
 	/* common defaults */
 	memcpy(&sof_mtl_ops, &sof_hda_common_ops, sizeof(struct snd_sof_dsp_ops));
+
+	/* probe_early */
+	sof_mtl_ops.probe_early = mtl_hda_dsp_probe_early;
 
 	/* shutdown */
 	sof_mtl_ops.shutdown = hda_dsp_shutdown;
