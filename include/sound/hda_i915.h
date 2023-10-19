@@ -10,6 +10,7 @@
 #ifdef CONFIG_SND_HDA_I915
 void snd_hdac_i915_set_bclk(struct hdac_bus *bus);
 int snd_hdac_i915_init(struct hdac_bus *bus);
+void snd_hdac_i915_bind(struct hdac_bus *bus, int i915_bind);
 #else
 static inline void snd_hdac_i915_set_bclk(struct hdac_bus *bus)
 {
@@ -17,6 +18,9 @@ static inline void snd_hdac_i915_set_bclk(struct hdac_bus *bus)
 static inline int snd_hdac_i915_init(struct hdac_bus *bus)
 {
 	return -ENODEV;
+}
+static inline void snd_hdac_i915_bind(struct hdac_bus *bus, int i915_bind)
+{
 }
 #endif
 static inline int snd_hdac_i915_exit(struct hdac_bus *bus)
