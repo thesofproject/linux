@@ -171,6 +171,19 @@ static int i915_gfx_present(struct pci_dev *hdac_pci)
 }
 
 /**
+ * snd_hdac_i915_bind - override i915 audio component bind options
+ * @bus: HDA core bus
+ * @i915_bind: bind options between sound component and GPU
+ *  1=always, 0=never, -1=on nomodeset(default))
+ */
+
+void snd_hdac_i915_bind(struct hdac_bus *bus, int i915_bind)
+{
+	gpu_bind = i915_bind;
+}
+EXPORT_SYMBOL_GPL(snd_hdac_i915_bind);
+
+/**
  * snd_hdac_i915_init - Initialize i915 audio component
  * @bus: HDA core bus
  *
