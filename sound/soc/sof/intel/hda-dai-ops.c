@@ -627,6 +627,7 @@ hda_select_dai_widget_ops(struct snd_sof_dev *sdev, struct snd_sof_widget *swidg
 	sdai = swidget->private;
 
 	if (sdev->dspless_mode_selected) {
+
 		switch (sdai->type) {
 		case SOF_DAI_INTEL_HDA:
 			return &hda_dspless_dma_ops;
