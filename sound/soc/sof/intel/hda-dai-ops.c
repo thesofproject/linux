@@ -238,18 +238,18 @@ static unsigned int generic_calc_stream_format(struct snd_sof_dev *sdev,
 					       struct snd_pcm_hw_params *params)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
-	struct snd_soc_dai *codec_dai;
+	struct snd_soc_dai_link_ch_map *ch_maps;
 	unsigned int format_val;
 	u32 ch_mask = 0;
 	int num_channels;
-	int codec_dai_id;
+	int i;
 
 	/*
 	 * if the multiple dais are handled by the same dailink, we may need to update the
-	 * stream channel count - the params are modified in soc-pcm based on the codec_ch_maps info
+	 * stream channel count - the params are modified in soc-pcm based on the ch_maps info
 	 */
-	for_each_rtd_codec_dais(rtd, codec_dai_id, codec_dai)
-		ch_mask |= rtd->dai_link->ch_maps[codec_dai_id].ch_mask;
+	for_each_link_ch_maps(rtd->dai_link, i, ch_maps)
+		ch_mask |= ch_maps[i].ch_mask;
 
 	num_channels = hweight_long(ch_mask);
 	if (num_channels != params_channels(params))
