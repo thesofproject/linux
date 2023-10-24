@@ -759,6 +759,9 @@ static bool hda_dsp_stream_check(struct hdac_bus *bus, u32 status)
 		if (status & BIT(s->index) && s->opened) {
 			sd_status = readb(s->sd_addr + SOF_HDA_ADSP_REG_SD_STS);
 
+			if (sd_status & BIT(3))
+				dev_err_ratelimited(bus->dev, "%s: xrun, status %#x\n", __func__, sd_status);
+
 			trace_sof_intel_hda_dsp_stream_status(bus->dev, s, sd_status);
 
 			writeb(sd_status, s->sd_addr + SOF_HDA_ADSP_REG_SD_STS);
