@@ -7,6 +7,7 @@
  */
 
 #include <linux/firmware.h>
+#include <sound/hda_i915.h>
 #include <sound/hda_register.h>
 #include <sound/sof/ipc4/header.h>
 #include <trace/events/sof_intel.h>
@@ -77,6 +78,12 @@ static int lnl_hda_dsp_runtime_resume(struct snd_sof_dev *sdev)
 	return hdac_bus_offload_dmic_ssp(sof_to_bus(sdev));
 }
 
+static int lnl_hda_dsp_probe_early(struct snd_sof_dev *sdev)
+{
+	snd_hdac_i915_bind(sof_to_bus(sdev), 0);
+	return hda_dsp_probe_early(sdev);
+}
+
 static int lnl_dsp_post_fw_run(struct snd_sof_dev *sdev)
 {
 	if (sdev->first_boot) {
@@ -96,6 +103,9 @@ int sof_lnl_ops_init(struct snd_sof_dev *sdev)
 
 	/* common defaults */
 	memcpy(&sof_lnl_ops, &sof_hda_common_ops, sizeof(struct snd_sof_dsp_ops));
+
+	/* probe_early */
+	sof_lnl_ops.probe_early = lnl_hda_dsp_probe_early;
 
 	/* probe */
 	sof_lnl_ops.probe = lnl_hda_dsp_probe;
