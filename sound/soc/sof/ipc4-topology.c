@@ -144,6 +144,12 @@ static const struct sof_topology_token src_tokens[] = {
 		offsetof(struct sof_ipc4_src_data, sink_rate)},
 };
 
+/* Process tokens */
+static const struct sof_topology_token process_tokens[] = {
+	{SOF_TKN_PROCESS_BUFFER_PERIOD_SIZE, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+	 offsetof(struct sof_ipc4_process, buffer_period_size)},
+};
+
 static const struct sof_token_info ipc4_token_list[SOF_TOKEN_COUNT] = {
 	[SOF_DAI_TOKENS] = {"DAI tokens", dai_tokens, ARRAY_SIZE(dai_tokens)},
 	[SOF_PIPELINE_TOKENS] = {"Pipeline tokens", pipeline_tokens, ARRAY_SIZE(pipeline_tokens)},
@@ -165,6 +171,7 @@ static const struct sof_token_info ipc4_token_list[SOF_TOKEN_COUNT] = {
 		ipc4_audio_fmt_num_tokens, ARRAY_SIZE(ipc4_audio_fmt_num_tokens)},
 	[SOF_GAIN_TOKENS] = {"Gain tokens", gain_tokens, ARRAY_SIZE(gain_tokens)},
 	[SOF_SRC_TOKENS] = {"SRC tokens", src_tokens, ARRAY_SIZE(src_tokens)},
+	[SOF_PROCESS_TOKENS] = {"Process tokens", process_tokens, ARRAY_SIZE(process_tokens)},
 };
 
 struct snd_sof_widget *sof_ipc4_find_swidget_by_ids(struct snd_sof_dev *sdev,
@@ -905,6 +912,15 @@ static int sof_ipc4_widget_setup_comp_process(struct snd_sof_widget *swidget)
 	ret = sof_ipc4_widget_setup_msg(swidget, &process->msg);
 	if (ret)
 		goto err;
+
+	/* set default period size to 1 and override it with the topology value if set */
+	process->buffer_period_size = 1;
+	ret = sof_update_ipc_object(scomp, process, SOF_PROCESS_TOKENS, swidget->tuples,
+				    swidget->num_tuples, sizeof(*process), 1);
+	if (ret) {
+		dev_err(scomp->dev, "parse process tokens failed %d\n", ret);
+		goto err;
+	}
 
 	/* parse process init module payload config type from module info */
 	fw_module = swidget->module_info;
@@ -2012,6 +2028,7 @@ sof_ipc4_process_set_pin_formats(struct snd_sof_widget *swidget, int pin_type)
 
 			if (pin_format_item->pin_index == i - pin_format_offset) {
 				*pin_format = *pin_format_item;
+				pin_format->buffer_size *= process->buffer_period_size;
 				break;
 			}
 		}
@@ -2074,6 +2091,10 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 			swidget->widget->name);
 		return output_fmt_index;
 	}
+
+	/* adjust the input/output buffer size based on the period size set in topology */
+	process->base_config.ibs *= process->buffer_period_size;
+	process->base_config.obs *= process->buffer_period_size;
 
 	/* copy Pin 0 output format */
 	if (available_fmt->num_output_formats &&
@@ -3042,6 +3063,7 @@ static enum sof_tokens process_token_list[] = {
 	SOF_IN_AUDIO_FORMAT_TOKENS,
 	SOF_OUT_AUDIO_FORMAT_TOKENS,
 	SOF_COMP_EXT_TOKENS,
+	SOF_PROCESS_TOKENS,
 };
 
 static const struct sof_ipc_tplg_widget_ops tplg_ipc4_widget_ops[SND_SOC_DAPM_TYPE_COUNT] = {

@@ -473,6 +473,7 @@ struct sof_ipc4_process {
 	struct sof_ipc4_msg msg;
 	u32 base_config_ext_size;
 	u32 init_config;
+	u32 buffer_period_size;
 };
 
 bool sof_ipc4_copier_is_single_format(struct snd_sof_dev *sdev,
