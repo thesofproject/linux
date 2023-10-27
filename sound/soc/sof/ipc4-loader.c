@@ -80,6 +80,9 @@ static ssize_t sof_ipc4_fw_parse_ext_man(struct snd_sof_dev *sdev,
 	dev_dbg(sdev->dev, "Header length: %u, module count: %u\n",
 		fw_header->len, fw_header->num_module_entries);
 
+	if (SOF_IPC4_GET_IMAGE_TYPE(fw_header->fw_image_flags) == SOF_IPC4_BASEFW)
+		ipc4_data->fw_image_flags = fw_header->fw_image_flags;
+
 	fw_lib->modules = devm_kmalloc_array(sdev->dev, fw_header->num_module_entries,
 					     sizeof(*fw_module), GFP_KERNEL);
 	if (!fw_lib->modules)
