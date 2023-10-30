@@ -159,7 +159,7 @@ bool snd_hdac_check_power_state(struct hdac_device *hdac,
 unsigned int snd_hdac_sync_power_state(struct hdac_device *hdac,
 		      hda_nid_t nid, unsigned int target_state);
 
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_AUDIO_CODEC)
+#if IS_ENABLED(CONFIG_SND_HDA_CODEC_HDMI)
 bool snd_hda_device_is_hdmi(struct hdac_device *hdev);
 #else
 static inline bool snd_hda_device_is_hdmi(struct hdac_device *hdev)
