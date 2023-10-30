@@ -137,6 +137,126 @@ static int sdw_slave_reg_show(struct seq_file *s_file, void *data)
 }
 DEFINE_SHOW_ATTRIBUTE(sdw_slave_reg);
 
+#define MAX_CMD_BYTES 256
+
+static int cmd;
+static u32 start_addr;
+static size_t num_bytes;
+static u8  read_buffer[MAX_CMD_BYTES];
+static u8  write_buffer[MAX_CMD_BYTES];
+
+static int set_command(void *data, u64 value)
+{
+	struct sdw_slave *slave = data;
+
+	if (value > 1)
+		return -EINVAL;
+
+	/* Userspace changed the hardware state behind the kernel's back */
+	add_taint(TAINT_USER, LOCKDEP_STILL_OK);
+
+	dev_dbg(&slave->dev, "command: %s\n", value ? "write" : "read");
+	cmd = value;
+
+	return 0;
+}
+DEFINE_DEBUGFS_ATTRIBUTE(set_command_fops, NULL,
+			 set_command, "%llu\n");
+
+static int set_start_address(void *data, u64 value)
+{
+	struct sdw_slave *slave = data;
+
+	/* Userspace changed the hardware state behind the kernel's back */
+	add_taint(TAINT_USER, LOCKDEP_STILL_OK);
+
+	dev_dbg(&slave->dev, "start address %#llx\n", value);
+
+	start_addr = value;
+
+	return 0;
+}
+DEFINE_DEBUGFS_ATTRIBUTE(set_start_address_fops, NULL,
+			 set_start_address, "%llu\n");
+
+static int set_num_bytes(void *data, u64 value)
+{
+	struct sdw_slave *slave = data;
+
+	if (value == 0 || value > MAX_CMD_BYTES)
+		return -EINVAL;
+
+	/* Userspace changed the hardware state behind the kernel's back */
+	add_taint(TAINT_USER, LOCKDEP_STILL_OK);
+
+	dev_dbg(&slave->dev, "number of bytes %lld\n", value);
+
+	num_bytes = value;
+
+	return 0;
+}
+DEFINE_DEBUGFS_ATTRIBUTE(set_num_bytes_fops, NULL,
+			 set_num_bytes, "%llu\n");
+
+static int cmd_go(void *data, u64 value)
+{
+	struct sdw_slave *slave = data;
+	int ret;
+
+	if (value != 1)
+		return -EINVAL;
+
+	/* one last check */
+	if (start_addr > SDW_REG_MAX ||
+	    num_bytes == 0 || num_bytes > MAX_CMD_BYTES)
+		return -EINVAL;
+
+	ret = pm_runtime_get_sync(&slave->dev);
+	if (ret < 0 && ret != -EACCES) {
+		pm_runtime_put_noidle(&slave->dev);
+		return ret;
+	}
+
+	/* Userspace changed the hardware state behind the kernel's back */
+	add_taint(TAINT_USER, LOCKDEP_STILL_OK);
+
+	dev_dbg(&slave->dev, "starting command\n");
+
+	if (cmd == 0)
+		ret = sdw_nwrite_no_pm(slave, start_addr, num_bytes, write_buffer);
+	else
+		ret = sdw_nread_no_pm(slave, start_addr, num_bytes, read_buffer);
+
+	dev_dbg(&slave->dev, "command completed %d\n", ret);
+
+	pm_runtime_mark_last_busy(&slave->dev);
+	pm_runtime_put(&slave->dev);
+
+	return ret;
+}
+DEFINE_DEBUGFS_ATTRIBUTE(cmd_go_fops, NULL,
+			 cmd_go, "%llu\n");
+
+#define MAX_LINE_LEN 128
+
+static int read_buffer_show(struct seq_file *s_file, void *data)
+{
+	char buf[MAX_LINE_LEN];
+	int i;
+
+	if (num_bytes == 0 || num_bytes > MAX_CMD_BYTES)
+		return -EINVAL;
+
+	for (i = 0; i < num_bytes; i++) {
+		scnprintf(buf, MAX_LINE_LEN, "address %#x val 0x%02x\n",
+			  start_addr + i, read_buffer[i]);
+		seq_printf(s_file, "%s", buf);
+	}
+
+	return 0;
+}
+DEFINE_SHOW_ATTRIBUTE(read_buffer);
+
 void sdw_slave_debugfs_init(struct sdw_slave *slave)
 {
 	struct dentry *master;
@@ -150,6 +270,14 @@ void sdw_slave_debugfs_init(struct sdw_slave *slave)
 	d = debugfs_create_dir(name, master);
 
 	debugfs_create_file("registers", 0400, d, slave, &sdw_slave_reg_fops);
+
+	/* interface to send arbitrary commands */
+	debugfs_create_file("command", 0200, d, slave, &set_command_fops);
+	debugfs_create_file("start_address", 0200, d, slave, &set_start_address_fops);
+	debugfs_create_file("num_bytes", 0200, d, slave, &set_num_bytes_fops);
+	debugfs_create_file("go", 0200, d, slave, &cmd_go_fops);
+
+	debugfs_create_file("read_buffer", 0400, d, slave, &read_buffer_fops);
 
 	slave->debugfs = d;
 }
