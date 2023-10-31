@@ -13,7 +13,7 @@
 
 #define CODEC_NAME_SIZE	8
 
-static int cs_spk_init(struct snd_soc_pcm_runtime *rtd)
+int cs_spk_rtd_init(struct snd_soc_pcm_runtime *rtd)
 {
 	const char *dai_name = rtd->dai_link->codecs->dai_name;
 	struct snd_soc_card *card = rtd->card;
@@ -41,7 +41,6 @@ int sof_sdw_cs_amp_init(struct snd_soc_card *card,
 		return 0;
 
 	info->amp_num++;
-	dai_links->init = cs_spk_init;
 
 	return 0;
 }
