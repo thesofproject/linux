@@ -3,6 +3,7 @@
 
 #include <linux/device.h>
 #include <linux/debugfs.h>
+#include <linux/firmware.h>
 #include <linux/mod_devicetable.h>
 #include <linux/pm_runtime.h>
 #include <linux/slab.h>
@@ -142,8 +143,8 @@ DEFINE_SHOW_ATTRIBUTE(sdw_slave_reg);
 static int cmd;
 static u32 start_addr;
 static size_t num_bytes;
-static u8  read_buffer[MAX_CMD_BYTES];
-static u8  write_buffer[MAX_CMD_BYTES];
+static u8 read_buffer[MAX_CMD_BYTES];
+static char *firmware_file;
 
 static int set_command(void *data, u64 value)
 {
@@ -155,7 +156,7 @@ static int set_command(void *data, u64 value)
 	/* Userspace changed the hardware state behind the kernel's back */
 	add_taint(TAINT_USER, LOCKDEP_STILL_OK);
 
-	dev_dbg(&slave->dev, "command: %s\n", value ? "write" : "read");
+	dev_dbg(&slave->dev, "command: %s\n", value ? "read" : "write");
 	cmd = value;
 
 	return 0;
@@ -222,13 +223,32 @@ static int cmd_go(void *data, u64 value)
 
 	dev_dbg(&slave->dev, "starting command\n");
 
-	if (cmd == 0)
-		ret = sdw_nwrite_no_pm(slave, start_addr, num_bytes, write_buffer);
-	else
+	if (cmd == 0) {
+		const struct firmware *fw;
+
+		ret = request_firmware(&fw, firmware_file, &slave->dev);
+		if (ret < 0) {
+			dev_err(&slave->dev, "firmware %s not found\n", firmware_file);
+			goto out;
+		}
+
+		if (fw->size != num_bytes) {
+			dev_err(&slave->dev,
+				"firmware %s: unexpected size %zd, desired %zd\n",
+				firmware_file, fw->size, num_bytes);
+			release_firmware(fw);
+			goto out;
+		}
+
+		ret = sdw_nwrite_no_pm(slave, start_addr, num_bytes, fw->data);
+		release_firmware(fw);
+	} else {
 		ret = sdw_nread_no_pm(slave, start_addr, num_bytes, read_buffer);
+	}
 
 	dev_dbg(&slave->dev, "command completed %d\n", ret);
 
+out:
 	pm_runtime_mark_last_busy(&slave->dev);
 	pm_runtime_put(&slave->dev);
 
@@ -278,6 +298,8 @@ void sdw_slave_debugfs_init(struct sdw_slave *slave)
 	debugfs_create_file("go", 0200, d, slave, &cmd_go_fops);
 
 	debugfs_create_file("read_buffer", 0400, d, slave, &read_buffer_fops);
+	firmware_file = NULL;
+	debugfs_create_str("firmware_file", 0200, d, &firmware_file);
 
 	slave->debugfs = d;
 }
