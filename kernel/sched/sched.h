@@ -1050,6 +1050,8 @@ struct root_domain {
 	 * CPUs of the rd. Protected by RCU.
 	 */
 	struct perf_domain __rcu *pd;
+
+	ANDROID_VENDOR_DATA(1);
 };
 
 extern void init_defrootdomain(void);
