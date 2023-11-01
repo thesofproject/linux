@@ -926,6 +926,7 @@ struct sdw_master_ops {
  * @stream_refcount: number of streams currently using this bus
  * @btp_stream_refcount: number of BTP streams currently using this bus (should
  * be zero or one, multiple streams per link is not supported).
+ * @bpt_stream: pointer stored for convenience.
  */
 struct sdw_bus {
 	struct device *dev;
@@ -957,6 +958,7 @@ struct sdw_bus {
 	int hw_sync_min_links;
 	int stream_refcount;
 	int bpt_stream_refcount;
+	struct sdw_stream_runtime *bpt_stream;
 };
 
 int sdw_bus_master_add(struct sdw_bus *bus, struct device *parent,
