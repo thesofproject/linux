@@ -144,8 +144,8 @@ config QCOM_IOMMU
 	  Support for IOMMU on certain Qualcomm SoCs.
 
 config ARM_SMMU_V3_PKVM
-	bool "ARM SMMUv3 support for protected Virtual Machines"
-	depends on KVM && ARM64 && ARM_SMMU_V3=y
+	tristate "ARM SMMUv3 support for protected Virtual Machines"
+	depends on KVM && ARM64 && ARM_SMMU_V3
 	help
 	  Enable a SMMUv3 driver in the KVM hypervisor, to protect VMs against
 	  memory accesses from devices owned by the host.
