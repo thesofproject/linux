@@ -918,7 +918,7 @@ struct sdw_bus {
 	struct lock_class_key bus_lock_key;
 	struct mutex msg_lock;
 	struct lock_class_key msg_lock_key;
-	int (*compute_params)(struct sdw_bus *bus);
+	int (*compute_params)(struct sdw_bus *bus, bool bpt_stream);
 	const struct sdw_master_ops *ops;
 	const struct sdw_master_port_ops *port_ops;
 	struct sdw_bus_params params;
@@ -1030,7 +1030,7 @@ struct sdw_stream_runtime *sdw_alloc_stream(const char *stream_name,
 					    enum sdw_stream_type type);
 void sdw_release_stream(struct sdw_stream_runtime *stream);
 
-int sdw_compute_params(struct sdw_bus *bus);
+int sdw_compute_params(struct sdw_bus *bus, bool bpt_stream);
 
 int sdw_stream_add_master(struct sdw_bus *bus,
 		struct sdw_stream_config *stream_config,
