@@ -93,10 +93,10 @@ static const struct sof_dev_desc arl_s_desc = {
 	.ipc_default            = SOF_IPC_TYPE_4,
 	.dspless_mode_supported = true,         /* Only supported for HDaudio */
 	.default_fw_path = {
-		[SOF_IPC_TYPE_4] = "intel/sof-ipc4/arl",
+		[SOF_IPC_TYPE_4] = "intel/sof-ipc4/arl-s",
 	},
 	.default_lib_path = {
-		[SOF_IPC_TYPE_4] = "intel/sof-ipc4-lib/arl",
+		[SOF_IPC_TYPE_4] = "intel/sof-ipc4-lib/arl-s",
 	},
 	.default_tplg_path = {
 		[SOF_IPC_TYPE_4] = "intel/sof-ace-tplg",
