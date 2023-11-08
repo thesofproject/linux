@@ -887,6 +887,7 @@ static int sof_ipc4_widget_setup_comp_process(struct snd_sof_widget *swidget)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
 	struct sof_ipc4_fw_module *fw_module;
+	struct snd_sof_widget *pipe_widget;
 	struct sof_ipc4_process *process;
 	void *cfg;
 	int ret;
@@ -942,6 +943,21 @@ static int sof_ipc4_widget_setup_comp_process(struct snd_sof_widget *swidget)
 	process->ipc_config_data = cfg;
 
 	sof_ipc4_widget_update_kcontrol_module_id(swidget);
+
+	pipe_widget = swidget->spipe->pipe_widget;
+
+	/*
+	 * A Data Processing (DP) domain widget can be scheduled to run on a secondary core while
+	 * it's pipeline runs the primary core. In this case, the secondary core could get powered
+	 * off before the pipeline is deleted resulting in a crash when the firmware tries to free
+	 * the DP module during pipeline deletion. Prevent this by setting the pipe_widget's core
+	 * ID to match that of the widget so that the core would be kept powered on until the
+	 * pipeline has been deleted. This would work only in the case where a pipeline only
+	 * contains a single DP module that is scheduled on a secondary core.
+	 */
+	if ((fw_module->man4_module_entry.type & SOF_IPC4_MODULE_DP) && !pipe_widget->core &&
+	     swidget->core)
+		pipe_widget->core = swidget->core;
 
 	return 0;
 free_base_cfg_ext:
