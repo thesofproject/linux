@@ -2249,6 +2249,8 @@ static void migrate_task_rq_dl(struct task_struct *p, int new_cpu __maybe_unused
 
 static void check_preempt_equal_dl(struct rq *rq, struct task_struct *p)
 {
+	struct task_struct *exec_ctx;
+
 	/*
 	 * Current can't be migrated, useless to reschedule,
 	 * let's hope p can move out.
@@ -2257,12 +2259,16 @@ static void check_preempt_equal_dl(struct rq *rq, struct task_struct *p)
 	    !cpudl_find(&rq->rd->cpudl, rq->donor, rq->curr, NULL))
 		return;
 
+	exec_ctx = find_exec_ctx(rq, p);
+	if (task_current(rq, exec_ctx))
+		return;
+
 	/*
 	 * p is migratable, so let's not schedule it and
 	 * see if it is pushed or pulled somewhere else.
 	 */
 	if (p->nr_cpus_allowed != 1 &&
-	    cpudl_find(&rq->rd->cpudl, p, p, NULL))
+	    cpudl_find(&rq->rd->cpudl, p, exec_ctx, NULL))
 		return;
 
 	resched_curr(rq);
@@ -2485,7 +2491,7 @@ static int find_later_rq(struct task_struct *sched_ctx, struct task_struct *exec
 	if (unlikely(!later_mask))
 		return -1;
 
-	if (exec_ctx->nr_cpus_allowed == 1)
+	if (exec_ctx && exec_ctx->nr_cpus_allowed == 1)
 		return -1;
 
 	/*
@@ -2583,12 +2589,16 @@ static struct task_struct *pick_next_pushable_dl_task(struct rq *rq)
 /* Locks the rq it finds */
 static struct rq *find_lock_later_rq(struct task_struct *task, struct rq *rq)
 {
+	struct task_struct *exec_ctx;
 	struct rq *later_rq = NULL;
 	int tries;
 	int cpu;
 
 	for (tries = 0; tries < DL_MAX_TRIES; tries++) {
-		cpu = find_later_rq(task, task);
+		exec_ctx = find_exec_ctx(rq, task);
+		if (!exec_ctx)
+			break;
+		cpu = find_later_rq(task, exec_ctx);
 
 		if ((cpu == -1) || (cpu == rq->cpu))
 			break;
