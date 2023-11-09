@@ -138,7 +138,8 @@ sof_card_dai_links_create(struct device *dev, enum sof_ssp_codec amp_type,
 			links[id].name = devm_kasprintf(dev, GFP_KERNEL, "SSP%d-HDMI", port);
 			if (!links[id].name)
 				return NULL;
-			links[id].id = fixed_be ? (HDMI_IN_BE_ID + i - 1) : id;
+			/* fixed_be is true */
+			links[id].id = HDMI_IN_BE_ID + i - 1;
 			links[id].codecs = &snd_soc_dummy_dlc;
 			links[id].num_codecs = 1;
 			links[id].platforms = platform_component;
