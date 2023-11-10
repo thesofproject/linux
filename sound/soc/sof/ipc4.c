@@ -685,7 +685,11 @@ static void sof_ipc4_rx_msg(struct snd_sof_dev *sdev)
 			return;
 
 		ipc4_msg->data_size = data_size;
-		snd_sof_ipc_msg_data(sdev, NULL, ipc4_msg->data_ptr, ipc4_msg->data_size);
+		err = snd_sof_ipc_msg_data(sdev, NULL, ipc4_msg->data_ptr, ipc4_msg->data_size);
+		if (err < 0) {
+			dev_err(sdev->dev, "failed to read IPC notification data: %d\n", err);
+			goto out;
+		}
 	}
 
 	/* Handle notifications with payload */
@@ -693,7 +697,7 @@ static void sof_ipc4_rx_msg(struct snd_sof_dev *sdev)
 		handler_func(sdev, ipc4_msg);
 
 	sof_ipc4_log_header(sdev->dev, "ipc rx done ", ipc4_msg, true);
-
+out:
 	if (data_size) {
 		if (sof_debug_check_flag(SOF_DBG_DUMP_IPC_MESSAGE_PAYLOAD))
 			sof_ipc4_dump_payload(sdev, ipc4_msg->data_ptr,
