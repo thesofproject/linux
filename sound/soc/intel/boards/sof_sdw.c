@@ -659,6 +659,18 @@ static const struct snd_soc_ops sdw_ops = {
 
 static struct sof_sdw_codec_info codec_info_list[] = {
 	{
+		.part_id = 0x0000, /* TAS2783 */
+		.dais = {
+			{
+				.direction = {true, true},
+				.dai_name = "tas2783-codec",
+				.dai_type = SOF_SDW_DAI_TYPE_AMP,
+				.dailink = {SDW_AMP_OUT_DAI_ID, SDW_AMP_IN_DAI_ID},
+			},
+		},
+		.dai_num = 1,
+	},
+	{
 		.part_id = 0x700,
 		.dais = {
 			{
