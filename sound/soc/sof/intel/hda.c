@@ -34,7 +34,6 @@
 #include "../ipc4-topology.h"
 #include "hda.h"
 
-#define CREATE_TRACE_POINTS
 #include <trace/events/sof_intel.h>
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
