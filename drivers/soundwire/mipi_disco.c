@@ -280,6 +280,35 @@ static int sdw_slave_read_dpn(struct sdw_slave *slave,
 	return 0;
 }
 
+/*
+ * In MIPI DisCo spec for SoundWire, lane mapping for a slave device is done with
+ * mipi-sdw-lane-x-mapping properties, where x is 1..7, and the values for those
+ * properties are mipi-sdw-manager-lane-x or mipi-sdw-peripheral-link-y, where x
+ * is an integer between 1 to 7 if the lane is connected to a master lane, y is a
+ * character between A to E if the lane is connected to another slave lane.
+ */
+static int sdw_slave_read_lane_mapping(struct sdw_slave *slave)
+{
+	struct sdw_slave_prop *prop = &slave->prop;
+	struct device *dev = &slave->dev;
+	char prop_name[30];
+	const char *prop_val;
+	size_t len;
+	int ret, i;
+
+	for (i = 0; i < SDW_MAX_LANES; i++) {
+		snprintf(prop_name, sizeof(prop_name), "mipi-sdw-lane-%d-mapping", i);
+		ret = device_property_read_string(dev, prop_name, &prop_val);
+		if (ret)
+			continue;
+		len = strlen(prop_val);
+		/* The last character is enough to identify the connection */
+		prop->lane_maps[i] = prop_val[len - 1];
+		dev_err(dev, "[Chao] %c\n", prop->lane_maps[i]);
+	}
+	return 0;
+}
+
 /**
  * sdw_slave_read_prop() - Read Slave properties
  * @slave: SDW Slave
@@ -381,6 +410,8 @@ int sdw_slave_read_prop(struct sdw_slave *slave)
 	/* Read dpn properties for sink port(s) */
 	sdw_slave_read_dpn(slave, prop->sink_dpn_prop, nval,
 			   prop->sink_ports, "sink");
+
+	sdw_slave_read_lane_mapping(slave);
 
 	return 0;
 }

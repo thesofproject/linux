@@ -46,6 +46,8 @@ struct sdw_slave;
 #define SDW_MAX_PORTS			15
 #define SDW_VALID_PORT_RANGE(n)		((n) < SDW_MAX_PORTS && (n) >= 1)
 
+#define SDW_MAX_LANES		8
+
 enum {
 	SDW_PORT_DIRN_SINK = 0,
 	SDW_PORT_DIRN_SOURCE,
@@ -361,6 +363,7 @@ struct sdw_dpn_prop {
  * @p15_behave: Slave behavior when the Master attempts a read to the Port15
  * alias
  * @lane_control_support: Slave supports lane control
+ * @lane_maps: Lane mapping for the slave
  * @master_count: Number of Masters present on this Slave
  * @source_ports: Bitmap identifying source ports
  * @sink_ports: Bitmap identifying sink ports
@@ -388,6 +391,7 @@ struct sdw_slave_prop {
 	bool bank_delay_support;
 	enum sdw_p15_behave p15_behave;
 	bool lane_control_support;
+	u8 lane_maps[SDW_MAX_LANES];
 	u32 master_count;
 	u32 source_ports;
 	u32 sink_ports;
