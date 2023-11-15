@@ -108,6 +108,10 @@ config SND_AMD_SOUNDWIRE_ACPI
 	  This options enables ACPI helper functions for SoundWire
 	  interface for AMD platforms.
 
+config SND_SOC_ACPI_AMD_MATCH
+	tristate
+	select SND_SOC_ACPI if ACPI
+
 config SND_SOC_AMD_LEGACY_MACH
 	tristate "AMD Legacy Machine Driver Support"
 	depends on X86 && PCI && I2C
