@@ -372,3 +372,13 @@ int kvm_iommu_device_id(struct device *dev, u32 idx,
 	return ret;
 }
 EXPORT_SYMBOL_GPL(kvm_iommu_device_id);
+
+int kvm_iommu_guest_alloc_mc(struct kvm_hyp_memcache *mc, u32 pgsize, u32 nr_pages)
+{
+	return topup_hyp_memcache(mc, nr_pages, get_order(pgsize));
+}
+
+void kvm_iommu_guest_free_mc(struct kvm_hyp_memcache *mc)
+{
+		free_hyp_memcache(mc);
+}
