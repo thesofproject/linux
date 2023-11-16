@@ -70,6 +70,7 @@ struct pkvm_hyp_vm {
 
 	/* pvIOMMUs attached. */
 	struct list_head pviommus;
+	struct hyp_pool iommu_pool;
 
 	/* Primary vCPU pending entry to the pvmfw */
 	struct pkvm_hyp_vcpu *pvmfw_entry_vcpu;
