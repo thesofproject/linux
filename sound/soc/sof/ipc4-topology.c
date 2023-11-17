@@ -1368,8 +1368,8 @@ static int snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, struct snd_s
 		 */
 		dev_type = intel_nhlt_ssp_device_type(sdev->dev, ipc4_data->nhlt,
 						      dai_index);
-		if (ret < 0)
-			return ret;
+		if (dev_type < 0)
+			return dev_type;
 		break;
 	default:
 		return 0;
