@@ -41,8 +41,14 @@ static int intel_shim_check_wake(struct sdw_intel *sdw)
 	u16 wake_sts;
 	int ret;
 
+	dev_info(sdw->cdns.dev, "%s: plb start\n", __func__);
+
 	/* find out which bits are set in LSDIID for this sublink */
 	ret = hdac_bus_eml_sdw_get_lsdiid_unlocked(sdw->link_res->hbus, sdw->instance, &lsdiid);
+
+	dev_info(sdw->cdns.dev, "%s: plb lsdiid %#x\n",
+		 __func__, lsdiid);
+
 	if (ret < 0)
 		return ret;
 
@@ -51,6 +57,8 @@ static int intel_shim_check_wake(struct sdw_intel *sdw)
 	 * wakes in low-power modes
 	 */
 	wake_sts = snd_hdac_chip_readw(sdw->link_res->hbus, STATESTS);
+
+	dev_info(sdw->cdns.dev, "%s: plb done wakests %#x\n", __func__, wake_sts);
 
 	return wake_sts & lsdiid;
 }
@@ -62,13 +70,24 @@ static void intel_shim_wake(struct sdw_intel *sdw, bool wake_enable)
 	u16 wake_sts;
 	int ret;
 
+	dev_info(sdw->cdns.dev, "%s: plb start wake_enable %d\n",
+		 __func__, wake_enable);
+
 	mutex_lock(sdw->link_res->shim_lock);
 
 	ret = hdac_bus_eml_sdw_get_lsdiid_unlocked(sdw->link_res->hbus, sdw->instance, &lsdiid);
+
+	dev_info(sdw->cdns.dev, "%s: plb lsdiid %#x\n",
+		 __func__, lsdiid);
+
+
 	if (ret < 0)
 		goto unlock;
 
 	wake_en = snd_hdac_chip_readw(sdw->link_res->hbus, WAKEEN);
+
+	dev_info(sdw->cdns.dev, "%s: plb wake_en1 %#x\n",
+		 __func__, wake_en);
 
 	if (wake_enable) {
 		/* Enable the wakeup */
@@ -85,8 +104,14 @@ static void intel_shim_wake(struct sdw_intel *sdw, bool wake_enable)
 		wake_sts |= lsdiid;
 		snd_hdac_chip_writew(sdw->link_res->hbus, STATESTS, wake_sts);
 	}
+
+	dev_info(sdw->cdns.dev, "%s: plb wake_en2 %#x\n",
+		 __func__, wake_en);
+
 unlock:
 	mutex_unlock(sdw->link_res->shim_lock);
+
+	dev_info(sdw->cdns.dev, "%s: plb done\n", __func__);
 }
 
 static int intel_link_power_up(struct sdw_intel *sdw)
