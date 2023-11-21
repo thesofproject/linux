@@ -6,11 +6,17 @@
 
 #include <kvm/arm_hypercalls.h>
 
+#include <nvhe/alloc.h>
 #include <nvhe/iommu.h>
 #include <nvhe/mem_protect.h>
 #include <nvhe/pkvm.h>
 #include <nvhe/pviommu.h>
 #include <nvhe/pviommu-host.h>
+
+struct pviommu_guest_domain {
+	pkvm_handle_t		id;
+	struct list_head	list;
+};
 
 static DEFINE_HYP_SPINLOCK(pviommu_guest_domain_lock);
 
@@ -102,7 +108,6 @@ static bool pkvm_guest_iommu_attach_dev(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exi
 		pkvm_pviommu_hyp_req(exit_code);
 		return false;
 	}
-
 out_ret:
 	smccc_set_retval(vcpu, ret ?  SMCCC_RET_INVALID_PARAMETER : SMCCC_RET_SUCCESS,
 			 0, 0, 0);
@@ -144,6 +149,19 @@ static bool pkvm_guest_iommu_alloc_domain(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *e
 {
 	int domain_id = 0;
 	struct kvm_vcpu *vcpu = &hyp_vcpu->vcpu;
+	struct pviommu_guest_domain *guest_domain;
+	struct kvm_hyp_req *req;
+	struct pkvm_hyp_vm *vm = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
+
+	guest_domain = hyp_alloc(sizeof(*guest_domain));
+	if (!guest_domain) {
+		BUG_ON(hyp_alloc_errno() != -ENOMEM);
+		req = pkvm_hyp_req_reserve(hyp_vcpu, REQ_MEM_DEST_HYP_ALLOC);
+		req->mem.nr_pages = hyp_alloc_missing_donations();
+		req->mem.sz_alloc = PAGE_SIZE;
+		pkvm_pviommu_hyp_req(exit_code);
+		return false;
+	}
 
 	/* MBZ */
 	if (smccc_get_arg2(vcpu) || smccc_get_arg3(vcpu) || smccc_get_arg4(vcpu) ||
@@ -160,12 +178,16 @@ static bool pkvm_guest_iommu_alloc_domain(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *e
 	 * which is different from the HVC interface for pvIOMMU, so we defer domain alloction
 	 * till the attach call.
 	 */
+
+	guest_domain->id = domain_id;
+	list_add_tail(&guest_domain->list, &vm->domains);
 	hyp_spin_unlock(&pviommu_guest_domain_lock);
 	smccc_set_retval(vcpu, SMCCC_RET_SUCCESS, domain_id, 0, 0);
 	return true;
 
 out_inval:
 	hyp_spin_unlock(&pviommu_guest_domain_lock);
+	hyp_free(guest_domain);
 	smccc_set_retval(vcpu, SMCCC_RET_INVALID_PARAMETER, 0, 0, 0);
 	return true;
 }
@@ -175,6 +197,8 @@ static bool pkvm_guest_iommu_free_domain(struct pkvm_hyp_vcpu *hyp_vcpu)
 	int ret;
 	struct kvm_vcpu *vcpu = &hyp_vcpu->vcpu;
 	u64 domain_id = smccc_get_arg2(vcpu);
+	struct pviommu_guest_domain *guest_domain, *temp;
+	struct pkvm_hyp_vm *vm = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
 
 	if (smccc_get_arg3(vcpu) || smccc_get_arg4(vcpu) || smccc_get_arg5(vcpu) ||
 	    smccc_get_arg6(vcpu)) {
@@ -184,8 +208,18 @@ static bool pkvm_guest_iommu_free_domain(struct pkvm_hyp_vcpu *hyp_vcpu)
 
 	hyp_spin_lock(&pviommu_guest_domain_lock);
 	ret = kvm_iommu_free_domain(domain_id);
-	if (!ret)
-		pkvm_guest_iommu_free_id(domain_id);
+	if (ret)
+		goto out_unlock;
+	list_for_each_entry_safe(guest_domain, temp, &vm->domains, list) {
+		if (guest_domain->id == domain_id) {
+			pkvm_guest_iommu_free_id(domain_id);
+			list_del(&guest_domain->list);
+			hyp_free(guest_domain);
+			break;
+		}
+	}
+
+out_unlock:
 	hyp_spin_unlock(&pviommu_guest_domain_lock);
 
 out_ret:
@@ -319,6 +353,20 @@ static bool pkvm_guest_iommu_unmap(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_cod
 
 	smccc_set_retval(vcpu, ret, unmapped, 0, 0);
 	return true;
+}
+
+void kvm_iommu_teardown_guest_domains(struct pkvm_hyp_vm *hyp_vm)
+{
+	struct pviommu_guest_domain *guest_domain, *temp;
+
+	hyp_spin_lock(&pviommu_guest_domain_lock);
+	list_for_each_entry_safe(guest_domain, temp, &hyp_vm->domains, list) {
+		kvm_iommu_force_free_domain(guest_domain->id, hyp_vm);
+		pkvm_guest_iommu_free_id(guest_domain->id);
+		list_del(&guest_domain->list);
+		hyp_free(guest_domain);
+	}
+	hyp_spin_unlock(&pviommu_guest_domain_lock);
 }
 
 bool kvm_handle_pviommu_hvc(struct kvm_vcpu *vcpu, u64 *exit_code)
