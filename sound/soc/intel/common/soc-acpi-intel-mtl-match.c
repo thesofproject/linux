@@ -520,7 +520,7 @@ static const struct snd_soc_acpi_adr_device cs42l42_0_adr[] = {
 	}
 };
 
-static const struct snd_soc_acpi_adr_device tas2783_1_adr[] = {
+static const struct snd_soc_acpi_adr_device tas2783_0_adr[] = {
 	{
 		.adr = 0x0000390102000001ull,
 		.num_endpoints = 1,
@@ -535,11 +535,11 @@ static const struct snd_soc_acpi_adr_device tas2783_1_adr[] = {
 	}
 };
 
-static const struct snd_soc_acpi_link_adr tas2783_link1[] = {
+static const struct snd_soc_acpi_link_adr tas2783_link0[] = {
 	{
 		.mask = BIT(0),
-		.num_adr = ARRAY_SIZE(tas2783_1_adr),
-		.adr_d = tas2783_1_adr,
+		.num_adr = ARRAY_SIZE(tas2783_0_adr),
+		.adr_d = tas2783_0_adr,
 	},
 	{}
 };
@@ -612,8 +612,8 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_mtl_sdw_machines[] = {
 		.sof_tplg_filename = "sof-mtl-rt713-l0-rt1316-l12.tplg",
 	},
 	{
-		.link_mask = 0xf, //HACK for all sdw links are enabled
-		.links = tas2783_link1,
+		.link_mask = GENMASK(3, 0), //HACK for all sdw links are enabled
+		.links = tas2783_link0,
 		.drv_name = "sof_sdw",
 		.sof_tplg_filename = "sof-mtl-tas2783.tplg",
 	},

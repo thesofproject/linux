@@ -561,7 +561,7 @@ EXPORT_SYMBOL_GPL(snd_soc_acpi_intel_tgl_machines);
 struct snd_soc_acpi_mach snd_soc_acpi_intel_tgl_sdw_machines[] = {
 	/* mockup tests need to be first */
 	{
-		.link_mask = 0xf, //HACK for all sdw links are enabled
+		.link_mask = GENMASK(3, 0), //HACK for all sdw links are enabled
 		.links = tas2783_link0,
 		.drv_name = "sof_sdw",
 		.sof_tplg_filename = "sof-tgl-tas2783.tplg",
