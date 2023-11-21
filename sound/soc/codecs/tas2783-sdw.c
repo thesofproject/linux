@@ -81,7 +81,8 @@ static const struct reg_default tas2783_reg_defaults[] = {
 	{ 0x40400108, 0},	/* FUNC_1, FU23, MUTE */
 };
 
-static bool tas2783_readable_register(struct device *dev, unsigned int reg)
+static bool tas2783_readable_register(struct device *dev,
+	unsigned int reg)
 {
 	switch (reg) {
 		case 0x8000 ... 0xc000:	/* Page 0 ~ 127. */
@@ -92,7 +93,8 @@ static bool tas2783_readable_register(struct device *dev, unsigned int reg)
 	}
 }
 
-static bool tas2783_volatile_register(struct device *dev, unsigned int reg)
+static bool tas2783_volatile_register(struct device *dev,
+	unsigned int reg)
 {
 	switch (reg) {
 	case 0x8001:
@@ -275,7 +277,7 @@ static void tas2783_apply_calib(
 		(tas_dev->sdw_peripheral->id.unique_id > TAS2783_ID_MAX))
 		return;
 	reg_start = (u8 *)(cali_data+(tas_dev->sdw_peripheral->id.unique_id
-		- TAS2783_ID_MIN)*sizeof(tas2783_cali_reg));
+		- TAS2783_ID_MIN) * sizeof(tas2783_cali_reg));
 	for (int i = 0; i < ARRAY_SIZE(tas2783_cali_reg); i++) {
 		ret = regmap_bulk_write(map, tas2783_cali_reg[i],
 			reg_start + i, 4);
@@ -416,18 +418,7 @@ static const struct snd_soc_dapm_route tasdevice_audio_map[] = {
 static int tasdevice_set_sdw_stream(struct snd_soc_dai *dai,
 	void *sdw_stream, int direction)
 {
-	struct sdw_stream_data *stream;
-
-	if (!sdw_stream)
-		return 0;
-
-	stream = kzalloc(sizeof(*stream), GFP_KERNEL);
-	if (!stream)
-		return -ENOMEM;
-
-	stream->sdw_stream = sdw_stream;
-
-	 snd_soc_dai_dma_data_set(dai, direction, stream);
+	snd_soc_dai_dma_data_set(dai, direction, sdw_stream);
 
 	return 0;
 }

@@ -6,7 +6,7 @@
  * https://www.ti.com
  *
  * The TAS2783 driver implements a flexible and configurable
- * algo coff setting for single TAS2783 chips.
+ * algorithm coefficient setting for single TAS2783 chips.
  *
  * Author: Baojun Xu <baojun.xu@ti.com>
  * 			Shenghao Ding <shenghao-ding@ti.com>
