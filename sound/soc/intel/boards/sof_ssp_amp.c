@@ -27,21 +27,10 @@
 #define SOF_AMPLIFIER_SSP_MASK			(GENMASK(3, 0))
 
 /* HDMI capture*/
-#define SOF_SSP_HDMI_CAPTURE_PRESENT		BIT(4)
-#define SOF_NO_OF_HDMI_CAPTURE_SSP_SHIFT		5
-#define SOF_NO_OF_HDMI_CAPTURE_SSP_MASK		(GENMASK(6, 5))
-#define SOF_NO_OF_HDMI_CAPTURE_SSP(quirk)	\
-	(((quirk) << SOF_NO_OF_HDMI_CAPTURE_SSP_SHIFT) & SOF_NO_OF_HDMI_CAPTURE_SSP_MASK)
-
-#define SOF_HDMI_CAPTURE_1_SSP_SHIFT		7
-#define SOF_HDMI_CAPTURE_1_SSP_MASK		(GENMASK(9, 7))
-#define SOF_HDMI_CAPTURE_1_SSP(quirk)	\
-	(((quirk) << SOF_HDMI_CAPTURE_1_SSP_SHIFT) & SOF_HDMI_CAPTURE_1_SSP_MASK)
-
-#define SOF_HDMI_CAPTURE_2_SSP_SHIFT		10
-#define SOF_HDMI_CAPTURE_2_SSP_MASK		(GENMASK(12, 10))
-#define SOF_HDMI_CAPTURE_2_SSP(quirk)	\
-	(((quirk) << SOF_HDMI_CAPTURE_2_SSP_SHIFT) & SOF_HDMI_CAPTURE_2_SSP_MASK)
+#define SOF_HDMI_CAPTURE_SSP_MASK_SHIFT		4
+#define SOF_HDMI_CAPTURE_SSP_MASK_MASK		(GENMASK(9, 4))
+#define SOF_HDMI_CAPTURE_SSP_MASK(quirk)	\
+	(((quirk) << SOF_HDMI_CAPTURE_SSP_MASK_SHIFT) & SOF_HDMI_CAPTURE_SSP_MASK_MASK)
 
 /* HDMI playback */
 #define SOF_HDMI_PLAYBACK_PRESENT		BIT(13)
@@ -82,13 +71,6 @@ static struct snd_soc_card sof_ssp_amp_card = {
 	.late_probe = sof_card_late_probe,
 };
 
-static struct snd_soc_dai_link_component platform_component[] = {
-	{
-		/* name might be overridden during probe */
-		.name = "0000:00:1f.3"
-	}
-};
-
 /* BE ID defined in sof-tgl-rt1308-hdmi-ssp.m4 */
 #define HDMI_IN_BE_ID		0
 #define SPK_BE_ID		2
@@ -101,52 +83,36 @@ sof_card_dai_links_create(struct device *dev, enum sof_ssp_codec amp_type,
 			  int ssp_amp, int dmic_be_num, int hdmi_num,
 			  bool idisp_codec)
 {
-	struct snd_soc_dai_link_component *cpus;
 	struct snd_soc_dai_link *links;
 	int i;
 	int id = 0;
 	int ret;
 	bool fixed_be = false;
 	int be_id;
+	unsigned long ssp_mask_hdmi_in;
 
 	links = devm_kcalloc(dev, sof_ssp_amp_card.num_links,
 					sizeof(struct snd_soc_dai_link), GFP_KERNEL);
-	cpus = devm_kcalloc(dev, sof_ssp_amp_card.num_links,
-					sizeof(struct snd_soc_dai_link_component), GFP_KERNEL);
-	if (!links || !cpus)
+	if (!links)
 		return NULL;
 
 	/* HDMI-In SSP */
-	if (sof_ssp_amp_quirk & SOF_SSP_HDMI_CAPTURE_PRESENT) {
-		int num_of_hdmi_ssp = (sof_ssp_amp_quirk & SOF_NO_OF_HDMI_CAPTURE_SSP_MASK) >>
-				SOF_NO_OF_HDMI_CAPTURE_SSP_SHIFT;
+	ssp_mask_hdmi_in = (sof_ssp_amp_quirk & SOF_HDMI_CAPTURE_SSP_MASK_MASK) >>
+				SOF_HDMI_CAPTURE_SSP_MASK_SHIFT;
+
+	if (ssp_mask_hdmi_in) {
+		int port = 0;
 
 		/* the topology supports HDMI-IN uses fixed BE ID for DAI links */
 		fixed_be = true;
 
 		be_id = HDMI_IN_BE_ID;
-		for (i = 1; i <= num_of_hdmi_ssp; i++) {
-			int port = (i == 1 ? (sof_ssp_amp_quirk & SOF_HDMI_CAPTURE_1_SSP_MASK) >>
-						SOF_HDMI_CAPTURE_1_SSP_SHIFT :
-						(sof_ssp_amp_quirk & SOF_HDMI_CAPTURE_2_SSP_MASK) >>
-						SOF_HDMI_CAPTURE_2_SSP_SHIFT);
+		for_each_set_bit(port, &ssp_mask_hdmi_in, 32) {
+			ret = sof_intel_board_set_hdmi_in_link(dev, &links[id],
+							       be_id, port);
+			if (ret)
+				return NULL;
 
-			links[id].cpus = &cpus[id];
-			links[id].cpus->dai_name = devm_kasprintf(dev, GFP_KERNEL,
-								  "SSP%d Pin", port);
-			if (!links[id].cpus->dai_name)
-				return NULL;
-			links[id].name = devm_kasprintf(dev, GFP_KERNEL, "SSP%d-HDMI", port);
-			if (!links[id].name)
-				return NULL;
-			links[id].id = be_id;
-			links[id].codecs = &snd_soc_dummy_dlc;
-			links[id].num_codecs = 1;
-			links[id].platforms = platform_component;
-			links[id].num_platforms = ARRAY_SIZE(platform_component);
-			links[id].dpcm_capture = 1;
-			links[id].no_pcm = 1;
-			links[id].num_cpus = 1;
 			id++;
 			be_id++;
 		}
@@ -246,7 +212,10 @@ static int sof_ssp_amp_probe(struct platform_device *pdev)
 	else
 		ctx->dmic_be_num = 0;
 
-	/* port number of peripherals attached to ssp interface */
+	/* port number/mask of peripherals attached to ssp interface */
+	ctx->ssp_mask_hdmi_in = (sof_ssp_amp_quirk & SOF_HDMI_CAPTURE_SSP_MASK_MASK) >>
+			SOF_HDMI_CAPTURE_SSP_MASK_SHIFT;
+
 	ctx->ssp_bt = (sof_ssp_amp_quirk & SOF_BT_OFFLOAD_SSP_MASK) >>
 			SOF_BT_OFFLOAD_SSP_SHIFT;
 
@@ -258,9 +227,8 @@ static int sof_ssp_amp_probe(struct platform_device *pdev)
 	if (ctx->amp_type != CODEC_NONE)
 		sof_ssp_amp_card.num_links++;
 
-	if (sof_ssp_amp_quirk & SOF_SSP_HDMI_CAPTURE_PRESENT)
-		sof_ssp_amp_card.num_links += (sof_ssp_amp_quirk & SOF_NO_OF_HDMI_CAPTURE_SSP_MASK) >>
-				SOF_NO_OF_HDMI_CAPTURE_SSP_SHIFT;
+	if (ctx->ssp_mask_hdmi_in)
+		sof_ssp_amp_card.num_links += hweight32(ctx->ssp_mask_hdmi_in);
 
 	if (sof_ssp_amp_quirk & SOF_HDMI_PLAYBACK_PRESENT) {
 		ctx->hdmi_num = (sof_ssp_amp_quirk & SOF_NO_OF_HDMI_PLAYBACK_MASK) >>
@@ -325,10 +293,8 @@ static const struct platform_device_id board_ids[] = {
 	{
 		.name = "tgl_rt1308_hdmi_ssp",
 		.driver_data = (kernel_ulong_t)(SOF_AMPLIFIER_SSP(2) |
-					SOF_NO_OF_HDMI_CAPTURE_SSP(2) |
-					SOF_HDMI_CAPTURE_1_SSP(1) |
-					SOF_HDMI_CAPTURE_2_SSP(5) |
-					SOF_SSP_HDMI_CAPTURE_PRESENT),
+					SOF_HDMI_CAPTURE_SSP_MASK(0x22)),
+					/* SSP 1 and SSP 5 are used for HDMI IN */
 	},
 	{
 		.name = "adl_cs35l41",
@@ -340,28 +306,22 @@ static const struct platform_device_id board_ids[] = {
 	},
 	{
 		.name = "adl_lt6911_hdmi_ssp",
-		.driver_data = (kernel_ulong_t)(SOF_NO_OF_HDMI_CAPTURE_SSP(2) |
-					SOF_HDMI_CAPTURE_1_SSP(0) |
-					SOF_HDMI_CAPTURE_2_SSP(2) |
-					SOF_SSP_HDMI_CAPTURE_PRESENT |
+		.driver_data = (kernel_ulong_t)(SOF_HDMI_CAPTURE_SSP_MASK(0x5) |
+					/* SSP 0 and SSP 2 are used for HDMI IN */
 					SOF_NO_OF_HDMI_PLAYBACK(3) |
 					SOF_HDMI_PLAYBACK_PRESENT),
 	},
 	{
 		.name = "rpl_lt6911_hdmi_ssp",
-		.driver_data = (kernel_ulong_t)(SOF_NO_OF_HDMI_CAPTURE_SSP(2) |
-					SOF_HDMI_CAPTURE_1_SSP(0) |
-					SOF_HDMI_CAPTURE_2_SSP(2) |
-					SOF_SSP_HDMI_CAPTURE_PRESENT |
+		.driver_data = (kernel_ulong_t)(SOF_HDMI_CAPTURE_SSP_MASK(0x5) |
+					/* SSP 0 and SSP 2 are used for HDMI IN */
 					SOF_NO_OF_HDMI_PLAYBACK(3) |
 					SOF_HDMI_PLAYBACK_PRESENT),
 	},
 	{
 		.name = "mtl_lt6911_hdmi_ssp",
-		.driver_data = (kernel_ulong_t)(SOF_NO_OF_HDMI_CAPTURE_SSP(2) |
-				SOF_HDMI_CAPTURE_1_SSP(0) |
-				SOF_HDMI_CAPTURE_2_SSP(2) |
-				SOF_SSP_HDMI_CAPTURE_PRESENT |
+		.driver_data = (kernel_ulong_t)(SOF_HDMI_CAPTURE_SSP_MASK(0x5) |
+				/* SSP 0 and SSP 2 are used for HDMI IN */
 				SOF_NO_OF_HDMI_PLAYBACK(3) |
 				SOF_HDMI_PLAYBACK_PRESENT),
 	},
