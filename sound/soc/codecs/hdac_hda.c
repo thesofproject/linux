@@ -619,6 +619,7 @@ static const struct snd_soc_component_driver hdac_hda_hdmi_codec = {
 
 static int hdac_hda_dev_probe(struct hdac_device *hdev)
 {
+	struct hdac_hda_priv *hda_pvt = dev_get_drvdata(&hdev->dev);
 	struct hdac_ext_link *hlink;
 	int ret;
 
@@ -631,7 +632,7 @@ static int hdac_hda_dev_probe(struct hdac_device *hdev)
 	snd_hdac_ext_bus_link_get(hdev->bus, hlink);
 
 	/* ASoC specific initialization */
-	if (snd_hda_device_is_hdmi(hdev))
+	if (hda_pvt->need_display_power)
 		ret = devm_snd_soc_register_component(&hdev->dev,
 						&hdac_hda_hdmi_codec, hdac_hda_hdmi_dais,
 						ARRAY_SIZE(hdac_hda_hdmi_dais));

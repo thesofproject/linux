@@ -84,6 +84,19 @@ static int lnl_hda_dsp_probe_early(struct snd_sof_dev *sdev)
 	return hda_dsp_probe_early(sdev);
 }
 
+static int lnl_dsp_post_fw_run(struct snd_sof_dev *sdev)
+{
+	if (sdev->first_boot) {
+		struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
+
+		/* Check if IMR boot is usable */
+		if (!sof_debug_check_flag(SOF_DBG_IGNORE_D3_PERSISTENT))
+			hda->imrboot_supported = true;
+	}
+
+	return 0;
+}
+
 int sof_lnl_ops_init(struct snd_sof_dev *sdev)
 {
 	struct sof_ipc4_fw_data *ipc4_data;
@@ -116,7 +129,7 @@ int sof_lnl_ops_init(struct snd_sof_dev *sdev)
 
 	/* pre/post fw run */
 	sof_lnl_ops.pre_fw_run = mtl_dsp_pre_fw_run;
-	sof_lnl_ops.post_fw_run = mtl_dsp_post_fw_run;
+	sof_lnl_ops.post_fw_run = lnl_dsp_post_fw_run;
 
 	/* parse platform specific extended manifest */
 	sof_lnl_ops.parse_platform_ext_manifest = NULL;
@@ -129,6 +142,10 @@ int sof_lnl_ops_init(struct snd_sof_dev *sdev)
 	sof_lnl_ops.runtime_resume		= lnl_hda_dsp_runtime_resume;
 
 	sof_lnl_ops.get_stream_position = mtl_dsp_get_stream_hda_link_position;
+
+	/* dsp core get/put */
+	sof_lnl_ops.core_get = mtl_dsp_core_get;
+	sof_lnl_ops.core_put = mtl_dsp_core_put;
 
 	sdev->private = kzalloc(sizeof(struct sof_ipc4_fw_data), GFP_KERNEL);
 	if (!sdev->private)

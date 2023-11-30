@@ -2232,13 +2232,11 @@ err_pm:
 	return ret;
 }
 
-static int cs42l43_codec_remove(struct platform_device *pdev)
+static void cs42l43_codec_remove(struct platform_device *pdev)
 {
 	struct cs42l43_codec *priv = platform_get_drvdata(pdev);
 
 	clk_put(priv->mclk);
-
-	return 0;
 }
 
 static int cs42l43_codec_runtime_resume(struct device *dev)
@@ -2253,8 +2251,8 @@ static int cs42l43_codec_runtime_resume(struct device *dev)
 	return 0;
 }
 
-DEFINE_RUNTIME_DEV_PM_OPS(cs42l43_codec_pm_ops, NULL,
-			  cs42l43_codec_runtime_resume, NULL);
+static DEFINE_RUNTIME_DEV_PM_OPS(cs42l43_codec_pm_ops, NULL,
+				 cs42l43_codec_runtime_resume, NULL);
 
 static const struct platform_device_id cs42l43_codec_id_table[] = {
 	{ "cs42l43-codec", },
@@ -2269,7 +2267,7 @@ static struct platform_driver cs42l43_codec_driver = {
 	},
 
 	.probe		= cs42l43_codec_probe,
-	.remove		= cs42l43_codec_remove,
+	.remove_new	= cs42l43_codec_remove,
 	.id_table	= cs42l43_codec_id_table,
 };
 module_platform_driver(cs42l43_codec_driver);
