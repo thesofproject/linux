@@ -475,11 +475,11 @@ snd_sof_pcm_platform_trigger(struct snd_sof_dev *sdev,
 }
 
 /* Firmware loading */
-static inline int snd_sof_load_firmware(struct snd_sof_dev *sdev)
+static inline int snd_sof_load_firmware(struct snd_sof_dev *sdev, const char *fw_filename)
 {
 	dev_dbg(sdev->dev, "loading firmware\n");
 
-	return sof_ops(sdev)->load_firmware(sdev);
+	return sof_ops(sdev)->load_firmware(sdev, fw_filename);
 }
 
 /* host DSP message data */

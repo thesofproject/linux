@@ -432,7 +432,7 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	}
 
 	/* load the firmware */
-	ret = snd_sof_load_firmware(sdev);
+	ret = snd_sof_load_firmware(sdev, NULL);
 	if (ret < 0) {
 		dev_err(sdev->dev, "error: failed to load DSP firmware %d\n",
 			ret);
@@ -472,6 +472,7 @@ skip_dsp_init:
 	/* hereafter all FW boot flows are for PM reasons */
 	sdev->first_boot = false;
 
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_DSP_OPS_TEST)
 	/* now register audio DSP platform driver and dai */
 	ret = devm_snd_soc_register_component(sdev->dev, &sdev->plat_drv,
 					      sof_ops(sdev)->drv,
@@ -488,6 +489,7 @@ skip_dsp_init:
 			"error: failed to register machine driver %d\n", ret);
 		goto fw_trace_err;
 	}
+#endif
 
 	ret = sof_register_clients(sdev);
 	if (ret < 0) {
@@ -511,8 +513,11 @@ skip_dsp_init:
 	return 0;
 
 sof_machine_err:
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_DSP_OPS_TEST)
 	snd_sof_machine_unregister(sdev, plat_data);
+
 fw_trace_err:
+#endif
 	sof_fw_trace_free(sdev);
 fw_run_err:
 	snd_sof_fw_unload(sdev);
@@ -567,6 +572,7 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 	if (sof_core_debug)
 		dev_info(dev, "sof_debug value: %#x\n", sof_core_debug);
 
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_DSP_OPS_TEST)
 	if (sof_debug_check_flag(SOF_DBG_DSPLESS_MODE)) {
 		if (plat_data->desc->dspless_mode_supported) {
 			dev_info(dev, "Switching to DSPless mode\n");
@@ -575,7 +581,7 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 			dev_info(dev, "DSPless mode is not supported by the platform\n");
 		}
 	}
-
+#endif
 	/* Initialize sof_ops based on the initial selected IPC version */
 	ret = sof_init_sof_ops(sdev);
 	if (ret)

@@ -4,6 +4,9 @@ snd-sof-objs := core.o ops.o loader.o ipc.o pcm.o pm.o debug.o topology.o\
 		control.o trace.o iomem-utils.o sof-audio.o stream-ipc.o\
 		fw-file-profile.o
 
+ifneq ($(CONFIG_SND_SOC_SOF_DEBUG_DSP_OPS_TEST),)
+snd-sof-objs += debug-dsp-ops.o
+endif
 # IPC implementations
 ifneq ($(CONFIG_SND_SOC_SOF_IPC3),)
 snd-sof-objs +=	ipc3.o ipc3-loader.o ipc3-topology.o ipc3-control.o ipc3-pcm.o\

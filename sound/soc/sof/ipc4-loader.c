@@ -136,10 +136,8 @@ static ssize_t sof_ipc4_fw_parse_ext_man(struct snd_sof_dev *sdev,
 
 static size_t sof_ipc4_fw_parse_basefw_ext_man(struct snd_sof_dev *sdev)
 {
-	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	struct sof_ipc4_fw_library *fw_lib;
 	ssize_t payload_offset;
-	int ret;
 
 	fw_lib = devm_kzalloc(sdev->dev, sizeof(*fw_lib), GFP_KERNEL);
 	if (!fw_lib)
@@ -148,7 +146,11 @@ static size_t sof_ipc4_fw_parse_basefw_ext_man(struct snd_sof_dev *sdev)
 	fw_lib->sof_fw.fw = sdev->basefw.fw;
 
 	payload_offset = sof_ipc4_fw_parse_ext_man(sdev, fw_lib);
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_DSP_OPS_TEST)
 	if (payload_offset > 0) {
+		struct sof_ipc4_fw_data *ipc4_data = sdev->private;
+		int ret;
+
 		fw_lib->sof_fw.payload_offset = payload_offset;
 
 		/* basefw ID is 0 */
@@ -157,7 +159,7 @@ static size_t sof_ipc4_fw_parse_basefw_ext_man(struct snd_sof_dev *sdev)
 		if (ret)
 			return ret;
 	}
-
+#endif
 	return payload_offset;
 }
 

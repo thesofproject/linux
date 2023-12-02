@@ -171,6 +171,10 @@ static void sof_pci_probe_complete(struct device *dev)
 	if (sof_pci_debug & SOF_PCI_DISABLE_PM_RUNTIME)
 		return;
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_DSP_OPS_TEST)
+	return;
+#endif
+
 	/* allow runtime_pm */
 	pm_runtime_set_autosuspend_delay(dev, SND_SOF_SUSPEND_DELAY_MS);
 	pm_runtime_use_autosuspend(dev);

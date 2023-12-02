@@ -266,6 +266,14 @@ config SND_SOC_SOF_DEBUG_RETAIN_DSP_CONTEXT
 	  Say Y if you want to retain DSP context for FW exceptions.
 	  If unsure, select "N".
 
+config SND_SOC_SOF_DEBUG_DSP_OPS_TEST
+	bool "SOF enable DSP ops testing"
+	help
+	  This option is used for testing DSP operations such as load/unload FW,
+	  set power state, enable/disable core etc. from userspace.
+	  Say Y if you want to retain DSP context for FW exceptions.
+	  If unsure, select "N".
+
 endif ## SND_SOC_SOF_DEBUG
 
 endif ## SND_SOC_SOF_DEVELOPER_SUPPORT
