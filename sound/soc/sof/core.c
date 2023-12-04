@@ -400,7 +400,7 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	if (ret)
 		return ret;
 
-	sof_set_fw_state(sdev, SOF_FW_BOOT_PREPARE);
+	sof_set_fw_state(sdev, SOF_FW_BOOT_PREPARE)
 
 	/* set up platform component driver */
 	snd_sof_new_platform_drv(sdev);

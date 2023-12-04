@@ -18,6 +18,10 @@
 #include "ipc4-telemetry.h"
 #include "ops.h"
 
+/*
+ * This is a comment used to test jenkins CI
+ */
+
 static const struct sof_ipc4_fw_status {
 	int status;
 	char *msg;
