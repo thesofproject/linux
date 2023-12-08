@@ -19,6 +19,7 @@
 #include <sound/hda_register.h>
 
 #include <linux/acpi.h>
+#include <linux/debugfs.h>
 #include <linux/module.h>
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_intel.h>
@@ -376,8 +377,12 @@ int hda_dsp_post_fw_run(struct snd_sof_dev *sdev)
 		/* Check if IMR boot is usable */
 		if (!sof_debug_check_flag(SOF_DBG_IGNORE_D3_PERSISTENT) &&
 		    (sdev->fw_ready.flags & SOF_IPC_INFO_D3_PERSISTENT ||
-		     sdev->pdata->ipc_type == SOF_IPC_TYPE_4))
+		     sdev->pdata->ipc_type == SOF_IPC_TYPE_4)) {
 			hdev->imrboot_supported = true;
+			debugfs_create_bool("skip_imr_boot",
+					    0644, sdev->debugfs_root,
+					    &hdev->skip_imr_boot);
+		}
 	}
 
 	hda_sdw_int_enable(sdev, true);
