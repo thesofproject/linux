@@ -990,6 +990,7 @@ skip_disable_dsp:
 	if (!sdev->dspless_mode_selected)
 		iounmap(sdev->bar[HDA_DSP_BAR]);
 }
+EXPORT_SYMBOL_NS(hda_dsp_remove, SND_SOC_SOF_INTEL_HDA_GENERIC);
 
 void hda_dsp_remove_late(struct snd_sof_dev *sdev)
 {
