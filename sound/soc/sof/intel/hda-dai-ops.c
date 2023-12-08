@@ -254,7 +254,8 @@ static unsigned int generic_calc_stream_format(struct snd_sof_dev *sdev,
 	for_each_link_ch_maps(rtd->dai_link, i, ch_maps)
 		ch_mask |= ch_maps[i].ch_mask;
 
-	num_channels = hweight_long(ch_mask);
+	num_channels = ch_mask ? hweight_long(ch_mask) : params_channels(params);
+
 	if (num_channels != params_channels(params))
 		dev_dbg(sdev->dev, "configuring stream format for %d channels, params_channels was %d\n",
 			num_channels, params_channels(params));
