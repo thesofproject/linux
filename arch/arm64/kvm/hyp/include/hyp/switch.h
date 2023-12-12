@@ -343,8 +343,6 @@ static inline void __deactivate_traps_common(struct kvm_vcpu *vcpu)
 
 	if (cpus_have_final_cap(ARM64_HAS_HCX))
 		write_sysreg_s(ctxt_sys_reg(hctxt, HCRX_EL2), SYS_HCRX_EL2);
-
-	__deactivate_traps_hfgxtr(vcpu);
 	__deactivate_traps_mpam();
 }
 
