@@ -252,7 +252,7 @@ static unsigned int generic_calc_stream_format(struct snd_sof_dev *sdev,
 	 * stream channel count - the params are modified in soc-pcm based on the ch_maps info
 	 */
 	for_each_link_ch_maps(rtd->dai_link, i, ch_maps)
-		ch_mask |= ch_maps[i].ch_mask;
+		ch_mask |= ch_maps->ch_mask;
 
 	num_channels = hweight_long(ch_mask);
 	if (num_channels != params_channels(params))
