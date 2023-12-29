@@ -1681,6 +1681,7 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		 */
 		if (ipc4_copier->dai_type == SOF_DAI_INTEL_ALH) {
 			struct sof_ipc4_alh_configuration_blob *blob;
+			struct sof_ipc4_dma_config *dma_config;
 			struct sof_ipc4_copier_data *alh_data;
 			struct sof_ipc4_copier *alh_copier;
 			struct snd_sof_widget *w;
@@ -1720,21 +1721,39 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 				alh_copier = (struct sof_ipc4_copier *)dai->private;
 				alh_data = &alh_copier->data;
 				blob->alh_cfg.mapping[i].device = alh_data->gtw_cfg.node_id;
+
+				/*
+				 * The dma_config_tlv[i] mapping device should be the same as
+				 * the mapping[i] device in ALH blob. The device id is used
+				 * only for DMA tlv mapping purposes.
+				 */
+				dma_config = &ipc4_copier->dma_config_tlv[i].dma_config;
+				dma_config->dma_stream_channel_map.mapping[0].device =
+					blob->alh_cfg.mapping[i].device;
+
 				/*
 				 * Set the same channel mask for playback as the audio data is
 				 * duplicated for all speakers. For capture, split the channels
 				 * among the aggregated DAIs. For example, with 4 channels on 2
-				 * aggregated DAIs, the channel_mask should be 0x3 and 0xc for the
-				 * two DAI's.
+				 * aggregated DAIs, the channel_mask of alh_cfg.mapping
+				 * should be 0x3 and 0xc for the two DAI's. However, the
+				 * channel_mask of dma_stream_channel_map.mapping should be both
+				 * 0x3 since we always use the lowest channels.
 				 * The channel masks used depend on the cpu_dais used in the
 				 * dailink at the machine driver level, which actually comes from
 				 * the tables in soc_acpi files depending on the _ADR and devID
 				 * registers for each codec.
 				 */
-				if (w->id == snd_soc_dapm_dai_in)
+				if (w->id == snd_soc_dapm_dai_in) {
 					blob->alh_cfg.mapping[i].channel_mask = ch_mask;
-				else
+					dma_config->dma_stream_channel_map.mapping[0].channel_mask =
+						ch_mask;
+				} else {
 					blob->alh_cfg.mapping[i].channel_mask = mask << (step * i);
+					/* No need to shift for the channel_mask in dma_config */
+					dma_config->dma_stream_channel_map.mapping[0].channel_mask =
+						mask;
+				}
 
 				i++;
 			}
