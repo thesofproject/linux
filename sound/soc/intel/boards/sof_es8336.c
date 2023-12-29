@@ -50,6 +50,9 @@
 #define SOF_ES8336_ENABLE_DMIC			BIT(5)
 #define SOF_ES8336_JD_INVERTED			BIT(6)
 #define SOC_ES8336_HEADSET_MIC1			BIT(8)
+#define SOF_ES8336_OVERRIDE_DSM_LOW_HIGH	BIT(9)
+#define SOF_ES8336_SPK_EN_LOW			BIT(10)
+#define SOF_ES8336_HP_EN_LOW			BIT(11)
 
 static unsigned long quirk;
 
@@ -87,6 +90,12 @@ static void log_quirks(struct device *dev)
 		dev_info(dev, "quirk JD inverted enabled\n");
 	if (quirk & SOC_ES8336_HEADSET_MIC1)
 		dev_info(dev, "quirk headset at mic1 port enabled\n");
+	if (quirk & SOF_ES8336_OVERRIDE_DSM_LOW_HIGH) {
+		dev_info(dev, "quirk speaker enabled on %s\n",
+			 quirk & SOF_ES8336_SPK_EN_LOW ? "low" : "high");
+		dev_info(dev, "quirk headset enabled on %s\n",
+			 quirk & SOF_ES8336_HP_EN_LOW ? "low" : "high");
+	}
 }
 
 static void pcm_pop_work_events(struct work_struct *work)
@@ -322,7 +331,10 @@ static const struct dmi_system_id sof_es8336_quirk_table[] = {
 			DMI_MATCH(DMI_BOARD_NAME, "BOHB-WAX9-PCB-B2"),
 		},
 		.driver_data = (void *)(SOF_ES8336_SPEAKERS_EN_GPIO1_QUIRK |
-					SOC_ES8336_HEADSET_MIC1)
+					SOC_ES8336_HEADSET_MIC1 |
+					SOF_ES8336_OVERRIDE_DSM_LOW_HIGH |
+					SOF_ES8336_HP_EN_LOW)
+
 	},
 	{}
 };
@@ -699,24 +711,35 @@ static int sof_es8336_probe(struct platform_device *pdev)
 		priv->enable_hp_gpio.crs_entry_index = 1;
 	}
 
-	ret = es83xx_dsm_is_gpio_level_low(priv->codec_dev, true);
-	if (ret < 0) {
-		put_device(codec_dev);
-		return ret;
-	} else if (ret > 0) {
-		priv->enable_spk_gpio.active_low = true;
+	/*
+	 * On some devices, _DSM is not reliable for
+	 * Speader/headsed active on low/high. So, allow overriding
+	 * it via a quirk.
+	 */
+	if (quirk & SOF_ES8336_OVERRIDE_DSM_LOW_HIGH) {
+		priv->enable_spk_gpio.active_low = quirk & SOF_ES8336_SPK_EN_LOW ? true : false;
+		priv->enable_hp_gpio.active_low = quirk & SOF_ES8336_HP_EN_LOW ? true : false;
 	} else {
-		priv->enable_spk_gpio.active_low = false;
-	}
+		/* Use _DSM data to set active_low state */
+		ret = es83xx_dsm_is_gpio_level_low(priv->codec_dev, true);
+		if (ret < 0) {
+			put_device(codec_dev);
+			return ret;
+		} else if (ret > 0) {
+			priv->enable_spk_gpio.active_low = true;
+		} else {
+			priv->enable_spk_gpio.active_low = false;
+		}
 
-	ret = es83xx_dsm_is_gpio_level_low(priv->codec_dev, false);
-	if (ret < 0) {
-		put_device(codec_dev);
-		return ret;
-	} else if (ret > 0) {
-		priv->enable_hp_gpio.active_low = true;
-	} else {
-		priv->enable_hp_gpio.active_low = false;
+		ret = es83xx_dsm_is_gpio_level_low(priv->codec_dev, false);
+		if (ret < 0) {
+			put_device(codec_dev);
+			return ret;
+		} else if (ret > 0) {
+			priv->enable_hp_gpio.active_low = true;
+		} else {
+			priv->enable_hp_gpio.active_low = false;
+		}
 	}
 
 	priv->gpio_mapping[0].name = "speakers-enable-gpios";
