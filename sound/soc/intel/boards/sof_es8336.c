@@ -308,12 +308,23 @@ static const struct dmi_system_id sof_es8336_quirk_table[] = {
 	{
 		.callback = sof_es8336_quirk_cb,
 		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "HUAWEI"),
+			DMI_MATCH(DMI_SYS_VENDOR, "HUAWEI"),	/* Matebook D15 2020 */
 			DMI_MATCH(DMI_BOARD_NAME, "BOHB-WAX9-PCB-B2"),
 		},
 		.driver_data = (void *)(SOF_ES8336_SPEAKERS_EN_GPIO1_QUIRK |
 					SOF_ES8336_JD_NOT_INVERTED |
 					SOF_ES8336_OVERRIDE_DSM_LOW_HIGH |
+					SOF_ES8336_HP_EN_LOW)
+
+	},
+	{
+		.callback = sof_es8336_quirk_cb,
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "HUAWEI"),	/* Matebook 14 2021 */
+			DMI_MATCH(DMI_BOARD_NAME, "NBD-WXX9-PCB-B3"),
+		},
+		.driver_data = (void *)(SOF_ES8336_JD_NOT_INVERTED |
+					SOF_ES8336_OVERRIDE_DSM_LOW_HIGH|
 					SOF_ES8336_HP_EN_LOW)
 
 	},
