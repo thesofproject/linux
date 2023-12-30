@@ -694,6 +694,9 @@ static void es8316_enable_jack_detect(struct snd_soc_component *component,
 	if (device_property_read_bool(component->dev,
 				      "everest,jack-detect-inverted"))
 		es8316->jd_inverted = true;
+	if (device_property_read_bool(component->dev,
+				      "everest,jack-detect-not-inverted"))
+		es8316->jd_inverted = false;
 
 	mutex_lock(&es8316->lock);
 

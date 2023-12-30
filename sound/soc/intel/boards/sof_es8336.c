@@ -52,6 +52,7 @@
 #define SOF_ES8336_OVERRIDE_DSM_LOW_HIGH	BIT(9)
 #define SOF_ES8336_SPK_EN_LOW			BIT(10)
 #define SOF_ES8336_HP_EN_LOW			BIT(11)
+#define SOF_ES8336_JD_NOT_INVERTED		BIT(12)
 
 static unsigned long quirk;
 
@@ -311,6 +312,7 @@ static const struct dmi_system_id sof_es8336_quirk_table[] = {
 			DMI_MATCH(DMI_BOARD_NAME, "BOHB-WAX9-PCB-B2"),
 		},
 		.driver_data = (void *)(SOF_ES8336_SPEAKERS_EN_GPIO1_QUIRK |
+					SOF_ES8336_JD_NOT_INVERTED |
 					SOF_ES8336_OVERRIDE_DSM_LOW_HIGH |
 					SOF_ES8336_HP_EN_LOW)
 
@@ -687,6 +689,9 @@ static int sof_es8336_probe(struct platform_device *pdev)
 
 	if (quirk & SOF_ES8336_JD_INVERTED)
 		props[cnt++] = PROPERTY_ENTRY_BOOL("everest,jack-detect-inverted");
+	else if (quirk & SOF_ES8336_JD_NOT_INVERTED)
+		props[cnt++] = PROPERTY_ENTRY_BOOL("everest,jack-detect-not-inverted");
+
 
 	if (cnt) {
 		fwnode = fwnode_create_software_node(props, NULL);
