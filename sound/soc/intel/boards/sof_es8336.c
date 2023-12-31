@@ -597,6 +597,17 @@ static int sof_es8336_probe(struct platform_device *pdev)
 	card = &sof_es8336_card;
 	card->dev = dev;
 
+	adev = acpi_dev_get_first_match_dev(mach->id, NULL, -1);
+	if (!adev) {
+		dev_err(dev, "Error cannot find '%s' dev\n", mach->id);
+		return -ENXIO;
+	}
+	codec_dev = acpi_get_first_physical_node(adev);
+	acpi_dev_put(adev);
+	if (!codec_dev)
+		return -EPROBE_DEFER;
+	priv->codec_dev = get_device(codec_dev);
+
 	if (pdev->id_entry && pdev->id_entry->driver_data)
 		quirk = (unsigned long)pdev->id_entry->driver_data;
 
@@ -656,25 +667,13 @@ static int sof_es8336_probe(struct platform_device *pdev)
 	sof_es8336_card.dai_link = dai_links;
 
 	/* fixup codec name based on HID */
-	adev = acpi_dev_get_first_match_dev(mach->id, NULL, -1);
-	if (adev) {
-		snprintf(codec_name, sizeof(codec_name),
-			 "i2c-%s", acpi_dev_name(adev));
-		dai_links[0].codecs->name = codec_name;
+	snprintf(codec_name, sizeof(codec_name),
+		 "i2c-%s", acpi_dev_name(adev));
+	dai_links[0].codecs->name = codec_name;
 
-		/* also fixup codec dai name if relevant */
-		if (!strncmp(mach->id, "ESSX8326", SND_ACPI_I2C_ID_LEN))
-			dai_links[0].codecs->dai_name = "ES8326 HiFi";
-	} else {
-		dev_err(dev, "Error cannot find '%s' dev\n", mach->id);
-		return -ENXIO;
-	}
-
-	codec_dev = acpi_get_first_physical_node(adev);
-	acpi_dev_put(adev);
-	if (!codec_dev)
-		return -EPROBE_DEFER;
-	priv->codec_dev = get_device(codec_dev);
+	/* also fixup codec dai name if relevant */
+	if (!strncmp(mach->id, "ESSX8326", SND_ACPI_I2C_ID_LEN))
+		dai_links[0].codecs->dai_name = "ES8326 HiFi";
 
 	ret = snd_soc_fixup_dai_links_platform_name(&sof_es8336_card,
 						    mach->mach_params.platform);
