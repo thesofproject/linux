@@ -456,6 +456,8 @@ int gzvm_vm_ioctl_arch_enable_cap(struct gzvm *gzvm,
 		 */
 	case GZVM_CAP_BLOCK_BASED_DEMAND_PAGING:
 		return gzvm_vm_arch_enable_cap(gzvm, cap, &res);
+	case GZVM_CAP_ENABLE_IDLE:
+		return gzvm_vm_arch_enable_cap(gzvm, cap, &res);
 	default:
 		break;
 	}
