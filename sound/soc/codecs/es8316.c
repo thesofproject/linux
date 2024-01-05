@@ -22,6 +22,7 @@
 #include <sound/tlv.h>
 #include <sound/jack.h>
 #include "es8316.h"
+#include "es83xx-dsm-common.h"
 
 /* In slave mode at single speed, the codec is documented as accepting 5
  * MCLK/LRCK ratios, but we also add ratio 400, which is commonly used on
@@ -689,8 +690,13 @@ static void es8316_enable_jack_detect(struct snd_soc_component *component,
 	 * guarantee that the bytchr-es8316 driver, which might set this
 	 * property, will probe before us.
 	 */
-	es8316->jd_inverted = device_property_read_bool(component->dev,
-							"everest,jack-detect-inverted");
+
+	if (device_property_read_bool(component->dev,
+				      "everest,jack-detect-inverted"))
+		es8316->jd_inverted = true;
+	if (device_property_read_bool(component->dev,
+				      "everest,jack-detect-not-inverted"))
+		es8316->jd_inverted = false;
 
 	mutex_lock(&es8316->lock);
 
@@ -861,6 +867,16 @@ static int es8316_i2c_probe(struct i2c_client *i2c_client)
 			      GFP_KERNEL);
 	if (es8316 == NULL)
 		return -ENOMEM;
+
+	es83xx_dsm_dump(dev);
+
+	/* read jack information from _DSM */
+	ret = es83xx_dsm_jack_inverted(dev);
+	if (ret < 0)
+		dev_warn(dev, "%s: Could not get jack detection information with ACPI _DSM method\n",
+			 __func__);
+	else
+		es8316->jd_inverted = ret;
 
 	i2c_set_clientdata(i2c_client, es8316);
 

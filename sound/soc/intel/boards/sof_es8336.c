@@ -20,6 +20,7 @@
 #include <sound/soc.h>
 #include <sound/soc-acpi.h>
 #include "hda_dsp_common.h"
+#include "../../codecs/es83xx-dsm-common.h"
 
 /* jd-inv + terminating entry */
 #define MAX_NO_PROPS 2
@@ -48,8 +49,10 @@
 
 #define SOF_ES8336_ENABLE_DMIC			BIT(5)
 #define SOF_ES8336_JD_INVERTED			BIT(6)
-#define SOF_ES8336_HEADPHONE_GPIO		BIT(7)
-#define SOC_ES8336_HEADSET_MIC1			BIT(8)
+#define SOF_ES8336_OVERRIDE_DSM_LOW_HIGH	BIT(9)
+#define SOF_ES8336_SPK_EN_LOW			BIT(10)
+#define SOF_ES8336_HP_EN_LOW			BIT(11)
+#define SOF_ES8336_JD_NOT_INVERTED		BIT(12)
 
 static unsigned long quirk;
 
@@ -64,36 +67,17 @@ struct sof_es8336_private {
 	struct list_head hdmi_pcm_list;
 	bool speaker_en;
 	struct delayed_work pcm_pop_work;
+
+	struct acpi_gpio_params enable_spk_gpio, enable_hp_gpio;
+	struct acpi_gpio_mapping gpio_mapping[3];
+	struct snd_soc_dapm_route mic_map[2];
+	int num_routes;
 };
 
 struct sof_hdmi_pcm {
 	struct list_head head;
 	struct snd_soc_dai *codec_dai;
 	int device;
-};
-
-static const struct acpi_gpio_params enable_gpio0 = { 0, 0, true };
-static const struct acpi_gpio_params enable_gpio1 = { 1, 0, true };
-
-static const struct acpi_gpio_mapping acpi_speakers_enable_gpio0[] = {
-	{ "speakers-enable-gpios", &enable_gpio0, 1, ACPI_GPIO_QUIRK_ONLY_GPIOIO },
-	{ }
-};
-
-static const struct acpi_gpio_mapping acpi_speakers_enable_gpio1[] = {
-	{ "speakers-enable-gpios", &enable_gpio1, 1, ACPI_GPIO_QUIRK_ONLY_GPIOIO },
-};
-
-static const struct acpi_gpio_mapping acpi_enable_both_gpios[] = {
-	{ "speakers-enable-gpios", &enable_gpio0, 1, ACPI_GPIO_QUIRK_ONLY_GPIOIO },
-	{ "headphone-enable-gpios", &enable_gpio1, 1, ACPI_GPIO_QUIRK_ONLY_GPIOIO },
-	{ }
-};
-
-static const struct acpi_gpio_mapping acpi_enable_both_gpios_rev_order[] = {
-	{ "speakers-enable-gpios", &enable_gpio1, 1, ACPI_GPIO_QUIRK_ONLY_GPIOIO },
-	{ "headphone-enable-gpios", &enable_gpio0, 1, ACPI_GPIO_QUIRK_ONLY_GPIOIO },
-	{ }
 };
 
 static void log_quirks(struct device *dev)
@@ -104,12 +88,14 @@ static void log_quirks(struct device *dev)
 		dev_info(dev, "quirk DMIC enabled\n");
 	if (quirk & SOF_ES8336_SPEAKERS_EN_GPIO1_QUIRK)
 		dev_info(dev, "Speakers GPIO1 quirk enabled\n");
-	if (quirk & SOF_ES8336_HEADPHONE_GPIO)
-		dev_info(dev, "quirk headphone GPIO enabled\n");
 	if (quirk & SOF_ES8336_JD_INVERTED)
 		dev_info(dev, "quirk JD inverted enabled\n");
-	if (quirk & SOC_ES8336_HEADSET_MIC1)
-		dev_info(dev, "quirk headset at mic1 port enabled\n");
+	if (quirk & SOF_ES8336_OVERRIDE_DSM_LOW_HIGH) {
+		dev_info(dev, "quirk speaker enabled on %s\n",
+			 quirk & SOF_ES8336_SPK_EN_LOW ? "low" : "high");
+		dev_info(dev, "quirk headset enabled on %s\n",
+			 quirk & SOF_ES8336_HP_EN_LOW ? "low" : "high");
+	}
 }
 
 static void pcm_pop_work_events(struct work_struct *work)
@@ -118,10 +104,7 @@ static void pcm_pop_work_events(struct work_struct *work)
 		container_of(work, struct sof_es8336_private, pcm_pop_work.work);
 
 	gpiod_set_value_cansleep(priv->gpio_speakers, priv->speaker_en);
-
-	if (quirk & SOF_ES8336_HEADPHONE_GPIO)
-		gpiod_set_value_cansleep(priv->gpio_headphone, priv->speaker_en);
-
+	gpiod_set_value_cansleep(priv->gpio_headphone, !priv->speaker_en);
 }
 
 static int sof_8336_trigger(struct snd_pcm_substream *substream, int cmd)
@@ -139,10 +122,11 @@ static int sof_8336_trigger(struct snd_pcm_substream *substream, int cmd)
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_STOP:
-		if (priv->speaker_en == false)
+		if (priv->speaker_en == true)
 			if (substream->stream == 0) {
 				cancel_delayed_work(&priv->pcm_pop_work);
-				gpiod_set_value_cansleep(priv->gpio_speakers, true);
+				gpiod_set_value_cansleep(priv->gpio_speakers, 0);
+				gpiod_set_value_cansleep(priv->gpio_headphone, 0);
 			}
 		break;
 	default:
@@ -158,12 +142,9 @@ static int sof_es8316_speaker_power_event(struct snd_soc_dapm_widget *w,
 	struct snd_soc_card *card = w->dapm->card;
 	struct sof_es8336_private *priv = snd_soc_card_get_drvdata(card);
 
-	if (priv->speaker_en == !SND_SOC_DAPM_EVENT_ON(event))
-		return 0;
-
-	priv->speaker_en = !SND_SOC_DAPM_EVENT_ON(event);
-
+	priv->speaker_en = SND_SOC_DAPM_EVENT_ON(event);
 	queue_delayed_work(system_wq, &priv->pcm_pop_work, msecs_to_jiffies(70));
+
 	return 0;
 }
 
@@ -193,16 +174,6 @@ static const struct snd_soc_dapm_route sof_es8316_audio_map[] = {
 	{"Speaker", NULL, "HPOL"},
 	{"Speaker", NULL, "HPOR"},
 	{"Speaker", NULL, "Speaker Power"},
-};
-
-static const struct snd_soc_dapm_route sof_es8316_headset_mic2_map[] = {
-	{"MIC1", NULL, "Internal Mic"},
-	{"MIC2", NULL, "Headset Mic"},
-};
-
-static const struct snd_soc_dapm_route sof_es8316_headset_mic1_map[] = {
-	{"MIC2", NULL, "Internal Mic"},
-	{"MIC1", NULL, "Headset Mic"},
 };
 
 static const struct snd_soc_dapm_route dmic_map[] = {
@@ -272,21 +243,15 @@ static int sof_es8316_init(struct snd_soc_pcm_runtime *runtime)
 	struct snd_soc_component *codec = snd_soc_rtd_to_codec(runtime, 0)->component;
 	struct snd_soc_card *card = runtime->card;
 	struct sof_es8336_private *priv = snd_soc_card_get_drvdata(card);
-	const struct snd_soc_dapm_route *custom_map;
-	int num_routes;
-	int ret;
+	int i, ret;
 
 	card->dapm.idle_bias_off = true;
 
-	if (quirk & SOC_ES8336_HEADSET_MIC1) {
-		custom_map = sof_es8316_headset_mic1_map;
-		num_routes = ARRAY_SIZE(sof_es8316_headset_mic1_map);
-	} else {
-		custom_map = sof_es8316_headset_mic2_map;
-		num_routes = ARRAY_SIZE(sof_es8316_headset_mic2_map);
-	}
+	for (i = 0; i < priv->num_routes; i++)
+		dev_info(card->dev, "%s is %s\n",
+			 priv->mic_map[i].source, priv->mic_map[i].sink);
 
-	ret = snd_soc_dapm_add_routes(&card->dapm, custom_map, num_routes);
+	ret = snd_soc_dapm_add_routes(&card->dapm, priv->mic_map, priv->num_routes);
 	if (ret)
 		return ret;
 
@@ -343,11 +308,25 @@ static const struct dmi_system_id sof_es8336_quirk_table[] = {
 	{
 		.callback = sof_es8336_quirk_cb,
 		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "HUAWEI"),
+			DMI_MATCH(DMI_SYS_VENDOR, "HUAWEI"),	/* Matebook D15 2020 */
 			DMI_MATCH(DMI_BOARD_NAME, "BOHB-WAX9-PCB-B2"),
 		},
-		.driver_data = (void *)(SOF_ES8336_HEADPHONE_GPIO |
-					SOC_ES8336_HEADSET_MIC1)
+		.driver_data = (void *)(SOF_ES8336_SPEAKERS_EN_GPIO1_QUIRK |
+					SOF_ES8336_JD_NOT_INVERTED |
+					SOF_ES8336_OVERRIDE_DSM_LOW_HIGH |
+					SOF_ES8336_HP_EN_LOW)
+
+	},
+	{
+		.callback = sof_es8336_quirk_cb,
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "HUAWEI"),	/* Matebook 14 2021 */
+			DMI_MATCH(DMI_BOARD_NAME, "NBD-WXX9-PCB-B3"),
+		},
+		.driver_data = (void *)(SOF_ES8336_JD_NOT_INVERTED |
+					SOF_ES8336_OVERRIDE_DSM_LOW_HIGH|
+					SOF_ES8336_HP_EN_LOW)
+
 	},
 	{}
 };
@@ -598,7 +577,6 @@ static int sof_es8336_probe(struct platform_device *pdev)
 	struct acpi_device *adev;
 	struct snd_soc_dai_link *dai_links;
 	struct device *codec_dev;
-	const struct acpi_gpio_mapping *gpio_mapping;
 	unsigned int cnt = 0;
 	int dmic_be_num = 0;
 	int hdmi_num = 3;
@@ -610,6 +588,17 @@ static int sof_es8336_probe(struct platform_device *pdev)
 
 	card = &sof_es8336_card;
 	card->dev = dev;
+
+	adev = acpi_dev_get_first_match_dev(mach->id, NULL, -1);
+	if (!adev) {
+		dev_err(dev, "Error cannot find '%s' dev\n", mach->id);
+		return -ENXIO;
+	}
+	codec_dev = acpi_get_first_physical_node(adev);
+	acpi_dev_put(adev);
+	if (!codec_dev)
+		return -EPROBE_DEFER;
+	priv->codec_dev = get_device(codec_dev);
 
 	if (pdev->id_entry && pdev->id_entry->driver_data)
 		quirk = (unsigned long)pdev->id_entry->driver_data;
@@ -641,8 +630,32 @@ static int sof_es8336_probe(struct platform_device *pdev)
 		}
 	}
 
-	if (mach->mach_params.dmic_num)
-		quirk |= SOF_ES8336_ENABLE_DMIC;
+	/*
+	 * Check if DMIC is not enabled, as the _DSM table may be
+	 * reporting a non-existent AMIC.
+	 */
+	if (!(quirk & SOF_ES8336_ENABLE_DMIC)) {
+		ret = es83xx_dsm_mic_type(priv->codec_dev, true);
+		if (ret == PLATFORM_MIC_AMIC_LIN1RIN1) {
+			priv->mic_map[priv->num_routes].sink = "MIC1";
+			priv->mic_map[priv->num_routes].source = "Internal Mic";
+			priv->num_routes++;
+		} else if (ret == PLATFORM_MIC_AMIC_LIN2RIN2) {
+			priv->mic_map[priv->num_routes].sink = "MIC2";
+			priv->mic_map[priv->num_routes].source = "Internal Mic";
+		}
+	}
+
+	ret = es83xx_dsm_mic_type(priv->codec_dev, false);
+	if (ret == PLATFORM_MIC_AMIC_LIN1RIN1) {
+		priv->mic_map[priv->num_routes].sink = "MIC1";
+		priv->mic_map[priv->num_routes].source = "Headset Mic";
+		priv->num_routes++;
+	} else if (ret == PLATFORM_MIC_AMIC_LIN2RIN2) {
+		priv->mic_map[priv->num_routes].sink = "MIC2";
+		priv->mic_map[priv->num_routes].source = "Headset Mic";
+		priv->num_routes++;
+	}
 
 	if (quirk_override != -1) {
 		dev_info(dev, "Overriding quirk 0x%lx => 0x%x\n",
@@ -651,7 +664,7 @@ static int sof_es8336_probe(struct platform_device *pdev)
 	}
 	log_quirks(dev);
 
-	if (quirk & SOF_ES8336_ENABLE_DMIC)
+	if (quirk & SOF_ES8336_ENABLE_DMIC || mach->mach_params.dmic_num > 0)
 		dmic_be_num = 2;
 
 	/* compute number of dai links */
@@ -670,25 +683,13 @@ static int sof_es8336_probe(struct platform_device *pdev)
 	sof_es8336_card.dai_link = dai_links;
 
 	/* fixup codec name based on HID */
-	adev = acpi_dev_get_first_match_dev(mach->id, NULL, -1);
-	if (adev) {
-		snprintf(codec_name, sizeof(codec_name),
-			 "i2c-%s", acpi_dev_name(adev));
-		dai_links[0].codecs->name = codec_name;
+	snprintf(codec_name, sizeof(codec_name),
+		 "i2c-%s", acpi_dev_name(adev));
+	dai_links[0].codecs->name = codec_name;
 
-		/* also fixup codec dai name if relevant */
-		if (!strncmp(mach->id, "ESSX8326", SND_ACPI_I2C_ID_LEN))
-			dai_links[0].codecs->dai_name = "ES8326 HiFi";
-	} else {
-		dev_err(dev, "Error cannot find '%s' dev\n", mach->id);
-		return -ENXIO;
-	}
-
-	codec_dev = acpi_get_first_physical_node(adev);
-	acpi_dev_put(adev);
-	if (!codec_dev)
-		return -EPROBE_DEFER;
-	priv->codec_dev = get_device(codec_dev);
+	/* also fixup codec dai name if relevant */
+	if (!strncmp(mach->id, "ESSX8326", SND_ACPI_I2C_ID_LEN))
+		dai_links[0].codecs->dai_name = "ES8326 HiFi";
 
 	ret = snd_soc_fixup_dai_links_platform_name(&sof_es8336_card,
 						    mach->mach_params.platform);
@@ -699,6 +700,9 @@ static int sof_es8336_probe(struct platform_device *pdev)
 
 	if (quirk & SOF_ES8336_JD_INVERTED)
 		props[cnt++] = PROPERTY_ENTRY_BOOL("everest,jack-detect-inverted");
+	else if (quirk & SOF_ES8336_JD_NOT_INVERTED)
+		props[cnt++] = PROPERTY_ENTRY_BOOL("everest,jack-detect-not-inverted");
+
 
 	if (cnt) {
 		fwnode = fwnode_create_software_node(props, NULL);
@@ -717,30 +721,75 @@ static int sof_es8336_probe(struct platform_device *pdev)
 		}
 	}
 
-	/* get speaker enable GPIO */
-	if (quirk & SOF_ES8336_HEADPHONE_GPIO) {
-		if (quirk & SOF_ES8336_SPEAKERS_EN_GPIO1_QUIRK)
-			gpio_mapping = acpi_enable_both_gpios;
-		else
-			gpio_mapping = acpi_enable_both_gpios_rev_order;
-	} else if (quirk & SOF_ES8336_SPEAKERS_EN_GPIO1_QUIRK) {
-		gpio_mapping = acpi_speakers_enable_gpio1;
+	if (quirk & SOF_ES8336_SPEAKERS_EN_GPIO1_QUIRK) {
+		priv->enable_spk_gpio.crs_entry_index = 1;
+		priv->enable_hp_gpio.crs_entry_index = 0;
 	} else {
-		gpio_mapping = acpi_speakers_enable_gpio0;
+		priv->enable_spk_gpio.crs_entry_index = 0;
+		priv->enable_hp_gpio.crs_entry_index = 1;
 	}
 
-	ret = devm_acpi_dev_add_driver_gpios(codec_dev, gpio_mapping);
+	/*
+	 * On some devices, _DSM is not reliable for
+	 * Speader/headsed active on low/high. So, allow overriding
+	 * it via a quirk.
+	 */
+	if (quirk & SOF_ES8336_OVERRIDE_DSM_LOW_HIGH) {
+		priv->enable_spk_gpio.active_low = quirk & SOF_ES8336_SPK_EN_LOW ? true : false;
+		priv->enable_hp_gpio.active_low = quirk & SOF_ES8336_HP_EN_LOW ? true : false;
+	} else {
+		/* Use _DSM data to set active_low state */
+		ret = es83xx_dsm_is_gpio_level_low(priv->codec_dev, true);
+		if (ret < 0) {
+			put_device(codec_dev);
+			return ret;
+		} else if (ret > 0) {
+			priv->enable_spk_gpio.active_low = true;
+		} else {
+			priv->enable_spk_gpio.active_low = false;
+		}
+
+		ret = es83xx_dsm_is_gpio_level_low(priv->codec_dev, false);
+		if (ret < 0) {
+			put_device(codec_dev);
+			return ret;
+		} else if (ret > 0) {
+			priv->enable_hp_gpio.active_low = true;
+		} else {
+			priv->enable_hp_gpio.active_low = false;
+		}
+	}
+
+	priv->gpio_mapping[0].name = "speakers-enable-gpios";
+	priv->gpio_mapping[0].data = &priv->enable_spk_gpio;
+	priv->gpio_mapping[0].size = 1;
+	priv->gpio_mapping[0].quirks = ACPI_GPIO_QUIRK_ONLY_GPIOIO;
+
+	priv->gpio_mapping[1].name = "headphone-enable-gpios";
+	priv->gpio_mapping[1].data = &priv->enable_hp_gpio;
+	priv->gpio_mapping[1].size = 1;
+	priv->gpio_mapping[1].quirks = ACPI_GPIO_QUIRK_ONLY_GPIOIO;
+
+	dev_info(codec_dev, "speaker gpio %d active %s, headphone gpio %d active %s\n",
+		 priv->enable_spk_gpio.crs_entry_index,
+		 priv->enable_spk_gpio.active_low ? "low" : "high",
+		 priv->enable_hp_gpio.crs_entry_index,
+		 priv->enable_hp_gpio.active_low ? "low" : "high");
+
+	ret = devm_acpi_dev_add_driver_gpios(codec_dev, priv->gpio_mapping);
 	if (ret)
 		dev_warn(codec_dev, "unable to add GPIO mapping table\n");
 
-	priv->gpio_speakers = gpiod_get_optional(codec_dev, "speakers-enable", GPIOD_OUT_LOW);
+	priv->gpio_speakers = gpiod_get_optional(codec_dev, "speakers-enable",
+						 priv->enable_spk_gpio.active_low ? GPIOD_OUT_LOW : GPIOD_OUT_HIGH);
 	if (IS_ERR(priv->gpio_speakers)) {
 		ret = dev_err_probe(dev, PTR_ERR(priv->gpio_speakers),
 				    "could not get speakers-enable GPIO\n");
 		goto err_put_codec;
 	}
 
-	priv->gpio_headphone = gpiod_get_optional(codec_dev, "headphone-enable", GPIOD_OUT_LOW);
+	priv->gpio_headphone = gpiod_get_optional(codec_dev, "headphone-enable",
+						 priv->enable_hp_gpio.active_low ? GPIOD_OUT_LOW : GPIOD_OUT_HIGH);
 	if (IS_ERR(priv->gpio_headphone)) {
 		ret = dev_err_probe(dev, PTR_ERR(priv->gpio_headphone),
 				    "could not get headphone-enable GPIO\n");
