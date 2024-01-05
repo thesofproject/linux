@@ -914,6 +914,18 @@ skip_dsp_setup:
 
 	hdev->nhlt = intel_nhlt_init(sdev->dev);
 
+	/* log PCI capabilities last */
+	dev_info(sdev->dev, "%s: PCI PME CAPABLE in D0: %s\n", __func__,
+		 pci_pme_capable(pci, PCI_D0) ? "true" : "false");
+	dev_info(sdev->dev, "%s: PCI PME CAPABLE in D1: %s\n", __func__,
+		 pci_pme_capable(pci, PCI_D1) ? "true" : "false");
+	dev_info(sdev->dev, "%s: PCI PME CAPABLE in D2: %s\n", __func__,
+		 pci_pme_capable(pci, PCI_D2) ? "true" : "false");
+	dev_info(sdev->dev, "%s: PCI PME CAPABLE in D3hot: %s\n", __func__,
+		 pci_pme_capable(pci, PCI_D3hot) ? "true" : "false");
+	dev_info(sdev->dev, "%s: PCI PME CAPABLE in D3cold: %s\n", __func__,
+		 pci_pme_capable(pci, PCI_D3cold) ? "true" : "false");
+
 	return 0;
 
 disable_pp_cap:
