@@ -846,8 +846,7 @@ skip_dsp:
 
 static int hda_resume(struct snd_sof_dev *sdev, bool runtime_resume)
 {
-	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
-	const struct sof_intel_dsp_desc *chip = hda->desc;
+	const struct sof_intel_dsp_desc *chip;
 	int ret;
 
 	/* display codec must be powered before link reset */
