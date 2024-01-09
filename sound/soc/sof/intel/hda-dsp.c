@@ -800,8 +800,6 @@ static int hda_suspend(struct snd_sof_dev *sdev, bool runtime_suspend)
 	/* make sure that no irq handler is pending before shutdown */
 	synchronize_irq(sdev->ipc_irq);
 
-	hda_codec_jack_wake_enable(sdev, runtime_suspend);
-
 	/* power down all hda links */
 	hda_bus_ml_suspend(bus);
 
@@ -869,7 +867,6 @@ static int hda_resume(struct snd_sof_dev *sdev, bool runtime_resume)
 
 	/* check jack status */
 	if (runtime_resume) {
-		hda_codec_jack_wake_enable(sdev, false);
 		if (sdev->system_suspend_target == SOF_SUSPEND_NONE)
 			hda_codec_jack_check(sdev);
 	}

@@ -65,8 +65,7 @@ static int intel_shim_check_wake(struct sdw_intel *sdw)
 	 * wakes in low-power modes
 	 */
 	wake_sts = snd_hdac_chip_readw(sdw->link_res->hbus, STATESTS);
-
-	return wake_sts & lsdiid;
+	return 1; /* HACK: always retuen 1 */
 }
 
 static void intel_shim_wake(struct sdw_intel *sdw, bool wake_enable)
