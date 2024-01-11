@@ -1494,6 +1494,7 @@ void hda_dsp_get_state(struct snd_sof_dev *sdev, const char *level)
 		dev_printk(level, sdev->dev, "error code: %#x (%s)\n", error_code,
 			   error_text);
 }
+EXPORT_SYMBOL_NS(hda_dsp_get_state, SND_SOC_SOF_INTEL_HDA_COMMON);
 
 static void hda_dsp_get_registers(struct snd_sof_dev *sdev,
 				  struct sof_ipc_dsp_oops_xtensa *xoops,
