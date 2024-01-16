@@ -21,6 +21,7 @@
 #include <trace/events/sof_intel.h>
 #include "../ops.h"
 #include "../sof-audio.h"
+#include "../ipc4-priv.h"
 #include "hda.h"
 
 int sof_hda_position_quirk = SOF_HDA_POSITION_QUIRK_USE_DPIB_REGISTERS;
@@ -960,6 +961,14 @@ int hda_dsp_stream_init(struct snd_sof_dev *sdev)
 
 	/* store total stream count (playback + capture) from GCAP */
 	sof_hda->stream_max = num_total;
+
+	/* store stream count from GCAP required for CHAIN_DMA */
+	if (sdev->pdata->ipc_type == SOF_IPC_TYPE_4) {
+		struct sof_ipc4_fw_data *ipc4_data = sdev->private;
+
+		ipc4_data->num_playback_streams = num_playback;
+		ipc4_data->num_capture_streams = num_capture;
+	}
 
 	return 0;
 }
