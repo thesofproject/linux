@@ -1090,3 +1090,28 @@ snd_pcm_uframes_t hda_dsp_stream_get_position(struct hdac_stream *hstream,
 	return pos;
 }
 EXPORT_SYMBOL_NS(hda_dsp_stream_get_position, SND_SOC_SOF_INTEL_HDA_COMMON);
+
+u64 hda_dsp_get_stream_hda_link_position(struct snd_sof_dev *sdev,
+					 struct snd_soc_component *component,
+					 struct snd_pcm_substream *substream)
+{
+	struct hdac_stream *hstream = substream->runtime->private_data;
+	struct hdac_ext_stream *hext_stream = stream_to_hdac_ext_stream(hstream);
+	u32 llp_l, llp_u;
+
+	/*
+	 * The pplc_addr have been calculated during probe in
+	 * hda_dsp_stream_init():
+	 * pplc_addr = sdev->bar[HDA_DSP_PP_BAR] +
+	 *	       SOF_HDA_PPLC_BASE +
+	 *	       SOF_HDA_PPLC_MULTI * total_stream +
+	 *	       SOF_HDA_PPLC_INTERVAL * stream_index
+	 *
+	 * Use this pre-calculated address to avoid repeated re-calculation.
+	 */
+	llp_l = readl(hext_stream->pplc_addr + AZX_REG_PPLCLLPL);
+	llp_u = readl(hext_stream->pplc_addr + AZX_REG_PPLCLLPU);
+
+	return ((u64)llp_u << 32) | llp_l;
+}
+EXPORT_SYMBOL_NS(hda_dsp_get_stream_hda_link_position, SND_SOC_SOF_INTEL_HDA_COMMON);
