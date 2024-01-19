@@ -891,17 +891,17 @@ static snd_pcm_sframes_t sof_ipc4_pcm_delay(struct snd_soc_component *component,
 	tmp_ptr -= time_info->stream_start_offset;
 
 	/* Calculate the delay taking into account that both pointer can wrap */
-	div64_u64_rem(tmp_ptr, substream->runtime->boundary, &tmp_ptr);
+	div64_u64_rem(tmp_ptr, substream->runtime->buffer_size, &tmp_ptr);
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-		head_ptr = substream->runtime->status->hw_ptr;
+		head_ptr = snd_sof_pcm_platform_pointer(sdev, substream);
 		tail_ptr = tmp_ptr;
 	} else {
 		head_ptr = tmp_ptr;
-		tail_ptr = substream->runtime->status->hw_ptr;
+		tail_ptr = snd_sof_pcm_platform_pointer(sdev, substream);
 	}
 
 	if (head_ptr < tail_ptr)
-		return substream->runtime->boundary - tail_ptr + head_ptr;
+		return substream->runtime->buffer_size - tail_ptr + head_ptr;
 
 	return head_ptr - tail_ptr;
 }
