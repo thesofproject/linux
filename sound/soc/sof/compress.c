@@ -147,7 +147,7 @@ static int sof_compr_free(struct snd_soc_component *component,
 	stream.comp_id = spcm->stream[cstream->direction].comp_id;
 
 	if (spcm->prepared[cstream->direction]) {
-		ret = sof_ipc_tx_message_no_reply(sdev->ipc, &stream, sizeof(stream));
+		ret = sof_ipc_tx_message_no_reply(sdev->ipc, "compr_free", &stream, sizeof(stream));
 		if (!ret)
 			spcm->prepared[cstream->direction] = false;
 	}
@@ -229,7 +229,7 @@ static int sof_compr_set_params(struct snd_soc_component *component,
 
 	memcpy((u8 *)pcm->params.ext_data, &params->codec, ext_data_size);
 
-	ret = sof_ipc_tx_message(sdev->ipc, pcm, sizeof(*pcm) + ext_data_size,
+	ret = sof_ipc_tx_message(sdev->ipc, "compr_set_params", pcm, sizeof(*pcm) + ext_data_size,
 				 &ipc_params_reply, sizeof(ipc_params_reply));
 	if (ret < 0) {
 		dev_err(component->dev, "error ipc failed\n");
@@ -299,7 +299,7 @@ static int sof_compr_trigger(struct snd_soc_component *component,
 		break;
 	}
 
-	return sof_ipc_tx_message_no_reply(sdev->ipc, &stream, sizeof(stream));
+	return sof_ipc_tx_message_no_reply(sdev->ipc, "compr_trigger", &stream, sizeof(stream));
 }
 
 static int sof_compr_copy_playback(struct snd_compr_runtime *rtd,

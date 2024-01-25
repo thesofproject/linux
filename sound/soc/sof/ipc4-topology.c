@@ -2438,7 +2438,8 @@ static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 	msg->data_size = ipc_size;
 	msg->data_ptr = ipc_data;
 
-	ret = sof_ipc_tx_message_no_reply(sdev->ipc, msg, ipc_size);
+	ret = sof_ipc_tx_message_no_reply(sdev->ipc, "ipc4_widget_setup",
+					  msg, ipc_size);
 	if (ret < 0) {
 		dev_err(sdev->dev, "failed to create module %s\n", swidget->widget->name);
 
@@ -2482,7 +2483,8 @@ static int sof_ipc4_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget 
 
 		msg.primary = header;
 
-		ret = sof_ipc_tx_message_no_reply(sdev->ipc, &msg, 0);
+		ret = sof_ipc_tx_message_no_reply(sdev->ipc, "ipc4_widget_free",
+						  &msg, 0);
 		if (ret < 0)
 			dev_err(sdev->dev, "failed to free pipeline widget %s\n",
 				swidget->widget->name);
@@ -2719,7 +2721,8 @@ static int sof_ipc4_route_setup(struct snd_sof_dev *sdev, struct snd_sof_route *
 	msg.primary = header;
 	msg.extension = extension;
 
-	ret = sof_ipc_tx_message_no_reply(sdev->ipc, &msg, 0);
+	ret = sof_ipc_tx_message_no_reply(sdev->ipc, "ipc4_route_setup",
+					  &msg, 0);
 	if (ret < 0) {
 		dev_err(sdev->dev, "failed to bind modules %s:%d -> %s:%d\n",
 			src_widget->widget->name, sroute->src_queue_id,
@@ -2778,7 +2781,7 @@ static int sof_ipc4_route_free(struct snd_sof_dev *sdev, struct snd_sof_route *s
 	msg.primary = header;
 	msg.extension = extension;
 
-	ret = sof_ipc_tx_message_no_reply(sdev->ipc, &msg, 0);
+	ret = sof_ipc_tx_message_no_reply(sdev->ipc, "ipc4_route_free", &msg, 0);
 	if (ret < 0)
 		dev_err(sdev->dev, "failed to unbind modules %s:%d -> %s:%d\n",
 			src_widget->widget->name, sroute->src_queue_id,

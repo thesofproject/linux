@@ -290,12 +290,14 @@ int sof_client_ipc_tx_message(struct sof_client_dev *cdev, void *ipc_msg,
 	if (cdev->sdev->pdata->ipc_type == SOF_IPC_TYPE_3) {
 		struct sof_ipc_cmd_hdr *hdr = ipc_msg;
 
-		return sof_ipc_tx_message(cdev->sdev->ipc, ipc_msg, hdr->size,
+		return sof_ipc_tx_message(cdev->sdev->ipc, "client_ipc_tx_message",
+					  ipc_msg, hdr->size,
 					  reply_data, reply_bytes);
 	} else if (cdev->sdev->pdata->ipc_type == SOF_IPC_TYPE_4) {
 		struct sof_ipc4_msg *msg = ipc_msg;
 
-		return sof_ipc_tx_message(cdev->sdev->ipc, ipc_msg, msg->data_size,
+		return sof_ipc_tx_message(cdev->sdev->ipc, "client_ipc_tx_message",
+					  ipc_msg, msg->data_size,
 					  reply_data, reply_bytes);
 	}
 

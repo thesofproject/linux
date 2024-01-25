@@ -235,7 +235,8 @@ static int memory_info_update(struct snd_sof_dev *sdev, char *buf, size_t buff_s
 		goto error;
 	}
 
-	ret = sof_ipc_tx_message(sdev->ipc, &msg, msg.size, reply, SOF_IPC_MSG_MAX_SIZE);
+	ret = sof_ipc_tx_message(sdev->ipc, "memory_info_update",
+				 &msg, msg.size, reply, SOF_IPC_MSG_MAX_SIZE);
 	pm_runtime_mark_last_busy(sdev->dev);
 	pm_runtime_put_autosuspend(sdev->dev);
 	if (ret < 0 || reply->rhdr.error < 0) {

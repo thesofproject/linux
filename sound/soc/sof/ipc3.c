@@ -1137,7 +1137,8 @@ static int sof_ipc3_set_pm_gate(struct snd_sof_dev *sdev, u32 flags)
 	pm_gate.flags = flags;
 
 	/* send pm_gate ipc to dsp */
-	return sof_ipc_tx_message_no_pm_no_reply(sdev->ipc, &pm_gate, sizeof(pm_gate));
+	return sof_ipc_tx_message_no_pm_no_reply(sdev->ipc, "ipc3_set_pm_gate",
+						 &pm_gate, sizeof(pm_gate));
 }
 
 static const struct sof_ipc_pm_ops ipc3_pm_ops = {

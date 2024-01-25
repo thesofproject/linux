@@ -591,7 +591,8 @@ int hda_dsp_ipc4_load_library(struct snd_sof_dev *sdev,
 	msg.primary |= SOF_IPC4_MSG_TYPE_SET(SOF_IPC4_GLB_LOAD_LIBRARY_PREPARE);
 	msg.primary |= SOF_IPC4_MSG_DIR(SOF_IPC4_MSG_REQUEST);
 	msg.primary |= SOF_IPC4_MSG_TARGET(SOF_IPC4_FW_GEN_MSG);
-	ret = sof_ipc_tx_message_no_reply(sdev->ipc, &msg, 0);
+	ret = sof_ipc_tx_message_no_reply(sdev->ipc, "ipc4_load_library_prepare",
+					  &msg, 0);
 	if (!ret) {
 		int sd_offset = SOF_STREAM_SD_OFFSET(&hext_stream->hstream);
 		unsigned int status;
@@ -629,7 +630,8 @@ int hda_dsp_ipc4_load_library(struct snd_sof_dev *sdev,
 	msg.primary &= ~SOF_IPC4_MSG_TYPE_MASK;
 	msg.primary |= SOF_IPC4_MSG_TYPE_SET(SOF_IPC4_GLB_LOAD_LIBRARY);
 	msg.primary |= SOF_IPC4_GLB_LOAD_LIBRARY_LIB_ID(fw_lib->id);
-	ret = sof_ipc_tx_message_no_reply(sdev->ipc, &msg, 0);
+	ret = sof_ipc_tx_message_no_reply(sdev->ipc, "ipc4_load_library",
+					  &msg, 0);
 
 	/* Stop the DMA channel */
 	ret1 = hda_cl_trigger(sdev->dev, hext_stream, SNDRV_PCM_TRIGGER_STOP);

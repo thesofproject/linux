@@ -72,7 +72,7 @@ int sof_ipc_send_msg(struct snd_sof_dev *sdev, void *msg_data, size_t msg_bytes,
 }
 
 /* send IPC message from host to DSP */
-int sof_ipc_tx_message(struct snd_sof_ipc *ipc, void *msg_data, size_t msg_bytes,
+int sof_ipc_tx_message(struct snd_sof_ipc *ipc, char *tag, void *msg_data, size_t msg_bytes,
 		       void *reply_data, size_t reply_bytes)
 {
 	if (msg_bytes > ipc->max_payload_size ||
@@ -97,7 +97,7 @@ EXPORT_SYMBOL(sof_ipc_set_get_data);
  * This will be used for IPC's that can be handled by the DSP
  * even in a low-power D0 substate.
  */
-int sof_ipc_tx_message_no_pm(struct snd_sof_ipc *ipc, void *msg_data, size_t msg_bytes,
+int sof_ipc_tx_message_no_pm(struct snd_sof_ipc *ipc, char *tag, void *msg_data, size_t msg_bytes,
 			     void *reply_data, size_t reply_bytes)
 {
 	if (msg_bytes > ipc->max_payload_size ||

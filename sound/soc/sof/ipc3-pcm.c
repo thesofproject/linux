@@ -33,7 +33,8 @@ static int sof_ipc3_pcm_hw_free(struct snd_soc_component *component,
 	stream.comp_id = spcm->stream[substream->stream].comp_id;
 
 	/* send IPC to the DSP */
-	return sof_ipc_tx_message_no_reply(sdev->ipc, &stream, sizeof(stream));
+	return sof_ipc_tx_message_no_reply(sdev->ipc, "ipc3_pcm_hw_free",
+					   &stream, sizeof(stream));
 }
 
 static int sof_ipc3_pcm_hw_params(struct snd_soc_component *component,
@@ -120,7 +121,8 @@ static int sof_ipc3_pcm_hw_params(struct snd_soc_component *component,
 	dev_dbg(component->dev, "stream_tag %d", pcm.params.stream_tag);
 
 	/* send hw_params IPC to the DSP */
-	ret = sof_ipc_tx_message(sdev->ipc, &pcm, sizeof(pcm),
+	ret = sof_ipc_tx_message(sdev->ipc, "ipc3_pcm_hw_params",
+				 &pcm, sizeof(pcm),
 				 &ipc_params_reply, sizeof(ipc_params_reply));
 	if (ret < 0) {
 		dev_err(component->dev, "HW params ipc failed for stream %d\n",
@@ -176,7 +178,8 @@ static int sof_ipc3_pcm_trigger(struct snd_soc_component *component,
 	}
 
 	/* send IPC to the DSP */
-	return sof_ipc_tx_message_no_reply(sdev->ipc, &stream, sizeof(stream));
+	return sof_ipc_tx_message_no_reply(sdev->ipc, "ipc3_pcm_trigger",
+					   &stream, sizeof(stream));
 }
 
 static void ssp_dai_config_pcm_params_match(struct snd_sof_dev *sdev, const char *link_name,
