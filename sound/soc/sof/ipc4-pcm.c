@@ -614,9 +614,28 @@ static int sof_ipc4_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 			struct snd_sof_widget *pipe_widget = swidget->spipe->pipe_widget;
 			struct sof_ipc4_pipeline *pipeline = pipe_widget->private;
 
-			/* Chain DMA does not use copiers, so no fixup needed */
-			if (pipeline->use_chain_dma)
+			if (pipeline->use_chain_dma) {
+				struct snd_soc_dpcm *dpcm;
+				int dir2;
+
+				/*
+				 * BE (host DMA stream) must be stopped first
+				 * as the chain DMA IPCs sent by FE trigger, will
+				 * require host DMA to be stopped.
+				 */
+
+				rtd->dai_link->trigger[dir] = SND_SOC_DPCM_TRIGGER_PRE;
+
+				for_each_dpcm_fe(rtd, dir2, dpcm) {
+					struct snd_soc_pcm_runtime *fe = dpcm->fe;
+
+					fe->dai_link->trigger[dir2] =
+						SND_SOC_DPCM_TRIGGER_PRE;
+				}
+
+				/* Chain DMA does not use copiers, so no fixup needed */
 				return 0;
+			}
 
 			if (dir == SNDRV_PCM_STREAM_PLAYBACK) {
 				if (sof_ipc4_copier_is_single_format(sdev,
