@@ -306,11 +306,15 @@ static int intel_hw_params(struct snd_pcm_substream *substream,
 		dir = SDW_DATA_DIR_TX;
 
 	pdi = sdw_cdns_alloc_pdi(cdns, &cdns->pcm, ch, dir, dai->id);
-
 	if (!pdi) {
 		ret = -EINVAL;
 		goto error;
 	}
+
+	/* use same definitions for alh_id as previous generations */
+	pdi->intel_alh_id = (sdw->instance * 16) + pdi->num + 3;
+	if (pdi->num >= 2)
+		pdi->intel_alh_id += 2;
 
 	/* the SHIM will be configured in the callback functions */
 
