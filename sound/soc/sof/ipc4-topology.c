@@ -1726,11 +1726,6 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 				alh_data = &alh_copier->data;
 				blob->alh_cfg.mapping[i].device = alh_data->gtw_cfg.node_id;
 
-				/*
-				 * The dma_config_tlv[i] mapping device should be the same as
-				 * the mapping[i] device in ALH blob. The device id is used
-				 * only for DMA tlv mapping purposes.
-				 */
 				dma_config = &ipc4_copier->dma_config_tlv[i].dma_config;
 				dma_config->dma_stream_channel_map.mapping[0].device =
 					blob->alh_cfg.mapping[i].device;

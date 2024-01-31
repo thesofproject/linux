@@ -426,10 +426,10 @@ static int non_hda_dai_hw_params_data(struct snd_pcm_substream *substream,
 	dma_config->dma_channel_id = stream_id - 1;
 	dma_config->stream_id = stream_id;
 	/*
-	 * Currently we use a DMA for each device in ALH blob. The device will
-	 * be copied in sof_ipc4_prepare_copier_module.
+	 * Currently we use a DMA for each device in ALH blob.
 	 */
 	dma_config->dma_stream_channel_map.device_count = 1;
+	dma_config->dma_stream_channel_map.mapping[0].device = data->dai_index;
 	dma_config->dma_priv_config_size = 0;
 
 	/*
