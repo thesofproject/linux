@@ -172,8 +172,18 @@ int hda_dsp_pcm_trigger(struct snd_sof_dev *sdev,
 {
 	struct hdac_stream *hstream = substream->runtime->private_data;
 	struct hdac_ext_stream *hext_stream = stream_to_hdac_ext_stream(hstream);
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_component *scomp = sdev->component;
+	struct snd_sof_pcm *spcm;
 
-	return hda_dsp_stream_trigger(sdev, hext_stream, cmd);
+	spcm = snd_sof_find_spcm_dai(scomp, rtd);
+	if (!spcm) {
+		dev_warn_ratelimited(sdev->dev, "warn: can't find PCM with DAI ID %d\n",
+				     rtd->dai_link->id);
+		return 0;
+	}
+
+	return hda_dsp_stream_trigger(sdev, hext_stream, cmd, spcm->use_chain);
 }
 EXPORT_SYMBOL_NS(hda_dsp_pcm_trigger, SND_SOC_SOF_INTEL_HDA_COMMON);
 

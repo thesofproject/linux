@@ -93,6 +93,6 @@ int hda_dsp_trace_trigger(struct snd_sof_dev *sdev, int cmd)
 {
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 
-	return hda_dsp_stream_trigger(sdev, hda->dtrace_stream, cmd);
+	return hda_dsp_stream_trigger(sdev, hda->dtrace_stream, cmd, false);
 }
 EXPORT_SYMBOL_NS(hda_dsp_trace_trigger, SND_SOC_SOF_INTEL_HDA_COMMON);

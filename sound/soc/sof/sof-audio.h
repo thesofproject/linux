@@ -341,6 +341,7 @@ struct snd_sof_pcm {
 	struct list_head list;	/* list in sdev pcm list */
 	struct snd_pcm_hw_params params[2];
 	bool prepared[2]; /* PCM_PARAMS set successfully */
+	bool use_chain;
 };
 
 struct snd_sof_led_control {

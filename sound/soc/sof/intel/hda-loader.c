@@ -249,7 +249,7 @@ int hda_cl_trigger(struct device *dev, struct hdac_ext_stream *hext_stream, int 
 		hstream->running = true;
 		return 0;
 	default:
-		return hda_dsp_stream_trigger(sdev, hext_stream, cmd);
+		return hda_dsp_stream_trigger(sdev, hext_stream, cmd, false);
 	}
 }
 EXPORT_SYMBOL_NS(hda_cl_trigger, SND_SOC_SOF_INTEL_HDA_COMMON);

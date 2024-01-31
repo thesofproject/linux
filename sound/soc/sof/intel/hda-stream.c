@@ -331,7 +331,7 @@ static int hda_dsp_stream_reset(struct snd_sof_dev *sdev, struct hdac_stream *hs
 }
 
 int hda_dsp_stream_trigger(struct snd_sof_dev *sdev,
-			   struct hdac_ext_stream *hext_stream, int cmd)
+			struct hdac_ext_stream *hext_stream, int cmd, bool use_chain)
 {
 	struct hdac_stream *hstream = &hext_stream->hstream;
 	int sd_offset = SOF_STREAM_SD_OFFSET(hstream);
@@ -342,7 +342,7 @@ int hda_dsp_stream_trigger(struct snd_sof_dev *sdev,
 	/* cmd must be for audio stream */
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
-		if (!sdev->dspless_mode_selected)
+		if (!use_chain && !sdev->dspless_mode_selected)
 			break;
 		fallthrough;
 	case SNDRV_PCM_TRIGGER_START:
@@ -372,11 +372,12 @@ int hda_dsp_stream_trigger(struct snd_sof_dev *sdev,
 
 		break;
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
-		if (!sdev->dspless_mode_selected)
+		if ((!use_chain && !sdev->dspless_mode_selected))
 			break;
 		fallthrough;
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_STOP:
+		dev_dbg(sdev->dev, "hda_stream_trigger stop cmd %d\n", cmd);
 		snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR,
 					sd_offset,
 					SOF_HDA_SD_CTL_DMA_START |

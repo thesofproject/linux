@@ -807,12 +807,28 @@ static int sof_ipc4_pcm_hw_params(struct snd_soc_component *component,
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_sof_pcm_stream_pipeline_list *pipeline_list;
 	struct sof_ipc4_timestamp_info *time_info;
+	struct snd_sof_widget *pipe_widget;
+	struct sof_ipc4_pipeline *pipeline;
+	struct snd_sof_pipeline *spipe;
 	struct snd_sof_pcm *spcm;
 
 	spcm = snd_sof_find_spcm_dai(component, rtd);
 	if (!spcm)
 		return -EINVAL;
+
+	pipeline_list = &spcm->stream[substream->stream].pipeline_list;
+
+	/* nothing to trigger if the list is empty */
+	if (pipeline_list->pipelines && pipeline_list->count) {
+		spipe = pipeline_list->pipelines[0];
+		pipe_widget = spipe->pipe_widget;
+		pipeline = pipe_widget->private;
+
+		if (pipeline->use_chain_dma)
+			spcm->use_chain = true;
+	}
 
 	time_info = spcm->stream[substream->stream].private;
 	/* delay calculation is not supported by current fw_reg ABI */

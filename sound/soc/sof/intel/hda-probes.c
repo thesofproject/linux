@@ -107,7 +107,7 @@ static int hda_probes_compr_trigger(struct sof_client_dev *cdev,
 	struct hdac_ext_stream *hext_stream = hda_compr_get_stream(cstream);
 	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
 
-	return hda_dsp_stream_trigger(sdev, hext_stream, cmd);
+	return hda_dsp_stream_trigger(sdev, hext_stream, cmd, false);
 }
 
 static int hda_probes_compr_pointer(struct sof_client_dev *cdev,

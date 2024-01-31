@@ -304,7 +304,8 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
-		ipc_first = true;
+		if (!spcm->use_chain)
+			ipc_first = true;
 		break;
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
 		if (pcm_ops && pcm_ops->ipc_first_on_start)
@@ -343,7 +344,8 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 
 		fallthrough;
 	case SNDRV_PCM_TRIGGER_STOP:
-		ipc_first = true;
+		if (!spcm->use_chain)
+			ipc_first = true;
 		if (pcm_ops && pcm_ops->reset_hw_params_during_stop)
 			reset_hw_params = true;
 		break;
@@ -369,7 +371,7 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 	case SNDRV_PCM_TRIGGER_STOP:
 		/* invoke platform trigger to stop DMA even if pcm_ops isn't set or if it failed */
-		if (!pcm_ops || !pcm_ops->platform_stop_during_hw_free)
+		if (spcm->use_chain || !pcm_ops || !pcm_ops->platform_stop_during_hw_free)
 			snd_sof_pcm_platform_trigger(sdev, substream, cmd);
 		break;
 	default:

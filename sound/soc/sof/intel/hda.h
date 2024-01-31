@@ -656,7 +656,7 @@ int hda_dsp_iccmax_stream_hw_params(struct snd_sof_dev *sdev,
 				    struct snd_dma_buffer *dmab,
 				    struct snd_pcm_hw_params *params);
 int hda_dsp_stream_trigger(struct snd_sof_dev *sdev,
-			   struct hdac_ext_stream *hext_stream, int cmd);
+			struct hdac_ext_stream *hext_stream, int cmd, bool use_chain);
 irqreturn_t hda_dsp_stream_threaded_handler(int irq, void *context);
 int hda_dsp_stream_setup_bdl(struct snd_sof_dev *sdev,
 			     struct snd_dma_buffer *dmab,
