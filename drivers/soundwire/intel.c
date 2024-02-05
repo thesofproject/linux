@@ -373,7 +373,8 @@ static int intel_link_power_up(struct sdw_intel *sdw)
 			} else {
 				dev_err(sdw->cdns.dev, "%s: invalid clock configuration, mclk %d lcap_mlcs %d\n",
 					__func__, prop->mclk_freq, lcap_mlcs);
-				return -EINVAL;
+				ret = -EINVAL;
+				goto out;
 			}
 		} else {
 			syncprd = SDW_SHIM_SYNC_SYNCPRD_VAL_38_4;
