@@ -104,10 +104,12 @@ extern const char * const migratetype_names[MIGRATE_TYPES];
  */
 #  define is_migrate_cma_folio(folio, pfn) \
 	(get_pfnblock_migratetype(&folio->page, pfn) == MIGRATE_CMA)
+#  define get_cma_migrate_type() MIGRATE_CMA
 #else
 #  define is_migrate_cma(migratetype) false
 #  define is_migrate_cma_page(_page) false
 #  define is_migrate_cma_folio(folio, pfn) false
+#  define get_cma_migrate_type() MIGRATE_MOVABLE
 #endif
 
 static inline bool is_migrate_movable(int mt)
