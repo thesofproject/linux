@@ -277,6 +277,14 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 		spcm->pcm.pcm_id, substream->stream, cmd);
 
 	switch (cmd) {
+	case SNDRV_PCM_TRIGGER_STOP:
+		break;
+	default:
+		spcm->stream_stopped[substream->stream] = false;
+		break;
+	}
+
+	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 		ipc_first = true;
 		break;
@@ -344,6 +352,9 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 		/* invoke platform trigger to stop DMA even if pcm_ops isn't set or if it failed */
 		if (!pcm_ops || !pcm_ops->platform_stop_during_hw_free)
 			snd_sof_pcm_platform_trigger(sdev, substream, cmd);
+		if (pcm_ops && pcm_ops->platform_stop_during_hw_free &&
+		    cmd == SNDRV_PCM_TRIGGER_STOP)
+			spcm->stream_stopped[substream->stream] = true;
 		break;
 	default:
 		break;
