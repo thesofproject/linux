@@ -184,6 +184,7 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 	}
 
 	spcm->prepared[substream->stream] = true;
+	spcm->stream_stopped[substream->stream] = false;
 
 	/* save pcm hw_params */
 	memcpy(&spcm->params[substream->stream], params, sizeof(*params));
@@ -223,6 +224,7 @@ static int sof_pcm_hw_free(struct snd_soc_component *component,
 		err = ret;
 
 	spcm->prepared[substream->stream] = false;
+	spcm->stream_stopped[substream->stream] = false;
 
 	cancel_work_sync(&spcm->stream[substream->stream].period_elapsed_work);
 
@@ -365,8 +367,8 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 			ret = pcm_ops->post_trigger(sdev->component, substream);
 			if (ret < 0)
 				return ret;
+			spcm->stream_stopped[substream->stream] = true;
 		}
-
 		break;
 	default:
 		break;
