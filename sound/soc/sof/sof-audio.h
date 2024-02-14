@@ -104,16 +104,12 @@ struct snd_sof_dai_config_data {
  *	       additional memory in the SOF PCM stream structure
  * @pcm_free: Function pointer for PCM free that can be used for freeing any
  *	       additional memory in the SOF PCM stream structure
+ * @post_trigger: Op to perform operations after platform trigger has been completed
  * @delay: Function pointer for pcm delay calculation
  * @reset_hw_params_during_stop: Flag indicating whether the hw_params should be reset during the
  *				 STOP pcm trigger
  * @ipc_first_on_start: Send IPC before invoking platform trigger during
  *				START/PAUSE_RELEASE triggers
- * @platform_stop_during_hw_free: Invoke the platform trigger during hw_free. This is needed for
- *				  IPC4 where a pipeline is only paused during stop/pause/suspend
- *				  triggers. The FW keeps the host DMA running in this case and
- *				  therefore the host must do the same and should stop the DMA during
- *				  hw_free.
  * @d0i3_supported_in_s0ix: Allow DSP D0I3 during S0iX
  */
 struct sof_ipc_pcm_ops {
@@ -126,11 +122,12 @@ struct sof_ipc_pcm_ops {
 	int (*dai_link_fixup)(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_params *params);
 	int (*pcm_setup)(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm);
 	void (*pcm_free)(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm);
+	int (*post_trigger)(struct snd_soc_component *component,
+			    struct snd_pcm_substream *substream);
 	snd_pcm_sframes_t (*delay)(struct snd_soc_component *component,
 				   struct snd_pcm_substream *substream);
 	bool reset_hw_params_during_stop;
 	bool ipc_first_on_start;
-	bool platform_stop_during_hw_free;
 	bool d0i3_supported_in_s0ix;
 };
 

@@ -97,7 +97,7 @@ sof_ipc4_add_pipeline_to_trigger_list(struct snd_sof_dev *sdev, int state,
 	struct snd_sof_widget *pipe_widget = spipe->pipe_widget;
 	struct sof_ipc4_pipeline *pipeline = pipe_widget->private;
 
-	if (pipeline->skip_during_fe_trigger && state != SOF_IPC4_PIPE_RESET)
+	if (pipeline->skip_during_fe_trigger)
 		return;
 
 	switch (state) {
@@ -136,7 +136,7 @@ sof_ipc4_update_pipeline_state(struct snd_sof_dev *sdev, int state, int cmd,
 	struct sof_ipc4_pipeline *pipeline = pipe_widget->private;
 	int i;
 
-	if (pipeline->skip_during_fe_trigger && state != SOF_IPC4_PIPE_RESET)
+	if (pipeline->skip_during_fe_trigger)
 		return;
 
 	/* set state for pipeline if it was just triggered */
@@ -485,8 +485,8 @@ static int sof_ipc4_pcm_trigger(struct snd_soc_component *component,
 	return sof_ipc4_trigger_pipelines(component, substream, state, cmd);
 }
 
-static int sof_ipc4_pcm_hw_free(struct snd_soc_component *component,
-				struct snd_pcm_substream *substream)
+static int sof_ipc4_pcm_post_trigger(struct snd_soc_component *component,
+				     struct snd_pcm_substream *substream)
 {
 	/* command is not relevant with RESET, so just pass 0 */
 	return sof_ipc4_trigger_pipelines(component, substream, SOF_IPC4_PIPE_RESET, 0);
@@ -937,11 +937,10 @@ static snd_pcm_sframes_t sof_ipc4_pcm_delay(struct snd_soc_component *component,
 const struct sof_ipc_pcm_ops ipc4_pcm_ops = {
 	.hw_params = sof_ipc4_pcm_hw_params,
 	.trigger = sof_ipc4_pcm_trigger,
-	.hw_free = sof_ipc4_pcm_hw_free,
 	.dai_link_fixup = sof_ipc4_pcm_dai_link_fixup,
 	.pcm_setup = sof_ipc4_pcm_setup,
 	.pcm_free = sof_ipc4_pcm_free,
 	.delay = sof_ipc4_pcm_delay,
 	.ipc_first_on_start = true,
-	.platform_stop_during_hw_free = true,
+	.post_trigger = sof_ipc4_pcm_post_trigger,
 };
