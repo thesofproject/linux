@@ -196,7 +196,6 @@ static int sof_pcm_hw_free(struct snd_soc_component *component,
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
-	const struct sof_ipc_pcm_ops *pcm_ops = sof_ipc_get_ops(sdev, pcm);
 	struct snd_sof_pcm *spcm;
 	int ret, err = 0;
 
@@ -211,21 +210,6 @@ static int sof_pcm_hw_free(struct snd_soc_component *component,
 	dev_dbg(component->dev, "pcm: free stream %d dir %d\n",
 		spcm->pcm.pcm_id, substream->stream);
 
-	if (spcm->prepared[substream->stream]) {
-		/* stop DMA first if needed */
-		if (pcm_ops && pcm_ops->platform_stop_during_hw_free)
-			snd_sof_pcm_platform_trigger(sdev, substream, SNDRV_PCM_TRIGGER_STOP);
-
-		/* free PCM in the DSP */
-		if (pcm_ops && pcm_ops->hw_free) {
-			ret = pcm_ops->hw_free(component, substream);
-			if (ret < 0)
-				err = ret;
-		}
-
-		spcm->prepared[substream->stream] = false;
-	}
-
 	/* reset DMA */
 	ret = snd_sof_pcm_platform_hw_free(sdev, substream);
 	if (ret < 0) {
@@ -237,6 +221,8 @@ static int sof_pcm_hw_free(struct snd_soc_component *component,
 	ret = sof_widget_list_free(sdev, spcm, substream->stream);
 	if (ret < 0)
 		err = ret;
+
+	spcm->prepared[substream->stream] = false;
 
 	cancel_work_sync(&spcm->stream[substream->stream].period_elapsed_work);
 
@@ -367,9 +353,20 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 	case SNDRV_PCM_TRIGGER_STOP:
-		/* invoke platform trigger to stop DMA even if pcm_ops isn't set or if it failed */
-		if (!pcm_ops || !pcm_ops->platform_stop_during_hw_free)
-			snd_sof_pcm_platform_trigger(sdev, substream, cmd);
+		/* always invoke platform trigger to stop DMA */
+		snd_sof_pcm_platform_trigger(sdev, substream, cmd);
+
+		/* nothing more to do for DSP-less mode */
+		if (!pcm_ops || cmd == SNDRV_PCM_TRIGGER_PAUSE_PUSH)
+			break;
+
+		/* For IPC4, reset pipelines after stopping DMA */
+		if (pcm_ops->post_trigger) {
+			ret = pcm_ops->post_trigger(sdev->component, substream);
+			if (ret < 0)
+				return ret;
+		}
+
 		break;
 	default:
 		break;
