@@ -235,6 +235,7 @@ static int sof_pcm_prepare(struct snd_soc_component *component,
 			   struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
 	struct snd_sof_pcm *spcm;
 	int ret;
 
@@ -246,8 +247,16 @@ static int sof_pcm_prepare(struct snd_soc_component *component,
 	if (!spcm)
 		return -EINVAL;
 
-	if (spcm->prepared[substream->stream])
-		return 0;
+	if (spcm->prepared[substream->stream]) {
+		/* reset DMA and free widget lists to start over */
+		if (spcm->stream_stopped[substream->stream]) {
+			ret = sof_pcm_stream_free(sdev, substream, spcm, substream->stream, true);
+			if (ret < 0)
+				return ret;
+		} else {
+			return 0;
+		}
+	}
 
 	dev_dbg(component->dev, "pcm: prepare stream %d dir %d\n",
 		spcm->pcm.pcm_id, substream->stream);
