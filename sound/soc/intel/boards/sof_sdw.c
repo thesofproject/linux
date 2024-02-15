@@ -1463,6 +1463,7 @@ static int parse_sdw_endpoints(struct snd_soc_card *card,
 			       struct sof_sdw_endpoint *sof_ends)
 {
 	struct device *dev = card->dev;
+	struct mc_private *ctx = snd_soc_card_get_drvdata(card);
 	struct snd_soc_acpi_mach *mach = dev_get_platdata(dev);
 	struct snd_soc_acpi_mach_params *mach_params = &mach->mach_params;
 	struct snd_soc_codec_conf *codec_conf = card->codec_conf;
@@ -1492,6 +1493,8 @@ static int parse_sdw_endpoints(struct snd_soc_card *card,
 			codec_info = find_codec_info_part(adr_dev->adr);
 			if (!codec_info)
 				return -EINVAL;
+
+			ctx->ignore_pch_dmic |= codec_info->ignore_pch_dmic;
 
 			codec_name = get_codec_name(dev, codec_info, adr_link, i);
 			if (!codec_name)
@@ -1639,8 +1642,6 @@ static int create_sdw_dailink(struct snd_soc_card *card,
 	codec_info = find_codec_info_part(adr_link->adr_d[adr_index].adr);
 	if (!codec_info)
 		return -EINVAL;
-
-	ctx->ignore_pch_dmic |= codec_info->ignore_pch_dmic;
 
 	for_each_pcm_streams(stream) {
 		char *name, *cpu_name;
