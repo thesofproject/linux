@@ -33,11 +33,17 @@ static void remove_files(struct kernfs_node *parent,
 
 static umode_t __first_visible(const struct attribute_group *grp, struct kobject *kobj)
 {
-	if (grp->attrs && grp->is_visible)
+	if (grp->attrs && grp->is_visible) {
+		pr_info("kobj: %s is_visible: %pS\n", kobj->name,
+			grp->is_visible);
 		return grp->is_visible(kobj, grp->attrs[0], 0);
+	}
 
-	if (grp->bin_attrs && grp->is_bin_visible)
+	if (grp->bin_attrs && grp->is_bin_visible) {
+		pr_info("kobj: %s is_bin_visible: %pS\n", kobj->name,
+			grp->is_bin_visible);
 		return grp->is_bin_visible(kobj, grp->bin_attrs[0], 0);
+	}
 
 	return 0;
 }
@@ -62,6 +68,8 @@ static int create_files(struct kernfs_node *parent, struct kobject *kobj,
 			if (update)
 				kernfs_remove_by_name(parent, (*attr)->name);
 			if (grp->is_visible) {
+				pr_info("kobj: %s is_visible: %pS\n",
+					kobj->name, grp->is_visible);
 				mode = grp->is_visible(kobj, *attr, i);
 				mode &= ~SYSFS_GROUP_INVISIBLE;
 				if (!mode)
@@ -92,6 +100,8 @@ static int create_files(struct kernfs_node *parent, struct kobject *kobj,
 				kernfs_remove_by_name(parent,
 						(*bin_attr)->attr.name);
 			if (grp->is_bin_visible) {
+				pr_info("kobj: %s is_bin_visible: %pS\n",
+					kobj->name, grp->is_bin_visible);
 				mode = grp->is_bin_visible(kobj, *bin_attr, i);
 				mode &= ~SYSFS_GROUP_INVISIBLE;
 				if (!mode)
