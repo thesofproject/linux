@@ -379,9 +379,9 @@ static int non_hda_dai_hw_params_data(struct snd_pcm_substream *substream,
 	}
 
 	/* use HDaudio stream handling */
-	ret = hda_dai_hw_params(substream, params, cpu_dai);
+	ret = hda_dai_hw_params_data(substream, params, cpu_dai, data, flags);
 	if (ret < 0) {
-		dev_err(cpu_dai->dev, "%s: hda_dai_hw_params failed: %d\n", __func__, ret);
+		dev_err(cpu_dai->dev, "%s: hda_dai_hw_params_data failed: %d\n", __func__, ret);
 		return ret;
 	}
 
