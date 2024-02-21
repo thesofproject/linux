@@ -1283,7 +1283,6 @@ struct sof_sdw_endpoint {
 	u32 link_mask;
 	const char *codec_name;
 
-	const struct snd_soc_acpi_link_adr *adr_link;
 	struct sof_sdw_codec_info *codec_info;
 	const struct sof_sdw_dai_info *dai_info;
 };
@@ -1435,7 +1434,6 @@ static int parse_sdw_endpoints(struct snd_soc_card *card,
 
 				sof_end->link_mask = adr_link->mask;
 				sof_end->codec_name = codec_name;
-				sof_end->adr_link = adr_link;
 				sof_end->codec_info = codec_info;
 				sof_end->dai_info = dai_info;
 				sof_end++;
@@ -1558,8 +1556,7 @@ static int create_sdw_dailink(struct snd_soc_card *card,
 
 		list_for_each_entry(sof_end, &sof_dai->endpoints, list) {
 			if (sof_end->dai_info->init)
-				sof_end->dai_info->init(card, sof_end->adr_link,
-							*dai_links,
+				sof_end->dai_info->init(card, *dai_links,
 							sof_end->codec_info,
 							playback);
 		}
@@ -1622,7 +1619,7 @@ static int create_ssp_dailinks(struct snd_soc_card *card,
 		if (ret)
 			return ret;
 
-		ret = ssp_info->dais[0].init(card, NULL, *dai_links, ssp_info, 0);
+		ret = ssp_info->dais[0].init(card, *dai_links, ssp_info, 0);
 		if (ret < 0)
 			return ret;
 
