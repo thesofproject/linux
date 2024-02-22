@@ -117,6 +117,7 @@ static void intel_link_dev_unregister(struct sdw_intel_link_dev *ldev)
 static int sdw_intel_cleanup(struct sdw_intel_ctx *ctx)
 {
 	struct sdw_intel_link_dev *ldev;
+	struct sdw_slave *slave;
 	u32 link_mask;
 	int i;
 
@@ -131,6 +132,13 @@ static int sdw_intel_cleanup(struct sdw_intel_ctx *ctx)
 		pm_runtime_disable(&ldev->auxdev.dev);
 		if (!ldev->link_res.clock_stop_quirks)
 			pm_runtime_put_noidle(ldev->link_res.dev);
+
+		/*
+		 * Disable runtime PM to prevent peripherals from being resume in the
+		 * link device unregistering process.
+		 */
+		list_for_each_entry(slave, &ldev->link_res.cdns->bus.slaves, node)
+			pm_runtime_disable(&slave->dev);
 
 		intel_link_dev_unregister(ldev);
 	}
