@@ -245,6 +245,9 @@ static int hda_sdw_exit(struct snd_sof_dev *sdev)
 
 	hdev = sdev->pdata->hw_pdata;
 
+	if (hdev->sdw)
+		sdw_intel_pre_exit(hdev->sdw);
+
 	hda_sdw_int_enable(sdev, false);
 
 	if (hdev->sdw)
