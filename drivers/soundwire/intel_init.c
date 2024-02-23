@@ -16,6 +16,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/soundwire/sdw_intel.h>
 #include "cadence_master.h"
+#include "bus.h"
 #include "intel.h"
 #include "intel_auxdevice.h"
 
@@ -362,6 +363,47 @@ void sdw_intel_exit(struct sdw_intel_ctx *ctx)
 	kfree(ctx);
 }
 EXPORT_SYMBOL_NS(sdw_intel_exit, SOUNDWIRE_INTEL_INIT);
+
+static int intel_disable_runtime_pm_child_device(struct device *dev, void *data)
+{
+	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+	unsigned long time;
+
+	if (!slave->probed) {
+		dev_dbg(dev, "skipping device, no probed driver\n");
+		return 0;
+	}
+	if (!slave->dev_num_sticky) {
+		dev_dbg(dev, "skipping device, never detected on bus\n");
+		return 0;
+	}
+
+	pm_runtime_disable(dev);
+	time = wait_for_completion_timeout(&slave->initialization_complete,
+					   msecs_to_jiffies(5000));
+
+	if (!time) {
+		dev_err(&slave->dev, "Initialization not complete, timed out\n");
+		return -ETIMEDOUT;
+	}
+	return 0;
+}
+
+void sdw_intel_pre_exit(struct sdw_intel_ctx *ctx)
+{
+	struct sdw_intel_link_res *link;
+
+	list_for_each_entry(link, &ctx->link_list, list) {
+		struct sdw_bus *bus = &link->cdns->bus;
+		int ret;
+
+		ret = device_for_each_child(bus->dev, NULL, intel_disable_runtime_pm_child_device);
+		if (ret < 0)
+			dev_err(bus->dev, "%s: intel_disable_runtime_pm_child_device failed: %d\n",
+				__func__, ret);
+	}
+}
+EXPORT_SYMBOL_NS(sdw_intel_pre_exit, SOUNDWIRE_INTEL_INIT);
 
 void sdw_intel_process_wakeen_event(struct sdw_intel_ctx *ctx)
 {

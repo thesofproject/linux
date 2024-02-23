@@ -373,6 +373,7 @@ sdw_intel_probe(struct sdw_intel_res *res);
 int sdw_intel_startup(struct sdw_intel_ctx *ctx);
 
 void sdw_intel_exit(struct sdw_intel_ctx *ctx);
+void sdw_intel_pre_exit(struct sdw_intel_ctx *ctx);
 
 irqreturn_t sdw_intel_thread(int irq, void *dev_id);
 
