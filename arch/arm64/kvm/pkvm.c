@@ -211,7 +211,7 @@ static int __pkvm_create_hyp_vcpu(struct kvm_vcpu *vcpu)
 	pkvm_handle_t handle = vcpu->kvm->arch.pkvm.handle;
 	int ret;
 
-	vcpu->arch.stage2_mc.flags |= HYP_MEMCACHE_ACCOUNT_STAGE2;
+	init_hyp_stage2_memcache(&vcpu->arch.stage2_mc);
 
 	ret = kvm_call_refill_hyp_nvhe(__pkvm_init_vcpu, handle, vcpu);
 	if (!ret)
@@ -249,6 +249,8 @@ static int __pkvm_create_hyp_vm(struct kvm *kvm)
 	pgd = alloc_pages_exact(pgd_sz, GFP_KERNEL_ACCOUNT);
 	if (!pgd)
 		return -ENOMEM;
+
+	init_hyp_stage2_memcache(&kvm->arch.pkvm.stage2_teardown_mc);
 
 	ret = kvm_call_refill_hyp_nvhe(__pkvm_init_vm, kvm, pgd);
 	if (ret)
@@ -1216,11 +1218,10 @@ EXPORT_SYMBOL(__pkvm_register_el2_call);
 
 int __pkvm_topup_hyp_alloc(unsigned long nr_pages)
 {
-	struct kvm_hyp_memcache mc = {
-		.head		= 0,
-		.nr_pages	= 0,
-	};
+	struct kvm_hyp_memcache mc;
 	int ret;
+
+	init_hyp_memcache(&mc);
 
 	ret = topup_hyp_memcache(&mc, nr_pages);
 	if (ret)
@@ -1239,6 +1240,8 @@ unsigned long __pkvm_reclaim_hyp_alloc(unsigned long nr_pages)
 	unsigned long ratelimit, last_reclaim, reclaimed = 0;
 	struct kvm_hyp_memcache mc;
 	struct arm_smccc_res res;
+
+	init_hyp_memcache(&mc);
 
 	do {
 		/* Arbitrary upper bound to limit the time spent at EL2 */
