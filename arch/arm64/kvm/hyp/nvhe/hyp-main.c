@@ -119,9 +119,9 @@ static int pkvm_refill_memcache(struct pkvm_hyp_vcpu *hyp_vcpu)
 {
 	struct kvm_vcpu *host_vcpu = hyp_vcpu->host_vcpu;
 
-	return refill_memcache(&hyp_vcpu->vcpu.arch.pkvm_memcache,
-			       host_vcpu->arch.pkvm_memcache.nr_pages,
-			       &host_vcpu->arch.pkvm_memcache);
+	return refill_memcache(&hyp_vcpu->vcpu.arch.stage2_mc,
+			       host_vcpu->arch.stage2_mc.nr_pages,
+			       &host_vcpu->arch.stage2_mc);
 }
 
 typedef void (*hyp_entry_exit_handler_fn)(struct pkvm_hyp_vcpu *);
