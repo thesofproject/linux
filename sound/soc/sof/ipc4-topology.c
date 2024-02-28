@@ -1377,7 +1377,8 @@ static int snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, struct snd_s
 	switch (linktype) {
 	case SOF_DAI_INTEL_DMIC:
 		nhlt_type = NHLT_LINK_DMIC;
-		bit_depth = params_width(params);
+		/* look for 32-bit blob first */
+		bit_depth = 32;
 		channel_count = params_channels(params);
 		sample_rate = params_rate(params);
 		break;
@@ -1413,12 +1414,24 @@ static int snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, struct snd_s
 					   dir, dev_type);
 
 	if (!cfg) {
+		/* no 32-bit DMIC blob found, look for one based on params */
+		if (linktype == SOF_DAI_INTEL_DMIC && params_width(params) != 32) {
+			bit_depth = params_width(params);
+			cfg = intel_nhlt_get_endpoint_blob(sdev->dev, ipc4_data->nhlt,
+							   dai_index, nhlt_type,
+							   bit_depth, bit_depth,
+							   channel_count, sample_rate,
+							   dir, dev_type);
+			if (cfg)
+				goto out;
+		}
+
 		dev_err(sdev->dev,
 			"no matching blob for sample rate: %d sample width: %d channels: %d\n",
 			sample_rate, bit_depth, channel_count);
 		return -EINVAL;
 	}
-
+out:
 	/* config length should be in dwords */
 	*len = cfg->size >> 2;
 	*dst = (u32 *)cfg->caps;
