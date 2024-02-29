@@ -14,6 +14,7 @@
 #include <linux/lockref.h>
 #include <linux/stringhash.h>
 #include <linux/wait.h>
+#include <linux/android_kabi.h>
 
 struct path;
 struct file;
@@ -129,6 +130,9 @@ struct dentry {
 		struct hlist_bl_node d_in_lookup_hash;	/* only for in-lookup ones */
 	 	struct rcu_head d_rcu;
 	} d_u;
+
+	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_RESERVE(2);
 };
 
 /*
@@ -167,6 +171,9 @@ struct dentry_operations {
 	bool (*d_unalias_trylock)(const struct dentry *);
 	void (*d_unalias_unlock)(const struct dentry *);
 	void (*d_canonical_path)(const struct path *, struct path *);
+
+	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_RESERVE(2);
 } ____cacheline_aligned;
 
 /*
