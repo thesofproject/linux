@@ -965,7 +965,7 @@ int __pkvm_start_teardown_vm(pkvm_handle_t handle)
 	struct pkvm_hyp_vm *hyp_vm;
 	int ret = 0;
 
-	hyp_read_lock(&vm_table_lock);
+	hyp_write_lock(&vm_table_lock);
 	hyp_vm = get_vm_by_handle(handle);
 	if (!hyp_vm) {
 		ret = -ENOENT;
@@ -980,7 +980,7 @@ int __pkvm_start_teardown_vm(pkvm_handle_t handle)
 
 	hyp_vm->is_dying = true;
 unlock:
-	hyp_read_unlock(&vm_table_lock);
+	hyp_write_unlock(&vm_table_lock);
 
 	return ret;
 }
