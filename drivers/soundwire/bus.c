@@ -1761,9 +1761,14 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 			goto io_err;
 		}
 
+		dev_dbg(&slave->dev, "SDW_SCP_INT1 write successful iteration %d\n",
+			count);
+
 		/* at this point all initial interrupt sources were handled */
 		slave->first_interrupt_done = true;
 
+		dev_dbg(&slave->dev, "SDW_SCP_INT1 read started iteration %d\n",
+			count);
 		/*
 		 * Read status again to ensure no new interrupts arrived
 		 * while servicing interrupts.
@@ -1774,6 +1779,10 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 				"SDW_SCP_INT1 recheck read failed:%d\n", ret);
 			goto io_err;
 		}
+
+		dev_dbg(&slave->dev, "SDW_SCP_INT1 read done iteration %d\n",
+			count);
+
 		buf = ret;
 
 		ret = sdw_nread_no_pm(slave, SDW_SCP_INTSTAT2, 2, buf2);
