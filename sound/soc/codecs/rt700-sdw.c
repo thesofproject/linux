@@ -459,12 +459,16 @@ static int rt700_sdw_remove(struct sdw_slave *slave)
 {
 	struct rt700_priv *rt700 = dev_get_drvdata(&slave->dev);
 
+	dev_dbg(&slave->dev, "remove started\n");
+
 	if (rt700->hw_init) {
 		cancel_delayed_work_sync(&rt700->jack_detect_work);
 		cancel_delayed_work_sync(&rt700->jack_btn_check_work);
 	}
 
 	pm_runtime_disable(&slave->dev);
+
+	dev_dbg(&slave->dev, "remove done\n");
 
 	return 0;
 }
@@ -526,6 +530,8 @@ static int __maybe_unused rt700_dev_resume(struct device *dev)
 	struct rt700_priv *rt700 = dev_get_drvdata(dev);
 	unsigned long time;
 
+	dev_dbg(&slave->dev, "Resume started\n");
+
 	if (!rt700->first_hw_init)
 		return 0;
 
@@ -546,6 +552,8 @@ regmap_sync:
 	regcache_cache_only(rt700->regmap, false);
 	regcache_sync_region(rt700->regmap, 0x3000, 0x8fff);
 	regcache_sync_region(rt700->regmap, 0x752010, 0x75206b);
+
+	dev_dbg(&slave->dev, "Resume done\n");
 
 	return 0;
 }

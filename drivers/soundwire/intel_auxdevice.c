@@ -454,11 +454,15 @@ static int intel_resume_child_device(struct device *dev, void *data)
 		return 0;
 	}
 
+	dev_dbg(dev, "runtime_resume started\n");
+
 	ret = pm_runtime_resume(dev);
 	if (ret < 0) {
 		dev_err(dev, "%s: pm_runtime_resume failed: %d\n", __func__, ret);
 		return ret;
 	}
+
+	dev_dbg(dev, "runtime_resume done\n");
 
 	return 0;
 }

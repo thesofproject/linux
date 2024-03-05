@@ -742,7 +742,11 @@ static int rt1308_sdw_probe(struct sdw_slave *slave,
 
 static int rt1308_sdw_remove(struct sdw_slave *slave)
 {
+	dev_dbg(&slave->dev, "remove started\n");
+
 	pm_runtime_disable(&slave->dev);
+
+	dev_dbg(&slave->dev, "remove done\n");
 
 	return 0;
 }
@@ -773,6 +777,8 @@ static int __maybe_unused rt1308_dev_resume(struct device *dev)
 	struct rt1308_sdw_priv *rt1308 = dev_get_drvdata(dev);
 	unsigned long time;
 
+	dev_dbg(&slave->dev, "Resume started\n");
+
 	if (!rt1308->first_hw_init)
 		return 0;
 
@@ -792,6 +798,8 @@ regmap_sync:
 	slave->unattach_request = 0;
 	regcache_cache_only(rt1308->regmap, false);
 	regcache_sync_region(rt1308->regmap, 0xc000, 0xcfff);
+
+	dev_dbg(&slave->dev, "Resume done\n");
 
 	return 0;
 }
