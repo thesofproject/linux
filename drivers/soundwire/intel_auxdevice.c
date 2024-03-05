@@ -385,6 +385,33 @@ err_init:
 	return ret;
 }
 
+static int intel_resume_child_device(struct device *dev, void *data)
+{
+	int ret;
+	struct sdw_slave *slave = dev_to_sdw_dev(dev);
+
+	if (!slave->probed) {
+		dev_dbg(dev, "skipping device, no probed driver\n");
+		return 0;
+	}
+	if (!slave->dev_num_sticky) {
+		dev_dbg(dev, "skipping device, never detected on bus\n");
+		return 0;
+	}
+
+	dev_dbg(dev, "runtime_resume started\n");
+
+	ret = pm_runtime_resume(dev);
+	if (ret < 0) {
+		dev_err(dev, "%s: pm_runtime_resume failed: %d\n", __func__, ret);
+		return ret;
+	}
+
+	dev_dbg(dev, "runtime_resume done\n");
+
+	return 0;
+}
+
 static void intel_link_remove(struct auxiliary_device *auxdev)
 {
 	struct sdw_cdns *cdns = auxiliary_get_drvdata(auxdev);
@@ -397,6 +424,32 @@ static void intel_link_remove(struct auxiliary_device *auxdev)
 	 * SDW_INTEL_CLK_STOP_NOT_ALLOWED
 	 */
 	if (!bus->prop.hw_disabled) {
+		struct device *dev = &auxdev->dev;
+		int ret;
+
+		/*
+		 * first resume the device for this link. This will also by construction
+		 * resume the PCI parent device.
+		 */
+		ret = pm_request_resume(dev);
+		if (ret < 0) {
+			dev_err(dev, "%s: pm_request_resume failed: %d\n", __func__, ret);
+		}
+
+		/*
+		 * Continue resuming the entire bus (parent + child devices) to exit
+		 * the clock stop mode. If there are no devices connected on this link
+		 * this is a no-op.
+		 * The resume to full power could have been implemented with a .prepare
+		 * step in SoundWire codec drivers. This would however require a lot
+		 * of code to handle an Intel-specific corner case. It is simpler in
+		 * practice to add a loop at the link level.
+		 */
+		ret = device_for_each_child(bus->dev, NULL, intel_resume_child_device);
+
+		if (ret < 0)
+			dev_err(dev, "%s: intel_resume_child_device failed: %d\n", __func__, ret);
+
 		sdw_intel_debugfs_exit(sdw);
 		sdw_cdns_enable_interrupt(cdns, false);
 	}
@@ -440,32 +493,6 @@ int intel_link_process_wakeen_event(struct auxiliary_device *auxdev)
  * PM calls
  */
 
-static int intel_resume_child_device(struct device *dev, void *data)
-{
-	int ret;
-	struct sdw_slave *slave = dev_to_sdw_dev(dev);
-
-	if (!slave->probed) {
-		dev_dbg(dev, "skipping device, no probed driver\n");
-		return 0;
-	}
-	if (!slave->dev_num_sticky) {
-		dev_dbg(dev, "skipping device, never detected on bus\n");
-		return 0;
-	}
-
-	dev_dbg(dev, "runtime_resume started\n");
-
-	ret = pm_runtime_resume(dev);
-	if (ret < 0) {
-		dev_err(dev, "%s: pm_runtime_resume failed: %d\n", __func__, ret);
-		return ret;
-	}
-
-	dev_dbg(dev, "runtime_resume done\n");
-
-	return 0;
-}
 
 static int __maybe_unused intel_pm_prepare(struct device *dev)
 {
