@@ -460,6 +460,8 @@ static int rt711_sdw_remove(struct sdw_slave *slave)
 {
 	struct rt711_priv *rt711 = dev_get_drvdata(&slave->dev);
 
+	dev_dbg(&slave->dev, "remove started\n");
+
 	if (rt711->hw_init) {
 		cancel_delayed_work_sync(&rt711->jack_detect_work);
 		cancel_delayed_work_sync(&rt711->jack_btn_check_work);
@@ -470,6 +472,8 @@ static int rt711_sdw_remove(struct sdw_slave *slave)
 
 	mutex_destroy(&rt711->calibrate_mutex);
 	mutex_destroy(&rt711->disable_irq_lock);
+
+	dev_dbg(&slave->dev, "remove done\n");
 
 	return 0;
 }
@@ -532,6 +536,8 @@ static int __maybe_unused rt711_dev_resume(struct device *dev)
 	struct rt711_priv *rt711 = dev_get_drvdata(dev);
 	unsigned long time;
 
+	dev_dbg(&slave->dev, "Resume started\n");
+
 	if (!rt711->first_hw_init)
 		return 0;
 
@@ -557,6 +563,8 @@ regmap_sync:
 	regcache_cache_only(rt711->regmap, false);
 	regcache_sync_region(rt711->regmap, 0x3000, 0x8fff);
 	regcache_sync_region(rt711->regmap, 0x752009, 0x752091);
+
+	dev_dbg(&slave->dev, "Resume done\n");
 
 	return 0;
 }
