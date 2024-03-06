@@ -1482,7 +1482,7 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 	struct snd_soc_component *scomp = swidget->scomp;
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct sof_ipc4_copier_data *copier_data;
-	struct snd_pcm_hw_params *ref_params;
+	struct snd_pcm_hw_params ref_params;
 	struct sof_ipc4_copier *ipc4_copier;
 	struct snd_sof_dai *dai;
 	u32 gtw_cfg_config_length;
@@ -1495,6 +1495,7 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 	u32 deep_buffer_dma_ms = 0;
 	int output_fmt_index;
 	bool single_output_format;
+	bool single_input_format;
 	int i;
 
 	dev_dbg(sdev->dev, "copier %s, type %d", swidget->widget->name, swidget->id);
@@ -1560,9 +1561,9 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		 * for capture.
 		 */
 		if (dir == SNDRV_PCM_STREAM_PLAYBACK)
-			ref_params = fe_params;
+			ref_params = *fe_params;
 		else
-			ref_params = pipeline_params;
+			ref_params = *pipeline_params;
 
 		copier_data->gtw_cfg.node_id &= ~SOF_IPC4_NODE_INDEX_MASK;
 		copier_data->gtw_cfg.node_id |=
@@ -1594,9 +1595,9 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		 * FE hw_params for capture and the pipeline params for playback.
 		 */
 		if (dir == SNDRV_PCM_STREAM_PLAYBACK)
-			ref_params = pipeline_params;
+			ref_params = *pipeline_params;
 		else
-			ref_params = fe_params;
+			ref_params = *fe_params;
 
 		ret = snd_sof_get_nhlt_endpoint_data(sdev, dai, fe_params, ipc4_copier->dai_index,
 						     ipc4_copier->dai_type, dir,
@@ -1612,7 +1613,7 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		ipc4_copier = (struct sof_ipc4_copier *)swidget->private;
 		copier_data = &ipc4_copier->data;
 		available_fmt = &ipc4_copier->available_fmt;
-		ref_params = pipeline_params;
+		ref_params = *pipeline_params;
 
 		break;
 	}
@@ -1622,8 +1623,48 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		return -EINVAL;
 	}
 
+	/* check if all input formats are the same */
+	single_input_format = sof_ipc4_copier_is_single_format(sdev,
+								available_fmt->input_pin_fmts,
+								available_fmt->num_input_formats);
+
+	/*
+	 * in the case of capture, if all the input formats are the same, update the reference
+	 * params to use the only available format when searching for a match. This is needed
+	 * for cases when the DAI copier has multiple input audio formats for variable channel
+	 * counts and rates but the sample format is the same across all of them.
+	 */
+	if (single_input_format && dir == SNDRV_PCM_STREAM_CAPTURE) {
+		struct sof_ipc4_audio_format *in_fmt;
+		snd_pcm_format_t snd_fmt;
+		struct snd_mask *m;
+		int in_ref_valid_bits;
+
+		in_fmt = &available_fmt->input_pin_fmts[0].audio_fmt;
+		in_ref_valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(in_fmt->fmt_cfg);
+
+		switch (in_ref_valid_bits) {
+		case 16:
+			snd_fmt = SNDRV_PCM_FORMAT_S16_LE;
+			break;
+		case 24:
+			snd_fmt = SNDRV_PCM_FORMAT_S24_LE;
+			break;
+		case 32:
+			snd_fmt = SNDRV_PCM_FORMAT_S32_LE;
+			break;
+		default:
+			dev_err(sdev->dev, "invalid PCM valid_bits %d\n", in_ref_valid_bits);
+			return -EINVAL;
+		}
+
+		m = hw_param_mask(&ref_params, SNDRV_PCM_HW_PARAM_FORMAT);
+		snd_mask_none(m);
+		snd_mask_set_format(m, snd_fmt);
+	}
+
 	/* set input and output audio formats */
-	ret = sof_ipc4_init_input_audio_fmt(sdev, swidget, &copier_data->base_config, ref_params,
+	ret = sof_ipc4_init_input_audio_fmt(sdev, swidget, &copier_data->base_config, &ref_params,
 					    available_fmt);
 	if (ret < 0)
 		return ret;
