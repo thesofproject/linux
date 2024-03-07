@@ -6,6 +6,7 @@
  * Copyright(c) 2018 Intel Corporation. All rights reserved.
  *
  * Author: Liam Girdwood <liam.r.girdwood@linux.intel.com>
+ * Testing testing testing
  */
 
 #ifndef __SOUND_SOC_SOF_PRIV_H
