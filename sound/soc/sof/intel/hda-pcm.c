@@ -263,6 +263,18 @@ int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
 		snd_pcm_hw_constraint_mask64(substream->runtime, SNDRV_PCM_HW_PARAM_FORMAT,
 					     SNDRV_PCM_FMTBIT_S16 | SNDRV_PCM_FMTBIT_S32);
 
+	/*
+	 * Set constraint on the period time to make sure that it is larger than
+	 * the DSP buffer size. This is the maximum DMA burst size that can
+	 * happen on stream start for example.
+	 * The period size must not be smaller than this.
+	 */
+	if (spcm->stream[substream->stream].dsp_buffer_time_ms)
+		snd_pcm_hw_constraint_minmax(substream->runtime,
+			SNDRV_PCM_HW_PARAM_PERIOD_TIME,
+			spcm->stream[substream->stream].dsp_buffer_time_ms * USEC_PER_MSEC,
+			UINT_MAX);
+
 	/* binding pcm substream to hda stream */
 	substream->runtime->private_data = &dsp_stream->hstream;
 	return 0;
