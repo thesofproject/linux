@@ -16,6 +16,7 @@
 #include "ipc4-fw-reg.h"
 #include "ipc4-priv.h"
 #include "ipc4-telemetry.h"
+#include "ipc4-telemetry2.h"
 #include "ops.h"
 
 static const struct sof_ipc4_fw_status {
@@ -581,6 +582,8 @@ static int ipc4_fw_ready(struct snd_sof_dev *sdev, struct sof_ipc4_msg *ipc4_msg
 		return 0;
 
 	sof_ipc4_create_exception_debugfs_node(sdev);
+
+	sof_ipc4_create_telemetry2_debugfs_node(sdev);
 
 	return sof_ipc4_init_msg_memory(sdev);
 }
