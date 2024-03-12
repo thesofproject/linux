@@ -398,6 +398,19 @@ int sdw_slave_read_prop(struct sdw_slave *slave)
 	device_property_read_u32(dev, "mipi-sdw-sink-port-list",
 				 &prop->sink_ports);
 
+	device_property_read_u32(dev, "mipi-sdw-sdca-interrupt-register-list",
+				 &prop->sdca_interrupt_register_list);
+
+	/*
+	 * The specification defines the property value as boolean, but
+	 * the value can be defined as zero. This is not aligned the
+	 * implementation of device_property_read_bool() which only checks
+	 * the presence of the property.
+	 * Let's use read_u8 to work-around this conceptual disconnect.
+	 */
+	device_property_read_u8(dev, "mipi-sdw-commit-register-supported",
+				&prop->commit_register_supported);
+
 	/*
 	 * Read dp0 properties - we don't rely on the 'mipi-sdw-dp-0-supported'
 	 * property since the 'mipi-sdw-dp0-subproperties' property is logically
