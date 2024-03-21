@@ -462,6 +462,17 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 		goto ipc_err;
 	}
 
+	/*
+	 * skip loading/booting firmware and registering the machine driver when DSP OPS testing
+	 * is enabled with IPC4. Normal audio operations will be unavailable in this mode.
+	 */
+	if (sof_debug_check_flag(SOF_DBG_DSP_OPS_TEST_MODE) &&
+	    sdev->pdata->ipc_type == SOF_IPC_TYPE_4) {
+		sdev->dsp_test_mode_enabled = true;
+		sdev->probe_completed = true;
+		return 0;
+	}
+
 	/* load the firmware */
 	ret = snd_sof_load_firmware(sdev, NULL);
 	if (ret < 0) {
