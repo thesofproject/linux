@@ -52,6 +52,10 @@ struct snd_sof_pcm_stream;
 							 * dump the message payload also
 							 */
 #define SOF_DBG_DSPLESS_MODE			BIT(15) /* Do not initialize and use the DSP */
+#define SOF_DBG_DSP_OPS_TEST_MODE		BIT(16) /* Used for DSP ops testing when
+							 * DSPLESS_MODE is not set.
+							 * No audio functionality when enabled.
+							 */
 
 /* Flag definitions used for controlling the DSP dump behavior */
 #define SOF_DBG_DUMP_REGS		BIT(0)
@@ -566,6 +570,13 @@ struct snd_sof_dev {
 	 * pdata->desc->dspless_mode_supported is true.
 	 */
 	bool dspless_mode_selected;
+
+	/*
+	 * Flag set when DSP ops testing is enabled. When this is set normal audio functionality
+	 * will be disabled. Note that the DSP ops testing cannot be enabled when dspless mode is
+	 * selected.
+	 */
+	bool dsp_test_mode_enabled;
 
 	/* Main, Base firmware image */
 	struct sof_firmware basefw;
