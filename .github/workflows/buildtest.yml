@@ -24,7 +24,7 @@ jobs:
       - name: Install sparse
         run: |
           git clone git://git.kernel.org/pub/scm/devel/sparse/sparse.git
-          git -C sparse reset --hard ce1a6720
+          git -C sparse reset --hard 0196afe16a50
           BINDIR=$(pwd)/bin make -C sparse install
           echo "$(pwd)/bin" >> $GITHUB_PATH
 
