@@ -702,6 +702,9 @@ struct snd_sof_dev {
 	bool mclk_id_override;
 	u16  mclk_id_quirk; /* same size as in IPC3 definitions */
 
+	/* used to store the FW filename and path passed from userspace for DSP ops testing */
+	struct sof_loadable_file_profile test_profile;
+
 	void *private;			/* core does not touch this */
 };
 
@@ -910,5 +913,7 @@ static inline int sof_resume_clients(struct snd_sof_dev *sdev)
 /* Main ops for IPC implementations */
 extern const struct sof_ipc_ops ipc3_ops;
 extern const struct sof_ipc_ops ipc4_ops;
+
+int sof_dbg_dsp_ops_test_init(struct snd_sof_dev *sdev);
 
 #endif
