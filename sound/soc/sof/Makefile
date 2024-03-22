@@ -2,7 +2,7 @@
 
 snd-sof-y := core.o ops.o loader.o ipc.o pcm.o pm.o debug.o topology.o\
 		control.o trace.o iomem-utils.o sof-audio.o stream-ipc.o\
-		fw-file-profile.o
+		fw-file-profile.o debug-dsp-ops.o
 
 # IPC implementations
 ifneq ($(CONFIG_SND_SOC_SOF_IPC3),)
