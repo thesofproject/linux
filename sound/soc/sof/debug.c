@@ -371,9 +371,12 @@ int snd_sof_dbg_init(struct snd_sof_dev *sdev)
 			return err;
 	}
 
-	return snd_sof_debugfs_buf_item(sdev, &sdev->fw_state,
-					sizeof(sdev->fw_state),
-					"fw_state", 0444);
+	err = snd_sof_debugfs_buf_item(sdev, &sdev->fw_state, sizeof(sdev->fw_state),
+				       "fw_state", 0444);
+	if (err < 0)
+		return err;
+
+	return sof_dbg_dsp_ops_test_init(sdev);
 }
 EXPORT_SYMBOL_GPL(snd_sof_dbg_init);
 
