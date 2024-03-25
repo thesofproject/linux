@@ -8,6 +8,37 @@
 #include "sof-priv.h"
 #include "ops.h"
 
+static int sof_dsp_ops_boot_firmware(struct snd_sof_dev *sdev)
+{
+	const char *fw_filename = NULL;
+	int ret;
+
+	if (sdev->test_profile.fw_name && strlen(sdev->test_profile.fw_name)) {
+		if (sdev->test_profile.fw_path && strlen(sdev->test_profile.fw_path))
+			fw_filename = kasprintf(GFP_KERNEL, "%s/%s", sdev->test_profile.fw_path,
+						sdev->test_profile.fw_name);
+		else
+			fw_filename = kasprintf(GFP_KERNEL, "%s", sdev->test_profile.fw_name);
+	}
+
+	/* If fw_filename is NULL the firmware from the default profile will be loaded */
+	ret = snd_sof_load_firmware(sdev, fw_filename);
+	kfree(fw_filename);
+	if (ret < 0)
+		return ret;
+
+	/* boot firmware */
+	sof_set_fw_state(sdev, SOF_FW_BOOT_IN_PROGRESS);
+
+	ret = snd_sof_run_firmware(sdev);
+
+	/* set first_boot to false so subsequent boots will be from IMR if supported */
+	if (!ret)
+		sdev->first_boot = false;
+
+	return ret;
+}
+
 static ssize_t sof_dsp_ops_tester_dfs_read(struct file *file, char __user *buffer,
 					   size_t count, loff_t *ppos)
 {
@@ -47,6 +78,21 @@ static ssize_t sof_dsp_ops_tester_dfs_write(struct file *file, const char __user
 	struct snd_sof_dev *sdev = dfse->sdev;
 	size_t size;
 	char *string;
+
+	if (!strcmp(dentry->d_name.name, "boot_fw")) {
+		int ret;
+		string = kzalloc(count + 1, GFP_KERNEL);
+		if (!string)
+			return -ENOMEM;
+
+		size = simple_write_to_buffer(string, count, ppos, buffer, count);
+		kfree(string);
+
+		ret = sof_dsp_ops_boot_firmware(sdev);
+		if (ret < 0)
+			return ret;
+		return size;
+	}
 
 	if (strcmp(dentry->d_name.name, "fw_filename") &&
 	    strcmp(dentry->d_name.name, "fw_path"))
@@ -114,5 +160,9 @@ int sof_dbg_dsp_ops_test_init(struct snd_sof_dev *sdev)
 		return ret;
 
 	/* create debugfs entry for FW path */
-	return sof_dsp_dsp_ops_create_dfse(sdev, "fw_path", dsp_ops_debugfs, 0666);
+	ret = sof_dsp_dsp_ops_create_dfse(sdev, "fw_path", dsp_ops_debugfs, 0666);
+	if (ret < 0)
+		return ret;
+
+	return sof_dsp_dsp_ops_create_dfse(sdev, "boot_fw", dsp_ops_debugfs, 0222);
 }
