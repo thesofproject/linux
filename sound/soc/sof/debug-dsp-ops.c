@@ -8,6 +8,8 @@
 #include "sof-priv.h"
 #include "ops.h"
 
+#define MAX_FW_STATE_STRING_LEN 128
+
 /*
  * set dsp power state op by writing the requested power state.
  * ex: echo D3 > dsp_power_state
@@ -77,13 +79,73 @@ static int sof_dsp_ops_boot_firmware(struct snd_sof_dev *sdev)
 	return ret;
 }
 
+static ssize_t sof_dsp_ops_fw_state_read(struct snd_sof_dev *sdev, char __user *buffer,
+					 size_t count, loff_t *ppos)
+{
+	char string[MAX_FW_STATE_STRING_LEN];
+	size_t size_ret;
+
+	switch (sdev->fw_state) {
+	case SOF_FW_BOOT_NOT_STARTED:
+		snprintf(string, MAX_FW_STATE_STRING_LEN,
+			 "%d: NOT STARTED\n", sdev->fw_state);
+		break;
+	case SOF_DSPLESS_MODE:
+		snprintf(string, MAX_FW_STATE_STRING_LEN,
+			 "%d: DSPLESS MODE\n", sdev->fw_state);
+		break;
+	case SOF_FW_BOOT_PREPARE:
+		snprintf(string, MAX_FW_STATE_STRING_LEN,
+			 "%d: PREPARE\n", sdev->fw_state);
+		break;
+	case SOF_FW_BOOT_IN_PROGRESS:
+		snprintf(string, MAX_FW_STATE_STRING_LEN,
+			 "%d: BOOT IN PROGRESS\n", sdev->fw_state);
+		break;
+	case SOF_FW_BOOT_FAILED:
+		snprintf(string, MAX_FW_STATE_STRING_LEN,
+			 "%d: FAILED\n", sdev->fw_state);
+		break;
+	case SOF_FW_BOOT_READY_FAILED:
+		snprintf(string, MAX_FW_STATE_STRING_LEN,
+			 "%d: READY FAILED\n", sdev->fw_state);
+		break;
+	case SOF_FW_BOOT_READY_OK:
+		snprintf(string, MAX_FW_STATE_STRING_LEN,
+			 "%d: READY OK\n", sdev->fw_state);
+		break;
+	case SOF_FW_BOOT_COMPLETE:
+		snprintf(string, MAX_FW_STATE_STRING_LEN,
+			 "%d: COMPLETE\n", sdev->fw_state);
+		break;
+	case SOF_FW_CRASHED:
+		snprintf(string, MAX_FW_STATE_STRING_LEN,
+			 "%d: CRASHED\n", sdev->fw_state);
+		break;
+	default:
+		break;
+	}
+
+	if (*ppos)
+		return 0;
+
+	count = min_t(size_t, count, strlen(string));
+	size_ret = copy_to_user(buffer, string, count);
+	if (size_ret)
+		return -EFAULT;
+
+	*ppos += count;
+
+	return count;
+}
+
 static ssize_t sof_dsp_ops_tester_dfs_read(struct file *file, char __user *buffer,
 					   size_t count, loff_t *ppos)
 {
 	struct snd_sof_dfsentry *dfse = file->private_data;
 	struct snd_sof_dev *sdev = dfse->sdev;
 	struct dentry *dentry;
-	const char *string = NULL;
+	const char *string;
 	size_t size_ret;
 
 	/* return the FW filename or path */
@@ -95,14 +157,16 @@ static ssize_t sof_dsp_ops_tester_dfs_read(struct file *file, char __user *buffe
 	} else if (!strcmp(dentry->d_name.name, "dsp_power_state")) {
 		switch (sdev->dsp_power_state.state) {
 		case SOF_DSP_PM_D0:
-			string = "D0";
+			string = "D0\n";
 			break;
 		case SOF_DSP_PM_D3:
-			string = "D3";
+			string = "D3\n";
 			break;
 		default:
 			break;
 		}
+	} else if (!strcmp(dentry->d_name.name, "fw_state")) {
+		return sof_dsp_ops_fw_state_read(sdev, buffer, count, ppos);
 	} else {
 		return 0;
 	}
@@ -238,5 +302,9 @@ int sof_dbg_dsp_ops_test_init(struct snd_sof_dev *sdev)
 	if (ret < 0)
 		return ret;
 
-	return sof_dsp_dsp_ops_create_dfse(sdev, "dsp_power_state", dsp_ops_debugfs, 0666);
+	ret = sof_dsp_dsp_ops_create_dfse(sdev, "dsp_power_state", dsp_ops_debugfs, 0666);
+	if (ret < 0)
+		return ret;
+
+	return sof_dsp_dsp_ops_create_dfse(sdev, "fw_state", dsp_ops_debugfs, 0444);
 }
