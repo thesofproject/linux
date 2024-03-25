@@ -93,7 +93,7 @@ int snd_sof_boot_dsp_firmware(struct snd_sof_dev *sdev)
 	sof_set_fw_state(sdev, SOF_FW_BOOT_PREPARE);
 
 	/* load the firmware */
-	ret = snd_sof_load_firmware(sdev);
+	ret = snd_sof_load_firmware(sdev, NULL);
 	if (ret < 0) {
 		dev_err(sdev->dev, "%s: failed to load DSP firmware: %d\n",
 			__func__, ret);
