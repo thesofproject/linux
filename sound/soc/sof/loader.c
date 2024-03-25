@@ -14,22 +14,25 @@
 #include "sof-priv.h"
 #include "ops.h"
 
-int snd_sof_load_firmware_raw(struct snd_sof_dev *sdev)
+int snd_sof_load_firmware_raw(struct snd_sof_dev *sdev, const char *fw_filename)
 {
 	struct snd_sof_pdata *plat_data = sdev->pdata;
-	const char *fw_filename;
 	ssize_t ext_man_size;
+	bool alloc = false;
 	int ret;
 
 	/* Don't request firmware again if firmware is already requested */
 	if (sdev->basefw.fw)
 		return 0;
 
-	fw_filename = kasprintf(GFP_KERNEL, "%s/%s",
-				plat_data->fw_filename_prefix,
-				plat_data->fw_filename);
-	if (!fw_filename)
-		return -ENOMEM;
+	if (!fw_filename) {
+		fw_filename = kasprintf(GFP_KERNEL, "%s/%s",
+					plat_data->fw_filename_prefix,
+					plat_data->fw_filename);
+		if (!fw_filename)
+			return -ENOMEM;
+		alloc = true;
+	}
 
 	ret = request_firmware(&sdev->basefw.fw, fw_filename, sdev->dev);
 
@@ -59,17 +62,18 @@ int snd_sof_load_firmware_raw(struct snd_sof_dev *sdev)
 	}
 
 err:
-	kfree(fw_filename);
+	if (alloc)
+		kfree(fw_filename);
 
 	return ret;
 }
 EXPORT_SYMBOL(snd_sof_load_firmware_raw);
 
-int snd_sof_load_firmware_memcpy(struct snd_sof_dev *sdev)
+int snd_sof_load_firmware_memcpy(struct snd_sof_dev *sdev, const char *fw_filename)
 {
 	int ret;
 
-	ret = snd_sof_load_firmware_raw(sdev);
+	ret = snd_sof_load_firmware_raw(sdev, fw_filename);
 	if (ret < 0)
 		return ret;
 
