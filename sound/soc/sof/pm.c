@@ -126,7 +126,7 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 	sof_set_fw_state(sdev, SOF_FW_BOOT_PREPARE);
 
 	/* load the firmware */
-	ret = snd_sof_load_firmware(sdev);
+	ret = snd_sof_load_firmware(sdev, NULL);
 	if (ret < 0) {
 		dev_err(sdev->dev,
 			"error: failed to load DSP firmware after resume %d\n",
