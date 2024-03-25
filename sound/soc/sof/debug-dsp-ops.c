@@ -8,6 +8,44 @@
 #include "sof-priv.h"
 #include "ops.h"
 
+/*
+ * set dsp power state op by writing the requested power state.
+ * ex: echo D3 > dsp_power_state
+ */
+static int sof_dsp_ops_set_power_state(struct snd_sof_dev *sdev, char *state)
+{
+	/* only D3 supported for now */
+	if (strcmp(state, "D3")) {
+		dev_err(sdev->dev, "Unsupported state %s\n", state);
+		return -EINVAL;
+	}
+
+	/* power off the DSP */
+	if (sdev->dsp_power_state.state == SOF_DSP_PM_D0) {
+		const struct sof_ipc_pm_ops *pm_ops = sof_ipc_get_ops(sdev, pm);
+		struct sof_dsp_power_state target_state = {
+			.state = SOF_DSP_PM_D3,
+		};
+		int ret;
+
+		/* notify DSP of upcoming power down */
+		if (pm_ops && pm_ops->ctx_save) {
+			ret = pm_ops->ctx_save(sdev);
+			if (ret < 0)
+				return ret;
+		}
+
+		ret = snd_sof_dsp_set_power_state(sdev, &target_state);
+		if (ret < 0)
+			return ret;
+
+		sdev->enabled_cores_mask = 0;
+		sof_set_fw_state(sdev, SOF_FW_BOOT_NOT_STARTED);
+	}
+
+	return 0;
+}
+
 static int sof_dsp_ops_boot_firmware(struct snd_sof_dev *sdev)
 {
 	const char *fw_filename = NULL;
@@ -45,17 +83,29 @@ static ssize_t sof_dsp_ops_tester_dfs_read(struct file *file, char __user *buffe
 	struct snd_sof_dfsentry *dfse = file->private_data;
 	struct snd_sof_dev *sdev = dfse->sdev;
 	struct dentry *dentry;
-	const char *string;
+	const char *string = NULL;
 	size_t size_ret;
 
 	/* return the FW filename or path */
 	dentry = file->f_path.dentry;
-	if (!strcmp(dentry->d_name.name, "fw_filename"))
+	if (!strcmp(dentry->d_name.name, "fw_filename")) {
 		string = sdev->test_profile.fw_name;
-	else if (!strcmp(dentry->d_name.name, "fw_path"))
+	} else if (!strcmp(dentry->d_name.name, "fw_path")) {
 		string = sdev->test_profile.fw_path;
-	else
+	} else if (!strcmp(dentry->d_name.name, "dsp_power_state")) {
+		switch (sdev->dsp_power_state.state) {
+		case SOF_DSP_PM_D0:
+			string = "D0";
+			break;
+		case SOF_DSP_PM_D3:
+			string = "D3";
+			break;
+		default:
+			break;
+		}
+	} else {
 		return 0;
+	}
 
 	if (*ppos || !string)
 		return 0;
@@ -91,6 +141,26 @@ static ssize_t sof_dsp_ops_tester_dfs_write(struct file *file, const char __user
 		ret = sof_dsp_ops_boot_firmware(sdev);
 		if (ret < 0)
 			return ret;
+		return size;
+	}
+
+	/* set DSP power state */
+	if (!strcmp(dentry->d_name.name, "dsp_power_state")) {
+		int ret;
+
+		string = kzalloc(count + 1, GFP_KERNEL);
+		if (!string)
+			return -ENOMEM;
+
+		size = simple_write_to_buffer(string, count, ppos, buffer, count);
+
+		/* truncate the \n at the end */
+		string[count - 1] = '\0';
+		ret = sof_dsp_ops_set_power_state(sdev, string);
+		kfree(string);
+		if (ret < 0)
+			return ret;
+
 		return size;
 	}
 
@@ -164,5 +234,9 @@ int sof_dbg_dsp_ops_test_init(struct snd_sof_dev *sdev)
 	if (ret < 0)
 		return ret;
 
-	return sof_dsp_dsp_ops_create_dfse(sdev, "boot_fw", dsp_ops_debugfs, 0222);
+	ret = sof_dsp_dsp_ops_create_dfse(sdev, "boot_fw", dsp_ops_debugfs, 0222);
+	if (ret < 0)
+		return ret;
+
+	return sof_dsp_dsp_ops_create_dfse(sdev, "dsp_power_state", dsp_ops_debugfs, 0666);
 }
