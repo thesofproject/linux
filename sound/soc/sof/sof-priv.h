@@ -229,7 +229,7 @@ struct snd_sof_dsp_ops {
 			struct snd_sof_ipc_msg *msg); /* mandatory */
 
 	/* FW loading */
-	int (*load_firmware)(struct snd_sof_dev *sof_dev); /* mandatory */
+	int (*load_firmware)(struct snd_sof_dev *sof_dev, const char *fw_filename); /* mandatory */
 	int (*load_module)(struct snd_sof_dev *sof_dev,
 			   struct snd_sof_mod_hdr *hdr); /* optional */
 
@@ -729,8 +729,8 @@ int sof_create_ipc_file_profile(struct snd_sof_dev *sdev,
 /*
  * Firmware loading.
  */
-int snd_sof_load_firmware_raw(struct snd_sof_dev *sdev);
-int snd_sof_load_firmware_memcpy(struct snd_sof_dev *sdev);
+int snd_sof_load_firmware_raw(struct snd_sof_dev *sdev, const char *fw_filename);
+int snd_sof_load_firmware_memcpy(struct snd_sof_dev *sdev, const char *fw_filename);
 int snd_sof_run_firmware(struct snd_sof_dev *sdev);
 void snd_sof_fw_unload(struct snd_sof_dev *sdev);
 

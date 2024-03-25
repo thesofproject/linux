@@ -266,7 +266,7 @@ int acp_sof_dsp_run(struct snd_sof_dev *sdev)
 }
 EXPORT_SYMBOL_NS(acp_sof_dsp_run, SND_SOC_SOF_AMD_COMMON);
 
-int acp_sof_load_signed_firmware(struct snd_sof_dev *sdev)
+int acp_sof_load_signed_firmware(struct snd_sof_dev *sdev, const char *fw_name)
 {
 	struct snd_sof_pdata *plat_data = sdev->pdata;
 	struct acp_dev_data *adata = plat_data->hw_pdata;
