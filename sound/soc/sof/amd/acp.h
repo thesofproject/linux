@@ -275,7 +275,7 @@ void amd_sof_acp_remove(struct snd_sof_dev *sdev);
 /* DSP Loader callbacks */
 int acp_sof_dsp_run(struct snd_sof_dev *sdev);
 int acp_dsp_pre_fw_run(struct snd_sof_dev *sdev);
-int acp_sof_load_signed_firmware(struct snd_sof_dev *sdev);
+int acp_sof_load_signed_firmware(struct snd_sof_dev *sdev, const char *fw_filename);
 int acp_get_bar_index(struct snd_sof_dev *sdev, u32 type);
 
 /* Block IO callbacks */
