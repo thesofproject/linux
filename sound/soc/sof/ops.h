@@ -474,12 +474,14 @@ snd_sof_pcm_platform_trigger(struct snd_sof_dev *sdev,
 	return 0;
 }
 
-/* Firmware loading */
-static inline int snd_sof_load_firmware(struct snd_sof_dev *sdev)
+/* Firmware loading. If the fw_filename argument is NULL, the firmware file set in the
+ * default profile will be loaded. Otherwise, it must contain the full path to the file.
+ */
+static inline int snd_sof_load_firmware(struct snd_sof_dev *sdev, const char *fw_filename)
 {
 	dev_dbg(sdev->dev, "loading firmware\n");
 
-	return sof_ops(sdev)->load_firmware(sdev);
+	return sof_ops(sdev)->load_firmware(sdev, fw_filename);
 }
 
 /* host DSP message data */
