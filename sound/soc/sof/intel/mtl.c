@@ -306,18 +306,21 @@ int mtl_dsp_post_fw_run(struct snd_sof_dev *sdev)
 	if (sdev->first_boot) {
 		struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
 
-		ret = hda_sdw_startup(sdev);
-		if (ret < 0) {
-			dev_err(sdev->dev, "could not startup SoundWire links\n");
-			return ret;
-		}
-
 		/* Check if IMR boot is usable */
 		if (!sof_debug_check_flag(SOF_DBG_IGNORE_D3_PERSISTENT)) {
 			hdev->imrboot_supported = true;
 			debugfs_create_bool("skip_imr_boot",
 					    0644, sdev->debugfs_root,
 					    &hdev->skip_imr_boot);
+		}
+
+		if (sdev->dsp_test_mode_enabled)
+			return 0;
+
+		ret = hda_sdw_startup(sdev);
+		if (ret < 0) {
+			dev_err(sdev->dev, "could not startup SoundWire links\n");
+			return ret;
 		}
 	}
 
