@@ -405,6 +405,9 @@ static void rt712_sdca_jack_init(struct rt712_sdca_priv *rt712)
 			RT712_UMP_HID_CTL0, 0x1100, 0x1100);
 		rt712_sdca_index_update_bits(rt712, RT712_VENDOR_HDA_CTL,
 			RT712_UMP_HID_CTL7, 0xf000, 0x0000);
+		rt712_sdca_index_write(rt712, RT712_VENDOR_REG, 0x09, 0x6002);
+		rt712_sdca_index_write(rt712, RT712_VENDOR_REG, 0x47, 0xa47a);
+		regmap_write(rt712->regmap, 0x2f59, 0x07);
 
 		/* detected_mode_change_event_en & hid1_push_button_event_en */
 		rt712_sdca_index_update_bits(rt712, RT712_VENDOR_HDA_CTL,
