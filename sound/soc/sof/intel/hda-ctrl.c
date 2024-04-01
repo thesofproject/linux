@@ -284,10 +284,6 @@ void hda_dsp_ctrl_stop_chip(struct snd_sof_dev *sdev)
 	snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR, SOF_HDA_INTCTL,
 				SOF_HDA_INT_ALL_STREAM,	0);
 
-	/* disable controller CIE and GIE */
-	snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR, SOF_HDA_INTCTL,
-				SOF_HDA_INT_CTRL_EN | SOF_HDA_INT_GLOBAL_EN,
-				0);
 
 	/* clear stream status */
 	list_for_each_entry(stream, &bus->stream_list, list) {
@@ -316,6 +312,11 @@ void hda_dsp_ctrl_stop_chip(struct snd_sof_dev *sdev)
 		snd_sof_dsp_write(sdev, HDA_DSP_HDA_BAR,
 				  SOF_HDA_ADSP_DPUBASE, 0);
 	}
+
+	/* disable controller CIE and GIE */
+	snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR, SOF_HDA_INTCTL,
+				SOF_HDA_INT_CTRL_EN | SOF_HDA_INT_GLOBAL_EN,
+				0);
 
 	bus->chip_init = false;
 }
