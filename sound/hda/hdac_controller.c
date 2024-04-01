@@ -45,25 +45,26 @@ void snd_hdac_bus_init_cmd_io(struct hdac_bus *bus)
 	WARN_ON_ONCE(!bus->rb.area);
 
 	spin_lock_irq(&bus->reg_lock);
-	/* CORB set up */
-	bus->corb.addr = bus->rb.addr;
-	bus->corb.buf = (__le32 *)bus->rb.area;
-	snd_hdac_chip_writel(bus, CORBLBASE, (u32)bus->corb.addr);
-	snd_hdac_chip_writel(bus, CORBUBASE, upper_32_bits(bus->corb.addr));
+	if (!bus->use_pio_for_commands) {
+		/* CORB set up */
+		bus->corb.addr = bus->rb.addr;
+		bus->corb.buf = (__le32 *)bus->rb.area;
+		snd_hdac_chip_writel(bus, CORBLBASE, (u32)bus->corb.addr);
+		snd_hdac_chip_writel(bus, CORBUBASE, upper_32_bits(bus->corb.addr));
 
-	/* set the corb size to 256 entries (ULI requires explicitly) */
-	snd_hdac_chip_writeb(bus, CORBSIZE, 0x02);
-	/* set the corb write pointer to 0 */
-	snd_hdac_chip_writew(bus, CORBWP, 0);
+		/* set the corb size to 256 entries (ULI requires explicitly) */
+		snd_hdac_chip_writeb(bus, CORBSIZE, 0x02);
+		/* set the corb write pointer to 0 */
+		snd_hdac_chip_writew(bus, CORBWP, 0);
 
-	/* reset the corb hw read pointer */
-	snd_hdac_chip_writew(bus, CORBRP, AZX_CORBRP_RST);
-	if (!bus->corbrp_self_clear)
-		azx_clear_corbrp(bus);
+		/* reset the corb hw read pointer */
+		snd_hdac_chip_writew(bus, CORBRP, AZX_CORBRP_RST);
+		if (!bus->corbrp_self_clear)
+			azx_clear_corbrp(bus);
 
-	/* enable corb dma */
-	if (!bus->use_pio_for_commands)
+		/* enable corb dma */
 		snd_hdac_chip_writeb(bus, CORBCTL, AZX_CORBCTL_RUN);
+	}
 
 	/* RIRB set up */
 	bus->rirb.addr = bus->rb.addr + 2048;
@@ -100,6 +101,9 @@ static void hdac_wait_for_cmd_dmas(struct hdac_bus *bus)
 		&& time_before(jiffies, timeout))
 		udelay(10);
 
+	if (bus->use_pio_for_commands)
+		return;
+
 	timeout = jiffies + msecs_to_jiffies(100);
 	while ((snd_hdac_chip_readb(bus, CORBCTL) & AZX_CORBCTL_RUN)
 		&& time_before(jiffies, timeout))
@@ -115,7 +119,8 @@ void snd_hdac_bus_stop_cmd_io(struct hdac_bus *bus)
 	spin_lock_irq(&bus->reg_lock);
 	/* disable ringbuffer DMAs */
 	snd_hdac_chip_writeb(bus, RIRBCTL, 0);
-	snd_hdac_chip_writeb(bus, CORBCTL, 0);
+	if (!bus->use_pio_for_commands)
+		snd_hdac_chip_writeb(bus, CORBCTL, 0);
 	spin_unlock_irq(&bus->reg_lock);
 
 	hdac_wait_for_cmd_dmas(bus);
