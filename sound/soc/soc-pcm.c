@@ -2808,18 +2808,6 @@ static int soc_get_playback_capture(struct snd_soc_pcm_runtime *rtd,
 		return -EINVAL;
 	}
 
-	/* REMOVE ME */
-	if (dai_link->dynamic || dai_link->no_pcm) {
-		if (dai_link->dpcm_playback && !dai_link->dpcm_capture)
-			dai_link->playback_only = 1;
-		if (!dai_link->dpcm_playback && dai_link->dpcm_capture)
-			dai_link->capture_only = 1;
-		if (!dai_link->dpcm_playback && !dai_link->dpcm_capture) {
-			dev_err(rtd->dev, "no dpcm_playback/capture are selected\n");
-			return -EINVAL;
-		}
-	}
-
 	/* Adapt stream for codec2codec links */
 	cpu_playback = snd_soc_get_stream_cpu(dai_link, SNDRV_PCM_STREAM_PLAYBACK);
 	cpu_capture  = snd_soc_get_stream_cpu(dai_link, SNDRV_PCM_STREAM_CAPTURE);
