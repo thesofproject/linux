@@ -67,39 +67,6 @@ enum {
 #define SOF_SDW_DAI_TYPE_AMP		1
 #define SOF_SDW_DAI_TYPE_MIC		2
 
-#define SOF_SDW_MAX_DAI_NUM		8
-
-struct sof_sdw_codec_info;
-
-struct sof_sdw_dai_info {
-	const bool direction[2]; /* playback & capture support */
-	const char *dai_name;
-	const int dai_type;
-	const int dailink[2]; /* dailink id for each direction */
-	int  (*init)(struct snd_soc_card *card,
-		     struct snd_soc_dai_link *dai_links,
-		     struct sof_sdw_codec_info *info,
-		     bool playback);
-	int (*exit)(struct snd_soc_card *card, struct snd_soc_dai_link *dai_link);
-	int (*rtd_init)(struct snd_soc_pcm_runtime *rtd);
-	bool rtd_init_done; /* Indicate that the rtd_init callback is done */
-	unsigned long quirk;
-};
-
-struct sof_sdw_codec_info {
-	const int part_id;
-	const int version_id;
-	const char *codec_name;
-	int amp_num;
-	const u8 acpi_id[ACPI_ID_LEN];
-	const bool ignore_pch_dmic;
-	const struct snd_soc_ops *ops;
-	struct sof_sdw_dai_info dais[SOF_SDW_MAX_DAI_NUM];
-	const int dai_num;
-
-	int (*codec_card_late_probe)(struct snd_soc_card *card);
-};
-
 struct mc_private {
 	struct snd_soc_jack sdw_headset;
 	struct sof_hdmi_private hdmi;
