@@ -704,12 +704,6 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_mtl_sdw_machines[] = {
 		.sof_tplg_filename = "sof-mtl-rt713-l0-rt1316-l12.tplg",
 	},
 	{
-		.link_mask = 0x9, /* 2 active links required */
-		.links = mtl_rt711_l0_rt1316_l3,
-		.drv_name = "sof_sdw",
-		.sof_tplg_filename = "sof-mtl-rt711-l0-rt1316-l3.tplg",
-	},
-	{
 		.link_mask = BIT(3) | BIT(0),
 		.links = mtl_712_only,
 		.drv_name = "sof_sdw",
@@ -738,6 +732,12 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_mtl_sdw_machines[] = {
 		.links = mtl_3_in_1_sdca,
 		.drv_name = "sof_sdw",
 		.sof_tplg_filename = "sof-mtl-rt711-l0-rt1316-l23-rt714-l1.tplg",
+	},
+	{
+		.link_mask = 0x9, /* 2 active links required */
+		.links = mtl_rt711_l0_rt1316_l3,
+		.drv_name = "sof_sdw",
+		.sof_tplg_filename = "sof-mtl-rt711-l0-rt1316-l3.tplg",
 	},
 	{
 		.link_mask = BIT(0),
