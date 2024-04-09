@@ -153,16 +153,46 @@ static int imx8ulp_reset(struct snd_sof_dev *sdev)
 	return 0;
 }
 
+static void __iomem *imx8ulp_ioremap_wc_rmem_byname(struct snd_sof_dev *sdev,
+						    const char *name)
+{
+	struct device_node *np, *rmem_node;
+	struct reserved_mem *rmem;
+	int idx;
+
+	np = sdev->dev->of_node;
+
+	idx = of_property_match_string(np, "memory-region-names", name);
+	if (idx < 0) {
+		dev_err(sdev->dev, "failed to fetch index of %s\n", name);
+		return NULL;
+	}
+
+	rmem_node = of_parse_phandle(np, "memory-region", idx);
+	if (!rmem_node) {
+		dev_err(sdev->dev, "failed to fetch node for %s\n", name);
+		return NULL;
+	}
+
+	rmem = of_reserved_mem_lookup(rmem_node);
+	if (!rmem) {
+		dev_err(sdev->dev, "failed to resolve %s\n", name);
+		of_node_put(rmem_node);
+		return NULL;
+	}
+
+	of_node_put(rmem_node);
+
+	return devm_ioremap_wc(sdev->dev, rmem->base, rmem->size);
+}
+
 static int imx8ulp_probe(struct snd_sof_dev *sdev)
 {
 	struct platform_device *pdev =
 		container_of(sdev->dev, struct platform_device, dev);
 	struct device_node *np = pdev->dev.of_node;
-	struct device_node *res_node;
 	struct imx8ulp_priv *priv;
-	struct resource res;
 	void __iomem *reg;
-	u32 base, size;
 	int ret = 0;
 
 	priv = devm_kzalloc(&pdev->dev, sizeof(*priv), GFP_KERNEL);
@@ -206,34 +236,24 @@ static int imx8ulp_probe(struct snd_sof_dev *sdev)
 	sdev->bar[SOF_FW_BLK_TYPE_IRAM] = reg;
 	sdev->mmio_bar = SOF_FW_BLK_TYPE_IRAM;
 
-	res_node = of_parse_phandle(np, "memory-reserved", 0);
-	if (!res_node) {
-		dev_err(&pdev->dev, "failed to get memory region node\n");
-		ret = -ENODEV;
+	reg = imx8ulp_ioremap_wc_rmem_byname(sdev, "dram");
+	if (!reg) {
+		dev_err(sdev->dev, "failed to map DRAM region\n");
+		ret = -EINVAL;
 		goto exit_pdev_unregister;
 	}
-
-	ret = of_address_to_resource(res_node, 0, &res);
-	of_node_put(res_node);
-	if (ret) {
-		dev_err(&pdev->dev, "failed to get reserved region address\n");
-		goto exit_pdev_unregister;
-	}
-
-	sdev->bar[SOF_FW_BLK_TYPE_SRAM] = devm_ioremap_wc(sdev->dev, res.start,
-							  resource_size(&res));
-	if (!sdev->bar[SOF_FW_BLK_TYPE_SRAM]) {
-		dev_err(sdev->dev, "failed to ioremap mem 0x%x size 0x%x\n",
-			base, size);
-		ret = -ENOMEM;
-		goto exit_pdev_unregister;
-	}
+	sdev->bar[SOF_FW_BLK_TYPE_SRAM] = reg;
 	sdev->mailbox_bar = SOF_FW_BLK_TYPE_SRAM;
 
 	/* set default mailbox offset for FW ready message */
 	sdev->dsp_box.offset = MBOX_OFFSET;
 
-	ret = of_reserved_mem_device_init(sdev->dev);
+	/* the DSP can't access certain DMA regions so, to make
+	 * sure that the DMA buffer will be allocated from one of
+	 * the memory regions accessible by the DSP, use the memory
+	 * region passed through the DTS.
+	 */
+	ret = of_reserved_mem_device_init_by_name(sdev->dev, np, "dma");
 	if (ret) {
 		dev_err(&pdev->dev, "failed to init reserved memory region %d\n", ret);
 		goto exit_pdev_unregister;
