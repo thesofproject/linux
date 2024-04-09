@@ -488,6 +488,9 @@ DECLARE_RESTRICTED_HOOK(android_rvh_set_task_comm,
 	TP_PROTO(struct task_struct *tsk, bool exec),
 	TP_ARGS(tsk, exec), 1);
 
+DECLARE_HOOK(android_vh_tick_nohz_idle_stop_tick,
+	TP_PROTO(void *unused),
+	TP_ARGS(unused));
 /* macro versions of hooks are no longer required */
 
 DECLARE_HOOK(android_vh_task_cmdline_prio_restore,
