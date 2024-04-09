@@ -159,9 +159,9 @@ static int imx8ulp_probe(struct snd_sof_dev *sdev)
 		container_of(sdev->dev, struct platform_device, dev);
 	struct device_node *np = pdev->dev.of_node;
 	struct device_node *res_node;
-	struct resource *mmio;
 	struct imx8ulp_priv *priv;
 	struct resource res;
+	void __iomem *reg;
 	u32 base, size;
 	int ret = 0;
 
@@ -196,24 +196,14 @@ static int imx8ulp_probe(struct snd_sof_dev *sdev)
 	imx_dsp_set_data(priv->dsp_ipc, priv);
 	priv->dsp_ipc->ops = &dsp_ops;
 
-	/* DSP base */
-	mmio = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (mmio) {
-		base = mmio->start;
-		size = resource_size(mmio);
-	} else {
-		dev_err(sdev->dev, "error: failed to get DSP base at idx 0\n");
+	/* fetch and map IRAM region */
+	reg = devm_platform_ioremap_resource_byname(pdev, "iram");
+	if (IS_ERR(reg)) {
+		dev_err(sdev->dev, "failed to map IRAM region\n");
 		ret = -EINVAL;
 		goto exit_pdev_unregister;
 	}
-
-	sdev->bar[SOF_FW_BLK_TYPE_IRAM] = devm_ioremap(sdev->dev, base, size);
-	if (!sdev->bar[SOF_FW_BLK_TYPE_IRAM]) {
-		dev_err(sdev->dev, "failed to ioremap base 0x%x size 0x%x\n",
-			base, size);
-		ret = -ENODEV;
-		goto exit_pdev_unregister;
-	}
+	sdev->bar[SOF_FW_BLK_TYPE_IRAM] = reg;
 	sdev->mmio_bar = SOF_FW_BLK_TYPE_IRAM;
 
 	res_node = of_parse_phandle(np, "memory-reserved", 0);
