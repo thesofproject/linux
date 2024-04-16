@@ -18,11 +18,18 @@ int sdca_alloc(void **context,
 	       struct device *parent,
 	       struct sdw_slave *slave);
 
+int sdca_find_functions(struct sdca_data *sdca);
+
 #else
 
 static inline int sdca_alloc(void **context,
 			     struct device *parent,
 			     struct sdw_slave *slave)
+{
+	return 0;
+}
+
+static inline int sdca_find_functions(struct sdca_data *sdca)
 {
 	return 0;
 }
