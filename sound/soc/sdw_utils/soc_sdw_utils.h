@@ -41,7 +41,7 @@ struct sof_sdw_codec_info {
 	const char *codec_name;
 	int amp_num;
 	const u8 acpi_id[ACPI_ID_LEN];
-	const bool ignore_pch_dmic;
+	const bool ignore_internal_dmic;
 	const struct snd_soc_ops *ops;
 	struct sof_sdw_dai_info dais[SOF_SDW_MAX_DAI_NUM];
 	const int dai_num;
