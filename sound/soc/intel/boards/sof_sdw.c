@@ -1462,7 +1462,7 @@ static int create_dmic_dailinks(struct snd_soc_card *card,
 	ret = init_simple_dai_link(dev, *dai_links, be_id, "dmic01",
 				   0, 1, // DMIC only supports capture
 				   "DMIC01 Pin", "dmic-codec", "dmic-hifi",
-				   sof_sdw_dmic_init, NULL);
+				   asoc_sdw_dmic_init, NULL);
 	if (ret)
 		return ret;
 

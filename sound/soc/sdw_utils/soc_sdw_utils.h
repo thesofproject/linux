@@ -70,4 +70,6 @@ bool is_sdw_unique_device(const struct snd_soc_acpi_link_adr *adr_link,
 			  unsigned int class_id,
 			  int index_in_link);
 
+/* DMIC support */
+int asoc_sdw_dmic_init(struct snd_soc_pcm_runtime *rtd);
 #endif
