@@ -619,7 +619,7 @@ static struct sof_sdw_codec_info codec_info_list[] = {
 				.dailink = {SDW_AMP_OUT_DAI_ID, SDW_UNUSED_DAI_ID},
 				.init = sof_sdw_rt_amp_init,
 				.exit = sof_sdw_rt_amp_exit,
-				.rtd_init = rt712_spk_rtd_init,
+				.rtd_init = rt712_sdw_spk_rtd_init,
 			},
 		},
 		.dai_num = 2,
