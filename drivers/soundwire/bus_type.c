@@ -6,6 +6,7 @@
 #include <linux/pm_domain.h>
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_type.h>
+#include <sound/sdca.h>
 #include "bus.h"
 #include "irq.h"
 #include "sysfs_local.h"
@@ -100,6 +101,19 @@ static int sdw_drv_probe(struct device *dev)
 		return -ENODEV;
 
 	/*
+	 * the SDCA alloc/parsing is done before the driver probe
+	 * so that all the information extracted from firmware is
+	 * available.
+	 */
+	ret = sdca_alloc(&slave->sdca_context,
+			 &slave->dev,
+			 slave);
+	if (ret < 0)
+		return ret;
+
+	sdca_find_functions(slave->sdca_context);
+
+	/*
 	 * attach to power domain but don't turn on (last arg)
 	 */
 	ret = dev_pm_domain_attach(dev, false);
@@ -116,7 +130,6 @@ static int sdw_drv_probe(struct device *dev)
 		dev_pm_domain_detach(dev, false);
 		return ret;
 	}
-
 	mutex_lock(&slave->sdw_dev_lock);
 
 	/* device is probed so let's read the properties now */
@@ -254,3 +267,4 @@ module_exit(sdw_bus_exit);
 
 MODULE_DESCRIPTION("SoundWire bus");
 MODULE_LICENSE("GPL v2");
+MODULE_IMPORT_NS(SND_SOC_SDCA);

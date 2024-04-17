@@ -663,6 +663,7 @@ struct sdw_slave_ops {
  * @is_mockup_device: status flag used to squelch errors in the command/control
  * protocol for SoundWire mockup devices
  * @sdw_dev_lock: mutex used to protect callbacks/remove races
+ * @sdca_context: opaque pointer to SDCA information
  */
 struct sdw_slave {
 	struct sdw_slave_id id;
@@ -686,6 +687,7 @@ struct sdw_slave {
 	bool first_interrupt_done;
 	bool is_mockup_device;
 	struct mutex sdw_dev_lock; /* protect callbacks/remove races */
+	void *sdca_context;
 };
 
 #define dev_to_sdw_dev(_dev) container_of(_dev, struct sdw_slave, dev)
