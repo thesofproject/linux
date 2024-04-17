@@ -45,6 +45,15 @@ struct sof_sdw_codec_info {
 	int (*codec_card_late_probe)(struct snd_soc_card *card);
 };
 
+struct mc_private {
+	struct snd_soc_jack sdw_headset;
+	struct device *headset_codec_dev; /* only one headset per card */
+	struct device *amp_dev1, *amp_dev2;
+	void *intel_mc_private;
+	bool append_dai_type;
+	bool ignore_internal_dmic;
+};
+
 int asoc_sdw_startup(struct snd_pcm_substream *substream);
 int asoc_sdw_prepare(struct snd_pcm_substream *substream);
 int asoc_sdw_prepare(struct snd_pcm_substream *substream);
