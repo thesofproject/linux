@@ -48,6 +48,15 @@ static int sof_dsp_ops_set_power_state(struct snd_sof_dev *sdev, char *state)
 	return 0;
 }
 
+static void sof_dsp_ops_unload_firmware(struct snd_sof_dev *sdev)
+{
+	/* release the currently loaded firmware */
+	if (sdev->basefw.fw)
+		snd_sof_fw_unload(sdev);
+
+	sof_set_fw_state(sdev, SOF_FW_BOOT_PREPARE);
+}
+
 static int sof_dsp_ops_boot_firmware(struct snd_sof_dev *sdev)
 {
 	const char *fw_filename = NULL;
@@ -193,6 +202,17 @@ static ssize_t sof_dsp_ops_tester_dfs_write(struct file *file, const char __user
 	size_t size;
 	char *string;
 
+	if (!strcmp(dentry->d_name.name, "unload_fw")) {
+		string = kzalloc(count + 1, GFP_KERNEL);
+		if (!string)
+			return -ENOMEM;
+
+		size = simple_write_to_buffer(string, count, ppos, buffer, count);
+		kfree(string);
+		sof_dsp_ops_unload_firmware(sdev);
+		return size;
+	}
+
 	if (!strcmp(dentry->d_name.name, "boot_fw")) {
 		int ret;
 		string = kzalloc(count + 1, GFP_KERNEL);
@@ -306,5 +326,9 @@ int sof_dbg_dsp_ops_test_init(struct snd_sof_dev *sdev)
 	if (ret < 0)
 		return ret;
 
-	return sof_dsp_dsp_ops_create_dfse(sdev, "fw_state", dsp_ops_debugfs, 0444);
+	ret = sof_dsp_dsp_ops_create_dfse(sdev, "fw_state", dsp_ops_debugfs, 0444);
+	if (ret < 0)
+		return ret;
+
+	return sof_dsp_dsp_ops_create_dfse(sdev, "unload_fw", dsp_ops_debugfs, 0222);
 }
