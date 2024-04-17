@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-only
+// This file incorporates work covered by the following copyright notice:
 // Copyright (c) 2023 Intel Corporation
+// Copyright (c) 2024 Advanced Micro Devices, Inc.
 
 /*
- *  sof_sdw_rt722_sdca - Helpers to handle RT722-SDCA from generic machine driver
+ *  soc_sdw_rt722_sdca - Helpers to handle RT722-SDCA from generic machine driver
  */
 
 #include <linux/device.h>
@@ -13,7 +15,7 @@
 #include <sound/soc.h>
 #include <sound/soc-acpi.h>
 #include <sound/soc-dapm.h>
-#include "sof_sdw_common.h"
+#include "soc_sdw_utils.h"
 
 static const struct snd_soc_dapm_widget rt722_spk_widgets[] = {
 	SND_SOC_DAPM_SPK("Speaker", NULL),
@@ -27,7 +29,7 @@ static const struct snd_kcontrol_new rt722_spk_controls[] = {
 	SOC_DAPM_PIN_SWITCH("Speaker"),
 };
 
-int rt722_spk_rtd_init(struct snd_soc_pcm_runtime *rtd)
+int rt722_sdw_spk_rtd_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_card *card = rtd->card;
 	int ret;
@@ -58,4 +60,4 @@ int rt722_spk_rtd_init(struct snd_soc_pcm_runtime *rtd)
 
 	return ret;
 }
-
+EXPORT_SYMBOL_NS(rt722_sdw_spk_rtd_init, SND_SOC_SDW_UTILS);
