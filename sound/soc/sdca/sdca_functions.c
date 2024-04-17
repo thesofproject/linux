@@ -127,6 +127,7 @@ static int find_sdca_function(struct acpi_device *adev, void *data)
 	struct fwnode_handle *control5; /* used to identify topology type */
 	bool valid_function_found = false;
 	u32 function_topology = 0;
+	u64 topology_features = 0;
 	acpi_status status;
 	u64 addr;
 	int ret;
@@ -189,6 +190,16 @@ static int find_sdca_function(struct acpi_device *adev, void *data)
 
 	if (!valid_function_found)
 		return 0;
+
+	fwnode_property_read_u64(function_node, "mipi-sdca-function-topology-features",
+				 &topology_features);
+	if (topology_features) {
+		dev_info(parent, "%pfwP: SDCA function has topology-features mask %#llx\n",
+			 function_node,
+			 topology_features);
+		sdca->functions[sdca->function_count].topology_features =
+			topology_features;
+	}
 
 	ret = find_sdca_entities(&adev->dev,
 				 function_node,

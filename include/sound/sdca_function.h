@@ -85,6 +85,7 @@ struct sdca_entity {
  * struct sdca_function - top-level information for one SDCA function
  * @adr: ACPI _ADR field reported in platform firmware
  * @topology_type: identifier for that function
+ * @topology_features: mask of optional features in topology
  * @num_entities: number of entities reported in this function. This is a factor
  * of multiple options allowed in the SDCA specification
  * @entities: dynamically allocated array of entities.
@@ -92,6 +93,7 @@ struct sdca_entity {
 struct sdca_function {
 	u8 adr; /* limited range since only 8 functions can be supported */
 	enum sdca_function_type topology_type;
+	u64 topology_features;
 	int num_entities;
 	struct sdca_entity *entities;
 };
