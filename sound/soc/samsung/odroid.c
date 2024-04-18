@@ -184,7 +184,7 @@ static struct snd_soc_dai_link odroid_card_dais[] = {
 		SND_SOC_DAILINK_REG(mixer),
 	}, {
 		/* Secondary FE <-> BE link */
-		.playback_only = 1,
+		.playback_assertion = 1,
 		.ops = &odroid_card_fe_ops,
 		.name = "Secondary",
 		.stream_name = "Secondary",
