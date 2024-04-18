@@ -47,16 +47,16 @@ static int imx_spdif_audio_probe(struct platform_device *pdev)
 	data->dai.name = "S/PDIF PCM";
 	data->dai.stream_name = "S/PDIF PCM";
 	data->dai.cpus->of_node = spdif_np;
-	data->dai.playback_only = true;
-	data->dai.capture_only = true;
+	data->dai.playback_assertion = true;
+	data->dai.capture_assertion = true;
 
 	if (of_property_read_bool(np, "spdif-out"))
-		data->dai.capture_only = false;
+		data->dai.capture_assertion = false;
 
 	if (of_property_read_bool(np, "spdif-in"))
-		data->dai.playback_only = false;
+		data->dai.playback_assertion = false;
 
-	if (data->dai.playback_only && data->dai.capture_only) {
+	if (data->dai.playback_assertion && data->dai.capture_assertion) {
 		dev_err(&pdev->dev, "no enabled S/PDIF DAI link\n");
 		goto end;
 	}

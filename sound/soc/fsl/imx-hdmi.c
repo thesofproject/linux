@@ -143,8 +143,8 @@ static int imx_hdmi_probe(struct platform_device *pdev)
 	data->dai.cpus->dai_name = dev_name(&cpu_pdev->dev);
 	data->dai.platforms->of_node = cpu_np;
 	data->dai.ops = &imx_hdmi_ops;
-	data->dai.playback_only = true;
-	data->dai.capture_only = false;
+	data->dai.playback_assertion = true;
+	data->dai.capture_assertion = false;
 	data->dai.init = imx_hdmi_init;
 
 	put_device(&cpu_pdev->dev);
@@ -169,8 +169,8 @@ static int imx_hdmi_probe(struct platform_device *pdev)
 	}
 
 	if (hdmi_out) {
-		data->dai.playback_only = true;
-		data->dai.capture_only = false;
+		data->dai.playback_assertion = true;
+		data->dai.capture_assertion = false;
 		data->dai.codecs->dai_name = "i2s-hifi";
 		data->dai.codecs->name = "hdmi-audio-codec.1";
 		data->dai.dai_fmt = data->dai_fmt |
@@ -179,8 +179,8 @@ static int imx_hdmi_probe(struct platform_device *pdev)
 	}
 
 	if (hdmi_in) {
-		data->dai.playback_only = false;
-		data->dai.capture_only = true;
+		data->dai.playback_assertion = false;
+		data->dai.capture_assertion = true;
 		data->dai.codecs->dai_name = "i2s-hifi";
 		data->dai.codecs->name = "hdmi-audio-codec.2";
 		data->dai.dai_fmt = data->dai_fmt |

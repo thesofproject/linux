@@ -185,18 +185,18 @@ static int imx_rpmsg_probe(struct platform_device *pdev)
 		data->dai.platforms->name = platform_name;
 	else
 		data->dai.platforms->name = "rpmsg-audio-channel";
-	data->dai.playback_only = true;
-	data->dai.capture_only = true;
+	data->dai.playback_assertion = true;
+	data->dai.capture_assertion = true;
 	data->card.num_links = 1;
 	data->card.dai_link = &data->dai;
 
 	if (of_property_read_bool(np, "fsl,rpmsg-out"))
-		data->dai.capture_only = false;
+		data->dai.capture_assertion = false;
 
 	if (of_property_read_bool(np, "fsl,rpmsg-in"))
-		data->dai.playback_only = false;
+		data->dai.playback_assertion = false;
 
-	if (data->dai.playback_only && data->dai.capture_only) {
+	if (data->dai.playback_assertion && data->dai.capture_assertion) {
 		dev_err(&pdev->dev, "no enabled rpmsg DAI link\n");
 		ret = -EINVAL;
 		goto fail;
