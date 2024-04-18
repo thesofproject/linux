@@ -2794,7 +2794,12 @@ static int soc_get_playback_capture(struct snd_soc_pcm_runtime *rtd,
 				    int *playback, int *capture)
 {
 	struct snd_soc_dai_link *dai_link = rtd->dai_link;
+	struct snd_soc_dai_link_ch_map *ch_maps;
 	struct snd_soc_dai *cpu_dai;
+	struct snd_soc_dai *codec_dai;
+	struct snd_soc_dai *dummy_dai = snd_soc_find_dai(&snd_soc_dummy_dlc);
+	int cpu_playback;
+	int cpu_capture;
 	int has_playback = 0;
 	int has_capture  = 0;
 	int i;
@@ -2804,77 +2809,95 @@ static int soc_get_playback_capture(struct snd_soc_pcm_runtime *rtd,
 		return -EINVAL;
 	}
 
-	if (dai_link->dynamic || dai_link->no_pcm) {
-		int stream;
+	/*
+	 * REMOVE ME
+	 *
+	 * dpcm_playback/capture will be used as playback/capture_assertion
+	 */
+	if (dai_link->playback_only && dai_link->capture_only) {
+		dev_err(rtd->dev, "both playback_only / capture_only are set\n");
+		return -EINVAL;
+	}
+	if (dai_link->playback_only)
+		dai_link->playback_assertion = 1;
+	if (dai_link->capture_only)
+		dai_link->capture_assertion = 1;
+	if (dai_link->dpcm_playback)
+		dai_link->playback_assertion = 1;
+	if (dai_link->dpcm_capture)
+		dai_link->capture_assertion = 1;
 
-		if (dai_link->dpcm_playback) {
-			stream = SNDRV_PCM_STREAM_PLAYBACK;
+	/* Adapt stream for codec2codec links */
+	cpu_playback = snd_soc_get_stream_cpu(dai_link, SNDRV_PCM_STREAM_PLAYBACK);
+	cpu_capture  = snd_soc_get_stream_cpu(dai_link, SNDRV_PCM_STREAM_CAPTURE);
 
-			for_each_rtd_cpu_dais(rtd, i, cpu_dai) {
-				if (snd_soc_dai_stream_valid(cpu_dai, stream)) {
-					has_playback = 1;
-					break;
-				}
-			}
-			if (!has_playback) {
-				dev_err(rtd->card->dev,
-					"No CPU DAIs support playback for stream %s\n",
-					dai_link->stream_name);
-				return -EINVAL;
-			}
-		}
-		if (dai_link->dpcm_capture) {
-			stream = SNDRV_PCM_STREAM_CAPTURE;
-
-			for_each_rtd_cpu_dais(rtd, i, cpu_dai) {
-				if (snd_soc_dai_stream_valid(cpu_dai, stream)) {
-					has_capture = 1;
-					break;
-				}
-			}
-
-			if (!has_capture) {
-				dev_err(rtd->card->dev,
-					"No CPU DAIs support capture for stream %s\n",
-					dai_link->stream_name);
-				return -EINVAL;
-			}
-		}
-	} else {
-		struct snd_soc_dai_link_ch_map *ch_maps;
-		struct snd_soc_dai *codec_dai;
-
-		/* Adapt stream for codec2codec links */
-		int cpu_capture  = snd_soc_get_stream_cpu(dai_link, SNDRV_PCM_STREAM_CAPTURE);
-		int cpu_playback = snd_soc_get_stream_cpu(dai_link, SNDRV_PCM_STREAM_PLAYBACK);
+	/*
+	 * see
+	 *	soc.h :: [dai_link->ch_maps Image sample]
+	 */
+	for_each_rtd_ch_maps(rtd, i, ch_maps) {
+		cpu_dai	  = snd_soc_rtd_to_cpu(rtd,   ch_maps->cpu);
+		codec_dai = snd_soc_rtd_to_codec(rtd, ch_maps->codec);
 
 		/*
-		 * see
-		 *	soc.h :: [dai_link->ch_maps Image sample]
+		 * FIXME
+		 *
+		 * DPCM BE Codec has been no checked before.
+		 * It should be checked, but it breaks compatibility.
+		 * It ignores BE Codec here, so far.
 		 */
-		for_each_rtd_ch_maps(rtd, i, ch_maps) {
-			cpu_dai	  = snd_soc_rtd_to_cpu(rtd,   ch_maps->cpu);
-			codec_dai = snd_soc_rtd_to_codec(rtd, ch_maps->codec);
+		if (dai_link->no_pcm)
+			codec_dai = dummy_dai;
 
-			if (snd_soc_dai_stream_valid(codec_dai, SNDRV_PCM_STREAM_PLAYBACK) &&
-			    snd_soc_dai_stream_valid(cpu_dai,   cpu_playback))
-				has_playback = 1;
-			if (snd_soc_dai_stream_valid(codec_dai, SNDRV_PCM_STREAM_CAPTURE) &&
-			    snd_soc_dai_stream_valid(cpu_dai,   cpu_capture))
-				has_capture = 1;
-		}
+		if (snd_soc_dai_stream_valid(cpu_dai,   cpu_playback) &&
+		    snd_soc_dai_stream_valid(codec_dai, SNDRV_PCM_STREAM_PLAYBACK))
+			has_playback = 1;
+		if (snd_soc_dai_stream_valid(cpu_dai,   cpu_capture) &&
+		    snd_soc_dai_stream_valid(codec_dai, SNDRV_PCM_STREAM_CAPTURE))
+			has_capture = 1;
 	}
 
-	if (dai_link->playback_only)
-		has_capture = 0;
+	/*
+	 * Assertion check
+	 *
+	 * playback_assertion = 0	No assertion check.
+	 * capture_assertion  = 0	ASoC will use detected playback/capture as-is.
+	 *				No playback, No capture will be error.
+	 *
+	 * playback_assertion = 1	DAI must playback available. ASoC will disable capture.
+	 * capture_assertion  = 0	In other words "playback_only"
+	 *
+	 * playback_assertion = 0	DAI must capture available. ASoC will disable playback.
+	 * capture_assertion  = 1	In other words "capture_only"
+	 *
+	 * playback_assertion = 1	DAI must both playback/capture available.
+	 * capture_assertion  = 1
+	 */
+	if (dai_link->playback_assertion) {
+		if (!has_playback) {
+			dev_err(rtd->dev, "%s playback assertion check error\n", dai_link->stream_name);
+			return -EINVAL;
+		}
+		/* makes it plyaback only */
+		if (!dai_link->capture_assertion)
+			has_capture = 0;
+	}
+	if (dai_link->capture_assertion) {
+		if (!has_capture) {
+			dev_err(rtd->dev, "%s capture assertion check error\n", dai_link->stream_name);
+			return -EINVAL;
+		}
+		/* makes it capture only */
+		if (!dai_link->playback_assertion)
+			has_playback = 0;
+	}
 
-	if (dai_link->capture_only)
-		has_playback = 0;
-
+	/*
+	 * Detect Mismatch
+	 */
 	if (!has_playback && !has_capture) {
 		dev_err(rtd->dev, "substream %s has no playback, no capture\n",
 			dai_link->stream_name);
-
 		return -EINVAL;
 	}
 

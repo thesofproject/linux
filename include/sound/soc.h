@@ -809,6 +809,15 @@ struct snd_soc_dai_link {
 	unsigned int dpcm_capture:1;
 	unsigned int dpcm_playback:1;
 
+	/*
+	 * Capture / Playback support assertion. Having assertion flag is not mandatory.
+	 * In case of having assertion flag, non specific side will be disabled.
+	 * see details
+	 *	soc_get_playback_capture()
+	 */
+	unsigned int capture_assertion:1;
+	unsigned int playback_assertion:1;
+
 	/* DPCM used FE & BE merged format */
 	unsigned int dpcm_merged_format:1;
 	/* DPCM used FE & BE merged channel */
