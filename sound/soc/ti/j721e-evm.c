@@ -670,7 +670,7 @@ static int j721e_soc_probe_cpb(struct j721e_priv *priv, int *link_idx,
 	priv->dai_links[*link_idx].platforms->of_node = dai_node;
 	priv->dai_links[*link_idx].codecs->of_node = codec_node;
 	priv->dai_links[*link_idx].codecs->dai_name = "pcm3168a-dac";
-	priv->dai_links[*link_idx].playback_only = 1;
+	priv->dai_links[*link_idx].playback_assertion = 1;
 	priv->dai_links[*link_idx].id = J721E_AUDIO_DOMAIN_CPB;
 	priv->dai_links[*link_idx].dai_fmt = J721E_DAI_FMT;
 	priv->dai_links[*link_idx].init = j721e_audio_init;
@@ -690,7 +690,7 @@ static int j721e_soc_probe_cpb(struct j721e_priv *priv, int *link_idx,
 	priv->dai_links[*link_idx].platforms->of_node = dai_node;
 	priv->dai_links[*link_idx].codecs->of_node = codec_node;
 	priv->dai_links[*link_idx].codecs->dai_name = "pcm3168a-adc";
-	priv->dai_links[*link_idx].capture_only = 1;
+	priv->dai_links[*link_idx].capture_assertion = 1;
 	priv->dai_links[*link_idx].id = J721E_AUDIO_DOMAIN_CPB;
 	priv->dai_links[*link_idx].dai_fmt = J721E_DAI_FMT;
 	priv->dai_links[*link_idx].init = j721e_audio_init;
@@ -787,7 +787,7 @@ static int j721e_soc_probe_ivi(struct j721e_priv *priv, int *link_idx,
 	priv->dai_links[*link_idx].codecs[0].dai_name = "pcm3168a-dac";
 	priv->dai_links[*link_idx].codecs[1].of_node = codecb_node;
 	priv->dai_links[*link_idx].codecs[1].dai_name = "pcm3168a-dac";
-	priv->dai_links[*link_idx].playback_only = 1;
+	priv->dai_links[*link_idx].playback_assertion = 1;
 	priv->dai_links[*link_idx].id = J721E_AUDIO_DOMAIN_IVI;
 	priv->dai_links[*link_idx].dai_fmt = J721E_DAI_FMT;
 	priv->dai_links[*link_idx].init = j721e_audio_init_ivi;
@@ -809,7 +809,7 @@ static int j721e_soc_probe_ivi(struct j721e_priv *priv, int *link_idx,
 	priv->dai_links[*link_idx].codecs[0].dai_name = "pcm3168a-adc";
 	priv->dai_links[*link_idx].codecs[1].of_node = codecb_node;
 	priv->dai_links[*link_idx].codecs[1].dai_name = "pcm3168a-adc";
-	priv->dai_links[*link_idx].capture_only = 1;
+	priv->dai_links[*link_idx].capture_assertion = 1;
 	priv->dai_links[*link_idx].id = J721E_AUDIO_DOMAIN_IVI;
 	priv->dai_links[*link_idx].dai_fmt = J721E_DAI_FMT;
 	priv->dai_links[*link_idx].init = j721e_audio_init;
