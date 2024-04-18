@@ -31,7 +31,7 @@ static struct snd_soc_dai_link acp63_dai_pdm[] = {
 	{
 		.name = "acp63-dmic-capture",
 		.stream_name = "DMIC capture",
-		.capture_only = 1,
+		.capture_assertion = 1,
 		SND_SOC_DAILINK_REG(acp63_pdm, dmic_codec, pdm_platform),
 	},
 };

@@ -289,7 +289,6 @@ static struct snd_soc_dai_link acp5x_8821_35l41_dai[] = {
 			   SND_SOC_DAIFMT_NB_NF |
 			   SND_SOC_DAIFMT_CBC_CFC,
 		.playback_assertion = 1,
-		.playback_only = 1,
 		.ops = &acp5x_cs35l41_play_ops,
 		SND_SOC_DAILINK_REG(acp5x_bt, cs35l41, platform),
 	},
@@ -388,7 +387,6 @@ static struct snd_soc_dai_link acp5x_8821_98388_dai[] = {
 			   SND_SOC_DAIFMT_NB_NF |
 			   SND_SOC_DAIFMT_CBC_CFC,
 		.playback_assertion = 1,
-		.playback_only = 1,
 		.ops = &acp5x_max98388_play_ops,
 		SND_SOC_DAILINK_REG(acp5x_bt, max98388, platform),
 	},
