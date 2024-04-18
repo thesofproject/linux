@@ -78,14 +78,14 @@ static struct snd_soc_dai_link mxs_sgtl5000_dai[] = {
 		.stream_name	= "HiFi Playback",
 		.dai_fmt	= MXS_SGTL5000_DAI_FMT,
 		.ops		= &mxs_sgtl5000_hifi_ops,
-		.playback_only	= true,
+		.playback_assertion = true,
 		SND_SOC_DAILINK_REG(hifi_tx),
 	}, {
 		.name		= "HiFi Rx",
 		.stream_name	= "HiFi Capture",
 		.dai_fmt	= MXS_SGTL5000_DAI_FMT,
 		.ops		= &mxs_sgtl5000_hifi_ops,
-		.capture_only	= true,
+		.capture_assertion = true,
 		SND_SOC_DAILINK_REG(hifi_rx),
 	},
 };
