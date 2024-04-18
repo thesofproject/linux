@@ -128,6 +128,7 @@ static int find_sdca_function(struct acpi_device *adev, void *data)
 	bool valid_function_found = false;
 	u32 function_topology = 0;
 	u64 topology_features = 0;
+	u32 max_busy_delay = 0;
 	acpi_status status;
 	u64 addr;
 	int ret;
@@ -190,6 +191,18 @@ static int find_sdca_function(struct acpi_device *adev, void *data)
 
 	if (!valid_function_found)
 		return 0;
+
+	fwnode_property_read_u32(function_node, "mipi-sdca-function-busy-max-delay",
+				 &max_busy_delay);
+	sdca->functions[sdca->function_count].function_busy_max_delay_us =
+		max_busy_delay;
+	if (max_busy_delay > 0) {
+		dev_err(parent,
+			"%pfwP: unsupported non-zero delay %d us for Function_Busy\n",
+			function_node, max_busy_delay);
+		dev_err(parent,
+			"please report this on https://github.com/thesofproject/linux/issues\n");
+	}
 
 	fwnode_property_read_u64(function_node, "mipi-sdca-function-topology-features",
 				 &topology_features);

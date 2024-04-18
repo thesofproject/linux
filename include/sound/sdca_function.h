@@ -89,6 +89,9 @@ struct sdca_entity {
  * @num_entities: number of entities reported in this function. This is a factor
  * of multiple options allowed in the SDCA specification
  * @entities: dynamically allocated array of entities.
+ * @function_busy_max_delay_us: indicates if hardware can assert the Function_Busy
+ * bit, which requires special-casing of the 'Command Ignored' response. If zero,
+ * then the Host shall assume this bit is never asserted.
  */
 struct sdca_function {
 	u8 adr; /* limited range since only 8 functions can be supported */
@@ -96,6 +99,7 @@ struct sdca_function {
 	u64 topology_features;
 	int num_entities;
 	struct sdca_entity *entities;
+	u32 function_busy_max_delay_us;
 };
 
 /**
