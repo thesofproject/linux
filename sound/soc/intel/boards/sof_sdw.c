@@ -844,7 +844,7 @@ static struct sof_sdw_codec_info codec_info_list[] = {
 				.dai_name = "rt5682-sdw",
 				.dai_type = SOF_SDW_DAI_TYPE_JACK,
 				.dailink = {SDW_JACK_OUT_DAI_ID, SDW_JACK_IN_DAI_ID},
-				.rtd_init = rt5682_rtd_init,
+				.rtd_init = rt5682_sdw_rtd_init,
 			},
 		},
 		.dai_num = 1,

@@ -130,7 +130,6 @@ int cs42l43_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int cs42l43_dmic_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int cs_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int maxim_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
-int rt5682_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int rt700_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int rt711_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int rt_amp_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
