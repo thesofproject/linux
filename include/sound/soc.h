@@ -787,10 +787,6 @@ struct snd_soc_dai_link {
 	/* Mark this pcm with non atomic ops */
 	unsigned int nonatomic:1;
 
-	/* For unidirectional dai links */
-	unsigned int playback_only:1;
-	unsigned int capture_only:1;
-
 	/* Keep DAI active over suspend */
 	unsigned int ignore_suspend:1;
 
@@ -804,10 +800,6 @@ struct snd_soc_dai_link {
 
 	/* This DAI link can route to other DAI links at runtime (Frontend)*/
 	unsigned int dynamic:1;
-
-	/* DPCM capture and Playback support */
-	unsigned int dpcm_capture:1;
-	unsigned int dpcm_playback:1;
 
 	/*
 	 * Capture / Playback support assertion. Having assertion flag is not mandatory.

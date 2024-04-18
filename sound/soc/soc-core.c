@@ -2011,13 +2011,6 @@ match:
 					dev_warn(card->dev,
 						 "invalid configuration, dailink %s has flags no_pcm=0 and capture_assertion=1\n",
 						 dai_link->name);
-
-				/* convert normal link into DPCM one */
-				if (!(dai_link->playback_assertion ||
-				      dai_link->capture_assertion)) {
-					dai_link->playback_assertion = !dai_link->capture_only;
-					dai_link->capture_assertion = !dai_link->playback_only;
-				}
 			}
 
 			/*

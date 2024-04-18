@@ -2808,24 +2808,6 @@ static int soc_get_playback_capture(struct snd_soc_pcm_runtime *rtd,
 		return -EINVAL;
 	}
 
-	/*
-	 * REMOVE ME
-	 *
-	 * dpcm_playback/capture will be used as playback/capture_assertion
-	 */
-	if (dai_link->playback_only && dai_link->capture_only) {
-		dev_err(rtd->dev, "both playback_only / capture_only are set\n");
-		return -EINVAL;
-	}
-	if (dai_link->playback_only)
-		dai_link->playback_assertion = 1;
-	if (dai_link->capture_only)
-		dai_link->capture_assertion = 1;
-	if (dai_link->dpcm_playback)
-		dai_link->playback_assertion = 1;
-	if (dai_link->dpcm_capture)
-		dai_link->capture_assertion = 1;
-
 	/* Adapt stream for codec2codec links */
 	cpu_playback = snd_soc_get_stream_cpu(dai_link, SNDRV_PCM_STREAM_PLAYBACK);
 	cpu_capture  = snd_soc_get_stream_cpu(dai_link, SNDRV_PCM_STREAM_CAPTURE);
