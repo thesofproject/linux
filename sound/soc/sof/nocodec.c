@@ -56,9 +56,9 @@ static int sof_nocodec_bes_setup(struct device *dev,
 		links[i].cpus->dai_name = drv[i].name;
 		links[i].platforms->name = dev_name(dev->parent);
 		if (drv[i].playback.channels_min)
-			links[i].dpcm_playback = 1;
+			links[i].playback_assertion = 1;
 		if (drv[i].capture.channels_min)
-			links[i].dpcm_capture = 1;
+			links[i].capture_assertion = 1;
 
 		links[i].be_hw_params_fixup = sof_pcm_dai_link_fixup;
 	}
