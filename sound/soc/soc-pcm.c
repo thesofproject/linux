@@ -2797,7 +2797,6 @@ static int soc_get_playback_capture(struct snd_soc_pcm_runtime *rtd,
 	struct snd_soc_dai_link_ch_map *ch_maps;
 	struct snd_soc_dai *cpu_dai;
 	struct snd_soc_dai *codec_dai;
-	struct snd_soc_dai *dummy_dai = snd_soc_find_dai(&snd_soc_dummy_dlc);
 	int cpu_playback;
 	int cpu_capture;
 	int has_playback = 0;
@@ -2836,24 +2835,36 @@ static int soc_get_playback_capture(struct snd_soc_pcm_runtime *rtd,
 	 *	soc.h :: [dai_link->ch_maps Image sample]
 	 */
 	for_each_rtd_ch_maps(rtd, i, ch_maps) {
-		cpu_dai	  = snd_soc_rtd_to_cpu(rtd,   ch_maps->cpu);
-		codec_dai = snd_soc_rtd_to_codec(rtd, ch_maps->codec);
+		int cpu_play_t, cpu_capture_t;
+		int codec_play_t, codec_capture_t;
+
+		cpu_dai		= snd_soc_rtd_to_cpu(rtd,   ch_maps->cpu);
+		codec_dai	= snd_soc_rtd_to_codec(rtd, ch_maps->codec);
+
+		cpu_play_t	= snd_soc_dai_stream_valid(cpu_dai,   cpu_playback);
+		codec_play_t	= snd_soc_dai_stream_valid(codec_dai, SNDRV_PCM_STREAM_PLAYBACK);
+
+		cpu_capture_t	= snd_soc_dai_stream_valid(cpu_dai,   cpu_capture);
+		codec_capture_t	= snd_soc_dai_stream_valid(codec_dai, SNDRV_PCM_STREAM_CAPTURE);
 
 		/*
-		 * FIXME
+		 * FIXME / CLEAN-UP-ME
 		 *
 		 * DPCM BE Codec has been no checked before.
 		 * It should be checked, but it breaks compatibility.
 		 * It ignores BE Codec here, so far.
 		 */
-		if (dai_link->no_pcm)
-			codec_dai = dummy_dai;
+		if ((dai_link->no_pcm) &&
+		    (!codec_play_t && !codec_capture_t)) {
+			dev_warn_once(rtd->dev, "DCPM BE Codec has no stream settings (%s)\n",
+				      codec_dai->name);
+			codec_play_t	= 1;
+			codec_capture_t	= 1;
+		}
 
-		if (snd_soc_dai_stream_valid(cpu_dai,   cpu_playback) &&
-		    snd_soc_dai_stream_valid(codec_dai, SNDRV_PCM_STREAM_PLAYBACK))
+		if (cpu_play_t && codec_play_t)
 			has_playback = 1;
-		if (snd_soc_dai_stream_valid(cpu_dai,   cpu_capture) &&
-		    snd_soc_dai_stream_valid(codec_dai, SNDRV_PCM_STREAM_CAPTURE))
+		if (cpu_capture_t && codec_capture_t)
 			has_capture = 1;
 	}
 
