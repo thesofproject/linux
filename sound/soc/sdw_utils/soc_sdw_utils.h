@@ -85,6 +85,8 @@ bool is_sdw_unique_device(const struct snd_soc_acpi_link_adr *adr_link,
 /* DMIC support */
 int asoc_sdw_dmic_init(struct snd_soc_pcm_runtime *rtd);
 int rt_sdw_dmic_rtd_init(struct snd_soc_pcm_runtime *rtd);
+int rt700_sdw_rtd_init(struct snd_soc_pcm_runtime *rtd);
+int rt711_sdw_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int rt712_sdw_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int rt722_sdw_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int rt5682_sdw_rtd_init(struct snd_soc_pcm_runtime *rtd);
@@ -98,4 +100,10 @@ int soc_sdw_rt_sdca_jack_init(struct snd_soc_card *card,
 			      struct snd_soc_dai_link *dai_links,
 			      struct sof_sdw_codec_info *info,
 			      bool playback);
+
+int soc_sdw_rt711_exit(struct snd_soc_card *card, struct snd_soc_dai_link *dai_link);
+int soc_sdw_rt711_init(struct snd_soc_card *card,
+		       struct snd_soc_dai_link *dai_links,
+		       struct sof_sdw_codec_info *info,
+		       bool playback);
 #endif
