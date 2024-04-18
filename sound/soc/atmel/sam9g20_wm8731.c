@@ -98,7 +98,7 @@ static struct snd_soc_dai_link at91sam9g20ek_dai = {
 	.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
 		   SND_SOC_DAIFMT_CBP_CFP,
 #ifndef ENABLE_MIC_INPUT
-	.playback_only = true,
+	.playback_assertion = true,
 #endif
 	SND_SOC_DAILINK_REG(pcm),
 };
