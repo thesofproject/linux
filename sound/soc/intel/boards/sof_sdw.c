@@ -1161,8 +1161,8 @@ static void init_dai_link(struct device *dev, struct snd_soc_dai_link *dai_links
 	dai_links->num_cpus = cpus_num;
 	dai_links->codecs = codecs;
 	dai_links->num_codecs = codecs_num;
-	dai_links->dpcm_playback = playback;
-	dai_links->dpcm_capture = capture;
+	dai_links->playback_assertion = playback;
+	dai_links->capture_assertion = capture;
 	dai_links->init = init;
 	dai_links->ops = ops;
 }
