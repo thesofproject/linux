@@ -44,6 +44,12 @@ enum sdca_entity0_controls {
 #define SDCA_MAX_ENTITY_COUNT 128
 
 /*
+ * The DisCo spec uses a 64-bit mask to represent input pins for
+ * an entity
+ */
+#define SDCA_MAX_ENTITY_PIN_COUNT 64
+
+/*
  * SDCA Entity Types from SDCA specification v1.a Section 6.1.2
  * all Entity Types not described are reserved
  */
@@ -74,11 +80,19 @@ enum sdca_entity_type {
  * @id: identifier used for addressing
  * @label: string such as "OT 12"
  * @entity_type: identifier for that entity
+ * @sink_count: number of sinks for an Entity
+ * @sinks: array containing the @id of each sink
+ * @source_count: number of sources for an Entity
+ * @sources: array containning the @id of each source
  */
 struct sdca_entity {
 	int id;
 	char *label;
 	enum sdca_entity_type entity_type;
+	int sink_count;
+	int sinks[SDCA_MAX_ENTITY_PIN_COUNT];
+	int source_count;
+	int sources[SDCA_MAX_ENTITY_PIN_COUNT];
 };
 
 /**
