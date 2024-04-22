@@ -253,6 +253,48 @@ static int find_sdca_entities_connections(struct device *dev,
 	return 0;
 }
 
+static int find_sdca_function_initialization_table(struct device *dev,
+						   struct fwnode_handle *function_node,
+						   struct sdca_function *function)
+{
+	u8 *initialization_table;
+	int nval;
+	int ret;
+
+	nval = fwnode_property_count_u8(function_node,
+					"mipi-sdca-function-initialization-table");
+	if (nval <= 0)
+		return nval;
+
+	/* make sure the table contains a set of 4-byte addresses and one-byte value */
+	if (nval % 5) {
+		dev_err(dev, "%s: %pfwP: invalid initialization table size %#x\n",
+			__func__, function_node, nval);
+		return -EINVAL;
+	}
+
+	dev_info(dev, "%s: %pfwP: initialization table size %#x\n",
+		 __func__, function_node, nval);
+
+	initialization_table = devm_kcalloc(dev, nval,
+					    sizeof(*initialization_table),
+					    GFP_KERNEL);
+	if (!initialization_table)
+		return -ENOMEM;
+
+	ret = fwnode_property_read_u8_array(function_node,
+					    "mipi-sdca-function-initialization-table",
+					    initialization_table,
+					    nval);
+	if (ret < 0)
+		return ret;
+
+	function->initialization_table = initialization_table;
+	function->initialization_table_size = nval;
+
+	return 0;
+}
+
 static int find_sdca_function(struct acpi_device *adev, void *data)
 {
 	struct fwnode_handle *function_node = acpi_fwnode_handle(adev);
@@ -347,6 +389,11 @@ static int find_sdca_function(struct acpi_device *adev, void *data)
 		sdca->functions[sdca->function_count].topology_features =
 			topology_features;
 	}
+
+	ret = find_sdca_function_initialization_table(parent, function_node,
+						      &sdca->functions[sdca->function_count]);
+	if (ret < 0)
+		return ret;
 
 	ret = find_sdca_entities(&adev->dev,
 				 function_node,

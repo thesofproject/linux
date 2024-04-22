@@ -106,6 +106,9 @@ struct sdca_entity {
  * @function_busy_max_delay_us: indicates if hardware can assert the Function_Busy
  * bit, which requires special-casing of the 'Command Ignored' response. If zero,
  * then the Host shall assume this bit is never asserted.
+ * @initialization_table: set of 4-byte address/byte value to set-up the Function
+ * during boot and resume if context is lost
+ * @initialization_table_size: size of @initialization_table
  */
 struct sdca_function {
 	u8 adr; /* limited range since only 8 functions can be supported */
@@ -114,6 +117,8 @@ struct sdca_function {
 	int num_entities;
 	struct sdca_entity *entities;
 	u32 function_busy_max_delay_us;
+	u8 *initialization_table;
+	int initialization_table_size;
 };
 
 /**
