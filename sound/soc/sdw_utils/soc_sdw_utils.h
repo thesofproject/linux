@@ -105,6 +105,11 @@ struct soc_sdw_codec_info *find_sdw_codec_info_dai(const char *dai_name,
 
 int soc_sdw_rtd_init(struct snd_soc_pcm_runtime *rtd);
 
+struct snd_soc_dai_link *mc_find_codec_dai_used(struct snd_soc_card *card,
+						const char *dai_name);
+
+void mc_dailink_exit_loop(struct snd_soc_card *card);
+
 /* DMIC support */
 int asoc_sdw_dmic_init(struct snd_soc_pcm_runtime *rtd);
 int rt_sdw_dmic_rtd_init(struct snd_soc_pcm_runtime *rtd);
