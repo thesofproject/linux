@@ -63,6 +63,7 @@ struct mc_private {
 	struct device *headset_codec_dev; /* only one headset per card */
 	struct device *amp_dev1, *amp_dev2;
 	void *intel_mc_private;
+	void *amd_mc_private;
 	bool append_dai_type;
 	bool ignore_internal_dmic;
 	unsigned long sdw_quirk;
