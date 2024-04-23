@@ -36,6 +36,10 @@
  */
 #define SOF_SIDECAR_AMPS		BIT(16)
 
+#define ASOC_SDW_DAI_TYPE_JACK		0
+#define ASOC_SDW_DAI_TYPE_AMP		1
+#define ASOC_SDW_DAI_TYPE_MIC		2
+
 struct asoc_sdw_codec_info;
 
 struct asoc_sdw_dai_info {

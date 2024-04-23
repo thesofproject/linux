@@ -539,7 +539,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {true, true},
 				.dai_name = "rt700-aif1",
-				.dai_type = SOF_SDW_DAI_TYPE_JACK,
+				.dai_type = ASOC_SDW_DAI_TYPE_JACK,
 				.dailink = {ASOC_SDW_JACK_OUT_DAI_ID, ASOC_SDW_JACK_IN_DAI_ID},
 				.rtd_init = asoc_sdw_rt700_rtd_init,
 			},
@@ -553,7 +553,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {true, true},
 				.dai_name = "rt711-sdca-aif1",
-				.dai_type = SOF_SDW_DAI_TYPE_JACK,
+				.dai_type = ASOC_SDW_DAI_TYPE_JACK,
 				.dailink = {ASOC_SDW_JACK_OUT_DAI_ID, ASOC_SDW_JACK_IN_DAI_ID},
 				.init = asoc_sdw_rt_sdca_jack_init,
 				.exit = asoc_sdw_rt_sdca_jack_exit,
@@ -569,7 +569,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {true, true},
 				.dai_name = "rt711-aif1",
-				.dai_type = SOF_SDW_DAI_TYPE_JACK,
+				.dai_type = ASOC_SDW_DAI_TYPE_JACK,
 				.dailink = {ASOC_SDW_JACK_OUT_DAI_ID, ASOC_SDW_JACK_IN_DAI_ID},
 				.init = asoc_sdw_rt711_init,
 				.exit = asoc_sdw_rt711_exit,
@@ -585,7 +585,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {true, true},
 				.dai_name = "rt712-sdca-aif1",
-				.dai_type = SOF_SDW_DAI_TYPE_JACK,
+				.dai_type = ASOC_SDW_DAI_TYPE_JACK,
 				.dailink = {ASOC_SDW_JACK_OUT_DAI_ID, ASOC_SDW_JACK_IN_DAI_ID},
 				.init = asoc_sdw_rt_sdca_jack_init,
 				.exit = asoc_sdw_rt_sdca_jack_exit,
@@ -594,7 +594,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {true, false},
 				.dai_name = "rt712-sdca-aif2",
-				.dai_type = SOF_SDW_DAI_TYPE_AMP,
+				.dai_type = ASOC_SDW_DAI_TYPE_AMP,
 				.dailink = {ASOC_SDW_AMP_OUT_DAI_ID, ASOC_SDW_UNUSED_DAI_ID},
 				.init = asoc_sdw_rt_amp_init,
 				.exit = asoc_sdw_rt_amp_exit,
@@ -610,7 +610,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {false, true},
 				.dai_name = "rt712-sdca-dmic-aif1",
-				.dai_type = SOF_SDW_DAI_TYPE_MIC,
+				.dai_type = ASOC_SDW_DAI_TYPE_MIC,
 				.dailink = {ASOC_SDW_UNUSED_DAI_ID, ASOC_SDW_DMIC_DAI_ID},
 				.rtd_init = asoc_sdw_rt_dmic_rtd_init,
 			},
@@ -624,7 +624,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {true, true},
 				.dai_name = "rt712-sdca-aif1",
-				.dai_type = SOF_SDW_DAI_TYPE_JACK,
+				.dai_type = ASOC_SDW_DAI_TYPE_JACK,
 				.dailink = {ASOC_SDW_JACK_OUT_DAI_ID, ASOC_SDW_JACK_IN_DAI_ID},
 				.init = asoc_sdw_rt_sdca_jack_init,
 				.exit = asoc_sdw_rt_sdca_jack_exit,
@@ -640,7 +640,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {false, true},
 				.dai_name = "rt712-sdca-dmic-aif1",
-				.dai_type = SOF_SDW_DAI_TYPE_MIC,
+				.dai_type = ASOC_SDW_DAI_TYPE_MIC,
 				.dailink = {ASOC_SDW_UNUSED_DAI_ID, ASOC_SDW_DMIC_DAI_ID},
 				.rtd_init = asoc_sdw_rt_dmic_rtd_init,
 			},
@@ -654,7 +654,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {true, false},
 				.dai_name = "rt1308-aif",
-				.dai_type = SOF_SDW_DAI_TYPE_AMP,
+				.dai_type = ASOC_SDW_DAI_TYPE_AMP,
 				.dailink = {ASOC_SDW_AMP_OUT_DAI_ID, ASOC_SDW_UNUSED_DAI_ID},
 				.init = asoc_sdw_rt_amp_init,
 				.exit = asoc_sdw_rt_amp_exit,
@@ -670,7 +670,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {true, true},
 				.dai_name = "rt1316-aif",
-				.dai_type = SOF_SDW_DAI_TYPE_AMP,
+				.dai_type = ASOC_SDW_DAI_TYPE_AMP,
 				.dailink = {ASOC_SDW_AMP_OUT_DAI_ID, ASOC_SDW_AMP_IN_DAI_ID},
 				.init = asoc_sdw_rt_amp_init,
 				.exit = asoc_sdw_rt_amp_exit,
@@ -685,7 +685,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {true, true},
 				.dai_name = "rt1318-aif",
-				.dai_type = SOF_SDW_DAI_TYPE_AMP,
+				.dai_type = ASOC_SDW_DAI_TYPE_AMP,
 				.dailink = {ASOC_SDW_AMP_OUT_DAI_ID, ASOC_SDW_AMP_IN_DAI_ID},
 				.init = asoc_sdw_rt_amp_init,
 				.exit = asoc_sdw_rt_amp_exit,
@@ -702,7 +702,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {false, true},
 				.dai_name = "rt715-sdca-aif2",
-				.dai_type = SOF_SDW_DAI_TYPE_MIC,
+				.dai_type = ASOC_SDW_DAI_TYPE_MIC,
 				.dailink = {ASOC_SDW_UNUSED_DAI_ID, ASOC_SDW_DMIC_DAI_ID},
 				.rtd_init = asoc_sdw_rt_dmic_rtd_init,
 			},
@@ -717,7 +717,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {false, true},
 				.dai_name = "rt715-sdca-aif2",
-				.dai_type = SOF_SDW_DAI_TYPE_MIC,
+				.dai_type = ASOC_SDW_DAI_TYPE_MIC,
 				.dailink = {ASOC_SDW_UNUSED_DAI_ID, ASOC_SDW_DMIC_DAI_ID},
 				.rtd_init = asoc_sdw_rt_dmic_rtd_init,
 			},
@@ -732,7 +732,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {false, true},
 				.dai_name = "rt715-aif2",
-				.dai_type = SOF_SDW_DAI_TYPE_MIC,
+				.dai_type = ASOC_SDW_DAI_TYPE_MIC,
 				.dailink = {ASOC_SDW_UNUSED_DAI_ID, ASOC_SDW_DMIC_DAI_ID},
 				.rtd_init = asoc_sdw_rt_dmic_rtd_init,
 			},
@@ -747,7 +747,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {false, true},
 				.dai_name = "rt715-aif2",
-				.dai_type = SOF_SDW_DAI_TYPE_MIC,
+				.dai_type = ASOC_SDW_DAI_TYPE_MIC,
 				.dailink = {ASOC_SDW_UNUSED_DAI_ID, ASOC_SDW_DMIC_DAI_ID},
 				.rtd_init = asoc_sdw_rt_dmic_rtd_init,
 			},
@@ -761,7 +761,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {true, true},
 				.dai_name = "rt722-sdca-aif1",
-				.dai_type = SOF_SDW_DAI_TYPE_JACK,
+				.dai_type = ASOC_SDW_DAI_TYPE_JACK,
 				.dailink = {ASOC_SDW_JACK_OUT_DAI_ID, ASOC_SDW_JACK_IN_DAI_ID},
 				.init = asoc_sdw_rt_sdca_jack_init,
 				.exit = asoc_sdw_rt_sdca_jack_exit,
@@ -770,7 +770,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {true, false},
 				.dai_name = "rt722-sdca-aif2",
-				.dai_type = SOF_SDW_DAI_TYPE_AMP,
+				.dai_type = ASOC_SDW_DAI_TYPE_AMP,
 				/* No feedback capability is provided by rt722-sdca codec driver*/
 				.dailink = {ASOC_SDW_AMP_OUT_DAI_ID, ASOC_SDW_UNUSED_DAI_ID},
 				.init = asoc_sdw_rt_amp_init,
@@ -780,7 +780,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {false, true},
 				.dai_name = "rt722-sdca-aif3",
-				.dai_type = SOF_SDW_DAI_TYPE_MIC,
+				.dai_type = ASOC_SDW_DAI_TYPE_MIC,
 				.dailink = {ASOC_SDW_UNUSED_DAI_ID, ASOC_SDW_DMIC_DAI_ID},
 				.rtd_init = asoc_sdw_rt_dmic_rtd_init,
 			},
@@ -793,7 +793,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {true, true},
 				.dai_name = "max98373-aif1",
-				.dai_type = SOF_SDW_DAI_TYPE_AMP,
+				.dai_type = ASOC_SDW_DAI_TYPE_AMP,
 				.dailink = {ASOC_SDW_AMP_OUT_DAI_ID, ASOC_SDW_AMP_IN_DAI_ID},
 				.init = asoc_sdw_maxim_init,
 				.rtd_init = asoc_sdw_maxim_spk_rtd_init,
@@ -807,7 +807,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {true, false},
 				.dai_name = "max98363-aif1",
-				.dai_type = SOF_SDW_DAI_TYPE_AMP,
+				.dai_type = ASOC_SDW_DAI_TYPE_AMP,
 				.dailink = {ASOC_SDW_AMP_OUT_DAI_ID, ASOC_SDW_UNUSED_DAI_ID},
 				.init = asoc_sdw_maxim_init,
 				.rtd_init = asoc_sdw_maxim_spk_rtd_init,
@@ -821,7 +821,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {true, true},
 				.dai_name = "rt5682-sdw",
-				.dai_type = SOF_SDW_DAI_TYPE_JACK,
+				.dai_type = ASOC_SDW_DAI_TYPE_JACK,
 				.dailink = {ASOC_SDW_JACK_OUT_DAI_ID, ASOC_SDW_JACK_IN_DAI_ID},
 				.rtd_init = asoc_sdw_rt5682_rtd_init,
 			},
@@ -834,7 +834,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {true, true},
 				.dai_name = "cs35l56-sdw1",
-				.dai_type = SOF_SDW_DAI_TYPE_AMP,
+				.dai_type = ASOC_SDW_DAI_TYPE_AMP,
 				.dailink = {ASOC_SDW_AMP_OUT_DAI_ID, ASOC_SDW_AMP_IN_DAI_ID},
 				.init = asoc_sdw_cs_amp_init,
 				.rtd_init = asoc_sdw_cs_spk_rtd_init,
@@ -848,7 +848,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {true, true},
 				.dai_name = "cs42l42-sdw",
-				.dai_type = SOF_SDW_DAI_TYPE_JACK,
+				.dai_type = ASOC_SDW_DAI_TYPE_JACK,
 				.dailink = {ASOC_SDW_JACK_OUT_DAI_ID, ASOC_SDW_JACK_IN_DAI_ID},
 				.rtd_init = asoc_sdw_cs42l42_rtd_init,
 			},
@@ -864,27 +864,27 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {true, false},
 				.dai_name = "cs42l43-dp5",
-				.dai_type = SOF_SDW_DAI_TYPE_JACK,
+				.dai_type = ASOC_SDW_DAI_TYPE_JACK,
 				.dailink = {ASOC_SDW_JACK_OUT_DAI_ID, ASOC_SDW_UNUSED_DAI_ID},
 				.rtd_init = asoc_sdw_cs42l43_hs_rtd_init,
 			},
 			{
 				.direction = {false, true},
 				.dai_name = "cs42l43-dp1",
-				.dai_type = SOF_SDW_DAI_TYPE_MIC,
+				.dai_type = ASOC_SDW_DAI_TYPE_MIC,
 				.dailink = {ASOC_SDW_UNUSED_DAI_ID, ASOC_SDW_DMIC_DAI_ID},
 				.rtd_init = asoc_sdw_cs42l43_dmic_rtd_init,
 			},
 			{
 				.direction = {false, true},
 				.dai_name = "cs42l43-dp2",
-				.dai_type = SOF_SDW_DAI_TYPE_JACK,
+				.dai_type = ASOC_SDW_DAI_TYPE_JACK,
 				.dailink = {ASOC_SDW_UNUSED_DAI_ID, ASOC_SDW_JACK_IN_DAI_ID},
 			},
 			{
 				.direction = {true, false},
 				.dai_name = "cs42l43-dp6",
-				.dai_type = SOF_SDW_DAI_TYPE_AMP,
+				.dai_type = ASOC_SDW_DAI_TYPE_AMP,
 				.dailink = {ASOC_SDW_AMP_OUT_DAI_ID, ASOC_SDW_UNUSED_DAI_ID},
 				.init = asoc_sdw_cs42l43_spk_init,
 				.rtd_init = asoc_sdw_cs42l43_spk_rtd_init,
@@ -900,7 +900,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {true, true},
 				.dai_name = "sdw-mockup-aif1",
-				.dai_type = SOF_SDW_DAI_TYPE_JACK,
+				.dai_type = ASOC_SDW_DAI_TYPE_JACK,
 				.dailink = {ASOC_SDW_JACK_OUT_DAI_ID, ASOC_SDW_JACK_IN_DAI_ID},
 			},
 		},
@@ -913,7 +913,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {true, true},
 				.dai_name = "sdw-mockup-aif1",
-				.dai_type = SOF_SDW_DAI_TYPE_JACK,
+				.dai_type = ASOC_SDW_DAI_TYPE_JACK,
 				.dailink = {ASOC_SDW_JACK_OUT_DAI_ID, ASOC_SDW_JACK_IN_DAI_ID},
 			},
 		},
@@ -926,7 +926,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.direction = {true, true},
 				.dai_name = "sdw-mockup-aif1",
-				.dai_type = SOF_SDW_DAI_TYPE_AMP,
+				.dai_type = ASOC_SDW_DAI_TYPE_AMP,
 				.dailink = {ASOC_SDW_AMP_OUT_DAI_ID, ASOC_SDW_AMP_IN_DAI_ID},
 			},
 		},
@@ -939,7 +939,7 @@ static struct asoc_sdw_codec_info codec_info_list[] = {
 			{
 				.dai_name = "sdw-mockup-aif1",
 				.direction = {false, true},
-				.dai_type = SOF_SDW_DAI_TYPE_MIC,
+				.dai_type = ASOC_SDW_DAI_TYPE_MIC,
 				.dailink = {ASOC_SDW_UNUSED_DAI_ID, ASOC_SDW_DMIC_DAI_ID},
 			},
 		},
