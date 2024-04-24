@@ -25,6 +25,7 @@
 #define SOC_SDW_DAI_TYPE_JACK		0
 #define SOC_SDW_DAI_TYPE_AMP		1
 #define SOC_SDW_DAI_TYPE_MIC		2
+#define SOC_SDW_CODEC_SPKR		BIT(15)
 
 struct soc_sdw_codec_info;
 
@@ -67,6 +68,9 @@ struct mc_private {
 	unsigned long sdw_quirk;
 };
 
+extern struct soc_sdw_codec_info codec_info_list[];
+int get_sdw_codec_info_list_size(void);
+
 int asoc_sdw_startup(struct snd_pcm_substream *substream);
 int asoc_sdw_prepare(struct snd_pcm_substream *substream);
 int asoc_sdw_prepare(struct snd_pcm_substream *substream);
@@ -91,6 +95,15 @@ bool is_sdw_unique_device(const struct snd_soc_acpi_link_adr *adr_link,
 			  unsigned int part_id,
 			  unsigned int class_id,
 			  int index_in_link);
+
+struct soc_sdw_codec_info *find_sdw_codec_info_part(const u64 adr);
+
+struct soc_sdw_codec_info *find_sdw_codec_info_acpi(const u8 *acpi_id);
+
+struct soc_sdw_codec_info *find_sdw_codec_info_dai(const char *dai_name,
+						   int *dai_index);
+
+int soc_sdw_rtd_init(struct snd_soc_pcm_runtime *rtd);
 
 /* DMIC support */
 int asoc_sdw_dmic_init(struct snd_soc_pcm_runtime *rtd);
