@@ -80,10 +80,6 @@ struct mc_private {
 
 extern unsigned long sof_sdw_quirk;
 
-struct snd_soc_dai *get_codec_dai_by_name(struct snd_soc_pcm_runtime *rtd,
-					  const char * const dai_name[],
-					  int num_dais);
-
 /* generic HDMI support */
 int sof_sdw_hdmi_init(struct snd_soc_pcm_runtime *rtd);
 

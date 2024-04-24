@@ -82,7 +82,7 @@ int rt711_rtd_init(struct snd_soc_pcm_runtime *rtd)
 	struct snd_soc_jack *jack;
 	int ret;
 
-	codec_dai = get_codec_dai_by_name(rtd, jack_codecs, ARRAY_SIZE(jack_codecs));
+	codec_dai = get_sdw_codec_dai_by_name(rtd, jack_codecs, ARRAY_SIZE(jack_codecs));
 	if (!codec_dai)
 		return -EINVAL;
 

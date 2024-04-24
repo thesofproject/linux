@@ -26,7 +26,7 @@ int rt_dmic_rtd_init(struct snd_soc_pcm_runtime *rtd)
 	struct snd_soc_dai *codec_dai;
 	char *mic_name;
 
-	codec_dai = get_codec_dai_by_name(rtd, dmics, ARRAY_SIZE(dmics));
+	codec_dai = get_sdw_codec_dai_by_name(rtd, dmics, ARRAY_SIZE(dmics));
 	if (!codec_dai)
 		return -EINVAL;
 

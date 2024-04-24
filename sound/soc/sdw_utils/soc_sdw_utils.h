@@ -54,4 +54,20 @@ int asoc_sdw_hw_params(struct snd_pcm_substream *substream,
 int asoc_sdw_hw_free(struct snd_pcm_substream *substream);
 void asoc_sdw_shutdown(struct snd_pcm_substream *substream);
 
+struct snd_soc_dai *get_sdw_codec_dai_by_name(struct snd_soc_pcm_runtime *rtd,
+					      const char * const dai_name[],
+					      int num_dais);
+
+const char *get_sdw_codec_name(struct device *dev,
+			       const struct sof_sdw_codec_info *codec_info,
+			       const struct snd_soc_acpi_link_adr *adr_link,
+			       int adr_index);
+
+bool is_sdw_unique_device(const struct snd_soc_acpi_link_adr *adr_link,
+			  unsigned int sdw_version,
+			  unsigned int mfg_id,
+			  unsigned int part_id,
+			  unsigned int class_id,
+			  int index_in_link);
+
 #endif
