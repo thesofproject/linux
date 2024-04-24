@@ -15,6 +15,12 @@
 #define SOC_SDW_MAX_DAI_NUM		8
 #define MAX_NO_PROPS 2
 #define SOC_JACK_JDSRC(quirk)		((quirk) & GENMASK(3, 0))
+#define SDW_UNUSED_DAI_ID		-1
+#define SDW_JACK_OUT_DAI_ID		0
+#define SDW_JACK_IN_DAI_ID		1
+#define SDW_AMP_OUT_DAI_ID		2
+#define SDW_AMP_IN_DAI_ID		3
+#define SDW_DMIC_DAI_ID			4
 
 struct soc_sdw_codec_info;
 

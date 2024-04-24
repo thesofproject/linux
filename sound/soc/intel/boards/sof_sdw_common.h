@@ -16,12 +16,6 @@
 #include "../../sdw_utils/soc_sdw_utils.h"
 
 #define MAX_HDMI_NUM 4
-#define SDW_UNUSED_DAI_ID -1
-#define SDW_JACK_OUT_DAI_ID 0
-#define SDW_JACK_IN_DAI_ID 1
-#define SDW_AMP_OUT_DAI_ID 2
-#define SDW_AMP_IN_DAI_ID 3
-#define SDW_DMIC_DAI_ID 4
 #define SDW_MAX_CPU_DAIS 16
 #define SDW_INTEL_BIDIR_PDI_BASE 2
 
