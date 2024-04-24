@@ -15,7 +15,6 @@
 #include "sof_hdmi_common.h"
 #include "../../sdw_utils/soc_sdw_utils.h"
 
-#define MAX_NO_PROPS 2
 #define MAX_HDMI_NUM 4
 #define SDW_UNUSED_DAI_ID -1
 #define SDW_JACK_OUT_DAI_ID 0
@@ -87,13 +86,6 @@ int sof_sdw_rt711_init(struct snd_soc_card *card,
 		       bool playback);
 int sof_sdw_rt711_exit(struct snd_soc_card *card, struct snd_soc_dai_link *dai_link);
 
-/* RT711-SDCA support */
-int sof_sdw_rt_sdca_jack_init(struct snd_soc_card *card,
-			      struct snd_soc_dai_link *dai_links,
-			      struct sof_sdw_codec_info *info,
-			      bool playback);
-int sof_sdw_rt_sdca_jack_exit(struct snd_soc_card *card, struct snd_soc_dai_link *dai_link);
-
 /* RT1308 I2S support */
 extern struct snd_soc_ops sof_sdw_rt1308_i2s_ops;
 
@@ -133,6 +125,5 @@ int maxim_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int rt700_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int rt711_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int rt_amp_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
-int rt_sdca_jack_rtd_init(struct snd_soc_pcm_runtime *rtd);
 
 #endif

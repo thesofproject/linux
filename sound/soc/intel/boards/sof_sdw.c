@@ -576,8 +576,8 @@ static struct sof_sdw_codec_info codec_info_list[] = {
 				.dai_name = "rt711-sdca-aif1",
 				.dai_type = SOF_SDW_DAI_TYPE_JACK,
 				.dailink = {SDW_JACK_OUT_DAI_ID, SDW_JACK_IN_DAI_ID},
-				.init = sof_sdw_rt_sdca_jack_init,
-				.exit = sof_sdw_rt_sdca_jack_exit,
+				.init = soc_sdw_rt_sdca_jack_init,
+				.exit = soc_sdw_rt_sdca_jack_exit,
 				.rtd_init = rt_sdca_jack_rtd_init,
 			},
 		},
@@ -608,8 +608,8 @@ static struct sof_sdw_codec_info codec_info_list[] = {
 				.dai_name = "rt712-sdca-aif1",
 				.dai_type = SOF_SDW_DAI_TYPE_JACK,
 				.dailink = {SDW_JACK_OUT_DAI_ID, SDW_JACK_IN_DAI_ID},
-				.init = sof_sdw_rt_sdca_jack_init,
-				.exit = sof_sdw_rt_sdca_jack_exit,
+				.init = soc_sdw_rt_sdca_jack_init,
+				.exit = soc_sdw_rt_sdca_jack_exit,
 				.rtd_init = rt_sdca_jack_rtd_init,
 			},
 			{
@@ -647,8 +647,8 @@ static struct sof_sdw_codec_info codec_info_list[] = {
 				.dai_name = "rt712-sdca-aif1",
 				.dai_type = SOF_SDW_DAI_TYPE_JACK,
 				.dailink = {SDW_JACK_OUT_DAI_ID, SDW_JACK_IN_DAI_ID},
-				.init = sof_sdw_rt_sdca_jack_init,
-				.exit = sof_sdw_rt_sdca_jack_exit,
+				.init = soc_sdw_rt_sdca_jack_init,
+				.exit = soc_sdw_rt_sdca_jack_exit,
 				.rtd_init = rt_sdca_jack_rtd_init,
 			},
 		},
@@ -784,8 +784,8 @@ static struct sof_sdw_codec_info codec_info_list[] = {
 				.dai_name = "rt722-sdca-aif1",
 				.dai_type = SOF_SDW_DAI_TYPE_JACK,
 				.dailink = {SDW_JACK_OUT_DAI_ID, SDW_JACK_IN_DAI_ID},
-				.init = sof_sdw_rt_sdca_jack_init,
-				.exit = sof_sdw_rt_sdca_jack_exit,
+				.init = soc_sdw_rt_sdca_jack_init,
+				.exit = soc_sdw_rt_sdca_jack_exit,
 				.rtd_init = rt_sdca_jack_rtd_init,
 			},
 			{
@@ -1786,6 +1786,7 @@ static int mc_probe(struct platform_device *pdev)
 	if (!ctx)
 		return -ENOMEM;
 	ctx->intel_mc_private = intel_ctx;
+	ctx->sdw_quirk = sof_sdw_quirk;
 	snd_soc_card_set_drvdata(card, ctx);
 
 	dmi_check_system(sof_sdw_quirk_table);
