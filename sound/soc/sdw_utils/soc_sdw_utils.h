@@ -90,7 +90,7 @@ int rt711_sdw_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int rt712_sdw_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int rt722_sdw_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int rt5682_sdw_rtd_init(struct snd_soc_pcm_runtime *rtd);
-
+int rt_amp_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int rt_sdca_jack_rtd_init(struct snd_soc_pcm_runtime *rtd);
 
 int soc_sdw_rt_sdca_jack_exit(struct snd_soc_card *card,
@@ -106,4 +106,14 @@ int soc_sdw_rt711_init(struct snd_soc_card *card,
 		       struct snd_soc_dai_link *dai_links,
 		       struct sof_sdw_codec_info *info,
 		       bool playback);
+
+/* RT1308 I2S support */
+extern struct snd_soc_ops soc_sdw_rt1308_i2s_ops;
+
+/* generic amp support */
+int soc_sdw_rt_amp_init(struct snd_soc_card *card,
+			struct snd_soc_dai_link *dai_links,
+			struct sof_sdw_codec_info *info,
+			bool playback);
+int soc_sdw_rt_amp_exit(struct snd_soc_card *card, struct snd_soc_dai_link *dai_link);
 #endif

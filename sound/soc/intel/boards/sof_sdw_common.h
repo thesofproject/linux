@@ -79,16 +79,6 @@ int sof_sdw_hdmi_init(struct snd_soc_pcm_runtime *rtd);
 
 int sof_sdw_hdmi_card_late_probe(struct snd_soc_card *card);
 
-/* RT1308 I2S support */
-extern struct snd_soc_ops sof_sdw_rt1308_i2s_ops;
-
-/* generic amp support */
-int sof_sdw_rt_amp_init(struct snd_soc_card *card,
-			struct snd_soc_dai_link *dai_links,
-			struct sof_sdw_codec_info *info,
-			bool playback);
-int sof_sdw_rt_amp_exit(struct snd_soc_card *card, struct snd_soc_dai_link *dai_link);
-
 /* MAXIM codec support */
 int sof_sdw_maxim_init(struct snd_soc_card *card,
 		       struct snd_soc_dai_link *dai_links,
@@ -115,6 +105,5 @@ int cs42l43_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int cs42l43_dmic_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int cs_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int maxim_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
-int rt_amp_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
 
 #endif
