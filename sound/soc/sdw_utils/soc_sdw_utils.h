@@ -16,6 +16,13 @@
 #define MAX_NO_PROPS 2
 #define SOC_SDW_JACK_JDSRC(quirk)		((quirk) & GENMASK(3, 0))
 
+#define ASOC_SDW_UNUSED_DAI_ID		-1
+#define ASOC_SDW_JACK_OUT_DAI_ID	0
+#define ASOC_SDW_JACK_IN_DAI_ID		1
+#define ASOC_SDW_AMP_OUT_DAI_ID		2
+#define ASOC_SDW_AMP_IN_DAI_ID		3
+#define ASOC_SDW_DMIC_DAI_ID		4
+
 /* If a CODEC has an optional speaker output, this quirk will enable it */
 #define SOF_CODEC_SPKR			BIT(15)
 /*
