@@ -684,8 +684,22 @@ static int hda_dsp_set_power_state(struct snd_sof_dev *sdev,
 	case SOF_DSP_PM_D3:
 		/* The only allowed transition is: D0I0 -> D3 */
 		if (sdev->dsp_power_state.state == SOF_DSP_PM_D0 &&
-		    sdev->dsp_power_state.substate == SOF_HDA_DSP_PM_D0I0)
+		    sdev->dsp_power_state.substate == SOF_HDA_DSP_PM_D0I0) {
+			struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
+			const struct sof_intel_dsp_desc *chip = hda->desc;
+			int ret, j;
+
+			ret = chip->power_down_dsp(sdev);
+			if (ret < 0) {
+				dev_err(sdev->dev, "%s: failed to power down DSP\n", __func__);
+				return ret;
+			}
+
+			/* reset ref counts for all cores */
+			for (j = 0; j < chip->cores_num; j++)
+				sdev->dsp_core_ref_count[j] = 0;
 			break;
+		}
 
 		dev_err(sdev->dev,
 			"error: transition from %d to %d not allowed\n",
@@ -781,8 +795,11 @@ static int hda_suspend(struct snd_sof_dev *sdev, bool runtime_suspend)
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	const struct sof_intel_dsp_desc *chip = hda->desc;
 	struct hdac_bus *bus = sof_to_bus(sdev);
+	struct sof_dsp_power_state target_state = {
+		.state = SOF_DSP_PM_D3,
+	};
 	bool imr_lost = false;
-	int ret, j;
+	int ret;
 
 	/*
 	 * The memory used for IMR boot loses its content in deeper than S3
@@ -820,15 +837,9 @@ static int hda_suspend(struct snd_sof_dev *sdev, bool runtime_suspend)
 	if (sdev->dspless_mode_selected)
 		goto skip_dsp;
 
-	ret = chip->power_down_dsp(sdev);
-	if (ret < 0) {
-		dev_err(sdev->dev, "failed to power down DSP during suspend\n");
+	ret = snd_sof_dsp_set_power_state(sdev, &target_state);
+	if (ret < 0)
 		return ret;
-	}
-
-	/* reset ref counts for all cores */
-	for (j = 0; j < chip->cores_num; j++)
-		sdev->dsp_core_ref_count[j] = 0;
 
 	/* disable ppcap interrupt */
 	hda_dsp_ctrl_ppcap_enable(sdev, false);
@@ -983,10 +994,6 @@ EXPORT_SYMBOL_NS(hda_dsp_runtime_idle, SND_SOC_SOF_INTEL_HDA_COMMON);
 int hda_dsp_runtime_suspend(struct snd_sof_dev *sdev)
 {
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
-	const struct sof_dsp_power_state target_state = {
-		.state = SOF_DSP_PM_D3,
-	};
-	int ret;
 
 	if (!sdev->dspless_mode_selected) {
 		/* cancel any attempt for DSP D0I3 */
@@ -994,11 +1001,7 @@ int hda_dsp_runtime_suspend(struct snd_sof_dev *sdev)
 	}
 
 	/* stop hda controller and power dsp off */
-	ret = hda_suspend(sdev, true);
-	if (ret < 0)
-		return ret;
-
-	return snd_sof_dsp_set_power_state(sdev, &target_state);
+	return hda_suspend(sdev, true);
 }
 EXPORT_SYMBOL_NS(hda_dsp_runtime_suspend, SND_SOC_SOF_INTEL_HDA_COMMON);
 
@@ -1054,12 +1057,10 @@ int hda_dsp_suspend(struct snd_sof_dev *sdev, u32 target_state)
 
 	/* stop hda controller and power dsp off */
 	ret = hda_suspend(sdev, false);
-	if (ret < 0) {
-		dev_err(bus->dev, "error: suspending dsp\n");
-		return ret;
-	}
+	if (ret < 0)
+		dev_err(bus->dev, "failed to suspend dsp\n");
 
-	return snd_sof_dsp_set_power_state(sdev, &target_dsp_state);
+	return ret;
 }
 EXPORT_SYMBOL_NS(hda_dsp_suspend, SND_SOC_SOF_INTEL_HDA_COMMON);
 
