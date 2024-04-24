@@ -112,6 +112,9 @@ EXPORT_SYMBOL(snd_sof_load_firmware_memcpy);
 
 int snd_sof_run_firmware(struct snd_sof_dev *sdev)
 {
+	struct sof_dsp_power_state state = {
+                .state = SOF_DSP_PM_D0,
+        };
 	int ret;
 
 	init_waitqueue_head(&sdev->boot_wait);
@@ -170,6 +173,9 @@ int snd_sof_run_firmware(struct snd_sof_dev *sdev)
 
 	dev_dbg(sdev->dev, "firmware boot complete\n");
 	sof_set_fw_state(sdev, SOF_FW_BOOT_COMPLETE);
+
+	/* set the DSP power state to D0 after successful firmware boot */
+	sdev->dsp_power_state = state;
 
 	/* perform post fw run operations */
 	ret = snd_sof_dsp_post_fw_run(sdev);
