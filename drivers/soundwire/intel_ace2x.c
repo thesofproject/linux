@@ -35,7 +35,8 @@ static void intel_shim_vs_init(struct sdw_intel *sdw)
 
 	intel_prop = bus->vendor_specific_prop;
 	doaise = intel_prop->doaise;
-	doais = intel_prop->doais;
+	//doais = intel_prop->doais;
+	doais = 0x1;
 	dodse = intel_prop->dodse;
 	dods = intel_prop->dods;
 
