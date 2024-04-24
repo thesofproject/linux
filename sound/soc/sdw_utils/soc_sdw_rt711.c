@@ -163,7 +163,7 @@ EXPORT_SYMBOL_NS(soc_sdw_rt711_exit, SND_SOC_SDW_UTILS);
 
 int soc_sdw_rt711_init(struct snd_soc_card *card,
 		       struct snd_soc_dai_link *dai_links,
-		       struct sof_sdw_codec_info *info,
+		       struct soc_sdw_codec_info *info,
 		       bool playback)
 {
 	struct mc_private *ctx = snd_soc_card_get_drvdata(card);

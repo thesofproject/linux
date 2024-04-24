@@ -61,7 +61,7 @@ EXPORT_SYMBOL_NS(cs_sdw_spk_rtd_init, SND_SOC_SDW_UTILS);
 
 int soc_sdw_cs_amp_init(struct snd_soc_card *card,
 			struct snd_soc_dai_link *dai_links,
-			struct sof_sdw_codec_info *info,
+			struct soc_sdw_codec_info *info,
 			bool playback)
 {
 	/* Do init on playback link only. */
