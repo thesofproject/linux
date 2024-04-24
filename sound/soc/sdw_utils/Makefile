@@ -5,5 +5,6 @@ snd-soc-sdw-utils-objs     := soc_sdw_utils.o soc_sdw_dmic.o soc_sdw_rt_dmic.o \
 			      soc_sdw_rt5682.o \
 			      soc_sdw_rt_sdca_jack_common.o soc_sdw_rt_amp.o \
 			      soc_sdw_cs42l42.o soc_sdw_cs42l43.o	\
-			      soc_sdw_cs_amp.o
+			      soc_sdw_cs_amp.o				\
+			      soc_sdw_maxim.o
 obj-$(CONFIG_SND_SOC_SDW_UTILS) += snd-soc-sdw-utils.o

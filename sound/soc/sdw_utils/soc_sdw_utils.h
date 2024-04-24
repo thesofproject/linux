@@ -97,6 +97,7 @@ int cs42l43_sdw_hs_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int cs42l43_sdw_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int cs42l43_sdw_dmic_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int cs_sdw_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
+int maxim_sdw_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
 
 int soc_sdw_rt_sdca_jack_exit(struct snd_soc_card *card,
 			      struct snd_soc_dai_link *dai_link);
@@ -133,5 +134,11 @@ int soc_sdw_cs_amp_init(struct snd_soc_card *card,
 			struct snd_soc_dai_link *dai_links,
 			struct sof_sdw_codec_info *info,
 			bool playback);
+
+/* MAXIM codec support */
+int soc_sdw_maxim_init(struct snd_soc_card *card,
+		       struct snd_soc_dai_link *dai_links,
+		       struct sof_sdw_codec_info *info,
+		       bool playback);
 
 #endif
