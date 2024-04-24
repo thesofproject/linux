@@ -786,5 +786,21 @@ void mc_dailink_exit_loop(struct snd_soc_card *card)
 }
 EXPORT_SYMBOL_NS(mc_dailink_exit_loop, SND_SOC_SDW_UTILS);
 
+int soc_sdw_card_late_probe(struct snd_soc_card *card)
+{
+	int ret = 0;
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(codec_info_list); i++) {
+		if (codec_info_list[i].codec_card_late_probe) {
+			ret = codec_info_list[i].codec_card_late_probe(card);
+			if (ret < 0)
+				return ret;
+		}
+	}
+	return ret;
+}
+EXPORT_SYMBOL_NS(soc_sdw_card_late_probe, SND_SOC_SDW_UTILS);
+
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("SoundWire ASoC helpers");

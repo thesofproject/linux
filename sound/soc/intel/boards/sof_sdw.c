@@ -1192,17 +1192,11 @@ static int sof_sdw_card_late_probe(struct snd_soc_card *card)
 {
 	struct mc_private *ctx = snd_soc_card_get_drvdata(card);
 	struct intel_mc_ctx *intel_ctx = (struct intel_mc_ctx *)ctx->intel_mc_private;
-	int codec_info_list_size = get_sdw_codec_info_list_size();
-	int ret = 0;
-	int i;
-	for (i = 0; i < codec_info_list_size; i++) {
-		if (codec_info_list[i].codec_card_late_probe) {
-			ret = codec_info_list[i].codec_card_late_probe(card);
+	int ret;
 
-			if (ret < 0)
-				return ret;
-		}
-	}
+	ret = soc_sdw_card_late_probe(card);
+	if (ret < 0)
+		return ret;
 
 	if (intel_ctx->hdmi.idisp_codec)
 		ret = sof_sdw_hdmi_card_late_probe(card);
