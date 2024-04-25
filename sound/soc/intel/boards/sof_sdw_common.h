@@ -85,25 +85,8 @@ int sof_sdw_maxim_init(struct snd_soc_card *card,
 		       struct sof_sdw_codec_info *info,
 		       bool playback);
 
-/* CS42L43 support */
-int sof_sdw_cs42l43_spk_init(struct snd_soc_card *card,
-			     struct snd_soc_dai_link *dai_links,
-			     struct sof_sdw_codec_info *info,
-			     bool playback);
-
-/* CS AMP support */
-int sof_sdw_cs_amp_init(struct snd_soc_card *card,
-			struct snd_soc_dai_link *dai_links,
-			struct sof_sdw_codec_info *info,
-			bool playback);
-
 /* dai_link init callbacks */
 
-int cs42l42_rtd_init(struct snd_soc_pcm_runtime *rtd);
-int cs42l43_hs_rtd_init(struct snd_soc_pcm_runtime *rtd);
-int cs42l43_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
-int cs42l43_dmic_rtd_init(struct snd_soc_pcm_runtime *rtd);
-int cs_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int maxim_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
 
 #endif

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-only
+// This file incorporates work covered by the following copyright notice:
 // Copyright (c) 2023 Intel Corporation
+// Copyright (c) 2024 Advanced Micro Devices, Inc.
 
 /*
- *  sof_sdw_cs42l42 - Helpers to handle CS42L42 from generic machine driver
+ *  soc_sdw_cs42l42 - Helpers to handle CS42L42 from generic machine driver
  */
 
 #include <linux/device.h>
@@ -15,7 +17,7 @@
 #include <sound/soc-acpi.h>
 #include <sound/soc-dapm.h>
 #include <sound/jack.h>
-#include "sof_sdw_common.h"
+#include "soc_sdw_utils.h"
 
 static const struct snd_soc_dapm_widget cs42l42_widgets[] = {
 	SND_SOC_DAPM_HP("Headphone", NULL),
@@ -50,7 +52,7 @@ static const char * const jack_codecs[] = {
 	"cs42l42"
 };
 
-int cs42l42_rtd_init(struct snd_soc_pcm_runtime *rtd)
+int cs42l42_sdw_rtd_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_card *card = rtd->card;
 	struct mc_private *ctx = snd_soc_card_get_drvdata(card);
@@ -120,4 +122,4 @@ int cs42l42_rtd_init(struct snd_soc_pcm_runtime *rtd)
 
 	return ret;
 }
-MODULE_IMPORT_NS(SND_SOC_INTEL_SOF_BOARD_HELPERS);
+EXPORT_SYMBOL_NS(cs42l42_sdw_rtd_init, SND_SOC_SDW_UTILS);

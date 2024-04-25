@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// Based on sof_sdw_rt5682.c
+// Based on soc_sdw_rt5682.c
+// This file incorporates work covered by the following copyright notice:
 // Copyright (c) 2023 Intel Corporation
+// Copyright (c) 2024 Advanced Micro Devices, Inc.
 
 /*
- *  sof_sdw_cs42l43 - Helpers to handle CS42L43 from generic machine driver
+ *  soc_sdw_cs42l43 - Helpers to handle CS42L43 from generic machine driver
  */
 #include <linux/device.h>
 #include <linux/errno.h>
@@ -16,7 +18,7 @@
 #include <sound/soc.h>
 #include <sound/soc-acpi.h>
 #include <sound/soc-dapm.h>
-#include "sof_sdw_common.h"
+#include "soc_sdw_utils.h"
 
 static const struct snd_soc_dapm_widget cs42l43_hs_widgets[] = {
 	SND_SOC_DAPM_HP("Headphone", NULL),
@@ -50,7 +52,7 @@ static const struct snd_soc_dapm_route cs42l43_dmic_map[] = {
 	{ "cs42l43 PDM2_DIN", NULL, "DMIC" },
 };
 
-static struct snd_soc_jack_pin sof_jack_pins[] = {
+static struct snd_soc_jack_pin soc_jack_pins[] = {
 	{
 		.pin    = "Headphone",
 		.mask   = SND_JACK_HEADPHONE,
@@ -61,7 +63,7 @@ static struct snd_soc_jack_pin sof_jack_pins[] = {
 	},
 };
 
-int cs42l43_hs_rtd_init(struct snd_soc_pcm_runtime *rtd)
+int cs42l43_sdw_hs_rtd_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_component *component = snd_soc_rtd_to_codec(rtd, 0)->component;
 	struct mc_private *ctx = snd_soc_card_get_drvdata(rtd->card);
@@ -93,8 +95,8 @@ int cs42l43_hs_rtd_init(struct snd_soc_pcm_runtime *rtd)
 					 SND_JACK_HEADSET | SND_JACK_LINEOUT |
 					 SND_JACK_BTN_0 | SND_JACK_BTN_1 |
 					 SND_JACK_BTN_2 | SND_JACK_BTN_3,
-					 jack, sof_jack_pins,
-					 ARRAY_SIZE(sof_jack_pins));
+					 jack, soc_jack_pins,
+					 ARRAY_SIZE(soc_jack_pins));
 	if (ret) {
 		dev_err(card->dev, "Failed to create jack: %d\n", ret);
 		return ret;
@@ -118,8 +120,9 @@ int cs42l43_hs_rtd_init(struct snd_soc_pcm_runtime *rtd)
 
 	return ret;
 }
+EXPORT_SYMBOL_NS(cs42l43_sdw_hs_rtd_init, SND_SOC_SDW_UTILS);
 
-int cs42l43_spk_rtd_init(struct snd_soc_pcm_runtime *rtd)
+int cs42l43_sdw_spk_rtd_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_card *card = rtd->card;
 	int ret;
@@ -143,8 +146,9 @@ int cs42l43_spk_rtd_init(struct snd_soc_pcm_runtime *rtd)
 
 	return ret;
 }
+EXPORT_SYMBOL_NS(cs42l43_sdw_spk_rtd_init, SND_SOC_SDW_UTILS);
 
-int sof_sdw_cs42l43_spk_init(struct snd_soc_card *card,
+int soc_sdw_cs42l43_spk_init(struct snd_soc_card *card,
 			     struct snd_soc_dai_link *dai_links,
 			     struct sof_sdw_codec_info *info,
 			     bool playback)
@@ -157,8 +161,9 @@ int sof_sdw_cs42l43_spk_init(struct snd_soc_card *card,
 
 	return 0;
 }
+EXPORT_SYMBOL_NS(soc_sdw_cs42l43_spk_init, SND_SOC_SDW_UTILS);
 
-int cs42l43_dmic_rtd_init(struct snd_soc_pcm_runtime *rtd)
+int cs42l43_sdw_dmic_rtd_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_card *card = rtd->card;
 	int ret;
@@ -182,4 +187,4 @@ int cs42l43_dmic_rtd_init(struct snd_soc_pcm_runtime *rtd)
 
 	return ret;
 }
-
+EXPORT_SYMBOL_NS(cs42l43_sdw_dmic_rtd_init, SND_SOC_SDW_UTILS);

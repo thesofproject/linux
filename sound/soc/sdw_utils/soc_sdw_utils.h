@@ -92,6 +92,11 @@ int rt722_sdw_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int rt5682_sdw_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int rt_amp_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int rt_sdca_jack_rtd_init(struct snd_soc_pcm_runtime *rtd);
+int cs42l42_sdw_rtd_init(struct snd_soc_pcm_runtime *rtd);
+int cs42l43_sdw_hs_rtd_init(struct snd_soc_pcm_runtime *rtd);
+int cs42l43_sdw_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
+int cs42l43_sdw_dmic_rtd_init(struct snd_soc_pcm_runtime *rtd);
+int cs_sdw_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
 
 int soc_sdw_rt_sdca_jack_exit(struct snd_soc_card *card,
 			      struct snd_soc_dai_link *dai_link);
@@ -116,4 +121,17 @@ int soc_sdw_rt_amp_init(struct snd_soc_card *card,
 			struct sof_sdw_codec_info *info,
 			bool playback);
 int soc_sdw_rt_amp_exit(struct snd_soc_card *card, struct snd_soc_dai_link *dai_link);
+
+/* CS42L43 support */
+int soc_sdw_cs42l43_spk_init(struct snd_soc_card *card,
+			     struct snd_soc_dai_link *dai_links,
+			     struct sof_sdw_codec_info *info,
+			     bool playback);
+
+/* CS AMP support */
+int soc_sdw_cs_amp_init(struct snd_soc_card *card,
+			struct snd_soc_dai_link *dai_links,
+			struct sof_sdw_codec_info *info,
+			bool playback);
+
 #endif

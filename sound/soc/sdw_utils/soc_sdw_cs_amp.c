@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-only
+// This file incorporates work covered by the following copyright notice:
 // Copyright (c) 2023 Intel Corporation
+// Copyright (c) 2024 Advanced Micro Devices, Inc.
 
 /*
- *  sof_sdw_cs_amp - Helpers to handle CS35L56 from generic machine driver
+ *  soc_sdw_cs_amp - Helpers to handle CS35L56 from generic machine driver
  */
 
 #include <linux/device.h>
@@ -10,15 +12,15 @@
 #include <sound/soc.h>
 #include <sound/soc-acpi.h>
 #include <sound/soc-dai.h>
-#include "sof_sdw_common.h"
+#include "soc_sdw_utils.h"
 
 #define CODEC_NAME_SIZE	8
 
-static const struct snd_soc_dapm_widget sof_widgets[] = {
+static const struct snd_soc_dapm_widget soc_widgets[] = {
 	SND_SOC_DAPM_SPK("Speakers", NULL),
 };
 
-int cs_spk_rtd_init(struct snd_soc_pcm_runtime *rtd)
+int cs_sdw_spk_rtd_init(struct snd_soc_pcm_runtime *rtd)
 {
 	const char *dai_name = rtd->dai_link->codecs->dai_name;
 	struct snd_soc_card *card = rtd->card;
@@ -35,8 +37,8 @@ int cs_spk_rtd_init(struct snd_soc_pcm_runtime *rtd)
 	if (!card->components)
 		return -ENOMEM;
 
-	ret = snd_soc_dapm_new_controls(&card->dapm, sof_widgets,
-					ARRAY_SIZE(sof_widgets));
+	ret = snd_soc_dapm_new_controls(&card->dapm, soc_widgets,
+					ARRAY_SIZE(soc_widgets));
 	if (ret) {
 		dev_err(card->dev, "widgets addition failed: %d\n", ret);
 		return ret;
@@ -55,8 +57,9 @@ int cs_spk_rtd_init(struct snd_soc_pcm_runtime *rtd)
 
 	return 0;
 }
+EXPORT_SYMBOL_NS(cs_sdw_spk_rtd_init, SND_SOC_SDW_UTILS);
 
-int sof_sdw_cs_amp_init(struct snd_soc_card *card,
+int soc_sdw_cs_amp_init(struct snd_soc_card *card,
 			struct snd_soc_dai_link *dai_links,
 			struct sof_sdw_codec_info *info,
 			bool playback)
@@ -69,3 +72,4 @@ int sof_sdw_cs_amp_init(struct snd_soc_card *card,
 
 	return 0;
 }
+EXPORT_SYMBOL_NS(soc_sdw_cs_amp_init, SND_SOC_SDW_UTILS);
