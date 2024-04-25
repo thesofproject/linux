@@ -2844,9 +2844,21 @@ static int soc_get_playback_capture(struct snd_soc_pcm_runtime *rtd,
 			codec_capture_t	= 1;
 		}
 
-		if (cpu_play_t && codec_play_t)
+		if (cpu_play_t && !codec_play_t) {
+			dev_err(rtd->dev, "CPU dai %s supports playback but codec DAI %s does not\n",
+				 cpu_dai->name,
+				 codec_dai->name);
+		}
+
+		if (cpu_capture_t && !codec_capture_t) {
+			dev_err(rtd->dev, "CPU dai %s supports capture but codec DAI %s does not\n",
+				 cpu_dai->name,
+				 codec_dai->name);
+		}
+
+		if (cpu_play_t)
 			has_playback = 1;
-		if (cpu_capture_t && codec_capture_t)
+		if (cpu_capture_t)
 			has_capture = 1;
 	}
 
