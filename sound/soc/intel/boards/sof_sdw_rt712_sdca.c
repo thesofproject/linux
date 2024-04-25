@@ -39,25 +39,27 @@ int rt712_spk_rtd_init(struct snd_soc_pcm_runtime *rtd)
 	struct snd_soc_card *card = rtd->card;
 	int ret;
 
+
+	if (!strstr(card->components, "spk:")) {
+		ret = snd_soc_add_card_controls(card, rt712_spk_controls,
+						ARRAY_SIZE(rt712_spk_controls));
+		if (ret) {
+			dev_err(card->dev, "rt712 spk controls addition failed: %d\n", ret);
+			return ret;
+		}
+		ret = snd_soc_dapm_new_controls(&card->dapm, rt712_spk_widgets,
+						ARRAY_SIZE(rt712_spk_widgets));
+		if (ret) {
+			dev_err(card->dev, "rt712 spk widgets addition failed: %d\n", ret);
+			return ret;
+		}
+	}
+
 	card->components = devm_kasprintf(card->dev, GFP_KERNEL,
 					  "%s spk:rt712",
 					  card->components);
 	if (!card->components)
 		return -ENOMEM;
-
-	ret = snd_soc_add_card_controls(card, rt712_spk_controls,
-					ARRAY_SIZE(rt712_spk_controls));
-	if (ret) {
-		dev_err(card->dev, "rt712 spk controls addition failed: %d\n", ret);
-		return ret;
-	}
-
-	ret = snd_soc_dapm_new_controls(&card->dapm, rt712_spk_widgets,
-					ARRAY_SIZE(rt712_spk_widgets));
-	if (ret) {
-		dev_err(card->dev, "rt712 spk widgets addition failed: %d\n", ret);
-		return ret;
-	}
 
 	ret = snd_soc_dapm_add_routes(&card->dapm, rt712_spk_map, ARRAY_SIZE(rt712_spk_map));
 	if (ret)

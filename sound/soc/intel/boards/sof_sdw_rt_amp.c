@@ -196,25 +196,27 @@ int rt_amp_spk_rtd_init(struct snd_soc_pcm_runtime *rtd)
 
 	rt_amp_map = get_codec_name_and_route(rtd, codec_name);
 
+	if (!strstr(card->components, "spk:")) {
+		ret = snd_soc_add_card_controls(card, rt_amp_controls,
+						ARRAY_SIZE(rt_amp_controls));
+		if (ret) {
+			dev_err(card->dev, "%s controls addition failed: %d\n", codec_name, ret);
+			return ret;
+		}
+
+		ret = snd_soc_dapm_new_controls(&card->dapm, rt_amp_widgets,
+					ARRAY_SIZE(rt_amp_widgets));
+		if (ret) {
+			dev_err(card->dev, "%s widgets addition failed: %d\n", codec_name, ret);
+			return ret;
+		}
+	}
+
 	card->components = devm_kasprintf(card->dev, GFP_KERNEL,
 					  "%s spk:%s",
 					  card->components, codec_name);
 	if (!card->components)
 		return -ENOMEM;
-
-	ret = snd_soc_add_card_controls(card, rt_amp_controls,
-					ARRAY_SIZE(rt_amp_controls));
-	if (ret) {
-		dev_err(card->dev, "%s controls addition failed: %d\n", codec_name, ret);
-		return ret;
-	}
-
-	ret = snd_soc_dapm_new_controls(&card->dapm, rt_amp_widgets,
-					ARRAY_SIZE(rt_amp_widgets));
-	if (ret) {
-		dev_err(card->dev, "%s widgets addition failed: %d\n", codec_name, ret);
-		return ret;
-	}
 
 	for_each_rtd_codec_dais(rtd, i, dai) {
 		if (strstr(dai->component->name_prefix, "-1"))
