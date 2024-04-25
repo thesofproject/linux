@@ -130,6 +130,8 @@ struct snd_soc_dai_link *asoc_sdw_mc_find_codec_dai_used(struct snd_soc_card *ca
 
 void asoc_sdw_mc_dailink_exit_loop(struct snd_soc_card *card);
 
+int asoc_sdw_card_late_probe(struct snd_soc_card *card);
+
 /* DMIC support */
 int asoc_sdw_dmic_init(struct snd_soc_pcm_runtime *rtd);
 int asoc_sdw_rt_dmic_rtd_init(struct snd_soc_pcm_runtime *rtd);
