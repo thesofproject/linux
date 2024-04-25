@@ -3839,6 +3839,8 @@ static void reweight_entity(struct cfs_rq *cfs_rq, struct sched_entity *se,
 
 	update_load_set(&se->load, weight);
 
+	trace_android_vh_reweight_entity(se);
+
 	do {
 		u32 divider = get_pelt_divider(&se->avg);
 

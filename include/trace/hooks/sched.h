@@ -453,6 +453,10 @@ DECLARE_HOOK(android_vh_map_util_freq,
 		bool *need_freq_update),
 	TP_ARGS(util, freq, cap, next_freq, policy, need_freq_update));
 
+DECLARE_HOOK(android_vh_reweight_entity,
+	TP_PROTO(struct sched_entity *se),
+	TP_ARGS(se));
+
 /* macro versions of hooks are no longer required */
 
 DECLARE_HOOK(android_vh_task_cmdline_prio_restore,
