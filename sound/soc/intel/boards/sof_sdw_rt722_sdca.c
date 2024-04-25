@@ -33,7 +33,7 @@ int rt722_spk_rtd_init(struct snd_soc_pcm_runtime *rtd)
 	int ret;
 
 	card->components = devm_kasprintf(card->dev, GFP_KERNEL,
-					  "%s spk:rt722",
+					  "%s spk:rt722-spk",
 					  card->components);
 	if (!card->components)
 		return -ENOMEM;

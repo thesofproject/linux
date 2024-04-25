@@ -19,6 +19,10 @@ static const char * const dmics[] = {
 	"rt722-sdca",
 };
 
+static const char * const multi_function_dmics[] = {
+	"rt722-sdca",
+};
+
 int rt_dmic_rtd_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_card *card = rtd->card;
@@ -46,6 +50,17 @@ int rt_dmic_rtd_init(struct snd_soc_pcm_runtime *rtd)
 					  mic_name);
 	if (!card->components)
 		return -ENOMEM;
+
+	codec_dai = get_codec_dai_by_name(rtd, multi_function_dmics,
+					  ARRAY_SIZE(multi_function_dmics));
+	if (codec_dai) {
+		/* Add -mic suffix for multi function dmics */
+		card->components = devm_kasprintf(card->dev, GFP_KERNEL,
+						  "%s-mic", card->components);
+		if (!card->components)
+			return -ENOMEM;
+
+	}
 
 	dev_dbg(card->dev, "card->components: %s\n", card->components);
 
