@@ -191,6 +191,7 @@ int rt_amp_spk_rtd_init(struct snd_soc_pcm_runtime *rtd)
 	const struct snd_soc_dapm_route *rt_amp_map;
 	char codec_name[CODEC_NAME_SIZE];
 	struct snd_soc_dai *dai;
+	const char *c_temp;
 	int ret;
 	int i;
 
@@ -212,11 +213,25 @@ int rt_amp_spk_rtd_init(struct snd_soc_pcm_runtime *rtd)
 		}
 	}
 
-	card->components = devm_kasprintf(card->dev, GFP_KERNEL,
-					  "%s spk:%s",
-					  card->components, codec_name);
-	if (!card->components)
-		return -ENOMEM;
+	/* Add components string for each codec dai */
+	for_each_rtd_codec_dais(rtd, i, dai) {
+		/*
+		 * rt_amp_spk_rtd_init() only for rt13xx amps. rt7xx multi-function codecs will
+		 * use their own rtd_init function.
+		 */
+		if (!strstr(dai->name, "rt13"))
+			continue;
+		snprintf(codec_name, CODEC_NAME_SIZE, "%s", dai->name);
+		c_temp = devm_kasprintf(card->dev, GFP_KERNEL, "spk:%s", codec_name);
+		/* Check if the tag is already in card->components */
+		if (strstr(card->components, c_temp))
+			continue;
+		card->components = devm_kasprintf(card->dev, GFP_KERNEL,
+						  "%s %s",
+						  card->components, c_temp);
+		if (!card->components)
+			return -ENOMEM;
+	}
 
 	for_each_rtd_codec_dais(rtd, i, dai) {
 		if (strstr(dai->component->name_prefix, "-1"))
