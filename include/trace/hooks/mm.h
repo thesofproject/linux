@@ -258,6 +258,9 @@ DECLARE_HOOK(android_vh_save_track_hash,
 DECLARE_HOOK(android_vh_kmalloc_slab,
 	TP_PROTO(unsigned int index, gfp_t flags, struct kmem_cache **s),
 	TP_ARGS(index, flags, s));
+DECLARE_HOOK(android_vh_customize_alloc_gfp,
+	TP_PROTO(gfp_t *alloc_gfp, unsigned int order),
+	TP_ARGS(alloc_gfp, order));
 #endif /* _TRACE_HOOK_MM_H */
 
 /* This part must be outside protection */
