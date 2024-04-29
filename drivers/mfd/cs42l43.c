@@ -23,6 +23,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/regmap.h>
 #include <linux/soundwire/sdw.h>
+#include <linux/soundwire/sdw_registers.h>
 #include <linux/types.h>
 
 #include "cs42l43.h"
@@ -502,7 +503,47 @@ static int cs42l43_mcu_stage_2_3(struct cs42l43 *cs42l43, bool shadow)
 	if (shadow)
 		need_reg = CS42L43_FW_SH_BOOT_CFG_NEED_CONFIGS;
 
-	regmap_write(cs42l43->regmap, need_reg, 0);
+	regmap_write(cs42l43->regmap, need_reg,
+		     CS42L43_FW_PATCH_NEED_CFG_MASK |
+		     CS42L43_FW_CODEC_NEED_CFG_MASK |
+		     CS42L43_FW_PLL_NEED_CFG_MASK);
+
+	if (shadow) {
+		regmap_write(cs42l43->regmap, 0x11F930, 0x00000033);
+		regmap_write(cs42l43->regmap, 0x11F934, 0x50000000);
+		regmap_write(cs42l43->regmap, 0x11F938, 0x000000a4);
+	} else {
+		regmap_write(cs42l43->regmap, 0x114044, 0x00000033);
+		regmap_write(cs42l43->regmap, 0x114048, 0x50000000);
+		regmap_write(cs42l43->regmap, 0x11404C, 0x000000a4);
+	}
+
+	regmap_write(cs42l43->regmap, CS42L43_FW_MISSION_CTRL_NEED_CONFIGS,
+		     CS42L43_FW_CODEC_NEED_CFG_MASK | CS42L43_FW_PLL_HAVE_CFG_MASK);
+
+	regmap_write(cs42l43->regmap, CS42L43_CONFIG_SELECTION,
+		     CS42L43_FW_PLL_CFG_SEL_MASK);
+
+	regmap_write(cs42l43->regmap, CS42L43_MCU_SW_INTERRUPT, CS42L43_CONFIGS_IND_MASK);
+	regmap_write(cs42l43->regmap, CS42L43_MCU_SW_INTERRUPT, 0);
+
+	ret = regmap_read_poll_timeout(cs42l43->regmap, CS42L43_SOFT_INT_SHADOW, val,
+				       (val & CS42L43_CONFIGS_APPLIED_INT_MASK),
+				       CS42L43_MCU_POLL_US, CS42L43_MCU_UPDATE_TIMEOUT_US);
+	if (ret)
+		dev_err(cs42l43->dev, "Failed to update PLL configs: %d, 0x%x\n", ret, val);
+
+	regmap_write(cs42l43->regmap, CS42L43_CONFIG_SELECTION,
+		     CS42L43_FW_CODEC_CFG_SEL_MASK);
+
+	regmap_write(cs42l43->regmap, CS42L43_MCU_SW_INTERRUPT, CS42L43_CONFIGS_IND_MASK);
+	regmap_write(cs42l43->regmap, CS42L43_MCU_SW_INTERRUPT, 0);
+
+	ret = regmap_read_poll_timeout(cs42l43->regmap, CS42L43_SOFT_INT_SHADOW, val,
+				       (val & CS42L43_CONFIGS_APPLIED_INT_MASK),
+				       CS42L43_MCU_POLL_US, CS42L43_MCU_UPDATE_TIMEOUT_US);
+	if (ret)
+		dev_err(cs42l43->dev, "Failed to update codec configs: %d, 0x%x\n", ret, val);
 
 	ret = regmap_read_poll_timeout(cs42l43->regmap, CS42L43_BOOT_STATUS,
 				       val, (val == CS42L43_MCU_BOOT_STAGE3),
