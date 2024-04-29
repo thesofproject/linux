@@ -76,7 +76,7 @@ static const char * const jack_codecs[] = {
 int rt711_rtd_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_card *card = rtd->card;
-	struct mc_private *ctx = snd_soc_card_get_drvdata(card);
+	struct asoc_sdw_mc_private *ctx = snd_soc_card_get_drvdata(card);
 	struct snd_soc_dai *codec_dai;
 	struct snd_soc_component *component;
 	struct snd_soc_jack *jack;
@@ -146,7 +146,7 @@ int rt711_rtd_init(struct snd_soc_pcm_runtime *rtd)
 
 int sof_sdw_rt711_exit(struct snd_soc_card *card, struct snd_soc_dai_link *dai_link)
 {
-	struct mc_private *ctx = snd_soc_card_get_drvdata(card);
+	struct asoc_sdw_mc_private *ctx = snd_soc_card_get_drvdata(card);
 
 	if (!ctx->headset_codec_dev)
 		return 0;
@@ -162,7 +162,7 @@ int sof_sdw_rt711_init(struct snd_soc_card *card,
 		       struct sof_sdw_codec_info *info,
 		       bool playback)
 {
-	struct mc_private *ctx = snd_soc_card_get_drvdata(card);
+	struct asoc_sdw_mc_private *ctx = snd_soc_card_get_drvdata(card);
 	struct device *sdw_dev;
 	int ret;
 
