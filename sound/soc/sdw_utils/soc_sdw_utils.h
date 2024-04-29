@@ -13,6 +13,8 @@
 #include <sound/soc-acpi.h>
 
 #define SOC_SDW_MAX_DAI_NUM		8
+#define MAX_NO_PROPS 2
+#define SOC_SDW_JACK_JDSRC(quirk)		((quirk) & GENMASK(3, 0))
 
 struct sof_sdw_codec_info;
 
@@ -59,6 +61,7 @@ struct asoc_sdw_mc_private {
 	void *private;
 	bool append_dai_type;
 	bool ignore_internal_dmic;
+	unsigned long mc_quirk;
 };
 
 int asoc_sdw_startup(struct snd_pcm_substream *substream);
@@ -92,4 +95,15 @@ int asoc_sdw_rt_dmic_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int asoc_sdw_rt712_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int asoc_sdw_rt722_spk_rtd_init(struct snd_soc_pcm_runtime *rtd);
 int asoc_sdw_rt5682_rtd_init(struct snd_soc_pcm_runtime *rtd);
+
+int asoc_sdw_rt_sdca_jack_rtd_init(struct snd_soc_pcm_runtime *rtd);
+
+int asoc_sdw_rt_sdca_jack_exit(struct snd_soc_card *card,
+			       struct snd_soc_dai_link *dai_link);
+
+int asoc_sdw_rt_sdca_jack_init(struct snd_soc_card *card,
+			       struct snd_soc_dai_link *dai_links,
+			       struct sof_sdw_codec_info *info,
+			       bool playback);
+
 #endif
