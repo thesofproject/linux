@@ -6,6 +6,7 @@
  * Used by Master driver
  */
 
+#include <linux/crc8.h>
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/debugfs.h>
@@ -183,6 +184,7 @@ MODULE_PARM_DESC(cdns_mcp_int_mask, "Cadence MCP IntMask");
 #define CDNS_PORTCTRL_TEST_FAILED		BIT(1)
 #define CDNS_PORTCTRL_DIRN			BIT(7)
 #define CDNS_PORTCTRL_BANK_INVERT		BIT(8)
+#define CDNS_PORTCTRL_BULK_ENABLE		BIT(16)
 
 #define CDNS_PORT_OFFSET			0x80
 
@@ -1837,13 +1839,20 @@ void sdw_cdns_config_stream(struct sdw_cdns *cdns,
 
 		if (cdns->bus.params.m_data_mode != SDW_PORT_DATA_MODE_NORMAL)
 			val |= CDNS_PORTCTRL_TEST_FAILED;
+	} else if (pdi->num == 0) {
+		val |= CDNS_PORTCTRL_BULK_ENABLE;
 	}
 	offset = CDNS_PORTCTRL + pdi->num * CDNS_PORT_OFFSET;
 	cdns_updatel(cdns, offset,
-		     CDNS_PORTCTRL_DIRN | CDNS_PORTCTRL_TEST_FAILED,
+		     CDNS_PORTCTRL_DIRN | CDNS_PORTCTRL_TEST_FAILED |
+		     CDNS_PORTCTRL_BULK_ENABLE,
 		     val);
 
-	val = pdi->num;
+	/* The DataPort0 needs to be mapped to both PDI and PDI1 ! */
+	if (pdi->num == 1)
+		val = 0;
+	else
+		val = pdi->num;
 	val |= CDNS_PDI_CONFIG_SOFT_RESET;
 	val |= FIELD_PREP(CDNS_PDI_CONFIG_CHANNEL, (1 << ch) - 1);
 	cdns_writel(cdns, CDNS_PDI_CONFIG(pdi->num), val);
@@ -1887,6 +1896,906 @@ struct sdw_cdns_pdi *sdw_cdns_alloc_pdi(struct sdw_cdns *cdns,
 	return pdi;
 }
 EXPORT_SYMBOL(sdw_cdns_alloc_pdi);
+
+/*
+ * the MIPI SoundWire CRC8 polynomial is X^8 + X^6 + X^3 + X^2 + 1, MSB first
+ * The value is (1)01001101 = 0x4D
+ *
+ * the table below was generated with
+ *
+ *	u8 crc8_lookup_table[CRC8_TABLE_SIZE];
+ *	crc8_populate_msb(crc8_lookup_table, SDW_CRC8_POLY);
+ *
+ */
+#define SDW_CRC8_SEED 0xFF
+#define SDW_CRC8_POLY 0x4D
+
+static const u8 sdw_crc8_lookup_msb[CRC8_TABLE_SIZE] = {
+	0x00, /* 0 */
+	0x4d, /* 1 */
+	0x9a, /* 2 */
+	0xd7, /* 3 */
+	0x79, /* 4 */
+	0x34, /* 5 */
+	0xe3, /* 6 */
+	0xae, /* 7 */
+	0xf2, /* 8 */
+	0xbf, /* 9 */
+	0x68, /* 10 */
+	0x25, /* 11 */
+	0x8b, /* 12 */
+	0xc6, /* 13 */
+	0x11, /* 14 */
+	0x5c, /* 15 */
+	0xa9, /* 16 */
+	0xe4, /* 17 */
+	0x33, /* 18 */
+	0x7e, /* 19 */
+	0xd0, /* 20 */
+	0x9d, /* 21 */
+	0x4a, /* 22 */
+	0x07, /* 23 */
+	0x5b, /* 24 */
+	0x16, /* 25 */
+	0xc1, /* 26 */
+	0x8c, /* 27 */
+	0x22, /* 28 */
+	0x6f, /* 29 */
+	0xb8, /* 30 */
+	0xf5, /* 31 */
+	0x1f, /* 32 */
+	0x52, /* 33 */
+	0x85, /* 34 */
+	0xc8, /* 35 */
+	0x66, /* 36 */
+	0x2b, /* 37 */
+	0xfc, /* 38 */
+	0xb1, /* 39 */
+	0xed, /* 40 */
+	0xa0, /* 41 */
+	0x77, /* 42 */
+	0x3a, /* 43 */
+	0x94, /* 44 */
+	0xd9, /* 45 */
+	0x0e, /* 46 */
+	0x43, /* 47 */
+	0xb6, /* 48 */
+	0xfb, /* 49 */
+	0x2c, /* 50 */
+	0x61, /* 51 */
+	0xcf, /* 52 */
+	0x82, /* 53 */
+	0x55, /* 54 */
+	0x18, /* 55 */
+	0x44, /* 56 */
+	0x09, /* 57 */
+	0xde, /* 58 */
+	0x93, /* 59 */
+	0x3d, /* 60 */
+	0x70, /* 61 */
+	0xa7, /* 62 */
+	0xea, /* 63 */
+	0x3e, /* 64 */
+	0x73, /* 65 */
+	0xa4, /* 66 */
+	0xe9, /* 67 */
+	0x47, /* 68 */
+	0x0a, /* 69 */
+	0xdd, /* 70 */
+	0x90, /* 71 */
+	0xcc, /* 72 */
+	0x81, /* 73 */
+	0x56, /* 74 */
+	0x1b, /* 75 */
+	0xb5, /* 76 */
+	0xf8, /* 77 */
+	0x2f, /* 78 */
+	0x62, /* 79 */
+	0x97, /* 80 */
+	0xda, /* 81 */
+	0x0d, /* 82 */
+	0x40, /* 83 */
+	0xee, /* 84 */
+	0xa3, /* 85 */
+	0x74, /* 86 */
+	0x39, /* 87 */
+	0x65, /* 88 */
+	0x28, /* 89 */
+	0xff, /* 90 */
+	0xb2, /* 91 */
+	0x1c, /* 92 */
+	0x51, /* 93 */
+	0x86, /* 94 */
+	0xcb, /* 95 */
+	0x21, /* 96 */
+	0x6c, /* 97 */
+	0xbb, /* 98 */
+	0xf6, /* 99 */
+	0x58, /* 100 */
+	0x15, /* 101 */
+	0xc2, /* 102 */
+	0x8f, /* 103 */
+	0xd3, /* 104 */
+	0x9e, /* 105 */
+	0x49, /* 106 */
+	0x04, /* 107 */
+	0xaa, /* 108 */
+	0xe7, /* 109 */
+	0x30, /* 110 */
+	0x7d, /* 111 */
+	0x88, /* 112 */
+	0xc5, /* 113 */
+	0x12, /* 114 */
+	0x5f, /* 115 */
+	0xf1, /* 116 */
+	0xbc, /* 117 */
+	0x6b, /* 118 */
+	0x26, /* 119 */
+	0x7a, /* 120 */
+	0x37, /* 121 */
+	0xe0, /* 122 */
+	0xad, /* 123 */
+	0x03, /* 124 */
+	0x4e, /* 125 */
+	0x99, /* 126 */
+	0xd4, /* 127 */
+	0x7c, /* 128 */
+	0x31, /* 129 */
+	0xe6, /* 130 */
+	0xab, /* 131 */
+	0x05, /* 132 */
+	0x48, /* 133 */
+	0x9f, /* 134 */
+	0xd2, /* 135 */
+	0x8e, /* 136 */
+	0xc3, /* 137 */
+	0x14, /* 138 */
+	0x59, /* 139 */
+	0xf7, /* 140 */
+	0xba, /* 141 */
+	0x6d, /* 142 */
+	0x20, /* 143 */
+	0xd5, /* 144 */
+	0x98, /* 145 */
+	0x4f, /* 146 */
+	0x02, /* 147 */
+	0xac, /* 148 */
+	0xe1, /* 149 */
+	0x36, /* 150 */
+	0x7b, /* 151 */
+	0x27, /* 152 */
+	0x6a, /* 153 */
+	0xbd, /* 154 */
+	0xf0, /* 155 */
+	0x5e, /* 156 */
+	0x13, /* 157 */
+	0xc4, /* 158 */
+	0x89, /* 159 */
+	0x63, /* 160 */
+	0x2e, /* 161 */
+	0xf9, /* 162 */
+	0xb4, /* 163 */
+	0x1a, /* 164 */
+	0x57, /* 165 */
+	0x80, /* 166 */
+	0xcd, /* 167 */
+	0x91, /* 168 */
+	0xdc, /* 169 */
+	0x0b, /* 170 */
+	0x46, /* 171 */
+	0xe8, /* 172 */
+	0xa5, /* 173 */
+	0x72, /* 174 */
+	0x3f, /* 175 */
+	0xca, /* 176 */
+	0x87, /* 177 */
+	0x50, /* 178 */
+	0x1d, /* 179 */
+	0xb3, /* 180 */
+	0xfe, /* 181 */
+	0x29, /* 182 */
+	0x64, /* 183 */
+	0x38, /* 184 */
+	0x75, /* 185 */
+	0xa2, /* 186 */
+	0xef, /* 187 */
+	0x41, /* 188 */
+	0x0c, /* 189 */
+	0xdb, /* 190 */
+	0x96, /* 191 */
+	0x42, /* 192 */
+	0x0f, /* 193 */
+	0xd8, /* 194 */
+	0x95, /* 195 */
+	0x3b, /* 196 */
+	0x76, /* 197 */
+	0xa1, /* 198 */
+	0xec, /* 199 */
+	0xb0, /* 200 */
+	0xfd, /* 201 */
+	0x2a, /* 202 */
+	0x67, /* 203 */
+	0xc9, /* 204 */
+	0x84, /* 205 */
+	0x53, /* 206 */
+	0x1e, /* 207 */
+	0xeb, /* 208 */
+	0xa6, /* 209 */
+	0x71, /* 210 */
+	0x3c, /* 211 */
+	0x92, /* 212 */
+	0xdf, /* 213 */
+	0x08, /* 214 */
+	0x45, /* 215 */
+	0x19, /* 216 */
+	0x54, /* 217 */
+	0x83, /* 218 */
+	0xce, /* 219 */
+	0x60, /* 220 */
+	0x2d, /* 221 */
+	0xfa, /* 222 */
+	0xb7, /* 223 */
+	0x5d, /* 224 */
+	0x10, /* 225 */
+	0xc7, /* 226 */
+	0x8a, /* 227 */
+	0x24, /* 228 */
+	0x69, /* 229 */
+	0xbe, /* 230 */
+	0xf3, /* 231 */
+	0xaf, /* 232 */
+	0xe2, /* 233 */
+	0x35, /* 234 */
+	0x78, /* 235 */
+	0xd6, /* 236 */
+	0x9b, /* 237 */
+	0x4c, /* 238 */
+	0x01, /* 239 */
+	0xf4, /* 240 */
+	0xb9, /* 241 */
+	0x6e, /* 242 */
+	0x23, /* 243 */
+	0x8d, /* 244 */
+	0xc0, /* 245 */
+	0x17, /* 246 */
+	0x5a, /* 247 */
+	0x06, /* 248 */
+	0x4b, /* 249 */
+	0x9c, /* 250 */
+	0xd1, /* 251 */
+	0x7f, /* 252 */
+	0x32, /* 253 */
+	0xe5, /* 254 */
+	0xa8  /* 255 */
+};
+
+/* BPT/BRA helpers */
+
+#define SDW_CDNS_BRA_HDR			6 /* defined by MIPI */
+#define SDW_CDNS_BRA_HDR_CRC			1 /* defined by MIPI */
+#define SDW_CDNS_BRA_HDR_CRC_PAD		1 /* Cadence only */
+#define SDW_CDNS_BRA_HDR_RESP			1 /* defined by MIPI */
+#define SDW_CDNS_BRA_HDR_RESP_PAD		1 /* Cadence only */
+
+#define SDW_CDNS_BRA_DATA_PAD			1 /* Cadence only */
+#define SDW_CDNS_BRA_DATA_CRC			1 /* defined by MIPI */
+#define SDW_CDNS_BRA_DATA_CRC_PAD		1 /* Cadence only */
+
+#define SDW_CDNS_BRA_FOOTER_RESP		1 /* defined by MIPI */
+#define SDW_CDNS_BRA_FOOTER_RESP_PAD		1 /* Cadence only */
+
+static unsigned int sdw_cdns_bra_actual_data_size(unsigned int allocated_bytes_per_frame)
+{
+	unsigned int total;
+
+	total = allocated_bytes_per_frame -
+		SDW_CDNS_BRA_HDR -
+		SDW_CDNS_BRA_HDR_CRC -
+		SDW_CDNS_BRA_HDR_RESP;
+
+	total -= SDW_CDNS_BRA_DATA_CRC;
+
+	total -= SDW_CDNS_BRA_FOOTER_RESP;
+
+	return total;
+}
+
+static unsigned int sdw_cdns_write_pdi0_buffer_size(unsigned int actual_data_size)
+{
+	unsigned int total;
+
+	total = SDW_CDNS_BRA_HDR +
+		SDW_CDNS_BRA_HDR_CRC +
+		SDW_CDNS_BRA_HDR_CRC_PAD;
+
+	total += actual_data_size;
+	if (actual_data_size & 1)
+		total += SDW_CDNS_BRA_DATA_PAD;
+
+	total += SDW_CDNS_BRA_DATA_CRC +
+		SDW_CDNS_BRA_DATA_CRC_PAD;
+
+	return total * 2;
+}
+
+static unsigned int sdw_cdns_write_pdi1_buffer_size(unsigned int actual_data_size)
+{
+	unsigned int total;
+
+	total = SDW_CDNS_BRA_HDR_RESP +
+		SDW_CDNS_BRA_HDR_RESP_PAD;
+
+	total += SDW_CDNS_BRA_FOOTER_RESP +
+		SDW_CDNS_BRA_FOOTER_RESP_PAD;
+
+	return total * 2;
+}
+
+static unsigned int sdw_cdns_read_pdi0_buffer_size(unsigned int actual_data_size)
+{
+	unsigned int total;
+
+	total = SDW_CDNS_BRA_HDR +
+		SDW_CDNS_BRA_HDR_CRC +
+		SDW_CDNS_BRA_HDR_CRC_PAD;
+
+	return total * 2;
+}
+
+static unsigned int sdw_cdns_read_pdi1_buffer_size(unsigned int actual_data_size)
+{
+	unsigned int total;
+
+	total = SDW_CDNS_BRA_HDR_RESP +
+		SDW_CDNS_BRA_HDR_RESP_PAD;
+
+	total += actual_data_size;
+	if (actual_data_size & 1)
+		total += SDW_CDNS_BRA_DATA_PAD;
+
+	total += SDW_CDNS_BRA_HDR_CRC +
+		SDW_CDNS_BRA_HDR_CRC_PAD;
+
+	total += SDW_CDNS_BRA_FOOTER_RESP +
+		SDW_CDNS_BRA_FOOTER_RESP_PAD;
+
+	return total * 2;
+}
+
+int sdw_cdns_bpt_find_buffer_sizes(int command, /* 0: write, 1: read */
+				   int row, int col,
+				   unsigned int data_bytes,
+				   unsigned int requested_bytes_per_frame,
+				   unsigned int *data_per_frame,
+				   unsigned int *pdi0_buffer_size,
+				   unsigned int *pdi1_buffer_size,
+				   unsigned int *num_frames)
+{
+	unsigned int bpt_bits = row * (col - 1);
+	unsigned int bpt_bytes = bpt_bits >> 3;
+	unsigned int actual_bpt_bytes;
+	unsigned int pdi0_tx_size;
+	unsigned int pdi1_rx_size;
+	unsigned int remainder;
+
+	if (!data_bytes)
+		return -EINVAL;
+
+	actual_bpt_bytes = sdw_cdns_bra_actual_data_size(bpt_bytes);
+	if (data_bytes < actual_bpt_bytes)
+		actual_bpt_bytes = data_bytes;
+
+	/*
+	 * the caller may want to set the number of bytes per frame,
+	 * allow when possible
+	 */
+	if (requested_bytes_per_frame < actual_bpt_bytes)
+		actual_bpt_bytes = requested_bytes_per_frame;
+
+	*data_per_frame = actual_bpt_bytes;
+
+	if (command == 0) {
+		/*
+		 * for writes we need to send all the data_bytes per frame,
+		 * even for the last frame which may only transport fewer bytes
+		 */
+
+		*num_frames = DIV_ROUND_UP(data_bytes, actual_bpt_bytes);
+
+		pdi0_tx_size = sdw_cdns_write_pdi0_buffer_size(actual_bpt_bytes);
+		pdi1_rx_size = sdw_cdns_write_pdi1_buffer_size(actual_bpt_bytes);
+
+		*pdi0_buffer_size = pdi0_tx_size * *num_frames;
+		*pdi1_buffer_size = pdi1_rx_size * *num_frames;
+	} else {
+		/*
+		 * for reads we need to retrieve only what is requested in the BPT
+		 * header, so the last frame needs to be special-cased
+		 */
+		*num_frames = data_bytes / actual_bpt_bytes;
+
+		pdi0_tx_size = sdw_cdns_read_pdi0_buffer_size(actual_bpt_bytes);
+		pdi1_rx_size = sdw_cdns_read_pdi1_buffer_size(actual_bpt_bytes);
+
+		*pdi0_buffer_size = pdi0_tx_size * *num_frames;
+		*pdi1_buffer_size = pdi1_rx_size * *num_frames;
+
+		remainder = data_bytes % actual_bpt_bytes;
+		if (remainder) {
+			pdi0_tx_size = sdw_cdns_read_pdi0_buffer_size(remainder);
+			pdi1_rx_size = sdw_cdns_read_pdi1_buffer_size(remainder);
+
+			*num_frames = *num_frames + 1;
+			*pdi0_buffer_size += pdi0_tx_size;
+			*pdi1_buffer_size += pdi1_rx_size;
+		}
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(sdw_cdns_bpt_find_buffer_sizes);
+
+static int sdw_cdns_copy_write_data(u8 *data, int data_size, u8 *dma_buffer, int dma_buffer_size)
+{
+	/*
+	 * the implementation copies the data one byte at a time. Experiments with
+	 * two bytes at a time did not seem to improve the performance
+	 */
+	int i;
+	int j;
+
+	/* size check to prevent out of bounds access */
+	i = data_size - 1;
+	j = (2 * i) - (i & 1);
+	if (data_size & 1)
+		j++;
+	j += 2;
+	if (j >= dma_buffer_size)
+		return -EINVAL;
+
+	/* copy data */
+	for (i = 0; i < data_size; i++) {
+		j = (2 * i) - (i & 1);
+		dma_buffer[j] = data[i];
+	}
+	/* add required pad */
+	if (data_size & 1)
+		dma_buffer[++j] = 0;
+	/* skip last two bytes */
+	j += 2;
+
+	/* offset and data are off-by-one */
+	return j + 1;
+}
+
+static int sdw_cdns_prepare_write_pd0_buffer(u8 *header, unsigned int header_size,
+					     u8 *data, unsigned int data_size,
+					     u8 *dma_buffer, unsigned int dma_buffer_size,
+					     unsigned int *dma_data_written,
+					     unsigned int frame_counter)
+{
+	u8 crc;
+	int data_written;
+	u8 *last_byte;
+
+	*dma_data_written = 0;
+
+	data_written = sdw_cdns_copy_write_data(header, header_size, dma_buffer, dma_buffer_size);
+	if (data_written < 0)
+		return data_written;
+	dma_buffer[3] = BIT(7);
+	dma_buffer[3] |= frame_counter & GENMASK(3, 0);
+
+	dma_buffer += data_written;
+	dma_buffer_size -= data_written;
+	*dma_data_written += data_written;
+
+	crc = SDW_CRC8_SEED;
+	crc = crc8(sdw_crc8_lookup_msb, header, header_size, crc);
+
+	data_written = sdw_cdns_copy_write_data(&crc, 1, dma_buffer, dma_buffer_size);
+	if (data_written < 0)
+		return data_written;
+	dma_buffer += data_written;
+	dma_buffer_size -= data_written;
+	*dma_data_written += data_written;
+
+	data_written = sdw_cdns_copy_write_data(data, data_size, dma_buffer, dma_buffer_size);
+	if (data_written < 0)
+		return data_written;
+	dma_buffer += data_written;
+	dma_buffer_size -= data_written;
+	*dma_data_written += data_written;
+
+	crc = SDW_CRC8_SEED;
+	crc = crc8(sdw_crc8_lookup_msb, data, data_size, crc);
+	data_written = sdw_cdns_copy_write_data(&crc, 1, dma_buffer, dma_buffer_size);
+	if (data_written < 0)
+		return data_written;
+	dma_buffer += data_written;
+	dma_buffer_size -= data_written;
+	*dma_data_written += data_written;
+
+	/* tag last byte */
+	last_byte = dma_buffer - 1;
+	last_byte[0] = BIT(6);
+
+	return 0;
+}
+
+static int sdw_cdns_prepare_read_pd0_buffer(u8 *header, unsigned int header_size,
+					    u8 *dma_buffer, unsigned int dma_buffer_size,
+					    unsigned int *dma_data_written,
+					    unsigned int frame_counter)
+{
+	u8 crc;
+	int data_written;
+	u8 *last_byte;
+
+	*dma_data_written = 0;
+
+	data_written = sdw_cdns_copy_write_data(header, header_size, dma_buffer, dma_buffer_size);
+	if (data_written < 0)
+		return data_written;
+	dma_buffer[3] = BIT(7);
+	dma_buffer[3] |= frame_counter & GENMASK(3, 0);
+
+	dma_buffer += data_written;
+	dma_buffer_size -= data_written;
+	*dma_data_written += data_written;
+
+	crc = SDW_CRC8_SEED;
+	crc = crc8(sdw_crc8_lookup_msb, header, header_size, crc);
+
+	data_written = sdw_cdns_copy_write_data(&crc, 1, dma_buffer, dma_buffer_size);
+	if (data_written < 0)
+		return data_written;
+	dma_buffer += data_written;
+	dma_buffer_size -= data_written;
+	*dma_data_written += data_written;
+
+	/* tag last byte */
+	last_byte = dma_buffer - 1;
+	last_byte[0] = BIT(6);
+
+	return 0;
+}
+
+#define CDNS_BPT_ROLLING_COUNTER_START 1
+
+int sdw_cdns_prepare_write_dma_buffer(u8 dev_num, u32 start_register,
+				      u8 *data, int data_size,
+				      int data_per_frame,
+				      u8 *dma_buffer, int dma_buffer_size,
+				      int *dma_buffer_total_bytes)
+{
+	u8 header[SDW_CDNS_BRA_HDR];
+	u8 *p_dma_buffer;
+	u8 *p_data;
+	int dma_data_written;
+	int total_dma_data_written;
+	u8 counter;
+	int ret;
+
+	counter = CDNS_BPT_ROLLING_COUNTER_START;
+
+	header[0] = BIT(1);		/* write command: BIT(1) set */
+	header[0] |= GENMASK(7, 6);	/* header is active */
+	header[0] |= (dev_num << 2);
+
+	p_data = &data[0];
+	p_dma_buffer = &dma_buffer[0];
+	total_dma_data_written = 0;
+
+	while (data_size >= data_per_frame) {
+		header[1] = data_per_frame;
+		header[2] = start_register >> 24 & 0xFF;
+		header[3] = start_register >> 16 & 0xFF;
+		header[4] = start_register >> 8 & 0xFF;
+		header[5] = start_register >> 0 & 0xFF;
+
+		ret = sdw_cdns_prepare_write_pd0_buffer(header, SDW_CDNS_BRA_HDR,
+							p_data, data_per_frame,
+							p_dma_buffer, dma_buffer_size,
+							&dma_data_written,
+							counter);
+		if (ret < 0)
+			return ret;
+
+		counter++;
+
+		p_data += data_per_frame;
+		data_size -= data_per_frame;
+
+		p_dma_buffer += dma_data_written;
+		dma_buffer_size -= dma_data_written;
+		total_dma_data_written += dma_data_written;
+
+		start_register += data_per_frame;
+	}
+
+	if (data_size) {
+		header[1] = data_size;
+		header[2] = start_register >> 24 & 0xFF;
+		header[3] = start_register >> 16 & 0xFF;
+		header[4] = start_register >> 8 & 0xFF;
+		header[5] = start_register >> 0 & 0xFF;
+
+		ret = sdw_cdns_prepare_write_pd0_buffer(header, SDW_CDNS_BRA_HDR,
+							p_data, data_size,
+							p_dma_buffer, dma_buffer_size,
+							&dma_data_written,
+							counter);
+		if (ret < 0)
+			return ret;
+
+		total_dma_data_written += dma_data_written;
+	}
+
+	*dma_buffer_total_bytes = total_dma_data_written;
+
+	return 0;
+}
+EXPORT_SYMBOL(sdw_cdns_prepare_write_dma_buffer);
+
+int sdw_cdns_prepare_read_dma_buffer(u8 dev_num, u32 start_register,
+				     int data_size,
+				     int data_per_frame,
+				     u8 *dma_buffer, int dma_buffer_size,
+				     int *dma_buffer_total_bytes)
+{
+	u8 header[SDW_CDNS_BRA_HDR];
+	u8 *p_dma_buffer;
+	int dma_data_written;
+	int total_dma_data_written;
+	u8 counter;
+	int ret;
+
+	counter = CDNS_BPT_ROLLING_COUNTER_START;
+
+	header[0] = 0;			/* read command: BIT(1) cleared */
+	header[0] |= GENMASK(7, 6);	/* header is active */
+	header[0] |= (dev_num << 2);
+
+	p_dma_buffer = &dma_buffer[0];
+	total_dma_data_written = 0;
+
+	while (data_size >= data_per_frame) {
+		header[1] = data_per_frame;
+		header[2] = start_register >> 24 & 0xFF;
+		header[3] = start_register >> 16 & 0xFF;
+		header[4] = start_register >> 8 & 0xFF;
+		header[5] = start_register >> 0 & 0xFF;
+
+		ret = sdw_cdns_prepare_read_pd0_buffer(header, SDW_CDNS_BRA_HDR,
+						       p_dma_buffer, dma_buffer_size,
+						       &dma_data_written,
+						       counter);
+		if (ret < 0)
+			return ret;
+
+		counter++;
+
+		data_size -= data_per_frame;
+
+		p_dma_buffer += dma_data_written;
+		dma_buffer_size -= dma_data_written;
+		total_dma_data_written += dma_data_written;
+
+		start_register += data_per_frame;
+	}
+
+	if (data_size) {
+		header[1] = data_size;
+		header[2] = start_register >> 24 & 0xFF;
+		header[3] = start_register >> 16 & 0xFF;
+		header[4] = start_register >> 8 & 0xFF;
+		header[5] = start_register >> 0 & 0xFF;
+
+		ret = sdw_cdns_prepare_read_pd0_buffer(header, SDW_CDNS_BRA_HDR,
+						       p_dma_buffer, dma_buffer_size,
+						       &dma_data_written,
+						       counter);
+		if (ret < 0)
+			return ret;
+
+		total_dma_data_written += dma_data_written;
+	}
+
+	*dma_buffer_total_bytes = total_dma_data_written;
+
+	return 0;
+}
+EXPORT_SYMBOL(sdw_cdns_prepare_read_dma_buffer);
+
+static int check_counter(u32 val, u8 counter)
+{
+	u8 frame;
+
+	frame = (val >> 24) & GENMASK(3, 0);
+	if (counter != frame)
+		return -EIO;
+	return 0;
+}
+
+static int check_response(u32 val)
+{
+	u8 response;
+
+	response = (val >> 3) & GENMASK(1, 0);
+	if (response == 0) /* Ignored */
+		return -ENODATA;
+	if (response != 1) /* ACK */
+		return -EIO;
+
+	return 0;
+}
+
+static int check_frame_start(u32 header, u8 counter)
+{
+	int ret;
+
+	/* check frame_start marker */
+	if (!(header & BIT(31)))
+		return -EIO;
+
+	ret = check_counter(header, counter);
+	if (ret < 0)
+		return ret;
+
+	return check_response(header);
+}
+
+static int check_frame_end(u32 footer)
+{
+	/* check frame_end marker */
+	if (!(footer & BIT(30)))
+		return -EIO;
+
+	return check_response(footer);
+}
+
+int sdw_cdns_check_write_response(struct device *dev,
+				  u8 *dma_buffer, int dma_buffer_size,
+				  int num_frames)
+{
+	u32 *p_data;
+	int counter;
+	u32 header;
+	u32 footer;
+	int ret;
+	int i;
+
+	/* paranoia check on buffer size */
+	if (dma_buffer_size != num_frames * 8)
+		return -EINVAL;
+
+	counter = CDNS_BPT_ROLLING_COUNTER_START;
+	p_data = (u32 *)dma_buffer;
+
+	for (i = 0; i < num_frames; i++) {
+		header = *p_data++;
+		footer = *p_data++;
+
+		ret = check_frame_start(header, counter);
+		if (ret < 0) {
+			dev_err(dev, "%s: bad frame %d/%d start header %x\n",
+				__func__, i, num_frames, header);
+			return ret;
+		}
+
+		ret = check_frame_end(footer);
+		if (ret < 0) {
+			dev_err(dev, "%s: bad frame %d/%d end footer %x\n",
+				__func__, i, num_frames, footer);
+			return ret;
+		}
+
+		counter++;
+		counter &= GENMASK(3, 0);
+	}
+	return 0;
+}
+EXPORT_SYMBOL(sdw_cdns_check_write_response);
+
+static u8 extract_read_data(u32 *data, int num_bytes, u8 *buffer)
+{
+	u32 val;
+	int i;
+	u8 crc;
+	u8 b0;
+	u8 b1;
+
+	crc = SDW_CRC8_SEED;
+
+	/* process two bytes at a time */
+	for (i = 0; i < num_bytes / 2; i++) {
+		val = *data++;
+
+		b0 = val & 0xff;
+		b1 = (val >> 8) & 0xff;
+
+		*buffer++ = b0;
+		crc = crc8(sdw_crc8_lookup_msb, &b0, 1, crc);
+
+		*buffer++ = b1;
+		crc = crc8(sdw_crc8_lookup_msb, &b1, 1, crc);
+	}
+	/* handle remaining byte if it exists */
+	if (num_bytes & 1) {
+		val = *data;
+
+		b0 = val & 0xff;
+
+		*buffer++ = b0;
+		crc = crc8(sdw_crc8_lookup_msb, &b0, 1, crc);
+	}
+	return crc;
+}
+
+int sdw_cdns_check_read_response(struct device *dev,
+				 u8 *dma_buffer, int dma_buffer_size,
+				 u8 *buffer, int buffer_size,
+				 int num_frames, int data_per_frame)
+{
+	int total_num_bytes = 0;
+	u32 *p_data;
+	u8 *p_buf;
+	int counter;
+	u32 header;
+	u32 footer;
+	u8 expected_crc;
+	u8 crc;
+	int len;
+	int ret;
+	int i;
+
+	counter = CDNS_BPT_ROLLING_COUNTER_START;
+	p_data = (u32 *)dma_buffer;
+	p_buf = buffer;
+
+	for (i = 0; i < num_frames; i++) {
+		header = *p_data++;
+
+		ret = check_frame_start(header, counter);
+		if (ret < 0) {
+			dev_err(dev, "%s: bad frame %d/%d start header %x\n",
+				__func__, i, num_frames, header);
+			return ret;
+		}
+
+		len = data_per_frame;
+		if (total_num_bytes + data_per_frame > buffer_size)
+			len = buffer_size - total_num_bytes;
+
+		crc = extract_read_data(p_data, len, p_buf);
+
+		p_data += (len + 1) / 2;
+		expected_crc = *p_data++ & 0xff;
+
+		if (crc != expected_crc) {
+			dev_err(dev, "%s: bad frame %d/%d crc %#x expected %#x\n",
+				__func__, i, num_frames, crc, expected_crc);
+			return -EIO;
+		}
+
+		p_buf += len;
+		total_num_bytes += len;
+
+		footer = *p_data++;
+		ret = check_frame_end(footer);
+		if (ret < 0) {
+			dev_err(dev, "%s: bad frame %d/%d end footer %x\n",
+				__func__, i, num_frames, footer);
+			return ret;
+		}
+
+		counter++;
+		counter &= GENMASK(3, 0);
+	}
+	return 0;
+}
+EXPORT_SYMBOL(sdw_cdns_check_read_response);
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("Cadence Soundwire Library");
