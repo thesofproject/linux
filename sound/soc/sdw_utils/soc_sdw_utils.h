@@ -29,16 +29,16 @@
  */
 #define SOF_SIDECAR_AMPS		BIT(16)
 
-struct sof_sdw_codec_info;
+struct asoc_sdw_codec_info;
 
-struct sof_sdw_dai_info {
+struct asoc_sdw_dai_info {
 	const bool direction[2]; /* playback & capture support */
 	const char *dai_name;
 	const int dai_type;
 	const int dailink[2]; /* dailink id for each direction */
 	int  (*init)(struct snd_soc_card *card,
 		     struct snd_soc_dai_link *dai_links,
-		     struct sof_sdw_codec_info *info,
+		     struct asoc_sdw_codec_info *info,
 		     bool playback);
 	int (*exit)(struct snd_soc_card *card, struct snd_soc_dai_link *dai_link);
 	int (*rtd_init)(struct snd_soc_pcm_runtime *rtd);
@@ -46,7 +46,7 @@ struct sof_sdw_dai_info {
 	unsigned long quirk;
 };
 
-struct sof_sdw_codec_info {
+struct asoc_sdw_codec_info {
 	const int part_id;
 	const int version_id;
 	const char *codec_name;
@@ -54,7 +54,7 @@ struct sof_sdw_codec_info {
 	const u8 acpi_id[ACPI_ID_LEN];
 	const bool ignore_internal_dmic;
 	const struct snd_soc_ops *ops;
-	struct sof_sdw_dai_info dais[SOC_SDW_MAX_DAI_NUM];
+	struct asoc_sdw_dai_info dais[SOC_SDW_MAX_DAI_NUM];
 	const int dai_num;
 
 	int (*codec_card_late_probe)(struct snd_soc_card *card);
@@ -91,7 +91,7 @@ struct snd_soc_dai *asoc_sdw_get_codec_dai_by_name(struct snd_soc_pcm_runtime *r
 						   int num_dais);
 
 const char *asoc_sdw_get_codec_name(struct device *dev,
-				    const struct sof_sdw_codec_info *codec_info,
+				    const struct asoc_sdw_codec_info *codec_info,
 				    const struct snd_soc_acpi_link_adr *adr_link,
 				    int adr_index);
 
@@ -124,13 +124,13 @@ int asoc_sdw_rt_sdca_jack_exit(struct snd_soc_card *card,
 
 int asoc_sdw_rt_sdca_jack_init(struct snd_soc_card *card,
 			       struct snd_soc_dai_link *dai_links,
-			       struct sof_sdw_codec_info *info,
+			       struct asoc_sdw_codec_info *info,
 			       bool playback);
 
 int asoc_sdw_rt711_exit(struct snd_soc_card *card, struct snd_soc_dai_link *dai_link);
 int asoc_sdw_rt711_init(struct snd_soc_card *card,
 			struct snd_soc_dai_link *dai_links,
-			struct sof_sdw_codec_info *info,
+			struct asoc_sdw_codec_info *info,
 			bool playback);
 
 /* RT1308 I2S support */
@@ -139,14 +139,14 @@ extern const struct snd_soc_ops asoc_sdw_rt1308_i2s_ops;
 /* generic amp support */
 int asoc_sdw_rt_amp_init(struct snd_soc_card *card,
 			 struct snd_soc_dai_link *dai_links,
-			 struct sof_sdw_codec_info *info,
+			 struct asoc_sdw_codec_info *info,
 			 bool playback);
 int asoc_sdw_rt_amp_exit(struct snd_soc_card *card, struct snd_soc_dai_link *dai_link);
 
 /* CS42L43 support */
 int asoc_sdw_cs42l43_spk_init(struct snd_soc_card *card,
 			      struct snd_soc_dai_link *dai_links,
-			      struct sof_sdw_codec_info *info,
+			      struct asoc_sdw_codec_info *info,
 			      bool playback);
 
 /* CS AMP support */
@@ -157,18 +157,18 @@ int asoc_sdw_bridge_cs35l56_add_sidecar(struct snd_soc_card *card,
 					struct snd_soc_codec_conf **codec_conf);
 int asoc_sdw_bridge_cs35l56_spk_init(struct snd_soc_card *card,
 				     struct snd_soc_dai_link *dai_links,
-				     struct sof_sdw_codec_info *info,
+				     struct asoc_sdw_codec_info *info,
 				     bool playback);
 
 int asoc_sdw_cs_amp_init(struct snd_soc_card *card,
 			 struct snd_soc_dai_link *dai_links,
-			 struct sof_sdw_codec_info *info,
+			 struct asoc_sdw_codec_info *info,
 			 bool playback);
 
 /* MAXIM codec support */
 int asoc_sdw_maxim_init(struct snd_soc_card *card,
 			struct snd_soc_dai_link *dai_links,
-			struct sof_sdw_codec_info *info,
+			struct asoc_sdw_codec_info *info,
 			bool playback);
 
 #endif
