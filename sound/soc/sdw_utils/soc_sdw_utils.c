@@ -368,7 +368,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 				.dailink = {ASOC_SDW_AMP_OUT_DAI_ID, ASOC_SDW_UNUSED_DAI_ID},
 				.init = asoc_sdw_cs42l43_spk_init,
 				.rtd_init = asoc_sdw_cs42l43_spk_rtd_init,
-				.quirk = SOF_CODEC_SPKR | SOF_SIDECAR_AMPS,
+				.quirk = ASOC_SDW_CODEC_SPKR | ASOC_SDW_SIDECAR_AMPS,
 			},
 		},
 		.dai_num = 4,

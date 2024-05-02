@@ -24,17 +24,17 @@
 #define ASOC_SDW_DMIC_DAI_ID		4
 
 /* If a CODEC has an optional speaker output, this quirk will enable it */
-#define SOF_CODEC_SPKR			BIT(15)
+#define ASOC_SDW_CODEC_SPKR			BIT(15)
 /*
  * If the CODEC has additional devices attached directly to it.
  *
  * For the cs42l43:
  *   - 0 - No speaker output
- *   - SOF_CODEC_SPKR - CODEC internal speaker
- *   - SOF_SIDECAR_AMPS - 2x Sidecar amplifiers + CODEC internal speaker
- *   - SOF_CODEC_SPKR | SOF_SIDECAR_AMPS - Not currently supported
+ *   - ASOC_SDW_CODEC_SPKR - CODEC internal speaker
+ *   - ASOC_SDW_SIDECAR_AMPS - 2x Sidecar amplifiers + CODEC internal speaker
+ *   - ASOC_SDW_CODEC_SPKR | ASOC_SDW_SIDECAR_AMPS - Not currently supported
  */
-#define SOF_SIDECAR_AMPS		BIT(16)
+#define ASOC_SDW_SIDECAR_AMPS		BIT(16)
 
 #define ASOC_SDW_DAI_TYPE_JACK		0
 #define ASOC_SDW_DAI_TYPE_AMP		1

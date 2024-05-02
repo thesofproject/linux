@@ -105,7 +105,7 @@ int asoc_sdw_bridge_cs35l56_count_sidecar(struct snd_soc_card *card,
 {
 	struct asoc_sdw_mc_private *ctx = snd_soc_card_get_drvdata(card);
 
-	if (ctx->mc_quirk & SOF_SIDECAR_AMPS) {
+	if (ctx->mc_quirk & ASOC_SDW_SIDECAR_AMPS) {
 		(*num_dais)++;
 		(*num_devs) += ARRAY_SIZE(bridge_cs35l56_name_prefixes);
 	}
@@ -120,7 +120,7 @@ int asoc_sdw_bridge_cs35l56_add_sidecar(struct snd_soc_card *card,
 {
 	struct asoc_sdw_mc_private *ctx = snd_soc_card_get_drvdata(card);
 
-	if (ctx->mc_quirk & SOF_SIDECAR_AMPS) {
+	if (ctx->mc_quirk & ASOC_SDW_SIDECAR_AMPS) {
 		**dai_links = bridge_dai_template;
 
 		for (int i = 0; i < ARRAY_SIZE(bridge_cs35l56_name_prefixes); i++) {
@@ -143,7 +143,7 @@ int asoc_sdw_bridge_cs35l56_spk_init(struct snd_soc_card *card,
 {
 	struct asoc_sdw_mc_private *ctx = snd_soc_card_get_drvdata(card);
 
-	if (ctx->mc_quirk & SOF_SIDECAR_AMPS)
+	if (ctx->mc_quirk & ASOC_SDW_SIDECAR_AMPS)
 		info->amp_num += ARRAY_SIZE(bridge_cs35l56_name_prefixes);
 
 	return 0;
