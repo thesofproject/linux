@@ -36,10 +36,10 @@ static void log_quirks(struct device *dev)
 			SOF_SSP_GET_PORT(sof_sdw_quirk));
 	if (sof_sdw_quirk & SOF_SDW_NO_AGGREGATION)
 		dev_err(dev, "quirk SOF_SDW_NO_AGGREGATION enabled but no longer supported\n");
-	if (sof_sdw_quirk & SOF_CODEC_SPKR)
-		dev_dbg(dev, "quirk SOF_CODEC_SPKR enabled\n");
-	if (sof_sdw_quirk & SOF_SIDECAR_AMPS)
-		dev_dbg(dev, "quirk SOF_SIDECAR_AMPS enabled\n");
+	if (sof_sdw_quirk & ASOC_SDW_CODEC_SPKR)
+		dev_dbg(dev, "quirk ASOC_SDW_CODEC_SPKR enabled\n");
+	if (sof_sdw_quirk & ASOC_SDW_SIDECAR_AMPS)
+		dev_dbg(dev, "quirk ASOC_SDW_SIDECAR_AMPS enabled\n");
 }
 
 static int sof_sdw_quirk_cb(const struct dmi_system_id *id)

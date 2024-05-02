@@ -480,7 +480,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 				.rtd_init = asoc_sdw_cs42l43_spk_rtd_init,
 				.widgets = generic_spk_widgets,
 				.num_widgets = ARRAY_SIZE(generic_spk_widgets),
-				.quirk = SOF_CODEC_SPKR | SOF_SIDECAR_AMPS,
+				.quirk = ASOC_SDW_CODEC_SPKR | ASOC_SDW_SIDECAR_AMPS,
 			},
 		},
 		.dai_num = 4,
