@@ -1173,6 +1173,8 @@ int sdw_cdns_enable_interrupt(struct sdw_cdns *cdns, bool state)
 	u32 slave_intmask1 = 0;
 	u32 mask = 0;
 
+	dev_dbg(cdns->dev, "SoundWire interrupt enable: %d\n", state);
+
 	if (!state)
 		goto update_masks;
 
