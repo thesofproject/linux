@@ -13,6 +13,7 @@
 #include <linux/soundwire/sdw_type.h>
 #include <sound/soc.h>
 #include <sound/soc-acpi.h>
+#include "sof_board_helpers.h"
 #include "sof_sdw_common.h"
 #include "../../codecs/rt711.h"
 
@@ -1733,16 +1734,10 @@ static int create_hdmi_dailinks(struct snd_soc_card *card,
 static int create_bt_dailinks(struct snd_soc_card *card,
 			      struct snd_soc_dai_link **dai_links, int *be_id)
 {
-	struct device *dev = card->dev;
 	int port = (sof_sdw_quirk & SOF_BT_OFFLOAD_SSP_MASK) >>
 			SOF_BT_OFFLOAD_SSP_SHIFT;
-	char *name = devm_kasprintf(dev, GFP_KERNEL, "SSP%d-BT", port);
-	char *cpu_dai_name = devm_kasprintf(dev, GFP_KERNEL, "SSP%d Pin", port);
-	int ret;
+	int ret = sof_intel_board_set_bt_link(card->dev, dai_links, be_id, port);
 
-	ret = init_simple_dai_link(dev, *dai_links, be_id, name,
-				   1, 1, cpu_dai_name, snd_soc_dummy_dlc.name,
-				   snd_soc_dummy_dlc.dai_name, NULL, NULL);
 	if (ret)
 		return ret;
 
@@ -2078,3 +2073,4 @@ MODULE_AUTHOR("Pierre-Louis Bossart <pierre-louis.bossart@linux.intel.com>");
 MODULE_LICENSE("GPL v2");
 MODULE_IMPORT_NS(SND_SOC_INTEL_HDA_DSP_COMMON);
 MODULE_IMPORT_NS(SND_SOC_INTEL_SOF_MAXIM_COMMON);
+MODULE_IMPORT_NS(SND_SOC_INTEL_SOF_BOARD_HELPERS);
