@@ -143,9 +143,23 @@ irqreturn_t sdw_intel_thread(int irq, void *dev_id)
 {
 	struct sdw_intel_ctx *ctx = dev_id;
 	struct sdw_intel_link_res *link;
+	irqreturn_t ret;
+	int mask = 0;
 
-	list_for_each_entry(link, &ctx->link_list, list)
-		sdw_cdns_irq(irq, link->cdns);
+	list_for_each_entry(link, &ctx->link_list, list) {
+		ret = sdw_cdns_irq(irq, link->cdns);
+		if (ret == IRQ_HANDLED)
+			mask |= BIT(link->cdns->instance);
+	}
+
+	/* attempt a second pass to handle interrupts on links not serviced in the first pass */
+	list_for_each_entry(link, &ctx->link_list, list) {
+		if (mask & BIT(link->cdns->instance))
+			continue;
+		ret = sdw_cdns_irq(irq, link->cdns);
+		if (ret == IRQ_HANDLED)
+			dev_err(link->cdns->dev, "New SoundWire interrupt signaled in 2nd pass!!\n");
+	}
 
 	return IRQ_HANDLED;
 }
