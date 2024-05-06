@@ -205,6 +205,8 @@ static void lnl_enable_sdw_irq(struct snd_sof_dev *sdev, bool enable)
 	struct hdac_bus *bus = sof_to_bus(sdev);
 
 	hdac_bus_eml_enable_interrupt(bus, true,  AZX_REG_ML_LEPTR_ID_SDW, enable);
+
+	dev_dbg(sdev->dev, "SoundWire interrupt enable: %d\n", enable);
 }
 
 static int lnl_dsp_disable_interrupts(struct snd_sof_dev *sdev)
