@@ -225,6 +225,8 @@ struct gendisk {
 	struct blk_independent_access_ranges *ia_ranges;
 
 	struct mutex rqos_state_mutex;	/* rqos state change mutex */
+
+	ANDROID_OEM_DATA(1);
 };
 
 /**
