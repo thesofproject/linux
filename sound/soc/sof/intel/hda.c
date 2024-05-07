@@ -1312,7 +1312,8 @@ struct snd_soc_acpi_mach *hda_machine_select(struct snd_sof_dev *sdev)
 	const char *tplg_suffix;
 
 	/* Try I2S or DMIC if it is supported */
-	if (interface_mask & (BIT(SOF_DAI_INTEL_SSP) | BIT(SOF_DAI_INTEL_DMIC)))
+	if (!HDA_EXT_CODEC(bus->codec_mask) &&
+	    interface_mask & (BIT(SOF_DAI_INTEL_SSP) | BIT(SOF_DAI_INTEL_DMIC)))
 		mach = snd_soc_acpi_find_machine(desc->machines);
 
 	if (mach) {
