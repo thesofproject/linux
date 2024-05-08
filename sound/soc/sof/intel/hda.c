@@ -560,6 +560,28 @@ static int check_nhlt_ssp_mclk_mask(struct snd_sof_dev *sdev, int ssp_num)
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_AUDIO_CODEC) || IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_SOUNDWIRE)
 
+#define NHLT_ARCH_NAME_LEN	12
+
+static void get_nhlt_arch_string(struct snd_sof_dev *sdev, char *arch_str)
+{
+	const struct sof_intel_dsp_desc *chip = get_chip_info(sdev->pdata);
+
+	if (!chip)
+		return;
+
+	switch (chip->hw_ip_version) {
+	case SOF_INTEL_CAVS_2_5:
+		strscpy(arch_str, "-cavs25", NHLT_ARCH_NAME_LEN);
+		break;
+	case SOF_INTEL_ACE_1_0:
+	case SOF_INTEL_ACE_2_0:
+		strscpy(arch_str, "-ace1", NHLT_ARCH_NAME_LEN);
+		break;
+	default:
+		break;
+	}
+}
+
 static const char *fixup_tplg_name(struct snd_sof_dev *sdev,
 				   const char *sof_tplg_filename,
 				   const char *idisp_str,
@@ -576,10 +598,27 @@ static const char *fixup_tplg_name(struct snd_sof_dev *sdev,
 	/* this assumes a .tplg extension */
 	tmp = filename;
 	split_ext = strsep(&tmp, ".");
-	if (split_ext)
+	if (split_ext) {
+		char nhtl_arch_name[NHLT_ARCH_NAME_LEN] = "";
+
+		/*
+		 * If the topology embedded NHLT is requested to be used with
+		 * the sof-hda-generic topology and we have detected DMICs then
+		 * we need to include the NHLT architecture string into the
+		 * name.
+		 * The NHLT architecture string is only needed for IPC4, all IPC3
+		 * platforms are using the same NHLT architecture and does not
+		 * need differentiating sub-string.
+		 */
+		if (hda_use_tplg_nhlt && sdev->pdata->ipc_type == SOF_IPC_TYPE_4 &&
+		    !strcmp(split_ext, "sof-hda-generic") && strlen(dmic_str))
+			get_nhlt_arch_string(sdev, nhtl_arch_name);
+
 		tplg_filename = devm_kasprintf(sdev->dev, GFP_KERNEL,
-					       "%s%s%s.tplg",
-					       split_ext, idisp_str, dmic_str);
+					       "%s%s%s%s.tplg",
+					       split_ext, nhtl_arch_name,
+					       idisp_str, dmic_str);
+	}
 	kfree(filename);
 
 	return tplg_filename;
