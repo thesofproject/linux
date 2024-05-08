@@ -104,7 +104,13 @@ struct snd_pcm_ops {
 
 #define SNDRV_PCM_POS_XRUN		((snd_pcm_uframes_t)-1)
 
-/* If you change this don't forget to change rates[] table in pcm_native.c */
+/* If you change this don't forget to change rates[] table in pcm_native.c
+ *
+ * In 2017, these bits were copied to (at least) "tplg_local.h"; see alsa-lib
+ * commit c550a421a3.  So this is a de-facto user space ABI now.  The
+ * (2013!) recommendation is to use SNDRV_PCM_RATE_KNOT, see
+ * https://lore.kernel.org/alsa-devel/s5h1u6mk3dm.wl%25tiwai@suse.de/
+ */
 #define SNDRV_PCM_RATE_5512		(1U<<0)		/* 5512Hz */
 #define SNDRV_PCM_RATE_8000		(1U<<1)		/* 8000Hz */
 #define SNDRV_PCM_RATE_11025		(1U<<2)		/* 11025Hz */
@@ -124,7 +130,7 @@ struct snd_pcm_ops {
 #define SNDRV_PCM_RATE_768000		(1U<<16)	/* 768000Hz */
 
 #define SNDRV_PCM_RATE_CONTINUOUS	(1U<<30)	/* continuous range */
-#define SNDRV_PCM_RATE_KNOT		(1U<<31)	/* supports more non-continuos rates */
+#define SNDRV_PCM_RATE_KNOT		(1U<<31)	/* supports more non-continuous rates */
 
 #define SNDRV_PCM_RATE_8000_44100	(SNDRV_PCM_RATE_8000|SNDRV_PCM_RATE_11025|\
 					 SNDRV_PCM_RATE_16000|SNDRV_PCM_RATE_22050|\
