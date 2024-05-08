@@ -1023,6 +1023,7 @@ struct hda_dai_widget_dma_ops {
 					    struct snd_pcm_substream *substream);
 };
 
+extern bool hda_use_tplg_nhlt;
 const struct hda_dai_widget_dma_ops *
 hda_select_dai_widget_ops(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget);
 int hda_dai_config(struct snd_soc_dapm_widget *w, unsigned int flags,

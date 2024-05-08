@@ -25,7 +25,8 @@
  * The default method is to fetch NHLT from BIOS. With this parameter set
  * it is possible to override that with NHLT in the SOF topology manifest.
  */
-static bool hda_use_tplg_nhlt;
+bool hda_use_tplg_nhlt;
+EXPORT_SYMBOL_NS(hda_use_tplg_nhlt, SND_SOC_SOF_INTEL_HDA_COMMON);
 module_param_named(sof_use_tplg_nhlt, hda_use_tplg_nhlt, bool, 0444);
 MODULE_PARM_DESC(sof_use_tplg_nhlt, "SOF topology nhlt override");
 
