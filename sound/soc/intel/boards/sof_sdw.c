@@ -795,8 +795,15 @@ static struct sof_sdw_codec_info codec_info_list[] = {
 				.widgets = generic_spk_widgets,
 				.num_widgets = ARRAY_SIZE(generic_spk_widgets),
 			},
+			{
+				.direction = {false, true},
+				.dai_name = "rt712-sdca-aif3",
+				.dai_type = SOF_SDW_DAI_TYPE_MIC,
+				.dailink = {SDW_UNUSED_DAI_ID, SDW_DMIC_DAI_ID},
+				.rtd_init = rt_dmic_rtd_init,
+			},
 		},
-		.dai_num = 2,
+		.dai_num = 3,
 	},
 	{
 		.part_id = 0x1712,
