@@ -13,6 +13,7 @@
 #include <linux/types.h>
 #include <sound/soc.h>
 #include "sof_hdmi_common.h"
+#include "../../sdw_utils/soc_sdw_utils.h"
 
 #define MAX_NO_PROPS 2
 #define MAX_HDMI_NUM 4
@@ -133,14 +134,6 @@ struct mc_private {
 };
 
 extern unsigned long sof_sdw_quirk;
-
-int sdw_startup(struct snd_pcm_substream *substream);
-int sdw_prepare(struct snd_pcm_substream *substream);
-int sdw_trigger(struct snd_pcm_substream *substream, int cmd);
-int sdw_hw_params(struct snd_pcm_substream *substream,
-		  struct snd_pcm_hw_params *params);
-int sdw_hw_free(struct snd_pcm_substream *substream);
-void sdw_shutdown(struct snd_pcm_substream *substream);
 
 /* generic HDMI support */
 int sof_sdw_hdmi_init(struct snd_soc_pcm_runtime *rtd);
