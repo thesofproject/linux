@@ -76,4 +76,7 @@ const char *asoc_sdw_get_codec_name(struct device *dev,
 				    const struct snd_soc_acpi_link_adr *adr_link,
 				    int adr_index);
 
+/* DMIC support */
+int asoc_sdw_dmic_init(struct snd_soc_pcm_runtime *rtd);
+
 #endif
