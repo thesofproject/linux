@@ -9,6 +9,7 @@
 #include <linux/acpi.h>
 #include <linux/soundwire/sdw.h>
 #include <sound/sdca.h>
+#include <sound/sdca_function.h>
 
 void sdca_lookup_interface_revision(struct sdw_slave *slave)
 {
@@ -22,3 +23,30 @@ void sdca_lookup_interface_revision(struct sdw_slave *slave)
 				 &slave->sdca_data.interface_revision);
 }
 EXPORT_SYMBOL_NS(sdca_lookup_interface_revision, SND_SOC_SDCA);
+
+bool sdca_device_quirk_match(struct sdw_slave *slave, enum sdca_quirk quirk)
+{
+	struct sdw_slave_id *id = &slave->id;
+
+	switch (quirk) {
+	case SDCA_QUIRKS_RT712_VB:
+		/*
+		 * The RT712_VA relies on the v06r04 draft, and the
+		 * RT712_VB on a more recent v08r01 draft.
+		 */
+		if ((slave->sdca_data.interface_revision >= 0x0801) &&
+		    (slave->sdca_data.function_mask &
+		     BIT(SDCA_FUNCTION_TYPE_SMART_MIC)) &&
+		    (id->mfg_id == 0x025d) &&
+		    ((id->part_id == 0x712) ||
+		     (id->part_id == 0x713) ||
+		     (id->part_id == 0x716) ||
+		     (id->part_id == 0x717)))
+			return true;
+		break;
+	default:
+		break;
+	}
+	return false;
+}
+EXPORT_SYMBOL_NS(sdca_device_quirk_match, SND_SOC_SDCA);

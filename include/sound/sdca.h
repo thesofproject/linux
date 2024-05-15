@@ -22,16 +22,24 @@ struct sdca_device_data {
 	u32 function_mask;
 };
 
+enum sdca_quirk {
+	SDCA_QUIRKS_RT712_VB,
+};
+
 #if IS_ENABLED(CONFIG_ACPI) && IS_ENABLED(CONFIG_SND_SOC_SDCA)
 
 void sdca_lookup_function_mask(struct sdw_slave *slave);
 void sdca_lookup_interface_revision(struct sdw_slave *slave);
+bool sdca_device_quirk_match(struct sdw_slave *slave, enum sdca_quirk quirk);
 
 #else
 
 static inline void sdca_lookup_function_mask(struct sdw_slave *slave) {}
 static inline void sdca_lookup_interface_revision(struct sdw_slave *slave) {}
-
+static inline bool sdca_device_quirk_match(struct sdw_slave *slave, enum sdca_quirk quirk)
+{
+	return false;
+}
 #endif
 
 #endif
