@@ -9,6 +9,8 @@
 #include <sound/soc-acpi.h>
 #include <sound/soc-acpi-intel-match.h>
 #include <sound/soc-acpi-intel-ssp-common.h>
+#include <sound/sdca.h>
+#include <linux/soundwire/sdw_intel.h>
 #include "soc-acpi-intel-sdw-mockup-match.h"
 
 static const struct snd_soc_acpi_codecs mtl_rt5682_rt5682s_hp = {
@@ -126,6 +128,27 @@ static const struct snd_soc_acpi_endpoint rt712_endpoints[] = {
 	},
 };
 
+static const struct snd_soc_acpi_endpoint rt712_vb_endpoints[] = {
+	{
+		.num = 0,
+		.aggregated = 0,
+		.group_position = 0,
+		.group_id = 0,
+	},
+	{
+		.num = 1,
+		.aggregated = 0,
+		.group_position = 0,
+		.group_id = 0,
+	},
+	{
+		.num = 2,
+		.aggregated = 0,
+		.group_position = 0,
+		.group_id = 0,
+	},
+};
+
 /*
  * RT722 is a multi-function codec, three endpoints are created for
  * its headset, amp and dmic functions.
@@ -179,6 +202,15 @@ static const struct snd_soc_acpi_adr_device rt712_0_single_adr[] = {
 		.adr = 0x000030025D071201ull,
 		.num_endpoints = ARRAY_SIZE(rt712_endpoints),
 		.endpoints = rt712_endpoints,
+		.name_prefix = "rt712"
+	}
+};
+
+static const struct snd_soc_acpi_adr_device rt712_vb_0_single_adr[] = {
+	{
+		.adr = 0x000030025D071201ull,
+		.num_endpoints = ARRAY_SIZE(rt712_vb_endpoints),
+		.endpoints = rt712_vb_endpoints,
 		.name_prefix = "rt712"
 	}
 };
@@ -352,6 +384,15 @@ static const struct snd_soc_acpi_link_adr mtl_712_l0[] = {
 		.mask = BIT(0),
 		.num_adr = ARRAY_SIZE(rt712_0_single_adr),
 		.adr_d = rt712_0_single_adr,
+	},
+	{}
+};
+
+static const struct snd_soc_acpi_link_adr mtl_712_vb_l0[] = {
+	{
+		.mask = BIT(0),
+		.num_adr = ARRAY_SIZE(rt712_vb_0_single_adr),
+		.adr_d = rt712_vb_0_single_adr,
 	},
 	{}
 };
@@ -715,6 +756,31 @@ static const struct snd_soc_acpi_link_adr cs42l43_link0_cs35l56_link2_link3[] = 
 	{}
 };
 
+/*
+ * Pretend machine quirk. The argument type is not the traditional
+ * 'struct snd_soc_acpi_mach' pointer but instead the sdw_intel_ctx
+ * which contains the peripheral information required for the
+ * SoundWire/SDCA filter on the SMART_MIC setup and interface
+ * revision. When the return value is false, the entry in the
+ * 'snd_soc_acpi_mach' table needs to be skipped.
+ */
+static bool is_device_rt712_vb(void *arg)
+{
+	struct sdw_intel_ctx *ctx = arg;
+	int i;
+
+	if (!ctx)
+		return false;
+
+	for (i = 0; i < ctx->peripherals->num_peripherals; i++) {
+		if (sdca_device_quirk_match(ctx->peripherals->array[i],
+					    SDCA_QUIRKS_RT712_VB))
+			return true;
+	}
+
+	return false;
+}
+
 /* this table is used when there is no I2S codec present */
 struct snd_soc_acpi_mach snd_soc_acpi_intel_mtl_sdw_machines[] = {
 	/* mockup tests need to be first */
@@ -765,6 +831,13 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_mtl_sdw_machines[] = {
 		.links = mtl_712_l0_1712_l3,
 		.drv_name = "sof_sdw",
 		.sof_tplg_filename = "sof-mtl-rt712-l0-rt1712-l3.tplg",
+	},
+	{
+		.link_mask = BIT(0),
+		.links = mtl_712_vb_l0,
+		.drv_name = "sof_sdw",
+		.machine_check = is_device_rt712_vb,
+		.sof_tplg_filename = "sof-mtl-rt712-vb-l0.tplg",
 	},
 	{
 		.link_mask = BIT(0),
@@ -835,3 +908,5 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_mtl_sdw_machines[] = {
 	{},
 };
 EXPORT_SYMBOL_GPL(snd_soc_acpi_intel_mtl_sdw_machines);
+
+MODULE_IMPORT_NS(SND_SOC_SDCA);
