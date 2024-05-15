@@ -53,18 +53,6 @@ enum {
 #define SOF_SSP_GET_PORT(quirk)	(((quirk) >> 7) & GENMASK(5, 0))
 /* Deprecated and no longer supported by the code */
 #define SOF_SDW_NO_AGGREGATION		BIT(14)
-/* If a CODEC has an optional speaker output, this quirk will enable it */
-#define SOF_CODEC_SPKR			BIT(15)
-/*
- * If the CODEC has additional devices attached directly to it.
- *
- * For the cs42l43:
- *   - 0 - No speaker output
- *   - SOF_CODEC_SPKR - CODEC internal speaker
- *   - SOF_SIDECAR_AMPS - 2x Sidecar amplifiers + CODEC internal speaker
- *   - SOF_CODEC_SPKR | SOF_SIDECAR_AMPS - Not currently supported
- */
-#define SOF_SIDECAR_AMPS		BIT(16)
 
 /* BT audio offload: reserve 3 bits for future */
 #define SOF_BT_OFFLOAD_SSP_SHIFT	15
@@ -96,35 +84,8 @@ int sof_sdw_maxim_init(struct snd_soc_card *card,
 		       struct sof_sdw_codec_info *info,
 		       bool playback);
 
-/* CS42L43 support */
-int sof_sdw_cs42l43_spk_init(struct snd_soc_card *card,
-			     struct snd_soc_dai_link *dai_links,
-			     struct sof_sdw_codec_info *info,
-			     bool playback);
-
-/* CS AMP support */
-int bridge_cs35l56_count_sidecar(struct snd_soc_card *card,
-				 int *num_dais, int *num_devs);
-int bridge_cs35l56_add_sidecar(struct snd_soc_card *card,
-			       struct snd_soc_dai_link **dai_links,
-			       struct snd_soc_codec_conf **codec_conf);
-int bridge_cs35l56_spk_init(struct snd_soc_card *card,
-			    struct snd_soc_dai_link *dai_links,
-			    struct sof_sdw_codec_info *info,
-			    bool playback);
-
-int sof_sdw_cs_amp_init(struct snd_soc_card *card,
-			struct snd_soc_dai_link *dai_links,
-			struct sof_sdw_codec_info *info,
-			bool playback);
-
 /* dai_link init callbacks */
 
-int cs42l42_rtd_init(struct snd_soc_pcm_runtime *rtd, struct snd_soc_dai *dai);
-int cs42l43_hs_rtd_init(struct snd_soc_pcm_runtime *rtd, struct snd_soc_dai *dai);
-int cs42l43_spk_rtd_init(struct snd_soc_pcm_runtime *rtd, struct snd_soc_dai *dai);
-int cs42l43_dmic_rtd_init(struct snd_soc_pcm_runtime *rtd, struct snd_soc_dai *dai);
-int cs_spk_rtd_init(struct snd_soc_pcm_runtime *rtd, struct snd_soc_dai *dai);
 int maxim_spk_rtd_init(struct snd_soc_pcm_runtime *rtd, struct snd_soc_dai *dai);
 
 #endif
