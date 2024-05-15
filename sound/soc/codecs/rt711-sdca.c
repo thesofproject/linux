@@ -85,15 +85,15 @@ static void rt711_sdca_ge_force_jack_type(struct rt711_sdca_priv *rt711, unsigne
 {
 	switch (det_mode) {
 	case 0x00:
-		rt711_sdca_index_update_bits(rt711, RT711_VENDOR_REG, RT711_COMBO_JACK_AUTO_CTL1, 0x8000, 0x0000);
+		rt711_sdca_index_update_bits(rt711, RT711_VENDOR_REG, RT711_COMBO_JACK_AUTO_CTL1, 0x8400, 0x0000);
 		rt711_sdca_index_update_bits(rt711, RT711_VENDOR_HDA_CTL, RT711_PUSH_BTN_INT_CTL0, 0x10, 0x00);
 		break;
 	case 0x03:
-		rt711_sdca_index_update_bits(rt711, RT711_VENDOR_REG, RT711_COMBO_JACK_AUTO_CTL1, 0x8000, 0x8000);
+		rt711_sdca_index_update_bits(rt711, RT711_VENDOR_REG, RT711_COMBO_JACK_AUTO_CTL1, 0x8400, 0x8000);
 		rt711_sdca_index_update_bits(rt711, RT711_VENDOR_HDA_CTL, RT711_PUSH_BTN_INT_CTL0, 0x17, 0x13);
 		break;
 	case 0x05:
-		rt711_sdca_index_update_bits(rt711, RT711_VENDOR_REG, RT711_COMBO_JACK_AUTO_CTL1, 0x8000, 0x8000);
+		rt711_sdca_index_update_bits(rt711, RT711_VENDOR_REG, RT711_COMBO_JACK_AUTO_CTL1, 0x8400, 0x8400);
 		rt711_sdca_index_update_bits(rt711, RT711_VENDOR_HDA_CTL, RT711_PUSH_BTN_INT_CTL0, 0x17, 0x15);
 		break;
 	}
@@ -285,7 +285,7 @@ static int rt711_sdca_headset_detect(struct rt711_sdca_priv *rt711)
 		break;
 	}
 
-	if (rt711->ge_mode_override) {
+	if (rt711->ge_mode_override || (det_mode == 0)) {
 		if ((det_mode != rt711->ge_mode_override) && det_mode) {
 			det_mode = rt711->ge_mode_override;
 			rt711->jack_type =
