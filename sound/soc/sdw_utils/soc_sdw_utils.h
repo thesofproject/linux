@@ -130,6 +130,8 @@ struct snd_soc_dai_link *asoc_sdw_mc_find_codec_dai_used(struct snd_soc_card *ca
 
 void asoc_sdw_mc_dailink_exit_loop(struct snd_soc_card *card);
 
+int asoc_sdw_card_late_probe(struct snd_soc_card *card);
+
 int asoc_sdw_rt_sdca_jack_exit(struct snd_soc_card *card,
 			       struct snd_soc_dai_link *dai_link);
 
