@@ -182,7 +182,7 @@ bool asoc_sdw_is_unique_device(const struct snd_soc_acpi_link_adr *adr_link,
 EXPORT_SYMBOL_NS(asoc_sdw_is_unique_device, SND_SOC_SDW_UTILS);
 
 const char *asoc_sdw_get_codec_name(struct device *dev,
-				    const struct sof_sdw_codec_info *codec_info,
+				    const struct asoc_sdw_codec_info *codec_info,
 				    const struct snd_soc_acpi_link_adr *adr_link,
 				    int adr_index)
 {
