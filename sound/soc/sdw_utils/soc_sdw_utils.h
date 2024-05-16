@@ -92,6 +92,9 @@ struct asoc_sdw_mc_private {
 	unsigned long mc_quirk;
 };
 
+extern struct asoc_sdw_codec_info codec_info_list[];
+int asoc_sdw_get_codec_info_list_size(void);
+
 int asoc_sdw_startup(struct snd_pcm_substream *substream);
 int asoc_sdw_prepare(struct snd_pcm_substream *substream);
 int asoc_sdw_prepare(struct snd_pcm_substream *substream);
@@ -112,6 +115,15 @@ const char *asoc_sdw_get_codec_name(struct device *dev,
 				    const struct asoc_sdw_codec_info *codec_info,
 				    const struct snd_soc_acpi_link_adr *adr_link,
 				    int adr_index);
+
+struct asoc_sdw_codec_info *asoc_sdw_find_codec_info_part(const u64 adr);
+
+struct asoc_sdw_codec_info *asoc_sdw_find_codec_info_acpi(const u8 *acpi_id);
+
+struct asoc_sdw_codec_info *asoc_sdw_find_codec_info_dai(const char *dai_name,
+							 int *dai_index);
+
+int asoc_sdw_rtd_init(struct snd_soc_pcm_runtime *rtd);
 
 int asoc_sdw_rt_sdca_jack_exit(struct snd_soc_card *card,
 			       struct snd_soc_dai_link *dai_link);
