@@ -2795,6 +2795,7 @@ static int soc_get_playback_capture(struct snd_soc_pcm_runtime *rtd,
 {
 	struct snd_soc_dai_link *dai_link = rtd->dai_link;
 	struct snd_soc_dai *cpu_dai;
+	struct snd_soc_dai *codec_dai;
 	struct snd_soc_dai_link_ch_map *ch_maps;
 	int has_playback = 0;
 	int has_capture  = 0;
@@ -2806,15 +2807,25 @@ static int soc_get_playback_capture(struct snd_soc_pcm_runtime *rtd,
 	}
 
 	if (dai_link->dynamic || dai_link->no_pcm) {
+		int has_playback_both = 0;
+		int has_capture_both = 0;
 
 		for_each_rtd_ch_maps(rtd, i, ch_maps) {
 			cpu_dai	  = snd_soc_rtd_to_cpu(rtd,   ch_maps->cpu);
+			codec_dai = snd_soc_rtd_to_codec(rtd, ch_maps->codec);
 
 			if (snd_soc_dai_stream_valid(cpu_dai, SNDRV_PCM_STREAM_PLAYBACK))
 				has_playback = 1;
 
 			if (snd_soc_dai_stream_valid(cpu_dai, SNDRV_PCM_STREAM_CAPTURE))
 				has_capture = 1;
+
+			if (snd_soc_dai_stream_valid(codec_dai, SNDRV_PCM_STREAM_PLAYBACK) &&
+			    snd_soc_dai_stream_valid(cpu_dai,   SNDRV_PCM_STREAM_PLAYBACK))
+				has_playback_both = 1;
+			if (snd_soc_dai_stream_valid(codec_dai, SNDRV_PCM_STREAM_CAPTURE) &&
+			    snd_soc_dai_stream_valid(cpu_dai,   SNDRV_PCM_STREAM_CAPTURE))
+				has_capture_both = 1;
 		}
 
 		/*
@@ -2850,9 +2861,39 @@ static int soc_get_playback_capture(struct snd_soc_pcm_runtime *rtd,
 				has_playback = 0;
 			}
 		}
-	} else {
-		struct snd_soc_dai *codec_dai;
 
+		/*
+		 * REMOVE ME
+		 *
+		 * Current DPCM is checking CPU side only, but both CPU and Codec should be
+		 * checked. Indicate warning if there was CPU / Codec mismatch.
+		 * To keep compatibility, warning only for now.
+		 */
+		if ((dai_link->dpcm_playback || dai_link->playback_only) &&
+		    !has_playback_both)
+			dev_warn(rtd->card->dev,
+				 "System requests playback, but not available (%s)."
+				 " Please update Codec driver\n",
+				 dai_link->stream_name);
+		if ((dai_link->dpcm_capture || dai_link->capture_only) &&
+		     !has_capture_both)
+			dev_warn(rtd->card->dev,
+				 "System requests capture, but not available (%s)."
+				 " Please update Codec driver\n",
+				 dai_link->stream_name);
+
+		/*
+		 * REMOVE ME
+		 *
+		 * In case of there was no dpcm_xxx flag, and CPU / Codec mismatch,
+		 * follow new style
+		 */
+		if (!dai_link->dpcm_playback && has_playback)
+			has_playback = has_playback_both;
+		if (!dai_link->dpcm_capture && has_capture)
+			has_capture = has_capture_both;
+
+	} else {
 		/* Adapt stream for codec2codec links */
 		int cpu_capture  = snd_soc_get_stream_cpu(dai_link, SNDRV_PCM_STREAM_CAPTURE);
 		int cpu_playback = snd_soc_get_stream_cpu(dai_link, SNDRV_PCM_STREAM_PLAYBACK);
