@@ -46,6 +46,7 @@
 #include <linux/uaccess.h>
 
 #include <trace/events/timer.h>
+#include <trace/hooks/syscall_check.h>
 
 #include "tick-internal.h"
 
@@ -2195,6 +2196,7 @@ SYSCALL_DEFINE2(nanosleep, struct __kernel_timespec __user *, rqtp,
 	if (!timespec64_valid(&tu))
 		return -EINVAL;
 
+	trace_android_vh_check_nanosleep_syscall(&tu);
 	current->restart_block.fn = do_no_restart_syscall;
 	current->restart_block.nanosleep.type = rmtp ? TT_NATIVE : TT_NONE;
 	current->restart_block.nanosleep.rmtp = rmtp;
@@ -2217,6 +2219,7 @@ SYSCALL_DEFINE2(nanosleep_time32, struct old_timespec32 __user *, rqtp,
 	if (!timespec64_valid(&tu))
 		return -EINVAL;
 
+	trace_android_vh_check_nanosleep_syscall(&tu);
 	current->restart_block.fn = do_no_restart_syscall;
 	current->restart_block.nanosleep.type = rmtp ? TT_COMPAT : TT_NONE;
 	current->restart_block.nanosleep.compat_rmtp = rmtp;
