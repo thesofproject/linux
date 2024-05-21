@@ -10,6 +10,7 @@
 #define __SDCA_H__
 
 struct sdw_slave;
+struct sdca_dev;
 
 #define SDCA_MAX_INTERRUPTS 31 /* the last bit is reserved for future extensions */
 
@@ -56,12 +57,14 @@ struct sdca_interrupt_info {
 /**
  * sdca_device_desc - short descriptor for an SDCA Function
  * @function_node: firmware node for the Function
+ * @func_dev: pointer to SDCA function device.
  * @adr: ACPI address (used for SDCA register access)
  * @type: Function topology type
  * @name: human-readable string
  */
 struct sdca_function_desc {
 	struct fwnode_handle *function_node;
+	struct sdca_dev *func_dev;
 	u64 adr;
 	u32 type;
 	const char *name;
@@ -92,6 +95,8 @@ enum sdca_quirk {
 void sdca_lookup_functions(struct sdw_slave *slave);
 void sdca_lookup_interface_revision(struct sdw_slave *slave);
 bool sdca_device_quirk_match(struct sdw_slave *slave, enum sdca_quirk quirk);
+int sdca_dev_register_functions(struct sdw_slave *slave);
+void sdca_dev_unregister_functions(struct sdw_slave *slave);
 
 #else
 
@@ -101,6 +106,13 @@ static inline bool sdca_device_quirk_match(struct sdw_slave *slave, enum sdca_qu
 {
 	return false;
 }
+
+static inline int sdca_dev_register_functions(struct sdw_slave *slave)
+{
+	return 0;
+}
+
+static inline void sdca_dev_unregister_functions(struct sdw_slave *slave) {}
 
 #endif
 
