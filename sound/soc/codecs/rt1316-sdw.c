@@ -701,6 +701,12 @@ static int rt1316_sdw_init(struct device *dev, struct regmap *regmap,
 
 	dev_dbg(dev, "%s\n", __func__);
 
+	{
+		dev_info(dev, "%s: plb: before register_functions\n", __func__);
+		ret = sdca_dev_register_functions(slave);
+		dev_info(dev, "%s: plb: after register_functions, ret %d\n", __func__, ret);
+	}
+
 	return 0;
 }
 
@@ -720,6 +726,12 @@ static int rt1316_sdw_probe(struct sdw_slave *slave,
 static int rt1316_sdw_remove(struct sdw_slave *slave)
 {
 	pm_runtime_disable(&slave->dev);
+
+	{
+		dev_info(&slave->dev, "%s: plb: before unregister_functions\n", __func__);
+		sdca_dev_unregister_functions(slave);
+		dev_info(&slave->dev, "%s: plb: after unregister_functions\n", __func__);
+	}
 
 	return 0;
 }
@@ -793,3 +805,4 @@ module_sdw_driver(rt1316_sdw_driver);
 MODULE_DESCRIPTION("ASoC RT1316 driver SDCA SDW");
 MODULE_AUTHOR("Shuming Fan <shumingf@realtek.com>");
 MODULE_LICENSE("GPL");
+MODULE_IMPORT_NS(SND_SOC_SDCA);

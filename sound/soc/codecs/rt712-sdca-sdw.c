@@ -368,6 +368,12 @@ static int rt712_sdca_sdw_remove(struct sdw_slave *slave)
 	mutex_destroy(&rt712->calibrate_mutex);
 	mutex_destroy(&rt712->disable_irq_lock);
 
+	{
+		dev_info(&slave->dev, "%s: plb: before unregister_functions\n", __func__);
+		sdca_dev_unregister_functions(slave);
+		dev_info(&slave->dev, "%s: plb: after unregister_functions\n", __func__);
+	}
+
 	return 0;
 }
 
@@ -487,3 +493,4 @@ module_sdw_driver(rt712_sdca_sdw_driver);
 MODULE_DESCRIPTION("ASoC RT712 SDCA SDW driver");
 MODULE_AUTHOR("Shuming Fan <shumingf@realtek.com>");
 MODULE_LICENSE("GPL");
+MODULE_IMPORT_NS(SND_SOC_SDCA);
