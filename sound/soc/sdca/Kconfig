@@ -3,9 +3,35 @@
 config SND_SOC_SDCA
 	tristate "ASoC SDCA library"
 	depends on ACPI
+	select AUXILIARY_BUS
 	help
 	  This option enables support for the MIPI SoundWire Device
 	  Class for Audio (SDCA).
 
 config SND_SOC_SDCA_OPTIONAL
 	def_tristate SND_SOC_SDCA || !SND_SOC_SDCA
+
+config SND_SOC_SDCA_SMART_AMP
+	tristate "ASoC SDCA SmartAmp driver"
+	depends on SND_SOC_SDCA
+	help
+	  This option enables support for the MIPI SDCA SmartAmp Function driver.
+
+config SND_SOC_SDCA_UAJ
+	tristate "ASoC SDCA UAJ"
+	depends on SND_SOC_SDCA
+	help
+	  This option enables support for the MIPI SDCA Universal Audio Jack
+	  Function driver.
+
+config SND_SOC_SDCA_SMART_MIC
+	tristate "ASoC SDCA SmartMic driver"
+	depends on SND_SOC_SDCA
+	help
+	  This option enables support for the MIPI SDCA SmartMic Function driver.
+
+config SND_SOC_SDCA_HID
+	tristate "ASoC SDCA HID driver"
+	depends on SND_SOC_SDCA
+	help
+	  This option enables support for the MIPI SDCA HID Function driver.
