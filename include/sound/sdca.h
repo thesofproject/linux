@@ -55,11 +55,13 @@ struct sdca_interrupt_info {
 
 /**
  * sdca_device_desc - short descriptor for an SDCA Function
+ * @function_node: firmware node for the Function
  * @adr: ACPI address (used for SDCA register access)
  * @type: Function topology type
  * @name: human-readable string
  */
 struct sdca_function_desc {
+	struct fwnode_handle *function_node;
 	u64 adr;
 	u32 type;
 	const char *name;
