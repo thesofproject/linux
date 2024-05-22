@@ -170,6 +170,237 @@ void sdca_lookup_functions(struct sdw_slave *slave)
 }
 EXPORT_SYMBOL_NS(sdca_lookup_functions, SND_SOC_SDCA);
 
+static int find_sdca_entities(struct device *dev,
+			      struct fwnode_handle *function_node,
+			      struct sdca_function_data *function)
+{
+	struct fwnode_handle *entity_node;
+	struct sdca_entity *entities;
+	char entity_property[40];
+	int num_entities;
+	u32 *entity_list;
+	u32 entity_type;
+	int ret;
+	int i;
+
+	num_entities = fwnode_property_count_u32(function_node,
+						 "mipi-sdca-entity-id-list");
+	if (num_entities <= 0) {
+		dev_err(dev, "%s: %s property access failed %d\n",
+			__func__, "mipi-sdca-entity-id-list",
+			num_entities);
+		return -EINVAL;
+	}
+	if (num_entities >  SDCA_MAX_ENTITY_COUNT) {
+		dev_err(dev, "%s: invalid entity count %d, max allowed %d\n",
+			__func__, num_entities, SDCA_MAX_ENTITY_COUNT);
+		return -EINVAL;
+	}
+
+	entities = devm_kcalloc(dev, num_entities, sizeof(*entities), GFP_KERNEL);
+	if (!entities)
+		return -ENOMEM;
+
+	entity_list = kcalloc(num_entities, sizeof(u32), GFP_KERNEL);
+	if (!entity_list)
+		return -ENOMEM;
+
+	fwnode_property_read_u32_array(function_node,
+				       "mipi-sdca-entity-id-list",
+				       entity_list,
+				       num_entities);
+
+	for (i = 0; i < num_entities; i++)
+		entities[i].id = entity_list[i];
+
+	kfree(entity_list);
+
+	/* now read subproperties */
+	for (i = 0; i < num_entities; i++) {
+		const char *label;
+
+		/* DisCo uses upper-case for hex numbers */
+		snprintf(entity_property, sizeof(entity_property),
+			 "mipi-sdca-entity-id-0x%X-subproperties",
+			 entities[i].id);
+
+		entity_node = fwnode_get_named_child_node(function_node,
+							  entity_property);
+		if (!entity_node) {
+			dev_err(dev, "%s: %pfwP: property %s not found\n",
+				__func__, function_node, entity_property);
+			return -EINVAL;
+		}
+
+		fwnode_property_read_u32(entity_node, "mipi-sdca-entity-type",
+					 &entity_type);
+		entities[i].entity_type = entity_type;
+
+		ret = fwnode_property_read_string(entity_node, "mipi-sdca-entity-label", &label);
+		if (ret) {
+			/* Not all entities have labels, log and ignore */
+			dev_dbg(dev, "%pfwP: entity %#x property %s not found\n",
+				function, entities[i].id,
+				"mipi-sdca-entity-label");
+		} else {
+			entities[i].label = devm_kasprintf(dev, GFP_KERNEL, "%s", label);
+			if (!entities[i].label) {
+				fwnode_handle_put(entity_node);
+				return -ENOMEM;
+			}
+		}
+
+		fwnode_handle_put(entity_node);
+
+		dev_info(dev, "%s: %pfwP: found entity %#x type %#x label %s\n",
+			 __func__, function_node,
+			 entities[i].id,
+			 entities[i].entity_type,
+			 entities[i].label);
+	}
+
+	function->num_entities = num_entities;
+	function->entities = entities;
+
+	return 0;
+}
+
+static struct sdca_entity *find_sdca_entity_by_label(struct sdca_function_data *function,
+						     const char *label)
+{
+	int i;
+
+	for (i = 0; i < function->num_entities; i++) {
+		struct sdca_entity *entity;
+
+		entity = &function->entities[i];
+
+		if (!strcmp(entity->label, label))
+			return entity;
+	}
+
+	return NULL;
+}
+
+static int find_sdca_entity_connection(struct device *dev,
+				       struct fwnode_handle *function_node,
+				       struct sdca_function_data *function,
+				       struct fwnode_handle *entity_node,
+				       struct sdca_entity *entity)
+{
+	u64 input_pin_list;
+	int pin;
+
+	fwnode_property_read_u64(entity_node, "mipi-sdca-input-pin-list",
+				 &input_pin_list);
+
+	if (!input_pin_list)
+		return 0;
+
+	/*
+	 * Each bit set in the input-pin-list refers to an entity_id
+	 *  in this Function. Entity0 is an illegal connection since
+	 *  it is used for Function-level configurations
+	 */
+	if (input_pin_list & BIT(0)) {
+		dev_err(dev, "%s: %pfwP: entity_id %#x has invalid input_pin 0\n",
+			__func__, function_node, entity->id);
+		return -EINVAL;
+	}
+
+	for (pin = 1; pin < 64; pin++) {
+		struct fwnode_handle *connected_node;
+		struct sdca_entity *connected_entity;
+		const char *connected_label;
+		char pin_property[40];
+		int ret;
+
+		if (!(input_pin_list & BIT(pin)))
+			continue;
+
+		snprintf(pin_property, sizeof(pin_property),
+			 "mipi-sdca-input-pin-%d", pin);
+
+		connected_node = fwnode_get_named_child_node(entity_node,
+							     pin_property);
+		if (!connected_node) {
+			dev_err(dev, "%s: %pfwP: entity_id %#x: input pin %s not found\n",
+				__func__, function_node, entity->id, pin_property);
+			return -EINVAL;
+		}
+
+		ret = fwnode_property_read_string(connected_node,
+						  "mipi-sdca-entity-label",
+						  &connected_label);
+		if (ret) {
+			dev_err(dev, "%s: %pfwP: entity_id %#x: could not find label for connection %s\n",
+				__func__, function_node, entity->id, pin_property);
+			goto out;
+		}
+
+		connected_entity = find_sdca_entity_by_label(function, connected_label);
+		if (!connected_entity) {
+			dev_err(dev, "%s: %pfwP: entity_id %#x: could not find entity with label %s\n",
+				__func__, function_node, entity->id, connected_label);
+			ret = -EINVAL;
+			goto out;
+		}
+
+		dev_info(dev, "%s: %pfwP: entity_id %#x: input entity_id %#x\n",
+			 __func__, function_node, entity->id, connected_entity->id);
+
+		entity->sources[entity->source_count++] = connected_entity->id;
+		connected_entity->sinks[connected_entity->sink_count++] = entity->id;
+
+out:
+		fwnode_handle_put(connected_node);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+static int find_sdca_entities_connections(struct device *dev,
+					  struct fwnode_handle *function_node,
+					  struct sdca_function_data *function)
+{
+	int ret;
+	int i;
+
+	for (i = 0; i < function->num_entities; i++) {
+		struct fwnode_handle *entity_node;
+		struct sdca_entity *entity;
+		char entity_property[40];
+
+		entity = &function->entities[i];
+
+		/* DisCo uses upper-case for hex numbers */
+		snprintf(entity_property, sizeof(entity_property),
+			 "mipi-sdca-entity-id-0x%X-subproperties",
+			 entity->id);
+
+		entity_node = fwnode_get_named_child_node(function_node,
+							  entity_property);
+		if (!entity_node) {
+			dev_err(dev, "%s: %pfwP: property %s not found\n",
+				__func__, function_node, entity_property);
+			return -EINVAL;
+		}
+
+		ret = find_sdca_entity_connection(dev,
+						  function_node,
+						  function,
+						  entity_node,
+						  entity);
+		fwnode_handle_put(entity_node);
+
+		if (ret)
+			return ret;
+	}
+	return 0;
+}
+
 static int find_sdca_function_initialization_table(struct device *dev,
 						   struct fwnode_handle *function_node,
 						   u8 **table, int *table_size)
@@ -262,6 +493,47 @@ int sdca_function_extract_initialization_table(struct sdw_slave *slave,
 						       table, table_size);
 }
 EXPORT_SYMBOL_NS(sdca_function_extract_initialization_table, SND_SOC_SDCA);
+
+/**
+ * sdca_parse_function - parse SDCA information reported in ACPI in the scope of
+ * a Function device
+ *
+ * @dev: a SDCA device (NOT the parent SoundWire device!)
+ * @function_node: firmware node for the Function
+ * @function: pointer to SDCA storage structure
+ */
+int sdca_parse_function(struct device *dev,
+			struct fwnode_handle *function_node,
+			struct sdca_function_data *function)
+{
+	int ret;
+
+	ret = find_sdca_entities(dev, function_node, function);
+	if (ret < 0) {
+		dev_err(dev, "%s: find_sdca_entities failed: %d\n",
+			__func__, ret);
+		return ret;
+	}
+
+	ret = find_sdca_entities_connections(dev, function_node, function);
+	if (ret < 0) {
+		dev_err(dev, "%s: find_sdca_entities_connections failed: %d\n",
+			__func__, ret);
+		return ret;
+	}
+
+	ret = find_sdca_function_initialization_table(dev, function_node,
+						      &function->initialization_table,
+						      &function->initialization_table_size);
+	if (ret < 0) {
+		dev_err(dev, "%s: find_sdca_function_initialization_table failed: %d\n",
+			__func__, ret);
+		return ret;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_NS(sdca_parse_function, SND_SOC_SDCA);
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("SDCA library");
