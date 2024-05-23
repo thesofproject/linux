@@ -2827,11 +2827,11 @@ static int soc_get_playback_capture(struct snd_soc_pcm_runtime *rtd,
 			if ( dai_link->dpcm_playback &&
 			    !dai_link->dpcm_capture  &&
 			    !dai_link->playback_only) {
-				dev_warn(rtd->card->dev,
+				dev_err(rtd->card->dev,
 					 "both playback/capture are available,"
 					 " but not using playback_only flag (%s)\n",
 					 dai_link->stream_name);
-				dev_warn(rtd->card->dev,
+				dev_err(rtd->card->dev,
 					 "dpcm_playback/capture are no longer needed,"
 					 " please use playback/capture_only instead\n");
 				has_capture = 0;
