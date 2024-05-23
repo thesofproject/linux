@@ -2810,11 +2810,23 @@ static int soc_get_playback_capture(struct snd_soc_pcm_runtime *rtd,
 		for_each_rtd_ch_maps(rtd, i, ch_maps) {
 			cpu_dai	  = snd_soc_rtd_to_cpu(rtd,   ch_maps->cpu);
 
-			if (snd_soc_dai_stream_valid(cpu_dai, SNDRV_PCM_STREAM_PLAYBACK))
+			if (snd_soc_dai_stream_valid(cpu_dai, SNDRV_PCM_STREAM_PLAYBACK)) {
+				dev_info(rtd->card->dev,
+					 "stream %s dai %s has_playback=1 dynamic %d no_pcm %d\n",
+					 dai_link->stream_name,
+					 cpu_dai->name,
+					 dai_link->dynamic, dai_link->no_pcm);
 				has_playback = 1;
+			}
 
-			if (snd_soc_dai_stream_valid(cpu_dai, SNDRV_PCM_STREAM_CAPTURE))
+			if (snd_soc_dai_stream_valid(cpu_dai, SNDRV_PCM_STREAM_CAPTURE)) {
+				dev_info(rtd->card->dev,
+					 "stream %s dai %s has_capture=1 dynamic %d no_pcm %d\n",
+					 dai_link->stream_name,
+					 cpu_dai->name,
+					 dai_link->dynamic, dai_link->no_pcm);
 				has_capture = 1;
+			}
 		}
 
 		/*
