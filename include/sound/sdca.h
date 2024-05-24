@@ -15,11 +15,13 @@ struct sdw_slave;
 
 /**
  * sdca_device_desc - short descriptor for an SDCA Function
+ * @function_node: firmware node for the Function
  * @adr: ACPI address (used for SDCA register access)
  * @type: Function topology type
  * @name: human-readable string
  */
 struct sdca_function_desc {
+	struct fwnode_handle *function_node;
 	u64 adr;
 	u32 type;
 	const char *name;
@@ -48,7 +50,9 @@ enum sdca_quirk {
 void sdca_lookup_functions(struct sdw_slave *slave);
 void sdca_lookup_interface_revision(struct sdw_slave *slave);
 bool sdca_device_quirk_match(struct sdw_slave *slave, enum sdca_quirk quirk);
-
+int sdca_function_extract_initialization_table(struct sdw_slave *slave,
+					       u64 adr, u32 type,
+					       u8 **table, int *table_size);
 #else
 
 static inline void sdca_lookup_functions(struct sdw_slave *slave) {}
@@ -57,6 +61,14 @@ static inline bool sdca_device_quirk_match(struct sdw_slave *slave, enum sdca_qu
 {
 	return false;
 }
+
+static inline int sdca_function_extract_initialization_table(struct sdw_slave *slave,
+							     u64 adr, u32 type,
+							     u8 **table, int *table_size)
+{
+	return 0;
+}
+
 #endif
 
 #endif

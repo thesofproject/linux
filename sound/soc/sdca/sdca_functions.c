@@ -155,6 +155,7 @@ static int find_sdca_function(struct acpi_device *adev, void *data)
 	sdca_data->sdca_func[func_index].adr = addr;
 	sdca_data->sdca_func[func_index].type = function_type;
 	sdca_data->sdca_func[func_index].name = function_name;
+	sdca_data->sdca_func[func_index].function_node = function_node;
 	sdca_data->num_functions++;
 
 	return 0;
@@ -168,6 +169,99 @@ void sdca_lookup_functions(struct sdw_slave *slave)
 	acpi_dev_for_each_child(adev, find_sdca_function, &slave->sdca_data);
 }
 EXPORT_SYMBOL_NS(sdca_lookup_functions, SND_SOC_SDCA);
+
+static int find_sdca_function_initialization_table(struct device *dev,
+						   struct fwnode_handle *function_node,
+						   u8 **table, int *table_size)
+{
+	u8 *initialization_table;
+	int nval;
+	int ret;
+
+	nval = fwnode_property_count_u8(function_node,
+					"mipi-sdca-function-initialization-table");
+	if (nval <= 0)
+		return nval;
+
+	/* make sure the table contains a set of 4-byte addresses and one-byte value */
+	if (nval % 5) {
+		dev_err(dev, "%s: %pfwP: invalid initialization table size %#x\n",
+			__func__, function_node, nval);
+		return -EINVAL;
+	}
+
+	dev_dbg(dev, "%s: %pfwP: initialization table size %#x\n",
+		__func__, function_node, nval);
+
+	/*
+	 * depending on the uses of this function, the dev could be
+	 * the Slave parent, or alternatively the SDCA device if the
+	 * codec driver registered one during its probe.
+	 */
+	initialization_table = devm_kcalloc(dev, nval,
+					    sizeof(*initialization_table),
+					    GFP_KERNEL);
+	if (!initialization_table)
+		return -ENOMEM;
+
+	ret = fwnode_property_read_u8_array(function_node,
+					    "mipi-sdca-function-initialization-table",
+					    initialization_table,
+					    nval);
+	if (ret < 0)
+		return ret;
+
+	*table = initialization_table;
+	*table_size = nval;
+
+	return 0;
+}
+
+/**
+ * sdca_function_extract_initialization_table - check if initialization table
+ * is present for an SDCA function identified by an ADR and type, allocate the
+ * required memory and extract the values from ACPI.
+ *
+ * @slave: parent SoundWire device
+ * @adr: ACPI ADR for the Function. This is required to uniquify cases
+ * where multiple Functions of the same @type are exposed in ACPI tables.
+ * @type: SDCA_FUNCTION_TYPE_XXX
+ * @table: devm_ allocated table of size @table_size, using the @slave device.
+ * @table_size: bytes allocated and extracted from ACPI tables. Note that
+ * this value SHALL be a multiple of 5, since the table include a set of 4-byte
+ * addresses and 1-byte values.
+ */
+
+int sdca_function_extract_initialization_table(struct sdw_slave *slave,
+					       u64 adr, u32 type,
+					       u8 **table, int *table_size)
+{
+	struct sdca_device_data *sdca_data = &slave->sdca_data;
+	int i;
+
+	if (!sdca_data->num_functions) {
+		dev_err(&slave->dev, "%s: device has no SDCA functions\n",
+			__func__);
+		return -EINVAL;
+	}
+
+	for (i = 0; i < sdca_data->num_functions; i++) {
+		if (sdca_data->sdca_func[i].adr == adr &&
+		    sdca_data->sdca_func[i].type == type)
+			break;
+	}
+
+	if (i == sdca_data->num_functions) {
+		dev_err(&slave->dev, "%s: No function found for adr %lld type %d\n",
+			__func__, adr, type);
+		return -EINVAL;
+	}
+
+	return find_sdca_function_initialization_table(&slave->dev,
+						       sdca_data->sdca_func[i].function_node,
+						       table, table_size);
+}
+EXPORT_SYMBOL_NS(sdca_function_extract_initialization_table, SND_SOC_SDCA);
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("SDCA library");
