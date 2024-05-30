@@ -9,3 +9,9 @@ config SND_SOC_SDCA
 
 config SND_SOC_SDCA_OPTIONAL
 	def_tristate SND_SOC_SDCA || !SND_SOC_SDCA
+
+config SND_SOC_SDCA_IRQ_HANDLER
+	tristate
+	depends on SOUNDWIRE
+	help
+	  This option enables support for the SDCA IRQ handler.
