@@ -11,6 +11,46 @@
 
 struct sdw_slave;
 
+#define SDCA_MAX_INTERRUPTS 31 /* the last bit is reserved for future extensions */
+
+/**
+ * struct sdca_interrupt_source - interface between interrupt source and
+ * SoundWire SDCA interrupt handler
+ *
+ * @index: SDCA interrupt number in [0, SDCA_MAX_INTERRUPTS - 1]
+ * @context: source-specific information, used by @callback
+ * @callback: provided by interrupt source for source-specific handling.
+ */
+struct sdca_interrupt_source {
+	int index;
+	void *context;
+	void (*callback)(void *context);
+};
+
+/**
+ * struct sdca_interrupt_info - Peripheral device-level information
+ * used for interrupt handler
+ *
+ * @sources: array of pointers, addressed with an interrupt index
+ * matching @registered_source_mask bits.
+ * @irqs_lock: mutex protecting concurrent access to @sources,
+ * @registered_source_mask and reventing SDCA interrupts from being disabled
+ * on suspend while being handled.
+ * @enabled_interrupt_mask: mask indicating which interrupts from @registered_source_mask
+ * are currently enabled.
+ * @detected_interrupt_mask: bitfields set in interrupt handler, and accessible
+ * in deferred processing.
+ * @supported_hw_register_mask: Up to 4 registers may be implemented
+ */
+struct sdca_interrupt_info {
+	struct sdca_interrupt_source *sources[SDCA_MAX_INTERRUPTS];
+	struct mutex irqs_lock; /* protects SDCA interrupts */
+	u32 registered_source_mask;
+	u32 enabled_interrupt_mask;
+	u32 detected_interrupt_mask;
+	int supported_hw_register_mask;
+};
+
 #define SDCA_MAX_FUNCTION_COUNT 8
 
 /**
@@ -32,11 +72,13 @@ struct sdca_function_desc {
  * @num_functions: total number of supported SDCA functions. Invalid/unsupported
  * functions will be skipped.
  * @sdca_func: array of function descriptors
+ * @interrupt_info: device-level interrupt configuration/handling
  */
 struct sdca_device_data {
 	u32 interface_revision;
 	int num_functions;
 	struct sdca_function_desc sdca_func[SDCA_MAX_FUNCTION_COUNT];
+	struct sdca_interrupt_info *interrupt_info;
 };
 
 enum sdca_quirk {
@@ -57,6 +99,64 @@ static inline bool sdca_device_quirk_match(struct sdw_slave *slave, enum sdca_qu
 {
 	return false;
 }
+
 #endif
+
+#if IS_ENABLED(CONFIG_SND_SOC_SDCA_IRQ_HANDLER)
+
+int sdca_interrupt_info_alloc(struct sdw_slave *slave);
+void sdca_interrupt_info_release(struct sdw_slave *slave);
+int sdca_interrupt_info_reset(struct sdw_slave *slave);
+int sdca_interrupt_initialize(struct sdw_slave *slave,
+			      int supported_hw_register_mask);
+int sdca_interrupt_register_source(struct sdw_slave *slave,
+				   struct sdca_interrupt_source *source);
+int sdca_interrupt_enable(struct sdw_slave *slave,
+			  u32 source_mask,
+			  bool enable);
+void sdca_interrupt_clear_history(struct sdw_slave *slave, u32 preserve_mask);
+int sdca_interrupt_handler(struct sdw_slave *slave);
+
+#else
+
+static inline int sdca_interrupt_info_alloc(struct sdw_slave *slave)
+{
+	return 0;
+}
+
+static inline void sdca_interrupt_info_release(struct sdw_slave *slave) {}
+
+static inline int sdca_interrupt_info_reset(struct sdw_slave *slave)
+{
+	return 0;
+}
+
+static inline int sdca_interrupt_initialize(struct sdw_slave *slave,
+					    int supported_hw_register_mask)
+{
+	return 0;
+}
+
+static inline int sdca_interrupt_register_source(struct sdw_slave *slave,
+						 struct sdca_interrupt_source *source)
+{
+	return 0;
+}
+
+static inline int sdca_interrupt_enable(struct sdw_slave *slave,
+					u32 source_mask,
+					bool enable)
+{
+	return 0;
+}
+
+static inline void sdca_interrupt_clear_history(struct sdw_slave *slave, u32 preserve_mask) {}
+
+static inline int sdca_interrupt_handler(struct sdw_slave *slave)
+{
+	return 0;
+}
+
+#endif /* IS_ENABLED(CONFIG_SND_SOC_SDCA_IRQ_HANDLER) */
 
 #endif
