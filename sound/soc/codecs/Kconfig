@@ -1727,6 +1727,7 @@ config SND_SOC_RT711_SDW
 config SND_SOC_RT711_SDCA_SDW
 	tristate "Realtek RT711 SDCA Codec - SDW"
 	depends on SOUNDWIRE
+	select SND_SOC_SDCA_IRQ_HANDLER
 	select REGMAP_SOUNDWIRE
 	select REGMAP_SOUNDWIRE_MBQ
 
