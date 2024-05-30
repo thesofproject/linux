@@ -23,6 +23,7 @@
 #include <sound/initval.h>
 #include <sound/tlv.h>
 #include <sound/jack.h>
+#include <sound/sdca.h>
 
 #include "rt711-sdca.h"
 
@@ -457,6 +458,8 @@ io_error:
 
 static void rt711_sdca_jack_init(struct rt711_sdca_priv *rt711)
 {
+	int ret;
+
 	mutex_lock(&rt711->calibrate_mutex);
 
 	if (rt711->hs_jack) {
@@ -510,11 +513,15 @@ static void rt711_sdca_jack_init(struct rt711_sdca_priv *rt711)
 			break;
 		}
 
-		/* set SCP_SDCA_IntMask1[0]=1 */
-		sdw_write_no_pm(rt711->slave, SDW_SCP_SDCA_INTMASK1, SDW_SCP_SDCA_INTMASK_SDCA_0);
-		/* set SCP_SDCA_IntMask2[0]=1 */
-		sdw_write_no_pm(rt711->slave, SDW_SCP_SDCA_INTMASK2, SDW_SCP_SDCA_INTMASK_SDCA_8);
-		dev_dbg(&rt711->slave->dev, "in %s enable\n", __func__);
+		ret = sdca_interrupt_enable(rt711->slave,
+					    BIT(0) | BIT(8),
+					    true);
+		if (ret < 0)
+			dev_err(&rt711->slave->dev,
+				"%s: sdca_interrupt_enable failed: %d\n",
+				__func__, ret);
+		else
+			dev_dbg(&rt711->slave->dev, "in %s enable\n", __func__);
 	} else {
 		/* disable HID 1/2 event */
 		rt711_sdca_index_update_bits(rt711, RT711_VENDOR_HDA_CTL,
@@ -1477,15 +1484,82 @@ static struct snd_soc_dai_driver rt711_sdca_dai[] = {
 	}
 };
 
+/* this is called with the irqs_lock mutex held */
+static void jack_detection_callback(void *context)
+{
+	struct rt711_sdca_priv *rt711 = context;
+
+	rt711->scp_sdca_stat1 = SDW_SCP_SDCA_INT_SDCA_0;
+
+	/*
+	 * Invoke the delayed work unconditionally, the test on
+	 * the SDCA_0 being enabled was done in the common handler
+	 */
+	mod_delayed_work(system_power_efficient_wq,
+			 &rt711->jack_detect_work, msecs_to_jiffies(30));
+}
+
+/* this is called with the irqs_lock mutex held */
+static void button_detection_callback(void *context)
+{
+	struct rt711_sdca_priv *rt711 = context;
+
+	rt711->scp_sdca_stat2 = SDW_SCP_SDCA_INT_SDCA_8;
+
+	/*
+	 * Invoke the delayed work unconditionally, the test on
+	 * the SDCA_8 being enabled was done in the common handler
+	 */
+	mod_delayed_work(system_power_efficient_wq,
+			 &rt711->jack_detect_work, msecs_to_jiffies(30));
+}
+
 int rt711_sdca_init(struct device *dev, struct regmap *regmap,
 			struct regmap *mbq_regmap, struct sdw_slave *slave)
 {
+	struct sdca_interrupt_source *sdca_int_0;
+	struct sdca_interrupt_source *sdca_int_8;
 	struct rt711_sdca_priv *rt711;
 	int ret;
 
 	rt711 = devm_kzalloc(dev, sizeof(*rt711), GFP_KERNEL);
 	if (!rt711)
 		return -ENOMEM;
+
+	ret = sdca_interrupt_info_alloc(slave);
+	if (ret < 0)
+		return ret;
+
+	/* SDCA_INT1 and SDCA_INT2 are supported */
+	ret = sdca_interrupt_initialize(slave, GENMASK(1, 0));
+	if (ret < 0)
+		return ret;
+
+	/* alloc and configure SDCA interrupt sources */
+	sdca_int_0 = devm_kzalloc(dev, sizeof(*sdca_int_0), GFP_KERNEL);
+	if (!sdca_int_0)
+		return -ENOMEM;
+
+	sdca_int_8 = devm_kzalloc(dev, sizeof(*sdca_int_8), GFP_KERNEL);
+	if (!sdca_int_8)
+		return -ENOMEM;
+
+	sdca_int_0->index = 0;
+	sdca_int_0->context = rt711;
+	sdca_int_0->callback = jack_detection_callback;
+
+	sdca_int_8->index = 8;
+	sdca_int_8->context = rt711;
+	sdca_int_8->callback = button_detection_callback;
+
+	/* now register sources */
+	ret = sdca_interrupt_register_source(slave, sdca_int_0);
+	if (ret < 0)
+		return ret;
+
+	ret = sdca_interrupt_register_source(slave, sdca_int_8);
+	if (ret < 0)
+		return ret;
 
 	dev_set_drvdata(dev, rt711);
 	rt711->slave = slave;
@@ -1496,7 +1570,6 @@ int rt711_sdca_init(struct device *dev, struct regmap *regmap,
 	regcache_cache_only(rt711->mbq_regmap, true);
 
 	mutex_init(&rt711->calibrate_mutex);
-	mutex_init(&rt711->disable_irq_lock);
 
 	INIT_DELAYED_WORK(&rt711->jack_detect_work, rt711_sdca_jack_detect_handler);
 	INIT_DELAYED_WORK(&rt711->jack_btn_check_work, rt711_sdca_btn_check_handler);
@@ -1602,10 +1675,9 @@ int rt711_sdca_io_init(struct device *dev, struct sdw_slave *slave)
 	int ret = 0;
 	unsigned int val;
 
-	rt711->disable_irq = false;
-
-	if (rt711->hw_init)
-		return 0;
+	ret = sdca_interrupt_info_reset(slave);
+	if (ret < 0)
+		return ret;
 
 	regcache_cache_only(rt711->regmap, false);
 	regcache_cache_only(rt711->mbq_regmap, false);
