@@ -27,8 +27,6 @@ struct  rt712_sdca_priv {
 	struct delayed_work jack_detect_work;
 	struct delayed_work jack_btn_check_work;
 	struct mutex calibrate_mutex; /* for headset calibration */
-	struct mutex disable_irq_lock; /* SDCA irq lock protection */
-	bool disable_irq;
 	int jack_type;
 	int jd_src;
 	unsigned int scp_sdca_stat1;
