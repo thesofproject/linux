@@ -17,6 +17,14 @@
 #include <sound/soc.h>
 #include "bus.h"
 
+static int m_lane;
+module_param(m_lane, int, 0444);
+MODULE_PARM_DESC(m_lane, "Manager lane");
+
+static int p_lane;
+module_param(p_lane, int, 0444);
+MODULE_PARM_DESC(p_lane, "Peripheral lane");
+
 /*
  * Array of supported rows and columns as per MIPI SoundWire Specification 1.1
  *
@@ -990,6 +998,7 @@ static int sdw_slave_port_config(struct sdw_slave *slave,
 		ret = sdw_port_config(p_rt, port_config, i);
 		if (ret < 0)
 			return ret;
+		p_rt->lane = p_lane;
 		i++;
 	}
 
@@ -1038,6 +1047,7 @@ static int sdw_master_port_config(struct sdw_master_runtime *m_rt,
 		ret = sdw_port_config(p_rt, port_config, i);
 		if (ret < 0)
 			return ret;
+		p_rt->lane = m_lane;
 		i++;
 	}
 
