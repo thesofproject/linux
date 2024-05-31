@@ -262,7 +262,12 @@ static void rt712_sdca_jack_detect_handler(struct work_struct *work)
 {
 	struct rt712_sdca_priv *rt712 =
 		container_of(work, struct rt712_sdca_priv, jack_detect_work.work);
+	struct sdca_interrupt_info *interrupt_info;
 	int btn_type = 0, ret;
+
+	interrupt_info = rt712->slave->sdca_data.interrupt_info;
+	if (!interrupt_info)
+		return;
 
 	if (!rt712->hs_jack)
 		return;
@@ -271,14 +276,14 @@ static void rt712_sdca_jack_detect_handler(struct work_struct *work)
 		return;
 
 	/* SDW_SCP_SDCA_INT_SDCA_0 is used for jack detection */
-	if (rt712->scp_sdca_stat1 & SDW_SCP_SDCA_INT_SDCA_0) {
+	if (interrupt_info->detected_interrupt_mask & BIT(0)) {
 		ret = rt712_sdca_headset_detect(rt712);
 		if (ret < 0)
 			return;
 	}
 
 	/* SDW_SCP_SDCA_INT_SDCA_8 is used for button detection */
-	if (rt712->scp_sdca_stat2 & SDW_SCP_SDCA_INT_SDCA_8)
+	if (interrupt_info->detected_interrupt_mask & BIT(8))
 		btn_type = rt712_sdca_button_detect(rt712);
 
 	if (rt712->jack_type == 0)
@@ -289,8 +294,7 @@ static void rt712_sdca_jack_detect_handler(struct work_struct *work)
 	dev_dbg(&rt712->slave->dev,
 		"in %s, btn_type=0x%x\n", __func__, btn_type);
 	dev_dbg(&rt712->slave->dev,
-		"in %s, scp_sdca_stat1=0x%x, scp_sdca_stat2=0x%x\n", __func__,
-		rt712->scp_sdca_stat1, rt712->scp_sdca_stat2);
+		"in %s, detected_interrupt_mask=0x%x\n", __func__, interrupt_info->detected_interrupt_mask);
 
 	snd_soc_jack_report(rt712->hs_jack, rt712->jack_type | btn_type,
 			SND_JACK_HEADSET |
@@ -403,6 +407,8 @@ io_error:
 
 static void rt712_sdca_jack_init(struct rt712_sdca_priv *rt712)
 {
+	int ret;
+
 	mutex_lock(&rt712->calibrate_mutex);
 
 	if (rt712->hs_jack) {
@@ -432,11 +438,15 @@ static void rt712_sdca_jack_init(struct rt712_sdca_priv *rt712)
 			break;
 		}
 
-		/* set SCP_SDCA_IntMask1[0]=1 */
-		sdw_write_no_pm(rt712->slave, SDW_SCP_SDCA_INTMASK1, SDW_SCP_SDCA_INTMASK_SDCA_0);
-		/* set SCP_SDCA_IntMask2[0]=1 */
-		sdw_write_no_pm(rt712->slave, SDW_SCP_SDCA_INTMASK2, SDW_SCP_SDCA_INTMASK_SDCA_8);
-		dev_dbg(&rt712->slave->dev, "in %s enable\n", __func__);
+		ret = sdca_interrupt_enable(rt712->slave,
+					    BIT(0) | BIT(8),
+					    true);
+		if (ret < 0)
+			dev_err(&rt712->slave->dev,
+				"%s: sdca_interrupt_enable failed: %d\n",
+				__func__, ret);
+		else
+			dev_dbg(&rt712->slave->dev, "in %s enable\n", __func__);
 
 		/* trigger GE interrupt */
 		rt712_sdca_index_update_bits(rt712, RT712_VENDOR_HDA_CTL,
@@ -1590,6 +1600,32 @@ static struct snd_soc_dai_driver rt712_sdca_dai[] = {
 	}
 };
 
+/* this is called with the irqs_lock mutex held */
+static void jack_detection_callback(void *context)
+{
+	struct rt712_sdca_priv *rt712 = context;
+
+	/*
+	 * Invoke the delayed work unconditionally, the test on
+	 * the SDCA_0 being enabled was done in the common handler
+	 */
+	mod_delayed_work(system_power_efficient_wq,
+			 &rt712->jack_detect_work, msecs_to_jiffies(30));
+}
+
+/* this is called with the irqs_lock mutex held */
+static void button_detection_callback(void *context)
+{
+	struct rt712_sdca_priv *rt712 = context;
+
+	/*
+	 * Invoke the delayed work unconditionally, the test on
+	 * the SDCA_8 being enabled was done in the common handler
+	 */
+	mod_delayed_work(system_power_efficient_wq,
+			 &rt712->jack_detect_work, msecs_to_jiffies(30));
+}
+
 static struct snd_soc_dai_driver rt712_sdca_dmic_dai[] = {
 	{
 		.name = "rt712-sdca-aif3",
@@ -1608,12 +1644,49 @@ static struct snd_soc_dai_driver rt712_sdca_dmic_dai[] = {
 int rt712_sdca_init(struct device *dev, struct regmap *regmap,
 			struct regmap *mbq_regmap, struct sdw_slave *slave)
 {
+	struct sdca_interrupt_source *sdca_int_0;
+	struct sdca_interrupt_source *sdca_int_8;
 	struct rt712_sdca_priv *rt712;
 	int ret;
 
 	rt712 = devm_kzalloc(dev, sizeof(*rt712), GFP_KERNEL);
 	if (!rt712)
 		return -ENOMEM;
+
+	ret = sdca_interrupt_info_alloc(slave);
+	if (ret < 0)
+		return ret;
+
+	/* SDCA_INT1 and SDCA_INT2 are supported */
+	ret = sdca_interrupt_initialize(slave, GENMASK(1, 0));
+	if (ret < 0)
+		return ret;
+
+	/* alloc and configure SDCA interrupt sources */
+	sdca_int_0 = devm_kzalloc(dev, sizeof(*sdca_int_0), GFP_KERNEL);
+	if (!sdca_int_0)
+		return -ENOMEM;
+
+	sdca_int_8 = devm_kzalloc(dev, sizeof(*sdca_int_8), GFP_KERNEL);
+	if (!sdca_int_8)
+		return -ENOMEM;
+
+	sdca_int_0->index = 0;
+	sdca_int_0->context = rt712;
+	sdca_int_0->callback = jack_detection_callback;
+
+	sdca_int_8->index = 8;
+	sdca_int_8->context = rt712;
+	sdca_int_8->callback = button_detection_callback;
+
+	/* now register sources */
+	ret = sdca_interrupt_register_source(slave, sdca_int_0);
+	if (ret < 0)
+		return ret;
+
+	ret = sdca_interrupt_register_source(slave, sdca_int_8);
+	if (ret < 0)
+		return ret;
 
 	dev_set_drvdata(dev, rt712);
 	rt712->slave = slave;
@@ -1624,7 +1697,6 @@ int rt712_sdca_init(struct device *dev, struct regmap *regmap,
 	regcache_cache_only(rt712->mbq_regmap, true);
 
 	mutex_init(&rt712->calibrate_mutex);
-	mutex_init(&rt712->disable_irq_lock);
 
 	INIT_DELAYED_WORK(&rt712->jack_detect_work, rt712_sdca_jack_detect_handler);
 	INIT_DELAYED_WORK(&rt712->jack_btn_check_work, rt712_sdca_btn_check_handler);
@@ -1813,11 +1885,11 @@ int rt712_sdca_io_init(struct device *dev, struct sdw_slave *slave)
 	struct rt712_sdca_priv *rt712 = dev_get_drvdata(dev);
 	unsigned int val;
 	struct sdw_slave_prop *prop = &slave->prop;
+	int ret;
 
-	rt712->disable_irq = false;
-
-	if (rt712->hw_init)
-		return 0;
+	ret = sdca_interrupt_info_reset(slave);
+	if (ret < 0)
+		return ret;
 
 	regcache_cache_only(rt712->regmap, false);
 	regcache_cache_only(rt712->mbq_regmap, false);
