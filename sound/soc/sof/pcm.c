@@ -689,6 +689,64 @@ static snd_pcm_sframes_t sof_pcm_delay(struct snd_soc_component *component,
 	return 0;
 }
 
+int sof_pcm_suspend_paused(struct snd_sof_dev *sdev)
+{
+	struct snd_pcm_substream *substream;
+	struct snd_sof_pcm *spcm;
+	int dir, ret;
+
+	/*
+	 * Search for streams which was in paused state at suspend to properly
+	 * suspend it.
+	 * Due to the differences in flows between IPC versions it is preferred
+	 * to use the high level pcm ops to move the stream to running then to
+	 * suspended instead of trying to hand-replicate the flows.
+	 */
+	list_for_each_entry(spcm, &sdev->pcm_list, list) {
+		for_each_pcm_streams(dir) {
+			substream = spcm->stream[dir].substream;
+			if (!substream || !substream->runtime)
+				continue;
+
+			/*
+			 * Paused streams will not receive a suspend trigger
+			 * but moved to suspended state.
+			 */
+			if (!(substream->runtime->state == SNDRV_PCM_STATE_SUSPENDED &&
+			    substream->runtime->suspended_state == SNDRV_PCM_STATE_PAUSED))
+				continue;
+
+			/*
+			 * The stream needs to be released and then suspended to
+			 * make sure that it is in a state where it can handle
+			 * the system suspend
+			 */
+			ret = substream->ops->trigger(substream,
+						      SNDRV_PCM_TRIGGER_PAUSE_RELEASE);
+			if (ret) {
+				dev_err(sdev->dev,
+					"%s: PAUSE_RELEASE failed for %s (id: %d): %d\n",
+					__func__, substream->name,
+					spcm->pcm.pcm_id, ret);
+				return ret;
+			}
+
+			ret = substream->ops->trigger(substream,
+						      SNDRV_PCM_TRIGGER_SUSPEND);
+			if (ret) {
+				dev_err(sdev->dev,
+					"%s: SUSPEND failed for %s (id: %d): %d\n",
+					__func__, substream->name,
+					spcm->pcm.pcm_id, ret);
+				return ret;
+			}
+		}
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(sof_pcm_suspend_paused);
+
 void snd_sof_new_platform_drv(struct snd_sof_dev *sdev)
 {
 	struct snd_soc_component_driver *pd = &sdev->plat_drv;
