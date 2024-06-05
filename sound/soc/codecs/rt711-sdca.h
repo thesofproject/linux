@@ -27,7 +27,6 @@ struct  rt711_sdca_priv {
 	struct delayed_work jack_btn_check_work;
 	struct mutex calibrate_mutex; /* for headset calibration */
 	int jack_type, jd_src;
-	unsigned int scp_sdca_stat1, scp_sdca_stat2;
 	int hw_ver;
 	bool fu0f_dapm_mute, fu0f_mixer_l_mute, fu0f_mixer_r_mute;
 	bool fu1e_dapm_mute, fu1e_mixer_l_mute, fu1e_mixer_r_mute;
