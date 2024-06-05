@@ -1628,12 +1628,14 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 	}
 
 	/* Read Intstat 1, Intstat 2 and Intstat 3 registers */
+	dev_warn(&slave->dev, "%s: before SDW_SCP_INT1 read\n", __func__);
 	ret = sdw_read_no_pm(slave, SDW_SCP_INT1);
 	if (ret < 0) {
 		dev_err(&slave->dev,
 			"SDW_SCP_INT1 read failed:%d\n", ret);
 		goto io_err;
 	}
+	dev_warn(&slave->dev, "%s: after SDW_SCP_INT1 read\n", __func__);
 	buf = ret;
 
 	ret = sdw_nread_no_pm(slave, SDW_SCP_INTSTAT2, 2, buf2);
