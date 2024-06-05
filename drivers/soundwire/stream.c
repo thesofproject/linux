@@ -1325,12 +1325,15 @@ static void sdw_acquire_bus_lock(struct sdw_stream_runtime *stream)
 	struct sdw_master_runtime *m_rt;
 	struct sdw_bus *bus;
 
+	pr_warn("%s: acquiring locks for stream %s\n", __func__, stream->name);
+
 	/* Iterate for all Master(s) in Master list */
 	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
 		bus = m_rt->bus;
 
 		mutex_lock(&bus->bus_lock);
 	}
+	pr_warn("%s: acquired locks for stream %s\n", __func__, stream->name);
 }
 
 /**
@@ -1347,11 +1350,14 @@ static void sdw_release_bus_lock(struct sdw_stream_runtime *stream)
 	struct sdw_master_runtime *m_rt;
 	struct sdw_bus *bus;
 
+	pr_warn("%s: releasing locks for stream %s\n", __func__, stream->name);
+		
 	/* Iterate for all Master(s) in Master list */
 	list_for_each_entry_reverse(m_rt, &stream->master_list, stream_node) {
 		bus = m_rt->bus;
 		mutex_unlock(&bus->bus_lock);
 	}
+	pr_warn("%s: released locks for stream %s\n", __func__, stream->name);
 }
 
 static int _sdw_prepare_stream(struct sdw_stream_runtime *stream,
@@ -1362,6 +1368,8 @@ static int _sdw_prepare_stream(struct sdw_stream_runtime *stream,
 	struct sdw_master_prop *prop;
 	struct sdw_bus_params params;
 	int ret;
+
+	pr_warn("%s: start for stream %s\n", __func__, stream->name);
 
 	/* Prepare  Master(s) and Slave(s) port(s) associated with stream */
 	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
@@ -1400,11 +1408,15 @@ static int _sdw_prepare_stream(struct sdw_stream_runtime *stream,
 		}
 	}
 
+	pr_warn("%s: before bank switch for stream %s\n", __func__, stream->name);
+
 	ret = do_bank_switch(stream);
 	if (ret < 0) {
-		pr_err("%s: do_bank_switch failed: %d\n", __func__, ret);
+		pr_err("%s: do_bank_switch failed for stream %s: %d\n", __func__, stream->name, ret);
 		goto restore_params;
 	}
+
+	pr_warn("%s: after bank switch for stream %s\n", __func__, stream->name);
 
 	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
 		bus = m_rt->bus;
@@ -1419,6 +1431,8 @@ static int _sdw_prepare_stream(struct sdw_stream_runtime *stream,
 	}
 
 	stream->state = SDW_STREAM_PREPARED;
+
+	pr_warn("%s: plb done for stream %s\n", __func__, stream->name);
 
 	return ret;
 
