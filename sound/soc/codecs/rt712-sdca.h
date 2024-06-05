@@ -29,8 +29,6 @@ struct  rt712_sdca_priv {
 	struct mutex calibrate_mutex; /* for headset calibration */
 	int jack_type;
 	int jd_src;
-	unsigned int scp_sdca_stat1;
-	unsigned int scp_sdca_stat2;
 	unsigned int hw_id;
 	bool fu0f_dapm_mute;
 	bool fu0f_mixer_l_mute;

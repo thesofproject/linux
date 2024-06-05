@@ -228,12 +228,14 @@ static int rt712_sdca_interrupt_callback(struct sdw_slave *slave,
 
 	if (cancel_delayed_work_sync(&rt712->jack_detect_work)) {
 		dev_warn(&slave->dev, "%s the pending delayed_work was cancelled", __func__);
-		/* avoid the HID owner doesn't change to device */
-
-		/* FIXME: WHAT DOES THIS DO ????
-		 * if (rt712->scp_sdca_stat2)
-		 *     scp_sdca_stat2 = rt712->scp_sdca_stat2;
+		/*
+		 * Preserve status for HID, to make sure the UMP interrupt is handled
+		 * and the ownership can be changed in the workqueue back to DEVICE
 		 */
+		sdca_interrupt_clear_history(slave, BIT(8));
+	} else {
+		/* clear all history */
+		sdca_interrupt_clear_history(slave, 0);
 	}
 
 	ret = sdca_interrupt_handler(slave);

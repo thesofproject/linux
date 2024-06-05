@@ -254,7 +254,12 @@ static void rt712_sdca_jack_detect_handler(struct work_struct *work)
 {
 	struct rt712_sdca_priv *rt712 =
 		container_of(work, struct rt712_sdca_priv, jack_detect_work.work);
+	struct sdca_interrupt_info *interrupt_info;
 	int btn_type = 0, ret;
+
+	interrupt_info = rt712->slave->sdca_data.interrupt_info;
+	if (!interrupt_info)
+		return;
 
 	if (!rt712->hs_jack)
 		return;
@@ -263,14 +268,14 @@ static void rt712_sdca_jack_detect_handler(struct work_struct *work)
 		return;
 
 	/* SDW_SCP_SDCA_INT_SDCA_0 is used for jack detection */
-	if (rt712->scp_sdca_stat1 & SDW_SCP_SDCA_INT_SDCA_0) {
+	if (interrupt_info->detected_interrupt_mask & BIT(0)) {
 		ret = rt712_sdca_headset_detect(rt712);
 		if (ret < 0)
 			return;
 	}
 
 	/* SDW_SCP_SDCA_INT_SDCA_8 is used for button detection */
-	if (rt712->scp_sdca_stat2 & SDW_SCP_SDCA_INT_SDCA_8)
+	if (interrupt_info->detected_interrupt_mask & BIT(8))
 		btn_type = rt712_sdca_button_detect(rt712);
 
 	if (rt712->jack_type == 0)
@@ -281,8 +286,7 @@ static void rt712_sdca_jack_detect_handler(struct work_struct *work)
 	dev_dbg(&rt712->slave->dev,
 		"in %s, btn_type=0x%x\n", __func__, btn_type);
 	dev_dbg(&rt712->slave->dev,
-		"in %s, scp_sdca_stat1=0x%x, scp_sdca_stat2=0x%x\n", __func__,
-		rt712->scp_sdca_stat1, rt712->scp_sdca_stat2);
+		"in %s, detected_interrupt_mask=0x%x\n", __func__, interrupt_info->detected_interrupt_mask);
 
 	snd_soc_jack_report(rt712->hs_jack, rt712->jack_type | btn_type,
 			SND_JACK_HEADSET |
@@ -1185,8 +1189,6 @@ static void jack_detection_callback(void *context)
 {
 	struct rt712_sdca_priv *rt712 = context;
 
-	rt712->scp_sdca_stat1 = SDW_SCP_SDCA_INT_SDCA_0;
-
 	/*
 	 * Invoke the delayed work unconditionally, the test on
 	 * the SDCA_0 being enabled was done in the common handler
@@ -1199,8 +1201,6 @@ static void jack_detection_callback(void *context)
 static void button_detection_callback(void *context)
 {
 	struct rt712_sdca_priv *rt712 = context;
-
-	rt712->scp_sdca_stat2 = SDW_SCP_SDCA_INT_SDCA_8;
 
 	/*
 	 * Invoke the delayed work unconditionally, the test on
