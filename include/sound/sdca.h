@@ -38,6 +38,8 @@ struct sdca_interrupt_source {
  * on suspend while being handled.
  * @enabled_interrupt_mask: mask indicating which interrupts from @registered_source_mask
  * are currently enabled.
+ * @detected_interrupt_mask: bitfields set in interrupt handler, and accessible
+ * in deferred processing.
  * @supported_hw_register_mask: Up to 4 registers may be implemented
  */
 struct sdca_interrupt_info {
@@ -45,6 +47,7 @@ struct sdca_interrupt_info {
 	struct mutex irqs_lock; /* protects SDCA interrupts */
 	u32 registered_source_mask;
 	u32 enabled_interrupt_mask;
+	u32 detected_interrupt_mask;
 	int supported_hw_register_mask;
 };
 
@@ -97,6 +100,7 @@ int sdca_interrupt_register_source(struct sdw_slave *slave,
 int sdca_interrupt_enable(struct sdw_slave *slave,
 			  u32 source_mask,
 			  bool enable);
+void sdca_interrupt_clear_history(struct sdw_slave *slave, u32 preserve_mask);
 int sdca_interrupt_handler(struct sdw_slave *slave);
 
 #else
@@ -138,6 +142,8 @@ static inline int sdca_interrupt_enable(struct sdw_slave *slave,
 {
 	return 0;
 }
+
+void sdca_interrupt_clear_history(struct sdw_slave *slave, u32 preserve_mask) {}
 
 static inline int sdca_interrupt_handler(struct sdw_slave *slave)
 {

@@ -282,6 +282,23 @@ unlock:
 }
 EXPORT_SYMBOL_NS(sdca_interrupt_enable, SND_SOC_SDCA_IRQ_HANDLER);
 
+void sdca_interrupt_clear_history(struct sdw_slave *slave, u32 preserve_mask)
+{
+	struct sdca_interrupt_info *interrupt_info;
+
+	interrupt_info = slave->sdca_data.interrupt_info;
+
+	/*
+	 * Clear all history except for the interrupts set in preserve_mask.
+	 * This is very useful for SDCA UMP processing, where the
+	 * interrupt is only thrown once when the ownership changes to
+	 * HOST. If the processing happens in a work queue, and a new interrupt
+	 * cancels the work queue, the interrupt will not be signaled again
+	 */
+	interrupt_info->detected_interrupt_mask &= preserve_mask;
+}
+EXPORT_SYMBOL_NS(sdca_interrupt_clear_history, SND_SOC_SDCA_IRQ_HANDLER);
+
 /* helper called with the 'irq_lock' mutex held */
 static int sdca_interrupt_register_handler(struct sdw_slave *slave,
 					   struct sdca_interrupt_info *interrupt_info,
@@ -309,22 +326,14 @@ static int sdca_interrupt_register_handler(struct sdw_slave *slave,
 
 	do {
 		/*
-		 * Handle source-specific tasks.
+		 * Record detected interrupt sources, source-specific actions
+		 * will be taken after all interrupts have been cleared.
 		 */
 
 		for_each_set_bit(bit, &status, 8) {
 			int index = (reg_index << 3) + bit;
-			void *context = interrupt_info->sources[index]->context;
 
-			/*
-			 * There could be a racy window where the interrupts are disabled
-			 * between the time the peripheral signals its alert status and
-			 * the time where this interrupt handler is scheduled.
-			 * In this case we don't invoke the callbacks since presumably a
-			 * higher-level transition such as system suspend is going on.
-			 */
-			if (BIT(index) & interrupt_info->enabled_interrupt_mask)
-				interrupt_info->sources[index]->callback(context);
+			interrupt_info->detected_interrupt_mask |= BIT(index);
 		}
 
 		/* clear the interrupts for this register */
@@ -370,6 +379,8 @@ int sdca_interrupt_handler(struct sdw_slave *slave)
 	unsigned long registered_source_mask;
 	unsigned long enabled_register_mask;
 	unsigned long hw_register_mask;
+	unsigned long detected_mask;
+	int index;
 	int reg_index;
 	int ret = 0;
 
@@ -425,6 +436,24 @@ int sdca_interrupt_handler(struct sdw_slave *slave)
 						      reg_index);
 		if (ret < 0)
 			goto unlock;
+	}
+
+	/*
+	 * Handle source-specific tasks.
+	 */
+	detected_mask =  interrupt_info->detected_interrupt_mask;
+	for_each_set_bit(index, &detected_mask, 32) {
+		void *context = interrupt_info->sources[index]->context;
+
+		/*
+		 * There could be a racy window where the interrupts are disabled
+		 * between the time the peripheral signals its alert status and
+		 * the time where this interrupt handler is scheduled.
+		 * In this case we don't invoke the callbacks since presumably a
+		 * higher-level transition such as system suspend is going on.
+		 */
+		if (BIT(index) & interrupt_info->enabled_interrupt_mask)
+			interrupt_info->sources[index]->callback(context);
 	}
 
 unlock:
