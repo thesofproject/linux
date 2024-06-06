@@ -912,6 +912,7 @@ irqreturn_t sdw_cdns_irq(int irq, void *dev_id)
 		return IRQ_NONE;
 
 	int_status = cdns_readl(cdns, CDNS_MCP_INTSTAT);
+	dev_warn(cdns->dev, "%s int_status %#x\n", __func__, int_status);
 
 	/* check for reserved values read as zero */
 	if (int_status & CDNS_MCP_INT_RESERVED)

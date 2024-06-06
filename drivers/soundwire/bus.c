@@ -254,6 +254,7 @@ static inline int do_transfer_defer(struct sdw_bus *bus,
 	enum sdw_command_response resp;
 	int ret = 0, i;
 
+	dev_warn(bus->dev, "%s\n", __func__);
 	defer->msg = msg;
 	defer->length = msg->len;
 	init_completion(&defer->complete);
@@ -292,6 +293,7 @@ int sdw_transfer(struct sdw_bus *bus, struct sdw_msg *msg)
 {
 	int ret;
 
+	dev_warn(bus->dev, "%s\n", __func__);
 	mutex_lock(&bus->msg_lock);
 
 	ret = sdw_transfer_unlocked(bus, msg);
