@@ -13,6 +13,7 @@
 struct block_device;
 struct path;
 struct bio;
+struct gendisk;
 
 DECLARE_HOOK(android_vh_check_set_ioprio,
 	TP_PROTO(struct bio *bio),
@@ -24,6 +25,10 @@ struct vfsmount;
 DECLARE_HOOK(android_vh_do_new_mount_fc,
 	TP_PROTO(const struct path *mountpoint, struct vfsmount *mnt),
 	TP_ARGS(mountpoint, mnt));
+
+DECLARE_HOOK(android_vh_bd_link_disk_holder,
+	TP_PROTO(struct block_device *bdev, struct gendisk *disk),
+	TP_ARGS(bdev, disk));
 
 #endif /* _TRACE_HOOK_BLK_H */
 /* This part must be outside protection */
