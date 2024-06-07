@@ -206,6 +206,7 @@ static void lnl_enable_sdw_irq(struct snd_sof_dev *sdev, bool enable)
 {
 	struct hdac_bus *bus = sof_to_bus(sdev);
 
+	dev_warn(sdev->dev, "%s enable? %d\n", __func__, enable);
 	hdac_bus_eml_enable_interrupt(bus, true,  AZX_REG_ML_LEPTR_ID_SDW, enable);
 }
 
