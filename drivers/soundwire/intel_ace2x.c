@@ -222,7 +222,11 @@ static void intel_sync_arm(struct sdw_intel *sdw)
 
 	mutex_lock(sdw->link_res->shim_lock);
 
+	dev_info(sdw->cdns.dev, "%s: started\n", __func__);
+
 	hdac_bus_eml_sdw_sync_arm_unlocked(sdw->link_res->hbus, link_id);
+
+	dev_info(sdw->cdns.dev, "%s: done\n", __func__);
 
 	mutex_unlock(sdw->link_res->shim_lock);
 }
@@ -231,9 +235,13 @@ static int intel_sync_go_unlocked(struct sdw_intel *sdw)
 {
 	int ret;
 
+	dev_info(sdw->cdns.dev, "%s: started\n", __func__);
+
 	ret = hdac_bus_eml_sdw_sync_go_unlocked(sdw->link_res->hbus);
 	if (ret < 0)
 		dev_err(sdw->cdns.dev, "%s: SyncGO clear failed: %d\n", __func__, ret);
+
+	dev_info(sdw->cdns.dev, "%s: done\n", __func__);
 
 	return ret;
 }
