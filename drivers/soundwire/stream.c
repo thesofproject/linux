@@ -758,7 +758,8 @@ static int sdw_ml_sync_bank_switch(struct sdw_bus *bus, bool multi_link)
 						bus->bank_switch_timeout);
 
 	if (!time_left) {
-		dev_err(bus->dev, "Controller Timed out on bank switch\n");
+		dev_err(bus->dev, "%s: master %d:%d timed out on bank switch\n",
+			__func__, bus->controller_id, bus->link_id);
 		return -ETIMEDOUT;
 	}
 
