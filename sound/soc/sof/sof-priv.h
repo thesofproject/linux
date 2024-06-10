@@ -301,6 +301,7 @@ struct snd_sof_dsp_ops {
 					   const struct sof_ext_man_elem_header *hdr);
 
 	/* DSP PM */
+	int (*suspend_early)(struct snd_sof_dev *sof_dev); /* optional */
 	int (*suspend)(struct snd_sof_dev *sof_dev,
 		       u32 target_state); /* optional */
 	int (*resume)(struct snd_sof_dev *sof_dev); /* optional */

@@ -235,6 +235,14 @@ static inline int snd_sof_dsp_resume(struct snd_sof_dev *sdev)
 	return 0;
 }
 
+static inline int snd_sof_dsp_suspend_early(struct snd_sof_dev *sdev)
+{
+	if (sof_ops(sdev)->suspend_early)
+		return sof_ops(sdev)->suspend_early(sdev);
+
+	return 0;
+}
+
 static inline int snd_sof_dsp_suspend(struct snd_sof_dev *sdev,
 				      u32 target_state)
 {

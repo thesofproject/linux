@@ -210,6 +210,16 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 	if (runtime_suspend && !sof_ops(sdev)->runtime_suspend)
 		return 0;
 
+	/* Prepare the DSP for system suspend */
+	if (!runtime_suspend) {
+		ret = snd_sof_dsp_suspend_early(sdev);
+		if (ret) {
+			dev_err(sdev->dev, "%s: DSP early suspend failed: %d\n",
+				__func__, ret);
+				return ret;
+		}
+	}
+
 	/* we need to tear down pipelines only if the DSP hardware is
 	 * active, which happens for PCI devices. if the device is
 	 * suspended, it is brought back to full power and then
