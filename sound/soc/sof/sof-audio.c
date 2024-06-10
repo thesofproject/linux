@@ -838,7 +838,8 @@ int sof_pcm_stream_free(struct snd_sof_dev *sdev, struct snd_pcm_substream *subs
 
 	if (spcm->prepared[substream->stream]) {
 		/* stop DMA first if needed */
-		if (pcm_ops && pcm_ops->platform_stop_during_hw_free)
+		if (spcm->stream[dir].suspending ||
+		    (pcm_ops && pcm_ops->platform_stop_during_hw_free))
 			snd_sof_pcm_platform_trigger(sdev, substream, SNDRV_PCM_TRIGGER_STOP);
 
 		/* free PCM in the DSP */
