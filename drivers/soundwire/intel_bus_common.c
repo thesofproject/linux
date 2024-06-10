@@ -263,9 +263,14 @@ int intel_post_bank_switch(struct sdw_intel *sdw)
 	 *
 	 * So, set the SYNCGO bit only if CMDSYNC bit is set for any Master.
 	 */
-	if (sdw_intel_sync_check_cmdsync_unlocked(sdw))
+	if (sdw_intel_sync_check_cmdsync_unlocked(sdw)) {
 		ret = sdw_intel_sync_go_unlocked(sdw);
-
+		if (!ret) {
+			dev_info(sdw->cdns.dev, "%s: sync_go wait start\n", __func__);
+			usleep_range(2000, 2100);
+			dev_info(sdw->cdns.dev, "%s: sync_go wait done\n", __func__);
+		}
+	}
 	mutex_unlock(sdw->link_res->shim_lock);
 
 	if (ret < 0)
