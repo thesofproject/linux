@@ -293,12 +293,19 @@ int sdw_transfer(struct sdw_bus *bus, struct sdw_msg *msg)
 {
 	int ret;
 
-	dev_warn(bus->dev, "%s\n", __func__);
+	dev_warn(bus->dev, "%s: dev %d addr %#x flags %#x\n",
+		 __func__, msg->dev_num, msg->addr, msg->flags);
+
 	mutex_lock(&bus->msg_lock);
+
+	dev_warn(bus->dev, "%s: after mutex\n", __func__);
 
 	ret = sdw_transfer_unlocked(bus, msg);
 
 	mutex_unlock(&bus->msg_lock);
+
+	dev_warn(bus->dev, "%s: done\n", __func__);
+
 
 	return ret;
 }
