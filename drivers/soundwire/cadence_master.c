@@ -1714,9 +1714,6 @@ int sdw_cdns_clock_restart(struct sdw_cdns *cdns, bool bus_reset)
 {
 	int ret;
 
-	/* unmask Slave interrupts that were masked when stopping the clock */
-	cdns_enable_slave_interrupts(cdns, true);
-
 	ret = cdns_clear_bit(cdns, CDNS_MCP_CONTROL,
 			     CDNS_MCP_CONTROL_CLK_STOP_CLR);
 	if (ret < 0) {
@@ -1753,6 +1750,9 @@ int sdw_cdns_clock_restart(struct sdw_cdns *cdns, bool bus_reset)
 		if (ret < 0)
 			dev_err(cdns->dev, "bus failed to exit clock stop %d\n", ret);
 	}
+
+	/* unmask Slave interrupts that were masked when stopping the clock */
+	cdns_enable_slave_interrupts(cdns, true);
 
 	return ret;
 }
