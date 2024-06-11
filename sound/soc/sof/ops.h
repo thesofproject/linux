@@ -276,13 +276,6 @@ static inline int snd_sof_dsp_runtime_idle(struct snd_sof_dev *sdev)
 	return 0;
 }
 
-static inline int snd_sof_dsp_hw_params_upon_resume(struct snd_sof_dev *sdev)
-{
-	if (sof_ops(sdev)->set_hw_params_upon_resume)
-		return sof_ops(sdev)->set_hw_params_upon_resume(sdev);
-	return 0;
-}
-
 static inline int snd_sof_dsp_set_clk(struct snd_sof_dev *sdev, u32 freq)
 {
 	if (sof_ops(sdev)->set_clk)
