@@ -49,6 +49,11 @@ static void intel_shim_vs_init(struct sdw_intel *sdw)
 	dodse = intel_prop->dodse;
 	dods = intel_prop->dods;
 
+	dev_dbg_once(sdw->cdns.dev, "%s: clde %#x doaise2 %#x dodse2 %#x clds %#x clss %#x\n",
+		     __func__, clde, doaise2, dodse2, clds, clss);
+	dev_dbg_once(sdw->cdns.dev, "%s: doaise %#x doais %#x dodse %#x dods %#x\n",
+		     __func__, doaise, doais, dodse, dods);
+
 	act = intel_readw(shim_vs, SDW_SHIM2_INTEL_VS_ACTMCTL);
 	u16p_replace_bits(&act, clde, SDW_SHIM3_INTEL_VS_ACTMCTL_CLDE);
 	u16p_replace_bits(&act, doaise2, SDW_SHIM3_INTEL_VS_ACTMCTL_DOAISE2);
