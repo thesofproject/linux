@@ -3278,7 +3278,9 @@ static int sof_ipc4_tear_down_all_pipelines(struct snd_sof_dev *sdev, bool verif
 				continue;
 
 			if (spcm->stream[dir].list) {
+				spcm->stream[dir].suspending = true;
 				ret = sof_pcm_stream_free(sdev, substream, spcm, dir, true);
+				spcm->stream[dir].suspending = false;
 				if (ret < 0)
 					return ret;
 			}

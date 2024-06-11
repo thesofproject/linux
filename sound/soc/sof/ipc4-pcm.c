@@ -131,6 +131,7 @@ static void sof_ipc4_add_pipeline_by_priority(struct ipc4_pipeline_set_state_dat
 
 static void
 sof_ipc4_add_pipeline_to_trigger_list(struct snd_sof_dev *sdev, int state,
+				      bool suspending,
 				      struct snd_sof_pipeline *spipe,
 				      struct ipc4_pipeline_set_state_data *trigger_list,
 				      s8 *pipe_priority)
@@ -152,6 +153,18 @@ sof_ipc4_add_pipeline_to_trigger_list(struct snd_sof_dev *sdev, int state,
 							  false);
 		break;
 	case SOF_IPC4_PIPE_RESET:
+		if (suspending) {
+			if (pipeline->state != SOF_IPC4_PIPE_PAUSED)
+				dev_warn(sdev->dev,
+					 "%s: %s is not in PAUSED state"
+					 "(state: %d, started/paused count: %d/%d)\n",
+					 __func__, pipe_widget->widget->name,
+					 pipeline->state, spipe->started_count, spipe->paused_count);
+
+			spipe->started_count = 0;
+			spipe->paused_count = 0;
+		}
+
 		/* RESET if the pipeline is neither running nor paused */
 		if (!spipe->started_count && !spipe->paused_count)
 			sof_ipc4_add_pipeline_by_priority(trigger_list, pipe_widget, pipe_priority,
@@ -436,18 +449,24 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 	 * indeterministic. But the sink->source trigger order sink->source would still be
 	 * guaranteed for each fork independently.
 	 */
-	if (state == SOF_IPC4_PIPE_RUNNING || state == SOF_IPC4_PIPE_RESET)
+	if (state == SOF_IPC4_PIPE_RUNNING || state == SOF_IPC4_PIPE_RESET) {
+		bool suspending = spcm->stream[substream->stream].suspending;
+
 		for (i = pipeline_list->count - 1; i >= 0; i--) {
 			spipe = pipeline_list->pipelines[i];
-			sof_ipc4_add_pipeline_to_trigger_list(sdev, state, spipe, trigger_list,
+			sof_ipc4_add_pipeline_to_trigger_list(sdev, state,
+							      suspending, spipe,
+							      trigger_list,
 							      pipe_priority);
 		}
-	else
+	} else {
 		for (i = 0; i < pipeline_list->count; i++) {
 			spipe = pipeline_list->pipelines[i];
-			sof_ipc4_add_pipeline_to_trigger_list(sdev, state, spipe, trigger_list,
+			sof_ipc4_add_pipeline_to_trigger_list(sdev, state, false,
+							      spipe, trigger_list,
 							      pipe_priority);
 		}
+	}
 
 	/* return if all pipelines are in the requested state already */
 	if (!trigger_list->count) {
