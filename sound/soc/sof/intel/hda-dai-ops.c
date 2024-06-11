@@ -416,10 +416,12 @@ static int hda_ipc4_post_trigger(struct snd_sof_dev *sdev, struct snd_soc_dai *c
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_STOP:
 		/*
-		 * STOP/SUSPEND trigger is invoked only once when all users of this pipeline have
-		 * been stopped. So, clear the started_count so that the pipeline can be reset
+		 * STOP/SUSPEND trigger is invoked only once when all users of
+		 * this pipeline have been stopped. So, clear the started and
+		 * paused count so that the pipeline can be reset
 		 */
 		swidget->spipe->started_count = 0;
+		swidget->spipe->paused_count = 0;
 		break;
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 		break;
