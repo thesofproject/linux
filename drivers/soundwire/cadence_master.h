@@ -125,6 +125,8 @@ struct sdw_cdns {
 
 	u32 ip_offset;
 
+	bool slave_alerts_disabled;
+
 	/*
 	 * The datasheet says the RX FIFO AVAIL can be 2 entries more
 	 * than the FIFO capacity, so allow for this.
@@ -202,5 +204,7 @@ void sdw_cdns_check_self_clearing_bits(struct sdw_cdns *cdns, const char *string
 
 void sdw_cdns_config_update(struct sdw_cdns *cdns);
 int sdw_cdns_config_update_set_wait(struct sdw_cdns *cdns);
+
+void sdw_cdns_enable_slave_alerts(struct sdw_cdns *cdns, bool state);
 
 #endif /* __SDW_CADENCE_H */

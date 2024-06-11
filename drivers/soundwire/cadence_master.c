@@ -1003,6 +1003,7 @@ static void cdns_update_slave_status_work(struct work_struct *work)
 	u32 slave0, slave1;
 	u64 slave_intstat;
 	u32 device0_status;
+	u32 mcp_int_mask;
 	int retry_count = 0;
 
 	/*
@@ -1069,8 +1070,12 @@ update_status:
 	}
 
 	/* unmask Slave interrupt now */
+	mcp_int_mask = CDNS_MCP_INT_SLAVE_MASK;
+	if (cdns->slave_alerts_disabled)
+		mcp_int_mask &= ~CDNS_MCP_INT_SLAVE_ALERT;
+
 	cdns_updatel(cdns, CDNS_MCP_INTMASK,
-		     CDNS_MCP_INT_SLAVE_MASK, CDNS_MCP_INT_SLAVE_MASK);
+		     CDNS_MCP_INT_SLAVE_MASK, mcp_int_mask);
 
 }
 
@@ -1162,6 +1167,31 @@ static void cdns_enable_slave_interrupts(struct sdw_cdns *cdns, bool state)
 
 	cdns_writel(cdns, CDNS_MCP_INTMASK, mask);
 }
+
+/**
+ * sdw_cdns_enable_slave_alerts() - Enable SDW slave alerts
+ * @cdns: Cadence instance
+ * @state: boolean for true/false
+ */
+void sdw_cdns_enable_slave_alerts(struct sdw_cdns *cdns, bool state)
+{
+	u32 mask;
+
+	mask = cdns_readl(cdns, CDNS_MCP_INTMASK);
+	if (state)
+		mask |= CDNS_MCP_INT_SLAVE_ALERT;
+	else
+		mask &= ~CDNS_MCP_INT_SLAVE_ALERT;
+
+	cdns_writel(cdns, CDNS_MCP_INTMASK, mask);
+
+	cdns->slave_alerts_disabled = !state;
+
+	/* FIXME: for some reason this locks the device */
+	//if (!state)
+	//	flush_work(&cdns->work);
+}
+EXPORT_SYMBOL(sdw_cdns_enable_slave_alerts);
 
 /**
  * sdw_cdns_enable_interrupt() - Enable SDW interrupts
