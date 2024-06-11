@@ -2379,7 +2379,9 @@ static int sof_tear_down_left_over_pipelines(struct snd_sof_dev *sdev)
 				continue;
 
 			if (spcm->stream[dir].list) {
+				spcm->stream[dir].suspending = true;
 				ret = sof_pcm_stream_free(sdev, substream, spcm, dir, true);
+				spcm->stream[dir].suspending = false;
 				if (ret < 0)
 					return ret;
 			}
