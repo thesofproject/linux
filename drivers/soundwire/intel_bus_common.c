@@ -238,6 +238,8 @@ int intel_pre_bank_switch(struct sdw_intel *sdw)
 	if (!bus->multi_link)
 		return 0;
 
+	sdw_cdns_enable_slave_alerts(cdns, false);
+
 	sdw_intel_sync_arm(sdw);
 
 	return 0;
@@ -275,6 +277,8 @@ int intel_post_bank_switch(struct sdw_intel *sdw)
 
 	if (ret < 0)
 		dev_err(sdw->cdns.dev, "Post bank switch failed: %d\n", ret);
+
+	sdw_cdns_enable_slave_alerts(cdns, true);
 
 	return ret;
 }
