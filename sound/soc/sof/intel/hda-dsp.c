@@ -1007,6 +1007,19 @@ int hda_dsp_runtime_suspend(struct snd_sof_dev *sdev)
 }
 EXPORT_SYMBOL_NS(hda_dsp_runtime_suspend, SND_SOC_SOF_INTEL_HDA_COMMON);
 
+int hda_dsp_suspend_early(struct snd_sof_dev *sdev)
+{
+	int ret;
+
+	/* make sure all DAI resources are freed */
+	ret = hda_dsp_dais_suspend(sdev);
+	if (ret < 0)
+		dev_warn(sdev->dev, "%s: failure in hda_dsp_dais_suspend\n", __func__);
+
+	return ret;
+}
+EXPORT_SYMBOL_NS(hda_dsp_suspend_early, SND_SOC_SOF_INTEL_HDA_COMMON);
+
 int hda_dsp_suspend(struct snd_sof_dev *sdev, u32 target_state)
 {
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
@@ -1147,19 +1160,6 @@ int hda_dsp_shutdown(struct snd_sof_dev *sdev)
 	return snd_sof_suspend(sdev->dev);
 }
 EXPORT_SYMBOL_NS(hda_dsp_shutdown, SND_SOC_SOF_INTEL_HDA_COMMON);
-
-int hda_dsp_set_hw_params_upon_resume(struct snd_sof_dev *sdev)
-{
-	int ret;
-
-	/* make sure all DAI resources are freed */
-	ret = hda_dsp_dais_suspend(sdev);
-	if (ret < 0)
-		dev_warn(sdev->dev, "%s: failure in hda_dsp_dais_suspend\n", __func__);
-
-	return ret;
-}
-EXPORT_SYMBOL_NS(hda_dsp_set_hw_params_upon_resume, SND_SOC_SOF_INTEL_HDA_COMMON);
 
 void hda_dsp_d0i3_work(struct work_struct *work)
 {
