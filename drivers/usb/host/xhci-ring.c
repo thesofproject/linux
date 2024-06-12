@@ -1926,6 +1926,12 @@ static void handle_cmd_completion(struct xhci_hcd *xhci,
 		break;
 	case TRB_GET_BW:
 		break;
+	case TRB_GET_EXT_PROP:
+		xhci_dbg(xhci, "Get Extended Property status 0x%08x\n", status);
+		break;
+	case TRB_SET_EXT_PROP:
+		xhci_dbg(xhci, "Set Extended Property status 0x%08x\n", status);
+		break;
 	default:
 		/* Skip over unknown commands on the event ring */
 		xhci_info(xhci, "INFO unknown command type %d\n", cmd_type);
@@ -4493,4 +4499,53 @@ int xhci_queue_reset_ep(struct xhci_hcd *xhci, struct xhci_command *cmd,
 
 	return queue_command(xhci, cmd, 0, 0, 0,
 			trb_slot_id | trb_ep_index | type, false);
+}
+
+int xhci_queue_get_ext_property(struct xhci_hcd *xhci, struct xhci_command *cmd,
+				u32 property, u32 subtype,
+				u32 slot_id, u32 ep_index)
+{
+	u32 type = TRB_TYPE(TRB_GET_EXT_PROP);
+	u32 ctx_lo = 0;
+	u32 ctx_hi = 0;
+
+	if (property != PROP_ECI_ALL) {
+		type |= SLOT_ID_FOR_TRB(slot_id) |
+			FIELD_PREP(TRB_PROP_EP_ID, ep_index + 1) |
+			FIELD_PREP(TRB_PROP_SUBTYPE, subtype);
+
+		if (cmd->in_ctx) {
+			ctx_lo = lower_32_bits(cmd->in_ctx->dma);
+			ctx_hi = upper_32_bits(cmd->in_ctx->dma);
+		}
+	}
+
+	return queue_command(xhci, cmd, ctx_lo, ctx_hi,
+			     FIELD_PREP(TRB_PROP_ECI, property), type, false);
+}
+
+int xhci_queue_set_ext_property(struct xhci_hcd *xhci, struct xhci_command *cmd,
+				u32 param, u32 property, u32 subtype,
+				u32 slot_id, u32 ep_index)
+{
+	u32 type = TRB_TYPE(TRB_SET_EXT_PROP);
+	u32 cap_param;
+	u32 ctx_lo = 0;
+	u32 ctx_hi = 0;
+
+	cap_param = FIELD_PREP(TRB_PROP_ECPARAM, param) |
+		    FIELD_PREP(TRB_PROP_ECI, property);
+
+	if (property != PROP_ECI_ALL) {
+		type |= SLOT_ID_FOR_TRB(slot_id) |
+			FIELD_PREP(TRB_PROP_EP_ID, ep_index + 1) |
+			FIELD_PREP(TRB_PROP_SUBTYPE, subtype);
+
+		if (cmd->in_ctx) {
+			ctx_lo = lower_32_bits(cmd->in_ctx->dma);
+			ctx_hi = upper_32_bits(cmd->in_ctx->dma);
+		}
+	}
+
+	return queue_command(xhci, cmd, ctx_lo, ctx_hi, cap_param, type, false);
 }
