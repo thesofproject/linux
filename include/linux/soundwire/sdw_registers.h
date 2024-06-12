@@ -4,6 +4,9 @@
 #ifndef __SDW_REGISTERS_H
 #define __SDW_REGISTERS_H
 
+#include <linux/bitfield.h>
+#include <linux/bits.h>
+
 /*
  * SDW registers as defined by MIPI 1.2 Spec
  */
@@ -338,7 +341,27 @@
 						 (((ch) & 0x38) << 12) |	\
 						 ((ch) & 0x07))
 
+#define SDW_SDCA_CTL_FUNC(addr) FIELD_GET(GENMASK(24, 22), addr)
+#define SDW_SDCA_CTL_ENT(addr) ((FIELD_GET(BIT(21), addr) << 6) | \
+				FIELD_GET(GENMASK(12, 7), addr))
+#define SDW_SDCA_CTL_CSEL(addr) ((FIELD_GET(GENMASK(20, 19), addr) << 4) | \
+				 FIELD_GET(GENMASK(6, 3), addr))
+#define SDW_SDCA_CTL_CNUM(addr) ((FIELD_GET(GENMASK(17, 15), addr) << 3) | \
+				 FIELD_GET(GENMASK(2, 0), addr))
+
 #define SDW_SDCA_MBQ_CTL(reg)			((reg) | BIT(13))
 #define SDW_SDCA_NEXT_CTL(reg)			((reg) | BIT(14))
+
+/* SDCA Function_Status */
+#define SDW_SDCA_FUNCTION_STATUS		0x10
+
+#define SDW_SDCA_DEVICE_NEWLY_ATTACHED		BIT(0)
+#define SDW_SDCA_INTS_DISABLED_ABNORMALLY	BIT(1)
+#define SDW_SDCA_STREAMING_STOPPED_ABNORMALLY	BIT(2)
+#define SDW_SDCA_FUNCTION_FAULT			BIT(3)
+#define SDW_SDCA_UMP_SEQUENCE_FAULT		BIT(4)
+#define SDW_SDCA_FUNCTION_NEEDS_INITIALIZATION	BIT(5)
+#define SDW_SDCA_FUNCTION_HAS_BEEN_RESET	BIT(6)
+#define SDW_SDCA_FUNCTION_BUSY			BIT(7)
 
 #endif /* __SDW_REGISTERS_H */
