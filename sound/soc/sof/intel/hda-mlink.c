@@ -320,6 +320,7 @@ static void hdaml_link_sync_go(u32 __iomem *lsync)
 	val |= AZX_REG_ML_LSYNC_SYNCGO;
 
 	writel(val, lsync);
+	pr_warn("%s val %#x\n", __func__, val);
 }
 
 static bool hdaml_link_check_cmdsync(u32 __iomem *lsync, u32 cmdsync_mask)
