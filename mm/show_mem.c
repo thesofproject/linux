@@ -459,3 +459,4 @@ void __show_mem(unsigned int filter, nodemask_t *nodemask, int max_zone_idx)
 	}
 #endif
 }
+EXPORT_SYMBOL_GPL(__show_mem);
