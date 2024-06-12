@@ -74,6 +74,8 @@ int sdw_master_read_prop(struct sdw_bus *bus)
 		fwnode_property_read_u32_array(link,
 				"mipi-sdw-clock-frequencies-supported",
 				prop->clk_freq, prop->num_clk_freq);
+		/* HACK: only use the first frequency */
+		prop->num_clk_freq = 1;
 	}
 
 	/*
