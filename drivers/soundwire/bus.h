@@ -212,5 +212,6 @@ void sdw_clear_slave_status(struct sdw_bus *bus, u32 request);
 int sdw_slave_modalias(const struct sdw_slave *slave, char *buf, size_t size);
 void sdw_compute_slave_ports(struct sdw_master_runtime *m_rt,
 			     struct sdw_transport_data *t_data);
+int sdw_slave_set_frequency(struct sdw_slave *slave);
 
 #endif /* __SDW_BUS_H */
