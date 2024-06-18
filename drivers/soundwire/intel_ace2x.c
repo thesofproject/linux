@@ -147,16 +147,18 @@ static int intel_link_power_up(struct sdw_intel *sdw)
 
 	mutex_lock(sdw->link_res->shim_lock);
 
-	ret = hdac_bus_eml_sdw_power_up_unlocked(sdw->link_res->hbus, BIT(link_id));
-	if (ret < 0) {
-		dev_err(sdw->cdns.dev, "%s: hdac_bus_eml_sdw_power_up failed: %d\n",
-			__func__, ret);
-		goto out;
-	}
-
-	intel_shim_vs_set_clock_source(sdw, clock_source);
-
 	if (!*shim_mask) {
+		dev_dbg(sdw->cdns.dev, "powering up all links\n");
+
+		ret = hdac_bus_eml_sdw_power_up_unlocked(sdw->link_res->hbus, sdw->link_res->link_mask);
+		if (ret < 0) {
+			dev_err(sdw->cdns.dev, "%s: hdac_bus_eml_sdw_power_up failed: %d\n",
+				__func__, ret);
+			goto out;
+		}
+
+		intel_shim_vs_set_clock_source(sdw, clock_source);
+
 		/* we first need to program the SyncPRD/CPU registers */
 		dev_dbg(sdw->cdns.dev, "first link up, programming SYNCPRD\n");
 
@@ -174,6 +176,7 @@ static int intel_link_power_up(struct sdw_intel *sdw)
 				__func__, ret);
 			goto out;
 		}
+
 	}
 
 	*shim_mask |= BIT(link_id);
@@ -200,15 +203,19 @@ static int intel_link_power_down(struct sdw_intel *sdw)
 
 	*shim_mask &= ~BIT(link_id);
 
-	ret = hdac_bus_eml_sdw_power_down_unlocked(sdw->link_res->hbus, BIT(link_id));
-	if (ret < 0) {
-		dev_err(sdw->cdns.dev, "%s: hdac_bus_eml_sdw_power_down failed: %d\n",
+	if (!*shim_mask) {
+		dev_dbg(sdw->cdns.dev, "powering down all links\n");
+
+		ret = hdac_bus_eml_sdw_power_down_unlocked(sdw->link_res->hbus, sdw->link_res->link_mask);
+		if (ret < 0) {
+			dev_err(sdw->cdns.dev, "%s: hdac_bus_eml_sdw_power_down failed: %d\n",
 			__func__, ret);
 
-		/*
-		 * we leave the sdw->cdns.link_up flag as false since we've disabled
-		 * the link at this point and cannot handle interrupts any longer.
-		 */
+			/*
+			 * we leave the sdw->cdns.link_up flag as false since we've disabled
+			 * the link at this point and cannot handle interrupts any longer.
+			 */
+		}
 	}
 
 	mutex_unlock(sdw->link_res->shim_lock);
