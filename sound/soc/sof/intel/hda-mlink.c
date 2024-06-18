@@ -188,9 +188,9 @@ static int hdaml_lnk_enum(struct device *dev, struct hdac_ext2_link *h2link,
 #define HDAML_POLL_DELAY_SLACK_US 5
 #define HDAML_POLL_DELAY_RETRY  100
 
-static int check_sublink_power(u32 __iomem *lctl, int sublink, bool enabled)
+static int check_sublink_power(u32 __iomem *lctl, int sublink_mask, bool enabled)
 {
-	int mask = BIT(sublink) << AZX_ML_LCTL_CPA_SHIFT;
+	int mask = sublink_mask << AZX_ML_LCTL_CPA_SHIFT;
 	int retry = HDAML_POLL_DELAY_RETRY;
 	u32 val;
 
@@ -213,31 +213,31 @@ static int check_sublink_power(u32 __iomem *lctl, int sublink, bool enabled)
 	return -EIO;
 }
 
-static int hdaml_link_init(u32 __iomem *lctl, int sublink)
+static int hdaml_link_init(u32 __iomem *lctl, int sublink_mask)
 {
 	u32 val;
-	u32 mask = BIT(sublink) << AZX_ML_LCTL_SPA_SHIFT;
+	u32 mask = sublink_mask << AZX_ML_LCTL_SPA_SHIFT;
 
 	val = readl(lctl);
 	val |= mask;
 
 	writel(val, lctl);
 
-	return check_sublink_power(lctl, sublink, true);
+	return check_sublink_power(lctl, sublink_mask, true);
 }
 
-static int hdaml_link_shutdown(u32 __iomem *lctl, int sublink)
+static int hdaml_link_shutdown(u32 __iomem *lctl, int sublink_mask)
 {
 	u32 val;
 	u32 mask;
 
 	val = readl(lctl);
-	mask = BIT(sublink) << AZX_ML_LCTL_SPA_SHIFT;
+	mask = sublink_mask << AZX_ML_LCTL_SPA_SHIFT;
 	val &= ~mask;
 
 	writel(val, lctl);
 
-	return check_sublink_power(lctl, sublink, false);
+	return check_sublink_power(lctl, sublink_mask, false);
 }
 
 static void hdaml_link_enable_interrupt(u32 __iomem *lctl, bool enable)
@@ -650,7 +650,7 @@ bool hdac_bus_eml_sdw_check_cmdsync_unlocked(struct hdac_bus *bus)
 }
 EXPORT_SYMBOL_NS(hdac_bus_eml_sdw_check_cmdsync_unlocked, SND_SOC_SOF_HDA_MLINK);
 
-static int hdac_bus_eml_power_up_base(struct hdac_bus *bus, bool alt, int elid, int sublink,
+static int hdac_bus_eml_power_up_base(struct hdac_bus *bus, bool alt, int elid, int sublink_mask,
 				      bool eml_lock)
 {
 	struct hdac_ext2_link *h2link;
@@ -661,7 +661,10 @@ static int hdac_bus_eml_power_up_base(struct hdac_bus *bus, bool alt, int elid, 
 	if (!h2link)
 		return -ENODEV;
 
-	if (sublink >= h2link->slcount)
+	if (!sublink_mask)
+		return -EINVAL;
+
+	if (__fls(sublink_mask) >= h2link->slcount)
 		return -EINVAL;
 
 	hlink = &h2link->hext_link;
@@ -673,11 +676,20 @@ static int hdac_bus_eml_power_up_base(struct hdac_bus *bus, bool alt, int elid, 
 		if (++hlink->ref_count > 1)
 			goto skip_init;
 	} else {
-		if (++h2link->sublink_ref_count[sublink] > 1)
+		long mask = sublink_mask;
+		int bit;
+
+		sublink_mask = 0;
+		for_each_set_bit(bit, &mask, HDAML_MAX_SUBLINKS) {
+			if (++h2link->sublink_ref_count[bit] > 1)
+				continue;
+			sublink_mask |= BIT(bit);
+		}
+		if (!sublink_mask)
 			goto skip_init;
 	}
 
-	ret = hdaml_link_init(hlink->ml_addr + AZX_REG_ML_LCTL, sublink);
+	ret = hdaml_link_init(hlink->ml_addr + AZX_REG_ML_LCTL, sublink_mask);
 
 skip_init:
 	if (eml_lock)
@@ -686,19 +698,19 @@ skip_init:
 	return ret;
 }
 
-int hdac_bus_eml_power_up(struct hdac_bus *bus, bool alt, int elid, int sublink)
+int hdac_bus_eml_power_up(struct hdac_bus *bus, bool alt, int elid, int sublink_mask)
 {
-	return hdac_bus_eml_power_up_base(bus, alt, elid, sublink, true);
+	return hdac_bus_eml_power_up_base(bus, alt, elid, sublink_mask, true);
 }
 EXPORT_SYMBOL_NS(hdac_bus_eml_power_up, SND_SOC_SOF_HDA_MLINK);
 
-int hdac_bus_eml_power_up_unlocked(struct hdac_bus *bus, bool alt, int elid, int sublink)
+int hdac_bus_eml_power_up_unlocked(struct hdac_bus *bus, bool alt, int elid, int sublink_mask)
 {
-	return hdac_bus_eml_power_up_base(bus, alt, elid, sublink, false);
+	return hdac_bus_eml_power_up_base(bus, alt, elid, sublink_mask, false);
 }
 EXPORT_SYMBOL_NS(hdac_bus_eml_power_up_unlocked, SND_SOC_SOF_HDA_MLINK);
 
-static int hdac_bus_eml_power_down_base(struct hdac_bus *bus, bool alt, int elid, int sublink,
+static int hdac_bus_eml_power_down_base(struct hdac_bus *bus, bool alt, int elid, int sublink_mask,
 					bool eml_lock)
 {
 	struct hdac_ext2_link *h2link;
@@ -709,7 +721,10 @@ static int hdac_bus_eml_power_down_base(struct hdac_bus *bus, bool alt, int elid
 	if (!h2link)
 		return -ENODEV;
 
-	if (sublink >= h2link->slcount)
+	if (!sublink_mask)
+		return -EINVAL;
+
+	if (__fls(sublink_mask) >= h2link->slcount)
 		return -EINVAL;
 
 	hlink = &h2link->hext_link;
@@ -721,10 +736,19 @@ static int hdac_bus_eml_power_down_base(struct hdac_bus *bus, bool alt, int elid
 		if (--hlink->ref_count > 0)
 			goto skip_shutdown;
 	} else {
-		if (--h2link->sublink_ref_count[sublink] > 0)
+		long mask = sublink_mask;
+		int bit;
+
+		sublink_mask = 0;
+		for_each_set_bit(bit, &mask, HDAML_MAX_SUBLINKS) {
+			if (--h2link->sublink_ref_count[bit] > 0)
+				continue;
+			sublink_mask |= BIT(bit);
+		}
+		if (!sublink_mask)
 			goto skip_shutdown;
 	}
-	ret = hdaml_link_shutdown(hlink->ml_addr + AZX_REG_ML_LCTL, sublink);
+	ret = hdaml_link_shutdown(hlink->ml_addr + AZX_REG_ML_LCTL, sublink_mask);
 
 skip_shutdown:
 	if (eml_lock)
@@ -733,27 +757,27 @@ skip_shutdown:
 	return ret;
 }
 
-int hdac_bus_eml_power_down(struct hdac_bus *bus, bool alt, int elid, int sublink)
+int hdac_bus_eml_power_down(struct hdac_bus *bus, bool alt, int elid, int sublink_mask)
 {
-	return hdac_bus_eml_power_down_base(bus, alt, elid, sublink, true);
+	return hdac_bus_eml_power_down_base(bus, alt, elid, sublink_mask, true);
 }
 EXPORT_SYMBOL_NS(hdac_bus_eml_power_down, SND_SOC_SOF_HDA_MLINK);
 
-int hdac_bus_eml_power_down_unlocked(struct hdac_bus *bus, bool alt, int elid, int sublink)
+int hdac_bus_eml_power_down_unlocked(struct hdac_bus *bus, bool alt, int elid, int sublink_mask)
 {
-	return hdac_bus_eml_power_down_base(bus, alt, elid, sublink, false);
+	return hdac_bus_eml_power_down_base(bus, alt, elid, sublink_mask, false);
 }
 EXPORT_SYMBOL_NS(hdac_bus_eml_power_down_unlocked, SND_SOC_SOF_HDA_MLINK);
 
-int hdac_bus_eml_sdw_power_up_unlocked(struct hdac_bus *bus, int sublink)
+int hdac_bus_eml_sdw_power_up_unlocked(struct hdac_bus *bus, int sublink_mask)
 {
-	return hdac_bus_eml_power_up_unlocked(bus, true, AZX_REG_ML_LEPTR_ID_SDW, sublink);
+	return hdac_bus_eml_power_up_unlocked(bus, true, AZX_REG_ML_LEPTR_ID_SDW, sublink_mask);
 }
 EXPORT_SYMBOL_NS(hdac_bus_eml_sdw_power_up_unlocked, SND_SOC_SOF_HDA_MLINK);
 
-int hdac_bus_eml_sdw_power_down_unlocked(struct hdac_bus *bus, int sublink)
+int hdac_bus_eml_sdw_power_down_unlocked(struct hdac_bus *bus, int sublink_mask)
 {
-	return hdac_bus_eml_power_down_unlocked(bus, true, AZX_REG_ML_LEPTR_ID_SDW, sublink);
+	return hdac_bus_eml_power_down_unlocked(bus, true, AZX_REG_ML_LEPTR_ID_SDW, sublink_mask);
 }
 EXPORT_SYMBOL_NS(hdac_bus_eml_sdw_power_down_unlocked, SND_SOC_SOF_HDA_MLINK);
 

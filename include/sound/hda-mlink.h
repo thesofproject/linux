@@ -33,14 +33,14 @@ int hdac_bus_eml_sdw_sync_go_unlocked(struct hdac_bus *bus);
 bool hdac_bus_eml_check_cmdsync_unlocked(struct hdac_bus *bus, bool alt, int elid);
 bool hdac_bus_eml_sdw_check_cmdsync_unlocked(struct hdac_bus *bus);
 
-int hdac_bus_eml_power_up(struct hdac_bus *bus, bool alt, int elid, int sublink);
-int hdac_bus_eml_power_up_unlocked(struct hdac_bus *bus, bool alt, int elid, int sublink);
+int hdac_bus_eml_power_up(struct hdac_bus *bus, bool alt, int elid, int sublink_mask);
+int hdac_bus_eml_power_up_unlocked(struct hdac_bus *bus, bool alt, int elid, int sublink_mask);
 
-int hdac_bus_eml_power_down(struct hdac_bus *bus, bool alt, int elid, int sublink);
-int hdac_bus_eml_power_down_unlocked(struct hdac_bus *bus, bool alt, int elid, int sublink);
+int hdac_bus_eml_power_down(struct hdac_bus *bus, bool alt, int elid, int sublink_mask);
+int hdac_bus_eml_power_down_unlocked(struct hdac_bus *bus, bool alt, int elid, int sublink_mask);
 
-int hdac_bus_eml_sdw_power_up_unlocked(struct hdac_bus *bus, int sublink);
-int hdac_bus_eml_sdw_power_down_unlocked(struct hdac_bus *bus, int sublink);
+int hdac_bus_eml_sdw_power_up_unlocked(struct hdac_bus *bus, int sublink_mask);
+int hdac_bus_eml_sdw_power_down_unlocked(struct hdac_bus *bus, int sublink_mask);
 
 int hdac_bus_eml_sdw_get_lsdiid_unlocked(struct hdac_bus *bus, int sublink, u16 *lsdiid);
 int hdac_bus_eml_sdw_set_lsdiid(struct hdac_bus *bus, int sublink, int dev_num);
