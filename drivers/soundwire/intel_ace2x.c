@@ -64,6 +64,7 @@ static void intel_shim_vs_init(struct sdw_intel *sdw)
 	usleep_range(10, 15);
 }
 
+#if 0
 static void intel_shim_vs_set_clock_source(struct sdw_intel *sdw, u32 source)
 {
 	void __iomem *shim_vs = sdw->link_res->shim_vs;
@@ -77,6 +78,7 @@ static void intel_shim_vs_set_clock_source(struct sdw_intel *sdw, u32 source)
 
 	dev_dbg(sdw->cdns.dev, "clock source %d LVSCTL %#x\n", source, val);
 }
+#endif
 
 static int intel_shim_check_wake(struct sdw_intel *sdw)
 {
@@ -147,15 +149,6 @@ static int intel_link_power_up(struct sdw_intel *sdw)
 
 	mutex_lock(sdw->link_res->shim_lock);
 
-	ret = hdac_bus_eml_sdw_power_up_unlocked(sdw->link_res->hbus, link_id);
-	if (ret < 0) {
-		dev_err(sdw->cdns.dev, "%s: hdac_bus_eml_sdw_power_up failed: %d\n",
-			__func__, ret);
-		goto out;
-	}
-
-	intel_shim_vs_set_clock_source(sdw, clock_source);
-
 	if (!*shim_mask) {
 		/* we first need to program the SyncPRD/CPU registers */
 		dev_dbg(sdw->cdns.dev, "first link up, programming SYNCPRD\n");
@@ -166,7 +159,18 @@ static int intel_link_power_up(struct sdw_intel *sdw)
 				__func__, ret);
 			goto out;
 		}
+	}
 
+	ret = hdac_bus_eml_sdw_power_up_unlocked(sdw->link_res->hbus, link_id);
+	if (ret < 0) {
+		dev_err(sdw->cdns.dev, "%s: hdac_bus_eml_sdw_power_up failed: %d\n",
+			__func__, ret);
+		goto out;
+	}
+
+	//intel_shim_vs_set_clock_source(sdw, clock_source);
+
+	if (!*shim_mask) {
 		/* SYNCPU will change once link is active */
 		ret =  hdac_bus_eml_sdw_wait_syncpu_unlocked(sdw->link_res->hbus);
 		if (ret < 0) {
