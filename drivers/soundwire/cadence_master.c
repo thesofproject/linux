@@ -989,6 +989,39 @@ irqreturn_t sdw_cdns_irq(int irq, void *dev_id)
 }
 EXPORT_SYMBOL(sdw_cdns_irq);
 
+static void cdns_check_attached_status_dwork(struct work_struct *work)
+{
+	struct sdw_cdns *cdns =
+		container_of(work, struct sdw_cdns, attach_dwork.work);
+	enum sdw_slave_status status[SDW_MAX_DEVICES + 1];
+	u32 val;
+	int ret;
+	int i;
+
+	/*
+	 * Mask the Slave interrupt while we try to update the status.
+	 * This will prevent concurrent execution of this delayed_work
+	 * and the regular update_status_work as a result of programming
+	 * the device number to a non-zero value.
+	 */
+	cdns_updatel(cdns, CDNS_MCP_INTMASK, CDNS_MCP_INT_SLAVE_MASK, 0);
+
+	val = cdns_readl(cdns, CDNS_MCP_SLAVE_STAT);
+
+	for (i = 0; i <= SDW_MAX_DEVICES; i++) {
+		status[i] = val & 0x3;
+		if (status[i])
+			dev_dbg(cdns->dev, "Peripheral %d status: %d\n", i, status[i]);
+		val >>= 2;
+	}
+
+	ret = sdw_handle_slave_status(&cdns->bus, status);
+	if (ret < 0)
+		dev_err(cdns->dev, "%s: sdw_handle_slave_status failed: %d\n", __func__, ret);
+
+	/* unmask Slave interrupt now */
+	cdns_updatel(cdns, CDNS_MCP_INTMASK, CDNS_MCP_INT_SLAVE_MASK, CDNS_MCP_INT_SLAVE_MASK);
+}
 /**
  * cdns_update_slave_status_work - update slave status in a work since we will need to handle
  * other interrupts eg. CDNS_MCP_INT_RX_WL during the update slave
@@ -1742,6 +1775,8 @@ int sdw_cdns_probe(struct sdw_cdns *cdns)
 	cdns->bus.port_ops = &cdns_port_ops;
 
 	INIT_WORK(&cdns->work, cdns_update_slave_status_work);
+	INIT_DELAYED_WORK(&cdns->attach_dwork, cdns_check_attached_status_dwork);
+
 	return 0;
 }
 EXPORT_SYMBOL(sdw_cdns_probe);
