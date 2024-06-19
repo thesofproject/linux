@@ -928,7 +928,7 @@ skip_dsp_setup:
 	}
 
 	chip = get_chip_info(sdev->pdata);
-	if (chip && chip->hw_ip_version >= SOF_INTEL_ACE_2_0) {
+	if (chip && chip->hw_ip_version > SOF_INTEL_ACE_2_0) {
 		ret = hda_sdw_startup(sdev);
 		if (ret < 0) {
 			dev_err(sdev->dev, "could not startup SoundWire links\n");

@@ -892,7 +892,7 @@ static int hda_resume(struct snd_sof_dev *sdev, bool runtime_resume)
 	}
 
 	chip = get_chip_info(sdev->pdata);
-	if (chip && chip->hw_ip_version >= SOF_INTEL_ACE_2_0)
+	if (chip && chip->hw_ip_version > SOF_INTEL_ACE_2_0)
 		hda_sdw_int_enable(sdev, true);
 
 cleanup:
