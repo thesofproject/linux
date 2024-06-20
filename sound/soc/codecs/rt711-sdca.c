@@ -266,6 +266,8 @@ static int rt711_sdca_headset_detect(struct rt711_sdca_priv *rt711)
 	unsigned int det_mode;
 	int ret;
 
+	rt711_sdca_ge_force_jack_type(rt711, rt711->ge_mode_override);
+
 	/* get detected_mode */
 	ret = regmap_read(rt711->regmap,
 		SDW_SDCA_CTL(FUNC_NUM_JACK_CODEC, RT711_SDCA_ENT_GE49, RT711_SDCA_CTL_DETECTED_MODE, 0),
@@ -283,15 +285,6 @@ static int rt711_sdca_headset_detect(struct rt711_sdca_priv *rt711)
 	case 0x05:
 		rt711->jack_type = SND_JACK_HEADSET;
 		break;
-	}
-
-	if (rt711->ge_mode_override || (det_mode == 0)) {
-		if ((det_mode != rt711->ge_mode_override) && det_mode) {
-			det_mode = rt711->ge_mode_override;
-			rt711->jack_type =
-				(rt711->jack_type == SND_JACK_HEADPHONE) ? SND_JACK_HEADSET : SND_JACK_HEADPHONE;
-		}
-		rt711_sdca_ge_force_jack_type(rt711, det_mode);
 	}
 
 	/* write selected_mode */
@@ -853,7 +846,7 @@ static int rt711_sdca_ge_select_put(struct snd_kcontrol *kcontrol,
 }
 
 static const char * const rt711_sdca_ge_select[] = {
-	"None",
+	"Auto",
 	"Headphone",
 	"Headset",
 };
