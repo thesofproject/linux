@@ -203,6 +203,7 @@ struct sof_amd_acp_desc {
 	u32 probe_reg_offset;
 	u32 reg_start_addr;
 	u32 reg_end_addr;
+	u32 acp_error_stat;
 	u32 sdw_max_link_count;
 	u64 sdw_acpi_dev_addr;
 };
