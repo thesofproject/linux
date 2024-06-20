@@ -101,6 +101,10 @@ DECLARE_HOOK(android_vh_alloc_pages_failure_bypass,
 DECLARE_HOOK(android_vh_kmalloc_large_alloced,
 	TP_PROTO(struct folio *folio, unsigned int order, gfp_t flags),
 	TP_ARGS(folio, order, flags));
+DECLARE_HOOK(android_vh_page_should_be_protected,
+	TP_PROTO(struct folio *folio, unsigned long nr_scanned,
+	s8 priority, int *should_protect),
+	TP_ARGS(folio, nr_scanned, priority, should_protect));
 #endif /* _TRACE_HOOK_MM_H */
 
 /* This part must be outside protection */
