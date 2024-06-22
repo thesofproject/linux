@@ -790,6 +790,55 @@ out_unlock:
 
 }
 
+static int smmu_dev_block_dma(pkvm_handle_t iommu, u32 sid, bool is_host2guest)
+{
+	struct hyp_arm_smmu_v3_device_pv *smmu = smmu_id_to_ptr(iommu);
+	static struct arm_smmu_ste *dst;
+	int ret = 0;
+
+
+	if (!smmu)
+		return -ENODEV;
+
+	kvm_smmu_lock(&smmu->common);
+	dst = smmu_get_ste_ptr(&smmu->common, sid);
+
+	/*
+	 * VFIO will attach the device to a blocking domain, this will make the
+	 * kernel driver detach the device which should be have zeroed STE.
+	 * So, if this is not the current state of the device, something
+	 * went wrong.
+	 * For guests, we need to do more as guests might not exit cleanly
+	 * and the device might be translating, so we have to actually block
+	 * the device and clean the STE/CD.
+	 */
+	if (dst->data[0]) {
+		if (is_host2guest) {
+			ret = -EINVAL;
+		} else {
+			int i = 0;
+			u32 cfg = FIELD_GET(STRTAB_STE_0_CFG, le64_to_cpu(dst->data[0]));
+
+			if (cfg == STRTAB_STE_0_CFG_S1_TRANS) {
+				size_t nr_entries, cd_sz;
+				u64 *cd_table;
+
+				cd_table = hyp_phys_to_virt(le64_to_cpu(dst->data[0]) & STRTAB_STE_0_S1CTXPTR_MASK);
+				nr_entries = 1 << FIELD_GET(STRTAB_STE_0_S1CDMAX, le64_to_cpu(dst->data[0]));
+				cd_sz = (1 << nr_entries) * (CTXDESC_CD_DWORDS << 3);
+				kvm_iommu_reclaim_pages(cd_table, get_order(cd_sz));
+			}
+
+			for (i = 0; i < STRTAB_STE_DWORDS; i++)
+				dst->data[i] = 0;
+			ret = smmu_sync_ste(smmu, dst->data, sid);
+		}
+	}
+
+	kvm_smmu_unlock(&smmu->common);
+	return ret;
+}
+
 static int smmu_map_pages(struct kvm_hyp_iommu_domain *domain, unsigned long iova,
 			  phys_addr_t paddr, size_t pgsize,
 			  size_t pgcount, int prot, size_t *total_mapped)
@@ -1392,4 +1441,5 @@ struct kvm_iommu_ops smmu_pv_ops = {
 	.dabt_handler			= smmu_dabt_handler,
 	.host_stage2_idmap		= smmu_host_stage2_idmap,
 	.set_identity			= smmu_set_identity,
+	.dev_block_dma			= smmu_dev_block_dma,
 };
