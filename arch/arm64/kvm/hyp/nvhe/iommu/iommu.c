@@ -351,14 +351,29 @@ static struct kvm_hyp_iommu_domain *handle_to_domain(pkvm_handle_t domain_id)
 static int domain_get(struct kvm_hyp_iommu_domain *domain)
 {
 	int old = atomic_fetch_inc_acquire(&domain->refs);
+	struct pkvm_hyp_vcpu *hyp_vcpu = __get_vcpu();
+	int ret = 0;
 
 	BUG_ON(!old || (old + 1 < 0));
-	return 0;
+
+	/* check done after refcount is elevated to avoid race with alloc_domain */
+	if (!hyp_vcpu && domain->vm)
+		ret = -EPERM;
+	if (hyp_vcpu && (domain->vm != pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu)))
+		ret = -EPERM;
+
+	if (ret)
+		atomic_dec_return_release(&domain->refs);
+	return ret;
 }
 
 static void domain_put(struct kvm_hyp_iommu_domain *domain)
 {
+	struct pkvm_hyp_vcpu *hyp_vcpu = __get_vcpu();
+
 	BUG_ON(!atomic_dec_return_release(&domain->refs));
+	WARN_ON(!hyp_vcpu && domain->vm);
+	WARN_ON(hyp_vcpu && (domain->vm != pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu)));
 }
 
 int kvm_iommu_alloc_domain(pkvm_handle_t drv_id, pkvm_handle_t iommu_id,
@@ -367,6 +382,8 @@ int kvm_iommu_alloc_domain(pkvm_handle_t drv_id, pkvm_handle_t iommu_id,
 	int ret = -EINVAL;
 	struct kvm_hyp_iommu_domain *domain;
 	struct kvm_iommu_ops *kvm_iommu_ops;
+	struct pkvm_hyp_vcpu *hyp_vcpu = __get_vcpu();
+	struct pkvm_hyp_vm *vm;
 
 	kvm_iommu_ops = get_drv(drv_id);
 	if (!kvm_iommu_ops || !kvm_iommu_ops->alloc_domain)
@@ -385,6 +402,11 @@ int kvm_iommu_alloc_domain(pkvm_handle_t drv_id, pkvm_handle_t iommu_id,
 	if (ret)
 		goto out_unlock;
 	domain->driver = kvm_iommu_ops;
+
+	if (hyp_vcpu) {
+		vm = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
+		domain->vm = vm;
+	}
 	atomic_set_release(&domain->refs, 1);
 out_unlock:
 	hyp_spin_unlock(&kvm_iommu_domain_lock);
@@ -396,6 +418,7 @@ int kvm_iommu_free_domain(pkvm_handle_t domain_id)
 	int ret = 0;
 	struct kvm_hyp_iommu_domain *domain;
 	struct kvm_iommu_ops *kvm_iommu_ops;
+	struct pkvm_hyp_vcpu *hyp_vcpu = __get_vcpu();
 
 	domain = handle_to_domain(domain_id);
 	if (!domain)
@@ -406,6 +429,13 @@ int kvm_iommu_free_domain(pkvm_handle_t domain_id)
 	if (!kvm_iommu_ops || !kvm_iommu_ops->free_domain) {
 		ret = -ENODEV;
 		goto out_unlock;
+	}
+
+	if (hyp_vcpu) {
+		if (domain->vm != pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu)) {
+			ret = -EPERM;
+			goto out_unlock;
+		}
 	}
 
 	if (WARN_ON(atomic_cmpxchg_acquire(&domain->refs, 1, 0) != 1)) {
