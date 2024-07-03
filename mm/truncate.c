@@ -24,6 +24,9 @@
 #include <linux/rmap.h>
 #include "internal.h"
 
+#undef CREATE_TRACE_POINTS
+#include <trace/hooks/vmscan.h>
+
 static void clear_shadow_entries(struct address_space *mapping,
 				 unsigned long start, unsigned long max)
 {
@@ -549,6 +552,11 @@ unsigned long mapping_try_invalidate(struct address_space *mapping,
 	unsigned long ret;
 	unsigned long count = 0;
 	int i;
+	bool skip = false;
+
+	trace_android_vh_invalidate_mapping_pagevec(mapping, &skip);
+	if (skip)
+		return count;
 
 	folio_batch_init(&fbatch);
 	while (find_lock_entries(mapping, &index, end, &fbatch, indices)) {
