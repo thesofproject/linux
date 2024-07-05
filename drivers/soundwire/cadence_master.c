@@ -1002,8 +1002,10 @@ static void cdns_check_attached_status_dwork(struct work_struct *work)
 	 * Mask the Slave interrupt while we try to update the status.
 	 * This will prevent concurrent execution of this delayed_work
 	 * and the regular update_status_work as a result of programming
-	 * the device number to a non-zero value.
+	 * the device number to a non-zero value. Cancel cdns->work before
+	 * disabling the interrupt.
 	 */
+	cancel_work_sync(&cdns->work);
 	cdns_updatel(cdns, CDNS_MCP_INTMASK, CDNS_MCP_INT_SLAVE_MASK, 0);
 
 	val = cdns_readl(cdns, CDNS_MCP_SLAVE_STAT);
