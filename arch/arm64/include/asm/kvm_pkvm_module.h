@@ -20,6 +20,7 @@ struct kvm_power_domain;
 struct kvm_power_domain_ops;
 struct kvm_hyp_iommu_domain;
 struct iommu_iotlb_gather;
+struct pkvm_device;
 
 /**
  * struct pkvm_module_ops - pKVM modules callbacks
@@ -173,6 +174,20 @@ struct iommu_iotlb_gather;
  *				successful unmap() operation, so the hypervisor
  *				can track the page state.
  * @init_hvc_pd:		Register a power domain ops.
+ * @device_register_reset:	Register a reset callback for devices that is called
+ *				before/after devices are assigned. Only one callback
+ *				can be registered per device.
+ *				Devices are identified by the base address of the MMIO
+ *				as defined in the device tree.
+ *				Reset is expected to clear any state/secrets on the
+ *				device and put it in quiescent state, where it can't
+ *				trigger any DMA.
+ *				If reset fails at device assignment to guest, the
+ *				device won't be assigned.
+ *				Or if it fails on the guest teardown path, that would
+ *				panic to avoid leaking any information.
+ *				Direction of assignment can be deduced from pkvm_device::ctxt
+ *				where NULL means host to guest and vice versa.
  */
 struct pkvm_module_ops {
 	int (*create_private_mapping)(phys_addr_t phys, size_t size,
@@ -245,6 +260,8 @@ struct pkvm_module_ops {
 	int (*pkvm_use_dma)(phys_addr_t phys_addr, size_t size);
 	int (*pkvm_unuse_dma)(phys_addr_t phys_addr, size_t size);
 	int (*init_hvc_pd)(struct kvm_power_domain *pd, const struct kvm_power_domain_ops *ops);
+	int (*device_register_reset)(u64 phys, void *cookie,
+				     int (*cb)(void *cookie, bool host_to_guest));
 	ANDROID_KABI_RESERVE(1);
 	ANDROID_KABI_RESERVE(2);
 	ANDROID_KABI_RESERVE(3);
