@@ -658,8 +658,11 @@ static int sof_audio_probe(struct platform_device *pdev)
 		sof_audio_card_rt5682.name = card_name;
 
 		/* create speaker dai link also */
-		if (ctx->amp_type == CODEC_NONE)
+		if (ctx->amp_type == CODEC_NONE) {
 			ctx->amp_type = CODEC_RT5650;
+			ctx->ssp_amp = (sof_rt5682_quirk & SOF_SSP_PORT_AMP_MASK) >>
+					SOF_SSP_PORT_AMP_SHIFT;
+		}
 	}
 
 	if (mach->mach_params.codec_mask & IDISP_CODEC_MASK)
