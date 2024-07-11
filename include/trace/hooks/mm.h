@@ -306,6 +306,9 @@ DECLARE_HOOK(android_vh_show_smap,
 		unsigned long swap_shared, unsigned long writeback,
 		unsigned long same, unsigned long huge),
 	TP_ARGS(m, swap_shared, writeback, same, huge));
+DECLARE_HOOK(android_vh_alloc_contig_range_not_isolated,
+	TP_PROTO(unsigned long start, unsigned end),
+	TP_ARGS(start, end));
 #endif /* _TRACE_HOOK_MM_H */
 
 /* This part must be outside protection */
