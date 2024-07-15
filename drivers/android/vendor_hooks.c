@@ -62,6 +62,7 @@
 #include <trace/hooks/suspend.h>
 #include <trace/hooks/fsnotify.h>
 #include <trace/hooks/fuse.h>
+#include <trace/hooks/madvise.h>
 
 /*
  * Export tracepoints that act as a bare tracehook (ie: have no trace event
@@ -391,3 +392,4 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_alloc_contig_range_not_isolated);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_warn_alloc_tune_ratelimit);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_warn_alloc_show_mem_bypass);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_tune_scan_control);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_process_madvise_bypass);
