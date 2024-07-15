@@ -398,3 +398,4 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_process_madvise_return_error);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_madvise_pageout_bypass);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_free_pages_prepare_bypass);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_free_pages_ok_bypass);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_split_large_folio_bypass);
