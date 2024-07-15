@@ -556,6 +556,7 @@ struct pid *pidfd_get_pid(unsigned int fd, unsigned int *flags)
 	}
 	return pid;
 }
+EXPORT_SYMBOL_GPL(pidfd_get_pid);
 
 /**
  * pidfd_get_task() - Get the task associated with a pidfd

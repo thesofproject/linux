@@ -1826,6 +1826,7 @@ out:
 	swap_cluster_unlock(ci);
 	return count;
 }
+EXPORT_SYMBOL_GPL(swp_swapcount);
 
 static bool swap_page_trans_huge_swapped(struct swap_info_struct *si,
 					 swp_entry_t entry, int order)
