@@ -345015,7 +345015,7 @@ elf_symbol {
   name: "inet_csk_get_port"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x3aef7d47
+  crc: 0x937b495c
   type_id: 0x99f517b1
   full_name: "inet_csk_get_port"
 }
@@ -345096,7 +345096,7 @@ elf_symbol {
   name: "inet_sk_get_local_port_range"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xe0a0129f
+  crc: 0xd30a9090
   type_id: 0xf0f5bd3d
   full_name: "inet_sk_get_local_port_range"
 }
