@@ -690,6 +690,11 @@ static int mc_probe(struct platform_device *pdev)
 	for (i = 0; i < ctx->codec_info_list_count; i++)
 		amp_num += codec_info_list[i].amp_num;
 
+	card->components = devm_kasprintf(card->dev, GFP_KERNEL,
+					  " cfg-amp:%d", amp_num);
+	if (!card->components)
+		return -ENOMEM;
+
 	card->long_name = sdw_card_long_name;
 
 	/* Register the card */
