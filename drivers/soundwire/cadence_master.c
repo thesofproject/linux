@@ -1007,8 +1007,12 @@ static void cdns_check_attached_status_dwork(struct work_struct *work)
 
 	for (i = 0; i <= SDW_MAX_DEVICES; i++) {
 		status[i] = val & 0x3;
-		if (status[i])
-			dev_dbg(cdns->dev, "Peripheral %d status: %d\n", i, status[i]);
+		if (status[i]) {
+			if (i)
+				dev_dbg(cdns->dev, "Peripheral %d status: %d\n", i, status[i]);
+			else
+				dev_err(cdns->dev, "Peripheral %d status: %d\n", i, status[i]);
+		}
 		val >>= 2;
 	}
 
