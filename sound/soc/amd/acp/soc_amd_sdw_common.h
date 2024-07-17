@@ -41,5 +41,4 @@ struct amd_mc_ctx {
 	unsigned int max_sdw_links;
 };
 
-extern unsigned long sof_sdw_quirk;
 #endif
