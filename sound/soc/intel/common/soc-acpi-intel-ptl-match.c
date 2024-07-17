@@ -132,13 +132,13 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_ptl_sdw_machines[] = {
 		.link_mask = BIT(0),
 		.links = ptl_rt722_only,
 		.drv_name = "sof_sdw",
-		.sof_tplg_filename = "sof-ptl-rt722-l0.tplg",
+		.sof_tplg_filename = "sof-ptl-rt722.tplg",
 	},
 	{
 		.link_mask = BIT(3),
 		.links = ptl_rt722_l3,
 		.drv_name = "sof_sdw",
-		.sof_tplg_filename = "sof-ptl-rt722-l3.tplg",
+		.sof_tplg_filename = "sof-ptl-rt722.tplg",
 	},
 	{},
 };
