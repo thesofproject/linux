@@ -11,7 +11,9 @@
 
 #include <linux/platform_data/x86/soc.h>
 
-#if IS_ENABLED(CONFIG_X86)
+#if IS_ENABLED(CONFIG_X86) && \
+	(IS_ENABLED(CONFIG_SND_SOC_SOF_BAYTRAIL) || \
+	 IS_ENABLED(CONFIG_SND_SST_ATOM_HIFI2_PLATFORM_ACPI))
 
 #include <linux/dmi.h>
 #include <asm/iosf_mbi.h>
