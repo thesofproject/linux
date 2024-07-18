@@ -1628,23 +1628,35 @@ static void __free_pages_ok(struct page *page, unsigned int order,
 	int migratetype;
 	unsigned long pfn = page_to_pfn(page);
 	struct zone *zone = page_zone(page);
+	bool skip_free_pages_prepare = false;
+	bool skip_free_pages_ok = false;
 	bool skip_free_unref_page = false;
 
-	if (free_pages_prepare(page, order)) {
-		/*
-		 * Calling get_pfnblock_migratetype() without spin_lock_irqsave() here
-		 * is used to avoid calling get_pfnblock_migratetype() under the lock.
-		 * This will reduce the lock holding time.
-		 * If a page is being freed, its migratetype won’t change, so no lock is needed.
-		 */
-		migratetype = get_pfnblock_migratetype(page, pfn);
-		trace_android_vh_free_unref_page_bypass(page, order, migratetype,
-			&skip_free_unref_page);
-		if (skip_free_unref_page)
-			return;
+	trace_android_vh_free_pages_prepare_bypass(page, order,
+			fpi_flags, &skip_free_pages_prepare);
+	if (skip_free_pages_prepare)
+		goto skip_prepare;
 
-		free_one_page(zone, page, pfn, order, fpi_flags);
-	}
+	if (!free_pages_prepare(page, order))
+		return;
+skip_prepare:
+	trace_android_vh_free_pages_ok_bypass(page, order,
+			fpi_flags, &skip_free_pages_ok);
+	if (skip_free_pages_ok)
+		return;
+	/*
+	 * Calling get_pfnblock_migratetype() without spin_lock_irqsave() here
+	 * is used to avoid calling get_pfnblock_migratetype() under the lock.
+	 * This will reduce the lock holding time.
+	 * If a page is being freed, its migratetype won’t change, so no lock is needed.
+	 */
+	migratetype = get_pfnblock_migratetype(page, pfn);
+	trace_android_vh_free_unref_page_bypass(page, order, migratetype,
+			&skip_free_unref_page);
+	if (skip_free_unref_page)
+		return;
+
+	free_one_page(zone, page, pfn, order, fpi_flags);
 }
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
