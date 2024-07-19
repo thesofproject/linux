@@ -471,20 +471,6 @@ static struct skl_ssp_clk skl_ssp_clks[] = {
 						{.name = "ssp5_sclkfs"},
 };
 
-static struct snd_soc_acpi_mach *skl_find_hda_machine(struct skl_dev *skl,
-					struct snd_soc_acpi_mach *machines)
-{
-	struct snd_soc_acpi_mach *mach;
-
-	/* point to common table */
-	mach = snd_soc_acpi_intel_hda_machines;
-
-	/* all entries in the machine table use the same firmware */
-	mach->fw_filename = machines->fw_filename;
-
-	return mach;
-}
-
 static int skl_find_machine(struct skl_dev *skl, void *driver_data)
 {
 	struct hdac_bus *bus = skl_to_bus(skl);
@@ -493,12 +479,8 @@ static int skl_find_machine(struct skl_dev *skl, void *driver_data)
 
 	mach = snd_soc_acpi_find_machine(mach);
 	if (!mach) {
-		dev_dbg(bus->dev, "No matching I2S machine driver found\n");
-		mach = skl_find_hda_machine(skl, driver_data);
-		if (!mach) {
-			dev_err(bus->dev, "No matching machine driver found\n");
-			return -ENODEV;
-		}
+		dev_err(bus->dev, "No matching I2S machine driver found\n");
+		return -ENODEV;
 	}
 
 	skl->mach = mach;
