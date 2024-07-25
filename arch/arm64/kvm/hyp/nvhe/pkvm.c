@@ -40,6 +40,9 @@ unsigned int kvm_host_sve_max_vl;
  */
 static DEFINE_PER_CPU(struct pkvm_hyp_vcpu *, loaded_hyp_vcpu);
 
+static LIST_HEAD(running_vms);
+struct ffa_mem_transfer *find_transfer_by_handle(u64 ffa_handle, struct kvm_ffa_buffers *buf);
+
 static void pkvm_vcpu_reset_hcr(struct kvm_vcpu *vcpu)
 {
 	vcpu->arch.hcr_el2 = HCR_GUEST_FLAGS;
@@ -528,6 +531,7 @@ static int init_pkvm_hyp_vm(struct kvm *host_kvm, struct pkvm_hyp_vm *hyp_vm,
 	mmu->last_vcpu_ran = (int __percpu *)last_ran;
 	memset(last_ran, -1, pkvm_get_last_ran_size());
 	hyp_spin_lock_init(&hyp_vm->vcpus_lock);
+	INIT_LIST_HEAD(&hyp_vm->ffa_buf.xfer_list);
 
 	return 0;
 }
@@ -701,6 +705,7 @@ static int __insert_vm_table_entry(pkvm_handle_t handle,
 
 	vm_table[idx] = hyp_vm;
 
+	list_add(&hyp_vm->vm_list, &running_vms);
 	return 0;
 }
 
@@ -726,8 +731,12 @@ static int insert_vm_table_entry(pkvm_handle_t handle,
  */
 static void remove_vm_table_entry(pkvm_handle_t handle)
 {
+	struct pkvm_hyp_vm *hyp_vm;
+
 	hyp_assert_write_lock_held(&vm_table_lock);
+	hyp_vm = vm_table[vm_handle_to_idx(handle)];
 	vm_table[vm_handle_to_idx(handle)] = NULL;
+	list_del(&hyp_vm->vm_list);
 }
 
 static size_t pkvm_get_hyp_vm_size(unsigned int nr_vcpus)
@@ -892,6 +901,22 @@ err_free_vm:
 err_unpin_kvm:
 	hyp_unpin_shared_mem(host_kvm, host_kvm + 1);
 	return ret;
+}
+
+struct ffa_mem_transfer *__pkvm_get_vm_ffa_transfer(u16 handle)
+{
+	struct pkvm_hyp_vm *vm;
+	struct ffa_mem_transfer *transfer = NULL;
+
+	hyp_read_lock(&vm_table_lock);
+	list_for_each_entry(vm, &running_vms, vm_list) {
+		transfer = find_transfer_by_handle(handle, &vm->ffa_buf);
+		if (transfer)
+			goto unlock;
+	}
+unlock:
+	hyp_read_unlock(&vm_table_lock);
+	return transfer;
 }
 
 /*
