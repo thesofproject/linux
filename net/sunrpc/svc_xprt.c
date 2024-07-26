@@ -157,6 +157,7 @@ int svc_print_xprts(char *buf, int maxlen)
  */
 void svc_xprt_deferred_close(struct svc_xprt *xprt)
 {
+	trace_svc_xprt_close(xprt);
 	if (!test_and_set_bit(XPT_CLOSE, &xprt->xpt_flags))
 		svc_xprt_enqueue(xprt);
 }
@@ -1421,13 +1422,12 @@ static void *svc_pool_stats_start(struct seq_file *m, loff_t *pos)
 
 	dprintk("svc_pool_stats_start, *pidx=%u\n", pidx);
 
-	if (!si->serv)
-		return NULL;
-
 	mutex_lock(si->mutex);
 
 	if (!pidx)
 		return SEQ_START_TOKEN;
+	if (!si->serv)
+		return NULL;
 	return pidx > si->serv->sv_nrpools ? NULL
 		: &si->serv->sv_pools[pidx - 1];
 }
@@ -1459,8 +1459,7 @@ static void svc_pool_stats_stop(struct seq_file *m, void *p)
 {
 	struct svc_info *si = m->private;
 
-	if (si->serv)
-		mutex_unlock(si->mutex);
+	mutex_unlock(si->mutex);
 }
 
 static int svc_pool_stats_show(struct seq_file *m, void *p)

@@ -28,7 +28,7 @@ static inline int nf_hooks_lwtunnel_set(int enable)
 }
 
 #ifdef CONFIG_SYSCTL
-int nf_hooks_lwtunnel_sysctl_handler(struct ctl_table *table, int write,
+int nf_hooks_lwtunnel_sysctl_handler(const struct ctl_table *table, int write,
 				     void *buffer, size_t *lenp, loff_t *ppos)
 {
 	int proc_nf_hooks_lwtunnel_enabled = 0;
@@ -117,4 +117,7 @@ void netfilter_lwtunnel_fini(void)
 {
 	unregister_pernet_subsys(&nf_lwtunnel_net_ops);
 }
+#else
+int __init netfilter_lwtunnel_init(void) { return 0; }
+void netfilter_lwtunnel_fini(void) {}
 #endif /* CONFIG_SYSCTL */

@@ -50,7 +50,7 @@ struct io_wq_work_list {
 
 struct io_wq_work {
 	struct io_wq_work_node list;
-	unsigned flags;
+	atomic_t flags;
 	/* place it here instead of io_kiocb as it fills padding and saves 4B */
 	int cancel_seq;
 };
@@ -207,16 +207,7 @@ struct io_submit_state {
 	bool			need_plug;
 	bool			cq_flush;
 	unsigned short		submit_nr;
-	unsigned int		cqes_count;
 	struct blk_plug		plug;
-};
-
-struct io_ev_fd {
-	struct eventfd_ctx	*cq_ev_fd;
-	unsigned int		eventfd_async: 1;
-	struct rcu_head		rcu;
-	atomic_t		refs;
-	atomic_t		ops;
 };
 
 struct io_alloc_cache {
@@ -373,7 +364,6 @@ struct io_ring_ctx {
 	struct io_restriction		restrictions;
 
 	/* slow path rsrc auxilary data, used by update/register */
-	struct io_mapped_ubuf		*dummy_ubuf;
 	struct io_rsrc_data		*file_data;
 	struct io_rsrc_data		*buf_data;
 
@@ -405,6 +395,9 @@ struct io_ring_ctx {
 
 	struct callback_head		poll_wq_task_work;
 	struct list_head		defer_list;
+
+	struct io_alloc_cache		msg_cache;
+	spinlock_t			msg_lock;
 
 #ifdef CONFIG_NET_RX_BUSY_POLL
 	struct list_head	napi_list;	/* track busy poll napi_id */
