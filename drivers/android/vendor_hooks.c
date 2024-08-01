@@ -190,6 +190,7 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_udp_unicast_rcv_skb);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_udp6_unicast_rcv_skb);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_sk_alloc);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_sk_free);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_sk_clone_lock);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_tcp_write_timeout_estab_retrans);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_inet_csk_clone_lock);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_ftrace_oops_enter);
