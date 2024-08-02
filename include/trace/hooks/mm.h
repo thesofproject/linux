@@ -209,6 +209,19 @@ DECLARE_HOOK(android_vh_rmqueue_bulk_bypass,
 DECLARE_HOOK(android_vh_cma_alloc_retry,
 	TP_PROTO(char *name, int *retry),
 	TP_ARGS(name, retry));
+DECLARE_HOOK(android_vh_page_cache_readahead_start,
+	TP_PROTO(struct file *file, pgoff_t pgoff,
+		unsigned int size, bool sync),
+	TP_ARGS(file, pgoff, size, sync));
+DECLARE_HOOK(android_vh_page_cache_readahead_end,
+	TP_PROTO(struct file *file, pgoff_t pgoff),
+	TP_ARGS(file, pgoff));
+DECLARE_HOOK(android_vh_filemap_fault_start,
+	TP_PROTO(struct file *file, pgoff_t pgoff),
+	TP_ARGS(file, pgoff));
+DECLARE_HOOK(android_vh_filemap_fault_end,
+	TP_PROTO(struct file *file, pgoff_t pgoff),
+	TP_ARGS(file, pgoff));
 #endif /* _TRACE_HOOK_MM_H */
 
 /* This part must be outside protection */
