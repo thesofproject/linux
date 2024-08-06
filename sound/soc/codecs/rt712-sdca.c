@@ -1652,6 +1652,11 @@ int rt712_sdca_init(struct device *dev, struct regmap *regmap,
 	if (ret < 0)
 		return ret;
 
+	ret =  devm_snd_soc_register_component(dev,
+				&soc_sdca_dev_rt712_dmic, rt712_sdca_dmic_dai, ARRAY_SIZE(rt712_sdca_dmic_dai));
+	if (ret < 0)
+		return ret;
+
 	/* set autosuspend parameters */
 	pm_runtime_set_autosuspend_delay(dev, 3000);
 	pm_runtime_use_autosuspend(dev);
@@ -1799,7 +1804,6 @@ static void rt712_sdca_vb_io_init(struct rt712_sdca_priv *rt712)
 int rt712_sdca_io_init(struct device *dev, struct sdw_slave *slave)
 {
 	struct rt712_sdca_priv *rt712 = dev_get_drvdata(dev);
-	int ret = 0;
 	unsigned int val;
 	struct sdw_slave_prop *prop = &slave->prop;
 
@@ -1833,10 +1837,6 @@ int rt712_sdca_io_init(struct device *dev, struct sdw_slave *slave)
 		rt712_sdca_va_io_init(rt712);
 	else {
 		/* multilanes and DMIC are supported by rt712vb */
-		ret =  devm_snd_soc_register_component(dev,
-			&soc_sdca_dev_rt712_dmic, rt712_sdca_dmic_dai, ARRAY_SIZE(rt712_sdca_dmic_dai));
-		if (ret < 0)
-			return ret;
 
 		prop->lane_control_support = true;
 		rt712_sdca_vb_io_init(rt712);
