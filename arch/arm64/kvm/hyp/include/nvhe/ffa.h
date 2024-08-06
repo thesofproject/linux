@@ -21,6 +21,7 @@
 struct ffa_mem_transfer {
 	struct list_head node;
 	u64 ffa_handle;
+	struct list_head translations;
 };
 
 int hyp_ffa_init(void *pages);
