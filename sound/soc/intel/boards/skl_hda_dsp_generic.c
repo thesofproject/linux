@@ -2,7 +2,7 @@
 // Copyright(c) 2015-18 Intel Corporation.
 
 /*
- * Machine Driver for SKL+ platforms with DSP and iDisp, HDA Codecs
+ * Machine Driver for SOF platforms with DSP and iDisp, HDA Codecs
  */
 
 #include <linux/module.h>
@@ -18,14 +18,14 @@
 #include "../../sof/intel/hda.h"
 #include "sof_board_helpers.h"
 
-static int skl_hda_card_late_probe(struct snd_soc_card *card)
+static int sof_hda_card_late_probe(struct snd_soc_card *card)
 {
 	return sof_intel_board_card_late_probe(card);
 }
 
 #define HDA_CODEC_AUTOSUSPEND_DELAY_MS 1000
 
-static void skl_set_hda_codec_autosuspend_delay(struct snd_soc_card *card)
+static void sof_set_hda_codec_autosuspend_delay(struct snd_soc_card *card)
 {
 	struct snd_soc_pcm_runtime *rtd;
 	struct hdac_hda_priv *hda_pvt;
@@ -71,7 +71,7 @@ static void skl_set_hda_codec_autosuspend_delay(struct snd_soc_card *card)
 				       0)
 
 static unsigned long
-skl_hda_get_board_quirk(struct snd_soc_acpi_mach_params *mach_params)
+sof_hda_get_board_quirk(struct snd_soc_acpi_mach_params *mach_params)
 {
 	unsigned long board_quirk = 0;
 	int ssp_bt;
@@ -85,12 +85,12 @@ skl_hda_get_board_quirk(struct snd_soc_acpi_mach_params *mach_params)
 	return board_quirk;
 }
 
-static int skl_hda_audio_probe(struct platform_device *pdev)
+static int sof_hda_audio_probe(struct platform_device *pdev)
 {
 	struct snd_soc_acpi_mach *mach = pdev->dev.platform_data;
 	struct sof_card_private *ctx;
 	struct snd_soc_card *card;
-	unsigned long board_quirk = skl_hda_get_board_quirk(&mach->mach_params);
+	unsigned long board_quirk = sof_hda_get_board_quirk(&mach->mach_params);
 	int ret;
 
 	card = devm_kzalloc(&pdev->dev, sizeof(struct snd_soc_card), GFP_KERNEL);
@@ -100,7 +100,7 @@ static int skl_hda_audio_probe(struct platform_device *pdev)
 	card->name = "hda-dsp";
 	card->owner = THIS_MODULE;
 	card->fully_routed = true;
-	card->late_probe = skl_hda_card_late_probe;
+	card->late_probe = sof_hda_card_late_probe;
 
 	dev_dbg(&pdev->dev, "board_quirk = %lx\n", board_quirk);
 
@@ -144,24 +144,24 @@ static int skl_hda_audio_probe(struct platform_device *pdev)
 
 	ret = devm_snd_soc_register_card(&pdev->dev, card);
 	if (!ret)
-		skl_set_hda_codec_autosuspend_delay(card);
+		sof_set_hda_codec_autosuspend_delay(card);
 
 	return ret;
 }
 
-static struct platform_driver skl_hda_audio = {
-	.probe = skl_hda_audio_probe,
+static struct platform_driver sof_hda_audio = {
+	.probe = sof_hda_audio_probe,
 	.driver = {
-		.name = "skl_hda_dsp_generic",
+		.name = "sof_hda_dsp_generic",
 		.pm = &snd_soc_pm_ops,
 	},
 };
 
-module_platform_driver(skl_hda_audio)
+module_platform_driver(sof_hda_audio)
 
 /* Module information */
-MODULE_DESCRIPTION("SKL/KBL/BXT/APL HDA Generic Machine driver");
+MODULE_DESCRIPTION("SOF Machine driver for HDA codec");
 MODULE_AUTHOR("Rakesh Ughreja <rakesh.a.ughreja@intel.com>");
 MODULE_LICENSE("GPL v2");
-MODULE_ALIAS("platform:skl_hda_dsp_generic");
+MODULE_ALIAS("platform:sof_hda_dsp_generic");
 MODULE_IMPORT_NS(SND_SOC_INTEL_SOF_BOARD_HELPERS);

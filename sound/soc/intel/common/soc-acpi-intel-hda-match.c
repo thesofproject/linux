@@ -12,7 +12,7 @@
 struct snd_soc_acpi_mach snd_soc_acpi_intel_hda_machines[] = {
 	{
 		/* .id is not used in this file */
-		.drv_name = "skl_hda_dsp_generic",
+		.drv_name = "sof_hda_dsp_generic",
 		.sof_tplg_filename = "sof-hda-generic", /* the tplg suffix is added at run time */
 		.tplg_quirk_mask = SND_SOC_ACPI_TPLG_INTEL_DMIC_NUMBER,
 	},
