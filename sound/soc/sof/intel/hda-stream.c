@@ -1082,7 +1082,7 @@ snd_pcm_uframes_t hda_dsp_stream_get_position(struct hdac_stream *hstream,
 		break;
 	}
 
-	if (pos >= hstream->bufsize)
+	if (pos > hstream->bufsize)
 		pos = 0;
 
 	return pos;
