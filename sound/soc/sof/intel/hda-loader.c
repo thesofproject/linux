@@ -316,7 +316,10 @@ int hda_cl_copy_fw(struct snd_sof_dev *sdev, struct hdac_ext_stream *hext_stream
 							msecs_to_jiffies(HDA_CL_DMA_IOC_TIMEOUT_MS));
 
 		if (!time_left) {
-			dev_err(sdev->dev, "Code loader DMA did not complete\n");
+			struct hdac_stream *hstream = &hext_stream->hstream;
+			snd_pcm_uframes_t pos = hda_dsp_stream_get_position(hstream, SNDRV_PCM_STREAM_PLAYBACK, 0);
+			dev_err(sdev->dev, "Code loader DMA did not complete, DMA pos %lu/%u\n",
+				pos, hstream->bufsize);
 			return -ETIMEDOUT;
 		}
 		dev_dbg(sdev->dev, "Code loader DMA done\n");
