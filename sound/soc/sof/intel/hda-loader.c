@@ -319,9 +319,11 @@ int hda_cl_copy_fw(struct snd_sof_dev *sdev, struct hdac_ext_stream *hext_stream
 	 */
 
 	if (status < 0) {
+		struct hdac_stream *hstream = &hext_stream->hstream;
+		snd_pcm_uframes_t pos = hda_dsp_stream_get_position(hstream, SNDRV_PCM_STREAM_PLAYBACK, 0);
 		dev_err(sdev->dev,
-			"%s: timeout with rom_status_reg (%#x) read\n",
-			__func__, chip->rom_status_reg);
+			"%s: timeout with rom_status_reg (%#x) read, DMA pos %lu/%lu\n",
+			__func__, chip->rom_status_reg, pos, hstream->bufsize);
 	} else {
 		dev_dbg(sdev->dev, "Code loader FW_ENTERED status\n");
 	}
