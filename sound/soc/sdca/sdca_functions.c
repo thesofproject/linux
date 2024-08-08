@@ -8,6 +8,7 @@
 
 #include <linux/acpi.h>
 #include <linux/soundwire/sdw.h>
+#include <linux/soundwire/sdw_registers.h>
 #include <sound/sdca_function.h>
 #include <sound/sdca.h>
 
@@ -170,6 +171,84 @@ void sdca_lookup_functions(struct sdw_slave *slave)
 }
 EXPORT_SYMBOL_NS(sdca_lookup_functions, SND_SOC_SDCA);
 
+static int find_sdca_entity_controls(struct device *dev,
+				     struct fwnode_handle *entity_node,
+				     struct sdca_entity *entity,
+				     int func_id)
+{
+	struct fwnode_handle *control_node;
+	char control_property[40];
+	unsigned long list;
+	u32 clist = 0;
+	int i, j = 0;
+
+	if (fwnode_property_read_u32(entity_node, "mipi-sdca-control-list", &clist))
+		return 0;
+
+	entity->num_controls = hweight32(clist);
+	entity->controls = devm_kcalloc(dev, entity->num_controls,
+					sizeof(*entity->controls), GFP_KERNEL);
+	if (!entity->controls)
+		return -ENOMEM;
+
+	list = clist;
+
+	for_each_set_bit(i, &list, 32) {
+		/* DisCo uses upper-case for hex numbers */
+		snprintf(control_property, sizeof(control_property),
+			 "mipi-sdca-control-0x%X-subproperties",
+			 i);
+
+		control_node = fwnode_get_named_child_node(entity_node,
+							   control_property);
+		if (!control_node) {
+			dev_err(dev, "%s: %pfwP: property %s not found\n",
+				__func__, entity_node, control_property);
+			//FIXME: return -EINVAL;
+			continue;
+		}
+
+		if (!fwnode_property_read_u32(control_node,
+					      "mipi-sdca-control-access-mode",
+					      &clist))
+			entity->controls[j].mode = clist;
+
+		if (entity->controls[j].mode == SDCA_CONTROL_ACCESS_MODE_DC) {
+			if (!fwnode_property_read_u32(control_node,
+						      "mipi-sdca-control-dc-value",
+						      &clist))
+				entity->controls[j].value = clist;
+		} else {
+			if (!fwnode_property_read_u32(control_node,
+						      "mipi-sdca-control-default-value",
+						      &clist))
+			{
+				entity->controls[j].value = clist;
+				entity->controls[j].has_default = true;
+			}
+
+			entity->controls[j].deferrable =
+				fwnode_property_read_bool(control_node,
+							  "mipi-sdca-control-deferrable");
+		}
+
+		fwnode_handle_put(control_node);
+
+		entity->controls[j].id = i;
+
+		dev_info(dev, "%s: entity-%#x: found control %#x mode %#x value %#x %s\n",
+			 __func__, entity->id,
+			entity->controls[j].id,
+			entity->controls[j].mode,
+			entity->controls[j].value,
+			entity->controls[j].deferrable ? "deferrable" : "");
+
+		j++;
+	}
+
+	return 0;
+}
+
 static int find_sdca_entities(struct device *dev,
 			      struct fwnode_handle *function_node,
 			      struct sdca_function_data *function)
@@ -190,14 +269,14 @@ static int find_sdca_entities(struct device *dev,
 			__func__, "mipi-sdca-entity-id-list",
 			num_entities);
 		return -EINVAL;
-	}
-	if (num_entities >  SDCA_MAX_ENTITY_COUNT) {
+	} else if (num_entities >  SDCA_MAX_ENTITY_COUNT) {
 		dev_err(dev, "%s: invalid entity count %d, max allowed %d\n",
 			__func__, num_entities, SDCA_MAX_ENTITY_COUNT);
 		return -EINVAL;
 	}
 
-	entities = devm_kcalloc(dev, num_entities, sizeof(*entities), GFP_KERNEL);
+	/* Add 1 to make space for entity 0 */
+	entities = devm_kcalloc(dev, num_entities + 1, sizeof(*entities), GFP_KERNEL);
 	if (!entities)
 		return -ENOMEM;
 
@@ -250,16 +329,30 @@ static int find_sdca_entities(struct device *dev,
 			}
 		}
 
-		fwnode_handle_put(entity_node);
-
 		dev_info(dev, "%s: %pfwP: found entity %#x type %#x label %s\n",
 			 __func__, function_node,
 			 entities[i].id,
 			 entities[i].entity_type,
 			 entities[i].label);
+
+		ret = find_sdca_entity_controls(dev, entity_node, &entities[i],
+						function->function_desc->type);
+
+		fwnode_handle_put(entity_node);
+
+		if (ret)
+			return ret;
+
 	}
 
-	function->num_entities = num_entities;
+	ret = find_sdca_entity_controls(dev, function_node, &entities[num_entities],
+					function->function_desc->type);
+	if (ret)
+		return ret;
+
+	entities[num_entities].label = "entity0";
+
+	function->num_entities = num_entities + 1;
 	function->entities = entities;
 
 	return 0;
@@ -374,6 +467,9 @@ static int find_sdca_entities_connections(struct device *dev,
 		char entity_property[40];
 
 		entity = &function->entities[i];
+
+		if (!entity->id)
+			continue;
 
 		/* DisCo uses upper-case for hex numbers */
 		snprintf(entity_property, sizeof(entity_property),

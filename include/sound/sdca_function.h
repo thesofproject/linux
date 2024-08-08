@@ -52,6 +52,23 @@ enum sdca_entity0_controls {
 	SDCA_CONTROL_ENTITY_0_FUNCTION_VERSION		= 0x08
 };
 
+enum sdca_control_access_mode {
+	SDCA_CONTROL_ACCESS_MODE_RW			= 0x0,
+	SDCA_CONTROL_ACCESS_MODE_DUAL			= 0x1,
+	SDCA_CONTROL_ACCESS_MODE_RW1C			= 0x2,
+	SDCA_CONTROL_ACCESS_MODE_RO			= 0x3,
+	SDCA_CONTROL_ACCESS_MODE_RW1S			= 0x4,
+	SDCA_CONTROL_ACCESS_MODE_DC			= 0x5,
+};
+
+struct sdca_control {
+	int id;
+	enum sdca_control_access_mode mode;
+	bool deferrable;
+	bool has_default;
+	int value;
+};
+
 /*
  * The addressing space for SDCA relies on 7 bits for Entities, so a
  * maximum of 128 entities per function can be represented
@@ -108,6 +125,8 @@ struct sdca_entity {
 	int sinks[SDCA_MAX_ENTITY_PIN_COUNT];
 	int source_count;
 	int sources[SDCA_MAX_ENTITY_PIN_COUNT];
+	int num_controls;
+	struct sdca_control *controls;
 };
 
 /**
