@@ -1415,7 +1415,7 @@ static const struct reg_sequence rt1320_patch_code_write[] = {
 	{ 0x0000d540, 0x01 },
 };
 
-static const struct reg_default rt1320_reg_defaults[] = {
+static const struct reg_default rt1320_mbq_defaults[] = {
 	{ SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_FU21, RT1320_SDCA_CTL_FU_MUTE, CH_01), 0x01 },
 	{ SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_FU21, RT1320_SDCA_CTL_FU_MUTE, CH_02), 0x01 },
 	{ SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_PPU21, RT1320_SDCA_CTL_POSTURE_NUMBER, 0), 0x00 },
@@ -1424,9 +1424,7 @@ static const struct reg_default rt1320_reg_defaults[] = {
 	{ SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_CS21, RT1320_SDCA_CTL_SAMPLE_FREQ_INDEX, 0), 0x09 },
 	{ SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_PDE27, RT1320_SDCA_CTL_REQ_POWER_STATE, 0), 0x03 },
 	{ SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_PDE23, RT1320_SDCA_CTL_REQ_POWER_STATE, 0), 0x03 },
-};
 
-static const struct reg_default rt1320_mbq_defaults[] = {
 	{ SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_FU21, RT1320_SDCA_CTL_FU_VOLUME, CH_01), 0x0000 },
 	{ SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_FU21, RT1320_SDCA_CTL_FU_VOLUME, CH_02), 0x0000 },
 };
@@ -1488,17 +1486,6 @@ static bool rt1320_readable_register(struct device *dev, unsigned int reg)
 	case 0xf720 ... 0xf723:
 	case 0x1000f008:
 	case 0x3fe2e000 ... 0x3fe2e003:
-	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT0, RT1320_SDCA_CTL_FUNC_STATUS, 0):
-	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_FU21, RT1320_SDCA_CTL_FU_MUTE, CH_01):
-	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_FU21, RT1320_SDCA_CTL_FU_MUTE, CH_02):
-	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_PPU21, RT1320_SDCA_CTL_POSTURE_NUMBER, 0):
-	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_PDE23, RT1320_SDCA_CTL_REQ_POWER_STATE, 0):
-	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_PDE27, RT1320_SDCA_CTL_REQ_POWER_STATE, 0):
-	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_CS113, RT1320_SDCA_CTL_SAMPLE_FREQ_INDEX, 0):
-	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_CS14, RT1320_SDCA_CTL_SAMPLE_FREQ_INDEX, 0):
-	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_CS21, RT1320_SDCA_CTL_SAMPLE_FREQ_INDEX, 0):
-	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_SAPU, RT1320_SDCA_CTL_SAPU_PROTECTION_MODE, 0):
-	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_SAPU, RT1320_SDCA_CTL_SAPU_PROTECTION_STATUS, 0):
 		return true;
 	default:
 		return false;
@@ -1552,6 +1539,15 @@ static bool rt1320_volatile_register(struct device *dev, unsigned int reg)
 	case 0x1000f008:
 	case 0x3fc2bfc4 ... 0x3fc2bfc7:
 	case 0x3fe2e000 ... 0x3fe2e003:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static bool rt1320_mbq_volatile_register(struct device *dev, unsigned int reg)
+{
+	switch (reg) {
 	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT0, RT1320_SDCA_CTL_FUNC_STATUS, 0):
 	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_SAPU, RT1320_SDCA_CTL_SAPU_PROTECTION_MODE, 0):
 	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_SAPU, RT1320_SDCA_CTL_SAPU_PROTECTION_STATUS, 0):
@@ -1564,11 +1560,46 @@ static bool rt1320_volatile_register(struct device *dev, unsigned int reg)
 static bool rt1320_mbq_readable_register(struct device *dev, unsigned int reg)
 {
 	switch (reg) {
+	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT0, RT1320_SDCA_CTL_FUNC_STATUS, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_FU21, RT1320_SDCA_CTL_FU_MUTE, CH_01):
+	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_FU21, RT1320_SDCA_CTL_FU_MUTE, CH_02):
+	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_PPU21, RT1320_SDCA_CTL_POSTURE_NUMBER, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_PDE23, RT1320_SDCA_CTL_REQ_POWER_STATE, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_PDE27, RT1320_SDCA_CTL_REQ_POWER_STATE, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_CS113, RT1320_SDCA_CTL_SAMPLE_FREQ_INDEX, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_CS14, RT1320_SDCA_CTL_SAMPLE_FREQ_INDEX, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_CS21, RT1320_SDCA_CTL_SAMPLE_FREQ_INDEX, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_SAPU, RT1320_SDCA_CTL_SAPU_PROTECTION_MODE, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_SAPU, RT1320_SDCA_CTL_SAPU_PROTECTION_STATUS, 0):
+
 	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_FU21, RT1320_SDCA_CTL_FU_VOLUME, CH_01):
 	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_FU21, RT1320_SDCA_CTL_FU_VOLUME, CH_02):
 		return true;
 	default:
 		return false;
+	}
+}
+
+static int rt1320_mbq_size(struct device *dev, unsigned int reg)
+{
+	switch (reg) {
+	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT0, RT1320_SDCA_CTL_FUNC_STATUS, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_FU21, RT1320_SDCA_CTL_FU_MUTE, CH_01):
+	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_FU21, RT1320_SDCA_CTL_FU_MUTE, CH_02):
+	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_PPU21, RT1320_SDCA_CTL_POSTURE_NUMBER, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_PDE23, RT1320_SDCA_CTL_REQ_POWER_STATE, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_PDE27, RT1320_SDCA_CTL_REQ_POWER_STATE, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_CS113, RT1320_SDCA_CTL_SAMPLE_FREQ_INDEX, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_CS14, RT1320_SDCA_CTL_SAMPLE_FREQ_INDEX, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_CS21, RT1320_SDCA_CTL_SAMPLE_FREQ_INDEX, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_SAPU, RT1320_SDCA_CTL_SAPU_PROTECTION_MODE, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_SAPU, RT1320_SDCA_CTL_SAPU_PROTECTION_STATUS, 0):
+		return 1;
+	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_FU21, RT1320_SDCA_CTL_FU_VOLUME, CH_01):
+	case SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_FU21, RT1320_SDCA_CTL_FU_VOLUME, CH_02):
+		return 2;
+	default:
+		return 0;
 	}
 }
 
@@ -1578,8 +1609,6 @@ static const struct regmap_config rt1320_sdw_regmap = {
 	.readable_reg = rt1320_readable_register,
 	.volatile_reg = rt1320_volatile_register,
 	.max_register = 0x41081488,
-	.reg_defaults = rt1320_reg_defaults,
-	.num_reg_defaults = ARRAY_SIZE(rt1320_reg_defaults),
 	.cache_type = REGCACHE_MAPLE,
 	.use_single_read = true,
 	.use_single_write = true,
@@ -1590,12 +1619,17 @@ static const struct regmap_config rt1320_mbq_regmap = {
 	.reg_bits = 32,
 	.val_bits = 16,
 	.readable_reg = rt1320_mbq_readable_register,
+	.volatile_reg = rt1320_mbq_volatile_register,
 	.max_register = 0x41000192,
 	.reg_defaults = rt1320_mbq_defaults,
 	.num_reg_defaults = ARRAY_SIZE(rt1320_mbq_defaults),
 	.cache_type = REGCACHE_MAPLE,
 	.use_single_read = true,
 	.use_single_write = true,
+};
+
+static const struct regmap_sdw_mbq_cfg rt1320_mbq_cfg = {
+	.mbq_size = rt1320_mbq_size,
 };
 
 static int rt1320_read_prop(struct sdw_slave *slave)
@@ -1691,7 +1725,7 @@ static int rt1320_io_init(struct device *dev, struct sdw_slave *slave)
 		rt1320->version_id = val;
 	}
 
-	regmap_read(rt1320->regmap,
+	regmap_read(rt1320->mbq_regmap,
 		SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT0, RT1320_SDCA_CTL_FUNC_STATUS, 0), &amp_func_status);
 	dev_dbg(dev, "%s amp func_status=0x%x\n", __func__, amp_func_status);
 
@@ -1701,12 +1735,12 @@ static int rt1320_io_init(struct device *dev, struct sdw_slave *slave)
 		regmap_multi_reg_write(rt1320->regmap, rt1320_patch_code_write,
 			ARRAY_SIZE(rt1320_patch_code_write));
 
-		regmap_write(rt1320->regmap,
+		regmap_write(rt1320->mbq_regmap,
 			SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT0, RT1320_SDCA_CTL_FUNC_STATUS, 0),
 			FUNCTION_NEEDS_INITIALIZATION);
 	}
 	if (!rt1320->first_hw_init) {
-		regmap_write(rt1320->regmap, SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_PDE23,
+		regmap_write(rt1320->mbq_regmap, SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_PDE23,
 			RT1320_SDCA_CTL_REQ_POWER_STATE, 0), 0);
 		regmap_read(rt1320->regmap, RT1320_HIFI_VER_0, &val);
 		regmap_read(rt1320->regmap, RT1320_HIFI_VER_1, &tmp);
@@ -1722,7 +1756,7 @@ static int rt1320_io_init(struct device *dev, struct sdw_slave *slave)
 		 */
 		if (val == RT1320_VER_B_ID)
 			rt1320->version_id = RT1320_VB;
-		regmap_write(rt1320->regmap, SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_PDE23,
+		regmap_write(rt1320->mbq_regmap, SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_PDE23,
 			RT1320_SDCA_CTL_REQ_POWER_STATE, 0), 3);
 	}
 	dev_dbg(dev, "%s version_id=%d\n", __func__, rt1320->version_id);
@@ -1774,13 +1808,13 @@ static int rt1320_pde23_event(struct snd_soc_dapm_widget *w,
 
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
-		regmap_write(rt1320->regmap,
+		regmap_write(rt1320->mbq_regmap,
 			SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_PDE23,
 				RT1320_SDCA_CTL_REQ_POWER_STATE, 0),
 				ps0);
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
-		regmap_write(rt1320->regmap,
+		regmap_write(rt1320->mbq_regmap,
 			SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_PDE23,
 				RT1320_SDCA_CTL_REQ_POWER_STATE, 0),
 				ps3);
@@ -2013,7 +2047,7 @@ static int rt1320_sdw_hw_params(struct snd_pcm_substream *substream,
 	}
 
 	/* set sampling frequency */
-	regmap_write(rt1320->regmap,
+	regmap_write(rt1320->mbq_regmap,
 		SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_CS21, RT1320_SDCA_CTL_SAMPLE_FREQ_INDEX, 0),
 		sampling_rate);
 
@@ -2167,7 +2201,7 @@ static int rt1320_sdw_probe(struct sdw_slave *slave,
 	struct regmap *regmap, *mbq_regmap;
 
 	/* Regmap Initialization */
-	mbq_regmap = devm_regmap_init_sdw_mbq(slave, &rt1320_mbq_regmap);
+	mbq_regmap = devm_regmap_init_sdw_mbq_cfg(slave, &rt1320_mbq_regmap, &rt1320_mbq_cfg);
 	if (IS_ERR(mbq_regmap))
 		return PTR_ERR(mbq_regmap);
 
