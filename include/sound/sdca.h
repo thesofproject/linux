@@ -10,6 +10,7 @@
 #define __SDCA_H__
 
 struct regmap;
+struct regmap_config;
 struct sdw_slave;
 struct sdca_dev;
 struct sdca_function_data;
@@ -102,6 +103,7 @@ bool sdca_device_quirk_match(struct sdw_slave *slave, enum sdca_quirk quirk);
 int sdca_dev_register_functions(struct sdw_slave *slave, struct regmap *regmap);
 int sdca_dev_parse_functions(struct sdw_slave *slave);
 void sdca_dev_unregister_functions(struct sdw_slave *slave);
+int sdca_dev_populate_constants(struct sdw_slave *slave, struct regmap_config *config);
 
 bool sdca_disco_regmap_readable(struct device *dev, unsigned int reg);
 bool sdca_disco_regmap_writeable(struct device *dev, unsigned int reg);
@@ -129,6 +131,12 @@ static inline int sdca_dev_parse_functions(struct sdw_slave *slave)
 }
 
 static inline void sdca_dev_unregister_functions(struct sdw_slave *slave) {}
+
+static inline int sdca_dev_populate_constants(struct sdw_slave *slave,
+					      struct regmap_config *config)
+{
+	return 0;
+}
 
 static inline bool sdca_disco_regmap_readable(struct device *dev, unsigned int reg)
 {

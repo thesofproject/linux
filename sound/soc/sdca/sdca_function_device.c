@@ -9,7 +9,9 @@
 #include <linux/module.h>
 #include <linux/auxiliary_bus.h>
 #include <linux/regmap.h>
+#include <linux/sort.h>
 #include <linux/soundwire/sdw.h>
+#include <linux/soundwire/sdw_registers.h>
 #include <sound/sdca.h>
 #include <sound/sdca_function.h>
 #include "sdca_function_device.h"
@@ -145,3 +147,133 @@ void sdca_dev_unregister_functions(struct sdw_slave *slave)
 		sdca_dev_unregister(sdca_data->sdca_func[i].func_dev);
 }
 EXPORT_SYMBOL_NS(sdca_dev_unregister_functions, SND_SOC_SDCA);
+
+int sdca_function_for_each_control(struct sdca_function_desc *func_desc,
+				   int (*callback)(struct sdca_function_desc *,
+						   struct sdca_entity *,
+						   struct sdca_control *,
+						   void *),
+				   void *cookie)
+{
+	struct sdca_entity *entity;
+	int i, j;
+	int ret;
+
+	for (i = 0; i < func_desc->function->num_entities; i++) {
+		entity = &func_desc->function->entities[i];
+
+		for (j = 0; j < entity->num_controls; j++) {
+			ret = callback(func_desc, entity,
+				       &entity->controls[j], cookie);
+			if (ret)
+				return ret;
+		}
+	}
+
+	return 0;
+}
+
+int sdca_data_for_each_control(struct sdca_device_data *sdca_data,
+			       int (*callback)(struct sdca_function_desc *,
+					       struct sdca_entity *,
+					       struct sdca_control *,
+					       void *),
+			       void *cookie)
+{
+	int ret;
+	int i;
+
+	for (i = 0; i < sdca_data->num_functions; i++) {
+		ret = sdca_function_for_each_control(&sdca_data->sdca_func[i],
+						     callback, cookie);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+static int sdca_constants_count(struct sdca_function_desc *func_desc,
+				struct sdca_entity *entity,
+				struct sdca_control *control,
+				void *cookie)
+{
+	int *count = cookie;
+
+	if (control->mode == SDCA_CONTROL_ACCESS_MODE_DC)
+		(*count)++;
+
+	return 0;
+}
+
+static int sdca_constants_save(struct sdca_function_desc *func_desc,
+			      struct sdca_entity *entity,
+			      struct sdca_control *control,
+			      void *cookie)
+{
+	struct reg_default **values = cookie;
+
+	if (control->mode == SDCA_CONTROL_ACCESS_MODE_DC) {
+		(*values)->reg = SDW_SDCA_CTL(func_desc->adr, entity->id,
+					      control->id, 0);
+		(*values)->def = control->value;
+		(*values)++;
+	}
+
+	return 0;
+}
+
+static void sdca_constants_swap(void *a, void *b, int size)
+{
+	struct reg_default *x = a;
+	struct reg_default *y = b;
+	struct reg_default tmp;
+
+	tmp = *x;
+	*x = *y;
+	*y = tmp;
+}
+
+static int sdca_constants_cmp(const void *a, const void *b)
+{
+	const struct reg_default *x = a;
+	const struct reg_default *y = b;
+
+	if (x->reg > y->reg)
+		return 1;
+	else if (x->reg < y->reg)
+		return -1;
+	else
+		return 0;
+}
+
+int sdca_dev_populate_constants(struct sdw_slave *slave,
+				struct regmap_config *config)
+{
+	struct sdca_device_data *sdca_data = &slave->sdca_data;
+	struct reg_default *values, *tmp;
+	int nvalues = 0;
+	int ret;
+
+	ret = sdca_data_for_each_control(sdca_data, sdca_constants_count, &nvalues);
+	if (ret)
+		return ret;
+
+	values = devm_kcalloc(&slave->dev, nvalues, sizeof(*values), GFP_KERNEL);
+	if (!values)
+		return -ENOMEM;
+
+	tmp = values;
+
+	ret = sdca_data_for_each_control(sdca_data, sdca_constants_save, &tmp);
+	if (ret)
+		return ret;
+
+	sort(values, nvalues, sizeof(*values), sdca_constants_cmp, sdca_constants_swap);
+
+	config->reg_defaults = values;
+	config->num_reg_defaults = nvalues;
+
+	return 0;
+}
+EXPORT_SYMBOL_NS(sdca_dev_populate_constants, SND_SOC_SDCA);

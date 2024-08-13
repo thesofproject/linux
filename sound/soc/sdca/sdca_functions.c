@@ -7,10 +7,12 @@
  */
 
 #include <linux/acpi.h>
+#include <linux/regmap.h>
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_registers.h>
 #include <sound/sdca_function.h>
 #include <sound/sdca.h>
+#include "sdca_function_device.h"
 
 static int patch_sdca_function_type(struct device *dev,
 				    u32 interface_revision,
@@ -528,6 +530,29 @@ int sdca_parse_function(struct device *dev,
 	return 0;
 }
 EXPORT_SYMBOL_NS(sdca_parse_function, SND_SOC_SDCA);
+
+static int sdca_disco_write_default(struct sdca_function_desc *func_desc,
+				    struct sdca_entity *entity,
+				    struct sdca_control *control,
+				    void *cookie)
+{
+	struct regmap *regmap = cookie;
+
+	if (!control->has_default)
+		return 0;
+
+	return regmap_write(regmap,
+			    SDW_SDCA_CTL(func_desc->adr, entity->id, control->id, 0),
+			    control->value);
+}
+
+int sdca_disco_write_defaults(struct sdca_dev *sdev)
+{
+	return sdca_function_for_each_control(sdev->function_desc,
+					      sdca_disco_write_default,
+					      sdev->regmap);
+}
+EXPORT_SYMBOL_NS(sdca_disco_write_defaults, SND_SOC_SDCA);
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("SDCA library");

@@ -9,6 +9,7 @@
 #ifndef __SDCA_FUNCTION_H__
 #define __SDCA_FUNCTION_H__
 
+struct sdca_dev;
 struct sdca_function_desc;
 
 /*
@@ -162,4 +163,6 @@ struct sdca_function_data {
 int sdca_parse_function(struct device *dev,
 			struct fwnode_handle *function_node,
 			struct sdca_function_desc *func_desc);
+int sdca_disco_write_defaults(struct sdca_dev *sdev);
+
 #endif

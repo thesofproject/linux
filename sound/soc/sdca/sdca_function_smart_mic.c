@@ -17,6 +17,14 @@
 static int sdca_smart_mic_probe(struct auxiliary_device *auxdev,
 				const struct auxiliary_device_id *aux_dev_id)
 {
+	struct sdca_dev *sdev = auxiliary_dev_to_sdca_dev(auxdev);
+	struct device *dev = &auxdev->dev;
+	int ret;
+
+	ret = sdca_disco_write_defaults(sdev);
+	if (ret)
+		return dev_err_probe(dev, ret, "Failed to write default values\n");
+
 	return 0;
 }
 

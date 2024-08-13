@@ -4,6 +4,12 @@
 #ifndef __SDCA_FUNCTION_DEVICE_H
 #define __SDCA_FUNCTION_DEVICE_H
 
+#include <linux/auxiliary_bus.h>
+
+struct sdca_device_data;
+struct sdca_function_desc;
+struct sdca_entity;
+struct sdca_control;
 struct regmap;
 
 struct sdca_dev {
@@ -14,5 +20,18 @@ struct sdca_dev {
 
 #define auxiliary_dev_to_sdca_dev(auxiliary_dev)		\
 	container_of(auxiliary_dev, struct sdca_dev, auxdev)
+
+int sdca_function_for_each_control(struct sdca_function_desc *func_desc,
+				   int (*callback)(struct sdca_function_desc *,
+						   struct sdca_entity *,
+						   struct sdca_control *,
+						   void *),
+				   void *cookie);
+int sdca_data_for_each_control(struct sdca_device_data *sdca_data,
+			       int (*callback)(struct sdca_function_desc *,
+					       struct sdca_entity *,
+					       struct sdca_control *,
+					       void *),
+			       void *cookie);
 
 #endif
