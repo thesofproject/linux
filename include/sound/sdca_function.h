@@ -54,6 +54,12 @@ enum sdca_entity0_controls {
 	SDCA_CONTROL_ENTITY_0_FUNCTION_VERSION		= 0x08
 };
 
+enum sdca_fu_controls {
+	SDCA_CONTROL_FU_MUTE				= 0x01,
+	SDCA_CONTROL_FU_CHANNEL_VOLUME			= 0x02,
+	SDCA_CONTROL_FU_LATENCY				= 0x10,
+};
+
 enum sdca_control_access_mode {
 	SDCA_CONTROL_ACCESS_MODE_RW			= 0x0,
 	SDCA_CONTROL_ACCESS_MODE_DUAL			= 0x1,

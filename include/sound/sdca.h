@@ -103,6 +103,12 @@ int sdca_dev_register_functions(struct sdw_slave *slave, struct regmap *regmap);
 int sdca_dev_parse_functions(struct sdw_slave *slave);
 void sdca_dev_unregister_functions(struct sdw_slave *slave);
 
+bool sdca_disco_regmap_readable(struct device *dev, unsigned int reg);
+bool sdca_disco_regmap_writeable(struct device *dev, unsigned int reg);
+bool sdca_disco_regmap_volatile(struct device *dev, unsigned int reg);
+bool sdca_disco_regmap_deferrable(struct device *dev, unsigned int reg);
+int sdca_disco_regmap_mbq_size(struct device *dev, unsigned int reg);
+
 #else
 
 static inline void sdca_lookup_functions(struct sdw_slave *slave) {}
@@ -123,6 +129,31 @@ static inline int sdca_dev_parse_functions(struct sdw_slave *slave)
 }
 
 static inline void sdca_dev_unregister_functions(struct sdw_slave *slave) {}
+
+static inline bool sdca_disco_regmap_readable(struct device *dev, unsigned int reg)
+{
+	return false;
+}
+
+static inline bool sdca_disco_regmap_writeable(struct device *dev, unsigned int reg)
+{
+	return false;
+}
+
+static inline bool sdca_disco_regmap_volatile(struct device *dev, unsigned int reg)
+{
+	return false;
+}
+
+static inline bool sdca_disco_regmap_deferrable(struct device *dev, unsigned int reg)
+{
+	return false;
+}
+
+static inline int sdca_disco_regmap_mbq_size(struct device *dev, unsigned int reg)
+{
+	return 0;
+}
 
 #endif
 
