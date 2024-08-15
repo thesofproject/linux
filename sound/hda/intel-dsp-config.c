@@ -509,6 +509,21 @@ static const struct config_entry config_table[] = {
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_METEORLAKE)
 	/* Meteorlake-P */
 	{
+		.flags = FLAG_SOF,
+		.device = PCI_DEVICE_ID_INTEL_HDA_MTL,
+		.dmi_table = (const struct dmi_system_id []) {
+			{
+				.matches = {
+					DMI_MATCH(DMI_SYS_VENDOR, "Framework"),
+					DMI_MATCH(DMI_PRODUCT_FAMILY, "Laptop"),
+					DMI_MATCH(DMI_PRODUCT_NAME,
+						  "Laptop 13 (Intel Core Ultra Series 1)"),
+				}
+			},
+			{}
+		}
+	},
+	{
 		.flags = FLAG_SOF | FLAG_SOF_ONLY_IF_DMIC_OR_SOUNDWIRE,
 		.device = PCI_DEVICE_ID_INTEL_HDA_MTL,
 	},
