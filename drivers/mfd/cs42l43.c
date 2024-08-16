@@ -25,6 +25,7 @@
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_registers.h>
 #include <linux/types.h>
+#include <sound/sdca.h>
 
 #include "cs42l43.h"
 
@@ -762,10 +763,33 @@ static int cs42l43_mcu_update(struct cs42l43 *cs42l43)
 	return -ETIMEDOUT;
 }
 
+static struct regmap_config cs42l43_sdca_regmap = {
+	.name                   = "sdca",
+	.reg_bits               = 32,
+	.val_bits               = 32,
+	.reg_format_endian      = REGMAP_ENDIAN_LITTLE,
+	.val_format_endian      = REGMAP_ENDIAN_LITTLE,
+
+	.max_register           = 0x4040FFFF,
+	.readable_reg           = sdca_disco_regmap_readable,
+	.writeable_reg          = sdca_disco_regmap_writeable,
+	.volatile_reg           = sdca_disco_regmap_volatile,
+
+	.cache_type             = REGCACHE_MAPLE,
+};
+
+static struct regmap_sdw_mbq_cfg cs42l43_mbq_config = {
+	.mbq_size = sdca_disco_regmap_mbq_size,
+	.deferrable = sdca_disco_regmap_deferrable,
+	.retry_us = 1000,
+	.timeout_us = 100000,
+};
+
 static void cs42l43_boot_work(struct work_struct *work)
 {
 	struct cs42l43 *cs42l43 = container_of(work, struct cs42l43, boot_work);
 	unsigned int devid, revid, otp;
+	struct regmap *regmap;
 	int ret;
 
 	ret = cs42l43_wait_for_attach(cs42l43);
@@ -804,6 +828,26 @@ static void cs42l43_boot_work(struct work_struct *work)
 	ret = cs42l43_mcu_update(cs42l43);
 	if (ret)
 		goto err;
+
+	ret = sdca_dev_parse_functions(cs42l43->sdw);
+	if (ret) {
+		dev_err(cs42l43->dev, "Failed to parse functions: %d\n", ret);
+		goto err;
+	}
+
+	sdca_dev_populate_constants(cs42l43->sdw, &cs42l43_sdca_regmap);
+
+	regmap = devm_regmap_init_sdw_mbq_cfg(cs42l43->sdw,
+					      &cs42l43_sdca_regmap,
+					      &cs42l43_mbq_config);
+	if (IS_ERR(regmap))
+		return;
+
+	ret = sdca_dev_register_functions(cs42l43->sdw, regmap);
+	if (ret) {
+		dev_err(cs42l43->dev, "Failed to add subdevices: %d\n", ret);
+		goto err;
+	}
 
 	pm_runtime_mark_last_busy(cs42l43->dev);
 
@@ -1062,3 +1106,4 @@ MODULE_DESCRIPTION("CS42L43 Core Driver");
 MODULE_AUTHOR("Charles Keepax <ckeepax@opensource.cirrus.com>");
 MODULE_LICENSE("GPL");
 MODULE_FIRMWARE("cs42l43.bin");
+MODULE_IMPORT_NS(SND_SOC_SDCA);
