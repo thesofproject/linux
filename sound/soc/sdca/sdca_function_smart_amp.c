@@ -17,17 +17,6 @@
 static int sdca_smart_amp_probe(struct auxiliary_device *auxdev,
 				const struct auxiliary_device_id *aux_dev_id)
 {
-	struct sdca_dev *sdev = auxiliary_dev_to_sdca_dev(auxdev);
-	struct device *dev = &auxdev->dev;
-	int ret;
-
-	ret =  sdca_parse_function(dev,
-				   auxdev->dev.fwnode,
-				   &sdev->function);
-	if (ret < 0)
-		dev_err(dev, "%s: %pfwP: probe failed: %d\n",
-			__func__, auxdev->dev.fwnode, ret);
-
 	return 0;
 }
 

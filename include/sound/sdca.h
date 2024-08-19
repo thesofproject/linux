@@ -11,6 +11,7 @@
 
 struct sdw_slave;
 struct sdca_dev;
+struct sdca_function_data;
 
 #define SDCA_MAX_INTERRUPTS 31 /* the last bit is reserved for future extensions */
 
@@ -64,6 +65,7 @@ struct sdca_interrupt_info {
  */
 struct sdca_function_desc {
 	struct fwnode_handle *function_node;
+	struct sdca_function_data *function;
 	struct sdca_dev *func_dev;
 	u64 adr;
 	u32 type;
@@ -96,6 +98,7 @@ void sdca_lookup_functions(struct sdw_slave *slave);
 void sdca_lookup_interface_revision(struct sdw_slave *slave);
 bool sdca_device_quirk_match(struct sdw_slave *slave, enum sdca_quirk quirk);
 int sdca_dev_register_functions(struct sdw_slave *slave);
+int sdca_dev_parse_functions(struct sdw_slave *slave);
 void sdca_dev_unregister_functions(struct sdw_slave *slave);
 
 #else
@@ -108,6 +111,11 @@ static inline bool sdca_device_quirk_match(struct sdw_slave *slave, enum sdca_qu
 }
 
 static inline int sdca_dev_register_functions(struct sdw_slave *slave)
+{
+	return 0;
+}
+
+static inline int sdca_dev_parse_functions(struct sdw_slave *slave)
 {
 	return 0;
 }

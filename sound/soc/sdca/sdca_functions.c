@@ -251,7 +251,7 @@ static int find_sdca_entity_controls(struct device *dev,
 
 static int find_sdca_entities(struct device *dev,
 			      struct fwnode_handle *function_node,
-			      struct sdca_function_data *function)
+			      struct sdca_function_desc *func_desc)
 {
 	struct fwnode_handle *entity_node;
 	struct sdca_entity *entities;
@@ -319,7 +319,7 @@ static int find_sdca_entities(struct device *dev,
 		if (ret) {
 			/* Not all entities have labels, log and ignore */
 			dev_dbg(dev, "%pfwP: entity %#x property %s not found\n",
-				function, entities[i].id,
+				func_desc->function, entities[i].id,
 				"mipi-sdca-entity-label");
 		} else {
 			entities[i].label = devm_kasprintf(dev, GFP_KERNEL, "%s", label);
@@ -336,7 +336,7 @@ static int find_sdca_entities(struct device *dev,
 			 entities[i].label);
 
 		ret = find_sdca_entity_controls(dev, entity_node, &entities[i],
-						function->function_desc->type);
+						func_desc->type);
 
 		fwnode_handle_put(entity_node);
 
@@ -346,14 +346,14 @@ static int find_sdca_entities(struct device *dev,
 	}
 
 	ret = find_sdca_entity_controls(dev, function_node, &entities[num_entities],
-					function->function_desc->type);
+					func_desc->type);
 	if (ret)
 		return ret;
 
 	entities[num_entities].label = "entity0";
 
-	function->num_entities = num_entities + 1;
-	function->entities = entities;
+	func_desc->function->num_entities = num_entities + 1;
+	func_desc->function->entities = entities;
 
 	return 0;
 }
@@ -456,17 +456,17 @@ out:
 
 static int find_sdca_entities_connections(struct device *dev,
 					  struct fwnode_handle *function_node,
-					  struct sdca_function_data *function)
+					  struct sdca_function_desc *func_desc)
 {
 	int ret;
 	int i;
 
-	for (i = 0; i < function->num_entities; i++) {
+	for (i = 0; i < func_desc->function->num_entities; i++) {
 		struct fwnode_handle *entity_node;
 		struct sdca_entity *entity;
 		char entity_property[40];
 
-		entity = &function->entities[i];
+		entity = &func_desc->function->entities[i];
 
 		if (!entity->id)
 			continue;
@@ -486,7 +486,7 @@ static int find_sdca_entities_connections(struct device *dev,
 
 		ret = find_sdca_entity_connection(dev,
 						  function_node,
-						  function,
+						  func_desc->function,
 						  entity_node,
 						  entity);
 		fwnode_handle_put(entity_node);
@@ -507,18 +507,18 @@ static int find_sdca_entities_connections(struct device *dev,
  */
 int sdca_parse_function(struct device *dev,
 			struct fwnode_handle *function_node,
-			struct sdca_function_data *function)
+			struct sdca_function_desc *func_desc)
 {
 	int ret;
 
-	ret = find_sdca_entities(dev, function_node, function);
+	ret = find_sdca_entities(dev, function_node, func_desc);
 	if (ret < 0) {
 		dev_err(dev, "%s: find_sdca_entities failed: %d\n",
 			__func__, ret);
 		return ret;
 	}
 
-	ret = find_sdca_entities_connections(dev, function_node, function);
+	ret = find_sdca_entities_connections(dev, function_node, func_desc);
 	if (ret < 0) {
 		dev_err(dev, "%s: find_sdca_entities_connections failed: %d\n",
 			__func__, ret);

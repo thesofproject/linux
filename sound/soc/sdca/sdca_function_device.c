@@ -49,7 +49,7 @@ static struct sdca_dev *sdca_dev_register(struct device *parent,
 	auxdev->dev.fwnode = function_desc->function_node;
 	auxdev->dev.release = sdca_dev_release;
 
-	sdev->function.function_desc = function_desc;
+	sdev->function_desc = function_desc;
 
 	rc = ida_alloc(&sdca_function_ida, GFP_KERNEL);
 	if (rc < 0) {
@@ -85,6 +85,33 @@ static void sdca_dev_unregister(struct sdca_dev *sdev)
 	auxiliary_device_delete(&sdev->auxdev);
 	auxiliary_device_uninit(&sdev->auxdev);
 }
+
+int sdca_dev_parse_functions(struct sdw_slave *slave)
+{
+	struct sdca_device_data *sdca_data = &slave->sdca_data;
+	struct device *dev = &slave->dev;
+	struct sdca_function_desc *func_desc;
+	struct sdca_function_data *func;
+	int ret;
+	int i;
+
+	for (i = 0; i < sdca_data->num_functions; i++) {
+		func_desc = &sdca_data->sdca_func[i];
+
+		func = devm_kzalloc(dev, sizeof(*func), GFP_KERNEL);
+		if (!func)
+			return -ENOMEM;
+
+		func_desc->function = func;
+
+		ret = sdca_parse_function(dev, func_desc->function_node, func_desc);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_NS(sdca_dev_parse_functions, SND_SOC_SDCA);
 
 int sdca_dev_register_functions(struct sdw_slave *slave)
 {

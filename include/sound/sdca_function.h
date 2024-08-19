@@ -9,6 +9,8 @@
 #ifndef __SDCA_FUNCTION_H__
 #define __SDCA_FUNCTION_H__
 
+struct sdca_function_desc;
+
 /*
  * SDCA Function Types from SDCA specification v1.0a Section 5.1.2
  * all Function types not described are reserved
@@ -131,7 +133,6 @@ struct sdca_entity {
 
 /**
  * struct sdca_function_data - top-level information for one SDCA function
- * @function_desc: pointer to short descriptor used in initial parsing
  * @topology_features: mask of optional features in topology
  * @num_entities: number of entities reported in this function. This is a factor
  * of multiple options allowed in the SDCA specification
@@ -144,7 +145,6 @@ struct sdca_entity {
  * @initialization_table_size: size of @initialization_table
  */
 struct sdca_function_data {
-	struct sdca_function_desc *function_desc;
 	u64 topology_features;
 	int num_entities;
 	struct sdca_entity *entities;
@@ -155,5 +155,5 @@ struct sdca_function_data {
 
 int sdca_parse_function(struct device *dev,
 			struct fwnode_handle *function_node,
-			struct sdca_function_data *function);
+			struct sdca_function_desc *func_desc);
 #endif

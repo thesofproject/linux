@@ -6,7 +6,7 @@
 
 struct sdca_dev {
 	struct auxiliary_device auxdev;
-	struct sdca_function_data function;
+	struct sdca_function_desc *function_desc;
 };
 
 #define auxiliary_dev_to_sdca_dev(auxiliary_dev)		\
