@@ -9,6 +9,7 @@
 #ifndef __SDCA_H__
 #define __SDCA_H__
 
+struct regmap;
 struct sdw_slave;
 struct sdca_dev;
 struct sdca_function_data;
@@ -86,6 +87,7 @@ struct sdca_device_data {
 	int num_functions;
 	struct sdca_function_desc sdca_func[SDCA_MAX_FUNCTION_COUNT];
 	struct sdca_interrupt_info *interrupt_info;
+	struct regmap *regmap;
 };
 
 enum sdca_quirk {
@@ -97,7 +99,7 @@ enum sdca_quirk {
 void sdca_lookup_functions(struct sdw_slave *slave);
 void sdca_lookup_interface_revision(struct sdw_slave *slave);
 bool sdca_device_quirk_match(struct sdw_slave *slave, enum sdca_quirk quirk);
-int sdca_dev_register_functions(struct sdw_slave *slave);
+int sdca_dev_register_functions(struct sdw_slave *slave, struct regmap *regmap);
 int sdca_dev_parse_functions(struct sdw_slave *slave);
 void sdca_dev_unregister_functions(struct sdw_slave *slave);
 
@@ -110,7 +112,7 @@ static inline bool sdca_device_quirk_match(struct sdw_slave *slave, enum sdca_qu
 	return false;
 }
 
-static inline int sdca_dev_register_functions(struct sdw_slave *slave)
+static inline int sdca_dev_register_functions(struct sdw_slave *slave, struct regmap *regmap)
 {
 	return 0;
 }

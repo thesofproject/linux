@@ -8,6 +8,7 @@
 #include <linux/acpi.h>
 #include <linux/module.h>
 #include <linux/auxiliary_bus.h>
+#include <linux/regmap.h>
 #include <linux/soundwire/sdw.h>
 #include <sound/sdca.h>
 #include <sound/sdca_function.h>
@@ -32,7 +33,8 @@ static void sdca_dev_release(struct device *dev)
 
 /* alloc, init and add link devices */
 static struct sdca_dev *sdca_dev_register(struct device *parent,
-					  struct sdca_function_desc *function_desc)
+					  struct sdca_function_desc *function_desc,
+					  struct regmap *regmap)
 {
 	struct sdca_dev *sdev;
 	struct auxiliary_device *auxdev;
@@ -49,6 +51,7 @@ static struct sdca_dev *sdca_dev_register(struct device *parent,
 	auxdev->dev.fwnode = function_desc->function_node;
 	auxdev->dev.release = sdca_dev_release;
 
+	sdev->regmap = regmap;
 	sdev->function_desc = function_desc;
 
 	rc = ida_alloc(&sdca_function_ida, GFP_KERNEL);
@@ -113,7 +116,7 @@ int sdca_dev_parse_functions(struct sdw_slave *slave)
 }
 EXPORT_SYMBOL_NS(sdca_dev_parse_functions, SND_SOC_SDCA);
 
-int sdca_dev_register_functions(struct sdw_slave *slave)
+int sdca_dev_register_functions(struct sdw_slave *slave, struct regmap *regmap)
 {
 	struct sdca_device_data *sdca_data = &slave->sdca_data;
 	int i;
@@ -122,7 +125,7 @@ int sdca_dev_register_functions(struct sdw_slave *slave)
 		struct sdca_dev *func_dev;
 
 		func_dev = sdca_dev_register(&slave->dev,
-					     &sdca_data->sdca_func[i]);
+					     &sdca_data->sdca_func[i], regmap);
 		if (!func_dev)
 			return -ENODEV;
 

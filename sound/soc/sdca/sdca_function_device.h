@@ -4,9 +4,12 @@
 #ifndef __SDCA_FUNCTION_DEVICE_H
 #define __SDCA_FUNCTION_DEVICE_H
 
+struct regmap;
+
 struct sdca_dev {
 	struct auxiliary_device auxdev;
 	struct sdca_function_desc *function_desc;
+	struct regmap *regmap;
 };
 
 #define auxiliary_dev_to_sdca_dev(auxiliary_dev)		\
