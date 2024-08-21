@@ -47,6 +47,7 @@ static const struct sof_dev_desc lnl_desc = {
 	.nocodec_tplg_filename = "sof-lnl-nocodec.tplg",
 	.ops = &sof_lnl_ops,
 	.ops_init = sof_lnl_ops_init,
+	.ipc_timeout = 5000,
 };
 
 /* PCI IDs */
