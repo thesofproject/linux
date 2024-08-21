@@ -115,6 +115,11 @@ static int lnl_dsp_post_fw_run(struct snd_sof_dev *sdev)
 		}
 	}
 
+	dev_info(sdev->dev, "Set ULPFRBRDCGE to 0\n");
+	snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR,
+				SOF_HDA_VS_HfCLKCTL,
+				SOF_HDA_VS_HfCLKCTL_ULPFBRDCGE, 0);
+
 	return 0;
 }
 

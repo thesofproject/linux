@@ -76,6 +76,10 @@
 /*Vendor Specific Registers*/
 #define SOF_HDA_VS_D0I3C		0x104A
 
+#define SOF_HDA_VS_HfCLKCTL		0x1D10
+
+#define SOF_HDA_VS_HfCLKCTL_ULPFBRDCGE	BIT(1)
+
 /* D0I3C Register fields */
 #define SOF_HDA_VS_D0I3C_CIP		BIT(0) /* Command-In-Progress */
 #define SOF_HDA_VS_D0I3C_I3		BIT(2) /* D0i3 enable bit */
