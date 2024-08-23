@@ -2164,6 +2164,14 @@ static int sof_set_widget_pipeline(struct snd_sof_dev *sdev, struct snd_sof_pipe
 	return 0;
 }
 
+#ifdef CONFIG_SND_SOC_SOF_IPC4
+#include "ipc4-priv.h"
+
+static const guid_t preload_uuid[] = {
+	GUID_INIT(0x93446E12, 0x1864, 0x4E04, 0xAF, 0xE0, 0x3B, 0x1D, 0x77, 0x8F, 0xFB, 0x79),
+};
+#endif
+
 /* completion - called at completion of firmware loading */
 static int sof_complete(struct snd_soc_component *scomp)
 {
@@ -2172,6 +2180,7 @@ static int sof_complete(struct snd_soc_component *scomp)
 	const struct sof_ipc_tplg_widget_ops *widget_ops;
 	struct snd_sof_control *scontrol;
 	struct snd_sof_pipeline *spipe;
+	unsigned int i;
 	int ret;
 
 	widget_ops = tplg_ops ? tplg_ops->widget : NULL;
@@ -2186,6 +2195,13 @@ static int sof_complete(struct snd_soc_component *scomp)
 				return ret;
 			}
 		}
+
+#ifdef CONFIG_SND_SOC_SOF_IPC4
+	/* Pre-load libraries */
+	for (i = 0; i < ARRAY_SIZE(preload_uuid); i++)
+		if (!sof_ipc4_find_module_by_uuid(sdev, preload_uuid + i))
+			return -ENODEV;
+#endif
 
 	/* set up the IPC structures for the pipeline widgets */
 	list_for_each_entry(spipe, &sdev->pipeline_list, list) {
