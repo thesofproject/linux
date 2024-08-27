@@ -1131,6 +1131,9 @@ struct prelim_drm_xe_pxp_ops {
 	/** @status: returned outcome of the operation */
 	__u32 status;
 #define PRELIM_DRM_XE_PXP_OP_STATUS_SUCCESS 0
+#define PRELIM_DRM_XE_PXP_OP_STATUS_RETRY_REQUIRED 1
+#define PRELIM_DRM_XE_PXP_OP_STATUS_SESSION_NOT_AVAILABLE 2
+#define PRELIM_DRM_XE_PXP_OP_STATUS_POWER_OFF 3
 
 	/*
 	 * in/out: action-specific data. Must fill the structure matching the
