@@ -180,4 +180,6 @@ static inline void sof_ipc4_compr_drain_done(struct snd_sof_dev *sdev,
 					     void *ipc_message) { }
 #endif
 
+void sof_ipc4_create_debug_slot_ro_debugfs_node(struct snd_sof_dev *sdev, u32 slot_type,
+						size_t data_offset, const char *name);
 #endif
