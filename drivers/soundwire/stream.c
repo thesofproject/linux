@@ -627,6 +627,16 @@ static int sdw_notify_config(struct sdw_master_runtime *m_rt)
 	return 0;
 }
 
+bool is_clock_scaling_supported_by_slave(struct sdw_slave *slave)
+{
+	/*
+	 * Dynamic scaling is a defined by SDCA. However, some devices expose the class ID but
+	 * can't support dynamic scaling. We might need a quirk to handle such devices.
+	 */
+	return slave->id.class_id;
+}
+EXPORT_SYMBOL(is_clock_scaling_supported_by_slave);
+
 /**
  * sdw_program_params() - Program transport and port parameters for Master(s)
  * and Slave(s)
@@ -637,7 +647,36 @@ static int sdw_notify_config(struct sdw_master_runtime *m_rt)
 static int sdw_program_params(struct sdw_bus *bus, bool prepare)
 {
 	struct sdw_master_runtime *m_rt;
+	struct sdw_slave *slave;
 	int ret = 0;
+
+	list_for_each_entry(slave, &bus->slaves, node) {
+		u32 scale_index;
+		u32 addr1;
+		u8 base;
+
+		scale_index = sdw_slave_get_scale_index(slave, &base);
+		if (scale_index < 0)
+			return scale_index;
+
+		if (!is_clock_scaling_supported_by_slave(slave)){
+			dev_dbg(&slave->dev, "%s: The Peripheral doesn't comply with SDCA\n",
+				__func__);
+			break;
+		}
+
+		if (bus->params.next_bank) {
+			addr1 = SDW_SCP_BUSCLOCK_SCALE_B1;
+		} else {
+			addr1 = SDW_SCP_BUSCLOCK_SCALE_B0;
+		}
+		/* Program SDW_SCP_BUSCLOCK_SCALE */
+		ret = sdw_write_no_pm(slave, addr1, scale_index);
+		if (ret < 0) {
+			dev_err(bus->dev, "SDW_SCP_BUSCLOCK_SCALE register write failed\n");
+			return ret;
+		}
+	}
 
 	list_for_each_entry(m_rt, &bus->m_rt_list, bus_node) {
 
