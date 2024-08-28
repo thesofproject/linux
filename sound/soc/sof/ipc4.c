@@ -582,6 +582,9 @@ static int ipc4_fw_ready(struct snd_sof_dev *sdev, struct sof_ipc4_msg *ipc4_msg
 
 	sof_ipc4_create_exception_debugfs_node(sdev);
 
+	sof_ipc4_create_debug_slot_debugfs_node(sdev, SOF_IPC4_DEBUG_SLOT_DEBUG_STREAM,
+						0, "debug_stream");
+
 	return sof_ipc4_init_msg_memory(sdev);
 }
 
