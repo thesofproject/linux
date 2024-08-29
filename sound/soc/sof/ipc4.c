@@ -16,7 +16,6 @@
 #include "ipc4-fw-reg.h"
 #include "ipc4-priv.h"
 #include "ipc4-topology.h"
-#include "ipc4-telemetry.h"
 #include "ops.h"
 
 static const struct sof_ipc4_fw_status {
@@ -741,7 +740,9 @@ static int ipc4_fw_ready(struct snd_sof_dev *sdev, struct sof_ipc4_msg *ipc4_msg
 		return 0;
 	}
 
-	sof_ipc4_create_exception_debugfs_node(sdev);
+	/* sizeof(u32)is for skiping the first separator magic number */
+	sof_ipc4_create_debug_slot_ro_debugfs_node(sdev, SOF_IPC4_DEBUG_SLOT_TELEMETRY,
+						   sizeof(u32), "exception");
 
 	sof_ipc4_create_debug_slot_ro_debugfs_node(sdev, SOF_IPC4_DEBUG_SLOT_DEBUG_STREAM,
 						   0, "debug_stream");
