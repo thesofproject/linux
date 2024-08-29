@@ -69,5 +69,4 @@ struct sof_ipc4_telemetry_slot_data {
 	u32 arch_data[];
 } __packed;
 
-void sof_ipc4_create_exception_debugfs_node(struct snd_sof_dev *sdev);
 #endif
