@@ -12,7 +12,7 @@ snd-sof-$(CONFIG_SND_SOC_SOF_COMPRESS) += ipc3-compress.o
 endif
 ifneq ($(CONFIG_SND_SOC_SOF_IPC4),)
 snd-sof-y += ipc4.o ipc4-loader.o ipc4-topology.o ipc4-control.o ipc4-pcm.o\
-		ipc4-mtrace.o ipc4-telemetry.o ipc4-debug-slot-debugfs.o
+		ipc4-mtrace.o ipc4-debug-slot-debugfs.o
 snd-sof-$(CONFIG_SND_SOC_SOF_COMPRESS) += ipc4-compress.o
 endif
 
