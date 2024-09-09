@@ -70,8 +70,10 @@ static inline struct snd_soc_acpi_mach *snd_soc_acpi_codec_list(void *arg)
  * @dai_drivers: pointer to dai_drivers, used e.g. in nocodec mode
  * @subsystem_vendor: optional PCI SSID vendor value
  * @subsystem_device: optional PCI SSID device value
+ * @subsystem_rev: optional PCI SSID revision value
  * @subsystem_id_set: true if a value has been written to
  *		      subsystem_vendor and subsystem_device.
+ * @bt_link_mask: BT offload link enabled on the board
  */
 struct snd_soc_acpi_mach_params {
 	u32 acpi_ipc_irq_index;
@@ -86,7 +88,9 @@ struct snd_soc_acpi_mach_params {
 	struct snd_soc_dai_driver *dai_drivers;
 	unsigned short subsystem_vendor;
 	unsigned short subsystem_device;
+	unsigned short subsystem_rev;
 	bool subsystem_id_set;
+	u32 bt_link_mask;
 };
 
 /**
