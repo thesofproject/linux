@@ -1174,7 +1174,7 @@ static int snd_timer_s_close(struct snd_timer *timer)
 static const struct snd_timer_hardware snd_timer_system =
 {
 	.flags =	SNDRV_TIMER_HW_FIRST | SNDRV_TIMER_HW_WORK,
-	.resolution =	1000000000L / HZ,
+	.resolution =	NSEC_PER_SEC / HZ,
 	.ticks =	10000000L,
 	.close =	snd_timer_s_close,
 	.start =	snd_timer_s_start,
@@ -1615,7 +1615,7 @@ static int snd_timer_user_ginfo(struct file *file,
 
 	ginfo = memdup_user(_ginfo, sizeof(*ginfo));
 	if (IS_ERR(ginfo))
-		return PTR_ERR(no_free_ptr(ginfo));
+		return PTR_ERR(ginfo);
 
 	tid = ginfo->tid;
 	memset(ginfo, 0, sizeof(*ginfo));
@@ -2190,7 +2190,7 @@ static int snd_utimer_ioctl_create(struct file *file,
 
 	utimer_info = memdup_user(_utimer_info, sizeof(*utimer_info));
 	if (IS_ERR(utimer_info))
-		return PTR_ERR(no_free_ptr(utimer_info));
+		return PTR_ERR(utimer_info);
 
 	err = snd_utimer_create(utimer_info, &utimer);
 	if (err < 0)
