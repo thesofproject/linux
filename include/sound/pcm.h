@@ -109,20 +109,23 @@ struct snd_pcm_ops {
 #define SNDRV_PCM_RATE_5512		(1U<<0)		/* 5512Hz */
 #define SNDRV_PCM_RATE_8000		(1U<<1)		/* 8000Hz */
 #define SNDRV_PCM_RATE_11025		(1U<<2)		/* 11025Hz */
-#define SNDRV_PCM_RATE_16000		(1U<<3)		/* 16000Hz */
-#define SNDRV_PCM_RATE_22050		(1U<<4)		/* 22050Hz */
-#define SNDRV_PCM_RATE_32000		(1U<<5)		/* 32000Hz */
-#define SNDRV_PCM_RATE_44100		(1U<<6)		/* 44100Hz */
-#define SNDRV_PCM_RATE_48000		(1U<<7)		/* 48000Hz */
-#define SNDRV_PCM_RATE_64000		(1U<<8)		/* 64000Hz */
-#define SNDRV_PCM_RATE_88200		(1U<<9)		/* 88200Hz */
-#define SNDRV_PCM_RATE_96000		(1U<<10)	/* 96000Hz */
-#define SNDRV_PCM_RATE_176400		(1U<<11)	/* 176400Hz */
-#define SNDRV_PCM_RATE_192000		(1U<<12)	/* 192000Hz */
-#define SNDRV_PCM_RATE_352800		(1U<<13)	/* 352800Hz */
-#define SNDRV_PCM_RATE_384000		(1U<<14)	/* 384000Hz */
-#define SNDRV_PCM_RATE_705600		(1U<<15)	/* 705600Hz */
-#define SNDRV_PCM_RATE_768000		(1U<<16)	/* 768000Hz */
+#define SNDRV_PCM_RATE_12000		(1U<<3)		/* 12000Hz */
+#define SNDRV_PCM_RATE_16000		(1U<<4)		/* 16000Hz */
+#define SNDRV_PCM_RATE_22050		(1U<<5)		/* 22050Hz */
+#define SNDRV_PCM_RATE_24000		(1U<<6)		/* 24000Hz */
+#define SNDRV_PCM_RATE_32000		(1U<<7)		/* 32000Hz */
+#define SNDRV_PCM_RATE_44100		(1U<<8)		/* 44100Hz */
+#define SNDRV_PCM_RATE_48000		(1U<<9)		/* 48000Hz */
+#define SNDRV_PCM_RATE_64000		(1U<<10)	/* 64000Hz */
+#define SNDRV_PCM_RATE_88200		(1U<<11)	/* 88200Hz */
+#define SNDRV_PCM_RATE_96000		(1U<<12)	/* 96000Hz */
+#define SNDRV_PCM_RATE_128000		(1U<<13)	/* 128000Hz */
+#define SNDRV_PCM_RATE_176400		(1U<<14)	/* 176400Hz */
+#define SNDRV_PCM_RATE_192000		(1U<<15)	/* 192000Hz */
+#define SNDRV_PCM_RATE_352800		(1U<<16)	/* 352800Hz */
+#define SNDRV_PCM_RATE_384000		(1U<<17)	/* 384000Hz */
+#define SNDRV_PCM_RATE_705600		(1U<<18)	/* 705600Hz */
+#define SNDRV_PCM_RATE_768000		(1U<<19)	/* 768000Hz */
 
 #define SNDRV_PCM_RATE_CONTINUOUS	(1U<<30)	/* continuous range */
 #define SNDRV_PCM_RATE_KNOT		(1U<<31)	/* supports more non-continuous rates */
@@ -498,6 +501,9 @@ struct snd_pcm_substream {
 	/* misc flags */
 	unsigned int hw_opened: 1;
 	unsigned int managed_buffer_alloc:1;
+#ifdef CONFIG_SND_PCM_XRUN_DEBUG
+	unsigned int xrun_counter; /* number of times xrun happens */
+#endif /* CONFIG_SND_PCM_XRUN_DEBUG */
 };
 
 #define SUBSTREAM_BUSY(substream) ((substream)->ref_count > 0)
@@ -1353,48 +1359,6 @@ snd_pcm_set_fixed_buffer_all(struct snd_pcm *pcm, int type,
 			     struct device *data, size_t size)
 {
 	return snd_pcm_set_managed_buffer_all(pcm, type, data, size, 0);
-}
-
-int _snd_pcm_lib_alloc_vmalloc_buffer(struct snd_pcm_substream *substream,
-				      size_t size, gfp_t gfp_flags);
-int snd_pcm_lib_free_vmalloc_buffer(struct snd_pcm_substream *substream);
-struct page *snd_pcm_lib_get_vmalloc_page(struct snd_pcm_substream *substream,
-					  unsigned long offset);
-/**
- * snd_pcm_lib_alloc_vmalloc_buffer - allocate virtual DMA buffer
- * @substream: the substream to allocate the buffer to
- * @size: the requested buffer size, in bytes
- *
- * Allocates the PCM substream buffer using vmalloc(), i.e., the memory is
- * contiguous in kernel virtual space, but not in physical memory.  Use this
- * if the buffer is accessed by kernel code but not by device DMA.
- *
- * Return: 1 if the buffer was changed, 0 if not changed, or a negative error
- * code.
- */
-static inline int snd_pcm_lib_alloc_vmalloc_buffer
-			(struct snd_pcm_substream *substream, size_t size)
-{
-	return _snd_pcm_lib_alloc_vmalloc_buffer(substream, size,
-						 GFP_KERNEL | __GFP_HIGHMEM | __GFP_ZERO);
-}
-
-/**
- * snd_pcm_lib_alloc_vmalloc_32_buffer - allocate 32-bit-addressable buffer
- * @substream: the substream to allocate the buffer to
- * @size: the requested buffer size, in bytes
- *
- * This function works like snd_pcm_lib_alloc_vmalloc_buffer(), but uses
- * vmalloc_32(), i.e., the pages are allocated from 32-bit-addressable memory.
- *
- * Return: 1 if the buffer was changed, 0 if not changed, or a negative error
- * code.
- */
-static inline int snd_pcm_lib_alloc_vmalloc_32_buffer
-			(struct snd_pcm_substream *substream, size_t size)
-{
-	return _snd_pcm_lib_alloc_vmalloc_buffer(substream, size,
-						 GFP_KERNEL | GFP_DMA32 | __GFP_ZERO);
 }
 
 #define snd_pcm_get_dma_buf(substream) ((substream)->runtime->dma_buffer_p)
