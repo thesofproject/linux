@@ -23,7 +23,9 @@
 #include <linux/pm_runtime.h>
 #include <linux/regmap.h>
 #include <linux/soundwire/sdw.h>
+#include <linux/soundwire/sdw_registers.h>
 #include <linux/types.h>
+#include <sound/sdca.h>
 
 #include "cs42l43.h"
 
@@ -70,21 +72,6 @@ struct cs42l43_patch_header {
 	__le16 romver;
 	__le32 load_addr;
 } __packed;
-
-static const struct reg_sequence cs42l43_reva_patch[] = {
-	{ 0x4000,					0x00000055 },
-	{ 0x4000,					0x000000AA },
-	{ 0x10084,					0x00000000 },
-	{ 0x1741C,					0x00CD2000 },
-	{ 0x1718C,					0x00000003 },
-	{ 0x4000,					0x00000000 },
-	{ CS42L43_CCM_BLK_CLK_CONTROL,			0x00000002 },
-	{ CS42L43_HPPATHVOL,				0x011B011B },
-	{ CS42L43_OSC_DIV_SEL,				0x00000001 },
-	{ CS42L43_DACCNFG2,				0x00000005 },
-	{ CS42L43_MIC_DETECT_CONTROL_ANDROID,		0x80790079 },
-	{ CS42L43_RELID,				0x0000000F },
-};
 
 const struct reg_default cs42l43_reg_default[CS42L43_N_DEFAULTS] = {
 	{ CS42L43_DRV_CTRL1,				0x000186C0 },
@@ -437,88 +424,8 @@ bool cs42l43_volatile_register(struct device *dev, unsigned int reg)
 }
 EXPORT_SYMBOL_NS_GPL(cs42l43_volatile_register, MFD_CS42L43);
 
-#define CS42L43_IRQ_OFFSET(reg) ((CS42L43_##reg##_INT) - CS42L43_DECIM_INT)
-
-#define CS42L43_IRQ_REG(name, reg) REGMAP_IRQ_REG(CS42L43_##name, \
-						  CS42L43_IRQ_OFFSET(reg), \
-						  CS42L43_##name##_INT_MASK)
-
-static const struct regmap_irq cs42l43_regmap_irqs[] = {
-	CS42L43_IRQ_REG(PLL_LOST_LOCK,				PLL),
-	CS42L43_IRQ_REG(PLL_READY,				PLL),
-
-	CS42L43_IRQ_REG(HP_STARTUP_DONE,			MSM),
-	CS42L43_IRQ_REG(HP_SHUTDOWN_DONE,			MSM),
-	CS42L43_IRQ_REG(HSDET_DONE,				MSM),
-	CS42L43_IRQ_REG(TIPSENSE_UNPLUG_DB,			MSM),
-	CS42L43_IRQ_REG(TIPSENSE_PLUG_DB,			MSM),
-	CS42L43_IRQ_REG(RINGSENSE_UNPLUG_DB,			MSM),
-	CS42L43_IRQ_REG(RINGSENSE_PLUG_DB,			MSM),
-	CS42L43_IRQ_REG(TIPSENSE_UNPLUG_PDET,			MSM),
-	CS42L43_IRQ_REG(TIPSENSE_PLUG_PDET,			MSM),
-	CS42L43_IRQ_REG(RINGSENSE_UNPLUG_PDET,			MSM),
-	CS42L43_IRQ_REG(RINGSENSE_PLUG_PDET,			MSM),
-
-	CS42L43_IRQ_REG(HS2_BIAS_SENSE,				ACC_DET),
-	CS42L43_IRQ_REG(HS1_BIAS_SENSE,				ACC_DET),
-	CS42L43_IRQ_REG(DC_DETECT1_FALSE,			ACC_DET),
-	CS42L43_IRQ_REG(DC_DETECT1_TRUE,			ACC_DET),
-	CS42L43_IRQ_REG(HSBIAS_CLAMPED,				ACC_DET),
-	CS42L43_IRQ_REG(HS3_4_BIAS_SENSE,			ACC_DET),
-
-	CS42L43_IRQ_REG(AMP2_CLK_STOP_FAULT,			CLASS_D_AMP),
-	CS42L43_IRQ_REG(AMP1_CLK_STOP_FAULT,			CLASS_D_AMP),
-	CS42L43_IRQ_REG(AMP2_VDDSPK_FAULT,			CLASS_D_AMP),
-	CS42L43_IRQ_REG(AMP1_VDDSPK_FAULT,			CLASS_D_AMP),
-	CS42L43_IRQ_REG(AMP2_SHUTDOWN_DONE,			CLASS_D_AMP),
-	CS42L43_IRQ_REG(AMP1_SHUTDOWN_DONE,			CLASS_D_AMP),
-	CS42L43_IRQ_REG(AMP2_STARTUP_DONE,			CLASS_D_AMP),
-	CS42L43_IRQ_REG(AMP1_STARTUP_DONE,			CLASS_D_AMP),
-	CS42L43_IRQ_REG(AMP2_THERM_SHDN,			CLASS_D_AMP),
-	CS42L43_IRQ_REG(AMP1_THERM_SHDN,			CLASS_D_AMP),
-	CS42L43_IRQ_REG(AMP2_THERM_WARN,			CLASS_D_AMP),
-	CS42L43_IRQ_REG(AMP1_THERM_WARN,			CLASS_D_AMP),
-	CS42L43_IRQ_REG(AMP2_SCDET,				CLASS_D_AMP),
-	CS42L43_IRQ_REG(AMP1_SCDET,				CLASS_D_AMP),
-
-	CS42L43_IRQ_REG(GPIO3_FALL,				GPIO),
-	CS42L43_IRQ_REG(GPIO3_RISE,				GPIO),
-	CS42L43_IRQ_REG(GPIO2_FALL,				GPIO),
-	CS42L43_IRQ_REG(GPIO2_RISE,				GPIO),
-	CS42L43_IRQ_REG(GPIO1_FALL,				GPIO),
-	CS42L43_IRQ_REG(GPIO1_RISE,				GPIO),
-
-	CS42L43_IRQ_REG(HP_ILIMIT,				HPOUT),
-	CS42L43_IRQ_REG(HP_LOADDET_DONE,			HPOUT),
-};
-
-static const struct regmap_irq_chip cs42l43_irq_chip = {
-	.name = "cs42l43",
-
-	.status_base = CS42L43_DECIM_INT,
-	.mask_base = CS42L43_DECIM_MASK,
-	.num_regs = 16,
-
-	.irqs = cs42l43_regmap_irqs,
-	.num_irqs = ARRAY_SIZE(cs42l43_regmap_irqs),
-
-	.runtime_pm = true,
-};
-
 static const char * const cs42l43_core_supplies[] = {
 	"vdd-a", "vdd-io", "vdd-cp",
-};
-
-static const char * const cs42l43_parent_supplies[] = { "vdd-amp" };
-
-static const struct mfd_cell cs42l43_devs[] = {
-	{ .name = "cs42l43-pinctrl", },
-	{ .name = "cs42l43-spi", },
-	{
-		.name = "cs42l43-codec",
-		.parent_supplies = cs42l43_parent_supplies,
-		.num_parent_supplies = ARRAY_SIZE(cs42l43_parent_supplies),
-	},
 };
 
 /*
@@ -576,11 +483,6 @@ static int cs42l43_wait_for_attach(struct cs42l43 *cs42l43)
 
 	regcache_cache_only(cs42l43->regmap, false);
 
-	/* The hardware requires enabling OSC_DIV before doing any SoundWire reads. */
-	if (cs42l43->sdw)
-		regmap_write(cs42l43->regmap, CS42L43_OSC_DIV_SEL,
-			     CS42L43_OSC_DIV2_EN_MASK);
-
 	return 0;
 }
 
@@ -602,7 +504,47 @@ static int cs42l43_mcu_stage_2_3(struct cs42l43 *cs42l43, bool shadow)
 	if (shadow)
 		need_reg = CS42L43_FW_SH_BOOT_CFG_NEED_CONFIGS;
 
-	regmap_write(cs42l43->regmap, need_reg, 0);
+	regmap_write(cs42l43->regmap, need_reg,
+		     CS42L43_FW_PATCH_NEED_CFG_MASK |
+		     CS42L43_FW_CODEC_NEED_CFG_MASK |
+		     CS42L43_FW_PLL_NEED_CFG_MASK);
+
+	if (shadow) {
+		regmap_write(cs42l43->regmap, 0x11F930, 0x00000033);
+		regmap_write(cs42l43->regmap, 0x11F934, 0x50000000);
+		regmap_write(cs42l43->regmap, 0x11F938, 0x000000a4);
+	} else {
+		regmap_write(cs42l43->regmap, 0x114044, 0x00000033);
+		regmap_write(cs42l43->regmap, 0x114048, 0x50000000);
+		regmap_write(cs42l43->regmap, 0x11404C, 0x000000a4);
+	}
+
+	regmap_write(cs42l43->regmap, CS42L43_FW_MISSION_CTRL_NEED_CONFIGS,
+		     CS42L43_FW_CODEC_NEED_CFG_MASK | CS42L43_FW_PLL_HAVE_CFG_MASK);
+
+	regmap_write(cs42l43->regmap, CS42L43_CONFIG_SELECTION,
+		     CS42L43_FW_PLL_CFG_SEL_MASK);
+
+	regmap_write(cs42l43->regmap, CS42L43_MCU_SW_INTERRUPT, CS42L43_CONFIGS_IND_MASK);
+	regmap_write(cs42l43->regmap, CS42L43_MCU_SW_INTERRUPT, 0);
+
+	ret = regmap_read_poll_timeout(cs42l43->regmap, CS42L43_SOFT_INT_SHADOW, val,
+				       (val & CS42L43_CONFIGS_APPLIED_INT_MASK),
+				       CS42L43_MCU_POLL_US, CS42L43_MCU_UPDATE_TIMEOUT_US);
+	if (ret)
+		dev_err(cs42l43->dev, "Failed to update PLL configs: %d, 0x%x\n", ret, val);
+
+	regmap_write(cs42l43->regmap, CS42L43_CONFIG_SELECTION,
+		     CS42L43_FW_CODEC_CFG_SEL_MASK);
+
+	regmap_write(cs42l43->regmap, CS42L43_MCU_SW_INTERRUPT, CS42L43_CONFIGS_IND_MASK);
+	regmap_write(cs42l43->regmap, CS42L43_MCU_SW_INTERRUPT, 0);
+
+	ret = regmap_read_poll_timeout(cs42l43->regmap, CS42L43_SOFT_INT_SHADOW, val,
+				       (val & CS42L43_CONFIGS_APPLIED_INT_MASK),
+				       CS42L43_MCU_POLL_US, CS42L43_MCU_UPDATE_TIMEOUT_US);
+	if (ret)
+		dev_err(cs42l43->dev, "Failed to update codec configs: %d, 0x%x\n", ret, val);
 
 	ret = regmap_read_poll_timeout(cs42l43->regmap, CS42L43_BOOT_STATUS,
 				       val, (val == CS42L43_MCU_BOOT_STAGE3),
@@ -634,34 +576,6 @@ static int cs42l43_mcu_stage_3_2(struct cs42l43 *cs42l43)
 		     CS42L43_FW_PATCH_NEED_CFG_MASK);
 	regmap_write(cs42l43->regmap, CS42L43_FW_MISSION_CTRL_HAVE_CONFIGS, 0);
 
-	return cs42l43_soft_reset(cs42l43);
-}
-
-/*
- * Disable the firmware running on the device such that the driver can access
- * the registers without fear of the MCU changing them under it.
- */
-static int cs42l43_mcu_disable(struct cs42l43 *cs42l43)
-{
-	unsigned int val;
-	int ret;
-
-	regmap_write(cs42l43->regmap, CS42L43_FW_MISSION_CTRL_MM_MCU_CFG_REG,
-		     CS42L43_FW_MISSION_CTRL_MM_MCU_CFG_DISABLE_VAL);
-	regmap_write(cs42l43->regmap, CS42L43_FW_MISSION_CTRL_MM_CTRL_SELECTION,
-		     CS42L43_FW_MM_CTRL_MCU_SEL_MASK);
-	regmap_write(cs42l43->regmap, CS42L43_MCU_SW_INTERRUPT, CS42L43_CONTROL_IND_MASK);
-	regmap_write(cs42l43->regmap, CS42L43_MCU_SW_INTERRUPT, 0);
-
-	ret = regmap_read_poll_timeout(cs42l43->regmap, CS42L43_SOFT_INT_SHADOW, val,
-				       (val & CS42L43_CONTROL_APPLIED_INT_MASK),
-				       CS42L43_MCU_POLL_US, CS42L43_MCU_CMD_TIMEOUT_US);
-	if (ret) {
-		dev_err(cs42l43->dev, "Failed to disable firmware: %d, 0x%x\n", ret, val);
-		return ret;
-	}
-
-	/* Soft reset to clear any register state the firmware left behind. */
 	return cs42l43_soft_reset(cs42l43);
 }
 
@@ -818,12 +732,10 @@ static int cs42l43_mcu_update_step(struct cs42l43 *cs42l43)
 			if (ret)
 				return ret;
 
-			return cs42l43_mcu_disable(cs42l43);
+			return 0;
 		} else {
 			return cs42l43_mcu_stage_3_2(cs42l43);
 		}
-	case CS42L43_MCU_BOOT_STAGE4:
-		return 0;
 	default:
 		dev_err(cs42l43->dev, "Invalid boot status: %d\n", boot_status);
 		return -EINVAL;
@@ -851,57 +763,33 @@ static int cs42l43_mcu_update(struct cs42l43 *cs42l43)
 	return -ETIMEDOUT;
 }
 
-static int cs42l43_irq_config(struct cs42l43 *cs42l43)
-{
-	struct irq_data *irq_data;
-	unsigned long irq_flags;
-	int ret;
+static struct regmap_config cs42l43_sdca_regmap = {
+	.name                   = "sdca",
+	.reg_bits               = 32,
+	.val_bits               = 32,
+	.reg_format_endian      = REGMAP_ENDIAN_LITTLE,
+	.val_format_endian      = REGMAP_ENDIAN_LITTLE,
 
-	if (cs42l43->sdw)
-		cs42l43->irq = cs42l43->sdw->irq;
+	.max_register           = 0x4040FFFF,
+	.readable_reg           = sdca_disco_regmap_readable,
+	.writeable_reg          = sdca_disco_regmap_writeable,
+	.volatile_reg           = sdca_disco_regmap_volatile,
 
-	cs42l43->irq_chip = cs42l43_irq_chip;
-	cs42l43->irq_chip.irq_drv_data = cs42l43;
+	.cache_type             = REGCACHE_MAPLE,
+};
 
-	irq_data = irq_get_irq_data(cs42l43->irq);
-	if (!irq_data) {
-		dev_err(cs42l43->dev, "Invalid IRQ: %d\n", cs42l43->irq);
-		return -EINVAL;
-	}
-
-	irq_flags = irqd_get_trigger_type(irq_data);
-	switch (irq_flags) {
-	case IRQF_TRIGGER_LOW:
-	case IRQF_TRIGGER_HIGH:
-	case IRQF_TRIGGER_RISING:
-	case IRQF_TRIGGER_FALLING:
-		break;
-	case IRQ_TYPE_NONE:
-	default:
-		irq_flags = IRQF_TRIGGER_LOW;
-		break;
-	}
-
-	irq_flags |= IRQF_ONESHOT;
-
-	ret = devm_regmap_add_irq_chip(cs42l43->dev, cs42l43->regmap,
-				       cs42l43->irq, irq_flags, 0,
-				       &cs42l43->irq_chip, &cs42l43->irq_data);
-	if (ret) {
-		dev_err(cs42l43->dev, "Failed to add IRQ chip: %d\n", ret);
-		return ret;
-	}
-
-	dev_dbg(cs42l43->dev, "Configured IRQ %d with flags 0x%lx\n",
-		cs42l43->irq, irq_flags);
-
-	return 0;
-}
+static struct regmap_sdw_mbq_cfg cs42l43_mbq_config = {
+	.mbq_size = sdca_disco_regmap_mbq_size,
+	.deferrable = sdca_disco_regmap_deferrable,
+	.retry_us = 1000,
+	.timeout_us = 100000,
+};
 
 static void cs42l43_boot_work(struct work_struct *work)
 {
 	struct cs42l43 *cs42l43 = container_of(work, struct cs42l43, boot_work);
 	unsigned int devid, revid, otp;
+	struct regmap *regmap;
 	int ret;
 
 	ret = cs42l43_wait_for_attach(cs42l43);
@@ -941,27 +829,27 @@ static void cs42l43_boot_work(struct work_struct *work)
 	if (ret)
 		goto err;
 
-	ret = regmap_register_patch(cs42l43->regmap, cs42l43_reva_patch,
-				    ARRAY_SIZE(cs42l43_reva_patch));
+	ret = sdca_dev_parse_functions(cs42l43->sdw);
 	if (ret) {
-		dev_err(cs42l43->dev, "Failed to apply register patch: %d\n", ret);
+		dev_err(cs42l43->dev, "Failed to parse functions: %d\n", ret);
 		goto err;
 	}
 
-	ret = cs42l43_irq_config(cs42l43);
-	if (ret)
-		goto err;
+	sdca_dev_populate_constants(cs42l43->sdw, &cs42l43_sdca_regmap);
 
-	ret = devm_mfd_add_devices(cs42l43->dev, PLATFORM_DEVID_NONE,
-				   cs42l43_devs, ARRAY_SIZE(cs42l43_devs),
-				   NULL, 0, NULL);
+	regmap = devm_regmap_init_sdw_mbq_cfg(cs42l43->sdw,
+					      &cs42l43_sdca_regmap,
+					      &cs42l43_mbq_config);
+	if (IS_ERR(regmap))
+		return;
+
+	ret = sdca_dev_register_functions(cs42l43->sdw, regmap);
 	if (ret) {
 		dev_err(cs42l43->dev, "Failed to add subdevices: %d\n", ret);
 		goto err;
 	}
 
 	pm_runtime_mark_last_busy(cs42l43->dev);
-	pm_runtime_put_autosuspend(cs42l43->dev);
 
 	return;
 
@@ -1218,3 +1106,4 @@ MODULE_DESCRIPTION("CS42L43 Core Driver");
 MODULE_AUTHOR("Charles Keepax <ckeepax@opensource.cirrus.com>");
 MODULE_LICENSE("GPL");
 MODULE_FIRMWARE("cs42l43.bin");
+MODULE_IMPORT_NS(SND_SOC_SDCA);
