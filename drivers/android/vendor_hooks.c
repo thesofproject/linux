@@ -154,6 +154,7 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_exit_mm);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_show_mem);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_print_slabinfo_header);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_cache_show);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_mglru_should_abort_scan);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_alter_mutex_list_add);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_mutex_unlock_slowpath);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_mem_cgroup_free);
