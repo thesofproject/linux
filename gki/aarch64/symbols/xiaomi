@@ -199,3 +199,7 @@
 # required by xring_thermal.ko
  __traceiter_android_vh_enable_thermal_genl_check
  __tracepoint_android_vh_enable_thermal_genl_check
+
+# required by printk_hook.ko
+ __traceiter_android_rvh_logbuf
+ __tracepoint_android_rvh_logbuf
