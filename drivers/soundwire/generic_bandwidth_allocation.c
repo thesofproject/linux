@@ -346,6 +346,7 @@ free_params:
 	kfree(params);
 out:
 	kfree(group.rates);
+	kfree(group.lanes);
 
 	return ret;
 }
