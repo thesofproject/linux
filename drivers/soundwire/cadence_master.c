@@ -1352,6 +1352,7 @@ static void cdns_init_clock_ctrl(struct sdw_cdns *cdns)
 	u32 val;
 	u32 ssp_interval;
 	int divider;
+	int freq;
 
 	dev_dbg(cdns->dev, "mclk %d max %d row %d col %d\n",
 		prop->mclk_freq,
@@ -1360,12 +1361,23 @@ static void cdns_init_clock_ctrl(struct sdw_cdns *cdns)
 		prop->default_col);
 
 	/* Set clock divider */
-	divider	= (prop->mclk_freq / prop->max_clk_freq) - 1;
+	if (bus->params.curr_dr_freq) {
+		divider	= (prop->mclk_freq * SDW_DOUBLE_RATE_FACTOR /
+			bus->params.curr_dr_freq) - 1;
+		freq = bus->params.curr_dr_freq >> 1;
+	} else {
+		divider	= (prop->mclk_freq / prop->max_clk_freq) - 1;
+		freq = prop->max_clk_freq;
+	}
 
 	cdns_updatel(cdns, CDNS_MCP_CLK_CTRL0,
 		     CDNS_MCP_CLK_MCLKD_MASK, divider);
 	cdns_updatel(cdns, CDNS_MCP_CLK_CTRL1,
 		     CDNS_MCP_CLK_MCLKD_MASK, divider);
+
+	/* Set frame shape base on the actual bus frequency. */
+	prop->default_col = freq * SDW_DOUBLE_RATE_FACTOR /
+				prop->default_frame_rate / prop->default_row;
 
 	/*
 	 * Frame shape changes after initialization have to be done
