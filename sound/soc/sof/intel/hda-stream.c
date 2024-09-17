@@ -120,8 +120,14 @@ int hda_dsp_stream_setup_bdl(struct snd_sof_dev *sdev,
 
 	period_bytes = hstream->period_bytes;
 	dev_dbg(sdev->dev, "period_bytes:0x%x\n", period_bytes);
+	/*
+	 * HDA spec demands at least two 'periods' for the DMA to work correctly
+	 * Note: period_bytes == 0 can only happen for firmware or library
+	 * loading, the binary sizes have the necessary alignment requirements
+	 * met
+	 */
 	if (!period_bytes)
-		period_bytes = hstream->bufsize;
+		period_bytes = hstream->bufsize / 2;
 
 	periods = hstream->bufsize / period_bytes;
 
