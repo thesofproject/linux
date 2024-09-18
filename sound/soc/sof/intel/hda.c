@@ -56,6 +56,11 @@ static int sdw_clock_stop_quirks = SDW_INTEL_CLK_STOP_BUS_RESET;
 module_param(sdw_clock_stop_quirks, int, 0444);
 MODULE_PARM_DESC(sdw_clock_stop_quirks, "SOF SoundWire clock stop quirks");
 
+static int hda_keep_fw_dma_buffer = -1;
+module_param_named(keep_firmware_dma_buffer, hda_keep_fw_dma_buffer, int, 0444);
+MODULE_PARM_DESC(keep_firmware_dma_buffer,
+	"Allocation policy for firmware DMA buffer. 0 - on demand, 1 - allocate once");
+
 static int sdw_params_stream(struct device *dev,
 			     struct sdw_intel_stream_params_data *params_data)
 {
@@ -395,6 +400,11 @@ int hda_dsp_pre_fw_run(struct snd_sof_dev *sdev)
 					    0644, sdev->debugfs_root,
 					    &hdev->skip_imr_boot);
 		}
+
+		if (hda_keep_fw_dma_buffer == 0 || hda_keep_fw_dma_buffer == 1)
+			hdev->keep_fw_dma_buffer = hda_keep_fw_dma_buffer;
+		else
+			hdev->keep_fw_dma_buffer = !hdev->imrboot_supported;
 	}
 
 	/* disable clock gating and power gating */
@@ -937,6 +947,9 @@ void hda_dsp_remove(struct snd_sof_dev *sdev)
 
 	/* disable DSP */
 	hda_dsp_ctrl_ppcap_enable(sdev, false);
+
+	if (hda->keep_fw_dma_buffer && hda->fw_dmab.area)
+		snd_dma_free_pages(&hda->fw_dmab);
 
 skip_disable_dsp:
 	free_irq(sdev->ipc_irq, sdev);

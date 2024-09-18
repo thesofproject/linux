@@ -489,11 +489,19 @@ enum sof_hda_D0_substate {
 
 /* represents DSP HDA controller frontend - i.e. host facing control */
 struct sof_intel_hda_dev {
+	bool keep_fw_dma_buffer;
 	bool imrboot_supported;
 	bool skip_imr_boot;
 	bool booted_from_imr;
 
 	int boot_iteration;
+
+	/*
+	 * DMA buffer for base firmware download. If keep_fw_dma_buffer is true,
+	 * the buffer is allocated once and kept through the liftime of the
+	 * driver.
+	 */
+	struct snd_dma_buffer fw_dmab;
 
 	struct hda_bus hbus;
 
