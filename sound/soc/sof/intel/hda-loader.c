@@ -43,9 +43,9 @@ static void hda_ssp_set_cbp_cfp(struct snd_sof_dev *sdev)
 	}
 }
 
-struct hdac_ext_stream *hda_cl_prepare(struct device *dev, unsigned int format,
-				       unsigned int size, struct snd_dma_buffer *dmab,
-				       int direction, bool is_iccmax)
+static struct hdac_ext_stream*
+hda_cl_prepare(struct device *dev, unsigned int format, unsigned int size,
+	       struct snd_dma_buffer *dmab, int direction, bool is_iccmax)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	struct hdac_ext_stream *hext_stream;
@@ -95,7 +95,6 @@ out_put:
 	hda_dsp_stream_put(sdev, direction, hstream->stream_tag);
 	return ERR_PTR(ret);
 }
-EXPORT_SYMBOL_NS(hda_cl_prepare, SND_SOC_SOF_INTEL_HDA_COMMON);
 
 /*
  * first boot sequence has some extra steps.
@@ -221,7 +220,8 @@ err:
 }
 EXPORT_SYMBOL_NS(cl_dsp_init, SND_SOC_SOF_INTEL_HDA_COMMON);
 
-int hda_cl_trigger(struct device *dev, struct hdac_ext_stream *hext_stream, int cmd)
+static int hda_cl_trigger(struct device *dev, struct hdac_ext_stream *hext_stream,
+			  int cmd)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	struct hdac_stream *hstream = &hext_stream->hstream;
@@ -252,10 +252,9 @@ int hda_cl_trigger(struct device *dev, struct hdac_ext_stream *hext_stream, int 
 		return hda_dsp_stream_trigger(sdev, hext_stream, cmd);
 	}
 }
-EXPORT_SYMBOL_NS(hda_cl_trigger, SND_SOC_SOF_INTEL_HDA_COMMON);
 
-int hda_cl_cleanup(struct device *dev, struct snd_dma_buffer *dmab,
-		   struct hdac_ext_stream *hext_stream)
+static int hda_cl_cleanup(struct device *dev, struct snd_dma_buffer *dmab,
+			  struct hdac_ext_stream *hext_stream)
 {
 	struct snd_sof_dev *sdev =  dev_get_drvdata(dev);
 	struct hdac_stream *hstream = &hext_stream->hstream;
@@ -286,11 +285,11 @@ int hda_cl_cleanup(struct device *dev, struct snd_dma_buffer *dmab,
 
 	return ret;
 }
-EXPORT_SYMBOL_NS(hda_cl_cleanup, SND_SOC_SOF_INTEL_HDA_COMMON);
 
 #define HDA_CL_DMA_IOC_TIMEOUT_MS 500
 
-int hda_cl_copy_fw(struct snd_sof_dev *sdev, struct hdac_ext_stream *hext_stream)
+static int hda_cl_copy_fw(struct snd_sof_dev *sdev,
+			  struct hdac_ext_stream *hext_stream)
 {
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	const struct sof_intel_dsp_desc *chip = hda->desc;
