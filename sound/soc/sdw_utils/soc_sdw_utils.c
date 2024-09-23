@@ -10,6 +10,7 @@
 #include <linux/module.h>
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_type.h>
+#include <sound/sdca_function.h>
 #include <sound/soc_sdw_utils.h>
 
 static const struct snd_soc_dapm_widget generic_dmic_widgets[] = {
@@ -1131,6 +1132,116 @@ struct asoc_sdw_dailink *asoc_sdw_find_dailink(struct asoc_sdw_dailink *dailinks
 }
 EXPORT_SYMBOL_NS(asoc_sdw_find_dailink, "SND_SOC_SDW_UTILS");
 
+static int asoc_sdw_get_dai_type(u32 type)
+{
+	switch (type) {
+	case SDCA_FUNCTION_TYPE_SMART_AMP:
+	case SDCA_FUNCTION_TYPE_SIMPLE_AMP:
+		return SOC_SDW_DAI_TYPE_AMP;
+	case SDCA_FUNCTION_TYPE_SMART_MIC:
+	case SDCA_FUNCTION_TYPE_SIMPLE_MIC:
+	case SDCA_FUNCTION_TYPE_SPEAKER_MIC:
+		return SOC_SDW_DAI_TYPE_MIC;
+	case SDCA_FUNCTION_TYPE_UAJ:
+	case SDCA_FUNCTION_TYPE_RJ:
+	case SDCA_FUNCTION_TYPE_SIMPLE_JACK:
+		return SOC_SDW_DAI_TYPE_JACK;
+	default:
+		return -EINVAL;
+	}
+}
+
+/**
+ * Check if the SDCA function is present by the SDW peripheral
+ *
+ * @dev: Device pointer
+ * @codec_info: Codec info pointer
+ * @adr_link: ACPI link address
+ * @adr_index: Index of the ACPI link address
+ * @end_index: Index of the endpoint
+ *
+ * Return: 1 if the function is present or no need to check the function,
+ * 	   0 if the function is not present, or negative error code.
+ */
+
+static int is_sdca_function_present(struct device *dev, struct asoc_sdw_codec_info *codec_info,
+				    const struct snd_soc_acpi_link_adr *adr_link, int adr_index,
+				    int end_index)
+{
+	const struct snd_soc_acpi_adr_device *adr_dev = &adr_link->adr_d[adr_index];
+	const struct snd_soc_acpi_endpoint *adr_end;
+	const struct asoc_sdw_dai_info *dai_info;
+	struct snd_soc_dai_link_component dlc;
+	struct snd_soc_dai *codec_dai;
+	struct sdw_slave *slave;
+	struct device *sdw_dev;
+	const char *sdw_codec_name;
+	int i;
+
+	adr_end = &adr_dev->endpoints[end_index];
+	dai_info = &codec_info->dais[adr_end->num];
+
+	if (!SDW_CLASS_ID(adr_dev->adr)) {
+		dev_dbg(dev, "%#llx: in not a SDCA device\n", adr_dev->adr);
+		return 1;
+	}
+
+	/*
+	 * No need to check SDCA functions if there is only 1 endpoint
+	 * present.
+	 */
+	if (adr_dev->num_endpoints == 1) {
+		dev_dbg(dev, "%#llx: Only 1 endpoint with DAI type %d is found\n",
+			adr_dev->adr, dai_info->dai_type);
+		return 1;
+	}
+
+	dlc.dai_name = dai_info->dai_name;
+	codec_dai = snd_soc_find_dai_with_mutex(&dlc);
+	if (!codec_dai) {
+		dev_warn(dev, "codec dai %s not registered yet\n", dlc.dai_name);
+		return -EPROBE_DEFER;
+	}
+
+	sdw_codec_name = _asoc_sdw_get_codec_name(dev, codec_info,
+						  adr_link, adr_index);
+	if (!sdw_codec_name)
+		return -ENOMEM;
+
+	sdw_dev = bus_find_device_by_name(&sdw_bus_type, NULL, sdw_codec_name);
+	if (!sdw_dev) {
+		dev_err(dev, "codec %s not found\n", sdw_codec_name);
+		return -EINVAL;
+	}
+
+	slave = dev_to_sdw_dev(sdw_dev);
+	if (!slave)
+		return -EINVAL;
+
+	/* Make sure BIOS provides SDCA properties */
+	if (!slave->sdca_data.interface_revision) {
+		dev_warn(&slave->dev, "SDCA properties not found in the BIOS\n");
+		return 1;
+	}
+
+	for (i = 0; i < slave->sdca_data.num_functions; i++) {
+		int dai_type = asoc_sdw_get_dai_type(
+				slave->sdca_data.function[i].type);
+
+		if (dai_type == dai_info->dai_type) {
+			dev_dbg(&slave->dev, "DAI type %d sdca function %s found\n",
+				dai_type, slave->sdca_data.function[i].name);
+			return 1;
+		}
+	}
+
+	dev_dbg(&slave->dev,
+		"SDCA device function for DAI type %d not supported, skip endpoint\n",
+		dai_info->dai_type);
+
+	return 0;
+}
+
 int asoc_sdw_parse_sdw_endpoints(struct snd_soc_card *card,
 				 struct asoc_sdw_dailink *soc_dais,
 				 struct asoc_sdw_endpoint *soc_ends,
@@ -1201,6 +1312,13 @@ int asoc_sdw_parse_sdw_endpoints(struct snd_soc_card *card,
 
 				if (dai_info->quirk &&
 				    !(dai_info->quirk_exclude ^ !!(dai_info->quirk & ctx->mc_quirk)))
+					continue;
+
+				ret = is_sdca_function_present(dev, codec_info, adr_link, i, j);
+				if (ret < 0)
+					return ret;
+
+				if (!ret)
 					continue;
 
 				dev_dbg(dev,
