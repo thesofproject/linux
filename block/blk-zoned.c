@@ -8,6 +8,7 @@
  * Copyright (c) 2016, Damien Le Moal
  * Copyright (c) 2016, Western Digital
  * Copyright (c) 2024, Western Digital Corporation or its affiliates.
+ * Copyright 2025 Google LLC
  */
 
 #include <linux/kernel.h>
@@ -53,6 +54,8 @@ static const char *const zone_cond_name[] = {
  * @zone_no: The number of the zone the plug is managing.
  * @wp_offset: The zone write pointer location relative to the start of the zone
  *             as a number of 512B sectors.
+ * @from_cpu: Software queue to submit writes from for drivers that preserve
+ *	the write order.
  * @bio_list: The list of BIOs that are currently plugged.
  * @bio_work: Work struct to handle issuing of plugged BIOs
  * @rcu_head: RCU head to free zone write plugs with an RCU grace period.
@@ -65,6 +68,7 @@ struct blk_zone_wplug {
 	unsigned int		flags;
 	unsigned int		zone_no;
 	unsigned int		wp_offset;
+	int			from_cpu;
 	struct bio_list		bio_list;
 	struct work_struct	bio_work;
 	struct rcu_head		rcu_head;
@@ -79,8 +83,7 @@ static inline unsigned int disk_zone_wplugs_hash_size(struct gendisk *disk)
 /*
  * Zone write plug flags bits:
  *  - BLK_ZONE_WPLUG_PLUGGED: Indicates that the zone write plug is plugged,
- *    that is, that write BIOs are being throttled due to a write BIO already
- *    being executed or the zone write plug bio list is not empty.
+ *    that is, that write BIOs are being throttled.
  *  - BLK_ZONE_WPLUG_NEED_WP_UPDATE: Indicates that we lost track of a zone
  *    write pointer offset and need to update it.
  *  - BLK_ZONE_WPLUG_UNHASHED: Indicates that the zone write plug was removed
@@ -577,6 +580,7 @@ again:
 	zwplug->flags = 0;
 	zwplug->zone_no = zno;
 	zwplug->wp_offset = bdev_offset_from_zone_start(disk->part0, sector);
+	zwplug->from_cpu = -1;
 	bio_list_init(&zwplug->bio_list);
 	INIT_WORK(&zwplug->bio_work, blk_zone_wplug_bio_work);
 	zwplug->disk = disk;
@@ -800,16 +804,25 @@ void blk_zone_mgmt_bio_endio(struct bio *bio)
 static void disk_zone_wplug_schedule_bio_work(struct gendisk *disk,
 					      struct blk_zone_wplug *zwplug)
 {
+	int cpu;
+
 	lockdep_assert_held(&zwplug->lock);
 
 	/*
-	 * Take a reference on the zone write plug and schedule the submission
-	 * of the next plugged BIO. blk_zone_wplug_bio_work() will release the
-	 * reference we take here.
+	 * Schedule a blk_zone_wplug_bio_work() call and increase the zone write
+	 * plug reference count. blk_zone_wplug_bio_work() will release the
+	 * reference we take here. Increasing the zone write plug reference
+	 * count after the queue_work_on() call is safe because all callers hold
+	 * the zone write plug lock and blk_zone_wplug_bio_work() obtains the
+	 * same lock before decrementing the reference count.
 	 */
 	WARN_ON_ONCE(!(zwplug->flags & BLK_ZONE_WPLUG_PLUGGED));
-	refcount_inc(&zwplug->ref);
-	queue_work(disk->zone_wplugs_wq, &zwplug->bio_work);
+	if (zwplug->from_cpu >= 0)
+		cpu = zwplug->from_cpu;
+	else
+		cpu = WORK_CPU_UNBOUND;
+	if (queue_work_on(cpu, disk->zone_wplugs_wq, &zwplug->bio_work))
+		refcount_inc(&zwplug->ref);
 }
 
 static inline void disk_zone_wplug_add_bio(struct gendisk *disk,
@@ -1006,14 +1019,18 @@ static bool blk_zone_wplug_prepare_bio(struct blk_zone_wplug *zwplug,
 	return true;
 }
 
-static bool blk_zone_wplug_handle_write(struct bio *bio, unsigned int nr_segs)
+static bool blk_zone_wplug_handle_write(struct bio *bio, unsigned int nr_segs,
+					int rq_cpu)
 {
 	struct gendisk *disk = bio->bi_bdev->bd_disk;
+	const bool pipeline_zwr = bio_op(bio) != REQ_OP_ZONE_APPEND &&
+				 blk_pipeline_zwr(disk->queue);
 	sector_t sector = bio->bi_iter.bi_sector;
 	bool schedule_bio_work = false;
 	struct blk_zone_wplug *zwplug;
 	gfp_t gfp_mask = GFP_NOIO;
 	unsigned long flags;
+	int from_cpu = -1;
 
 	/*
 	 * BIOs must be fully contained within a zone so that we use the correct
@@ -1066,14 +1083,44 @@ static bool blk_zone_wplug_handle_write(struct bio *bio, unsigned int nr_segs)
 	if (zwplug->flags & BLK_ZONE_WPLUG_PLUGGED)
 		goto add_to_bio_list;
 
+	/*
+	 * The code below has been organized such that zwplug->from_cpu and
+	 * zwplug->flags are only modified after it is clear that a request will
+	 * be added to the bio list or that it will be submitted by the
+	 * caller. This prevents that any changes to these member variables have
+	 * to be reverted if the blk_zone_wplug_prepare_bio() call fails.
+	 */
+
+	if (pipeline_zwr) {
+		if (zwplug->from_cpu >= 0)
+			from_cpu = zwplug->from_cpu;
+		else
+			from_cpu = smp_processor_id();
+		if (from_cpu != rq_cpu) {
+			zwplug->from_cpu = from_cpu;
+			goto add_to_bio_list;
+		}
+	}
+
 	if (!blk_zone_wplug_prepare_bio(zwplug, bio)) {
 		spin_unlock_irqrestore(&zwplug->lock, flags);
 		bio_io_error(bio);
 		return true;
 	}
 
-	/* Otherwise, plug and submit the BIO. */
-	zwplug->flags |= BLK_ZONE_WPLUG_PLUGGED;
+	if (pipeline_zwr) {
+		/*
+		 * The block driver preserves the write order. Submit future
+		 * writes from the same CPU core as ongoing writes.
+		 */
+		zwplug->from_cpu = from_cpu;
+	} else {
+		/*
+		 * The block driver does not preserve the write order. Plug and
+		 * let the caller submit the BIO.
+		 */
+		zwplug->flags |= BLK_ZONE_WPLUG_PLUGGED;
+	}
 
 	spin_unlock_irqrestore(&zwplug->lock, flags);
 
@@ -1205,7 +1252,7 @@ bool blk_zone_plug_bio(struct bio *bio, unsigned int nr_segs, int rq_cpu)
 		fallthrough;
 	case REQ_OP_WRITE:
 	case REQ_OP_WRITE_ZEROES:
-		return blk_zone_wplug_handle_write(bio, nr_segs);
+		return blk_zone_wplug_handle_write(bio, nr_segs, rq_cpu);
 	case REQ_OP_ZONE_RESET:
 	case REQ_OP_ZONE_FINISH:
 	case REQ_OP_ZONE_RESET_ALL:
@@ -1233,6 +1280,16 @@ static void disk_zone_wplug_unplug_bio(struct gendisk *disk,
 	}
 
 	zwplug->flags &= ~BLK_ZONE_WPLUG_PLUGGED;
+
+	/*
+	 * zwplug->from_cpu must not change while one or more writes are pending
+	 * for the zone associated with zwplug. zwplug->ref is 2 when the plug
+	 * is unused (one reference taken when the plug was allocated and
+	 * another reference taken by the caller context). Reset
+	 * zwplug->from_cpu if no more writes are pending.
+	 */
+	if (refcount_read(&zwplug->ref) == 2)
+		zwplug->from_cpu = -1;
 
 	/*
 	 * If the zone is full (it was fully written or finished, or empty
@@ -1334,6 +1391,7 @@ static void blk_zone_wplug_bio_work(struct work_struct *work)
 {
 	struct blk_zone_wplug *zwplug =
 		container_of(work, struct blk_zone_wplug, bio_work);
+	bool pipeline_zwr = blk_pipeline_zwr(zwplug->disk->queue);
 	struct block_device *bdev;
 	unsigned long flags;
 	struct bio *bio;
@@ -1379,7 +1437,7 @@ static void blk_zone_wplug_bio_work(struct work_struct *work)
 		} else {
 			blk_mq_submit_bio(bio);
 		}
-	} while (0);
+	} while (pipeline_zwr);
 
 put_zwplug:
 	/* Drop the reference we took in disk_zone_wplug_schedule_bio_work(). */
@@ -1916,6 +1974,7 @@ static void queue_zone_wplug_show(struct blk_zone_wplug *zwplug,
 	unsigned int zwp_zone_no, zwp_ref;
 	unsigned int zwp_bio_list_size;
 	unsigned long flags;
+	int from_cpu;
 
 	spin_lock_irqsave(&zwplug->lock, flags);
 	zwp_zone_no = zwplug->zone_no;
@@ -1923,12 +1982,13 @@ static void queue_zone_wplug_show(struct blk_zone_wplug *zwplug,
 	zwp_ref = refcount_read(&zwplug->ref);
 	zwp_wp_offset = zwplug->wp_offset;
 	zwp_bio_list_size = bio_list_size(&zwplug->bio_list);
+	from_cpu = zwplug->from_cpu;
 	spin_unlock_irqrestore(&zwplug->lock, flags);
 
 	seq_printf(m,
-		"Zone no: %u, flags: 0x%x, ref: %u, wp ofst: %u, pending BIO: %u\n",
+		"Zone no: %u, flags: 0x%x, ref: %u, wp ofst: %u, pending BIO: %u, from_cpu: %d\n",
 		zwp_zone_no, zwp_flags, zwp_ref,
-		zwp_wp_offset, zwp_bio_list_size);
+		zwp_wp_offset, zwp_bio_list_size, from_cpu);
 }
 
 int queue_zone_wplugs_show(void *data, struct seq_file *m)
