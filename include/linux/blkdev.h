@@ -922,7 +922,7 @@ static inline bool bio_needs_zone_write_plugging(struct bio *bio)
 	}
 }
 
-bool blk_zone_plug_bio(struct bio *bio, unsigned int nr_segs);
+bool blk_zone_plug_bio(struct bio *bio, unsigned int nr_segs, int rq_cpu);
 
 /**
  * disk_zone_capacity - returns the zone capacity of zone containing @sector
@@ -962,7 +962,8 @@ static inline bool bio_needs_zone_write_plugging(struct bio *bio)
 	return false;
 }
 
-static inline bool blk_zone_plug_bio(struct bio *bio, unsigned int nr_segs)
+static inline bool blk_zone_plug_bio(struct bio *bio, unsigned int nr_segs,
+				     int rq_cpu)
 {
 	return false;
 }
