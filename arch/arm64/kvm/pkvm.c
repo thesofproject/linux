@@ -4,6 +4,8 @@
  * Author: Quentin Perret <qperret@google.com>
  */
 
+#include <linux/arm_ffa.h>
+#include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/initrd.h>
 #include <linux/io.h>
@@ -31,6 +33,15 @@
 
 #include "hyp_constants.h"
 #include "hyp_trace.h"
+
+/*
+ * Retry the VM creation message for the host for a maximul total
+ * amount of times, with sleeps in between. For the first few attempts,
+ * do a faster reschedule instead of a full sleep.
+ */
+#define VM_AVAILABILITY_FAST_RETRIES	5
+#define VM_AVAILABILITY_TOTAL_RETRIES	500
+#define VM_AVAILABILITY_RETRY_SLEEP_MS	10
 
 DEFINE_STATIC_KEY_FALSE(kvm_protected_mode_initialized);
 
@@ -285,6 +296,52 @@ err_free_reqs:
 	return ret;
 }
 
+/* __pkvm_notify_guest_vm_avail_retry - notify secure of the VM state change
+ * @kvm: the kvm structure
+ * @availability_msg: the VM state that will be notified
+ *
+ * Returns: 0 when the notification is sent with success, -EINTR or -EAGAIN if
+ * the destruction notification is interrupted and retries exceeded and
+ * a positive value indicating the remaining jiffies when the creation
+ * notification is sent but interrupted.
+ */
+static int __pkvm_notify_guest_vm_avail_retry(struct kvm *kvm, u32 availability_msg)
+{
+	int ret, retries;
+	long timeout;
+
+	if (!kvm->arch.pkvm.ffa_support)
+		return 0;
+
+	for (retries = 0; retries < VM_AVAILABILITY_TOTAL_RETRIES; retries++) {
+		ret = kvm_call_hyp_nvhe(__pkvm_notify_guest_vm_avail,
+					kvm->arch.pkvm.handle);
+		if (!ret)
+			return 0;
+		else if (ret != -EINTR && ret != -EAGAIN)
+			return ret;
+
+		if (retries < VM_AVAILABILITY_FAST_RETRIES) {
+			cond_resched();
+		} else if (availability_msg == FFA_VM_DESTRUCTION_MSG) {
+			msleep(VM_AVAILABILITY_RETRY_SLEEP_MS);
+		} else {
+			timeout = msecs_to_jiffies(VM_AVAILABILITY_RETRY_SLEEP_MS);
+			timeout = schedule_timeout_killable(timeout);
+			if (timeout) {
+				/*
+				 * The timer did not expire,
+				 * most likely because the
+				 * process was killed.
+				 */
+				return ret;
+			}
+		}
+	}
+
+	return ret;
+}
+
 /*
  * Allocates and donates memory for hypervisor VM structs at EL2.
  *
@@ -325,8 +382,11 @@ static int __pkvm_create_hyp_vm(struct kvm *kvm)
 	kvm->arch.pkvm.is_created = true;
 	kvm->arch.pkvm.stage2_teardown_mc.flags |= HYP_MEMCACHE_ACCOUNT_STAGE2;
 	kvm_account_pgtable_pages(pgd, pgd_sz / PAGE_SIZE);
+	ret = __pkvm_notify_guest_vm_avail_retry(kvm, FFA_VM_CREATION_MSG);
+	if (ret)
+		goto free_pgd;
 
-	return 0;
+	return ret;
 free_pgd:
 	free_pages_exact(pgd, pgd_sz);
 	atomic64_sub(pgd_sz, &kvm->stat.protected_hyp_mem);
@@ -732,7 +792,7 @@ static int __pkvm_pgtable_stage2_unmap(struct kvm_pgtable *pgt, u64 start, u64 e
 	struct kvm_pinned_page *ppage;
 	struct pkvm_mapping *mapping;
 	u64 pages, nr_busy;
-	int ret;
+	int ret, notify_status;
 
 	if (!handle)
 		return 0;
@@ -775,11 +835,15 @@ retry:
 		ppage = next;
 	}
 
+	notify_status = __pkvm_notify_guest_vm_avail_retry(kvm, FFA_VM_DESTRUCTION_MSG);
 	if (nr_busy) {
 		do {
 			ret = kvm_call_hyp_nvhe(__pkvm_reclaim_dying_guest_ffa_resources,
 						kvm->arch.pkvm.handle);
 			WARN_ON(ret && ret != -EAGAIN);
+			if (notify_status == -EINTR || notify_status == -EAGAIN)
+				notify_status = __pkvm_notify_guest_vm_avail_retry(
+						kvm, FFA_VM_DESTRUCTION_MSG);
 			cond_resched();
 		} while (ret == -EAGAIN);
 		goto retry;
