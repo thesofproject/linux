@@ -80,14 +80,22 @@ do {							\
 
 #ifdef CONFIG_PROTECTED_NVHE_FTRACE
 void hyp_ftrace_setup_core(void);
+void *hyp_ftrace_sync(unsigned long *func_pg, unsigned long *funcs,
+		      unsigned long *funcs_end, unsigned long offset_idx,
+		      void *tramp);
 int hyp_ftrace_setup(unsigned long *funcs, unsigned long *funcs_end,
 		     unsigned long hyp_kern_offset, void *tramp);
 void hyp_ftrace_ret_flush(void);
+void hyp_ftrace_disable(unsigned long *funcs, unsigned long *funcs_end);
+int __pkvm_sync_ftrace(unsigned long host_func_pg);
+int __pkvm_disable_ftrace(void);
 #else
 static inline void hyp_ftrace_setup_core(void) { }
 static inline void hyp_ftrace_ret_flush(void) { }
 static inline int hyp_ftrace_setup(unsigned long *funcs, unsigned long *funcs_end,
 				   unsigned long hyp_kern_offset, void *tramp) { return 0; }
+static inline int __pkvm_sync_ftrace(unsigned long host_func_pg) { return -EOPNOTSUPP; }
+static inline int __pkvm_disable_ftrace(void) { return -EOPNOTSUPP; }
 #endif /* CONFIG_PROTECTED_NVHE_FTRACE */
 #else /* CONFIG_TRACING */
 static inline void *tracing_reserve_entry(unsigned long length) { return NULL; }
@@ -112,5 +120,7 @@ static inline int __pkvm_enable_event(unsigned short id, bool enable)  { return 
 
 static inline void hyp_ftrace_setup_core(void) { }
 static inline void hyp_ftrace_ret_flush(void) { }
+static inline int __pkvm_sync_ftrace(unsigned long host_func_pg) { return -EOPNOTSUPP; }
+static inline int __pkvm_disable_ftrace(void) { return -EOPNOTSUPP; }
 #endif
 #endif
