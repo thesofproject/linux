@@ -253,6 +253,7 @@ asmlinkage void __noreturn __kvm_host_psci_cpu_entry(bool is_cpu_on)
 
 	pkvm_psci_notify(PKVM_PSCI_CPU_ENTRY, host_ctxt);
 	__hyp_exit();
+	hyp_ftrace_ret_flush();
 	__host_enter(host_ctxt);
 }
 
