@@ -26,7 +26,15 @@ properties:
     maxItems: 1
 
   '#iommu-cells':
-    const: 1
+    enum: [ 1, 2 ]
+    description: |
+      See Documentation/devicetree/bindings/iommu/iommu.txt for details. With a
+      value of 1, each IOMMU specifier represents a distinct stream ID emitted
+      by that device into the relevant SMMU.
+
+      pvIOMMU would assume each device belongs to a different group, to describe
+      iommu groups, it is optionally passed in the second field of "iommus", where
+      devices having the same ID are part of the same group.
 
 required:
   - compatible
