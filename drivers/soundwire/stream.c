@@ -627,6 +627,16 @@ static int sdw_notify_config(struct sdw_master_runtime *m_rt)
 	return 0;
 }
 
+bool is_clock_scaling_supported_by_slave(struct sdw_slave *slave)
+{
+	/*
+	 * Dynamic scaling is a defined by SDCA. However, some devices expose the class ID but
+	 * can't support dynamic scaling. We might need a quirk to handle such devices.
+	 */
+	return slave->id.class_id;
+}
+EXPORT_SYMBOL(is_clock_scaling_supported_by_slave);
+
 /**
  * sdw_program_params() - Program transport and port parameters for Master(s)
  * and Slave(s)
@@ -637,7 +647,36 @@ static int sdw_notify_config(struct sdw_master_runtime *m_rt)
 static int sdw_program_params(struct sdw_bus *bus, bool prepare)
 {
 	struct sdw_master_runtime *m_rt;
+	struct sdw_slave *slave;
 	int ret = 0;
+
+	list_for_each_entry(slave, &bus->slaves, node) {
+		u32 scale_index;
+		u32 addr1;
+		u8 base;
+
+		scale_index = sdw_slave_get_scale_index(slave, &base);
+		if (scale_index < 0)
+			return scale_index;
+
+		if (!is_clock_scaling_supported_by_slave(slave)){
+			dev_dbg(&slave->dev, "%s: The Peripheral doesn't comply with SDCA\n",
+				__func__);
+			break;
+		}
+
+		if (bus->params.next_bank) {
+			addr1 = SDW_SCP_BUSCLOCK_SCALE_B1;
+		} else {
+			addr1 = SDW_SCP_BUSCLOCK_SCALE_B0;
+		}
+		/* Program SDW_SCP_BUSCLOCK_SCALE */
+		ret = sdw_write_no_pm(slave, addr1, scale_index);
+		if (ret < 0) {
+			dev_err(bus->dev, "SDW_SCP_BUSCLOCK_SCALE register write failed\n");
+			return ret;
+		}
+	}
 
 	list_for_each_entry(m_rt, &bus->m_rt_list, bus_node) {
 
@@ -1656,7 +1695,15 @@ static int _sdw_deprepare_stream(struct sdw_stream_runtime *stream)
 	unsigned int multi_lane_bandwidth;
 	unsigned int bandwidth;
 	struct sdw_bus *bus;
+	int state = stream->state;
 	int ret = 0;
+
+	/*
+	 * first mark the state as DEPREPARED so that it is not taken into account
+	 * for bit allocation
+	 */
+	state = stream->state;
+	stream->state = SDW_STREAM_DEPREPARED;
 
 	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
 		bus = m_rt->bus;
@@ -1665,6 +1712,7 @@ static int _sdw_deprepare_stream(struct sdw_stream_runtime *stream)
 		if (ret < 0) {
 			dev_err(bus->dev,
 				"De-prepare port(s) failed: %d\n", ret);
+			stream->state = state;
 			return ret;
 		}
 
@@ -1678,18 +1726,20 @@ static int _sdw_deprepare_stream(struct sdw_stream_runtime *stream)
 				m_rt->stream->params.bps;
 			multi_lane_bandwidth += bandwidth;
 			bus->lane_used_bandwidth[p_rt->lane] -= bandwidth;
+			if (!bus->lane_used_bandwidth[p_rt->lane] )
+				p_rt->lane = 0;
 		}
 		/* TODO: Update this during Device-Device support */
 		bandwidth = m_rt->stream->params.rate * m_rt->ch_count * m_rt->stream->params.bps;
 		bus->params.bandwidth -= bandwidth - multi_lane_bandwidth;
 
 		/* Compute params */
-		/* No need to compute params if bus->params.bandwidth is unchanged */
-		if (multi_lane_bandwidth != bandwidth && bus->compute_params) {
+		if (bus->compute_params) {
 			ret = bus->compute_params(bus);
 			if (ret < 0) {
 				dev_err(bus->dev, "Compute params failed: %d\n",
 					ret);
+				stream->state = state;
 				return ret;
 			}
 		}
@@ -1698,11 +1748,11 @@ static int _sdw_deprepare_stream(struct sdw_stream_runtime *stream)
 		ret = sdw_program_params(bus, false);
 		if (ret < 0) {
 			dev_err(bus->dev, "%s: Program params failed: %d\n", __func__, ret);
+			stream->state = state;
 			return ret;
 		}
 	}
 
-	stream->state = SDW_STREAM_DEPREPARED;
 	return do_bank_switch(stream);
 }
 
