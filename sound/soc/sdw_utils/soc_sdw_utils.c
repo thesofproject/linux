@@ -1156,7 +1156,7 @@ int asoc_sdw_parse_sdw_endpoints(struct snd_soc_card *card,
 				soc_dai = asoc_sdw_find_dailink(soc_dais, adr_end);
 
 				if (dai_info->quirk &&
-				    !(dai_info->quirk_exclude ^ (dai_info->quirk & ctx->mc_quirk)))
+				    !(dai_info->quirk_exclude ^ !!(dai_info->quirk & ctx->mc_quirk)))
 					continue;
 
 				dev_dbg(dev,
