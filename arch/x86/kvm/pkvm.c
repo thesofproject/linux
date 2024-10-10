@@ -13,6 +13,10 @@ static unsigned int pkvm_memblock_nr;
 phys_addr_t pkvm_mem_base;
 phys_addr_t pkvm_mem_size;
 
+bool pvmfw_present;
+phys_addr_t pvmfw_base;
+phys_addr_t pvmfw_size;
+
 static int cmp_pkvm_memblock(const void *p1, const void *p2)
 {
 	const struct memblock_region *r1 = p1;

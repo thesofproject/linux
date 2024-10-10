@@ -18,6 +18,10 @@
  */
 struct pkvm_init_ops *init_ops;
 
+bool pvmfw_present;
+phys_addr_t pvmfw_base;
+phys_addr_t pvmfw_size;
+
 static void *hyp_pgt_base;
 static void *host_pgt_base;
 static void *pkvm_vmemmap_base;
