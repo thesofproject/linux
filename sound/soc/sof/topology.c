@@ -567,7 +567,7 @@ static int sof_copy_tuples(struct snd_sof_dev *sdev, struct snd_soc_tplg_vendor_
 						continue;
 
 					tuples[*num_copied_tuples].token = tokens[j].token;
-					tuples[*num_copied_tuples].value.s = elem->string;
+					tuples[*num_copied_tuples].value.s = devm_kasprintf(sdev->dev, GFP_KERNEL, "%s", elem->string);
 				} else {
 					struct snd_soc_tplg_vendor_value_elem *elem;
 
@@ -2280,7 +2280,7 @@ static const struct snd_soc_tplg_bytes_ext_ops sof_bytes_ext_ops[] = {
 	{SOF_TPLG_KCTL_BYTES_VOLATILE_RO, snd_sof_bytes_ext_volatile_get},
 };
 
-static const struct snd_soc_tplg_ops sof_tplg_ops = {
+static struct snd_soc_tplg_ops sof_tplg_ops = {
 	/* external kcontrol init - used for any driver specific init */
 	.control_load	= sof_control_load,
 	.control_unload	= sof_control_unload,
@@ -2303,7 +2303,7 @@ static const struct snd_soc_tplg_ops sof_tplg_ops = {
 	.link_unload	= sof_link_unload,
 
 	/* completion - called at completion of firmware loading */
-	.complete	= sof_complete,
+	/* complete will be added in the last tplg ops */
 
 	/* manifest - optional to inform component of manifest */
 	.manifest	= sof_manifest,
@@ -2456,14 +2456,116 @@ static const struct snd_soc_tplg_ops sof_dspless_tplg_ops = {
 	.bytes_ext_ops_count = ARRAY_SIZE(sof_dspless_bytes_ext_ops),
 };
 
+#define MAX_TPLG_NUM 5
+
+enum tplg_device_id {
+	TPLG_DEVICE_SDW_JACK,
+	TPLG_DEVICE_SDW_AMP,
+	TPLG_DEVICE_SDW_MIC,
+	TPLG_DEVICE_HOST_DMIC,
+	TPLG_DEVICE_HDMI,
+};
+
+struct topology_file {
+	char *device;
+	char *file;
+	int be_id;
+};
+
 int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_pdata *sof_pdata = sdev->pdata;
+	struct topology_file tplg_files[MAX_TPLG_NUM];
+	struct snd_soc_dai_link *dai_link;
+	char platform[4];
+	bool load_default_tplg = false;
+	unsigned long tplg_mask = 0;
 	const struct firmware *fw;
+	int tplg_num = 0;
 	int ret;
+	int i;
 
 	dev_dbg(scomp->dev, "loading topology:%s\n", file);
 
+	sscanf(sof_pdata->tplg_filename, "sof-%3s-*.tplg", platform);
+
+	if (sdev->pdata->ipc_type == SOF_IPC_TYPE_3)
+		goto legacy_tplg;
+
+	for_each_card_prelinks(scomp->card, i, dai_link) {
+		dev_dbg(scomp->dev, "dai_link %s id %d\n", dai_link->name, dai_link->id);
+		if (strstr(dai_link->name, "SimpleJack")) {
+			if (tplg_mask & BIT(TPLG_DEVICE_SDW_JACK))
+				continue;
+			tplg_mask |= BIT(TPLG_DEVICE_SDW_JACK);
+			tplg_files[tplg_num].device = "sdca-jack";
+		} else if (strstr(dai_link->name, "SmartAmp")) {
+			if (tplg_mask & BIT(TPLG_DEVICE_SDW_AMP))
+				continue;
+			tplg_mask |= BIT(TPLG_DEVICE_SDW_AMP);
+			tplg_files[tplg_num].device = "sdca-amp";
+		} else if (strstr(dai_link->name, "SmartMic")) {
+			if (tplg_mask & BIT(TPLG_DEVICE_SDW_MIC))
+				continue;
+			tplg_mask |= BIT(TPLG_DEVICE_SDW_MIC);
+			tplg_files[tplg_num].device = "sdca-mic";
+		} else if (strstr(dai_link->name, "DMIC")) {
+			if (tplg_mask & BIT(TPLG_DEVICE_HOST_DMIC))
+				continue;
+			tplg_mask |= BIT(TPLG_DEVICE_HOST_DMIC);
+			tplg_files[tplg_num].device = "host-dmic";
+		} else if (strstr(dai_link->name, "iDisp")) {
+			if (tplg_mask & BIT(TPLG_DEVICE_HDMI))
+				continue;
+			tplg_mask |= BIT(TPLG_DEVICE_HDMI);
+			tplg_files[tplg_num].device = "hdmi";
+		} else {
+			/* The dai link is not supported by sperated tplg yet */
+			load_default_tplg = true;
+			continue;
+		}
+		tplg_files[tplg_num].be_id = dai_link->id;
+		tplg_num++;
+	}
+	dev_dbg(scomp->dev, "tplg_mask %#lx tplg_num %d\n", tplg_mask, tplg_num);
+
+	for (i = 0; i < tplg_num; i++) {
+		tplg_files[i].file = devm_kasprintf(sdev->dev, GFP_KERNEL,
+						    "%s/sof-%s-%s-id%d.tplg",
+						    sof_pdata->tplg_filename_prefix, platform,
+						    tplg_files[i].device,
+						    tplg_files[i].be_id);
+		ret = request_firmware(&fw, tplg_files[i].file, scomp->dev);
+		dev_dbg(scomp->dev, "Requesting %d %s\n", i, tplg_files[i].file);
+		if (ret < 0) {
+			dev_warn(scomp->dev, "error: tplg request firmware %s failed err: %d\n",
+				tplg_files[i].file, ret);
+			dev_warn(scomp->dev,"Fail back to the default topology\n");
+			goto legacy_tplg;
+		}
+		/* set complete = sof_complete if it is the last topology */
+		if (!load_default_tplg && i == tplg_num - 1)
+			sof_tplg_ops.complete = sof_complete;
+		if (sdev->dspless_mode_selected)
+			ret = snd_soc_tplg_component_load(scomp, &sof_dspless_tplg_ops, fw);
+		else
+			ret = snd_soc_tplg_component_load(scomp, &sof_tplg_ops, fw);
+
+		if (ret < 0) {
+			dev_err(scomp->dev, "error: tplg component load failed %d\n",
+				ret);
+			release_firmware(fw);
+			return -EINVAL;
+		}
+
+		release_firmware(fw);
+	}
+	/* Load topology successfully, goto out */
+	if (!load_default_tplg)
+		goto out;
+
+legacy_tplg:
 	ret = request_firmware(&fw, file, scomp->dev);
 	if (ret < 0) {
 		dev_err(scomp->dev, "error: tplg request firmware %s failed err: %d\n",
@@ -2473,6 +2575,7 @@ int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 		return ret;
 	}
 
+	sof_tplg_ops.complete = sof_complete;
 	if (sdev->dspless_mode_selected)
 		ret = snd_soc_tplg_component_load(scomp, &sof_dspless_tplg_ops, fw);
 	else
@@ -2486,6 +2589,7 @@ int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 
 	release_firmware(fw);
 
+out:
 	if (ret >= 0 && sdev->led_present)
 		ret = snd_ctl_led_request();
 
