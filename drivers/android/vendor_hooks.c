@@ -436,3 +436,4 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_try_to_unmap_one);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_swap_writepage);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_rmqueue_pcplist_override_batch);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_tune_inactive_ratio);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_shrink_node);
