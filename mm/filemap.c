@@ -977,6 +977,9 @@ int filemap_add_folio(struct address_space *mapping, struct folio *folio,
 
 	if (kernel_file)
 		tmp = set_active_memcg(root_mem_cgroup);
+
+	trace_android_vh_filemap_add_folio(mapping, folio, index);
+
 	ret = mem_cgroup_charge(folio, NULL, gfp);
 	if (kernel_file)
 		set_active_memcg(tmp);
