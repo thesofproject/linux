@@ -728,6 +728,8 @@ void snd_sof_complete(struct device *dev);
 
 void snd_sof_new_platform_drv(struct snd_sof_dev *sdev);
 
+int sof_pcm_stop_paused_on_suspend(struct snd_sof_dev *sdev);
+
 /*
  * Compress support
  */
