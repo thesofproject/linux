@@ -108,7 +108,7 @@ EXPORT_SYMBOL_GPL(rt_sdca_index_update_bits);
 int rt_sdca_btn_type(unsigned char *buffer)
 {
 	u8 btn_type = 0;
-	int ret;
+	int ret = 0;
 
 	btn_type |= buffer[0] & 0xf;
 	btn_type |= (buffer[0] >> 4) & 0xf;
@@ -150,14 +150,14 @@ int rt_sdca_headset_detect(struct regmap *map, unsigned int entity_id)
 		goto io_error;
 
 	switch (det_mode) {
-	case 0x00:
-		jack_type = 0;
-		break;
 	case 0x03:
 		jack_type = SND_JACK_HEADPHONE;
 		break;
 	case 0x05:
 		jack_type = SND_JACK_HEADSET;
+		break;
+	default:
+		jack_type = 0;
 		break;
 	}
 

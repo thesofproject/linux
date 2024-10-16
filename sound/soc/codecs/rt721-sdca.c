@@ -30,7 +30,7 @@ static void rt721_sdca_jack_detect_handler(struct work_struct *work)
 {
 	struct rt721_sdca_priv *rt721 =
 		container_of(work, struct rt721_sdca_priv, jack_detect_work.work);
-	int btn_type = 0, ret;
+	int btn_type = 0;
 
 	if (!rt721->hs_jack)
 		return;
@@ -42,7 +42,7 @@ static void rt721_sdca_jack_detect_handler(struct work_struct *work)
 	if (rt721->scp_sdca_stat1 & SDW_SCP_SDCA_INT_SDCA_6) {
 		rt721->jack_type = rt_sdca_headset_detect(rt721->regmap,
 							RT721_SDCA_ENT_GE49);
-		if (ret < 0)
+		if (rt721->jack_type < 0)
 			return;
 	}
 
@@ -611,12 +611,8 @@ static int rt721_sdca_dmic_set_gain_get(struct snd_kcontrol *kcontrol,
 
 		if (!adc_vol_flag) /* boost gain */
 			ctl = regvalue / boost_step;
-		else { /* ADC gain */
-			if (adc_vol_flag)
-				ctl = p->max - (((vol_max - regvalue) & 0xffff) / interval_offset);
-			else
-				ctl = p->max - (((0 - regvalue) & 0xffff) / interval_offset);
-		}
+		else /* ADC gain */
+			ctl = p->max - (((vol_max - regvalue) & 0xffff) / interval_offset);
 
 		ucontrol->value.integer.value[i] = ctl;
 	}
