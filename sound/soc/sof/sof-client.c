@@ -5,6 +5,7 @@
 // Authors: Ranjani Sridharan <ranjani.sridharan@linux.intel.com>
 //	    Peter Ujfalusi <peter.ujfalusi@linux.intel.com>
 //
+// Test only
 
 #include <linux/debugfs.h>
 #include <linux/errno.h>
