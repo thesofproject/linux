@@ -11,6 +11,7 @@
 #include <kvm/arm_psci.h>
 
 #include <asm/kvm_emulate.h>
+#include <hyp/adjust_pc.h>
 
 #include <hyp/adjust_pc.h>
 
@@ -1442,8 +1443,7 @@ static bool pkvm_handle_psci(struct pkvm_hyp_vcpu *hyp_vcpu)
 	return pvm_psci_not_supported(hyp_vcpu);
 }
 
-static int pkvm_handle_empty_memcache(struct pkvm_hyp_vcpu *hyp_vcpu,
-				      u64 *exit_code)
+int pkvm_handle_empty_memcache(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 {
 	struct kvm_hyp_req *req;
 
