@@ -117,4 +117,6 @@ void sof_ipc4_update_cpc_from_manifest(struct snd_sof_dev *sdev,
 size_t sof_ipc4_find_debug_slot_offset_by_type(struct snd_sof_dev *sdev,
 					       u32 slot_type);
 
+void sof_ipc4_create_debug_slot_debugfs_node(struct snd_sof_dev *sdev, u32 slot_type,
+					     size_t data_offset, const char *name);
 #endif
