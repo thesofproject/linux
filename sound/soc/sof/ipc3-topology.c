@@ -1594,6 +1594,17 @@ static int sof_ipc3_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 	if (ret < 0)
 		goto free;
 
+	/* DAI 2 is used as the first DAI for SDW in topology, normalize it to 0 */
+	if (comp_dai->type == SOF_DAI_INTEL_ALH) {
+		comp_dai->dai_index -= 2;
+		if (comp_dai->dai_index < 0) {
+			dev_err(sdev->dev,
+				"Invalid ALH dai index %d, Please use SDW Pin 2 and above\n",
+				comp_dai->dai_index);
+			return -EINVAL;
+		}
+	}
+
 	dev_dbg(scomp->dev, "dai %s: type %d index %d\n",
 		swidget->widget->name, comp_dai->type, comp_dai->dai_index);
 	sof_dbg_comp_config(scomp, &comp_dai->config);
@@ -2167,8 +2178,19 @@ static int sof_ipc3_dai_config(struct snd_sof_dev *sdev, struct snd_sof_widget *
 	case SOF_DAI_INTEL_ALH:
 		if (data) {
 			/* save the dai_index during hw_params and reuse it for hw_free */
-			if (flags & SOF_DAI_CONFIG_FLAGS_HW_PARAMS)
-				config->dai_index = data->dai_index;
+			if (flags & SOF_DAI_CONFIG_FLAGS_HW_PARAMS) {
+				/*
+				 * DAI 2 is used as the first DAI for SDW in topology, normalize
+				 * it to 0
+				 */
+				config->dai_index = data->dai_index - 2;
+				if (config->dai_index < 0) {
+					dev_err(sdev->dev,
+						"Invalid ALH dai index %d, Please use SDW Pin 2 and above\n",
+						config->dai_index);
+					return -EINVAL;
+				}
+			}
 			config->alh.stream_id = data->dai_data;
 		}
 		break;
