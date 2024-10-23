@@ -210,6 +210,17 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 	if (runtime_suspend && !sof_ops(sdev)->runtime_suspend)
 		return 0;
 
+	/*
+	 * On system suspend we need special handling of paused streams
+	 * For more details, see the comment section in
+	 * sof_pcm_stop_paused_on_suspend)(
+	 */
+	if (!runtime_suspend) {
+		ret = sof_pcm_stop_paused_on_suspend(sdev);
+		if (ret < 0)
+			return ret;
+	}
+
 	/* we need to tear down pipelines only if the DSP hardware is
 	 * active, which happens for PCI devices. if the device is
 	 * suspended, it is brought back to full power and then

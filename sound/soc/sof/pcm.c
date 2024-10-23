@@ -689,6 +689,83 @@ static snd_pcm_sframes_t sof_pcm_delay(struct snd_soc_component *component,
 	return 0;
 }
 
+static int sof_pcm_trigger_suspended_paused_streams(struct snd_sof_dev *sdev,
+						    int cmd)
+{
+	struct snd_pcm_substream *substream;
+	struct snd_pcm_runtime *runtime;
+	struct snd_sof_pcm *spcm;
+	int dir, ret;
+
+	list_for_each_entry(spcm, &sdev->pcm_list, list) {
+		for_each_pcm_streams(dir) {
+			substream = spcm->stream[dir].substream;
+			if (!substream || !substream->runtime)
+				continue;
+
+			/*
+			 * The stream supports RESUME, it is expected that it
+			 * is handling the corner case of suspending while
+			 * a stream is paused
+			 */
+			runtime = substream->runtime;
+			if (runtime->info & SNDRV_PCM_INFO_RESUME)
+				continue;
+
+			/* Only send the trigger to a paused and suspended stream */
+			if (runtime->state != SNDRV_PCM_STATE_SUSPENDED ||
+			    runtime->suspended_state != SNDRV_PCM_STATE_PAUSED)
+				continue;
+
+			ret = substream->ops->trigger(substream, cmd);
+			if (ret) {
+				dev_err(sdev->dev,
+					"%s: trigger %d failed for stream %d, dir: %d\n",
+					__func__, cmd, spcm->pcm.pcm_id, dir);
+				return ret;
+			}
+		}
+	}
+
+	return 0;
+}
+
+int sof_pcm_stop_paused_on_suspend(struct snd_sof_dev *sdev)
+{
+	int ret;
+
+	/*
+	 * Handle the corner case of system suspend while at least one stream is
+	 * paused.
+	 * Paused streams will not receive the SUSPEND triggers, they are
+	 * 'silently' moved to SUSPENDED state.
+	 *
+	 * The workaround for the corner case is applicable for streams not
+	 * supporting RESUME.
+	 *
+	 * First we need to move (trigger) the paused streams to RUNNING state,
+	 * then we need to stop them
+	 *
+	 * Explanation: Streams moved to SUSPENDED state from PAUSED without
+	 * trigger. If a stream does not support RESUME then on system resume
+	 * the RESUME trigger is not sent, the stream's state and suspended_state
+	 * remains untouched. When the user space releases the pause then the
+	 * core will reject this because the state of the stream is _not_ PAUSED,
+	 * it is still SUSPENDED.
+	 * From this point user space will do the normal (hw_params) prepare and
+	 * START, PAUSE_RELEASE trigger will not be sent by the core after the
+	 * system has resumed.
+	 */
+	ret = sof_pcm_trigger_suspended_paused_streams(sdev,
+						       SNDRV_PCM_TRIGGER_PAUSE_RELEASE);
+	if (ret)
+		return ret;
+
+	return sof_pcm_trigger_suspended_paused_streams(sdev,
+							SNDRV_PCM_TRIGGER_STOP);
+}
+EXPORT_SYMBOL(sof_pcm_stop_paused_on_suspend);
+
 void snd_sof_new_platform_drv(struct snd_sof_dev *sdev)
 {
 	struct snd_soc_component_driver *pd = &sdev->plat_drv;
