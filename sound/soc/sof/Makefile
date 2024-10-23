@@ -11,7 +11,7 @@ snd-sof-y +=	ipc3.o ipc3-loader.o ipc3-topology.o ipc3-control.o ipc3-pcm.o\
 endif
 ifneq ($(CONFIG_SND_SOC_SOF_IPC4),)
 snd-sof-y += ipc4.o ipc4-loader.o ipc4-topology.o ipc4-control.o ipc4-pcm.o\
-		ipc4-mtrace.o ipc4-telemetry.o
+		ipc4-mtrace.o ipc4-debug-slot-debugfs.o
 endif
 
 # SOF client support
