@@ -36,19 +36,23 @@ int sof_ipc_msg_data(struct snd_sof_dev *sdev,
 		size_t posn_offset;
 
 		if (sps->substream) {
-			struct sof_stream *stream = sps->substream->runtime->private_data;
+			struct snd_pcm_runtime *runtime = sps->substream->runtime;
 
 			/* The stream might already be closed */
-			if (!stream)
+			if (!runtime || !runtime->private_data)
 				return -ESTRPIPE;
+
+			struct sof_stream *stream = runtime->private_data;
 
 			posn_offset = stream->posn_offset;
 		} else {
 
-			struct sof_compr_stream *sstream = sps->cstream->runtime->private_data;
+			struct snd_compr_runtime *runtime = sps->cstream->runtime;
 
-			if (!sstream)
+			if (!runtime || !runtime->private_data)
 				return -ESTRPIPE;
+
+			struct sof_compr_stream *sstream = runtime->private_data;
 
 			posn_offset = sstream->posn_offset;
 		}
