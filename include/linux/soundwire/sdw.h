@@ -1040,6 +1040,7 @@ int sdw_bus_exit_clk_stop(struct sdw_bus *bus);
 
 int sdw_compare_devid(struct sdw_slave *slave, struct sdw_slave_id id);
 void sdw_extract_slave_id(struct sdw_bus *bus, u64 addr, struct sdw_slave_id *id);
+bool is_clock_scaling_supported_by_slave(struct sdw_slave *slave);
 
 #if IS_ENABLED(CONFIG_SOUNDWIRE)
 
@@ -1050,6 +1051,8 @@ int sdw_stream_add_slave(struct sdw_slave *slave,
 			 struct sdw_stream_runtime *stream);
 int sdw_stream_remove_slave(struct sdw_slave *slave,
 			    struct sdw_stream_runtime *stream);
+
+int sdw_slave_get_scale_index(struct sdw_slave *slave, u8 *base);
 
 /* messaging and data APIs */
 int sdw_read(struct sdw_slave *slave, u32 addr);
