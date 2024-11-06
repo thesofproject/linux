@@ -227,64 +227,36 @@ enum sdw_clk_stop_mode {
 
 /**
  * struct sdw_dp0_prop - DP0 properties
+ * @words: wordlengths supported
  * @max_word: Maximum number of bits in a Payload Channel Sample, 1 to 64
  * (inclusive)
  * @min_word: Minimum number of bits in a Payload Channel Sample, 1 to 64
  * (inclusive)
  * @num_words: number of wordlengths supported
- * @words: wordlengths supported
+ * @ch_prep_timeout: Port-specific timeout value, in milliseconds
  * @BRA_flow_controlled: Slave implementation results in an OK_NotReady
  * response
  * @simple_ch_prep_sm: If channel prepare sequence is required
- * @ch_prep_timeout: Port-specific timeout value, in milliseconds
  * @imp_def_interrupts: If set, each bit corresponds to support for
  * implementation-defined interrupts
+ * @num_lanes: array size of @lane_list
+ * @lane_list: indicates which Lanes can be used by DP0
  *
  * The wordlengths are specified by Spec as max, min AND number of
  * discrete values, implementation can define based on the wordlengths they
  * support
  */
 struct sdw_dp0_prop {
+	u32 *words;
 	u32 max_word;
 	u32 min_word;
 	u32 num_words;
-	u32 *words;
+	u32 ch_prep_timeout;
 	bool BRA_flow_controlled;
 	bool simple_ch_prep_sm;
-	u32 ch_prep_timeout;
 	bool imp_def_interrupts;
-};
-
-/**
- * struct sdw_dpn_audio_mode - Audio mode properties for DPn
- * @bus_min_freq: Minimum bus frequency, in Hz
- * @bus_max_freq: Maximum bus frequency, in Hz
- * @bus_num_freq: Number of discrete frequencies supported
- * @bus_freq: Discrete bus frequencies, in Hz
- * @min_freq: Minimum sampling frequency, in Hz
- * @max_freq: Maximum sampling bus frequency, in Hz
- * @num_freq: Number of discrete sampling frequency supported
- * @freq: Discrete sampling frequencies, in Hz
- * @prep_ch_behave: Specifies the dependencies between Channel Prepare
- * sequence and bus clock configuration
- * If 0, Channel Prepare can happen at any Bus clock rate
- * If 1, Channel Prepare sequence shall happen only after Bus clock is
- * changed to a frequency supported by this mode or compatible modes
- * described by the next field
- * @glitchless: Bitmap describing possible glitchless transitions from this
- * Audio Mode to other Audio Modes
- */
-struct sdw_dpn_audio_mode {
-	u32 bus_min_freq;
-	u32 bus_max_freq;
-	u32 bus_num_freq;
-	u32 *bus_freq;
-	u32 max_freq;
-	u32 min_freq;
-	u32 num_freq;
-	u32 *freq;
-	u32 prep_ch_behave;
-	u32 glitchless;
+	int num_lanes;
+	u32 *lane_list;
 };
 
 /**
@@ -299,24 +271,25 @@ struct sdw_dpn_audio_mode {
  * @type: Data port type. Full, Simplified or Reduced
  * @max_grouping: Maximum number of samples that can be grouped together for
  * a full data port
- * @simple_ch_prep_sm: If the port supports simplified channel prepare state
- * machine
  * @ch_prep_timeout: Port-specific timeout value, in milliseconds
  * @imp_def_interrupts: If set, each bit corresponds to support for
  * implementation-defined interrupts
  * @max_ch: Maximum channels supported
  * @min_ch: Minimum channels supported
  * @num_channels: Number of discrete channels supported
- * @channels: Discrete channels supported
  * @num_ch_combinations: Number of channel combinations supported
+ * @channels: Discrete channels supported
  * @ch_combinations: Channel combinations supported
+ * @lane_list: indicates which Lanes can be used by DPn
+ * @num_lanes: array size of @lane_list
  * @modes: SDW mode supported
  * @max_async_buffer: Number of samples that this port can buffer in
  * asynchronous modes
+ * @port_encoding: Payload Channel Sample encoding schemes supported
  * @block_pack_mode: Type of block port mode supported
  * @read_only_wordlength: Read Only wordlength field in DPN_BlockCtrl1 register
- * @port_encoding: Payload Channel Sample encoding schemes supported
- * @audio_modes: Audio modes supported
+ * @simple_ch_prep_sm: If the port supports simplified channel prepare state
+ * machine
  */
 struct sdw_dpn_prop {
 	u32 num;
@@ -326,25 +299,29 @@ struct sdw_dpn_prop {
 	u32 *words;
 	enum sdw_dpn_type type;
 	u32 max_grouping;
-	bool simple_ch_prep_sm;
 	u32 ch_prep_timeout;
 	u32 imp_def_interrupts;
 	u32 max_ch;
 	u32 min_ch;
 	u32 num_channels;
-	u32 *channels;
 	u32 num_ch_combinations;
+	u32 *channels;
 	u32 *ch_combinations;
+	u32 *lane_list;
+	int num_lanes;
 	u32 modes;
 	u32 max_async_buffer;
+	u32 port_encoding;
 	bool block_pack_mode;
 	bool read_only_wordlength;
-	u32 port_encoding;
-	struct sdw_dpn_audio_mode *audio_modes;
+	bool simple_ch_prep_sm;
 };
 
 /**
  * struct sdw_slave_prop - SoundWire Slave properties
+ * @dp0_prop: Data Port 0 properties
+ * @src_dpn_prop: Source Data Port N properties
+ * @sink_dpn_prop: Sink Data Port N properties
  * @mipi_revision: Spec version of the implementation
  * @wake_capable: Wake-up events are supported
  * @test_mode_capable: If test mode is supported
@@ -361,23 +338,26 @@ struct sdw_dpn_prop {
  * SCP_AddrPage2
  * @bank_delay_support: Slave implements bank delay/bridge support registers
  * SCP_BankDelay and SCP_NextFrame
+ * @lane_control_support: Slave supports lane control
  * @p15_behave: Slave behavior when the Master attempts a read to the Port15
  * alias
- * @lane_control_support: Slave supports lane control
  * @master_count: Number of Masters present on this Slave
  * @source_ports: Bitmap identifying source ports
  * @sink_ports: Bitmap identifying sink ports
- * @dp0_prop: Data Port 0 properties
- * @src_dpn_prop: Source Data Port N properties
- * @sink_dpn_prop: Sink Data Port N properties
- * @scp_int1_mask: SCP_INT1_MASK desired settings
  * @quirks: bitmask identifying deltas from the MIPI specification
+ * @sdca_interrupt_register_list: indicates which sets of SDCA interrupt status
+ * and masks are supported
+ * @commit_register_supported: is PCP_Commit register supported
+ * @scp_int1_mask: SCP_INT1_MASK desired settings
  * @clock_reg_supported: the Peripheral implements the clock base and scale
  * registers introduced with the SoundWire 1.2 specification. SDCA devices
  * do not need to set this boolean property as the registers are required.
  * @use_domain_irq: call actual IRQ handler on slave, as well as callback
  */
 struct sdw_slave_prop {
+	struct sdw_dp0_prop *dp0_prop;
+	struct sdw_dpn_prop *src_dpn_prop;
+	struct sdw_dpn_prop *sink_dpn_prop;
 	u32 mipi_revision;
 	bool wake_capable;
 	bool test_mode_capable;
@@ -389,16 +369,15 @@ struct sdw_slave_prop {
 	bool high_PHY_capable;
 	bool paging_support;
 	bool bank_delay_support;
-	enum sdw_p15_behave p15_behave;
 	bool lane_control_support;
+	enum sdw_p15_behave p15_behave;
 	u32 master_count;
 	u32 source_ports;
 	u32 sink_ports;
-	struct sdw_dp0_prop *dp0_prop;
-	struct sdw_dpn_prop *src_dpn_prop;
-	struct sdw_dpn_prop *sink_dpn_prop;
-	u8 scp_int1_mask;
 	u32 quirks;
+	u32 sdca_interrupt_register_list;
+	u8 commit_register_supported;
+	u8 scp_int1_mask;
 	bool clock_reg_supported;
 	bool use_domain_irq;
 };
@@ -407,13 +386,14 @@ struct sdw_slave_prop {
 
 /**
  * struct sdw_master_prop - Master properties
+ * @clk_gears: Clock gears supported
+ * @clk_freq: Clock frequencies supported, in Hz
+ * @quirks: bitmask identifying optional behavior beyond the scope of the MIPI specification
  * @revision: MIPI spec version of the implementation
  * @clk_stop_modes: Bitmap, bit N set when clock-stop-modeN supported
  * @max_clk_freq: Maximum Bus clock frequency, in Hz
  * @num_clk_gears: Number of clock gears supported
- * @clk_gears: Clock gears supported
  * @num_clk_freq: Number of clock frequencies supported, in Hz
- * @clk_freq: Clock frequencies supported, in Hz
  * @default_frame_rate: Controller default Frame rate, in Hz
  * @default_row: Number of rows
  * @default_col: Number of columns
@@ -422,24 +402,23 @@ struct sdw_slave_prop {
  * command
  * @mclk_freq: clock reference passed to SoundWire Master, in Hz.
  * @hw_disabled: if true, the Master is not functional, typically due to pin-mux
- * @quirks: bitmask identifying optional behavior beyond the scope of the MIPI specification
  */
 struct sdw_master_prop {
+	u32 *clk_gears;
+	u32 *clk_freq;
+	u64 quirks;
 	u32 revision;
 	u32 clk_stop_modes;
 	u32 max_clk_freq;
 	u32 num_clk_gears;
-	u32 *clk_gears;
 	u32 num_clk_freq;
-	u32 *clk_freq;
 	u32 default_frame_rate;
 	u32 default_row;
 	u32 default_col;
-	bool dynamic_frame;
 	u32 err_threshold;
 	u32 mclk_freq;
+	bool dynamic_frame;
 	bool hw_disabled;
-	u64 quirks;
 };
 
 /* Definitions for Master quirks */
@@ -823,15 +802,15 @@ struct sdw_master_port_ops {
 struct sdw_msg;
 
 /**
- * struct sdw_defer - SDW deffered message
- * @length: message length
+ * struct sdw_defer - SDW deferred message
  * @complete: message completion
  * @msg: SDW message
+ * @length: message length
  */
 struct sdw_defer {
+	struct sdw_msg *msg;
 	int length;
 	struct completion complete;
-	struct sdw_msg *msg;
 };
 
 /**
@@ -874,68 +853,71 @@ struct sdw_master_ops {
  * struct sdw_bus - SoundWire bus
  * @dev: Shortcut to &bus->md->dev to avoid changing the entire code.
  * @md: Master device
- * @controller_id: system-unique controller ID. If set to -1, the bus @id will be used.
- * @link_id: Link id number, can be 0 to N, unique for each Controller
- * @id: bus system-wide unique id
- * @slaves: list of Slaves on this bus
- * @assigned: Bitmap for Slave device numbers.
- * Bit set implies used number, bit clear implies unused number.
+ * @bus_lock_key: bus lock key associated to @bus_lock
  * @bus_lock: bus lock
+ * @slaves: list of Slaves on this bus
+ * @msg_lock_key: message lock key associated to @msg_lock
  * @msg_lock: message lock
- * @compute_params: points to Bus resource management implementation
- * @ops: Master callback ops
- * @port_ops: Master port callback ops
- * @params: Current bus parameters
- * @prop: Master properties
- * @vendor_specific_prop: pointer to non-standard properties
  * @m_rt_list: List of Master instance of all stream(s) running on Bus. This
  * is used to compute and program bus bandwidth, clock, frame shape,
  * transport and port parameters
- * @debugfs: Bus debugfs
- * @domain: IRQ domain
  * @defer_msg: Defer message
- * @clk_stop_timeout: Clock stop timeout computed
- * @bank_switch_timeout: Bank switch timeout computed
- * @multi_link: Store bus property that indicates if multi links
- * are supported. This flag is populated by drivers after reading
- * appropriate firmware (ACPI/DT).
+ * @params: Current bus parameters
+ * @stream_refcount: number of streams currently using this bus
+ * @ops: Master callback ops
+ * @port_ops: Master port callback ops
+ * @prop: Master properties
+ * @vendor_specific_prop: pointer to non-standard properties
  * @hw_sync_min_links: Number of links used by a stream above which
  * hardware-based synchronization is required. This value is only
  * meaningful if multi_link is set. If set to 1, hardware-based
  * synchronization will be used even if a stream only uses a single
  * SoundWire segment.
- * @stream_refcount: number of streams currently using this bus
+ * @controller_id: system-unique controller ID. If set to -1, the bus @id will be used.
+ * @link_id: Link id number, can be 0 to N, unique for each Controller
+ * @id: bus system-wide unique id
+ * @compute_params: points to Bus resource management implementation
+ * @assigned: Bitmap for Slave device numbers.
+ * Bit set implies used number, bit clear implies unused number.
+ * @clk_stop_timeout: Clock stop timeout computed
+ * @bank_switch_timeout: Bank switch timeout computed
+ * @domain: IRQ domain
+ * @irq_chip: IRQ chip
+ * @debugfs: Bus debugfs (optional)
+ * @multi_link: Store bus property that indicates if multi links
+ * are supported. This flag is populated by drivers after reading
+ * appropriate firmware (ACPI/DT).
  */
 struct sdw_bus {
 	struct device *dev;
 	struct sdw_master_device *md;
+	struct lock_class_key bus_lock_key;
+	struct mutex bus_lock;
+	struct list_head slaves;
+	struct lock_class_key msg_lock_key;
+	struct mutex msg_lock;
+	struct list_head m_rt_list;
+	struct sdw_defer defer_msg;
+	struct sdw_bus_params params;
+	int stream_refcount;
+	const struct sdw_master_ops *ops;
+	const struct sdw_master_port_ops *port_ops;
+	struct sdw_master_prop prop;
+	void *vendor_specific_prop;
+	int hw_sync_min_links;
 	int controller_id;
 	unsigned int link_id;
 	int id;
-	struct list_head slaves;
-	DECLARE_BITMAP(assigned, SDW_MAX_DEVICES);
-	struct mutex bus_lock;
-	struct lock_class_key bus_lock_key;
-	struct mutex msg_lock;
-	struct lock_class_key msg_lock_key;
 	int (*compute_params)(struct sdw_bus *bus);
-	const struct sdw_master_ops *ops;
-	const struct sdw_master_port_ops *port_ops;
-	struct sdw_bus_params params;
-	struct sdw_master_prop prop;
-	void *vendor_specific_prop;
-	struct list_head m_rt_list;
+	DECLARE_BITMAP(assigned, SDW_MAX_DEVICES);
+	unsigned int clk_stop_timeout;
+	u32 bank_switch_timeout;
+	struct irq_chip irq_chip;
+	struct irq_domain *domain;
 #ifdef CONFIG_DEBUG_FS
 	struct dentry *debugfs;
 #endif
-	struct irq_chip irq_chip;
-	struct irq_domain *domain;
-	struct sdw_defer defer_msg;
-	unsigned int clk_stop_timeout;
-	u32 bank_switch_timeout;
 	bool multi_link;
-	int hw_sync_min_links;
-	int stream_refcount;
 };
 
 int sdw_bus_master_add(struct sdw_bus *bus, struct device *parent,
@@ -1013,18 +995,18 @@ struct sdw_stream_params {
  * @params: Stream parameters
  * @state: Current state of the stream
  * @type: Stream type PCM or PDM
+ * @m_rt_count: Count of Master runtime(s) in this stream
  * @master_list: List of Master runtime(s) in this stream.
  * master_list can contain only one m_rt per Master instance
  * for a stream
- * @m_rt_count: Count of Master runtime(s) in this stream
  */
 struct sdw_stream_runtime {
 	const char *name;
 	struct sdw_stream_params params;
 	enum sdw_stream_state state;
 	enum sdw_stream_type type;
-	struct list_head master_list;
 	int m_rt_count;
+	struct list_head master_list;
 };
 
 struct sdw_stream_runtime *sdw_alloc_stream(const char *stream_name);
