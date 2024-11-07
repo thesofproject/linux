@@ -300,6 +300,7 @@ struct kvm_protected_vm {
 	bool is_protected;
 	bool is_created;
 	bool smc_forwarded;
+	u32 ffa_support;
 };
 
 struct kvm_mpidr_data {

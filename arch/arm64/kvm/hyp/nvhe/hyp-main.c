@@ -1664,6 +1664,11 @@ static void handle___pkvm_ptdump(struct kvm_cpu_context *host_ctxt)
 		cpu_reg(host_ctxt, 0) = SMCCC_RET_NOT_SUPPORTED;
 }
 
+static void handle___pkvm_host_get_ffa_version(struct kvm_cpu_context *host_ctxt)
+{
+	cpu_reg(host_ctxt, 1) = ffa_get_hypervisor_version();
+}
+
 typedef void (*hcall_t)(struct kvm_cpu_context *);
 
 #define HANDLE_FUNC(x)	[__KVM_HOST_SMCCC_FUNC_##x] = (hcall_t)handle_##x
@@ -1730,6 +1735,7 @@ static const hcall_t host_hcall[] = {
 	HANDLE_FUNC(__pkvm_hyp_alloc_mgt_reclaimable),
 	HANDLE_FUNC(__pkvm_hyp_alloc_mgt_reclaim),
 	HANDLE_FUNC(__pkvm_ptdump),
+	HANDLE_FUNC(__pkvm_host_get_ffa_version),
 };
 
 static void handle_host_hcall(struct kvm_cpu_context *host_ctxt)
