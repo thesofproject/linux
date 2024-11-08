@@ -1377,6 +1377,9 @@ void smp_kick_mwait_play_dead(void)
 		for (i = 0; READ_ONCE(md->status) != newstate && i < 1000; i++) {
 			/* Bring it out of mwait */
 			WRITE_ONCE(md->control, newstate);
+			/* If MONITOR unreliable, send IPI */
+			if (boot_cpu_has_bug(X86_BUG_MONITOR))
+				__apic_send_IPI(cpu, RESCHEDULE_VECTOR);
 			udelay(5);
 		}
 
