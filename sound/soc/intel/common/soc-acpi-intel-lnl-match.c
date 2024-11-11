@@ -8,6 +8,7 @@
 
 #include <sound/soc-acpi.h>
 #include <sound/soc-acpi-intel-match.h>
+#include "soc-acpi-intel-sdca-quirks.h"
 #include "soc-acpi-intel-sdw-mockup-match.h"
 
 struct snd_soc_acpi_mach snd_soc_acpi_intel_lnl_machines[] = {
@@ -287,7 +288,7 @@ static const struct snd_soc_acpi_adr_device rt1318_2_group1_adr[] = {
 
 static const struct snd_soc_acpi_adr_device rt1320_1_group1_adr[] = {
 	{
-		.adr = 0x000130025d132000ull,
+		.adr = 0x000130025D132001ull,
 		.num_endpoints = 1,
 		.endpoints = &spk_r_endpoint,
 		.name_prefix = "rt1320-1"
@@ -546,6 +547,7 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_lnl_sdw_machines[] = {
 		.link_mask = BIT(1) | BIT(2),
 		.links = lnl_sdw_rt712_vb_l2_rt1320_l1,
 		.drv_name = "sof_sdw",
+		.machine_check = snd_soc_acpi_intel_sdca_is_device_rt712_vb,
 		.sof_tplg_filename = "sof-lnl-rt712-l2-rt1320-l1.tplg"
 	},
 	{},
