@@ -812,6 +812,13 @@ int pkvm_host_mmu_init(void *pool_base, unsigned long pool_pages, host_mmu_init_
 			return ret;
 	}
 
+	/* Unmap pvmfw memory if it has just been mapped */
+	if (pvmfw_present) {
+		ret = pkvm_pgtable_unmap(&host_mmu, pvmfw_base, pvmfw_base, pvmfw_size);
+		if (ret)
+			return ret;
+	}
+
 	return fix_host_mmu_pgstate();
 }
 
