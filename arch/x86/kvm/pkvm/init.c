@@ -159,6 +159,14 @@ static int create_hyp_mmu(const struct pkvm_mem_info infos[], int nr_infos)
 	if (ret)
 		return ret;
 
+	if (pvmfw_present) {
+		ret = pkvm_hyp_mmu_map((unsigned long)__pkvm_va(pvmfw_base),
+				       pvmfw_base, pvmfw_size,
+				       (u64)pgprot_val(PAGE_KERNEL_RO));
+		if (ret)
+			return ret;
+	}
+
 	/* Load pKVM hypervisor's MMU to use pKVM vmemmap */
 	pkvm_hyp_mmu_load();
 
