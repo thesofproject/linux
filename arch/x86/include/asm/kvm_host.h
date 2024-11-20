@@ -927,6 +927,8 @@ struct kvm_pkvm_vm {
 	int handle;
 	struct pkvm_memcache guest_mmu_teardown_mc;
 	struct rb_root_cached mappings;
+
+	gpa_t pvmfw_load_addr;
 };
 
 struct kvm_pkvm_vcpu {
@@ -2166,12 +2168,15 @@ extern phys_addr_t pvmfw_size;
 void __init pkvm_reserve(void);
 void pkvm_init_debugfs(void);
 void pkvm_create_vm_debugfs(struct kvm *kvm);
+int pkvm_vm_ioctl_enable_cap(struct kvm *kvm, struct kvm_enable_cap *cap);
 int kvm_topup_pkvm_memcache(struct pkvm_memcache *mc, unsigned long min_pages);
 void kvm_free_pkvm_memcache(struct pkvm_memcache *mc);
 #else
 #define enable_pkvm		false
 static inline void __init pkvm_reserve(void) {}
 static inline void pkvm_create_vm_debugfs(struct kvm *kvm) {}
+static inline int pkvm_vm_ioctl_enable_cap(struct kvm *kvm, struct kvm_enable_cap *cap)
+{ return -EINVAL; }
 #endif
 
 #ifdef __PKVM_HYP__
