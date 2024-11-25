@@ -10,25 +10,31 @@
 
 #define MAX_FW_STATE_STRING_LEN 128
 
+#define SOF_DSP_PM_D0I0 0
+#define SOF_DSP_PM_D0I3 1
+
 /*
  * set dsp power state op by writing the requested power state.
  * ex: echo D3 > dsp_power_state
  */
 static int sof_dsp_ops_set_power_state(struct snd_sof_dev *sdev, char *state)
 {
-	/* only D3 supported for now */
-	if (strcmp(state, "D3")) {
-		dev_err(sdev->dev, "Unsupported state %s\n", state);
+	const struct sof_ipc_pm_ops *pm_ops = sof_ipc_get_ops(sdev, pm);
+	struct sof_dsp_power_state target_state;
+	int ret;
+
+	/* Only D3/D0IO/D0I3 states supported */
+	if (strcmp(state, "D3") && strcmp(state, "D0I3") && strcmp(state, "D0I0")) {
+		dev_err(sdev->dev, "Unsupported DSP PM state %s\n", state);
 		return -EINVAL;
 	}
 
-	/* power off the DSP */
-	if (sdev->dsp_power_state.state == SOF_DSP_PM_D0) {
-		const struct sof_ipc_pm_ops *pm_ops = sof_ipc_get_ops(sdev, pm);
-		struct sof_dsp_power_state target_state = {
-			.state = SOF_DSP_PM_D3,
-		};
-		int ret;
+	/* put the DSP in D3 state */
+	if (!strcmp(state, "D3")) {
+		if (sdev->dsp_power_state.state == SOF_DSP_PM_D3)
+			return 0;
+
+		target_state.state = SOF_DSP_PM_D3;
 
 		/* notify DSP of upcoming power down */
 		if (pm_ops && pm_ops->ctx_save) {
@@ -43,9 +49,18 @@ static int sof_dsp_ops_set_power_state(struct snd_sof_dev *sdev, char *state)
 
 		sdev->enabled_cores_mask = 0;
 		sof_set_fw_state(sdev, SOF_FW_BOOT_NOT_STARTED);
+
+		return 0;
 	}
 
-	return 0;
+	/* handle D0I0/D0I3 transitions */
+	target_state.state = SOF_DSP_PM_D0;
+	if (!strcmp(state, "D0I3"))
+		target_state.substate = SOF_DSP_PM_D0I3;
+	else
+		target_state.substate = SOF_DSP_PM_D0I0;
+
+	return snd_sof_dsp_set_power_state(sdev, &target_state);
 }
 
 static int sof_dsp_ops_trace_init(struct snd_sof_dev *sdev, bool init)
@@ -175,7 +190,16 @@ static ssize_t sof_dsp_ops_tester_dfs_read(struct file *file, char __user *buffe
 	} else if (!strcmp(dentry->d_name.name, "dsp_power_state")) {
 		switch (sdev->dsp_power_state.state) {
 		case SOF_DSP_PM_D0:
-			string = "D0\n";
+			switch (sdev->dsp_power_state.substate) {
+			case SOF_DSP_PM_D0I0:
+				string = "D0I0\n";
+				break;
+			case SOF_DSP_PM_D0I3:
+				string = "D0I3\n";
+				break;
+			default:
+				break;
+			}
 			break;
 		case SOF_DSP_PM_D3:
 			string = "D3\n";
