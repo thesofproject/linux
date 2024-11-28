@@ -45,6 +45,7 @@ struct sdw_intel_link_res {
 	u32 link_mask;
 	struct sdw_cdns *cdns;
 	struct list_head list;
+	struct mutex *link_lock; /* lock protecting list */
 	struct hdac_bus *hbus;
 };
 

@@ -304,6 +304,7 @@ struct sdw_intel_ctx {
 	acpi_handle handle;
 	struct sdw_intel_link_dev **ldev;
 	struct list_head link_list;
+	struct mutex link_lock; /* lock protecting link_list */
 	struct mutex shim_lock; /* lock for access to shared SHIM registers */
 	u32 shim_mask;
 	u32 shim_base;
