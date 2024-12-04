@@ -502,6 +502,7 @@ struct snd_sof_widget {
 		  pipeline
  * @complete: flag used to indicate that pipeline set up is complete.
  * @core_mask: Mask containing target cores for all modules in the pipeline
+ * @be_managed_pipeline: Flag indicating that the pipeline is managed by the BE DAI ops
  * @list: List item in sdev pipeline_list
  */
 struct snd_sof_pipeline {
@@ -510,6 +511,7 @@ struct snd_sof_pipeline {
 	int paused_count;
 	int complete;
 	unsigned long core_mask;
+	bool be_managed_pipeline;
 	struct list_head list;
 };
 
@@ -685,6 +687,7 @@ int sof_update_ipc_object(struct snd_soc_component *scomp, void *object, enum so
 u32 vol_compute_gain(u32 value, int *tlv);
 
 /* pipeline management */
+bool sof_is_widget_pipeline_be_managed(struct snd_soc_dapm_widget *w);
 int snd_sof_set_up_be_pipeline(struct snd_soc_dapm_widget *w, int dir);
 int snd_sof_free_be_pipeline(struct snd_soc_dapm_widget *w, int dir);
 void snd_sof_unprepare_widgets_in_pipeline(struct snd_soc_dapm_widget *w,

@@ -211,9 +211,12 @@ static int hda_link_dma_hw_params(struct snd_pcm_substream *substream,
 static int __maybe_unused hda_dai_hw_free(struct snd_pcm_substream *substream,
 					  struct snd_soc_dai *cpu_dai)
 {
+	struct snd_soc_dapm_widget *w = snd_soc_dai_get_widget(cpu_dai, substream->stream);
 	const struct hda_dai_widget_dma_ops *ops = hda_dai_get_ops(substream, cpu_dai);
 	struct hdac_ext_stream *hext_stream;
 	struct snd_sof_dev *sdev = dai_to_sdev(substream, cpu_dai);
+	struct snd_sof_widget *swidget = w->dobj.private;
+	int ret;
 
 	if (!ops) {
 		dev_err(cpu_dai->dev, "DAI widget ops not set\n");
@@ -222,9 +225,23 @@ static int __maybe_unused hda_dai_hw_free(struct snd_pcm_substream *substream,
 
 	hext_stream = ops->get_hext_stream(sdev, cpu_dai, substream);
 	if (!hext_stream)
-		return 0;
+		goto free;
 
-	return hda_link_dma_cleanup(substream, hext_stream, cpu_dai, true);
+	ret = hda_link_dma_cleanup(substream, hext_stream, cpu_dai, true);
+	if (ret < 0)
+		return ret;
+
+free:
+	if (sof_is_widget_pipeline_be_managed(w)) {
+		ret = snd_sof_free_be_pipeline(w, substream->stream);
+		if (ret < 0)
+			return ret;
+	}
+
+	if (sof_is_widget_pipeline_be_managed(w))
+		snd_sof_unprepare_widgets_in_pipeline(w, swidget->spipe, substream->stream);
+
+	return 0;
 }
 
 static int __maybe_unused hda_dai_hw_params_data(struct snd_pcm_substream *substream,
@@ -316,14 +333,31 @@ static int __maybe_unused hda_dai_trigger(struct snd_pcm_substream *substream, i
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_STOP:
-	case SNDRV_PCM_TRIGGER_SUSPEND:
-		ret = hda_link_dma_cleanup(substream, hext_stream, dai,
-					   cmd == SNDRV_PCM_TRIGGER_STOP ? false : true);
+		ret = hda_link_dma_cleanup(substream, hext_stream, dai, false);
 		if (ret < 0) {
-			dev_err(sdev->dev, "%s: failed to clean up link DMA\n", __func__);
+			dev_err(sdev->dev, "%s: failed to clean up link DMA during stop\n",
+				__func__);
 			return ret;
 		}
 		break;
+	case SNDRV_PCM_TRIGGER_SUSPEND:
+	{
+		struct snd_soc_dapm_widget *w = snd_soc_dai_get_widget(dai, substream->stream);
+
+		ret = hda_link_dma_cleanup(substream, hext_stream, dai, true);
+		if (ret < 0) {
+			dev_err(sdev->dev, "%s: failed to clean up link DMA during suspend\n",
+				__func__);
+			return ret;
+		}
+
+		if (sof_is_widget_pipeline_be_managed(w)) {
+			ret = snd_sof_free_be_pipeline(w, substream->stream);
+			if (ret < 0)
+				return ret;
+		}
+		break;
+	}
 	default:
 		break;
 	}
@@ -336,9 +370,33 @@ static int __maybe_unused hda_dai_trigger(struct snd_pcm_substream *substream, i
 static int hda_dai_prepare(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	const struct hda_dai_widget_dma_ops *ops = hda_dai_get_ops(substream, dai);
+	struct snd_soc_dapm_widget *w = snd_soc_dai_get_widget(dai, substream->stream);
+	struct snd_sof_widget *swidget = w->dobj.private;
+	struct snd_sof_dev *sdev = widget_to_sdev(w);
 	int stream = substream->stream;
+	int ret;
 
-	return hda_dai_hw_params(substream, &rtd->dpcm[stream].hw_params, dai);
+	if (!ops) {
+		dev_err(sdev->dev, "DAI widget ops not set\n");
+		return -EINVAL;
+	}
+
+	/* if this is a prepare without a hw_free or a suspend, free the BE pipeline */
+	if (swidget->spipe->complete && sof_is_widget_pipeline_be_managed(w)) {
+		ret = snd_sof_free_be_pipeline(w, stream);
+		if (ret < 0)
+			return ret;
+	}
+
+	ret = hda_dai_hw_params(substream, &rtd->dpcm[stream].hw_params, dai);
+	if (ret < 0)
+		return ret;
+
+	if (sof_is_widget_pipeline_be_managed(w))
+		return snd_sof_set_up_be_pipeline(w, stream);
+
+	return 0;
 }
 
 static const struct snd_soc_dai_ops hda_dai_ops = {
@@ -460,10 +518,27 @@ static int non_hda_dai_hw_params(struct snd_pcm_substream *substream,
 static int non_hda_dai_prepare(struct snd_pcm_substream *substream,
 			       struct snd_soc_dai *cpu_dai)
 {
+	struct snd_soc_dapm_widget *w = snd_soc_dai_get_widget(cpu_dai, substream->stream);
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_sof_widget *swidget = w->dobj.private;
 	int stream = substream->stream;
+	int ret;
 
-	return non_hda_dai_hw_params(substream, &rtd->dpcm[stream].hw_params, cpu_dai);
+	/* if this is a prepare without a hw_free or a suspend, free the BE pipeline */
+	if (swidget->spipe->complete && sof_is_widget_pipeline_be_managed(w)) {
+		ret = snd_sof_free_be_pipeline(w, stream);
+		if (ret < 0)
+			return ret;
+	}
+
+	ret = non_hda_dai_hw_params(substream, &rtd->dpcm[stream].hw_params, cpu_dai);
+	if (ret < 0)
+		return ret;
+
+	if (sof_is_widget_pipeline_be_managed(w))
+		return snd_sof_set_up_be_pipeline(w, stream);
+
+	return 0;
 }
 
 static const struct snd_soc_dai_ops ssp_dai_ops = {
@@ -641,7 +716,32 @@ EXPORT_SYMBOL_NS(sdw_hda_dai_trigger, "SND_SOC_SOF_INTEL_HDA_COMMON");
 int sdw_hda_dai_prepare(struct snd_pcm_substream *substream, struct snd_pcm_hw_params *params,
 			struct snd_soc_dai *cpu_dai, int link_id, int intel_alh_id)
 {
-	return sdw_hda_dai_hw_params(substream, params, cpu_dai, link_id, intel_alh_id);
+	struct snd_soc_dapm_widget *w = snd_soc_dai_get_widget(cpu_dai, substream->stream);
+	const struct hda_dai_widget_dma_ops *ops = hda_dai_get_ops(substream, cpu_dai);
+	struct snd_sof_widget *swidget = w->dobj.private;
+	int stream = substream->stream;
+	int ret;
+
+	if (!ops) {
+		dev_err(cpu_dai->dev, "DAI widget ops not set\n");
+		return -EINVAL;
+	}
+
+	/* if this is a prepare without a hw_free or a suspend, free the BE pipeline */
+	if (swidget->spipe->complete && sof_is_widget_pipeline_be_managed(w)) {
+		ret = snd_sof_free_be_pipeline(w, stream);
+		if (ret < 0)
+			return ret;
+	}
+
+	ret = sdw_hda_dai_hw_params(substream, params, cpu_dai, link_id, intel_alh_id);
+	if (ret < 0)
+		return ret;
+
+	if (sof_is_widget_pipeline_be_managed(w))
+		return snd_sof_set_up_be_pipeline(w, stream);
+
+	return 0;
 }
 EXPORT_SYMBOL_NS(sdw_hda_dai_prepare, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
@@ -670,10 +770,11 @@ static int hda_dai_suspend(struct hdac_bus *bus)
 			struct snd_soc_dai *cpu_dai;
 			struct snd_sof_dev *sdev;
 			struct snd_sof_dai *sdai;
+			int dir = s->direction;
 
 			rtd = snd_soc_substream_to_rtd(hext_stream->link_substream);
 			cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
-			w = snd_soc_dai_get_widget(cpu_dai, hdac_stream(hext_stream)->direction);
+			w = snd_soc_dai_get_widget(cpu_dai, dir);
 			swidget = w->dobj.private;
 			sdev = widget_to_sdev(w);
 			sdai = swidget->private;
@@ -696,6 +797,12 @@ static int hda_dai_suspend(struct hdac_bus *bus)
 						   hext_stream, cpu_dai, true);
 			if (ret < 0)
 				return ret;
+
+			if (sof_is_widget_pipeline_be_managed(w)) {
+				ret = snd_sof_free_be_pipeline(w, dir);
+				if (ret < 0)
+					return ret;
+			}
 		}
 	}
 

@@ -1444,7 +1444,6 @@ static void sof_ipc4_unprepare_copier_module(struct snd_sof_widget *swidget)
 	/* reset pipeline memory usage */
 	pipe_widget = swidget->spipe->pipe_widget;
 	pipeline = pipe_widget->private;
-	pipeline->mem_usage = 0;
 
 	if (WIDGET_IS_AIF(swidget->id) || swidget->id == snd_soc_dapm_buffer) {
 		if (pipeline->use_chain_dma) {
