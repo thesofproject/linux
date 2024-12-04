@@ -28,6 +28,7 @@
 #include <sound/soc-acpi-intel-ssp-common.h>
 #include <sound/sof.h>
 #include <sound/sof/xtensa.h>
+#include <sound/hda_i915.h>
 #include <sound/hda-mlink.h>
 #include "../sof-audio.h"
 #include "../sof-pci-dev.h"
@@ -40,6 +41,11 @@
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
 #include <sound/soc-acpi-intel-match.h>
 #endif
+
+static bool disable_display_audio_bind;
+module_param(disable_display_audio_bind, bool, 0444);
+MODULE_PARM_DESC(disable_display_audio_bind,
+		 "Disable i915/Xe display audio component binding");
 
 /* platform specific devices */
 #include "shim.h"
@@ -703,6 +709,9 @@ int hda_dsp_probe_early(struct snd_sof_dev *sdev)
 	struct sof_intel_hda_dev *hdev;
 	const struct sof_intel_dsp_desc *chip;
 	int ret = 0;
+
+	if (disable_display_audio_bind)
+		snd_hdac_i915_bind(sof_to_bus(sdev), 0);
 
 	if (!sdev->dspless_mode_selected) {
 		/*
