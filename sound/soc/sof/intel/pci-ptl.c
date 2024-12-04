@@ -44,7 +44,7 @@ static const struct sof_dev_desc ptl_desc = {
 	},
 	.nocodec_tplg_filename = "sof-ptl-nocodec.tplg",
 	.ops = &sof_lnl_ops,
-	.ops_init = sof_ptl_ops_init,
+	.ops_init = sof_lnl_ops_init,
 };
 
 /* PCI IDs */

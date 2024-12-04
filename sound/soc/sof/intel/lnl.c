@@ -7,7 +7,6 @@
  */
 
 #include <linux/debugfs.h>
-#include <sound/hda_i915.h>
 #include <linux/firmware.h>
 #include <sound/hda_register.h>
 #include <sound/sof/ipc4/header.h>
@@ -184,24 +183,6 @@ int sof_lnl_ops_init(struct snd_sof_dev *sdev)
 	return 0;
 };
 EXPORT_SYMBOL_NS(sof_lnl_ops_init, SND_SOC_SOF_INTEL_LNL);
-
-static int ptl_hda_dsp_probe_early(struct snd_sof_dev *sdev)
-{
-	snd_hdac_i915_bind(sof_to_bus(sdev), 0);
-	return hda_dsp_probe_early(sdev);
-}
-
-int sof_ptl_ops_init(struct snd_sof_dev *sdev)
-{
-	int ret;
-
-	ret = sof_lnl_ops_init(sdev);
-	if (!ret)
-		sof_lnl_ops.probe_early = ptl_hda_dsp_probe_early;
-
-	return ret;
-};
-EXPORT_SYMBOL_NS(sof_ptl_ops_init, SND_SOC_SOF_INTEL_LNL);
 
 /* Check if an SDW IRQ occurred */
 static bool lnl_dsp_check_sdw_irq(struct snd_sof_dev *sdev)
