@@ -292,6 +292,18 @@ int sof_route_setup(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *wsourc
 	return 0;
 }
 
+/* helper function to check if the widget's pipeline is BE managed */
+bool sof_is_widget_pipeline_be_managed(struct snd_soc_dapm_widget *w)
+{
+	struct snd_sof_widget *swidget = w->dobj.private;
+
+	if (swidget->spipe->be_managed_pipeline)
+		return true;
+
+	return false;
+}
+EXPORT_SYMBOL(sof_is_widget_pipeline_be_managed);
+
 static int sof_setup_pipeline_connections(struct snd_sof_dev *sdev,
 					  struct snd_soc_dapm_widget_list *list, int dir)
 {
@@ -318,6 +330,12 @@ static int sof_setup_pipeline_connections(struct snd_sof_dev *sdev,
 					continue;
 
 				if (p->sink->dobj.private) {
+					/*
+					 * skip routes between widgets belonging to the BE pipeline
+					 */
+					if (sof_is_widget_pipeline_be_managed(widget) &&
+					    sof_is_widget_pipeline_be_managed(p->sink))
+						continue;
 					ret = sof_route_setup(sdev, widget, p->sink);
 					if (ret < 0)
 						return ret;
@@ -334,6 +352,12 @@ static int sof_setup_pipeline_connections(struct snd_sof_dev *sdev,
 					continue;
 
 				if (p->source->dobj.private) {
+					/*
+					 * skip routes between widgets belonging to the BE pipeline
+					 */
+					if (sof_is_widget_pipeline_be_managed(widget) &&
+					    sof_is_widget_pipeline_be_managed(p->source))
+						continue;
 					ret = sof_route_setup(sdev, p->source, widget);
 					if (ret < 0)
 						return ret;
@@ -414,8 +438,12 @@ sof_unprepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widg
 	if (is_virtual_widget(sdev, widget, __func__))
 		return;
 
-	/* skip if the widget is in use or if it is already unprepared */
-	if (!swidget || !swidget->prepared || swidget->use_count > 0)
+	/*
+	 * skip if the widget is in use or if it is already unprepared or
+	 * if it belongs to a BE pipeline.
+	 */
+	if (!swidget || !swidget->prepared || swidget->use_count > 0 ||
+	    sof_is_widget_pipeline_be_managed(widget))
 		goto sink_unprepare;
 
 	widget_ops = tplg_ops ? tplg_ops->widget : NULL;
@@ -505,6 +533,7 @@ static int sof_free_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dap
 				    int dir, struct snd_sof_pcm *spcm)
 {
 	struct snd_soc_dapm_widget_list *list = spcm->stream[dir].list;
+	struct snd_sof_widget *swidget = widget->dobj.private;
 	struct snd_soc_dapm_path *p;
 	int err;
 	int ret = 0;
@@ -512,7 +541,8 @@ static int sof_free_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dap
 	if (is_virtual_widget(sdev, widget, __func__))
 		return 0;
 
-	if (widget->dobj.private) {
+	/* only free widgets that aren't part of the BE pipeline */
+	if (swidget && !sof_is_widget_pipeline_be_managed(widget)) {
 		err = sof_widget_free(sdev, widget->dobj.private);
 		if (err < 0)
 			ret = err;
@@ -554,7 +584,7 @@ static int sof_set_up_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_d
 	if (is_virtual_widget(sdev, widget, __func__))
 		return 0;
 
-	if (swidget) {
+	if (swidget && !sof_is_widget_pipeline_be_managed(widget)) {
 		int i;
 
 		ret = sof_widget_setup(sdev, widget->dobj.private);
@@ -593,7 +623,7 @@ sink_setup:
 			ret = sof_set_up_widgets_in_path(sdev, p->sink, dir, spcm);
 			p->walking = false;
 			if (ret < 0) {
-				if (swidget)
+				if (swidget && !sof_is_widget_pipeline_be_managed(widget))
 					sof_widget_free(sdev, swidget);
 				return ret;
 			}
