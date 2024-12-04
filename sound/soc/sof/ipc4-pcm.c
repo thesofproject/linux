@@ -136,9 +136,8 @@ sof_ipc4_add_pipeline_to_trigger_list(struct snd_sof_dev *sdev, int state,
 				      s8 *pipe_priority)
 {
 	struct snd_sof_widget *pipe_widget = spipe->pipe_widget;
-	struct sof_ipc4_pipeline *pipeline = pipe_widget->private;
 
-	if (pipeline->skip_during_fe_trigger)
+	if (spipe->be_managed_pipeline)
 		return;
 
 	switch (state) {
@@ -177,7 +176,7 @@ sof_ipc4_update_pipeline_state(struct snd_sof_dev *sdev, int state, int cmd,
 	struct sof_ipc4_pipeline *pipeline = pipe_widget->private;
 	int i;
 
-	if (pipeline->skip_during_fe_trigger)
+	if (spipe->be_managed_pipeline)
 		return;
 
 	/* set state for pipeline if it was just triggered */
@@ -431,10 +430,9 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 	 * IPC4 requires pipelines to be triggered in order starting at the sink and
 	 * walking all the way to the source. So traverse the pipeline_list in the order
 	 * sink->source when starting PCM's and in the reverse order to pause/stop PCM's.
-	 * Skip the pipelines that have their skip_during_fe_trigger flag set. If there is a fork
-	 * in the pipeline, the order of triggering between the left/right paths will be
-	 * indeterministic. But the sink->source trigger order sink->source would still be
-	 * guaranteed for each fork independently.
+	 * Skip the backend pipelines. If there is a fork in the pipeline, the order of triggering
+	 * between the left/right paths will be indeterministic. But the sink->source trigger
+	 * order sink->source would still be guaranteed for each fork independently.
 	 */
 	if (state == SOF_IPC4_PIPE_RUNNING || state == SOF_IPC4_PIPE_RESET)
 		for (i = pipeline_list->count - 1; i >= 0; i--) {
