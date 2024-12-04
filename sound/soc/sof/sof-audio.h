@@ -683,4 +683,18 @@ int sof_update_ipc_object(struct snd_soc_component *scomp, void *object, enum so
 			  struct snd_sof_tuple *tuples, int num_tuples,
 			  size_t object_size, int token_instance_num);
 u32 vol_compute_gain(u32 value, int *tlv);
+
+/* pipeline management */
+int snd_sof_set_up_be_pipeline(struct snd_soc_dapm_widget *w, int dir);
+int snd_sof_free_be_pipeline(struct snd_soc_dapm_widget *w, int dir);
+void snd_sof_unprepare_widgets_in_pipeline(struct snd_soc_dapm_widget *w,
+					   struct snd_sof_pipeline *spipe, int dir);
+
+static inline struct snd_sof_dev *widget_to_sdev(struct snd_soc_dapm_widget *w)
+{
+	struct snd_sof_widget *swidget = w->dobj.private;
+	struct snd_soc_component *component = swidget->scomp;
+
+	return snd_soc_component_get_drvdata(component);
+}
 #endif

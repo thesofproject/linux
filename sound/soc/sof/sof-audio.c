@@ -986,3 +986,249 @@ int sof_dai_get_tdm_slots(struct snd_soc_pcm_runtime *rtd)
 	return sof_dai_get_param(rtd, SOF_DAI_PARAM_INTEL_SSP_TDM_SLOTS);
 }
 EXPORT_SYMBOL(sof_dai_get_tdm_slots);
+
+static int snd_sof_set_up_widgets_in_pipeline(struct snd_soc_dapm_widget *w,
+					      struct snd_sof_pipeline *spipe, int dir)
+{
+	struct snd_sof_widget *swidget = w->dobj.private;
+	struct snd_sof_dev *sdev = widget_to_sdev(w);
+	struct snd_soc_dapm_path *p;
+	int ret;
+
+	/* set up the widget if it belongs to the same pipeline as the DAI widget */
+	if (swidget->spipe != spipe || !swidget->prepared)
+		return 0;
+
+	ret = sof_widget_setup(sdev, swidget);
+	if (ret < 0)
+		return ret;
+
+	if (dir == SNDRV_PCM_STREAM_PLAYBACK) {
+		snd_soc_dapm_widget_for_each_source_path(w, p) {
+			if (!p->walking) {
+				p->walking = true;
+
+				ret = snd_sof_set_up_widgets_in_pipeline(p->source, spipe, dir);
+				p->walking = false;
+				if (ret < 0)
+					goto err;
+			}
+		}
+	} else {
+		snd_soc_dapm_widget_for_each_sink_path(w, p) {
+			if (!p->walking) {
+				p->walking = true;
+
+				ret = snd_sof_set_up_widgets_in_pipeline(p->sink, spipe, dir);
+				p->walking = false;
+				if (ret < 0)
+					goto err;
+			}
+		}
+	}
+
+	return 0;
+err:
+	if (swidget)
+		sof_widget_free(sdev, swidget);
+	return ret;
+}
+
+void snd_sof_unprepare_widgets_in_pipeline(struct snd_soc_dapm_widget *w,
+					   struct snd_sof_pipeline *spipe, int dir)
+{
+	struct snd_sof_widget *swidget = w->dobj.private;
+	const struct sof_ipc_tplg_widget_ops *widget_ops;
+	struct snd_sof_dev *sdev = widget_to_sdev(w);
+	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
+	struct snd_soc_dapm_path *p;
+
+	/* unprepare the widget only if it belongs to the same pipeline as the DAI widget */
+	if (!swidget || swidget->spipe != spipe)
+		return;
+
+	/* skip if the widget is in use or if it is already unprepared */
+	if (!swidget->prepared || swidget->use_count > 0)
+		goto unprepare;
+
+	widget_ops = tplg_ops ? tplg_ops->widget : NULL;
+	if (widget_ops && widget_ops[w->id].ipc_unprepare)
+		/* unprepare the source widget */
+		widget_ops[w->id].ipc_unprepare(swidget);
+
+	swidget->prepared = false;
+
+unprepare:
+	if (dir == SNDRV_PCM_STREAM_PLAYBACK) {
+		snd_soc_dapm_widget_for_each_source_path(w, p) {
+			if (!p->walking) {
+				p->walking = true;
+				snd_sof_unprepare_widgets_in_pipeline(p->source, spipe, dir);
+				p->walking = false;
+			}
+		}
+	} else {
+		snd_soc_dapm_widget_for_each_sink_path(w, p) {
+			if (!p->walking) {
+				p->walking = true;
+				snd_sof_unprepare_widgets_in_pipeline(p->sink, spipe, dir);
+				p->walking = false;
+			}
+		}
+	}
+}
+EXPORT_SYMBOL(snd_sof_unprepare_widgets_in_pipeline);
+
+static int snd_sof_free_widgets_in_pipeline(struct snd_soc_dapm_widget *w,
+					    struct snd_sof_pipeline *spipe, int dir)
+{
+	struct snd_sof_widget *swidget = w->dobj.private;
+	struct snd_sof_dev *sdev = widget_to_sdev(w);
+	struct snd_soc_dapm_path *p;
+	int ret = 0;
+	int err;
+
+	/* free the widget if it belongs to the same pipeline as the DAI widget */
+	if (swidget->spipe != spipe || !swidget->prepared)
+		return 0;
+
+	err = sof_widget_free(sdev, swidget);
+	if (err < 0)
+		ret = err;
+
+	if (dir == SNDRV_PCM_STREAM_PLAYBACK) {
+		snd_soc_dapm_widget_for_each_source_path(w, p) {
+			if (!p->walking) {
+				p->walking = true;
+
+				err = snd_sof_free_widgets_in_pipeline(p->source, spipe, dir);
+				p->walking = false;
+				if (err < 0)
+					ret = err;
+			}
+		}
+	} else {
+		snd_soc_dapm_widget_for_each_sink_path(w, p) {
+			if (!p->walking) {
+				p->walking = true;
+
+				err = snd_sof_free_widgets_in_pipeline(p->sink, spipe, dir);
+				p->walking = false;
+				if (err < 0)
+					ret = err;
+			}
+		}
+	}
+
+	return ret;
+}
+
+static int snd_sof_set_up_routes_in_pipeline(struct snd_soc_dapm_widget *w,
+					     struct snd_sof_pipeline *spipe, int dir)
+{
+	struct snd_sof_widget *swidget = w->dobj.private;
+	struct snd_sof_dev *sdev = widget_to_sdev(w);
+	struct snd_soc_dapm_path *p;
+	int ret;
+
+	if (swidget->spipe != spipe)
+		return 0;
+
+	if (dir == SNDRV_PCM_STREAM_PLAYBACK) {
+		snd_soc_dapm_widget_for_each_source_path(w, p) {
+			if (!p->walking) {
+				struct snd_soc_dapm_widget *wsource = p->source;
+				struct snd_sof_widget *source_swidget = wsource->dobj.private;
+
+				if (source_swidget->spipe != spipe)
+					continue;
+
+				p->walking = true;
+
+				ret = sof_route_setup(sdev, wsource, w);
+				if (ret < 0) {
+					p->walking = false;
+					return ret;
+				}
+
+				ret = snd_sof_set_up_routes_in_pipeline(wsource, spipe, dir);
+				p->walking = false;
+				if (ret < 0)
+					return ret;
+			}
+		}
+	} else {
+		snd_soc_dapm_widget_for_each_sink_path(w, p) {
+			if (!p->walking) {
+				struct snd_soc_dapm_widget *wsink = p->sink;
+				struct snd_sof_widget *sink_swidget = wsink->dobj.private;
+
+				if (sink_swidget->spipe != spipe)
+					continue;
+
+				p->walking = true;
+
+				ret = sof_route_setup(sdev, w, wsink);
+				if (ret < 0) {
+					p->walking = false;
+					return ret;
+				}
+
+				ret = snd_sof_set_up_routes_in_pipeline(wsink, spipe, dir);
+				p->walking = false;
+				if (ret < 0)
+					return ret;
+			}
+		}
+	}
+
+	return 0;
+}
+
+int snd_sof_set_up_be_pipeline(struct snd_soc_dapm_widget *w, int dir)
+{
+	struct snd_sof_widget *swidget = w->dobj.private;
+	struct snd_sof_dev *sdev = widget_to_sdev(w);
+	int ret;
+
+	/* set up the widgets in the BE pipeline */
+	ret = snd_sof_set_up_widgets_in_pipeline(w, swidget->spipe, dir);
+	if (ret < 0) {
+		dev_err(sdev->dev, "failed to set up widgets in the BE pipeline with DAI: %s\n",
+			w->name);
+		return ret;
+	}
+
+	/* set up the routes */
+	ret = snd_sof_set_up_routes_in_pipeline(w, swidget->spipe, dir);
+	if (ret < 0) {
+		dev_err(sdev->dev, "failed to set up routes in the BE pipeline with DAI: %s\n",
+			w->name);
+		return ret;
+	}
+
+	swidget->spipe->complete = 1;
+	return 0;
+}
+EXPORT_SYMBOL(snd_sof_set_up_be_pipeline);
+
+int snd_sof_free_be_pipeline(struct snd_soc_dapm_widget *w, int dir)
+{
+	struct snd_sof_widget *swidget = w->dobj.private;
+	struct snd_sof_dev *sdev = widget_to_sdev(w);
+	int ret;
+
+	/*
+	 * free the widgets in the BE pipeline. Routes are automatically disconnected when
+	 * widgets are freed
+	 */
+	ret = snd_sof_free_widgets_in_pipeline(w, swidget->spipe, dir);
+	if (ret < 0)
+		dev_err(sdev->dev, "failed to free widgets in the BE pipeline with DAI: %s\n",
+			w->name);
+
+	swidget->spipe->complete = 0;
+
+	return ret;
+}
+EXPORT_SYMBOL(snd_sof_free_be_pipeline);
