@@ -416,10 +416,11 @@ static int hda_ipc4_post_trigger(struct snd_sof_dev *sdev, struct snd_soc_dai *c
 		break;
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_STOP:
-		/*
-		 * STOP/SUSPEND trigger is invoked only once when all users of this pipeline have
-		 * been stopped. So, clear the started_count so that the pipeline can be reset
-		 */
+		ret = sof_ipc4_set_pipeline_state(sdev, pipe_widget->instance_id,
+						  SOF_IPC4_PIPE_RESET);
+		if (ret < 0)
+			goto out;
+		pipeline->state = SOF_IPC4_PIPE_RESET;
 		swidget->spipe->started_count = 0;
 		break;
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
@@ -623,7 +624,8 @@ hda_select_dai_widget_ops(struct snd_sof_dev *sdev, struct snd_sof_widget *swidg
 	}
 	case SOF_IPC_TYPE_4:
 	{
-		struct snd_sof_widget *pipe_widget = swidget->spipe->pipe_widget;
+		struct snd_sof_pipeline *spipe = swidget->spipe;
+		struct snd_sof_widget *pipe_widget = spipe->pipe_widget;
 		struct sof_ipc4_pipeline *pipeline = pipe_widget->private;
 
 		switch (sdai->type) {
@@ -631,20 +633,27 @@ hda_select_dai_widget_ops(struct snd_sof_dev *sdev, struct snd_sof_widget *swidg
 			if (pipeline->use_chain_dma)
 				return &hda_ipc4_chain_dma_ops;
 
+			spipe->be_managed_pipeline = true;
 			return &hda_ipc4_dma_ops;
 		case SOF_DAI_INTEL_SSP:
 			if (chip->hw_ip_version < SOF_INTEL_ACE_2_0)
 				return NULL;
+
+			spipe->be_managed_pipeline = true;
 			return &ssp_ipc4_dma_ops;
 		case SOF_DAI_INTEL_DMIC:
 			if (chip->hw_ip_version < SOF_INTEL_ACE_2_0)
 				return NULL;
+
+			spipe->be_managed_pipeline = true;
 			return &dmic_ipc4_dma_ops;
 		case SOF_DAI_INTEL_ALH:
 			if (chip->hw_ip_version < SOF_INTEL_ACE_2_0)
 				return NULL;
 			if (pipeline->use_chain_dma)
 				return &sdw_ipc4_chain_dma_ops;
+
+			spipe->be_managed_pipeline = true;
 			return &sdw_ipc4_dma_ops;
 
 		default:
