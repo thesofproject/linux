@@ -220,6 +220,8 @@ struct sdw_intel_stream_free_data {
 struct sdw_intel_ops {
 	int (*params_stream)(struct device *dev,
 			     struct sdw_intel_stream_params_data *params_data);
+	int (*prepare_stream)(struct device *dev,
+			      struct sdw_intel_stream_params_data *params_data);
 	int (*free_stream)(struct device *dev,
 			   struct sdw_intel_stream_free_data *free_data);
 	int (*trigger)(struct snd_pcm_substream *substream, int cmd, struct snd_soc_dai *dai);
