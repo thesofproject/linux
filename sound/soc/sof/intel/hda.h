@@ -894,6 +894,9 @@ int sdw_hda_dai_hw_free(struct snd_pcm_substream *substream,
 int sdw_hda_dai_trigger(struct snd_pcm_substream *substream, int cmd,
 			struct snd_soc_dai *cpu_dai);
 
+int sdw_hda_dai_prepare(struct snd_pcm_substream *substream, struct snd_pcm_hw_params *params,
+			struct snd_soc_dai *cpu_dai, int link_id, int intel_alh_id);
+
 /* common dai driver */
 extern struct snd_soc_dai_driver skl_dai[];
 int hda_dsp_dais_suspend(struct snd_sof_dev *sdev);

@@ -594,6 +594,27 @@ static int intel_params_stream(struct sdw_intel *sdw,
 	return -EIO;
 }
 
+static int intel_prepare_stream(struct sdw_intel *sdw,
+				struct snd_pcm_substream *substream,
+				struct snd_soc_dai *dai,
+				struct snd_pcm_hw_params *hw_params,
+				int link_id, int alh_stream_id)
+{
+	struct sdw_intel_link_res *res = sdw->link_res;
+	struct sdw_intel_stream_params_data params_data;
+
+	params_data.substream = substream;
+	params_data.dai = dai;
+	params_data.hw_params = hw_params;
+	params_data.link_id = link_id;
+	params_data.alh_stream_id = alh_stream_id;
+
+	if (res->ops && res->ops->prepare_stream && res->dev)
+		return res->ops->prepare_stream(res->dev, &params_data);
+
+	return -EIO;
+}
+
 static int intel_free_stream(struct sdw_intel *sdw,
 			     struct snd_pcm_substream *substream,
 			     struct snd_soc_dai *dai,
@@ -730,8 +751,8 @@ static int intel_prepare(struct snd_pcm_substream *substream,
 	}
 
 	/* Inform DSP about PDI stream number */
-	return intel_params_stream(sdw, substream, dai, hw_params, sdw->instance,
-				   dai_runtime->pdi->intel_alh_id);
+	return intel_prepare_stream(sdw, substream, dai, hw_params, sdw->instance,
+				    dai_runtime->pdi->intel_alh_id);
 }
 
 static int
