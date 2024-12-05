@@ -638,6 +638,13 @@ int sdw_hda_dai_trigger(struct snd_pcm_substream *substream, int cmd,
 }
 EXPORT_SYMBOL_NS(sdw_hda_dai_trigger, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
+int sdw_hda_dai_prepare(struct snd_pcm_substream *substream, struct snd_pcm_hw_params *params,
+			struct snd_soc_dai *cpu_dai, int link_id, int intel_alh_id)
+{
+	return sdw_hda_dai_hw_params(substream, params, cpu_dai, link_id, intel_alh_id);
+}
+EXPORT_SYMBOL_NS(sdw_hda_dai_prepare, "SND_SOC_SOF_INTEL_HDA_COMMON");
+
 static int hda_dai_suspend(struct hdac_bus *bus)
 {
 	struct snd_soc_pcm_runtime *rtd;

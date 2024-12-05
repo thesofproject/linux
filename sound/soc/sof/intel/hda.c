@@ -119,6 +119,14 @@ static int sdw_ace2x_params_stream(struct device *dev,
 				     params_data->alh_stream_id);
 }
 
+static int sdw_ace2x_prepare_stream(struct device *dev,
+				    struct sdw_intel_stream_params_data *params_data)
+{
+	return sdw_hda_dai_prepare(params_data->substream, params_data->hw_params,
+				   params_data->dai, params_data->link_id,
+				   params_data->alh_stream_id);
+}
+
 static int sdw_ace2x_free_stream(struct device *dev,
 				 struct sdw_intel_stream_free_data *free_data)
 {
@@ -134,6 +142,7 @@ static int sdw_ace2x_trigger(struct snd_pcm_substream *substream, int cmd, struc
 
 static struct sdw_intel_ops sdw_ace2x_callback = {
 	.params_stream = sdw_ace2x_params_stream,
+	.prepare_stream = sdw_ace2x_prepare_stream,
 	.free_stream = sdw_ace2x_free_stream,
 	.trigger = sdw_ace2x_trigger,
 };
