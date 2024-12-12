@@ -46,4 +46,5 @@ void assert_in_mod_range(unsigned long addr, size_t size);
 #else
 static inline void assert_in_mod_range(unsigned long addr, size_t size) { }
 #endif /* CONFIG_PKVM_STRICT_CHECKS */
+
 #endif /* __KVM_HYP_MM_H */
