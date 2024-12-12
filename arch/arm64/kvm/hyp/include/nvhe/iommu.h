@@ -21,4 +21,20 @@ void *kvm_iommu_donate_pages(u8 order);
 void kvm_iommu_reclaim_pages(void *ptr);
 bool kvm_iommu_host_dabt_handler(struct user_pt_regs *regs, u64 esr, u64 addr);
 void kvm_iommu_host_stage2_idmap_complete(bool map);
+
+/* Hypercall handlers */
+int kvm_iommu_alloc_domain(pkvm_handle_t iommu_id, pkvm_handle_t domain_id, int type);
+int kvm_iommu_free_domain(pkvm_handle_t domain_id);
+int kvm_iommu_attach_dev(pkvm_handle_t iommu_id, pkvm_handle_t domain_id,
+			 u32 endpoint_id, u32 pasid, u32 pasid_bits,
+			 unsigned long flags);
+int kvm_iommu_detach_dev(pkvm_handle_t iommu_id, pkvm_handle_t domain_id,
+			 u32 endpoint_id, u32 pasid);
+
+int kvm_iommu_map_pages(pkvm_handle_t domain_id,
+			unsigned long iova, phys_addr_t paddr, size_t pgsize,
+			size_t pgcount, int prot, unsigned long *mapped);
+size_t kvm_iommu_unmap_pages(pkvm_handle_t domain_id, unsigned long iova,
+			     size_t pgsize, size_t pgcount);
+phys_addr_t kvm_iommu_iova_to_phys(pkvm_handle_t domain_id, unsigned long iova);
 #endif /* __ARM64_KVM_NVHE_IOMMU_H__ */
