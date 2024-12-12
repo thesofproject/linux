@@ -1891,4 +1891,13 @@ int kvm_iommu_register_hyp_ops(struct kvm_iommu_ops *hyp_ops);
 size_t kvm_iommu_pages(void);
 #endif
 
+/*
+ * Unlike previous android versions, where we supported 1 << 16 domains,
+ * this added a lot of unneeded complexity, sharing code and struts with EL1,
+ * memory allocation in different contexts and handling error cases.
+ * We switched to a static array for simplicity with 512 domains which is more
+ * than enough.
+ */
+#define KVM_IOMMU_MAX_DOMAINS		512
+
 #endif /* __ARM64_KVM_HOST_H__ */
