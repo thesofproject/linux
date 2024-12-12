@@ -109,6 +109,9 @@ static __always_inline void __load_host_stage2(void)
 		write_sysreg(0, vttbr_el2);
 }
 
+int __pkvm_host_use_dma(phys_addr_t phys_addr, size_t size);
+int __pkvm_host_unuse_dma(phys_addr_t phys_addr, size_t size);
+
 #ifdef CONFIG_NVHE_EL2_DEBUG
 void pkvm_ownership_selftest(void *base);
 #else
