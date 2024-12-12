@@ -213,6 +213,21 @@ static const exit_handler_fn *kvm_get_exit_handler_array(struct kvm_vcpu *vcpu)
 	return hyp_exit_handlers;
 }
 
+/*
+ * As we have caught the guest red-handed, decide that it isn't fit for
+ * purpose anymore by making the vcpu invalid. The VMM can try and fix it by
+ * re-initializing the vcpu with KVM_ARM_VCPU_INIT, however, this is likely
+ * not possible for protected VMs.
+ */
+void vcpu_illegal_trap(struct kvm_vcpu *vcpu, u64 *exit_code)
+{
+	trace_vcpu_illegal_trap(kvm_vcpu_get_esr(vcpu));
+
+	vcpu_clear_flag(vcpu, VCPU_INITIALIZED);
+	*exit_code &= BIT(ARM_EXIT_WITH_SERROR_BIT);
+	*exit_code |= ARM_EXCEPTION_IL;
+}
+
 static inline bool fixup_guest_exit(struct kvm_vcpu *vcpu, u64 *exit_code)
 {
 	const exit_handler_fn *handlers = kvm_get_exit_handler_array(vcpu);
@@ -228,18 +243,8 @@ static inline bool fixup_guest_exit(struct kvm_vcpu *vcpu, u64 *exit_code)
 	 * it.  The check below is based on the one in
 	 * kvm_arch_vcpu_ioctl_run().
 	 */
-	if (unlikely(vcpu_is_protected(vcpu) && vcpu_mode_is_32bit(vcpu))) {
-		/*
-		 * As we have caught the guest red-handed, decide that it isn't
-		 * fit for purpose anymore by making the vcpu invalid. The VMM
-		 * can try and fix it by re-initializing the vcpu with
-		 * KVM_ARM_VCPU_INIT, however, this is likely not possible for
-		 * protected VMs.
-		 */
-		vcpu_clear_flag(vcpu, VCPU_INITIALIZED);
-		*exit_code &= BIT(ARM_EXIT_WITH_SERROR_BIT);
-		*exit_code |= ARM_EXCEPTION_IL;
-	}
+	if (unlikely(vcpu_is_protected(vcpu) && vcpu_mode_is_32bit(vcpu)))
+		vcpu_illegal_trap(vcpu, exit_code);
 
 	return __fixup_guest_exit(vcpu, exit_code, handlers);
 }
