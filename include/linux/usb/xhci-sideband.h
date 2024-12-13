@@ -46,8 +46,6 @@ struct xhci_sideband_event {
  * @mutex: mutex for sideband operations
  * @intf: USB sideband client interface
  * @notify_client: callback for xHCI sideband sequences
- *
- * FIXME usb device accessed via sideband Keeping track of sideband accessed usb devices.
  */
 struct xhci_sideband {
 	struct xhci_hcd                 *xhci;

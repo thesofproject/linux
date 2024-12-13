@@ -14,6 +14,28 @@
 #include "xhci.h"
 
 /* sideband internal helpers */
+
+static bool
+xhci_sideband_hw_capable(struct xhci_hcd *xhci)
+{
+	u16 buf = 0;
+	int ret;
+
+	/* xHCI 1.2 and later can support GSC bit in hcc_params2 register */
+	if ((xhci->hci_version < 0x120) || !(xhci->hcc_params2 & HCC2_GSC))
+		return false;
+	/*
+	 * Note, normally xHC hardware writes directly to buf, so buf needs to
+	 * be DMA mappable. PROP_ECI_ALL is special and returns 16 bits data in
+	 * the command completion event, which is then copied to buf.
+	 */
+	ret = xhci_get_ext_property(xhci, 0, 0, PROP_ECI_ALL, 0, &buf, sizeof(buf));
+	if (ret >= 0 && buf & PROP_ECI_AUDIO)
+		return true;
+
+	return false;
+}
+
 static struct sg_table *
 xhci_ring_to_sgtable(struct xhci_sideband *sb, struct xhci_ring *ring)
 {
@@ -185,6 +207,22 @@ out_unlock:
 }
 
 /* Caller must hold sb->mutex */
+static int
+__xhci_sideband_remove_endpoint(struct xhci_sideband *sb, unsigned int ep_index)
+{
+	int ret = 0;
+
+	lockdep_assert_held(&sb->mutex);
+
+	if (sb->type == XHCI_SIDEBAND_VENDOR)
+		ret = sideband_stop_endpoint_sync(sb, ep_index, true);
+
+	sb->eps[ep_index] = NULL;
+
+	return ret;
+}
+
+/* Caller must hold sb->mutex */
 static void
 __xhci_sideband_remove_interrupter(struct xhci_sideband *sb)
 {
@@ -251,6 +289,9 @@ xhci_sideband_add_endpoint(struct xhci_sideband *sb,
 	if (sb->eps[ep_index])
 		return -EBUSY;
 
+	if (sb->type == XHCI_SIDEBAND_AUDIO)
+		return -EINVAL;
+
 	/*
 	 * Note, we don't know the DMA mask of the audio DSP device, if its
 	 * smaller than for xhci it won't be able to access the endpoint ring
@@ -297,16 +338,12 @@ xhci_sideband_remove_endpoint(struct xhci_sideband *sb,
 			      struct usb_host_endpoint *host_ep)
 {
 	unsigned int ep_index;
-	int ret;
 
 	guard(mutex)(&sb->mutex);
 
 	ep_index = xhci_get_endpoint_index(&host_ep->desc);
 
-	ret = sideband_stop_endpoint_sync(sb, ep_index, true);
-	sb->eps[ep_index] = NULL;
-
-	return ret;
+	return __xhci_sideband_remove_endpoint(sb, ep_index);
 }
 EXPORT_SYMBOL_GPL(xhci_sideband_remove_endpoint);
 
@@ -504,13 +541,22 @@ xhci_sideband_register(struct usb_interface *intf, enum xhci_sideband_type type,
 	struct xhci_virt_device *vdev;
 	struct xhci_sideband *sb;
 
-	/*
-	 * Make sure the usb device is connected to a xhci controller.  Fail
-	 * registration if the type is anything other than  XHCI_SIDEBAND_VENDOR,
-	 * as this is the only type that is currently supported by xhci-sideband.
-	 */
-	if (!udev->slot_id || type != XHCI_SIDEBAND_VENDOR)
+	/* Make sure the usb device is connected to a xhci controller. */
+	if (!udev->slot_id)
 		return NULL;
+
+	switch (type) {
+	case XHCI_SIDEBAND_VENDOR:
+		break;
+	case XHCI_SIDEBAND_AUDIO:
+		if (!xhci_sideband_hw_capable(xhci)) {
+			dev_info(&udev->dev, "Host not sideband capable\n");
+			return NULL;
+		}
+		break;
+	default:
+		return NULL;
+	}
 
 	sb = kzalloc_node(sizeof(*sb), GFP_KERNEL, dev_to_node(hcd->self.sysdev));
 	if (!sb)
@@ -540,6 +586,8 @@ xhci_sideband_register(struct usb_interface *intf, enum xhci_sideband_type type,
 
 	spin_unlock_irq(&xhci->lock);
 
+	dev_dbg(&udev->dev, "Registered for sideband use\n");
+
 	return sb;
 }
 EXPORT_SYMBOL_GPL(xhci_sideband_register);
@@ -558,6 +606,7 @@ void
 xhci_sideband_unregister(struct xhci_sideband *sb)
 {
 	struct xhci_virt_device *vdev;
+	struct usb_device *udev;
 	struct xhci_hcd *xhci;
 	int i;
 
@@ -565,15 +614,15 @@ xhci_sideband_unregister(struct xhci_sideband *sb)
 		return;
 
 	xhci = sb->xhci;
+	udev = sb->udev;
 
 	mutex_lock(&sb->mutex);
 
 	for (i = 0; i < EP_CTX_PER_DEV; i++) {
-		if (sb->eps[i]) {
-			sideband_stop_endpoint_sync(sb, i, true);
-			sb->eps[i] = NULL;
-		}
+		if (sb->eps[i])
+			__xhci_sideband_remove_endpoint(sb, i);
 	}
+
 	__xhci_sideband_remove_interrupter(sb);
 
 	spin_lock_irq(&xhci->lock);
@@ -585,6 +634,8 @@ xhci_sideband_unregister(struct xhci_sideband *sb)
 	spin_unlock_irq(&xhci->lock);
 
 	mutex_unlock(&sb->mutex);
+
+	dev_dbg(&udev->dev, "sideband unregistered\n");
 
 	kfree(sb);
 }
