@@ -279,6 +279,87 @@ out_unlock:
 	return ret;
 }
 
+/*
+ * Hand an endpoint over to the xHC audio sideband using resource @res_id, or
+ * give it back to xhci if @res_id is 0 (xHCI 7.9.2.1). The vdev is validated
+ * under the same xhci->lock that queues the command. ep->sideband and
+ * sb->eps[] are only updated once the command completed successfully and the
+ * vdev has been validated again.
+ *
+ * Caller must hold sb->mutex
+ */
+static int
+sideband_set_ep_resource_sync(struct xhci_sideband *sb, unsigned int ep_index,
+			      u32 res_id)
+{
+	struct xhci_command *cmd;
+	struct xhci_virt_ep *ep;
+	unsigned long flags;
+	int ret = 0;
+
+	lockdep_assert_held(&sb->mutex);
+
+	cmd = xhci_alloc_command(sb->xhci, true, GFP_KERNEL);
+	if (!cmd)
+		ret = -ENOMEM;
+
+	spin_lock_irqsave(&sb->xhci->lock, flags);
+
+	/* validate that xhci didn't free or reallocate vdev */
+	ep = sideband_to_ep(sb, ep_index);
+	if (!ep) {
+		ret = -ENODEV;
+		goto out_unlock;
+	}
+
+	/* fail add if ep is already in sideband use, or uses streams */
+	if (res_id) {
+		if (ep->sideband)
+			ret = -EBUSY;
+		else if (ep->ep_state & EP_HAS_STREAMS)
+			ret = -EINVAL;
+	} else if (ep->sideband != sb) {
+		/* fail remove if endpoint isn't part of this sideband */
+		ret = -ENODEV;
+	}
+
+	if (ret)
+		goto out_unlock;
+
+	ret = xhci_queue_set_ext_property(sb->xhci, cmd, sb->udev->slot_id,
+					  ep_index + 1, 0, PROP_ECI_AUDIO,
+					  AUDIO_SUBTYPE_SET_RES, res_id);
+	if (ret)
+		goto out_unlock;
+
+	xhci_ring_cmd_db(sb->xhci);
+	spin_unlock_irqrestore(&sb->xhci->lock, flags);
+
+	wait_for_completion(cmd->completion);
+
+	spin_lock_irqsave(&sb->xhci->lock, flags);
+	ep = sideband_to_ep(sb, ep_index);
+	if (!ep) {
+		ret = -ENODEV;
+		goto out_unlock;
+	}
+
+	if (cmd->status != COMP_SUCCESS) {
+		ret = -EIO;
+		goto out_unlock;
+	}
+
+	ep->sideband = res_id ? sb : NULL;
+	sb->eps[ep_index] = res_id ? ep : NULL;
+
+out_unlock:
+	spin_unlock_irqrestore(&sb->xhci->lock, flags);
+	if (cmd)
+		xhci_free_command(sb->xhci, cmd);
+
+	return ret;
+}
+
 /* Caller must hold sb->mutex */
 static int
 __xhci_sideband_remove_endpoint(struct xhci_sideband *sb, unsigned int ep_index)
@@ -287,10 +368,17 @@ __xhci_sideband_remove_endpoint(struct xhci_sideband *sb, unsigned int ep_index)
 
 	lockdep_assert_held(&sb->mutex);
 
-	if (sb->type == XHCI_SIDEBAND_VENDOR)
+	if (sb->type == XHCI_SIDEBAND_VENDOR) {
 		ret = sideband_stop_endpoint_sync(sb, ep_index, true);
+		sb->eps[ep_index] = NULL;
+	}
 
-	sb->eps[ep_index] = NULL;
+	if (sb->type == XHCI_SIDEBAND_AUDIO) {
+		ret = sideband_set_ep_resource_sync(sb, ep_index, 0);
+		/* removed on success or when the endpoint is no longer ours */
+		if (ret == 0 || ret == -ENODEV)
+			sb->eps[ep_index] = NULL;
+	}
 
 	return ret;
 }
@@ -486,6 +574,7 @@ xhci_sideband_add_endpoint(struct xhci_sideband *sb,
 {
 	struct xhci_virt_ep *ep;
 	unsigned int ep_index;
+	unsigned int res_id;
 	unsigned long flags;
 	int ret = 0;
 
@@ -499,8 +588,17 @@ xhci_sideband_add_endpoint(struct xhci_sideband *sb,
 	if (sb->eps[ep_index])
 		return -EBUSY;
 
-	if (sb->type == XHCI_SIDEBAND_AUDIO)
-		return -EINVAL;
+	if (sb->type == XHCI_SIDEBAND_AUDIO) {
+		res_id = sb->eps_res_id[ep_index];
+		if (res_id == 0) {
+			dev_dbg(&sb->udev->dev,
+				"Can't offload endpoint %u, missing resource id\n",
+				ep_index);
+			return -EINVAL;
+		}
+
+		return sideband_set_ep_resource_sync(sb, ep_index, res_id);
+	}
 
 	/*
 	 * Note, we don't know the DMA mask of the audio DSP device, if its
@@ -816,6 +914,7 @@ void
 xhci_sideband_unregister(struct xhci_sideband *sb)
 {
 	struct xhci_virt_device *vdev;
+	struct xhci_virt_ep *ep;
 	struct usb_device *udev;
 	struct xhci_hcd *xhci;
 	int res_id;
@@ -847,6 +946,14 @@ xhci_sideband_unregister(struct xhci_sideband *sb)
 	__xhci_sideband_remove_interrupter(sb);
 
 	spin_lock_irq(&xhci->lock);
+
+	/* clear endpoint sideband pointers for endpoints that failed removal */
+	for (i = 0; i < EP_CTX_PER_DEV; i++) {
+		ep = sideband_to_ep(sb, i);
+		if (ep && ep->sideband == sb)
+			ep->sideband = NULL;
+		sb->eps[i] = NULL;
+	}
 	vdev = sideband_to_vdev(sb);
 	if (vdev)
 		vdev->sideband = NULL;
