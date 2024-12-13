@@ -147,21 +147,44 @@ xhci_sideband_endpoint_belongs(struct xhci_sideband *sb,
 	return sb->udev->ep_out[epnum] == host_ep;
 }
 
+static int
+xhci_sideband_hw_set_resource(struct xhci_sideband *sb, u32 param, u32 ep_index)
+{
+	unsigned int slot_id;
+	int ret;
+
+	slot_id = sb->udev->slot_id;
+
+	ret = xhci_set_ext_property(sb->xhci, slot_id, ep_index, PROP_ECI_AUDIO,
+				    AUDIO_SUBTYPE_SET_RES, param);
+	return ret;
+}
+
 /* Caller must hold sb->mutex */
-static void
+static int
 __xhci_sideband_remove_endpoint(struct xhci_sideband *sb, struct xhci_virt_ep *ep)
 {
+	int ret = 0;
+
 	lockdep_assert_held(&sb->mutex);
 
 	/*
 	 * Issue a stop endpoint command when an endpoint is removed.
 	 * The stop ep cmd handler will handle the ring cleanup.
 	 */
-	if (sb->type == XHCI_SIDEBAND_VENDOR)
+	if (sb->type == XHCI_SIDEBAND_VENDOR) {
 		xhci_stop_endpoint_sync(sb->xhci, ep, 0, GFP_KERNEL);
+
+	} else if (sb->type == XHCI_SIDEBAND_AUDIO) {
+		ret = xhci_sideband_hw_set_resource(sb, 0, ep->ep_index);
+		if (ret)
+			xhci_warn(sb->xhci, "Failed to clear sideband ep resource\n");
+	}
 
 	ep->sideband = NULL;
 	sb->eps[ep->ep_index] = NULL;
+
+	return ret;
 }
 
 /* Caller must hold sb->mutex */
@@ -353,6 +376,8 @@ xhci_sideband_add_endpoint(struct xhci_sideband *sb,
 	struct xhci_virt_device *vdev;
 	struct xhci_virt_ep *ep;
 	unsigned int ep_index;
+	unsigned int res_id;
+	int ret;
 
 	guard(mutex)(&sb->mutex);
 
@@ -381,11 +406,16 @@ xhci_sideband_add_endpoint(struct xhci_sideband *sb,
 		return -EBUSY;
 
 	if (sb->type == XHCI_SIDEBAND_AUDIO) {
-		if (!sb->eps_res_id[ep_index]) {
+		res_id = sb->eps_res_id[ep_index];
+		if (res_id == 0) {
 			xhci_info(sb->xhci, "%s: Can't offload endpoint %d, missing resource id\n",
 				  __func__, ep_index);
 			return -ENODEV;
 		}
+
+		ret = xhci_sideband_hw_set_resource(sb, res_id, ep_index);
+		if (ret)
+			return ret;
 	}
 
 	ep->sideband = sb;
@@ -423,9 +453,8 @@ xhci_sideband_remove_endpoint(struct xhci_sideband *sb,
 		sb->eps[ep_index] = NULL;
 		return -ENODEV;
 	}
-	__xhci_sideband_remove_endpoint(sb, ep);
 
-	return 0;
+	return __xhci_sideband_remove_endpoint(sb, ep);
 }
 EXPORT_SYMBOL_GPL(xhci_sideband_remove_endpoint);
 
@@ -632,7 +661,7 @@ xhci_sideband_register(struct usb_interface *intf, enum xhci_sideband_type type,
 		break;
 	case XHCI_SIDEBAND_AUDIO:
 		if (!xhci_sideband_hw_capable(xhci)) {
-			dev_err(&udev->dev, "%s: Host not sideband capable\n",
+			dev_info(&udev->dev, "%s: Host not sideband capable\n",
 				__func__);
 			return NULL;
 		}
