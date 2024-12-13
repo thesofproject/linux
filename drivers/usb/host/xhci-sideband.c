@@ -14,6 +14,29 @@
 #include "xhci.h"
 
 /* sideband internal helpers */
+
+static bool
+xhci_sideband_hw_capable(struct xhci_hcd *xhci)
+{
+	u16 buf = 0;
+	int ret;
+
+	/* xHCI 1.2 and later can support GSC bit in hcc_params2 register */
+	if ((xhci->hci_version < 0x120) || !(xhci->hcc_params2 & HCC2_GSC))
+		return false;
+	/*
+	 * Note, normally xHC hardware writes directly to buf, so buf needs to
+	 * be DMA mappable. PROP_ECI_ALL is special and returns 16 bits data in
+	 * the command completion event, which is then copied to buf.
+	 */
+	ret = xhci_get_ext_property(xhci, 0, 0, PROP_ECI_ALL, 0, &buf, sizeof(buf));
+
+	if (ret >= 0 && buf & PROP_ECI_AUDIO)
+		return true;
+
+	return false;
+}
+
 static struct sg_table *
 xhci_ring_to_sgtable(struct xhci_sideband *sb, struct xhci_ring *ring)
 {
@@ -102,7 +125,8 @@ __xhci_sideband_remove_endpoint(struct xhci_sideband *sb, struct xhci_virt_ep *e
 	 * Issue a stop endpoint command when an endpoint is removed.
 	 * The stop ep cmd handler will handle the ring cleanup.
 	 */
-	xhci_stop_endpoint_sync(sb->xhci, ep, 0, GFP_KERNEL);
+	if (sb->type == XHCI_SIDEBAND_VENDOR)
+		xhci_stop_endpoint_sync(sb->xhci, ep, 0, GFP_KERNEL);
 
 	ep->sideband = NULL;
 	sb->eps[ep->ep_index] = NULL;
@@ -425,13 +449,23 @@ xhci_sideband_register(struct usb_interface *intf, enum xhci_sideband_type type,
 	struct xhci_virt_device *vdev;
 	struct xhci_sideband *sb;
 
-	/*
-	 * Make sure the usb device is connected to a xhci controller.  Fail
-	 * registration if the type is anything other than  XHCI_SIDEBAND_VENDOR,
-	 * as this is the only type that is currently supported by xhci-sideband.
-	 */
-	if (!udev->slot_id || type != XHCI_SIDEBAND_VENDOR)
+	/* Make sure the usb device is connected to a xhci controller. */
+	if (!udev->slot_id)
 		return NULL;
+
+	switch (type) {
+	case XHCI_SIDEBAND_VENDOR:
+		break;
+	case XHCI_SIDEBAND_AUDIO:
+		if (!xhci_sideband_hw_capable(xhci)) {
+			dev_err(&udev->dev, "%s: Host not sideband capable\n",
+				__func__);
+			return NULL;
+		}
+		break;
+	default:
+		return NULL;
+	}
 
 	sb = kzalloc_node(sizeof(*sb), GFP_KERNEL, dev_to_node(hcd->self.sysdev));
 	if (!sb)
@@ -461,6 +495,8 @@ xhci_sideband_register(struct usb_interface *intf, enum xhci_sideband_type type,
 
 	spin_unlock_irq(&xhci->lock);
 
+	dev_dbg(&udev->dev, "Registered for sideband use\n");
+
 	return sb;
 }
 EXPORT_SYMBOL_GPL(xhci_sideband_register);
@@ -479,6 +515,7 @@ void
 xhci_sideband_unregister(struct xhci_sideband *sb)
 {
 	struct xhci_virt_device *vdev;
+	struct usb_device *udev;
 	struct xhci_hcd *xhci;
 	int i;
 
@@ -486,6 +523,7 @@ xhci_sideband_unregister(struct xhci_sideband *sb)
 		return;
 
 	xhci = sb->xhci;
+	udev = sb->udev;
 
 	scoped_guard(mutex, &sb->mutex) {
 		vdev = sideband_to_vdev(sb);
@@ -504,6 +542,8 @@ xhci_sideband_unregister(struct xhci_sideband *sb)
 	if (vdev)
 		vdev->sideband = NULL;
 	spin_unlock_irq(&xhci->lock);
+
+	dev_dbg(&udev->dev, "sideband unregistered\n");
 
 	kfree(sb);
 }
