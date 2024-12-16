@@ -2007,6 +2007,10 @@ int xhci_queue_get_ext_property(struct xhci_hcd *xhci, struct xhci_command *cmd,
 		u32 property, u32 subtype, u32 slot_id, u32 ep_id);
 int xhci_queue_set_ext_property(struct xhci_hcd *xhci, struct xhci_command *cmd,
 		u32 param, u32 property, u32 subtype, u32 slot_id, u32 ep_id);
+int xhci_set_ext_property(struct xhci_hcd *xhci, u32 slot_id, u32 ep_index,
+		u32 property, u32 subtype, u32 param);
+int xhci_get_ext_property(struct xhci_hcd *xhci, u32 slot_id, u32 ep_index,
+		u32 property, u32 subtype, void *buf, size_t buf_len);
 void xhci_handle_command_timeout(struct work_struct *work);
 
 void xhci_ring_ep_doorbell(struct xhci_hcd *xhci, unsigned int slot_id,
