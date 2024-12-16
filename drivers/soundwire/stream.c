@@ -643,6 +643,8 @@ static int sdw_program_params(struct sdw_bus *bus, bool prepare)
 
 	/* Check if all Peripherals comply with SDCA */
 	list_for_each_entry(slave, &bus->slaves, node) {
+		if (!slave->dev_num_sticky)
+			continue;
 		if (!is_clock_scaling_supported_by_slave(slave)) {
 			dev_dbg(&slave->dev, "The Peripheral doesn't comply with SDCA\n");
 			goto manager_runtime;
@@ -659,6 +661,8 @@ static int sdw_program_params(struct sdw_bus *bus, bool prepare)
 		int scale_index;
 		u8 base;
 
+		if (!slave->dev_num_sticky)
+			continue;
 		scale_index = sdw_slave_get_scale_index(slave, &base);
 		if (scale_index < 0)
 			return scale_index;
