@@ -5208,6 +5208,95 @@ static int xhci_disable_usb3_lpm_timeout(struct usb_hcd *hcd,
 }
 #endif	/* CONFIG_PM */
 
+/**
+ * xhci_get_ext_property - issue a Get Extended Property command and wait
+ * @xhci: xHCI host controller
+ * @slot_id: slot ID of the device, or 0 for device independent properties
+ * @ep_id: endpoint id (DCI), only used if @slot_id is set.
+ * @property: Extended Capability Identifier (ECI), PROP_ECI_ALL to list
+ *	      supported extended capabilities
+ * @subtype: command subtype, specific to the extended capability
+ * @buf: buffer for the returned Extended Property Context
+ * @buf_len: size of @buf
+ *
+ * For PROP_ECI_ALL the xHC returns a 16 bit bitmap of supported extended
+ * capabilities in the command completion event, which is copied to @buf.
+ * For all other properties the xHC writes the Extended Property Context
+ * directly to @buf using DMA, so @buf must be DMA-able memory, i.e. not on
+ * the stack or vmalloc'ed.
+ *
+ * Context: Process context. Sleeps until the command completes.
+ *
+ * Return: 0 on success, negative error code otherwise.
+ */
+int xhci_get_ext_property(struct xhci_hcd *xhci, u32 slot_id, u32 ep_id,
+			  u32 property, u32 subtype, void *buf, size_t buf_len)
+{
+	struct device *dev = xhci_to_hcd(xhci)->self.sysdev;
+	struct xhci_command *cmd;
+	dma_addr_t dma = 0;
+	unsigned long flags;
+	int ret;
+
+	if (!buf)
+		return -EINVAL;
+
+	/* PROP_ECI_ALL xHC does not write to buf, data is in event TRB */
+	if (property == PROP_ECI_ALL && (buf_len < sizeof(u16)))
+		return -EINVAL;
+
+	cmd = xhci_alloc_command(xhci, true, GFP_KERNEL);
+	if (!cmd)
+		return -ENOMEM;
+
+	/* xHC writes the Extended Property Context to buf for other properties */
+	if (property != PROP_ECI_ALL) {
+		dma = dma_map_single(dev, buf, buf_len, DMA_FROM_DEVICE);
+		if (dma_mapping_error(dev, dma)) {
+			ret = -ENOMEM;
+			goto free_cmd;
+		}
+	}
+
+	spin_lock_irqsave(&xhci->lock, flags);
+
+	if (slot_id && !xhci->devs[slot_id]) {
+		spin_unlock_irqrestore(&xhci->lock, flags);
+		ret = -ENODEV;
+		goto unmap;
+	}
+
+	ret = xhci_queue_get_ext_property(xhci, cmd, slot_id, ep_id, dma,
+					  property, subtype);
+	if (ret) {
+		spin_unlock_irqrestore(&xhci->lock, flags);
+		goto unmap;
+	}
+
+	xhci_ring_cmd_db(xhci);
+	spin_unlock_irqrestore(&xhci->lock, flags);
+
+	wait_for_completion(cmd->completion);
+
+	switch (cmd->status) {
+	case COMP_SUCCESS:
+		/* cmd->comp_param is u32, PROP_ECI_ALL only uses bits 15:0 */
+		if (property == PROP_ECI_ALL)
+			*(u16 *)buf = cmd->comp_param;
+		break;
+	default:
+		xhci_dbg(xhci, "Get ext property command failed %u\n", cmd->status);
+		ret = -EIO;
+	}
+unmap:
+	if (property != PROP_ECI_ALL)
+		dma_unmap_single(dev, dma, buf_len, DMA_FROM_DEVICE);
+free_cmd:
+	xhci_free_command(xhci, cmd);
+
+	return ret;
+}
+
 /*-------------------------------------------------------------------------*/
 
 /* Once a hub descriptor is fetched for a device, we need to update the xHC's
