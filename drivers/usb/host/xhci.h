@@ -1554,6 +1554,11 @@ struct xhci_hub {
 	u8			min_rev;
 };
 
+struct xhci_sideband_idr {
+	struct xarray	id_xa;
+	struct xa_limit	id_lim;
+};
+
 /* There is one xhci_hcd structure per controller */
 struct xhci_hcd {
 	struct usb_hcd *main_hcd;
@@ -1727,7 +1732,8 @@ struct xhci_hcd {
 	struct dentry		*debugfs_root;
 	struct dentry		*debugfs_slots;
 	struct list_head	regset_list;
-
+	/* Sideband controlled endpoint resource ids, xhci 7.9.2.1 */
+	struct xhci_sideband_idr	sideband_idr;
 	void			*dbc;
 	/* platform-specific data -- must come last */
 	unsigned long		priv[] __aligned(sizeof(s64));

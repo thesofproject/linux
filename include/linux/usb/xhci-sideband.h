@@ -41,6 +41,7 @@ struct xhci_sideband_event {
  * @xhci: The xhci host controller the usb device is connected to
  * @udev: the usb device accessed via sideband
  * @eps: array of endpoints controlled via sideband
+ * @eps_res_id: array of resource ids for endpoints
  * @ir: event handling and buffer for sideband accessed device
  * @type: xHCI sideband type
  * @mutex: mutex for sideband operations
@@ -51,6 +52,7 @@ struct xhci_sideband {
 	struct xhci_hcd                 *xhci;
 	struct usb_device		*udev;
 	struct xhci_virt_ep             *eps[EP_CTX_PER_DEV];
+	unsigned int			eps_res_id[EP_CTX_PER_DEV];
 	struct xhci_interrupter         *ir;
 	enum xhci_sideband_type		type;
 
@@ -97,6 +99,13 @@ void
 xhci_sideband_remove_interrupter(struct xhci_sideband *sb);
 int
 xhci_sideband_interrupter_id(struct xhci_sideband *sb);
+int
+xhci_sideband_alloc_resource_id(struct xhci_sideband *sb,
+				struct usb_host_endpoint *host_ep,
+				unsigned int min, unsigned int max);
+int
+xhci_sideband_free_resource_id(struct xhci_sideband *sb,
+			       unsigned int res_id);
 
 #if IS_ENABLED(CONFIG_USB_XHCI_SIDEBAND)
 void xhci_sideband_notify_ep_ring_free(struct xhci_sideband *sb,

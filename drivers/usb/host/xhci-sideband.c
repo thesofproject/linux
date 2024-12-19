@@ -14,12 +14,60 @@
 #include "xhci.h"
 
 /* sideband internal helpers */
+static int
+sideband_res_id_to_ep_index(struct xhci_sideband *sb, unsigned int res_id)
+{
+	int i;
+
+	if (res_id == 0)
+		return -EINVAL;
+
+	for (i = 0; i < EP_CTX_PER_DEV; i++) {
+		if (sb->eps_res_id[i] == res_id)
+			return i;
+	}
+
+	return -ENODEV;
+}
+
+static int
+xhci_sideband_hw_max_resources(struct xhci_hcd *xhci)
+{
+	union xhci_extprop_ctx *ctx;
+	unsigned int res_max;
+	int ret;
+
+	ctx = kzalloc_obj(*ctx, GFP_KERNEL);
+	if (!ctx)
+		return -ENOMEM;
+
+	ret = xhci_get_ext_property(xhci, 0, 0, PROP_ECI_AUDIO,
+				    AUDIO_SUBTYPE_GET_RES, ctx, sizeof(*ctx));
+	if (ret < 0) {
+		kfree(ctx);
+		return ret;
+	}
+
+	res_max = ctx->generic.byte[0];
+	kfree(ctx);
+
+	/* Intel hosts sideband resources are capped at 6 */
+	if (xhci->quirks & XHCI_INTEL_HOST)
+		res_max = min(res_max, 6);
+
+	return res_max;
+}
 
 static bool
 xhci_sideband_hw_capable(struct xhci_hcd *xhci)
 {
 	u16 buf = 0;
+	int res_max;
 	int ret;
+
+	/* fastpath, all checks are done if resource limits are set */
+	if (xhci->sideband_idr.id_lim.max > 0)
+		return true;
 
 	/* xHCI 1.2 and later can support GSC bit in hcc_params2 register */
 	if ((xhci->hci_version < 0x120) || !(xhci->hcc_params2 & HCC2_GSC))
@@ -30,8 +78,16 @@ xhci_sideband_hw_capable(struct xhci_hcd *xhci)
 	 * the command completion event, which is then copied to buf.
 	 */
 	ret = xhci_get_ext_property(xhci, 0, 0, PROP_ECI_ALL, 0, &buf, sizeof(buf));
-	if (ret >= 0 && buf & PROP_ECI_AUDIO)
+	if (ret < 0 || !(buf & PROP_ECI_AUDIO))
+		return false;
+
+	/* check xHC has at least one resource for endpoint sideband use */
+	res_max = xhci_sideband_hw_max_resources(xhci);
+	if (res_max > 0) {
+		xhci->sideband_idr.id_lim.min = 1;
+		xhci->sideband_idr.id_lim.max = res_max;
 		return true;
+	}
 
 	return false;
 }
@@ -111,6 +167,23 @@ sideband_to_vdev(struct xhci_sideband *sb)
 		return vdev;
 
 	return NULL;
+}
+
+static bool
+xhci_sideband_endpoint_belongs(struct xhci_sideband *sb,
+			       struct usb_host_endpoint *host_ep)
+{
+	unsigned int epnum;
+
+	if (!sb || !host_ep)
+		return false;
+
+	epnum = usb_endpoint_num(&host_ep->desc);
+
+	if (usb_endpoint_dir_in(&host_ep->desc))
+		return sb->udev->ep_in[epnum] == host_ep;
+
+	return sb->udev->ep_out[epnum] == host_ep;
 }
 
 /*
@@ -238,6 +311,140 @@ __xhci_sideband_remove_interrupter(struct xhci_sideband *sb)
 /* sideband api functions */
 
 /**
+ * xhci_sideband_alloc_resource_id - reserve a resource id to offload an endpoint
+ * @sb: sideband instance for this usb device
+ * @host_ep: usb host endpoint
+ * @min: lowest resource id acceptable to the caller, 0 for no preference
+ * @max: highest resource id acceptable to the caller, 0 for no preference
+ *
+ * Reserves a sideband resource id for this endpoint from the limited set of
+ * xHC resource ids. Only valid for XHCI_SIDEBAND_AUDIO sideband types.
+ * Once an endpoint has a valid resource id then it can be assigned to audio
+ * sideband by calling xhci_sideband_add_endpoint()
+ *
+ * The xHC limits which resources an endpoint of a direction may use. An
+ * offload engine which ties a function to particular resources narrows that
+ * further with @min and @max, which have to lie within the xHC's limits for
+ * the endpoint; the first free resource of the intersection is reserved.
+ * With both 0 the first free resource the xHC allows is reserved.
+ *
+ * An endpoint holds one reservation at a time; it has to be released with
+ * xhci_sideband_free_resource_id() before another one can be made.
+ *
+ * Returns: positive resource id on success, -EBUSY if all resources of the
+ * range are taken or the endpoint already holds a reservation, negative
+ * error otherwise.
+ */
+int
+xhci_sideband_alloc_resource_id(struct xhci_sideband *sb,
+				struct usb_host_endpoint *host_ep,
+				unsigned int min, unsigned int max)
+{
+	struct xhci_sideband_idr *res;
+	struct xa_limit lim;
+	unsigned int ep_index;
+	unsigned int res_id;
+	int ret;
+
+	if (!xhci_sideband_endpoint_belongs(sb, host_ep))
+		return -EINVAL;
+
+	guard(mutex)(&sb->mutex);
+
+	if (sb->type != XHCI_SIDEBAND_AUDIO)
+		return -EINVAL;
+
+	ep_index = xhci_get_endpoint_index(&host_ep->desc);
+	res = &sb->xhci->sideband_idr;
+	lim = res->id_lim;
+
+	/*
+	 * Intel xHC hardware limits resource IDs 1 and 2 to output endpoints.
+	 * IDs 3-6 are for input endpoints
+	 */
+	if (sb->xhci->quirks & XHCI_INTEL_HOST) {
+		if (usb_endpoint_dir_out(&host_ep->desc))
+			lim.max = min(lim.max, 2);
+		else
+			lim.min = 3;
+	}
+
+	if (min) {
+		if (min < lim.min || min > lim.max)
+			return -EINVAL;
+		lim.min = min;
+	}
+
+	if (max) {
+		if (max < lim.min || max > lim.max)
+			return -EINVAL;
+		lim.max = max;
+	}
+
+	if (sb->eps_res_id[ep_index]) {
+		dev_dbg(&sb->udev->dev, "ep %u already holds resource id %u\n",
+			ep_index, sb->eps_res_id[ep_index]);
+		return -EBUSY;
+	}
+
+	ret = xa_alloc(&res->id_xa, &res_id, sb, lim, GFP_KERNEL);
+	if (ret)
+		return ret;
+
+	sb->eps_res_id[ep_index] = res_id;
+
+	dev_dbg(&sb->udev->dev, "allocated sideband resource %u for ep %u\n",
+		res_id, ep_index);
+
+	return res_id;
+}
+EXPORT_SYMBOL_GPL(xhci_sideband_alloc_resource_id);
+
+/**
+ * xhci_sideband_free_resource_id - release a resource id
+ * @sb: sideband instance for this usb device
+ * @res_id: resource id to free
+ *
+ * Free a previously reserved sideband resource id, making it available for
+ * endpoints. Don't release the resource id if the endpoint is in active
+ * sideband use.
+ *
+ * Returns: 0 on success, negative error otherwise.
+ */
+int
+xhci_sideband_free_resource_id(struct xhci_sideband *sb,
+			       unsigned int res_id)
+{
+	struct xhci_sideband_idr *res;
+	int ep_index;
+
+	if (!sb)
+		return -EINVAL;
+
+	res = &sb->xhci->sideband_idr;
+
+	guard(mutex)(&sb->mutex);
+
+	ep_index = sideband_res_id_to_ep_index(sb, res_id);
+	if (ep_index < 0)
+		return -ENODEV;
+
+	if (sb != xa_load(&res->id_xa, res_id))
+		return -ENODEV;
+	if (sb->eps[ep_index])
+		return -EBUSY;
+
+	xa_erase(&res->id_xa, res_id);
+	sb->eps_res_id[ep_index] = 0;
+
+	dev_dbg(&sb->udev->dev, "erase ep %u resource id %u\n",
+		ep_index, res_id);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(xhci_sideband_free_resource_id);
+
+/**
  * xhci_sideband_notify_ep_ring_free - notify client of xfer ring free
  * @sb: sideband instance for this usb device
  * @ep_index: usb endpoint index
@@ -283,6 +490,9 @@ xhci_sideband_add_endpoint(struct xhci_sideband *sb,
 	int ret = 0;
 
 	guard(mutex)(&sb->mutex);
+
+	if (!xhci_sideband_endpoint_belongs(sb, host_ep))
+		return -EINVAL;
 
 	ep_index = xhci_get_endpoint_index(&host_ep->desc);
 
@@ -608,6 +818,7 @@ xhci_sideband_unregister(struct xhci_sideband *sb)
 	struct xhci_virt_device *vdev;
 	struct usb_device *udev;
 	struct xhci_hcd *xhci;
+	int res_id;
 	int i;
 
 	if (!sb)
@@ -621,6 +832,16 @@ xhci_sideband_unregister(struct xhci_sideband *sb)
 	for (i = 0; i < EP_CTX_PER_DEV; i++) {
 		if (sb->eps[i])
 			__xhci_sideband_remove_endpoint(sb, i);
+
+		if (sb->type != XHCI_SIDEBAND_AUDIO)
+			continue;
+
+		res_id = sb->eps_res_id[i];
+		if (res_id && sb == xa_load(&xhci->sideband_idr.id_xa, res_id)) {
+			dev_dbg(&udev->dev, "%s erase ep %u res_id %u\n",
+				__func__, i, res_id);
+			xa_erase(&xhci->sideband_idr.id_xa, res_id);
+		}
 	}
 
 	__xhci_sideband_remove_interrupter(sb);
