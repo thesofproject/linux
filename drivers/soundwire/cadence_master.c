@@ -1352,7 +1352,6 @@ static int cdns_init_clock_ctrl(struct sdw_cdns *cdns)
 	u32 val;
 	u32 ssp_interval;
 	int divider;
-	int freq;
 
 	dev_dbg(cdns->dev, "mclk %d max %d row %d col %d\n",
 		prop->mclk_freq,
@@ -1360,10 +1359,15 @@ static int cdns_init_clock_ctrl(struct sdw_cdns *cdns)
 		prop->default_row,
 		prop->default_col);
 
+	if (!prop->default_frame_rate || !prop->default_row) {
+		dev_err(cdns->dev, "Default frame_rate %d or row %d is invalid\n",
+			prop->default_frame_rate, prop->default_row);
+		return -EINVAL;
+	}
+
 	/* Set clock divider */
 	divider	= (prop->mclk_freq * SDW_DOUBLE_RATE_FACTOR /
 		bus->params.curr_dr_freq) - 1;
-	freq = bus->params.curr_dr_freq >> 1;
 
 	cdns_updatel(cdns, CDNS_MCP_CLK_CTRL0,
 		     CDNS_MCP_CLK_MCLKD_MASK, divider);
@@ -1371,13 +1375,7 @@ static int cdns_init_clock_ctrl(struct sdw_cdns *cdns)
 		     CDNS_MCP_CLK_MCLKD_MASK, divider);
 
 	/* Set frame shape base on the actual bus frequency. */
-	if (!prop->default_frame_rate || !prop->default_row) {
-		dev_err(cdns->dev, "Default frame_rate %d or row %d is invalid\n",
-			prop->default_frame_rate, prop->default_row);
-		return -EINVAL;
-	}
-
-	prop->default_col = freq * SDW_DOUBLE_RATE_FACTOR /
+	prop->default_col = bus->params.curr_dr_freq /
 			    prop->default_frame_rate / prop->default_row;
 
 	/*
