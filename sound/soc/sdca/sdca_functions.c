@@ -303,7 +303,8 @@ static int find_sdca_entities(struct device *dev,
 		return -EINVAL;
 	}
 
-	entities = devm_kcalloc(dev, num_entities, sizeof(*entities), GFP_KERNEL);
+	/* Add 1 to make space for Entity 0 */
+	entities = devm_kcalloc(dev, num_entities + 1, sizeof(*entities), GFP_KERNEL);
 	if (!entities)
 		return -ENOMEM;
 
@@ -341,7 +342,13 @@ static int find_sdca_entities(struct device *dev,
 			return ret;
 	}
 
-	function->num_entities = num_entities;
+	/*
+	 * Add Entity 0 at end of the array, avoids it being needlessly checked
+	 * by all the Entity searches involved in creating connections.
+	 */
+	entities[num_entities].label = "entity0";
+
+	function->num_entities = num_entities + 1;
 	function->entities = entities;
 
 	return 0;
@@ -455,6 +462,10 @@ static int find_sdca_connections(struct device *dev,
 		char entity_property[SDCA_PROPERTY_LENGTH];
 		struct fwnode_handle *entity_node;
 		int ret;
+
+		/* Entity 0 cannot have connections */
+		if (entity->type == SDCA_ENTITY_TYPE_ENTITY_0)
+			continue;
 
 		/* DisCo uses upper-case for hex numbers */
 		snprintf(entity_property, sizeof(entity_property),
