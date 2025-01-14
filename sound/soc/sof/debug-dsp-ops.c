@@ -177,8 +177,8 @@ static ssize_t sof_dsp_ops_tester_dfs_read(struct file *file, char __user *buffe
 {
 	struct snd_sof_dfsentry *dfse = file->private_data;
 	struct snd_sof_dev *sdev = dfse->sdev;
+	const char *string = NULL;
 	struct dentry *dentry;
-	const char *string;
 	size_t size_ret;
 
 	/* return the FW filename or path */
