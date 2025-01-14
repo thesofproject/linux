@@ -16,6 +16,7 @@ int xe_pxp_ops_ioctl(struct drm_device *dev, void *data, struct drm_file *drmfil
 void xe_pxp_multi_session_init(struct xe_pxp *pxp);
 u32 xe_pxp_release_all_sessions(struct xe_pxp *pxp);
 void xe_pxp_invalidate_sessions(struct xe_pxp *pxp, u32 mask);
+void xe_pxp_multi_session_set_arb_session_tag(struct xe_pxp *pxp, bool active);
 
 void xe_pxp_close(struct xe_pxp *pxp, struct drm_file *drmfile);
 
