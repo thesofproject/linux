@@ -128,6 +128,11 @@ jobs:
           sudo apt update
           sudo apt install -y debhelper
 
+      - name: Install build-essential
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential
+
       - name: build start
         run: |
           export ARCH=x86_64 KCFLAGS="-Wall -Werror"
