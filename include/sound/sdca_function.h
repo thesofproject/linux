@@ -57,6 +57,16 @@ enum sdca_function_type {
 #define	SDCA_FUNCTION_TYPE_IMP_DEF_NAME			"ImplementationDefined"
 
 /**
+ * struct sdca_init_write - a single initialization write
+ * @addr: Register address to be written
+ * @val: Single byte value to be written
+ */
+struct sdca_init_write {
+	u32 addr;
+	u8 val;
+};
+
+/**
  * enum sdca_entity0_controls - SDCA Controls for Entity 0
  *
  * Control Selectors for Entity 0 from SDCA specification v1.0 Section
@@ -158,7 +168,9 @@ struct sdca_entity {
 /**
  * struct sdca_function_data - top-level information for one SDCA function
  * @desc: Pointer to short descriptor from initial parsing.
+ * @init_table: Pointer to a table of initialization writes.
  * @entities: Dynamically allocated array of Entities.
+ * @num_init_table: Number of initialization writes.
  * @num_entities: Number of Entities reported in this Function.
  * @busy_max_delay: Maximum Function busy delay in microseconds, before an
  * error should be reported.
@@ -166,7 +178,9 @@ struct sdca_entity {
 struct sdca_function_data {
 	struct sdca_function_desc *desc;
 
+	struct sdca_init_write *init_table;
 	struct sdca_entity *entities;
+	int num_init_table;
 	int num_entities;
 
 	unsigned int busy_max_delay;
