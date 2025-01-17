@@ -19,7 +19,7 @@ static struct snd_soc_dai_driver imx8_dai[] = {
 
 static struct snd_sof_dsp_ops sof_imx8_ops;
 
-static int imx8_ops_init(struct snd_sof_dev *sdev)
+static void imx8_ops_init(struct snd_soc_dai_driver *dai_drv, uint32_t num_drv)
 {
 	/* first copy from template */
 	memcpy(&sof_imx8_ops, &sof_imx_ops, sizeof(sof_imx_ops));
@@ -31,8 +31,18 @@ static int imx8_ops_init(struct snd_sof_dev *sdev)
 		snd_sof_debugfs_add_region_item_iomem;
 
 	/* ... and finally set DAI driver */
-	sof_imx8_ops.drv = imx8_dai;
-	sof_imx8_ops.num_drv = ARRAY_SIZE(imx8_dai);
+	sof_imx8_ops.drv = dai_drv;
+	sof_imx8_ops.num_drv = num_drv;
+}
+
+static int imx_ops_init(struct snd_sof_dev *sdev)
+{
+	if (of_device_is_compatible(sdev->dev->of_node, "fsl,imx8qm-dsp") ||
+	    of_device_is_compatible(sdev->dev->of_node, "fsl,imx8qxp-dsp")) {
+		imx8_ops_init(imx8_dai, ARRAY_SIZE(imx8_dai));
+	} else {
+		return -EINVAL;
+	}
 
 	return 0;
 }
@@ -186,8 +196,8 @@ static struct snd_sof_of_mach sof_imx8_machs[] = {
 	{}
 };
 
-IMX_SOF_DEV_DESC(imx8, sof_imx8_machs, &imx8_chip_info, &sof_imx8_ops, imx8_ops_init);
-IMX_SOF_DEV_DESC(imx8x, sof_imx8_machs, &imx8x_chip_info, &sof_imx8_ops, imx8_ops_init);
+IMX_SOF_DEV_DESC(imx8, sof_imx8_machs, &imx8_chip_info, &sof_imx8_ops, imx_ops_init);
+IMX_SOF_DEV_DESC(imx8x, sof_imx8_machs, &imx8x_chip_info, &sof_imx8_ops, imx_ops_init);
 
 static const struct of_device_id sof_of_imx8_ids[] = {
 	{
