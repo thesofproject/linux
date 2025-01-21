@@ -130,3 +130,13 @@ bool kvm_iommu_host_dabt_handler(struct user_pt_regs *regs, u64 esr, u64 addr)
 	}
 	return false;
 }
+
+void kvm_iommu_host_stage2_idmap_complete(bool map)
+{
+	if (!kvm_idmap_initialized ||
+	    !kvm_iommu_ops->host_stage2_idmap_complete)
+		return;
+
+	trace_iommu_idmap_complete(map);
+	kvm_iommu_ops->host_stage2_idmap_complete(map);
+}
