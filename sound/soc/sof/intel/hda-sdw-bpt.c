@@ -20,7 +20,7 @@
 #include "../ipc4-priv.h"
 #include "hda.h"
 
-#define BPT_FREQUENCY		192000
+#define BPT_FREQUENCY		192000 /* The max rate defined in rate_bits[] hdac_device.c */
 #define BPT_MULTIPLIER		((BPT_FREQUENCY / 48000) - 1)
 #define BPT_CHAIN_DMA_FIFO_MS	10
 /*
