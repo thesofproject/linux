@@ -311,7 +311,7 @@ This model is not required BRA support:
        that stream can connect master ports as well as all peripheral
        DP0 ports.
 
-   (5) BRA transfers only make sense in the concept of one
+   (5) BRA transfers only make sense in the context of one
        Manager/Link, so the BRA stream handling does not rely on the
        concept of multi-link aggregation allowed by regular DAI links.
 
