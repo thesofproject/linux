@@ -297,7 +297,7 @@ out:
 	pm_runtime_mark_last_busy(&slave->dev);
 	pm_runtime_put(&slave->dev);
 
-	dev_dbg(&slave->dev, "command completed, num_byte %ld status %d, time %lld ms\n",
+	dev_dbg(&slave->dev, "command completed, num_byte %zu status %d, time %lld ms\n",
 		num_bytes, ret, div_u64(finish_t - start_t, NSEC_PER_MSEC));
 
 	return ret;
