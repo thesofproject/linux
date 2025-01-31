@@ -1235,7 +1235,13 @@ int __pkvm_host_donate_hyp_locked(u64 pfn, u64 nr_pages)
 		goto unlock;
 
 	__hyp_set_page_state_range(phys, size, PKVM_PAGE_OWNED);
-	WARN_ON(pkvm_create_mappings_locked(virt, virt + size, default_hyp_prot(phys)));
+	ret = pkvm_create_mappings_locked(virt, virt + size, default_hyp_prot(phys));
+	if (ret) {
+		WARN_ON(ret != -ENOMEM);
+		/* We might have failed halfway through, so remove anything we've installed */
+		pkvm_remove_mappings_locked(virt, virt + size);
+		goto unlock;
+	}
 	WARN_ON(host_stage2_set_owner_locked(phys, size, PKVM_ID_HYP));
 
 unlock:
@@ -1382,9 +1388,21 @@ int hyp_pin_shared_mem(void *from, void *to)
 		p = hyp_virt_to_page(cur);
 		hyp_page_ref_inc(p);
 		if (p->refcount == 1)
-			WARN_ON(pkvm_create_mappings_locked((void *)cur,
-							    (void *)cur + PAGE_SIZE,
-							    PAGE_HYP));
+			ret = pkvm_create_mappings_locked((void *)cur,
+							  (void *)cur + PAGE_SIZE,
+							  PAGE_HYP);
+	}
+
+	if (ret) {
+		WARN_ON(ret != -ENOMEM);
+		/* We might have failed halfway through, so remove anything we've installed */
+		end = cur;
+		for (cur = start; cur < end; cur += PAGE_SIZE) {
+			p = hyp_virt_to_page(cur);
+			hyp_page_ref_dec(p);
+			if (p->refcount == 0)
+				pkvm_remove_mappings_locked((void *)cur, (void *)cur + PAGE_SIZE);
+		}
 	}
 
 unlock:
