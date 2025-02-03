@@ -1807,7 +1807,7 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct sof_ipc4_copier_data *copier_data;
 	int input_fmt_index, output_fmt_index;
-	struct snd_pcm_hw_params ref_params;
+	struct snd_pcm_hw_params ref_params = { 0 };
 	struct sof_ipc4_copier *ipc4_copier;
 	struct snd_sof_dai *dai;
 	u32 gtw_cfg_config_length;
