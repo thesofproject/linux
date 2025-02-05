@@ -638,13 +638,13 @@ static int isight_probe(struct fw_unit *unit,
 
 	card->private_free = isight_card_free;
 
-	strcpy(card->driver, "iSight");
-	strcpy(card->shortname, "Apple iSight");
+	strscpy(card->driver, "iSight");
+	strscpy(card->shortname, "Apple iSight");
 	snprintf(card->longname, sizeof(card->longname),
 		 "Apple iSight (GUID %08x%08x) at %s, S%d",
 		 fw_dev->config_rom[3], fw_dev->config_rom[4],
 		 dev_name(&unit->device), 100 << fw_dev->max_speed);
-	strcpy(card->mixername, "iSight");
+	strspy(card->mixername, "iSight");
 
 	err = isight_create_pcm(isight);
 	if (err < 0)
