@@ -12,8 +12,10 @@
 #include <linux/dev_printk.h>
 #include <linux/device.h>
 #include <linux/module.h>
+#include <linux/regmap.h>
 #include <linux/soundwire/sdw_registers.h>
 #include <linux/string_helpers.h>
+#include <linux/types.h>
 #include <sound/control.h>
 #include <sound/sdca.h>
 #include <sound/sdca_asoc.h>
@@ -1185,6 +1187,68 @@ int sdca_asoc_populate_component(struct device *dev,
 	return 0;
 }
 EXPORT_SYMBOL_NS(sdca_asoc_populate_component, "SND_SOC_SDCA");
+
+int sdca_asoc_get_port(struct device *dev, struct regmap *regmap,
+		       struct sdca_function_data *function,
+		       struct snd_soc_dai *dai)
+{
+	struct sdca_entity *entity = &function->entities[dai->id];
+	struct sdca_control_range *range;
+	unsigned int reg, val;
+	int sel = -EINVAL;
+	int i, ret;
+
+	switch (entity->type) {
+	case SDCA_ENTITY_TYPE_IT:
+		sel = SDCA_CTL_IT_DATAPORT_SELECTOR;
+		break;
+	case SDCA_ENTITY_TYPE_OT:
+		sel = SDCA_CTL_OT_DATAPORT_SELECTOR;
+		break;
+	default:
+		break;
+	}
+
+	if (sel < 0 || !entity->iot.is_dataport) {
+		dev_err(dev, "%s: port number only available for dataports\n",
+			entity->label);
+		return -EINVAL;
+	}
+
+	range = selector_find_range(dev, entity, sel, SDCA_DATAPORT_SELECTOR_NCOLS,
+				    SDCA_DATAPORT_SELECTOR_NROWS);
+	if (!range)
+		return -EINVAL;
+
+	reg = SDW_SDCA_CTL(function->desc->adr, entity->id, sel, 0);
+
+	ret = regmap_read(regmap, reg, &val);
+	if (ret) {
+		dev_err(dev, "%s: failed to read dataport selector: %d\n",
+			entity->label, ret);
+		return ret;
+	}
+
+	for (i = 0; i < range->rows; i++) {
+		static const u8 port_mask = 0xF;
+
+		sel = sdca_range(range, val & port_mask, i);
+
+		/*
+		 * FIXME: Currently only a single dataport is supported, so
+		 * return the first one found, technically upto 4 dataports
+		 * could be linked, but this is not yet supported.
+		 */
+		if (sel != 0xFF)
+			return sel;
+
+		val >>= hweight8(port_mask);
+	}
+
+	dev_err(dev, "%s: no dataport found\n", entity->label);
+	return -ENODEV;
+}
+EXPORT_SYMBOL_NS(sdca_asoc_get_port, "SND_SOC_SDCA");
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("SDCA library");

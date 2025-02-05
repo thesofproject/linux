@@ -11,9 +11,11 @@
 #define __SDCA_ASOC_H__
 
 struct device;
+struct regmap;
 struct sdca_function_data;
 struct snd_kcontrol_new;
 struct snd_soc_component_driver;
+struct snd_soc_dai;
 struct snd_soc_dai_driver;
 struct snd_soc_dai_ops;
 struct snd_soc_dapm_route;
@@ -38,5 +40,9 @@ int sdca_asoc_populate_component(struct device *dev,
 				 struct snd_soc_component_driver *component_drv,
 				 struct snd_soc_dai_driver **dai_drv, int *num_dai_drv,
 				 const struct snd_soc_dai_ops *ops);
+
+int sdca_asoc_get_port(struct device *dev, struct regmap *regmap,
+		       struct sdca_function_data *function,
+		       struct snd_soc_dai *dai);
 
 #endif // __SDCA_ASOC_H__
