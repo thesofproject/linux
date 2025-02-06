@@ -3563,6 +3563,7 @@ static DEFINE_XARRAY_ALLOC1(mem_cgroup_ids);
 static void mem_cgroup_id_remove(struct mem_cgroup *memcg)
 {
 	if (memcg->id.id > 0) {
+		trace_android_vh_mem_cgroup_id_remove(memcg);
 		xa_erase(&mem_cgroup_ids, memcg->id.id);
 		memcg->id.id = 0;
 	}
@@ -3870,6 +3871,7 @@ static int mem_cgroup_css_online(struct cgroup_subsys_state *css)
 	 * regular ID destruction during offlining.
 	 */
 	xa_store(&mem_cgroup_ids, memcg->id.id, memcg, GFP_KERNEL);
+	trace_android_vh_mem_cgroup_css_online(css, memcg);
 
 	return 0;
 offline_kmem:
@@ -3883,6 +3885,7 @@ static void mem_cgroup_css_offline(struct cgroup_subsys_state *css)
 {
 	struct mem_cgroup *memcg = mem_cgroup_from_css(css);
 
+	trace_android_vh_mem_cgroup_css_offline(css, memcg);
 	memcg1_css_offline(memcg);
 
 	page_counter_set_min(&memcg->memory, 0);
