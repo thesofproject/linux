@@ -356,6 +356,7 @@ struct snd_sof_pcm {
 	struct snd_pcm_hw_params params[2];
 	struct snd_sof_platform_stream_params platform_params[2];
 	bool prepared[2]; /* PCM_PARAMS set successfully */
+	bool setup_done[2]; /* the setup of the SOF PCM device is done */
 	bool pending_stop[2]; /* only used if (!pcm_ops->platform_stop_during_hw_free) */
 
 	/* Must be last - ends in a flex-array member. */
