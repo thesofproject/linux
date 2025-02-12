@@ -6,8 +6,8 @@
 
 #include <linux/firmware/imx/dsp.h>
 #include <linux/module.h>
-#include <linux/of_reserved_mem.h>
 #include <linux/of_address.h>
+#include <linux/of_reserved_mem.h>
 #include <linux/pm_domain.h>
 #include <sound/sof/xtensa.h>
 
@@ -81,8 +81,10 @@ EXPORT_SYMBOL(imx8_dump);
 
 static void imx_handle_reply(struct imx_dsp_ipc *ipc)
 {
+	struct snd_sof_dev *sdev;
 	unsigned long flags;
-	struct snd_sof_dev *sdev = imx_dsp_get_data(ipc);
+
+	sdev = imx_dsp_get_data(ipc);
 
 	spin_lock_irqsave(&sdev->ipc_lock, flags);
 	snd_sof_ipc_process_reply(sdev, 0);
@@ -150,6 +152,7 @@ static int imx_set_power_state(struct snd_sof_dev *sdev,
 			       const struct sof_dsp_power_state *target)
 {
 	sdev->dsp_power_state = *target;
+
 	return 0;
 }
 
@@ -194,10 +197,10 @@ static int imx_common_suspend(struct snd_sof_dev *sdev)
 
 static int imx_runtime_resume(struct snd_sof_dev *sdev)
 {
-	int ret;
 	const struct sof_dsp_power_state target_state = {
 		.state = SOF_DSP_PM_D0,
 	};
+	int ret;
 
 	ret = imx_common_resume(sdev);
 	if (ret < 0) {
@@ -210,10 +213,10 @@ static int imx_runtime_resume(struct snd_sof_dev *sdev)
 
 static int imx_resume(struct snd_sof_dev *sdev)
 {
-	int ret;
 	const struct sof_dsp_power_state target_state = {
 		.state = SOF_DSP_PM_D0,
 	};
+	int ret;
 
 	ret = imx_common_resume(sdev);
 	if (ret < 0) {
@@ -234,10 +237,10 @@ static int imx_resume(struct snd_sof_dev *sdev)
 
 static int imx_runtime_suspend(struct snd_sof_dev *sdev)
 {
-	int ret;
 	const struct sof_dsp_power_state target_state = {
 		.state = SOF_DSP_PM_D3,
 	};
+	int ret;
 
 	ret = imx_common_suspend(sdev);
 	if (ret < 0)
@@ -248,10 +251,10 @@ static int imx_runtime_suspend(struct snd_sof_dev *sdev)
 
 static int imx_suspend(struct snd_sof_dev *sdev, unsigned int target_state)
 {
-	int ret;
 	const struct sof_dsp_power_state target_power_state = {
 		.state = target_state,
 	};
+	int ret;
 
 	if (!pm_runtime_suspended(sdev->dev)) {
 		ret = imx_common_suspend(sdev);
@@ -278,12 +281,12 @@ static int imx_region_name_to_blk_type(const char *region_name)
 
 static int imx_parse_ioremap_memory(struct snd_sof_dev *sdev)
 {
-	struct platform_device *pdev;
 	const struct imx_chip_info *chip_info;
+	struct reserved_mem *reserved;
+	struct platform_device *pdev;
+	struct device_node *res_np;
 	phys_addr_t base, size;
 	struct resource *res;
-	struct reserved_mem *reserved;
-	struct device_node *res_np;
 	int i, blk_type, ret;
 
 	pdev = to_platform_device(sdev->dev);
@@ -347,18 +350,27 @@ static int imx_parse_ioremap_memory(struct snd_sof_dev *sdev)
 
 static void imx_unregister_action(void *data)
 {
-	platform_device_unregister(data);
+	struct imx_common_data *common;
+	struct snd_sof_dev *sdev;
+
+	sdev = data;
+	common = sdev->pdata->hw_pdata;
+
+	if (get_chip_info(sdev)->has_dma_reserved)
+		of_reserved_mem_device_release(sdev->dev);
+
+	platform_device_unregister(common->ipc_dev);
 }
 
 static int imx_probe(struct snd_sof_dev *sdev)
 {
-	int ret;
-	struct platform_device *pdev;
-	struct imx_common_data *common;
 	struct dev_pm_domain_attach_data domain_data = {
 		.pd_names = NULL, /* no filtering */
 		.pd_flags = PD_FLAG_DEV_LINK_ON,
 	};
+	struct imx_common_data *common;
+	struct platform_device *pdev;
+	int ret;
 
 	pdev = to_platform_device(sdev->dev);
 
@@ -374,12 +386,22 @@ static int imx_probe(struct snd_sof_dev *sdev)
 		return dev_err_probe(sdev->dev, PTR_ERR(common->ipc_dev),
 				     "failed to create IPC device\n");
 
-	/* let the devres API take care of unregistering this platform
-	 * driver when no longer required.
-	 */
+	if (get_chip_info(sdev)->has_dma_reserved) {
+		ret = of_reserved_mem_device_init_by_name(sdev->dev,
+							  pdev->dev.of_node,
+							  "dma");
+		if (ret) {
+			platform_device_unregister(common->ipc_dev);
+
+			return dev_err_probe(sdev->dev, ret,
+					     "failed to bind DMA region\n");
+		}
+	}
+
+	/* let the devres API take care of the cleanup */
 	ret = devm_add_action_or_reset(sdev->dev,
 				       imx_unregister_action,
-				       common->ipc_dev);
+				       sdev);
 	if (ret)
 		return dev_err_probe(sdev->dev, ret, "failed to add devm action\n");
 
@@ -392,15 +414,6 @@ static int imx_probe(struct snd_sof_dev *sdev)
 	if (ret < 0)
 		return dev_err_probe(sdev->dev, ret,
 				     "failed to parse/ioremap memory regions\n");
-
-	if (get_chip_info(sdev)->has_dma_reserved) {
-		ret = of_reserved_mem_device_init_by_name(sdev->dev,
-							  pdev->dev.of_node,
-							  "dma");
-		if (ret)
-			return dev_err_probe(sdev->dev, ret,
-					     "failed to bind DMA region\n");
-	}
 
 	if (!sdev->dev->pm_domain) {
 		ret = devm_pm_domain_attach_list(sdev->dev,
@@ -415,7 +428,6 @@ static int imx_probe(struct snd_sof_dev *sdev)
 				     "failed to fetch clocks\n");
 	common->clk_num = ret;
 
-	/* no effect if number of clocks is 0 */
 	ret = clk_bulk_prepare_enable(common->clk_num, common->clks);
 	if (ret < 0)
 		return dev_err_probe(sdev->dev, ret, "failed to enable clocks\n");
@@ -433,7 +445,7 @@ static int imx_probe(struct snd_sof_dev *sdev)
 
 static void imx_remove(struct snd_sof_dev *sdev)
 {
-	struct imx_common_data *common = sdev->pdata->hw_pdata;
+	struct imx_common_data *common;
 	int ret;
 
 	common = sdev->pdata->hw_pdata;

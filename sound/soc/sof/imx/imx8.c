@@ -45,78 +45,6 @@ struct imx8m_chip_data {
 	struct regmap *regmap;
 };
 
-static struct snd_soc_dai_driver imx8_dai[] = {
-	IMX_SOF_DAI_DRV_ENTRY_BIDIR("esai0", 1, 8),
-	IMX_SOF_DAI_DRV_ENTRY_BIDIR("sai1", 1, 32),
-};
-
-static struct snd_soc_dai_driver imx8m_dai[] = {
-	IMX_SOF_DAI_DRV_ENTRY_BIDIR("sai1", 1, 32),
-	IMX_SOF_DAI_DRV_ENTRY_BIDIR("sai2", 1, 32),
-	IMX_SOF_DAI_DRV_ENTRY_BIDIR("sai3", 1, 32),
-	IMX_SOF_DAI_DRV_ENTRY_BIDIR("sai5", 1, 32),
-	IMX_SOF_DAI_DRV_ENTRY_BIDIR("sai6", 1, 32),
-	IMX_SOF_DAI_DRV_ENTRY_BIDIR("sai7", 1, 32),
-	IMX_SOF_DAI_DRV_ENTRY("micfil", 0, 0, 1, 8),
-};
-
-static struct snd_soc_dai_driver imx8ulp_dai[] = {
-	IMX_SOF_DAI_DRV_ENTRY_BIDIR("sai5", 1, 32),
-	IMX_SOF_DAI_DRV_ENTRY_BIDIR("sai6", 1, 32),
-};
-
-static struct snd_sof_dsp_ops sof_imx8_ops;
-
-static void imx8_ops_init(struct snd_soc_dai_driver *dai_drv, uint32_t num_drv)
-{
-	/* first copy from template */
-	memcpy(&sof_imx8_ops, &sof_imx_ops, sizeof(sof_imx_ops));
-
-	/* then set common imx8 ops */
-	sof_imx8_ops.dbg_dump = imx8_dump;
-	sof_imx8_ops.dsp_arch_ops = &sof_xtensa_arch_ops;
-	sof_imx8_ops.debugfs_add_region_item =
-		snd_sof_debugfs_add_region_item_iomem;
-
-	/* ... and finally set DAI driver */
-	sof_imx8_ops.drv = dai_drv;
-	sof_imx8_ops.num_drv = num_drv;
-}
-
-static int imx_ops_init(struct snd_sof_dev *sdev)
-{
-	if (of_device_is_compatible(sdev->dev->of_node, "fsl,imx8qm-dsp") ||
-	    of_device_is_compatible(sdev->dev->of_node, "fsl,imx8qxp-dsp")) {
-		imx8_ops_init(imx8_dai, ARRAY_SIZE(imx8_dai));
-	} else if (of_device_is_compatible(sdev->dev->of_node, "fsl,imx8mp-dsp")) {
-		imx8_ops_init(imx8m_dai, ARRAY_SIZE(imx8m_dai));
-	} else if (of_device_is_compatible(sdev->dev->of_node, "fsl,imx8ulp-dsp")) {
-		imx8_ops_init(imx8ulp_dai, ARRAY_SIZE(imx8ulp_dai));
-	} else {
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
-static int imx8_probe(struct snd_sof_dev *sdev)
-{
-	struct imx_common_data *common;
-	struct imx_sc_ipc *sc_ipc_handle;
-	int ret;
-
-	common = sdev->pdata->hw_pdata;
-
-	ret = imx_scu_get_handle(&sc_ipc_handle);
-	if (ret < 0)
-		return dev_err_probe(sdev->dev, ret,
-				     "failed to fetch SC IPC handle\n");
-
-	common->chip_pdata = sc_ipc_handle;
-
-	return 0;
-}
-
 /*
  * DSP control.
  */
@@ -176,29 +104,20 @@ static int imx8_run(struct snd_sof_dev *sdev)
 	return 0;
 }
 
-static int imx8m_probe(struct snd_sof_dev *sdev)
+static int imx8_probe(struct snd_sof_dev *sdev)
 {
+	struct imx_sc_ipc *sc_ipc_handle;
 	struct imx_common_data *common;
-	struct imx8m_chip_data *chip;
+	int ret;
 
 	common = sdev->pdata->hw_pdata;
 
-	chip = devm_kzalloc(sdev->dev, sizeof(*chip), GFP_KERNEL);
-	if (!chip)
-		return dev_err_probe(sdev->dev, -ENOMEM,
-				     "failed to allocate chip data\n");
+	ret = imx_scu_get_handle(&sc_ipc_handle);
+	if (ret < 0)
+		return dev_err_probe(sdev->dev, ret,
+				     "failed to fetch SC IPC handle\n");
 
-	chip->dap = devm_ioremap(sdev->dev, IMX8M_DAP_DEBUG, IMX8M_DAP_DEBUG_SIZE);
-	if (!chip->dap)
-		return dev_err_probe(sdev->dev, -ENODEV,
-				     "failed to ioremap DAP\n");
-
-	chip->regmap = syscon_regmap_lookup_by_phandle(sdev->dev->of_node, "fsl,dsp-ctrl");
-	if (IS_ERR(chip->regmap))
-		return dev_err_probe(sdev->dev, PTR_ERR(chip->regmap),
-				     "failed to fetch dsp ctrl regmap\n");
-
-	common->chip_pdata = chip;
+	common->chip_pdata = sc_ipc_handle;
 
 	return 0;
 }
@@ -238,19 +157,29 @@ static int imx8m_run(struct snd_sof_dev *sdev)
 	return 0;
 }
 
-static int imx8ulp_probe(struct snd_sof_dev *sdev)
+static int imx8m_probe(struct snd_sof_dev *sdev)
 {
 	struct imx_common_data *common;
-	struct regmap *regmap;
+	struct imx8m_chip_data *chip;
 
 	common = sdev->pdata->hw_pdata;
 
-	regmap = syscon_regmap_lookup_by_phandle(sdev->dev->of_node, "fsl,dsp-ctrl");
-	if (IS_ERR(regmap))
-		return dev_err_probe(sdev->dev, PTR_ERR(regmap),
+	chip = devm_kzalloc(sdev->dev, sizeof(*chip), GFP_KERNEL);
+	if (!chip)
+		return dev_err_probe(sdev->dev, -ENOMEM,
+				     "failed to allocate chip data\n");
+
+	chip->dap = devm_ioremap(sdev->dev, IMX8M_DAP_DEBUG, IMX8M_DAP_DEBUG_SIZE);
+	if (!chip->dap)
+		return dev_err_probe(sdev->dev, -ENODEV,
+				     "failed to ioremap DAP\n");
+
+	chip->regmap = syscon_regmap_lookup_by_phandle(sdev->dev->of_node, "fsl,dsp-ctrl");
+	if (IS_ERR(chip->regmap))
+		return dev_err_probe(sdev->dev, PTR_ERR(chip->regmap),
 				     "failed to fetch dsp ctrl regmap\n");
 
-	common->chip_pdata = regmap;
+	common->chip_pdata = chip;
 
 	return 0;
 }
@@ -273,8 +202,8 @@ static int imx8ulp_run(struct snd_sof_dev *sdev)
 
 static int imx8ulp_reset(struct snd_sof_dev *sdev)
 {
-	struct regmap *regmap;
 	struct arm_smccc_res smc_res;
+	struct regmap *regmap;
 
 	regmap = get_chip_pdata(sdev);
 
@@ -298,6 +227,63 @@ static int imx8ulp_reset(struct snd_sof_dev *sdev)
 	arm_smccc_smc(FSL_SIP_HIFI_XRDC, 0, 0, 0, 0, 0, 0, 0, &smc_res);
 
 	return smc_res.a0;
+}
+
+static int imx8ulp_probe(struct snd_sof_dev *sdev)
+{
+	struct imx_common_data *common;
+	struct regmap *regmap;
+
+	common = sdev->pdata->hw_pdata;
+
+	regmap = syscon_regmap_lookup_by_phandle(sdev->dev->of_node, "fsl,dsp-ctrl");
+	if (IS_ERR(regmap))
+		return dev_err_probe(sdev->dev, PTR_ERR(regmap),
+				     "failed to fetch dsp ctrl regmap\n");
+
+	common->chip_pdata = regmap;
+
+	return 0;
+}
+
+static struct snd_soc_dai_driver imx8_dai[] = {
+	IMX_SOF_DAI_DRV_ENTRY_BIDIR("esai0", 1, 8),
+	IMX_SOF_DAI_DRV_ENTRY_BIDIR("sai1", 1, 32),
+};
+
+static struct snd_soc_dai_driver imx8m_dai[] = {
+	IMX_SOF_DAI_DRV_ENTRY_BIDIR("sai1", 1, 32),
+	IMX_SOF_DAI_DRV_ENTRY_BIDIR("sai2", 1, 32),
+	IMX_SOF_DAI_DRV_ENTRY_BIDIR("sai3", 1, 32),
+	IMX_SOF_DAI_DRV_ENTRY_BIDIR("sai5", 1, 32),
+	IMX_SOF_DAI_DRV_ENTRY_BIDIR("sai6", 1, 32),
+	IMX_SOF_DAI_DRV_ENTRY_BIDIR("sai7", 1, 32),
+	IMX_SOF_DAI_DRV_ENTRY("micfil", 0, 0, 1, 8),
+};
+
+static struct snd_soc_dai_driver imx8ulp_dai[] = {
+	IMX_SOF_DAI_DRV_ENTRY_BIDIR("sai5", 1, 32),
+	IMX_SOF_DAI_DRV_ENTRY_BIDIR("sai6", 1, 32),
+};
+
+static struct snd_sof_dsp_ops sof_imx8_ops;
+
+static int imx8_ops_init(struct snd_sof_dev *sdev)
+{
+	/* first copy from template */
+	memcpy(&sof_imx8_ops, &sof_imx_ops, sizeof(sof_imx_ops));
+
+	/* then set common imx8 ops */
+	sof_imx8_ops.dbg_dump = imx8_dump;
+	sof_imx8_ops.dsp_arch_ops = &sof_xtensa_arch_ops;
+	sof_imx8_ops.debugfs_add_region_item =
+		snd_sof_debugfs_add_region_item_iomem;
+
+	/* ... and finally set DAI driver */
+	sof_imx8_ops.drv = get_chip_info(sdev)->drv;
+	sof_imx8_ops.num_drv = get_chip_info(sdev)->num_drv;
+
+	return 0;
 }
 
 static const struct imx_chip_ops imx8_chip_ops = {
@@ -347,6 +333,8 @@ static const struct imx_chip_info imx8_chip_info = {
 		.window_offset = 0x800000,
 	},
 	.memory = imx8_memory_regions,
+	.drv = imx8_dai,
+	.num_drv = ARRAY_SIZE(imx8_dai),
 	.ops = &imx8_chip_ops,
 };
 
@@ -357,6 +345,8 @@ static const struct imx_chip_info imx8x_chip_info = {
 		.window_offset = 0x800000,
 	},
 	.memory = imx8_memory_regions,
+	.drv = imx8_dai,
+	.num_drv = ARRAY_SIZE(imx8_dai),
 	.ops = &imx8x_chip_ops,
 };
 
@@ -367,6 +357,8 @@ static const struct imx_chip_info imx8m_chip_info = {
 		.window_offset = 0x800000,
 	},
 	.memory = imx8m_memory_regions,
+	.drv = imx8m_dai,
+	.num_drv = ARRAY_SIZE(imx8m_dai),
 	.ops = &imx8m_chip_ops,
 };
 
@@ -378,6 +370,8 @@ static const struct imx_chip_info imx8ulp_chip_info = {
 	},
 	.has_dma_reserved = true,
 	.memory = imx8ulp_memory_regions,
+	.drv = imx8ulp_dai,
+	.num_drv = ARRAY_SIZE(imx8ulp_dai),
 	.ops = &imx8ulp_chip_ops,
 };
 
@@ -430,10 +424,10 @@ static struct snd_sof_of_mach sof_imx8_machs[] = {
 	{}
 };
 
-IMX_SOF_DEV_DESC(imx8, sof_imx8_machs, &imx8_chip_info, &sof_imx8_ops, imx_ops_init);
-IMX_SOF_DEV_DESC(imx8x, sof_imx8_machs, &imx8x_chip_info, &sof_imx8_ops, imx_ops_init);
-IMX_SOF_DEV_DESC(imx8m, sof_imx8_machs, &imx8m_chip_info, &sof_imx8_ops, imx_ops_init);
-IMX_SOF_DEV_DESC(imx8ulp, sof_imx8_machs, &imx8ulp_chip_info, &sof_imx8_ops, imx_ops_init);
+IMX_SOF_DEV_DESC(imx8, sof_imx8_machs, &imx8_chip_info, &sof_imx8_ops, imx8_ops_init);
+IMX_SOF_DEV_DESC(imx8x, sof_imx8_machs, &imx8x_chip_info, &sof_imx8_ops, imx8_ops_init);
+IMX_SOF_DEV_DESC(imx8m, sof_imx8_machs, &imx8m_chip_info, &sof_imx8_ops, imx8_ops_init);
+IMX_SOF_DEV_DESC(imx8ulp, sof_imx8_machs, &imx8ulp_chip_info, &sof_imx8_ops, imx8_ops_init);
 
 static const struct of_device_id sof_of_imx8_ids[] = {
 	{

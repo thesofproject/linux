@@ -30,17 +30,17 @@ static int imx95_ops_init(struct snd_sof_dev *sdev)
 	memcpy(&sof_imx9_ops, &sof_imx_ops, sizeof(sof_imx_ops));
 
 	/* ... and finally set DAI driver */
-	sof_imx9_ops.drv = imx95_dai;
-	sof_imx9_ops.num_drv = ARRAY_SIZE(imx95_dai);
+	sof_imx9_ops.drv = get_chip_info(sdev)->drv;
+	sof_imx9_ops.num_drv = get_chip_info(sdev)->num_drv;
 
 	return 0;
 }
 
 static int imx95_chip_probe(struct snd_sof_dev *sdev)
 {
-	struct resource *res;
 	struct arm_smccc_res smc_res;
 	struct platform_device *pdev;
+	struct resource *res;
 
 	pdev = to_platform_device(sdev->dev);
 
@@ -94,6 +94,8 @@ static const struct imx_chip_info imx95_chip_info = {
 	},
 	.has_dma_reserved = true,
 	.memory = imx95_memory_regions,
+	.drv = imx95_dai,
+	.num_drv = ARRAY_SIZE(imx95_dai),
 	.ops = &imx95_chip_ops,
 };
 
