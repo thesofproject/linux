@@ -3,6 +3,8 @@
  * Copyright (c) 2023-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
+#define pr_fmt(fmt) "gunyah: " fmt
+
 #include <linux/gunyah.h>
 #include <linux/module.h>
 #include <linux/of_platform.h>
@@ -42,7 +44,7 @@ void *gunyah_get_info(u16 owner, u16 id, size_t *size)
 }
 EXPORT_SYMBOL_GPL(gunyah_get_info);
 
-static int gunyah_probe(struct platform_device *pdev)
+static int __init gunyah_init(void)
 {
 	struct gunyah_hypercall_hyp_identify_resp gunyah_api;
 	unsigned long info_ipa, info_size;
@@ -67,7 +69,7 @@ static int gunyah_probe(struct platform_device *pdev)
 	gh_error = gunyah_hypercall_addrspace_find_info_area(&info_ipa, &info_size);
 	/* ignore errors for compatability with gh without info_area support */
 	if (gh_error != GUNYAH_ERROR_OK)
-		goto out;
+		return 0;
 
 	info_area = memremap(info_ipa, info_size, MEMREMAP_WB);
 	if (!info_area) {
@@ -75,26 +77,9 @@ static int gunyah_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 
-out:
-	return devm_of_platform_populate(&pdev->dev);
+	return 0;
 }
-
-static const struct of_device_id gunyah_of_match[] = {
-	{ .compatible = "gunyah-hypervisor" },
-	{}
-};
-MODULE_DEVICE_TABLE(of, gunyah_of_match);
-
-/* clang-format off */
-static struct platform_driver gunyah_driver = {
-	.probe = gunyah_probe,
-	.driver = {
-		.name = "gunyah",
-		.of_match_table = gunyah_of_match,
-	}
-};
-/* clang-format on */
-module_platform_driver(gunyah_driver);
+core_initcall(gunyah_init);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Gunyah Driver");
