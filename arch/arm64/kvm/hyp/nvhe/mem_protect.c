@@ -1951,7 +1951,7 @@ static void assert_host_shared_guest(struct pkvm_hyp_vm *vm, u64 ipa, u64 size)
 	u64 phys;
 	int ret;
 
-	if (!IS_ENABLED(CONFIG_NVHE_EL2_DEBUG))
+	if (!IS_ENABLED(CONFIG_PKVM_STRICT_CHECKS))
 		return;
 
 	host_lock_component();
