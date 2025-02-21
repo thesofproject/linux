@@ -440,5 +440,6 @@ int hda_sdw_bpt_close(struct device *dev, struct hdac_ext_stream *bpt_tx_stream,
 EXPORT_SYMBOL_NS(hda_sdw_bpt_close, "SND_SOC_SOF_INTEL_HDA_SDW_BPT");
 
 MODULE_LICENSE("Dual BSD/GPL");
+MODULE_DESCRIPTION("SOF helpers for HDaudio SoundWire BPT");
 MODULE_IMPORT_NS("SND_SOC_SOF_INTEL_HDA_COMMON");
 MODULE_IMPORT_NS("SND_SOC_SOF_HDA_MLINK");
