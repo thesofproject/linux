@@ -815,6 +815,8 @@ static void tcp_rcv_rtt_update(struct tcp_sock *tp, u32 sample, int win_dep)
 	u32 new_sample, old_sample = tp->rcv_rtt_est.rtt_us;
 	long m = sample << 3;
 
+	trace_android_vh_tcp_rcv_rtt_update(tp, sample, win_dep);
+
 	if (old_sample == 0 || m < old_sample) {
 		new_sample = m;
 	} else {
