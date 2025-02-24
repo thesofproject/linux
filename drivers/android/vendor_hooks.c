@@ -39,6 +39,7 @@
 #include <trace/hooks/syscall_check.h>
 #include <trace/hooks/gic.h>
 #include <trace/hooks/gic_v3.h>
+#include <trace/hooks/gunyah.h>
 #include <trace/hooks/psi.h>
 #include <trace/hooks/remoteproc.h>
 #include <trace/hooks/reboot.h>
@@ -186,6 +187,8 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_cpuidle_psci_enter);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_cpuidle_psci_exit);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_cpufreq_transition);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_gic_v3_set_affinity);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_gh_before_vcpu_run);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_gh_after_vcpu_run);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_freq_qos_add_request);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_freq_qos_update_request);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_freq_qos_remove_request);
