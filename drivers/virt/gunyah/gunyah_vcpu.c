@@ -97,7 +97,7 @@ static bool gunyah_handle_page_fault(
 	bool write = !!vcpu_run_resp->state_data[1];
 	int ret = 0;
 
-	ret = gunyah_gup_demand_page(vcpu->ghvm, addr, write);
+	ret = gunyah_demand_page(vcpu->ghvm, addr, write);
 	if (!ret || ret == -EAGAIN)
 		return true;
 
@@ -120,7 +120,7 @@ gunyah_handle_mmio(struct gunyah_vcpu *vcpu, unsigned long resume_data[3],
 	if (WARN_ON(len > sizeof(u64)))
 		len = sizeof(u64);
 
-	ret = gunyah_gup_demand_page(vcpu->ghvm, addr,
+	ret = gunyah_demand_page(vcpu->ghvm, addr,
 					vcpu->vcpu_run->mmio.is_write);
 	if (!ret || ret == -EAGAIN) {
 		resume_data[1] = GUNYAH_ADDRSPACE_VMMIO_ACTION_RETRY;

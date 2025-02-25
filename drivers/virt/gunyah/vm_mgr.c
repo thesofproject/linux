@@ -625,47 +625,6 @@ static inline int gunyah_vm_fill_boot_context(struct gunyah_vm *ghvm)
 	return 0;
 }
 
-int gunyah_gup_setup_demand_paging(struct gunyah_vm *ghvm)
-{
-	struct gunyah_rm_mem_entry *entries;
-	struct gunyah_vm_gup_binding *b;
-	unsigned long index = 0;
-	u32 count = 0, i;
-	int ret = 0;
-
-	down_read(&ghvm->bindings_lock);
-	mt_for_each(&ghvm->bindings, b, index, ULONG_MAX)
-		if (b->share_type == VM_MEM_LEND &&
-			(b->guest_phys_addr != ghvm->fw.config.guest_phys_addr))
-			count++;
-
-	if (!count)
-		goto out;
-
-	entries = kcalloc(count, sizeof(*entries), GFP_KERNEL);
-	if (!entries) {
-		ret = -ENOMEM;
-		goto out;
-	}
-
-	index = i = 0;
-	mt_for_each(&ghvm->bindings, b, index, ULONG_MAX) {
-		if (b->share_type != VM_MEM_LEND ||
-			(b->guest_phys_addr == ghvm->fw.config.guest_phys_addr))
-			continue;
-		entries[i].phys_addr = cpu_to_le64(b->guest_phys_addr);
-		entries[i].size = cpu_to_le64(b->size);
-		if (++i == count)
-			break;
-	}
-
-	ret = gunyah_rm_vm_set_demand_paging(ghvm->rm, ghvm->vmid, i, entries);
-	kfree(entries);
-out:
-	up_read(&ghvm->bindings_lock);
-	return ret;
-}
-
 static int gunyah_vm_start(struct gunyah_vm *ghvm)
 {
 	struct gunyah_rm_hyp_resources *resources;
@@ -691,11 +650,11 @@ static int gunyah_vm_start(struct gunyah_vm *ghvm)
 	ghvm->vmid = ret;
 	ghvm->vm_status = GUNYAH_RM_VM_STATUS_LOAD;
 
-	ghvm->dtb.parcel_start = ghvm->dtb.config.guest_phys_addr >> PAGE_SHIFT;
-	ghvm->dtb.parcel_pages = ghvm->dtb.config.size >> PAGE_SHIFT;
-	ret = gunyah_gup_share_parcel(ghvm, &ghvm->dtb.parcel,
-					&ghvm->dtb.parcel_start,
-					&ghvm->dtb.parcel_pages);
+	ghvm->dtb.parcel.start = ghvm->dtb.config.guest_phys_addr >> PAGE_SHIFT;
+	ghvm->dtb.parcel.pages = ghvm->dtb.config.size >> PAGE_SHIFT;
+	ret = gunyah_share_parcel(ghvm, &ghvm->dtb.parcel,
+					&ghvm->dtb.parcel.start,
+					&ghvm->dtb.parcel.pages);
 	if (ret) {
 		dev_warn(ghvm->parent,
 			 "Failed to allocate parcel for DTB: %d\n", ret);
@@ -703,11 +662,11 @@ static int gunyah_vm_start(struct gunyah_vm *ghvm)
 	}
 
 	if (ghvm->auth == GUNYAH_RM_VM_AUTH_QCOM_ANDROID_PVM) {
-		ghvm->fw.parcel_start = ghvm->fw.config.guest_phys_addr >> PAGE_SHIFT;
-		ghvm->fw.parcel_pages = ghvm->fw.config.size >> PAGE_SHIFT;
-		ret = gunyah_gup_share_parcel(ghvm, &ghvm->fw.parcel,
-				&ghvm->fw.parcel_start,
-				&ghvm->fw.parcel_pages);
+		ghvm->fw.parcel.start = ghvm->fw.config.guest_phys_addr >> PAGE_SHIFT;
+		ghvm->fw.parcel.pages = ghvm->fw.config.size >> PAGE_SHIFT;
+		ret = gunyah_share_parcel(ghvm, &ghvm->fw.parcel,
+				&ghvm->fw.parcel.start,
+				&ghvm->fw.parcel.pages);
 		if (ret) {
 			dev_warn(ghvm->parent,
 					"Failed to allocate parcel for FW: %d\n", ret);
@@ -715,9 +674,9 @@ static int gunyah_vm_start(struct gunyah_vm *ghvm)
 		}
 	}
 	ret = gunyah_rm_vm_configure(ghvm->rm, ghvm->vmid, ghvm->auth,
-				     ghvm->dtb.parcel.mem_handle, 0, 0,
+				     ghvm->dtb.parcel.parcel.mem_handle, 0, 0,
 				     ghvm->dtb.config.guest_phys_addr -
-					     (ghvm->dtb.parcel_start
+					     (ghvm->dtb.parcel.start
 					      << PAGE_SHIFT),
 				     ghvm->dtb.config.size);
 	if (ret) {
@@ -726,26 +685,26 @@ static int gunyah_vm_start(struct gunyah_vm *ghvm)
 	}
 
 	if (ghvm->auth == GUNYAH_RM_VM_AUTH_QCOM_ANDROID_PVM) {
-		ret = gunyah_rm_vm_set_firmware_mem(ghvm->rm, ghvm->vmid, &ghvm->fw.parcel,
-				ghvm->fw.config.guest_phys_addr - (ghvm->fw.parcel_start << PAGE_SHIFT),
-				ghvm->fw.config.size);
+		ret = gunyah_rm_vm_set_firmware_mem(ghvm->rm, ghvm->vmid, &ghvm->fw.parcel.parcel,
+			ghvm->fw.config.guest_phys_addr - (ghvm->fw.parcel.start << PAGE_SHIFT),
+			ghvm->fw.config.size);
 		if (ret) {
 			pr_warn("Failed to configure pVM firmware\n");
 			goto err;
 		}
 	}
 
-	ret = gunyah_gup_setup_demand_paging(ghvm);
+	ret = gunyah_setup_demand_paging(ghvm, 0, ULONG_MAX);
 	if (ret) {
 		dev_warn(ghvm->parent,
-			 "Failed to set up gmem demand paging: %d\n", ret);
-		goto err;
+			"Failed to set up demand paging: %d\n", ret);
+		return ret;
 	}
 
 	ret = gunyah_rm_vm_set_address_layout(
 		ghvm->rm, ghvm->vmid, GUNYAH_RM_RANGE_ID_IMAGE,
-		ghvm->dtb.parcel_start << PAGE_SHIFT,
-		ghvm->dtb.parcel_pages << PAGE_SHIFT);
+		ghvm->dtb.parcel.start << PAGE_SHIFT,
+		ghvm->dtb.parcel.pages << PAGE_SHIFT);
 	if (ret) {
 		dev_warn(ghvm->parent,
 			 "Failed to set location of DTB mem parcel: %d\n", ret);
@@ -788,9 +747,9 @@ static int gunyah_vm_start(struct gunyah_vm *ghvm)
 		gunyah_vm_add_resource(ghvm, ghrsc);
 	}
 
-	ret = gunyah_vm_parcel_to_paged(ghvm, &ghvm->dtb.parcel,
-					ghvm->dtb.parcel_start,
-					ghvm->dtb.parcel_pages);
+	ret = gunyah_vm_parcel_to_paged(ghvm, &ghvm->dtb.parcel.parcel,
+					ghvm->dtb.parcel.start,
+					ghvm->dtb.parcel.pages);
 	if (ret)
 		goto err;
 
@@ -800,8 +759,8 @@ static int gunyah_vm_start(struct gunyah_vm *ghvm)
 		 * need to rollback parcel_to_paged because RM is still
 		 * tracking the parcel
 		 */
-		gunyah_vm_mm_erase_range(ghvm, ghvm->dtb.parcel_start,
-					 ghvm->dtb.parcel_pages);
+		gunyah_vm_mm_erase_range(ghvm, ghvm->dtb.parcel.start,
+					 ghvm->dtb.parcel.pages);
 		dev_warn(ghvm->parent, "Failed to start VM: %d\n", ret);
 		goto err;
 	}
@@ -961,51 +920,10 @@ int __must_check gunyah_vm_get(struct gunyah_vm *ghvm)
 }
 EXPORT_SYMBOL_GPL(gunyah_vm_get);
 
-int gunyah_gup_reclaim_parcel(struct gunyah_vm *ghvm,
-			       struct gunyah_rm_mem_parcel *parcel, u64 gfn,
-			       u64 nr)
-{
-	struct gunyah_rm_mem_entry *entry;
-	struct folio *folio;
-	pgoff_t i;
-	int ret;
-
-	if (parcel->mem_handle != GUNYAH_MEM_HANDLE_INVAL) {
-		ret = gunyah_rm_mem_reclaim(ghvm->rm, parcel);
-		if (ret) {
-			dev_err(ghvm->parent, "Failed to reclaim parcel: %d\n",
-				ret);
-			/* We can't reclaim the pages -- hold onto the pages
-			 * forever because we don't know what state the memory
-			 * is in
-			 */
-			return ret;
-		}
-		parcel->mem_handle = GUNYAH_MEM_HANDLE_INVAL;
-
-		for (i = 0; i < parcel->n_mem_entries; i++) {
-			entry = &parcel->mem_entries[i];
-
-			folio = pfn_folio(PHYS_PFN(le64_to_cpu(entry->phys_addr)));
-
-			if (folio_test_private(folio))
-				gunyah_folio_host_reclaim(folio);
-
-			unpin_user_page(folio_page(folio, 0));
-			account_locked_vm(ghvm->mm_s, 1, false);
-		}
-
-		kfree(parcel->mem_entries);
-		kfree(parcel->acl_entries);
-	}
-
-	return 0;
-}
-
 static void _gunyah_vm_put(struct kref *kref)
 {
 	struct gunyah_vm *ghvm = container_of(kref, struct gunyah_vm, kref);
-	struct gunyah_vm_gup_binding *b;
+	struct gunyah_vm_binding *b;
 	unsigned long index = 0;
 	void *entry;
 	int ret;
@@ -1017,27 +935,7 @@ static void _gunyah_vm_put(struct kref *kref)
 	if (ghvm->vm_status == GUNYAH_RM_VM_STATUS_RUNNING)
 		gunyah_vm_stop(ghvm);
 
-	if (ghvm->vm_status == GUNYAH_RM_VM_STATUS_LOAD ||
-	    ghvm->vm_status == GUNYAH_RM_VM_STATUS_READY ||
-	    ghvm->vm_status == GUNYAH_RM_VM_STATUS_INIT_FAILED) {
-		ret = gunyah_gup_reclaim_parcel(ghvm, &ghvm->dtb.parcel,
-						 ghvm->dtb.parcel_start,
-						 ghvm->dtb.parcel_pages);
-		if (ret)
-			dev_err(ghvm->parent,
-				"Failed to reclaim DTB parcel: %d\n", ret);
-	}
-
 	gunyah_vm_remove_functions(ghvm);
-
-	down_write(&ghvm->bindings_lock);
-	mt_for_each(&ghvm->bindings, b, index, ULONG_MAX) {
-		mtree_erase(&ghvm->bindings, gunyah_gpa_to_gfn(b->guest_phys_addr));
-		kfree(b);
-	}
-	up_write(&ghvm->bindings_lock);
-	WARN_ON(!mtree_empty(&ghvm->bindings));
-	mtree_destroy(&ghvm->bindings);
 
 	/**
 	 * If this fails, we're going to lose the memory for good and is
@@ -1046,6 +944,8 @@ static void _gunyah_vm_put(struct kref *kref)
 	 * running and RM will let us reclaim all the memory.
 	 */
 	WARN_ON(gunyah_vm_reclaim_range(ghvm, 0, U64_MAX));
+	WARN_ON(!mtree_empty(&ghvm->mm));
+	mtree_destroy(&ghvm->mm);
 
 	/* clang-format off */
 	gunyah_vm_remove_resource_ticket(ghvm, &ghvm->addrspace_ticket);
@@ -1070,17 +970,15 @@ static void _gunyah_vm_put(struct kref *kref)
 		/* clang-format on */
 	}
 
-	WARN_ON(!mtree_empty(&ghvm->mm));
-	mtree_destroy(&ghvm->mm);
-
-	if (ghvm->auth == GUNYAH_RM_VM_AUTH_QCOM_ANDROID_PVM) {
-		ret = gunyah_gup_reclaim_parcel(ghvm, &ghvm->fw.parcel,
-				ghvm->fw.parcel_start,
-				ghvm->fw.parcel_pages);
-		if (ret)
-			dev_err(ghvm->parent,
-					"Failed to reclaim firmware parcel: %d\n", ret);
+	WARN_ON(gunyah_reclaim_parcels(ghvm, 0, ULONG_MAX));
+	down_write(&ghvm->bindings_lock);
+	mt_for_each(&ghvm->bindings, b, index, ULONG_MAX) {
+		mtree_erase(&ghvm->bindings, gunyah_gpa_to_gfn(b->guest_phys_addr));
+		kfree(b);
 	}
+	up_write(&ghvm->bindings_lock);
+	WARN_ON(!mtree_empty(&ghvm->bindings));
+	mtree_destroy(&ghvm->bindings);
 
 	if (ghvm->vm_status > GUNYAH_RM_VM_STATUS_NO_STATE) {
 		gunyah_rm_notifier_unregister(ghvm->rm, &ghvm->nb);
