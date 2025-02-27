@@ -89,12 +89,12 @@ transmission or programming errors, each BRA packet provides:
       transmitted as the last-but-one byte in the packet, prior to the
       footer response.
 
-The header response can be one of
+The header response can be one of:
   (a) Ack
   (b) Nak
   (c) Not Ready
 
-The footer response can be one of
+The footer response can be one of:
   (1) Ack
   (2) Nak  (CRC failure)
   (3) Good (operation completed)
@@ -112,7 +112,7 @@ to start on a new SoundWire Row, and the scale of data may vary.
 	+---+--------------------------------------------+
 	+   |                                            |
 	+   |             BRA HEADER                     |
-        +   |	                                         |
+	+   |                                            |
 	+   +--------------------------------------------+
 	+ C |             HEADER CRC                     |
 	+ O +--------------------------------------------+
@@ -184,7 +184,7 @@ consumed/produced by these FIFOs is not symmetrical, as a result
 hardware typically inserts markers to help software and hardware
 interpret raw data
 
-Each packet will typically have
+Each packet will typically have:
 
   (1) a 'Start of Packet' indicator.
 
@@ -240,15 +240,15 @@ One possible strategy to speed-up all initialization tasks would be to
 start a BRA transfer for firmware download, then deal with all the
 "regular" read/writes in parallel with the command channel, and last
 to wait for the BRA transfers to complete. This would allow for a
-degree of overlap instead of a purely sequential solution. As a
-results, the BRA API must support async transfers and expose a
-separate wait function.
+degree of overlap instead of a purely sequential solution. As such,
+the BRA API must support async transfers and expose a separate wait
+function.
 
 
 Peripheral/bus interface
 ------------------------
 
-The bus interface for BPT/BRA is made of two functions
+The bus interface for BPT/BRA is made of two functions:
 
     - sdw_bpt_send_async(bpt_message)
 
