@@ -2044,6 +2044,13 @@ static const u8 sdw_crc8_lookup_msb[CRC8_TABLE_SIZE] = {
 #define SDW_CDNS_BRA_FOOTER_RESP		1 /* defined by MIPI */
 #define SDW_CDNS_BRA_FOOTER_RESP_PAD		1 /* Cadence only */
 
+#define SDW_CDNS_WRITE_PDI1_BUFFER_SIZE	\
+	((SDW_CDNS_BRA_HDR_RESP + SDW_CDNS_BRA_HDR_RESP_PAD +	\
+	 SDW_CDNS_BRA_FOOTER_RESP + SDW_CDNS_BRA_FOOTER_RESP_PAD) * 2)
+
+#define SDW_CDNS_READ_PDI0_BUFFER_SIZE \
+	((SDW_CDNS_BRA_HDR + SDW_CDNS_BRA_HDR_CRC + SDW_CDNS_BRA_HDR_CRC_PAD) * 2)
+
 static unsigned int sdw_cdns_bra_actual_data_size(unsigned int allocated_bytes_per_frame)
 {
 	unsigned int total;
@@ -2070,25 +2077,6 @@ static unsigned int sdw_cdns_write_pdi0_buffer_size(unsigned int actual_data_siz
 		total += SDW_CDNS_BRA_DATA_PAD;
 
 	total += SDW_CDNS_BRA_DATA_CRC + SDW_CDNS_BRA_DATA_CRC_PAD;
-
-	return total * 2;
-}
-
-static unsigned int sdw_cdns_write_pdi1_buffer_size(unsigned int actual_data_size)
-{
-	unsigned int total;
-
-	total = SDW_CDNS_BRA_HDR_RESP +	SDW_CDNS_BRA_HDR_RESP_PAD +
-		SDW_CDNS_BRA_FOOTER_RESP + SDW_CDNS_BRA_FOOTER_RESP_PAD;
-
-	return total * 2;
-}
-
-static unsigned int sdw_cdns_read_pdi0_buffer_size(unsigned int actual_data_size)
-{
-	unsigned int total;
-
-	total = SDW_CDNS_BRA_HDR + SDW_CDNS_BRA_HDR_CRC + SDW_CDNS_BRA_HDR_CRC_PAD;
 
 	return total * 2;
 }
@@ -2151,7 +2139,7 @@ int sdw_cdns_bpt_find_buffer_sizes(int command, /* 0: write, 1: read */
 		*num_frames = DIV_ROUND_UP(data_bytes, actual_bpt_bytes);
 
 		pdi0_tx_size = sdw_cdns_write_pdi0_buffer_size(actual_bpt_bytes);
-		pdi1_rx_size = sdw_cdns_write_pdi1_buffer_size(actual_bpt_bytes);
+		pdi1_rx_size = SDW_CDNS_WRITE_PDI1_BUFFER_SIZE;
 
 		*pdi0_buffer_size = pdi0_tx_size * *num_frames;
 		*pdi1_buffer_size = pdi1_rx_size * *num_frames;
@@ -2162,7 +2150,7 @@ int sdw_cdns_bpt_find_buffer_sizes(int command, /* 0: write, 1: read */
 		 */
 		*num_frames = data_bytes / actual_bpt_bytes;
 
-		pdi0_tx_size = sdw_cdns_read_pdi0_buffer_size(actual_bpt_bytes);
+		pdi0_tx_size = SDW_CDNS_READ_PDI0_BUFFER_SIZE;
 		pdi1_rx_size = sdw_cdns_read_pdi1_buffer_size(actual_bpt_bytes);
 
 		*pdi0_buffer_size = pdi0_tx_size * *num_frames;
@@ -2170,7 +2158,7 @@ int sdw_cdns_bpt_find_buffer_sizes(int command, /* 0: write, 1: read */
 
 		remainder = data_bytes % actual_bpt_bytes;
 		if (remainder) {
-			pdi0_tx_size = sdw_cdns_read_pdi0_buffer_size(remainder);
+			pdi0_tx_size = SDW_CDNS_READ_PDI0_BUFFER_SIZE;
 			pdi1_rx_size = sdw_cdns_read_pdi1_buffer_size(remainder);
 
 			*num_frames = *num_frames + 1;
