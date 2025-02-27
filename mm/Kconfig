@@ -1034,6 +1034,13 @@ config GCMA
 
 	  If unsure, say "n".
 
+config GCMA_SYSFS
+	bool "GCMA information through sysfs interface"
+	depends on GCMA && SYSFS
+	help
+	  This option exposes some sysfs attributes to get information
+	  from GCMA.
+
 #
 # Select this config option from the architecture Kconfig, if available, to set
 # the max page order for physically contiguous allocations.
