@@ -86,6 +86,8 @@ struct sof_ipc4_fw_data {
 	int max_num_pipelines;
 	u32 max_libs_count;
 	bool fw_context_save;
+	u32 global_kcontrol_mask;
+	void *global_kcontrol_priv;
 
 	int (*load_library)(struct snd_sof_dev *sdev,
 			    struct sof_ipc4_fw_library *fw_lib, bool reload);
@@ -117,5 +119,7 @@ void sof_ipc4_update_cpc_from_manifest(struct snd_sof_dev *sdev,
 
 size_t sof_ipc4_find_debug_slot_offset_by_type(struct snd_sof_dev *sdev,
 					       u32 slot_type);
+
+void snd_ipc4_global_capture_hw_mute_force(struct snd_sof_dev *sdev, bool force);
 
 #endif

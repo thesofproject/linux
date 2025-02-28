@@ -166,6 +166,8 @@ struct sof_ipc_tplg_control_ops {
 	/* mandatory callback to set up volume table for volume kcontrols */
 	int (*set_up_volume_table)(struct snd_sof_control *scontrol, int tlv[SOF_TLV_ITEMS],
 				   int size);
+	int (*create_non_topology_controls)(struct snd_sof_dev *sdev,
+					    struct snd_soc_component *scomp);
 };
 
 /**

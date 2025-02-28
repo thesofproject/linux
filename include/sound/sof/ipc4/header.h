@@ -432,7 +432,8 @@ enum sof_ipc4_fw_config_params {
 	SOF_IPC4_FW_RESERVED3,
 	SOF_IPC4_FW_RESERVED4,
 	SOF_IPC4_FW_RESERVED5,
-	SOF_IPC4_FW_CONTEXT_SAVE
+	SOF_IPC4_FW_CONTEXT_SAVE,
+	SOF_IPC4_FW_GLOBAL_KCONTROL_MASK,
 };
 
 struct sof_ipc4_fw_version {
@@ -570,6 +571,14 @@ struct sof_ipc4_notify_module_data {
 #define SOF_IPC4_NOTIFY_MODULE_EVENTID_ALSA_MAGIC_MASK		GENMASK(31, 16)
 #define SOF_IPC4_NOTIFY_MODULE_EVENTID_ALSA_MAGIC_VAL		0xA15A0000
 #define SOF_IPC4_NOTIFY_MODULE_EVENTID_ALSA_PARAMID_MASK	GENMASK(15, 0)
+
+/*
+ * Global non topology kcontrol ids
+ */
+
+enum sof_ipc4_kcontrol_global_id {
+	SOF_IPC4_KCONTROL_GLOBAL_CAPTURE_HW_MUTE = 1,
+};
 
 /** @}*/
 

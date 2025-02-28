@@ -2261,8 +2261,15 @@ static int sof_complete(struct snd_soc_component *scomp)
 	}
 
 	/* set up static pipelines */
-	if (tplg_ops && tplg_ops->set_up_all_pipelines)
-		return tplg_ops->set_up_all_pipelines(sdev, false);
+	if (tplg_ops && tplg_ops->set_up_all_pipelines) {
+		ret = tplg_ops->set_up_all_pipelines(sdev, false);
+		if (ret < 0)
+			return ret;
+	}
+
+	/* set up non topology mixers */
+	if (tplg_ops && tplg_ops->control && tplg_ops->control->create_non_topology_controls)
+		return tplg_ops->control->create_non_topology_controls(sdev, scomp);
 
 	return 0;
 }

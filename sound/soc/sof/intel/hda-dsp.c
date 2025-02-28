@@ -26,6 +26,9 @@
 #include "hda.h"
 #include "mtl.h"
 #include "hda-ipc.h"
+#ifdef CONFIG_SND_SOC_SOF_IPC4
+#include "../ipc4-priv.h"
+#endif
 
 #define EXCEPT_MAX_HDR_SIZE	0x400
 #define HDA_EXT_ROM_STATUS_SIZE 8
@@ -752,11 +755,22 @@ int hda_dsp_set_power_state_ipc4(struct snd_sof_dev *sdev,
 				 const struct sof_dsp_power_state *target_state)
 {
 	/* Return without doing anything if the DSP is already in the target state */
+	int ret;
+
 	if (target_state->state == sdev->dsp_power_state.state &&
 	    target_state->substate == sdev->dsp_power_state.substate)
 		return 0;
 
-	return hda_dsp_set_power_state(sdev, target_state);
+	ret = hda_dsp_set_power_state(sdev, target_state);
+
+#ifdef CONFIG_SND_SOC_SOF_IPC4
+	if (ret >= 0)
+		snd_ipc4_global_capture_hw_mute_force(sdev,
+						      target_state->state == SOF_DSP_PM_D3 ?
+						      true : false);
+#endif
+
+	return ret;
 }
 EXPORT_SYMBOL_NS(hda_dsp_set_power_state_ipc4, "SND_SOC_SOF_INTEL_HDA_COMMON");
 

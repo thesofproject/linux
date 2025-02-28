@@ -504,6 +504,9 @@ int sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev)
 		case SOF_IPC4_FW_CONTEXT_SAVE:
 			ipc4_data->fw_context_save = *tuple->value;
 			break;
+		case SOF_IPC4_FW_GLOBAL_KCONTROL_MASK:
+			ipc4_data->global_kcontrol_mask = *tuple->value;
+			break;
 		default:
 			break;
 		}
