@@ -16,6 +16,7 @@
 
 #include <linux/bitfield.h>
 #include <linux/module.h>
+#include <linux/string_choices.h>
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_MLINK)
 
@@ -711,8 +712,14 @@ static int hdac_bus_eml_power_up_base(struct hdac_bus *bus, bool alt, int elid, 
 				     h2link->shim_vs_offset +
 				     sublink * h2link->instance_offset +
 				     AZX_REG_INTEL_VS_SHIM_PVCCS;
+		u16 val = readw(pvccs);
 
-		writew(readw(pvccs) | AZX_REG_INTEL_VS_SHIM_PVCCS_MDSTSCHGIE, pvccs);
+		writew(val | AZX_REG_INTEL_VS_SHIM_PVCCS_MDSTSCHGIE, pvccs);
+
+		if (val & AZX_REG_INTEL_VS_SHIM_PVCCS_MDSTS)
+			dev_dbg(bus->dev,
+				"sublink %d (%d:%d): Mic privacy is enabled\n",
+				sublink, alt, elid);
 	}
 
 skip_init:
@@ -1079,6 +1086,7 @@ bool hdac_bus_eml_get_mic_privacy_state(struct hdac_bus *bus, bool alt, int elid
 {
 	struct hdac_ext2_link *h2link;
 	u16 __iomem *pvccs;
+	bool state;
 	int i;
 
 	h2link = find_ext2_link(bus, alt, elid);
@@ -1095,7 +1103,11 @@ bool hdac_bus_eml_get_mic_privacy_state(struct hdac_bus *bus, bool alt, int elid
 			i * h2link->instance_offset +
 			AZX_REG_INTEL_VS_SHIM_PVCCS;
 
-		return readw(pvccs) & AZX_REG_INTEL_VS_SHIM_PVCCS_MDSTS;
+		state = readw(pvccs) & AZX_REG_INTEL_VS_SHIM_PVCCS_MDSTS;
+		dev_dbg(bus->dev, "alt: %d, elid: %d: Mic privacy is %s\n", alt,
+			elid, str_enabled_disabled(state));
+
+		return state;
 	}
 
 	return false;
