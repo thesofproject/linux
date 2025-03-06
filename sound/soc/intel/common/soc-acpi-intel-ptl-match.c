@@ -573,7 +573,8 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_ptl_sdw_machines[] = {
 		.links = ptl_sdw_rt712_vb_l3_rt1320_l2,
 		.drv_name = "sof_sdw",
 		.machine_check = snd_soc_acpi_intel_sdca_is_device_rt712_vb,
-		.sof_tplg_filename = "sof-ptl-rt712-l3-rt1320-l2.tplg"
+		.sof_tplg_filename = "sof-ptl-rt712-l3-rt1320-l2.tplg",
+		.get_function_tplg_files = sof_sdw_get_tplg_files,
 	},
 	{
 		.link_mask = BIT(1) | BIT(2) | BIT(3),
@@ -588,7 +589,8 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_ptl_sdw_machines[] = {
 		.links = ptl_sdw_rt713_vb_l3_rt1320_l12,
 		.drv_name = "sof_sdw",
 		.machine_check = snd_soc_acpi_intel_sdca_is_device_rt712_vb,
-		.sof_tplg_filename = "sof-ptl-rt713-l3-rt1320-l12.tplg"
+		.sof_tplg_filename = "sof-ptl-rt713-l3-rt1320-l12.tplg",
+		.get_function_tplg_files = sof_sdw_get_tplg_files,
 	},
 	{},
 };
