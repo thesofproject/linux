@@ -21,7 +21,7 @@
 static bool sof_ptl_check_mic_privacy_irq(struct snd_sof_dev *sdev, bool alt,
 					  int elid)
 {
-	if (alt != 1 || elid != AZX_REG_ML_LEPTR_ID_SDW)
+	if (!alt || elid != AZX_REG_ML_LEPTR_ID_SDW)
 		return false;
 
 	return hdac_bus_eml_is_mic_privacy_changed(sof_to_bus(sdev), alt, elid);
@@ -32,7 +32,7 @@ static void sof_ptl_process_mic_privacy(struct snd_sof_dev *sdev, bool alt,
 {
 	bool state;
 
-	if (alt != 1 || elid != AZX_REG_ML_LEPTR_ID_SDW)
+	if (!alt || elid != AZX_REG_ML_LEPTR_ID_SDW)
 		return;
 
 	state = hdac_bus_eml_get_mic_privacy_state(sof_to_bus(sdev), alt, elid);
