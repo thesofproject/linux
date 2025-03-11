@@ -230,7 +230,7 @@ static int ipc4_probes_points_info(struct sof_client_dev *cdev,
 	default:
 		dev_err(dev, "%s: info type %u not supported", __func__, type);
 		return -EOPNOTSUPP;
-	};
+	}
 
 	msg.primary = mentry->id;
 	msg.primary |= SOF_IPC4_MSG_DIR(SOF_IPC4_MSG_REQUEST);
@@ -252,7 +252,7 @@ static int ipc4_probes_points_info(struct sof_client_dev *cdev,
 	*num_desc = info->num_elems;
 	dev_dbg(dev, "%s: got %zu probe points", __func__, *num_desc);
 
-	*desc = kzalloc(*num_desc * sizeof(*desc), GFP_KERNEL);
+	*desc = kzalloc(*num_desc * sizeof(**desc), GFP_KERNEL);
 	if (!*desc) {
 		kfree(msg.data_ptr);
 		return -ENOMEM;
