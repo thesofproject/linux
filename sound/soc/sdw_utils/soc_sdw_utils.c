@@ -1197,7 +1197,9 @@ static int is_sdca_function_present(struct device *dev, struct asoc_sdw_codec_in
 	}
 
 	dlc.dai_name = dai_info->dai_name;
+	pr_info("bard: start find %s\n", dlc.dai_name);
 	codec_dai = snd_soc_find_dai_with_mutex(&dlc);
+	pr_info("bard: end find %s\n", dlc.dai_name);
 	if (!codec_dai) {
 		dev_warn(dev, "codec dai %s not registered yet\n", dlc.dai_name);
 		return -EPROBE_DEFER;

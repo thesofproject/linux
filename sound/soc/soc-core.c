@@ -273,27 +273,55 @@ static inline int snd_soc_dlc_dai_is_empty(struct snd_soc_dai_link_component *dl
 static int snd_soc_is_matching_dai(const struct snd_soc_dai_link_component *dlc,
 				   struct snd_soc_dai *dai)
 {
+	bool trace = false;
+
+	if (dlc && dlc->dai_name && strstr(dlc->dai_name, "rt722")) {
+		trace = true;
+	}
+
+	if (trace)
+		pr_info("bard: %s %d dlc->dai_name %s dai->name %s\n",
+			__func__, __LINE__, dlc->dai_name, dai->name);
+
 	if (!dlc)
 		return 0;
 
+	if (trace)
+		pr_info("bard: %s %d\n", __func__, __LINE__);
+
 	if (dlc->dai_args)
 		return snd_soc_is_match_dai_args(dai->driver->dai_args, dlc->dai_args);
+
+	if (trace)
+		pr_info("bard: %s %d\n", __func__, __LINE__);
 
 	if (!dlc->dai_name)
 		return 1;
 
 	/* see snd_soc_dai_name_get() */
 
+	if (trace)
+		pr_info("bard: %s %d\n", __func__, __LINE__);
+
 	if (dai->driver->name &&
 	    strcmp(dlc->dai_name, dai->driver->name) == 0)
 		return 1;
 
+	if (trace)
+		pr_info("bard: %s %d\n", __func__, __LINE__);
+
 	if (strcmp(dlc->dai_name, dai->name) == 0)
 		return 1;
+
+	if (trace)
+		pr_info("bard: %s %d\n", __func__, __LINE__);
 
 	if (dai->component->name &&
 	    strcmp(dlc->dai_name, dai->component->name) == 0)
 		return 1;
+
+	if (trace)
+		pr_info("bard: %s %d\n", __func__, __LINE__);
 
 	return 0;
 }
@@ -850,16 +878,29 @@ static int snd_soc_is_matching_component(
 	struct snd_soc_component *component)
 {
 	struct device_node *component_of_node;
+	bool trace = false;
 
+	if (dlc && dlc->dai_name && strstr(dlc->dai_name, "rt722")) {
+		trace = true;
+	}
+
+	if (trace)
+		pr_info("bard: %s component %s\n", __func__, component->name);
 	if (!dlc)
 		return 0;
 
+	if (trace)
+		pr_info("bard: %s dlc %s\n", __func__, dlc->name);
 	if (dlc->dai_args) {
 		struct snd_soc_dai *dai;
 
-		for_each_component_dais(component, dai)
-			if (snd_soc_is_matching_dai(dlc, dai))
+		for_each_component_dais(component, dai) {
+			if (trace)
+				pr_info("bard: %s dai %s\n", __func__, dai->name);
+			if (snd_soc_is_matching_dai(dlc, dai)) {
 				return 1;
+			}
+		}
 		return 0;
 	}
 
@@ -911,15 +952,29 @@ struct snd_soc_dai *snd_soc_find_dai(
 {
 	struct snd_soc_component *component;
 	struct snd_soc_dai *dai;
+	bool trace = false;
 
+	if (dlc && dlc->dai_name && strstr(dlc->dai_name, "rt722")) {
+		trace = true;
+	}
 	lockdep_assert_held(&client_mutex);
 
 	/* Find CPU DAI from registered DAIs */
-	for_each_component(component)
-		if (snd_soc_is_matching_component(dlc, component))
-			for_each_component_dais(component, dai)
-				if (snd_soc_is_matching_dai(dlc, dai))
+	for_each_component(component) {
+		if (trace)
+			pr_info("bard: %s component %s\n", __func__, component->name);
+		if (snd_soc_is_matching_component(dlc, component)) {
+			for_each_component_dais(component, dai) {
+				if (trace)
+					pr_info("bard: %s dai %s\n", __func__, dai->name);
+				if (snd_soc_is_matching_dai(dlc, dai)) {
+					if (trace)
+						pr_info("bard: %s found %s\n", __func__, dai->name);
 					return dai;
+				}
+			}
+		}
+	}
 
 	return NULL;
 }
@@ -930,6 +985,7 @@ struct snd_soc_dai *snd_soc_find_dai_with_mutex(
 {
 	struct snd_soc_dai *dai;
 
+	pr_info("bard: %s\n", __func__);
 	mutex_lock(&client_mutex);
 	dai = snd_soc_find_dai(dlc);
 	mutex_unlock(&client_mutex);
