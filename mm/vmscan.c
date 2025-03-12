@@ -6200,6 +6200,7 @@ static void shrink_node_memcgs(pg_data_t *pgdat, struct scan_control *sc)
 		unsigned long reclaimed;
 		unsigned long scanned;
 		bool skip = false;
+		bool bypass = false;
 
 		/*
 		 * This loop can become CPU-bound when target memcgs
@@ -6249,8 +6250,14 @@ static void shrink_node_memcgs(pg_data_t *pgdat, struct scan_control *sc)
 				   sc->nr_scanned - scanned,
 				   sc->nr_reclaimed - reclaimed);
 
+#ifdef CONFIG_ANDROID_VENDOR_OEM_DATA
+		trace_android_vh_shrink_node_memcgs_bypass(&sc->android_vendor_data1,
+				    partial, sc->nr_to_reclaim, sc->nr_reclaimed,
+				    sc->gfp_mask, sc->order, &bypass);
+#endif
+
 		/* If partial walks are allowed, bail once goal is reached */
-		if (partial && sc->nr_reclaimed >= sc->nr_to_reclaim) {
+		if (bypass || (partial && sc->nr_reclaimed >= sc->nr_to_reclaim)) {
 			mem_cgroup_iter_break(target_memcg, memcg);
 			break;
 		}
