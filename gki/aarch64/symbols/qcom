@@ -3223,6 +3223,7 @@
   __traceiter_android_rvh___set_task_cpu
   __traceiter_android_rvh_account_irq
   __traceiter_android_rvh_before_do_sched_yield
+  __traceiter_android_rvh_bitmap_find_best_next_area
   __traceiter_android_rvh_build_perf_domains
   __traceiter_android_rvh_can_migrate_task
   __traceiter_android_rvh_cpu_capacity_show
@@ -3317,6 +3318,7 @@
   trace_output_call
   __tracepoint_android_rvh_account_irq
   __tracepoint_android_rvh_before_do_sched_yield
+  __tracepoint_android_rvh_bitmap_find_best_next_area
   __tracepoint_android_rvh_build_perf_domains
   __tracepoint_android_rvh_can_migrate_task
   __tracepoint_android_rvh_cpu_capacity_show
