@@ -583,7 +583,7 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_ptl_sdw_machines[] = {
 		.sof_tplg_filename = "sof-ptl-rt713-l3-rt1320-l12.tplg",
 		.get_function_tplg_files = sof_sdw_get_tplg_files,
 	},
-		{
+	{
 		.link_mask = BIT(1) | BIT(2) | BIT(3),
 		.links = ptl_cs42l43_l2_cs35l56x6_l13,
 		.drv_name = "sof_sdw",
