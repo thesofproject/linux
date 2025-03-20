@@ -1304,18 +1304,28 @@ int asoc_sdw_parse_sdw_endpoints(struct snd_soc_card *card,
 				dai_info = &codec_info->dais[adr_end->num];
 				soc_dai = asoc_sdw_find_dailink(soc_dais, adr_end);
 
-				if (dai_info->quirk &&
-				    !(dai_info->quirk_exclude ^ !!(dai_info->quirk & ctx->mc_quirk)))
-					continue;
-
 				/*
-				 * Skip the sdca endpoint presence check if machine quirk is set.
-				 * In other words, quirk should have higher priority than the sdca
-				 * properties in the BIOS.
+				 * quirk should have higher priority than the sdca properties
+				 * in the BIOS. We can't always check the DAI quirk because we
+				 * will set the mc_quirk when the BIOS doesn't provide the right
+				 * information. The endpoint will be skipped if the dai_info->
+				 * quirk_exclude and mc_quirk are both not set if we always skip
+				 * the endpoint according to the quirk information. We need to
+				 * keep the endpoint if it is present in the BIOS. So, only
+				 * check the DAI quirk when the mc_quirk is set or SDCA endpoint
+				 * present check is not needed.
 				 */
-				if (check_sdca && !(dai_info->quirk & ctx->mc_quirk)) {
-					ret = is_sdca_endpoint_present(dev, codec_info,
-								       adr_link, i, j);
+				if (dai_info->quirk & ctx->mc_quirk || !check_sdca) {
+					/*
+					 * Check the endpoint if a matching quirk is set or SDCA
+					 * endpoint check is not necessary
+					 */
+					if (dai_info->quirk &&
+					    !(dai_info->quirk_exclude ^ !!(dai_info->quirk & ctx->mc_quirk)))
+						continue;
+				} else {
+					/* Check SDCA codec endpoint if there is no matching quirk */
+					ret = is_sdca_endpoint_present(dev, codec_info, adr_link, i, j);
 					if (ret < 0)
 						return ret;
 
