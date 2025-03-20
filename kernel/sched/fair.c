@@ -5424,6 +5424,7 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 
 		WARN_ON_ONCE(delay && se->sched_delayed);
 
+		trace_android_rvh_dequeue_entity_delayed(cfs_rq, se, &delay);
 		if (sched_feat(DELAY_DEQUEUE) && delay &&
 		    !entity_eligible(cfs_rq, se)) {
 			update_load_avg(cfs_rq, se, 0);
