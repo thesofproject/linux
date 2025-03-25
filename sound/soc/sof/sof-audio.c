@@ -672,30 +672,6 @@ sof_walk_widgets_in_order(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
 	return 0;
 }
 
-int sof_widget_list_prepare(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
-			    struct snd_pcm_hw_params *fe_params,
-			    struct snd_sof_platform_stream_params *platform_params,
-			    int dir)
-{
-	/*
-	 * Prepare widgets for set up. The prepare step is used to allocate memory, assign
-	 * instance ID and pick the widget configuration based on the runtime PCM params.
-	 */
-	return sof_walk_widgets_in_order(sdev, spcm, fe_params, platform_params,
-					dir, SOF_WIDGET_PREPARE);
-}
-
-void sof_widget_list_unprepare(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, int dir)
-{
-	struct snd_soc_dapm_widget_list *list = spcm->stream[dir].list;
-
-	/* unprepare the widget */
-	sof_walk_widgets_in_order(sdev, spcm, NULL, NULL, dir, SOF_WIDGET_UNPREPARE);
-
-	snd_soc_dapm_dai_free_widgets(&list);
-	spcm->stream[dir].list = NULL;
-}
-
 int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
 			  struct snd_pcm_hw_params *fe_params,
 			  struct snd_sof_platform_stream_params *platform_params,
@@ -706,9 +682,18 @@ int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
 	struct snd_soc_dapm_widget *widget;
 	int i, ret;
 
-	/* nothing to set up or setup has been already done */
-	if (!list || spcm->setup_done[dir])
+	/* nothing to set up */
+	if (!list)
 		return 0;
+
+	/*
+	 * Prepare widgets for set up. The prepare step is used to allocate memory, assign
+	 * instance ID and pick the widget configuration based on the runtime PCM params.
+	 */
+	ret = sof_walk_widgets_in_order(sdev, spcm, fe_params, platform_params,
+					dir, SOF_WIDGET_PREPARE);
+	if (ret < 0)
+		return ret;
 
 	/* Set up is used to send the IPC to the DSP to create the widget */
 	ret = sof_walk_widgets_in_order(sdev, spcm, fe_params, platform_params,
@@ -764,8 +749,6 @@ int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
 		}
 	}
 
-	spcm->setup_done[dir] = true;
-
 	return 0;
 
 widget_free:
@@ -783,13 +766,18 @@ int sof_widget_list_free(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, int
 	int ret;
 
 	/* nothing to free */
-	if (!list || !spcm->setup_done[dir])
+	if (!list)
 		return 0;
 
 	/* send IPC to free widget in the DSP */
 	ret = sof_walk_widgets_in_order(sdev, spcm, NULL, NULL, dir, SOF_WIDGET_FREE);
 
-	spcm->setup_done[dir] = false;
+	/* unprepare the widget */
+	sof_walk_widgets_in_order(sdev, spcm, NULL, NULL, dir, SOF_WIDGET_UNPREPARE);
+
+	snd_soc_dapm_dai_free_widgets(&list);
+	spcm->stream[dir].list = NULL;
+
 	pipeline_list->count = 0;
 
 	return ret;
