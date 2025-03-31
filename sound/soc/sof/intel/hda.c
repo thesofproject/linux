@@ -23,6 +23,7 @@
 #include <linux/module.h>
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_intel.h>
+#include <linux/soundwire/sdw_peripherals.h>
 #include <sound/intel-dsp-config.h>
 #include <sound/intel-nhlt.h>
 #include <sound/soc-acpi-intel-ssp-common.h>
@@ -33,6 +34,7 @@
 #include "../sof-pci-dev.h"
 #include "../ops.h"
 #include "../ipc4-topology.h"
+#include "../../intel/common/sof-function-topology-lib.h"
 #include "hda.h"
 
 #include <trace/events/sof_intel.h>
@@ -1117,13 +1119,66 @@ static void hda_generic_machine_select(struct snd_sof_dev *sdev,
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_SOUNDWIRE)
 
+static struct snd_soc_acpi_adr_device *find_acpi_adr_device(struct device *dev,
+							    struct sdw_slave *sdw_device,
+							    struct snd_soc_acpi_link_adr *link,
+							    int *amp_index)
+{
+	struct snd_soc_acpi_adr_device *adr_dev;
+	int index = link->num_adr;
+	int i;
+
+	link->mask = BIT(sdw_device->bus->link_id);
+	if (!index) {
+		adr_dev = devm_kzalloc(dev, sizeof(*adr_dev), GFP_KERNEL);
+	} else {
+		adr_dev = devm_krealloc(dev, (struct snd_soc_acpi_adr_device *)link->adr_d, (index + 1) * sizeof(*adr_dev), GFP_KERNEL);
+	}
+	if (!adr_dev)
+		return NULL;
+
+	for (i = 0; i < ARRAY_SIZE(support_adr); i++) {
+		if (sdw_device->id.part_id == SDW_PART_ID(support_adr[i].adr)) {
+			memcpy(&adr_dev[index], &support_adr[i], sizeof(*adr_dev));
+			break;
+		}
+	}
+	if (i == ARRAY_SIZE(support_adr)) {
+		dev_err(dev, "part id %#x is not supported\n", sdw_device->id.part_id);
+		return NULL;
+	}
+
+	adr_dev[index].adr = ((u64)sdw_device->id.class_id & 0xFF) |
+			((u64)sdw_device->id.part_id & 0xFFFF) << 8 |
+			((u64)sdw_device->id.mfg_id & 0xFFFF) << 24 |
+			((u64)(sdw_device->id.unique_id & 0xF) << 40) |
+			((u64)(sdw_device->id.sdw_version & 0xF) << 44) |
+			((u64)(sdw_device->bus->link_id & 0xF) << 48);
+
+	if (!strcmp(adr_dev[index].name_prefix, "AMP")) {
+		adr_dev[index].name_prefix = devm_kasprintf(dev, GFP_KERNEL, "%s%d", adr_dev[index].name_prefix, *amp_index);
+		if (!adr_dev[index].name_prefix)
+			return NULL;
+		(*amp_index)++;
+	}
+
+	dev_dbg(dev, "adr[%d] 0x%llx link id %d name_prefix \"%s\" is found\n", index, adr_dev[index].adr, sdw_device->bus->link_id, adr_dev[index].name_prefix);
+
+	link->num_adr++;
+
+	return adr_dev;
+}
+
 static struct snd_soc_acpi_mach *hda_sdw_machine_select(struct snd_sof_dev *sdev)
 {
 	struct snd_sof_pdata *pdata = sdev->pdata;
 	const struct snd_soc_acpi_link_adr *link;
+	struct snd_soc_acpi_link_adr *links;
 	struct sdw_peripherals *peripherals;
 	struct snd_soc_acpi_mach *mach;
 	struct sof_intel_hda_dev *hdev;
+	int amp_index = 1;
+	int link_index;
 	u32 link_mask;
 	int i;
 
@@ -1201,7 +1256,39 @@ static struct snd_soc_acpi_mach *hda_sdw_machine_select(struct snd_sof_dev *sdev
 			 peripherals->array[i]->id.part_id,
 			 peripherals->array[i]->id.sdw_version);
 
-	return NULL;
+	if (!peripherals->num_peripherals)
+		return NULL;
+
+	/* Create default SDW mach */
+	mach = devm_kzalloc(sdev->dev, sizeof(*mach), GFP_KERNEL);
+	if (!mach)
+		return NULL;
+
+	links = devm_kcalloc(sdev->dev, peripherals->num_peripherals,
+					 sizeof(*links), GFP_KERNEL);
+	if (!links)
+		return NULL;
+
+	link_mask = 0;
+	link_index = 0;
+	for (i = 0; i < peripherals->num_peripherals; i++) {
+		links[link_index].adr_d = find_acpi_adr_device(sdev->dev, peripherals->array[i], &links[link_index], &amp_index);
+		link_mask |= links[link_index].mask;
+
+		if (i < peripherals->num_peripherals - 1 && peripherals->array[i + 1]->bus->link_id != peripherals->array[i]->bus->link_id)
+			link_index++;
+
+	}
+
+	mach->drv_name = "sof_sdw";
+	mach->sof_tplg_filename = "sof-sdw-generic.tplg";
+	mach->mach_params.links = links;
+	mach->mach_params.link_mask = link_mask;
+	mach->mach_params.platform = dev_name(sdev->dev);
+	mach->get_function_tplg_files = sof_sdw_get_tplg_files;
+	dev_info(sdev->dev, "Use default SDW machine driver %s topology: %s\n",
+		 mach->drv_name, mach->sof_tplg_filename);
+	return mach;
 }
 #else
 static struct snd_soc_acpi_mach *hda_sdw_machine_select(struct snd_sof_dev *sdev)
