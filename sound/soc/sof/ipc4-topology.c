@@ -1501,6 +1501,14 @@ in_fmt:
 	return i;
 }
 
+static void sof_ipc4_unprepare_pipeline_module(struct snd_sof_widget *swidget)
+{
+	struct sof_ipc4_pipeline *pipeline = swidget->private;
+
+	/* reset pipeline memory usage */
+	pipeline->mem_usage = 0;
+}
+
 static void sof_ipc4_unprepare_copier_module(struct snd_sof_widget *swidget)
 {
 	struct sof_ipc4_copier *ipc4_copier = NULL;
@@ -3011,7 +3019,6 @@ static int sof_ipc4_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget 
 			dev_err(sdev->dev, "failed to free pipeline widget %s\n",
 				swidget->widget->name);
 
-		pipeline->mem_usage = 0;
 		pipeline->state = SOF_IPC4_PIPE_UNINITIALIZED;
 		ida_free(&pipeline_ida, swidget->instance_id);
 		swidget->instance_id = -EINVAL;
@@ -3637,7 +3644,7 @@ static const struct sof_ipc_tplg_widget_ops tplg_ipc4_widget_ops[SND_SOC_DAPM_TY
 	[snd_soc_dapm_scheduler] = {sof_ipc4_widget_setup_comp_pipeline,
 				    sof_ipc4_widget_free_comp_pipeline,
 				    pipeline_token_list, ARRAY_SIZE(pipeline_token_list), NULL,
-				    NULL, NULL},
+				    NULL, sof_ipc4_unprepare_pipeline_module},
 	[snd_soc_dapm_pga] = {sof_ipc4_widget_setup_comp_pga, sof_ipc4_widget_free_comp_pga,
 			      pga_token_list, ARRAY_SIZE(pga_token_list), NULL,
 			      sof_ipc4_prepare_gain_module,

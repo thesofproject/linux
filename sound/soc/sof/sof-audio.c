@@ -447,9 +447,15 @@ sof_unprepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widg
 		goto sink_unprepare;
 
 	widget_ops = tplg_ops ? tplg_ops->widget : NULL;
-	if (widget_ops && widget_ops[widget->id].ipc_unprepare)
+	if (widget_ops && widget_ops[widget->id].ipc_unprepare) {
+		struct snd_sof_widget *pipe_widget = swidget->spipe->pipe_widget;
+
 		/* unprepare the source widget */
 		widget_ops[widget->id].ipc_unprepare(swidget);
+
+		/* unprepare the widget's pipeline widget */
+		widget_ops[pipe_widget->id].ipc_unprepare(pipe_widget);
+	}
 
 	swidget->prepared = false;
 
@@ -1085,9 +1091,15 @@ void snd_sof_unprepare_widgets_in_pipeline(struct snd_soc_dapm_widget *w,
 		goto unprepare;
 
 	widget_ops = tplg_ops ? tplg_ops->widget : NULL;
-	if (widget_ops && widget_ops[w->id].ipc_unprepare)
+	if (widget_ops && widget_ops[w->id].ipc_unprepare) {
+		struct snd_sof_widget *pipe_widget = swidget->spipe->pipe_widget;
+
 		/* unprepare the source widget */
 		widget_ops[w->id].ipc_unprepare(swidget);
+
+		/* unprepare the widget's pipeline widget */
+		widget_ops[pipe_widget->id].ipc_unprepare(pipe_widget);
+	}
 
 	swidget->prepared = false;
 
