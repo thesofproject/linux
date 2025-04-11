@@ -468,6 +468,10 @@ static int __init pkvm_firmware_rmem_clear(void)
 	kvm_info("Clearing pKVM firmware memory\n");
 	size = pvmfw_size;
 	addr = memremap(pvmfw_base, size, MEMREMAP_WB);
+
+	pvmfw_size = kvm_nvhe_sym(pvmfw_size) = 0;
+	pvmfw_base = kvm_nvhe_sym(pvmfw_base) = 0;
+
 	if (!addr)
 		return -EINVAL;
 
