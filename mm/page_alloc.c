@@ -415,6 +415,14 @@ static unsigned long __get_pfnblock_flags_mask(const struct page *page,
 	return (word >> bitidx) & mask;
 }
 
+unsigned long get_pfnblock_flags_mask(const struct page *page,
+				      unsigned long pfn,
+				      unsigned long mask)
+{
+	return __get_pfnblock_flags_mask(page, pfn, mask);
+}
+EXPORT_SYMBOL_GPL(get_pfnblock_flags_mask);
+
 /**
  * get_pfnblock_bit - Check if a standalone bit of a pageblock is set
  * @page: The page within the block of interest
