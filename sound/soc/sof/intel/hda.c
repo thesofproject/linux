@@ -1506,6 +1506,7 @@ int hda_pci_intel_probe(struct pci_dev *pci, const struct pci_device_id *pci_id)
 		return -ENODEV;
 	}
 
+	dev_pm_set_driver_flags(&pci->dev, DPM_FLAG_SMART_SUSPEND);
 	return sof_pci_probe(pci, pci_id);
 }
 EXPORT_SYMBOL_NS(hda_pci_intel_probe, "SND_SOC_SOF_INTEL_HDA_GENERIC");
