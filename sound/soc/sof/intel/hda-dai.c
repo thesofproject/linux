@@ -232,7 +232,7 @@ static int __maybe_unused hda_dai_hw_free(struct snd_pcm_substream *substream,
 		return ret;
 
 free:
-	if (sof_is_widget_pipeline_be_managed(w)) {
+	if (swidget->spipe->complete && sof_is_widget_pipeline_be_managed(w)) {
 		ret = snd_sof_free_be_pipeline(w, substream->stream);
 		if (ret < 0)
 			return ret;
@@ -294,6 +294,7 @@ static int __maybe_unused hda_dai_hw_params(struct snd_pcm_substream *substream,
 static int __maybe_unused hda_dai_trigger(struct snd_pcm_substream *substream, int cmd,
 					  struct snd_soc_dai *dai)
 {
+	struct snd_soc_dapm_widget *w = snd_soc_dai_get_widget(dai, substream->stream);
 	const struct hda_dai_widget_dma_ops *ops = hda_dai_get_ops(substream, dai);
 	struct hdac_ext_stream *hext_stream;
 	struct snd_sof_dev *sdev;
@@ -308,6 +309,14 @@ static int __maybe_unused hda_dai_trigger(struct snd_pcm_substream *substream, i
 		dai->name, substream->stream);
 
 	sdev = dai_to_sdev(substream, dai);
+
+	/* For playback, set up the widgets first */
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK &&
+	    cmd == SNDRV_PCM_TRIGGER_START) {
+		ret = snd_sof_set_up_be_pipeline(w, substream->stream);
+		if (ret < 0)
+			return ret;
+	}
 
 	hext_stream = ops->get_hext_stream(sdev, dai, substream);
 	if (!hext_stream)
@@ -393,8 +402,9 @@ static int hda_dai_prepare(struct snd_pcm_substream *substream, struct snd_soc_d
 	if (ret < 0)
 		return ret;
 
-	if (sof_is_widget_pipeline_be_managed(w))
-		return snd_sof_set_up_be_pipeline(w, stream);
+	/* set up the widgets in the case of capture */
+	if (stream == SNDRV_PCM_STREAM_CAPTURE && sof_is_widget_pipeline_be_managed(w))
+               return snd_sof_set_up_be_pipeline(w, stream);
 
 	return 0;
 }
@@ -535,9 +545,9 @@ static int non_hda_dai_prepare(struct snd_pcm_substream *substream,
 	if (ret < 0)
 		return ret;
 
-	if (sof_is_widget_pipeline_be_managed(w))
-		return snd_sof_set_up_be_pipeline(w, stream);
-
+	/* set up the widgets in the case of capture */
+	if (stream == SNDRV_PCM_STREAM_CAPTURE && sof_is_widget_pipeline_be_managed(w))
+               return snd_sof_set_up_be_pipeline(w, stream);
 	return 0;
 }
 
@@ -738,8 +748,9 @@ int sdw_hda_dai_prepare(struct snd_pcm_substream *substream, struct snd_pcm_hw_p
 	if (ret < 0)
 		return ret;
 
-	if (sof_is_widget_pipeline_be_managed(w))
-		return snd_sof_set_up_be_pipeline(w, stream);
+	/* set up the widgets in the case of capture */
+	if (stream == SNDRV_PCM_STREAM_CAPTURE && sof_is_widget_pipeline_be_managed(w))
+               return snd_sof_set_up_be_pipeline(w, stream);
 
 	return 0;
 }
