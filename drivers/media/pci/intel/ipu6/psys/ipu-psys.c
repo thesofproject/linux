@@ -870,8 +870,6 @@ struct ipu_psys_kbuffer *ipu_psys_mapbuf_locked(int fd, struct ipu_psys_fh *fh)
 		goto mapbuf_end;
 	}
 
-	kbuf->dma_addr = sg_dma_address(kbuf->sgt->sgl);
-
 	dmap.is_iomem = false;
 	if (dma_buf_vmap_unlocked(kbuf->dbuf, &dmap)) {
 		dev_dbg(dev, "dma buf vmap failed\n");
