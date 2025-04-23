@@ -133,6 +133,11 @@ jobs:
           sudo apt update
           sudo apt install -y build-essential
 
+      - name: Install uuid-dev
+        run: |
+          sudo apt update
+          sudo apt install -y uuid-dev
+
       - name: build start
         run: |
           export ARCH=x86_64 KCFLAGS="-Wall -Werror"
@@ -178,6 +183,11 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y gcc-aarch64-linux-gnu
+
+      - name: Install uuid-dev
+        run: |
+          sudo apt update
+          sudo apt install -y uuid-dev
 
       - name: build start
         run: |
