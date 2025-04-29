@@ -2319,28 +2319,32 @@ _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		copier_data = &ipc4_copier->data;
 		available_fmt = &ipc4_copier->available_fmt;
 
-		/*
-		 * Use the fe_params as a base for the copier configuration.
-		 * The ref_params might get updated to reflect what format is
-		 * supported by the copier on the DAI side.
-		 *
-		 * In case of capture the ref_params returned will be used to
-		 * find the input configuration of the copier.
-		 */
-		ref_params = kmemdup(fe_params, sizeof(*ref_params), GFP_KERNEL);
-		if (!ref_params)
-			return -ENOMEM;
+		if (dir == SNDRV_PCM_STREAM_PLAYBACK) {
+			/*
+			 * For playback the pipeline_params needs to be used to
+			 * find the input configuration of the copier.
+			 */
+			ref_params = kmemdup(pipeline_params, sizeof(*ref_params),
+					     GFP_KERNEL);
+			if (!ref_params)
+				return -ENOMEM;
+		} else {
+			/*
+			 * For capture the adjusted fe_params needs to be used
+			 * to find the input configuration of the copier.
+			 *
+			 * The params might be updated in
+			 * sof_ipc4_prepare_dai_copier() to reflect the supported
+			 * input formats by the copier/dai.
+			 */
+			ref_params = kmemdup(fe_params, sizeof(*ref_params), GFP_KERNEL);
+			if (!ref_params)
+				return -ENOMEM;
 
-		ret = sof_ipc4_prepare_dai_copier(sdev, dai, ref_params, dir);
-		if (ret < 0)
-			return ret;
-
-		/*
-		 * For playback the pipeline_params needs to be used to find the
-		 * input configuration of the copier.
-		 */
-		if (dir == SNDRV_PCM_STREAM_PLAYBACK)
-			memcpy(ref_params, pipeline_params, sizeof(*ref_params));
+			ret = sof_ipc4_prepare_dai_copier(sdev, dai, ref_params, dir);
+			if (ret < 0)
+				return ret;
+		}
 
 		break;
 	}
@@ -2395,15 +2399,34 @@ _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 	}
 	case snd_soc_dapm_aif_out:
 	case snd_soc_dapm_dai_in:
-		out_ref_rate = params_rate(fe_params);
-		out_ref_channels = params_channels(fe_params);
-		ret = sof_ipc4_get_sample_type(sdev, fe_params);
+		/*
+		 * For capture the fe_params needs to be used to find the output
+		 * configuration of the copier.
+		 *
+		 * For playback the adjusted fe_params needs to be used
+		 * to find the output configuration of the copier.
+		 *
+		 * The params might be updated in
+		 * sof_ipc4_prepare_dai_copier() to reflect the supported
+		 * output formats by the copier/dai.
+		 */
+		memcpy(ref_params, fe_params, sizeof(*ref_params));
+		if (dir == SNDRV_PCM_STREAM_PLAYBACK &&
+ 		    swidget->id == snd_soc_dapm_dai_in) {
+			ret = sof_ipc4_prepare_dai_copier(sdev, dai, ref_params, dir);
+			if (ret < 0)
+				return ret;
+		}
+
+		out_ref_rate = params_rate(ref_params);
+		out_ref_channels = params_channels(ref_params);
+		ret = sof_ipc4_get_sample_type(sdev, ref_params);
 		if (ret < 0)
 			return ret;
 		out_ref_type = (u32)ret;
 
 		if (!single_output_bitdepth) {
-			out_ref_valid_bits = sof_ipc4_get_valid_bits(sdev, fe_params);
+			out_ref_valid_bits = sof_ipc4_get_valid_bits(sdev, ref_params);
 			if (out_ref_valid_bits < 0)
 				return out_ref_valid_bits;
 		}
