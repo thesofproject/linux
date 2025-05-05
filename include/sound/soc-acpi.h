@@ -81,7 +81,7 @@ struct snd_soc_acpi_mach_params {
 	u32 codec_mask;
 	u32 dmic_num;
 	u32 link_mask;
-	const struct snd_soc_acpi_link_adr *links;
+	struct snd_soc_acpi_link_adr *links;
 	u32 i2s_link_mask;
 	u32 num_dai_drivers;
 	struct snd_soc_dai_driver *dai_drivers;
@@ -114,10 +114,10 @@ struct snd_soc_acpi_endpoint {
  * @name_prefix: string used for codec controls
  */
 struct snd_soc_acpi_adr_device {
-	const u64 adr;
-	const u8 num_endpoints;
+	u64 adr;
+	u8 num_endpoints;
 	const struct snd_soc_acpi_endpoint *endpoints;
-	const char *name_prefix;
+	char *name_prefix;
 };
 
 /**
@@ -131,8 +131,8 @@ struct snd_soc_acpi_adr_device {
  */
 
 struct snd_soc_acpi_link_adr {
-	const u32 mask;
-	const u32 num_adr;
+	u32 mask;
+	u32 num_adr;
 	const struct snd_soc_acpi_adr_device *adr_d;
 };
 
@@ -209,7 +209,7 @@ struct snd_soc_acpi_mach {
 	u8 id[ACPI_ID_LEN];
 	const char *uid;
 	const struct snd_soc_acpi_codecs *comp_ids;
-	const u32 link_mask;
+	u32 link_mask;
 	const struct snd_soc_acpi_link_adr *links;
 	const char *drv_name;
 	const char *fw_filename;

@@ -1185,7 +1185,7 @@ static struct snd_soc_acpi_mach *hda_sdw_machine_select(struct snd_sof_dev *sdev
 				break;
 	}
 	if (mach && mach->link_mask) {
-		mach->mach_params.links = mach->links;
+		mach->mach_params.links = (struct snd_soc_acpi_link_adr *)mach->links;
 		mach->mach_params.link_mask = mach->link_mask;
 		mach->mach_params.platform = dev_name(sdev->dev);
 
@@ -1377,7 +1377,7 @@ struct snd_soc_acpi_mach *hda_machine_select(struct snd_sof_dev *sdev)
 		}
 
 		if (mach->link_mask) {
-			mach->mach_params.links = mach->links;
+			mach->mach_params.links = (struct snd_soc_acpi_link_adr *)mach->links;
 			mach->mach_params.link_mask = mach->link_mask;
 		}
 
