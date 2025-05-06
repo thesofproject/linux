@@ -1077,7 +1077,7 @@ static void hda_generic_machine_select(struct snd_sof_dev *sdev,
 				if (!tplg_filename)
 					return;
 
-				hda_mach->sof_tplg_filename = tplg_filename;
+				pdata->tplg_filename = tplg_filename;
 			}
 
 			if (codec_num == 2 ||
