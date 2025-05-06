@@ -19,7 +19,7 @@
 #include "sof-audio.h"
 #include "ops.h"
 
-static bool disable_function_topology = false;
+static bool disable_function_topology;
 module_param(disable_function_topology, bool, 0444);
 MODULE_PARM_DESC(disable_function_topology, "Disable function topology loading");
 
