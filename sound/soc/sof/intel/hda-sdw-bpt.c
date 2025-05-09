@@ -304,7 +304,7 @@ close:
 
 	return ret;
 }
-EXPORT_SYMBOL_NS(hda_sdw_bpt_open, "SND_SOC_SOF_INTEL_HDA_SDW_BPT");
+EXPORT_SYMBOL_NS(hda_sdw_bpt_open, SND_SOC_SOF_INTEL_HDA_SDW_BPT);
 
 int hda_sdw_bpt_send_async(struct device *dev, struct hdac_ext_stream *bpt_tx_stream,
 			   struct hdac_ext_stream *bpt_rx_stream)
@@ -332,7 +332,7 @@ int hda_sdw_bpt_send_async(struct device *dev, struct hdac_ext_stream *bpt_tx_st
 
 	return ret;
 }
-EXPORT_SYMBOL_NS(hda_sdw_bpt_send_async, "SND_SOC_SOF_INTEL_HDA_SDW_BPT");
+EXPORT_SYMBOL_NS(hda_sdw_bpt_send_async, SND_SOC_SOF_INTEL_HDA_SDW_BPT);
 
 /*
  * 3s is several orders of magnitude larger than what is needed for a
@@ -420,7 +420,7 @@ dma_disable:
 
 	return ret;
 }
-EXPORT_SYMBOL_NS(hda_sdw_bpt_wait, "SND_SOC_SOF_INTEL_HDA_SDW_BPT");
+EXPORT_SYMBOL_NS(hda_sdw_bpt_wait, SND_SOC_SOF_INTEL_HDA_SDW_BPT);
 
 int hda_sdw_bpt_close(struct device *dev, struct hdac_ext_stream *bpt_tx_stream,
 		      struct snd_dma_buffer *dmab_tx_bdl, struct hdac_ext_stream *bpt_rx_stream,
@@ -437,9 +437,9 @@ int hda_sdw_bpt_close(struct device *dev, struct hdac_ext_stream *bpt_tx_stream,
 
 	return ret;
 }
-EXPORT_SYMBOL_NS(hda_sdw_bpt_close, "SND_SOC_SOF_INTEL_HDA_SDW_BPT");
+EXPORT_SYMBOL_NS(hda_sdw_bpt_close, SND_SOC_SOF_INTEL_HDA_SDW_BPT);
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("SOF helpers for HDaudio SoundWire BPT");
-MODULE_IMPORT_NS("SND_SOC_SOF_INTEL_HDA_COMMON");
-MODULE_IMPORT_NS("SND_SOC_SOF_HDA_MLINK");
+MODULE_IMPORT_NS(SND_SOC_SOF_INTEL_HDA_COMMON);
+MODULE_IMPORT_NS(SND_SOC_SOF_HDA_MLINK);
