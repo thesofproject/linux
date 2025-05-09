@@ -761,7 +761,7 @@ int sof_mtl_set_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops *dsp_ops)
 
 	return 0;
 }
-EXPORT_SYMBOL_NS(sof_mtl_set_ops, "SND_SOC_SOF_INTEL_MTL");
+EXPORT_SYMBOL_NS(sof_mtl_set_ops, SND_SOC_SOF_INTEL_MTL);
 
 const struct sof_intel_dsp_desc mtl_chip_info = {
 	.cores_num = 3,
