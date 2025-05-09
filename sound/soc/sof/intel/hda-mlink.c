@@ -1046,7 +1046,7 @@ void hdac_bus_eml_set_mic_privacy_mask(struct hdac_bus *bus, bool alt, int elid,
 
 	h2link->mic_privacy_mask = mask;
 }
-EXPORT_SYMBOL_NS(hdac_bus_eml_set_mic_privacy_mask, "SND_SOC_SOF_HDA_MLINK");
+EXPORT_SYMBOL_NS(hdac_bus_eml_set_mic_privacy_mask, SND_SOC_SOF_HDA_MLINK);
 
 bool hdac_bus_eml_is_mic_privacy_changed(struct hdac_bus *bus, bool alt, int elid)
 {
@@ -1080,7 +1080,7 @@ bool hdac_bus_eml_is_mic_privacy_changed(struct hdac_bus *bus, bool alt, int eli
 
 	return changed;
 }
-EXPORT_SYMBOL_NS(hdac_bus_eml_is_mic_privacy_changed, "SND_SOC_SOF_HDA_MLINK");
+EXPORT_SYMBOL_NS(hdac_bus_eml_is_mic_privacy_changed, SND_SOC_SOF_HDA_MLINK);
 
 bool hdac_bus_eml_get_mic_privacy_state(struct hdac_bus *bus, bool alt, int elid)
 {
@@ -1112,7 +1112,7 @@ bool hdac_bus_eml_get_mic_privacy_state(struct hdac_bus *bus, bool alt, int elid
 
 	return false;
 }
-EXPORT_SYMBOL_NS(hdac_bus_eml_get_mic_privacy_state, "SND_SOC_SOF_HDA_MLINK");
+EXPORT_SYMBOL_NS(hdac_bus_eml_get_mic_privacy_state, SND_SOC_SOF_HDA_MLINK);
 
 #endif
 
