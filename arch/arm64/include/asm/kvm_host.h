@@ -88,7 +88,7 @@ void kvm_arm_vcpu_destroy(struct kvm_vcpu *vcpu);
 struct kvm_hyp_memcache {
 	phys_addr_t head;
 	unsigned long nr_pages;
-	struct pkvm_mapping *mapping; /* only used from EL1 */
+	void *mapping; /* struct pkvm_mapping *, only used from EL1 */
 
 #define	HYP_MEMCACHE_ACCOUNT_STAGE2	BIT(1)
 #define	HYP_MEMCACHE_ACCOUNT_KMEMCG	BIT(2)
