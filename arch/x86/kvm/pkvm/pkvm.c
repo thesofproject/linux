@@ -838,6 +838,13 @@ static bool is_guest_vcpu_accessible(struct kvm_vcpu *vcpu, enum pkvm_hc hc)
 		 * As the host needs to pre-configure the pVM's vCPU state for
 		 * booting, the protection for pVM is only enforced by the pKVM
 		 * hypervisor once the vCPU has started running.
+		 *
+		 * If the pVM runs with pvmfw, the pKVM hypervisor itself will
+		 * enforce most of the vcpu's initial state before the first vcpu
+		 * starts running, in pkvm_vcpu_pvmfw_entry_init(). However,
+		 * before that we don't know yet if the pVM will run with pvmfw
+		 * or not, since the host VMM may issue the ioctl enabling pvmfw
+		 * either before or after using any of the above PV interfaces.
 		 */
 		return !kvm_vcpu_has_run(vcpu);
 	default:
@@ -1262,8 +1269,63 @@ static int pkvm_load_mmu_pgd(struct kvm_vcpu *vcpu)
 
 static void pkvm_vcpu_pvmfw_entry_init(struct kvm_vcpu *vcpu)
 {
+	struct kvm_segment seg;
+	struct desc_ptr dt;
+
 	/* pvmfw entry point is at the beginning of the pvmfw image. */
 	kvm_rip_write(vcpu, vcpu->kvm->arch.pkvm.pvmfw_load_addr);
+
+	/* Force RFLAGS and CR4 to their reset values. */
+	kvm_x86_call(set_rflags)(vcpu, X86_EFLAGS_FIXED);
+	kvm_x86_call(set_cr4)(vcpu, 0);
+
+	/* pvmfw starts in 32-bit protected mode with paging disabled. */
+	kvm_x86_call(set_cr0)(vcpu, X86_CR0_PE | X86_CR0_ET);
+	kvm_x86_call(set_efer)(vcpu, 0);
+
+	/* Set up flat 4GB segments. */
+	memset(&seg, 0, sizeof(seg));
+	seg.limit = 0xffffffff;
+	seg.type = 0xb;
+	seg.present = 1;
+	seg.db = 1;	/* 32-bit segment */
+	seg.s = 1;
+	seg.g = 1;
+	kvm_x86_call(set_segment)(vcpu, &seg, VCPU_SREG_CS);
+	seg.type = 0x3;
+	kvm_x86_call(set_segment)(vcpu, &seg, VCPU_SREG_DS);
+	kvm_x86_call(set_segment)(vcpu, &seg, VCPU_SREG_ES);
+	kvm_x86_call(set_segment)(vcpu, &seg, VCPU_SREG_FS);
+	kvm_x86_call(set_segment)(vcpu, &seg, VCPU_SREG_GS);
+	kvm_x86_call(set_segment)(vcpu, &seg, VCPU_SREG_SS);
+
+	memset(&dt, 0, sizeof(dt));
+
+	/*
+	 * Initially hardware will use the cached segment descriptors we've set up
+	 * above, so GDT in memory does not matter, until the guest reloads
+	 * a segment register. Set the initial GDTR to an invalid GDT, so that
+	 * if pvmfw accidentally reloads a segment register before it has set up
+	 * its own GDT, it generates a #GP.
+	 */
+	kvm_x86_call(set_gdt)(vcpu, &dt);
+
+	/* Similarly for TSS */
+	memset(&seg, 0, sizeof(seg));
+	seg.type = 0xb;
+	seg.present = 1;
+	kvm_x86_call(set_segment)(vcpu, &seg, VCPU_SREG_TR);
+
+	/* ...and LDT */
+	memset(&seg, 0, sizeof(seg));
+	seg.unusable = 1;
+	kvm_x86_call(set_segment)(vcpu, &seg, VCPU_SREG_LDTR);
+
+	/*
+	 * Set the initial IDTR to an invalid IDT, so that any early exception
+	 * (before pvmfw sets up its own IDT) results in a triple fault.
+	 */
+	kvm_x86_call(set_idt)(vcpu, &dt);
 }
 
 static void update_vcpu_state_from_host(struct kvm_vcpu *vcpu)
