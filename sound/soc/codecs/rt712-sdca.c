@@ -1451,6 +1451,8 @@ static void rt712_sdca_shutdown(struct snd_pcm_substream *substream,
 	snd_soc_dai_set_dma_data(dai, substream, NULL);
 }
 
+#define RT712_PROBE_TIMEOUT 5000
+
 static int rt712_sdca_pcm_hw_params(struct snd_pcm_substream *substream,
 				struct snd_pcm_hw_params *params,
 				struct snd_soc_dai *dai)
@@ -1504,6 +1506,10 @@ static int rt712_sdca_pcm_hw_params(struct snd_pcm_substream *substream,
 	num_channels = params_channels(params);
 	port_config.ch_mask = GENMASK(num_channels - 1, 0);
 	port_config.num = port;
+
+	retval = sdw_slave_wait_for_initialization(rt712->slave, RT712_PROBE_TIMEOUT);
+	if (retval < 0)
+		return retval;
 
 	retval = sdw_stream_add_slave(rt712->slave, &stream_config,
 					&port_config, 1, sdw_stream);
