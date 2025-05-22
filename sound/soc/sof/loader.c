@@ -115,6 +115,7 @@ int snd_sof_run_firmware(struct snd_sof_dev *sdev)
 	struct sof_dsp_power_state state = {
 		.state = SOF_DSP_PM_D0,
 	};
+	ktime_t boot_start;
 	int ret;
 
 	init_waitqueue_head(&sdev->boot_wait);
@@ -143,6 +144,7 @@ int snd_sof_run_firmware(struct snd_sof_dev *sdev)
 	}
 
 	dev_dbg(sdev->dev, "booting DSP firmware\n");
+	boot_start = ktime_get();
 
 	/* boot the firmware on the DSP */
 	ret = snd_sof_dsp_run(sdev);
@@ -171,7 +173,6 @@ int snd_sof_run_firmware(struct snd_sof_dev *sdev)
 	if (sdev->fw_state == SOF_FW_BOOT_READY_FAILED)
 		return -EIO; /* FW boots but fw_ready op failed */
 
-	dev_dbg(sdev->dev, "firmware boot complete\n");
 	sof_set_fw_state(sdev, SOF_FW_BOOT_COMPLETE);
 
 	/* set the DSP power state to D0 after successful firmware boot */
@@ -185,9 +186,13 @@ int snd_sof_run_firmware(struct snd_sof_dev *sdev)
 	}
 
 	if (sdev->ipc->ops->post_fw_boot)
-		return sdev->ipc->ops->post_fw_boot(sdev);
+		ret = sdev->ipc->ops->post_fw_boot(sdev);
 
-	return 0;
+	if (!ret)
+		dev_dbg(sdev->dev, "firmware boot complete, took %lldus\n",
+			ktime_us_delta(ktime_get(), boot_start));
+
+	return ret;
 }
 EXPORT_SYMBOL(snd_sof_run_firmware);
 
