@@ -113,8 +113,8 @@ EXPORT_SYMBOL(snd_sof_load_firmware_memcpy);
 int snd_sof_run_firmware(struct snd_sof_dev *sdev)
 {
 	struct sof_dsp_power_state state = {
-                .state = SOF_DSP_PM_D0,
-        };
+		.state = SOF_DSP_PM_D0,
+	};
 	int ret;
 
 	init_waitqueue_head(&sdev->boot_wait);
