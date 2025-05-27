@@ -123,8 +123,9 @@ enum sof_ipc4_global_msg {
 	/* Notification (FW to SW driver) */
 	SOF_IPC4_GLB_NOTIFICATION,
 
-	/* 28 .. 31: RESERVED - do not use */
+	/* 28 .. 30: RESERVED - do not use */
 
+	SOF_IPC4_GLB_ENTER_GDB = 31,
 	SOF_IPC4_GLB_TYPE_LAST,
 };
 
