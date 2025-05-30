@@ -1571,7 +1571,6 @@ static int sof_ipc4_init_input_audio_fmt(struct snd_sof_dev *sdev,
 	u32 channels;
 	u32 rate;
 	u32 type;
-	bool single_format;
 	int sample_valid_bits;
 	int sample_type;
 	int i = 0;
@@ -1580,10 +1579,6 @@ static int sof_ipc4_init_input_audio_fmt(struct snd_sof_dev *sdev,
 		dev_err(sdev->dev, "no input formats for %s\n", swidget->widget->name);
 		return -EINVAL;
 	}
-
-	single_format = sof_ipc4_is_single_format(sdev, pin_fmts, pin_fmts_size);
-	if (single_format)
-		goto in_fmt;
 
 	sample_valid_bits = sof_ipc4_get_valid_bits(sdev, params);
 	if (sample_valid_bits < 0)
@@ -1609,16 +1604,15 @@ static int sof_ipc4_init_input_audio_fmt(struct snd_sof_dev *sdev,
 		type = sof_ipc4_fmt_cfg_to_type(fmt->fmt_cfg);
 		if (params_rate(params) == rate && params_channels(params) == channels &&
 		    sample_valid_bits == valid_bits && sample_type == type)
-			break;
+			goto in_fmt;
 	}
 
-	if (i == pin_fmts_size) {
-		dev_err(sdev->dev,
-			"%s: Unsupported audio format: %uHz, %ubit, %u channels, type: %d\n",
-			__func__, params_rate(params), sample_valid_bits,
-			params_channels(params), sample_type);
-		return -EINVAL;
-	}
+	dev_err(sdev->dev,
+		"%s: Unsupported audio format: %uHz, %ubit, %u channels, type: %d\n",
+		__func__, params_rate(params), sample_valid_bits,
+		params_channels(params), sample_type);
+
+	return -EINVAL;
 
 in_fmt:
 	/* copy input format */
