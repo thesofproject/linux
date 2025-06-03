@@ -373,6 +373,7 @@ static int rt1017_sdca_update_status(struct sdw_slave *slave,
 				enum sdw_slave_status status)
 {
 	struct  rt1017_sdca_priv *rt1017 = dev_get_drvdata(&slave->dev);
+	int ret;
 
 	if (status == SDW_SLAVE_UNATTACHED)
 		rt1017->hw_init = false;
@@ -385,7 +386,18 @@ static int rt1017_sdca_update_status(struct sdw_slave *slave,
 		return 0;
 
 	/* perform I/O transfers required for Slave initialization */
-	return rt1017_sdca_io_init(&slave->dev, slave);
+	ret = rt1017_sdca_io_init(&slave->dev, slave);
+	if (ret < 0) {
+		dev_err(&slave->dev, "IO init failed: %d\n", ret);
+		return ret;
+	}
+
+	if (slave->unattach_request) {
+		regcache_cache_only(rt1017->regmap, false);
+		regcache_sync(rt1017->regmap);
+	}
+
+	return ret;
 }
 
 static const char * const rt1017_rx_data_ch_select[] = {
@@ -569,6 +581,8 @@ static void rt1017_sdca_shutdown(struct snd_pcm_substream *substream,
 	snd_soc_dai_set_dma_data(dai, substream, NULL);
 }
 
+#define RT1017_PROBE_TIMEOUT 5000
+
 static int rt1017_sdca_pcm_hw_params(struct snd_pcm_substream *substream,
 				struct snd_pcm_hw_params *params,
 				struct snd_soc_dai *dai)
@@ -615,6 +629,10 @@ static int rt1017_sdca_pcm_hw_params(struct snd_pcm_substream *substream,
 	dev_dbg(dai->dev, "frame_rate %d, ch_count %d, bps %d, direction %d, ch_mask %d, port: %d\n",
 		params_rate(params), num_channels, snd_pcm_format_width(params_format(params)),
 		direction, ch_mask, port);
+
+	retval = sdw_slave_wait_for_initialization(rt1017->sdw_slave, RT1017_PROBE_TIMEOUT);
+	if (retval < 0)
+		return retval;
 
 	retval = sdw_stream_add_slave(rt1017->sdw_slave, &stream_config,
 				&port_config, 1, sdw_stream);
@@ -770,13 +788,10 @@ static int rt1017_sdca_dev_suspend(struct device *dev)
 	return 0;
 }
 
-#define RT1017_PROBE_TIMEOUT 5000
-
 static int rt1017_sdca_dev_resume(struct device *dev)
 {
 	struct sdw_slave *slave = dev_to_sdw_dev(dev);
 	struct rt1017_sdca_priv *rt1017 = dev_get_drvdata(dev);
-	unsigned long time;
 
 	if (!rt1017->first_hw_init)
 		return 0;
@@ -784,14 +799,7 @@ static int rt1017_sdca_dev_resume(struct device *dev)
 	if (!slave->unattach_request)
 		goto regmap_sync;
 
-	time = wait_for_completion_timeout(&slave->initialization_complete,
-				msecs_to_jiffies(RT1017_PROBE_TIMEOUT));
-	if (!time) {
-		dev_err(&slave->dev, "Initialization not complete, timed out\n");
-		sdw_show_ping_status(slave->bus, true);
-
-		return -ETIMEDOUT;
-	}
+	return 0;
 
 regmap_sync:
 	slave->unattach_request = 0;
