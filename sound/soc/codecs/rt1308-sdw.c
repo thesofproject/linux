@@ -303,6 +303,7 @@ static int rt1308_update_status(struct sdw_slave *slave,
 					enum sdw_slave_status status)
 {
 	struct  rt1308_sdw_priv *rt1308 = dev_get_drvdata(&slave->dev);
+	int ret;
 
 	if (status == SDW_SLAVE_UNATTACHED)
 		rt1308->hw_init = false;
@@ -315,7 +316,18 @@ static int rt1308_update_status(struct sdw_slave *slave,
 		return 0;
 
 	/* perform I/O transfers required for Slave initialization */
-	return rt1308_io_init(&slave->dev, slave);
+	ret = rt1308_io_init(&slave->dev, slave);
+	if (ret < 0) {
+		dev_err(&slave->dev, "IO init failed %d\n", ret);
+		return ret;
+	}
+
+	if (slave->unattach_request) {
+		regcache_cache_only(rt1308->regmap, false);
+		regcache_sync_region(rt1308->regmap, 0xc000, 0xcfff);
+	}
+
+	return ret;
 }
 
 static int rt1308_bus_config(struct sdw_slave *slave,
@@ -526,6 +538,8 @@ static int rt1308_sdw_set_tdm_slot(struct snd_soc_dai *dai,
 	return 0;
 }
 
+#define RT1308_PROBE_TIMEOUT 5000
+
 static int rt1308_sdw_hw_params(struct snd_pcm_substream *substream,
 	struct snd_pcm_hw_params *params, struct snd_soc_dai *dai)
 {
@@ -559,6 +573,10 @@ static int rt1308_sdw_hw_params(struct snd_pcm_substream *substream,
 		stream_config.ch_count = rt1308->slots;
 		port_config.ch_mask = rt1308->rx_mask;
 	}
+
+	retval = sdw_slave_wait_for_initialization(rt1308->sdw_slave, RT1308_PROBE_TIMEOUT);
+	if (retval < 0)
+		return retval;
 
 	retval = sdw_stream_add_slave(rt1308->sdw_slave, &stream_config,
 				&port_config, 1, sdw_stream);
@@ -765,13 +783,10 @@ static int rt1308_dev_suspend(struct device *dev)
 	return 0;
 }
 
-#define RT1308_PROBE_TIMEOUT 5000
-
 static int rt1308_dev_resume(struct device *dev)
 {
 	struct sdw_slave *slave = dev_to_sdw_dev(dev);
 	struct rt1308_sdw_priv *rt1308 = dev_get_drvdata(dev);
-	unsigned long time;
 
 	if (!rt1308->first_hw_init)
 		return 0;
@@ -779,14 +794,7 @@ static int rt1308_dev_resume(struct device *dev)
 	if (!slave->unattach_request)
 		goto regmap_sync;
 
-	time = wait_for_completion_timeout(&slave->initialization_complete,
-				msecs_to_jiffies(RT1308_PROBE_TIMEOUT));
-	if (!time) {
-		dev_err(&slave->dev, "Initialization not complete, timed out\n");
-		sdw_show_ping_status(slave->bus, true);
-
-		return -ETIMEDOUT;
-	}
+	return 0;
 
 regmap_sync:
 	slave->unattach_request = 0;
