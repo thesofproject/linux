@@ -893,6 +893,8 @@ static void rt700_shutdown(struct snd_pcm_substream *substream,
 	snd_soc_dai_set_dma_data(dai, substream, NULL);
 }
 
+#define RT700_PROBE_TIMEOUT 5000
+
 static int rt700_pcm_hw_params(struct snd_pcm_substream *substream,
 					struct snd_pcm_hw_params *params,
 					struct snd_soc_dai *dai)
@@ -933,6 +935,10 @@ static int rt700_pcm_hw_params(struct snd_pcm_substream *substream,
 		dev_err(component->dev, "%s: Invalid DAI id %d\n", __func__, dai->id);
 		return -EINVAL;
 	}
+
+	retval = sdw_slave_wait_for_initialization(rt700->slave, RT700_PROBE_TIMEOUT);
+	if (retval < 0)
+		return retval;
 
 	retval = sdw_stream_add_slave(rt700->slave, &stream_config,
 					&port_config, 1, sdw_stream);
