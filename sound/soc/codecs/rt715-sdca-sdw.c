@@ -120,6 +120,7 @@ static int rt715_sdca_update_status(struct sdw_slave *slave,
 				enum sdw_slave_status status)
 {
 	struct rt715_sdca_priv *rt715 = dev_get_drvdata(&slave->dev);
+	int ret;
 
 	/*
 	 * Perform initialization only if slave status is present and
@@ -129,7 +130,29 @@ static int rt715_sdca_update_status(struct sdw_slave *slave,
 		return 0;
 
 	/* perform I/O transfers required for Slave initialization */
-	return rt715_sdca_io_init(&slave->dev, slave);
+	ret = rt715_sdca_io_init(&slave->dev, slave);
+	if (ret < 0) {
+		dev_err(&slave->dev, "IO init failed: %d\n", ret);
+		return ret;
+	}
+
+	if (slave->unattach_request) {
+		regcache_cache_only(rt715->regmap, false);
+		regcache_sync_region(rt715->regmap,
+			SDW_SDCA_CTL(FUN_JACK_CODEC, RT715_SDCA_ST_EN, RT715_SDCA_ST_CTRL,
+				CH_00),
+			SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_SMPU_TRIG_ST_EN,
+				RT715_SDCA_SMPU_TRIG_ST_CTRL, CH_00));
+		regcache_cache_only(rt715->mbq_regmap, false);
+		regcache_sync_region(rt715->mbq_regmap, 0x2000000, 0x61020ff);
+		regcache_sync_region(rt715->mbq_regmap,
+			SDW_SDCA_CTL(FUN_JACK_CODEC, RT715_SDCA_ST_EN, RT715_SDCA_ST_CTRL,
+				CH_00),
+			SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_SMPU_TRIG_ST_EN,
+				RT715_SDCA_SMPU_TRIG_ST_CTRL, CH_00));
+	}
+
+	return ret;
 }
 
 static int rt715_sdca_read_prop(struct sdw_slave *slave)
@@ -220,13 +243,10 @@ static int rt715_dev_suspend(struct device *dev)
 	return 0;
 }
 
-#define RT715_PROBE_TIMEOUT 5000
-
 static int rt715_dev_resume(struct device *dev)
 {
 	struct sdw_slave *slave = dev_to_sdw_dev(dev);
 	struct rt715_sdca_priv *rt715 = dev_get_drvdata(dev);
-	unsigned long time;
 
 	if (!rt715->first_hw_init)
 		return 0;
@@ -234,14 +254,7 @@ static int rt715_dev_resume(struct device *dev)
 	if (!slave->unattach_request)
 		goto regmap_sync;
 
-	time = wait_for_completion_timeout(&slave->initialization_complete,
-					   msecs_to_jiffies(RT715_PROBE_TIMEOUT));
-	if (!time) {
-		dev_err(&slave->dev, "%s: Initialization not complete, timed out\n", __func__);
-		sdw_show_ping_status(slave->bus, true);
-
-		return -ETIMEDOUT;
-	}
+	return 0;
 
 regmap_sync:
 	slave->unattach_request = 0;
