@@ -138,6 +138,11 @@ jobs:
           sudo apt update
           sudo apt install -y uuid-dev
 
+      - name: Install libdw-dev
+        run: |
+          sudo apt update
+          sudo apt install -y libdw-dev
+
       - name: build start
         run: |
           export ARCH=x86_64 KCFLAGS="-Wall -Werror"
