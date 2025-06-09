@@ -16,6 +16,7 @@
 enum tplg_device_id {
 	TPLG_DEVICE_SDCA_JACK,
 	TPLG_DEVICE_SDCA_AMP,
+	TPLG_DEVICE_SDCA_AMP_FEEDBACK,
 	TPLG_DEVICE_SDCA_MIC,
 	TPLG_DEVICE_INTEL_PCH_DMIC,
 	TPLG_DEVICE_HDMI,
@@ -35,6 +36,7 @@ int sof_sdw_get_tplg_files(struct snd_soc_card *card, const struct snd_soc_acpi_
 	const struct firmware *fw;
 	char platform[SOF_INTEL_PLATFORM_NAME_MAX];
 	unsigned long tplg_mask = 0;
+	int amp_tplg_num;
 	int tplg_num = 0;
 	int tplg_dev;
 	int ret;
@@ -55,9 +57,41 @@ int sof_sdw_get_tplg_files(struct snd_soc_card *card, const struct snd_soc_acpi_
 			tplg_dev = TPLG_DEVICE_SDCA_JACK;
 			tplg_dev_name = "sdca-jack";
 		} else if (strstr(dai_link->name, "SmartAmp")) {
-			tplg_dev = TPLG_DEVICE_SDCA_AMP;
-			tplg_dev_name = devm_kasprintf(card->dev, GFP_KERNEL,
-						       "sdca-%damp", dai_link->num_cpus);
+			/* If the AMP feedback topology is already used, continue */
+			if (tplg_mask & BIT(TPLG_DEVICE_SDCA_AMP_FEEDBACK))
+				continue;
+			if (strstr(dai_link->name, "Playback")) {
+				tplg_dev = TPLG_DEVICE_SDCA_AMP;
+				tplg_dev_name = devm_kasprintf(card->dev, GFP_KERNEL,
+							       "sdca-%damp", dai_link->num_cpus);
+				amp_tplg_num = tplg_num;
+			} else { /* Capture */
+				tplg_dev = TPLG_DEVICE_SDCA_AMP_FEEDBACK;
+				tplg_dev_name = devm_kasprintf(card->dev, GFP_KERNEL,
+							       "sdca-%damp-feedback",
+							       dai_link->num_cpus);
+				/* Replace the AMP topology with feedback */
+				if (tplg_mask & BIT(TPLG_DEVICE_SDCA_AMP)) {
+					/*
+					 * Update tplg_mask and test tplg_dev_name as it will
+					 * continue in this if condition.
+					 */
+					tplg_mask |= BIT(tplg_dev);
+					if (!tplg_dev_name)
+						return -ENOMEM;
+
+					(*tplg_files)[amp_tplg_num] =
+						devm_kasprintf(card->dev, GFP_KERNEL,
+							       "%s/sof-%s-id%d.tplg",
+							       prefix, tplg_dev_name,
+							       dai_link->id);
+					if (!(*tplg_files)[amp_tplg_num])
+						return -ENOMEM;
+
+					/* No need to add tplg file to the tplg_files list */
+					continue;
+				}
+			}
 			if (!tplg_dev_name)
 				return -ENOMEM;
 		} else if (strstr(dai_link->name, "SmartMic")) {
