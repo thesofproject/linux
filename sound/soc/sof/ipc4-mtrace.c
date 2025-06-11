@@ -10,31 +10,7 @@
 #include "ipc4-priv.h"
 
 /*
- * debug info window is organized in 16 (equal sized) pages:
- *
- *	------------------------
- *	| Page0  - descriptors |
- *	------------------------
- *	| Page1  - slot0       |
- *	------------------------
- *	| Page2  - slot1       |
- *	------------------------
- *	|         ...          |
- *	------------------------
- *	| Page14  - slot13     |
- *	------------------------
- *	| Page15  - slot14     |
- *	------------------------
- *
- * The slot size == page size
- *
- * The first page contains descriptors for the remaining 15 cores
- * The slot descriptor is:
- * u32 res_id;
- * u32 type;
- * u32 vma;
- *
- * Log buffer slots have the following layout:
+ * Log buffer debug window slots have the following layout:
  * u32 host_read_ptr;
  * u32 dsp_write_ptr;
  * u8 buffer[];
