@@ -623,11 +623,16 @@ size_t sof_ipc4_find_debug_slot_offset_by_type(struct snd_sof_dev *sdev,
 
 	/* The type is the second u32 in the slot descriptor */
 	slot_desc_type_offset = sdev->debug_box.offset + sizeof(u32);
-	for (i = 0; i < SOF_IPC4_MAX_DEBUG_SLOTS; i++) {
+	for (i = 0; i < SOF_IPC4_MAX_DEBUG_DESCS; i++) {
 		sof_mailbox_read(sdev, slot_desc_type_offset, &type, sizeof(type));
 
-		if (type == slot_type)
+		if (type == slot_type) {
+			if (i == SOF_IPC4_MAX_DEBUG_DESCS - 1)
+				/* Desc 15: see comment on SOF_IPC4_MAX_DEBUG_DESCS in header.h */
+				return sdev->debug_box.offset + SOF_IPC4_DEBUG_PAGE0_SLOT_OFFSET;
+
 			return sdev->debug_box.offset + (i + 1) * SOF_IPC4_DEBUG_SLOT_SIZE;
+		}
 
 		slot_desc_type_offset += SOF_IPC4_DEBUG_DESCRIPTOR_SIZE;
 	}
