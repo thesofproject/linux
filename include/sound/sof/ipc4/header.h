@@ -545,16 +545,45 @@ struct sof_ipc4_notify_resource_data {
 	uint32_t data[6];
 } __packed __aligned(4);
 
-#define SOF_IPC4_DEBUG_DESCRIPTOR_SIZE		12 /* 3 x u32 */
+/*
+ * The debug memory window contains up to 16 4kB large pages, where pages one to
+ * fifteen are used for user slots and page zero contains slot descriptors:
+ *
+ *	------------------------
+ *	| Page0  - descriptors |
+ *	------------------------
+ *	| Page1  - slot0       |
+ *	------------------------
+ *	| Page2  - slot1       |
+ *	------------------------
+ *	|         ...          |
+ *	------------------------
+ *	| Page14  - slot13     |
+ *	------------------------
+ *	| Page15  - slot14     |
+ *	------------------------
+ *
+ * The slot descriptor is:
+ * u32 res_id;
+ * u32 type;
+ * u32 vma;
+ */
+
+#define SOF_IPC4_DEBUG_PAGE_SIZE		0x1000
+#define SOF_IPC4_DEBUG_SLOT_SIZE		SOF_IPC4_DEBUG_PAGE_SIZE
+#define SOF_IPC4_DEBUG_PAGE0_SLOT_OFFSET	1024
+
+/* Usable slots 0..14 (page 1..15) */
+#define SOF_IPC4_MAX_DEBUG_SLOTS		15
 
 /*
- * The debug memory window is divided into 16 slots, and the
- * first slot is used as a recorder for the other 15 slots.
+ * Descriptor 0-14: slot 0-14 (page 1-15)
+ * Descriptor 15: partial slot at page 0 + 1024
  */
-#define SOF_IPC4_MAX_DEBUG_SLOTS		15
-#define SOF_IPC4_DEBUG_SLOT_SIZE		0x1000
+#define SOF_IPC4_MAX_DEBUG_DESCS		(SOF_IPC4_MAX_DEBUG_SLOTS + 1)
+#define SOF_IPC4_DEBUG_DESCRIPTOR_SIZE		12 /* 3 x u32 */
 
-/* debug log slot types */
+/* Debug log slot types */
 #define SOF_IPC4_DEBUG_SLOT_UNUSED		0x00000000
 #define SOF_IPC4_DEBUG_SLOT_CRITICAL_LOG	0x54524300 /* byte 0: core ID */
 #define SOF_IPC4_DEBUG_SLOT_DEBUG_LOG		0x474f4c00 /* byte 0: core ID */
