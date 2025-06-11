@@ -309,6 +309,33 @@ static struct snd_soc_acpi_mach avs_tgl_i2s_machines[] = {
 		.tplg_filename = "rt1308-tplg.bin",
 	},
 	{
+		.id = "10EC5640",
+		.uid = "1",
+		.drv_name = "avs_rt5640",
+		.mach_params = {
+			.i2s_link_mask = AVS_SSP(0),
+		},
+		.tplg_filename = "rt5640-tplg.bin",
+	},
+	{
+		.id = "10EC5640",
+		.uid = "3",
+		.drv_name = "avs_rt5640",
+		.mach_params = {
+			.i2s_link_mask = AVS_SSP(1),
+		},
+		.tplg_filename = "rt5640-tplg.bin",
+	},
+	{
+		.id = "10EC5640",
+		.uid = "2",
+		.drv_name = "avs_rt5640",
+		.mach_params = {
+			.i2s_link_mask = AVS_SSP(2),
+		},
+		.tplg_filename = "rt5640-tplg.bin",
+	},
+	{
 		.id = "ESSX8336",
 		.drv_name = "avs_es8336",
 		.mach_params = {
@@ -548,7 +575,7 @@ static int avs_register_i2s_test_boards(struct avs_dev *adev)
 	u32 *array, num_elems;
 
 	ret = parse_int_array(i2s_test, strlen(i2s_test), (int **)&array);
-	if (ret < 0) {
+	if (ret) {
 		dev_err(adev->dev, "failed to parse i2s_test parameter\n");
 		return ret;
 	}

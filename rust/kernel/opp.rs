@@ -575,6 +575,7 @@ impl<T: ConfigOps + Default> Config<T> {
 /// frequency.
 ///
 /// ```
+/// # #![cfg(CONFIG_OF)]
 /// use kernel::clk::Hertz;
 /// use kernel::cpumask::Cpumask;
 /// use kernel::device::Device;

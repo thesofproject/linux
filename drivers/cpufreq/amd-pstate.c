@@ -197,7 +197,7 @@ static u8 msr_get_epp(struct amd_cpudata *cpudata)
 	u64 value;
 	int ret;
 
-	ret = rdmsrl_on_cpu(cpudata->cpu, MSR_AMD_CPPC_REQ, &value);
+	ret = rdmsrq_on_cpu(cpudata->cpu, MSR_AMD_CPPC_REQ, &value);
 	if (ret < 0) {
 		pr_debug("Could not retrieve energy perf value (%d)\n", ret);
 		return ret;
@@ -258,10 +258,10 @@ static int msr_update_perf(struct cpufreq_policy *policy, u8 min_perf,
 		return 0;
 
 	if (fast_switch) {
-		wrmsrl(MSR_AMD_CPPC_REQ, value);
+		wrmsrq(MSR_AMD_CPPC_REQ, value);
 		return 0;
 	} else {
-		int ret = wrmsrl_on_cpu(cpudata->cpu, MSR_AMD_CPPC_REQ, value);
+		int ret = wrmsrq_on_cpu(cpudata->cpu, MSR_AMD_CPPC_REQ, value);
 
 		if (ret)
 			return ret;
@@ -309,7 +309,7 @@ static int msr_set_epp(struct cpufreq_policy *policy, u8 epp)
 	if (value == prev)
 		return 0;
 
-	ret = wrmsrl_on_cpu(cpudata->cpu, MSR_AMD_CPPC_REQ, value);
+	ret = wrmsrq_on_cpu(cpudata->cpu, MSR_AMD_CPPC_REQ, value);
 	if (ret) {
 		pr_err("failed to set energy perf value (%d)\n", ret);
 		return ret;
@@ -371,7 +371,7 @@ static int shmem_set_epp(struct cpufreq_policy *policy, u8 epp)
 
 static inline int msr_cppc_enable(struct cpufreq_policy *policy)
 {
-	return wrmsrl_safe_on_cpu(policy->cpu, MSR_AMD_CPPC_ENABLE, 1);
+	return wrmsrq_safe_on_cpu(policy->cpu, MSR_AMD_CPPC_ENABLE, 1);
 }
 
 static int shmem_cppc_enable(struct cpufreq_policy *policy)
@@ -392,7 +392,7 @@ static int msr_init_perf(struct amd_cpudata *cpudata)
 	u64 cap1, numerator, cppc_req;
 	u8 min_perf;
 
-	int ret = rdmsrl_safe_on_cpu(cpudata->cpu, MSR_AMD_CPPC_CAP1,
+	int ret = rdmsrq_safe_on_cpu(cpudata->cpu, MSR_AMD_CPPC_CAP1,
 				     &cap1);
 	if (ret)
 		return ret;
@@ -536,8 +536,8 @@ static inline bool amd_pstate_sample(struct amd_cpudata *cpudata)
 	unsigned long flags;
 
 	local_irq_save(flags);
-	rdmsrl(MSR_IA32_APERF, aperf);
-	rdmsrl(MSR_IA32_MPERF, mperf);
+	rdmsrq(MSR_IA32_APERF, aperf);
+	rdmsrq(MSR_IA32_MPERF, mperf);
 	tsc = rdtsc();
 
 	if (cpudata->prev.mperf == mperf || cpudata->prev.tsc == tsc) {
@@ -796,7 +796,7 @@ static int amd_pstate_init_boost_support(struct amd_cpudata *cpudata)
 		goto exit_err;
 	}
 
-	ret = rdmsrl_on_cpu(cpudata->cpu, MSR_K7_HWCR, &boost_val);
+	ret = rdmsrq_on_cpu(cpudata->cpu, MSR_K7_HWCR, &boost_val);
 	if (ret) {
 		pr_err_once("failed to read initial CPU boost state!\n");
 		ret = -EIO;
@@ -815,7 +815,7 @@ exit_err:
 
 static void amd_perf_ctl_reset(unsigned int cpu)
 {
-	wrmsrl_on_cpu(cpu, MSR_AMD_PERF_CTL, 0);
+	wrmsrq_on_cpu(cpu, MSR_AMD_PERF_CTL, 0);
 }
 
 #define CPPC_MAX_PERF	U8_MAX
@@ -852,8 +852,10 @@ static void amd_pstate_update_limits(struct cpufreq_policy *policy)
 	if (highest_perf_changed) {
 		WRITE_ONCE(cpudata->prefcore_ranking, cur_high);
 
-		if (cur_high < CPPC_MAX_PERF)
+		if (cur_high < CPPC_MAX_PERF) {
 			sched_set_itmt_core_prio((int)cur_high, cpu);
+			sched_update_asym_prefer_cpu(cpu, prev_high, cur_high);
+		}
 	}
 }
 

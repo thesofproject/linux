@@ -14,7 +14,8 @@
 #include <linux/string.h>
 #include <linux/sysfs.h>
 
-static int max_mem_region = -ENOENT;
+/* Default assume one memory region covering all system memory, per the spec */
+static int max_mem_region = 1;
 
 /* Access for use by resctrl file system */
 int acpi_mrrm_max_mem_region(void)
@@ -156,8 +157,10 @@ static __init int add_boot_memory_ranges(void)
 
 	for (int i = 0; i < mrrm_mem_entry_num; i++) {
 		name = kasprintf(GFP_KERNEL, "range%d", i);
-		if (!name)
+		if (!name) {
+			ret = -ENOMEM;
 			break;
+		}
 
 		kobj = kobject_create_and_add(name, pkobj);
 
