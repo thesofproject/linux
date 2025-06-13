@@ -390,6 +390,13 @@ struct snd_sof_widget *sof_client_ipc4_find_swidget_by_id(struct sof_client_dev 
 	return NULL;
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_ipc4_find_swidget_by_id, "SND_SOC_SOF_CLIENT");
+
+ssize_t sof_client_ipc4_find_debug_slot_offset_by_type(struct sof_client_dev *cdev,
+						       u32 type)
+{
+	return sof_ipc4_find_debug_slot_offset_by_type(sof_client_dev_to_sof_dev(cdev), type);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_ipc4_find_debug_slot_offset_by_type, "SND_SOC_SOF_CLIENT");
 #endif
 
 int sof_suspend_clients(struct snd_sof_dev *sdev, pm_message_t state)
@@ -655,3 +662,17 @@ struct snd_sof_dev *sof_client_dev_to_sof_dev(struct sof_client_dev *cdev)
 	return centry->sdev;
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_dev_to_sof_dev, "SND_SOC_SOF_CLIENT");
+
+void sof_client_mailbox_read(struct sof_client_dev *cdev, u32 offset,
+			     void *message, size_t bytes)
+{
+	sof_mailbox_read(sof_client_dev_to_sof_dev(cdev), offset, message, bytes);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_mailbox_read, "SND_SOC_SOF_CLIENT");
+
+void sof_client_mailbox_write(struct sof_client_dev *cdev, u32 offset,
+			      void *message, size_t bytes)
+{
+	sof_mailbox_write(sof_client_dev_to_sof_dev(cdev), offset, message, bytes);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_mailbox_write, "SND_SOC_SOF_CLIENT");
