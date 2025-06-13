@@ -76,4 +76,12 @@ void sof_client_unregister_fw_state_handler(struct sof_client_dev *cdev);
 enum sof_fw_state sof_client_get_fw_state(struct sof_client_dev *cdev);
 int sof_client_ipc_rx_message(struct sof_client_dev *cdev, void *ipc_msg, void *msg_buf);
 
+void sof_client_mailbox_read(struct sof_client_dev *cdev, u32 offset,
+			     void *message, size_t bytes);
+void sof_client_mailbox_write(struct sof_client_dev *cdev, u32 offset,
+			      void *message, size_t bytes);
+
+ssize_t sof_client_ipc4_find_debug_slot_offset_by_type(struct sof_client_dev *cdev,
+						       u32 type);
+
 #endif /* __SOC_SOF_CLIENT_H */
