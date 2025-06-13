@@ -1115,7 +1115,7 @@ static void __resched_curr(struct rq *rq, int tif)
 {
 	struct task_struct *curr = rq->curr;
 	struct thread_info *cti = task_thread_info(curr);
-	int cpu;
+	int cpu, need_lazy = 0;
 
 	lockdep_assert_rq_held(rq);
 
@@ -1127,6 +1127,10 @@ static void __resched_curr(struct rq *rq, int tif)
 		tif = TIF_NEED_RESCHED;
 
 	if (cti->flags & ((1 << tif) | _TIF_NEED_RESCHED))
+		return;
+
+	trace_android_vh_set_tsk_need_resched_lazy(curr, rq, &need_lazy);
+	if (need_lazy)
 		return;
 
 	cpu = cpu_of(rq);
