@@ -382,11 +382,8 @@ static int __pkvm_create_hyp_vm(struct kvm *kvm)
 	kvm->arch.pkvm.is_created = true;
 	kvm->arch.pkvm.stage2_teardown_mc.flags |= HYP_MEMCACHE_ACCOUNT_STAGE2;
 	kvm_account_pgtable_pages(pgd, pgd_sz / PAGE_SIZE);
-	ret = __pkvm_notify_guest_vm_avail_retry(kvm, FFA_VM_CREATION_MSG);
-	if (ret)
-		goto free_pgd;
 
-	return ret;
+	return __pkvm_notify_guest_vm_avail_retry(kvm, FFA_VM_CREATION_MSG);
 free_pgd:
 	free_pages_exact(pgd, pgd_sz);
 	atomic64_sub(pgd_sz, &kvm->stat.protected_hyp_mem);
