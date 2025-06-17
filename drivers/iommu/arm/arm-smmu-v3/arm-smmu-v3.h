@@ -1283,6 +1283,9 @@ int arm_smmu_init_one_queue(struct arm_smmu_device *smmu,
 			    size_t dwords, const char *name);
 int arm_smmu_fw_probe(struct platform_device *pdev,
 		      struct arm_smmu_device *smmu);
+int arm_smmu_register_iommu(struct arm_smmu_device *smmu,
+			    const struct iommu_ops *ops, phys_addr_t ioaddr);
+void arm_smmu_unregister_iommu(struct arm_smmu_device *smmu);
 
 #ifdef CONFIG_ARM_SMMU_V3_SVA
 bool arm_smmu_sva_supported(struct arm_smmu_device *smmu);
