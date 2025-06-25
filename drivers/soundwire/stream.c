@@ -1250,18 +1250,10 @@ static struct sdw_master_runtime
 	struct sdw_master_runtime *m_rt, *walk_m_rt;
 	struct list_head *insert_after;
 
-	if (stream->type == SDW_STREAM_BPT) {
-		if (bus->stream_refcount > 0 || bus->bpt_stream_refcount > 0) {
-			dev_err(bus->dev, "%s: %d/%d audio/BPT stream already allocated\n",
-				__func__, bus->stream_refcount, bus->bpt_stream_refcount);
-			return ERR_PTR(-EBUSY);
-		}
-	} else {
-		if (bus->bpt_stream_refcount > 0) {
-			dev_err(bus->dev, "%s: BPT stream already allocated\n",
-				__func__);
-			return ERR_PTR(-EAGAIN);
-		}
+	if (stream->type == SDW_STREAM_BPT && bus->bpt_stream_refcount > 0) {
+		dev_err(bus->dev, "%s: BPT stream already allocated\n",
+			__func__);
+		return ERR_PTR(-EAGAIN);
 	}
 
 	m_rt = kzalloc_obj(*m_rt);
