@@ -1634,7 +1634,14 @@ static int find_sdca_entity_connection(struct device *dev,
 	ret = fwnode_property_read_u64(entity_node, "mipi-sdca-input-pin-list", &pin_list);
 	if (ret == -EINVAL) {
 		/* Allow missing pin lists, assume no pins. */
-		dev_warn(dev, "%s: missing pin list\n", entity->label);
+		if (strstr(entity->label, "OT") || strstr(entity->label, "MU") ||
+		    strstr(entity->label, "SU") || strstr(entity->label, "FU") ||
+		    strstr(entity->label, "XU") || strstr(entity->label, "CX") ||
+		    strstr(entity->label, "CRU") || strstr(entity->label, "UDMPU") ||
+		    strstr(entity->label, "MFPU") || strstr(entity->label, "SMPU") ||
+		    strstr(entity->label, "SAPU") || strstr(entity->label, "PPU") ||
+		    strstr(entity->label, "SPE"))
+			dev_warn(dev, "%s: missing pin list\n", entity->label);
 		return 0;
 	} else if (ret) {
 		dev_err(dev, "%s: failed to read pin list: %d\n", entity->label, ret);
