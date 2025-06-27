@@ -843,19 +843,32 @@ static int find_sdca_entity_control(struct device *dev, struct sdca_entity *enti
 
 	control->layers = tmp;
 
+	ret = fwnode_property_read_u64(control_node, "mipi-sdca-control-cn-list",
+				       &control->cn_list);
+	if (ret == -EINVAL) {
+		/* Spec allows not specifying cn-list if only the first number is used */
+		control->cn_list = 0x1;
+	} else if (ret || !control->cn_list) {
+		dev_err(dev, "%s: control %#x: cn list missing: %d\n",
+			entity->label, control->sel, ret);
+		return ret;
+	}
+
 	switch (control->mode) {
 	case SDCA_ACCESS_MODE_DC:
-		ret = fwnode_property_read_u32(control_node,
-					       "mipi-sdca-control-dc-value",
-					       &tmp);
-		if (ret) {
-			dev_err(dev, "%s: control %#x: dc value missing: %d\n",
-				entity->label, control->sel, ret);
-			return ret;
-		}
+		/* only single control number case */
+		if (control->cn_list == 0x1) {
+			ret = fwnode_property_read_u32(control_node,
+						       "mipi-sdca-control-dc-value", &tmp);
+			if (ret) {
+				dev_err(dev, "%s: control %#x: dc value missing: %d\n",
+					entity->label, control->sel, ret);
+				return ret;
+			}
 
-		control->value = tmp;
-		control->has_fixed = true;
+			control->value = tmp;
+			control->has_fixed = true;
+		}
 		break;
 	case SDCA_ACCESS_MODE_RW:
 	case SDCA_ACCESS_MODE_DUAL:
@@ -892,17 +905,6 @@ static int find_sdca_entity_control(struct device *dev, struct sdca_entity *enti
 	ret = find_sdca_control_range(dev, control_node, &control->range);
 	if (ret) {
 		dev_err(dev, "%s: control %#x: range missing: %d\n",
-			entity->label, control->sel, ret);
-		return ret;
-	}
-
-	ret = fwnode_property_read_u64(control_node, "mipi-sdca-control-cn-list",
-				       &control->cn_list);
-	if (ret == -EINVAL) {
-		/* Spec allows not specifying cn-list if only the first number is used */
-		control->cn_list = 0x1;
-	} else if (ret || !control->cn_list) {
-		dev_err(dev, "%s: control %#x: cn list missing: %d\n",
 			entity->label, control->sel, ret);
 		return ret;
 	}
