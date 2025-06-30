@@ -834,6 +834,8 @@ int sdca_asoc_populate_dapm(struct device *dev, struct sdca_function_data *funct
 }
 EXPORT_SYMBOL_NS(sdca_asoc_populate_dapm, "SND_SOC_SDCA");
 
+#define SCALE_FACTOR BIT(8)
+
 static int control_limit_kctl(struct device *dev,
 			      struct sdca_entity *entity,
 			      struct sdca_control *control,
@@ -843,7 +845,6 @@ static int control_limit_kctl(struct device *dev,
 	struct sdca_control_range *range;
 	int min, max, step;
 	unsigned int *tlv;
-	int shift;
 
 	if (control->type != SDCA_CTL_DATATYPE_Q7P8DB)
 		return 0;
@@ -863,21 +864,14 @@ static int control_limit_kctl(struct device *dev,
 	max = sign_extend32(max, control->nbits - 1);
 
 	/*
-	 * FIXME: Only support power of 2 step sizes as this can be supported
-	 * by a simple shift.
+	 * The SDCA volumes are in steps of 1/256th of a dB, so we need to
+	 * scale them to 1/100ths of a dB for the ALSA TLV.
+	 * The min and max values are in Q7.8 format, so we need to scale
+	 * them to 1/100ths of a dB.
 	 */
-	if (hweight32(step) != 1) {
-		dev_err(dev, "%s: %s: currently unsupported step size\n",
-			entity->label, control->label);
-		return -EINVAL;
-	}
-
-	/*
-	 * The SDCA volumes are in steps of 1/256th of a dB, a step down of
-	 * 64 (shift of 6) gives 1/4dB. 1/4dB is the smallest unit that is also
-	 * representable in the ALSA TLVs which are in 1/100ths of a dB.
-	 */
-	shift = max(ffs(step) - 1, 6);
+	min = min * 100 / SCALE_FACTOR;
+	max = max * 100 / SCALE_FACTOR;
+	step = step * 100 / SCALE_FACTOR;
 
 	tlv = devm_kcalloc(dev, 4, sizeof(*tlv), GFP_KERNEL);
 	if (!tlv)
@@ -885,19 +879,143 @@ static int control_limit_kctl(struct device *dev,
 
 	tlv[0] = SNDRV_CTL_TLVT_DB_SCALE;
 	tlv[1] = 2 * sizeof(*tlv);
-	tlv[2] = (min * 100) >> 8;
-	tlv[3] = ((1 << shift) * 100) >> 8;
+	tlv[2] = min;
+	tlv[3] = step;
 
-	mc->min = min >> shift;
-	mc->max = max >> shift;
-	mc->shift = shift;
-	mc->rshift = shift;
-	mc->sign_bit = 15 - shift;
+	mc->min = 0;
+	mc->max = (max - min) / step;
 
 	kctl->tlv.p = tlv;
 	kctl->access |= SNDRV_CTL_ELEM_ACCESS_TLV_READ;
 
 	return 0;
+}
+
+// Convert Q7.8 to tlv value
+static int q78_to_tlv_val(int16_t q78)
+{
+	return (int)((q78 * 100) / SCALE_FACTOR);
+}
+
+static short tlv_value_to_q78(int value)
+{
+	short value16;
+	int tmp;
+	// Clamp value to representable range
+	if (value > 127996)
+		value = 127996;
+	else if (value < -128000)
+		value = -128000;
+
+	tmp = value * SCALE_FACTOR;
+	value16 = (short)(tmp / 1000);
+
+	return value16;
+}
+
+static unsigned int soc_mixer_q78_to_ctl(struct soc_mixer_control *mc,
+					 struct snd_kcontrol *kcontrol, int val, int max)
+{
+	int reg_val = 0;
+	const unsigned int *tlv;
+	int min, step;
+
+	if (mc->invert)
+		val = max - val;
+
+	tlv = kcontrol->tlv.p;
+	min = tlv[2];
+	step = tlv[3];
+
+	reg_val = q78_to_tlv_val(val);
+	reg_val = reg_val - min;
+	reg_val = reg_val / step;
+
+	return reg_val;
+}
+
+static unsigned int soc_mixer_ctl_to_q78(struct soc_mixer_control *mc,
+					 struct snd_kcontrol *kcontrol, int val, int max)
+{
+	unsigned int reg_val = 0;
+	const unsigned int *tlv;
+	int min, step, dB;
+
+	if (mc->invert)
+		val = max - val;
+
+	tlv = kcontrol->tlv.p;
+	min = tlv[2];
+	step = tlv[3];
+
+	dB = min + (step * val);
+	reg_val = tlv_value_to_q78(dB * 10);
+
+	return reg_val;
+}
+
+static int sdca_get_volsw(struct snd_kcontrol *kcontrol,
+			  struct snd_ctl_elem_value *ucontrol)
+{
+	struct soc_mixer_control *mc =
+		(struct soc_mixer_control *)kcontrol->private_value;
+	int max = mc->max - mc->min;
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	unsigned int reg_val;
+	int val;
+
+	reg_val = snd_soc_component_read(component, mc->reg);
+	val = soc_mixer_q78_to_ctl(mc, kcontrol, reg_val, max);
+
+	ucontrol->value.integer.value[0] = val;
+
+	if (mc->reg == mc->rreg) {
+		val = soc_mixer_q78_to_ctl(mc, kcontrol, reg_val, max);
+	} else {
+		reg_val = snd_soc_component_read(component, mc->rreg);
+		val = soc_mixer_q78_to_ctl(mc, kcontrol, reg_val, max);
+	}
+
+	ucontrol->value.integer.value[1] = val;
+	return 0;
+}
+
+static int sdca_put_volsw(struct snd_kcontrol *kcontrol,
+			  struct snd_ctl_elem_value *ucontrol)
+{
+	struct soc_mixer_control *mc =
+		(struct soc_mixer_control *)kcontrol->private_value;
+	int max = mc->max - mc->min;
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	unsigned int val1, val_mask = 0xffff;
+	unsigned int val2 = 0;
+	bool double_r = false;
+	int ret;
+
+	val1 = soc_mixer_ctl_to_q78(mc, kcontrol, ucontrol->value.integer.value[0], max);
+
+	if (mc->reg == mc->rreg) {
+		val1 |= soc_mixer_ctl_to_q78(mc, kcontrol,
+					     ucontrol->value.integer.value[1], max);
+	} else {
+		val2 = soc_mixer_ctl_to_q78(mc, kcontrol,
+					    ucontrol->value.integer.value[1], max);
+		double_r = true;
+	}
+
+	ret = snd_soc_component_update_bits(component, mc->reg, val_mask, val1);
+	if (ret < 0)
+		return ret;
+
+	if (double_r) {
+		int err = snd_soc_component_update_bits(component, mc->rreg,
+							val_mask, val2);
+		/* Don't drop change flag */
+		if (err)
+			return err;
+	}
+
+	return ret;
 }
 
 static int populate_control(struct device *dev,
@@ -924,7 +1042,7 @@ static int populate_control(struct device *dev,
 	if (!control_name)
 		return -ENOMEM;
 
-	mc = devm_kmalloc(dev, sizeof(*mc), GFP_KERNEL);
+	mc = devm_kzalloc(dev, sizeof(*mc), GFP_KERNEL);
 	if (!mc)
 		return -ENOMEM;
 
@@ -954,8 +1072,13 @@ static int populate_control(struct device *dev,
 	(*kctl)->private_value = (unsigned long)mc;
 	(*kctl)->iface = SNDRV_CTL_ELEM_IFACE_MIXER;
 	(*kctl)->info = snd_soc_info_volsw;
-	(*kctl)->get = snd_soc_get_volsw;
-	(*kctl)->put = snd_soc_put_volsw;
+	if (strstr(control_name, "Volume")) {
+		(*kctl)->get = sdca_get_volsw;
+		(*kctl)->put = sdca_put_volsw;
+	} else {
+		(*kctl)->get = snd_soc_get_volsw;
+		(*kctl)->put = snd_soc_put_volsw;
+	}
 
 	if (readonly_control(control))
 		(*kctl)->access = SNDRV_CTL_ELEM_ACCESS_READ;
