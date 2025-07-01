@@ -574,6 +574,8 @@ static int ipc4_mtrace_init(struct snd_sof_dev *sdev)
 static void ipc4_mtrace_free(struct snd_sof_dev *sdev)
 {
 	ipc4_mtrace_disable(sdev);
+	devm_kfree(sdev->dev, sdev->fw_trace_data);
+	sdev->fw_trace_data = NULL;
 }
 
 static int sof_ipc4_mtrace_update_pos_all_cores(struct snd_sof_dev *sdev)
