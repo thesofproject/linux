@@ -22,6 +22,9 @@
 #include <linux/proc_ns.h>
 
 #include <trace/hooks/user.h>
+#include <linux/android_kabi.h>
+
+ANDROID_KABI_DECLONLY(module);
 
 #if IS_ENABLED(CONFIG_BINFMT_MISC)
 struct binfmt_misc init_binfmt_misc = {
