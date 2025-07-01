@@ -65,10 +65,13 @@ static int sof_dsp_ops_set_power_state(struct snd_sof_dev *sdev, char *state)
 
 static int sof_dsp_ops_trace_init(struct snd_sof_dev *sdev, bool init)
 {
-	if (init)
+	if (init) {
+		sdev->fw_trace_is_supported = true;
 		return sof_fw_trace_init(sdev);
+	}
 
 	sof_fw_trace_free(sdev);
+	sdev->fw_trace_is_supported = false;
 	return 0;
 }
 
@@ -234,13 +237,37 @@ static ssize_t sof_dsp_ops_tester_dfs_write(struct file *file, const char __user
 	struct snd_sof_dev *sdev = dfse->sdev;
 	size_t size;
 	char *string;
+	int ret;
 
+	if (!strcmp(dentry->d_name.name, "init_trace")) {
+		string = kzalloc(count + 1, GFP_KERNEL);
+		if (!string)
+			return -ENOMEM;
 
-	if (!strcmp(dentry->d_name.name, "init_trace"))
-		return sof_dsp_ops_trace_init(sdev, true);
+		size = simple_write_to_buffer(string, count, ppos, buffer, count);
+		kfree(string);
 
-	if (!strcmp(dentry->d_name.name, "free_trace"))
-		return sof_dsp_ops_trace_init(sdev, false);
+		ret = sof_dsp_ops_trace_init(sdev, true);
+		if (ret < 0)
+			return ret;
+
+		return size;
+	}
+
+	if (!strcmp(dentry->d_name.name, "free_trace")) {
+		string = kzalloc(count + 1, GFP_KERNEL);
+		if (!string)
+			return -ENOMEM;
+
+		size = simple_write_to_buffer(string, count, ppos, buffer, count);
+		kfree(string);
+
+		ret = sof_dsp_ops_trace_init(sdev, false);
+		if (ret < 0)
+			return ret;
+
+		return size;
+	}
 
 	if (!strcmp(dentry->d_name.name, "unload_fw")) {
 		string = kzalloc(count + 1, GFP_KERNEL);
