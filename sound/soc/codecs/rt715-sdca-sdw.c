@@ -139,17 +139,17 @@ static int rt715_sdca_update_status(struct sdw_slave *slave,
 	if (slave->unattach_request) {
 		regcache_cache_only(rt715->regmap, false);
 		regcache_sync_region(rt715->regmap,
-				     SDW_SDCA_CTL(FUN_JACK_CODEC, RT715_SDCA_ST_EN,
-						  RT715_SDCA_ST_CTRL, CH_00),
-				     SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_SMPU_TRIG_ST_EN,
-						  RT715_SDCA_SMPU_TRIG_ST_CTRL, CH_00));
+			SDW_SDCA_CTL(FUN_JACK_CODEC, RT715_SDCA_ST_EN, RT715_SDCA_ST_CTRL,
+				CH_00),
+			SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_SMPU_TRIG_ST_EN,
+				RT715_SDCA_SMPU_TRIG_ST_CTRL, CH_00));
 		regcache_cache_only(rt715->mbq_regmap, false);
 		regcache_sync_region(rt715->mbq_regmap, 0x2000000, 0x61020ff);
 		regcache_sync_region(rt715->mbq_regmap,
-				     SDW_SDCA_CTL(FUN_JACK_CODEC, RT715_SDCA_ST_EN,
-						  RT715_SDCA_ST_CTRL, CH_00),
-				     SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_SMPU_TRIG_ST_EN,
-						  RT715_SDCA_SMPU_TRIG_ST_CTRL, CH_00));
+			SDW_SDCA_CTL(FUN_JACK_CODEC, RT715_SDCA_ST_EN, RT715_SDCA_ST_CTRL,
+				CH_00),
+			SDW_SDCA_CTL(FUN_MIC_ARRAY, RT715_SDCA_SMPU_TRIG_ST_EN,
+				RT715_SDCA_SMPU_TRIG_ST_CTRL, CH_00));
 	}
 
 	return ret;
