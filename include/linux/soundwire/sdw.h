@@ -1087,7 +1087,6 @@ int sdw_stream_remove_slave(struct sdw_slave *slave,
 			    struct sdw_stream_runtime *stream);
 
 int sdw_slave_get_scale_index(struct sdw_slave *slave, u8 *base);
-int sdw_slave_wait_for_initialization(struct sdw_slave *slave, unsigned int timeout);
 
 /* messaging and data APIs */
 int sdw_read(struct sdw_slave *slave, u32 addr);

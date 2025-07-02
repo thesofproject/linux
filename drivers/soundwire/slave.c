@@ -104,23 +104,6 @@ int sdw_slave_add(struct sdw_bus *bus,
 }
 EXPORT_SYMBOL(sdw_slave_add);
 
-int sdw_slave_wait_for_initialization(struct sdw_slave *slave, unsigned int timeout)
-{
-	unsigned long time;
-
-	time = wait_for_completion_timeout(&slave->initialization_complete,
-				msecs_to_jiffies(timeout));
-	if (!time) {
-		dev_err(&slave->dev, "%s: Initialization not complete, timed out\n", __func__);
-		sdw_show_ping_status(slave->bus, true);
-
-		return -ETIMEDOUT;
-	}
-
-	return 0;
-}
-EXPORT_SYMBOL(sdw_slave_wait_for_initialization);
-
 #if IS_ENABLED(CONFIG_ACPI)
 
 static bool find_slave(struct sdw_bus *bus,
