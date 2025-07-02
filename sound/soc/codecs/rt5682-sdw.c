@@ -129,10 +129,6 @@ static int rt5682_sdw_hw_params(struct snd_pcm_substream *substream,
 	else
 		port_config.num = 2;
 
-	retval = sdw_slave_wait_for_initialization(rt5682->slave, RT5682_PROBE_TIMEOUT);
-	if (retval < 0)
-		return retval;
-
 	retval = sdw_stream_add_slave(rt5682->slave, &stream_config,
 				      &port_config, 1, sdw_stream);
 	if (retval) {
@@ -517,7 +513,6 @@ static int rt5682_update_status(struct sdw_slave *slave,
 					enum sdw_slave_status status)
 {
 	struct rt5682_priv *rt5682 = dev_get_drvdata(&slave->dev);
-	int ret;
 
 	if (status == SDW_SLAVE_UNATTACHED)
 		rt5682->hw_init = false;
@@ -530,19 +525,7 @@ static int rt5682_update_status(struct sdw_slave *slave,
 		return 0;
 
 	/* perform I/O transfers required for Slave initialization */
-	ret = rt5682_io_init(&slave->dev, slave);
-	if (ret < 0) {
-		dev_err(&slave->dev, "IO init Failed: %d\n", ret);
-		return ret;
-	}
-
-	if (slave->unattach_request) {
-		regcache_cache_only(rt5682->sdw_regmap, false);
-		regcache_cache_only(rt5682->regmap, false);
-		regcache_sync(rt5682->regmap);
-	}
-
-	return ret;
+	return rt5682_io_init(&slave->dev, slave);
 }
 
 static int rt5682_read_prop(struct sdw_slave *slave)
@@ -774,6 +757,7 @@ static int rt5682_dev_resume(struct device *dev)
 {
 	struct sdw_slave *slave = dev_to_sdw_dev(dev);
 	struct rt5682_priv *rt5682 = dev_get_drvdata(dev);
+	unsigned long time;
 
 	if (!rt5682->first_hw_init)
 		return 0;
@@ -788,7 +772,14 @@ static int rt5682_dev_resume(struct device *dev)
 		goto regmap_sync;
 	}
 
-	return 0;
+	time = wait_for_completion_timeout(&slave->initialization_complete,
+				msecs_to_jiffies(RT5682_PROBE_TIMEOUT));
+	if (!time) {
+		dev_err(&slave->dev, "%s: Initialization not complete, timed out\n", __func__);
+		sdw_show_ping_status(slave->bus, true);
+
+		return -ETIMEDOUT;
+	}
 
 regmap_sync:
 	slave->unattach_request = 0;
