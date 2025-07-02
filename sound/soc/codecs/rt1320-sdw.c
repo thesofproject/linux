@@ -774,7 +774,6 @@ static int rt1320_update_status(struct sdw_slave *slave,
 					enum sdw_slave_status status)
 {
 	struct  rt1320_sdw_priv *rt1320 = dev_get_drvdata(&slave->dev);
-	int ret;
 
 	if (status == SDW_SLAVE_UNATTACHED)
 		rt1320->hw_init = false;
@@ -787,20 +786,7 @@ static int rt1320_update_status(struct sdw_slave *slave,
 		return 0;
 
 	/* perform I/O transfers required for Slave initialization */
-	ret = rt1320_io_init(&slave->dev, slave);
-	if (ret < 0) {
-		dev_err(&slave->dev, "IO init failed: %d\n", ret);
-		return ret;
-	}
-
-	if (slave->unattach_request) {
-		regcache_cache_only(rt1320->regmap, false);
-		regcache_sync(rt1320->regmap);
-		regcache_cache_only(rt1320->mbq_regmap, false);
-		regcache_sync(rt1320->mbq_regmap);
-	}
-
-	return ret;
+	return rt1320_io_init(&slave->dev, slave);
 }
 
 static int rt1320_pde11_event(struct snd_soc_dapm_widget *w,
@@ -1197,8 +1183,6 @@ static void rt1320_sdw_shutdown(struct snd_pcm_substream *substream,
 	snd_soc_dai_set_dma_data(dai, substream, NULL);
 }
 
-#define RT1320_PROBE_TIMEOUT 5000
-
 static int rt1320_sdw_hw_params(struct snd_pcm_substream *substream,
 	struct snd_pcm_hw_params *params, struct snd_soc_dai *dai)
 {
@@ -1240,10 +1224,6 @@ static int rt1320_sdw_hw_params(struct snd_pcm_substream *substream,
 		} else
 			return -EINVAL;
 	}
-
-	retval = sdw_slave_wait_for_initialization(rt1320->sdw_slave, RT1320_PROBE_TIMEOUT);
-	if (retval < 0)
-		return retval;
 
 	if (dai->id == RT1320_AIF1)
 		retval = sdw_stream_add_slave(rt1320->sdw_slave, &stream_config,
@@ -1505,10 +1485,13 @@ static int rt1320_dev_suspend(struct device *dev)
 	return 0;
 }
 
+#define RT1320_PROBE_TIMEOUT 5000
+
 static int rt1320_dev_resume(struct device *dev)
 {
 	struct sdw_slave *slave = dev_to_sdw_dev(dev);
 	struct rt1320_sdw_priv *rt1320 = dev_get_drvdata(dev);
+	unsigned long time;
 
 	if (!rt1320->first_hw_init)
 		return 0;
@@ -1516,7 +1499,12 @@ static int rt1320_dev_resume(struct device *dev)
 	if (!slave->unattach_request)
 		goto regmap_sync;
 
-	return 0;
+	time = wait_for_completion_timeout(&slave->initialization_complete,
+				msecs_to_jiffies(RT1320_PROBE_TIMEOUT));
+	if (!time) {
+		dev_err(&slave->dev, "%s: Initialization not complete, timed out\n", __func__);
+		return -ETIMEDOUT;
+	}
 
 regmap_sync:
 	slave->unattach_request = 0;
