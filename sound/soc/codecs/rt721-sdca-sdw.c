@@ -190,7 +190,6 @@ static int rt721_sdca_update_status(struct sdw_slave *slave,
 				enum sdw_slave_status status)
 {
 	struct rt721_sdca_priv *rt721 = dev_get_drvdata(&slave->dev);
-	int ret;
 
 	if (status == SDW_SLAVE_UNATTACHED)
 		rt721->hw_init = false;
@@ -218,20 +217,7 @@ static int rt721_sdca_update_status(struct sdw_slave *slave,
 		return 0;
 
 	/* perform I/O transfers required for Slave initialization */
-	ret = rt721_sdca_io_init(&slave->dev, slave);
-	if (ret < 0) {
-		dev_err(&slave->dev, "IO init failed: %d\n", ret);
-		return ret;
-	}
-
-	if (slave->unattach_request) {
-		regcache_cache_only(rt721->regmap, false);
-		regcache_sync(rt721->regmap);
-		regcache_cache_only(rt721->mbq_regmap, false);
-		regcache_sync(rt721->mbq_regmap);
-	}
-
-	return ret;
+	return rt721_sdca_io_init(&slave->dev, slave);
 }
 
 static int rt721_sdca_read_prop(struct sdw_slave *slave)
@@ -497,10 +483,13 @@ static int rt721_sdca_dev_system_suspend(struct device *dev)
 	return rt721_sdca_dev_suspend(dev);
 }
 
+#define RT721_PROBE_TIMEOUT 5000
+
 static int rt721_sdca_dev_resume(struct device *dev)
 {
 	struct sdw_slave *slave = dev_to_sdw_dev(dev);
 	struct rt721_sdca_priv *rt721 = dev_get_drvdata(dev);
+	unsigned long time;
 
 	if (!rt721->first_hw_init)
 		return 0;
@@ -515,7 +504,15 @@ static int rt721_sdca_dev_resume(struct device *dev)
 		mutex_unlock(&rt721->disable_irq_lock);
 		goto regmap_sync;
 	}
-	return 0;
+
+	time = wait_for_completion_timeout(&slave->initialization_complete,
+				msecs_to_jiffies(RT721_PROBE_TIMEOUT));
+	if (!time) {
+		dev_err(&slave->dev, "Initialization not complete, timed out\n");
+		sdw_show_ping_status(slave->bus, true);
+
+		return -ETIMEDOUT;
+	}
 
 regmap_sync:
 	slave->unattach_request = 0;
