@@ -376,7 +376,6 @@ static int rt715_update_status(struct sdw_slave *slave,
 				enum sdw_slave_status status)
 {
 	struct rt715_priv *rt715 = dev_get_drvdata(&slave->dev);
-	int ret;
 
 	/*
 	 * Perform initialization only if slave status is present and
@@ -386,19 +385,7 @@ static int rt715_update_status(struct sdw_slave *slave,
 		return 0;
 
 	/* perform I/O transfers required for Slave initialization */
-	ret = rt715_io_init(&slave->dev, slave);
-	if (ret < 0) {
-		dev_err(&slave->dev, "%s: I/O init failed: %d\n", __func__, ret);
-		return ret;
-	}
-
-	if (slave->unattach_request) {
-		regcache_cache_only(rt715->regmap, false);
-		regcache_sync_region(rt715->regmap, 0x3000, 0x8fff);
-		regcache_sync_region(rt715->regmap, 0x752039, 0x752039);
-	}
-
-	return ret;
+	return rt715_io_init(&slave->dev, slave);
 }
 
 static int rt715_read_prop(struct sdw_slave *slave)
@@ -510,10 +497,13 @@ static int rt715_dev_suspend(struct device *dev)
 	return 0;
 }
 
+#define RT715_PROBE_TIMEOUT 5000
+
 static int rt715_dev_resume(struct device *dev)
 {
 	struct sdw_slave *slave = dev_to_sdw_dev(dev);
 	struct rt715_priv *rt715 = dev_get_drvdata(dev);
+	unsigned long time;
 
 	if (!rt715->first_hw_init)
 		return 0;
@@ -521,7 +511,14 @@ static int rt715_dev_resume(struct device *dev)
 	if (!slave->unattach_request)
 		goto regmap_sync;
 
-	return 0;
+	time = wait_for_completion_timeout(&slave->initialization_complete,
+					   msecs_to_jiffies(RT715_PROBE_TIMEOUT));
+	if (!time) {
+		dev_err(&slave->dev, "%s: Initialization not complete, timed out\n", __func__);
+		sdw_show_ping_status(slave->bus, true);
+
+		return -ETIMEDOUT;
+	}
 
 regmap_sync:
 	slave->unattach_request = 0;
