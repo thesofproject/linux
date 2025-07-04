@@ -2109,7 +2109,6 @@ int sdw_cdns_bpt_find_buffer_sizes(int command, /* 0: write, 1: read */
 	unsigned int actual_bpt_bytes;
 	unsigned int pdi0_tx_size;
 	unsigned int pdi1_rx_size;
-	unsigned int remainder;
 
 	if (!data_bytes)
 		return -EINVAL;
@@ -2117,9 +2116,6 @@ int sdw_cdns_bpt_find_buffer_sizes(int command, /* 0: write, 1: read */
 	actual_bpt_bytes = sdw_cdns_bra_actual_data_size(bpt_bytes);
 	if (!actual_bpt_bytes)
 		return -EINVAL;
-
-	if (data_bytes < actual_bpt_bytes)
-		actual_bpt_bytes = data_bytes;
 
 	/*
 	 * the caller may want to set the number of bytes per frame,
@@ -2130,42 +2126,24 @@ int sdw_cdns_bpt_find_buffer_sizes(int command, /* 0: write, 1: read */
 
 	*data_per_frame = actual_bpt_bytes;
 
+	/*
+	 * For writes we need to send all the data_bytes per frame, even for the last frame
+	 * which may only transport fewer bytes.
+	 * For reads for some reason the transport may not complete if the last frame is not
+	 * fully used. We will set the data length of all frames are fully used to the BPT
+	 * header and ignore the unrequested date.
+	 */
+	*num_frames = DIV_ROUND_UP(data_bytes, actual_bpt_bytes);
 	if (command == 0) {
-		/*
-		 * for writes we need to send all the data_bytes per frame,
-		 * even for the last frame which may only transport fewer bytes
-		 */
-
-		*num_frames = DIV_ROUND_UP(data_bytes, actual_bpt_bytes);
-
 		pdi0_tx_size = sdw_cdns_write_pdi0_buffer_size(actual_bpt_bytes);
 		pdi1_rx_size = SDW_CDNS_WRITE_PDI1_BUFFER_SIZE;
-
-		*pdi0_buffer_size = pdi0_tx_size * *num_frames;
-		*pdi1_buffer_size = pdi1_rx_size * *num_frames;
 	} else {
-		/*
-		 * for reads we need to retrieve only what is requested in the BPT
-		 * header, so the last frame needs to be special-cased
-		 */
-		*num_frames = data_bytes / actual_bpt_bytes;
-
 		pdi0_tx_size = SDW_CDNS_READ_PDI0_BUFFER_SIZE;
 		pdi1_rx_size = sdw_cdns_read_pdi1_buffer_size(actual_bpt_bytes);
-
-		*pdi0_buffer_size = pdi0_tx_size * *num_frames;
-		*pdi1_buffer_size = pdi1_rx_size * *num_frames;
-
-		remainder = data_bytes % actual_bpt_bytes;
-		if (remainder) {
-			pdi0_tx_size = SDW_CDNS_READ_PDI0_BUFFER_SIZE;
-			pdi1_rx_size = sdw_cdns_read_pdi1_buffer_size(remainder);
-
-			*num_frames = *num_frames + 1;
-			*pdi0_buffer_size += pdi0_tx_size;
-			*pdi1_buffer_size += pdi1_rx_size;
-		}
 	}
+
+	*pdi0_buffer_size = pdi0_tx_size * *num_frames;
+	*pdi1_buffer_size = pdi1_rx_size * *num_frames;
 
 	return 0;
 }
@@ -2382,7 +2360,11 @@ int sdw_cdns_prepare_read_dma_buffer(u8 dev_num, u32 start_register, int data_si
 	header[0] |= GENMASK(7, 6);	/* header is active */
 	header[0] |= (dev_num << 2);
 
-	while (data_size >= data_per_frame) {
+	/*
+	 * Set message length = data_per_frame even if the required data is less then
+	 * data_per_frame in the last frame.
+	 */
+	while (data_size >= 0) {
 		header[1] = data_per_frame;
 		header[2] = start_register >> 24 & 0xFF;
 		header[3] = start_register >> 16 & 0xFF;
@@ -2405,23 +2387,6 @@ int sdw_cdns_prepare_read_dma_buffer(u8 dev_num, u32 start_register, int data_si
 
 		start_register += data_per_frame;
 	}
-
-	if (data_size) {
-		header[1] = data_size;
-		header[2] = start_register >> 24 & 0xFF;
-		header[3] = start_register >> 16 & 0xFF;
-		header[4] = start_register >> 8 & 0xFF;
-		header[5] = start_register >> 0 & 0xFF;
-
-		ret = sdw_cdns_prepare_read_pd0_buffer(header, SDW_CDNS_BRA_HDR, p_dma_buffer,
-						       dma_buffer_size, &dma_data_written,
-						       counter);
-		if (ret < 0)
-			return ret;
-
-		total_dma_data_written += dma_data_written;
-	}
-
 	*dma_buffer_total_bytes = total_dma_data_written;
 
 	return 0;
@@ -2563,7 +2528,6 @@ int sdw_cdns_check_read_response(struct device *dev, u8 *dma_buffer, int dma_buf
 	u32 footer;
 	u8 expected_crc;
 	u8 crc;
-	int len;
 	int ret;
 	int i;
 
@@ -2571,6 +2535,7 @@ int sdw_cdns_check_read_response(struct device *dev, u8 *dma_buffer, int dma_buf
 	p_data = (u32 *)dma_buffer;
 	p_buf = buffer;
 
+	/* All frames include the last frame have data_per_frame data */
 	for (i = 0; i < num_frames; i++) {
 		header = *p_data++;
 
@@ -2581,13 +2546,9 @@ int sdw_cdns_check_read_response(struct device *dev, u8 *dma_buffer, int dma_buf
 			return ret;
 		}
 
-		len = data_per_frame;
-		if (total_num_bytes + data_per_frame > buffer_size)
-			len = buffer_size - total_num_bytes;
+		crc = extract_read_data(p_data, data_per_frame, p_buf);
 
-		crc = extract_read_data(p_data, len, p_buf);
-
-		p_data += (len + 1) / 2;
+		p_data += (data_per_frame + 1) / 2;
 		expected_crc = *p_data++ & 0xff;
 
 		if (crc != expected_crc) {
@@ -2596,8 +2557,8 @@ int sdw_cdns_check_read_response(struct device *dev, u8 *dma_buffer, int dma_buf
 			return -EIO;
 		}
 
-		p_buf += len;
-		total_num_bytes += len;
+		p_buf += data_per_frame;
+		total_num_bytes += data_per_frame;
 
 		footer = *p_data++;
 		ret = check_frame_end(footer);
