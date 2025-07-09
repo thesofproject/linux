@@ -1067,6 +1067,66 @@ static inline void queue_write(__le64 *dst, u64 *src, size_t n_dwords)
 		*dst++ = cpu_to_le64(*src++);
 }
 
+static inline void queue_sync_cons_out(struct arm_smmu_queue *q)
+{
+	/*
+	 * Ensure that all CPU accesses (reads and writes) to the queue
+	 * are complete before we update the cons pointer.
+	 */
+	__iomb();
+	writel_relaxed(q->llq.cons, q->cons_reg);
+}
+
+static inline void queue_sync_cons_ovf(struct arm_smmu_queue *q)
+{
+	struct arm_smmu_ll_queue *llq = &q->llq;
+
+	if (likely(Q_OVF(llq->prod) == Q_OVF(llq->cons)))
+		return;
+
+	llq->cons = Q_OVF(llq->prod) | Q_WRP(llq, llq->cons) |
+		      Q_IDX(llq, llq->cons);
+	queue_sync_cons_out(q);
+}
+
+static inline int queue_sync_prod_in(struct arm_smmu_queue *q)
+{
+	u32 prod;
+	int ret = 0;
+
+	/*
+	 * We can't use the _relaxed() variant here, as we must prevent
+	 * speculative reads of the queue before we have determined that
+	 * prod has indeed moved.
+	 */
+	prod = readl(q->prod_reg);
+
+	if (Q_OVF(prod) != Q_OVF(q->llq.prod))
+		ret = -EOVERFLOW;
+
+	q->llq.prod = prod;
+	return ret;
+}
+
+static inline void queue_read(u64 *dst, __le64 *src, size_t n_dwords)
+{
+	int i;
+
+	for (i = 0; i < n_dwords; ++i)
+		*dst++ = le64_to_cpu(*src++);
+}
+
+static inline int queue_remove_raw(struct arm_smmu_queue *q, u64 *ent)
+{
+	if (queue_empty(&q->llq))
+		return -EAGAIN;
+
+	queue_read(ent, Q_ENT(q, q->llq.cons), q->ent_dwords);
+	queue_inc_cons(&q->llq);
+	queue_sync_cons_out(q);
+	return 0;
+}
+
 static inline void arm_smmu_write_strtab_l1_desc(struct arm_smmu_strtab_l1 *dst,
 						 dma_addr_t l2ptr_dma)
 {
@@ -1296,6 +1356,19 @@ int arm_smmu_setup_irqs(struct arm_smmu_device *smmu,
 			irqreturn_t evtqirq(int irq, void *dev),
 			irqreturn_t gerrorirq(int irq, void *dev),
 			irqreturn_t priirq(int irq, void *dev));
+irqreturn_t arm_smmu_gerror_common(int irq, void *dev,
+				   void(*cmd_err)(struct arm_smmu_device *smmu));
+irqreturn_t arm_smmu_evtq_common(int irq, void *dev,
+				 int handle_event(struct arm_smmu_device *smmu,
+						  u64 *evt, struct arm_smmu_event *event));
+int arm_smmu_handle_event(struct arm_smmu_device *smmu, u64 *evt,
+			  struct arm_smmu_event *event);
+int arm_smmu_insert_master(struct arm_smmu_device *smmu,
+			   struct arm_smmu_master *master, bool init_ste);
+void arm_smmu_remove_master(struct arm_smmu_master *master);
+struct arm_smmu_master *
+arm_smmu_find_master(struct arm_smmu_device *smmu, u32 sid);
+int arm_smmu_init_sid_strtab(struct arm_smmu_device *smmu, u32 sid);
 
 enum arm_smmu_msi_index {
 	EVTQ_MSI_INDEX,
