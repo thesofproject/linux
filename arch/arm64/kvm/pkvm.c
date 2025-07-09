@@ -464,6 +464,28 @@ int pkvm_pgtable_stage2_init(struct kvm_pgtable *pgt, struct kvm_s2_mmu *mmu,
 	return 0;
 }
 
+void pkvm_host_reclaim_page(struct kvm *kvm, phys_addr_t ipa)
+{
+	struct kvm_pgtable *pgt = kvm->arch.mmu.pgt;
+	struct pkvm_mapping *mapping = NULL;
+	struct mm_struct *mm = current->mm;
+	struct page *page;
+
+	write_lock(&kvm->mmu_lock);
+	mapping = pkvm_mapping_iter_first(&pgt->pkvm_mappings, ipa, ipa + PAGE_SIZE - 1);
+	if (mapping)
+		pkvm_mapping_remove(mapping, &pgt->pkvm_mappings);
+	write_unlock(&kvm->mmu_lock);
+
+	if (WARN_ON(!mapping))
+		return;
+
+	account_locked_vm(mm, 1, false);
+	page = pfn_to_page(mapping->pfn);
+	unpin_user_pages_dirty_lock(&page, 1, true);
+	kfree(mapping);
+}
+
 static int __pkvm_pgtable_stage2_unmap(struct kvm_pgtable *pgt, u64 start, u64 end)
 {
 	struct kvm *kvm = kvm_s2_mmu_to_kvm(pgt->mmu);

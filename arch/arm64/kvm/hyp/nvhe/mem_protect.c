@@ -313,6 +313,49 @@ void drain_hyp_pool(struct pkvm_hyp_vm *vm, struct kvm_hyp_memcache *mc)
 	}
 }
 
+int __pkvm_guest_relinquish_to_host(struct pkvm_hyp_vcpu *vcpu,
+				    u64 ipa, u64 *ppa)
+{
+	struct pkvm_hyp_vm *vm = pkvm_hyp_vcpu_to_hyp_vm(vcpu);
+	enum pkvm_page_state state;
+	u64 phys = 0, addr;
+	kvm_pte_t pte;
+	s8 level;
+	int ret;
+
+	if (!pkvm_hyp_vcpu_is_protected(vcpu))
+		return 0;
+
+	host_lock_component();
+	guest_lock_component(vm);
+
+	ret = kvm_pgtable_get_leaf(&vm->pgt, ipa, &pte, &level);
+	if (ret || !kvm_pte_valid(pte))
+		goto end;
+
+	state = pkvm_getstate(kvm_pgtable_stage2_pte_prot(pte));
+	if (state != PKVM_PAGE_OWNED) {
+		ret = -EPERM;
+		goto end;
+	}
+
+	addr = ALIGN_DOWN(ipa, kvm_granule_size(level));
+	phys = kvm_pte_to_phys(pte);
+	phys += ipa - addr;
+	hyp_poison_page(phys);
+
+	/* Zap the guest stage2 pte and return ownership to the host */
+	WARN_ON(host_stage2_set_owner_locked(phys, PAGE_SIZE, PKVM_ID_HOST));
+	WARN_ON(kvm_pgtable_stage2_unmap(&vm->pgt, ipa, PAGE_SIZE));
+end:
+	guest_unlock_component(vm);
+	host_unlock_component();
+
+	*ppa = phys;
+
+	return ret;
+}
+
 int __pkvm_prot_finalize(void)
 {
 	struct kvm_s2_mmu *mmu = &host_mmu.arch.mmu;
