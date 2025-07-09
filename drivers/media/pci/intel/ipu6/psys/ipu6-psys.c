@@ -397,76 +397,6 @@ static struct ipu_psys_ppg *ipu_psys_lookup_ppg(struct ipu_psys *psys,
 	return NULL;
 }
 
-#define BUTTRESS_FREQ_CTL_QOS_FLOOR_SHIFT	8
-static void ipu_buttress_set_psys_ratio(struct ipu6_device *isp,
-					unsigned int psys_divisor,
-					unsigned int psys_qos_floor)
-{
-	struct ipu6_buttress_ctrl *ctrl = isp->psys->ctrl;
-
-	mutex_lock(&isp->buttress.power_mutex);
-
-	if (ctrl->ratio == psys_divisor && ctrl->qos_floor == psys_qos_floor)
-		goto out_mutex_unlock;
-
-	ctrl->ratio = psys_divisor;
-	ctrl->qos_floor = psys_qos_floor;
-
-	if (ctrl->started) {
-		/*
-		 * According to documentation driver initiates DVFS
-		 * transition by writing wanted ratio, floor ratio and start
-		 * bit. No need to stop PS first
-		 */
-		writel(BUTTRESS_FREQ_CTL_START |
-		       ctrl->qos_floor << BUTTRESS_FREQ_CTL_QOS_FLOOR_SHIFT |
-		       psys_divisor, isp->base + BUTTRESS_REG_PS_FREQ_CTL);
-	}
-
-out_mutex_unlock:
-	mutex_unlock(&isp->buttress.power_mutex);
-}
-
-static void ipu_buttress_set_psys_freq(struct ipu6_device *isp,
-				       unsigned int freq)
-{
-	unsigned int psys_ratio = freq / BUTTRESS_PS_FREQ_STEP;
-
-	dev_dbg(&isp->psys->auxdev.dev, "freq:%u\n", freq);
-
-	ipu_buttress_set_psys_ratio(isp, psys_ratio, psys_ratio);
-}
-
-static void
-ipu_buttress_add_psys_constraint(struct ipu6_device *isp,
-				 struct ipu6_psys_constraint *constraint)
-{
-	struct ipu6_buttress *b = &isp->buttress;
-
-	mutex_lock(&b->cons_mutex);
-	list_add(&constraint->list, &b->constraints);
-	mutex_unlock(&b->cons_mutex);
-}
-
-static void
-ipu_buttress_remove_psys_constraint(struct ipu6_device *isp,
-				    struct ipu6_psys_constraint *constraint)
-{
-	struct ipu6_buttress *b = &isp->buttress;
-	struct ipu6_psys_constraint *c;
-	unsigned int min_freq = 0;
-
-	mutex_lock(&b->cons_mutex);
-	list_del(&constraint->list);
-
-	list_for_each_entry(c, &b->constraints, list)
-		if (c->min_freq > min_freq)
-			min_freq = c->min_freq;
-
-	ipu_buttress_set_psys_freq(isp, min_freq);
-	mutex_unlock(&b->cons_mutex);
-}
-
 /*
  * Move kcmd into completed state (due to running finished or failure).
  * Fill up the event struct and notify waiters.
@@ -483,10 +413,6 @@ void ipu_psys_kcmd_complete(struct ipu_psys_ppg *kppg,
 	kcmd->ev.issue_id = kcmd->issue_id;
 	kcmd->ev.error = error;
 	list_move_tail(&kcmd->list, &kppg->kcmds_finished_list);
-
-	if (kcmd->constraint.min_freq)
-		ipu_buttress_remove_psys_constraint(psys->adev->isp,
-						    &kcmd->constraint);
 
 	if (!early_pg_transfer && kcmd->pg_user && kcmd->kpg->pg) {
 		struct ipu_psys_kbuffer *kbuf;
@@ -707,12 +633,6 @@ int ipu_psys_kcmd_new(struct ipu_psys_command *cmd, struct ipu_psys_fh *fh)
 		dev_err(dev, "No support legacy pg now\n");
 		ret = -EINVAL;
 		goto error;
-	}
-
-	if (cmd->min_psys_freq) {
-		kcmd->constraint.min_freq = cmd->min_psys_freq;
-		ipu_buttress_add_psys_constraint(psys->adev->isp,
-						 &kcmd->constraint);
 	}
 
 	ret = ipu_psys_kcmd_send_to_ppg(kcmd);
