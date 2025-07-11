@@ -134,6 +134,9 @@
 #undef CREATE_TRACE_POINTS
 #include <trace/hooks/mm.h>
 
+#undef CREATE_TRACE_POINTS
+#include <trace/hooks/mm.h>
+
 #include "internal.h"
 
 /*
@@ -476,12 +479,18 @@ void page_cache_ra_order(struct readahead_control *ractl,
 	int err = 0;
 	gfp_t gfp = readahead_gfp_mask(mapping);
 	unsigned int new_order = ra->order;
+	bool bypass = false;
 
 	trace_page_cache_ra_order(mapping->host, start, ra);
 	if (!mapping_large_folio_support(mapping)) {
 		ra->order = 0;
 		goto fallback;
 	}
+
+	trace_android_vh_page_cache_ra_order_bypass(ractl, ra, new_order, &gfp,
+						    &bypass);
+	if (bypass)
+		goto fallback;
 
 	limit = min(limit, index + ra->size - 1);
 
