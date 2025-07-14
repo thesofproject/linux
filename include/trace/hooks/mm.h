@@ -40,6 +40,10 @@ DECLARE_HOOK(android_vh_shmem_mod_shmem,
 DECLARE_HOOK(android_vh_shmem_mod_swapped,
 	TP_PROTO(struct address_space *mapping, long nr_pages),
 	TP_ARGS(mapping, nr_pages));
+DECLARE_RESTRICTED_HOOK(android_rvh_mm_customize_alloc_anon_thp,
+			TP_PROTO(gfp_t *gfp_mask, unsigned long *orders,
+				 int *order, struct folio **folio),
+			TP_ARGS(gfp_mask, orders, order, folio), 1);
 DECLARE_RESTRICTED_HOOK(android_rvh_try_alloc_pages_gfp,
 			TP_PROTO(struct page **page, unsigned int order,
 				gfp_t gfp, enum zone_type highest_zoneidx),
@@ -233,9 +237,32 @@ DECLARE_HOOK(android_vh_mm_compaction_end,
 DECLARE_HOOK(android_vh_mm_free_page,
 	TP_PROTO(struct page *page),
 	TP_ARGS(page));
+DECLARE_HOOK(android_vh_mm_customize_ac,
+	TP_PROTO(gfp_t gfp, unsigned int order, struct zonelist **zonelist,
+		 struct zoneref **preferred_zoneref, enum zone_type *highest_zoneidx,
+		 unsigned int *alloc_flags),
+	TP_ARGS(gfp, order, zonelist, preferred_zoneref, highest_zoneidx, alloc_flags));
 DECLARE_HOOK(android_vh_mm_customize_longterm_pinnable,
 	TP_PROTO(struct folio *folio, bool *is_longterm_pinnable),
 	TP_ARGS(folio, is_longterm_pinnable));
+DECLARE_HOOK(android_vh_mm_customize_rmqueue,
+	TP_PROTO(struct zone *zone, unsigned int order, unsigned int *alloc_flags,
+		 int *migratetype),
+	TP_ARGS(zone, order, alloc_flags, migratetype));
+DECLARE_HOOK(android_vh_mm_customize_suitable_zone,
+	TP_PROTO(struct zone *zone, gfp_t gfp, int order, enum zone_type highest_zoneidx,
+		 bool *use_this_zone, bool *suitable),
+	TP_ARGS(zone, gfp, order, highest_zoneidx, use_this_zone, suitable));
+DECLARE_HOOK(android_vh_mm_customize_wmark_ok,
+	TP_PROTO(struct zone *zone, unsigned int order, enum zone_type highest_zoneidx,
+		 bool *wmark_ok, bool *customized),
+	TP_ARGS(zone, order, highest_zoneidx, wmark_ok, customized));
+DECLARE_HOOK(android_vh_mm_customize_zone_max_order,
+	TP_PROTO(struct zone *zone, int *max_order),
+	TP_ARGS(zone, max_order));
+DECLARE_HOOK(android_vh_mm_customize_zone_pageset,
+	TP_PROTO(struct zone *zone, int *new_high_min, int *new_high_max, int *new_batch),
+	TP_ARGS(zone, new_high_min, new_high_max, new_batch));
 DECLARE_HOOK(android_vh_mm_migrate_one_page,
 	TP_PROTO(struct page *page, const vm_flags_t vm_flags),
 	TP_ARGS(page, vm_flags));
