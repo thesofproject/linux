@@ -257,6 +257,9 @@ DECLARE_HOOK(android_vh_mm_customize_wmark_ok,
 	TP_PROTO(struct zone *zone, unsigned int order, enum zone_type highest_zoneidx,
 		 bool *wmark_ok, bool *customized),
 	TP_ARGS(zone, order, highest_zoneidx, wmark_ok, customized));
+DECLARE_HOOK(android_vh_mm_customize_zone_can_compact,
+	TP_PROTO(struct zone *zone, bool *can_compact),
+	TP_ARGS(zone, can_compact));
 DECLARE_HOOK(android_vh_mm_customize_zone_max_order,
 	TP_PROTO(struct zone *zone, int *max_order),
 	TP_ARGS(zone, max_order));
