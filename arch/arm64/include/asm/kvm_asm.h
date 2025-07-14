@@ -129,6 +129,8 @@ enum __kvm_host_smccc_func {
 	__KVM_HOST_SMCCC_FUNC___pkvm_host_iommu_set_identity,
 	__KVM_HOST_SMCCC_FUNC___pkvm_host_iommu_map_sg,
 	__KVM_HOST_SMCCC_FUNC___pkvm_host_hvc_pd,
+	__KVM_HOST_SMCCC_FUNC___pkvm_host_iommu_iotlb_sync_map,
+
 	/*
 	 * Start of the dynamically registered hypercalls. Start a bit
 	 * further, just in case some modules...
