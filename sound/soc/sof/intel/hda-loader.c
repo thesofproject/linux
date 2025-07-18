@@ -418,8 +418,11 @@ static int hda_dsp_boot_imr(struct snd_sof_dev *sdev)
 	else
 		ret = -EINVAL;
 
-	if (!ret)
+	if (!ret) {
+		dev_info(sdev->dev, "bard: %s calling hda_sdw_process_wakeen\n",
+			__func__); 
 		hda_sdw_process_wakeen(sdev);
+	}
 
 	return ret;
 }
@@ -518,8 +521,11 @@ int hda_dsp_cl_boot_firmware(struct snd_sof_dev *sdev)
 	 * is initialized successfully, which ensures power rails are
 	 * enabled before accessing the SoundWire SHIM registers
 	 */
-	if (!sdev->first_boot)
+	if (!sdev->first_boot) {
+		dev_info(sdev->dev, "bard: %s calling hda_sdw_process_wakeen\n",
+			__func__); 
 		hda_sdw_process_wakeen(sdev);
+	}
 
 	/*
 	 * Set the boot_iteration to the last attempt, indicating that the

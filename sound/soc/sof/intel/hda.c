@@ -725,6 +725,7 @@ static irqreturn_t hda_dsp_interrupt_thread(int irq, void *context)
 
 	if (hda_sdw_check_wakeen_irq(sdev)) {
 		trace_sof_intel_hda_irq(sdev, "wakeen");
+		dev_info(sdev->dev, "bard: SoundWire wakeen interrupt\n");
 		hda_sdw_process_wakeen(sdev);
 	}
 
