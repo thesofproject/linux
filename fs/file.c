@@ -23,6 +23,7 @@
 #include <linux/file_ref.h>
 #include <net/sock.h>
 #include <linux/init_task.h>
+#include <linux/dma-buf.h>
 
 #include "internal.h"
 
@@ -656,6 +657,14 @@ void fd_install(unsigned int fd, struct file *file)
 
 	if (WARN_ON_ONCE(unlikely(file->f_mode & FMODE_BACKING)))
 		return;
+
+	if (is_dma_buf_file(file)) {
+		int err = dma_buf_account_task(file->private_data, current);
+
+		if (err)
+			pr_err("dmabuf accounting failed during %s operation, err %d\n",
+			       __func__, err);
+	}
 
 	rcu_read_lock_sched();
 
