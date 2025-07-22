@@ -40,6 +40,7 @@ static const struct address_space_operations swap_aops = {
 struct address_space swap_space __read_mostly = {
 	.a_ops = &swap_aops,
 };
+EXPORT_SYMBOL_GPL(swap_space);
 
 static bool enable_vma_readahead __read_mostly = true;
 
