@@ -94,11 +94,16 @@
 	sarq	$5, PER_CPU_VAR(__x86_call_depth);		\
 	CALL_THUNKS_DEBUG_INC_CALLS
 
+#ifdef CONFIG_PKVM_X86
+#define INCREMENT_CALL_DEPTH_PKVM				\
+	sarq	$5, PER_CPU_VAR(__x86_call_depth__pkvm);
+#endif
 #else
 #define CREDIT_CALL_DEPTH
 #define RESET_CALL_DEPTH
 #define RESET_CALL_DEPTH_FROM_CALL
 #define INCREMENT_CALL_DEPTH
+#define INCREMENT_CALL_DEPTH_PKVM
 #endif
 
 /*
