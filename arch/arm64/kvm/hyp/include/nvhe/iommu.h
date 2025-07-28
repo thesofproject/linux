@@ -16,6 +16,10 @@ struct kvm_hyp_iommu_domain {
 struct kvm_iommu_ops {
 	int (*init)(void);
 	void (*host_stage2_idmap)(phys_addr_t start, phys_addr_t end, int prot);
+	int (*attach_dev)(pkvm_handle_t iommu, struct kvm_hyp_iommu_domain *domain,
+			  pkvm_handle_t dev, u32 pasid, u32 pasid_bits, unsigned long flags);
+	int (*detach_dev)(pkvm_handle_t iommu, struct kvm_hyp_iommu_domain *domain,
+			  pkvm_handle_t dev, u32 pasid);
 	bool (*dabt_handler)(struct user_pt_regs *regs, u64 esr, u64 addr);
 	void (*host_stage2_idmap_complete)(bool map);
 	int (*alloc_domain)(pkvm_handle_t iommu_id, struct kvm_hyp_iommu_domain *domain, int type);
