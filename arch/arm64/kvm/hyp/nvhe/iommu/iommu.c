@@ -20,7 +20,7 @@ struct kvm_iommu_ops *kvm_iommu_ops;
 
 /* Protected by host_mmu.lock */
 static bool kvm_idmap_initialized;
-static struct hyp_pool iommu_pages_pool;
+static struct hyp_pool iommu_pages_pool_atomic;
 
 static inline int pkvm_to_iommu_prot(enum kvm_pgtable_prot prot)
 {
@@ -83,7 +83,7 @@ static int kvm_iommu_snapshot_host_stage2(struct kvm_iommu_ops *ops)
 int kvm_iommu_init(void *pool_base, size_t nr_pages)
 {
 	if (nr_pages) {
-		return hyp_pool_init(&iommu_pages_pool, hyp_virt_to_pfn(pool_base),
+		return hyp_pool_init(&iommu_pages_pool_atomic, hyp_virt_to_pfn(pool_base),
 				     nr_pages, 0);
 	}
 
@@ -121,14 +121,14 @@ void kvm_iommu_host_stage2_idmap(phys_addr_t start, phys_addr_t end,
 	kvm_iommu_ops->host_stage2_idmap(start, end, pkvm_to_iommu_prot(prot));
 }
 
-void *kvm_iommu_donate_pages(u8 order)
+void *kvm_iommu_donate_pages_atomic(u8 order)
 {
-	return hyp_alloc_pages(&iommu_pages_pool, order);
+	return hyp_alloc_pages(&iommu_pages_pool_atomic, order);
 }
 
-void kvm_iommu_reclaim_pages(void *ptr)
+void kvm_iommu_reclaim_pages_atomic(void *ptr)
 {
-	hyp_put_page(&iommu_pages_pool, ptr);
+	hyp_put_page(&iommu_pages_pool_atomic, ptr);
 }
 
 bool kvm_iommu_host_dabt_handler(struct user_pt_regs *regs, u64 esr, u64 addr)

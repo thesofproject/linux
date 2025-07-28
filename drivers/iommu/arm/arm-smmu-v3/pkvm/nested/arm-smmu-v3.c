@@ -473,7 +473,7 @@ static int smmu_shadow_l2_strtab(struct hyp_arm_smmu_v3_device *smmu, u32 sid)
 	u64 l1_desc_host;
 	struct arm_smmu_strtab_l2 *l2table;
 
-	l2table = kvm_iommu_donate_pages(get_order(sizeof(*l2table)));
+	l2table = kvm_iommu_donate_pages_atomic(get_order(sizeof(*l2table)));
 	if (!l2table)
 		return -ENOMEM;
 
