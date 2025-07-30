@@ -19,12 +19,14 @@
  * struct sof_ipc4_timestamp_info - IPC4 timestamp info
  * @host_copier: the host copier of the pcm stream
  * @dai_copier: the dai copier of the pcm stream
- * @stream_start_offset: reported by fw in memory window (converted to frames)
- * @stream_end_offset: reported by fw in memory window (converted to frames)
+ * @stream_start_offset: reported by fw in memory window (converted to
+ *                       frames at dai_copier sampling rate)
+ * @stream_end_offset: reported by fw in memory window (converted to
+ *                     frames at dai_copier sampling rate)
  * @llp_offset: llp offset in memory window
- * @boundary: wrap boundary should be used for the LLP frame counter
  * @delay: Calculated and stored in pointer callback. The stored value is
- *	   returned in the delay callback.
+ *         returned in the delay callback. Expressed in frames at host copier
+ *         sampling rate.
  */
 struct sof_ipc4_timestamp_info {
 	struct sof_ipc4_copier *host_copier;
@@ -33,7 +35,6 @@ struct sof_ipc4_timestamp_info {
 	u64 stream_end_offset;
 	u32 llp_offset;
 
-	u64 boundary;
 	snd_pcm_sframes_t delay;
 };
 
@@ -1100,18 +1101,70 @@ static int sof_ipc4_get_stream_start_offset(struct snd_sof_dev *sdev,
 	do_div(time_info->stream_end_offset, dai_sample_size);
 
 out:
-	/*
-	 * Calculate the wrap boundary need to be used for delay calculation
-	 * The host counter is in bytes, it will wrap earlier than the frames
-	 * based link counter.
-	 */
-	time_info->boundary = div64_u64(~((u64)0),
-					frames_to_bytes(substream->runtime, 1));
 	/* Initialize the delay value to 0 (no delay) */
 	time_info->delay = 0;
 
 	return 0;
 }
+
+static u64 sof_ipc4_time_scale(struct sof_ipc4_timestamp_info *time_info, u64 value,
+			       bool dai_to_host)
+{
+	u64 dai_rate, host_rate, mul, div;
+
+	if (!time_info->dai_copier || !time_info->host_copier)
+		return value;
+
+	/*
+	 * copiers do not change sampling rate, so we can use the
+	 * out_format independently of stream direction
+	 */
+	dai_rate = time_info->dai_copier->data.out_format.sampling_frequency;
+	host_rate = time_info->host_copier->data.out_format.sampling_frequency;
+
+	if (!dai_rate || !host_rate || dai_rate == host_rate)
+		return value;
+
+	if (dai_to_host) {
+		mul = host_rate;
+		div = dai_rate;
+	} else {
+		mul = dai_rate;
+		div = host_rate;
+	}
+
+	/* take care not to overflow u64, div/mul can be up to 768000 */
+	if (value > U32_MAX) {
+		value = div64_u64(value, div);
+		value *= mul;
+	} else {
+		value *= mul;
+		value = div64_u64(value, div);
+	}
+
+	return value;
+}
+
+static u64 sof_ipc4_time_dai_to_host(struct sof_ipc4_timestamp_info *time_info, u64 dai_time)
+{
+	return sof_ipc4_time_scale(time_info, dai_time, true);
+}
+
+static u64 sof_ipc4_time_host_to_dai(struct sof_ipc4_timestamp_info *time_info, u64 host_time)
+{
+	return sof_ipc4_time_scale(time_info, host_time, false);
+}
+
+/*
+ * Modulus to use to compare host and link counters. This is required
+ * as host/link counters use different units (bytes/frames) and the
+ * sampling rates may be different (when resampling), so the raw hardware
+ * counters will wrap around at different times. To calculate
+ * differences, use DELAY_BOUNDARY as a common modulus. This value must
+ * be smaller than the wrap-around point of any hardware counter, as
+ * expressed in units of the DAI frame counter.
+ */
+#define DELAY_BOUNDARY		U32_MAX
 
 static int sof_ipc4_pcm_pointer(struct snd_soc_component *component,
 				struct snd_pcm_substream *substream,
@@ -1149,7 +1202,12 @@ static int sof_ipc4_pcm_pointer(struct snd_soc_component *component,
 
 	/* For delay calculation we need the host counter */
 	host_cnt = snd_sof_pcm_get_host_byte_counter(sdev, component, substream);
+
+	/* Store the original value to host_ptr */
 	host_ptr = host_cnt;
+
+	/* Scale value to DAI time in case DAI running at different rate */
+	host_cnt = sof_ipc4_time_host_to_dai(time_info, host_cnt);
 
 	/* convert the host_cnt to frames */
 	host_cnt = div64_u64(host_cnt, frames_to_bytes(substream->runtime, 1));
@@ -1200,8 +1258,12 @@ static int sof_ipc4_pcm_pointer(struct snd_soc_component *component,
 		dai_cnt -= time_info->stream_start_offset;
 	}
 
-	/* Wrap the dai counter at the boundary where the host counter wraps */
-	div64_u64_rem(dai_cnt, time_info->boundary, &dai_cnt);
+	/* dai/host_cnt converted to same unit, but the values will
+	 * wrap the counters at different times, so use a common
+	 * modulo before any comparisons
+	 */
+	div64_u64_rem(dai_cnt, DELAY_BOUNDARY, &dai_cnt);
+	div64_u64_rem(host_cnt, DELAY_BOUNDARY, &host_cnt);
 
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 		head_cnt = host_cnt;
@@ -1211,14 +1273,15 @@ static int sof_ipc4_pcm_pointer(struct snd_soc_component *component,
 		tail_cnt = host_cnt;
 	}
 
-	if (head_cnt < tail_cnt) {
-		time_info->delay = time_info->boundary - tail_cnt + head_cnt;
-		goto out;
-	}
+	/* delay in DAI time */
+	if (unlikely(head_cnt < tail_cnt))
+		time_info->delay = DELAY_BOUNDARY - tail_cnt + head_cnt;
+	else
+		time_info->delay = head_cnt - tail_cnt;
 
-	time_info->delay =  head_cnt - tail_cnt;
+	/* convert delay to host time */
+	time_info->delay = sof_ipc4_time_dai_to_host(time_info, time_info->delay);
 
-out:
 	/*
 	 * Convert the host byte counter to PCM pointer which wraps in buffer
 	 * and it is in frames
