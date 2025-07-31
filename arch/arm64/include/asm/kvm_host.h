@@ -1891,6 +1891,23 @@ int kvm_iommu_register_hyp_ops(struct kvm_iommu_ops *hyp_ops);
 size_t kvm_iommu_pages(void);
 #endif
 
+#ifndef __KVM_NVHE_HYPERVISOR__
+int pkvm_iommu_resume(int device_id);
+int pkvm_iommu_suspend(int device_id);
+phys_addr_t kvm_iommu_iova_to_phys(pkvm_handle_t domain_id, unsigned long iova);
+size_t kvm_iommu_unmap_pages(pkvm_handle_t domain_id, unsigned long iova,
+			     size_t pgsize, size_t pgcount);
+int kvm_iommu_map_pages(pkvm_handle_t domain_id, unsigned long iova,
+			phys_addr_t paddr, size_t pgsize, size_t pgcount,
+			int prot, gfp_t gfp, size_t *total_mapped);
+int kvm_iommu_free_domain(pkvm_handle_t domain_id);
+int kvm_iommu_alloc_domain(pkvm_handle_t iommu_id, pkvm_handle_t domain_id, int type);
+int kvm_iommu_detach_dev(pkvm_handle_t iommu_id, pkvm_handle_t domain_id,
+			 unsigned int endpoint, unsigned int pasid);
+int kvm_iommu_attach_dev(pkvm_handle_t iommu_id, pkvm_handle_t domain_id,
+			 unsigned int endpoint, unsigned int pasid,
+			 unsigned int ssid_bits, unsigned long flags);
+#endif
 /*
  * Unlike previous android versions, where we supported 1 << 16 domains,
  * this added a lot of unneeded complexity, sharing code and struts with EL1,
