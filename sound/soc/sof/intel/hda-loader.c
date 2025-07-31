@@ -58,7 +58,7 @@ hda_cl_prepare(struct device *dev, unsigned int format, unsigned int size,
 	struct hdac_stream *hstream;
 	int ret;
 
-	hext_stream = hda_dsp_stream_get(sdev, direction, 0);
+	hext_stream = hda_dsp_stream_get(sdev, direction, 0, HDA_STREAM_USE_HOST_LINK_DMA);
 
 	if (!hext_stream) {
 		dev_err(sdev->dev, "error: no stream available\n");
@@ -110,7 +110,7 @@ out_free:
 	hstream->bufsize = 0;
 	hstream->format_val = 0;
 out_put:
-	hda_dsp_stream_put(sdev, direction, hstream->stream_tag);
+	hda_dsp_stream_put(sdev, direction, hstream->stream_tag, HDA_STREAM_USE_HOST_LINK_DMA);
 	return ERR_PTR(ret);
 }
 EXPORT_SYMBOL_NS(hda_cl_prepare, "SND_SOC_SOF_INTEL_HDA_COMMON");
@@ -286,7 +286,8 @@ int hda_cl_cleanup(struct device *dev, struct snd_dma_buffer *dmab,
 		snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR, sd_offset,
 					SOF_HDA_SD_CTL_DMA_START, 0);
 
-	hda_dsp_stream_put(sdev, hstream->direction, hstream->stream_tag);
+	hda_dsp_stream_put(sdev, hstream->direction, hstream->stream_tag,
+			   HDA_STREAM_USE_HOST_LINK_DMA);
 	hstream->running = 0;
 	hstream->substream = NULL;
 

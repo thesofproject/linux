@@ -487,6 +487,11 @@ enum sof_hda_D0_substate {
 	SOF_HDA_DSP_PM_D0I3,	/* low power D0 substate */
 };
 
+enum sof_hda_stream_type {
+	HDA_STREAM_USE_HOST_DMA,
+	HDA_STREAM_USE_HOST_LINK_DMA,
+};
+
 struct sof_ace3_mic_privacy {
 	bool active;
 	struct work_struct work;
@@ -693,8 +698,10 @@ u64 hda_dsp_get_stream_ldp(struct snd_sof_dev *sdev,
 			   struct snd_pcm_substream *substream);
 
 struct hdac_ext_stream *
-	hda_dsp_stream_get(struct snd_sof_dev *sdev, int direction, u32 flags);
-int hda_dsp_stream_put(struct snd_sof_dev *sdev, int direction, int stream_tag);
+	hda_dsp_stream_get(struct snd_sof_dev *sdev, int direction, u32 flags,
+			   enum sof_hda_stream_type type);
+int hda_dsp_stream_put(struct snd_sof_dev *sdev, int direction, int stream_tag,
+		       enum sof_hda_stream_type type);
 int hda_dsp_stream_spib_config(struct snd_sof_dev *sdev,
 			       struct hdac_ext_stream *hext_stream,
 			       int enable, u32 size);

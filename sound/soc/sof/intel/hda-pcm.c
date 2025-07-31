@@ -260,7 +260,7 @@ int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
 	    spcm->stream[substream->stream].d0i3_compatible)
 		flags |= SOF_HDA_STREAM_DMI_L1_COMPATIBLE;
 
-	dsp_stream = hda_dsp_stream_get(sdev, direction, flags);
+	dsp_stream = hda_dsp_stream_get(sdev, direction, flags, HDA_STREAM_USE_HOST_DMA);
 	if (!dsp_stream) {
 		dev_err(sdev->dev, "error: no stream available\n");
 		return -ENODEV;
@@ -326,7 +326,7 @@ int hda_dsp_pcm_close(struct snd_sof_dev *sdev,
 	int direction = substream->stream;
 	int ret;
 
-	ret = hda_dsp_stream_put(sdev, direction, hstream->stream_tag);
+	ret = hda_dsp_stream_put(sdev, direction, hstream->stream_tag, HDA_STREAM_USE_HOST_DMA);
 
 	if (ret) {
 		dev_dbg(sdev->dev, "stream %s not opened!\n", substream->name);

@@ -32,7 +32,7 @@ static int hda_probes_compr_startup(struct sof_client_dev *cdev,
 	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
 	struct hdac_ext_stream *hext_stream;
 
-	hext_stream = hda_dsp_stream_get(sdev, cstream->direction, 0);
+	hext_stream = hda_dsp_stream_get(sdev, cstream->direction, 0, HDA_STREAM_USE_HOST_DMA);
 	if (!hext_stream)
 		return -EBUSY;
 
@@ -54,7 +54,7 @@ static int hda_probes_compr_shutdown(struct sof_client_dev *cdev,
 	int ret;
 
 	ret = hda_dsp_stream_put(sdev, cstream->direction,
-				 hdac_stream(hext_stream)->stream_tag);
+				 hdac_stream(hext_stream)->stream_tag, HDA_STREAM_USE_HOST_DMA);
 	if (ret < 0) {
 		dev_dbg(sdev->dev, "stream put failed: %d\n", ret);
 		return ret;

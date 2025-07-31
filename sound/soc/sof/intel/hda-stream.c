@@ -211,7 +211,8 @@ int hda_dsp_stream_spib_config(struct snd_sof_dev *sdev,
 
 /* get next unused stream */
 struct hdac_ext_stream *
-hda_dsp_stream_get(struct snd_sof_dev *sdev, int direction, u32 flags)
+hda_dsp_stream_get(struct snd_sof_dev *sdev, int direction, u32 flags,
+		   enum sof_hda_stream_type type)
 {
 	const struct sof_intel_dsp_desc *chip_info =  get_chip_info(sdev->pdata);
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
@@ -233,7 +234,14 @@ hda_dsp_stream_get(struct snd_sof_dev *sdev, int direction, u32 flags)
 			if (hda_stream->host_reserved)
 				continue;
 
+			/* check if the link stream is available if the link dma is used */
+			if (type == HDA_STREAM_USE_HOST_LINK_DMA && hext_stream->link_locked)
+				continue;
+
 			s->opened = true;
+			if (type == HDA_STREAM_USE_HOST_LINK_DMA)
+				hext_stream->link_locked = true;
+
 			break;
 		}
 	}
@@ -265,13 +273,15 @@ hda_dsp_stream_get(struct snd_sof_dev *sdev, int direction, u32 flags)
 }
 
 /* free a stream */
-int hda_dsp_stream_put(struct snd_sof_dev *sdev, int direction, int stream_tag)
+int hda_dsp_stream_put(struct snd_sof_dev *sdev, int direction, int stream_tag,
+		       enum sof_hda_stream_type type)
 {
 	const struct sof_intel_dsp_desc *chip_info =  get_chip_info(sdev->pdata);
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	struct hdac_bus *bus = sof_to_bus(sdev);
 	struct sof_intel_hda_stream *hda_stream;
 	struct hdac_ext_stream *hext_stream;
+	struct hdac_ext_stream *link_stream;
 	struct hdac_stream *s;
 	bool dmi_l1_enable = true;
 	bool found = false;
@@ -292,6 +302,10 @@ int hda_dsp_stream_put(struct snd_sof_dev *sdev, int direction, int stream_tag)
 		if (s->direction == direction && s->stream_tag == stream_tag) {
 			s->opened = false;
 			found = true;
+
+			if (type == HDA_STREAM_USE_HOST_LINK_DMA)
+				link_stream = hext_stream;
+
 		} else if (!(hda_stream->flags & SOF_HDA_STREAM_DMI_L1_COMPATIBLE)) {
 			dmi_l1_enable = false;
 		}
@@ -311,6 +325,9 @@ int hda_dsp_stream_put(struct snd_sof_dev *sdev, int direction, int stream_tag)
 			__func__, stream_tag);
 		return -ENODEV;
 	}
+
+	if (type == HDA_STREAM_USE_HOST_LINK_DMA)
+		snd_hdac_ext_stream_release(link_stream, HDAC_EXT_STREAM_TYPE_LINK);
 
 	return 0;
 }

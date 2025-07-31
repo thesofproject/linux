@@ -43,7 +43,8 @@ int hda_dsp_trace_init(struct snd_sof_dev *sdev, struct snd_dma_buffer *dmab,
 	int ret;
 
 	hda->dtrace_stream = hda_dsp_stream_get(sdev, SNDRV_PCM_STREAM_CAPTURE,
-						SOF_HDA_STREAM_DMI_L1_COMPATIBLE);
+						SOF_HDA_STREAM_DMI_L1_COMPATIBLE,
+						HDA_STREAM_USE_HOST_DMA);
 
 	if (!hda->dtrace_stream) {
 		dev_err(sdev->dev,
@@ -61,7 +62,7 @@ int hda_dsp_trace_init(struct snd_sof_dev *sdev, struct snd_dma_buffer *dmab,
 	if (ret < 0) {
 		dev_err(sdev->dev, "error: hdac trace init failed: %d\n", ret);
 		hda_dsp_stream_put(sdev, SNDRV_PCM_STREAM_CAPTURE,
-				   dtrace_params->stream_tag);
+				   dtrace_params->stream_tag, HDA_STREAM_USE_HOST_DMA);
 		hda->dtrace_stream = NULL;
 		dtrace_params->stream_tag = 0;
 	}
@@ -79,7 +80,7 @@ int hda_dsp_trace_release(struct snd_sof_dev *sdev)
 		hstream = &hda->dtrace_stream->hstream;
 		hda_dsp_stream_put(sdev,
 				   SNDRV_PCM_STREAM_CAPTURE,
-				   hstream->stream_tag);
+				   hstream->stream_tag, HDA_STREAM_USE_HOST_DMA);
 		hda->dtrace_stream = NULL;
 		return 0;
 	}
