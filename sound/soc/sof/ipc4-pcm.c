@@ -1279,6 +1279,13 @@ static int sof_ipc4_pcm_pointer(struct snd_soc_component *component,
 	else
 		time_info->delay = head_cnt - tail_cnt;
 
+	if (time_info->delay > (DELAY_BOUNDARY >> 1)) {
+		dev_dbg_ratelimited(sdev->dev,
+				    "delay reporting inaccurate due to xrun, host %llu dai_cnt %llu",
+				    host_cnt, dai_cnt);
+		time_info->delay = 0;
+	}
+
 	/* convert delay to host time */
 	time_info->delay = sof_ipc4_time_dai_to_host(time_info, time_info->delay);
 
