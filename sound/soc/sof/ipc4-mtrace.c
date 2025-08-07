@@ -513,6 +513,13 @@ static int ipc4_mtrace_init(struct snd_sof_dev *sdev)
 	int i, ret;
 
 	if (sdev->fw_trace_data) {
+		if (sof_debug_check_flag(SOF_DBG_DSP_OPS_TEST_MODE)) {
+			/* Re-create the configuration for mtrace */
+			priv = sdev->fw_trace_data;
+			memset(priv, 0, sizeof(*priv));
+			goto setup;
+		}
+
 		dev_err(sdev->dev, "fw_trace_data has been already allocated\n");
 		return -EBUSY;
 	}
@@ -530,6 +537,7 @@ static int ipc4_mtrace_init(struct snd_sof_dev *sdev)
 
 	sdev->fw_trace_data = priv;
 
+setup:
 	/* Set initial values for mtrace parameters */
 	priv->state_info.aging_timer_period = DEFAULT_AGING_TIMER_PERIOD_MS;
 	priv->state_info.fifo_full_timer_period = DEFAULT_FIFO_FULL_TIMER_PERIOD_MS;
