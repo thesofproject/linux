@@ -1260,6 +1260,12 @@ static int sof_ipc4_pcm_pointer(struct snd_soc_component *component,
 	else
 		time_info->delay = head_cnt - tail_cnt;
 
+	if (time_info->delay > (DELAY_BOUNDARY >> 1)) {
+		dev_dbg_ratelimited(sdev->dev, "inaccurate delay, host %llu dai_cnt %llu",
+				    host_cnt, dai_cnt);
+		time_info->delay = 0;
+	}
+
 	/*
 	 * Convert the host byte counter to PCM pointer which wraps in buffer
 	 * and it is in frames
