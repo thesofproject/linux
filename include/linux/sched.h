@@ -345,7 +345,8 @@ extern void io_schedule_finish(int token);
 extern long io_schedule_timeout(long timeout);
 extern void io_schedule(void);
 extern int select_fallback_rq(int cpu, struct task_struct *p);
-extern struct task_struct *pick_task(struct rq *rq);
+struct rq_flags;
+extern struct task_struct *pick_task(struct rq *rq, struct rq_flags *rf);
 
 /* wrapper functions to trace from this header file */
 DECLARE_TRACEPOINT(sched_set_state_tp);
@@ -640,8 +641,8 @@ struct sched_rt_entity {
 #endif
 } __randomize_layout;
 
-typedef bool (*dl_server_has_tasks_f)(struct sched_dl_entity *);
-typedef struct task_struct *(*dl_server_pick_f)(struct sched_dl_entity *);
+struct rq_flags;
+typedef struct task_struct *(*dl_server_pick_f)(struct sched_dl_entity *, struct rq_flags *rf);
 
 struct sched_dl_entity {
 	struct rb_node			rb_node;
@@ -733,9 +734,6 @@ struct sched_dl_entity {
 	 * dl_server_update().
 	 *
 	 * @rq the runqueue this server is for
-	 *
-	 * @server_has_tasks() returns true if @server_pick return a
-	 * runnable task.
 	 */
 	struct rq			*rq;
 	dl_server_pick_f		server_pick_task;
