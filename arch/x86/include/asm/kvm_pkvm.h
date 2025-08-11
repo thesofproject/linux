@@ -15,6 +15,7 @@ struct pkvm_pcpu {
 struct pkvm_hyp {
 	int num_cpus;
 	struct pkvm_pcpu *pcpus[CONFIG_NR_CPUS];
+	struct kvm *host_kvm;
 };
 
 #define PKVM_HYP_PAGES		(PAGE_ALIGN(sizeof(struct pkvm_hyp)) >> PAGE_SHIFT)
@@ -24,9 +25,11 @@ u64 pkvm_total_reserve_pages(void);
 void *pkvm_early_alloc_contig(unsigned int nr_pages);
 void pkvm_early_alloc_init(void *virt, unsigned long size);
 
-static inline unsigned long pkvm_data_pages(void)
+static inline unsigned long pkvm_data_pages(unsigned long extra_global)
 {
-	return PKVM_HYP_PAGES + PKVM_PCPU_PAGES * num_possible_cpus();
+	unsigned long global_pages = PKVM_HYP_PAGES + extra_global;
+
+	return global_pages + PKVM_PCPU_PAGES * num_possible_cpus();
 }
 
 #endif /* CONFIG_PKVM_X86 */
