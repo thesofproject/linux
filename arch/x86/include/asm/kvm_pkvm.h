@@ -26,6 +26,9 @@ struct pkvm_hyp {
 #define PKVM_HYP_PAGES		(PAGE_ALIGN(sizeof(struct pkvm_hyp)) >> PAGE_SHIFT)
 #define PKVM_PCPU_PAGES		(PAGE_ALIGN(sizeof(struct pkvm_pcpu)) >> PAGE_SHIFT)
 
+extern unsigned long pkvm_sym(page_offset_base);
+extern unsigned long pkvm_sym(phys_base);
+
 u64 pkvm_total_reserve_pages(void);
 PKVM_DECLARE(void *, pkvm_early_alloc_page, (void));
 PKVM_DECLARE(void *, pkvm_early_alloc_contig, (unsigned int nr_pages));
