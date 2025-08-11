@@ -776,7 +776,8 @@ static inline unsigned long pkvm_vmx_data_pages(void)
 }
 
 int __init vmx_pkvm_init(void);
-void pkvm_host_vmexit_entry(void);
+PKVM_DECLARE(void, pkvm_host_vmexit_entry, (void));
+extern struct vmx_capability pkvm_sym(vmx_capability);
 
 #endif /* CONFIG_PKVM_INTEL */
 
