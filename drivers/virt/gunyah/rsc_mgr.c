@@ -15,6 +15,7 @@
 #include <linux/platform_device.h>
 #include <linux/miscdevice.h>
 #include <linux/auxiliary_bus.h>
+#include <linux/suspend.h>
 
 #include <asm/gunyah.h>
 
@@ -156,6 +157,8 @@ struct gunyah_rm {
 	struct auxiliary_device adev;
 	struct miscdevice miscdev;
 	struct fwnode_handle *parent_fwnode;
+
+	struct notifier_block pm_nb;
 };
 
 /**
@@ -807,6 +810,63 @@ static int gunyah_adev_init(struct gunyah_rm *rm, const char *name)
 	return ret;
 }
 
+static int gunyah_rm_hibernation_restore(struct notifier_block *nb,
+					 unsigned long action, void *data)
+{
+	struct gunyah_rm *rm;
+	int ret;
+
+	rm = container_of(nb, struct gunyah_rm, pm_nb);
+
+	switch (action) {
+	case PM_HIBERNATION_PREPARE:
+		/* Cleanup stale data from pre-hibernation */
+		free_irq(rm->tx_ghrsc.irq, rm);
+		irq_dispose_mapping(rm->tx_ghrsc.irq);
+		free_irq(rm->rx_ghrsc.irq, rm);
+		irq_dispose_mapping(rm->rx_ghrsc.irq);
+		gunyah_unmap_addrspace_info_area();
+		break;
+	case PM_POST_HIBERNATION:
+		/* Fetch the latest RM info from addrspace info area */
+		ret = gunyah_map_addrspace_info_area();
+		if (ret) {
+			pr_err("Failed to map addrspace info area\n");
+			return NOTIFY_BAD;
+		}
+		ret = gunyah_rm_probe_info_area(rm);
+		if (ret) {
+			pr_err("Failed to get RM info\n");
+			goto err;
+		}
+
+		enable_irq_wake(rm->tx_ghrsc.irq);
+		ret = request_threaded_irq(rm->tx_ghrsc.irq, NULL,
+				gunyah_rm_tx, IRQF_ONESHOT,
+				"gunyah_rm_tx", rm);
+		if (ret)
+			goto err;
+		/* assume RM is ready to receive messages from us */
+		complete(&rm->send_ready);
+
+		enable_irq_wake(rm->rx_ghrsc.irq);
+		ret = request_threaded_irq(rm->rx_ghrsc.irq, NULL,
+				gunyah_rm_rx, IRQF_ONESHOT,
+				"gunyah_rm_rx", rm);
+		if (ret) {
+			free_irq(rm->tx_ghrsc.irq, rm);
+			goto err;
+		}
+		break;
+	default:
+		return NOTIFY_DONE;
+	}
+	return NOTIFY_OK;
+err:
+	gunyah_unmap_addrspace_info_area();
+	return NOTIFY_BAD;
+}
+
 static struct gunyah_rm *__rm;
 
 static int __init gunyah_rm_init(void)
@@ -839,8 +899,14 @@ static int __init gunyah_rm_init(void)
 	xa_init_flags(&rm->call_xarray, XA_FLAGS_ALLOC);
 
 	ret = gunyah_rm_probe_info_area(rm);
-	if (ret == -ENOENT)
+	if (ret == -ENOENT) {
 		ret = gunyah_rm_get_of_info(rm);
+	} else if (!ret) {
+		rm->pm_nb.notifier_call = gunyah_rm_hibernation_restore;
+		ret = register_pm_notifier(&rm->pm_nb);
+		if (ret)
+			pr_err("Failed to register pm notifier\n");
+	}
 	if (ret)
 		return ret;
 
