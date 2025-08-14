@@ -53,6 +53,8 @@
   __tracepoint_android_vh_customize_pmd_gfp_bypass
   __traceiter_android_vh_thp_vma_allowable_orders
   __tracepoint_android_vh_thp_vma_allowable_orders
+  __traceiter_android_vh_dma_buf_release
+  __tracepoint_android_vh_dma_buf_release
 
 #required by metis.ko module
   __traceiter_android_rvh_try_to_wake_up_begin
