@@ -6,6 +6,7 @@
 #include <asm/extable.h>
 #include <asm/pkvm_image.h>
 #include <asm/trapnr.h>
+#include "debug.h"
 #include "idt.h"
 
 static const int pt_regoff[] = {
@@ -73,6 +74,19 @@ static bool ex_handler_default(const struct exception_table_entry *e,
 static bool ex_handler_msr(const struct exception_table_entry *fixup,
 			   struct pt_regs *regs, bool wrmsr, bool safe, int reg)
 {
+#ifdef CONFIG_PKVM_X86_DEBUG
+	if (__ONCE_LITE_IF(!safe && wrmsr)) {
+		pkvm_err("unchecked MSR access error: WRMSR to 0x%x (tried to write 0x%08x%08x) at rIP: 0x%lx (%pS)\n",
+			(unsigned int)regs->cx, (unsigned int)regs->dx,
+			(unsigned int)regs->ax,  regs->ip, (void *)regs->ip);
+	}
+
+	if (__ONCE_LITE_IF(!safe && !wrmsr)) {
+		pkvm_err("unchecked MSR access error: RDMSR from 0x%x at rIP: 0x%lx (%pS)\n",
+			(unsigned int)regs->cx, regs->ip, (void *)regs->ip);
+	}
+#endif
+
 	if (!wrmsr) {
 		/* Pretend that the read succeeded and returned 0. */
 		regs->ax = 0;
@@ -116,6 +130,13 @@ static bool pkvm_fixup_exception(struct pt_regs *regs)
 static void default_exception_handler(struct pt_regs *regs,
 				      int vector, bool has_error_code)
 {
+	if (has_error_code)
+		pkvm_err("Exception %d @ip %pS (0x%px), err code 0x%lx\n",
+			 vector, (void *)regs->ip, (void *)regs->ip, regs->orig_ax);
+	else
+		pkvm_err("Exception %d @ip %pS (0x%px), no err code\n",
+			 vector, (void *)regs->ip, (void *)regs->ip);
+
 	asm volatile("hlt" : : : "memory");
 }
 
