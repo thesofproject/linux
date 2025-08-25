@@ -22,6 +22,9 @@ DECLARE_RESTRICTED_HOOK(android_rvh_gh_vm_release,
 DECLARE_RESTRICTED_HOOK(android_rvh_gh_vcpu_release,
 	     TP_PROTO(u16 vmid, struct gunyah_vcpu *vcpu),
 	     TP_ARGS(vmid, vcpu), 1);
+DECLARE_RESTRICTED_HOOK(android_rvh_gh_note_fw_parcel,
+	     TP_PROTO(struct gunyah_vm *ghvm, u16 ghvm_vmid, u32 fw_mem_handle),
+	     TP_ARGS(ghvm, ghvm_vmid, fw_mem_handle), 1);
 
 #endif /* _TRACE_HOOK_GUNYAH_H */
 /* This part must be outside protection */
