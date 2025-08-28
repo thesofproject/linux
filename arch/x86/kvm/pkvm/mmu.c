@@ -237,3 +237,13 @@ int pkvm_host_mmu_init(void *pool_base, unsigned long pool_pages, host_mmu_init_
 {
 	return fn ? fn(&host_mmu, pool_base, pool_pages) : -EOPNOTSUPP;
 }
+
+int pkvm_host_mmu_map(unsigned long phys, unsigned long size,
+		      bool read, bool write, bool exec, bool mmio)
+{
+	u64 prot = host_mmu.pgt_ops->calc_pte_perm(read, write, exec) |
+		   host_mmu.pgt_ops->calc_pte_memtype(mmio);
+
+	/* The vaddr == phys for the host MMU */
+	return pkvm_pgtable_map(&host_mmu, phys, phys, size, prot);
+}
