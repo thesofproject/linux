@@ -53,6 +53,11 @@ static __init void pkvm_setup_syms(void)
 	 * if a specific feature is supported or not.
 	 */
 	memcpy(&pkvm_sym(boot_cpu_data), &boot_cpu_data, sizeof(struct cpuinfo_x86));
+
+#ifdef CONFIG_DYNAMIC_PHYSICAL_MASK
+	/* For pKVM hypervisor to decode the valid physical address bits */
+	pkvm_sym(physical_mask) = physical_mask;
+#endif
 }
 
 static __init int pkvm_setup_host_vmcs_config(void)

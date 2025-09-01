@@ -5,6 +5,9 @@
 
 unsigned long page_offset_base __ro_after_init;
 unsigned long phys_base;
+#ifdef CONFIG_DYNAMIC_PHYSICAL_MASK
+phys_addr_t physical_mask;
+#endif
 
 struct memblock_region pkvm_memory[PKVM_MEMBLOCK_REGIONS];
 unsigned int pkvm_memblock_nr;
