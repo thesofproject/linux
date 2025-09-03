@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <linux/kvm_host.h>
+#include <linux/bitfield.h>
 #include <asm/vmx.h>
 #include <vmx/capabilities.h>
 #include <mmu/spte.h>
@@ -10,6 +11,12 @@
 #include "gfp.h"
 #include "pkvm/mmu.h"
 #include "pkvm.h"
+
+/* The ignored bit56 ~ bit52 in EPT present leaf are used to store page state */
+#define EPT_PAGE_STATE_SHIFT			52
+#define EPT_PAGE_STATE_MAX_BITS			5
+#define EPT_PAGE_STATE_MASK								\
+	GENMASK(EPT_PAGE_STATE_SHIFT + PKVM_PAGE_STATE_BITS - 1, EPT_PAGE_STATE_SHIFT)
 
 static struct pkvm_pgtable *host_ept;
 static struct pkvm_pool host_ept_pool;
@@ -148,6 +155,29 @@ static void host_ept_flush_tlb(struct pkvm_pgtable *pgt,
 	}
 }
 
+static u64 ept_pgstate_mask(void)
+{
+	return EPT_PAGE_STATE_MASK;
+}
+
+static u64 ept_pte_mk_pgstate(enum pkvm_page_state state)
+{
+	/*
+	 * As the ignored bit56 ~ bit52 in the EPT present leaf are used to
+	 * store page state, the number of page state bits should not be larger
+	 * than this.
+	 */
+	BUILD_BUG_ON_MSG(EPT_PAGE_STATE_MAX_BITS < PKVM_PAGE_STATE_BITS,
+			"EPT doesn't have enough bits to store page state");
+
+	return FIELD_PREP(EPT_PAGE_STATE_MASK, state);
+}
+
+static enum pkvm_page_state ept_pte_pgstate(void *ptep)
+{
+	return (ept_pte_get(ptep) & EPT_PAGE_STATE_MASK) >> EPT_PAGE_STATE_SHIFT;
+}
+
 static const struct pkvm_pgtable_ops host_ept_pgt_ops = {
 	.pte_present = ept_pte_present,
 	.pte_annotated = ept_pte_annotated,
@@ -166,6 +196,9 @@ static const struct pkvm_pgtable_ops host_ept_pgt_ops = {
 	.pte_set = ept_pte_set,
 	.pte_get = ept_pte_get,
 	.flush_tlb = host_ept_flush_tlb,
+	.pte_mk_pgstate = ept_pte_mk_pgstate,
+	.pte_pgstate = ept_pte_pgstate,
+	.pgstate_mask = ept_pgstate_mask,
 };
 
 static inline u64 construct_host_eptp(struct pkvm_pgtable *pgt)
