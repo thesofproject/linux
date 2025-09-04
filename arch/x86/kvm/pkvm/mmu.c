@@ -194,6 +194,65 @@ static void set_host_mem_pgstate(unsigned long phys, unsigned long size,
 		page->host_state = pgstate;
 }
 
+static int check_host_mem_pgstate(unsigned long phys, unsigned long size,
+				  enum pkvm_page_state pgstate)
+{
+	if (!is_memory_range(phys, size))
+		return -EINVAL;
+
+	for_each_pkvm_page(page, phys, size) {
+		if (page->host_state != pgstate)
+			return -EPERM;
+	}
+
+	return 0;
+}
+
+struct page_ownership {
+	const enum pkvm_owner_id *owner;
+};
+
+static int check_page_ownership_walker(struct pkvm_pgtable_visit_ctx *ctx,
+				       unsigned long walk_flags,
+				       void *const arg)
+{
+	struct pkvm_pgtable *pgt = ctx->pgt;
+	struct page_ownership *expected = arg;
+	void *ptep = ctx->ptep;
+
+	if (expected->owner) {
+		/* The pte should be a non-present entry to contain owner id. */
+		if (pgt->pgt_ops->pte_present(ptep))
+			return -EPERM;
+
+		if (*expected->owner != pkvm_pte_owner_id(pgt, ptep))
+			return -EPERM;
+	}
+
+	return 0;
+}
+
+static int check_page_owner(struct pkvm_pgtable *pgt, unsigned long vaddr,
+			    unsigned long size, const enum pkvm_owner_id expected_owner)
+{
+	struct page_ownership expected_ownership = {
+		.owner = &expected_owner,
+	};
+	struct pkvm_pgtable_walker walker = {
+		.cb = check_page_ownership_walker,
+		.arg = &expected_ownership,
+		.walk_flags = PKVM_PGTABLE_WALK_LEAF,
+	};
+
+	return pkvm_pgtable_walk(pgt, vaddr, size, &walker);
+}
+
+static u64 host_mmu_pte_prot(bool mmio)
+{
+	return host_mmu.pgt_ops->calc_pte_perm(true, true, true) |
+	       host_mmu.pgt_ops->calc_pte_memtype(mmio);
+}
+
 int pkvm_hyp_mmu_init(void *pool_base, unsigned long pool_pages)
 {
 	struct pkvm_pgtable_cap cap = {
@@ -329,4 +388,111 @@ int pkvm_host_mmu_unmap(unsigned long vaddr, unsigned long size)
 {
 	/* The vaddr == phys for the host MMU */
 	return pkvm_pgtable_unmap(&host_mmu, vaddr, vaddr, size);
+}
+
+/**
+ * pkvm_host_donate_hyp() - Donate memory pages from host to hypervisor.
+ * @phys:	Physical address of the memory region to donate.
+ * @size:	Size of the memory region to donate.
+ *
+ * The donation transfers ownership of the memory pages in range
+ * [@phys, @phys + @size) from the host to the hypervisor, thus protecting them
+ * from accessing by the host. The @phys and @size are required to be PAGE_SIZE
+ * aligned (@size is also required to be non-zeroed value).
+ *
+ * The donated memory pages are annotated with PKVM_ID_HYP owner id in the host
+ * mmu, and page states are updated to PKVM_PAGE_NONE, to indicate the ownership
+ * has been transferred to the hypervisor.
+ *
+ * Returns: 0 on success, or a negative error code on failure.
+ */
+int pkvm_host_donate_hyp(unsigned long phys, unsigned long size)
+{
+	int ret;
+
+	if (!PAGE_ALIGNED(phys) || !PAGE_ALIGNED(size) || size == 0)
+		return -EINVAL;
+
+	pkvm_host_mmu_lock();
+
+	ret = check_host_mem_pgstate(phys, size, PKVM_PAGE_OWNED);
+	if (ret)
+		goto unlock;
+
+	/* The vaddr == phys for the host MMU. */
+	ret = pkvm_pgtable_set_owner(&host_mmu, phys, size, PKVM_ID_HYP);
+	/*
+	 * pkvm_pgtable_set_owner() shouldn't fail here unless there is a bug.
+	 * Furthermore, if it fails, it means some (maybe not all) pages in the
+	 * range remain mapped in the host mmu, whereas their state will be
+	 * changed to PKVM_PAGE_NONE below, causing an inconsistency between the
+	 * page state and the mapping, which may lead to unexpected behavior. So
+	 * panic if it fails.
+	 */
+	BUG_ON(ret);
+
+	set_host_mem_pgstate(phys, size, PKVM_PAGE_NONE);
+unlock:
+	pkvm_host_mmu_unlock();
+
+	return ret;
+}
+
+/**
+ * pkvm_hyp_donate_host() - Donate memory pages from hypervisor to host.
+ * @phys:	Physical address of the memory region to donate.
+ * @size:	Size of the memory region to donate.
+ *
+ * The donation transfers ownership of the memory pages in range
+ * [@phys, @phys + @size) from the hypervisor to the host, thus allowing the
+ * host to access those pages. The @phys and @size are required to be PAGE_SIZE
+ * aligned (@size is also required to be non-zeroed value).
+ *
+ * The donated memory pages are mapped in the host mmu with read/write/exec
+ * permission and WB memory type in the host mmu, with the page states being
+ * updated to PKVM_PAGE_OWNED to indicate the ownership has been transferred to
+ * the host.
+ */
+void pkvm_hyp_donate_host(unsigned long phys, unsigned long size)
+{
+	int ret;
+
+	if (!PAGE_ALIGNED(phys) || !PAGE_ALIGNED(size) || size == 0) {
+		ret = -EINVAL;
+		goto out;
+	}
+
+	pkvm_host_mmu_lock();
+
+	ret = check_host_mem_pgstate(phys, size, PKVM_PAGE_NONE);
+	if (ret)
+		goto unlock;
+
+	/* The vaddr == phys for the host MMU */
+	ret = check_page_owner(&host_mmu, phys, size, PKVM_ID_HYP);
+	if (ret)
+		goto unlock;
+
+	/*
+	 * pkvm_pgtable_map() shouldn't fail here unless there is a bug.
+	 * Furthermore, if it fails, it means some (maybe not all) pages in the
+	 * range remain not mapped in the host mmu, whereas their state will be
+	 * changed to PKVM_PAGE_OWNED below, causing an inconsistency between
+	 * the page state and the mapping, which may lead to unexpected
+	 * behavior. So panic if it fails.
+	 */
+	BUG_ON(ret = pkvm_pgtable_map(&host_mmu, phys, phys, size,
+				      host_mmu_pte_prot(false)));
+
+	set_host_mem_pgstate(phys, size, PKVM_PAGE_OWNED);
+unlock:
+	pkvm_host_mmu_unlock();
+out:
+	/*
+	 * pkvm_hyp_donate_host() is only used by the pKVM hypervisor itself,
+	 * not on the host behalf, so it is supposed to be called with correct
+	 * parameters, and only for pages that are known to be owned by the
+	 * hypervisor. So any error here means a pKVM bug.
+	 */
+	BUG_ON(ret);
 }
