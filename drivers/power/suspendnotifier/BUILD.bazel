@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2025 The Android Open Source Project
+
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_module",
+)
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+ddk_module(
+    name = "suspend_notifier",
+    srcs = [
+        "suspend_notifier.c",
+    ],
+    out = "suspend_notifier.ko",
+    includes = [
+        ".",
+    ],
+    kernel_build = "//private/devices/google/x86-64/intel/common:kernel",
+)
