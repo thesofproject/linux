@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2025 The Android Open Source Project
+
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_module",
+)
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+ddk_module(
+    name = "cros_ec_light_prox",
+    srcs = ["cros_ec_light_prox.c"],
+    out = "cros_ec_light_prox.ko",
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
