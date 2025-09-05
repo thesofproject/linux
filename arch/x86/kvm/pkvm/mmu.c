@@ -45,6 +45,12 @@ static bool hyp_mmu_pte_present(void *ptep)
 	return pte_present(*(pte_t *)ptep);
 }
 
+static bool hyp_mmu_pte_annotated(void *ptep)
+{
+	/* Hypervisor mmu is not used to store annotations */
+	return false;
+}
+
 static bool hyp_mmu_pte_huge(void *ptep)
 {
 	return pte_huge(*(pte_t *)ptep);
@@ -121,6 +127,7 @@ static void hyp_mmu_flush_tlb(struct pkvm_pgtable *pgt,
 
 static const struct pkvm_pgtable_ops hyp_mmu_pgt_ops = {
 	.pte_present = hyp_mmu_pte_present,
+	.pte_annotated = hyp_mmu_pte_annotated,
 	.pte_huge = hyp_mmu_pte_huge,
 	.pte_mkhuge = hyp_mmu_pte_mkhuge,
 	.pte_to_phys = hyp_mmu_pte_to_phys,
