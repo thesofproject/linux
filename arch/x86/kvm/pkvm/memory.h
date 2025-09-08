@@ -3,6 +3,7 @@
 #define __PKVM_X86_MEMORY_H
 
 #include <linux/types.h>
+#include <linux/range.h>
 #include <vdso/limits.h>
 #include <asm/page.h>
 
@@ -62,5 +63,7 @@ static inline void pkvm_set_page_refcounted(struct pkvm_page *p)
 	BUG_ON(p->refcount);
 	p->refcount = 1;
 }
+
+bool pkvm_find_addr_range(unsigned long phys, struct range *range);
 
 #endif /* __PKVM_X86_MEMORY_H */
