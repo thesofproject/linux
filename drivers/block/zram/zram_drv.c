@@ -844,6 +844,7 @@ static struct zram_wb_ctl *init_wb_ctl(struct zram *zram)
 	atomic_set(&wb_ctl->num_inflight, 0);
 	init_waitqueue_head(&wb_ctl->done_wait);
 	spin_lock_init(&wb_ctl->done_lock);
+	wb_ctl->processed_bytes = 0;
 
 	for (i = 0; i < zram->wb_batch_size; i++) {
 		struct zram_wb_req *req;
@@ -1003,6 +1004,8 @@ static int zram_complete_done_reqs(struct zram *zram,
 		err = zram_writeback_complete(zram, req);
 		if (err)
 			ret = err;
+		else
+			wb_ctl->processed_bytes += PAGE_SIZE;
 
 		atomic_dec(&wb_ctl->num_inflight);
 		release_pp_slot(zram, req->pps);
