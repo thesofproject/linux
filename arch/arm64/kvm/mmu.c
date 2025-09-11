@@ -1834,7 +1834,8 @@ __pkvm_pages_to_ppages(struct kvm *kvm, struct kvm_memory_slot *memslot, gfn_t g
 		ppage = list_first_entry(&ppage_prealloc, struct kvm_pinned_page, list_node);
 		list_del_init(&ppage->list_node);
 
-		ppage->page = pfn_to_page(pfn);
+		ppage->_page = pfn_to_page(pfn);
+		ppage->pfn = pfn;
 		ppage->ipa = ipa;
 		ppage->order = get_order(page_size);
 		list_add_tail(&ppage->list_node, ppages);
@@ -1914,8 +1915,8 @@ static int __pkvm_host_donate_guest_sglist(struct kvm_vcpu *vcpu, struct list_he
 		int p, nr_ppages = 0;
 
 		list_for_each_entry(ppage, ppages, list_node) {
-			u64 pfn = page_to_pfn(ppage->page);
 			gfn_t gfn = ppage->ipa >> PAGE_SHIFT;
+			u64 pfn = ppage->pfn;
 
 			hyp_ppage = next_kvm_hyp_pinned_page(vcpu->arch.hyp_reqs, hyp_ppage, false);
 			if (!hyp_ppage)
@@ -1974,8 +1975,8 @@ static int __pkvm_host_donate_guest(struct kvm_vcpu *vcpu, struct list_head *ppa
 	}
 
 	list_for_each_entry_safe(ppage, tmp, ppages, list_node) {
-		u64 pfn = page_to_pfn(ppage->page);
 		gfn_t gfn = ppage->ipa >> PAGE_SHIFT;
+		u64 pfn = ppage->pfn;
 
 		ret = kvm_call_hyp_nvhe(__pkvm_host_map_guest, pfn, gfn, 1 << ppage->order,
 					KVM_PGTABLE_PROT_RWX);
@@ -2095,7 +2096,7 @@ free_ppages:
 	/* Pages left in the list haven't been mapped */
 	list_for_each_entry_safe(ppage, tmp, &ppages, list_node) {
 		list_del(&ppage->list_node);
-		unpin_user_pages(&ppage->page, 1);
+		unpin_user_pages(&ppage->_page, 1);
 		if (account_dec)
 			account_locked_vm(mm, 1 << ppage->order, false);
 		kfree(ppage);
@@ -2196,14 +2197,15 @@ int __pkvm_pgtable_stage2_split(struct kvm_vcpu *vcpu, phys_addr_t ipa, size_t s
 	ppage->order = 0;
 	WARN_ON(insert_ppage(kvm, ppage));
 
-	pfn = page_to_pfn(ppage->page) + 1;
+	pfn = ppage->pfn + 1;
 	ipa = ipa + PAGE_SIZE;
 	while (nr_pages--) {
 		/* Pop a ppage from the pre-allocated list */
 		ppage = list_first_entry(&ppage_prealloc, struct kvm_pinned_page, list_node);
 		list_del(&ppage->list_node);
 
-		ppage->page = pfn_to_page(pfn);
+		ppage->_page = pfn_to_page(pfn);
+		ppage->pfn = pfn;
 		ppage->ipa = ipa;
 		ppage->order = 0;
 		ppage->node.rb_right = ppage->node.rb_left = NULL;
