@@ -5381,6 +5381,8 @@ static int ufshcd_sdev_configure(struct scsi_device *sdev,
 	 */
 	if (hba->mcq_enabled)
 		lim->features |= BLK_FEAT_ORDERED_HWQ;
+	if (hba->dev_info.zwor_sup)
+		lim->features |= BLK_FEAT_ZWOR;
 
 	lim->dma_pad_mask = PRDT_DATA_BYTE_COUNT_PAD - 1;
 
@@ -8548,6 +8550,7 @@ static int ufs_get_device_desc(struct ufs_hba *hba)
 	u8 model_index;
 	u8 *desc_buf;
 	struct ufs_dev_info *dev_info = &hba->dev_info;
+	u32 ext_ufs_feature;
 
 	desc_buf = kzalloc(QUERY_DESC_MAX_SIZE, GFP_KERNEL);
 	if (!desc_buf) {
@@ -8577,9 +8580,10 @@ static int ufs_get_device_desc(struct ufs_hba *hba)
 
 	dev_info->rtt_cap = desc_buf[DEVICE_DESC_PARAM_RTT_CAP];
 
-	dev_info->hid_sup = get_unaligned_be32(desc_buf +
-				DEVICE_DESC_PARAM_EXT_UFS_FEATURE_SUP) &
-				UFS_DEV_HID_SUPPORT;
+	ext_ufs_feature = get_unaligned_be32(desc_buf +
+				DEVICE_DESC_PARAM_EXT_UFS_FEATURE_SUP);
+	dev_info->hid_sup = ext_ufs_feature & UFS_DEV_HID_SUPPORT;
+	dev_info->zwor_sup = ext_ufs_feature & UFS_DEV_ZWOR_SUPPORT;
 
 	model_index = desc_buf[DEVICE_DESC_PARAM_PRDCT_NAME];
 
