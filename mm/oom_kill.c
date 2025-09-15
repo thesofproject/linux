@@ -53,6 +53,9 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/oom.h>
 
+#undef CREATE_TRACE_POINTS
+#include <trace/hooks/mm.h>
+
 static int sysctl_panic_on_oom;
 static int sysctl_oom_kill_allocating_task;
 static int sysctl_oom_dump_tasks = 1;
@@ -701,6 +704,8 @@ static void wake_oom_reaper(struct timer_list *timer)
 #define OOM_REAPER_DELAY (2*HZ)
 static void queue_oom_reaper(struct task_struct *tsk)
 {
+	bool bypass = false;
+
 	/* mm is already queued? */
 	if (mm_flags_test_and_set(MMF_OOM_REAP_QUEUED, tsk->signal->oom_mm))
 		return;
@@ -708,6 +713,9 @@ static void queue_oom_reaper(struct task_struct *tsk)
 	get_task_struct(tsk);
 	timer_setup(&tsk->oom_reaper_timer, wake_oom_reaper, 0);
 	tsk->oom_reaper_timer.expires = jiffies + OOM_REAPER_DELAY;
+	trace_android_vh_oom_reaper_delay_bypass(tsk, &bypass);
+	if (bypass)
+		tsk->oom_reaper_timer.expires = jiffies;
 	add_timer(&tsk->oom_reaper_timer);
 }
 
