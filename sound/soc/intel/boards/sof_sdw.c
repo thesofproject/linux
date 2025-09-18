@@ -15,8 +15,10 @@
 #include <linux/soundwire/sdw_intel.h>
 #include <sound/core.h>
 #include <sound/soc-acpi.h>
+
 #include "sof_sdw_common.h"
 #include "../../codecs/rt711.h"
+#include "../../sof/intel/hda.h"
 
 static unsigned long sof_sdw_quirk = RT711_JD1;
 static int quirk_override = -1;
@@ -1143,8 +1145,28 @@ static int create_bt_dailinks(struct snd_soc_card *card,
 			      struct snd_soc_dai_link **dai_links, int *be_id)
 {
 	struct device *dev = card->dev;
-	int port = (sof_sdw_quirk & SOF_BT_OFFLOAD_SSP_MASK) >>
+	struct snd_soc_acpi_mach *mach = dev_get_platdata(dev);
+	const struct sof_intel_dsp_desc *chip = get_chip_info(snd_soc_card_get_drvdata(card));
+	int port;
+
+	if (!mach || !chip)
+		return -EINVAL;
+
+	port = (sof_sdw_quirk & SOF_BT_OFFLOAD_SSP_MASK) >>
 			SOF_BT_OFFLOAD_SSP_SHIFT;
+
+	/* Use the bt_link_mask from module parameters if provided
+	 * and if the SoC hardware IP version is ACE4 or newer.
+	 * This allows platform data to override which SSP is used
+	 * for Bluetooth offload.
+	 */
+	if (mach->mach_params.bt_link_mask &&
+	    chip->hw_ip_version >= SOF_INTEL_ACE_4_0) {
+		port = __ffs(mach->mach_params.bt_link_mask);
+		dev_info(dev, "BT: using bt_link_mask override, SSP%d selected (ACE4+)\n",
+				port);
+	}
+
 	char *name = devm_kasprintf(dev, GFP_KERNEL, "SSP%d-BT", port);
 	char *cpu_dai_name = devm_kasprintf(dev, GFP_KERNEL, "SSP%d Pin", port);
 	if (!name || !cpu_dai_name)
