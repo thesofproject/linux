@@ -58,4 +58,20 @@ enum pkvm_page_state {
 
 #define PKVM_PAGE_STATE_BITS		bits_per(NR_PKVM_PAGE_STATES - 1)
 
+/**
+ * enum pkvm_owner_id - Id to indicate the page owner.
+ * @PKVM_ID_HOST:	Host VM.
+ * @PKVM_ID_HYP:	pKVM hypervisor.
+ *
+ * The owner ID is used to indicate the page owner. It is saved in the host
+ * MMU non-present leaf entry.
+ */
+enum pkvm_owner_id {
+	PKVM_ID_HOST,
+	PKVM_ID_HYP,
+	PKVM_MAX_ID,
+};
+
+#define PKVM_OWNER_ID_BITS		bits_per(PKVM_MAX_ID - 1)
+
 #endif /* __PKVM_X86_MEM_PROTECT_H */
