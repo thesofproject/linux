@@ -5,6 +5,7 @@
  */
 
 #include <linux/acpi.h>
+#include <linux/dma-buf.h>
 #include <linux/mman.h>
 #include <linux/kvm_host.h>
 #include <linux/io.h>
@@ -1779,6 +1780,53 @@ err_free_pages:
 	return ret;
 }
 
+static int __pkvm_mem_abort_dmabuf(struct kvm_vcpu *vcpu, struct kvm_memory_slot *memslot,
+				   gfn_t gfn, u64 nr_pages, struct list_head *ppages)
+{
+	unsigned long hva = gfn_to_hva_memslot_prot(memslot, gfn, NULL);
+	struct kvm_pinned_page *ppage;
+	struct file *file;
+	struct page *page;
+	bool writable;
+	kvm_pfn_t pfn;
+
+	if (kvm_is_error_hva(hva))
+		return -EFAULT;
+
+	while (nr_pages--) {
+		file = NULL;
+		pfn = ___kvm_faultin_pfn(memslot, gfn, FOLL_WRITE, &writable, &page, &file);
+		if (is_error_pfn(pfn) || !pfn_is_map_memory(pfn))
+			return -EFAULT;
+
+		if (!writable || !file || !is_dma_buf_file(file)) {
+			if (file)
+				fput(file);
+			kvm_release_page_clean(page);
+			return -EFAULT;
+		}
+
+		ppage = kmalloc(sizeof(*ppage), GFP_KERNEL_ACCOUNT);
+		if (!ppage) {
+			fput(file);
+			kvm_release_page_clean(page);
+			return -ENOMEM;
+		}
+
+		ppage->_page = page;
+		ppage->file = file;
+		ppage->pfn = pfn;
+		ppage->ipa = gfn << PAGE_SHIFT;
+		ppage->order = 0;
+		list_add_tail(&ppage->list_node, ppages);
+
+		gfn++;
+		hva += PAGE_SIZE;
+	}
+
+	return 0;
+}
+
 /*
  * Create a list of kvm_pinned_page based on the array of pages from
  * __pkvm_pin_pages in preparation for EL2 mapping.
@@ -1835,6 +1883,7 @@ __pkvm_pages_to_ppages(struct kvm *kvm, struct kvm_memory_slot *memslot, gfn_t g
 		list_del_init(&ppage->list_node);
 
 		ppage->_page = pfn_to_page(pfn);
+		ppage->file = NULL;
 		ppage->pfn = pfn;
 		ppage->ipa = ipa;
 		ppage->order = get_order(page_size);
@@ -2037,6 +2086,22 @@ static int pkvm_mem_abort_device(struct kvm_vcpu *vcpu, struct kvm_memory_slot *
 	return 0;
 }
 
+void pkvm_release_ppage(struct kvm_pinned_page *ppage, bool dirty)
+{
+	if (!ppage->file) {
+		if (dirty)
+			unpin_user_pages_dirty_lock(&ppage->_page, 1, true);
+		else
+			unpin_user_pages(&ppage->_page, 1);
+	} else {
+		fput(ppage->file);
+		if (dirty)
+			kvm_release_page_dirty(ppage->_page);
+		else
+			kvm_release_page_clean(ppage->_page);
+	}
+}
+
 static int pkvm_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa, size_t size,
 			  struct kvm_memory_slot *memslot)
 {
@@ -2044,8 +2109,8 @@ static int pkvm_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa, size_t s
 	struct kvm_pinned_page *ppage, *tmp;
 	struct mm_struct *mm = current->mm;
 	struct kvm *kvm = vcpu->kvm;
+	struct page **pages = NULL;
 	bool account_dec = false;
-	struct page **pages;
 	LIST_HEAD(ppages);
 	long ret, nr_pages;
 
@@ -2067,7 +2132,14 @@ static int pkvm_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa, size_t s
 		 * case, that is possible because the VMA for the device mapping is VM_IO,
 		 * which fails in check_vma_flags() with -EFAULT
 		 */
-		return pkvm_mem_abort_device(vcpu, memslot, gfn, nr_pages);
+		ret = pkvm_mem_abort_device(vcpu, memslot, gfn, nr_pages);
+		if (!ret)
+			return ret;
+
+		ret = __pkvm_mem_abort_dmabuf(vcpu, memslot, gfn, nr_pages, &ppages);
+		if (ret)
+			goto free_pages;
+		goto topup;
 	} else if (ret) {
 		return ret;
 	}
@@ -2081,6 +2153,7 @@ static int pkvm_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa, size_t s
 		goto free_pages;
 	}
 
+topup:
 	ret = __pkvm_topup_stage2_memcache(vcpu, &ppages);
 	if (ret)
 		goto free_ppages;
@@ -2096,7 +2169,7 @@ free_ppages:
 	/* Pages left in the list haven't been mapped */
 	list_for_each_entry_safe(ppage, tmp, &ppages, list_node) {
 		list_del(&ppage->list_node);
-		unpin_user_pages(&ppage->_page, 1);
+		pkvm_release_ppage(ppage, false);
 		if (account_dec)
 			account_locked_vm(mm, 1 << ppage->order, false);
 		kfree(ppage);
@@ -2180,7 +2253,7 @@ int __pkvm_pgtable_stage2_split(struct kvm_vcpu *vcpu, phys_addr_t ipa, size_t s
 	write_lock(&kvm->mmu_lock);
 
 	ppage = find_ppage(kvm, ipa);
-	if (!ppage) {
+	if (!ppage || WARN_ON(ppage->file)) {
 		ret = -EPERM;
 		goto end;
 	} else if (!ppage->order) {
@@ -2205,6 +2278,7 @@ int __pkvm_pgtable_stage2_split(struct kvm_vcpu *vcpu, phys_addr_t ipa, size_t s
 		list_del(&ppage->list_node);
 
 		ppage->_page = pfn_to_page(pfn);
+		ppage->file = NULL;
 		ppage->pfn = pfn;
 		ppage->ipa = ipa;
 		ppage->order = 0;
@@ -3026,7 +3100,8 @@ int kvm_arch_prepare_memory_region(struct kvm *kvm,
 			 * Cacheable PFNMAP is allowed only if the hardware
 			 * supports it.
 			 */
-			if (kvm_vma_is_cacheable(vma) && !kvm_supports_cacheable_pfnmap()) {
+			if (kvm_vma_is_cacheable(vma) && !kvm_supports_cacheable_pfnmap() &&
+								!is_dma_buf_file(vma->vm_file)) {
 				ret = -EINVAL;
 				break;
 			}
