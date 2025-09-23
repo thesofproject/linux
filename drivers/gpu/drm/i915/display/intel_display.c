@@ -6561,7 +6561,7 @@ int intel_atomic_check(struct drm_device *dev,
 	if (ret)
 		goto fail;
 
-	ret = intel_bw_atomic_check(state, any_ms);
+	ret = intel_bw_atomic_check(state);
 	if (ret)
 		goto fail;
 
