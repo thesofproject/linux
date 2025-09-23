@@ -6432,6 +6432,7 @@ int intel_atomic_check(struct drm_device *dev,
 	struct intel_atomic_state *state = to_intel_atomic_state(_state);
 	struct intel_crtc_state *old_crtc_state, *new_crtc_state;
 	struct intel_crtc *crtc;
+	bool need_cdclk_calc = false;
 	int ret, i;
 	bool any_ms = false;
 
@@ -6565,7 +6566,7 @@ int intel_atomic_check(struct drm_device *dev,
 	if (ret)
 		goto fail;
 
-	ret = intel_cdclk_atomic_check(state, &any_ms);
+	ret = intel_cdclk_atomic_check(state, &need_cdclk_calc);
 	if (ret)
 		goto fail;
 
@@ -6576,7 +6577,9 @@ int intel_atomic_check(struct drm_device *dev,
 		ret = intel_modeset_checks(state);
 		if (ret)
 			goto fail;
+	}
 
+	if (need_cdclk_calc) {
 		ret = intel_modeset_calc_cdclk(state);
 		if (ret)
 			return ret;
@@ -7491,13 +7494,13 @@ static void intel_atomic_commit_tail(struct intel_atomic_state *state)
 	 */
 	intel_pmdemand_pre_plane_update(state);
 
-	if (state->modeset) {
+	if (state->modeset)
 		drm_atomic_helper_update_legacy_modeset_state(display->drm, &state->base);
 
-		intel_set_cdclk_pre_plane_update(state);
+	intel_set_cdclk_pre_plane_update(state);
 
+	if (state->modeset)
 		intel_modeset_verify_disabled(state);
-	}
 
 	intel_sagv_pre_plane_update(state);
 
@@ -7610,8 +7613,7 @@ static void intel_atomic_commit_tail(struct intel_atomic_state *state)
 		intel_verify_planes(state);
 
 	intel_sagv_post_plane_update(state);
-	if (state->modeset)
-		intel_set_cdclk_post_plane_update(state);
+	intel_set_cdclk_post_plane_update(state);
 	intel_pmdemand_post_plane_update(state);
 
 	drm_atomic_helper_commit_hw_done(&state->base);
