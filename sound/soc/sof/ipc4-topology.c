@@ -1380,6 +1380,9 @@ static int sof_ipc4_update_hw_params(struct snd_sof_dev *sdev, struct snd_pcm_hw
 			case SOF_IPC4_TYPE_UNSIGNED_INTEGER:
 				snd_fmt = SNDRV_PCM_FORMAT_U8;
 				break;
+			case SOF_IPC4_TYPE_SIGNED_INTEGER:
+				snd_fmt = SNDRV_PCM_FORMAT_S8;
+				break;
 			default:
 				dev_err(sdev->dev, "Unsupported PCM 8-bit IPC4 type %d\n", type);
 				return -EINVAL;
@@ -1521,6 +1524,7 @@ static int sof_ipc4_get_valid_bits(struct snd_sof_dev *sdev, struct snd_pcm_hw_p
 {
 	switch (params_format(params)) {
 	case SNDRV_PCM_FORMAT_U8:
+	case SNDRV_PCM_FORMAT_S8:
 	case SNDRV_PCM_FORMAT_MU_LAW:
 	case SNDRV_PCM_FORMAT_A_LAW:
 		return 8;
@@ -1547,6 +1551,8 @@ static int sof_ipc4_get_sample_type(struct snd_sof_dev *sdev, struct snd_pcm_hw_
 		return SOF_IPC4_TYPE_MU_LAW;
 	case SNDRV_PCM_FORMAT_U8:
 		return SOF_IPC4_TYPE_UNSIGNED_INTEGER;
+	case SNDRV_PCM_FORMAT_S8:
+		return SOF_IPC4_TYPE_SIGNED_INTEGER;
 	case SNDRV_PCM_FORMAT_S16_LE:
 	case SNDRV_PCM_FORMAT_S24_LE:
 	case SNDRV_PCM_FORMAT_S32_LE:
