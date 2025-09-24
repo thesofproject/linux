@@ -1353,6 +1353,9 @@ struct intel_crtc_state {
 	/* LOBF flag */
 	bool has_lobf;
 
+	/* W2 window or 'set context latency' lines */
+	u16 set_context_latency;
+
 	/* to track changes in plane color blocks */
 	bool plane_color_changed;
 };
