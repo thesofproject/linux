@@ -4,6 +4,7 @@
 
 #include <linux/types.h>
 #include <linux/range.h>
+#include <linux/kvm_types.h>
 #include <linux/mm.h>
 #include <vdso/limits.h>
 #include <asm/page.h>
@@ -128,6 +129,21 @@ static inline void pkvm_clear_memory(void *va, size_t size)
 	 * the previous contents cannot be read via non-coherent DMA.
 	 */
 	pkvm_clflush_cache_range(va, size);
+}
+
+static inline phys_addr_t pkvm_host_gpa_to_phys(gpa_t gpa)
+{
+	/*
+	 * Host VM's GPA is identify-mapped in the host mmu, thus GPA equals
+	 * physical address.
+	 */
+	return gpa;
+}
+
+static inline gpa_t pkvm_phys_to_host_gpa(unsigned long phys)
+{
+	/* See comments in pkvm_host_gpa_to_phys */
+	return phys;
 }
 
 #endif /* __PKVM_X86_MEMORY_H */
