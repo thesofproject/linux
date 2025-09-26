@@ -150,6 +150,9 @@ ddk_module(
         "CONFIG_I2C": {
             True: ["xe/xe_i2c.c"],
         },
+        "CONFIG_DRM_XE_GPUFREQTRACER": {
+            True: ["xe/xe_gpufreqtracer.c"],
+        },
         "CONFIG_DRM_XE_GPUSVM": {
             True: ["xe/xe_svm.c"],
         },

@@ -18,6 +18,7 @@
 #include "xe_bo_evict.h"
 #include "xe_device.h"
 #include "xe_ggtt.h"
+#include "xe_gpufreqtracer.h"
 #include "xe_gt.h"
 #include "xe_gt_idle.h"
 #include "xe_i2c.h"
@@ -127,6 +128,8 @@ int xe_pm_suspend(struct xe_device *xe)
 	drm_dbg(&xe->drm, "Suspending device\n");
 	trace_xe_pm_suspend(xe, __builtin_return_address(0));
 
+	xe_gpufreqtracer_suspend_workers(xe);
+
 	err = xe_pxp_pm_suspend(xe->pxp);
 	if (err)
 		goto err;
@@ -214,6 +217,8 @@ int xe_pm_resume(struct xe_device *xe)
 	err = xe_bo_restore_late(xe);
 	if (err)
 		goto err;
+
+	xe_gpufreqtracer_resume_workers(xe);
 
 	xe_pxp_pm_resume(xe->pxp);
 
@@ -509,6 +514,8 @@ int xe_pm_runtime_suspend(struct xe_device *xe)
 	 */
 	xe_rpm_lockmap_acquire(xe);
 
+	xe_gpufreqtracer_suspend_workers(xe);
+
 	err = xe_pxp_pm_suspend(xe->pxp);
 	if (err)
 		goto out;
@@ -607,6 +614,8 @@ int xe_pm_runtime_resume(struct xe_device *xe)
 		if (err)
 			goto out;
 	}
+
+	xe_gpufreqtracer_resume_workers(xe);
 
 	xe_pxp_pm_resume(xe->pxp);
 

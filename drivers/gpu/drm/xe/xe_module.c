@@ -7,11 +7,13 @@
 
 #include <linux/init.h>
 #include <linux/module.h>
+#include <linux/stringify.h>
 
 #include <drm/drm_module.h>
 
 #include "xe_drv.h"
 #include "xe_configfs.h"
+#include "xe_gpufreqtracer.h"
 #include "xe_hw_fence.h"
 #include "xe_pci.h"
 #include "xe_pm.h"
@@ -41,6 +43,9 @@ struct xe_modparam xe_modparam = {
 #endif
 	.wedged_mode =		DEFAULT_WEDGED_MODE,
 	.svm_notifier_size =	DEFAULT_SVM_NOTIFIER_SIZE,
+#ifdef CONFIG_DRM_XE_GPUFREQTRACER
+	.gpufreq_monitoring_interval_ms = XE_GPUFREQ_MONITORING_DEFAULT_INTERVAL_MS,
+#endif
 	/* the rest are 0 by default */
 };
 
@@ -92,6 +97,16 @@ module_param_named_unsafe(wedged_mode, xe_modparam.wedged_mode, int, 0600);
 MODULE_PARM_DESC(wedged_mode,
 		 "Module's default policy for the wedged mode (0=never, 1=upon-critical-errors, 2=upon-any-hang "
 		 "[default=" __stringify(DEFAULT_WEDGED_MODE) "])");
+
+#ifdef CONFIG_DRM_XE_GPUFREQTRACER
+module_param_named(gpufreq_monitoring_interval_ms,
+		   xe_modparam.gpufreq_monitoring_interval_ms, uint, 0644);
+MODULE_PARM_DESC(gpufreq_monitoring_interval_ms,
+		 "GPU frequency monitoring interval in milliseconds ("
+		 __stringify(XE_GPUFREQ_MONITORING_MIN_INTERVAL_MS) "-"
+		 __stringify(XE_GPUFREQ_MONITORING_MAX_INTERVAL_MS) ", default: "
+		 __stringify(XE_GPUFREQ_MONITORING_DEFAULT_INTERVAL_MS) ")");
+#endif
 
 static int xe_check_nomodeset(void)
 {

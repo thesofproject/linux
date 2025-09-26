@@ -35,6 +35,7 @@
 #include "xe_exec_queue.h"
 #include "xe_force_wake.h"
 #include "xe_ggtt.h"
+#include "xe_gpufreqtracer.h"
 #include "xe_gsc_proxy.h"
 #include "xe_gt.h"
 #include "xe_gt_mcr.h"
@@ -915,6 +916,10 @@ int xe_device_probe(struct xe_device *xe)
 	xe_nvm_init(xe);
 
 	err = xe_heci_gsc_init(xe);
+	if (err)
+		return err;
+
+	err = xe_gpufreqtracer_init(xe);
 	if (err)
 		return err;
 
