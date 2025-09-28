@@ -49,5 +49,7 @@ static inline struct pkvm_vm *to_pkvm(struct kvm *kvm)
 void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu);
 void pkvm_kick_vcpu(struct kvm_vcpu *vcpu);
 int pkvm_x86_vendor_init(struct kvm_x86_init_ops *ops);
+struct pkvm_vm *pkvm_get_vm(int vm_handle);
+void pkvm_put_vm(struct pkvm_vm *pkvm_vm);
 
 #endif /* __PKVM_X86_PKVM_H */
