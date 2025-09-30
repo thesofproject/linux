@@ -501,6 +501,10 @@ static int __init finalize_pkvm(void)
 	if (pkvm_load_early_modules())
 		pkvm_firmware_rmem_clear();
 
+	ret = kvm_iommu_init_driver();
+	if (ret)
+		pkvm_firmware_rmem_clear();
+
 	/*
 	 * Exclude HYP sections from kmemleak so that they don't get peeked
 	 * at, which would end badly once inaccessible.
