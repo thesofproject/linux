@@ -14,6 +14,7 @@
 #include <nvhe/spinlock.h>
 #include <nvhe/trace.h>
 #include <nvhe/trap_handler.h>
+#include <nvhe/iommu.h>
 
 static void *__pkvm_module_memcpy(void *to, const void *from, size_t count)
 {
@@ -265,6 +266,14 @@ const struct pkvm_module_ops module_ops = {
 	.tracing_commit_entry = tracing_commit_entry,
 	.tracing_mod_hyp_printk = tracing_mod_hyp_printk,
 	.hyp_smp_processor_id = __hyp_smp_processor_id,
+	.iommu_donate_pages = kvm_iommu_donate_pages,
+	.iommu_reclaim_pages = kvm_iommu_reclaim_pages,
+	.get_time = pkvm_time_get,
+	.host_donate_hyp_prot = ___pkvm_host_donate_hyp_prot,
+#ifdef CONFIG_LIST_HARDENED
+	.list_add_valid_or_report = __list_add_valid_or_report,
+	.list_del_entry_valid_or_report = __list_del_entry_valid_or_report,
+#endif
 };
 
 static void *pkvm_module_hyp_va(struct pkvm_el2_module *mod, void *kern_va)
