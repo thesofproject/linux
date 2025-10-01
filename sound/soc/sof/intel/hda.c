@@ -1184,6 +1184,15 @@ static struct snd_soc_acpi_adr_device *find_acpi_adr_device(struct device *dev,
 		}
 
 		name_prefix = codec_info_list[i].name_prefix;
+		/*
+		 * This should not happen, but add a paranoid check to avoid NULL pointer
+		 * dereference
+		 */
+		if (!name_prefix) {
+			dev_err(dev, "codec_info_list name_prefix of part id %#x is missing\n",
+				codec_info_list[i].part_id);
+			return NULL;
+		}
 		for (j = 0; j < codec_info_list[i].dai_num; j++) {
 			/* Check if the endpoint is present by the SDCA DisCo table */
 			if (!is_endpoint_present(sdw_device, &codec_info_list[i],
@@ -1391,6 +1400,8 @@ static struct snd_soc_acpi_mach *hda_sdw_machine_select(struct snd_sof_dev *sdev
 		link_index = hweight32(link_mask & (BIT(peripherals->array[i]->bus->link_id) - 1));
 		links[link_index].adr_d = find_acpi_adr_device(sdev->dev, peripherals->array[i],
 							       &links[link_index], &amp_index);
+		if (!links[link_index].adr_d)
+			return NULL;
 	}
 
 	mach->drv_name = "sof_sdw";
