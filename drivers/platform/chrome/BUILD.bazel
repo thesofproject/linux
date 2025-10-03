@@ -1,0 +1,26 @@
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_module",
+)
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+ddk_module(
+    name = "cros-ec-usb",
+    srcs = [
+        "cros_ec_usb.c",
+    ],
+    out = "cros-ec-usb.ko",
+    hdrs = [
+        "cros_ec.h",
+    ],
+    includes = [
+        "include",
+    ],
+    kconfig = "Kconfig",
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
