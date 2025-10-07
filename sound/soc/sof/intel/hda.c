@@ -1178,10 +1178,8 @@ static struct snd_soc_acpi_adr_device *find_acpi_adr_device(struct device *dev,
 
 		endpoints = devm_kcalloc(dev, codec_info_list[i].dai_num,
 					 sizeof(struct snd_soc_acpi_endpoint), GFP_KERNEL);
-		if (!endpoints) {
-			dev_err(dev, "failed to allocate memory for endpoints\n");
+		if (!endpoints)
 			return NULL;
-		}
 
 		name_prefix = codec_info_list[i].name_prefix;
 		/*
@@ -1413,7 +1411,8 @@ static struct snd_soc_acpi_mach *hda_sdw_machine_select(struct snd_sof_dev *sdev
 	 * Set mach->sof_tplg_filename as a dummy topology to avoid tplg file checking
 	 * and being used.
 	 */
-	mach->sof_tplg_filename = devm_kasprintf(sdev->dev, GFP_KERNEL, "sof-%s-dummy.tplg", chip->platform);
+	mach->sof_tplg_filename = devm_kasprintf(sdev->dev, GFP_KERNEL,
+						 "sof-%s-dummy.tplg", chip->platform);
 
 	dev_info(sdev->dev, "Use SoundWire default machine driver with function topologies\n");
 	return mach;
