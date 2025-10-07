@@ -130,7 +130,7 @@ int sof_sdw_get_tplg_files(struct snd_soc_card *card, const struct snd_soc_acpi_
 				 "Failed to open topology file: %s, you might need to\n",
 				 (*tplg_files)[i]);
 			dev_warn(card->dev,
-				"download it from https://github.com/thesofproject/sof-bin/\n");
+				 "download it from https://github.com/thesofproject/sof-bin/\n");
 			return 0;
 		}
 	}
