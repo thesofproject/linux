@@ -336,6 +336,59 @@ static void cros_ec_usb_delete(struct cros_ec_usb *ec_usb)
 	kfree(ec_usb->bulk_in_buffer);
 }
 
+static struct cros_ec_device *cros_ec_device_alloc_usb(struct device *dev)
+{
+	struct cros_ec_device *ec_dev;
+
+	/*
+	 * ANDROID: Do not alloc ec_dev via devm_kzalloc
+	 *
+	 * Do not free the cros_ec_device once the ec device over USB is
+	 * disconnected. It could cause UAF error once any userspace
+	 * program tries to use the cros_* file after the disconnect.
+	 * The ec device is disconnected every sysjump so it is a common
+	 * case.
+	 *
+	 * This will be fixed with coming series of commit:
+	 * https://lore.kernel.org/all/20250923075302.591026-1-tzungbi@kernel.org/
+	 * The cros-ec-usb driver will be adjusted after it is merged.
+	 */
+	ec_dev = kzalloc(sizeof(*ec_dev), GFP_KERNEL);
+	if (!ec_dev)
+		return NULL;
+
+	ec_dev->din_size = sizeof(struct ec_host_response) +
+			   sizeof(struct ec_response_get_protocol_info) +
+			   EC_MAX_RESPONSE_OVERHEAD;
+	ec_dev->dout_size = sizeof(struct ec_host_request) +
+			    sizeof(struct ec_params_rwsig_action) +
+			    EC_MAX_REQUEST_OVERHEAD;
+
+	ec_dev->din = devm_kzalloc(dev, ec_dev->din_size, GFP_KERNEL);
+	if (!ec_dev->din)
+		return NULL;
+
+	ec_dev->dout = devm_kzalloc(dev, ec_dev->dout_size, GFP_KERNEL);
+	if (!ec_dev->dout)
+		return NULL;
+
+	ec_dev->dev = dev;
+	ec_dev->max_response = sizeof(struct ec_response_get_protocol_info);
+	ec_dev->max_request = sizeof(struct ec_params_rwsig_action);
+	ec_dev->suspend_timeout_ms = EC_HOST_SLEEP_TIMEOUT_DEFAULT;
+
+	BLOCKING_INIT_NOTIFIER_HEAD(&ec_dev->event_notifier);
+	BLOCKING_INIT_NOTIFIER_HEAD(&ec_dev->panic_notifier);
+
+	lockdep_register_key(&ec_dev->lockdep_key);
+	mutex_init(&ec_dev->lock);
+	lockdep_set_class(&ec_dev->lock, &ec_dev->lockdep_key);
+
+	/* ANDROID: Do not call cros_ec_device_free after disconnect */
+
+	return ec_dev;
+}
+
 static int cros_ec_usb_probe(struct usb_interface *intf, const struct usb_device_id *id)
 {
 	struct usb_device *usb_dev = interface_to_usbdev(intf);
@@ -362,7 +415,8 @@ static int cros_ec_usb_probe(struct usb_interface *intf, const struct usb_device
 		if (!ec_usb)
 			return -ENOMEM;
 
-		ec_dev = kzalloc(sizeof(*ec_dev), GFP_KERNEL);
+		/* ANDROID: Do not use cros_ec_device_alloc to avoid UAF */
+		ec_dev = cros_ec_device_alloc_usb(if_dev);
 		if (!ec_dev) {
 			kfree(ec_usb);
 			return -ENOMEM;
@@ -378,10 +432,6 @@ static int cros_ec_usb_probe(struct usb_interface *intf, const struct usb_device
 		ec_dev->irq = 0;
 		ec_dev->cmd_xfer = NULL;
 		ec_dev->pkt_xfer = do_cros_ec_pkt_xfer_usb;
-		ec_dev->din_size = sizeof(struct ec_host_response) +
-				   sizeof(struct ec_response_get_protocol_info);
-		ec_dev->dout_size = sizeof(struct ec_host_request) +
-				    sizeof(struct ec_params_rwsig_action);
 	} else {
 		ec_dev = ec_usb->ec_dev;
 
