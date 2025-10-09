@@ -27,6 +27,7 @@
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_registers.h>
 #include <linux/soundwire/sdw_type.h>
+#include <sound/sdca_function.h>
 #include <sound/sdw.h>
 #include <sound/soc.h>
 #include <sound/tlv.h>
@@ -40,6 +41,7 @@
 #define TAS2783_PROBE_TIMEOUT 5000
 #define TAS2783_CALI_GUID EFI_GUID(0x1f52d2a1, 0xbb3a, 0x457d, 0xbc, \
 				   0x09, 0x43, 0xa3, 0xf4, 0x31, 0x0a, 0x92)
+#define MIPI_INIT_TABLE "mipi-sdca-function-initialization-table"
 
 static const u32 tas2783_cali_reg[] = {
 	TAS2783_CAL_R0,
@@ -55,6 +57,11 @@ struct bin_header_t {
 	u32 file_id;
 	u32 length;
 };
+
+struct raw_init_data {
+	__le32 addr;
+	u8 val;
+} __packed;
 
 struct calibration_data {
 	u32 is_valid;
@@ -83,6 +90,8 @@ struct tas2783_prv {
 	wait_queue_head_t fw_wait;
 	bool fw_dl_task_done;
 	bool fw_dl_success;
+	struct reg_sequence *init_data;
+	int num_init_data;
 };
 
 static const struct reg_default tas2783_reg_default[] = {
@@ -1214,9 +1223,19 @@ static s32 tas_io_init(struct device *dev, struct sdw_slave *slave)
 		dev_err(tas_dev->dev, "fw request, wait_event timeout\n");
 		ret = -EAGAIN;
 	} else {
-		ret = regmap_multi_reg_write(tas_dev->regmap, tas2783_init_seq,
-					     ARRAY_SIZE(tas2783_init_seq));
-		tas_dev->hw_init = true;
+		if (tas_dev->num_init_data > 0)
+			ret = regmap_multi_reg_write(tas_dev->regmap,
+						     tas_dev->init_data,
+						     tas_dev->num_init_data);
+		else
+			ret = regmap_multi_reg_write(tas_dev->regmap, tas2783_init_seq,
+						     ARRAY_SIZE(tas2783_init_seq));
+
+		if (ret)
+			dev_err(tas_dev->dev,
+				"init writes failed, err=%d", ret);
+		else
+			tas_dev->hw_init = true;
 	}
 
 	return ret;
@@ -1260,6 +1279,73 @@ static void tas_remove(struct tas2783_prv *tas_dev)
 	snd_soc_unregister_component(tas_dev->dev);
 }
 
+static s32 tas_get_smartamp_init_data(struct sdw_slave *peripheral,
+				      struct tas2783_prv *tas_dev)
+{
+	int num_init_data, i;
+	struct device *dev;
+	struct reg_sequence *init_data;
+	struct sdca_device_data *sdca_data;
+	struct sdca_function_desc *function;
+	struct raw_init_data *raw __free(kfree) = NULL;
+
+	dev = &peripheral->dev;
+	sdca_data = &peripheral->sdca_data;
+
+	dev_dbg(dev, "number of functions found %d",
+		sdca_data->num_functions);
+
+	if (sdca_data->num_functions <= 0)
+		return -EINVAL;
+
+	/* look for smartamp function */
+	for (i = 0; i < sdca_data->num_functions; i++) {
+		if (sdca_data->function[i].type ==
+			SDCA_FUNCTION_TYPE_SMART_AMP)
+			break;
+	}
+	if (i == sdca_data->num_functions)
+		return -EINVAL;
+
+	function = &sdca_data->function[i];
+	num_init_data = fwnode_property_count_u8(function->node,
+						 MIPI_INIT_TABLE);
+	if (num_init_data <= 0) {
+		dev_dbg(dev, "error reading init table for tas2783 err=%d",
+			num_init_data);
+		return num_init_data;
+	}
+
+	if (num_init_data % sizeof(*raw) != 0) {
+		dev_dbg(dev, "%s should be integer multiple of %lu",
+			MIPI_INIT_TABLE, sizeof(*raw));
+		return -EINVAL;
+	}
+
+	raw = kzalloc(num_init_data, GFP_KERNEL);
+	if (!raw)
+		return -ENOMEM;
+
+	fwnode_property_read_u8_array(function->node, MIPI_INIT_TABLE,
+				      (u8 *)raw, num_init_data);
+
+	num_init_data /= sizeof(*raw);
+	init_data = devm_kcalloc(dev, num_init_data, sizeof(*init_data),
+				 GFP_KERNEL);
+	if (!init_data)
+		return -ENOMEM;
+
+	for (i = 0; i < num_init_data; i++) {
+		init_data[i].reg = le32_to_cpu(raw[i].addr);
+		init_data[i].def = raw[i].val;
+	}
+
+	tas_dev->num_init_data = num_init_data;
+	tas_dev->init_data = init_data;
+
+	return 0;
+}
+
 static s32 tas_sdw_probe(struct sdw_slave *peripheral,
 			 const struct sdw_device_id *id)
 {
@@ -1271,6 +1357,8 @@ static s32 tas_sdw_probe(struct sdw_slave *peripheral,
 	if (!tas_dev)
 		return dev_err_probe(dev, -ENOMEM,
 				     "Failed devm_kzalloc");
+
+	tas_get_smartamp_init_data(peripheral, tas_dev);
 
 	tas_dev->dev = dev;
 	tas_dev->sdw_peripheral = peripheral;
@@ -1325,6 +1413,7 @@ static struct sdw_driver tas_sdw_driver = {
 };
 module_sdw_driver(tas_sdw_driver);
 
+MODULE_IMPORT_NS("SND_SOC_SDCA");
 MODULE_AUTHOR("Texas Instruments Inc.");
 MODULE_DESCRIPTION("ASoC TAS2783 SoundWire Driver");
 MODULE_LICENSE("GPL");
