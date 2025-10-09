@@ -220,7 +220,8 @@ bool module_handle_guest_smc(struct arm_smccc_1_2_regs *regs, struct arm_smccc_1
 const struct pkvm_module_ops module_ops = {
 	.create_private_mapping = __pkvm_create_private_mapping,
 	.alloc_module_va = __pkvm_alloc_module_va,
-	.map_module_page = __pkvm_map_module_page,
+	.map_module_pages = __pkvm_map_module_pages,
+	.unmap_module_pages = __pkvm_unmap_module_pages,
 	.register_serial_driver = __pkvm_register_serial_driver,
 	.putc = hyp_putc,
 	.puts = hyp_puts,
@@ -335,7 +336,7 @@ int __pkvm_register_hcall(unsigned long hvn_hyp_va)
 	dyn_hcall_t hfn = (void *)hvn_hyp_va;
 	int reserved_id, ret;
 
-	assert_in_mod_range(hvn_hyp_va);
+	assert_in_mod_range(hvn_hyp_va, 8);
 
 	hyp_spin_lock(&dyn_hcall_lock);
 
