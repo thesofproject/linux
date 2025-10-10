@@ -1561,12 +1561,21 @@ static int __init early_pkvm_prefault_cfg(char *buf)
 }
 early_param("kvm-arm.protected_prefault", early_pkvm_prefault_cfg);
 
+static void remove_ppage(struct kvm *kvm, struct kvm_pinned_page *ppage)
+{
+	if (WARN_ON(!ppage->slot->arch.pkvm_pf_count))
+		return;
+	kvm_pinned_pages_remove(ppage, &kvm->arch.pkvm.pinned_pages);
+	ppage->slot->arch.pkvm_pf_count--;
+}
+
 static int insert_ppage(struct kvm *kvm, struct kvm_pinned_page *ppage)
 {
 	if (find_ppage(kvm, ppage->ipa))
 		return -EEXIST;
 
 	kvm_pinned_pages_insert(ppage, &kvm->arch.pkvm.pinned_pages);
+	ppage->slot->arch.pkvm_pf_count++;
 
 	return 0;
 }
@@ -1818,6 +1827,7 @@ static int __pkvm_mem_abort_dmabuf(struct kvm_vcpu *vcpu, struct kvm_memory_slot
 		ppage->pfn = pfn;
 		ppage->ipa = gfn << PAGE_SHIFT;
 		ppage->order = 0;
+		ppage->slot = memslot;
 		list_add_tail(&ppage->list_node, ppages);
 
 		gfn++;
@@ -1887,6 +1897,7 @@ __pkvm_pages_to_ppages(struct kvm *kvm, struct kvm_memory_slot *memslot, gfn_t g
 		ppage->pfn = pfn;
 		ppage->ipa = ipa;
 		ppage->order = get_order(page_size);
+		ppage->slot = memslot;
 		list_add_tail(&ppage->list_node, ppages);
 		nr_ppages += 1 << ppage->order;
 
@@ -2266,7 +2277,7 @@ int __pkvm_pgtable_stage2_split(struct kvm_vcpu *vcpu, phys_addr_t ipa, size_t s
 	if (ret)
 		goto end;
 
-	kvm_pinned_pages_remove(ppage, &kvm->arch.pkvm.pinned_pages);
+	remove_ppage(kvm, ppage);
 	ppage->order = 0;
 	WARN_ON(insert_ppage(kvm, ppage));
 
@@ -2283,6 +2294,7 @@ int __pkvm_pgtable_stage2_split(struct kvm_vcpu *vcpu, phys_addr_t ipa, size_t s
 		ppage->ipa = ipa;
 		ppage->order = 0;
 		ppage->node.rb_right = ppage->node.rb_left = NULL;
+		ppage->slot = memslot;
 		WARN_ON(insert_ppage(kvm, ppage));
 
 		pfn += 1;
@@ -3032,11 +3044,8 @@ int kvm_arch_prepare_memory_region(struct kvm *kvm,
 	int ret = 0;
 
 	if (is_protected_kvm_enabled()) {
-		/* In protected mode, cannot modify memslots once a pVM has run. */
-		if ((change == KVM_MR_DELETE || change == KVM_MR_MOVE) &&
-		    pkvm_hyp_vm_is_created(kvm) && kvm_vm_is_protected(kvm)) {
-			return -EPERM;
-		}
+		if (old && kvm_vm_is_protected(kvm) && old->arch.pkvm_pf_count)
+			return -EBUSY;
 
 		if (new && kvm_vm_is_protected(kvm) &&
 		    new->flags & (KVM_MEM_LOG_DIRTY_PAGES | KVM_MEM_READONLY)) {
