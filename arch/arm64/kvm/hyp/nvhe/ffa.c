@@ -1704,8 +1704,13 @@ bool kvm_guest_ffa_handler(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 	}
 
 	if (!VM_FFA_SUPPORTED(vcpu)) {
-		ffa_to_smccc_error(&res, FFA_RET_NOT_SUPPORTED);
-		ffa_set_retval(ctxt, &res);
+		if (func_id == FFA_VERSION) {
+			/* FFA_VERSION cannot return FFA_ERROR */
+			smccc_set_retval(vcpu, FFA_RET_NOT_SUPPORTED, 0, 0, 0);
+		} else {
+			ffa_to_smccc_error(&res, FFA_RET_NOT_SUPPORTED);
+			ffa_set_retval(ctxt, &res);
+		}
 		return true;
 	}
 
