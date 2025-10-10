@@ -181,12 +181,12 @@ static int create_host_mmu(const struct pkvm_mem_info infos[], int nr_infos,
 		 * which the host doesn't need to access.
 		 */
 		if (infos[i].type != PKVM_TEXT_DATA) {
-			ret = pkvm_host_mmu_unmap(infos[i].pa, infos[i].size);
+			ret = pkvm_host_donate_hyp(infos[i].pa, infos[i].size);
 			if (ret)
 				return ret;
 		}
 #else
-		ret = pkvm_host_mmu_unmap(infos[i].pa, infos[i].size);
+		ret = pkvm_host_donate_hyp(infos[i].pa, infos[i].size);
 		if (ret)
 			return ret;
 #endif
