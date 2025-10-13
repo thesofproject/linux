@@ -17,5 +17,14 @@ $(obj)/pkvm/nested/kvm_nvhe.o: FORCE
 arm_smmu_v3_kvm-objs += pkvm/nested/kvm_nvhe.o
 endif
 
+ccflags-$(CONFIG_ARM_SMMU_V3_PKVM_PV) += -Iarch/arm64/kvm/
+
+# Build hypervisor objects for module
+ifeq ($(CONFIG_ARM_SMMU_V3_PKVM_PV),m)
+$(obj)/pkvm/pv/kvm_nvhe.o: FORCE
+	$(Q)$(MAKE) $(build)=$(obj)/pkvm/pv $(obj)/pkvm/pv/kvm_nvhe.o
+
+arm_smmu_v3_kvm_pv-objs += pkvm/pv/kvm_nvhe.o
+endif
 
 obj-$(CONFIG_ARM_SMMU_V3_KUNIT_TEST) += arm-smmu-v3-test.o

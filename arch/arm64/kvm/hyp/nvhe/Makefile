@@ -19,10 +19,20 @@ hyp-obj-$(CONFIG_MODULES) += modules.o
 hyp-obj-y += $(lib-objs)
 
 # Only for built-in, not modules
-ifeq ($(CONFIG_ARM_SMMU_V3_PKVM),y)
 HYP_SMMU_V3_DRV_PATH = ../../../../../drivers/iommu/arm/arm-smmu-v3
+
+ifeq ($(CONFIG_ARM_SMMU_V3_PKVM),y)
 subdir-ccflags-y += -I$(srctree)/drivers/iommu/arm/arm-smmu-v3/pkvm/
 hyp-obj-$(CONFIG_ARM_SMMU_V3_PKVM) += $(HYP_SMMU_V3_DRV_PATH)/pkvm/nested/arm-smmu-v3.o \
+	$(HYP_SMMU_V3_DRV_PATH)/arm-smmu-v3-common-lib.o \
+	$(HYP_SMMU_V3_DRV_PATH)/pkvm/io-pgtable-arm-hyp.o \
+	$(HYP_SMMU_V3_DRV_PATH)/../../io-pgtable-arm.o \
+	$(HYP_SMMU_V3_DRV_PATH)/pkvm/arm-smmu-v3-lib-hyp.o
+endif
+
+ifeq ($(CONFIG_ARM_SMMU_V3_PKVM_PV),y)
+subdir-ccflags-y += -I$(srctree)/drivers/iommu/arm/arm-smmu-v3/pkvm/
+hyp-obj-$(CONFIG_ARM_SMMU_V3_PKVM_PV) += $(HYP_SMMU_V3_DRV_PATH)/pkvm/pv/arm-smmu-v3-pv.o \
 	$(HYP_SMMU_V3_DRV_PATH)/arm-smmu-v3-common-lib.o \
 	$(HYP_SMMU_V3_DRV_PATH)/pkvm/io-pgtable-arm-hyp.o \
 	$(HYP_SMMU_V3_DRV_PATH)/../../io-pgtable-arm.o \
