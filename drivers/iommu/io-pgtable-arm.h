@@ -43,6 +43,10 @@ void *__arm_lpae_alloc_data(size_t size, gfp_t gfp);
 void __arm_lpae_free_data(void *p);
 struct io_pgtable *
 arm_64_lpae_alloc_pgtable_s2(struct io_pgtable_cfg *cfg, void *cookie);
+struct io_pgtable *
+arm_64_lpae_alloc_pgtable_s1(struct io_pgtable_cfg *cfg, void *cookie);
+void arm_lpae_free_pgtable(struct io_pgtable *iop);
+
 #ifndef __KVM_NVHE_HYPERVISOR__
 #define __arm_lpae_virt_to_phys	__pa
 #define __arm_lpae_phys_to_virt	__va
@@ -55,6 +59,7 @@ arm_64_lpae_alloc_pgtable_s2(struct io_pgtable_cfg *cfg, void *cookie);
 struct io_pgtable_ops *kvm_alloc_io_pgtable_ops(enum io_pgtable_fmt fmt,
 						struct io_pgtable_cfg *cfg,
 						void *cookie);
+void kvm_arm_io_pgtable_free(struct io_pgtable *iop);
 #endif /* !__KVM_NVHE_HYPERVISOR__ */
 
 #endif /* IO_PGTABLE_ARM_H_ */

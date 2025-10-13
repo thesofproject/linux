@@ -14,10 +14,13 @@ struct io_pgtable_ops *kvm_alloc_io_pgtable_ops(enum io_pgtable_fmt fmt,
 {
 	struct io_pgtable *iop;
 
-	if (fmt != ARM_64_LPAE_S2)
+	if (fmt == ARM_64_LPAE_S2)
+		iop = arm_64_lpae_alloc_pgtable_s2(cfg, cookie);
+	else if (fmt == ARM_64_LPAE_S1)
+		iop = arm_64_lpae_alloc_pgtable_s1(cfg, cookie);
+	else
 		return NULL;
 
-	iop = arm_64_lpae_alloc_pgtable_s2(cfg, cookie);
 	if (!iop)
 		return NULL;
 
@@ -26,6 +29,12 @@ struct io_pgtable_ops *kvm_alloc_io_pgtable_ops(enum io_pgtable_fmt fmt,
 	iop->cfg	= *cfg;
 
 	return &iop->ops;
+}
+
+void kvm_arm_io_pgtable_free(struct io_pgtable *iopt)
+{
+	io_pgtable_tlb_flush_all(iopt);
+	arm_lpae_free_pgtable(iopt);
 }
 
 void *__arm_lpae_alloc_pages(size_t size, gfp_t gfp,
