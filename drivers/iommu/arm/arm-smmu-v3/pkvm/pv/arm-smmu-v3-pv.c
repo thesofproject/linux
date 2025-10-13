@@ -52,6 +52,18 @@ static int smmu_write_cr0(struct hyp_arm_smmu_v3_device *smmu, u32 val)
 	return smmu_wait(false, readl_relaxed(smmu->base + ARM_SMMU_CR0ACK) == val);
 }
 
+__maybe_unused
+static int smmu_send_cmd(struct hyp_arm_smmu_v3_device_pv *smmu,
+			 struct arm_smmu_cmdq_ent *cmd)
+{
+	int ret = smmu_add_cmd(&smmu->common, cmd);
+
+	if (ret)
+		return ret;
+
+	return smmu_sync_cmd(&smmu->common);
+}
+
 static int smmu_init_registers(struct hyp_arm_smmu_v3_device *smmu)
 {
 	u64 val, old;
@@ -85,9 +97,36 @@ static int smmu_init_registers(struct hyp_arm_smmu_v3_device *smmu)
 	return 0;
 }
 
+static int smmu_init_cmdq(struct hyp_arm_smmu_v3_device *smmu)
+{
+	size_t cmdq_size;
+	int ret;
+	enum kvm_pgtable_prot prot = PAGE_HYP;
+
+	cmdq_size = (1 << (smmu->cmdq.llq.max_n_shift)) *
+		     CMDQ_ENT_DWORDS * 8;
+
+	if (!(smmu->features & ARM_SMMU_FEAT_COHERENCY))
+		prot |= KVM_PGTABLE_PROT_NORMAL_NC;
+
+	ret = ___pkvm_host_donate_hyp(smmu->cmdq.base_dma >> PAGE_SHIFT,
+				      PAGE_ALIGN(cmdq_size) >> PAGE_SHIFT, prot);
+	if (ret)
+		return ret;
+
+	smmu->cmdq.base = hyp_phys_to_virt(smmu->cmdq.base_dma);
+	smmu->cmdq.prod_reg = smmu->base + ARM_SMMU_CMDQ_PROD;
+	smmu->cmdq.cons_reg = smmu->base + ARM_SMMU_CMDQ_CONS;
+	memset(smmu->cmdq.base, 0, cmdq_size);
+	writel_relaxed(0, smmu->cmdq.prod_reg);
+	writel_relaxed(0, smmu->cmdq.cons_reg);
+
+	return 0;
+}
+
 static int smmu_init_device(struct hyp_arm_smmu_v3_device_pv *smmu)
 {
-	int i;
+	int i, ret;
 	size_t nr_pages;
 
 	if (!PAGE_ALIGNED(smmu->common.mmio_addr | smmu->common.mmio_size))
@@ -105,7 +144,11 @@ static int smmu_init_device(struct hyp_arm_smmu_v3_device_pv *smmu)
 	}
 	smmu->common.base = hyp_phys_to_virt(smmu->common.mmio_addr);
 
-	return smmu_init_registers(&smmu->common);
+	ret = smmu_init_registers(&smmu->common);
+	if (ret)
+		return ret;
+
+	return smmu_init_cmdq(&smmu->common);
 }
 
 static int smmu_init(void)
