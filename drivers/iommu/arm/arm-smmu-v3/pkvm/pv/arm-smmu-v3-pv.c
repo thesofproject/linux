@@ -245,6 +245,40 @@ static int smmu_init_cmdq(struct hyp_arm_smmu_v3_device *smmu)
 	return 0;
 }
 
+static int smmu_reset_device(struct hyp_arm_smmu_v3_device_pv *smmu)
+{
+	int ret;
+	struct arm_smmu_cmdq_ent cfgi_cmd = {
+		.opcode = CMDQ_OP_CFGI_ALL,
+	};
+	struct arm_smmu_cmdq_ent tlbi_cmd = {
+		.opcode = CMDQ_OP_TLBI_NSNH_ALL,
+	};
+
+	/* Invalidate all cached configs and TLBs */
+	ret = smmu_write_cr0(&smmu->common, CR0_CMDQEN);
+	if (ret)
+		return ret;
+
+	ret = smmu_add_cmd(&smmu->common, &cfgi_cmd);
+	if (ret)
+		goto err_disable_cmdq;
+
+	ret = smmu_add_cmd(&smmu->common, &tlbi_cmd);
+	if (ret)
+		goto err_disable_cmdq;
+
+	ret = smmu_sync_cmd(&smmu->common);
+	if (ret)
+		goto err_disable_cmdq;
+
+	/* Enable translation */
+	return smmu_write_cr0(&smmu->common, CR0_SMMUEN | CR0_CMDQEN | CR0_ATSCHK | CR0_EVTQEN);
+
+err_disable_cmdq:
+	return smmu_write_cr0(&smmu->common, 0);
+}
+
 static int smmu_init_device(struct hyp_arm_smmu_v3_device_pv *smmu)
 {
 	int i, ret;
@@ -276,7 +310,11 @@ static int smmu_init_device(struct hyp_arm_smmu_v3_device_pv *smmu)
 	if (ret)
 		return ret;
 
-	return smmu_init_strtab(&smmu->common);
+	ret = smmu_init_strtab(&smmu->common);
+	if (ret)
+		return ret;
+
+	return smmu_reset_device(smmu);
 }
 
 static int smmu_init(void)
