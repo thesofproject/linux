@@ -35,6 +35,8 @@ extern const struct pkvm_module_ops		*mod_ops;
 #define hyp_pin_shared_mem(x, y)		CALL_FROM_OPS(pin_shared_mem, x, y)
 #define __pkvm_host_unshare_hyp(x)		CALL_FROM_OPS(host_unshare_hyp, x)
 #define hyp_unpin_shared_mem(x, y)		CALL_FROM_OPS(unpin_shared_mem, x, y)
+#define kvm_iommu_donate_pages(x, y)		CALL_FROM_OPS(iommu_donate_pages, x, y)
+#define kvm_iommu_reclaim_pages(x, y)		CALL_FROM_OPS(iommu_reclaim_pages, x, y)
 
 #endif
 
