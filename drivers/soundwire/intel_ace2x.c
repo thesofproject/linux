@@ -181,9 +181,9 @@ static int intel_ace2x_bpt_open_stream(struct sdw_intel *sdw, struct sdw_slave *
 
 		/* find fake pdi1 buffer size */
 		rx_pad = rx_alignment - (pdi1_buffer_size % rx_alignment);
-		while (rx_pad <= READ_PDI1_MIN_SIZE) {
+		while (rx_pad <= READ_PDI1_MIN_SIZE)
 			rx_pad += rx_alignment;
-		}
+
 		pdi1_buffer_size += rx_pad;
 		/* It is fine if we request more than enough byte to read */
 		fake_num_frames = DIV_ROUND_UP(rx_pad, pdi1_buf_size_pre_frame);
@@ -196,12 +196,11 @@ static int intel_ace2x_bpt_open_stream(struct sdw_intel *sdw, struct sdw_slave *
 	} else { /* write */
 		/*
 		 * For the write command, the rx data block is 4, and the rx buffer size of a frame
-		 * is 8. So the rx buffer size (pdi0_buffer_size) is always a mutiple of rx
+		 * is 8. So the rx buffer size (pdi0_buffer_size) is always a multiple of rx
 		 * alignment.
 		 */
 		tx_pad = tx_alignment - (pdi0_buffer_size % tx_alignment);
 		pdi0_buffer_size += tx_pad;
-
 	}
 
 	dev_dbg(cdns->dev, "Message len %d transferred in %d frames (%d per frame)\n",
@@ -228,7 +227,8 @@ static int intel_ace2x_bpt_open_stream(struct sdw_intel *sdw, struct sdw_slave *
 		ret = sdw_cdns_prepare_read_dma_buffer(msg->dev_num, msg->addr,	msg->len,
 						       data_per_frame,
 						       sdw->bpt_ctx.dmab_tx_bdl.area,
-						       pdi0_buffer_size, &tx_total_bytes, fake_size);
+						       pdi0_buffer_size, &tx_total_bytes,
+						       fake_size);
 	}
 
 	if (!ret)
