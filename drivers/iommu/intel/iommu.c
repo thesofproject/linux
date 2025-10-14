@@ -904,12 +904,6 @@ static void dma_pte_free_pagetable(struct dmar_domain *domain,
 	/* We don't need lock here; nobody else touches the iova range */
 	dma_pte_free_level(domain, agaw_to_level(domain->agaw), retain_level,
 			   domain->pgd, 0, start_pfn, last_pfn);
-
-	/* free pgd */
-	if (start_pfn == 0 && last_pfn == DOMAIN_MAX_PFN(domain->gaw)) {
-		iommu_free_pages(domain->pgd);
-		domain->pgd = NULL;
-	}
 }
 
 /* When a page at a given level is being unlinked from its parent, we don't
