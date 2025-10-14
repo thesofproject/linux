@@ -7,6 +7,7 @@
 #include <nvhe/alloc.h>
 #include <nvhe/iommu.h>
 #include <nvhe/mem_protect.h>
+#include <nvhe/trap_handler.h>
 
 #include "arm_smmu_v3.h"
 #include "arm-smmu-v3-lib-hyp.h"
@@ -794,6 +795,62 @@ out_free_domain:
 	return ret;
 }
 
+static bool smmu_dabt_device(struct hyp_arm_smmu_v3_device_pv *smmu,
+			     struct user_pt_regs *regs,
+			     u64 esr, u32 off)
+{
+	bool is_write = esr & ESR_ELx_WNR;
+	unsigned int len = BIT((esr & ESR_ELx_SAS) >> ESR_ELx_SAS_SHIFT);
+	int rd = (esr & ESR_ELx_SRT_MASK) >> ESR_ELx_SRT_SHIFT;
+	const u32 no_access  = 0;
+	const u32 read_write = (u32)(-1);
+	const u32 read_only = is_write ? no_access : read_write;
+	u32 mask = no_access;
+
+	/*
+	 * Only handle MMIO access with u32 size and alignment.
+	 * We don't need to change 64-bit registers for now.
+	 */
+	if ((len != sizeof(u32)) || (off & (sizeof(u32) - 1)))
+		return false;
+
+	switch (off) {
+	case ARM_SMMU_EVTQ_PROD + SZ_64K:
+		mask = read_write;
+		break;
+	case ARM_SMMU_EVTQ_CONS + SZ_64K:
+		mask = read_write;
+		break;
+	case ARM_SMMU_GERROR:
+		mask = read_only;
+		break;
+	case ARM_SMMU_GERRORN:
+		mask = read_write;
+		break;
+	};
+
+	if (!mask)
+		return false;
+	if (is_write)
+		writel_relaxed(regs->regs[rd] & mask, smmu->common.base + off);
+	else
+		regs->regs[rd] = readl_relaxed(smmu->common.base + off);
+
+	return true;
+}
+
+static bool smmu_dabt_handler(struct user_pt_regs *regs, u64 esr, u64 addr)
+{
+	struct hyp_arm_smmu_v3_device_pv *smmu;
+
+	for_each_smmu(smmu) {
+		if (addr < smmu->common.mmio_addr ||
+		    addr >= smmu->common.mmio_addr + smmu->common.mmio_size)
+			continue;
+		return smmu_dabt_device(smmu, regs, esr, addr - smmu->common.mmio_addr);
+	}
+	return false;
+}
 
 static int smmu_init_strtab(struct hyp_arm_smmu_v3_device *smmu)
 {
@@ -1020,4 +1077,5 @@ struct kvm_iommu_ops smmu_pv_ops = {
 	.map_pages			= smmu_map_pages,
 	.unmap_pages			= smmu_unmap_pages,
 	.iova_to_phys			= smmu_iova_to_phys,
+	.dabt_handler			= smmu_dabt_handler,
 };
