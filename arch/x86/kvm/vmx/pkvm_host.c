@@ -819,6 +819,21 @@ static void pkvm_inject_exception(struct kvm_vcpu *vcpu)
 	KVM_BUG_ON(pkvm_hypercall(inject_exception), vcpu->kvm);
 }
 
+static void pkvm_cancel_injection(struct kvm_vcpu *vcpu)
+{
+	vcpu->arch.nmi_injected = false;
+	kvm_clear_exception_queue(vcpu);
+	kvm_clear_interrupt_queue(vcpu);
+
+	if (KVM_BUG_ON(pkvm_hypercall(cancel_injection), vcpu->kvm))
+		return;
+
+	if (vcpu->arch.nmi_injected ||
+	    vcpu->arch.interrupt.injected ||
+	    vcpu->arch.exception.injected)
+		kvm_make_request(KVM_REQ_EVENT, vcpu);
+}
+
 static int pkvm_interrupt_allowed(struct kvm_vcpu *vcpu, bool for_injection)
 {
 	return pkvm_hypercall(interrupt_allowed, for_injection);
@@ -913,6 +928,7 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.inject_irq = pkvm_inject_irq,
 	.inject_nmi = pkvm_inject_nmi,
 	.inject_exception = pkvm_inject_exception,
+	.cancel_injection = pkvm_cancel_injection,
 	.interrupt_allowed = pkvm_interrupt_allowed,
 	.nmi_allowed = pkvm_nmi_allowed,
 	.get_nmi_mask = pkvm_get_nmi_mask,
