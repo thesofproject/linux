@@ -16,6 +16,9 @@ enum pkvm_psci_notification {
 	PKVM_PSCI_CPU_ENTRY,
 };
 
+struct kvm_hyp_iommu_domain;
+struct iommu_iotlb_gather;
+
 /**
  * struct pkvm_module_ops - pKVM modules callbacks
  * @create_private_mapping:	Map a memory region into the hypervisor private
@@ -158,6 +161,8 @@ enum pkvm_psci_notification {
 				Needed if the code uses linked lists.
  * @hyp_alloc:			Allocate memory in hyp VA space.
  * @hyp_free:			Free memory allocated  from hyp_alloc().
+ * @iommu_iotlb_gather_add_page:
+ *				Add an IOVA range to an iommu_iotlb_gather.
  */
 struct pkvm_module_ops {
 	int (*create_private_mapping)(phys_addr_t phys, size_t size,
@@ -223,6 +228,10 @@ struct pkvm_module_ops {
 #endif
 	void *(*hyp_alloc)(size_t size);
 	void (*hyp_free)(void *addr);
+	void (*iommu_iotlb_gather_add_page)(struct kvm_hyp_iommu_domain *domain,
+					    struct iommu_iotlb_gather *gather,
+					    unsigned long iova,
+					    size_t size);
 	ANDROID_KABI_RESERVE(1);
 	ANDROID_KABI_RESERVE(2);
 	ANDROID_KABI_RESERVE(3);

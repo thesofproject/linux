@@ -279,6 +279,7 @@ const struct pkvm_module_ops module_ops = {
 #endif
 	.hyp_alloc = hyp_alloc,
 	.hyp_free = hyp_free,
+	.iommu_iotlb_gather_add_page = kvm_iommu_iotlb_gather_add_page,
 };
 
 static void *pkvm_module_hyp_va(struct pkvm_el2_module *mod, void *kern_va)
