@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/error-injection.h>
@@ -29,6 +29,7 @@
 #define GUNYAH_RM_RPC_VM_SET_FIRMWARE_MEM	0x56000032
 #define GUNYAH_RM_RPC_VM_SET_DEMAND_PAGING	0x56000033
 #define GUNYAH_RM_RPC_VM_SET_ADDRESS_LAYOUT	0x56000034
+#define GUNYAH_RM_RPC_GET_LOG			0x00000005U
 /* clang-format on */
 
 struct gunyah_rm_vm_common_vmid_req {
@@ -148,6 +149,16 @@ struct gunyah_vm_set_firmware_mem_req {
 	__le64 fw_offset;
 	__le64 fw_size;
 } __packed;
+
+struct gunyah_rm_get_log_req {
+	__le16 log_id;
+	__le16 padding;
+};
+
+struct gunyah_rm_get_log_resp {
+	__le64 addr;
+	__le64 size;
+};
 
 /*
  * Several RM calls take only a VMID as a parameter and give only standard
@@ -695,3 +706,25 @@ int gunyah_rm_vm_set_firmware_mem(struct gunyah_rm *rm, u16 vmid, struct gunyah_
 	return gunyah_rm_call(rm, GUNYAH_RM_RPC_VM_SET_FIRMWARE_MEM, &req, sizeof(req), NULL, NULL);
 }
 ALLOW_ERROR_INJECTION(gunyah_rm_vm_set_firmware_mem, ERRNO);
+
+int gunyah_rm_get_log(struct gunyah_rm *rm, u16 log_id, u64 *addr, u64 *size)
+{
+	struct gunyah_rm_get_log_req req = {
+		.log_id = cpu_to_le16(log_id),
+	};
+	struct gunyah_rm_get_log_resp *resp;
+	size_t resp_size;
+	int ret;
+
+	ret = gunyah_rm_call(rm, GUNYAH_RM_RPC_GET_LOG, &req,
+		sizeof(req), (void **)&resp, &resp_size);
+
+	if (ret)
+		return ret;
+
+	*addr = le64_to_cpu(resp->addr);
+	*size = le64_to_cpu(resp->size);
+	kfree(resp);
+
+	return ret;
+}

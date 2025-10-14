@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 #ifndef __GUNYAH_RSC_MGR_PRIV_H
 #define __GUNYAH_RSC_MGR_PRIV_H
@@ -154,5 +154,6 @@ int gunyah_rm_platform_pre_demand_page(struct gunyah_rm *rm, u16 vmid,
 int gunyah_rm_platform_reclaim_demand_page(struct gunyah_rm *rm, u16 vmid,
 					   enum gunyah_pagetable_access access,
 					   struct folio *folio);
+int gunyah_rm_get_log(struct gunyah_rm *rm, u16 vmid, u64 *addr, u64 *size);
 
 #endif
