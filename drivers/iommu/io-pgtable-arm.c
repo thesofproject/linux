@@ -831,7 +831,7 @@ static int arm_lpae_read_and_clear_dirty(struct io_pgtable_ops *ops,
 	return __arm_lpae_iopte_walk(data, &walk_data, ptep, lvl);
 }
 
-static void arm_lpae_restrict_pgsizes(struct io_pgtable_cfg *cfg)
+void arm_lpae_restrict_pgsizes(struct io_pgtable_cfg *cfg)
 {
 	unsigned long granule, page_sizes;
 	unsigned int max_addr_bits = 48;
@@ -873,6 +873,7 @@ static void arm_lpae_restrict_pgsizes(struct io_pgtable_cfg *cfg)
 	cfg->ias = min(cfg->ias, max_addr_bits);
 	cfg->oas = min(cfg->oas, max_addr_bits);
 }
+EXPORT_SYMBOL(arm_lpae_restrict_pgsizes);
 
 static struct arm_lpae_io_pgtable *
 arm_lpae_alloc_pgtable(struct io_pgtable_cfg *cfg)

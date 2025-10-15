@@ -46,6 +46,7 @@ arm_64_lpae_alloc_pgtable_s2(struct io_pgtable_cfg *cfg, void *cookie);
 struct io_pgtable *
 arm_64_lpae_alloc_pgtable_s1(struct io_pgtable_cfg *cfg, void *cookie);
 void arm_lpae_free_pgtable(struct io_pgtable *iop);
+void arm_lpae_restrict_pgsizes(struct io_pgtable_cfg *cfg);
 
 #ifndef __KVM_NVHE_HYPERVISOR__
 #define __arm_lpae_virt_to_phys	__pa
