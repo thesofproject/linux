@@ -50,6 +50,11 @@ bool __list_del_entry_valid_or_report(struct list_head *entry)
 }
 #endif
 
+int pkvm_init_hvc_pd(struct kvm_power_domain *pd, const struct kvm_power_domain_ops *ops)
+{
+	return CALL_FROM_OPS(init_hvc_pd, pd, ops);
+}
+
 const struct pkvm_module_ops		*mod_ops;
 #endif
 
@@ -94,8 +99,12 @@ static int smmu_write_cr0(struct hyp_arm_smmu_v3_device *smmu, u32 val)
 static int smmu_send_cmd(struct hyp_arm_smmu_v3_device_pv *smmu,
 			 struct arm_smmu_cmdq_ent *cmd)
 {
-	int ret = smmu_add_cmd(&smmu->common, cmd);
+	int ret;
 
+	if (smmu->power_is_off)
+		return 0;
+
+	ret = smmu_add_cmd(&smmu->common, cmd);
 	if (ret)
 		return ret;
 
@@ -177,6 +186,10 @@ static void smmu_tlb_inv_range(struct kvm_hyp_iommu_domain *domain,
 	 */
 	BUG_ON(end < iova);
 	kvm_smmu_lock(&smmu->common);
+	if (smmu->power_is_off) {
+		kvm_smmu_unlock(&smmu->common);
+		return;
+	}
 	WARN_ON(smmu_tlb_inv_range_smmu(smmu, domain,
 					&cmd, iova, size, granule));
 	kvm_smmu_unlock(&smmu->common);
@@ -1053,6 +1066,43 @@ err_disable_cmdq:
 	return smmu_write_cr0(&smmu->common, 0);
 }
 
+static int smmu_power_on(struct kvm_power_domain *pd)
+{
+	int ret;
+	struct hyp_arm_smmu_v3_device_pv *smmu = container_of(pd,
+							      struct hyp_arm_smmu_v3_device_pv,
+							      power_domain);
+
+	kvm_smmu_lock(&smmu->common);
+	smmu->power_is_off = false;
+	ret = smmu_reset_device(smmu);
+	kvm_smmu_unlock(&smmu->common);
+	return ret;
+}
+
+static int smmu_power_off(struct kvm_power_domain *pd)
+{
+	int ret;
+	struct hyp_arm_smmu_v3_device_pv *smmu = container_of(pd,
+							      struct hyp_arm_smmu_v3_device_pv,
+							      power_domain);
+
+	kvm_smmu_lock(&smmu->common);
+	smmu->power_is_off = true;
+	/*
+	 * Disable translation, GBPA is validated at probe to be set, so all translation
+	 * would be aborted when SMMU is disabled.
+	 */
+	ret = smmu_write_cr0(&smmu->common, 0);
+	kvm_smmu_unlock(&smmu->common);
+	return 0;
+}
+
+static const struct kvm_power_domain_ops smmu_power_ops = {
+	.power_on       = smmu_power_on,
+	.power_off      = smmu_power_off,
+};
+
 static int smmu_init_device(struct hyp_arm_smmu_v3_device_pv *smmu)
 {
 	int i, ret;
@@ -1072,6 +1122,10 @@ static int smmu_init_device(struct hyp_arm_smmu_v3_device_pv *smmu)
 		WARN_ON(___pkvm_host_donate_hyp(pfn, 1, true));
 	}
 	smmu->common.base = hyp_phys_to_virt(smmu->common.mmio_addr);
+
+	ret = pkvm_init_power_domain(&smmu->power_domain, &smmu_power_ops);
+	if (ret)
+		return ret;
 
 	ret = smmu_init_registers(&smmu->common);
 	if (ret)
