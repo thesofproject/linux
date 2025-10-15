@@ -168,6 +168,8 @@ enum btintel_pcie_reset_type {
 /* Default interrupt timeout in msec */
 #define BTINTEL_DEFAULT_INTR_TIMEOUT_MS	3000
 
+#define BTINTEL_PCIE_DX_TRANSITION_MAX_RETRIES	3
+
 /* The number of descriptors in TX queues */
 #define BTINTEL_PCIE_TX_DESCS_COUNT	32
 
