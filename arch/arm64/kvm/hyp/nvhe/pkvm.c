@@ -1643,11 +1643,6 @@ static bool pkvm_memshare_call(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 			goto out_guest_err;
 
 		goto out_host;
-	case -ENOMEM:
-		if (pkvm_request_vcpu_memcache(hyp_vcpu, exit_code))
-			goto out_guest_err;
-
-		goto out_host;
 	}
 
 out_guest_err:
