@@ -140,6 +140,7 @@ static DECLARE_RWSEM(pool_shrink_rwsem);
 static struct page *ttm_pool_alloc_page(struct ttm_pool *pool, gfp_t gfp_flags,
 					unsigned int order)
 {
+	const unsigned int beneficial_order = ttm_pool_beneficial_order(pool);
 	unsigned long attr = DMA_ATTR_FORCE_CONTIGUOUS;
 	struct ttm_pool_dma *dma;
 	struct page *p;
@@ -154,6 +155,12 @@ static struct page *ttm_pool_alloc_page(struct ttm_pool *pool, gfp_t gfp_flags,
 			__GFP_THISNODE;
 
 	trace_android_vh_ttm_pool_alloc_page_flags(order, &gfp_flags);
+	/*
+	 * Do not add latency to the allocation path for allocations orders
+	 * device tolds us do not bring them additional performance gains.
+	 */
+	if (beneficial_order && order > beneficial_order)
+		gfp_flags &= ~__GFP_DIRECT_RECLAIM;
 
 	if (!ttm_pool_uses_dma_alloc(pool)) {
 		p = alloc_pages_node(pool->nid, gfp_flags, order);
