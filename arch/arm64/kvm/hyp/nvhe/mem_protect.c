@@ -21,9 +21,7 @@
 #include <nvhe/mm.h>
 #include <nvhe/modules.h>
 
-#define KVM_HOST_S2_FLAGS (KVM_PGTABLE_S2_NOFWB | \
-			   KVM_PGTABLE_S2_IDMAP | \
-			   KVM_PGTABLE_S2_PREFAULT_BLOCK)
+#define KVM_HOST_S2_FLAGS (KVM_PGTABLE_S2_NOFWB | KVM_PGTABLE_S2_IDMAP)
 
 struct host_mmu host_mmu;
 
@@ -325,7 +323,7 @@ int kvm_guest_prepare_stage2(struct pkvm_hyp_vm *vm, void *pgd)
 	};
 
 	guest_lock_component(vm);
-	ret = __kvm_pgtable_stage2_init(mmu->pgt, mmu, &vm->mm_ops, KVM_PGTABLE_S2_PREFAULT_BLOCK,
+	ret = __kvm_pgtable_stage2_init(mmu->pgt, mmu, &vm->mm_ops, 0,
 					&guest_s2_pte_ops);
 	guest_unlock_component(vm);
 	if (ret)
