@@ -336,6 +336,13 @@ static int fix_host_mmu_pgstate(void)
 				 &walker);
 }
 
+static int host_mmu_map(unsigned long phys, unsigned long size, bool mmio)
+{
+	/* The vaddr == phys for the host MMU */
+	return pkvm_pgtable_map(&host_mmu, phys, phys, size,
+				host_mmu_pte_prot(mmio));
+}
+
 int pkvm_hyp_mmu_init(void *pool_base, unsigned long pool_pages)
 {
 	struct pkvm_pgtable_cap cap = {
@@ -429,9 +436,8 @@ int pkvm_host_mmu_init(void *pool_base, unsigned long pool_pages, host_mmu_init_
 	/* Map memory blocks with RWX permissions */
 	for (i = 0; i < pkvm_memblock_nr; i++) {
 		reg = &pkvm_memory[i];
-		ret = pkvm_host_mmu_map((unsigned long)reg->base,
-					(unsigned long)reg->size,
-					true, true, true, false);
+		ret = host_mmu_map((unsigned long)reg->base,
+				   (unsigned long)reg->size, false);
 		if (ret)
 			return ret;
 
@@ -440,8 +446,7 @@ int pkvm_host_mmu_init(void *pool_base, unsigned long pool_pages, host_mmu_init_
 	/* Map holes between memblocks as MMIO with RWX permissions */
 	for (i = phys = 0; i < pkvm_memblock_nr; i++, phys = reg->base + reg->size) {
 		reg = &pkvm_memory[i];
-		ret = pkvm_host_mmu_map(phys, (unsigned long)reg->base - phys,
-					true, true, true, true);
+		ret = host_mmu_map(phys, (unsigned long)reg->base - phys, true);
 		if (ret)
 			return ret;
 	}
@@ -452,22 +457,6 @@ int pkvm_host_mmu_init(void *pool_base, unsigned long pool_pages, host_mmu_init_
 int pkvm_host_mmu_finalize(host_mmu_finalize_fn_t fn)
 {
 	return fn ? fn(&host_mmu) : 0;
-}
-
-int pkvm_host_mmu_map(unsigned long phys, unsigned long size,
-		      bool read, bool write, bool exec, bool mmio)
-{
-	u64 prot = host_mmu.pgt_ops->calc_pte_perm(read, write, exec) |
-		   host_mmu.pgt_ops->calc_pte_memtype(mmio);
-
-	/* The vaddr == phys for the host MMU */
-	return pkvm_pgtable_map(&host_mmu, phys, phys, size, prot);
-}
-
-int pkvm_host_mmu_unmap(unsigned long vaddr, unsigned long size)
-{
-	/* The vaddr == phys for the host MMU */
-	return pkvm_pgtable_unmap(&host_mmu, vaddr, vaddr, size);
 }
 
 /**
