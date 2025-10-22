@@ -2394,7 +2394,7 @@ void blk_mq_run_hw_queue(struct blk_mq_hw_ctx *hctx, bool async)
 		return;
 	}
 
-	blk_mq_run_dispatch_ops(hctx->queue,
+	blk_mq_run_dispatch_ops_serialized(hctx,
 				blk_mq_sched_dispatch_requests(hctx));
 }
 EXPORT_SYMBOL(blk_mq_run_hw_queue);
@@ -2570,7 +2570,7 @@ static void blk_mq_run_work_fn(struct work_struct *work)
 	struct blk_mq_hw_ctx *hctx =
 		container_of(work, struct blk_mq_hw_ctx, run_work.work);
 
-	blk_mq_run_dispatch_ops(hctx->queue,
+	blk_mq_run_dispatch_ops_serialized(hctx,
 				blk_mq_sched_dispatch_requests(hctx));
 }
 
@@ -2794,11 +2794,12 @@ static bool blk_mq_get_budget_and_tag(struct request *rq)
 static void blk_mq_try_issue_directly(struct blk_mq_hw_ctx *hctx,
 		struct request *rq)
 {
+	bool async = blk_pipeline_zwr(rq->q);
 	blk_status_t ret;
 
 	if (blk_mq_hctx_stopped(hctx) || blk_queue_quiesced(rq->q)) {
 		blk_mq_insert_request(rq, 0);
-		blk_mq_run_hw_queue(hctx, false);
+		blk_mq_run_hw_queue(hctx, async);
 		return;
 	}
 
@@ -2815,7 +2816,7 @@ static void blk_mq_try_issue_directly(struct blk_mq_hw_ctx *hctx,
 	case BLK_STS_RESOURCE:
 	case BLK_STS_DEV_RESOURCE:
 		blk_mq_request_bypass_insert(rq, 0);
-		blk_mq_run_hw_queue(hctx, false);
+		blk_mq_run_hw_queue(hctx, async);
 		break;
 	default:
 		blk_mq_end_request(rq, ret);
@@ -2847,6 +2848,7 @@ static void blk_mq_issue_direct(struct rq_list *rqs)
 
 	while ((rq = rq_list_pop(rqs))) {
 		bool last = rq_list_empty(rqs);
+		bool async = blk_pipeline_zwr(rq->q);
 
 		if (hctx != rq->mq_hctx) {
 			if (hctx) {
@@ -2864,7 +2866,7 @@ static void blk_mq_issue_direct(struct rq_list *rqs)
 		case BLK_STS_RESOURCE:
 		case BLK_STS_DEV_RESOURCE:
 			blk_mq_request_bypass_insert(rq, 0);
-			blk_mq_run_hw_queue(hctx, false);
+			blk_mq_run_hw_queue(hctx, async);
 			goto out;
 		default:
 			blk_mq_end_request(rq, ret);
@@ -4066,7 +4068,7 @@ blk_mq_alloc_hctx(struct request_queue *q, struct blk_mq_tag_set *set,
 	struct blk_mq_hw_ctx *hctx;
 	gfp_t gfp = GFP_NOIO | __GFP_NOWARN | __GFP_NORETRY;
 
-	hctx = kzalloc_node(sizeof(struct blk_mq_hw_ctx), gfp, node);
+	hctx = kzalloc_node(sizeof(struct blk_mq_hw_ctx_priv), gfp, node);
 	if (!hctx)
 		goto fail_alloc_hctx;
 
@@ -4083,6 +4085,7 @@ blk_mq_alloc_hctx(struct request_queue *q, struct blk_mq_tag_set *set,
 	INIT_LIST_HEAD(&hctx->dispatch);
 	INIT_HLIST_NODE(&hctx->cpuhp_dead);
 	INIT_HLIST_NODE(&hctx->cpuhp_online);
+	mutex_init(&to_hctx_priv(hctx)->zwp_mutex);
 	hctx->queue = q;
 	hctx->flags = set->flags & ~BLK_MQ_F_TAG_QUEUE_SHARED;
 
