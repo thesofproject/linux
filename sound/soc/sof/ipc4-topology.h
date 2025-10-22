@@ -463,6 +463,27 @@ struct sof_ipc4_src {
 };
 
 /*
+ * struct sof_ipc4_siggen_data - IPC data for siggen
+ * @base_config: IPC base config data
+ * @sink_rate: Output rate for sink module
+ */
+struct sof_ipc4_siggen_data {
+	struct sof_ipc4_base_module_cfg base_config;
+} __packed __aligned(4);
+
+/**
+ * struct sof_ipc4_siggen - siggen config data
+ * @data: IPC base config data
+ * @available_fmt: Available audio format
+ * @msg: IPC4 message struct containing header and data info
+ */
+struct sof_ipc4_siggen {
+	struct sof_ipc4_siggen_data data;
+	struct sof_ipc4_available_audio_format available_fmt;
+	struct sof_ipc4_msg msg;
+};
+
+/*
  * struct sof_ipc4_asrc_data - IPC data for ASRC
  * @base_config: IPC base config data
  * @out_freq: Output rate for sink module, passed as such from topology to FW.

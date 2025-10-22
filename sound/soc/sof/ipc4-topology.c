@@ -1063,6 +1063,52 @@ err:
 	return ret;
 }
 
+static int sof_ipc4_widget_setup_comp_siggen(struct snd_sof_widget *swidget)
+{
+	struct snd_soc_component *scomp = swidget->scomp;
+	struct snd_sof_pipeline *spipe = swidget->spipe;
+	struct sof_ipc4_siggen *siggen;
+	int ret;
+
+	dev_dbg(scomp->dev, "Updating IPC structure for %s\n", swidget->widget->name);
+
+	siggen = kzalloc(sizeof(*siggen), GFP_KERNEL);
+	if (!siggen)
+		return -ENOMEM;
+
+	swidget->private = siggen;
+
+	ret = sof_ipc4_get_audio_fmt(scomp, swidget, &siggen->available_fmt,
+				     &siggen->data.base_config);
+	if (ret)
+		goto err;
+
+	spipe->core_mask |= BIT(swidget->core);
+
+	ret = sof_ipc4_widget_setup_msg(swidget, &siggen->msg);
+	if (ret)
+		goto err;
+
+	return 0;
+err:
+	sof_ipc4_free_audio_fmt(&siggen->available_fmt);
+	kfree(siggen);
+	swidget->private = NULL;
+	return ret;
+}
+
+static void sof_ipc4_widget_free_comp_siggen(struct snd_sof_widget *swidget)
+{
+	struct sof_ipc4_siggen *siggen = swidget->private;
+
+	if (!siggen)
+		return;
+
+	sof_ipc4_free_audio_fmt(&siggen->available_fmt);
+	kfree(swidget->private);
+	swidget->private = NULL;
+}
+
 static int sof_ipc4_widget_setup_comp_src(struct snd_sof_widget *swidget)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
@@ -2479,6 +2525,34 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 	return 0;
 }
 
+static int sof_ipc4_prepare_siggen_module(struct snd_sof_widget *swidget,
+					  struct snd_pcm_hw_params *fe_params,
+					  struct snd_sof_platform_stream_params *platform_params,
+					  struct snd_pcm_hw_params *pipeline_params, int dir)
+{
+	struct snd_soc_component *scomp = swidget->scomp;
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct sof_ipc4_siggen *siggen = swidget->private;
+	struct sof_ipc4_available_audio_format *available_fmt = &siggen->available_fmt;
+	struct sof_ipc4_audio_format *out_fmt;
+
+	/* use the first available output format to set the base config audio format */
+	if (available_fmt->num_output_formats != 1) {
+		dev_err(sdev->dev, "siggen should only have one available output format");
+		return -EINVAL;
+	}
+	out_fmt = &available_fmt->output_pin_fmts[0].audio_fmt;
+
+	/* copy output format */
+	memcpy(&siggen->data.base_config.audio_fmt, out_fmt, sizeof(struct sof_ipc4_audio_format));
+	siggen->data.base_config.obs = available_fmt->output_pin_fmts[0].buffer_size;
+
+	/* update pipeline memory usage */
+	sof_ipc4_update_resource_usage(sdev, swidget, &siggen->data.base_config, dir);
+
+	return 0;
+}
+
 static int sof_ipc4_prepare_gain_module(struct snd_sof_widget *swidget,
 					struct snd_pcm_hw_params *fe_params,
 					struct snd_sof_platform_stream_params *platform_params,
@@ -3160,6 +3234,16 @@ static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 		ipc_data = &asrc->data;
 
 		msg = &asrc->msg;
+		break;
+	}
+	case snd_soc_dapm_siggen:
+	{
+		struct sof_ipc4_siggen *siggen = swidget->private;
+
+		ipc_size = sizeof(siggen->data);
+		ipc_data = &siggen->data;
+
+		msg = &siggen->msg;
 		break;
 	}
 	case snd_soc_dapm_effect:
@@ -3852,6 +3936,13 @@ static enum sof_tokens mixer_token_list[] = {
 	SOF_COMP_EXT_TOKENS,
 };
 
+static enum sof_tokens siggen_token_list[] = {
+	SOF_COMP_TOKENS,
+	SOF_AUDIO_FMT_NUM_TOKENS,
+	SOF_OUT_AUDIO_FORMAT_TOKENS,
+	SOF_COMP_EXT_TOKENS,
+};
+
 static enum sof_tokens src_token_list[] = {
 	SOF_COMP_TOKENS,
 	SOF_SRC_TOKENS,
@@ -3924,6 +4015,10 @@ static const struct sof_ipc_tplg_widget_ops tplg_ipc4_widget_ops[SND_SOC_DAPM_TY
 				process_token_list, ARRAY_SIZE(process_token_list),
 				NULL, sof_ipc4_prepare_process_module,
 				NULL},
+	[snd_soc_dapm_siggen] = {sof_ipc4_widget_setup_comp_siggen,
+				 sof_ipc4_widget_free_comp_siggen,
+				 siggen_token_list, ARRAY_SIZE(siggen_token_list), NULL,
+				 sof_ipc4_prepare_siggen_module, NULL},
 };
 
 const struct sof_ipc_tplg_ops ipc4_tplg_ops = {
