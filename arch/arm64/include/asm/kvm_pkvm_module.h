@@ -43,6 +43,12 @@ struct pkvm_sglist_page {
 	u8	order;
 } __packed;
 
+enum pkvm_smc_handler_ret {
+	GUEST_SMC_HANDLED,
+	GUEST_SMC_NOT_HANDLED,
+	GUEST_SMC_NEED_TOPUP,
+};
+
 /**
  * struct pkvm_module_ops - pKVM modules callbacks
  * @create_private_mapping:	Map a memory region into the hypervisor private
@@ -236,7 +242,7 @@ struct pkvm_module_ops {
 	int (*host_stage2_mod_prot)(u64 pfn, enum kvm_pgtable_prot prot, u64 nr_pages, bool update_iommu);
 	int (*host_stage2_get_leaf)(phys_addr_t phys, kvm_pte_t *ptep, s8 *level);
 	int (*register_host_smc_handler)(bool (*cb)(struct user_pt_regs *));
-	int (*register_guest_smc_handler)(bool (*cb)(struct arm_smccc_1_2_regs *regs,
+	int (*register_guest_smc_handler)(enum pkvm_smc_handler_ret (*cb)(struct arm_smccc_1_2_regs *regs,
 						     struct arm_smccc_1_2_regs *res,
 						     pkvm_handle_t handle));
 	int (*register_default_trap_handler)(bool (*cb)(struct user_pt_regs *));
