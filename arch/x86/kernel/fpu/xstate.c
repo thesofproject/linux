@@ -592,6 +592,7 @@ static bool __init check_xstate_against_struct(int nr)
 
 	return true;
 }
+#endif /* !__PKVM_HYP__ */
 
 static unsigned int xstate_calculate_size(u64 xfeatures, bool compacted)
 {
@@ -613,6 +614,7 @@ static unsigned int xstate_calculate_size(u64 xfeatures, bool compacted)
 	return offset + xstate_sizes[topmost];
 }
 
+#ifndef __PKVM_HYP__
 /*
  * This essentially double-checks what the cpu told us about
  * how large the XSAVE buffer needs to be.  We are recalculating
@@ -2031,5 +2033,40 @@ void pkvm_setup_xstate_cache(void)
 
 	/* Cache size, offset and flags for initialization */
 	setup_xstate_cache();
+}
+
+int __xfd_enable_feature(u64 xfd_err, struct fpu_guest *guest_fpu)
+{
+	u64 xfd_event = xfd_err & XFEATURE_MASK_USER_DYNAMIC;
+	struct fpstate *fps;
+	unsigned int ksize;
+
+	if (!xfd_event)
+		return 0;
+
+	if (WARN_ON_ONCE(!guest_fpu))
+		return -EINVAL;
+
+	if ((xstate_get_group_perm(!!guest_fpu) & xfd_event) != xfd_event)
+		return -EPERM;
+
+	fps = guest_fpu->fpstate;
+	ksize = xstate_calculate_size(fps->xfeatures | xfd_event,
+				      cpu_feature_enabled(X86_FEATURE_XCOMPACTED));
+	if (fps->size < ksize) {
+		/* State size is insufficient. */
+		return -ENOMEM;
+	}
+
+	guest_fpu->xfeatures |= xfd_event;
+	fps->xfeatures |= xfd_event;
+	fps->user_xfeatures |= xfd_event;
+	fps->xfd &= ~xfd_event;
+
+	xstate_init_xcomp_bv(&fps->regs.xsave, fps->xfeatures);
+	if (fps->in_use)
+		xfd_update_state(fps);
+
+	return 0;
 }
 #endif /* __PKVM_HYP__ */
