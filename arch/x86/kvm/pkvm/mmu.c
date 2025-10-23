@@ -611,3 +611,118 @@ int pkvm_hyp_donate_host_mmio_locked(unsigned long phys, unsigned long size)
 
 	return pkvm_pgtable_map(&host_mmu, phys, phys, size, prot);
 }
+
+/**
+ * pkvm_host_share_hyp() - Shares host pages with the pKVM hypervisor.
+ * @phys:	Physical address of the memory region to share.
+ * @size:	Size of the memory region to share.
+ *
+ * The sharing transfers the memory pages in range [@phys, @phys + @size) which
+ * are exclusively owned by the host to shared-owned by the host and the pKVM
+ * hypervisor. The host_share_hyp_count counters of those memory pages are
+ * incremented. If a memory page is already shared-owned, page state will not be
+ * changed but only the counter will be incremented. @phys and @size are not
+ * required to be PAGE_SIZE aligned (@size is required to be non-zeroed value)
+ * to support sharing arbitrary unaligned memory regions.
+ *
+ * Returns: 0 on success, or a negative error code on failure.
+ */
+int pkvm_host_share_hyp(unsigned long phys, unsigned long size)
+{
+	int ret;
+
+	if (size == 0 || !is_memory_range(phys, size))
+		return -EINVAL;
+
+	pkvm_host_mmu_lock();
+
+	for_each_pkvm_page(page, phys, size) {
+		switch (page->host_state) {
+		case PKVM_PAGE_OWNED:
+			BUG_ON(page->host_share_hyp_count);
+			continue;
+		case PKVM_PAGE_SHARED_OWNED:
+			if (page->host_share_hyp_count == U16_MAX) {
+				ret = -ENOSPC;
+				goto unlock;
+			}
+
+			/*
+			 * Allow sharing an already shared page as long as it is
+			 * shared with the hypervisor, not with a guest.
+			 */
+			if (page->host_share_hyp_count)
+				continue;
+
+			fallthrough;
+		default:
+			ret = -EPERM;
+			goto unlock;
+		}
+	}
+
+	for_each_pkvm_page(page, phys, size) {
+		page->host_state = PKVM_PAGE_SHARED_OWNED;
+		page->host_share_hyp_count++;
+	}
+
+	ret = 0;
+
+unlock:
+	pkvm_host_mmu_unlock();
+
+	return ret;
+}
+
+/**
+ * pkvm_host_unshare_hyp() - Un-share host pages with the pKVM hypervisor.
+ * @phys:	Physical address of the memory region to unshare.
+ * @size:	Size of the memory region to unshare.
+ *
+ * Decrements the host_share_hyp_count counter for the memory pages in range
+ * [@phys, @phys + @size) which are shared-owned owned by the host and the pKVM
+ * hypervisor, and if a page's host_share_hyp_count becomes zero, then changes
+ * this page's state to make it exclusively owned by the host. @phys and @size
+ * are not required to be PAGE_SIZE aligned (@size is required to be non-zeroed
+ * value), to support unsharing arbitrary unaligned memory regions.
+ */
+void pkvm_host_unshare_hyp(unsigned long phys, unsigned long size)
+{
+	int ret;
+
+	if (size == 0) {
+		ret = -EINVAL;
+		goto out;
+	}
+
+	pkvm_host_mmu_lock();
+
+	ret = check_host_mem_pgstate(phys, size, PKVM_PAGE_SHARED_OWNED);
+	if (ret)
+		goto unlock;
+
+	for_each_pkvm_page(page, phys, size) {
+		/*
+		 * Even if host_share_hyp_count is 0 because the page is
+		 * shared with a guest, not with the hypervisor, it still
+		 * means a pKVM bug, since pkvm_host_unshare_hyp() is only
+		 * used by pKVM itself, for pages that are known to be
+		 * shared with the hypervisor.
+		 */
+		BUG_ON(!page->host_share_hyp_count);
+		if (--page->host_share_hyp_count)
+			continue;
+
+		page->host_state = PKVM_PAGE_OWNED;
+	}
+unlock:
+	pkvm_host_mmu_unlock();
+out:
+	/*
+	 * pkvm_host_unshare_hyp() is only used by the pKVM hypervisor itself,
+	 * not on the host behalf, so it is supposed to be called with correct
+	 * parameters, and only for pages that are known to be shared with the
+	 * hypervisor. So any error here means a pKVM bug.
+	 */
+	BUG_ON(ret);
+}
