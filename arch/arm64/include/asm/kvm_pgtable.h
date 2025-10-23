@@ -305,6 +305,9 @@ enum kvm_pgtable_prot {
 /* Indicates a valid MMIO mapping registered via ioguard. */
 #define KVM_INVALID_PTE_MMIO_NOTE	BIT(11)
 
+/* Indicates a IPA range where MODULE_OWNED pages are accepted */
+#define KVM_ACCEPT_MODULE_PROT_NOTE	BIT(12)
+
 #define KVM_PGTABLE_PROT_RW	(KVM_PGTABLE_PROT_R | KVM_PGTABLE_PROT_W)
 #define KVM_PGTABLE_PROT_RWX	(KVM_PGTABLE_PROT_RW | KVM_PGTABLE_PROT_X)
 

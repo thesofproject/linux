@@ -28,6 +28,8 @@ module_handle_guest_smc(struct arm_smccc_1_2_regs *regs, struct arm_smccc_1_2_re
 			pkvm_handle_t handle);
 const uuid_t *module_get_guest_trng_uuid(void);
 u64 module_get_guest_trng_rng(u64 *entropy, int nbits);
+
+int module_guest_accept_module_owned_share(u64 phys, u64 ipa, u64 size, struct pkvm_hyp_vm *vm);
 #else
 static inline int __pkvm_init_module(void *module_init) { return -EOPNOTSUPP; }
 static inline int
@@ -45,5 +47,10 @@ module_handle_guest_smc(struct arm_smccc_1_2_regs *regs, struct arm_smccc_1_2_re
 			pkvm_handle_t handle)
 {
 	return false;
+}
+
+static inline int module_guest_accept_module_owned_share(u64 phys, u64 ipa, u64 size, struct pkvm_hyp_vm *vm)
+{
+	return -EPERM;
 }
 #endif

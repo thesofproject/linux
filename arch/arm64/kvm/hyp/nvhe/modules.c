@@ -125,6 +125,7 @@ enum mod_handler_type {
 	HOST_FAULT_HANDLER = 0,
 	HOST_SMC_HANDLER,
 	GUEST_SMC_HANDLER,
+	GUEST_ACCEPT_MODULE_OWNED_HANDLER,
 	NUM_MOD_HANDLER_TYPES,
 };
 
@@ -176,6 +177,12 @@ static int __register_guest_smc_handler(enum pkvm_smc_handler_ret (*cb)(struct a
 						   pkvm_handle_t handle))
 {
 	return mod_handler_register(GUEST_SMC_HANDLER, cb);
+}
+
+static int __register_guest_accept_module_owned_handler(int (*cb)(u64 phys, u64 ipa, u64 size,
+								  pkvm_handle_t handle))
+{
+	return mod_handler_register(GUEST_ACCEPT_MODULE_OWNED_HANDLER, cb);
 }
 
 bool module_handle_host_perm_fault(struct user_pt_regs *regs, u64 esr, u64 addr)
@@ -263,6 +270,19 @@ u64 module_get_guest_trng_rng(u64 *entropy, int nbits)
 	return ops->trng_rnd64(entropy, nbits);
 }
 
+int module_guest_accept_module_owned_share(u64 phys, u64 ipa, u64 size, struct pkvm_hyp_vm *vm)
+{
+	int (*cb)(u64 phys, u64 ipa, u64 size, pkvm_handle_t handle);
+	int i;
+
+	for_each_mod_handler(GUEST_ACCEPT_MODULE_OWNED_HANDLER, cb, i) {
+		if (!cb(phys, ipa, size, vm->kvm.arch.pkvm.handle))
+			return 0;
+	}
+
+	return -EPERM;
+}
+
 const struct pkvm_module_ops module_ops = {
 	.create_private_mapping = __pkvm_create_private_mapping,
 	.alloc_module_va = __pkvm_alloc_module_va,
@@ -323,6 +343,8 @@ const struct pkvm_module_ops module_ops = {
 	.device_register_reset = pkvm_device_register_reset,
 	.iommu_register_pviommu_drv = kvm_iommu_register_pviommu_drv,
 	.register_guest_trng_ops = __register_guest_trng_ops,
+	.guest_accept_module_prot_page = __pkvm_accept_module_prot_page,
+	.register_guest_accept_module_owned_handler = __register_guest_accept_module_owned_handler,
 };
 
 static void *pkvm_module_hyp_va(struct pkvm_el2_module *mod, void *kern_va)
