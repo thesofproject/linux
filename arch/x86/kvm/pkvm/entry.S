@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 #include <linux/linkage.h>
 #include <asm/asm.h>
+#include <asm/cache.h>
+#include <asm/segment.h>
 #include <asm/trapnr.h>
 #include <asm/unwind_hints.h>
 
@@ -69,3 +71,15 @@ SYM_CODE_END(handle_exception_\name)
 #define GEN(v, e)	exception_entry #v vector=v has_error_code=e
 #include <asm/GEN-for-each-exc.h>
 #undef GEN
+
+.pushsection .pkvm.text, "ax"
+
+.align L1_CACHE_BYTES, 0xcc
+SYM_CODE_START_NOALIGN(x86_verw_sel)
+	UNWIND_HINT_UNDEFINED
+	ANNOTATE_NOENDBR
+	.word __KERNEL_DS
+.align L1_CACHE_BYTES, 0xcc
+SYM_CODE_END(x86_verw_sel);
+
+.popsection
