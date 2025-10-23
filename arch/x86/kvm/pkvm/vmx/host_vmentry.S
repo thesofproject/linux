@@ -66,6 +66,8 @@ SYM_FUNC_START(pkvm_host_vmexit_entry)
 	mov VCPU_R15(%_ASM_BX), %r15
 	mov VCPU_RBX(%_ASM_BX), %_ASM_BX
 
+	CLEAR_CPU_BUFFERS
+
 	/*
 	 * The first time of entering guest is in local_deprivilege_cpu() which
 	 * requires vmlaunch. This code path is called after that, hence only
