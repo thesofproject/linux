@@ -737,6 +737,7 @@ int ____kvm_emulate_hypercall(struct kvm_vcpu *vcpu, int cpl,
 
 int kvm_emulate_hypercall(struct kvm_vcpu *vcpu);
 void kvm_user_return_msr_cpu_online(void);
+u64 kvm_get_arch_capabilities(void);
 
 #define CET_US_RESERVED_BITS		GENMASK(9, 6)
 #define CET_US_SHSTK_MASK_BITS		GENMASK(1, 0)
