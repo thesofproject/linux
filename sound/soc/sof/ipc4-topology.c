@@ -1281,7 +1281,7 @@ static void sof_ipc4_widget_free_comp_process(struct snd_sof_widget *swidget)
 
 static void
 sof_ipc4_update_resource_usage(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget,
-			       struct sof_ipc4_base_module_cfg *base_config)
+			       struct sof_ipc4_base_module_cfg *base_config, int dir)
 {
 	struct sof_ipc4_fw_module *fw_module = swidget->module_info;
 	struct snd_sof_widget *pipe_widget;
@@ -1312,6 +1312,10 @@ sof_ipc4_update_resource_usage(struct snd_sof_dev *sdev, struct snd_sof_widget *
 	pipe_widget = swidget->spipe->pipe_widget;
 	pipeline = pipe_widget->private;
 	pipeline->mem_usage += total;
+
+	/* set pipeline direction */
+	pipeline->msg.extension |= SOF_IPC4_GLB_PIPE_EXT_DIRECTION_SET(0x1);
+	pipeline->msg.extension |= SOF_IPC4_GLB_PIPE_EXT_DIRECTION(dir);
 
 	/* Update base_config->cpc from the module manifest */
 	sof_ipc4_update_cpc_from_manifest(sdev, fw_module, base_config);
@@ -2452,7 +2456,7 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 					 input_fmt_index, output_fmt_index);
 
 	/* update pipeline memory usage */
-	sof_ipc4_update_resource_usage(sdev, swidget, &copier_data->base_config);
+	sof_ipc4_update_resource_usage(sdev, swidget, &copier_data->base_config, dir);
 
 	/* copy IPC data */
 	memcpy(*ipc_config_data, (void *)copier_data, sizeof(*copier_data));
@@ -2515,7 +2519,7 @@ static int sof_ipc4_prepare_gain_module(struct snd_sof_widget *swidget,
 					 input_fmt_index, output_fmt_index);
 
 	/* update pipeline memory usage */
-	sof_ipc4_update_resource_usage(sdev, swidget, &gain->data.base_config);
+	sof_ipc4_update_resource_usage(sdev, swidget, &gain->data.base_config, dir);
 
 	return 0;
 }
@@ -2560,7 +2564,7 @@ static int sof_ipc4_prepare_mixer_module(struct snd_sof_widget *swidget,
 					 input_fmt_index, output_fmt_index);
 
 	/* update pipeline memory usage */
-	sof_ipc4_update_resource_usage(sdev, swidget, &mixer->base_config);
+	sof_ipc4_update_resource_usage(sdev, swidget, &mixer->base_config, dir);
 
 	return 0;
 }
@@ -2626,7 +2630,7 @@ static int sof_ipc4_prepare_src_module(struct snd_sof_widget *swidget,
 					 input_fmt_index, output_fmt_index);
 
 	/* update pipeline memory usage */
-	sof_ipc4_update_resource_usage(sdev, swidget, &src->data.base_config);
+	sof_ipc4_update_resource_usage(sdev, swidget, &src->data.base_config, dir);
 
 	out_audio_fmt = &available_fmt->output_pin_fmts[output_fmt_index].audio_fmt;
 	src->data.sink_rate = out_audio_fmt->sampling_frequency;
@@ -2783,7 +2787,7 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 					 input_fmt_index, output_fmt_index);
 
 	/* update pipeline memory usage */
-	sof_ipc4_update_resource_usage(sdev, swidget, &process->base_config);
+	sof_ipc4_update_resource_usage(sdev, swidget, &process->base_config, dir);
 
 	/* ipc_config_data is composed of the base_config followed by an optional extension */
 	memcpy(cfg, &process->base_config, sizeof(struct sof_ipc4_base_module_cfg));
