@@ -1612,21 +1612,17 @@ out_unlock:
 static int pkvm_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
 		struct kvm_memory_slot *memslot, unsigned long hva)
 {
-	struct kvm_hyp_memcache *hyp_memcache = &vcpu->arch.stage2_mc;
 	unsigned int flags = FOLL_HWPOISON | FOLL_LONGTERM | FOLL_WRITE;
 	struct mm_struct *mm = current->mm;
 	struct kvm *kvm = vcpu->kvm;
 	struct kvm_s2_mmu *mmu =  &kvm->arch.mmu;
 	struct page *page;
-	int ret, nr_pages;
+	void *memcache;
+	int ret;
 
-	nr_pages = hyp_memcache->nr_pages;
-	ret = topup_hyp_memcache(hyp_memcache, kvm_mmu_cache_min_pages(mmu));
+	ret = prepare_mmu_memcache(vcpu, true, &memcache);
 	if (ret)
-		return -ENOMEM;
-
-	nr_pages = hyp_memcache->nr_pages - nr_pages;
-	atomic64_add(nr_pages << PAGE_SHIFT, &kvm->stat.protected_hyp_mem);
+		return ret;
 
 	ret = account_locked_vm(mm, 1, true);
 	if (ret)
@@ -1664,7 +1660,7 @@ static int pkvm_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
 
 	write_lock(&kvm->mmu_lock);
 	ret = KVM_PGT_FN(kvm_pgtable_stage2_map)(mmu->pgt, fault_ipa, PAGE_SIZE, page_to_phys(page),
-						 KVM_PGTABLE_PROT_RWX, hyp_memcache, 0);
+						 KVM_PGTABLE_PROT_RWX, memcache, 0);
 	write_unlock(&kvm->mmu_lock);
 	if (ret) {
 		if (ret == -EAGAIN)
