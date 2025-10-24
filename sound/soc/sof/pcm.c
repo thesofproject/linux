@@ -185,7 +185,7 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 		}
 
 		/* set the host DMA ID */
-		if (tplg_ops && tplg_ops->host_config)
+		if (WIDGET_IS_AIF(host_widget->id) && tplg_ops && tplg_ops->host_config)
 			tplg_ops->host_config(sdev, host_widget, platform_params);
 	}
 
