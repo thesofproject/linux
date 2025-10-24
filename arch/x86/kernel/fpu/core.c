@@ -29,7 +29,7 @@
 #define CREATE_TRACE_POINTS
 #include <asm/trace/fpu.h>
 
-#ifdef CONFIG_X86_64
+#if defined(CONFIG_X86_64) && !defined(__PKVM_HYP__)
 DEFINE_STATIC_KEY_FALSE(__fpu_state_size_dynamic);
 DEFINE_PER_CPU(u64, xfd_state);
 #endif
@@ -39,6 +39,7 @@ struct fpu_state_config	fpu_kernel_cfg __ro_after_init;
 struct fpu_state_config fpu_user_cfg __ro_after_init;
 struct vcpu_fpu_config guest_default_cfg __ro_after_init;
 
+#ifndef __PKVM_HYP__
 /*
  * Represents the initial FPU state. It's mostly (but not completely) zeroes,
  * depending on the FPU hardware format:
@@ -986,3 +987,4 @@ noinstr void fpu_idle_fpregs(void)
 		__this_cpu_write(fpu_fpregs_owner_ctx, NULL);
 	}
 }
+#endif /* !__PKVM_HYP__ */
