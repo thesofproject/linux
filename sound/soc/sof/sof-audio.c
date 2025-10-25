@@ -13,6 +13,19 @@
 #include "sof-audio.h"
 #include "ops.h"
 
+/*
+ * Check is a DAI widget is an aggregated DAI. Aggregated DAI's have names ending in numbers
+ * starting with 0 and only the first DAI needs to be set up in the firmware. The rest of
+ * the aggregated DAI's are represented in the topology graph for completeness but do not
+ * need any firmware configuration.
+ */
+static bool is_aggregated_dai(struct snd_sof_widget *swidget)
+{
+	return (WIDGET_IS_DAI(swidget->id) &&
+	       isdigit(swidget->widget->name[strlen(swidget->widget->name) - 1]) &&
+	       swidget->widget->name[strlen(swidget->widget->name) - 1] != '0');
+}
+
 static bool is_virtual_widget(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *widget,
 			      const char *func)
 {
@@ -412,6 +425,10 @@ sof_unprepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widg
 	struct snd_soc_dapm_path *p;
 
 	if (is_virtual_widget(sdev, widget, __func__))
+		goto sink_unprepare;
+
+	/* skip aggregated DAIs */
+	if (!swidget || is_aggregated_dai(swidget))
 		return;
 
 	/* skip if the widget is in use or if it is already unprepared */
@@ -452,10 +469,14 @@ sof_prepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget
 	int ret;
 
 	if (is_virtual_widget(sdev, widget, __func__))
-		return 0;
+		goto sink_prepare;
 
 	widget_ops = tplg_ops ? tplg_ops->widget : NULL;
 	if (!widget_ops)
+		return 0;
+
+	/* skip aggregated DAIs */
+	if (!swidget || is_aggregated_dai(swidget))
 		return 0;
 
 	if (!swidget || !widget_ops[widget->id].ipc_prepare || swidget->prepared)
@@ -506,18 +527,23 @@ static int sof_free_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dap
 {
 	struct snd_soc_dapm_widget_list *list = spcm->stream[dir].list;
 	struct snd_soc_dapm_path *p;
+	struct snd_sof_widget *swidget;
 	int err;
 	int ret = 0;
 
 	if (is_virtual_widget(sdev, widget, __func__))
+		goto sink_free;
+
+	swidget = widget->dobj.private;
+
+	/* skip aggregated DAIs */
+	if (!swidget || is_aggregated_dai(swidget))
 		return 0;
 
-	if (widget->dobj.private) {
-		err = sof_widget_free(sdev, widget->dobj.private);
-		if (err < 0)
-			ret = err;
-	}
-
+	err = sof_widget_free(sdev, widget->dobj.private);
+	if (err < 0)
+		ret = err;
+sink_free:
 	/* free all widgets in the sink paths even in case of error to keep use counts balanced */
 	snd_soc_dapm_widget_for_each_sink_path(widget, p) {
 		if (!p->walking) {
@@ -552,10 +578,14 @@ static int sof_set_up_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_d
 	int ret;
 
 	if (is_virtual_widget(sdev, widget, __func__))
-		return 0;
+		goto sink_setup;
 
 	if (swidget) {
 		int i;
+
+		/* skip aggregated DAIs */
+		if (!swidget || is_aggregated_dai(swidget))
+			return 0;
 
 		ret = sof_widget_setup(sdev, widget->dobj.private);
 		if (ret < 0)
@@ -619,11 +649,10 @@ sof_walk_widgets_in_order(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
 		return 0;
 
 	for_each_dapm_widgets(list, i, widget) {
-		if (is_virtual_widget(sdev, widget, __func__))
-			continue;
 
-		/* starting widget for playback is AIF type */
-		if (dir == SNDRV_PCM_STREAM_PLAYBACK && widget->id != snd_soc_dapm_aif_in)
+		/* starting widget for playback is of AIF or snd_soc_dapm_input type */
+		if (dir == SNDRV_PCM_STREAM_PLAYBACK && (widget->id != snd_soc_dapm_aif_in &&
+		    widget->id != snd_soc_dapm_input))
 			continue;
 
 		/* starting widget for capture is DAI type */
@@ -904,27 +933,39 @@ struct snd_sof_widget *snd_sof_find_swidget(struct snd_soc_component *scomp,
 	return NULL;
 }
 
+static struct snd_sof_widget *snd_sof_find_swidget_sname_type(struct snd_soc_component *scomp,
+							      const char *sname,
+							      enum snd_soc_dapm_type type)
+{
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_widget *swidget;
+
+	list_for_each_entry(swidget, &sdev->widget_list, list) {
+		if (!strcmp(sname, swidget->widget->sname) && swidget->id == type)
+			return swidget;
+	}
+
+	return NULL;
+}
+
 /* find widget by stream name and direction */
 struct snd_sof_widget *
 snd_sof_find_swidget_sname(struct snd_soc_component *scomp,
 			   const char *pcm_name, int dir)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
-	struct snd_sof_widget *swidget;
-	enum snd_soc_dapm_type type;
+	if (dir == SNDRV_PCM_STREAM_PLAYBACK) {
+		struct snd_sof_widget *swidget;
 
-	if (dir == SNDRV_PCM_STREAM_PLAYBACK)
-		type = snd_soc_dapm_aif_in;
-	else
-		type = snd_soc_dapm_aif_out;
-
-	list_for_each_entry(swidget, &sdev->widget_list, list) {
-		if (!strcmp(pcm_name, swidget->widget->sname) &&
-		    swidget->id == type)
+		/* first look for an aif_in type widget */
+		swidget = snd_sof_find_swidget_sname_type(scomp, pcm_name, snd_soc_dapm_aif_in);
+		if (swidget)
 			return swidget;
+
+		/* if not found, look for an input type widget */
+		return snd_sof_find_swidget_sname_type(scomp, pcm_name, snd_soc_dapm_input);
 	}
 
-	return NULL;
+	return snd_sof_find_swidget_sname_type(scomp, pcm_name, snd_soc_dapm_aif_out);
 }
 
 struct snd_sof_dai *snd_sof_find_dai(struct snd_soc_component *scomp,
