@@ -92,12 +92,12 @@ void __arm_lpae_sync_pte(arm_lpae_iopte *ptep, int num_entries,
 				   sizeof(*ptep) * num_entries, DMA_TO_DEVICE);
 }
 
-void *__arm_lpae_alloc_data(size_t size, gfp_t gfp)
+void *__arm_lpae_alloc_data(struct io_pgtable_cfg *cfg, size_t size, gfp_t gfp)
 {
 	return kmalloc(size, gfp);
 }
 
-void __arm_lpae_free_data(void *p)
+void __arm_lpae_free_data(struct io_pgtable_cfg *cfg, void *p)
 {
 	return kfree(p);
 }

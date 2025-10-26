@@ -555,7 +555,7 @@ static int smmu_init_pgt(void)
 		.ias = 48,
 		.oas = 48,
 		.coherent_walk = true,
-		.quirks = IO_PGTABLE_QUIRK_NO_WARN,
+		.quirks = IO_PGTABLE_QUIRK_NO_WARN | IO_PGTABLE_QUIRK_IDMAP,
 	};
 	struct hyp_arm_smmu_v3_nested_device *nested_smmu;
 	struct io_pgtable_ops *ops;
