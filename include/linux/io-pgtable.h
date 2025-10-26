@@ -139,6 +139,16 @@ struct io_pgtable_cfg {
 	 */
 	void (*free)(void *cookie, void *pages, size_t size);
 
+	/**
+	 * @put_page: Callback when physical address is unmapped.
+	 *
+	 * Optional hook for physical pages mapped by the IOMMU.
+	 * This is useful if the page table owners wants to track
+	 * physical pages without having to rely on slow methods
+	 * as calling iova_to_phys before each unmapped page.
+	 */
+	void (*put_pages)(void *cookie, u64 phys, size_t size,
+			  struct iommu_iotlb_gather *gather);
 	/* Low-level data specific to the table format */
 	union {
 		struct {
@@ -294,6 +304,14 @@ io_pgtable_tlb_add_page(struct io_pgtable *iop,
 {
 	if (iop->cfg.tlb && iop->cfg.tlb->tlb_add_page)
 		iop->cfg.tlb->tlb_add_page(gather, iova, granule, iop->cookie);
+}
+
+static inline void
+io_pgtable_put_pages(struct io_pgtable *iop, u64 phys, size_t size,
+		     struct iommu_iotlb_gather *gather)
+{
+	if (iop->cfg.put_pages)
+		iop->cfg.put_pages(iop->cookie, phys, size, gather);
 }
 
 /**
