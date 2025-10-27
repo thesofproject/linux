@@ -941,6 +941,8 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.enable_nmi_window = pkvm_enable_nmi_window,
 	.enable_irq_window = pkvm_enable_irq_window,
 	.update_cr8_intercept = pkvm_update_cr8_intercept,
+
+	.x2apic_icr_is_split = false,
 };
 
 bool pkvm_interrupt_blocked(struct kvm_vcpu *vcpu)
