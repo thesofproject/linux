@@ -1016,6 +1016,11 @@ static struct kvm_x86_nested_ops pkvm_nested_ops = {
 	.write_log_dirty = pkvm_nested_write_pml_buffer,
 };
 
+static void pkvm_setup_mce(struct kvm_vcpu *vcpu)
+{
+	KVM_BUG_ON(pkvm_hypercall(setup_mce), vcpu->kvm);
+}
+
 static bool pkvm_apic_init_signal_blocked(struct kvm_vcpu *vcpu)
 {
 	/*
@@ -1118,6 +1123,8 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 
 	.pi_update_irte = vmx_pi_update_irte,
 	.pi_start_bypass = vmx_pi_start_bypass,
+
+	.setup_mce = pkvm_setup_mce,
 
 	.apic_init_signal_blocked = pkvm_apic_init_signal_blocked,
 
