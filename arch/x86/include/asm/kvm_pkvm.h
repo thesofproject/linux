@@ -119,11 +119,13 @@ union pkvm_hc_data {
 		struct pkvm_memcache memcache;
 	} vcpu_add_fpstate;
 	struct {
+		unsigned long reqs_to_host;
+#define HOST_HANDLE_EXIT			0
+	} vcpu_run;
+	struct {
 		u64 data[PKVM_HC_DATA_MAX_NUM];
 	} raw;
 };
-
-#define HOST_HANDLE_EXIT			0
 
 /*
  * The union pkvm_hc_data is passed in hypercalls via the registers used for
