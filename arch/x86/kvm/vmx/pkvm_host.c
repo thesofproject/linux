@@ -987,6 +987,9 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.sync_pir_to_irr = vmx_sync_pir_to_irr,
 	.deliver_interrupt = vmx_deliver_interrupt,
 	.dy_apicv_has_pending_interrupt = pi_has_pending_interrupt,
+
+	.pi_update_irte = vmx_pi_update_irte,
+	.pi_start_bypass = vmx_pi_start_bypass,
 };
 
 bool pkvm_interrupt_blocked(struct kvm_vcpu *vcpu)
