@@ -3,6 +3,7 @@
 
 #include <linux/kvm_host.h>
 #include <asm/kvm_pkvm.h>
+#include <asm/fred.h>
 #include "pkvm_constants.h"
 #include "posted_intr.h"
 #include "trace.h"
@@ -120,6 +121,12 @@ static void pkvm_cache_segment(struct vcpu_vmx *vmx, struct kvm_segment *var, in
 		   (var->s << 4)	 |
 		   var->type;
 	pkvm_segment_cache_set(vmx, seg, SEG_FIELD_AR);
+}
+
+static fastpath_t pkvm_exit_handlers_fastpath(struct kvm_vcpu *vcpu)
+{
+	/* TODO Handle vmexit for fastpath */
+	return EXIT_FASTPATH_NONE;
 }
 
 static int pkvm_check_processor_compat(void)
@@ -776,6 +783,82 @@ static void pkvm_flush_tlb_guest(struct kvm_vcpu *vcpu)
 		KVM_BUG_ON(pkvm_hypercall(flush_tlb_guest), vcpu->kvm);
 }
 
+static fastpath_t pkvm_vcpu_run(struct kvm_vcpu *vcpu, u64 run_flags)
+{
+	bool force_immediate_exit = run_flags & KVM_RUN_FORCE_IMMEDIATE_EXIT;
+	struct vcpu_vmx *vmx = to_vmx(vcpu);
+	unsigned long reqs_to_host;
+	fastpath_t exit_fastpath;
+	union pkvm_hc_data out;
+
+	trace_kvm_entry(vcpu, force_immediate_exit);
+
+	kvm_wait_lapic_expire(vcpu);
+
+	guest_state_enter_irqoff();
+
+	vcpu->arch.nmi_injected = false;
+	kvm_clear_exception_queue(vcpu);
+	kvm_clear_interrupt_queue(vcpu);
+
+	vmx->vt.exit_reason.full = 0xdead;
+	vmx->fail = 0;
+
+	vcpu->arch.regs_avail &= ~VMX_REGS_LAZY_LOAD_SET;
+	if (pkvm_hypercall_out(vcpu_run, &out, force_immediate_exit)) {
+		vmx->fail = 1;
+		guest_state_exit_irqoff();
+		return EXIT_FASTPATH_NONE;
+	}
+
+	reqs_to_host = out.vcpu_run.reqs_to_host;
+	vcpu->arch.regs_dirty = 0;
+
+	/*
+	 * The host still needs to pre-configure pVM's vCPU state for booting.
+	 * Once the vcpu has started running, some PV interfaces will be
+	 * inaccessible to the host. Setting the guest_state_protected flag for
+	 * the host to avoid using such PV interface.
+	 */
+	if (unlikely(vcpu->kvm->arch.has_protected_state &&
+		     !vcpu->arch.guest_state_protected)) {
+		vcpu->arch.guest_state_protected = true;
+		fpstate_set_confidential(&vcpu->arch.guest_fpu);
+	}
+
+	if (unlikely(vmx_get_exit_reason(vcpu).full == 0xdead))
+		vmx->fail = 1;
+	else
+		vmx_handle_nmi(vcpu);
+
+	guest_state_exit_irqoff();
+
+	if (unlikely(vmx->fail))
+		return EXIT_FASTPATH_NONE;
+
+	if (unlikely((u16)vmx_get_exit_reason(vcpu).basic == EXIT_REASON_MCE_DURING_VMENTRY))
+		kvm_machine_check();
+
+	trace_kvm_exit(vcpu, KVM_ISA_VMX);
+
+	if (unlikely(vmx_get_exit_reason(vcpu).failed_vmentry))
+		return EXIT_FASTPATH_NONE;
+
+	if (vcpu->arch.exception.pending || vcpu->arch.exception.injected)
+		kvm_make_request(KVM_REQ_EVENT, vcpu);
+
+	exit_fastpath = EXIT_FASTPATH_EXIT_HANDLED;
+	if (reqs_to_host) {
+		if (test_and_clear_bit(HOST_HANDLE_EXIT, &reqs_to_host))
+			exit_fastpath = EXIT_FASTPATH_NONE;
+	}
+
+	if (exit_fastpath == EXIT_FASTPATH_EXIT_HANDLED)
+		return exit_fastpath;
+
+	return pkvm_exit_handlers_fastpath(vcpu);
+}
+
 static void pkvm_set_interrupt_shadow(struct kvm_vcpu *vcpu, int mask)
 {
 	if (!pkvm_is_protected_vcpu(vcpu))
@@ -1104,6 +1187,7 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.flush_tlb_gva = pkvm_flush_tlb_gva,
 	.flush_tlb_guest = pkvm_flush_tlb_guest,
 
+	.vcpu_run = pkvm_vcpu_run,
 	.set_interrupt_shadow = pkvm_set_interrupt_shadow,
 	.get_interrupt_shadow = pkvm_get_interrupt_shadow,
 	.inject_irq = pkvm_inject_irq,
