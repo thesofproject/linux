@@ -971,6 +971,16 @@ static void pkvm_vcpu_after_set_cpuid(struct kvm_vcpu *vcpu)
 		kvm_free_pkvm_memcache(&out.vcpu_after_set_cpuid.memcache);
 }
 
+static u64 pkvm_get_l2_tsc_offset(struct kvm_vcpu *vcpu)
+{
+	return 0;
+}
+
+static u64 pkvm_get_l2_tsc_multiplier(struct kvm_vcpu *vcpu)
+{
+	return kvm_caps.default_tsc_scaling_ratio;
+}
+
 static void pkvm_write_tsc_offset(struct kvm_vcpu *vcpu)
 {
 	KVM_BUG_ON(pkvm_hypercall(write_tsc_offset), vcpu->kvm);
@@ -985,6 +995,26 @@ static void pkvm_load_mmu_pgd(struct kvm_vcpu *vcpu, hpa_t root_hpa, int root_le
 {
 	KVM_BUG_ON(pkvm_hypercall(load_mmu_pgd, root_hpa, root_level), vcpu->kvm);
 }
+
+static void pkvm_leave_nested(struct kvm_vcpu *vcpu) {}
+static bool pkvm_nested_is_exception_vmexit(struct kvm_vcpu *vcpu, u8 vector,
+					    u32 error_code)
+{
+	return false;
+}
+static int pkvm_check_nested_events(struct kvm_vcpu *vcpu) { return 0; }
+static void pkvm_nested_triple_fault(struct kvm_vcpu *vcpu) {}
+static bool pkvm_get_nested_state_pages(struct kvm_vcpu *vcpu) { return true; }
+static int pkvm_nested_write_pml_buffer(struct kvm_vcpu *vcpu, gpa_t gpa) { return 0; }
+
+static struct kvm_x86_nested_ops pkvm_nested_ops = {
+	.leave_nested = pkvm_leave_nested,
+	.is_exception_vmexit = pkvm_nested_is_exception_vmexit,
+	.check_events = pkvm_check_nested_events,
+	.triple_fault = pkvm_nested_triple_fault,
+	.get_nested_state_pages = pkvm_get_nested_state_pages,
+	.write_log_dirty = pkvm_nested_write_pml_buffer,
+};
 
 static bool pkvm_apic_init_signal_blocked(struct kvm_vcpu *vcpu)
 {
@@ -1077,10 +1107,14 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 
 	.vcpu_after_set_cpuid = pkvm_vcpu_after_set_cpuid,
 
+	.get_l2_tsc_offset = pkvm_get_l2_tsc_offset,
+	.get_l2_tsc_multiplier = pkvm_get_l2_tsc_multiplier,
 	.write_tsc_offset = pkvm_write_tsc_offset,
 	.write_tsc_multiplier = pkvm_write_tsc_multiplier,
 
 	.load_mmu_pgd = pkvm_load_mmu_pgd,
+
+	.nested_ops = &pkvm_nested_ops,
 
 	.pi_update_irte = vmx_pi_update_irte,
 	.pi_start_bypass = vmx_pi_start_bypass,
