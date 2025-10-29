@@ -134,12 +134,98 @@ static fastpath_t pkvm_exit_handlers_fastpath(struct kvm_vcpu *vcpu)
 	}
 }
 
+static int handle_exception_nmi(struct kvm_vcpu *vcpu)
+{
+	struct vcpu_vmx *vmx = to_vmx(vcpu);
+	struct kvm_run *kvm_run = vcpu->run;
+	u32 intr_info, ex_no, error_code;
+	unsigned long dr6;
+	u32 vect_info;
+
+	vect_info = vmx->idt_vectoring_info;
+	intr_info = vmx_get_intr_info(vcpu);
+
+	/*
+	 * Machine checks are handled by handle_exit_irqoff operation, or by
+	 * pkvm_vcpu_run() if a #MC occurs on VM-Entry.  NMIs are handled by
+	 * pkvm_vcpu_run().
+	 */
+	if (is_machine_check(intr_info) || is_nmi(intr_info))
+		return 1;
+
+	if (is_invalid_opcode(intr_info))
+		return handle_ud(vcpu);
+
+	error_code = 0;
+	if (intr_info & INTR_INFO_DELIVER_CODE_MASK)
+		error_code = vmx->error_code;
+
+	/*
+	 * The #PF with PFEC.RSVD = 1 indicates the guest is accessing
+	 * MMIO, it is better to report an internal error.
+	 * See the comments in __pkvm_handle_exit.
+	 */
+	if ((vect_info & VECTORING_INFO_VALID_MASK) &&
+	    !(is_page_fault(intr_info) && !(error_code & PFERR_RSVD_MASK))) {
+		vcpu->run->exit_reason = KVM_EXIT_INTERNAL_ERROR;
+		vcpu->run->internal.suberror = KVM_INTERNAL_ERROR_SIMUL_EX;
+		vcpu->run->internal.ndata = 4;
+		vcpu->run->internal.data[0] = vect_info;
+		vcpu->run->internal.data[1] = intr_info;
+		vcpu->run->internal.data[2] = error_code;
+		vcpu->run->internal.data[3] = vcpu->arch.last_vmentry_cpu;
+		return 0;
+	}
+
+	ex_no = intr_info & INTR_INFO_VECTOR_MASK;
+	switch (ex_no) {
+	case DB_VECTOR:
+		dr6 = vmx_get_exit_qual(vcpu);
+		/*
+		 * Only handle KVM_GUESTDBG_SINGLESTEP or KVM_GUESTDBG_USE_HW_BP
+		 * as the opposite cases are already handled by the pKVM
+		 * hypervisor.
+		 */
+		if (WARN_ON_ONCE(!(vcpu->guest_debug &
+			      (KVM_GUESTDBG_SINGLESTEP | KVM_GUESTDBG_USE_HW_BP))))
+			break;
+		kvm_run->debug.arch.dr6 = dr6 | DR6_ACTIVE_LOW;
+		kvm_run->debug.arch.dr7 = vcpu->arch.dr7;
+		fallthrough;
+	case BP_VECTOR:
+		kvm_run->exit_reason = KVM_EXIT_DEBUG;
+		kvm_run->debug.arch.pc = kvm_get_linear_rip(vcpu);
+		kvm_run->debug.arch.exception = ex_no;
+		break;
+	case AC_VECTOR:
+		/*
+		 * The #AC exception is injected by the pKVM hypervisor if it is
+		 * required. And if #AC is not injected, handle split lock in
+		 * the host. Depending on detection mode this will either warn
+		 * and disable split lock detection for this task or force
+		 * SIGBUS on it.
+		 */
+		if (handle_guest_split_lock(kvm_rip_read(vcpu)))
+			return 1;
+		fallthrough;
+	default:
+		pr_warn("pkvm_host: Unsupported exception_nmi: intr_info 0x%x\n", intr_info);
+		kvm_run->exit_reason = KVM_EXIT_EXCEPTION;
+		kvm_run->ex.exception = ex_no;
+		kvm_run->ex.error_code = error_code;
+		break;
+	}
+
+	return 0;
+}
+
 /*
  * The exit handlers return 1 if the exit was handled fully and guest execution
  * may resume.  Otherwise they set the kvm_run parameter to indicate what needs
  * to be done to userspace and return 0.
  */
 static int (*pkvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
+	[EXIT_REASON_EXCEPTION_NMI]           = handle_exception_nmi,
 };
 
 static const int pkvm_vmx_max_exit_handlers = ARRAY_SIZE(pkvm_vmx_exit_handlers);
