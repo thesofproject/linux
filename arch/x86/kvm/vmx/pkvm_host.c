@@ -1299,6 +1299,8 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 
 	.load_mmu_pgd = pkvm_load_mmu_pgd,
 
+	.handle_exit_irqoff = vmx_handle_exit_irqoff,
+
 	.nested_ops = &pkvm_nested_ops,
 
 	.pi_update_irte = vmx_pi_update_irte,
