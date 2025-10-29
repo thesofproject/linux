@@ -129,6 +129,77 @@ static fastpath_t pkvm_exit_handlers_fastpath(struct kvm_vcpu *vcpu)
 	return EXIT_FASTPATH_NONE;
 }
 
+/*
+ * The exit handlers return 1 if the exit was handled fully and guest execution
+ * may resume.  Otherwise they set the kvm_run parameter to indicate what needs
+ * to be done to userspace and return 0.
+ */
+static int (*pkvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
+};
+
+static const int pkvm_vmx_max_exit_handlers = ARRAY_SIZE(pkvm_vmx_exit_handlers);
+
+static int __pkvm_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
+{
+	union vmx_exit_reason exit_reason = vmx_get_exit_reason(vcpu);
+	struct vcpu_vmx *vmx = to_vmx(vcpu);
+	u16 exit_handler_index;
+	u32 vectoring_info;
+
+	if (exit_reason.failed_vmentry) {
+		vcpu->run->exit_reason = KVM_EXIT_FAIL_ENTRY;
+		vcpu->run->fail_entry.hardware_entry_failure_reason
+			= exit_reason.full;
+		vcpu->run->fail_entry.cpu = vcpu->arch.last_vmentry_cpu;
+		return 0;
+	}
+
+	if (unlikely(vmx->fail)) {
+		vcpu->run->exit_reason = KVM_EXIT_FAIL_ENTRY;
+		vcpu->run->fail_entry.hardware_entry_failure_reason
+			= vmx->error_code;
+		vcpu->run->fail_entry.cpu = vcpu->arch.last_vmentry_cpu;
+		return 0;
+	}
+
+	vectoring_info = vmx->idt_vectoring_info;
+	if ((vectoring_info & VECTORING_INFO_VALID_MASK) &&
+	    (exit_reason.basic != EXIT_REASON_EXCEPTION_NMI &&
+	     exit_reason.basic != EXIT_REASON_EPT_VIOLATION &&
+	     exit_reason.basic != EXIT_REASON_PML_FULL &&
+	     exit_reason.basic != EXIT_REASON_APIC_ACCESS &&
+	     exit_reason.basic != EXIT_REASON_TASK_SWITCH &&
+	     exit_reason.basic != EXIT_REASON_NOTIFY &&
+	     exit_reason.basic != EXIT_REASON_EPT_MISCONFIG)) {
+		kvm_prepare_event_vectoring_exit(vcpu, INVALID_GPA);
+		return 0;
+	}
+
+	if (exit_fastpath != EXIT_FASTPATH_NONE)
+		return 1;
+
+	if (exit_reason.basic >= pkvm_vmx_max_exit_handlers)
+		goto unexpected_vmexit;
+
+	exit_handler_index = array_index_nospec((u16)exit_reason.basic,
+						pkvm_vmx_max_exit_handlers);
+	if (!pkvm_vmx_exit_handlers[exit_handler_index])
+		goto unexpected_vmexit;
+
+	return pkvm_vmx_exit_handlers[exit_handler_index](vcpu);
+
+unexpected_vmexit:
+	vcpu_unimpl(vcpu, "vmx: unexpected exit reason 0x%x\n",
+		    exit_reason.full);
+	vcpu->run->exit_reason = KVM_EXIT_INTERNAL_ERROR;
+	vcpu->run->internal.suberror =
+			KVM_INTERNAL_ERROR_UNEXPECTED_EXIT_REASON;
+	vcpu->run->internal.ndata = 2;
+	vcpu->run->internal.data[0] = exit_reason.full;
+	vcpu->run->internal.data[1] = vcpu->arch.last_vmentry_cpu;
+	return 0;
+}
+
 static int pkvm_check_processor_compat(void)
 {
 	return pkvm_hypercall(check_processor_compatibility);
@@ -859,6 +930,11 @@ static fastpath_t pkvm_vcpu_run(struct kvm_vcpu *vcpu, u64 run_flags)
 	return pkvm_exit_handlers_fastpath(vcpu);
 }
 
+static int pkvm_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
+{
+	return __pkvm_handle_exit(vcpu, exit_fastpath);
+}
+
 static void pkvm_set_interrupt_shadow(struct kvm_vcpu *vcpu, int mask)
 {
 	if (!pkvm_is_protected_vcpu(vcpu))
@@ -1188,6 +1264,7 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.flush_tlb_guest = pkvm_flush_tlb_guest,
 
 	.vcpu_run = pkvm_vcpu_run,
+	.handle_exit = pkvm_handle_exit,
 	.set_interrupt_shadow = pkvm_set_interrupt_shadow,
 	.get_interrupt_shadow = pkvm_get_interrupt_shadow,
 	.inject_irq = pkvm_inject_irq,
