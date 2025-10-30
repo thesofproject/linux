@@ -232,6 +232,14 @@ static int handle_triple_fault(struct kvm_vcpu *vcpu)
 	return 0;
 }
 
+static int handle_nmi_window(struct kvm_vcpu *vcpu)
+{
+	++vcpu->stat.nmi_window_exits;
+	kvm_make_request(KVM_REQ_EVENT, vcpu);
+
+	return 1;
+}
+
 /*
  * The exit handlers return 1 if the exit was handled fully and guest execution
  * may resume.  Otherwise they set the kvm_run parameter to indicate what needs
@@ -241,6 +249,7 @@ static int (*pkvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_EXCEPTION_NMI]           = handle_exception_nmi,
 	[EXIT_REASON_EXTERNAL_INTERRUPT]      = handle_external_interrupt,
 	[EXIT_REASON_TRIPLE_FAULT]            = handle_triple_fault,
+	[EXIT_REASON_NMI_WINDOW]	      = handle_nmi_window,
 };
 
 static const int pkvm_vmx_max_exit_handlers = ARRAY_SIZE(pkvm_vmx_exit_handlers);
