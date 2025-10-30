@@ -151,13 +151,13 @@ static int adsp_default_clk_init(struct snd_sof_dev *sdev, bool enable)
 	return 0;
 }
 
-int adsp_clock_on(struct snd_sof_dev *sdev)
+int mt8195_adsp_clock_on(struct snd_sof_dev *sdev)
 {
 	/* Open ADSP clock */
 	return adsp_default_clk_init(sdev, 1);
 }
 
-int adsp_clock_off(struct snd_sof_dev *sdev)
+int mt8195_adsp_clock_off(struct snd_sof_dev *sdev)
 {
 	/* Close ADSP clock */
 	return adsp_default_clk_init(sdev, 0);
