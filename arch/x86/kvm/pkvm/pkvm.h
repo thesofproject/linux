@@ -102,6 +102,13 @@ static inline void pkvm_make_req_to_host(int req, struct kvm_vcpu *vcpu)
 	set_bit(req, &to_pkvm_vcpu(vcpu)->reqs_to_host);
 }
 
+static inline bool pkvm_has_req_to_host(int req, struct kvm_vcpu *vcpu)
+{
+	BUILD_BUG_ON(req >= sizeof(to_pkvm_vcpu(vcpu)->reqs_to_host) * 8);
+
+	return test_bit(req, &to_pkvm_vcpu(vcpu)->reqs_to_host);
+}
+
 struct pkvm_x86_ops {
 	void (*update_vcpu_state_from_host)(struct kvm_vcpu *vcpu);
 	void (*share_vcpu_state_with_host)(struct kvm_vcpu *vcpu);

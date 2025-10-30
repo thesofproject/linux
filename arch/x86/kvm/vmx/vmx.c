@@ -9547,6 +9547,36 @@ static void pkvm_vmx_update_vcpu_state_from_host(struct kvm_vcpu *vcpu)
 	 */
 }
 
+static void share_nonprotected_vcpu_state(struct kvm_vcpu *vcpu,
+					  struct kvm_vcpu *shared_vcpu)
+{
+	shared_vcpu->arch.event_exit_inst_len = 0;
+
+	switch (vmx_get_exit_reason(vcpu).basic) {
+	case EXIT_REASON_EXCEPTION_NMI: {
+		u32 ex_no = vmx_get_intr_info(vcpu) & INTR_INFO_VECTOR_MASK;
+
+		if (ex_no == DB_VECTOR) {
+			/*
+			 * DR6 can be decoded from the exit qualification which
+			 * is already shared. Only share guest DR7 with host.
+			 */
+			shared_vcpu->arch.dr7 = vmcs_readl(GUEST_DR7);
+		} else if (ex_no == BP_VECTOR) {
+			/*
+			 * Update instruction length as the host may reinject
+			 * #BP from user space while in guest debugging mode.
+			 */
+			shared_vcpu->arch.event_exit_inst_len =
+				vmcs_read32(VM_EXIT_INSTRUCTION_LEN);
+		}
+		break;
+	}
+	default:
+		break;
+	}
+}
+
 static void pkvm_vmx_share_vcpu_state_with_host(struct kvm_vcpu *vcpu)
 {
 	struct kvm_vcpu *shared_vcpu = to_pkvm_vcpu(vcpu)->shared_vcpu;
@@ -9589,6 +9619,13 @@ static void pkvm_vmx_share_vcpu_state_with_host(struct kvm_vcpu *vcpu)
 		}
 		vmx_segment_cache_test_set(shared_vmx, VCPU_SREG_CS, SEG_FIELD_AR);
 		vmx_segment_cache_test_set(shared_vmx, VCPU_SREG_SS, SEG_FIELD_AR);
+	}
+
+	if (pkvm_has_req_to_host(HOST_HANDLE_EXIT, vcpu) &&
+	    !vmx_get_exit_reason(vcpu).failed_vmentry &&
+	    !vmx->fail) {
+		if (!pkvm_is_protected_vcpu(vcpu))
+			share_nonprotected_vcpu_state(vcpu, shared_vcpu);
 	}
 }
 
