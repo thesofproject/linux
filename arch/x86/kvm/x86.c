@@ -9384,17 +9384,23 @@ static int kvm_vcpu_check_hw_bp(unsigned long addr, u32 type, u32 dr7,
 			dr6 |= (1 << i);
 	return dr6;
 }
+#endif /* !__PKVM_HYP__ */
 
 static int kvm_vcpu_do_singlestep(struct kvm_vcpu *vcpu)
 {
-	struct kvm_run *kvm_run = vcpu->run;
-
 	if (vcpu->guest_debug & KVM_GUESTDBG_SINGLESTEP) {
+#ifndef __PKVM_HYP__
+		struct kvm_run *kvm_run = vcpu->run;
+
 		kvm_run->debug.arch.dr6 = DR6_BS | DR6_ACTIVE_LOW;
 		kvm_run->debug.arch.pc = kvm_get_linear_rip(vcpu);
 		kvm_run->debug.arch.exception = DB_VECTOR;
 		kvm_run->exit_reason = KVM_EXIT_DEBUG;
 		return 0;
+#else
+		pkvm_make_req_to_host(HOST_HANDLE_GUESTDBG_SINGLESTEP, vcpu);
+		return 1;
+#endif
 	}
 	kvm_queue_exception_p(vcpu, DB_VECTOR, DR6_BS);
 	return 1;
@@ -9409,7 +9415,9 @@ int kvm_skip_emulated_instruction(struct kvm_vcpu *vcpu)
 	if (unlikely(!r))
 		return 0;
 
+#ifndef __PKVM_HYP__ /* No PMU support in the pKVM hypervisor */
 	kvm_pmu_instruction_retired(vcpu);
+#endif
 
 	/*
 	 * rflags is the old, "raw" value of the flags.  The new value has
@@ -9425,6 +9433,7 @@ int kvm_skip_emulated_instruction(struct kvm_vcpu *vcpu)
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_skip_emulated_instruction);
 
+#ifndef __PKVM_HYP__
 static bool kvm_is_code_breakpoint_inhibited(struct kvm_vcpu *vcpu)
 {
 	if (kvm_get_rflags(vcpu) & X86_EFLAGS_RF)
