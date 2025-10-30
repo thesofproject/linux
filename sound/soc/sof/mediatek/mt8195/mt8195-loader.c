@@ -10,7 +10,7 @@
 #include "mt8195.h"
 #include "../../ops.h"
 
-void sof_hifixdsp_boot_sequence(struct snd_sof_dev *sdev, u32 boot_addr)
+void mt8195_sof_hifixdsp_boot_sequence(struct snd_sof_dev *sdev, u32 boot_addr)
 {
 	/* ADSP bootup base */
 	snd_sof_dsp_write(sdev, DSP_REG_BAR, DSP_ALTRESETVEC, boot_addr);
@@ -47,7 +47,7 @@ void sof_hifixdsp_boot_sequence(struct snd_sof_dev *sdev, u32 boot_addr)
 				ADSP_RUNSTALL, 0);
 }
 
-void sof_hifixdsp_shutdown(struct snd_sof_dev *sdev)
+void mt8195_sof_hifixdsp_shutdown(struct snd_sof_dev *sdev)
 {
 	/* RUN_STALL pull high again to reset */
 	snd_sof_dsp_update_bits(sdev, DSP_REG_BAR, DSP_RESET_SW,
