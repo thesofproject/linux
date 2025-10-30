@@ -5887,6 +5887,7 @@ void vmx_patch_hypercall(struct kvm_vcpu *vcpu, unsigned char *hypercall)
 	hypercall[1] = 0x01;
 	hypercall[2] = 0xc1;
 }
+#endif /* !__PKVM_HYP__ */
 
 /* called to set cr0 as appropriate for a mov-to-cr0 exit. */
 static int handle_set_cr0(struct kvm_vcpu *vcpu, unsigned long val)
@@ -5932,6 +5933,7 @@ static int handle_set_cr4(struct kvm_vcpu *vcpu, unsigned long val)
 		return kvm_set_cr4(vcpu, val);
 }
 
+#ifndef __PKVM_HYP__
 static int handle_desc(struct kvm_vcpu *vcpu)
 {
 	/*
@@ -5943,6 +5945,7 @@ static int handle_desc(struct kvm_vcpu *vcpu)
 	WARN_ON_ONCE(!kvm_is_cr4_bit_set(vcpu, X86_CR4_UMIP));
 	return kvm_emulate_instruction(vcpu, 0);
 }
+#endif /* !__PKVM_HYP__ */
 
 static int handle_cr(struct kvm_vcpu *vcpu)
 {
@@ -5950,7 +5953,6 @@ static int handle_cr(struct kvm_vcpu *vcpu)
 	int cr;
 	int reg;
 	int err;
-	int ret;
 
 	exit_qualification = vmx_get_exit_qual(vcpu);
 	cr = exit_qualification & 15;
@@ -5963,17 +5965,30 @@ static int handle_cr(struct kvm_vcpu *vcpu)
 		case 0:
 			err = handle_set_cr0(vcpu, val);
 			return kvm_complete_insn_gp(vcpu, err);
+		/*
+		 * The pKVM hypervisor requires EPT and unrestricted guest
+		 * feature thus the guest will not cause move-to-cr3 vmexit.
+		 */
+#ifndef __PKVM_HYP__
 		case 3:
 			WARN_ON_ONCE(enable_unrestricted_guest);
 
 			err = kvm_set_cr3(vcpu, val);
 			return kvm_complete_insn_gp(vcpu, err);
+#endif
 		case 4:
 			err = handle_set_cr4(vcpu, val);
 			return kvm_complete_insn_gp(vcpu, err);
+		/*
+		 * The pKVM hypervisor requires TPR shadow feature thus the
+		 * guest will not cause move-to-cr8 exit.
+		 */
+#ifndef __PKVM_HYP__
 		case 8: {
 				u8 cr8_prev = kvm_get_cr8(vcpu);
 				u8 cr8 = (u8)val;
+				int ret;
+
 				err = kvm_set_cr8(vcpu, cr8);
 				ret = kvm_complete_insn_gp(vcpu, err);
 				if (lapic_in_kernel(vcpu))
@@ -5988,11 +6003,18 @@ static int handle_cr(struct kvm_vcpu *vcpu)
 				vcpu->run->exit_reason = KVM_EXIT_SET_TPR;
 				return 0;
 			}
+#endif
 		}
 		break;
 	case 2: /* clts */
 		KVM_BUG(1, vcpu->kvm, "Guest always owns CR0.TS");
 		return -EIO;
+	/*
+	 * Similar to move-to-cr3 and move-to-cr8, the pKVM hypervisor
+	 * virtualize CR3 and CR8 via VMX hardware features thus there is no
+	 * move-from-cr3 and move-from-cr8 vmexit.
+	 */
+#ifndef __PKVM_HYP__
 	case 1: /*mov from cr*/
 		switch (cr) {
 		case 3:
@@ -6009,6 +6031,7 @@ static int handle_cr(struct kvm_vcpu *vcpu)
 			return kvm_skip_emulated_instruction(vcpu);
 		}
 		break;
+#endif
 	case 3: /* lmsw */
 		val = (exit_qualification >> LMSW_SOURCE_DATA_SHIFT) & 0x0f;
 		trace_kvm_cr_write(0, (kvm_read_cr0_bits(vcpu, ~0xful) | val));
@@ -6018,12 +6041,15 @@ static int handle_cr(struct kvm_vcpu *vcpu)
 	default:
 		break;
 	}
+#ifndef __PKVM_HYP__ /* The pKVM vcpu doesn't have run page. */
 	vcpu->run->exit_reason = 0;
+#endif
 	vcpu_unimpl(vcpu, "unhandled control register: op %d cr %d\n",
 	       (int)(exit_qualification >> 4) & 3, cr);
 	return 0;
 }
 
+#ifndef __PKVM_HYP__
 static int handle_dr(struct kvm_vcpu *vcpu)
 {
 	unsigned long exit_qualification;
@@ -6650,8 +6676,8 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 #endif
 	[EXIT_REASON_NMI_WINDOW]	      = handle_nmi_window,
 	[EXIT_REASON_IO_INSTRUCTION]          = handle_io,
-#ifndef __PKVM_HYP__
 	[EXIT_REASON_CR_ACCESS]               = handle_cr,
+#ifndef __PKVM_HYP__
 	[EXIT_REASON_DR_ACCESS]               = handle_dr,
 	[EXIT_REASON_CPUID]                   = kvm_emulate_cpuid,
 	[EXIT_REASON_MSR_READ]                = kvm_emulate_rdmsr,
