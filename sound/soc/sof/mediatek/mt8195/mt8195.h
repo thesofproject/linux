@@ -156,6 +156,6 @@ struct snd_sof_dev;
 #define SUSPEND_DSP_IDLE_TIMEOUT_US		1000000	/* timeout to wait dsp idle, 1 sec */
 #define SUSPEND_DSP_IDLE_POLL_INTERVAL_US	500	/* 0.5 msec */
 
-void sof_hifixdsp_boot_sequence(struct snd_sof_dev *sdev, u32 boot_addr);
-void sof_hifixdsp_shutdown(struct snd_sof_dev *sdev);
+void mt8195_sof_hifixdsp_boot_sequence(struct snd_sof_dev *sdev, u32 boot_addr);
+void mt8195_sof_hifixdsp_shutdown(struct snd_sof_dev *sdev);
 #endif
