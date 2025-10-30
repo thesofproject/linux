@@ -241,6 +241,32 @@ static int handle_nmi_window(struct kvm_vcpu *vcpu)
 }
 
 /*
+ * This function is a 1:1 copy of handle_io in vmx.c.
+ * TODO: Check whether this requires updates whenever handle_io in vmx.c is
+ * updated in the future.
+ */
+static int handle_io(struct kvm_vcpu *vcpu)
+{
+	unsigned long exit_qualification;
+	int size, in, string;
+	unsigned int port;
+
+	exit_qualification = vmx_get_exit_qual(vcpu);
+	string = (exit_qualification & 16) != 0;
+
+	++vcpu->stat.io_exits;
+
+	if (string)
+		return kvm_emulate_instruction(vcpu, 0);
+
+	port = exit_qualification >> 16;
+	size = (exit_qualification & 7) + 1;
+	in = (exit_qualification & 8) != 0;
+
+	return kvm_fast_pio(vcpu, size, port, in);
+}
+
+/*
  * The exit handlers return 1 if the exit was handled fully and guest execution
  * may resume.  Otherwise they set the kvm_run parameter to indicate what needs
  * to be done to userspace and return 0.
@@ -250,6 +276,7 @@ static int (*pkvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_EXTERNAL_INTERRUPT]      = handle_external_interrupt,
 	[EXIT_REASON_TRIPLE_FAULT]            = handle_triple_fault,
 	[EXIT_REASON_NMI_WINDOW]	      = handle_nmi_window,
+	[EXIT_REASON_IO_INSTRUCTION]          = handle_io,
 };
 
 static const int pkvm_vmx_max_exit_handlers = ARRAY_SIZE(pkvm_vmx_exit_handlers);
