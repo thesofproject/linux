@@ -167,7 +167,7 @@ static int mt8195_run(struct snd_sof_dev *sdev)
 
 	adsp_bootup_addr = SRAM_PHYS_BASE_FROM_DSP_VIEW;
 	dev_dbg(sdev->dev, "HIFIxDSP boot from base : 0x%08X\n", adsp_bootup_addr);
-	sof_hifixdsp_boot_sequence(sdev, adsp_bootup_addr);
+	mt8195_sof_hifixdsp_boot_sequence(sdev, adsp_bootup_addr);
 
 	return 0;
 }
@@ -200,9 +200,9 @@ static int mt8195_dsp_probe(struct snd_sof_dev *sdev)
 		return -EINVAL;
 	}
 
-	ret = adsp_clock_on(sdev);
+	ret = mt8195_adsp_clock_on(sdev);
 	if (ret) {
-		dev_err(sdev->dev, "adsp_clock_on fail!\n");
+		dev_err(sdev->dev, "mt8195_adsp_clock_on fail!\n");
 		return -EINVAL;
 	}
 
@@ -275,7 +275,7 @@ exit_pdev_unregister:
 err_adsp_sram_power_off:
 	adsp_sram_power_on(&pdev->dev, false);
 exit_clk_disable:
-	adsp_clock_off(sdev);
+	mt8195_adsp_clock_off(sdev);
 
 	return ret;
 }
@@ -292,7 +292,7 @@ static void mt8195_dsp_remove(struct snd_sof_dev *sdev)
 
 	platform_device_unregister(priv->ipc_dev);
 	adsp_sram_power_on(&pdev->dev, false);
-	adsp_clock_off(sdev);
+	mt8195_adsp_clock_off(sdev);
 }
 
 static int mt8195_dsp_suspend(struct snd_sof_dev *sdev, u32 target_state)
@@ -314,7 +314,7 @@ static int mt8195_dsp_suspend(struct snd_sof_dev *sdev, u32 target_state)
 	}
 
 	/* stall and reset dsp */
-	sof_hifixdsp_shutdown(sdev);
+	mt8195_sof_hifixdsp_shutdown(sdev);
 
 	/* power down adsp sram */
 	ret = adsp_sram_power_on(&pdev->dev, false);
@@ -324,7 +324,7 @@ static int mt8195_dsp_suspend(struct snd_sof_dev *sdev, u32 target_state)
 	}
 
 	/* turn off adsp clock */
-	return adsp_clock_off(sdev);
+	return mt8195_adsp_clock_off(sdev);
 }
 
 static int mt8195_dsp_resume(struct snd_sof_dev *sdev)
@@ -332,9 +332,9 @@ static int mt8195_dsp_resume(struct snd_sof_dev *sdev)
 	int ret;
 
 	/* turn on adsp clock */
-	ret = adsp_clock_on(sdev);
+	ret = mt8195_adsp_clock_on(sdev);
 	if (ret) {
-		dev_err(sdev->dev, "adsp_clock_on fail!\n");
+		dev_err(sdev->dev, "mt8195_adsp_clock_on fail!\n");
 		return ret;
 	}
 
