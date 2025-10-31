@@ -6573,6 +6573,7 @@ static int handle_preemption_timer(struct kvm_vcpu *vcpu)
 	kvm_lapic_expired_hv_timer(vcpu);
 	return 1;
 }
+#endif /* !__PKVM_HYP__ */
 
 /*
  * When nested=0, all VMX instruction VM Exits filter here.  The handlers
@@ -6584,6 +6585,7 @@ static int handle_vmx_instruction(struct kvm_vcpu *vcpu)
 	return 1;
 }
 
+#ifndef __PKVM_HYP__
 static int handle_tdx_instruction(struct kvm_vcpu *vcpu)
 {
 	kvm_queue_exception(vcpu, UD_VECTOR);
@@ -6705,7 +6707,6 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 #endif
 	[EXIT_REASON_RDPMC]                   = kvm_emulate_rdpmc,
 	[EXIT_REASON_VMCALL]                  = handle_vmcall,
-#ifndef __PKVM_HYP__
 	[EXIT_REASON_VMCLEAR]		      = handle_vmx_instruction,
 	[EXIT_REASON_VMLAUNCH]		      = handle_vmx_instruction,
 	[EXIT_REASON_VMPTRLD]		      = handle_vmx_instruction,
@@ -6715,6 +6716,7 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_VMWRITE]		      = handle_vmx_instruction,
 	[EXIT_REASON_VMOFF]		      = handle_vmx_instruction,
 	[EXIT_REASON_VMON]		      = handle_vmx_instruction,
+#ifndef __PKVM_HYP__
 	[EXIT_REASON_TPR_BELOW_THRESHOLD]     = handle_tpr_below_threshold,
 	[EXIT_REASON_APIC_ACCESS]             = handle_apic_access,
 	[EXIT_REASON_APIC_WRITE]              = handle_apic_write,
@@ -6731,13 +6733,17 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_MWAIT_INSTRUCTION]	      = kvm_emulate_mwait,
 	[EXIT_REASON_MONITOR_TRAP_FLAG]       = handle_monitor_trap,
 	[EXIT_REASON_MONITOR_INSTRUCTION]     = kvm_emulate_monitor,
+#endif
 	[EXIT_REASON_INVEPT]                  = handle_vmx_instruction,
 	[EXIT_REASON_INVVPID]                 = handle_vmx_instruction,
+#ifndef __PKVM_HYP__
 	[EXIT_REASON_RDRAND]                  = kvm_handle_invalid_op,
 	[EXIT_REASON_RDSEED]                  = kvm_handle_invalid_op,
 	[EXIT_REASON_PML_FULL]		      = handle_pml_full,
 	[EXIT_REASON_INVPCID]                 = handle_invpcid,
+#endif
 	[EXIT_REASON_VMFUNC]		      = handle_vmx_instruction,
+#ifndef __PKVM_HYP__
 	[EXIT_REASON_PREEMPTION_TIMER]	      = handle_preemption_timer,
 	[EXIT_REASON_ENCLS]		      = handle_encls,
 	[EXIT_REASON_BUS_LOCK]                = handle_bus_lock_vmexit,
