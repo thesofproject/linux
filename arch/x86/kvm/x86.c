@@ -14885,4 +14885,20 @@ int pkvm_vcpu_enter_guest(struct kvm_vcpu *vcpu, bool force_immediate_exit,
 
 	return ret;
 }
+
+int pkvm_emulate_hypercall(struct kvm_vcpu *vcpu)
+{
+	int ret = -KVM_EPERM;
+
+	if (!pkvm_is_protected_vcpu(vcpu))
+		return 0;
+
+	if (kvm_x86_call(get_cpl)(vcpu)) {
+		kvm_inject_gp(vcpu, 0);
+		return 1;
+	}
+
+	kvm_rax_write(vcpu, ret);
+	return kvm_skip_emulated_instruction(vcpu);
+}
 #endif /* !__PKVM_HYP__ */

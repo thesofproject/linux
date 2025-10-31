@@ -127,5 +127,6 @@ unsigned long pkvm_pcpu_tss(int cpu);
 int pkvm_vcpu_enter_guest(struct kvm_vcpu *vcpu, bool force_immediate_exit,
 			  unsigned long *reqs_to_host);
 void pkvm_x86_ops_init(struct pkvm_x86_ops *ops);
+int pkvm_emulate_hypercall(struct kvm_vcpu *vcpu);
 
 #endif /* __PKVM_X86_PKVM_H */
