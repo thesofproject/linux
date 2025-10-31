@@ -1468,6 +1468,27 @@ static bool pkvm_apic_init_signal_blocked(struct kvm_vcpu *vcpu)
 	return false;
 }
 
+static int pkvm_complete_emulated_msr(struct kvm_vcpu *vcpu, int err)
+{
+	if (pkvm_is_protected_vcpu(vcpu)) {
+		/*
+		 * To complete emulation with error code, complete_emulated_msr
+		 * PV interface should be used to tell the pKVM hypervisor to
+		 * inject #GP as the host is not allowed to inject any exception
+		 * to a pVM. If the emulation is successful, then nothing needs
+		 * to be completed from the host side as the pKVM hypervisor will
+		 * skip the MSR instruction before entering the pVM again.
+		 */
+		return err ? pkvm_hypercall(complete_emulated_msr, err) : 1;
+	}
+
+	/*
+	 * For npVM, the host is allowed to inject #GP or skip the MSR
+	 * instruction. No need to bother the pKVM hypervisor.
+	 */
+	return kvm_complete_insn_gp(vcpu, err);
+}
+
 struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.name = KBUILD_MODNAME,
 
@@ -1582,6 +1603,8 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 #endif
 
 	.apic_init_signal_blocked = pkvm_apic_init_signal_blocked,
+
+	.complete_emulated_msr = pkvm_complete_emulated_msr,
 
 	.vcpu_deliver_sipi_vector = kvm_vcpu_deliver_sipi_vector,
 };
