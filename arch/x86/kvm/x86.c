@@ -1670,9 +1670,9 @@ unsigned long kvm_get_dr(struct kvm_vcpu *vcpu, int dr)
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_get_dr);
 
-#ifndef __PKVM_HYP__
 int kvm_emulate_rdpmc(struct kvm_vcpu *vcpu)
 {
+#ifndef __PKVM_HYP__
 	u32 pmc = kvm_rcx_read(vcpu);
 	u64 data;
 
@@ -1684,9 +1684,13 @@ int kvm_emulate_rdpmc(struct kvm_vcpu *vcpu)
 	kvm_rax_write(vcpu, (u32)data);
 	kvm_rdx_write(vcpu, data >> 32);
 	return kvm_skip_emulated_instruction(vcpu);
+#else
+	/* The pKVM hypervisor doesn't support PMU emulation. */
+	kvm_inject_gp(vcpu, 0);
+	return 1;
+#endif
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_rdpmc);
-#endif /* !__PKVM_HYP__ */
 
 /*
  * Some IA32_ARCH_CAPABILITIES bits have dependencies on MSRs that KVM
