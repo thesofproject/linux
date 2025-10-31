@@ -6554,6 +6554,7 @@ static int handle_invpcid(struct kvm_vcpu *vcpu)
 
 	return kvm_handle_invpcid(vcpu, type, gva);
 }
+#endif /* !__PKVM_HYP__ */
 
 static int handle_pml_full(struct kvm_vcpu *vcpu)
 {
@@ -6579,7 +6580,6 @@ static int handle_pml_full(struct kvm_vcpu *vcpu)
 	 */
 	return 1;
 }
-#endif /* !__PKVM_HYP__ */
 
 static fastpath_t handle_fastpath_preemption_timer(struct kvm_vcpu *vcpu,
 						   bool force_immediate_exit)
@@ -6795,8 +6795,8 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_INVVPID]                 = handle_vmx_instruction,
 	[EXIT_REASON_RDRAND]                  = kvm_handle_invalid_op,
 	[EXIT_REASON_RDSEED]                  = kvm_handle_invalid_op,
-#ifndef __PKVM_HYP__
 	[EXIT_REASON_PML_FULL]		      = handle_pml_full,
+#ifndef __PKVM_HYP__
 	[EXIT_REASON_INVPCID]                 = handle_invpcid,
 #endif
 	[EXIT_REASON_VMFUNC]		      = handle_vmx_instruction,
