@@ -6049,7 +6049,6 @@ static int handle_cr(struct kvm_vcpu *vcpu)
 	return 0;
 }
 
-#ifndef __PKVM_HYP__
 static int handle_dr(struct kvm_vcpu *vcpu)
 {
 	unsigned long exit_qualification;
@@ -6074,11 +6073,13 @@ static int handle_dr(struct kvm_vcpu *vcpu)
 		 * guest debugging itself.
 		 */
 		if (vcpu->guest_debug & KVM_GUESTDBG_USE_HW_BP) {
+#ifndef __PKVM_HYP__
 			vcpu->run->debug.arch.dr6 = DR6_BD | DR6_ACTIVE_LOW;
 			vcpu->run->debug.arch.dr7 = dr7;
 			vcpu->run->debug.arch.pc = kvm_get_linear_rip(vcpu);
 			vcpu->run->debug.arch.exception = DB_VECTOR;
 			vcpu->run->exit_reason = KVM_EXIT_DEBUG;
+#endif
 			return 0;
 		} else {
 			kvm_queue_exception_p(vcpu, DB_VECTOR, DR6_BD);
@@ -6109,7 +6110,6 @@ static int handle_dr(struct kvm_vcpu *vcpu)
 out:
 	return kvm_complete_insn_gp(vcpu, err);
 }
-#endif /* !__PKVM_HYP__ */
 
 void vmx_sync_dirty_debug_regs(struct kvm_vcpu *vcpu)
 {
@@ -6677,8 +6677,8 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_NMI_WINDOW]	      = handle_nmi_window,
 	[EXIT_REASON_IO_INSTRUCTION]          = handle_io,
 	[EXIT_REASON_CR_ACCESS]               = handle_cr,
-#ifndef __PKVM_HYP__
 	[EXIT_REASON_DR_ACCESS]               = handle_dr,
+#ifndef __PKVM_HYP__
 	[EXIT_REASON_CPUID]                   = kvm_emulate_cpuid,
 	[EXIT_REASON_MSR_READ]                = kvm_emulate_rdmsr,
 	[EXIT_REASON_MSR_WRITE]               = kvm_emulate_wrmsr,
