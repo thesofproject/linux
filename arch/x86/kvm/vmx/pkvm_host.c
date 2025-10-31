@@ -10,6 +10,8 @@
 #include "x86_ops.h"
 #include "vmx.h"
 
+static int pkvm_complete_emulated_msr(struct kvm_vcpu *vcpu, int err);
+
 static void pkvm_free_loaded_vmcs(struct loaded_vmcs *loaded_vmcs)
 {
 	if (!loaded_vmcs->vmcs)
@@ -282,6 +284,14 @@ static int handle_dr(struct kvm_vcpu *vcpu)
 	return 1;
 }
 
+static int handle_rdmsr(struct kvm_vcpu *vcpu)
+{
+	if (pkvm_host_has_emulated_msr(vcpu->kvm, kvm_rcx_read(vcpu)))
+		return kvm_emulate_rdmsr(vcpu);
+
+	return pkvm_complete_emulated_msr(vcpu, 1);
+}
+
 /*
  * The exit handlers return 1 if the exit was handled fully and guest execution
  * may resume.  Otherwise they set the kvm_run parameter to indicate what needs
@@ -294,6 +304,7 @@ static int (*pkvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_NMI_WINDOW]	      = handle_nmi_window,
 	[EXIT_REASON_IO_INSTRUCTION]          = handle_io,
 	[EXIT_REASON_DR_ACCESS]               = handle_dr,
+	[EXIT_REASON_MSR_READ]                = handle_rdmsr,
 };
 
 static const int pkvm_vmx_max_exit_handlers = ARRAY_SIZE(pkvm_vmx_exit_handlers);
