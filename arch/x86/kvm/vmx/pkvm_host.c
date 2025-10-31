@@ -1629,6 +1629,20 @@ static int pkvm_leave_smm(struct kvm_vcpu *vcpu, const union kvm_smram *smram)
 static void pkvm_enable_smi_window(struct kvm_vcpu *vcpu) {}
 #endif
 
+static int pkvm_check_emulate_instruction(struct kvm_vcpu *vcpu, int emul_type,
+					  void *insn, int insn_len)
+{
+	/*
+	 * The host can emulate instruction for npVMs but cannot for pVMs. Thus
+	 * pVM's kernel should be enlightened to avoid causing such vmexits.
+	 * Return X86EMUL_UNHANDLEABLE in case it is not.
+	 */
+	if (pkvm_is_protected_vcpu(vcpu))
+		return X86EMUL_UNHANDLEABLE;
+
+	return vmx_check_emulate_instruction(vcpu, emul_type, insn, insn_len);
+}
+
 static bool pkvm_apic_init_signal_blocked(struct kvm_vcpu *vcpu)
 {
 	/*
@@ -1776,6 +1790,7 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.enable_smi_window = pkvm_enable_smi_window,
 #endif
 
+	.check_emulate_instruction = pkvm_check_emulate_instruction,
 	.apic_init_signal_blocked = pkvm_apic_init_signal_blocked,
 
 	.complete_emulated_msr = pkvm_complete_emulated_msr,
