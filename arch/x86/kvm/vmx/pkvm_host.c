@@ -468,6 +468,15 @@ static int handle_pause(struct kvm_vcpu *vcpu)
 	return kvm_skip_emulated_instruction(vcpu);
 }
 
+static int handle_bus_lock_vmexit(struct kvm_vcpu *vcpu)
+{
+	/*
+	 * The bus_lock_detected flag is set when got the vmexit reason from the
+	 * pKVM hypervisor. Nothing to do here.
+	 */
+	return 1;
+}
+
 /*
  * The exit handlers return 1 if the exit was handled fully and guest execution
  * may resume.  Otherwise they set the kvm_run parameter to indicate what needs
@@ -494,6 +503,7 @@ static int (*pkvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_EPT_VIOLATION]	      = handle_ept_violation,
 	[EXIT_REASON_EPT_MISCONFIG]           = handle_ept_misconfig,
 	[EXIT_REASON_PAUSE_INSTRUCTION]       = handle_pause,
+	[EXIT_REASON_BUS_LOCK]                = handle_bus_lock_vmexit,
 };
 
 static const int pkvm_vmx_max_exit_handlers = ARRAY_SIZE(pkvm_vmx_exit_handlers);
@@ -1321,7 +1331,21 @@ static fastpath_t pkvm_vcpu_run(struct kvm_vcpu *vcpu, u64 run_flags)
 
 static int pkvm_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 {
-	return __pkvm_handle_exit(vcpu, exit_fastpath);
+	int ret = __pkvm_handle_exit(vcpu, exit_fastpath);
+
+	/*
+	 * Exit to user space when bus lock detected to inform that there is
+	 * a bus lock in guest.
+	 */
+	if (vmx_get_exit_reason(vcpu).bus_lock_detected) {
+		if (ret > 0)
+			vcpu->run->exit_reason = KVM_EXIT_X86_BUS_LOCK;
+
+		vcpu->run->flags |= KVM_RUN_X86_BUS_LOCK;
+		return 0;
+	}
+
+	return ret;
 }
 
 static int pkvm_skip_emulated_instruction(struct kvm_vcpu *vcpu)
