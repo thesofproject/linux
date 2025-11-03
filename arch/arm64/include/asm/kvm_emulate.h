@@ -707,6 +707,9 @@ static inline void vcpu_set_hcrx(struct kvm_vcpu *vcpu)
 		if (kvm_has_feat(kvm, ID_AA64ISAR2_EL1, MOPS, IMP))
 			vcpu->arch.hcrx_el2 |= (HCRX_EL2_MSCEn | HCRX_EL2_MCE2);
 
+		if (!kvm_has_feat(kvm, ID_AA64PFR1_EL1, NMI, IMP))
+			vcpu->arch.hcrx_el2 |= HCRX_EL2_TALLINT;
+
 		if (kvm_has_tcr2(kvm))
 			vcpu->arch.hcrx_el2 |= HCRX_EL2_TCR2En;
 
