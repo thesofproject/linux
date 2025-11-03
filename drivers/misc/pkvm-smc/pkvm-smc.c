@@ -12,7 +12,6 @@
 #define HYP_EVENT_FILE ../../../../drivers/misc/pkvm-smc/pkvm/events.h
 #include <asm/kvm_define_hypevents.h>
 
-static unsigned long pkvm_module_token;
 int kvm_nvhe_sym(pkvm_smc_filter_hyp_init)(const struct pkvm_module_ops *ops);
 extern int kvm_nvhe_sym(permissive);
 
@@ -25,8 +24,7 @@ static int __init smc_filter_init(void)
 	int ret;
 
 	kvm_nvhe_sym(permissive) = permissive;
-	ret = pkvm_load_el2_module(kvm_nvhe_sym(pkvm_smc_filter_hyp_init),
-				   &pkvm_module_token);
+	ret = pkvm_load_el2_module(kvm_nvhe_sym(pkvm_smc_filter_hyp_init));
 	if (ret)
 		pr_err("Failed to register pKVM SMC filter: %d\n", ret);
 	else
