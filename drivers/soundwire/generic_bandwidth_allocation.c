@@ -216,6 +216,9 @@ static void _sdw_compute_port_params(struct sdw_bus *bus,
 				if (m_rt->stream->state > SDW_STREAM_DISABLED ||
 				    m_rt->stream->state < SDW_STREAM_CONFIGURED)
 					continue;
+				/* BPT stream is handled in sdw_compute_dp0_port_params */
+				if (m_rt->stream->type == SDW_STREAM_BPT)
+					continue;
 				sdw_compute_master_ports(m_rt, &params[i], &port_bo, hstop);
 			}
 
@@ -355,6 +358,9 @@ static int sdw_get_group_count(struct sdw_bus *bus,
 	}
 
 	list_for_each_entry(m_rt, &bus->m_rt_list, bus_node) {
+		if (m_rt->stream->type == SDW_STREAM_BPT)
+			continue;
+
 		if (m_rt->stream->state == SDW_STREAM_DEPREPARED)
 			continue;
 
