@@ -341,9 +341,8 @@ static __init void init_host_state_area(struct vcpu_vmx *vmx, struct pkvm_hyp *p
 	vmcs_write16(HOST_FS_SELECTOR, selector);
 	vmcs_writel(HOST_FS_BASE, 0);
 	savesegment(gs, selector);
-	vmcs_write16(HOST_GS_SELECTOR, selector);
-	rdmsrq(MSR_GS_BASE, msrq);
-	vmcs_writel(HOST_GS_BASE, msrq);
+	vmcs_write16(HOST_GS_SELECTOR, 0);
+	vmcs_writel(HOST_GS_BASE, pkvm_sym(pkvm_per_cpu_offset)(cpu));
 
 	vmcs_write16(HOST_TR_SELECTOR, GDT_ENTRY_TSS*8);
 	vmcs_writel(HOST_TR_BASE, (unsigned long)&get_cpu_entry_area(cpu)->tss.x86_tss);
