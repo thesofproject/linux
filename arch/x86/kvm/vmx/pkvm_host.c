@@ -1909,6 +1909,8 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.complete_emulated_msr = pkvm_complete_emulated_msr,
 
 	.vcpu_deliver_sipi_vector = kvm_vcpu_deliver_sipi_vector,
+
+	.get_untagged_addr = vmx_get_untagged_addr,
 };
 
 static struct kvm_pmc *pkvm_intel_rdpmc_ecx_to_pmc(struct kvm_vcpu *vcpu,
