@@ -566,6 +566,18 @@ static int sdw_compute_bus_params(struct sdw_bus *bus)
 		clk_buf = NULL;
 	}
 
+	/*
+	 * Use the maximum freq to get maximum bandwidth and no need to try another freq
+	 * if any BPT stream is running
+	 */
+	list_for_each_entry(m_rt, &bus->m_rt_list, bus_node) {
+		if (m_rt->stream->type == SDW_STREAM_BPT &&
+		    m_rt->stream->state < SDW_STREAM_DEPREPARED) {
+			clk_values = 1;
+			clk_buf = NULL;
+		}
+	}
+
 	/* If dynamic scaling is not supported, don't try higher freq */
 	if (!is_clock_scaling_supported(bus))
 		clk_values = 1;
