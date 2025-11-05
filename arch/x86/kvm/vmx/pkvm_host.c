@@ -495,6 +495,29 @@ static int handle_notify(struct kvm_vcpu *vcpu)
 	return 1;
 }
 
+static int vmx_get_msr_imm_reg(struct kvm_vcpu *vcpu)
+{
+	return vmx_get_instr_info_reg(to_vmx(vcpu)->instr_info);
+}
+
+static int handle_rdmsr_imm(struct kvm_vcpu *vcpu)
+{
+	if (pkvm_host_has_emulated_msr(vcpu->kvm, vmx_get_exit_qual(vcpu)))
+		return kvm_emulate_rdmsr_imm(vcpu, vmx_get_exit_qual(vcpu),
+					     vmx_get_msr_imm_reg(vcpu));
+
+	return pkvm_complete_emulated_msr(vcpu, 1);
+}
+
+static int handle_wrmsr_imm(struct kvm_vcpu *vcpu)
+{
+	if (pkvm_host_has_emulated_msr(vcpu->kvm, vmx_get_exit_qual(vcpu)))
+		return kvm_emulate_wrmsr_imm(vcpu, vmx_get_exit_qual(vcpu),
+					     vmx_get_msr_imm_reg(vcpu));
+
+	return pkvm_complete_emulated_msr(vcpu, 1);
+}
+
 /*
  * The exit handlers return 1 if the exit was handled fully and guest execution
  * may resume.  Otherwise they set the kvm_run parameter to indicate what needs
@@ -523,6 +546,8 @@ static int (*pkvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_PAUSE_INSTRUCTION]       = handle_pause,
 	[EXIT_REASON_BUS_LOCK]                = handle_bus_lock_vmexit,
 	[EXIT_REASON_NOTIFY]		      = handle_notify,
+	[EXIT_REASON_MSR_READ_IMM]            = handle_rdmsr_imm,
+	[EXIT_REASON_MSR_WRITE_IMM]           = handle_wrmsr_imm,
 };
 
 static const int pkvm_vmx_max_exit_handlers = ARRAY_SIZE(pkvm_vmx_exit_handlers);
