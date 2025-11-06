@@ -1535,11 +1535,10 @@ static bool pkvm_handle_psci(struct pkvm_hyp_vcpu *hyp_vcpu)
 	return pvm_psci_not_supported(hyp_vcpu);
 }
 
-int pkvm_handle_empty_memcache(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
+static int pkvm_request_vcpu_memcache(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 {
-	struct kvm_hyp_req *req;
+	struct kvm_hyp_req *req = pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_MEM);
 
-	req = pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_MEM);
 	if (!req)
 		return -ENOMEM;
 
@@ -1547,7 +1546,63 @@ int pkvm_handle_empty_memcache(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 	req->mem.nr_pages = kvm_mmu_cache_min_pages(&hyp_vcpu->vcpu.kvm->arch.mmu);
 
 	write_sysreg_el2(read_sysreg_el2(SYS_ELR) - 4, SYS_ELR);
+	*exit_code = ARM_EXCEPTION_HYP_REQ;
 
+	return 0;
+}
+
+static int __pkvm_request_split(struct pkvm_hyp_vcpu *hyp_vcpu, u64 ipa)
+{
+	struct kvm_hyp_req *req = pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_SPLIT);
+
+	if (!req)
+		return -ENOMEM;
+
+	req->split.guest_ipa = ALIGN_DOWN(ipa, PMD_SIZE);
+	req->split.size = PMD_SIZE;
+
+	return 0;
+}
+
+static int pkvm_request_split(struct pkvm_hyp_vcpu *hyp_vcpu, u64 ipa, u64 nr_pages, u64 *exit_code)
+{
+	u64 end = ipa + (nr_pages * PAGE_SIZE);
+	int ret;
+
+	if (!IS_ALIGNED(ipa, PMD_SIZE)) {
+		ret = __pkvm_request_split(hyp_vcpu, ipa);
+		if (ret)
+			return ret;
+
+		/* This request already covers end */
+		if (ALIGN(ipa + 1, PMD_SIZE) >= end)
+			goto end;
+	}
+
+	if (!IS_ALIGNED(end, PMD_SIZE)) {
+		ret = __pkvm_request_split(hyp_vcpu, end);
+		if (ret)
+			return ret;
+	}
+
+end:
+	write_sysreg_el2(read_sysreg_el2(SYS_ELR) - 4, SYS_ELR);
+	*exit_code = ARM_EXCEPTION_HYP_REQ;
+
+	return 0;
+}
+
+static int pkvm_request_map(struct pkvm_hyp_vcpu *hyp_vcpu, u64 ipa, u64 nr_pages, u64 *exit_code)
+{
+	struct kvm_hyp_req *req = pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_MAP);
+
+	if (!req)
+		return -ENOMEM;
+
+	req->map.guest_ipa = ipa;
+	req->map.size = nr_pages << PAGE_SHIFT;
+
+	write_sysreg_el2(read_sysreg_el2(SYS_ELR) - 4, SYS_ELR);
 	*exit_code = ARM_EXCEPTION_HYP_REQ;
 
 	return 0;
@@ -1560,7 +1615,6 @@ static bool pkvm_memshare_call(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 	u64 ipa = smccc_get_arg1(vcpu);
 	u64 nr_pages = smccc_get_arg2(vcpu);
 	u64 arg3 = smccc_get_arg3(vcpu);
-	struct kvm_hyp_req *req;
 	u64 nr_shared;
 	int err;
 
@@ -1580,20 +1634,17 @@ static bool pkvm_memshare_call(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 
 		return true;
 	case -ENOENT:
-		req = pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_MAP);
-		if (!req)
+		if (pkvm_request_map(hyp_vcpu, ipa, nr_pages, exit_code))
 			goto out_guest_err;
 
-		req->map.guest_ipa = ipa;
-		req->map.size = nr_pages << PAGE_SHIFT;
+		goto out_host;
+	case -E2BIG:
+		if (pkvm_request_split(hyp_vcpu, ipa, nr_pages, exit_code))
+			goto out_guest_err;
 
-		/*
-		 * We're about to go back to the host... let's not waste time
-		 * and check for the memcache while at it.
-		 */
-		fallthrough;
+		goto out_host;
 	case -ENOMEM:
-		if (pkvm_handle_empty_memcache(hyp_vcpu, exit_code))
+		if (pkvm_request_vcpu_memcache(hyp_vcpu, exit_code))
 			goto out_guest_err;
 
 		goto out_host;
@@ -1655,7 +1706,7 @@ static bool pkvm_install_ioguard_page(struct pkvm_hyp_vcpu *hyp_vcpu,
 		goto out_guest_err;
 
 	ret = __pkvm_install_ioguard_page(hyp_vcpu, ipa, nr_pages, &nr_guarded);
-	if (ret == -ENOMEM && !pkvm_handle_empty_memcache(hyp_vcpu, exit_code))
+	if (ret == -ENOMEM && !pkvm_request_vcpu_memcache(hyp_vcpu, exit_code))
 		return false;
 
 out_guest_err:
@@ -1732,18 +1783,8 @@ static bool pkvm_memrelinquish_call(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_co
 
 	ret = __pkvm_guest_relinquish_to_host(hyp_vcpu, ipa, &pa);
 	if (ret == -E2BIG) {
-		struct kvm_hyp_req *req = pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_SPLIT);
-
-		if (!req) {
-			ret = -ENOMEM;
+		if (pkvm_request_split(hyp_vcpu, PAGE_ALIGN_DOWN(ipa), 1, exit_code))
 			goto out_guest_err;
-		}
-
-		req->split.guest_ipa = ALIGN_DOWN(ipa, PMD_SIZE);
-		req->split.size = PMD_SIZE;
-
-		write_sysreg_el2(read_sysreg_el2(SYS_ELR) - 4, SYS_ELR);
-		*exit_code = ARM_EXCEPTION_HYP_REQ;
 
 		return false;
 	} else if (ret) {
