@@ -119,6 +119,15 @@ static inline bool is_mmio_range(unsigned long phys, unsigned long size)
 	return range_contains(&range, &target);
 }
 
+/*
+ * Convert a linux host kernel direct mapping virtual address to a pKVM mapping
+ * virtual address. Currently the two virtual addresses are the same.
+ */
+static inline void *kern_pkvm_va(void *va)
+{
+	return va;
+}
+
 void pkvm_clflush_cache_range(void *vaddr, unsigned int size);
 
 static inline void pkvm_clear_memory(void *va, size_t size)
