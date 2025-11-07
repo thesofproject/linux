@@ -228,8 +228,9 @@ static void _sdw_compute_port_params(struct sdw_bus *bus, struct sdw_group_param
 				/*
 				 * hstart = hstop - params->hwidth + 1.
 				 * At this point after hstop = hstop - params[i].hwidth above,
-				 * the hstart is equal to hstop + 1, and bus->bpt_hstop should
-				 * be hstart - 1. so we can set bpt_hstop to hstop directly.
+				 * the hstart is equal to hstop + 1, and bus->params.bpt_hstop
+				 * should be hstart - 1. so we can set bpt_hstop to hstop
+				 * directly.
 				 */
 				bus->params.bpt_hstop = hstop;
 			}
@@ -267,8 +268,16 @@ static int sdw_compute_group_params(struct sdw_bus *bus,
 			 */
 			if (m_rt->stream->state != SDW_STREAM_ENABLED &&
 			    m_rt->stream->state != SDW_STREAM_PREPARED &&
-			    m_rt->stream->state != SDW_STREAM_DISABLED)
+			    m_rt->stream->state != SDW_STREAM_DISABLED) {
 				continue;
+			} else if (m_rt->stream->type == SDW_STREAM_BPT) {
+				/*
+				 * If any BPT stream is running or pause, exclude the BPT columns
+				 * BPT: col 0.. bus->params.bpt_hstop
+				 * Audio: col bus->params.bpt_hstop + 1 .. bus->params.col - 1
+				 */
+				sel_col = bus->params.col - bus->params.bpt_hstop - 1;
+			}
 		}
 
 		/* Don't count BPT stream bandwidth, it will use the remaining bandwidth */
@@ -290,6 +299,14 @@ static int sdw_compute_group_params(struct sdw_bus *bus,
 	for (l = 0; l < SDW_MAX_LANES; l++) {
 		if (l > 0 && !bus->params.lane_used_bandwidth[l])
 			continue;
+
+		/*
+		 * Currently, BPT stream is only implemented on lane 0 which means all columns
+		 * are available for lane 1 and above. Set sel_col back.
+		 */
+		if (l > 0)
+			sel_col = bus->params.col;
+
 		/* reset column_needed for each lane */
 		column_needed = 0;
 		for (i = 0; i < group->count; i++) {
@@ -303,8 +320,13 @@ static int sdw_compute_group_params(struct sdw_bus *bus,
 			/* There is no control column for lane 1 and above */
 			if (column_needed > sel_col)
 				return -EINVAL;
-			/* Column 0 is control column on lane 0 */
-			if (params[i].lane == 0 && column_needed > sel_col - 1)
+			/*
+			 * Column 0 is the control column on lane 0. However, when sel_col is
+			 * reduced (e.g. due to a running BPT stream), sel_col already represents
+			 * usable audio columns.
+			 */
+			if (sel_col == bus->params.col && params[i].lane == 0 &&
+			    column_needed > sel_col - 1)
 				return -EINVAL;
 		}
 	}
@@ -570,8 +592,10 @@ static int sdw_compute_bus_params(struct sdw_bus *bus)
 	struct sdw_master_runtime *m_rt;
 	struct sdw_slave_runtime *s_rt;
 	unsigned int curr_dr_freq = 0;
+	bool is_bpt_running = false;
 	int i, l, clk_values, ret;
 	bool is_gear = false;
+	int available_col;
 	int m_lane = 0;
 	u32 *clk_buf;
 
@@ -596,6 +620,12 @@ static int sdw_compute_bus_params(struct sdw_bus *bus)
 		    m_rt->stream->state < SDW_STREAM_DEPREPARED) {
 			clk_values = 1;
 			clk_buf = NULL;
+			/*
+			 * If any BPT stream is active, the available audio columns should exclude
+			 * the BPT columns
+			 */
+			if (m_rt->stream->state >= SDW_STREAM_PREPARED)
+				is_bpt_running = true;
 		}
 	}
 
@@ -618,7 +648,21 @@ static int sdw_compute_bus_params(struct sdw_bus *bus)
 
 		total_col = curr_dr_freq / mstr_prop->default_frame_rate / mstr_prop->default_row;
 
-		if (curr_dr_freq * (total_col - 1) >=
+		/*
+		 * available columns for audio stream on lane 0:
+		 * - exclude control column 0
+		 * - if BPT is active, also exclude columns 1..bpt_hstop used by DP0
+		 */
+		if (is_bpt_running)
+			available_col = total_col - bus->params.bpt_hstop - 1;
+		else
+			available_col = total_col - 1;
+
+		if (available_col <= 0)
+			continue;
+
+		/* Keep formula consistent with sdw_select_row_col() */
+		if (curr_dr_freq * available_col >=
 		    bus->params.bandwidth * total_col)
 			break;
 
