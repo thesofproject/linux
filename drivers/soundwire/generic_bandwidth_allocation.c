@@ -260,6 +260,11 @@ static int sdw_compute_group_params(struct sdw_bus *bus,
 			    m_rt->stream->state != SDW_STREAM_DISABLED)
 				continue;
 		}
+
+		/* Don't count BPT stream bandwidth, it will use the remaining bandwidth */
+		if (m_rt->stream->type == SDW_STREAM_BPT)
+			continue;
+
 		list_for_each_entry(p_rt, &m_rt->port_list, port_node) {
 			rate = m_rt->stream->params.rate;
 			bps = m_rt->stream->params.bps;
@@ -601,6 +606,9 @@ static int sdw_compute_bus_params(struct sdw_bus *bus)
 			break;
 
 		list_for_each_entry(m_rt, &bus->m_rt_list, bus_node) {
+			/* BPT stream always uses lane 0 */
+			if (m_rt->stream->type == SDW_STREAM_BPT)
+				continue;
 			/*
 			 * Get the first s_rt that will be used to find the available lane that
 			 * can be used. No need to check all Peripherals because we can't use
