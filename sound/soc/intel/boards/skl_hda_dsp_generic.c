@@ -5,6 +5,7 @@
  * Machine Driver for SKL+ platforms with DSP and iDisp, HDA Codecs
  */
 
+#include <linux/acpi.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <sound/core.h>
@@ -50,24 +51,25 @@ static void skl_set_hda_codec_autosuspend_delay(struct snd_soc_card *card)
 
 #define IDISP_HDMI_BE_ID	1
 #define HDA_BE_ID		4
+#define SSP_AMP_BE_ID		5
 #define DMIC01_BE_ID		6
 #define DMIC16K_BE_ID		7
 #define BT_OFFLOAD_BE_ID	8
 
 #define HDA_LINK_ORDER	SOF_LINK_ORDER(SOF_LINK_IDISP_HDMI,  \
 				       SOF_LINK_HDA,        \
+				       SOF_LINK_AMP,        \
 				       SOF_LINK_DMIC01,     \
 				       SOF_LINK_DMIC16K,    \
 				       SOF_LINK_BT_OFFLOAD, \
-				       SOF_LINK_NONE,       \
 				       SOF_LINK_NONE)
 
 #define HDA_LINK_IDS	SOF_LINK_ORDER(IDISP_HDMI_BE_ID,  \
 				       HDA_BE_ID,        \
+				       SSP_AMP_BE_ID,    \
 				       DMIC01_BE_ID,     \
 				       DMIC16K_BE_ID,    \
 				       BT_OFFLOAD_BE_ID, \
-				       0,                \
 				       0)
 
 static unsigned long
@@ -75,6 +77,13 @@ skl_hda_get_board_quirk(struct snd_soc_acpi_mach_params *mach_params)
 {
 	unsigned long board_quirk = 0;
 	int ssp_bt;
+	int ssp_amp;
+
+	if (mach_params->i2s_link_mask) {
+		ssp_amp = fls(mach_params->i2s_link_mask) - 1;
+		if (ssp_amp >= 0)
+			board_quirk |= SOF_SSP_PORT_AMP(ssp_amp);
+	}
 
 	if (hweight_long(mach_params->bt_link_mask) == 1) {
 		ssp_bt = fls(mach_params->bt_link_mask) - 1;
@@ -83,6 +92,51 @@ skl_hda_get_board_quirk(struct snd_soc_acpi_mach_params *mach_params)
 	}
 
 	return board_quirk;
+}
+
+static int skl_hda_set_aw88399_dai_link(struct device *dev,
+					struct snd_soc_dai_link *link)
+{
+	struct snd_soc_dai_link_component *codecs;
+	struct acpi_device *adev;
+	struct device *physdev;
+	int count = 0;
+	int i = 0;
+
+	for_each_acpi_dev_match(adev, AW88399_ACPI_HID, NULL, -1) {
+		count++;
+		acpi_dev_put(adev);
+	}
+
+	if (!count)
+		return -ENODEV;
+
+	codecs = devm_kcalloc(dev, count, sizeof(*codecs), GFP_KERNEL);
+	if (!codecs)
+		return -ENOMEM;
+
+	for_each_acpi_dev_match(adev, AW88399_ACPI_HID, NULL, -1) {
+		physdev = get_device(acpi_get_first_physical_node(adev));
+		acpi_dev_put(adev);
+		if (!physdev) {
+			dev_warn(dev, "AW88399 ACPI node lacks physical device\n");
+			continue;
+		}
+
+		codecs[i].name = dev_name(physdev);
+		codecs[i].dai_name = "aw88399-aif";
+		i++;
+		if (i == count)
+			break;
+	}
+
+	if (!i)
+		return -ENODEV;
+
+	link->codecs = codecs;
+	link->num_codecs = i;
+
+	return 0;
 }
 
 static int skl_hda_add_dai_link(struct snd_soc_card *card,
@@ -128,6 +182,13 @@ static int skl_hda_audio_probe(struct platform_device *pdev)
 	if (mach->mach_params.codec_mask & IDISP_CODEC_MASK)
 		ctx->hdmi.idisp_codec = true;
 
+	if (ctx->amp_type == CODEC_AW88399 && !ctx->ssp_amp) {
+		int ssp_port = fls(mach->mach_params.i2s_link_mask) - 1;
+
+		if (ssp_port >= 0)
+			ctx->ssp_amp = ssp_port;
+	}
+
 	ctx->link_order_overwrite = HDA_LINK_ORDER;
 	ctx->link_id_overwrite = HDA_LINK_IDS;
 
@@ -135,6 +196,18 @@ static int skl_hda_audio_probe(struct platform_device *pdev)
 	ret = sof_intel_board_set_dai_link(&pdev->dev, card, ctx);
 	if (ret)
 		return ret;
+
+	if (ctx->amp_type == CODEC_AW88399) {
+		if (!ctx->amp_link) {
+			dev_err(&pdev->dev, "AW88399 amp link missing\n");
+			return -EINVAL;
+		}
+
+		ret = skl_hda_set_aw88399_dai_link(&pdev->dev, ctx->amp_link);
+		if (ret)
+			return dev_err_probe(&pdev->dev, ret,
+					     "failed to configure AW88399 link\n");
+	}
 
 	card->dev = &pdev->dev;
 

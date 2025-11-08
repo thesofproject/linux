@@ -37,6 +37,9 @@
 #define RT5682_ACPI_HID		"10EC5682"
 #define RT5682S_ACPI_HID	"RTL5682"
 
+/* Awinic */
+#define AW88399_ACPI_HID	"AWDZ8399"
+
 enum snd_soc_acpi_intel_codec {
 	CODEC_NONE,
 
@@ -63,6 +66,7 @@ enum snd_soc_acpi_intel_codec {
 	CODEC_RT1015P,
 	CODEC_RT1019P,
 	CODEC_RT1308,
+	CODEC_AW88399,
 };
 
 enum snd_soc_acpi_intel_codec

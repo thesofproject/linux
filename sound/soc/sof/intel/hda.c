@@ -21,6 +21,7 @@
 #include <linux/acpi.h>
 #include <linux/debugfs.h>
 #include <linux/module.h>
+#include <linux/pci.h>
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_intel.h>
 #include <sound/intel-dsp-config.h>
@@ -1432,6 +1433,52 @@ static struct snd_soc_acpi_mach *hda_sdw_machine_select(struct snd_sof_dev *sdev
 }
 #endif
 
+static bool sof_hda_tplg_has_suffix(const char *tplg, const char *suffix)
+{
+	size_t tplg_len, suffix_len;
+
+	if (!tplg || !suffix)
+		return false;
+
+	tplg_len = strlen(tplg);
+	suffix_len = strlen(suffix);
+	if (tplg_len < suffix_len)
+		return false;
+
+	return !strcmp(tplg + tplg_len - suffix_len, suffix);
+}
+
+static int sof_hda_append_tplg_suffix(struct snd_sof_dev *sdev,
+				      const char *suffix)
+{
+	struct snd_sof_pdata *pdata = sdev->pdata;
+	char *tplg_filename;
+
+	if (!suffix || !*suffix)
+		return 0;
+
+	if (sof_hda_tplg_has_suffix(pdata->tplg_filename, suffix))
+		return 0;
+
+	tplg_filename = devm_kasprintf(sdev->dev, GFP_KERNEL,
+				       "%s-%s", pdata->tplg_filename, suffix);
+	if (!tplg_filename)
+		return -ENOMEM;
+
+	pdata->tplg_filename = tplg_filename;
+	return 0;
+}
+
+struct sof_hda_ssid_quirk {
+	u16 vendor;
+	u16 device;
+	const char *suffix;
+};
+
+static const struct sof_hda_ssid_quirk sof_hda_ssid_quirks[] = {
+	{ PCI_VENDOR_ID_LENOVO, 0x3906, "aw88399" },
+};
+
 void hda_set_mach_params(struct snd_soc_acpi_mach *mach,
 			 struct snd_sof_dev *sdev)
 {
@@ -1677,14 +1724,28 @@ struct snd_soc_acpi_mach *hda_machine_select(struct snd_sof_dev *sdev)
 				return NULL;
 			}
 
-			tplg_filename = devm_kasprintf(sdev->dev, GFP_KERNEL,
-						       "%s-%s",
-						       sof_pdata->tplg_filename,
-						       tplg_suffix);
-			if (!tplg_filename)
+			if (sof_hda_append_tplg_suffix(sdev, tplg_suffix))
 				return NULL;
+		}
 
-			sof_pdata->tplg_filename = tplg_filename;
+		if (tplg_fixup && amp_type == CODEC_AW88399 &&
+		    !(mach->tplg_quirk_mask & SND_SOC_ACPI_TPLG_INTEL_AMP_NAME)) {
+			if (sof_hda_append_tplg_suffix(sdev, "aw88399"))
+				return NULL;
+		}
+
+		if (tplg_fixup && sof_pdata->subsystem_id_set) {
+			int i;
+
+			for (i = 0; i < ARRAY_SIZE(sof_hda_ssid_quirks); i++) {
+				if (sof_hda_ssid_quirks[i].vendor != sof_pdata->subsystem_vendor ||
+				    sof_hda_ssid_quirks[i].device != sof_pdata->subsystem_device)
+					continue;
+
+				if (sof_hda_append_tplg_suffix(sdev, sof_hda_ssid_quirks[i].suffix))
+					return NULL;
+				break;
+			}
 		}
 
 

@@ -301,6 +301,7 @@ config SND_SOC_INTEL_SKL_HDA_DSP_GENERIC_MACH
 	select SND_SOC_INTEL_HDA_DSP_COMMON
 	select SND_SOC_INTEL_SOF_BOARD_HELPERS
 	select SND_SOC_DMIC
+	select SND_SOC_AW88399
 	# SND_SOC_HDAC_HDA is already selected
 	help
 	  This adds support for ASoC machine driver for Intel Skylake+
