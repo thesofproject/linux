@@ -1476,7 +1476,7 @@ struct sof_hda_ssid_quirk {
 };
 
 static const struct sof_hda_ssid_quirk sof_hda_ssid_quirks[] = {
-	{ PCI_VENDOR_ID_LENOVO, 0x3906, "aw88399" },
+	/* Empty - AW88399 uses dynamic SSP detection instead of SSID quirk */
 };
 
 void hda_set_mach_params(struct snd_soc_acpi_mach *mach,
@@ -1732,6 +1732,26 @@ struct snd_soc_acpi_mach *hda_machine_select(struct snd_sof_dev *sdev)
 		    !(mach->tplg_quirk_mask & SND_SOC_ACPI_TPLG_INTEL_AMP_NAME)) {
 			if (sof_hda_append_tplg_suffix(sdev, "aw88399"))
 				return NULL;
+
+			/* Append SSP port detected from NHLT for AW88399 */
+			if (mach->mach_params.i2s_link_mask) {
+				const struct sof_intel_dsp_desc *chip = get_chip_info(sdev->pdata);
+				int ssp_num = fls(mach->mach_params.i2s_link_mask) - 1;
+				char ssp_suffix[16];
+
+				if (ssp_num >= chip->ssp_count) {
+					dev_err(sdev->dev, "Invalid SSP %d for AW88399, max on this platform is %d\n",
+						ssp_num, chip->ssp_count);
+					return NULL;
+				}
+
+				snprintf(ssp_suffix, sizeof(ssp_suffix), "ssp%d", ssp_num);
+				if (sof_hda_append_tplg_suffix(sdev, ssp_suffix))
+					return NULL;
+
+				dev_dbg(sdev->dev, "AW88399 using SSP%d, topology: %s\n",
+					ssp_num, sof_pdata->tplg_filename);
+			}
 		}
 
 		if (tplg_fixup && sof_pdata->subsystem_id_set) {
