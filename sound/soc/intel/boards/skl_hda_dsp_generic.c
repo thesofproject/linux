@@ -185,7 +185,8 @@ static int skl_hda_audio_probe(struct platform_device *pdev)
 	/* Force AW88399 detection for Lenovo Legion - auto-detection may fail due to timing */
 	if (mach->mach_params.subsystem_vendor == 0x17aa &&
 	    (mach->mach_params.subsystem_device == 0x3906 ||
-	     mach->mach_params.subsystem_device == 0x3907)) {
+	     mach->mach_params.subsystem_device == 0x3907 ||
+	     mach->mach_params.subsystem_device == 0x3d6c)) {
 		if (ctx->amp_type == CODEC_NONE) {
 			dev_info(&pdev->dev, "Lenovo Legion: forcing AW88399 amp detection\n");
 			ctx->amp_type = CODEC_AW88399;
