@@ -397,6 +397,40 @@ static void pkvm_cache_reg(struct kvm_vcpu *vcpu, enum kvm_reg reg)
 	}
 }
 
+static unsigned long pkvm_get_rflags(struct kvm_vcpu *vcpu)
+{
+	struct vcpu_vmx *vmx = to_vmx(vcpu);
+
+	if (!kvm_register_is_available(vcpu, VCPU_EXREG_RFLAGS)) {
+		if (vcpu->arch.guest_state_protected) {
+			vmx->rflags = 0;
+		} else {
+			union pkvm_hc_data out;
+
+			if (KVM_BUG_ON(pkvm_hypercall_out(get_rflags, &out), vcpu->kvm))
+				return 0;
+
+			vmx->rflags = out.get_rflags.data;
+		}
+		kvm_register_mark_available(vcpu, VCPU_EXREG_RFLAGS);
+	}
+
+	return vmx->rflags;
+}
+
+static void pkvm_set_rflags(struct kvm_vcpu *vcpu, unsigned long rflags)
+{
+	to_vmx(vcpu)->rflags = rflags;
+	if (!vcpu->arch.guest_state_protected)
+		KVM_BUG_ON(pkvm_hypercall(set_rflags, rflags), vcpu->kvm);
+	kvm_register_mark_available(vcpu, VCPU_EXREG_RFLAGS);
+}
+
+static bool pkvm_get_if_flag(struct kvm_vcpu *vcpu)
+{
+	return pkvm_get_rflags(vcpu) & X86_EFLAGS_IF;
+}
+
 struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.name = KBUILD_MODNAME,
 
@@ -429,6 +463,9 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.set_cr4 = pkvm_set_cr4,
 	.set_efer = pkvm_set_efer,
 	.cache_reg = pkvm_cache_reg,
+	.get_rflags = pkvm_get_rflags,
+	.set_rflags = pkvm_set_rflags,
+	.get_if_flag = pkvm_get_if_flag,
 };
 
 bool pkvm_interrupt_blocked(struct kvm_vcpu *vcpu)
