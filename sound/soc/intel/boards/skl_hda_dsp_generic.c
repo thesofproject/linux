@@ -182,6 +182,16 @@ static int skl_hda_audio_probe(struct platform_device *pdev)
 	if (mach->mach_params.codec_mask & IDISP_CODEC_MASK)
 		ctx->hdmi.idisp_codec = true;
 
+	/* Force AW88399 detection for Lenovo Legion - auto-detection may fail due to timing */
+	if (mach->mach_params.subsystem_vendor == 0x17aa &&
+	    (mach->mach_params.subsystem_device == 0x3906 ||
+	     mach->mach_params.subsystem_device == 0x3907)) {
+		if (ctx->amp_type == CODEC_NONE) {
+			dev_info(&pdev->dev, "Lenovo Legion: forcing AW88399 amp detection\n");
+			ctx->amp_type = CODEC_AW88399;
+		}
+	}
+
 	if (ctx->amp_type == CODEC_AW88399 && !ctx->ssp_amp) {
 		int ssp_port = fls(mach->mach_params.i2s_link_mask) - 1;
 
