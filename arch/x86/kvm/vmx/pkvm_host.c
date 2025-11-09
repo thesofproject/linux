@@ -751,6 +751,30 @@ static bool pkvm_get_if_flag(struct kvm_vcpu *vcpu)
 	return pkvm_get_rflags(vcpu) & X86_EFLAGS_IF;
 }
 
+static void pkvm_flush_tlb_all(struct kvm_vcpu *vcpu)
+{
+	if (!vcpu->arch.guest_state_protected)
+		KVM_BUG_ON(pkvm_hypercall(flush_tlb_all), vcpu->kvm);
+}
+
+static void pkvm_flush_tlb_current(struct kvm_vcpu *vcpu)
+{
+	if (!vcpu->arch.guest_state_protected)
+		KVM_BUG_ON(pkvm_hypercall(flush_tlb_current), vcpu->kvm);
+}
+
+static void pkvm_flush_tlb_gva(struct kvm_vcpu *vcpu, gva_t addr)
+{
+	if (!vcpu->arch.guest_state_protected)
+		KVM_BUG_ON(pkvm_hypercall(flush_tlb_gva, addr), vcpu->kvm);
+}
+
+static void pkvm_flush_tlb_guest(struct kvm_vcpu *vcpu)
+{
+	if (!vcpu->arch.guest_state_protected)
+		KVM_BUG_ON(pkvm_hypercall(flush_tlb_guest), vcpu->kvm);
+}
+
 struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.name = KBUILD_MODNAME,
 
@@ -798,6 +822,11 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.get_rflags = pkvm_get_rflags,
 	.set_rflags = pkvm_set_rflags,
 	.get_if_flag = pkvm_get_if_flag,
+
+	.flush_tlb_all = pkvm_flush_tlb_all,
+	.flush_tlb_current = pkvm_flush_tlb_current,
+	.flush_tlb_gva = pkvm_flush_tlb_gva,
+	.flush_tlb_guest = pkvm_flush_tlb_guest,
 };
 
 bool pkvm_interrupt_blocked(struct kvm_vcpu *vcpu)
