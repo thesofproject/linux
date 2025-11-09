@@ -1728,10 +1728,11 @@ struct snd_soc_acpi_mach *hda_machine_select(struct snd_sof_dev *sdev)
 				return NULL;
 		}
 
-		if (tplg_fixup && amp_type == CODEC_AW88399 &&
-		    !(mach->tplg_quirk_mask & SND_SOC_ACPI_TPLG_INTEL_AMP_NAME)) {
-			if (sof_hda_append_tplg_suffix(sdev, "aw88399"))
-				return NULL;
+		if (tplg_fixup && amp_type == CODEC_AW88399) {
+			if (!(mach->tplg_quirk_mask & SND_SOC_ACPI_TPLG_INTEL_AMP_NAME)) {
+				if (sof_hda_append_tplg_suffix(sdev, "aw88399"))
+					return NULL;
+			}
 
 			/* Append SSP port detected from NHLT for AW88399 */
 			if (mach->mach_params.i2s_link_mask) {
