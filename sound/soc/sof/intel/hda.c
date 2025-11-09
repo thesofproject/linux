@@ -1666,6 +1666,16 @@ struct snd_soc_acpi_mach *hda_machine_select(struct snd_sof_dev *sdev)
 		/* report SSP link mask to machine driver */
 		mach->mach_params.i2s_link_mask = check_nhlt_ssp_mask(sdev, NHLT_DEVICE_I2S);
 
+		/* Quirk for Lenovo Legion with AW88399: NHLT doesn't list SSP for I2S amps */
+		if (sof_pdata->subsystem_id_set &&
+		    sof_pdata->subsystem_vendor == 0x17aa &&
+		    (sof_pdata->subsystem_device == 0x3906 || sof_pdata->subsystem_device == 0x3907)) {
+			if (!mach->mach_params.i2s_link_mask) {
+				dev_info(sdev->dev, "Lenovo Legion quirk: forcing SSP1 for AW88399\n");
+				mach->mach_params.i2s_link_mask = BIT(1); /* SSP1 */
+			}
+		}
+
 		if (tplg_fixup &&
 		    mach->tplg_quirk_mask & SND_SOC_ACPI_TPLG_INTEL_SSP_NUMBER &&
 		    mach->mach_params.i2s_link_mask) {
