@@ -7083,6 +7083,7 @@ static noinstr void vmx_l1d_flush(struct kvm_vcpu *vcpu)
 		    [size] "r" (size)
 		: "eax", "ebx", "ecx", "edx");
 }
+#endif /* !__PKVM_HYP__ */
 
 void vmx_update_cr8_intercept(struct kvm_vcpu *vcpu, int tpr, int irr)
 {
@@ -7100,6 +7101,7 @@ void vmx_update_cr8_intercept(struct kvm_vcpu *vcpu, int tpr, int irr)
 		vmcs_write32(TPR_THRESHOLD, tpr_threshold);
 }
 
+#ifndef __PKVM_HYP__
 void vmx_set_virtual_apic_mode(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
