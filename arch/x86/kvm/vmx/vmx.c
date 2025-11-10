@@ -1902,7 +1902,6 @@ rip_updated:
 	return 1;
 }
 
-#ifndef __PKVM_HYP__
 /*
  * Recognizes a pending MTF VM-exit and records the nested state for later
  * delivery.
@@ -1943,7 +1942,6 @@ int vmx_skip_emulated_instruction(struct kvm_vcpu *vcpu)
 	vmx_update_emulated_instruction(vcpu);
 	return skip_emulated_instruction(vcpu);
 }
-#endif /* !__PKVM_HYP__ */
 
 void vmx_clear_hlt(struct kvm_vcpu *vcpu)
 {
