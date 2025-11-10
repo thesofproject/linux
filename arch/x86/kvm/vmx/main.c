@@ -914,12 +914,10 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 	.is_valid_cr4 = vt_op(is_valid_cr4),
 	.set_cr4 = vt_op(set_cr4),
 	.set_efer = vt_op(set_efer),
-#ifndef __PKVM_HYP__
 	.get_idt = vt_op(get_idt),
 	.set_idt = vt_op(set_idt),
 	.get_gdt = vt_op(get_gdt),
 	.set_gdt = vt_op(set_gdt),
-#endif
 	.set_dr7 = vt_op(set_dr7),
 	.sync_dirty_debug_regs = vt_op(sync_dirty_debug_regs),
 	.cache_reg = vt_op(cache_reg),
