@@ -12,6 +12,7 @@ static inline void vmx_leave_nested(struct kvm_vcpu *vcpu) {}
 static inline void nested_vmx_setup_ctls_msrs(struct vmcs_config *vmcs_conf, u32 ept_caps) {}
 static inline void nested_vmx_free_vcpu(struct kvm_vcpu *vcpu) {}
 static inline void nested_vmx_set_vmcs_shadowing_bitmap(void) {}
+static inline void nested_sync_vmcs12_to_shadow(struct kvm_vcpu *vcpu) {}
 static inline int vmx_set_vmx_msr(struct kvm_vcpu *vcpu, u32 msr_index, u64 data) { return 1; }
 static inline int vmx_get_vmx_msr(struct nested_vmx_msrs *msrs, u32 msr_index, u64 *pdata)
 {
