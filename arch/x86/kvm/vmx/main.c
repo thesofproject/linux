@@ -1032,9 +1032,9 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 #endif
 
 	.recalc_intercepts = vt_op(recalc_intercepts),
-#ifndef __PKVM_HYP__
 	.complete_emulated_msr = vt_op(complete_emulated_msr),
 
+#ifndef __PKVM_HYP__
 	.vcpu_deliver_sipi_vector = kvm_vcpu_deliver_sipi_vector,
 
 	.get_untagged_addr = vmx_get_untagged_addr,
