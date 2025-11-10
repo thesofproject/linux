@@ -903,14 +903,12 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 	.get_msr = vt_op(get_msr),
 	.set_msr = vt_op(set_msr),
 
-#ifndef __PKVM_HYP__
 	.get_segment_base = vt_op(get_segment_base),
 	.get_segment = vt_op(get_segment),
 	.set_segment = vt_op(set_segment),
 	.get_cpl = vt_op(get_cpl),
 	.get_cpl_no_cache = vt_op(get_cpl_no_cache),
 	.get_cs_db_l_bits = vt_op(get_cs_db_l_bits),
-#endif
 	.is_valid_cr0 = vt_op(is_valid_cr0),
 	.set_cr0 = vt_op(set_cr0),
 	.is_valid_cr4 = vt_op(is_valid_cr4),
