@@ -4405,7 +4405,6 @@ static void vmx_update_msr_bitmap_x2apic(struct kvm_vcpu *vcpu)
 	}
 }
 
-#ifndef __PKVM_HYP__
 void pt_update_intercept_for_msr(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
@@ -4499,6 +4498,7 @@ void vmx_recalc_intercepts(struct kvm_vcpu *vcpu)
 	vmx_recalc_msr_intercepts(vcpu);
 }
 
+#ifndef __PKVM_HYP__
 static int vmx_deliver_nested_posted_interrupt(struct kvm_vcpu *vcpu,
 						int vector)
 {
