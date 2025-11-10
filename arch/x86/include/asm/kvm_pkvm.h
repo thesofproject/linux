@@ -434,6 +434,15 @@ static inline size_t pkvm_guest_initial_fpstate_size(struct kvm *kvm)
 
 #endif /* CONFIG_PKVM_X86_DEBUG */
 
+#undef KVM_BUG_ON
+#define KVM_BUG_ON(cond, kvm)						\
+({									\
+	bool __ret = !!(cond);						\
+									\
+	BUG_ON(__ret);							\
+	unlikely(__ret);						\
+})
+
 #endif /* __PKVM_HYP__ */
 
 #else /* !CONFIG_PKVM_X86 */
