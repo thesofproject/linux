@@ -168,6 +168,10 @@ EXPORT_SYMBOL(intel_nhlt_ssp_endpoint_mask);
 #define SSP_BLOB_V2_0_MDIVC_OFFSET	20 /* offset in u32 */
 #define SSP_BLOB_VER_2_0		0xEE000200
 
+#define SSP_BLOB_V3_0_SIZE		200
+#define SSP_BLOB_V3_0_MDIVC_OFFSET	50 /* offset in u32 */
+#define SSP_BLOB_VER_3_0		0xEE000300
+
 int intel_nhlt_ssp_mclk_mask(struct nhlt_acpi_table *nhlt, int ssp_num)
 {
 	struct nhlt_endpoint *epnt;
@@ -205,7 +209,10 @@ int intel_nhlt_ssp_mclk_mask(struct nhlt_acpi_table *nhlt, int ssp_num)
 
 				blob = (u32 *)cfg->config.caps;
 
-				if (blob[1] == SSP_BLOB_VER_2_0) {
+				if (blob[1] == SSP_BLOB_VER_3_0) {
+					mdivc_offset = SSP_BLOB_V3_0_MDIVC_OFFSET;
+					size = SSP_BLOB_V3_0_SIZE + sizeof(uint32_t);
+				} else if (blob[1] == SSP_BLOB_VER_2_0) {
 					mdivc_offset = SSP_BLOB_V2_0_MDIVC_OFFSET;
 					size = SSP_BLOB_V2_0_SIZE;
 				} else if (blob[1] == SSP_BLOB_VER_1_5) {
