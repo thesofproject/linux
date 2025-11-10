@@ -5919,6 +5919,7 @@ static int handle_dr(struct kvm_vcpu *vcpu)
 out:
 	return kvm_complete_insn_gp(vcpu, err);
 }
+#endif /* !__PKVM_HYP__ */
 
 void vmx_sync_dirty_debug_regs(struct kvm_vcpu *vcpu)
 {
@@ -5944,6 +5945,7 @@ void vmx_set_dr7(struct kvm_vcpu *vcpu, unsigned long val)
 	vmcs_writel(GUEST_DR7, val);
 }
 
+#ifndef __PKVM_HYP__
 static int handle_tpr_below_threshold(struct kvm_vcpu *vcpu)
 {
 	kvm_apic_update_ppr(vcpu);
