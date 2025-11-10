@@ -47,6 +47,8 @@
 #include "hyperv.h"
 #include "smm.h"
 
+#ifndef __PKVM_HYP__
+
 #ifndef CONFIG_X86_64
 #define mod_64(x, y) ((x) - (y) * div64_u64(x, y))
 #else
@@ -533,12 +535,14 @@ static inline int apic_lvt_nmi_mode(u32 lvt_val)
 {
 	return (lvt_val & (APIC_MODE_MASK | APIC_LVT_MASKED)) == APIC_DM_NMI;
 }
+#endif /* !__PKVM_HYP__ */
 
 static inline bool kvm_lapic_lvt_supported(struct kvm_lapic *apic, int lvt_index)
 {
 	return apic->nr_lvt_entries > lvt_index;
 }
 
+#ifndef __PKVM_HYP__
 void kvm_apic_set_version(struct kvm_vcpu *vcpu)
 {
 	struct kvm_lapic *apic = vcpu->arch.apic;
@@ -1671,6 +1675,7 @@ static inline struct kvm_lapic *to_lapic(struct kvm_io_device *dev)
 {
 	return container_of(dev, struct kvm_lapic, dev);
 }
+#endif /* !__PKVM_HYP__ */
 
 #define APIC_REG_MASK(reg)	(1ull << ((reg) >> 4))
 #define APIC_REGS_MASK(first, count) \
@@ -1714,6 +1719,7 @@ u64 kvm_lapic_readable_reg_mask(struct kvm_lapic *apic)
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_lapic_readable_reg_mask);
 
+#ifndef __PKVM_HYP__
 static int kvm_lapic_reg_read(struct kvm_lapic *apic, u32 offset, int len,
 			      void *data)
 {
@@ -3525,3 +3531,4 @@ void kvm_lapic_exit(void)
 	static_key_deferred_flush(&apic_sw_disabled);
 	WARN_ON(static_branch_unlikely(&apic_sw_disabled.key));
 }
+#endif /* !__PKVM_HYP__ */
