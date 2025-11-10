@@ -99,7 +99,6 @@ static int skl_hda_set_aw88399_dai_link(struct device *dev,
 {
 	struct snd_soc_dai_link_component *codecs;
 	struct acpi_device *adev;
-	struct device *physdev;
 	int count = 0;
 	int i = 0;
 
@@ -116,22 +115,16 @@ static int skl_hda_set_aw88399_dai_link(struct device *dev,
 		return -ENOMEM;
 
 	for_each_acpi_dev_match(adev, AW88399_ACPI_HID, NULL, -1) {
-		physdev = get_device(acpi_get_first_physical_node(adev));
+		/* Use ACPI device name directly to avoid I2C enumeration race */
+		codecs[i].name = devm_kasprintf(dev, GFP_KERNEL, "i2c-%s",
+						acpi_dev_name(adev));
 		acpi_dev_put(adev);
-		if (!physdev) {
-			dev_warn(dev, "AW88399 ACPI node lacks physical device\n");
-			continue;
-		}
+		if (!codecs[i].name)
+			return -ENOMEM;
 
-		codecs[i].name = dev_name(physdev);
 		codecs[i].dai_name = "aw88399-aif";
 		i++;
-		if (i == count)
-			break;
 	}
-
-	if (!i)
-		return -ENODEV;
 
 	link->codecs = codecs;
 	link->num_codecs = i;
