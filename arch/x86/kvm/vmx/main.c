@@ -882,8 +882,8 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 #endif
 
 	.vcpu_precreate = vt_op(vcpu_precreate),
-#ifndef __PKVM_HYP__
 	.vcpu_create = vt_op(vcpu_create),
+#ifndef __PKVM_HYP__
 	.vcpu_free = vt_op(vcpu_free),
 	.vcpu_reset = vt_op(vcpu_reset),
 
