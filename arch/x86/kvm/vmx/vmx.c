@@ -851,6 +851,7 @@ static u32 vmx_read_guest_seg_ar(struct vcpu_vmx *vmx, unsigned seg)
 		*p = vmcs_read32(kvm_vmx_segment_fields[seg].ar_bytes);
 	return *p;
 }
+#endif /* !__PKVM_HYP__ */
 
 void vmx_update_exception_bitmap(struct kvm_vcpu *vcpu)
 {
@@ -917,6 +918,7 @@ void vmx_update_exception_bitmap(struct kvm_vcpu *vcpu)
 	vmcs_write32(EXCEPTION_BITMAP, eb);
 }
 
+#ifndef __PKVM_HYP__
 /*
  * Check if MSR is intercepted for currently loaded MSR bitmap.
  */
