@@ -876,8 +876,8 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 	.vm_size = sizeof(struct kvm_vmx),
 
 	.vm_init = vt_op(vm_init),
-#ifndef __PKVM_HYP__
 	.vm_destroy = vt_op(vm_destroy),
+#ifndef __PKVM_HYP__
 	.vm_pre_destroy = vt_op_tdx_only(vm_pre_destroy),
 
 	.vcpu_precreate = vt_op(vcpu_precreate),
