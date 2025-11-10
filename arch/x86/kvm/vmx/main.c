@@ -979,9 +979,11 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 
 	.get_exit_info = vt_op(get_exit_info),
 	.get_entry_info = vt_op(get_entry_info),
+#endif
 
 	.vcpu_after_set_cpuid = vt_op(vcpu_after_set_cpuid),
 
+#ifndef __PKVM_HYP__
 	.has_wbinvd_exit = cpu_has_vmx_wbinvd_exit,
 
 	.get_l2_tsc_offset = vt_op(get_l2_tsc_offset),
