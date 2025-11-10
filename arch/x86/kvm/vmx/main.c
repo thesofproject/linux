@@ -900,8 +900,10 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 #ifndef __PKVM_HYP__
 	.get_feature_msr = vmx_get_feature_msr,
 	.get_msr = vt_op(get_msr),
+#endif
 	.set_msr = vt_op(set_msr),
 
+#ifndef __PKVM_HYP__
 	.get_segment_base = vt_op(get_segment_base),
 	.get_segment = vt_op(get_segment),
 	.set_segment = vt_op(set_segment),
