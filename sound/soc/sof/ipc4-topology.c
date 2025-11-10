@@ -1782,8 +1782,22 @@ snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, struct snd_sof_dai *dai
 		 */
 		dev_type = intel_nhlt_ssp_device_type(sdev->dev, ipc4_data->nhlt,
 						      dai_index);
-		if (dev_type < 0)
-			return dev_type;
+		if (dev_type < 0) {
+			/* Quirk: Lenovo Legion with AW88399 has no NHLT SSP entry */
+			if (sdev->pdata->subsystem_id_set &&
+			    sdev->pdata->subsystem_vendor == 0x17aa &&
+			    (sdev->pdata->subsystem_device == 0x3906 ||
+			     sdev->pdata->subsystem_device == 0x3907 ||
+			     sdev->pdata->subsystem_device == 0x3d6c) &&
+			    dai_index == 1) {  /* SSP1 */
+				dev_info(sdev->dev,
+					"Lenovo Legion: using I2S device type for SSP%d\n",
+					dai_index);
+				dev_type = NHLT_DEVICE_I2S;
+			} else {
+				return dev_type;
+			}
+		}
 		break;
 	default:
 		return 0;
