@@ -949,8 +949,10 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 	.nmi_allowed = vt_op(nmi_allowed),
 	.get_nmi_mask = vt_op(get_nmi_mask),
 	.set_nmi_mask = vt_op(set_nmi_mask),
+#endif
 	.enable_nmi_window = vt_op(enable_nmi_window),
 	.enable_irq_window = vt_op(enable_irq_window),
+#ifndef __PKVM_HYP__
 	.update_cr8_intercept = vt_op(update_cr8_intercept),
 
 	.x2apic_icr_is_split = false,
