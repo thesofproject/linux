@@ -1077,9 +1077,9 @@ static void hda_generic_machine_select(struct snd_sof_dev *sdev,
 		}
 
 		/* Preserve subsystem ID so machine driver quirks can match */
-		if (sof_pdata->subsystem_id_set) {
-			hda_mach->mach_params.subsystem_vendor = sof_pdata->subsystem_vendor;
-			hda_mach->mach_params.subsystem_device = sof_pdata->subsystem_device;
+		if (pdata->subsystem_id_set) {
+			hda_mach->mach_params.subsystem_vendor = pdata->subsystem_vendor;
+			hda_mach->mach_params.subsystem_device = pdata->subsystem_device;
 			hda_mach->mach_params.subsystem_id_set = true;
 		}
 
