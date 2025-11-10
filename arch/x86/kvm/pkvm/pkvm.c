@@ -696,3 +696,14 @@ void pkvm_put_vcpu(struct pkvm_vcpu *pkvm_vcpu)
 
 	pkvm_put_vm(pkvm_vcpu->pkvm_vm);
 }
+
+unsigned long pkvm_pcpu_tss(int cpu)
+{
+#ifdef CONFIG_PKVM_X86_DEBUG
+	return (unsigned long)&get_cpu_entry_area(cpu)->tss.x86_tss;
+#else
+	struct pkvm_pcpu *pcpu = per_cpu(phys_cpu, cpu);
+
+	return (unsigned long)&pcpu->tss;
+#endif
+}
