@@ -41,7 +41,11 @@ pkvm-hyp-y			+= $(kvm)/x86.o $(kvm)/cpuid.o $(kvm)/mtrr.o
 
 pkvm-hyp-$(CONFIG_PKVM_INTEL)	+= vmx/host_vmentry.o vmx/host_vmx.o \
 				   $(kvm)/vmx/vmx.o vmx/idt.o vmx/ept.o \
-				   vmx/host_repriv.o $(kvm)/vmx/main.o
+				   vmx/host_repriv.o $(kvm)/vmx/main.o \
+				   $(kvm)/vmx/vmenter.o
+
+AFLAGS_$(kvm)/vmx/vmenter.pkvm.o += -iquote $(obj)
+$(obj)/$(kvm)/vmx/vmenter.pkvm.o: $(obj)/kvm-asm-offsets.h
 
 fpu				:= ../../kernel/fpu
 pkvm-hyp-y			+= $(fpu)/core.o
