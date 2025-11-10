@@ -1852,6 +1852,21 @@ snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, struct snd_sof_dai *dai
 				goto out;
 		}
 
+		/* Quirk: Lenovo Legion with empty NHLT doesn't need blob */
+		if (sdev->pdata->subsystem_id_set &&
+		    sdev->pdata->subsystem_vendor == 0x17aa &&
+		    (sdev->pdata->subsystem_device == 0x3906 ||
+		     sdev->pdata->subsystem_device == 0x3907 ||
+		     sdev->pdata->subsystem_device == 0x3d6c) &&
+		    linktype == SOF_DAI_INTEL_SSP && dai_index == 1) {
+			dev_info(sdev->dev,
+				"Lenovo Legion: SSP%d running without NHLT blob\n",
+				dai_index);
+			*len = 0;
+			*dst = NULL;
+			return 0;
+		}
+
 		dev_err(sdev->dev,
 			"no matching blob for sample rate: %d sample width: %d channels: %d\n",
 			sample_rate, bit_depth, channel_count);
