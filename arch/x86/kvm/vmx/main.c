@@ -935,8 +935,8 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 	.vcpu_pre_run = vt_op(vcpu_pre_run),
 #endif
 	.vcpu_run = vt_op(vcpu_run),
-#ifndef __PKVM_HYP__
 	.handle_exit = vt_op(handle_exit),
+#ifndef __PKVM_HYP__
 	.skip_emulated_instruction = vmx_skip_emulated_instruction,
 	.update_emulated_instruction = vmx_update_emulated_instruction,
 #endif
