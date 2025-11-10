@@ -210,7 +210,8 @@ int intel_nhlt_ssp_mclk_mask(struct nhlt_acpi_table *nhlt, int ssp_num)
 					size = SSP_BLOB_V2_0_SIZE;
 				} else if (blob[1] == SSP_BLOB_VER_1_5) {
 					mdivc_offset = SSP_BLOB_V1_5_MDIVC_OFFSET;
-					size = SSP_BLOB_V1_5_SIZE;
+					/* mdivc is a flexible array with at least one value */
+					size = SSP_BLOB_V1_5_SIZE + sizeof(uint32_t);
 				} else {
 					mdivc_offset = SSP_BLOB_V1_0_MDIVC_OFFSET;
 					size = SSP_BLOB_V1_0_SIZE;
