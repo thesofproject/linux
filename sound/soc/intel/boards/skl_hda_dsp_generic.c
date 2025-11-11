@@ -151,6 +151,7 @@ static int skl_hda_audio_probe(struct platform_device *pdev)
 	struct snd_soc_card *card;
 	unsigned long board_quirk = skl_hda_get_board_quirk(&mach->mach_params);
 	int ret;
+ 	int i;
 
 	card = devm_kzalloc(&pdev->dev, sizeof(struct snd_soc_card), GFP_KERNEL);
 	if (!card)
@@ -217,10 +218,29 @@ static int skl_hda_audio_probe(struct platform_device *pdev)
 
 	if (mach->mach_params.dmic_num > 0) {
 		card->components = devm_kasprintf(card->dev, GFP_KERNEL,
-						  "cfg-dmics:%d",
-						  mach->mach_params.dmic_num);
+					  "cfg-dmics:%d",
+					  mach->mach_params.dmic_num);
 		if (!card->components)
 			return -ENOMEM;
+	}
+
+	if (ctx->amp_type == CODEC_AW88399 && ctx->amp_link &&
+	    ctx->amp_link->num_codecs > 0) {
+		for (i = 0; i < ctx->amp_link->num_codecs; i++) {
+			const char *codec = ctx->amp_link->codecs[i].name;
+			const char *old = card->components;
+
+			if (!codec)
+				continue;
+
+			card->components = devm_kasprintf(card->dev, GFP_KERNEL,
+						       "%s%s%s",
+						       old ? old : "",
+						       old ? " " : "",
+						       codec);
+			if (!card->components)
+				return -ENOMEM;
+		}
 	}
 
 	ret = snd_soc_fixup_dai_links_platform_name(card,
