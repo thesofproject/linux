@@ -6,6 +6,7 @@
  */
 
 #include <linux/acpi.h>
+#include <linux/dmi.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <sound/core.h>
@@ -101,6 +102,7 @@ static int skl_hda_set_aw88399_dai_link(struct device *dev,
 	struct acpi_device *adev;
 	int count = 0;
 	int i = 0;
+	bool legion_quirk = false;
 
 	for_each_acpi_dev_match(adev, AW88399_ACPI_HID, NULL, -1) {
 		count++;
@@ -110,24 +112,58 @@ static int skl_hda_set_aw88399_dai_link(struct device *dev,
 	if (!count)
 		return -ENODEV;
 
+	/*
+	 * Lenovo Legion Pro 7 16IAX10H quirk: BIOS exposes only one ACPI device
+	 * (at I2C address 0x35) but hardware has two physical AW88399 chips
+	 * (0x34 and 0x35) for stereo woofer configuration. When only 1 ACPI
+	 * device is found on Legion, hardcode both I2C addresses.
+	 */
+	if (count == 1 && dmi_check_system((const struct dmi_system_id[]) {
+		{
+			.matches = {
+				DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+				DMI_MATCH(DMI_PRODUCT_NAME, "83F5"),
+			},
+		},
+		{ }
+	})) {
+		dev_info(dev, "Lenovo Legion: forcing 2-chip stereo configuration for AW88399\n");
+		legion_quirk = true;
+		count = 2;
+	}
+
 	codecs = devm_kcalloc(dev, count, sizeof(*codecs), GFP_KERNEL);
 	if (!codecs)
 		return -ENOMEM;
 
-	for_each_acpi_dev_match(adev, AW88399_ACPI_HID, NULL, -1) {
-		/* Use ACPI device name directly to avoid I2C enumeration race */
-		codecs[i].name = devm_kasprintf(dev, GFP_KERNEL, "i2c-%s",
-						acpi_dev_name(adev));
-		acpi_dev_put(adev);
-		if (!codecs[i].name)
+	if (legion_quirk) {
+		/* Hardcode both I2C addresses for Legion stereo setup */
+		codecs[0].name = devm_kstrdup(dev, "aw88399.2-0034", GFP_KERNEL);
+		if (!codecs[0].name)
 			return -ENOMEM;
+		codecs[0].dai_name = "aw88399-aif";
 
-		codecs[i].dai_name = "aw88399-aif";
-		i++;
+		codecs[1].name = devm_kstrdup(dev, "aw88399.2-0035", GFP_KERNEL);
+		if (!codecs[1].name)
+			return -ENOMEM;
+		codecs[1].dai_name = "aw88399-aif";
+	} else {
+		/* Normal path: use ACPI enumeration */
+		for_each_acpi_dev_match(adev, AW88399_ACPI_HID, NULL, -1) {
+			/* Use ACPI device name directly to avoid I2C enumeration race */
+			codecs[i].name = devm_kasprintf(dev, GFP_KERNEL, "i2c-%s",
+							acpi_dev_name(adev));
+			acpi_dev_put(adev);
+			if (!codecs[i].name)
+				return -ENOMEM;
+
+			codecs[i].dai_name = "aw88399-aif";
+			i++;
+		}
 	}
 
 	link->codecs = codecs;
-	link->num_codecs = i;
+	link->num_codecs = count;
 
 	return 0;
 }
