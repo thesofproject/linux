@@ -1970,7 +1970,9 @@ int __pkvm_host_donate_guest(u64 pfn, u64 gfn, u64 nr_pages, struct pkvm_hyp_vcp
 	host_lock_component();
 	guest_lock_component(vm);
 
-	ret = ___host_check_page_state_range(phys, size, PKVM_PAGE_OWNED, HOST_CHECK_NULL_REFCNT);
+	ret = ___host_check_page_state_range(phys, size, PKVM_PAGE_OWNED,
+					     HOST_CHECK_NULL_REFCNT |
+					     HOST_CHECK_IS_MEMORY);
 	if (ret)
 		goto unlock;
 
@@ -2021,7 +2023,6 @@ int __pkvm_host_donate_sglist_guest(struct pkvm_hyp_vcpu *vcpu)
 {
 	struct pkvm_hyp_vm *vm = pkvm_hyp_vcpu_to_hyp_vm(vcpu);
 	struct kvm_hyp_pinned_page *ppage = hyp_ppages;
-	bool is_memory;
 	int ret;
 
 	host_lock_component();
@@ -2030,8 +2031,6 @@ int __pkvm_host_donate_sglist_guest(struct pkvm_hyp_vcpu *vcpu)
 	ret = __copy_hyp_ppages(vcpu);
 	if (ret)
 		goto unlock;
-
-	is_memory = addr_is_memory(hyp_pfn_to_phys(ppage->pfn));
 
 	for_each_hyp_ppage(ppage) {
 		u64 phys = hyp_pfn_to_phys(ppage->pfn);
@@ -2043,13 +2042,9 @@ int __pkvm_host_donate_sglist_guest(struct pkvm_hyp_vcpu *vcpu)
 			goto unlock;
 		}
 
-		if (addr_is_memory(phys) != is_memory) {
-			ret = -EINVAL;
-			goto unlock;
-		}
-
 		ret = ___host_check_page_state_range(phys, size, PKVM_PAGE_OWNED,
-						     HOST_CHECK_NULL_REFCNT);
+						     HOST_CHECK_NULL_REFCNT |
+						     HOST_CHECK_IS_MEMORY);
 		if (ret)
 			goto unlock;
 
