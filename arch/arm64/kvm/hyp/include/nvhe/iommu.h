@@ -9,10 +9,12 @@
 
 #include <nvhe/alloc_mgt.h>
 
+struct kvm_iommu_ops;
 struct kvm_hyp_iommu_domain {
 	atomic_t		refs;
 	pkvm_handle_t		domain_id;
 	void			*priv;
+	struct kvm_iommu_ops	*driver;
 };
 
 struct kvm_iommu_ops {
