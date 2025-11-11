@@ -23,6 +23,7 @@ struct kvm_iommu_ops *kvm_iommu_ops;
 static bool kvm_idmap_initialized;
 static struct hyp_pool iommu_pages_pool_atomic;
 static struct hyp_pool iommu_host_pool;
+static bool iommu_pools_ready;
 
 DECLARE_PER_CPU(struct kvm_hyp_req, host_hyp_reqs);
 
@@ -33,7 +34,7 @@ static DEFINE_HYP_SPINLOCK(kvm_iommu_domain_lock);
 
 static int kvm_iommu_refill(struct kvm_hyp_memcache *host_mc)
 {
-	if (!kvm_iommu_ops)
+	if (!iommu_pools_ready)
 		return -EINVAL;
 
 	return refill_hyp_pool(&iommu_host_pool, host_mc);
@@ -41,7 +42,7 @@ static int kvm_iommu_refill(struct kvm_hyp_memcache *host_mc)
 
 static void kvm_iommu_reclaim(struct kvm_hyp_memcache *host_mc, int target)
 {
-	if (!kvm_iommu_ops)
+	if (!iommu_pools_ready)
 		return;
 
 	reclaim_hyp_pool(&iommu_host_pool, host_mc, target);
@@ -49,7 +50,7 @@ static void kvm_iommu_reclaim(struct kvm_hyp_memcache *host_mc, int target)
 
 static int kvm_iommu_reclaimable(void)
 {
-	if (!kvm_iommu_ops)
+	if (!iommu_pools_ready)
 		return 0;
 
 	return hyp_pool_free_pages(&iommu_host_pool);
@@ -121,16 +122,21 @@ static int kvm_iommu_snapshot_host_stage2(struct kvm_iommu_ops *ops)
 
 int kvm_iommu_init(void *pool_base, size_t nr_pages)
 {
-	if (nr_pages) {
-		int ret;
+	int ret;
 
+	if (nr_pages) {
 		ret = hyp_pool_init(&iommu_pages_pool_atomic, hyp_virt_to_pfn(pool_base),
 				    nr_pages, 0);
 		if (ret)
 			return ret;
 	}
 
-	return hyp_pool_init_empty(&iommu_host_pool, 64);
+	ret = hyp_pool_init_empty(&iommu_host_pool, 64);
+	if (ret)
+		return ret;
+
+	iommu_pools_ready = true;
+	return ret;
 }
 
 int kvm_iommu_register_ops(struct kvm_iommu_ops *ops, pkvm_handle_t *drv_id)
