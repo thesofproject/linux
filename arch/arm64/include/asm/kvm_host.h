@@ -1890,7 +1890,7 @@ int kvm_iommu_register_driver(struct kvm_iommu_driver *kern_ops,
 			      size_t pool_pages);
 
 int kvm_iommu_init_driver(void);
-int kvm_iommu_register_hyp_ops(struct kvm_iommu_ops *hyp_ops);
+int kvm_iommu_register_hyp_ops(struct kvm_iommu_ops *hyp_ops, pkvm_handle_t *drv_id);
 size_t kvm_iommu_pages(void);
 #endif
 
@@ -1904,13 +1904,15 @@ int kvm_iommu_map_pages(pkvm_handle_t domain_id, unsigned long iova,
 			phys_addr_t paddr, size_t pgsize, size_t pgcount,
 			int prot, gfp_t gfp, size_t *total_mapped);
 int kvm_iommu_free_domain(pkvm_handle_t domain_id);
-int kvm_iommu_alloc_domain(pkvm_handle_t iommu_id, pkvm_handle_t domain_id, int type);
+int kvm_iommu_alloc_domain(pkvm_handle_t drv_id, pkvm_handle_t iommu_id,
+			   pkvm_handle_t domain_id, int type);
 int kvm_iommu_detach_dev(pkvm_handle_t iommu_id, pkvm_handle_t domain_id,
 			 unsigned int endpoint, unsigned int pasid);
 int kvm_iommu_attach_dev(pkvm_handle_t iommu_id, pkvm_handle_t domain_id,
 			 unsigned int endpoint, unsigned int pasid,
 			 unsigned int ssid_bits, unsigned long flags);
-int kvm_iommu_set_identity(pkvm_handle_t iommu, pkvm_handle_t dev, bool on);
+int kvm_iommu_set_identity(pkvm_handle_t drv_id, pkvm_handle_t iommu,
+			   pkvm_handle_t dev, bool on);
 size_t kvm_iommu_map_sg(pkvm_handle_t domain_id, struct kvm_iommu_sg *sg,
 			unsigned long iova, unsigned int nent,
 			unsigned int prot, gfp_t gfp);

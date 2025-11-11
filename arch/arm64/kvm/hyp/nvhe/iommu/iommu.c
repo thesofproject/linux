@@ -133,7 +133,7 @@ int kvm_iommu_init(void *pool_base, size_t nr_pages)
 	return hyp_pool_init_empty(&iommu_host_pool, 64);
 }
 
-int kvm_iommu_register_ops(struct kvm_iommu_ops *ops)
+int kvm_iommu_register_ops(struct kvm_iommu_ops *ops, pkvm_handle_t *drv_id)
 {
 	int ret;
 
@@ -150,6 +150,7 @@ int kvm_iommu_register_ops(struct kvm_iommu_ops *ops)
 		return ret;
 
 	kvm_iommu_ops = ops;
+	*drv_id = 0;
 	return 0;
 }
 
@@ -240,7 +241,8 @@ static void domain_put(struct kvm_hyp_iommu_domain *domain)
 	BUG_ON(!atomic_dec_return_release(&domain->refs));
 }
 
-int kvm_iommu_alloc_domain(pkvm_handle_t iommu_id, pkvm_handle_t domain_id, int type)
+int kvm_iommu_alloc_domain(pkvm_handle_t drv_id, pkvm_handle_t iommu_id,
+			   pkvm_handle_t domain_id, int type)
 {
 	int ret = -EINVAL;
 	struct kvm_hyp_iommu_domain *domain;
@@ -443,7 +445,8 @@ phys_addr_t kvm_iommu_iova_to_phys(pkvm_handle_t domain_id, unsigned long iova)
 	return phys;
 }
 
-int kvm_iommu_set_identity(pkvm_handle_t iommu, pkvm_handle_t dev, bool on)
+int kvm_iommu_set_identity(pkvm_handle_t drv_id, pkvm_handle_t iommu,
+			   pkvm_handle_t dev, bool on)
 {
 	if (!kvm_iommu_ops || !kvm_iommu_ops->set_identity)
 		return -ENODEV;

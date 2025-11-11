@@ -135,6 +135,7 @@ static int kvm_arm_smmu_v3_post_init(void);
 static int kvm_arm_smmu_v3_init(void)
 {
 	int ret;
+	pkvm_handle_t hyp_drv_id;
 
 #ifdef MODULE
 	ret = pkvm_load_el2_module(kvm_nvhe_sym(smmu_init_hyp_module));
@@ -145,7 +146,7 @@ static int kvm_arm_smmu_v3_init(void)
 	}
 #endif
 
-	ret = kvm_iommu_register_hyp_ops(ksym_ref_addr_nvhe(smmu_ops));
+	ret = kvm_iommu_register_hyp_ops(ksym_ref_addr_nvhe(smmu_ops), &hyp_drv_id);
 	if (ret)
 		return ret;
 

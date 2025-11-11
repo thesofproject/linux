@@ -25,6 +25,8 @@ struct kvm_arm_smmu_domain {
 	pkvm_handle_t			id;
 };
 
+static pkvm_handle_t hyp_drv_id;
+
 #define to_kvm_smmu_domain(_domain) \
 	container_of(_domain, struct kvm_arm_smmu_domain, domain)
 
@@ -144,7 +146,7 @@ static void kvm_arm_smmu_detach_dev_pasid(struct device *dev,
 			int ret;
 			u32 sid = master->streams[i].id;
 
-			ret = kvm_iommu_set_identity(host_smmu->id, sid, false);
+			ret = kvm_iommu_set_identity(hyp_drv_id, host_smmu->id, sid, false);
 			if (ret)
 				dev_err(dev, "Failed to disable identity(sid=0x%x) %d\n",
 					sid, ret);
@@ -238,7 +240,7 @@ static int kvm_arm_smmu_domain_finalize(struct kvm_arm_smmu_domain *kvm_smmu_dom
 		return ret;
 
 	kvm_smmu_domain->id = ret;
-	ret = kvm_iommu_alloc_domain(host_smmu->id, kvm_smmu_domain->id, KVM_ARM_SMMU_DOMAIN_S1);
+	ret = kvm_iommu_alloc_domain(hyp_drv_id, host_smmu->id, kvm_smmu_domain->id, KVM_ARM_SMMU_DOMAIN_S1);
 	if (ret) {
 		ida_free(&kvm_arm_smmu_domain_ida, kvm_smmu_domain->id);
 		return ret;
@@ -340,7 +342,7 @@ static int kvm_arm_smmu_attach_dev_identity(struct iommu_domain *domain,
 	for (i = 0; i < master->num_streams; i++) {
 		u32 sid = master->streams[i].id;
 
-		ret = kvm_iommu_set_identity(host_smmu->id, sid, true);
+		ret = kvm_iommu_set_identity(hyp_drv_id, host_smmu->id, sid, true);
 		if (ret) {
 			dev_err(dev, "Failed to enable identity(sid=0x%x) %d\n", sid, ret);
 			return ret;
@@ -851,7 +853,7 @@ static int kvm_arm_smmu_v3_init_drv(void)
 	kvm_hyp_arm_smmu_v3_pv_smmus = kvm_arm_smmu_array;
 	kvm_hyp_arm_smmu_v3_pv_count = kvm_arm_smmu_count;
 
-	ret = kvm_iommu_register_hyp_ops(ksym_ref_addr_nvhe(smmu_pv_ops));
+	ret = kvm_iommu_register_hyp_ops(ksym_ref_addr_nvhe(smmu_pv_ops), &hyp_drv_id);
 	if (ret)
 		goto err_free;
 
