@@ -15,6 +15,7 @@
 #include <sound/hda_codec.h>
 #include <sound/soc.h>
 #include "hda_component.h"
+#include "../generic.h"
 #include "aw88399_hda.h"
 
 /* Import register definitions from ASoC driver */
@@ -173,6 +174,7 @@ static int aw88399_hda_acpi_probe(struct aw88399_hda *aw88399)
 {
 	struct device *dev = aw88399->dev;
 	struct acpi_device *adev;
+	u64 uid;
 	int ret = 0;
 
 	adev = ACPI_COMPANION(dev);
@@ -186,7 +188,7 @@ static int aw88399_hda_acpi_probe(struct aw88399_hda *aw88399)
 	 * On Legion, we have only 1 ACPI device (at 0x35), so this will be 0.
 	 * The 0x34 device is manually instantiated and won't have ACPI data.
 	 */
-	ret = acpi_dev_uid_to_integer(adev, &aw88399->index);
+	ret = acpi_dev_uid_to_integer(adev, &uid);
 	if (ret) {
 		/*
 		 * If no _UID or error, derive index from I2C address.
@@ -196,6 +198,7 @@ static int aw88399_hda_acpi_probe(struct aw88399_hda *aw88399)
 		aw88399->index = i2c->addr - 0x34;
 		dev_info(dev, "No ACPI _UID, using address-based index %d\n", aw88399->index);
 	} else {
+		aw88399->index = (int)uid;
 		dev_info(dev, "ACPI _UID: %d\n", aw88399->index);
 	}
 
@@ -322,4 +325,4 @@ EXPORT_SYMBOL_NS_GPL(aw88399_hda_pm_ops, SND_HDA_SCODEC_AW88399);
 MODULE_DESCRIPTION("HDA AW88399 driver");
 MODULE_AUTHOR("Lyapsus");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(SND_SOC_AW88395_LIB);
+MODULE_IMPORT_NS("SND_SOC_AW88395_LIB");
