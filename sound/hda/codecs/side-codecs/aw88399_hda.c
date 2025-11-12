@@ -76,8 +76,13 @@ static int aw88399_hda_bind(struct device *dev, struct device *master, void *mas
 	if (!comp)
 		return -EINVAL;
 
+	if (comp->dev)
+		return -EBUSY;
+
 	comp->dev = dev;
 	aw88399->codec = parent->codec;
+
+	strscpy(comp->name, dev_name(dev), sizeof(comp->name));
 
 	/* Set up playback hooks */
 	comp->playback_hook = aw88399_hda_playback_hook;
@@ -90,6 +95,13 @@ static int aw88399_hda_bind(struct device *dev, struct device *master, void *mas
 static void aw88399_hda_unbind(struct device *dev, struct device *master, void *master_data)
 {
 	struct aw88399_hda *aw88399 = dev_get_drvdata(dev);
+	struct hda_component_parent *parent = master_data;
+	struct hda_component *comp;
+
+	comp = hda_component_from_index(parent, aw88399->index);
+	if (comp && (comp->dev == dev)) {
+		memset(comp, 0, sizeof(*comp));
+	}
 
 	aw88399->codec = NULL;
 	dev_info(dev, "Unbound from HDA codec\n");
@@ -317,8 +329,38 @@ static int aw88399_hda_runtime_resume(struct device *dev)
 	return 0;
 }
 
+static int aw88399_hda_system_suspend(struct device *dev)
+{
+	struct aw88399_hda *aw88399 = dev_get_drvdata(dev);
+
+	dev_dbg(dev, "System suspend\n");
+
+	/* Stop amplifier before system sleep */
+	if (aw88399->aw_dev && aw88399->playing) {
+		aw88395_dev_stop(aw88399->aw_dev);
+	}
+
+	return 0;
+}
+
+static int aw88399_hda_system_resume(struct device *dev)
+{
+	struct aw88399_hda *aw88399 = dev_get_drvdata(dev);
+
+	dev_dbg(dev, "System resume\n");
+
+	/* Reset chip after system sleep */
+	if (aw88399->aw_dev) {
+		aw88399_hda_hw_reset(aw88399);
+		/* Chip will be fully reinitialized on next playback */
+	}
+
+	return 0;
+}
+
 const struct dev_pm_ops aw88399_hda_pm_ops = {
 	RUNTIME_PM_OPS(aw88399_hda_runtime_suspend, aw88399_hda_runtime_resume, NULL)
+	SYSTEM_SLEEP_PM_OPS(aw88399_hda_system_suspend, aw88399_hda_system_resume)
 };
 EXPORT_SYMBOL_NS_GPL(aw88399_hda_pm_ops, "SND_HDA_SCODEC_AW88399");
 
