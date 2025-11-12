@@ -247,7 +247,7 @@ common_kernel(
     modules_superset = get_gki_modules_superset("arm64") + get_kunit_modules_superset("arm64"),
     protected_module_names_list = ":gki_aarch64_protected_module_names",
     system_dlkm_extra_archive_files = [":generate_gki_module_info_arm64"],
-    trim_nonlisted_kmi = False,
+    trim_nonlisted_kmi = True,
     visibility = ["//visibility:public"],
 )
 
@@ -277,7 +277,7 @@ common_kernel(
     page_size = "16k",
     protected_module_names_list = ":gki_aarch64_protected_module_names",
     system_dlkm_extra_archive_files = [":generate_gki_module_info_arm64"],
-    trim_nonlisted_kmi = False,
+    trim_nonlisted_kmi = True,
     visibility = ["//visibility:public"],
 )
 
