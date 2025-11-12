@@ -451,14 +451,12 @@ static int sdw_prep_deprep_slave_ports(struct sdw_bus *bus,
 				       struct sdw_port_runtime *p_rt,
 				       bool prep)
 {
-	struct completion *port_ready;
 	struct sdw_dpn_prop *dpn_prop;
 	struct sdw_prepare_ch prep_ch;
 	u32 imp_def_interrupts;
 	bool simple_ch_prep_sm;
-	u32 ch_prep_timeout;
 	bool intr = false;
-	int ret = 0, val;
+	int ret = 0;
 	u32 addr;
 
 	prep_ch.num = p_rt->num;
@@ -474,7 +472,6 @@ static int sdw_prep_deprep_slave_ports(struct sdw_bus *bus,
 
 		imp_def_interrupts = dpn_prop->imp_def_interrupts;
 		simple_ch_prep_sm = dpn_prop->simple_ch_prep_sm;
-		ch_prep_timeout = dpn_prop->ch_prep_timeout;
 	} else {
 		struct sdw_dp0_prop *dp0_prop = s_rt->slave->prop.dp0_prop;
 
@@ -485,7 +482,6 @@ static int sdw_prep_deprep_slave_ports(struct sdw_bus *bus,
 		}
 		imp_def_interrupts = dp0_prop->imp_def_interrupts;
 		simple_ch_prep_sm =  dp0_prop->simple_ch_prep_sm;
-		ch_prep_timeout = dp0_prop->ch_prep_timeout;
 	}
 
 	prep_ch.prepare = prep;
@@ -526,27 +522,81 @@ static int sdw_prep_deprep_slave_ports(struct sdw_bus *bus,
 			return ret;
 		}
 
-		/* Wait for completion on port ready */
-		port_ready = &s_rt->slave->port_ready[prep_ch.num];
-		wait_for_completion_timeout(port_ready,
-			msecs_to_jiffies(ch_prep_timeout));
-
-		val = sdw_read_no_pm(s_rt->slave, SDW_DPN_PREPARESTATUS(p_rt->num));
-		if ((val < 0) || (val & p_rt->ch_mask)) {
-			ret = (val < 0) ? val : -ETIMEDOUT;
-			dev_err(&s_rt->slave->dev,
-				"Chn prep failed for port %d: %d\n", prep_ch.num, ret);
-			return ret;
-		}
+		/*
+		 * Defer wait for completion to allow all peripherals to
+		 * prepare in parallel.
+		 */
+	} else {
+		/* Inform slaves about ports prepared */
+		sdw_do_port_prep(s_rt, prep_ch,
+				 prep ? SDW_OPS_PORT_POST_PREP : SDW_OPS_PORT_POST_DEPREP);
 	}
-
-	/* Inform slaves about ports prepared */
-	sdw_do_port_prep(s_rt, prep_ch, prep ? SDW_OPS_PORT_POST_PREP : SDW_OPS_PORT_POST_DEPREP);
 
 	/* Disable interrupt after Port de-prepare */
 	if (!prep && intr)
 		ret = sdw_configure_dpn_intr(s_rt->slave, p_rt->num, prep,
 					     imp_def_interrupts);
+
+	return ret;
+}
+
+static int sdw_wait_prep_slave_ports(struct sdw_bus *bus,
+				     struct sdw_slave_runtime *s_rt,
+				     struct sdw_port_runtime *p_rt)
+{
+	struct completion *port_ready;
+	struct sdw_dpn_prop *dpn_prop;
+	struct sdw_dp0_prop *dp0_prop;
+	struct sdw_prepare_ch prep_ch;
+	bool simple_ch_prep_sm;
+	u32 ch_prep_timeout;
+	int ret, val;
+
+	if (p_rt->num) {
+		dpn_prop = sdw_get_slave_dpn_prop(s_rt->slave, s_rt->direction, p_rt->num);
+		simple_ch_prep_sm = dpn_prop->simple_ch_prep_sm;
+		ch_prep_timeout = dpn_prop->ch_prep_timeout;
+	} else {
+		dp0_prop = s_rt->slave->prop.dp0_prop;
+		simple_ch_prep_sm = dp0_prop->simple_ch_prep_sm;
+		ch_prep_timeout = dp0_prop->ch_prep_timeout;
+	}
+
+	if (simple_ch_prep_sm)
+		return 0;
+
+	/*
+	 * Check if already prepared. Avoid overhead of waiting for interrupt
+	 * and port_ready completion if we don't need to.
+	 */
+	val = sdw_read_no_pm(s_rt->slave, SDW_DPN_PREPARESTATUS(p_rt->num));
+	if (val < 0) {
+		ret = val;
+		goto err;
+	}
+
+	if (val & p_rt->ch_mask) {
+		/* Wait for completion on port ready */
+		port_ready = &s_rt->slave->port_ready[p_rt->num];
+		wait_for_completion_timeout(port_ready, msecs_to_jiffies(ch_prep_timeout));
+		val = sdw_read_no_pm(s_rt->slave, SDW_DPN_PREPARESTATUS(p_rt->num));
+		if ((val < 0) || (val & p_rt->ch_mask)) {
+			ret = (val < 0) ? val : -ETIMEDOUT;
+			goto err;
+		}
+	}
+
+	/* Inform slaves about ports prepared */
+	prep_ch.num = p_rt->num;
+	prep_ch.ch_mask = p_rt->ch_mask;
+	prep_ch.prepare = true;
+	prep_ch.bank = bus->params.next_bank;
+	sdw_do_port_prep(s_rt, prep_ch, SDW_OPS_PORT_POST_PREP);
+
+	return 0;
+
+err:
+	dev_err(&s_rt->slave->dev, "Chn prep failed for port %d: %d\n", p_rt->num, ret);
 
 	return ret;
 }
@@ -599,6 +649,17 @@ static int sdw_prep_deprep_ports(struct sdw_master_runtime *m_rt, bool prep)
 							  p_rt, prep);
 			if (ret < 0)
 				return ret;
+		}
+	}
+
+	/* Wait for parallel CP_SM prepare completion */
+	if (prep) {
+		list_for_each_entry(s_rt, &m_rt->slave_rt_list, m_rt_node) {
+			list_for_each_entry(p_rt, &s_rt->port_list, port_node) {
+				ret = sdw_wait_prep_slave_ports(m_rt->bus, s_rt, p_rt);
+				if (ret < 0)
+					return ret;
+			}
 		}
 	}
 
