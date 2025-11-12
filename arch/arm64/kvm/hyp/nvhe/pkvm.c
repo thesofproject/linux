@@ -224,6 +224,13 @@ static int pkvm_vcpu_init_traps(struct pkvm_hyp_vcpu *hyp_vcpu)
  */
 #define RESERVED_ENTRY ((void *)0xa110ca7ed)
 
+/*
+ * Marks an invalid (deliberately leaked) entry in the VM table.
+ * This type of entry can never be recovered.
+ */
+#define LEAKED_ENTRY ((void *)0xdeadbeef)
+
+
 static unsigned int vm_handle_to_idx(pkvm_handle_t handle)
 {
 	return handle - HANDLE_OFFSET;
@@ -255,12 +262,15 @@ void pkvm_hyp_vm_table_init(void *tbl)
 static struct pkvm_hyp_vm *get_vm_by_handle(pkvm_handle_t handle)
 {
 	unsigned int idx = vm_handle_to_idx(handle);
+	struct pkvm_hyp_vm *hyp_vm;
 
 	if (unlikely(idx >= KVM_MAX_PVMS))
 		return NULL;
 
-	/* A reserved entry doesn't represent an initialized VM. */
-	if (unlikely(vm_table[idx] == RESERVED_ENTRY))
+	hyp_vm = vm_table[idx];
+
+	/* These entries don't represent an initialized VM. */
+	if (unlikely(hyp_vm == RESERVED_ENTRY || hyp_vm == LEAKED_ENTRY))
 		return NULL;
 
 	return vm_table[idx];
@@ -770,18 +780,16 @@ static void remove_vm_table_entry(pkvm_handle_t handle)
 	hyp_assert_write_lock_held(&vm_table_lock);
 	hyp_vm = vm_table[vm_handle_to_idx(handle)];
 
+	vm_table[vm_handle_to_idx(handle)] = NULL;
+
 	/*
 	 * If we didn't send the destruction message leak the vmid to
 	 * prevent others from using it.
 	 */
 	if (hyp_vm->kvm.arch.pkvm.ffa_support &&
-	    hyp_vm->ffa_buf.vm_avail_bitmap) {
-		vm_table[vm_handle_to_idx(handle)] = (void *)0xdeadbeef;
-		list_del(&hyp_vm->vm_list);
-		return;
-	}
+	    hyp_vm->ffa_buf.vm_avail_bitmap)
+		vm_table[vm_handle_to_idx(handle)] = LEAKED_ENTRY;
 
-	vm_table[vm_handle_to_idx(handle)] = NULL;
 	list_del(&hyp_vm->vm_list);
 }
 
