@@ -269,7 +269,7 @@ int aw88399_hda_probe(struct device *dev, const char *device_name, int id, int i
 
 	return 0;
 }
-EXPORT_SYMBOL_NS_GPL(aw88399_hda_probe, SND_HDA_SCODEC_AW88399);
+EXPORT_SYMBOL_NS_GPL(aw88399_hda_probe, "SND_HDA_SCODEC_AW88399");
 
 void aw88399_hda_remove(struct device *dev)
 {
@@ -285,7 +285,7 @@ void aw88399_hda_remove(struct device *dev)
 
 	dev_info(dev, "AW88399 HDA side codec removed\n");
 }
-EXPORT_SYMBOL_NS_GPL(aw88399_hda_remove, SND_HDA_SCODEC_AW88399);
+EXPORT_SYMBOL_NS_GPL(aw88399_hda_remove, "SND_HDA_SCODEC_AW88399");
 
 static int aw88399_hda_runtime_suspend(struct device *dev)
 {
@@ -320,7 +320,7 @@ static int aw88399_hda_runtime_resume(struct device *dev)
 const struct dev_pm_ops aw88399_hda_pm_ops = {
 	RUNTIME_PM_OPS(aw88399_hda_runtime_suspend, aw88399_hda_runtime_resume, NULL)
 };
-EXPORT_SYMBOL_NS_GPL(aw88399_hda_pm_ops, SND_HDA_SCODEC_AW88399);
+EXPORT_SYMBOL_NS_GPL(aw88399_hda_pm_ops, "SND_HDA_SCODEC_AW88399");
 
 MODULE_DESCRIPTION("HDA AW88399 driver");
 MODULE_AUTHOR("Lyapsus");
