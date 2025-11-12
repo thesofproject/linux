@@ -260,6 +260,15 @@ to the return value of ``host_s2_pgtable_pages()`` on your system. Some
 extra pages might be required if your SMMU supports other dynamically
 allocated HW structures (e.g., L2 STE).
 
+Other IOMMUs
+============
+
+A template empty driver exists that you can use to start a new driver,
+``CONFIG_PKVM_IOMMU_TEMPLATE```
+
+Based on the IOMMU design, you can check one of the SMMUv3 provided driver
+implementation for any unclear points.
+
 FAQ
 ===
 
