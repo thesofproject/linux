@@ -73,6 +73,16 @@ static void skl_set_hda_codec_autosuspend_delay(struct snd_soc_card *card)
 				       BT_OFFLOAD_BE_ID, \
 				       0)
 
+static const struct dmi_system_id legion_aw88399_dmi_table[] = {
+	{
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "83F5"),
+		},
+	},
+	{ }
+};
+
 static unsigned long
 skl_hda_get_board_quirk(struct snd_soc_acpi_mach_params *mach_params)
 {
@@ -103,8 +113,15 @@ static int skl_hda_set_aw88399_dai_link(struct device *dev,
 	int count = 0;
 	int i = 0;
 	bool legion_quirk = false;
+	char *legion_acpi_name = NULL;
 
+	/* Scan ACPI devices and cache the first device name for Legion quirk */
 	for_each_acpi_dev_match(adev, AW88399_ACPI_HID, NULL, -1) {
+		if (count == 0 && !legion_acpi_name) {
+			/* Cache first device name during initial scan */
+			legion_acpi_name = devm_kasprintf(dev, GFP_KERNEL, "i2c-%s",
+							  acpi_dev_name(adev));
+		}
 		count++;
 		acpi_dev_put(adev);
 	}
@@ -118,18 +135,13 @@ static int skl_hda_set_aw88399_dai_link(struct device *dev,
 	 * (0x34 and 0x35) for stereo woofer configuration. When only 1 ACPI
 	 * device is found on Legion, hardcode both I2C addresses.
 	 */
-	if (count == 1 && dmi_check_system((const struct dmi_system_id[]) {
-		{
-			.matches = {
-				DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
-				DMI_MATCH(DMI_PRODUCT_NAME, "83F5"),
-			},
-		},
-		{ }
-	})) {
+	if (count == 1 && dmi_check_system(legion_aw88399_dmi_table)) {
 		dev_info(dev, "Lenovo Legion: forcing 2-chip stereo configuration for AW88399\n");
 		legion_quirk = true;
 		count = 2;
+
+		if (!legion_acpi_name)
+			return -ENOMEM;
 	}
 
 	codecs = devm_kcalloc(dev, count, sizeof(*codecs), GFP_KERNEL);
@@ -143,7 +155,7 @@ static int skl_hda_set_aw88399_dai_link(struct device *dev,
 			return -ENOMEM;
 		codecs[0].dai_name = "aw88399-aif";
 
-		codecs[1].name = devm_kstrdup(dev, "aw88399.2-0035", GFP_KERNEL);
+		codecs[1].name = legion_acpi_name;
 		if (!codecs[1].name)
 			return -ENOMEM;
 		codecs[1].dai_name = "aw88399-aif";
@@ -187,7 +199,7 @@ static int skl_hda_audio_probe(struct platform_device *pdev)
 	struct snd_soc_card *card;
 	unsigned long board_quirk = skl_hda_get_board_quirk(&mach->mach_params);
 	int ret;
- 	int i;
+	int i;
 
 	card = devm_kzalloc(&pdev->dev, sizeof(struct snd_soc_card), GFP_KERNEL);
 	if (!card)

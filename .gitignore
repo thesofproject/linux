@@ -178,6 +178,9 @@ x509.genkey
 # Clang's compilation database file
 compile_commands.json
 
+# Local helper scripts
+/check-code.sh
+
 # Documentation toolchain
 sphinx_*/
 
