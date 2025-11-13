@@ -1397,6 +1397,49 @@ static int aw88399_stop(struct aw_device *aw_dev)
 	return 0;
 }
 
+static int aw88399_dai_trigger(struct snd_pcm_substream *substream, int cmd,
+				struct snd_soc_dai *dai)
+{
+	struct snd_soc_component *component = dai->component;
+	struct aw88399 *aw88399 = snd_soc_component_get_drvdata(component);
+	int ret = 0;
+
+	dev_dbg(component->dev, "%s: cmd=%d, stream=%s\n", __func__, cmd,
+		substream->stream == SNDRV_PCM_STREAM_PLAYBACK ? "playback" : "capture");
+
+	/* Only handle playback stream */
+	if (substream->stream != SNDRV_PCM_STREAM_PLAYBACK)
+		return 0;
+
+	switch (cmd) {
+	case SNDRV_PCM_TRIGGER_START:
+	case SNDRV_PCM_TRIGGER_RESUME:
+	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+		dev_info(component->dev, "Starting playback (trigger)\n");
+		ret = aw88399_dev_start(aw88399);
+		if (ret < 0)
+			dev_err(component->dev, "Failed to start device: %d\n", ret);
+		break;
+	case SNDRV_PCM_TRIGGER_STOP:
+	case SNDRV_PCM_TRIGGER_SUSPEND:
+	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+		dev_info(component->dev, "Stopping playback (trigger)\n");
+		ret = aw88399_stop(aw88399->aw_pa);
+		if (ret < 0)
+			dev_err(component->dev, "Failed to stop device: %d\n", ret);
+		break;
+	default:
+		ret = -EINVAL;
+		break;
+	}
+
+	return ret;
+}
+
+static const struct snd_soc_dai_ops aw88399_dai_ops = {
+	.trigger = aw88399_dai_trigger,
+};
+
 static struct snd_soc_dai_driver aw88399_dai[] = {
 	{
 		.name = "aw88399-aif",
@@ -1415,6 +1458,7 @@ static struct snd_soc_dai_driver aw88399_dai[] = {
 			.rates = AW88399_RATES,
 			.formats = AW88399_FORMATS,
 		},
+		.ops = &aw88399_dai_ops,
 	},
 };
 
