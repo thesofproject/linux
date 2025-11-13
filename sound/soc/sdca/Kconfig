@@ -28,6 +28,7 @@ config SND_SOC_SDCA_IRQ
 config SND_SOC_SDCA_FDL
 	bool "SDCA FDL (File DownLoad) support"
 	depends on SND_SOC_SDCA
+	select SOUNDWIRE_INTEL_FDL
 	default y
 	help
 	  This option enables support for the File Download using UMP,
