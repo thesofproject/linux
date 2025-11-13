@@ -14,6 +14,7 @@
 #include <linux/minmax.h>
 #include <linux/regmap.h>
 #include <linux/sort.h>
+#include <sound/pcm_params.h>
 #include <sound/soc.h>
 #include "aw88399.h"
 #include "aw88395/aw88395_device.h"
@@ -1436,8 +1437,34 @@ static int aw88399_dai_trigger(struct snd_pcm_substream *substream, int cmd,
 	return ret;
 }
 
+static int aw88399_dai_hw_params(struct snd_pcm_substream *substream,
+				  struct snd_pcm_hw_params *params,
+				  struct snd_soc_dai *dai)
+{
+	struct snd_soc_component *component = dai->component;
+	unsigned int rate = params_rate(params);
+	unsigned int width = params_width(params);
+	unsigned int channels = params_channels(params);
+
+	dev_dbg(component->dev, "%s: rate=%u, width=%u, channels=%u, stream=%s\n",
+		__func__, rate, width, channels,
+		substream->stream == SNDRV_PCM_STREAM_PLAYBACK ? "playback" : "capture");
+
+	/* Topology is configured for 48kHz, warn if mismatch */
+	if (rate != 48000) {
+		dev_warn(component->dev, "Unexpected sample rate %u (expected 48000)\n", rate);
+		dev_warn(component->dev, "Audio may be distorted or not work\n");
+	}
+
+	/* Firmware handles I2S/format configuration via profile */
+	/* No additional register writes needed here */
+
+	return 0;
+}
+
 static const struct snd_soc_dai_ops aw88399_dai_ops = {
 	.trigger = aw88399_dai_trigger,
+	.hw_params = aw88399_dai_hw_params,
 };
 
 static struct snd_soc_dai_driver aw88399_dai[] = {
