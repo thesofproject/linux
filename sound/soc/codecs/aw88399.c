@@ -1322,7 +1322,7 @@ static void aw88399_startup_work(struct work_struct *work)
 	mutex_unlock(&aw88399->lock);
 }
 
-static void aw88399_start(struct aw88399 *aw88399, bool sync_start)
+void aw88399_start(struct aw88399 *aw88399, bool sync_start)
 {
 	int ret;
 
@@ -1345,6 +1345,7 @@ static void aw88399_start(struct aw88399 *aw88399, bool sync_start)
 			&aw88399->start_work,
 			AW88399_START_WORK_DELAY_MS);
 }
+EXPORT_SYMBOL_GPL(aw88399_start);
 
 static int aw_dev_check_sysint(struct aw_device *aw_dev)
 {
@@ -1359,7 +1360,7 @@ static int aw_dev_check_sysint(struct aw_device *aw_dev)
 	return 0;
 }
 
-static int aw88399_stop(struct aw_device *aw_dev)
+int aw88399_stop(struct aw_device *aw_dev)
 {
 	struct aw_sec_data_desc *dsp_cfg =
 		&aw_dev->prof_info.prof_desc[aw_dev->prof_cur].sec_desc[AW88395_DATA_TYPE_DSP_CFG];
@@ -1397,6 +1398,7 @@ static int aw88399_stop(struct aw_device *aw_dev)
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(aw88399_stop);
 
 static int aw88399_dai_hw_params(struct snd_pcm_substream *substream,
 				  struct snd_pcm_hw_params *params,
@@ -2115,7 +2117,7 @@ static int aw88399_dev_init(struct aw88399 *aw88399, struct aw_container *aw_cfg
 	return 0;
 }
 
-static int aw88399_request_firmware_file(struct aw88399 *aw88399)
+int aw88399_request_firmware_file(struct aw88399 *aw88399)
 {
 	const struct firmware *cont = NULL;
 	int ret;
@@ -2156,6 +2158,7 @@ static int aw88399_request_firmware_file(struct aw88399 *aw88399)
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(aw88399_request_firmware_file);
 
 static const struct snd_kcontrol_new aw88399_controls[] = {
 	SOC_SINGLE_EXT("PCM Playback Volume", AW88399_SYSCTRL2_REG,
@@ -2186,9 +2189,11 @@ static int aw88399_playback_event(struct snd_soc_dapm_widget *w,
 	mutex_lock(&aw88399->lock);
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
+		cancel_delayed_work_sync(&aw88399->start_work);
 		aw88399_start(aw88399, AW88399_ASYNC_START);
 		break;
 	case SND_SOC_DAPM_POST_PMD:
+		cancel_delayed_work_sync(&aw88399->start_work);
 		aw88399_stop(aw88399->aw_pa);
 		break;
 	default:
@@ -2283,7 +2288,7 @@ static void aw88399_parse_channel_dt(struct aw_device *aw_dev)
 	dev_dbg(aw_dev->dev, "DT channel value: %d\n", channel_value);
 }
 
-static int aw88399_init(struct aw88399 *aw88399, struct i2c_client *i2c, struct regmap *regmap)
+int aw88399_init(struct aw88399 *aw88399, struct i2c_client *i2c, struct regmap *regmap)
 {
 	struct aw_device *aw_dev;
 	unsigned int chip_id;
@@ -2325,6 +2330,7 @@ static int aw88399_init(struct aw88399 *aw88399, struct i2c_client *i2c, struct 
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(aw88399_init);
 
 static int aw88399_i2c_probe(struct i2c_client *i2c)
 {

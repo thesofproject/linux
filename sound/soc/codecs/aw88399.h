@@ -631,4 +631,10 @@ struct aw88399 {
 	unsigned int dither_st;
 };
 
+int aw88399_init(struct aw88399 *aw88399, struct i2c_client *i2c,
+		 struct regmap *regmap);
+int aw88399_request_firmware_file(struct aw88399 *aw88399);
+void aw88399_start(struct aw88399 *aw88399, bool sync_start);
+int aw88399_stop(struct aw_device *aw_dev);
+
 #endif

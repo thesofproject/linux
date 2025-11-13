@@ -33,8 +33,8 @@ static const struct regmap_config aw88399_hda_regmap_i2c = {
 static void aw88399_hda_playback_hook(struct device *dev, int action)
 {
 	struct aw88399_hda *aw88399 = dev_get_drvdata(dev);
-	struct aw_device *aw_dev = aw88399->aw_dev;
-	int ret;
+	struct aw88399 *core = aw88399->core;
+	int ret = 0;
 
 	dev_dbg(dev, "Playback action: %d\n", action);
 
@@ -45,17 +45,19 @@ static void aw88399_hda_playback_hook(struct device *dev, int action)
 		break;
 	case HDA_GEN_PCM_ACT_PREPARE:
 		/* Start amplifier */
-		ret = aw88395_dev_start(aw_dev);
-		if (ret)
-			dev_err(dev, "Failed to start amplifier: %d\n", ret);
+		if (core)
+			aw88399_start(core, AW88399_SYNC_START);
 		break;
 	case HDA_GEN_PCM_ACT_CLEANUP:
 		/* Stop amplifier */
-		ret = aw88395_dev_stop(aw_dev);
+		if (aw88399->aw_dev)
+			ret = aw88399_stop(aw88399->aw_dev);
 		if (ret)
 			dev_err(dev, "Failed to stop amplifier: %d\n", ret);
 		break;
 	case HDA_GEN_PCM_ACT_CLOSE:
+		if (aw88399->aw_dev)
+			aw88399_stop(aw88399->aw_dev);
 		aw88399->playing = false;
 		pm_runtime_mark_last_busy(dev);
 		pm_runtime_put_autosuspend(dev);
@@ -99,9 +101,8 @@ static void aw88399_hda_unbind(struct device *dev, struct device *master, void *
 	struct hda_component *comp;
 
 	comp = hda_component_from_index(parent, aw88399->index);
-	if (comp && (comp->dev == dev)) {
+	if (comp && (comp->dev == dev))
 		memset(comp, 0, sizeof(*comp));
-	}
 
 	aw88399->codec = NULL;
 	dev_info(dev, "Unbound from HDA codec\n");
@@ -129,55 +130,31 @@ static int aw88399_hda_init(struct aw88399_hda *aw88399)
 {
 	struct device *dev = aw88399->dev;
 	struct i2c_client *i2c = to_i2c_client(dev);
-	struct aw_device *aw_dev;
-	unsigned int chip_id;
+	struct aw88399 *core;
 	int ret;
 
 	/* Hardware reset */
 	aw88399_hda_hw_reset(aw88399);
 
-	/* Read and verify chip ID */
-	ret = regmap_read(aw88399->regmap, AW88399_ID_REG, &chip_id);
-	if (ret) {
-		dev_err(dev, "Failed to read chip ID: %d\n", ret);
-		return ret;
-	}
-
-	if (chip_id != AW88399_CHIP_ID) {
-		dev_err(dev, "Unsupported chip ID: 0x%04x (expected 0x%04x)\n",
-			chip_id, AW88399_CHIP_ID);
-		return -ENODEV;
-	}
-
-	dev_info(dev, "AW88399 chip ID: 0x%04x\n", chip_id);
-
-	/* Allocate aw_device */
-	aw_dev = devm_kzalloc(dev, sizeof(*aw_dev), GFP_KERNEL);
-	if (!aw_dev)
+	core = devm_kzalloc(dev, sizeof(*core), GFP_KERNEL);
+	if (!core)
 		return -ENOMEM;
 
-	aw_dev->i2c = i2c;
-	aw_dev->dev = dev;
-	aw_dev->regmap = aw88399->regmap;
-	aw_dev->chip_id = chip_id;
+	mutex_init(&core->lock);
+	core->reset_gpio = aw88399->reset_gpio;
+	core->regmap = aw88399->regmap;
 
-	/* Derive channel from I2C address: 0x34 = left (0), 0x35 = right (1) */
-	aw_dev->channel = i2c->addr - 0x34;
-	aw88399->channel = aw_dev->channel;
-
-	dev_info(dev, "Using I2C address-based channel %d (addr 0x%02x)\n",
-		 aw_dev->channel, i2c->addr);
-
-	mutex_init(&aw_dev->dsp_lock);
-
-	/* Initialize device using existing aw88395 device layer */
-	ret = aw88395_init(&aw_dev, i2c, aw88399->regmap);
-	if (ret) {
-		dev_err(dev, "Failed to initialize device: %d\n", ret);
+	ret = aw88399_init(core, i2c, aw88399->regmap);
+	if (ret)
 		return ret;
-	}
 
-	aw88399->aw_dev = aw_dev;
+	ret = aw88399_request_firmware_file(core);
+	if (ret)
+		return ret;
+
+	aw88399->core = core;
+	aw88399->aw_dev = core->aw_pa;
+	aw88399->channel = core->aw_pa->channel;
 
 	return 0;
 }
@@ -191,8 +168,12 @@ static int aw88399_hda_acpi_probe(struct aw88399_hda *aw88399)
 
 	adev = ACPI_COMPANION(dev);
 	if (!adev) {
-		dev_err(dev, "No ACPI companion\n");
-		return -ENODEV;
+		struct i2c_client *i2c = to_i2c_client(dev);
+
+		aw88399->index = i2c->addr - 0x34;
+		dev_warn(dev, "No ACPI companion, using address-based index %d\n",
+			 aw88399->index);
+		return 0;
 	}
 
 	/*
@@ -207,6 +188,7 @@ static int aw88399_hda_acpi_probe(struct aw88399_hda *aw88399)
 		 * 0x34 = index 0 (left), 0x35 = index 1 (right)
 		 */
 		struct i2c_client *i2c = to_i2c_client(dev);
+
 		aw88399->index = i2c->addr - 0x34;
 		dev_info(dev, "No ACPI _UID, using address-based index %d\n", aw88399->index);
 	} else {
@@ -289,9 +271,8 @@ void aw88399_hda_remove(struct device *dev)
 
 	pm_runtime_disable(dev);
 
-	if (aw88399->aw_dev) {
-		aw88395_dev_stop(aw88399->aw_dev);
-	}
+	if (aw88399->aw_dev)
+		aw88399_stop(aw88399->aw_dev);
 
 	component_del(dev, &aw88399_hda_comp_ops);
 
@@ -305,9 +286,8 @@ static int aw88399_hda_runtime_suspend(struct device *dev)
 
 	dev_dbg(dev, "Runtime suspend\n");
 
-	if (aw88399->aw_dev && aw88399->playing) {
-		aw88395_dev_stop(aw88399->aw_dev);
-	}
+	if (aw88399->aw_dev && aw88399->playing)
+		aw88399_stop(aw88399->aw_dev);
 
 	aw88399->suspended = true;
 
@@ -322,9 +302,8 @@ static int aw88399_hda_runtime_resume(struct device *dev)
 
 	aw88399->suspended = false;
 
-	if (aw88399->aw_dev && aw88399->playing) {
-		aw88395_dev_start(aw88399->aw_dev);
-	}
+	if (aw88399->core && aw88399->aw_dev && aw88399->playing)
+		aw88399_start(aw88399->core, AW88399_SYNC_START);
 
 	return 0;
 }
@@ -336,9 +315,8 @@ static int aw88399_hda_system_suspend(struct device *dev)
 	dev_dbg(dev, "System suspend\n");
 
 	/* Stop amplifier before system sleep */
-	if (aw88399->aw_dev && aw88399->playing) {
-		aw88395_dev_stop(aw88399->aw_dev);
-	}
+	if (aw88399->aw_dev && aw88399->playing)
+		aw88399_stop(aw88399->aw_dev);
 
 	return 0;
 }
