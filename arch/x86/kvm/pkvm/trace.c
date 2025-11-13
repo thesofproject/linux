@@ -12,6 +12,11 @@ struct perf_ctrl {
 static DEFINE_PER_CPU(struct vmexit_perf, hvcpu_perf);
 static DEFINE_PER_CPU(struct perf_ctrl, perf_ctrl);
 
+static inline bool is_host_vcpu(struct kvm_vcpu *vcpu)
+{
+	return this_cpu_read(host_vcpu) == vcpu;
+}
+
 static inline struct vmexit_perf *vcpu_to_perf(struct kvm_vcpu *vcpu)
 {
 	/*
@@ -19,7 +24,7 @@ static inline struct vmexit_perf *vcpu_to_perf(struct kvm_vcpu *vcpu)
 	 * Enable the trace support for guest once the pKVM hypervisor
 	 * support running a guest vCPU.
 	 */
-	BUG_ON(this_cpu_read(host_vcpu) != vcpu);
+	BUG_ON(!is_host_vcpu(vcpu));
 
 	return this_cpu_ptr(&hvcpu_perf);
 }
@@ -27,6 +32,7 @@ static inline struct vmexit_perf *vcpu_to_perf(struct kvm_vcpu *vcpu)
 static void refresh_vmexit_perf(struct perf_ctrl *pctrl, struct vmexit_perf *perf)
 {
 	memset(perf->data.vmexit_reasons, 0, sizeof(perf->data.vmexit_reasons));
+	memset(perf->data.hypercalls, 0, sizeof(perf->data.hypercalls));
 
 	perf->age = pctrl->age;
 }
@@ -65,6 +71,7 @@ void pkvm_trace_vmexit_start(struct kvm_vcpu *vcpu)
 	if (pctrl->age != perf->age)
 		refresh_vmexit_perf(pctrl, perf);
 
+	perf->rax = vcpu->arch.regs[VCPU_REGS_RAX];
 	perf->tsc = rdtsc_ordered();
 }
 
@@ -92,6 +99,12 @@ void pkvm_trace_vmexit_end(struct kvm_vcpu *vcpu, u32 reason)
 
 	perf->data.vmexit_reasons[reason].count++;
 	perf->data.vmexit_reasons[reason].cycles += cycles;
+
+	if (is_host_vcpu(vcpu) && reason == EXIT_REASON_VMCALL &&
+	    perf->rax < MAX_PKVM_HYPERCALLS) {
+		perf->data.hypercalls[perf->rax].count++;
+		perf->data.hypercalls[perf->rax].cycles += cycles;
+	}
 
 	pkvm_spin_unlock(&perf->lock);
 }

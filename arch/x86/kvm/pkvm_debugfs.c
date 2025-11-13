@@ -46,6 +46,28 @@ static const char *get_vmexit_reason(int reason)
 	return NULL;
 }
 
+static const char *pkvm_hypercalls[MAX_PKVM_HYPERCALLS] = {
+	#define PKVM_HC(fn)	[TO_PKVM_HC(fn)] = #fn,
+	#include <asm/pkvm_hypercalls.h>
+};
+
+static inline void __print_perf_data(struct seq_file *m, const char *prefix,
+				     const char *reason, struct vmexit_stats *print,
+				     struct vmexit_stats *summary)
+{
+	if (!print->count)
+		return;
+
+	seq_printf(m, "%s%s %lld cycles %lld each-handler-cycle %lld\n",
+		   prefix, reason, print->count, print->cycles,
+		   print->cycles / print->count);
+
+	if (summary) {
+		summary->count += print->count;
+		summary->cycles += print->cycles;
+	}
+}
+
 static int print_perf_data(struct seq_file *m, struct perf_data *summary,
 			   struct perf_data *pervcpu)
 {
@@ -67,22 +89,19 @@ static int print_perf_data(struct seq_file *m, struct perf_data *summary,
 	if (!prefix)
 		return -ENOMEM;
 
-	for (summary_stats = (print == pervcpu && summary) ? summary->vmexit_reasons : NULL,
-	     stats = print->vmexit_reasons, i = 0;
-	     i < MAX_EXIT_REASONS;
-	     summary_stats = summary_stats ? summary_stats + 1 : NULL, stats++, i++) {
-		if (!stats->count)
-			continue;
+#define for_each_stats(event, num)							\
+	for (summary_stats = (print == pervcpu && summary) ? summary->event : NULL,	\
+	     stats = print->event, i = 0;						\
+	     i < num;									\
+	     summary_stats = summary_stats ? summary_stats + 1 : NULL, stats++, i++)
 
-		seq_printf(m, "%s%s %lld cycles %lld each-handler-cycle %lld\n",
-			   prefix, get_vmexit_reason(i), stats->count, stats->cycles,
-			   stats->cycles / stats->count);
+	for_each_stats(vmexit_reasons, MAX_EXIT_REASONS)
+		__print_perf_data(m, prefix, get_vmexit_reason(i), stats, summary_stats);
 
-		if (summary_stats) {
-			summary_stats->count += stats->count;
-			summary_stats->cycles += stats->cycles;
-		}
-	}
+	for_each_stats(hypercalls, MAX_PKVM_HYPERCALLS)
+		__print_perf_data(m, prefix, pkvm_hypercalls[i], stats, summary_stats);
+
+#undef for_each_stats
 
 	kfree(prefix);
 
