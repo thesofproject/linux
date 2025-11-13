@@ -161,6 +161,12 @@ struct sof_card_private {
 	union {
 		struct sof_da7219_private da7219;
 		struct sof_rt5682_private rt5682;
+		struct {
+			bool acpi_scanned;
+			int codec_count;
+			bool is_legion_quirk;
+			char acpi_names[2][32];  /* ACPI device names (e.g., "AWDZ8399:00") */
+		} aw88399;
 	};
 };
 

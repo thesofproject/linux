@@ -115,28 +115,47 @@ skl_hda_get_board_quirk(struct snd_soc_acpi_mach_params *mach_params)
 }
 
 static int skl_hda_set_aw88399_dai_link(struct device *dev,
-					struct snd_soc_dai_link *link)
+					struct snd_soc_dai_link *link,
+					struct sof_card_private *ctx)
 {
 	struct snd_soc_dai_link_component *codecs;
-	struct acpi_device *adev;
-	int count = 0;
-	int i = 0;
-	bool legion_quirk = false;
-	char *legion_acpi_name = NULL;
+	int count;
+	int i;
+	bool legion_quirk;
 
-	/* Scan ACPI devices and cache the first device name for Legion quirk */
-	for_each_acpi_dev_match(adev, AW88399_ACPI_HID, NULL, -1) {
-		if (count == 0 && !legion_acpi_name) {
-			/* Cache first device name during initial scan */
-			legion_acpi_name = devm_kasprintf(dev, GFP_KERNEL, "i2c-%s",
-							  acpi_dev_name(adev));
-		}
-		count++;
-		acpi_dev_put(adev);
+	/*
+	 * Use cached ACPI scan results if available. This prevents repeated
+	 * ACPI scanning during deferred probe retries which can cause system
+	 * instability.
+	 */
+	if (ctx->aw88399.acpi_scanned) {
+		count = ctx->aw88399.codec_count;
+		legion_quirk = ctx->aw88399.is_legion_quirk;
+		goto skip_acpi_scan;
 	}
 
-	if (!count)
-		return -ENODEV;
+	/* First call: scan ACPI and cache results */
+	{
+		struct acpi_device *adev;
+		int scan_count = 0;
+
+		for_each_acpi_dev_match(adev, AW88399_ACPI_HID, NULL, -1) {
+			if (scan_count < 2) {
+				/* Cache ACPI device name */
+				strscpy(ctx->aw88399.acpi_names[scan_count],
+					acpi_dev_name(adev),
+					sizeof(ctx->aw88399.acpi_names[0]));
+			}
+			scan_count++;
+			acpi_dev_put(adev);
+		}
+
+		if (!scan_count)
+			return -ENODEV;
+
+		ctx->aw88399.codec_count = scan_count;
+		count = scan_count;
+	}
 
 	/*
 	 * Lenovo Legion Pro 7 16IAX10H quirk: BIOS exposes only one ACPI device
@@ -144,13 +163,14 @@ static int skl_hda_set_aw88399_dai_link(struct device *dev,
 	 * (0x34 and 0x35) for stereo woofer configuration. When only 1 ACPI
 	 * device is found on Legion, hardcode both I2C addresses.
 	 */
-	if (count == 1 && dmi_check_system(legion_aw88399_dmi_table)) {
-		dev_info(dev, "Lenovo Legion: forcing 2-chip stereo configuration for AW88399\n");
-		legion_quirk = true;
-		count = 2;
+	legion_quirk = (count == 1 && dmi_check_system(legion_aw88399_dmi_table));
+	ctx->aw88399.is_legion_quirk = legion_quirk;
+	ctx->aw88399.acpi_scanned = true;
 
-		if (!legion_acpi_name)
-			return -ENOMEM;
+skip_acpi_scan:
+	if (legion_quirk) {
+		dev_info(dev, "Lenovo Legion: forcing 2-chip stereo configuration for AW88399\n");
+		count = 2;
 	}
 
 	codecs = devm_kcalloc(dev, count, sizeof(*codecs), GFP_KERNEL);
@@ -164,22 +184,20 @@ static int skl_hda_set_aw88399_dai_link(struct device *dev,
 			return -ENOMEM;
 		codecs[0].dai_name = "aw88399-aif";
 
-		codecs[1].name = legion_acpi_name;
+		/* Use cached ACPI name for second device */
+		codecs[1].name = devm_kasprintf(dev, GFP_KERNEL, "i2c-%s",
+						ctx->aw88399.acpi_names[0]);
 		if (!codecs[1].name)
 			return -ENOMEM;
 		codecs[1].dai_name = "aw88399-aif";
 	} else {
-		/* Normal path: use ACPI enumeration */
-		for_each_acpi_dev_match(adev, AW88399_ACPI_HID, NULL, -1) {
-			/* Use ACPI device name directly to avoid I2C enumeration race */
+		/* Normal path: use cached ACPI device names */
+		for (i = 0; i < count && i < 2; i++) {
 			codecs[i].name = devm_kasprintf(dev, GFP_KERNEL, "i2c-%s",
-							acpi_dev_name(adev));
-			acpi_dev_put(adev);
+						       ctx->aw88399.acpi_names[i]);
 			if (!codecs[i].name)
 				return -ENOMEM;
-
 			codecs[i].dai_name = "aw88399-aif";
-			i++;
 		}
 	}
 
@@ -269,7 +287,7 @@ static int skl_hda_audio_probe(struct platform_device *pdev)
 			return -EINVAL;
 		}
 
-		ret = skl_hda_set_aw88399_dai_link(&pdev->dev, ctx->amp_link);
+		ret = skl_hda_set_aw88399_dai_link(&pdev->dev, ctx->amp_link, ctx);
 		if (ret)
 			return dev_err_probe(&pdev->dev, ret,
 					     "failed to configure AW88399 link\n");
