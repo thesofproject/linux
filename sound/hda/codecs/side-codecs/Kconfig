@@ -153,6 +153,7 @@ config SND_HDA_SCODEC_AW88399_I2C
 	depends on SND_SOC
 	select SND_HDA_SCODEC_AW88399
 	select SND_SOC_AW88395_LIB
+	select SND_SOC_AW88399
 	help
 	  Say Y or M here to include AW88399 I2C HD-audio side codec support
 	  in snd-hda-intel driver, such as ALC287.
