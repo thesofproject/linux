@@ -114,11 +114,15 @@ skl_hda_get_board_quirk(struct snd_soc_acpi_mach_params *mach_params)
 	return board_quirk;
 }
 
+/* Name prefixes for AW88399 codec controls (left/right channel) */
+static const char * const aw88399_name_prefixes[] = { "Left", "Right" };
+
 static int skl_hda_set_aw88399_dai_link(struct device *dev,
 					struct snd_soc_dai_link *link,
 					struct sof_card_private *ctx)
 {
 	struct snd_soc_dai_link_component *codecs;
+	struct snd_soc_codec_conf *codec_conf;
 	int count;
 	int i;
 	bool legion_quirk;
@@ -177,6 +181,14 @@ skip_acpi_scan:
 	if (!codecs)
 		return -ENOMEM;
 
+	/*
+	 * Allocate codec_conf for name prefixes to avoid control name
+	 * conflicts between multiple AW88399 chips
+	 */
+	codec_conf = devm_kcalloc(dev, count, sizeof(*codec_conf), GFP_KERNEL);
+	if (!codec_conf)
+		return -ENOMEM;
+
 	if (legion_quirk) {
 		/* Hardcode both I2C addresses for Legion stereo setup */
 		codecs[0].name = devm_kstrdup(dev, "aw88399.2-0034", GFP_KERNEL);
@@ -201,8 +213,18 @@ skip_acpi_scan:
 		}
 	}
 
+	/* Set up codec_conf with name prefixes to avoid control name conflicts */
+	for (i = 0; i < count; i++) {
+		codec_conf[i].dlc.name = codecs[i].name;
+		codec_conf[i].name_prefix = aw88399_name_prefixes[i];
+	}
+
 	link->codecs = codecs;
 	link->num_codecs = count;
+
+	/* Store codec_conf for card setup */
+	ctx->aw88399.codec_conf = codec_conf;
+	ctx->aw88399.num_codecs = count;
 
 	return 0;
 }
@@ -291,6 +313,15 @@ static int skl_hda_audio_probe(struct platform_device *pdev)
 		if (ret)
 			return dev_err_probe(&pdev->dev, ret,
 					     "failed to configure AW88399 link\n");
+
+		/*
+		 * Set codec_conf for name prefixes to avoid control name
+		 * conflicts between multiple AW88399 codecs
+		 */
+		if (ctx->aw88399.codec_conf && ctx->aw88399.num_codecs > 0) {
+			card->codec_conf = ctx->aw88399.codec_conf;
+			card->num_configs = ctx->aw88399.num_codecs;
+		}
 	}
 
 	card->dev = &pdev->dev;

@@ -166,6 +166,8 @@ struct sof_card_private {
 			int codec_count;
 			bool is_legion_quirk;
 			char acpi_names[2][32];  /* ACPI device names (e.g., "AWDZ8399:00") */
+			struct snd_soc_codec_conf *codec_conf;  /* Codec config for name prefixes */
+			int num_codecs;  /* Number of codec configs */
 		} aw88399;
 	};
 };
