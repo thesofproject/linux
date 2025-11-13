@@ -73,6 +73,15 @@ static void skl_set_hda_codec_autosuspend_delay(struct snd_soc_card *card)
 				       BT_OFFLOAD_BE_ID, \
 				       0)
 
+/*
+ * Module parameter to disable SSP quirks for testing HDA side-codec approach.
+ * Default: false (SSP enabled)
+ * Set to true to skip SSP configuration and use HDA side-codec binding.
+ */
+static bool disable_ssp_quirks;
+module_param(disable_ssp_quirks, bool, 0644);
+MODULE_PARM_DESC(disable_ssp_quirks, "Disable SSP quirks for Legion (for HDA side-codec testing)");
+
 static const struct dmi_system_id legion_aw88399_dmi_table[] = {
 	{
 		.matches = {
@@ -224,8 +233,12 @@ static int skl_hda_audio_probe(struct platform_device *pdev)
 	if (mach->mach_params.codec_mask & IDISP_CODEC_MASK)
 		ctx->hdmi.idisp_codec = true;
 
-	/* Force AW88399 detection for Lenovo Legion - auto-detection may fail due to timing */
-	if (mach->mach_params.subsystem_vendor == 0x17aa &&
+	/*
+	 * Force AW88399 detection for Lenovo Legion - auto-detection may fail due to timing.
+	 * Can be disabled with disable_ssp_quirks=1 to test HDA side-codec approach.
+	 */
+	if (!disable_ssp_quirks &&
+	    mach->mach_params.subsystem_vendor == 0x17aa &&
 	    (mach->mach_params.subsystem_device == 0x3906 ||
 	     mach->mach_params.subsystem_device == 0x3907 ||
 	     mach->mach_params.subsystem_device == 0x3d6c)) {
@@ -235,7 +248,7 @@ static int skl_hda_audio_probe(struct platform_device *pdev)
 		}
 	}
 
-	if (ctx->amp_type == CODEC_AW88399 && !ctx->ssp_amp) {
+	if (!disable_ssp_quirks && ctx->amp_type == CODEC_AW88399 && !ctx->ssp_amp) {
 		int ssp_port = fls(mach->mach_params.i2s_link_mask) - 1;
 
 		if (ssp_port >= 0)
