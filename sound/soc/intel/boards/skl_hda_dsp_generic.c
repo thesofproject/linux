@@ -117,6 +117,38 @@ skl_hda_get_board_quirk(struct snd_soc_acpi_mach_params *mach_params)
 /* Name prefixes for AW88399 codec controls (left/right channel) */
 static const char * const aw88399_name_prefixes[] = { "Left", "Right" };
 
+/*
+ * Manual DAPM routes for AW88399 multi-codec setup.
+ * With NULL sname in codec DAPM widgets (required to avoid infinite dirty
+ * propagation in multi-codec scenarios), auto-linking is disabled. These
+ * manual routes connect the prefixed DAI widgets to prefixed codec AIF widgets.
+ */
+static const struct snd_soc_dapm_route aw88399_dapm_routes[] = {
+	/* Left channel: DAI widget -> codec AIF_RX widget */
+	{"Left AIF_RX", NULL, "Left Speaker_Playback"},
+
+	/* Right channel: DAI widget -> codec AIF_RX widget */
+	{"Right AIF_RX", NULL, "Right Speaker_Playback"},
+};
+
+static int aw88399_init(struct snd_soc_pcm_runtime *rtd)
+{
+	struct snd_soc_card *card = rtd->card;
+	int ret;
+
+	/*
+	 * Add manual DAPM routes since codec uses NULL sname.
+	 * This creates the missing link between DAI widgets and codec AIF widgets
+	 * that would normally be created by auto-linking.
+	 */
+	ret = snd_soc_dapm_add_routes(&card->dapm, aw88399_dapm_routes,
+				      ARRAY_SIZE(aw88399_dapm_routes));
+	if (ret)
+		dev_err(rtd->dev, "Failed to add AW88399 DAPM routes: %d\n", ret);
+
+	return ret;
+}
+
 static int skl_hda_set_aw88399_dai_link(struct device *dev,
 					struct snd_soc_dai_link *link,
 					struct sof_card_private *ctx)
@@ -221,6 +253,7 @@ skip_acpi_scan:
 
 	link->codecs = codecs;
 	link->num_codecs = count;
+	link->init = aw88399_init;  /* Add manual DAPM routes */
 
 	/* Store codec_conf for card setup */
 	ctx->aw88399.codec_conf = codec_conf;
