@@ -77,87 +77,64 @@ int intel_start_bus_after_reset(struct sdw_intel *sdw)
 	struct device *dev = sdw->cdns.dev;
 	struct sdw_cdns *cdns = &sdw->cdns;
 	struct sdw_bus *bus = &cdns->bus;
-	bool clock_stop0;
 	int status;
 	int ret;
 
 	/*
-	 * An exception condition occurs for the CLK_STOP_BUS_RESET
-	 * case if one or more masters remain active. In this condition,
-	 * all the masters are powered on for they are in the same power
-	 * domain. Master can preserve its context for clock stop0, so
-	 * there is no need to clear slave status and reset bus.
+	 * make sure all Slaves are tagged as UNATTACHED and
+	 * provide reason for reinitialization
 	 */
-	clock_stop0 = sdw_cdns_is_clock_stop(&sdw->cdns);
 
-	if (!clock_stop0) {
+	status = SDW_UNATTACH_REQUEST_MASTER_RESET;
+	sdw_clear_slave_status(bus, status);
 
-		/*
-		 * make sure all Slaves are tagged as UNATTACHED and
-		 * provide reason for reinitialization
-		 */
+	/*
+	 * follow recommended programming flows to avoid
+	 * timeouts when gsync is enabled
+	 */
+	if (bus->multi_link)
+		sdw_intel_sync_arm(sdw);
 
-		status = SDW_UNATTACH_REQUEST_MASTER_RESET;
-		sdw_clear_slave_status(bus, status);
+	/*
+	 * Re-initialize the IP since it was powered-off
+	 */
+	sdw_cdns_init(&sdw->cdns);
 
-		/*
-		 * follow recommended programming flows to avoid
-		 * timeouts when gsync is enabled
-		 */
-		if (bus->multi_link)
-			sdw_intel_sync_arm(sdw);
-
-		/*
-		 * Re-initialize the IP since it was powered-off
-		 */
-		sdw_cdns_init(&sdw->cdns);
-
-	} else {
-		ret = sdw_cdns_enable_interrupt(cdns, true);
-		if (ret < 0) {
-			dev_err(dev, "cannot enable interrupts during resume\n");
-			return ret;
-		}
-	}
-
-	ret = sdw_cdns_clock_restart(cdns, !clock_stop0);
+	ret = sdw_cdns_clock_restart(cdns, true);
 	if (ret < 0) {
 		dev_err(dev, "unable to restart clock during resume\n");
-		if (!clock_stop0)
-			sdw_cdns_enable_interrupt(cdns, false);
+		sdw_cdns_enable_interrupt(cdns, false);
 		return ret;
 	}
 
-	if (!clock_stop0) {
-		sdw_cdns_config_update(cdns);
+	sdw_cdns_config_update(cdns);
 
-		if (bus->multi_link) {
-			ret = sdw_intel_sync_go(sdw);
-			if (ret < 0) {
-				dev_err(sdw->cdns.dev, "sync go failed during resume\n");
-				return ret;
-			}
-		}
-
-		ret = sdw_cdns_config_update_set_wait(cdns);
+	if (bus->multi_link) {
+		ret = sdw_intel_sync_go(sdw);
 		if (ret < 0) {
-			dev_err(dev, "%s: CONFIG_UPDATE BIT still set\n", __func__);
+			dev_err(sdw->cdns.dev, "sync go failed during resume\n");
 			return ret;
 		}
-
-		ret = sdw_cdns_enable_interrupt(cdns, true);
-		if (ret < 0) {
-			dev_err(dev, "cannot enable interrupts during resume\n");
-			return ret;
-		}
-
-		ret = sdw_cdns_exit_reset(cdns);
-		if (ret < 0) {
-			dev_err(dev, "unable to exit bus reset sequence during resume\n");
-			return ret;
-		}
-
 	}
+
+	ret = sdw_cdns_config_update_set_wait(cdns);
+	if (ret < 0) {
+		dev_err(dev, "%s: CONFIG_UPDATE BIT still set\n", __func__);
+		return ret;
+	}
+
+	ret = sdw_cdns_enable_interrupt(cdns, true);
+	if (ret < 0) {
+		dev_err(dev, "cannot enable interrupts during resume\n");
+		return ret;
+	}
+
+	ret = sdw_cdns_exit_reset(cdns);
+	if (ret < 0) {
+		dev_err(dev, "unable to exit bus reset sequence during resume\n");
+		return ret;
+	}
+
 	sdw_cdns_check_self_clearing_bits(cdns, __func__, true, INTEL_MASTER_RESET_ITERATIONS);
 
 	schedule_delayed_work(&cdns->attach_dwork,
