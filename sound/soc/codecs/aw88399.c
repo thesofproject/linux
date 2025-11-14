@@ -2374,40 +2374,9 @@ static int aw88399_i2c_probe(struct i2c_client *i2c)
 	if (ret)
 		return ret;
 
-	/*
-	 * Create instance-specific DAI driver with unique stream names.
-	 * This is required for multi-codec setups with name_prefix.
-	 * The static aw88399_dai array is shared by all instances, but each
-	 * instance needs a unique stream name to match the prefixed DAPM widgets
-	 * created by name_prefix ("Left Speaker_Playback", "Right Speaker_Playback").
-	 */
-	struct snd_soc_dai_driver *dai_drv;
-	const char *stream_playback, *stream_capture;
-
-	dai_drv = devm_kmemdup(&i2c->dev, aw88399_dai, sizeof(aw88399_dai), GFP_KERNEL);
-	if (!dai_drv)
-		return -ENOMEM;
-
-	/* Set stream names based on channel assignment */
-	if (aw88399->aw_pa->channel == AW88399_DEV_DEFAULT_CH) {
-		/* Left channel (address 0x34) */
-		stream_playback = "Left Speaker_Playback";
-		stream_capture = "Left Speaker_Capture";
-	} else {
-		/* Right channel (address 0x35) */
-		stream_playback = "Right Speaker_Playback";
-		stream_capture = "Right Speaker_Capture";
-	}
-
-	dai_drv[0].playback.stream_name = devm_kstrdup(&i2c->dev, stream_playback, GFP_KERNEL);
-	dai_drv[0].capture.stream_name = devm_kstrdup(&i2c->dev, stream_capture, GFP_KERNEL);
-
-	if (!dai_drv[0].playback.stream_name || !dai_drv[0].capture.stream_name)
-		return -ENOMEM;
-
 	ret = devm_snd_soc_register_component(&i2c->dev,
 			&soc_codec_dev_aw88399,
-			dai_drv, ARRAY_SIZE(aw88399_dai));
+			aw88399_dai, ARRAY_SIZE(aw88399_dai));
 	if (ret)
 		dev_err(&i2c->dev, "failed to register aw88399: %d", ret);
 
