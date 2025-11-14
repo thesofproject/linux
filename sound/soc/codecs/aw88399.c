@@ -2390,8 +2390,13 @@ static const struct i2c_device_id aw88399_i2c_id[] = {
 MODULE_DEVICE_TABLE(i2c, aw88399_i2c_id);
 
 #ifdef CONFIG_ACPI
+/*
+ * ACPI match removed to prevent binding conflict with HDA side-codec driver.
+ * Both drivers previously matched "AWDZ8399", causing race condition where
+ * SSP driver (loaded as dependency) would bind before HDA driver.
+ * SSP driver can still be instantiated manually via sysfs or platform data.
+ */
 static const struct acpi_device_id aw88399_acpi_match[] = {
-	{ "AWDZ8399", 0 },
 	{ },
 };
 MODULE_DEVICE_TABLE(acpi, aw88399_acpi_match);
