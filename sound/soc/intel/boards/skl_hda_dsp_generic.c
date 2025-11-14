@@ -310,6 +310,19 @@ static int skl_hda_audio_probe(struct platform_device *pdev)
 	if (!ctx)
 		return -ENOMEM;
 
+	/*
+	 * Override amp detection when testing HDA side-codec approach.
+	 * sof_intel_board_get_ctx() sets amp_type via ACPI scan before we
+	 * check disable_ssp_quirks. Force CODEC_NONE to prevent creation of
+	 * invalid SSP DAI link (would have num_cpus=1, num_codecs=0).
+	 */
+	if (disable_ssp_quirks) {
+		ctx->amp_type = CODEC_NONE;
+		ctx->ssp_amp = 0;
+		ctx->amp_link = NULL;
+		dev_info(&pdev->dev, "SSP quirks disabled: forcing amp_type=CODEC_NONE for HDA side-codec\n");
+	}
+
 	if (HDA_EXT_CODEC(mach->mach_params.codec_mask))
 		ctx->hda_codec_present = true;
 
