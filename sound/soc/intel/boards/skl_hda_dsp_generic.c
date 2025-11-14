@@ -161,10 +161,13 @@ static int skl_hda_set_aw88399_dai_link(struct device *dev,
 
 	/*
 	 * Skip SSP DAI link setup when disable_ssp_quirks=1 to allow
-	 * HDA side-codec approach instead
+	 * HDA side-codec approach instead. Return 0 (success) to allow
+	 * card registration to continue without this link.
 	 */
-	if (disable_ssp_quirks)
-		return -ENODEV;
+	if (disable_ssp_quirks) {
+		dev_info(dev, "SSP quirks disabled, skipping AW88399 DAI link setup\n");
+		return 0;
+	}
 
 	/*
 	 * Use cached ACPI scan results if available. This prevents repeated
