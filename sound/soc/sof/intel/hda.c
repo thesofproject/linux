@@ -59,6 +59,10 @@ static int sdw_clock_stop_quirks = SDW_INTEL_CLK_STOP_BUS_RESET;
 module_param(sdw_clock_stop_quirks, int, 0444);
 MODULE_PARM_DESC(sdw_clock_stop_quirks, "SOF SoundWire clock stop quirks");
 
+static bool disable_ssp_quirks;
+module_param(disable_ssp_quirks, bool, 0644);
+MODULE_PARM_DESC(disable_ssp_quirks, "Disable SSP quirks for Legion (for HDA side-codec testing)");
+
 static int sdw_params_stream(struct device *dev,
 			     struct sdw_intel_stream_params_data *params_data)
 {
@@ -1674,7 +1678,8 @@ struct snd_soc_acpi_mach *hda_machine_select(struct snd_sof_dev *sdev)
 		mach->mach_params.i2s_link_mask = check_nhlt_ssp_mask(sdev, NHLT_DEVICE_I2S);
 
 		/* Quirk for Lenovo Legion with AW88399: NHLT doesn't list SSP for I2S amps */
-		if (sof_pdata->subsystem_id_set &&
+		if (!disable_ssp_quirks &&
+		    sof_pdata->subsystem_id_set &&
 		    sof_pdata->subsystem_vendor == 0x17aa &&
 		    (sof_pdata->subsystem_device == 0x3906 || sof_pdata->subsystem_device == 0x3907 ||
 		     sof_pdata->subsystem_device == 0x3d6c)) {
