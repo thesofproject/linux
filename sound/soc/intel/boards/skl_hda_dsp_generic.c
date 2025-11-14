@@ -160,6 +160,13 @@ static int skl_hda_set_aw88399_dai_link(struct device *dev,
 	bool legion_quirk;
 
 	/*
+	 * Skip SSP DAI link setup when disable_ssp_quirks=1 to allow
+	 * HDA side-codec approach instead
+	 */
+	if (disable_ssp_quirks)
+		return -ENODEV;
+
+	/*
 	 * Use cached ACPI scan results if available. This prevents repeated
 	 * ACPI scanning during deferred probe retries which can cause system
 	 * instability.
