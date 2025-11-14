@@ -18,9 +18,8 @@
 #include "../generic.h"
 #include "aw88399_hda.h"
 
-/* Import register definitions from ASoC driver */
+/* Import register definitions and init function from ASoC driver */
 #include "../../soc/codecs/aw88399.h"
-#include "../../soc/codecs/aw88395/aw88395_device.h"
 
 static const struct regmap_config aw88399_hda_regmap_i2c = {
 	.reg_bits = 8,
@@ -154,7 +153,6 @@ static int aw88399_hda_init(struct aw88399_hda *aw88399)
 
 	aw88399->core = core;
 	aw88399->aw_dev = core->aw_pa;
-	aw88399->channel = core->aw_pa->channel;
 
 	return 0;
 }
@@ -171,6 +169,7 @@ static int aw88399_hda_acpi_probe(struct aw88399_hda *aw88399)
 		struct i2c_client *i2c = to_i2c_client(dev);
 
 		aw88399->index = i2c->addr - 0x34;
+		aw88399->channel = aw88399->index;
 		dev_warn(dev, "No ACPI companion, using address-based index %d\n",
 			 aw88399->index);
 		return 0;
@@ -195,6 +194,8 @@ static int aw88399_hda_acpi_probe(struct aw88399_hda *aw88399)
 		aw88399->index = (int)uid;
 		dev_info(dev, "ACPI _UID: %d\n", aw88399->index);
 	}
+
+	aw88399->channel = aw88399->index;
 
 	return 0;
 }
@@ -345,4 +346,3 @@ EXPORT_SYMBOL_NS_GPL(aw88399_hda_pm_ops, "SND_HDA_SCODEC_AW88399");
 MODULE_DESCRIPTION("HDA AW88399 driver");
 MODULE_AUTHOR("Lyapsus");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS("SND_SOC_AW88395_LIB");
