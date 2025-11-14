@@ -1413,10 +1413,20 @@ static int aw88399_dai_hw_params(struct snd_pcm_substream *substream,
 		__func__, rate, width, channels,
 		substream->stream == SNDRV_PCM_STREAM_PLAYBACK ? "playback" : "capture");
 
-	/* Topology is configured for 48kHz, warn if mismatch */
+	/* Firmware is configured for 48kHz S32_LE stereo only */
 	if (rate != 48000) {
-		dev_warn(component->dev, "Unexpected sample rate %u (expected 48000)\n", rate);
-		dev_warn(component->dev, "Audio may be distorted or not work\n");
+		dev_err(component->dev, "Only 48kHz supported, got %u\n", rate);
+		return -EINVAL;
+	}
+
+	if (width != 32) {
+		dev_err(component->dev, "Only 32-bit samples supported, got %u\n", width);
+		return -EINVAL;
+	}
+
+	if (channels != 2) {
+		dev_err(component->dev, "Only stereo supported, got %u channels\n", channels);
+		return -EINVAL;
 	}
 
 	/* Firmware handles I2S/format configuration via profile */
