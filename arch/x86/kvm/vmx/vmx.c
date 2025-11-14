@@ -5839,14 +5839,19 @@ static __always_inline int handle_external_interrupt(struct kvm_vcpu *vcpu)
 	++vcpu->stat.irq_exits;
 	return 1;
 }
+#endif /* !__PKVM_HYP__ */
 
 static int handle_triple_fault(struct kvm_vcpu *vcpu)
 {
+#ifndef __PKVM_HYP__
 	vcpu->run->exit_reason = KVM_EXIT_SHUTDOWN;
 	vcpu->mmio_needed = 0;
+#else
+	if (pkvm_is_protected_vcpu(vcpu))
+		vcpu->arch.mp_state = KVM_MP_STATE_STOPPED;
+#endif
 	return 0;
 }
-#endif /* !__PKVM_HYP__ */
 
 static int handle_io(struct kvm_vcpu *vcpu)
 {
@@ -6741,8 +6746,8 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_EXCEPTION_NMI]           = handle_exception_nmi,
 #ifndef __PKVM_HYP__
 	[EXIT_REASON_EXTERNAL_INTERRUPT]      = handle_external_interrupt,
-	[EXIT_REASON_TRIPLE_FAULT]            = handle_triple_fault,
 #endif
+	[EXIT_REASON_TRIPLE_FAULT]            = handle_triple_fault,
 	[EXIT_REASON_NMI_WINDOW]	      = handle_nmi_window,
 	[EXIT_REASON_IO_INSTRUCTION]          = handle_io,
 	[EXIT_REASON_CR_ACCESS]               = handle_cr,
