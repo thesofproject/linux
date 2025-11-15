@@ -179,11 +179,6 @@ x509.genkey
 # Clang's compilation database file
 compile_commands.json
 
-# Local helper scripts and configuration files
-/check-code.sh
-/aw88399-use-hda.conf
-/aw88399-use-ssp.conf
-
 # Documentation toolchain
 sphinx_*/
 
