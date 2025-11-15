@@ -2979,6 +2979,102 @@ static void aw88399_fixup_i2c_two(struct hda_codec *cdc, const struct hda_fixup 
 	comp_generic_fixup(cdc, action, "i2c", "AWDZ8399", "-%s:00-aw88399-hda.%d", 2);
 }
 
+struct alc_coef_update {
+	u16 idx;
+	u16 mask;
+	u16 val;
+};
+
+static void alc_apply_coef_updates(struct hda_codec *codec,
+				    const struct alc_coef_update *seq,
+				    int len)
+{
+	int i;
+
+	for (i = 0; i < len; i++) {
+		u16 idx = seq[i].idx;
+		u16 mask = seq[i].mask;
+
+		if (mask)
+			alc_update_coef_idx(codec, idx, mask, seq[i].val);
+		else
+			alc_write_coef_idx(codec, idx, seq[i].val);
+	}
+}
+
+static const struct alc_coef_update legion_16iax_aw88399_init[] = {
+	{0x0032, 0x1600, 0xff37},
+	{0x0008, 0xe000, 0x0160},
+	{0x0006, 0x0000, 0x5210},
+	{0x0017, 0x4005, 0x0101},
+	{0x0031, 0x5501, 0x206b},
+	{0x0030, 0x0000, 0x0300},
+	{0x0090, 0x0505, 0x5015},
+	{0x0034, 0x0000, 0x1810},
+	{0x000a, 0x0000, 0x0170},
+	{0x0009, 0x0000, 0xe0c3},
+	{0x0037, 0x6200, 0x4404},
+	{0x000b, 0x0000, 0x3800},
+	{0x000c, 0x0400, 0x0800},
+	{0x0050, 0x2f00, 0x5002},
+	{0x0030, 0x0000, 0x0d00},
+	{0x0010, 0x0700, 0xd2d2},
+	{0x0035, 0x0200, 0x200a},
+	{0x0032, 0x1600, 0xff37},
+	{0x0031, 0x5501, 0x204f},
+	{0x00f0, 0x0200, 0x0000},
+	{0x0036, 0x0000, 0x0180},
+	{0x0021, 0xff00, 0x00ff},
+	{0x0031, 0x5501, 0x607b},
+	{0x0008, 0xe000, 0x0120},
+	{0x007f, 0x0f00, 0x04fe},
+	{0x007f, 0x0f00, 0x44fe},
+};
+
+static const struct alc_coef_update legion_16iax_aw88399_pron[] = {
+	{0x000b, 0x0000, 0x3800},
+	{0x0050, 0x1b00, 0x5002},
+	{0x0032, 0x1600, 0xff37},
+};
+
+static const struct alc_coef_update legion_16iax_aw88399_prof[] = {
+	{0x000b, 0x0000, 0x3000},
+	{0x0050, 0x1b00, 0x1002},
+	{0x0032, 0x1600, 0xfc31},
+};
+
+static void alc287_legion_aw88399_playback_hook(struct hda_pcm_stream *hinfo,
+					 struct hda_codec *codec,
+					 struct snd_pcm_substream *sub, int action)
+{
+	switch (action) {
+	case HDA_GEN_PCM_ACT_PREPARE:
+		alc_apply_coef_updates(codec, legion_16iax_aw88399_pron,
+					ARRAY_SIZE(legion_16iax_aw88399_pron));
+		break;
+	case HDA_GEN_PCM_ACT_CLEANUP:
+		alc_apply_coef_updates(codec, legion_16iax_aw88399_prof,
+					ARRAY_SIZE(legion_16iax_aw88399_prof));
+		break;
+	default:
+		break;
+	}
+}
+
+static void alc287_fixup_legion_16iax_aw88399(struct hda_codec *codec,
+				const struct hda_fixup *fix, int action)
+{
+	struct alc_spec *spec = codec->spec;
+
+	switch (action) {
+	case HDA_FIXUP_ACT_PRE_PROBE:
+		alc_apply_coef_updates(codec, legion_16iax_aw88399_init,
+					ARRAY_SIZE(legion_16iax_aw88399_init));
+		spec->gen.pcm_playback_hook = alc287_legion_aw88399_playback_hook;
+		break;
+	}
+}
+
 static void cs35l41_fixup_spi_two(struct hda_codec *codec, const struct hda_fixup *fix, int action)
 {
 	comp_generic_fixup(codec, action, "spi", "CSC3551", "-%s:00-cs35l41-hda.%d", 2);
@@ -3742,6 +3838,7 @@ enum {
 	ALC269_FIXUP_POSITIVO_P15X_HEADSET_MIC,
 	ALC289_FIXUP_ASUS_ZEPHYRUS_DUAL_SPK,
 	ALC287_FIXUP_AW88399_I2C_2,
+	ALC287_FIXUP_LENOVO_LEGION_AW88399,
 };
 
 /* A special fixup for Lenovo C940 and Yoga Duet 7;
@@ -6183,6 +6280,12 @@ static const struct hda_fixup alc269_fixups[] = {
 		.type = HDA_FIXUP_FUNC,
 		.v.func = aw88399_fixup_i2c_two,
 	},
+	[ALC287_FIXUP_LENOVO_LEGION_AW88399] = {
+		.type = HDA_FIXUP_FUNC,
+		.v.func = alc287_fixup_legion_16iax_aw88399,
+		.chained = true,
+		.chain_id = ALC287_FIXUP_AW88399_I2C_2,
+	},
 };
 
 static const struct hda_quirk alc269_fixup_tbl[] = {
@@ -7120,8 +7223,8 @@ static const struct hda_quirk alc269_fixup_tbl[] = {
 	SND_PCI_QUIRK(0x17aa, 0x38fa, "Thinkbook 16P Gen5", ALC287_FIXUP_MG_RTKC_CSAMP_CS35L41_I2C_THINKPAD),
 	SND_PCI_QUIRK(0x17aa, 0x38fd, "ThinkBook plus Gen5 Hybrid", ALC287_FIXUP_TAS2781_I2C),
 	SND_PCI_QUIRK(0x17aa, 0x3902, "Lenovo E50-80", ALC269_FIXUP_DMIC_THINKPAD_ACPI),
-	SND_PCI_QUIRK(0x17aa, 0x3906, "Lenovo Legion Pro 7 16IAX10H", ALC287_FIXUP_AW88399_I2C_2),
-	SND_PCI_QUIRK(0x17aa, 0x3907, "Lenovo Legion Pro 7 16IAX10H", ALC287_FIXUP_AW88399_I2C_2),
+SND_PCI_QUIRK(0x17aa, 0x3906, "Lenovo Legion Pro 7 16IAX10H", ALC287_FIXUP_LENOVO_LEGION_AW88399),
+SND_PCI_QUIRK(0x17aa, 0x3907, "Lenovo Legion Pro 7 16IAX10H", ALC287_FIXUP_LENOVO_LEGION_AW88399),
 	SND_PCI_QUIRK(0x17aa, 0x390d, "Lenovo Yoga Pro 7 14ASP10", ALC287_FIXUP_YOGA9_14IAP7_BASS_SPK_PIN),
 	SND_PCI_QUIRK(0x17aa, 0x3913, "Lenovo 145", ALC236_FIXUP_LENOVO_INV_DMIC),
 	SND_PCI_QUIRK(0x17aa, 0x391f, "Yoga S990-16 pro Quad YC Quad", ALC287_FIXUP_TXNW2781_I2C),
@@ -7131,7 +7234,7 @@ static const struct hda_quirk alc269_fixup_tbl[] = {
 	SND_PCI_QUIRK(0x17aa, 0x3977, "IdeaPad S210", ALC283_FIXUP_INT_MIC),
 	SND_PCI_QUIRK(0x17aa, 0x3978, "Lenovo B50-70", ALC269_FIXUP_DMIC_THINKPAD_ACPI),
 	SND_PCI_QUIRK(0x17aa, 0x3bf8, "Quanta FL1", ALC269_FIXUP_PCM_44K),
-	SND_PCI_QUIRK(0x17aa, 0x3d6c, "Lenovo Legion Pro 7 16IAX10H", ALC287_FIXUP_AW88399_I2C_2),
+SND_PCI_QUIRK(0x17aa, 0x3d6c, "Lenovo Legion Pro 7 16IAX10H", ALC287_FIXUP_LENOVO_LEGION_AW88399),
 	SND_PCI_QUIRK(0x17aa, 0x5013, "Thinkpad", ALC269_FIXUP_LIMIT_INT_MIC_BOOST),
 	SND_PCI_QUIRK(0x17aa, 0x501a, "Thinkpad", ALC283_FIXUP_INT_MIC),
 	SND_PCI_QUIRK(0x17aa, 0x501e, "Thinkpad L440", ALC292_FIXUP_TPT440_DOCK),
