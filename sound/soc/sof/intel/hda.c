@@ -1734,7 +1734,14 @@ struct snd_soc_acpi_mach *hda_machine_select(struct snd_sof_dev *sdev)
 			}
 		}
 
-		amp_type = snd_soc_acpi_intel_detect_amp_type(sdev->dev);
+		/*
+		 * Force amp_type=CODEC_NONE when disable_ssp_quirks=1.
+		 * This prevents loading SSP-based topology when using HDA side-codec.
+		 */
+		if (disable_ssp_quirks)
+			amp_type = CODEC_NONE;
+		else
+			amp_type = snd_soc_acpi_intel_detect_amp_type(sdev->dev);
 		codec_type = snd_soc_acpi_intel_detect_codec_type(sdev->dev);
 		amp_name_valid = amp_type != CODEC_NONE && amp_type != codec_type;
 
