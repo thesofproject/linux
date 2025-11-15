@@ -15,6 +15,10 @@
 
 #include "uapi/ashmem.h"
 
+#include <linux/shrinker.h>
+const gfp_t RUST_CONST_HELPER___GFP_FS = ___GFP_FS;
+const gfp_t RUST_CONST_HELPER___GFP_IO = ___GFP_IO;
+
 #define ASHMEM_NAME_PREFIX "dev/ashmem/"
 #define ASHMEM_NAME_PREFIX_LEN (sizeof(ASHMEM_NAME_PREFIX) - 1)
 #define ASHMEM_FULL_NAME_LEN (ASHMEM_NAME_LEN + ASHMEM_NAME_PREFIX_LEN)
@@ -26,5 +30,10 @@ enum {
 	COMPAT_ASHMEM_SET_PROT_MASK	=	_IOW(__ASHMEMIOC, 5, unsigned int),
 };
 #endif
+
+bool is_ashmem_file(struct file *file);
+int ashmem_area_name(struct file *file, char *name);
+long ashmem_area_size(struct file *file);
+struct file *ashmem_area_vmfile(struct file *file);
 
 #endif	/* _LINUX_ASHMEM_H */
