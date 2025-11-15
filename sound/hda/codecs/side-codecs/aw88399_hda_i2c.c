@@ -15,11 +15,11 @@ static int aw88399_hda_i2c_probe(struct i2c_client *clt)
 {
 	const char *device_name;
 
-	/* Match both ACPI and manually instantiated devices */
+	/* Match both ACPI and serial-multi-instantiate devices */
 	if (strstr(dev_name(&clt->dev), "AWDZ8399"))
 		device_name = "AWDZ8399";
-	else if (strcmp(clt->name, "aw88399") == 0)
-		device_name = "aw88399";  /* Manual sysfs instantiation */
+	else if (strcmp(clt->name, "aw88399-hda") == 0)
+		device_name = "aw88399-hda";  /* serial-multi-instantiate */
 	else
 		return -ENODEV;
 
