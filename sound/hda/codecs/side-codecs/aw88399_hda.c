@@ -6,7 +6,6 @@
 //
 
 #include <linux/acpi.h>
-#include <linux/device.h>
 #include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 #include <linux/module.h>
@@ -167,6 +166,23 @@ static int aw88399_hda_acpi_probe(struct aw88399_hda *aw88399)
 
 	adev = ACPI_COMPANION(dev);
 	if (!adev) {
+		const char *name = dev_name(dev);
+		char *suffix;
+
+		/*
+		 * For serial-multi-instantiate devices, derive index from device name suffix.
+		 * Device names: "i2c-AWDZ8399:00-aw88399-hda.0", "i2c-AWDZ8399:00-aw88399-hda.1"
+		 * Component match expects index to match suffix number.
+		 */
+		suffix = strrchr(name, '.');
+		if (suffix && *(suffix + 1) >= '0' && *(suffix + 1) <= '9') {
+			aw88399->index = *(suffix + 1) - '0';
+			aw88399->channel = aw88399->index;
+			dev_info(dev, "Derived index %d from device name\n", aw88399->index);
+			return 0;
+		}
+
+		/* Fallback for manual sysfs devices: use I2C address */
 		struct i2c_client *i2c = to_i2c_client(dev);
 
 		aw88399->index = i2c->addr - 0x34;
@@ -199,25 +215,6 @@ static int aw88399_hda_acpi_probe(struct aw88399_hda *aw88399)
 	aw88399->channel = aw88399->index;
 
 	return 0;
-}
-
-static int aw88399_hda_rename_manual_device(struct aw88399_hda *aw88399)
-{
-	struct device *dev = aw88399->dev;
-	char new_name[64];
-	int ret;
-
-	if (ACPI_COMPANION(dev))
-		return 0;
-
-	snprintf(new_name, sizeof(new_name), "i2c-AWDZ8399:00-aw88399-hda.%d",
-		 aw88399->index);
-
-	ret = device_rename(dev, new_name);
-	if (ret)
-		dev_err(dev, "Failed to rename manual device: %d\n", ret);
-
-	return ret;
 }
 
 int aw88399_hda_probe(struct device *dev, const char *device_name, int id, int irq)
@@ -257,10 +254,6 @@ int aw88399_hda_probe(struct device *dev, const char *device_name, int id, int i
 		dev_err(dev, "ACPI probe failed: %d\n", ret);
 		return ret;
 	}
-
-	ret = aw88399_hda_rename_manual_device(aw88399);
-	if (ret)
-		return ret;
 
 	/* Initialize chip */
 	ret = aw88399_hda_init(aw88399);
