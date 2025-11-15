@@ -8,6 +8,7 @@
 #include <linux/acpi.h>
 #include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
+#include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/pm_runtime.h>
@@ -20,6 +21,9 @@
 
 /* Import register definitions and init function from ASoC driver */
 #include "../../soc/codecs/aw88399.h"
+
+#define AW88399_HDA_I2C_BASE_ADDR	0x34
+#define AW88399_HDA_MAX_AMPS		2
 
 static const struct regmap_config aw88399_hda_regmap_i2c = {
 	.reg_bits = 8,
@@ -112,6 +116,21 @@ static const struct component_ops aw88399_hda_comp_ops = {
 	.unbind = aw88399_hda_unbind,
 };
 
+static int aw88399_hda_index_from_i2c(struct aw88399_hda *aw88399)
+{
+	struct device *dev = aw88399->dev;
+	struct i2c_client *i2c = to_i2c_client(dev);
+	int index = i2c->addr - AW88399_HDA_I2C_BASE_ADDR;
+
+	if (index < 0 || index >= AW88399_HDA_MAX_AMPS) {
+		dev_warn(dev, "Unexpected I2C address 0x%02x, clamping index\n",
+			i2c->addr);
+		index = clamp(index, 0, AW88399_HDA_MAX_AMPS - 1);
+	}
+
+	return index;
+}
+
 static void aw88399_hda_hw_reset(struct aw88399_hda *aw88399)
 {
 	if (!aw88399->reset_gpio)
@@ -160,35 +179,20 @@ static int aw88399_hda_init(struct aw88399_hda *aw88399)
 static int aw88399_hda_acpi_probe(struct aw88399_hda *aw88399)
 {
 	struct device *dev = aw88399->dev;
+	struct i2c_client *i2c = to_i2c_client(dev);
 	struct acpi_device *adev;
+	int addr_index;
 	u64 uid;
 	int ret = 0;
 
+	addr_index = aw88399_hda_index_from_i2c(aw88399);
+	aw88399->channel = addr_index;
+
 	adev = ACPI_COMPANION(dev);
 	if (!adev) {
-		const char *name = dev_name(dev);
-		char *suffix;
-
-		/*
-		 * For serial-multi-instantiate devices, derive index from device name suffix.
-		 * Device names: "i2c-AWDZ8399:00-aw88399-hda.0", "i2c-AWDZ8399:00-aw88399-hda.1"
-		 * Component match expects index to match suffix number.
-		 */
-		suffix = strrchr(name, '.');
-		if (suffix && *(suffix + 1) >= '0' && *(suffix + 1) <= '9') {
-			aw88399->index = *(suffix + 1) - '0';
-			aw88399->channel = aw88399->index;
-			dev_info(dev, "Derived index %d from device name\n", aw88399->index);
-			return 0;
-		}
-
-		/* Fallback for manual sysfs devices: use I2C address */
-		struct i2c_client *i2c = to_i2c_client(dev);
-
-		aw88399->index = i2c->addr - 0x34;
-		aw88399->channel = aw88399->index;
-		dev_warn(dev, "No ACPI companion, using address-based index %d\n",
-			 aw88399->index);
+		aw88399->index = addr_index;
+		dev_info(dev, "No ACPI companion, using I2C addr 0x%02x for index %d\n",
+			 i2c->addr, aw88399->index);
 		return 0;
 	}
 
@@ -199,20 +203,26 @@ static int aw88399_hda_acpi_probe(struct aw88399_hda *aw88399)
 	 */
 	ret = acpi_dev_uid_to_integer(adev, &uid);
 	if (ret) {
-		/*
-		 * If no _UID or error, derive index from I2C address.
-		 * 0x34 = index 0 (left), 0x35 = index 1 (right)
-		 */
-		struct i2c_client *i2c = to_i2c_client(dev);
-
-		aw88399->index = i2c->addr - 0x34;
-		dev_info(dev, "No ACPI _UID, using address-based index %d\n", aw88399->index);
+		aw88399->index = addr_index;
+		dev_info(dev, "No ACPI _UID, using I2C addr 0x%02x for index %d\n",
+			 i2c->addr, aw88399->index);
 	} else {
 		aw88399->index = (int)uid;
-		dev_info(dev, "ACPI _UID: %d\n", aw88399->index);
-	}
 
-	aw88399->channel = aw88399->index;
+		if (aw88399->index < 0 || aw88399->index >= AW88399_HDA_MAX_AMPS) {
+			dev_warn(dev, "ACPI _UID %llu out of range, falling back to I2C index %d\n",
+				 uid, addr_index);
+			aw88399->index = addr_index;
+		} else if (aw88399->index != addr_index) {
+			dev_warn(dev,
+				 "ACPI _UID %d disagrees with I2C addr 0x%02x, overriding with index %d\n",
+				 aw88399->index, i2c->addr, addr_index);
+			aw88399->index = addr_index;
+		} else {
+			dev_info(dev, "ACPI _UID: %d (addr 0x%02x)\n",
+				 aw88399->index, i2c->addr);
+		}
+	}
 
 	return 0;
 }
