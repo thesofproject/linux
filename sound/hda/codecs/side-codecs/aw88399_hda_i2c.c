@@ -15,11 +15,11 @@ static int aw88399_hda_i2c_probe(struct i2c_client *clt)
 {
 	const char *device_name;
 
-	/* Match both ACPI and serial-multi-instantiate devices */
+	/* Match ACPI, serial-multi-instantiate, and manual devices */
 	if (strstr(dev_name(&clt->dev), "AWDZ8399"))
 		device_name = "AWDZ8399";
-	else if (strcmp(clt->name, "aw88399-hda") == 0)
-		device_name = "aw88399-hda";  /* serial-multi-instantiate */
+	else if (!strcmp(clt->name, "aw88399-hda") || !strcmp(clt->name, "aw88399"))
+		device_name = "aw88399-hda";  /* manual or SMI instantiation */
 	else
 		return -ENODEV;
 
@@ -33,6 +33,7 @@ static void aw88399_hda_i2c_remove(struct i2c_client *clt)
 
 static const struct i2c_device_id aw88399_hda_i2c_id[] = {
 	{ "aw88399-hda", 0 },
+	{ "aw88399", 0 },
 	{}
 };
 MODULE_DEVICE_TABLE(i2c, aw88399_hda_i2c_id);

@@ -6,6 +6,7 @@
 //
 
 #include <linux/acpi.h>
+#include <linux/device.h>
 #include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 #include <linux/module.h>
@@ -200,6 +201,25 @@ static int aw88399_hda_acpi_probe(struct aw88399_hda *aw88399)
 	return 0;
 }
 
+static int aw88399_hda_rename_manual_device(struct aw88399_hda *aw88399)
+{
+	struct device *dev = aw88399->dev;
+	char new_name[64];
+	int ret;
+
+	if (ACPI_COMPANION(dev))
+		return 0;
+
+	snprintf(new_name, sizeof(new_name), "i2c-AWDZ8399:00-aw88399-hda.%d",
+		 aw88399->index);
+
+	ret = device_rename(dev, new_name);
+	if (ret)
+		dev_err(dev, "Failed to rename manual device: %d\n", ret);
+
+	return ret;
+}
+
 int aw88399_hda_probe(struct device *dev, const char *device_name, int id, int irq)
 {
 	struct aw88399_hda *aw88399;
@@ -237,6 +257,10 @@ int aw88399_hda_probe(struct device *dev, const char *device_name, int id, int i
 		dev_err(dev, "ACPI probe failed: %d\n", ret);
 		return ret;
 	}
+
+	ret = aw88399_hda_rename_manual_device(aw88399);
+	if (ret)
+		return ret;
 
 	/* Initialize chip */
 	ret = aw88399_hda_init(aw88399);
