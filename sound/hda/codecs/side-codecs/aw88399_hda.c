@@ -12,6 +12,7 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/pm_runtime.h>
+#include <linux/property.h>
 #include <linux/regmap.h>
 #include <sound/hda_codec.h>
 #include <sound/soc.h>
@@ -21,9 +22,14 @@
 
 /* Import register definitions and init function from ASoC driver */
 #include "../../soc/codecs/aw88399.h"
+#include "../../soc/codecs/aw88395/aw88395_device.h"
 
 #define AW88399_HDA_I2C_BASE_ADDR	0x34
 #define AW88399_HDA_MAX_AMPS		2
+
+#define AW88399_ACPI_PROP_DEV_INDEX	"awinic,dev-index"
+#define AW88399_ACPI_PROP_SPK_POS	"awinic,speaker-position"
+#define AW88399_ACPI_PROP_SPK_ID	"awinic,speaker-id"
 
 static const struct regmap_config aw88399_hda_regmap_i2c = {
 	.reg_bits = 8,
@@ -32,6 +38,8 @@ static const struct regmap_config aw88399_hda_regmap_i2c = {
 	.reg_format_endian = REGMAP_ENDIAN_LITTLE,
 	.val_format_endian = REGMAP_ENDIAN_BIG,
 };
+
+static void aw88399_hda_acpi_notify(acpi_handle handle, u32 event, struct device *dev);
 
 static void aw88399_hda_playback_hook(struct device *dev, int action)
 {
@@ -91,6 +99,9 @@ static int aw88399_hda_bind(struct device *dev, struct device *master, void *mas
 
 	/* Set up playback hooks */
 	comp->playback_hook = aw88399_hda_playback_hook;
+	comp->acpi_notify = aw88399->adev ? aw88399_hda_acpi_notify : NULL;
+	comp->adev = aw88399->adev;
+	comp->acpi_notifications_supported = aw88399->acpi_notify_supported && aw88399->adev;
 
 	dev_info(dev, "Bound to HDA codec, channel %d\n", aw88399->channel);
 
@@ -116,6 +127,13 @@ static const struct component_ops aw88399_hda_comp_ops = {
 	.unbind = aw88399_hda_unbind,
 };
 
+static void aw88399_hda_acpi_notify(acpi_handle handle, u32 event, struct device *dev)
+{
+	struct aw88399_hda *aw88399 = dev_get_drvdata(dev);
+
+	dev_dbg(dev, "ACPI notify event 0x%x for channel %d\n", event, aw88399->channel);
+}
+
 static int aw88399_hda_index_from_i2c(struct aw88399_hda *aw88399)
 {
 	struct device *dev = aw88399->dev;
@@ -129,6 +147,50 @@ static int aw88399_hda_index_from_i2c(struct aw88399_hda *aw88399)
 	}
 
 	return index;
+}
+
+static bool aw88399_hda_try_dsd_index(struct aw88399_hda *aw88399, int addr_index)
+{
+	struct device *dev = aw88399->dev;
+	u32 value;
+
+	if (device_property_read_u32(dev, AW88399_ACPI_PROP_DEV_INDEX, &value))
+		return false;
+
+	if (value >= AW88399_HDA_MAX_AMPS) {
+		dev_warn(dev, "_DSD dev-index %u out of range, ignoring\n", value);
+		return false;
+	}
+
+	aw88399->index = value;
+	dev_info(dev, "Using _DSD dev-index %u (I2C suggested %d)\n", value, addr_index);
+
+	return true;
+}
+
+static void aw88399_hda_parse_speaker_props(struct aw88399_hda *aw88399)
+{
+	struct device *dev = aw88399->dev;
+	u32 value;
+
+	aw88399->speaker_pos_valid = false;
+	aw88399->speaker_id_valid = false;
+
+	if (!device_property_read_u32(dev, AW88399_ACPI_PROP_SPK_POS, &value)) {
+		if (value < AW88399_HDA_MAX_AMPS) {
+			aw88399->speaker_pos = value;
+			aw88399->speaker_pos_valid = true;
+			dev_info(dev, "Speaker position from _DSD: %u\n", value);
+		} else {
+			dev_warn(dev, "_DSD speaker-position %u out of range\n", value);
+		}
+	}
+
+	if (!device_property_read_u32(dev, AW88399_ACPI_PROP_SPK_ID, &value)) {
+		aw88399->speaker_id = value;
+		aw88399->speaker_id_valid = true;
+		dev_info(dev, "Speaker ID from _DSD: %u\n", value);
+	}
 }
 
 static void aw88399_hda_hw_reset(struct aw88399_hda *aw88399)
@@ -172,6 +234,12 @@ static int aw88399_hda_init(struct aw88399_hda *aw88399)
 
 	aw88399->core = core;
 	aw88399->aw_dev = core->aw_pa;
+	if (aw88399->aw_dev) {
+		if (aw88399->speaker_pos_valid)
+			aw88399->aw_dev->channel = aw88399->speaker_pos;
+		else
+			aw88399->aw_dev->channel = aw88399->index;
+	}
 
 	return 0;
 }
@@ -183,46 +251,53 @@ static int aw88399_hda_acpi_probe(struct aw88399_hda *aw88399)
 	struct acpi_device *adev;
 	int addr_index;
 	u64 uid;
-	int ret = 0;
+	int ret;
+	bool index_from_dsd = false;
 
 	addr_index = aw88399_hda_index_from_i2c(aw88399);
-	aw88399->channel = addr_index;
+	aw88399->index = addr_index;
+	aw88399->adev = NULL;
+	aw88399->acpi_notify_supported = false;
 
 	adev = ACPI_COMPANION(dev);
 	if (!adev) {
-		aw88399->index = addr_index;
 		dev_info(dev, "No ACPI companion, using I2C addr 0x%02x for index %d\n",
 			 i2c->addr, aw88399->index);
-		return 0;
+		goto metadata;
 	}
 
-	/*
-	 * Get component index from ACPI _UID if available.
-	 * On Legion, we have only 1 ACPI device (at 0x35), so this will be 0.
-	 * The 0x34 device is manually instantiated and won't have ACPI data.
-	 */
-	ret = acpi_dev_uid_to_integer(adev, &uid);
-	if (ret) {
-		aw88399->index = addr_index;
-		dev_info(dev, "No ACPI _UID, using I2C addr 0x%02x for index %d\n",
-			 i2c->addr, aw88399->index);
-	} else {
-		aw88399->index = (int)uid;
+	aw88399->adev = adev;
+	aw88399->acpi_notify_supported = true;
+	index_from_dsd = aw88399_hda_try_dsd_index(aw88399, addr_index);
 
-		if (aw88399->index < 0 || aw88399->index >= AW88399_HDA_MAX_AMPS) {
+	if (!index_from_dsd) {
+		ret = acpi_dev_uid_to_integer(adev, &uid);
+		if (ret) {
+			aw88399->index = addr_index;
+			dev_info(dev, "No ACPI _UID, using I2C addr 0x%02x for index %d\n",
+				 i2c->addr, aw88399->index);
+		} else if (uid >= AW88399_HDA_MAX_AMPS) {
 			dev_warn(dev, "ACPI _UID %llu out of range, falling back to I2C index %d\n",
 				 uid, addr_index);
 			aw88399->index = addr_index;
-		} else if (aw88399->index != addr_index) {
-			dev_warn(dev,
-				 "ACPI _UID %d disagrees with I2C addr 0x%02x, overriding with index %d\n",
-				 aw88399->index, i2c->addr, addr_index);
-			aw88399->index = addr_index;
 		} else {
-			dev_info(dev, "ACPI _UID: %d (addr 0x%02x)\n",
-				 aw88399->index, i2c->addr);
+			aw88399->index = (int)uid;
+			if (aw88399->index != addr_index)
+				dev_info(dev,
+					 "ACPI _UID %d overrides I2C addr 0x%02x suggestion %d\n",
+					 aw88399->index, i2c->addr, addr_index);
+			else
+				dev_info(dev, "ACPI _UID: %d (addr 0x%02x)\n",
+					 aw88399->index, i2c->addr);
 		}
 	}
+
+metadata:
+	aw88399_hda_parse_speaker_props(aw88399);
+	if (aw88399->speaker_pos_valid)
+		aw88399->channel = aw88399->speaker_pos;
+	else
+		aw88399->channel = aw88399->index;
 
 	return 0;
 }

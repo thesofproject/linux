@@ -13,6 +13,8 @@
 #include <linux/device.h>
 #include <sound/hda_codec.h>
 
+struct acpi_device;
+
 struct aw88399;
 struct aw_device;
 
@@ -24,8 +26,14 @@ struct aw88399_hda {
 	struct aw88399 *core;
 
 	struct hda_codec *codec;
+	struct acpi_device *adev;
 	int index;
 	int channel;
+	int speaker_pos;
+	int speaker_id;
+	bool speaker_pos_valid;
+	bool speaker_id_valid;
+	bool acpi_notify_supported;
 
 	bool playing;
 	bool suspended;
