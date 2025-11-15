@@ -83,18 +83,7 @@ static int aw88399_hda_bind(struct device *dev, struct device *master, void *mas
 	comp->dev = dev;
 	aw88399->codec = parent->codec;
 
-	/*
-	 * Build component name in format expected by Realtek quirk:
-	 * "i2c-AWDZ8399:00-aw88399-hda.%d" for ACPI devices, or
-	 * "%s-aw88399-hda.%d" for manual devices.
-	 * This ensures component matching works for both.
-	 */
-	if (strstr(dev_name(dev), "AWDZ8399"))
-		snprintf(comp->name, sizeof(comp->name), "%s-aw88399-hda.%d",
-			 dev_name(dev), aw88399->index);
-	else
-		snprintf(comp->name, sizeof(comp->name), "i2c-%s-aw88399-hda.%d",
-			 dev_name(dev), aw88399->index);
+	strscpy(comp->name, dev_name(dev), sizeof(comp->name));
 
 	/* Set up playback hooks */
 	comp->playback_hook = aw88399_hda_playback_hook;
