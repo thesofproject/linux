@@ -73,9 +73,6 @@ static const struct codec_map amps[] = {
 	 * then the amp will be selected properly.
 	 */
 	CODEC_MAP_ENTRY("RT5650", "rt5650", RT5650_ACPI_HID, CODEC_RT5650),
-
-	/* Awinic */
-	CODEC_MAP_ENTRY("AW88399", "aw88399", AW88399_ACPI_HID, CODEC_AW88399),
 };
 
 enum snd_soc_acpi_intel_codec
