@@ -6,6 +6,7 @@
 //
 
 #include <linux/acpi.h>
+#include <linux/dmi.h>
 #include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 #include <linux/kernel.h>
@@ -298,6 +299,17 @@ metadata:
 		aw88399->channel = aw88399->speaker_pos;
 	else
 		aw88399->channel = aw88399->index;
+
+	/*
+	 * Lenovo Legion Pro 7 16IAX10H has I2C devices wired backwards:
+	 * 0x34 is physically on the right side, 0x35 on the left.
+	 * Force channel swap for this model.
+	 */
+	if (dmi_match(DMI_PRODUCT_NAME, "83F5")) {
+		aw88399->channel = 1 - aw88399->channel;
+		dev_info(dev, "Legion detected, swapping to channel %d (index %d, addr 0x%02x)\n",
+			 aw88399->channel, aw88399->index, i2c->addr);
+	}
 
 	return 0;
 }
