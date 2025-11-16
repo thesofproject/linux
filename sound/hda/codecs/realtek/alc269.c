@@ -3060,6 +3060,7 @@ static void alc287_fixup_legion_16iax_aw88399(struct hda_codec *codec,
 	case HDA_FIXUP_ACT_PRE_PROBE:
 		alc_apply_coef_updates(codec, legion_16iax_aw88399_init,
 					ARRAY_SIZE(legion_16iax_aw88399_init));
+		codec->power_save_node = 0;
 		spec->gen.pcm_playback_hook = alc287_legion_aw88399_playback_hook;
 		break;
 	}
