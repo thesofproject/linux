@@ -229,18 +229,20 @@ static int aw88399_hda_init(struct aw88399_hda *aw88399)
 	if (ret)
 		return ret;
 
+	/* Set channel BEFORE loading firmware so ACF parser sees correct value */
+	if (core->aw_pa) {
+		if (aw88399->speaker_pos_valid)
+			core->aw_pa->channel = aw88399->speaker_pos;
+		else
+			core->aw_pa->channel = aw88399->channel;
+	}
+
 	ret = aw88399_request_firmware_file(core);
 	if (ret)
 		return ret;
 
 	aw88399->core = core;
 	aw88399->aw_dev = core->aw_pa;
-	if (aw88399->aw_dev) {
-		if (aw88399->speaker_pos_valid)
-			aw88399->aw_dev->channel = aw88399->speaker_pos;
-		else
-			aw88399->aw_dev->channel = aw88399->index;
-	}
 
 	return 0;
 }
