@@ -3085,60 +3085,6 @@ static const struct alc_coef_update legion_16iax_aw88399_pron[] = {
 static const struct alc_coef_update legion_16iax_aw88399_prof[] = {
 };
 
-static void alc287_legion_remove_ctl(struct hda_codec *codec,
-				     const char *name)
-{
-	struct snd_kcontrol *kctl;
-
-	if (!codec->card)
-		return;
-
-	kctl = snd_hda_find_mixer_ctl(codec, name);
-	if (kctl)
-		snd_ctl_remove(codec->card, kctl);
-}
-
-static void alc287_legion_hide_playback_ctls(struct hda_codec *codec)
-{
-	static const char * const names[] = {
-		"Master Playback Volume",
-		"Master Playback Switch",
-		"Headphone Playback Volume",
-		"Headphone Playback Switch",
-		"Speaker Playback Volume",
-		"Speaker Playback Switch",
-		"Bass Speaker Playback Volume",
-		"Bass Speaker Playback Switch",
-	};
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(names); i++)
-		alc287_legion_remove_ctl(codec, names[i]);
-}
-
-static void alc287_legion_promote_post_mixer(struct hda_codec *codec)
-{
-	rename_ctl(codec, "Post Mixer Analog Playback Volume",
-		   "Master Playback Volume");
-	rename_ctl(codec, "Post Mixer Analog Playback Switch",
-		   "Master Playback Switch");
-}
-
-static void alc287_legion_force_amp_max(struct hda_codec *codec, hda_nid_t nid)
-{
-	u32 caps;
-	unsigned int ofs, steps;
-
-	caps = query_amp_caps(codec, nid, HDA_OUTPUT);
-	steps = (caps & AC_AMPCAP_NUM_STEPS) >> AC_AMPCAP_NUM_STEPS_SHIFT;
-	ofs = (caps & AC_AMPCAP_OFFSET) >> AC_AMPCAP_OFFSET_SHIFT;
-	if (!steps && !ofs)
-		return;
-
-	snd_hda_codec_amp_init_stereo(codec, nid, HDA_OUTPUT, 0,
-				      HDA_AMP_VOLMASK, ofs + steps);
-}
-
 static void alc287_legion_aw88399_playback_hook(struct hda_pcm_stream *hinfo,
 					 struct hda_codec *codec,
 					 struct snd_pcm_substream *sub, int action)
@@ -3161,29 +3107,12 @@ static void alc287_fixup_legion_16iax_aw88399(struct hda_codec *codec,
 				const struct hda_fixup *fix, int action)
 {
 	struct alc_spec *spec = codec->spec;
-	static const hda_nid_t dac_nids[] = { 0x02, 0x03 };
-	static const hda_nid_t speaker_pins[] = { 0x14, 0x17 };
-	int i;
 
 	switch (action) {
 	case HDA_FIXUP_ACT_PRE_PROBE:
 		alc_apply_coef_updates(codec, legion_16iax_aw88399_init,
 					ARRAY_SIZE(legion_16iax_aw88399_init));
 		spec->gen.pcm_playback_hook = alc287_legion_aw88399_playback_hook;
-		spec->gen.suppress_vmaster = 1;
-		break;
-	case HDA_FIXUP_ACT_BUILD:
-		alc287_legion_hide_playback_ctls(codec);
-		alc287_legion_promote_post_mixer(codec);
-		break;
-	case HDA_FIXUP_ACT_INIT:
-		for (i = 0; i < ARRAY_SIZE(dac_nids); i++)
-			alc287_legion_force_amp_max(codec, dac_nids[i]);
-
-		for (i = 0; i < ARRAY_SIZE(speaker_pins); i++)
-			snd_hda_codec_amp_init_stereo(codec, speaker_pins[i],
-						      HDA_OUTPUT, 0,
-						      HDA_AMP_MUTE, 0);
 		break;
 	}
 }
