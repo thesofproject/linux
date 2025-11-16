@@ -301,13 +301,14 @@ metadata:
 		aw88399->channel = aw88399->index;
 
 	/*
-	 * Lenovo Legion Pro 7 16IAX10H has I2C devices wired backwards:
-	 * 0x34 is physically on the right side, 0x35 on the left.
-	 * Force channel swap for this model.
+	 * Lenovo Legion Pro 7 16IAX10H (product 83F5, SSIDs 17aa:3906/3907/3d6c)
+	 * has I2C devices wired backwards: 0x34 is physically right, 0x35 is left.
+	 * Swap channels to correct L/R assignment. This is a hardware wiring issue
+	 * specific to this model, not a driver bug.
 	 */
 	if (dmi_match(DMI_PRODUCT_NAME, "83F5")) {
 		aw88399->channel = 1 - aw88399->channel;
-		dev_info(dev, "Legion detected, swapping to channel %d (index %d, addr 0x%02x)\n",
+		dev_info(dev, "Legion quirk: swapped to channel %d (index %d, addr 0x%02x)\n",
 			 aw88399->channel, aw88399->index, i2c->addr);
 	}
 
@@ -426,29 +427,37 @@ static int aw88399_hda_runtime_resume(struct device *dev)
 static int aw88399_hda_system_suspend(struct device *dev)
 {
 	struct aw88399_hda *aw88399 = dev_get_drvdata(dev);
+	int ret;
 
 	dev_dbg(dev, "System suspend\n");
 
-	/* Stop amplifier before system sleep */
 	if (aw88399->aw_dev && aw88399->playing)
 		aw88399_stop(aw88399->aw_dev);
 
-	return 0;
+	ret = pm_runtime_force_suspend(dev);
+	if (ret)
+		dev_err(dev, "Runtime force suspend failed: %d\n", ret);
+
+	return ret;
 }
 
 static int aw88399_hda_system_resume(struct device *dev)
 {
 	struct aw88399_hda *aw88399 = dev_get_drvdata(dev);
+	int ret;
 
 	dev_dbg(dev, "System resume\n");
 
-	/* Reset chip after system sleep */
 	if (aw88399->aw_dev) {
 		aw88399_hda_hw_reset(aw88399);
 		/* Chip will be fully reinitialized on next playback */
 	}
 
-	return 0;
+	ret = pm_runtime_force_resume(dev);
+	if (ret)
+		dev_err(dev, "Runtime force resume failed: %d\n", ret);
+
+	return ret;
 }
 
 const struct dev_pm_ops aw88399_hda_pm_ops = {
