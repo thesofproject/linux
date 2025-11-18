@@ -217,6 +217,11 @@ bool module_handle_guest_smc(struct arm_smccc_1_2_regs *regs, struct arm_smccc_1
 	return false;
 }
 
+static int __hyp_smp_processor_id(void)
+{
+	return hyp_smp_processor_id();
+}
+
 const struct pkvm_module_ops module_ops = {
 	.create_private_mapping = __pkvm_create_private_mapping,
 	.alloc_module_va = __pkvm_alloc_module_va,
@@ -259,6 +264,7 @@ const struct pkvm_module_ops module_ops = {
 	.tracing_reserve_entry = tracing_reserve_entry,
 	.tracing_commit_entry = tracing_commit_entry,
 	.tracing_mod_hyp_printk = tracing_mod_hyp_printk,
+	.hyp_smp_processor_id = __hyp_smp_processor_id,
 };
 
 static void *pkvm_module_hyp_va(struct pkvm_el2_module *mod, void *kern_va)
