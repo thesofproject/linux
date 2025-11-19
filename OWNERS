@@ -19,3 +19,5 @@ per-file */TEST_MAPPING = *
 
 # Test config xml can be made by anyone
 per-file */*.xml = *
+
+include kernel/common:android-mainline-desktop:/OWNERS_DrNo
