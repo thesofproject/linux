@@ -14,6 +14,7 @@
 #include <linux/minmax.h>
 #include <linux/regmap.h>
 #include <linux/sort.h>
+#include <sound/pcm_params.h>
 #include <sound/soc.h>
 #include "aw88399.h"
 #include "aw88395/aw88395_device.h"
@@ -1013,7 +1014,7 @@ static int aw_dev_dsp_update_fw(struct aw_device *aw_dev,
 
 static int aw_dev_check_sram(struct aw_device *aw_dev)
 {
-	unsigned int reg_val;
+	unsigned int reg_val = 0;
 
 	mutex_lock(&aw_dev->dsp_lock);
 	/* read dsp_rom_check_reg */
@@ -1321,7 +1322,7 @@ static void aw88399_startup_work(struct work_struct *work)
 	mutex_unlock(&aw88399->lock);
 }
 
-static void aw88399_start(struct aw88399 *aw88399, bool sync_start)
+void aw88399_start(struct aw88399 *aw88399, bool sync_start)
 {
 	int ret;
 
@@ -1344,6 +1345,7 @@ static void aw88399_start(struct aw88399 *aw88399, bool sync_start)
 			&aw88399->start_work,
 			AW88399_START_WORK_DELAY_MS);
 }
+EXPORT_SYMBOL_GPL(aw88399_start);
 
 static int aw_dev_check_sysint(struct aw_device *aw_dev)
 {
@@ -1358,7 +1360,7 @@ static int aw_dev_check_sysint(struct aw_device *aw_dev)
 	return 0;
 }
 
-static int aw88399_stop(struct aw_device *aw_dev)
+int aw88399_stop(struct aw_device *aw_dev)
 {
 	struct aw_sec_data_desc *dsp_cfg =
 		&aw_dev->prof_info.prof_desc[aw_dev->prof_cur].sec_desc[AW88395_DATA_TYPE_DSP_CFG];
@@ -1396,6 +1398,46 @@ static int aw88399_stop(struct aw_device *aw_dev)
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(aw88399_stop);
+
+static int aw88399_dai_hw_params(struct snd_pcm_substream *substream,
+				  struct snd_pcm_hw_params *params,
+				  struct snd_soc_dai *dai)
+{
+	struct snd_soc_component *component = dai->component;
+	unsigned int rate = params_rate(params);
+	unsigned int width = params_width(params);
+	unsigned int channels = params_channels(params);
+
+	dev_dbg(component->dev, "%s: rate=%u, width=%u, channels=%u, stream=%s\n",
+		__func__, rate, width, channels,
+		substream->stream == SNDRV_PCM_STREAM_PLAYBACK ? "playback" : "capture");
+
+	/* Firmware is configured for 48kHz S32_LE stereo only */
+	if (rate != 48000) {
+		dev_err(component->dev, "Only 48kHz supported, got %u\n", rate);
+		return -EINVAL;
+	}
+
+	if (width != 32) {
+		dev_err(component->dev, "Only 32-bit samples supported, got %u\n", width);
+		return -EINVAL;
+	}
+
+	if (channels != 2) {
+		dev_err(component->dev, "Only stereo supported, got %u channels\n", channels);
+		return -EINVAL;
+	}
+
+	/* Firmware handles I2S/format configuration via profile */
+	/* No additional register writes needed here */
+
+	return 0;
+}
+
+static const struct snd_soc_dai_ops aw88399_dai_ops = {
+	.hw_params = aw88399_dai_hw_params,
+};
 
 static struct snd_soc_dai_driver aw88399_dai[] = {
 	{
@@ -1415,6 +1457,7 @@ static struct snd_soc_dai_driver aw88399_dai[] = {
 			.rates = AW88399_RATES,
 			.formats = AW88399_FORMATS,
 		},
+		.ops = &aw88399_dai_ops,
 	},
 };
 
@@ -2084,7 +2127,7 @@ static int aw88399_dev_init(struct aw88399 *aw88399, struct aw_container *aw_cfg
 	return 0;
 }
 
-static int aw88399_request_firmware_file(struct aw88399 *aw88399)
+int aw88399_request_firmware_file(struct aw88399 *aw88399)
 {
 	const struct firmware *cont = NULL;
 	int ret;
@@ -2125,6 +2168,7 @@ static int aw88399_request_firmware_file(struct aw88399 *aw88399)
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(aw88399_request_firmware_file);
 
 static const struct snd_kcontrol_new aw88399_controls[] = {
 	SOC_SINGLE_EXT("PCM Playback Volume", AW88399_SYSCTRL2_REG,
@@ -2155,9 +2199,11 @@ static int aw88399_playback_event(struct snd_soc_dapm_widget *w,
 	mutex_lock(&aw88399->lock);
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
+		cancel_delayed_work_sync(&aw88399->start_work);
 		aw88399_start(aw88399, AW88399_ASYNC_START);
 		break;
 	case SND_SOC_DAPM_POST_PMD:
+		cancel_delayed_work_sync(&aw88399->start_work);
 		aw88399_stop(aw88399->aw_pa);
 		break;
 	default:
@@ -2170,13 +2216,13 @@ static int aw88399_playback_event(struct snd_soc_dapm_widget *w,
 
 static const struct snd_soc_dapm_widget aw88399_dapm_widgets[] = {
 	 /* playback */
-	SND_SOC_DAPM_AIF_IN_E("AIF_RX", "Speaker_Playback", 0, 0, 0, 0,
+	SND_SOC_DAPM_AIF_IN_E("AIF_RX", NULL, 0, 0, 0, 0,
 					aw88399_playback_event,
 					SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
 	SND_SOC_DAPM_OUTPUT("DAC Output"),
 
 	/* capture */
-	SND_SOC_DAPM_AIF_OUT("AIF_TX", "Speaker_Capture", 0, SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_AIF_OUT("AIF_TX", NULL, 0, SND_SOC_NOPM, 0, 0),
 	SND_SOC_DAPM_INPUT("ADC Input"),
 };
 
@@ -2233,12 +2279,26 @@ static void aw88399_parse_channel_dt(struct aw_device *aw_dev)
 {
 	struct device_node *np = aw_dev->dev->of_node;
 	u32 channel_value;
+	int ret;
 
-	of_property_read_u32(np, "awinic,audio-channel", &channel_value);
+	ret = of_property_read_u32(np, "awinic,audio-channel", &channel_value);
+	if (ret) {
+		/*
+		 * On ACPI systems, DT properties don't exist. Derive channel
+		 * from I2C address: 0x34 -> channel 0 (left), 0x35 -> channel 1 (right)
+		 */
+		aw_dev->channel = aw_dev->i2c->addr - 0x34;
+		dev_info(aw_dev->dev,
+			 "DT channel property not found, using I2C address-based channel %d (addr 0x%02x)\n",
+			 aw_dev->channel, aw_dev->i2c->addr);
+		return;
+	}
+
 	aw_dev->channel = channel_value;
+	dev_dbg(aw_dev->dev, "DT channel value: %d\n", channel_value);
 }
 
-static int aw88399_init(struct aw88399 *aw88399, struct i2c_client *i2c, struct regmap *regmap)
+int aw88399_init(struct aw88399 *aw88399, struct i2c_client *i2c, struct regmap *regmap)
 {
 	struct aw_device *aw_dev;
 	unsigned int chip_id;
@@ -2280,6 +2340,7 @@ static int aw88399_init(struct aw88399 *aw88399, struct i2c_client *i2c, struct 
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(aw88399_init);
 
 static int aw88399_i2c_probe(struct i2c_client *i2c)
 {
@@ -2329,8 +2390,13 @@ static const struct i2c_device_id aw88399_i2c_id[] = {
 MODULE_DEVICE_TABLE(i2c, aw88399_i2c_id);
 
 #ifdef CONFIG_ACPI
+/*
+ * ACPI match removed to prevent binding conflict with HDA side-codec driver.
+ * Both drivers previously matched "AWDZ8399", causing race condition where
+ * SSP driver (loaded as dependency) would bind before HDA driver.
+ * SSP driver can still be instantiated manually via sysfs or platform data.
+ */
 static const struct acpi_device_id aw88399_acpi_match[] = {
-	{ "AWDZ8399", 0 },
 	{ },
 };
 MODULE_DEVICE_TABLE(acpi, aw88399_acpi_match);
