@@ -1,0 +1,44 @@
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_module",
+)
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+ddk_module(
+    name = "intel-ipu6-psys",
+    srcs = [
+        "ipu-fw-psys.c",
+        "ipu-fw-resources.c",
+        "ipu-psys.c",
+        "ipu-resources.c",
+        "ipu6-fw-resources.c",
+        "ipu6-l-scheduler.c",
+        "ipu6-ppg.c",
+        "ipu6-psys.c",
+        "ipu6ep-fw-resources.c",
+        "ipu6se-fw-resources.c",
+    ],
+    out = "intel-ipu6-psys.ko",
+    hdrs = [
+        "include/uapi/linux/ipu-psys.h",
+        "ipu-fw-psys.h",
+        "ipu-platform-psys.h",
+        "ipu-platform-resources.h",
+        "ipu-psys.h",
+        "ipu6-platform-resources.h",
+        "ipu6-ppg.h",
+        "ipu6ep-platform-resources.h",
+        "ipu6se-platform-resources.h",
+    ],
+    includes = [
+        ".",
+        "drivers/media/pci/intel/ipu6",
+        "include",
+    ],
+    kernel_build = "//private/devices/google/x86-64/intel/common:kernel",
+)
