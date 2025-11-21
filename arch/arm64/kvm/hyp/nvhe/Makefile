@@ -25,7 +25,8 @@ subdir-ccflags-y += -I$(srctree)/drivers/iommu/arm/arm-smmu-v3/pkvm/
 hyp-obj-$(CONFIG_ARM_SMMU_V3_PKVM) += $(HYP_SMMU_V3_DRV_PATH)/pkvm/nested/arm-smmu-v3.o \
 	$(HYP_SMMU_V3_DRV_PATH)/arm-smmu-v3-common-lib.o \
 	$(HYP_SMMU_V3_DRV_PATH)/pkvm/io-pgtable-arm-hyp.o \
-	$(HYP_SMMU_V3_DRV_PATH)/../../io-pgtable-arm.o
+	$(HYP_SMMU_V3_DRV_PATH)/../../io-pgtable-arm.o \
+	$(HYP_SMMU_V3_DRV_PATH)/pkvm/arm-smmu-v3-lib-hyp.o
 endif
 
 $(obj)/hyp.lds: $(src)/hyp.lds.S FORCE
