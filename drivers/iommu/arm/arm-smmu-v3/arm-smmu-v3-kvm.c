@@ -22,7 +22,7 @@
 extern struct kvm_iommu_ops kvm_nvhe_sym(smmu_ops);
 
 static size_t				kvm_arm_smmu_count;
-static struct hyp_arm_smmu_v3_device	*kvm_arm_smmu_array;
+static struct hyp_arm_smmu_v3_nested_device	*kvm_arm_smmu_array;
 static size_t				kvm_arm_smmu_cur;
 
 #ifdef MODULE
@@ -93,18 +93,18 @@ static int smmuv3_nesting_probe(struct platform_device *pdev)
 {
 	struct resource *res;
 	void *cmdq_base, *strtab;
-	struct hyp_arm_smmu_v3_device *smmu = &kvm_arm_smmu_array[kvm_arm_smmu_cur];
+	struct hyp_arm_smmu_v3_nested_device *smmu = &kvm_arm_smmu_array[kvm_arm_smmu_cur];
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	smmu->mmio_addr = res->start;
-	smmu->mmio_size = resource_size(res);
-	if (smmu->mmio_size < SZ_128K) {
+	smmu->common.mmio_addr = res->start;
+	smmu->common.mmio_size = resource_size(res);
+	if (smmu->common.mmio_size < SZ_128K) {
 		dev_err(&pdev->dev, "MMIO region too small(%pr)\n", &res);
 		return -EINVAL;
 	}
 
 	if (of_dma_is_coherent(pdev->dev.of_node))
-		smmu->features |= ARM_SMMU_FEAT_COHERENCY;
+		smmu->common.features |= ARM_SMMU_FEAT_COHERENCY;
 
 	/*
 	 * Allocate the shadow command queue, it doesn't have to be the same
@@ -116,8 +116,8 @@ static int smmuv3_nesting_probe(struct platform_device *pdev)
 	if (!cmdq_base)
 		return -ENOMEM;
 
-	smmu->cmdq.base_dma = virt_to_phys(cmdq_base);
-	smmu->cmdq.llq.max_n_shift = SMMU_KVM_CMDQ_ORDER + PAGE_SHIFT - CMDQ_ENT_SZ_SHIFT;
+	smmu->common.cmdq.base_dma = virt_to_phys(cmdq_base);
+	smmu->common.cmdq.llq.max_n_shift = SMMU_KVM_CMDQ_ORDER + PAGE_SHIFT - CMDQ_ENT_SZ_SHIFT;
 
 	strtab = (void *)__get_free_pages(GFP_KERNEL | __GFP_ZERO, SMMU_KVM_STRTAB_ORDER);
 	if (!strtab)
