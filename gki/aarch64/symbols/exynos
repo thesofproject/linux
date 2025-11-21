@@ -800,3 +800,7 @@
   __tracepoint_sched_switch
   __tracepoint_workqueue_execute_end
   __tracepoint_workqueue_execute_start
+
+# required by exynos-irq-gic-v3-its.ko
+  its_restore_enable
+  its_save_disable
