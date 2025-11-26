@@ -109,17 +109,15 @@ static int ufshcd_crypto_keyslot_evict(struct blk_crypto_profile *profile,
  */
 bool ufshcd_crypto_enable(struct ufs_hba *hba)
 {
+	int err = -EOPNOTSUPP;
+
 	if (!(hba->caps & UFSHCD_CAP_CRYPTO))
 		return false;
 
 	/* Reset might clear all keys, so reprogram all the keys. */
-	if (hba->crypto_profile.num_slots) {
-		int err = -EOPNOTSUPP;
-
-		trace_android_rvh_ufs_reprogram_all_keys(hba, &err);
-		if (err == -EOPNOTSUPP)
-			blk_crypto_reprogram_all_keys(&hba->crypto_profile);
-	}
+	trace_android_rvh_ufs_reprogram_all_keys(hba, &err);
+	if (err == -EOPNOTSUPP)
+		blk_crypto_reprogram_all_keys(&hba->crypto_profile);
 
 	if (hba->quirks & UFSHCD_QUIRK_BROKEN_CRYPTO_ENABLE)
 		return false;
