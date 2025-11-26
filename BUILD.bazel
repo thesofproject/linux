@@ -209,6 +209,7 @@ filegroup(
     srcs = [
         # keep sorted
         "gki/aarch64/symbols/db845c",
+        "gki/aarch64/symbols/exynos",
         "gki/aarch64/symbols/honor",
         "gki/aarch64/symbols/kunit",
         "gki/aarch64/symbols/pixel",
