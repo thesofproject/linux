@@ -2272,7 +2272,8 @@ static int realtek_resume_jack(struct usb_mixer_elem_list *list)
 }
 
 static int realtek_add_jack(struct usb_mixer_interface *mixer,
-			    char *name, u32 val)
+			    char *name, u32 val, int unitid,
+			    const struct snd_kcontrol_new *kctl_new)
 {
 	struct usb_mixer_elem_info *cval;
 	struct snd_kcontrol *kctl;
@@ -2280,14 +2281,13 @@ static int realtek_add_jack(struct usb_mixer_interface *mixer,
 	cval = kzalloc(sizeof(*cval), GFP_KERNEL);
 	if (!cval)
 		return -ENOMEM;
-	snd_usb_mixer_elem_init_std(&cval->head, mixer,
-				    REALTEK_JACK_INTERRUPT_NODE);
+	snd_usb_mixer_elem_init_std(&cval->head, mixer, unitid);
 	cval->head.resume = realtek_resume_jack;
 	cval->val_type = USB_MIXER_BOOLEAN;
 	cval->channels = 1;
 	cval->min = 0;
 	cval->max = 1;
-	kctl = snd_ctl_new1(&realtek_connector_ctl_ro, cval);
+	kctl = snd_ctl_new1(kctl_new, cval);
 	if (!kctl) {
 		kfree(cval);
 		return -ENOMEM;
@@ -2317,14 +2317,20 @@ static int dell_dock_mixer_create(struct usb_mixer_interface *mixer)
 			USB_RECIP_DEVICE | USB_TYPE_VENDOR | USB_DIR_OUT,
 			0, 0, NULL, 0);
 
-	err = realtek_add_jack(mixer, "Line Out Jack", REALTEK_LINE1);
+	err = realtek_add_jack(mixer, "Line Out Jack", REALTEK_LINE1,
+			       REALTEK_JACK_INTERRUPT_NODE,
+			       &realtek_connector_ctl_ro);
 	if (err < 0)
 		return err;
-	err = realtek_add_jack(mixer, "Headphone Jack", REALTEK_HP_OUT);
+	err = realtek_add_jack(mixer, "Headphone Jack", REALTEK_HP_OUT,
+			       REALTEK_JACK_INTERRUPT_NODE,
+			       &realtek_connector_ctl_ro);
 	if (err < 0)
 		return err;
 	err = realtek_add_jack(mixer, "Headset Mic Jack",
-			       REALTEK_HP_OUT | REALTEK_MIC_FLAG);
+			       REALTEK_HP_OUT | REALTEK_MIC_FLAG,
+			       REALTEK_JACK_INTERRUPT_NODE,
+			       &realtek_connector_ctl_ro);
 	if (err < 0)
 		return err;
 	return 0;
