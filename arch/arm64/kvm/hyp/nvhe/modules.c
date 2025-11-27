@@ -284,6 +284,7 @@ const struct pkvm_module_ops module_ops = {
 	.pkvm_unuse_dma = __pkvm_host_unuse_dma,
 	.init_hvc_pd = pkvm_init_hvc_pd,
 	.device_register_reset = pkvm_device_register_reset,
+	.iommu_register_pviommu_drv = kvm_iommu_register_pviommu_drv,
 };
 
 static void *pkvm_module_hyp_va(struct pkvm_el2_module *mod, void *kern_va)
