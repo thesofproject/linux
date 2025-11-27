@@ -277335,6 +277335,12 @@ function {
   parameter_id: 0x4585663f
 }
 function {
+  id: 0x9b51e812
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x3f949c69
+}
+function {
   id: 0x9b523c43
   return_type_id: 0x6720d32f
   parameter_id: 0x1aeeade4
@@ -289204,6 +289210,24 @@ elf_symbol {
   full_name: "__traceiter_sched_set_state_tp"
 }
 elf_symbol {
+  id: 0x23bf3397
+  name: "__traceiter_scsi_dispatch_cmd_done"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xfabd4295
+  type_id: 0x9b51e812
+  full_name: "__traceiter_scsi_dispatch_cmd_done"
+}
+elf_symbol {
+  id: 0x36d71264
+  name: "__traceiter_scsi_dispatch_cmd_start"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xfabd4295
+  type_id: 0x9b51e812
+  full_name: "__traceiter_scsi_dispatch_cmd_start"
+}
+elf_symbol {
   id: 0x8ce8e50d
   name: "__traceiter_sk_data_ready"
   is_defined: true
@@ -289607,6 +289631,24 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_sched_set_state_tp"
+}
+elf_symbol {
+  id: 0x82a9a35d
+  name: "__tracepoint_scsi_dispatch_cmd_done"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_scsi_dispatch_cmd_done"
+}
+elf_symbol {
+  id: 0x6069ba16
+  name: "__tracepoint_scsi_dispatch_cmd_start"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_scsi_dispatch_cmd_start"
 }
 elf_symbol {
   id: 0xf68d6127
@@ -319141,6 +319183,8 @@ interface {
   symbol_id: 0x45e62871
   symbol_id: 0x85a11e58
   symbol_id: 0x0d6e6436
+  symbol_id: 0x23bf3397
+  symbol_id: 0x36d71264
   symbol_id: 0x8ce8e50d
   symbol_id: 0x62a42e92
   symbol_id: 0xa7ccbbf5
@@ -319186,6 +319230,8 @@ interface {
   symbol_id: 0x02473ce7
   symbol_id: 0x65f99dde
   symbol_id: 0x7c94aad8
+  symbol_id: 0x82a9a35d
+  symbol_id: 0x6069ba16
   symbol_id: 0xf68d6127
   symbol_id: 0x9a65f074
   symbol_id: 0x158cc323
