@@ -41659,6 +41659,12 @@ member {
   offset: 25408
 }
 member {
+  id: 0xd671c705
+  name: "android_oem_data1"
+  type_id: 0x92233392
+  offset: 39680
+}
+member {
   id: 0x9115ad4d
   name: "android_opts"
   type_id: 0xb2b32355
@@ -232383,7 +232389,7 @@ struct_union {
   kind: STRUCT
   name: "ufs_hba"
   definition {
-    bytesize: 4960
+    bytesize: 4968
     member_id: 0x6138df6b
     member_id: 0xd60d1ea3
     member_id: 0xc8af3fe4
@@ -232500,6 +232506,7 @@ struct_union {
     member_id: 0x815a0822
     member_id: 0xe2626722
     member_id: 0xbd00dc07
+    member_id: 0xd671c705
   }
 }
 struct_union {
@@ -289220,7 +289227,7 @@ elf_symbol {
   name: "__traceiter_ufshcd_profile_clk_gating"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x5be94506
+  crc: 0x51e55c0f
   type_id: 0x9bbe93e3
   full_name: "__traceiter_ufshcd_profile_clk_gating"
 }
@@ -289229,7 +289236,7 @@ elf_symbol {
   name: "__traceiter_ufshcd_profile_clk_scaling"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x5be94506
+  crc: 0x51e55c0f
   type_id: 0x9bbe93e3
   full_name: "__traceiter_ufshcd_profile_clk_scaling"
 }
@@ -289238,7 +289245,7 @@ elf_symbol {
   name: "__traceiter_ufshcd_profile_hibern8"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x5be94506
+  crc: 0x51e55c0f
   type_id: 0x9bbe93e3
   full_name: "__traceiter_ufshcd_profile_hibern8"
 }
@@ -315580,7 +315587,7 @@ elf_symbol {
   name: "ufshcd_bkops_ctrl"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xdae9cca7
+  crc: 0xb526ba17
   type_id: 0x9c602690
   full_name: "ufshcd_bkops_ctrl"
 }
@@ -315589,7 +315596,7 @@ elf_symbol {
   name: "ufshcd_disable_irq"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x9b5ff72b
+  crc: 0xe5d114b8
   type_id: 0x1178942c
   full_name: "ufshcd_disable_irq"
 }
@@ -315598,7 +315605,7 @@ elf_symbol {
   name: "ufshcd_dme_configure_adapt"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x24b93004
+  crc: 0x9ec1e1e7
   type_id: 0x9de56de8
   full_name: "ufshcd_dme_configure_adapt"
 }
@@ -315607,7 +315614,7 @@ elf_symbol {
   name: "ufshcd_dme_get_attr"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xf91d5aa8
+  crc: 0xacfbcf83
   type_id: 0x9f4a97c1
   full_name: "ufshcd_dme_get_attr"
 }
@@ -315616,7 +315623,7 @@ elf_symbol {
   name: "ufshcd_dme_rmw"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xea159f85
+  crc: 0x41945ed8
   type_id: 0x9f756016
   full_name: "ufshcd_dme_rmw"
 }
@@ -315625,7 +315632,7 @@ elf_symbol {
   name: "ufshcd_dme_set_attr"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xde7bac1f
+  crc: 0x493482bf
   type_id: 0x9f4d7f57
   full_name: "ufshcd_dme_set_attr"
 }
@@ -315634,7 +315641,7 @@ elf_symbol {
   name: "ufshcd_dump_regs"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x257d6874
+  crc: 0x75e85fc8
   type_id: 0x9f8d0629
   full_name: "ufshcd_dump_regs"
 }
@@ -315643,7 +315650,7 @@ elf_symbol {
   name: "ufshcd_enable_irq"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x9b5ff72b
+  crc: 0xe5d114b8
   type_id: 0x1178942c
   full_name: "ufshcd_enable_irq"
 }
@@ -315652,7 +315659,7 @@ elf_symbol {
   name: "ufshcd_fixup_dev_quirks"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xc6044155
+  crc: 0xf8a5f469
   type_id: 0x1183ff2d
   full_name: "ufshcd_fixup_dev_quirks"
 }
@@ -315661,7 +315668,7 @@ elf_symbol {
   name: "ufshcd_hold"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x9b5ff72b
+  crc: 0xe5d114b8
   type_id: 0x1178942c
   full_name: "ufshcd_hold"
 }
@@ -315679,7 +315686,7 @@ elf_symbol {
   name: "ufshcd_is_hba_active"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x9ee26b12
+  crc: 0xd560ffcb
   type_id: 0xff449ebb
   full_name: "ufshcd_is_hba_active"
 }
@@ -315688,7 +315695,7 @@ elf_symbol {
   name: "ufshcd_mcq_config_esi"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x4d4589df
+  crc: 0x8743c0dc
   type_id: 0x11ebebf2
   full_name: "ufshcd_mcq_config_esi"
 }
@@ -315697,7 +315704,7 @@ elf_symbol {
   name: "ufshcd_mcq_enable_esi"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x1cfe5ff5
+  crc: 0x089a6e18
   type_id: 0x1178942c
   full_name: "ufshcd_mcq_enable_esi"
 }
@@ -315706,7 +315713,7 @@ elf_symbol {
   name: "ufshcd_mcq_poll_cqe_lock"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x5b45a022
+  crc: 0xca6c232b
   type_id: 0x30f8e5d3
   full_name: "ufshcd_mcq_poll_cqe_lock"
 }
@@ -315715,7 +315722,7 @@ elf_symbol {
   name: "ufshcd_mcq_write_cqis"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x0764b0f5
+  crc: 0x964d33fc
   type_id: 0x12457cb4
   full_name: "ufshcd_mcq_write_cqis"
 }
@@ -315733,7 +315740,7 @@ elf_symbol {
   name: "ufshcd_parse_gear_limits"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x74a60f8b
+  crc: 0xbd4bb036
   type_id: 0x11b296f4
   full_name: "ufshcd_parse_gear_limits"
 }
@@ -315742,7 +315749,7 @@ elf_symbol {
   name: "ufshcd_pltfrm_init"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x808b6abf
+  crc: 0x9a769f68
   type_id: 0x928794d5
   full_name: "ufshcd_pltfrm_init"
 }
@@ -315760,7 +315767,7 @@ elf_symbol {
   name: "ufshcd_query_attr_retry"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xe0cc7be9
+  crc: 0x2e342afd
   type_id: 0x9ca39dee
   full_name: "ufshcd_query_attr_retry"
 }
@@ -315769,7 +315776,7 @@ elf_symbol {
   name: "ufshcd_query_flag_retry"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xba1a573b
+  crc: 0x0f4579cf
   type_id: 0x9c8699ca
   full_name: "ufshcd_query_flag_retry"
 }
@@ -315778,7 +315785,7 @@ elf_symbol {
   name: "ufshcd_read_desc_param"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x55422565
+  crc: 0x964845fc
   type_id: 0x9fb1e92c
   full_name: "ufshcd_read_desc_param"
 }
@@ -315787,7 +315794,7 @@ elf_symbol {
   name: "ufshcd_release"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x9b5ff72b
+  crc: 0xe5d114b8
   type_id: 0x1178942c
   full_name: "ufshcd_release"
 }
@@ -315796,7 +315803,7 @@ elf_symbol {
   name: "ufshcd_remove"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x9b5ff72b
+  crc: 0xe5d114b8
   type_id: 0x1178942c
   full_name: "ufshcd_remove"
 }
@@ -315886,7 +315893,7 @@ elf_symbol {
   name: "ufshcd_uic_hibern8_enter"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xdae9cca7
+  crc: 0xb526ba17
   type_id: 0x9c602690
   full_name: "ufshcd_uic_hibern8_enter"
 }
@@ -315895,7 +315902,7 @@ elf_symbol {
   name: "ufshcd_uic_hibern8_exit"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xdae9cca7
+  crc: 0xb526ba17
   type_id: 0x9c602690
   full_name: "ufshcd_uic_hibern8_exit"
 }
