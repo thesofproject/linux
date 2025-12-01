@@ -84,7 +84,7 @@
 	    "	.previous"						"\n"	\
 	    "	.section \"___kexporttab+" #sym "\",\"a\""		"\n"	\
 	    "	" __KSYM_ALIGN						"\n"	\
-	    "__kexporttab" #sym ":"					"\n"	\
+	    "__kexporttab_" #sym ":"					"\n"	\
 	    "	" __KSYM_REF(__kstrtab_ ##sym)				"\n"	\
 	    "	.previous"						"\n"	\
 	)
