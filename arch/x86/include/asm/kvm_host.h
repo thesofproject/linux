@@ -829,6 +829,14 @@ pop_pkvm_memcache(struct pkvm_memcache *mc, void *(*to_va)(phys_addr_t phys))
 	return head;
 }
 
+static inline void free_pkvm_memcache(struct pkvm_memcache *mc,
+				      void (*free)(struct pkvm_page_range range),
+				      void *(*to_va)(phys_addr_t phys))
+{
+	while (mc->count)
+		free(pop_pkvm_memcache(mc, to_va));
+}
+
 struct kvm_pkvm_vm {
 	int handle;
 };
@@ -2053,6 +2061,7 @@ extern phys_addr_t pkvm_mem_base;
 extern phys_addr_t pkvm_mem_size;
 void __init pkvm_reserve(void);
 void pkvm_init_debugfs(void);
+void kvm_free_pkvm_memcache(struct pkvm_memcache *mc);
 #else
 #define enable_pkvm		false
 static inline void __init pkvm_reserve(void) {}
