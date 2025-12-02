@@ -12,6 +12,8 @@
   __tracepoint_android_vh_ufs_wait_for_uic_cmd
   __traceiter_android_vh_ufs_transfer_rsp_status
   __tracepoint_android_vh_ufs_transfer_rsp_status
+  __traceiter_android_rvh_dpm_prepare
+  __tracepoint_android_rvh_dpm_prepare
   __tracepoint_ufshcd_profile_hibern8
   __traceiter_ufshcd_profile_hibern8
   __tracepoint_ufshcd_profile_clk_scaling
