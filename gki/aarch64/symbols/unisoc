@@ -73,11 +73,13 @@
   sysfs_emit
   system_cpucaps
   system_wq
+  __traceiter_android_vh_psi_event
   __traceiter_irq_handler_exit
   __traceiter_mm_vmscan_direct_reclaim_begin
   __traceiter_mm_vmscan_direct_reclaim_end
   __traceiter_softirq_entry
   __traceiter_softirq_exit
+  __tracepoint_android_vh_psi_event
   __tracepoint_irq_handler_exit
   __tracepoint_mm_vmscan_direct_reclaim_begin
   __tracepoint_mm_vmscan_direct_reclaim_end
