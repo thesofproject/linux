@@ -387,6 +387,14 @@ DECLARE_HOOK(android_vh_scx_set_cpus_allowed,
 DECLARE_HOOK(android_vh_scx_task_switch_finish,
 	TP_PROTO(struct task_struct *p, int enable),
 	TP_ARGS(p, enable));
+DECLARE_HOOK(android_vh_scx_task_can_run_on,
+	TP_PROTO(bool *disallow, struct task_struct *p, struct rq *rq),
+	TP_ARGS(disallow, p, rq));
+
+struct scx_exit_info;
+DECLARE_HOOK(android_vh_scx_exit_on_abnormal,
+	TP_PROTO(struct scx_exit_info *ei),
+	TP_ARGS(ei));
 DECLARE_HOOK(android_vh_switching_to_scx,
 	TP_PROTO(struct rq *rq, struct task_struct *p),
 	TP_ARGS(rq, p));

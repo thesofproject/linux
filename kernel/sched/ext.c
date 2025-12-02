@@ -1832,6 +1832,7 @@ static bool consume_dispatch_q(struct scx_sched *sch, struct rq *rq,
 			       struct scx_dispatch_q *dsq)
 {
 	struct task_struct *p;
+	bool disallow = false;
 retry:
 	/*
 	 * This retry loop can repeatedly race against scx_bypass() dequeueing
@@ -1854,6 +1855,9 @@ retry:
 	nldsq_for_each_task(p, dsq) {
 		struct rq *task_rq = task_rq(p);
 
+		trace_android_vh_scx_task_can_run_on(&disallow, p, rq);
+		if (disallow)
+			continue;
 		if (rq == task_rq) {
 			task_unlink_from_dsq(p, dsq);
 			move_local_task_to_local_dsq(p, 0, dsq, rq);
@@ -4453,6 +4457,7 @@ static void scx_error_irq_workfn(struct irq_work *irq_work)
 		scx_dump_state(ei, sch->ops.exit_dump_len);
 
 	kthread_queue_work(sch->helper, &sch->disable_work);
+	trace_android_vh_scx_exit_on_abnormal(ei);
 }
 
 static void scx_vexit(struct scx_sched *sch,
