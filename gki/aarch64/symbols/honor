@@ -24,3 +24,5 @@
   __traceiter_scsi_dispatch_cmd_start
   __tracepoint_scsi_dispatch_cmd_done
   __traceiter_scsi_dispatch_cmd_done
+  __tracepoint_android_vh_f2fs_printk
+  __traceiter_android_vh_f2fs_printk
