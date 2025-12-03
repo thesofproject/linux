@@ -4774,6 +4774,11 @@ pointer_reference {
   pointee_type_id: 0x1d1f0988
 }
 pointer_reference {
+  id: 0x0dd9b44e
+  kind: POINTER
+  pointee_type_id: 0x1d2637a7
+}
+pointer_reference {
   id: 0x0dd9ca98
   kind: POINTER
   pointee_type_id: 0x1d27ccfe
@@ -9832,6 +9837,11 @@ pointer_reference {
   id: 0x20297ce4
   kind: POINTER
   pointee_type_id: 0xaae5150f
+}
+pointer_reference {
+  id: 0x2032a2b7
+  kind: POINTER
+  pointee_type_id: 0xaa8a6c43
 }
 pointer_reference {
   id: 0x2035145b
@@ -20704,6 +20714,11 @@ pointer_reference {
   pointee_type_id: 0xe061253c
 }
 pointer_reference {
+  id: 0x328e2a92
+  kind: POINTER
+  pointee_type_id: 0xe0784cd6
+}
+pointer_reference {
   id: 0x32941b2b
   kind: POINTER
   pointee_type_id: 0xe0108a33
@@ -21197,6 +21212,11 @@ pointer_reference {
   id: 0x33867816
   kind: POINTER
   pointee_type_id: 0xe45906c7
+}
+pointer_reference {
+  id: 0x3388de4a
+  kind: POINTER
+  pointee_type_id: 0xe4639fb7
 }
 pointer_reference {
   id: 0x338b6c2e
@@ -29744,6 +29764,11 @@ qualified {
   qualified_type_id: 0xf170be41
 }
 qualified {
+  id: 0xe0784cd6
+  qualifier: CONST
+  qualified_type_id: 0xf1a685d1
+}
+qualified {
   id: 0xe0785a59
   qualifier: CONST
   qualified_type_id: 0xf1a6dfed
@@ -29947,6 +29972,11 @@ qualified {
   id: 0xe443eee6
   qualifier: CONST
   qualified_type_id: 0xe1480d10
+}
+qualified {
+  id: 0xe4639fb7
+  qualifier: CONST
+  qualified_type_id: 0xe1c9c854
 }
 qualified {
   id: 0xe46d5624
@@ -68979,6 +69009,12 @@ member {
   offset: 128
 }
 member {
+  id: 0xd4ad44a1
+  name: "driver"
+  type_id: 0xe3de788c
+  offset: 192
+}
+member {
   id: 0xd4ad451a
   name: "driver"
   type_id: 0xe3de788c
@@ -69042,6 +69078,12 @@ member {
   name: "driver_data"
   type_id: 0x42af4f5c
   offset: 256
+}
+member {
+  id: 0x6d08ae79
+  name: "driver_data"
+  type_id: 0x42af4f5c
+  offset: 64
 }
 member {
   id: 0x6d0f8d8a
@@ -91294,6 +91336,11 @@ member {
   offset: 96
 }
 member {
+  id: 0xc4f04fa0
+  name: "id_table"
+  type_id: 0x3388de4a
+}
+member {
   id: 0xc4f26b73
   name: "id_table"
   type_id: 0x31a2d17a
@@ -112415,6 +112462,12 @@ member {
   name: "mode"
   type_id: 0x81bb7781
   offset: 1280
+}
+member {
+  id: 0x872efc9a
+  name: "mode"
+  type_id: 0xb3e7bac9
+  offset: 16
 }
 member {
   id: 0x8740e6e7
@@ -135451,6 +135504,12 @@ member {
   type_id: 0x2e8c0d7b
 }
 member {
+  id: 0xd778984e
+  name: "probe"
+  type_id: 0x2e9f98e1
+  offset: 64
+}
+member {
   id: 0xd778cb02
   name: "probe"
   type_id: 0x2ec6e9a9
@@ -143480,6 +143539,12 @@ member {
   name: "remove"
   type_id: 0x0e200b74
   offset: 1216
+}
+member {
+  id: 0xb4ae00cc
+  name: "remove"
+  type_id: 0x0dd9b44e
+  offset: 128
 }
 member {
   id: 0xb4ae0703
@@ -164232,6 +164297,11 @@ member {
   name: "svid"
   type_id: 0x914dbfdc
   offset: 6336
+}
+member {
+  id: 0x0fd66cdf
+  name: "svid"
+  type_id: 0xe8034002
 }
 member {
   id: 0x89342aa2
@@ -231734,6 +231804,18 @@ struct_union {
   }
 }
 struct_union {
+  id: 0xaa8a6c43
+  kind: STRUCT
+  name: "typec_altmode_driver"
+  definition {
+    bytesize: 168
+    member_id: 0xc4f04fa0
+    member_id: 0xd778984e
+    member_id: 0xb4ae00cc
+    member_id: 0xd4ad44a1
+  }
+}
+struct_union {
   id: 0xeeb2f917
   kind: STRUCT
   name: "typec_altmode_ops"
@@ -231801,6 +231883,17 @@ struct_union {
     bytesize: 16
     member_id: 0x9639fcb2
     member_id: 0xfb64dce0
+  }
+}
+struct_union {
+  id: 0xe1c9c854
+  kind: STRUCT
+  name: "typec_device_id"
+  definition {
+    bytesize: 16
+    member_id: 0x0fd66cdf
+    member_id: 0x872efc9a
+    member_id: 0x6d08ae79
   }
 }
 struct_union {
@@ -260655,6 +260748,11 @@ function {
   parameter_id: 0xf435685e
 }
 function {
+  id: 0x1894f93e
+  return_type_id: 0x48b5725f
+  parameter_id: 0x2032a2b7
+}
+function {
   id: 0x18951485
   return_type_id: 0x48b5725f
   parameter_id: 0x2035145b
@@ -262797,6 +262895,11 @@ function {
   return_type_id: 0x48b5725f
   parameter_id: 0x35c3dd06
   parameter_id: 0x335d253d
+}
+function {
+  id: 0x1d2637a7
+  return_type_id: 0x48b5725f
+  parameter_id: 0x36f998d3
 }
 function {
   id: 0x1d27ccfe
@@ -268760,6 +268863,11 @@ function {
   parameter_id: 0x31c8b544
 }
 function {
+  id: 0x9058feb4
+  return_type_id: 0x6720d32f
+  parameter_id: 0x3760766d
+}
+function {
   id: 0x905d75b0
   return_type_id: 0x6720d32f
   parameter_id: 0x37765a7c
@@ -273715,6 +273823,12 @@ function {
   parameter_id: 0x2f3288e0
   parameter_id: 0xf435685e
   parameter_id: 0x0483e6f8
+}
+function {
+  id: 0x95a0d4f3
+  return_type_id: 0x6720d32f
+  parameter_id: 0x2032a2b7
+  parameter_id: 0x0b27dc43
 }
 function {
   id: 0x95a14791
@@ -285054,6 +285168,11 @@ function {
   parameter_id: 0x6720d32f
 }
 function {
+  id: 0xc446f809
+  return_type_id: 0x3760766d
+  parameter_id: 0x36f998d3
+}
+function {
   id: 0xc44c8212
   return_type_id: 0x3f37d9d5
   parameter_id: 0x347303b4
@@ -286656,6 +286775,11 @@ function {
   id: 0xf7820d73
   return_type_id: 0x6d7f5ff6
   parameter_id: 0x249959de
+}
+function {
+  id: 0xf7e1123f
+  return_type_id: 0x328e2a92
+  parameter_id: 0x36f998d3
 }
 function {
   id: 0xf7e2e2fa
@@ -290463,6 +290587,15 @@ elf_symbol {
   crc: 0x553d6d40
   type_id: 0x914993bc
   full_name: "__tty_insert_flip_string_flags"
+}
+elf_symbol {
+  id: 0xce6c6f05
+  name: "__typec_altmode_register_driver"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xee820b91
+  type_id: 0x95a0d4f3
+  full_name: "__typec_altmode_register_driver"
 }
 elf_symbol {
   id: 0xb882f62e
@@ -316303,6 +316436,60 @@ elf_symbol {
   full_name: "tty_termios_encode_baud_rate"
 }
 elf_symbol {
+  id: 0x15f59e38
+  name: "typec_altmode2port"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x88aa49a2
+  type_id: 0xc446f809
+  full_name: "typec_altmode2port"
+}
+elf_symbol {
+  id: 0xf4ad9ab3
+  name: "typec_altmode_enter"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xdb952f20
+  type_id: 0x90ddcdd6
+  full_name: "typec_altmode_enter"
+}
+elf_symbol {
+  id: 0x848c1a1a
+  name: "typec_altmode_exit"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xa12c0af1
+  type_id: 0x903e851b
+  full_name: "typec_altmode_exit"
+}
+elf_symbol {
+  id: 0x1f42d24c
+  name: "typec_altmode_get_partner"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x743955fa
+  type_id: 0xf7e1123f
+  full_name: "typec_altmode_get_partner"
+}
+elf_symbol {
+  id: 0x0d2420a7
+  name: "typec_altmode_unregister_driver"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x020ee97f
+  type_id: 0x1894f93e
+  full_name: "typec_altmode_unregister_driver"
+}
+elf_symbol {
+  id: 0xab1410be
+  name: "typec_get_negotiated_svdm_version"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x7579149c
+  type_id: 0x9058feb4
+  full_name: "typec_get_negotiated_svdm_version"
+}
+elf_symbol {
   id: 0x8fafe0a6
   name: "typec_mux_get_drvdata"
   is_defined: true
@@ -320276,6 +320463,7 @@ interface {
   symbol_id: 0x483c06ba
   symbol_id: 0xc9969dba
   symbol_id: 0x0f3e6156
+  symbol_id: 0xce6c6f05
   symbol_id: 0xb882f62e
   symbol_id: 0x7c261545
   symbol_id: 0xf497de36
@@ -323145,6 +323333,12 @@ interface {
   symbol_id: 0xdcd44915
   symbol_id: 0x40ef0583
   symbol_id: 0x4cc18d95
+  symbol_id: 0x15f59e38
+  symbol_id: 0xf4ad9ab3
+  symbol_id: 0x848c1a1a
+  symbol_id: 0x1f42d24c
+  symbol_id: 0x0d2420a7
+  symbol_id: 0xab1410be
   symbol_id: 0x8fafe0a6
   symbol_id: 0x6d4f7368
   symbol_id: 0x29215b38
