@@ -305,6 +305,7 @@ filegroup(
     name = "x86_64_additional_kmi_symbol_lists",
     srcs = [
         # keep sorted
+        "gki/x86_64/symbols/desktop",
         "gki/x86_64/symbols/kunit",
         "gki/x86_64/symbols/virtual_device",
     ],
