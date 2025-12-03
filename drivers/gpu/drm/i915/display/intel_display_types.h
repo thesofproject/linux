@@ -637,6 +637,7 @@ struct intel_plane_state {
 		enum drm_color_encoding color_encoding;
 		enum drm_color_range color_range;
 		enum drm_scaling_filter scaling_filter;
+		struct drm_property_blob *ctm;
 	} hw;
 
 	struct i915_vma *ggtt_vma;
@@ -1341,6 +1342,9 @@ struct intel_crtc_state {
 
 	/* LOBF flag */
 	bool has_lobf;
+
+	/* to track changes in plane color blocks */
+	bool plane_color_changed;
 };
 
 enum intel_pipe_crc_source {
