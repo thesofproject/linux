@@ -25,6 +25,17 @@ use crate::{
     BinderReturnWriter, DArc, DLArc, DTRWrap, DeliverToRead,
 };
 
+use core::mem::offset_of;
+use kernel::bindings::rb_transaction_layout;
+pub(crate) const TRANSACTION_LAYOUT: rb_transaction_layout = rb_transaction_layout {
+    debug_id: offset_of!(Transaction, debug_id),
+    code: offset_of!(Transaction, code),
+    flags: offset_of!(Transaction, flags),
+    from_thread: offset_of!(Transaction, from),
+    to_proc: offset_of!(Transaction, to),
+    target_node: offset_of!(Transaction, target_node),
+};
+
 #[pin_data(PinnedDrop)]
 pub(crate) struct Transaction {
     pub(crate) debug_id: usize,
@@ -280,12 +291,16 @@ impl Transaction {
 
         if oneway {
             if let Some(target_node) = self.target_node.clone() {
+                crate::trace::trace_transaction(false, &self, None);
                 if process_inner.is_frozen.is_frozen() {
                     process_inner.async_recv = true;
                     if self.flags & TF_UPDATE_TXN != 0 {
                         if let Some(t_outdated) =
                             target_node.take_outdated_transaction(&self, &mut process_inner)
                         {
+                            crate::trace::trace_transaction_update_buffer_release(
+                                t_outdated.debug_id,
+                            );
                             // Save the transaction to be dropped after locks are released.
                             _t_outdated = t_outdated;
                         }
@@ -317,11 +332,13 @@ impl Transaction {
         }
 
         let res = if let Some(thread) = self.find_target_thread() {
+            crate::trace::trace_transaction(false, &self, Some(&thread.task));
             match thread.push_work(self) {
                 PushWorkRes::Ok => Ok(()),
                 PushWorkRes::FailedDead(me) => Err((BinderError::new_dead(), me)),
             }
         } else {
+            crate::trace::trace_transaction(false, &self, None);
             process_inner.push_work(self)
         };
         drop(process_inner);
@@ -451,6 +468,8 @@ impl DeliverToRead for Transaction {
 
         self.drop_outstanding_txn();
 
+        crate::trace::trace_transaction_received(&self);
+
         // When this is not a reply and not a oneway transaction, update `current_transaction`. If
         // it's a reply, `current_transaction` has already been updated appropriately.
         if self.target_node.is_some() && tr_sec.transaction_data.flags & TF_ONE_WAY == 0 {
@@ -484,6 +503,8 @@ impl DeliverToRead for Transaction {
         if self.set_priority_called.swap(true, Ordering::Relaxed) {
             return;
         }
+
+        crate::trace::trace_transaction_thread_selected(self, to_thread);
 
         let node_prio = target_node.node_prio();
         let mut desired = self.priority;
