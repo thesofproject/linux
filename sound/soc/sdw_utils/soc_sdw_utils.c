@@ -830,23 +830,6 @@ struct asoc_sdw_codec_info *asoc_sdw_find_codec_info_acpi(const u8 *acpi_id)
 }
 EXPORT_SYMBOL_NS(asoc_sdw_find_codec_info_acpi, "SND_SOC_SDW_UTILS");
 
-struct asoc_sdw_codec_info *asoc_sdw_find_codec_info_dai(const char *dai_name, int *dai_index)
-{
-	int i, j;
-
-	for (i = 0; i < ARRAY_SIZE(codec_info_list); i++) {
-		for (j = 0; j < codec_info_list[i].dai_num; j++) {
-			if (!strcmp(codec_info_list[i].dais[j].dai_name, dai_name)) {
-				*dai_index = j;
-				return &codec_info_list[i];
-			}
-		}
-	}
-
-	return NULL;
-}
-EXPORT_SYMBOL_NS(asoc_sdw_find_codec_info_dai, "SND_SOC_SDW_UTILS");
-
 static int asoc_sdw_find_codec_info_dai_index(const struct asoc_sdw_codec_info *codec_info,
 					      const char *dai_name)
 {

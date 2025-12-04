@@ -139,9 +139,6 @@ struct asoc_sdw_codec_info *asoc_sdw_find_codec_info_part(const u64 adr);
 
 struct asoc_sdw_codec_info *asoc_sdw_find_codec_info_acpi(const u8 *acpi_id);
 
-struct asoc_sdw_codec_info *asoc_sdw_find_codec_info_dai(const char *dai_name,
-							 int *dai_index);
-
 struct snd_soc_dai_link *asoc_sdw_mc_find_codec_dai_used(struct snd_soc_card *card,
 							 const char *dai_name);
 
