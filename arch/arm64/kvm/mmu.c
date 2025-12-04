@@ -2956,13 +2956,13 @@ int kvm_arch_prepare_memory_region(struct kvm *kvm,
 	int ret = 0;
 
 	if (is_protected_kvm_enabled()) {
-		/* In protected mode, cannot modify memslots once a VM has run. */
+		/* In protected mode, cannot modify memslots once a pVM has run. */
 		if ((change == KVM_MR_DELETE || change == KVM_MR_MOVE) &&
-		    pkvm_hyp_vm_is_created(kvm)) {
+		    pkvm_hyp_vm_is_created(kvm) && kvm_vm_is_protected(kvm)) {
 			return -EPERM;
 		}
 
-		if (new &&
+		if (new && kvm_vm_is_protected(kvm) &&
 		    new->flags & (KVM_MEM_LOG_DIRTY_PAGES | KVM_MEM_READONLY)) {
 			return -EPERM;
 		}
