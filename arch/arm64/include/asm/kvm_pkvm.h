@@ -77,6 +77,33 @@ static inline bool kvm_pkvm_ioctl_allowed(struct kvm *kvm, unsigned int ioctl)
 	return kvm_pkvm_ext_allowed(kvm, ext);
 }
 
+static inline unsigned long pvm_supported_vcpu_features(struct kvm *kvm)
+{
+	unsigned long features = 0;
+
+	set_bit(KVM_ARM_VCPU_POWER_OFF, &features);
+
+	if (kvm_pkvm_ext_allowed(kvm, KVM_CAP_ARM_EL1_32BIT))
+		set_bit(KVM_ARM_VCPU_EL1_32BIT, &features);
+
+	if (kvm_pkvm_ext_allowed(kvm, KVM_CAP_ARM_PSCI_0_2))
+		set_bit(KVM_ARM_VCPU_PSCI_0_2, &features);
+
+	if (kvm_pkvm_ext_allowed(kvm, KVM_CAP_ARM_PMU_V3))
+		set_bit(KVM_ARM_VCPU_PMU_V3, &features);
+
+	if (kvm_pkvm_ext_allowed(kvm, KVM_CAP_ARM_SVE))
+		set_bit(KVM_ARM_VCPU_SVE, &features);
+
+	if (kvm_pkvm_ext_allowed(kvm, KVM_CAP_ARM_PTRAUTH_ADDRESS) &&
+	    kvm_pkvm_ext_allowed(kvm, KVM_CAP_ARM_PTRAUTH_GENERIC)) {
+		set_bit(KVM_ARM_VCPU_PTRAUTH_ADDRESS, &features);
+		set_bit(KVM_ARM_VCPU_PTRAUTH_GENERIC, &features);
+	}
+
+	return features;
+}
+
 extern struct memblock_region kvm_nvhe_sym(hyp_memory)[];
 extern unsigned int kvm_nvhe_sym(hyp_memblock_nr);
 
