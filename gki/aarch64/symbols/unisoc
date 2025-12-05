@@ -73,6 +73,16 @@
   sysfs_emit
   system_cpucaps
   system_wq
+  __traceiter_irq_handler_exit
+  __traceiter_mm_vmscan_direct_reclaim_begin
+  __traceiter_mm_vmscan_direct_reclaim_end
+  __traceiter_softirq_entry
+  __traceiter_softirq_exit
+  __tracepoint_irq_handler_exit
+  __tracepoint_mm_vmscan_direct_reclaim_begin
+  __tracepoint_mm_vmscan_direct_reclaim_end
+  __tracepoint_softirq_entry
+  __tracepoint_softirq_exit
   unregister_chrdev_region
   usb_phy_get_charger_current
   utf8_data_table
@@ -80,3 +90,4 @@
   vsscanf
   __wake_up
   __warn_printk
+
