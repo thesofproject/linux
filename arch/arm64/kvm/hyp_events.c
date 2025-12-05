@@ -323,6 +323,7 @@ static const struct file_operations hyp_ftrace_notrace_fops = {
 #define HYP_FTRACE_SKIP_FUNC (-1ULL)
 
 static void hyp_ftrace_funcs_init(unsigned long *funcs, unsigned long *funcs_end,
+				  unsigned long hyp_text_start, unsigned long hyp_text_end,
 				  unsigned long hyp_kern_offset, bool clear)
 {
 	unsigned long *func;
@@ -342,6 +343,10 @@ static void hyp_ftrace_funcs_init(unsigned long *funcs, unsigned long *funcs_end
 
 		sprint_symbol_no_offset(sym, kern_addr);
 		if (!strncmp(sym, "__kvm_nvhe_$", 12))
+			goto skip;
+
+		if (WARN(*func < hyp_text_start || *func >= hyp_text_end,
+			 "Symbol %s not in the text section", sym))
 			goto skip;
 
 		ret = hyp_ftrace_init_lr_ins(kern_addr);
@@ -370,21 +375,23 @@ next:
 	}
 }
 
+#define hyp_section_addr(x) kern_hyp_va((unsigned long)lm_alias(x))
+
 static void hyp_ftrace_init(void)
 {
-	unsigned long hyp_base;
-
 	hyp_ftrace_funcs_pg = (unsigned long *)__get_free_page(GFP_KERNEL);
 	if (!hyp_ftrace_funcs_pg)
 		return;
 
 	memset(hyp_ftrace_funcs_pg, 0, PAGE_SIZE);
 
-	hyp_base = (unsigned long)kern_hyp_va(lm_alias((unsigned long)__hyp_text_start));
-
 	hyp_ftrace_funcs_init(__hyp_patchable_function_entries_start,
 			      __hyp_patchable_function_entries_end,
-			      (unsigned long)__hyp_text_start - hyp_base, false);
+			      hyp_section_addr(__hyp_text_start),
+			      hyp_section_addr(__hyp_text_end),
+			      (unsigned long)__hyp_text_start -
+			      (unsigned long)hyp_section_addr(__hyp_text_start),
+			      false);
 
 	/* For the hypervisor to compute its hyp_kern_offset */
 	kvm_nvhe_sym(__hyp_text_start_kern) = (unsigned long)__hyp_text_start;
@@ -444,6 +451,8 @@ static void hyp_ftrace_init_mod(struct pkvm_el2_module *mod)
 
 	hyp_ftrace_funcs_init(mod->patchable_function_entries.start,
 			      mod->patchable_function_entries.end,
+			      (unsigned long)mod->text.start,
+			      (unsigned long)mod->text.end,
 			      mod->sections.start - mod->hyp_va,
 			      ret);
 
