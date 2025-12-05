@@ -665,7 +665,11 @@ static void sync_hyp_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu, u32 exit_reason)
 		BUG();
 	}
 
-	vcpu_clear_flag(host_vcpu, PC_UPDATE_REQ);
+	if (pkvm_hyp_vcpu_is_protected(hyp_vcpu))
+		vcpu_clear_flag(host_vcpu, PC_UPDATE_REQ);
+	else
+		host_vcpu->arch.iflags = hyp_vcpu->vcpu.arch.iflags;
+
 	hyp_vcpu->exit_code = exit_reason;
 }
 
