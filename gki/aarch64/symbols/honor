@@ -3,6 +3,11 @@
   __traceiter_android_vh_tcp_write_timeout_estab_retrans
   __tracepoint_android_vh_tcp_write_timeout_estab_retrans
   lruvec_page_state
+  arch_vma_name
+  __pmd_trans_huge_lock
+  anon_vma_name
+  vm_normal_page
+  pmd_clear_bad
   __traceiter_android_vh_mem_cgroup_free
   __tracepoint_android_vh_mem_cgroup_free
   __traceiter_android_vh_mem_cgroup_alloc
@@ -13,6 +18,36 @@
   __tracepoint_android_vh_mem_cgroup_css_offline
   __traceiter_android_vh_mem_cgroup_css_online
   __tracepoint_android_vh_mem_cgroup_css_online
+  __traceiter_android_vh_meminfo_proc_show
+  __tracepoint_android_vh_meminfo_proc_show
+  __traceiter_android_vh_exit_mm
+  __tracepoint_android_vh_exit_mm
+  __traceiter_android_vh_show_mem
+  __tracepoint_android_vh_show_mem
+  __traceiter_android_vh_print_slabinfo_header
+  __tracepoint_android_vh_print_slabinfo_header
+  __traceiter_android_vh_cache_show
+  __tracepoint_android_vh_cache_show
+  __traceiter_android_vh_mglru_should_abort_scan
+  __tracepoint_android_vh_mglru_should_abort_scan
+  __traceiter_android_vh_tune_swappiness
+  __tracepoint_android_vh_tune_swappiness
+  __traceiter_android_vh_async_psi_bypass
+  __tracepoint_android_vh_async_psi_bypass
+  __traceiter_android_rvh_vmalloc_node_bypass
+  __tracepoint_android_rvh_vmalloc_node_bypass
+  __traceiter_android_rvh_vfree_bypass
+  __tracepoint_android_rvh_vfree_bypass
+  __traceiter_android_vh_should_fault_around
+  __tracepoint_android_vh_should_fault_around
+  __traceiter_android_vh_process_madvise_begin
+  __tracepoint_android_vh_process_madvise_begin
+  __traceiter_android_vh_process_madvise_iter
+  __tracepoint_android_vh_process_madvise_iter
+  __traceiter_android_vh_process_madvise
+  __tracepoint_android_vh_process_madvise
+  __traceiter_android_vh_madvise_swapin_walk_pmd_entry
+  __tracepoint_android_vh_madvise_swapin_walk_pmd_entry
   __traceiter_android_vh_ufs_eh_timed_out
   __tracepoint_android_vh_ufs_eh_timed_out
   __traceiter_android_vh_ufs_link_startup
