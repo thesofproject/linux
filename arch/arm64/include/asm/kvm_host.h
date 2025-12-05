@@ -252,6 +252,7 @@ struct kvm_protected_vm {
 	pkvm_handle_t handle;
 	struct kvm_hyp_memcache teardown_mc;
 	struct kvm_hyp_memcache stage2_teardown_mc;
+	gpa_t pvmfw_load_addr;
 	bool is_protected;
 	bool is_created;
 };

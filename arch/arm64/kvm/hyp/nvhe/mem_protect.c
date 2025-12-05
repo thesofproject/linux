@@ -1167,6 +1167,14 @@ int __pkvm_host_donate_guest(u64 pfn, u64 gfn, struct pkvm_hyp_vcpu *vcpu)
 		goto unlock;
 
 	WARN_ON(host_stage2_set_owner_locked(phys, PAGE_SIZE, PKVM_ID_GUEST));
+
+	if (pkvm_ipa_range_has_pvmfw(vm, ipa, ipa + PAGE_SIZE)) {
+		ret = pkvm_load_pvmfw_pages(vm, ipa, phys, PAGE_SIZE);
+		if (WARN_ON(ret)) {
+			goto unlock;
+		}
+       }
+
 	WARN_ON(kvm_pgtable_stage2_map(&vm->pgt, ipa, PAGE_SIZE, phys,
 				       pkvm_mkstate(KVM_PGTABLE_PROT_RWX, PKVM_PAGE_OWNED),
 				       &vcpu->vcpu.arch.pkvm_memcache, 0));
