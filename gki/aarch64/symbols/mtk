@@ -1,1 +1,7 @@
 [abi_symbol_list]
+  __traceiter_android_vh_sched_pelt_multiplier
+  __traceiter_android_rvh_post_init_entity_util_avg
+  __traceiter_android_rvh_cpu_util_cfs_boost
+  __tracepoint_android_vh_sched_pelt_multiplier
+  __tracepoint_android_rvh_post_init_entity_util_avg
+  __tracepoint_android_rvh_cpu_util_cfs_boost
