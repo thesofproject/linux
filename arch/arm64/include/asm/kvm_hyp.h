@@ -152,6 +152,4 @@ extern unsigned int kvm_nvhe_sym(kvm_arm_vmid_bits);
 extern unsigned int kvm_nvhe_sym(kvm_sve_max_vl);
 extern unsigned int kvm_nvhe_sym(kvm_host_sve_max_vl);
 
-extern bool kvm_nvhe_sym(__pkvm_modules_enabled);
-
 #endif /* __ARM64_KVM_HYP_H__ */

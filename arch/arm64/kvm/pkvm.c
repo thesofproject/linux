@@ -765,7 +765,13 @@ int pkvm_pgtable_stage2_split(struct kvm_pgtable *pgt, u64 addr, u64 size,
 #ifdef CONFIG_MODULES
 static int __init early_pkvm_enable_modules(char *arg)
 {
-	kvm_nvhe_sym(__pkvm_modules_enabled) = true;
+	extern unsigned long kvm_nvhe_sym(pkvm_priv_hcall_limit);
+
+	/*
+	 * Move the limit to allow module loading HVCs. It will be moved back to
+	 * its original position in __pkvm_close_module_registration().
+	 */
+	kvm_nvhe_sym(pkvm_priv_hcall_limit) = __KVM_HOST_SMCCC_FUNC___pkvm_alloc_module_va;
 
 	return 0;
 }
