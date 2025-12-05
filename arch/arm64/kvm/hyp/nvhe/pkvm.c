@@ -1850,7 +1850,10 @@ bool kvm_handle_pvm_hvc64(struct kvm_vcpu *vcpu, u64 *exit_code)
 			return pkvm_forward_trng(vcpu);
 		break;
 	default:
-		return pkvm_handle_psci(hyp_vcpu);
+		if (is_ffa_call(fn))
+			return kvm_guest_ffa_handler(hyp_vcpu, exit_code);
+		else
+			return pkvm_handle_psci(hyp_vcpu);
 	}
 
 	smccc_set_retval(vcpu, val[0], val[1], val[2], val[3]);
