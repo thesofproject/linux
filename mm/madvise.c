@@ -32,6 +32,7 @@
 #include <linux/swapops.h>
 #include <linux/shmem_fs.h>
 #include <linux/mmu_notifier.h>
+#include <trace/hooks/mm.h>
 
 #include <asm/tlb.h>
 
@@ -2012,6 +2013,10 @@ static ssize_t vector_madvise(struct mm_struct *mm, struct iov_iter *iter,
 		size_t len_in = iter_iov_len(iter);
 		int error;
 
+		trace_android_vh_process_madvise_iter(mm->owner, behavior, &ret);
+		if (ret < 0)
+			break;
+
 		if (madvise_should_skip(start, len_in, behavior, &error))
 			ret = error;
 		else
@@ -2105,6 +2110,8 @@ SYSCALL_DEFINE5(process_madvise, int, pidfd, const struct iovec __user *, vec,
 		ret = -EPERM;
 		goto release_mm;
 	}
+
+	trace_android_vh_process_madvise_begin(task, behavior);
 
 	ret = vector_madvise(mm, &iter, behavior);
 
