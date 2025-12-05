@@ -343,7 +343,6 @@ static void pkvm_init_features_from_host(struct pkvm_hyp_vm *hyp_vm, const struc
 {
 	struct kvm *kvm = &hyp_vm->kvm;
 	unsigned long host_arch_flags = READ_ONCE(host_kvm->arch.flags);
-	DECLARE_BITMAP(allowed_features, KVM_VCPU_MAX_FEATURES);
 
 	/* CTR_EL0 is always under host control, even for protected VMs. */
 	hyp_vm->kvm.arch.ctr_el0 = host_kvm->arch.ctr_el0;
@@ -363,29 +362,14 @@ static void pkvm_init_features_from_host(struct pkvm_hyp_vm *hyp_vm, const struc
 		return;
 	}
 
-	if (kvm_pkvm_ext_allowed(kvm, KVM_CAP_ARM_MTE))
-		kvm->arch.flags |= host_arch_flags & BIT(KVM_ARCH_FLAG_MTE_ENABLED);
+	kvm->arch.vcpu_features[0] = pvm_supported_vcpu_features(kvm) &
+				     host_kvm->arch.vcpu_features[0];
 
-	bitmap_zero(allowed_features, KVM_VCPU_MAX_FEATURES);
+	if (kvm_pkvm_ext_allowed(kvm, KVM_CAP_ARM_SVE) && kvm_has_sve(host_kvm))
+		set_bit(KVM_ARCH_FLAG_GUEST_HAS_SVE, &kvm->arch.flags);
 
-	set_bit(KVM_ARM_VCPU_PSCI_0_2, allowed_features);
-
-	if (kvm_pkvm_ext_allowed(kvm, KVM_CAP_ARM_PMU_V3))
-		set_bit(KVM_ARM_VCPU_PMU_V3, allowed_features);
-
-	if (kvm_pkvm_ext_allowed(kvm, KVM_CAP_ARM_PTRAUTH_ADDRESS))
-		set_bit(KVM_ARM_VCPU_PTRAUTH_ADDRESS, allowed_features);
-
-	if (kvm_pkvm_ext_allowed(kvm, KVM_CAP_ARM_PTRAUTH_GENERIC))
-		set_bit(KVM_ARM_VCPU_PTRAUTH_GENERIC, allowed_features);
-
-	if (kvm_pkvm_ext_allowed(kvm, KVM_CAP_ARM_SVE)) {
-		set_bit(KVM_ARM_VCPU_SVE, allowed_features);
-		kvm->arch.flags |= host_arch_flags & BIT(KVM_ARCH_FLAG_GUEST_HAS_SVE);
-	}
-
-	bitmap_and(kvm->arch.vcpu_features, host_kvm->arch.vcpu_features,
-		   allowed_features, KVM_VCPU_MAX_FEATURES);
+	if (kvm_pkvm_ext_allowed(kvm, KVM_CAP_ARM_MTE) && kvm_has_mte(host_kvm))
+		set_bit(KVM_ARCH_FLAG_MTE_ENABLED, &kvm->arch.flags);
 }
 
 static int pkvm_vcpu_init_psci(struct pkvm_hyp_vcpu *hyp_vcpu)
