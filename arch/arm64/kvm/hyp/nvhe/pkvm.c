@@ -211,12 +211,8 @@ static pkvm_handle_t idx_to_vm_handle(unsigned int idx)
 	return idx + HANDLE_OFFSET;
 }
 
-/*
- * Spinlock for protecting state related to the VM table. Protects writes
- * to 'vm_table', 'nr_table_entries', and other per-vm state on initialization.
- * Also protects reads and writes to 'last_hyp_vcpu_lookup'.
- */
-DEFINE_HYP_SPINLOCK(vm_table_lock);
+/* Rwlock for protecting state related to the VM table. */
+DEFINE_HYP_RWLOCK(vm_table_lock);
 
 /*
  * A table that tracks all VMs in protected mode.
@@ -257,7 +253,7 @@ struct pkvm_hyp_vcpu *pkvm_load_hyp_vcpu(pkvm_handle_t handle,
 	if (__this_cpu_read(loaded_hyp_vcpu))
 		return NULL;
 
-	hyp_spin_lock(&vm_table_lock);
+	hyp_read_lock(&vm_table_lock);
 	hyp_vm = get_vm_by_handle(handle);
 	if (!hyp_vm || hyp_vm->is_dying || hyp_vm->kvm.created_vcpus <= vcpu_idx)
 		goto unlock;
@@ -267,15 +263,15 @@ struct pkvm_hyp_vcpu *pkvm_load_hyp_vcpu(pkvm_handle_t handle,
 		goto unlock;
 
 	/* Ensure vcpu isn't loaded on more than one cpu simultaneously. */
-	if (unlikely(hyp_vcpu->loaded_hyp_vcpu)) {
+	if (unlikely(cmpxchg_relaxed(&hyp_vcpu->loaded_hyp_vcpu, NULL,
+				     this_cpu_ptr(&loaded_hyp_vcpu)))) {
 		hyp_vcpu = NULL;
 		goto unlock;
 	}
 
-	hyp_vcpu->loaded_hyp_vcpu = this_cpu_ptr(&loaded_hyp_vcpu);
 	hyp_page_ref_inc(hyp_virt_to_page(hyp_vm));
 unlock:
-	hyp_spin_unlock(&vm_table_lock);
+	hyp_read_unlock(&vm_table_lock);
 
 	if (hyp_vcpu)
 		__this_cpu_write(loaded_hyp_vcpu, hyp_vcpu);
@@ -286,11 +282,22 @@ void pkvm_put_hyp_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu)
 {
 	struct pkvm_hyp_vm *hyp_vm = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
 
-	hyp_spin_lock(&vm_table_lock);
-	hyp_vcpu->loaded_hyp_vcpu = NULL;
 	__this_cpu_write(loaded_hyp_vcpu, NULL);
+
+	/*
+	 * Clearing the 'loaded_hyp_vcpu' field allows the 'hyp_vcpu' to
+	 * be loaded by another physical CPU, so make sure we're done
+	 * with the vCPU before letting somebody else play with it.
+	 */
+	smp_store_release(&hyp_vcpu->loaded_hyp_vcpu, NULL);
+
+	/*
+	 * We don't hold the 'vm_table_lock'. Once the refcount hits
+	 * zero, VM teardown can destroy the VM's data structures and
+	 * so this must come last.
+	 */
+	smp_wmb();
 	hyp_page_ref_dec(hyp_virt_to_page(hyp_vm));
-	hyp_spin_unlock(&vm_table_lock);
 }
 
 struct pkvm_hyp_vcpu *pkvm_get_loaded_hyp_vcpu(void)
@@ -303,20 +310,18 @@ struct pkvm_hyp_vm *get_pkvm_hyp_vm(pkvm_handle_t handle)
 {
 	struct pkvm_hyp_vm *hyp_vm;
 
-	hyp_spin_lock(&vm_table_lock);
+	hyp_read_lock(&vm_table_lock);
 	hyp_vm = get_vm_by_handle(handle);
 	if (hyp_vm)
 		hyp_page_ref_inc(hyp_virt_to_page(hyp_vm));
-	hyp_spin_unlock(&vm_table_lock);
+	hyp_read_unlock(&vm_table_lock);
 
 	return hyp_vm;
 }
 
 void put_pkvm_hyp_vm(struct pkvm_hyp_vm *hyp_vm)
 {
-	hyp_spin_lock(&vm_table_lock);
 	hyp_page_ref_dec(hyp_virt_to_page(hyp_vm));
-	hyp_spin_unlock(&vm_table_lock);
 }
 
 struct pkvm_hyp_vm *get_np_pkvm_hyp_vm(pkvm_handle_t handle)
@@ -563,7 +568,7 @@ static int allocate_vm_table_entry(void)
 {
 	int idx;
 
-	hyp_assert_lock_held(&vm_table_lock);
+	hyp_assert_write_lock_held(&vm_table_lock);
 
 	/*
 	 * Initializing protected state might have failed, yet a malicious
@@ -587,7 +592,7 @@ static int __insert_vm_table_entry(pkvm_handle_t handle,
 {
 	unsigned int idx;
 
-	hyp_assert_lock_held(&vm_table_lock);
+	hyp_assert_write_lock_held(&vm_table_lock);
 
 	/*
 	 * Initializing protected state might have failed, yet a malicious
@@ -619,9 +624,9 @@ static int insert_vm_table_entry(pkvm_handle_t handle,
 {
 	int ret;
 
-	hyp_spin_lock(&vm_table_lock);
+	hyp_write_lock(&vm_table_lock);
 	ret = __insert_vm_table_entry(handle, hyp_vm);
-	hyp_spin_unlock(&vm_table_lock);
+	hyp_write_unlock(&vm_table_lock);
 
 	return ret;
 }
@@ -631,7 +636,7 @@ static int insert_vm_table_entry(pkvm_handle_t handle,
  */
 static void remove_vm_table_entry(pkvm_handle_t handle)
 {
-	hyp_assert_lock_held(&vm_table_lock);
+	hyp_assert_write_lock_held(&vm_table_lock);
 	vm_table[vm_handle_to_idx(handle)] = NULL;
 }
 
@@ -698,9 +703,9 @@ int __pkvm_reserve_vm(void)
 {
 	int ret;
 
-	hyp_spin_lock(&vm_table_lock);
+	hyp_write_lock(&vm_table_lock);
 	ret = allocate_vm_table_entry();
-	hyp_spin_unlock(&vm_table_lock);
+	hyp_write_unlock(&vm_table_lock);
 
 	if (ret < 0)
 		return ret;
@@ -719,10 +724,10 @@ void __pkvm_unreserve_vm(pkvm_handle_t handle)
 	if (unlikely(!vm_table))
 		return;
 
-	hyp_spin_lock(&vm_table_lock);
+	hyp_write_lock(&vm_table_lock);
 	if (likely(idx < KVM_MAX_PVMS && vm_table[idx] == RESERVED_ENTRY))
 		remove_vm_table_entry(handle);
-	hyp_spin_unlock(&vm_table_lock);
+	hyp_write_unlock(&vm_table_lock);
 }
 
 /*
@@ -829,7 +834,7 @@ int __pkvm_init_vcpu(pkvm_handle_t handle, struct kvm_vcpu *host_vcpu,
 	if (!hyp_vcpu)
 		return -ENOMEM;
 
-	hyp_spin_lock(&vm_table_lock);
+	hyp_write_lock(&vm_table_lock);
 
 	hyp_vm = get_vm_by_handle(handle);
 	if (!hyp_vm) {
@@ -854,7 +859,7 @@ int __pkvm_init_vcpu(pkvm_handle_t handle, struct kvm_vcpu *host_vcpu,
 
 	hyp_vm->vcpus[idx] = hyp_vcpu;
 unlock:
-	hyp_spin_unlock(&vm_table_lock);
+	hyp_write_unlock(&vm_table_lock);
 
 	if (ret)
 		unmap_donated_memory(hyp_vcpu, sizeof(*hyp_vcpu));
@@ -878,7 +883,7 @@ int __pkvm_reclaim_dying_guest_page(pkvm_handle_t handle, u64 gfn)
 	struct pkvm_hyp_vm *hyp_vm;
 	int ret = -EINVAL;
 
-	hyp_spin_lock(&vm_table_lock);
+	hyp_read_lock(&vm_table_lock);
 	hyp_vm = get_vm_by_handle(handle);
 	if (!hyp_vm || !hyp_vm->is_dying)
 		goto unlock;
@@ -889,7 +894,7 @@ int __pkvm_reclaim_dying_guest_page(pkvm_handle_t handle, u64 gfn)
 
 	drain_hyp_pool(hyp_vm, &hyp_vm->host_kvm->arch.pkvm.teardown_mc);
 unlock:
-	hyp_spin_unlock(&vm_table_lock);
+	hyp_read_unlock(&vm_table_lock);
 
 	return ret;
 }
@@ -899,7 +904,7 @@ int __pkvm_start_teardown_vm(pkvm_handle_t handle)
 	struct pkvm_hyp_vm *hyp_vm;
 	int ret = 0;
 
-	hyp_spin_lock(&vm_table_lock);
+	hyp_read_lock(&vm_table_lock);
 	hyp_vm = get_vm_by_handle(handle);
 	if (!hyp_vm) {
 		ret = -ENOENT;
@@ -914,7 +919,7 @@ int __pkvm_start_teardown_vm(pkvm_handle_t handle)
 
 	hyp_vm->is_dying = true;
 unlock:
-	hyp_spin_unlock(&vm_table_lock);
+	hyp_read_unlock(&vm_table_lock);
 
 	return ret;
 }
@@ -929,7 +934,7 @@ int __pkvm_finalize_teardown_vm(pkvm_handle_t handle)
 	unsigned int idx;
 	int err;
 
-	hyp_spin_lock(&vm_table_lock);
+	hyp_write_lock(&vm_table_lock);
 	hyp_vm = get_vm_by_handle(handle);
 	if (!hyp_vm) {
 		err = -ENOENT;
@@ -944,7 +949,13 @@ int __pkvm_finalize_teardown_vm(pkvm_handle_t handle)
 	/* Ensure the VMID is clean before it can be reallocated */
 	__kvm_tlb_flush_vmid(&hyp_vm->kvm.arch.mmu);
 	remove_vm_table_entry(handle);
-	hyp_spin_unlock(&vm_table_lock);
+	hyp_write_unlock(&vm_table_lock);
+
+	/*
+	 * At this point, the VM has been detached from the VM table and
+	 * has a refcount of 0 so we're free to tear it down without
+	 * worrying about anybody else.
+	 */
 
 	mc = &host_kvm->arch.pkvm.teardown_mc;
 	stage2_mc = &host_kvm->arch.pkvm.stage2_teardown_mc;
@@ -983,7 +994,7 @@ int __pkvm_finalize_teardown_vm(pkvm_handle_t handle)
 	return 0;
 
 err_unlock:
-	hyp_spin_unlock(&vm_table_lock);
+	hyp_write_unlock(&vm_table_lock);
 	return err;
 }
 
