@@ -14,6 +14,7 @@
 
 #include <nvhe/mem_protect.h>
 #include <nvhe/memory.h>
+#include <nvhe/mm.h>
 #include <nvhe/pkvm.h>
 #include <nvhe/trap_handler.h>
 
@@ -1000,6 +1001,17 @@ int __pkvm_finalize_teardown_vm(pkvm_handle_t handle)
 err_unlock:
 	hyp_write_unlock(&vm_table_lock);
 	return err;
+}
+
+void pkvm_poison_pvmfw_pages(void)
+{
+	u64 npages = pvmfw_size >> PAGE_SHIFT;
+	phys_addr_t addr = pvmfw_base;
+
+	while (npages--) {
+		hyp_poison_page(addr);
+		addr += PAGE_SIZE;
+	}
 }
 
 /*
