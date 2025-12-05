@@ -249,7 +249,7 @@ void kvm_arch_destroy_vm(struct kvm *kvm)
 	kvm_vgic_destroy(kvm);
 
 	if (is_protected_kvm_enabled())
-		pkvm_destroy_hyp_vm(kvm);
+		pkvm_finalize_destroy_hyp_vm(kvm);
 
 	kvm_destroy_mpidr_data(kvm);
 
