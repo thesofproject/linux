@@ -1622,7 +1622,7 @@ out_guest_err:
 	return true;
 }
 
-static bool pkvm_memrelinquish_call(struct pkvm_hyp_vcpu *hyp_vcpu)
+static bool pkvm_memrelinquish_call(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 {
 	struct kvm_vcpu *vcpu = &hyp_vcpu->vcpu;
 	u64 ipa = smccc_get_arg1(vcpu);
@@ -1635,8 +1635,24 @@ static bool pkvm_memrelinquish_call(struct pkvm_hyp_vcpu *hyp_vcpu)
 		goto out_guest_err;
 
 	ret = __pkvm_guest_relinquish_to_host(hyp_vcpu, ipa, &pa);
-	if (ret)
+	if (ret == -E2BIG) {
+		struct kvm_hyp_req *req = pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_SPLIT);
+
+		if (!req) {
+			ret = -ENOMEM;
+			goto out_guest_err;
+		}
+
+		req->split.guest_ipa = ALIGN_DOWN(ipa, PMD_SIZE);
+		req->split.size = PMD_SIZE;
+
+		write_sysreg_el2(read_sysreg_el2(SYS_ELR) - 4, SYS_ELR);
+		*exit_code = ARM_EXCEPTION_HYP_REQ;
+
+		return false;
+	} else if (ret) {
 		goto out_guest_err;
+	}
 
 	if (pa != 0) {
 		/* Now pass to host. */
@@ -1710,7 +1726,7 @@ bool kvm_handle_pvm_hvc64(struct kvm_vcpu *vcpu, u64 *exit_code)
 	case ARM_SMCCC_VENDOR_HYP_KVM_MEM_UNSHARE_FUNC_ID:
 		return pkvm_memunshare_call(hyp_vcpu);
 	case ARM_SMCCC_VENDOR_HYP_KVM_MEM_RELINQUISH_FUNC_ID:
-		return pkvm_memrelinquish_call(hyp_vcpu);
+		return pkvm_memrelinquish_call(hyp_vcpu, exit_code);
 	default:
 		return pkvm_handle_psci(hyp_vcpu);
 	}
