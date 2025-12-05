@@ -29,6 +29,8 @@ enum pkvm_component_id {
 	PKVM_ID_HYP,
 	PKVM_ID_FFA,
 	PKVM_ID_GUEST,
+	PKVM_ID_PROTECTED,
+	PKVM_ID_MAX = PKVM_ID_PROTECTED,
 };
 
 extern unsigned long hyp_nr_cpus;
@@ -73,6 +75,8 @@ void destroy_hyp_vm_pgt(struct pkvm_hyp_vm *vm);
 void drain_hyp_pool(struct pkvm_hyp_vm *vm, struct kvm_hyp_memcache *mc);
 int refill_memcache(struct kvm_hyp_memcache *mc, unsigned long min_pages,
 		    struct kvm_hyp_memcache *host_mc);
+
+int module_change_host_page_prot(u64 pfn, enum kvm_pgtable_prot prot, u64 nr_pages);
 
 void psci_mem_protect_inc(u64 n);
 void psci_mem_protect_dec(u64 n);

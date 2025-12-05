@@ -126,6 +126,7 @@ const struct pkvm_module_ops module_ops = {
 	.update_hcr_el2 = __update_hcr_el2,
 	.update_hfgwtr_el2 = __update_hfgwtr_el2,
 	.register_host_perm_fault_handler = hyp_register_host_perm_fault_handler,
+	.host_stage2_mod_prot = module_change_host_page_prot,
 	.host_stage2_get_leaf = host_stage2_get_leaf,
 	.register_host_smc_handler = __pkvm_register_host_smc_handler,
 	.register_default_trap_handler = __pkvm_register_default_trap_handler,
