@@ -356,6 +356,8 @@ int __kvm_vcpu_run(struct kvm_vcpu *vcpu)
 
 	host_ctxt->__hyp_running_vcpu = NULL;
 
+	__pkvm_unmask_serror();
+
 	return exit_code;
 }
 
