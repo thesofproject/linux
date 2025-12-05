@@ -862,7 +862,8 @@ void pkvm_pgtable_stage2_destroy(struct kvm_pgtable *pgt)
 	struct kvm *kvm = kvm_s2_mmu_to_kvm(pgt->mmu);
 	pkvm_handle_t handle = kvm->arch.pkvm.handle;
 
-	WARN_ON(kvm_call_hyp_nvhe(__pkvm_start_teardown_vm, handle));
+	if (pkvm_hyp_vm_is_created(kvm))
+		WARN_ON(kvm_call_hyp_nvhe(__pkvm_start_teardown_vm, handle));
 
 	__pkvm_pgtable_stage2_unmap(pgt, 0, ~(0ULL));
 }

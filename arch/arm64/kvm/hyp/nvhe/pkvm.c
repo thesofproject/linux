@@ -785,6 +785,9 @@ static void remove_vm_table_entry(pkvm_handle_t handle)
 
 	vm_table[vm_handle_to_idx(handle)] = NULL;
 
+	if (hyp_vm == RESERVED_ENTRY)
+		return;
+
 	/*
 	 * If we didn't send the destruction message leak the vmid to
 	 * prevent others from using it.
