@@ -432,6 +432,25 @@ static int __init finalize_pkvm(void)
 }
 device_initcall_sync(finalize_pkvm);
 
+int pkvm_enable_smc_forwarding(struct file *kvm_file)
+{
+	struct kvm *kvm;
+
+	if (!file_is_kvm(kvm_file))
+		return -EINVAL;
+
+	if (!kvm_get_kvm_safe(kvm_file->private_data))
+		return -EINVAL;
+
+	kvm = kvm_file->private_data;
+	if (!kvm)
+		return -EINVAL;
+
+	kvm->arch.pkvm.smc_forwarded = true;
+
+	return 0;
+}
+
 static int __init pkvm_firmware_rmem_err(struct reserved_mem *rmem,
 					 const char *reason)
 {

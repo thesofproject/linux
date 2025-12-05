@@ -12,9 +12,12 @@
 
 #include <asm/kvm_emulate.h>
 
+#include <hyp/adjust_pc.h>
+
 #include <nvhe/alloc.h>
 #include <nvhe/mem_protect.h>
 #include <nvhe/memory.h>
+#include <nvhe/modules.h>
 #include <nvhe/mm.h>
 #include <nvhe/pkvm.h>
 #include <nvhe/trap_handler.h>
@@ -506,6 +509,7 @@ static int init_pkvm_hyp_vm(struct kvm *host_kvm, struct pkvm_hyp_vm *hyp_vm,
 		pvmfw_load_addr = READ_ONCE(host_kvm->arch.pkvm.pvmfw_load_addr);
 	hyp_vm->kvm.arch.pkvm.pvmfw_load_addr = pvmfw_load_addr;
 
+	hyp_vm->kvm.arch.pkvm.smc_forwarded = READ_ONCE(host_kvm->arch.pkvm.smc_forwarded);
 	hyp_vm->kvm.arch.pkvm.is_created = true;
 	hyp_vm->kvm.arch.flags = 0;
 
@@ -1689,6 +1693,43 @@ static bool pkvm_forward_trng(struct kvm_vcpu *vcpu)
 	}
 
 	return true;
+}
+
+static bool is_standard_secure_service_call(u64 func_id)
+{
+	return (func_id >= PSCI_0_2_FN_BASE && func_id <= ARM_CCA_FUNC_END) ||
+	       (func_id >= PSCI_0_2_FN64_BASE && func_id <= ARM_CCA_64BIT_FUNC_END);
+}
+
+bool kvm_handle_pvm_smc64(struct kvm_vcpu *vcpu, u64 *exit_code)
+{
+	bool handled = false;
+	struct kvm_cpu_context *ctxt = &vcpu->arch.ctxt;
+	struct pkvm_hyp_vm *vm;
+	struct pkvm_hyp_vcpu *hyp_vcpu;
+	struct arm_smccc_1_2_regs regs;
+	struct arm_smccc_1_2_regs res;
+	DECLARE_REG(u64, func_id, ctxt, 0);
+
+	hyp_vcpu = container_of(vcpu, struct pkvm_hyp_vcpu, vcpu);
+	vm = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
+
+	if (is_standard_secure_service_call(func_id))
+		return false;
+
+	if (!vm->kvm.arch.pkvm.smc_forwarded)
+		return false;
+
+	memcpy(&regs, &ctxt->regs, sizeof(regs));
+	handled = module_handle_guest_smc(&regs, &res, vm->kvm.arch.pkvm.handle);
+	if (handled)
+		memcpy(&ctxt->regs.regs[0], &res, sizeof(res));
+	else
+		ctxt->regs.regs[0] = -1;
+
+	__kvm_skip_instr(vcpu);
+
+	return handled;
 }
 
 /*
