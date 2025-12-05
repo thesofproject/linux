@@ -37,6 +37,7 @@ static inline bool kvm_pkvm_ext_allowed(struct kvm *kvm, long ext)
 	switch (ext) {
 	case KVM_CAP_CORE:
 	case KVM_CAP_IRQCHIP:
+	case KVM_CAP_ONE_REG:
 	case KVM_CAP_ARM_PSCI:
 	case KVM_CAP_ARM_PSCI_0_2:
 	case KVM_CAP_NR_VCPUS:
