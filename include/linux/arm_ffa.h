@@ -243,6 +243,10 @@ struct ffa_partition_info {
 #define FFA_PARTITION_INDIRECT_MSG	BIT(2)
 /* partition can receive notifications */
 #define FFA_PARTITION_NOTIFICATION_RECV	BIT(3)
+/* partition must be informed about each VM that is created by the Hypervisor */
+#define FFA_PARTITION_HYP_CREATE_VM	BIT(6)
+/* partition must be informed about each VM that is destroyed by the Hypervisor */
+#define FFA_PARTITION_HYP_DESTROY_VM	BIT(7)
 /* partition runs in the AArch64 execution state. */
 #define FFA_PARTITION_AARCH64_EXEC	BIT(8)
 /* partition supports receipt of direct request2 */
@@ -252,6 +256,9 @@ struct ffa_partition_info {
 	u32 properties;
 	uuid_t uuid;
 };
+
+#define FFA_VM_CREATION_MSG	(BIT(31) | (BIT(2)))
+#define FFA_VM_DESTRUCTION_MSG  (FFA_VM_CREATION_MSG | BIT(1))
 
 static inline
 bool ffa_partition_check_property(struct ffa_device *dev, u32 property)
