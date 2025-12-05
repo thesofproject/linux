@@ -17,6 +17,7 @@
 #include <linux/of_reserved_mem.h>
 #include <linux/sort.h>
 
+#include <asm/kvm_host.h>
 #include <asm/kvm_hyp.h>
 #include <asm/kvm_mmu.h>
 #include <asm/kvm_pkvm.h>
@@ -184,6 +185,9 @@ void __init kvm_hyp_reserve(void)
 
 static void __pkvm_finalize_destroy_hyp_vm(struct kvm *kvm)
 {
+	struct kvm_vcpu *vcpu;
+	unsigned long idx;
+
 	if (pkvm_hyp_vm_is_created(kvm)) {
 		WARN_ON(kvm_call_hyp_nvhe(__pkvm_finalize_teardown_vm,
 					  kvm->arch.pkvm.handle));
@@ -200,6 +204,17 @@ static void __pkvm_finalize_destroy_hyp_vm(struct kvm *kvm)
 	atomic64_sub(kvm->arch.pkvm.stage2_teardown_mc.nr_pages << PAGE_SHIFT,
 		     &kvm->stat.protected_hyp_mem);
 	free_hyp_memcache(&kvm->arch.pkvm.stage2_teardown_mc);
+
+	kvm_for_each_vcpu(idx, vcpu, kvm) {
+		struct kvm_hyp_req *hyp_reqs = vcpu->arch.hyp_reqs;
+
+		if (!hyp_reqs)
+			continue;
+
+		kvm_unshare_hyp(hyp_reqs, hyp_reqs + 1);
+		vcpu->arch.hyp_reqs = NULL;
+		free_page((unsigned long)hyp_reqs);
+	}
 }
 
 static void __pkvm_vcpu_hyp_created(struct kvm_vcpu *vcpu)
@@ -210,13 +225,31 @@ static void __pkvm_vcpu_hyp_created(struct kvm_vcpu *vcpu)
 static int __pkvm_create_hyp_vcpu(struct kvm_vcpu *vcpu)
 {
 	pkvm_handle_t handle = vcpu->kvm->arch.pkvm.handle;
+	struct kvm_hyp_req *hyp_reqs;
 	int ret;
 
 	init_hyp_stage2_memcache(&vcpu->arch.stage2_mc);
 
+	hyp_reqs = (struct kvm_hyp_req *)__get_free_page(GFP_KERNEL_ACCOUNT);
+	if (!hyp_reqs)
+		return -ENOMEM;
+
+	ret = kvm_share_hyp(hyp_reqs, hyp_reqs + 1);
+	if (ret)
+		goto err_free_reqs;
+
+	vcpu->arch.hyp_reqs = hyp_reqs;
+
 	ret = kvm_call_refill_hyp_nvhe(__pkvm_init_vcpu, handle, vcpu);
-	if (!ret)
+	if (!ret) {
 		__pkvm_vcpu_hyp_created(vcpu);
+		return 0;
+	}
+
+	kvm_unshare_hyp(hyp_reqs, hyp_reqs + 1);
+err_free_reqs:
+	free_page((unsigned long)hyp_reqs);
+	vcpu->arch.hyp_reqs = NULL;
 
 	return ret;
 }
