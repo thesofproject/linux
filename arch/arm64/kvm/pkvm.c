@@ -826,4 +826,4 @@ int __pkvm_load_el2_module(struct pkvm_el2_module *mod, struct module *this)
 	return 0;
 }
 EXPORT_SYMBOL(__pkvm_load_el2_module);
-#endif
+#endif /* CONFIG_MODULES */
