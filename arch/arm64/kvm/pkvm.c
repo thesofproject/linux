@@ -138,8 +138,8 @@ static int __pkvm_create_hyp_vcpu(struct kvm_vcpu *vcpu)
  */
 static int __pkvm_create_hyp_vm(struct kvm *kvm)
 {
-	size_t pgd_sz, hyp_vm_sz;
-	void *pgd, *hyp_vm;
+	size_t pgd_sz, hyp_vm_sz, last_ran_sz;
+	void *pgd, *hyp_vm, *last_ran;
 	int ret;
 
 	if (kvm->created_vcpus < 1)
@@ -166,16 +166,26 @@ static int __pkvm_create_hyp_vm(struct kvm *kvm)
 		goto free_pgd;
 	}
 
-	/* Donate the VM memory to hyp and let hyp initialize it. */
-	ret = kvm_call_hyp_nvhe(__pkvm_init_vm, kvm, hyp_vm, pgd);
-	if (ret)
+	/* Allocate memory to donate to hyp for tracking mmu->last_vcpu_ran. */
+	last_ran_sz = PAGE_ALIGN(array_size(num_possible_cpus(), sizeof(int)));
+	last_ran = alloc_pages_exact(last_ran_sz, GFP_KERNEL_ACCOUNT);
+	if (!last_ran) {
+		ret = -ENOMEM;
 		goto free_vm;
+	}
+
+	/* Donate the VM memory to hyp and let hyp initialize it. */
+	ret = kvm_call_hyp_nvhe(__pkvm_init_vm, kvm, hyp_vm, pgd, last_ran);
+	if (ret)
+		goto free_last_ran;
 
 	kvm->arch.pkvm.is_created = true;
 	kvm->arch.pkvm.stage2_teardown_mc.flags |= HYP_MEMCACHE_ACCOUNT_STAGE2;
 	kvm_account_pgtable_pages(pgd, pgd_sz / PAGE_SIZE);
 
 	return 0;
+free_last_ran:
+	free_pages_exact(last_ran, last_ran_sz);
 free_vm:
 	free_pages_exact(hyp_vm, hyp_vm_sz);
 free_pgd:
