@@ -31,6 +31,7 @@ enum pkvm_page_state {
 	 * struct hyp_page.
 	 */
 	PKVM_NOPAGE			= BIT(0) | BIT(1),
+	PKVM_PAGE_RESTRICTED_PROT	= BIT(3),
 };
 #define PKVM_PAGE_STATE_MASK		(BIT(0) | BIT(1))
 
