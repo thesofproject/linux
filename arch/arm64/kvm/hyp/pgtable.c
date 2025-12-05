@@ -1038,7 +1038,7 @@ static void stage2_map_prefault_block(struct kvm_pgtable_pte_ops *pte_ops,
 		 * presumably re-break the freshly installed block, but that
 		 * should happen very infrequently.
 		 */
-		if ((ctx->level < (KVM_PGTABLE_LAST_LEVEL - 2)) ||
+		if ((ctx->level < (KVM_PGTABLE_LAST_LEVEL - 1)) ||
 				(pa < ctx->addr) || (pa >= ctx->end)) {
 			/* We can write non-atomically: ptep isn't yet live. */
 			*ptep = pte;
