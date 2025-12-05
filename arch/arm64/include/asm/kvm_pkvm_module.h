@@ -84,6 +84,10 @@ enum pkvm_psci_notification {
  *				order depends on the registration order. If no
  *				handler return True, the SMC is forwarded to
  *				EL3.
+ * @register_guest_smc_handler: @cb is called when guest identified by the
+ *				pkvm_handle issues an SMC that pKVM couldn't
+ *				handle. If @cb returns false, then unsupported
+ *				operation error is returned back to the guest.
  * @register_default_trap_handler:
  *				@cb is called whenever EL2 traps EL1 and pKVM
  *				has not handled it. If @cb returns false, the
@@ -151,6 +155,9 @@ struct pkvm_module_ops {
 	int (*host_stage2_mod_prot)(u64 pfn, enum kvm_pgtable_prot prot, u64 nr_pages);
 	int (*host_stage2_get_leaf)(phys_addr_t phys, kvm_pte_t *ptep, s8 *level);
 	int (*register_host_smc_handler)(bool (*cb)(struct user_pt_regs *));
+	int (*register_guest_smc_handler)(bool (*cb)(struct arm_smccc_1_2_regs *regs,
+						     struct arm_smccc_1_2_regs *res,
+						     pkvm_handle_t handle));
 	int (*register_default_trap_handler)(bool (*cb)(struct user_pt_regs *));
 	int (*register_illegal_abt_notifier)(void (*cb)(struct user_pt_regs *));
 	int (*register_psci_notifier)(void (*cb)(enum pkvm_psci_notification, struct user_pt_regs *));

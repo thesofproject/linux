@@ -122,6 +122,7 @@ static void tracing_mod_hyp_printk(u8 fmt_id, u64 a, u64 b, u64 c, u64 d)
 enum mod_handler_type {
 	HOST_FAULT_HANDLER = 0,
 	HOST_SMC_HANDLER,
+	GUEST_SMC_HANDLER,
 	NUM_MOD_HANDLER_TYPES,
 };
 
@@ -168,6 +169,13 @@ static int __register_host_smc_handler(bool (*cb)(struct user_pt_regs *))
 	return mod_handler_register(HOST_SMC_HANDLER, cb);
 }
 
+static int __register_guest_smc_handler(bool (*cb)(struct arm_smccc_1_2_regs *regs,
+						   struct arm_smccc_1_2_regs *res,
+						   pkvm_handle_t handle))
+{
+	return mod_handler_register(GUEST_SMC_HANDLER, cb);
+}
+
 bool module_handle_host_perm_fault(struct user_pt_regs *regs, u64 esr, u64 addr)
 {
 	int (*cb)(struct user_pt_regs *regs, u64 esr, u64 addr);
@@ -194,6 +202,21 @@ bool module_handle_host_smc(struct user_pt_regs *regs)
 	return false;
 }
 
+bool module_handle_guest_smc(struct arm_smccc_1_2_regs *regs, struct arm_smccc_1_2_regs *res,
+			     pkvm_handle_t handle)
+{
+	bool (*cb)(struct arm_smccc_1_2_regs *regs, struct arm_smccc_1_2_regs *res,
+		   pkvm_handle_t handle);
+	int i;
+
+	for_each_mod_handler(GUEST_SMC_HANDLER, cb, i) {
+		if (cb(regs, res, handle))
+			return true;
+	}
+
+	return false;
+}
+
 const struct pkvm_module_ops module_ops = {
 	.create_private_mapping = __pkvm_create_private_mapping,
 	.alloc_module_va = __pkvm_alloc_module_va,
@@ -213,6 +236,7 @@ const struct pkvm_module_ops module_ops = {
 	.host_stage2_mod_prot = module_change_host_page_prot,
 	.host_stage2_get_leaf = host_stage2_get_leaf,
 	.register_host_smc_handler = __register_host_smc_handler,
+	.register_guest_smc_handler = __register_guest_smc_handler,
 	.register_default_trap_handler = __pkvm_register_default_trap_handler,
 	.register_illegal_abt_notifier = __pkvm_register_illegal_abt_notifier,
 	.register_psci_notifier = __pkvm_register_psci_notifier,
