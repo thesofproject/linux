@@ -1706,13 +1706,18 @@ int __pkvm_host_reclaim_page_guest(u64 gfn, u64 nr_pages, struct pkvm_hyp_vm *vm
 		WARN_ON(__host_check_page_state_range(phys, size, PKVM_PAGE_SHARED_OWNED));
 		break;
 	case PKVM_PAGE_SHARED_OWNED:
-		WARN_ON(__host_check_page_state_range(phys, size, PKVM_PAGE_SHARED_BORROWED));
+		if (__host_check_page_state_range(phys, size, PKVM_PAGE_SHARED_BORROWED)) {
+			/* Presumably a page shared via FF-A, will be handled separately */
+			ret = -EBUSY;
+			goto unlock;
+		}
 		break;
 	default:
 		ret = -EPERM;
 		goto unlock;
 	}
 
+	/* We could avoid TLB inval, it is done per VMID on the finalize path */
 	WARN_ON(kvm_pgtable_stage2_unmap(&vm->pgt, ipa, size));
 	WARN_ON(host_stage2_set_owner_locked(phys, size, PKVM_ID_HOST));
 

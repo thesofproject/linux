@@ -266,6 +266,20 @@ static struct pkvm_hyp_vm *get_vm_by_handle(pkvm_handle_t handle)
 	return vm_table[idx];
 }
 
+int __pkvm_reclaim_dying_guest_ffa_resources(pkvm_handle_t handle)
+{
+	struct pkvm_hyp_vm *hyp_vm;
+	int ret = -EINVAL;
+
+	hyp_read_lock(&vm_table_lock);
+	hyp_vm = get_vm_by_handle(handle);
+	if (hyp_vm && hyp_vm->is_dying)
+		ret = kvm_dying_guest_reclaim_ffa_resources(hyp_vm);
+	hyp_read_unlock(&vm_table_lock);
+
+	return ret;
+}
+
 struct pkvm_hyp_vcpu *pkvm_load_hyp_vcpu(pkvm_handle_t handle,
 					 unsigned int vcpu_idx)
 {
@@ -1050,6 +1064,12 @@ int __pkvm_finalize_teardown_vm(pkvm_handle_t handle)
 	__kvm_tlb_flush_vmid(&hyp_vm->kvm.arch.mmu);
 	remove_vm_table_entry(handle);
 	hyp_write_unlock(&vm_table_lock);
+
+	/* A well-behaved host will have reclaimed all FF-A resources already */
+	do {
+		err = kvm_dying_guest_reclaim_ffa_resources(hyp_vm);
+	} while (err == -EAGAIN);
+	WARN_ON(err);
 
 	/*
 	 * At this point, the VM has been detached from the VM table and
