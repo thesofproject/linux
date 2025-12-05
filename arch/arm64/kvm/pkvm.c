@@ -211,7 +211,7 @@ static int __pkvm_create_hyp_vcpu(struct kvm_vcpu *vcpu)
 	pkvm_handle_t handle = vcpu->kvm->arch.pkvm.handle;
 	int ret;
 
-	vcpu->arch.pkvm_memcache.flags |= HYP_MEMCACHE_ACCOUNT_STAGE2;
+	vcpu->arch.stage2_mc.flags |= HYP_MEMCACHE_ACCOUNT_STAGE2;
 
 	ret = kvm_call_refill_hyp_nvhe(__pkvm_init_vcpu, handle, vcpu);
 	if (!ret)

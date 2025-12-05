@@ -452,7 +452,7 @@ static void teardown_sve_state(struct pkvm_hyp_vcpu *hyp_vcpu)
 	if (sve_state) {
 		struct kvm_hyp_memcache *vcpu_mc;
 
-		vcpu_mc = &hyp_vcpu->vcpu.arch.pkvm_memcache;
+		vcpu_mc = &hyp_vcpu->vcpu.arch.stage2_mc;
 		hyp_free(sve_state);
 	}
 }
@@ -1005,7 +1005,7 @@ int __pkvm_finalize_teardown_vm(pkvm_handle_t handle)
 		if (!hyp_vcpu)
 			continue;
 
-		vcpu_mc = &hyp_vcpu->vcpu.arch.pkvm_memcache;
+		vcpu_mc = &hyp_vcpu->vcpu.arch.stage2_mc;
 
 		while (vcpu_mc->nr_pages) {
 			void *addr = pop_hyp_memcache(vcpu_mc, hyp_phys_to_virt);

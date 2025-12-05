@@ -1487,7 +1487,7 @@ static int prepare_mmu_memcache(struct kvm_vcpu *vcpu, bool topup_memcache,
 	if (!is_protected_kvm_enabled())
 		*memcache = &vcpu->arch.mmu_page_cache;
 	else
-		*memcache = &vcpu->arch.pkvm_memcache;
+		*memcache = &vcpu->arch.stage2_mc;
 
 	if (!topup_memcache)
 		return 0;
@@ -1600,7 +1600,7 @@ out_unlock:
 static int pkvm_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
 		struct kvm_memory_slot *memslot, unsigned long hva)
 {
-	struct kvm_hyp_memcache *hyp_memcache = &vcpu->arch.pkvm_memcache;
+	struct kvm_hyp_memcache *hyp_memcache = &vcpu->arch.stage2_mc;
 	unsigned int flags = FOLL_HWPOISON | FOLL_LONGTERM | FOLL_WRITE;
 	struct mm_struct *mm = current->mm;
 	struct kvm *kvm = vcpu->kvm;
