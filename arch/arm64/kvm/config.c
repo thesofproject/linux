@@ -6,6 +6,7 @@
 
 #include <linux/kvm_host.h>
 #include <asm/kvm_emulate.h>
+#include <asm/kvm_hyp.h>
 #include <asm/kvm_nested.h>
 #include <asm/sysreg.h>
 
@@ -1175,14 +1176,9 @@ static void __init check_feat_map(const struct reg_bits_to_feat_map *map,
 	for (int i = 0; i < map_size; i++)
 		mask |= map[i].bits;
 
-	if (mask != ~res0) {
-#ifndef __KVM_NVHE_HYPERVISOR__
+	if (mask != ~res0)
 		kvm_err("Undefined %s behaviour, bits %016llx\n",
 			str, mask ^ ~res0);
-#else
-		BUG();
-#endif
-	}
 }
 
 static u64 reg_feat_map_bits(const struct reg_bits_to_feat_map *map)
