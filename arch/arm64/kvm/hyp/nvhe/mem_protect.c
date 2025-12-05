@@ -1812,19 +1812,6 @@ int host_stage2_get_leaf(phys_addr_t phys, kvm_pte_t *ptep, s8 *level)
 	return ret;
 }
 
-int host_stage2_protect_pages_locked(phys_addr_t addr, u64 size)
-{
-	int ret;
-
-	hyp_assert_lock_held(&host_mmu.lock);
-
-	ret = __host_check_page_state_range(addr, size, PKVM_PAGE_OWNED);
-	if (!ret)
-		ret = host_stage2_set_owner_locked(addr, size, PKVM_ID_PROTECTED);
-
-	return ret;
-}
-
 #ifdef CONFIG_NVHE_EL2_DEBUG
 struct pkvm_expected_state {
 	enum pkvm_page_state host;
