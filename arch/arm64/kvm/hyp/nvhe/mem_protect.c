@@ -1028,6 +1028,27 @@ unlock:
 
 int __pkvm_host_donate_hyp(u64 pfn, u64 nr_pages)
 {
+	return ___pkvm_host_donate_hyp(pfn, nr_pages, false);
+}
+
+int ___pkvm_host_donate_hyp(u64 pfn, u64 nr_pages, bool accept_mmio)
+{
+	phys_addr_t start = hyp_pfn_to_phys(pfn);
+	phys_addr_t end = start + (nr_pages << PAGE_SHIFT);
+	int ret;
+
+	if (!accept_mmio && !range_is_memory(start, end))
+		return -EPERM;
+
+	host_lock_component();
+	ret = __pkvm_host_donate_hyp_locked(pfn, nr_pages);
+	host_unlock_component();
+
+	return ret;
+}
+
+int __pkvm_host_donate_hyp_locked(u64 pfn, u64 nr_pages)
+{
 	u64 phys = hyp_pfn_to_phys(pfn);
 	u64 size = PAGE_SIZE * nr_pages;
 	void *virt = __hyp_va(phys);
@@ -1036,7 +1057,7 @@ int __pkvm_host_donate_hyp(u64 pfn, u64 nr_pages)
 	if (!pfn_range_is_valid(pfn, nr_pages))
 		return -EINVAL;
 
-	host_lock_component();
+	hyp_assert_lock_held(&host_mmu.lock);
 	hyp_lock_component();
 
 	ret = __host_check_page_state_range(phys, size, PKVM_PAGE_OWNED);
@@ -1052,7 +1073,6 @@ int __pkvm_host_donate_hyp(u64 pfn, u64 nr_pages)
 
 unlock:
 	hyp_unlock_component();
-	host_unlock_component();
 
 	return ret;
 }
