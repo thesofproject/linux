@@ -1522,16 +1522,26 @@ static void do_ffa_guest_version(struct arm_smccc_1_2_regs *res,
 {
 	DECLARE_REG(u32, ffa_req_version, ctxt, 1);
 
-	if (FFA_MAJOR_VERSION(ffa_req_version) != 1) {
-		res->a0 = FFA_RET_NOT_SUPPORTED;
-		return;
+	hyp_spin_lock(&version_lock);
+
+	if (!has_version_negotiated) {
+		res->a0 = FFA_RET_DENIED;
+		goto unlock;
 	}
 
-	hyp_spin_lock(&version_lock);
-	if (has_version_negotiated)
-		res->a0 = hyp_ffa_version;
-	else
+	if (FFA_MAJOR_VERSION(ffa_req_version) != FFA_MAJOR_VERSION(hyp_ffa_version)) {
 		res->a0 = FFA_RET_NOT_SUPPORTED;
+		goto unlock;
+	}
+
+	/* No backwards compatibility for you, please update your guest drivers*/
+	if (FFA_MINOR_VERSION(ffa_req_version) < FFA_MINOR_VERSION(hyp_ffa_version)) {
+		res->a0 = FFA_RET_NOT_SUPPORTED;
+		goto unlock;
+	}
+
+	res->a0 = hyp_ffa_version;
+unlock:
 	hyp_spin_unlock(&version_lock);
 }
 
