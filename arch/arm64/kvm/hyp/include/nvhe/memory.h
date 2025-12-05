@@ -31,6 +31,12 @@ enum pkvm_page_state {
 	 * struct hyp_page.
 	 */
 	PKVM_NOPAGE			= BIT(0) | BIT(1),
+	PKVM_MODULE_OWNED_PAGE		= BIT(2),
+
+	/*
+	 * Meta-states which aren't encoded directly in the PTE's SW bits (or
+	 * the hyp_vmemmap entry for the host)
+	 */
 	PKVM_PAGE_RESTRICTED_PROT	= BIT(3),
 };
 #define PKVM_PAGE_STATE_MASK		(BIT(0) | BIT(1))
