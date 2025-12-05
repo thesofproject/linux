@@ -4,6 +4,7 @@
  */
 
 #include <nvhe/mm.h>
+#include <nvhe/mem_protect.h>
 #include <nvhe/trace/trace.h>
 
 #include <nvhe/trace/define_events.h>
@@ -19,6 +20,32 @@ static struct {
 	struct hyp_event_id	*start;
 	struct hyp_event_id	*end;
 } event_id_mod[MAX_EVENT_ID_MOD];
+
+#ifdef CONFIG_PROTECTED_NVHE_FTRACE
+int __pkvm_sync_ftrace(unsigned long host_funcs_pg)
+{
+	unsigned long *funcs_pg = (unsigned long *)kern_hyp_va(host_funcs_pg);
+	u64 pfn = hyp_virt_to_pfn(funcs_pg);
+	int ret;
+
+	ret = __pkvm_host_donate_hyp(pfn, 1);
+	if (ret)
+		return ret;
+
+	funcs_pg = hyp_ftrace_sync(funcs_pg, NULL, NULL, 0, NULL);
+
+	WARN_ON(__pkvm_hyp_donate_host(pfn, 1));
+
+	return funcs_pg ? -EINVAL : 0;
+}
+
+int __pkvm_disable_ftrace(void)
+{
+	hyp_ftrace_disable(NULL, NULL);
+
+	return 0;
+}
+#endif
 
 static void hyp_set_key(atomic_t *key, int val)
 {

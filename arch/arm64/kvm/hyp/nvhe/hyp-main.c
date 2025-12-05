@@ -1561,6 +1561,18 @@ static void handle___pkvm_selftest_event(struct kvm_cpu_context *host_ctxt)
 	cpu_reg(host_ctxt, 1) = ret;
 }
 
+static void handle___pkvm_sync_ftrace(struct kvm_cpu_context *host_ctxt)
+{
+	DECLARE_REG(unsigned long, host_func_pg, host_ctxt, 1);
+
+	cpu_reg(host_ctxt, 1) = __pkvm_sync_ftrace(host_func_pg);
+}
+
+static void handle___pkvm_disable_ftrace(struct kvm_cpu_context *host_ctxt)
+{
+	cpu_reg(host_ctxt, 1) = __pkvm_disable_ftrace();
+}
+
 static void handle___pkvm_alloc_module_va(struct kvm_cpu_context *host_ctxt)
 {
 	DECLARE_REG(u64, nr_pages, host_ctxt, 1);
@@ -1690,6 +1702,8 @@ static const hcall_t host_hcall[] = {
 	HANDLE_FUNC(__pkvm_swap_reader_tracing),
 	HANDLE_FUNC(__pkvm_enable_event),
 	HANDLE_FUNC(__pkvm_selftest_event),
+	HANDLE_FUNC(__pkvm_sync_ftrace),
+	HANDLE_FUNC(__pkvm_disable_ftrace),
 	HANDLE_FUNC(__pkvm_hyp_alloc_mgt_refill),
 	HANDLE_FUNC(__pkvm_hyp_alloc_mgt_reclaimable),
 	HANDLE_FUNC(__pkvm_hyp_alloc_mgt_reclaim),
