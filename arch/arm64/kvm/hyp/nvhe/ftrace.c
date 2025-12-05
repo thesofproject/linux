@@ -149,6 +149,19 @@ static int __get_offset_idx_ins(unsigned long *func, unsigned long ip, u32 *insn
 	return 0;
 }
 
+static int __get_disable_ins(unsigned long *func, unsigned long ip, u32 *insn,
+			     void *args)
+{
+	static u32 nop;
+
+	if (!nop)
+		nop = aarch64_insn_gen_nop();
+
+	*insn = cpu_to_le32(nop);
+
+	return 0;
+}
+
 static int __get_enable_ins(unsigned long ip, u32 *insn, void *tramp)
 {
 	u32 imm, mask;
@@ -191,6 +204,54 @@ static int __get_enable_disable_ins_early(unsigned long *func, unsigned long ip,
 
 	/* Nothing else to do */
 	return 1;
+}
+
+struct __ftrace_sync_patch_args {
+	void		*tramp;
+	unsigned long	offset_idx;
+	unsigned long	*funcs_pg;
+};
+
+static int
+__get_enable_disable_ins_from_funcs_pg(unsigned long *func, unsigned long ip,
+				       u32 *insn, void *__args)
+{
+	struct __ftrace_sync_patch_args *args = __args;
+	unsigned long kern_addr;
+	static u32 nop;
+	u32 cur_insn;
+	bool enable;
+	int ret = 0;
+
+	if (funcs_pg_is_end(args->funcs_pg))
+		return -EAGAIN;
+
+	kern_addr = __kern_addr(args->offset_idx, *func);
+	if (get_func(kern_addr) != funcs_pg_func(*args->funcs_pg)) {
+		ret = -EINVAL;
+		goto end;
+	}
+
+	if (!nop)
+		nop = aarch64_insn_gen_nop();
+
+	enable = funcs_pg_enabled(*args->funcs_pg);
+	cur_insn = *(u32 *)ip;
+
+	/* Are we modifying anything? */
+	if ((cur_insn == nop) != enable) {
+		ret = -EBUSY;
+		goto end;
+	}
+
+	if (funcs_pg_enabled(*args->funcs_pg))
+		ret = __get_enable_ins(ip, insn, args->tramp);
+	else
+		*insn = cpu_to_le32(nop);
+
+end:
+	args->funcs_pg++;
+	return ret;
 }
 
 static phys_addr_t __get_phys(unsigned long addr)
@@ -291,4 +352,48 @@ void hyp_ftrace_setup_core(void)
 			 __hyp_patchable_function_entries_end,
 			 __hyp_text_start_kern - (unsigned long)__hyp_text_start,
 			 __hyp_ftrace_tramp);
+}
+
+/*
+ * funcs_pg is the host donated page containing the list of functions to
+ * enable/disable.
+ *
+ * funcs and funcs_end are the hypervisor owned ELF sections. For security
+ * purposes, funcs_pg is validated against funcs/funcs_end and for efficency
+ * purposes, it is expected from funcs_pg to have the same order as
+ * funcs/funcs_end.
+ *
+ * Returns NULL if the entire funcs_pg has been consumed otherwise the next
+ * entry to process if funcs_end has been reached.
+ */
+void *hyp_ftrace_sync(unsigned long *funcs_pg, unsigned long *funcs,
+		      unsigned long *funcs_end, unsigned long offset_idx,
+		      void *tramp)
+{
+	struct __ftrace_sync_patch_args args = {
+		.tramp = tramp ? tramp : (void *)__hyp_ftrace_tramp,
+		.offset_idx = funcs ? offset_idx : 0,
+		.funcs_pg = funcs_pg,
+	};
+
+	if (!funcs || !funcs_end) {
+		funcs = __hyp_patchable_function_entries_start;
+		funcs_end = __hyp_patchable_function_entries_end;
+	}
+
+	hyp_ftrace_patch(funcs, funcs_end, 2 * AARCH64_INSN_SIZE,
+			 __get_enable_disable_ins_from_funcs_pg, (void *)&args);
+
+	return funcs_pg_is_end(args.funcs_pg) ? NULL : args.funcs_pg;
+}
+
+void hyp_ftrace_disable(unsigned long *funcs, unsigned long *funcs_end)
+{
+	if (!funcs || !funcs_end) {
+		funcs = __hyp_patchable_function_entries_start;
+		funcs_end = __hyp_patchable_function_entries_end;
+	}
+
+	hyp_ftrace_patch(funcs, funcs_end, 2 * AARCH64_INSN_SIZE,
+			 __get_disable_ins, NULL);
 }
