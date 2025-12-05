@@ -25,6 +25,8 @@
 #include <asm/text-patching.h>
 #include <asm/setup.h>
 
+#include <linux/init_syscalls.h>
+
 #include "hyp_constants.h"
 #include "hyp_trace.h"
 
@@ -844,9 +846,26 @@ static int __init early_pkvm_modules_cfg(char *arg)
 }
 early_param("kvm-arm.protected_modules", early_pkvm_modules_cfg);
 
-static void free_modprobe_argv(struct subprocess_info *info)
+static void __init free_modprobe_argv(struct subprocess_info *info)
 {
 	kfree(info->argv);
+}
+
+static int __init init_modprobe(struct subprocess_info *info, struct cred *new)
+{
+	struct file *file = filp_open("/dev/kmsg", O_RDWR, 0);
+
+	if (IS_ERR(file)) {
+		pr_warn("Warning: unable to open /dev/kmsg, modprobe will be silent.\n");
+		return 0;
+	}
+
+	init_dup(file);
+	init_dup(file);
+	init_dup(file);
+	fput(file);
+
+	return 0;
 }
 
 /*
@@ -890,7 +909,7 @@ static int __init __pkvm_request_early_module(char *module_name,
 	argv[idx++] = NULL;
 
 	info = call_usermodehelper_setup(modprobe_path, argv, envp, GFP_KERNEL,
-					 NULL, free_modprobe_argv, NULL);
+					 init_modprobe, free_modprobe_argv, NULL);
 	if (!info)
 		goto err;
 
