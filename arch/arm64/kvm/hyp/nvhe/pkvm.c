@@ -910,7 +910,7 @@ int __pkvm_reclaim_dying_guest_page(pkvm_handle_t handle, u64 gfn)
 	if (ret)
 		goto unlock;
 
-	drain_hyp_pool(hyp_vm, &hyp_vm->host_kvm->arch.pkvm.teardown_mc);
+	drain_hyp_pool(hyp_vm, &hyp_vm->host_kvm->arch.pkvm.stage2_teardown_mc);
 unlock:
 	hyp_read_unlock(&vm_table_lock);
 
@@ -944,7 +944,7 @@ unlock:
 
 int __pkvm_finalize_teardown_vm(pkvm_handle_t handle)
 {
-	struct kvm_hyp_memcache *mc, *stage2_mc;
+	struct kvm_hyp_memcache *stage2_mc;
 	struct pkvm_hyp_vm *hyp_vm;
 	struct kvm *host_kvm;
 	unsigned int idx;
@@ -973,7 +973,6 @@ int __pkvm_finalize_teardown_vm(pkvm_handle_t handle)
 	 * worrying about anybody else.
 	 */
 
-	mc = &host_kvm->arch.pkvm.teardown_mc;
 	stage2_mc = &host_kvm->arch.pkvm.stage2_teardown_mc;
 	destroy_hyp_vm_pgt(hyp_vm);
 	drain_hyp_pool(hyp_vm, stage2_mc);
