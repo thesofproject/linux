@@ -5,6 +5,7 @@
 #include <asm/kvm_host.h>
 #include <asm/kvm_pkvm_module.h>
 #include <asm/kvm_hypevents.h>
+#include <asm/module.h>
 
 #include <nvhe/mem_protect.h>
 #include <nvhe/modules.h>
@@ -157,11 +158,27 @@ const struct pkvm_module_ops module_ops = {
 	.tracing_mod_hyp_printk = tracing_mod_hyp_printk,
 };
 
-int __pkvm_init_module(void *module_init)
+static void *pkvm_module_hyp_va(struct pkvm_el2_module *mod, void *kern_va)
 {
-	int (*do_module_init)(const struct pkvm_module_ops *ops) = module_init;
+	return kern_va - mod->sections.start + mod->hyp_va;
+}
 
-	return do_module_init(&module_ops);
+int __pkvm_init_module(void *host_mod)
+{
+	int (*do_module_init)(const struct pkvm_module_ops *ops);
+	struct pkvm_el2_module *mod = kern_hyp_va(host_mod);
+	int ret;
+
+	ret = hyp_pin_shared_mem(mod, mod + 1);
+	if (ret)
+		return ret;
+
+	do_module_init = pkvm_module_hyp_va(mod, (void *)mod->init);
+	ret = do_module_init(&module_ops);
+
+	hyp_unpin_shared_mem(mod, mod + 1);
+
+	return ret;
 }
 
 #define MAX_DYNAMIC_HCALLS 128
