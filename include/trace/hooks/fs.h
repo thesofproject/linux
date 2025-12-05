@@ -9,6 +9,8 @@
 #define _TRACE_HOOK_FS_H
 
 #include <trace/hooks/vendor_hooks.h>
+struct f2fs_sb_info;
+struct va_format;
 
 DECLARE_HOOK(android_vh_ep_create_wakeup_source,
 	TP_PROTO(char *name, int len),
@@ -17,6 +19,10 @@ DECLARE_HOOK(android_vh_ep_create_wakeup_source,
 DECLARE_HOOK(android_vh_timerfd_create,
 	TP_PROTO(char *name, int len),
 	TP_ARGS(name, len));
+DECLARE_HOOK(android_vh_f2fs_printk,
+	TP_PROTO(unsigned long s_flag, struct va_format *vaf, int level, bool limit_rate),
+	TP_ARGS(s_flag, vaf, level, limit_rate));
+
 #endif /* _TRACE_HOOK_FS_H */
 
 /* This part must be outside protection */
