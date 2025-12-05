@@ -388,6 +388,9 @@ DECLARE_HOOK(android_vh_cpu_cgroup_css_free,
 	TP_PROTO(struct cgroup_subsys_state *css),
 	TP_ARGS(css));
 
+DECLARE_HOOK(android_vh_sched_pelt_multiplier,
+	TP_PROTO(unsigned int old, unsigned int cur, int *ret),
+	TP_ARGS(old, cur, ret));
 /* macro versions of hooks are no longer required */
 
 #endif /* _TRACE_HOOK_SCHED_H */
