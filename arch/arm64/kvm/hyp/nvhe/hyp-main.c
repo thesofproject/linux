@@ -752,6 +752,16 @@ static void sync_debug_state(struct pkvm_hyp_vcpu *hyp_vcpu)
 	}
 }
 
+static void __flush_hyp_reqs(struct pkvm_hyp_vcpu *hyp_vcpu)
+{
+	struct kvm_hyp_req *hyp_req = hyp_vcpu->vcpu.arch.hyp_reqs;
+
+	hyp_req->type = KVM_HYP_LAST_REQ;
+
+	/* One of the request might have been TYPE_MEM/DEST_VCPU_MEMCACHE */
+	pkvm_refill_memcache(hyp_vcpu);
+}
+
 static void flush_hyp_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu)
 {
 	struct kvm_vcpu *host_vcpu = hyp_vcpu->host_vcpu;
@@ -799,6 +809,9 @@ static void flush_hyp_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu)
 		if (ec_handler)
 			ec_handler(hyp_vcpu);
 		break;
+	case ARM_EXCEPTION_HYP_REQ:
+		__flush_hyp_reqs(hyp_vcpu);
+		break;
 	default:
 		BUG();
 	}
@@ -825,6 +838,7 @@ static void sync_hyp_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu, u32 exit_reason)
 
 	switch (ARM_EXCEPTION_CODE(exit_reason)) {
 	case ARM_EXCEPTION_IRQ:
+	case ARM_EXCEPTION_HYP_REQ:
 		break;
 	case ARM_EXCEPTION_TRAP:
 		esr_ec = ESR_ELx_EC(kvm_vcpu_get_esr(&hyp_vcpu->vcpu));
