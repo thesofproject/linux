@@ -27,9 +27,13 @@ enum pkvm_psci_notification {
  *				how pKVM maps module code. That space could also
  *				be used to map memory temporarily, when the
  *				fixmap granularity (PAGE_SIZE) is too small.
- * @map_module_page:		Used in conjunction with @alloc_module_va. When
+ * @map_module_pages:		Used in conjunction with @alloc_module_va. When
  *				@is_protected is not set, the page is also
  *				unmapped from the host stage-2.
+ * @unmap_module_pages:		Unmap pages previously allocated with
+ *				@map_module_pages. Does not restore the host
+ *				stage-2 mapping, use @hyp_donate_host for that
+ *				purpose.
  * @register_serial_driver:	Register a driver for a serial interface. The
  *				framework only needs a single callback
  *				@hyp_putc_cb which is expected to print a single
@@ -177,6 +181,9 @@ struct pkvm_module_ops {
 	void* (*tracing_reserve_entry)(unsigned long length);
 	void (*tracing_commit_entry)(void);
 	void (*tracing_mod_hyp_printk)(u8 fmt_id, u64 a, u64 b, u64 c, u64 d);
+	int (*map_module_pages)(u64 pfn, void *va, u64 nr_pages,
+				    enum kvm_pgtable_prot prot, bool is_protected);
+	int (*unmap_module_pages)(u64 pfn, void *va, u64 nr_pages);
 };
 
 int __pkvm_load_el2_module(struct module *this, unsigned long *token);
