@@ -51,6 +51,12 @@ struct kvm_ffa_descriptor_buffer {
 
 static struct kvm_ffa_descriptor_buffer ffa_desc_buf;
 
+struct ffa_translation {
+	struct list_head node;
+	u64 ipa;
+	phys_addr_t pa;
+};
+
 /*
  * Note that we don't currently lock these buffers explicitly, instead
  * relying on the locking of the hyp FFA buffers.
@@ -452,6 +458,83 @@ static u32 __ffa_host_unshare_ranges(struct ffa_mem_region_addr_range *ranges,
 	return i;
 }
 
+static int ffa_store_translation(struct ffa_mem_transfer *transfer, u64 ipa, phys_addr_t pa)
+{
+	struct ffa_translation *tr;
+
+	tr = hyp_alloc(sizeof(struct ffa_translation));
+	if (!tr)
+		return -ENOMEM;
+
+	tr->ipa = ipa;
+	tr->pa = pa;
+	list_add(&tr->node, &transfer->translations);
+
+	return 0;
+}
+
+static void ffa_guest_unshare_ranges(struct pkvm_hyp_vcpu *vcpu,
+				     struct ffa_mem_transfer *transfer)
+{
+	struct ffa_translation *translation, *tmp;
+
+	list_for_each_entry_safe(translation, tmp, &transfer->translations, node) {
+		WARN_ON(__pkvm_guest_unshare_ffa_page(vcpu, translation->ipa));
+		list_del(&translation->node);
+		hyp_free(translation);
+	}
+}
+
+static int ffa_guest_share_ranges(struct ffa_mem_region_addr_range *ranges,
+				  u32 nranges, struct pkvm_hyp_vcpu *vcpu,
+				  struct ffa_composite_mem_region *out_region,
+				  size_t reg_len,
+				  struct ffa_mem_transfer *transfer)
+{
+	struct ffa_mem_region_addr_range *range;
+	struct ffa_mem_region_addr_range *buf = out_region->constituents;
+	int i, j, ret;
+	u32 mem_region_idx = 0;
+	u64 ipa, pa;
+
+	for (i = 0; i < nranges; i++) {
+		range = &ranges[i];
+		for (j = 0; j < range->pg_cnt; j++) {
+			if (mem_region_idx * sizeof(struct ffa_mem_region_addr_range) >= reg_len) {
+				ret = -EINVAL;
+				goto unshare;
+			}
+
+			ipa = range->address + PAGE_SIZE * j;
+			ret = __pkvm_guest_share_ffa_page(vcpu, ipa, &pa);
+			if (ret)
+				goto unshare;
+
+			ret = ffa_store_translation(transfer, ipa, pa);
+			if (ret) {
+				WARN_ON(__pkvm_guest_unshare_ffa_page(vcpu, ipa));
+				goto unshare;
+			}
+
+			buf[mem_region_idx].address = pa;
+			buf[mem_region_idx].pg_cnt = 1;
+
+			if (mem_region_idx + 1 < mem_region_idx) {
+				ret = -EINVAL;
+				goto unshare;
+			}
+
+			mem_region_idx++;
+		}
+	}
+
+	out_region->addr_range_cnt = mem_region_idx;
+	return 0;
+unshare:
+	ffa_guest_unshare_ranges(vcpu, transfer);
+	return ret;
+}
+
 static int ffa_host_share_ranges(struct ffa_mem_region_addr_range *ranges,
 				 u32 nranges)
 {
@@ -541,6 +624,22 @@ out:
 	return;
 }
 
+static bool is_page_count_valid(struct ffa_composite_mem_region *reg,
+				u32 nranges)
+{
+	u32 i, pg_cnt = 0, new_pg_cnt;
+
+	for (i = 0; i < nranges; i++) {
+		new_pg_cnt = pg_cnt + reg->constituents[i].pg_cnt;
+		if (new_pg_cnt < pg_cnt)
+			return false;
+
+		pg_cnt = new_pg_cnt;
+	}
+
+	return pg_cnt == reg->total_pg_cnt;
+}
+
 static int __do_ffa_mem_xfer(const u64 func_id,
 			     struct arm_smccc_1_2_regs *res,
 			     struct kvm_cpu_context *ctxt,
@@ -551,7 +650,7 @@ static int __do_ffa_mem_xfer(const u64 func_id,
 	DECLARE_REG(u64, addr_mbz, ctxt, 3);
 	DECLARE_REG(u32, npages_mbz, ctxt, 4);
 	struct ffa_mem_region_attributes *ep_mem_access;
-	struct ffa_composite_mem_region *reg;
+	struct ffa_composite_mem_region *reg, *temp_reg;
 	struct ffa_mem_region *buf;
 	struct kvm_ffa_buffers *ffa_buf;
 	u32 offset, nr_ranges, checked_offset;
@@ -580,6 +679,8 @@ static int __do_ffa_mem_xfer(const u64 func_id,
 		transfer = hyp_alloc(sizeof(struct ffa_mem_transfer));
 		if (!transfer)
 			return -ENOMEM;
+
+		INIT_LIST_HEAD(&transfer->translations);
 	}
 
 	hyp_spin_lock(&kvm_ffa_hyp_lock);
@@ -600,7 +701,7 @@ static int __do_ffa_mem_xfer(const u64 func_id,
 	ep_mem_access = (void *)buf +
 			ffa_mem_desc_offset(buf, 0, hyp_ffa_version);
 	offset = ep_mem_access->composite_off;
-	if (!offset || buf->ep_count != 1 || buf->sender_id != HOST_FFA_ID) {
+	if (!offset || buf->ep_count != 1 || buf->sender_id != hyp_vcpu_to_ffa_handle(hyp_vcpu)) {
 		ffa_to_smccc_error(res, FFA_RET_INVALID_PARAMETERS);
 		goto out_unlock;
 	}
@@ -623,7 +724,40 @@ static int __do_ffa_mem_xfer(const u64 func_id,
 	}
 
 	nr_ranges /= sizeof(reg->constituents[0]);
-	ret = ffa_host_share_ranges(reg->constituents, nr_ranges);
+	if (hyp_vcpu) {
+		if (!is_page_count_valid(reg, nr_ranges)) {
+			ffa_to_smccc_error(res, FFA_RET_INVALID_PARAMETERS);
+			goto out_unlock;
+		}
+
+		size_t translated_sz = reg->total_pg_cnt * sizeof(struct ffa_mem_region_addr_range)
+			+ offset;
+		if (translated_sz > PAGE_SIZE) {
+			ffa_to_smccc_error(res, FFA_RET_INVALID_PARAMETERS);
+			goto out_unlock;
+		}
+
+		memcpy(ffa_desc_buf.buf, buf, offset);
+		temp_reg = ffa_desc_buf.buf + offset;
+		ret = ffa_guest_share_ranges(reg->constituents, nr_ranges, hyp_vcpu,
+					     temp_reg, ffa_desc_buf.len - offset,
+					     transfer);
+		if (!ret) {
+			/* Re-adjust the size of the transfer after painting with PAs */
+			if (temp_reg->addr_range_cnt > reg->addr_range_cnt) {
+				u32 extra_sz = (temp_reg->addr_range_cnt - reg->addr_range_cnt) *
+					sizeof(struct ffa_mem_region_addr_range);
+				fraglen += extra_sz;
+				len += extra_sz;
+
+				nr_ranges = reg->addr_range_cnt = temp_reg->addr_range_cnt;
+			}
+
+			memcpy(reg->constituents, temp_reg->constituents,
+			       temp_reg->addr_range_cnt * sizeof(struct ffa_mem_region_addr_range));
+		}
+	} else
+		ret = ffa_host_share_ranges(reg->constituents, nr_ranges);
 	if (ret)
 		goto out_unlock;
 
@@ -653,7 +787,10 @@ out_unlock:
 		ffa_to_smccc_res(res, linux_errno_to_ffa(ret));
 	return ret;
 err_unshare:
-	WARN_ON(ffa_host_unshare_ranges(reg->constituents, nr_ranges));
+	if (hyp_vcpu)
+		ffa_guest_unshare_ranges(hyp_vcpu, transfer);
+	else
+		WARN_ON(ffa_host_unshare_ranges(reg->constituents, nr_ranges));
 	goto out_unlock;
 }
 
