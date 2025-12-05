@@ -1109,6 +1109,7 @@ unlock:
 }
 
 #define MODULE_PROT_ALLOWLIST (KVM_PGTABLE_PROT_RWX |		\
+			       KVM_PGTABLE_PROT_DEVICE |	\
 			       KVM_PGTABLE_PROT_NORMAL_NC |	\
 			       KVM_PGTABLE_PROT_PXN |		\
 			       KVM_PGTABLE_PROT_UXN)
