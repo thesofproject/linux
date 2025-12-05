@@ -12,6 +12,7 @@
 
 #include <asm/kvm_emulate.h>
 
+#include <nvhe/alloc.h>
 #include <nvhe/mem_protect.h>
 #include <nvhe/memory.h>
 #include <nvhe/mm.h>
@@ -781,24 +782,19 @@ void __pkvm_unreserve_vm(pkvm_handle_t handle)
  * Unmap the donated memory from the host at stage 2.
  *
  * host_kvm: A pointer to the host's struct kvm.
- * vm_hva: The host va of the area being donated for the VM state.
- *	   Must be page aligned.
  * pgd_hva: The host va of the area being donated for the stage-2 PGD for
  *	    the VM. Must be page aligned. Its size is implied by the VM's
  *	    VTCR.
- * last_ran_hva: The host va of the area being donated for hyp to use to track
- *		 the most recent physical cpu on which each vcpu has run.
  * Return 0 success, negative error code on failure.
  */
-int __pkvm_init_vm(struct kvm *host_kvm, unsigned long vm_hva,
-		   unsigned long pgd_hva, unsigned long last_ran_hva)
+int __pkvm_init_vm(struct kvm *host_kvm, unsigned long pgd_hva)
 {
 	struct pkvm_hyp_vm *hyp_vm = NULL;
 	int *last_ran = NULL;
-	size_t vm_size, pgd_size, last_ran_size;
 	unsigned int nr_vcpus;
 	pkvm_handle_t handle;
 	void *pgd = NULL;
+	size_t pgd_size;
 	int ret;
 
 	ret = hyp_pin_shared_mem(host_kvm, host_kvm + 1);
@@ -817,23 +813,24 @@ int __pkvm_init_vm(struct kvm *host_kvm, unsigned long vm_hva,
 		goto err_unpin_kvm;
 	}
 
-	vm_size = pkvm_get_hyp_vm_size(nr_vcpus);
-	last_ran_size = pkvm_get_last_ran_size();
+	hyp_vm = hyp_alloc(pkvm_get_hyp_vm_size(nr_vcpus));
+	if (!hyp_vm) {
+		ret = hyp_alloc_errno();
+		goto err_unpin_kvm;
+	}
+
+	last_ran = hyp_alloc(pkvm_get_last_ran_size());
+	if (!last_ran) {
+		ret = hyp_alloc_errno();
+		goto err_free_vm;
+	}
+
 	pgd_size = kvm_pgtable_stage2_pgd_size(host_mmu.arch.mmu.vtcr);
-
-	ret = -ENOMEM;
-
-	hyp_vm = map_donated_memory(vm_hva, vm_size);
-	if (!hyp_vm)
-		goto err_remove_mappings;
-
-	last_ran = map_donated_memory(last_ran_hva, last_ran_size);
-	if (!last_ran)
-		goto err_remove_mappings;
-
 	pgd = map_donated_memory_noclear(pgd_hva, pgd_size);
-	if (!pgd)
-		goto err_remove_mappings;
+	if (!pgd) {
+		ret = -EINVAL;
+		goto err_free_last_ran;
+	}
 
 	init_pkvm_hyp_vm(host_kvm, hyp_vm, last_ran, nr_vcpus, handle);
 
@@ -849,9 +846,11 @@ int __pkvm_init_vm(struct kvm *host_kvm, unsigned long vm_hva,
 	return 0;
 
 err_remove_mappings:
-	unmap_donated_memory(hyp_vm, vm_size);
-	unmap_donated_memory(last_ran, last_ran_size);
 	unmap_donated_memory(pgd, pgd_size);
+err_free_last_ran:
+	hyp_free(last_ran);
+err_free_vm:
+	hyp_free(hyp_vm);
 err_unpin_kvm:
 	hyp_unpin_shared_mem(host_kvm, host_kvm + 1);
 	return ret;
@@ -862,22 +861,19 @@ err_unpin_kvm:
  *
  * handle: The hypervisor handle for the vm.
  * host_vcpu: A pointer to the corresponding host vcpu.
- * vcpu_hva: The host va of the area being donated for the vcpu state.
- *	     Must be page aligned. The size of the area must be equal to
- *	     the page-aligned size of 'struct pkvm_hyp_vcpu'.
+ *
  * Return 0 on success, negative error code on failure.
  */
-int __pkvm_init_vcpu(pkvm_handle_t handle, struct kvm_vcpu *host_vcpu,
-		     unsigned long vcpu_hva)
+int __pkvm_init_vcpu(pkvm_handle_t handle, struct kvm_vcpu *host_vcpu)
 {
 	struct pkvm_hyp_vcpu *hyp_vcpu;
 	struct pkvm_hyp_vm *hyp_vm;
 	unsigned int idx;
 	int ret;
 
-	hyp_vcpu = map_donated_memory(vcpu_hva, sizeof(*hyp_vcpu));
+	hyp_vcpu = hyp_alloc(sizeof(*hyp_vcpu));
 	if (!hyp_vcpu)
-		return -ENOMEM;
+		return hyp_alloc_errno();
 
 	hyp_read_lock(&vm_table_lock);
 
@@ -910,7 +906,7 @@ unlock_vm:
 	hyp_read_unlock(&vm_table_lock);
 
 	if (ret)
-		unmap_donated_memory(hyp_vcpu, sizeof(*hyp_vcpu));
+		hyp_free(hyp_vcpu);
 	return ret;
 }
 
@@ -975,8 +971,6 @@ unlock:
 int __pkvm_finalize_teardown_vm(pkvm_handle_t handle)
 {
 	struct kvm_hyp_memcache *mc, *stage2_mc;
-	size_t vm_size, last_ran_size;
-	int __percpu *last_vcpu_ran;
 	struct pkvm_hyp_vm *hyp_vm;
 	struct kvm *host_kvm;
 	unsigned int idx;
@@ -1031,16 +1025,11 @@ int __pkvm_finalize_teardown_vm(pkvm_handle_t handle)
 		if (pkvm_hyp_vcpu_is_protected(hyp_vcpu))
 			teardown_sve_state(hyp_vcpu);
 
-		teardown_donated_memory(mc, hyp_vcpu, sizeof(*hyp_vcpu));
+		hyp_free(hyp_vcpu);
 	}
 
-	last_vcpu_ran = hyp_vm->kvm.arch.mmu.last_vcpu_ran;
-	last_ran_size = pkvm_get_last_ran_size();
-	teardown_donated_memory(mc, (__force void *)last_vcpu_ran,
-				last_ran_size);
-
-	vm_size = pkvm_get_hyp_vm_size(hyp_vm->kvm.created_vcpus);
-	teardown_donated_memory(mc, hyp_vm, vm_size);
+	hyp_free((__force void *)hyp_vm->kvm.arch.mmu.last_vcpu_ran);
+	hyp_free(hyp_vm);
 	hyp_unpin_shared_mem(host_kvm, host_kvm + 1);
 	return 0;
 
