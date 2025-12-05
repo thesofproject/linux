@@ -77,7 +77,19 @@ do {							\
 
 #define trace_hyp_printk(fmt, ...) \
 	__trace_hyp_printk_N(fmt, __VA_ARGS__)
+
+#ifdef CONFIG_PROTECTED_NVHE_FTRACE
+void hyp_ftrace_setup_core(void);
+int hyp_ftrace_setup(unsigned long *funcs, unsigned long *funcs_end,
+		     unsigned long hyp_kern_offset, void *tramp);
+void hyp_ftrace_ret_flush(void);
 #else
+static inline void hyp_ftrace_setup_core(void) { }
+static inline void hyp_ftrace_ret_flush(void) { }
+static inline int hyp_ftrace_setup(unsigned long *funcs, unsigned long *funcs_end,
+				   unsigned long hyp_kern_offset, void *tramp) { return 0; }
+#endif /* CONFIG_PROTECTED_NVHE_FTRACE */
+#else /* CONFIG_TRACING */
 static inline void *tracing_reserve_entry(unsigned long length) { return NULL; }
 static inline void tracing_commit_entry(void) { }
 static inline int register_hyp_event_ids(void *event_ids, size_t nr_events)
@@ -97,5 +109,8 @@ static inline int __pkvm_reset_tracing(unsigned int cpu) { return -ENODEV; }
 static inline int __pkvm_swap_reader_tracing(unsigned int cpu) { return -ENODEV; }
 static inline int __pkvm_enable_event(unsigned short id, bool enable)  { return -ENODEV; }
 #define trace_hyp_printk(fmt, ...)
+
+static inline void hyp_ftrace_setup_core(void) { }
+static inline void hyp_ftrace_ret_flush(void) { }
 #endif
 #endif

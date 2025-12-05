@@ -19,6 +19,7 @@
 #include <nvhe/mm.h>
 #include <nvhe/pkvm.h>
 #include <nvhe/serial.h>
+#include <nvhe/trace/trace.h>
 #include <nvhe/trap_handler.h>
 
 unsigned long hyp_nr_cpus;
@@ -391,6 +392,8 @@ void __noreturn __pkvm_init_finalise(void)
 	ret = hyp_create_fixmap();
 	if (ret)
 		goto out;
+
+	hyp_ftrace_setup_core();
 
 	ret = fix_host_ownership();
 	if (ret)
