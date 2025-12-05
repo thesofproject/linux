@@ -1,1 +1,22 @@
 [abi_symbol_list]
+  __balance_callbacks
+  cpu_busy_with_softirqs
+  set_next_entity
+  __traceiter_android_rvh_before_do_sched_yield
+  __traceiter_android_rvh_build_perf_domains
+  __traceiter_android_rvh_cpu_capacity_show
+  __traceiter_android_rvh_cpufreq_transition
+  __traceiter_android_vh_alter_mutex_list_add
+  __traceiter_android_vh_cpu_cgroup_css_free
+  __traceiter_android_vh_freq_qos_add_request
+  __traceiter_android_vh_freq_qos_remove_request
+  __traceiter_android_vh_freq_qos_update_request
+  __tracepoint_android_rvh_before_do_sched_yield
+  __tracepoint_android_rvh_build_perf_domains
+  __tracepoint_android_rvh_cpu_capacity_show
+  __tracepoint_android_rvh_cpufreq_transition
+  __tracepoint_android_vh_alter_mutex_list_add
+  __tracepoint_android_vh_cpu_cgroup_css_free
+  __tracepoint_android_vh_freq_qos_add_request
+  __tracepoint_android_vh_freq_qos_remove_request
+  __tracepoint_android_vh_freq_qos_update_request
