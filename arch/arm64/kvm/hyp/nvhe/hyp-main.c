@@ -840,7 +840,7 @@ static void flush_hyp_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu)
 	hyp_vcpu->exit_code = 0;
 }
 
-static void sync_hyp_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu, u32 exit_reason)
+static void sync_hyp_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 {
 	struct kvm_vcpu *host_vcpu = hyp_vcpu->host_vcpu;
 	hyp_entry_exit_handler_fn ec_handler;
@@ -857,7 +857,7 @@ static void sync_hyp_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu, u32 exit_reason)
 	sync_hyp_vgic_state(hyp_vcpu);
 	sync_hyp_timer_state(hyp_vcpu);
 
-	switch (ARM_EXCEPTION_CODE(exit_reason)) {
+	switch (ARM_EXCEPTION_CODE(*exit_code)) {
 	case ARM_EXCEPTION_IRQ:
 	case ARM_EXCEPTION_HYP_REQ:
 		break;
@@ -869,8 +869,16 @@ static void sync_hyp_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu, u32 exit_reason)
 		else
 			ec_handler = exit_hyp_vm_handlers[esr_ec];
 
-		if (ec_handler)
+		if (ec_handler) {
 			ec_handler(hyp_vcpu);
+		} else {
+			/*
+			 * If we have no handler we should not be punting this
+			 * trap to Host, as it will have no sync'ed context to
+			 * handle (for example: ESR_EL2).
+			 */
+			vcpu_illegal_trap(&hyp_vcpu->vcpu, exit_code);
+		}
 		break;
 	case ARM_EXCEPTION_EL1_SERROR:
 	case ARM_EXCEPTION_IL:
@@ -884,7 +892,7 @@ static void sync_hyp_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu, u32 exit_reason)
 	else
 		host_vcpu->arch.iflags = hyp_vcpu->vcpu.arch.iflags;
 
-	hyp_vcpu->exit_code = exit_reason;
+	hyp_vcpu->exit_code = *exit_code;
 }
 
 static void handle___pkvm_vcpu_load(struct kvm_cpu_context *host_ctxt)
@@ -995,7 +1003,7 @@ static void handle___kvm_vcpu_run(struct kvm_cpu_context *host_ctxt)
 {
 	struct pkvm_hyp_vcpu *hyp_vcpu;
 	struct kvm_vcpu *host_vcpu;
-	int ret = ARM_EXCEPTION_IL;
+	u64 ret = ARM_EXCEPTION_IL;
 
 	host_vcpu = get_host_hyp_vcpus(host_ctxt, 1, &hyp_vcpu);
 
@@ -1020,7 +1028,7 @@ static void handle___kvm_vcpu_run(struct kvm_cpu_context *host_ctxt)
 
 		flush_hyp_vcpu(hyp_vcpu);
 		ret = __kvm_vcpu_run(&hyp_vcpu->vcpu);
-		sync_hyp_vcpu(hyp_vcpu, ret);
+		sync_hyp_vcpu(hyp_vcpu, &ret);
 	} else {
 		struct kvm_vcpu *vcpu = kern_hyp_va(host_vcpu);
 
