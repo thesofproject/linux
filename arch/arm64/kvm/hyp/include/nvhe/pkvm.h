@@ -55,6 +55,8 @@ struct pkvm_hyp_vm {
 	struct hyp_pool pool;
 	hyp_spinlock_t pgtable_lock;
 
+	hyp_spinlock_t vcpus_lock;
+
 	/*
 	 * True when the guest is being torn down. When in this state, the
 	 * guest's vCPUs can't be loaded anymore, but its pages can be
