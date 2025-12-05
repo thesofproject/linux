@@ -16,6 +16,7 @@
 #include <linux/balloon_compaction.h>
 #include <linux/oom.h>
 #include <linux/wait.h>
+#include <linux/mem_relinquish.h>
 #include <linux/mm.h>
 #include <linux/page_reporting.h>
 
@@ -1178,6 +1179,9 @@ static int virtballoon_restore(struct virtio_device *vdev)
 
 static int virtballoon_validate(struct virtio_device *vdev)
 {
+	if (WARN_ON(page_relinquish_disallowed()))
+		return -EINVAL;
+
 	/*
 	 * Inform the hypervisor that our pages are poisoned or
 	 * initialized. If we cannot do that then we should disable
