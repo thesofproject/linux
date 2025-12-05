@@ -19,6 +19,7 @@ int __pkvm_init_module(void *host_mod);
 int __pkvm_register_hcall(unsigned long hfn_hyp_va);
 int handle_host_dynamic_hcall(struct user_pt_regs *regs, int id);
 void __pkvm_close_module_registration(void);
+bool module_handle_host_perm_fault(struct user_pt_regs *regs, u64 esr, u64 addr);
 #else
 static inline int __pkvm_init_module(void *module_init) { return -EOPNOTSUPP; }
 static inline int
@@ -29,4 +30,5 @@ handle_host_dynamic_hcall(struct kvm_cpu_context *host_ctxt, int id)
 	return HCALL_UNHANDLED;
 }
 static inline void __pkvm_close_module_registration(void) { }
+bool module_handle_host_perm_fault(struct user_pt_regs *regs, u64 esr, u64 addr) { return false; }
 #endif
