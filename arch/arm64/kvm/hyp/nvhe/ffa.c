@@ -590,6 +590,32 @@ err_unmap:
 	goto out_unlock;
 }
 
+static int __handle_mem_protect_err(struct pkvm_hyp_vcpu *hyp_vcpu, u64 ipa, int ret)
+{
+	struct kvm_hyp_req *req;
+
+	switch (ret) {
+	case -ENOENT:
+		req = pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_MAP);
+		if (!req)
+			return -ENOSPC;
+
+		req->map.guest_ipa = ipa;
+		req->map.size = PAGE_SIZE;
+		break;
+	case -E2BIG:
+		req = pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_SPLIT);
+		if (!req)
+			return -ENOSPC;
+
+		req->split.guest_ipa = ALIGN_DOWN(ipa, PMD_SIZE);
+		req->split.size = PMD_SIZE;
+		break;
+	}
+
+	return ret;
+}
+
 static int do_ffa_rxtx_guest_map(struct kvm_cpu_context *ctxt, struct pkvm_hyp_vcpu *hyp_vcpu)
 {
 	DECLARE_REG(phys_addr_t, tx, ctxt, 1);
@@ -598,7 +624,6 @@ static int do_ffa_rxtx_guest_map(struct kvm_cpu_context *ctxt, struct pkvm_hyp_v
 	int ret = 0;
 	u64 rx_va, tx_va;
 	struct kvm_ffa_buffers *ffa_buf;
-	struct kvm_hyp_req *req;
 
 	if (npages != (KVM_FFA_MBOX_NR_PAGES * PAGE_SIZE) / FFA_PAGE_SIZE)
 		return -EINVAL;
@@ -631,19 +656,8 @@ out_unlock:
 out_err_with_tx:
 	WARN_ON(__pkvm_guest_unshare_hyp_page(hyp_vcpu, tx));
 out_err:
-	if (ret == -EFAULT || ret == -ENOENT) {
-		req = pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_MAP);
-		if (!req || !pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_MAP))
-			return -ENOSPC;
-
-		req->map.guest_ipa = tx;
-		req->map.size = PAGE_SIZE;
-
-		req++;
-
-		req->map.guest_ipa = rx;
-		req->map.size = PAGE_SIZE;
-	}
+	ret = __handle_mem_protect_err(hyp_vcpu, tx, ret);
+	ret = __handle_mem_protect_err(hyp_vcpu, rx, ret);
 
 	return ret;
 }
@@ -784,7 +798,6 @@ static int ffa_guest_share_ranges(struct ffa_mem_region_addr_range *ranges,
 	int i, j, ret;
 	u32 mem_region_idx = 0;
 	u64 ipa, pa, offset;
-	struct kvm_hyp_req *req;
 
 	for (i = 0; i < nranges; i++) {
 		range = &ranges[i];
@@ -800,20 +813,8 @@ static int ffa_guest_share_ranges(struct ffa_mem_region_addr_range *ranges,
 				goto unshare;
 			}
 
-			ret = __pkvm_guest_share_ffa_page(vcpu, ipa, &pa);
-			if (ret == -EFAULT || ret == -ENOENT) {
-				req = pkvm_hyp_req_reserve(vcpu, KVM_HYP_REQ_TYPE_MAP);
-				if (!req) {
-					ret = -ENOSPC;
-					goto unshare;
-				}
-
-				req->map.guest_ipa = ipa;
-				req->map.size = PAGE_SIZE;
-				goto unshare;
-			}
-
-			/* Any other uncaught error ? abort */
+			ret = __handle_mem_protect_err(vcpu, ipa,
+					__pkvm_guest_share_ffa_page(vcpu, ipa, &pa));
 			if (ret)
 				goto unshare;
 
@@ -1725,8 +1726,8 @@ bool kvm_guest_ffa_handler(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 	struct kvm_vcpu *vcpu = &hyp_vcpu->vcpu;
 	struct kvm_cpu_context *ctxt = &vcpu->arch.ctxt;
 	struct arm_smccc_1_2_regs res;
-	int ret, hyp_alloc_ret;
 	struct kvm_hyp_req *req;
+	int ret;
 
 	DECLARE_REG(u64, func_id, ctxt, 0);
 
@@ -1801,29 +1802,40 @@ bool kvm_guest_ffa_handler(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 		break;
 	}
 
-	if (ret == -EFAULT || ret == -ENOMEM || ret == -ENOENT) {
-		hyp_alloc_ret = hyp_alloc_errno();
-		if (hyp_alloc_ret == -ENOMEM) {
+	switch (ret) {
+	case -ENOMEM:
+		/* -ENOMEM can be raised either by hyp_alloc() or the vCPU memcache */
+		switch (hyp_alloc_errno()) {
+		case -ENOMEM:
 			req = pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_MEM);
 			if (!req)
 				goto out_guest_with_ret;
 
 			req->mem.dest = REQ_MEM_DEST_HYP_ALLOC;
 			req->mem.nr_pages = hyp_alloc_missing_donations();
-		} else if (hyp_alloc_ret) {
+			break;
+		case 0:
+			req = pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_MEM);
+			if (!req)
+				goto out_guest_with_ret;
+
+			req->mem.dest = REQ_MEM_DEST_VCPU_MEMCACHE;
+			req->mem.nr_pages = kvm_mmu_cache_min_pages(&hyp_vcpu->vcpu.kvm->arch.mmu);
+			break;
+		default:
 			/* Nothing the host can do for us, let the HVC fail */
-			ret = hyp_alloc_ret;
+			ret = hyp_alloc_errno();
 			goto out_guest_with_ret;
 		}
-
-		req = pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_MEM);
-		if (!req)
-			goto out_guest_with_ret;
-
-		req->mem.dest = REQ_MEM_DEST_VCPU_MEMCACHE;
-		req->mem.nr_pages = kvm_mmu_cache_min_pages(&hyp_vcpu->vcpu.kvm->arch.mmu);
-
-		/* Go back to the host and replay the last guest instruction */
+		fallthrough;
+	case -ENOENT:
+		fallthrough;
+	case -E2BIG:
+		/*
+		 * ENOENT and E2BIG have already been handled earlier with
+		 * __handle_mem_protect_err(). Go back to the host and replay the last guest
+		 * instruction.
+		 */
 		write_sysreg_el2(read_sysreg_el2(SYS_ELR) - 4, SYS_ELR);
 		*exit_code = ARM_EXCEPTION_HYP_REQ;
 		return false;
