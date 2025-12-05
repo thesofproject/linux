@@ -40,6 +40,12 @@ struct pkvm_hyp_vcpu {
 	int power_state;
 };
 
+/* Holds the hyp address of the mapped RX/TX buffers inside the hypervisor */
+struct kvm_ffa_buffers {
+	void *tx;
+	void *rx;
+};
+
 /*
  * Holds the relevant data for running a vm in protected mode.
  */
@@ -68,6 +74,8 @@ struct pkvm_hyp_vm {
 	 * reclaimed by the host.
 	 */
 	bool is_dying;
+
+	struct kvm_ffa_buffers ffa_buf;
 
 	/* Array of the hyp vCPU structures for this VM. */
 	struct pkvm_hyp_vcpu *vcpus[];
