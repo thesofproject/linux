@@ -797,52 +797,6 @@ static void host_inject_abort(struct kvm_cpu_context *host_ctxt)
 	write_sysreg_el2(spsr, SYS_SPSR);
 }
 
-#define MAX_HOST_FAULT_HANDLERS 16
-
-static int
-(*perm_fault_handlers[MAX_HOST_FAULT_HANDLERS])(struct user_pt_regs *regs, u64 esr, u64 addr);
-
-int hyp_register_host_perm_fault_handler(int (*cb)(struct user_pt_regs *regs, u64 esr, u64 addr))
-{
-	static DEFINE_HYP_SPINLOCK(handlers_lock);
-	int i;
-
-	hyp_spin_lock(&handlers_lock);
-
-	for (i = 0; i < MAX_HOST_FAULT_HANDLERS; i++) {
-		if (!perm_fault_handlers[i]) {
-			WRITE_ONCE(perm_fault_handlers[i], cb);
-			break;
-		}
-	}
-
-	hyp_spin_unlock(&handlers_lock);
-
-	return i >= MAX_HOST_FAULT_HANDLERS ? -EBUSY : 0;
-}
-
-static int handle_host_perm_fault(struct kvm_cpu_context *host_ctxt, u64 esr, u64 addr)
-{
-	int (*cb)(struct user_pt_regs *regs, u64 esr, u64 addr);
-	bool handled = false;
-	int i;
-
-	for (i = 0; i < MAX_HOST_FAULT_HANDLERS; i++) {
-		int err;
-
-		cb = READ_ONCE(perm_fault_handlers[i]);
-		if (!cb)
-			break;
-
-		handled = true;
-
-		err = cb(&host_ctxt->regs, esr, addr);
-		if (err)
-			return err;
-	}
-
-	return handled ? 0 : -EPERM;
-}
 
 void handle_host_mem_abort(struct kvm_cpu_context *host_ctxt)
 {
@@ -869,10 +823,19 @@ void handle_host_mem_abort(struct kvm_cpu_context *host_ctxt)
 	BUG_ON(!(fault.hpfar_el2 & HPFAR_EL2_NS));
 	addr = FIELD_GET(HPFAR_EL2_FIPA, fault.hpfar_el2) << 12;
 
-	ret = host_stage2_idmap(addr);
 
-	if ((esr & ESR_ELx_FSC_TYPE) == ESR_ELx_FSC_PERM)
-		ret = handle_host_perm_fault(host_ctxt, esr, addr);
+	switch (esr & ESR_ELx_FSC_TYPE) {
+	case ESR_ELx_FSC_FAULT:
+		ret = host_stage2_idmap(addr);
+		break;
+	case ESR_ELx_FSC_PERM:
+		ret = module_handle_host_perm_fault(&host_ctxt->regs, esr, addr);
+		ret = ret ? 0 /* handled */ : -EPERM;
+		break;
+	default:
+		ret = -EPERM;
+		break;
+	}
 
 	if (ret == -EPERM)
 		host_inject_abort(host_ctxt);
