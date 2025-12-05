@@ -15,6 +15,8 @@
 
 struct mutex;
 struct mutex_waiter;
+struct rt_mutex_base;
+struct rw_semaphore;
 
 DECLARE_HOOK(android_vh_alter_mutex_list_add,
 	TP_PROTO(struct mutex *lock,
@@ -25,6 +27,33 @@ DECLARE_HOOK(android_vh_alter_mutex_list_add,
 DECLARE_HOOK(android_vh_mutex_unlock_slowpath,
 	TP_PROTO(struct mutex *lock),
 	TP_ARGS(lock));
+
+DECLARE_HOOK(android_vh_mutex_wait_start,
+	TP_PROTO(struct mutex *lock),
+	TP_ARGS(lock));
+DECLARE_HOOK(android_vh_mutex_wait_finish,
+	TP_PROTO(struct mutex *lock),
+	TP_ARGS(lock));
+
+DECLARE_HOOK(android_vh_rtmutex_wait_start,
+	TP_PROTO(struct rt_mutex_base *lock),
+	TP_ARGS(lock));
+DECLARE_HOOK(android_vh_rtmutex_wait_finish,
+	TP_PROTO(struct rt_mutex_base *lock),
+	TP_ARGS(lock));
+
+DECLARE_HOOK(android_vh_rwsem_read_wait_start,
+	TP_PROTO(struct rw_semaphore *sem),
+	TP_ARGS(sem));
+DECLARE_HOOK(android_vh_rwsem_read_wait_finish,
+	TP_PROTO(struct rw_semaphore *sem),
+	TP_ARGS(sem));
+DECLARE_HOOK(android_vh_rwsem_write_wait_start,
+	TP_PROTO(struct rw_semaphore *sem),
+	TP_ARGS(sem));
+DECLARE_HOOK(android_vh_rwsem_write_wait_finish,
+	TP_PROTO(struct rw_semaphore *sem),
+	TP_ARGS(sem));
 
 #endif /* _TRACE_HOOK_DTASK_H */
 

@@ -646,6 +646,7 @@ __mutex_lock_common(struct mutex *lock, unsigned int state, unsigned int subclas
 			goto err_early_kill;
 	}
 
+	trace_android_vh_mutex_wait_start(lock);
 	__set_task_blocked_on(current, lock);
 	set_current_state(state);
 	trace_contention_begin(lock, LCB_F_MUTEX);
@@ -718,6 +719,7 @@ __mutex_lock_common(struct mutex *lock, unsigned int state, unsigned int subclas
 acquired:
 	__clear_task_blocked_on(current, lock);
 	__set_current_state(TASK_RUNNING);
+	trace_android_vh_mutex_wait_finish(lock);
 
 	if (ww_ctx) {
 		/*
@@ -748,6 +750,7 @@ skip_wait:
 err:
 	__clear_task_blocked_on(current, lock);
 	__set_current_state(TASK_RUNNING);
+	trace_android_vh_mutex_wait_finish(lock);
 	__mutex_remove_waiter(lock, &waiter);
 err_early_kill:
 	WARN_ON(__get_task_blocked_on(current));
