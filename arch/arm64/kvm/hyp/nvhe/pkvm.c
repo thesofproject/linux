@@ -173,12 +173,11 @@ static int pkvm_vcpu_init_traps(struct pkvm_hyp_vcpu *hyp_vcpu)
 	vcpu->arch.mdcr_el2 = 0;
 
 	pkvm_vcpu_reset_hcr(vcpu);
+	vcpu_set_hcrx(vcpu);
 
 	if ((!pkvm_hyp_vcpu_is_protected(hyp_vcpu))) {
 		struct kvm_vcpu *host_vcpu = hyp_vcpu->host_vcpu;
 
-		/* Trust the host for non-protected vcpu features. */
-		vcpu->arch.hcrx_el2 = host_vcpu->arch.hcrx_el2;
 		memcpy(vcpu->arch.fgt, host_vcpu->arch.fgt, sizeof(vcpu->arch.fgt));
 		return 0;
 	}
@@ -189,7 +188,6 @@ static int pkvm_vcpu_init_traps(struct pkvm_hyp_vcpu *hyp_vcpu)
 
 	pvm_init_traps_hcr(vcpu);
 	pvm_init_traps_mdcr(vcpu);
-	vcpu_set_hcrx(vcpu);
 
 	return 0;
 }
