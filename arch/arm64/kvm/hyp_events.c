@@ -389,6 +389,70 @@ static void hyp_ftrace_init(void)
 	/* For the hypervisor to compute its hyp_kern_offset */
 	kvm_nvhe_sym(__hyp_text_start_kern) = (unsigned long)__hyp_text_start;
 }
+
+extern void kvm_nvhe_sym(__hyp_ftrace_tramp)(void);
+
+static int hyp_ftrace_init_mod_tramp(struct pkvm_el2_module *mod)
+{
+	u64 tramp_dst = (u64)kern_hyp_va(lm_alias((unsigned long)kvm_nvhe_sym(__hyp_ftrace_tramp)));
+	enum aarch64_insn_register reg = AARCH64_INSN_REG_16;
+	void *tramp = mod->text.end - 20; /* see module.lds.h */
+	static u32 insns[5];
+	u32 *insn = insns;
+	int shift = 0;
+
+	/*
+	 * adrp is not enough for that massive jump between the private and
+	 * linear, it's not a trampoline we need, it's a space shuttle!
+	 *
+	 * XXX: Relocate .hyp.text into the private range
+	 */
+
+	if (*insn)
+		goto write;
+
+	while (shift < 64) {
+		u64 mask = GENMASK(shift + 15, shift);
+
+		*insn = cpu_to_le32(
+			aarch64_insn_gen_movewide(
+				AARCH64_INSN_REG_16,
+				(tramp_dst & mask) >> shift,
+				shift,
+				AARCH64_INSN_VARIANT_64BIT,
+				shift ? AARCH64_INSN_MOVEWIDE_KEEP : AARCH64_INSN_MOVEWIDE_ZERO));
+		shift += 16;
+		insn++;
+	}
+
+	*insn = cpu_to_le32(aarch64_insn_gen_branch_reg(reg, AARCH64_INSN_BRANCH_NOLINK));
+
+write:
+	return aarch64_insn_copy((void *)tramp, insns, sizeof(insns))
+		? 0 : -EINVAL;
+}
+
+static void hyp_ftrace_init_mod(struct pkvm_el2_module *mod)
+{
+	/* Install a trampoline to reach __hyp_ftrace_tramp */
+	int ret = hyp_ftrace_init_mod_tramp(mod);
+
+	if (ret)
+		pr_warn("Failed to install trampoline for hyp ftrace\n");
+
+	mutex_lock(&hyp_ftrace_funcs_lock);
+
+	hyp_ftrace_funcs_init(mod->patchable_function_entries.start,
+			      mod->patchable_function_entries.end,
+			      mod->sections.start - mod->hyp_va,
+			      ret);
+
+	mutex_unlock(&hyp_ftrace_funcs_lock);
+
+	sync_icache_aliases((unsigned long)mod->text.start,
+			    (unsigned long)mod->text.end);
+}
+
 static int enable_func_hyp_event(struct hyp_event *event, bool enable)
 {
 	unsigned short id = event->id;
@@ -422,6 +486,7 @@ handled:
 	return ret;
 }
 #else
+static void hyp_ftrace_init_mod(struct pkvm_el2_module *mod) { }
 static void hyp_ftrace_init(void) { }
 static int enable_func_hyp_event(struct hyp_event *event, bool enable)
 {
@@ -820,12 +885,17 @@ int hyp_trace_init_events(void)
 	return 0;
 }
 
-int hyp_trace_init_mod_events(struct hyp_event *event,
-			      struct hyp_event_id *event_id, int nr_events,
-			      struct hyp_printk_fmt *fmt, int nr_fmts)
+int hyp_trace_init_mod_events(struct pkvm_el2_module *mod)
 {
+	struct hyp_event_id *event_id = mod->event_ids.start;
+	struct hyp_printk_fmt *fmt = mod->hyp_printk_fmts;
+	struct hyp_event *event = mod->hyp_events;
+	size_t nr_events = mod->nr_hyp_events;
+	size_t nr_fmts = mod->nr_hyp_printk_fmts;
 	u8 *hyp_printk_fmt_offsets;
 	int ret;
+
+	hyp_ftrace_init_mod(mod);
 
 	ret = hyp_event_table_init(event, event_id, nr_events);
 	if (ret)

@@ -354,6 +354,29 @@ void hyp_ftrace_setup_core(void)
 			 __hyp_ftrace_tramp);
 }
 
+unsigned long *hyp_ftrace_find_host_func(unsigned long host_func,
+					 unsigned long *funcs,
+					 unsigned long *funcs_end,
+					 unsigned long offset_idx)
+{
+	if (!funcs) {
+		funcs = __hyp_patchable_function_entries_start;
+		funcs_end = __hyp_patchable_function_entries_end;
+		offset_idx = 0;
+	}
+
+	while (funcs < funcs_end) {
+		unsigned long kern_addr = __kern_addr(offset_idx, *funcs);
+
+		if (get_func(kern_addr) == funcs_pg_func(host_func))
+			return funcs;
+
+		funcs++;
+	}
+
+	return NULL;
+}
+
 /*
  * funcs_pg is the host donated page containing the list of functions to
  * enable/disable.
