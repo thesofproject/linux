@@ -11,9 +11,9 @@
 #include <linux/array_size.h>
 #include <linux/io.h>
 #include <linux/mem_encrypt.h>
-#include <linux/mem_relinquish.h>
 #include <linux/mm.h>
 #include <linux/pgtable.h>
+#include <linux/virtio_balloon.h>
 
 #include <asm/hypervisor.h>
 
@@ -96,17 +96,16 @@ static int mmio_guard_ioremap_hook(phys_addr_t phys, size_t size,
 	return 0;
 }
 
-#ifdef CONFIG_MEMORY_RELINQUISH
+#ifdef CONFIG_VIRTIO_BALLOON_HYP_OPS
 
 static bool mem_relinquish_available;
 
-bool page_relinquish_disallowed(void)
+static bool pkvm_page_relinquish_disallowed(void)
 {
 	return mem_relinquish_available && (pkvm_granule > PAGE_SIZE);
 }
-EXPORT_SYMBOL_GPL(page_relinquish_disallowed);
 
-void page_relinquish(struct page *page)
+static void pkvm_page_relinquish(struct page *page, unsigned int nr)
 {
 	phys_addr_t phys, end;
 	u32 func_id = ARM_SMCCC_VENDOR_HYP_KVM_MEM_RELINQUISH_FUNC_ID;
@@ -115,7 +114,7 @@ void page_relinquish(struct page *page)
 		return;
 
 	phys = page_to_phys(page);
-	end = phys + PAGE_SIZE;
+	end = phys + PAGE_SIZE * nr;
 
 	while (phys < end) {
 		struct arm_smccc_res res;
@@ -126,7 +125,11 @@ void page_relinquish(struct page *page)
 		phys += pkvm_granule;
 	}
 }
-EXPORT_SYMBOL_GPL(page_relinquish);
+
+static struct virtio_balloon_hyp_ops pkvm_virtio_balloon_hyp_ops = {
+	.page_relinquish_disallowed = pkvm_page_relinquish_disallowed,
+	.page_relinquish = pkvm_page_relinquish
+};
 
 #endif
 
@@ -151,7 +154,8 @@ void pkvm_init_hyp_services(void)
 	if (kvm_arm_hyp_service_available(ARM_SMCCC_KVM_FUNC_MMIO_GUARD_MAP))
 		arm64_ioremap_prot_hook_register(&mmio_guard_ioremap_hook);
 
-#ifdef CONFIG_MEMORY_RELINQUISH
+#ifdef CONFIG_VIRTIO_BALLOON_HYP_OPS
+	virtio_balloon_hyp_ops = &pkvm_virtio_balloon_hyp_ops;
 	if (kvm_arm_hyp_service_available(ARM_SMCCC_KVM_FUNC_MEM_RELINQUISH))
 		mem_relinquish_available = true;
 #endif
