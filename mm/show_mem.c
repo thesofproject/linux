@@ -15,6 +15,9 @@
 #include <linux/swap.h>
 #include <linux/vmstat.h>
 
+#undef CREATE_TRACE_POINTS
+#include <trace/hooks/mm.h>
+
 #include "internal.h"
 #include "swap.h"
 
@@ -458,5 +461,6 @@ void __show_mem(unsigned int filter, nodemask_t *nodemask, int max_zone_idx)
 		spin_unlock(&mem_alloc_profiling_spinlock);
 	}
 #endif
+	trace_android_vh_show_mem(filter, nodemask);
 }
 EXPORT_SYMBOL_GPL(__show_mem);
