@@ -27,6 +27,7 @@
 #include <ufs/ufs.h>
 #include <ufs/ufs_quirks.h>
 #include <ufs/ufshci.h>
+#include <linux/android_vendor.h>
 
 #define UFSHCD "ufshcd"
 
@@ -1124,6 +1125,8 @@ struct ufs_hba {
 	int critical_health_count;
 	atomic_t dev_lvl_exception_count;
 	u64 dev_lvl_exception_id;
+
+	ANDROID_OEM_DATA(1);
 };
 
 /**
