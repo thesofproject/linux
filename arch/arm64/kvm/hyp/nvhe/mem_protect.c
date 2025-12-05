@@ -343,6 +343,7 @@ int __pkvm_guest_relinquish_to_host(struct pkvm_hyp_vcpu *vcpu,
 	phys = kvm_pte_to_phys(pte);
 	phys += ipa - addr;
 	hyp_poison_page(phys);
+	psci_mem_protect_dec(1);
 
 	/* Zap the guest stage2 pte and return ownership to the host */
 	WARN_ON(host_stage2_set_owner_locked(phys, PAGE_SIZE, PKVM_ID_HOST));
@@ -1117,6 +1118,7 @@ int __pkvm_host_reclaim_page_guest(u64 gfn, struct pkvm_hyp_vm *vm)
 	case PKVM_PAGE_OWNED:
 		WARN_ON(__host_check_page_state_range(phys, PAGE_SIZE, PKVM_NOPAGE));
 		hyp_poison_page(phys);
+		psci_mem_protect_dec(1);
 		break;
 	case PKVM_PAGE_SHARED_BORROWED:
 		WARN_ON(__host_check_page_state_range(phys, PAGE_SIZE, PKVM_PAGE_SHARED_OWNED));
@@ -1160,6 +1162,7 @@ int __pkvm_guest_share_host(u64 gfn, struct pkvm_hyp_vcpu *vcpu)
 
 	ret = 0;
 	WARN_ON(__host_set_page_state_range(phys, PAGE_SIZE, PKVM_PAGE_SHARED_BORROWED));
+	psci_mem_protect_dec(1);
 	WARN_ON(kvm_pgtable_stage2_map(&vm->pgt, ipa, PAGE_SIZE, phys,
 				       pkvm_mkstate(KVM_PGTABLE_PROT_RWX, PKVM_PAGE_SHARED_OWNED),
 				       &vcpu->vcpu.arch.pkvm_memcache, 0));
@@ -1192,6 +1195,7 @@ int __pkvm_guest_unshare_host(u64 gfn, struct pkvm_hyp_vcpu *vcpu)
 
 	ret = 0;
 	WARN_ON(host_stage2_set_owner_locked(phys, PAGE_SIZE, PKVM_ID_GUEST));
+	psci_mem_protect_inc(1);
 	WARN_ON(kvm_pgtable_stage2_map(&vm->pgt, ipa, PAGE_SIZE, phys,
 				       pkvm_mkstate(KVM_PGTABLE_PROT_RWX, PKVM_PAGE_OWNED),
 				       &vcpu->vcpu.arch.pkvm_memcache, 0));
@@ -1223,9 +1227,11 @@ int __pkvm_host_donate_guest(u64 pfn, u64 gfn, struct pkvm_hyp_vcpu *vcpu)
 
 	WARN_ON(host_stage2_set_owner_locked(phys, PAGE_SIZE, PKVM_ID_GUEST));
 
+	psci_mem_protect_inc(1);
 	if (pkvm_ipa_range_has_pvmfw(vm, ipa, ipa + PAGE_SIZE)) {
 		ret = pkvm_load_pvmfw_pages(vm, ipa, phys, PAGE_SIZE);
 		if (WARN_ON(ret)) {
+			psci_mem_protect_dec(1);
 			goto unlock;
 		}
        }
