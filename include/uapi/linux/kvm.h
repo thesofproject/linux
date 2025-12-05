@@ -710,6 +710,7 @@ struct kvm_enable_cap {
 /*
  * Extension capability list.
  */
+#define KVM_CAP_CORE -1	/* represents core KVM capabilities */
 #define KVM_CAP_IRQCHIP	  0
 #define KVM_CAP_HLT	  1
 #define KVM_CAP_MMU_SHADOW_CACHE_CONTROL 2
