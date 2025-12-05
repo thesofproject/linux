@@ -150,8 +150,11 @@ static int __init register_moveable_regions(void)
 
 		start = res.start;
 		size = resource_size(&res);
-		if (!PAGE_ALIGNED(start) || !PAGE_ALIGNED(size))
+		if (!PAGE_ALIGNED(start) || !PAGE_ALIGNED(size)) {
+			kvm_err("Failed to register '%s': Resource not page-aligned\n",
+				np->full_name);
 			return -EINVAL;
+		}
 
 		moveable_regs[i].start = start;
 		moveable_regs[i].size = size;
