@@ -5219,6 +5219,10 @@ static const struct address_space_operations shmem_aops = {
 	.error_remove_folio = shmem_error_remove_folio,
 };
 
+#ifdef CONFIG_ASHMEM_RUST
+extern long ashmem_memfd_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
+#endif
+
 static const struct file_operations shmem_file_operations = {
 	.mmap		= shmem_mmap,
 	.open		= shmem_file_open,
@@ -5236,6 +5240,11 @@ static const struct file_operations shmem_file_operations = {
 	.unlocked_ioctl	= memfd_ashmem_shim_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= memfd_ashmem_shim_compat_ioctl,
+#endif
+#elif defined CONFIG_ASHMEM_RUST
+	.unlocked_ioctl = ashmem_memfd_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl = ashmem_memfd_ioctl,
 #endif
 #endif
 };

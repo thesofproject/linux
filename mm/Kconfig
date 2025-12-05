@@ -1242,7 +1242,8 @@ config MEMFD_CREATE
 
 config MEMFD_ASHMEM_SHIM
 	bool "Memfd ashmem ioctl compatibility support"
-	depends on MEMFD_CREATE
+	default y
+	depends on MEMFD_CREATE && ASHMEM_C
 	help
 	  This provides compatibility support for ashmem ioctl commands against
 	  memfd file descriptors. This is useful for compatibility on Android
