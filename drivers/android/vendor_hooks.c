@@ -47,6 +47,7 @@
 #include <trace/hooks/dtask.h>
 #include <trace/hooks/power.h>
 #include <trace/hooks/rwsem.h>
+#include <trace/hooks/futex.h>
 
 /*
  * Export tracepoints that act as a bare tracehook (ie: have no trace event
@@ -160,3 +161,4 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_rwsem_init);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_rwsem_wake);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_rwsem_write_finished);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_alter_rwsem_list_add);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_alter_futex_plist_add);
