@@ -671,6 +671,62 @@ static void pkvm_update_exception_bitmap(struct kvm_vcpu *vcpu)
 	kvm_x86_call(update_exception_bitmap)(vcpu);
 }
 
+static int pkvm_set_msr(struct kvm_vcpu *vcpu, u32 index, u64 data)
+{
+	if (pkvm_is_protected_vcpu(vcpu)) {
+		if (WARN_ON(kvm_vcpu_has_run(vcpu)))
+			return -EPERM;
+
+		/*
+		 * For simplicity and security, allow the host to change
+		 * initial values of those MSRs (or individual bits in MSRs)
+		 * that are currently tweaked by crosvm, and only those.
+		 * The allowed set can be extended as needed.
+		 */
+		switch (index) {
+		case MTRRphysBase_MSR(0) ... MSR_MTRRfix4K_F8000:
+		case MSR_MTRRdefType:
+			break;
+		case MSR_IA32_MISC_ENABLE:
+			if (data & ~(MSR_IA32_MISC_ENABLE_FAST_STRING |
+				     MSR_IA32_MISC_ENABLE_PEBS_UNAVAIL |
+				     MSR_IA32_MISC_ENABLE_BTS_UNAVAIL))
+				return -EPERM;
+
+			/*
+			 * vPMU is not supported by pKVM yet. Don't trick the pVM
+			 * that it is.
+			 */
+			data |= MSR_IA32_MISC_ENABLE_PEBS_UNAVAIL |
+				MSR_IA32_MISC_ENABLE_BTS_UNAVAIL;
+			break;
+		case MSR_STAR:
+		case MSR_LSTAR:
+		case MSR_CSTAR:
+		case MSR_SYSCALL_MASK:
+		case MSR_KERNEL_GS_BASE:
+		case MSR_IA32_SYSENTER_CS:
+		case MSR_IA32_SYSENTER_ESP:
+		case MSR_IA32_SYSENTER_EIP:
+			/*
+			 * TODO: The user space VMM from the host side (e.g.,
+			 * crosvm) may still try to set these MSRs which are
+			 * protected by the pKVM hypervisor for a pVM. Ignore
+			 * writings to these MSRs and return 0 to make such
+			 * user space VMM happy, meanwhile doesn't really modify
+			 * these MSRs. This eventually will be fixed in the user
+			 * space VMM to avoid doing so for a pVM. Once this is
+			 * implemented, these can be removed.
+			 */
+			return 0;
+		default:
+			return -EPERM;
+		}
+	}
+
+	return kvm_msr_write(vcpu, index, data);
+}
+
 static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc hc,
 					   union pkvm_hc_data *out)
 {
@@ -695,8 +751,8 @@ static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc 
 		ret = kvm_x86_call(set_efer)(vcpu, pkvm_hc_input1(hvcpu));
 		break;
 	case __pkvm__set_msr:
-		ret = kvm_msr_write(vcpu, pkvm_hc_input1(hvcpu),
-				    pkvm_hc_input2(hvcpu));
+		ret = pkvm_set_msr(vcpu, pkvm_hc_input1(hvcpu),
+				   pkvm_hc_input2(hvcpu));
 		break;
 	case __pkvm__get_msr:
 		ret = kvm_msr_read(vcpu, pkvm_hc_input1(hvcpu), &out->get_msr.data);
