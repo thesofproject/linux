@@ -684,6 +684,8 @@ static int __pkvm_pgtable_stage2_unmap(struct kvm_pgtable *pgt, u64 start, u64 e
 	struct mm_struct *mm = current->mm;
 	struct kvm_pinned_page *ppage;
 	struct pkvm_mapping *mapping;
+	u64 pages, nr_busy;
+	int ret;
 
 	if (!handle)
 		return 0;
@@ -703,18 +705,37 @@ static int __pkvm_pgtable_stage2_unmap(struct kvm_pgtable *pgt, u64 start, u64 e
 		kfree(mapping);
 	}
 
+retry:
+	pages = 0;
+	nr_busy = 0;
 	ppage = kvm_pinned_pages_iter_first(&kvm->arch.pkvm.pinned_pages, start, end);
 	while (ppage) {
 		struct kvm_pinned_page *next = kvm_pinned_pages_iter_next(ppage, start, end);
 
 		WARN_ON(!kvm_vm_is_protected(kvm));
-		WARN_ON(__reclaim_dying_page(ppage, handle));
+		ret = __reclaim_dying_page(ppage, handle);
 		cond_resched();
+		if (ret == -EBUSY) {
+			nr_busy++;
+			ppage = next;
+			continue;
+		}
+		WARN_ON(ret);
 		unpin_user_pages_dirty_lock(&ppage->page, 1, true);
 		account_locked_vm(mm, 1 << ppage->order, false);
 		kvm_pinned_pages_remove(ppage, &kvm->arch.pkvm.pinned_pages);
 		kfree(ppage);
 		ppage = next;
+	}
+
+	if (nr_busy) {
+		do {
+			ret = kvm_call_hyp_nvhe(__pkvm_reclaim_dying_guest_ffa_resources,
+						kvm->arch.pkvm.handle);
+			WARN_ON(ret && ret != -EAGAIN);
+			cond_resched();
+		} while (ret == -EAGAIN);
+		goto retry;
 	}
 
 	return 0;
