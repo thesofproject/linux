@@ -316,9 +316,14 @@ static inline void __activate_traps_common(struct kvm_vcpu *vcpu)
 		write_sysreg(ARMV8_PMU_USERENR_MASK, pmuserenr_el0);
 		vcpu_set_flag(vcpu, PMUSERENR_ON_CPU);
 	}
+}
 
+static inline void __activate_traps_hcrx(struct kvm_vcpu *vcpu)
+{
 	if (cpus_have_final_cap(ARM64_HAS_HCX)) {
+		struct kvm_cpu_context *hctxt = host_data_ptr(host_ctxt);
 		u64 hcrx = vcpu->arch.hcrx_el2;
+
 		if (is_nested_ctxt(vcpu)) {
 			u64 val = __vcpu_sys_reg(vcpu, HCRX_EL2);
 			hcrx |= val & __HCRX_EL2_MASK;
