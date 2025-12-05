@@ -1618,6 +1618,14 @@ static bool task_can_run_on_remote_rq(struct scx_sched *sch,
 		return false;
 	}
 
+	/* Make sure tasks' aren't on a cpu  */
+	if (task_on_cpu(task_rq(p), p))
+		return false;
+
+	/* Don't migrate blocked tasks, proxy-exec will handle this */
+	if (task_is_blocked(p))
+		return false;
+
 	if (!scx_rq_online(rq)) {
 		if (enforce)
 			__scx_add_event(sch, SCX_EV_DISPATCH_LOCAL_DSQ_OFFLINE, 1);
