@@ -12,14 +12,7 @@ int __kvm_nvhe_pl011_hyp_init(const struct pkvm_module_ops *ops);
 
 static int __init pl011_nvhe_init(void)
 {
-	unsigned long token;
-	int ret;
-
-	ret = pkvm_load_el2_module(__kvm_nvhe_pl011_hyp_init, &token);
-	if (ret)
-		return ret;
-
-	return 0;
+	return pkvm_load_el2_module(__kvm_nvhe_pl011_hyp_init);
 }
 module_init(pl011_nvhe_init);
 

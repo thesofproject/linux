@@ -186,7 +186,7 @@ struct pkvm_module_ops {
 	int (*unmap_module_pages)(u64 pfn, void *va, u64 nr_pages);
 };
 
-int __pkvm_load_el2_module(struct module *this, unsigned long *token);
+int __pkvm_load_el2_module(struct module *this);
 
 int __pkvm_register_el2_call(unsigned long hfn_hyp_va);
 
@@ -203,8 +203,7 @@ static inline unsigned long __pkvm_el2_mod_va(struct pkvm_el2_module *mod, void 
 
 void pkvm_el2_mod_frob_sections(Elf_Ehdr *ehdr, Elf_Shdr *sechdrs, char *secstrings);
 #else
-static inline int __pkvm_load_el2_module(struct module *this,
-					 unsigned long *token)
+static inline int __pkvm_load_el2_module(struct module *this)
 {
 	return -ENOSYS;
 }
@@ -229,24 +228,20 @@ static inline unsigned long __pkvm_el2_mod_va(void *mod, void *kern_va)
 int pkvm_load_early_modules(void);
 
 #ifdef MODULE
-
-/* TODO: With the introduction of pkvm_el2_module::hyp_va token is redundant */
-
 /*
  * Convert an EL2 module addr from the kernel VA to the hyp VA
  */
-#define pkvm_el2_mod_va(kern_va, token) __pkvm_el2_mod_va(&THIS_MODULE->arch.hyp, kern_va)
+#define pkvm_el2_mod_va(kern_va) __pkvm_el2_mod_va(&THIS_MODULE->arch.hyp, kern_va)
 
-#define pkvm_load_el2_module(init_fn, token)				\
+#define pkvm_load_el2_module(init_fn)					\
 ({									\
 	THIS_MODULE->arch.hyp.init = init_fn;				\
-	__pkvm_load_el2_module(THIS_MODULE, token);			\
+	__pkvm_load_el2_module(THIS_MODULE);				\
 })
 
-static inline int pkvm_register_el2_mod_call(dyn_hcall_t hfn,
-					     unsigned long token)
+static inline int pkvm_register_el2_mod_call(dyn_hcall_t hfn)
 {
-	return __pkvm_register_el2_call(pkvm_el2_mod_va(hfn, token));
+	return __pkvm_register_el2_call(pkvm_el2_mod_va(hfn));
 }
 
 #define pkvm_el2_mod_call(id, ...)					\

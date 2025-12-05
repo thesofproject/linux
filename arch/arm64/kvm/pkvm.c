@@ -1456,7 +1456,7 @@ static void pkvm_module_kmemleak(struct module *this,
 	kmemleak_scan_area(start, end - start, GFP_KERNEL);
 }
 
-int __pkvm_load_el2_module(struct module *this, unsigned long *token)
+int __pkvm_load_el2_module(struct module *this)
 {
 	struct pkvm_el2_module *mod = &this->arch.hyp;
 	struct pkvm_mod_sec_mapping secs_map[] = {
@@ -1511,14 +1511,6 @@ int __pkvm_load_el2_module(struct module *this, unsigned long *token)
 	}
 	hyp_va = (void *)res.a1;
 	mod->hyp_va = hyp_va;
-
-	/*
-	 * The token can be used for other calls related to this module.
-	 * Conveniently the only information needed is this addr so let's use it
-	 * as an identifier.
-	 */
-	if (token)
-		*token = (unsigned long)hyp_va;
 
 	/* Relies on kvm_apply_hyp_module_relocations() sync_icache_aliases */
 	ret = pkvm_reloc_imported_symbols(mod);
