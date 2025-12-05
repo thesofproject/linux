@@ -1480,6 +1480,7 @@ ddk_headers(
     hdrs = [
         "arch/arm64/kvm/hyp/include/module/nvhe/define_events.h",
         "arch/arm64/kvm/hyp/include/module/nvhe/trace.h",
+        "arch/arm64/kvm/hyp/include/nvhe/alloc_mgt.h",
     ],
     includes = [
         # LINT.IfChange(pkvm_includes)
