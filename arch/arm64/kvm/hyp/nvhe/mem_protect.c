@@ -908,13 +908,30 @@ static enum pkvm_page_state host_get_mmio_page_state(kvm_pte_t pte, u64 addr)
 	return state | pkvm_getstate(prot);
 }
 
-static int ___host_check_page_state_range(u64 addr, u64 size, enum pkvm_page_state state,
-					  struct memblock_region *reg, bool check_null_refcount)
+enum host_check_page_state_flags {
+	HOST_CHECK_NULL_REFCNT		= BIT(0),
+	HOST_CHECK_IS_MEMORY		= BIT(1),
+};
+
+static int ___host_check_page_state_range(u64 addr, u64 size,
+					  enum pkvm_page_state state,
+					  enum host_check_page_state_flags flags)
 {
 	struct check_walk_data d = {
 		.desired	= state,
 		.get_page_state	= host_get_mmio_page_state,
 	};
+	u64 end = addr + size;
+	struct memblock_region *reg;
+	struct kvm_mem_range range;
+
+	/* Can't check the state of both MMIO and memory regions at once */
+	reg = find_mem_range(addr, &range);
+	if (!reg && (flags & HOST_CHECK_IS_MEMORY))
+		return -EINVAL;
+
+	if (!is_in_mem_range(end - 1, &range))
+		return -EINVAL;
 
 	hyp_assert_lock_held(&host_mmu.lock);
 
@@ -928,7 +945,7 @@ static int ___host_check_page_state_range(u64 addr, u64 size, enum pkvm_page_sta
 	for_each_hyp_page(page, addr, size) {
 		if (get_host_state(page) != state)
 			return -EPERM;
-		if (check_null_refcount && hyp_refcount_get(page->refcount))
+		if ((flags & HOST_CHECK_NULL_REFCNT) && hyp_refcount_get(page->refcount))
 			return -EINVAL;
 	}
 
@@ -943,17 +960,13 @@ static int ___host_check_page_state_range(u64 addr, u64 size, enum pkvm_page_sta
 static int __host_check_page_state_range(u64 addr, u64 size,
 					 enum pkvm_page_state state)
 {
-	struct memblock_region *reg;
-	struct kvm_mem_range range;
-	u64 end = addr + size;
+	enum host_check_page_state_flags flags = HOST_CHECK_IS_MEMORY;
 
-	/* Can't check the state of both MMIO and memory regions at once */
-	reg = find_mem_range(addr, &range);
-	if (!is_in_mem_range(end - 1, &range))
-		return -EINVAL;
+	if (state == PKVM_PAGE_OWNED)
+		flags |= HOST_CHECK_NULL_REFCNT;
 
 	/* Check the refcount of PAGE_OWNED pages as those may be used for DMA. */
-	return ___host_check_page_state_range(addr, size, state, reg, state == PKVM_PAGE_OWNED);
+	return ___host_check_page_state_range(addr, size, state, flags);
 }
 
 static int __host_set_page_state_range(u64 addr, u64 size,
@@ -1367,7 +1380,7 @@ int __pkvm_host_donate_hyp_locked(u64 pfn, u64 nr_pages)
 	hyp_assert_lock_held(&host_mmu.lock);
 	hyp_lock_component();
 
-	ret = __host_check_page_state_range(phys, size, PKVM_PAGE_OWNED);
+	ret = ___host_check_page_state_range(phys, size, PKVM_PAGE_OWNED, HOST_CHECK_NULL_REFCNT);
 	if (ret)
 		goto unlock;
 	ret = __hyp_check_page_state_range(phys, size, PKVM_NOPAGE);
@@ -1426,17 +1439,11 @@ unlock:
 int __pkvm_host_donate_ffa(u64 pfn, u64 nr_pages)
 {
 	u64 size, phys = hyp_pfn_to_phys(pfn), end;
-	struct kvm_mem_range range;
-	struct memblock_region *reg;
 	int ret;
 
 	if (check_shl_overflow(nr_pages, PAGE_SHIFT, &size) ||
 	    check_add_overflow(phys, size, &end))
 		return -EINVAL;
-
-	reg = find_mem_range(phys, &range);
-	if (!reg || !is_in_mem_range(end - 1, &range))
-		return -EPERM;
 
 	host_lock_component();
 
@@ -1453,17 +1460,11 @@ unlock:
 int __pkvm_host_reclaim_ffa(u64 pfn, u64 nr_pages)
 {
 	u64 size, phys = hyp_pfn_to_phys(pfn), end;
-	struct memblock_region *reg;
-	struct kvm_mem_range range;
 	int ret;
 
 	if (check_shl_overflow(nr_pages, PAGE_SHIFT, &size) ||
 	    check_add_overflow(phys, size, &end))
 		return -EINVAL;
-
-	reg = find_mem_range(phys, &range);
-	if (!reg || !is_in_mem_range(end - 1, &range))
-		return -EPERM;
 
 	host_lock_component();
 
@@ -1529,8 +1530,8 @@ int module_change_host_page_prot(u64 pfn, enum kvm_pgtable_prot prot, u64 nr_pag
 		}
 	} else {
 		/* The entire range must be pristine. */
-		ret = ___host_check_page_state_range(
-				addr, nr_pages << PAGE_SHIFT, PKVM_PAGE_OWNED, reg, true);
+		ret = ___host_check_page_state_range(addr, nr_pages << PAGE_SHIFT,
+						     PKVM_PAGE_OWNED, HOST_CHECK_NULL_REFCNT);
 		if (ret)
 			goto unlock;
 	}
@@ -1901,7 +1902,7 @@ int __pkvm_host_donate_guest(u64 pfn, u64 gfn, u64 nr_pages, struct pkvm_hyp_vcp
 	host_lock_component();
 	guest_lock_component(vm);
 
-	ret = __host_check_page_state_range(phys, size, PKVM_PAGE_OWNED);
+	ret = ___host_check_page_state_range(phys, size, PKVM_PAGE_OWNED, HOST_CHECK_NULL_REFCNT);
 	if (ret)
 		goto unlock;
 
@@ -1977,7 +1978,8 @@ int __pkvm_host_donate_sglist_guest(struct pkvm_hyp_vcpu *vcpu)
 			goto unlock;
 		}
 
-		ret = __host_check_page_state_range(phys, size, PKVM_PAGE_OWNED);
+		ret = ___host_check_page_state_range(phys, size, PKVM_PAGE_OWNED,
+						     HOST_CHECK_NULL_REFCNT);
 		if (ret)
 			goto unlock;
 
