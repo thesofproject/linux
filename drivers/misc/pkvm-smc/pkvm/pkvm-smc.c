@@ -136,10 +136,6 @@ int pkvm_smc_filter_hyp_init(const struct pkvm_module_ops *ops);
 
 int pkvm_smc_filter_hyp_init(const struct pkvm_module_ops *ops)
 {
-#ifdef CONFIG_TRACING
-	ops->register_hyp_event_ids((unsigned long)__hyp_event_ids_start,
-				    (unsigned long)__hyp_event_ids_end);
-#endif
 	pkvm_ops = ops;
 	return ops->register_host_smc_handler(filter_smc);
 }
