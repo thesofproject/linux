@@ -611,7 +611,7 @@ out_unlock:
 out_err_with_tx:
 	WARN_ON(__pkvm_guest_unshare_hyp_page(hyp_vcpu, tx));
 out_err:
-	if (ret == -EFAULT) {
+	if (ret == -EFAULT || ret == -ENOENT) {
 		req = pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_MAP);
 		if (!req || !pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_MAP))
 			return -ENOSPC;
@@ -1743,7 +1743,7 @@ bool kvm_guest_ffa_handler(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 		break;
 	}
 
-	if (ret == -EFAULT || ret == -ENOMEM) {
+	if (ret == -EFAULT || ret == -ENOMEM || ret == -ENOENT) {
 		hyp_alloc_ret = hyp_alloc_errno();
 		if (hyp_alloc_ret == -ENOMEM) {
 			req = pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_MEM);
