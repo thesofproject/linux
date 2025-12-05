@@ -214,6 +214,7 @@ static int swapin_walk_pmd_entry(pmd_t *pmd, unsigned long start,
 
 		pte_unmap_unlock(ptep, ptl);
 		ptep = NULL;
+		trace_android_vh_madvise_swapin_walk_pmd_entry(entry);
 
 		folio = read_swap_cache_async(entry, GFP_HIGHUSER_MOVABLE,
 					     vma, addr, &splug);
@@ -2122,6 +2123,7 @@ release_task:
 free_iov:
 	kfree(iov);
 out:
+	trace_android_vh_process_madvise(behavior, &ret, NULL);
 	return ret;
 }
 

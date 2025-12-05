@@ -78,6 +78,12 @@ DECLARE_HOOK(android_vh_process_madvise_begin,
 DECLARE_HOOK(android_vh_process_madvise_iter,
 	TP_PROTO(struct task_struct *task, int behavior, ssize_t *ret),
 	TP_ARGS(task, behavior, ret));
+DECLARE_HOOK(android_vh_madvise_swapin_walk_pmd_entry,
+	TP_PROTO(swp_entry_t entry),
+	TP_ARGS(entry));
+DECLARE_HOOK(android_vh_process_madvise,
+	TP_PROTO(int behavior, ssize_t *ret, void *priv),
+	TP_ARGS(behavior, ret, priv));
 #endif /* _TRACE_HOOK_MM_H */
 
 /* This part must be outside protection */
