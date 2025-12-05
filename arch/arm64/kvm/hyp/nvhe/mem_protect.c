@@ -539,7 +539,6 @@ static void __host_update_page_state(phys_addr_t addr, u64 size, enum pkvm_page_
 		set_host_state(page, state);
 }
 
-#define KVM_INVALID_PTE_OWNER_MASK	GENMASK(9, 2)
 #define KVM_MAX_OWNER_ID		3
 
 static kvm_pte_t kvm_init_invalid_leaf_owner(u8 owner_id)
@@ -1436,9 +1435,6 @@ int __pkvm_host_mkyoung_guest(u64 gfn, struct pkvm_hyp_vcpu *vcpu)
 	return 0;
 }
 
-/* Replace this with something more structured once day */
-#define MMIO_NOTE	(('M' << 24 | 'M' << 16 | 'I' << 8 | 'O') << 1)
-
 static bool __check_ioguard_page(struct pkvm_hyp_vcpu *hyp_vcpu, u64 ipa)
 {
 	struct pkvm_hyp_vm *vm = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
@@ -1452,7 +1448,7 @@ static bool __check_ioguard_page(struct pkvm_hyp_vcpu *hyp_vcpu, u64 ipa)
 
 	/* Must be a PAGE_SIZE mapping with our annotation */
 	return (BIT(ARM64_HW_PGTABLE_LEVEL_SHIFT(level)) == PAGE_SIZE &&
-		pte == MMIO_NOTE);
+		pte == KVM_INVALID_PTE_MMIO_NOTE);
 }
 
 int __pkvm_install_ioguard_page(struct pkvm_hyp_vcpu *hyp_vcpu, u64 ipa)
@@ -1479,7 +1475,7 @@ int __pkvm_install_ioguard_page(struct pkvm_hyp_vcpu *hyp_vcpu, u64 ipa)
 		 * Already flagged as MMIO, let's accept it, and fail
 		 * otherwise
 		 */
-		if (pte != MMIO_NOTE)
+		if (pte != KVM_INVALID_PTE_MMIO_NOTE)
 			ret = -EBUSY;
 
 		goto unlock;
@@ -1487,7 +1483,7 @@ int __pkvm_install_ioguard_page(struct pkvm_hyp_vcpu *hyp_vcpu, u64 ipa)
 
 	ret = kvm_pgtable_stage2_annotate(&vm->pgt, ipa, PAGE_SIZE,
 					  &hyp_vcpu->vcpu.arch.pkvm_memcache,
-					  MMIO_NOTE);
+					  KVM_INVALID_PTE_MMIO_NOTE);
 
 unlock:
 	guest_unlock_component(vm);
