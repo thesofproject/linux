@@ -185,6 +185,17 @@ static inline bool kvm_is_block_size_supported(u64 size)
 	return is_power_of_two && (size & kvm_supported_block_sizes());
 }
 
+static inline bool kvm_pte_table(kvm_pte_t pte, u32 level)
+{
+	if (level == KVM_PGTABLE_LAST_LEVEL)
+		return false;
+
+	if (!kvm_pte_valid(pte))
+		return false;
+
+	return FIELD_GET(KVM_PTE_TYPE, pte) == KVM_PTE_TYPE_TABLE;
+}
+
 /**
  * struct kvm_pgtable_mm_ops - Memory management callbacks.
  * @zalloc_page:		Allocate a single zeroed memory page.
