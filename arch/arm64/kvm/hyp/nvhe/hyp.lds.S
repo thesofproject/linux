@@ -35,4 +35,9 @@ SECTIONS {
 
 	HYP_SECTION(.bss)
 	HYP_SECTION(.data)
+
+	/DISCARD/ : {
+		*(.printk_index)
+		*(.init.*)
+	}
 }

@@ -155,4 +155,9 @@ extern unsigned int kvm_nvhe_sym(kvm_sve_max_vl);
 extern unsigned int kvm_nvhe_sym(kvm_host_sve_max_vl);
 extern bool kvm_nvhe_sym(smccc_trng_available);
 
+#ifdef __KVM_NVHE_HYPERVISOR__
+#undef __init
+#define __init __section(".init.text") __attribute__((patchable_function_entry(0, 0)))
+#endif
+
 #endif /* __ARM64_KVM_HYP_H__ */
