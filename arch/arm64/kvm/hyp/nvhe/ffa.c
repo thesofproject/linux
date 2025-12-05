@@ -1804,29 +1804,18 @@ bool kvm_guest_ffa_handler(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 
 	switch (ret) {
 	case -ENOMEM:
-		/* -ENOMEM can be raised either by hyp_alloc() or the vCPU memcache */
-		switch (hyp_alloc_errno()) {
-		case -ENOMEM:
-			req = pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_MEM);
-			if (!req)
-				goto out_guest_with_ret;
-
-			req->mem.dest = REQ_MEM_DEST_HYP_ALLOC;
-			req->mem.nr_pages = hyp_alloc_missing_donations();
-			break;
-		case 0:
-			req = pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_MEM);
-			if (!req)
-				goto out_guest_with_ret;
-
-			req->mem.dest = REQ_MEM_DEST_VCPU_MEMCACHE;
-			req->mem.nr_pages = kvm_mmu_cache_min_pages(&hyp_vcpu->vcpu.kvm->arch.mmu);
-			break;
-		default:
-			/* Nothing the host can do for us, let the HVC fail */
+		if (hyp_alloc_errno() != -ENOMEM) {
+			/* Only hyp_alloc() can raise -ENOMEM. Let the HVC fail */
 			ret = hyp_alloc_errno();
 			goto out_guest_with_ret;
 		}
+
+		req = pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_MEM);
+		if (!req)
+			goto out_guest_with_ret;
+
+		req->mem.dest = REQ_MEM_DEST_HYP_ALLOC;
+		req->mem.nr_pages = hyp_alloc_missing_donations();
 		fallthrough;
 	case -ENOENT:
 		fallthrough;
