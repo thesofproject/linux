@@ -13,6 +13,8 @@ snd-hda-scodec-component-y :=	hda_component.o
 snd-hda-scodec-tas2781-y :=	tas2781_hda.o
 snd-hda-scodec-tas2781-i2c-y :=	tas2781_hda_i2c.o
 snd-hda-scodec-tas2781-spi-y :=	tas2781_hda_spi.o
+snd-hda-scodec-max98390-y :=	max98390_hda.o max98390_hda_filters.o
+snd-hda-scodec-max98390-i2c-y := max98390_hda_i2c.o
 
 obj-$(CONFIG_SND_HDA_CIRRUS_SCODEC) += snd-hda-cirrus-scodec.o
 obj-$(CONFIG_SND_HDA_CIRRUS_SCODEC_KUNIT_TEST) += snd-hda-cirrus-scodec-test.o
@@ -26,3 +28,5 @@ obj-$(CONFIG_SND_HDA_SCODEC_COMPONENT) += snd-hda-scodec-component.o
 obj-$(CONFIG_SND_HDA_SCODEC_TAS2781) += snd-hda-scodec-tas2781.o
 obj-$(CONFIG_SND_HDA_SCODEC_TAS2781_I2C) += snd-hda-scodec-tas2781-i2c.o
 obj-$(CONFIG_SND_HDA_SCODEC_TAS2781_SPI) += snd-hda-scodec-tas2781-spi.o
+obj-$(CONFIG_SND_HDA_SCODEC_MAX98390) += snd-hda-scodec-max98390.o
+obj-$(CONFIG_SND_HDA_SCODEC_MAX98390_I2C) += snd-hda-scodec-max98390-i2c.o

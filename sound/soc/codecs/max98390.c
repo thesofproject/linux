@@ -978,7 +978,7 @@ static const struct snd_soc_component_driver soc_codec_dev_max98390 = {
 	.endianness		= 1,
 };
 
-static const struct regmap_config max98390_regmap = {
+const struct regmap_config max98390_regmap = {
 	.reg_bits         = 16,
 	.val_bits         = 8,
 	.max_register     = MAX98390_R24FF_REV_ID,
@@ -988,6 +988,7 @@ static const struct regmap_config max98390_regmap = {
 	.volatile_reg	  = max98390_volatile_reg,
 	.cache_type       = REGCACHE_RBTREE,
 };
+EXPORT_SYMBOL_GPL(max98390_regmap);
 
 static void max98390_slot_config(struct i2c_client *i2c,
 	struct max98390_priv *max98390)
@@ -1111,6 +1112,7 @@ MODULE_DEVICE_TABLE(of, max98390_of_match);
 
 #ifdef CONFIG_ACPI
 static const struct acpi_device_id max98390_acpi_match[] = {
+	{ "MAX98390", 0 },
 	{ "MX98390", 0 },
 	{},
 };
