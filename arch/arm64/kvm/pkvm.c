@@ -16,6 +16,7 @@
 #include <linux/of_reserved_mem.h>
 #include <linux/sort.h>
 
+#include <asm/kvm_hyp.h>
 #include <asm/kvm_mmu.h>
 #include <asm/kvm_pkvm.h>
 #include <asm/kvm_pkvm_module.h>
@@ -679,6 +680,14 @@ int pkvm_pgtable_stage2_split(struct kvm_pgtable *pgt, u64 addr, u64 size,
 }
 
 #ifdef CONFIG_MODULES
+static int __init early_pkvm_enable_modules(char *arg)
+{
+	kvm_nvhe_sym(__pkvm_modules_enabled) = true;
+
+	return 0;
+}
+early_param("kvm-arm.protected_modules", early_pkvm_enable_modules);
+
 struct pkvm_mod_sec_mapping {
 	struct pkvm_module_section *sec;
 	enum kvm_pgtable_prot prot;
