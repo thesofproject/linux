@@ -620,23 +620,36 @@ static void __flush_hyp_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu)
 static void flush_debug_state(struct pkvm_hyp_vcpu *hyp_vcpu)
 {
 	struct kvm_vcpu *host_vcpu = hyp_vcpu->host_vcpu;
+	struct kvm_vcpu *vcpu = &hyp_vcpu->vcpu;
 
-	hyp_vcpu->vcpu.arch.debug_owner = host_vcpu->arch.debug_owner;
+	vcpu->arch.debug_owner = host_vcpu->arch.debug_owner;
+	vcpu->arch.pmu = host_vcpu->arch.pmu;
 
-	if (kvm_guest_owns_debug_regs(&hyp_vcpu->vcpu))
-		hyp_vcpu->vcpu.arch.vcpu_debug_state = host_vcpu->arch.vcpu_debug_state;
-	else if (kvm_host_owns_debug_regs(&hyp_vcpu->vcpu))
-		hyp_vcpu->vcpu.arch.external_debug_state = host_vcpu->arch.external_debug_state;
+	if (kvm_guest_owns_debug_regs(vcpu)) {
+		vcpu->arch.vcpu_debug_state = host_vcpu->arch.vcpu_debug_state;
+	} else if (kvm_host_owns_debug_regs(vcpu)) {
+		vcpu->arch.external_debug_state = host_vcpu->arch.external_debug_state;
+
+		/* Propagate any special handling for single step from host. */
+		__vcpu_assign_sys_reg(vcpu, MDSCR_EL1, __vcpu_sys_reg(host_vcpu, MDSCR_EL1));
+		*vcpu_cpsr(vcpu) = *vcpu_cpsr(host_vcpu);
+	}
 }
 
 static void sync_debug_state(struct pkvm_hyp_vcpu *hyp_vcpu)
 {
 	struct kvm_vcpu *host_vcpu = hyp_vcpu->host_vcpu;
+	struct kvm_vcpu *vcpu = &hyp_vcpu->vcpu;
 
-	if (kvm_guest_owns_debug_regs(&hyp_vcpu->vcpu))
-		host_vcpu->arch.vcpu_debug_state = hyp_vcpu->vcpu.arch.vcpu_debug_state;
-	else if (kvm_host_owns_debug_regs(&hyp_vcpu->vcpu))
-		host_vcpu->arch.external_debug_state = hyp_vcpu->vcpu.arch.external_debug_state;
+	if (kvm_guest_owns_debug_regs(vcpu)) {
+		host_vcpu->arch.vcpu_debug_state = vcpu->arch.vcpu_debug_state;
+
+		/* Propagate any special handling for single step to host. */
+		__vcpu_assign_sys_reg(host_vcpu, MDSCR_EL1, __vcpu_sys_reg(vcpu, MDSCR_EL1));
+		*vcpu_cpsr(host_vcpu) = *vcpu_cpsr(vcpu);
+	} else if (kvm_host_owns_debug_regs(vcpu)) {
+		host_vcpu->arch.external_debug_state = vcpu->arch.external_debug_state;
+	}
 }
 
 static void flush_hyp_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu)
@@ -646,7 +659,6 @@ static void flush_hyp_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu)
 	u8 esr_ec;
 
 	fpsimd_sve_flush();
-	flush_debug_state(hyp_vcpu);
 
 	if (READ_ONCE(hyp_vcpu->power_state) == PSCI_0_2_AFFINITY_LEVEL_ON_PENDING)
 		pkvm_reset_vcpu(hyp_vcpu);
@@ -666,7 +678,7 @@ static void flush_hyp_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu)
 							 (HCR_TWI | HCR_TWE);
 
 		hyp_vcpu->vcpu.arch.mdcr_el2 = host_vcpu->arch.mdcr_el2;
-		sync_debug_state(hyp_vcpu);
+		flush_debug_state(hyp_vcpu);
 	}
 
 	hyp_vcpu->vcpu.arch.vsesr_el2 = host_vcpu->arch.vsesr_el2;
@@ -704,6 +716,8 @@ static void sync_hyp_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu, u32 exit_reason)
 	u8 esr_ec;
 
 	fpsimd_sve_sync(&hyp_vcpu->vcpu);
+	if (!pkvm_hyp_vcpu_is_protected(hyp_vcpu))
+		sync_debug_state(hyp_vcpu);
 
 	/*
 	 * Don't sync the vcpu GPR/sysreg state after a run. Instead,
