@@ -1008,7 +1008,7 @@ static int __guest_check_transition_size(u64 phys, u64 ipa, u64 nr_pages, u64 *s
 	return 0;
 }
 
-static void hyp_poison_page(phys_addr_t phys)
+void hyp_poison_page(phys_addr_t phys)
 {
 	void *addr = hyp_fixmap_map(phys);
 
