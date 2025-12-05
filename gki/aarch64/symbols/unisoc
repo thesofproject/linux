@@ -93,3 +93,11 @@
   __wake_up
   __warn_printk
 
+# required sprd_typec_displayport.ko
+  typec_altmode_enter
+  typec_altmode_exit
+  typec_altmode_get_partner
+  typec_altmode2port
+  __typec_altmode_register_driver
+  typec_altmode_unregister_driver
+  typec_get_negotiated_svdm_version
