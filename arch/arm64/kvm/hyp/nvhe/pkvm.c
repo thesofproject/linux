@@ -1099,13 +1099,7 @@ int pkvm_load_pvmfw_pages(struct pkvm_hyp_vm *vm, u64 ipa, phys_addr_t phys,
 
 void pkvm_poison_pvmfw_pages(void)
 {
-	u64 npages = pvmfw_size >> PAGE_SHIFT;
-	phys_addr_t addr = pvmfw_base;
-
-	while (npages--) {
-		hyp_poison_page(addr);
-		addr += PAGE_SIZE;
-	}
+	hyp_poison_page(pvmfw_base, pvmfw_size);
 }
 
 /*
