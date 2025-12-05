@@ -764,23 +764,71 @@ static int check_page_state_range(struct kvm_pgtable *pgt, u64 addr, u64 size,
 	return kvm_pgtable_walk(pgt, addr, size, &walker);
 }
 
-static int __host_check_page_state_range(u64 addr, u64 size,
-					 enum pkvm_page_state state)
+static enum pkvm_page_state host_get_mmio_page_state(kvm_pte_t pte, u64 addr)
 {
-	int ret;
+	enum pkvm_page_state state = 0;
+	enum kvm_pgtable_prot prot;
 
-	ret = check_range_allowed_memory(addr, addr + size);
-	if (ret)
-		return ret;
+	WARN_ON(addr_is_memory(addr));
+
+	if (!kvm_pte_valid(pte) && pte)
+		return PKVM_NOPAGE;
+
+	prot = kvm_pgtable_stage2_pte_prot(pte);
+	if (kvm_pte_valid(pte)) {
+		if ((prot & KVM_PGTABLE_PROT_RWX) != PKVM_HOST_MMIO_PROT)
+			state = PKVM_PAGE_RESTRICTED_PROT;
+	}
+
+	return state | pkvm_getstate(prot);
+}
+
+static int ___host_check_page_state_range(u64 addr, u64 size, enum pkvm_page_state state,
+					  struct memblock_region *reg, bool check_null_refcount)
+{
+	struct check_walk_data d = {
+		.desired	= state,
+		.get_page_state	= host_get_mmio_page_state,
+	};
 
 	hyp_assert_lock_held(&host_mmu.lock);
+
+	/* MMIO state is still in the page-table */
+	if (!reg)
+		return check_page_state_range(&host_mmu.pgt, addr, size, &d);
+
+	if (reg->flags & MEMBLOCK_NOMAP)
+		return -EPERM;
 
 	for_each_hyp_page(page, addr, size) {
 		if (get_host_state(page) != state)
 			return -EPERM;
+		if (check_null_refcount && hyp_refcount_get(page->refcount))
+			return -EINVAL;
 	}
 
+	/*
+	 * All memory pages with restricted permissions will already be covered
+	 * by other states (e.g. PKVM_MODULE_OWNED_PAGE), so no need to retrieve
+	 * the PKVM_PAGE_RESTRICTED_PROT state from the PTE.
+	 */
 	return 0;
+}
+
+static int __host_check_page_state_range(u64 addr, u64 size,
+					 enum pkvm_page_state state)
+{
+	struct memblock_region *reg;
+	struct kvm_mem_range range;
+	u64 end = addr + size;
+
+	/* Can't check the state of both MMIO and memory regions at once */
+	reg = find_mem_range(addr, &range);
+	if (!is_in_mem_range(end - 1, &range))
+		return -EINVAL;
+
+	/* Check the refcount of PAGE_OWNED pages as those may be used for DMA. */
+	return ___host_check_page_state_range(addr, size, state, reg, state == PKVM_PAGE_OWNED);
 }
 
 static int __host_set_page_state_range(u64 addr, u64 size,
@@ -811,15 +859,24 @@ static int __hyp_check_page_state_range(phys_addr_t phys, u64 size, enum pkvm_pa
 			return -EPERM;
 	}
 
+	/* TODO: Does not check for PKVM_PAGE_RESTRICTED_PROT! */
+
 	return 0;
 }
 
 static enum pkvm_page_state guest_get_page_state(kvm_pte_t pte, u64 addr)
 {
+	enum pkvm_page_state state = 0;
+	enum kvm_pgtable_prot prot;
+
 	if (!kvm_pte_valid(pte))
 		return PKVM_NOPAGE;
 
-	return pkvm_getstate(kvm_pgtable_stage2_pte_prot(pte));
+	prot = kvm_pgtable_stage2_pte_prot(pte);
+	if (kvm_pte_valid(pte) && ((prot & KVM_PGTABLE_PROT_RWX) != KVM_PGTABLE_PROT_RWX))
+		state = PKVM_PAGE_RESTRICTED_PROT;
+
+	return state | pkvm_getstate(prot);
 }
 
 static int __guest_check_page_state_range(struct pkvm_hyp_vm *vm, u64 addr,
@@ -1117,13 +1174,14 @@ int __pkvm_host_reclaim_page_guest(u64 gfn, struct pkvm_hyp_vm *vm)
 	if (ret)
 		goto unlock;
 
-	switch(guest_get_page_state(pte, ipa)) {
+	switch ((int)guest_get_page_state(pte, ipa)) {
 	case PKVM_PAGE_OWNED:
 		WARN_ON(__host_check_page_state_range(phys, PAGE_SIZE, PKVM_NOPAGE));
 		hyp_poison_page(phys);
 		psci_mem_protect_dec(1);
 		break;
 	case PKVM_PAGE_SHARED_BORROWED:
+	case PKVM_PAGE_SHARED_BORROWED | PKVM_PAGE_RESTRICTED_PROT:
 		WARN_ON(__host_check_page_state_range(phys, PAGE_SIZE, PKVM_PAGE_SHARED_OWNED));
 		break;
 	case PKVM_PAGE_SHARED_OWNED:
@@ -1336,7 +1394,7 @@ static int __check_host_shared_guest(struct pkvm_hyp_vm *vm, u64 *__phys, u64 ip
 	if (!size)
 		size = kvm_granule_size(level);
 
-	state = guest_get_page_state(pte, ipa);
+	state = guest_get_page_state(pte, ipa) & ~PKVM_PAGE_RESTRICTED_PROT;
 	if (state != PKVM_PAGE_SHARED_BORROWED)
 		return -EPERM;
 
