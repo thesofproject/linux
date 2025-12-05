@@ -325,6 +325,8 @@ extern void __vgic_v3_init_lrs(void);
 	__kvm_at_err;							\
 } )
 
+void vcpu_illegal_trap(struct kvm_vcpu *vcpu, u64 *exit_code);
+
 void __noreturn hyp_panic(void);
 asmlinkage void kvm_unexpected_el2_exception(void);
 asmlinkage void __noreturn hyp_panic(void);
