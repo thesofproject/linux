@@ -16,6 +16,7 @@
 #include <hyp/adjust_pc.h>
 
 #include <nvhe/alloc.h>
+#include <nvhe/ffa.h>
 #include <nvhe/mem_protect.h>
 #include <nvhe/memory.h>
 #include <nvhe/modules.h>
@@ -1808,4 +1809,15 @@ bool kvm_handle_pvm_hvc64(struct kvm_vcpu *vcpu, u64 *exit_code)
 
 	smccc_set_retval(vcpu, val[0], val[1], val[2], val[3]);
 	return true;
+}
+
+u32 hyp_vcpu_to_ffa_handle(struct pkvm_hyp_vcpu *hyp_vcpu)
+{
+	pkvm_handle_t vm_handle;
+
+	if (!hyp_vcpu)
+		return HOST_FFA_ID;
+
+	vm_handle = hyp_vcpu->vcpu.kvm->arch.pkvm.handle;
+	return vm_handle_to_idx(vm_handle) + 1;
 }

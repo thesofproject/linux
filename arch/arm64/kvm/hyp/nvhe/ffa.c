@@ -39,12 +39,6 @@
 #include <nvhe/spinlock.h>
 
 /*
- * "ID value 0 must be returned at the Non-secure physical FF-A instance"
- * We share this ID with the host.
- */
-#define HOST_FFA_ID	0
-
-/*
  * A buffer to hold the maximum descriptor size we can see from the host,
  * which is required when the SPMD returns a fragmented FFA_MEM_RETRIEVE_RESP
  * when resolving the handle on the reclaim path.
@@ -350,6 +344,8 @@ static int do_ffa_rxtx_guest_map(struct kvm_cpu_context *ctxt, struct pkvm_hyp_v
 
 	ffa_buf->tx = (void *)tx_va;
 	ffa_buf->rx = (void *)rx_va;
+	ffa_buf->tx_ipa = tx;
+	ffa_buf->rx_ipa = rx;
 out_unlock:
 	hyp_spin_unlock(&kvm_ffa_hyp_lock);
 	return ret;
@@ -381,7 +377,7 @@ static void do_ffa_rxtx_unmap(struct arm_smccc_1_2_regs *res,
 	int ret = 0;
 	struct kvm_ffa_buffers *ffa_buf;
 
-	if (id != HOST_FFA_ID) {
+	if (hyp_vcpu_to_ffa_handle(hyp_vcpu) != id) {
 		ret = FFA_RET_INVALID_PARAMETERS;
 		goto out;
 	}
@@ -393,19 +389,21 @@ static void do_ffa_rxtx_unmap(struct arm_smccc_1_2_regs *res,
 		goto out_unlock;
 	}
 
-	hyp_unpin_shared_mem(ffa_buf->tx, ffa_buf->tx + 1);
-	WARN_ON(__pkvm_host_unshare_hyp(hyp_virt_to_pfn(ffa_buf->tx)));
-	ffa_buf->tx = NULL;
+	if (!hyp_vcpu) {
+		hyp_unpin_shared_mem(ffa_buf->tx, ffa_buf->tx + 1);
+		WARN_ON(__pkvm_host_unshare_hyp(hyp_virt_to_pfn(ffa_buf->tx)));
 
-	hyp_unpin_shared_mem(ffa_buf->rx, ffa_buf->rx + 1);
-	WARN_ON(__pkvm_host_unshare_hyp(hyp_virt_to_pfn(ffa_buf->rx)));
+		hyp_unpin_shared_mem(ffa_buf->rx, ffa_buf->rx + 1);
+		WARN_ON(__pkvm_host_unshare_hyp(hyp_virt_to_pfn(ffa_buf->rx)));
+
+		ffa_unmap_hyp_buffers();
+	} else {
+		WARN_ON(__pkvm_guest_unshare_hyp_page(hyp_vcpu, ffa_buf->tx_ipa));
+		WARN_ON(__pkvm_guest_unshare_hyp_page(hyp_vcpu, ffa_buf->rx_ipa));
+	}
+
 	ffa_buf->rx = NULL;
-
-	hyp_unpin_shared_mem(host_buffers.rx, host_buffers.rx + 1);
-	WARN_ON(__pkvm_host_unshare_hyp(hyp_virt_to_pfn(host_buffers.rx)));
-	host_buffers.rx = NULL;
-
-	ffa_unmap_hyp_buffers();
+	ffa_buf->tx = NULL;
 
 out_unlock:
 	hyp_spin_unlock(&kvm_ffa_hyp_lock);
@@ -1090,6 +1088,9 @@ bool kvm_guest_ffa_handler(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 	case FFA_FN64_RXTX_MAP:
 		ret = do_ffa_rxtx_guest_map(ctxt, hyp_vcpu);
 		break;
+	case FFA_RXTX_UNMAP:
+		do_ffa_rxtx_unmap(&res, ctxt, hyp_vcpu);
+		goto out_guest;
 	default:
 		ret = -EOPNOTSUPP;
 		break;
