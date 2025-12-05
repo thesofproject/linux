@@ -27,6 +27,9 @@ DECLARE_HOOK(android_vh_alter_mutex_list_add,
 DECLARE_HOOK(android_vh_mutex_unlock_slowpath,
 	TP_PROTO(struct mutex *lock),
 	TP_ARGS(lock));
+DECLARE_RESTRICTED_HOOK(android_rvh_dpm_prepare,
+	TP_PROTO(int flag),
+	TP_ARGS(flag), 1);
 
 DECLARE_HOOK(android_vh_mutex_wait_start,
 	TP_PROTO(struct mutex *lock),
