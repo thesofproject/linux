@@ -1485,12 +1485,13 @@ static bool kvm_vma_is_cacheable(struct vm_area_struct *vma)
 static int prepare_mmu_memcache(struct kvm_vcpu *vcpu, bool topup_memcache,
 				void **memcache)
 {
-	int min_pages;
+	struct kvm_hyp_memcache *hyp_memcache;
+	int min_pages, nr_pages, ret;
 
 	if (!is_protected_kvm_enabled())
 		*memcache = &vcpu->arch.mmu_page_cache;
 	else
-		*memcache = &vcpu->arch.stage2_mc;
+		*memcache = hyp_memcache = &vcpu->arch.stage2_mc;
 
 	if (!topup_memcache)
 		return 0;
@@ -1500,7 +1501,15 @@ static int prepare_mmu_memcache(struct kvm_vcpu *vcpu, bool topup_memcache,
 	if (!is_protected_kvm_enabled())
 		return kvm_mmu_topup_memory_cache(*memcache, min_pages);
 
-	return topup_hyp_memcache(*memcache, min_pages);
+	nr_pages = hyp_memcache->nr_pages;
+	ret = topup_hyp_memcache(hyp_memcache, min_pages);
+	if (ret)
+		return ret;
+
+	nr_pages = hyp_memcache->nr_pages - nr_pages;
+	atomic64_add(nr_pages << PAGE_SHIFT, &vcpu->kvm->stat.protected_hyp_mem);
+
+	return 0;
 }
 
 /*
@@ -1609,11 +1618,15 @@ static int pkvm_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
 	struct kvm *kvm = vcpu->kvm;
 	struct kvm_s2_mmu *mmu =  &kvm->arch.mmu;
 	struct page *page;
-	int ret;
+	int ret, nr_pages;
 
+	nr_pages = hyp_memcache->nr_pages;
 	ret = topup_hyp_memcache(hyp_memcache, kvm_mmu_cache_min_pages(mmu));
 	if (ret)
 		return -ENOMEM;
+
+	nr_pages = hyp_memcache->nr_pages - nr_pages;
+	atomic64_add(nr_pages << PAGE_SHIFT, &kvm->stat.protected_hyp_mem);
 
 	ret = account_locked_vm(mm, 1, true);
 	if (ret)

@@ -197,9 +197,10 @@ static void __pkvm_finalize_destroy_hyp_vm(struct kvm *kvm)
 
 	kvm->arch.pkvm.handle = 0;
 	kvm->arch.pkvm.is_created = false;
+	atomic64_sub(kvm->arch.pkvm.stage2_teardown_mc.nr_pages << PAGE_SHIFT,
+		     &kvm->stat.protected_hyp_mem);
 	free_hyp_memcache(&kvm->arch.pkvm.stage2_teardown_mc);
 }
-
 
 static void __pkvm_vcpu_hyp_created(struct kvm_vcpu *vcpu)
 {
@@ -249,6 +250,7 @@ static int __pkvm_create_hyp_vm(struct kvm *kvm)
 	pgd = alloc_pages_exact(pgd_sz, GFP_KERNEL_ACCOUNT);
 	if (!pgd)
 		return -ENOMEM;
+	atomic64_add(pgd_sz, &kvm->stat.protected_hyp_mem);
 
 	init_hyp_stage2_memcache(&kvm->arch.pkvm.stage2_teardown_mc);
 
@@ -263,6 +265,7 @@ static int __pkvm_create_hyp_vm(struct kvm *kvm)
 	return 0;
 free_pgd:
 	free_pages_exact(pgd, pgd_sz);
+	atomic64_sub(pgd_sz, &kvm->stat.protected_hyp_mem);
 	return ret;
 }
 
