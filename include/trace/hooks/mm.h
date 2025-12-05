@@ -69,6 +69,9 @@ DECLARE_RESTRICTED_HOOK(android_rvh_vmalloc_node_bypass,
 DECLARE_RESTRICTED_HOOK(android_rvh_vfree_bypass,
 	TP_PROTO(const void *addr, bool *bypass),
 	TP_ARGS(addr, bypass), 1);
+DECLARE_HOOK(android_vh_should_fault_around,
+	TP_PROTO(struct vm_fault *vmf, bool *should_around),
+	TP_ARGS(vmf, should_around));
 #endif /* _TRACE_HOOK_MM_H */
 
 /* This part must be outside protection */
