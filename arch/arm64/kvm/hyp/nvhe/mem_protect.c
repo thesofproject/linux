@@ -1232,11 +1232,12 @@ int __pkvm_guest_share_hyp_page(struct pkvm_hyp_vcpu *vcpu, u64 ipa, u64 *hyp_va
 
 	virt = __hyp_va(phys);
 	if (IS_ENABLED(CONFIG_NVHE_EL2_DEBUG)) {
-		ret = __hyp_check_page_state_range((u64)virt, PAGE_SIZE, PKVM_NOPAGE);
+		ret = __hyp_check_page_state_range(phys, PAGE_SIZE, PKVM_NOPAGE);
 		if (ret)
 			goto unlock;
 	}
 
+	__hyp_set_page_state_range(phys, PAGE_SIZE, PKVM_PAGE_SHARED_BORROWED);
 	prot = pkvm_mkstate(PAGE_HYP, PKVM_PAGE_SHARED_BORROWED);
 	ret = pkvm_create_mappings_locked(virt, virt + PAGE_SIZE, prot);
 	if (ret) {
@@ -1279,10 +1280,11 @@ int __pkvm_guest_unshare_hyp_page(struct pkvm_hyp_vcpu *vcpu, u64 ipa)
 	phys = kvm_pte_to_phys(pte);
 
 	virt = (u64)__hyp_va(phys);
-	ret = __hyp_check_page_state_range(virt, PAGE_SIZE, PKVM_PAGE_SHARED_BORROWED);
+	ret = __hyp_check_page_state_range(phys, PAGE_SIZE, PKVM_PAGE_SHARED_BORROWED);
 	if (ret)
 		goto unlock;
 
+	__hyp_set_page_state_range(phys, PAGE_SIZE, PKVM_NOPAGE);
 	WARN_ON(kvm_pgtable_hyp_unmap(&pkvm_pgtable, virt, PAGE_SIZE) != PAGE_SIZE);
 	ret = kvm_pgtable_stage2_map(&vm->pgt, ipa, PAGE_SIZE, phys,
 				     pkvm_mkstate(KVM_PGTABLE_PROT_RWX, PKVM_PAGE_OWNED),
