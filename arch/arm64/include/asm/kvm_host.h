@@ -1770,4 +1770,9 @@ static inline long kvm_get_cap_for_kvm_ioctl(unsigned int ioctl, long *ext)
 	return -EINVAL;
 }
 
+/* Allocator interface IDs. */
+#define HYP_ALLOC_MGT_HEAP_ID          0
+
+unsigned long __pkvm_reclaim_hyp_alloc_mgt(unsigned long nr_pages);
+
 #endif /* __ARM64_KVM_HOST_H__ */
