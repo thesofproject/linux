@@ -1469,16 +1469,20 @@ void *__symbol_get(const char *symbol)
 EXPORT_SYMBOL_GPL(__symbol_get);
 
 #ifdef CONFIG_MODULE_SIG_PROTECT
-static int cmp_string(const void *a, const void *b)
+static int cmp_export(const void *sym, const void *export)
 {
-	return strcmp(*(const char **)a, *(const char **)b);
+#ifdef CONFIG_HAVE_ARCH_PREL32_RELOCATIONS
+	return strcmp((const char *)sym, (const char *)offset_to_ptr(export));
+#else
+	return strcmp((const char *)sym, (const char *)export);
+#endif
 }
 
 static bool is_protected_export(const struct kernel_symbol *sym)
 {
 	return bsearch(kernel_symbol_name(sym), __start___kexporttab,
 		       __stop___kexporttab - __start___kexporttab,
-		       sizeof(const char *), cmp_string) != NULL;
+		       sizeof(const char *), cmp_export) != NULL;
 }
 #endif
 
