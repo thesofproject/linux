@@ -75,6 +75,9 @@ static inline bool kvm_pkvm_ioctl_allowed(struct kvm *kvm, unsigned int ioctl)
 extern struct memblock_region kvm_nvhe_sym(hyp_memory)[];
 extern unsigned int kvm_nvhe_sym(hyp_memblock_nr);
 
+extern phys_addr_t kvm_nvhe_sym(pvmfw_base);
+extern phys_addr_t kvm_nvhe_sym(pvmfw_size);
+
 static inline unsigned long
 hyp_vmemmap_memblock_size(struct memblock_region *reg, size_t vmemmap_entry_size)
 {
