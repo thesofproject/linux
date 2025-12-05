@@ -526,6 +526,11 @@ static enum kvm_pgtable_prot default_host_prot(bool is_memory)
 	return is_memory ? PKVM_HOST_MEM_PROT : PKVM_HOST_MMIO_PROT;
 }
 
+static enum kvm_pgtable_prot default_hyp_prot(phys_addr_t phys)
+{
+	return addr_is_memory(phys) ? PAGE_HYP : PAGE_HYP_DEVICE;
+}
+
 bool addr_is_memory(phys_addr_t phys)
 {
 	struct kvm_mem_range range;
@@ -1230,7 +1235,7 @@ int __pkvm_host_donate_hyp_locked(u64 pfn, u64 nr_pages)
 		goto unlock;
 
 	__hyp_set_page_state_range(phys, size, PKVM_PAGE_OWNED);
-	WARN_ON(pkvm_create_mappings_locked(virt, virt + size, PAGE_HYP));
+	WARN_ON(pkvm_create_mappings_locked(virt, virt + size, default_hyp_prot(phys)));
 	WARN_ON(host_stage2_set_owner_locked(phys, size, PKVM_ID_HYP));
 
 unlock:
