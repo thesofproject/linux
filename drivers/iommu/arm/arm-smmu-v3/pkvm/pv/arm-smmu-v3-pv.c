@@ -375,9 +375,15 @@ static void smmu_put_pages(void *cookie, u64 phys, size_t size, struct iommu_iot
 	struct kvm_hyp_iommu_domain *domain = cookie;
 
 	if (unmapped->ptr == KVM_SMMU_UNMAPPED_MAX) {
-		/* Invalidate TLBs then flush requests. */
-		smmu_iotlb_sync(domain, gather);
-		iommu_iotlb_gather_init(gather);
+		/*
+		 * Invalidate TLBs then flush requests.
+		 * If gather is NULL that means page table is destroyed, and no devices are
+		 * attached so we ignore TLB invalidation.
+		 */
+		if (gather) {
+			smmu_iotlb_sync(domain, gather);
+			iommu_iotlb_gather_init(gather);
+		}
 		smmu_flush_deferred_unuse(unmapped);
 	}
 
@@ -936,6 +942,7 @@ static void smmu_free_domain(struct kvm_hyp_iommu_domain *domain)
 	if (smmu_domain->pgtable)
 		kvm_arm_io_pgtable_free(smmu_domain->pgtable);
 
+	smmu_flush_deferred_unuse(this_cpu_ptr(&kvm_smmu_deferred_unuse));
 	hyp_free(smmu_domain);
 }
 
