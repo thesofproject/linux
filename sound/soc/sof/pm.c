@@ -8,9 +8,14 @@
 // Author: Liam Girdwood <liam.r.girdwood@linux.intel.com>
 //
 
+#include <linux/module.h>
 #include "ops.h"
 #include "sof-priv.h"
 #include "sof-audio.h"
+
+static int override_on_demand_boot = -1;
+module_param_named(on_demand_boot, override_on_demand_boot, int, 0444);
+MODULE_PARM_DESC(on_demand_boot, "Force on-demand DSP boot: 0 - disabled, 1 - enabled");
 
 /*
  * Helper function to determine the target DSP state during
@@ -159,6 +164,7 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	u32 old_state = sdev->dsp_power_state.state;
+	bool on_demand_boot;
 	int ret;
 
 	/* do nothing if dsp resume callbacks are not set */
@@ -206,7 +212,12 @@ static int sof_resume(struct device *dev, bool runtime_resume)
 		return 0;
 	}
 
-	if (sdev->pdata->desc->on_demand_dsp_boot) {
+	if (override_on_demand_boot > -1)
+		on_demand_boot = override_on_demand_boot ? true : false;
+	else
+		on_demand_boot = sdev->pdata->desc->on_demand_dsp_boot;
+
+	if (on_demand_boot) {
 		/* Only change the fw_state to PREPARE but skip booting */
 		sof_set_fw_state(sdev, SOF_FW_BOOT_PREPARE);
 		return 0;
