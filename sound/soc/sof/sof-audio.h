@@ -358,6 +358,7 @@ struct snd_sof_pcm {
 	struct snd_sof_pcm_stream stream[2];
 	struct list_head list;	/* list in sdev pcm list */
 	struct snd_pcm_hw_params params[2];
+	struct snd_compr_params cparams[2]; /* applicable for compress devices */
 	struct snd_sof_platform_stream_params platform_params[2];
 	bool prepared[2]; /* PCM_PARAMS set successfully */
 	bool setup_done[2]; /* the setup of the SOF PCM device is done */
