@@ -9,6 +9,11 @@ static int __init early_pkvm_parse_cmdline(char *buf)
 }
 early_param("kvm-intel.pkvm", early_pkvm_parse_cmdline);
 
+u64 pkvm_total_reserve_pages(void)
+{
+	return pkvm_data_pages();
+}
+
 int __init vmx_pkvm_init(void)
 {
 	return 0;
