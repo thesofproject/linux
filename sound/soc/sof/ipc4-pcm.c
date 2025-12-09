@@ -412,28 +412,23 @@ static int sof_ipc4_chain_dma_trigger(struct snd_sof_dev *sdev,
 }
 
 static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
-				      struct snd_pcm_substream *substream, int state, int cmd)
+				      struct snd_pcm_substream *substream, int state, int cmd,
+				      struct snd_sof_pcm *spcm, int dir)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
-	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct snd_sof_pcm_stream_pipeline_list *pipeline_list;
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	struct ipc4_pipeline_set_state_data *trigger_list;
 	struct snd_sof_widget *pipe_widget;
 	struct sof_ipc4_pipeline *pipeline;
 	struct snd_sof_pipeline *spipe;
-	struct snd_sof_pcm *spcm;
 	u8 *pipe_priority;
 	int ret;
 	int i;
 
-	spcm = snd_sof_find_spcm_dai(component, rtd);
-	if (!spcm)
-		return -EINVAL;
+	spcm_dbg(spcm, dir, "cmd: %d, state: %d\n", cmd, state);
 
-	spcm_dbg(spcm, substream->stream, "cmd: %d, state: %d\n", cmd, state);
-
-	pipeline_list = &spcm->stream[substream->stream].pipeline_list;
+	pipeline_list = &spcm->stream[dir].pipeline_list;
 	guard(mutex)(&ipc4_data->pipeline_state_mutex);
 
 	/* nothing to trigger if the list is empty */
@@ -454,9 +449,9 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 	if (pipeline->use_chain_dma) {
 		struct sof_ipc4_timestamp_info *time_info;
 
-		time_info = sof_ipc4_sps_to_time_info(&spcm->stream[substream->stream]);
+		time_info = sof_ipc4_sps_to_time_info(&spcm->stream[dir]);
 
-		ret = sof_ipc4_chain_dma_trigger(sdev, spcm, substream->stream,
+		ret = sof_ipc4_chain_dma_trigger(sdev, spcm, dir,
 						 pipeline_list, state, cmd);
 		if (ret || !time_info)
 			return ret;
@@ -465,12 +460,16 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 			/*
 			 * Record the DAI position for delay reporting
 			 * To handle multiple pause/resume/xrun we need to add
-			 * the positions to simulate how the firmware behaves
+			 * the positions to simulate how the firmware behaves.
+			 * Chained DMA does not support compress streams. We should
+			 * never get here with compress.
 			 */
-			u64 pos = snd_sof_pcm_get_dai_frame_counter(sdev, component,
-								    substream);
+			if (substream) {
+				u64 pos = snd_sof_pcm_get_dai_frame_counter(sdev, component,
+									    substream);
 
-			time_info->stream_end_offset += pos;
+				time_info->stream_end_offset += pos;
+			}
 		} else if (state == SOF_IPC4_PIPE_RESET) {
 			/* Reset the end offset as the stream is stopped */
 			time_info->stream_end_offset = 0;
@@ -533,7 +532,7 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 	 */
 	ret = sof_ipc4_set_multi_pipeline_state(sdev, SOF_IPC4_PIPE_PAUSED, trigger_list);
 	if (ret < 0) {
-		spcm_err(spcm, substream->stream, "failed to pause all pipelines\n");
+		spcm_err(spcm, dir, "failed to pause all pipelines\n");
 		/*
 		 * workaround: if the firmware is crashed or the IPC timed out
 		 * while setting the pipeline state we must ignore the error
@@ -566,7 +565,7 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 		 * Invalidate the stream_start_offset to make sure that it is
 		 * going to be updated if the stream resumes
 		 */
-		time_info = sof_ipc4_sps_to_time_info(&spcm->stream[substream->stream]);
+		time_info = sof_ipc4_sps_to_time_info(&spcm->stream[dir]);
 		if (time_info)
 			time_info->stream_start_offset = SOF_IPC4_INVALID_STREAM_POSITION;
 
@@ -576,7 +575,7 @@ skip_pause_transition:
 	/* else set the RUNNING/RESET state in the DSP */
 	ret = sof_ipc4_set_multi_pipeline_state(sdev, state, trigger_list);
 	if (ret < 0) {
-		spcm_err(spcm, substream->stream,
+		spcm_err(spcm, dir,
 			 "failed to set final state %d for all pipelines\n",
 			 state);
 		/*
@@ -609,7 +608,8 @@ free:
 }
 
 static int sof_ipc4_pcm_trigger(struct snd_soc_component *component,
-				struct snd_pcm_substream *substream, int cmd)
+				struct snd_pcm_substream *substream,
+				struct snd_sof_pcm *spcm, int cmd, int dir)
 {
 	int state;
 
@@ -631,14 +631,15 @@ static int sof_ipc4_pcm_trigger(struct snd_soc_component *component,
 	}
 
 	/* set the pipeline state */
-	return sof_ipc4_trigger_pipelines(component, substream, state, cmd);
+	return sof_ipc4_trigger_pipelines(component, substream, state, cmd, spcm, dir);
 }
 
 static int sof_ipc4_pcm_hw_free(struct snd_soc_component *component,
-				struct snd_pcm_substream *substream)
+				struct snd_pcm_substream *substream,
+				struct snd_sof_pcm *spcm, int dir)
 {
 	/* command is not relevant with RESET, so just pass 0 */
-	return sof_ipc4_trigger_pipelines(component, substream, SOF_IPC4_PIPE_RESET, 0);
+	return sof_ipc4_trigger_pipelines(component, substream, SOF_IPC4_PIPE_RESET, 0, spcm, dir);
 }
 
 static int ipc4_ssp_dai_config_pcm_params_match(struct snd_sof_dev *sdev,
