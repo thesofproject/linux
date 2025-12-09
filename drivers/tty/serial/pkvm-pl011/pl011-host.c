@@ -4,10 +4,6 @@
 
 #include <asm/kvm_pkvm_module.h>
 
-#ifndef MODULE
-BUILD_BUG("pKVM pl011 UART must be compiled as a module");
-#endif
-
 int __kvm_nvhe_pl011_hyp_init(const struct pkvm_module_ops *ops);
 
 static int __init pl011_nvhe_init(void)
