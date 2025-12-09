@@ -287,3 +287,28 @@
   __traceiter_android_vh_f2fs_printk
   __tracepoint_android_vh_f2fs_create
   __traceiter_android_vh_f2fs_create
+  wb_wakeup
+  redirty_tail_locked
+  bdi_list
+  __traceiter_android_vh_inode_io_list_del
+  __tracepoint_android_vh_inode_io_list_del
+  __traceiter_android_vh_redirty_tail_locked
+  __tracepoint_android_vh_redirty_tail_locked
+  __traceiter_android_vh_queue_io
+  __tracepoint_android_vh_queue_io
+  __traceiter_android_vh_mark_inode_dirty
+  __tracepoint_android_vh_mark_inode_dirty
+  __traceiter_android_vh_wb_dirty_limits
+  __tracepoint_android_vh_wb_dirty_limits
+  __traceiter_android_vh_vfs_fsync_range
+  __tracepoint_android_vh_vfs_fsync_range
+  __traceiter_android_rvh_do_fcntl
+  __tracepoint_android_rvh_do_fcntl
+  __traceiter_android_vh_evict
+  __tracepoint_android_vh_evict
+  pm_wakeup_irq
+  wakeup_sources_stats_open
+  __tracepoint_android_vh_update_uid_stats
+  __tracepoint_android_vh_append_total_power
+  __traceiter_android_vh_update_uid_stats
+  __traceiter_android_vh_append_total_power
