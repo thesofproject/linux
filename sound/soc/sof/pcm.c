@@ -152,7 +152,7 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 	 * between. At least ALSA OSS emulation depends on this.
 	 */
 	if (spcm->prepared[substream->stream] && pcm_ops && pcm_ops->hw_free) {
-		ret = pcm_ops->hw_free(component, substream);
+		ret = pcm_ops->hw_free(component, substream, spcm, substream->stream);
 		if (ret < 0)
 			return ret;
 
@@ -223,7 +223,8 @@ static int sof_pcm_stream_free(struct snd_sof_dev *sdev,
 
 		/* free PCM in the DSP */
 		if (pcm_ops && pcm_ops->hw_free) {
-			ret = pcm_ops->hw_free(sdev->component, substream);
+			ret = pcm_ops->hw_free(sdev->component, substream, spcm,
+					       substream->stream);
 			if (ret < 0) {
 				spcm_err(spcm, substream->stream,
 					 "pcm_ops->hw_free failed %d\n", ret);
@@ -458,7 +459,7 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 		snd_sof_pcm_platform_trigger(sdev, substream, cmd);
 
 	if (pcm_ops && pcm_ops->trigger)
-		ret = pcm_ops->trigger(component, substream, cmd);
+		ret = pcm_ops->trigger(component, substream, spcm, cmd, substream->stream);
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
