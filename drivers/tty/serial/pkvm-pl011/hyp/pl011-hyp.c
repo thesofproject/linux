@@ -35,6 +35,9 @@ static void pl011_hyp_putc(char c)
 	dmb(sy);
 }
 
+/* -Wmissing-prototypes */
+int pl011_hyp_init(const struct pkvm_module_ops *ops);
+
 int pl011_hyp_init(const struct pkvm_module_ops *ops)
 {
 	int ret;
