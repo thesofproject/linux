@@ -1337,4 +1337,7 @@ const struct sof_ipc_pcm_ops ipc4_pcm_ops = {
 	.delay = sof_ipc4_pcm_delay,
 	.ipc_first_on_start = true,
 	.platform_stop_during_hw_free = true,
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_COMPRESS)
+	.compress_ops =	&sof_ipc4_compressed_ops,
+#endif
 };
