@@ -32399,6 +32399,12 @@ member {
   offset: 320
 }
 member {
+  id: 0xed700d4c
+  name: "android_vendor_data1"
+  type_id: 0x92233392
+  offset: 14528
+}
+member {
   id: 0xb43680cf
   name: "aneg_done"
   type_id: 0x2ee76b64
@@ -177872,7 +177878,7 @@ struct_union {
   kind: STRUCT
   name: "root_domain"
   definition {
-    bytesize: 1816
+    bytesize: 1824
     member_id: 0x05f7cb61
     member_id: 0x74a1e6d8
     member_id: 0x95dacd96
@@ -177894,6 +177900,7 @@ struct_union {
     member_id: 0xdd4e185d
     member_id: 0x954a0e7b
     member_id: 0x672698de
+    member_id: 0xed700d4c
   }
 }
 struct_union {
@@ -219702,7 +219709,7 @@ elf_symbol {
   name: "__traceiter_sched_set_state_tp"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x96c5924d
+  crc: 0x589cbffc
   type_id: 0x9bc214f0
   full_name: "__traceiter_sched_set_state_tp"
 }
@@ -219729,7 +219736,7 @@ elf_symbol {
   name: "__tracepoint_sched_set_state_tp"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0x361e3d2b
+  crc: 0x3d5c850f
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_sched_set_state_tp"
 }
@@ -226721,7 +226728,7 @@ elf_symbol {
   name: "sched_set_fifo_low"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xdbf8458b
+  crc: 0xdd90fb05
   type_id: 0x17de3be6
   full_name: "sched_set_fifo_low"
 }
@@ -229259,7 +229266,7 @@ elf_symbol {
   name: "wake_up_process"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xbbb640ab
+  crc: 0x4e13af8a
   type_id: 0x9ac6895a
   full_name: "wake_up_process"
 }
