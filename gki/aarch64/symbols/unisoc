@@ -125,6 +125,9 @@
   __traceiter_android_rvh_update_deadline
   __traceiter_android_rvh_update_misfit_status
   __traceiter_android_rvh_wake_up_new_task
+  __traceiter_android_vh_alter_futex_plist_add
+  __traceiter_android_vh_alter_mutex_list_add
+  __traceiter_android_vh_alter_rwsem_list_add
   __traceiter_android_vh_check_uninterruptible_tasks
   __traceiter_android_vh_check_uninterruptible_tasks_dn
   __traceiter_android_vh_cpufreq_fast_switch
@@ -137,7 +140,17 @@
   __traceiter_android_vh_ftrace_format_check
   __traceiter_android_vh_ftrace_oops_enter
   __traceiter_android_vh_ftrace_oops_exit
+  __traceiter_android_vh_mutex_unlock_slowpath
+  __traceiter_android_vh_mutex_wait_start
+  __traceiter_android_vh_mutex_wait_finish
   __traceiter_android_vh_psi_event
+  __traceiter_android_vh_rwsem_downgrade_wake_finish
+  __traceiter_android_vh_rwsem_read_wait_finish
+  __traceiter_android_vh_rwsem_read_wait_start
+  __traceiter_android_vh_rwsem_wake
+  __traceiter_android_vh_rwsem_wake_finish
+  __traceiter_android_vh_rwsem_write_wait_finish
+  __traceiter_android_vh_rwsem_write_wait_start
   __traceiter_android_vh_sched_show_task
   __traceiter_android_vh_scheduler_tick
   __traceiter_android_vh_scx_enabled
@@ -203,6 +216,9 @@
   __tracepoint_android_rvh_update_deadline
   __tracepoint_android_rvh_update_misfit_status
   __tracepoint_android_rvh_wake_up_new_task
+  __tracepoint_android_vh_alter_futex_plist_add
+  __tracepoint_android_vh_alter_mutex_list_add
+  __tracepoint_android_vh_alter_rwsem_list_add
   __tracepoint_android_vh_check_uninterruptible_tasks
   __tracepoint_android_vh_check_uninterruptible_tasks_dn
   __tracepoint_android_vh_cpufreq_fast_switch
@@ -215,7 +231,17 @@
   __tracepoint_android_vh_ftrace_format_check
   __tracepoint_android_vh_ftrace_oops_enter
   __tracepoint_android_vh_ftrace_oops_exit
+  __tracepoint_android_vh_mutex_unlock_slowpath
+  __tracepoint_android_vh_mutex_wait_start
+  __tracepoint_android_vh_mutex_wait_finish
   __tracepoint_android_vh_psi_event
+  __tracepoint_android_vh_rwsem_downgrade_wake_finish
+  __tracepoint_android_vh_rwsem_read_wait_finish
+  __tracepoint_android_vh_rwsem_read_wait_start
+  __tracepoint_android_vh_rwsem_wake
+  __tracepoint_android_vh_rwsem_wake_finish
+  __tracepoint_android_vh_rwsem_write_wait_finish
+  __tracepoint_android_vh_rwsem_write_wait_start
   __tracepoint_android_vh_sched_show_task
   __tracepoint_android_vh_scheduler_tick
   __tracepoint_android_vh_scx_enabled
