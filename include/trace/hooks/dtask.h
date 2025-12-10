@@ -65,6 +65,9 @@ DECLARE_HOOK(android_vh_sched_show_task,
 	TP_PROTO(struct task_struct *task),
 	TP_ARGS(task));
 
+DECLARE_HOOK(android_vh_set_tsk_need_resched_lazy,
+	TP_PROTO(struct task_struct *p, struct rq *rq, int *need_lazy),
+	TP_ARGS(p, rq, need_lazy));
 #endif /* _TRACE_HOOK_DTASK_H */
 /* This part must be outside protection */
 #include <trace/define_trace.h>
