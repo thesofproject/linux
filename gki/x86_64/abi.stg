@@ -32369,6 +32369,12 @@ member {
   offset: 25280
 }
 member {
+  id: 0xd671c1bd
+  name: "android_oem_data1"
+  type_id: 0x92233392
+  offset: 1472
+}
+member {
   id: 0xd671c55e
   name: "android_oem_data1"
   type_id: 0x92233392
@@ -106892,10 +106898,10 @@ member {
   offset: 336
 }
 member {
-  id: 0x5d6e783d
+  id: 0x5d6e758a
   name: "proto"
   type_id: 0x0db3daed
-  offset: 1472
+  offset: 1536
 }
 member {
   id: 0x5dd026ed
@@ -172641,7 +172647,7 @@ struct_union {
   kind: STRUCT
   name: "nf_conn"
   definition {
-    bytesize: 248
+    bytesize: 256
     member_id: 0x980f575e
     member_id: 0x2d1fe1be
     member_id: 0x540a881d
@@ -172654,7 +172660,8 @@ struct_union {
     member_id: 0x816a53f4
     member_id: 0x3bd928e4
     member_id: 0x9979519f
-    member_id: 0x5d6e783d
+    member_id: 0xd671c1bd
+    member_id: 0x5d6e758a
   }
 }
 struct_union {
@@ -219582,7 +219589,7 @@ elf_symbol {
   name: "__skb_flow_dissect"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x3e577d01
+  crc: 0x16e45322
   type_id: 0xf1510018
   full_name: "__skb_flow_dissect"
 }
@@ -219591,7 +219598,7 @@ elf_symbol {
   name: "__skb_get_hash_net"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xf3e61f1f
+  crc: 0xde96e7ad
   type_id: 0x1f8b5856
   full_name: "__skb_get_hash_net"
 }
