@@ -33,6 +33,7 @@
 #include <linux/shmem_fs.h>
 #include <linux/mmu_notifier.h>
 #include <trace/hooks/mm.h>
+#include <trace/hooks/sys.h>
 
 #include <asm/tlb.h>
 
@@ -2185,6 +2186,7 @@ int set_anon_vma_name(unsigned long addr, unsigned long size,
 	struct anon_vma_name *anon_name = NULL;
 	struct mm_struct *mm = current->mm;
 	int error;
+	bool bypass = false;
 
 	if (uname) {
 		char *name, *pch;
@@ -2206,6 +2208,10 @@ int set_anon_vma_name(unsigned long addr, unsigned long size,
 			return -ENOMEM;
 	}
 
+	trace_android_rvh_pr_set_vma_name_bypass(mm, addr, size, anon_name,
+			&error, &bypass);
+	if (bypass)
+		return error;
 	error = madvise_set_anon_name(mm, addr, size, anon_name);
 	anon_vma_name_put(anon_name);
 
