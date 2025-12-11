@@ -63,6 +63,9 @@ struct slabinfo;
 DECLARE_HOOK(android_vh_cache_show,
 	TP_PROTO(struct seq_file *m, struct slabinfo *sinfo, struct kmem_cache *s),
 	TP_ARGS(m, sinfo, s));
+DECLARE_HOOK(android_vh_ra_tuning_max_page,
+	TP_PROTO(struct readahead_control *ractl, unsigned long *max_page),
+	TP_ARGS(ractl, max_page));
 DECLARE_RESTRICTED_HOOK(android_rvh_vmalloc_node_bypass,
 	TP_PROTO(unsigned long size, gfp_t gfp_mask, void **addr),
 	TP_ARGS(size, gfp_mask, addr), 1);

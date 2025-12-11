@@ -131,6 +131,8 @@
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/readahead.h>
+#undef CREATE_TRACE_POINTS
+#include <trace/hooks/mm.h>
 
 #include "internal.h"
 
@@ -548,6 +550,9 @@ static unsigned long ractl_max_pages(struct readahead_control *ractl,
 	 */
 	if (req_size > max_pages && bdi->io_pages > max_pages)
 		max_pages = min(req_size, bdi->io_pages);
+
+	trace_android_vh_ra_tuning_max_page(ractl, &max_pages);
+
 	return max_pages;
 }
 
