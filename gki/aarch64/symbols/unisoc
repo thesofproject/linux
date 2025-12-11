@@ -128,6 +128,10 @@
   __traceiter_android_vh_alter_futex_plist_add
   __traceiter_android_vh_alter_mutex_list_add
   __traceiter_android_vh_alter_rwsem_list_add
+  __traceiter_android_vh_binder_proc_transaction_finish
+  __traceiter_android_vh_binder_restore_priority
+  __traceiter_android_vh_binder_set_priority
+  __traceiter_android_vh_binder_wait_for_work
   __traceiter_android_vh_check_uninterruptible_tasks
   __traceiter_android_vh_check_uninterruptible_tasks_dn
   __traceiter_android_vh_cpufreq_fast_switch
@@ -155,6 +159,7 @@
   __traceiter_android_vh_scheduler_tick
   __traceiter_android_vh_scx_enabled
   __traceiter_android_vh_setscheduler_uclamp
+  __traceiter_android_vh_sync_txn_recvd
   __traceiter_android_vh_update_topology_flags_workfn
   __traceiter_cpu_frequency_limits
   __traceiter_cpu_idle
@@ -219,6 +224,10 @@
   __tracepoint_android_vh_alter_futex_plist_add
   __tracepoint_android_vh_alter_mutex_list_add
   __tracepoint_android_vh_alter_rwsem_list_add
+  __tracepoint_android_vh_binder_proc_transaction_finish
+  __tracepoint_android_vh_binder_restore_priority
+  __tracepoint_android_vh_binder_set_priority
+  __tracepoint_android_vh_binder_wait_for_work
   __tracepoint_android_vh_check_uninterruptible_tasks
   __tracepoint_android_vh_check_uninterruptible_tasks_dn
   __tracepoint_android_vh_cpufreq_fast_switch
@@ -246,6 +255,7 @@
   __tracepoint_android_vh_scheduler_tick
   __tracepoint_android_vh_scx_enabled
   __tracepoint_android_vh_setscheduler_uclamp
+  __tracepoint_android_vh_sync_txn_recvd
   __tracepoint_android_vh_update_topology_flags_workfn
   __tracepoint_cpu_frequency_limits
   __tracepoint_cpu_idle
