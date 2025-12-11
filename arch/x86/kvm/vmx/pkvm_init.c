@@ -155,6 +155,7 @@ static __init int pkvm_setup_host_vm(struct pkvm_hyp *pkvm)
 		return -ENOMEM;
 	}
 
+	kvmx->kvm.arch.pkvm.handle = PKVM_HOST_VM_HANDLE;
 	/*
 	 * Only a few fields in the kvm structure will be used, e.g.,
 	 * hlt_in_guest for exception injection code to clear hlt state.

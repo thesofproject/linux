@@ -837,6 +837,8 @@ static inline void free_pkvm_memcache(struct pkvm_memcache *mc,
 		free(pop_pkvm_memcache(mc, to_va));
 }
 
+#define PKVM_HOST_VM_HANDLE	INT_MAX
+
 struct kvm_pkvm_vm {
 	int handle;
 };
