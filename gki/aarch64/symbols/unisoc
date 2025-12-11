@@ -5,6 +5,7 @@
   __arch_copy_from_user
   __arch_copy_to_user
   blk_crypto_reprogram_all_keys
+  blkcg_policy_register
   capable
   __check_object_size
   class_create
@@ -86,6 +87,7 @@
   __traceiter_android_rvh_cpu_cgroup_online
   __traceiter_android_rvh_cpufreq_transition
   __traceiter_android_rvh_cpu_overutilized
+  __traceiter_android_rvh_ctl_dirty_rate
   __traceiter_android_rvh_dequeue_entity
   __traceiter_android_rvh_dequeue_task
   __traceiter_android_rvh_dequeue_task_fair
@@ -182,6 +184,7 @@
   __tracepoint_android_rvh_cpu_cgroup_online
   __tracepoint_android_rvh_cpufreq_transition
   __tracepoint_android_rvh_cpu_overutilized
+  __tracepoint_android_rvh_ctl_dirty_rate
   __tracepoint_android_rvh_dequeue_entity
   __tracepoint_android_rvh_dequeue_task
   __tracepoint_android_rvh_dequeue_task_fair
