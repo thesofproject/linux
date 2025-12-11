@@ -84,6 +84,9 @@ DECLARE_HOOK(android_vh_madvise_swapin_walk_pmd_entry,
 DECLARE_HOOK(android_vh_process_madvise,
 	TP_PROTO(int behavior, ssize_t *ret, void *priv),
 	TP_ARGS(behavior, ret, priv));
+DECLARE_RESTRICTED_HOOK(android_rvh_ctl_dirty_rate,
+	TP_PROTO(struct inode *inode),
+	TP_ARGS(inode), 1);
 #endif /* _TRACE_HOOK_MM_H */
 
 /* This part must be outside protection */
