@@ -134,6 +134,7 @@
   __traceiter_android_vh_binder_restore_priority
   __traceiter_android_vh_binder_set_priority
   __traceiter_android_vh_binder_wait_for_work
+  __traceiter_android_vh_check_set_ioprio
   __traceiter_android_vh_check_uninterruptible_tasks
   __traceiter_android_vh_check_uninterruptible_tasks_dn
   __traceiter_android_vh_cpufreq_fast_switch
@@ -231,6 +232,7 @@
   __tracepoint_android_vh_binder_restore_priority
   __tracepoint_android_vh_binder_set_priority
   __tracepoint_android_vh_binder_wait_for_work
+  __tracepoint_android_vh_check_set_ioprio
   __tracepoint_android_vh_check_uninterruptible_tasks
   __tracepoint_android_vh_check_uninterruptible_tasks_dn
   __tracepoint_android_vh_cpufreq_fast_switch
@@ -284,3 +286,4 @@
   __typec_altmode_register_driver
   typec_altmode_unregister_driver
   typec_get_negotiated_svdm_version
+
