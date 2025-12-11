@@ -406,6 +406,10 @@ DECLARE_RESTRICTED_HOOK(android_rvh_post_init_entity_util_avg,
 DECLARE_HOOK(android_vh_task_cmdline_prio_inherit,
 	TP_PROTO(struct task_struct *p, int *saved_prio, bool *prio_inherited),
 	TP_ARGS(p, saved_prio, prio_inherited));
+DECLARE_HOOK(android_vh_mmput,
+	TP_PROTO(struct mm_struct *mm),
+	TP_ARGS(mm));
+/* macro versions of hooks are no longer required */
 
 DECLARE_HOOK(android_vh_task_cmdline_prio_restore,
 	TP_PROTO(int saved_prio),
