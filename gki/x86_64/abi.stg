@@ -7654,6 +7654,11 @@ pointer_reference {
   pointee_type_id: 0xad11a121
 }
 pointer_reference {
+  id: 0x21da44d5
+  kind: POINTER
+  pointee_type_id: 0xad29f5c9
+}
+pointer_reference {
   id: 0x21e0c6ee
   kind: POINTER
   pointee_type_id: 0xadc3fd26
@@ -65296,6 +65301,12 @@ member {
   name: "get_plca_status"
   type_id: 0x2edc5593
   offset: 4224
+}
+member {
+  id: 0x4f78f705
+  name: "get_pool_size"
+  type_id: 0x21da44d5
+  offset: 64
 }
 member {
   id: 0x068909a2
@@ -158004,8 +158015,9 @@ struct_union {
   kind: STRUCT
   name: "dma_heap_ops"
   definition {
-    bytesize: 8
+    bytesize: 16
     member_id: 0x7fa38ab0
+    member_id: 0x4f78f705
   }
 }
 struct_union {
@@ -217395,6 +217407,11 @@ function {
   parameter_id: 0x31b5a66f
 }
 function {
+  id: 0xad29f5c9
+  return_type_id: 0xfc0e1dbd
+  parameter_id: 0x28273940
+}
+function {
   id: 0xad855341
   return_type_id: 0xfc0e1dbd
   parameter_id: 0x2efe8065
@@ -221891,7 +221908,7 @@ elf_symbol {
   name: "dma_heap_add"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xa25a4269
+  crc: 0xaeaee554
   namespace: "DMA_BUF_HEAP"
   type_id: 0x0a745291
   full_name: "dma_heap_add"
