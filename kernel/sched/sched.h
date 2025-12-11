@@ -76,6 +76,8 @@
 #include <trace/events/power.h>
 #include <trace/events/sched.h>
 
+#include <trace/hooks/sched.h>
+
 #include "../workqueue_internal.h"
 
 struct rq;
@@ -2219,6 +2221,9 @@ static inline struct task_group *task_group(struct task_struct *p)
 
 static inline void __set_task_cpu(struct task_struct *p, unsigned int cpu)
 {
+	if (task_cpu(p) != cpu)
+		trace_android_rvh___set_task_cpu(p, cpu);
+
 	set_task_rq(p, cpu);
 #ifdef CONFIG_SMP
 	/*

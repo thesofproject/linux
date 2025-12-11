@@ -22,6 +22,10 @@ DECLARE_RESTRICTED_HOOK(android_rvh_select_fallback_rq,
 	TP_PROTO(int cpu, struct task_struct *p, int *new_cpu),
 	TP_ARGS(cpu, p, new_cpu), 1);
 
+DECLARE_RESTRICTED_HOOK(android_rvh___set_task_cpu,
+	TP_PROTO(struct task_struct *p, unsigned int new_cpu),
+	TP_ARGS(p, new_cpu), 1);
+
 struct rq;
 DECLARE_HOOK(android_vh_scheduler_tick,
 	TP_PROTO(struct rq *rq),
