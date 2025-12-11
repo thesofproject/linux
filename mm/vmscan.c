@@ -74,6 +74,7 @@
 
 #undef CREATE_TRACE_POINTS
 #include <trace/hooks/vmscan.h>
+#include <trace/hooks/mm.h>
 
 EXPORT_TRACEPOINT_SYMBOL_GPL(mm_vmscan_direct_reclaim_begin);
 EXPORT_TRACEPOINT_SYMBOL_GPL(mm_vmscan_direct_reclaim_end);
@@ -915,6 +916,12 @@ static enum folio_references folio_check_references(struct folio *folio,
 {
 	int referenced_ptes, referenced_folio;
 	vm_flags_t vm_flags;
+	int ret = 0;
+
+	trace_android_vh_page_should_be_protected(folio, sc->nr_scanned,
+		sc->priority, &ret);
+	if (ret)
+		return ret;
 
 	referenced_ptes = folio_referenced(folio, 1, sc->target_mem_cgroup,
 					   &vm_flags);
@@ -2145,6 +2152,8 @@ static void shrink_active_list(unsigned long nr_to_scan,
 	unsigned nr_rotated = 0;
 	bool file = is_file_lru(lru);
 	struct pglist_data *pgdat = lruvec_pgdat(lruvec);
+	int should_protect = 0;
+	bool bypass = false;
 
 	lru_add_drain();
 
@@ -2181,6 +2190,19 @@ static void shrink_active_list(unsigned long nr_to_scan,
 			}
 		}
 
+		trace_android_vh_page_should_be_protected(folio, sc->nr_scanned,
+			sc->priority, &should_protect);
+
+		if (unlikely(should_protect)) {
+			nr_rotated += folio_nr_pages(folio);
+			list_add(&folio->lru, &l_active);
+			continue;
+		}
+
+		trace_android_vh_page_referenced_check_bypass(folio, nr_to_scan, lru, &bypass);
+		if (bypass)
+			goto skip_folio_referenced;
+
 		/* Referenced or rmap lock contention: rotate */
 		if (folio_referenced(folio, 0, sc->target_mem_cgroup,
 				     &vm_flags) != 0) {
@@ -2200,6 +2222,7 @@ static void shrink_active_list(unsigned long nr_to_scan,
 			}
 		}
 
+skip_folio_referenced:
 		folio_clear_active(folio);	/* we are de-activating */
 		folio_set_workingset(folio);
 		list_add(&folio->lru, &l_inactive);
