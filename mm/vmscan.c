@@ -2655,6 +2655,7 @@ static void get_scan_count(struct lruvec *lruvec, struct scan_control *sc,
 	calculate_pressure_balance(sc, swappiness, fraction, &denominator);
 
 out:
+	trace_android_vh_tune_scan_type(&scan_balance);
 	for_each_evictable_lru(lru) {
 		bool file = is_file_lru(lru);
 		unsigned long lruvec_size;
