@@ -447,6 +447,8 @@ static int __vcpu_create(struct kvm *kvm, struct kvm_vcpu *vcpu, struct fpstate 
 	if (ret)
 		goto unsetup_lapic;
 
+	pkvm_vcpu_perf_init(vcpu);
+
 	/* Load guest vCPU to reset it. */
 	kvm_x86_call(vcpu_load)(vcpu, cpu);
 

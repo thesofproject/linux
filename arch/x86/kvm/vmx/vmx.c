@@ -77,6 +77,7 @@
 #include "mem_protect.h"
 #include "memory.h"
 #include "pkvm.h"
+#include "pkvm/trace.h"
 
 #undef module_param_named
 #define module_param_named(...)
@@ -8082,8 +8083,14 @@ static noinstr void vmx_vcpu_enter_exit(struct kvm_vcpu *vcpu,
 	if (vcpu->arch.cr2 != native_read_cr2())
 		native_write_cr2(vcpu->arch.cr2);
 
+#ifdef __PKVM_HYP__
+	pkvm_trace_vmexit_end(vcpu, vmx_get_exit_reason(vcpu).basic);
+#endif
 	vmx->fail = __vmx_vcpu_run(vmx, (unsigned long *)&vcpu->arch.regs,
 				   flags);
+#ifdef __PKVM_HYP__
+	pkvm_trace_vmexit_start(vcpu);
+#endif
 
 	vcpu->arch.cr2 = native_read_cr2();
 	vcpu->arch.regs_avail &= ~VMX_REGS_LAZY_LOAD_SET;
