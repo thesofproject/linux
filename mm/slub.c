@@ -5628,6 +5628,8 @@ static void *___kmalloc_large_node(size_t size, gfp_t flags, int node)
 		__folio_set_large_kmalloc(folio);
 	}
 
+	trace_android_vh_kmalloc_large_alloced(folio, order, flags);
+
 	ptr = kasan_kmalloc_large(ptr, size, flags);
 	/* As ptr might get tagged, call kmemleak hook after KASAN. */
 	kmemleak_alloc(ptr, size, 1, flags);
