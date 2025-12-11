@@ -52,6 +52,7 @@
   nr_cpu_ids
   __per_cpu_offset
   perf_aux_output_skip
+  pidfd_get_pid
   prepare_to_wait_event
   _printk
   put_device
@@ -70,6 +71,7 @@
   snprintf
   __stack_chk_fail
   strcmp
+  swp_swapcount
   synchronize_rcu
   sysfs_emit
   system_cpucaps
@@ -85,8 +87,8 @@
   __traceiter_android_rvh_cpu_capacity_show
   __traceiter_android_rvh_cpu_cgroup_attach
   __traceiter_android_rvh_cpu_cgroup_online
-  __traceiter_android_rvh_cpufreq_transition
   __traceiter_android_rvh_cpu_overutilized
+  __traceiter_android_rvh_cpufreq_transition
   __traceiter_android_rvh_ctl_dirty_rate
   __traceiter_android_rvh_dequeue_entity
   __traceiter_android_rvh_dequeue_task
@@ -103,6 +105,7 @@
   __traceiter_android_rvh_is_cpu_allowed
   __traceiter_android_rvh_migrate_queued_task
   __traceiter_android_rvh_new_task_stats
+  __traceiter_android_rvh_pr_set_vma_name_bypass
   __traceiter_android_rvh_prepare_prio_fork
   __traceiter_android_rvh_replace_next_task_fair
   __traceiter_android_rvh_rto_next_cpu
@@ -120,13 +123,16 @@
   __traceiter_android_rvh_select_task_rq_fair
   __traceiter_android_rvh_select_task_rq_rt
   __traceiter_android_rvh_set_cpus_allowed_by_task
-  __traceiter_android_rvh_setscheduler
   __traceiter_android_rvh_set_task_cpu
+  __traceiter_android_rvh_setscheduler
   __traceiter_android_rvh_tick_entry
   __traceiter_android_rvh_try_to_wake_up
   __traceiter_android_rvh_update_deadline
   __traceiter_android_rvh_update_misfit_status
   __traceiter_android_rvh_wake_up_new_task
+  __traceiter_android_vh_adjust_alloc_flags
+  __traceiter_android_vh_adjust_kvmalloc_flags
+  __traceiter_android_vh_alloc_pages_reclaim_bypass
   __traceiter_android_vh_alter_futex_plist_add
   __traceiter_android_vh_alter_mutex_list_add
   __traceiter_android_vh_alter_rwsem_list_add
@@ -137,9 +143,10 @@
   __traceiter_android_vh_check_set_ioprio
   __traceiter_android_vh_check_uninterruptible_tasks
   __traceiter_android_vh_check_uninterruptible_tasks_dn
-  __traceiter_android_vh_cpufreq_fast_switch
   __traceiter_android_vh_cpu_idle_enter
   __traceiter_android_vh_cpu_idle_exit
+  __traceiter_android_vh_cpufreq_fast_switch
+  __traceiter_android_vh_exit_signal
   __traceiter_android_vh_freq_qos_add_request
   __traceiter_android_vh_freq_qos_remove_request
   __traceiter_android_vh_freq_qos_update_request
@@ -150,7 +157,11 @@
   __traceiter_android_vh_mutex_unlock_slowpath
   __traceiter_android_vh_mutex_wait_start
   __traceiter_android_vh_mutex_wait_finish
+  __traceiter_android_vh_kmalloc_large_alloced
+  __traceiter_android_vh_mmput
+  __traceiter_android_vh_page_should_be_protected
   __traceiter_android_vh_psi_event
+  __traceiter_android_vh_ra_tuning_max_page
   __traceiter_android_vh_rwsem_downgrade_wake_finish
   __traceiter_android_vh_rwsem_read_wait_finish
   __traceiter_android_vh_rwsem_read_wait_start
@@ -162,7 +173,9 @@
   __traceiter_android_vh_scheduler_tick
   __traceiter_android_vh_scx_enabled
   __traceiter_android_vh_setscheduler_uclamp
+  __traceiter_android_vh_slab_folio_alloced
   __traceiter_android_vh_sync_txn_recvd
+  __traceiter_android_vh_tune_scan_type
   __traceiter_android_vh_update_topology_flags_workfn
   __traceiter_cpu_frequency_limits
   __traceiter_cpu_idle
@@ -183,8 +196,8 @@
   __tracepoint_android_rvh_cpu_capacity_show
   __tracepoint_android_rvh_cpu_cgroup_attach
   __tracepoint_android_rvh_cpu_cgroup_online
-  __tracepoint_android_rvh_cpufreq_transition
   __tracepoint_android_rvh_cpu_overutilized
+  __tracepoint_android_rvh_cpufreq_transition
   __tracepoint_android_rvh_ctl_dirty_rate
   __tracepoint_android_rvh_dequeue_entity
   __tracepoint_android_rvh_dequeue_task
@@ -201,6 +214,7 @@
   __tracepoint_android_rvh_is_cpu_allowed
   __tracepoint_android_rvh_migrate_queued_task
   __tracepoint_android_rvh_new_task_stats
+  __tracepoint_android_rvh_pr_set_vma_name_bypass
   __tracepoint_android_rvh_prepare_prio_fork
   __tracepoint_android_rvh_replace_next_task_fair
   __tracepoint_android_rvh_rto_next_cpu
@@ -218,13 +232,16 @@
   __tracepoint_android_rvh_select_task_rq_fair
   __tracepoint_android_rvh_select_task_rq_rt
   __tracepoint_android_rvh_set_cpus_allowed_by_task
-  __tracepoint_android_rvh_setscheduler
   __tracepoint_android_rvh_set_task_cpu
+  __tracepoint_android_rvh_setscheduler
   __tracepoint_android_rvh_tick_entry
   __tracepoint_android_rvh_try_to_wake_up
   __tracepoint_android_rvh_update_deadline
   __tracepoint_android_rvh_update_misfit_status
   __tracepoint_android_rvh_wake_up_new_task
+  __tracepoint_android_vh_adjust_alloc_flags
+  __tracepoint_android_vh_adjust_kvmalloc_flags
+  __tracepoint_android_vh_alloc_pages_reclaim_bypass
   __tracepoint_android_vh_alter_futex_plist_add
   __tracepoint_android_vh_alter_mutex_list_add
   __tracepoint_android_vh_alter_rwsem_list_add
@@ -235,9 +252,10 @@
   __tracepoint_android_vh_check_set_ioprio
   __tracepoint_android_vh_check_uninterruptible_tasks
   __tracepoint_android_vh_check_uninterruptible_tasks_dn
-  __tracepoint_android_vh_cpufreq_fast_switch
   __tracepoint_android_vh_cpu_idle_enter
   __tracepoint_android_vh_cpu_idle_exit
+  __tracepoint_android_vh_cpufreq_fast_switch
+  __tracepoint_android_vh_exit_signal
   __tracepoint_android_vh_freq_qos_add_request
   __tracepoint_android_vh_freq_qos_remove_request
   __tracepoint_android_vh_freq_qos_update_request
@@ -248,7 +266,11 @@
   __tracepoint_android_vh_mutex_unlock_slowpath
   __tracepoint_android_vh_mutex_wait_start
   __tracepoint_android_vh_mutex_wait_finish
+  __tracepoint_android_vh_kmalloc_large_alloced
+  __tracepoint_android_vh_mmput
+  __tracepoint_android_vh_page_should_be_protected
   __tracepoint_android_vh_psi_event
+  __tracepoint_android_vh_ra_tuning_max_page
   __tracepoint_android_vh_rwsem_downgrade_wake_finish
   __tracepoint_android_vh_rwsem_read_wait_finish
   __tracepoint_android_vh_rwsem_read_wait_start
@@ -260,7 +282,9 @@
   __tracepoint_android_vh_scheduler_tick
   __tracepoint_android_vh_scx_enabled
   __tracepoint_android_vh_setscheduler_uclamp
+  __tracepoint_android_vh_slab_folio_alloced
   __tracepoint_android_vh_sync_txn_recvd
+  __tracepoint_android_vh_tune_scan_type
   __tracepoint_android_vh_update_topology_flags_workfn
   __tracepoint_cpu_frequency_limits
   __tracepoint_cpu_idle
