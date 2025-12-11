@@ -441,6 +441,7 @@ write:
 
 static void hyp_ftrace_init_mod(struct pkvm_el2_module *mod)
 {
+	unsigned long hyp_kern_offset = mod->sections.start - mod->hyp_va;
 	/* Install a trampoline to reach __hyp_ftrace_tramp */
 	int ret = hyp_ftrace_init_mod_tramp(mod);
 
@@ -451,9 +452,9 @@ static void hyp_ftrace_init_mod(struct pkvm_el2_module *mod)
 
 	hyp_ftrace_funcs_init(mod->patchable_function_entries.start,
 			      mod->patchable_function_entries.end,
-			      (unsigned long)mod->text.start,
-			      (unsigned long)mod->text.end,
-			      mod->sections.start - mod->hyp_va,
+			      (unsigned long)mod->text.start - hyp_kern_offset,
+			      (unsigned long)mod->text.end - hyp_kern_offset,
+			      hyp_kern_offset,
 			      ret);
 
 	mutex_unlock(&hyp_ftrace_funcs_lock);
