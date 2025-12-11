@@ -1592,7 +1592,7 @@ void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 		break;
 	case __pkvm__dump_vmexit_trace:
 		ret = pkvm_dump_vmexit_trace(pkvm_host_gpa_to_phys(pkvm_hc_input1(vcpu)),
-					     pkvm_hc_input2(vcpu));
+					     pkvm_hc_input2(vcpu), PKVM_HOST_VM_HANDLE);
 		break;
 	case __pkvm__check_processor_compatibility:
 		ret = kvm_x86_call(check_processor_compatibility)();
@@ -1768,4 +1768,25 @@ unsigned long pkvm_pcpu_tss(int cpu)
 void pkvm_x86_ops_init(struct pkvm_x86_ops *ops)
 {
 	memcpy(&pkvm_x86_ops, ops, sizeof(struct pkvm_x86_ops));
+}
+
+int pkvm_walk_each_vm(pkvm_vm_func_t func, void *arg)
+{
+	struct pkvm_vm *vm;
+	int i, ret = 0;
+
+	pkvm_spin_lock(&pkvm_vms_lock);
+
+	for (i = 0; i < MAX_PKVM_VMS; i++) {
+		vm = pkvm_vms_ref[i].pkvm_vm;
+		if (!vm)
+			continue;
+		ret = func(vm, arg);
+		if (ret)
+			break;
+	}
+
+	pkvm_spin_unlock(&pkvm_vms_lock);
+
+	return ret;
 }
