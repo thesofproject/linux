@@ -39,8 +39,8 @@ void __arm_lpae_free_pages(void *pages, size_t size,
 void *__arm_lpae_alloc_pages(size_t size, gfp_t gfp,
 			     struct io_pgtable_cfg *cfg,
 			     void *cookie);
-void *__arm_lpae_alloc_data(size_t size, gfp_t gfp);
-void __arm_lpae_free_data(void *p);
+void *__arm_lpae_alloc_data(struct io_pgtable_cfg *cfg, size_t size, gfp_t gfp);
+void __arm_lpae_free_data(struct io_pgtable_cfg *cfg, void *p);
 struct io_pgtable *
 arm_64_lpae_alloc_pgtable_s2(struct io_pgtable_cfg *cfg, void *cookie);
 struct io_pgtable *
