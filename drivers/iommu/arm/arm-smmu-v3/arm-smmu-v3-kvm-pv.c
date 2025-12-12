@@ -137,6 +137,21 @@ static void kvm_arm_smmu_detach_dev_pasid(struct device *dev,
 	struct host_arm_smmu_device *host_smmu = smmu_to_host(master->smmu);
 	struct kvm_arm_smmu_domain *kvm_smmu_domain = to_kvm_smmu_domain(domain);
 
+	if (domain->type == IOMMU_DOMAIN_IDENTITY) {
+		if (WARN_ON(pasid))
+			return;
+		for (i = 0; i < master->num_streams; i++) {
+			int ret;
+			u32 sid = master->streams[i].id;
+
+			ret = kvm_iommu_set_identity(host_smmu->id, sid, false);
+			if (ret)
+				dev_err(dev, "Failed to disable identity(sid=0x%x) %d\n",
+					sid, ret);
+		}
+		return;
+	}
+
 	for (i = 0; i < master->num_streams; i++)
 		kvm_iommu_detach_dev(host_smmu->id, kvm_smmu_domain->id,
 				     master->streams[i].id, pasid);
@@ -307,7 +322,45 @@ static struct iommu_domain kvm_arm_smmu_blocked_domain = {
 	.ops = &kvm_arm_smmu_blocked_ops,
 };
 
+static int kvm_arm_smmu_def_domain_type(struct device *dev)
+{
+	if (device_property_read_bool(dev, "iommu-idmapped"))
+		return IOMMU_DOMAIN_IDENTITY;
+	return 0;
+}
+
+static int kvm_arm_smmu_attach_dev_identity(struct iommu_domain *domain,
+					    struct device *dev)
+{
+	struct arm_smmu_master *master = dev_iommu_priv_get(dev);
+	struct arm_smmu_device *smmu = master->smmu;
+	struct host_arm_smmu_device *host_smmu = smmu_to_host(smmu);
+	int i, ret;
+
+	for (i = 0; i < master->num_streams; i++) {
+		u32 sid = master->streams[i].id;
+
+		ret = kvm_iommu_set_identity(host_smmu->id, sid, true);
+		if (ret) {
+			dev_err(dev, "Failed to enable identity(sid=0x%x) %d\n", sid, ret);
+			return ret;
+		}
+	}
+	return 0;
+}
+
+static const struct iommu_domain_ops kvm_arm_smmu_identity_ops = {
+	.attach_dev = kvm_arm_smmu_attach_dev_identity,
+};
+
+static struct iommu_domain kvm_arm_smmu_identity_domain = {
+	.type = IOMMU_DOMAIN_IDENTITY,
+	.ops = &kvm_arm_smmu_identity_ops,
+
+};
+
 static struct iommu_ops kvm_arm_smmu_ops = {
+	.identity_domain	= &kvm_arm_smmu_identity_domain,
 	.capable		= kvm_arm_smmu_capable,
 	.device_group		= arm_smmu_device_group,
 	.of_xlate		= arm_smmu_of_xlate,
@@ -317,6 +370,7 @@ static struct iommu_ops kvm_arm_smmu_ops = {
 	.owner			= THIS_MODULE,
 	.domain_alloc_paging	= kvm_arm_smmu_domain_alloc_paging,
 	.blocked_domain		= &kvm_arm_smmu_blocked_domain,
+	.def_domain_type	= kvm_arm_smmu_def_domain_type,
 	.default_domain_ops 	=  &(const struct iommu_domain_ops) {
 		.attach_dev	= kvm_arm_smmu_attach_dev,
 		.set_dev_pasid	= kvm_arm_smmu_attach_dev_pasid,
