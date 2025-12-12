@@ -1690,18 +1690,21 @@ static void handle___pkvm_host_get_ffa_version(struct kvm_cpu_context *host_ctxt
 static void handle___pkvm_iommu_register_ops(struct kvm_cpu_context *host_ctxt)
 {
 	DECLARE_REG(struct kvm_iommu_ops *, ops, host_ctxt, 1);
+	pkvm_handle_t drv_id;
 
-	cpu_reg(host_ctxt, 1) = kvm_iommu_register_ops(ops);
+	cpu_reg(host_ctxt, 1) = kvm_iommu_register_ops(ops, &drv_id);
+	cpu_reg(host_ctxt, 2) = drv_id;
 }
 
 static void handle___pkvm_host_iommu_alloc_domain(struct kvm_cpu_context *host_ctxt)
 {
 	int ret;
-	DECLARE_REG(pkvm_handle_t, iommu_id, host_ctxt, 1);
-	DECLARE_REG(pkvm_handle_t, domain, host_ctxt, 2);
-	DECLARE_REG(int, type, host_ctxt, 3);
+	DECLARE_REG(pkvm_handle_t, drv_id, host_ctxt, 1);
+	DECLARE_REG(pkvm_handle_t, iommu_id, host_ctxt, 2);
+	DECLARE_REG(pkvm_handle_t, domain, host_ctxt, 3);
+	DECLARE_REG(int, type, host_ctxt, 4);
 
-	ret = kvm_iommu_alloc_domain(iommu_id, domain, type);
+	ret = kvm_iommu_alloc_domain(drv_id, iommu_id, domain, type);
 	hyp_reqs_smccc_encode(ret, host_ctxt, this_cpu_ptr(&host_hyp_reqs));
 }
 
@@ -1782,11 +1785,12 @@ static void handle___pkvm_host_iommu_iova_to_phys(struct kvm_cpu_context *host_c
 static void handle___pkvm_host_iommu_set_identity(struct kvm_cpu_context *host_ctxt)
 {
 	int ret;
-	DECLARE_REG(pkvm_handle_t, iommu, host_ctxt, 1);
-	DECLARE_REG(pkvm_handle_t, dev, host_ctxt, 2);
-	DECLARE_REG(bool, on, host_ctxt, 3);
+	DECLARE_REG(pkvm_handle_t, drv_id, host_ctxt, 1);
+	DECLARE_REG(pkvm_handle_t, iommu, host_ctxt, 2);
+	DECLARE_REG(pkvm_handle_t, dev, host_ctxt, 3);
+	DECLARE_REG(bool, on, host_ctxt, 4);
 
-	ret = kvm_iommu_set_identity(iommu, dev, on);
+	ret = kvm_iommu_set_identity(drv_id, iommu, dev, on);
 	hyp_reqs_smccc_encode(ret, host_ctxt, this_cpu_ptr(&host_hyp_reqs));
 }
 

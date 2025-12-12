@@ -45,12 +45,20 @@ int kvm_iommu_register_driver(struct kvm_iommu_driver *kern_ops, size_t pool_pag
 }
 EXPORT_SYMBOL(kvm_iommu_register_driver);
 
-int kvm_iommu_register_hyp_ops(struct kvm_iommu_ops *hyp_ops)
+int kvm_iommu_register_hyp_ops(struct kvm_iommu_ops *hyp_ops, pkvm_handle_t *drv_id)
 {
+	struct arm_smccc_res res;
+	int ret;
+
 	if (!hyp_ops)
 		return -ENODEV;
 
-	return kvm_call_hyp_nvhe(__pkvm_iommu_register_ops, hyp_ops);
+	res = kvm_call_hyp_nvhe_smccc(__pkvm_iommu_register_ops, hyp_ops);
+	ret = res.a1;
+	if (ret)
+		return ret;
+	*drv_id = res.a2;
+	return ret;
 }
 EXPORT_SYMBOL(kvm_iommu_register_hyp_ops);
 
@@ -144,10 +152,11 @@ int kvm_iommu_detach_dev(pkvm_handle_t iommu_id, pkvm_handle_t domain_id,
 }
 EXPORT_SYMBOL(kvm_iommu_detach_dev);
 
-int kvm_iommu_alloc_domain(pkvm_handle_t iommu_id, pkvm_handle_t domain_id, int type)
+int kvm_iommu_alloc_domain(pkvm_handle_t drv_id, pkvm_handle_t iommu_id,
+			   pkvm_handle_t domain_id, int type)
 {
-	return kvm_call_hyp_nvhe_mc(__pkvm_host_iommu_alloc_domain, iommu_id,
-				    domain_id, type);
+	return kvm_call_hyp_nvhe_mc(__pkvm_host_iommu_alloc_domain, drv_id,
+				    iommu_id, domain_id, type);
 }
 EXPORT_SYMBOL(kvm_iommu_alloc_domain);
 
@@ -231,9 +240,11 @@ int pkvm_iommu_resume(int device_id)
 }
 EXPORT_SYMBOL(pkvm_iommu_resume);
 
-int kvm_iommu_set_identity(pkvm_handle_t iommu, pkvm_handle_t dev, bool on)
+int kvm_iommu_set_identity(pkvm_handle_t drv_id, pkvm_handle_t iommu,
+			   pkvm_handle_t dev, bool on)
 {
-	return kvm_call_hyp_nvhe_mc(__pkvm_host_iommu_set_identity, iommu, dev, on);
+	return kvm_call_hyp_nvhe_mc(__pkvm_host_iommu_set_identity, drv_id,
+				    iommu, dev, on);
 }
 EXPORT_SYMBOL(kvm_iommu_set_identity);
 
