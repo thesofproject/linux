@@ -128,32 +128,17 @@ static void __init sort_moveable_regs(void)
 	     NULL);
 }
 
-static int __init register_moveable_regions(void)
+static int __init register_moveable_fdt_resource(struct device_node *np,
+						 enum pkvm_moveable_reg_type type)
 {
-	struct memblock_region *reg;
-	struct device_node *np;
-	int i = 0;
+	struct resource res;
+	u64 start, size;
+	unsigned int j = 0;
+	unsigned int i = kvm_nvhe_sym(pkvm_moveable_regs_nr);
 
-	for_each_mem_region(reg) {
+	while(!of_address_to_resource(np, j, &res)) {
 		if (i >= PKVM_NR_MOVEABLE_REGS)
 			return -ENOMEM;
-		moveable_regs[i].start = reg->base;
-		moveable_regs[i].size = reg->size;
-		moveable_regs[i].type = PKVM_MREG_MEMORY;
-		i++;
-	}
-
-	for_each_compatible_node(np, NULL, "pkvm,protected-region") {
-		struct resource res;
-		u64 start, size;
-		int ret;
-
-		if (i >= PKVM_NR_MOVEABLE_REGS)
-			return -ENOMEM;
-
-		ret = of_address_to_resource(np, 0, &res);
-		if (ret)
-			return ret;
 
 		start = res.start;
 		size = resource_size(&res);
@@ -165,14 +150,56 @@ static int __init register_moveable_regions(void)
 
 		moveable_regs[i].start = start;
 		moveable_regs[i].size = size;
-		moveable_regs[i].type = PKVM_MREG_PROTECTED_RANGE;
+		moveable_regs[i].type = type;
 		i++;
+		j++;
 	}
 
 	kvm_nvhe_sym(pkvm_moveable_regs_nr) = i;
+	return 0;
+}
+
+static int __init register_moveable_regions(void)
+{
+	struct memblock_region *reg;
+	struct device_node *np;
+	int i = 0, ret = 0, idx = 0;
+
+	for_each_mem_region(reg) {
+		if (i >= PKVM_NR_MOVEABLE_REGS)
+			return -ENOMEM;
+		moveable_regs[i].start = reg->base;
+		moveable_regs[i].size = reg->size;
+		moveable_regs[i].type = PKVM_MREG_MEMORY;
+		i++;
+	}
+	kvm_nvhe_sym(pkvm_moveable_regs_nr) = i;
+
+	for_each_compatible_node(np, NULL, "pkvm,protected-region") {
+		ret = register_moveable_fdt_resource(np, PKVM_MREG_PROTECTED_RANGE);
+		if (ret)
+			goto out_fail;
+	}
+
+	for_each_compatible_node(np, NULL, PKVM_DEVICE_ASSIGN_COMPAT) {
+		struct of_phandle_args args;
+
+		while (!of_parse_phandle_with_fixed_args(np, "devices", 1, idx, &args)) {
+			idx++;
+			ret = register_moveable_fdt_resource(args.np, PKVM_MREG_ASSIGN_MMIO);
+			of_node_put(args.np);
+			if (ret)
+				goto out_fail;
+		}
+	}
+
 	sort_moveable_regs();
 
-	return 0;
+	return ret;
+out_fail:
+	of_node_put(np);
+	kvm_nvhe_sym(pkvm_moveable_regs_nr) = 0;
+	return ret;
 }
 
 static int __init early_hyp_lm_size_mb_cfg(char *arg)
