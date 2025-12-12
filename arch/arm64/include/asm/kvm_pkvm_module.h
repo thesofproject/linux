@@ -188,6 +188,7 @@ struct pkvm_device;
  *				panic to avoid leaking any information.
  *				Direction of assignment can be deduced from pkvm_device::ctxt
  *				where NULL means host to guest and vice versa.
+ * @iommu_register_pviommu_drv:	Register an IOMMU driver to handle guest VMs pvIOMMU
  */
 struct pkvm_module_ops {
 	int (*create_private_mapping)(phys_addr_t phys, size_t size,
@@ -262,6 +263,7 @@ struct pkvm_module_ops {
 	int (*init_hvc_pd)(struct kvm_power_domain *pd, const struct kvm_power_domain_ops *ops);
 	int (*device_register_reset)(u64 phys, void *cookie,
 				     int (*cb)(void *cookie, bool host_to_guest));
+	int (*iommu_register_pviommu_drv)(pkvm_handle_t drv_id);
 	ANDROID_KABI_RESERVE(1);
 	ANDROID_KABI_RESERVE(2);
 	ANDROID_KABI_RESERVE(3);

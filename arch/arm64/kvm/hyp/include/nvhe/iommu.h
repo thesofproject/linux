@@ -18,7 +18,7 @@ struct kvm_hyp_iommu_domain {
 };
 
 struct kvm_iommu_ops {
-	int (*init)(void);
+	int (*init)(pkvm_handle_t drv_id);
 	void (*host_stage2_idmap)(phys_addr_t start, phys_addr_t end, int prot);
 	int (*attach_dev)(pkvm_handle_t iommu, struct kvm_hyp_iommu_domain *domain,
 			  pkvm_handle_t dev, u32 pasid, u32 pasid_bits, unsigned long flags);
@@ -84,6 +84,8 @@ void kvm_iommu_reclaim_pages(void *p, u8 order);
 void kvm_iommu_iotlb_gather_add_page(struct kvm_hyp_iommu_domain *domain,
 				     struct iommu_iotlb_gather *gather,
 				     unsigned long iova, size_t size);
+
+int kvm_iommu_register_pviommu_drv(pkvm_handle_t iommu_id);
 
 extern struct hyp_mgt_allocator_ops kvm_iommu_allocator_ops;
 

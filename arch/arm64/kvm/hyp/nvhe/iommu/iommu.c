@@ -28,6 +28,12 @@ static struct hyp_pool iommu_pages_pool_atomic;
 static struct hyp_pool iommu_host_pool;
 static bool iommu_pools_ready;
 
+/*
+ * We support multiple drivers for the host kernel, but only one for the guest,
+ * this can be registered from the driver.
+ */
+static pkvm_handle_t pviommu_drv_id = KVM_IOMMU_MAX_DRV;
+
 DECLARE_PER_CPU(struct kvm_hyp_req, host_hyp_reqs);
 
 static struct kvm_hyp_iommu_domain kvm_iommu_domains[KVM_IOMMU_MAX_DOMAINS];
@@ -193,7 +199,7 @@ int kvm_iommu_register_ops(struct kvm_iommu_ops *ops, pkvm_handle_t *drv_id)
 	 * Init may require donation which has to be done outside the reg lock.
 	 * The driver spot is already reserved so no race can happen on it.
 	 */
-	ret = ops->init();
+	ret = ops->init(*drv_id);
 	if (ret)
 		return ret;
 
@@ -650,4 +656,10 @@ int kvm_iommu_iotlb_sync_map(pkvm_handle_t domain_id,
 	ret = kvm_iommu_ops->iotlb_sync_map(domain, iova, size);
 	domain_put(domain);
 	return ret;
+}
+
+int kvm_iommu_register_pviommu_drv(pkvm_handle_t drv_id)
+{
+	return cmpxchg_release(&pviommu_drv_id, KVM_IOMMU_MAX_DRV, drv_id) ==
+		KVM_IOMMU_MAX_DRV ? 0 : -EBUSY;
 }
