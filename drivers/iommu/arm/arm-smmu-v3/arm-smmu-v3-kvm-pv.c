@@ -122,6 +122,78 @@ static bool kvm_arm_smmu_capable(struct device *dev, enum iommu_cap cap)
 	}
 }
 
+static void kvm_arm_smmu_detach_dev_pasid(struct device *dev,
+					  struct iommu_domain *domain,
+					  ioasid_t pasid)
+{
+	int i;
+	struct arm_smmu_master *master = dev_iommu_priv_get(dev);
+	struct host_arm_smmu_device *host_smmu = smmu_to_host(master->smmu);
+	struct kvm_arm_smmu_domain *kvm_smmu_domain = to_kvm_smmu_domain(domain);
+
+	for (i = 0; i < master->num_streams; i++)
+		kvm_iommu_detach_dev(host_smmu->id, kvm_smmu_domain->id,
+				     master->streams[i].id, pasid);
+}
+static void kvm_arm_smmu_release_device(struct device *dev)
+{
+	struct arm_smmu_master *master = dev_iommu_priv_get(dev);
+	struct iommu_domain *domain = iommu_get_domain_for_dev(dev);
+
+	if (domain)
+		kvm_arm_smmu_detach_dev_pasid(dev, domain, 0);
+	arm_smmu_remove_master(master);
+}
+
+static int kvm_arm_smmu_attach_dev_pasid(struct iommu_domain *domain,
+					 struct device *dev, ioasid_t pasid,
+					 struct iommu_domain *old)
+{
+	int i, ret = 0;
+	struct arm_smmu_master *master = dev_iommu_priv_get(dev);
+	struct host_arm_smmu_device *host_smmu = smmu_to_host(master->smmu);
+	struct kvm_arm_smmu_domain *kvm_smmu_domain = to_kvm_smmu_domain(domain);
+
+	/* Blocked dev's will have invalid STEs as they are detached.*/
+	if (old && old->type != IOMMU_DOMAIN_BLOCKED)
+		kvm_arm_smmu_detach_dev_pasid(dev, old, pasid);
+
+	if (domain->type == IOMMU_DOMAIN_BLOCKED)
+		return 0;
+
+	/* IOMMU_DOMAIN_BLOCKED are not backed by kvm_arm_smmu_domain. */
+	if (master->smmu != kvm_smmu_domain->smmu)
+		return -EINVAL;
+
+	for (i = 0; i < master->num_streams; i++) {
+		ret = kvm_iommu_attach_dev(host_smmu->id, kvm_smmu_domain->id,
+					   master->streams[i].id, pasid,
+					   master->ssid_bits, 0);
+		if (ret) {
+			dev_err(dev, "Failed to attach device to SMMUv3: %d\n", ret);
+			goto out_err;
+		}
+	}
+	return ret;
+out_err:
+	while (i--)
+		kvm_iommu_detach_dev(host_smmu->id, kvm_smmu_domain->id,
+				     master->streams[i].id, pasid);
+	return ret;
+}
+static int kvm_arm_smmu_attach_dev(struct iommu_domain *domain,
+				   struct device *dev)
+{
+	struct iommu_domain *old = iommu_get_domain_for_dev(dev);
+
+	return kvm_arm_smmu_attach_dev_pasid(domain, dev, 0, old);
+}
+
+/* The main kvm_arm_smmu_attach_dev() handles also the blocked domain. */
+static const struct iommu_domain_ops kvm_arm_smmu_blocked_ops = {
+	.attach_dev = kvm_arm_smmu_attach_dev,
+};
+
 static int kvm_arm_smmu_domain_finalize(struct kvm_arm_smmu_domain *kvm_smmu_domain,
 					struct arm_smmu_master *master)
 {
@@ -197,15 +269,24 @@ static void kvm_arm_smmu_free_domain(struct iommu_domain *domain)
 	kfree(kvm_smmu_domain);
 }
 
+static struct iommu_domain kvm_arm_smmu_blocked_domain = {
+	.type = IOMMU_DOMAIN_BLOCKED,
+	.ops = &kvm_arm_smmu_blocked_ops,
+};
+
 static struct iommu_ops kvm_arm_smmu_ops = {
 	.capable		= kvm_arm_smmu_capable,
 	.device_group		= arm_smmu_device_group,
 	.of_xlate		= arm_smmu_of_xlate,
 	.get_resv_regions	= arm_smmu_get_resv_regions,
 	.probe_device		= kvm_arm_smmu_probe_device,
+	.release_device		= kvm_arm_smmu_release_device,
 	.owner			= THIS_MODULE,
 	.domain_alloc_paging	= kvm_arm_smmu_domain_alloc_paging,
+	.blocked_domain		= &kvm_arm_smmu_blocked_domain,
 	.default_domain_ops 	=  &(const struct iommu_domain_ops) {
+		.attach_dev	= kvm_arm_smmu_attach_dev,
+		.set_dev_pasid	= kvm_arm_smmu_attach_dev_pasid,
 		.free		= kvm_arm_smmu_free_domain,
 	}
 };
