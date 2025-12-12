@@ -383,7 +383,7 @@ static struct pkvm_device *pkvm_get_device_by_iommu(u64 id, u32 endpoint_id)
 	return NULL;
 }
 
-int pkvm_devices_get_context(u64 iommu_id, u32 endpoint_id)
+int pkvm_devices_get_context(u64 iommu_id, u32 endpoint_id, struct pkvm_hyp_vm *vm)
 {
 	struct pkvm_device *dev = pkvm_get_device_by_iommu(iommu_id, endpoint_id);
 	int ret = 0;
@@ -392,7 +392,7 @@ int pkvm_devices_get_context(u64 iommu_id, u32 endpoint_id)
 		return 0;
 
 	hyp_spin_lock(&device_spinlock);
-	if (dev->ctxt)
+	if (dev->ctxt != vm)
 		ret = -EPERM;
 	else
 		hyp_refcount_inc(dev->refcount);
@@ -408,9 +408,7 @@ void pkvm_devices_put_context(u64 iommu_id, u32 endpoint_id)
 		return;
 
 	hyp_spin_lock(&device_spinlock);
-	BUG_ON(dev->ctxt);
 	hyp_refcount_dec(dev->refcount);
-
 	hyp_spin_unlock(&device_spinlock);
 }
 
