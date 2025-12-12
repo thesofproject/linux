@@ -15,6 +15,7 @@ struct kvm_hyp_iommu_domain {
 	pkvm_handle_t		domain_id;
 	void			*priv;
 	struct kvm_iommu_ops	*driver;
+	struct pkvm_hyp_vm		*vm;
 };
 
 int kvm_iommu_dev_block_dma(pkvm_handle_t iommu_id, u32 endpoint_id, bool host_to_guest);
