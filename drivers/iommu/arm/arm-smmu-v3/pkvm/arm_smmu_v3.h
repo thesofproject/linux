@@ -75,6 +75,7 @@ extern struct hyp_arm_smmu_v3_nested_device *kvm_nvhe_sym(kvm_hyp_arm_smmu_v3_sm
 struct hyp_arm_smmu_v3_device_pv {
 	struct hyp_arm_smmu_v3_device common;
 	struct arm_smmu_queue  		evtq;
+	u32                   		ssid_bits;
 };
 
 extern size_t kvm_nvhe_sym(kvm_hyp_arm_smmu_v3_pv_count);
