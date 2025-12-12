@@ -1044,6 +1044,17 @@ static int __hyp_check_page_state_range(phys_addr_t phys, u64 size,
 	return 0;
 }
 
+int hyp_check_range_owned(u64 phys_addr, u64 size)
+{
+	int ret;
+
+	hyp_lock_component();
+	ret = __hyp_check_page_state_range(phys_addr, size, PKVM_PAGE_OWNED);
+	hyp_unlock_component();
+
+	return ret;
+}
+
 static enum pkvm_page_state guest_get_page_state(kvm_pte_t pte, u64 addr)
 {
 	enum pkvm_page_state state = 0;
