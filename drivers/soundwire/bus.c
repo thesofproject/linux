@@ -1228,6 +1228,7 @@ int sdw_bus_exit_clk_stop(struct sdw_bus *bus)
 		if (ret < 0)
 			dev_warn(&slave->dev, "clock stop pre-deprepare cb failed:%d\n", ret);
 
+
 		/* Only de-prepare a Slave device if needed */
 		if (!slave->prop.simple_clk_stop_capable) {
 			simple_clk_stop = false;
