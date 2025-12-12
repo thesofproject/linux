@@ -2016,7 +2016,7 @@ static ssize_t vector_madvise(struct mm_struct *mm, struct iov_iter *iter,
 		size_t len_in = iter_iov_len(iter);
 		int error;
 
-		trace_android_vh_process_madvise_iter(mm->owner, behavior, &ret);
+		trace_android_vh_process_madvise_iter(mm, behavior, &ret);
 		if (ret < 0)
 			break;
 
