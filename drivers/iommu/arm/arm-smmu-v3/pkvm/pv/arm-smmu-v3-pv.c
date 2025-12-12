@@ -318,7 +318,6 @@ static u64 *smmu_alloc_cd(struct hyp_arm_smmu_v3_device *smmu, u32 pasid_bits)
 	return (u64 *)hyp_virt_to_phys(cd_table);
 }
 
-__maybe_unused
 static void smmu_free_cd(u64 *cd_table, u32 pasid_bits)
 {
 	u32 order = get_order((1 << pasid_bits) *
@@ -495,6 +494,114 @@ static int smmu_domain_config_s1(struct hyp_arm_smmu_v3_device_pv *smmu,
 	if (pasid)
 		smmu_sync_cd(smmu, cd_entry, sid, pasid);
 	return 0;
+}
+
+static int smmu_detach_dev(pkvm_handle_t iommu, struct kvm_hyp_iommu_domain *domain,
+			   u32 sid, u32 pasid)
+{
+	struct arm_smmu_ste *dst;
+	int i, ret;
+	struct hyp_arm_smmu_v3_device_pv *smmu = smmu_id_to_ptr(iommu);
+	struct hyp_arm_smmu_v3_domain *smmu_domain = domain->priv;
+	u32 pasid_bits = 0;
+	u64 *cd_table = NULL, *cd;
+	u32 domain_id, ste_cfg;
+
+	if (!smmu)
+		return -ENODEV;
+
+	kvm_smmu_lock(&smmu->common);
+	dst = smmu_get_ste_ptr(&smmu->common, sid);
+	if (!dst) {
+		ret = -ENODEV;
+		goto out_unlock;
+	}
+
+	ste_cfg = FIELD_GET(STRTAB_STE_0_CFG, le64_to_cpu(dst->data[0]));
+	/*
+	 * For stage-1:
+	 * - The kernel has to detach pasid = 0 the last.
+	 * - This will free the CD.
+	 */
+	if (smmu_domain->type == KVM_ARM_SMMU_DOMAIN_S1) {
+		if (ste_cfg != STRTAB_STE_0_CFG_S1_TRANS) {
+			ret = -EACCES;
+			goto out_unlock;
+		}
+		pasid_bits = FIELD_GET(STRTAB_STE_0_S1CDMAX, le64_to_cpu(dst->data[0]));
+		if (pasid >= (1 << pasid_bits)) {
+			ret = -E2BIG;
+			goto out_unlock;
+		}
+		cd_table = (u64 *)(le64_to_cpu(dst->data[0]) & STRTAB_STE_0_S1CTXPTR_MASK);
+		if (WARN_ON(!cd_table)) {
+			ret = -ENODEV;
+			goto out_unlock;
+		}
+
+		cd_table = hyp_phys_to_virt((phys_addr_t)cd_table);
+		if (pasid == 0) {
+			int j;
+
+			/* Ensure other pasids are detached. */
+			for (j = 1 ; j < (1 << pasid_bits) ; ++j) {
+				cd = smmu_get_cd_ptr(cd_table, j);
+				if (le64_to_cpu(cd[0]) & CTXDESC_CD_0_V) {
+					ret = -EINVAL;
+					goto out_unlock;
+				}
+			}
+
+			cd = smmu_get_cd_ptr(cd_table, 0);
+			domain_id = FIELD_GET(CTXDESC_CD_0_ASID, le64_to_cpu(cd[0]));
+			if (domain->domain_id != domain_id) {
+				ret = -EACCES;
+				goto out_unlock;
+			}
+		} else {
+			cd = smmu_get_cd_ptr(cd_table, pasid);
+			if (!(le64_to_cpu(cd[0]) & CTXDESC_CD_0_V)) {
+				/* The device is not actually attached! */
+				ret = -ENOENT;
+				goto out_unlock;
+			}
+			domain_id = FIELD_GET(CTXDESC_CD_0_ASID, le64_to_cpu(cd[0]));
+			if (domain->domain_id != domain_id) {
+				ret = -EACCES;
+				goto out_unlock;
+			}
+			cd[0] = 0;
+			smmu_sync_cd(smmu, cd, sid, pasid);
+			cd[1] = 0;
+			cd[2] = 0;
+			cd[3] = 0;
+			ret = smmu_sync_cd(smmu, cd, sid, pasid);
+			goto out_unlock;
+		}
+	} else {
+		domain_id = FIELD_GET(STRTAB_STE_2_S2VMID, le64_to_cpu(dst->data[2]));
+		if ((ste_cfg != STRTAB_STE_0_CFG_S2_TRANS) ||
+		    domain->domain_id != domain_id) {
+			ret = -EACCES;
+			goto out_unlock;
+		}
+	}
+	/* For stage-2 and pasid = 0 */
+	dst->data[0] = 0;
+	ret = smmu_sync_ste(smmu, dst->data, sid);
+	if (ret)
+		goto out_unlock;
+	for (i = 1; i < STRTAB_STE_DWORDS; i++)
+		dst->data[i] = 0;
+
+	ret = smmu_sync_ste(smmu, dst->data, sid);
+
+	/* Free CD table as it was cleared. */
+	if (cd_table)
+		smmu_free_cd(cd_table, pasid_bits);
+out_unlock:
+	kvm_smmu_unlock(&smmu->common);
+	return ret;
 }
 
 static int smmu_attach_dev(pkvm_handle_t iommu, struct kvm_hyp_iommu_domain *domain,
@@ -829,4 +936,5 @@ struct kvm_iommu_ops smmu_pv_ops = {
 	.free_domain			= smmu_free_domain,
 	.iotlb_sync			= smmu_iotlb_sync,
 	.attach_dev			= smmu_attach_dev,
+	.detach_dev			= smmu_detach_dev,
 };
