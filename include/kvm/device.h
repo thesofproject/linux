@@ -38,6 +38,8 @@ struct pkvm_device {
 	u32 group_id;
 	void *ctxt; /* Current context of the device*/
 	unsigned short refcount;
+	int (*reset_handler)(void *cookie, bool host_to_guest);
+	void *cookie; /* cookie from drivers. */
 };
 
 #endif /* #ifndef __KVM_DEVICE_H */
