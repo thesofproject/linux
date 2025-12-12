@@ -363,6 +363,40 @@ static int smmu_domain_finalise(struct hyp_arm_smmu_v3_device_pv *smmu,
 	return 0;
 }
 
+static int smmu_domain_config_s2(struct kvm_hyp_iommu_domain *domain,
+				 struct arm_smmu_ste *ste)
+{
+	struct io_pgtable_cfg *cfg;
+	u64 ts, sl, ic, oc, sh, tg, ps;
+	struct hyp_arm_smmu_v3_domain *smmu_domain = domain->priv;
+
+	cfg = &smmu_domain->pgtable->cfg;
+	ps = cfg->arm_lpae_s2_cfg.vtcr.ps;
+	tg = cfg->arm_lpae_s2_cfg.vtcr.tg;
+	sh = cfg->arm_lpae_s2_cfg.vtcr.sh;
+	oc = cfg->arm_lpae_s2_cfg.vtcr.orgn;
+	ic = cfg->arm_lpae_s2_cfg.vtcr.irgn;
+	sl = cfg->arm_lpae_s2_cfg.vtcr.sl;
+	ts = cfg->arm_lpae_s2_cfg.vtcr.tsz;
+
+	ste->data[0] = cpu_to_le64(STRTAB_STE_0_V |
+		FIELD_PREP(STRTAB_STE_0_CFG, STRTAB_STE_0_CFG_S2_TRANS));
+	ste->data[1] = cpu_to_le64(FIELD_PREP(STRTAB_STE_1_SHCFG, STRTAB_STE_1_SHCFG_INCOMING));
+	ste->data[2] = cpu_to_le64(FIELD_PREP(STRTAB_STE_2_VTCR,
+			FIELD_PREP(STRTAB_STE_2_VTCR_S2PS, ps) |
+			FIELD_PREP(STRTAB_STE_2_VTCR_S2TG, tg) |
+			FIELD_PREP(STRTAB_STE_2_VTCR_S2SH0, sh) |
+			FIELD_PREP(STRTAB_STE_2_VTCR_S2OR0, oc) |
+			FIELD_PREP(STRTAB_STE_2_VTCR_S2IR0, ic) |
+			FIELD_PREP(STRTAB_STE_2_VTCR_S2SL0, sl) |
+			FIELD_PREP(STRTAB_STE_2_VTCR_S2T0SZ, ts)) |
+		 FIELD_PREP(STRTAB_STE_2_S2VMID, domain->domain_id) |
+		 STRTAB_STE_2_S2AA64 | STRTAB_STE_2_S2R);
+	ste->data[3] = cpu_to_le64(cfg->arm_lpae_s2_cfg.vttbr & STRTAB_STE_3_S2TTB_MASK);
+
+	return 0;
+}
+
 static u64 *smmu_domain_config_s1_ste(struct hyp_arm_smmu_v3_device_pv *smmu,
 				      u32 pasid_bits, struct arm_smmu_ste *ste)
 {
@@ -498,8 +532,7 @@ static int smmu_attach_dev(pkvm_handle_t iommu, struct kvm_hyp_iommu_domain *dom
 			ret = -EBUSY;
 			goto out_unlock;
 		}
-		/* TBD */
-		ret = -ENODEV;
+		ret = smmu_domain_config_s2(domain, &ste);
 	}
 	/* We don't update STEs for pasid domains. */
 	if (ret || pasid)
