@@ -661,6 +661,15 @@ config PKVM_SMC_FILTER
 
 	  Say N here unless you know what you are doing.
 
+config PKVM_IOMMU_TEMPLATE
+	  tristate "pKVM IOMMU template driver"
+	  depends on KVM && ARM64 && m
+	  help
+		This is just a template driver on how to implement a KVM IOMMU
+		driver, please check pkvm-iommu.rst for more info.
+
+		Say N here unless you know what you are doing.
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
