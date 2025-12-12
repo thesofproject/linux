@@ -7,6 +7,7 @@
 #include <asm/kvm_hypevents.h>
 #include <asm/module.h>
 
+#include <nvhe/alloc.h>
 #include <nvhe/mem_protect.h>
 #include <nvhe/modules.h>
 #include <nvhe/mm.h>
@@ -276,6 +277,8 @@ const struct pkvm_module_ops module_ops = {
 	.list_add_valid_or_report = __list_add_valid_or_report,
 	.list_del_entry_valid_or_report = __list_del_entry_valid_or_report,
 #endif
+	.hyp_alloc = hyp_alloc,
+	.hyp_free = hyp_free,
 };
 
 static void *pkvm_module_hyp_va(struct pkvm_el2_module *mod, void *kern_va)

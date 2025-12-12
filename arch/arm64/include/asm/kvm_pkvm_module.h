@@ -156,6 +156,8 @@ enum pkvm_psci_notification {
  * @list_add_valid_or_report:	Needed if the code uses linked lists
  * @list_del_entry_valid_or_report:
 				Needed if the code uses linked lists.
+ * @hyp_alloc:			Allocate memory in hyp VA space.
+ * @hyp_free:			Free memory allocated  from hyp_alloc().
  */
 struct pkvm_module_ops {
 	int (*create_private_mapping)(phys_addr_t phys, size_t size,
@@ -219,6 +221,8 @@ struct pkvm_module_ops {
 	typeof(__list_add_valid_or_report) *list_add_valid_or_report;
 	typeof(__list_del_entry_valid_or_report) *list_del_entry_valid_or_report;
 #endif
+	void *(*hyp_alloc)(size_t size);
+	void (*hyp_free)(void *addr);
 	ANDROID_KABI_RESERVE(1);
 	ANDROID_KABI_RESERVE(2);
 	ANDROID_KABI_RESERVE(3);
