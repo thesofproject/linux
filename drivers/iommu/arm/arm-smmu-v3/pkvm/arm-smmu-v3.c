@@ -247,7 +247,7 @@ static void smmu_tlb_inv_range(unsigned long iova, size_t size, size_t granule,
 	struct hyp_arm_smmu_v3_device *smmu;
 
 	for_each_smmu(smmu) {
-		hyp_spin_lock(&smmu->lock);
+		kvm_smmu_lock(smmu);
 		/*
 		 * Don't bother if SMMU is disabled, this would be useful for the case
 		 * when RPM is supported to avoid thouching the SMMU MMIO when disabled.
@@ -259,7 +259,7 @@ static void smmu_tlb_inv_range(unsigned long iova, size_t size, size_t granule,
 			WARN_ON(smmu_tlb_inv_range_smmu(smmu, &cmd, iova, size, granule));
 			WARN_ON(smmu_send_cmd(smmu, &cmd_s1));
 		}
-		hyp_spin_unlock(&smmu->lock);
+		kvm_smmu_unlock(smmu);
 	}
 }
 
@@ -584,7 +584,7 @@ static int smmu_init_device(struct hyp_arm_smmu_v3_device *smmu)
 	ret = smmu_probe(smmu);
 	if (ret)
 		goto out_ret;
-	hyp_spin_lock_init(&smmu->lock);
+	kvm_smmu_lock_init(smmu);
 
 	ret = smmu_init_cmdq(smmu);
 	if (ret)
@@ -658,8 +658,6 @@ static int smmu_init(void)
 		if (ret)
 			goto out_reclaim_smmu;
 	}
-
-	BUILD_BUG_ON(sizeof(hyp_spinlock_t) != sizeof(u32));
 
 	return smmu_init_pgt();
 
@@ -976,9 +974,9 @@ static bool smmu_dabt_handler(struct user_pt_regs *regs, u64 esr, u64 addr)
 	for_each_smmu(smmu) {
 		if (addr < smmu->mmio_addr || addr >= smmu->mmio_addr + smmu->mmio_size)
 			continue;
-		hyp_spin_lock(&smmu->lock);
+		kvm_smmu_lock(smmu);
 		ret = smmu_dabt_device(smmu, regs, esr, addr - smmu->mmio_addr);
-		hyp_spin_unlock(&smmu->lock);
+		kvm_smmu_unlock(smmu);
 		return ret;
 	}
 	return false;

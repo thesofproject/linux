@@ -41,11 +41,7 @@ struct hyp_arm_smmu_v3_device {
 	unsigned long		oas;
 	unsigned long		pgsize_bitmap;
 	unsigned int		sid_bits;
-#ifdef __KVM_NVHE_HYPERVISOR__
-	hyp_spinlock_t		lock;
-#else
 	u32			lock;
-#endif
 	struct arm_smmu_queue	cmdq;
 	struct arm_smmu_queue	cmdq_host;
 	u32			cr0;
@@ -55,6 +51,30 @@ struct hyp_arm_smmu_v3_device {
 	u64			host_ste_base;
 	struct arm_smmu_strtab_cfg strtab_cfg;
 };
+
+#ifdef __KVM_NVHE_HYPERVISOR__
+static inline hyp_spinlock_t *kvm_smmu_get_lock(struct hyp_arm_smmu_v3_device *smmu)
+{
+	/* See struct kvm_hyp_iommu */
+	BUILD_BUG_ON(sizeof(smmu->lock) != sizeof(hyp_spinlock_t));
+	return (hyp_spinlock_t *)(&smmu->lock);
+}
+
+static inline void kvm_smmu_lock_init(struct hyp_arm_smmu_v3_device *smmu)
+{
+	hyp_spin_lock_init(kvm_smmu_get_lock(smmu));
+}
+
+static inline void kvm_smmu_lock(struct hyp_arm_smmu_v3_device *smmu)
+{
+	hyp_spin_lock(kvm_smmu_get_lock(smmu));
+}
+
+static inline void kvm_smmu_unlock(struct hyp_arm_smmu_v3_device *smmu)
+{
+	hyp_spin_unlock(kvm_smmu_get_lock(smmu));
+}
+#endif
 
 extern size_t kvm_nvhe_sym(kvm_hyp_arm_smmu_v3_count);
 #define kvm_hyp_arm_smmu_v3_count kvm_nvhe_sym(kvm_hyp_arm_smmu_v3_count)
