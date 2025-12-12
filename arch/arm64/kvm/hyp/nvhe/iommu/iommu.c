@@ -442,3 +442,11 @@ phys_addr_t kvm_iommu_iova_to_phys(pkvm_handle_t domain_id, unsigned long iova)
 	domain_put(domain);
 	return phys;
 }
+
+int kvm_iommu_set_identity(pkvm_handle_t iommu, pkvm_handle_t dev, bool on)
+{
+	if (!kvm_iommu_ops || !kvm_iommu_ops->set_identity)
+		return -ENODEV;
+
+	return kvm_iommu_ops->set_identity(iommu, dev, on);
+}
