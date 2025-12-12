@@ -227,3 +227,70 @@ int kvm_iommu_set_identity(pkvm_handle_t iommu, pkvm_handle_t dev, bool on)
 	return kvm_call_hyp_nvhe_mc(__pkvm_host_iommu_set_identity, iommu, dev, on);
 }
 EXPORT_SYMBOL(kvm_iommu_set_identity);
+
+int kvm_iommu_share_hyp_sg(struct kvm_iommu_sg *sg, unsigned int nents)
+{
+	size_t nr_pages = PAGE_ALIGN(sizeof(*sg) * nents) >> PAGE_SHIFT;
+	phys_addr_t sg_pfn = virt_to_phys(sg) >> PAGE_SHIFT;
+	int i;
+	int ret;
+
+	for (i = 0 ; i < nr_pages ; ++i) {
+		ret = kvm_call_hyp_nvhe(__pkvm_host_share_hyp, sg_pfn + i);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(kvm_iommu_share_hyp_sg);
+
+int kvm_iommu_unshare_hyp_sg(struct kvm_iommu_sg *sg, unsigned int nents)
+{
+	size_t nr_pages = PAGE_ALIGN(sizeof(*sg) * nents) >> PAGE_SHIFT;
+	phys_addr_t sg_pfn = virt_to_phys(sg) >> PAGE_SHIFT;
+	int i;
+	int ret;
+
+	for (i = 0 ; i < nr_pages ; ++i) {
+		ret = kvm_call_hyp_nvhe(__pkvm_host_unshare_hyp, sg_pfn + i);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(kvm_iommu_unshare_hyp_sg);
+
+size_t kvm_iommu_map_sg(pkvm_handle_t domain_id, struct kvm_iommu_sg *sg,
+			unsigned long iova, unsigned int nent,
+			unsigned int prot, gfp_t gfp)
+{
+	size_t mapped, total_mapped = 0;
+	struct arm_smccc_res res;
+
+	do {
+		res = kvm_call_hyp_nvhe_smccc(__pkvm_host_iommu_map_sg,
+					      domain_id, iova, sg, nent, prot);
+		mapped = res.a1;
+		iova += mapped;
+		total_mapped += mapped;
+		/* Skip mapped */
+		while (mapped) {
+			if (mapped < (sg->pgsize * sg->pgcount)) {
+				sg->phys += mapped;
+				sg->pgcount -= mapped / sg->pgsize;
+				mapped = 0;
+			} else {
+				mapped -= sg->pgsize * sg->pgcount;
+				sg++;
+				nent--;
+			}
+		}
+
+		kvm_iommu_topup_memcache(&res, gfp);
+	} while (nent);
+
+	return total_mapped;
+}
+EXPORT_SYMBOL(kvm_iommu_map_sg);
