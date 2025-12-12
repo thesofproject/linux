@@ -293438,6 +293438,12 @@ function {
   parameter_id: 0x120540d1
 }
 function {
+  id: 0x9b2a7922
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x2170d06d
+}
+function {
   id: 0x9b2c93fd
   return_type_id: 0x6720d32f
   parameter_id: 0x18ea6ae3
@@ -307007,6 +307013,15 @@ elf_symbol {
   full_name: "__traceiter_android_vh_check_uninterruptible_tasks_dn"
 }
 elf_symbol {
+  id: 0x21cae9c7
+  name: "__traceiter_android_vh_count_workingset_refault"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xddb21a93
+  type_id: 0x9b2a7922
+  full_name: "__traceiter_android_vh_count_workingset_refault"
+}
+elf_symbol {
   id: 0xceeb829a
   name: "__traceiter_android_vh_cpu_cgroup_css_free"
   is_defined: true
@@ -308706,6 +308721,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_vh_check_uninterruptible_tasks_dn"
+}
+elf_symbol {
+  id: 0xbe784d1d
+  name: "__tracepoint_android_vh_count_workingset_refault"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_vh_count_workingset_refault"
 }
 elf_symbol {
   id: 0xb8dc863c
@@ -341119,6 +341143,7 @@ interface {
   symbol_id: 0xeebf3d23
   symbol_id: 0xa2224fa6
   symbol_id: 0xd37cc550
+  symbol_id: 0x21cae9c7
   symbol_id: 0xceeb829a
   symbol_id: 0x9247dcb1
   symbol_id: 0xfd04e27a
@@ -341308,6 +341333,7 @@ interface {
   symbol_id: 0x22653fb1
   symbol_id: 0x2cf5984c
   symbol_id: 0x62b6878e
+  symbol_id: 0xbe784d1d
   symbol_id: 0xb8dc863c
   symbol_id: 0x26324a1f
   symbol_id: 0x4ade2774
