@@ -11,6 +11,7 @@ ARM
    hyp-abi
    hypercalls
    pkvm
+   pkvm-iommu
    pvtime
    ptp_kvm
    vcpu-features
