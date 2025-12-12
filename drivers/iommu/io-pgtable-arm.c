@@ -85,6 +85,11 @@
 #define ARM_LPAE_PTE_SH_IS		(((arm_lpae_iopte)3) << 8)
 #define ARM_LPAE_PTE_NS			(((arm_lpae_iopte)1) << 5)
 #define ARM_LPAE_PTE_VALID		(((arm_lpae_iopte)1) << 0)
+#define ARM_LPAE_PTE_ATTR_LO_MASK	(((arm_lpae_iopte)0x3ff) << 2)
+/* Ignore the contiguous bit for block splitting */
+#define ARM_LPAE_PTE_ATTR_HI_MASK	(ARM_LPAE_PTE_XN | ARM_LPAE_PTE_DBM)
+#define ARM_LPAE_PTE_ATTR_MASK		(ARM_LPAE_PTE_ATTR_LO_MASK |	\
+					 ARM_LPAE_PTE_ATTR_HI_MASK)
 
 /* Software bit for solving coherency races */
 #define ARM_LPAE_PTE_SW_SYNC		(((arm_lpae_iopte)1) << 55)
@@ -150,6 +155,8 @@
 
 #define iopte_type(pte)					\
 	(((pte) >> ARM_LPAE_PTE_TYPE_SHIFT) & ARM_LPAE_PTE_TYPE_MASK)
+
+#define iopte_prot(pte)	((pte) & ARM_LPAE_PTE_ATTR_MASK)
 
 #define iopte_writeable_dirty(pte)				\
 	(((pte) & ARM_LPAE_PTE_AP_WR_CLEAN_MASK) == ARM_LPAE_PTE_DBM)
@@ -578,6 +585,62 @@ static int visit_put_pages(struct io_pgtable_walk_data *walk_data, int lvl,
 	return 0;
 }
 
+static size_t arm_lpae_split_blk_unmap(struct arm_lpae_io_pgtable *data,
+				       struct iommu_iotlb_gather *gather,
+				       unsigned long iova, size_t size,
+				       arm_lpae_iopte blk_pte, int lvl,
+				       arm_lpae_iopte *ptep, size_t pgcount)
+{
+	struct io_pgtable_cfg *cfg = &data->iop.cfg;
+	arm_lpae_iopte pte, *tablep;
+	phys_addr_t blk_paddr;
+	size_t tablesz = ARM_LPAE_GRANULE(data);
+	size_t split_sz = ARM_LPAE_BLOCK_SIZE(lvl, data);
+	int ptes_per_table = ARM_LPAE_PTES_PER_TABLE(data);
+	int i, unmap_idx_start = -1, num_entries = 0, max_entries;
+
+	if (WARN_ON(lvl == ARM_LPAE_MAX_LEVELS))
+		return 0;
+
+	tablep = __arm_lpae_alloc_pages(tablesz, GFP_ATOMIC, cfg, data->iop.cookie);
+	if (!tablep)
+		return 0; /* Bytes unmapped */
+
+	/* We may be breaking even a smaller block. */
+	if (size == split_sz) {
+		unmap_idx_start = ARM_LPAE_LVL_IDX(iova, lvl, data);
+		max_entries = arm_lpae_max_entries(unmap_idx_start, data);
+		num_entries = min_t(int, pgcount, max_entries);
+	}
+
+	blk_paddr = iopte_to_paddr(blk_pte, data);
+	pte = iopte_prot(blk_pte);
+
+	for (i = 0; i < ptes_per_table; i++, blk_paddr += split_sz) {
+		/* Unmap! */
+		if (i >= unmap_idx_start && i < (unmap_idx_start + num_entries))
+			continue;
+
+		__arm_lpae_init_pte(data, blk_paddr, pte, lvl, 1, &tablep[i]);
+	}
+
+	pte = arm_lpae_install_table(tablep, ptep, blk_pte, data);
+	/* IDMAP table can't race. */
+	WARN_ON(pte != blk_pte);
+	/* Invalidate old block, blk_paddr == iova as this is idmap. */
+	io_pgtable_tlb_add_page(&data->iop, gather, blk_paddr,
+				ARM_LPAE_BLOCK_SIZE(lvl - 1, data));
+
+	if (unmap_idx_start >= 0) {
+		for (i = 0; i < num_entries; i++)
+			io_pgtable_tlb_add_page(&data->iop, gather, iova + i * size, size);
+
+		return num_entries * size;
+	}
+
+	return __arm_lpae_unmap(data, gather, iova, size, pgcount, lvl, tablep);
+}
+
 static size_t __arm_lpae_unmap(struct arm_lpae_io_pgtable *data,
 			       struct iommu_iotlb_gather *gather,
 			       unsigned long iova, size_t size, size_t pgcount,
@@ -649,8 +712,14 @@ static size_t __arm_lpae_unmap(struct arm_lpae_io_pgtable *data,
 
 		return i * size;
 	} else if (iopte_leaf(pte, lvl, iop->fmt)) {
-		WARN_ONCE(true, "Unmap of a partial large IOPTE is not allowed");
-		return 0;
+		/* Splittig only support for identity mapped page tables */
+		if (iop->cfg.quirks & IO_PGTABLE_QUIRK_IDMAP) {
+			return arm_lpae_split_blk_unmap(data, gather, iova, size,
+							pte, lvl + 1, ptep, pgcount);
+		} else {
+			WARN_ONCE(true, "Unmap of a partial large IOPTE is not allowed");
+			return 0;
+		}
 	}
 
 	/* Keep on walkin' */
