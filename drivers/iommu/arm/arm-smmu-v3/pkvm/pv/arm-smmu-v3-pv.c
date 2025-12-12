@@ -1416,6 +1416,16 @@ out_reclaim_smmu:
 	return ret;
 }
 
+static int smmu_id_to_token(pkvm_handle_t smmu_id, u64 *out_token)
+{
+	if (smmu_id >= kvm_hyp_arm_smmu_v3_pv_count)
+		return -EINVAL;
+
+	smmu_id = array_index_nospec(smmu_id, kvm_hyp_arm_smmu_v3_pv_count);
+	*out_token = kvm_hyp_arm_smmu_v3_pv_smmus[smmu_id].common.mmio_addr;
+	return 0;
+}
+
 #ifdef MODULE
 int smmu_init_hyp_module(const struct pkvm_module_ops *ops)
 {
@@ -1442,4 +1452,5 @@ struct kvm_iommu_ops smmu_pv_ops = {
 	.host_stage2_idmap		= smmu_host_stage2_idmap,
 	.set_identity			= smmu_set_identity,
 	.dev_block_dma			= smmu_dev_block_dma,
+	.get_iommu_token_by_id	= smmu_id_to_token,
 };
