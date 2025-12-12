@@ -146,6 +146,7 @@ enum pkvm_psci_notification {
  * @hyp_va:			Convert a physical address into a virtual one.
  * @kern_hyp_va:		Convert a kernel virtual address into an
  *				hypervisor virtual one.
+ * @hyp_smp_processor_id:	Current CPU id
  */
 struct pkvm_module_ops {
 	int (*create_private_mapping)(phys_addr_t phys, size_t size,
@@ -195,6 +196,7 @@ struct pkvm_module_ops {
 	int (*map_module_pages)(u64 pfn, void *va, u64 nr_pages,
 				    enum kvm_pgtable_prot prot, bool is_protected);
 	int (*unmap_module_pages)(u64 pfn, void *va, u64 nr_pages);
+	int (*hyp_smp_processor_id)(void);
 
 	ANDROID_KABI_RESERVE(1);
 	ANDROID_KABI_RESERVE(2);
