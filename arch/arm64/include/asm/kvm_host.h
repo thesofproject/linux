@@ -1883,6 +1883,7 @@ struct kvm_iommu_driver {
 };
 
 struct kvm_iommu_ops;
+struct kvm_iommu_sg;
 int kvm_iommu_register_driver(struct kvm_iommu_driver *kern_ops,
 			      size_t pool_pages);
 
@@ -1908,6 +1909,9 @@ int kvm_iommu_attach_dev(pkvm_handle_t iommu_id, pkvm_handle_t domain_id,
 			 unsigned int endpoint, unsigned int pasid,
 			 unsigned int ssid_bits, unsigned long flags);
 int kvm_iommu_set_identity(pkvm_handle_t iommu, pkvm_handle_t dev, bool on);
+size_t kvm_iommu_map_sg(pkvm_handle_t domain_id, struct kvm_iommu_sg *sg,
+			unsigned long iova, unsigned int nent,
+			unsigned int prot, gfp_t gfp);
 #endif
 /*
  * Unlike previous android versions, where we supported 1 << 16 domains,
@@ -1917,5 +1921,32 @@ int kvm_iommu_set_identity(pkvm_handle_t iommu, pkvm_handle_t dev, bool on);
  * than enough.
  */
 #define KVM_IOMMU_MAX_DOMAINS		512
+
+struct kvm_iommu_sg {
+	phys_addr_t phys;
+	size_t pgsize;
+	unsigned int pgcount;
+};
+
+
+#define kvm_iommu_sg_nents_size(n) (PAGE_ALIGN((n) * sizeof(struct kvm_iommu_sg)))
+
+static inline unsigned int kvm_iommu_sg_nents_round(unsigned int nents)
+{
+	return kvm_iommu_sg_nents_size(nents) / sizeof(struct kvm_iommu_sg);
+}
+
+static inline struct kvm_iommu_sg *kvm_iommu_sg_alloc(unsigned int nents, gfp_t gfp)
+{
+	return alloc_pages_exact(kvm_iommu_sg_nents_size(nents), gfp);
+}
+
+static inline void kvm_iommu_sg_free(struct kvm_iommu_sg *sg, unsigned int nents)
+{
+	free_pages_exact(sg, kvm_iommu_sg_nents_size(nents));
+}
+
+int kvm_iommu_share_hyp_sg(struct kvm_iommu_sg *sg, unsigned int nents);
+int kvm_iommu_unshare_hyp_sg(struct kvm_iommu_sg *sg, unsigned int nents);
 
 #endif /* __ARM64_KVM_HOST_H__ */
