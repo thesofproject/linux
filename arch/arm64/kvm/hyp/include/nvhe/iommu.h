@@ -24,6 +24,12 @@ struct kvm_iommu_ops {
 	void (*host_stage2_idmap_complete)(bool map);
 	int (*alloc_domain)(pkvm_handle_t iommu_id, struct kvm_hyp_iommu_domain *domain, int type);
 	void (*free_domain)(struct kvm_hyp_iommu_domain *domain);
+	int (*map_pages)(struct kvm_hyp_iommu_domain *domain, unsigned long iova,
+			 phys_addr_t paddr, size_t pgsize,
+			 size_t pgcount, int prot, size_t *total_mapped);
+	size_t (*unmap_pages)(struct kvm_hyp_iommu_domain *domain, unsigned long iova,
+			      size_t pgsize, size_t pgcount);
+	phys_addr_t (*iova_to_phys)(struct kvm_hyp_iommu_domain *domain, unsigned long iova);
 };
 
 int kvm_iommu_init(void *pool_base, size_t nr_pages);
