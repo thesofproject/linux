@@ -25,6 +25,16 @@ static size_t				kvm_arm_smmu_count;
 static struct hyp_arm_smmu_v3_device	*kvm_arm_smmu_array;
 static size_t				kvm_arm_smmu_cur;
 
+#ifdef MODULE
+#define ksym_ref_addr_nvhe(x) \
+	((typeof(kvm_nvhe_sym(x)) *)(pkvm_el2_mod_va(&kvm_nvhe_sym(x))))
+
+int kvm_nvhe_sym(smmu_init_hyp_module)(const struct pkvm_module_ops *ops);
+#else
+#define ksym_ref_addr_nvhe(x) \
+	((typeof(kvm_nvhe_sym(x)) *)(kern_hyp_va(lm_alias(&kvm_nvhe_sym(x)))))
+#endif
+
 static void kvm_arm_smmu_array_free(void)
 {
 	int order;
@@ -65,9 +75,16 @@ static size_t smmu_hyp_pgt_pages(void)
 	/*
 	 * SMMUv3 uses the same format as stage-2 and hence have the same memory
 	 * requirements, we add extra 500 pages for L2 ste.
+	 * For modules, we can't use host_s2_pgtable_pages(), so we return 1 page,
+	 * and rely on the vendor passing the right commandline arg.
 	 */
-	if (of_find_compatible_node(NULL, NULL, "arm,smmu-v3"))
+	if (of_find_compatible_node(NULL, NULL, "arm,smmu-v3")) {
+#ifdef MODULE
+		return 1;
+#else
 		return host_s2_pgtable_pages() + 500;
+#endif
+	}
 	return 0;
 }
 
@@ -113,9 +130,29 @@ static int smmuv3_nesting_probe(struct platform_device *pdev)
 	return 0;
 }
 
+static int kvm_arm_smmu_v3_post_init(void);
+
 static int kvm_arm_smmu_v3_init(void)
 {
-	return kvm_iommu_register_hyp_ops(kern_hyp_va(lm_alias(&kvm_nvhe_sym(smmu_ops))));
+	int ret;
+
+#ifdef MODULE
+	ret = pkvm_load_el2_module(kvm_nvhe_sym(smmu_init_hyp_module));
+
+	if (ret) {
+		pr_err("Failed to load SMMUv3 IOMMU EL2 module: %d\n", ret);
+		return ret;
+	}
+#endif
+
+	ret = kvm_iommu_register_hyp_ops(ksym_ref_addr_nvhe(smmu_ops));
+	if (ret)
+		return ret;
+
+#ifdef MODULE
+	return kvm_arm_smmu_v3_post_init();
+#endif
+	return 0;
 }
 
 struct kvm_iommu_driver kvm_smmu_v3_ops = {
@@ -171,7 +208,6 @@ static int smmu_create_aux_device(struct device *dev, void *data)
 	return 0;
 }
 
-static struct platform_driver smmuv3_nesting_driver;
 static int kvm_arm_smmu_v3_post_init(void)
 {
 	if (!is_protected_kvm_enabled() || !kvm_arm_smmu_cur)
@@ -194,5 +230,11 @@ static struct platform_driver smmuv3_nesting_driver = {
 		.of_match_table = smmuv3_nested_of_match,
 	},
 };
-late_initcall(kvm_arm_smmu_v3_post_init);
 subsys_initcall(kvm_arm_smmu_v3_register);
+
+#ifndef MODULE
+late_initcall(kvm_arm_smmu_v3_post_init);
+#endif
+
+MODULE_DESCRIPTION("pKVM SMMUv3 nested trap and emulated IOMMU driver.");
+MODULE_LICENSE("GPL v2");
