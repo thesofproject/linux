@@ -294977,14 +294977,6 @@ function {
   parameter_id: 0x6d7f5ff6
 }
 function {
-  id: 0x9bc2eb7c
-  return_type_id: 0x6720d32f
-  parameter_id: 0x18bd6530
-  parameter_id: 0x1d19a9d5
-  parameter_id: 0x6720d32f
-  parameter_id: 0x3fe31e81
-}
-function {
   id: 0x9bc302e5
   return_type_id: 0x6720d32f
   parameter_id: 0x18bd6530
@@ -295405,6 +295397,14 @@ function {
   parameter_id: 0x18ea6ae3
   parameter_id: 0x18bd6530
   parameter_id: 0x0b3476b2
+}
+function {
+  id: 0x9bda56c5
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x1b36c7a2
+  parameter_id: 0x6720d32f
+  parameter_id: 0x3fe31e81
 }
 function {
   id: 0x9bdaaaaa
@@ -307394,8 +307394,8 @@ elf_symbol {
   name: "__traceiter_android_vh_process_madvise_iter"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x18689c5b
-  type_id: 0x9bc2eb7c
+  crc: 0x56575c7e
+  type_id: 0x9bda56c5
   full_name: "__traceiter_android_vh_process_madvise_iter"
 }
 elf_symbol {
