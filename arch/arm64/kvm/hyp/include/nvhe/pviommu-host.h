@@ -13,11 +13,18 @@
 #define MAX_NR_PVIOMMU					32
 #define MAX_NR_SID_PER_PVIOMMU				16
 
+struct pviommu_route {
+	pkvm_handle_t iommu;
+	u32 sid;
+};
+
 int pkvm_pviommu_attach(struct kvm *host_kvm, int pviommu);
 int pkvm_pviommu_add_vsid(struct kvm *host_kvm, int pviommu,
 			  pkvm_handle_t iommu, u32 sid, u32 vsid);
 int pkvm_pviommu_finalise(struct pkvm_hyp_vm *hyp_vm);
 void pkvm_pviommu_teardown(struct pkvm_hyp_vm *hyp_vm);
+int pkvm_pviommu_get_route(struct pkvm_hyp_vm *hyp_vm, pkvm_handle_t pviommu, u32 vsid,
+			   struct pviommu_route *route);
 
 /**
  * struct pviommu_entry - A single entry (endpoint) in a pvIOMMU
