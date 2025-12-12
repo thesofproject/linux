@@ -489,6 +489,10 @@ static int arm_lpae_map_pages(struct io_pgtable_ops *ops, unsigned long iova,
 	if (WARN_ON(iaext || paddr >> cfg->oas))
 		return -ERANGE;
 
+	if ((cfg->quirks & IO_PGTABLE_QUIRK_IDMAP) &&
+	    (iova != paddr))
+		return -EINVAL;
+
 	if (!(iommu_prot & (IOMMU_READ | IOMMU_WRITE)))
 		return -EINVAL;
 
@@ -538,9 +542,10 @@ static void __arm_lpae_free_pgtable(struct arm_lpae_io_pgtable *data, int lvl,
 void arm_lpae_free_pgtable(struct io_pgtable *iop)
 {
 	struct arm_lpae_io_pgtable *data = io_pgtable_to_data(iop);
+	struct io_pgtable_cfg *cfg = &iop->cfg;
 
 	__arm_lpae_free_pgtable(data, data->start_level, data->pgd);
-	__arm_lpae_free_data(data);
+	__arm_lpae_free_data(cfg, data);
 }
 
 static size_t __arm_lpae_unmap(struct arm_lpae_io_pgtable *data,
@@ -854,7 +859,7 @@ arm_lpae_alloc_pgtable(struct io_pgtable_cfg *cfg)
 	if (cfg->oas > ARM_LPAE_MAX_ADDR_BITS)
 		return NULL;
 
-	data = __arm_lpae_alloc_data(sizeof(*data), GFP_KERNEL);
+	data = __arm_lpae_alloc_data(cfg, sizeof(*data), GFP_KERNEL);
 	if (!data)
 		return NULL;
 
@@ -981,7 +986,7 @@ arm_64_lpae_alloc_pgtable_s1(struct io_pgtable_cfg *cfg, void *cookie)
 	return &data->iop;
 
 out_free_data:
-	__arm_lpae_free_data(data);
+	__arm_lpae_free_data(cfg, data);
 	return NULL;
 }
 
@@ -993,7 +998,8 @@ arm_64_lpae_alloc_pgtable_s2(struct io_pgtable_cfg *cfg, void *cookie)
 	typeof(&cfg->arm_lpae_s2_cfg.vtcr) vtcr = &cfg->arm_lpae_s2_cfg.vtcr;
 
 	if (cfg->quirks & ~(IO_PGTABLE_QUIRK_ARM_S2FWB |
-			    IO_PGTABLE_QUIRK_NO_WARN))
+			    IO_PGTABLE_QUIRK_NO_WARN |
+			    IO_PGTABLE_QUIRK_IDMAP))
 		return NULL;
 
 	data = arm_lpae_alloc_pgtable(cfg);
@@ -1077,7 +1083,7 @@ arm_64_lpae_alloc_pgtable_s2(struct io_pgtable_cfg *cfg, void *cookie)
 	return &data->iop;
 
 out_free_data:
-	__arm_lpae_free_data(data);
+	__arm_lpae_free_data(cfg, data);
 	return NULL;
 }
 
@@ -1156,7 +1162,7 @@ arm_mali_lpae_alloc_pgtable(struct io_pgtable_cfg *cfg, void *cookie)
 	return &data->iop;
 
 out_free_data:
-	__arm_lpae_free_data(data);
+	__arm_lpae_free_data(cfg, data);
 	return NULL;
 }
 
