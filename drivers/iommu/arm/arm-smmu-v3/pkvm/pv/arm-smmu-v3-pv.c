@@ -4,12 +4,16 @@
  * Author: Mostafa Saleh <smostafa@google.com>
  */
 #include <asm/kvm_hyp.h>
+#include <nvhe/alloc.h>
 #include <nvhe/iommu.h>
 #include <nvhe/mem_protect.h>
 
 #include "arm_smmu_v3.h"
 #include "arm-smmu-v3-lib-hyp.h"
 #include "arm-smmu-v3-module.h"
+
+#include <linux/io-pgtable.h>
+#include "../../../io-pgtable-arm.h"
 
 #ifdef MODULE
 void *memset(void *dst, int c, size_t count)
@@ -45,6 +49,30 @@ struct hyp_arm_smmu_v3_device_pv *kvm_hyp_arm_smmu_v3_pv_smmus;
 	for ((smmu) = kvm_hyp_arm_smmu_v3_pv_smmus; \
 	     (smmu) != &kvm_hyp_arm_smmu_v3_pv_smmus[kvm_hyp_arm_smmu_v3_pv_count]; \
 	     (smmu)++)
+/*
+ * SMMUv3 domain:
+ * @domain: Pointer to the IOMMU domain.
+ * @smmu: SMMU owner of the domain
+ * @type: Type of domain (S1, S2)
+ * @pgt_lock: Lock for page table
+ * @pgtable: io_pgtable instance for this domain
+ */
+struct hyp_arm_smmu_v3_domain {
+	struct kvm_hyp_iommu_domain     	*domain;
+	struct hyp_arm_smmu_v3_device_pv 	*smmu;
+	u32					type;
+	hyp_spinlock_t				pgt_lock;
+	struct io_pgtable			*pgtable;
+};
+
+static struct hyp_arm_smmu_v3_device_pv *smmu_id_to_ptr(pkvm_handle_t smmu_id)
+{
+	if (smmu_id >= kvm_hyp_arm_smmu_v3_pv_count)
+		return NULL;
+
+	smmu_id = array_index_nospec(smmu_id, kvm_hyp_arm_smmu_v3_pv_count);
+	return &kvm_hyp_arm_smmu_v3_pv_smmus[smmu_id];
+}
 
 static int smmu_write_cr0(struct hyp_arm_smmu_v3_device *smmu, u32 val)
 {
@@ -138,6 +166,90 @@ smmu_get_alloc_ste_ptr(struct hyp_arm_smmu_v3_device *smmu, u32 sid)
 	}
 	return smmu_get_ste_ptr(smmu, sid);
 }
+
+static int smmu_domain_finalise(struct hyp_arm_smmu_v3_device_pv *smmu,
+				struct kvm_hyp_iommu_domain *domain)
+{
+	struct io_pgtable_cfg cfg;
+	struct hyp_arm_smmu_v3_domain *smmu_domain = domain->priv;
+	enum io_pgtable_fmt fmt;
+	struct io_pgtable_ops *ops;
+
+	if (smmu_domain->type == KVM_ARM_SMMU_DOMAIN_S1) {
+		size_t ias = (smmu->common.features & ARM_SMMU_FEAT_VAX) ? 52 : 48;
+		fmt = ARM_64_LPAE_S1;
+		cfg = (struct io_pgtable_cfg) {
+			.pgsize_bitmap = smmu->common.pgsize_bitmap,
+			.ias = min_t(unsigned long, ias, VA_BITS),
+			.oas = smmu->common.ias,
+			.coherent_walk = smmu->common.features & ARM_SMMU_FEAT_COHERENCY,
+		};
+	} else {
+		fmt = ARM_64_LPAE_S2;
+		cfg = (struct io_pgtable_cfg) {
+			.pgsize_bitmap = smmu->common.pgsize_bitmap,
+			.ias = smmu->common.ias,
+			.oas = smmu->common.oas,
+			.coherent_walk = smmu->common.features & ARM_SMMU_FEAT_COHERENCY,
+		};
+	}
+
+	ops = kvm_alloc_io_pgtable_ops(fmt, &cfg, domain);
+	if (!ops)
+		return -ENOMEM;
+	smmu_domain->pgtable = io_pgtable_ops_to_pgtable(ops);
+	return 0;
+}
+
+static void smmu_free_domain(struct kvm_hyp_iommu_domain *domain)
+{
+	struct hyp_arm_smmu_v3_domain *smmu_domain = domain->priv;
+
+	if (smmu_domain->pgtable)
+		kvm_arm_io_pgtable_free(smmu_domain->pgtable);
+
+	hyp_free(smmu_domain);
+}
+
+/*
+ * alloc_domain will only allocate the page table and add the IOMMU to domain
+ * tracking.
+ * However, it doesn't interact with the STE, that is left for attach_dev.
+ */
+static int smmu_alloc_domain(pkvm_handle_t iommu,
+			     struct kvm_hyp_iommu_domain *domain, int type)
+{
+	struct hyp_arm_smmu_v3_domain *smmu_domain;
+	struct hyp_arm_smmu_v3_device_pv *smmu = smmu_id_to_ptr(iommu);
+	int ret;
+
+	if (!smmu)
+		return -ENODEV;
+
+	if (type >= KVM_ARM_SMMU_DOMAIN_MAX)
+		return -EINVAL;
+
+	smmu_domain = hyp_alloc(sizeof(*smmu_domain));
+	if (!smmu_domain)
+		return -ENOMEM;
+
+	smmu_domain->domain = domain;
+	smmu_domain->type = type;
+	smmu_domain->smmu = smmu;
+	hyp_spin_lock_init(&smmu_domain->pgt_lock);
+	domain->priv = (void *)smmu_domain;
+
+	/* No lock needed, alloc_domain is locked from core code. */
+	ret = smmu_domain_finalise(smmu, domain);
+	if (ret)
+		goto out_free_domain;
+	return 0;
+
+out_free_domain:
+	hyp_free(smmu_domain);
+	return ret;
+}
+
 
 static int smmu_init_strtab(struct hyp_arm_smmu_v3_device *smmu)
 {
@@ -356,4 +468,6 @@ int smmu_init_hyp_module(const struct pkvm_module_ops *ops)
 /* Shared with the kernel driver in EL1 */
 struct kvm_iommu_ops smmu_pv_ops = {
 	.init                           = smmu_init,
+	.alloc_domain			= smmu_alloc_domain,
+	.free_domain			= smmu_free_domain,
 };

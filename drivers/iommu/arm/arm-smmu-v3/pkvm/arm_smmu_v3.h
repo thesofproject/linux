@@ -112,4 +112,10 @@ static inline void kvm_smmu_unlock(struct hyp_arm_smmu_v3_device *smmu)
 }
 #endif
 
+enum kvm_arm_smmu_domain_type {
+	KVM_ARM_SMMU_DOMAIN_S1,
+	KVM_ARM_SMMU_DOMAIN_S2,
+	KVM_ARM_SMMU_DOMAIN_MAX,
+};
+
 #endif /* __KVM_ARM_SMMU_V3_H */
