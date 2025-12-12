@@ -18,6 +18,8 @@ hyp-obj-$(CONFIG_PKVM_FTRACE) += ftrace.o
 hyp-obj-$(CONFIG_MODULES) += modules.o
 hyp-obj-y += $(lib-objs)
 
+KBUILD_CFLAGS += -D __NO_FORTIFY
+
 # Only for built-in, not modules
 HYP_SMMU_V3_DRV_PATH = ../../../../../drivers/iommu/arm/arm-smmu-v3
 
