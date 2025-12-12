@@ -292,6 +292,7 @@ static void __pkvm_finalize_destroy_hyp_vm(struct kvm *kvm)
 	atomic64_sub(kvm->arch.pkvm.stage2_teardown_mc.nr_pages << PAGE_SHIFT,
 		     &kvm->stat.protected_hyp_mem);
 	free_hyp_memcache(&kvm->arch.pkvm.stage2_teardown_mc);
+	kvm_iommu_guest_free_mc(&kvm->arch.pkvm.teardown_iommu_mc);
 
 	kvm_for_each_vcpu(idx, vcpu, kvm) {
 		struct kvm_hyp_req *hyp_reqs = vcpu->arch.hyp_reqs;

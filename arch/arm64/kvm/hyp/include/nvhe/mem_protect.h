@@ -96,7 +96,7 @@ int reclaim_hyp_pool(struct hyp_pool *pool, struct kvm_hyp_memcache *host_mc,
 		     int nr_pages);
 
 void destroy_hyp_vm_pgt(struct pkvm_hyp_vm *vm);
-void drain_hyp_pool(struct pkvm_hyp_vm *vm, struct kvm_hyp_memcache *mc);
+void drain_hyp_pool(struct hyp_pool *pool, struct kvm_hyp_memcache *mc);
 int refill_memcache(struct kvm_hyp_memcache *mc, unsigned long min_pages,
 		    struct kvm_hyp_memcache *host_mc);
 
