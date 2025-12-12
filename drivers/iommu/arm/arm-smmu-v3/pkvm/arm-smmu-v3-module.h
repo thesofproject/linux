@@ -18,8 +18,8 @@ extern const struct pkvm_module_ops		*mod_ops;
 /* Needs alternatives which is not supported at the moment. */
 #undef CONFIG_ARM64_LSE_ATOMICS
 
-#define kvm_iommu_donate_pages(x)		CALL_FROM_OPS(iommu_donate_pages, x)
-#define kvm_iommu_reclaim_pages(x)		CALL_FROM_OPS(iommu_reclaim_pages, x)
+#define kvm_iommu_donate_pages_atomic(x)		CALL_FROM_OPS(iommu_donate_pages_atomic, x)
+#define kvm_iommu_reclaim_pages_atomic(x)		CALL_FROM_OPS(iommu_reclaim_pages_atomic, x)
 #define hyp_virt_to_phys(x)			CALL_FROM_OPS(hyp_pa, x)
 #define hyp_phys_to_virt(x)			CALL_FROM_OPS(hyp_va, x)
 #define memcpy(x, y, z)				CALL_FROM_OPS(memcpy, x, y, z)
