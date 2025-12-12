@@ -1848,6 +1848,18 @@ static int get_valid_guest_pte(struct pkvm_hyp_vm *vm, u64 ipa, kvm_pte_t *ptep,
 	return 0;
 }
 
+int __pkvm_guest_get_valid_phys_page(struct pkvm_hyp_vm *vm, u64 *phys, u64 ipa)
+{
+	kvm_pte_t pte;
+	int ret;
+
+	guest_lock_component(vm);
+	ret = get_valid_guest_pte(vm, ipa, &pte, phys, PAGE_SIZE);
+	guest_unlock_component(vm);
+
+	return ret;
+}
+
 int __pkvm_host_reclaim_page_guest(u64 gfn, u64 nr_pages, struct pkvm_hyp_vm *vm)
 {
 	u64 phys, size, ipa = hyp_pfn_to_phys(gfn);
