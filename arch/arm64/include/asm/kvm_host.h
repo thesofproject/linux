@@ -1881,6 +1881,10 @@ int __pkvm_topup_hyp_alloc_mgt_gfp(unsigned long id, unsigned long nr_pages,
 struct kvm_iommu_driver {
 	int (*init_driver)(void);
 	int (*get_iommu_id_by_of)(struct device_node *np, pkvm_handle_t *out_id);
+	int (*get_device_iommu_num_ids)(struct device *dev);
+	int (*get_device_iommu_id)(struct device *dev, u32 id,
+				   pkvm_handle_t *out_iommu, u32 *out_sid);
+
 	/* Private to core. */
 	struct list_head node;
 };
@@ -1955,6 +1959,9 @@ static inline void kvm_iommu_sg_free(struct kvm_iommu_sg *sg, unsigned int nents
 int kvm_iommu_share_hyp_sg(struct kvm_iommu_sg *sg, unsigned int nents);
 int kvm_iommu_unshare_hyp_sg(struct kvm_iommu_sg *sg, unsigned int nents);
 
+int kvm_iommu_device_num_ids(struct device *dev);
+int kvm_iommu_device_id(struct device *dev, u32 idx,
+			pkvm_handle_t *out_iommu, u32 *out_sid);
 #define __KVM_HAVE_ARCH_ASSIGNED_DEVICE_GROUP
 
 #endif /* __ARM64_KVM_HOST_H__ */
