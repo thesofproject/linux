@@ -8,6 +8,8 @@
 #include <nvhe/spinlock.h>
 #endif
 
+#include <kvm/power_domain.h>
+
 #include "../arm-smmu-v3.h"
 
 /*
@@ -76,6 +78,8 @@ struct hyp_arm_smmu_v3_device_pv {
 	struct hyp_arm_smmu_v3_device common;
 	struct arm_smmu_queue  		evtq;
 	u32                   		ssid_bits;
+	bool                  		power_is_off;
+	struct kvm_power_domain		power_domain;
 };
 
 extern size_t kvm_nvhe_sym(kvm_hyp_arm_smmu_v3_pv_count);
