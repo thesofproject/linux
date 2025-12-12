@@ -13,7 +13,7 @@
 
 const struct pkvm_module_ops *pkvm_ops;
 
-static int iommu_temp_init(void)
+static int iommu_temp_init(pkvm_handle_t drv_id)
 {
 	/* Any common driver init. */
 	return 0;

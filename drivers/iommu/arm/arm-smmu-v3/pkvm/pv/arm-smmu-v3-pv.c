@@ -1340,7 +1340,7 @@ static int smmu_init_idmap(void)
 	return 0;
 }
 
-static int smmu_init(void)
+static int smmu_init(pkvm_handle_t drv_id)
 {
 	int ret;
 	struct hyp_arm_smmu_v3_device_pv *smmu;
@@ -1359,6 +1359,7 @@ static int smmu_init(void)
 			goto out_reclaim_smmu;
 	}
 
+	kvm_iommu_register_pviommu_drv(drv_id);
 	return smmu_init_idmap();
 out_reclaim_smmu:
 	smmu_reclaim_pages(hyp_virt_to_phys(kvm_hyp_arm_smmu_v3_pv_smmus),

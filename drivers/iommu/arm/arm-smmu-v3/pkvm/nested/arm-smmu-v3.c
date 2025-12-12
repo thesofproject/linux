@@ -581,7 +581,7 @@ static int smmu_init_pgt(void)
 	return 0;
 }
 
-static int smmu_init(void)
+static int smmu_init(pkvm_handle_t drv_id)
 {
 	int ret;
 	struct hyp_arm_smmu_v3_nested_device *nested_smmu;
