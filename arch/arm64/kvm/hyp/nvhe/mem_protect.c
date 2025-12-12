@@ -1005,14 +1005,37 @@ static void __hyp_set_page_state_range(phys_addr_t phys, u64 size, enum pkvm_pag
 		set_hyp_state(page, state);
 }
 
-static int __hyp_check_page_state_range(phys_addr_t phys, u64 size, enum pkvm_page_state state)
+static enum pkvm_page_state hyp_get_page_state_mmio(kvm_pte_t pte, u64 addr)
 {
+	enum pkvm_page_state state = 0;
+	enum kvm_pgtable_prot prot;
+
+	if (!kvm_pte_valid(pte))
+		return PKVM_NOPAGE;
+	prot = kvm_pgtable_hyp_pte_prot(pte);
+	if (kvm_pte_valid(pte) && ((prot & KVM_PGTABLE_PROT_RWX) != PAGE_HYP)) {
+		state = PKVM_PAGE_RESTRICTED_PROT;
+	}
+	return state | pkvm_getstate(prot);
+}
+
+static int __hyp_check_page_state_range(phys_addr_t phys, u64 size,
+					enum pkvm_page_state state)
+{
+	if (!range_is_memory(phys, phys + size)) {
+		struct check_walk_data d = {
+			.desired	= state,
+			.get_page_state	= hyp_get_page_state_mmio,
+		};
+
+		hyp_assert_lock_held(&pkvm_pgd_lock);
+		return check_page_state_range(&pkvm_pgtable, (u64)hyp_phys_to_virt(phys), size, &d);
+	}
+
 	for_each_hyp_page(page, phys, size) {
 		if (get_hyp_state(page) != state)
 			return -EPERM;
 	}
-
-	/* TODO: Does not check for PKVM_PAGE_RESTRICTED_PROT! */
 
 	return 0;
 }
@@ -1388,7 +1411,12 @@ static int __pkvm_host_donate_hyp_locked(u64 pfn, u64 nr_pages, enum kvm_pgtable
 	if (ret)
 		goto unlock;
 
-	__hyp_set_page_state_range(phys, size, PKVM_PAGE_OWNED);
+	/*
+	 * Only allow hyp MMIO transitions to/from the host
+	 */
+	if (range_is_memory(phys, phys + size))
+		__hyp_set_page_state_range(phys, size, PKVM_PAGE_OWNED);
+
 	ret = pkvm_create_mappings_locked(virt, virt + size, prot);
 	if (ret) {
 		WARN_ON(ret != -ENOMEM);
@@ -1446,11 +1474,13 @@ int __pkvm_hyp_donate_host(u64 pfn, u64 nr_pages)
 	ret = __hyp_check_page_state_range(phys, size, PKVM_PAGE_OWNED);
 	if (ret)
 		goto unlock;
-	ret = __host_check_page_state_range(phys, size, PKVM_NOPAGE);
+	ret = ___host_check_page_state_range(phys, size, PKVM_NOPAGE, 0);
 	if (ret)
 		goto unlock;
 
-	__hyp_set_page_state_range(phys, size, PKVM_NOPAGE);
+	/* See __pkvm_host_donate_hyp_locked() */
+	if (range_is_memory(phys, phys + size))
+		__hyp_set_page_state_range(phys, size, PKVM_NOPAGE);
 	WARN_ON(kvm_pgtable_hyp_unmap(&pkvm_pgtable, virt, size) != size);
 	WARN_ON(host_stage2_set_owner_locked(phys, size, PKVM_ID_HOST));
 
