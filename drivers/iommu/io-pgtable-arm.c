@@ -9,6 +9,10 @@
 
 #define pr_fmt(fmt)	"arm-lpae io-pgtable: " fmt
 
+#if defined(__KVM_NVHE_HYPERVISOR__) && defined(MODULE)
+#undef CONFIG_ARM64_LSE_ATOMICS
+#endif
+
 #include <linux/atomic.h>
 #include <linux/bitops.h>
 #include <linux/io-pgtable.h>
@@ -19,6 +23,7 @@
 #include <asm/barrier.h>
 
 #include "io-pgtable-arm.h"
+#include "arm/arm-smmu-v3/pkvm/arm-smmu-v3-module.h"
 
 #define ARM_LPAE_MAX_ADDR_BITS		52
 #define ARM_LPAE_S2_MAX_CONCAT_PAGES	16
