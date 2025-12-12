@@ -361,6 +361,36 @@ static bool kvm_arm_smmu_validate_features(struct arm_smmu_device *smmu)
 	return true;
 }
 
+static irqreturn_t kvm_arm_smmu_evt_handler(int irq, void *dev)
+{
+	return arm_smmu_evtq_common(irq, dev, arm_smmu_handle_event);
+}
+
+static void kvm_arm_smmu_cmdq_err(struct arm_smmu_device *smmu)
+{
+	dev_err(smmu->dev, "Hypervisor command queue corrupted!\n");
+	BUG();
+}
+
+static irqreturn_t kvm_arm_smmu_gerror_handler(int irq, void *dev)
+{
+	return arm_smmu_gerror_common(irq, dev, kvm_arm_smmu_cmdq_err);
+}
+
+static irqreturn_t kvm_arm_smmu_combined_handler(int irq, void *dev)
+{
+	kvm_arm_smmu_gerror_handler(irq, dev);
+	return IRQ_WAKE_THREAD;
+}
+
+static irqreturn_t kvm_arm_smmu_pri_handler(int irq, void *dev)
+{
+	struct arm_smmu_device *smmu = dev;
+
+	dev_err(smmu->dev, "PRI not supported in KVM driver!\n");
+	return IRQ_HANDLED;
+}
+
 static int kvm_arm_smmu_device_reset(struct host_arm_smmu_device *host_smmu)
 {
 	int ret;
@@ -387,6 +417,17 @@ static int kvm_arm_smmu_device_reset(struct host_arm_smmu_device *host_smmu)
 	/* Command queue */
 	writeq_relaxed(smmu->cmdq.q.q_base, smmu->base + ARM_SMMU_CMDQ_BASE);
 
+	/* Event queue */
+	writeq_relaxed(smmu->evtq.q.q_base, smmu->base + ARM_SMMU_EVTQ_BASE);
+	writel_relaxed(smmu->evtq.q.llq.prod, smmu->base + SZ_64K + ARM_SMMU_EVTQ_PROD);
+	writel_relaxed(smmu->evtq.q.llq.cons, smmu->base + SZ_64K + ARM_SMMU_EVTQ_CONS);
+
+	ret = arm_smmu_setup_irqs(smmu,
+				  kvm_arm_smmu_evt_handler,
+				  kvm_arm_smmu_combined_handler,
+				  kvm_arm_smmu_evt_handler,
+				  kvm_arm_smmu_gerror_handler,
+				  kvm_arm_smmu_pri_handler);
 	return 0;
 }
 
@@ -429,6 +470,8 @@ static int kvm_arm_smmu_probe(struct platform_device *pdev)
 	if (IS_ERR(smmu->base))
 		return PTR_ERR(smmu->base);
 
+	arm_smmu_probe_irq(pdev, smmu);
+
 	ret = arm_smmu_device_hw_probe(smmu);
 	if (ret)
 		return ret;
@@ -439,6 +482,12 @@ static int kvm_arm_smmu_probe(struct platform_device *pdev)
 	ret = arm_smmu_init_one_queue(smmu, &smmu->cmdq.q, smmu->base,
 				      ARM_SMMU_CMDQ_PROD, ARM_SMMU_CMDQ_CONS,
 				      CMDQ_ENT_DWORDS, "cmdq");
+	if (ret)
+		return ret;
+
+	ret = arm_smmu_init_one_queue(smmu, &smmu->evtq.q, smmu->base + SZ_64K,
+				      ARM_SMMU_EVTQ_PROD, ARM_SMMU_EVTQ_CONS,
+				      EVTQ_ENT_DWORDS, "evtq");
 	if (ret)
 		return ret;
 
@@ -462,6 +511,7 @@ static int kvm_arm_smmu_probe(struct platform_device *pdev)
 	hyp_smmu->common.mmio_size = size;
 	hyp_smmu->common.features = smmu->features;
 	hyp_smmu->ssid_bits = smmu->ssid_bits;
+	hyp_smmu->evtq = smmu->evtq.q;
 	kvm_arm_smmu_cur++;
 
 	return 0;
