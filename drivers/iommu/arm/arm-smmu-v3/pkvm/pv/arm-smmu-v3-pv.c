@@ -152,14 +152,13 @@ static void smmu_tlb_flush_all(void *cookie)
 }
 
 static int smmu_tlb_inv_range_smmu(struct hyp_arm_smmu_v3_device_pv *smmu,
-				   struct kvm_hyp_iommu_domain *domain,
+				   struct io_pgtable *pgtable,
 				   struct arm_smmu_cmdq_ent *cmd,
 				   unsigned long iova, size_t size, size_t granule)
 {
-	struct hyp_arm_smmu_v3_domain *smmu_domain = domain->priv;
 
 	arm_smmu_tlb_inv_build(cmd, iova, size, granule,
-			       smmu_domain->pgtable->cfg.pgsize_bitmap,
+			       pgtable->cfg.pgsize_bitmap,
 			       smmu->common.features & ARM_SMMU_FEAT_RANGE_INV,
 			       smmu, __smmu_add_cmd, NULL);
 	return smmu_sync_cmd(&smmu->common);
@@ -193,7 +192,7 @@ static void smmu_tlb_inv_range(struct kvm_hyp_iommu_domain *domain,
 		kvm_smmu_unlock(&smmu->common);
 		return;
 	}
-	WARN_ON(smmu_tlb_inv_range_smmu(smmu, domain,
+	WARN_ON(smmu_tlb_inv_range_smmu(smmu, smmu_domain->pgtable,
 					&cmd, iova, size, granule));
 	kvm_smmu_unlock(&smmu->common);
 }
@@ -765,6 +764,8 @@ static int smmu_set_identity(pkvm_handle_t iommu, pkvm_handle_t sid, bool on)
 			goto out_unlock;
 
 		WRITE_ONCE(dst->data[0], ste.data[0]);
+		/* Max number of SIDs is 32 bits, so no overflow. */
+		smmu->idmap_ref++;
 	} else {
 		if (le64_to_cpu(dst->data[0]) != (STRTAB_STE_0_V |
 			FIELD_PREP(STRTAB_STE_0_CFG, STRTAB_STE_0_CFG_S2_TRANS)))
@@ -778,6 +779,7 @@ static int smmu_set_identity(pkvm_handle_t iommu, pkvm_handle_t sid, bool on)
 			goto out_unlock;
 		for (i = 1; i < STRTAB_STE_DWORDS; i++)
 			dst->data[i] = 0;
+		smmu->idmap_ref--;
 	}
 
 	ret = smmu_sync_ste(smmu, dst->data, sid);
@@ -1266,10 +1268,53 @@ static void smmu_host_stage2_idmap(phys_addr_t start, phys_addr_t end, int prot)
 	}
 }
 
+static void smmu_tlb_inv_range_idmap(unsigned long iova, size_t size, size_t granule,
+				     bool leaf)
+{
+	struct hyp_arm_smmu_v3_device_pv *smmu;
+	struct arm_smmu_cmdq_ent cmd = {
+		.opcode = CMDQ_OP_TLBI_S2_IPA,
+		.tlbi = {
+			.leaf = leaf,
+			.vmid = 0,
+		},
+	};
+
+	for_each_smmu(smmu) {
+		kvm_smmu_lock(&smmu->common);
+		if (!smmu->idmap_ref || smmu->power_is_off) {
+			kvm_smmu_unlock(&smmu->common);
+			continue;
+		}
+		WARN_ON(smmu_tlb_inv_range_smmu(smmu, idmap_pgtable,
+					&cmd, iova, size, granule));
+		kvm_smmu_unlock(&smmu->common);
+	}
+}
+
+static void smmu_idmap_tlb_flush_walk(unsigned long iova, size_t size,
+				      size_t granule, void *cookie)
+{
+	smmu_tlb_inv_range_idmap(iova, size, granule, false);
+}
+
+static void smmu_idmap_tlb_add_page(struct iommu_iotlb_gather *gather,
+				    unsigned long iova, size_t granule,
+				    void *cookie)
+{
+	smmu_tlb_inv_range_idmap(iova, granule, granule, true);
+}
+
+static const struct iommu_flush_ops smmu_idmap_tlb_ops = {
+	.tlb_flush_walk = smmu_idmap_tlb_flush_walk,
+	.tlb_add_page	= smmu_idmap_tlb_add_page,
+};
+
 static int smmu_init_idmap(void)
 {
 	/* Default values overridden based on SMMUs common features. */
 	struct io_pgtable_cfg cfg = (struct io_pgtable_cfg) {
+		.tlb = &smmu_idmap_tlb_ops,
 		.pgsize_bitmap = -1,
 		.ias = 48,
 		.oas = 48,
