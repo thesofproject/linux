@@ -343,9 +343,9 @@ void destroy_hyp_vm_pgt(struct pkvm_hyp_vm *vm)
 	guest_unlock_component(vm);
 }
 
-void drain_hyp_pool(struct pkvm_hyp_vm *vm, struct kvm_hyp_memcache *mc)
+void drain_hyp_pool(struct hyp_pool *pool, struct kvm_hyp_memcache *mc)
 {
-	WARN_ON(reclaim_hyp_pool(&vm->pool, mc, INT_MAX) != -ENOMEM);
+	WARN_ON(reclaim_hyp_pool(pool, mc, INT_MAX) != -ENOMEM);
 }
 
 static enum pkvm_page_state guest_get_page_state(kvm_pte_t pte, u64 addr);
