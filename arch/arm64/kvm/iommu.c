@@ -8,9 +8,14 @@
 
 extern struct kvm_iommu_ops *kvm_nvhe_sym(kvm_iommu_ops);
 extern size_t kvm_nvhe_sym(hyp_kvm_iommu_pages);
+static struct kvm_iommu_driver *iommu_driver;
 
-int kvm_iommu_register_driver(struct kvm_iommu_ops *hyp_ops, size_t pool_pages)
+int kvm_iommu_register_driver(struct kvm_iommu_ops *hyp_ops,
+			      struct kvm_iommu_driver *kern_ops, size_t pool_pages)
 {
+	if (!kern_ops || !hyp_ops)
+		return -ENODEV;
+
 	/* See kvm_iommu_pages() */
 	if (pool_pages > kvm_nvhe_sym(hyp_kvm_iommu_pages)) {
 		kvm_err("Missing memory for the IOMMU pool, need 0x%zx pages, check kvm-arm.hyp_iommu_pages",
@@ -19,6 +24,25 @@ int kvm_iommu_register_driver(struct kvm_iommu_ops *hyp_ops, size_t pool_pages)
 	}
 
 	kvm_nvhe_sym(kvm_iommu_ops) = hyp_ops;
+	/*
+	 * Paired with smp_load_acquire(&iommu_driver)
+	 * Ensure memory stores happening during a driver
+	 * init are observed before executing kvm iommu callbacks.
+	 */
+	return cmpxchg_release(&iommu_driver, NULL, kern_ops) ? -EBUSY : 0;
+}
+
+int kvm_iommu_init_driver(void)
+{
+	/* See kvm_iommu_register_driver() */
+	if (!smp_load_acquire(&iommu_driver)) {
+		kvm_err("pKVM enabled without an IOMMU driver, do not run confidential workloads in virtual machines\n");
+		return -ENODEV;
+	}
+
+	if (iommu_driver->init_driver)
+		return iommu_driver->init_driver();
+
 	return 0;
 }
 
