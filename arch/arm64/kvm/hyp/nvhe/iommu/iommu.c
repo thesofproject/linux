@@ -227,6 +227,19 @@ static struct kvm_hyp_iommu_domain *handle_to_domain(pkvm_handle_t domain_id)
 	return &kvm_iommu_domains[domain_id];
 }
 
+static int domain_get(struct kvm_hyp_iommu_domain *domain)
+{
+	int old = atomic_fetch_inc_acquire(&domain->refs);
+
+	BUG_ON(!old || (old + 1 < 0));
+	return 0;
+}
+
+static void domain_put(struct kvm_hyp_iommu_domain *domain)
+{
+	BUG_ON(!atomic_dec_return_release(&domain->refs));
+}
+
 int kvm_iommu_alloc_domain(pkvm_handle_t iommu_id, pkvm_handle_t domain_id, int type)
 {
 	int ret = -EINVAL;
@@ -283,13 +296,51 @@ out_unlock:
 int kvm_iommu_attach_dev(pkvm_handle_t iommu_id, pkvm_handle_t domain_id,
 			 u32 endpoint_id, u32 pasid, u32 pasid_bits, unsigned long flags)
 {
-	return -ENODEV;
+	int ret;
+	struct kvm_hyp_iommu_domain *domain;
+
+	if (!kvm_iommu_ops || !kvm_iommu_ops->attach_dev)
+		return -ENODEV;
+
+	hyp_spin_lock(&kvm_iommu_domain_lock);
+	domain = handle_to_domain(domain_id);
+	if (!domain || domain_get(domain)) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
+	ret = kvm_iommu_ops->attach_dev(iommu_id, domain,
+				        endpoint_id, pasid, pasid_bits, flags);
+	if (ret)
+		domain_put(domain);
+out_unlock:
+	hyp_spin_unlock(&kvm_iommu_domain_lock);
+	return ret;
 }
 
 int kvm_iommu_detach_dev(pkvm_handle_t iommu_id, pkvm_handle_t domain_id,
 			 u32 endpoint_id, u32 pasid)
 {
-	return -ENODEV;
+	int ret;
+	struct kvm_hyp_iommu_domain *domain;
+
+	if (!kvm_iommu_ops || !kvm_iommu_ops->detach_dev)
+		return -ENODEV;
+
+	hyp_spin_lock(&kvm_iommu_domain_lock);
+	domain = handle_to_domain(domain_id);
+	if (!domain || atomic_read(&domain->refs) <= 1) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
+	ret = kvm_iommu_ops->detach_dev(iommu_id, domain, endpoint_id, pasid);
+	if (ret)
+		goto out_unlock;
+	domain_put(domain);
+out_unlock:
+	hyp_spin_unlock(&kvm_iommu_domain_lock);
+	return ret;
 }
 
 int kvm_iommu_map_pages(pkvm_handle_t domain_id,
