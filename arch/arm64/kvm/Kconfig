@@ -68,6 +68,13 @@ config PKVM_MODULE_PATH
 	  Directory where the pKVM modules are found. If empty, the modules
 	  will be searched into the default path /lib/modules/<uname>.
 
+config IOMMU_POOL_PAGES
+	hex "Number of pages reserved for IOMMU pool"
+	depends on KVM && IOMMU_SUPPORT
+	default 0x0
+	help
+	  IOMMU pool is used with protected mode to allocated IOMMU drivers page tables.
+
 menuconfig PKVM_DEBUG
 	bool "Debug mode for Protected KVM hypervisor"
 	help

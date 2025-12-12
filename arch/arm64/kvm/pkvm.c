@@ -212,6 +212,8 @@ void __init kvm_hyp_reserve(void)
 
 	hyp_mem_pages++; /* hyp_ppages */
 
+	hyp_mem_pages += kvm_iommu_pages();
+
 	/*
 	 * Try to allocate a PMD-aligned region to reduce TLB pressure once
 	 * this is unmapped from the host stage-2, and fallback to PAGE_SIZE.
