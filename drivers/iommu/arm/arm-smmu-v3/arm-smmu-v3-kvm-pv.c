@@ -14,6 +14,15 @@
 
 extern struct kvm_iommu_ops kvm_nvhe_sym(smmu_pv_ops);
 
+struct kvm_arm_smmu_domain {
+	struct iommu_domain		domain;
+	struct arm_smmu_device		*smmu;
+	pkvm_handle_t			id;
+};
+
+#define to_kvm_smmu_domain(_domain) \
+	container_of(_domain, struct kvm_arm_smmu_domain, domain)
+
 #ifdef MODULE
 #define ksym_ref_addr_nvhe(x) \
 	((typeof(kvm_nvhe_sym(x)) *)(pkvm_el2_mod_va(&kvm_nvhe_sym(x))))
@@ -46,6 +55,7 @@ struct host_arm_smmu_device {
 	struct arm_smmu_device		smmu;
 	pkvm_handle_t			id;
 	u32				boot_gbpa;
+	phys_addr_t			ioaddr;
 };
 
 #define smmu_to_host(_smmu) \
@@ -54,6 +64,67 @@ struct host_arm_smmu_device {
 static size_t				kvm_arm_smmu_cur;
 static size_t				kvm_arm_smmu_count;
 static struct hyp_arm_smmu_v3_device_pv	*kvm_arm_smmu_array;
+
+static struct platform_driver kvm_arm_smmu_driver;
+
+static struct arm_smmu_device *
+kvm_arm_smmu_get_by_fwnode(struct fwnode_handle *fwnode)
+{
+	struct device *dev;
+	dev = driver_find_device_by_fwnode(&kvm_arm_smmu_driver.driver, fwnode);
+	put_device(dev);
+	return dev ? dev_get_drvdata(dev) : NULL;
+}
+
+static struct iommu_device *kvm_arm_smmu_probe_device(struct device *dev)
+{
+	struct arm_smmu_device *smmu;
+	struct iommu_fwspec *fwspec = dev_iommu_fwspec_get(dev);
+	struct arm_smmu_master *master;
+	int ret;
+	if (WARN_ON_ONCE(dev_iommu_priv_get(dev)))
+		return ERR_PTR(-EBUSY);
+	smmu = kvm_arm_smmu_get_by_fwnode(fwspec->iommu_fwnode);
+	if (!smmu)
+		return ERR_PTR(-ENODEV);
+	master = kzalloc(sizeof(*master), GFP_KERNEL);
+	if (!master)
+		return ERR_PTR(-ENOMEM);
+	master->dev = dev;
+	master->smmu = smmu;
+	dev_iommu_priv_set(dev, master);
+	device_property_read_u32(dev, "pasid-num-bits", &master->ssid_bits);
+	master->ssid_bits = min(smmu->ssid_bits, master->ssid_bits);
+	ret = arm_smmu_insert_master(smmu, master, false);
+	if (ret)
+		goto err_free_master;
+	return &smmu->iommu;
+err_free_master:
+	kfree(master);
+	return ERR_PTR(ret);
+}
+
+static bool kvm_arm_smmu_capable(struct device *dev, enum iommu_cap cap)
+{
+	struct arm_smmu_master *master = dev_iommu_priv_get(dev);
+	switch (cap) {
+	case IOMMU_CAP_CACHE_COHERENCY:
+		return master->smmu->features & ARM_SMMU_FEAT_COHERENCY;
+	case IOMMU_CAP_NOEXEC:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static struct iommu_ops kvm_arm_smmu_ops = {
+	.capable		= kvm_arm_smmu_capable,
+	.device_group		= arm_smmu_device_group,
+	.of_xlate		= arm_smmu_of_xlate,
+	.get_resv_regions	= arm_smmu_get_resv_regions,
+	.probe_device		= kvm_arm_smmu_probe_device,
+	.owner			= THIS_MODULE,
+};
 
 static bool kvm_arm_smmu_validate_features(struct arm_smmu_device *smmu)
 {
@@ -128,7 +199,6 @@ static int kvm_arm_smmu_probe(struct platform_device *pdev)
 {
 	int ret;
 	size_t size;
-	phys_addr_t ioaddr;
 	struct resource *res;
 	struct arm_smmu_device *smmu;
 	struct device *dev = &pdev->dev;
@@ -157,7 +227,7 @@ static int kvm_arm_smmu_probe(struct platform_device *pdev)
 		dev_err(dev, "unsupported MMIO region size (%pr)\n", res);
 		return -EINVAL;
 	}
-	ioaddr = res->start;
+	host_smmu->ioaddr = res->start;
 	host_smmu->id = kvm_arm_smmu_cur;
 
 	smmu->base = devm_ioremap_resource(dev, res);
@@ -193,7 +263,7 @@ static int kvm_arm_smmu_probe(struct platform_device *pdev)
 	hyp_smmu->common.pgsize_bitmap = smmu->pgsize_bitmap;
 	hyp_smmu->common.oas = smmu->oas;
 	hyp_smmu->common.ias = smmu->ias;
-	hyp_smmu->common.mmio_addr = ioaddr;
+	hyp_smmu->common.mmio_addr = host_smmu->ioaddr;
 	hyp_smmu->common.mmio_size = size;
 	hyp_smmu->common.features = smmu->features;
 	hyp_smmu->ssid_bits = smmu->ssid_bits;
@@ -213,6 +283,7 @@ static void kvm_arm_smmu_remove(struct platform_device *pdev)
 	 */
 	arm_smmu_device_disable(smmu);
 	arm_smmu_update_gbpa(smmu, host_smmu->boot_gbpa, GBPA_ABORT);
+	arm_smmu_unregister_iommu(smmu);
 }
 
 static const struct of_device_id arm_smmu_of_match[] = {
@@ -258,6 +329,23 @@ static void kvm_arm_smmu_array_free(void)
 	free_pages((unsigned long)kvm_arm_smmu_array, order);
 }
 
+static int smmu_fin_device(struct device *dev, void *data)
+{
+	struct arm_smmu_device *smmu = dev_get_drvdata(dev);
+	struct host_arm_smmu_device *host_smmu = smmu_to_host(smmu);
+
+	return arm_smmu_register_iommu(smmu, &kvm_arm_smmu_ops, host_smmu->ioaddr);
+}
+
+static int kvm_arm_smmu_v3_post_init(void)
+{
+	if (!kvm_arm_smmu_count)
+		return 0;
+	WARN_ON(driver_for_each_device(&kvm_arm_smmu_driver.driver, NULL,
+		NULL, smmu_fin_device));
+	return 0;
+}
+
 static int kvm_arm_smmu_v3_init_drv(void)
 {
 	int ret;
@@ -291,8 +379,7 @@ static int kvm_arm_smmu_v3_init_drv(void)
 	if (ret)
 		goto err_free;
 
-	return 0;
-
+	return kvm_arm_smmu_v3_post_init();
 err_free:
 	kvm_arm_smmu_array_free();
 	return ret;
