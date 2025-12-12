@@ -1352,23 +1352,7 @@ int __pkvm_host_donate_hyp(u64 pfn, u64 nr_pages)
 	return ___pkvm_host_donate_hyp(pfn, nr_pages, false);
 }
 
-int ___pkvm_host_donate_hyp(u64 pfn, u64 nr_pages, bool accept_mmio)
-{
-	phys_addr_t start = hyp_pfn_to_phys(pfn);
-	phys_addr_t end = start + (nr_pages << PAGE_SHIFT);
-	int ret;
-
-	if (!accept_mmio && !range_is_memory(start, end))
-		return -EPERM;
-
-	host_lock_component();
-	ret = __pkvm_host_donate_hyp_locked(pfn, nr_pages);
-	host_unlock_component();
-
-	return ret;
-}
-
-int __pkvm_host_donate_hyp_locked(u64 pfn, u64 nr_pages)
+static int __pkvm_host_donate_hyp_locked(u64 pfn, u64 nr_pages, enum kvm_pgtable_prot prot)
 {
 	u64 size, phys = hyp_pfn_to_phys(pfn);
 	void *virt = __hyp_va(phys);
@@ -1391,7 +1375,7 @@ int __pkvm_host_donate_hyp_locked(u64 pfn, u64 nr_pages)
 		goto unlock;
 
 	__hyp_set_page_state_range(phys, size, PKVM_PAGE_OWNED);
-	ret = pkvm_create_mappings_locked(virt, virt + size, default_hyp_prot(phys));
+	ret = pkvm_create_mappings_locked(virt, virt + size, prot);
 	if (ret) {
 		WARN_ON(ret != -ENOMEM);
 		/* We might have failed halfway through, so remove anything we've installed */
@@ -1404,6 +1388,30 @@ unlock:
 	hyp_unlock_component();
 
 	return ret;
+}
+
+/* The swiss knife of memory donation. */
+int ___pkvm_host_donate_hyp_prot(u64 pfn, u64 nr_pages,
+				 bool accept_mmio, enum kvm_pgtable_prot prot)
+{
+	phys_addr_t start = hyp_pfn_to_phys(pfn);
+	phys_addr_t end = start + (nr_pages << PAGE_SHIFT);
+	int ret;
+
+	if (!accept_mmio && !range_is_memory(start, end))
+		return -EPERM;
+
+	host_lock_component();
+	ret = __pkvm_host_donate_hyp_locked(pfn, nr_pages, prot);
+	host_unlock_component();
+
+	return ret;
+}
+
+int ___pkvm_host_donate_hyp(u64 pfn, u64 nr_pages, bool accept_mmio)
+{
+	return ___pkvm_host_donate_hyp_prot(pfn, nr_pages, accept_mmio,
+					    default_hyp_prot(hyp_pfn_to_phys(pfn)));
 }
 
 int __pkvm_hyp_donate_host(u64 pfn, u64 nr_pages)
