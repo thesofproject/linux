@@ -42,6 +42,28 @@ static phys_addr_t arm_smmu_msi_cfg[ARM_SMMU_MAX_MSIS][3] = {
 	},
 };
 
+static const char * const event_str[] = {
+	[EVT_ID_BAD_STREAMID_CONFIG] = "C_BAD_STREAMID",
+	[EVT_ID_STE_FETCH_FAULT] = "F_STE_FETCH",
+	[EVT_ID_BAD_STE_CONFIG] = "C_BAD_STE",
+	[EVT_ID_STREAM_DISABLED_FAULT] = "F_STREAM_DISABLED",
+	[EVT_ID_BAD_SUBSTREAMID_CONFIG] = "C_BAD_SUBSTREAMID",
+	[EVT_ID_CD_FETCH_FAULT] = "F_CD_FETCH",
+	[EVT_ID_BAD_CD_CONFIG] = "C_BAD_CD",
+	[EVT_ID_TRANSLATION_FAULT] = "F_TRANSLATION",
+	[EVT_ID_ADDR_SIZE_FAULT] = "F_ADDR_SIZE",
+	[EVT_ID_ACCESS_FAULT] = "F_ACCESS",
+	[EVT_ID_PERMISSION_FAULT] = "F_PERMISSION",
+	[EVT_ID_VMS_FETCH_FAULT] = "F_VMS_FETCH",
+};
+
+static const char * const event_class_str[] = {
+	[0] = "CD fetch",
+	[1] = "Stage 1 translation table fetch",
+	[2] = "Input address caused fault",
+	[3] = "Reserved",
+};
+
 static void arm_smmu_device_iidr_probe(struct arm_smmu_device *smmu)
 {
 	u32 reg;
@@ -814,4 +836,402 @@ void arm_smmu_probe_irq(struct platform_device *pdev,
 		if (irq > 0)
 			smmu->gerr_irq = irq;
 	}
+}
+
+static int arm_smmu_init_l2_strtab(struct arm_smmu_device *smmu, u32 sid)
+{
+	dma_addr_t l2ptr_dma;
+	struct arm_smmu_strtab_cfg *cfg = &smmu->strtab_cfg;
+	struct arm_smmu_strtab_l2 **l2table;
+
+	l2table = &cfg->l2.l2ptrs[arm_smmu_strtab_l1_idx(sid)];
+	if (*l2table)
+		return 0;
+
+	*l2table = dmam_alloc_coherent(smmu->dev, sizeof(**l2table),
+				       &l2ptr_dma, GFP_KERNEL);
+	if (!*l2table) {
+		dev_err(smmu->dev,
+			"failed to allocate l2 stream table for SID %u\n",
+			sid);
+		return -ENOMEM;
+	}
+
+	arm_smmu_init_initial_stes((*l2table)->stes,
+				   ARRAY_SIZE((*l2table)->stes));
+	arm_smmu_write_strtab_l1_desc(&cfg->l2.l1tab[arm_smmu_strtab_l1_idx(sid)],
+				      l2ptr_dma);
+	return 0;
+}
+
+static bool arm_smmu_sid_in_range(struct arm_smmu_device *smmu, u32 sid)
+{
+	if (smmu->features & ARM_SMMU_FEAT_2_LVL_STRTAB)
+		return arm_smmu_strtab_l1_idx(sid) < smmu->strtab_cfg.l2.num_l1_ents;
+	return sid < smmu->strtab_cfg.linear.num_ents;
+}
+
+int arm_smmu_init_sid_strtab(struct arm_smmu_device *smmu, u32 sid)
+{
+	/* Check the SIDs are in range of the SMMU and our stream table */
+	if (!arm_smmu_sid_in_range(smmu, sid))
+		return -ERANGE;
+
+	/* Ensure l2 strtab is initialised */
+	if (smmu->features & ARM_SMMU_FEAT_2_LVL_STRTAB)
+		return arm_smmu_init_l2_strtab(smmu, sid);
+
+	return 0;
+}
+
+irqreturn_t arm_smmu_gerror_common(int irq, void *dev,
+				   void(*cmd_err)(struct arm_smmu_device *smmu))
+{
+	u32 gerror, gerrorn, active;
+	struct arm_smmu_device *smmu = dev;
+
+	gerror = readl_relaxed(smmu->base + ARM_SMMU_GERROR);
+	gerrorn = readl_relaxed(smmu->base + ARM_SMMU_GERRORN);
+
+	active = gerror ^ gerrorn;
+	if (!(active & GERROR_ERR_MASK))
+		return IRQ_NONE; /* No errors pending */
+
+	dev_warn(smmu->dev,
+		 "unexpected global error reported (0x%08x), this could be serious\n",
+		 active);
+
+	if (active & GERROR_SFM_ERR) {
+		dev_err(smmu->dev, "device has entered Service Failure Mode!\n");
+		arm_smmu_device_disable(smmu);
+	}
+
+	if (active & GERROR_MSI_GERROR_ABT_ERR)
+		dev_warn(smmu->dev, "GERROR MSI write aborted\n");
+
+	if (active & GERROR_MSI_PRIQ_ABT_ERR)
+		dev_warn(smmu->dev, "PRIQ MSI write aborted\n");
+
+	if (active & GERROR_MSI_EVTQ_ABT_ERR)
+		dev_warn(smmu->dev, "EVTQ MSI write aborted\n");
+
+	if (active & GERROR_MSI_CMDQ_ABT_ERR)
+		dev_warn(smmu->dev, "CMDQ MSI write aborted\n");
+
+	if (active & GERROR_PRIQ_ABT_ERR)
+		dev_err(smmu->dev, "PRIQ write aborted -- events may have been lost\n");
+
+	if (active & GERROR_EVTQ_ABT_ERR)
+		dev_err(smmu->dev, "EVTQ write aborted -- events may have been lost\n");
+
+	if (active & GERROR_CMDQ_ERR)
+		cmd_err(smmu);
+
+	writel(gerror, smmu->base + ARM_SMMU_GERRORN);
+	return IRQ_HANDLED;
+}
+
+
+static void arm_smmu_dump_raw_event(struct arm_smmu_device *smmu, u64 *raw,
+				    struct arm_smmu_event *event)
+{
+	int i;
+
+	dev_err(smmu->dev, "event 0x%02x received:\n", event->id);
+
+	for (i = 0; i < EVTQ_ENT_DWORDS; ++i)
+		dev_err(smmu->dev, "\t0x%016llx\n", raw[i]);
+}
+
+#define ARM_SMMU_EVT_KNOWN(e)	((e)->id < ARRAY_SIZE(event_str) && event_str[(e)->id])
+#define ARM_SMMU_LOG_EVT_STR(e) ARM_SMMU_EVT_KNOWN(e) ? event_str[(e)->id] : "UNKNOWN"
+#define ARM_SMMU_LOG_CLIENT(e)	(e)->dev ? dev_name((e)->dev) : "(unassigned sid)"
+
+static void arm_smmu_dump_event(struct arm_smmu_device *smmu, u64 *raw,
+				struct arm_smmu_event *evt,
+				struct ratelimit_state *rs)
+{
+	if (!__ratelimit(rs))
+		return;
+
+	arm_smmu_dump_raw_event(smmu, raw, evt);
+
+	switch (evt->id) {
+	case EVT_ID_TRANSLATION_FAULT:
+	case EVT_ID_ADDR_SIZE_FAULT:
+	case EVT_ID_ACCESS_FAULT:
+	case EVT_ID_PERMISSION_FAULT:
+		dev_err(smmu->dev, "event: %s client: %s sid: %#x ssid: %#x iova: %#llx ipa: %#llx",
+			ARM_SMMU_LOG_EVT_STR(evt), ARM_SMMU_LOG_CLIENT(evt),
+			evt->sid, evt->ssid, evt->iova, evt->ipa);
+
+		dev_err(smmu->dev, "%s %s %s %s \"%s\"%s%s stag: %#x",
+			evt->privileged ? "priv" : "unpriv",
+			evt->instruction ? "inst" : "data",
+			str_read_write(evt->read),
+			evt->s2 ? "s2" : "s1", event_class_str[evt->class],
+			evt->class_tt ? (evt->ttrnw ? " ttd_read" : " ttd_write") : "",
+			evt->stall ? " stall" : "", evt->stag);
+
+		break;
+
+	case EVT_ID_STE_FETCH_FAULT:
+	case EVT_ID_CD_FETCH_FAULT:
+	case EVT_ID_VMS_FETCH_FAULT:
+		dev_err(smmu->dev, "event: %s client: %s sid: %#x ssid: %#x fetch_addr: %#llx",
+			ARM_SMMU_LOG_EVT_STR(evt), ARM_SMMU_LOG_CLIENT(evt),
+			evt->sid, evt->ssid, evt->fetch_addr);
+
+		break;
+
+	default:
+		dev_err(smmu->dev, "event: %s client: %s sid: %#x ssid: %#x",
+			ARM_SMMU_LOG_EVT_STR(evt), ARM_SMMU_LOG_CLIENT(evt),
+			evt->sid, evt->ssid);
+	}
+}
+
+static int arm_smmu_streams_cmp_key(const void *lhs, const struct rb_node *rhs)
+{
+	struct arm_smmu_stream *stream_rhs =
+		rb_entry(rhs, struct arm_smmu_stream, node);
+	const u32 *sid_lhs = lhs;
+
+	if (*sid_lhs < stream_rhs->id)
+		return -1;
+	if (*sid_lhs > stream_rhs->id)
+		return 1;
+	return 0;
+}
+
+static int arm_smmu_streams_cmp_node(struct rb_node *lhs,
+				     const struct rb_node *rhs)
+{
+	return arm_smmu_streams_cmp_key(
+		&rb_entry(lhs, struct arm_smmu_stream, node)->id, rhs);
+}
+
+struct arm_smmu_master *
+arm_smmu_find_master(struct arm_smmu_device *smmu, u32 sid)
+{
+	struct rb_node *node;
+
+	lockdep_assert_held(&smmu->streams_mutex);
+
+	node = rb_find(&sid, &smmu->streams, arm_smmu_streams_cmp_key);
+	if (!node)
+		return NULL;
+	return rb_entry(node, struct arm_smmu_stream, node)->master;
+}
+
+int arm_smmu_insert_master(struct arm_smmu_device *smmu,
+			   struct arm_smmu_master *master,
+			   bool init_ste)
+{
+	int i;
+	int ret = 0;
+	struct iommu_fwspec *fwspec = dev_iommu_fwspec_get(master->dev);
+
+	master->streams = kcalloc(fwspec->num_ids, sizeof(*master->streams),
+				  GFP_KERNEL);
+	if (!master->streams)
+		return -ENOMEM;
+	master->num_streams = fwspec->num_ids;
+
+	mutex_lock(&smmu->streams_mutex);
+	for (i = 0; i < fwspec->num_ids; i++) {
+		struct arm_smmu_stream *new_stream = &master->streams[i];
+		struct rb_node *existing;
+		u32 sid = fwspec->ids[i];
+
+		new_stream->id = sid;
+		new_stream->master = master;
+
+		if (init_ste) {
+			ret = arm_smmu_init_sid_strtab(smmu, sid);
+			if (ret)
+				break;
+		}
+
+		/* Insert into SID tree */
+		existing = rb_find_add(&new_stream->node, &smmu->streams,
+				       arm_smmu_streams_cmp_node);
+		if (existing) {
+			struct arm_smmu_master *existing_master =
+				rb_entry(existing, struct arm_smmu_stream, node)
+					->master;
+
+			/* Bridged PCI devices may end up with duplicated IDs */
+			if (existing_master == master)
+				continue;
+
+			dev_warn(master->dev,
+				 "Aliasing StreamID 0x%x (from %s) unsupported, expect DMA to be broken\n",
+				 sid, dev_name(existing_master->dev));
+			ret = -ENODEV;
+			break;
+		}
+	}
+
+	if (ret) {
+		for (i--; i >= 0; i--)
+			rb_erase(&master->streams[i].node, &smmu->streams);
+		kfree(master->streams);
+	}
+	mutex_unlock(&smmu->streams_mutex);
+
+	return ret;
+}
+
+void arm_smmu_remove_master(struct arm_smmu_master *master)
+{
+	int i;
+	struct arm_smmu_device *smmu = master->smmu;
+	struct iommu_fwspec *fwspec = dev_iommu_fwspec_get(master->dev);
+
+	if (!smmu || !master->streams)
+		return;
+
+	mutex_lock(&smmu->streams_mutex);
+	for (i = 0; i < fwspec->num_ids; i++)
+		rb_erase(&master->streams[i].node, &smmu->streams);
+	mutex_unlock(&smmu->streams_mutex);
+
+	kfree(master->streams);
+}
+
+/* IRQ and event handlers */
+static void arm_smmu_decode_event(struct arm_smmu_device *smmu, u64 *raw,
+				  struct arm_smmu_event *event)
+{
+	struct arm_smmu_master *master;
+
+	event->id = FIELD_GET(EVTQ_0_ID, raw[0]);
+	event->sid = FIELD_GET(EVTQ_0_SID, raw[0]);
+	event->ssv = FIELD_GET(EVTQ_0_SSV, raw[0]);
+	event->ssid = event->ssv ? FIELD_GET(EVTQ_0_SSID, raw[0]) : IOMMU_NO_PASID;
+	event->privileged = FIELD_GET(EVTQ_1_PnU, raw[1]);
+	event->instruction = FIELD_GET(EVTQ_1_InD, raw[1]);
+	event->s2 = FIELD_GET(EVTQ_1_S2, raw[1]);
+	event->read = FIELD_GET(EVTQ_1_RnW, raw[1]);
+	event->stag = FIELD_GET(EVTQ_1_STAG, raw[1]);
+	event->stall = FIELD_GET(EVTQ_1_STALL, raw[1]);
+	event->class = FIELD_GET(EVTQ_1_CLASS, raw[1]);
+	event->iova = FIELD_GET(EVTQ_2_ADDR, raw[2]);
+	event->ipa = raw[3] & EVTQ_3_IPA;
+	event->fetch_addr = raw[3] & EVTQ_3_FETCH_ADDR;
+	event->ttrnw = FIELD_GET(EVTQ_1_TT_READ, raw[1]);
+	event->class_tt = false;
+	event->dev = NULL;
+
+	if (event->id == EVT_ID_PERMISSION_FAULT)
+		event->class_tt = (event->class == EVTQ_1_CLASS_TT);
+
+	mutex_lock(&smmu->streams_mutex);
+	master = arm_smmu_find_master(smmu, event->sid);
+	if (master)
+		event->dev = get_device(master->dev);
+	mutex_unlock(&smmu->streams_mutex);
+}
+
+irqreturn_t arm_smmu_evtq_common(int irq, void *dev,
+				 int handle_event(struct arm_smmu_device *smmu,
+						  u64 *evt, struct arm_smmu_event *event))
+{
+	u64 evt[EVTQ_ENT_DWORDS];
+	struct arm_smmu_event event = {0};
+	struct arm_smmu_device *smmu = dev;
+	struct arm_smmu_queue *q = &smmu->evtq.q;
+	struct arm_smmu_ll_queue *llq = &q->llq;
+	static DEFINE_RATELIMIT_STATE(rs, DEFAULT_RATELIMIT_INTERVAL,
+				      DEFAULT_RATELIMIT_BURST);
+
+	do {
+		while (!queue_remove_raw(q, evt)) {
+			arm_smmu_decode_event(smmu, evt, &event);
+			if (handle_event(smmu, evt, &event))
+				arm_smmu_dump_event(smmu, evt, &event, &rs);
+
+			put_device(event.dev);
+			cond_resched();
+		}
+
+		/*
+		 * Not much we can do on overflow, so scream and pretend we're
+		 * trying harder.
+		 */
+		if (queue_sync_prod_in(q) == -EOVERFLOW)
+			dev_err(smmu->dev, "EVTQ overflow detected -- events lost\n");
+	} while (!queue_empty(llq));
+
+	/* Sync our overflow flag, as we believe we're up to speed */
+	queue_sync_cons_ovf(q);
+	return IRQ_HANDLED;
+}
+
+int arm_smmu_handle_event(struct arm_smmu_device *smmu, u64 *evt,
+			  struct arm_smmu_event *event)
+{
+	int ret = 0;
+	u32 perm = 0;
+	struct arm_smmu_master *master;
+	struct iopf_fault fault_evt = { };
+	struct iommu_fault *flt = &fault_evt.fault;
+
+	switch (event->id) {
+	case EVT_ID_BAD_STE_CONFIG:
+	case EVT_ID_STREAM_DISABLED_FAULT:
+	case EVT_ID_BAD_SUBSTREAMID_CONFIG:
+	case EVT_ID_BAD_CD_CONFIG:
+	case EVT_ID_TRANSLATION_FAULT:
+	case EVT_ID_ADDR_SIZE_FAULT:
+	case EVT_ID_ACCESS_FAULT:
+	case EVT_ID_PERMISSION_FAULT:
+		break;
+	default:
+		return -EOPNOTSUPP;
+	}
+
+	if (event->stall) {
+		if (event->read)
+			perm |= IOMMU_FAULT_PERM_READ;
+		else
+			perm |= IOMMU_FAULT_PERM_WRITE;
+
+		if (event->instruction)
+			perm |= IOMMU_FAULT_PERM_EXEC;
+
+		if (event->privileged)
+			perm |= IOMMU_FAULT_PERM_PRIV;
+
+		flt->type = IOMMU_FAULT_PAGE_REQ;
+		flt->prm = (struct iommu_fault_page_request){
+			.flags = IOMMU_FAULT_PAGE_REQUEST_LAST_PAGE,
+			.grpid = event->stag,
+			.perm = perm,
+			.addr = event->iova,
+		};
+
+		if (event->ssv) {
+			flt->prm.flags |= IOMMU_FAULT_PAGE_REQUEST_PASID_VALID;
+			flt->prm.pasid = event->ssid;
+		}
+	}
+
+	mutex_lock(&smmu->streams_mutex);
+	master = arm_smmu_find_master(smmu, event->sid);
+	if (!master) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
+	if (event->stall)
+		ret = iommu_report_device_fault(master->dev, &fault_evt);
+	else if (master->vmaster && !event->s2)
+		ret = arm_vmaster_report_event(master->vmaster, evt);
+	else
+		ret = -EOPNOTSUPP; /* Unhandled events should be pinned */
+out_unlock:
+	mutex_unlock(&smmu->streams_mutex);
+	return ret;
 }
