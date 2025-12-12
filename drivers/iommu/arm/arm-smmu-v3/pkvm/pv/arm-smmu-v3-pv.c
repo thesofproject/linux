@@ -430,14 +430,11 @@ static int smmu_domain_finalise(struct hyp_arm_smmu_v3_device_pv *smmu,
 	return 0;
 }
 
-static int smmu_domain_config_s2(struct kvm_hyp_iommu_domain *domain,
-				 struct arm_smmu_ste *ste)
+static int smmu_domain_config_s2(struct io_pgtable_cfg *cfg,
+				 struct arm_smmu_ste *ste, u32 vmid)
 {
-	struct io_pgtable_cfg *cfg;
 	u64 ts, sl, ic, oc, sh, tg, ps;
-	struct hyp_arm_smmu_v3_domain *smmu_domain = domain->priv;
 
-	cfg = &smmu_domain->pgtable->cfg;
 	ps = cfg->arm_lpae_s2_cfg.vtcr.ps;
 	tg = cfg->arm_lpae_s2_cfg.vtcr.tg;
 	sh = cfg->arm_lpae_s2_cfg.vtcr.sh;
@@ -457,7 +454,7 @@ static int smmu_domain_config_s2(struct kvm_hyp_iommu_domain *domain,
 			FIELD_PREP(STRTAB_STE_2_VTCR_S2IR0, ic) |
 			FIELD_PREP(STRTAB_STE_2_VTCR_S2SL0, sl) |
 			FIELD_PREP(STRTAB_STE_2_VTCR_S2T0SZ, ts)) |
-		 FIELD_PREP(STRTAB_STE_2_S2VMID, domain->domain_id) |
+		 FIELD_PREP(STRTAB_STE_2_S2VMID, vmid) |
 		 STRTAB_STE_2_S2AA64 | STRTAB_STE_2_S2R);
 	ste->data[3] = cpu_to_le64(cfg->arm_lpae_s2_cfg.vttbr & STRTAB_STE_3_S2TTB_MASK);
 
@@ -707,7 +704,7 @@ static int smmu_attach_dev(pkvm_handle_t iommu, struct kvm_hyp_iommu_domain *dom
 			ret = -EBUSY;
 			goto out_unlock;
 		}
-		ret = smmu_domain_config_s2(domain, &ste);
+		ret = smmu_domain_config_s2(&smmu_domain->pgtable->cfg, &ste, domain->domain_id);
 	}
 	/* We don't update STEs for pasid domains. */
 	if (ret || pasid)
@@ -731,6 +728,64 @@ static int smmu_attach_dev(pkvm_handle_t iommu, struct kvm_hyp_iommu_domain *dom
 out_unlock:
 	kvm_smmu_unlock(&smmu->common);
 	return ret;
+}
+
+static int smmu_set_identity(pkvm_handle_t iommu, pkvm_handle_t sid, bool on)
+{
+	struct hyp_arm_smmu_v3_device_pv *smmu = smmu_id_to_ptr(iommu);
+	struct arm_smmu_ste *dst;
+	struct arm_smmu_ste ste = {};
+	int ret, i;
+
+	if (!smmu)
+		return -ENODEV;
+
+	kvm_smmu_lock(&smmu->common);
+	dst = smmu_get_alloc_ste_ptr(&smmu->common, sid);
+	if (!dst) {
+		ret = -ENOMEM;
+		goto out_unlock;
+	}
+
+	if (on) {
+		if (dst->data[0]) {
+			ret = -EBUSY;
+			goto out_unlock;
+		}
+
+		ret = smmu_domain_config_s2(&idmap_pgtable->cfg, &ste, 0);
+		if (ret)
+			goto out_unlock;
+
+		for (i = 1; i < STRTAB_STE_DWORDS; i++)
+			dst->data[i] = ste.data[i];
+
+		ret = smmu_sync_ste(smmu, dst->data, sid);
+		if (ret)
+			goto out_unlock;
+
+		WRITE_ONCE(dst->data[0], ste.data[0]);
+	} else {
+		if (le64_to_cpu(dst->data[0]) != (STRTAB_STE_0_V |
+			FIELD_PREP(STRTAB_STE_0_CFG, STRTAB_STE_0_CFG_S2_TRANS)))
+			return -EINVAL;
+		if (FIELD_GET(STRTAB_STE_2_S2VMID, le64_to_cpu(dst->data[2])))
+			return -EINVAL;
+
+		dst->data[0] = 0;
+		ret = smmu_sync_ste(smmu, dst->data, sid);
+		if (ret)
+			goto out_unlock;
+		for (i = 1; i < STRTAB_STE_DWORDS; i++)
+			dst->data[i] = 0;
+	}
+
+	ret = smmu_sync_ste(smmu, dst->data, sid);
+	WARN_ON(ret);
+out_unlock:
+	kvm_smmu_unlock(&smmu->common);
+	return ret;
+
 }
 
 static int smmu_map_pages(struct kvm_hyp_iommu_domain *domain, unsigned long iova,
@@ -844,6 +899,10 @@ static int smmu_alloc_domain(pkvm_handle_t iommu,
 	struct hyp_arm_smmu_v3_domain *smmu_domain;
 	struct hyp_arm_smmu_v3_device_pv *smmu = smmu_id_to_ptr(iommu);
 	int ret;
+
+	/* domain 0 not used and ID reserved for the s2 vmid. */
+	if (domain->domain_id == 0)
+		return -EPERM;
 
 	if (!smmu)
 		return -ENODEV;
@@ -1288,4 +1347,5 @@ struct kvm_iommu_ops smmu_pv_ops = {
 	.iova_to_phys			= smmu_iova_to_phys,
 	.dabt_handler			= smmu_dabt_handler,
 	.host_stage2_idmap		= smmu_host_stage2_idmap,
+	.set_identity			= smmu_set_identity,
 };
