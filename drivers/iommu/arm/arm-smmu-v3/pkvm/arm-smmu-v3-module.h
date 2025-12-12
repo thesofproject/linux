@@ -39,6 +39,8 @@ extern const struct pkvm_module_ops		*mod_ops;
 #define kvm_iommu_reclaim_pages(x, y)		CALL_FROM_OPS(iommu_reclaim_pages, x, y)
 #define hyp_alloc(x)				CALL_FROM_OPS(hyp_alloc, x)
 #define hyp_free(x)				CALL_FROM_OPS(hyp_free, x)
+#define kvm_iommu_iotlb_gather_add_page(x, y, z, w) \
+						CALL_FROM_OPS(iommu_iotlb_gather_add_page, x, y, z, w)
 #endif
 
 

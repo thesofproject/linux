@@ -91,6 +91,119 @@ static int smmu_send_cmd(struct hyp_arm_smmu_v3_device_pv *smmu,
 	return smmu_sync_cmd(&smmu->common);
 }
 
+static void __smmu_add_cmd(void *__opaque, struct arm_smmu_cmdq_batch *unused,
+			   struct arm_smmu_cmdq_ent *cmd)
+{
+	struct hyp_arm_smmu_v3_device *smmu = (struct hyp_arm_smmu_v3_device *)__opaque;
+
+	WARN_ON(smmu_add_cmd(smmu, cmd));
+}
+
+static void smmu_inv_domain(struct hyp_arm_smmu_v3_device_pv *smmu,
+			    struct hyp_arm_smmu_v3_domain *smmu_domain)
+{
+	struct kvm_hyp_iommu_domain *domain = smmu_domain->domain;
+	struct arm_smmu_cmdq_ent cmd = {};
+
+	if (smmu_domain->type == KVM_ARM_SMMU_DOMAIN_S1) {
+		cmd.opcode = CMDQ_OP_TLBI_NH_ASID;
+		cmd.tlbi.asid = domain->domain_id;
+	}
+	else {
+		cmd.opcode = CMDQ_OP_TLBI_S12_VMALL;
+		cmd.tlbi.vmid = domain->domain_id;
+	}
+
+	WARN_ON(smmu_send_cmd(smmu, &cmd));
+}
+
+static void smmu_tlb_flush_all(void *cookie)
+{
+	struct kvm_hyp_iommu_domain *domain = cookie;
+	struct hyp_arm_smmu_v3_domain *smmu_domain = domain->priv;
+	struct hyp_arm_smmu_v3_device_pv *smmu = smmu_domain->smmu;
+
+	kvm_smmu_lock(&smmu->common);
+	smmu_inv_domain(smmu, smmu_domain);
+	kvm_smmu_unlock(&smmu->common);
+}
+
+static int smmu_tlb_inv_range_smmu(struct hyp_arm_smmu_v3_device_pv *smmu,
+				   struct kvm_hyp_iommu_domain *domain,
+				   struct arm_smmu_cmdq_ent *cmd,
+				   unsigned long iova, size_t size, size_t granule)
+{
+	struct hyp_arm_smmu_v3_domain *smmu_domain = domain->priv;
+
+	arm_smmu_tlb_inv_build(cmd, iova, size, granule,
+			       smmu_domain->pgtable->cfg.pgsize_bitmap,
+			       smmu->common.features & ARM_SMMU_FEAT_RANGE_INV,
+			       smmu, __smmu_add_cmd, NULL);
+	return smmu_sync_cmd(&smmu->common);
+}
+
+static void smmu_tlb_inv_range(struct kvm_hyp_iommu_domain *domain,
+			       unsigned long iova, size_t size, size_t granule,
+			       bool leaf)
+{
+	struct hyp_arm_smmu_v3_domain *smmu_domain = domain->priv;
+	unsigned long end = iova + size;
+	struct arm_smmu_cmdq_ent cmd;
+	struct hyp_arm_smmu_v3_device_pv *smmu = smmu_domain->smmu;
+
+	cmd.tlbi.leaf = leaf;
+	if (smmu_domain->type == KVM_ARM_SMMU_DOMAIN_S1) {
+		cmd.opcode = CMDQ_OP_TLBI_NH_VA;
+		cmd.tlbi.asid = domain->domain_id;
+		cmd.tlbi.vmid = 0;
+	} else {
+		cmd.opcode = CMDQ_OP_TLBI_S2_IPA;
+		cmd.tlbi.vmid = domain->domain_id;
+	}
+	/*
+	 * There are no mappings at high addresses since we don't use TTB1, so
+	 * no overflow possible.
+	 */
+	BUG_ON(end < iova);
+	kvm_smmu_lock(&smmu->common);
+	WARN_ON(smmu_tlb_inv_range_smmu(smmu, domain,
+					&cmd, iova, size, granule));
+	kvm_smmu_unlock(&smmu->common);
+}
+
+static void smmu_tlb_flush_walk(unsigned long iova, size_t size,
+				size_t granule, void *cookie)
+{
+	smmu_tlb_inv_range(cookie, iova, size, granule, false);
+}
+
+static void smmu_tlb_add_page(struct iommu_iotlb_gather *gather,
+			      unsigned long iova, size_t granule,
+			      void *cookie)
+{
+	if (gather)
+		kvm_iommu_iotlb_gather_add_page(cookie, gather, iova, granule);
+	else
+		smmu_tlb_inv_range(cookie, iova, granule, granule, true);
+}
+
+static const struct iommu_flush_ops smmu_tlb_ops = {
+	.tlb_flush_all  = smmu_tlb_flush_all,
+	.tlb_flush_walk = smmu_tlb_flush_walk,
+	.tlb_add_page	= smmu_tlb_add_page,
+};
+
+static void smmu_iotlb_sync(struct kvm_hyp_iommu_domain *domain,
+			    struct iommu_iotlb_gather *gather)
+{
+	size_t size;
+
+	if (!gather->pgsize)
+		return;
+	size = gather->end - gather->start + 1;
+	smmu_tlb_inv_range(domain, gather->start, size,  gather->pgsize, true);
+}
+
 __maybe_unused
 static int smmu_sync_ste(struct hyp_arm_smmu_v3_device_pv *smmu, __le64 *step, u32 sid)
 {
@@ -183,6 +296,7 @@ static int smmu_domain_finalise(struct hyp_arm_smmu_v3_device_pv *smmu,
 			.ias = min_t(unsigned long, ias, VA_BITS),
 			.oas = smmu->common.ias,
 			.coherent_walk = smmu->common.features & ARM_SMMU_FEAT_COHERENCY,
+			.tlb = &smmu_tlb_ops,
 		};
 	} else {
 		fmt = ARM_64_LPAE_S2;
@@ -191,6 +305,7 @@ static int smmu_domain_finalise(struct hyp_arm_smmu_v3_device_pv *smmu,
 			.ias = smmu->common.ias,
 			.oas = smmu->common.oas,
 			.coherent_walk = smmu->common.features & ARM_SMMU_FEAT_COHERENCY,
+			.tlb = &smmu_tlb_ops,
 		};
 	}
 
@@ -470,4 +585,5 @@ struct kvm_iommu_ops smmu_pv_ops = {
 	.init                           = smmu_init,
 	.alloc_domain			= smmu_alloc_domain,
 	.free_domain			= smmu_free_domain,
+	.iotlb_sync			= smmu_iotlb_sync,
 };
