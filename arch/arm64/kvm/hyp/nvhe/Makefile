@@ -11,7 +11,7 @@ hyp-obj-y := timer-sr.o sysreg-sr.o debug-sr.o switch.o tlb.o hyp-init.o host.o 
 	 serial.o alloc_mgt.o iommu/iommu.o power/hvc.o  device/device.o
 hyp-obj-y += ../vgic-v3-sr.o ../aarch32.o ../vgic-v2-cpuif-proxy.o ../entry.o \
 	 ../fpsimd.o ../hyp-entry.o ../exception.o ../pgtable.o ../../config.o
-hyp-obj-y += ../../../kernel/smccc-call.o
+hyp-obj-y += ../../../kernel/smccc-call.o  iommu/pviommu-host.o
 hyp-obj-$(CONFIG_LIST_HARDENED) += list_debug.o
 hyp-obj-$(CONFIG_TRACING) += clock.o events.o trace.o
 hyp-obj-$(CONFIG_PKVM_FTRACE) += ftrace.o
