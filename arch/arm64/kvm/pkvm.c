@@ -10,6 +10,7 @@
 #include <linux/initrd.h>
 #include <linux/io.h>
 #include <linux/interval_tree_generic.h>
+#include <linux/iommu.h>
 #include <linux/kmemleak.h>
 #include <linux/kvm_host.h>
 #include <asm/kvm_mmu.h>
@@ -18,6 +19,7 @@
 #include <linux/of_address.h>
 #include <linux/of_fdt.h>
 #include <linux/of_reserved_mem.h>
+#include <linux/platform_device.h>
 #include <linux/sort.h>
 
 #include <asm/kvm_host.h>
@@ -1801,4 +1803,105 @@ int __pkvm_topup_hyp_alloc_mgt_gfp(unsigned long id, unsigned long nr_pages,
 	}
 
 	return ret;
+}
+
+static int __pkvm_donate_resource(struct resource *r)
+{
+	if (!PAGE_ALIGNED(resource_size(r)) || !PAGE_ALIGNED(r->start))
+		return -EINVAL;
+
+	return kvm_call_hyp_nvhe(__pkvm_host_donate_hyp_mmio,
+				 __phys_to_pfn(r->start),
+				 resource_size(r) >> PAGE_SHIFT);
+
+}
+
+static int __pkvm_reclaim_resource(struct resource *r)
+{
+	if (!PAGE_ALIGNED(resource_size(r)) || !PAGE_ALIGNED(r->start))
+		return -EINVAL;
+
+	return kvm_call_hyp_nvhe(__pkvm_host_reclaim_hyp_mmio,
+				 __phys_to_pfn(r->start),
+				 resource_size(r) >> PAGE_SHIFT);
+}
+
+static int __pkvm_arch_assign_device(struct device *dev, void *data)
+{
+	struct platform_device *pdev;
+	struct resource *r;
+	int index = 0;
+	int ret = 0;
+
+	if (!dev_is_platform(dev))
+		return -EOPNOTSUPP;
+
+	pdev = to_platform_device(dev);
+
+	while ((r = platform_get_resource(pdev, IORESOURCE_MEM, index++))) {
+		ret = __pkvm_donate_resource(r);
+		if (ret)
+			break;
+	}
+
+	if (ret) {
+		while (index--) {
+			r = platform_get_resource(pdev, IORESOURCE_MEM, index);
+			__pkvm_reclaim_resource(r);
+		}
+	}
+	return ret;
+}
+
+static int __pkvm_arch_reclaim_device(struct device *dev, void *data)
+{
+	struct platform_device *pdev;
+	struct resource *r;
+	int index = 0;
+
+	pdev = to_platform_device(dev);
+
+	while ((r = platform_get_resource(pdev, IORESOURCE_MEM, index++)))
+		__pkvm_reclaim_resource(r);
+
+	return 0;
+}
+
+int kvm_arch_assign_device(struct device *dev)
+{
+	if (!is_protected_kvm_enabled())
+		return 0;
+
+	return __pkvm_arch_assign_device(dev, NULL);
+}
+
+int kvm_arch_assign_group(struct iommu_group *group)
+{
+	int ret;
+
+	if (!is_protected_kvm_enabled())
+		return 0;
+
+	ret = iommu_group_for_each_dev(group, NULL, __pkvm_arch_assign_device);
+
+	if (ret)
+		iommu_group_for_each_dev(group, NULL, __pkvm_arch_reclaim_device);
+
+	return ret;
+}
+
+void kvm_arch_reclaim_device(struct device *dev)
+{
+	if (!is_protected_kvm_enabled())
+		return;
+
+	__pkvm_arch_reclaim_device(dev, NULL);
+}
+
+void kvm_arch_reclaim_group(struct iommu_group *group)
+{
+	if (!is_protected_kvm_enabled())
+		return;
+
+	iommu_group_for_each_dev(group, NULL, __pkvm_arch_reclaim_device);
 }
