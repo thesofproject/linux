@@ -863,8 +863,26 @@ err_free:
 	return ret;
 }
 
+static int kvm_arm_v3_id_by_of(struct device_node *np, pkvm_handle_t *out_id)
+{
+	struct device *dev;
+	struct arm_smmu_device *smmu;
+	struct host_arm_smmu_device *host_smmu;
+
+	dev = driver_find_device_by_of_node(&kvm_arm_smmu_driver.driver, np);
+	if (!dev)
+		return -ENODEV;
+
+	smmu = dev_get_drvdata(dev);
+	host_smmu = smmu_to_host(smmu);
+	put_device(dev);
+	*out_id = host_smmu->id;
+	return 0;
+}
+
 static struct kvm_iommu_driver kvm_smmu_v3_ops = {
 	.init_driver = kvm_arm_smmu_v3_init_drv,
+	.get_iommu_id_by_of = kvm_arm_v3_id_by_of,
 };
 
 static int kvm_arm_smmu_v3_register(void)

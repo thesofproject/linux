@@ -314,3 +314,22 @@ size_t kvm_iommu_map_sg(pkvm_handle_t domain_id, struct kvm_iommu_sg *sg,
 	return total_mapped;
 }
 EXPORT_SYMBOL(kvm_iommu_map_sg);
+
+int kvm_get_iommu_id_by_of(struct device_node *np, pkvm_handle_t *out_id)
+{
+	int ret = -ENODEV;
+	struct kvm_iommu_driver *driver;
+
+	/* Find a driver that handles this device */
+	mutex_lock(&kvm_iommu_reg_lock);
+	list_for_each_entry(driver, &kvm_iommu_drivers, node) {
+		if (driver->get_iommu_id_by_of) {
+			ret = driver->get_iommu_id_by_of(np, out_id);
+			if (ret == 0)
+				break;
+		}
+	}
+
+	mutex_unlock(&kvm_iommu_reg_lock);
+	return ret;
+}
