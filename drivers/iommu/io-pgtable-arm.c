@@ -548,6 +548,36 @@ void arm_lpae_free_pgtable(struct io_pgtable *iop)
 	__arm_lpae_free_data(cfg, data);
 }
 
+struct io_pgtable_walk_data {
+	struct io_pgtable		*iop;
+	void				*data;
+	int (*visit)(struct io_pgtable_walk_data *walk_data, int lvl,
+		     arm_lpae_iopte *ptep, size_t size);
+	unsigned long			flags;
+	u64				addr;
+	const u64			end;
+};
+
+static int __arm_lpae_iopte_walk(struct arm_lpae_io_pgtable *data,
+				 struct io_pgtable_walk_data *walk_data,
+				 arm_lpae_iopte *ptep,
+				 int lvl);
+
+struct put_pages_data {
+	struct arm_lpae_io_pgtable *data;
+	struct iommu_iotlb_gather *gather;
+};
+
+static int visit_put_pages(struct io_pgtable_walk_data *walk_data, int lvl,
+			   arm_lpae_iopte *ptep, size_t size)
+{
+	struct put_pages_data *put_data = walk_data->data;
+
+	io_pgtable_put_pages(put_data->data->iop.cookie, iopte_to_paddr(*ptep, put_data->data),
+			     ARM_LPAE_BLOCK_SIZE(lvl, put_data->data), put_data->gather);
+	return 0;
+}
+
 static size_t __arm_lpae_unmap(struct arm_lpae_io_pgtable *data,
 			       struct iommu_iotlb_gather *gather,
 			       unsigned long iova, size_t size, size_t pgcount,
@@ -583,12 +613,30 @@ static size_t __arm_lpae_unmap(struct arm_lpae_io_pgtable *data,
 			}
 
 			if (!iopte_leaf(pte, lvl, iop->fmt)) {
-				__arm_lpae_clear_pte(&ptep[i], &iop->cfg, 1);
+				if (iop->cfg.put_pages) {
+					struct put_pages_data put_data = {
+						.data = data,
+						.gather = gather,
+					};
+					struct io_pgtable_walk_data walk_data = {
+						.data = &put_data,
+						.visit = visit_put_pages,
+						.addr = iova + i * size,
+						.end = iova + i * size + size,
+					};
+					int ret;
 
+					ret = __arm_lpae_iopte_walk(data, &walk_data, &ptep[i], lvl);
+					if (ret)
+						return ret;
+				}
+				__arm_lpae_clear_pte(&ptep[i], &iop->cfg, 1);
 				/* Also flush any partial walks */
 				io_pgtable_tlb_flush_walk(iop, iova + i * size, size,
 							  ARM_LPAE_GRANULE(data));
 				__arm_lpae_free_pgtable(data, lvl + 1, iopte_deref(pte, data));
+			} else {
+				io_pgtable_put_pages(iop, iopte_to_paddr(pte, data), size, gather);
 			}
 		}
 
@@ -630,21 +678,6 @@ static size_t arm_lpae_unmap_pages(struct io_pgtable_ops *ops, unsigned long iov
 	return __arm_lpae_unmap(data, gather, iova, pgsize, pgcount,
 				data->start_level, ptep);
 }
-
-struct io_pgtable_walk_data {
-	struct io_pgtable		*iop;
-	void				*data;
-	int (*visit)(struct io_pgtable_walk_data *walk_data, int lvl,
-		     arm_lpae_iopte *ptep, size_t size);
-	unsigned long			flags;
-	u64				addr;
-	const u64			end;
-};
-
-static int __arm_lpae_iopte_walk(struct arm_lpae_io_pgtable *data,
-				 struct io_pgtable_walk_data *walk_data,
-				 arm_lpae_iopte *ptep,
-				 int lvl);
 
 struct iova_to_phys_data {
 	arm_lpae_iopte pte;
@@ -734,7 +767,7 @@ static int __arm_lpae_iopte_walk(struct arm_lpae_io_pgtable *data,
 				 int lvl)
 {
 	u32 idx;
-	int max_entries, ret;
+	int max_entries;
 
 	if (WARN_ON(lvl == ARM_LPAE_MAX_LEVELS))
 		return -EINVAL;
@@ -746,9 +779,8 @@ static int __arm_lpae_iopte_walk(struct arm_lpae_io_pgtable *data,
 
 	for (idx = ARM_LPAE_LVL_IDX(walk_data->addr, lvl, data);
 	     (idx < max_entries) && (walk_data->addr < walk_data->end); ++idx) {
-		ret = io_pgtable_visit(data, walk_data, ptep + idx, lvl);
-		if (ret)
-			return ret;
+		/* Walk the whole range, ignore invalid PTEs, those will not have the callback called. */
+		io_pgtable_visit(data, walk_data, ptep + idx, lvl);
 	}
 
 	return 0;
