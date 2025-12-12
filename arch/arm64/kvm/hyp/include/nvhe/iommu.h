@@ -5,6 +5,8 @@
 #include <asm/kvm_host.h>
 #include <asm/kvm_pgtable.h>
 
+#include <linux/iommu.h>
+
 #include <nvhe/alloc_mgt.h>
 
 struct kvm_hyp_iommu_domain {
@@ -28,8 +30,11 @@ struct kvm_iommu_ops {
 			 phys_addr_t paddr, size_t pgsize,
 			 size_t pgcount, int prot, size_t *total_mapped);
 	size_t (*unmap_pages)(struct kvm_hyp_iommu_domain *domain, unsigned long iova,
-			      size_t pgsize, size_t pgcount);
+			      size_t pgsize, size_t pgcount,
+			      struct iommu_iotlb_gather *gather);
 	phys_addr_t (*iova_to_phys)(struct kvm_hyp_iommu_domain *domain, unsigned long iova);
+	void (*iotlb_sync)(struct kvm_hyp_iommu_domain *domain,
+			   struct iommu_iotlb_gather *gather);
 };
 
 int kvm_iommu_init(void *pool_base, size_t nr_pages);
@@ -64,6 +69,10 @@ void kvm_iommu_reclaim_pages(void *p, u8 order);
 
 #define kvm_iommu_donate_page()		kvm_iommu_donate_pages(0, 0)
 #define kvm_iommu_reclaim_page(p)		kvm_iommu_reclaim_pages(p, 0)
+
+void kvm_iommu_iotlb_gather_add_page(struct kvm_hyp_iommu_domain *domain,
+				     struct iommu_iotlb_gather *gather,
+				     unsigned long iova, size_t size);
 
 extern struct hyp_mgt_allocator_ops kvm_iommu_allocator_ops;
 

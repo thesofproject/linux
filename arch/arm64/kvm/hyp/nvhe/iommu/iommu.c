@@ -378,12 +378,30 @@ int kvm_iommu_map_pages(pkvm_handle_t domain_id,
 	return ret == -ENOMEM ? 0 : ret;
 }
 
+static inline void kvm_iommu_iotlb_sync(struct kvm_hyp_iommu_domain *domain,
+					struct iommu_iotlb_gather *iotlb_gather)
+{
+	if (kvm_iommu_ops->iotlb_sync)
+		kvm_iommu_ops->iotlb_sync(domain, iotlb_gather);
+
+	iommu_iotlb_gather_init(iotlb_gather);
+}
+
+void kvm_iommu_iotlb_gather_add_page(struct kvm_hyp_iommu_domain *domain,
+				     struct iommu_iotlb_gather *gather,
+				     unsigned long iova,
+				     size_t size)
+{
+	_iommu_iotlb_add_page(domain, gather, iova, size, kvm_iommu_iotlb_sync);
+}
+
 size_t kvm_iommu_unmap_pages(pkvm_handle_t domain_id, unsigned long iova,
 			     size_t pgsize, size_t pgcount)
 {
 	size_t size;
 	size_t unmapped;
 	struct kvm_hyp_iommu_domain *domain;
+	struct iommu_iotlb_gather iotlb_gather;
 
 	if (!kvm_iommu_ops || !kvm_iommu_ops->unmap_pages)
 		return -ENODEV;
@@ -399,8 +417,10 @@ size_t kvm_iommu_unmap_pages(pkvm_handle_t domain_id, unsigned long iova,
 	if (!domain || domain_get(domain))
 		return 0;
 
-	unmapped = kvm_iommu_ops->unmap_pages(domain, iova, pgsize, pgcount);
-
+	iommu_iotlb_gather_init(&iotlb_gather);
+	unmapped = kvm_iommu_ops->unmap_pages(domain, iova, pgsize,
+					      pgcount, &iotlb_gather);
+	kvm_iommu_iotlb_sync(domain, &iotlb_gather);
 	domain_put(domain);
 	return unmapped;
 }
