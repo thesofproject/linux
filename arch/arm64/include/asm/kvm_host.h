@@ -1907,6 +1907,7 @@ int kvm_iommu_detach_dev(pkvm_handle_t iommu_id, pkvm_handle_t domain_id,
 int kvm_iommu_attach_dev(pkvm_handle_t iommu_id, pkvm_handle_t domain_id,
 			 unsigned int endpoint, unsigned int pasid,
 			 unsigned int ssid_bits, unsigned long flags);
+int kvm_iommu_set_identity(pkvm_handle_t iommu, pkvm_handle_t dev, bool on);
 #endif
 /*
  * Unlike previous android versions, where we supported 1 << 16 domains,

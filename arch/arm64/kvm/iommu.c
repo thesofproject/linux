@@ -221,3 +221,9 @@ int pkvm_iommu_resume(int device_id)
 	return kvm_call_hyp_nvhe(__pkvm_host_hvc_pd, device_id, 1);
 }
 EXPORT_SYMBOL(pkvm_iommu_resume);
+
+int kvm_iommu_set_identity(pkvm_handle_t iommu, pkvm_handle_t dev, bool on)
+{
+	return kvm_call_hyp_nvhe_mc(__pkvm_host_iommu_set_identity, iommu, dev, on);
+}
+EXPORT_SYMBOL(kvm_iommu_set_identity);

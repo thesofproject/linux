@@ -1779,6 +1779,17 @@ static void handle___pkvm_host_iommu_iova_to_phys(struct kvm_cpu_context *host_c
 	cpu_reg(host_ctxt, 1) = kvm_iommu_iova_to_phys(domain, iova);
 }
 
+static void handle___pkvm_host_iommu_set_identity(struct kvm_cpu_context *host_ctxt)
+{
+	int ret;
+	DECLARE_REG(pkvm_handle_t, iommu, host_ctxt, 1);
+	DECLARE_REG(pkvm_handle_t, dev, host_ctxt, 2);
+	DECLARE_REG(bool, on, host_ctxt, 3);
+
+	ret = kvm_iommu_set_identity(iommu, dev, on);
+	hyp_reqs_smccc_encode(ret, host_ctxt, this_cpu_ptr(&host_hyp_reqs));
+}
+
 static void handle___pkvm_host_hvc_pd(struct kvm_cpu_context *host_ctxt)
 {
 	DECLARE_REG(u64, device_id, host_ctxt, 1);
@@ -1863,6 +1874,7 @@ static const hcall_t host_hcall[] = {
 	HANDLE_FUNC(__pkvm_host_iommu_map_pages),
 	HANDLE_FUNC(__pkvm_host_iommu_unmap_pages),
 	HANDLE_FUNC(__pkvm_host_iommu_iova_to_phys),
+	HANDLE_FUNC(__pkvm_host_iommu_set_identity),
 	HANDLE_FUNC(__pkvm_host_hvc_pd),
 };
 
