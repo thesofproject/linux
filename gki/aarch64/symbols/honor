@@ -60,6 +60,8 @@
   __tracepoint_android_vh_ufs_transfer_rsp_status
   __traceiter_android_rvh_dpm_prepare
   __tracepoint_android_rvh_dpm_prepare
+  __traceiter_android_vh_count_workingset_refault
+  __tracepoint_android_vh_count_workingset_refault
   __tracepoint_ufshcd_profile_hibern8
   __traceiter_ufshcd_profile_hibern8
   __tracepoint_ufshcd_profile_clk_scaling
