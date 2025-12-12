@@ -14,6 +14,7 @@
 
 #include <linux/io-pgtable.h>
 #include "../../../io-pgtable-arm.h"
+#include "arm-smmu-v3-lib-hyp.h"
 #include "arm-smmu-v3-module.h"
 
 #ifdef MODULE
@@ -65,26 +66,6 @@ struct hyp_arm_smmu_v3_device *kvm_hyp_arm_smmu_v3_smmus;
 
 #define cmdq_size(cmdq)	((1 << ((cmdq)->llq.max_n_shift)) * CMDQ_ENT_DWORDS * 8)
 
-/*
- * Wait until @cond is true.
- * Return 0 on success, or -ETIMEDOUT
- */
-#define smmu_wait(use_wfe, _cond)					\
-({								\
-	int __ret = 0;						\
-	u64 delay = pkvm_time_get() + ARM_SMMU_POLL_TIMEOUT_US;	\
-								\
-	while (!(_cond)) {					\
-		if (use_wfe)					\
-			wfe();					\
-		if (pkvm_time_get() >= delay) {			\
-			__ret = -ETIMEDOUT;			\
-			break;					\
-		}						\
-	}							\
-	__ret;							\
-})
-
 /* Protected by host_mmu.lock from core code. */
 static struct io_pgtable *idmap_pgtable;
 
@@ -96,19 +77,6 @@ static bool is_cmdq_enabled(struct hyp_arm_smmu_v3_device *smmu)
 static bool is_smmu_enabled(struct hyp_arm_smmu_v3_device *smmu)
 {
 	return FIELD_GET(CR0_SMMUEN, smmu->cr0);
-}
-
-/* Transfer ownership of memory */
-static int smmu_take_pages(u64 phys, size_t size)
-{
-	WARN_ON(!PAGE_ALIGNED(phys) || !PAGE_ALIGNED(size));
-	return __pkvm_host_donate_hyp(phys >> PAGE_SHIFT, size >> PAGE_SHIFT);
-}
-
-static void smmu_reclaim_pages(u64 phys, size_t size)
-{
-	WARN_ON(!PAGE_ALIGNED(phys) || !PAGE_ALIGNED(size));
-	WARN_ON(__pkvm_hyp_donate_host(phys >> PAGE_SHIFT, size >> PAGE_SHIFT));
 }
 
 static void smmu_copy_from_host(struct hyp_arm_smmu_v3_device *smmu,
@@ -164,67 +132,6 @@ static bool smmu_cmdq_has_space(struct arm_smmu_queue *cmdq, u32 n)
 
 	WRITE_ONCE(llq->cons, readl_relaxed(cmdq->cons_reg));
 	return queue_has_space(llq, n);
-}
-
-static bool smmu_cmdq_full(struct arm_smmu_queue *cmdq)
-{
-	struct arm_smmu_ll_queue *llq = &cmdq->llq;
-
-	WRITE_ONCE(llq->cons, readl_relaxed(cmdq->cons_reg));
-	return queue_full(llq);
-}
-
-static bool smmu_cmdq_empty(struct arm_smmu_queue *cmdq)
-{
-	struct arm_smmu_ll_queue *llq = &cmdq->llq;
-
-	WRITE_ONCE(llq->cons, readl_relaxed(cmdq->cons_reg));
-	return queue_empty(llq);
-}
-
-static void smmu_add_cmd_raw(struct hyp_arm_smmu_v3_device *smmu,
-			     u64 *cmd)
-{
-	struct arm_smmu_queue *q = &smmu->cmdq;
-	struct arm_smmu_ll_queue *llq = &q->llq;
-
-	queue_write(Q_ENT(q, llq->prod), cmd,  CMDQ_ENT_DWORDS);
-	llq->prod = queue_inc_prod_n(llq, 1);
-}
-
-static int smmu_add_cmd(struct hyp_arm_smmu_v3_device *smmu,
-			struct arm_smmu_cmdq_ent *ent)
-{
-	int ret;
-	u64 cmd[CMDQ_ENT_DWORDS];
-
-	ret = smmu_wait(smmu->features & ARM_SMMU_FEAT_SEV,
-			!smmu_cmdq_full(&smmu->cmdq));
-	if (ret)
-		return ret;
-
-	ret = arm_smmu_cmdq_build_cmd(cmd, ent);
-	if (ret)
-		return ret;
-
-	smmu_add_cmd_raw(smmu, cmd);
-	writel_relaxed(smmu->cmdq.llq.prod, smmu->cmdq.prod_reg);
-	return 0;
-}
-
-static int smmu_sync_cmd(struct hyp_arm_smmu_v3_device *smmu)
-{
-	int ret;
-	struct arm_smmu_cmdq_ent cmd = {
-		.opcode = CMDQ_OP_CMD_SYNC,
-	};
-
-	ret = smmu_add_cmd(smmu, &cmd);
-	if (ret)
-		return ret;
-
-	return smmu_wait(smmu->features & ARM_SMMU_FEAT_SEV,
-			 smmu_cmdq_empty(&smmu->cmdq));
 }
 
 static int smmu_send_cmd(struct hyp_arm_smmu_v3_device *smmu,
