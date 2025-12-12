@@ -3,14 +3,18 @@
  * Copyright (C) 2025 Google LLC
  * Author: Mostafa Saleh <smostafa@google.com>
  */
+
+#include <asm/kvm_host.h>
 #include <asm/kvm_mmu.h>
 #include <asm/kvm_pkvm.h>
 
+#include <linux/io-pgtable.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
 
 #include "pkvm/arm_smmu_v3.h"
 #include "arm-smmu-v3.h"
+#include "../../io-pgtable-arm.h"
 
 extern struct kvm_iommu_ops kvm_nvhe_sym(smmu_pv_ops);
 
@@ -64,6 +68,7 @@ struct host_arm_smmu_device {
 static size_t				kvm_arm_smmu_cur;
 static size_t				kvm_arm_smmu_count;
 static struct hyp_arm_smmu_v3_device_pv	*kvm_arm_smmu_array;
+static DEFINE_IDA(kvm_arm_smmu_domain_ida);
 
 static struct platform_driver kvm_arm_smmu_driver;
 
@@ -117,6 +122,81 @@ static bool kvm_arm_smmu_capable(struct device *dev, enum iommu_cap cap)
 	}
 }
 
+static int kvm_arm_smmu_domain_finalize(struct kvm_arm_smmu_domain *kvm_smmu_domain,
+					struct arm_smmu_master *master)
+{
+	int ret = 0;
+	struct arm_smmu_device *smmu = master->smmu;
+	struct host_arm_smmu_device *host_smmu = smmu_to_host(smmu);
+	struct io_pgtable_cfg cfg;
+
+	cfg.ias = smmu->ias;
+	cfg.oas = smmu->oas;
+	cfg.pgsize_bitmap = smmu->pgsize_bitmap;
+
+	arm_lpae_restrict_pgsizes(&cfg);
+	kvm_smmu_domain->domain.pgsize_bitmap = cfg.pgsize_bitmap;
+	kvm_smmu_domain->domain.geometry.aperture_end = (1UL << cfg.ias) - 1;
+	kvm_smmu_domain->domain.geometry.force_aperture = true;
+
+	ret = ida_alloc_range(&kvm_arm_smmu_domain_ida, 1,
+			      KVM_IOMMU_MAX_DOMAINS, GFP_KERNEL);
+	if (ret < 0)
+		return ret;
+
+	kvm_smmu_domain->id = ret;
+	ret = kvm_iommu_alloc_domain(host_smmu->id, kvm_smmu_domain->id, KVM_ARM_SMMU_DOMAIN_S1);
+	if (ret) {
+		ida_free(&kvm_arm_smmu_domain_ida, kvm_smmu_domain->id);
+		return ret;
+	}
+
+	kvm_smmu_domain->smmu = smmu;
+	return ret;
+}
+
+static struct kvm_arm_smmu_domain *kvm_arm_smmu_domain_alloc(void)
+{
+	struct kvm_arm_smmu_domain *smmu_domain;
+
+	smmu_domain = kzalloc(sizeof(*smmu_domain), GFP_KERNEL);
+	if (!smmu_domain)
+		return ERR_PTR(-ENOMEM);
+	return smmu_domain;
+}
+
+static struct iommu_domain *kvm_arm_smmu_domain_alloc_paging(struct device *dev)
+{
+	struct kvm_arm_smmu_domain *smmu_domain = kvm_arm_smmu_domain_alloc();
+	struct arm_smmu_master *master = dev_iommu_priv_get(dev);
+	int ret;
+
+	if (IS_ERR(smmu_domain))
+		return ERR_PTR(PTR_ERR(smmu_domain));
+
+	ret = kvm_arm_smmu_domain_finalize(smmu_domain, master);
+	if (ret) {
+		kfree(smmu_domain);
+		return ERR_PTR(ret);
+	}
+	return &smmu_domain->domain;
+}
+
+static void kvm_arm_smmu_free_domain(struct iommu_domain *domain)
+{
+	int ret;
+	struct kvm_arm_smmu_domain *kvm_smmu_domain = to_kvm_smmu_domain(domain);
+	struct arm_smmu_device *smmu = kvm_smmu_domain->smmu;
+
+	if (smmu) {
+		ret = kvm_iommu_free_domain(kvm_smmu_domain->id);
+		if (ret)
+			dev_err(smmu->dev, "Failed to free domain %d\n", ret);
+		ida_free(&kvm_arm_smmu_domain_ida, kvm_smmu_domain->id);
+	}
+	kfree(kvm_smmu_domain);
+}
+
 static struct iommu_ops kvm_arm_smmu_ops = {
 	.capable		= kvm_arm_smmu_capable,
 	.device_group		= arm_smmu_device_group,
@@ -124,6 +204,10 @@ static struct iommu_ops kvm_arm_smmu_ops = {
 	.get_resv_regions	= arm_smmu_get_resv_regions,
 	.probe_device		= kvm_arm_smmu_probe_device,
 	.owner			= THIS_MODULE,
+	.domain_alloc_paging	= kvm_arm_smmu_domain_alloc_paging,
+	.default_domain_ops 	=  &(const struct iommu_domain_ops) {
+		.free		= kvm_arm_smmu_free_domain,
+	}
 };
 
 static bool kvm_arm_smmu_validate_features(struct arm_smmu_device *smmu)
