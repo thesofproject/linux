@@ -397,6 +397,10 @@ void __noreturn __pkvm_init_finalise(void)
 
 	hyp_ftrace_setup_core();
 
+	ret = pkvm_timer_init();
+	if (ret)
+		goto out;
+
 	ret = fix_host_ownership();
 	if (ret)
 		goto out;
