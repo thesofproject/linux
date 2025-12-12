@@ -535,7 +535,7 @@ static void __arm_lpae_free_pgtable(struct arm_lpae_io_pgtable *data, int lvl,
 	__arm_lpae_free_pages(start, table_size, &data->iop.cfg, data->iop.cookie);
 }
 
-static void arm_lpae_free_pgtable(struct io_pgtable *iop)
+void arm_lpae_free_pgtable(struct io_pgtable *iop)
 {
 	struct arm_lpae_io_pgtable *data = io_pgtable_to_data(iop);
 
@@ -879,7 +879,7 @@ arm_lpae_alloc_pgtable(struct io_pgtable_cfg *cfg)
 	return data;
 }
 
-static struct io_pgtable *
+struct io_pgtable *
 arm_64_lpae_alloc_pgtable_s1(struct io_pgtable_cfg *cfg, void *cookie)
 {
 	u64 reg;
