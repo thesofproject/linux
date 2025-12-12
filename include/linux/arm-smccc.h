@@ -117,6 +117,13 @@
 	0xa9, 0xca, 0x4b, 0x56, \
 	0x4d, 0x00, 0x3a, 0x74)
 
+#define ARM_SMCCC_KVM_PVIOMMU_READ		(1 << 0)
+#define ARM_SMCCC_KVM_PVIOMMU_WRITE		(1 << 1)
+#define ARM_SMCCC_KVM_PVIOMMU_CACHE		(1 << 2)
+#define ARM_SMCCC_KVM_PVIOMMU_NOEXEC		(1 << 3)
+#define ARM_SMCCC_KVM_PVIOMMU_MMIO		(1 << 4)
+#define ARM_SMCCC_KVM_PVIOMMU_PRIV		(1 << 5)
+
 /* KVM "vendor specific" services */
 #define ARM_SMCCC_KVM_FUNC_FEATURES		0
 #define ARM_SMCCC_KVM_FUNC_PTP			1
