@@ -5,6 +5,7 @@
  * Copyright (C) 2022 Linaro Ltd.
  */
 #include <asm/kvm_hyp.h>
+#include <asm/kvm_hypevents.h>
 
 #include <hyp/adjust_pc.h>
 
@@ -105,6 +106,7 @@ void kvm_iommu_host_stage2_idmap(phys_addr_t start, phys_addr_t end,
 
 	if (!kvm_idmap_initialized)
 		return;
+	trace_iommu_idmap(start, end, prot);
 	kvm_iommu_ops->host_stage2_idmap(start, end, pkvm_to_iommu_prot(prot));
 }
 
