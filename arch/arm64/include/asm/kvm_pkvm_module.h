@@ -163,6 +163,13 @@ struct iommu_iotlb_gather;
  * @hyp_free:			Free memory allocated  from hyp_alloc().
  * @iommu_iotlb_gather_add_page:
  *				Add an IOVA range to an iommu_iotlb_gather.
+ * @pkvm_use_dma:		Increment the refcount for pages used for DMA,
+ *				this is typically called from the module after a
+ * 				can track the page state.
+ * @pkvm_unuse_dma:		Decrement the refcount for pages used for DMA,
+ *				this is typically called from the module after a
+ *				successful unmap() operation, so the hypervisor
+ *				can track the page state.
  */
 struct pkvm_module_ops {
 	int (*create_private_mapping)(phys_addr_t phys, size_t size,
@@ -232,6 +239,8 @@ struct pkvm_module_ops {
 					    struct iommu_iotlb_gather *gather,
 					    unsigned long iova,
 					    size_t size);
+	int (*pkvm_use_dma)(phys_addr_t phys_addr, size_t size);
+	int (*pkvm_unuse_dma)(phys_addr_t phys_addr, size_t size);
 	ANDROID_KABI_RESERVE(1);
 	ANDROID_KABI_RESERVE(2);
 	ANDROID_KABI_RESERVE(3);

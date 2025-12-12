@@ -280,6 +280,8 @@ const struct pkvm_module_ops module_ops = {
 	.hyp_alloc = hyp_alloc,
 	.hyp_free = hyp_free,
 	.iommu_iotlb_gather_add_page = kvm_iommu_iotlb_gather_add_page,
+	.pkvm_use_dma = __pkvm_host_use_dma,
+	.pkvm_unuse_dma = __pkvm_host_unuse_dma,
 };
 
 static void *pkvm_module_hyp_va(struct pkvm_el2_module *mod, void *kern_va)

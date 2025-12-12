@@ -16,6 +16,16 @@
 #include <linux/io-pgtable.h>
 #include "../../../io-pgtable-arm.h"
 
+#define KVM_SMMU_UNMAPPED_MAX		511
+
+struct kvm_smmu_unmapped {
+	unsigned short ptr;
+	u64 phys[KVM_SMMU_UNMAPPED_MAX];
+	size_t size[KVM_SMMU_UNMAPPED_MAX];
+};
+
+static DEFINE_PER_CPU(struct kvm_smmu_unmapped, kvm_smmu_deferred_unuse);
+
 #ifdef MODULE
 void *memset(void *dst, int c, size_t count)
 {
@@ -327,6 +337,45 @@ static void smmu_free_cd(u64 *cd_table, u32 pasid_bits)
 	kvm_iommu_reclaim_pages(cd_table, order);
 }
 
+static void smmu_flush_deferred_unuse(struct kvm_smmu_unmapped *unmapped)
+{
+	while (unmapped->ptr) {
+		unmapped->ptr--;
+		WARN_ON(__pkvm_host_unuse_dma(unmapped->phys[unmapped->ptr],
+					      unmapped->size[unmapped->ptr]));
+	}
+}
+
+/*
+ * This is called just before the PTE is cleared, and before any TLB invalidation.
+ * So, it is not possible to decrement the page count from here as it can still
+ * be accessible through DMA.
+ * Doint invalidation before this defeats the point of iotlb_gather and issues
+ * extra commands hurting perfromance.
+ * Instead, we keep track of those pages, and unuse them once TLBs are invalidated.
+ */
+static void smmu_put_pages(void *cookie, u64 phys, size_t size, struct iommu_iotlb_gather *gather)
+{
+	struct kvm_smmu_unmapped *unmapped = this_cpu_ptr(&kvm_smmu_deferred_unuse);
+	struct kvm_hyp_iommu_domain *domain = cookie;
+
+	if (unmapped->ptr == KVM_SMMU_UNMAPPED_MAX) {
+		/* Invalidate TLBs then flush requests. */
+		smmu_iotlb_sync(domain, gather);
+		iommu_iotlb_gather_init(gather);
+		smmu_flush_deferred_unuse(unmapped);
+	}
+
+	if (unmapped->ptr &&
+	    (unmapped->phys[unmapped->ptr - 1] + unmapped->size[unmapped->ptr - 1]) == phys) {
+		unmapped->size[unmapped->ptr - 1] += size;
+	} else {
+		unmapped->phys[unmapped->ptr] = phys;
+		unmapped->size[unmapped->ptr] = size;
+		unmapped->ptr++;
+	}
+}
+
 static int smmu_domain_finalise(struct hyp_arm_smmu_v3_device_pv *smmu,
 				struct kvm_hyp_iommu_domain *domain)
 {
@@ -344,6 +393,7 @@ static int smmu_domain_finalise(struct hyp_arm_smmu_v3_device_pv *smmu,
 			.oas = smmu->common.ias,
 			.coherent_walk = smmu->common.features & ARM_SMMU_FEAT_COHERENCY,
 			.tlb = &smmu_tlb_ops,
+			.put_pages = smmu_put_pages,
 		};
 	} else {
 		fmt = ARM_64_LPAE_S2;
@@ -353,6 +403,7 @@ static int smmu_domain_finalise(struct hyp_arm_smmu_v3_device_pv *smmu,
 			.oas = smmu->common.oas,
 			.coherent_walk = smmu->common.features & ARM_SMMU_FEAT_COHERENCY,
 			.tlb = &smmu_tlb_ops,
+			.put_pages = smmu_put_pages,
 		};
 	}
 
@@ -675,6 +726,7 @@ static int smmu_map_pages(struct kvm_hyp_iommu_domain *domain, unsigned long iov
 	int ret = 0;
 	struct hyp_arm_smmu_v3_domain *smmu_domain = domain->priv;
 	struct io_pgtable *pgtable = smmu_domain->pgtable;
+	size_t size = pgsize * pgcount;
 
 	if (!pgtable)
 		return -EINVAL;
@@ -683,7 +735,12 @@ static int smmu_map_pages(struct kvm_hyp_iommu_domain *domain, unsigned long iov
 	if (!IS_ALIGNED(iova | paddr | pgsize, granule))
 		return -EINVAL;
 
+	ret = __pkvm_host_use_dma(paddr, size);
+	if (ret)
+		return ret;
+
 	hyp_spin_lock(&smmu_domain->pgt_lock);
+
 	while (pgcount) {
 		mapped = 0;
 		ret = pgtable->ops.map_pages(&pgtable->ops, iova, paddr,
@@ -695,7 +752,10 @@ static int smmu_map_pages(struct kvm_hyp_iommu_domain *domain, unsigned long iov
 		if (ret)
 			break;
 	}
+
 	hyp_spin_unlock(&smmu_domain->pgt_lock);
+	if (*total_mapped != size)
+		WARN_ON(__pkvm_host_unuse_dma(paddr, size - *total_mapped));
 
 	return ret;
 }
@@ -726,6 +786,7 @@ static size_t smmu_unmap_pages(struct kvm_hyp_iommu_domain *domain, unsigned lon
 		pgcount -= unmapped / pgsize;
 	}
 	hyp_spin_unlock(&smmu_domain->pgt_lock);
+	smmu_flush_deferred_unuse(this_cpu_ptr(&kvm_smmu_deferred_unuse));
 	return total_unmapped;
 }
 
