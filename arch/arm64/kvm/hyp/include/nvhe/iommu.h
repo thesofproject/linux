@@ -97,5 +97,5 @@ void kvm_iommu_iotlb_gather_add_page(struct kvm_hyp_iommu_domain *domain,
 int kvm_iommu_register_pviommu_drv(pkvm_handle_t iommu_id);
 
 extern struct hyp_mgt_allocator_ops kvm_iommu_allocator_ops;
-
+extern pkvm_handle_t pviommu_drv_id;
 #endif /* __ARM64_KVM_NVHE_IOMMU_H__ */
