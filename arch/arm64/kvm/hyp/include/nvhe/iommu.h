@@ -17,6 +17,8 @@ struct kvm_hyp_iommu_domain {
 	struct kvm_iommu_ops	*driver;
 };
 
+int kvm_iommu_dev_block_dma(pkvm_handle_t iommu_id, u32 endpoint_id, bool host_to_guest);
+
 struct kvm_iommu_ops {
 	int (*init)(pkvm_handle_t drv_id);
 	void (*host_stage2_idmap)(phys_addr_t start, phys_addr_t end, int prot);
@@ -40,6 +42,8 @@ struct kvm_iommu_ops {
 	int (*set_identity)(pkvm_handle_t iommu, pkvm_handle_t dev, bool state);
 	int (*iotlb_sync_map)(struct kvm_hyp_iommu_domain *domain,
 			      unsigned long iova, size_t size);
+	int (*dev_block_dma)(pkvm_handle_t iommu, u32 endpoint_id,
+			     bool is_host_to_guest);
 };
 
 int kvm_iommu_init(void *pool_base, size_t nr_pages);

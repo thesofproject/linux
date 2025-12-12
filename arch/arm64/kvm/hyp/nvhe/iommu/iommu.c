@@ -663,3 +663,13 @@ int kvm_iommu_register_pviommu_drv(pkvm_handle_t drv_id)
 	return cmpxchg_release(&pviommu_drv_id, KVM_IOMMU_MAX_DRV, drv_id) ==
 		KVM_IOMMU_MAX_DRV ? 0 : -EBUSY;
 }
+
+int kvm_iommu_dev_block_dma(pkvm_handle_t iommu_id, u32 endpoint_id, bool host_to_guest)
+{
+	struct kvm_iommu_ops *kvm_iommu_ops = get_drv(pviommu_drv_id);
+
+	if (!kvm_iommu_ops || !kvm_iommu_ops->dev_block_dma)
+		return -ENODEV;
+
+	return kvm_iommu_ops->dev_block_dma(iommu_id, endpoint_id, host_to_guest);
+}
