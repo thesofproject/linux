@@ -948,7 +948,7 @@ static size_t smmu_pgsize_idmap(size_t size, u64 paddr, size_t pgsize_bitmap)
 static void smmu_host_stage2_idmap(phys_addr_t start, phys_addr_t end, int prot)
 {
 	size_t size = end - start;
-	size_t pgsize = PAGE_SIZE, pgcount;
+	size_t pgsize, pgcount;
 	size_t mapped, unmapped;
 	int ret;
 	struct io_pgtable *pgtable = idmap_pgtable;
@@ -964,23 +964,8 @@ static void smmu_host_stage2_idmap(phys_addr_t start, phys_addr_t end, int prot)
 
 		while (size) {
 			mapped = 0;
-			/*
-			 * We handle pages size for memory and MMIO differently:
-			 * - memory: Map everything with PAGE_SIZE, that is guaranteed to
-			 *   find memory as we allocated enough pages to cover the entire
-			 *   memory, we do that as io-pgtable-arm doesn't support
-			 *   split_blk_unmap logic any more, so we can't break blocks once
-			 *   mapped to tables.
-			 * - MMIO: Unlike memory, pKVM allocate 1G to for all MMIO, while
-			 *   the MMIO space can be large, as it is assumed to cover the
-			 *   whole IAS that is not memory, we have to use block mappings,
-			 *   that is fine for MMIO as it is never donated at the moment,
-			 *   so we never need to unmap MMIO at the run time triggereing
-			 *   split block logic.
-			 */
-			if (prot & IOMMU_MMIO)
-				pgsize = smmu_pgsize_idmap(size, start, pgtable->cfg.pgsize_bitmap);
 
+			pgsize = smmu_pgsize_idmap(size, start, pgtable->cfg.pgsize_bitmap);
 			pgcount = size / pgsize;
 			ret = pgtable->ops.map_pages(&pgtable->ops, start, start,
 						     pgsize, pgcount, prot, 0, &mapped);
@@ -991,6 +976,7 @@ static void smmu_host_stage2_idmap(phys_addr_t start, phys_addr_t end, int prot)
 		}
 	} else {
 		while (size) {
+			pgsize = smmu_pgsize_idmap(size, start, pgtable->cfg.pgsize_bitmap);
 			pgcount = size / pgsize;
 			unmapped = pgtable->ops.unmap_pages(&pgtable->ops, start,
 							    pgsize, pgcount, &gather);
