@@ -37,6 +37,7 @@ struct pkvm_device {
 	u32 nr_iommus;
 	u32 group_id;
 	void *ctxt; /* Current context of the device*/
+	unsigned short refcount;
 };
 
 #endif /* #ifndef __KVM_DEVICE_H */

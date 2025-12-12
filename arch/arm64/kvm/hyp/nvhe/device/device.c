@@ -99,7 +99,7 @@ int pkvm_device_hyp_assign_mmio(u64 pfn, u64 nr_pages)
 
 	hyp_spin_lock(&device_spinlock);
 	/* A VM already have this device, no take backs. */
-	if (dev->ctxt) {
+	if (dev->ctxt || dev->refcount) {
 		ret = -EBUSY;
 		goto out_unlock;
 	}
@@ -184,7 +184,7 @@ static int __pkvm_group_assign(u32 group_id, struct pkvm_hyp_vm *vm)
 
 		if (dev->group_id != group_id)
 			continue;
-		if (dev->ctxt) {
+		if (dev->ctxt || dev->refcount) {
 			ret = -EPERM;
 			break;
 		}
@@ -330,5 +330,54 @@ void pkvm_devices_teardown(struct pkvm_hyp_vm *vm)
 		dev->ctxt = NULL;
 		pkvm_devices_reclaim_device(dev);
 	}
+	hyp_spin_unlock(&device_spinlock);
+}
+
+static struct pkvm_device *pkvm_get_device_by_iommu(u64 id, u32 endpoint_id)
+{
+	struct pkvm_device *dev = NULL;
+	struct pkvm_dev_iommu *iommu;
+	int i, j;
+
+	for (i = 0 ; i < registered_devices_nr ; ++i) {
+		dev = &registered_devices[i];
+		for (j = 0 ; j < dev->nr_iommus; ++j) {
+			iommu = &dev->iommus[j];
+			if ((id == iommu->id) && (endpoint_id == iommu->endpoint))
+				return dev;
+		}
+	}
+
+	return NULL;
+}
+
+int pkvm_devices_get_context(u64 iommu_id, u32 endpoint_id)
+{
+	struct pkvm_device *dev = pkvm_get_device_by_iommu(iommu_id, endpoint_id);
+	int ret = 0;
+
+	if (!dev)
+		return 0;
+
+	hyp_spin_lock(&device_spinlock);
+	if (dev->ctxt)
+		ret = -EPERM;
+	else
+		hyp_refcount_inc(dev->refcount);
+	hyp_spin_unlock(&device_spinlock);
+	return ret;
+}
+
+void pkvm_devices_put_context(u64 iommu_id, u32 endpoint_id)
+{
+	struct pkvm_device *dev = pkvm_get_device_by_iommu(iommu_id, endpoint_id);
+
+	if (!dev)
+		return;
+
+	hyp_spin_lock(&device_spinlock);
+	BUG_ON(dev->ctxt);
+	hyp_refcount_dec(dev->refcount);
+
 	hyp_spin_unlock(&device_spinlock);
 }

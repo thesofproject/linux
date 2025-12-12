@@ -10,6 +10,7 @@
 #include <hyp/adjust_pc.h>
 
 #include <linux/iommu.h>
+#include <kvm/device.h>
 
 #include <nvhe/iommu.h>
 #include <nvhe/mem_protect.h>
@@ -377,6 +378,14 @@ int kvm_iommu_attach_dev(pkvm_handle_t iommu_id, pkvm_handle_t domain_id,
 	struct kvm_hyp_iommu_domain *domain;
 	struct kvm_iommu_ops *kvm_iommu_ops;
 
+	/*
+	 * At the moment the IOMMU in EL2 is not aware of guests and pvIOMMU
+	 * doesn't exist yet, so all attaches come from host, this should change soon.
+	 */
+	ret = pkvm_devices_get_context(iommu_id, endpoint_id);
+	if (ret)
+		return ret;
+
 	hyp_spin_lock(&kvm_iommu_domain_lock);
 	domain = handle_to_domain(domain_id);
 	if (!domain || domain_get(domain)) {
@@ -397,6 +406,8 @@ int kvm_iommu_attach_dev(pkvm_handle_t iommu_id, pkvm_handle_t domain_id,
 		domain_put(domain);
 out_unlock:
 	hyp_spin_unlock(&kvm_iommu_domain_lock);
+	pkvm_devices_put_context(iommu_id, endpoint_id);
+
 	return ret;
 }
 
@@ -406,6 +417,11 @@ int kvm_iommu_detach_dev(pkvm_handle_t iommu_id, pkvm_handle_t domain_id,
 	int ret;
 	struct kvm_hyp_iommu_domain *domain;
 	struct kvm_iommu_ops *kvm_iommu_ops;
+
+	/* See kvm_iommu_attach_dev(). */
+	ret = pkvm_devices_get_context(iommu_id, endpoint_id);
+	if (ret)
+		return ret;
 
 	hyp_spin_lock(&kvm_iommu_domain_lock);
 	domain = handle_to_domain(domain_id);
@@ -425,6 +441,7 @@ int kvm_iommu_detach_dev(pkvm_handle_t iommu_id, pkvm_handle_t domain_id,
 	domain_put(domain);
 out_unlock:
 	hyp_spin_unlock(&kvm_iommu_domain_lock);
+	pkvm_devices_put_context(iommu_id, endpoint_id);
 	return ret;
 }
 
@@ -544,11 +561,16 @@ int kvm_iommu_set_identity(pkvm_handle_t drv_id, pkvm_handle_t iommu,
 			   pkvm_handle_t dev, bool on)
 {
 	struct kvm_iommu_ops *kvm_iommu_ops = get_drv(drv_id);
+	int ret;
 
 	if (!kvm_iommu_ops || !kvm_iommu_ops->set_identity)
 		return -ENODEV;
-
-	return kvm_iommu_ops->set_identity(iommu, dev, on);
+	ret = pkvm_devices_get_context(iommu, dev);
+	if (ret)
+		return ret;
+	ret = kvm_iommu_ops->set_identity(iommu, dev, on);
+	pkvm_devices_put_context(iommu, dev);
+	return ret;
 }
 
 size_t kvm_iommu_map_sg(pkvm_handle_t domain_id, unsigned long iova, struct kvm_iommu_sg *sg,
