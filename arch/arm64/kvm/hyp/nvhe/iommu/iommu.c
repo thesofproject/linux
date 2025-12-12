@@ -14,13 +14,15 @@
 #include <nvhe/iommu.h>
 #include <nvhe/mem_protect.h>
 #include <nvhe/mm.h>
+#include <nvhe/rwlock.h>
 #include <nvhe/spinlock.h>
 
-/* Only one set of ops supported */
-struct kvm_iommu_ops *kvm_iommu_ops;
+#define KVM_IOMMU_MAX_DRV	5
+static DEFINE_HYP_RWLOCK(kvm_iommu_reg_lock);
+/* Both protected by kvm_iommu_reg_lock */
+static size_t nr_drivers;
+static struct kvm_iommu_ops *kvm_iommu_drivers[KVM_IOMMU_MAX_DRV];
 
-/* Protected by host_mmu.lock */
-static bool kvm_idmap_initialized;
 static struct hyp_pool iommu_pages_pool_atomic;
 static struct hyp_pool iommu_host_pool;
 static bool iommu_pools_ready;
@@ -31,6 +33,21 @@ static struct kvm_hyp_iommu_domain kvm_iommu_domains[KVM_IOMMU_MAX_DOMAINS];
 
 /* Protects domains in kvm_iommu_domains */
 static DEFINE_HYP_SPINLOCK(kvm_iommu_domain_lock);
+
+#define for_each_drv(drv) \
+	for (typeof(kvm_iommu_drivers[0]) *_pp = (kvm_iommu_drivers); \
+	     _pp < &kvm_iommu_drivers[nr_drivers]; _pp++) \
+		if (((drv) = *_pp))
+
+static void kvm_iommu_drv_lock(void)
+{
+	hyp_read_lock(&kvm_iommu_reg_lock);
+}
+
+static void kvm_iommu_drv_unlock(void)
+{
+	hyp_read_unlock(&kvm_iommu_reg_lock);
+}
 
 static int kvm_iommu_refill(struct kvm_hyp_memcache *host_mc)
 {
@@ -54,6 +71,19 @@ static int kvm_iommu_reclaimable(void)
 		return 0;
 
 	return hyp_pool_free_pages(&iommu_host_pool);
+}
+
+static struct kvm_iommu_ops *get_drv(pkvm_handle_t drv_id)
+{
+	struct kvm_iommu_ops *drv = NULL;
+
+	kvm_iommu_drv_lock();
+	if (drv_id < nr_drivers) {
+		drv_id = array_index_nospec(drv_id, nr_drivers);
+		drv = kvm_iommu_drivers[drv_id];
+	}
+	kvm_iommu_drv_unlock();
+	return drv;
 }
 
 struct hyp_mgt_allocator_ops kvm_iommu_allocator_ops = {
@@ -113,8 +143,6 @@ static int kvm_iommu_snapshot_host_stage2(struct kvm_iommu_ops *ops)
 
 	hyp_spin_lock(&host_mmu.lock);
 	ret = kvm_pgtable_walk(pgt, 0, BIT(pgt->ia_bits), &walker);
-	/* Start receiving calls to host_stage2_idmap. */
-	kvm_idmap_initialized = !ret;
 	hyp_spin_unlock(&host_mmu.lock);
 
 	return ret;
@@ -147,28 +175,52 @@ int kvm_iommu_register_ops(struct kvm_iommu_ops *ops, pkvm_handle_t *drv_id)
 	    !ops->host_stage2_idmap)
 		return -ENODEV;
 
+	hyp_write_lock(&kvm_iommu_reg_lock);
+
+	if (nr_drivers == KVM_IOMMU_MAX_DRV) {
+		hyp_write_unlock(&kvm_iommu_reg_lock);
+		return -EBUSY;
+	}
+
+	*drv_id = nr_drivers;
+	/* Reserve a place for this driver but it is registered later */
+	nr_drivers++;
+
+	hyp_write_unlock(&kvm_iommu_reg_lock);
+
+	/*
+	 * Init may require donation which has to be done outside the reg lock.
+	 * The driver spot is already reserved so no race can happen on it.
+	 */
 	ret = ops->init();
 	if (ret)
 		return ret;
 
+	hyp_write_lock(&kvm_iommu_reg_lock);
 	ret = kvm_iommu_snapshot_host_stage2(ops);
 	if (ret)
-		return ret;
+		goto out_ret;
 
-	kvm_iommu_ops = ops;
-	*drv_id = 0;
-	return 0;
+	kvm_iommu_drivers[*drv_id] = ops;
+	hyp_write_unlock(&kvm_iommu_reg_lock);
+
+out_ret:
+	return ret;
 }
 
 void kvm_iommu_host_stage2_idmap(phys_addr_t start, phys_addr_t end,
 				 enum kvm_pgtable_prot prot)
 {
+	struct kvm_iommu_ops *kvm_iommu_ops;
+
 	hyp_assert_lock_held(&host_mmu.lock);
 
-	if (!kvm_idmap_initialized)
-		return;
 	trace_iommu_idmap(start, end, prot);
-	kvm_iommu_ops->host_stage2_idmap(start, end, pkvm_to_iommu_prot(prot));
+	kvm_iommu_drv_lock();
+	for_each_drv(kvm_iommu_ops) {
+		kvm_iommu_ops->host_stage2_idmap(start, end, pkvm_to_iommu_prot(prot));
+	}
+	kvm_iommu_drv_unlock();
 }
 
 void *kvm_iommu_donate_pages(u8 order, int flags)
@@ -205,23 +257,34 @@ void kvm_iommu_reclaim_pages_atomic(void *ptr)
 
 bool kvm_iommu_host_dabt_handler(struct user_pt_regs *regs, u64 esr, u64 addr)
 {
-	if (kvm_iommu_ops && kvm_iommu_ops->dabt_handler &&
-	    kvm_iommu_ops->dabt_handler(regs, esr, addr)) {
-		/* DABT handled by the driver, skip to next instruction. */
-		kvm_skip_host_instr();
-		return true;
+	struct kvm_iommu_ops *kvm_iommu_ops;
+
+	kvm_iommu_drv_lock();
+
+	for_each_drv(kvm_iommu_ops) {
+		if (kvm_iommu_ops && kvm_iommu_ops->dabt_handler &&
+		    kvm_iommu_ops->dabt_handler(regs, esr, addr)) {
+			/* DABT handled by the driver, skip to next instruction. */
+			kvm_skip_host_instr();
+			kvm_iommu_drv_unlock();
+			return true;
+		}
 	}
+	kvm_iommu_drv_unlock();
 	return false;
 }
 
 void kvm_iommu_host_stage2_idmap_complete(bool map)
 {
-	if (!kvm_idmap_initialized ||
-	    !kvm_iommu_ops->host_stage2_idmap_complete)
-		return;
+	struct kvm_iommu_ops *kvm_iommu_ops;
 
 	trace_iommu_idmap_complete(map);
-	kvm_iommu_ops->host_stage2_idmap_complete(map);
+	kvm_iommu_drv_lock();
+	for_each_drv(kvm_iommu_ops) {
+		if (kvm_iommu_ops->host_stage2_idmap_complete)
+			kvm_iommu_ops->host_stage2_idmap_complete(map);
+	}
+	kvm_iommu_drv_unlock();
 }
 
 static struct kvm_hyp_iommu_domain *handle_to_domain(pkvm_handle_t domain_id)
@@ -252,7 +315,9 @@ int kvm_iommu_alloc_domain(pkvm_handle_t drv_id, pkvm_handle_t iommu_id,
 {
 	int ret = -EINVAL;
 	struct kvm_hyp_iommu_domain *domain;
+	struct kvm_iommu_ops *kvm_iommu_ops;
 
+	kvm_iommu_ops = get_drv(drv_id);
 	if (!kvm_iommu_ops || !kvm_iommu_ops->alloc_domain)
 		return -ENODEV;
 
@@ -268,7 +333,7 @@ int kvm_iommu_alloc_domain(pkvm_handle_t drv_id, pkvm_handle_t iommu_id,
 	ret = kvm_iommu_ops->alloc_domain(iommu_id, domain, type);
 	if (ret)
 		goto out_unlock;
-
+	domain->driver = kvm_iommu_ops;
 	atomic_set_release(&domain->refs, 1);
 out_unlock:
 	hyp_spin_unlock(&kvm_iommu_domain_lock);
@@ -279,15 +344,19 @@ int kvm_iommu_free_domain(pkvm_handle_t domain_id)
 {
 	int ret = 0;
 	struct kvm_hyp_iommu_domain *domain;
-
-	if (!kvm_iommu_ops || !kvm_iommu_ops->free_domain)
-		return -ENODEV;
+	struct kvm_iommu_ops *kvm_iommu_ops;
 
 	domain = handle_to_domain(domain_id);
 	if (!domain)
 		return -EINVAL;
 
 	hyp_spin_lock(&kvm_iommu_domain_lock);
+	kvm_iommu_ops = domain->driver;
+	if (!kvm_iommu_ops || !kvm_iommu_ops->free_domain) {
+		ret = -ENODEV;
+		goto out_unlock;
+	}
+
 	if (WARN_ON(atomic_cmpxchg_acquire(&domain->refs, 1, 0) != 1)) {
 		ret = -EINVAL;
 		goto out_unlock;
@@ -306,14 +375,19 @@ int kvm_iommu_attach_dev(pkvm_handle_t iommu_id, pkvm_handle_t domain_id,
 {
 	int ret;
 	struct kvm_hyp_iommu_domain *domain;
-
-	if (!kvm_iommu_ops || !kvm_iommu_ops->attach_dev)
-		return -ENODEV;
+	struct kvm_iommu_ops *kvm_iommu_ops;
 
 	hyp_spin_lock(&kvm_iommu_domain_lock);
 	domain = handle_to_domain(domain_id);
 	if (!domain || domain_get(domain)) {
 		ret = -EINVAL;
+		goto out_unlock;
+	}
+
+	kvm_iommu_ops = domain->driver;
+	if (!kvm_iommu_ops || !kvm_iommu_ops->attach_dev) {
+		ret = -ENODEV;
+		domain_put(domain);
 		goto out_unlock;
 	}
 
@@ -331,14 +405,17 @@ int kvm_iommu_detach_dev(pkvm_handle_t iommu_id, pkvm_handle_t domain_id,
 {
 	int ret;
 	struct kvm_hyp_iommu_domain *domain;
-
-	if (!kvm_iommu_ops || !kvm_iommu_ops->detach_dev)
-		return -ENODEV;
+	struct kvm_iommu_ops *kvm_iommu_ops;
 
 	hyp_spin_lock(&kvm_iommu_domain_lock);
 	domain = handle_to_domain(domain_id);
 	if (!domain || atomic_read(&domain->refs) <= 1) {
 		ret = -EINVAL;
+		goto out_unlock;
+	}
+	kvm_iommu_ops = domain->driver;
+	if (!kvm_iommu_ops || !kvm_iommu_ops->detach_dev) {
+		ret = -ENODEV;
 		goto out_unlock;
 	}
 
@@ -361,9 +438,7 @@ int kvm_iommu_map_pages(pkvm_handle_t domain_id,
 	size_t size;
 	int ret;
 	struct kvm_hyp_iommu_domain *domain;
-
-	if (!kvm_iommu_ops || !kvm_iommu_ops->map_pages)
-		return -ENODEV;
+	struct kvm_iommu_ops *kvm_iommu_ops;
 
 	*mapped = 0;
 
@@ -378,6 +453,12 @@ int kvm_iommu_map_pages(pkvm_handle_t domain_id,
 	if (!domain || domain_get(domain))
 		return -ENOENT;
 
+	kvm_iommu_ops = domain->driver;
+	if (!kvm_iommu_ops || !kvm_iommu_ops->map_pages) {
+		domain_put(domain);
+		ret = -ENODEV;
+		return ret;
+	}
 	ret = kvm_iommu_ops->map_pages(domain, iova, paddr, pgsize, pgcount,
 				       prot, mapped);
 
@@ -389,8 +470,8 @@ int kvm_iommu_map_pages(pkvm_handle_t domain_id,
 static inline void kvm_iommu_iotlb_sync(struct kvm_hyp_iommu_domain *domain,
 					struct iommu_iotlb_gather *iotlb_gather)
 {
-	if (kvm_iommu_ops->iotlb_sync)
-		kvm_iommu_ops->iotlb_sync(domain, iotlb_gather);
+	if (domain->driver->iotlb_sync)
+		domain->driver->iotlb_sync(domain, iotlb_gather);
 
 	iommu_iotlb_gather_init(iotlb_gather);
 }
@@ -410,9 +491,7 @@ size_t kvm_iommu_unmap_pages(pkvm_handle_t domain_id, unsigned long iova,
 	size_t unmapped;
 	struct kvm_hyp_iommu_domain *domain;
 	struct iommu_iotlb_gather iotlb_gather;
-
-	if (!kvm_iommu_ops || !kvm_iommu_ops->unmap_pages)
-		return -ENODEV;
+	struct kvm_iommu_ops *kvm_iommu_ops;
 
 	if (!pgsize || !pgcount)
 		return 0;
@@ -424,6 +503,12 @@ size_t kvm_iommu_unmap_pages(pkvm_handle_t domain_id, unsigned long iova,
 	domain = handle_to_domain(domain_id);
 	if (!domain || domain_get(domain))
 		return 0;
+
+	kvm_iommu_ops = domain->driver;
+	if (!kvm_iommu_ops || !kvm_iommu_ops->unmap_pages) {
+		domain_put(domain);
+		return 0;
+	}
 
 	iommu_iotlb_gather_init(&iotlb_gather);
 	unmapped = kvm_iommu_ops->unmap_pages(domain, iova, pgsize,
@@ -437,14 +522,18 @@ phys_addr_t kvm_iommu_iova_to_phys(pkvm_handle_t domain_id, unsigned long iova)
 {
 	phys_addr_t phys = 0;
 	struct kvm_hyp_iommu_domain *domain;
-
-	if (!kvm_iommu_ops || !kvm_iommu_ops->iova_to_phys)
-		return -ENODEV;
+	struct kvm_iommu_ops *kvm_iommu_ops;
 
 	domain = handle_to_domain( domain_id);
 
 	if (!domain || domain_get(domain))
 		return 0;
+
+	kvm_iommu_ops = domain->driver;
+	if (!kvm_iommu_ops || !kvm_iommu_ops->iova_to_phys) {
+		domain_put(domain);
+		return 0;
+	}
 
 	phys = kvm_iommu_ops->iova_to_phys(domain, iova);
 	domain_put(domain);
@@ -454,6 +543,8 @@ phys_addr_t kvm_iommu_iova_to_phys(pkvm_handle_t domain_id, unsigned long iova)
 int kvm_iommu_set_identity(pkvm_handle_t drv_id, pkvm_handle_t iommu,
 			   pkvm_handle_t dev, bool on)
 {
+	struct kvm_iommu_ops *kvm_iommu_ops = get_drv(drv_id);
+
 	if (!kvm_iommu_ops || !kvm_iommu_ops->set_identity)
 		return -ENODEV;
 
@@ -470,9 +561,7 @@ size_t kvm_iommu_map_sg(pkvm_handle_t domain_id, unsigned long iova, struct kvm_
 	size_t size, pgsize, pgcount;
 	unsigned int orig_nent = nent;
 	struct kvm_iommu_sg *orig_sg = sg;
-
-	if (!kvm_iommu_ops || !kvm_iommu_ops->map_pages)
-		return 0;
+	struct kvm_iommu_ops *kvm_iommu_ops;
 
 	if (prot & ~IOMMU_PROT_MASK)
 		return 0;
@@ -480,6 +569,12 @@ size_t kvm_iommu_map_sg(pkvm_handle_t domain_id, unsigned long iova, struct kvm_
 	domain = handle_to_domain(domain_id);
 	if (!domain || domain_get(domain))
 		return 0;
+
+	kvm_iommu_ops = domain->driver;
+	if (!kvm_iommu_ops || !kvm_iommu_ops->map_pages) {
+		domain_put(domain);
+		return 0;
+	}
 
 	ret = hyp_pin_shared_mem(sg, sg + nent);
 	if (ret)
@@ -516,10 +611,8 @@ int kvm_iommu_iotlb_sync_map(pkvm_handle_t domain_id,
 			     unsigned long iova, size_t size)
 {
 	struct kvm_hyp_iommu_domain *domain;
+	struct kvm_iommu_ops *kvm_iommu_ops;
 	int ret;
-
-	if (!kvm_iommu_ops || !kvm_iommu_ops->iotlb_sync_map)
-		return -ENODEV;
 
 	if (!size || (iova + size < iova))
 		return -EINVAL;
@@ -527,6 +620,10 @@ int kvm_iommu_iotlb_sync_map(pkvm_handle_t domain_id,
 	domain = handle_to_domain(domain_id);
 	if (!domain || domain_get(domain))
 		return -EINVAL;
+
+	kvm_iommu_ops = domain->driver;
+	if (!kvm_iommu_ops || !kvm_iommu_ops->iotlb_sync_map)
+		return -ENODEV;
 
 	ret = kvm_iommu_ops->iotlb_sync_map(domain, iova, size);
 	domain_put(domain);
