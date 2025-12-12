@@ -717,3 +717,13 @@ int kvm_iommu_dev_block_dma(pkvm_handle_t iommu_id, u32 endpoint_id, bool host_t
 
 	return kvm_iommu_ops->dev_block_dma(iommu_id, endpoint_id, host_to_guest);
 }
+
+int iommu_pkvm_use_dma(u64 phys_addr, size_t size)
+{
+	return __pkvm_use_dma(phys_addr, size, __get_vcpu());
+}
+
+int iommu_pkvm_unuse_dma(u64 phys_addr, size_t size)
+{
+	return __pkvm_unuse_dma(phys_addr, size, __get_vcpu());
+}

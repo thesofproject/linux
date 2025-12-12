@@ -41,8 +41,8 @@ extern const struct pkvm_module_ops		*mod_ops;
 #define hyp_free(x)				CALL_FROM_OPS(hyp_free, x)
 #define kvm_iommu_iotlb_gather_add_page(x, y, z, w) \
 						CALL_FROM_OPS(iommu_iotlb_gather_add_page, x, y, z, w)
-#define __pkvm_host_use_dma(x, y)		CALL_FROM_OPS(pkvm_use_dma, x, y)
-#define __pkvm_host_unuse_dma(x, y)		CALL_FROM_OPS(pkvm_unuse_dma, x, y)
+#define iommu_pkvm_use_dma(x, y)		CALL_FROM_OPS(pkvm_use_dma, x, y)
+#define iommu_pkvm_unuse_dma(x, y)		CALL_FROM_OPS(pkvm_unuse_dma, x, y)
 #define kvm_iommu_register_pviommu_drv(x)	CALL_FROM_OPS(iommu_register_pviommu_drv, x)
 
 #endif
