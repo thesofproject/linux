@@ -333,3 +333,42 @@ int kvm_get_iommu_id_by_of(struct device_node *np, pkvm_handle_t *out_id)
 	mutex_unlock(&kvm_iommu_reg_lock);
 	return ret;
 }
+
+int kvm_iommu_device_num_ids(struct device *dev)
+{
+	int ret = 0;
+	struct kvm_iommu_driver *driver;
+
+	mutex_lock(&kvm_iommu_reg_lock);
+	list_for_each_entry(driver, &kvm_iommu_drivers, node) {
+		if (driver->get_device_iommu_num_ids) {
+			ret = driver->get_device_iommu_num_ids(dev);
+			if (ret)
+				break;
+		}
+	}
+
+	mutex_unlock(&kvm_iommu_reg_lock);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(kvm_iommu_device_num_ids);
+
+int kvm_iommu_device_id(struct device *dev, u32 idx,
+			pkvm_handle_t *out_iommu, u32 *out_sid)
+{
+	int ret = -ENODEV;
+	struct kvm_iommu_driver *driver;
+
+	mutex_lock(&kvm_iommu_reg_lock);
+	list_for_each_entry(driver, &kvm_iommu_drivers, node) {
+		if (driver->get_device_iommu_id) {
+			ret = driver->get_device_iommu_id(dev, idx, out_iommu, out_sid);
+			if (ret == 0)
+				break;
+		}
+	}
+
+	mutex_unlock(&kvm_iommu_reg_lock);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(kvm_iommu_device_id);
