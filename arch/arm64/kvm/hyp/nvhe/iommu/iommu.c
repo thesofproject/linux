@@ -25,6 +25,10 @@ static size_t nr_drivers;
 static struct kvm_iommu_ops *kvm_iommu_drivers[KVM_IOMMU_MAX_DRV];
 
 static struct hyp_pool iommu_pages_pool_atomic;
+
+/* Hypervisor is non-preemptable, so cur_context can be per cpu. */
+DEFINE_PER_CPU(struct pkvm_hyp_vcpu *, __cur_context);
+#define cur_context (*this_cpu_ptr(&__cur_context))
 static struct hyp_pool iommu_host_pool;
 static bool iommu_pools_ready;
 
@@ -237,7 +241,8 @@ static struct pkvm_hyp_vcpu *__get_vcpu(void)
 
 	if (vcpu)
 		return container_of(vcpu, struct pkvm_hyp_vcpu, vcpu);
-	return NULL;
+	/* Maybe guest is not loaded but we are in teardown context. */
+	return cur_context;
 }
 
 static void *__kvm_iommu_donate_pages(struct hyp_pool *pool,
