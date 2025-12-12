@@ -32,7 +32,7 @@ static bool iommu_pools_ready;
  * We support multiple drivers for the host kernel, but only one for the guest,
  * this can be registered from the driver.
  */
-static pkvm_handle_t pviommu_drv_id = KVM_IOMMU_MAX_DRV;
+pkvm_handle_t pviommu_drv_id = KVM_IOMMU_MAX_DRV;
 
 DECLARE_PER_CPU(struct kvm_hyp_req, host_hyp_reqs);
 
@@ -388,6 +388,13 @@ int kvm_iommu_alloc_domain(pkvm_handle_t drv_id, pkvm_handle_t iommu_id,
 	kvm_iommu_ops = get_drv(drv_id);
 	if (!kvm_iommu_ops || !kvm_iommu_ops->alloc_domain)
 		return -ENODEV;
+
+	/*
+	 * Host only has access to the lower half of the domain IDs.
+	 * Guest ID space is managed by the hypervisor, so it is trusted.
+	 */
+	if (!hyp_vcpu && (domain_id >= (KVM_IOMMU_MAX_DOMAINS >> 1)))
+		return -EINVAL;
 
 	domain = handle_to_domain(domain_id);
 	if (!domain)

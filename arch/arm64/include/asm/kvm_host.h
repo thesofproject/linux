@@ -1935,6 +1935,10 @@ size_t kvm_iommu_map_sg(pkvm_handle_t domain_id, struct kvm_iommu_sg *sg,
  * than enough.
  */
 #define KVM_IOMMU_MAX_DOMAINS		512
+#define KVM_IOMMU_MAX_HOST_DOMAINS (KVM_IOMMU_MAX_DOMAINS >> 1)
+
+/* Reserve type for IOMMU core, which means that is a guest. */
+#define KVM_IOMMU_DOMAIN_ANY_TYPE				0
 
 struct kvm_iommu_sg {
 	phys_addr_t phys;

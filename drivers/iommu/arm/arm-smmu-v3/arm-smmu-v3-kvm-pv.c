@@ -235,7 +235,7 @@ static int kvm_arm_smmu_domain_finalize(struct kvm_arm_smmu_domain *kvm_smmu_dom
 	kvm_smmu_domain->domain.geometry.force_aperture = true;
 
 	ret = ida_alloc_range(&kvm_arm_smmu_domain_ida, 1,
-			      KVM_IOMMU_MAX_DOMAINS, GFP_KERNEL);
+			      KVM_IOMMU_MAX_HOST_DOMAINS, GFP_KERNEL);
 	if (ret < 0)
 		return ret;
 
