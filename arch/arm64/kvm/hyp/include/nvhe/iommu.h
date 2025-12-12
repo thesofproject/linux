@@ -21,6 +21,7 @@ struct kvm_hyp_iommu_domain {
 int kvm_iommu_dev_block_dma(pkvm_handle_t iommu_id, u32 endpoint_id, bool host_to_guest);
 
 int kvm_iommu_force_free_domain(pkvm_handle_t domain_id, struct pkvm_hyp_vm *vm);
+int kvm_iommu_id_to_token(pkvm_handle_t smmu_id, u64 *out_token);
 
 struct kvm_iommu_ops {
 	int (*init)(pkvm_handle_t drv_id);
@@ -47,6 +48,7 @@ struct kvm_iommu_ops {
 			      unsigned long iova, size_t size);
 	int (*dev_block_dma)(pkvm_handle_t iommu, u32 endpoint_id,
 			     bool is_host_to_guest);
+	int (*get_iommu_token_by_id)(pkvm_handle_t smmu_id, u64 *out_token);
 };
 
 int kvm_iommu_init(void *pool_base, size_t nr_pages);

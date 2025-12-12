@@ -805,3 +805,12 @@ int iommu_pkvm_unuse_dma(u64 phys_addr, size_t size)
 {
 	return __pkvm_unuse_dma(phys_addr, size, __get_vcpu());
 }
+
+int kvm_iommu_id_to_token(pkvm_handle_t id, u64 *out_token)
+{
+	struct kvm_iommu_ops *kvm_iommu_ops = get_drv(pviommu_drv_id);
+
+	if (!kvm_iommu_ops || !kvm_iommu_ops->get_iommu_token_by_id)
+		return -ENODEV;
+	return kvm_iommu_ops->get_iommu_token_by_id(id, out_token);
+}
