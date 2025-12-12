@@ -80,6 +80,7 @@ struct hyp_arm_smmu_v3_device_pv {
 	u32                   		ssid_bits;
 	bool                  		power_is_off;
 	struct kvm_power_domain		power_domain;
+	unsigned long			idmap_ref;
 };
 
 extern size_t kvm_nvhe_sym(kvm_hyp_arm_smmu_v3_pv_count);
