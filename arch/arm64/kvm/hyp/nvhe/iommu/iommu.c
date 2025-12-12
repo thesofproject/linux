@@ -26,6 +26,11 @@ static struct hyp_pool iommu_host_pool;
 
 DECLARE_PER_CPU(struct kvm_hyp_req, host_hyp_reqs);
 
+static struct kvm_hyp_iommu_domain kvm_iommu_domains[KVM_IOMMU_MAX_DOMAINS];
+
+/* Protects domains in kvm_iommu_domains */
+static DEFINE_HYP_SPINLOCK(kvm_iommu_domain_lock);
+
 static int kvm_iommu_refill(struct kvm_hyp_memcache *host_mc)
 {
 	if (!kvm_iommu_ops)
@@ -212,14 +217,67 @@ void kvm_iommu_host_stage2_idmap_complete(bool map)
 	kvm_iommu_ops->host_stage2_idmap_complete(map);
 }
 
+static struct kvm_hyp_iommu_domain *handle_to_domain(pkvm_handle_t domain_id)
+{
+	if (domain_id >= KVM_IOMMU_MAX_DOMAINS)
+		return NULL;
+
+	domain_id = array_index_nospec(domain_id, KVM_IOMMU_MAX_DOMAINS);
+
+	return &kvm_iommu_domains[domain_id];
+}
+
 int kvm_iommu_alloc_domain(pkvm_handle_t iommu_id, pkvm_handle_t domain_id, int type)
 {
-	return -ENODEV;
+	int ret = -EINVAL;
+	struct kvm_hyp_iommu_domain *domain;
+
+	if (!kvm_iommu_ops || !kvm_iommu_ops->alloc_domain)
+		return -ENODEV;
+
+	domain = handle_to_domain(domain_id);
+	if (!domain)
+		return -ENOMEM;
+
+	hyp_spin_lock(&kvm_iommu_domain_lock);
+	if (atomic_read(&domain->refs))
+		goto out_unlock;
+
+	domain->domain_id = domain_id;
+	ret = kvm_iommu_ops->alloc_domain(iommu_id, domain, type);
+	if (ret)
+		goto out_unlock;
+
+	atomic_set_release(&domain->refs, 1);
+out_unlock:
+	hyp_spin_unlock(&kvm_iommu_domain_lock);
+	return ret;
 }
 
 int kvm_iommu_free_domain(pkvm_handle_t domain_id)
 {
-	return -ENODEV;
+	int ret = 0;
+	struct kvm_hyp_iommu_domain *domain;
+
+	if (!kvm_iommu_ops || !kvm_iommu_ops->free_domain)
+		return -ENODEV;
+
+	domain = handle_to_domain(domain_id);
+	if (!domain)
+		return -EINVAL;
+
+	hyp_spin_lock(&kvm_iommu_domain_lock);
+	if (WARN_ON(atomic_cmpxchg_acquire(&domain->refs, 1, 0) != 1)) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
+	kvm_iommu_ops->free_domain(domain);
+	memset(domain, 0, sizeof(*domain));
+out_unlock:
+	hyp_spin_unlock(&kvm_iommu_domain_lock);
+
+	return ret;
 }
 
 int kvm_iommu_attach_dev(pkvm_handle_t iommu_id, pkvm_handle_t domain_id,
