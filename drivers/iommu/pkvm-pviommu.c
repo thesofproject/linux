@@ -9,6 +9,9 @@
 #include <linux/maple_tree.h>
 #include <linux/pci.h>
 #include <linux/platform_device.h>
+#include <linux/xarray.h>
+
+static DEFINE_XARRAY(pviommu_groups);
 
 static unsigned long pgsize_bitmap;
 
@@ -334,15 +337,44 @@ static void pviommu_release_device(struct device *dev)
 
 static int pviommu_of_xlate(struct device *dev, const struct of_phandle_args *args)
 {
-	return iommu_fwspec_add_ids(dev, args->args, 1);
+	return iommu_fwspec_add_ids(dev, args->args, args->args_count);
+}
+
+static struct iommu_group *pviommu_group_alloc_get(struct device *dev, int group_id)
+{
+	struct iommu_group *group;
+
+	group = xa_load(&pviommu_groups, (unsigned long)group_id);
+	if (group)
+		return group;
+
+	group = iommu_group_alloc();
+	if (!IS_ERR(group))
+		return group;
+
+	if (WARN_ON(xa_insert(&pviommu_groups, (unsigned long)group_id, group, GFP_KERNEL)))
+		dev_err(dev,
+			"Failed to track group %d this will lead to multiple groups instead of one\n",
+			group_id);
+
+	return group;
 }
 
 static struct iommu_group *pviommu_device_group(struct device *dev)
 {
-	if (dev_is_pci(dev))
+	struct iommu_fwspec *fwspec = dev_iommu_fwspec_get(dev);
+
+	if (!fwspec)
+		return ERR_PTR(-ENODEV);
+
+	if (dev_is_pci(dev)) {
 		return pci_device_group(dev);
-	else
-		return generic_device_group(dev);
+	} else {
+		if (fwspec->num_ids == 1)
+			return generic_device_group(dev);
+		else
+			return pviommu_group_alloc_get(dev, fwspec->ids[1]);
+	}
 }
 
 static struct iommu_ops pviommu_ops = {
