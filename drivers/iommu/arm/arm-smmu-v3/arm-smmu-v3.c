@@ -11,6 +11,7 @@
 
 #include <linux/acpi.h>
 #include <linux/acpi_iort.h>
+#include <linux/auxiliary_bus.h>
 #include <linux/bitops.h>
 #include <linux/crash_dump.h>
 #include <linux/delay.h>
@@ -4602,6 +4603,63 @@ static struct platform_driver arm_smmu_driver = {
 };
 module_driver(arm_smmu_driver, platform_driver_register,
 	      arm_smmu_driver_unregister);
+
+#ifdef CONFIG_ARM_SMMU_V3_PKVM
+/*
+ * Now we have 2 devices, the aux device bound to this driver, and pdev
+ * which is the physical platform device.
+ * This part is a bit hairy but it works due to the fact that
+ * CONFIG_ARM_SMMU_V3_PKVM forces both drivers to be built in.
+ * The struct device for the SMMU is used in the following cases:
+ * 1) Printing using dev_*()
+ * 2) DMA memory alloc (dmam_alloc_coherent, devm_*)
+ * 3) Requesting resources (iomem, sysfs)
+ * 4) Probing firmware info (of_node, fwnode...)
+ * 5) Dealing with abstracted HW resources (irqs, MSIs, RPM)
+ * 6) Saving/reading driver data
+ * For point 4) and 5) we must use the platform device.
+ * For, 1) pdev is better for debuggability.
+ * For 2), 3), 6) it's better to use the bound device.
+ * However that doesn't really work:
+ * For 2) The DMA allocation using the aux device will fail, as
+ * we need to setup some device DMA attrs (mask), to match the
+ * platform.
+ * For 6) Some contexts from the pdev as MSI, it needs to use the
+ * drvdata.
+ * Based on the following:
+ * 1- Both drivers must be built-in to enable this (enforced by Kconfig),
+ *    which means that none of them can be removed.
+ * 2- The KVM driver doesn't do anythng at runtime and doesn't use drvdata.
+ * We can keep the driver simple and to claim the platform device in all cases.
+ */
+static int arm_smmu_device_probe_emu(struct auxiliary_device *auxdev,
+				     const struct auxiliary_device_id *id)
+{
+	struct device *parent = auxdev->dev.parent;
+
+	dev_info(&auxdev->dev, "Probing from %s\n", dev_name(parent));
+	return arm_smmu_device_probe(to_platform_device(parent));
+}
+
+static void arm_smmu_device_shutdown_emu(struct auxiliary_device *auxdev)
+{
+	arm_smmu_device_shutdown(to_platform_device(auxdev->dev.parent));
+}
+
+const struct auxiliary_device_id arm_smmu_aux_table[] = {
+	{ .name = "protected_kvm.smmu_v3_emu" },
+	{ },
+};
+
+struct auxiliary_driver arm_smmu_driver_emu = {
+	.name = "arm-smmu-v3-emu",
+	.id_table = arm_smmu_aux_table,
+	.probe = arm_smmu_device_probe_emu,
+	.shutdown = arm_smmu_device_shutdown_emu,
+};
+
+module_auxiliary_driver(arm_smmu_driver_emu);
+#endif
 
 MODULE_DESCRIPTION("IOMMU API for ARM architected SMMUv3 implementations");
 MODULE_AUTHOR("Will Deacon <will@kernel.org>");
