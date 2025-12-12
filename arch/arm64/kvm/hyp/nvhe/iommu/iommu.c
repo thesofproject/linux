@@ -230,15 +230,33 @@ void kvm_iommu_host_stage2_idmap(phys_addr_t start, phys_addr_t end,
 	kvm_iommu_drv_unlock();
 }
 
-void *kvm_iommu_donate_pages(u8 order, int flags)
+/* Return current vcpu or NULL for host. */
+static struct pkvm_hyp_vcpu *__get_vcpu(void)
+{
+	struct kvm_vcpu *vcpu = this_cpu_ptr(&kvm_host_data)->host_ctxt.__hyp_running_vcpu;
+
+	if (vcpu)
+		return container_of(vcpu, struct pkvm_hyp_vcpu, vcpu);
+	return NULL;
+}
+
+static void *__kvm_iommu_donate_pages(struct hyp_pool *pool,
+				      u8 order, int flags)
 {
 	void *p;
 	struct kvm_hyp_req *req = this_cpu_ptr(&host_hyp_reqs);
 	size_t size = (1 << order) * PAGE_SIZE;
+	struct pkvm_hyp_vcpu *hyp_vcpu = __get_vcpu();
 
-	p = hyp_alloc_pages(&iommu_host_pool, order);
+	p = hyp_alloc_pages(pool, order);
 	if (p)
 		return p;
+
+	if (hyp_vcpu) {
+		req = pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_MEM);
+		if (WARN_ON(!req))
+			return NULL;
+	}
 
 	req->type = KVM_HYP_REQ_TYPE_MEM;
 	req->mem.dest = REQ_MEM_DEST_HYP_IOMMU;
@@ -247,9 +265,35 @@ void *kvm_iommu_donate_pages(u8 order, int flags)
 	return NULL;
 }
 
+static void __kvm_iommu_reclaim_pages(struct hyp_pool *pool, void *p, u8 order)
+{
+	hyp_put_page(pool, p);
+}
+
+void *kvm_iommu_donate_pages(u8 order, int flags)
+{
+	struct pkvm_hyp_vcpu *hyp_vcpu = __get_vcpu();
+	struct hyp_pool *pool;
+
+	if (hyp_vcpu)
+		pool = &pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu)->iommu_pool;
+	else
+		pool = &iommu_host_pool;
+
+	return __kvm_iommu_donate_pages(pool, order, flags);
+}
+
 void kvm_iommu_reclaim_pages(void *p, u8 order)
 {
-	hyp_put_page(&iommu_host_pool, p);
+	struct pkvm_hyp_vcpu *hyp_vcpu = __get_vcpu();
+	struct hyp_pool *pool;
+
+	if (hyp_vcpu)
+		pool = &pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu)->iommu_pool;
+	else
+		pool = &iommu_host_pool;
+
+	__kvm_iommu_reclaim_pages(pool, p, order);
 }
 
 void *kvm_iommu_donate_pages_atomic(u8 order)
