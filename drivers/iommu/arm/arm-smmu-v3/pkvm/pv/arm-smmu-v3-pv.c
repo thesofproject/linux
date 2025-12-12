@@ -204,7 +204,6 @@ static void smmu_iotlb_sync(struct kvm_hyp_iommu_domain *domain,
 	smmu_tlb_inv_range(domain, gather->start, size,  gather->pgsize, true);
 }
 
-__maybe_unused
 static int smmu_sync_ste(struct hyp_arm_smmu_v3_device_pv *smmu, __le64 *step, u32 sid)
 {
 	struct arm_smmu_cmdq_ent cmd = {
@@ -219,7 +218,6 @@ static int smmu_sync_ste(struct hyp_arm_smmu_v3_device_pv *smmu, __le64 *step, u
 	return smmu_send_cmd(smmu, &cmd);
 }
 
-__maybe_unused
 static int smmu_sync_cd(struct hyp_arm_smmu_v3_device_pv *smmu, u64 *cd, u32 sid, u32 ssid)
 {
 	struct arm_smmu_cmdq_ent cmd = {
@@ -283,7 +281,6 @@ smmu_get_ste_ptr(struct hyp_arm_smmu_v3_device *smmu, u32 sid)
 	return &cfg->linear.table[sid];
 }
 
-__maybe_unused
 static struct arm_smmu_ste *
 smmu_get_alloc_ste_ptr(struct hyp_arm_smmu_v3_device *smmu, u32 sid)
 {
@@ -296,14 +293,12 @@ smmu_get_alloc_ste_ptr(struct hyp_arm_smmu_v3_device *smmu, u32 sid)
 	return smmu_get_ste_ptr(smmu, sid);
 }
 
-__maybe_unused
 static u64 *smmu_get_cd_ptr(u64 *cdtab, u32 ssid)
 {
 	/* Only linear supported for now. */
 	return cdtab + ssid * CTXDESC_CD_DWORDS;
 }
 
-__maybe_unused
 static u64 *smmu_alloc_cd(struct hyp_arm_smmu_v3_device *smmu, u32 pasid_bits)
 {
 	u64 *cd_table;
@@ -366,6 +361,168 @@ static int smmu_domain_finalise(struct hyp_arm_smmu_v3_device_pv *smmu,
 		return -ENOMEM;
 	smmu_domain->pgtable = io_pgtable_ops_to_pgtable(ops);
 	return 0;
+}
+
+static u64 *smmu_domain_config_s1_ste(struct hyp_arm_smmu_v3_device_pv *smmu,
+				      u32 pasid_bits, struct arm_smmu_ste *ste)
+{
+	u64 *cd_table;
+
+	cd_table = smmu_alloc_cd(&smmu->common, pasid_bits);
+	if (!cd_table)
+		return NULL;
+
+	ste->data[1] = FIELD_PREP(STRTAB_STE_1_S1DSS, STRTAB_STE_1_S1DSS_SSID0) |
+		FIELD_PREP(STRTAB_STE_1_S1CIR, STRTAB_STE_1_S1C_CACHE_WBRA) |
+		FIELD_PREP(STRTAB_STE_1_S1COR, STRTAB_STE_1_S1C_CACHE_WBRA) |
+		FIELD_PREP(STRTAB_STE_1_S1CSH, ARM_SMMU_SH_ISH);
+	ste->data[0] = ((u64)cd_table & STRTAB_STE_0_S1CTXPTR_MASK) |
+		FIELD_PREP(STRTAB_STE_0_CFG, STRTAB_STE_0_CFG_S1_TRANS) |
+		FIELD_PREP(STRTAB_STE_0_S1CDMAX, pasid_bits) |
+		FIELD_PREP(STRTAB_STE_0_S1FMT, STRTAB_STE_0_S1FMT_LINEAR) |
+		STRTAB_STE_0_V;
+
+	return cd_table;
+}
+
+/*
+ * This function handles configuration for pasid and non-pasid domains
+ * with the following assumptions:
+ * - pasid 0 always attached first, this should be the typicall flow
+ *   for the kernel where attach_dev is always called before set_dev_pasid.
+ *   In that case only pasid 0 is allowed to allocate memory for the CD,
+ *   and other pasids would expect to find the tabel.
+ * - pasid 0 is detached last, also guaranteed from the kernel.
+ */
+static int smmu_domain_config_s1(struct hyp_arm_smmu_v3_device_pv *smmu,
+				 struct kvm_hyp_iommu_domain *domain,
+				 u32 sid, u32 pasid, u32 pasid_bits,
+				 struct arm_smmu_ste *ste)
+{
+	struct arm_smmu_ste *dst;
+	u64 val;
+	u64 *cd_entry, *cd_table;
+	struct io_pgtable_cfg *cfg;
+	struct hyp_arm_smmu_v3_domain *smmu_domain = domain->priv;
+
+	cfg = &smmu_domain->pgtable->cfg;
+	dst = smmu_get_ste_ptr(&smmu->common, sid);
+	val = dst->data[0];
+
+	if (FIELD_GET(STRTAB_STE_0_CFG, val) == STRTAB_STE_0_CFG_S2_TRANS)
+		return -EBUSY;
+
+	if (pasid == 0) {
+		/* Must be first attach after a detach. */
+		if (val)
+			return -EBUSY;
+
+		cd_table = smmu_domain_config_s1_ste(smmu, pasid_bits, ste);
+		if (!cd_table)
+			return -ENOMEM;
+	} else {
+		u32 nr_entries;
+
+		cd_table = (u64 *)(FIELD_GET(STRTAB_STE_0_S1CTXPTR_MASK, val) << 6);
+		if (!cd_table)
+			return -EINVAL;
+		nr_entries = 1 << FIELD_GET(STRTAB_STE_0_S1CDMAX, val);
+		if (pasid >= nr_entries)
+			return -E2BIG;
+	}
+
+	/* Write CD. */
+	cd_entry = smmu_get_cd_ptr(hyp_phys_to_virt((u64)cd_table), pasid);
+
+	/* CD already used by another device. */
+	if (cd_entry[0])
+		return -EBUSY;
+
+	cd_entry[1] = cpu_to_le64(cfg->arm_lpae_s1_cfg.ttbr & CTXDESC_CD_1_TTB0_MASK);
+	cd_entry[2] = 0;
+	cd_entry[3] = cpu_to_le64(cfg->arm_lpae_s1_cfg.mair);
+
+	/* STE is live. */
+	if (pasid)
+		smmu_sync_cd(smmu, cd_entry, sid, pasid);
+	val =  FIELD_PREP(CTXDESC_CD_0_TCR_T0SZ, cfg->arm_lpae_s1_cfg.tcr.tsz) |
+	       FIELD_PREP(CTXDESC_CD_0_TCR_TG0, cfg->arm_lpae_s1_cfg.tcr.tg) |
+	       FIELD_PREP(CTXDESC_CD_0_TCR_IRGN0, cfg->arm_lpae_s1_cfg.tcr.irgn) |
+	       FIELD_PREP(CTXDESC_CD_0_TCR_ORGN0, cfg->arm_lpae_s1_cfg.tcr.orgn) |
+	       FIELD_PREP(CTXDESC_CD_0_TCR_SH0, cfg->arm_lpae_s1_cfg.tcr.sh) |
+	       FIELD_PREP(CTXDESC_CD_0_TCR_IPS, cfg->arm_lpae_s1_cfg.tcr.ips) |
+	       CTXDESC_CD_0_TCR_EPD1 | CTXDESC_CD_0_AA64 |
+	       CTXDESC_CD_0_R | CTXDESC_CD_0_A |
+	       CTXDESC_CD_0_ASET |
+	       FIELD_PREP(CTXDESC_CD_0_ASID, domain->domain_id) |
+	       CTXDESC_CD_0_V;
+	WRITE_ONCE(cd_entry[0], cpu_to_le64(val));
+	/* STE is live. */
+	if (pasid)
+		smmu_sync_cd(smmu, cd_entry, sid, pasid);
+	return 0;
+}
+
+static int smmu_attach_dev(pkvm_handle_t iommu, struct kvm_hyp_iommu_domain *domain,
+			   u32 sid, u32 pasid, u32 pasid_bits, unsigned long flags)
+{
+	int i;
+	int ret;
+	struct arm_smmu_ste *dst;
+	struct arm_smmu_ste ste = {};
+	struct hyp_arm_smmu_v3_device_pv *smmu = smmu_id_to_ptr(iommu);
+	struct hyp_arm_smmu_v3_domain *smmu_domain = domain->priv;
+
+	if (!smmu)
+		return -ENODEV;
+	if (smmu_domain->smmu != smmu)
+		return -EBUSY;
+
+	kvm_smmu_lock(&smmu->common);
+	dst = smmu_get_alloc_ste_ptr(&smmu->common, sid);
+	if (!dst) {
+		ret = -ENOMEM;
+		goto out_unlock;
+	}
+
+	if (smmu_domain->type == KVM_ARM_SMMU_DOMAIN_S1) {
+		/*
+		 * Allocate and config CD, and update CD if possible.
+		 */
+		pasid_bits = min(pasid_bits, smmu->ssid_bits);
+		ret = smmu_domain_config_s1(smmu, domain, sid, pasid,
+					    pasid_bits, &ste);
+	} else {
+		/* Device already attached or pasid for s2. */
+		if (dst->data[0] || pasid) {
+			ret = -EBUSY;
+			goto out_unlock;
+		}
+		/* TBD */
+		ret = -ENODEV;
+	}
+	/* We don't update STEs for pasid domains. */
+	if (ret || pasid)
+		goto out_unlock;
+
+	/*
+	 * The SMMU may cache a disabled STE.
+	 * Initialize all fields, sync, then enable it.
+	 */
+	for (i = 1; i < STRTAB_STE_DWORDS; i++)
+		dst->data[i] = ste.data[i];
+
+	ret = smmu_sync_ste(smmu, dst->data, sid);
+	if (ret)
+		goto out_unlock;
+
+	WRITE_ONCE(dst->data[0], ste.data[0]);
+	ret = smmu_sync_ste(smmu, dst->data, sid);
+	WARN_ON(ret);
+
+out_unlock:
+	kvm_smmu_unlock(&smmu->common);
+	return ret;
 }
 
 static void smmu_free_domain(struct kvm_hyp_iommu_domain *domain)
@@ -638,4 +795,5 @@ struct kvm_iommu_ops smmu_pv_ops = {
 	.alloc_domain			= smmu_alloc_domain,
 	.free_domain			= smmu_free_domain,
 	.iotlb_sync			= smmu_iotlb_sync,
+	.attach_dev			= smmu_attach_dev,
 };
