@@ -6,14 +6,12 @@
 
 #include <linux/kvm_host.h>
 
-extern struct kvm_iommu_ops *kvm_nvhe_sym(kvm_iommu_ops);
 extern size_t kvm_nvhe_sym(hyp_kvm_iommu_pages);
 static struct kvm_iommu_driver *iommu_driver;
 
-int kvm_iommu_register_driver(struct kvm_iommu_ops *hyp_ops,
-			      struct kvm_iommu_driver *kern_ops, size_t pool_pages)
+int kvm_iommu_register_driver(struct kvm_iommu_driver *kern_ops, size_t pool_pages)
 {
-	if (!kern_ops || !hyp_ops)
+	if (!kern_ops)
 		return -ENODEV;
 
 	/* See kvm_iommu_pages() */
@@ -23,13 +21,20 @@ int kvm_iommu_register_driver(struct kvm_iommu_ops *hyp_ops,
 		return -ENOMEM;
 	}
 
-	kvm_nvhe_sym(kvm_iommu_ops) = hyp_ops;
 	/*
 	 * Paired with smp_load_acquire(&iommu_driver)
 	 * Ensure memory stores happening during a driver
 	 * init are observed before executing kvm iommu callbacks.
 	 */
 	return cmpxchg_release(&iommu_driver, NULL, kern_ops) ? -EBUSY : 0;
+}
+
+int kvm_iommu_register_hyp_ops(struct kvm_iommu_ops *hyp_ops)
+{
+	if (!hyp_ops)
+		return -ENODEV;
+
+	return kvm_call_hyp_nvhe(__pkvm_iommu_register_ops, hyp_ops);
 }
 
 int kvm_iommu_init_driver(void)
