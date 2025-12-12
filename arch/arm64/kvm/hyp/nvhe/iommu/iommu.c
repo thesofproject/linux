@@ -209,13 +209,10 @@ int kvm_iommu_register_ops(struct kvm_iommu_ops *ops, pkvm_handle_t *drv_id)
 
 	hyp_write_lock(&kvm_iommu_reg_lock);
 	ret = kvm_iommu_snapshot_host_stage2(ops);
-	if (ret)
-		goto out_ret;
+	if (!ret)
+		kvm_iommu_drivers[*drv_id] = ops;
 
-	kvm_iommu_drivers[*drv_id] = ops;
 	hyp_write_unlock(&kvm_iommu_reg_lock);
-
-out_ret:
 	return ret;
 }
 
