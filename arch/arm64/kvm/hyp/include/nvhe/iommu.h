@@ -36,6 +36,8 @@ struct kvm_iommu_ops {
 	void (*iotlb_sync)(struct kvm_hyp_iommu_domain *domain,
 			   struct iommu_iotlb_gather *gather);
 	int (*set_identity)(pkvm_handle_t iommu, pkvm_handle_t dev, bool state);
+	int (*iotlb_sync_map)(struct kvm_hyp_iommu_domain *domain,
+			      unsigned long iova, size_t size);
 };
 
 int kvm_iommu_init(void *pool_base, size_t nr_pages);
@@ -66,7 +68,8 @@ phys_addr_t kvm_iommu_iova_to_phys(pkvm_handle_t domain_id, unsigned long iova);
 int kvm_iommu_set_identity(pkvm_handle_t iommu, pkvm_handle_t dev, bool on);
 size_t kvm_iommu_map_sg(pkvm_handle_t domain, unsigned long iova, struct kvm_iommu_sg *sg,
 			unsigned int nent, unsigned int prot);
-
+int kvm_iommu_iotlb_sync_map(pkvm_handle_t domain_id,
+			     unsigned long iova, size_t size);
 /* Flags not used and added for future use. */
 void *kvm_iommu_donate_pages(u8 order, int flags);
 void kvm_iommu_reclaim_pages(void *p, u8 order);
