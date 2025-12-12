@@ -343,20 +343,82 @@ out_unlock:
 	return ret;
 }
 
+#define IOMMU_PROT_MASK (IOMMU_READ | IOMMU_WRITE | IOMMU_CACHE |\
+			 IOMMU_NOEXEC | IOMMU_MMIO | IOMMU_PRIV)
+
 int kvm_iommu_map_pages(pkvm_handle_t domain_id,
 			unsigned long iova, phys_addr_t paddr, size_t pgsize,
 			size_t pgcount, int prot, unsigned long *mapped)
 {
-	return 0;
+	size_t size;
+	int ret;
+	struct kvm_hyp_iommu_domain *domain;
+
+	if (!kvm_iommu_ops || !kvm_iommu_ops->map_pages)
+		return -ENODEV;
+
+	*mapped = 0;
+
+	if (prot & ~IOMMU_PROT_MASK)
+		return -EOPNOTSUPP;
+
+	if (__builtin_mul_overflow(pgsize, pgcount, &size) ||
+	    iova + size < iova || paddr + size < paddr)
+		return -E2BIG;
+
+	domain = handle_to_domain(domain_id);
+	if (!domain || domain_get(domain))
+		return -ENOENT;
+
+	ret = kvm_iommu_ops->map_pages(domain, iova, paddr, pgsize, pgcount,
+				       prot, mapped);
+
+	domain_put(domain);
+	/* Mask -ENOMEM, as it's passed as a request. */
+	return ret == -ENOMEM ? 0 : ret;
 }
 
 size_t kvm_iommu_unmap_pages(pkvm_handle_t domain_id, unsigned long iova,
 			     size_t pgsize, size_t pgcount)
 {
-	return 0;
+	size_t size;
+	size_t unmapped;
+	struct kvm_hyp_iommu_domain *domain;
+
+	if (!kvm_iommu_ops || !kvm_iommu_ops->unmap_pages)
+		return -ENODEV;
+
+	if (!pgsize || !pgcount)
+		return 0;
+
+	if (__builtin_mul_overflow(pgsize, pgcount, &size) ||
+	    iova + size < iova)
+		return 0;
+
+	domain = handle_to_domain(domain_id);
+	if (!domain || domain_get(domain))
+		return 0;
+
+	unmapped = kvm_iommu_ops->unmap_pages(domain, iova, pgsize, pgcount);
+
+	domain_put(domain);
+	return unmapped;
 }
 
 phys_addr_t kvm_iommu_iova_to_phys(pkvm_handle_t domain_id, unsigned long iova)
 {
-	return 0;
+	phys_addr_t phys = 0;
+	struct kvm_hyp_iommu_domain *domain;
+
+	if (!kvm_iommu_ops || !kvm_iommu_ops->iova_to_phys)
+		return -ENODEV;
+
+	domain = handle_to_domain( domain_id);
+
+	if (!domain || domain_get(domain))
+		return 0;
+
+	phys = kvm_iommu_ops->iova_to_phys(domain, iova);
+	domain_put(domain);
+	return phys;
 }
