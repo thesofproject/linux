@@ -359,6 +359,107 @@ static struct iommu_domain kvm_arm_smmu_identity_domain = {
 
 };
 
+struct kvm_arm_smmu_map_sg {
+	struct iommu_map_cookie_sg cookie;
+	struct kvm_iommu_sg *sg;
+	unsigned int ptr;
+	unsigned long iova;
+	int prot;
+	gfp_t gfp;
+	unsigned int nents;
+	size_t total_mapped;
+	size_t size; /* Total size of entries not mapped yet. */
+};
+
+static struct iommu_map_cookie_sg *kvm_arm_smmu_alloc_cookie_sg(unsigned long iova,
+								int prot,
+								unsigned int nents,
+								gfp_t gfp)
+{
+	int ret;
+	struct kvm_arm_smmu_map_sg *map_sg = kzalloc(sizeof(*map_sg), gfp);
+
+	if (!map_sg)
+		return NULL;
+
+	/* Rounds nents to allocate to page aligned size. */
+	map_sg->nents = kvm_iommu_sg_nents_round(nents);
+	map_sg->sg = kvm_iommu_sg_alloc(map_sg->nents, gfp);
+	if (!map_sg->sg)
+		return NULL;
+	map_sg->iova = iova;
+	map_sg->prot = prot;
+	map_sg->gfp = gfp;
+	ret = kvm_iommu_share_hyp_sg(map_sg->sg, map_sg->nents);
+	if (ret) {
+		kvm_iommu_sg_free(map_sg->sg, map_sg->nents);
+		kfree(map_sg);
+		return NULL;
+	}
+
+	return &map_sg->cookie;
+}
+
+static int kvm_arm_smmu_add_deferred_map_sg(struct iommu_map_cookie_sg *cookie,
+					    phys_addr_t paddr, size_t pgsize, size_t pgcount)
+{
+	struct kvm_arm_smmu_map_sg *map_sg = container_of(cookie, struct kvm_arm_smmu_map_sg,
+							  cookie);
+	struct kvm_iommu_sg *sg = map_sg->sg;
+	struct kvm_arm_smmu_domain *kvm_smmu_domain = to_kvm_smmu_domain(map_sg->cookie.domain);
+	size_t mapped;
+
+	/* Out of space, flush the list. */
+	if (map_sg->nents == map_sg->ptr) {
+		mapped = kvm_iommu_map_sg(kvm_smmu_domain->id, sg, map_sg->iova,
+					  map_sg->ptr, map_sg->prot, map_sg->gfp);
+		/*
+		 * Something went wrong, undo the mappings from the current sg list,
+		 * leaving total mapped as it would be unmapped from core code as
+		 * kvm_arm_smmu_consume_deferred_map_sg() would return total_mapped.
+		 */
+		if (mapped != map_sg->size) {
+			iommu_unmap(&kvm_smmu_domain->domain, map_sg->iova, mapped);
+			/*
+			 * The core code will try to consume the list in the error path
+			 * don't attempt to map this list again as it already failed, so
+			 * no need to waste time.
+			 */
+			map_sg->ptr = 0;
+			return -EINVAL;
+		}
+		map_sg->ptr = 0;
+		map_sg->iova += mapped;
+		map_sg->total_mapped += mapped;
+		map_sg->size = 0;
+	}
+
+	sg[map_sg->ptr].phys = paddr;
+	sg[map_sg->ptr].pgsize = pgsize;
+	sg[map_sg->ptr].pgcount = pgcount;
+	map_sg->size += pgsize * pgcount;
+	map_sg->ptr++;
+	return 0;
+}
+
+static size_t kvm_arm_smmu_consume_deferred_map_sg(struct iommu_map_cookie_sg *cookie)
+{
+	struct kvm_arm_smmu_map_sg *map_sg = container_of(cookie, struct kvm_arm_smmu_map_sg,
+							  cookie);
+	struct kvm_iommu_sg *sg = map_sg->sg;
+	size_t total_mapped = map_sg->total_mapped;
+	struct kvm_arm_smmu_domain *kvm_smmu_domain = to_kvm_smmu_domain(map_sg->cookie.domain);
+
+	/* Might be cleared from error path. */
+	if (map_sg->ptr)
+		total_mapped += kvm_iommu_map_sg(kvm_smmu_domain->id, sg, map_sg->iova,
+						 map_sg->ptr, map_sg->prot, map_sg->gfp);
+	kvm_iommu_unshare_hyp_sg(sg, map_sg->nents);
+	kvm_iommu_sg_free(sg, map_sg->nents);
+	kfree(map_sg);
+	return total_mapped;
+}
+
 static struct iommu_ops kvm_arm_smmu_ops = {
 	.identity_domain	= &kvm_arm_smmu_identity_domain,
 	.capable		= kvm_arm_smmu_capable,
@@ -378,6 +479,9 @@ static struct iommu_ops kvm_arm_smmu_ops = {
 		.map_pages	= kvm_arm_smmu_map_pages,
 		.unmap_pages	= kvm_arm_smmu_unmap_pages,
 		.free		= kvm_arm_smmu_free_domain,
+		.alloc_cookie_sg = kvm_arm_smmu_alloc_cookie_sg,
+		.add_deferred_map_sg = kvm_arm_smmu_add_deferred_map_sg,
+		.consume_deferred_map_sg = kvm_arm_smmu_consume_deferred_map_sg,
 	}
 };
 
