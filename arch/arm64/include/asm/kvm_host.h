@@ -1880,6 +1880,8 @@ int __pkvm_topup_hyp_alloc_mgt_gfp(unsigned long id, unsigned long nr_pages,
 #ifndef __KVM_NVHE_HYPERVISOR__
 struct kvm_iommu_driver {
 	int (*init_driver)(void);
+	/* Private to core. */
+	struct list_head node;
 };
 
 struct kvm_iommu_ops;
