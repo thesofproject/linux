@@ -79,8 +79,8 @@ DECLARE_HOOK(android_vh_process_madvise_begin,
 	TP_PROTO(struct task_struct *task, int behavior),
 	TP_ARGS(task, behavior));
 DECLARE_HOOK(android_vh_process_madvise_iter,
-	TP_PROTO(struct task_struct *task, int behavior, ssize_t *ret),
-	TP_ARGS(task, behavior, ret));
+	TP_PROTO(struct mm_struct *mm, int behavior, ssize_t *ret),
+	TP_ARGS(mm, behavior, ret));
 DECLARE_HOOK(android_vh_madvise_swapin_walk_pmd_entry,
 	TP_PROTO(swp_entry_t entry),
 	TP_ARGS(entry));
