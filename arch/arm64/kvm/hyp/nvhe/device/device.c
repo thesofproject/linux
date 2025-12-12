@@ -303,3 +303,32 @@ out_inval:
 	smccc_set_retval(vcpu, SMCCC_RET_INVALID_PARAMETER, 0, 0, 0);
 	return true;
 }
+
+static void pkvm_devices_reclaim_device(struct pkvm_device *dev)
+{
+	int i;
+
+	for (i = 0 ; i < dev->nr_resources ; ++i) {
+		struct pkvm_dev_resource *res = &dev->resources[i];
+
+		hyp_spin_lock(&host_mmu.lock);
+		WARN_ON(host_stage2_set_owner_locked(res->base, res->size, PKVM_ID_HOST));
+		hyp_spin_unlock(&host_mmu.lock);
+	}
+}
+
+void pkvm_devices_teardown(struct pkvm_hyp_vm *vm)
+{
+	int i;
+
+	hyp_spin_lock(&device_spinlock);
+	for (i = 0 ; i < registered_devices_nr ; ++i) {
+		struct pkvm_device *dev = &registered_devices[i];
+
+		if (dev->ctxt != vm)
+			continue;
+		dev->ctxt = NULL;
+		pkvm_devices_reclaim_device(dev);
+	}
+	hyp_spin_unlock(&device_spinlock);
+}
