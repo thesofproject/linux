@@ -4601,10 +4601,8 @@ static struct platform_driver arm_smmu_driver = {
 	.remove = arm_smmu_device_remove,
 	.shutdown = arm_smmu_device_shutdown,
 };
-module_driver(arm_smmu_driver, platform_driver_register,
-	      arm_smmu_driver_unregister);
 
-#ifdef CONFIG_ARM_SMMU_V3_PKVM
+#if IS_ENABLED(CONFIG_ARM_SMMU_V3_PKVM)
 /*
  * Now we have 2 devices, the aux device bound to this driver, and pdev
  * which is the physical platform device.
@@ -4657,9 +4655,27 @@ struct auxiliary_driver arm_smmu_driver_emu = {
 	.probe = arm_smmu_device_probe_emu,
 	.shutdown = arm_smmu_device_shutdown_emu,
 };
-
-module_auxiliary_driver(arm_smmu_driver_emu);
 #endif
+
+static int arm_smmu_driver_init(void)
+{
+	platform_driver_register(&arm_smmu_driver);
+#if IS_ENABLED(CONFIG_ARM_SMMU_V3_PKVM)
+	auxiliary_driver_register(&arm_smmu_driver_emu);
+#endif
+	return 0;
+}
+
+static void arm_smmu_driver_exit(void)
+{
+	arm_smmu_driver_unregister(&arm_smmu_driver);
+#if IS_ENABLED(CONFIG_ARM_SMMU_V3_PKVM)
+	auxiliary_driver_unregister(&arm_smmu_driver_emu);
+#endif
+}
+
+module_init(arm_smmu_driver_init);
+module_exit(arm_smmu_driver_exit);
 
 MODULE_DESCRIPTION("IOMMU API for ARM architected SMMUv3 implementations");
 MODULE_AUTHOR("Will Deacon <will@kernel.org>");
