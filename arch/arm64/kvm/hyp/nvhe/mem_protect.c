@@ -348,6 +348,7 @@ void drain_hyp_pool(struct pkvm_hyp_vm *vm, struct kvm_hyp_memcache *mc)
 	WARN_ON(reclaim_hyp_pool(&vm->pool, mc, INT_MAX) != -ENOMEM);
 }
 
+static enum pkvm_page_state guest_get_page_state(kvm_pte_t pte, u64 addr);
 int __pkvm_guest_relinquish_to_host(struct pkvm_hyp_vcpu *vcpu,
 				    u64 ipa, u64 *ppa)
 {
@@ -374,15 +375,15 @@ int __pkvm_guest_relinquish_to_host(struct pkvm_hyp_vcpu *vcpu,
 		goto end;
 	}
 
-	state = pkvm_getstate(kvm_pgtable_stage2_pte_prot(pte));
+	addr = ALIGN_DOWN(ipa, kvm_granule_size(level));
+	phys = kvm_pte_to_phys(pte);
+	phys += ipa - addr;
+
+	state = guest_get_page_state(pte, addr);
 	if (state != PKVM_PAGE_OWNED) {
 		ret = -EPERM;
 		goto end;
 	}
-
-	addr = ALIGN_DOWN(ipa, kvm_granule_size(level));
-	phys = kvm_pte_to_phys(pte);
-	phys += ipa - addr;
 
 	/* Zap the guest stage2 pte and return ownership to the host */
 	WARN_ON(kvm_pgtable_stage2_unmap(&vm->pgt, ipa, PAGE_SIZE));
