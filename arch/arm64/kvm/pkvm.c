@@ -302,6 +302,8 @@ static void __pkvm_finalize_destroy_hyp_vm(struct kvm *kvm)
 		kvm_unshare_hyp(hyp_reqs, hyp_reqs + 1);
 		vcpu->arch.hyp_reqs = NULL;
 		free_page((unsigned long)hyp_reqs);
+
+		kvm_iommu_guest_free_mc(&vcpu->arch.iommu_mc);
 	}
 }
 
