@@ -659,6 +659,8 @@ static inline bool gic_enable_sre(void)
 void gic_v3_dist_init(void);
 void gic_v3_cpu_init(void);
 void gic_v3_dist_wait_for_rwp(void);
+int its_save_disable(void);
+void its_restore_enable(void);
 
 #endif
 
