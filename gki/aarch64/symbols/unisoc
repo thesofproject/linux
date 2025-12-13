@@ -10,6 +10,7 @@
   __check_object_size
   class_create
   class_destroy
+  commit_creds
   _dev_err
   device_create
   device_destroy
@@ -30,6 +31,7 @@
   idr_remove
   init_wait_entry
   __init_waitqueue_head
+  inode_to_bdi
   irq_to_desc
   kernel_cpustat
   kfree
@@ -301,6 +303,7 @@
   unregister_chrdev_region
   usb_phy_get_charger_current
   utf8_data_table
+  vfs_truncate
   vmalloc_nr_pages
   vsscanf
   __wake_up

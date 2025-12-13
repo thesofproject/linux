@@ -280905,6 +280905,11 @@ function {
   parameter_id: 0x0258f96e
 }
 function {
+  id: 0x4e098341
+  return_type_id: 0x28f4ee78
+  parameter_id: 0x1b8590a8
+}
+function {
   id: 0x4e221f3c
   return_type_id: 0x2560a232
   parameter_id: 0x4585663f
@@ -287284,6 +287289,11 @@ function {
   parameter_id: 0x3d4c764a
 }
 function {
+  id: 0x92d5a42f
+  return_type_id: 0x6720d32f
+  parameter_id: 0x3d551c03
+}
+function {
   id: 0x92d5c63f
   return_type_id: 0x6720d32f
   parameter_id: 0x3e10b518
@@ -288019,6 +288029,12 @@ function {
   parameter_id: 0x3b68ec61
   parameter_id: 0x38d23361
   parameter_id: 0x07dcdbe1
+}
+function {
+  id: 0x93bdf686
+  return_type_id: 0x6720d32f
+  parameter_id: 0x3a8e2ac6
+  parameter_id: 0x27a7c613
 }
 function {
   id: 0x93bf0967
@@ -312312,6 +312328,15 @@ elf_symbol {
   full_name: "cma_release"
 }
 elf_symbol {
+  id: 0xdbbde05c
+  name: "commit_creds"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xba0724d4
+  type_id: 0x92d5a42f
+  full_name: "commit_creds"
+}
+elf_symbol {
   id: 0x4f627b39
   name: "compat_ptr_ioctl"
   is_defined: true
@@ -323606,6 +323631,15 @@ elf_symbol {
   crc: 0x6668f05d
   type_id: 0x10fabb94
   full_name: "init_wait_entry"
+}
+elf_symbol {
+  id: 0x471295fc
+  name: "inode_to_bdi"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xa05dfd49
+  type_id: 0x4e098341
+  full_name: "inode_to_bdi"
 }
 elf_symbol {
   id: 0x18eeb52f
@@ -339699,6 +339733,15 @@ elf_symbol {
   full_name: "vfree"
 }
 elf_symbol {
+  id: 0x0796726a
+  name: "vfs_truncate"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x275bd01f
+  type_id: 0x93bdf686
+  full_name: "vfs_truncate"
+}
+elf_symbol {
   id: 0x47f90fd0
   name: "video_devdata"
   is_defined: true
@@ -341898,6 +341941,7 @@ interface {
   symbol_id: 0x5f9864aa
   symbol_id: 0x966a7c42
   symbol_id: 0xab62b21c
+  symbol_id: 0xdbbde05c
   symbol_id: 0x4f627b39
   symbol_id: 0xda163e44
   symbol_id: 0xb375007c
@@ -343150,6 +343194,7 @@ interface {
   symbol_id: 0x3d6f5577
   symbol_id: 0x5eecacc4
   symbol_id: 0x215b5641
+  symbol_id: 0x471295fc
   symbol_id: 0x18eeb52f
   symbol_id: 0xbc652525
   symbol_id: 0x2336c16f
@@ -344939,6 +344984,7 @@ interface {
   symbol_id: 0x2e0cfc9a
   symbol_id: 0x9181a5f3
   symbol_id: 0xa7ab6134
+  symbol_id: 0x0796726a
   symbol_id: 0x47f90fd0
   symbol_id: 0x969a2ec0
   symbol_id: 0xb1b42a22
