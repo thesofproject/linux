@@ -805,11 +805,11 @@
   its_restore_enable
   its_save_disable
 
-# required by gpu.ko
-  zs_free
-  zs_destroy_pool
-  zs_create_pool
-  zs_malloc
-  zs_obj_write
-  zs_obj_read_end
-  zs_obj_read_begin
+# required by zsmalloc.ko
+  copy_page
+  dec_zone_page_state
+  flush_dcache_page
+  folio_unlock
+  folio_wait_bit
+  inc_zone_page_state
+  set_movable_ops
