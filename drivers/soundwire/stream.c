@@ -512,14 +512,19 @@ static int sdw_prep_deprep_slave_ports(struct sdw_bus *bus,
 	sdw_do_port_prep(s_rt, prep_ch, prep ? SDW_OPS_PORT_PRE_PREP : SDW_OPS_PORT_PRE_DEPREP);
 
 	/* Prepare Slave port implementing CP_SM */
+	/* For Simplified_CP_SM, MIPI SoundWire specification v1-2 indicates
+	 * Prepare bits are "write-ignored" - this means devices may ignore the command.
+	 * Some devices still benefit from receiving this command even when using
+	 * Simplified_CP_SM, so we send it to all devices and ignore errors from those
+	 * that don't support it.
+	 */
+	addr = SDW_DPN_PREPARECTRL(p_rt->num);
+	if (prep)
+		ret = sdw_write_no_pm(s_rt->slave, addr, p_rt->ch_mask);
+	else
+		ret = sdw_write_no_pm(s_rt->slave, addr, 0x0);
+
 	if (!simple_ch_prep_sm) {
-		addr = SDW_DPN_PREPARECTRL(p_rt->num);
-
-		if (prep)
-			ret = sdw_write_no_pm(s_rt->slave, addr, p_rt->ch_mask);
-		else
-			ret = sdw_write_no_pm(s_rt->slave, addr, 0x0);
-
 		if (ret < 0) {
 			dev_err(&s_rt->slave->dev,
 				"Slave prep_ctrl reg write failed\n");
@@ -538,6 +543,11 @@ static int sdw_prep_deprep_slave_ports(struct sdw_bus *bus,
 				"Chn prep failed for port %d: %d\n", prep_ch.num, ret);
 			return ret;
 		}
+	} else {
+		/* Some device return error for the prepare command,
+		 * ignore the error for Simplified CP_SM
+		 */
+		ret = 0;
 	}
 
 	/* Inform slaves about ports prepared */
