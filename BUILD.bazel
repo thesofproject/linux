@@ -211,6 +211,7 @@ filegroup(
         "gki/aarch64/symbols/db845c",
         "gki/aarch64/symbols/exynos",
         "gki/aarch64/symbols/exynosauto",
+        "gki/aarch64/symbols/galaxy",
         "gki/aarch64/symbols/honor",
         "gki/aarch64/symbols/kunit",
         "gki/aarch64/symbols/mtk",
