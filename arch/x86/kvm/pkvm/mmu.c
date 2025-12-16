@@ -210,6 +210,7 @@ static int check_host_mem_pgstate(unsigned long phys, unsigned long size,
 
 struct page_ownership {
 	const enum pkvm_owner_id *owner;
+	const enum pkvm_page_state *state;
 };
 
 static int check_page_ownership_walker(struct pkvm_pgtable_visit_ctx *ctx,
@@ -229,6 +230,9 @@ static int check_page_ownership_walker(struct pkvm_pgtable_visit_ctx *ctx,
 			return -EPERM;
 	}
 
+	if (expected->state && (*expected->state != pkvm_pte_pgstate(pgt, ptep)))
+		return -EPERM;
+
 	return 0;
 }
 
@@ -237,6 +241,24 @@ static int check_page_owner(struct pkvm_pgtable *pgt, unsigned long vaddr,
 {
 	struct page_ownership expected_ownership = {
 		.owner = &expected_owner,
+		.state = NULL,
+	};
+	struct pkvm_pgtable_walker walker = {
+		.cb = check_page_ownership_walker,
+		.arg = &expected_ownership,
+		.walk_flags = PKVM_PGTABLE_WALK_LEAF,
+	};
+
+	return pkvm_pgtable_walk(pgt, vaddr, size, &walker);
+}
+
+static int check_page_owner_and_state(struct pkvm_pgtable *pgt, unsigned long vaddr,
+				      unsigned long size, const enum pkvm_owner_id expected_owner,
+				      const enum pkvm_page_state expected_state)
+{
+	struct page_ownership expected_ownership = {
+		.owner = &expected_owner,
+		.state = &expected_state,
 	};
 	struct pkvm_pgtable_walker walker = {
 		.cb = check_page_ownership_walker,
@@ -558,4 +580,45 @@ out:
 	 * hypervisor. So any error here means a pKVM bug.
 	 */
 	BUG_ON(ret);
+}
+
+/**
+ * pkvm_hyp_donate_host_mmio_locked() - Donate MMIO pages from hypervisor to
+ *					host with the host mmu already locked
+ *					by the caller.
+ * @phys:	Physical address of the MMIO region to donate.
+ * @size:	Size of the MMIO region to donate.
+ *
+ * The donation transfers ownership of the MMIO pages in range
+ * [@phys, @phys + @size) from the hypervisor to the host, thus allowing the
+ * host to access. This expects the caller has already locked the host mmu. The
+ * @phys and @size are required to be PAGE_SIZE aligned (@size is also required
+ * to be non-zeroed value) to make sure the caller aware only PAGE_SIZE aligned
+ * memory range can be donated.
+ *
+ * The donated MMIO pages are mapped in the host mmu with read/write/exec
+ * permission and UC memory type in the host mmu, with the page states being
+ * updated to PKVM_PAGE_OWNED to indicate the ownership has been transferred to
+ * the host.
+ *
+ * Returns: 0 on success, or a negative error code on failure.
+ */
+int pkvm_hyp_donate_host_mmio_locked(unsigned long phys, unsigned long size)
+{
+	u64 prot = host_mmu.pgt_ops->pte_mk_pgstate(PKVM_PAGE_OWNED) |
+		   host_mmu_pte_prot(true);
+	int ret;
+
+	if (!PAGE_ALIGNED(phys) || !PAGE_ALIGNED(size) || size == 0)
+		return -EINVAL;
+
+	if (!is_mmio_range(phys, size))
+		return -EINVAL;
+
+	/* The vaddr == phys for the host MMU */
+	ret = check_page_owner_and_state(&host_mmu, phys, size, PKVM_ID_HYP, PKVM_PAGE_NONE);
+	if (ret)
+		return ret;
+
+	return pkvm_pgtable_map(&host_mmu, phys, phys, size, prot);
 }
