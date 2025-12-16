@@ -7884,6 +7884,11 @@ pointer_reference {
   pointee_type_id: 0x64da9c42
 }
 pointer_reference {
+  id: 0x13aa14a4
+  kind: POINTER
+  pointee_type_id: 0x64e8b40e
+}
+pointer_reference {
   id: 0x13b93798
   kind: POINTER
   pointee_type_id: 0x64a438fc
@@ -25849,6 +25854,11 @@ pointer_reference {
   pointee_type_id: 0xc7675249
 }
 pointer_reference {
+  id: 0x3b49fcec
+  kind: POINTER
+  pointee_type_id: 0xc767152e
+}
+pointer_reference {
   id: 0x3b4ce03a
   kind: POINTER
   pointee_type_id: 0xc7736674
@@ -39300,6 +39310,12 @@ member {
   name: "__data"
   type_id: 0x1162409a
   offset: 16
+}
+member {
+  id: 0xf4b0c46d
+  name: "__data"
+  type_id: 0xca2a51af
+  offset: 32
 }
 member {
   id: 0xf4b20642
@@ -89256,6 +89272,12 @@ member {
   offset: 1984
 }
 member {
+  id: 0xd14ff363
+  name: "get_reader_page"
+  type_id: 0x2b820c5e
+  offset: 64
+}
+member {
   id: 0x70f679be
   name: "get_reference_args"
   type_id: 0x2e2cf703
@@ -126893,6 +126915,11 @@ member {
   offset: 192
 }
 member {
+  id: 0xc2c8918f
+  name: "nr_cpus"
+  type_id: 0x6720d32f
+}
+member {
   id: 0x98f5512e
   name: "nr_cpus_allowed"
   type_id: 0x6720d32f
@@ -136514,6 +136541,11 @@ member {
   name: "pdeath_signal"
   type_id: 0x6720d32f
   offset: 13280
+}
+member {
+  id: 0x87a80bdc
+  name: "pdesc"
+  type_id: 0x13aa14a4
 }
 member {
   id: 0x414b677e
@@ -154070,6 +154102,12 @@ member {
   name: "reset"
   type_id: 0x2ee2b162
   offset: 2368
+}
+member {
+  id: 0x62962587
+  name: "reset"
+  type_id: 0x2b820c5e
+  offset: 128
 }
 member {
   id: 0x62b007df
@@ -237079,6 +237117,17 @@ struct_union {
   name: "ring_buffer_iter"
 }
 struct_union {
+  id: 0xc767152e
+  kind: STRUCT
+  name: "ring_buffer_writer"
+  definition {
+    bytesize: 24
+    member_id: 0x87a80bdc
+    member_id: 0xd14ff363
+    member_id: 0x62962587
+  }
+}
+struct_union {
   id: 0x4e470864
   kind: STRUCT
   name: "rlimit"
@@ -245273,6 +245322,16 @@ struct_union {
     bytesize: 16
     member_id: 0xc19003f2
     member_id: 0x449a1c14
+  }
+}
+struct_union {
+  id: 0x64e8b40e
+  kind: STRUCT
+  name: "trace_page_desc"
+  definition {
+    bytesize: 4
+    member_id: 0xc2c8918f
+    member_id: 0xf4b0c46d
   }
 }
 struct_union {
@@ -274698,6 +274757,11 @@ function {
   parameter_id: 0x791f812b
 }
 function {
+  id: 0x157ba89f
+  return_type_id: 0x48b5725f
+  parameter_id: 0x178fe432
+}
+function {
   id: 0x157d734c
   return_type_id: 0x48b5725f
   parameter_id: 0x11e6864c
@@ -276108,6 +276172,14 @@ function {
   parameter_id: 0x2360e10b
   parameter_id: 0x3e10b518
   parameter_id: 0x1b44744f
+}
+function {
+  id: 0x18c2a1b0
+  return_type_id: 0x178fe432
+  parameter_id: 0x33756485
+  parameter_id: 0x4585663f
+  parameter_id: 0x1b44744f
+  parameter_id: 0x3b49fcec
 }
 function {
   id: 0x18c46588
@@ -281524,6 +281596,14 @@ function {
   parameter_id: 0x6720d32f
 }
 function {
+  id: 0x4a48ce6b
+  return_type_id: 0x00d82b18
+  parameter_id: 0x178fe432
+  parameter_id: 0x6720d32f
+  parameter_id: 0x2e18f543
+  parameter_id: 0x064d6086
+}
+function {
   id: 0x4acfd9c5
   return_type_id: 0x0cbf60eb
   parameter_id: 0x359862c8
@@ -281537,6 +281617,12 @@ function {
   parameter_id: 0x18bd6530
   parameter_id: 0xc9082b19
   parameter_id: 0xf435685e
+}
+function {
+  id: 0x4b1207bd
+  return_type_id: 0x00d82b18
+  parameter_id: 0x178fe432
+  parameter_id: 0x33756485
 }
 function {
   id: 0x4cd21214
@@ -282065,6 +282151,11 @@ function {
   id: 0x56a01dac
   return_type_id: 0x25520d15
   parameter_id: 0x16239d0c
+}
+function {
+  id: 0x56a0bb37
+  return_type_id: 0x18bd6530
+  parameter_id: 0x00d82b18
 }
 function {
   id: 0x56af9ca8
@@ -291639,6 +291730,11 @@ function {
   return_type_id: 0x6720d32f
   parameter_id: 0x16fde55f
   parameter_id: 0x17b22970
+}
+function {
+  id: 0x98631a23
+  return_type_id: 0x6720d32f
+  parameter_id: 0x178fe432
 }
 function {
   id: 0x9864c638
@@ -304453,6 +304549,11 @@ function {
   parameter_id: 0x2170d06d
 }
 function {
+  id: 0xfb47a208
+  return_type_id: 0x6d7f5ff6
+  parameter_id: 0x178fe432
+}
+function {
   id: 0xfb6fdb6d
   return_type_id: 0x6d7f5ff6
   parameter_id: 0x1b2ca025
@@ -306836,6 +306937,15 @@ elf_symbol {
   crc: 0xb6dce34c
   type_id: 0x96bbe934
   full_name: "__rht_bucket_nested"
+}
+elf_symbol {
+  id: 0xa5888f99
+  name: "__ring_buffer_alloc"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x00c8919c
+  type_id: 0x18c2a1b0
+  full_name: "__ring_buffer_alloc"
 }
 elf_symbol {
   id: 0x98379aaf
@@ -333761,6 +333871,69 @@ elf_symbol {
   full_name: "rht_bucket_nested_insert"
 }
 elf_symbol {
+  id: 0xc9ab2df7
+  name: "ring_buffer_consume"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x5705eb3d
+  type_id: 0x4a48ce6b
+  full_name: "ring_buffer_consume"
+}
+elf_symbol {
+  id: 0x822f4248
+  name: "ring_buffer_empty"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xcbb9584e
+  type_id: 0xfb47a208
+  full_name: "ring_buffer_empty"
+}
+elf_symbol {
+  id: 0x6a2129a4
+  name: "ring_buffer_event_data"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xaef5468a
+  type_id: 0x56a0bb37
+  full_name: "ring_buffer_event_data"
+}
+elf_symbol {
+  id: 0xc42c23cb
+  name: "ring_buffer_free"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x54273aae
+  type_id: 0x157ba89f
+  full_name: "ring_buffer_free"
+}
+elf_symbol {
+  id: 0xcfe8fb36
+  name: "ring_buffer_lock_reserve"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x11403887
+  type_id: 0x4b1207bd
+  full_name: "ring_buffer_lock_reserve"
+}
+elf_symbol {
+  id: 0x0abeccfe
+  name: "ring_buffer_peek"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x5705eb3d
+  type_id: 0x4a48ce6b
+  full_name: "ring_buffer_peek"
+}
+elf_symbol {
+  id: 0x7547315b
+  name: "ring_buffer_unlock_commit"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x329963bd
+  type_id: 0x98631a23
+  full_name: "ring_buffer_unlock_commit"
+}
+elf_symbol {
   id: 0x0e66eaf7
   name: "round_jiffies"
   is_defined: true
@@ -342556,6 +342729,7 @@ interface {
   symbol_id: 0xf263b97f
   symbol_id: 0xa2452368
   symbol_id: 0x2b453adc
+  symbol_id: 0xa5888f99
   symbol_id: 0x98379aaf
   symbol_id: 0x0166be18
   symbol_id: 0xc5953732
@@ -345545,6 +345719,13 @@ interface {
   symbol_id: 0x9f246b4e
   symbol_id: 0x6af2dc93
   symbol_id: 0x56f4af9c
+  symbol_id: 0xc9ab2df7
+  symbol_id: 0x822f4248
+  symbol_id: 0x6a2129a4
+  symbol_id: 0xc42c23cb
+  symbol_id: 0xcfe8fb36
+  symbol_id: 0x0abeccfe
+  symbol_id: 0x7547315b
   symbol_id: 0x0e66eaf7
   symbol_id: 0x81bce56b
   symbol_id: 0x01a1f5e7

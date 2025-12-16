@@ -3,6 +3,14 @@
   cpu_busy_with_softirqs
   memblock_end_of_DRAM
   init_iova_domain
+  __ring_buffer_alloc
+  ring_buffer_consume
+  ring_buffer_empty
+  ring_buffer_event_data
+  ring_buffer_free
+  ring_buffer_lock_reserve
+  ring_buffer_peek
+  ring_buffer_unlock_commit
   set_next_entity
   __traceiter_android_rvh_before_do_sched_yield
   __traceiter_android_rvh_build_perf_domains
