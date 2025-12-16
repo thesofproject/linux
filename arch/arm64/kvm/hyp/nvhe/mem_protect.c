@@ -304,6 +304,23 @@ static void invalidate_icache_guest_page(void *va, size_t size)
 	__apply_guest_page(va, size, __invalidate_icache_guest_page);
 }
 
+static void __hyp_flush_page(void *addr, size_t size)
+{
+	/*
+	 * Prefer kvm_flush_dcache_to_poc() over __clean_dcache_guest_page()
+	 * here as the latter may elide the CMO under the assumption that FWB
+	 * will be enabled on CPUs that support it. This is incorrect for the
+	 * host stage-2 and would otherwise lead to a malicious host potentially
+	 * being able to read the contents of newly reclaimed guest pages.
+	 */
+	kvm_flush_dcache_to_poc(addr, size);
+}
+
+static void hyp_flush_page(phys_addr_t phys, size_t size)
+{
+	__apply_guest_page(__hyp_va(phys), size, __hyp_flush_page);
+}
+
 int kvm_guest_prepare_stage2(struct pkvm_hyp_vm *vm, void *pgd)
 {
 	struct kvm_s2_mmu *mmu = &vm->kvm.arch.mmu;
@@ -381,7 +398,7 @@ static int ___pkvm_guest_relinquish_to_module(struct pkvm_hyp_vcpu *vcpu, u64 ip
 
 static enum pkvm_page_state guest_get_page_state(kvm_pte_t pte, u64 addr);
 int __pkvm_guest_relinquish_to_host(struct pkvm_hyp_vcpu *vcpu,
-				    u64 ipa, u64 *ppa)
+				    u64 ipa, u64 flags, u64 *ppa)
 {
 	struct pkvm_hyp_vm *vm = pkvm_hyp_vcpu_to_hyp_vm(vcpu);
 	enum pkvm_page_state state;
@@ -428,7 +445,10 @@ int __pkvm_guest_relinquish_to_host(struct pkvm_hyp_vcpu *vcpu,
 	/* Zap the guest stage2 pte and return ownership to the host */
 	WARN_ON(kvm_pgtable_stage2_unmap(&vm->pgt, ipa, PAGE_SIZE));
 
-	hyp_poison_page(phys, PAGE_SIZE);
+	if (!(flags & KVM_FUNC_MEM_RELINQUISH_NO_POISON))
+		hyp_poison_page(phys, PAGE_SIZE);
+	else
+		hyp_flush_page(phys, PAGE_SIZE);
 	psci_mem_protect_dec(1);
 
 	WARN_ON(host_stage2_set_owner_locked(phys, PAGE_SIZE, PKVM_ID_HOST));
@@ -1925,14 +1945,7 @@ static int __guest_check_transition_size(u64 phys, u64 ipa, u64 nr_pages, u64 *s
 static void __hyp_poison_page(void *addr, size_t size)
 {
 	memset(addr, 0, size);
-	/*
-	 * Prefer kvm_flush_dcache_to_poc() over __clean_dcache_guest_page()
-	 * here as the latter may elide the CMO under the assumption that FWB
-	 * will be enabled on CPUs that support it. This is incorrect for the
-	 * host stage-2 and would otherwise lead to a malicious host potentially
-	 * being able to read the contents of newly reclaimed guest pages.
-	 */
-	kvm_flush_dcache_to_poc(addr, size);
+	__hyp_flush_page(addr, size);
 }
 
 void hyp_poison_page(phys_addr_t phys, size_t size)
