@@ -26,6 +26,8 @@
 #include "segment.h"
 #include "iostat.h"
 #include <trace/events/f2fs.h>
+#undef CREATE_TRACE_POINTS
+#include <trace/hooks/fs.h>
 
 #define NUM_PREALLOC_POST_READ_CTXS	128
 
@@ -35,6 +37,8 @@ static mempool_t *bio_post_read_ctx_pool;
 static struct bio_set f2fs_bioset;
 
 #define	F2FS_BIO_POOL_SIZE	NR_CURSEG_TYPE
+
+EXPORT_TRACEPOINT_SYMBOL_GPL(f2fs_write_begin);
 
 int __init f2fs_init_bioset(void)
 {
@@ -1021,6 +1025,7 @@ alloc_new:
 	io->last_block_in_bio = fio->new_blkaddr;
 
 	trace_f2fs_submit_folio_write(fio->folio, fio);
+	trace_android_vh_f2fs_set_bio_flag(page_folio(fio->page), io->bio);
 #ifdef CONFIG_BLK_DEV_ZONED
 	if (f2fs_sb_has_blkzoned(sbi) && btype < META &&
 			is_end_zone_blkaddr(sbi, fio->new_blkaddr)) {
