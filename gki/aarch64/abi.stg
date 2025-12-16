@@ -301691,6 +301691,12 @@ function {
   parameter_id: 0xc227931d
 }
 function {
+  id: 0xa7ea77a4
+  return_type_id: 0xfc0e1dbd
+  parameter_id: 0x00c83ba6
+  parameter_id: 0x3e10b518
+}
+function {
   id: 0xa7f744cd
   return_type_id: 0xfc0e1dbd
   parameter_id: 0x07f9a52e
@@ -317156,6 +317162,16 @@ elf_symbol {
   namespace: "DMA_BUF"
   type_id: 0x10aa5f7a
   full_name: "dma_buf_put"
+}
+elf_symbol {
+  id: 0x77d18a9c
+  name: "dma_buf_set_name"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x588c4eee
+  namespace: "DMA_BUF"
+  type_id: 0xa7ea77a4
+  full_name: "dma_buf_set_name"
 }
 elf_symbol {
   id: 0xd0deb542
@@ -343863,6 +343879,7 @@ interface {
   symbol_id: 0xc99a7edf
   symbol_id: 0x4ec1de19
   symbol_id: 0xe5cfd7ac
+  symbol_id: 0x77d18a9c
   symbol_id: 0xd0deb542
   symbol_id: 0x68016e57
   symbol_id: 0xe8233473

@@ -1,6 +1,7 @@
 [abi_symbol_list]
   __balance_callbacks
   cpu_busy_with_softirqs
+  dma_buf_set_name
   memblock_end_of_DRAM
   init_iova_domain
   __ring_buffer_alloc
