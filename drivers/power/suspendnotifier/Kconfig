@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config POWER_SUSPEND_NOTIFIER
+  tristate "suspend notifier"
+  help
+    This option enables sending events from PM's suspend
+    callback to userspace through a device.
+
+    This is necessary for device drivers and platform-specific
+    code to register callbacks that execute immediately before
+    or after the system enters a low-power state.
