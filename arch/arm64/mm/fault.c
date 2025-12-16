@@ -44,6 +44,7 @@
 #include <asm/tlbflush.h>
 #include <asm/traps.h>
 #include <asm/virt.h>
+#include <trace/hooks/fault.h>
 
 struct fault_info {
 	int	(*fn)(unsigned long far, unsigned long esr,
@@ -833,6 +834,11 @@ static int do_sea(unsigned long far, unsigned long esr, struct pt_regs *regs)
 {
 	const struct fault_info *inf;
 	unsigned long siaddr;
+	bool can_fixup = false;
+
+	trace_android_vh_try_fixup_sea(far, esr, regs, &can_fixup);
+	if (can_fixup && fixup_exception(regs, esr))
+		return 0;
 
 	inf = esr_to_fault_info(esr);
 
