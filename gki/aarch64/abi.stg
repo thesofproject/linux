@@ -294949,6 +294949,15 @@ function {
   parameter_id: 0x35f7f02e
 }
 function {
+  id: 0x9b6eb253
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x33756485
+  parameter_id: 0x33756485
+  parameter_id: 0x01222f7d
+  parameter_id: 0x11cfee5a
+}
+function {
   id: 0x9b6fa0ce
   return_type_id: 0x6720d32f
   parameter_id: 0x18bd6530
@@ -308610,6 +308619,15 @@ elf_symbol {
   full_name: "__traceiter_android_vh_tcp_write_timeout_estab_retrans"
 }
 elf_symbol {
+  id: 0xeac5f4dd
+  name: "__traceiter_android_vh_try_fixup_sea"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xef5e7bba
+  type_id: 0x9b6eb253
+  full_name: "__traceiter_android_vh_try_fixup_sea"
+}
+elf_symbol {
   id: 0x39155e73
   name: "__traceiter_android_vh_tune_scan_type"
   is_defined: true
@@ -310417,6 +310435,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_vh_tcp_write_timeout_estab_retrans"
+}
+elf_symbol {
+  id: 0x0896a337
+  name: "__tracepoint_android_vh_try_fixup_sea"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_vh_try_fixup_sea"
 }
 elf_symbol {
   id: 0x49b955bd
@@ -342930,6 +342957,7 @@ interface {
   symbol_id: 0x989b4fa1
   symbol_id: 0x28fc87d0
   symbol_id: 0x9c4fb9ab
+  symbol_id: 0xeac5f4dd
   symbol_id: 0x39155e73
   symbol_id: 0x3947ecb4
   symbol_id: 0xe31bb308
@@ -343131,6 +343159,7 @@ interface {
   symbol_id: 0xa0d0bf73
   symbol_id: 0x96610076
   symbol_id: 0x1a59144d
+  symbol_id: 0x0896a337
   symbol_id: 0x49b955bd
   symbol_id: 0xfe6b6962
   symbol_id: 0x609a86da
