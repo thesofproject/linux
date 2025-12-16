@@ -2,11 +2,15 @@
   __balance_callbacks
   cpu_busy_with_softirqs
   memblock_end_of_DRAM
+  init_iova_domain
   set_next_entity
   __traceiter_android_rvh_before_do_sched_yield
   __traceiter_android_rvh_build_perf_domains
   __traceiter_android_rvh_cpu_capacity_show
   __traceiter_android_rvh_cpufreq_transition
+  __traceiter_android_rvh_iommu_alloc_insert_iova
+  __traceiter_android_rvh_iommu_iovad_init_alloc_algo
+  __traceiter_android_rvh_iommu_limit_align_shift
   __traceiter_android_vh_alter_mutex_list_add
   __traceiter_android_vh_cpu_cgroup_css_free
   __traceiter_android_vh_freq_qos_add_request
@@ -16,6 +20,9 @@
   __tracepoint_android_rvh_build_perf_domains
   __tracepoint_android_rvh_cpu_capacity_show
   __tracepoint_android_rvh_cpufreq_transition
+  __tracepoint_android_rvh_iommu_alloc_insert_iova
+  __tracepoint_android_rvh_iommu_iovad_init_alloc_algo
+  __tracepoint_android_rvh_iommu_limit_align_shift
   __tracepoint_android_vh_alter_mutex_list_add
   __tracepoint_android_vh_cpu_cgroup_css_free
   __tracepoint_android_vh_freq_qos_add_request
