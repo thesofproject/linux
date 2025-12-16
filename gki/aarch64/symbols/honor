@@ -57,6 +57,38 @@
   __tracepoint_android_vh_process_madvise
   __traceiter_android_vh_madvise_swapin_walk_pmd_entry
   __tracepoint_android_vh_madvise_swapin_walk_pmd_entry
+  mempool_exit
+  dm_register_target
+  dm_unregister_target
+  blk_crypto_evict_key
+  blk_crypto_derive_sw_secret
+  dm_shift_arg
+  dm_get_device
+  dm_put_device
+  dm_read_arg_group
+  dm_consume_args
+  bioset_init
+  dm_set_target_max_io_len
+  dm_per_bio_data
+  dm_bio_get_target_bio_nr
+  bioset_exit
+  dm_submit_bio_remap
+  dm_table_device_name
+  dm_table_event
+  empty_zero_page
+  dm_get_reserved_bio_based_ios
+  wait_for_completion_io
+  bio_crypt_set_ctx
+  zero_fill_bio_iter
+  errseq_set
+  filemap_invalidate_inode
+  iov_iter_folio_queue
+  mempool_init_noprof
+  netfs_write_subrequest_terminated
+  __filemap_set_wb_err
+  __trace_bputs
+  __traceiter_android_vh_f2fs_set_bio_flag
+  __tracepoint_android_vh_f2fs_set_bio_flag
   __traceiter_android_vh_ufs_eh_timed_out
   __tracepoint_android_vh_ufs_eh_timed_out
   __traceiter_android_vh_ufs_link_startup
@@ -81,5 +113,9 @@
   __traceiter_scsi_dispatch_cmd_start
   __tracepoint_scsi_dispatch_cmd_done
   __traceiter_scsi_dispatch_cmd_done
+  __tracepoint_f2fs_write_begin
+  __traceiter_f2fs_write_begin
   __tracepoint_android_vh_f2fs_printk
   __traceiter_android_vh_f2fs_printk
+  __tracepoint_android_vh_f2fs_create
+  __traceiter_android_vh_f2fs_create
