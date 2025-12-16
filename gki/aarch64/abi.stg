@@ -44302,6 +44302,12 @@ member {
   offset: 320
 }
 member {
+  id: 0xed7002b3
+  name: "android_vendor_data1"
+  type_id: 0x92233392
+  offset: 1024
+}
+member {
   id: 0xed7008ac
   name: "android_vendor_data1"
   type_id: 0x92233392
@@ -222693,7 +222699,7 @@ struct_union {
   kind: STRUCT
   name: "iova_domain"
   definition {
-    bytesize: 128
+    bytesize: 136
     member_id: 0x9e6e7abb
     member_id: 0x48f62bf3
     member_id: 0xd4933eac
@@ -222705,6 +222711,7 @@ struct_union {
     member_id: 0xccc355f4
     member_id: 0xe96b952a
     member_id: 0x3e96ca84
+    member_id: 0xed7002b3
   }
 }
 struct_union {
@@ -293973,6 +293980,25 @@ function {
   parameter_id: 0x945e7ef6
 }
 function {
+  id: 0x9b5d6db7
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x3f84ee3c
+  parameter_id: 0x33756485
+  parameter_id: 0x064d6086
+}
+function {
+  id: 0x9b5db5aa
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x3f84ee3c
+  parameter_id: 0x33756485
+  parameter_id: 0x33756485
+  parameter_id: 0x35304fb1
+  parameter_id: 0x6d7f5ff6
+  parameter_id: 0x13580d6c
+}
+function {
   id: 0x9b5e2574
   return_type_id: 0x6720d32f
   parameter_id: 0x1b7b196f
@@ -294676,6 +294702,13 @@ function {
   parameter_id: 0x0258f96e
   parameter_id: 0x3e10b518
   parameter_id: 0x6720d32f
+}
+function {
+  id: 0x9ba938bd
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x0258f96e
+  parameter_id: 0x3f84ee3c
 }
 function {
   id: 0x9ba95149
@@ -306692,6 +306725,33 @@ elf_symbol {
   full_name: "__traceiter_android_rvh_hw_protection_shutdown"
 }
 elf_symbol {
+  id: 0x0b1353da
+  name: "__traceiter_android_rvh_iommu_alloc_insert_iova"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x7a911b27
+  type_id: 0x9b5db5aa
+  full_name: "__traceiter_android_rvh_iommu_alloc_insert_iova"
+}
+elf_symbol {
+  id: 0x7edcea8d
+  name: "__traceiter_android_rvh_iommu_iovad_init_alloc_algo"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x68a570cc
+  type_id: 0x9ba938bd
+  full_name: "__traceiter_android_rvh_iommu_iovad_init_alloc_algo"
+}
+elf_symbol {
+  id: 0x72c43156
+  name: "__traceiter_android_rvh_iommu_limit_align_shift"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x83332a1b
+  type_id: 0x9b5d6db7
+  full_name: "__traceiter_android_rvh_iommu_limit_align_shift"
+}
+elf_symbol {
   id: 0x7c212080
   name: "__traceiter_android_rvh_is_cpu_allowed"
   is_defined: true
@@ -308454,6 +308514,33 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_rvh_hw_protection_shutdown"
+}
+elf_symbol {
+  id: 0x58127eb8
+  name: "__tracepoint_android_rvh_iommu_alloc_insert_iova"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_rvh_iommu_alloc_insert_iova"
+}
+elf_symbol {
+  id: 0x0991fcbf
+  name: "__tracepoint_android_rvh_iommu_iovad_init_alloc_algo"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_rvh_iommu_iovad_init_alloc_algo"
+}
+elf_symbol {
+  id: 0x693af5b0
+  name: "__tracepoint_android_rvh_iommu_limit_align_shift"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_rvh_iommu_limit_align_shift"
 }
 elf_symbol {
   id: 0x99d57c12
@@ -310638,7 +310725,7 @@ elf_symbol {
   name: "alloc_iova_fast"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xd9f9c2ad
+  crc: 0xfb2958a3
   type_id: 0x3e8d4bea
   full_name: "alloc_iova_fast"
 }
@@ -320736,7 +320823,7 @@ elf_symbol {
   name: "free_iova_fast"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x9580d2a9
+  crc: 0x105c749b
   type_id: 0x1fb862d7
   full_name: "free_iova_fast"
 }
@@ -323643,7 +323730,7 @@ elf_symbol {
   name: "init_iova_domain"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x6b35013d
+  crc: 0x25ceeb38
   type_id: 0x1fb862d7
   full_name: "init_iova_domain"
 }
@@ -324264,7 +324351,7 @@ elf_symbol {
   name: "iova_domain_init_rcaches"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x2dc1dbab
+  crc: 0xbe970fc6
   type_id: 0x9261d8a0
   full_name: "iova_domain_init_rcaches"
 }
@@ -331180,7 +331267,7 @@ elf_symbol {
   name: "put_iova_domain"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x447dd13b
+  crc: 0xa5a1a32b
   type_id: 0x1f796a1c
   full_name: "put_iova_domain"
 }
@@ -332404,7 +332491,7 @@ elf_symbol {
   name: "reserve_iova"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x1eedd3dc
+  crc: 0xb8a4034a
   type_id: 0x48135354
   full_name: "reserve_iova"
 }
@@ -341440,6 +341527,9 @@ interface {
   symbol_id: 0xa23fdad4
   symbol_id: 0xe443e259
   symbol_id: 0xf24e6a40
+  symbol_id: 0x0b1353da
+  symbol_id: 0x7edcea8d
+  symbol_id: 0x72c43156
   symbol_id: 0x7c212080
   symbol_id: 0x1ea5d323
   symbol_id: 0x0d22882d
@@ -341636,6 +341726,9 @@ interface {
   symbol_id: 0x555d2f3e
   symbol_id: 0x7fd0bf2f
   symbol_id: 0x1bf33aee
+  symbol_id: 0x58127eb8
+  symbol_id: 0x0991fcbf
+  symbol_id: 0x693af5b0
   symbol_id: 0x99d57c12
   symbol_id: 0x3cb4db49
   symbol_id: 0x62726c6f
