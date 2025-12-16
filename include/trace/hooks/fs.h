@@ -19,9 +19,18 @@ DECLARE_HOOK(android_vh_ep_create_wakeup_source,
 DECLARE_HOOK(android_vh_timerfd_create,
 	TP_PROTO(char *name, int len),
 	TP_ARGS(name, len));
+
 DECLARE_HOOK(android_vh_f2fs_printk,
 	TP_PROTO(unsigned long s_flag, struct va_format *vaf, int level, bool limit_rate),
 	TP_ARGS(s_flag, vaf, level, limit_rate));
+
+DECLARE_HOOK(android_vh_f2fs_create,
+	TP_PROTO(struct inode *inode, struct dentry *dentry),
+	TP_ARGS(inode, dentry));
+
+DECLARE_HOOK(android_vh_f2fs_set_bio_flag,
+	TP_PROTO(struct folio *folio, struct bio *bio),
+	TP_ARGS(folio, bio));
 
 #endif /* _TRACE_HOOK_FS_H */
 
