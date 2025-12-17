@@ -34,18 +34,20 @@
   put_disk
   runqueues
   sync_blockdev
+  __traceiter_android_rvh_die_kernel_fault
+  __traceiter_android_rvh_do_sp_pc_abort
+  __traceiter_android_rvh_report_bug
   __traceiter_android_vh_is_fpsimd_save
   __traceiter_console
   __traceiter_irq_handler_entry
   __traceiter_workqueue_execute_start
+  __tracepoint_android_rvh_die_kernel_fault
+  __tracepoint_android_rvh_do_sp_pc_abort
+  __tracepoint_android_rvh_report_bug
   __tracepoint_android_vh_is_fpsimd_save
-  __traceiter_android_vh_is_fpsimd_save
   __tracepoint_console
-  __traceiter_console
   __tracepoint_irq_handler_entry
-  __traceiter_irq_handler_entry
   __tracepoint_workqueue_execute_start
-  __traceiter_workqueue_execute_start
   unregister_console
   unregister_die_notifier
   unregister_restart_handler

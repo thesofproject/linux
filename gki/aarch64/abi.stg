@@ -296877,6 +296877,14 @@ function {
   parameter_id: 0x038de60c
 }
 function {
+  id: 0x9b46543b
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x3e10b518
+  parameter_id: 0x4585663f
+  parameter_id: 0x33756485
+}
+function {
   id: 0x9b4678d8
   return_type_id: 0x6720d32f
   parameter_id: 0x188b9e81
@@ -297173,6 +297181,15 @@ function {
   parameter_id: 0x3ea31487
 }
 function {
+  id: 0x9b5be873
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x3e10b518
+  parameter_id: 0x33756485
+  parameter_id: 0x33756485
+  parameter_id: 0x01222f7d
+}
+function {
   id: 0x9b5c8666
   return_type_id: 0x6720d32f
   parameter_id: 0x18a2fb63
@@ -297419,6 +297436,14 @@ function {
   parameter_id: 0x33756485
   parameter_id: 0x01222f7d
   parameter_id: 0x11cfee5a
+}
+function {
+  id: 0x9b6eb620
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x33756485
+  parameter_id: 0x33756485
+  parameter_id: 0x01222f7d
 }
 function {
   id: 0x9b6fa0ce
@@ -310112,6 +310137,15 @@ elf_symbol {
   full_name: "__traceiter_android_rvh_dequeue_task_fair"
 }
 elf_symbol {
+  id: 0xa3b41867
+  name: "__traceiter_android_rvh_die_kernel_fault"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x7dbba355
+  type_id: 0x9b5be873
+  full_name: "__traceiter_android_rvh_die_kernel_fault"
+}
+elf_symbol {
   id: 0x6e62463e
   name: "__traceiter_android_rvh_do_el1_fpac"
   is_defined: true
@@ -310137,6 +310171,15 @@ elf_symbol {
   crc: 0x7a5dd1bd
   type_id: 0x9b17b01e
   full_name: "__traceiter_android_rvh_do_sched_yield"
+}
+elf_symbol {
+  id: 0x76eb11ee
+  name: "__traceiter_android_rvh_do_sp_pc_abort"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xaba43e49
+  type_id: 0x9b6eb620
+  full_name: "__traceiter_android_rvh_do_sp_pc_abort"
 }
 elf_symbol {
   id: 0x255d03b3
@@ -310326,6 +310369,15 @@ elf_symbol {
   crc: 0xe6ed1777
   type_id: 0x9b14b1ec
   full_name: "__traceiter_android_rvh_replace_next_task_fair"
+}
+elf_symbol {
+  id: 0xaedef3a2
+  name: "__traceiter_android_rvh_report_bug"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xe54d56e0
+  type_id: 0x9b46543b
+  full_name: "__traceiter_android_rvh_report_bug"
 }
 elf_symbol {
   id: 0xbf64b0b6
@@ -312137,6 +312189,15 @@ elf_symbol {
   full_name: "__tracepoint_android_rvh_dequeue_task_fair"
 }
 elf_symbol {
+  id: 0x11f903b1
+  name: "__tracepoint_android_rvh_die_kernel_fault"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_rvh_die_kernel_fault"
+}
+elf_symbol {
   id: 0xcd81b300
   name: "__tracepoint_android_rvh_do_el1_fpac"
   is_defined: true
@@ -312162,6 +312223,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_rvh_do_sched_yield"
+}
+elf_symbol {
+  id: 0x1d7748c4
+  name: "__tracepoint_android_rvh_do_sp_pc_abort"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_rvh_do_sp_pc_abort"
 }
 elf_symbol {
   id: 0x6de60f21
@@ -312351,6 +312421,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_rvh_replace_next_task_fair"
+}
+elf_symbol {
+  id: 0x1a849f34
+  name: "__tracepoint_android_rvh_report_bug"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_rvh_report_bug"
 }
 elf_symbol {
   id: 0xeda5c5b0
@@ -346203,9 +346282,11 @@ interface {
   symbol_id: 0x8f1b1c1e
   symbol_id: 0xd6290b85
   symbol_id: 0x3e4ab4f6
+  symbol_id: 0xa3b41867
   symbol_id: 0x6e62463e
   symbol_id: 0x1bf82dcd
   symbol_id: 0x81449840
+  symbol_id: 0x76eb11ee
   symbol_id: 0x255d03b3
   symbol_id: 0x6682daab
   symbol_id: 0x24dfaeb0
@@ -346227,6 +346308,7 @@ interface {
   symbol_id: 0x8c494e33
   symbol_id: 0xeccbc3c1
   symbol_id: 0xe3e24295
+  symbol_id: 0xaedef3a2
   symbol_id: 0xbf64b0b6
   symbol_id: 0xb25ca194
   symbol_id: 0x53bf1227
@@ -346428,9 +346510,11 @@ interface {
   symbol_id: 0x3eb0f084
   symbol_id: 0x832ab9cf
   symbol_id: 0xaa8affb8
+  symbol_id: 0x11f903b1
   symbol_id: 0xcd81b300
   symbol_id: 0x7a6ec3db
   symbol_id: 0x411e7a56
+  symbol_id: 0x1d7748c4
   symbol_id: 0x6de60f21
   symbol_id: 0xf9b36d15
   symbol_id: 0xbade8646
@@ -346452,6 +346536,7 @@ interface {
   symbol_id: 0x50cc3541
   symbol_id: 0x50605d97
   symbol_id: 0x18bac297
+  symbol_id: 0x1a849f34
   symbol_id: 0xeda5c5b0
   symbol_id: 0x3cd58ada
   symbol_id: 0xad77fe31
