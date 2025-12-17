@@ -35,6 +35,9 @@ DECLARE_HOOK(android_vh_shrink_slab_bypass,
 DECLARE_HOOK(android_vh_check_folio_look_around_ref,
 	TP_PROTO(struct folio *folio, int *skip),
 	TP_ARGS(folio, skip));
+DECLARE_HOOK(android_vh_should_memcg_bypass,
+	TP_PROTO(struct mem_cgroup *memcg, int priority, bool *bypass),
+	TP_ARGS(memcg, priority, bypass));
 #endif /* _TRACE_HOOK_VMSCAN_H */
 /* This part must be outside protection */
 #include <trace/define_trace.h>
