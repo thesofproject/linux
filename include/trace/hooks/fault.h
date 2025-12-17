@@ -7,10 +7,19 @@
 #define _TRACE_HOOK_FAULT_H
 
 #include <trace/hooks/vendor_hooks.h>
+DECLARE_RESTRICTED_HOOK(android_rvh_die_kernel_fault,
+	TP_PROTO(const char *msg, unsigned long addr, unsigned long esr, struct pt_regs *regs),
+	TP_ARGS(msg, addr, esr, regs), 1);
+
 DECLARE_HOOK(android_vh_try_fixup_sea,
 	TP_PROTO(unsigned long addr, unsigned long esr, struct pt_regs *regs,
 		 bool *can_fixup),
 	TP_ARGS(addr, esr, regs, can_fixup));
+
+DECLARE_RESTRICTED_HOOK(android_rvh_do_sp_pc_abort,
+	TP_PROTO(unsigned long addr, unsigned long esr, struct pt_regs *regs),
+	TP_ARGS(addr, esr, regs),
+	TP_CONDITION(!user_mode(regs)));
 
 #endif /* _TRACE_HOOK_FAULT_H */
 /* This part must be outside protection */
