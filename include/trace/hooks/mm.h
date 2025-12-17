@@ -148,6 +148,15 @@ DECLARE_HOOK(android_vh_page_cache_ra_order_bypass,
 	TP_PROTO(struct readahead_control *ractl, struct file_ra_state *ra,
 		 int new_order, gfp_t *gfp, bool *bypass),
 	TP_ARGS(ractl, ra, new_order, gfp, bypass));
+DECLARE_HOOK(android_vh_alloc_pages_slowpath_start,
+	TP_PROTO(u64 *stime),
+	TP_ARGS(stime));
+DECLARE_HOOK(android_vh_alloc_pages_slowpath_end,
+	TP_PROTO(gfp_t *gfp_mask, unsigned int order, unsigned long alloc_start,
+		u64 stime, unsigned long did_some_progress,
+		unsigned long pages_reclaimed, int retry_loop_count),
+	TP_ARGS(gfp_mask, order, alloc_start, stime, did_some_progress,
+		pages_reclaimed, retry_loop_count));
 #endif /* _TRACE_HOOK_MM_H */
 
 /* This part must be outside protection */
