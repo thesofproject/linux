@@ -160,6 +160,9 @@ DECLARE_HOOK(android_vh_alloc_pages_slowpath_end,
 DECLARE_HOOK(android_vh_add_lazyfree_bypass,
 	TP_PROTO(struct lruvec *lruvec, struct folio *folio, bool *bypass),
 	TP_ARGS(lruvec, folio, bypass));
+DECLARE_HOOK(android_vh_oom_reaper_delay_bypass,
+	TP_PROTO(struct task_struct *tsk, bool *bypass),
+	TP_ARGS(tsk, bypass));
 #endif /* _TRACE_HOOK_MM_H */
 
 /* This part must be outside protection */
