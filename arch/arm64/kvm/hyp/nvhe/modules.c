@@ -224,6 +224,42 @@ static int __hyp_smp_processor_id(void)
 	return hyp_smp_processor_id();
 }
 
+static const struct pkvm_module_trng_ops *module_guest_trng_ops;
+
+static int __register_guest_trng_ops(const struct pkvm_module_trng_ops *ops)
+{
+	if (!ops->trng_uuid || !ops->trng_rnd64)
+		return -EINVAL;
+
+	if (cmpxchg64_relaxed(&module_guest_trng_ops, NULL, ops))
+		return -EBUSY;
+
+	return 0;
+}
+
+const uuid_t *module_get_guest_trng_uuid(void)
+{
+	const struct pkvm_module_trng_ops *ops;
+
+	ops = READ_ONCE(module_guest_trng_ops);
+	if (!ops)
+		return NULL;
+
+	return ops->trng_uuid;
+}
+
+
+u64 module_get_guest_trng_rng(u64 *entropy, int nbits)
+{
+	const struct pkvm_module_trng_ops *ops;
+
+	ops = READ_ONCE(module_guest_trng_ops);
+	if (!ops)
+		return SMCCC_RET_NOT_SUPPORTED;
+
+	return ops->trng_rnd64(entropy, nbits);
+}
+
 const struct pkvm_module_ops module_ops = {
 	.create_private_mapping = __pkvm_create_private_mapping,
 	.alloc_module_va = __pkvm_alloc_module_va,
@@ -285,6 +321,7 @@ const struct pkvm_module_ops module_ops = {
 	.init_hvc_pd = pkvm_init_hvc_pd,
 	.device_register_reset = pkvm_device_register_reset,
 	.iommu_register_pviommu_drv = kvm_iommu_register_pviommu_drv,
+	.register_guest_trng_ops = __register_guest_trng_ops,
 };
 
 static void *pkvm_module_hyp_va(struct pkvm_el2_module *mod, void *kern_va)
