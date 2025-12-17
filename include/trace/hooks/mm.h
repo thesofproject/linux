@@ -123,6 +123,9 @@ DECLARE_HOOK(android_vh_free_one_page_bypass,
 DECLARE_HOOK(android_vh_reserve_highatomic_bypass,
 	TP_PROTO(struct page *page, bool *bypass),
 	TP_ARGS(page, bypass));
+DECLARE_HOOK(android_vh_migration_target_bypass,
+	TP_PROTO(struct page *page, bool *bypass),
+	TP_ARGS(page, bypass));
 #endif /* _TRACE_HOOK_MM_H */
 
 /* This part must be outside protection */
