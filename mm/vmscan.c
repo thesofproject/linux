@@ -920,6 +920,8 @@ static enum folio_references folio_check_references(struct folio *folio,
 
 	trace_android_vh_page_should_be_protected(folio, sc->nr_scanned,
 		sc->priority, &ret);
+
+	trace_android_vh_check_folio_look_around_ref(folio, &ret);
 	if (ret)
 		return ret;
 
