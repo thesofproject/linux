@@ -24,6 +24,13 @@
   is_vmalloc_or_module_addr
   __show_mem
   __pte_offset_map_lock
+  try_to_free_mem_cgroup_pages
+  mem_cgroup_from_id
+  shrink_slab
+  root_mem_cgroup
+  __mod_lruvec_state
+  mem_cgroup_update_lru_size
+  folio_referenced
   __traceiter_android_vh_mem_cgroup_free
   __tracepoint_android_vh_mem_cgroup_free
   __traceiter_android_vh_mem_cgroup_alloc
@@ -130,6 +137,36 @@
   __tracepoint_android_vh_pagetypeinfo_show
   __traceiter_mm_vmscan_kswapd_wake
   __tracepoint_mm_vmscan_kswapd_wake
+  __traceiter_android_vh_shrink_slab_bypass
+  __tracepoint_android_vh_shrink_slab_bypass
+  __traceiter_android_vh_get_page_wmark
+  __tracepoint_android_vh_get_page_wmark
+  __traceiter_android_vh_page_add_new_anon_rmap
+  __tracepoint_android_vh_page_add_new_anon_rmap
+  __traceiter_android_vh_check_folio_look_around_ref
+  __tracepoint_android_vh_check_folio_look_around_ref
+  __traceiter_android_vh_look_around
+  __tracepoint_android_vh_look_around
+  __traceiter_android_vh_look_around_migrate_folio
+  __tracepoint_android_vh_look_around_migrate_folio
+  __traceiter_android_vh_test_clear_look_around_ref
+  __tracepoint_android_vh_test_clear_look_around_ref
+  __traceiter_android_vh_killed_process
+  __tracepoint_android_vh_killed_process
+  __traceiter_android_vh_free_unref_page_bypass
+  __tracepoint_android_vh_free_unref_page_bypass
+  __traceiter_android_vh_kvmalloc_node_use_vmalloc
+  __tracepoint_android_vh_kvmalloc_node_use_vmalloc
+  __traceiter_android_vh_should_alloc_pages_retry
+  __tracepoint_android_vh_should_alloc_pages_retry
+  __traceiter_android_vh_unreserve_highatomic_bypass
+  __tracepoint_android_vh_unreserve_highatomic_bypass
+  __traceiter_android_vh_rmqueue_bulk_bypass
+  __tracepoint_android_vh_rmqueue_bulk_bypass
+  __traceiter_android_vh_should_memcg_bypass
+  __tracepoint_android_vh_should_memcg_bypass
+  __traceiter_android_vh_cma_alloc_retry
+  __tracepoint_android_vh_cma_alloc_retry
   __traceiter_android_vh_ufs_eh_timed_out
   __tracepoint_android_vh_ufs_eh_timed_out
   __traceiter_android_vh_ufs_link_startup
