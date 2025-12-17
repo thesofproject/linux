@@ -36,6 +36,9 @@
 #include "internal.h"
 #include "cma.h"
 
+#undef CREATE_TRACE_POINTS
+#include <trace/hooks/mm.h>
+
 struct cma cma_areas[MAX_CMA_AREAS];
 unsigned int cma_area_count;
 
@@ -799,6 +802,7 @@ static int cma_range_alloc(struct cma *cma, struct cma_memrange *cmr,
 	if (bitmap_count > bitmap_maxno)
 		goto out;
 
+	trace_android_vh_cma_alloc_retry(cma->name, &max_retries);
 	for (start = 0; ; start = bitmap_no + mask + 1) {
 		spin_lock_irq(&cma->lock);
 		/*
