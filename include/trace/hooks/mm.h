@@ -126,6 +126,9 @@ DECLARE_HOOK(android_vh_reserve_highatomic_bypass,
 DECLARE_HOOK(android_vh_migration_target_bypass,
 	TP_PROTO(struct page *page, bool *bypass),
 	TP_ARGS(page, bypass));
+DECLARE_HOOK(android_vh_watermark_fast_ok,
+	TP_PROTO(unsigned int order, gfp_t gfp_mask, bool *is_watermark_ok),
+	TP_ARGS(order, gfp_mask, is_watermark_ok));
 #endif /* _TRACE_HOOK_MM_H */
 
 /* This part must be outside protection */
