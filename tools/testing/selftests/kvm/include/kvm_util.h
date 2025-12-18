@@ -144,11 +144,8 @@ struct vcpu_reg_list {
 #define for_each_sublist(c, s)		\
 	for ((s) = &(c)->sublists[0]; (s)->regs; ++(s))
 
-#define kvm_for_each_vcpu(vm, i, vcpu)			\
-	for ((i) = 0; (i) <= (vm)->last_vcpu_id; (i)++)	\
-		if (!((vcpu) = vm->vcpus[i]))		\
-			continue;			\
-		else
+#define kvm_for_each_vcpu(vm, vcpu)			\
+	list_for_each_entry((vcpu), &(vm)->vcpus, list)
 
 struct userspace_mem_region *
 memslot2region(struct kvm_vm *vm, uint32_t memslot);
