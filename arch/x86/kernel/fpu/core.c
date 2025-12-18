@@ -29,7 +29,7 @@
 #define CREATE_TRACE_POINTS
 #include <asm/trace/fpu.h>
 
-#if defined(CONFIG_X86_64) && !defined(__PKVM_HYP__)
+#ifdef CONFIG_X86_64
 DEFINE_STATIC_KEY_FALSE(__fpu_state_size_dynamic);
 DEFINE_PER_CPU(u64, xfd_state);
 #endif
@@ -217,8 +217,10 @@ void fpu_reset_from_exception_fixup(void)
 {
 	restore_fpregs_from_fpstate(&init_fpstate, XFEATURE_MASK_FPSTATE);
 }
+#endif /* !__PKVM_HYP__ */
 
 #if IS_ENABLED(CONFIG_KVM)
+#ifndef __PKVM_HYP__
 static void __fpstate_reset(struct fpstate *fpstate);
 
 static void fpu_lock_guest_permissions(void)
@@ -315,13 +317,16 @@ int fpu_enable_guest_xfd_features(struct fpu_guest *guest_fpu, u64 xfeatures)
 	return __xfd_enable_feature(xfeatures, guest_fpu);
 }
 EXPORT_SYMBOL_GPL(fpu_enable_guest_xfd_features);
+#endif /* !__PKVM_HYP__ */
 
 #ifdef CONFIG_X86_64
 void fpu_update_guest_xfd(struct fpu_guest *guest_fpu, u64 xfd)
 {
 	struct fpstate *fpstate = guest_fpu->fpstate;
 
+#ifndef __PKVM_HYP__
 	fpregs_lock();
+#endif
 
 	/*
 	 * KVM's guest ABI is that setting XFD[i]=1 *can* immediately revert the
@@ -342,10 +347,13 @@ void fpu_update_guest_xfd(struct fpu_guest *guest_fpu, u64 xfd)
 	if (fpstate->in_use)
 		xfd_update_state(fpstate);
 
+#ifndef __PKVM_HYP__
 	fpregs_unlock();
+#endif
 }
 EXPORT_SYMBOL_GPL(fpu_update_guest_xfd);
 
+#ifndef __PKVM_HYP__
 /**
  * fpu_sync_guest_vmexit_xfd_state - Synchronize XFD MSR and software state
  *
@@ -369,8 +377,10 @@ void fpu_sync_guest_vmexit_xfd_state(void)
 	}
 }
 EXPORT_SYMBOL_GPL(fpu_sync_guest_vmexit_xfd_state);
+#endif /* !__PKVM_HYP__ */
 #endif /* CONFIG_X86_64 */
 
+#ifndef __PKVM_HYP__
 int fpu_swap_kvm_fpstate(struct fpu_guest *guest_fpu, bool enter_guest)
 {
 	struct fpstate *guest_fps = guest_fpu->fpstate;
@@ -467,8 +477,10 @@ int fpu_copy_uabi_to_guest_fpstate(struct fpu_guest *gfpu, const void *buf,
 	return copy_uabi_from_kernel_to_xstate(kstate, ustate, vpkru);
 }
 EXPORT_SYMBOL_GPL(fpu_copy_uabi_to_guest_fpstate);
+#endif /* !__PKVM_HYP__ */
 #endif /* CONFIG_KVM */
 
+#ifndef __PKVM_HYP__
 void kernel_fpu_begin_mask(unsigned int kfpu_mask)
 {
 	if (!irqs_disabled())

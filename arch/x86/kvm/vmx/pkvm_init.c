@@ -86,6 +86,10 @@ static __init void pkvm_setup_syms(void)
 	pkvm_sym(nr_cpu_ids) = nr_cpu_ids;
 	pkvm_sym(fpu_kernel_cfg) = fpu_kernel_cfg;
 	pkvm_sym(fpu_user_cfg) = fpu_user_cfg;
+#ifdef CONFIG_X86_64
+	if (static_branch_unlikely(&__fpu_state_size_dynamic))
+		static_branch_enable(&pkvm_sym(__fpu_state_size_dynamic));
+#endif
 	pkvm_sym(x86_pred_cmd) = x86_pred_cmd;
 }
 
