@@ -182,6 +182,7 @@
   __traceiter_android_vh_setscheduler_uclamp
   __traceiter_android_vh_slab_folio_alloced
   __traceiter_android_vh_sync_txn_recvd
+  __traceiter_android_vh_tune_mmap_readaround
   __traceiter_android_vh_tune_scan_type
   __traceiter_android_vh_update_topology_flags_workfn
   __traceiter_cpu_frequency_limits
@@ -296,6 +297,7 @@
   __tracepoint_android_vh_setscheduler_uclamp
   __tracepoint_android_vh_slab_folio_alloced
   __tracepoint_android_vh_sync_txn_recvd
+  __tracepoint_android_vh_tune_mmap_readaround
   __tracepoint_android_vh_tune_scan_type
   __tracepoint_android_vh_update_topology_flags_workfn
   __tracepoint_cpu_frequency_limits
