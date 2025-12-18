@@ -95,24 +95,31 @@ static int handle_read_msr(struct kvm_vcpu *vcpu)
 static int handle_write_msr(struct kvm_vcpu *vcpu)
 {
 	unsigned long msr = vcpu->arch.regs[VCPU_REGS_RCX];
+	int ret = X86EMUL_CONTINUE;
 	u32 low, high;
-
-	/*
-	 * The MSR writing bitmap doesn't intercept any MSR. If the vmexit is
-	 * caused by such MSR in the range of the bitmap, it should be a code
-	 * bug.
-	 */
-	BUG_ON(is_msr_in_bitmap_range(msr));
 
 	low = vcpu->arch.regs[VCPU_REGS_RAX];
 	high = vcpu->arch.regs[VCPU_REGS_RDX];
 
-	if (wrmsr_safe(msr, low, high)) {
-		kvm_inject_gp(vcpu, 0);
-		return X86EMUL_UNHANDLEABLE;
+	switch (msr) {
+	default:
+		/*
+		 * The MSRs intercepted by the writing bitmap should be
+		 * emulated by the switch cases. Otherwise it should be a code
+		 * bug.
+		 */
+		BUG_ON(is_msr_in_bitmap_range(msr));
+
+		if (wrmsr_safe(msr, low, high))
+			ret = X86EMUL_UNHANDLEABLE;
+
+		break;
 	}
 
-	return X86EMUL_CONTINUE;
+	if (ret == X86EMUL_UNHANDLEABLE)
+		kvm_inject_gp(vcpu, 0);
+
+	return ret;
 }
 
 static void handle_xsetbv(struct kvm_vcpu *vcpu)
