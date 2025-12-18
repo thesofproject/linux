@@ -195,6 +195,7 @@ struct vm_shape {
 kvm_static_assert(sizeof(struct vm_shape) == sizeof(uint64_t));
 
 #define VM_TYPE_DEFAULT			0
+#define VM_TYPE_PROTECTED		1
 
 #define VM_SHAPE(__mode)			\
 ({						\
