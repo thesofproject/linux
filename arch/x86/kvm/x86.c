@@ -85,6 +85,11 @@
 #include <asm/sgx.h>
 #include <clocksource/hyperv_timer.h>
 
+#ifdef __PKVM_HYP__
+#undef module_param_named
+#define module_param_named(...)
+#endif
+
 #define CREATE_TRACE_POINTS
 #include "trace.h"
 
@@ -109,6 +114,7 @@ EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_host);
 
 #define emul_to_vcpu(ctxt) \
 	((struct kvm_vcpu *)(ctxt)->vcpu)
+#endif /* !__PKVM_HYP__ */
 
 /* EFER defaults:
  * - enable syscall per default because its emulated by KVM
@@ -121,6 +127,7 @@ u64 __read_mostly efer_reserved_bits = ~((u64)(EFER_SCE | EFER_LME | EFER_LMA));
 static u64 __read_mostly efer_reserved_bits = ~((u64)EFER_SCE);
 #endif
 
+#ifndef __PKVM_HYP__
 #define KVM_EXIT_HYPERCALL_VALID_MASK (1 << KVM_HC_MAP_GPA_RANGE)
 
 #define KVM_CAP_PMU_VALID_MASK KVM_PMU_CAP_DISABLE
@@ -185,18 +192,21 @@ module_param(force_emulation_prefix, int, 0644);
 
 int __read_mostly pi_inject_timer = -1;
 module_param(pi_inject_timer, bint, 0644);
+#endif /* !__PKVM_HYP__ */
 
 /* Enable/disable PMU virtualization */
 bool __read_mostly enable_pmu = true;
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(enable_pmu);
 module_param(enable_pmu, bool, 0444);
 
+#ifndef __PKVM_HYP__
 bool __read_mostly eager_page_split = true;
 module_param(eager_page_split, bool, 0644);
 
 /* Enable/disable SMT_RSB bug mitigation */
 static bool __read_mostly mitigate_smt_rsb;
 module_param(mitigate_smt_rsb, bool, 0444);
+#endif /* !__PKVM_HYP__ */
 
 /*
  * Restoring the host value for MSRs that are only consumed when running in
@@ -217,7 +227,9 @@ struct kvm_user_return_msrs {
 u32 __read_mostly kvm_nr_uret_msrs;
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_nr_uret_msrs);
 static u32 __read_mostly kvm_uret_msrs_list[KVM_MAX_NR_USER_RETURN_MSRS];
+#ifndef __PKVM_HYP__
 static struct kvm_user_return_msrs __percpu *user_return_msrs;
+#endif /* !__PKVM_HYP__ */
 
 bool __read_mostly allow_smaller_maxphyaddr = 0;
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(allow_smaller_maxphyaddr);
@@ -231,6 +243,7 @@ EXPORT_SYMBOL_FOR_KVM_INTERNAL(enable_ipiv);
 bool __read_mostly enable_device_posted_irqs = true;
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(enable_device_posted_irqs);
 
+#ifndef __PKVM_HYP__
 const struct _kvm_stats_desc kvm_vm_stats_desc[] = {
 	KVM_GENERIC_VM_STATS(),
 	STATS_DESC_COUNTER(VM, mmu_shadow_zapped),
@@ -592,6 +605,7 @@ static void kvm_on_user_return(struct user_return_notifier *urn)
 		}
 	}
 }
+#endif /* !__PKVM_HYP__ */
 
 static int kvm_probe_user_return_msr(u32 msr)
 {
@@ -632,6 +646,7 @@ int kvm_find_user_return_msr(u32 msr)
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_find_user_return_msr);
 
+#ifndef __PKVM_HYP__
 static void kvm_user_return_msr_cpu_online(void)
 {
 	struct kvm_user_return_msrs *msrs = this_cpu_ptr(user_return_msrs);
@@ -1789,6 +1804,7 @@ static int set_efer(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 
 	return 0;
 }
+#endif /* !__PKVM_HYP__ */
 
 void kvm_enable_efer_bits(u64 mask)
 {
@@ -1796,6 +1812,7 @@ void kvm_enable_efer_bits(u64 mask)
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_enable_efer_bits);
 
+#ifndef __PKVM_HYP__
 bool kvm_msr_allowed(struct kvm_vcpu *vcpu, u32 index, u32 type)
 {
 	struct kvm_x86_msr_filter *msr_filter;

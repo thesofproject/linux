@@ -1012,8 +1012,8 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 };
 
 struct kvm_x86_init_ops vt_init_ops __initdata = {
-#ifndef __PKVM_HYP__
 	.hardware_setup = vt_op(hardware_setup),
+#ifndef __PKVM_HYP__
 	.handle_intel_pt_intr = NULL,
 #endif
 
