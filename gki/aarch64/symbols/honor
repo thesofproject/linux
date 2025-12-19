@@ -195,6 +195,8 @@
   __traceiter_ufshcd_profile_clk_scaling
   __tracepoint_ufshcd_profile_clk_gating
   __traceiter_ufshcd_profile_clk_gating
+  __traceiter_android_rvh_cpuinfo_c_show
+  __tracepoint_android_rvh_cpuinfo_c_show
   __tracepoint_scsi_dispatch_cmd_start
   __traceiter_scsi_dispatch_cmd_start
   __tracepoint_scsi_dispatch_cmd_done
