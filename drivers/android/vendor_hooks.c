@@ -181,6 +181,8 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_tcp_v4_connect);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_tcp_v6_connect);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_udp_v4_connect);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_udp_v6_connect);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_sk_alloc);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_sk_free);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_tcp_write_timeout_estab_retrans);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_ftrace_oops_enter);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_ftrace_oops_exit);
