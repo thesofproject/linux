@@ -1,5 +1,7 @@
   __tracepoint_android_vh_security_audit_log_setid
   __traceiter_android_vh_security_audit_log_setid
+  __traceiter_android_vh_sk_alloc
+  __tracepoint_android_vh_sk_alloc
   __traceiter_android_vh_tcp_v4_connect
   __tracepoint_android_vh_tcp_v4_connect
   __traceiter_android_vh_tcp_v6_connect
