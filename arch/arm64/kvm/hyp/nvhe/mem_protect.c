@@ -385,6 +385,10 @@ int __pkvm_guest_relinquish_to_host(struct pkvm_hyp_vcpu *vcpu,
 	addr = ALIGN_DOWN(ipa, kvm_granule_size(level));
 	phys = kvm_pte_to_phys(pte);
 	phys += ipa - addr;
+	if (!addr_is_memory(phys)) {
+		ret = -EPERM;
+		goto end;
+	}
 	/* page might be used for DMA! */
 	if (hyp_page_count(hyp_phys_to_virt(phys))) {
 		ret = -EBUSY;
