@@ -163,6 +163,8 @@
   __tracepoint_android_vh_test_clear_look_around_ref
   __traceiter_android_vh_killed_process
   __tracepoint_android_vh_killed_process
+  __traceiter_android_vh_thaw_killed_process
+  __tracepoint_android_vh_thaw_killed_process
   __traceiter_android_vh_free_unref_page_bypass
   __tracepoint_android_vh_free_unref_page_bypass
   __traceiter_android_vh_kvmalloc_node_use_vmalloc
