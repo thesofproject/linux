@@ -402,6 +402,8 @@ static int __vcpu_create(struct kvm *kvm, struct kvm_vcpu *vcpu, struct fpstate 
 		vcpu->arch.perf_capabilities = kvm_caps.supported_perf_cap;
 	}
 
+	vcpu->arch.walk_mmu = &vcpu->arch.root_mmu;
+
 	ret = kvm_x86_call(vcpu_create)(vcpu);
 	if (ret)
 		goto unsetup_lapic;
@@ -727,6 +729,43 @@ static int pkvm_set_msr(struct kvm_vcpu *vcpu, u32 index, u64 data)
 	return kvm_msr_write(vcpu, index, data);
 }
 
+static int pkvm_cache_reg(struct kvm_vcpu *vcpu, enum kvm_reg reg,
+			  union pkvm_hc_data *out)
+{
+	kvm_x86_call(cache_reg)(vcpu, reg);
+
+	switch (reg) {
+	case VCPU_REGS_RSP:
+		out->cache_reg.rsp = vcpu->arch.regs[VCPU_REGS_RSP];
+		break;
+	case VCPU_REGS_RIP:
+		out->cache_reg.rip = vcpu->arch.regs[VCPU_REGS_RIP];
+		break;
+	case VCPU_EXREG_PDPTR: {
+		struct kvm_mmu *mmu = vcpu->arch.walk_mmu;
+
+		out->cache_reg.pdptrs[0] = mmu->pdptrs[0];
+		out->cache_reg.pdptrs[1] = mmu->pdptrs[1];
+		out->cache_reg.pdptrs[2] = mmu->pdptrs[2];
+		out->cache_reg.pdptrs[3] = mmu->pdptrs[3];
+		break;
+	}
+	case VCPU_EXREG_CR0:
+		out->cache_reg.cr0 = vcpu->arch.cr0;
+		break;
+	case VCPU_EXREG_CR3:
+		out->cache_reg.cr3 = vcpu->arch.cr3;
+		break;
+	case VCPU_EXREG_CR4:
+		out->cache_reg.cr4 = vcpu->arch.cr4;
+		break;
+	default:
+		return -EOPNOTSUPP;
+	}
+
+	return 0;
+}
+
 static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc hc,
 					   union pkvm_hc_data *out)
 {
@@ -756,6 +795,9 @@ static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc 
 		break;
 	case __pkvm__get_msr:
 		ret = kvm_msr_read(vcpu, pkvm_hc_input1(hvcpu), &out->get_msr.data);
+		break;
+	case __pkvm__cache_reg:
+		ret = pkvm_cache_reg(vcpu, pkvm_hc_input1(hvcpu), out);
 		break;
 	default:
 		ret = -EINVAL;

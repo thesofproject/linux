@@ -29,6 +29,7 @@ PKVM_HC(update_exception_bitmap)
 PKVM_HC(set_efer)
 PKVM_HC(set_msr)
 PKVM_HC_OUT(get_msr)
+PKVM_HC_OUT(cache_reg)
 
 #undef PKVM_HC
 #undef PKVM_HC_OUT
