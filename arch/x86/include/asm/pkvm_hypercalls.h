@@ -34,6 +34,7 @@ PKVM_HC(set_cr4)
 PKVM_HC(set_cr0)
 PKVM_HC_OUT(get_rflags)
 PKVM_HC(set_rflags)
+PKVM_HC(set_dr7)
 
 #undef PKVM_HC
 #undef PKVM_HC_OUT
