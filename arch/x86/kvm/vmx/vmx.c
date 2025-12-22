@@ -117,10 +117,10 @@ module_param_named(unrestricted_guest,
 bool __read_mostly enable_ept_ad_bits = 1;
 module_param_named(eptad, enable_ept_ad_bits, bool, 0444);
 
-#ifndef __PKVM_HYP__
 static bool __read_mostly emulate_invalid_guest_state = true;
 module_param(emulate_invalid_guest_state, bool, 0444);
 
+#ifndef __PKVM_HYP__
 static bool __read_mostly fasteoi = 1;
 module_param(fasteoi, bool, 0444);
 
@@ -166,20 +166,18 @@ module_param_named(preemption_timer, enable_preemption_timer, bool, S_IRUGO);
 extern bool __read_mostly allow_smaller_maxphyaddr;
 module_param(allow_smaller_maxphyaddr, bool, S_IRUGO);
 
-#ifndef __PKVM_HYP__
 #define KVM_VM_CR0_ALWAYS_OFF (X86_CR0_NW | X86_CR0_CD)
 #define KVM_VM_CR0_ALWAYS_ON_UNRESTRICTED_GUEST X86_CR0_NE
 #define KVM_VM_CR0_ALWAYS_ON				\
 	(KVM_VM_CR0_ALWAYS_ON_UNRESTRICTED_GUEST | X86_CR0_PG | X86_CR0_PE)
-#endif /* !__PKVM_HYP__ */
 
 #define KVM_VM_CR4_ALWAYS_ON_UNRESTRICTED_GUEST X86_CR4_VMXE
 #define KVM_PMODE_VM_CR4_ALWAYS_ON (X86_CR4_PAE | X86_CR4_VMXE)
 #define KVM_RMODE_VM_CR4_ALWAYS_ON (X86_CR4_VME | X86_CR4_PAE | X86_CR4_VMXE)
 
-#ifndef __PKVM_HYP__
 #define RMODE_GUEST_OWNED_EFLAGS_BITS (~(X86_EFLAGS_IOPL | X86_EFLAGS_VM))
 
+#ifndef __PKVM_HYP__
 #define MSR_IA32_RTIT_STATUS_MASK (~(RTIT_STATUS_FILTEREN | \
 	RTIT_STATUS_CONTEXTEN | RTIT_STATUS_TRIGGEREN | \
 	RTIT_STATUS_ERROR | RTIT_STATUS_STOPPED | \
@@ -433,9 +431,11 @@ static const struct kernel_param_ops vmentry_l1d_flush_ops = {
 	.get = vmentry_l1d_flush_get,
 };
 module_param_cb(vmentry_l1d_flush, &vmentry_l1d_flush_ops, NULL, 0644);
+#endif /* !__PKVM_HYP__ */
 
 static u32 vmx_segment_access_rights(struct kvm_segment *var);
 
+#ifndef __PKVM_HYP__
 void vmx_vmexit(void);
 #endif /* !__PKVM_HYP__ */
 
@@ -514,7 +514,6 @@ static DEFINE_PKVM_SPINLOCK(vmx_vpid_lock);
 struct vmcs_config vmcs_config __ro_after_init;
 struct vmx_capability vmx_capability __ro_after_init;
 
-#ifndef __PKVM_HYP__
 #define VMX_SEGMENT_FIELD(seg)					\
 	[VCPU_SREG_##seg] = {                                   \
 		.selector = GUEST_##seg##_SELECTOR,		\
@@ -538,8 +537,6 @@ static const struct kvm_vmx_segment_field {
 	VMX_SEGMENT_FIELD(TR),
 	VMX_SEGMENT_FIELD(LDTR),
 };
-
-#endif /* !__PKVM_HYP__ */
 
 static unsigned long host_idt_base;
 
@@ -812,6 +809,7 @@ void loaded_vmcs_clear(struct loaded_vmcs *loaded_vmcs)
 		smp_call_function_single(cpu,
 			 __loaded_vmcs_clear, loaded_vmcs, 1);
 }
+#endif /* !__PKVM_HYP__ */
 
 static bool vmx_segment_cache_test_set(struct vcpu_vmx *vmx, unsigned seg,
 				       unsigned field)
@@ -863,7 +861,6 @@ static u32 vmx_read_guest_seg_ar(struct vcpu_vmx *vmx, unsigned seg)
 		*p = vmcs_read32(kvm_vmx_segment_fields[seg].ar_bytes);
 	return *p;
 }
-#endif /* !__PKVM_HYP__ */
 
 void vmx_update_exception_bitmap(struct kvm_vcpu *vcpu)
 {
@@ -1590,7 +1587,6 @@ void vmx_vcpu_put(struct kvm_vcpu *vcpu)
 #endif
 }
 
-#ifndef __PKVM_HYP__
 bool vmx_emulation_required(struct kvm_vcpu *vcpu)
 {
 	return emulate_invalid_guest_state && !vmx_guest_state_valid(vcpu);
@@ -1614,6 +1610,7 @@ unsigned long vmx_get_rflags(struct kvm_vcpu *vcpu)
 	return vmx->rflags;
 }
 
+#ifndef __PKVM_HYP__
 void vmx_set_rflags(struct kvm_vcpu *vcpu, unsigned long rflags)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
@@ -3249,6 +3246,7 @@ static __init int alloc_kvm_area(void)
 	}
 	return 0;
 }
+#endif /* !__PKVM_HYP__ */
 
 static void fix_pmode_seg(struct kvm_vcpu *vcpu, int seg,
 		struct kvm_segment *save)
@@ -3386,7 +3384,6 @@ static void enter_rmode(struct kvm_vcpu *vcpu)
 	fix_rmode_seg(VCPU_SREG_GS, &vmx->rmode.segs[VCPU_SREG_GS]);
 	fix_rmode_seg(VCPU_SREG_FS, &vmx->rmode.segs[VCPU_SREG_FS]);
 }
-#endif /* !__PKVM_HYP__ */
 
 int vmx_set_efer(struct kvm_vcpu *vcpu, u64 efer)
 {
@@ -3411,7 +3408,6 @@ int vmx_set_efer(struct kvm_vcpu *vcpu, u64 efer)
 	return 0;
 }
 
-#ifndef __PKVM_HYP__
 #ifdef CONFIG_X86_64
 
 static void enter_lmode(struct kvm_vcpu *vcpu)
@@ -3422,8 +3418,10 @@ static void enter_lmode(struct kvm_vcpu *vcpu)
 
 	guest_tr_ar = vmcs_read32(GUEST_TR_AR_BYTES);
 	if ((guest_tr_ar & VMX_AR_TYPE_MASK) != VMX_AR_TYPE_BUSY_64_TSS) {
+#ifdef CONFIG_PKVM_X86_DEBUG
 		pr_debug_ratelimited("%s: tss fixup for long mode. \n",
 				     __func__);
+#endif
 		vmcs_write32(GUEST_TR_AR_BYTES,
 			     (guest_tr_ar & ~VMX_AR_TYPE_MASK)
 			     | VMX_AR_TYPE_BUSY_64_TSS);
@@ -3438,6 +3436,7 @@ static void exit_lmode(struct kvm_vcpu *vcpu)
 
 #endif
 
+#ifndef __PKVM_HYP__
 void vmx_flush_tlb_all(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
@@ -3536,7 +3535,6 @@ void ept_save_pdptrs(struct kvm_vcpu *vcpu)
 	kvm_register_mark_available(vcpu, VCPU_EXREG_PDPTR);
 }
 
-#ifndef __PKVM_HYP__
 #define CR3_EXITING_BITS (CPU_BASED_CR3_LOAD_EXITING | \
 			  CPU_BASED_CR3_STORE_EXITING)
 
@@ -3640,6 +3638,7 @@ void vmx_set_cr0(struct kvm_vcpu *vcpu, unsigned long cr0)
 	vmx->vt.emulation_required = vmx_emulation_required(vcpu);
 }
 
+#ifndef __PKVM_HYP__
 static int vmx_get_max_ept_level(void)
 {
 	if (cpu_has_vmx_ept_5levels())
@@ -3775,7 +3774,6 @@ void vmx_set_cr4(struct kvm_vcpu *vcpu, unsigned long cr4)
 		vcpu->arch.cpuid_dynamic_bits_dirty = true;
 }
 
-#ifndef __PKVM_HYP__
 void vmx_get_segment(struct kvm_vcpu *vcpu, struct kvm_segment *var, int seg)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
@@ -3812,6 +3810,7 @@ void vmx_get_segment(struct kvm_vcpu *vcpu, struct kvm_segment *var, int seg)
 	var->g = (ar >> 15) & 1;
 }
 
+#ifndef __PKVM_HYP__
 u64 vmx_get_segment_base(struct kvm_vcpu *vcpu, int seg)
 {
 	struct kvm_segment s;
@@ -3847,6 +3846,7 @@ int vmx_get_cpl_no_cache(struct kvm_vcpu *vcpu)
 {
 	return __vmx_get_cpl(vcpu, true);
 }
+#endif /* !__PKVM_HYP__ */
 
 static u32 vmx_segment_access_rights(struct kvm_segment *var)
 {
@@ -3902,6 +3902,7 @@ void __vmx_set_segment(struct kvm_vcpu *vcpu, struct kvm_segment *var, int seg)
 	vmcs_write32(sf->ar_bytes, vmx_segment_access_rights(var));
 }
 
+#ifndef __PKVM_HYP__
 void vmx_set_segment(struct kvm_vcpu *vcpu, struct kvm_segment *var, int seg)
 {
 	__vmx_set_segment(vcpu, var, seg);
@@ -3940,6 +3941,7 @@ void vmx_set_gdt(struct kvm_vcpu *vcpu, struct desc_ptr *dt)
 	vmcs_write32(GUEST_GDTR_LIMIT, dt->size);
 	vmcs_writel(GUEST_GDTR_BASE, dt->address);
 }
+#endif /* !__PKVM_HYP__ */
 
 static bool rmode_segment_valid(struct kvm_vcpu *vcpu, int seg)
 {
@@ -4134,6 +4136,7 @@ bool __vmx_guest_state_valid(struct kvm_vcpu *vcpu)
 	return true;
 }
 
+#ifndef __PKVM_HYP__
 static int init_rmode_tss(struct kvm *kvm, void __user *ua)
 {
 	const void *zero_page = (const void *) __va(page_to_phys(ZERO_PAGE(0)));
