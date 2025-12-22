@@ -805,6 +805,34 @@
   its_restore_enable
   its_save_disable
 
+# required by samsung-iommu-group-v9.ko
+  iommu_group_alloc
+  iommu_group_set_name
+
+# required by samsung_iommu_v9.ko
+  device_link_add
+  device_link_del
+  dev_iommu_priv_set
+  iommu_alloc_resv_region
+  iommu_device_register
+  iommu_device_sysfs_add
+  iommu_device_sysfs_remove
+  iommu_fwspec_add_ids
+  iommu_group_for_each_dev
+  iommu_group_get
+  iommu_group_get_iommudata
+  iommu_group_set_iommudata
+  of_find_node_with_property
+  rb_prev
+  __traceiter_android_rvh_iommu_alloc_insert_iova
+  __traceiter_android_rvh_iommu_dma_info_to_prot
+  __traceiter_android_rvh_iommu_iovad_init_alloc_algo
+  __traceiter_android_rvh_iommu_limit_align_shift
+  __tracepoint_android_rvh_iommu_alloc_insert_iova
+  __tracepoint_android_rvh_iommu_dma_info_to_prot
+  __tracepoint_android_rvh_iommu_iovad_init_alloc_algo
+  __tracepoint_android_rvh_iommu_limit_align_shift
+
 # required by zsmalloc.ko
   copy_page
   dec_zone_page_state
