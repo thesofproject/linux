@@ -1026,6 +1026,26 @@
   iommu_group_alloc
   iommu_group_set_name
 
+# required by samsung-secure-iova.ko
+  gen_pool_first_fit_align
+
+# required by samsung_dma_heap.ko
+  anon_inode_getfile
+  contig_page_data
+  dma_buf_export
+  dma_heap_add
+  dma_heap_get_dev
+  dma_heap_get_drvdata
+  dma_heap_get_name
+  dma_map_sgtable
+  is_dma_buf_file
+  kstrtoul_from_user
+  mod_node_page_state
+  sched_set_normal
+  __traceiter_android_vh_show_mem
+  __tracepoint_android_vh_show_mem
+  vm_insert_page
+
 # required by samsung_iommu_v9.ko
   device_link_add
   device_link_del
