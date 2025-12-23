@@ -1587,7 +1587,8 @@ static int map_create(union bpf_attr *attr, bpfptr_t uattr)
 			goto free_map;
 		}
 	} else if (attr->excl_prog_hash_size) {
-		return -EINVAL;
+		err = -EINVAL;
+		goto free_map;
 	}
 
 	err = security_bpf_map_create(map, attr, token, uattr.is_kernel);
@@ -2463,6 +2464,9 @@ void notrace bpf_prog_inc_misses_counter(struct bpf_prog *prog)
 {
 	struct bpf_prog_stats *stats;
 	unsigned int flags;
+
+	if (unlikely(!prog->stats))
+		return;
 
 	stats = this_cpu_ptr(prog->stats);
 	flags = u64_stats_update_begin_irqsave(&stats->syncp);
