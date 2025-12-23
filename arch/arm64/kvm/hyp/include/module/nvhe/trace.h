@@ -94,6 +94,7 @@ void *hyp_ftrace_sync(unsigned long *func_pg, unsigned long *funcs,
 int hyp_ftrace_setup(unsigned long *funcs, unsigned long *funcs_end,
 		     unsigned long hyp_kern_offset, void *tramp);
 void hyp_ftrace_ret_flush(void);
+unsigned long hyp_ftrace_ret_pop(void);
 void hyp_ftrace_disable(unsigned long *funcs, unsigned long *funcs_end);
 int __pkvm_sync_ftrace(unsigned long host_func_pg);
 int __pkvm_disable_ftrace(void);
