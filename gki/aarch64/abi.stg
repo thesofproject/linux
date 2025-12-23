@@ -316203,7 +316203,7 @@ elf_symbol {
   name: "blk_execute_rq_nowait"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x022af5ea
+  crc: 0x3e7475fc
   type_id: 0x168d2c88
   full_name: "blk_execute_rq_nowait"
 }
@@ -316221,7 +316221,7 @@ elf_symbol {
   name: "blk_mq_free_request"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x92517f6e
+  crc: 0x42f0c196
   type_id: 0x1738d1f7
   full_name: "blk_mq_free_request"
 }
@@ -316230,7 +316230,7 @@ elf_symbol {
   name: "blk_mq_quiesce_tagset"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x45d2cb08
+  crc: 0x8ce1bac8
   type_id: 0x1ba86ccd
   full_name: "blk_mq_quiesce_tagset"
 }
@@ -316239,7 +316239,7 @@ elf_symbol {
   name: "blk_mq_unquiesce_tagset"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x45d2cb08
+  crc: 0x8ce1bac8
   type_id: 0x1ba86ccd
   full_name: "blk_mq_unquiesce_tagset"
 }
