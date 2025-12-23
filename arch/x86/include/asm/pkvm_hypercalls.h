@@ -53,6 +53,8 @@ PKVM_HC(flush_tlb_gva)
 PKVM_HC(flush_tlb_guest)
 PKVM_HC(set_interrupt_shadow)
 PKVM_HC_OUT(get_interrupt_shadow)
+PKVM_HC(enable_nmi_window)
+PKVM_HC(enable_irq_window)
 
 #undef PKVM_HC
 #undef PKVM_HC_OUT
