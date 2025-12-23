@@ -25,6 +25,7 @@ PKVM_HC(vcpu_create)
 PKVM_HC_OUT(vcpu_free)
 PKVM_HC(vcpu_load)
 PKVM_HC(vcpu_put)
+PKVM_HC(update_exception_bitmap)
 
 #undef PKVM_HC
 #undef PKVM_HC_OUT
