@@ -297647,6 +297647,13 @@ function {
   parameter_id: 0x11cfee5a
 }
 function {
+  id: 0x9b66b9f2
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x33756485
+  parameter_id: 0x13580d6c
+}
+function {
   id: 0x9b6740c7
   return_type_id: 0x6720d32f
   parameter_id: 0x1aeeade4
@@ -310717,6 +310724,15 @@ elf_symbol {
   full_name: "__traceiter_android_rvh_iommu_alloc_insert_iova"
 }
 elf_symbol {
+  id: 0x9742b6be
+  name: "__traceiter_android_rvh_iommu_dma_info_to_prot"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xb334fc80
+  type_id: 0x9b66b9f2
+  full_name: "__traceiter_android_rvh_iommu_dma_info_to_prot"
+}
+elf_symbol {
   id: 0x7edcea8d
   name: "__traceiter_android_rvh_iommu_iovad_init_alloc_algo"
   is_defined: true
@@ -313019,6 +313035,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_rvh_iommu_alloc_insert_iova"
+}
+elf_symbol {
+  id: 0x456e9ebc
+  name: "__tracepoint_android_rvh_iommu_dma_info_to_prot"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_rvh_iommu_dma_info_to_prot"
 }
 elf_symbol {
   id: 0x0991fcbf
@@ -347277,6 +347302,7 @@ interface {
   symbol_id: 0xe443e259
   symbol_id: 0xf24e6a40
   symbol_id: 0x0b1353da
+  symbol_id: 0x9742b6be
   symbol_id: 0x7edcea8d
   symbol_id: 0x72c43156
   symbol_id: 0x7c212080
@@ -347533,6 +347559,7 @@ interface {
   symbol_id: 0x7fd0bf2f
   symbol_id: 0x1bf33aee
   symbol_id: 0x58127eb8
+  symbol_id: 0x456e9ebc
   symbol_id: 0x0991fcbf
   symbol_id: 0x693af5b0
   symbol_id: 0x99d57c12
