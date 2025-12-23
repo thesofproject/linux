@@ -150,6 +150,7 @@
   __traceiter_android_vh_cpu_idle_enter
   __traceiter_android_vh_cpu_idle_exit
   __traceiter_android_vh_cpufreq_fast_switch
+  __traceiter_android_vh_exit_check
   __traceiter_android_vh_exit_signal
   __traceiter_android_vh_filemap_fault_start
   __traceiter_android_vh_filemap_fault_end
@@ -269,6 +270,7 @@
   __tracepoint_android_vh_cpu_idle_enter
   __tracepoint_android_vh_cpu_idle_exit
   __tracepoint_android_vh_cpufreq_fast_switch
+  __tracepoint_android_vh_exit_check
   __tracepoint_android_vh_exit_signal
   __tracepoint_android_vh_filemap_fault_start
   __tracepoint_android_vh_filemap_fault_end
