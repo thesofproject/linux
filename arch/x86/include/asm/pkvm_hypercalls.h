@@ -62,6 +62,7 @@ PKVM_HC(set_nmi_mask)
 PKVM_HC(inject_irq)
 PKVM_HC(inject_nmi)
 PKVM_HC(inject_exception)
+PKVM_HC(cancel_injection)
 
 #undef PKVM_HC
 #undef PKVM_HC_OUT
