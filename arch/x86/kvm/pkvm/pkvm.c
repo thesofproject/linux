@@ -655,6 +655,9 @@ static bool is_guest_vcpu_accessible(struct kvm_vcpu *vcpu, enum pkvm_hc hc)
 	switch (hc) {
 	case __pkvm__enable_nmi_window:
 	case __pkvm__enable_irq_window:
+	case __pkvm__interrupt_allowed:
+	case __pkvm__nmi_allowed:
+	case __pkvm__get_nmi_mask:
 		/*
 		 * The host is responsible for running vCPU, injecting
 		 * interrupts, emulating lapic etc. Always allow the related PV
@@ -816,6 +819,27 @@ static void pkvm_set_dr7(struct kvm_vcpu *vcpu, unsigned long val)
 		vcpu->arch.switch_db_regs |= KVM_DEBUGREG_BP_ENABLED;
 }
 
+static inline bool pkvm_event_injection_allowed(struct kvm_vcpu *vcpu)
+{
+	return !kvm_event_needs_reinjection(vcpu) && !vcpu->arch.exception.pending;
+}
+
+static int pkvm_interrupt_allowed(struct kvm_vcpu *vcpu, bool for_injection)
+{
+	if (for_injection && !pkvm_event_injection_allowed(vcpu))
+		return -EBUSY;
+
+	return kvm_x86_call(interrupt_allowed)(vcpu, for_injection);
+}
+
+static int pkvm_nmi_allowed(struct kvm_vcpu *vcpu, bool for_injection)
+{
+	if (for_injection && !pkvm_event_injection_allowed(vcpu))
+		return -EBUSY;
+
+	return kvm_x86_call(nmi_allowed)(vcpu, for_injection);
+}
+
 static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc hc,
 					   union pkvm_hc_data *in, union pkvm_hc_data *out)
 {
@@ -929,6 +953,18 @@ static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc 
 		break;
 	case __pkvm__enable_irq_window:
 		kvm_x86_call(enable_irq_window)(vcpu);
+		break;
+	case __pkvm__interrupt_allowed:
+		ret = pkvm_interrupt_allowed(vcpu, pkvm_hc_input1(hvcpu));
+		break;
+	case __pkvm__nmi_allowed:
+		ret = pkvm_nmi_allowed(vcpu, pkvm_hc_input1(hvcpu));
+		break;
+	case __pkvm__get_nmi_mask:
+		out->get_nmi_mask.data = kvm_x86_call(get_nmi_mask)(vcpu);
+		break;
+	case __pkvm__set_nmi_mask:
+		kvm_x86_call(set_nmi_mask)(vcpu, pkvm_hc_input1(hvcpu));
 		break;
 	default:
 		ret = -EINVAL;
