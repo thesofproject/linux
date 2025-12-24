@@ -95,6 +95,18 @@ union pkvm_hc_data {
 		u64 data;
 	} get_segment_base;
 	struct {
+		struct desc_ptr desc;
+	} set_idt;
+	struct {
+		struct desc_ptr desc;
+	} get_idt;
+	struct {
+		struct desc_ptr desc;
+	} set_gdt;
+	struct {
+		struct desc_ptr desc;
+	} get_gdt;
+	struct {
 		u64 data[PKVM_HC_DATA_MAX_NUM];
 	} raw;
 };
