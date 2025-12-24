@@ -524,6 +524,10 @@ static int __pkvm_vcpu_free(struct pkvm_vm *pkvm_vm, int vcpu_handle,
 
 	fps = pkvm_vcpu->vcpu.arch.guest_fpu.fpstate;
 	teardown_donated_memory(mc, fps, fps->size);
+	if (pkvm_vcpu->vcpu.arch.cpuid_entries)
+		teardown_donated_memory(mc, pkvm_vcpu->vcpu.arch.cpuid_entries,
+					PAGE_ALIGN(sizeof(struct kvm_cpuid_entry2) *
+					pkvm_vcpu->vcpu.arch.cpuid_nent));
 	teardown_donated_memory(mc, pkvm_vcpu, pkvm_vcpu->size);
 
 	pkvm_host_unshare_hyp(shared_vcpu_pa, kvm_vcpu_sz);
@@ -692,6 +696,7 @@ static bool is_guest_vcpu_accessible(struct kvm_vcpu *vcpu, enum pkvm_hc hc)
 	case __pkvm__flush_tlb_current:
 	case __pkvm__flush_tlb_gva:
 	case __pkvm__flush_tlb_guest:
+	case __pkvm__vcpu_after_set_cpuid:
 		/*
 		 * As the host needs to pre-configure the pVM's vCPU state for
 		 * booting, the protection for pVM is only enforced by the pKVM
@@ -948,6 +953,43 @@ static void pkvm_sync_pir_to_irr(struct kvm_vcpu *vcpu, int pir)
 	kvm_x86_call(sync_pir_to_irr)(vcpu);
 }
 
+static int pkvm_vcpu_after_set_cpuid(struct kvm_vcpu *vcpu,
+				     phys_addr_t cpuid_pa,
+				     struct pkvm_memcache *mc)
+{
+	struct kvm_cpuid_entry2 *new, *old;
+	int new_nent, old_nent, ret;
+	u64 size;
+
+	new_nent = to_pkvm_vcpu(vcpu)->shared_vcpu->arch.cpuid_nent;
+	size = PAGE_ALIGN(sizeof(struct kvm_cpuid_entry2) * new_nent);
+	ret = pkvm_host_donate_hyp(cpuid_pa, size, false);
+	if (ret)
+		return ret;
+
+	new = __pkvm_va(cpuid_pa);
+	old = vcpu->arch.cpuid_entries;
+	old_nent = vcpu->arch.cpuid_nent;
+
+	ret = kvm_set_cpuid(vcpu, new, new_nent);
+	if (ret) {
+		pkvm_hyp_donate_host(__pkvm_pa(new), size, false);
+		return ret;
+	}
+
+	memset(mc, 0, sizeof(*mc));
+	/*
+	 * New cpuid entries memory is consumed. Tear down the old cpuid
+	 * entries memory if there is.
+	 */
+	if (old)
+		teardown_donated_memory(mc, (void *)old,
+					PAGE_ALIGN(sizeof(struct kvm_cpuid_entry2) *
+						   old_nent));
+
+	return 0;
+}
+
 static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc hc,
 					   union pkvm_hc_data *in, union pkvm_hc_data *out)
 {
@@ -1105,6 +1147,10 @@ static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc 
 		break;
 	case __pkvm__sync_pir_to_irr:
 		pkvm_sync_pir_to_irr(vcpu, pkvm_hc_input1(hvcpu));
+		break;
+	case __pkvm__vcpu_after_set_cpuid:
+		ret = pkvm_vcpu_after_set_cpuid(vcpu, pkvm_host_gpa_to_phys(pkvm_hc_input1(hvcpu)),
+						&out->vcpu_after_set_cpuid.memcache);
 		break;
 	default:
 		ret = -EINVAL;
