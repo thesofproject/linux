@@ -658,6 +658,8 @@ static bool is_guest_vcpu_accessible(struct kvm_vcpu *vcpu, enum pkvm_hc hc)
 	case __pkvm__interrupt_allowed:
 	case __pkvm__nmi_allowed:
 	case __pkvm__get_nmi_mask:
+	case __pkvm__inject_irq:
+	case __pkvm__inject_nmi:
 		/*
 		 * The host is responsible for running vCPU, injecting
 		 * interrupts, emulating lapic etc. Always allow the related PV
@@ -840,6 +842,38 @@ static int pkvm_nmi_allowed(struct kvm_vcpu *vcpu, bool for_injection)
 	return kvm_x86_call(nmi_allowed)(vcpu, for_injection);
 }
 
+static void pkvm_inject_irq(struct kvm_vcpu *vcpu)
+{
+	struct kvm_vcpu *shared_vcpu = to_pkvm_vcpu(vcpu)->shared_vcpu;
+
+	if (WARN_ON_ONCE(pkvm_interrupt_allowed(vcpu, true) <= 0))
+		return;
+
+	vcpu->arch.interrupt.soft = shared_vcpu->arch.interrupt.soft;
+	vcpu->arch.interrupt.nr = shared_vcpu->arch.interrupt.nr;
+	kvm_x86_call(inject_irq)(vcpu, false);
+}
+
+static void pkvm_inject_nmi(struct kvm_vcpu *vcpu)
+{
+	if (WARN_ON_ONCE(pkvm_nmi_allowed(vcpu, true) <= 0))
+		return;
+
+	kvm_x86_call(inject_nmi)(vcpu);
+}
+
+static void pkvm_inject_exception(struct kvm_vcpu *vcpu)
+{
+	/*
+	 * As the __pkvm__inject_exception is always denied for the pVM,
+	 * it must be a code bug if the vcpu is protected.
+	 */
+	BUG_ON(pkvm_is_protected_vcpu(vcpu));
+	vcpu->arch.exception = to_pkvm_vcpu(vcpu)->shared_vcpu->arch.exception;
+
+	kvm_x86_call(inject_exception)(vcpu);
+}
+
 static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc hc,
 					   union pkvm_hc_data *in, union pkvm_hc_data *out)
 {
@@ -965,6 +999,15 @@ static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc 
 		break;
 	case __pkvm__set_nmi_mask:
 		kvm_x86_call(set_nmi_mask)(vcpu, pkvm_hc_input1(hvcpu));
+		break;
+	case __pkvm__inject_irq:
+		pkvm_inject_irq(vcpu);
+		break;
+	case __pkvm__inject_nmi:
+		pkvm_inject_nmi(vcpu);
+		break;
+	case __pkvm__inject_exception:
+		pkvm_inject_exception(vcpu);
 		break;
 	default:
 		ret = -EINVAL;

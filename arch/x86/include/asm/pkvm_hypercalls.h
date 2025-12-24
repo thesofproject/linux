@@ -59,6 +59,9 @@ PKVM_HC(interrupt_allowed)
 PKVM_HC(nmi_allowed)
 PKVM_HC_OUT(get_nmi_mask)
 PKVM_HC(set_nmi_mask)
+PKVM_HC(inject_irq)
+PKVM_HC(inject_nmi)
+PKVM_HC(inject_exception)
 
 #undef PKVM_HC
 #undef PKVM_HC_OUT
