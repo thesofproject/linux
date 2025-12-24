@@ -702,6 +702,7 @@ static bool is_guest_vcpu_accessible(struct kvm_vcpu *vcpu, enum pkvm_hc hc)
 	case __pkvm__flush_tlb_gva:
 	case __pkvm__flush_tlb_guest:
 	case __pkvm__vcpu_after_set_cpuid:
+	case __pkvm__vcpu_add_fpstate:
 		/*
 		 * As the host needs to pre-configure the pVM's vCPU state for
 		 * booting, the protection for pVM is only enforced by the pKVM
@@ -1015,6 +1016,55 @@ undonate:
 	return ret;
 }
 
+static int pkvm_vcpu_add_fpstate(struct kvm_vcpu *vcpu,
+				 phys_addr_t fpstate_pa, size_t size,
+				 struct pkvm_memcache *mc)
+{
+	struct fpstate *new, *old;
+	int ret;
+
+	/* Expect the host to use this PV interface for pVM only. */
+	if (!pkvm_is_protected_vcpu(vcpu))
+		return -EINVAL;
+
+	ret = pkvm_host_donate_hyp(fpstate_pa, size, true);
+	if (ret)
+		return ret;
+
+	memset(mc, 0, sizeof(*mc));
+
+	old = vcpu->arch.guest_fpu.fpstate;
+	new = __pkvm_va(fpstate_pa);
+	/*
+	 * Reuse the existing fpstate memory if it's sufficiently large. At this
+	 * stage, we can't determine whether the new fpstate size matches the
+	 * vCPUID or not, because that check only occurs when the host calls
+	 * __pkvm__vcpu_after_set_cpuid to update the vCPUID. If the new fpstate
+	 * size is smaller than what the new vCPUID requires, the vCPUID won't
+	 * be updated. Therefore, ensuring the new fpstate size is at least as
+	 * large as the previous one allows continued support for this scenario.
+	 */
+	if (old && old->size >= size) {
+		teardown_donated_memory(mc, new, size);
+		return 0;
+	}
+
+	new->size = size;
+	vcpu->arch.guest_fpu.fpstate = new;
+
+	pkvm_init_guest_fpu(&vcpu->arch.guest_fpu);
+	fpstate_set_confidential(&vcpu->arch.guest_fpu);
+
+	/*
+	 * New physical fpstate memory is consumed. Tear down the old fpstate
+	 * memory if there is.
+	 */
+	if (old)
+		teardown_donated_memory(mc, old, old->size);
+
+	return 0;
+}
+
 static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc hc,
 					   union pkvm_hc_data *in, union pkvm_hc_data *out)
 {
@@ -1176,6 +1226,10 @@ static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc 
 	case __pkvm__vcpu_after_set_cpuid:
 		ret = pkvm_vcpu_after_set_cpuid(vcpu, pkvm_host_gpa_to_phys(pkvm_hc_input1(hvcpu)),
 						&out->vcpu_after_set_cpuid.memcache);
+		break;
+	case __pkvm__vcpu_add_fpstate:
+		ret = pkvm_vcpu_add_fpstate(vcpu, pkvm_host_gpa_to_phys(pkvm_hc_input1(hvcpu)),
+					    pkvm_hc_input2(hvcpu), &out->vcpu_add_fpstate.memcache);
 		break;
 	default:
 		ret = -EINVAL;
