@@ -65,6 +65,7 @@ PKVM_HC(inject_exception)
 PKVM_HC(cancel_injection)
 PKVM_HC(update_cr8_intercept)
 PKVM_HC(set_virtual_apic_mode)
+PKVM_HC(refresh_apicv_exec_ctrl)
 
 #undef PKVM_HC
 #undef PKVM_HC_OUT
