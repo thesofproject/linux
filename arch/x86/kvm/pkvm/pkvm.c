@@ -67,6 +67,8 @@ int pkvm_x86_vendor_init(struct kvm_x86_init_ops *ops)
 
 	kvm_caps.supported_vm_types = BIT(KVM_X86_DEFAULT_VM) |
 				      BIT(KVM_X86_PKVM_PROTECTED_VM);
+	if (IS_ENABLED(CONFIG_KVM_SW_PROTECTED_VM))
+		kvm_caps.supported_vm_types |= BIT(KVM_X86_SW_PROTECTED_VM);
 	kvm_caps.supported_mce_cap = MCG_CTL_P | MCG_SER_P;
 
 	if (boot_cpu_has(X86_FEATURE_XSAVE)) {
