@@ -12,6 +12,7 @@
  *  Copyright (C) 2004-2006 Ingo Molnar
  *  Copyright (C) 2004 Nadia Yvette Chambers
  */
+#include <linux/page_size_compat_defs.h>
 #include <linux/ring_buffer.h>
 #include <linux/utsname.h>
 #include <linux/stacktrace.h>
@@ -9840,8 +9841,7 @@ allocate_trace_buffer(struct trace_array *tr, struct array_buffer *buf, int size
 	buf->tr = tr;
 
 	if (tr->range_addr_start && tr->range_addr_size) {
-		/* Add scratch buffer to handle 128 modules */
-		buf->buffer = ring_buffer_alloc_range(size, rb_flags, 0,
+		buf->buffer = ring_buffer_alloc_range(size, rb_flags, get_order(__PAGE_SIZE),
 						      tr->range_addr_start,
 						      tr->range_addr_size,
 						      struct_size(tscratch, entries, 128));
