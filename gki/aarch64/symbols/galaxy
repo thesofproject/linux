@@ -9,6 +9,7 @@
   crypto_alloc_acomp
   device_match_name
   __devm_alloc_percpu
+  dma_heap_try_get_pool_size_kb
   file_bdev
   filemap_fdatawrite_range_kick
   file_ra_state_init
