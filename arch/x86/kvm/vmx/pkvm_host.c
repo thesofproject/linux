@@ -416,6 +416,12 @@ static int handle_task_switch(struct kvm_vcpu *vcpu)
 			       reason, has_error_code, error_code);
 }
 
+static int handle_machine_check(struct kvm_vcpu *vcpu)
+{
+	/* handled by pkvm_vcpu_run() */
+	return 1;
+}
+
 /*
  * The exit handlers return 1 if the exit was handled fully and guest execution
  * may resume.  Otherwise they set the kvm_run parameter to indicate what needs
@@ -438,6 +444,7 @@ static int (*pkvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_EOI_INDUCED]             = handle_apic_eoi_induced,
 	[EXIT_REASON_WBINVD]                  = kvm_emulate_wbinvd,
 	[EXIT_REASON_TASK_SWITCH]             = handle_task_switch,
+	[EXIT_REASON_MCE_DURING_VMENTRY]      = handle_machine_check,
 };
 
 static const int pkvm_vmx_max_exit_handlers = ARRAY_SIZE(pkvm_vmx_exit_handlers);
