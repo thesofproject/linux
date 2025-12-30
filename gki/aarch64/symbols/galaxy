@@ -4,6 +4,7 @@
   bdev_fput
   __blk_alloc_disk
   blkdev_issue_flush
+  compact_node_async
   crypto_acomp_compress
   crypto_acomp_decompress
   crypto_alloc_acomp
@@ -16,10 +17,12 @@
   file_write_and_wait_range
   fixed_size_llseek
   flush_dcache_page
+  free_hpage
   generic_file_read_iter
   generic_perform_write
   generic_write_checks
   getboottime64
+  get_pfnblock_flags_mask
   gpiod_cansleep
   gpio_device_find
   gpio_device_get_chip
@@ -27,13 +30,20 @@
   kmsg_dump_get_line
   kmsg_dump_rewind
   kvasprintf_const
+  mas_walk
+  mas_prev
+  mas_next
+  mm_access
   panic_in_progress
+  prep_compound_page
+  prep_new_hpage
   proc_set_size
   proc_symlink
   pstore_register
   pstore_unregister
   put_disk
   runqueues
+  swap_cache_del_folio
   sync_blockdev
   __traceiter_android_rvh_die_kernel_fault
   __traceiter_android_rvh_do_sp_pc_abort
@@ -41,6 +51,7 @@
   __traceiter_android_vh_is_fpsimd_save
   __traceiter_console
   __traceiter_irq_handler_entry
+  __traceiter_vm_unmapped_area
   __traceiter_workqueue_execute_start
   __tracepoint_android_rvh_die_kernel_fault
   __tracepoint_android_rvh_do_sp_pc_abort
@@ -48,6 +59,7 @@
   __tracepoint_android_vh_is_fpsimd_save
   __tracepoint_console
   __tracepoint_irq_handler_entry
+  __tracepoint_vm_unmapped_area
   __tracepoint_workqueue_execute_start
   unregister_console
   unregister_die_notifier
