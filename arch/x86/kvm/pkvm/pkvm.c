@@ -1219,6 +1219,7 @@ static void update_vcpu_state_from_host(struct kvm_vcpu *vcpu)
 		       ARRAY_SIZE(vcpu->arch.eff_db) * sizeof(*vcpu->arch.eff_db));
 		vcpu->arch.dr6 = shared_vcpu->arch.dr6;
 		vcpu->arch.dr7 = shared_vcpu->arch.dr7;
+		vcpu->arch.xcr0 = shared_vcpu->arch.xcr0;
 		if (vcpu->guest_debug & KVM_GUESTDBG_USE_HW_BP)
 			vcpu->arch.guest_debug_dr7 = shared_vcpu->arch.guest_debug_dr7;
 		if (vcpu->guest_debug & KVM_GUESTDBG_SINGLESTEP)
@@ -1311,6 +1312,7 @@ static void share_vcpu_state_with_host(struct kvm_vcpu *vcpu)
 		       ARRAY_SIZE(vcpu->arch.eff_db) * sizeof(*vcpu->arch.eff_db));
 		shared_vcpu->arch.dr6 = vcpu->arch.dr6;
 		shared_vcpu->arch.dr7 = vcpu->arch.dr7;
+		shared_vcpu->arch.xcr0 = vcpu->arch.xcr0;
 	}
 
 	pkvm_x86_call(share_vcpu_state_with_host)(vcpu);
