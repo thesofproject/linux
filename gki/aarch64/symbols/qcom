@@ -26,6 +26,7 @@
   alloc_etherdev_mqs
   alloc_io_pgtable_ops
   alloc_netdev_mqs
+  __alloc_pages_noprof
   __alloc_skb
   alloc_skb_with_frags
   alt_cb_patch_nops
@@ -433,6 +434,7 @@
   debugfs_create_symlink
   debugfs_create_u16
   debugfs_create_u32
+  debugfs_create_u32_array
   debugfs_create_u64
   debugfs_create_u8
   debugfs_create_ulong
@@ -523,6 +525,7 @@
   device_wakeup_disable
   device_wakeup_enable
   _dev_info
+  dev_iommu_priv_set
   dev_kfree_skb_any_reason
   dev_kfree_skb_irq_reason
   dev_load
@@ -537,6 +540,7 @@
   devm_clk_get_enabled
   devm_clk_get_optional
   devm_clk_get_optional_enabled
+  devm_clk_hw_get_clk
   devm_clk_hw_register
   devm_clk_put
   devm_clk_register
@@ -601,6 +605,8 @@
   devm_platform_ioremap_resource_byname
   devm_pm_runtime_enable
   devm_power_supply_register
+  __devm_pwmchip_add
+  devm_pwmchip_alloc
   devm_pwm_get
   devm_qcom_smem_state_get
   devm_regmap_add_irq_chip
@@ -627,6 +633,8 @@
   devm_rtc_allocate_device
   __devm_rtc_register_device
   devm_snd_soc_register_card
+  devm_spmi_controller_add
+  devm_spmi_controller_alloc
   devm_thermal_of_cooling_device_register
   devm_thermal_of_zone_register
   devm_thermal_of_zone_unregister
@@ -761,6 +769,10 @@
   dma_resv_wait_timeout
   dma_set_coherent_mask
   dma_set_mask
+  __dma_sync_sg_for_cpu
+  __dma_sync_sg_for_device
+  __dma_sync_single_for_cpu
+  __dma_sync_single_for_device
   dma_unmap_page_attrs
   dma_unmap_resource
   dma_unmap_sg_attrs
@@ -967,6 +979,7 @@
   drm_prime_pages_to_sg
   drm_printf
   __drm_printfn_coredump
+  __drm_printfn_dbg
   drm_property_blob_get
   drm_property_blob_put
   drm_property_create
@@ -1081,6 +1094,7 @@
   free_pages
   free_percpu
   free_percpu_irq
+  free_reserved_page
   freq_qos_add_request
   freq_qos_remove_request
   freq_qos_update_request
@@ -1149,6 +1163,7 @@
   get_cpu_idle_time_us
   get_device
   get_device_system_crosststamp
+  get_free_pages_noprof
   get_governor_parent_kobj
   get_net_ns_by_fd
   get_net_ns_by_pid
@@ -1164,9 +1179,11 @@
   get_task_cred
   get_task_mm
   get_task_pid
+  __get_unmapped_area
   get_unused_fd_flags
   get_user_ifreq
   get_user_pages
+  get_zeroed_page_noprof
   gov_attr_set_init
   gov_attr_set_put
   governor_sysfs_ops
@@ -1467,6 +1484,7 @@
   iov_iter_init
   iov_iter_kvec
   iov_iter_revert
+  __iowrite32_copy_full
   ip6_dst_hoplimit
   ip_compute_csum
   __ip_dev_find
@@ -1507,6 +1525,7 @@
   irq_domain_free_irqs_common
   irq_domain_free_irqs_parent
   irq_domain_get_irq_data
+  irq_domain_instantiate
   irq_domain_remove
   irq_domain_set_hwirq_and_chip
   irq_domain_set_info
@@ -1570,6 +1589,7 @@
   __kfifo_in_r
   __kfifo_len_r
   __kfifo_out
+  __kfifo_out_linear
   __kfifo_out_r
   __kfifo_to_user
   __kfifo_to_user_r
@@ -1583,7 +1603,11 @@
   kill_fasync
   kimage_voffset
   __kmalloc_cache_node_noprof
+  __kmalloc_cache_noprof
   kmalloc_caches
+  __kmalloc_large_noprof
+  __kmalloc_noprof
+  kmem_cache_alloc_noprof
   kmem_cache_destroy
   kmem_cache_free
   kmemdup_array
@@ -1662,6 +1686,7 @@
   kvasprintf_const
   kvfree
   kvfree_call_rcu
+  __kvmalloc_node_noprof
   l2cap_add_psm
   l2cap_chan_close
   l2cap_chan_connect
@@ -1798,6 +1823,7 @@
   mmc_send_tuning
   __mmdrop
   mmput
+  mm_get_unmapped_area
   mod_delayed_work_on
   mod_node_page_state
   mod_timer
@@ -2087,6 +2113,7 @@
   pci_dev_put
   pci_disable_device
   pci_disable_msi
+  pci_ecam_create
   pci_ecam_map_bus
   pcie_capability_clear_and_set_word_unlocked
   pcie_capability_read_word
@@ -2120,6 +2147,7 @@
   pci_walk_bus
   pci_write_config_dword
   pci_write_config_word
+  pcpu_alloc_noprof
   __percpu_down_read
   percpu_down_write
   percpu_free_rwsem
@@ -2224,6 +2252,8 @@
   platform_device_add_data
   platform_device_alloc
   platform_device_del
+  platform_device_msi_free_irqs_all
+  platform_device_msi_init_and_alloc_irqs
   platform_device_put
   platform_device_register
   platform_device_register_full
@@ -2353,6 +2383,7 @@
   __put_task_struct
   put_unused_fd
   put_user_ifreq
+  __pwmchip_add
   pwmchip_remove
   qca_read_soc_version
   qca_send_pre_shutdown_cmd
@@ -2373,6 +2404,7 @@
   radix_tree_iter_resume
   radix_tree_lookup
   radix_tree_next_chunk
+  radix_tree_preloads
   radix_tree_tagged
   ___ratelimit
   rational_best_approximation
@@ -2767,6 +2799,9 @@
   show_rcu_tasks_classic_gp_kthread
   show_rcu_tasks_trace_gp_kthread
   show_regs
+  shrinker_alloc
+  shrinker_free
+  shrinker_register
   si_mem_available
   si_meminfo
   simple_attr_open
@@ -2779,6 +2814,7 @@
   single_open
   single_open_size
   single_release
+  sized_strscpy
   sk_alloc
   skb_add_rx_frag_netmem
   skb_append_pagefrags
@@ -2962,6 +2998,7 @@
   spmi_ext_register_readl
   spmi_ext_register_write
   spmi_ext_register_writel
+  spmi_find_device_by_of_node
   spmi_register_read
   spmi_register_write
   spmi_register_zero_write
@@ -3086,6 +3123,8 @@
   thermal_zone_device_register_with_trips
   thermal_zone_device_unregister
   thermal_zone_device_update
+  thermal_zone_for_each_trip
+  thermal_zone_get_crit_temp
   thermal_zone_get_temp
   thermal_zone_get_zone_by_name
   tick_nohz_get_sleep_length
@@ -3381,9 +3420,11 @@
   udp_tunnel_sock_release
   udp_tunnel_xmit_skb
   ufshcd_auto_hibern8_update
+  ufshcd_disable_irq
   ufshcd_dme_get_attr
   ufshcd_dme_set_attr
   ufshcd_dump_regs
+  ufshcd_enable_irq
   ufshcd_fixup_dev_quirks
   ufshcd_hba_stop
   ufshcd_hold
@@ -3392,6 +3433,7 @@
   ufshcd_mcq_enable_esi
   ufshcd_mcq_poll_cqe_lock
   ufshcd_mcq_write_cqis
+  ufshcd_negotiate_pwr_params
   ufshcd_pltfrm_init
   ufshcd_query_attr
   ufshcd_query_descriptor_retry
@@ -3605,6 +3647,7 @@
   vb2_request_validate
   vb2_streamoff
   vb2_streamon
+  vcalloc_noprof
   vchan_dma_desc_free_list
   vchan_find_desc
   vchan_init
@@ -3669,6 +3712,7 @@
   vlan_vid_del
   vlan_vids_add_by_dev
   vlan_vids_del_by_dev
+  vmalloc_noprof
   vmalloc_to_page
   vmalloc_to_pfn
   vmap
@@ -3692,6 +3736,7 @@
   vsnprintf
   vsprintf
   vunmap
+  vzalloc_noprof
   wait_for_completion
   wait_for_completion_interruptible
   wait_for_completion_interruptible_timeout
