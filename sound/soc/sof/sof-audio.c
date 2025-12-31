@@ -319,7 +319,7 @@ static int sof_set_up_same_dir_widget_routes(struct snd_sof_dev *sdev,
 	 * to check if the direction_valid is set for one of the widgets as all widgets will have
 	 * the direction set in topology if one is set.
 	 */
-	if (sink_widget->spipe->direction_valid &&
+	if (sink_widget->spipe && sink_widget->spipe->direction_valid &&
 	    !sof_widget_in_same_direction(sink_widget, src_widget->spipe->direction))
 		return 0;
 
@@ -416,7 +416,7 @@ static int sof_setup_pipeline_connections(struct snd_sof_dev *sdev,
 			 * is set.
 			 */
 			if (src_widget && sink_widget &&
-			    src_widget->spipe->direction_valid &&
+			    src_widget->spipe && src_widget->spipe->direction_valid &&
 			    sof_widget_in_same_direction(sink_widget, src_widget->spipe->direction))
 				continue;
 		}
@@ -446,7 +446,8 @@ sof_unprepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widg
 	if (!swidget)
 		goto sink_unprepare;
 
-	if (swidget->spipe->direction_valid && !sof_widget_in_same_direction(swidget, dir))
+	if (swidget->spipe && swidget->spipe->direction_valid &&
+	    !sof_widget_in_same_direction(swidget, dir))
 		return;
 
 	/* skip widgets in use, those already unprepared or aggregated DAIs */
@@ -497,7 +498,8 @@ sof_prepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget
 	if (!widget_ops)
 		return 0;
 
-	if (swidget->spipe->direction_valid && !sof_widget_in_same_direction(swidget, dir))
+	if (swidget->spipe && swidget->spipe->direction_valid &&
+	    !sof_widget_in_same_direction(swidget, dir))
 		return 0;
 
 	/* skip widgets already prepared or aggregated DAI widgets*/
@@ -561,7 +563,8 @@ static int sof_free_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dap
 	if (!swidget)
 		goto sink_free;
 
-	if (swidget->spipe->direction_valid && !sof_widget_in_same_direction(swidget, dir))
+	if (swidget->spipe && swidget->spipe->direction_valid &&
+	    !sof_widget_in_same_direction(swidget, dir))
 		return 0;
 
 	/* skip aggregated DAIs */
@@ -611,7 +614,8 @@ static int sof_set_up_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_d
 	if (swidget) {
 		int i;
 
-		if (swidget->spipe->direction_valid && !sof_widget_in_same_direction(swidget, dir))
+		if (swidget->spipe && swidget->spipe->direction_valid &&
+		    !sof_widget_in_same_direction(swidget, dir))
 			return 0;
 
 		/* skip aggregated DAIs */
