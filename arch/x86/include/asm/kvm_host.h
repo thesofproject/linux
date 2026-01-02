@@ -829,6 +829,26 @@ pop_pkvm_memcache(struct pkvm_memcache *mc, void *(*to_va)(phys_addr_t phys))
 	return head;
 }
 
+static inline void push_pkvm_memcache_page(struct pkvm_memcache *mc,
+					   void *addr,
+					   phys_addr_t (*to_pa)(void *virt))
+{
+	push_pkvm_memcache(mc, addr, PAGE_SIZE, to_pa);
+}
+
+/* For memcaches containing single-page ranges only. */
+static inline void *pop_pkvm_memcache_page(struct pkvm_memcache *mc,
+					   void *(*to_va)(phys_addr_t phys))
+{
+	if (!mc->count)
+		return NULL;
+
+	if (WARN_ON_ONCE(mc->head.nr_pages != 1))
+		return NULL;
+
+	return to_va(pop_pkvm_memcache(mc, to_va).addr);
+}
+
 static inline void free_pkvm_memcache(struct pkvm_memcache *mc,
 				      void (*free)(struct pkvm_page_range range),
 				      void *(*to_va)(phys_addr_t phys))
