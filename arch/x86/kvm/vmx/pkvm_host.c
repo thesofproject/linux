@@ -655,7 +655,7 @@ static bool pkvm_has_emulated_msr(struct kvm *kvm, u32 index)
 
 static int pkvm_vm_init(struct kvm *kvm)
 {
-	void *pkvm_vm;
+	void *pkvm_vm, *pgd;
 	int ret;
 
 	/*
@@ -671,9 +671,17 @@ static int pkvm_vm_init(struct kvm *kvm)
 	if (!pkvm_vm)
 		return -ENOMEM;
 
-	ret = pkvm_hypercall(vm_init, __pa(kvm), __pa(pkvm_vm));
-	if (ret < 0)
+	pgd = (void *)__get_free_page(GFP_KERNEL_ACCOUNT);
+	if (!pgd) {
+		ret = -ENOMEM;
 		goto free_page;
+	}
+
+	kvm_account_pgtable_pages(pgd, 1);
+
+	ret = pkvm_hypercall(vm_init, __pa(kvm), __pa(pkvm_vm), __pa(pgd));
+	if (ret < 0)
+		goto free_pgtable_page;
 
 	kvm->arch.pkvm.handle = ret;
 
@@ -682,6 +690,9 @@ static int pkvm_vm_init(struct kvm *kvm)
 
 	return 0;
 
+free_pgtable_page:
+	kvm_account_pgtable_pages(pgd, -1);
+	free_page((unsigned long)pgd);
 free_page:
 	free_pages_exact(pkvm_vm, PKVM_VMX_VM_SIZE);
 	return ret;
@@ -700,6 +711,7 @@ static void pkvm_vm_destroy(struct kvm *kvm)
 	}
 
 	kvm_free_pkvm_memcache(&out.vm_destroy.memcache);
+	kvm_free_pkvm_memcache(&kvm->arch.pkvm.guest_mmu_teardown_mc);
 
 	vmx_vm_destroy(kvm);
 }

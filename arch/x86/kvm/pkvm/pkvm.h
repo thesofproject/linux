@@ -6,6 +6,8 @@
 #include <asm/kvm_pkvm.h>
 #include <asm/pkvm_spinlock.h>
 #include <asm/pkvm_trace.h>
+#include "gfp.h"
+#include "pgtable.h"
 
 DECLARE_PER_CPU(struct pkvm_pcpu *, phys_cpu);
 DECLARE_PER_CPU(struct kvm_vcpu *, host_vcpu);
@@ -59,6 +61,10 @@ struct pkvm_vm {
 	pkvm_spinlock_t lock;
 	struct pkvm_vcpu *vcpus[KVM_MAX_VCPUS];
 	atomic_t vcpu_refs[KVM_MAX_VCPUS];
+	/* Guest MMU (stage-2) page table managed by the hypervisor */
+	struct pkvm_pgtable mmu;
+	struct pkvm_pool mmu_pool;
+	pkvm_spinlock_t mmu_lock;
 	/*
 	 * The struct kvm should be the last element. In cases where struct kvm
 	 * is wrapped by a vendor specific structure, putting it as the last
