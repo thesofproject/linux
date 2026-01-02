@@ -788,6 +788,8 @@ struct pkvm_memcache {
 		u64 nr_pages;
 	} head;
 	unsigned long count;
+#define PKVM_MC_ACCOUNT_PGTABLE_PAGES	BIT(1)
+	unsigned long flags;
 };
 
 static inline void push_pkvm_memcache(struct pkvm_memcache *mc,
@@ -849,12 +851,39 @@ static inline void *pop_pkvm_memcache_page(struct pkvm_memcache *mc,
 	return to_va(pop_pkvm_memcache(mc, to_va).addr);
 }
 
+/* For memcaches containing single-page ranges only. */
+static inline int topup_pkvm_memcache(struct pkvm_memcache *mc,
+				      unsigned long min_pages,
+				      void *(*alloc_pg)(void *arg),
+				      phys_addr_t (*to_pa)(void *virt),
+				      void *arg)
+{
+	while (mc->count < min_pages) {
+		void *p = alloc_pg(arg);
+
+		if (!p)
+			return -ENOMEM;
+
+		push_pkvm_memcache_page(mc, p, to_pa);
+	}
+
+	return 0;
+}
+
 static inline void free_pkvm_memcache(struct pkvm_memcache *mc,
-				      void (*free)(struct pkvm_page_range range),
-				      void *(*to_va)(phys_addr_t phys))
+				      void (*free)(struct pkvm_page_range range,
+						   void *arg),
+				      void *(*to_va)(phys_addr_t phys),
+				      void *arg)
 {
 	while (mc->count)
-		free(pop_pkvm_memcache(mc, to_va));
+		free(pop_pkvm_memcache(mc, to_va), arg);
+}
+
+static inline void init_pkvm_mmu_memcache(struct pkvm_memcache *mc)
+{
+	memset(mc, 0, sizeof(*mc));
+	mc->flags = PKVM_MC_ACCOUNT_PGTABLE_PAGES;
 }
 
 #define PKVM_HOST_VM_HANDLE	INT_MAX
@@ -2093,6 +2122,7 @@ extern phys_addr_t pkvm_mem_size;
 void __init pkvm_reserve(void);
 void pkvm_init_debugfs(void);
 void pkvm_create_vm_debugfs(struct kvm *kvm);
+int kvm_topup_pkvm_memcache(struct pkvm_memcache *mc, unsigned long min_pages);
 void kvm_free_pkvm_memcache(struct pkvm_memcache *mc);
 #else
 #define enable_pkvm		false
