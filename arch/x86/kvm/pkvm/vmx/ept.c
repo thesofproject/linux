@@ -21,7 +21,7 @@
 static struct pkvm_pgtable *host_ept;
 static struct pkvm_pool host_ept_pool;
 
-static void *host_ept_zalloc_page(void)
+static void *host_ept_zalloc_page(struct pkvm_memcache *mc)
 {
 	return pkvm_alloc_pages(&host_ept_pool, 0);
 }

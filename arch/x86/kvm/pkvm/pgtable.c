@@ -9,7 +9,7 @@
 
 static void *pgtable_alloc_page(const struct pkvm_pgtable_mm_ops *mm_ops)
 {
-	return mm_ops->zalloc_page();
+	return mm_ops->zalloc_page(NULL);
 }
 
 static bool leaf_in_addr_range(unsigned long leaf_size,

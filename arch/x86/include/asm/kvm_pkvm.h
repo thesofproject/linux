@@ -349,7 +349,7 @@ DECLARE_STATIC_KEY_FALSE(pkvm_sym(__fpu_state_size_dynamic));
 extern unsigned int pkvm_sym(tsc_khz);
 
 u64 pkvm_total_reserve_pages(void);
-PKVM_DECLARE(void *, pkvm_early_alloc_page, (void));
+PKVM_DECLARE(void *, pkvm_early_alloc_page, (struct pkvm_memcache *mc));
 PKVM_DECLARE(void *, pkvm_early_alloc_contig, (unsigned int nr_pages));
 PKVM_DECLARE(void, pkvm_early_alloc_init, (void *virt, unsigned long size));
 PKVM_DECLARE(int, pkvm_setup_per_cpu, (int cpu, unsigned long base));
