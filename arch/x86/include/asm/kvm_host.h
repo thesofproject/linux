@@ -895,6 +895,7 @@ struct kvm_pkvm_vm {
 
 struct kvm_pkvm_vcpu {
 	int handle;
+	struct pkvm_memcache guest_mmu_memcache;
 };
 #endif /* CONFIG_PKVM_X86 */
 
