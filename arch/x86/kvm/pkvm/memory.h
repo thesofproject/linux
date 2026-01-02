@@ -140,6 +140,16 @@ static inline void pkvm_clear_memory(void *va, size_t size)
 	pkvm_clflush_cache_range(va, size);
 }
 
+static inline void *pkvm_phys_to_virt(phys_addr_t phys)
+{
+	return __pkvm_va(phys);
+}
+
+static inline phys_addr_t pkvm_virt_to_phys(void *addr)
+{
+	return __pkvm_pa(addr);
+}
+
 static inline phys_addr_t pkvm_host_gpa_to_phys(gpa_t gpa)
 {
 	/*
