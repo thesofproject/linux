@@ -701,6 +701,7 @@ free_page:
 static void pkvm_vm_destroy(struct kvm *kvm)
 {
 	int vm_handle = kvm->arch.pkvm.handle;
+	struct pkvm_mapping *mapping;
 	union pkvm_hc_data out;
 	int ret;
 
@@ -712,6 +713,17 @@ static void pkvm_vm_destroy(struct kvm *kvm)
 
 	kvm_free_pkvm_memcache(&out.vm_destroy.memcache);
 	kvm_free_pkvm_memcache(&kvm->arch.pkvm.guest_mmu_teardown_mc);
+
+	/*
+	 * TODO: do this in the generic code in kvm_mmu_uninit_vm() instead.
+	 * For now we cannot do that, since kvm_mmu_uninit_vm() is called too
+	 * early, when pKVM has not released guest pages to the host yet
+	 * (which is currently completely postponed until vm_destroy).
+	 */
+	for_each_pkvm_mapping(kvm, 0, U64_MAX, mapping) {
+		pkvm_mapping_remove(mapping, &kvm->arch.pkvm.mappings);
+		kfree(mapping);
+	}
 
 	vmx_vm_destroy(kvm);
 }
