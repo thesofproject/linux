@@ -14331,6 +14331,7 @@ void kvm_arch_unregister_noncoherent_dma(struct kvm *kvm)
 	if (!atomic_dec_return(&kvm->arch.noncoherent_dma_count))
 		kvm_noncoherent_dma_assignment_start_or_stop(kvm);
 }
+#endif /* !__PKVM_HYP__ */
 
 bool kvm_arch_has_noncoherent_dma(struct kvm *kvm)
 {
@@ -14338,6 +14339,7 @@ bool kvm_arch_has_noncoherent_dma(struct kvm *kvm)
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_arch_has_noncoherent_dma);
 
+#ifndef __PKVM_HYP__
 bool kvm_arch_no_poll(struct kvm_vcpu *vcpu)
 {
 	return (vcpu->arch.msr_kvm_poll_control & 1) == 0;
