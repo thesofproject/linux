@@ -352,7 +352,25 @@ static int host_mmu_map(unsigned long phys, unsigned long size, bool mmio)
 
 static void *guest_mmu_zalloc_page(struct pkvm_memcache *mc)
 {
-	return pkvm_alloc_pages(&current_vm->mmu_pool, 0);
+	struct pkvm_page *p;
+	void *page;
+
+	page = pkvm_alloc_pages(&current_vm->mmu_pool, 0);
+	if (page)
+		return page;
+
+	if (!mc)
+		return NULL;
+
+	page = pop_pkvm_memcache_page(mc, pkvm_phys_to_virt);
+	if (!page)
+		return page;
+
+	memset(page, 0, PAGE_SIZE);
+	p = pkvm_virt_to_page(page);
+	pkvm_set_page_refcounted(p);
+
+	return page;
 }
 
 static void guest_mmu_get_page(void *vaddr)
