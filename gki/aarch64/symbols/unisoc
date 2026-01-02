@@ -2424,3 +2424,407 @@
   typec_altmode_unregister_driver
   typec_get_negotiated_svdm_version
 
+# required by sprd_u_serial.ko
+  tty_hangup
+  tty_port_register_device
+  tty_unregister_device
+  tty_wakeup
+
+# required by sprd_uart.ko
+  do_SAK
+  handle_sysrq
+  __kfifo_out_linear
+  nbcon_device_release
+  nbcon_device_try_acquire
+  sysrq_mask
+  tty_termios_baud_rate
+  tty_termios_encode_baud_rate
+  uart_add_one_port
+  uart_get_baud_rate
+  uart_insert_char
+  uart_register_driver
+  uart_remove_one_port
+  uart_resume_port
+  uart_suspend_port
+  uart_try_toggle_sysrq
+  uart_unregister_driver
+  uart_update_timeout
+  uart_write_wakeup
+
+# required by sprd_uid.ko
+  stpcpy
+
+# required by sprd_usb_f_rndis.ko
+  gether_cleanup
+  gether_connect
+  gether_disconnect
+  gether_get_dev_addr
+  gether_get_host_addr
+  gether_get_host_addr_u8
+  gether_get_ifname
+  gether_get_qmult
+  gether_register_netdev
+  gether_set_dev_addr
+  gether_set_gadget
+  gether_set_host_addr
+  gether_set_ifname
+  gether_set_qmult
+  gether_setup_name_default
+
+# required by sprd_usb_f_rndis2pam.ko
+  alloc_etherdev_mqs
+  dev_valid_name
+  hex_to_bin
+
+# required by sprd_usb_f_serial.ko
+  usb_string_id
+
+# required by sprd_usb_f_vser.ko
+  usb_ep_dequeue
+
+# required by sprd_vdsp.ko
+  device_property_read_string
+  of_n_addr_cells
+  of_n_size_cells
+  of_property_read_u64_index
+
+# required by sprd_vext.ko
+  ww_mutex_lock_interruptible
+  ww_mutex_unlock
+
+# required by sprd_vpu_pw_domain.ko
+  of_genpd_add_subdomain
+
+# required by sprd_wlan_combo.ko
+  __dynamic_netdev_dbg
+  kernel_bind
+  kernel_getsockname
+  kernel_recvmsg
+  kernel_sendmsg
+  __netdev_alloc_frag_align
+  netdev_warn
+  nla_put_nohdr
+  nla_strscpy
+  printk_timed_ratelimit
+  request_firmware_direct
+  skb_unlink
+  sock_create_kern
+  sock_setsockopt
+
+# required by sprdbt_tty.ko
+  tty_port_link_device
+
+# required by sysdump.ko
+  get_zeroed_page_noprof
+  input_unregister_handler
+  kmsg_dump_get_buffer
+  kmsg_dump_get_line
+  kmsg_dump_register
+  kmsg_dump_rewind
+  kmsg_dump_unregister
+  mem_section
+  node_states
+  ns_to_kernel_old_timeval
+  smp_call_function
+  vscnprintf
+
+# required by thermal-generic-adc.ko
+  iio_get_channel_type
+
+# required by timer_sprd.ko
+  clockevents_config_and_register
+  __clocksource_register_scale
+  timer_of_init
+
+# required by trusty.ko
+  add_wait_queue
+  _copy_to_iter
+  disable_percpu_irq
+  enable_percpu_irq
+  free_percpu_irq
+  irq_create_of_mapping
+  __of_get_address
+  of_platform_populate
+  of_translate_address
+  register_virtio_device
+  __register_virtio_driver
+  remove_wait_queue
+  __request_percpu_irq
+  __sysfs_match_string
+  unregister_virtio_device
+  unregister_virtio_driver
+  virtqueue_add_inbuf
+  virtqueue_add_outbuf
+  virtqueue_detach_unused_buf
+  virtqueue_get_buf
+  virtqueue_get_vring_size
+  virtqueue_kick
+  virtqueue_kick_prepare
+  virtqueue_notify
+  vm_map_ram
+  vring_del_virtqueue
+  vring_interrupt
+  vring_new_virtqueue
+  wait_woken
+  woken_wake_function
+
+# required by ufcs.ko
+  device_set_of_node_from_dev
+  srcu_init_notifier_head
+  srcu_notifier_call_chain
+  srcu_notifier_chain_register
+  srcu_notifier_chain_unregister
+
+# required by ufs_sprd.ko
+  async_schedule_node
+  blk_mq_wait_quiesce_done
+  hex_dump_to_buffer
+  proc_set_user
+  scsi_block_requests
+  scsi_unblock_requests
+  ufshcd_dump_regs
+  ufshcd_fixup_dev_quirks
+
+# required by ufs_sprd_old.ko
+  ufshcd_hba_enable
+  ufshcd_update_evt_hist
+
+# required by uni_trace_debug.ko
+
+# required by uniber.ko
+  bitmap_parselist
+  proc_dostring
+
+# required by unisoc_aphang.ko
+  smpboot_register_percpu_thread
+  vmalloc_to_pfn
+
+# required by unisoc_fsio.ko
+  blkcg_policy_register
+  kern_path
+  kobject_get
+  ktime_get_coarse_ts64
+  path_put
+  profile_event_register
+  profile_event_unregister
+
+# required by unisoc_iommu.ko
+  memset32
+
+# required by unisoc_last_kmsg.ko
+  blockdev_superblock
+  nr_swap_pages
+  pcpu_nr_pages
+  platform_bus
+  si_mem_available
+  vm_memory_committed
+  xa_find
+  xa_find_after
+
+# required by unisoc_mem_pool.ko
+  rb_first_postorder
+  rb_next_postorder
+  simple_strtoul
+
+# required by unisoc_mm_emem.ko
+  down_read_trylock
+  get_slabinfo
+  __pmd_trans_huge_lock
+  __show_mem
+  si_meminfo
+  si_swapinfo
+  swp_swapcount
+  vm_normal_page
+
+# required by unisoc_mm_reclaim.ko
+  send_sig
+  shrink_slab
+  xa_destroy
+  xa_load
+  xa_store
+
+# required by unisoc_mm_ummd.ko
+  contig_page_data
+
+# required by unisoc_net.ko
+  icmp6_send
+  in4_pton
+  in6_pton
+  inet_select_addr
+  ip6_find_1stfragopt
+  ip6_local_out
+  ip6_route_output_flags
+  ip_local_out
+  ipv6_dev_get_saddr
+  ipv6_select_ident
+  mempool_alloc_noprof
+  mempool_alloc_slab
+  mempool_create_node_noprof
+  mempool_destroy
+  mempool_free
+  mempool_free_slab
+  netlink_broadcast
+  nf_ct_get_tuplepr
+  nf_ct_invert_tuple
+  proc_create_net_data
+  raw_notifier_chain_unregister
+  rcuref_get_slowpath
+  skb_checksum_help
+  __skb_ext_put
+  skb_set_owner_w
+  sock_wfree
+  softnet_data
+  xfrm_lookup
+  xfrm_state_afinfo_get_rcu
+
+# required by unisoc_pmu_sample.ko
+  __cpuhp_setup_state_cpuslocked
+  perf_event_create_kernel_counter
+  perf_event_enable
+  perf_event_read_local
+  perf_event_read_value
+  perf_event_release_kernel
+
+# required by unisoc_sched.ko
+  activate_task
+  arch_freq_scale
+  available_idle_cpu
+  __balance_callbacks
+  balance_push_callback
+  bpf_trace_run10
+  bpf_trace_run9
+  __cpu_dying_mask
+  cpuidle_get_driver
+  cpuidle_governor_latency_req
+  cpuidle_register_governor
+  cpumask_any_and_distribute
+  cpupri_find_fitness
+  cpu_topology
+  css_next_child
+  deactivate_task
+  dev_pm_qos_add_notifier
+  dev_pm_qos_remove_notifier
+  double_rq_lock
+  get_governor_parent_kobj
+  gov_attr_set_get
+  gov_attr_set_init
+  gov_attr_set_put
+  governor_sysfs_ops
+  have_governor_per_policy
+  housekeeping_cpumask
+  housekeeping_overridden
+  housekeeping_test_cpu
+  int_pow
+  irq_work_queue_on
+  irq_work_sync
+  migrate_swap
+  __migrate_task
+  pick_task
+  proc_douintvec_minmax
+  raw_spin_rq_lock_nested
+  raw_spin_rq_unlock
+  rebuild_sched_domains
+  reciprocal_value
+  resched_curr
+  root_task_group
+  sched_uclamp_used
+  schedule_timeout_uninterruptible
+  __scx_enabled
+  select_fallback_rq
+  set_task_cpu
+  smp_call_function_single_async
+  stop_machine
+  stop_one_cpu
+  stop_one_cpu_nowait
+  task_rq_lock
+  tick_nohz_get_idle_calls_cpu
+  tick_nohz_get_sleep_length
+  topology_clear_scale_freq_source
+  topology_update_done
+  tracepoint_probe_register_prio
+  uclamp_eff_value
+  update_rq_clock
+  wake_up_if_idle
+  wakeup_preempt
+
+# required by unisoc_scufreq.ko
+  cpufreq_get
+  cpufreq_get_driver_data
+
+# required by unisoc_time_sync.ko
+  arch_timer_read_counter
+  clocks_calc_mult_shift
+  pvclock_gtod_register_notifier
+
+# required by unisoc_tsensor_core.ko
+  driver_create_file
+
+# required by unisoc_wcn_bsp.ko
+  gpiod_get
+  gpiod_set_value
+  register_chrdev_region
+  sdio_enable_func
+  sdio_memcpy_fromio
+  sdio_memcpy_toio
+  sdio_readb
+  sdio_readl
+  sdio_readsb
+  __sdio_register_driver
+  sdio_set_block_size
+  sdio_unregister_driver
+  sdio_writeb
+  sdio_writel
+  sdio_writesb
+
+# required by uzram.ko
+  __bio_add_page
+  bio_endio
+  bio_end_io_acct_remapped
+  bio_init
+  bio_start_io_acct
+  bit_wait
+  __blk_alloc_disk
+  contpte_ptep_get
+  copy_page
+  del_gendisk
+  device_add_disk
+  file_path
+  filp_close
+  get_swap_device
+  I_BDEV
+  inode_owner_or_capable
+  inode_permission
+  LZ4_compress_fast
+  LZ4_compress_fast_continue
+  LZ4_decompress_safe
+  LZ4_decompress_safe_continue
+  LZ4_loadDict
+  LZ4_setStreamDecode
+  lzo1x_1_compress
+  lzo1x_decompress_safe
+  lzorle1x_1_compress
+  memparse
+  memset64
+  next_arg
+  nop_mnt_idmap
+  out_of_line_wait_on_bit_lock
+  pidfd_get_task
+  put_disk
+  __register_blkdev
+  set_capacity
+  set_capacity_and_notify
+  skip_spaces
+  sysfs_emit_at
+  unregister_blkdev
+  wake_up_bit
+  zs_compact
+  zs_create_pool
+  zs_destroy_pool
+  zs_free
+  zs_get_total_pages
+  zs_huge_class_size
+  zs_malloc
+  zs_obj_read_begin
+  zs_obj_read_end
+  zs_obj_write
+  zs_pool_stats
