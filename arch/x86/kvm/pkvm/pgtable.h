@@ -28,6 +28,8 @@ struct pkvm_pgtable_mm_ops {
  * @pte_annotated:	Check if a pte is annotated with page state/owner id.
  * @pte_huge:		Check if a pte is huge.
  * @pte_mkhuge:		Set huge for the given pte.
+ * @pte_young:		Check if a pte has access bit set.
+ * @pte_mkold:		Clear access bit in the given pte.
  * @pte_to_phys:	Decode the physical address from pte.
  * @pte_to_prot:	Decode the property bits from pte, including the page
  *                      state bits.
@@ -56,6 +58,8 @@ struct pkvm_pgtable_ops {
 	bool (*pte_annotated)(void *pte);
 	bool (*pte_huge)(void *ptep);
 	void (*pte_mkhuge)(void *ptep);
+	bool (*pte_young)(void *ptep);
+	void (*pte_mkold)(void *ptep);
 	unsigned long (*pte_to_phys)(void *ptep);
 	u64 (*pte_to_prot)(void *ptep);
 	u64 (*calc_pte_perm)(bool read, bool write, bool exec);
@@ -152,6 +156,8 @@ void pkvm_pgtable_lookup_range(struct pkvm_pgtable *pgt,
 			       unsigned long *range_size,
 			       unsigned long *phys, u64 *prot);
 void pkvm_pgtable_destroy(struct pkvm_pgtable *pgt);
+bool pkvm_pgtable_test_clear_young(struct pkvm_pgtable *pgt, unsigned long vaddr,
+				   unsigned long size, bool mkold);
 
 /*
  * Return the max size of the virtual address space that can be
