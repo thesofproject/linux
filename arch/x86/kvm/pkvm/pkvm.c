@@ -450,6 +450,8 @@ static int __vcpu_create(struct kvm *kvm, struct kvm_vcpu *vcpu, struct fpstate 
 		vcpu->arch.perf_capabilities = kvm_caps.supported_perf_cap;
 	}
 
+	vcpu->arch.root_mmu.root.hpa = pkvm_vm->mmu.root_pa;
+	vcpu->arch.root_mmu.root_role.level = pkvm_vm->mmu.cap.level;
 	vcpu->arch.mmu = &vcpu->arch.root_mmu;
 	vcpu->arch.walk_mmu = &vcpu->arch.root_mmu;
 
@@ -1193,13 +1195,6 @@ static int pkvm_load_mmu_pgd(struct kvm_vcpu *vcpu, hpa_t root_hpa, int root_lev
 					      sizeof(struct kvm_mmu));
 		}
 	}
-
-	/*
-	 * TODO: Implement guest memory protection rather than directly using
-	 * the EPT controlled by the host.
-	 */
-	vcpu->arch.mmu->root.hpa = root_hpa;
-	vcpu->arch.mmu->root_role.level = root_level;
 
 	kvm_x86_call(load_mmu_pgd)(vcpu, vcpu->arch.mmu->root.hpa,
 				   vcpu->arch.mmu->root_role.level);

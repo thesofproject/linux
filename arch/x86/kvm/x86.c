@@ -10394,7 +10394,7 @@ int kvm_x86_vendor_init(struct kvm_x86_init_ops *ops)
 
 	kvm_register_perf_callbacks(ops->handle_intel_pt_intr);
 
-	if (IS_ENABLED(CONFIG_KVM_SW_PROTECTED_VM) && tdp_mmu_enabled)
+	if (IS_ENABLED(CONFIG_KVM_SW_PROTECTED_VM) && (tdp_mmu_enabled || enable_pkvm))
 		kvm_caps.supported_vm_types |= BIT(KVM_X86_SW_PROTECTED_VM);
 
 	if (enable_pkvm)
