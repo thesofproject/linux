@@ -1355,3 +1355,43 @@ unlock:
 
 	return ret;
 }
+
+/**
+ * pkvm_host_test_clear_young_guest() - Test and optionally clear the access
+ *					flag in guest PTEs for host pages
+ *					shared with a guest.
+ * @kvm:	Guest VM.
+ * @gpa:	Address of the guest physical address region to test/clear the
+ *		access flag.
+ * @size:	Size of the guest physical address region to test/clear the
+ *		access flag.
+ * @mkold:	If true, clear the access flag if it is set.
+ *
+ * Checks if any of the pages mapped in the GPA range [@gpa, @gpa + @size) in
+ * the guest mmu are young, i.e. have the access bit set in their PTEs. If
+ * @mkold is true, also clears this bit for all those pages. The guest must be
+ * a non-protected VM.  The @gpa and @size are required to be PAGE_SIZE aligned.
+ *
+ * Does not flush the TLB after clearing the access flag. It is the caller's
+ * responsibility to flush the TLB when needed.
+ *
+ * Returns: true if any of the pages in the range had the access flag set.
+ */
+int pkvm_host_test_clear_young_guest(struct kvm *kvm, unsigned long gpa,
+				     unsigned long size, bool mkold)
+{
+	struct pkvm_vm *pkvm_vm = to_pkvm(kvm);
+	int ret;
+
+	if (!PAGE_ALIGNED(gpa) || !PAGE_ALIGNED(size))
+		return -EINVAL;
+
+	if (WARN_ON_ONCE(pkvm_is_protected_vm(kvm)))
+		return -EPERM;
+
+	pkvm_guest_mmu_lock(pkvm_vm);
+	ret = pkvm_pgtable_test_clear_young(&pkvm_vm->mmu, gpa, size, mkold);
+	pkvm_guest_mmu_unlock(pkvm_vm);
+
+	return ret;
+}
