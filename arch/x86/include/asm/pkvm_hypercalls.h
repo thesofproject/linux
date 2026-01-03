@@ -82,6 +82,7 @@ PKVM_HC(has_wbinvd_exit)
 /* KVM MMU hypercalls */
 PKVM_HC(vm_mmu_map)
 PKVM_HC(vm_mmu_unmap)
+PKVM_HC(vm_mmu_age)
 
 #undef PKVM_HC
 #undef PKVM_HC_OUT
