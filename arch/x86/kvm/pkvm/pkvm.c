@@ -735,7 +735,6 @@ static bool is_guest_vcpu_accessible(struct kvm_vcpu *vcpu, enum pkvm_hc hc)
 	case __pkvm__sync_pir_to_irr:
 	case __pkvm__write_tsc_offset:
 	case __pkvm__write_tsc_multiplier:
-	case __pkvm__load_mmu_pgd:
 	case __pkvm__setup_mce:
 	case __pkvm__vcpu_run:
 	case __pkvm__complete_emulated_msr:
@@ -773,6 +772,7 @@ static bool is_guest_vcpu_accessible(struct kvm_vcpu *vcpu, enum pkvm_hc hc)
 	case __pkvm__flush_tlb_guest:
 	case __pkvm__vcpu_after_set_cpuid:
 	case __pkvm__vcpu_add_fpstate:
+	case __pkvm__load_mmu_pgd:
 		/*
 		 * As the host needs to pre-configure the pVM's vCPU state for
 		 * booting, the protection for pVM is only enforced by the pKVM
@@ -1166,34 +1166,31 @@ static int pkvm_load_mmu_pgd(struct kvm_vcpu *vcpu, hpa_t root_hpa, int root_lev
 
 	/*
 	 * The guest CR3/PDPTR may be updated by the load_mmu_pgd. Sync the
-	 * guest CR3/PDPTR from the host for both npVMs or pVMs (if pVMs are not
-	 * starting to run yet).
+	 * guest CR3/PDPTR from the host.
 	 */
-	if (!pkvm_is_protected_vcpu(vcpu) || !kvm_vcpu_has_run(vcpu)) {
-		if (kvm_register_is_dirty(shared_vcpu, VCPU_EXREG_CR3)) {
-			vcpu->arch.cr3 = shared_vcpu->arch.cr3;
-			kvm_register_mark_dirty(vcpu, VCPU_EXREG_CR3);
-		}
+	if (kvm_register_is_dirty(shared_vcpu, VCPU_EXREG_CR3)) {
+		vcpu->arch.cr3 = shared_vcpu->arch.cr3;
+		kvm_register_mark_dirty(vcpu, VCPU_EXREG_CR3);
+	}
 
-		if (kvm_register_is_dirty(shared_vcpu, VCPU_EXREG_PDPTR)) {
-			struct kvm_mmu *shared_walk_mmu = kern_pkvm_va(shared_vcpu->arch.walk_mmu);
-			struct kvm_mmu *walk_mmu = vcpu->arch.walk_mmu;
-			int ret;
+	if (kvm_register_is_dirty(shared_vcpu, VCPU_EXREG_PDPTR)) {
+		struct kvm_mmu *shared_walk_mmu = kern_pkvm_va(shared_vcpu->arch.walk_mmu);
+		struct kvm_mmu *walk_mmu = vcpu->arch.walk_mmu;
+		int ret;
 
-			ret = pkvm_host_share_hyp(__pkvm_pa(shared_walk_mmu),
-						  sizeof(struct kvm_mmu));
-			if (ret)
-				return ret;
+		ret = pkvm_host_share_hyp(__pkvm_pa(shared_walk_mmu),
+					  sizeof(struct kvm_mmu));
+		if (ret)
+			return ret;
 
-			walk_mmu->pdptrs[0] = shared_walk_mmu->pdptrs[0];
-			walk_mmu->pdptrs[1] = shared_walk_mmu->pdptrs[1];
-			walk_mmu->pdptrs[2] = shared_walk_mmu->pdptrs[2];
-			walk_mmu->pdptrs[3] = shared_walk_mmu->pdptrs[3];
-			kvm_register_mark_dirty(vcpu, VCPU_EXREG_PDPTR);
+		walk_mmu->pdptrs[0] = shared_walk_mmu->pdptrs[0];
+		walk_mmu->pdptrs[1] = shared_walk_mmu->pdptrs[1];
+		walk_mmu->pdptrs[2] = shared_walk_mmu->pdptrs[2];
+		walk_mmu->pdptrs[3] = shared_walk_mmu->pdptrs[3];
+		kvm_register_mark_dirty(vcpu, VCPU_EXREG_PDPTR);
 
-			pkvm_host_unshare_hyp(__pkvm_pa(shared_walk_mmu),
-					      sizeof(struct kvm_mmu));
-		}
+		pkvm_host_unshare_hyp(__pkvm_pa(shared_walk_mmu),
+				      sizeof(struct kvm_mmu));
 	}
 
 	kvm_x86_call(load_mmu_pgd)(vcpu, vcpu->arch.mmu->root.hpa,
