@@ -1644,6 +1644,31 @@ static bool __kvm_rmap_zap_gfn_range(struct kvm *kvm,
 				 PG_LEVEL_4K, KVM_MAX_HUGEPAGE_LEVEL,
 				 start, end - 1, can_yield, true, flush);
 }
+#ifdef CONFIG_PKVM_X86
+static bool pkvm_unmap_gfn_range(struct kvm *kvm, struct kvm_gfn_range *range)
+{
+	struct pkvm_mapping *m;
+
+	lockdep_assert_held_write(&kvm->mmu_lock);
+
+	if (pkvm_is_protected_vm(kvm))
+		return false;
+
+	for_each_pkvm_mapping(kvm, range->start, range->end, m) {
+		int err = pkvm_hypercall(vm_mmu_unmap, kvm->arch.pkvm.handle,
+					 m->gfn << PAGE_SHIFT,
+					 m->nr_pages << PAGE_SHIFT);
+		WARN_ONCE(err, "pkvm unmap gfn[%llx..%llx] failed, err = %d\n",
+			  m->gfn, m->gfn + m->nr_pages, err);
+
+		pkvm_mapping_remove(m, &kvm->arch.pkvm.mappings);
+		kfree(m);
+	}
+
+	/* pKVM itself always flushes TLB on unmap */
+	return false;
+}
+#endif /* CONFIG_PKVM_X86 */
 
 bool kvm_unmap_gfn_range(struct kvm *kvm, struct kvm_gfn_range *range)
 {
@@ -1659,6 +1684,11 @@ bool kvm_unmap_gfn_range(struct kvm *kvm, struct kvm_gfn_range *range)
 	 */
 	lockdep_assert_once(kvm->mmu_invalidate_in_progress ||
 			    lockdep_is_held(&kvm->slots_lock));
+
+#ifdef CONFIG_PKVM_X86
+	if (/*enable_pkvm*/ 0)
+		flush = pkvm_unmap_gfn_range(kvm, range);
+#endif
 
 	if (kvm_memslots_have_rmaps(kvm))
 		flush = __kvm_rmap_zap_gfn_range(kvm, range->slot,
