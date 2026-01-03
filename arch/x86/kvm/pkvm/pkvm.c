@@ -1160,7 +1160,7 @@ static int pkvm_write_tsc_multiplier(struct kvm_vcpu *vcpu)
 	return 0;
 }
 
-static int pkvm_load_mmu_pgd(struct kvm_vcpu *vcpu, hpa_t root_hpa, int root_level)
+static int pkvm_load_mmu_pgd(struct kvm_vcpu *vcpu)
 {
 	struct kvm_vcpu *shared_vcpu = to_pkvm_vcpu(vcpu)->shared_vcpu;
 
@@ -1623,7 +1623,7 @@ static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc 
 		ret = pkvm_write_tsc_multiplier(vcpu);
 		break;
 	case __pkvm__load_mmu_pgd:
-		ret = pkvm_load_mmu_pgd(vcpu, pkvm_hc_input1(hvcpu), pkvm_hc_input2(hvcpu));
+		ret = pkvm_load_mmu_pgd(vcpu);
 		break;
 	case __pkvm__setup_mce:
 		ret = kvm_vcpu_x86_setup_mce(vcpu, to_pkvm_vcpu(vcpu)->shared_vcpu->arch.mcg_cap);
