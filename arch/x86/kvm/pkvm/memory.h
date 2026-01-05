@@ -6,6 +6,7 @@
 #include <linux/range.h>
 #include <vdso/limits.h>
 #include <asm/page.h>
+#include "mem_protect.h"
 
 #define __pkvm_pa		__pa
 #define __pkvm_va		__va
@@ -13,7 +14,16 @@
 struct pkvm_page {
 	unsigned short refcount;
 	u8 order;
+
+	/* Store host memory page state. */
+	enum pkvm_page_state host_state: 8;
 };
+
+/*
+ * Make sure pkvm_page->host_state is large enough to store enum
+ * pkvm_page_state.
+ */
+static_assert(PKVM_PAGE_STATE_BITS <= 8);
 
 extern u64 __pkvm_vmemmap;
 #define pkvm_vmemmap ((struct pkvm_page *)__pkvm_vmemmap)

@@ -3,6 +3,7 @@
 #define __PKVM_X86_PGTABLE_H
 
 #include <linux/types.h>
+#include "mem_protect.h"
 
 struct pkvm_pgtable;
 
@@ -26,7 +27,8 @@ struct pkvm_pgtable_mm_ops {
  * @pte_huge:		Check if a pte is huge.
  * @pte_mkhuge:		Set huge for the given pte.
  * @pte_to_phys:	Decode the physical address from pte.
- * @pte_to_prot:	Decode the property bits from pte.
+ * @pte_to_prot:	Decode the property bits from pte, including the page
+ *                      state bits.
  * @calc_pte_perm:	Calculate the pte permission bits according to the
  *			read/write/exec permissions.
  * @calc_pte_memtype:	Calculate the pte memory type bits for either memory or
@@ -43,6 +45,9 @@ struct pkvm_pgtable_mm_ops {
  * @pte_set:		Set a pte to a given raw value.
  * @pte_get:		Get the raw value stored in the pte.
  * @flush_tlb:		Flush the TLB for a virtual address range.
+ * @pte_mk_pgstate:	Make a pte value with the given the page state.
+ * @pte_pgstate:	Get the page state from the pte.
+ * @pgstate_mask:	Get the page state bits mask.
  */
 struct pkvm_pgtable_ops {
 	bool (*pte_present)(void *ptep);
@@ -62,6 +67,9 @@ struct pkvm_pgtable_ops {
 	u64 (*pte_get)(void *ptep);
 	void (*flush_tlb)(struct pkvm_pgtable *pgt,
 			  unsigned long vaddr, unsigned long size);
+	u64 (*pte_mk_pgstate)(enum pkvm_page_state state);
+	enum pkvm_page_state (*pte_pgstate)(void *ptep);
+	u64 (*pgstate_mask)(void);
 };
 
 struct pkvm_pgtable_cap {
@@ -140,6 +148,31 @@ void pkvm_pgtable_lookup(struct pkvm_pgtable *pgt, unsigned long vaddr,
 static inline unsigned long pkvm_pgtable_max_size(struct pkvm_pgtable *pgt)
 {
 	return pgt->pgt_ops->level_to_size(pgt->cap.level + 1);
+}
+
+static inline u64 pkvm_pgt_pgstate_mask(struct pkvm_pgtable *pgt)
+{
+	if (!pgt->pgt_ops->pgstate_mask)
+		return 0;
+
+	return pgt->pgt_ops->pgstate_mask();
+}
+
+static inline u64 pkvm_pte_mk_pgstate(struct pkvm_pgtable *pgt,
+				      enum pkvm_page_state state)
+{
+	if (!pgt->pgt_ops->pte_mk_pgstate)
+		return 0;
+
+	return pgt->pgt_ops->pte_mk_pgstate(state);
+}
+
+static inline enum pkvm_page_state pkvm_pte_pgstate(struct pkvm_pgtable *pgt, void *ptep)
+{
+	if (!pgt->pgt_ops->pte_pgstate)
+		return PKVM_PAGE_NONE;
+
+	return pgt->pgt_ops->pte_pgstate(ptep);
 }
 
 #endif /* __PKVM_X86_PGTABLE_H */
