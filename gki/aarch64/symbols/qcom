@@ -13,6 +13,7 @@
   ring_buffer_peek
   ring_buffer_unlock_commit
   set_next_entity
+  __traceiter_android_rvh___set_task_cpu
   __traceiter_android_rvh_before_do_sched_yield
   __traceiter_android_rvh_build_perf_domains
   __traceiter_android_rvh_cpu_capacity_show
@@ -28,6 +29,7 @@
   __traceiter_android_vh_freq_qos_remove_request
   __traceiter_android_vh_freq_qos_update_request
   __traceiter_android_vh_try_fixup_sea
+  __tracepoint_android_rvh___set_task_cpu
   __tracepoint_android_rvh_before_do_sched_yield
   __tracepoint_android_rvh_build_perf_domains
   __tracepoint_android_rvh_cpu_capacity_show
