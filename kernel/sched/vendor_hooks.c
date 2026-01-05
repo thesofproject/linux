@@ -55,6 +55,7 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_dequeue_task_fair);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_util_est_update);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_setscheduler_uclamp);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_set_task_cpu);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh___set_task_cpu);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_try_to_wake_up);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_try_to_wake_up_success);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_sched_fork);
