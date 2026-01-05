@@ -131,6 +131,9 @@
   crypto_shash_init
   crypto_skcipher_decrypt
   crypto_skcipher_setkey
+  css_task_iter_end
+  css_task_iter_next
+  css_task_iter_start
   csum_ipv6_magic
   csum_partial
   csum_tcpudp_nofold
