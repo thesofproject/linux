@@ -216,6 +216,7 @@ filegroup(
         "gki/aarch64/symbols/honor",
         "gki/aarch64/symbols/kunit",
         "gki/aarch64/symbols/mtk",
+        "gki/aarch64/symbols/oplus",
         "gki/aarch64/symbols/pixel",
         "gki/aarch64/symbols/qcom",
         "gki/aarch64/symbols/unisoc",
