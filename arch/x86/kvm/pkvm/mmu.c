@@ -253,6 +253,67 @@ static u64 host_mmu_pte_prot(bool mmio)
 	       host_mmu.pgt_ops->calc_pte_memtype(mmio);
 }
 
+static int fix_host_mmu_pgstate_walker(struct pkvm_pgtable_visit_ctx *ctx,
+				       unsigned long walk_flags,
+				       void *const arg)
+{
+	const struct pkvm_pgtable_ops *pgt_ops = ctx->pgt->pgt_ops;
+	u64 pte;
+
+	if (pgt_ops->pte_present(ctx->ptep)) {
+		/* A present pte could map either memory pages or MMIO pages. */
+		unsigned long phys, size;
+
+		phys = pgt_ops->pte_to_phys(ctx->ptep);
+		size = pgt_ops->level_to_size(ctx->level);
+
+		if (is_mmio_range(phys, size)) {
+			/*
+			 * Store PKVM_PAGE_OWNED page state in pte for the MMIO
+			 * pages. No need to flush TLB as the page state bits in
+			 * pte are ignored bits.
+			 */
+			pte = pgt_ops->pte_get(ctx->ptep) |
+			      pgt_ops->pte_mk_pgstate(PKVM_PAGE_OWNED);
+
+			pgt_ops->pte_set(ctx->ptep, pte);
+		} else {
+			/*
+			 * Not MMIO pages then should be memory pages. Otherwise
+			 * it is a code bug.
+			 */
+			BUG_ON(!is_memory_range(phys, size));
+			set_host_mem_pgstate(phys, size, PKVM_PAGE_OWNED);
+		}
+	} else {
+		/*
+		 * A non-present pte will be used by the pKVM hypervisor to
+		 * install MMIO mappings at runtime. Set the page state
+		 * as PKVM_PAGE_NONE to as it is non-present leaf. Meanwhile set
+		 * the owner ID as PKVM_ID_HYP so that only the pKVM hypervisor
+		 * can initiate the transition of this MMIO page to the host.
+		 */
+		pte = pgt_ops->pte_mk_pgstate(PKVM_PAGE_NONE) |
+		      pkvm_pte_mk_owner_id(PKVM_ID_HYP);
+
+		pgt_ops->pte_set(ctx->ptep, pte);
+	}
+
+	return 0;
+}
+
+static int fix_host_mmu_pgstate(void)
+{
+	struct pkvm_pgtable_walker walker = {
+		.cb = fix_host_mmu_pgstate_walker,
+		.arg = NULL,
+		.walk_flags = PKVM_PGTABLE_WALK_LEAF,
+	};
+
+	return pkvm_pgtable_walk(&host_mmu, 0, pkvm_pgtable_max_size(&host_mmu),
+				 &walker);
+}
+
 int pkvm_hyp_mmu_init(void *pool_base, unsigned long pool_pages)
 {
 	struct pkvm_pgtable_cap cap = {
@@ -352,9 +413,6 @@ int pkvm_host_mmu_init(void *pool_base, unsigned long pool_pages, host_mmu_init_
 		if (ret)
 			return ret;
 
-		set_host_mem_pgstate((unsigned long)reg->base,
-				     (unsigned long)reg->size,
-				     PKVM_PAGE_OWNED);
 	}
 
 	/* Map holes between memblocks as MMIO with RWX permissions */
@@ -366,7 +424,7 @@ int pkvm_host_mmu_init(void *pool_base, unsigned long pool_pages, host_mmu_init_
 			return ret;
 	}
 
-	return 0;
+	return fix_host_mmu_pgstate();
 }
 
 int pkvm_host_mmu_finalize(host_mmu_finalize_fn_t fn)
