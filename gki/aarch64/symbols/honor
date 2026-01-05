@@ -8,6 +8,10 @@
   __tracepoint_android_vh_tcp_v6_connect
   __traceiter_android_vh_tcp_write_timeout_estab_retrans
   __tracepoint_android_vh_tcp_write_timeout_estab_retrans
+  __traceiter_android_vh_udp_unicast_rcv_skb
+  __tracepoint_android_vh_udp_unicast_rcv_skb
+  __traceiter_android_vh_udp6_unicast_rcv_skb
+  __tracepoint_android_vh_udp6_unicast_rcv_skb
   __traceiter_android_vh_udp_v4_connect
   __tracepoint_android_vh_udp_v4_connect
   __traceiter_android_vh_udp_v6_connect
