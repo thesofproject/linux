@@ -952,9 +952,75 @@
   wake_up_if_idle
   wakeup_preempt
 
+# required by exynos-chipid_v2.ko
+  soc_device_register
+
 # required by exynos-irq-gic-v3-its.ko
   its_restore_enable
   its_save_disable
+
+# required by exynos_mct_v3.ko
+  clockevents_config_and_register
+  __clocksource_register_scale
+  irq_force_affinity
+  _printk_deferred
+
+# required by exynos_tty.ko
+  cache_line_size
+  console_suspend
+  dma_get_slave_caps
+  do_SAK
+  handle_sysrq
+  __kfifo_out_linear
+  __release_region
+  __request_region
+  sysrq_mask
+  tty_flip_buffer_push
+  __tty_insert_flip_string_flags
+  tty_kref_put
+  tty_port_tty_get
+  uart_add_one_port
+  uart_console_write
+  uart_get_baud_rate
+  uart_parse_options
+  uart_register_driver
+  uart_remove_one_port
+  uart_resume_port
+  uart_set_options
+  uart_suspend_port
+  uart_try_toggle_sysrq
+  uart_unregister_driver
+  uart_update_timeout
+  uart_write_wakeup
+
+# required by irq-gic-v3-vh.ko
+  __traceiter_android_rvh_gic_v3_set_affinity
+  __tracepoint_android_rvh_gic_v3_set_affinity
+
+# required by pinctrl-samsung-ext.ko
+  device_get_next_child_node
+  generic_handle_domain_irq
+  gpiochip_lock_as_irq
+  gpiochip_unlock_as_irq
+  irq_domain_xlate_twocell
+  irq_set_chained_handler_and_data
+  pinctrl_add_gpio_range
+  pinctrl_force_default
+  pinctrl_force_sleep
+  pinctrl_remove_gpio_range
+  pin_get_name
+  platform_get_irq_optional
+
+# required by pwm-exynos.ko
+  devm_clk_get_enabled
+  __devm_pwmchip_add
+  devm_pwmchip_alloc
+
+# required by s3c2410_wdt_ext.ko
+  watchdog_init_timeout
+  watchdog_register_device
+  watchdog_set_restart_priority
+  watchdog_unregister_device
 
 # required by samsung-iommu-group-v9.ko
   iommu_group_alloc
