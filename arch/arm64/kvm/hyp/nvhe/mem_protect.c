@@ -1489,6 +1489,80 @@ int ___pkvm_host_donate_hyp(u64 pfn, u64 nr_pages, bool accept_mmio)
 					    default_hyp_prot(hyp_pfn_to_phys(pfn)));
 }
 
+int __pkvm_host_donate_sglist_hyp(struct pkvm_sglist_page *sglist, size_t nr_pages)
+{
+	int p, ret;
+
+	host_lock_component();
+	hyp_lock_component();
+
+	/* Checking we are reading hyp private memory */
+	WARN_ON(__hyp_check_page_state_range((u64)sglist, nr_pages * sizeof(*sglist),
+					     PKVM_PAGE_OWNED));
+
+	for (p = 0; p < nr_pages; p++) {
+		u8 max_order = get_order(PMD_SIZE);
+		size_t size;
+		u64 phys;
+
+		if (sglist[p].order > max_order) {
+			ret = -EINVAL;
+			goto unlock;
+		}
+		size = PAGE_SIZE << sglist[p].order;
+
+		if (!pfn_range_is_valid(sglist[p].pfn, size >> PAGE_SHIFT)) {
+			ret = -EINVAL;
+			goto unlock;
+		}
+		phys = hyp_pfn_to_phys(sglist[p].pfn);
+
+		ret = __host_check_page_state_range(phys, size, PKVM_PAGE_OWNED);
+		if (ret)
+			goto unlock;
+
+		ret = __hyp_check_page_state_range((u64)__hyp_va(phys), size, PKVM_NOPAGE);
+		if (ret)
+			goto unlock;
+	}
+
+	for (p = 0; p < nr_pages; p++) {
+		size_t size = PAGE_SIZE << sglist[p].order;
+		u64 phys = hyp_pfn_to_phys(sglist[p].pfn);
+		enum kvm_pgtable_prot prot;
+
+		prot = pkvm_mkstate(PAGE_HYP, PKVM_PAGE_OWNED);
+		ret = pkvm_create_mappings_locked(__hyp_va(phys), __hyp_va(phys) + size, prot);
+		if (ret) {
+			WARN_ON(ret != -ENOMEM);
+
+			kvm_iommu_host_stage2_idmap_complete(false);
+
+			/* Rollback */
+			for (; p >= 0; p--) {
+				phys = hyp_pfn_to_phys(sglist[p].pfn);
+				size = PAGE_SIZE << sglist[p].order;
+
+				pkvm_remove_mappings_locked(__hyp_va(phys), __hyp_va(phys) + size);
+				WARN_ON(host_stage2_set_owner_locked(phys, size, PKVM_ID_HOST));
+			}
+
+			goto unlock;
+		}
+
+		WARN_ON(__host_stage2_set_owner_locked(phys, size, PKVM_ID_HYP, true, 0, false));
+		kvm_iommu_host_stage2_idmap(phys, phys + size, 0);
+	}
+
+	kvm_iommu_host_stage2_idmap_complete(false);
+
+unlock:
+	hyp_unlock_component();
+	host_unlock_component();
+
+	return ret;
+}
+
 static int pkvm_hyp_donate_guest(struct pkvm_hyp_vcpu *vcpu, u64 pfn, u64 gfn)
 {
 	struct pkvm_hyp_vm *vm = pkvm_hyp_vcpu_to_hyp_vm(vcpu);

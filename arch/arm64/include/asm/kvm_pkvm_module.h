@@ -38,6 +38,11 @@ struct pkvm_module_trng_ops {
 	ANDROID_KABI_RESERVE(2);
 };
 
+struct pkvm_sglist_page {
+	u64	pfn : 40;
+	u8	order;
+} __packed;
+
 /**
  * struct pkvm_module_ops - pKVM modules callbacks
  * @create_private_mapping:	Map a memory region into the hypervisor private
@@ -146,6 +151,9 @@ struct pkvm_module_trng_ops {
  *				is called before remasking SErrors.
  * @host_donate_hyp:		The page @pfn is unmapped from the host and
  *				full control is given to the hypervisor.
+ * @host_donate_sglist_hyp:	Similar to host_donate_hyp but take an array of PFNs
+ *				(kvm_sglist_page) as an argument. This intends to
+ *				batch IOMMU updates.
  * @hyp_donate_host:		The page @pfn whom control has previously been
  *				given to the hypervisor (@host_donate_hyp) is
  *				given back to the host.
@@ -242,6 +250,7 @@ struct pkvm_module_ops {
 	int (*register_hyp_panic_notifier)(void (*cb)(struct user_pt_regs *));
 	int (*register_unmask_serror)(bool (*unmask)(void), void (*mask)(void));
 	int (*host_donate_hyp)(u64 pfn, u64 nr_pages);
+	int (*host_donate_sglist_hyp)(struct pkvm_sglist_page *sglist, size_t nr_pages);
 	int (*hyp_donate_host)(u64 pfn, u64 nr_pages);
 	int (*host_share_hyp)(u64 pfn);
 	int (*host_unshare_hyp)(u64 pfn);
