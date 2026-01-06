@@ -343224,7 +343224,7 @@ elf_symbol {
   name: "gpiod_to_chip"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x0b0e5569
+  crc: 0x013c72e3
   type_id: 0x4d0cf62c
   full_name: "gpiod_to_chip"
 }
@@ -344142,7 +344142,7 @@ elf_symbol {
   name: "i2c_smbus_write_word_data"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x3fe7d8eb
+  crc: 0x36e93755
   type_id: 0x8d392a65
   full_name: "i2c_smbus_write_word_data"
 }
