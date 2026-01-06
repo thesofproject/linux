@@ -224211,7 +224211,7 @@ elf_symbol {
   name: "inet_csk_get_port"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x03f06347
+  crc: 0x3ecfe63a
   type_id: 0x99f517b1
   full_name: "inet_csk_get_port"
 }
