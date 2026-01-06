@@ -85,6 +85,18 @@
   __tracepoint_android_vh_process_madvise
   __traceiter_android_vh_madvise_swapin_walk_pmd_entry
   __tracepoint_android_vh_madvise_swapin_walk_pmd_entry
+  __traceiter_block_bio_queue
+  __tracepoint_block_bio_queue
+  __traceiter_block_getrq
+  __tracepoint_block_getrq
+  __traceiter_block_rq_complete
+  __tracepoint_block_rq_complete
+  __traceiter_block_rq_issue
+  __tracepoint_block_rq_issue
+  __traceiter_block_rq_merge
+  __tracepoint_block_rq_merge
+  __traceiter_block_rq_requeue
+  __tracepoint_block_rq_requeue
   mempool_exit
   dm_register_target
   dm_unregister_target
