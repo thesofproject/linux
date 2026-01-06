@@ -1,3 +1,5 @@
+  __traceiter_android_vh_inet_csk_clone_lock
+  __tracepoint_android_vh_inet_csk_clone_lock
   __tracepoint_android_vh_security_audit_log_setid
   __traceiter_android_vh_security_audit_log_setid
   __traceiter_android_vh_sk_alloc
