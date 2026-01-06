@@ -221,6 +221,7 @@ filegroup(
         "gki/aarch64/symbols/qcom",
         "gki/aarch64/symbols/unisoc",
         "gki/aarch64/symbols/virtual_device",
+        "gki/aarch64/symbols/vivo",
         "gki/aarch64/symbols/xiaomi",
     ],
     visibility = ["//visibility:public"],
