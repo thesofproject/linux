@@ -51,6 +51,7 @@
   __traceiter_sched_switch
   __traceiter_workqueue_execute_end
   __traceiter_workqueue_execute_start
+  __traceiter_android_vh_free_unref_folios_to_pcp_bypass
   __tracepoint_android_rvh_cpufreq_transition
   __tracepoint_android_rvh_dequeue_task_fair
   __tracepoint_android_rvh_enqueue_task_fair
@@ -85,6 +86,7 @@
   __tracepoint_sched_switch
   __tracepoint_workqueue_execute_end
   __tracepoint_workqueue_execute_start
+  __tracepoint_android_vh_free_unref_folios_to_pcp_bypass
   ucsi_send_command
   unlock_buffer
   __wait_on_buffer
