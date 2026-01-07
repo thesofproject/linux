@@ -323832,7 +323832,7 @@ elf_symbol {
   name: "__traceiter_android_rvh_set_cpus_allowed_comm"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x12124b68
+  crc: 0x0b59f60e
   type_id: 0x9bd79f74
   full_name: "__traceiter_android_rvh_set_cpus_allowed_comm"
 }
@@ -323994,7 +323994,7 @@ elf_symbol {
   name: "__traceiter_android_vh_account_task_time"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x56f39411
+  crc: 0x9bbef42a
   type_id: 0x9bd1c0e0
   full_name: "__traceiter_android_vh_account_task_time"
 }
@@ -324471,7 +324471,7 @@ elf_symbol {
   name: "__traceiter_android_vh_futex_sleep_start"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x0aaa2d59
+  crc: 0x323f9d7d
   type_id: 0x9bdbdcc4
   full_name: "__traceiter_android_vh_futex_sleep_start"
 }
@@ -324606,7 +324606,7 @@ elf_symbol {
   name: "__traceiter_android_vh_map_util_freq"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x2aa877fd
+  crc: 0xd8a3e5db
   type_id: 0x9b6e7eec
   full_name: "__traceiter_android_vh_map_util_freq"
 }
@@ -324903,7 +324903,7 @@ elf_symbol {
   name: "__traceiter_android_vh_reweight_entity"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x6c52d21c
+  crc: 0x2fc938ca
   type_id: 0x9b8f15f1
   full_name: "__traceiter_android_vh_reweight_entity"
 }
@@ -325038,7 +325038,7 @@ elf_symbol {
   name: "__traceiter_android_vh_sched_setaffinity_early"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x63ded56d
+  crc: 0x928ce37b
   type_id: 0x9bd7d84b
   full_name: "__traceiter_android_vh_sched_setaffinity_early"
 }
@@ -325794,7 +325794,7 @@ elf_symbol {
   name: "__traceiter_sched_stat_blocked"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x99971d7c
+  crc: 0xdc8b400c
   type_id: 0x9bff5408
   full_name: "__traceiter_sched_stat_blocked"
 }
@@ -325812,7 +325812,7 @@ elf_symbol {
   name: "__traceiter_sched_stat_sleep"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x99971d7c
+  crc: 0xdc8b400c
   type_id: 0x9bff5408
   full_name: "__traceiter_sched_stat_sleep"
 }
@@ -325821,7 +325821,7 @@ elf_symbol {
   name: "__traceiter_sched_stat_wait"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x99971d7c
+  crc: 0xdc8b400c
   type_id: 0x9bff5408
   full_name: "__traceiter_sched_stat_wait"
 }
@@ -325848,7 +325848,7 @@ elf_symbol {
   name: "__traceiter_sched_waking"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xf66faaf3
+  crc: 0x18cec91b
   type_id: 0x9bdbdcc4
   full_name: "__traceiter_sched_waking"
 }
@@ -347100,6 +347100,16 @@ elf_symbol {
   crc: 0x7851be11
   type_id: 0x9d80e32f
   full_name: "is_console_locked"
+}
+elf_symbol {
+  id: 0x73ffe9a9
+  name: "is_dma_buf_file"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x92d2cca8
+  namespace: "DMA_BUF"
+  type_id: 0x9bba7997
+  full_name: "is_dma_buf_file"
 }
 elf_symbol {
   id: 0x4822711b
@@ -370468,6 +370478,7 @@ interface {
   symbol_id: 0x3d2a104d
   symbol_id: 0x65d49acf
   symbol_id: 0x064a6e13
+  symbol_id: 0x73ffe9a9
   symbol_id: 0x4822711b
   symbol_id: 0x03de6dc5
   symbol_id: 0xe4e974b3
