@@ -325169,6 +325169,15 @@ elf_symbol {
   full_name: "__traceiter_android_vh_sk_alloc"
 }
 elf_symbol {
+  id: 0x215231a8
+  name: "__traceiter_android_vh_sk_clone_lock"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xecfc7c1a
+  type_id: 0x9bdaaaaa
+  full_name: "__traceiter_android_vh_sk_clone_lock"
+}
+elf_symbol {
   id: 0x0562cb47
   name: "__traceiter_android_vh_slab_folio_alloced"
   is_defined: true
@@ -327930,6 +327939,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_vh_sk_alloc"
+}
+elf_symbol {
+  id: 0xa5ebe436
+  name: "__tracepoint_android_vh_sk_clone_lock"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_vh_sk_clone_lock"
 }
 elf_symbol {
   id: 0x4a999b29
@@ -368016,6 +368034,7 @@ interface {
   symbol_id: 0x69c3749b
   symbol_id: 0x3d0fc76c
   symbol_id: 0x56a5b453
+  symbol_id: 0x215231a8
   symbol_id: 0x0562cb47
   symbol_id: 0x58e7556b
   symbol_id: 0x2ecf85e9
@@ -368323,6 +368342,7 @@ interface {
   symbol_id: 0xc8a7ac69
   symbol_id: 0x5ef059ce
   symbol_id: 0x4aa5e229
+  symbol_id: 0xa5ebe436
   symbol_id: 0x4a999b29
   symbol_id: 0x39e68fed
   symbol_id: 0xefb9e5a3
