@@ -446,6 +446,10 @@ DECLARE_HOOK(android_vh_sched_setaffinity_early,
 	TP_PROTO(struct task_struct *p, const struct cpumask *new_mask, bool *retval),
 	TP_ARGS(p, new_mask, retval));
 
+DECLARE_HOOK(android_vh_account_task_time,
+	TP_PROTO(struct task_struct *p, struct rq *rq, int user_tick),
+	TP_ARGS(p, rq, user_tick));
+
 struct cpufreq_policy;
 DECLARE_HOOK(android_vh_map_util_freq,
 	TP_PROTO(unsigned long util, unsigned long freq,
