@@ -35,6 +35,8 @@ DECLARE_HOOK(android_vh_sk_alloc,
 	TP_PROTO(struct sock *sk), TP_ARGS(sk));
 DECLARE_HOOK(android_vh_sk_free,
 	TP_PROTO(struct sock *sk), TP_ARGS(sk));
+DECLARE_HOOK(android_vh_sk_clone_lock,
+	TP_PROTO(struct sock *nsk), TP_ARGS(nsk));
 DECLARE_HOOK(android_vh_tcp_write_timeout_estab_retrans,
 	TP_PROTO(struct sock *sk), TP_ARGS(sk));
 struct request_sock;
