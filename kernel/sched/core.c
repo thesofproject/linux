@@ -2755,6 +2755,8 @@ void set_cpus_allowed_common(struct task_struct *p, struct affinity_context *ctx
 	 */
 	if (ctx->flags & SCA_USER)
 		swap(p->user_cpus_ptr, ctx->user_mask);
+
+	trace_android_rvh_set_cpus_allowed_comm(p, ctx->new_mask);
 }
 
 static void
