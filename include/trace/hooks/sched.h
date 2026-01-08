@@ -463,8 +463,8 @@ DECLARE_HOOK(android_vh_map_util_freq,
 	TP_ARGS(util, freq, cap, next_freq, policy, need_freq_update));
 
 DECLARE_HOOK(android_vh_reweight_entity,
-	TP_PROTO(struct sched_entity *se),
-	TP_ARGS(se));
+	TP_PROTO(struct sched_entity *se, unsigned long *weight),
+	TP_ARGS(se, weight));
 
 /* macro versions of hooks are no longer required */
 
