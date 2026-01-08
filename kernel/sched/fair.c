@@ -3829,6 +3829,8 @@ static void reweight_entity(struct cfs_rq *cfs_rq, struct sched_entity *se,
 	}
 	dequeue_load_avg(cfs_rq, se);
 
+	trace_android_vh_reweight_entity(se, &weight);
+
 	/*
 	 * Because we keep se->vlag = V - v_i, while: lag_i = w_i*(V - v_i),
 	 * we need to scale se->vlag when w_i changes.
@@ -3838,8 +3840,6 @@ static void reweight_entity(struct cfs_rq *cfs_rq, struct sched_entity *se,
 		se->deadline = div_s64(se->deadline * se->load.weight, weight);
 
 	update_load_set(&se->load, weight);
-
-	trace_android_vh_reweight_entity(se);
 
 	do {
 		u32 divider = get_pelt_divider(&se->avg);
