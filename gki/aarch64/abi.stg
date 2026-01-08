@@ -287364,6 +287364,13 @@ function {
   parameter_id: 0xf435685e
 }
 function {
+  id: 0x142cd06c
+  return_type_id: 0x48b5725f
+  parameter_id: 0x1d44326e
+  parameter_id: 0xf1a6dfed
+  parameter_id: 0x8c586ef5
+}
+function {
   id: 0x142e0390
   return_type_id: 0x48b5725f
   parameter_id: 0x1d19a9d5
@@ -316737,6 +316744,13 @@ function {
   parameter_id: 0x0cf3d8fe
   parameter_id: 0x08b7f786
   parameter_id: 0x07dcdbe1
+}
+function {
+  id: 0x9ea3b9a0
+  return_type_id: 0x6720d32f
+  parameter_id: 0x0ca27481
+  parameter_id: 0x0483e6f8
+  parameter_id: 0x6720d32f
 }
 function {
   id: 0x9ea457b9
@@ -352521,6 +352535,15 @@ elf_symbol {
   full_name: "netdev_err"
 }
 elf_symbol {
+  id: 0x980489ec
+  name: "netdev_get_name"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xa1ac4f73
+  type_id: 0x9ea3b9a0
+  full_name: "netdev_get_name"
+}
+elf_symbol {
   id: 0x1a34a34f
   name: "netdev_increment_features"
   is_defined: true
@@ -364065,6 +364088,15 @@ elf_symbol {
   full_name: "tasklist_lock"
 }
 elf_symbol {
+  id: 0x862e9de5
+  name: "tcp_send_active_reset"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xa837c84e
+  type_id: 0x142cd06c
+  full_name: "tcp_send_active_reset"
+}
+elf_symbol {
   id: 0x76f0e146
   name: "tcpm_cc_change"
   is_defined: true
@@ -372913,6 +372945,7 @@ interface {
   symbol_id: 0x2a20c876
   symbol_id: 0x023c08b0
   symbol_id: 0xfac0e8e6
+  symbol_id: 0x980489ec
   symbol_id: 0x1a34a34f
   symbol_id: 0x06bf2dbd
   symbol_id: 0x11e35877
@@ -374196,6 +374229,7 @@ interface {
   symbol_id: 0x9c77d018
   symbol_id: 0x9b3fb280
   symbol_id: 0x6c3c9573
+  symbol_id: 0x862e9de5
   symbol_id: 0x76f0e146
   symbol_id: 0x8ff05644
   symbol_id: 0x3da83409
