@@ -1197,6 +1197,7 @@ out:
 	rcu_read_unlock();
 	return ret;
 }
+EXPORT_SYMBOL_GPL(netdev_get_name);
 
 static bool dev_addr_cmp(struct net_device *dev, unsigned short type,
 			 const char *ha)
