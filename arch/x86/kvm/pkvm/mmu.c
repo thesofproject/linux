@@ -827,6 +827,11 @@ void pkvm_guest_mmu_setup(const struct pkvm_pgtable_ops *pgt_ops,
 	guest_mmu_pgt_cap = pgt_cap;
 }
 
+int pkvm_guest_mmu_max_level(void)
+{
+	return guest_mmu_pgt_cap.level;
+}
+
 int pkvm_guest_mmu_init(struct pkvm_vm *pkvm_vm, phys_addr_t pgd_pa)
 {
 	struct kvm_pkvm_vm *shared_pkvm = &pkvm_vm->shared_kvm->arch.pkvm;

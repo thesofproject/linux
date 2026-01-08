@@ -30,6 +30,10 @@
 #include "pmu.h"
 #include "xen.h"
 
+#ifdef __PKVM_HYP__
+#include "pkvm/mmu.h"
+#endif
+
 /*
  * Unlike "struct cpuinfo_x86.x86_capability", kvm_cpu_caps doesn't need to be
  * aligned to sizeof(unsigned long) because it's not accessed via bitops.
@@ -1807,11 +1811,12 @@ static inline int __do_cpuid_func(struct kvm_cpuid_array *array, u32 function)
 		} else {
 			phys_as = entry->eax & 0xff;
 			g_phys_as = phys_as;
-			/* FIXME: Check pKVM guest MMU level */
-#ifndef __PKVM_HYP__
+#ifdef __PKVM_HYP__
+			if (pkvm_guest_mmu_max_level() < 5)
+#else
 			if (kvm_mmu_get_max_tdp_level() < 5)
-				g_phys_as = min(g_phys_as, 48U);
 #endif
+				g_phys_as = min(g_phys_as, 48U);
 		}
 
 		entry->eax = phys_as | (virt_as << 8) | (g_phys_as << 16);
