@@ -790,14 +790,7 @@ static void pkvm_vcpu_reset(struct kvm_vcpu *vcpu, bool init_event)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 
-	/*
-	 * TODO: The vcpu_reset PV interface will be disallowed for the pVM
-	 * once its INIT event is handled inside the pKVM hypervisor. So should
-	 * check `pkvm_is_protected_vcpu(vcpu)` rather than
-	 * `vcpu->arch.guest_state_protected` once it is ready. See comments for
-	 * `__pkvm__vcpu_reset` in pkvm_vcpu_handle_host_hypercall.
-	 */
-	if (!vcpu->arch.guest_state_protected && init_event)
+	if (!pkvm_is_protected_vcpu(vcpu) && init_event)
 		KVM_BUG_ON(pkvm_hypercall(vcpu_reset), vcpu->kvm);
 
 	/*

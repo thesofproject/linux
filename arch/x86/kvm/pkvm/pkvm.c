@@ -819,7 +819,6 @@ static bool is_guest_vcpu_accessible(struct kvm_vcpu *vcpu, enum pkvm_hc hc)
 	case __pkvm__set_cr0:
 	case __pkvm__set_rflags:
 	case __pkvm__get_rflags:
-	case __pkvm__vcpu_reset:
 	case __pkvm__set_segment:
 	case __pkvm__get_segment:
 	case __pkvm__get_segment_base:
@@ -1667,9 +1666,6 @@ static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc 
 		/*
 		 * Only needs to support reset vCPU for INIT as the non-INIT reset
 		 * is done by the pKVM hypervisor when creating this vCPU.
-		 *
-		 * TODO: The INIT for pVMs will be handled inside the pKVM hypervisor.
-		 * Once this is implemented, make the __pkvm__vcpu_reset only for npVM.
 		 */
 		kvm_vcpu_reset(vcpu, true);
 		break;
