@@ -34,6 +34,28 @@
   __traceiter_android_vh_task_cmdline_prio_restore
   __tracepoint_android_vh_mutex_init
   __traceiter_android_vh_mutex_init
+  __traceiter_android_vh_rwsem_write_finished
+  __tracepoint_android_vh_rwsem_write_finished
+  __traceiter_rpm_idle
+  __tracepoint_rpm_idle
+  __traceiter_rpm_resume
+  __tracepoint_rpm_resume
+  __traceiter_rpm_return_int
+  __tracepoint_rpm_return_int
+  __traceiter_rpm_suspend
+  __tracepoint_rpm_suspend
+  __traceiter_android_vh_do_futex
+  __tracepoint_android_vh_do_futex
+  __traceiter_android_vh_futex_wait_start
+  __tracepoint_android_vh_futex_wait_start
+  __traceiter_android_vh_futex_wait_end
+  __tracepoint_android_vh_futex_wait_end
+  __traceiter_android_vh_futex_wake_traverse_plist
+  __tracepoint_android_vh_futex_wake_traverse_plist
+  __traceiter_android_vh_futex_wake_this
+  __tracepoint_android_vh_futex_wake_this
+  __traceiter_android_vh_futex_wake_up_q_finish
+  __tracepoint_android_vh_futex_wake_up_q_finish
   binder_alloc_copy_from_buffer
   lruvec_page_state
   arch_vma_name
