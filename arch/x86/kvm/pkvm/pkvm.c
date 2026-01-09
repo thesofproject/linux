@@ -2,6 +2,7 @@
 #include <linux/types.h>
 #include "init.h"
 #include "lapic.h"
+#include "memory.h"
 #include "pkvm.h"
 #include "trace.h"
 
@@ -34,6 +35,10 @@ void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 		break;
 	case __pkvm__enable_vmexit_trace:
 		pkvm_enable_vmexit_trace(pkvm_hc_input1(vcpu));
+		break;
+	case __pkvm__dump_vmexit_trace:
+		ret = pkvm_dump_vmexit_trace(pkvm_host_gpa_to_phys(pkvm_hc_input1(vcpu)),
+					     pkvm_hc_input2(vcpu));
 		break;
 	default:
 		ret = -EINVAL;
