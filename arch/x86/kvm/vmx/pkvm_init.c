@@ -12,7 +12,6 @@ static int __init early_pkvm_parse_cmdline(char *buf)
 }
 early_param("kvm-intel.pkvm", early_pkvm_parse_cmdline);
 
-static struct vmcs_config host_vmcs_config;
 static DEFINE_PER_CPU(struct vmcs *, pkvm_vmxarea);
 
 struct pkvm_deprivilege_param {
@@ -27,7 +26,7 @@ u64 pkvm_total_reserve_pages(void)
 
 static __init int pkvm_setup_host_vmcs_config(void)
 {
-	struct vmcs_config *vmcs_config = &host_vmcs_config;
+	struct vmcs_config *vmcs_config = &pkvm_sym(host_vmcs_config);
 	struct vmx_capability *vmx_cap = &pkvm_sym(vmx_capability);
 	struct vmcs_config_setting setting = {
 		.cpu_based_vm_exec_ctrl_req =
@@ -97,7 +96,8 @@ static struct vmcs *pkvm_alloc_vmcs(void)
 	if (!PAGE_ALIGNED(__pa(vmcs)))
 		return NULL;
 
-	vmcs->hdr.revision_id = vmx_basic_vmcs_revision_id(host_vmcs_config.basic);
+	vmcs->hdr.revision_id = vmx_basic_vmcs_revision_id(pkvm_sym(host_vmcs_config).basic);
+
 	return vmcs;
 }
 
@@ -362,19 +362,19 @@ static __init void init_host_state_area(struct vcpu_vmx *vmx, struct pkvm_hyp *p
 
 static __init void init_execution_control(struct vcpu_vmx *vmx)
 {
-	pin_controls_set(vmx, host_vmcs_config.pin_based_exec_ctrl);
+	pin_controls_set(vmx, pkvm_sym(host_vmcs_config).pin_based_exec_ctrl);
 
 	/*
 	 * CR3 LOAD/STORE EXITING are always read as 1 from the
 	 * MSR_IA32_VMX_PROCBASED_CTLS. Clear these two bits as the CR3 will be
 	 * passthrough to the host VM.
 	 */
-	exec_controls_set(vmx, host_vmcs_config.cpu_based_exec_ctrl &
+	exec_controls_set(vmx, pkvm_sym(host_vmcs_config).cpu_based_exec_ctrl &
 			       ~(CPU_BASED_CR3_LOAD_EXITING |
 				 CPU_BASED_CR3_STORE_EXITING));
 
 	/* Disable EPT/VPID first, enable after EPT pgtable created */
-	secondary_exec_controls_set(vmx, host_vmcs_config.cpu_based_2nd_exec_ctrl &
+	secondary_exec_controls_set(vmx, pkvm_sym(host_vmcs_config).cpu_based_2nd_exec_ctrl &
 					 ~(SECONDARY_EXEC_ENABLE_EPT |
 					   SECONDARY_EXEC_ENABLE_VPID));
 	/*
@@ -411,13 +411,13 @@ static __init void init_execution_control(struct vcpu_vmx *vmx)
 
 static __init void init_vmexit_control(struct vcpu_vmx *vmx)
 {
-	vm_exit_controls_set(vmx, host_vmcs_config.vmexit_ctrl);
+	vm_exit_controls_set(vmx, pkvm_sym(host_vmcs_config).vmexit_ctrl);
 	vmcs_write32(VM_EXIT_MSR_STORE_COUNT, 0);
 }
 
 static __init void init_vmentry_control(struct vcpu_vmx *vmx)
 {
-	vm_entry_controls_set(vmx, host_vmcs_config.vmentry_ctrl);
+	vm_entry_controls_set(vmx, pkvm_sym(host_vmcs_config).vmentry_ctrl);
 	vmcs_write32(VM_ENTRY_INTR_INFO_FIELD, 0);
 	vmcs_write32(VM_ENTRY_MSR_LOAD_COUNT, 0);
 	vmcs_write32(VM_ENTRY_INTR_INFO_FIELD, 0);
