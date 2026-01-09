@@ -8,6 +8,7 @@
 #include <asm/pkvm_image.h>
 #include "pkvm_constants.h"
 #include "vmx.h"
+#include "pkvm_iommu.h"
 
 extern u64 x86_pred_cmd;
 
@@ -1342,6 +1343,10 @@ int __init vmx_pkvm_init(void)
 		pr_cont("reboot with kvm-intel.pkvm_relax_cpu_bugs=false\n");
 	}
 
+	ret = pkvm_host_prepare_iommu();
+	if (ret)
+		goto out;
+
 	pkvm_sym(init_ops) = pkvm_sym(pkvm_vmx_init_ops);
 
 	ret = pkvm_host_deprivilege_cpus(pkvm);
@@ -1352,6 +1357,12 @@ int __init vmx_pkvm_init(void)
 	if (ret)
 		goto repriv_cpus;
 	static_branch_enable(&pkvm_enabled_key);
+
+	ret = pkvm_host_init_iommu();
+	if (ret) {
+		static_branch_disable(&pkvm_enabled_key);
+		goto repriv_cpus;
+	}
 
 	pkvm_hypercall(init_finalize);
 
@@ -1371,6 +1382,9 @@ out:
 	 * can clear it while we are still in VMX non-root.
 	 */
 	pkvm_firmware_rmem_clear();
+
+	/* TODO: Try re-initialize IOMMU */
+
 	/*
 	 * As the reserved memory at the pkvm_mem_base will not be
 	 * released back to the host, no need to de-initialize or
