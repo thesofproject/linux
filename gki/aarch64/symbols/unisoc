@@ -990,6 +990,8 @@
   __traceiter_android_rvh_new_task_stats
   __traceiter_android_rvh_prepare_prio_fork
   __traceiter_android_rvh_pr_set_vma_name_bypass
+  __traceiter_android_rvh_psci_cpu_suspend
+  __traceiter_android_rvh_psci_tos_resident_on
   __traceiter_android_rvh_replace_next_task_fair
   __traceiter_android_rvh_rto_next_cpu
   __traceiter_android_rvh_sched_balance_find_src_group
@@ -1153,6 +1155,8 @@
   __tracepoint_android_rvh_new_task_stats
   __tracepoint_android_rvh_prepare_prio_fork
   __tracepoint_android_rvh_pr_set_vma_name_bypass
+  __tracepoint_android_rvh_psci_cpu_suspend
+  __tracepoint_android_rvh_psci_tos_resident_on
   __tracepoint_android_rvh_replace_next_task_fair
   __tracepoint_android_rvh_rto_next_cpu
   __tracepoint_android_rvh_sched_balance_find_src_group
