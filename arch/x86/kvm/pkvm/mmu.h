@@ -2,7 +2,10 @@
 #ifndef __PKVM_X86_MMU_H
 #define __PKVM_X86_MMU_H
 
+#include <asm/pkvm_spinlock.h>
 #include "init.h"
+
+extern pkvm_spinlock_t host_mmu_lock;
 
 int pkvm_hyp_mmu_init(void *pool_base, unsigned long pool_pages);
 int pkvm_hyp_mmu_switch_to_buddy(void *pool_base, unsigned long pool_pages);
@@ -16,5 +19,15 @@ int pkvm_host_mmu_init(void *pool_base, unsigned long pool_pages,
 int pkvm_host_mmu_map(unsigned long phys, unsigned long size, bool read,
 		      bool write, bool exec, bool mmio);
 int pkvm_host_mmu_unmap(unsigned long vaddr, unsigned long size);
+
+static inline void pkvm_host_mmu_lock(void)
+{
+	pkvm_spin_lock(&host_mmu_lock);
+}
+
+static inline void pkvm_host_mmu_unlock(void)
+{
+	pkvm_spin_unlock(&host_mmu_lock);
+}
 
 #endif /* __PKVM_X86_MMU_H */
