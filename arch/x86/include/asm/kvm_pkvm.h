@@ -39,7 +39,8 @@ struct pkvm_hyp {
 #define TO_PKVM_HC(f)		CONCATENATE(__pkvm__, f)
 
 enum pkvm_hc {
-	__pkvm__init,
+	#define PKVM_HC(f)	TO_PKVM_HC(f),
+	#include <asm/pkvm_hypercalls.h>
 };
 
 #define PKVM_HC_IN_0()
