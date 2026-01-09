@@ -3,6 +3,7 @@
 
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/extable.h>
 #include <asm/pkvm_image.h>
 #include "vmx.h"
 
@@ -570,6 +571,16 @@ static __init int pkvm_host_deprivilege_cpus(struct pkvm_hyp *pkvm)
 		.ret = 0,
 	};
 	int cpu, ret = 0;
+
+	/*
+	 * The pKVM hypervisor's IDT will be programmed into VMCS before
+	 * deprivileging the CPU. Once deprivileging is done and the CPU
+	 * enters to the root mode, the pKVM's exception handlers should be
+	 * functional. So before that, sort pKVM's exception table to make
+	 * sure the exception fixup working as expected.
+	 */
+	if (&pkvm_sym(__stop___ex_table) > &pkvm_sym(__start___ex_table))
+		sort_extable(pkvm_sym(__start___ex_table), pkvm_sym(__stop___ex_table));
 
 	for_each_possible_cpu(cpu) {
 		ret = smp_call_function_single(cpu, pkvm_host_deprivilege_cpu, &p, 1);
