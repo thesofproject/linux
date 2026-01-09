@@ -120,6 +120,11 @@ int pkvm_hyp_mmu_init(void *pool_base, unsigned long pool_pages)
 	return pkvm_pgtable_init(&hyp_mmu, cap, &pkvm_early_alloc_mm_ops, &hyp_mmu_pgt_ops);
 }
 
+int pkvm_hyp_mmu_finalize(hyp_mmu_finalize_fn_t fn)
+{
+	return fn ? fn(&hyp_mmu) : 0;
+}
+
 int pkvm_hyp_mmu_map(unsigned long vaddr, unsigned long phys,
 		     unsigned long size, u64 prot)
 {
