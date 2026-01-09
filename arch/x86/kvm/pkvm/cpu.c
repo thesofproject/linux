@@ -16,6 +16,8 @@ DEFINE_PER_CPU_CACHE_HOT(int, cpu_number);
 DEFINE_PER_CPU_CACHE_HOT(u64, __x86_call_depth);
 #endif
 struct cpuinfo_x86 boot_cpu_data;
+struct cpumask __cpu_possible_mask __ro_after_init;
+unsigned int nr_cpu_ids;
 
 unsigned int pkvm_per_cpu_nr_pages(void)
 {
