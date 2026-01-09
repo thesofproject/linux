@@ -11,6 +11,19 @@
 #include "cpuid.h"
 
 #define KVM_MAX_MCE_BANKS 32
+#define KVM_SUPPORTED_XCR0     (XFEATURE_MASK_FP | XFEATURE_MASK_SSE \
+				| XFEATURE_MASK_YMM | XFEATURE_MASK_BNDREGS \
+				| XFEATURE_MASK_BNDCSR | XFEATURE_MASK_AVX512 \
+				| XFEATURE_MASK_PKRU | XFEATURE_MASK_XTILE)
+
+#define XFEATURE_MASK_CET_ALL	(XFEATURE_MASK_CET_USER | XFEATURE_MASK_CET_KERNEL)
+/*
+ * Note, KVM supports exposing PT to the guest, but does not support context
+ * switching PT via XSTATE (KVM's PT virtualization relies on perf; swapping
+ * PT via guest XSTATE would clobber perf state), i.e. KVM doesn't support
+ * IA32_XSS[bit 8] (guests can/must use RDMSR/WRMSR to save/restore PT MSRs).
+ */
+#define KVM_SUPPORTED_XSS	(XFEATURE_MASK_CET_ALL)
 
 struct kvm_caps {
 	/* control of guest tsc rate supported? */
