@@ -87,6 +87,16 @@ enum {
 	#include <asm/pkvm_hypercalls.h>
 };
 
+static inline int pkvm_hc_output_num(enum pkvm_hc hc)
+{
+	switch (hc) {
+	#define PKVM_HC(f) case TO_PKVM_HC(f): return PKVM_HC_OUTPUT_NUM(f);
+	#include <asm/pkvm_hypercalls.h>
+	default:
+		return 0;
+	}
+}
+
 #define PKVM_HC_IN_0()
 #define PKVM_HC_IN_1(a1)		, "b"(a1)
 #define PKVM_HC_IN_2(a1, a2)		PKVM_HC_IN_1(a1), "c"(a2)
@@ -154,6 +164,41 @@ DEFINE_PKVM_HC_INPUT(4, RSI)
 static inline void pkvm_hc_set_ret(struct kvm_vcpu *vcpu, int ret)
 {
 	vcpu->arch.regs[VCPU_REGS_RAX] = ret;
+}
+
+#define DEFINE_PKVM_HC_OUTPUT(n, reg)							\
+static inline void pkvm_hc_set_output##n(struct kvm_vcpu *vcpu, union pkvm_hc_data *p)	\
+{											\
+	BUILD_BUG_ON(n == 0 || n > PKVM_HC_DATA_MAX_NUM);				\
+	vcpu->arch.regs[VCPU_REGS_##reg] = p->raw.data[n - 1];				\
+}
+
+DEFINE_PKVM_HC_OUTPUT(1, RBX)
+DEFINE_PKVM_HC_OUTPUT(2, RCX)
+DEFINE_PKVM_HC_OUTPUT(3, RDX)
+DEFINE_PKVM_HC_OUTPUT(4, RSI)
+
+static inline void pkvm_hc_set_output(struct kvm_vcpu *vcpu, enum pkvm_hc hc,
+				      union pkvm_hc_data *out)
+{
+	switch (pkvm_hc_output_num(hc)) {
+	case 4:
+		pkvm_hc_set_output4(vcpu, out);
+		fallthrough;
+	case 3:
+		pkvm_hc_set_output3(vcpu, out);
+		fallthrough;
+	case 2:
+		pkvm_hc_set_output2(vcpu, out);
+		fallthrough;
+	case 1:
+		pkvm_hc_set_output1(vcpu, out);
+		fallthrough;
+	case 0:
+		break;
+	default:
+		BUG();
+	}
 }
 
 extern unsigned long pkvm_sym(page_offset_base);
