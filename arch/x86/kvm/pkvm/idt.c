@@ -139,3 +139,11 @@ void handle_exception(struct pt_regs *regs, int vector, bool has_error_code)
 	handler = exception_handlers[vector];
 	handler(regs, vector, has_error_code);
 }
+
+void pkvm_register_excp_handler(int vector, exception_handler_t handler)
+{
+	if (vector >= X86_TRAP_IRET)
+		return;
+
+	exception_handlers[vector] = handler;
+}
