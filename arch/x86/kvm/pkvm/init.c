@@ -273,3 +273,14 @@ int pkvm_init(struct pkvm_mem_info infos[], int nr_infos)
 	this_cpu_write(cpu_initialized, true);
 	return 0;
 }
+
+int pkvm_reprivilege_vcpu(struct kvm_vcpu *vcpu)
+{
+	if (!init_ops || !init_ops->reprivilege_cpu)
+		return -EOPNOTSUPP;
+
+	init_ops->reprivilege_cpu(vcpu->arch.regs);
+
+	/* Reach here only if reprivilege operation fails. */
+	return -EFAULT;
+}
