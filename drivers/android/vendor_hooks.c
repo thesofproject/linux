@@ -50,6 +50,7 @@
 #include <trace/hooks/fault.h>
 #include <trace/hooks/ftrace_dump.h>
 #include <trace/hooks/dtask.h>
+#include <trace/hooks/psci.h>
 #include <trace/hooks/power.h>
 #include <trace/hooks/rwsem.h>
 #include <trace/hooks/futex.h>
@@ -143,6 +144,8 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_iommu_iovad_alloc_iova);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_iommu_iovad_free_iova);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_iommu_iovad_init_alloc_algo);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_iommu_limit_align_shift);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_psci_tos_resident_on);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_psci_cpu_suspend);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_ptype_head);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_allow_domain_state);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_cpuidle_psci_enter);
