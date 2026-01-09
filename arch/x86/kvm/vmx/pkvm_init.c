@@ -14,6 +14,8 @@ static int __init early_pkvm_parse_cmdline(char *buf)
 }
 early_param("kvm-intel.pkvm", early_pkvm_parse_cmdline);
 
+static bool relax_cpu_bugs = true;
+
 static DEFINE_PER_CPU(struct vmcs *, pkvm_vmxarea);
 static unsigned long data_pages;
 
@@ -328,6 +330,284 @@ static __init int pkvm_setup_per_cpu(struct pkvm_hyp *pkvm, int cpu)
 		return -ENOMEM;
 	}
 #endif
+
+	return 0;
+}
+
+static bool mitigate_spectre_v2(struct cpuinfo_x86 *c)
+{
+	u64 spec_ctrl = SPEC_CTRL_IBRS;
+
+	/* Require to set IBRS in spec ctrl MSR */
+	if (!boot_cpu_has(X86_FEATURE_MSR_SPEC_CTRL))
+		return false;
+
+	/* Require eIBRS */
+	if (!boot_cpu_has(X86_FEATURE_IBRS_ENHANCED))
+		return false;
+
+	if (boot_cpu_has_bug(X86_BUG_EIBRS_PBRSB)) {
+		/* Fill RSB after vmexit */
+		set_cpu_cap(&pkvm_sym(boot_cpu_data), X86_FEATURE_RSB_VMEXIT_LITE);
+
+		clear_bit(X86_BUG_EIBRS_PBRSB, (unsigned long *)c->x86_capability);
+		pr_info("mitigated eibrs_pbrsb when mitigating spectre_v2\n");
+	}
+
+	if (boot_cpu_has_bug(X86_BUG_BHI)) {
+		/* Require to set BHI_DIS_S to mitigate BHI bug */
+		if (!boot_cpu_has(X86_FEATURE_BHI_CTRL))
+			return false;
+		spec_ctrl |= SPEC_CTRL_BHI_DIS_S;
+	}
+
+	pkvm_sym(set_x86_spec_ctrl)(spec_ctrl);
+
+	if (spec_ctrl & SPEC_CTRL_BHI_DIS_S) {
+		clear_bit(X86_BUG_BHI, (unsigned long *)c->x86_capability);
+		pr_info("mitigated bhi when mitigating spectre_v2\n");
+	}
+
+	return true;
+}
+
+static bool __mitigate_spectre_v2_user(void)
+{
+	/* Requires eIBRS so that no need for STIBP in case SMT is activated. */
+	if (!boot_cpu_has(X86_FEATURE_IBRS_ENHANCED))
+		return false;
+
+	/* Require IBPB */
+	if (!boot_cpu_has(X86_FEATURE_IBPB))
+		return false;
+
+	static_branch_enable(&pkvm_sym(switch_vcpu_ibpb));
+
+	return true;
+}
+
+static bool mitigate_spectre_v2_user(struct cpuinfo_x86 *c)
+{
+	if (!__mitigate_spectre_v2_user())
+		return false;
+
+	if (boot_cpu_has_bug(X86_BUG_VMSCAPE)) {
+		clear_bit(X86_BUG_VMSCAPE, (unsigned long *)c->x86_capability);
+		pr_info("mitigated vmscape when mitigating spectre_v2_user\n");
+	}
+
+	return true;
+}
+
+static bool mitigate_spec_store_bypass(void)
+{
+	u64 spec_ctrl = SPEC_CTRL_SSBD;
+
+	/* Requires spec ctrl MSR to set SSBD to disable SSB. */
+	if (!boot_cpu_has(X86_FEATURE_MSR_SPEC_CTRL) ||
+	    !boot_cpu_has(X86_FEATURE_SPEC_CTRL_SSBD))
+		return false;
+
+	pkvm_sym(set_x86_spec_ctrl)(spec_ctrl);
+
+	return true;
+}
+
+static bool mitigate_bhi(void)
+{
+	u64 spec_ctrl = SPEC_CTRL_BHI_DIS_S;
+
+	/* Requires spec ctrl MSR to set BHI_DIS_S to mitigate BHI */
+	if (!boot_cpu_has(X86_FEATURE_MSR_SPEC_CTRL) ||
+	    !boot_cpu_has(X86_FEATURE_BHI_CTRL))
+		return false;
+
+	pkvm_sym(set_x86_spec_ctrl)(spec_ctrl);
+
+	return true;
+}
+
+static bool mitigate_eibrs_pbrsb(void)
+{
+	/* Fill RSB after vmexit */
+	set_cpu_cap(&pkvm_sym(boot_cpu_data), X86_FEATURE_RSB_VMEXIT_LITE);
+
+	return true;
+}
+
+static bool mitigate_rfds(void)
+{
+	if (!(x86_read_arch_cap_msr() & ARCH_CAP_RFDS_CLEAR))
+		return false;
+
+	set_cpu_cap(&pkvm_sym(boot_cpu_data), X86_FEATURE_CLEAR_CPU_BUF);
+	return true;
+}
+
+static bool mitigate_vmscape(struct cpuinfo_x86 *c)
+{
+	if (!__mitigate_spectre_v2_user())
+		return false;
+
+	if (boot_cpu_has_bug(X86_BUG_SPECTRE_V2_USER)) {
+		clear_bit(X86_BUG_SPECTRE_V2_USER, (unsigned long *)c->x86_capability);
+		pr_info("mitigated spectre_v2_user when mitigating vmscape\n");
+	}
+
+	return true;
+}
+
+/*
+ * Make sure the CPU only with the bugs that can be mitigated by the pKVM
+ * hypervisor can pass the check. And these mitigated CPU bugs are listed in
+ * possible_cpu_bugs[].
+ *
+ * The assumption is that the linux kernel is trusted before deprivileging and
+ * can report the CPU bugs/features precisely.
+ *
+ * Below are how these CPU bugs be mitigated by the pKVM hypervisor:
+ *
+ * 1) X86_BUG_SPECTRE_V1.
+ * 1.1) usercopy/swapgs are not used. Thus can mitigate X86_BUG_SWAPGS.
+ * 1.2) The array index passed from the host VM or the guest VM are sanitized
+ * by array_index_nospec to prevent bypassing the bounds check due to CPU
+ * speculation.
+ *
+ * 2) X86_BUG_SPECTRE_V2.
+ * 2.1) Leverage hardware mitigation eIBRS feature; Set SPEC_CTRL_IBRS in
+ * spec ctrl MSR.
+ * 2.2) No context switch in pKVM hypervisor. No need to fill RSB.
+ * 2.3) If eIBRS is affected by PBRSB, fill RSB for vmexits.
+ * 2.4) Set SPEC_CTRL_BHI_DIS_S in spec ctrl MSR to mitigate BHI bug.
+ *
+ * 3) X86_BUG_SPECTRE_V2_USER.
+ * Requires eIBRS (thus no need for STIBP) in case SMT is enabled at runtime.
+ * Require IBPB feature to perform indirect branch prediction barrier when
+ * switching vcpu.
+ *
+ * 4) X86_BUG_SPEC_STORE_BYPASS.
+ * Set SPEC_CTRL_SSBD in spec ctrl MSR to mitigate.
+ *
+ * 5) X86_BUG_SWAPGS:
+ * See comments for X86_BUG_SPECTRE_V1 1.1.
+ *
+ * 6) X86_BUG_BHI:
+ * Set SPEC_CTRL_BHI_DIS_S in spec ctrl MSR to mitigate BHI bug.
+ *
+ * 7) X86_BUG_EIBRS_PBRSB.
+ * Fill RSB after vmexit.
+ *
+ * 8) X86_BUG_RFDS.
+ * Requires ARCH_CAP_RFDS_CLEAR to clears CPU register file via VERW.
+ *
+ * 9) X86_BUG_VMSCAPE
+ * Requires eIBRS (thus no need for STIBP) in case SMT is enabled at runtime.
+ * No need to perform IBPB before exit to the user space as the pKVM hypervisor
+ * doesn't have. But the pKVM hypervisor can switch to the host VMM which runs
+ * at the user space privilege level, and the host is untrusted to guarantee
+ * this bug will be mitigated. Thus perform IBPB before switching from a guest
+ * to the host to mitigate this bug. So the mitigation is the same with
+ * X86_BUG_SPECTRE_V2_USER.
+ *
+ * Note: Beyond the above mitigations, the pKVM hypervisor also supports boot
+ * time retpoline/rethunk patching to mitigate certain older CPU bugs (not
+ * listed in the possible_cpu_bugs[]). The reason is that, the pKVM hypervisor
+ * is part of linux kernel, and linux kernel could enable retpoline/rethunk
+ * patching via kernel command line parameters even for a CPU which doesn't have
+ * such bugs. With this, the kernel image (including the pkvm hypervisor) will
+ * be patched with linux kernel's retpoline/rethunk symbols at the boot time. To
+ * support this usage, the pKVM hypervisor should support retpoline/rethunk
+ * patching with its own retpoline/rethunk symbols, otherwise it will not be
+ * able to run due to isolation.
+ */
+static void pkvm_mitigate_cpu_bug(struct cpuinfo_x86 *c, unsigned long bug)
+{
+	bool mitigated = false;
+
+	if (!boot_cpu_has(bug)) {
+		pr_info("CPU doesn't have bug %s\n", x86_bug_flags[bug - NCAPINTS * 32]);
+		return;
+	}
+
+	/*
+	 * CPU has this bug but it is already mitigated when mitigating some
+	 * other bug.
+	 */
+	if (!cpu_has_bug(c, bug))
+		return;
+
+	switch (bug) {
+	case X86_BUG_SPECTRE_V1:
+	case X86_BUG_SWAPGS:
+		/* Guaranteed by the pKVM hypervisor code */
+		mitigated = true;
+		break;
+	case X86_BUG_SPECTRE_V2:
+		mitigated = mitigate_spectre_v2(c);
+		break;
+	case X86_BUG_SPECTRE_V2_USER:
+		mitigated = mitigate_spectre_v2_user(c);
+		break;
+	case X86_BUG_SPEC_STORE_BYPASS:
+		mitigated = mitigate_spec_store_bypass();
+		break;
+	case X86_BUG_BHI:
+		mitigated = mitigate_bhi();
+		break;
+	case X86_BUG_EIBRS_PBRSB:
+		mitigated = mitigate_eibrs_pbrsb();
+		break;
+	case X86_BUG_RFDS:
+		mitigated = mitigate_rfds();
+		break;
+	case X86_BUG_VMSCAPE:
+		mitigated = mitigate_vmscape(c);
+		break;
+	default:
+		break;
+	}
+
+	if (mitigated) {
+		clear_bit(bug, (unsigned long *)c->x86_capability);
+		pr_info("mitigated CPU bug %s\n", x86_bug_flags[bug - NCAPINTS * 32]);
+	} else {
+		pr_err("cannot mitigate CPU bug %s\n", x86_bug_flags[bug - NCAPINTS * 32]);
+	}
+}
+
+/*
+ * The CPU bugs list based on Intel ADL/PTL CPU. Could be extended beyond those
+ * CPUs in the future.
+ */
+static unsigned long possible_cpu_bugs[] = {
+	X86_BUG_SPECTRE_V1,
+	X86_BUG_SPECTRE_V2,
+	X86_BUG_SPECTRE_V2_USER,
+	X86_BUG_SPEC_STORE_BYPASS,
+	X86_BUG_SWAPGS,
+	X86_BUG_BHI,
+	X86_BUG_EIBRS_PBRSB,
+	X86_BUG_RFDS,
+	X86_BUG_VMSCAPE,
+};
+
+static int pkvm_mitigate_cpu_bugs(void)
+{
+	struct cpuinfo_x86 c = boot_cpu_data;
+	int i, unmitigated_cpu_bugs = 0;
+
+	for (i = 0; i < ARRAY_SIZE(possible_cpu_bugs); i++)
+		pkvm_mitigate_cpu_bug(&c, possible_cpu_bugs[i]);
+
+	for_each_set_bit(i, (unsigned long *)&c.x86_capability[NCAPINTS], NBUGINTS * 32) {
+		pr_err("unmitigated cpu bug %s\n", x86_bug_flags[i]);
+		unmitigated_cpu_bugs++;
+	}
+
+	if (unmitigated_cpu_bugs) {
+		pr_err("in total has %d unmitigated cpu bugs\n", unmitigated_cpu_bugs);
+		return -EOPNOTSUPP;
+	}
 
 	return 0;
 }
@@ -798,7 +1078,6 @@ static __init int pkvm_host_deprivilege_cpus(struct pkvm_hyp *pkvm)
 		.ret = 0,
 	};
 	int cpu, ret = 0;
-	u64 spec_ctrl;
 
 	pkvm_sym(pkvm_vmx_register_excp_handlers)();
 
@@ -811,9 +1090,6 @@ static __init int pkvm_host_deprivilege_cpus(struct pkvm_hyp *pkvm)
 	 */
 	if (&pkvm_sym(__stop___ex_table) > &pkvm_sym(__start___ex_table))
 		sort_extable(pkvm_sym(__start___ex_table), pkvm_sym(__stop___ex_table));
-
-	rdmsrq_safe(MSR_IA32_SPEC_CTRL, &spec_ctrl);
-	pkvm_sym(set_x86_spec_ctrl)(spec_ctrl);
 
 	for_each_possible_cpu(cpu) {
 		ret = smp_call_function_single(cpu, pkvm_host_deprivilege_cpu, &p, 1);
@@ -957,6 +1233,20 @@ int __init vmx_pkvm_init(void)
 		ret = pkvm_setup_per_cpu(pkvm, cpu);
 		if (ret)
 			goto out;
+	}
+
+	/*
+	 * Check if there is any CPU bug which cannot be mitigated by the pkvm
+	 * hypervisor. As this may need to set the pkvm's per-cpu spec ctrl, do
+	 * this after pkvm's per-cpu has been initialized.
+	 */
+	ret = pkvm_mitigate_cpu_bugs();
+	if (ret) {
+		if (!relax_cpu_bugs) {
+			pr_err("prevent pkvm from running due to unmitigated CPU bugs\n");
+			goto out;
+		}
+		pr_warn("allow pkvm to run with unmitigated CPU bugs\n");
 	}
 
 	pkvm_sym(init_ops) = pkvm_sym(pkvm_vmx_init_ops);
