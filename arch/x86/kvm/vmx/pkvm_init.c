@@ -63,6 +63,11 @@ static __init void pkvm_setup_syms(void)
 	/* For pKVM hypervisor to decode the valid physical address bits */
 	pkvm_sym(physical_mask) = physical_mask;
 #endif
+	/* For the pKVM hypervisor to leverage pgprot_val macro */
+	pkvm_sym(__default_kernel_pte_mask) = __default_kernel_pte_mask;
+#ifdef CONFIG_AMD_MEM_ENCRYPT
+	pkvm_sym(sme_me_mask) = sme_me_mask;
+#endif
 }
 
 static __init int pkvm_setup_host_vmcs_config(void)
@@ -669,9 +674,45 @@ static __init int pkvm_host_deprivilege_cpus(struct pkvm_hyp *pkvm)
 static void do_pkvm_hyp_init(void *data)
 {
 	unsigned long data_size = data_pages << PAGE_SHIFT;
-	int ret;
+	struct pkvm_mem_info infos[] = {
+		{
+			.type	= PKVM_RESERVED_UNUSED_MEMORY,
+			.va	= (unsigned long)__va(pkvm_mem_base + data_size),
+			.pa	= pkvm_mem_base + data_size,
+			.size	= pkvm_mem_size - data_size,
+			.prot	= pgprot_val(PAGE_KERNEL),
+		},
+		{
+			.type	= PKVM_TEXT_DATA,
+			.va	= (unsigned long)pkvm_sym(text_start),
+			.pa	= __pa_symbol(pkvm_sym(text_start)),
+			.size	= pkvm_sym(text_end) - pkvm_sym(text_start),
+			.prot	= pgprot_val(PAGE_KERNEL_EXEC),
+		},
+		{
+			.type	= PKVM_TEXT_DATA,
+			.va	= (unsigned long)pkvm_sym(rodata_start),
+			.pa	= __pa_symbol(pkvm_sym(rodata_start)),
+			.size	= pkvm_sym(rodata_end) - pkvm_sym(rodata_start),
+			.prot	= pgprot_val(PAGE_KERNEL_RO),
+		},
+		{
+			.type	= PKVM_TEXT_DATA,
+			.va	= (unsigned long)pkvm_sym(data_start),
+			.pa	= __pa_symbol(pkvm_sym(data_start)),
+			.size	= pkvm_sym(data_end) - pkvm_sym(data_start),
+			.prot	= pgprot_val(PAGE_KERNEL),
+		},
+		{
+			.type	= PKVM_TEXT_DATA,
+			.va	= (unsigned long)pkvm_sym(bss_start),
+			.pa	= __pa_symbol(pkvm_sym(bss_start)),
+			.size	= pkvm_sym(bss_end) - pkvm_sym(bss_start),
+			.prot	= pgprot_val(PAGE_KERNEL),
+		},
+	};
+	int ret = pkvm_hypercall(init, (unsigned long)infos, ARRAY_SIZE(infos));
 
-	ret = pkvm_hypercall(init, pkvm_mem_base + data_size, pkvm_mem_size - data_size);
 	if (data)
 		*(int *)data = ret;
 }

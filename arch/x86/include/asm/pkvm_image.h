@@ -45,6 +45,9 @@
 
 #ifdef CONFIG_PKVM_X86
 extern char pkvm_sym(text_start)[], pkvm_sym(text_end)[];
+extern char pkvm_sym(rodata_start)[], pkvm_sym(rodata_end)[];
+extern char pkvm_sym(data_start)[], pkvm_sym(data_end)[];
+extern char pkvm_sym(bss_start)[], pkvm_sym(bss_end)[];
 struct exception_table_entry;
 extern struct exception_table_entry pkvm_sym(__start___ex_table)[];
 extern struct exception_table_entry pkvm_sym(__stop___ex_table)[];
