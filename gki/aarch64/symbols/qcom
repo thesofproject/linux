@@ -12,6 +12,10 @@
   ring_buffer_lock_reserve
   ring_buffer_peek
   ring_buffer_unlock_commit
+  sdei_event_disable
+  sdei_event_enable
+  sdei_event_register
+  sdei_event_unregister
   set_next_entity
   __traceiter_android_rvh___set_task_cpu
   __traceiter_android_rvh_before_do_sched_yield
