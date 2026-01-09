@@ -274,8 +274,18 @@ int pkvm_init(struct pkvm_mem_info infos[], int nr_infos)
 	return 0;
 }
 
+/*
+ * Flag indicating if pkvm is initialized successfully.
+ * Used to enforce internal hypercalls to be unavailable
+ * for general use once pkvm is initialized.
+ */
+static bool pkvm_initialized __ro_after_init;
+
 int pkvm_reprivilege_vcpu(struct kvm_vcpu *vcpu)
 {
+	if (READ_ONCE(pkvm_initialized))
+		return -EPERM;
+
 	if (!init_ops || !init_ops->reprivilege_cpu)
 		return -EOPNOTSUPP;
 
@@ -283,4 +293,26 @@ int pkvm_reprivilege_vcpu(struct kvm_vcpu *vcpu)
 
 	/* Reach here only if reprivilege operation fails. */
 	return -EFAULT;
+}
+
+int pkvm_init_finalize(void)
+{
+	int cpu;
+
+	if (READ_ONCE(pkvm_initialized))
+		return -EPERM;
+
+	for_each_possible_cpu(cpu) {
+		if (!per_cpu(cpu_initialized, cpu))
+			return -EAGAIN;
+	}
+	WRITE_ONCE(pkvm_initialized, true);
+	if (init_ops)
+		init_ops->reprivilege_cpu = NULL;
+	/*
+	 * TODO: Move reprivilege logic to a separate
+	 * section and zero it out here.
+	 */
+
+	return 0;
 }
