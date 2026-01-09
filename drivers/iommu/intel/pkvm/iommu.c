@@ -9,6 +9,15 @@
 #include "pkvm/debug.h"
 #include "iommu.h"
 
+/*
+ * IOMMU supported page size and page levels for second stage page table.
+ *
+ * Here we set it to the maximum supported values and during IOMMU initialization,
+ * we determine the least common values supported by all the IOMMUs in the system.
+ */
+unsigned int iommu_pgsz_mask = 1 << PG_LEVEL_4K | 1 << PG_LEVEL_2M | 1 << PG_LEVEL_1G;
+unsigned int iommu_pglvl_mask = IOMMU_PGT_4LEVEL | IOMMU_PGT_5LEVEL;
+
 #define PKVM_MAX_IOMMU_NUM	16
 static struct intel_iommu iommus[PKVM_MAX_IOMMU_NUM];
 static int nr_iommus;
