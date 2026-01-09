@@ -13,3 +13,16 @@ __visible bool kvm_rebooting;
 struct pkvm_hyp *pkvm_hyp;
 DEFINE_PER_CPU(struct pkvm_pcpu *, phys_cpu);
 DEFINE_PER_CPU(struct kvm_vcpu *, host_vcpu);
+
+void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
+{
+	int ret = 0;
+
+	switch (pkvm_hc(vcpu)) {
+	default:
+		ret = -EINVAL;
+		break;
+	}
+
+	pkvm_hc_set_ret(vcpu, ret);
+}
