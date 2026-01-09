@@ -13579,6 +13579,11 @@ pointer_reference {
   pointee_type_id: 0x85dc5f9c
 }
 pointer_reference {
+  id: 0x2bebd53c
+  kind: POINTER
+  pointee_type_id: 0x85efb26e
+}
+pointer_reference {
   id: 0x2bf214c5
   kind: POINTER
   pointee_type_id: 0x8588b58b
@@ -31112,6 +31117,11 @@ typedef {
   id: 0xcdc0f9fc
   name: "sci_t"
   referred_type_id: 0x92233392
+}
+typedef {
+  id: 0x85efb26e
+  name: "sdei_event_callback"
+  referred_type_id: 0xafc04e0d
 }
 typedef {
   id: 0x86a9103f
@@ -319520,6 +319530,13 @@ function {
   parameter_id: 0x2584a3b9
 }
 function {
+  id: 0xaf6b69e4
+  return_type_id: 0x6720d32f
+  parameter_id: 0xc9082b19
+  parameter_id: 0x2bebd53c
+  parameter_id: 0x18bd6530
+}
+function {
   id: 0xaf7fbf57
   return_type_id: 0x31e58fe0
   parameter_id: 0x015f6fbc
@@ -319538,6 +319555,18 @@ function {
   parameter_id: 0x0483e6f8
   parameter_id: 0xfc0e1dbd
   parameter_id: 0x0379c823
+}
+function {
+  id: 0xafc04e0d
+  return_type_id: 0x6720d32f
+  parameter_id: 0xc9082b19
+  parameter_id: 0x01222f7d
+  parameter_id: 0x18bd6530
+}
+function {
+  id: 0xafc2e9e9
+  return_type_id: 0x6720d32f
+  parameter_id: 0xc9082b19
 }
 function {
   id: 0xb019e307
@@ -360858,6 +360887,42 @@ elf_symbol {
   full_name: "scsi_unblock_requests"
 }
 elf_symbol {
+  id: 0x5bdb39c8
+  name: "sdei_event_disable"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xe6b3818f
+  type_id: 0xafc2e9e9
+  full_name: "sdei_event_disable"
+}
+elf_symbol {
+  id: 0xc337269f
+  name: "sdei_event_enable"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xe6b3818f
+  type_id: 0xafc2e9e9
+  full_name: "sdei_event_enable"
+}
+elf_symbol {
+  id: 0xfab182de
+  name: "sdei_event_register"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xed8d4b12
+  type_id: 0xaf6b69e4
+  full_name: "sdei_event_register"
+}
+elf_symbol {
+  id: 0xc017b968
+  name: "sdei_event_unregister"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xe6b3818f
+  type_id: 0xafc2e9e9
+  full_name: "sdei_event_unregister"
+}
+elf_symbol {
   id: 0x771aea1d
   name: "sdev_prefix_printk"
   is_defined: true
@@ -374851,6 +374916,10 @@ interface {
   symbol_id: 0x5286bfd6
   symbol_id: 0x1c51070a
   symbol_id: 0x9c54c873
+  symbol_id: 0x5bdb39c8
+  symbol_id: 0xc337269f
+  symbol_id: 0xfab182de
+  symbol_id: 0xc017b968
   symbol_id: 0x771aea1d
   symbol_id: 0x8d3c4841
   symbol_id: 0x05840f35
