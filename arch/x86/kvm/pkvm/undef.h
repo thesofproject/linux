@@ -11,6 +11,7 @@
  */
 #undef CONFIG_PRINTK
 #undef CONFIG_DEBUG_VIRTUAL
+#undef CONFIG_CALL_THUNKS_DEBUG
 
 #define NOTRACE
 
