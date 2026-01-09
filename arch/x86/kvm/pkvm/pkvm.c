@@ -3,6 +3,7 @@
 #include <asm/fpu/xcr.h>
 #include "init.h"
 #include "lapic.h"
+#include "mem_protect.h"
 #include "memory.h"
 #include "pkvm.h"
 #include "trace.h"
@@ -33,6 +34,56 @@ static int pkvm_enable_virtualization_cpu(void)
 	return kvm_x86_call(enable_virtualization_cpu)();
 }
 
+static int pkvm_vm_init(phys_addr_t host_kvm_pa, phys_addr_t pkvm_vm_pa)
+{
+	struct pkvm_vm *pkvm_vm;
+	struct kvm *kvm;
+	size_t size;
+	u8 vm_type;
+	int ret;
+
+	ret = pkvm_host_share_hyp(host_kvm_pa, kvm_x86_ops.vm_size);
+	if (ret)
+		return ret;
+
+	size = PAGE_ALIGN(PKVM_VM_BASE_SIZE + kvm_x86_ops.vm_size);
+	ret = pkvm_host_donate_hyp(pkvm_vm_pa, size, true);
+	if (ret)
+		goto unshare;
+
+	pkvm_vm = __pkvm_va(pkvm_vm_pa);
+	pkvm_vm->size = size;
+	pkvm_vm->shared_kvm = __pkvm_va(host_kvm_pa);
+	kvm = &pkvm_vm->kvm;
+
+	vm_type = pkvm_vm->shared_kvm->arch.vm_type;
+	if (!kvm_is_vm_type_supported(vm_type)) {
+		ret = -EOPNOTSUPP;
+		goto undonate;
+	}
+
+	kvm->arch.vm_type = vm_type;
+	if (pkvm_is_protected_vm(kvm))
+		kvm->arch.disabled_quirks = kvm_caps.inapplicable_quirks &
+					    kvm_caps.supported_quirks;
+	else
+		kvm->arch.disabled_quirks = (kvm_caps.inapplicable_quirks |
+					     pkvm_vm->shared_kvm->arch.disabled_quirks) &
+					    kvm_caps.supported_quirks;
+
+	ret = kvm_x86_call(vm_init)(kvm);
+	if (ret)
+		goto undonate;
+
+	return 0;
+
+undonate:
+	pkvm_hyp_donate_host(__pkvm_pa(pkvm_vm), size, false);
+unshare:
+	pkvm_host_unshare_hyp(host_kvm_pa, kvm_x86_ops.vm_size);
+	return ret;
+}
+
 void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 {
 	int ret = 0;
@@ -60,6 +111,10 @@ void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 		break;
 	case __pkvm__enable_virtualization_cpu:
 		ret = pkvm_enable_virtualization_cpu();
+		break;
+	case __pkvm__vm_init:
+		ret = pkvm_vm_init(pkvm_host_gpa_to_phys(pkvm_hc_input1(vcpu)),
+				   pkvm_host_gpa_to_phys(pkvm_hc_input2(vcpu)));
 		break;
 	default:
 		ret = -EINVAL;
