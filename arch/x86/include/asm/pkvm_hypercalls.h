@@ -8,4 +8,7 @@ PKVM_HC(init)
 PKVM_HC(init_finalize)
 PKVM_HC(reprivilege_cpu)
 
+/* pKVM vmexit tracing/profiling */
+PKVM_HC(enable_vmexit_trace)
+
 #undef PKVM_HC

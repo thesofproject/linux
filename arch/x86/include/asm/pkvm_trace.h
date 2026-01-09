@@ -29,6 +29,7 @@ struct vmexit_perf {
 	pkvm_spinlock_t lock;
 	struct perf_data data;
 	unsigned long long tsc;
+	unsigned int age;
 };
 
 #endif /* _ASM_X86_PKVM_TRACE_H */
