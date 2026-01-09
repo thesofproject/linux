@@ -83,6 +83,22 @@ static void pkvm_disable_virtualization_cpu(void)
 	 */
 }
 
+/*
+ * The kvm parameter can be NULL (module initialization, or invocation before
+ * VM creation). Be sure to check the kvm parameter before using it.
+ */
+static bool pkvm_has_emulated_msr(struct kvm *kvm, u32 index)
+{
+	/* SMM mode is not supported by the pKVM hypervisor. */
+	if (index == MSR_IA32_SMBASE)
+		return false;
+
+	if (!kvm)
+		return vmx_has_emulated_msr(NULL, index);
+
+	return pkvm_host_has_emulated_msr(kvm, index);
+}
+
 static int pkvm_vm_init(struct kvm *kvm)
 {
 	void *pkvm_vm;
@@ -256,6 +272,8 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.enable_virtualization_cpu = pkvm_enable_virtualization_cpu,
 	.disable_virtualization_cpu = pkvm_disable_virtualization_cpu,
 	.emergency_disable_virtualization_cpu = pkvm_disable_virtualization_cpu,
+
+	.has_emulated_msr = pkvm_has_emulated_msr,
 
 	.vm_size = sizeof(struct kvm_vmx),
 	.vm_init = pkvm_vm_init,
