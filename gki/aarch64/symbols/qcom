@@ -1582,6 +1582,8 @@
   kmalloc_caches
   kmem_cache_destroy
   kmem_cache_free
+  kmemdup_array
+  kmemdup_noprof
   kmemdup_nul
   kmsg_dump_get_buffer
   kmsg_dump_get_line
@@ -1872,6 +1874,7 @@
   netif_tx_unlock
   netif_tx_wake_queue
   netlink_broadcast
+  netlink_broadcast_filtered
   netlink_capable
   __netlink_dump_start
   __netlink_kernel_create
@@ -2572,6 +2575,7 @@
   rhashtable_walk_next
   rhashtable_walk_start_check
   rhashtable_walk_stop
+  rhltable_init_noprof
   __rht_bucket_nested
   rht_bucket_nested
   rht_bucket_nested_insert
@@ -2772,6 +2776,7 @@
   single_open_size
   single_release
   sk_alloc
+  skb_add_rx_frag_netmem
   skb_append_pagefrags
   skb_checksum
   skb_checksum_help
@@ -2792,6 +2797,7 @@
   skb_ensure_writable
   __skb_flow_dissect
   skb_free_datagram
+  __skb_get_hash_net
   __skb_gso_segment
   __skb_pad
   skb_page_frag_refill
@@ -2824,6 +2830,7 @@
   __sk_receive_skb
   sk_reset_timer
   sk_setup_caps
+  sk_skb_reason_drop
   sk_stop_timer
   slhc_compress
   slhc_free
