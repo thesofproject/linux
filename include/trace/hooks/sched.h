@@ -476,6 +476,10 @@ DECLARE_HOOK(android_vh_task_cmdline_prio_restore,
 	TP_PROTO(int saved_prio),
 	TP_ARGS(saved_prio));
 
+DECLARE_RESTRICTED_HOOK(android_rvh_update_rt_rq_load_avg,
+	TP_PROTO(u64 now, struct rq *rq, struct task_struct *tsk, int running),
+	TP_ARGS(now, rq, tsk, running), 1);
+
 DECLARE_RESTRICTED_HOOK(android_rvh_util_fits_cpu,
 	TP_PROTO(unsigned long util, unsigned long uclamp_min, unsigned long uclamp_max,
 		 int cpu, bool *fits, bool *done),
