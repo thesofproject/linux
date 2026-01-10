@@ -466,6 +466,10 @@ DECLARE_HOOK(android_vh_reweight_entity,
 	TP_PROTO(struct sched_entity *se, unsigned long *weight),
 	TP_ARGS(se, weight));
 
+DECLARE_RESTRICTED_HOOK(android_rvh_set_task_comm,
+	TP_PROTO(struct task_struct *tsk, bool exec),
+	TP_ARGS(tsk, exec), 1);
+
 /* macro versions of hooks are no longer required */
 
 DECLARE_HOOK(android_vh_task_cmdline_prio_restore,
