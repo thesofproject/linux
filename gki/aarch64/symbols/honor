@@ -8,6 +8,10 @@
   __tracepoint_android_vh_sk_alloc
   __traceiter_android_vh_sk_clone_lock
   __tracepoint_android_vh_sk_clone_lock
+  __traceiter_android_vh_tcp_rcv_established_fast_path
+  __tracepoint_android_vh_tcp_rcv_established_fast_path
+  __traceiter_android_vh_tcp_rcv_established_slow_path
+  __tracepoint_android_vh_tcp_rcv_established_slow_path
   __traceiter_android_vh_tcp_v4_connect
   __tracepoint_android_vh_tcp_v4_connect
   __traceiter_android_vh_tcp_v6_connect
