@@ -39,6 +39,7 @@ struct pkvm_hyp {
 #define PKVM_PCPU_PAGES		(PAGE_ALIGN(sizeof(struct pkvm_pcpu)) >> PAGE_SHIFT)
 
 enum pkvm_mem_type {
+	PKVM_RESERVED_USED_MEMORY,
 	PKVM_RESERVED_UNUSED_MEMORY,
 	PKVM_TEXT_DATA,
 };

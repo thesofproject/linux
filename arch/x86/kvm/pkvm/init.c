@@ -145,7 +145,8 @@ static int create_hyp_mmu(const struct pkvm_mem_info infos[], int nr_infos)
 	return pkvm_hyp_mmu_switch_to_buddy(hyp_pgt_base, nr_pages);
 }
 
-static int create_host_mmu(host_mmu_init_fn_t host_mmu_init_fn)
+static int create_host_mmu(const struct pkvm_mem_info infos[], int nr_infos,
+			   host_mmu_init_fn_t host_mmu_init_fn)
 {
 	struct memblock_region *reg;
 	unsigned long phys = 0;
@@ -176,12 +177,25 @@ static int create_host_mmu(host_mmu_init_fn_t host_mmu_init_fn)
 			return ret;
 	}
 
+	/*
+	 * Unmap the memory range in the pkvm_mem_info, which includes the pkvm
+	 * TEXT/DATA and its reserved memory, to protect the pKVM hypervisor
+	 * from the host VM.
+	 */
+	for (i = 0; i < nr_infos; i++) {
+		ret = pkvm_host_mmu_unmap(infos[i].pa, infos[i].size);
+		if (ret)
+			return ret;
+	}
+
 	return 0;
 }
 
+#define TMP_NR_INFOS	16
 static int initialize_global(struct pkvm_mem_info infos[], int nr_infos)
 {
 	host_mmu_init_fn_t host_mmu_init_fn = init_ops ? init_ops->host_mmu_init : NULL;
+	struct pkvm_mem_info tmp_infos[TMP_NR_INFOS];
 	phys_addr_t mem_base = INVALID_PAGE;
 	unsigned long mem_size = 0;
 	int i, ret;
@@ -189,12 +203,21 @@ static int initialize_global(struct pkvm_mem_info infos[], int nr_infos)
 	if (!infos || !nr_infos)
 		return -EINVAL;
 
+	if (nr_infos > TMP_NR_INFOS)
+		return -ENOMEM;
+
+	/*
+	 * The passed in parameter infos[] is in linux kernel's stack which
+	 * may use VMAP_STACK. It will not be accessible to the pKVM hypervisor
+	 * after switching to use its own mmu. Copy the infos[] to tmp_infos[]
+	 * which is in its own stack.
+	 */
 	for (i = 0; i < nr_infos; i++) {
 		if (infos[i].type == PKVM_RESERVED_UNUSED_MEMORY) {
 			mem_base = infos[i].pa;
 			mem_size = infos[i].size;
-			break;
 		}
+		tmp_infos[i] = infos[i];
 	}
 
 	if (!PAGE_ALIGNED(mem_base) || !mem_size)
@@ -208,7 +231,7 @@ static int initialize_global(struct pkvm_mem_info infos[], int nr_infos)
 	if (ret)
 		return ret;
 
-	return create_host_mmu(host_mmu_init_fn);
+	return create_host_mmu(tmp_infos, nr_infos, host_mmu_init_fn);
 }
 
 int pkvm_init(struct pkvm_mem_info infos[], int nr_infos)
