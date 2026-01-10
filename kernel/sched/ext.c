@@ -2196,7 +2196,7 @@ static int balance_scx(struct rq *rq, struct rq_flags *rf)
 
 		for_each_cpu_andnot(scpu, smt_mask, cpumask_of(cpu_of(rq))) {
 			struct rq *srq = cpu_rq(scpu);
-			struct task_struct *sprev = srq->curr;
+			struct task_struct *sprev = srq->donor;
 
 			WARN_ON_ONCE(__rq_lockp(rq) != __rq_lockp(srq));
 			update_rq_clock(srq);
