@@ -5321,6 +5321,8 @@ out:
 	 */
 	slab_post_alloc_hook(s, lru, gfpflags, 1, &object, init, orig_size);
 
+	trace_android_vh_slab_alloc_node(object, addr, s);
+
 	return object;
 }
 
@@ -6675,6 +6677,7 @@ void slab_free(struct kmem_cache *s, struct slab *slab, void *object,
 	memcg_slab_free_hook(s, slab, &object, 1);
 	alloc_tagging_slab_free_hook(s, slab, &object, 1);
 
+	trace_android_vh_slab_free(addr, s);
 	if (unlikely(!slab_free_hook(s, object, slab_want_init_on_free(s), false)))
 		return;
 
@@ -6709,6 +6712,9 @@ void slab_free_bulk(struct kmem_cache *s, struct slab *slab, void *head,
 	 */
 	if (likely(slab_free_freelist_hook(s, &head, &tail, &cnt)))
 		do_slab_free(s, slab, head, tail, cnt, addr);
+
+	trace_android_vh_slab_free(addr, s);
+
 }
 
 #ifdef CONFIG_SLUB_RCU_DEBUG
