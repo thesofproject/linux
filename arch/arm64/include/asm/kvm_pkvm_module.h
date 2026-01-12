@@ -171,11 +171,6 @@ struct pkvm_sglist_page {
  *				(@host_unshare_hyp).
  * @memcpy:			Same as kernel memcpy, but use hypervisor VAs.
  * @memset:			Same as kernel memset, but use a hypervisor VA.
- * @hyp_pa:			Return the physical address for a hypervisor
- *				virtual address in the linear range.
- * @hyp_va:			Convert a physical address into a virtual one.
- * @kern_hyp_va:		Convert a kernel virtual address into an
- *				hypervisor virtual one.
  * @hyp_smp_processor_id:	Current CPU id
  * @iommu_donate_pages:		Allocate pages from the IOMMU pool.
  * @iommu_reclaim_pages:	Reclaim pages to the IOMMU pool.
@@ -258,9 +253,6 @@ struct pkvm_module_ops {
 	void (*unpin_shared_mem)(void *from, void *to);
 	void* (*memcpy)(void *to, const void *from, size_t count);
 	void* (*memset)(void *dst, int c, size_t count);
-	phys_addr_t (*hyp_pa)(void *x);
-	void* (*hyp_va)(phys_addr_t phys);
-	unsigned long (*kern_hyp_va)(unsigned long x);
 	void* (*tracing_reserve_entry)(unsigned long length);
 	void (*tracing_commit_entry)(void);
 	void (*tracing_mod_hyp_printk)(u8 fmt_id, u64 a, u64 b, u64 c, u64 d);
