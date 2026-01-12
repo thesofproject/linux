@@ -1185,18 +1185,6 @@ static __init int pkvm_hyp_init(void)
 		}
 	}
 
-	/*
-	 * XXX: Revert
-	 * Temporarily fail pkvm initialization until pVMCS is fully merged.
-	 * pKVM doesn't serve any real purpose until we have pVMCS ready and
-	 * this failure helps us test reprivilege logic. This also enables
-	 * host to boot normally with KVM enabled and thereby not breaking
-	 * any virtualization functionality.
-	 */
-	if (!ret || !init_ret) {
-		pr_err("Explicitly triggering pkvm initialization failure!\n");
-		ret = -EFAULT;
-	}
 	return ret ? ret : init_ret;
 }
 
