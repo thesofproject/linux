@@ -23,6 +23,8 @@
   __traceiter_android_rvh_replace_next_task_fair
   __traceiter_android_rvh_set_user_nice
   __traceiter_android_rvh_try_to_wake_up
+  __traceiter_android_rvh_alloc_pages_reclaim_start
+  __traceiter_android_rvh_alloc_pages_reclaim_cycle_end
   __traceiter_android_vh_alter_mutex_list_add
   __traceiter_android_vh_alter_rwsem_list_add
   __traceiter_android_vh_binder_restore_priority
@@ -54,6 +56,8 @@
   __tracepoint_android_rvh_replace_next_task_fair
   __tracepoint_android_rvh_set_user_nice
   __tracepoint_android_rvh_try_to_wake_up
+  __tracepoint_android_rvh_alloc_pages_reclaim_start
+  __tracepoint_android_rvh_alloc_pages_reclaim_cycle_end
   __tracepoint_android_vh_alter_mutex_list_add
   __tracepoint_android_vh_alter_rwsem_list_add
   __tracepoint_android_vh_binder_restore_priority
