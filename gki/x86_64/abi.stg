@@ -32461,6 +32461,12 @@ member {
   offset: 1472
 }
 member {
+  id: 0xd671c1c8
+  name: "android_oem_data1"
+  type_id: 0x92233392
+  offset: 1728
+}
+member {
   id: 0xd671c443
   name: "android_oem_data1"
   type_id: 0x92233392
@@ -93679,10 +93685,10 @@ member {
   type_id: 0xdb2fb9a5
 }
 member {
-  id: 0x0fc0fef9
+  id: 0x0fc0ffaf
   name: "node"
   type_id: 0xb5f7722d
-  offset: 1728
+  offset: 1792
 }
 member {
   id: 0x0ff5b15e
@@ -169090,7 +169096,7 @@ struct_union {
   kind: STRUCT
   name: "kmem_cache"
   definition {
-    bytesize: 224
+    bytesize: 232
     member_id: 0xc34eef06
     member_id: 0x5f5e6095
     member_id: 0x6dcde565
@@ -169118,7 +169124,8 @@ struct_union {
     member_id: 0x2db6a8b3
     member_id: 0xe3db193a
     member_id: 0xbb6c9e9c
-    member_id: 0x0fc0fef9
+    member_id: 0xd671c1c8
+    member_id: 0x0fc0ffaf
   }
 }
 struct_union {
@@ -219446,7 +219453,7 @@ elf_symbol {
   name: "__kmalloc_cache_noprof"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x3f034876
+  crc: 0x483691cf
   type_id: 0x5ed273d9
   full_name: "__kmalloc_cache_noprof"
 }
@@ -219473,7 +219480,7 @@ elf_symbol {
   name: "__kmem_cache_create_args"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x9461446a
+  crc: 0x6c396468
   type_id: 0xc3df801d
   full_name: "__kmem_cache_create_args"
 }
@@ -219536,7 +219543,7 @@ elf_symbol {
   name: "__kvmalloc_node_noprof"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x110d0d19
+  crc: 0x82ada2b0
   type_id: 0x6bdb9f49
   full_name: "__kvmalloc_node_noprof"
 }
@@ -224579,7 +224586,7 @@ elf_symbol {
   name: "kmalloc_caches"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0xa5edf1dc
+  crc: 0x81199134
   type_id: 0x0b8865f4
   full_name: "kmalloc_caches"
 }
@@ -224588,7 +224595,7 @@ elf_symbol {
   name: "kmem_cache_alloc_bulk_noprof"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x7dce12b7
+  crc: 0x566596f8
   type_id: 0x95c413fa
   full_name: "kmem_cache_alloc_bulk_noprof"
 }
@@ -224597,7 +224604,7 @@ elf_symbol {
   name: "kmem_cache_alloc_noprof"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xe96472a9
+  crc: 0x0885c5b2
   type_id: 0x5eef7e83
   full_name: "kmem_cache_alloc_noprof"
 }
@@ -224606,7 +224613,7 @@ elf_symbol {
   name: "kmem_cache_destroy"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xf8838bdd
+  crc: 0x8e687fdf
   type_id: 0x1b27059e
   full_name: "kmem_cache_destroy"
 }
@@ -224615,7 +224622,7 @@ elf_symbol {
   name: "kmem_cache_free"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x0c52cb42
+  crc: 0xedb37c59
   type_id: 0x1b45f00a
   full_name: "kmem_cache_free"
 }
@@ -224624,7 +224631,7 @@ elf_symbol {
   name: "kmem_cache_free_bulk"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xf8c52f4e
+  crc: 0x2350e66d
   type_id: 0x18f4ffe7
   full_name: "kmem_cache_free_bulk"
 }

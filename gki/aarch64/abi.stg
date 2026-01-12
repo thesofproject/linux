@@ -49917,6 +49917,12 @@ member {
   offset: 1472
 }
 member {
+  id: 0xd671c1c8
+  name: "android_oem_data1"
+  type_id: 0x92233392
+  offset: 1728
+}
+member {
   id: 0xd671c443
   name: "android_oem_data1"
   type_id: 0x92233392
@@ -140484,10 +140490,10 @@ member {
   type_id: 0xdb2fb9a5
 }
 member {
-  id: 0x0fc0fef9
+  id: 0x0fc0ffaf
   name: "node"
   type_id: 0xb5f7722d
-  offset: 1728
+  offset: 1792
 }
 member {
   id: 0x0ff5b15e
@@ -249879,7 +249885,7 @@ struct_union {
   kind: STRUCT
   name: "kmem_cache"
   definition {
-    bytesize: 224
+    bytesize: 232
     member_id: 0xc34eef06
     member_id: 0x5f5e6095
     member_id: 0x6dcde565
@@ -249907,7 +249913,8 @@ struct_union {
     member_id: 0x2db6a8b3
     member_id: 0xe3db193a
     member_id: 0xbb6c9e9c
-    member_id: 0x0fc0fef9
+    member_id: 0xd671c1c8
+    member_id: 0x0fc0ffaf
   }
 }
 struct_union {
@@ -331870,6 +331877,13 @@ function {
   parameter_id: 0x6720d32f
 }
 function {
+  id: 0x9b69d0a5
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x33756485
+  parameter_id: 0x2efd5036
+}
+function {
   id: 0x9b6acfa5
   return_type_id: 0x6720d32f
   parameter_id: 0x1ba8b228
@@ -333151,6 +333165,14 @@ function {
   parameter_id: 0x18bd6530
   parameter_id: 0x18ea6ae3
   parameter_id: 0x33756485
+}
+function {
+  id: 0x9bc1295b
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x18bd6530
+  parameter_id: 0x33756485
+  parameter_id: 0x2efd5036
 }
 function {
   id: 0x9bc1ac21
@@ -346587,7 +346609,7 @@ elf_symbol {
   name: "__kmalloc_cache_node_noprof"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x7be9868b
+  crc: 0xe9ca02da
   type_id: 0x5ef56662
   full_name: "__kmalloc_cache_node_noprof"
 }
@@ -346596,7 +346618,7 @@ elf_symbol {
   name: "__kmalloc_cache_noprof"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x0027cd3b
+  crc: 0xe7a35815
   type_id: 0x5ed273d9
   full_name: "__kmalloc_cache_noprof"
 }
@@ -346623,7 +346645,7 @@ elf_symbol {
   name: "__kmem_cache_create_args"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xcc0bc758
+  crc: 0x26906e10
   type_id: 0xc3df801d
   full_name: "__kmem_cache_create_args"
 }
@@ -346695,7 +346717,7 @@ elf_symbol {
   name: "__kvmalloc_node_noprof"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x951f15d8
+  crc: 0xe1ce2a0c
   type_id: 0x6bdb9f49
   full_name: "__kvmalloc_node_noprof"
 }
@@ -346875,7 +346897,7 @@ elf_symbol {
   name: "__mod_lruvec_state"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xbcdccba0
+  crc: 0xafd7e37d
   type_id: 0x1e768676
   full_name: "__mod_lruvec_state"
 }
@@ -350256,6 +350278,15 @@ elf_symbol {
   full_name: "__traceiter_android_vh_sk_clone_lock"
 }
 elf_symbol {
+  id: 0x37177d11
+  name: "__traceiter_android_vh_slab_alloc_node"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xe0f17472
+  type_id: 0x9bc1295b
+  full_name: "__traceiter_android_vh_slab_alloc_node"
+}
+elf_symbol {
   id: 0x0562cb47
   name: "__traceiter_android_vh_slab_folio_alloced"
   is_defined: true
@@ -350263,6 +350294,15 @@ elf_symbol {
   crc: 0x3d63c09b
   type_id: 0x9a85c64c
   full_name: "__traceiter_android_vh_slab_folio_alloced"
+}
+elf_symbol {
+  id: 0xcc89dffc
+  name: "__traceiter_android_vh_slab_free"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xa42feb40
+  type_id: 0x9b69d0a5
+  full_name: "__traceiter_android_vh_slab_free"
 }
 elf_symbol {
   id: 0x58e7556b
@@ -353397,6 +353437,15 @@ elf_symbol {
   full_name: "__tracepoint_android_vh_sk_clone_lock"
 }
 elf_symbol {
+  id: 0x65c6ad4b
+  name: "__tracepoint_android_vh_slab_alloc_node"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_vh_slab_alloc_node"
+}
+elf_symbol {
   id: 0x4a999b29
   name: "__tracepoint_android_vh_slab_folio_alloced"
   is_defined: true
@@ -353404,6 +353453,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_vh_slab_folio_alloced"
+}
+elf_symbol {
+  id: 0xab9ebde6
+  name: "__tracepoint_android_vh_slab_free"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_vh_slab_free"
 }
 elf_symbol {
   id: 0x39e68fed
@@ -370957,7 +371015,7 @@ elf_symbol {
   name: "get_slabinfo"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xe20580c1
+  crc: 0x2111422f
   namespace: "MINIDUMP"
   type_id: 0x1bc52dc4
   full_name: "get_slabinfo"
@@ -376503,7 +376561,7 @@ elf_symbol {
   name: "kmalloc_caches"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0x374445c8
+  crc: 0x0dd36a9b
   type_id: 0x0b8865f4
   full_name: "kmalloc_caches"
 }
@@ -376512,7 +376570,7 @@ elf_symbol {
   name: "kmem_cache_alloc_bulk_noprof"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xb56387cc
+  crc: 0x356421b9
   type_id: 0x95c413fa
   full_name: "kmem_cache_alloc_bulk_noprof"
 }
@@ -376521,7 +376579,7 @@ elf_symbol {
   name: "kmem_cache_alloc_lru_noprof"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x0fca3211
+  crc: 0x0da63d80
   type_id: 0x5de26741
   full_name: "kmem_cache_alloc_lru_noprof"
 }
@@ -376530,7 +376588,7 @@ elf_symbol {
   name: "kmem_cache_alloc_noprof"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x549d844d
+  crc: 0x45a4655b
   type_id: 0x5eef7e83
   full_name: "kmem_cache_alloc_noprof"
 }
@@ -376539,7 +376597,7 @@ elf_symbol {
   name: "kmem_cache_destroy"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xba524fee
+  crc: 0xac9ee114
   type_id: 0x1b27059e
   full_name: "kmem_cache_destroy"
 }
@@ -376548,7 +376606,7 @@ elf_symbol {
   name: "kmem_cache_free"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xb1ab3da6
+  crc: 0xa092dcb0
   type_id: 0x1b45f00a
   full_name: "kmem_cache_free"
 }
@@ -376557,7 +376615,7 @@ elf_symbol {
   name: "kmem_cache_free_bulk"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x6e6272f5
+  crc: 0x6ffee936
   type_id: 0x18f4ffe7
   full_name: "kmem_cache_free_bulk"
 }
@@ -378375,7 +378433,7 @@ elf_symbol {
   name: "lruvec_page_state"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x76c87569
+  crc: 0x138ed211
   type_id: 0x3f5bd282
   full_name: "lruvec_page_state"
 }
@@ -378744,7 +378802,7 @@ elf_symbol {
   name: "mem_cgroup_from_id"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x0f695fd8
+  crc: 0xc293ec7d
   type_id: 0x59f18b0b
   full_name: "mem_cgroup_from_id"
 }
@@ -378753,7 +378811,7 @@ elf_symbol {
   name: "mem_cgroup_update_lru_size"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xfbb25823
+  crc: 0xe4b35cbf
   type_id: 0x1ef25648
   full_name: "mem_cgroup_update_lru_size"
 }
@@ -378894,7 +378952,7 @@ elf_symbol {
   name: "memory_cgrp_subsys"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0x7977f3db
+  crc: 0x4ef1a81f
   type_id: 0x00571446
   full_name: "memory_cgrp_subsys"
 }
@@ -388653,7 +388711,7 @@ elf_symbol {
   name: "root_mem_cgroup"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0x7f57d935
+  crc: 0x2f62afe1
   type_id: 0x1d5bae2a
   full_name: "root_mem_cgroup"
 }
@@ -402437,7 +402495,9 @@ interface {
   symbol_id: 0x3d0fc76c
   symbol_id: 0x56a5b453
   symbol_id: 0x215231a8
+  symbol_id: 0x37177d11
   symbol_id: 0x0562cb47
+  symbol_id: 0xcc89dffc
   symbol_id: 0x58e7556b
   symbol_id: 0x2ecf85e9
   symbol_id: 0x34a01a22
@@ -402786,7 +402846,9 @@ interface {
   symbol_id: 0x5ef059ce
   symbol_id: 0x4aa5e229
   symbol_id: 0xa5ebe436
+  symbol_id: 0x65c6ad4b
   symbol_id: 0x4a999b29
+  symbol_id: 0xab9ebde6
   symbol_id: 0x39e68fed
   symbol_id: 0xefb9e5a3
   symbol_id: 0x3fe0157c
