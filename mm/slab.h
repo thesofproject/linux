@@ -294,7 +294,7 @@ struct kmem_cache {
 	unsigned int useroffset;	/* Usercopy region offset */
 	unsigned int usersize;		/* Usercopy region size */
 #endif
-
+	ANDROID_OEM_DATA(1);
 	struct kmem_cache_node *node[MAX_NUMNODES];
 };
 
