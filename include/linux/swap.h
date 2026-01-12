@@ -442,6 +442,7 @@ static inline unsigned long total_swapcache_pages(void)
 	return global_node_page_state(NR_SWAPCACHE);
 }
 
+void swap_cache_del_folio(struct folio *folio);
 void free_swap_cache(struct folio *folio);
 void free_folio_and_swap_cache(struct folio *folio);
 void free_pages_and_swap_cache(struct encoded_page **, int);
