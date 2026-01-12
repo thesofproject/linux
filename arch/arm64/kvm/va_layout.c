@@ -13,6 +13,7 @@
 #include <asm/kvm_mmu.h>
 #include <asm/memory.h>
 #include <asm/text-patching.h>
+#include <asm/hyp_image.h>
 
 /*
  * The LSB of the HYP VA tag
@@ -179,7 +180,7 @@ static u32 compute_instruction(int n, u32 rd, u32 rn)
 	return insn;
 }
 
-void __init kvm_update_va_mask(struct alt_instr *alt,
+noinstr void kvm_update_va_mask(struct alt_instr *alt,
 			       __le32 *origptr, __le32 *updptr, int nr_inst)
 {
 	int i;
@@ -212,6 +213,7 @@ void __init kvm_update_va_mask(struct alt_instr *alt,
 		updptr[i] = cpu_to_le32(insn);
 	}
 }
+EXPORT_KVM_NVHE_ALT_CB(kvm_update_va_mask);
 
 void kvm_patch_vector_branch(struct alt_instr *alt,
 			     __le32 *origptr, __le32 *updptr, int nr_inst)
@@ -324,3 +326,12 @@ void kvm_compute_final_ctr_el0(struct alt_instr *alt,
 	generate_mov_q(read_sanitised_ftr_reg(SYS_CTR_EL0),
 		       origptr, updptr, nr_inst);
 }
+
+noinstr void kvm_patch_physvirt_offset(struct alt_instr *alt, __le32 *origptr,
+				       __le32 *updptr, int nr_inst)
+{
+	BUG_ON(nr_inst != 5);
+
+	generate_mov_q(hyp_physvirt_offset, origptr, updptr, nr_inst - 1);
+}
+EXPORT_KVM_NVHE_ALT_CB(kvm_patch_physvirt_offset);
