@@ -109,11 +109,8 @@ static int mt8365_send_msg(struct snd_sof_dev *sdev,
 
 static void mt8365_dsp_handle_reply(struct snd_sof_dev *sdev)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave(&sdev->ipc_lock, flags);
+	guard(spinlock_irqsave)(&sdev->ipc_lock);
 	snd_sof_ipc_process_reply(sdev, 0);
-	spin_unlock_irqrestore(&sdev->ipc_lock, flags);
 }
 
 static void mt8365_dsp_handle_request(struct snd_sof_dev *sdev)
