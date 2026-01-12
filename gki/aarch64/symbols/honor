@@ -56,6 +56,10 @@
   __tracepoint_android_vh_futex_wake_this
   __traceiter_android_vh_futex_wake_up_q_finish
   __tracepoint_android_vh_futex_wake_up_q_finish
+  __tracepoint_android_vh_slab_alloc_node
+  __traceiter_android_vh_slab_alloc_node
+  __tracepoint_android_vh_slab_free
+  __traceiter_android_vh_slab_free
   binder_alloc_copy_from_buffer
   lruvec_page_state
   arch_vma_name
