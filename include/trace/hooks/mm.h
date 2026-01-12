@@ -167,6 +167,15 @@ DECLARE_HOOK(android_vh_alloc_pages_slowpath_end,
 		unsigned long pages_reclaimed, int retry_loop_count),
 	TP_ARGS(gfp_mask, order, alloc_start, stime, did_some_progress,
 		pages_reclaimed, retry_loop_count));
+DECLARE_RESTRICTED_HOOK(android_rvh_alloc_pages_reclaim_start,
+	TP_PROTO(gfp_t gfp_mask, int order, int *alloc_flags),
+	TP_ARGS(gfp_mask, order, alloc_flags), 3);
+DECLARE_RESTRICTED_HOOK(android_rvh_alloc_pages_reclaim_cycle_end,
+	TP_PROTO(gfp_t gfp_mask, int order, int *alloc_flags,
+	unsigned long *did_some_progress, int *no_progress_loops,
+	unsigned long direct_reclaim_retries),
+	TP_ARGS(gfp_mask, order, alloc_flags, did_some_progress,
+	no_progress_loops, direct_reclaim_retries), 6);
 DECLARE_HOOK(android_vh_add_lazyfree_bypass,
 	TP_PROTO(struct lruvec *lruvec, struct folio *folio, bool *bypass),
 	TP_ARGS(lruvec, folio, bypass));
