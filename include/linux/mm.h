@@ -4346,4 +4346,9 @@ static inline bool snapshot_page_is_faithful(const struct page_snapshot *ps)
 
 void snapshot_page(struct page_snapshot *ps, const struct page *page);
 
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+void free_hpage(struct page *page, int __bitwise fpi_flags);
+void prep_new_hpage(struct page *page, gfp_t gfp_flags, unsigned int alloc_flags);
+#endif
+
 #endif /* _LINUX_MM_H */
