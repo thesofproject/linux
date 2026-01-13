@@ -3011,6 +3011,7 @@ void free_unref_folios(struct folio_batch *folios)
 	struct per_cpu_pages *pcp = NULL;
 	struct zone *locked_zone = NULL;
 	int i, j;
+	bool skip_free = false;
 
 	/* Prepare folios for freeing */
 	for (i = 0, j = 0; i < folios->nr; i++) {
@@ -3035,6 +3036,10 @@ void free_unref_folios(struct folio_batch *folios)
 		j++;
 	}
 	folios->nr = j;
+
+	trace_android_vh_free_unref_folios_to_pcp_bypass(folios, &skip_free);
+	if (skip_free)
+		goto out;
 
 	for (i = 0; i < folios->nr; i++) {
 		struct folio *folio = folios->folios[i];
@@ -3097,6 +3102,7 @@ void free_unref_folios(struct folio_batch *folios)
 		pcp_spin_unlock(pcp);
 		pcp_trylock_finish(UP_flags);
 	}
+out:
 	folio_batch_reinit(folios);
 }
 
