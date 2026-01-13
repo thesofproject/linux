@@ -508,8 +508,8 @@ void __init early_init_fdt_scan_reserved_mem(void)
 	memblock_memsize_detect_hole();
 	memblock_memsize_disable_tracking();
 
-	fdt_scan_reserved_mem();
 	fdt_reserve_elfcorehdr();
+	fdt_scan_reserved_mem();
 
 	/* Process header /memreserve/ fields */
 	for (n = 0; ; n++) {
