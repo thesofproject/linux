@@ -4394,6 +4394,13 @@ int try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 		ttwu_queue(p, cpu, wake_flags);
 	}
 out:
+	/*
+	 * For now, if we've been woken up, clear the task->blocked_on
+	 * regardless if it was set to a mutex or PROXY_WAKING so the
+	 * task can run. We will need to be more careful later when
+	 * properly handling proxy migration
+	 */
+	clear_task_blocked_on(p, NULL);
 	if (success) {
 		trace_android_rvh_try_to_wake_up_success(p);
 		ttwu_stat(p, task_cpu(p), wake_flags);
@@ -6758,6 +6765,11 @@ find_proxy_task(struct rq *rq, struct task_struct *donor, struct rq_flags *rf)
 		/* Something changed in the chain, so pick again */
 		if (!mutex)
 			return NULL;
+
+		/* if its PROXY_WAKING, resched_idle so ttwu can complete */
+		if (mutex == PROXY_WAKING)
+			return proxy_resched_idle(rq);
+
 		/*
 		 * By taking mutex->wait_lock we hold off concurrent mutex_unlock()
 		 * and ensure @owner sticks around.
@@ -6778,6 +6790,11 @@ find_proxy_task(struct rq *rq, struct task_struct *donor, struct rq_flags *rf)
 
 		owner = __mutex_owner(mutex);
 		if (!owner) {
+			/*
+			 * If there is no owner, clear blocked_on
+			 * and return p so it can run and try to
+			 * acquire the lock
+			 */
 			__clear_task_blocked_on(p, mutex);
 			return p;
 		}
