@@ -195,6 +195,7 @@ static int __init setup_proxy_exec_toggle(void)
 {
 	int retval;
 
+	pr_info("sched_proxy_exec: %s\n", sched_proxy_exec() ? "enabled" : "disabled");
 	sched_proxy_exec_kobj = kobject_create_and_add("sched_proxy_exec", kernel_kobj);
 	if (!sched_proxy_exec_kobj)
 		return -ENOMEM;
