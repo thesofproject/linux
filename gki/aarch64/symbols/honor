@@ -18,6 +18,8 @@
   __tracepoint_android_vh_tcp_v6_connect
   __traceiter_android_vh_tcp_clean_rtx_queue
   __tracepoint_android_vh_tcp_clean_rtx_queue
+  __traceiter_android_vh_tcp_rcv_rtt_update
+  __tracepoint_android_vh_tcp_rcv_rtt_update
   __traceiter_android_vh_tcp_rcv_synack
   __tracepoint_android_vh_tcp_rcv_synack
   __traceiter_android_vh_tcp_write_timeout_estab_retrans
