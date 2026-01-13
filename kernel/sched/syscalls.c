@@ -1383,7 +1383,8 @@ static void do_sched_yield(void)
 	rq = this_rq_lock_irq(&rf);
 
 	schedstat_inc(rq->yld_count);
-	rq->donor->sched_class->yield_task(rq);
+	if (rq->donor->sched_class->yield_task)
+		rq->donor->sched_class->yield_task(rq);
 
 	trace_android_rvh_do_sched_yield(rq);
 
