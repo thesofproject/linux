@@ -948,7 +948,9 @@ static void hyp_trace_buffer_printk(struct hyp_trace_buffer *hyp_buffer)
 			return;
 
 		ht_iter->seq.buffer[ht_iter->seq.seq.len] = '\0';
-		printk("%s", ht_iter->seq.buffer);
+
+		if (!pr_emerg("%s", ht_iter->seq.buffer))
+			return;
 
 		ht_iter->seq.seq.len = 0;
 		ring_buffer_consume(hyp_buffer->trace_buffer, ht_iter->ent_cpu,
