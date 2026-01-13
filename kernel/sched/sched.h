@@ -3879,6 +3879,16 @@ bool task_is_pushable(struct rq *rq, struct task_struct *p, int cpu)
 	return false;
 }
 
+#ifdef CONFIG_SCHED_PROXY_EXEC
+struct task_struct *find_exec_ctx(struct rq *rq, struct task_struct *p);
+#else /* !CONFIG_SCHED_PROXY_EXEC */
+static inline
+struct task_struct *find_exec_ctx(struct rq *rq, struct task_struct *p)
+{
+	return p;
+}
+#endif /* CONFIG_SCHED_PROXY_EXEC */
+
 #ifdef CONFIG_RT_MUTEXES
 
 static inline int __rt_effective_prio(struct task_struct *pi_task, int prio)
