@@ -78,6 +78,7 @@
   __devres_alloc_node
   devres_free
   _dev_warn
+  disable_delayed_work_sync
   dma_buf_export
   dma_fence_context_alloc
   dma_fence_init

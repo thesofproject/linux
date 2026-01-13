@@ -363637,6 +363637,15 @@ elf_symbol {
   full_name: "dget_parent"
 }
 elf_symbol {
+  id: 0xa910f302
+  name: "disable_delayed_work_sync"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xc9c605b3
+  type_id: 0xf3110cae
+  full_name: "disable_delayed_work_sync"
+}
+elf_symbol {
   id: 0x573e2956
   name: "disable_irq"
   is_defined: true
@@ -404264,6 +404273,7 @@ interface {
   symbol_id: 0xabe60a33
   symbol_id: 0x7ae5eeb4
   symbol_id: 0xf34ac6e1
+  symbol_id: 0xa910f302
   symbol_id: 0x573e2956
   symbol_id: 0xe5bfa8c8
   symbol_id: 0xd48a6769
