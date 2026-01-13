@@ -178,6 +178,9 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
 						 &init_task.alloc_lock),
 #endif
 	.blocked_donor = NULL,
+#ifdef CONFIG_SCHED_PROXY_EXEC
+	.migration_node = LIST_HEAD_INIT(init_task.migration_node),
+#endif
 #ifdef CONFIG_RT_MUTEXES
 	.pi_waiters	= RB_ROOT_CACHED,
 	.pi_top_task	= NULL,
