@@ -2163,9 +2163,13 @@ has_tasks:
 	return true;
 }
 
-static int balance_scx(struct rq *rq, struct task_struct *prev,
-		       struct rq_flags *rf)
+static int balance_scx(struct rq *rq, struct rq_flags *rf)
 {
+	/*
+	 * Note, rq->donor may change during rq lock drops,
+	 * so don't re-use prev across lock drops
+	 */
+	struct task_struct *prev = rq->donor;
 	int ret;
 
 	rq_unpin_lock(rq, rf);

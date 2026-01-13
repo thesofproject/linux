@@ -2444,18 +2444,18 @@ struct sched_class {
 
 	void (*wakeup_preempt)(struct rq *rq, struct task_struct *p, int flags);
 
-	int (*balance)(struct rq *rq, struct task_struct *prev, struct rq_flags *rf);
+	int (*balance)(struct rq *rq, struct rq_flags *rf);
 	struct task_struct *(*pick_task)(struct rq *rq);
 	/*
 	 * Optional! When implemented pick_next_task() should be equivalent to:
 	 *
 	 *   next = pick_task();
 	 *   if (next) {
-	 *       put_prev_task(prev);
+	 *       put_prev_task(rq->donor);
 	 *       set_next_task_first(next);
 	 *   }
 	 */
-	struct task_struct *(*pick_next_task)(struct rq *rq, struct task_struct *prev);
+	struct task_struct *(*pick_next_task)(struct rq *rq);
 
 	void (*put_prev_task)(struct rq *rq, struct task_struct *p, struct task_struct *next);
 	void (*set_next_task)(struct rq *rq, struct task_struct *p, bool first);
@@ -2615,7 +2615,7 @@ static inline bool sched_fair_runnable(struct rq *rq)
 	return rq->cfs.nr_queued > 0;
 }
 
-extern struct task_struct *pick_next_task_fair(struct rq *rq, struct task_struct *prev, struct rq_flags *rf);
+extern struct task_struct *pick_next_task_fair(struct rq *rq, struct rq_flags *rf);
 extern struct task_struct *pick_task_idle(struct rq *rq);
 
 #define SCA_CHECK		0x01
