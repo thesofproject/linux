@@ -3957,6 +3957,7 @@ static void activate_blocked_waiters(struct rq *target_rq,
 			raw_spin_unlock_irqrestore(&owner->blocked_lock, flags);
 
 			do_activate_blocked_waiter(target_rq, p, en_flags);
+			trace_sched_pe_activate_blocked_entity(owner, p);
 
 			raw_spin_lock_irqsave(&p->blocked_lock, flags);
 			if (list_empty(&p->blocked_activation_node)) {
@@ -4125,6 +4126,11 @@ static inline bool proxy_needs_return(struct rq *rq, struct task_struct *p)
 	block_task(rq, p, DEQUEUE_NOCLOCK | DEQUEUE_SPECIAL);
 	return true;
 }
+
+static inline void _trace_sched_pe_return_migration(struct task_struct *p)
+{
+	trace_sched_pe_return_migration(p, p->wake_cpu);
+}
 #else /* !CONFIG_SCHED_PROXY_EXEC */
 static bool proxy_task_runnable_but_waking(struct task_struct *p)
 {
@@ -4137,6 +4143,9 @@ static inline bool proxy_needs_return(struct rq *rq, struct task_struct *p)
 static inline void activate_blocked_waiters(struct rq *target_rq,
 					    struct task_struct *owner,
 					    int wake_flags)
+{
+}
+static inline void _trace_sched_pe_return_migration(struct task_struct *p)
 {
 }
 #endif /* CONFIG_SCHED_PROXY_EXEC */
@@ -4231,8 +4240,10 @@ static int ttwu_runnable(struct task_struct *p, int wake_flags)
 			proxy_remove_from_sleeping_owner(p);
 			enqueue_task(rq, p, ENQUEUE_NOCLOCK | ENQUEUE_DELAYED);
 		}
-		if (proxy_needs_return(rq, p))
+		if (proxy_needs_return(rq, p)) {
+			_trace_sched_pe_return_migration(p);
 			goto out;
+		}
 		if (!task_on_cpu(rq, p)) {
 			/*
 			 * When on_rq && !on_cpu the task is preempted, see if
@@ -7201,6 +7212,8 @@ static void proxy_force_return(struct rq *rq, struct rq_flags *rf,
 	lockdep_assert_rq_held(rq);
 	WARN_ON(p == rq->curr);
 
+	_trace_sched_pe_return_migration(p);
+
 	get_task_struct(p);
 
 	/*
@@ -7285,6 +7298,7 @@ static void proxy_enqueue_on_owner(struct rq *rq, struct task_struct *owner,
 	 * ttwu_activate() will pick them up and place them on whatever rq
 	 * @owner will run next.
 	 */
+	trace_sched_pe_enqueue_sleeping_task(owner, p);
 	WARN_ON(p == owner);
 	WARN_ON(!p->on_rq);
 	WARN_ON(p->sleeping_owner);
@@ -7425,10 +7439,12 @@ find_proxy_task(struct rq *rq, struct task_struct *donor, struct rq_flags *rf)
 			if (curr_in_chain)
 				return proxy_resched_idle(rq);
 			action = MIGRATE;
+			trace_sched_pe_migration(donor, owner);
 			break;
 		}
 
 		if (task_on_rq_migrating(owner)) {
+			trace_sched_pe_owner_is_migrating(owner, p);
 			/*
 			 * One of the chain of mutex owners is currently migrating to this
 			 * CPU, but has not yet been enqueued because we are holding the
@@ -7650,6 +7666,8 @@ static void __sched notrace __schedule(int sched_mode)
 	}
 
 	prev_not_proxied = !prev->blocked_donor;
+
+	trace_sched_start_task_selection(prev, cpu, task_is_blocked(prev));
 pick_again:
 	assert_balance_callbacks_empty(rq);
 	next = pick_next_task(rq, &rf);
@@ -7659,14 +7677,18 @@ pick_again:
 		next = find_proxy_task(rq, next, &rf);
 		if (!next) {
 			/* zap the balance_callbacks before picking again */
+			trace_sched_picking_again(rq->donor, cpu, task_is_blocked(rq->donor));
 			zap_balance_callbacks(rq);
 			goto pick_again;
 		}
 		if (next == rq->idle) {
+			trace_sched_proxy_resched_idle(rq->donor, cpu, task_is_blocked(rq->donor));
 			zap_balance_callbacks(rq);
 			goto keep_resched;
 		}
+		trace_sched_found_proxy_task(rq->donor, next, cpu);
 	}
+	trace_sched_finish_task_selection(rq->donor, next, cpu);
 picked:
 	clear_tsk_need_resched(prev);
 	clear_preempt_need_resched();
