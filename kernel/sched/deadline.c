@@ -2586,6 +2586,45 @@ static struct task_struct *pick_next_pushable_dl_task(struct rq *rq)
 	return p;
 }
 
+static inline bool dl_revalidate_rq_state(struct task_struct *task, struct rq *rq,
+					  struct rq *later)
+{
+	/*
+	 * double_lock_balance had to release rq->lock, in the
+	 * meantime, task may no longer be fit to be migrated.
+	 * Check the following to ensure that the task is
+	 * still suitable for migration:
+	 * 1. It is possible the task was scheduled,
+	 *    migrate_disabled was set and then got preempted,
+	 *    so we must check the task migration disable
+	 *    flag.
+	 * 2. The CPU picked is in the task's affinity.
+	 * 3. For throttled task (dl_task_offline_migration),
+	 *    check the following:
+	 *    - the task is not on the rq anymore (it was
+	 *      migrated)
+	 *    - the task is not on CPU anymore
+	 *    - the task is still a dl task
+	 *    - the task is not queued on the rq anymore
+	 * 4. For the non-throttled task (push_dl_task), the
+	 *    check to ensure that this task is still at the
+	 *    head of the pushable tasks list is enough.
+	 */
+	if (unlikely(is_migration_disabled(task)))
+		return false;
+	if (!cpumask_test_cpu(later->cpu, &task->cpus_mask))
+		return false;
+	if (task->dl.dl_throttled && (task_rq(task) != rq ||
+				      task_on_cpu(rq, task) ||
+				      !dl_task(task) ||
+				      !task_on_rq_queued(task)))
+		return false;
+	if (!task->dl.dl_throttled &&
+	    task != pick_next_pushable_dl_task(rq))
+		return false;
+	return true;
+}
+
 /* Locks the rq it finds */
 static struct rq *find_lock_later_rq(struct task_struct *task, struct rq *rq)
 {
@@ -2617,37 +2656,7 @@ static struct rq *find_lock_later_rq(struct task_struct *task, struct rq *rq)
 
 		/* Retry if something changed. */
 		if (double_lock_balance(rq, later_rq)) {
-			/*
-			 * double_lock_balance had to release rq->lock, in the
-			 * meantime, task may no longer be fit to be migrated.
-			 * Check the following to ensure that the task is
-			 * still suitable for migration:
-			 * 1. It is possible the task was scheduled,
-			 *    migrate_disabled was set and then got preempted,
-			 *    so we must check the task migration disable
-			 *    flag.
-			 * 2. The CPU picked is in the task's affinity.
-			 * 3. For throttled task (dl_task_offline_migration),
-			 *    check the following:
-			 *    - the task is not on the rq anymore (it was
-			 *      migrated)
-			 *    - the task is not on CPU anymore
-			 *    - the task is still a dl task
-			 *    - the task is not queued on the rq anymore
-			 * 4. For the non-throttled task (push_dl_task), the
-			 *    check to ensure that this task is still at the
-			 *    head of the pushable tasks list is enough.
-			 */
-			if (unlikely(is_migration_disabled(task) ||
-				     !cpumask_test_cpu(later_rq->cpu, &task->cpus_mask) ||
-				     (task->dl.dl_throttled &&
-				      (task_rq(task) != rq ||
-				       task_on_cpu(rq, task) ||
-				       !dl_task(task) ||
-				       !task_on_rq_queued(task))) ||
-				     (!task->dl.dl_throttled &&
-				      task != pick_next_pushable_dl_task(rq)))) {
-
+			if (unlikely(!dl_revalidate_rq_state(task, rq, later_rq))) {
 				double_unlock_balance(rq, later_rq);
 				later_rq = NULL;
 				break;
