@@ -1251,6 +1251,9 @@ struct task_struct {
 	struct mutex			*blocked_on;	/* lock we're blocked on */
 	struct task_struct		*blocked_donor;	/* task that is boosting this task */
 	raw_spinlock_t			blocked_lock;
+#ifdef CONFIG_SCHED_PROXY_EXEC
+	struct list_head		migration_node;
+#endif
 
 #ifdef CONFIG_DETECT_HUNG_TASK_BLOCKER
 	/*
