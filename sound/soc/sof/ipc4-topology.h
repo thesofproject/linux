@@ -521,6 +521,8 @@ struct sof_ipc4_base_module_cfg_ext {
  * @msg: IPC4 message struct containing header and data info
  * @base_config_ext_size: Size of the base config extension data in bytes
  * @init_config: Module init config type (SOF_IPC4_MODULE_INIT_CONFIG_TYPE_*)
+ * @init_ext_module_data: module_data for init_ext object
+ * @init_ext_module_size: size of init_ext_module_data
  */
 struct sof_ipc4_process {
 	struct sof_ipc4_base_module_cfg base_config;
@@ -532,6 +534,8 @@ struct sof_ipc4_process {
 	struct sof_ipc4_msg msg;
 	u32 base_config_ext_size;
 	u32 init_config;
+	void *init_ext_module_data;
+	size_t init_ext_module_size;
 };
 
 bool sof_ipc4_copier_is_single_bitdepth(struct snd_sof_dev *sdev,
