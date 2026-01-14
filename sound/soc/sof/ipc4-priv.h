@@ -81,6 +81,8 @@ struct snd_ipc4_nhlt {
  * @libraries_restored: The libraries have been retained during firmware boot
  * @nhlt_list: The NHLT tables from the BIOS and the topology manifest
  *
+ * @codec_info: Information about the available codecs in booted firmware. The
+ *		data is to be used by the code for compressed support.
  * @load_library: Callback function for platform dependent library loading
  * @pipeline_state_mutex: Mutex to protect pipeline triggers, ref counts, states and deletion
  */
@@ -96,6 +98,8 @@ struct sof_ipc4_fw_data {
 	bool fw_context_save;
 	bool libraries_restored;
 	struct list_head nhlt_list;
+
+	void *codec_info;
 
 	int (*load_library)(struct snd_sof_dev *sdev,
 			    struct sof_ipc4_fw_library *fw_lib, bool reload);
