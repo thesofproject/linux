@@ -409,7 +409,8 @@ void f2fs_printk(struct f2fs_sb_info *sbi, bool limit_rate,
 			printk("%c%cF2FS-fs: %pV\n",
 				KERN_SOH_ASCII, level, &vaf);
 
-	trace_android_vh_f2fs_printk(sbi->s_flag, &vaf, level, limit_rate);
+	if (sbi)
+		trace_android_vh_f2fs_printk(sbi->s_flag, &vaf, level, limit_rate);
 	va_end(args);
 }
 
