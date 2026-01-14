@@ -23,7 +23,8 @@ unsigned int iommu_pglvl_mask = IOMMU_PGT_4LEVEL | IOMMU_PGT_5LEVEL;
 /* GCMD oneshot bits where unsetting the bit doesn't have an effect */
 #define DMAR_GCMD_ONESHOT	(DMA_GCMD_SRTP | DMA_GCMD_SIRTP)
 /* Mask of bits the host is allowed to access directly (passed through to hardware) */
-#define DMAR_GCMD_DIRECT	(DMAR_GSTS_EN_BITS | DMA_GCMD_SRTP | DMA_GCMD_SIRTP)
+#define DMAR_GCMD_DIRECT	(DMA_GCMD_TE | DMA_GCMD_IRE | DMA_GCMD_CFI | DMA_GCMD_SRTP | \
+				 DMA_GCMD_SIRTP)
 /* Mask of bits supported by pKVM */
 #define DMAR_GCMD_SUPPORTED_BITS	(DMAR_GSTS_EN_BITS | DMA_GCMD_SRTP | DMA_GCMD_SIRTP)
 
@@ -109,6 +110,70 @@ static int handle_gcmd_direct(struct intel_iommu *iommu, u32 gcmd_bit, bool set)
 	return 0;
 }
 
+static int initialize_qi(struct intel_iommu *iommu)
+{
+	struct q_inval *qi = iommu->qi;
+	u64 val = __pkvm_pa(qi->desc);
+
+	/*
+	 * TODO: Write protect QI descriptor page once we have
+	 *       hypervisor take care of all QI logic.
+	 */
+
+	pkvm_spin_lock_init(&qi->q_lock);
+	qi->free_head = qi->free_tail = 0;
+	qi->free_cnt = QI_LENGTH;
+
+	/*
+	 * Set DW=1 and QS=1 in IQA_REG when Scalable Mode capability
+	 * is present.
+	 */
+	if (sm_supported(iommu))
+		val |= BIT_ULL(11) | BIT_ULL(0);
+
+	/* write zero to the tail reg */
+	writel(0, iommu->reg + DMAR_IQT_REG);
+	/* Set IQA */
+	writeq(val, iommu->reg + DMAR_IQA_REG);
+
+	return handle_gcmd_direct(iommu, DMA_GCMD_QIE, true);
+}
+
+static int handle_gcmd_qie(struct intel_iommu *iommu, bool enable)
+{
+	int ret = 0;
+
+	if (enable) {
+		if (iommu->qi || iommu->vgsts & DMA_GSTS_QIES) {
+			pkvm_err("iommu%d: QI already enabled\n", iommu->seq_id);
+			return -EBUSY;
+		} else if (!iommu->viqa) {
+			pkvm_err("iommu%d: QIE before setting IQA\n", iommu->seq_id);
+			return -EINVAL;
+		}
+
+		/*
+		 * Host IOMMU driver dynamically allocates iommu->qi, but pKVM has it
+		 * embedded. For easy re-use of host code, the embedded field is named
+		 * as iommu->_qi, and the pointer iommu->qi points to iommu->_qi.
+		 * Also, it serves as a flag to denote whether qi is
+		 * enabled(similar to how host driver does)
+		 */
+		iommu->qi = &iommu->_qi;
+		iommu->qi->desc = pkvm_host_gpa_to_virt(iommu->viqa & VTD_PAGE_MASK);
+		ret = initialize_qi(iommu);
+	} else {
+		if (!iommu->qi)
+			ret = handle_gcmd_direct(iommu, DMA_GCMD_QIE, false);
+		else
+			iommu->vgsts &= ~DMA_GSTS_QIES;
+	}
+
+	pkvm_dbg("iommu%d: Quueued Invalidation %s!\n", iommu->seq_id,
+		 enable ? "enabled" : "disabled");
+	return ret;
+}
+
 static int handle_global_cmd(struct intel_iommu *iommu, u32 val)
 {
 	u32 changed = (iommu->vgsts & DMAR_GSTS_EN_BITS) ^ val;
@@ -130,6 +195,9 @@ static int handle_global_cmd(struct intel_iommu *iommu, u32 val)
 
 	pkvm_dbg("iommu%d: handle gcmd val 0x%x gsts 0x%x changed 0x%x\n",
 		 iommu->seq_id, val, iommu->vgsts, changed);
+
+	if (changed & DMA_GCMD_QIE)
+		return handle_gcmd_qie(iommu, !!(val & changed));
 
 	/*
 	 * Check if the bits are allowed to be directly accessible by the host
@@ -166,6 +234,9 @@ int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val)
 	case DMAR_ECAP_REG:
 		*val = iommu->ecap;
 		break;
+	case DMAR_IQA_REG:
+		*val = iommu->viqa;
+		break;
 	default:
 		/* Not emulated MMIO can directly go to hardware */
 		ret = iommu_direct_mmio_read(iommu, phys, len, val);
@@ -197,6 +268,15 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 		break;
 	case DMAR_GCMD_REG:
 		ret = handle_global_cmd(iommu, val);
+		break;
+	case DMAR_IQA_REG:
+		if (iommu->viqa) {
+			pkvm_err("iommu%d: IQA set more than once!\n",
+				 iommu->seq_id);
+			ret = -EINVAL;
+		} else {
+			iommu->viqa = val;
+		}
 		break;
 	default:
 		/* Not emulated MMIO can directly go to hardware */
