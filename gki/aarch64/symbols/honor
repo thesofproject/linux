@@ -76,6 +76,8 @@
   __traceiter_android_vh_slab_alloc_node
   __tracepoint_android_vh_slab_free
   __traceiter_android_vh_slab_free
+  __traceiter_android_vh_cgroup_set_task
+  __tracepoint_android_vh_cgroup_set_task
   binder_alloc_copy_from_buffer
   lruvec_page_state
   arch_vma_name
