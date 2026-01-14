@@ -279,6 +279,7 @@ struct kvm_pinned_page {
 		struct list_head	list_node;
 	};
 	struct page		*_page;
+	struct file		*file;
 	u64			pfn;
 	u64			ipa;
 	u64			__subtree_last;
@@ -292,6 +293,8 @@ struct kvm_pinned_page
 *kvm_pinned_pages_iter_next(struct kvm_pinned_page *ppage, u64 start, u64 end);
 void kvm_pinned_pages_remove(struct kvm_pinned_page *ppage,
 			     struct rb_root_cached *root);
+
+void pkvm_release_ppage(struct kvm_pinned_page *ppage, bool dirty);
 
 typedef unsigned int pkvm_handle_t;
 
