@@ -75,6 +75,8 @@ struct sof_ipc4_fw_library {
  * @fw_context_save: Firmware supports full context save and restore
  * @libraries_restored: The libraries have been retained during firmware boot
  *
+ * @codec_info: Information about the available codecs in booted firmware. The
+ *		data is to be used by the code for compressed support.
  * @load_library: Callback function for platform dependent library loading
  * @pipeline_state_mutex: Mutex to protect pipeline triggers, ref counts, states and deletion
  */
@@ -90,6 +92,8 @@ struct sof_ipc4_fw_data {
 	u32 max_libs_count;
 	bool fw_context_save;
 	bool libraries_restored;
+
+	void *codec_info;
 
 	int (*load_library)(struct snd_sof_dev *sdev,
 			    struct sof_ipc4_fw_library *fw_lib, bool reload);
