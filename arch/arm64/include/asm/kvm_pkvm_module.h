@@ -292,6 +292,10 @@ struct pkvm_module_ops {
 				     int (*cb)(void *cookie, bool host_to_guest));
 	int (*iommu_register_pviommu_drv)(pkvm_handle_t drv_id);
 	int (*register_guest_trng_ops)(const struct pkvm_module_trng_ops *ops);
+	int (*guest_accept_module_prot_page)(u64 ipa, u64 nr_pages);
+	int (*register_guest_accept_module_owned_handler)(int (*cb)(u64 phys, u64 ipa, u64 size,
+								   pkvm_handle_t handle));
+
 	ANDROID_KABI_RESERVE(1);
 	ANDROID_KABI_RESERVE(2);
 	ANDROID_KABI_RESERVE(3);

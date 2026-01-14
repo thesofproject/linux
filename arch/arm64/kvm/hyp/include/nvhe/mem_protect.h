@@ -124,6 +124,8 @@ static __always_inline void __load_host_stage2(void)
 int __pkvm_host_use_dma(phys_addr_t phys_addr, size_t size);
 int __pkvm_host_unuse_dma(phys_addr_t phys_addr, size_t size);
 
+int __pkvm_accept_module_prot_page(u64 ipa, u64 nr_pages);
+
 #ifdef CONFIG_NVHE_EL2_DEBUG
 void pkvm_ownership_selftest(void *base);
 #else
