@@ -4707,6 +4707,7 @@ int try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 
 	wake_flags |= WF_TTWU;
 
+	trace_android_rvh_try_to_wake_up_begin(p, state, &wake_flags);
 	if (p == current) {
 		/*
 		 * We're waking current, this means 'p->on_rq' and 'task_cpu(p)
