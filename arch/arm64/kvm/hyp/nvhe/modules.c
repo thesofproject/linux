@@ -171,7 +171,7 @@ static int __register_host_smc_handler(bool (*cb)(struct user_pt_regs *))
 	return mod_handler_register(HOST_SMC_HANDLER, cb);
 }
 
-static int __register_guest_smc_handler(bool (*cb)(struct arm_smccc_1_2_regs *regs,
+static int __register_guest_smc_handler(enum pkvm_smc_handler_ret (*cb)(struct arm_smccc_1_2_regs *regs,
 						   struct arm_smccc_1_2_regs *res,
 						   pkvm_handle_t handle))
 {
@@ -204,19 +204,22 @@ bool module_handle_host_smc(struct user_pt_regs *regs)
 	return false;
 }
 
-bool module_handle_guest_smc(struct arm_smccc_1_2_regs *regs, struct arm_smccc_1_2_regs *res,
-			     pkvm_handle_t handle)
+enum pkvm_smc_handler_ret
+module_handle_guest_smc(struct arm_smccc_1_2_regs *regs, struct arm_smccc_1_2_regs *res,
+			pkvm_handle_t handle)
 {
-	bool (*cb)(struct arm_smccc_1_2_regs *regs, struct arm_smccc_1_2_regs *res,
+	enum pkvm_smc_handler_ret (*cb)(struct arm_smccc_1_2_regs *regs, struct arm_smccc_1_2_regs *res,
 		   pkvm_handle_t handle);
+	enum pkvm_smc_handler_ret ret;
 	int i;
 
 	for_each_mod_handler(GUEST_SMC_HANDLER, cb, i) {
-		if (cb(regs, res, handle))
-			return true;
+		ret = cb(regs, res, handle);
+		if (ret != GUEST_SMC_NOT_HANDLED)
+			return ret;
 	}
 
-	return false;
+	return GUEST_SMC_NOT_HANDLED;
 }
 
 static int __hyp_smp_processor_id(void)
