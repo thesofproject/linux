@@ -331519,6 +331519,15 @@ function {
   parameter_id: 0x38d23361
 }
 function {
+  id: 0x9a357e4f
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x6720d32f
+  parameter_id: 0x18a16691
+  parameter_id: 0x1d19a9d5
+  parameter_id: 0x6d7f5ff6
+}
+function {
   id: 0x9a35acc8
   return_type_id: 0x6720d32f
   parameter_id: 0x1f97e1e4
@@ -351054,6 +351063,15 @@ elf_symbol {
   full_name: "__traceiter_android_vh_cgroup_attach"
 }
 elf_symbol {
+  id: 0x33c527ab
+  name: "__traceiter_android_vh_cgroup_set_task"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xa5c87177
+  type_id: 0x9a357e4f
+  full_name: "__traceiter_android_vh_cgroup_set_task"
+}
+elf_symbol {
   id: 0x6aac0cf8
   name: "__traceiter_android_vh_check_folio_look_around_ref"
   is_defined: true
@@ -354400,6 +354418,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_vh_cgroup_attach"
+}
+elf_symbol {
+  id: 0x6f146fe1
+  name: "__tracepoint_android_vh_cgroup_set_task"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_vh_cgroup_set_task"
 }
 elf_symbol {
   id: 0xca5cbc9a
@@ -404772,6 +404799,7 @@ interface {
   symbol_id: 0x61c82fb5
   symbol_id: 0xb083b981
   symbol_id: 0xa9225bf8
+  symbol_id: 0x33c527ab
   symbol_id: 0x6aac0cf8
   symbol_id: 0x23a3e1fa
   symbol_id: 0xeebf3d23
@@ -405144,6 +405172,7 @@ interface {
   symbol_id: 0x75b174bb
   symbol_id: 0xacf4923f
   symbol_id: 0xd3845a12
+  symbol_id: 0x6f146fe1
   symbol_id: 0xca5cbc9a
   symbol_id: 0xb436fd6c
   symbol_id: 0x22653fb1
