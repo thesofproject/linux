@@ -8,6 +8,8 @@
   __tracepoint_android_vh_sk_alloc
   __traceiter_android_vh_sk_clone_lock
   __tracepoint_android_vh_sk_clone_lock
+  __traceiter_android_vh_tcp_fastsyn
+  __tracepoint_android_vh_tcp_fastsyn
   __traceiter_android_vh_tcp_rcv_established_fast_path
   __tracepoint_android_vh_tcp_rcv_established_fast_path
   __traceiter_android_vh_tcp_rcv_established_slow_path
@@ -22,6 +24,14 @@
   __tracepoint_android_vh_tcp_rcv_rtt_update
   __traceiter_android_vh_tcp_rcv_synack
   __tracepoint_android_vh_tcp_rcv_synack
+  __traceiter_android_vh_tcp_select_window
+  __tracepoint_android_vh_tcp_select_window
+  __traceiter_android_vh_tcp_sock_error
+  __tracepoint_android_vh_tcp_sock_error
+  __traceiter_android_vh_tcp_state_change
+  __tracepoint_android_vh_tcp_state_change
+  __traceiter_android_vh_tcp_update_rtt
+  __tracepoint_android_vh_tcp_update_rtt
   __traceiter_android_vh_tcp_write_timeout_estab_retrans
   __tracepoint_android_vh_tcp_write_timeout_estab_retrans
   __traceiter_android_vh_udp_unicast_rcv_skb
