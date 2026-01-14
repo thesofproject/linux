@@ -1023,6 +1023,10 @@ static void iommu_set_root_entry(struct intel_iommu *iommu)
 
 	raw_spin_unlock_irqrestore(&iommu->register_lock, flag);
 
+	/* pKVM hypervisor takes care of the invalidation logic */
+	if (pkvm_enabled())
+		return;
+
 	/*
 	 * Hardware invalidates all DMA remapping hardware translation
 	 * caches as part of SRTP flow.
