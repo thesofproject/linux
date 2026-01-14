@@ -1,5 +1,7 @@
   netdev_get_name
   tcp_send_active_reset
+  __traceiter_android_vh_inet_create
+  __tracepoint_android_vh_inet_create
   __traceiter_android_vh_inet_csk_clone_lock
   __tracepoint_android_vh_inet_csk_clone_lock
   __tracepoint_android_vh_security_audit_log_setid
@@ -8,6 +10,8 @@
   __tracepoint_android_vh_sk_alloc
   __traceiter_android_vh_sk_clone_lock
   __tracepoint_android_vh_sk_clone_lock
+  __traceiter_android_vh_sock_create
+  __tracepoint_android_vh_sock_create
   __traceiter_android_vh_tcp_fastsyn
   __tracepoint_android_vh_tcp_fastsyn
   __traceiter_android_vh_tcp_rcv_established_fast_path
@@ -42,6 +46,8 @@
   __tracepoint_android_vh_udp_v4_connect
   __traceiter_android_vh_udp_v6_connect
   __tracepoint_android_vh_udp_v6_connect
+  __traceiter_android_vh_uplink_send_msg
+  __tracepoint_android_vh_uplink_send_msg
   __tracepoint_android_vh_set_tsk_need_resched_lazy
   __traceiter_android_vh_set_tsk_need_resched_lazy
   __tracepoint_android_vh_task_cmdline_prio_inherit
