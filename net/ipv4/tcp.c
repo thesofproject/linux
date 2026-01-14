@@ -1181,6 +1181,8 @@ int tcp_sendmsg_locked(struct sock *sk, struct msghdr *msg, size_t size)
 		goto out_err;
 	}
 
+	trace_android_vh_uplink_send_msg(sk);
+
 	/* This should be in poll */
 	sk_clear_bit(SOCKWQ_ASYNC_NOSPACE, sk);
 
