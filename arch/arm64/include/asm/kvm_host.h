@@ -278,7 +278,8 @@ struct kvm_pinned_page {
 		struct rb_node		node;
 		struct list_head	list_node;
 	};
-	struct page		*page;
+	struct page		*_page;
+	u64			pfn;
 	u64			ipa;
 	u64			__subtree_last;
 	u8			order;
