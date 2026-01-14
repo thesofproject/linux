@@ -261,6 +261,9 @@ DECLARE_HOOK(android_vh_kmalloc_slab,
 DECLARE_HOOK(android_vh_customize_alloc_gfp,
 	TP_PROTO(gfp_t *alloc_gfp, unsigned int order),
 	TP_ARGS(alloc_gfp, order));
+DECLARE_HOOK(android_vh_init_adjust_zone_wmark,
+	TP_PROTO(struct zone *zone, u64 interval),
+	TP_ARGS(zone, interval));
 #endif /* _TRACE_HOOK_MM_H */
 
 /* This part must be outside protection */
