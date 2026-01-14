@@ -913,6 +913,7 @@ void pkvm_host_reclaim_page(struct kvm *kvm, phys_addr_t ipa)
 	if (ppage) {
 		WARN_ON(ppage->order);
 		kvm_pinned_pages_remove(ppage, &kvm->arch.pkvm.pinned_pages);
+		ppage->slot->arch.pkvm_pf_count--;
 	}
 	write_unlock(&kvm->mmu_lock);
 
@@ -973,6 +974,7 @@ retry:
 		pkvm_release_ppage(ppage, true);
 		account_locked_vm(mm, 1 << ppage->order, false);
 		kvm_pinned_pages_remove(ppage, &kvm->arch.pkvm.pinned_pages);
+		ppage->slot->arch.pkvm_pf_count--;
 		kfree(ppage);
 		ppage = next;
 	}
