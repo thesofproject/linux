@@ -1408,7 +1408,7 @@ static void acc_free(struct usb_function *f)
 	put_acc_dev(dev);
 }
 
-bool __acc_req_match(const struct usb_ctrlrequest *ctrl)
+static bool __acc_req_match(const struct usb_ctrlrequest *ctrl)
 {
 	struct acc_dev *dev = get_acc_dev();
 	u8 bRequestType = ctrl->bRequestType;
