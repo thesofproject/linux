@@ -69,21 +69,21 @@ long gunyah_dev_vm_mgr_ioctl(struct gunyah_rm *rm, unsigned int cmd,
  * @mm_s: Userspace tied to this vm
  * @addrspace_ticket: Resource ticket to the capability for guest VM's
  *                    address space
- * @host_private_extent_ticket: Resource ticket to the capability for our
+ * @host_protected_extent_ticket: Resource ticket to the capability for our
  *                              memory extent from which to lend private
  *                              memory to the guest
- * @host_shared_extent_ticket: Resource ticket to the capaiblity for our
+ * @host_unprotected_extent_ticket: Resource ticket to the capaiblity for our
  *                             memory extent from which to share memory
  *                             with the guest. Distinction with
- *                             @host_private_extent_ticket needed for
+ *                             @host_protected_extent_ticket needed for
  *                             current Qualcomm platforms; on non-Qualcomm
  *                             platforms, this is the same capability ID
- * @guest_private_extent_ticket: Resource ticket to the capaiblity for
- *                               the guest's memory extent to lend private
- *                               memory to
- * @guest_shared_extent_ticket: Resource ticket to the capability for
+ * @guest_paged_extent_ticket: Resource ticket to the capaiblity for
+ *                               the guest's memory extent to lend main
+ *                               memory to.
+ * @guest_protected_shared_extent_ticket: Resource ticket to the capability for
  *                              the memory extent that represents
- *                              memory shared with the guest.
+ *                              memory shared with the protected guest.
  * @mmio_handler_root: RB tree of MMIO handlers.
  *                     Entries are &struct gunyah_vm_io_handler
  * @mmio_handler_lock: Serialization of traversing @mmio_handler_root
@@ -121,8 +121,8 @@ struct gunyah_vm {
 	struct rw_semaphore bindings_lock;
 	struct mm_struct *mm_s;
 	struct gunyah_vm_resource_ticket addrspace_ticket,
-		host_private_extent_ticket, host_shared_extent_ticket,
-		guest_private_extent_ticket, guest_shared_extent_ticket;
+		host_protected_extent_ticket, host_unprotected_extent_ticket,
+		guest_paged_extent_ticket, guest_protected_shared_extent_ticket;
 	struct rb_root mmio_handler_root;
 	struct rw_semaphore mmio_handler_lock;
 

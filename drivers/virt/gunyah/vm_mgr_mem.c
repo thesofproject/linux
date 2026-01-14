@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2023-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #define pr_fmt(fmt) "gunyah_vm_mgr: " fmt
@@ -155,11 +155,11 @@ int gunyah_vm_provide_folio(struct gunyah_vm *ghvm, struct folio *folio,
 
 	/* clang-format off */
 	if (share) {
-		guest_extent = __first_resource(&ghvm->guest_shared_extent_ticket);
-		host_extent = __first_resource(&ghvm->host_shared_extent_ticket);
+		guest_extent = __first_resource(&ghvm->guest_protected_shared_extent_ticket);
+		host_extent = __first_resource(&ghvm->host_unprotected_extent_ticket);
 	} else {
-		guest_extent = __first_resource(&ghvm->guest_private_extent_ticket);
-		host_extent = __first_resource(&ghvm->host_private_extent_ticket);
+		guest_extent = __first_resource(&ghvm->guest_paged_extent_ticket);
+		host_extent = __first_resource(&ghvm->host_protected_extent_ticket);
 	}
 	/* clang-format on */
 	addrspace = __first_resource(&ghvm->addrspace_ticket);
@@ -274,12 +274,12 @@ static int __gunyah_vm_reclaim_folio_locked(struct gunyah_vm *ghvm, void *entry,
 
 	/* clang-format off */
 	if (share) {
-		guest_extent = __first_resource(&ghvm->guest_shared_extent_ticket);
-		host_extent = __first_resource(&ghvm->host_shared_extent_ticket);
+		guest_extent = __first_resource(&ghvm->guest_protected_shared_extent_ticket);
+		host_extent = __first_resource(&ghvm->host_unprotected_extent_ticket);
 		map_flags |= BIT(GUNYAH_ADDRSPACE_MAP_FLAG_VMMIO);
 	} else {
-		guest_extent = __first_resource(&ghvm->guest_private_extent_ticket);
-		host_extent = __first_resource(&ghvm->host_private_extent_ticket);
+		guest_extent = __first_resource(&ghvm->guest_paged_extent_ticket);
+		host_extent = __first_resource(&ghvm->host_protected_extent_ticket);
 		map_flags |= BIT(GUNYAH_ADDRSPACE_MAP_FLAG_PRIVATE);
 	}
 	/* clang-format on */
