@@ -221334,7 +221334,7 @@ elf_symbol {
   name: "debugfs_change_name"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x28cf2173
+  crc: 0x43b0b773
   type_id: 0x99d0bb4d
   full_name: "debugfs_change_name"
 }
@@ -221370,7 +221370,7 @@ elf_symbol {
   name: "debugfs_create_dir"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x765fc436
+  crc: 0x2913c78d
   type_id: 0x83bdcb7d
   full_name: "debugfs_create_dir"
 }
@@ -221379,7 +221379,7 @@ elf_symbol {
   name: "debugfs_create_file_full"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x6b3d9871
+  crc: 0x85ef20eb
   type_id: 0x83b87e9d
   full_name: "debugfs_create_file_full"
 }
@@ -221388,7 +221388,7 @@ elf_symbol {
   name: "debugfs_create_file_unsafe"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x3d1332b2
+  crc: 0x4d706e86
   type_id: 0x83b87db5
   full_name: "debugfs_create_file_unsafe"
 }
@@ -221415,7 +221415,7 @@ elf_symbol {
   name: "debugfs_lookup_and_remove"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xa84f8adf
+  crc: 0x61052687
   type_id: 0x1f5469d6
   full_name: "debugfs_lookup_and_remove"
 }
@@ -221424,7 +221424,7 @@ elf_symbol {
   name: "debugfs_remove"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x65bf1790
+  crc: 0x5733b86a
   type_id: 0x141901a7
   full_name: "debugfs_remove"
 }
@@ -223765,7 +223765,7 @@ elf_symbol {
   name: "fput"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xa6e0e4e9
+  crc: 0x6af94ba2
   type_id: 0x16a2cb2b
   full_name: "fput"
 }
@@ -227218,7 +227218,7 @@ elf_symbol {
   name: "simple_attr_open"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xf858387d
+  crc: 0x88816be8
   type_id: 0x9b0987fe
   full_name: "simple_attr_open"
 }
@@ -227227,7 +227227,7 @@ elf_symbol {
   name: "simple_attr_release"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x943f5fc2
+  crc: 0x593773fc
   type_id: 0x9b022eae
   full_name: "simple_attr_release"
 }
@@ -227236,7 +227236,7 @@ elf_symbol {
   name: "simple_open"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x943f5fc2
+  crc: 0x593773fc
   type_id: 0x9b022eae
   full_name: "simple_open"
 }
