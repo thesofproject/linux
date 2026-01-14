@@ -60,6 +60,7 @@
 #include <trace/hooks/bug.h>
 #include <trace/hooks/regmap.h>
 #include <trace/hooks/suspend.h>
+#include <trace/hooks/fsnotify.h>
 
 /*
  * Export tracepoints that act as a bare tracehook (ie: have no trace event
@@ -328,3 +329,4 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_resume_end);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_early_resume_begin);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_vmscan_kswapd_done);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_customize_alloc_gfp);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_fsnotify_open);
