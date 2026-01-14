@@ -708,6 +708,7 @@ int pkvm_enable_smc_forwarding(struct file *kvm_file)
 
 	return 0;
 }
+EXPORT_SYMBOL(pkvm_enable_smc_forwarding);
 
 static int __init pkvm_firmware_rmem_err(struct reserved_mem *rmem,
 					 const char *reason)
