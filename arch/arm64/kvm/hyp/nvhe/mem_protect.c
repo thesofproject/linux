@@ -1464,27 +1464,24 @@ unlock:
 	return ret;
 }
 
-int __pkvm_host_donate_hyp(u64 pfn, u64 nr_pages)
+static int pkvm_host_donate_hyp(u64 pfn, u64 nr_pages, enum kvm_pgtable_prot prot,
+				enum host_check_page_state_flags flags)
 {
-	return ___pkvm_host_donate_hyp(pfn, nr_pages, false);
-}
-
-static int __pkvm_host_donate_hyp_locked(u64 pfn, u64 nr_pages, enum kvm_pgtable_prot prot)
-{
-	u64 size, phys = hyp_pfn_to_phys(pfn);
-	void *virt = __hyp_va(phys);
+	u64 size, phys;
+	void *virt;
 	int ret;
-
-	if (check_shl_overflow(nr_pages, PAGE_SHIFT, &size))
-		return -EINVAL;
 
 	if (!pfn_range_is_valid(pfn, nr_pages))
 		return -EINVAL;
 
-	hyp_assert_lock_held(&host_mmu.lock);
+	phys = hyp_pfn_to_phys(pfn);
+	size = nr_pages * PAGE_SIZE;
+	virt = __hyp_va(phys);
+
+	host_lock_component();
 	hyp_lock_component();
 
-	ret = ___host_check_page_state_range(phys, size, PKVM_PAGE_OWNED, HOST_CHECK_NULL_REFCNT);
+	ret = ___host_check_page_state_range(phys, size, PKVM_PAGE_OWNED, flags);
 	if (ret)
 		goto unlock;
 	ret = __hyp_check_page_state_range(phys, size, PKVM_NOPAGE);
@@ -1508,32 +1505,32 @@ static int __pkvm_host_donate_hyp_locked(u64 pfn, u64 nr_pages, enum kvm_pgtable
 
 unlock:
 	hyp_unlock_component();
+	host_unlock_component();
 
 	return ret;
 }
 
-/* The swiss knife of memory donation. */
+/* The Swiss Army knife of memory donation */
 int ___pkvm_host_donate_hyp_prot(u64 pfn, u64 nr_pages,
 				 bool accept_mmio, enum kvm_pgtable_prot prot)
 {
-	phys_addr_t start = hyp_pfn_to_phys(pfn);
-	phys_addr_t end = start + (nr_pages << PAGE_SHIFT);
-	int ret;
+	enum host_check_page_state_flags flags = HOST_CHECK_NULL_REFCNT;
 
-	if (!accept_mmio && !range_is_memory(start, end))
-		return -EPERM;
+	if (!accept_mmio)
+		flags |= HOST_CHECK_IS_MEMORY;
 
-	host_lock_component();
-	ret = __pkvm_host_donate_hyp_locked(pfn, nr_pages, prot);
-	host_unlock_component();
-
-	return ret;
+	return pkvm_host_donate_hyp(pfn, nr_pages, prot, flags);
 }
 
 int ___pkvm_host_donate_hyp(u64 pfn, u64 nr_pages, bool accept_mmio)
 {
 	return ___pkvm_host_donate_hyp_prot(pfn, nr_pages, accept_mmio,
 					    default_hyp_prot(hyp_pfn_to_phys(pfn)));
+}
+
+int __pkvm_host_donate_hyp(u64 pfn, u64 nr_pages)
+{
+	return ___pkvm_host_donate_hyp(pfn, nr_pages, false);
 }
 
 int __pkvm_host_donate_sglist_hyp(struct pkvm_sglist_page *sglist, size_t nr_pages)
