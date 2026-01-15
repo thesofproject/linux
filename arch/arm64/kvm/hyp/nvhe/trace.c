@@ -373,12 +373,12 @@ static int rb_cpu_reset(struct hyp_rb_per_cpu *cpu_buffer)
 	return 0;
 }
 
-static void rb_cpu_teardown(struct hyp_rb_per_cpu *cpu_buffer)
+static int rb_cpu_teardown(struct hyp_rb_per_cpu *cpu_buffer)
 {
 	int i;
 
 	if (!rb_cpu_loaded(cpu_buffer))
-		return;
+		return 0;
 
 	rb_cpu_disable_writing(cpu_buffer);
 
@@ -397,6 +397,8 @@ static void rb_cpu_teardown(struct hyp_rb_per_cpu *cpu_buffer)
 
 	hyp_free(cpu_buffer->bpages);
 	cpu_buffer->bpages = 0;
+
+	return 0;
 }
 
 static bool rb_cpu_fits_desc(struct rb_page_desc *pdesc,
@@ -477,7 +479,7 @@ static int rb_cpu_init(struct rb_page_desc *pdesc, struct hyp_rb_per_cpu *cpu_bu
 	return 0;
 
 err:
-	rb_cpu_teardown(cpu_buffer);
+	WARN_ON(rb_cpu_teardown(cpu_buffer));
 
 	return ret;
 }
@@ -518,24 +520,32 @@ int __pkvm_swap_reader_tracing(unsigned int cpu)
 	return ret;
 }
 
-static void __pkvm_teardown_tracing_locked(void)
+static int __pkvm_teardown_tracing_locked(void)
 {
-	int cpu;
+	int cpu, ret;
 
 	hyp_assert_lock_held(&trace_rb_lock);
 
 	for (cpu = 0; cpu < hyp_nr_cpus; cpu++) {
 		struct hyp_rb_per_cpu *cpu_buffer = per_cpu_ptr(&trace_rb, cpu);
 
-		rb_cpu_teardown(cpu_buffer);
+		ret = rb_cpu_teardown(cpu_buffer);
+		if (ret)
+			return ret;
 	}
+
+	return 0;
 }
 
-void __pkvm_teardown_tracing(void)
+int __pkvm_teardown_tracing(void)
 {
+	int ret;
+
 	hyp_spin_lock(&trace_rb_lock);
-	__pkvm_teardown_tracing_locked();
+	ret = __pkvm_teardown_tracing_locked();
 	hyp_spin_unlock(&trace_rb_lock);
+
+	return ret;
 }
 
 int __pkvm_load_tracing(unsigned long desc_hva, size_t desc_size)
@@ -575,7 +585,7 @@ int __pkvm_load_tracing(unsigned long desc_hva, size_t desc_size)
 	}
 
 	if (ret)
-		__pkvm_teardown_tracing_locked();
+		WARN_ON(__pkvm_teardown_tracing_locked());
 
 	hyp_spin_unlock(&trace_rb_lock);
 

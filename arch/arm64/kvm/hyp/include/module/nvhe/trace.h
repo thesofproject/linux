@@ -33,7 +33,7 @@ int register_hyp_mod_events(void *event_ids, size_t nr_events,
 
 void __pkvm_update_clock_tracing(u32 mult, u32 shift, u64 epoch_ns, u64 epoch_cyc);
 int __pkvm_load_tracing(unsigned long desc_va, size_t desc_size);
-void __pkvm_teardown_tracing(void);
+int __pkvm_teardown_tracing(void);
 int __pkvm_enable_tracing(bool enable);
 int __pkvm_reset_tracing(unsigned int cpu);
 int __pkvm_swap_reader_tracing(unsigned int cpu);
