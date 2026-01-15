@@ -1539,9 +1539,7 @@ static void handle___pkvm_load_tracing(struct kvm_cpu_context *host_ctxt)
 
 static void handle___pkvm_teardown_tracing(struct kvm_cpu_context *host_ctxt)
 {
-	__pkvm_teardown_tracing();
-
-	cpu_reg(host_ctxt, 1) = 0;
+	cpu_reg(host_ctxt, 1) = __pkvm_teardown_tracing();
 }
 
 static void handle___pkvm_enable_tracing(struct kvm_cpu_context *host_ctxt)
