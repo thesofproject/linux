@@ -5,5 +5,6 @@
 ccflags-$(CONFIG_PKVM_INTEL) += -I $(srctree)/drivers/iommu/intel
 
 pkvm-iommu = ../../../../drivers/iommu/intel/pkvm
+intel-iommu = ../../../../drivers/iommu/intel
 
-pkvm-hyp-$(CONFIG_PKVM_INTEL) += $(pkvm-iommu)/iommu.o
+pkvm-hyp-$(CONFIG_PKVM_INTEL) += $(pkvm-iommu)/iommu.o $(intel-iommu)/iommu.o
