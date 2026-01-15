@@ -142,6 +142,7 @@ struct gunyah_vm {
 	struct list_head resource_tickets;
 
 	struct device *parent;
+	bool is_protected;
 	enum gunyah_rm_vm_auth_mechanism auth;
 	void *auth_vm_mgr_data;
 	struct gunyah_auth_vm_mgr_ops *auth_vm_mgr_ops;
@@ -242,6 +243,7 @@ int gunyah_reclaim_parcels(struct gunyah_vm *ghvm,
 int gunyah_demand_page(struct gunyah_vm *ghvm, u64 gpa, bool write);
 int gunyah_setup_demand_paging(struct gunyah_vm *ghvm, u64 start_gfn,
 				u64 end_gfn);
+int gunyah_vm_set_protected(struct gunyah_vm *ghvm);
 #ifdef CONFIG_DMA_CMA
 int gunyah_cma_mem_init(void);
 void gunyah_cma_mem_exit(void);
