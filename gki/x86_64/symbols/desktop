@@ -29,6 +29,7 @@
   acpi_dev_remove_driver_gpios
   acpi_dev_remove_notify_handler
   acpi_dev_state_d0
+  acpi_dev_uid_to_integer
   acpi_disabled
   acpi_ec_mark_gpe_for_wake
   acpi_evaluate_dsm
@@ -43,6 +44,7 @@
   acpi_gbl_FADT
   acpi_get_devices
   acpi_get_handle
+  acpi_get_local_address
   acpi_get_local_u64_address
   acpi_get_name
   acpi_get_object_info
@@ -328,6 +330,7 @@
   device_bind_driver
   device_create
   device_create_bin_file
+  device_create_managed_software_node
   device_del
   device_destroy
   device_for_each_child
@@ -340,6 +343,7 @@
   device_link_remove
   device_match_name
   device_match_of_node
+  device_property_match_string
   device_property_present
   device_property_read_bool
   device_property_read_string
@@ -364,6 +368,7 @@
   devm_alloc_etherdev_mqs
   devm_backlight_device_register
   devm_blk_crypto_profile_init
+  devm_clk_get
   devm_clk_get_optional
   devm_clk_get_optional_enabled
   devm_clk_get_optional_enabled_with_rate
@@ -402,6 +407,7 @@
   devm_pinctrl_get
   devm_pinctrl_put
   devm_pinctrl_register
+  devm_platform_get_and_ioremap_resource
   devm_platform_ioremap_resource
   devm_pm_runtime_enable
   devm_pm_set_wake_irq
@@ -417,7 +423,9 @@
   devm_remove_action_nowarn
   __devm_request_region
   devm_request_threaded_irq
+  __devm_spi_alloc_controller
   devm_spi_mem_dirmap_create
+  devm_spi_register_controller
   __devm_v4l2_sensor_clk_get
   _dev_notice
   dev_open
@@ -477,6 +485,9 @@
   dma_pool_create_node
   dma_pool_destroy
   dma_pool_free
+  dma_release_channel
+  dma_request_chan
+  __dma_request_channel
   dma_resv_add_fence
   dma_resv_get_singleton
   dma_resv_init
@@ -911,6 +922,7 @@
   fwnode_get_child_node_count
   fwnode_get_name
   fwnode_get_named_child_node
+  fwnode_get_next_child_node
   fwnode_graph_get_endpoint_by_id
   fwnode_graph_get_next_endpoint
   fwnode_handle_get
@@ -967,6 +979,7 @@
   get_random_u16
   get_random_u32
   get_random_u8
+  __get_user_1
   __get_user_4
   __get_user_8
   get_zeroed_page_noprof
@@ -983,8 +996,11 @@
   gpiochip_line_is_irq
   gpiod_add_lookup_table
   gpiod_get
+  gpiod_get_array_optional
   gpiod_get_optional
+  gpiod_get_value_cansleep
   gpiod_put
+  gpiod_put_array
   gpiod_remove_lookup_table
   gpiod_set_raw_value_cansleep
   gpiod_set_value
@@ -1361,6 +1377,7 @@
   logfc
   lookup_bdev
   lookup_user_key
+  loops_per_jiffy
   lpit_read_residency_count_address
   macsec_pn_wrapped
   match_string
@@ -2150,10 +2167,15 @@
   sock_unregister
   sock_wake_async
   softnet_data
+  software_node_register
+  software_node_unregister
   sort
   sort_r
   spi_bus_lock
   spi_bus_unlock
+  spi_controller_resume
+  spi_controller_suspend
+  spi_finalize_current_transfer
   spi_get_device_id
   spi_mem_adjust_op_size
   spi_mem_dirmap_read
@@ -2163,10 +2185,14 @@
   spi_mem_exec_op
   spi_mem_get_name
   spi_mem_supports_op
+  spi_new_device
+  spi_register_controller
   __spi_register_driver
   spi_setup
   spi_sync
   spi_sync_locked
+  spi_target_abort
+  spi_unregister_controller
   split_page
   sprintf
   sscanf
@@ -2192,6 +2218,7 @@
   strspn
   __sw_hweight32
   __sw_hweight64
+  swnode_gpio_undefined
   synchronize_irq
   synchronize_net
   synchronize_rcu
