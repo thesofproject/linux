@@ -21,6 +21,7 @@
   acpi_dev_present
   acpi_dev_remove_driver_gpios
   acpi_dev_remove_notify_handler
+  acpi_dev_state_d0
   acpi_disabled
   acpi_evaluate_dsm
   acpi_evaluate_integer
@@ -67,6 +68,7 @@
   add_wait_queue
   allocate_resource
   alloc_chrdev_region
+  alloc_iova
   __alloc_pages_noprof
   __alloc_skb
   alloc_workqueue_noprof
@@ -78,6 +80,8 @@
   autoremove_wake_function
   __auxiliary_device_add
   auxiliary_device_init
+  __auxiliary_driver_register
+  auxiliary_driver_unregister
   backlight_device_get_by_name
   backlight_device_register
   backlight_device_unregister
@@ -129,10 +133,18 @@
   cdev_device_add
   cdev_device_del
   cdev_init
+  cec_allocate_adapter
+  cec_delete_adapter
   cec_fill_conn_info_from_drm
+  cec_notifier_cec_adap_register
+  cec_notifier_cec_adap_unregister
   cec_notifier_conn_register
   cec_notifier_conn_unregister
   cec_notifier_set_phys_addr
+  cec_received_msg_ts
+  cec_register_adapter
+  cec_transmit_attempt_done_ts
+  cec_unregister_adapter
   __check_object_size
   check_signature
   class_find_device
@@ -213,6 +225,7 @@
   debugfs_lookup
   debugfs_lookup_and_remove
   debugfs_remove
+  __default_kernel_pte_mask
   default_llseek
   delayed_work_timer_fn
   destroy_workqueue
@@ -227,6 +240,7 @@
   dev_get_regmap
   device_add
   device_create
+  device_create_bin_file
   device_del
   device_destroy
   device_for_each_child
@@ -237,6 +251,7 @@
   device_initialize
   device_link_add
   device_link_remove
+  device_match_name
   device_match_of_node
   device_property_present
   device_property_read_bool
@@ -244,6 +259,7 @@
   device_property_read_u32_array
   device_property_read_u8_array
   device_register
+  device_remove_bin_file
   device_set_node
   device_set_wakeup_capable
   device_unregister
@@ -275,6 +291,7 @@
   devm_krealloc
   devm_led_classdev_register_ext
   devm_memremap
+  devm_nvmem_register
   devm_pinctrl_get
   devm_pinctrl_put
   devm_platform_ioremap_resource
@@ -283,12 +300,15 @@
   devm_regulator_bulk_get
   devm_regulator_bulk_get_enable
   devm_regulator_get
+  devm_regulator_get_optional
   devm_release_action
   devm_remove_action_nowarn
   devm_request_threaded_irq
+  __devm_v4l2_sensor_clk_get
   _dev_notice
   dev_pm_clear_wake_irq
   dev_pm_domain_attach
+  dev_pm_domain_set
   dev_pm_set_dedicated_wake_irq
   _dev_printk
   devres_add
@@ -348,6 +368,7 @@
   dmi_check_system
   dmi_first_match
   dmi_get_system_info
+  dmi_match
   dmi_memdev_handle
   dmi_memdev_size
   dmi_memdev_type
@@ -688,6 +709,7 @@
   fasync_helper
   _find_first_bit
   _find_first_zero_bit
+  find_iova
   _find_last_bit
   _find_next_bit
   _find_next_or_bit
@@ -700,12 +722,15 @@
   __flush_workqueue
   __folio_put
   __fortify_panic
+  __free_iova
   free_irq
   __free_pages
   free_pages
   freezer_active
   freezing_slow_path
   fwnode_create_software_node
+  fwnode_graph_get_endpoint_by_id
+  fwnode_graph_get_next_endpoint
   fwnode_handle_get
   fwnode_irq_get_byname
   fwnode_property_match_property_string
@@ -725,6 +750,7 @@
   get_random_u32
   __get_user_4
   __get_user_8
+  get_zeroed_page_noprof
   gpiod_add_lookup_table
   gpiod_get_optional
   gpiod_put
@@ -829,6 +855,7 @@
   i2c_smbus_read_i2c_block_data
   i2c_smbus_write_byte_data
   i2c_smbus_write_i2c_block_data
+  i2c_smbus_write_word_data
   i2c_smbus_xfer
   __i2c_transfer
   i2c_transfer
@@ -874,6 +901,7 @@
   iio_trigger_register
   iio_trigger_unregister
   iio_trigger_using_own
+  init_iova_domain
   __init_rwsem
   __init_swait_queue_head
   init_wait_entry
@@ -918,6 +946,8 @@
   ioread8_rep
   ioremap
   iounmap
+  iova_cache_get
+  iova_cache_put
   iov_iter_npages
   iov_iter_revert
   iowrite32
@@ -1004,6 +1034,17 @@
   lock_sock_nested
   lookup_user_key
   match_string
+  media_create_pad_link
+  media_device_cleanup
+  media_device_init
+  media_device_pci_init
+  __media_device_register
+  media_device_unregister
+  media_entity_pads_init
+  media_entity_pipeline
+  media_entity_remote_pad_unique
+  media_pad_remote_pad_first
+  media_pad_remote_pad_unique
   memchr_inv
   memcpy
   memcpy_fromio
@@ -1097,8 +1138,10 @@
   pci_dev_present
   pci_dev_put
   pci_disable_device
+  pci_disable_msi
   pci_disable_sriov
   pci_enable_device
+  pci_enable_msi
   pci_enable_sriov
   pci_find_next_ext_capability
   pci_get_class
@@ -1168,6 +1211,8 @@
   __pm_runtime_disable
   pm_runtime_enable
   pm_runtime_forbid
+  pm_runtime_force_resume
+  pm_runtime_force_suspend
   pm_runtime_get_if_active
   pm_runtime_get_if_in_use
   __pm_runtime_idle
@@ -1201,6 +1246,7 @@
   proto_register
   proto_unregister
   put_device
+  put_iova_domain
   __put_task_struct
   __put_task_struct_rcu_cb
   __put_user_1
@@ -1308,6 +1354,8 @@
   sg_init_table
   sgl_alloc
   sgl_free
+  __sg_page_iter_dma_next
+  __sg_page_iter_start
   shrinker_alloc
   shrinker_free
   shrinker_register
@@ -1364,6 +1412,7 @@
   __spi_register_driver
   spi_sync
   spi_sync_locked
+  split_page
   sprintf
   sscanf
   __stack_chk_fail
@@ -1534,22 +1583,112 @@
   usleep_range_state
   utf8_data_table
   uuid_is_valid
+  __v4l2_async_nf_add_fwnode_remote
+  v4l2_async_nf_cleanup
+  v4l2_async_nf_init
+  v4l2_async_nf_register
+  v4l2_async_nf_unregister
+  __v4l2_async_register_subdev
+  v4l2_async_register_subdev_sensor
+  v4l2_async_unregister_subdev
+  v4l2_create_fwnode_links_to_pad
+  __v4l2_ctrl_grab
+  v4l2_ctrl_handler_free
+  v4l2_ctrl_handler_init_class
+  __v4l2_ctrl_handler_setup
+  __v4l2_ctrl_modify_range
+  v4l2_ctrl_new_custom
+  v4l2_ctrl_new_fwnode_properties
+  v4l2_ctrl_new_int_menu
+  v4l2_ctrl_new_std
+  v4l2_ctrl_new_std_menu_items
+  __v4l2_ctrl_s_ctrl
+  __v4l2_ctrl_s_ctrl_int64
+  v4l2_ctrl_subdev_log_status
+  v4l2_ctrl_subdev_subscribe_event
+  v4l2_device_register
+  __v4l2_device_register_subdev
+  __v4l2_device_register_subdev_nodes
+  v4l2_device_unregister
+  v4l2_device_unregister_subdev
+  v4l2_event_queue
+  v4l2_event_subdev_unsubscribe
+  v4l2_event_subscribe
+  v4l2_fh_open
+  __v4l2_find_nearest_size_conditional
+  v4l2_fwnode_device_parse
+  v4l2_fwnode_endpoint_alloc_parse
+  v4l2_fwnode_endpoint_free
+  v4l2_fwnode_endpoint_parse
+  v4l2_g_ctrl
+  v4l2_get_link_freq
+  v4l2_i2c_subdev_init
+  v4l2_link_freq_to_bitmap
+  v4l2_subdev_call_wrappers
+  v4l2_subdev_cleanup
+  v4l2_subdev_disable_streams
+  v4l2_subdev_enable_streams
+  v4l2_subdev_get_fmt
+  v4l2_subdev_has_pad_interdep
+  v4l2_subdev_init
+  __v4l2_subdev_init_finalize
+  v4l2_subdev_link_validate
+  v4l2_subdev_link_validate_default
+  __v4l2_subdev_next_active_route
+  v4l2_subdev_routing_find_opposite_end
+  v4l2_subdev_routing_validate
+  v4l2_subdev_set_routing_with_fmt
+  __v4l2_subdev_state_get_crop
+  __v4l2_subdev_state_get_format
+  v4l2_subdev_state_get_opposite_stream_format
+  v4l2_subdev_state_xlate_streams
   validate_usercopy_range
   __var_waitqueue
+  vb2_buffer_done
+  vb2_dma_sg_memops
+  vb2_fop_mmap
+  vb2_fop_poll
+  vb2_fop_release
+  vb2_ioctl_create_bufs
+  vb2_ioctl_dqbuf
+  vb2_ioctl_expbuf
+  vb2_ioctl_prepare_buf
+  vb2_ioctl_qbuf
+  vb2_ioctl_querybuf
+  vb2_ioctl_reqbufs
+  vb2_ioctl_streamoff
+  vb2_ioctl_streamon
+  vb2_plane_cookie
+  vb2_queue_change_type
+  vb2_queue_init
+  vb2_queue_release
+  vb2_video_unregister_device
   vfree
   vga_client_register
   vga_get
   vga_put
+  video_devdata
+  video_device_pipeline_alloc_start
+  video_device_pipeline_start
+  video_device_pipeline_stop
+  video_device_release_empty
   video_firmware_drivers_only
+  video_ioctl2
+  __video_register_device
+  __virt_addr_valid
   vivaldi_function_row_physmap_show
   vmalloc_noprof
   vmalloc_to_page
+  vmap
   __vma_start_write
   vmemmap_base
   vmf_insert_pfn
   vmf_insert_pfn_prot
   vm_get_page_prot
+  vm_insert_page
   vsnprintf
+  vunmap
+  vzalloc_noprof
   wait_for_completion
   wait_for_completion_interruptible
   wait_for_completion_interruptible_timeout
