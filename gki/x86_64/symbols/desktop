@@ -14,6 +14,7 @@
   acpi_dev_found
   acpi_dev_free_resource_list
   acpi_dev_get_first_match_dev
+  acpi_dev_get_memory_resources
   acpi_dev_get_next_consumer_dev
   acpi_dev_get_resources
   acpi_dev_gpio_irq_wake_get_by
@@ -118,6 +119,7 @@
   __bitmap_and
   __bitmap_andnot
   __bitmap_clear
+  __bitmap_complement
   bitmap_find_next_zero_area_off
   bitmap_free
   bitmap_from_arr32
@@ -339,6 +341,7 @@
   device_bind_driver
   device_create
   device_create_bin_file
+  device_create_file
   device_create_managed_software_node
   device_del
   device_destroy
@@ -361,6 +364,7 @@
   device_register
   device_release_driver
   device_remove_bin_file
+  device_remove_file
   device_remove_software_node
   device_rename
   device_reprobe
@@ -918,6 +922,7 @@
   __folio_put
   for_each_thermal_trip
   __fortify_panic
+  fput
   __free_iova
   free_irq
   free_netdev
@@ -926,6 +931,14 @@
   free_percpu
   freezer_active
   freezing_slow_path
+  fsg_common_create_luns
+  fsg_common_free_buffers
+  fsg_common_remove_luns
+  fsg_common_set_cdev
+  fsg_common_set_inquiry_string
+  fsg_common_set_num_buffers
+  fsg_common_set_sysfs
+  fsg_config_from_params
   fwnode_create_software_node
   fwnode_find_reference
   fwnode_get_child_node_count
@@ -992,6 +1005,7 @@
   __get_user_4
   __get_user_8
   get_zeroed_page_noprof
+  gpiochip_add_data_with_key
   gpiochip_add_pin_range_with_pins
   gpiochip_disable_irq
   gpiochip_dup_line_label
@@ -1003,6 +1017,7 @@
   gpiochip_irq_relres
   gpiochip_irq_reqres
   gpiochip_line_is_irq
+  gpiochip_remove
   gpiod_add_lookup_table
   gpiod_get
   gpiod_get_array_optional
@@ -1236,6 +1251,7 @@
   iounmap
   iova_cache_get
   iova_cache_put
+  iov_iter_kvec
   iov_iter_npages
   iov_iter_revert
   iowrite16_rep
@@ -1302,6 +1318,8 @@
   kasprintf
   kernel_param_lock
   kernel_param_unlock
+  kernel_sendmsg
+  kernel_sock_shutdown
   key_put
   __kfifo_alloc
   __kfifo_free
@@ -1342,6 +1360,7 @@
   kstrtoint
   kstrtoint_from_user
   kstrtol_from_user
+  kstrtoll
   kstrtou16
   kstrtou8
   kstrtouint
@@ -1354,6 +1373,7 @@
   kthread_queue_work
   kthread_should_stop
   kthread_stop
+  kthread_stop_put
   kthread_unuse_mm
   kthread_use_mm
   ktime_get
@@ -1802,6 +1822,7 @@
   pinctrl_lookup_state
   pinctrl_register_mappings
   pinctrl_select_state
+  platform_bus
   platform_device_add
   platform_device_add_data
   platform_device_add_resources
@@ -2106,6 +2127,9 @@
   sg_init_table
   sgl_alloc
   sgl_free
+  sg_miter_next
+  sg_miter_start
+  sg_miter_stop
   sg_nents
   __sg_page_iter_dma_next
   __sg_page_iter_start
@@ -2168,6 +2192,7 @@
   sock_diag_register
   sock_diag_save_cookie
   sock_diag_unregister
+  sockfd_lookup
   sock_init_data
   sock_kfree_s
   sock_kmalloc
@@ -2183,6 +2208,7 @@
   sock_no_sendmsg
   sock_no_shutdown
   sock_no_socketpair
+  sock_recvmsg
   sock_register
   sock_release
   sock_unregister
@@ -2237,6 +2263,7 @@
   strreplace
   strsep
   strspn
+  strstr
   __sw_hweight32
   __sw_hweight64
   swnode_gpio_undefined
@@ -2413,16 +2440,39 @@
   ttm_tt_init
   ttm_tt_restore
   ttm_tt_setup_backup
+  tty_encode_baud_rate
+  tty_flip_buffer_push
+  tty_get_char_size
+  __tty_insert_flip_string_flags
+  tty_kref_put
   tty_mode_ioctl
+  tty_port_tty_get
+  __tty_port_tty_hangup
+  tty_put_char
   tty_register_ldisc
   tty_termios_baud_rate
+  tty_termios_copy_hw
+  tty_termios_hw_change
   tty_unregister_ldisc
   tty_unthrottle
   typec_altmode2port
   typec_altmode_attention
+  typec_altmode_enter
+  typec_altmode_exit
+  typec_altmode_get_plug
+  typec_altmode_notify
+  typec_altmode_put_plug
+  __typec_altmode_register_driver
   typec_altmode_set_ops
+  typec_altmode_unregister_driver
   typec_altmode_update_active
   typec_altmode_vdm
+  typec_cable_altmode_enter
+  typec_cable_altmode_exit
+  typec_cable_get
+  typec_cable_is_active
+  typec_cable_put
+  typec_find_orientation
   typec_find_port_data_role
   typec_find_port_power_role
   typec_find_power_role
@@ -2458,14 +2508,26 @@
   typec_set_pwr_opmode
   typec_set_pwr_role
   typec_set_vconn_role
+  typec_switch_get_drvdata
   typec_switch_put
+  typec_switch_register
   typec_switch_set
+  typec_switch_unregister
   typec_unregister_altmode
   typec_unregister_cable
   typec_unregister_partner
   typec_unregister_plug
   typec_unregister_port
   ucs2_strnlen
+  ucsi_create
+  ucsi_destroy
+  ucsi_get_drvdata
+  ucsi_notify_common
+  ucsi_register
+  ucsi_resume
+  ucsi_set_drvdata
+  ucsi_sync_control_common
+  ucsi_unregister
   __udelay
   unix_inq_len
   unix_outq_len
@@ -2491,27 +2553,55 @@
   up
   up_read
   up_write
+  usb_add_config
+  usb_add_function
+  usb_add_gadget_udc
+  usb_add_hcd
   usb_alloc_coherent
   usb_alloc_urb
   usb_altnum_to_altsetting
   usb_anchor_urb
   usb_autopm_get_interface
+  usb_autopm_get_interface_async
   usb_autopm_get_interface_no_resume
   usb_autopm_put_interface
+  usb_autopm_put_interface_async
   usb_bulk_msg
+  usb_clear_halt
+  usb_composite_overwrite_options
+  usb_composite_probe
+  usb_composite_unregister
   usb_control_msg
   usb_control_msg_recv
   usb_control_msg_send
+  usb_create_hcd
+  usb_create_shared_hcd
+  usb_debug_root
+  usb_del_gadget_udc
   usb_deregister
   usb_deregister_dev
   usb_disable_autosuspend
+  usb_disabled
   usb_driver_claim_interface
   usb_driver_release_interface
   usb_enable_autosuspend
+  usb_ep_set_maxpacket_limit
   usb_free_coherent
   usb_free_urb
+  usb_gadget_giveback_request
+  usb_gadget_udc_reset
   usb_get_descriptor
+  usb_get_dev
   usb_get_from_anchor
+  usb_get_function
+  usb_get_function_instance
+  usb_hcd_check_unlink_urb
+  usb_hcd_giveback_urb
+  usb_hcd_is_primary_hcd
+  usb_hcd_link_urb_to_ep
+  usb_hcd_poll_rh_status
+  usb_hcd_resume_root_hub
+  usb_hcd_unlink_urb_from_ep
   usb_ifnum_to_if
   usb_interrupt_msg
   usb_intf_get_dma_device
@@ -2551,13 +2641,34 @@
   usb_power_delivery_register_capabilities
   usb_power_delivery_unregister
   usb_power_delivery_unregister_capabilities
+  usb_put_dev
+  usb_put_function
+  usb_put_function_instance
+  usb_put_hcd
   usb_queue_reset_device
   usb_register_dev
   usb_register_driver
+  usb_remove_hcd
+  usb_role_switch_get_drvdata
   usb_role_switch_put
+  usb_role_switch_register
   usb_role_switch_set_role
+  usb_role_switch_unregister
   usb_scuttle_anchored_urbs
+  usb_serial_deregister_drivers
+  usb_serial_generic_close
+  usb_serial_generic_get_icount
+  usb_serial_generic_open
+  usb_serial_generic_resume
+  usb_serial_generic_throttle
+  usb_serial_generic_tiocmiwait
+  usb_serial_generic_unthrottle
+  usb_serial_handle_dcd_change
+  usb_serial_port_softint
+  __usb_serial_register_drivers
   usb_set_interface
+  usb_speed_string
+  usb_string_ids_tab
   usb_submit_urb
   usb_unanchor_urb
   usb_unlink_urb
