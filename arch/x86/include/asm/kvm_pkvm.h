@@ -38,6 +38,10 @@ struct pkvm_hyp {
 
 #define TO_PKVM_HC(f)		CONCATENATE(__pkvm__, f)
 
+enum pkvm_hc {
+	__pkvm__init,
+};
+
 #define PKVM_HC_IN_0()
 #define PKVM_HC_IN_1(a1)		, "b"(a1)
 #define PKVM_HC_IN_2(a1, a2)		PKVM_HC_IN_1(a1), "c"(a2)
