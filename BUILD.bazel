@@ -214,6 +214,7 @@ filegroup(
         "gki/aarch64/symbols/exynosauto",
         "gki/aarch64/symbols/galaxy",
         "gki/aarch64/symbols/honor",
+        "gki/aarch64/symbols/imx",
         "gki/aarch64/symbols/kunit",
         "gki/aarch64/symbols/mtk",
         "gki/aarch64/symbols/oplus",
