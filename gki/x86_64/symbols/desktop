@@ -155,11 +155,20 @@
   clear_page_orig
   clear_page_rep
   clflush_cache_range
+  clkdev_create
+  clkdev_drop
   clk_disable
   clk_enable
+  __clk_get_name
+  clk_get_parent
   clk_get_rate
   clk_prepare
+  clk_register_fixed_rate
+  clk_register_fractional_divider
+  clk_register_gate
+  clk_set_rate
   clk_unprepare
+  clk_unregister
   compat_only_sysfs_link_entry_to_kobj
   complete
   complete_all
@@ -239,6 +248,7 @@
   __dev_fwnode_const
   dev_get_regmap
   device_add
+  device_add_software_node
   device_create
   device_create_bin_file
   device_del
@@ -260,6 +270,7 @@
   device_property_read_u8_array
   device_register
   device_remove_bin_file
+  device_remove_software_node
   device_set_node
   device_set_wakeup_capable
   device_unregister
@@ -282,7 +293,9 @@
   __devm_iio_trigger_alloc
   devm_iio_trigger_register
   devm_input_allocate_device
+  __devm_intel_scu_ipc_register
   devm_ioremap_resource
+  devm_ioremap_uc
   devm_ioremap_wc
   devm_kasprintf
   devm_kfree
@@ -295,6 +308,8 @@
   devm_pinctrl_get
   devm_pinctrl_put
   devm_platform_ioremap_resource
+  devm_pm_runtime_enable
+  devm_regmap_add_irq_chip
   __devm_regmap_init
   __devm_regmap_init_i2c
   devm_regulator_bulk_get
@@ -309,6 +324,8 @@
   dev_pm_clear_wake_irq
   dev_pm_domain_attach
   dev_pm_domain_set
+  dev_pm_qos_expose_latency_tolerance
+  dev_pm_qos_hide_latency_tolerance
   dev_pm_set_dedicated_wake_irq
   _dev_printk
   devres_add
@@ -755,6 +772,7 @@
   gpiod_get_optional
   gpiod_put
   gpiod_remove_lookup_table
+  gpiod_set_raw_value_cansleep
   gpiod_set_value
   gpiod_set_value_cansleep
   gpiod_to_irq
@@ -864,6 +882,7 @@
   i2c_verify_adapter
   i2c_verify_client
   ida_alloc_range
+  ida_destroy
   ida_free
   idr_alloc
   idr_destroy
@@ -934,6 +953,7 @@
   input_unregister_handle
   input_unregister_handler
   intel_graphics_stolen_res
+  intel_scu_ipc_dev_simple_command
   intlog10
   int_pow
   int_sqrt
@@ -1101,6 +1121,8 @@
   nsecs_to_jiffies
   ns_to_timespec64
   of_device_get_match_data
+  of_device_is_available
+  of_device_is_compatible
   of_fwnode_ops
   of_get_child_by_name
   of_get_next_child
@@ -1109,6 +1131,7 @@
   of_match_device
   of_property_match_string
   of_property_read_bool
+  of_property_read_reg
   of_property_read_variable_u16_array
   of_property_read_variable_u32_array
   of_reserved_mem_region_to_resource
@@ -1180,6 +1203,7 @@
   pci_set_power_state
   pci_sriov_get_totalvfs
   pci_sriov_set_totalvfs
+  pci_try_set_mwi
   pci_unmap_rom
   pci_unregister_driver
   pci_write_config_byte
@@ -1196,6 +1220,7 @@
   pinctrl_register_mappings
   pinctrl_select_state
   platform_device_add
+  platform_device_add_data
   platform_device_add_resources
   platform_device_alloc
   platform_device_put
@@ -1203,6 +1228,7 @@
   platform_device_unregister
   __platform_driver_register
   platform_driver_unregister
+  platform_get_irq
   platform_get_irq_optional
   platform_get_resource
   pm_generic_runtime_resume
@@ -1216,6 +1242,7 @@
   pm_runtime_get_if_active
   pm_runtime_get_if_in_use
   __pm_runtime_idle
+  pm_runtime_no_callbacks
   __pm_runtime_resume
   pm_runtime_set_autosuspend_delay
   __pm_runtime_set_status
@@ -1282,6 +1309,9 @@
   refcount_dec_and_lock
   refcount_warn_saturate
   __ref_stack_chk_guard
+  regcache_cache_only
+  regcache_mark_dirty
+  regcache_sync
   register_acpi_notifier
   __register_chrdev
   register_chrdev_region
@@ -1294,13 +1324,17 @@
   regmap_get_device
   __regmap_init
   regmap_multi_reg_write
+  regmap_multi_reg_write_bypassed
   regmap_raw_read
   regmap_raw_write
   regmap_read
+  regmap_register_patch
   regmap_update_bits_base
   regmap_write
   regulator_bulk_disable
   regulator_bulk_enable
+  regulator_bulk_register_supply_alias
+  regulator_bulk_unregister_supply_alias
   regulator_disable
   regulator_enable
   release_firmware
