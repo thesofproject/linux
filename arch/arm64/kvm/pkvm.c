@@ -1754,9 +1754,9 @@ int __pkvm_topup_hyp_alloc(unsigned long nr_pages)
 }
 EXPORT_SYMBOL(__pkvm_topup_hyp_alloc);
 
-unsigned long __pkvm_reclaim_hyp_alloc_mgt(unsigned long nr_pages)
+unsigned long __pkvm_reclaim_hyp_alloc_mgt_id(enum hyp_alloc_mgt_id id, unsigned long nr_pages)
 {
-	unsigned long ratelimit, last_reclaim, reclaimed = 0;
+	unsigned long ratelimit, reclaimed = 0;
 	struct kvm_hyp_memcache mc;
 	struct arm_smccc_res res;
 
@@ -1766,20 +1766,30 @@ unsigned long __pkvm_reclaim_hyp_alloc_mgt(unsigned long nr_pages)
 		/* Arbitrary upper bound to limit the time spent at EL2 */
 		ratelimit = min(nr_pages, 16UL);
 
-		arm_smccc_1_1_hvc(KVM_HOST_SMCCC_FUNC(__pkvm_hyp_alloc_mgt_reclaim),
-				  ratelimit, &res);
-		if (WARN_ON(res.a0 != SMCCC_RET_SUCCESS))
+		arm_smccc_1_1_hvc(KVM_HOST_SMCCC_FUNC(__pkvm_hyp_alloc_mgt_reclaim), id, ratelimit,
+				  &res);
+		if (WARN_ON(res.a0 != SMCCC_RET_SUCCESS) || !res.a2)
 			break;
 
 		mc.head = res.a1;
-		last_reclaim = mc.nr_pages = res.a2;
+		mc.nr_pages = res.a2;
 
+		reclaimed += mc.nr_pages;
 		free_hyp_memcache(&mc);
-		reclaimed += last_reclaim;
-
-	} while (last_reclaim && (reclaimed < nr_pages));
+	} while (reclaimed < nr_pages);
 
 	return reclaimed;
+}
+
+unsigned long __pkvm_reclaim_hyp_alloc_mgt(unsigned long nr_pages)
+{
+	unsigned long total = 0;
+	enum hyp_alloc_mgt_id id = __HYP_ALLOC_MGT_HEAP_ID_START__;
+
+	while ((id < NR_ALLOC_MGT_IDS) && (total < nr_pages))
+		total += __pkvm_reclaim_hyp_alloc_mgt_id(id++, nr_pages - total);
+
+	return total;
 }
 
 static int early_ffa_unmap_on_lend_cfg(char *arg)

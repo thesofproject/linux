@@ -1887,6 +1887,7 @@ enum hyp_alloc_mgt_id {
 	NR_ALLOC_MGT_IDS
 };
 
+unsigned long __pkvm_reclaim_hyp_alloc_mgt_id(enum hyp_alloc_mgt_id id, unsigned long nr_pages);
 unsigned long __pkvm_reclaim_hyp_alloc_mgt(unsigned long nr_pages);
 int __pkvm_topup_hyp_alloc_mgt_gfp(enum hyp_alloc_mgt_id id, unsigned long nr_pages,
 				   unsigned long sz_alloc, gfp_t gfp);
