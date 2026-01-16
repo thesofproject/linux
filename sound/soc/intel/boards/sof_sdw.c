@@ -1219,7 +1219,7 @@ static int create_echoref_dailink(struct snd_soc_card *card,
 	 * fe <-> be connection for loopback capture for echo reference
 	 */
 	ret = asoc_sdw_init_simple_dai_link(dev, *dai_links, be_id, name,
-					    0, 1, "snd-soc-dummy-dai", "dummy",
+					    0, 1, "Loopback Virtual Pin", "dummy",
 					    snd_soc_dummy_dlc.name, snd_soc_dummy_dlc.dai_name,
 					    1, NULL, NULL);
 	if (ret)
