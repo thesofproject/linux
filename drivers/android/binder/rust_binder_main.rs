@@ -301,6 +301,18 @@ impl kernel::Module for BinderModule {
         // SAFETY: The module initializer never runs twice, so we only call this once.
         unsafe { crate::context::CONTEXTS.init() };
 
+        // SAFETY: Doesn't run in parallel with C Binder init.
+        unsafe {
+            let unload = kernel::error::to_result(bindings::binder_try_unload_builtin());
+            if let Err(unload) = unload {
+                if unload != EPERM {
+                    pr_err!("Failed to load Rust Binder.\n");
+                }
+                bindings::binder_remove_trace_events(_module.as_ptr());
+                return Ok(Self {});
+            }
+        }
+
         pr_warn!("Loaded Rust Binder.");
 
         BINDER_SHRINKER.register(kernel::c_str!("android-binder"))?;

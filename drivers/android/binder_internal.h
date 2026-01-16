@@ -97,7 +97,8 @@ static inline struct dentry *binderfs_create_file(struct dentry *dir,
 #endif
 
 #ifdef CONFIG_ANDROID_BINDERFS
-extern int __init init_binderfs(void);
+int __init init_binderfs(void);
+void unload_binderfs(void);
 #else
 static inline int __init init_binderfs(void)
 {
