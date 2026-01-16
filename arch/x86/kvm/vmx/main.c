@@ -859,9 +859,9 @@ static int vt_gmem_max_mapping_level(struct kvm *kvm, kvm_pfn_t pfn,
 struct kvm_x86_ops vt_x86_ops __initdata = {
 	.name = KBUILD_MODNAME,
 
-#ifndef __PKVM_HYP__
 	.check_processor_compatibility = vmx_check_processor_compat,
 
+#ifndef __PKVM_HYP__
 	.hardware_unsetup = vmx_hardware_unsetup,
 
 	.enable_virtualization_cpu = vmx_enable_virtualization_cpu,
