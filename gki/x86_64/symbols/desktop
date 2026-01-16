@@ -1,61 +1,149 @@
 [abi_symbol_list]
   add_taint
+  add_wait_queue
+  __alloc_pages_noprof
+  arc4_crypt
+  arc4_setkey
   capable
+  __check_object_size
   class_register
   class_unregister
   clear_page_erms
   clear_page_orig
   clear_page_rep
   complete
+  _copy_from_iter
   _copy_from_user
   copy_page
+  _copy_to_iter
   _copy_to_user
   __cpuhp_remove_state
   __cpuhp_setup_state
   cpu_info
   __cpu_online_mask
+  crypto_ahash_digest
+  crypto_ahash_export
+  crypto_ahash_finup
+  crypto_ahash_import
+  crypto_ahash_init
+  crypto_ahash_setkey
+  crypto_ahash_update
+  crypto_alloc_ahash
+  crypto_alloc_skcipher
+  crypto_destroy_tfm
+  crypto_register_lskcipher
+  crypto_req_done
+  crypto_skcipher_decrypt
+  crypto_skcipher_encrypt
+  crypto_skcipher_export
+  crypto_skcipher_import
+  crypto_skcipher_setkey
+  crypto_unregister_lskcipher
   current_task
   device_create
   device_destroy
   devm_kmalloc
+  down_read
+  down_write
+  extract_iter_to_sg
   finish_wait
+  __folio_put
+  __free_pages
   __init_swait_queue_head
   init_wait_entry
   __init_waitqueue_head
+  iov_iter_npages
+  iov_iter_revert
   kasprintf
+  key_put
+  kfree
+  kfree_sensitive
+  __kmalloc_cache_noprof
+  kmalloc_caches
+  __kmalloc_noprof
+  kvfree
+  __list_add_valid_or_report
+  __list_del_entry_valid_or_report
+  lock_sock_nested
+  lookup_user_key
+  memcpy
   __memmove
   __memset
+  memset
   misc_deregister
   misc_register
   module_layout
+  module_put
   __mutex_init
   mutex_lock
   mutex_unlock
   no_seek_end_llseek
   nr_cpu_ids
+  page_offset_base
   __per_cpu_offset
   prepare_to_wait_event
   _printk
+  proto_register
+  proto_unregister
   __put_task_struct
   ___ratelimit
+  __rcu_read_lock
+  __rcu_read_unlock
   rdmsr_safe_on_cpu
   rdmsr_safe_regs_on_cpu
+  refcount_warn_saturate
   __ref_stack_chk_guard
   __register_chrdev
   register_pm_notifier
+  release_sock
+  remove_wait_queue
+  __request_module
   schedule
   schedule_timeout
   security_locked_down
+  security_sk_clone
+  security_sock_graft
+  sg_init_table
+  sk_alloc
+  sk_free
   smp_call_function_single_async
+  sock_init_data
+  sock_kfree_s
+  sock_kmalloc
+  sock_kzfree_s
+  sock_no_accept
+  sock_no_bind
+  sock_no_connect
+  sock_no_getname
+  sock_no_ioctl
+  sock_no_listen
+  sock_no_mmap
+  sock_no_recvmsg
+  sock_no_sendmsg
+  sock_no_shutdown
+  sock_no_socketpair
+  sock_register
+  sock_unregister
+  sock_wake_async
   sprintf
   __stack_chk_fail
   strcmp
   strim
+  try_module_get
+  unpin_user_page
   __unregister_chrdev
   unregister_pm_notifier
+  up_read
+  up_write
   utf8_data_table
+  validate_usercopy_range
+  vmemmap_base
   wait_for_completion
+  wait_woken
   __wake_up
+  __wake_up_sync_key
+  woken_wake_function
   wrmsr_safe_on_cpu
   wrmsr_safe_regs_on_cpu
+  __x86_indirect_thunk_r11
   __x86_return_thunk
