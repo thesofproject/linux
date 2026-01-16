@@ -44,6 +44,7 @@ use crate::{
     error::{BinderError, BinderResult},
     node::{CouldNotDeliverCriticalIncrement, CritIncrWrapper, Node, NodeDeath, NodeRef},
     page_range::ShrinkablePageRange,
+    prio,
     range_alloc::{RangeAllocator, ReserveNew, ReserveNewArgs},
     stats::BinderStats,
     thread::{PushWorkRes, Thread},
@@ -454,6 +455,8 @@ pub(crate) struct Process {
     links: ListLinks,
 
     pub(crate) stats: BinderStats,
+
+    pub(crate) default_priority: prio::BinderPriority,
 }
 
 kernel::impl_has_work! {
@@ -504,6 +507,7 @@ impl Process {
                 defer_work <- kernel::new_work!("Process::defer_work"),
                 links <- ListLinks::new(),
                 stats: BinderStats::new(),
+                default_priority: prio::get_default_prio_from_task(&current),
             }),
             GFP_KERNEL,
         )?;
