@@ -356,6 +356,7 @@
   __devm_drm_dev_alloc
   __devm_drm_panel_alloc
   devm_free_irq
+  devm_gpiochip_add_data_with_key
   devm_gpiod_get
   devm_gpiod_get_index
   devm_gpiod_get_optional
@@ -369,6 +370,7 @@
   devm_ioremap_resource
   devm_ioremap_uc
   devm_ioremap_wc
+  __devm_irq_alloc_descs
   devm_kasprintf
   devm_kfree
   devm_kmalloc
@@ -381,6 +383,7 @@
   devm_nvmem_register
   devm_pinctrl_get
   devm_pinctrl_put
+  devm_pinctrl_register
   devm_platform_ioremap_resource
   devm_pm_runtime_enable
   devm_pm_set_wake_irq
@@ -880,6 +883,7 @@
   freezer_active
   freezing_slow_path
   fwnode_create_software_node
+  fwnode_get_named_child_node
   fwnode_graph_get_endpoint_by_id
   fwnode_graph_get_next_endpoint
   fwnode_handle_get
@@ -934,6 +938,17 @@
   __get_user_4
   __get_user_8
   get_zeroed_page_noprof
+  gpiochip_add_pin_range_with_pins
+  gpiochip_disable_irq
+  gpiochip_dup_line_label
+  gpiochip_enable_irq
+  gpiochip_generic_config
+  gpiochip_generic_free
+  gpiochip_generic_request
+  gpiochip_get_data
+  gpiochip_irq_relres
+  gpiochip_irq_reqres
+  gpiochip_line_is_irq
   gpiod_add_lookup_table
   gpiod_get_optional
   gpiod_put
@@ -947,6 +962,9 @@
   guid_gen
   guid_null
   guid_parse
+  handle_bad_irq
+  handle_edge_irq
+  handle_level_irq
   handle_nested_irq
   handle_simple_irq
   handle_sysrq
@@ -1192,6 +1210,7 @@
   irq_create_mapping_affinity
   irq_dispose_mapping
   __irq_domain_alloc_fwnode
+  irq_domain_associate_many
   irq_domain_free_fwnode
   irq_domain_instantiate
   irq_domain_remove
@@ -1694,6 +1713,11 @@
   __phy_write_mmd
   phy_write_mmd
   phy_write_paged
+  pinconf_generic_dt_free_map
+  pinconf_generic_dt_node_to_map
+  pinctrl_dev_get_drvdata
+  pinctrl_gpio_direction_input
+  pinctrl_gpio_direction_output
   pinctrl_lookup_state
   pinctrl_register_mappings
   pinctrl_select_state
@@ -1779,6 +1803,7 @@
   pv_ops
   queue_delayed_work_on
   queue_work_on
+  radix_tree_lookup
   ___ratelimit
   _raw_read_lock
   _raw_read_lock_bh
