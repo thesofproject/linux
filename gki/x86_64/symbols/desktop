@@ -1,11 +1,60 @@
 [abi_symbol_list]
+  acpi_bus_generate_netlink_event
+  acpi_bus_get_status
+  __acpi_bus_register_driver
+  acpi_bus_unregister_driver
+  acpi_dev_for_each_child
+  acpi_dev_found
+  acpi_device_fix_up_power_children
+  acpi_device_hid
+  acpi_device_set_power
+  acpi_device_update_power
+  acpi_dev_install_notify_handler
+  acpi_dev_present
+  acpi_dev_remove_notify_handler
+  acpi_disabled
+  acpi_evaluate_integer
+  acpi_evaluate_object
+  acpi_execute_simple_method
+  acpi_extract_package
+  acpi_fetch_acpi_dev
+  acpi_format_exception
+  acpi_get_handle
+  acpi_get_object_info
+  acpi_get_parent
+  acpi_get_pci_dev
+  acpi_handle_printk
+  acpi_has_method
+  acpi_install_notify_handler
+  acpi_is_video_device
+  acpi_kobj
+  acpi_match_device_ids
+  acpi_notifier_call_chain
+  acpi_osi_is_win8
+  acpi_pm_wakeup_event
+  acpi_quirk_skip_acpi_ac_and_battery
+  acpi_remove_notify_handler
+  acpi_video_backlight_string
+  acpi_walk_namespace
   add_taint
+  add_uevent_var
   add_wait_queue
   __alloc_pages_noprof
   arc4_crypt
   arc4_setkey
+  backlight_device_register
+  backlight_device_unregister
+  backlight_force_update
+  bus_find_device
+  bus_for_each_dev
+  bus_register
+  bus_unregister
+  cancel_delayed_work
+  cancel_delayed_work_sync
   capable
   __check_object_size
+  class_find_device
+  class_for_each_device
   class_register
   class_unregister
   clear_page_erms
@@ -40,20 +89,59 @@
   crypto_skcipher_setkey
   crypto_unregister_lskcipher
   current_task
+  delayed_work_timer_fn
+  _dev_err
+  device_add
   device_create
   device_destroy
+  device_for_each_child
+  device_for_each_child_reverse
+  device_initialize
+  device_link_add
+  device_register
+  device_set_wakeup_capable
+  device_unregister
+  device_wakeup_disable
+  device_wakeup_enable
+  _dev_info
+  __devm_add_action
   devm_kmalloc
+  devres_add
+  __devres_alloc_node
+  devres_free
+  dev_set_name
+  _dev_warn
+  dmi_check_system
+  dmi_get_system_info
+  dmi_name_in_vendors
+  dmi_walk
   down_read
   down_write
+  driver_register
+  driver_set_override
+  driver_unregister
   extract_iter_to_sg
+  _find_first_bit
   finish_wait
   __folio_put
+  __fortify_panic
   __free_pages
+  guid_parse
+  ida_alloc_range
+  ida_free
+  __init_rwsem
   __init_swait_queue_head
   init_wait_entry
   __init_waitqueue_head
+  input_allocate_device
+  input_event
+  input_free_device
+  input_register_device
+  input_unregister_device
   iov_iter_npages
   iov_iter_revert
+  is_acpi_device_node
+  jiffies
   kasprintf
   key_put
   kfree
@@ -61,6 +149,9 @@
   __kmalloc_cache_noprof
   kmalloc_caches
   __kmalloc_noprof
+  kmemdup_noprof
+  kobject_uevent
+  kstrtouint
   kvfree
   __list_add_valid_or_report
   __list_del_entry_valid_or_report
@@ -74,18 +165,36 @@
   misc_register
   module_layout
   module_put
+  __msecs_to_jiffies
+  msleep
   __mutex_init
   mutex_lock
+  mutex_lock_interruptible
   mutex_unlock
   no_seek_end_llseek
   nr_cpu_ids
   page_offset_base
+  param_ops_bool
+  param_ops_int
+  param_ops_uint
+  pci_dev_put
+  pci_get_device
+  pci_read_config_dword
   __per_cpu_offset
+  __platform_driver_register
+  platform_driver_unregister
+  power_supply_changed
+  power_supply_get_drvdata
+  power_supply_is_system_supplied
+  power_supply_register
+  power_supply_unregister
   prepare_to_wait_event
   _printk
   proto_register
   proto_unregister
+  put_device
   __put_task_struct
+  queue_delayed_work_on
   ___ratelimit
   __rcu_read_lock
   __rcu_read_unlock
@@ -104,9 +213,11 @@
   security_sk_clone
   security_sock_graft
   sg_init_table
+  sized_strscpy
   sk_alloc
   sk_free
   smp_call_function_single_async
+  snprintf
   sock_init_data
   sock_kfree_s
   sock_kmalloc
@@ -125,10 +236,31 @@
   sock_register
   sock_unregister
   sock_wake_async
+  sort
   sprintf
+  sscanf
   __stack_chk_fail
+  strcasecmp
   strcmp
   strim
+  strncasecmp
+  strncmp
+  strnlen
+  sysfs_create_file_ns
+  sysfs_create_group
+  sysfs_create_link
+  sysfs_emit
+  sysfs_emit_at
+  __sysfs_match_string
+  sysfs_notify
+  sysfs_remove_file_ns
+  sysfs_remove_group
+  sysfs_remove_link
+  sysfs_update_group
+  system_percpu_wq
+  thermal_cooling_device_register
+  thermal_cooling_device_unregister
+  timer_init_key
   try_module_get
   unpin_user_page
   __unregister_chrdev
