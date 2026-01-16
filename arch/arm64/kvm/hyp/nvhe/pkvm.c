@@ -1787,15 +1787,16 @@ static bool pkvm_memrelinquish_call(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_co
 {
 	struct kvm_vcpu *vcpu = &hyp_vcpu->vcpu;
 	u64 ipa = smccc_get_arg1(vcpu);
+	/* TODO: use arg2 as nr_pages */
 	u64 arg2 = smccc_get_arg2(vcpu);
-	u64 arg3 = smccc_get_arg3(vcpu);
+	u64 flags = smccc_get_arg3(vcpu);
 	u64 pa = 0;
 	int ret;
 
-	if (arg2 || arg3)
+	if (arg2 || (flags != 0 && flags != KVM_FUNC_MEM_RELINQUISH_NO_POISON))
 		goto out_guest_err;
 
-	ret = __pkvm_guest_relinquish_to_host(hyp_vcpu, ipa, &pa);
+	ret = __pkvm_guest_relinquish_to_host(hyp_vcpu, ipa, flags, &pa);
 	if (ret == -E2BIG) {
 		if (pkvm_request_split(hyp_vcpu, PAGE_ALIGN_DOWN(ipa), 1, exit_code))
 			goto out_guest_err;
