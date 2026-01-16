@@ -3,6 +3,7 @@
   acpi_bus_get_status
   __acpi_bus_register_driver
   acpi_bus_unregister_driver
+  acpi_check_dsm
   acpi_dev_for_each_child
   acpi_dev_found
   acpi_device_fix_up_power_children
@@ -13,6 +14,7 @@
   acpi_dev_present
   acpi_dev_remove_notify_handler
   acpi_disabled
+  acpi_evaluate_dsm
   acpi_evaluate_integer
   acpi_evaluate_object
   acpi_execute_simple_method
@@ -41,17 +43,28 @@
   add_uevent_var
   add_wait_queue
   __alloc_pages_noprof
+  __alloc_skb
   arc4_crypt
   arc4_setkey
   backlight_device_register
   backlight_device_unregister
   backlight_force_update
+  bcmp
+  bit_wait_timeout
+  btbcm_set_bdaddr
+  btbcm_setup_apple
+  btbcm_setup_patchram
+  bt_err
+  bt_info
+  bt_to_errno
+  bt_warn
   bus_find_device
   bus_for_each_dev
   bus_register
   bus_unregister
   cancel_delayed_work
   cancel_delayed_work_sync
+  cancel_work_sync
   capable
   __check_object_size
   class_find_device
@@ -63,6 +76,8 @@
   clear_page_rep
   complete
   complete_all
+  __const_udelay
+  consume_skb
   _copy_from_iter
   _copy_from_user
   copy_page
@@ -96,7 +111,9 @@
   debugfs_create_dir
   debugfs_create_file_full
   debugfs_create_str
+  debugfs_lookup_and_remove
   debugfs_remove
+  default_llseek
   delayed_work_timer_fn
   _dev_err
   __dev_fwnode_const
@@ -117,17 +134,21 @@
   device_wakeup_disable
   device_wakeup_enable
   _dev_info
+  dev_kfree_skb_irq_reason
   __devm_add_action
   devm_device_add_group
   devm_kasprintf
   devm_kmalloc
   __devm_regmap_init
+  devm_request_threaded_irq
   dev_pm_domain_attach
   devres_add
   __devres_alloc_node
   devres_free
   dev_set_name
   _dev_warn
+  disable_irq
+  disable_irq_nosync
   dmi_check_system
   dmi_get_system_info
   dmi_name_in_vendors
@@ -137,17 +158,47 @@
   driver_register
   driver_set_override
   driver_unregister
+  efi
+  enable_irq
   extract_iter_to_sg
   _find_first_bit
   finish_wait
+  firmware_request_nowarn
+  flush_work
   __folio_put
   __fortify_panic
   __free_pages
   fwnode_property_present
   fwnode_property_read_u32_array
   fwnode_property_read_u8_array
+  gpiod_get_optional
+  gpiod_put
+  gpiod_set_value_cansleep
   guid_parse
   handle_nested_irq
+  hci_alloc_dev_priv
+  __hci_cmd_send
+  __hci_cmd_sync
+  hci_cmd_sync
+  hci_cmd_sync_cancel
+  __hci_cmd_sync_ev
+  hci_cmd_sync_queue
+  hci_devcd_abort
+  hci_devcd_append
+  hci_devcd_append_pattern
+  hci_devcd_complete
+  hci_devcd_init
+  hci_devcd_register
+  hci_drv_cmd_complete
+  hci_drv_cmd_status
+  hci_free_dev
+  hci_recv_diag
+  hci_recv_frame
+  hci_register_dev
+  hci_resume_dev
+  hci_set_hw_info
+  hci_suspend_dev
+  hci_unregister_dev
   ida_alloc_range
   ida_free
   __init_rwsem
@@ -168,6 +219,7 @@
   irq_modify_status
   irq_set_chip
   irq_set_chip_data
+  irq_set_irq_wake
   is_acpi_device_node
   jiffies
   kasprintf
@@ -180,11 +232,14 @@
   __kmalloc_noprof
   kmemdup_noprof
   kobject_uevent
+  kstrtobool_from_user
   kstrtou8
   kstrtouint
   ktime_get
   ktime_get_mono_fast_ns
   kvfree
+  __kvmalloc_node_noprof
+  kvmemdup
   __list_add_valid_or_report
   __list_del_entry_valid_or_report
   lock_sock_nested
@@ -204,11 +259,16 @@
   mutex_lock
   mutex_lock_interruptible
   mutex_unlock
+  nonseekable_open
   no_seek_end_llseek
   nr_cpu_ids
   of_fwnode_ops
   of_get_next_child
   of_get_property
+  of_irq_get_byname
+  of_match_device
+  of_property_read_variable_u16_array
+  out_of_line_wait_on_bit_timeout
   page_offset_base
   param_ops_bool
   param_ops_int
@@ -225,14 +285,18 @@
   platform_driver_unregister
   pm_generic_runtime_resume
   pm_generic_runtime_suspend
+  pm_runtime_allow
   __pm_runtime_disable
   pm_runtime_enable
+  pm_runtime_forbid
   __pm_runtime_idle
   __pm_runtime_resume
   pm_runtime_set_autosuspend_delay
   __pm_runtime_set_status
   __pm_runtime_suspend
   __pm_runtime_use_autosuspend
+  pm_system_wakeup
+  pm_wakeup_dev_event
   power_supply_changed
   power_supply_get_drvdata
   power_supply_is_system_supplied
@@ -245,7 +309,16 @@
   put_device
   __put_task_struct
   queue_delayed_work_on
+  queue_work_on
   ___ratelimit
+  _raw_read_lock
+  _raw_read_unlock
+  _raw_spin_lock_irq
+  _raw_spin_lock_irqsave
+  _raw_spin_unlock_irq
+  _raw_spin_unlock_irqrestore
+  _raw_write_lock_irqsave
+  _raw_write_unlock_irqrestore
   __rcu_read_lock
   __rcu_read_unlock
   rdmsr_safe_on_cpu
@@ -259,6 +332,7 @@
   release_sock
   remove_wait_queue
   request_firmware
+  request_firmware_direct
   __request_module
   schedule
   schedule_timeout
@@ -274,11 +348,25 @@
   sg_init_table
   simple_attr_open
   simple_attr_release
+  simple_open
+  simple_read_from_buffer
   single_open
   single_release
   sized_strscpy
   sk_alloc
+  skb_clone
+  skb_dequeue
+  __skb_pad
+  skb_pull
+  skb_pull_data
+  skb_push
+  skb_put
+  skb_queue_head
+  skb_queue_purge_reason
+  skb_queue_tail
+  skb_unlink
   sk_free
+  sk_skb_reason_drop
   smp_call_function_single_async
   snprintf
   sock_init_data
@@ -333,6 +421,30 @@
   unregister_pm_notifier
   up_read
   up_write
+  usb_alloc_urb
+  usb_anchor_urb
+  usb_autopm_get_interface
+  usb_autopm_put_interface
+  usb_bulk_msg
+  usb_control_msg
+  usb_deregister
+  usb_disable_autosuspend
+  usb_driver_claim_interface
+  usb_driver_release_interface
+  usb_enable_autosuspend
+  usb_free_urb
+  usb_get_from_anchor
+  usb_ifnum_to_if
+  usb_kill_anchored_urbs
+  usb_kill_urb
+  usb_match_id
+  usb_queue_reset_device
+  usb_register_driver
+  usb_scuttle_anchored_urbs
+  usb_set_interface
+  usb_submit_urb
+  usb_unanchor_urb
+  __usecs_to_jiffies
   usleep_range_state
   utf8_data_table
   validate_usercopy_range
@@ -341,7 +453,9 @@
   wait_for_completion_timeout
   wait_woken
   __wake_up
+  wake_up_bit
   __wake_up_sync_key
+  __warn_printk
   woken_wake_function
   wrmsr_safe_on_cpu
   wrmsr_safe_regs_on_cpu
