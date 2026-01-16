@@ -21,6 +21,7 @@
   acpi_extract_package
   acpi_fetch_acpi_dev
   acpi_format_exception
+  acpi_gbl_FADT
   acpi_get_handle
   acpi_get_local_u64_address
   acpi_get_object_info
@@ -53,6 +54,8 @@
   alloc_workqueue_noprof
   arc4_crypt
   arc4_setkey
+  atomic_notifier_chain_register
+  atomic_notifier_chain_unregister
   backlight_device_register
   backlight_device_unregister
   backlight_force_update
@@ -117,12 +120,15 @@
   crypto_skcipher_import
   crypto_skcipher_setkey
   crypto_unregister_lskcipher
+  _ctype
   current_task
   debugfs_attr_read
   debugfs_attr_write
+  debugfs_create_bool
   debugfs_create_dir
   debugfs_create_file_full
   debugfs_create_str
+  debugfs_create_x32
   debugfs_lookup_and_remove
   debugfs_remove
   default_llseek
@@ -182,10 +188,13 @@
   dump_stack
   efi
   efi_tpm_final_log_size
+  efivars_register
+  efivars_unregister
   enable_irq
   extract_iter_to_sg
   _find_first_bit
   finish_wait
+  firmware_kobj
   firmware_request_nowarn
   flush_work
   __folio_put
@@ -279,11 +288,19 @@
   kmalloc_caches
   __kmalloc_large_noprof
   __kmalloc_noprof
+  kmem_cache_alloc_noprof
+  __kmem_cache_create_args
+  kmem_cache_destroy
+  kmem_cache_free
   kmemdup_noprof
+  kobject_create_and_add
+  kobject_put
   kobject_uevent
+  kstrndup
   kstrtobool_from_user
   kstrtou8
   kstrtouint
+  kstrtoull
   ktime_get
   ktime_get_mono_fast_ns
   kvfree
@@ -298,6 +315,7 @@
   memcpy_fromio
   memdup_user
   __memmove
+  memory_read_from_buffer
   memremap
   __memset
   memset
@@ -329,6 +347,7 @@
   of_reserved_mem_region_to_resource
   out_of_line_wait_on_bit_timeout
   page_offset_base
+  panic_notifier_list
   param_ops_bool
   param_ops_int
   param_ops_string
@@ -337,6 +356,7 @@
   pci_get_device
   pci_read_config_dword
   __per_cpu_offset
+  phys_base
   platform_device_add
   platform_device_alloc
   platform_device_put
@@ -396,8 +416,17 @@
   refcount_warn_saturate
   __ref_stack_chk_guard
   __register_chrdev
+  register_die_notifier
   register_pm_notifier
+  register_reboot_notifier
+  regmap_bulk_read
   __regmap_init
+  regmap_multi_reg_write
+  regmap_raw_read
+  regmap_raw_write
+  regmap_read
+  regmap_update_bits_base
+  regmap_write
   release_firmware
   release_sock
   remove_proc_entry
@@ -486,14 +515,18 @@
   strncmp
   strnlen
   __sw_hweight32
+  sysfs_create_bin_file
   sysfs_create_file_ns
+  sysfs_create_files
   sysfs_create_group
   sysfs_create_link
   sysfs_emit
   sysfs_emit_at
   __sysfs_match_string
   sysfs_notify
+  sysfs_remove_bin_file
   sysfs_remove_file_ns
+  sysfs_remove_files
   sysfs_remove_group
   sysfs_remove_link
   sysfs_update_group
@@ -503,11 +536,14 @@
   timer_delete_sync
   timer_init_key
   try_module_get
+  ucs2_strnlen
   __udelay
   unpin_user_page
   __unregister_chrdev
   unregister_chrdev_region
+  unregister_die_notifier
   unregister_pm_notifier
+  unregister_reboot_notifier
   up_read
   up_write
   usb_alloc_urb
@@ -537,6 +573,8 @@
   usleep_range_state
   utf8_data_table
   validate_usercopy_range
+  vfree
+  vmalloc_noprof
   vmemmap_base
   wait_for_completion
   wait_for_completion_timeout
