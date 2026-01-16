@@ -125,7 +125,7 @@ static inline int register_hyp_event_ids(void *event_ids, size_t nr_events)
 static inline
 void __pkvm_update_clock_tracing(u32 mult, u32 shift, u64 epoch_ns, u64 epoch_cyc) { }
 static inline int __pkvm_load_tracing(unsigned long desc_va, size_t desc_size) { return -ENODEV; }
-static inline void __pkvm_teardown_tracing(void) { }
+static inline int __pkvm_teardown_tracing(void) { return -ENODEV; }
 static inline int __pkvm_enable_tracing(bool enable) { return -ENODEV; }
 static inline int __pkvm_reset_tracing(unsigned int cpu) { return -ENODEV; }
 static inline int __pkvm_swap_reader_tracing(unsigned int cpu) { return -ENODEV; }
