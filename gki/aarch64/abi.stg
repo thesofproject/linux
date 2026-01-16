@@ -359675,6 +359675,15 @@ elf_symbol {
   full_name: "__traceiter_android_vh_scx_enabled"
 }
 elf_symbol {
+  id: 0xf69f852d
+  name: "__traceiter_android_vh_scx_ops_enable_state"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x0b865d9b
+  type_id: 0x9a33392f
+  full_name: "__traceiter_android_vh_scx_ops_enable_state"
+}
+elf_symbol {
   id: 0xb625db04
   name: "__traceiter_android_vh_scx_restore_flags"
   is_defined: true
@@ -363381,6 +363390,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_vh_scx_enabled"
+}
+elf_symbol {
+  id: 0x978bc797
+  name: "__tracepoint_android_vh_scx_ops_enable_state"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_vh_scx_ops_enable_state"
 }
 elf_symbol {
   id: 0xad5c16f2
@@ -417785,6 +417803,7 @@ interface {
   symbol_id: 0xb5ed74f6
   symbol_id: 0xb841c45e
   symbol_id: 0x0c8a699d
+  symbol_id: 0xf69f852d
   symbol_id: 0xb625db04
   symbol_id: 0x537d5581
   symbol_id: 0x874fcdb2
@@ -418197,6 +418216,7 @@ interface {
   symbol_id: 0x931fa088
   symbol_id: 0xff2bccb8
   symbol_id: 0x04a09533
+  symbol_id: 0x978bc797
   symbol_id: 0xad5c16f2
   symbol_id: 0xffae3bcf
   symbol_id: 0xb6de2d88
