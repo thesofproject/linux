@@ -25,6 +25,7 @@ void *hyp_alloc_pages(struct hyp_pool *pool, u8 order);
 void hyp_split_page(struct hyp_page *page);
 void hyp_get_page(struct hyp_pool *pool, void *addr);
 void hyp_put_page(struct hyp_pool *pool, void *addr);
+bool hyp_pool_owned(struct hyp_pool *pool, void *addr);
 
 u64 hyp_pool_free_pages(struct hyp_pool *pool);
 
