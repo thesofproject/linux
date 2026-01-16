@@ -63,6 +63,7 @@
   acpi_target_system_state
   acpi_video_backlight_string
   acpi_walk_namespace
+  add_device_randomness
   add_taint
   add_timer
   add_uevent_var
@@ -88,6 +89,10 @@
   backlight_device_unregister
   backlight_force_update
   bcmp
+  bdi_alloc
+  bdi_put
+  bdi_register
+  bdi_unregister
   __bitmap_and
   __bitmap_andnot
   __bitmap_clear
@@ -223,6 +228,7 @@
   crypto_unregister_lskcipher
   _ctype
   current_task
+  deactivate_locked_super
   debugfs_attr_read
   debugfs_attr_write
   debugfs_create_bool
@@ -318,10 +324,12 @@
   devm_regulator_bulk_get
   devm_regulator_bulk_get_enable
   devm_regulator_get
+  devm_regulator_get_enable
   devm_regulator_get_optional
   devm_release_action
   devm_remove_action_nowarn
   devm_request_threaded_irq
+  devm_spi_mem_dirmap_create
   __devm_v4l2_sensor_clk_get
   _dev_notice
   dev_pm_clear_wake_irq
@@ -739,6 +747,7 @@
   finish_wait
   firmware_kobj
   firmware_request_nowarn
+  fixed_size_llseek
   flush_delayed_work
   flush_work
   __flush_workqueue
@@ -765,6 +774,7 @@
   generic_file_llseek_size
   generic_handle_irq
   generic_handle_irq_safe
+  generic_shutdown_super
   get_device
   get_free_pages_noprof
   get_pid_task
@@ -1021,6 +1031,7 @@
   __kmem_cache_create_args
   kmem_cache_destroy
   kmem_cache_free
+  kmemdup_array
   kmemdup_noprof
   kmemdup_nul
   kobject_add
@@ -1060,7 +1071,10 @@
   __list_add_valid_or_report
   __list_del_entry_valid_or_report
   local_clock
+  lockref_get
   lock_sock_nested
+  logfc
+  lookup_bdev
   lookup_user_key
   match_string
   media_create_pad_link
@@ -1159,20 +1173,32 @@
   nr_free_buffer_pages
   nsecs_to_jiffies
   ns_to_timespec64
+  nvmem_register
+  nvmem_unregister
+  of_alias_get_id
   of_device_get_match_data
   of_device_is_available
   of_device_is_compatible
+  of_find_property
   of_fwnode_ops
   of_get_child_by_name
+  of_get_compatible_child
   of_get_next_child
   of_get_property
   of_irq_get_byname
   of_match_device
+  of_match_node
+  of_n_addr_cells
+  of_node_name_prefix
+  of_n_size_cells
+  of_platform_populate
   of_property_match_string
   of_property_read_bool
   of_property_read_reg
+  of_property_read_string
   of_property_read_variable_u16_array
   of_property_read_variable_u32_array
+  of_prop_next_string
   of_reserved_mem_region_to_resource
   out_of_line_wait_on_bit_timeout
   p2sb_bar
@@ -1468,6 +1494,7 @@
   seq_open
   seq_printf
   seq_putc
+  __seq_puts
   seq_read
   seq_release
   seq_write
@@ -1480,6 +1507,7 @@
   sg_alloc_table_from_pages_segment
   sg_copy_from_buffer
   sg_copy_to_buffer
+  sget_dev
   sg_free_table
   sg_init_one
   sg_init_table
@@ -1497,6 +1525,7 @@
   simple_attr_write
   simple_open
   simple_read_from_buffer
+  simple_strtoul
   simple_write_to_buffer
   single_open
   single_release
@@ -1540,6 +1569,14 @@
   spi_bus_lock
   spi_bus_unlock
   spi_get_device_id
+  spi_mem_adjust_op_size
+  spi_mem_dirmap_read
+  spi_mem_dirmap_write
+  spi_mem_driver_register_with_owner
+  spi_mem_driver_unregister
+  spi_mem_exec_op
+  spi_mem_get_name
+  spi_mem_supports_op
   __spi_register_driver
   spi_sync
   spi_sync_locked
