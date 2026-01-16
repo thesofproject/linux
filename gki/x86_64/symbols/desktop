@@ -20,6 +20,7 @@
   acpi_fetch_acpi_dev
   acpi_format_exception
   acpi_get_handle
+  acpi_get_local_u64_address
   acpi_get_object_info
   acpi_get_parent
   acpi_get_pci_dev
@@ -61,6 +62,7 @@
   clear_page_orig
   clear_page_rep
   complete
+  complete_all
   _copy_from_iter
   _copy_from_user
   copy_page
@@ -89,15 +91,26 @@
   crypto_skcipher_setkey
   crypto_unregister_lskcipher
   current_task
+  debugfs_attr_read
+  debugfs_attr_write
+  debugfs_create_dir
+  debugfs_create_file_full
+  debugfs_create_str
+  debugfs_remove
   delayed_work_timer_fn
   _dev_err
+  __dev_fwnode_const
   device_add
   device_create
   device_destroy
   device_for_each_child
   device_for_each_child_reverse
+  device_get_named_child_node
   device_initialize
   device_link_add
+  device_match_of_node
+  device_property_read_string
+  device_property_read_u32_array
   device_register
   device_set_wakeup_capable
   device_unregister
@@ -105,7 +118,11 @@
   device_wakeup_enable
   _dev_info
   __devm_add_action
+  devm_device_add_group
+  devm_kasprintf
   devm_kmalloc
+  __devm_regmap_init
+  dev_pm_domain_attach
   devres_add
   __devres_alloc_node
   devres_free
@@ -126,7 +143,11 @@
   __folio_put
   __fortify_panic
   __free_pages
+  fwnode_property_present
+  fwnode_property_read_u32_array
+  fwnode_property_read_u8_array
   guid_parse
+  handle_nested_irq
   ida_alloc_range
   ida_free
   __init_rwsem
@@ -140,6 +161,13 @@
   input_unregister_device
   iov_iter_npages
   iov_iter_revert
+  irq_create_mapping_affinity
+  irq_dispose_mapping
+  irq_domain_instantiate
+  irq_domain_remove
+  irq_modify_status
+  irq_set_chip
+  irq_set_chip_data
   is_acpi_device_node
   jiffies
   kasprintf
@@ -148,10 +176,14 @@
   kfree_sensitive
   __kmalloc_cache_noprof
   kmalloc_caches
+  __kmalloc_large_noprof
   __kmalloc_noprof
   kmemdup_noprof
   kobject_uevent
+  kstrtou8
   kstrtouint
+  ktime_get
+  ktime_get_mono_fast_ns
   kvfree
   __list_add_valid_or_report
   __list_del_entry_valid_or_report
@@ -168,11 +200,15 @@
   __msecs_to_jiffies
   msleep
   __mutex_init
+  mutex_is_locked
   mutex_lock
   mutex_lock_interruptible
   mutex_unlock
   no_seek_end_llseek
   nr_cpu_ids
+  of_fwnode_ops
+  of_get_next_child
+  of_get_property
   page_offset_base
   param_ops_bool
   param_ops_int
@@ -181,8 +217,22 @@
   pci_get_device
   pci_read_config_dword
   __per_cpu_offset
+  platform_device_add
+  platform_device_alloc
+  platform_device_put
+  platform_device_unregister
   __platform_driver_register
   platform_driver_unregister
+  pm_generic_runtime_resume
+  pm_generic_runtime_suspend
+  __pm_runtime_disable
+  pm_runtime_enable
+  __pm_runtime_idle
+  __pm_runtime_resume
+  pm_runtime_set_autosuspend_delay
+  __pm_runtime_set_status
+  __pm_runtime_suspend
+  __pm_runtime_use_autosuspend
   power_supply_changed
   power_supply_get_drvdata
   power_supply_is_system_supplied
@@ -204,15 +254,28 @@
   __ref_stack_chk_guard
   __register_chrdev
   register_pm_notifier
+  __regmap_init
+  release_firmware
   release_sock
   remove_wait_queue
+  request_firmware
   __request_module
   schedule
   schedule_timeout
+  scnprintf
+  sdca_lookup_functions
+  sdca_lookup_interface_revision
   security_locked_down
   security_sk_clone
   security_sock_graft
+  seq_lseek
+  seq_printf
+  seq_read
   sg_init_table
+  simple_attr_open
+  simple_attr_release
+  single_open
+  single_release
   sized_strscpy
   sk_alloc
   sk_free
@@ -243,9 +306,11 @@
   strcasecmp
   strcmp
   strim
+  strlen
   strncasecmp
   strncmp
   strnlen
+  __sw_hweight32
   sysfs_create_file_ns
   sysfs_create_group
   sysfs_create_link
@@ -262,15 +327,18 @@
   thermal_cooling_device_unregister
   timer_init_key
   try_module_get
+  __udelay
   unpin_user_page
   __unregister_chrdev
   unregister_pm_notifier
   up_read
   up_write
+  usleep_range_state
   utf8_data_table
   validate_usercopy_range
   vmemmap_base
   wait_for_completion
+  wait_for_completion_timeout
   wait_woken
   __wake_up
   __wake_up_sync_key
