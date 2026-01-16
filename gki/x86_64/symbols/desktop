@@ -14,6 +14,7 @@
   acpi_dev_gpio_irq_wake_get_by
   acpi_device_fix_up_power
   acpi_device_fix_up_power_children
+  acpi_device_fix_up_power_extended
   acpi_device_hid
   acpi_device_set_power
   acpi_device_update_power
@@ -280,6 +281,7 @@
   dev_kfree_skb_irq_reason
   __devm_add_action
   devm_backlight_device_register
+  devm_blk_crypto_profile_init
   devm_clk_get_optional
   devm_device_add_group
   __devm_drm_dev_alloc
@@ -294,6 +296,7 @@
   devm_iio_trigger_register
   devm_input_allocate_device
   __devm_intel_scu_ipc_register
+  devm_ioremap
   devm_ioremap_resource
   devm_ioremap_uc
   devm_ioremap_wc
@@ -361,11 +364,13 @@
   dma_fence_wait_any_timeout
   dma_fence_wait_timeout
   dma_free_attrs
+  dmam_alloc_attrs
   dma_map_page_attrs
   dma_map_resource
   dma_map_sg_attrs
   dma_map_sgtable
   dma_max_mapping_size
+  dmam_free_coherent
   dma_resv_add_fence
   dma_resv_get_singleton
   dma_resv_init
@@ -965,6 +970,8 @@
   ioread8
   ioread8_rep
   ioremap
+  iosf_mbi_read
+  iosf_mbi_write
   iounmap
   iova_cache_get
   iova_cache_put
@@ -1029,6 +1036,7 @@
   kstrtobool_from_user
   kstrtoint
   kstrtoint_from_user
+  kstrtol_from_user
   kstrtou16
   kstrtou8
   kstrtouint
@@ -1039,6 +1047,7 @@
   ktime_get
   ktime_get_mono_fast_ns
   ktime_get_raw
+  ktime_get_ts64
   ktime_get_with_offset
   kunit_hooks
   kunit_running
@@ -1098,6 +1107,35 @@
   misc_deregister
   misc_register
   __mmap_lock_do_trace_released
+  mmc_card_can_cmd23
+  mmc_card_can_erase
+  mmc_card_can_trim
+  __mmc_claim_host
+  mmc_cmdq_disable
+  mmc_cmdq_enable
+  mmc_command_done
+  mmc_cqe_request_done
+  mmc_detect_change
+  mmc_erase
+  mmc_gpiod_request_cd
+  mmc_gpio_get_cd
+  mmc_gpio_set_cd_wake
+  mmc_hw_reset
+  mmc_is_req_done
+  mmc_register_driver
+  mmc_regulator_set_ocr
+  mmc_regulator_set_vqmmc2
+  mmc_release_host
+  mmc_request_done
+  mmc_retune_release
+  mmc_send_tuning
+  mmc_set_blocklen
+  mmc_set_data_timeout
+  mmc_start_request
+  mmc_unregister_driver
+  mmc_wait_for_cmd
+  mmc_wait_for_req
+  mmc_wait_for_req_done
   __mmdrop
   mmput
   mod_delayed_work_on
@@ -1118,6 +1156,7 @@
   noop_llseek
   no_seek_end_llseek
   nr_cpu_ids
+  nr_free_buffer_pages
   nsecs_to_jiffies
   ns_to_timespec64
   of_device_get_match_data
@@ -1166,7 +1205,10 @@
   pci_enable_device
   pci_enable_msi
   pci_enable_sriov
+  pci_find_capability
+  pci_find_ext_capability
   pci_find_next_ext_capability
+  pci_free_irq_vectors
   pci_get_class
   pci_get_device
   pci_get_domain_bus_and_slot
@@ -1231,6 +1273,7 @@
   platform_get_irq
   platform_get_irq_optional
   platform_get_resource
+  platform_get_resource_byname
   pm_generic_runtime_resume
   pm_generic_runtime_suspend
   pm_runtime_allow
@@ -1337,6 +1380,7 @@
   regulator_bulk_unregister_supply_alias
   regulator_disable
   regulator_enable
+  regulator_get_current_limit
   release_firmware
   __release_region
   release_resource
@@ -1362,6 +1406,57 @@
   __SCT__tp_func_gpu_mem_total
   sdca_lookup_functions
   sdca_lookup_interface_revision
+  sdhci_abort_tuning
+  __sdhci_add_host
+  sdhci_add_host
+  sdhci_alloc_host
+  sdhci_calc_clk
+  sdhci_cleanup_host
+  sdhci_complete_work
+  sdhci_cqe_disable
+  sdhci_cqe_enable
+  sdhci_cqe_irq
+  sdhci_data_line_cmd
+  sdhci_do_reset
+  sdhci_dumpregs
+  sdhci_enable_clk
+  sdhci_enable_preset_value
+  sdhci_enable_v4_mode
+  sdhci_end_tuning
+  sdhci_execute_tuning
+  __sdhci_finish_data_common
+  __sdhci_finish_mrq
+  sdhci_finish_mrq
+  sdhci_get_cd_nogpio
+  sdhci_get_ro
+  sdhci_get_vdd_value
+  sdhci_initialize_data
+  sdhci_mod_timer
+  sdhci_needs_reset
+  sdhci_prepare_dma
+  sdhci_present_error
+  __sdhci_read_caps
+  sdhci_remove_host
+  sdhci_request
+  sdhci_request_done_dma
+  sdhci_reset
+  sdhci_reset_tuning
+  sdhci_resume_host
+  sdhci_runtime_resume_host
+  sdhci_runtime_suspend_host
+  sdhci_send_tuning
+  sdhci_set_bus_width
+  sdhci_set_clock
+  sdhci_set_ios
+  sdhci_set_ios_common
+  sdhci_set_power
+  __sdhci_set_timeout
+  sdhci_set_uhs_signaling
+  sdhci_setup_host
+  sdhci_start_signal_voltage_switch
+  sdhci_start_tuning
+  sdhci_suspend_host
+  sdhci_thread_irq
   securityfs_create_dir
   securityfs_create_file
   securityfs_remove
@@ -1379,12 +1474,14 @@
   serio_interrupt
   __serio_register_port
   serio_unregister_port
+  set_normalized_timespec64
   set_primary_fwnode
   sg_alloc_table
   sg_alloc_table_from_pages_segment
   sg_copy_from_buffer
   sg_copy_to_buffer
   sg_free_table
+  sg_init_one
   sg_init_table
   sgl_alloc
   sgl_free
