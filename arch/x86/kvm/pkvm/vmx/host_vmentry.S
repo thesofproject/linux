@@ -5,6 +5,8 @@
 #include <asm/asm.h>
 #include <asm/unwind_hints.h>
 #include <asm/nospec-branch.h>
+#include "kvm-asm-offsets.h"
+#include "run_flags.h"
 #include "vcpu_regs.h"
 
 /*
@@ -42,10 +44,36 @@ SYM_FUNC_START(pkvm_host_vmexit_entry)
 
 	/* RDI: point to vcpu_vmx */
 	mov WORD_SIZE*1(%_ASM_SP), %_ASM_DI
+	mov $VMX_RUN_SAVE_SPEC_CTRL, %_ASM_SI
+
+	call vmx_spec_ctrl_restore_host
+
+	mov WORD_SIZE*1(%_ASM_SP), %_ASM_DI
 
 	/* pKVM never enables interrupts */
 	call pkvm_host_vmexit_main
 
+	ALTERNATIVE "jmp .Lspec_ctrl_done", "", X86_FEATURE_MSR_SPEC_CTRL
+
+	/*
+	 * SPEC_CTRL handling: if the host's SPEC_CTRL value differs from the
+	 * pkvm's, write the MSR.
+	 *
+	 * IMPORTANT: To avoid RSB underflow attacks and any other nastiness,
+	 * there must not be any returns or indirect branches between this code
+	 * and vmentry.
+	 */
+	mov WORD_SIZE*1(%_ASM_SP), %_ASM_DI
+	movl VMX_spec_ctrl(%_ASM_DI), %edi
+	movl PER_CPU_VAR(x86_spec_ctrl_current), %esi
+	cmp %edi, %esi
+	je .Lspec_ctrl_done
+	mov $MSR_IA32_SPEC_CTRL, %ecx
+	xor %edx, %edx
+	mov %edi, %eax
+	wrmsr
+
+.Lspec_ctrl_done:
 	/*
 	 * Restore registers to reflect the vm-exit handling/emulation result
 	 * before vmresume.
