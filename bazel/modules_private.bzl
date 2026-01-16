@@ -95,24 +95,20 @@ COMMON_GKI_MODULES_LIST = _COMMON_GKI_MODULES_LIST
 
 _ARM_GKI_MODULES_LIST = [
     # keep sorted
-    "drivers/ptp/ptp_kvm.ko",
 ]
 
 _ARM64_GKI_MODULES_LIST = [
     # keep sorted
     "drivers/char/hw_random/cctrng.ko",
     "drivers/misc/open-dice.ko",
-    "drivers/ptp/ptp_kvm.ko",
 ]
 
 _X86_GKI_MODULES_LIST = [
     # keep sorted
-    "drivers/ptp/ptp_kvm.ko",
 ]
 
 _X86_64_GKI_MODULES_LIST = [
     # keep sorted
-    "drivers/ptp/ptp_kvm.ko",
 ]
 
 def _apply(map_each, lst):
