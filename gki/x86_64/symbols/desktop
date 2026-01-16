@@ -4,6 +4,8 @@
   __acpi_bus_register_driver
   acpi_bus_unregister_driver
   acpi_check_dsm
+  acpi_check_region
+  acpi_check_resource_conflict
   acpi_dev_add_driver_gpios
   acpi_dev_for_each_child
   acpi_dev_found
@@ -38,6 +40,7 @@
   acpi_get_table
   acpi_handle_printk
   acpi_has_method
+  acpi_install_address_space_handler
   acpi_install_notify_handler
   acpi_is_video_device
   acpi_kobj
@@ -46,10 +49,13 @@
   acpi_notifier_call_chain
   acpi_osi_is_win8
   acpi_os_map_iomem
+  acpi_os_read_port
   acpi_os_unmap_iomem
+  acpi_os_write_port
   acpi_pm_wakeup_event
   acpi_put_table
   acpi_quirk_skip_acpi_ac_and_battery
+  acpi_remove_address_space_handler
   acpi_remove_notify_handler
   acpi_target_system_state
   acpi_video_backlight_string
@@ -104,6 +110,7 @@
   bt_info
   bt_to_errno
   bt_warn
+  BUG_func
   bus_find_device
   bus_for_each_dev
   bus_register
@@ -125,6 +132,7 @@
   cec_notifier_conn_unregister
   cec_notifier_set_phys_addr
   __check_object_size
+  check_signature
   class_find_device
   class_for_each_device
   class_register
@@ -133,6 +141,11 @@
   clear_page_orig
   clear_page_rep
   clflush_cache_range
+  clk_disable
+  clk_enable
+  clk_get_rate
+  clk_prepare
+  clk_unprepare
   compat_only_sysfs_link_entry_to_kobj
   complete
   complete_all
@@ -206,22 +219,27 @@
   dev_err_probe
   __dev_fwnode
   __dev_fwnode_const
+  dev_get_regmap
   device_add
   device_create
   device_del
   device_destroy
   device_for_each_child
   device_for_each_child_reverse
+  device_get_match_data
   device_get_named_child_node
   device_get_next_child_node
   device_initialize
   device_link_add
   device_link_remove
   device_match_of_node
+  device_property_present
+  device_property_read_bool
   device_property_read_string
   device_property_read_u32_array
   device_property_read_u8_array
   device_register
+  device_set_node
   device_set_wakeup_capable
   device_unregister
   device_wakeup_disable
@@ -230,12 +248,14 @@
   dev_kfree_skb_irq_reason
   __devm_add_action
   devm_backlight_device_register
+  devm_clk_get_optional
   devm_device_add_group
   __devm_drm_dev_alloc
   __devm_drm_panel_alloc
   devm_free_irq
   devm_gpiod_get
   devm_gpiod_get_index
+  devm_gpiod_get_optional
   devm_input_allocate_device
   devm_ioremap_resource
   devm_ioremap_wc
@@ -248,6 +268,7 @@
   devm_memremap
   devm_pinctrl_get
   devm_pinctrl_put
+  devm_platform_ioremap_resource
   __devm_regmap_init
   devm_release_action
   devm_remove_action_nowarn
@@ -314,6 +335,9 @@
   dmi_check_system
   dmi_first_match
   dmi_get_system_info
+  dmi_memdev_handle
+  dmi_memdev_size
+  dmi_memdev_type
   dmi_name_in_vendors
   dmi_walk
   do_wait_intr
@@ -669,6 +693,8 @@
   freezing_slow_path
   fwnode_create_software_node
   fwnode_handle_get
+  fwnode_irq_get_byname
+  fwnode_property_match_string
   fwnode_property_present
   fwnode_property_read_u32_array
   fwnode_property_read_u8_array
@@ -690,6 +716,7 @@
   gpiod_remove_lookup_table
   gpiod_set_value
   gpiod_set_value_cansleep
+  gpiod_to_irq
   guid_gen
   guid_null
   guid_parse
@@ -761,22 +788,32 @@
   hwrng_register
   hwrng_unregister
   i2c_acpi_find_adapter_by_handle
+  i2c_acpi_find_bus_speed
   i2c_acpi_get_i2c_resource
+  i2c_adapter_type
   i2c_add_adapter
   i2c_add_numbered_adapter
   i2c_bus_type
   i2c_del_adapter
   i2c_del_driver
+  i2c_for_each_dev
+  i2c_generic_scl_recovery
   i2c_get_adapter
+  i2c_handle_smbus_host_notify
   i2c_new_client_device
+  i2c_new_scanned_device
+  i2c_parse_fw_timings
   i2c_put_adapter
+  i2c_recover_bus
   i2c_register_driver
   i2c_smbus_read_byte
+  i2c_smbus_xfer
   __i2c_transfer
   i2c_transfer
   i2c_transfer_buffer_flags
   i2c_unregister_device
   i2c_verify_adapter
+  i2c_verify_client
   ida_alloc_range
   ida_free
   idr_alloc
@@ -808,16 +845,19 @@
   int_pow
   int_sqrt
   iomem_resource
+  ioport_resource
   ioread16
   ioread32
   __ioread64_lo_hi
   ioread8
+  ioread8_rep
   ioremap
   iounmap
   iov_iter_npages
   iov_iter_revert
   iowrite32
   iowrite8
+  iowrite8_rep
   __irq_alloc_descs
   irq_create_mapping_affinity
   irq_dispose_mapping
@@ -833,6 +873,7 @@
   irq_set_chip_data
   irq_set_irq_wake
   irq_work_queue
+  is_acpi_data_node
   is_acpi_device_node
   is_vmalloc_addr
   jiffies
@@ -956,15 +997,21 @@
   of_property_read_variable_u32_array
   of_reserved_mem_region_to_resource
   out_of_line_wait_on_bit_timeout
+  p2sb_bar
   page_offset_base
   panic_notifier_list
+  param_array_ops
   param_ops_bool
+  param_ops_byte
   param_ops_charp
   param_ops_int
   param_ops_string
   param_ops_uint
+  param_ops_ulong
+  param_ops_ushort
   pci_alloc_irq_vectors
   pci_assign_unassigned_bus_resources
+  pci_bus_read_config_byte
   pci_bus_read_config_word
   pci_bus_resource_n
   pci_bus_type
@@ -1082,6 +1129,7 @@
   __put_task_struct_rcu_cb
   __put_user_4
   __put_user_8
+  pv_ops
   queue_delayed_work_on
   queue_work_on
   ___ratelimit
@@ -1113,6 +1161,7 @@
   __ref_stack_chk_guard
   register_acpi_notifier
   __register_chrdev
+  register_chrdev_region
   register_die_notifier
   register_pm_notifier
   register_reboot_notifier
@@ -1166,6 +1215,7 @@
   serio_interrupt
   __serio_register_port
   serio_unregister_port
+  set_primary_fwnode
   sg_alloc_table
   sg_alloc_table_from_pages_segment
   sg_copy_from_buffer
@@ -1250,6 +1300,7 @@
   __sw_hweight64
   synchronize_irq
   synchronize_rcu
+  syscon_node_to_regmap
   sysctl_vals
   sysfs_create_bin_file
   sysfs_create_file_ns
