@@ -4,16 +4,20 @@
   __acpi_bus_register_driver
   acpi_bus_unregister_driver
   acpi_check_dsm
+  acpi_dev_add_driver_gpios
   acpi_dev_for_each_child
   acpi_dev_found
   acpi_dev_free_resource_list
   acpi_dev_get_resources
+  acpi_dev_gpio_irq_wake_get_by
+  acpi_device_fix_up_power
   acpi_device_fix_up_power_children
   acpi_device_hid
   acpi_device_set_power
   acpi_device_update_power
   acpi_dev_install_notify_handler
   acpi_dev_present
+  acpi_dev_remove_driver_gpios
   acpi_dev_remove_notify_handler
   acpi_disabled
   acpi_evaluate_dsm
@@ -71,6 +75,7 @@
   backlight_device_unregister
   backlight_force_update
   bcmp
+  __bitmap_and
   __bitmap_andnot
   __bitmap_clear
   bitmap_find_next_zero_area_off
@@ -82,6 +87,8 @@
   __bitmap_weight
   bitmap_zalloc
   bit_wait_timeout
+  blocking_notifier_chain_register
+  blocking_notifier_chain_unregister
   boot_cpu_data
   bpf_trace_run1
   bpf_trace_run2
@@ -125,6 +132,7 @@
   clear_page_erms
   clear_page_orig
   clear_page_rep
+  clflush_cache_range
   compat_only_sysfs_link_entry_to_kobj
   complete
   complete_all
@@ -154,6 +162,7 @@
   cpu_latency_qos_update_request
   cpu_number
   __cpu_online_mask
+  crc32_le
   crypto_ahash_digest
   crypto_ahash_export
   crypto_ahash_finup
@@ -194,6 +203,7 @@
   _dev_crit
   dev_driver_string
   _dev_err
+  dev_err_probe
   __dev_fwnode
   __dev_fwnode_const
   device_add
@@ -226,6 +236,7 @@
   devm_free_irq
   devm_gpiod_get
   devm_gpiod_get_index
+  devm_input_allocate_device
   devm_ioremap_resource
   devm_ioremap_wc
   devm_kasprintf
@@ -233,6 +244,7 @@
   devm_kmalloc
   devm_kmemdup
   devm_krealloc
+  devm_led_classdev_register_ext
   devm_memremap
   devm_pinctrl_get
   devm_pinctrl_put
@@ -241,7 +253,10 @@
   devm_remove_action_nowarn
   devm_request_threaded_irq
   _dev_notice
+  dev_pm_clear_wake_irq
   dev_pm_domain_attach
+  dev_pm_set_dedicated_wake_irq
+  _dev_printk
   devres_add
   __devres_alloc_node
   devres_free
@@ -250,6 +265,7 @@
   disable_irq
   disable_irq_nosync
   disable_work_sync
+  dma_alloc_attrs
   dma_buf_dynamic_attach
   dma_buf_map_attachment
   dma_buf_move_notify
@@ -273,8 +289,10 @@
   dma_fence_signal_locked
   dma_fence_wait_any_timeout
   dma_fence_wait_timeout
+  dma_free_attrs
   dma_map_page_attrs
   dma_map_resource
+  dma_map_sg_attrs
   dma_map_sgtable
   dma_max_mapping_size
   dma_resv_add_fence
@@ -294,10 +312,12 @@
   dma_unmap_resource
   dma_unmap_sg_attrs
   dmi_check_system
+  dmi_first_match
   dmi_get_system_info
   dmi_name_in_vendors
   dmi_walk
   do_wait_intr
+  down
   downgrade_write
   down_read
   down_read_interruptible
@@ -495,6 +515,7 @@
   drm_helper_probe_detect
   drm_helper_probe_single_connector_modes
   drm_ioctl
+  drm_is_panel_follower
   drm_kms_helper_connector_hotplug_event
   drm_kms_helper_hotplug_event
   drm_kms_helper_poll_disable
@@ -554,8 +575,10 @@
   drm_object_property_set_value
   drm_open
   drm_panel_add
+  drm_panel_add_follower
   drm_panel_prepare
   drm_panel_remove
+  drm_panel_remove_follower
   drm_panel_unprepare
   drm_plane_add_size_hints_property
   drm_plane_cleanup
@@ -626,6 +649,7 @@
   enable_irq
   extract_iter_to_sg
   _find_first_bit
+  _find_first_zero_bit
   _find_last_bit
   _find_next_bit
   _find_next_or_bit
@@ -707,6 +731,28 @@
   hdmi_spd_infoframe_check
   hdmi_spd_infoframe_init
   hdmi_vendor_infoframe_check
+  hid_add_device
+  hid_allocate_device
+  hid_alloc_report_buf
+  hid_destroy_device
+  hid_driver_reset_resume
+  hid_driver_suspend
+  hid_field_extract
+  hid_find_field
+  hid_hw_close
+  hid_hw_open
+  hid_hw_output_report
+  hid_hw_raw_request
+  hid_hw_start
+  hid_hw_stop
+  hid_input_report
+  hid_is_usb
+  hid_open_report
+  hid_output_report
+  hid_parse_report
+  __hid_register_driver
+  hid_report_raw_event
+  hid_unregister_driver
   hrtimer_cancel
   hrtimer_cb_get_time
   hrtimer_forward
@@ -725,8 +771,10 @@
   i2c_new_client_device
   i2c_put_adapter
   i2c_register_driver
+  i2c_smbus_read_byte
   __i2c_transfer
   i2c_transfer
+  i2c_transfer_buffer_flags
   i2c_unregister_device
   i2c_verify_adapter
   ida_alloc_range
@@ -743,10 +791,17 @@
   init_wait_entry
   __init_waitqueue_head
   init_wait_var_entry
+  input_alloc_absinfo
   input_allocate_device
   input_event
   input_free_device
+  input_mt_assign_slots
+  input_mt_init_slots
+  input_mt_report_slot_state
+  input_mt_sync_frame
   input_register_device
+  input_set_abs_params
+  input_set_capability
   input_unregister_device
   intel_graphics_stolen_res
   intlog10
@@ -768,8 +823,11 @@
   irq_dispose_mapping
   irq_domain_instantiate
   irq_domain_remove
+  irq_domain_simple_ops
   irq_free_descs
+  irq_get_irq_data
   irq_modify_status
+  __irq_resolve_mapping
   irq_set_chip
   irq_set_chip_and_handler_name
   irq_set_chip_data
@@ -872,6 +930,7 @@
   module_put
   __msecs_to_jiffies
   msleep
+  msleep_interruptible
   __mutex_init
   mutex_is_locked
   mutex_lock
@@ -886,6 +945,7 @@
   ns_to_timespec64
   of_device_get_match_data
   of_fwnode_ops
+  of_get_child_by_name
   of_get_next_child
   of_get_property
   of_irq_get_byname
@@ -893,6 +953,7 @@
   of_property_match_string
   of_property_read_bool
   of_property_read_variable_u16_array
+  of_property_read_variable_u32_array
   of_reserved_mem_region_to_resource
   out_of_line_wait_on_bit_timeout
   page_offset_base
@@ -907,6 +968,7 @@
   pci_bus_read_config_word
   pci_bus_resource_n
   pci_bus_type
+  pci_clear_master
   pci_d3cold_disable
   pci_d3cold_enable
   pci_dev_get
@@ -931,16 +993,21 @@
   pci_map_rom
   pci_match_id
   pcim_enable_device
+  pcim_iomap_region
+  pcim_iomap_regions
+  pcim_iomap_table
   pci_msix_vec_count
   pci_num_vf
   pci_pme_capable
   pci_pr3_present
+  pci_prepare_to_sleep
   pci_read_config_byte
   pci_read_config_dword
   pci_read_config_word
   pci_rebar_get_possible_sizes
   __pci_register_driver
   pci_release_resource
+  pci_reset_function
   pci_resize_resource
   pci_restore_state
   pci_save_state
@@ -1051,6 +1118,7 @@
   register_reboot_notifier
   register_sysctl_sz
   regmap_bulk_read
+  regmap_bulk_write
   __regmap_init
   regmap_multi_reg_write
   regmap_raw_read
@@ -1095,10 +1163,17 @@
   seq_read
   seq_release
   seq_write
+  serio_interrupt
+  __serio_register_port
+  serio_unregister_port
   sg_alloc_table
   sg_alloc_table_from_pages_segment
+  sg_copy_from_buffer
+  sg_copy_to_buffer
   sg_free_table
   sg_init_table
+  sgl_alloc
+  sgl_free
   shrinker_alloc
   shrinker_free
   shrinker_register
@@ -1216,6 +1291,7 @@
   __tracepoint_gpu_mem_total
   __tracepoint_mmap_lock_released
   __tracepoint_sched_set_state_tp
+  trace_print_symbols_seq
   trace_raw_output_prep
   __trace_set_current_state
   __trace_trigger_soft_disabled
@@ -1284,6 +1360,7 @@
   unregister_pm_notifier
   unregister_reboot_notifier
   unregister_sysctl_table
+  up
   up_read
   up_write
   usb_alloc_coherent
@@ -1324,6 +1401,7 @@
   vga_get
   vga_put
   video_firmware_drivers_only
+  vivaldi_function_row_physmap_show
   vmalloc_noprof
   vmalloc_to_page
   __vma_start_write
@@ -1331,6 +1409,7 @@
   vmf_insert_pfn
   vmf_insert_pfn_prot
   vm_get_page_prot
+  vsnprintf
   wait_for_completion
   wait_for_completion_interruptible
   wait_for_completion_timeout
