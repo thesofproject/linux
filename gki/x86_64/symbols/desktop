@@ -233,6 +233,8 @@
   cdc_ncm_select_altsetting
   cdc_ncm_unbind
   cdc_parse_cdc_header
+  cdev_add
+  cdev_del
   cdev_device_add
   cdev_device_del
   cdev_init
@@ -387,13 +389,16 @@
   debugfs_attr_read
   debugfs_attr_write
   debugfs_change_name
+  debugfs_create_blob
   debugfs_create_bool
+  debugfs_create_devm_seqfile
   debugfs_create_dir
   debugfs_create_file_full
   debugfs_create_file_unsafe
   debugfs_create_str
   debugfs_create_symlink
   debugfs_create_u32
+  debugfs_create_u8
   debugfs_create_x32
   debugfs_file_get
   debugfs_file_put
@@ -568,6 +573,7 @@
   devres_find
   devres_free
   dev_set_name
+  dev_set_threaded
   dev_trans_start
   dev_valid_name
   _dev_warn
@@ -584,11 +590,20 @@
   dma_async_device_register
   dma_async_device_unregister
   dma_async_tx_descriptor_init
+  dma_buf_attach
+  dma_buf_detach
   dma_buf_dynamic_attach
   dma_buf_export
+  dma_buf_fd
+  dma_buf_get
   dma_buf_map_attachment
+  dma_buf_map_attachment_unlocked
   dma_buf_move_notify
+  dma_buf_put
   dma_buf_unmap_attachment
+  dma_buf_unmap_attachment_unlocked
+  dma_buf_vmap_unlocked
+  dma_buf_vunmap_unlocked
   dm_accept_partial_bio
   dma_fence_add_callback
   dma_fence_array_alloc
@@ -1484,6 +1499,7 @@
   ioread16_rep
   ioread32
   ioread32be
+  __ioread32_copy
   __ioread64_lo_hi
   ioread8
   ioread8_rep
@@ -1623,10 +1639,14 @@
   kthread_create_worker_on_node
   kthread_destroy_worker
   kthread_flush_work
+  kthread_park
+  kthread_parkme
   kthread_queue_work
+  kthread_should_park
   kthread_should_stop
   kthread_stop
   kthread_stop_put
+  kthread_unpark
   kthread_unuse_mm
   kthread_use_mm
   ktime_get
@@ -1751,7 +1771,9 @@
   misc_deregister
   misc_register
   mktime64
+  __mmap_lock_do_trace_acquire_returned
   __mmap_lock_do_trace_released
+  __mmap_lock_do_trace_start_locking
   mmc_card_can_cmd23
   mmc_card_can_erase
   mmc_card_can_trim
@@ -1794,6 +1816,7 @@
   __msecs_to_jiffies
   msleep
   msleep_interruptible
+  mtree_load
   __mutex_init
   mutex_is_locked
   mutex_lock
@@ -1887,6 +1910,8 @@
   ns_to_timespec64
   n_tty_ioctl_helper
   __num_online_cpus
+  nvmem_cell_put
+  nvmem_cell_read
   nvmem_register
   nvmem_unregister
   of_alias_get_id
@@ -1903,6 +1928,7 @@
   of_fwnode_ops
   of_get_child_by_name
   of_get_compatible_child
+  of_get_mac_address
   of_get_next_child
   of_get_property
   of_irq_get
@@ -1913,6 +1939,7 @@
   of_n_addr_cells
   of_node_name_prefix
   of_n_size_cells
+  of_nvmem_cell_get
   of_platform_populate
   of_property_match_string
   of_property_read_bool
@@ -1934,6 +1961,10 @@
   page_get_link
   page_is_ram
   page_offset_base
+  page_pool_alloc_frag
+  page_pool_create
+  page_pool_destroy
+  page_pool_put_unrefed_netmem
   page_symlink
   page_symlink_inode_operations
   panic
@@ -2125,6 +2156,7 @@
   pinctrl_lookup_state
   pinctrl_register_mappings
   pinctrl_select_state
+  pin_user_pages_fast
   platform_bus
   platform_device_add
   platform_device_add_data
@@ -2229,6 +2261,7 @@
   queue_limits_commit_update_frozen
   queue_work_on
   radix_tree_lookup
+  radix_tree_tagged
   ___ratelimit
   _raw_read_lock
   _raw_read_lock_bh
@@ -2341,6 +2374,7 @@
   rfkill_alloc
   rfkill_blocked
   rfkill_destroy
+  rfkill_pause_polling
   rfkill_register
   rfkill_resume_polling
   rfkill_set_hw_state_reason
@@ -2372,6 +2406,7 @@
   sb_set_blocksize
   sched_clock
   sched_set_fifo
+  sched_set_fifo_low
   schedule
   schedule_timeout
   schedule_timeout_interruptible
@@ -2912,6 +2947,7 @@
   system_wq
   sys_tz
   __tasklet_hi_schedule
+  tasklet_init
   tasklet_kill
   __tasklet_schedule
   tasklet_setup
@@ -2983,14 +3019,18 @@
   trace_event_reg
   trace_handle_return
   __traceiter_gpu_mem_total
+  __traceiter_mmap_lock_acquire_returned
   __traceiter_mmap_lock_released
+  __traceiter_mmap_lock_start_locking
   __traceiter_read_msr
   __traceiter_sched_set_state_tp
   __traceiter_write_msr
   __traceiter_xdp_exception
   trace_output_call
   __tracepoint_gpu_mem_total
+  __tracepoint_mmap_lock_acquire_returned
   __tracepoint_mmap_lock_released
+  __tracepoint_mmap_lock_start_locking
   __tracepoint_read_msr
   __tracepoint_sched_set_state_tp
   __tracepoint_write_msr
@@ -3162,6 +3202,7 @@
   unlock_page
   unmap_mapping_range
   unpin_user_page
+  unpin_user_pages
   unregister_acpi_notifier
   unregister_blkdev
   __unregister_chrdev
@@ -3432,6 +3473,8 @@
   vmf_insert_pfn_prot
   vm_get_page_prot
   vm_insert_page
+  vm_map_ram
+  vm_unmap_ram
   vsnprintf
   vsprintf
   vunmap
