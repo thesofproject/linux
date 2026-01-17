@@ -411,6 +411,14 @@ pub(crate) struct ThreadPrioState {
     pub(crate) next: BinderPriority,
 }
 
+use core::mem::offset_of;
+use kernel::bindings::rb_thread_layout;
+pub(crate) const THREAD_LAYOUT: rb_thread_layout = rb_thread_layout {
+    arc_offset: Arc::<Thread>::DATA_OFFSET,
+    process: offset_of!(Thread, process),
+    id: offset_of!(Thread, id),
+};
+
 /// This represents a thread that's used with binder.
 #[pin_data]
 pub(crate) struct Thread {
@@ -703,6 +711,12 @@ impl Thread {
             );
         }
 
+        crate::trace::trace_set_priority(
+            task,
+            desired.prio,
+            prio::to_kernel_prio(policy, priority),
+        );
+
         let mut prio_state = self.prio_lock.lock();
         if !verify && prio_state.state == PriorityState::Abort {
             // A new priority has been set by an incoming nested
@@ -799,6 +813,7 @@ impl Thread {
 
                 let field_offset = offset + FD_FIELD_OFFSET;
 
+                crate::trace::trace_transaction_fd_send(view.alloc.debug_id, fd, field_offset);
                 view.alloc.info_add_fd(file, field_offset, false)?;
             }
             BinderObjectRef::Ptr(obj) => {
@@ -1081,6 +1096,8 @@ impl Thread {
                 }
             };
 
+        crate::trace::trace_transaction_alloc_buf(debug_id, tr);
+
         // SAFETY: This accesses a union field, but it's okay because the field's type is valid for
         // all bit-patterns.
         let trd_data_ptr = unsafe { &trd.data.ptr };
@@ -1217,6 +1234,8 @@ impl Thread {
         transaction: &DArc<Transaction>,
     ) -> bool {
         if let Ok(transaction) = &reply {
+            crate::trace::trace_transaction(true, &transaction, Some(&self.task));
+
             transaction.set_outstanding(&mut self.process.inner.lock());
         }
 
@@ -1396,6 +1415,7 @@ impl Thread {
         while reader.len() >= size_of::<u32>() && self.inner.lock().return_work.is_unused() {
             let before = reader.len();
             let cmd = reader.read::<u32>()?;
+            crate::trace::trace_command(cmd);
             GLOBAL_STATS.inc_bc(cmd);
             self.process.stats.inc_bc(cmd);
             match cmd {
@@ -1429,6 +1449,7 @@ impl Thread {
                         if buffer.looper_need_return_on_free() {
                             self.inner.lock().looper_need_return = true;
                         }
+                        crate::trace::trace_transaction_buffer_release(buffer.debug_id);
                         drop(buffer);
                     }
                 }
@@ -1485,10 +1506,17 @@ impl Thread {
             UserSlice::new(UserPtr::from_addr(read_start as _), read_len as _).writer(),
             self,
         );
-        let (in_pool, use_proc_queue) = {
+        let (in_pool, has_transaction, thread_todo, use_proc_queue) = {
             let inner = self.inner.lock();
-            (inner.is_looper(), inner.should_use_process_work_queue())
+            (
+                inner.is_looper(),
+                inner.current_transaction.is_some(),
+                !inner.work_list.is_empty(),
+                inner.should_use_process_work_queue(),
+            )
         };
+
+        crate::trace::trace_wait_for_work(use_proc_queue, has_transaction, thread_todo);
 
         let getter = if use_proc_queue {
             Self::get_work
@@ -1555,6 +1583,7 @@ impl Thread {
         let mut ret = Ok(());
         if req.write_size > 0 {
             ret = self.write(&mut req);
+            crate::trace::trace_write_done(ret);
             if let Err(err) = ret {
                 pr_warn!(
                     "Write failure {:?} in pid:{}",
@@ -1571,6 +1600,7 @@ impl Thread {
         // Go through the work queue.
         if req.read_size > 0 {
             ret = self.read(&mut req, wait);
+            crate::trace::trace_read_done(ret);
             if ret.is_err() && ret != Err(EINTR) {
                 pr_warn!(
                     "Read failure {:?} in pid:{}",
