@@ -75,6 +75,7 @@
 
 #include <linux/cacheflush.h>
 
+#include "binder_pick.h"
 #include "binder_netlink.h"
 #include "binder_internal.h"
 #include "binder_trace.h"
@@ -7380,6 +7381,15 @@ err_alloc_device_names_failed:
 	binder_alloc_shrinker_exit();
 
 	return ret;
+}
+
+void binder_unload_builtin(void)
+{
+	genl_unregister_family(&binder_nl_family);
+	unload_binderfs();
+	debugfs_remove_recursive(binder_debugfs_dir_entry_root);
+	binder_alloc_shrinker_exit();
+	binder_remove_trace_events(THIS_MODULE);
 }
 
 device_initcall(binder_init);
