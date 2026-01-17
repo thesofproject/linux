@@ -121,6 +121,7 @@ config KVM_INTEL_PROVE_VE
 
 config PKVM_X86
 	bool
+	depends on X86_X2APIC
 
 	help
 	  Provides pKVM x86 generic support.
