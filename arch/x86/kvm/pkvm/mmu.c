@@ -162,11 +162,20 @@ static int fix_hyp_mmu_page_refcnt(void)
 	};
 	unsigned long size;
 
+#ifdef CONFIG_PKVM_X86_DEBUG
+	/*
+	 * Only the memory addresses under VMALLOC_START are mapped by the
+	 * pKVM hypervisor itself, thus only need to fix vmmemap for this
+	 * range.
+	 */
+	size = VMALLOC_START & ~hyp_mmu.pgt_ops->level_to_mask(hyp_mmu.cap.level + 1);
+#else
 	/*
 	 * Calculate the max address space, then walk the [0, size) address
 	 * range to fixup refcount of every page-table page.
 	 */
 	size = pkvm_pgtable_max_size(&hyp_mmu);
+#endif
 
 	return pkvm_pgtable_walk(&hyp_mmu, 0, size, &walker);
 }
@@ -233,6 +242,18 @@ int pkvm_hyp_mmu_map(unsigned long vaddr, unsigned long phys,
 {
 	return pkvm_pgtable_map(&hyp_mmu, vaddr, phys, size, prot);
 }
+
+#ifdef CONFIG_PKVM_X86_DEBUG
+void pkvm_hyp_mmu_clone_host(unsigned long start_vaddr)
+{
+	int i = hyp_mmu_vaddr_to_index(start_vaddr, hyp_mmu.cap.level);
+	u64 *host_cr3 = __pkvm_va(__native_read_cr3() & PAGE_MASK);
+	u64 *ptep = __pkvm_va(hyp_mmu.root_pa);
+
+	for (; i < PTRS_PER_PTE; i++)
+		ptep[i] = host_cr3[i];
+}
+#endif
 
 int pkvm_host_mmu_init(void *pool_base, unsigned long pool_pages, host_mmu_init_fn_t fn)
 {
