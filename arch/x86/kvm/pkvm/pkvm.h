@@ -48,6 +48,8 @@ struct pkvm_vm {
 	 */
 	size_t size;
 	pkvm_spinlock_t lock;
+	struct pkvm_vcpu *vcpus[KVM_MAX_VCPUS];
+	atomic_t vcpu_refs[KVM_MAX_VCPUS];
 	/*
 	 * The struct kvm should be the last element. In cases where struct kvm
 	 * is wrapped by a vendor specific structure, putting it as the last
