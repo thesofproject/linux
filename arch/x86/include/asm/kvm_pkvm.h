@@ -234,6 +234,16 @@ static inline unsigned long pkvm_host_pgtable_pages(void)
 	       __pkvm_pgtable_max_pages(SZ_2G >> PAGE_SHIFT);
 }
 
+static inline bool pkvm_is_protected_vm(struct kvm *kvm)
+{
+	return kvm->arch.vm_type == KVM_X86_PKVM_PROTECTED_VM;
+}
+
+static inline bool pkvm_is_protected_vcpu(struct kvm_vcpu *vcpu)
+{
+	return pkvm_is_protected_vm(vcpu->kvm);
+}
+
 #ifdef __PKVM_HYP__
 
 #ifndef CONFIG_PKVM_X86_DEBUG
@@ -263,6 +273,11 @@ static inline unsigned long pkvm_host_pgtable_pages(void)
 #endif /* CONFIG_PKVM_X86_DEBUG */
 
 #endif /* __PKVM_HYP__ */
+
+#else /* !CONFIG_PKVM_X86 */
+
+static inline bool pkvm_is_protected_vm(struct kvm *kvm) { return false; }
+static inline bool pkvm_is_protected_vcpu(struct kvm_vcpu *vcpu) { return false; }
 
 #endif /* CONFIG_PKVM_X86 */
 
