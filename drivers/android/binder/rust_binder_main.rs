@@ -40,6 +40,7 @@ mod defs;
 mod error;
 mod node;
 mod page_range;
+mod prio;
 mod process;
 mod range_alloc;
 mod stats;
@@ -150,6 +151,10 @@ trait DeliverToRead: ListArcSafe + Send + Sync {
     ///
     /// Generally only set to true for non-oneway transactions.
     fn should_sync_wakeup(&self) -> bool;
+
+    /// Called when the work item is selected by a thread. This allows the work item to modify the
+    /// thread that is processing it.
+    fn on_thread_selected(&self, _thread: &Thread) {}
 
     fn debug_print(&self, m: &SeqFile, prefix: &str, transaction_prefix: &str) -> Result<()>;
 }
