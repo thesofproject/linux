@@ -52,6 +52,9 @@ static inline bool iommu_supports_5levels(void)
 }
 
 int pkvm_intel_iommu_init(void);
+
+int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val);
+int pkvm_iommu_mmio_write(u64 phys, int len, u64 val);
 #endif /* !__PKVM_HYP__ */
 #endif /* CONFIG_PKVM_INTEL */
 #endif /* _PKVM_INTEL_IOMMU_H_ */
