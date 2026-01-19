@@ -998,8 +998,10 @@ static int smmu_alloc_domain(pkvm_handle_t iommu,
 		return -EINVAL;
 
 	smmu_domain = hyp_alloc(sizeof(*smmu_domain));
-	if (!smmu_domain)
+	if (!smmu_domain) {
+		kvm_iommu_request_hyp_alloc();
 		return -ENOMEM;
+	}
 
 	smmu_domain->domain = domain;
 	smmu_domain->type = type;
