@@ -1111,6 +1111,7 @@ int pkvm_pgtable_stage2_map(struct kvm_pgtable *pgt, u64 addr, u64 size,
 	struct kvm_hyp_memcache *cache = mc;
 	u64 gfn = addr >> PAGE_SHIFT;
 	u64 pfn = phys >> PAGE_SHIFT;
+	struct arm_smccc_res res;
 	int ret;
 
 	if (size != PAGE_SIZE && size != PMD_SIZE)
@@ -1135,9 +1136,24 @@ int pkvm_pgtable_stage2_map(struct kvm_pgtable *pgt, u64 addr, u64 size,
 		mapping = NULL;
 	}
 
-	ret = kvm_call_hyp_nvhe(__pkvm_host_map_guest, pfn, gfn, size / PAGE_SIZE, prot);
-	if (WARN_ON(ret))
+	arm_smccc_1_1_hvc(KVM_HOST_SMCCC_FUNC(__pkvm_host_map_guest),
+			  pfn, gfn, size / PAGE_SIZE, prot, &res);
+	WARN_ON(res.a0 != SMCCC_RET_SUCCESS);
+	ret = res.a1;
+	if (WARN_ON(ret && ret > -EBADHANDLE))
 		return ret;
+
+	/*
+	 * Pending kvm_hyp_req in SMCCC. Releasing the write lock for the
+	 * handling is fine: The vCPU will have to fault again to retry.
+	 */
+	if (ret) {
+		write_unlock(&kvm->mmu_lock);
+		ret = __pkvm_handle_smccc_req(&res, NULL);
+		write_lock(&kvm->mmu_lock);
+
+		return ret ?: -EAGAIN;
+	}
 
 	swap(mapping, cache->mapping);
 	mapping->gfn = gfn;
@@ -1869,12 +1885,24 @@ void pkvm_el2_mod_frob_sections(Elf_Ehdr *ehdr, Elf_Shdr *sechdrs, char *secstri
 int __pkvm_topup_hyp_alloc_mgt_mc(enum hyp_alloc_mgt_id id, struct kvm_hyp_memcache *mc)
 {
 	struct arm_smccc_res res;
+	int ret;
 
-	res = kvm_call_hyp_nvhe_smccc(__pkvm_hyp_alloc_mgt_refill,
-				      id, mc->head, mc->nr_pages);
-	mc->head = res.a2;
-	mc->nr_pages = res.a3;
-	return res.a1;
+	do {
+		res = kvm_call_hyp_nvhe_smccc(__pkvm_hyp_alloc_mgt_refill, id, mc->head,
+					      mc->nr_pages);
+		ret = res.a1;
+		mc->head = res.a3 & PAGE_MASK;
+		mc->nr_pages = res.a3 & ~PAGE_MASK;
+
+		if (!ret)
+			break;
+
+		ret = __pkvm_handle_smccc_req(&res, NULL);
+		if (ret)
+			return ret;
+	} while (1);
+
+	return ret;
 }
 
 int __pkvm_topup_hyp_alloc(unsigned long nr_pages)
