@@ -7,6 +7,7 @@
 #include <kvm/arm_hypercalls.h>
 
 #include <nvhe/alloc.h>
+#include <nvhe/errno.h>
 #include <nvhe/iommu.h>
 #include <nvhe/mem_protect.h>
 #include <nvhe/pkvm.h>
@@ -155,7 +156,7 @@ static bool pkvm_guest_iommu_alloc_domain(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *e
 
 	guest_domain = hyp_alloc(sizeof(*guest_domain));
 	if (!guest_domain) {
-		BUG_ON(hyp_alloc_errno() != -ENOMEM);
+		BUG_ON(hyp_alloc_errno() != -ENOMEMHYPALLOC);
 		req = pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_HYP_ALLOC);
 		if (!req)
 			return false;

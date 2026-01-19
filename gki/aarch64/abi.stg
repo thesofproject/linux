@@ -43201,6 +43201,11 @@ array {
   element_type_id: 0x5d8155a5
 }
 array {
+  id: 0xfc89866a
+  number_of_elements: 15
+  element_type_id: 0x295c7202
+}
+array {
   id: 0xfca4258b
   element_type_id: 0xe276adef
 }
@@ -44304,8 +44309,8 @@ member {
   offset: 704
 }
 member {
-  id: 0x335fcf90
-  type_id: 0x42515dd6
+  id: 0x335fe5e4
+  type_id: 0x4251f404
   offset: 64
 }
 member {
@@ -53205,6 +53210,11 @@ member {
   offset: 256
 }
 member {
+  id: 0x342ee722
+  name: "args"
+  type_id: 0x155d8810
+}
+member {
   id: 0x343f32ad
   name: "args"
   type_id: 0x0483e6f8
@@ -53256,6 +53266,11 @@ member {
   name: "args"
   type_id: 0xfead10eb
   offset: 224
+}
+member {
+  id: 0x34c7332c
+  name: "args"
+  type_id: 0xfc89866a
 }
 member {
   id: 0x22d2becc
@@ -136005,9 +136020,9 @@ member {
   offset: 128
 }
 member {
-  id: 0x52238160
+  id: 0x5221054d
   name: "mem"
-  type_id: 0x223a9b2d
+  type_id: 0x20beb6d7
 }
 member {
   id: 0x52460da0
@@ -136256,6 +136271,11 @@ member {
   name: "membase"
   type_id: 0x1df06cce
   offset: 128
+}
+member {
+  id: 0x8d2fdaa1
+  name: "memcache"
+  type_id: 0x223a9b2d
 }
 member {
   id: 0xc76cf35a
@@ -147849,6 +147869,11 @@ member {
   name: "nr_pages"
   type_id: 0x95bb2407
   offset: 3520
+}
+member {
+  id: 0xe34bc830
+  name: "nr_pages"
+  type_id: 0xc9082b19
 }
 member {
   id: 0xe3b1b19e
@@ -228162,6 +228187,14 @@ struct_union {
   }
 }
 struct_union {
+  id: 0x155d8810
+  kind: STRUCT
+  definition {
+    bytesize: 15
+    member_id: 0x34c7332c
+  }
+}
+struct_union {
   id: 0x15738845
   kind: STRUCT
   definition {
@@ -229073,6 +229106,14 @@ struct_union {
     member_id: 0x5ab15455
     member_id: 0x79067da4
     member_id: 0x701b05fd
+  }
+}
+struct_union {
+  id: 0x20beb6d7
+  kind: STRUCT
+  definition {
+    bytesize: 4
+    member_id: 0xe34bc830
   }
 }
 struct_union {
@@ -231233,13 +231274,15 @@ struct_union {
   }
 }
 struct_union {
-  id: 0x42515dd6
+  id: 0x4251f404
   kind: UNION
   definition {
     bytesize: 16
-    member_id: 0x52238160
+    member_id: 0x5221054d
+    member_id: 0x8d2fdaa1
     member_id: 0x8dc1500c
     member_id: 0x406e59a2
+    member_id: 0x342ee722
   }
 }
 struct_union {
@@ -260974,7 +261017,7 @@ struct_union {
   definition {
     bytesize: 24
     member_id: 0x5c7f890c
-    member_id: 0x335fcf90
+    member_id: 0x335fe5e4
   }
 }
 struct_union {
