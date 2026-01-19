@@ -321,13 +321,10 @@ int __pkvm_handle_smccc_req(struct arm_smccc_res *res, void *arg);
 				  ##__VA_ARGS__, &res);			\
 		if (WARN_ON(res.a0 != SMCCC_RET_SUCCESS))		\
 			break;						\
-									\
 		__ret = res.a1;						\
-		if (__ret == -ENOMEM && res.a3) {			\
-			__ret = __pkvm_topup_hyp_alloc(res.a3);		\
-		} else {						\
+		if (!__ret)						\
 			break;						\
-		}							\
+		__ret = __pkvm_handle_smccc_req(&res, NULL);		\
 	} while (!__ret);						\
 	__ret;								\
 })
