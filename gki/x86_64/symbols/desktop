@@ -1,4 +1,5 @@
 [abi_symbol_list]
+  accel_open
   acpi_acquire_mutex
   acpi_bus_generate_netlink_event
   acpi_bus_get_status
@@ -492,6 +493,7 @@
   __devm_drm_panel_alloc
   devm_free_irq
   devm_fwnode_gpiod_get_index
+  devm_gen_pool_create
   devm_gpiochip_add_data_with_key
   devm_gpiod_get
   devm_gpiod_get_index
@@ -826,6 +828,7 @@
   drm_crtc_vblank_waitqueue
   drm_crtc_wait_one_vblank
   __drm_debug
+  drm_debugfs_add_files
   drm_debugfs_create_files
   drm_default_rgb_quant_range
   __drm_dev_dbg
@@ -874,6 +877,7 @@
   drm_gem_fb_create_with_dirty
   drm_gem_fb_end_cpu_access
   drm_gem_handle_create
+  drm_gem_lock_reservations
   drm_gem_mmap
   drm_gem_object_free
   drm_gem_object_lookup
@@ -883,8 +887,21 @@
   drm_gem_prime_mmap
   drm_gem_private_object_init
   drm_gem_reset_shadow_plane
+  drm_gem_shmem_create
   drm_gem_shmem_dumb_create
+  drm_gem_shmem_free
+  drm_gem_shmem_get_pages_sgt
+  drm_gem_shmem_get_sg_table
+  drm_gem_shmem_mmap
+  drm_gem_shmem_pin_locked
   drm_gem_shmem_prime_import_no_map
+  drm_gem_shmem_prime_import_sg_table
+  drm_gem_shmem_print_info
+  drm_gem_shmem_unpin_locked
+  drm_gem_shmem_vmap_locked
+  drm_gem_shmem_vm_ops
+  drm_gem_shmem_vunmap_locked
+  drm_gem_unlock_reservations
   drm_gem_vm_close
   drm_gem_vm_open
   drm_get_connector_status_name
@@ -982,6 +999,7 @@
   __drm_printfn_coredump
   __drm_printfn_dbg
   __drm_printfn_err
+  __drm_printfn_info
   __drm_printfn_line
   __drm_printfn_seq_file
   drm_print_hex_dump
@@ -1010,6 +1028,7 @@
   drm_release
   drm_release_noglobal
   drm_show_fdinfo
+  drm_show_memory_stats
   drm_syncobj_add_point
   drm_syncobj_create
   drm_syncobj_find
@@ -1206,6 +1225,9 @@
   genphy_suspend
   genphy_update_link
   genphy_write_mmd_unsupported
+  gen_pool_add_owner
+  gen_pool_alloc_algo_owner
+  gen_pool_free_owner
   get_device
   get_device_system_crosststamp
   get_free_pages_noprof
@@ -1635,6 +1657,7 @@
   kstrtouint
   kstrtouint_from_user
   kstrtoull
+  kstrtoull_from_user
   kthread_create_on_node
   kthread_create_worker_on_node
   kthread_destroy_worker
@@ -2008,6 +2031,7 @@
   pci_disable_msix
   pci_disable_sriov
   pcie_capability_clear_and_set_word_locked
+  pcie_capability_clear_and_set_word_unlocked
   pcie_capability_read_word
   pcie_capability_write_word
   pcie_get_readrq
@@ -2080,6 +2104,7 @@
   pci_sriov_set_totalvfs
   pci_status_get_and_clear_errors
   pci_stop_and_remove_bus_device
+  pci_try_reset_function
   pci_try_set_mwi
   pci_unlock_rescan_remove
   pci_unmap_rom
@@ -2528,6 +2553,8 @@
   set_nlink
   set_normalized_timespec64
   set_page_dirty
+  set_pages_array_wb
+  set_pages_array_wc
   set_primary_fwnode
   sg_alloc_table
   sg_alloc_table_from_pages_segment
@@ -2897,6 +2924,7 @@
   strncasecmp
   strncmp
   strncpy
+  strncpy_from_user
   strnlen
   strnstr
   strpbrk
@@ -3345,6 +3373,7 @@
   usb_unlink_urb
   usb_unpoison_urb
   __usecs_to_jiffies
+  USER_PTR_MAX
   usleep_range_state
   utf16s_to_utf8s
   utf32_to_utf8
@@ -3520,6 +3549,7 @@
   __xa_alloc
   __xa_alloc_cyclic
   xa_destroy
+  __xa_erase
   xa_erase
   xa_find
   xa_find_after
