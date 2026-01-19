@@ -32,6 +32,10 @@ DECLARE_HOOK(android_vh_f2fs_set_bio_flag,
 	TP_PROTO(struct folio *folio, struct bio *bio),
 	TP_ARGS(folio, bio));
 
+DECLARE_HOOK(android_vh_put_super,
+	TP_PROTO(struct super_block *sb),
+	TP_ARGS(sb));
+
 DECLARE_HOOK(android_vh_wb_dirty_limits,
 	TP_PROTO(unsigned long *thresh, struct bdi_writeback *wb),
 	TP_ARGS(thresh, wb));
