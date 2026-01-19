@@ -13,6 +13,7 @@
 #include <asm/spectre.h>
 
 #include <nvhe/early_alloc.h>
+#include <nvhe/errno.h>
 #include <nvhe/gfp.h>
 #include <nvhe/memory.h>
 #include <nvhe/mem_protect.h>

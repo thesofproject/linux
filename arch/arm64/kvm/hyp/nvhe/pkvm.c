@@ -17,6 +17,7 @@
 #include <hyp/adjust_pc.h>
 
 #include <nvhe/alloc.h>
+#include <nvhe/errno.h>
 #include <nvhe/ffa.h>
 #include <nvhe/mem_protect.h>
 #include <nvhe/memory.h>
@@ -968,7 +969,7 @@ int __pkvm_init_vm(struct kvm *host_kvm, unsigned long pgd_hva)
 		goto err_free_last_ran;
 	pgd = map_donated_memory_noclear(pgd_hva, pgd_size);
 	if (!pgd) {
-		ret = -EINVAL;
+		ret = -ENOMEMHOSTS2;
 		goto err_free_last_ran;
 	}
 
