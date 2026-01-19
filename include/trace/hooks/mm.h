@@ -290,6 +290,9 @@ DECLARE_HOOK(android_vh_filemap_folio_mapped,
 DECLARE_HOOK(android_vh_folio_remove_rmap_ptes,
 	TP_PROTO(struct folio *folio),
 	TP_ARGS(folio));
+DECLARE_HOOK(android_vh_filemap_get_folio_end,
+	TP_PROTO(struct address_space *mapping, struct folio *folio),
+	TP_ARGS(mapping, folio));
 DECLARE_HOOK(android_vh_adjust_swap_info_flags,
 	TP_PROTO(unsigned long *flags),
 	TP_ARGS(flags));
