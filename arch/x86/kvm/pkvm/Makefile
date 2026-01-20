@@ -43,6 +43,9 @@ pkvm-hyp-$(CONFIG_PKVM_INTEL)	+= vmx/host_vmentry.o vmx/host_vmx.o \
 				   $(kvm)/vmx/vmx.o vmx/idt.o vmx/ept.o \
 				   vmx/host_repriv.o $(kvm)/vmx/main.o
 
+fpu				:= ../../kernel/fpu
+pkvm-hyp-y			+= $(fpu)/core.o
+
 pkvm-obj 			:= $(patsubst %.o,%.pkvm.o,$(pkvm-hyp-y))
 obj-$(CONFIG_PKVM_X86)		+= pkvm.o
 
