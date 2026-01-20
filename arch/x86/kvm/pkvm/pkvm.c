@@ -16,6 +16,12 @@
  */
 __visible bool kvm_rebooting;
 
+/*
+ * Needed by code sharing with the KVM. As the pKVM hypervisor requires to have
+ * a second level page table to translate GPA to HPA, set tdp_enabled as true.
+ */
+bool tdp_enabled = true;
+
 struct pkvm_hyp *pkvm_hyp;
 DEFINE_PER_CPU(struct pkvm_pcpu *, phys_cpu);
 DEFINE_PER_CPU(struct kvm_vcpu *, host_vcpu);
