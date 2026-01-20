@@ -40,6 +40,12 @@ extern u64 __pkvm_vmemmap;
 #define pkvm_page_to_virt(page)	__pkvm_va(pkvm_page_to_phys(page))
 #define pkvm_page_to_pool(page)	(((struct pkvm_page *)page)->pool)
 
+/* Caution: __st is evaluated twice. */
+#define for_each_pkvm_page(__p, __st, __sz)						\
+	for (struct pkvm_page *__p = pkvm_phys_to_page(PAGE_ALIGN_DOWN(__st)),		\
+			      *__e = pkvm_phys_to_page(PAGE_ALIGN((__st) + (__sz)));	\
+	     __p < __e; __p++)
+
 /*
  * Refcounting for 'struct pkvm_page'.
  * pkvm_pool::lock must be held if atomic access to the refcount is required.
