@@ -121,6 +121,9 @@ struct pkvm_moveable_reg {
 extern struct pkvm_moveable_reg kvm_nvhe_sym(pkvm_moveable_regs)[];
 extern unsigned int kvm_nvhe_sym(pkvm_moveable_regs_nr);
 
+extern phys_addr_t kvm_nvhe_sym(host_s2_cma_base);
+extern phys_addr_t kvm_nvhe_sym(host_s2_cma_size);
+
 extern struct memblock_region kvm_nvhe_sym(hyp_memory)[];
 extern unsigned int kvm_nvhe_sym(hyp_memblock_nr);
 
