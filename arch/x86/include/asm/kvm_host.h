@@ -1992,8 +1992,12 @@ extern bool __read_mostly enable_device_posted_irqs;
 extern struct kvm_x86_ops kvm_x86_ops;
 #ifdef CONFIG_PKVM_X86
 extern bool __read_mostly enable_pkvm;	/* kernel command-line flag */
+extern phys_addr_t pkvm_mem_base;
+extern phys_addr_t pkvm_mem_size;
+void __init pkvm_reserve(void);
 #else
 #define enable_pkvm		false
+static inline void __init pkvm_reserve(void) {}
 #endif
 
 #define kvm_x86_call(func) static_call(kvm_x86_##func)
