@@ -8431,14 +8431,19 @@ void vmx_hardware_unsetup(void)
 
 	free_kvm_area();
 }
+#endif /* !__PKVM_HYP__ */
 
 void vmx_vm_destroy(struct kvm *kvm)
 {
+	/* TODO: Enable this for pKVM hypervisor when enabling ipiv */
+#ifndef __PKVM_HYP__
 	struct kvm_vmx *kvm_vmx = to_kvm_vmx(kvm);
 
 	free_pages((unsigned long)kvm_vmx->pid_table, vmx_get_pid_table_order(kvm));
+#endif
 }
 
+#ifndef __PKVM_HYP__
 /*
  * Note, the SDM states that the linear address is masked *after* the modified
  * canonicality check, whereas KVM masks (untags) the address and then performs
