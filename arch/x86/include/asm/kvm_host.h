@@ -840,6 +840,10 @@ static inline void free_pkvm_memcache(struct pkvm_memcache *mc,
 struct kvm_pkvm_vm {
 	int handle;
 };
+
+struct kvm_pkvm_vcpu {
+	int handle;
+};
 #endif /* CONFIG_PKVM_X86 */
 
 struct kvm_vcpu_arch {
@@ -1152,6 +1156,10 @@ struct kvm_vcpu_arch {
 
 #if IS_ENABLED(CONFIG_HYPERV)
 	hpa_t hv_root_tdp;
+#endif
+
+#ifdef CONFIG_PKVM_X86
+	struct kvm_pkvm_vcpu pkvm;
 #endif
 };
 
