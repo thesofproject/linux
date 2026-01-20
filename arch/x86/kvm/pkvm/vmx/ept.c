@@ -1,0 +1,185 @@
+// SPDX-License-Identifier: GPL-2.0
+#include <linux/kvm_host.h>
+#include <asm/vmx.h>
+#include <vmx/capabilities.h>
+#include <mmu/spte.h>
+#include <vmx/vmx.h>
+#include "ept.h"
+#include "gfp.h"
+
+static struct pkvm_pgtable *host_ept;
+static struct pkvm_pool host_ept_pool;
+
+static void *host_ept_zalloc_page(void)
+{
+	return pkvm_alloc_pages(&host_ept_pool, 0);
+}
+
+static void host_ept_get_page(void *vaddr)
+{
+	pkvm_get_page(&host_ept_pool, vaddr);
+}
+
+static void host_ept_put_page(void *vaddr)
+{
+	pkvm_put_page(&host_ept_pool, vaddr);
+}
+
+static int host_ept_page_count(void *vaddr)
+{
+	return pkvm_page_count(vaddr);
+}
+
+static const struct pkvm_pgtable_mm_ops host_ept_mm_ops = {
+	.zalloc_page = host_ept_zalloc_page,
+	.get_page = host_ept_get_page,
+	.put_page = host_ept_put_page,
+	.page_count = host_ept_page_count,
+};
+
+static bool ept_pte_present(void *ptep)
+{
+	u64 val = *(u64 *)ptep;
+
+	return !!(val & VMX_EPT_RWX_MASK);
+}
+
+static bool ept_pte_huge(void *ptep)
+{
+	return is_large_pte(*(u64 *)ptep);
+}
+
+static void ept_pte_mkhuge(void *ptep)
+{
+	*(u64 *)ptep |= PT_PAGE_SIZE_MASK;
+}
+
+static unsigned long ept_pte_to_phys(void *ptep)
+{
+	return *(u64 *)ptep & SPTE_BASE_ADDR_MASK;
+}
+
+static u64 ept_pte_to_prot(void *ptep)
+{
+	u64 prot = *(u64 *)ptep & ~(SPTE_BASE_ADDR_MASK);
+
+	return prot & ~PT_PAGE_SIZE_MASK;
+}
+
+static u64 ept_calc_pte_perm(bool read, bool write, bool exec)
+{
+	u64 prot = 0;
+
+	if (read)
+		prot |= VMX_EPT_READABLE_MASK;
+	if (write)
+		prot |= VMX_EPT_WRITABLE_MASK;
+	if (exec)
+		prot |= VMX_EPT_EXECUTABLE_MASK;
+
+	return prot;
+}
+
+static u64 ept_calc_pte_memtype(bool mmio)
+{
+	return mmio ? X86_MEMTYPE_UC << VMX_EPT_MT_EPTE_SHIFT :
+		      X86_MEMTYPE_WB << VMX_EPT_MT_EPTE_SHIFT;
+}
+
+static int ept_pte_to_index(unsigned long vaddr, int level)
+{
+	return SPTE_INDEX(vaddr, level);
+}
+
+static unsigned long ept_level_to_size(int level)
+{
+	return KVM_HPAGE_SIZE(level);
+}
+
+static u64 ept_level_to_mask(int level)
+{
+	return (~((1UL << SPTE_LEVEL_SHIFT(level)) - 1));
+}
+
+static bool ept_pte_is_leaf(void *ptep, int level)
+{
+	return level == PG_LEVEL_4K || !ept_pte_present(ptep) || ept_pte_huge(ptep);
+}
+
+static int ept_pte_size(int level)
+{
+	return PAGE_SIZE / SPTE_ENT_PER_PAGE;
+}
+
+static int ept_pte_count(int level)
+{
+	return SPTE_ENT_PER_PAGE;
+}
+
+static void ept_pte_set(void *ptep, u64 spte)
+{
+	WRITE_ONCE(*(u64 *)ptep, spte);
+}
+
+static u64 ept_pte_get(void *ptep)
+{
+	return READ_ONCE(*(u64 *)ptep);
+}
+
+static void host_ept_flush_tlb(struct pkvm_pgtable *pgt,
+			       unsigned long vaddr, unsigned long size)
+{
+	/* TODO: Flush TLB for the host EPT */
+}
+
+static const struct pkvm_pgtable_ops host_ept_pgt_ops = {
+	.pte_present = ept_pte_present,
+	.pte_huge = ept_pte_huge,
+	.pte_mkhuge = ept_pte_mkhuge,
+	.pte_to_phys = ept_pte_to_phys,
+	.pte_to_prot = ept_pte_to_prot,
+	.calc_pte_perm = ept_calc_pte_perm,
+	.calc_pte_memtype = ept_calc_pte_memtype,
+	.vaddr_to_index = ept_pte_to_index,
+	.level_to_size = ept_level_to_size,
+	.level_to_mask = ept_level_to_mask,
+	.pte_is_leaf = ept_pte_is_leaf,
+	.pte_size = ept_pte_size,
+	.pte_count = ept_pte_count,
+	.pte_set = ept_pte_set,
+	.pte_get = ept_pte_get,
+	.flush_tlb = host_ept_flush_tlb,
+};
+
+int pkvm_host_ept_init(struct pkvm_pgtable *pgt, void *pool_base,
+		       unsigned long pool_pages)
+{
+	unsigned long pfn = __pkvm_pa(pool_base) >> PAGE_SHIFT;
+	struct pkvm_pgtable_cap cap = {
+		.level = cpu_has_vmx_ept_5levels() ? 5 : 4,
+		.allowed_pgsz = 1 << PG_LEVEL_4K,
+		.table_prot = VMX_EPT_RWX_MASK,
+	};
+	int ret;
+
+	if (!cpu_has_vmx_ept_4levels() ||
+	    !cpu_has_vmx_ept_mt_wb() ||
+	    !cpu_has_vmx_invept_global())
+		return -EOPNOTSUPP;
+
+	ret = pkvm_pool_init(&host_ept_pool, pfn, pool_pages, 0);
+	if (ret)
+		return ret;
+
+	if (cpu_has_vmx_ept_2m_page())
+		cap.allowed_pgsz |=  1 << PG_LEVEL_2M;
+	if (cpu_has_vmx_ept_1g_page())
+		cap.allowed_pgsz |=  1 << PG_LEVEL_1G;
+
+	ret = pkvm_pgtable_init(pgt, cap, &host_ept_mm_ops, &host_ept_pgt_ops);
+	if (ret)
+		return ret;
+
+	host_ept = pgt;
+	return 0;
+}

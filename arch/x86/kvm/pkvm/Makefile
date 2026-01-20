@@ -36,7 +36,7 @@ kvm				:= ..
 pkvm-hyp-y			+= $(kvm)/x86.o
 
 pkvm-hyp-$(CONFIG_PKVM_INTEL)	+= vmx/host_vmentry.o vmx/host_vmx.o \
-				   $(kvm)/vmx/vmx.o vmx/idt.o
+				   $(kvm)/vmx/vmx.o vmx/idt.o vmx/ept.o
 
 pkvm-obj 			:= $(patsubst %.o,%.pkvm.o,$(pkvm-hyp-y))
 obj-$(CONFIG_PKVM_X86)		+= pkvm.o
