@@ -300,3 +300,30 @@ int pkvm_x86_vendor_init(struct kvm_x86_init_ops *ops)
 
 	return 0;
 }
+
+struct pkvm_vm *pkvm_get_vm(int vm_handle)
+{
+	struct pkvm_vm_ref *pkvm_vm_ref;
+	int idx = vm_handle;
+
+	if (idx < 0 || idx >= MAX_PKVM_VMS)
+		return NULL;
+
+	idx = array_index_nospec(idx, MAX_PKVM_VMS);
+	pkvm_vm_ref = &pkvm_vms_ref[idx];
+
+	return atomic_inc_not_zero(&pkvm_vm_ref->refcount) ? pkvm_vm_ref->pkvm_vm : NULL;
+}
+
+void pkvm_put_vm(struct pkvm_vm *pkvm_vm)
+{
+	int idx = pkvm_vm->kvm.arch.pkvm.handle;
+	struct pkvm_vm_ref *pkvm_vm_ref;
+
+	if (idx < 0 || idx >= MAX_PKVM_VMS)
+		return;
+
+	pkvm_vm_ref = &pkvm_vms_ref[idx];
+
+	WARN_ON(atomic_dec_if_positive(&pkvm_vm_ref->refcount) <= 0);
+}
