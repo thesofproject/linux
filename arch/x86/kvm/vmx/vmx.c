@@ -8913,6 +8913,8 @@ err_l1d_flush:
 
 int pkvm_vmx_init(void)
 {
+	BUILD_BUG_ON(offsetof(struct kvm_vmx, kvm) != 0);
+
 	if (setup_vmcs_config(&vmcs_config, &vmx_capability) < 0)
 		return -EIO;
 

@@ -871,9 +871,11 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 	.emergency_disable_virtualization_cpu = vmx_emergency_disable_virtualization_cpu,
 
 	.has_emulated_msr = vt_op(has_emulated_msr),
+#endif
 
 	.vm_size = sizeof(struct kvm_vmx),
 
+#ifndef __PKVM_HYP__
 	.vm_init = vt_op(vm_init),
 	.vm_destroy = vt_op(vm_destroy),
 	.vm_pre_destroy = vt_op_tdx_only(vm_pre_destroy),
