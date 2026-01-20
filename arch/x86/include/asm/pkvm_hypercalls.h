@@ -3,6 +3,10 @@
 BUILD_BUG_ON(1)
 #endif
 
+#ifndef PKVM_HC_OUT
+#define PKVM_HC_OUT PKVM_HC
+#endif
+
 /* Hypercalls used only during pKVM initialization */
 PKVM_HC(init)
 PKVM_HC(init_finalize)
@@ -18,3 +22,4 @@ PKVM_HC(enable_virtualization_cpu)
 PKVM_HC(vm_init)
 
 #undef PKVM_HC
+#undef PKVM_HC_OUT
