@@ -40,6 +40,7 @@ static int scx_bypass_depth;
 static bool scx_init_task_enabled;
 static bool scx_switching_all;
 DEFINE_STATIC_KEY_FALSE(__scx_switched_all);
+EXPORT_SYMBOL_GPL(__scx_switched_all);
 
 /*
  * Tracks whether scx_enable() called scx_bypass(true). Used to balance bypass
