@@ -140,12 +140,16 @@ config PKVM_INTEL
 	help
 	  Provides support for pKVM on Intel processors.
 
-	  This will deprivilege the host as a VM running in non-root VMX
-	  operation mode, under the control of pKVM hypervisor running in
-	  root VMX operation mode. This will allow KVM to run guests whose
-	  memory and CPU state is protected from the host, while using only
-	  basic VMX hardware features for that, without relying on technologies
-	  like TDX.
+	  If pKVM is enabled, this will deprivilege the host as a VM running in
+	  non-root VMX operation mode, under the control of pKVM hypervisor
+	  running in root VMX operation mode. This will allow KVM to run guests
+	  whose memory and CPU state is protected from the host, while using
+	  only basic VMX hardware features for that, without relying on
+	  technologies like TDX.
+
+	  The pKVM enabling on the Intel processors is controlled by a kernel
+	  command line parameter "kvm_intel.pkvm". By default pKVM is disabled.
+	  To enable it, set "kvm_intel.pkvm=1" in the kernel command line.
 
 	  If unsure, say N.
 
