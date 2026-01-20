@@ -78,3 +78,47 @@ void pkvm_lapic_send_init(int cpu)
 
 	native_x2apic_icr_write(icrlow, remote->apic_id);
 }
+
+int pkvm_lapic_msr_write(u32 msr, u64 val)
+{
+	struct pkvm_lapic *lapic = this_cpu_ptr(&pkvm_lapic);
+	int ret = 0;
+
+	if (!lapic->ready) {
+		/*
+		 * The host may access x2apic before the pKVM lapic is
+		 * initialized. In this case, the pKVM hypervisor doesn't use
+		 * lapic to send INIT (see comment in pkvm_lapic_send_init).
+		 * Thus no need to audit and let the host directly access x2apic.
+		 */
+		wrmsrl(msr, val);
+	} else if (msr == MSR_IA32_APICBASE) {
+		/*
+		 * The lapic should be always in x2apic mode as the pkvm
+		 * hypervisor only support x2apic mode.
+		 */
+		if ((val & LAPIC_MODE_X2APIC) != LAPIC_MODE_X2APIC)
+			return -EINVAL;
+		wrmsrl(msr, val);
+	} else {
+		u32 reg = (msr - APIC_BASE_MSR) << 4;
+
+		switch (reg) {
+		case APIC_ID:
+			/*
+			 * The pKVM hypervisor may be kicking this CPU via its
+			 * original ID. So not allow changing the lapic ID as
+			 * this may result in the on-going kick failed.
+			 */
+			if (lapic->apic_id != (u32)val)
+				ret = -EINVAL;
+			break;
+		default:
+			/* The other MSRs are not emulated */
+			ret = -EINVAL;
+			break;
+		}
+	}
+
+	return ret;
+}
