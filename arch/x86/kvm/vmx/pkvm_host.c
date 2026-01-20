@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
+#define pr_fmt(fmt) "pkvm_host: " fmt
+
 #include <linux/kvm_host.h>
 #include <asm/kvm_pkvm.h>
 #include "pkvm_constants.h"
@@ -59,6 +61,23 @@ free_page:
 	return ret;
 }
 
+static void pkvm_vm_destroy(struct kvm *kvm)
+{
+	int vm_handle = kvm->arch.pkvm.handle;
+	union pkvm_hc_data out;
+	int ret;
+
+	ret = pkvm_hypercall_out(vm_destroy, &out, vm_handle);
+	if (ret) {
+		pr_err("failed to destroy VM%d: %d\n", vm_handle, ret);
+		return;
+	}
+
+	kvm_free_pkvm_memcache(&out.vm_destroy.memcache);
+
+	vmx_vm_destroy(kvm);
+}
+
 struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.name = KBUILD_MODNAME,
 
@@ -70,4 +89,5 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 
 	.vm_size = sizeof(struct kvm_vmx),
 	.vm_init = pkvm_vm_init,
+	.vm_destroy = pkvm_vm_destroy,
 };
