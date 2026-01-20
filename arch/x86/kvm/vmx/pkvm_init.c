@@ -102,6 +102,17 @@ static __init int pkvm_setup_host_vm(struct pkvm_hyp *pkvm)
 		return -ENOMEM;
 	}
 
+	/*
+	 * Only a few fields in the kvm structure will be used, e.g.,
+	 * hlt_in_guest for exception injection code to clear hlt state.
+	 * As HLT instruction will be passthrough to the host VM, set
+	 * hlt_in_guest as true. As the mwait/pause/cstate will also be
+	 * passthrough, initialized them as well to reflect the fact.
+	 */
+	kvm_disable_exits(&kvmx->kvm, KVM_X86_DISABLE_EXITS_MWAIT |
+				      KVM_X86_DISABLE_EXITS_HLT   |
+				      KVM_X86_DISABLE_EXITS_PAUSE |
+				      KVM_X86_DISABLE_EXITS_CSTATE);
 	pkvm->host_kvm = &kvmx->kvm;
 
 	return 0;
