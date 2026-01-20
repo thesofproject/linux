@@ -15,6 +15,11 @@ static int __init early_pkvm_parse_cmdline(char *buf)
 early_param("kvm-intel.pkvm", early_pkvm_parse_cmdline);
 
 static bool relax_cpu_bugs = true;
+static int __init early_pkvm_relax_cpu_bugs_parse_cmdline(char *buf)
+{
+	return kstrtobool(buf, &relax_cpu_bugs);
+}
+early_param("kvm-intel.pkvm_relax_cpu_bugs", early_pkvm_relax_cpu_bugs_parse_cmdline);
 
 static DEFINE_PER_CPU(struct vmcs *, pkvm_vmxarea);
 static unsigned long data_pages;
@@ -1247,6 +1252,8 @@ int __init vmx_pkvm_init(void)
 			goto out;
 		}
 		pr_warn("allow pkvm to run with unmitigated CPU bugs\n");
+		pr_warn("to prevent pkvm running on such CPU, ");
+		pr_cont("reboot with kvm-intel.pkvm_relax_cpu_bugs=false\n");
 	}
 
 	pkvm_sym(init_ops) = pkvm_sym(pkvm_vmx_init_ops);
