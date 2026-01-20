@@ -8,6 +8,7 @@
 #include "ept.h"
 #include "gfp.h"
 #include "pkvm/mmu.h"
+#include "pkvm.h"
 
 static struct pkvm_pgtable *host_ept;
 static struct pkvm_pool host_ept_pool;
@@ -153,6 +154,15 @@ static const struct pkvm_pgtable_ops host_ept_pgt_ops = {
 	.flush_tlb = host_ept_flush_tlb,
 };
 
+static inline u64 construct_host_eptp(struct pkvm_pgtable *pgt)
+{
+	u64 eptp = pgt->root_pa | VMX_EPTP_MT_WB;
+
+	eptp |= (pgt->cap.level == 5) ? VMX_EPTP_PWL_5 : VMX_EPTP_PWL_4;
+
+	return eptp;
+}
+
 int pkvm_host_ept_init(struct pkvm_pgtable *pgt, void *pool_base,
 		       unsigned long pool_pages)
 {
@@ -183,6 +193,45 @@ int pkvm_host_ept_init(struct pkvm_pgtable *pgt, void *pool_base,
 		return ret;
 
 	host_ept = pgt;
+	return 0;
+}
+
+int pkvm_host_ept_finalize(struct pkvm_pgtable *pgt)
+{
+	struct kvm_vcpu *hvcpu = this_cpu_read(host_vcpu);
+
+	/* The EPT finalizing should be done after EPT initialization */
+	if (!host_ept || pgt != host_ept)
+		return -EINVAL;
+
+	secondary_exec_controls_setbit(to_vmx(hvcpu), SECONDARY_EXEC_ENABLE_EPT);
+	vmcs_write64(EPT_POINTER, construct_host_eptp(host_ept));
+
+	/* enable vpid */
+	if ((host_vmcs_config.cpu_based_2nd_exec_ctrl & SECONDARY_EXEC_ENABLE_VPID) &&
+	    (cpu_has_vmx_invvpid_single() || cpu_has_vmx_invvpid_global()) &&
+	    cpu_has_vmx_invvpid()) {
+		/* Derive vpid from vcpu_id by adding 1 to ensure vpid is non-zero */
+		int vpid = hvcpu->vcpu_id + 1;
+
+		if (vpid > 0 && vpid < VMX_NR_VPIDS) {
+			/*
+			 * Fixed VPIDs for the host vCPUs, which implies that it
+			 * could conflict with VPIDs from guest VMs.
+			 *
+			 * It's safe because cached mappings used in non-root
+			 * mode are associated with EPTRTA, and the host's EPT
+			 * root never changes and is different from any guest's
+			 * EPT root.
+			 */
+			vmcs_write16(VIRTUAL_PROCESSOR_ID, vpid);
+			secondary_exec_controls_setbit(to_vmx(hvcpu),
+						       SECONDARY_EXEC_ENABLE_VPID);
+		}
+	}
+
+	ept_sync_global();
+
 	return 0;
 }
 
