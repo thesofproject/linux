@@ -12,7 +12,19 @@
 
 struct vmcs_config host_vmcs_config;
 
-static struct pkvm_init_ops vmx_init_ops = {};
+static int vmx_hyp_mmu_finalize(struct pkvm_pgtable *pgt)
+{
+	if (!pgt)
+		return -EINVAL;
+
+	vmcs_writel(HOST_CR3, pgt->root_pa);
+
+	return 0;
+}
+
+static struct pkvm_init_ops vmx_init_ops = {
+	.hyp_mmu_finalize = vmx_hyp_mmu_finalize,
+};
 
 struct pkvm_init_ops *pkvm_vmx_init_ops = &vmx_init_ops;
 
