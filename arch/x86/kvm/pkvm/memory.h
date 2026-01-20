@@ -18,6 +18,9 @@ struct pkvm_page {
 
 	/* Store host memory page state. */
 	enum pkvm_page_state host_state: 8;
+
+	/* Tracks how many times the page is shared with pKVM. */
+	u16 host_share_hyp_count;
 };
 
 /*
