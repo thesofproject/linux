@@ -86,8 +86,6 @@ MODULE_AUTHOR("Qumranet");
 MODULE_DESCRIPTION("KVM support for VMX (Intel VT-x) extensions");
 MODULE_LICENSE("GPL");
 
-#ifndef __PKVM_HYP__
-
 #ifdef MODULE
 static const struct x86_cpu_id vmx_cpu_id[] = {
 	X86_MATCH_FEATURE(X86_FEATURE_VMX, NULL),
@@ -99,8 +97,10 @@ MODULE_DEVICE_TABLE(x86cpu, vmx_cpu_id);
 bool __read_mostly enable_vpid = 1;
 module_param_named(vpid, enable_vpid, bool, 0444);
 
+#ifndef __PKVM_HYP__
 static bool __read_mostly enable_vnmi = 1;
 module_param_named(vnmi, enable_vnmi, bool, 0444);
+#endif
 
 bool __read_mostly flexpriority_enabled = 1;
 module_param_named(flexpriority, flexpriority_enabled, bool, 0444);
@@ -115,6 +115,7 @@ module_param_named(unrestricted_guest,
 bool __read_mostly enable_ept_ad_bits = 1;
 module_param_named(eptad, enable_ept_ad_bits, bool, 0444);
 
+#ifndef __PKVM_HYP__
 static bool __read_mostly emulate_invalid_guest_state = true;
 module_param(emulate_invalid_guest_state, bool, 0444);
 
@@ -125,6 +126,7 @@ module_param(enable_apicv, bool, 0444);
 module_param(enable_ipiv, bool, 0444);
 
 module_param(enable_device_posted_irqs, bool, 0444);
+#endif /* !__PKVM_HYP__ */
 
 /*
  * If nested=1, nested virtualization is supported, i.e., guests may use
@@ -136,7 +138,6 @@ module_param(nested, bool, 0444);
 
 bool __read_mostly enable_pml = 1;
 module_param_named(pml, enable_pml, bool, 0444);
-#endif /* !__PKVM_HYP__ */
 
 static bool __read_mostly error_on_inconsistent_vmcs_config = true;
 module_param(error_on_inconsistent_vmcs_config, bool, 0444);
@@ -147,19 +148,23 @@ module_param(dump_invalid_vmcs, bool, 0644);
 
 #define MSR_BITMAP_MODE_X2APIC		1
 #define MSR_BITMAP_MODE_X2APIC_APICV	2
+#endif /* !__PKVM_HYP__ */
 
 #define KVM_VMX_TSC_MULTIPLIER_MAX     0xffffffffffffffffULL
 
+#ifndef __PKVM_HYP__
 /* Guest_tsc -> host_tsc conversion requires 64-bit division.  */
 static int __read_mostly cpu_preemption_timer_multi;
 static bool __read_mostly enable_preemption_timer = 1;
 #ifdef CONFIG_X86_64
 module_param_named(preemption_timer, enable_preemption_timer, bool, S_IRUGO);
 #endif
+#endif /* !__PKVM_HYP__ */
 
 extern bool __read_mostly allow_smaller_maxphyaddr;
 module_param(allow_smaller_maxphyaddr, bool, S_IRUGO);
 
+#ifndef __PKVM_HYP__
 #define KVM_VM_CR0_ALWAYS_OFF (X86_CR0_NW | X86_CR0_CD)
 #define KVM_VM_CR0_ALWAYS_ON_UNRESTRICTED_GUEST X86_CR0_NE
 #define KVM_VM_CR0_ALWAYS_ON				\
@@ -175,6 +180,8 @@ module_param(allow_smaller_maxphyaddr, bool, S_IRUGO);
 	RTIT_STATUS_CONTEXTEN | RTIT_STATUS_TRIGGEREN | \
 	RTIT_STATUS_ERROR | RTIT_STATUS_STOPPED | \
 	RTIT_STATUS_BYTECNT))
+
+#endif /* !__PKVM_HYP__ */
 
 /*
  * These 2 parameters are used to config the controls for Pause-Loop Exiting:
@@ -211,6 +218,7 @@ int __read_mostly pt_mode = PT_MODE_SYSTEM;
 module_param(pt_mode, int, S_IRUGO);
 #endif
 
+#ifndef __PKVM_HYP__
 struct x86_pmu_lbr __ro_after_init vmx_lbr_caps;
 
 static DEFINE_STATIC_KEY_FALSE(vmx_l1d_should_flush);
@@ -486,8 +494,10 @@ DEFINE_PER_CPU(struct vmcs *, current_vmcs);
  * when a CPU is brought down, and we need to VMCLEAR all VMCSs loaded on it.
  */
 static DEFINE_PER_CPU(struct list_head, loaded_vmcss_on_cpu);
+#endif /* !__PKVM_HYP__ */
 
 static DECLARE_BITMAP(vmx_vpid_bitmap, VMX_NR_VPIDS);
+#ifndef __PKVM_HYP__
 static DEFINE_SPINLOCK(vmx_vpid_lock);
 #endif /* !__PKVM_HYP__ */
 
@@ -519,9 +529,11 @@ static const struct kvm_vmx_segment_field {
 	VMX_SEGMENT_FIELD(LDTR),
 };
 
+#endif /* !__PKVM_HYP__ */
 
 static unsigned long host_idt_base;
 
+#ifndef __PKVM_HYP__
 #if IS_ENABLED(CONFIG_HYPERV)
 static bool __read_mostly enlightened_vmcs = !IS_ENABLED(CONFIG_PKVM_INTEL);
 module_param(enlightened_vmcs, bool, 0444);
@@ -2781,7 +2793,7 @@ int setup_vmcs_config_common(struct vmcs_config *vmcs_conf,
 	vmcs_conf->vmentry_ctrl        = _vmentry_control;
 	vmcs_conf->misc	= misc_msr;
 
-#if IS_ENABLED(CONFIG_HYPERV)
+#if IS_ENABLED(CONFIG_HYPERV) && !defined(__PKVM_HYP__)
 	if (enlightened_vmcs)
 		evmcs_sanitize_exec_ctrls(vmcs_conf);
 #endif
@@ -8008,6 +8020,7 @@ static __init u64 vmx_get_perf_capabilities(void)
 
 	return perf_cap;
 }
+#endif /* !__PKVM_HYP__ */
 
 static __init void vmx_set_cpu_caps(void)
 {
@@ -8031,7 +8044,9 @@ static __init void vmx_set_cpu_caps(void)
 
 	if (!enable_pmu)
 		kvm_cpu_cap_clear(X86_FEATURE_PDCM);
+#ifndef __PKVM_HYP__
 	kvm_caps.supported_perf_cap = vmx_get_perf_capabilities();
+#endif
 
 	if (!enable_sgx) {
 		kvm_cpu_cap_clear(X86_FEATURE_SGX);
@@ -8070,6 +8085,7 @@ static __init void vmx_set_cpu_caps(void)
 	}
 }
 
+#ifndef __PKVM_HYP__
 static bool vmx_is_io_intercepted(struct kvm_vcpu *vcpu,
 				  struct x86_instruction_info *info,
 				  unsigned long *exit_qualification)
@@ -8456,6 +8472,7 @@ static unsigned int vmx_handle_intel_pt_intr(void)
 		  (unsigned long *)&vcpu->arch.pmu.global_status);
 	return 1;
 }
+#endif /* !__PKVM_HYP__ */
 
 static __init void vmx_setup_user_return_msrs(void)
 {
@@ -8483,6 +8500,7 @@ static __init void vmx_setup_user_return_msrs(void)
 		kvm_add_user_return_msr(vmx_uret_msrs_list[i]);
 }
 
+#ifndef __PKVM_HYP__
 static void __init vmx_setup_me_spte_mask(void)
 {
 	u64 me_mask = 0;
@@ -8505,12 +8523,15 @@ static void __init vmx_setup_me_spte_mask(void)
 	 */
 	kvm_mmu_set_me_spte_mask(0, me_mask);
 }
+#endif /* !__PKVM_HYP__ */
 
 __init int vmx_hardware_setup(void)
 {
 	unsigned long host_bndcfgs;
 	struct desc_ptr dt;
+#ifndef __PKVM_HYP__
 	int r;
+#endif
 
 	store_idt(&dt);
 	host_idt_base = dt.address;
@@ -8538,7 +8559,15 @@ __init int vmx_hardware_setup(void)
 	    !cpu_has_vmx_ept_4levels() ||
 	    !cpu_has_vmx_ept_mt_wb() ||
 	    !cpu_has_vmx_invept_global())
+#ifndef __PKVM_HYP__
 		enable_ept = 0;
+#else
+		/*
+		 * The pKVM hypervisor doesn't support shadow page table for
+		 * simplicity thus requires EPT.
+		 */
+		return -EOPNOTSUPP;
+#endif
 
 	/* NX support is required for shadow paging. */
 	if (!enable_ept && !boot_cpu_has(X86_FEATURE_NX)) {
@@ -8558,13 +8587,29 @@ __init int vmx_hardware_setup(void)
 		enable_ept_ad_bits = 0;
 
 	if (!cpu_has_vmx_unrestricted_guest() || !enable_ept)
+#ifndef __PKVM_HYP__
 		enable_unrestricted_guest = 0;
+#else
+		/*
+		 * The pKVM hypervisor requires unrestricted_guest to simplify
+		 * the real-mode emulation.
+		 */
+		return -EOPNOTSUPP;
+#endif
 
 	if (!cpu_has_vmx_flexpriority())
 		flexpriority_enabled = 0;
 
 	if (!cpu_has_virtual_nmis())
+#ifndef __PKVM_HYP__
 		enable_vnmi = 0;
+#else
+		/*
+		 * The pKVM hypervisor requires to use the virtual NMI to avoid
+		 * calculating vnmi_blocked_time for simplicity.
+		 */
+		return -EOPNOTSUPP;
+#endif
 
 #ifdef CONFIG_X86_SGX_KVM
 	if (!cpu_has_vmx_encls_vmexit())
@@ -8580,9 +8625,17 @@ __init int vmx_hardware_setup(void)
 		vt_x86_ops.set_apic_access_page_addr = NULL;
 
 	if (!cpu_has_vmx_tpr_shadow())
+#ifndef __PKVM_HYP__
 		vt_x86_ops.update_cr8_intercept = NULL;
+#else
+		/*
+		 * The pKVM hypervisor requires TPR shadow to avoid emulating
+		 * cr8 for simplicity.
+		 */
+		return -EOPNOTSUPP;
+#endif
 
-#if IS_ENABLED(CONFIG_HYPERV)
+#if IS_ENABLED(CONFIG_HYPERV) && !defined(__PKVM_HYP__)
 	if (ms_hyperv.nested_features & HV_X64_NESTED_GUEST_MAPPING_FLUSH
 	    && enable_ept) {
 		vt_x86_ops.flush_remote_tlbs = hv_flush_remote_tlbs;
@@ -8616,6 +8669,7 @@ __init int vmx_hardware_setup(void)
 
 	set_bit(0, vmx_vpid_bitmap); /* 0 is reserved for host */
 
+#ifndef __PKVM_HYP__ /* TODO: Coordinate with pvEPT */
 	if (enable_ept)
 		kvm_mmu_set_ept_masks(enable_ept_ad_bits,
 				      cpu_has_vmx_ept_execute_only());
@@ -8630,6 +8684,7 @@ __init int vmx_hardware_setup(void)
 
 	kvm_configure_mmu(enable_ept, 0, vmx_get_max_ept_level(),
 			  ept_caps_to_lpage_level(vmx_capability.ept));
+#endif
 
 	/*
 	 * Only enable PML when hardware supports PML feature, and both EPT
@@ -8639,8 +8694,22 @@ __init int vmx_hardware_setup(void)
 		enable_pml = 0;
 
 	if (!cpu_has_vmx_preemption_timer())
+#ifndef __PKVM_HYP__
 		enable_preemption_timer = false;
+#else
+		/*
+		 * The pKVM hypervisor requires to use the preemption timer
+		 * to request immediate vmexit.
+		 */
+		return -EOPNOTSUPP;
+#endif
 
+	/*
+	 * The pKVM hypervisor will use the preemption timer for immediate
+	 * vmexit thus will not use it for guest VMs. The following preemption
+	 * timer setup is for guest VMs, so it can be skipped for the pKVM.
+	 */
+#ifndef __PKVM_HYP__
 	if (enable_preemption_timer) {
 		u64 use_timer_freq = 5000ULL * 1000 * 1000;
 
@@ -8664,10 +8733,12 @@ __init int vmx_hardware_setup(void)
 		vt_x86_ops.set_hv_timer = NULL;
 		vt_x86_ops.cancel_hv_timer = NULL;
 	}
+#endif
 
 	kvm_caps.supported_mce_cap |= MCG_LMCE_P;
 	kvm_caps.supported_mce_cap |= MCG_CMCI_P;
 
+#ifndef __PKVM_HYP__
 	if (pt_mode != PT_MODE_SYSTEM && pt_mode != PT_MODE_HOST_GUEST)
 		return -EINVAL;
 	if (!enable_ept || !enable_pmu || !cpu_has_vmx_intel_pt())
@@ -8724,8 +8795,14 @@ __init int vmx_hardware_setup(void)
 	kvm_caps.inapplicable_quirks &= ~KVM_X86_QUIRK_IGNORE_GUEST_PAT;
 
 	return r;
+#else
+	vmx_set_cpu_caps();
+
+	return 0;
+#endif
 }
 
+#ifndef __PKVM_HYP__
 static void vmx_cleanup_l1d_flush(void)
 {
 	if (vmx_l1d_flush_pages) {
@@ -8824,6 +8901,12 @@ int pkvm_vmx_init(void)
 {
 	if (setup_vmcs_config(&vmcs_config, &vmx_capability) < 0)
 		return -EIO;
+
+	/* Below features are disabled for simplicity */
+	enable_pmu = false;
+	nested = false;
+	flexpriority_enabled = false;
+	enable_pml = false;
 
 	return pkvm_x86_vendor_init(&vt_init_ops);
 }
