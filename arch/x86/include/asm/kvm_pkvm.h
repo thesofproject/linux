@@ -178,6 +178,33 @@ static inline unsigned long pkvm_hyp_pgtable_pages(void)
 	return __pkvm_pgtable_total_pages();
 }
 
+static inline unsigned long __vmemmap_memblock_size(struct memblock_region *reg,
+						    size_t vmemmap_entry_size)
+{
+	unsigned long nr_pages = reg->size >> PAGE_SHIFT;
+	unsigned long start, end;
+
+	/* Translate the pfn to the vmemmap entry */
+	start = (reg->base >> PAGE_SHIFT) * vmemmap_entry_size;
+	end = start + nr_pages * vmemmap_entry_size;
+	start = ALIGN_DOWN(start, PAGE_SIZE);
+	end = ALIGN(end, PAGE_SIZE);
+
+	return end - start;
+}
+
+static inline unsigned long pkvm_vmemmap_pages(size_t vmemmap_entry_size)
+{
+	unsigned long total_size = 0, i;
+
+	for (i = 0; i < pkvm_sym(pkvm_memblock_nr); i++) {
+		total_size += __vmemmap_memblock_size(&pkvm_sym(pkvm_memory)[i],
+						      vmemmap_entry_size);
+	}
+
+	return total_size >> PAGE_SHIFT;
+}
+
 #ifdef __PKVM_HYP__
 
 #undef WARN_ON
