@@ -27,6 +27,7 @@ static struct pkvm_init_ops vmx_init_ops = {
 	.hyp_mmu_finalize = vmx_hyp_mmu_finalize,
 	.host_mmu_init = pkvm_host_ept_init,
 	.host_mmu_finalize = pkvm_host_ept_finalize,
+	.reprivilege_cpu = pkvm_vmx_reprivilege_cpu,
 };
 
 struct pkvm_init_ops *pkvm_vmx_init_ops = &vmx_init_ops;
