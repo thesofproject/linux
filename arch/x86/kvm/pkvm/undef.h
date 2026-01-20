@@ -10,6 +10,7 @@
  * disabled. (This list needs to be extended when new variants are added.)
  */
 #undef CONFIG_PRINTK
+#undef CONFIG_DEBUG_VIRTUAL
 
 #define NOTRACE
 
