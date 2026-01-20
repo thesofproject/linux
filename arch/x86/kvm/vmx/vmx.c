@@ -8704,7 +8704,7 @@ static void __init do_vmx_pkvm_init(void)
 	int r;
 
 #if IS_ENABLED(CONFIG_HYPERV)
-	if (enlightened_vmcs) {
+	if (enlightened_vmcs && enable_pkvm) {
 		pr_warn("pKVM cannot be enabled due to conflict with enlightened_vmcs!\n");
 		return;
 	}

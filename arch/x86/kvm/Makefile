@@ -47,7 +47,7 @@ $(obj)/kvm-asm-offsets.h: $(obj)/kvm-asm-offsets.s FORCE
 
 pkvm-intel-$(CONFIG_PKVM_INTEL)	+= vmx/pkvm_init.o
 
-obj-$(CONFIG_PKVM_X86) += pkvm-intel.o
+obj-$(CONFIG_PKVM_X86) += pkvm-intel.o pkvm.o
 
 targets += kvm-asm-offsets.s
 clean-files += kvm-asm-offsets.h
