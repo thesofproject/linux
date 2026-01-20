@@ -463,6 +463,7 @@ int pkvm_host_mmu_finalize(host_mmu_finalize_fn_t fn)
  * pkvm_host_donate_hyp() - Donate memory pages from host to hypervisor.
  * @phys:	Physical address of the memory region to donate.
  * @size:	Size of the memory region to donate.
+ * @clear:	If true, clear the memory region after donating.
  *
  * The donation transfers ownership of the memory pages in range
  * [@phys, @phys + @size) from the host to the hypervisor, thus protecting them
@@ -475,7 +476,7 @@ int pkvm_host_mmu_finalize(host_mmu_finalize_fn_t fn)
  *
  * Returns: 0 on success, or a negative error code on failure.
  */
-int pkvm_host_donate_hyp(unsigned long phys, unsigned long size)
+int pkvm_host_donate_hyp(unsigned long phys, unsigned long size, bool clear)
 {
 	int ret;
 
@@ -503,6 +504,16 @@ int pkvm_host_donate_hyp(unsigned long phys, unsigned long size)
 	set_host_mem_pgstate(phys, size, PKVM_PAGE_NONE);
 unlock:
 	pkvm_host_mmu_unlock();
+
+	if (!ret && clear) {
+		/*
+		 * No need to flush CPU cache, like what pkvm_clear_memory()
+		 * does, as the pKVM hypervisor doesn't access memory via
+		 * non-coherent DMA (actually there is no DMA in the pKVM
+		 * hypervisor).
+		 */
+		memset(__pkvm_va(phys), 0, size);
+	}
 
 	return ret;
 }

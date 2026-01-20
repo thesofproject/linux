@@ -74,7 +74,7 @@ enum pkvm_owner_id {
 
 #define PKVM_OWNER_ID_BITS		bits_per(PKVM_MAX_ID - 1)
 
-int pkvm_host_donate_hyp(unsigned long phys, unsigned long size);
+int pkvm_host_donate_hyp(unsigned long phys, unsigned long size, bool clear);
 void pkvm_hyp_donate_host(unsigned long phys, unsigned long size, bool clear);
 int pkvm_hyp_donate_host_mmio_locked(unsigned long phys, unsigned long size);
 int pkvm_host_share_hyp(unsigned long phys, unsigned long size);
