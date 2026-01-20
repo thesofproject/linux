@@ -71,6 +71,8 @@ static __init void pkvm_setup_syms(void)
 #ifdef CONFIG_AMD_MEM_ENCRYPT
 	pkvm_sym(sme_me_mask) = sme_me_mask;
 #endif
+	cpumask_copy(&pkvm_sym(__cpu_possible_mask), cpu_possible_mask);
+	pkvm_sym(nr_cpu_ids) = nr_cpu_ids;
 }
 
 static __init int pkvm_setup_host_vmcs_config(void)
