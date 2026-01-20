@@ -25,6 +25,7 @@ struct pkvm_pgtable_mm_ops {
 /**
  * struct pkvm_pgtable_ops - Page table operation callbacks.
  * @pte_present:	Check if a pte is present.
+ * @pte_annotated:	Check if a pte is annotated with page state/owner id.
  * @pte_huge:		Check if a pte is huge.
  * @pte_mkhuge:		Set huge for the given pte.
  * @pte_to_phys:	Decode the physical address from pte.
@@ -52,6 +53,7 @@ struct pkvm_pgtable_mm_ops {
  */
 struct pkvm_pgtable_ops {
 	bool (*pte_present)(void *ptep);
+	bool (*pte_annotated)(void *pte);
 	bool (*pte_huge)(void *ptep);
 	void (*pte_mkhuge)(void *ptep);
 	unsigned long (*pte_to_phys)(void *ptep);
