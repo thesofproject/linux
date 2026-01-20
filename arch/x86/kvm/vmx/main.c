@@ -859,6 +859,7 @@ static int vt_gmem_max_mapping_level(struct kvm *kvm, kvm_pfn_t pfn,
 struct kvm_x86_ops vt_x86_ops __initdata = {
 	.name = KBUILD_MODNAME,
 
+#ifndef __PKVM_HYP__
 	.check_processor_compatibility = vmx_check_processor_compat,
 
 	.hardware_unsetup = vmx_hardware_unsetup,
@@ -1007,16 +1008,22 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 	.vcpu_mem_enc_ioctl = vt_op_tdx_only(vcpu_mem_enc_ioctl),
 
 	.gmem_max_mapping_level = vt_op_tdx_only(gmem_max_mapping_level)
+#endif /* !__PKVM_HYP__ */
 };
 
 struct kvm_x86_init_ops vt_init_ops __initdata = {
+#ifndef __PKVM_HYP__
 	.hardware_setup = vt_op(hardware_setup),
 	.handle_intel_pt_intr = NULL,
+#endif
 
 	.runtime_ops = &vt_x86_ops,
+#ifndef __PKVM_HYP__
 	.pmu_ops = &intel_pmu_ops,
+#endif
 };
 
+#ifndef __PKVM_HYP__
 static void __exit vt_exit(void)
 {
 	kvm_exit();
@@ -1071,3 +1078,4 @@ err_tdx_bringup:
 	return r;
 }
 module_init(vt_init);
+#endif /* !__PKVM_HYP__ */
