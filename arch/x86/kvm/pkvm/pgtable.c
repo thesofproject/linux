@@ -126,8 +126,14 @@ static int pgtable_try_map_leaf(struct pkvm_pgtable_visit_ctx *ctx,
 	 * Need to flush TLB when the previous mapping was present and the new
 	 * mapping changes either physical address or property bits. Otherwise
 	 * no need to flush TLB.
+	 *
+	 * No need to consider for the page state as it sits on the pte ignored
+	 * bits, which doesn't impact the TLB.
 	 */
-	flush_tlb = was_present && new != old;
+	if (pgt_ops->pte_present(ptep))
+		flush_tlb = (new ^ old) & ~pkvm_pgt_pgstate_mask(ctx->pgt);
+	else
+		flush_tlb = false;
 
 	if (ctx->level != PG_LEVEL_4K)
 		pgt_ops->pte_mkhuge(&new);
