@@ -145,6 +145,40 @@ static int create_hyp_mmu(const struct pkvm_mem_info infos[], int nr_infos)
 	return pkvm_hyp_mmu_switch_to_buddy(hyp_pgt_base, nr_pages);
 }
 
+static int create_host_mmu(host_mmu_init_fn_t host_mmu_init_fn)
+{
+	struct memblock_region *reg;
+	unsigned long phys = 0;
+	unsigned int i;
+	int ret;
+
+	ret = pkvm_host_mmu_init(host_pgt_base, pkvm_host_pgtable_pages(),
+				 host_mmu_init_fn);
+	if (ret)
+		return ret;
+
+	/* Map memory blocks with RWX permissions */
+	for (i = 0; i < pkvm_memblock_nr; i++) {
+		reg = &pkvm_memory[i];
+		ret = pkvm_host_mmu_map((unsigned long)reg->base,
+					(unsigned long)reg->size,
+					true, true, true, false);
+		if (ret)
+			return ret;
+	}
+
+	/* Map holes between memblocks as MMIO with RWX permissions */
+	for (i = 0; i < pkvm_memblock_nr; i++, phys = reg->base + reg->size) {
+		reg = &pkvm_memory[i];
+		ret = pkvm_host_mmu_map(phys, (unsigned long)reg->base - phys,
+					true, true, true, true);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
 static int initialize_global(struct pkvm_mem_info infos[], int nr_infos)
 {
 	host_mmu_init_fn_t host_mmu_init_fn = init_ops ? init_ops->host_mmu_init : NULL;
@@ -174,8 +208,7 @@ static int initialize_global(struct pkvm_mem_info infos[], int nr_infos)
 	if (ret)
 		return ret;
 
-	return pkvm_host_mmu_init(host_pgt_base, pkvm_host_pgtable_pages(),
-				  host_mmu_init_fn);
+	return create_host_mmu(host_mmu_init_fn);
 }
 
 int pkvm_init(struct pkvm_mem_info infos[], int nr_infos)
