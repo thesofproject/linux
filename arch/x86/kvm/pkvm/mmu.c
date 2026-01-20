@@ -10,6 +10,8 @@
 static struct pkvm_pgtable hyp_mmu;
 static struct pkvm_pool hyp_mmu_pool;
 
+static struct pkvm_pgtable host_mmu;
+
 static void *hyp_mmu_zalloc_page(void)
 {
 	return pkvm_alloc_pages(&hyp_mmu_pool, 0);
@@ -229,4 +231,9 @@ int pkvm_hyp_mmu_map(unsigned long vaddr, unsigned long phys,
 		     unsigned long size, u64 prot)
 {
 	return pkvm_pgtable_map(&hyp_mmu, vaddr, phys, size, prot);
+}
+
+int pkvm_host_mmu_init(void *pool_base, unsigned long pool_pages, host_mmu_init_fn_t fn)
+{
+	return fn ? fn(&host_mmu, pool_base, pool_pages) : -EOPNOTSUPP;
 }
