@@ -501,6 +501,8 @@ static DEFINE_PER_CPU(struct list_head, loaded_vmcss_on_cpu);
 static DECLARE_BITMAP(vmx_vpid_bitmap, VMX_NR_VPIDS);
 #ifndef __PKVM_HYP__
 static DEFINE_SPINLOCK(vmx_vpid_lock);
+#else
+static DEFINE_PKVM_SPINLOCK(vmx_vpid_lock);
 #endif /* !__PKVM_HYP__ */
 
 struct vmcs_config vmcs_config __ro_after_init;
@@ -677,6 +679,7 @@ static inline bool cpu_need_virtualize_apic_accesses(struct kvm_vcpu *vcpu)
 {
 	return flexpriority_enabled && lapic_in_kernel(vcpu);
 }
+#endif /* !__PKVM_HYP__ */
 
 struct vmx_uret_msr *vmx_find_uret_msr(struct vcpu_vmx *vmx, u32 msr)
 {
@@ -688,6 +691,7 @@ struct vmx_uret_msr *vmx_find_uret_msr(struct vcpu_vmx *vmx, u32 msr)
 	return NULL;
 }
 
+#ifndef __PKVM_HYP__
 static int vmx_set_guest_uret_msr(struct vcpu_vmx *vmx,
 				  struct vmx_uret_msr *msr, u64 data)
 {
@@ -2667,8 +2671,23 @@ int setup_vmcs_config_common(struct vmcs_config *vmcs_conf,
 					&_cpu_based_2nd_exec_control))
 			return -EIO;
 	}
+#ifndef __PKVM_HYP__
 	if (!IS_ENABLED(CONFIG_KVM_INTEL_PROVE_VE))
 		_cpu_based_2nd_exec_control &= ~SECONDARY_EXEC_EPT_VIOLATION_VE;
+#else
+	/*
+	 * Virtual MMIO is emulated by the host, but due to isolation, the host
+	 * cannot decode MMIO instructions for the pVM. So the EPT_VIOLATION_VE
+	 * feature could be enabled to inject #VE when the pVM accessed a
+	 * virtual MMIO address, allowing the pVM to decode the instruction
+	 * (e.g., mov) in its #VE handler and send MMIO details to the host via
+	 * hypercall. Now, the pVM is enlightened to use hypercalls directly for
+	 * virtual MMIO access instead of executing MMIO instructions. Therefore
+	 * no need to decode MMIO instruction. Disable the EPT_VIOLATION_VE
+	 * feature unconditionally.
+	 */
+	_cpu_based_2nd_exec_control &= ~SECONDARY_EXEC_EPT_VIOLATION_VE;
+#endif
 
 #ifndef CONFIG_X86_64
 	if (!(_cpu_based_2nd_exec_control &
@@ -2985,6 +3004,7 @@ void free_vmcs(struct vmcs *vmcs)
 {
 	free_page((unsigned long)vmcs);
 }
+#endif /* !__PKVM_HYP__ */
 
 /*
  * Free a VMCS, but before that VMCLEAR it on the CPU where it was last loaded
@@ -2993,19 +3013,44 @@ void free_loaded_vmcs(struct loaded_vmcs *loaded_vmcs)
 {
 	if (!loaded_vmcs->vmcs)
 		return;
+#ifndef __PKVM_HYP__
 	loaded_vmcs_clear(loaded_vmcs);
 	free_vmcs(loaded_vmcs->vmcs);
+#else
+	/*
+	 * The pKVM hypervisor doesn't have smp call thus requires the vmcs to
+	 * be already cleared on the remote CPU when freeing it.
+	 */
+	BUG_ON(loaded_vmcs->cpu != -1);
+	pkvm_hyp_donate_host(__pkvm_pa(loaded_vmcs->vmcs), PAGE_SIZE, true);
+#endif
 	loaded_vmcs->vmcs = NULL;
 	if (loaded_vmcs->msr_bitmap)
+#ifndef __PKVM_HYP__
 		free_page((unsigned long)loaded_vmcs->msr_bitmap);
+#else
+		pkvm_hyp_donate_host(__pkvm_pa(loaded_vmcs->msr_bitmap), PAGE_SIZE, true);
+#endif
 	WARN_ON(loaded_vmcs->shadow_vmcs != NULL);
 }
 
 int alloc_loaded_vmcs(struct loaded_vmcs *loaded_vmcs)
 {
+#ifndef __PKVM_HYP__
 	loaded_vmcs->vmcs = alloc_vmcs(false);
+#endif
 	if (!loaded_vmcs->vmcs)
 		return -ENOMEM;
+
+#ifdef __PKVM_HYP__
+	if (pkvm_host_donate_hyp(__pkvm_pa(loaded_vmcs->vmcs), PAGE_SIZE, true)) {
+		loaded_vmcs->vmcs = NULL;
+		loaded_vmcs->msr_bitmap = NULL;
+		goto out_vmcs;
+	}
+
+	loaded_vmcs->vmcs->hdr.revision_id = vmx_basic_vmcs_revision_id(vmcs_config.basic);
+#endif
 
 	vmcs_clear(loaded_vmcs->vmcs);
 
@@ -3015,10 +3060,20 @@ int alloc_loaded_vmcs(struct loaded_vmcs *loaded_vmcs)
 	loaded_vmcs->launched = 0;
 
 	if (cpu_has_vmx_msr_bitmap()) {
+#ifndef __PKVM_HYP__
 		loaded_vmcs->msr_bitmap = (unsigned long *)
 				__get_free_page(GFP_KERNEL_ACCOUNT);
+#endif
 		if (!loaded_vmcs->msr_bitmap)
 			goto out_vmcs;
+#ifdef __PKVM_HYP__
+		/* No need to clear msr_bitmap as it will be initialized by pKVM. */
+		if (pkvm_host_donate_hyp(__pkvm_pa(loaded_vmcs->msr_bitmap),
+					   PAGE_SIZE, false)) {
+			loaded_vmcs->msr_bitmap = NULL;
+			goto out_vmcs;
+		}
+#endif
 		memset(loaded_vmcs->msr_bitmap, 0xff, PAGE_SIZE);
 	}
 
@@ -3033,6 +3088,7 @@ out_vmcs:
 	return -ENOMEM;
 }
 
+#ifndef __PKVM_HYP__
 static void free_kvm_area(void)
 {
 	int cpu;
@@ -4025,6 +4081,7 @@ static void seg_setup(int seg)
 
 	vmcs_write32(sf->ar_bytes, ar);
 }
+#endif /* !__PKVM_HYP__ */
 
 int allocate_vpid(void)
 {
@@ -4032,13 +4089,21 @@ int allocate_vpid(void)
 
 	if (!enable_vpid)
 		return 0;
+#ifndef __PKVM_HYP__
 	spin_lock(&vmx_vpid_lock);
+#else
+	pkvm_spin_lock(&vmx_vpid_lock);
+#endif
 	vpid = find_first_zero_bit(vmx_vpid_bitmap, VMX_NR_VPIDS);
 	if (vpid < VMX_NR_VPIDS)
 		__set_bit(vpid, vmx_vpid_bitmap);
 	else
 		vpid = 0;
+#ifndef __PKVM_HYP__
 	spin_unlock(&vmx_vpid_lock);
+#else
+	pkvm_spin_unlock(&vmx_vpid_lock);
+#endif
 	return vpid;
 }
 
@@ -4046,9 +4111,17 @@ void free_vpid(int vpid)
 {
 	if (!enable_vpid || vpid == 0)
 		return;
+#ifndef __PKVM_HYP__
 	spin_lock(&vmx_vpid_lock);
+#else
+	pkvm_spin_lock(&vmx_vpid_lock);
+#endif
 	__clear_bit(vpid, vmx_vpid_bitmap);
+#ifndef __PKVM_HYP__
 	spin_unlock(&vmx_vpid_lock);
+#else
+	pkvm_spin_unlock(&vmx_vpid_lock);
+#endif
 }
 
 static void vmx_msr_bitmap_l01_changed(struct vcpu_vmx *vmx)
@@ -4094,6 +4167,7 @@ void vmx_set_intercept_for_msr(struct kvm_vcpu *vcpu, u32 msr, int type, bool se
 	}
 }
 
+#ifndef __PKVM_HYP__
 static void vmx_update_msr_bitmap_x2apic(struct kvm_vcpu *vcpu)
 {
 	/*
@@ -4886,10 +4960,12 @@ static void init_vmcs(struct vcpu_vmx *vmx)
 	if (cpu_has_vmx_xsaves())
 		vmcs_write64(XSS_EXIT_BITMAP, VMX_XSS_EXIT_BITMAP);
 
+#ifndef __PKVM_HYP__
 	if (enable_pml) {
 		vmcs_write64(PML_ADDRESS, page_to_phys(vmx->pml_pg));
 		vmcs_write16(GUEST_PML_INDEX, PML_HEAD_INDEX);
 	}
+#endif
 
 	vmx_write_encls_bitmap(&vmx->vcpu, NULL);
 
@@ -7667,9 +7743,13 @@ void vmx_vcpu_free(struct kvm_vcpu *vcpu)
 	free_loaded_vmcs(vmx->loaded_vmcs);
 	free_page((unsigned long)vmx->ve_info);
 }
+#endif /* !__PKVM_HYP__ */
 
 int vmx_vcpu_create(struct kvm_vcpu *vcpu)
 {
+#ifdef __PKVM_HYP__
+	struct vcpu_vmx *shared_vmx = to_vmx(to_pkvm_vcpu(vcpu)->shared_vcpu);
+#endif
 	struct vmx_uret_msr *tsx_ctrl;
 	struct vcpu_vmx *vmx;
 	int i, err;
@@ -7683,6 +7763,8 @@ int vmx_vcpu_create(struct kvm_vcpu *vcpu)
 
 	vmx->vpid = allocate_vpid();
 
+	/* PML is not used in the pKVM hypervisor. */
+#ifndef __PKVM_HYP__
 	/*
 	 * If PML is turned on, failure on enabling PML just results in failure
 	 * of creating the vcpu, therefore we can simplify PML logic (by
@@ -7694,6 +7776,7 @@ int vmx_vcpu_create(struct kvm_vcpu *vcpu)
 		if (!vmx->pml_pg)
 			goto free_vpid;
 	}
+#endif
 
 	for (i = 0; i < kvm_nr_uret_msrs; ++i)
 		vmx->guest_uret_msrs[i].mask = -1ull;
@@ -7708,10 +7791,19 @@ int vmx_vcpu_create(struct kvm_vcpu *vcpu)
 			tsx_ctrl->mask = ~(u64)TSX_CTRL_CPUID_CLEAR;
 	}
 
+#ifdef __PKVM_HYP__
+	vmx->vmcs01.vmcs = kern_pkvm_va(shared_vmx->vmcs01.vmcs);
+	vmx->vmcs01.msr_bitmap = kern_pkvm_va(shared_vmx->vmcs01.msr_bitmap);
+#endif
 	err = alloc_loaded_vmcs(&vmx->vmcs01);
 	if (err < 0)
+#ifndef __PKVM_HYP__
 		goto free_pml;
+#else
+		goto free_vpid;
+#endif
 
+#ifndef __PKVM_HYP__
 	/*
 	 * Use Hyper-V 'Enlightened MSR Bitmap' feature when KVM runs as a
 	 * nested (L1) hypervisor and Hyper-V in L0 supports it. Enable the
@@ -7724,9 +7816,18 @@ int vmx_vcpu_create(struct kvm_vcpu *vcpu)
 
 		evmcs->hv_enlightenments_control.msr_bitmap = 1;
 	}
+#endif
 
 	vmx->loaded_vmcs = &vmx->vmcs01;
 
+	/*
+	 * The pKVM hypervisor has disabled virtualize_apic_access and requires
+	 * enable_unrestricted_guest features for simplicity, thus it doesn't need
+	 * to allocate apic access page, or initialize the identify map for
+	 * real mode. EPT_VIOLATION_VE feature is also not used thus no need to
+	 * have ve_info page.
+	 */
+#ifndef __PKVM_HYP__
 	if (cpu_need_virtualize_apic_accesses(vcpu)) {
 		err = kvm_alloc_apic_access_page(vcpu->kvm);
 		if (err)
@@ -7752,22 +7853,29 @@ int vmx_vcpu_create(struct kvm_vcpu *vcpu)
 
 		vmx->ve_info = page_to_virt(page);
 	}
+#endif
 
 	if (vmx_can_use_ipiv(vcpu))
+#ifndef __PKVM_HYP__
 		WRITE_ONCE(to_kvm_vmx(vcpu->kvm)->pid_table[vcpu->vcpu_id],
 			   __pa(&vmx->vt.pi_desc) | PID_TABLE_ENTRY_VALID);
+#else
+		WRITE_ONCE(to_kvm_vmx(vcpu->kvm)->pid_table[vcpu->vcpu_id],
+			   __pa(&shared_vmx->vt.pi_desc) | PID_TABLE_ENTRY_VALID);
+#endif
 
 	return 0;
 
+#ifndef __PKVM_HYP__
 free_vmcs:
 	free_loaded_vmcs(vmx->loaded_vmcs);
 free_pml:
 	vmx_destroy_pml_buffer(vmx);
+#endif
 free_vpid:
 	free_vpid(vmx->vpid);
 	return err;
 }
-#endif /* !__PKVM_HYP__ */
 
 #define L1TF_MSG_SMT "L1TF CPU bug present and SMT on, data leak possible. See CVE-2018-3646 and https://www.kernel.org/doc/html/latest/admin-guide/hw-vuln/l1tf.html for details.\n"
 #define L1TF_MSG_L1D "L1TF CPU bug present and virtualization mitigation disabled, data leak possible. See CVE-2018-3646 and https://www.kernel.org/doc/html/latest/admin-guide/hw-vuln/l1tf.html for details.\n"

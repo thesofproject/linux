@@ -170,9 +170,13 @@ DECLARE_STATIC_KEY_FALSE(kvm_has_noapic_vcpu);
 
 static inline bool lapic_in_kernel(struct kvm_vcpu *vcpu)
 {
+#ifndef __PKVM_HYP__
 	if (static_branch_unlikely(&kvm_has_noapic_vcpu))
 		return vcpu->arch.apic;
 	return true;
+#else
+	return vcpu->arch.apic;
+#endif
 }
 
 extern struct static_key_false_deferred apic_hw_disabled;

@@ -1815,9 +1815,9 @@ void kvm_enable_efer_bits(u64 mask)
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_enable_efer_bits);
 
-#ifndef __PKVM_HYP__
 bool kvm_msr_allowed(struct kvm_vcpu *vcpu, u32 index, u32 type)
 {
+#ifndef __PKVM_HYP__
 	struct kvm_x86_msr_filter *msr_filter;
 	struct msr_bitmap_range *ranges;
 	struct kvm *kvm = vcpu->kvm;
@@ -1856,9 +1856,18 @@ out:
 	srcu_read_unlock(&kvm->srcu, idx);
 
 	return allowed;
+#else
+	/*
+	 * The pKVM hypervisor will not check the MSR filter configured by the
+	 * host user space VMM for simplicity, thus always allow MSR emulation
+	 * for the guest.
+	 */
+	return true;
+#endif
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_msr_allowed);
 
+#ifndef __PKVM_HYP__
 /*
  * Write @data into the MSR specified by @index.  Select MSR specific fault
  * checks are bypassed if @host_initiated is %true.
