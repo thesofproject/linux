@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <linux/types.h>
+#include "init.h"
 #include "pkvm.h"
 
 /*
@@ -19,6 +20,9 @@ void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 	int ret = 0;
 
 	switch (pkvm_hc(vcpu)) {
+	case __pkvm__init:
+		ret = pkvm_init();
+		break;
 	default:
 		ret = -EINVAL;
 		break;
