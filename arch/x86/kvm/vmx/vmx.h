@@ -746,10 +746,12 @@ void vmx_exit(void);
 #ifdef CONFIG_PKVM_INTEL
 
 #define PKVM_HOST_KVM_VMX_PAGES		(PAGE_ALIGN(sizeof(struct kvm_vmx)) >> PAGE_SHIFT)
+#define PKVM_HOST_VCPU_VMX_PAGES	(PAGE_ALIGN(sizeof(struct vcpu_vmx)) >> PAGE_SHIFT)
 
 static inline unsigned long pkvm_vmx_data_pages(void)
 {
-	return pkvm_data_pages(PKVM_HOST_KVM_VMX_PAGES);
+	return pkvm_data_pages(PKVM_HOST_KVM_VMX_PAGES,
+			       PKVM_HOST_VCPU_VMX_PAGES);
 }
 
 int __init vmx_pkvm_init(void);
