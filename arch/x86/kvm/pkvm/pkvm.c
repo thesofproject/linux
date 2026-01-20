@@ -3,6 +3,7 @@
 #include <asm/fpu/xcr.h>
 #include <asm/pkvm_spinlock.h>
 #include "debug.h"
+#include "fpu.h"
 #include "init.h"
 #include "lapic.h"
 #include "mem_protect.h"
@@ -305,6 +306,9 @@ static int __vcpu_create(struct kvm *kvm, struct kvm_vcpu *vcpu, struct fpstate 
 		return ret;
 
 	vcpu->arch.guest_fpu.fpstate = fps;
+	pkvm_init_guest_fpu(&vcpu->arch.guest_fpu);
+	if (pkvm_is_protected_vcpu(vcpu))
+		fpstate_set_confidential(&vcpu->arch.guest_fpu);
 
 	ret = kvm_x86_call(vcpu_create)(vcpu);
 	if (ret)
