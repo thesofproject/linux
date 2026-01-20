@@ -73,6 +73,12 @@
 #include "smm.h"
 #include "vmx_onhyperv.h"
 #include "posted_intr.h"
+#ifdef __PKVM_HYP__
+#include "pkvm.h"
+
+#undef module_param_named
+#define module_param_named(...)
+#endif
 
 #include "mmu/spte.h"
 
@@ -130,10 +136,12 @@ module_param(nested, bool, 0444);
 
 bool __read_mostly enable_pml = 1;
 module_param_named(pml, enable_pml, bool, 0444);
+#endif /* !__PKVM_HYP__ */
 
 static bool __read_mostly error_on_inconsistent_vmcs_config = true;
 module_param(error_on_inconsistent_vmcs_config, bool, 0444);
 
+#ifndef __PKVM_HYP__
 static bool __read_mostly dump_invalid_vmcs = 0;
 module_param(dump_invalid_vmcs, bool, 0644);
 
@@ -481,9 +489,9 @@ static DEFINE_PER_CPU(struct list_head, loaded_vmcss_on_cpu);
 
 static DECLARE_BITMAP(vmx_vpid_bitmap, VMX_NR_VPIDS);
 static DEFINE_SPINLOCK(vmx_vpid_lock);
+#endif /* !__PKVM_HYP__ */
 
 struct vmcs_config vmcs_config __ro_after_init;
-#endif /* !__PKVM_HYP__ */
 struct vmx_capability vmx_capability __ro_after_init;
 
 #ifndef __PKVM_HYP__
@@ -600,6 +608,7 @@ static void hv_reset_evmcs(void)
 static void hv_init_evmcs(void) {}
 static void hv_reset_evmcs(void) {}
 #endif /* IS_ENABLED(CONFIG_HYPERV) */
+#endif /* !__PKVM_HYP__ */
 
 /*
  * Comment's format: document - errata name - stepping - processor name.
@@ -649,6 +658,7 @@ static inline bool cpu_has_broken_vmx_preemption_timer(void)
 	return false;
 }
 
+#ifndef __PKVM_HYP__
 static inline bool cpu_need_virtualize_apic_accesses(struct kvm_vcpu *vcpu)
 {
 	return flexpriority_enabled && lapic_in_kernel(vcpu);
@@ -2531,6 +2541,7 @@ void vmx_cache_reg(struct kvm_vcpu *vcpu, enum kvm_reg reg)
 		break;
 	}
 }
+#endif /* !__PKVM_HYP__ */
 
 /*
  * There is no X86_FEATURE for SGX yet, but anyway we need to query CPUID
@@ -2798,6 +2809,7 @@ static int setup_vmcs_config(struct vmcs_config *vmcs_conf,
 	return setup_vmcs_config_common(vmcs_conf, vmx_cap, &setting);
 }
 
+#ifndef __PKVM_HYP__
 static bool __kvm_is_vmx_supported(void)
 {
 	int cpu = smp_processor_id();
@@ -8805,4 +8817,15 @@ err_l1d_flush:
 	kvm_x86_vendor_exit();
 	return r;
 }
+
+#else /* !__PKVM_HYP__ */
+
+int pkvm_vmx_init(void)
+{
+	if (setup_vmcs_config(&vmcs_config, &vmx_capability) < 0)
+		return -EIO;
+
+	return pkvm_x86_vendor_init(&vt_init_ops);
+}
+
 #endif /* !__PKVM_HYP__ */
