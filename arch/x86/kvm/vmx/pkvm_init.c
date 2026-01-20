@@ -47,6 +47,12 @@ static __init void pkvm_setup_syms(void)
 	 */
 	pkvm_sym(page_offset_base) = page_offset_base;
 	pkvm_sym(phys_base) = phys_base;
+
+	/*
+	 * For the pKVM hypervisor to leverage the boot_cpu_has macro to check
+	 * if a specific feature is supported or not.
+	 */
+	memcpy(&pkvm_sym(boot_cpu_data), &boot_cpu_data, sizeof(struct cpuinfo_x86));
 }
 
 static __init int pkvm_setup_host_vmcs_config(void)
