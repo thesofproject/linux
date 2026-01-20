@@ -5,6 +5,7 @@
 #include <linux/module.h>
 #include <linux/extable.h>
 #include <asm/pkvm_image.h>
+#include "pkvm_constants.h"
 #include "vmx.h"
 
 static int __init early_pkvm_parse_cmdline(char *buf)
@@ -38,6 +39,7 @@ u64 pkvm_total_reserve_pages(void)
 	u64 total = pkvm_vmx_data_pages();
 
 	total += pkvm_hyp_pgtable_pages();
+	total += pkvm_vmemmap_pages(PKVM_VMEMMAP_ENTRY_SIZE);
 
 	return total;
 }
