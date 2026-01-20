@@ -5,6 +5,7 @@
 #include "trace.h"
 
 struct perf_ctrl {
+	unsigned int age;
 	bool on;
 };
 static DEFINE_PER_CPU(struct vmexit_perf, hvcpu_perf);
@@ -22,6 +23,13 @@ static inline struct vmexit_perf *vcpu_to_perf(struct kvm_vcpu *vcpu)
 	return this_cpu_ptr(&hvcpu_perf);
 }
 
+static void refresh_vmexit_perf(struct perf_ctrl *pctrl, struct vmexit_perf *perf)
+{
+	memset(perf->data.vmexit_reasons, 0, sizeof(perf->data.vmexit_reasons));
+
+	perf->age = pctrl->age;
+}
+
 void pkvm_trace_vmexit_start(struct kvm_vcpu *vcpu)
 {
 	struct perf_ctrl *pctrl = this_cpu_ptr(&perf_ctrl);
@@ -31,6 +39,8 @@ void pkvm_trace_vmexit_start(struct kvm_vcpu *vcpu)
 		return;
 
 	perf = vcpu_to_perf(vcpu);
+	if (pctrl->age != perf->age)
+		refresh_vmexit_perf(pctrl, perf);
 
 	perf->tsc = rdtsc_ordered();
 }
@@ -48,6 +58,10 @@ void pkvm_trace_vmexit_end(struct kvm_vcpu *vcpu, u32 reason)
 		return;
 
 	perf = vcpu_to_perf(vcpu);
+	if (pctrl->age != perf->age) {
+		refresh_vmexit_perf(pctrl, perf);
+		return;
+	}
 
 	cycles = rdtsc_ordered() - perf->tsc;
 
@@ -66,4 +80,16 @@ void pkvm_vcpu_perf_init(struct kvm_vcpu *vcpu)
 	perf->data.vcpu_id = vcpu->vcpu_id;
 
 	pkvm_spin_lock_init(&perf->lock);
+}
+
+void pkvm_enable_vmexit_trace(bool en)
+{
+	struct perf_ctrl *pctrl = this_cpu_ptr(&perf_ctrl);
+
+	if (en && !pctrl->on) {
+		pctrl->age++;
+		pctrl->on = true;
+	} else if (!en && pctrl->on) {
+		pctrl->on = false;
+	}
 }

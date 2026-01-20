@@ -3,6 +3,7 @@
 #include "init.h"
 #include "lapic.h"
 #include "pkvm.h"
+#include "trace.h"
 
 /*
  * Needed by kvm_spurious_fault() which is a generic fault function for the
@@ -30,6 +31,9 @@ void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 		break;
 	case __pkvm__reprivilege_cpu:
 		ret = pkvm_reprivilege_vcpu(vcpu);
+		break;
+	case __pkvm__enable_vmexit_trace:
+		pkvm_enable_vmexit_trace(pkvm_hc_input1(vcpu));
 		break;
 	default:
 		ret = -EINVAL;
