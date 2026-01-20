@@ -67,18 +67,14 @@ static bool leaf_mapping_allowed(struct pkvm_pgtable_visit_ctx *ctx,
 	return IS_ALIGNED(data->phys + (ctx->addr - ctx->start), leaf_size);
 }
 
-static void pgtable_split(struct pkvm_pgtable_visit_ctx *ctx, void *child_ptep)
+static void split_huge_pte(struct pkvm_pgtable_visit_ctx *ctx, void *child_ptep)
 {
 	const struct pkvm_pgtable_mm_ops *mm_ops = ctx->pgt->mm_ops;
 	const struct pkvm_pgtable_ops *pgt_ops = ctx->pgt->pgt_ops;
+	u64 prot = pgt_ops->pte_to_prot(ctx->ptep);
 	unsigned long phys, phys_end, step_size;
 	int i = 0, entry_size, child_level;
-	u64 prot;
 
-	BUG_ON(ctx->level <= PG_LEVEL_4K);
-
-	/* Reuse the large mapping's prot. */
-	prot = pgt_ops->pte_to_prot(ctx->ptep);
 	child_level = ctx->level - 1;
 	if (child_level > PG_LEVEL_4K)
 		pgt_ops->pte_mkhuge(&prot);
@@ -92,6 +88,33 @@ static void pgtable_split(struct pkvm_pgtable_visit_ctx *ctx, void *child_ptep)
 		pgt_ops->pte_set(child_ptep + i * entry_size, phys | prot);
 		mm_ops->get_page(child_ptep);
 	}
+}
+
+static void split_annotated_pte(struct pkvm_pgtable_visit_ctx *ctx, void *child_ptep)
+{
+	const struct pkvm_pgtable_mm_ops *mm_ops = ctx->pgt->mm_ops;
+	const struct pkvm_pgtable_ops *pgt_ops = ctx->pgt->pgt_ops;
+	int entry_size = pgt_ops->pte_size(ctx->level - 1);
+	int entries = pgt_ops->pte_count(ctx->level);
+	u64 annotation = pgt_ops->pte_get(ctx->ptep);
+	int i;
+
+	for (i = 0; i < entries; i++) {
+		pgt_ops->pte_set((child_ptep + i * entry_size), annotation);
+		mm_ops->get_page(child_ptep);
+	}
+}
+
+static void pgtable_split(struct pkvm_pgtable_visit_ctx *ctx, void *child_ptep)
+{
+	const struct pkvm_pgtable_ops *pgt_ops = ctx->pgt->pgt_ops;
+
+	BUG_ON(ctx->level <= PG_LEVEL_4K);
+
+	if (pgt_ops->pte_huge(ctx->ptep))
+		split_huge_pte(ctx, child_ptep);
+	else if (pgt_ops->pte_annotated(ctx->ptep))
+		split_annotated_pte(ctx, child_ptep);
 }
 
 static int pgtable_try_map_leaf(struct pkvm_pgtable_visit_ctx *ctx,
@@ -187,10 +210,10 @@ static int __map_walker(struct pkvm_pgtable_visit_ctx *ctx,
 		return -ENOMEM;
 
 	/*
-	 * If a huge mapping already exists at the current level, split it into
-	 * smaller ones.
+	 * If a huge mapping already exists at the current level, or the pte
+	 * contains annotation, split it into smaller ones.
 	 */
-	if (pgt_ops->pte_huge(ptep)) {
+	if (pgt_ops->pte_huge(ptep) || pgt_ops->pte_annotated(ptep)) {
 		/* Split doesn't change the translation so no need to flush tlb. */
 		mm_ops->put_page(ptep);
 		pgtable_split(ctx, page);
@@ -338,10 +361,10 @@ static int unmap_walker(struct pkvm_pgtable_visit_ctx *ctx, unsigned long walk_f
 		return ret;
 
 	/*
-	 * If a huge mapping already exists at the current level, split it into
-	 * smaller ones.
+	 * If a huge mapping already exists at the current level, or the pte
+	 * contains annotation, split it into smaller ones.
 	 */
-	if (pgt_ops->pte_huge(ptep)) {
+	if (pgt_ops->pte_huge(ptep) || pgt_ops->pte_annotated(ptep)) {
 		void *page;
 
 		page = pgtable_alloc_page(mm_ops);
