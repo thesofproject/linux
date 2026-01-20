@@ -61,6 +61,36 @@ bool pkvm_find_addr_range(unsigned long phys, struct range *range)
 	return false;
 }
 
+static void pkvm_clflush_cache_range_opt(void *vaddr, unsigned int size)
+{
+	const unsigned long clflush_size = boot_cpu_data.x86_clflush_size;
+	void *p = (void *)((unsigned long)vaddr & ~(clflush_size - 1));
+	void *vend = vaddr + size;
+
+	if (p >= vend)
+		return;
+
+	for (; p < vend; p += clflush_size)
+		clflushopt(p);
+}
+
+/**
+ * pkvm_clflush_cache_range - flush a cache range with clflush
+ * which is implemented refer to clflush_cache_range() in kernel.
+ *
+ * @vaddr:	virtual start address
+ * @size:	number of bytes to flush
+ *
+ * CLFLUSHOPT is an unordered instruction which needs fencing with MFENCE or
+ * SFENCE to avoid ordering issues.
+ */
+void pkvm_clflush_cache_range(void *vaddr, unsigned int size)
+{
+	mb();
+	pkvm_clflush_cache_range_opt(vaddr, size);
+	mb();
+}
+
 /*
  * Ensure that __kcfi_typeid_ symbols are emitted for functions that may
  * not be indirectly called with all configurations.

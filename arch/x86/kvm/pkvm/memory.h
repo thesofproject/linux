@@ -97,4 +97,6 @@ static inline bool is_memory_range(unsigned long phys, unsigned long size)
 	return range_contains(&range, &target);
 }
 
+void pkvm_clflush_cache_range(void *vaddr, unsigned int size);
+
 #endif /* __PKVM_X86_MEMORY_H */
