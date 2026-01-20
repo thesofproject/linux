@@ -77,9 +77,51 @@ struct pkvm_pgtable {
 	const struct pkvm_pgtable_ops *pgt_ops;
 };
 
+struct pkvm_pgtable_visit_ctx {
+	struct pkvm_pgtable *pgt;
+	const unsigned long start;
+	const unsigned long end;
+	unsigned long addr;
+	int level;
+	void *ptep;
+};
+
+typedef int (*pgtable_visit_fn_t)(struct pkvm_pgtable_visit_ctx *ctx,
+				  unsigned long walk_flags, void *const arg);
+
+/**
+ * enum pkvm_pgtable_walk_flags - Flags to control page table walk.
+ * @PKVM_PGTABLE_WALK_TABLE_PRE:	Execute the callback on a non-leaf
+ *					entry before visiting its children.
+ * @PKVM_PGTABLE_WALK_LEAF:		Execute the callback on a leaf entry
+ *					(either present or non-present).
+ * @PKVM_PGTABLE_WALK_TABLE_POST:	Execute the callback on a non-leaf
+ *					entry after visiting its children.
+ */
+enum pkvm_pgtable_walk_flags {
+	PKVM_PGTABLE_WALK_TABLE_PRE	= BIT(0),
+	PKVM_PGTABLE_WALK_LEAF		= BIT(1),
+	PKVM_PGTABLE_WALK_TABLE_POST	= BIT(2),
+};
+
+/**
+ * struct pkvm_pgtable_walker - The page table walk callback descriptor.
+ * @cb:		The callback executed during the page table walking.
+ * @arg:	The argument passed to the callback.
+ * @walk_flags:	A bitwise-or of enum pkvm_pgtable_walk_flags to indicate the
+ *		walking behaviors.
+ */
+struct pkvm_pgtable_walker {
+	const pgtable_visit_fn_t cb;
+	void *const arg;
+	const unsigned long walk_flags;
+};
+
 int pkvm_pgtable_init(struct pkvm_pgtable *pgt,
 		      struct pkvm_pgtable_cap cap,
 		      const struct pkvm_pgtable_mm_ops *mm_ops,
 		      const struct pkvm_pgtable_ops *pgt_ops);
+int pkvm_pgtable_walk(struct pkvm_pgtable *pgt, unsigned long vaddr,
+		      unsigned long size, struct pkvm_pgtable_walker *walker);
 
 #endif /* __PKVM_X86_PGTABLE_H */
