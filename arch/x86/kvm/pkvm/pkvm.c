@@ -24,6 +24,9 @@ void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 		ret = pkvm_init((struct pkvm_mem_info *)pkvm_hc_input1(vcpu),
 				pkvm_hc_input2(vcpu));
 		break;
+	case __pkvm__init_finalize:
+		ret = pkvm_init_finalize();
+		break;
 	case __pkvm__reprivilege_cpu:
 		ret = pkvm_reprivilege_vcpu(vcpu);
 		break;
