@@ -3,6 +3,7 @@
 #include <linux/memblock.h>
 #include <kvm_emulate.h>
 #include <vmx/x86_ops.h>
+#include "debug.h"
 #include "ept.h"
 #include "host_vmx.h"
 #include "pkvm/init.h"
@@ -328,6 +329,8 @@ void pkvm_host_vmexit_main(struct vcpu_vmx *vmx)
 		skip_instruction = true;
 		break;
 	default:
+		pkvm_err_ratelimited("Unsupported vmexit reason 0x%x.\n",
+				      vt->exit_reason.full);
 		break;
 	}
 
