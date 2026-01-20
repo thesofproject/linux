@@ -361,6 +361,11 @@ struct affinity_context;
 DECLARE_HOOK(android_vh_task_should_scx,
 	TP_PROTO(int *should_scx, int policy, int prio),
 	TP_ARGS(should_scx, policy, prio));
+DECLARE_HOOK(android_vh_scx_restore_flags,
+	TP_PROTO(const struct sched_class *prev_class,
+		 const struct sched_class *next_class,
+		 int *flags),
+	TP_ARGS(prev_class, next_class, flags));
 DECLARE_HOOK(android_vh_scx_ops_consider_migration,
 	TP_PROTO(bool *consider_migration),
 	TP_ARGS(consider_migration));
