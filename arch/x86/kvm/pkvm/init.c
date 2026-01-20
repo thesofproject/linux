@@ -41,8 +41,12 @@ static int back_vmemmap(phys_addr_t back_pa)
 	unsigned int i;
 	int ret;
 
-	/* vmemmap region map to virtual address 0 */
-	__pkvm_vmemmap = 0;
+	/*
+	 * Map the vmemmap region to virtual address at page 1.
+	 * Keep page 0 unmapped, to catch NULL dereference bugs in the
+	 * hypervisor code.
+	 */
+	__pkvm_vmemmap = PAGE_SIZE;
 
 	for (i = 0; i < pkvm_memblock_nr; i++) {
 		reg = &pkvm_memory[i];
