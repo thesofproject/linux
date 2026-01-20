@@ -90,4 +90,6 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.vm_size = sizeof(struct kvm_vmx),
 	.vm_init = pkvm_vm_init,
 	.vm_destroy = pkvm_vm_destroy,
+
+	.vcpu_precreate = vmx_vcpu_precreate,
 };
