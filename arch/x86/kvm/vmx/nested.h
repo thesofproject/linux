@@ -9,6 +9,7 @@
 
 #ifdef __PKVM_HYP__
 static inline void nested_vmx_setup_ctls_msrs(struct vmcs_config *vmcs_conf, u32 ept_caps) {}
+static inline void nested_vmx_free_vcpu(struct kvm_vcpu *vcpu) {}
 
 static inline struct vmcs12 *get_vmcs12(struct kvm_vcpu *vcpu)
 {
