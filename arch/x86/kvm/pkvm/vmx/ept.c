@@ -343,8 +343,7 @@ int pkvm_handle_host_ept_violation(void)
 			 * handled by unmaping some other MMIO mapped for the
 			 * host VM to reclaim some mmu pages and try again.
 			 */
-			ret = pkvm_host_mmu_map(cur.start, size, true, true,
-						true, true);
+			ret = pkvm_hyp_donate_host_mmio_locked(cur.start, size);
 			if (ret == -ENOMEM)
 				pkvm_err("No page-table page to map host GPA 0x%lx\n", gpa);
 			break;
