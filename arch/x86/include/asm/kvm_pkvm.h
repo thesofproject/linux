@@ -3,7 +3,9 @@
 #define _ASM_X86_KVM_PKVM_H
 
 #ifdef CONFIG_PKVM_X86
+#include <linux/bug.h>
 #include <linux/mm.h>
+#include <asm/pkvm_image.h>
 
 #define PKVM_MEMBLOCK_REGIONS		128
 #define PKVM_STACK_SIZE			SZ_16K
@@ -25,9 +27,9 @@ struct pkvm_hyp {
 #define PKVM_PCPU_PAGES		(PAGE_ALIGN(sizeof(struct pkvm_pcpu)) >> PAGE_SHIFT)
 
 u64 pkvm_total_reserve_pages(void);
-void *pkvm_early_alloc_page(void);
-void *pkvm_early_alloc_contig(unsigned int nr_pages);
-void pkvm_early_alloc_init(void *virt, unsigned long size);
+PKVM_DECLARE(void *, pkvm_early_alloc_page, (void));
+PKVM_DECLARE(void *, pkvm_early_alloc_contig, (unsigned int nr_pages));
+PKVM_DECLARE(void, pkvm_early_alloc_init, (void *virt, unsigned long size));
 
 static inline unsigned long pkvm_data_pages(unsigned long extra_global,
 					    unsigned long extra_percpu)
@@ -42,6 +44,32 @@ static inline unsigned long get_host_stack_top(struct pkvm_pcpu *pcpu)
 {
 	return (unsigned long) &pcpu->stack[sizeof(pcpu->stack)];
 }
+
+#ifdef __PKVM_HYP__
+
+#undef WARN_ON
+#undef WARN
+#undef WARN_ON_ONCE
+#undef WARN_ONCE
+#undef _BUG_FLAGS
+
+#define WARN_ON(condition) ({						\
+	int __ret_warn_on = !!(condition);				\
+	unlikely(__ret_warn_on);					\
+})
+
+#define WARN(condition, format...) ({					\
+	int __ret_warn_on = !!(condition);				\
+	no_printk(format);						\
+	unlikely(__ret_warn_on);					\
+})
+
+#define WARN_ON_ONCE(condition) WARN_ON(condition)
+#define WARN_ONCE(condition, format...) WARN(condition, format)
+
+#define _BUG_FLAGS(ins, flags, extra)  asm volatile(ins)
+
+#endif /* __PKVM_HYP__ */
 
 #endif /* CONFIG_PKVM_X86 */
 
