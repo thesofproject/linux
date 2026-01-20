@@ -48,6 +48,11 @@ static bool ept_pte_present(void *ptep)
 	return !!(val & VMX_EPT_RWX_MASK);
 }
 
+static bool ept_pte_annotated(void *ptep)
+{
+	return !ept_pte_present(ptep) && *(u64 *)ptep != 0;
+}
+
 static bool ept_pte_huge(void *ptep)
 {
 	return is_large_pte(*(u64 *)ptep);
@@ -145,6 +150,7 @@ static void host_ept_flush_tlb(struct pkvm_pgtable *pgt,
 
 static const struct pkvm_pgtable_ops host_ept_pgt_ops = {
 	.pte_present = ept_pte_present,
+	.pte_annotated = ept_pte_annotated,
 	.pte_huge = ept_pte_huge,
 	.pte_mkhuge = ept_pte_mkhuge,
 	.pte_to_phys = ept_pte_to_phys,
