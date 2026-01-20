@@ -2114,6 +2114,11 @@ pointer_reference {
   pointee_type_id: 0x36a2b57a
 }
 pointer_reference {
+  id: 0x07396c3f
+  kind: POINTER
+  pointee_type_id: 0x36a55662
+}
+pointer_reference {
   id: 0x073de401
   kind: POINTER
   pointee_type_id: 0x36b77698
@@ -4287,11 +4292,6 @@ pointer_reference {
   id: 0x0cb7f0d8
   kind: POINTER
   pointee_type_id: 0x189f25fe
-}
-pointer_reference {
-  id: 0x0cb870e2
-  kind: POINTER
-  pointee_type_id: 0x18a12515
 }
 pointer_reference {
   id: 0x0cb8d793
@@ -204812,9 +204812,9 @@ member {
   offset: 2816
 }
 member {
-  id: 0x718dfada
+  id: 0x71867bc6
   name: "tracing_mod_hyp_printk"
-  type_id: 0x0cb870e2
+  type_id: 0x07396c3f
   offset: 2368
 }
 member {
@@ -265402,7 +265402,7 @@ struct_union {
     member_id: 0x7cfa7a4a
     member_id: 0x5a86951a
     member_id: 0xfa0102ce
-    member_id: 0x718dfada
+    member_id: 0x71867bc6
     member_id: 0x06845537
     member_id: 0xfa9fe937
     member_id: 0x0c6037c3
@@ -314797,15 +314797,6 @@ function {
   parameter_id: 0x92233392
 }
 function {
-  id: 0x18a12515
-  return_type_id: 0x48b5725f
-  parameter_id: 0x295c7202
-  parameter_id: 0x92233392
-  parameter_id: 0x92233392
-  parameter_id: 0x92233392
-  parameter_id: 0x92233392
-}
-function {
   id: 0x18a3b8d2
   return_type_id: 0x48b5725f
   parameter_id: 0x26e55184
@@ -321186,6 +321177,15 @@ function {
   return_type_id: 0x0490bb4a
   parameter_id: 0x3fa672fd
   parameter_id: 0x0490bb4a
+}
+function {
+  id: 0x36a55662
+  return_type_id: 0x48b5725f
+  parameter_id: 0x914dbfdc
+  parameter_id: 0x92233392
+  parameter_id: 0x92233392
+  parameter_id: 0x92233392
+  parameter_id: 0x92233392
 }
 function {
   id: 0x36c501fb

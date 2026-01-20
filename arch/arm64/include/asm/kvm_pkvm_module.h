@@ -261,7 +261,7 @@ struct pkvm_module_ops {
 	void* (*memset)(void *dst, int c, size_t count);
 	void* (*tracing_reserve_entry)(unsigned long length);
 	void (*tracing_commit_entry)(void);
-	void (*tracing_mod_hyp_printk)(u8 fmt_id, u64 a, u64 b, u64 c, u64 d);
+	void (*tracing_mod_hyp_printk)(u16 fmt_id, u64 a, u64 b, u64 c, u64 d);
 	int (*map_module_pages)(u64 pfn, void *va, u64 nr_pages,
 				    enum kvm_pgtable_prot prot, bool is_protected);
 	int (*unmap_module_pages)(u64 pfn, void *va, u64 nr_pages);
