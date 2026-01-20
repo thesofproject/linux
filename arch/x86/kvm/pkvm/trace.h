@@ -7,5 +7,6 @@
 void pkvm_trace_vmexit_start(struct kvm_vcpu *vcpu);
 void pkvm_trace_vmexit_end(struct kvm_vcpu *vcpu, u32 index);
 void pkvm_vcpu_perf_init(struct kvm_vcpu *vcpu);
+void pkvm_enable_vmexit_trace(bool en);
 
 #endif
