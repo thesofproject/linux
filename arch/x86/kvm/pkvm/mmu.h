@@ -20,9 +20,6 @@ void pkvm_hyp_mmu_clone_host(unsigned long start_vaddr);
 int pkvm_host_mmu_init(void *pool_base, unsigned long pool_pages,
 		       host_mmu_init_fn_t fn);
 int pkvm_host_mmu_finalize(host_mmu_finalize_fn_t fn);
-int pkvm_host_mmu_map(unsigned long phys, unsigned long size, bool read,
-		      bool write, bool exec, bool mmio);
-int pkvm_host_mmu_unmap(unsigned long vaddr, unsigned long size);
 
 static inline void pkvm_host_mmu_lock(void)
 {
