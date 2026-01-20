@@ -784,6 +784,8 @@ int __init vmx_pkvm_init(void)
 			goto out;
 	}
 
+	pkvm_sym(init_ops) = pkvm_sym(pkvm_vmx_init_ops);
+
 	ret = pkvm_host_deprivilege_cpus(pkvm);
 	if (ret) {
 		/* TODO: Re-privilege the deprivileged CPUs */
