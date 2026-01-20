@@ -3,6 +3,7 @@
 #include <linux/memblock.h>
 #include <kvm_emulate.h>
 #include <vmx/x86_ops.h>
+#include "ept.h"
 #include "host_vmx.h"
 #include "pkvm/init.h"
 #include "pkvm.h"
@@ -24,6 +25,7 @@ static int vmx_hyp_mmu_finalize(struct pkvm_pgtable *pgt)
 
 static struct pkvm_init_ops vmx_init_ops = {
 	.hyp_mmu_finalize = vmx_hyp_mmu_finalize,
+	.host_mmu_init = pkvm_host_ept_init,
 };
 
 struct pkvm_init_ops *pkvm_vmx_init_ops = &vmx_init_ops;
