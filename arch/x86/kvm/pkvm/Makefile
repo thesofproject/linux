@@ -1,15 +1,30 @@
 # SPDX-License-Identifier: GPL-2.0
 
 ccflags-y += -I $(srctree)/arch/x86/kvm
+# TODO: make the stack protector work with the pKVM hypervisor code
+ccflags-y += -fno-stack-protector
+ccflags-y += -D__PKVM_HYP__
+ccflags-y += -include $(srctree)/arch/x86/kvm/pkvm/undef.h
 
-pkvm-hyp-y			:= early_alloc.o
+asflags-y += -D__PKVM_HYP__
 
-pkvm-hyp-$(CONFIG_PKVM_INTEL)	+= vmx/host_vmentry.o vmx/host_vmx.o
+cmd_deps			:= $(src)/compiling_cmds.sh
+
+pkvm-hyp-y			:= early_alloc.o pkvm.o
+
+kernel-x86-lib			:= ../../lib
+pkvm-hyp-y			+= $(kernel-x86-lib)/memset_64.o
+
+kvm				:= ..
+pkvm-hyp-y			+= $(kvm)/x86.o
+
+pkvm-hyp-$(CONFIG_PKVM_INTEL)	+= vmx/host_vmentry.o vmx/host_vmx.o \
+				   $(kvm)/vmx/vmx.o
 
 pkvm-obj 			:= $(patsubst %.o,%.pkvm.o,$(pkvm-hyp-y))
 obj-$(CONFIG_PKVM_X86)		+= pkvm.o
 
-targets += $(pkvm-obj) pkvm.lds
+targets += $(pkvm-obj) pkvm.tmp.o pkvm.lds
 
 # When compiling with the $(objtool-enabled) is true, a single build-in object
 # will be processed by the objtool after all of these objects are linked as a
@@ -37,6 +52,28 @@ $(obj)/%.pkvm.o: $(src)/%.S FORCE
 $(obj)/pkvm.lds: $(src)/pkvm.lds.S FORCE
 	$(call if_changed_dep,cpp_lds_S)
 
-LDFLAGS_pkvm.o := -r -T
-$(obj)/pkvm.o: $(obj)/pkvm.lds $(addprefix $(obj)/,$(pkvm-obj)) FORCE
+LDFLAGS_pkvm.tmp.o := -r -T
+$(obj)/pkvm.tmp.o: $(obj)/pkvm.lds $(addprefix $(obj)/,$(pkvm-obj)) FORCE
 	$(call if_changed,ld)
+
+$(obj)/pkvm.o: $(obj)/pkvm.tmp.o $(cmd_deps) FORCE
+	$(call if_changed,pkvmcopy)
+
+quiet_cmd_pkvmcopy = PKVMPCOPY $@
+      cmd_pkvmcopy = $(BASH) $(src)/compiling_cmds.sh rename_syms $< $@
+
+# The pKVM hypervisor should be self-contained. All the symbols it uses should
+# be implemented in its own text. Remove ftrace to prevent compiler to insert
+# the __fentry__ symbols which are not part of the pKVM hypervisor text to
+# simplify the implementation.
+#
+# NOTE: do not remove CC_FLAGS_CFI. Since CFI code chunks don't depend
+# on the host kernel's global data, we can keep CFI coverage enabled
+# for the hypervisor as well, and we _should_ keep it enabled, for the
+# following reasons (apart from its security advantages):
+# 1. To avoid problems with the boot time kernel patching which assumes
+#    that if CFI is enabled, it covers the entire kernel text (see
+#    apply_seal_endbr()).
+# 2. To keep the calling convention compatible in cases when hypervisor
+#    functions are called from host kernel code (before deprivilege).
+KBUILD_CFLAGS := $(filter-out $(CC_FLAGS_FTRACE), $(KBUILD_CFLAGS))

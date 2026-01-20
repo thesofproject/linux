@@ -123,38 +123,38 @@ PHDRS {
 
 #define PKVM_TEXT							\
 	. = ALIGN(PAGE_SIZE);						\
-	__pkvm_text_start = .;						\
+	pkvm_sym(text_start) = .;						\
 	*(PKVM_SECTION_NAME(.text))					\
 	*(PKVM_SECTION_NAME(.noinstr.text))				\
 	. = ALIGN(PAGE_SIZE);						\
-	__pkvm_text_end = .;
+	pkvm_sym(text_end) = .;
 
 #define PKVM_BSS							\
 	. = ALIGN(PAGE_SIZE);						\
-	__pkvm_bss_start = .;						\
+	pkvm_sym(bss_start) = .;						\
 	*(PKVM_SECTION_NAME(.bss))					\
 	. = ALIGN(PAGE_SIZE);						\
-	__pkvm_bss_end = .;
+	pkvm_sym(bss_end) = .;
 
 #define PKVM_DATA							\
 	. = ALIGN(PAGE_SIZE);						\
-	__pkvm_data_start = .;						\
+	pkvm_sym(data_start) = .;						\
 	*(PKVM_SECTION_NAME(.data))					\
 	. = ALIGN(PAGE_SIZE);						\
-	__pkvm_data_end = .;
+	pkvm_sym(data_end) = .;
 
 #define PKVM_RODATA							\
 	PKVM_SECTION_NAME(.rodata) : 					\
 		AT(ADDR(PKVM_SECTION_NAME(.rodata)) - LOAD_OFFSET) {	\
 	. = ALIGN(PAGE_SIZE);						\
-	__pkvm_rodata_start = .;					\
-	__pkvm_start___ex_table = .;					\
+	pkvm_sym(rodata_start) = .;					\
+	pkvm_sym(__start___ex_table) = .;				\
 	*(PKVM_SECTION_NAME(__ex_table))				\
-	__pkvm_stop___ex_table = .;					\
+	pkvm_sym(__stop___ex_table) = .;				\
 	*(PKVM_SECTION_NAME(.rodata))					\
 	*(PKVM_SECTION_NAME(.data..ro_after_init))			\
 	. = ALIGN(PAGE_SIZE);						\
-	__pkvm_rodata_end = .;						\
+	pkvm_sym(rodata_end) = .;						\
 	}
 #else
 
