@@ -4822,11 +4822,6 @@ static int kvm_ioctl_get_supported_hv_cpuid(struct kvm_vcpu *vcpu,
 }
 #endif
 
-static bool kvm_is_vm_type_supported(unsigned long type)
-{
-	return type < 32 && (kvm_caps.supported_vm_types & BIT(type));
-}
-
 static inline u64 kvm_sync_valid_fields(struct kvm *kvm)
 {
 	return kvm && kvm->arch.has_protected_state ? 0 : KVM_SYNC_X86_VALID_FIELDS;
