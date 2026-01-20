@@ -6,6 +6,12 @@
 #include "memory.h"
 #include "mmu.h"
 
+/*
+ * Set by the host before deprivilege and used through the initialization
+ * process.
+ */
+struct pkvm_init_ops *init_ops;
+
 static void *hyp_pgt_base;
 
 static int divide_memory_pool(phys_addr_t phys, unsigned long size)
