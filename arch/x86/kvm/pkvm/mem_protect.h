@@ -76,5 +76,6 @@ enum pkvm_owner_id {
 
 int pkvm_host_donate_hyp(unsigned long phys, unsigned long size);
 void pkvm_hyp_donate_host(unsigned long phys, unsigned long size, bool clear);
+int pkvm_hyp_donate_host_mmio_locked(unsigned long phys, unsigned long size);
 
 #endif /* __PKVM_X86_MEM_PROTECT_H */
