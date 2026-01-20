@@ -679,6 +679,13 @@ static void do_pkvm_hyp_init(void *data)
 	unsigned long data_size = data_pages << PAGE_SHIFT;
 	struct pkvm_mem_info infos[] = {
 		{
+			.type	= PKVM_RESERVED_USED_MEMORY,
+			.va	= (unsigned long)__va(pkvm_mem_base),
+			.pa	= pkvm_mem_base,
+			.size	= data_size,
+			.prot	= pgprot_val(PAGE_KERNEL),
+		},
+		{
 			.type	= PKVM_RESERVED_UNUSED_MEMORY,
 			.va	= (unsigned long)__va(pkvm_mem_base + data_size),
 			.pa	= pkvm_mem_base + data_size,
