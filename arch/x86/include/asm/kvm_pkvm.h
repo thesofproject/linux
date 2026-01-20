@@ -57,6 +57,8 @@ struct pkvm_mem_info {
 enum pkvm_hc {
 	#define PKVM_HC(f)	TO_PKVM_HC(f),
 	#include <asm/pkvm_hypercalls.h>
+
+	MAX_PKVM_HYPERCALLS,
 };
 
 #define PKVM_HC_IN_0()
