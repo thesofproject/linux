@@ -601,7 +601,7 @@ int __init vmx_pkvm_init(void)
 	nr_pages = pkvm_vmx_data_pages();
 	pkvm_sym(pkvm_early_alloc_init)(__va(pkvm_mem_base), nr_pages << PAGE_SHIFT);
 
-	pkvm = pkvm_sym(pkvm_early_alloc_contig)(PKVM_HYP_PAGES);
+	pkvm = pkvm_sym(pkvm_hyp) = pkvm_sym(pkvm_early_alloc_contig)(PKVM_HYP_PAGES);
 	if (!pkvm) {
 		pr_err("cannot alloc pkvm_hyp\n");
 		ret = -ENOMEM;
@@ -648,6 +648,7 @@ out:
 	 * released back to the host, no need to de-initialize or
 	 * free for the early_alloc.
 	 */
+	pkvm_sym(pkvm_hyp) = NULL;
 	enable_pkvm = false;
 	return ret;
 }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <linux/types.h>
+#include "pkvm.h"
 
 /*
  * Needed by kvm_spurious_fault() which is a generic fault function for the
@@ -8,3 +9,7 @@
  * is always false in the pKVM hypervisor.
  */
 __visible bool kvm_rebooting;
+
+struct pkvm_hyp *pkvm_hyp;
+DEFINE_PER_CPU(struct pkvm_pcpu *, phys_cpu);
+DEFINE_PER_CPU(struct kvm_vcpu *, host_vcpu);
