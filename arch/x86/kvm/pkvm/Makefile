@@ -13,7 +13,7 @@ asflags-y += -include $(srctree)/arch/x86/kvm/pkvm/undef.h
 cmd_deps			:= $(src)/compiling_cmds.sh
 
 pkvm-hyp-y			:= early_alloc.o pkvm.o memory.o cpu.o \
-				   idt.o entry.o kern_stub.o
+				   idt.o entry.o kern_stub.o init.o
 
 kernel-x86-lib			:= ../../lib
 pkvm-hyp-y			+= $(kernel-x86-lib)/memset_64.o
