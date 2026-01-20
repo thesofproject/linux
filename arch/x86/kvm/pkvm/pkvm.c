@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <linux/types.h>
 #include "init.h"
+#include "lapic.h"
 #include "pkvm.h"
 
 /*
@@ -36,4 +37,13 @@ void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 	}
 
 	pkvm_hc_set_ret(vcpu, ret);
+}
+
+void pkvm_kick_vcpu(struct kvm_vcpu *vcpu)
+{
+	/* No need to kick if a vcpu is already out of guest mode */
+	if (kvm_vcpu_exiting_guest_mode(vcpu) != IN_GUEST_MODE)
+		return;
+
+	pkvm_lapic_send_init(READ_ONCE(vcpu->cpu));
 }
