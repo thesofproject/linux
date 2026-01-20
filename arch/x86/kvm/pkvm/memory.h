@@ -99,4 +99,14 @@ static inline bool is_memory_range(unsigned long phys, unsigned long size)
 
 void pkvm_clflush_cache_range(void *vaddr, unsigned int size);
 
+static inline void pkvm_clear_memory(void *va, size_t size)
+{
+	memset(va, 0, size);
+	/*
+	 * Flush CPU cache to ensure clearing the memory range in RAM, so that
+	 * the previous contents cannot be read via non-coherent DMA.
+	 */
+	pkvm_clflush_cache_range(va, size);
+}
+
 #endif /* __PKVM_X86_MEMORY_H */
