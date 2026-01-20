@@ -21,7 +21,7 @@ void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 
 	switch (pkvm_hc(vcpu)) {
 	case __pkvm__init:
-		ret = pkvm_init();
+		ret = pkvm_init((phys_addr_t)pkvm_hc_input1(vcpu), pkvm_hc_input2(vcpu));
 		break;
 	default:
 		ret = -EINVAL;
