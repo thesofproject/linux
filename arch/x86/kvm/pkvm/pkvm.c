@@ -41,6 +41,14 @@ static struct pkvm_vm_ref {
 	struct pkvm_vm *pkvm_vm;
 } pkvm_vms_ref[MAX_PKVM_VMS];
 
+/*
+ * Represents the actual, extended kvm_vcpu structure size. It is initialized as
+ * the size of struct kvm_vcpu. And if the vendor code extends kvm_vcpu instance
+ * via embedding struct kvm_vcpu to its specific structure, this size should also
+ * be extended by the vendor code.
+ */
+size_t kvm_vcpu_sz = sizeof(struct kvm_vcpu);
+
 static int pkvm_enable_virtualization_cpu(void)
 {
 	kvm_user_return_msr_cpu_online();
