@@ -64,16 +64,55 @@ static void handle_cr(struct kvm_vcpu *vcpu)
 	}
 }
 
+static bool is_msr_in_bitmap_range(unsigned long msr)
+{
+	return msr <= 0x1FFF || (msr >= 0xC0000000 && msr <= 0xC0001FFF);
+}
+
 static int handle_read_msr(struct kvm_vcpu *vcpu)
 {
-	kvm_inject_gp(vcpu, 0);
-	return X86EMUL_UNHANDLEABLE;
+	unsigned long msr = vcpu->arch.regs[VCPU_REGS_RCX];
+	u32 low, high;
+
+	/*
+	 * The MSR reading bitmap doesn't intercept any MSR. If the vmexit is
+	 * caused by such MSR in the range of the bitmap, it should be a code
+	 * bug.
+	 */
+	BUG_ON(is_msr_in_bitmap_range(msr));
+
+	if (rdmsr_safe(msr, &low, &high)) {
+		kvm_inject_gp(vcpu, 0);
+		return X86EMUL_UNHANDLEABLE;
+	}
+
+	vcpu->arch.regs[VCPU_REGS_RAX] = low;
+	vcpu->arch.regs[VCPU_REGS_RDX] = high;
+
+	return X86EMUL_CONTINUE;
 }
 
 static int handle_write_msr(struct kvm_vcpu *vcpu)
 {
-	kvm_inject_gp(vcpu, 0);
-	return X86EMUL_UNHANDLEABLE;
+	unsigned long msr = vcpu->arch.regs[VCPU_REGS_RCX];
+	u32 low, high;
+
+	/*
+	 * The MSR writing bitmap doesn't intercept any MSR. If the vmexit is
+	 * caused by such MSR in the range of the bitmap, it should be a code
+	 * bug.
+	 */
+	BUG_ON(is_msr_in_bitmap_range(msr));
+
+	low = vcpu->arch.regs[VCPU_REGS_RAX];
+	high = vcpu->arch.regs[VCPU_REGS_RDX];
+
+	if (wrmsr_safe(msr, low, high)) {
+		kvm_inject_gp(vcpu, 0);
+		return X86EMUL_UNHANDLEABLE;
+	}
+
+	return X86EMUL_CONTINUE;
 }
 
 static void handle_xsetbv(struct kvm_vcpu *vcpu)
