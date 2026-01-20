@@ -10,5 +10,6 @@ PKVM_HC(reprivilege_cpu)
 
 /* pKVM vmexit tracing/profiling */
 PKVM_HC(enable_vmexit_trace)
+PKVM_HC(dump_vmexit_trace)
 
 #undef PKVM_HC
