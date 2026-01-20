@@ -133,7 +133,14 @@ static u64 ept_pte_get(void *ptep)
 static void host_ept_flush_tlb(struct pkvm_pgtable *pgt,
 			       unsigned long vaddr, unsigned long size)
 {
-	/* TODO: Flush TLB for the host EPT */
+	int i;
+
+	for (i = 0; i < pkvm_hyp->num_cpus; i++) {
+		struct kvm_vcpu *vcpu = pkvm_hyp->host_vcpus[i];
+
+		kvm_make_request(KVM_REQ_TLB_FLUSH_CURRENT, vcpu);
+		pkvm_kick_vcpu(vcpu);
+	}
 }
 
 static const struct pkvm_pgtable_ops host_ept_pgt_ops = {
@@ -172,6 +179,7 @@ int pkvm_host_ept_init(struct pkvm_pgtable *pgt, void *pool_base,
 		.level = cpu_has_vmx_ept_5levels() ? 5 : 4,
 		.allowed_pgsz = 1 << PG_LEVEL_4K,
 		.table_prot = VMX_EPT_RWX_MASK,
+		.flush_tlb_lazy = true,
 	};
 	int ret;
 
@@ -232,6 +240,12 @@ int pkvm_host_ept_finalize(struct pkvm_pgtable *pgt)
 	}
 
 	ept_sync_global();
+	/*
+	 * Clear the pending TLB flush request left after updating host EPT
+	 * mappings in initialize_global(), as EPT has just been flushed with
+	 * global context anyway.
+	 */
+	kvm_clear_request(KVM_REQ_TLB_FLUSH_CURRENT, hvcpu);
 
 	return 0;
 }
@@ -303,4 +317,12 @@ int pkvm_handle_host_ept_violation(void)
 
 	pkvm_host_mmu_unlock();
 	return ret;
+}
+
+void pkvm_flush_host_ept(void)
+{
+	if (WARN_ON(!host_ept))
+		return;
+
+	ept_sync_context(construct_host_eptp(host_ept));
 }
