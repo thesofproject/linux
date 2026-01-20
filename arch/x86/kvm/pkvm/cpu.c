@@ -19,6 +19,7 @@ struct cpuinfo_x86 boot_cpu_data;
 struct cpumask __cpu_possible_mask __ro_after_init;
 unsigned int nr_cpu_ids;
 DEFINE_PER_CPU(u64, x86_spec_ctrl_current);
+DEFINE_STATIC_KEY_FALSE(switch_vcpu_ibpb);
 
 unsigned int pkvm_per_cpu_nr_pages(void)
 {

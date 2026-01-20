@@ -26,6 +26,11 @@ SYM_FUNC_START(pkvm_host_vmexit_entry)
 	push %_ASM_BX
 	mov WORD_SIZE*1(%_ASM_SP), %_ASM_BX
 
+	/*
+	 * No need for FILL_RETURN_BUFFER since there is no unbalanced RET
+	 * after host vmexit.
+	 */
+
 	mov %_ASM_AX, VCPU_RAX(%_ASM_BX)
 	mov %_ASM_CX, VCPU_RCX(%_ASM_BX)
 	mov %_ASM_DX, VCPU_RDX(%_ASM_BX)
