@@ -48,6 +48,7 @@
 #undef CONFIG_BUG
 #undef CONFIG_GENERIC_BUG
 #undef CONFIG_TRACEPOINTS
+#undef CONFIG_DEBUG_PREEMPT
 */
 
 #endif /* __PKVM_X86_UNDEF_H */
