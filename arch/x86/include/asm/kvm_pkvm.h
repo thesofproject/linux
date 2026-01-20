@@ -61,22 +61,79 @@ enum pkvm_hc {
 	MAX_PKVM_HYPERCALLS,
 };
 
+#define PKVM_HC_DATA_MAX_NUM		4
+
+union pkvm_hc_data {
+	struct {
+		u64 data[PKVM_HC_DATA_MAX_NUM];
+	} raw;
+};
+
+/*
+ * The union pkvm_hc_data is passed in hypercalls via the registers used for
+ * hypercall arguments, and PKVM_HC_DATA_MAX_NUM represents the number of those
+ * registers. So the size of the union cannot be larger than that.
+ */
+static_assert(sizeof(union pkvm_hc_data) == PKVM_HC_DATA_MAX_NUM * sizeof(u64));
+
+#define PKVM_HC_DATA_NUM(f)		\
+	(ALIGN(sizeof(((union pkvm_hc_data *)0)->f), sizeof(u64)) / sizeof(u64))
+
+#define PKVM_HC_OUTPUT_NUM(f)	f##_output_num
+
+enum {
+	#define PKVM_HC(f)	PKVM_HC_OUTPUT_NUM(f) = 0,
+	#define PKVM_HC_OUT(f)	PKVM_HC_OUTPUT_NUM(f) = PKVM_HC_DATA_NUM(f),
+	#include <asm/pkvm_hypercalls.h>
+};
+
 #define PKVM_HC_IN_0()
 #define PKVM_HC_IN_1(a1)		, "b"(a1)
 #define PKVM_HC_IN_2(a1, a2)		PKVM_HC_IN_1(a1), "c"(a2)
 #define PKVM_HC_IN_3(a1, a2, a3)	PKVM_HC_IN_2(a1, a2), "d"(a3)
 #define PKVM_HC_IN_4(a1, a2, a3, a4)	PKVM_HC_IN_3(a1, a2, a3), "S"(a4)
 
-#define pkvm_hypercall(f, ...)								\
+#define PKVM_HC_OUT_0(o)
+#define PKVM_HC_OUT_1(o)		, "=b"((o)->raw.data[0])
+#define PKVM_HC_OUT_2(o)		PKVM_HC_OUT_1(o), "=c"((o)->raw.data[1])
+#define PKVM_HC_OUT_3(o)		PKVM_HC_OUT_2(o), "=d"((o)->raw.data[2])
+#define PKVM_HC_OUT_4(o)		PKVM_HC_OUT_3(o), "=S"((o)->raw.data[3])
+
+#define __pkvm_hypercall(f, o, n, ...)							\
 ({											\
 	int ret;									\
 	asm volatile(KVM_HYPERCALL							\
-		     : "=a"(ret)							\
+		     : "=a"(ret) CONCATENATE(PKVM_HC_OUT_, n)(o)			\
 		     : "a"(TO_PKVM_HC(f))						\
 		       CONCATENATE(PKVM_HC_IN_, COUNT_ARGS(__VA_ARGS__))(__VA_ARGS__)	\
 		     : "memory");							\
 	ret;										\
 })
+
+#define PKVM_HC_UNREACHABLE(f)								\
+({											\
+	BUILD_BUG_ON_MSG(1, #f " requires unsupported number of data");			\
+	-EINVAL;									\
+})
+
+#define pkvm_hypercall(f, ...)								\
+({											\
+	BUILD_BUG_ON(PKVM_HC_OUTPUT_NUM(f));						\
+	__pkvm_hypercall(f, NULL, 0, ##__VA_ARGS__);					\
+})
+
+#define pkvm_hypercall_out(f, o, ...)							\
+	__builtin_choose_expr(PKVM_HC_OUTPUT_NUM(f) == 0,				\
+			      __pkvm_hypercall(f, NULL, 0, ##__VA_ARGS__),		\
+	__builtin_choose_expr(PKVM_HC_OUTPUT_NUM(f) == 1,				\
+			      __pkvm_hypercall(f, o, 1, ##__VA_ARGS__),			\
+	__builtin_choose_expr(PKVM_HC_OUTPUT_NUM(f) == 2,				\
+			      __pkvm_hypercall(f, o, 2, ##__VA_ARGS__),			\
+	__builtin_choose_expr(PKVM_HC_OUTPUT_NUM(f) == 3,				\
+			      __pkvm_hypercall(f, o, 3, ##__VA_ARGS__),			\
+	__builtin_choose_expr(PKVM_HC_OUTPUT_NUM(f) == 4,				\
+			      __pkvm_hypercall(f, o, 4, ##__VA_ARGS__),			\
+	PKVM_HC_UNREACHABLE(f))))))
 
 static inline unsigned long pkvm_hc(struct kvm_vcpu *vcpu)
 {
