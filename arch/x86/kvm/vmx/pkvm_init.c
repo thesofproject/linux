@@ -19,6 +19,14 @@ struct pkvm_deprivilege_param {
 	int ret;
 };
 
+/* Only need GDT entries for KERNEL_CS & KERNEL_DS as pKVM only use these two */
+static struct gdt_page pkvm_gdt_page = {
+	.gdt = {
+		[GDT_ENTRY_KERNEL_CS]		= GDT_ENTRY_INIT(0xa09b, 0, 0xfffff),
+		[GDT_ENTRY_KERNEL_DS]		= GDT_ENTRY_INIT(0xc093, 0, 0xfffff),
+	},
+};
+
 u64 pkvm_total_reserve_pages(void)
 {
 	return pkvm_vmx_data_pages();
@@ -124,6 +132,51 @@ static __init int pkvm_alloc_vmxarea(int cpu)
 	return 0;
 }
 
+static __init void init_gdt(struct pkvm_pcpu *pcpu)
+{
+	pcpu->gdt_page = pkvm_gdt_page;
+}
+
+static __init void init_idt(struct pkvm_pcpu *pcpu)
+{
+	void (*pkvm_exception_handlers[X86_TRAP_IRET])(void) = {
+#define GEN(x, ...)	\
+		[x] = pkvm_sym(handle_exception_##x),
+#include <asm/GEN-for-each-exc.h>
+#undef GEN
+	};
+	gate_desc *idt = pcpu->idt_page.idt;
+	struct idt_data d = {
+		.segment = __KERNEL_CS,
+		.bits.ist = 0,
+		.bits.zero = 0,
+		.bits.type = GATE_INTERRUPT,
+		.bits.dpl = 0,
+		.bits.p = 1,
+	};
+	gate_desc desc;
+	int i;
+
+	for (i = 0; i < X86_TRAP_IRET; i++) {
+		d.vector = i;
+		d.bits.ist = 0;
+		d.addr = (const void *)pkvm_exception_handlers[i];
+		idt_init_desc(&desc, &d);
+		write_idt_entry(idt, i, &desc);
+	}
+}
+
+static __init void init_tss(struct pkvm_pcpu *pcpu)
+{
+	struct desc_struct *d = pcpu->gdt_page.gdt;
+	tss_desc tss;
+
+	set_tssldt_descriptor(&tss, (unsigned long)&pcpu->tss, DESC_TSS,
+			      __KERNEL_TSS_LIMIT);
+
+	write_gdt_entry(d, GDT_ENTRY_TSS, &tss, DESC_TSS);
+}
+
 static __init int pkvm_setup_pcpu(struct pkvm_hyp *pkvm, int cpu)
 {
 	struct pkvm_pcpu *pcpu;
@@ -139,6 +192,10 @@ static __init int pkvm_setup_pcpu(struct pkvm_hyp *pkvm, int cpu)
 		pr_err("no pcpu memory for CPU%d\n", cpu);
 		return -ENOMEM;
 	}
+
+	init_gdt(pcpu);
+	init_idt(pcpu);
+	init_tss(pcpu);
 
 	pkvm->pcpus[cpu] = pcpu;
 
@@ -316,51 +373,38 @@ static __init void init_host_state_area(struct vcpu_vmx *vmx, struct pkvm_hyp *p
 {
 	int cpu = smp_processor_id();
 	unsigned long host_rsp;
-	struct desc_ptr dt;
-	u16 selector;
+	struct pkvm_pcpu *pcpu;
 	u64 msrq;
 
 	vmcs_writel(HOST_CR0, read_cr0() & ~X86_CR0_TS);
 	/* Use host cr3 until the pKVM hypervisor created its own MMU */
 	vmcs_writel(HOST_CR3, __read_cr3());
-	vmcs_writel(HOST_CR4, __read_cr4());
-
 	/*
-	 * FIXME: Use the linux host environments for the pKVM hypervisor as
-	 * a temp solution before the isolation is fully functional.
+	 * Disable FRED for the pKVM hypervisor if it is enabled by the host.
+	 * There is no too much benifit for the pKVM hypervisor to use the FRED
+	 * event delivery as the NMI is the only event expected to be received
+	 * by the pKVM hypervisor. The exceptions are not expected to be
+	 * happened in the pKVM hypervisor and all hardware interrupts will
+	 * directly go to the host. Meanwhile, enabling the FRED in the pkvm
+	 * hypervisor will result in additional FRED MSRs switching overhead. So
+	 * keep the FRED being disabled in the pKVM hypervisor.
 	 */
-	savesegment(cs, selector);
-	vmcs_write16(HOST_CS_SELECTOR, selector);
-	savesegment(ss, selector);
-	vmcs_write16(HOST_SS_SELECTOR, selector);
-	savesegment(ds, selector);
-	vmcs_write16(HOST_DS_SELECTOR, selector);
-	savesegment(es, selector);
-	vmcs_write16(HOST_ES_SELECTOR, selector);
-	savesegment(fs, selector);
-	vmcs_write16(HOST_FS_SELECTOR, selector);
-	vmcs_writel(HOST_FS_BASE, 0);
-	savesegment(gs, selector);
+	vmcs_writel(HOST_CR4, __read_cr4() & ~X86_CR4_FRED);
+
+	vmcs_write16(HOST_CS_SELECTOR, __KERNEL_CS);
+	vmcs_write16(HOST_SS_SELECTOR, __KERNEL_DS);
+	vmcs_write16(HOST_DS_SELECTOR, __KERNEL_DS);
+	vmcs_write16(HOST_ES_SELECTOR, 0);
+	vmcs_write16(HOST_TR_SELECTOR, GDT_ENTRY_TSS*8);
+	vmcs_write16(HOST_FS_SELECTOR, 0);
 	vmcs_write16(HOST_GS_SELECTOR, 0);
+	vmcs_writel(HOST_FS_BASE, 0);
 	vmcs_writel(HOST_GS_BASE, pkvm_sym(pkvm_per_cpu_offset)(cpu));
 
-	vmcs_write16(HOST_TR_SELECTOR, GDT_ENTRY_TSS*8);
-	vmcs_writel(HOST_TR_BASE, (unsigned long)&get_cpu_entry_area(cpu)->tss.x86_tss);
-
-	native_store_gdt(&dt);
-	vmcs_writel(HOST_GDTR_BASE, dt.address);
-
-	store_idt(&dt);
-	vmcs_writel(HOST_IDTR_BASE, dt.address);
-
-	rdmsrq(MSR_IA32_SYSENTER_CS, msrq);
-	vmcs_write32(HOST_IA32_SYSENTER_CS, (u32)msrq);
-
-	rdmsrq(MSR_IA32_SYSENTER_ESP, msrq);
-	vmcs_writel(HOST_IA32_SYSENTER_ESP, msrq);
-
-	rdmsrq(MSR_IA32_SYSENTER_EIP, msrq);
-	vmcs_writel(HOST_IA32_SYSENTER_EIP, msrq);
+	pcpu = pkvm->pcpus[cpu];
+	vmcs_writel(HOST_TR_BASE, (unsigned long)&pcpu->tss);
+	vmcs_writel(HOST_GDTR_BASE, (unsigned long)(&pcpu->gdt_page));
+	vmcs_writel(HOST_IDTR_BASE, (unsigned long)(&pcpu->idt_page));
 
 	rdmsrq(MSR_EFER, msrq);
 	vmcs_write64(HOST_IA32_EFER, msrq);
@@ -385,7 +429,7 @@ static __init void init_host_state_area(struct vcpu_vmx *vmx, struct pkvm_hyp *p
 	 *			.........
 	 * stack_bottom:
 	 */
-	host_rsp = get_host_stack_top(pkvm->pcpus[cpu]) - PKVM_STACK_TOP_RESV;
+	host_rsp = get_host_stack_top(pcpu) - PKVM_STACK_TOP_RESV;
 
 	vmcs_writel(HOST_RSP, host_rsp);
 	*((struct vcpu_vmx **) (host_rsp + 8)) = vmx;
