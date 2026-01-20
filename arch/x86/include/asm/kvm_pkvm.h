@@ -38,6 +38,19 @@ struct pkvm_hyp {
 #define PKVM_HYP_PAGES		(PAGE_ALIGN(sizeof(struct pkvm_hyp)) >> PAGE_SHIFT)
 #define PKVM_PCPU_PAGES		(PAGE_ALIGN(sizeof(struct pkvm_pcpu)) >> PAGE_SHIFT)
 
+enum pkvm_mem_type {
+	PKVM_RESERVED_UNUSED_MEMORY,
+	PKVM_TEXT_DATA,
+};
+
+struct pkvm_mem_info {
+	enum pkvm_mem_type type;
+	unsigned long va;
+	unsigned long pa;
+	unsigned long size;
+	u64 prot;
+};
+
 #define TO_PKVM_HC(f)		CONCATENATE(__pkvm__, f)
 
 enum pkvm_hc {
@@ -91,6 +104,10 @@ extern unsigned int pkvm_sym(pkvm_memblock_nr);
 extern struct cpuinfo_x86 pkvm_sym(boot_cpu_data);
 #ifdef CONFIG_DYNAMIC_PHYSICAL_MASK
 extern phys_addr_t pkvm_sym(physical_mask);
+#endif
+extern pteval_t pkvm_sym(__default_kernel_pte_mask);
+#ifdef CONFIG_AMD_MEM_ENCRYPT
+extern u64 pkvm_sym(sme_me_mask);
 #endif
 
 u64 pkvm_total_reserve_pages(void);

@@ -2,6 +2,8 @@
 #ifndef __PKVM_X86_INIT_H
 #define __PKVM_X86_INIT_H
 
-int pkvm_init(phys_addr_t mem_base, unsigned long mem_size);
+#include <asm/kvm_pkvm.h>
+
+int pkvm_init(struct pkvm_mem_info infos[], int nr_info);
 
 #endif /* __PKVM_X86_INIT_H */
