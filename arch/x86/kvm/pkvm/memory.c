@@ -2,6 +2,7 @@
 #include <linux/cache.h>
 #include <linux/types.h>
 #include <asm/kvm_pkvm.h>
+#include "memory.h"
 
 unsigned long page_offset_base __ro_after_init;
 unsigned long phys_base;
@@ -15,6 +16,50 @@ u64 sme_me_mask;
 
 struct memblock_region pkvm_memory[PKVM_MEMBLOCK_REGIONS];
 unsigned int pkvm_memblock_nr;
+
+/**
+ * pkvm_find_addr_range - Find out the addr range for the given physical addr.
+ * @phys:	The physical address to check.
+ * @range:	The structure to return the address range which contains the
+ *		@phys.
+ *
+ * A binary search is performed to find out the address range which contains
+ * @phys and this address range is returned via @range. The returned address
+ * range would be either a memory range if @phys is memory, or a hole (which is
+ * between memory ranges and usually can be used as the MMIO) range if @phys is
+ * not memory, which is indicated by the return value.
+ *
+ * Return true if @phys is memory. Otherwise, return false.
+ */
+bool pkvm_find_addr_range(unsigned long phys, struct range *range)
+{
+	int cur, left = 0, right = pkvm_memblock_nr;
+	struct memblock_region *reg;
+	unsigned long end;
+
+	range->start = 0;
+	range->end = ULONG_MAX;
+
+	/* The list of memblock regions is sorted, binary search it */
+	while (left < right) {
+		cur = (left + right) >> 1;
+		reg = &pkvm_memory[cur];
+		end = reg->base + reg->size;
+		if (phys < reg->base) {
+			right = cur;
+			range->end = reg->base;
+		} else if (phys >= end) {
+			left = cur + 1;
+			range->start = end;
+		} else {
+			range->start = reg->base;
+			range->end = end;
+			return true;
+		}
+	}
+
+	return false;
+}
 
 /*
  * Ensure that __kcfi_typeid_ symbols are emitted for functions that may
