@@ -28,6 +28,7 @@ static bool leaf_in_addr_range(unsigned long leaf_size,
 struct pgt_map_data {
 	unsigned long phys;
 	u64 prot;
+	u64 annotation;
 };
 
 static bool leaf_mapping_changed(struct pkvm_pgtable_visit_ctx *ctx,
@@ -36,19 +37,23 @@ static bool leaf_mapping_changed(struct pkvm_pgtable_visit_ctx *ctx,
 	const struct pkvm_pgtable_ops *pgt_ops = ctx->pgt->pgt_ops;
 	unsigned long leaf_size, mapped_phys, new_phys;
 
-	/* Property bits are changed */
-	if (data->prot != pgt_ops->pte_to_prot(ctx->ptep))
-		return true;
+	if (VALID_PAGE(data->phys)) {
+		/* Property bits are changed */
+		if (data->prot != pgt_ops->pte_to_prot(ctx->ptep))
+			return true;
 
-	leaf_size = pgt_ops->level_to_size(ctx->level);
-	mapped_phys = pgt_ops->pte_to_phys(ctx->ptep);
-	new_phys = data->phys + (ctx->addr - ctx->start);
-	/*
-	 * The new physical address is not covered by the old mapped range
-	 * [mapped_phys, mapped_phys + leaf_size).
-	 */
-	if (!((new_phys >= mapped_phys) && new_phys < (mapped_phys + leaf_size)))
+		leaf_size = pgt_ops->level_to_size(ctx->level);
+		mapped_phys = pgt_ops->pte_to_phys(ctx->ptep);
+		new_phys = data->phys + (ctx->addr - ctx->start);
+		/*
+		 * The new physical address is not covered by the old mapped range
+		 * [mapped_phys, mapped_phys + leaf_size).
+		 */
+		if (!((new_phys >= mapped_phys) && new_phys < (mapped_phys + leaf_size)))
+			return true;
+	} else if (data->annotation != ctx->pgt->pgt_ops->pte_get(ctx->ptep)) {
 		return true;
+	}
 
 	return false;
 }
@@ -63,6 +68,9 @@ static bool leaf_mapping_allowed(struct pkvm_pgtable_visit_ctx *ctx,
 
 	if (!((1 << ctx->level) & ctx->pgt->cap.allowed_pgsz))
 		return false;
+
+	if (!VALID_PAGE(data->phys))
+		return true;
 
 	return IS_ALIGNED(data->phys + (ctx->addr - ctx->start), leaf_size);
 }
@@ -122,7 +130,7 @@ static int pgtable_try_map_leaf(struct pkvm_pgtable_visit_ctx *ctx,
 {
 	const struct pkvm_pgtable_mm_ops *mm_ops = ctx->pgt->mm_ops;
 	const struct pkvm_pgtable_ops *pgt_ops = ctx->pgt->pgt_ops;
-	bool flush_tlb, was_present, is_present;
+	bool flush_tlb, was_counted, is_counted;
 	void *ptep = ctx->ptep;
 	u64 new, old;
 
@@ -142,38 +150,49 @@ static int pgtable_try_map_leaf(struct pkvm_pgtable_visit_ctx *ctx,
 		return -E2BIG;
 	}
 
-	was_present = pgt_ops->pte_present(ptep);
-	new = (data->phys + (ctx->addr - ctx->start)) | data->prot;
-	old = pgt_ops->pte_to_phys(ptep) | pgt_ops->pte_to_prot(ptep);
-	/*
-	 * Need to flush TLB when the previous mapping was present and the new
-	 * mapping changes either physical address or property bits. Otherwise
-	 * no need to flush TLB.
-	 *
-	 * No need to consider for the page state as it sits on the pte ignored
-	 * bits, which doesn't impact the TLB.
-	 */
-	if (pgt_ops->pte_present(ptep))
-		flush_tlb = (new ^ old) & ~pkvm_pgt_pgstate_mask(ctx->pgt);
-	else
-		flush_tlb = false;
+	if (VALID_PAGE(data->phys)) {
+		new = (data->phys + (ctx->addr - ctx->start)) | data->prot;
+		old = pgt_ops->pte_to_phys(ptep) | pgt_ops->pte_to_prot(ptep);
+		/*
+		 * Need to flush TLB when the previous mapping was present and the new
+		 * mapping changes either physical address or property bits. Otherwise
+		 * no need to flush TLB.
+		 *
+		 * No need to consider for the page state as it sits on the pte ignored
+		 * bits, which doesn't impact the TLB.
+		 */
+		if (pgt_ops->pte_present(ptep))
+			flush_tlb = (new ^ old) & ~pkvm_pgt_pgstate_mask(ctx->pgt);
+		else
+			flush_tlb = false;
 
-	if (ctx->level != PG_LEVEL_4K)
-		pgt_ops->pte_mkhuge(&new);
+		if (ctx->level != PG_LEVEL_4K)
+			pgt_ops->pte_mkhuge(&new);
+	} else {
+		new = data->annotation;
+		/*
+		 * Need to flush TLB if a present leaf is going to be removed
+		 * by installing an annotation.
+		 */
+		flush_tlb = pgt_ops->pte_present(ptep);
+	}
 
+	was_counted = pgt_ops->pte_present(ptep) || pgt_ops->pte_annotated(ptep);
 	pgt_ops->pte_set(ptep, new);
+	is_counted = pgt_ops->pte_present(ptep) || pgt_ops->pte_annotated(ptep);
 
-	is_present = pgt_ops->pte_present(ptep);
 	/*
 	 * Need to increment the page table page refcnt when installs a present
-	 * leaf if the refcnt was not already incremented by the previous one.
+	 * leaf or an annotation if the refcnt was not already incremented by
+	 * the previous one.
 	 *
 	 * Similarly need to decrement the page table page refcnt when removes a
-	 * present leaf if the refcnt was incremented by the previous one.
+	 * present leaf or annotation if the refcnt was incremented by the
+	 * previous one.
 	 */
-	if (is_present && !was_present)
+	if (is_counted && !was_counted)
 		mm_ops->get_page(ptep);
-	else if (!is_present && was_present)
+	else if (!is_counted && was_counted)
 		mm_ops->put_page(ptep);
 
 	if (flush_tlb) {
@@ -353,7 +372,7 @@ static int unmap_walker(struct pkvm_pgtable_visit_ctx *ctx, unsigned long walk_f
 	void *ptep = ctx->ptep;
 	int ret;
 
-	if (!pgt_ops->pte_present(ptep))
+	if (!pgt_ops->pte_present(ptep) && !pgt_ops->pte_annotated(ptep))
 		return 0;
 
 	ret = pgtable_try_unmap_leaf(ctx, (struct pgt_unmap_data *)arg);
@@ -612,6 +631,7 @@ int pkvm_pgtable_map(struct pkvm_pgtable *pgt, unsigned long vaddr,
 {
 	struct pgt_map_data data = {
 		.prot = prot,
+		.annotation = 0,
 	};
 	struct pkvm_pgtable_walker walker = {
 		.cb = map_walker,
@@ -665,6 +685,41 @@ int pkvm_pgtable_unmap(struct pkvm_pgtable *pgt, unsigned long vaddr,
 		.cb = unmap_walker,
 		.arg = &data,
 		.walk_flags = PKVM_PGTABLE_WALK_LEAF | PKVM_PGTABLE_WALK_TABLE_POST,
+	};
+
+	return pkvm_pgtable_walk(pgt, vaddr, size, &walker);
+}
+
+/**
+ * pkvm_pgtable_set_owner() - Set the owner ID annotation for a range of virtual
+ *			      addresses in a page table.
+ * @pgt:	Page table to set owner.
+ * @vaddr:	Starting virtual address of the range to set owner.
+ * @size:	Size of the range to set owner.
+ * @owner:	Owner ID to set as annotation for the specified range.
+ *
+ * The address range is the minimum PAGE_SIZE-aligned range covering [@vaddr,
+ * @vaddr + @size).
+ *
+ * Walks the page table entries covering the specified virtual address range
+ * [@vaddr, @vaddr + @size) and sets the owner ID annotation for each entry. If
+ * the entry was a present leaf, it will become a non-present leaf, i.e.
+ * unmapped, as the pte will be set with the @owner bits only.
+ *
+ * Return: 0 on success, negative value on failure.
+ */
+int pkvm_pgtable_set_owner(struct pkvm_pgtable *pgt, unsigned long vaddr,
+			   unsigned long size, enum pkvm_owner_id owner)
+{
+	struct pgt_map_data data = {
+		.phys = INVALID_PAGE,
+		.prot = 0,
+		.annotation = pkvm_pte_mk_owner_id(owner),
+	};
+	struct pkvm_pgtable_walker walker = {
+		.cb = map_walker,
+		.arg = &data,
+		.walk_flags = PKVM_PGTABLE_WALK_LEAF,
 	};
 
 	return pkvm_pgtable_walk(pgt, vaddr, size, &walker);
