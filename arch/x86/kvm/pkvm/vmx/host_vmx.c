@@ -4,12 +4,17 @@
 #include <kvm_emulate.h>
 #include <vmx/x86_ops.h>
 #include "host_vmx.h"
+#include "pkvm/init.h"
 #include "pkvm.h"
 
 #define CR4			4
 #define MOV_TO_CR		0
 
 struct vmcs_config host_vmcs_config;
+
+static struct pkvm_init_ops vmx_init_ops = {};
+
+struct pkvm_init_ops *pkvm_vmx_init_ops = &vmx_init_ops;
 
 static void skip_emulated_instruction(void)
 {
