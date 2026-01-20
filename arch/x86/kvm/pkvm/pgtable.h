@@ -68,6 +68,7 @@ struct pkvm_pgtable_cap {
 	int level;
 	int allowed_pgsz;
 	u64 table_prot;
+	bool flush_tlb_lazy;
 };
 
 struct pkvm_pgtable {
@@ -84,6 +85,8 @@ struct pkvm_pgtable_visit_ctx {
 	unsigned long addr;
 	int level;
 	void *ptep;
+	bool flush_tlb;
+	struct list_head teardown_pages;
 };
 
 typedef int (*pgtable_visit_fn_t)(struct pkvm_pgtable_visit_ctx *ctx,
