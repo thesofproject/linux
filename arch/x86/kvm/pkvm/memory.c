@@ -15,3 +15,9 @@ u64 sme_me_mask;
 
 struct memblock_region pkvm_memory[PKVM_MEMBLOCK_REGIONS];
 unsigned int pkvm_memblock_nr;
+
+/*
+ * Ensure that __kcfi_typeid_ symbols are emitted for functions that may
+ * not be indirectly called with all configurations.
+ */
+__ADDRESSABLE(__memcpy)
