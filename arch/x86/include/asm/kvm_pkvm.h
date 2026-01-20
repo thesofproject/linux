@@ -33,12 +33,15 @@ u64 pkvm_total_reserve_pages(void);
 PKVM_DECLARE(void *, pkvm_early_alloc_page, (void));
 PKVM_DECLARE(void *, pkvm_early_alloc_contig, (unsigned int nr_pages));
 PKVM_DECLARE(void, pkvm_early_alloc_init, (void *virt, unsigned long size));
+PKVM_DECLARE(int, pkvm_setup_per_cpu, (int cpu, unsigned long base));
+PKVM_DECLARE(unsigned int, pkvm_per_cpu_nr_pages, (void));
 
 static inline unsigned long pkvm_data_pages(unsigned long extra_global,
 					    unsigned long extra_percpu)
 {
 	unsigned long global_pages = PKVM_HYP_PAGES + extra_global;
-	unsigned long percpu_pages = PKVM_PCPU_PAGES + extra_percpu;
+	unsigned long percpu_pages = PKVM_PCPU_PAGES + extra_percpu +
+				     pkvm_sym(pkvm_per_cpu_nr_pages)();
 
 	return global_pages + percpu_pages * num_possible_cpus();
 }
