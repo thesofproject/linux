@@ -14,7 +14,7 @@ cmd_deps			:= $(src)/compiling_cmds.sh
 
 pkvm-hyp-y			:= early_alloc.o pkvm.o memory.o cpu.o \
 				   idt.o entry.o kern_stub.o init.o pgtable.o \
-				   mmu.o
+				   mmu.o page_alloc.o
 
 kernel-x86-lib			:= ../../lib
 pkvm-hyp-y			+= $(kernel-x86-lib)/memset_64.o
