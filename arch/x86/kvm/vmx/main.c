@@ -863,8 +863,10 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 
 #ifndef __PKVM_HYP__
 	.hardware_unsetup = vmx_hardware_unsetup,
+#endif
 
 	.enable_virtualization_cpu = vmx_enable_virtualization_cpu,
+#ifndef __PKVM_HYP__
 	.disable_virtualization_cpu = vt_op(disable_virtualization_cpu),
 	.emergency_disable_virtualization_cpu = vmx_emergency_disable_virtualization_cpu,
 
