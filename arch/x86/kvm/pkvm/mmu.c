@@ -241,6 +241,11 @@ int pkvm_host_mmu_init(void *pool_base, unsigned long pool_pages, host_mmu_init_
 	return fn ? fn(&host_mmu, pool_base, pool_pages) : -EOPNOTSUPP;
 }
 
+int pkvm_host_mmu_finalize(host_mmu_finalize_fn_t fn)
+{
+	return fn ? fn(&host_mmu) : 0;
+}
+
 int pkvm_host_mmu_map(unsigned long phys, unsigned long size,
 		      bool read, bool write, bool exec, bool mmio)
 {
