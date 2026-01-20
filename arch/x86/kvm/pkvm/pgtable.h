@@ -3,6 +3,7 @@
 #define __PKVM_X86_PGTABLE_H
 
 #include <linux/types.h>
+#include <linux/bitfield.h>
 #include "mem_protect.h"
 
 struct pkvm_pgtable;
@@ -173,6 +174,35 @@ static inline enum pkvm_page_state pkvm_pte_pgstate(struct pkvm_pgtable *pgt, vo
 		return PKVM_PAGE_NONE;
 
 	return pgt->pgt_ops->pte_pgstate(ptep);
+}
+
+/*
+ * Use bit31 ~ bi12 as owner ID bits to avoid conflicting w/ low 12 property
+ * bits for all kinds of page table.
+ */
+#define PKVM_INVALID_PTE_OWNER_SHIFT		12
+#define PKVM_INVALID_PTE_OWNER_BITS		20
+#define PKVM_INVALID_PTE_OWNER_MASK		GENMASK(PKVM_INVALID_PTE_OWNER_BITS +		\
+							PKVM_INVALID_PTE_OWNER_SHIFT - 1,	\
+							PKVM_INVALID_PTE_OWNER_SHIFT)
+
+static inline u64 pkvm_pte_mk_owner_id(enum pkvm_owner_id owner)
+{
+	/*
+	 * As 20 bits in the PTE are used to store pKVM owner ID, the number of
+	 * pKVM owner ID bits should not be larger than this.
+	 */
+	BUILD_BUG_ON_MSG(PKVM_OWNER_ID_BITS > PKVM_INVALID_PTE_OWNER_BITS,
+			"PTE doesn't have enough bits to store pkvm owner ID");
+
+	BUG_ON(owner >= PKVM_MAX_ID);
+
+	return FIELD_PREP(PKVM_INVALID_PTE_OWNER_MASK, owner);
+}
+
+static inline enum pkvm_owner_id pkvm_pte_owner_id(struct pkvm_pgtable *pgt, void *ptep)
+{
+	return FIELD_GET(PKVM_INVALID_PTE_OWNER_MASK, pgt->pgt_ops->pte_get(ptep));
 }
 
 #endif /* __PKVM_X86_PGTABLE_H */
