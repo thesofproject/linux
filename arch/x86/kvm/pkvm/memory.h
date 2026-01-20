@@ -4,6 +4,7 @@
 
 #include <linux/types.h>
 #include <linux/range.h>
+#include <linux/mm.h>
 #include <vdso/limits.h>
 #include <asm/page.h>
 #include "mem_protect.h"
@@ -75,5 +76,19 @@ static inline void pkvm_set_page_refcounted(struct pkvm_page *p)
 }
 
 bool pkvm_find_addr_range(unsigned long phys, struct range *range);
+
+static inline bool is_memory_range(unsigned long phys, unsigned long size)
+{
+	struct range target = {
+		.start = PAGE_ALIGN_DOWN(phys),
+		.end = PAGE_ALIGN(phys + size) - 1,
+	};
+	struct range range;
+
+	if (!pkvm_find_addr_range(phys, &range))
+		return false;
+
+	return range_contains(&range, &target);
+}
 
 #endif /* __PKVM_X86_MEMORY_H */
