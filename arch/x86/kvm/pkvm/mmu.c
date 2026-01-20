@@ -257,9 +257,39 @@ void pkvm_hyp_mmu_clone_host(unsigned long start_vaddr)
 
 int pkvm_host_mmu_init(void *pool_base, unsigned long pool_pages, host_mmu_init_fn_t fn)
 {
+	struct memblock_region *reg;
+	unsigned long phys;
+	int ret, i;
+
 	pkvm_spin_lock_init(&host_mmu_lock);
 
-	return fn ? fn(&host_mmu, pool_base, pool_pages) : -EOPNOTSUPP;
+	if (!fn)
+		return -EOPNOTSUPP;
+
+	ret = fn(&host_mmu, pool_base, pool_pages);
+	if (ret)
+		return ret;
+
+	/* Map memory blocks with RWX permissions */
+	for (i = 0; i < pkvm_memblock_nr; i++) {
+		reg = &pkvm_memory[i];
+		ret = pkvm_host_mmu_map((unsigned long)reg->base,
+					(unsigned long)reg->size,
+					true, true, true, false);
+		if (ret)
+			return ret;
+	}
+
+	/* Map holes between memblocks as MMIO with RWX permissions */
+	for (i = phys = 0; i < pkvm_memblock_nr; i++, phys = reg->base + reg->size) {
+		reg = &pkvm_memory[i];
+		ret = pkvm_host_mmu_map(phys, (unsigned long)reg->base - phys,
+					true, true, true, true);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
 }
 
 int pkvm_host_mmu_finalize(host_mmu_finalize_fn_t fn)
