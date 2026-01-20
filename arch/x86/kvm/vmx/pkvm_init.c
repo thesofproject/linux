@@ -28,7 +28,9 @@ static struct gdt_page pkvm_gdt_page = {
 	},
 };
 
-static unsigned int intercept_w_msrs[] = {};
+static unsigned int intercept_w_msrs[] = {
+	MSR_CORE_PERF_GLOBAL_CTRL,
+};
 
 u64 pkvm_total_reserve_pages(void)
 {
@@ -75,13 +77,15 @@ static __init int pkvm_setup_host_vmcs_config(void)
 			VM_EXIT_LOAD_IA32_EFER |
 			VM_EXIT_SAVE_IA32_PAT |
 			VM_EXIT_SAVE_IA32_EFER |
-			VM_EXIT_SAVE_DEBUG_CONTROLS,
+			VM_EXIT_SAVE_DEBUG_CONTROLS |
+			VM_EXIT_LOAD_IA32_PERF_GLOBAL_CTRL,
 		.vmexit_ctrl_opt = 0,
 		.vmentry_ctrl_req =
 			VM_ENTRY_LOAD_DEBUG_CONTROLS |
 			VM_ENTRY_IA32E_MODE |
 			VM_ENTRY_LOAD_IA32_EFER |
-			VM_ENTRY_LOAD_IA32_PAT,
+			VM_ENTRY_LOAD_IA32_PAT |
+			VM_ENTRY_LOAD_IA32_PERF_GLOBAL_CTRL,
 		.vmentry_ctrl_opt = 0,
 	};
 
@@ -312,7 +316,7 @@ static inline u32 get_ar(u16 sel)
 		vmcs_write32(GUEST_##SEG##_LIMIT, limit);	\
 	} while (0)
 
-static __init void init_guest_state_area_from_native(void)
+static __init void init_guest_state_area_from_native(struct vcpu_vmx *vmx)
 {
 	int cpu = smp_processor_id();
 	struct desc_ptr dt;
@@ -376,11 +380,22 @@ static __init void init_guest_state_area_from_native(void)
 
 	rdmsrq(MSR_IA32_CR_PAT, msrq);
 	vmcs_write64(GUEST_IA32_PAT, msrq);
+
+	if (!rdmsrq_safe(MSR_CORE_PERF_GLOBAL_CTRL, &msrq)) {
+		struct kvm_pmu *pmu = vcpu_to_pmu(&vmx->vcpu);
+		union cpuid10_eax eax = {
+			.full = native_cpuid_eax(10),
+		};
+
+		pmu->version = eax.split.version_id;
+		pmu->global_ctrl = msrq;
+		vmcs_write64(GUEST_IA32_PERF_GLOBAL_CTRL, msrq);
+	}
 }
 
-static __init void init_guest_state_area(void)
+static __init void init_guest_state_area(struct vcpu_vmx *vmx)
 {
-	init_guest_state_area_from_native();
+	init_guest_state_area_from_native(vmx);
 
 	/*Guest non register state*/
 	vmcs_write32(GUEST_ACTIVITY_STATE, GUEST_ACTIVITY_ACTIVE);
@@ -431,6 +446,8 @@ static __init void init_host_state_area(struct vcpu_vmx *vmx, struct pkvm_hyp *p
 
 	rdmsrq(MSR_IA32_CR_PAT, msrq);
 	vmcs_write64(HOST_IA32_PAT, msrq);
+
+	vmcs_write64(HOST_IA32_PERF_GLOBAL_CTRL, 0);
 
 	/*
 	 * [pcpu->stack, pcpu->stack + PKVM_STACK_SIZE) is per cpu stack.
@@ -513,13 +530,27 @@ static __init void init_execution_control(struct vcpu_vmx *vmx)
 
 static __init void init_vmexit_control(struct vcpu_vmx *vmx)
 {
-	vm_exit_controls_set(vmx, pkvm_sym(host_vmcs_config).vmexit_ctrl);
+	u32 vmexit_ctrl = pkvm_sym(host_vmcs_config).vmexit_ctrl;
+	struct kvm_pmu *pmu = vcpu_to_pmu(&vmx->vcpu);
+
+	/* No need to switch if PMU is not enabled */
+	if (!pmu->global_ctrl)
+		vmexit_ctrl &= ~VM_EXIT_LOAD_IA32_PERF_GLOBAL_CTRL;
+
+	vm_exit_controls_set(vmx, vmexit_ctrl);
 	vmcs_write32(VM_EXIT_MSR_STORE_COUNT, 0);
 }
 
 static __init void init_vmentry_control(struct vcpu_vmx *vmx)
 {
-	vm_entry_controls_set(vmx, pkvm_sym(host_vmcs_config).vmentry_ctrl);
+	u32 vmentry_ctrl = pkvm_sym(host_vmcs_config).vmentry_ctrl;
+	struct kvm_pmu *pmu = vcpu_to_pmu(&vmx->vcpu);
+
+	/* No need to switch if PMU is not enabled */
+	if (!pmu->global_ctrl)
+		vmentry_ctrl &= ~VM_ENTRY_LOAD_IA32_PERF_GLOBAL_CTRL;
+
+	vm_entry_controls_set(vmx, vmentry_ctrl);
 	vmcs_write32(VM_ENTRY_INTR_INFO_FIELD, 0);
 	vmcs_write32(VM_ENTRY_MSR_LOAD_COUNT, 0);
 	vmcs_write32(VM_ENTRY_INTR_INFO_FIELD, 0);
@@ -531,7 +562,7 @@ static __init int pkvm_host_init_vmx(struct vcpu_vmx *vmx, struct pkvm_hyp *pkvm
 	vmcs_load(vmx->loaded_vmcs->vmcs);
 	vmx->loaded_vmcs->cpu = smp_processor_id();
 
-	init_guest_state_area();
+	init_guest_state_area(vmx);
 	init_host_state_area(vmx, pkvm);
 	init_execution_control(vmx);
 	init_vmexit_control(vmx);
