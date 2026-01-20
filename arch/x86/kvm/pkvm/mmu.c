@@ -247,3 +247,9 @@ int pkvm_host_mmu_map(unsigned long phys, unsigned long size,
 	/* The vaddr == phys for the host MMU */
 	return pkvm_pgtable_map(&host_mmu, phys, phys, size, prot);
 }
+
+int pkvm_host_mmu_unmap(unsigned long vaddr, unsigned long size)
+{
+	/* The vaddr == phys for the host MMU */
+	return pkvm_pgtable_unmap(&host_mmu, vaddr, vaddr, size);
+}
