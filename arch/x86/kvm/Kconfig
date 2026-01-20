@@ -153,6 +153,18 @@ config PKVM_INTEL
 
 	  If unsure, say N.
 
+config PKVM_X86_DEBUG
+	bool "pKVM debugging support"
+	depends on PKVM_X86
+	help
+	  Provides support for the pKVM hypervisor to print logs by using the
+	  linux kernel symbols. With this config enabled, the security of the
+	  pKVM hypervisor cannot be guaranteed as the linux kernel symbols are
+	  untrusted code, which could be modified easily by the host. So suggest
+	  to enable this only for debugging purpose.
+
+	  If unsure, say N.
+
 config X86_SGX_KVM
 	bool "Software Guard eXtensions (SGX) Virtualization"
 	depends on X86_SGX && KVM_INTEL

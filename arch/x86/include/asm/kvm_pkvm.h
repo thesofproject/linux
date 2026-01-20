@@ -232,6 +232,8 @@ static inline unsigned long pkvm_host_pgtable_pages(void)
 
 #ifdef __PKVM_HYP__
 
+#ifndef CONFIG_PKVM_X86_DEBUG
+
 #undef WARN_ON
 #undef WARN
 #undef WARN_ON_ONCE
@@ -253,6 +255,8 @@ static inline unsigned long pkvm_host_pgtable_pages(void)
 #define WARN_ONCE(condition, format...) WARN(condition, format)
 
 #define _BUG_FLAGS(ins, flags, extra)  asm volatile(ins)
+
+#endif /* CONFIG_PKVM_X86_DEBUG */
 
 #endif /* __PKVM_HYP__ */
 
