@@ -870,6 +870,8 @@ int __init vmx_pkvm_init(void)
 	if (ret)
 		goto repriv_cpus;
 
+	pkvm_hypercall(init_finalize);
+
 	pr_info("Hypervisor is up and running!\n");
 	return 0;
 
