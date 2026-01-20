@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <asm/pkvm_trace.h>
 #include <asm/tsc.h>
+#include "memory.h"
 #include "pkvm.h"
 #include "trace.h"
 
@@ -28,6 +29,28 @@ static void refresh_vmexit_perf(struct perf_ctrl *pctrl, struct vmexit_perf *per
 	memset(perf->data.vmexit_reasons, 0, sizeof(perf->data.vmexit_reasons));
 
 	perf->age = pctrl->age;
+}
+
+static void copy_vmexit_perf_data(struct perf_data *dst, struct vmexit_perf *perf)
+{
+	pkvm_spin_lock(&perf->lock);
+	memcpy(dst, &perf->data, sizeof(struct perf_data));
+	pkvm_spin_unlock(&perf->lock);
+}
+
+static void copy_host_vm_trace(void *dst, unsigned long size)
+{
+	struct vmexit_perf *perf;
+	int cpu;
+
+	for_each_possible_cpu(cpu) {
+		perf = per_cpu_ptr(&hvcpu_perf, cpu);
+		if (size >= sizeof(struct perf_data)) {
+			copy_vmexit_perf_data(dst, perf);
+			dst += sizeof(struct perf_data);
+			size -= sizeof(struct perf_data);
+		}
+	}
 }
 
 void pkvm_trace_vmexit_start(struct kvm_vcpu *vcpu)
@@ -92,4 +115,18 @@ void pkvm_enable_vmexit_trace(bool en)
 	} else if (!en && pctrl->on) {
 		pctrl->on = false;
 	}
+}
+
+int pkvm_dump_vmexit_trace(phys_addr_t phys, unsigned long size)
+{
+	int ret = pkvm_host_share_hyp(phys, size);
+
+	if (ret)
+		return ret;
+
+	copy_host_vm_trace(__pkvm_va(phys), size);
+
+	pkvm_host_unshare_hyp(phys, size);
+
+	return 0;
 }
