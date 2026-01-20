@@ -147,9 +147,13 @@ static int pgtable_try_map_leaf(struct pkvm_pgtable_visit_ctx *ctx,
 	else if (!is_present && was_present)
 		mm_ops->put_page(ptep);
 
-	if (flush_tlb)
-		pgt_ops->flush_tlb(ctx->pgt, ctx->addr,
-				   pgt_ops->level_to_size(ctx->level));
+	if (flush_tlb) {
+		if (ctx->pgt->cap.flush_tlb_lazy)
+			ctx->flush_tlb |= true;
+		else
+			pgt_ops->flush_tlb(ctx->pgt, ctx->addr,
+					   pgt_ops->level_to_size(ctx->level));
+	}
 
 	return 0;
 }
@@ -250,8 +254,12 @@ static int pgtable_try_unmap_leaf(struct pkvm_pgtable_visit_ctx *ctx,
 	 * Flush TLB if a present entry is changed to
 	 * non-present.
 	 */
-	if (was_present)
-		pgt_ops->flush_tlb(ctx->pgt, ctx->addr, size);
+	if (was_present) {
+		if (ctx->pgt->cap.flush_tlb_lazy)
+			ctx->flush_tlb |= true;
+		else
+			pgt_ops->flush_tlb(ctx->pgt, ctx->addr, size);
+	}
 
 	return 0;
 }
@@ -269,10 +277,41 @@ static void pgtable_free_child(struct pkvm_pgtable_visit_ctx *ctx)
 	child = __pkvm_va(pgt_ops->pte_to_phys(ptep));
 	if (mm_ops->page_count(child) == 1) {
 		pgt_ops->pte_set(ptep, 0);
-		/* Flush TLB before release the child table page */
-		pgt_ops->flush_tlb(ctx->pgt, ctx->addr,
-				   pgt_ops->level_to_size(ctx->level));
-		mm_ops->put_page(child);
+		if (ctx->pgt->cap.flush_tlb_lazy) {
+			/*
+			 * As the flushing TLB is expensive, TLB will be flushed
+			 * when the walking is completed. In this case, the page
+			 * table page cannot be freed immediately at here as it
+			 * can be allocated as a page table page again before
+			 * flushing TLB. To prevent this, push the going-to-be
+			 * freed page table page to a teardown list and free
+			 * them after the TLB is flushed.
+			 */
+			list_add_tail((struct list_head *)child, &ctx->teardown_pages);
+			/*
+			 * The old value of the parent pte (pointed by the
+			 * ctx->ptep) may still be in the paging structure cache
+			 * and point to the page-table page represented by child.
+			 * But now the first two PTEs in the child page are used
+			 * as the list_head. To prevent translating a virtual
+			 * address via these two PTEs, they should be non-present
+			 * PTEs. BUG_ON if they are not.
+			 *
+			 * We are relying on a combination of two things here:
+			 * 1. addresses in list_head->next and list_head->prev are
+			 * naturally aligned to 8 bytes so their 3 lowest bits are
+			 * zero.
+			 * 2. a PTE in the given page table format is non-present
+			 * if its 3 lowest bits are zero.
+			 */
+			BUG_ON(pgt_ops->pte_present(child) ||
+			       pgt_ops->pte_present(child + pgt_ops->pte_size(ctx->level)));
+		} else {
+			/* Flush TLB before release the child table page */
+			pgt_ops->flush_tlb(ctx->pgt, ctx->addr,
+					   pgt_ops->level_to_size(ctx->level));
+			mm_ops->put_page(child);
+		}
 		mm_ops->put_page(ptep);
 	}
 }
@@ -347,6 +386,8 @@ struct pgt_walk_data {
 	const unsigned long start;
 	const unsigned long end;
 	struct pkvm_pgtable_walker *walker;
+	bool flush_tlb;
+	struct list_head teardown_pages;
 };
 
 static int _pgtable_walk(struct pgt_walk_data *data, void *ptep, int level);
@@ -363,6 +404,8 @@ static int pgtable_visit(struct pgt_walk_data *data, void *ptep, int level)
 		.addr = data->addr,
 		.level = level,
 		.ptep = ptep,
+		.flush_tlb = false,
+		.teardown_pages = LIST_HEAD_INIT(ctx.teardown_pages),
 	};
 	void *child_ptep;
 	int ret = 0;
@@ -380,24 +423,26 @@ static int pgtable_visit(struct pgt_walk_data *data, void *ptep, int level)
 	}
 
 	if (ret)
-		return ret;
+		goto out;
 
 	if (leaf) {
 		unsigned long size = pgt_ops->level_to_size(level);
 
 		data->addr = ALIGN_DOWN(data->addr, size);
 		data->addr += size;
-		return ret;
+		goto out;
 	}
 
 	child_ptep = __pkvm_va(pgt_ops->pte_to_phys(ptep));
 	ret = _pgtable_walk(data, child_ptep, level - 1);
 	if (ret)
-		return ret;
+		goto out;
 
 	if (walk_flags & PKVM_PGTABLE_WALK_TABLE_POST)
 		ret = walker->cb(&ctx, PKVM_PGTABLE_WALK_TABLE_POST, walker->arg);
-
+out:
+	data->flush_tlb |= ctx.flush_tlb;
+	list_splice_tail(&ctx.teardown_pages, &data->teardown_pages);
 	return ret;
 }
 
@@ -481,7 +526,10 @@ int pkvm_pgtable_walk(struct pkvm_pgtable *pgt, unsigned long vaddr,
 		.start = ALIGN_DOWN(vaddr, PAGE_SIZE),
 		.end = ALIGN(vaddr + size, PAGE_SIZE),
 		.walker = walker,
+		.flush_tlb = false,
+		.teardown_pages = LIST_HEAD_INIT(data.teardown_pages),
 	};
+	int ret;
 
 	if (!pgt->root_pa)
 		return -EINVAL;
@@ -489,7 +537,24 @@ int pkvm_pgtable_walk(struct pkvm_pgtable *pgt, unsigned long vaddr,
 	if (data.start == data.end)
 		return 0;
 
-	return _pgtable_walk(&data, __pkvm_va(pgt->root_pa), pgt->cap.level);
+	ret = _pgtable_walk(&data, __pkvm_va(pgt->root_pa), pgt->cap.level);
+
+	if (data.flush_tlb || !list_empty(&data.teardown_pages))
+		pgt->pgt_ops->flush_tlb(pgt, data.start, data.end - data.start);
+
+	/*
+	 * Free the unused page table pages in the teardown_pages list after
+	 * flushing the TLB, to make sure there is no stale TLB when these
+	 * pages are allocated as page table pages.
+	 */
+	while (!list_empty(&data.teardown_pages)) {
+		struct list_head *page = data.teardown_pages.next;
+
+		list_del(page);
+		pgt->mm_ops->put_page((void *)page);
+	}
+
+	return ret;
 }
 
 /**
