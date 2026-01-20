@@ -26,6 +26,13 @@ struct pkvm_hyp *pkvm_hyp;
 DEFINE_PER_CPU(struct pkvm_pcpu *, phys_cpu);
 DEFINE_PER_CPU(struct kvm_vcpu *, host_vcpu);
 
+static int pkvm_enable_virtualization_cpu(void)
+{
+	kvm_user_return_msr_cpu_online();
+
+	return kvm_x86_call(enable_virtualization_cpu)();
+}
+
 void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 {
 	int ret = 0;
@@ -50,6 +57,9 @@ void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 		break;
 	case __pkvm__check_processor_compatibility:
 		ret = kvm_x86_call(check_processor_compatibility)();
+		break;
+	case __pkvm__enable_virtualization_cpu:
+		ret = pkvm_enable_virtualization_cpu();
 		break;
 	default:
 		ret = -EINVAL;
