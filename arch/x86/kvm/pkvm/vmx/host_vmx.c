@@ -310,6 +310,14 @@ void pkvm_host_vmexit_main(struct vcpu_vmx *vmx)
 		if (handle_write_msr(vcpu) == X86EMUL_CONTINUE)
 			skip_instruction = true;
 		break;
+	case EXIT_REASON_EPT_VIOLATION:
+		/*
+		 * Inject #GP to the host VM if its EPT violation
+		 * cannot be handled.
+		 */
+		if (pkvm_handle_host_ept_violation())
+			kvm_inject_gp(vcpu, 0);
+		break;
 	case EXIT_REASON_PREEMPTION_TIMER:
 		handle_preemption_timer(vcpu);
 		break;

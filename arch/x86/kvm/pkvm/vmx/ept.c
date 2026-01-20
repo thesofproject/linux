@@ -4,8 +4,10 @@
 #include <vmx/capabilities.h>
 #include <mmu/spte.h>
 #include <vmx/vmx.h>
+#include <vmx/vmx_ops.h>
 #include "ept.h"
 #include "gfp.h"
+#include "pkvm/mmu.h"
 
 static struct pkvm_pgtable *host_ept;
 static struct pkvm_pool host_ept_pool;
@@ -182,4 +184,66 @@ int pkvm_host_ept_init(struct pkvm_pgtable *pgt, void *pool_base,
 
 	host_ept = pgt;
 	return 0;
+}
+
+int pkvm_handle_host_ept_violation(void)
+{
+	struct range range, cur;
+	int level, ret = -EPERM;
+	unsigned long hpa, gpa;
+
+	BUG_ON(!host_ept);
+
+	gpa = vmcs_read64(GUEST_PHYSICAL_ADDRESS);
+	/*
+	 * All the memory and MMIO holes have already been mapped in the host
+	 * EPT when initialize, except for the MMIO in the high-end address.
+	 * Handle the MMIO only.
+	 */
+	if (pkvm_find_addr_range(gpa, &range))
+		return ret;
+
+	pkvm_host_mmu_lock();
+
+	pkvm_pgtable_lookup(host_ept, gpa, &hpa, NULL, &level);
+	if (VALID_PAGE(hpa)) {
+		/*
+		 * Some other CPU has just mapped in the host EPT. Vmenter
+		 * the host VM and retry.
+		 */
+		pkvm_host_mmu_unlock();
+		return 0;
+	}
+
+	BUG_ON(level > host_ept->cap.level);
+	/*
+	 * Based on the looked up level, find out the possible maximum page-size
+	 * aligned address range which contains the GPA address for installing
+	 * the MMIO mapping, to minimize the memory consumption.
+	 */
+	for (; level > PG_LEVEL_NONE; level--) {
+		unsigned long size;
+
+		if (!((1 << level) & host_ept->cap.allowed_pgsz))
+			continue;
+
+		size = ept_level_to_size(level);
+		cur.start = ALIGN_DOWN(gpa, size);
+		cur.end = cur.start + size - 1;
+
+		if (range_contains(&range, &cur)) {
+			/*
+			 * TODO: In case the host mmu free pages are not
+			 * enough, -ENOMEM will be returned. This could be
+			 * handled by unmaping some other MMIO mapped for the
+			 * host VM to reclaim some mmu pages and try again.
+			 */
+			ret = pkvm_host_mmu_map(cur.start, size, true, true,
+						true, true);
+			break;
+		}
+	}
+
+	pkvm_host_mmu_unlock();
+	return ret;
 }
