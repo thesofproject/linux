@@ -5,6 +5,7 @@
 #include <linux/kvm_host.h>
 
 #include <asm/kvm.h>
+#include <asm/kvm_pkvm.h>
 #include <asm/intel_pt.h>
 #include <asm/perf_event.h>
 #include <asm/posted_intr.h>
