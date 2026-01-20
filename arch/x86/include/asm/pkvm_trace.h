@@ -2,6 +2,7 @@
 #ifndef _ASM_X86_PKVM_TRACE_H
 #define _ASM_X86_PKVM_TRACE_H
 
+#include <asm/kvm_pkvm.h>
 #include <asm/pkvm_spinlock.h>
 #include <asm/vmx.h>
 
@@ -22,12 +23,14 @@ struct vmexit_stats {
 
 struct perf_data {
 	struct vmexit_stats vmexit_reasons[MAX_EXIT_REASONS];
+	struct vmexit_stats hypercalls[MAX_PKVM_HYPERCALLS];
 	int vcpu_id;
 };
 
 struct vmexit_perf {
 	pkvm_spinlock_t lock;
 	struct perf_data data;
+	unsigned long rax;
 	unsigned long long tsc;
 	unsigned int age;
 };
