@@ -4,8 +4,10 @@
 
 #ifdef CONFIG_PKVM_X86
 #include <linux/bug.h>
+#include <linux/kvm_host.h>
 #include <linux/mm.h>
 #include <asm/desc.h>
+#include <asm/kvm_para.h>
 #include <asm/pkvm_image.h>
 
 #define PKVM_MEMBLOCK_REGIONS		128
@@ -33,6 +35,46 @@ struct pkvm_hyp {
 
 #define PKVM_HYP_PAGES		(PAGE_ALIGN(sizeof(struct pkvm_hyp)) >> PAGE_SHIFT)
 #define PKVM_PCPU_PAGES		(PAGE_ALIGN(sizeof(struct pkvm_pcpu)) >> PAGE_SHIFT)
+
+#define TO_PKVM_HC(f)		CONCATENATE(__pkvm__, f)
+
+#define PKVM_HC_IN_0()
+#define PKVM_HC_IN_1(a1)		, "b"(a1)
+#define PKVM_HC_IN_2(a1, a2)		PKVM_HC_IN_1(a1), "c"(a2)
+#define PKVM_HC_IN_3(a1, a2, a3)	PKVM_HC_IN_2(a1, a2), "d"(a3)
+#define PKVM_HC_IN_4(a1, a2, a3, a4)	PKVM_HC_IN_3(a1, a2, a3), "S"(a4)
+
+#define pkvm_hypercall(f, ...)								\
+({											\
+	int ret;									\
+	asm volatile(KVM_HYPERCALL							\
+		     : "=a"(ret)							\
+		     : "a"(TO_PKVM_HC(f))						\
+		       CONCATENATE(PKVM_HC_IN_, COUNT_ARGS(__VA_ARGS__))(__VA_ARGS__)	\
+		     : "memory");							\
+	ret;										\
+})
+
+static inline unsigned long pkvm_hc(struct kvm_vcpu *vcpu)
+{
+	return vcpu->arch.regs[VCPU_REGS_RAX];
+}
+
+#define DEFINE_PKVM_HC_INPUT(n, reg)							\
+static inline unsigned long pkvm_hc_input##n(struct kvm_vcpu *vcpu)			\
+{											\
+	return vcpu->arch.regs[VCPU_REGS_##reg];					\
+}
+
+DEFINE_PKVM_HC_INPUT(1, RBX)
+DEFINE_PKVM_HC_INPUT(2, RCX)
+DEFINE_PKVM_HC_INPUT(3, RDX)
+DEFINE_PKVM_HC_INPUT(4, RSI)
+
+static inline void pkvm_hc_set_ret(struct kvm_vcpu *vcpu, int ret)
+{
+	vcpu->arch.regs[VCPU_REGS_RAX] = ret;
+}
 
 extern unsigned long pkvm_sym(page_offset_base);
 extern unsigned long pkvm_sym(phys_base);
