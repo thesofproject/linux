@@ -9,6 +9,18 @@ SECTIONS {
 	PKVM_SECTION(.noinstr.text)
 	PKVM_SECTION(__ex_table)
 	PKVM_SECTION(.rodata)
+	/*
+	 * .pkvm.data..percpu needs to be defined before .data section
+	 * as .pkvm.data section will include all sections started with
+	 * .data which will include .data..percpu as well.
+	 *
+	 * .pkvm.data..percpu also needs to be page aligned to maintain
+	 * the same alignment for when linking into vmlinux.
+	 */
+	. = ALIGN(PAGE_SIZE);
+	BEGIN_PKVM_SECTION(.data..percpu)
+		PERCPU_INPUT(L1_CACHE_BYTES)
+	END_PKVM_SECTION
 	PKVM_SECTION(.data)
 	PKVM_SECTION(.bss)
 }
