@@ -205,6 +205,28 @@ static inline unsigned long pkvm_vmemmap_pages(size_t vmemmap_entry_size)
 	return total_size >> PAGE_SHIFT;
 }
 
+static inline unsigned long pkvm_host_pgtable_pages(void)
+{
+	/*
+	 * Usually the 2G ~ 4G are used as MMIO hole. As the host mmu should
+	 * contain the mapping for the MMIO, reserve additional memory pages
+	 * for 2GB MMIO size.
+	 *
+	 * MMIO regions also exists in the high-end physical address space which
+	 * is not able to know the size precisely during the early boot.
+	 * Therefore, instead of specifically reserving memory pages for these
+	 * MMIO regions, share the reservation for the 2G ~ 4G MMIO region.
+	 * While this approach cannot guarantee that memory page allocation for
+	 * the required MMIO mappings will always success, it is feasible
+	 * because the reservation for 2G ~ 4G MMIO region is based on the worst
+	 * case (4K page size) while in practice the MMIO region will be mapped
+	 * using the possible largest page size(e.g. 1G/2M), which significantly
+	 * reduces the memory consumption and makes sharing possible.
+	 */
+	return __pkvm_pgtable_total_pages() +
+	       __pkvm_pgtable_max_pages(SZ_2G >> PAGE_SHIFT);
+}
+
 #ifdef __PKVM_HYP__
 
 #undef WARN_ON
