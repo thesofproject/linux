@@ -3,6 +3,7 @@
 #include <asm/kvm_pkvm.h>
 #include <asm/pkvm_spinlock.h>
 #include <asm/string.h>
+#include "early_alloc.h"
 #include "pgtable.h"
 
 static unsigned long base;
@@ -62,4 +63,9 @@ void pkvm_early_alloc_init(void *virt, unsigned long size)
 {
 	base = cur = (unsigned long)virt;
 	end = base + size;
+}
+
+unsigned long pkvm_early_alloc_nr_used_pages(void)
+{
+	return (cur - base) >> PAGE_SHIFT;
 }

@@ -3,10 +3,39 @@
 #include <linux/pgtable.h>
 #include <asm/kvm_pkvm.h>
 #include "early_alloc.h"
+#include "gfp.h"
 #include "mmu.h"
 #include "pgtable.h"
 
 static struct pkvm_pgtable hyp_mmu;
+static struct pkvm_pool hyp_mmu_pool;
+
+static void *hyp_mmu_zalloc_page(void)
+{
+	return pkvm_alloc_pages(&hyp_mmu_pool, 0);
+}
+
+static void hyp_mmu_get_page(void *vaddr)
+{
+	pkvm_get_page(&hyp_mmu_pool, vaddr);
+}
+
+static void hyp_mmu_put_page(void *vaddr)
+{
+	pkvm_put_page(&hyp_mmu_pool, vaddr);
+}
+
+static int hyp_mmu_page_count(void *vaddr)
+{
+	return pkvm_page_count(vaddr);
+}
+
+static const struct pkvm_pgtable_mm_ops hyp_mmu_mm_ops = {
+	.zalloc_page = hyp_mmu_zalloc_page,
+	.get_page = hyp_mmu_get_page,
+	.put_page = hyp_mmu_put_page,
+	.page_count = hyp_mmu_page_count,
+};
 
 static bool hyp_mmu_pte_present(void *ptep)
 {
@@ -104,6 +133,41 @@ static const struct pkvm_pgtable_ops hyp_mmu_pgt_ops = {
 	.flush_tlb = hyp_mmu_flush_tlb,
 };
 
+static int fix_hyp_mmu_refcnt_walker(struct pkvm_pgtable_visit_ctx *ctx,
+				     unsigned long walk_flags,
+				     void *const arg)
+{
+	if (!ctx->pgt->pgt_ops->pte_present(ctx->ptep))
+		return 0;
+
+	/*
+	 * Fix-up the refcount for the page-table pages as the early allocator
+	 * was unable to access the pkvm_vmemmap and so the buddy allocator has
+	 * initialized the refcount to '1'.
+	 */
+	hyp_mmu_get_page(ctx->ptep);
+
+	return 0;
+}
+
+static int fix_hyp_mmu_page_refcnt(void)
+{
+	struct pkvm_pgtable_walker walker = {
+		.cb = fix_hyp_mmu_refcnt_walker,
+		.arg = NULL,
+		.walk_flags = PKVM_PGTABLE_WALK_LEAF | PKVM_PGTABLE_WALK_TABLE_POST,
+	};
+	unsigned long size;
+
+	/*
+	 * Calculate the max address space, then walk the [0, size) address
+	 * range to fixup refcount of every page-table page.
+	 */
+	size = pkvm_pgtable_max_size(&hyp_mmu);
+
+	return pkvm_pgtable_walk(&hyp_mmu, 0, size, &walker);
+}
+
 int pkvm_hyp_mmu_init(void *pool_base, unsigned long pool_pages)
 {
 	struct pkvm_pgtable_cap cap = {
@@ -118,6 +182,42 @@ int pkvm_hyp_mmu_init(void *pool_base, unsigned long pool_pages)
 	pkvm_early_alloc_init(pool_base, pool_pages << PAGE_SHIFT);
 
 	return pkvm_pgtable_init(&hyp_mmu, cap, &pkvm_early_alloc_mm_ops, &hyp_mmu_pgt_ops);
+}
+
+int pkvm_hyp_mmu_switch_to_buddy(void *pool_base, unsigned long pool_pages)
+{
+	unsigned long reserved_pages;
+	int ret;
+
+	/* Get the early alloc used pages and reserve them in hyp_mmu_pool */
+	if (hyp_mmu.mm_ops != &pkvm_early_alloc_mm_ops)
+		return -EINVAL;
+
+	reserved_pages = pkvm_early_alloc_nr_used_pages();
+	/* Enable buddy allocator */
+	ret = pkvm_pool_init(&hyp_mmu_pool, __pkvm_pa(pool_base) >> PAGE_SHIFT,
+			     pool_pages, reserved_pages);
+	if (ret)
+		return ret;
+
+	if (reserved_pages) {
+		/*
+		 * As the early alloc mm_ops was used to allocate mmu
+		 * page-table pages, the refcount of each page-table pages
+		 * was not maintained at that time. This should be fixed.
+		 */
+		ret = fix_hyp_mmu_page_refcnt();
+		if (ret)
+			return ret;
+	}
+
+	hyp_mmu.mm_ops = &hyp_mmu_mm_ops;
+	return 0;
+}
+
+void pkvm_hyp_mmu_load(void)
+{
+	native_write_cr3(hyp_mmu.root_pa);
 }
 
 int pkvm_hyp_mmu_finalize(hyp_mmu_finalize_fn_t fn)
