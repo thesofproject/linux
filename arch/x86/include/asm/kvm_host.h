@@ -781,6 +781,12 @@ enum kvm_only_cpuid_leafs {
 	NKVMCAPINTS = NR_KVM_CPU_CAPS - NCAPINTS,
 };
 
+#ifdef CONFIG_PKVM_X86
+struct kvm_pkvm_vm {
+	int handle;
+};
+#endif
+
 struct kvm_vcpu_arch {
 	/*
 	 * rip and regs accesses must go through
@@ -1618,6 +1624,10 @@ struct kvm_arch {
 	 * current VM.
 	 */
 	int cpu_dirty_log_size;
+
+#ifdef CONFIG_PKVM_X86
+	struct kvm_pkvm_vm pkvm;
+#endif
 };
 
 struct kvm_vm_stat {
