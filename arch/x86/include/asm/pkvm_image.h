@@ -45,6 +45,9 @@
 
 #ifdef CONFIG_PKVM_X86
 extern char pkvm_sym(text_start)[], pkvm_sym(text_end)[];
+struct exception_table_entry;
+extern struct exception_table_entry pkvm_sym(__start___ex_table)[];
+extern struct exception_table_entry pkvm_sym(__stop___ex_table)[];
 static inline bool is_pkvm_text(void *addr)
 {
 	return addr >= (void *)pkvm_sym(text_start) && addr < (void *)pkvm_sym(text_end);
