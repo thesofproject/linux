@@ -33,6 +33,11 @@ void *pkvm_early_alloc_contig(unsigned int nr_pages)
 	return ret;
 }
 
+void *pkvm_early_alloc_page(void)
+{
+	return pkvm_early_alloc_contig(1);
+}
+
 void pkvm_early_alloc_init(void *virt, unsigned long size)
 {
 	base = cur = (unsigned long)virt;
