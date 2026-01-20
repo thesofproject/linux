@@ -744,7 +744,16 @@ int vmx_init(void);
 void vmx_exit(void);
 
 #ifdef CONFIG_PKVM_INTEL
+
+#define PKVM_HOST_KVM_VMX_PAGES		(PAGE_ALIGN(sizeof(struct kvm_vmx)) >> PAGE_SHIFT)
+
+static inline unsigned long pkvm_vmx_data_pages(void)
+{
+	return pkvm_data_pages(PKVM_HOST_KVM_VMX_PAGES);
+}
+
 int __init vmx_pkvm_init(void);
-#endif
+
+#endif /* CONFIG_PKVM_INTEL */
 
 #endif /* __KVM_X86_VMX_H */
