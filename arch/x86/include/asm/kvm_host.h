@@ -2001,8 +2001,23 @@ void pkvm_init_debugfs(void);
 static inline void __init pkvm_reserve(void) {}
 #endif
 
+#ifdef __PKVM_HYP__
+/*
+ * TODO: Enable the static call mechanism in the pKVM hypervisor.
+ *
+ * Until the static call mechanism is available, just use indirect
+ * calls. In particular, assume that any ops that are used by pKVM
+ * hypervisor code are non-NULL.
+ */
+#define kvm_x86_call(func)				\
+({							\
+	BUG_ON(!kvm_x86_ops.func);			\
+	(kvm_x86_ops.func);				\
+})
+#else
 #define kvm_x86_call(func) static_call(kvm_x86_##func)
 #define kvm_pmu_call(func) static_call(kvm_x86_pmu_##func)
+#endif
 
 #define KVM_X86_OP(func) \
 	DECLARE_STATIC_CALL(kvm_x86_##func, *(((struct kvm_x86_ops *)0)->func));
