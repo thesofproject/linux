@@ -8998,6 +8998,8 @@ int pkvm_vmx_init(void)
 	flexpriority_enabled = false;
 	enable_pml = false;
 
+	kvm_vcpu_sz = sizeof(struct vcpu_vmx);
+
 	return pkvm_x86_vendor_init(&vt_init_ops);
 }
 
