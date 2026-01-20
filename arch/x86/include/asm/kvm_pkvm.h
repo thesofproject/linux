@@ -7,6 +7,8 @@
 
 #define PKVM_MEMBLOCK_REGIONS		128
 #define PKVM_STACK_SIZE			SZ_16K
+/* Size of reserved space for private parameter in pKVM stack */
+#define PKVM_STACK_TOP_RESV		16
 
 struct pkvm_pcpu {
 	u8 stack[PKVM_STACK_SIZE] __aligned(16);
@@ -34,6 +36,11 @@ static inline unsigned long pkvm_data_pages(unsigned long extra_global,
 	unsigned long percpu_pages = PKVM_PCPU_PAGES + extra_percpu;
 
 	return global_pages + percpu_pages * num_possible_cpus();
+}
+
+static inline unsigned long get_host_stack_top(struct pkvm_pcpu *pcpu)
+{
+	return (unsigned long) &pcpu->stack[sizeof(pcpu->stack)];
 }
 
 #endif /* CONFIG_PKVM_X86 */
