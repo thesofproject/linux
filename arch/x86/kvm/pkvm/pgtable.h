@@ -123,5 +123,7 @@ int pkvm_pgtable_init(struct pkvm_pgtable *pgt,
 		      const struct pkvm_pgtable_ops *pgt_ops);
 int pkvm_pgtable_walk(struct pkvm_pgtable *pgt, unsigned long vaddr,
 		      unsigned long size, struct pkvm_pgtable_walker *walker);
+int pkvm_pgtable_map(struct pkvm_pgtable *pgt, unsigned long vaddr,
+		     unsigned long phys, unsigned long size, u64 prot);
 
 #endif /* __PKVM_X86_PGTABLE_H */
