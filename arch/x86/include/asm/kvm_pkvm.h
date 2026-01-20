@@ -68,6 +68,9 @@ union pkvm_hc_data {
 		struct pkvm_memcache memcache;
 	} vm_destroy;
 	struct {
+		struct pkvm_memcache memcache;
+	} vcpu_free;
+	struct {
 		u64 data[PKVM_HC_DATA_MAX_NUM];
 	} raw;
 };
