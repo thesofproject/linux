@@ -1,0 +1,11 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+#ifndef _HYP_TRACE_H_
+#define _HYP_TRACE_H_
+
+#include <linux/kvm_host.h>
+
+void pkvm_trace_vmexit_start(struct kvm_vcpu *vcpu);
+void pkvm_trace_vmexit_end(struct kvm_vcpu *vcpu, u32 index);
+void pkvm_vcpu_perf_init(struct kvm_vcpu *vcpu);
+
+#endif

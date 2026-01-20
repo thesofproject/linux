@@ -6,6 +6,8 @@
 #include "lapic.h"
 #include "memory.h"
 #include "mmu.h"
+#include "pkvm.h"
+#include "trace.h"
 
 /*
  * Set by the host before deprivilege and used through the initialization
@@ -276,6 +278,8 @@ int pkvm_init(struct pkvm_mem_info infos[], int nr_infos)
 	ret = pkvm_host_mmu_finalize(host_mmu_finalize_fn);
 	if (ret)
 		return ret;
+
+	pkvm_vcpu_perf_init(this_cpu_read(host_vcpu));
 
 	this_cpu_write(cpu_initialized, true);
 	return 0;
