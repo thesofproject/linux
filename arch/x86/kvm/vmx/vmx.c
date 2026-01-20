@@ -683,7 +683,7 @@ static int vmx_set_guest_uret_msr(struct vcpu_vmx *vmx,
  * faults are guaranteed to be due to the !post-VMXON check unless the CPU is
  * magically in RM, VM86, compat mode, or at CPL>0.
  */
-static int kvm_cpu_vmxoff(void)
+int kvm_cpu_vmxoff(void)
 {
 	asm goto("1: vmxoff\n\t"
 			  _ASM_EXTABLE(1b, %l[fault])
@@ -2839,7 +2839,7 @@ int vmx_check_processor_compat(void)
 	return 0;
 }
 
-static int kvm_cpu_vmxon(u64 vmxon_pointer)
+int kvm_cpu_vmxon(u64 vmxon_pointer)
 {
 	u64 msr;
 

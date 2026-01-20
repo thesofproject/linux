@@ -12,6 +12,12 @@ static int __init early_pkvm_parse_cmdline(char *buf)
 early_param("kvm-intel.pkvm", early_pkvm_parse_cmdline);
 
 static struct vmcs_config host_vmcs_config;
+static DEFINE_PER_CPU(struct vmcs *, pkvm_vmxarea);
+
+struct pkvm_deprivilege_param {
+	struct pkvm_hyp *pkvm;
+	int ret;
+};
 
 u64 pkvm_total_reserve_pages(void)
 {
@@ -80,9 +86,35 @@ static __init int pkvm_setup_host_vm(struct pkvm_hyp *pkvm)
 	return 0;
 }
 
+static struct vmcs *pkvm_alloc_vmcs(void)
+{
+	struct vmcs *vmcs = pkvm_early_alloc_page();
+
+	if (!vmcs)
+		return NULL;
+
+	if (!PAGE_ALIGNED(__pa(vmcs)))
+		return NULL;
+
+	vmcs->hdr.revision_id = vmx_basic_vmcs_revision_id(host_vmcs_config.basic);
+	return vmcs;
+}
+
+static __init int pkvm_alloc_vmxarea(int cpu)
+{
+	struct vmcs *vmcs = pkvm_alloc_vmcs();
+
+	if (!vmcs)
+		return -ENOMEM;
+
+	per_cpu(pkvm_vmxarea, cpu) = vmcs;
+	return 0;
+}
+
 static __init int pkvm_setup_pcpu(struct pkvm_hyp *pkvm, int cpu)
 {
 	struct pkvm_pcpu *pcpu;
+	int ret;
 
 	if (cpu >= CONFIG_NR_CPUS) {
 		pr_err("setup_pcpu: invalid CPU number %d\n", cpu);
@@ -96,6 +128,10 @@ static __init int pkvm_setup_pcpu(struct pkvm_hyp *pkvm, int cpu)
 	}
 
 	pkvm->pcpus[cpu] = pcpu;
+
+	ret = pkvm_alloc_vmxarea(cpu);
+	if (ret)
+		pr_err("alloc vmxarea for CPU%d failed with ret %d\n", cpu, ret);
 
 	return 0;
 }
@@ -115,11 +151,331 @@ static __init int pkvm_setup_host_vcpu(struct pkvm_hyp *pkvm, int cpu)
 		return -ENOMEM;
 	}
 
+	vmx->vmcs01.vmcs = pkvm_alloc_vmcs();
+	if (!vmx->vmcs01.vmcs) {
+		pr_err("no vmcs page for CPU%d\n", cpu);
+		return -ENOMEM;
+	}
+
+	vmx->vmcs01.msr_bitmap = pkvm_early_alloc_page();
+	if (!vmx->vmcs01.msr_bitmap) {
+		pr_err("no msr_bitmap page for CPU%d\n", cpu);
+		return -ENOMEM;
+	}
+
 	vmx->vcpu.cpu = cpu;
 	vmx->vcpu.kvm = pkvm->host_kvm;
 	pkvm->host_vcpus[cpu] = &vmx->vcpu;
 
 	return 0;
+}
+
+static inline u32 get_ar(u16 sel)
+{
+	u32 access_rights;
+
+	if (sel == 0) {
+		access_rights = 0x10000;
+	} else {
+		asm ("lar %%ax, %%rax\n"
+				: "=a"(access_rights) : "a"(sel));
+		access_rights = access_rights >> 8;
+		access_rights = access_rights & 0xf0ff;
+	}
+
+	return access_rights;
+}
+
+#define init_guestsegment(seg, SEG, base, limit)		\
+	do  {							\
+		u16 sel;					\
+		u32 ar;						\
+								\
+		savesegment(seg, sel);				\
+		ar = get_ar(sel);				\
+		vmcs_write16(GUEST_##SEG##_SELECTOR, sel);	\
+		vmcs_write32(GUEST_##SEG##_AR_BYTES, ar);	\
+		vmcs_writel(GUEST_##SEG##_BASE, base);		\
+		vmcs_write32(GUEST_##SEG##_LIMIT, limit);	\
+	} while (0)
+
+static __init void init_guest_state_area_from_native(void)
+{
+	int cpu = smp_processor_id();
+	struct desc_ptr dt;
+	u64 msrq;
+	u16 ldtr;
+
+	/* Initialize CR registers */
+	vmcs_writel(GUEST_CR0, read_cr0() & ~X86_CR0_TS);
+	vmcs_writel(GUEST_CR3, __read_cr3());
+	vmcs_writel(GUEST_CR4, __read_cr4());
+
+	/* Initialize cs/ss/ds/es */
+	init_guestsegment(cs, CS, 0x0, 0xffffffff);
+	init_guestsegment(ss, SS, 0x0, 0xffffffff);
+	init_guestsegment(ds, DS, 0x0, 0xffffffff);
+	init_guestsegment(es, ES, 0x0, 0xffffffff);
+
+	/* Initialize fs/gs */
+	rdmsrq(MSR_FS_BASE, msrq);
+	init_guestsegment(fs, FS, msrq, 0xffffffff);
+	rdmsrq(MSR_GS_BASE, msrq);
+	init_guestsegment(gs, GS, msrq, 0xffffffff);
+
+	/* Initialize GDTR */
+	native_store_gdt(&dt);
+	vmcs_writel(GUEST_GDTR_BASE, dt.address);
+	vmcs_write32(GUEST_GDTR_LIMIT, dt.size);
+
+	/* Initialize TR */
+	vmcs_write16(GUEST_TR_SELECTOR, GDT_ENTRY_TSS*8);
+	vmcs_write32(GUEST_TR_AR_BYTES, get_ar(GDT_ENTRY_TSS*8));
+	vmcs_writel(GUEST_TR_BASE, (unsigned long)&get_cpu_entry_area(cpu)->tss.x86_tss);
+	vmcs_write32(GUEST_TR_LIMIT, __KERNEL_TSS_LIMIT);
+
+	/* Initialize LDTR */
+	store_ldt(ldtr);
+	vmcs_write16(GUEST_LDTR_SELECTOR, ldtr);
+	vmcs_write32(GUEST_LDTR_AR_BYTES, 0x10000);
+	vmcs_writel(GUEST_LDTR_BASE, 0x0);
+	vmcs_write32(GUEST_LDTR_LIMIT, 0xffffffff);
+
+	/* Initialize IDTR */
+	store_idt(&dt);
+	vmcs_writel(GUEST_IDTR_BASE, dt.address);
+	vmcs_write32(GUEST_IDTR_LIMIT, dt.size);
+
+	/* Set MSRs */
+	vmcs_write64(GUEST_IA32_DEBUGCTL, get_debugctlmsr());
+
+	rdmsrq(MSR_IA32_SYSENTER_CS, msrq);
+	vmcs_write32(GUEST_SYSENTER_CS, (u32)msrq);
+
+	rdmsrq(MSR_IA32_SYSENTER_ESP, msrq);
+	vmcs_writel(GUEST_SYSENTER_ESP, msrq);
+
+	rdmsrq(MSR_IA32_SYSENTER_EIP, msrq);
+	vmcs_writel(GUEST_SYSENTER_EIP, msrq);
+
+	rdmsrq(MSR_EFER, msrq);
+	vmcs_write64(GUEST_IA32_EFER, msrq);
+
+	rdmsrq(MSR_IA32_CR_PAT, msrq);
+	vmcs_write64(GUEST_IA32_PAT, msrq);
+}
+
+static __init void init_guest_state_area(void)
+{
+	init_guest_state_area_from_native();
+
+	/*Guest non register state*/
+	vmcs_write32(GUEST_ACTIVITY_STATE, GUEST_ACTIVITY_ACTIVE);
+	vmcs_write32(GUEST_INTERRUPTIBILITY_INFO, 0);
+	vmcs_writel(GUEST_PENDING_DBG_EXCEPTIONS, 0);
+	vmcs_write64(VMCS_LINK_POINTER, -1ull);
+}
+
+static __init void init_host_state_area(void)
+{
+	int cpu = smp_processor_id();
+	struct desc_ptr dt;
+	u16 selector;
+	u64 msrq;
+
+	vmcs_writel(HOST_CR0, read_cr0() & ~X86_CR0_TS);
+	/* Use host cr3 until the pKVM hypervisor created its own MMU */
+	vmcs_writel(HOST_CR3, __read_cr3());
+	vmcs_writel(HOST_CR4, __read_cr4());
+
+	/*
+	 * FIXME: Use the linux host environments for the pKVM hypervisor as
+	 * a temp solution before the isolation is fully functional.
+	 */
+	savesegment(cs, selector);
+	vmcs_write16(HOST_CS_SELECTOR, selector);
+	savesegment(ss, selector);
+	vmcs_write16(HOST_SS_SELECTOR, selector);
+	savesegment(ds, selector);
+	vmcs_write16(HOST_DS_SELECTOR, selector);
+	savesegment(es, selector);
+	vmcs_write16(HOST_ES_SELECTOR, selector);
+	savesegment(fs, selector);
+	vmcs_write16(HOST_FS_SELECTOR, selector);
+	vmcs_writel(HOST_FS_BASE, 0);
+	savesegment(gs, selector);
+	vmcs_write16(HOST_GS_SELECTOR, selector);
+	rdmsrq(MSR_GS_BASE, msrq);
+	vmcs_writel(HOST_GS_BASE, msrq);
+
+	vmcs_write16(HOST_TR_SELECTOR, GDT_ENTRY_TSS*8);
+	vmcs_writel(HOST_TR_BASE, (unsigned long)&get_cpu_entry_area(cpu)->tss.x86_tss);
+
+	native_store_gdt(&dt);
+	vmcs_writel(HOST_GDTR_BASE, dt.address);
+
+	store_idt(&dt);
+	vmcs_writel(HOST_IDTR_BASE, dt.address);
+
+	rdmsrq(MSR_IA32_SYSENTER_CS, msrq);
+	vmcs_write32(HOST_IA32_SYSENTER_CS, (u32)msrq);
+
+	rdmsrq(MSR_IA32_SYSENTER_ESP, msrq);
+	vmcs_writel(HOST_IA32_SYSENTER_ESP, msrq);
+
+	rdmsrq(MSR_IA32_SYSENTER_EIP, msrq);
+	vmcs_writel(HOST_IA32_SYSENTER_EIP, msrq);
+
+	rdmsrq(MSR_EFER, msrq);
+	vmcs_write64(HOST_IA32_EFER, msrq);
+
+	rdmsrq(MSR_IA32_CR_PAT, msrq);
+	vmcs_write64(HOST_IA32_PAT, msrq);
+}
+
+static __init void init_execution_control(struct vcpu_vmx *vmx)
+{
+	pin_controls_set(vmx, host_vmcs_config.pin_based_exec_ctrl);
+
+	/*
+	 * CR3 LOAD/STORE EXITING are always read as 1 from the
+	 * MSR_IA32_VMX_PROCBASED_CTLS. Clear these two bits as the CR3 will be
+	 * passthrough to the host VM.
+	 */
+	exec_controls_set(vmx, host_vmcs_config.cpu_based_exec_ctrl &
+			       ~(CPU_BASED_CR3_LOAD_EXITING |
+				 CPU_BASED_CR3_STORE_EXITING));
+
+	/* Disable EPT/VPID first, enable after EPT pgtable created */
+	secondary_exec_controls_set(vmx, host_vmcs_config.cpu_based_2nd_exec_ctrl &
+					 ~(SECONDARY_EXEC_ENABLE_EPT |
+					   SECONDARY_EXEC_ENABLE_VPID));
+	/*
+	 * Shadow VMCS will not be used as the VMCS will be exposed via PV-based
+	 * method.
+	 */
+	vmcs_write64(VMCS_LINK_POINTER, INVALID_GPA);
+
+	/* Host VM owns cr3 */
+	vmcs_write32(CR3_TARGET_COUNT, 0);
+
+	/* Host VM handles exceptions directly */
+	vmcs_write32(EXCEPTION_BITMAP, 0);
+
+	vmcs_write64(MSR_BITMAP, __pa(vmx->vmcs01.msr_bitmap));
+
+	/*
+	 * Host VM owns cr0 and cr4 except VMXE bit.
+	 * Does not care about IA32_VMX_CRx_FIXED0/1 setting, so if host VM
+	 * modifies cr0/cr4 conflicting with FIXED0/1, just let #GP happen.
+	 * For example, as pKVM does not enable unrestricted guest feature,
+	 * cr0.PE/PG must keep as 1 in host VM.
+	 */
+	vmcs_writel(CR0_GUEST_HOST_MASK, 0);
+	vmcs_writel(CR4_GUEST_HOST_MASK, X86_CR4_VMXE);
+
+	/*
+	 * Set the VMXE bit in CR4_READ_SHADOW so that the host VM will see the
+	 * consistent values between "native" cr4 and its cached cpu_tlbstate.cr4
+	 * (which is set when turns on VMX via kvm_cpu_vmxon).
+	 */
+	vmcs_writel(CR4_READ_SHADOW, X86_CR4_VMXE);
+}
+
+static __init void init_vmexit_control(struct vcpu_vmx *vmx)
+{
+	vm_exit_controls_set(vmx, host_vmcs_config.vmexit_ctrl);
+	vmcs_write32(VM_EXIT_MSR_STORE_COUNT, 0);
+}
+
+static __init void init_vmentry_control(struct vcpu_vmx *vmx)
+{
+	vm_entry_controls_set(vmx, host_vmcs_config.vmentry_ctrl);
+	vmcs_write32(VM_ENTRY_INTR_INFO_FIELD, 0);
+	vmcs_write32(VM_ENTRY_MSR_LOAD_COUNT, 0);
+	vmcs_write32(VM_ENTRY_INTR_INFO_FIELD, 0);
+}
+
+static __init int pkvm_host_init_vmx(struct vcpu_vmx *vmx)
+{
+	vmx->loaded_vmcs = &vmx->vmcs01;
+	vmcs_load(vmx->loaded_vmcs->vmcs);
+	vmx->loaded_vmcs->cpu = smp_processor_id();
+
+	init_guest_state_area();
+	init_host_state_area();
+	init_execution_control(vmx);
+	init_vmexit_control(vmx);
+	init_vmentry_control(vmx);
+
+	return 0;
+}
+
+static noinline int local_deprivilege_cpu(void)
+{
+	/* TODO */
+	return -EINVAL;
+}
+
+static __init void pkvm_host_deprivilege_cpu(void *data)
+{
+	struct pkvm_deprivilege_param *p = data;
+	int cpu = smp_processor_id(), ret;
+	struct kvm_vcpu *vcpu;
+
+	if (!p || !p->pkvm)
+		return;
+
+	vcpu = p->pkvm->host_vcpus[cpu];
+
+	ret = kvm_cpu_vmxon(__pa(this_cpu_read(pkvm_vmxarea)));
+	if (ret) {
+		pr_err("CPU%d vmxon failed, ret %d\n", cpu, ret);
+		goto done;
+	}
+
+	ret = pkvm_host_init_vmx(to_vmx(vcpu));
+	if (ret) {
+		pr_err("CPU%d init vmx failed, ret %d\n", cpu, ret);
+		goto vmxoff;
+	}
+
+	ret = local_deprivilege_cpu();
+	if (ret) {
+		pr_err("CPU%d deprivilege failed, ret %d\n", cpu, ret);
+		goto vmxoff;
+	}
+
+	vcpu->mode = IN_GUEST_MODE;
+	pr_info("CPU%d in guest mode\n", cpu);
+	return;
+vmxoff:
+	kvm_cpu_vmxoff();
+done:
+	p->ret = ret;
+}
+
+/*
+ * Used in root mode to deprivilege CPUs
+ */
+static __init int pkvm_host_deprivilege_cpus(struct pkvm_hyp *pkvm)
+{
+	struct pkvm_deprivilege_param p = {
+		.pkvm = pkvm,
+		.ret = 0,
+	};
+	int cpu, ret = 0;
+
+	for_each_possible_cpu(cpu) {
+		ret = smp_call_function_single(cpu, pkvm_host_deprivilege_cpu, &p, 1);
+		if (ret || p.ret) {
+			pr_err("Failed to deprivilege CPU%d: smp_call %d, deprivilege: %d\n",
+			       cpu, ret, p.ret);
+			break;
+		}
+	}
+
+	return ret ? ret : p.ret;
 }
 
 int __init vmx_pkvm_init(void)
@@ -168,6 +524,13 @@ int __init vmx_pkvm_init(void)
 			goto out;
 	}
 
+	ret = pkvm_host_deprivilege_cpus(pkvm);
+	if (ret) {
+		/* TODO: Re-privilege the deprivileged CPUs */
+		goto out;
+	}
+
+	pr_info("All cpus are in guest mode!\n");
 	return 0;
 out:
 	/*
