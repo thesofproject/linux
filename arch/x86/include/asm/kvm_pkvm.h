@@ -126,6 +126,7 @@ PKVM_DECLARE(unsigned long, pkvm_per_cpu_offset, (int cpu));
 #define GEN(x, ...) PKVM_DECLARE(void, handle_exception_##x, (void));
 #include <asm/GEN-for-each-exc.h>
 #undef GEN
+PKVM_DECLARE(void, set_x86_spec_ctrl, (u64 spec_ctrl));
 
 static inline unsigned long pkvm_data_pages(unsigned long extra_global,
 					    unsigned long extra_percpu)
