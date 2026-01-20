@@ -879,8 +879,10 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 	.vm_destroy = vt_op(vm_destroy),
 #ifndef __PKVM_HYP__
 	.vm_pre_destroy = vt_op_tdx_only(vm_pre_destroy),
+#endif
 
 	.vcpu_precreate = vt_op(vcpu_precreate),
+#ifndef __PKVM_HYP__
 	.vcpu_create = vt_op(vcpu_create),
 	.vcpu_free = vt_op(vcpu_free),
 	.vcpu_reset = vt_op(vcpu_reset),

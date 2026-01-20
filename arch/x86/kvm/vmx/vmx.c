@@ -74,6 +74,8 @@
 #include "vmx_onhyperv.h"
 #include "posted_intr.h"
 #ifdef __PKVM_HYP__
+#include "mem_protect.h"
+#include "memory.h"
 #include "pkvm.h"
 
 #undef module_param_named
@@ -4710,6 +4712,7 @@ static u32 vmx_secondary_exec_control(struct vcpu_vmx *vmx)
 
 	return exec_control;
 }
+#endif /* !__PKVM_HYP__ */
 
 static inline int vmx_get_pid_table_order(struct kvm *kvm)
 {
@@ -4718,6 +4721,7 @@ static inline int vmx_get_pid_table_order(struct kvm *kvm)
 
 static int vmx_alloc_ipiv_pid_table(struct kvm *kvm)
 {
+#ifndef __PKVM_HYP__
 	struct page *pages;
 	struct kvm_vmx *kvm_vmx = to_kvm_vmx(kvm);
 
@@ -4734,6 +4738,52 @@ static int vmx_alloc_ipiv_pid_table(struct kvm *kvm)
 
 	kvm_vmx->pid_table = (void *)page_address(pages);
 	return 0;
+#else
+	struct kvm *shared_kvm = to_pkvm(kvm)->shared_kvm;
+	struct kvm_vmx *kvm_vmx = to_kvm_vmx(kvm);
+	struct kvm_vmx *shared_kvm_vmx;
+	u64 *pid_table;
+	int ret;
+
+	if (!irqchip_in_kernel(shared_kvm) || !enable_ipiv)
+		return 0;
+
+	pkvm_spin_lock(&to_pkvm(kvm)->lock);
+
+	if (kvm_vmx->pid_table) {
+		/* The pid_table is already set. */
+		ret = 0;
+		goto unlock;
+	}
+
+	shared_kvm_vmx = to_kvm_vmx(shared_kvm);
+
+	if (shared_kvm->arch.max_vcpu_ids > KVM_MAX_VCPU_IDS ||
+	    !shared_kvm_vmx->pid_table) {
+		ret = -EINVAL;
+		goto unlock;
+	}
+
+	kvm->arch.irqchip_mode = shared_kvm->arch.irqchip_mode;
+	kvm->arch.max_vcpu_ids = shared_kvm->arch.max_vcpu_ids;
+	pid_table = kern_pkvm_va(shared_kvm_vmx->pid_table);
+	/*
+	 * Although the contents in pid_table is not secret since it is
+	 * constructed following the SDM, still donate the pid_table pages to
+	 * the pKVM hypervisor as the host doesn't need to access these pages
+	 * until the guest is destroyed.
+	 */
+	ret = pkvm_host_donate_hyp(__pkvm_pa(pid_table),
+				   PAGE_SIZE << vmx_get_pid_table_order(kvm),
+				   true);
+	if (ret)
+		goto unlock;
+
+	kvm_vmx->pid_table = pid_table;
+unlock:
+	pkvm_spin_unlock(&to_pkvm(kvm)->lock);
+	return ret;
+#endif
 }
 
 int vmx_vcpu_precreate(struct kvm *kvm)
@@ -4741,6 +4791,7 @@ int vmx_vcpu_precreate(struct kvm *kvm)
 	return vmx_alloc_ipiv_pid_table(kvm);
 }
 
+#ifndef __PKVM_HYP__
 #define VMX_XSS_EXIT_BITMAP 0
 
 static void init_vmcs(struct vcpu_vmx *vmx)
@@ -8435,11 +8486,19 @@ void vmx_hardware_unsetup(void)
 
 void vmx_vm_destroy(struct kvm *kvm)
 {
-	/* TODO: Enable this for pKVM hypervisor when enabling ipiv */
-#ifndef __PKVM_HYP__
 	struct kvm_vmx *kvm_vmx = to_kvm_vmx(kvm);
 
+#ifndef __PKVM_HYP__
 	free_pages((unsigned long)kvm_vmx->pid_table, vmx_get_pid_table_order(kvm));
+#else
+	if (kvm_vmx->pid_table) {
+		/*
+		 * No need to clear the pid_table as its contents is following the SDM
+		 * which is not a secret.
+		 */
+		pkvm_hyp_donate_host(__pkvm_pa(kvm_vmx->pid_table),
+				     PAGE_SIZE << vmx_get_pid_table_order(kvm), false);
+	}
 #endif
 }
 
