@@ -65,6 +65,9 @@ enum pkvm_hc {
 
 union pkvm_hc_data {
 	struct {
+		struct pkvm_memcache memcache;
+	} vm_destroy;
+	struct {
 		u64 data[PKVM_HC_DATA_MAX_NUM];
 	} raw;
 };
