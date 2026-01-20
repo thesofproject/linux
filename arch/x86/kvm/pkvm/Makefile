@@ -36,7 +36,7 @@ pkvm-hyp-y			+= $(kernel-lib)/sort.o $(kernel-lib)/bsearch.o \
 pkvm-hyp-$(CONFIG_LIST_HARDENED) += $(kernel-lib)/list_debug.o
 
 kvm				:= ..
-pkvm-hyp-y			+= $(kvm)/x86.o
+pkvm-hyp-y			+= $(kvm)/x86.o $(kvm)/cpuid.o
 
 pkvm-hyp-$(CONFIG_PKVM_INTEL)	+= vmx/host_vmentry.o vmx/host_vmx.o \
 				   $(kvm)/vmx/vmx.o vmx/idt.o vmx/ept.o \

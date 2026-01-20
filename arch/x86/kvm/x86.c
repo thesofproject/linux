@@ -91,6 +91,7 @@
 #ifndef __PKVM_HYP__
 
 #define MAX_IO_MSRS 256
+#endif /* !__PKVM_HYP__ */
 
 /*
  * Note, kvm_caps fields should *never* have default values, all fields must be
@@ -103,6 +104,7 @@ EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_caps);
 struct kvm_host_values kvm_host __read_mostly;
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_host);
 
+#ifndef __PKVM_HYP__
 #define  ERR_PTR_USR(e)  ((void __user *)ERR_PTR(e))
 
 #define emul_to_vcpu(ctxt) \
@@ -139,9 +141,10 @@ static void __get_sregs2(struct kvm_vcpu *vcpu, struct kvm_sregs2 *sregs2);
 static DEFINE_MUTEX(vendor_module_lock);
 static void kvm_load_guest_fpu(struct kvm_vcpu *vcpu);
 static void kvm_put_guest_fpu(struct kvm_vcpu *vcpu);
-
+#endif /* !__PKVM_HYP__ */
 struct kvm_x86_ops kvm_x86_ops __read_mostly;
 
+#ifndef __PKVM_HYP__
 #define KVM_X86_OP(func)					     \
 	DEFINE_STATIC_CALL_NULL(kvm_x86_##func,			     \
 				*(((struct kvm_x86_ops *)0)->func));
@@ -215,20 +218,6 @@ u32 __read_mostly kvm_nr_uret_msrs;
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_nr_uret_msrs);
 static u32 __read_mostly kvm_uret_msrs_list[KVM_MAX_NR_USER_RETURN_MSRS];
 static struct kvm_user_return_msrs __percpu *user_return_msrs;
-
-#define KVM_SUPPORTED_XCR0     (XFEATURE_MASK_FP | XFEATURE_MASK_SSE \
-				| XFEATURE_MASK_YMM | XFEATURE_MASK_BNDREGS \
-				| XFEATURE_MASK_BNDCSR | XFEATURE_MASK_AVX512 \
-				| XFEATURE_MASK_PKRU | XFEATURE_MASK_XTILE)
-
-#define XFEATURE_MASK_CET_ALL	(XFEATURE_MASK_CET_USER | XFEATURE_MASK_CET_KERNEL)
-/*
- * Note, KVM supports exposing PT to the guest, but does not support context
- * switching PT via XSTATE (KVM's PT virtualization relies on perf; swapping
- * PT via guest XSTATE would clobber perf state), i.e. KVM doesn't support
- * IA32_XSS[bit 8] (guests can/must use RDMSR/WRMSR to save/restore PT MSRs).
- */
-#define KVM_SUPPORTED_XSS	(XFEATURE_MASK_CET_ALL)
 
 bool __read_mostly allow_smaller_maxphyaddr = 0;
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(allow_smaller_maxphyaddr);
