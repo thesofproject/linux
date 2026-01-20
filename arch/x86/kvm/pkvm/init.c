@@ -122,6 +122,15 @@ static int create_hyp_mmu(const struct pkvm_mem_info infos[], int nr_infos)
 			return ret;
 	}
 
+#ifdef CONFIG_PKVM_X86_DEBUG
+	/*
+	 * Clone host CR3 page mapping starting from VMALLOC_START for the pKVM
+	 * hypervisor to run the linux kernel's symbols in the root mode. To
+	 * reduce the differences between w/ DEBUG and w/o DEBUG, keep using
+	 * the direct mapping created by the pKVM hypervisor itself.
+	 */
+	pkvm_hyp_mmu_clone_host(VMALLOC_START);
+#else
 	/*
 	 * Map pkvm's TEXT/DATA memory. The virtual address is the same
 	 * with the kernel symbol mapping.
@@ -134,6 +143,7 @@ static int create_hyp_mmu(const struct pkvm_mem_info infos[], int nr_infos)
 				return ret;
 		}
 	}
+#endif
 
 	ret = back_vmemmap(__pkvm_pa(pkvm_vmemmap_base));
 	if (ret)
@@ -184,9 +194,23 @@ static int create_host_mmu(const struct pkvm_mem_info infos[], int nr_infos,
 	 * from the host VM.
 	 */
 	for (i = 0; i < nr_infos; i++) {
+#ifdef CONFIG_PKVM_X86_DEBUG
+		/*
+		 * Only keep the pKVM TEXT/DATA mapped in the host mmu to allow
+		 * the host to access pKVM's text and data for debugging, and
+		 * unmap all the other regions i.e., pKVM reserved memory region
+		 * which the host doesn't need to access.
+		 */
+		if (infos[i].type != PKVM_TEXT_DATA) {
+			ret = pkvm_host_mmu_unmap(infos[i].pa, infos[i].size);
+			if (ret)
+				return ret;
+		}
+#else
 		ret = pkvm_host_mmu_unmap(infos[i].pa, infos[i].size);
 		if (ret)
 			return ret;
+#endif
 	}
 
 	return 0;

@@ -603,6 +603,8 @@ PROVIDE(__ref_stack_chk_guard = __stack_chk_guard);
 
 #endif /* CONFIG_X86_64 */
 
+#include <asm/pkvm_image_vars.h>
+
 /*
  * The symbols below are referenced using relative relocations in the
  * respective ELF notes. This produces build time constants that the

@@ -9,7 +9,9 @@
  * introducing additional symbols, some kernel configuration options are
  * disabled. (This list needs to be extended when new variants are added.)
  */
+#ifndef CONFIG_PKVM_X86_DEBUG
 #undef CONFIG_PRINTK
+#endif
 #undef CONFIG_DEBUG_VIRTUAL
 #undef CONFIG_CALL_THUNKS_DEBUG
 #undef CONFIG_PREEMPT_DYNAMIC

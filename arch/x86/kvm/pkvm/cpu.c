@@ -21,10 +21,14 @@ unsigned int nr_cpu_ids;
 
 unsigned int pkvm_per_cpu_nr_pages(void)
 {
+#ifndef CONFIG_PKVM_X86_DEBUG
 	unsigned long per_cpu_size = (unsigned long)__per_cpu_end -
 				     (unsigned long)__per_cpu_start;
 
 	return ALIGN(per_cpu_size, PAGE_SIZE) >> PAGE_SHIFT;
+#else
+	return 0;
+#endif
 }
 
 int pkvm_setup_per_cpu(int cpu, unsigned long base)
@@ -41,8 +45,12 @@ int pkvm_setup_per_cpu(int cpu, unsigned long base)
 	if (!vcpu)
 		return -EINVAL;
 
+#ifndef CONFIG_PKVM_X86_DEBUG
 	__per_cpu_offset[cpu] = (unsigned long)__pkvm_va(base) -
 				(unsigned long)__per_cpu_start;
+#else
+	__per_cpu_offset[cpu] = (unsigned long)__pkvm_va(base);
+#endif
 	per_cpu(this_cpu_off, cpu) = __per_cpu_offset[cpu];
 	per_cpu(cpu_number, cpu) = cpu;
 	per_cpu(phys_cpu, cpu) = pcpu;
