@@ -81,3 +81,27 @@ void __init pkvm_reserve(void)
 	kvm_info("Reserved %lld MiB at 0x%llx for pkvm\n", pkvm_mem_size >> 20,
 		 pkvm_mem_base);
 }
+
+static void *kvm_host_va(phys_addr_t phys)
+{
+	return __va(phys);
+}
+
+static void kvm_free_pkvm_page_range(struct pkvm_page_range range)
+{
+	void *vaddr = __va(range.addr);
+	u64 nr_pages = range.nr_pages;
+
+	if (WARN_ON_ONCE(!nr_pages))
+		return;
+
+	if (nr_pages > 1)
+		free_pages_exact(vaddr, nr_pages << PAGE_SHIFT);
+	else
+		free_page((unsigned long)vaddr);
+}
+
+void kvm_free_pkvm_memcache(struct pkvm_memcache *mc)
+{
+	free_pkvm_memcache(mc, kvm_free_pkvm_page_range, kvm_host_va);
+}
