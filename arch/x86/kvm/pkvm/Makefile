@@ -32,7 +32,8 @@ quiet_cmd_patch_retpoline = PATCH_RETPOLINE $@
 
 kernel-lib			:= ../../../../lib
 pkvm-hyp-y			+= $(kernel-lib)/sort.o $(kernel-lib)/bsearch.o \
-				   $(kernel-lib)/extable.o $(kernel-lib)/hweight.o
+				   $(kernel-lib)/extable.o $(kernel-lib)/hweight.o \
+				   $(kernel-lib)/string.o $(kernel-lib)/ctype.o
 pkvm-hyp-$(CONFIG_LIST_HARDENED) += $(kernel-lib)/list_debug.o
 
 kvm				:= ..

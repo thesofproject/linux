@@ -7,6 +7,15 @@
 #include "vmcs12.h"
 #include "vmx.h"
 
+#ifdef __PKVM_HYP__
+static inline void nested_vmx_setup_ctls_msrs(struct vmcs_config *vmcs_conf, u32 ept_caps) {}
+
+static inline struct vmcs12 *get_vmcs12(struct kvm_vcpu *vcpu)
+{
+	return to_vmx(vcpu)->nested.cached_vmcs12;
+}
+
+#else /* !__PKVM_HYP__ */
 /*
  * Status returned by nested_vmx_enter_non_root_mode():
  */
@@ -70,6 +79,8 @@ static inline struct vmcs12 *get_shadow_vmcs12(struct kvm_vcpu *vcpu)
 
 	return to_vmx(vcpu)->nested.cached_shadow_vmcs12;
 }
+
+#endif /* __PKVM_HYP__ */
 
 /*
  * Note: the same condition is checked against the state provided by userspace
