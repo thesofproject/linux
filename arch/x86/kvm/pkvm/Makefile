@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0
 
 ccflags-y += -I $(srctree)/arch/x86/kvm
+ccflags-y += -I $(srctree)/arch/x86/kvm/pkvm
 # TODO: make the stack protector work with the pKVM hypervisor code
 ccflags-y += -fno-stack-protector
 ccflags-y += -D__PKVM_HYP__
@@ -33,7 +34,7 @@ kvm				:= ..
 pkvm-hyp-y			+= $(kvm)/x86.o
 
 pkvm-hyp-$(CONFIG_PKVM_INTEL)	+= vmx/host_vmentry.o vmx/host_vmx.o \
-				   $(kvm)/vmx/vmx.o
+				   $(kvm)/vmx/vmx.o vmx/idt.o
 
 pkvm-obj 			:= $(patsubst %.o,%.pkvm.o,$(pkvm-hyp-y))
 obj-$(CONFIG_PKVM_X86)		+= pkvm.o
