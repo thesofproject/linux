@@ -25,6 +25,10 @@ $(obj)/retpoline.pkvm.S: $(srctree)/arch/x86/lib/retpoline.S $(cmd_deps) FORCE
 quiet_cmd_patch_retpoline = PATCH_RETPOLINE $@
       cmd_patch_retpoline = $(BASH) $(src)/compiling_cmds.sh patch_retpoline $< $@
 
+kernel-lib			:= ../../../../lib
+pkvm-hyp-y			+= $(kernel-lib)/sort.o $(kernel-lib)/bsearch.o \
+				   $(kernel-lib)/extable.o
+
 kvm				:= ..
 pkvm-hyp-y			+= $(kvm)/x86.o
 
