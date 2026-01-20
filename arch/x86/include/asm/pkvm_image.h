@@ -2,6 +2,8 @@
 #ifndef _ASM_X86_PKVM_IMAGE_H
 #define _ASM_X86_PKVM_IMAGE_H
 
+#include <linux/types.h>
+
 #if defined(__PKVM_HYP__)
 /*
  * For the pKVM hypervisor code to use the pKVM hypervisor symbols.
@@ -38,5 +40,19 @@
 	END_PKVM_SECTION
 
 #endif /* LINKER_SCRIPT */
+
+#ifndef __ASSEMBLER__
+
+#ifdef CONFIG_PKVM_X86
+extern char pkvm_sym(text_start)[], pkvm_sym(text_end)[];
+static inline bool is_pkvm_text(void *addr)
+{
+	return addr >= (void *)pkvm_sym(text_start) && addr < (void *)pkvm_sym(text_end);
+}
+#else
+static inline bool is_pkvm_text(void *addr) { return false; }
+#endif
+
+#endif
 
 #endif /* _ASM_X86_PKVM_IMAGE_H */
