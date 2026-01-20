@@ -207,6 +207,111 @@ static int map_walker(struct pkvm_pgtable_visit_ctx *ctx, unsigned long walk_fla
 	return -EINVAL;
 }
 
+struct pgt_unmap_data {
+	unsigned long phys;
+};
+
+static int pgtable_try_unmap_leaf(struct pkvm_pgtable_visit_ctx *ctx,
+				  struct pgt_unmap_data *data)
+{
+	const struct pkvm_pgtable_mm_ops *mm_ops = ctx->pgt->mm_ops;
+	const struct pkvm_pgtable_ops *pgt_ops = ctx->pgt->pgt_ops;
+	void *ptep = ctx->ptep;
+	unsigned long size;
+	bool was_present;
+
+	size = pgt_ops->level_to_size(ctx->level);
+	/*
+	 * Unmap the page if:
+	 * - 4K PTE entry
+	 * - a fully covered huge page
+	 * Otherwise return -E2BIG to go to the next level.
+	 */
+	if (!(ctx->level == PG_LEVEL_4K ||
+	      (pgt_ops->pte_huge(ptep) && leaf_in_addr_range(size, ctx->addr, ctx->end))))
+		return -E2BIG;
+
+	was_present = pgt_ops->pte_present(ptep);
+	if (VALID_PAGE(data->phys) && was_present) {
+		/*
+		 * The user can request to check if the unmapped physical
+		 * address is the desired memory page or not. Panic the
+		 * hypervisor if unexpected result happens.
+		 */
+		BUG_ON(pgt_ops->pte_to_phys(ptep) != data->phys + (ctx->addr - ctx->start));
+	}
+
+	pgt_ops->pte_set(ptep, 0);
+	mm_ops->put_page(ptep);
+
+	/*
+	 * Flush TLB if a present entry is changed to
+	 * non-present.
+	 */
+	if (was_present)
+		pgt_ops->flush_tlb(ctx->pgt, ctx->addr, size);
+
+	return 0;
+}
+
+static void pgtable_free_child(struct pkvm_pgtable_visit_ctx *ctx)
+{
+	const struct pkvm_pgtable_mm_ops *mm_ops = ctx->pgt->mm_ops;
+	const struct pkvm_pgtable_ops *pgt_ops = ctx->pgt->pgt_ops;
+	void *child, *ptep = ctx->ptep;
+
+	/*
+	 * Check the child pte page refcount. Put the child pte page if
+	 * it doesn't contain any other PTEs.
+	 */
+	child = __pkvm_va(pgt_ops->pte_to_phys(ptep));
+	if (mm_ops->page_count(child) == 1) {
+		pgt_ops->pte_set(ptep, 0);
+		/* Flush TLB before release the child table page */
+		pgt_ops->flush_tlb(ctx->pgt, ctx->addr,
+				   pgt_ops->level_to_size(ctx->level));
+		mm_ops->put_page(child);
+		mm_ops->put_page(ptep);
+	}
+}
+
+static int unmap_walker(struct pkvm_pgtable_visit_ctx *ctx, unsigned long walk_flags,
+			void *const arg)
+{
+	const struct pkvm_pgtable_mm_ops *mm_ops = ctx->pgt->mm_ops;
+	const struct pkvm_pgtable_ops *pgt_ops = ctx->pgt->pgt_ops;
+	void *ptep = ctx->ptep;
+	int ret;
+
+	if (!pgt_ops->pte_present(ptep))
+		return 0;
+
+	ret = pgtable_try_unmap_leaf(ctx, (struct pgt_unmap_data *)arg);
+	if (ret != -E2BIG)
+		return ret;
+
+	/*
+	 * If a huge mapping already exists at the current level, split it into
+	 * smaller ones.
+	 */
+	if (pgt_ops->pte_huge(ptep)) {
+		void *page;
+
+		page = pgtable_alloc_page(mm_ops);
+		if (!page)
+			return -ENOMEM;
+
+		/* Split doesn't change the translation so no need to flush tlb. */
+		pgtable_split(ctx, page);
+		pgt_ops->pte_set(ptep, ctx->pgt->cap.table_prot | __pkvm_pa(page));
+	} else {
+		/* Not a huge entry means it is a table entry */
+		pgtable_free_child(ctx);
+	}
+
+	return 0;
+}
+
 struct pgt_walk_data {
 	struct pkvm_pgtable *pgt;
 	unsigned long addr;
@@ -395,5 +500,49 @@ int pkvm_pgtable_map(struct pkvm_pgtable *pgt, unsigned long vaddr,
 		return -EINVAL;
 
 	data.phys = ALIGN_DOWN(phys, PAGE_SIZE);
+	return pkvm_pgtable_walk(pgt, vaddr, size, &walker);
+}
+
+/**
+ * pkvm_pgtable_unmap() - Remove virtual addr to physical addr mappings from a
+ *			  pKVM pgtable.
+ * @pgt:	The page table to remove mapping.
+ * @vaddr:	The virtual address of the mapping to be removed.
+ * @phys:	The desired physical address for the unmap walker to verify.
+ * @size:	The memory size to unmap.
+ *
+ * The unmapped range is the minimum PAGE_SIZE-aligned range covering
+ * [@vaddr, @vaddr + @size), and @phys is aligned down to the PAGE_SIZE if @phys
+ * is not INVALID_PAGE.
+ *
+ * All the mappings for the memory pages in [@vaddr, @vaddr + @size) are removed
+ * from the page table. Each leaf entry in the range is visited by the unmap
+ * walker, to unmap the present ones, followed by the TLB flushing. If the range
+ * represented by a present leaf overlaps with the unmapped range, the leaf will
+ * be split into smaller ones for the unmap walker to walk down to the next
+ * level to remove. If all the mappings in a page table page are removed then
+ * this page table page will be freed after the TLB flushing.
+ *
+ * When @phys is not INVALID_PAGE, the unmap walker will verify if the physical
+ * addresses in the removed mappings in range [@vaddr, @vaddr + @size) match
+ * with [@phys, @phys + @size) or not. The pKVM hypervisor will panic if the
+ * verification for any of the removed mapping is failed. If @phys is
+ * INVALID_PAGE, then the verification will not be performed.
+ *
+ * Return: 0 on success, negative error code on failure.
+ */
+int pkvm_pgtable_unmap(struct pkvm_pgtable *pgt, unsigned long vaddr,
+		       unsigned long phys, unsigned long size)
+{
+	struct pgt_unmap_data data = {
+		.phys = VALID_PAGE(phys) ? ALIGN_DOWN(phys, PAGE_SIZE) :
+					   INVALID_PAGE,
+	};
+	struct pkvm_pgtable_walker walker = {
+		.cb = unmap_walker,
+		.arg = &data,
+		.walk_flags = PKVM_PGTABLE_WALK_LEAF | PKVM_PGTABLE_WALK_TABLE_POST,
+	};
+
 	return pkvm_pgtable_walk(pgt, vaddr, size, &walker);
 }

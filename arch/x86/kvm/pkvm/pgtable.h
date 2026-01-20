@@ -125,6 +125,8 @@ int pkvm_pgtable_walk(struct pkvm_pgtable *pgt, unsigned long vaddr,
 		      unsigned long size, struct pkvm_pgtable_walker *walker);
 int pkvm_pgtable_map(struct pkvm_pgtable *pgt, unsigned long vaddr,
 		     unsigned long phys, unsigned long size, u64 prot);
+int pkvm_pgtable_unmap(struct pkvm_pgtable *pgt, unsigned long vaddr,
+		       unsigned long phys, unsigned long size);
 
 /*
  * Return the max size of the virtual address space that can be
