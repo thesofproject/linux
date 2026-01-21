@@ -104,6 +104,7 @@ static inline int __init init_binderfs(void)
 {
 	return 0;
 }
+static inline void unload_binderfs(void) { }
 #endif
 
 struct binder_debugfs_entry {
