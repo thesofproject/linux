@@ -31,6 +31,27 @@ unsigned int pkvm_moveable_regs_nr;
 
 static struct hyp_pool host_s2_pool;
 
+static int host_s2_pool_refill(struct kvm_hyp_memcache *host_mc)
+{
+	return refill_hyp_pool(&host_s2_pool, host_mc);
+}
+
+static void host_s2_pool_reclaim(struct kvm_hyp_memcache *host_mc, int target)
+{
+	reclaim_hyp_pool(&host_s2_pool, host_mc, target, false);
+}
+
+static int host_s2_pool_reclaimable(void)
+{
+	return hyp_pool_reclaimable(&host_s2_pool, 0);
+}
+
+struct hyp_mgt_allocator_ops host_s2_pool_ops = {
+	.refill		= host_s2_pool_refill,
+	.reclaim	= host_s2_pool_reclaim,
+	.reclaimable	= host_s2_pool_reclaimable,
+};
+
 static DEFINE_PER_CPU(struct pkvm_hyp_vm *, __current_vm);
 #define current_vm (*this_cpu_ptr(&__current_vm))
 

@@ -38,6 +38,8 @@ extern unsigned long hyp_nr_cpus;
 
 extern struct kvm_hyp_pinned_page *hyp_ppages;
 
+extern struct hyp_mgt_allocator_ops host_s2_pool_ops;
+
 int __pkvm_prot_finalize(void);
 int __pkvm_host_share_hyp(u64 pfn);
 int __pkvm_host_unshare_hyp(u64 pfn);
