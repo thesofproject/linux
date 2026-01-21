@@ -12834,9 +12834,9 @@ pointer_reference {
   pointee_type_id: 0x9b2eba1d
 }
 pointer_reference {
-  id: 0x2c5ba10b
+  id: 0x2c5ba7dc
   kind: POINTER
-  pointee_type_id: 0x9b2e62b2
+  pointee_type_id: 0x9b2e79ed
 }
 pointer_reference {
   id: 0x2c5bc41e
@@ -41715,9 +41715,9 @@ member {
   offset: 32
 }
 member {
-  id: 0x6e70c9e2
+  id: 0x6e1a73f0
   name: "adr"
-  type_id: 0xf8992146
+  type_id: 0x92233392
 }
 member {
   id: 0x6ea10151
@@ -86815,9 +86815,9 @@ member {
   offset: 192
 }
 member {
-  id: 0xb613ed66
+  id: 0xb613ed60
   name: "get_function_tplg_files"
-  type_id: 0x2c5ba10b
+  type_id: 0x2c5ba7dc
   offset: 1600
 }
 member {
@@ -125353,9 +125353,9 @@ member {
   offset: 704
 }
 member {
-  id: 0xd4341429
+  id: 0xd4134fe5
   name: "num_adr"
-  type_id: 0xee53e764
+  type_id: 0xc9082b19
   offset: 32
 }
 member {
@@ -125858,9 +125858,9 @@ member {
   offset: 2752
 }
 member {
-  id: 0x90bd30fe
+  id: 0x90422a7d
   name: "num_endpoints"
-  type_id: 0xd646f122
+  type_id: 0x295c7202
   offset: 64
 }
 member {
@@ -235400,8 +235400,8 @@ struct_union {
   name: "snd_soc_acpi_adr_device"
   definition {
     bytesize: 32
-    member_id: 0x6e70c9e2
-    member_id: 0x90bd30fe
+    member_id: 0x6e1a73f0
+    member_id: 0x90422a7d
     member_id: 0x0c955264
     member_id: 0x1029a2c0
   }
@@ -235434,8 +235434,8 @@ struct_union {
   name: "snd_soc_acpi_link_adr"
   definition {
     bytesize: 16
-    member_id: 0xa8dd3aca
-    member_id: 0xd4341429
+    member_id: 0xa8fa6106
+    member_id: 0xd4134fe5
     member_id: 0x6c30a137
   }
 }
@@ -235461,7 +235461,7 @@ struct_union {
     member_id: 0x5989fa88
     member_id: 0x6459f21d
     member_id: 0x623ce163
-    member_id: 0xb613ed66
+    member_id: 0xb613ed60
   }
 }
 struct_union {
@@ -286504,12 +286504,13 @@ function {
   parameter_id: 0x6d7f5ff6
 }
 function {
-  id: 0x9b2e62b2
+  id: 0x9b2e79ed
   return_type_id: 0x6720d32f
   parameter_id: 0x191de370
   parameter_id: 0x39948e3e
   parameter_id: 0x3e10b518
   parameter_id: 0x0bd53c9f
+  parameter_id: 0x6d7f5ff6
 }
 function {
   id: 0x9b2eba1d
@@ -323033,7 +323034,7 @@ elf_symbol {
   name: "snd_soc_acpi_find_machine"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x79827166
+  crc: 0xabba2a49
   type_id: 0xd83d42b4
   full_name: "snd_soc_acpi_find_machine"
 }
@@ -323051,7 +323052,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_adl_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0x8b78d183
+  crc: 0xcff6fb35
   type_id: 0x562e1f23
   full_name: "snd_soc_acpi_intel_adl_machines"
 }
@@ -323060,7 +323061,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_adl_sdw_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0xb1a0588f
+  crc: 0xf3a104f3
   type_id: 0x94fd264d
   full_name: "snd_soc_acpi_intel_adl_sdw_machines"
 }
@@ -323069,7 +323070,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_arl_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0x89cb3b34
+  crc: 0x2a16ace7
   type_id: 0xf9ff1d77
   full_name: "snd_soc_acpi_intel_arl_machines"
 }
@@ -323078,7 +323079,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_arl_sdw_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0x85cef3c0
+  crc: 0x2d5b87e4
   type_id: 0x9c17a29f
   full_name: "snd_soc_acpi_intel_arl_sdw_machines"
 }
@@ -323087,7 +323088,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_baytrail_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0x98a2b746
+  crc: 0x33707807
   type_id: 0x67e91768
   full_name: "snd_soc_acpi_intel_baytrail_machines"
 }
@@ -323096,7 +323097,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_broadwell_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0x89cb3b34
+  crc: 0x2a16ace7
   type_id: 0xf9ff1d77
   full_name: "snd_soc_acpi_intel_broadwell_machines"
 }
@@ -323105,7 +323106,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_bxt_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0x94a77fb2
+  crc: 0x343d5304
   type_id: 0x78cdabf7
   full_name: "snd_soc_acpi_intel_bxt_machines"
 }
@@ -323114,7 +323115,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_cfl_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0xb313b238
+  crc: 0x16415321
   type_id: 0xa5cad54c
   full_name: "snd_soc_acpi_intel_cfl_machines"
 }
@@ -323123,7 +323124,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_cfl_sdw_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0xb313b238
+  crc: 0x16415321
   type_id: 0xa5cad54c
   full_name: "snd_soc_acpi_intel_cfl_sdw_machines"
 }
@@ -323132,7 +323133,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_cherrytrail_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0x8b78d183
+  crc: 0xcff6fb35
   type_id: 0x562e1f23
   full_name: "snd_soc_acpi_intel_cherrytrail_machines"
 }
@@ -323141,7 +323142,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_cml_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0xc8148263
+  crc: 0x8c43d07c
   type_id: 0xf43dbbd4
   full_name: "snd_soc_acpi_intel_cml_machines"
 }
@@ -323150,7 +323151,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_cml_sdw_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0x89cb3b34
+  crc: 0x2a16ace7
   type_id: 0xf9ff1d77
   full_name: "snd_soc_acpi_intel_cml_sdw_machines"
 }
@@ -323159,7 +323160,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_cnl_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0xae7ff6be
+  crc: 0x086aacc2
   type_id: 0x02c6c6f2
   full_name: "snd_soc_acpi_intel_cnl_machines"
 }
@@ -323168,7 +323169,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_cnl_sdw_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0x877d1977
+  crc: 0xc8bbd036
   type_id: 0x9c4e20dc
   full_name: "snd_soc_acpi_intel_cnl_sdw_machines"
 }
@@ -323197,7 +323198,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_ehl_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0xa0c9d4fd
+  crc: 0xeac7d013
   type_id: 0x7caa7325
   full_name: "snd_soc_acpi_intel_ehl_machines"
 }
@@ -323226,7 +323227,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_glk_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0x9a115df1
+  crc: 0xd6902fd5
   type_id: 0xb1a2606e
   full_name: "snd_soc_acpi_intel_glk_machines"
 }
@@ -323235,7 +323236,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_hda_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0xa0c9d4fd
+  crc: 0xeac7d013
   type_id: 0x7caa7325
   full_name: "snd_soc_acpi_intel_hda_machines"
 }
@@ -323244,7 +323245,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_icl_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0x877d1977
+  crc: 0xc8bbd036
   type_id: 0x9c4e20dc
   full_name: "snd_soc_acpi_intel_icl_machines"
 }
@@ -323253,7 +323254,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_icl_sdw_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0x877d1977
+  crc: 0xc8bbd036
   type_id: 0x9c4e20dc
   full_name: "snd_soc_acpi_intel_icl_sdw_machines"
 }
@@ -323262,7 +323263,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_jsl_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0x98a2b746
+  crc: 0x33707807
   type_id: 0x67e91768
   full_name: "snd_soc_acpi_intel_jsl_machines"
 }
@@ -323271,7 +323272,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_kbl_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0x8b78d183
+  crc: 0xcff6fb35
   type_id: 0x562e1f23
   full_name: "snd_soc_acpi_intel_kbl_machines"
 }
@@ -323280,7 +323281,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_lnl_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0xb313b238
+  crc: 0x16415321
   type_id: 0xa5cad54c
   full_name: "snd_soc_acpi_intel_lnl_machines"
 }
@@ -323289,7 +323290,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_lnl_sdw_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0xed13a55e
+  crc: 0x4bdf878b
   type_id: 0x0e3dbb55
   full_name: "snd_soc_acpi_intel_lnl_sdw_machines"
 }
@@ -323298,7 +323299,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_mtl_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0x98a2b746
+  crc: 0x33707807
   type_id: 0x67e91768
   full_name: "snd_soc_acpi_intel_mtl_machines"
 }
@@ -323307,7 +323308,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_mtl_sdw_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0x47d1f050
+  crc: 0x25a12c13
   type_id: 0xf47040ea
   full_name: "snd_soc_acpi_intel_mtl_sdw_machines"
 }
@@ -323316,7 +323317,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_ptl_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0x9a115df1
+  crc: 0xd6902fd5
   type_id: 0xb1a2606e
   full_name: "snd_soc_acpi_intel_ptl_machines"
 }
@@ -323325,7 +323326,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_ptl_sdw_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0xe3a5871d
+  crc: 0xa972fb5a
   type_id: 0xfe75526d
   full_name: "snd_soc_acpi_intel_ptl_sdw_machines"
 }
@@ -323334,7 +323335,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_rpl_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0x96149505
+  crc: 0xd1dd04d6
   type_id: 0xd8fed48e
   full_name: "snd_soc_acpi_intel_rpl_machines"
 }
@@ -323343,7 +323344,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_rpl_sdw_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0x8b78d183
+  crc: 0xcff6fb35
   type_id: 0x562e1f23
   full_name: "snd_soc_acpi_intel_rpl_sdw_machines"
 }
@@ -323352,7 +323353,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_skl_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0x877d1977
+  crc: 0xc8bbd036
   type_id: 0x9c4e20dc
   full_name: "snd_soc_acpi_intel_skl_machines"
 }
@@ -323361,7 +323362,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_tgl_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0x877d1977
+  crc: 0xc8bbd036
   type_id: 0x9c4e20dc
   full_name: "snd_soc_acpi_intel_tgl_machines"
 }
@@ -323370,7 +323371,7 @@ elf_symbol {
   name: "snd_soc_acpi_intel_tgl_sdw_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0xbf167acc
+  crc: 0x110c7822
   type_id: 0x5c30f157
   full_name: "snd_soc_acpi_intel_tgl_sdw_machines"
 }
@@ -323379,7 +323380,7 @@ elf_symbol {
   name: "snd_soc_acpi_sdw_link_slaves_found"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x31a73b10
+  crc: 0x39c0259a
   type_id: 0xfec9ad60
   full_name: "snd_soc_acpi_sdw_link_slaves_found"
 }
