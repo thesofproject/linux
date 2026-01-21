@@ -1150,13 +1150,13 @@ static void *hyp_mc_alloc_gfp_fn(void *flags, unsigned long order)
 	return (void *)__get_free_pages(*(gfp_t *)flags, order);
 }
 
-void free_hyp_memcache(struct kvm_hyp_memcache *mc)
+unsigned long free_hyp_memcache(struct kvm_hyp_memcache *mc)
 {
 	if (!is_protected_kvm_enabled())
-		return;
+		return 0;
 
 	kfree(mc->mapping);
-	__free_hyp_memcache(mc, hyp_mc_free_fn, kvm_host_va, mc);
+	return __free_hyp_memcache(mc, hyp_mc_free_fn, kvm_host_va, mc);
 }
 
 int topup_hyp_memcache(struct kvm_hyp_memcache *mc, unsigned long min_pages,
