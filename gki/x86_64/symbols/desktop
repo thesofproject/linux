@@ -400,9 +400,14 @@
   debugfs_create_symlink
   debugfs_create_u32
   debugfs_create_u8
+  debugfs_create_ulong
+  debugfs_create_x16
   debugfs_create_x32
+  debugfs_create_x64
+  debugfs_enter_cancellation
   debugfs_file_get
   debugfs_file_put
+  debugfs_leave_cancellation
   debugfs_lookup
   debugfs_lookup_and_remove
   debugfs_remove
@@ -1319,6 +1324,7 @@
   hdmi_spd_infoframe_check
   hdmi_spd_infoframe_init
   hdmi_vendor_infoframe_check
+  hex2bin
   hex_asc_upper
   hex_dump_to_buffer
   hid_add_device
@@ -1718,6 +1724,7 @@
   lookup_user_key
   loops_per_jiffy
   lpit_read_residency_count_address
+  mac_pton
   macsec_pn_wrapped
   make_bad_inode
   mark_buffer_dirty
@@ -2525,11 +2532,13 @@
   seq_escape_mem
   seq_lseek
   seq_open
+  __seq_open_private
   seq_printf
   seq_putc
   __seq_puts
   seq_read
   seq_release
+  seq_release_private
   seq_write
   serial8250_clear_and_reinit_fifos
   serial8250_do_pm
@@ -3035,6 +3044,7 @@
   timer_delete
   timer_delete_sync
   timer_init_key
+  timer_shutdown
   timer_shutdown_sync
   to_software_node
   touch_atime
@@ -3504,6 +3514,7 @@
   vm_insert_page
   vm_map_ram
   vm_unmap_ram
+  vscnprintf
   vsnprintf
   vsprintf
   vunmap
