@@ -110,7 +110,7 @@ static inline void *pop_hyp_memcache(struct kvm_hyp_memcache *mc,
 				     void *(*to_va)(phys_addr_t phys),
 				     unsigned long *order)
 {
-	phys_addr_t *p = to_va(mc->head & PAGE_MASK & PAGE_MASK);
+	phys_addr_t *p = to_va(mc->head & PAGE_MASK);
 
 	if (!mc->nr_pages)
 		return NULL;
