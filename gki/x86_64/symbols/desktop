@@ -395,6 +395,7 @@
   debugfs_create_devm_seqfile
   debugfs_create_dir
   debugfs_create_file_full
+  debugfs_create_file_short
   debugfs_create_file_unsafe
   debugfs_create_str
   debugfs_create_symlink
@@ -1662,6 +1663,7 @@
   kstrtou8
   kstrtouint
   kstrtouint_from_user
+  kstrtoul_from_user
   kstrtoull
   kstrtoull_from_user
   kthread_create_on_node
@@ -2770,6 +2772,7 @@
   snd_soc_card_jack_new
   snd_soc_card_jack_new_pins
   snd_soc_component_disable_pin
+  snd_soc_component_enable_pin
   snd_soc_component_force_enable_pin
   snd_soc_component_get_kcontrol
   snd_soc_component_initialize

@@ -20744,6 +20744,11 @@ pointer_reference {
   pointee_type_id: 0xe28bb7e5
 }
 pointer_reference {
+  id: 0x323335fd
+  kind: POINTER
+  pointee_type_id: 0xe28c316a
+}
+pointer_reference {
   id: 0x32343a4a
   kind: POINTER
   pointee_type_id: 0xe2900fb4
@@ -30647,6 +30652,11 @@ qualified {
   id: 0xe28bb7e5
   qualifier: CONST
   qualified_type_id: 0xfa69691f
+}
+qualified {
+  id: 0xe28c316a
+  qualifier: CONST
+  qualified_type_id: 0xfa777322
 }
 qualified {
   id: 0xe2900fb4
@@ -145712,6 +145722,11 @@ member {
   offset: 64
 }
 member {
+  id: 0x485376a0
+  name: "read"
+  type_id: 0x0e2924a0
+}
+member {
   id: 0x48537e69
   name: "read"
   type_id: 0x0e2924a0
@@ -188903,6 +188918,12 @@ member {
   offset: 192
 }
 member {
+  id: 0x340ec3a4
+  name: "write"
+  type_id: 0x0e13b7f3
+  offset: 64
+}
+member {
   id: 0x340ec7ee
   name: "write"
   type_id: 0x0e13b7f3
@@ -205605,6 +205626,17 @@ struct_union {
     member_id: 0x7c00ef52
     member_id: 0x172de485
     member_id: 0x6e17e060
+  }
+}
+struct_union {
+  id: 0xfa777322
+  kind: STRUCT
+  name: "debugfs_short_fops"
+  definition {
+    bytesize: 24
+    member_id: 0x485376a0
+    member_id: 0x340ec3a4
+    member_id: 0x8386010f
   }
 }
 struct_union {
@@ -276775,6 +276807,16 @@ function {
   parameter_id: 0x36d130d1
 }
 function {
+  id: 0x83b87e8e
+  return_type_id: 0x120540d1
+  parameter_id: 0x3e10b518
+  parameter_id: 0x1253769c
+  parameter_id: 0x120540d1
+  parameter_id: 0x18bd6530
+  parameter_id: 0x391f15ea
+  parameter_id: 0x323335fd
+}
+function {
   id: 0x83b87e9d
   return_type_id: 0x120540d1
   parameter_id: 0x3e10b518
@@ -279371,6 +279413,14 @@ function {
   parameter_id: 0xf435685e
   parameter_id: 0x4585663f
   parameter_id: 0x13580d6c
+}
+function {
+  id: 0x91c563a4
+  return_type_id: 0x6720d32f
+  parameter_id: 0x3e10b518
+  parameter_id: 0xf435685e
+  parameter_id: 0x4585663f
+  parameter_id: 0x064d6086
 }
 function {
   id: 0x91c5850e
@@ -303062,6 +303112,15 @@ elf_symbol {
   full_name: "debugfs_create_file_full"
 }
 elf_symbol {
+  id: 0xf62cb873
+  name: "debugfs_create_file_short"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xa71f8836
+  type_id: 0x83b87e8e
+  full_name: "debugfs_create_file_short"
+}
+elf_symbol {
   id: 0xdd8fe9d8
   name: "debugfs_create_file_unsafe"
   is_defined: true
@@ -313965,6 +314024,15 @@ elf_symbol {
   full_name: "kstrtouint_from_user"
 }
 elf_symbol {
+  id: 0x35384efd
+  name: "kstrtoul_from_user"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xd600cd6d
+  type_id: 0x91c563a4
+  full_name: "kstrtoul_from_user"
+}
+elf_symbol {
   id: 0x95eb59ef
   name: "kstrtoull"
   is_defined: true
@@ -323493,6 +323561,15 @@ elf_symbol {
   full_name: "snd_soc_component_disable_pin"
 }
 elf_symbol {
+  id: 0x46cb4d6f
+  name: "snd_soc_component_enable_pin"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x5d4f4d4a
+  type_id: 0x99214080
+  full_name: "snd_soc_component_enable_pin"
+}
+elf_symbol {
   id: 0xf7d58a02
   name: "snd_soc_component_force_enable_pin"
   is_defined: true
@@ -331791,6 +331868,7 @@ interface {
   symbol_id: 0xa40a487c
   symbol_id: 0x58e45beb
   symbol_id: 0x497a0ba1
+  symbol_id: 0xf62cb873
   symbol_id: 0xdd8fe9d8
   symbol_id: 0x1b64388e
   symbol_id: 0x5cc133b3
@@ -333000,6 +333078,7 @@ interface {
   symbol_id: 0xa4c342f5
   symbol_id: 0xec1bb297
   symbol_id: 0x0da18d92
+  symbol_id: 0x35384efd
   symbol_id: 0x95eb59ef
   symbol_id: 0xa074b313
   symbol_id: 0x54d851dc
@@ -334059,6 +334138,7 @@ interface {
   symbol_id: 0x80680525
   symbol_id: 0xf84e3b0d
   symbol_id: 0xb63a9550
+  symbol_id: 0x46cb4d6f
   symbol_id: 0xf7d58a02
   symbol_id: 0xf31b7753
   symbol_id: 0x3662091d
