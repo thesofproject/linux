@@ -15,6 +15,7 @@
 
 struct mutex;
 struct mutex_waiter;
+struct rt_mutex;
 struct rt_mutex_base;
 struct rw_semaphore;
 struct percpu_rw_semaphore;
@@ -104,6 +105,30 @@ DECLARE_HOOK(android_vh_freeze_whether_wake,
 	TP_PROTO(struct task_struct *t, bool *wake),
 	TP_ARGS(t, wake));
 
+DECLARE_HOOK(android_vh_mutex_lock_acquired,
+	TP_PROTO(struct mutex *lock),
+	TP_ARGS(lock));
+DECLARE_HOOK(android_vh_mutex_lock_released,
+	TP_PROTO(struct mutex *lock),
+	TP_ARGS(lock));
+DECLARE_HOOK(android_vh_rtmutex_lock_acquired,
+	TP_PROTO(struct rt_mutex *lock),
+	TP_ARGS(lock));
+DECLARE_HOOK(android_vh_rtmutex_lock_released,
+	TP_PROTO(struct rt_mutex *lock),
+	TP_ARGS(lock));
+DECLARE_HOOK(android_vh_rwsem_lock_acquired,
+	TP_PROTO(struct rw_semaphore *sem),
+	TP_ARGS(sem));
+DECLARE_HOOK(android_vh_rwsem_lock_released,
+	TP_PROTO(struct rw_semaphore *sem),
+	TP_ARGS(sem));
+DECLARE_HOOK(android_vh_pcpu_rwsem_lock_acquired,
+	TP_PROTO(struct percpu_rw_semaphore *sem),
+	TP_ARGS(sem));
+DECLARE_HOOK(android_vh_pcpu_rwsem_lock_released,
+	TP_PROTO(struct percpu_rw_semaphore *sem),
+	TP_ARGS(sem));
 #endif /* _TRACE_HOOK_DTASK_H */
 
 /* This part must be outside protection */
