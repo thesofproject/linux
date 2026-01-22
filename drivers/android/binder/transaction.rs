@@ -534,7 +534,7 @@ impl DeliverToRead for Transaction {
             prio_state.state = PriorityState::Abort;
             *self.saved_priority.lock() = prio_state.next;
         } else {
-            let task = &*self.to.task;
+            let task = &*to_thread.task;
             let mut saved_priority = self.saved_priority.lock();
             saved_priority.sched_policy = task.policy();
             saved_priority.prio = task.normal_prio();
