@@ -15,6 +15,7 @@ struct shmem_inode_info;
 struct folio;
 struct folio_batch;
 struct track;
+struct oom_control;
 
 DECLARE_RESTRICTED_HOOK(android_rvh_shmem_get_folio,
 			TP_PROTO(struct shmem_inode_info *info, struct folio **folio, int order),
@@ -274,6 +275,9 @@ DECLARE_HOOK(android_vh_customize_alloc_gfp,
 DECLARE_HOOK(android_vh_init_adjust_zone_wmark,
 	TP_PROTO(struct zone *zone, u64 interval),
 	TP_ARGS(zone, interval));
+DECLARE_HOOK(android_vh_oom_evaluate_task_bypass,
+	TP_PROTO(struct task_struct *task, struct oom_control *oc, bool *bypass),
+	TP_ARGS(task, oc, bypass));
 DECLARE_HOOK(android_vh_folio_add_lru_folio_activate,
 	TP_PROTO(struct folio *folio, bool *bypass),
 	TP_ARGS(folio, bypass));
