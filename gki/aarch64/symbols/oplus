@@ -82,6 +82,7 @@
   mem_cgroup_update_lru_size
   memory_cgrp_subsys
   memory_cgrp_subsys_enabled_key
+  cgroup_add_dfl_cftypes
   mipi_dsi_generic_write
   mmc_wait_for_cmd
   mntget

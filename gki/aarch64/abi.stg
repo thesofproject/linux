@@ -348120,6 +348120,12 @@ function {
   parameter_id: 0x295c7202
 }
 function {
+  id: 0x9f4f3809
+  return_type_id: 0x6720d32f
+  parameter_id: 0x0a85fcb6
+  parameter_id: 0x1ba902d8
+}
+function {
   id: 0x9f5327f4
   return_type_id: 0x6720d32f
   parameter_id: 0x0b4f136e
@@ -368549,6 +368555,15 @@ elf_symbol {
   crc: 0x0f560bb2
   type_id: 0x1e99dfd1
   full_name: "cec_unregister_adapter"
+}
+elf_symbol {
+  id: 0x4d06ba53
+  name: "cgroup_add_dfl_cftypes"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x183c0826
+  type_id: 0x9f4f3809
+  full_name: "cgroup_add_dfl_cftypes"
 }
 elf_symbol {
   id: 0x4ce62869
@@ -419125,6 +419140,7 @@ interface {
   symbol_id: 0xc4e53e95
   symbol_id: 0xba1a33c8
   symbol_id: 0xe2dc88d9
+  symbol_id: 0x4d06ba53
   symbol_id: 0x4ce62869
   symbol_id: 0x6d77f512
   symbol_id: 0xb3cbf3c8
