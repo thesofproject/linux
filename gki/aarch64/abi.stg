@@ -317349,6 +317349,12 @@ function {
   parameter_id: 0x0f626ee5
 }
 function {
+  id: 0x17267b6f
+  return_type_id: 0xd5cc9c9a
+  parameter_id: 0x0cbf60eb
+  parameter_id: 0x3e10b518
+}
+function {
   id: 0x1726cb6c
   return_type_id: 0x48b5725f
   parameter_id: 0x1f73dead
@@ -330473,6 +330479,12 @@ function {
   parameter_id: 0x4585663f
   parameter_id: 0x4585663f
   parameter_id: 0x03ecaf94
+}
+function {
+  id: 0x902f9013
+  return_type_id: 0x6720d32f
+  parameter_id: 0x30cfc1c2
+  parameter_id: 0x6720d32f
 }
 function {
   id: 0x90306f4f
@@ -358709,6 +358721,13 @@ function {
   parameter_id: 0x11b57133
   parameter_id: 0x6d7f5ff6
   parameter_id: 0x6d7f5ff6
+}
+function {
+  id: 0xfb68644e
+  return_type_id: 0x6d7f5ff6
+  parameter_id: 0x172847a8
+  parameter_id: 0x07f9a52e
+  parameter_id: 0x6720d32f
 }
 function {
   id: 0xfb6fdb6d
@@ -399423,6 +399442,33 @@ elf_symbol {
   full_name: "mempool_init_noprof"
 }
 elf_symbol {
+  id: 0xe2946e5d
+  name: "mempool_kfree"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x5d728774
+  type_id: 0x16d5fd4b
+  full_name: "mempool_kfree"
+}
+elf_symbol {
+  id: 0xf946ac86
+  name: "mempool_kmalloc"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xdb3d8074
+  type_id: 0x6a9df39e
+  full_name: "mempool_kmalloc"
+}
+elf_symbol {
+  id: 0x9a28516c
+  name: "mempool_resize"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x36f6468c
+  type_id: 0x902f9013
+  full_name: "mempool_resize"
+}
+elf_symbol {
   id: 0x7ad45055
   name: "memremap"
   is_defined: true
@@ -407606,6 +407652,15 @@ elf_symbol {
   full_name: "prepare_to_wait_event"
 }
 elf_symbol {
+  id: 0xe8fde451
+  name: "prepare_to_wait_exclusive"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x86f8c6e3
+  type_id: 0xfb68644e
+  full_name: "prepare_to_wait_exclusive"
+}
+elf_symbol {
   id: 0xda3d90c9
   name: "print_hex_dump"
   is_defined: true
@@ -408965,6 +409020,15 @@ elf_symbol {
   crc: 0x81d09d89
   type_id: 0xb8307855
   full_name: "read_cache_page"
+}
+elf_symbol {
+  id: 0x94f761df
+  name: "read_comp_algo_dictionary"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x6c1ad8b0
+  type_id: 0x17267b6f
+  full_name: "read_comp_algo_dictionary"
 }
 elf_symbol {
   id: 0x46082c90
@@ -431188,6 +431252,9 @@ interface {
   symbol_id: 0xfa3d486a
   symbol_id: 0xfbb56638
   symbol_id: 0x0d8ea6e6
+  symbol_id: 0xe2946e5d
+  symbol_id: 0xf946ac86
+  symbol_id: 0x9a28516c
   symbol_id: 0x7ad45055
   symbol_id: 0x67a278cb
   symbol_id: 0xd1412061
@@ -432097,6 +432164,7 @@ interface {
   symbol_id: 0x80c0972e
   symbol_id: 0x49317a7a
   symbol_id: 0xd780999c
+  symbol_id: 0xe8fde451
   symbol_id: 0xda3d90c9
   symbol_id: 0x85643cba
   symbol_id: 0xdb24fd2f
@@ -432248,6 +432316,7 @@ interface {
   symbol_id: 0x85c7decb
   symbol_id: 0x87a9e1a0
   symbol_id: 0x5b227eda
+  symbol_id: 0x94f761df
   symbol_id: 0x46082c90
   symbol_id: 0x590d247f
   symbol_id: 0x91579542
