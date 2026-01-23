@@ -316,6 +316,17 @@ config CROS_TYPEC_SWITCH
 	  To compile this driver as a module, choose M here: the module will be
 	  called cros_typec_switch.
 
+config CROS_EC_USB
+	tristate "ChromeOS Embedded Controller (USB)"
+	depends on CROS_EC && USB
+	help
+	  If you say Y here, you get support for talking to the ChromeOS EC
+	  through a USB. The driver uses vendor defined interface and is capable
+	  of signaling events from EC.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called cros_ec_usb.
+
 source "drivers/platform/chrome/wilco_ec/Kconfig"
 
 # Kunit test cases
