@@ -2318,9 +2318,12 @@
   _raw_write_unlock_irqrestore
   rb_erase
   __rb_erase_color
+  rb_first_postorder
   __rb_insert_augmented
   rb_insert_color
+  rb_last
   rb_next
+  rb_next_postorder
   rb_prev
   rcu_barrier
   __rcu_read_lock
@@ -2887,6 +2890,7 @@
   sock_release
   sock_unregister
   sock_wake_async
+  sof_sdw_get_tplg_files
   softnet_data
   software_node_register
   software_node_unregister
