@@ -1,5 +1,9 @@
   netdev_get_name
   tcp_send_active_reset
+  __traceiter_android_vh_fuse_request_end
+  __traceiter_android_vh_fuse_request_send
+  __tracepoint_android_vh_fuse_request_end
+  __tracepoint_android_vh_fuse_request_send
   __traceiter_android_vh_inet_create
   __tracepoint_android_vh_inet_create
   __traceiter_android_vh_inet_csk_clone_lock
