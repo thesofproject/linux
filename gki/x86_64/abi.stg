@@ -37521,9 +37521,9 @@ member {
   offset: 320
 }
 member {
-  id: 0x3f6be9c6
+  id: 0x3f6be44a
   type_id: 0x7281f2df
-  offset: 2368
+  offset: 2496
 }
 member {
   id: 0x3f715122
@@ -42070,22 +42070,22 @@ member {
   offset: 10368
 }
 member {
-  id: 0xaa638893
+  id: 0xaa6383e3
   name: "alb_count"
   type_id: 0x4585663f
-  offset: 1888
+  offset: 2016
 }
 member {
-  id: 0x451d8329
+  id: 0x451d8575
   name: "alb_failed"
   type_id: 0x4585663f
-  offset: 1920
+  offset: 2048
 }
 member {
-  id: 0x336c4921
+  id: 0x336c4916
   name: "alb_pushed"
   type_id: 0x4585663f
-  offset: 1952
+  offset: 2080
 }
 member {
   id: 0x8778e723
@@ -103641,10 +103641,10 @@ member {
   offset: 9400
 }
 member {
-  id: 0xbbca5df7
+  id: 0xbbca5fff
   name: "last_decay_max_lb_cost"
   type_id: 0x33756485
-  offset: 768
+  offset: 896
 }
 member {
   id: 0x283a5c06
@@ -104227,70 +104227,70 @@ member {
   offset: 640
 }
 member {
-  id: 0x5af1134d
+  id: 0x5af11a8e
   name: "lb_balanced"
   type_id: 0x03a4acbb
-  offset: 1024
+  offset: 1152
 }
 member {
-  id: 0x5842eec7
+  id: 0x5842e58e
   name: "lb_count"
   type_id: 0x03a4acbb
-  offset: 832
+  offset: 960
 }
 member {
-  id: 0xa91b8531
+  id: 0xa91b8b82
   name: "lb_failed"
   type_id: 0x03a4acbb
-  offset: 928
+  offset: 1056
 }
 member {
-  id: 0xb46d574b
+  id: 0xb46d5d1b
   name: "lb_gained"
   type_id: 0x03a4acbb
-  offset: 1504
+  offset: 1632
 }
 member {
-  id: 0x772bd3d8
+  id: 0x772bdd45
   name: "lb_hot_gained"
   type_id: 0x03a4acbb
-  offset: 1600
+  offset: 1728
 }
 member {
-  id: 0x96466f28
+  id: 0x964668ae
   name: "lb_imbalance_load"
   type_id: 0x03a4acbb
-  offset: 1120
+  offset: 1248
 }
 member {
-  id: 0x79cd56d6
+  id: 0x79cd5ec2
   name: "lb_imbalance_misfit"
   type_id: 0x03a4acbb
-  offset: 1408
+  offset: 1536
 }
 member {
-  id: 0xd242e59a
+  id: 0xd242eecd
   name: "lb_imbalance_task"
   type_id: 0x03a4acbb
-  offset: 1312
+  offset: 1440
 }
 member {
-  id: 0x526f3f6f
+  id: 0x526f3728
   name: "lb_imbalance_util"
   type_id: 0x03a4acbb
-  offset: 1216
+  offset: 1344
 }
 member {
-  id: 0xe5e36548
+  id: 0xe5e362a3
   name: "lb_nobusyg"
   type_id: 0x03a4acbb
-  offset: 1696
+  offset: 1824
 }
 member {
-  id: 0x7da8b947
+  id: 0x7da8beea
   name: "lb_nobusyq"
   type_id: 0x03a4acbb
-  offset: 1792
+  offset: 1920
 }
 member {
   id: 0x58753a52
@@ -112087,10 +112087,10 @@ member {
   offset: 1824
 }
 member {
-  id: 0x4f305ba6
+  id: 0x4f305a21
   name: "max_newidle_lb_cost"
   type_id: 0x92233392
-  offset: 704
+  offset: 832
 }
 member {
   id: 0x5fc9a7ba
@@ -119562,12 +119562,6 @@ member {
   offset: 192
 }
 member {
-  id: 0x0ddfe8b0
-  name: "name"
-  type_id: 0x0483e6f8
-  offset: 2304
-}
-member {
   id: 0x0ddfe8cc
   name: "name"
   type_id: 0x0483e6f8
@@ -119578,6 +119572,12 @@ member {
   name: "name"
   type_id: 0x0483e6f8
   offset: 1280
+}
+member {
+  id: 0x0ddfea33
+  name: "name"
+  type_id: 0x0483e6f8
+  offset: 2432
 }
 member {
   id: 0x0ddfeb5a
@@ -121668,6 +121668,24 @@ member {
   name: "new_value"
   type_id: 0x097a80cb
   offset: 448
+}
+member {
+  id: 0x1b0c3564
+  name: "newidle_call"
+  type_id: 0x4585663f
+  offset: 704
+}
+member {
+  id: 0xcc1f5f37
+  name: "newidle_ratio"
+  type_id: 0x4585663f
+  offset: 768
+}
+member {
+  id: 0x0b947462
+  name: "newidle_success"
+  type_id: 0x4585663f
+  offset: 736
 }
 member {
   id: 0x4a402e19
@@ -156217,40 +156235,40 @@ member {
   type_id: 0x2ea8d96e
 }
 member {
-  id: 0x479a2166
+  id: 0x479a2fe9
   name: "sbe_balanced"
   type_id: 0x4585663f
-  offset: 2016
+  offset: 2144
 }
 member {
-  id: 0x218b0cbe
+  id: 0x218b0078
   name: "sbe_count"
-  type_id: 0x4585663f
-  offset: 1984
-}
-member {
-  id: 0x5e0ad5cc
-  name: "sbe_pushed"
-  type_id: 0x4585663f
-  offset: 2048
-}
-member {
-  id: 0xceeafbb5
-  name: "sbf_balanced"
   type_id: 0x4585663f
   offset: 2112
 }
 member {
-  id: 0xe679aad2
-  name: "sbf_count"
+  id: 0x5e0ad7d1
+  name: "sbe_pushed"
   type_id: 0x4585663f
-  offset: 2080
+  offset: 2176
 }
 member {
-  id: 0xac447d72
+  id: 0xceeafc04
+  name: "sbf_balanced"
+  type_id: 0x4585663f
+  offset: 2240
+}
+member {
+  id: 0xe679afd2
+  name: "sbf_count"
+  type_id: 0x4585663f
+  offset: 2208
+}
+member {
+  id: 0xac447977
   name: "sbf_pushed"
   type_id: 0x4585663f
-  offset: 2144
+  offset: 2272
 }
 member {
   id: 0x432405fe
@@ -160472,10 +160490,10 @@ member {
   type_id: 0x337e48e0
 }
 member {
-  id: 0x3bacf723
+  id: 0x3bacfa80
   name: "shared"
   type_id: 0x3950568f
-  offset: 2496
+  offset: 2624
 }
 member {
   id: 0x3bb332ff
@@ -164187,10 +164205,10 @@ member {
   offset: 128
 }
 member {
-  id: 0x97b2d8ce
+  id: 0x97b2d2a9
   name: "span"
   type_id: 0xc8e4d7d1
-  offset: 2624
+  offset: 2752
 }
 member {
   id: 0x97e3f72a
@@ -164205,10 +164223,10 @@ member {
   offset: 1472
 }
 member {
-  id: 0xaaa9688e
+  id: 0xaaa96c12
   name: "span_weight"
   type_id: 0x4585663f
-  offset: 2560
+  offset: 2688
 }
 member {
   id: 0x80fef72b
@@ -176862,16 +176880,16 @@ member {
   offset: 33408
 }
 member {
-  id: 0xceae464b
+  id: 0xceae4da4
   name: "ttwu_move_affine"
   type_id: 0x4585663f
-  offset: 2208
+  offset: 2336
 }
 member {
-  id: 0x6898f15d
+  id: 0x6898f1db
   name: "ttwu_move_balance"
   type_id: 0x4585663f
-  offset: 2240
+  offset: 2368
 }
 member {
   id: 0xb7ade5b8
@@ -176880,10 +176898,10 @@ member {
   offset: 576
 }
 member {
-  id: 0x156feee9
+  id: 0x156fec7d
   name: "ttwu_wake_remote"
   type_id: 0x4585663f
-  offset: 2176
+  offset: 2304
 }
 member {
   id: 0xa34e45b9
@@ -232111,7 +232129,7 @@ struct_union {
   kind: STRUCT
   name: "sched_domain"
   definition {
-    bytesize: 328
+    bytesize: 344
     member_id: 0x72355923
     member_id: 0x38ccdb4a
     member_id: 0x93302fc5
@@ -232127,36 +232145,39 @@ struct_union {
     member_id: 0x9ac11ab7
     member_id: 0xab9a8761
     member_id: 0xbbabfea2
-    member_id: 0x4f305ba6
-    member_id: 0xbbca5df7
-    member_id: 0x5842eec7
-    member_id: 0xa91b8531
-    member_id: 0x5af1134d
-    member_id: 0x96466f28
-    member_id: 0x526f3f6f
-    member_id: 0xd242e59a
-    member_id: 0x79cd56d6
-    member_id: 0xb46d574b
-    member_id: 0x772bd3d8
-    member_id: 0xe5e36548
-    member_id: 0x7da8b947
-    member_id: 0xaa638893
-    member_id: 0x451d8329
-    member_id: 0x336c4921
-    member_id: 0x218b0cbe
-    member_id: 0x479a2166
-    member_id: 0x5e0ad5cc
-    member_id: 0xe679aad2
-    member_id: 0xceeafbb5
-    member_id: 0xac447d72
-    member_id: 0x156feee9
-    member_id: 0xceae464b
-    member_id: 0x6898f15d
-    member_id: 0x0ddfe8b0
-    member_id: 0x3f6be9c6
-    member_id: 0x3bacf723
-    member_id: 0xaaa9688e
-    member_id: 0x97b2d8ce
+    member_id: 0x1b0c3564
+    member_id: 0x0b947462
+    member_id: 0xcc1f5f37
+    member_id: 0x4f305a21
+    member_id: 0xbbca5fff
+    member_id: 0x5842e58e
+    member_id: 0xa91b8b82
+    member_id: 0x5af11a8e
+    member_id: 0x964668ae
+    member_id: 0x526f3728
+    member_id: 0xd242eecd
+    member_id: 0x79cd5ec2
+    member_id: 0xb46d5d1b
+    member_id: 0x772bdd45
+    member_id: 0xe5e362a3
+    member_id: 0x7da8beea
+    member_id: 0xaa6383e3
+    member_id: 0x451d8575
+    member_id: 0x336c4916
+    member_id: 0x218b0078
+    member_id: 0x479a2fe9
+    member_id: 0x5e0ad7d1
+    member_id: 0xe679afd2
+    member_id: 0xceeafc04
+    member_id: 0xac447977
+    member_id: 0x156fec7d
+    member_id: 0xceae4da4
+    member_id: 0x6898f1db
+    member_id: 0x0ddfea33
+    member_id: 0x3f6be44a
+    member_id: 0x3bacfa80
+    member_id: 0xaaa96c12
+    member_id: 0x97b2d2a9
   }
 }
 struct_union {
@@ -298774,7 +298795,7 @@ elf_symbol {
   name: "__traceiter_sched_set_state_tp"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xe1a3dfcf
+  crc: 0x0ca0bec4
   type_id: 0x9bc214f0
   full_name: "__traceiter_sched_set_state_tp"
 }
@@ -298855,7 +298876,7 @@ elf_symbol {
   name: "__tracepoint_sched_set_state_tp"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0x8bc85d99
+  crc: 0x754df49c
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_sched_set_state_tp"
 }
@@ -320737,7 +320758,7 @@ elf_symbol {
   name: "sched_set_fifo"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x67258cff
+  crc: 0x0e4c7249
   type_id: 0x17de3be6
   full_name: "sched_set_fifo"
 }
@@ -320746,7 +320767,7 @@ elf_symbol {
   name: "sched_set_fifo_low"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x67258cff
+  crc: 0x0e4c7249
   type_id: 0x17de3be6
   full_name: "sched_set_fifo_low"
 }
@@ -330412,7 +330433,7 @@ elf_symbol {
   name: "wake_up_process"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xfb495a42
+  crc: 0xb3393369
   type_id: 0x9ac6895a
   full_name: "wake_up_process"
 }
