@@ -21164,6 +21164,11 @@ pointer_reference {
   pointee_type_id: 0xe6f5e267
 }
 pointer_reference {
+  id: 0x332d6166
+  kind: POINTER
+  pointee_type_id: 0xe6f56304
+}
+pointer_reference {
   id: 0x332e04da
   kind: POINTER
   pointee_type_id: 0xe6f8f5f5
@@ -30857,6 +30862,11 @@ qualified {
   id: 0xe6b1c981
   qualifier: CONST
   qualified_type_id: 0xea80908f
+}
+qualified {
+  id: 0xe6f56304
+  qualifier: CONST
+  qualified_type_id: 0xeb923a9b
 }
 qualified {
   id: 0xe6f8f5f5
@@ -282080,6 +282090,11 @@ function {
   parameter_id: 0x249959de
 }
 function {
+  id: 0x94a75f35
+  return_type_id: 0x0611572c
+  parameter_id: 0x332d6166
+}
+function {
   id: 0x94ae1223
   return_type_id: 0x6720d32f
   parameter_id: 0x24bbc433
@@ -319674,6 +319689,15 @@ elf_symbol {
   full_name: "rb_erase"
 }
 elf_symbol {
+  id: 0x49a7f238
+  name: "rb_first_postorder"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xb446c50a
+  type_id: 0x94a75f35
+  full_name: "rb_first_postorder"
+}
+elf_symbol {
   id: 0x51af4178
   name: "rb_insert_color"
   is_defined: true
@@ -319683,6 +319707,15 @@ elf_symbol {
   full_name: "rb_insert_color"
 }
 elf_symbol {
+  id: 0xcdedac88
+  name: "rb_last"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xb446c50a
+  type_id: 0x94a75f35
+  full_name: "rb_last"
+}
+elf_symbol {
   id: 0xceaba6d1
   name: "rb_next"
   is_defined: true
@@ -319690,6 +319723,15 @@ elf_symbol {
   crc: 0xc97fce5f
   type_id: 0x97c10137
   full_name: "rb_next"
+}
+elf_symbol {
+  id: 0x829cc511
+  name: "rb_next_postorder"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xc97fce5f
+  type_id: 0x97c10137
+  full_name: "rb_next_postorder"
 }
 elf_symbol {
   id: 0xd8d641e9
@@ -324585,6 +324627,15 @@ elf_symbol {
   crc: 0x084d1511
   type_id: 0x3d20d65e
   full_name: "sockfd_lookup"
+}
+elf_symbol {
+  id: 0x4867e7b8
+  name: "sof_sdw_get_tplg_files"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x5ce12792
+  type_id: 0x9b2e79ed
+  full_name: "sof_sdw_get_tplg_files"
 }
 elf_symbol {
   id: 0x85476106
@@ -333707,8 +333758,11 @@ interface {
   symbol_id: 0xd1f648be
   symbol_id: 0x9653ad6f
   symbol_id: 0x3cb678c1
+  symbol_id: 0x49a7f238
   symbol_id: 0x51af4178
+  symbol_id: 0xcdedac88
   symbol_id: 0xceaba6d1
+  symbol_id: 0x829cc511
   symbol_id: 0xd8d641e9
   symbol_id: 0xdbf9c67a
   symbol_id: 0x854212b1
@@ -334252,6 +334306,7 @@ interface {
   symbol_id: 0x39362be4
   symbol_id: 0xeab36c96
   symbol_id: 0xe86ce747
+  symbol_id: 0x4867e7b8
   symbol_id: 0x85476106
   symbol_id: 0x164a9978
   symbol_id: 0x7e8d43f0
