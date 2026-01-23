@@ -4476,6 +4476,17 @@
 			nosmt=force: Force disable SMT, cannot be undone
 				     via the sysfs control file.
 
+
+	nosocid		[ARM, ARM64] Disable SMCCC SoC ID driver
+			Disables initialization of the ARM SMCCC SoC ID driver
+			(CONFIG_ARM_SMCCC_SOC_ID) at boot. When specified, the
+			driver does not register the SoC device and related sysfs
+			entries under /sys/bus/soc/devices/soc0/*.
+			Useful for images that include the driver in a generic
+			build (e.g., GKI) but wish to suppress SoC ID exposure
+			at runtime without recompiling.
+			Format: "nosocid" (no value).
+
 	nosoftlockup	[KNL] Disable the soft-lockup detector.
 
 	nospec_store_bypass_disable
