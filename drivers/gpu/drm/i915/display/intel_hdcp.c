@@ -77,7 +77,6 @@ static int intel_conn_to_vcpi(struct intel_atomic_state *state,
 	struct drm_dp_mst_topology_mgr *mgr;
 	struct drm_dp_mst_atomic_payload *payload;
 	struct drm_dp_mst_topology_state *mst_state;
-	int vcpi = 0;
 
 	/* For HDMI this is forced to be 0x0. For DP SST also this is 0x0. */
 	if (!connector->mst.port)
@@ -88,15 +87,9 @@ static int intel_conn_to_vcpi(struct intel_atomic_state *state,
 	mst_state = to_drm_dp_mst_topology_state(mgr->base.state);
 	payload = drm_atomic_get_mst_payload_state(mst_state, connector->mst.port);
 	if (drm_WARN_ON(mgr->dev, !payload))
-		goto out;
+		return 0;
 
-	vcpi = payload->vcpi;
-	if (drm_WARN_ON(mgr->dev, vcpi < 0)) {
-		vcpi = 0;
-		goto out;
-	}
-out:
-	return vcpi;
+	return payload->vcpi;
 }
 
 /*
