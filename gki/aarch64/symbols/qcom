@@ -1044,6 +1044,7 @@
   eventfd_ctx_remove_wait_queue
   eventfd_signal_mask
   event_triggers_call
+  ext_sched_class
   extcon_get_edev_by_phandle
   extcon_get_edev_name
   extcon_get_extcon_dev
@@ -1300,6 +1301,7 @@
   __hw_addr_init
   __hw_addr_sync
   __hw_addr_unsync
+  hw_pressure
   hwrng_register
   hwrng_unregister
   hwspin_lock_bust
@@ -2087,6 +2089,7 @@
   oops_in_progress
   open_candev
   out_of_line_wait_on_bit
+  out_of_line_wait_on_bit_lock
   out_of_line_wait_on_bit_timeout
   overflowgid
   overflowuid
