@@ -336,7 +336,7 @@ static int pkvm_vm_finalize(int vm_handle)
 	struct kvm *kvm, *shared_kvm;
 	struct pkvm_vm *pkvm_vm;
 	u64 pvmfw_load_addr;
-	int ret = 0;
+	int ret = 0, i;
 
 	pkvm_vm = pkvm_get_vm(vm_handle);
 	if (!pkvm_vm)
@@ -367,6 +367,20 @@ static int pkvm_vm_finalize(int vm_handle)
 	}
 
 	kvm->arch.bsp_vcpu_id = shared_kvm->arch.bsp_vcpu_id;
+
+	for (i = 0; i < kvm->created_vcpus; i++) {
+		struct kvm_vcpu *vcpu = &pkvm_vm->vcpus[i]->vcpu;
+
+		if (vcpu->vcpu_id == kvm->arch.bsp_vcpu_id) {
+			/*
+			 * Make sure pvmfw_load_addr and bsp_vcpu_id are updated before
+			 * updating mp_state, i.e. before allowing the primary vCPU
+			 * to run. Pairs with smp_load_acquire() in pkvm_vcpu_run().
+			 */
+			smp_store_release(&vcpu->arch.mp_state, KVM_MP_STATE_RUNNABLE);
+			break;
+		}
+	}
 
 	kvm->arch.pkvm.finalized = true;
 	shared_kvm->arch.pkvm.finalized = true;
@@ -461,6 +475,7 @@ static int __vcpu_create(struct kvm *kvm, struct kvm_vcpu *vcpu, struct fpstate 
 	vcpu->arch.last_vmentry_cpu = -1;
 	vcpu->arch.regs_avail = ~0;
 	vcpu->arch.regs_dirty = ~0;
+	vcpu->arch.mp_state = KVM_MP_STATE_UNINITIALIZED;
 	vcpu->arch.pat = MSR_IA32_CR_PAT_DEFAULT;
 	if (!pkvm_is_protected_vcpu(vcpu)) {
 		vcpu->arch.mce_banks = kern_pkvm_va(pkvm_vcpu->shared_vcpu->arch.mce_banks);
@@ -1245,6 +1260,12 @@ static int pkvm_load_mmu_pgd(struct kvm_vcpu *vcpu)
 	return 0;
 }
 
+static void pkvm_vcpu_pvmfw_entry_init(struct kvm_vcpu *vcpu)
+{
+	/* pvmfw entry point is at the beginning of the pvmfw image. */
+	kvm_rip_write(vcpu, vcpu->kvm->arch.pkvm.pvmfw_load_addr);
+}
+
 static void update_vcpu_state_from_host(struct kvm_vcpu *vcpu)
 {
 	struct kvm_vcpu *shared_vcpu = to_pkvm_vcpu(vcpu)->shared_vcpu;
@@ -1309,7 +1330,8 @@ static void update_vcpu_state_from_host(struct kvm_vcpu *vcpu)
 		 * If the host VMM boots the pVM directly, without pvmfw,
 		 * let it set the boot entry address.
 		 */
-		if (kvm_register_is_dirty(shared_vcpu, VCPU_REGS_RIP))
+		if (!pkvm_vcpu_is_pvmfw_bsp(vcpu) &&
+		    kvm_register_is_dirty(shared_vcpu, VCPU_REGS_RIP))
 			kvm_rip_write(vcpu, shared_vcpu->arch.regs[VCPU_REGS_RIP]);
 	} else if (unlikely(!kvm_vcpu_has_run(vcpu) && !kvm_vcpu_is_reset_bsp(vcpu))) {
 		/*
@@ -1376,6 +1398,21 @@ static int pkvm_vcpu_run(struct kvm_vcpu *vcpu, bool force_immediate_exit,
 			 unsigned long *reqs_to_host)
 {
 	int ret;
+
+	if (pkvm_is_protected_vcpu(vcpu)) {
+		/*
+		 * Pairs with smp_store_release() in pkvm_vm_finalize() to make sure
+		 * that pvmfw_load_addr and bsp_vcpu_id are read after reading mp_state,
+		 * so they are read with up-to-date values.
+		 */
+		if (smp_load_acquire(&vcpu->arch.mp_state) != KVM_MP_STATE_RUNNABLE)
+			return -EPERM;
+
+		if (unlikely(!kvm_vcpu_has_run(vcpu))) {
+			if (pkvm_vcpu_is_pvmfw_bsp(vcpu))
+				pkvm_vcpu_pvmfw_entry_init(vcpu);
+		}
+	}
 
 	if (unlikely(!kvm_vcpu_has_run(vcpu)))
 		pkvm_load_mmu_pgd(vcpu);

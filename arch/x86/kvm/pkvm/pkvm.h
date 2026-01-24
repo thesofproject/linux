@@ -130,6 +130,16 @@ static inline bool pkvm_has_req_to_host(int req, struct kvm_vcpu *vcpu)
 	return test_bit(req, &to_pkvm_vcpu(vcpu)->reqs_to_host);
 }
 
+static inline bool pkvm_vm_has_pvmfw(struct kvm *kvm)
+{
+	return kvm->arch.pkvm.pvmfw_load_addr != INVALID_GPA;
+}
+
+static inline bool pkvm_vcpu_is_pvmfw_bsp(struct kvm_vcpu *vcpu)
+{
+	return kvm_vcpu_is_reset_bsp(vcpu) && pkvm_vm_has_pvmfw(vcpu->kvm);
+}
+
 struct pkvm_x86_ops {
 	void (*update_vcpu_state_from_host)(struct kvm_vcpu *vcpu);
 	void (*share_vcpu_state_with_host)(struct kvm_vcpu *vcpu);
