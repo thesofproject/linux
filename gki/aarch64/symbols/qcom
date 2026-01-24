@@ -34,6 +34,7 @@
   __amba_driver_register
   amba_driver_unregister
   android_rvh_probe_register
+  anon_inode_create_getfile
   anon_inode_getfile
   arc4_crypt
   arc4_setkey
@@ -2072,6 +2073,7 @@
   of_prop_next_string
   of_prop_next_u32
   of_reserved_mem_device_init_by_idx
+  of_reserved_mem_device_init_by_name
   of_reserved_mem_device_release
   of_reserved_mem_lookup
   of_root
@@ -3734,6 +3736,7 @@
   vm_insert_page
   vm_iomap_memory
   vm_map_pages
+  vm_map_pages_zero
   vm_mmap
   vm_munmap
   vm_node_stat
