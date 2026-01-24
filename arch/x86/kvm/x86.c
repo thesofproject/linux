@@ -13598,6 +13598,7 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
 
 #ifdef CONFIG_PKVM_X86
 	kvm->arch.pkvm.pvmfw_load_addr = INVALID_GPA;
+	mutex_init(&kvm->arch.pkvm.finalized_lock);
 #endif
 
 	INIT_DELAYED_WORK(&kvm->arch.kvmclock_update_work, kvmclock_update_fn);
