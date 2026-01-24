@@ -506,7 +506,7 @@ struct q_inval {
 	pkvm_spinlock_t	q_lock;
 #endif
 	void		*desc;          /* invalidation queue */
-	int             *desc_status;   /* desc status */
+	int             desc_status[QI_LENGTH]; /* desc status */
 	int             free_head;      /* first free entry */
 	int             free_tail;      /* last free entry */
 	int             free_cnt;
