@@ -324,9 +324,13 @@ impl Task {
     pub fn rlimit_nice(&self) -> i32 {
         // SAFETY: By the type invariant, we know that `self.0.get()` is valid, and RLIMIT_NICE
         // is a valid limit type.
-        let prio = unsafe { bindings::task_rlimit(self.0.get(), bindings::RLIMIT_NICE) as i32 };
+        let prio = unsafe { bindings::task_rlimit(self.0.get(), bindings::RLIMIT_NICE) };
+
+        // Clamp out-of-range values (e.g. RLIM_INFINITY)
+        let rlimit = usize::min(prio, 40) as i32;
+
         // Convert rlimit style value [1,40] to nice value [-20, 19].
-        bindings::MAX_NICE as i32 - prio + 1
+        bindings::MAX_NICE as i32 - rlimit + 1
     }
 
     /// Set the scheduling properties for this task without checking whether the task is allowed to
