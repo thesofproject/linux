@@ -4005,7 +4005,6 @@ static void scx_disable_workfn(struct kthread_work *work)
 	default:
 		break;
 	}
-	trace_android_vh_scx_ops_enable_state(SCX_DISABLING);
 
 	/*
 	 * Here, every runnable task is guaranteed to make forward progress and
@@ -4030,6 +4029,7 @@ static void scx_disable_workfn(struct kthread_work *work)
 	 * must be switched out and exited synchronously.
 	 */
 	percpu_down_write(&scx_fork_rwsem);
+	trace_android_vh_scx_ops_enable_state(SCX_DISABLING);
 
 	scx_init_task_enabled = false;
 
@@ -4039,6 +4039,7 @@ static void scx_disable_workfn(struct kthread_work *work)
 		const struct sched_class *new_class = scx_setscheduler_class(p);
 		struct sched_enq_and_set_ctx ctx;
 
+		trace_android_vh_setscheduler_class(&new_class, NULL, p, p->policy, p->prio);
 		if (old_class != new_class && p->se.sched_delayed)
 			dequeue_task(task_rq(p), p, DEQUEUE_SLEEP | DEQUEUE_DELAYED);
 
@@ -4833,6 +4834,7 @@ static int scx_enable(struct sched_ext_ops *ops, struct bpf_link *link)
 		const struct sched_class *new_class = scx_setscheduler_class(p);
 		struct sched_enq_and_set_ctx ctx;
 
+		trace_android_vh_setscheduler_class(&new_class, NULL, p, p->policy, p->prio);
 		if (!tryget_task_struct(p))
 			continue;
 

@@ -31,6 +31,12 @@ DECLARE_HOOK(android_vh_scheduler_tick,
 	TP_PROTO(struct rq *rq),
 	TP_ARGS(rq));
 
+struct sched_class;
+DECLARE_HOOK(android_vh_setscheduler_class,
+	TP_PROTO(const struct sched_class **class, int *should_scx,
+		 struct task_struct *p, int policy, int prio),
+	TP_ARGS(class, should_scx, p, policy, prio));
+
 DECLARE_RESTRICTED_HOOK(android_rvh_enqueue_task,
 	TP_PROTO(struct rq *rq, struct task_struct *p, int flags),
 	TP_ARGS(rq, p, flags), 1);
@@ -358,9 +364,6 @@ DECLARE_HOOK(android_vh_dup_task_struct,
 	TP_ARGS(tsk, orig));
 
 struct affinity_context;
-DECLARE_HOOK(android_vh_task_should_scx,
-	TP_PROTO(int *should_scx, int policy, int prio),
-	TP_ARGS(should_scx, policy, prio));
 DECLARE_HOOK(android_vh_scx_restore_flags,
 	TP_PROTO(const struct sched_class *prev_class,
 		 const struct sched_class *next_class,
