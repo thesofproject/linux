@@ -43,13 +43,13 @@ int __pkvm_enable_event(unsigned short id, bool enable);
 extern struct hyp_printk_fmt __hyp_printk_fmts_start[];
 
 #ifdef MODULE
-#define hyp_printk_fmt_to_id(fmt)					\
-({									\
-	static u8 fmt_id_offset __section(".hyp.printk_fmt_offset") __used;	\
+#define hyp_printk_fmt_to_id(fmt)						\
+({										\
+	static u16 fmt_id_offset __section(".hyp.printk_fmt_offset") __used;	\
 	(struct hyp_printk_fmt *)fmt - __hyp_printk_fmts_start + fmt_id_offset; \
 })
 #else
-static inline u8 hyp_printk_fmt_to_id(const char *fmt)
+static inline u16 hyp_printk_fmt_to_id(const char *fmt)
 {
 	return (struct hyp_printk_fmt *)fmt - __hyp_printk_fmts_start;
 }

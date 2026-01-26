@@ -97,7 +97,7 @@ static int __pkvm_module_host_donate_hyp(u64 pfn, u64 nr_pages)
 	return ___pkvm_host_donate_hyp(pfn, nr_pages, true);
 }
 
-static void tracing_mod_hyp_printk(u8 fmt_id, u64 a, u64 b, u64 c, u64 d)
+static void tracing_mod_hyp_printk(u16 fmt_id, u64 a, u64 b, u64 c, u64 d)
 {
 #ifdef CONFIG_TRACING
 	struct trace_hyp_format___hyp_printk *entry;
