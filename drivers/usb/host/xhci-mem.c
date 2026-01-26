@@ -1934,8 +1934,6 @@ void xhci_mem_cleanup(struct xhci_hcd *xhci)
 	cancel_delayed_work_sync(&xhci->cmd_timer);
 
 	xa_destroy(&xhci->sideband_idr.id_xa);
-	xhci->sideband_idr.id_lim.max = 0;
-	xhci->sideband_idr.id_lim.min = 0;
 
 	for (i = 0; xhci->interrupters && i < xhci->max_interrupters; i++) {
 		if (xhci->interrupters[i]) {
@@ -2421,9 +2419,6 @@ int xhci_mem_init(struct xhci_hcd *xhci, gfp_t flags)
 	xhci_dbg_trace(xhci, trace_xhci_dbg_init, "Starting %s", __func__);
 
 	xa_init_flags(&xhci->sideband_idr.id_xa, XA_FLAGS_ALLOC);
-	/* Hardcode limits for now, use get_ext_property() from xhci-sideband in future */
-	xhci->sideband_idr.id_lim.max = 6;
-	xhci->sideband_idr.id_lim.min = 1;
 
 	xhci_dbg_trace(xhci, trace_xhci_dbg_init, "Allocating internal virtual device array");
 	xhci->devs = kcalloc_node(xhci->max_slots + 1, sizeof(*xhci->devs), flags,

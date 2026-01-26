@@ -30,11 +30,44 @@ sideband_res_id_to_ep_index(struct xhci_sideband *sb, unsigned int res_id)
 	return -ENODEV;
 }
 
+static int
+xhci_sideband_hw_max_resources(struct xhci_hcd *xhci)
+{
+	union xhci_extprop_ctx *ctx;
+	unsigned int res_max;
+	int ret;
+
+	ctx = kzalloc_obj(*ctx, GFP_KERNEL);
+	if (!ctx)
+		return -ENOMEM;
+
+	ret = xhci_get_ext_property(xhci, 0, 0, PROP_ECI_AUDIO,
+				    AUDIO_SUBTYPE_GET_RES, ctx, sizeof(*ctx));
+	if (ret < 0) {
+		kfree(ctx);
+		return ret;
+	}
+
+	res_max = ctx->generic.byte[0];
+	kfree(ctx);
+
+	/* Intel hosts sideband resources are capped at 6 */
+	if (xhci->quirks & XHCI_INTEL_HOST)
+		res_max = min(res_max, 6);
+
+	return res_max;
+}
+
 static bool
 xhci_sideband_hw_capable(struct xhci_hcd *xhci)
 {
 	u16 buf = 0;
+	int res_max;
 	int ret;
+
+	/* fastpath, all checks are done if resource limits are set */
+	if (xhci->sideband_idr.id_lim.max > 0)
+		return true;
 
 	/* xHCI 1.2 and later can support GSC bit in hcc_params2 register */
 	if ((xhci->hci_version < 0x120) || !(xhci->hcc_params2 & HCC2_GSC))
@@ -45,9 +78,16 @@ xhci_sideband_hw_capable(struct xhci_hcd *xhci)
 	 * the command completion event, which is then copied to buf.
 	 */
 	ret = xhci_get_ext_property(xhci, 0, 0, PROP_ECI_ALL, 0, &buf, sizeof(buf));
+	if (ret < 0 || !(buf & PROP_ECI_AUDIO))
+		return false;
 
-	if (ret >= 0 && buf & PROP_ECI_AUDIO)
+	/* check xHC has at least one resource for endpoint sideband use */
+	res_max = xhci_sideband_hw_max_resources(xhci);
+	if (res_max > 0) {
+		xhci->sideband_idr.id_lim.min = 1;
+		xhci->sideband_idr.id_lim.max = res_max;
 		return true;
+	}
 
 	return false;
 }
