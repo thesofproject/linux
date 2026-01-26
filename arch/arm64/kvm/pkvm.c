@@ -1773,9 +1773,7 @@ unsigned long __pkvm_reclaim_hyp_alloc_mgt_id(enum hyp_alloc_mgt_id id, unsigned
 
 		mc.head = res.a1;
 		mc.nr_pages = res.a2;
-
-		reclaimed += mc.nr_pages;
-		free_hyp_memcache(&mc);
+		reclaimed += free_hyp_memcache(&mc);
 	} while (reclaimed < nr_pages);
 
 	return reclaimed;

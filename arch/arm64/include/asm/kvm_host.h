@@ -141,21 +141,24 @@ static inline int __topup_hyp_memcache(struct kvm_hyp_memcache *mc,
 	return 0;
 }
 
-static inline void __free_hyp_memcache(struct kvm_hyp_memcache *mc,
+static inline unsigned long __free_hyp_memcache(struct kvm_hyp_memcache *mc,
 				       void (*free_fn)(void *virt, void *arg, unsigned long order),
 				       void *(*to_va)(phys_addr_t phys),
 				       void *arg)
 {
-	unsigned long order;
+	unsigned long order, nr_pages = 0;
 	void *p;
 
 	while (mc->nr_pages) {
 		p = pop_hyp_memcache(mc, to_va, &order);
 		free_fn(p, arg, order);
+		nr_pages += 1UL << order;
 	}
+
+	return nr_pages;
 }
 
-void free_hyp_memcache(struct kvm_hyp_memcache *mc);
+unsigned long free_hyp_memcache(struct kvm_hyp_memcache *mc);
 int topup_hyp_memcache(struct kvm_hyp_memcache *mc, unsigned long min_pages, unsigned long order);
 int topup_hyp_memcache_gfp(struct kvm_hyp_memcache *mc, unsigned long min_pages,
 			   unsigned long order, gfp_t gfp);
