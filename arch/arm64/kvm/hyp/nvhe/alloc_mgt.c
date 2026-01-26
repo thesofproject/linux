@@ -43,16 +43,19 @@ int hyp_alloc_mgt_reclaimable(void)
 	return reclaimable;
 }
 
-void hyp_alloc_mgt_reclaim(struct kvm_hyp_memcache *host_mc, int target)
+void hyp_alloc_mgt_reclaim(enum hyp_alloc_mgt_id id, struct kvm_hyp_memcache *host_mc, int target)
 {
 	struct hyp_mgt_allocator_ops *ops;
-	int i;
+
+	if (id >= NR_ALLOC_MGT_IDS)
+		return;
+
+	id = array_index_nospec(id, NR_ALLOC_MGT_IDS);
 
 	BUILD_BUG_ON(ARRAY_SIZE(registered_allocators) != NR_ALLOC_MGT_IDS);
-	for (i = 0 ; (i < NR_ALLOC_MGT_IDS) && (host_mc->nr_pages < target) ; ++i) {
-		ops = registered_allocators[i];
-		/* Not fair but OK for now. */
-		if (ops->reclaim)
-			ops->reclaim(host_mc, target);
-	}
+	ops = registered_allocators[id];
+
+	/* Not fair but OK for now. */
+	if (ops->reclaim)
+		ops->reclaim(host_mc, target);
 }

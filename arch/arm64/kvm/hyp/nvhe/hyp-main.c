@@ -1661,13 +1661,14 @@ static void handle___pkvm_hyp_alloc_mgt_reclaimable(struct kvm_cpu_context *host
 
 static void handle___pkvm_hyp_alloc_mgt_reclaim(struct kvm_cpu_context *host_ctxt)
 {
-	DECLARE_REG(int, target, host_ctxt, 1);
+	DECLARE_REG(enum hyp_alloc_mgt_id, id, host_ctxt, 1);
+	DECLARE_REG(int, target, host_ctxt, 2);
 	struct kvm_hyp_memcache mc = {
 		.head		= 0,
 		.nr_pages	= 0,
 	};
 
-	hyp_alloc_mgt_reclaim(&mc, target);
+	hyp_alloc_mgt_reclaim(id, &mc, target);
 
 	cpu_reg(host_ctxt, 1) = mc.head;
 	cpu_reg(host_ctxt, 2) = mc.nr_pages;
