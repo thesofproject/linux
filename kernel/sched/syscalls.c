@@ -713,6 +713,7 @@ change:
 
 	prev_class = p->sched_class;
 	next_class = __setscheduler_class(policy, newprio);
+	trace_android_vh_setscheduler_class(&next_class, NULL, p, policy, newprio);
 
 	if (prev_class != next_class && p->se.sched_delayed)
 		dequeue_task(rq, p, DEQUEUE_SLEEP | DEQUEUE_DELAYED | DEQUEUE_NOCLOCK);
