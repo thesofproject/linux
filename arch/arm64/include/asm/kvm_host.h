@@ -1880,11 +1880,15 @@ static inline long kvm_get_cap_for_kvm_ioctl(unsigned int ioctl, long *ext)
 }
 
 /* Allocator interface IDs. */
-#define HYP_ALLOC_MGT_HEAP_ID          0
-#define HYP_ALLOC_MGT_IOMMU_ID         1
+enum hyp_alloc_mgt_id {
+	__HYP_ALLOC_MGT_HEAP_ID_START__ = 0,
+	HYP_ALLOC_MGT_HEAP_ID = __HYP_ALLOC_MGT_HEAP_ID_START__,
+	HYP_ALLOC_MGT_IOMMU_ID,
+	NR_ALLOC_MGT_IDS
+};
 
 unsigned long __pkvm_reclaim_hyp_alloc_mgt(unsigned long nr_pages);
-int __pkvm_topup_hyp_alloc_mgt_gfp(unsigned long id, unsigned long nr_pages,
+int __pkvm_topup_hyp_alloc_mgt_gfp(enum hyp_alloc_mgt_id id, unsigned long nr_pages,
 				   unsigned long sz_alloc, gfp_t gfp);
 
 #ifndef __KVM_NVHE_HYPERVISOR__
