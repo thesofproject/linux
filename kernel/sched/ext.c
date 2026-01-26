@@ -17,7 +17,8 @@
  * are used as temporary markers to indicate that the dereferences need to be
  * updated to point to the associated scheduler instances rather than scx_root.
  */
-static struct scx_sched __rcu *scx_root;
+struct scx_sched __rcu *scx_root;
+EXPORT_SYMBOL_GPL(scx_root);
 
 /*
  * During exit, a task may schedule after losing its PIDs. When disabling the
@@ -208,10 +209,11 @@ static struct scx_dispatch_q *find_global_dsq(struct scx_sched *sch,
 	return sch->global_dsqs[cpu_to_node(task_cpu(p))];
 }
 
-static struct scx_dispatch_q *find_user_dsq(struct scx_sched *sch, u64 dsq_id)
+struct scx_dispatch_q *find_user_dsq(struct scx_sched *sch, u64 dsq_id)
 {
 	return rhashtable_lookup_fast(&sch->dsq_hash, &dsq_id, dsq_hash_params);
 }
+EXPORT_SYMBOL_GPL(find_user_dsq);
 
 static const struct sched_class *scx_setscheduler_class(struct task_struct *p)
 {
