@@ -2564,7 +2564,9 @@ repeat:
 		goto unlock;
 	}
 
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
 alloced:
+#endif
 	alloced = true;
 	if (folio_test_large(folio) &&
 	    DIV_ROUND_UP(i_size_read(inode), PAGE_SIZE) <
