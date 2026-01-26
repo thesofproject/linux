@@ -369,6 +369,18 @@ DECLARE_HOOK(android_vh_scx_restore_flags,
 		 const struct sched_class *next_class,
 		 int *flags),
 	TP_ARGS(prev_class, next_class, flags));
+
+struct scx_dispatch_q;
+DECLARE_HOOK(android_vh_scx_enq_to_priq,
+	TP_PROTO(struct scx_dispatch_q *dsq, struct task_struct *p, bool *enq_priq),
+	TP_ARGS(dsq, p, enq_priq));
+DECLARE_HOOK(android_vh_scx_switch_repeat_skip,
+	TP_PROTO(struct task_struct *p, bool *skip, int *repeat),
+	TP_ARGS(p, skip, repeat));
+DECLARE_HOOK(android_vh_task_tick_scx,
+	TP_PROTO(struct rq *rq, struct task_struct *p, int queued),
+	TP_ARGS(rq, p, queued));
+
 DECLARE_HOOK(android_vh_scx_ops_consider_migration,
 	TP_PROTO(bool *consider_migration),
 	TP_ARGS(consider_migration));
