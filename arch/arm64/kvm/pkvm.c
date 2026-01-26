@@ -1724,7 +1724,7 @@ void pkvm_el2_mod_frob_sections(Elf_Ehdr *ehdr, Elf_Shdr *sechdrs, char *secstri
 }
 #endif /* CONFIG_MODULES */
 
-static int __pkvm_topup_hyp_alloc_mgt_mc(enum hyp_alloc_mgt_id id, struct kvm_hyp_memcache *mc)
+int __pkvm_topup_hyp_alloc_mgt_mc(enum hyp_alloc_mgt_id id, struct kvm_hyp_memcache *mc)
 {
 	struct arm_smccc_res res;
 
@@ -1773,7 +1773,11 @@ unsigned long __pkvm_reclaim_hyp_alloc_mgt_id(enum hyp_alloc_mgt_id id, unsigned
 
 		mc.head = res.a1;
 		mc.nr_pages = res.a2;
-		reclaimed += free_hyp_memcache(&mc);
+
+		if (id == HYP_ALLOC_MGT_IOMMU_ID)
+			reclaimed += __pkvm_free_iommu_hyp_memcache(&mc);
+		else
+			reclaimed += free_hyp_memcache(&mc);
 	} while (reclaimed < nr_pages);
 
 	return reclaimed;
@@ -1796,28 +1800,6 @@ static int early_ffa_unmap_on_lend_cfg(char *arg)
 	return 0;
 }
 early_param("kvm-arm.ffa-unmap-on-lend", early_ffa_unmap_on_lend_cfg);
-
-int __pkvm_topup_hyp_alloc_mgt_gfp(enum hyp_alloc_mgt_id id, unsigned long nr_pages,
-				   unsigned long sz_alloc, gfp_t gfp)
-{
-	struct kvm_hyp_memcache mc;
-	int ret;
-
-	init_hyp_memcache(&mc);
-
-	ret = topup_hyp_memcache_gfp(&mc, nr_pages, get_order(sz_alloc), gfp);
-	if (ret)
-		return ret;
-
-	ret = __pkvm_topup_hyp_alloc_mgt_mc(id, &mc);
-	if (ret) {
-		kvm_err("Failed topup %u pages = %ld, size = %ld err = %d, freeing %ld pages\n",
-			id, nr_pages, sz_alloc, ret, mc.nr_pages);
-		free_hyp_memcache(&mc);
-	}
-
-	return ret;
-}
 
 static int __pkvm_donate_resource(struct resource *r)
 {
