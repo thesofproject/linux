@@ -317,10 +317,40 @@ static void unsetup_vcpu_lapic(struct kvm_vcpu *vcpu)
 	pkvm_host_unshare_hyp(__pkvm_pa(apic->regs), PAGE_SIZE);
 }
 
+static int share_vcpu_mce_banks(struct kvm_vcpu *vcpu)
+{
+	int ret;
+
+	if (pkvm_is_protected_vcpu(vcpu))
+		return -EINVAL;
+
+	ret = pkvm_host_share_hyp(__pkvm_pa(vcpu->arch.mce_banks), KVM_MCE_SIZE);
+	if (ret)
+		return ret;
+
+	ret = pkvm_host_share_hyp(__pkvm_pa(vcpu->arch.mci_ctl2_banks), KVM_MCI_CTL2_SIZE);
+	if (ret)
+		pkvm_host_unshare_hyp(__pkvm_pa(vcpu->arch.mce_banks), KVM_MCE_SIZE);
+
+	return ret;
+}
+
+static void unshare_vcpu_mce_banks(struct kvm_vcpu *vcpu)
+{
+	if (pkvm_is_protected_vcpu(vcpu))
+		return;
+
+	pkvm_host_unshare_hyp(__pkvm_pa(vcpu->arch.mce_banks), KVM_MCE_SIZE);
+	pkvm_host_unshare_hyp(__pkvm_pa(vcpu->arch.mci_ctl2_banks), KVM_MCI_CTL2_SIZE);
+}
+
 static int __vcpu_create(struct kvm *kvm, struct kvm_vcpu *vcpu, struct fpstate *fps)
 {
 	struct pkvm_vcpu *pkvm_vcpu = to_pkvm_vcpu(vcpu);
 	int ret = kvm_x86_call(vcpu_precreate)(kvm);
+	void *unused = (void *)pkvm_vcpu +
+		       PKVM_VCPU_BASE_SIZE +
+		       kvm_vcpu_sz;
 
 	if (ret)
 		return ret;
@@ -334,16 +364,29 @@ static int __vcpu_create(struct kvm *kvm, struct kvm_vcpu *vcpu, struct fpstate 
 	vcpu->arch.regs_avail = ~0;
 	vcpu->arch.regs_dirty = ~0;
 	vcpu->arch.pat = MSR_IA32_CR_PAT_DEFAULT;
-	vcpu->arch.mce_banks = (void *)pkvm_vcpu + PKVM_VCPU_BASE_SIZE + kvm_vcpu_sz;
-	vcpu->arch.mci_ctl2_banks = (void *)vcpu->arch.mce_banks + KVM_MCE_SIZE;
+
+	if (!pkvm_is_protected_vcpu(vcpu)) {
+		vcpu->arch.mce_banks = kern_pkvm_va(pkvm_vcpu->shared_vcpu->arch.mce_banks);
+		vcpu->arch.mci_ctl2_banks =
+			kern_pkvm_va(pkvm_vcpu->shared_vcpu->arch.mci_ctl2_banks);
+		ret = share_vcpu_mce_banks(vcpu);
+		if (ret)
+			return ret;
+	} else {
+		vcpu->arch.mce_banks = unused;
+		unused += KVM_MCE_SIZE;
+		vcpu->arch.mci_ctl2_banks = unused;
+		unused += KVM_MCI_CTL2_SIZE;
+	}
 	vcpu->arch.mcg_cap = KVM_MAX_MCE_BANKS;
+
 	vcpu->arch.apic_base = pkvm_vcpu->shared_vcpu->arch.apic_base;
 	if (lapic_in_kernel(pkvm_vcpu->shared_vcpu))
-		vcpu->arch.apic = (void *)vcpu->arch.mci_ctl2_banks + KVM_MCI_CTL2_SIZE;
+		vcpu->arch.apic = unused;
 
 	ret = setup_vcpu_lapic(vcpu);
 	if (ret)
-		return ret;
+		goto unshare_mce;
 
 	vcpu->arch.guest_fpu.fpstate = fps;
 	pkvm_init_guest_fpu(&vcpu->arch.guest_fpu);
@@ -352,8 +395,14 @@ static int __vcpu_create(struct kvm *kvm, struct kvm_vcpu *vcpu, struct fpstate 
 
 	ret = kvm_x86_call(vcpu_create)(vcpu);
 	if (ret)
-		unsetup_vcpu_lapic(vcpu);
+		goto unsetup_lapic;
 
+	return 0;
+
+unsetup_lapic:
+	unsetup_vcpu_lapic(vcpu);
+unshare_mce:
+	unshare_vcpu_mce_banks(vcpu);
 	return ret;
 }
 
@@ -362,6 +411,7 @@ static void __vcpu_free(struct kvm_vcpu *vcpu)
 	kvm_x86_call(vcpu_free)(vcpu);
 
 	unsetup_vcpu_lapic(vcpu);
+	unshare_vcpu_mce_banks(vcpu);
 }
 
 static int pkvm_vcpu_create(int vm_handle, phys_addr_t host_vcpu_pa,
@@ -383,7 +433,9 @@ static int pkvm_vcpu_create(int vm_handle, phys_addr_t host_vcpu_pa,
 		goto put_vm;
 
 	shared_vcpu = __pkvm_va(host_vcpu_pa);
-	vcpu_size = PKVM_VCPU_BASE_SIZE + kvm_vcpu_sz + KVM_MCE_SIZE + KVM_MCI_CTL2_SIZE;
+	vcpu_size = PKVM_VCPU_BASE_SIZE + kvm_vcpu_sz;
+	if (pkvm_is_protected_vm(&pkvm_vm->kvm))
+		vcpu_size += KVM_MCE_SIZE + KVM_MCI_CTL2_SIZE;
 	if (lapic_in_kernel(shared_vcpu))
 		vcpu_size += sizeof(struct kvm_lapic);
 	vcpu_size = PAGE_ALIGN(vcpu_size);
