@@ -354,6 +354,12 @@ static int pkvm_set_efer(struct kvm_vcpu *vcpu, u64 efer)
 	return ret;
 }
 
+static void pkvm_set_dr7(struct kvm_vcpu *vcpu, unsigned long val)
+{
+	if (!pkvm_is_protected_vcpu(vcpu))
+		KVM_BUG_ON(pkvm_hypercall(set_dr7, val), vcpu->kvm);
+}
+
 static void pkvm_cache_reg(struct kvm_vcpu *vcpu, enum kvm_reg reg)
 {
 	union pkvm_hc_data out;
@@ -462,6 +468,7 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.is_valid_cr4 = pkvm_is_valid_cr4,
 	.set_cr4 = pkvm_set_cr4,
 	.set_efer = pkvm_set_efer,
+	.set_dr7 = pkvm_set_dr7,
 	.cache_reg = pkvm_cache_reg,
 	.get_rflags = pkvm_get_rflags,
 	.set_rflags = pkvm_set_rflags,
