@@ -67,6 +67,7 @@ PKVM_HC(update_cr8_intercept)
 PKVM_HC(set_virtual_apic_mode)
 PKVM_HC(refresh_apicv_exec_ctrl)
 PKVM_HC(load_eoi_exitmap)
+PKVM_HC(hwapic_isr_update)
 
 #undef PKVM_HC
 #undef PKVM_HC_OUT

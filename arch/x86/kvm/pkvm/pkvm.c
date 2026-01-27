@@ -665,6 +665,7 @@ static bool is_guest_vcpu_accessible(struct kvm_vcpu *vcpu, enum pkvm_hc hc)
 	case __pkvm__set_virtual_apic_mode:
 	case __pkvm__refresh_apicv_exec_ctrl:
 	case __pkvm__load_eoi_exitmap:
+	case __pkvm__hwapic_isr_update:
 		/*
 		 * The host is responsible for running vCPU, injecting
 		 * interrupts, emulating lapic etc. Always allow the related PV
@@ -1091,6 +1092,9 @@ static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc 
 	case __pkvm__load_eoi_exitmap:
 		pkvm_load_eoi_exitmap(vcpu, pkvm_hc_input1(hvcpu), pkvm_hc_input2(hvcpu),
 				      pkvm_hc_input3(hvcpu), pkvm_hc_input4(hvcpu));
+		break;
+	case __pkvm__hwapic_isr_update:
+		kvm_x86_call(hwapic_isr_update)(vcpu, pkvm_hc_input1(hvcpu));
 		break;
 	default:
 		ret = -EINVAL;
