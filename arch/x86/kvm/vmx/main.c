@@ -941,9 +941,11 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 	.get_interrupt_shadow = vt_op(get_interrupt_shadow),
 #ifndef __PKVM_HYP__
 	.patch_hypercall = vt_op(patch_hypercall),
+#endif
 	.inject_irq = vt_op(inject_irq),
 	.inject_nmi = vt_op(inject_nmi),
 	.inject_exception = vt_op(inject_exception),
+#ifndef __PKVM_HYP__
 	.cancel_injection = vt_op(cancel_injection),
 #endif
 	.interrupt_allowed = vt_op(interrupt_allowed),

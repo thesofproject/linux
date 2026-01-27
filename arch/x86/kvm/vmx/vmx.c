@@ -5257,7 +5257,6 @@ void vmx_enable_nmi_window(struct kvm_vcpu *vcpu)
 	exec_controls_setbit(to_vmx(vcpu), CPU_BASED_NMI_WINDOW_EXITING);
 }
 
-#ifndef __PKVM_HYP__
 void vmx_inject_irq(struct kvm_vcpu *vcpu, bool reinjected)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
@@ -5267,6 +5266,7 @@ void vmx_inject_irq(struct kvm_vcpu *vcpu, bool reinjected)
 	trace_kvm_inj_virq(irq, vcpu->arch.interrupt.soft, reinjected);
 
 	++vcpu->stat.irq_injections;
+#ifndef __PKVM_HYP__
 	if (vmx->rmode.vm86_active) {
 		int inc_eip = 0;
 		if (vcpu->arch.interrupt.soft)
@@ -5274,6 +5274,7 @@ void vmx_inject_irq(struct kvm_vcpu *vcpu, bool reinjected)
 		kvm_inject_realmode_interrupt(vcpu, irq, inc_eip);
 		return;
 	}
+#endif
 	intr = irq | INTR_INFO_VALID_MASK;
 	if (vcpu->arch.interrupt.soft) {
 		intr |= INTR_TYPE_SOFT_INTR;
@@ -5306,17 +5307,18 @@ void vmx_inject_nmi(struct kvm_vcpu *vcpu)
 	++vcpu->stat.nmi_injections;
 	vmx->loaded_vmcs->nmi_known_unmasked = false;
 
+#ifndef __PKVM_HYP__
 	if (vmx->rmode.vm86_active) {
 		kvm_inject_realmode_interrupt(vcpu, NMI_VECTOR, 0);
 		return;
 	}
+#endif
 
 	vmcs_write32(VM_ENTRY_INTR_INFO_FIELD,
 			INTR_TYPE_NMI_INTR | INTR_INFO_VALID_MASK | NMI_VECTOR);
 
 	vmx_clear_hlt(vcpu);
 }
-#endif /* !__PKVM_HYP__ */
 
 bool vmx_get_nmi_mask(struct kvm_vcpu *vcpu)
 {
