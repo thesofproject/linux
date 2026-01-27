@@ -668,6 +668,10 @@ static bool is_guest_vcpu_accessible(struct kvm_vcpu *vcpu, enum pkvm_hc hc)
 	case __pkvm__get_idt:
 	case __pkvm__set_gdt:
 	case __pkvm__get_gdt:
+	case __pkvm__flush_tlb_all:
+	case __pkvm__flush_tlb_current:
+	case __pkvm__flush_tlb_gva:
+	case __pkvm__flush_tlb_guest:
 		/*
 		 * As the host needs to pre-configure the pVM's vCPU state for
 		 * booting, the protection for pVM is only enforced by the pKVM
@@ -893,6 +897,18 @@ static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc 
 		break;
 	case __pkvm__get_gdt:
 		kvm_x86_call(get_gdt)(vcpu, &out->get_gdt.desc);
+		break;
+	case __pkvm__flush_tlb_all:
+		kvm_x86_call(flush_tlb_all)(vcpu);
+		break;
+	case __pkvm__flush_tlb_current:
+		kvm_x86_call(flush_tlb_current)(vcpu);
+		break;
+	case __pkvm__flush_tlb_gva:
+		kvm_x86_call(flush_tlb_gva)(vcpu, pkvm_hc_input1(hvcpu));
+		break;
+	case __pkvm__flush_tlb_guest:
+		kvm_x86_call(flush_tlb_guest)(vcpu);
 		break;
 	default:
 		ret = -EINVAL;
