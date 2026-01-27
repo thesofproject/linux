@@ -85,6 +85,16 @@ union pkvm_hc_data {
 		unsigned long data;
 	} get_rflags;
 	struct {
+		struct kvm_segment seg_val;
+		int seg;
+	} set_segment;
+	struct {
+		struct kvm_segment seg_val;
+	} get_segment;
+	struct {
+		u64 data;
+	} get_segment_base;
+	struct {
 		u64 data[PKVM_HC_DATA_MAX_NUM];
 	} raw;
 };
