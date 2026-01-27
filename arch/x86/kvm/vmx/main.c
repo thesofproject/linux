@@ -960,7 +960,9 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 	.set_virtual_apic_mode = vt_op(set_virtual_apic_mode),
 #ifndef __PKVM_HYP__
 	.set_apic_access_page_addr = vt_op(set_apic_access_page_addr),
+#endif
 	.refresh_apicv_exec_ctrl = vt_op(refresh_apicv_exec_ctrl),
+#ifndef __PKVM_HYP__
 	.load_eoi_exitmap = vt_op(load_eoi_exitmap),
 	.apicv_pre_state_restore = pi_apicv_pre_state_restore,
 	.required_apicv_inhibits = VMX_REQUIRED_APICV_INHIBITS,
