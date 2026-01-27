@@ -8,6 +8,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include "iommu.h"
+#include "pasid.h"
 #include "../iommu-pages.h"
 
 int __init pkvm_host_prepare_iommu(void)
@@ -179,6 +180,46 @@ int pkvm_context_mapping(struct intel_iommu *iommu, struct device_domain_info *i
 		 * If the hypervisor used donation_gpa, it will be set to 0.
 		 * Free the page if hypervisor didn't use the page.
 		 */
+		if (data->donation_page_gpa)
+			iommu_free_pages(phys_to_virt(data->donation_page_gpa));
+	}
+	spin_unlock(&iommu->lock);
+
+	return ret;
+}
+
+int pkvm_pasid_table_setup(struct intel_iommu *iommu, struct device_domain_info *info,
+			   u8 bus, u8 devfn)
+{
+	union pkvm_hc_data d = { 0 };
+	struct set_sm_ce_data *data = &d.iommu_set_sm_ce.in;
+	int ret;
+
+	data->phys = iommu->reg_phys;
+	data->pasid_table_gpa = virt_to_phys(info->pasid_table->table);
+	data->max_pasid = info->pasid_table->max_pasid;
+	data->bus = bus;
+	data->devfn = devfn;
+	data->pasid_supported = info->pasid_supported;
+	data->pasid_enabled = info->pasid_enabled;
+	data->ats_supported = info->ats_supported;
+	data->ats_enabled = info->ats_enabled;
+	data->ats_qdep = info->ats_qdep;
+
+	spin_lock(&iommu->lock);
+	ret = pkvm_hypercall_inout(iommu_set_sm_ce, &d, &d);
+	if (ret == -ENOMEM) {
+		void *donation_page = iommu_alloc_pages_node_sz(iommu->node,
+								GFP_ATOMIC, SZ_4K);
+
+		if (!donation_page) {
+			pr_err("iommu%d: failed to allocate context page\n", iommu->seq_id);
+			spin_unlock(&iommu->lock);
+			return -ENOMEM;
+		}
+		data->donation_page_gpa = virt_to_phys(donation_page);
+		ret = pkvm_hypercall_inout(iommu_set_sm_ce, &d, &d);
+
 		if (data->donation_page_gpa)
 			iommu_free_pages(phys_to_virt(data->donation_page_gpa));
 	}

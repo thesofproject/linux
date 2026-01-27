@@ -73,6 +73,20 @@ struct set_lm_ce_data {
 	u8 ats_enabled: 1;
 	u8 ats_supported: 1;
 };
+
+struct set_sm_ce_data {
+	u64 phys;
+	u64 pasid_table_gpa;
+	u64 donation_page_gpa;
+	u32 max_pasid;
+	u8 bus;
+	u8 devfn;
+	u8 ats_qdep;
+	u8 ats_enabled: 1;
+	u8 ats_supported: 1;
+	u8 pasid_supported: 3;
+	u8 pasid_enabled: 1;
+};
 #endif
 
 #define TO_PKVM_HC(f)		CONCATENATE(__pkvm__, f)
@@ -160,6 +174,10 @@ union pkvm_hc_data {
 		struct set_lm_ce_data in;
 		struct set_lm_ce_data out;
 	} iommu_set_lm_ce;
+	union {
+		struct set_sm_ce_data in;
+		struct set_sm_ce_data out;
+	} iommu_set_sm_ce;
 #endif
 	struct {
 		u64 data[PKVM_HC_DATA_MAX_NUM];
