@@ -910,6 +910,32 @@ static void pkvm_hwapic_isr_update(struct kvm_vcpu *vcpu, int max_isr)
 	KVM_BUG_ON(pkvm_hypercall(hwapic_isr_update, max_isr), vcpu->kvm);
 }
 
+static void pkvm_vcpu_after_set_cpuid(struct kvm_vcpu *vcpu)
+{
+	struct kvm_cpuid_entry2 *e2 = vcpu->arch.cpuid_entries;
+	int nent = vcpu->arch.cpuid_nent;
+	union pkvm_hc_data out;
+	void *entries;
+	size_t size;
+
+	if (vcpu->arch.guest_state_protected || !e2 || !nent)
+		return;
+
+	size = sizeof(struct kvm_cpuid_entry2) * nent;
+	entries = alloc_pages_exact(size, GFP_KERNEL_ACCOUNT);
+	if (!entries) {
+		kvm_err("Failed to allocate cpuid pages for pKVM vcpu\n");
+		return;
+	}
+
+	memcpy(entries, (void *)e2, size);
+
+	if (KVM_BUG_ON(pkvm_hypercall_out(vcpu_after_set_cpuid, &out, __pa(entries)), vcpu->kvm))
+		free_pages_exact(entries, size);
+	else
+		kvm_free_pkvm_memcache(&out.vcpu_after_set_cpuid.memcache);
+}
+
 static bool pkvm_apic_init_signal_blocked(struct kvm_vcpu *vcpu)
 {
 	/*
@@ -998,6 +1024,8 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.sync_pir_to_irr = vmx_sync_pir_to_irr,
 	.deliver_interrupt = vmx_deliver_interrupt,
 	.dy_apicv_has_pending_interrupt = pi_has_pending_interrupt,
+
+	.vcpu_after_set_cpuid = pkvm_vcpu_after_set_cpuid,
 
 	.pi_update_irte = vmx_pi_update_irte,
 	.pi_start_bypass = vmx_pi_start_bypass,
