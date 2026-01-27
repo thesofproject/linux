@@ -161,19 +161,18 @@ int cpu_has_xfeatures(u64 xfeatures_needed, const char **feature_name)
 	return 1;
 }
 EXPORT_SYMBOL_GPL(cpu_has_xfeatures);
+#endif /* !__PKVM_HYP__ */
 
 static bool xfeature_is_aligned64(int xfeature_nr)
 {
 	return xstate_flags[xfeature_nr] & XSTATE_FLAG_ALIGNED64;
 }
-#endif /* !__PKVM_HYP__ */
 
 static bool xfeature_is_supervisor(int xfeature_nr)
 {
 	return xstate_flags[xfeature_nr] & XSTATE_FLAG_SUPERVISOR;
 }
 
-#ifndef __PKVM_HYP__
 static unsigned int xfeature_get_offset(u64 xcomp_bv, int xfeature)
 {
 	unsigned int offs, i;
@@ -202,6 +201,7 @@ static unsigned int xfeature_get_offset(u64 xcomp_bv, int xfeature)
 	return offs;
 }
 
+#ifndef __PKVM_HYP__
 /*
  * Enable the extended processor state save/restore feature.
  * Called once per CPU onlining.
@@ -238,12 +238,12 @@ void fpu__init_cpu_xstate(void)
 				     xfeatures_mask_independent());
 	}
 }
+#endif /* !__PKVM_HYP__ */
 
 static bool xfeature_enabled(enum xfeature xfeature)
 {
 	return fpu_kernel_cfg.max_features & BIT_ULL(xfeature);
 }
-#endif /* !__PKVM_HYP__ */
 
 static int compare_xstate_offsets(const void *xfeature1, const void *xfeature2)
 {
@@ -995,6 +995,7 @@ void fpu__resume_cpu(void)
 	if (fpu_state_size_dynamic())
 		wrmsrq(MSR_IA32_XFD, x86_task_fpu(current)->fpstate->xfd);
 }
+#endif /* !__PKVM_HYP__ */
 
 /*
  * Given an xstate feature nr, calculate where in the xsave
@@ -1067,6 +1068,7 @@ void *get_xsave_addr(struct xregs_state *xsave, int xfeature_nr)
 }
 EXPORT_SYMBOL_GPL(get_xsave_addr);
 
+#ifndef __PKVM_HYP__
 /*
  * Given an xstate feature nr, calculate where in the xsave buffer the state is.
  * The xsave buffer should be in standard format, not compacted (e.g. user mode
@@ -1480,6 +1482,7 @@ void xrstors(struct xregs_state *xstate, u64 mask)
 	XSTATE_OP(XRSTORS, xstate, (u32)mask, (u32)(mask >> 32), err);
 	WARN_ON_ONCE(err);
 }
+#endif /* !__PKVM_HYP__ */
 
 #if IS_ENABLED(CONFIG_KVM)
 void fpstate_clear_xstate_component(struct fpstate *fpstate, unsigned int xfeature)
@@ -1492,6 +1495,7 @@ void fpstate_clear_xstate_component(struct fpstate *fpstate, unsigned int xfeatu
 EXPORT_SYMBOL_GPL(fpstate_clear_xstate_component);
 #endif
 
+#ifndef __PKVM_HYP__
 #ifdef CONFIG_X86_64
 
 #ifdef CONFIG_X86_DEBUG_FPU
