@@ -936,8 +936,10 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 	.handle_exit = vt_op(handle_exit),
 	.skip_emulated_instruction = vmx_skip_emulated_instruction,
 	.update_emulated_instruction = vmx_update_emulated_instruction,
+#endif
 	.set_interrupt_shadow = vt_op(set_interrupt_shadow),
 	.get_interrupt_shadow = vt_op(get_interrupt_shadow),
+#ifndef __PKVM_HYP__
 	.patch_hypercall = vt_op(patch_hypercall),
 	.inject_irq = vt_op(inject_irq),
 	.inject_nmi = vt_op(inject_nmi),
