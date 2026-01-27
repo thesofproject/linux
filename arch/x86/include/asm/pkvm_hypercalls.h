@@ -74,6 +74,7 @@ PKVM_HC_OUT(vcpu_add_fpstate)
 PKVM_HC(write_tsc_offset)
 PKVM_HC(write_tsc_multiplier)
 PKVM_HC(load_mmu_pgd)
+PKVM_HC(setup_mce)
 
 #undef PKVM_HC
 #undef PKVM_HC_OUT
