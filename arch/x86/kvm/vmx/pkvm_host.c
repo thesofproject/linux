@@ -255,7 +255,6 @@ static void pkvm_vcpu_reset(struct kvm_vcpu *vcpu, bool init_event)
 	 */
 	vcpu->arch.cr0_guest_owned_bits = ~0;
 	vcpu->arch.cr4_guest_owned_bits = ~0;
-	vcpu->arch.cr4_guest_rsvd_bits = 0;
 
 	kvm_set_cr8(vcpu, 0);
 
@@ -389,11 +388,14 @@ static bool pkvm_is_valid_cr4(struct kvm_vcpu *vcpu, unsigned long cr4)
 
 static void pkvm_set_cr4(struct kvm_vcpu *vcpu, unsigned long cr4)
 {
+	unsigned long old_cr4 = kvm_read_cr4(vcpu);
 	if (!vcpu->arch.guest_state_protected)
 		KVM_BUG_ON(pkvm_hypercall(set_cr4, cr4), vcpu->kvm);
 
 	vcpu->arch.cr4 = cr4;
 	kvm_register_mark_available(vcpu, VCPU_EXREG_CR4);
+	if ((cr4 ^ old_cr4) & (X86_CR4_OSXSAVE | X86_CR4_PKE))
+		vcpu->arch.cpuid_dynamic_bits_dirty = true;
 }
 
 static int pkvm_set_efer(struct kvm_vcpu *vcpu, u64 efer)
