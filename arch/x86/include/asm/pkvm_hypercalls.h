@@ -71,6 +71,8 @@ PKVM_HC(hwapic_isr_update)
 PKVM_HC(sync_pir_to_irr)
 PKVM_HC_OUT(vcpu_after_set_cpuid)
 PKVM_HC_OUT(vcpu_add_fpstate)
+PKVM_HC(write_tsc_offset)
+PKVM_HC(write_tsc_multiplier)
 
 #undef PKVM_HC
 #undef PKVM_HC_OUT
