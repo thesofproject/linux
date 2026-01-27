@@ -293,6 +293,41 @@ static int pkvm_set_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 	return -EPERM;
 }
 
+static bool pkvm_is_valid_cr0(struct kvm_vcpu *vcpu, unsigned long cr0)
+{
+	return true;
+}
+
+static void pkvm_set_cr0(struct kvm_vcpu *vcpu, unsigned long cr0)
+{
+	/*
+	 * Segment will updated by the pKVM hypervisor if the vCPU enters the
+	 * long mode. Clears the segment cache unconditionally for below
+	 * reasons:
+	 * 1) the clearing is just one line of code which is simpler comparing
+	 * with checking if the vCPU enters the long mode or not.
+	 * 2) the overall overhead is smaller than checking if the vCPU enters
+	 * the long mode or not. By clearing the segment cache unconditionally,
+	 * the host will need to use the get_segment PV interface if the host
+	 * wants to read the segment register after setting the CR0. So the
+	 * additional overhead is by sending one more PV interface. But if check
+	 * whether a vCPU will enter the long mode or not before clearing the
+	 * segment cache, there is also one more PV interface overhead which is
+	 * to send cache_reg PV interface to read CR0 PG bit first if the CR0 is
+	 * not up-to-date. As it is unlikely that the host wants to read the
+	 * segment register after setting the CR0 but likely the CR0 is not
+	 * up-to-date before setting the CR0, it seems the overall overhead of
+	 * clearing the segment cache unconditionally is smaller.
+	 */
+	vmx_segment_cache_clear(to_vmx(vcpu));
+
+	if (!vcpu->arch.guest_state_protected)
+		KVM_BUG_ON(pkvm_hypercall(set_cr0, cr0), vcpu->kvm);
+
+	vcpu->arch.cr0 = cr0;
+	kvm_register_mark_available(vcpu, VCPU_EXREG_CR0);
+}
+
 static bool pkvm_is_valid_cr4(struct kvm_vcpu *vcpu, unsigned long cr4)
 {
 	/* The pKVM doesn't support VMX feature. */
@@ -388,6 +423,8 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.get_feature_msr = pkvm_get_feature_msr,
 	.get_msr = pkvm_get_msr,
 	.set_msr = pkvm_set_msr,
+	.is_valid_cr0 = pkvm_is_valid_cr0,
+	.set_cr0 = pkvm_set_cr0,
 	.is_valid_cr4 = pkvm_is_valid_cr4,
 	.set_cr4 = pkvm_set_cr4,
 	.set_efer = pkvm_set_efer,
