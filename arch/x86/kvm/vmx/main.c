@@ -956,7 +956,9 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 
 #ifndef __PKVM_HYP__
 	.x2apic_icr_is_split = false,
+#endif
 	.set_virtual_apic_mode = vt_op(set_virtual_apic_mode),
+#ifndef __PKVM_HYP__
 	.set_apic_access_page_addr = vt_op(set_apic_access_page_addr),
 	.refresh_apicv_exec_ctrl = vt_op(refresh_apicv_exec_ctrl),
 	.load_eoi_exitmap = vt_op(load_eoi_exitmap),
