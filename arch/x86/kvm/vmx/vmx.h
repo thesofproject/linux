@@ -814,6 +814,12 @@ extern struct pkvm_init_ops *pkvm_sym(pkvm_vmx_init_ops);
 int pkvm_vmx_init(void);
 #endif
 
+bool pkvm_interrupt_blocked(struct kvm_vcpu *vcpu);
+
+#else
+
+static inline bool pkvm_interrupt_blocked(struct kvm_vcpu *vcpu) { return false; }
+
 #endif /* CONFIG_PKVM_INTEL */
 
 #endif /* __KVM_X86_VMX_H */
