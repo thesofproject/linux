@@ -1909,7 +1909,6 @@ out:
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_msr_allowed);
 
-#ifndef __PKVM_HYP__
 /*
  * Write @data into the MSR specified by @index.  Select MSR specific fault
  * checks are bypassed if @host_initiated is %true.
@@ -2016,6 +2015,7 @@ static int __kvm_set_msr(struct kvm_vcpu *vcpu, u32 index, u64 data,
 	return kvm_x86_call(set_msr)(vcpu, &msr);
 }
 
+#ifndef __PKVM_HYP__
 static int _kvm_set_msr(struct kvm_vcpu *vcpu, u32 index, u64 *data,
 			bool host_initiated)
 {
@@ -2075,12 +2075,14 @@ static int __kvm_get_msr(struct kvm_vcpu *vcpu, u32 index, u64 *data,
 		*data = msr.data;
 	return ret;
 }
+#endif /* !__PKVM_HYP__ */
 
 int kvm_msr_write(struct kvm_vcpu *vcpu, u32 index, u64 data)
 {
 	return __kvm_set_msr(vcpu, index, data, true);
 }
 
+#ifndef __PKVM_HYP__
 int kvm_msr_read(struct kvm_vcpu *vcpu, u32 index, u64 *data)
 {
 	return __kvm_get_msr(vcpu, index, data, true);
