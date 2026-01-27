@@ -7,6 +7,10 @@ BUILD_BUG_ON(1)
 #define PKVM_HC_OUT PKVM_HC
 #endif
 
+#ifndef PKVM_HC_IN
+#define PKVM_HC_IN PKVM_HC
+#endif
+
 /* Hypercalls used only during pKVM initialization */
 PKVM_HC(init)
 PKVM_HC(init_finalize)
@@ -39,3 +43,4 @@ PKVM_HC(set_dr7)
 
 #undef PKVM_HC
 #undef PKVM_HC_OUT
+#undef PKVM_HC_IN
