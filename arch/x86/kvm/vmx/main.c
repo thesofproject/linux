@@ -890,9 +890,9 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 	.prepare_switch_to_guest = vt_op(prepare_switch_to_guest),
 #endif
 	.vcpu_load = vt_op(vcpu_load),
-#ifndef __PKVM_HYP__
 	.vcpu_put = vt_op(vcpu_put),
 
+#ifndef __PKVM_HYP__
 	.HOST_OWNED_DEBUGCTL = VMX_HOST_OWNED_DEBUGCTL_BITS,
 
 	.update_exception_bitmap = vt_op(update_exception_bitmap),
