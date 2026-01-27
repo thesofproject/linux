@@ -110,6 +110,9 @@ union pkvm_hc_data {
 		u32 data;
 	} get_interrupt_shadow;
 	struct {
+		bool data;
+	} get_nmi_mask;
+	struct {
 		u64 data[PKVM_HC_DATA_MAX_NUM];
 	} raw;
 };
