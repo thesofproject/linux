@@ -377,7 +377,32 @@ static inline size_t pkvm_guest_initial_fpstate_size(struct kvm *kvm)
 
 #ifdef __PKVM_HYP__
 
-#ifndef CONFIG_PKVM_X86_DEBUG
+#undef kvm_err
+#undef kvm_info
+#undef kvm_debug
+#undef kvm_debug_ratelimited
+#undef kvm_pr_unimpl
+
+#ifdef CONFIG_PKVM_X86_DEBUG
+
+#define kvm_err(fmt, ...) \
+	pr_err("pkvm: " fmt, ## __VA_ARGS__)
+#define kvm_info(fmt, ...) \
+	pr_info("pkvm: " fmt, ## __VA_ARGS__)
+#define kvm_debug(fmt, ...) \
+	pr_debug("pkvm: " fmt, ## __VA_ARGS__)
+#define kvm_debug_ratelimited(fmt, ...) \
+	pr_debug_ratelimited("pkvm: " fmt, ## __VA_ARGS__)
+#define kvm_pr_unimpl(fmt, ...) \
+	pr_err_ratelimited("pkvm: " fmt, ## __VA_ARGS__)
+
+#else /* CONFIG_PKVM_X86_DEBUG */
+
+#define kvm_err(fmt, ...) do {} while(0)
+#define kvm_info(fmt, ...) do {} while(0)
+#define kvm_debug(fmt, ...) do {} while(0)
+#define kvm_debug_ratelimited(fmt, ...) do {} while(0)
+#define kvm_pr_unimpl(fmt, ...) do {} while(0)
 
 #undef WARN_ON
 #undef WARN
