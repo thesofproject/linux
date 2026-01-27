@@ -38,6 +38,7 @@
 	(bit) = FIRST_EXTENDED_XFEATURE;				\
 	for_each_set_bit_from(bit, (unsigned long *)&(mask), 8 * sizeof(mask))
 
+#ifndef __PKVM_HYP__
 /*
  * Although we spell it out in here, the Processor Trace
  * xfeature is completely unused.  We use other mechanisms
@@ -86,6 +87,7 @@ static unsigned short xsave_cpuid_features[] __initdata = {
 	[XFEATURE_XTILE_DATA]			= X86_FEATURE_AMX_TILE,
 	[XFEATURE_APX]				= X86_FEATURE_APX,
 };
+#endif /* !__PKVM_HYP__ */
 
 static unsigned int xstate_offsets[XFEATURE_MAX] __ro_after_init =
 	{ [ 0 ... XFEATURE_MAX - 1] = -1};
@@ -121,6 +123,7 @@ static inline unsigned int next_xfeature_order(unsigned int i, u64 mask)
 #define XSTATE_FLAG_SUPERVISOR	BIT(0)
 #define XSTATE_FLAG_ALIGNED64	BIT(1)
 
+#ifndef __PKVM_HYP__
 /*
  * Return whether the system supports a given xfeature.
  *
@@ -163,12 +166,14 @@ static bool xfeature_is_aligned64(int xfeature_nr)
 {
 	return xstate_flags[xfeature_nr] & XSTATE_FLAG_ALIGNED64;
 }
+#endif /* !__PKVM_HYP__ */
 
 static bool xfeature_is_supervisor(int xfeature_nr)
 {
 	return xstate_flags[xfeature_nr] & XSTATE_FLAG_SUPERVISOR;
 }
 
+#ifndef __PKVM_HYP__
 static unsigned int xfeature_get_offset(u64 xcomp_bv, int xfeature)
 {
 	unsigned int offs, i;
@@ -238,6 +243,7 @@ static bool xfeature_enabled(enum xfeature xfeature)
 {
 	return fpu_kernel_cfg.max_features & BIT_ULL(xfeature);
 }
+#endif /* !__PKVM_HYP__ */
 
 static int compare_xstate_offsets(const void *xfeature1, const void *xfeature2)
 {
@@ -292,6 +298,7 @@ static void __init setup_xstate_cache(void)
 	sort(xfeature_uncompact_order, i, sizeof(unsigned int), compare_xstate_offsets, NULL);
 }
 
+#ifndef __PKVM_HYP__
 /*
  * Print out all the supported xstate features:
  */
@@ -2009,3 +2016,16 @@ int elf_coredump_extra_notes_size(void)
 	return size;
 }
 #endif /* CONFIG_COREDUMP */
+#else /* !__PKVM_HYP__ */
+void pkvm_setup_xstate_cache(void)
+{
+	if (!boot_cpu_has(X86_FEATURE_FPU) ||
+	    !boot_cpu_has(X86_FEATURE_XSAVE)) {
+		pr_info("pkvm: No FPU or XSAVE detected\n");
+		return;
+	}
+
+	/* Cache size, offset and flags for initialization */
+	setup_xstate_cache();
+}
+#endif /* __PKVM_HYP__ */

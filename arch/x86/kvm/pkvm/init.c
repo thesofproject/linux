@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <linux/kvm_host.h>
+#include <asm/fpu/xstate.h>
 #include <asm/kvm_pkvm.h>
 #include "early_alloc.h"
 #include "fpu.h"
@@ -242,6 +243,8 @@ static int initialize_global(struct pkvm_mem_info infos[], int nr_infos)
 	ret = create_host_mmu(tmp_infos, nr_infos, host_mmu_init_fn);
 	if (ret)
 		return ret;
+
+	pkvm_setup_xstate_cache();
 
 	return hyp_global_init ? hyp_global_init() : 0;
 }
