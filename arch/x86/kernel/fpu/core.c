@@ -123,6 +123,7 @@ static void update_avx_timestamp(struct fpu *fpu)
 	if (fpu->fpstate->regs.xsave.header.xfeatures & AVX512_TRACKING_MASK)
 		fpu->avx512_timestamp = jiffies;
 }
+#endif /* !__PKVM_HYP__ */
 
 /*
  * Save the FPU register state in fpu->fpstate->regs. The register state is
@@ -142,7 +143,9 @@ void save_fpregs_to_fpstate(struct fpu *fpu)
 {
 	if (likely(use_xsave())) {
 		os_xsave(fpu->fpstate);
+#ifndef __PKVM_HYP__
 		update_avx_timestamp(fpu);
+#endif
 		return;
 	}
 
@@ -213,6 +216,7 @@ void restore_fpregs_from_fpstate(struct fpstate *fpstate, u64 mask)
 	}
 }
 
+#ifndef __PKVM_HYP__
 void fpu_reset_from_exception_fixup(void)
 {
 	restore_fpregs_from_fpstate(&init_fpstate, XFEATURE_MASK_FPSTATE);
@@ -380,17 +384,41 @@ EXPORT_SYMBOL_GPL(fpu_sync_guest_vmexit_xfd_state);
 #endif /* !__PKVM_HYP__ */
 #endif /* CONFIG_X86_64 */
 
-#ifndef __PKVM_HYP__
 int fpu_swap_kvm_fpstate(struct fpu_guest *guest_fpu, bool enter_guest)
 {
 	struct fpstate *guest_fps = guest_fpu->fpstate;
 	struct fpu *fpu = x86_task_fpu(current);
 	struct fpstate *cur_fps = fpu->fpstate;
 
+#ifndef __PKVM_HYP__
 	fpregs_lock();
 	if (!cur_fps->is_confidential && !test_thread_flag(TIF_NEED_FPU_LOAD))
 		save_fpregs_to_fpstate(fpu);
-
+#else
+#ifdef CONFIG_X86_64
+	if (fpu_state_size_dynamic() && enter_guest) {
+		/*
+		 * Refresh the xfd_state percpu cache before guest vmenter so
+		 * that the xfd can be restored after guest vmexit.
+		 */
+		rdmsrl(MSR_IA32_XFD, cur_fps->xfd);
+		__this_cpu_write(xfd_state, cur_fps->xfd);
+	}
+#endif
+	/*
+	 * If entering the npVM, the FPU are already loaded with the npVM fpu
+	 * state by the host. If exiting from the npVM, the fpu registers will be
+	 * saved by the host. So no need to save FPU for the npVM.
+	 *
+	 * If entering the pVM, the FPU are loaded with the host fpu state, which
+	 * is already saved by the host itself before switching to the pkvm
+	 * hypervisor. If exiting from the pVM, then the fpu state should be saved
+	 * by the pkvm hypervisor as the host is not allowed to do this for
+	 * isolation purpose.
+	 */
+	if (guest_fps->is_confidential && !enter_guest)
+		save_fpregs_to_fpstate(fpu);
+#endif
 	/* Swap fpstate */
 	if (enter_guest) {
 		fpu->__task_fpstate = cur_fps;
@@ -404,6 +432,7 @@ int fpu_swap_kvm_fpstate(struct fpu_guest *guest_fpu, bool enter_guest)
 
 	cur_fps = fpu->fpstate;
 
+#ifndef __PKVM_HYP__
 	if (!cur_fps->is_confidential) {
 		/* Includes XFD update */
 		restore_fpregs_from_fpstate(cur_fps, XFEATURE_MASK_FPSTATE);
@@ -418,10 +447,29 @@ int fpu_swap_kvm_fpstate(struct fpu_guest *guest_fpu, bool enter_guest)
 
 	fpregs_mark_activate();
 	fpregs_unlock();
+#else
+	/*
+	 * Similarly to the FPU saving case, no need to restore FPU for the npVM
+	 * as this will be handled by the host.
+	 *
+	 * If entering the pVM, restore the FPU with the pVM fpu state. If
+	 * exiting the pVM, wipe the FPU by restoring FPU with an initial fpu
+	 * state.
+	 */
+	if (guest_fps->is_confidential) {
+		/* Includes XFD update */
+		restore_fpregs_from_fpstate(cur_fps, XFEATURE_MASK_FPSTATE);
+	} else {
+		/* Only update XFD as npVM FPU is already loaded by the host */
+		xfd_update_state(cur_fps);
+	}
+#endif
+
 	return 0;
 }
 EXPORT_SYMBOL_GPL(fpu_swap_kvm_fpstate);
 
+#ifndef __PKVM_HYP__
 void fpu_copy_guest_fpstate_to_uabi(struct fpu_guest *gfpu, void *buf,
 				    unsigned int size, u64 xfeatures, u32 pkru)
 {
