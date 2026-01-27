@@ -122,6 +122,13 @@ static inline bool iommu_supports_5levels(void)
 }
 
 struct intel_iommu *iommu_from_phys(unsigned long phys);
+static inline bool is_iommu_mmio(unsigned long phys)
+{
+	return !!iommu_from_phys(phys);
+}
+
+bool overlaps_iommu_mmio(unsigned long phys, unsigned long size);
+
 int pkvm_intel_iommu_init(void);
 
 int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val);
