@@ -668,3 +668,31 @@ void pkvm_put_vm(struct pkvm_vm *pkvm_vm)
 
 	WARN_ON(atomic_dec_if_positive(&pkvm_vm_ref->refcount) <= 0);
 }
+
+struct pkvm_vcpu *pkvm_get_vcpu(int vm_handle, int vcpu_handle)
+{
+	struct pkvm_vm *pkvm_vm;
+
+	if (vcpu_handle < 0 || vcpu_handle >= KVM_MAX_VCPUS)
+		return NULL;
+
+	pkvm_vm = pkvm_get_vm(vm_handle);
+	if (!pkvm_vm)
+		return NULL;
+
+	vcpu_handle = array_index_nospec(vcpu_handle, KVM_MAX_VCPUS);
+	if (atomic_inc_not_zero(&pkvm_vm->vcpu_refs[vcpu_handle]))
+		return pkvm_vm->vcpus[vcpu_handle];
+
+	pkvm_put_vm(pkvm_vm);
+	return NULL;
+}
+
+void pkvm_put_vcpu(struct pkvm_vcpu *pkvm_vcpu)
+{
+	int vcpu_handle = pkvm_vcpu->vcpu.arch.pkvm.handle;
+
+	WARN_ON(atomic_dec_if_positive(&pkvm_vcpu->pkvm_vm->vcpu_refs[vcpu_handle]) <= 0);
+
+	pkvm_put_vm(pkvm_vcpu->pkvm_vm);
+}
