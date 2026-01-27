@@ -116,6 +116,9 @@ union pkvm_hc_data {
 		struct pkvm_memcache memcache;
 	} vcpu_after_set_cpuid;
 	struct {
+		struct pkvm_memcache memcache;
+	} vcpu_add_fpstate;
+	struct {
 		u64 data[PKVM_HC_DATA_MAX_NUM];
 	} raw;
 };
