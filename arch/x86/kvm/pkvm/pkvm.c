@@ -619,6 +619,16 @@ static int pkvm_vcpu_put(int vm_handle, int vcpu_handle)
 	return ret;
 }
 
+static bool is_guest_vcpu_accessible(struct kvm_vcpu *vcpu)
+{
+	/*
+	 * There is no isolation between non-protected VMs and the host, thus
+	 * all the PV interfaces are allowed for an npVM. For a pVM, by default
+	 * dis-allow all PV interfaces.
+	 */
+	return !pkvm_is_protected_vcpu(vcpu);
+}
+
 static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc hc,
 					   union pkvm_hc_data *out)
 {
@@ -629,6 +639,9 @@ static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc 
 
 	if (!vcpu)
 		return -EINVAL;
+
+	if (!is_guest_vcpu_accessible(vcpu))
+		return -EPERM;
 
 	kvm_x86_call(vcpu_load)(vcpu, cpu);
 
