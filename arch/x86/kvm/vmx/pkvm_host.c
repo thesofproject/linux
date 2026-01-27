@@ -775,6 +775,24 @@ static void pkvm_flush_tlb_guest(struct kvm_vcpu *vcpu)
 		KVM_BUG_ON(pkvm_hypercall(flush_tlb_guest), vcpu->kvm);
 }
 
+static void pkvm_set_interrupt_shadow(struct kvm_vcpu *vcpu, int mask)
+{
+	if (!pkvm_is_protected_vcpu(vcpu))
+		KVM_BUG_ON(pkvm_hypercall(set_interrupt_shadow, mask), vcpu->kvm);
+}
+
+static u32 pkvm_get_interrupt_shadow(struct kvm_vcpu *vcpu)
+{
+	union pkvm_hc_data out;
+
+	if (pkvm_is_protected_vcpu(vcpu))
+		return 0;
+
+	KVM_BUG_ON(pkvm_hypercall_out(get_interrupt_shadow, &out), vcpu->kvm);
+
+	return out.get_interrupt_shadow.data;
+}
+
 struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.name = KBUILD_MODNAME,
 
@@ -827,6 +845,9 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.flush_tlb_current = pkvm_flush_tlb_current,
 	.flush_tlb_gva = pkvm_flush_tlb_gva,
 	.flush_tlb_guest = pkvm_flush_tlb_guest,
+
+	.set_interrupt_shadow = pkvm_set_interrupt_shadow,
+	.get_interrupt_shadow = pkvm_get_interrupt_shadow,
 };
 
 bool pkvm_interrupt_blocked(struct kvm_vcpu *vcpu)
