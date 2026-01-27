@@ -936,6 +936,7 @@ static void kvm_queue_exception_e_p(struct kvm_vcpu *vcpu, unsigned nr,
 {
 	kvm_multiple_exception(vcpu, nr, true, error_code, true, payload);
 }
+#endif /* !__PKVM_HYP__ */
 
 void kvm_requeue_exception(struct kvm_vcpu *vcpu, unsigned int nr,
 			   bool has_error_code, u32 error_code)
@@ -966,6 +967,7 @@ void kvm_requeue_exception(struct kvm_vcpu *vcpu, unsigned int nr,
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_requeue_exception);
 
+#ifndef __PKVM_HYP__
 int kvm_complete_insn_gp(struct kvm_vcpu *vcpu, int err)
 {
 	if (err)

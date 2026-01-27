@@ -945,9 +945,7 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 	.inject_irq = vt_op(inject_irq),
 	.inject_nmi = vt_op(inject_nmi),
 	.inject_exception = vt_op(inject_exception),
-#ifndef __PKVM_HYP__
 	.cancel_injection = vt_op(cancel_injection),
-#endif
 	.interrupt_allowed = vt_op(interrupt_allowed),
 	.nmi_allowed = vt_op(nmi_allowed),
 	.get_nmi_mask = vt_op(get_nmi_mask),
