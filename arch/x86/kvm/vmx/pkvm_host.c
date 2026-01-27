@@ -4,6 +4,7 @@
 #include <linux/kvm_host.h>
 #include <asm/kvm_pkvm.h>
 #include "pkvm_constants.h"
+#include "posted_intr.h"
 #include "x86_ops.h"
 #include "vmx.h"
 
@@ -39,6 +40,27 @@ static int pkvm_alloc_loaded_vmcs(struct loaded_vmcs *loaded_vmcs)
 out_vmcs:
 	pkvm_free_loaded_vmcs(loaded_vmcs);
 	return -ENOMEM;
+}
+
+static void __pkvm_vcpu_unload(void *arg)
+{
+	struct kvm_vcpu *vcpu = arg;
+	struct vcpu_vmx *vmx;
+
+	if (pkvm_hypercall(vcpu_put, vcpu->kvm->arch.pkvm.handle,
+			   vcpu->arch.pkvm.handle))
+		return;
+
+	vmx = to_vmx(vcpu);
+	vmx->loaded_vmcs->cpu = -1;
+}
+
+static void pkvm_vcpu_unload(struct kvm_vcpu *vcpu)
+{
+	int cpu = to_vmx(vcpu)->loaded_vmcs->cpu;
+
+	if (cpu != -1)
+		smp_call_function_single(cpu, __pkvm_vcpu_unload, vcpu, 1);
 }
 
 static int pkvm_check_processor_compat(void)
@@ -172,6 +194,8 @@ static void pkvm_vcpu_free(struct kvm_vcpu *vcpu)
 	union pkvm_hc_data out;
 	int ret;
 
+	pkvm_vcpu_unload(vcpu);
+
 	ret = pkvm_hypercall_out(vcpu_free, &out, vm_handle, vcpu_handle);
 	if (ret) {
 		pr_err("failed to free VM%d vcpu%d: %d\n", vm_handle, vcpu_handle, ret);
@@ -181,6 +205,25 @@ static void pkvm_vcpu_free(struct kvm_vcpu *vcpu)
 	kvm_free_pkvm_memcache(&out.vcpu_free.memcache);
 
 	pkvm_free_loaded_vmcs(vmx->loaded_vmcs);
+}
+
+static void pkvm_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
+{
+	struct vcpu_vmx *vmx = to_vmx(vcpu);
+	bool already_loaded;
+
+	already_loaded = vmx->loaded_vmcs->cpu == cpu;
+	if (!already_loaded)
+		pkvm_vcpu_unload(vcpu);
+
+	if (KVM_BUG_ON(pkvm_hypercall(vcpu_load, vcpu->kvm->arch.pkvm.handle,
+				      vcpu->arch.pkvm.handle), vcpu->kvm))
+		return;
+
+	if (!already_loaded)
+		vmx->loaded_vmcs->cpu = cpu;
+
+	vmx_vcpu_pi_load(vcpu, cpu);
 }
 
 struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
@@ -199,4 +242,6 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.vcpu_precreate = vmx_vcpu_precreate,
 	.vcpu_create = pkvm_vcpu_create,
 	.vcpu_free = pkvm_vcpu_free,
+
+	.vcpu_load = pkvm_vcpu_load,
 };
