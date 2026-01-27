@@ -888,7 +888,9 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 	.vcpu_reset = vt_op(vcpu_reset),
 
 	.prepare_switch_to_guest = vt_op(prepare_switch_to_guest),
+#endif
 	.vcpu_load = vt_op(vcpu_load),
+#ifndef __PKVM_HYP__
 	.vcpu_put = vt_op(vcpu_put),
 
 	.HOST_OWNED_DEBUGCTL = VMX_HOST_OWNED_DEBUGCTL_BITS,
