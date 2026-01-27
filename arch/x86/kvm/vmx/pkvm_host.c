@@ -63,6 +63,64 @@ static void pkvm_vcpu_unload(struct kvm_vcpu *vcpu)
 		smp_call_function_single(cpu, __pkvm_vcpu_unload, vcpu, 1);
 }
 
+static bool pkvm_segment_cache_test(struct vcpu_vmx *vmx, int seg, int field)
+{
+	u32 mask = 1 << (seg * SEG_FIELD_NR + field);
+
+	if (!kvm_register_is_available(&vmx->vcpu, VCPU_EXREG_SEGMENTS)) {
+		kvm_register_mark_available(&vmx->vcpu, VCPU_EXREG_SEGMENTS);
+		vmx->segment_cache.bitmask = 0;
+	}
+
+	return vmx->segment_cache.bitmask & mask;
+}
+
+static void pkvm_segment_cache_set(struct vcpu_vmx *vmx, int seg, int field)
+{
+	u32 mask = 1 << (seg * SEG_FIELD_NR + field);
+
+	if (!kvm_register_is_available(&vmx->vcpu, VCPU_EXREG_SEGMENTS)) {
+		kvm_register_mark_available(&vmx->vcpu, VCPU_EXREG_SEGMENTS);
+		vmx->segment_cache.bitmask = 0;
+	}
+
+	/*
+	 * Make sure the cached segment field value is updated before setting
+	 * the bitmask. This code may get preempted by pkvm_get_cpl_no_cache()
+	 * (on the same CPU), and we don't want pkvm_get_cpl_no_cache() to see
+	 * the field marked in the bitmask as available while its cached value
+	 * is still out of date.
+	 */
+	barrier();
+
+	vmx->segment_cache.bitmask |= mask;
+}
+
+static void pkvm_cache_segment(struct vcpu_vmx *vmx, struct kvm_segment *var, int seg)
+{
+	struct kvm_save_segment *save = &vmx->segment_cache.seg[seg];
+
+	save->selector = var->selector;
+	pkvm_segment_cache_set(vmx, seg, SEG_FIELD_SEL);
+
+	save->base = var->base;
+	pkvm_segment_cache_set(vmx, seg, SEG_FIELD_BASE);
+
+	save->limit = var->limit;
+	pkvm_segment_cache_set(vmx, seg, SEG_FIELD_LIMIT);
+
+	save->ar = (var->unusable << 16) |
+		   (var->g << 15)	 |
+		   (var->db << 14)	 |
+		   (var->l << 13)	 |
+		   (var->avl << 12)	 |
+		   (var->present << 7)	 |
+		   (var->dpl << 5)	 |
+		   (var->s << 4)	 |
+		   var->type;
+	pkvm_segment_cache_set(vmx, seg, SEG_FIELD_AR);
+}
+
 static int pkvm_check_processor_compat(void)
 {
 	return pkvm_hypercall(check_processor_compatibility);
@@ -345,6 +403,157 @@ static int pkvm_set_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 	return -EPERM;
 }
 
+static u64 pkvm_get_segment_base(struct kvm_vcpu *vcpu, int seg)
+{
+	struct vcpu_vmx *vmx = to_vmx(vcpu);
+	union pkvm_hc_data out;
+	ulong *p;
+
+	if (vcpu->arch.guest_state_protected)
+		return 0;
+
+	p = &vmx->segment_cache.seg[seg].base;
+
+	if (!pkvm_segment_cache_test(vmx, seg, SEG_FIELD_BASE)) {
+		if (KVM_BUG_ON(pkvm_hypercall_out(get_segment_base, &out, seg), vcpu->kvm))
+			return 0;
+
+		*p = out.get_segment_base.data;
+		pkvm_segment_cache_set(vmx, seg, SEG_FIELD_BASE);
+	}
+
+	return *p;
+}
+
+static void pkvm_get_segment(struct kvm_vcpu *vcpu, struct kvm_segment *var, int seg)
+{
+	struct vcpu_vmx *vmx = to_vmx(vcpu);
+	struct kvm_save_segment *segment;
+	u32 ar;
+
+	if (vcpu->arch.guest_state_protected) {
+		if (var)
+			memset(var, 0, sizeof(*var));
+		return;
+	}
+
+	if (!pkvm_segment_cache_test(vmx, seg, SEG_FIELD_SEL) ||
+	    !pkvm_segment_cache_test(vmx, seg, SEG_FIELD_BASE) ||
+	    !pkvm_segment_cache_test(vmx, seg, SEG_FIELD_LIMIT) ||
+	    !pkvm_segment_cache_test(vmx, seg, SEG_FIELD_AR)) {
+		union pkvm_hc_data out;
+
+		if (KVM_BUG_ON(pkvm_hypercall_out(get_segment, &out, seg), vcpu->kvm))
+			return;
+
+		pkvm_cache_segment(vmx, &out.get_segment.seg_val, seg);
+	}
+
+	if (!var)
+		return;
+
+	segment = &vmx->segment_cache.seg[seg];
+	var->selector = segment->selector;
+	var->base = segment->base;
+	var->limit = segment->limit;
+	ar = segment->ar;
+	var->unusable = (ar >> 16) & 1;
+	var->type = ar & 15;
+	var->s = (ar >> 4) & 1;
+	var->dpl = (ar >> 5) & 3;
+	/*
+	 * Some userspaces do not preserve unusable property. Since usable
+	 * segment has to be present according to VMX spec we can use present
+	 * property to amend userspace bug by making unusable segment always
+	 * nonpresent. vmx_segment_access_rights() already marks nonpresent
+	 * segment as unusable.
+	 */
+	var->present = !var->unusable;
+	var->avl = (ar >> 12) & 1;
+	var->l = (ar >> 13) & 1;
+	var->db = (ar >> 14) & 1;
+	var->g = (ar >> 15) & 1;
+}
+
+static void pkvm_set_segment(struct kvm_vcpu *vcpu, struct kvm_segment *var, int seg)
+{
+	union pkvm_hc_data in = {
+		.set_segment = {
+			.seg_val = *var,
+			.seg = seg,
+		},
+	};
+
+	if (vcpu->arch.guest_state_protected)
+		return;
+
+	vmx_segment_cache_clear(to_vmx(vcpu));
+
+	KVM_BUG_ON(pkvm_hypercall_in(set_segment, &in), vcpu->kvm);
+}
+
+static int pkvm_get_cpl(struct kvm_vcpu *vcpu)
+{
+	struct vcpu_vmx *vmx = to_vmx(vcpu);
+	int seg = VCPU_SREG_SS;
+	u32 ar;
+
+	if (vcpu->arch.guest_state_protected)
+		return 0;
+
+	if (!pkvm_segment_cache_test(vmx, seg, SEG_FIELD_AR))
+		pkvm_get_segment(vcpu, NULL, seg);
+
+	ar = vmx->segment_cache.seg[seg].ar;
+	return VMX_AR_DPL(ar);
+}
+
+static int pkvm_get_cpl_no_cache(struct kvm_vcpu *vcpu)
+{
+	struct vcpu_vmx *vmx = to_vmx(vcpu);
+	int seg = VCPU_SREG_SS;
+	union pkvm_hc_data out;
+
+	if (vcpu->arch.guest_state_protected)
+		return 0;
+
+	/*
+	 * Even though this is a no_cache version of get_cpl, still use the
+	 * cached value if it is available, to avoid unnecessary calls to pKVM.
+	 * It may be cached either by the pKVM hypervisor itself (when
+	 * returning to the host after vcpu_run) or by the host after another
+	 * get_segment call to pKVM (in such case, the barrier() in
+	 * pkvm_segment_cache_set() makes sure that we are seeing the up-to-date
+	 * value).
+	 */
+	if (likely(pkvm_segment_cache_test(vmx, seg, SEG_FIELD_AR)))
+		return VMX_AR_DPL(vmx->segment_cache.seg[seg].ar);
+
+	if (KVM_BUG_ON(pkvm_hypercall_out(get_segment, &out, seg), vcpu->kvm))
+		return 0;
+
+	return out.get_segment.seg_val.dpl;
+}
+
+static void pkvm_get_cs_db_l_bits(struct kvm_vcpu *vcpu, int *db, int *l)
+{
+	struct vcpu_vmx *vmx = to_vmx(vcpu);
+	int seg = VCPU_SREG_CS;
+	u32 ar;
+
+	if (vcpu->arch.guest_state_protected) {
+		*db = *l = 0;
+		return;
+	}
+
+	if (!pkvm_segment_cache_test(vmx, seg, SEG_FIELD_AR))
+		pkvm_get_segment(vcpu, NULL, seg);
+
+	ar = vmx->segment_cache.seg[seg].ar;
+	*db = (ar >> 14) & 1;
+	*l = (ar >> 13) & 1;
+}
+
 static bool pkvm_is_valid_cr0(struct kvm_vcpu *vcpu, unsigned long cr0)
 {
 	return true;
@@ -519,6 +728,12 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.get_feature_msr = pkvm_get_feature_msr,
 	.get_msr = pkvm_get_msr,
 	.set_msr = pkvm_set_msr,
+	.get_segment_base = pkvm_get_segment_base,
+	.get_segment = pkvm_get_segment,
+	.set_segment = pkvm_set_segment,
+	.get_cpl = pkvm_get_cpl,
+	.get_cpl_no_cache = pkvm_get_cpl_no_cache,
+	.get_cs_db_l_bits = pkvm_get_cs_db_l_bits,
 	.is_valid_cr0 = pkvm_is_valid_cr0,
 	.set_cr0 = pkvm_set_cr0,
 	.is_valid_cr4 = pkvm_is_valid_cr4,
