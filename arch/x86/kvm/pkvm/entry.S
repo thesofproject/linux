@@ -2,6 +2,7 @@
 #include <linux/linkage.h>
 #include <asm/asm.h>
 #include <asm/cache.h>
+#include <asm/nospec-branch.h>
 #include <asm/segment.h>
 #include <asm/trapnr.h>
 #include <asm/unwind_hints.h>
@@ -83,3 +84,16 @@ SYM_CODE_START_NOALIGN(x86_verw_sel)
 SYM_CODE_END(x86_verw_sel);
 
 .popsection
+
+/* Clobbers AX, CX, DX */
+SYM_FUNC_START(write_ibpb)
+	ANNOTATE_NOENDBR
+	movl	$MSR_IA32_PRED_CMD, %ecx
+	movl	_ASM_RIP(x86_pred_cmd), %eax
+	xorl	%edx, %edx
+	wrmsr
+
+	/* Make sure IBPB clears return stack preductions too. */
+	FILL_RETURN_BUFFER %rax, RSB_CLEAR_LOOPS, X86_BUG_IBPB_NO_RET
+	RET
+SYM_FUNC_END(write_ibpb)
