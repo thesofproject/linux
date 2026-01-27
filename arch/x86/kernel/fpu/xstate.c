@@ -1826,6 +1826,7 @@ static inline int xstate_request_perm(unsigned long idx, bool guest)
 	return -EPERM;
 }
 #endif  /* !CONFIG_X86_64 */
+#endif /* __PKVM_HYP__ */
 
 u64 xstate_get_guest_group_perm(void)
 {
@@ -1833,6 +1834,7 @@ u64 xstate_get_guest_group_perm(void)
 }
 EXPORT_SYMBOL_GPL(xstate_get_guest_group_perm);
 
+#ifndef __PKVM_HYP__
 /**
  * fpu_xstate_prctl - xstate permission operations
  * @option:	A subfunction of arch_prctl()
