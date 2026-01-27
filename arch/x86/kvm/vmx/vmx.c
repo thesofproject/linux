@@ -1398,7 +1398,6 @@ static void vmx_prepare_switch_to_host(struct vcpu_vmx *vmx)
 #endif /* !__PKVM_HYP__ */
 
 #ifdef CONFIG_X86_64
-#ifndef __PKVM_HYP__
 static u64 vmx_read_guest_host_msr(struct vcpu_vmx *vmx, u32 msr, u64 *cache)
 {
 	preempt_disable();
@@ -1407,7 +1406,6 @@ static u64 vmx_read_guest_host_msr(struct vcpu_vmx *vmx, u32 msr, u64 *cache)
 	preempt_enable();
 	return *cache;
 }
-#endif /* !__PKVM_HYP__ */
 
 static void vmx_write_guest_host_msr(struct vcpu_vmx *vmx, u32 msr, u64 data,
 				     u64 *cache)
@@ -1419,13 +1417,11 @@ static void vmx_write_guest_host_msr(struct vcpu_vmx *vmx, u32 msr, u64 data,
 	*cache = data;
 }
 
-#ifndef __PKVM_HYP__
 static u64 vmx_read_guest_kernel_gs_base(struct vcpu_vmx *vmx)
 {
 	return vmx_read_guest_host_msr(vmx, MSR_KERNEL_GS_BASE,
 				       &vmx->msr_guest_kernel_gs_base);
 }
-#endif /* !__PKVM_HYP__ */
 
 static void vmx_write_guest_kernel_gs_base(struct vcpu_vmx *vmx, u64 data)
 {
@@ -2079,6 +2075,7 @@ int vmx_get_feature_msr(u32 msr, u64 *data)
 		return KVM_MSR_RET_UNSUPPORTED;
 	}
 }
+#endif /* !__PKVM_HYP__ */
 
 /*
  * Reads an msr value (of 'msr_info->index') into 'msr_info->data'.
@@ -2089,7 +2086,9 @@ int vmx_get_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	struct vmx_uret_msr *msr;
+#ifndef __PKVM_HYP__
 	u32 index;
+#endif
 
 	switch (msr_info->index) {
 #ifdef CONFIG_X86_64
@@ -2162,7 +2161,7 @@ int vmx_get_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 		if (vmx_get_vmx_msr(&vmx->nested.msrs, msr_info->index,
 				    &msr_info->data))
 			return 1;
-#ifdef CONFIG_KVM_HYPERV
+#if defined(CONFIG_KVM_HYPERV) && !defined(__PKVM_HYP__)
 		/*
 		 * Enlightened VMCS v1 doesn't have certain VMCS fields but
 		 * instead of just ignoring the features, different Hyper-V
@@ -2175,6 +2174,7 @@ int vmx_get_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 							&msr_info->data);
 #endif
 		break;
+#ifndef __PKVM_HYP__
 	case MSR_IA32_RTIT_CTL:
 		if (!vmx_pt_mode_is_host_guest())
 			return 1;
@@ -2220,6 +2220,17 @@ int vmx_get_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 		else
 			msr_info->data = vmx->pt_desc.guest.addr_a[index / 2];
 		break;
+#else
+	/* The pKVM doesn't support PT guest mode. */
+	case MSR_IA32_RTIT_CTL:
+	case MSR_IA32_RTIT_STATUS:
+	case MSR_IA32_RTIT_CR3_MATCH:
+	case MSR_IA32_RTIT_OUTPUT_BASE:
+	case MSR_IA32_RTIT_OUTPUT_MASK:
+	case MSR_IA32_RTIT_ADDR0_A ... MSR_IA32_RTIT_ADDR3_B:
+		WARN_ON_ONCE(vmx_pt_mode_is_host_guest());
+		return 1;
+#endif
 	case MSR_IA32_S_CET:
 		msr_info->data = vmcs_readl(GUEST_S_CET);
 		break;
@@ -2244,7 +2255,6 @@ int vmx_get_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 
 	return 0;
 }
-#endif /* !__PKVM_HYP__ */
 
 static u64 nested_vmx_truncate_sysenter_addr(struct kvm_vcpu *vcpu,
 						    u64 data)
