@@ -5316,6 +5316,7 @@ void vmx_inject_nmi(struct kvm_vcpu *vcpu)
 
 	vmx_clear_hlt(vcpu);
 }
+#endif /* !__PKVM_HYP__ */
 
 bool vmx_get_nmi_mask(struct kvm_vcpu *vcpu)
 {
@@ -5406,6 +5407,7 @@ int vmx_interrupt_allowed(struct kvm_vcpu *vcpu, bool for_injection)
 	return !vmx_interrupt_blocked(vcpu);
 }
 
+#ifndef __PKVM_HYP__
 int vmx_set_tss_addr(struct kvm *kvm, unsigned int addr)
 {
 	void __user *ret;
