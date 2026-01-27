@@ -4685,7 +4685,6 @@ static u32 vmx_get_initial_vmexit_ctrl(void)
 		~(VM_EXIT_LOAD_IA32_PERF_GLOBAL_CTRL | VM_EXIT_LOAD_IA32_EFER);
 }
 
-#ifndef __PKVM_HYP__
 void vmx_refresh_apicv_exec_ctrl(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
@@ -4707,7 +4706,6 @@ void vmx_refresh_apicv_exec_ctrl(struct kvm_vcpu *vcpu)
 
 	vmx_update_msr_bitmap_x2apic(vcpu);
 }
-#endif /* !__PKVM_HYP__ */
 
 static u32 vmx_exec_control(struct vcpu_vmx *vmx)
 {
