@@ -1317,7 +1317,6 @@ EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_set_cpu_caps);
 #undef VENDOR_F
 #undef RUNTIME_F
 
-#ifndef __PKVM_HYP__
 struct kvm_cpuid_array {
 	struct kvm_cpuid_entry2 *entries;
 	int maxnent;
@@ -1374,7 +1373,6 @@ static struct kvm_cpuid_entry2 *do_host_cpuid(struct kvm_cpuid_array *array,
 
 	return entry;
 }
-#endif /* !__PKVM_HYP__ */
 
 static int cpuid_func_emulated(struct kvm_cpuid_entry2 *entry, u32 func,
 			       bool include_partially_emulated)
@@ -1413,7 +1411,6 @@ static int cpuid_func_emulated(struct kvm_cpuid_entry2 *entry, u32 func,
 	}
 }
 
-#ifndef __PKVM_HYP__
 static int __do_cpuid_func_emulated(struct kvm_cpuid_array *array, u32 func)
 {
 	if (array->nent >= array->maxnent)
@@ -1791,8 +1788,11 @@ static inline int __do_cpuid_func(struct kvm_cpuid_array *array, u32 function)
 		} else {
 			phys_as = entry->eax & 0xff;
 			g_phys_as = phys_as;
+			/* FIXME: Check pKVM guest MMU level */
+#ifndef __PKVM_HYP__
 			if (kvm_mmu_get_max_tdp_level() < 5)
 				g_phys_as = min(g_phys_as, 48U);
+#endif
 		}
 
 		entry->eax = phys_as | (virt_as << 8) | (g_phys_as << 16);
@@ -1924,6 +1924,7 @@ static int get_cpuid_func(struct kvm_cpuid_array *array, u32 func,
 	return r;
 }
 
+#ifndef __PKVM_HYP__
 static bool sanity_check_entries(struct kvm_cpuid_entry2 __user *entries,
 				 __u32 num_entries, unsigned int ioctl_type)
 {
@@ -2151,4 +2152,55 @@ int kvm_emulate_cpuid(struct kvm_vcpu *vcpu)
 	return kvm_skip_emulated_instruction(vcpu);
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_cpuid);
+#else  /* !__PKVM_HYP__ */
+
+static DEFINE_PER_CPU(struct kvm_cpuid_entry2, cpuid_def[KVM_MAX_CPUID_ENTRIES]);
+
+static int pkvm_get_cpuid(struct kvm_cpuid_entry2 *entries, int *nent)
+{
+	static const u32 funcs[] = {
+		0, 0x80000000, KVM_CPUID_SIGNATURE,
+	};
+
+	struct kvm_cpuid_array array = {
+		.entries = entries,
+		.nent = 0,
+		.maxnent = *nent,
+	};
+	int r, i;
+
+	if (*nent < 1)
+		return -E2BIG;
+	if (*nent > KVM_MAX_CPUID_ENTRIES)
+		*nent = KVM_MAX_CPUID_ENTRIES;
+
+	for (i = 0; i < ARRAY_SIZE(funcs); i++) {
+		r = get_cpuid_func(&array, funcs[i], KVM_GET_SUPPORTED_CPUID);
+		if (r)
+			goto out;
+	}
+
+	*nent = array.nent;
+out:
+	return r;
+}
+
+int pkvm_enforce_cpuid(struct kvm_cpuid_entry2 *e2, int nent)
+{
+	struct kvm_cpuid_entry2 *de2 = this_cpu_ptr(cpuid_def);
+	int def_nent;
+
+	memset(de2, 0, KVM_MAX_CPUID_ENTRIES * sizeof(struct kvm_cpuid_entry2));
+	def_nent = KVM_MAX_CPUID_ENTRIES;
+
+	/*
+	 * It is possible that the pKVM hypervisor can implement different
+	 * permitted XCR0 for each guest (although currently the pKVM hypervisor
+	 * implements the same permitted XCR0 for all guests). In this case, the
+	 * default CPUID leaf 0xD will be different. Thus get the default CPUID
+	 * entries for each guest, rather than initialize cpuid_def once during
+	 * pKVM initialization.
+	 */
+	return pkvm_get_cpuid(de2, &def_nent);
+}
 #endif /* !__PKVM_HYP__ */
