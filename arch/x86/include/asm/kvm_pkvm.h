@@ -167,10 +167,10 @@ static inline int pkvm_hc_input_num(enum pkvm_hc hc)
 }
 
 #define PKVM_HC_IN_0()
-#define PKVM_HC_IN_1(a1)		, "b"(a1)
-#define PKVM_HC_IN_2(a1, a2)		PKVM_HC_IN_1(a1), "c"(a2)
-#define PKVM_HC_IN_3(a1, a2, a3)	PKVM_HC_IN_2(a1, a2), "d"(a3)
-#define PKVM_HC_IN_4(a1, a2, a3, a4)	PKVM_HC_IN_3(a1, a2, a3), "S"(a4)
+#define PKVM_HC_IN_1(a1)		, "b"((unsigned long)a1)
+#define PKVM_HC_IN_2(a1, a2)		PKVM_HC_IN_1(a1), "c"((unsigned long)a2)
+#define PKVM_HC_IN_3(a1, a2, a3)	PKVM_HC_IN_2(a1, a2), "d"((unsigned long)a3)
+#define PKVM_HC_IN_4(a1, a2, a3, a4)	PKVM_HC_IN_3(a1, a2, a3), "S"((unsigned long)a4)
 
 #define PKVM_HC_OUT_0(o)
 #define PKVM_HC_OUT_1(o)		, "=b"((o)->raw.data[0])
