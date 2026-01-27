@@ -951,6 +951,7 @@ unsigned int __vmx_vcpu_run_flags(struct vcpu_vmx *vmx)
 
 	return flags;
 }
+#endif /* !__PKVM_HYP__ */
 
 static __always_inline void clear_atomic_switch_msr_special(struct vcpu_vmx *vmx,
 		unsigned long entry, unsigned long exit)
@@ -1141,6 +1142,7 @@ static bool update_transition_efer(struct vcpu_vmx *vmx)
 	return true;
 }
 
+#ifndef __PKVM_HYP__
 #ifdef CONFIG_X86_32
 /*
  * On 32-bit kernels, VM exits still load the FS and GS bases from the
@@ -1923,7 +1925,6 @@ void vmx_inject_exception(struct kvm_vcpu *vcpu)
 	vmx_clear_hlt(vcpu);
 }
 
-#ifndef __PKVM_HYP__
 static void vmx_setup_uret_msr(struct vcpu_vmx *vmx, unsigned int msr,
 			       bool load_into_hardware)
 {
@@ -1979,6 +1980,7 @@ static void vmx_setup_uret_msrs(struct vcpu_vmx *vmx)
 	vmx->guest_uret_msrs_loaded = false;
 }
 
+#ifndef __PKVM_HYP__
 u64 vmx_get_l2_tsc_offset(struct kvm_vcpu *vcpu)
 {
 	struct vmcs12 *vmcs12 = get_vmcs12(vcpu);
@@ -3323,6 +3325,7 @@ static void enter_rmode(struct kvm_vcpu *vcpu)
 	fix_rmode_seg(VCPU_SREG_GS, &vmx->rmode.segs[VCPU_SREG_GS]);
 	fix_rmode_seg(VCPU_SREG_FS, &vmx->rmode.segs[VCPU_SREG_FS]);
 }
+#endif /* !__PKVM_HYP__ */
 
 int vmx_set_efer(struct kvm_vcpu *vcpu, u64 efer)
 {
@@ -3347,6 +3350,7 @@ int vmx_set_efer(struct kvm_vcpu *vcpu, u64 efer)
 	return 0;
 }
 
+#ifndef __PKVM_HYP__
 #ifdef CONFIG_X86_64
 
 static void enter_lmode(struct kvm_vcpu *vcpu)
