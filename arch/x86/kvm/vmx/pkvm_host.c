@@ -1003,6 +1003,8 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.pi_start_bypass = vmx_pi_start_bypass,
 
 	.apic_init_signal_blocked = pkvm_apic_init_signal_blocked,
+
+	.vcpu_deliver_sipi_vector = kvm_vcpu_deliver_sipi_vector,
 };
 
 bool pkvm_interrupt_blocked(struct kvm_vcpu *vcpu)
