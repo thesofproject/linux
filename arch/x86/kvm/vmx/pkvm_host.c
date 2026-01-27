@@ -793,6 +793,16 @@ static u32 pkvm_get_interrupt_shadow(struct kvm_vcpu *vcpu)
 	return out.get_interrupt_shadow.data;
 }
 
+static void pkvm_enable_nmi_window(struct kvm_vcpu *vcpu)
+{
+	KVM_BUG_ON(pkvm_hypercall(enable_nmi_window), vcpu->kvm);
+}
+
+static void pkvm_enable_irq_window(struct kvm_vcpu *vcpu)
+{
+	KVM_BUG_ON(pkvm_hypercall(enable_irq_window), vcpu->kvm);
+}
+
 struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.name = KBUILD_MODNAME,
 
@@ -848,6 +858,8 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 
 	.set_interrupt_shadow = pkvm_set_interrupt_shadow,
 	.get_interrupt_shadow = pkvm_get_interrupt_shadow,
+	.enable_nmi_window = pkvm_enable_nmi_window,
+	.enable_irq_window = pkvm_enable_irq_window,
 };
 
 bool pkvm_interrupt_blocked(struct kvm_vcpu *vcpu)
