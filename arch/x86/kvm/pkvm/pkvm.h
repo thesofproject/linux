@@ -98,5 +98,6 @@ struct pkvm_vm *pkvm_get_vm(int vm_handle);
 void pkvm_put_vm(struct pkvm_vm *pkvm_vm);
 struct pkvm_vcpu *pkvm_get_vcpu(int vm_handle, int vcpu_handle);
 void pkvm_put_vcpu(struct pkvm_vcpu *pkvm_vcpu);
+unsigned long pkvm_pcpu_tss(int cpu);
 
 #endif /* __PKVM_X86_PKVM_H */
