@@ -925,12 +925,12 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 	.set_rflags = vt_op(set_rflags),
 	.get_if_flag = vt_op(get_if_flag),
 
-#ifndef __PKVM_HYP__
 	.flush_tlb_all = vt_op(flush_tlb_all),
 	.flush_tlb_current = vt_op(flush_tlb_current),
 	.flush_tlb_gva = vt_op(flush_tlb_gva),
 	.flush_tlb_guest = vt_op(flush_tlb_guest),
 
+#ifndef __PKVM_HYP__
 	.vcpu_pre_run = vt_op(vcpu_pre_run),
 	.vcpu_run = vt_op(vcpu_run),
 	.handle_exit = vt_op(handle_exit),
