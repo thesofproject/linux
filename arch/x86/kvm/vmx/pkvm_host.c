@@ -910,6 +910,17 @@ static void pkvm_hwapic_isr_update(struct kvm_vcpu *vcpu, int max_isr)
 	KVM_BUG_ON(pkvm_hypercall(hwapic_isr_update, max_isr), vcpu->kvm);
 }
 
+static bool pkvm_apic_init_signal_blocked(struct kvm_vcpu *vcpu)
+{
+	/*
+	 * The init signal will be blocked if the guest VM is emulating nested
+	 * and in virtual VMX root mode. But as this is not a supported case by
+	 * the pKVM hypervisor, the init signal should never be blocked for the
+	 * guest VM.
+	 */
+	return false;
+}
+
 struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.name = KBUILD_MODNAME,
 
@@ -990,6 +1001,8 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 
 	.pi_update_irte = vmx_pi_update_irte,
 	.pi_start_bypass = vmx_pi_start_bypass,
+
+	.apic_init_signal_blocked = pkvm_apic_init_signal_blocked,
 };
 
 bool pkvm_interrupt_blocked(struct kvm_vcpu *vcpu)
