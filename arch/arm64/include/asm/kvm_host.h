@@ -133,8 +133,9 @@ static inline int __topup_hyp_memcache(struct kvm_hyp_memcache *mc,
 	while (mc->nr_pages < min_pages) {
 		phys_addr_t *p = alloc_fn(arg, order);
 
-		if (!p)
-			return -ENOMEM;
+		if (IS_ERR_OR_NULL(p))
+			return p ? PTR_ERR(p) : -ENOMEM;
+
 		push_hyp_memcache(mc, p, to_pa, order);
 	}
 
