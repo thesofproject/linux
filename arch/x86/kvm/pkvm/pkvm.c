@@ -354,6 +354,7 @@ static int __vcpu_create(struct kvm *kvm, struct kvm_vcpu *vcpu, struct fpstate 
 	void *unused = (void *)pkvm_vcpu +
 		       PKVM_VCPU_BASE_SIZE +
 		       kvm_vcpu_sz;
+	int cpu = raw_smp_processor_id();
 
 	if (ret)
 		return ret;
@@ -407,6 +408,21 @@ static int __vcpu_create(struct kvm *kvm, struct kvm_vcpu *vcpu, struct fpstate 
 	ret = kvm_x86_call(vcpu_create)(vcpu);
 	if (ret)
 		goto unsetup_lapic;
+
+	/* Load guest vCPU to reset it. */
+	kvm_x86_call(vcpu_load)(vcpu, cpu);
+
+	kvm_vcpu_reset(vcpu, false);
+
+	/*
+	 * The guest vCPU should be put before switching back to the host vCPU
+	 * to make sure the vcpu state is not cached on this CPU as this guest
+	 * vCPU may be loaded on another CPU later by the host via the PV
+	 * interface.
+	 */
+	kvm_x86_call(vcpu_put)(vcpu);
+
+	kvm_x86_call(vcpu_load)(this_cpu_read(host_vcpu), cpu);
 
 	return 0;
 
