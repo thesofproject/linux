@@ -8,8 +8,11 @@
 #include "vmx.h"
 
 #ifdef __PKVM_HYP__
+static inline void vmx_leave_nested(struct kvm_vcpu *vcpu) {}
 static inline void nested_vmx_setup_ctls_msrs(struct vmcs_config *vmcs_conf, u32 ept_caps) {}
 static inline void nested_vmx_free_vcpu(struct kvm_vcpu *vcpu) {}
+static inline void nested_vmx_set_vmcs_shadowing_bitmap(void) {}
+static inline int vmx_set_vmx_msr(struct kvm_vcpu *vcpu, u32 msr_index, u64 data) { return 1; }
 
 static inline struct vmcs12 *get_vmcs12(struct kvm_vcpu *vcpu)
 {
