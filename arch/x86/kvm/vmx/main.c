@@ -968,8 +968,8 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 	.required_apicv_inhibits = VMX_REQUIRED_APICV_INHIBITS,
 #endif
 	.hwapic_isr_update = vt_op(hwapic_isr_update),
-#ifndef __PKVM_HYP__
 	.sync_pir_to_irr = vt_op(sync_pir_to_irr),
+#ifndef __PKVM_HYP__
 	.deliver_interrupt = vt_op(deliver_interrupt),
 	.dy_apicv_has_pending_interrupt = pi_has_pending_interrupt,
 

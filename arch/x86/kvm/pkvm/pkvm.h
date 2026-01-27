@@ -21,6 +21,8 @@ struct pkvm_vcpu {
 	 * structure wrapping the kvm_vcpu structure (see below).
 	 */
 	size_t size;
+	/* Maximum IRR value recorded for posted interrupts. */
+	int max_irr;
 	/*
 	 * The struct kvm_vcpu should be the last element. In cases where struct
 	 * kvm_vcpu is wrapped by a vendor specific structure, putting it as the
