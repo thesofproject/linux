@@ -653,6 +653,14 @@ static bool is_guest_vcpu_accessible(struct kvm_vcpu *vcpu, enum pkvm_hc hc)
 		return true;
 
 	switch (hc) {
+	case __pkvm__enable_nmi_window:
+	case __pkvm__enable_irq_window:
+		/*
+		 * The host is responsible for running vCPU, injecting
+		 * interrupts, emulating lapic etc. Always allow the related PV
+		 * interfaces.
+		 */
+		return true;
 	case __pkvm__set_efer:
 	case __pkvm__set_msr:
 	case __pkvm__get_msr:
@@ -915,6 +923,12 @@ static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc 
 		break;
 	case __pkvm__get_interrupt_shadow:
 		out->get_interrupt_shadow.data = kvm_x86_call(get_interrupt_shadow)(vcpu);
+		break;
+	case __pkvm__enable_nmi_window:
+		kvm_x86_call(enable_nmi_window)(vcpu);
+		break;
+	case __pkvm__enable_irq_window:
+		kvm_x86_call(enable_irq_window)(vcpu);
 		break;
 	default:
 		ret = -EINVAL;
