@@ -1546,6 +1546,7 @@ ddk_headers(
     hdrs = [
         "drivers/dma/dmaengine.h",
         "drivers/extcon/extcon.h",
+        "drivers/opp/opp.h",
         "drivers/pci/controller/dwc/pcie-designware.h",
         "drivers/pci/pci.h",
         "drivers/thermal/thermal_core.h",
@@ -1572,6 +1573,7 @@ ddk_headers(
         "arch/arm64/include/uapi",
         "drivers/dma",
         "drivers/extcon",
+        "drivers/opp",
         "drivers/pci",
         "drivers/pci/controller/dwc",
         "drivers/thermal",
