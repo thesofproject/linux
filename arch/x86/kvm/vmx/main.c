@@ -952,9 +952,9 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 	.set_nmi_mask = vt_op(set_nmi_mask),
 	.enable_nmi_window = vt_op(enable_nmi_window),
 	.enable_irq_window = vt_op(enable_irq_window),
-#ifndef __PKVM_HYP__
 	.update_cr8_intercept = vt_op(update_cr8_intercept),
 
+#ifndef __PKVM_HYP__
 	.x2apic_icr_is_split = false,
 	.set_virtual_apic_mode = vt_op(set_virtual_apic_mode),
 	.set_apic_access_page_addr = vt_op(set_apic_access_page_addr),
