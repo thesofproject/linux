@@ -1636,6 +1636,7 @@ int kvm_emulate_rdpmc(struct kvm_vcpu *vcpu)
 	return kvm_skip_emulated_instruction(vcpu);
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_rdpmc);
+#endif /* !__PKVM_HYP__ */
 
 /*
  * Some IA32_ARCH_CAPABILITIES bits have dependencies on MSRs that KVM
@@ -1656,7 +1657,7 @@ EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_rdpmc);
 	 ARCH_CAP_FB_CLEAR | ARCH_CAP_RRSBA | ARCH_CAP_PBRSB_NO | ARCH_CAP_GDS_NO | \
 	 ARCH_CAP_RFDS_NO | ARCH_CAP_RFDS_CLEAR | ARCH_CAP_BHI_NO | ARCH_CAP_ITS_NO)
 
-static u64 kvm_get_arch_capabilities(void)
+u64 kvm_get_arch_capabilities(void)
 {
 	u64 data = kvm_host.arch_capabilities & KVM_SUPPORTED_ARCH_CAP;
 
@@ -1668,6 +1669,7 @@ static u64 kvm_get_arch_capabilities(void)
 	 */
 	data |= ARCH_CAP_PSCHANGE_MC_NO;
 
+#ifndef __PKVM_HYP__
 	/*
 	 * If we're doing cache flushes (either "always" or "cond")
 	 * we will do one whenever the guest does a vmlaunch/vmresume.
@@ -1679,6 +1681,18 @@ static u64 kvm_get_arch_capabilities(void)
 	 */
 	if (l1tf_vmx_mitigation != VMENTER_L1D_FLUSH_NEVER)
 		data |= ARCH_CAP_SKIP_VMENTRY_L1DFLUSH;
+#else
+	/*
+	 * The CPU which can run the pKVM hypervisor doesn't have L1TF CPU
+	 * bugs. This is guaranteed by pkvm_mitigate_cpu_bugs() which currently
+	 * doesn't mitigate L1TF and thus would fail pKVM initialization if L1TF
+	 * was present, so we can set ARCH_CAP_SKIP_VMENTRY_L1DFLUSH for guest.
+	 * As the pKVM hypervisor doesn't support nest, passing this cap to the
+	 * guest is not necessary. But in case nest is supported in the future,
+	 * passing this cap anyway.
+	 */
+	data |= ARCH_CAP_SKIP_VMENTRY_L1DFLUSH;
+#endif
 
 	if (!boot_cpu_has_bug(X86_BUG_CPU_MELTDOWN))
 		data |= ARCH_CAP_RDCL_NO;
@@ -1710,12 +1724,23 @@ static u64 kvm_get_arch_capabilities(void)
 		 */
 	}
 
+#ifndef __PKVM_HYP__
 	if (!boot_cpu_has_bug(X86_BUG_GDS) || gds_ucode_mitigated())
 		data |= ARCH_CAP_GDS_NO;
+#else
+	/*
+	 * The CPU which can run the pKVM hypervisor doesn't have GDS bug. This
+	 * is guaranteed by pkvm_mitigate_cpu_bugs() which currently doesn't
+	 * mitigate GDS and thus would fail pKVM initialization if GDS was
+	 * present, so we can set ARCH_CAP_GDS_NO.
+	 */
+	data |= ARCH_CAP_GDS_NO;
+#endif
 
 	return data;
 }
 
+#ifndef __PKVM_HYP__
 static int kvm_get_feature_msr(struct kvm_vcpu *vcpu, u32 index, u64 *data,
 			       bool host_initiated)
 {

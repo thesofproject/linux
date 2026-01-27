@@ -396,6 +396,12 @@ static int __vcpu_create(struct kvm *kvm, struct kvm_vcpu *vcpu, struct fpstate 
 	if (pkvm_is_protected_vcpu(vcpu))
 		fpstate_set_confidential(&vcpu->arch.guest_fpu);
 
+	if (kvm_check_has_quirk(vcpu->kvm, KVM_X86_QUIRK_STUFF_FEATURE_MSRS)) {
+		vcpu->arch.arch_capabilities = kvm_get_arch_capabilities();
+		vcpu->arch.msr_platform_info = MSR_PLATFORM_INFO_CPUID_FAULT;
+		vcpu->arch.perf_capabilities = kvm_caps.supported_perf_cap;
+	}
+
 	ret = kvm_x86_call(vcpu_create)(vcpu);
 	if (ret)
 		goto unsetup_lapic;
