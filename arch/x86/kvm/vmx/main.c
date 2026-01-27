@@ -921,9 +921,9 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 	.set_idt = vt_op(set_idt),
 	.get_gdt = vt_op(get_gdt),
 	.set_gdt = vt_op(set_gdt),
+#endif
 	.set_dr7 = vt_op(set_dr7),
 	.sync_dirty_debug_regs = vt_op(sync_dirty_debug_regs),
-#endif
 	.cache_reg = vt_op(cache_reg),
 	.get_rflags = vt_op(get_rflags),
 	.set_rflags = vt_op(set_rflags),
