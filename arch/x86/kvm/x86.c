@@ -177,11 +177,13 @@ module_param(kvmclock_periodic_sync, bool, 0444);
 /* tsc tolerance in parts per million - default to 1/2 of the NTP threshold */
 static u32 __read_mostly tsc_tolerance_ppm = 250;
 module_param(tsc_tolerance_ppm, uint, 0644);
+#endif /* !__PKVM_HYP__ */
 
 bool __read_mostly enable_vmware_backdoor = false;
 module_param(enable_vmware_backdoor, bool, 0444);
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(enable_vmware_backdoor);
 
+#ifndef __PKVM_HYP__
 /*
  * Flags to manipulate forced emulation behavior (any non-zero value will
  * enable forced emulation).

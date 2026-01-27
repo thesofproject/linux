@@ -894,8 +894,10 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 
 #ifndef __PKVM_HYP__
 	.HOST_OWNED_DEBUGCTL = VMX_HOST_OWNED_DEBUGCTL_BITS,
+#endif
 
 	.update_exception_bitmap = vt_op(update_exception_bitmap),
+#ifndef __PKVM_HYP__
 	.get_feature_msr = vmx_get_feature_msr,
 	.get_msr = vt_op(get_msr),
 	.set_msr = vt_op(set_msr),
