@@ -798,7 +798,7 @@ static void pkvm_set_dr7(struct kvm_vcpu *vcpu, unsigned long val)
 }
 
 static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc hc,
-					   union pkvm_hc_data *out)
+					   union pkvm_hc_data *in, union pkvm_hc_data *out)
 {
 	struct kvm_vcpu *vcpu = this_cpu_read(cur_guest_vcpu);
 	int cpu = raw_smp_processor_id(), ret = 0;
@@ -875,8 +875,10 @@ static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc 
 void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 {
 	enum pkvm_hc hc = pkvm_hc(vcpu);
-	union pkvm_hc_data out;
+	union pkvm_hc_data in, out;
 	int ret = 0;
+
+	pkvm_hc_get_input(vcpu, hc, &in);
 
 	switch (hc) {
 	case __pkvm__init:
@@ -928,7 +930,7 @@ void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 				    pkvm_hc_input2(vcpu));
 		break;
 	default:
-		ret = pkvm_vcpu_handle_host_hypercall(vcpu, hc, &out);
+		ret = pkvm_vcpu_handle_host_hypercall(vcpu, hc, &in, &out);
 		break;
 	}
 
