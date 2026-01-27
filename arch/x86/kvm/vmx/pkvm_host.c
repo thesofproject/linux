@@ -981,6 +981,11 @@ static void pkvm_write_tsc_multiplier(struct kvm_vcpu *vcpu)
 	KVM_BUG_ON(pkvm_hypercall(write_tsc_multiplier), vcpu->kvm);
 }
 
+static void pkvm_load_mmu_pgd(struct kvm_vcpu *vcpu, hpa_t root_hpa, int root_level)
+{
+	KVM_BUG_ON(pkvm_hypercall(load_mmu_pgd, root_hpa, root_level), vcpu->kvm);
+}
+
 static bool pkvm_apic_init_signal_blocked(struct kvm_vcpu *vcpu)
 {
 	/*
@@ -1074,6 +1079,8 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 
 	.write_tsc_offset = pkvm_write_tsc_offset,
 	.write_tsc_multiplier = pkvm_write_tsc_multiplier,
+
+	.load_mmu_pgd = pkvm_load_mmu_pgd,
 
 	.pi_update_irte = vmx_pi_update_irte,
 	.pi_start_bypass = vmx_pi_start_bypass,
