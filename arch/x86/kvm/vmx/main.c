@@ -925,11 +925,11 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 	.sync_dirty_debug_regs = vt_op(sync_dirty_debug_regs),
 #endif
 	.cache_reg = vt_op(cache_reg),
-#ifndef __PKVM_HYP__
 	.get_rflags = vt_op(get_rflags),
 	.set_rflags = vt_op(set_rflags),
 	.get_if_flag = vt_op(get_if_flag),
 
+#ifndef __PKVM_HYP__
 	.flush_tlb_all = vt_op(flush_tlb_all),
 	.flush_tlb_current = vt_op(flush_tlb_current),
 	.flush_tlb_gva = vt_op(flush_tlb_gva),
