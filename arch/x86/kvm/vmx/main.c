@@ -899,8 +899,8 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 	.update_exception_bitmap = vt_op(update_exception_bitmap),
 #ifndef __PKVM_HYP__
 	.get_feature_msr = vmx_get_feature_msr,
-	.get_msr = vt_op(get_msr),
 #endif
+	.get_msr = vt_op(get_msr),
 	.set_msr = vt_op(set_msr),
 
 #ifndef __PKVM_HYP__
