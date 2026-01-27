@@ -3909,7 +3909,6 @@ void vmx_get_cs_db_l_bits(struct kvm_vcpu *vcpu, int *db, int *l)
 	*l = (ar >> 13) & 1;
 }
 
-#ifndef __PKVM_HYP__
 void vmx_get_idt(struct kvm_vcpu *vcpu, struct desc_ptr *dt)
 {
 	dt->size = vmcs_read32(GUEST_IDTR_LIMIT);
@@ -3933,7 +3932,6 @@ void vmx_set_gdt(struct kvm_vcpu *vcpu, struct desc_ptr *dt)
 	vmcs_write32(GUEST_GDTR_LIMIT, dt->size);
 	vmcs_writel(GUEST_GDTR_BASE, dt->address);
 }
-#endif /* !__PKVM_HYP__ */
 
 static bool rmode_segment_valid(struct kvm_vcpu *vcpu, int seg)
 {
