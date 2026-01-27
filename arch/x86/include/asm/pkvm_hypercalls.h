@@ -63,6 +63,7 @@ PKVM_HC(inject_irq)
 PKVM_HC(inject_nmi)
 PKVM_HC(inject_exception)
 PKVM_HC(cancel_injection)
+PKVM_HC(update_cr8_intercept)
 
 #undef PKVM_HC
 #undef PKVM_HC_OUT

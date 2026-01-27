@@ -661,6 +661,7 @@ static bool is_guest_vcpu_accessible(struct kvm_vcpu *vcpu, enum pkvm_hc hc)
 	case __pkvm__inject_irq:
 	case __pkvm__inject_nmi:
 	case __pkvm__cancel_injection:
+	case __pkvm__update_cr8_intercept:
 		/*
 		 * The host is responsible for running vCPU, injecting
 		 * interrupts, emulating lapic etc. Always allow the related PV
@@ -1039,6 +1040,10 @@ static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc 
 		break;
 	case __pkvm__cancel_injection:
 		pkvm_cancel_injection(vcpu);
+		break;
+	case __pkvm__update_cr8_intercept:
+		kvm_x86_call(update_cr8_intercept)(vcpu, pkvm_hc_input1(hvcpu),
+						   pkvm_hc_input2(hvcpu));
 		break;
 	default:
 		ret = -EINVAL;
