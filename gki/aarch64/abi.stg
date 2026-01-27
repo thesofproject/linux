@@ -360678,7 +360678,7 @@ elf_symbol {
   name: "__skb_checksum_complete"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x92214690
+  crc: 0x5f11d9bd
   type_id: 0x1bdfb83f
   full_name: "__skb_checksum_complete"
 }
@@ -374979,7 +374979,7 @@ elf_symbol {
   name: "css_next_descendant_pre"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xb7d8e173
+  crc: 0xe5937358
   type_id: 0xc867c639
   full_name: "css_next_descendant_pre"
 }
@@ -408619,7 +408619,7 @@ elf_symbol {
   name: "security_dentry_create_files_as"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x281e02c3
+  crc: 0xdb7d0990
   type_id: 0x98927e91
   full_name: "security_dentry_create_files_as"
 }
@@ -408637,7 +408637,7 @@ elf_symbol {
   name: "security_inode_copy_up"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x99311d8e
+  crc: 0x00d3bde4
   type_id: 0x9916a6e1
   full_name: "security_inode_copy_up"
 }
@@ -408646,7 +408646,7 @@ elf_symbol {
   name: "security_inode_copy_up_xattr"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x4465ac04
+  crc: 0xdff5d634
   type_id: 0x99f9f1cf
   full_name: "security_inode_copy_up_xattr"
 }
@@ -414248,7 +414248,7 @@ elf_symbol {
   name: "tcf_block_get"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x93d665c2
+  crc: 0x7e6554c1
   type_id: 0x9ca86774
   full_name: "tcf_block_get"
 }
@@ -414257,7 +414257,7 @@ elf_symbol {
   name: "tcf_block_put"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x89e69001
+  crc: 0xac0fd1b4
   type_id: 0x1e089e10
   full_name: "tcf_block_put"
 }
@@ -414275,7 +414275,7 @@ elf_symbol {
   name: "tcf_classify"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xd6300444
+  crc: 0x08047190
   type_id: 0x9c1a5eb1
   full_name: "tcf_classify"
 }
@@ -414338,7 +414338,7 @@ elf_symbol {
   name: "tcf_exts_validate"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xadb3a5c4
+  crc: 0x8bdb3a9c
   type_id: 0x9e8d7e1b
   full_name: "tcf_exts_validate"
 }
@@ -414428,7 +414428,7 @@ elf_symbol {
   name: "tcp_cong_avoid_ai"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x5aa52082
+  crc: 0xf0f8521c
   type_id: 0x1570f9ad
   full_name: "tcp_cong_avoid_ai"
 }
@@ -414437,7 +414437,7 @@ elf_symbol {
   name: "tcp_reno_undo_cwnd"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x0fd5e902
+  crc: 0xedc98922
   type_id: 0x42a927f9
   full_name: "tcp_reno_undo_cwnd"
 }
@@ -422540,7 +422540,7 @@ elf_symbol {
   name: "xt_register_match"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x81bdcd6e
+  crc: 0x97255327
   type_id: 0x9fdeaef3
   full_name: "xt_register_match"
 }
@@ -422549,7 +422549,7 @@ elf_symbol {
   name: "xt_unregister_match"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xd7ee0978
+  crc: 0xb104202a
   type_id: 0x12c61c4f
   full_name: "xt_unregister_match"
 }
