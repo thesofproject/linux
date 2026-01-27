@@ -563,6 +563,62 @@ static int pkvm_vcpu_load(int vm_handle, int vcpu_handle)
 	return ret;
 }
 
+static int pkvm_vcpu_put(int vm_handle, int vcpu_handle)
+{
+	struct pkvm_vcpu *pkvm_vcpu = pkvm_get_vcpu(vm_handle, vcpu_handle);
+	int cpu = raw_smp_processor_id(), loaded_cpu, ret = 0;
+	struct kvm_vcpu *vcpu;
+
+	if (!pkvm_vcpu)
+		return -EINVAL;
+
+	vcpu = &pkvm_vcpu->vcpu;
+	loaded_cpu = vcpu->cpu;
+	if (loaded_cpu == cpu) {
+		/*
+		 * The current active vCPU is the host vCPU. Switch to the guest
+		 * vCPU in case vcpu_put operation requires.
+		 */
+		kvm_x86_call(vcpu_load)(vcpu, cpu);
+
+		/*
+		 * Another guest vCPU may have already been loaded on this CPU
+		 * thus the cur_guest_vcpu may be overridden. So only set the
+		 * cur_guest_vcpu as NULL if it points to the guest vCPU being
+		 * put.
+		 */
+		if (vcpu == this_cpu_read(cur_guest_vcpu))
+			this_cpu_write(cur_guest_vcpu, NULL);
+
+		kvm_x86_call(vcpu_put)(vcpu);
+
+		/*
+		 * Put this pkvm_vcpu to allow it to be freed via the vcpu_free PV
+		 * interface.
+		 */
+		pkvm_put_vcpu(pkvm_vcpu);
+
+		/* Switch to the host vCPU as a guest vCPU was just loaded. */
+		kvm_x86_call(vcpu_load)(this_cpu_read(host_vcpu), cpu);
+
+		/*
+		 * Paired with cmpxchg in pkvm_vcpu_load() to make sure the
+		 * vcpu->cpu is set only after the put is completed.
+		 */
+		smp_store_release(&vcpu->cpu, -1);
+	} else {
+		/*
+		 * The guest vCPU is not loaded on any CPU or is loaded on a
+		 * different CPU.
+		 */
+		ret = -EINVAL;
+	}
+
+	pkvm_put_vcpu(pkvm_vcpu);
+
+	return ret;
+}
+
 void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 {
 	enum pkvm_hc hc = pkvm_hc(vcpu);
@@ -613,6 +669,10 @@ void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 	case __pkvm__vcpu_load:
 		ret = pkvm_vcpu_load(pkvm_hc_input1(vcpu),
 				     pkvm_hc_input2(vcpu));
+		break;
+	case __pkvm__vcpu_put:
+		ret = pkvm_vcpu_put(pkvm_hc_input1(vcpu),
+				    pkvm_hc_input2(vcpu));
 		break;
 	default:
 		ret = -EINVAL;
