@@ -304,6 +304,49 @@ static int pkvm_set_efer(struct kvm_vcpu *vcpu, u64 efer)
 	return ret;
 }
 
+static void pkvm_cache_reg(struct kvm_vcpu *vcpu, enum kvm_reg reg)
+{
+	union pkvm_hc_data out;
+
+	if (pkvm_is_protected_vcpu(vcpu))
+		return;
+
+	if (KVM_BUG_ON(pkvm_hypercall_out(cache_reg, &out, reg), vcpu->kvm))
+		return;
+
+	kvm_register_mark_available(vcpu, reg);
+
+	switch (reg) {
+	case VCPU_REGS_RSP:
+		vcpu->arch.regs[VCPU_REGS_RSP] = out.cache_reg.rsp;
+		break;
+	case VCPU_REGS_RIP:
+		vcpu->arch.regs[VCPU_REGS_RIP] = out.cache_reg.rip;
+		break;
+	case VCPU_EXREG_PDPTR: {
+		struct kvm_mmu *mmu = vcpu->arch.walk_mmu;
+
+		mmu->pdptrs[0] = out.cache_reg.pdptrs[0];
+		mmu->pdptrs[1] = out.cache_reg.pdptrs[1];
+		mmu->pdptrs[2] = out.cache_reg.pdptrs[2];
+		mmu->pdptrs[3] = out.cache_reg.pdptrs[3];
+		break;
+	}
+	case VCPU_EXREG_CR0:
+		vcpu->arch.cr0 = out.cache_reg.cr0;
+		break;
+	case VCPU_EXREG_CR3:
+		vcpu->arch.cr3 = out.cache_reg.cr3;
+		break;
+	case VCPU_EXREG_CR4:
+		vcpu->arch.cr4 = out.cache_reg.cr4;
+		break;
+	default:
+		KVM_BUG_ON(1, vcpu->kvm);
+		break;
+	}
+}
+
 struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.name = KBUILD_MODNAME,
 
@@ -331,6 +374,7 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.get_msr = pkvm_get_msr,
 	.set_msr = pkvm_set_msr,
 	.set_efer = pkvm_set_efer,
+	.cache_reg = pkvm_cache_reg,
 };
 
 bool pkvm_interrupt_blocked(struct kvm_vcpu *vcpu)
