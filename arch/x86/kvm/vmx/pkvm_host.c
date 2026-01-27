@@ -984,6 +984,7 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.apicv_pre_state_restore = pi_apicv_pre_state_restore,
 	.required_apicv_inhibits = VMX_REQUIRED_APICV_INHIBITS,
 	.hwapic_isr_update = pkvm_hwapic_isr_update,
+	.sync_pir_to_irr = vmx_sync_pir_to_irr,
 };
 
 bool pkvm_interrupt_blocked(struct kvm_vcpu *vcpu)
