@@ -18,6 +18,7 @@
 #include <linux/sched/stat.h>
 
 #include <asm/processor.h>
+#include <asm/kvm_pkvm.h>
 #include <asm/user.h>
 #include <asm/fpu/xstate.h>
 #include <asm/sgx.h>
@@ -28,10 +29,6 @@
 #include "trace.h"
 #include "pmu.h"
 #include "xen.h"
-
-#ifdef __PKVM_HYP__
-#include <asm/kvm_pkvm.h>
-#endif
 
 /*
  * Unlike "struct cpuinfo_x86.x86_capability", kvm_cpu_caps doesn't need to be
@@ -253,6 +250,16 @@ static u32 kvm_apply_cpuid_pv_features_quirk(struct kvm_vcpu *vcpu)
 	best = kvm_find_cpuid_entry(vcpu, kvm_cpuid.base | KVM_CPUID_FEATURES);
 	if (!best)
 		return 0;
+
+	if (pkvm_is_protected_vcpu(vcpu)) {
+		/*
+		 * The pKVM hypervisor doesn't support emulate KVM PV features
+		 * for pVM for simplicity. Thus remove KVM PV feature bits from
+		 * the corresponding CPUID.
+		 */
+		best->eax = 0;
+		return 0;
+	}
 
 	if (kvm_hlt_in_guest(vcpu->kvm))
 		best->eax &= ~(1 << KVM_FEATURE_PV_UNHALT);
