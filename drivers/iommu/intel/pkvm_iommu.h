@@ -118,6 +118,24 @@ int pkvm_context_clear(u64 phys, u8 bus, u8 devfn, struct device_domain_info *in
 int pkvm_context_mapping(struct intel_iommu *iommu, struct device_domain_info *info,
 			 u8 bus, u8 devfn, u64 pgd_gpa, u16 did);
 #else /* __PKVM_HYP__ */
+/*
+ * dev_iommu_priv_get is called from quite a few places in code re-used by
+ * hypervisor and is defined in include/linux/iommu.h. It takes struct device
+ * as an argument. Having struct device as a stack variable to pass to
+ * dev_iommu_priv_get causes the stack to grow beyond safe limit. So we define
+ * a wrapper struct and a wrapper function to avoid ifdef-ing all locations
+ * where dev_iommu_priv_get is called. The C file(pasid.c) will redefine
+ * dev_iommu_priv_get to pkvm_dev_iommu_priv_get to enable this re-use.
+ */
+struct pkvm_device {
+	struct device_domain_info *info;
+};
+
+static inline struct device_domain_info *pkvm_dev_iommu_priv_get(struct pkvm_device *dev)
+{
+	return dev->info;
+}
+
 static inline bool iommu_supports_2m_page(void)
 {
 	return iommu_pgsz_mask & (1 << PG_LEVEL_2M);

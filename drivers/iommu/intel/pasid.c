@@ -22,7 +22,14 @@
 #include "pasid.h"
 #include "../iommu-pages.h"
 
-#ifndef __PKVM_HYP__
+#ifdef __PKVM_HYP__
+#undef spin_lock
+#define spin_lock pkvm_spin_lock
+#undef spin_unlock
+#define spin_unlock pkvm_spin_unlock
+
+#define dev_iommu_priv_get pkvm_dev_iommu_priv_get
+#else
 /*
  * Intel IOMMU system wide PASID name space:
  */
@@ -959,6 +966,7 @@ void intel_pasid_teardown_sm_context(struct device *dev)
 
 	pci_for_each_dma_alias(to_pci_dev(dev), pci_pasid_table_teardown, dev);
 }
+#endif /* __PKVM_HYP__ */
 
 /*
  * Get the PASID directory size for scalable mode context entry.
@@ -978,7 +986,11 @@ static unsigned long context_get_sm_pds(struct pasid_table *table)
 }
 
 static int context_entry_set_pasid_table(struct context_entry *context,
+#ifndef __PKVM_HYP__
 					 struct device *dev)
+#else
+					 struct pkvm_device *dev)
+#endif
 {
 	struct device_domain_info *info = dev_iommu_priv_get(dev);
 	struct pasid_table *table = info->pasid_table;
@@ -1005,7 +1017,11 @@ static int context_entry_set_pasid_table(struct context_entry *context,
 	return 0;
 }
 
-static int device_pasid_table_setup(struct device *dev, u8 bus, u8 devfn)
+#ifndef __PKVM_HYP__
+int device_pasid_table_setup(struct device *dev, u8 bus, u8 devfn)
+#else
+int device_pasid_table_setup(struct pkvm_device *dev, u8 bus, u8 devfn)
+#endif
 {
 	struct device_domain_info *info = dev_iommu_priv_get(dev);
 	struct intel_iommu *iommu = info->iommu;
@@ -1023,6 +1039,8 @@ static int device_pasid_table_setup(struct device *dev, u8 bus, u8 devfn)
 		return 0;
 	}
 
+#ifndef __PKVM_HYP__
+	BUG_ON(pkvm_enabled() && context_copied(iommu, bus, devfn));
 	if (context_copied(iommu, bus, devfn)) {
 		context_clear_entry(context);
 		__iommu_flush_cache(iommu, context, sizeof(*context));
@@ -1051,6 +1069,7 @@ static int device_pasid_table_setup(struct device *dev, u8 bus, u8 devfn)
 		 */
 		clear_context_copied(iommu, bus, devfn);
 	}
+#endif /* !__PKVM_HYP__ */
 
 	context_entry_set_pasid_table(context, dev);
 	spin_unlock(&iommu->lock);
@@ -1072,6 +1091,7 @@ static int device_pasid_table_setup(struct device *dev, u8 bus, u8 devfn)
 	return 0;
 }
 
+#ifndef __PKVM_HYP__
 static int pci_pasid_table_setup(struct pci_dev *pdev, u16 alias, void *data)
 {
 	struct device *dev = data;
