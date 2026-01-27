@@ -3804,7 +3804,6 @@ void vmx_get_segment(struct kvm_vcpu *vcpu, struct kvm_segment *var, int seg)
 	var->g = (ar >> 15) & 1;
 }
 
-#ifndef __PKVM_HYP__
 u64 vmx_get_segment_base(struct kvm_vcpu *vcpu, int seg)
 {
 	struct kvm_segment s;
@@ -3840,7 +3839,6 @@ int vmx_get_cpl_no_cache(struct kvm_vcpu *vcpu)
 {
 	return __vmx_get_cpl(vcpu, true);
 }
-#endif /* !__PKVM_HYP__ */
 
 static u32 vmx_segment_access_rights(struct kvm_segment *var)
 {
@@ -3896,7 +3894,6 @@ void __vmx_set_segment(struct kvm_vcpu *vcpu, struct kvm_segment *var, int seg)
 	vmcs_write32(sf->ar_bytes, vmx_segment_access_rights(var));
 }
 
-#ifndef __PKVM_HYP__
 void vmx_set_segment(struct kvm_vcpu *vcpu, struct kvm_segment *var, int seg)
 {
 	__vmx_set_segment(vcpu, var, seg);
@@ -3912,6 +3909,7 @@ void vmx_get_cs_db_l_bits(struct kvm_vcpu *vcpu, int *db, int *l)
 	*l = (ar >> 13) & 1;
 }
 
+#ifndef __PKVM_HYP__
 void vmx_get_idt(struct kvm_vcpu *vcpu, struct desc_ptr *dt)
 {
 	dt->size = vmcs_read32(GUEST_IDTR_LIMIT);
