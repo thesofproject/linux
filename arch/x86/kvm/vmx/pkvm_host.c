@@ -231,6 +231,12 @@ static void pkvm_vcpu_put(struct kvm_vcpu *vcpu)
 	vmx_vcpu_pi_put(vcpu);
 }
 
+static void pkvm_update_exception_bitmap(struct kvm_vcpu *vcpu)
+{
+	if (!pkvm_is_protected_vcpu(vcpu))
+		KVM_BUG_ON(pkvm_hypercall(update_exception_bitmap), vcpu->kvm);
+}
+
 struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.name = KBUILD_MODNAME,
 
@@ -250,6 +256,8 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 
 	.vcpu_load = pkvm_vcpu_load,
 	.vcpu_put = pkvm_vcpu_put,
+
+	.update_exception_bitmap = pkvm_update_exception_bitmap,
 };
 
 bool pkvm_interrupt_blocked(struct kvm_vcpu *vcpu)
