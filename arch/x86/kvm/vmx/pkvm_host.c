@@ -1021,6 +1021,25 @@ static void pkvm_setup_mce(struct kvm_vcpu *vcpu)
 	KVM_BUG_ON(pkvm_hypercall(setup_mce), vcpu->kvm);
 }
 
+#ifdef CONFIG_KVM_SMM
+static int pkvm_smi_allowed(struct kvm_vcpu *vcpu, bool for_injection)
+{
+	return false;
+}
+
+static int pkvm_enter_smm(struct kvm_vcpu *vcpu, union kvm_smram *smram)
+{
+	return -EOPNOTSUPP;
+}
+
+static int pkvm_leave_smm(struct kvm_vcpu *vcpu, const union kvm_smram *smram)
+{
+	return -EOPNOTSUPP;
+}
+
+static void pkvm_enable_smi_window(struct kvm_vcpu *vcpu) {}
+#endif
+
 static bool pkvm_apic_init_signal_blocked(struct kvm_vcpu *vcpu)
 {
 	/*
@@ -1125,6 +1144,13 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.pi_start_bypass = vmx_pi_start_bypass,
 
 	.setup_mce = pkvm_setup_mce,
+
+#ifdef CONFIG_KVM_SMM
+	.smi_allowed = pkvm_smi_allowed,
+	.enter_smm = pkvm_enter_smm,
+	.leave_smm = pkvm_leave_smm,
+	.enable_smi_window = pkvm_enable_smi_window,
+#endif
 
 	.apic_init_signal_blocked = pkvm_apic_init_signal_blocked,
 
