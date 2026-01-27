@@ -253,6 +253,16 @@ static void pkvm_update_exception_bitmap(struct kvm_vcpu *vcpu)
 		KVM_BUG_ON(pkvm_hypercall(update_exception_bitmap), vcpu->kvm);
 }
 
+static int pkvm_get_feature_msr(u32 msr, u64 *data)
+{
+	switch (msr) {
+	case KVM_FIRST_EMULATED_VMX_MSR ... KVM_LAST_EMULATED_VMX_MSR:
+		return 1;
+	default:
+		return KVM_MSR_RET_UNSUPPORTED;
+	}
+}
+
 static int pkvm_get_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 {
 	if (pkvm_host_has_emulated_msr(vcpu->kvm, msr_info->index))
@@ -317,6 +327,7 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.vcpu_put = pkvm_vcpu_put,
 
 	.update_exception_bitmap = pkvm_update_exception_bitmap,
+	.get_feature_msr = pkvm_get_feature_msr,
 	.get_msr = pkvm_get_msr,
 	.set_msr = pkvm_set_msr,
 	.set_efer = pkvm_set_efer,
