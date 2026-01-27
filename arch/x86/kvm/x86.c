@@ -667,14 +667,15 @@ void kvm_user_return_msr_cpu_online(void)
 	}
 }
 
-#ifndef __PKVM_HYP__
 static void kvm_user_return_register_notifier(struct kvm_user_return_msrs *msrs)
 {
+#ifndef __PKVM_HYP__
 	if (!msrs->registered) {
 		msrs->urn.on_user_return = kvm_on_user_return;
 		user_return_notifier_register(&msrs->urn);
 		msrs->registered = true;
 	}
+#endif
 }
 
 int kvm_set_user_return_msr(unsigned slot, u64 value, u64 mask)
@@ -695,6 +696,7 @@ int kvm_set_user_return_msr(unsigned slot, u64 value, u64 mask)
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_set_user_return_msr);
 
+#ifndef __PKVM_HYP__
 u64 kvm_get_user_return_msr(unsigned int slot)
 {
 	return this_cpu_ptr(user_return_msrs)->values[slot].curr;
@@ -14163,6 +14165,7 @@ void kvm_arch_gmem_invalidate(kvm_pfn_t start, kvm_pfn_t end)
 }
 #endif
 #endif
+#endif /* !__PKVM_HYP__ */
 
 int kvm_spec_ctrl_test_value(u64 value)
 {
@@ -14172,10 +14175,14 @@ int kvm_spec_ctrl_test_value(u64 value)
 	 */
 
 	u64 saved_value;
+#ifndef __PKVM_HYP__
 	unsigned long flags;
+#endif
 	int ret = 0;
 
+#ifndef __PKVM_HYP__
 	local_irq_save(flags);
+#endif
 
 	if (rdmsrq_safe(MSR_IA32_SPEC_CTRL, &saved_value))
 		ret = 1;
@@ -14184,12 +14191,15 @@ int kvm_spec_ctrl_test_value(u64 value)
 	else
 		wrmsrq(MSR_IA32_SPEC_CTRL, saved_value);
 
+#ifndef __PKVM_HYP__
 	local_irq_restore(flags);
+#endif
 
 	return ret;
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_spec_ctrl_test_value);
 
+#ifndef __PKVM_HYP__
 void kvm_fixup_and_inject_pf_error(struct kvm_vcpu *vcpu, gva_t gva, u16 error_code)
 {
 	struct kvm_mmu *mmu = vcpu->arch.walk_mmu;
