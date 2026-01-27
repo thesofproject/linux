@@ -988,9 +988,11 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 
 	.get_l2_tsc_offset = vt_op(get_l2_tsc_offset),
 	.get_l2_tsc_multiplier = vt_op(get_l2_tsc_multiplier),
+#endif
 	.write_tsc_offset = vt_op(write_tsc_offset),
 	.write_tsc_multiplier = vt_op(write_tsc_multiplier),
 
+#ifndef __PKVM_HYP__
 	.load_mmu_pgd = vt_op(load_mmu_pgd),
 
 	.check_intercept = vmx_check_intercept,
