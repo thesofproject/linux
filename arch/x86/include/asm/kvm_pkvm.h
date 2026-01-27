@@ -73,6 +73,14 @@ union pkvm_hc_data {
 	struct {
 		u64 data;
 	} get_msr;
+	union {
+		unsigned long rsp;
+		unsigned long rip;
+		unsigned long cr0;
+		unsigned long cr3;
+		unsigned long cr4;
+		u64 pdptrs[4];
+	} cache_reg;
 	struct {
 		u64 data[PKVM_HC_DATA_MAX_NUM];
 	} raw;
