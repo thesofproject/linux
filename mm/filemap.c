@@ -2061,6 +2061,7 @@ no_page:
 	/* not an uncached lookup, clear uncached if set */
 	if (folio_test_dropbehind(folio) && !(fgp_flags & FGP_DONTCACHE))
 		folio_clear_dropbehind(folio);
+	trace_android_vh_filemap_get_folio_end(mapping, folio);
 	return folio;
 }
 EXPORT_SYMBOL(__filemap_get_folio);
