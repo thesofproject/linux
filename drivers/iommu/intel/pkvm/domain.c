@@ -5,6 +5,7 @@
 #include <linux/hashtable.h>
 #include <asm/pkvm_spinlock.h>
 #include "pkvm/debug.h"
+#include "pkvm/memory.h"
 #include "../iommu.h"
 
 /*
@@ -124,8 +125,9 @@ int pkvm_free_iommu_domain(struct dmar_domain *domain)
 	return 0;
 }
 
-struct dmar_domain *pkvm_alloc_iommu_domain(void *pgd)
+struct dmar_domain *pkvm_alloc_iommu_domain(struct alloc_domain_data *data)
 {
+	void *pgd = pkvm_host_gpa_to_virt(data->pgd_gpa);
 	struct dmar_domain *domain;
 	unsigned long index;
 
@@ -142,6 +144,12 @@ struct dmar_domain *pkvm_alloc_iommu_domain(void *pgd)
 		domain = &iommu_domains[index];
 		INIT_LIST_HEAD(&domain->cache_tags);
 		domain->pgd = pgd;
+		domain->use_first_level = data->use_first_level;
+		domain->iommu_superpage = data->iommu_superpage;
+		domain->iommu_coherency = data->iommu_coherency;
+		domain->agaw = data->agaw;
+		domain->gaw = data->gaw;
+		domain->max_addr = data->max_addr;
 		domain->index = index;
 		domain->qi_batch = &domain->_qi_batch;
 		atomic_set(&domain->refcount, 1);

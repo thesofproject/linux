@@ -28,6 +28,7 @@ struct intel_iommu_info {
 
 struct qi_desc;
 struct intel_iommu;
+struct dmar_domain;
 struct device_domain_info;
 
 #ifdef CONFIG_PKVM_INTEL
@@ -124,6 +125,8 @@ int pkvm_pasid_setup_fl(struct device_domain_info *info, phys_addr_t fsptptr,
 int pkvm_pasid_setup_sl(struct device_domain_info *info, phys_addr_t ssptptr,
 			u32 pasid, u16 did, u16 old_did);
 int pkvm_pasid_teardown(struct device_domain_info *info, u32 pasid);
+int pkvm_alloc_domain(struct device_domain_info *info, struct dmar_domain *domain);
+int pkvm_free_domain(struct dmar_domain *domain);
 #else /* __PKVM_HYP__ */
 /*
  * dev_iommu_priv_get is called from quite a few places in code re-used by
@@ -168,7 +171,7 @@ bool overlaps_iommu_mmio(unsigned long phys, unsigned long size);
 bool is_dev_in_satc(u16 bdf);
 bool pkvm_iommu_paging_structure_coherency(void);
 
-struct dmar_domain *pkvm_alloc_iommu_domain(void *pgd);
+struct dmar_domain *pkvm_alloc_iommu_domain(struct alloc_domain_data *data);
 struct dmar_domain *pkvm_get_iommu_domain(void *pgd);
 struct dmar_domain *pkvm_get_iommu_domain_noref(void *pgd);
 void pkvm_put_iommu_domain(struct dmar_domain *domain);
@@ -193,6 +196,8 @@ int pkvm_iommu_set_sm_ce(struct set_sm_ce_data *in, struct set_sm_ce_data *out);
 int pkvm_iommu_pasid_setup_fl(struct pasid_setup_fl_data *in, struct pasid_setup_fl_data *out);
 int pkvm_iommu_pasid_setup_sl(struct pasid_setup_sl_data *in, struct pasid_setup_sl_data *out);
 int pkvm_iommu_pasid_teardown(struct pasid_teardown_data *data);
+int pkvm_iommu_alloc_domain(struct alloc_domain_data *data);
+int pkvm_iommu_free_domain(u64 pgd_gpa);
 #endif /* !__PKVM_HYP__ */
 #else /* !CONFIG_PKVM_INTEL */
 static inline int pkvm_qi_submit_sync(struct intel_iommu *iommu,
@@ -231,6 +236,15 @@ static inline int pkvm_pasid_setup_sl(struct device_domain_info *info,
 	return -EOPNOTSUPP;
 }
 static inline int pkvm_pasid_teardown(struct device_domain_info *info, u32 pasid)
+{
+	return -EOPNOTSUPP;
+}
+static inline int pkvm_alloc_domain(struct device_domain_info *info,
+				    struct dmar_domain *domain)
+{
+	return -EOPNOTSUPP;
+}
+static inline int pkvm_free_domain(struct dmar_domain *domain)
 {
 	return -EOPNOTSUPP;
 }

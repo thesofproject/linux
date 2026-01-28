@@ -1919,6 +1919,12 @@ void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 	case __pkvm__iommu_pasid_teardown:
 		ret = pkvm_iommu_pasid_teardown(&in.iommu_pasid_teardown.data);
 		break;
+	case __pkvm__iommu_alloc_domain:
+		ret = pkvm_iommu_alloc_domain(&in.iommu_alloc_domain.data);
+		break;
+	case __pkvm__iommu_free_domain:
+		ret = pkvm_iommu_free_domain(pkvm_hc_input1(vcpu));
+		break;
 #endif
 	default:
 		ret = pkvm_vcpu_handle_host_hypercall(vcpu, hc, &in, &out);
