@@ -287,6 +287,7 @@ static inline void pasid_set_eafe(struct pasid_entry *pe)
 extern unsigned int intel_pasid_max_id;
 int intel_pasid_alloc_table(struct device *dev);
 void intel_pasid_free_table(struct device *dev);
+#ifndef __PKVM_HYP__
 struct pasid_table *intel_pasid_get_table(struct device *dev);
 int intel_pasid_setup_first_level(struct intel_iommu *iommu, struct device *dev,
 				  phys_addr_t fsptptr, u32 pasid, u16 did,
@@ -294,6 +295,15 @@ int intel_pasid_setup_first_level(struct intel_iommu *iommu, struct device *dev,
 int intel_pasid_setup_second_level(struct intel_iommu *iommu,
 				   struct dmar_domain *domain,
 				   struct device *dev, u32 pasid);
+#else
+struct pasid_table *intel_pasid_get_table(struct pkvm_device *dev);
+int intel_pasid_setup_first_level(struct intel_iommu *iommu, struct pkvm_device *dev,
+				  phys_addr_t fsptptr, u32 pasid, u16 did,
+				  int flags);
+int intel_pasid_setup_second_level(struct intel_iommu *iommu,
+				   struct dmar_domain *domain,
+				   struct pkvm_device *dev, u16 did, u32 pasid);
+#endif
 int intel_pasid_setup_dirty_tracking(struct intel_iommu *iommu,
 				     struct device *dev, u32 pasid,
 				     bool enabled);
@@ -301,6 +311,7 @@ int intel_pasid_setup_pass_through(struct intel_iommu *iommu,
 				   struct device *dev, u32 pasid);
 int intel_pasid_setup_nested(struct intel_iommu *iommu, struct device *dev,
 			     u32 pasid, struct dmar_domain *domain);
+#ifndef __PKVM_HYP__
 int intel_pasid_replace_first_level(struct intel_iommu *iommu,
 				    struct device *dev, phys_addr_t fsptptr,
 				    u32 pasid, u16 did, u16 old_did, int flags);
@@ -308,6 +319,15 @@ int intel_pasid_replace_second_level(struct intel_iommu *iommu,
 				     struct dmar_domain *domain,
 				     struct device *dev, u16 old_did,
 				     u32 pasid);
+#else
+int intel_pasid_replace_first_level(struct intel_iommu *iommu,
+				    struct pkvm_device *dev, phys_addr_t fsptptr,
+				    u32 pasid, u16 did, u16 old_did, int flags);
+int intel_pasid_replace_second_level(struct intel_iommu *iommu,
+				     struct dmar_domain *domain,
+				     struct pkvm_device *dev, u16 did, u16 old_did,
+				     u32 pasid);
+#endif
 int intel_pasid_replace_pass_through(struct intel_iommu *iommu,
 				     struct device *dev, u16 old_did,
 				     u32 pasid);
@@ -315,9 +335,15 @@ int intel_pasid_replace_nested(struct intel_iommu *iommu,
 			       struct device *dev, u32 pasid,
 			       u16 old_did, struct dmar_domain *domain);
 
+#ifndef __PKVM_HYP__
 void intel_pasid_tear_down_entry(struct intel_iommu *iommu,
 				 struct device *dev, u32 pasid,
 				 bool fault_ignore);
+#else
+void intel_pasid_tear_down_entry(struct intel_iommu *iommu,
+				 struct pkvm_device *dev, u32 pasid,
+				 bool fault_ignore);
+#endif
 void intel_pasid_setup_page_snoop_control(struct intel_iommu *iommu,
 					  struct device *dev, u32 pasid);
 int intel_pasid_setup_sm_context(struct device *dev);
