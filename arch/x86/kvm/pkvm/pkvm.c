@@ -385,6 +385,12 @@ static int __vcpu_create(struct kvm *kvm, struct kvm_vcpu *vcpu, struct fpstate 
 	    pkvm_vm->shared_kvm->arch.bus_lock_detection_enabled &&
 	    kvm_caps.has_bus_lock_exit)
 		kvm->arch.bus_lock_detection_enabled = true;
+	if (!kvm->arch.notify_vmexit_flags &&
+	    pkvm_vm->shared_kvm->arch.notify_vmexit_flags &&
+	    kvm_caps.has_notify_vmexit) {
+		kvm->arch.notify_window = pkvm_vm->shared_kvm->arch.notify_window;
+		kvm->arch.notify_vmexit_flags = pkvm_vm->shared_kvm->arch.notify_vmexit_flags;
+	}
 
 	pkvm_spin_unlock(&pkvm_vm->lock);
 
