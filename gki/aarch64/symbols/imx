@@ -10,6 +10,7 @@
   alloc_chrdev_region
   alloc_etherdev_mqs
   alloc_io_pgtable_ops
+  alloc_netdev_dummy
   alloc_netdev_mqs
   alloc_pages_exact_noprof
   __alloc_pages_noprof
@@ -220,6 +221,7 @@
   __copy_overflow
   _copy_to_iter
   cpu_bit_bitmap
+  cpufreq_boost_set_sw
   cpufreq_cpu_get_raw
   cpufreq_generic_frequency_table_verify
   cpufreq_generic_get
@@ -284,6 +286,7 @@
   dev_activate
   dev_addr_mod
   dev_alloc_name
+  dev_change_net_namespace
   dev_close
   _dev_crit
   dev_deactivate
@@ -404,6 +407,7 @@
   devm_gpiod_get_index_optional
   devm_gpiod_get_optional
   devm_gpiod_put
+  devm_gpio_request_one
   devm_hwrng_register
   devm_i2c_new_dummy_device
   devm_iio_device_alloc
@@ -500,6 +504,7 @@
   devm_thermal_of_zone_register
   devm_usb_get_phy
   devm_usb_get_phy_by_phandle
+  __devm_v4l2_sensor_clk_get
   devm_watchdog_register_device
   _dev_notice
   dev_open
@@ -638,6 +643,7 @@
   down_trylock
   down_write
   dpcm_end_walk_at_be
+  dput
   dql_completed
   dql_reset
   drain_workqueue
@@ -899,14 +905,20 @@
   drop_reasons_register_subsys
   drop_reasons_unregister_subsys
   dump_stack
+  dw_pcie_ep_deinit
   dw_pcie_ep_init
+  dw_pcie_ep_init_registers
+  dw_pcie_ep_raise_intx_irq
   dw_pcie_ep_raise_msi_irq
   dw_pcie_ep_reset_bar
   dw_pcie_find_capability
   dw_pcie_find_ext_capability
   dw_pcie_host_init
+  dw_pcie_link_up
   dw_pcie_read_dbi
+  dw_pcie_resume_noirq
   dw_pcie_setup_rc
+  dw_pcie_suspend_noirq
   dw_pcie_wait_for_link
   dw_pcie_write_dbi
   ehci_handshake
@@ -921,6 +933,8 @@
   ether_setup
   eth_header_parse_protocol
   eth_mac_addr
+  ethnl_cable_test_fault_length_with_src
+  ethnl_cable_test_result_with_src
   ethtool_aggregate_ctrl_stats
   ethtool_aggregate_mac_stats
   ethtool_aggregate_pause_stats
@@ -929,8 +943,16 @@
   ethtool_convert_link_mode_to_legacy_u32
   ethtool_dev_mm_supported
   __ethtool_get_link_ksettings
+  ethtool_mmsv_event_handle
+  ethtool_mmsv_get_mm
+  ethtool_mmsv_init
+  ethtool_mmsv_link_state_handle
+  ethtool_mmsv_set_mm
+  ethtool_mmsv_stop
   ethtool_op_get_link
   ethtool_op_get_ts_info
+  ethtool_puts
+  ethtool_sprintf
   eth_type_trans
   eth_validate_addr
   extcon_get_edev_by_phandle
@@ -950,18 +972,25 @@
   find_vpid
   finish_wait
   firmware_kobj
+  firmware_request_nowait_nowarn
+  firmware_request_nowarn
   fixed_size_llseek
   flow_block_cb_setup_simple
   flow_rule_alloc
   flow_rule_match_basic
   flow_rule_match_eth_addrs
   flow_rule_match_ipv4_addrs
+  flow_rule_match_ipv6_addrs
   flow_rule_match_ports
   flow_rule_match_vlan
   flush_delayed_work
   flush_work
   __flush_workqueue
+  __folio_lock
   __folio_put
+  follow_pfnmap_end
+  follow_pfnmap_start
+  __fortify_panic
   fput
   free_candev
   free_io_pgtable_ops
@@ -983,13 +1012,17 @@
   fwnode_get_phy_node
   fwnode_graph_get_endpoint_by_id
   fwnode_graph_get_next_endpoint
+  fwnode_graph_get_remote_endpoint
+  fwnode_handle_get
   fwnode_irq_get_byname
   fwnode_mdio_find_device
   fwnode_property_match_string
   fwnode_property_present
+  fwnode_property_read_bool
   fwnode_property_read_string
   fwnode_property_read_u32_array
   fwnode_property_read_u64_array
+  fwnode_remove_software_node
   gcd
   generic_device_group
   generic_file_llseek
@@ -1003,13 +1036,18 @@
   genphy_c37_config_aneg
   genphy_c37_read_status
   genphy_c45_an_config_aneg
+  genphy_c45_an_disable_aneg
+  genphy_c45_aneg_done
   genphy_c45_check_and_restart_aneg
   genphy_c45_fast_retrain
   genphy_c45_pma_read_abilities
+  genphy_c45_pma_resume
   genphy_c45_pma_setup_forced
+  genphy_c45_pma_suspend
   genphy_c45_read_status
   __genphy_config_aneg
   genphy_handle_interrupt_no_ack
+  genphy_loopback
   genphy_read_abilities
   genphy_read_lpa
   genphy_read_master_slave
@@ -1039,6 +1077,7 @@
   get_random_bytes
   get_random_u16
   get_random_u32
+  get_random_u64
   get_random_u8
   get_unused_fd_flags
   get_user_pages
@@ -1540,10 +1579,14 @@
   netdev_txq_to_tc
   netdev_update_features
   netdev_warn
+  net_dim
+  net_dim_get_rx_moderation
   netif_carrier_off
   netif_carrier_on
   netif_device_attach
   netif_device_detach
+  netif_napi_add_weight_locked
+  __netif_napi_del_locked
   netif_receive_skb
   netif_receive_skb_list
   netif_rx
@@ -1558,6 +1601,7 @@
   netif_tx_unlock
   netif_tx_wake_queue
   netlink_broadcast
+  netlink_broadcast_filtered
   __netlink_kernel_create
   netlink_kernel_release
   netlink_register_notifier
@@ -1751,6 +1795,7 @@
   pci_bus_type
   pci_choose_state
   pci_device_group
+  pci_dev_put
   pci_disable_ats
   pci_disable_device
   pci_disable_msi
@@ -1764,13 +1809,17 @@
   pci_enable_msix_range
   pci_enable_sriov
   pci_enable_wake
+  pci_epc_init_notify
+  pci_find_ext_capability
   pci_free_irq_vectors
   pci_get_domain_bus_and_slot
   pci_iomap
+  pci_ioremap_bar
   pci_iounmap
   pci_irq_vector
   pci_msi_enabled
   pci_pme_active
+  pci_prepare_ats
   pci_read_config_dword
   __pci_register_driver
   pci_release_region
@@ -1787,6 +1836,8 @@
   pci_sriov_get_totalvfs
   pci_unregister_driver
   pci_write_config_dword
+  pci_write_config_word
+  pcpu_alloc_noprof
   percpu_counter_add_batch
   percpu_counter_batch
   __per_cpu_offset
@@ -1816,6 +1867,7 @@
   phy_ethtool_set_link_ksettings
   phy_ethtool_set_wol
   phy_exit
+  phy_gbit_features
   phy_init
   phy_init_eee
   phy_init_hw
@@ -1844,8 +1896,12 @@
   phylink_mii_c45_pcs_get_state
   phylink_mii_ioctl
   phylink_of_phy_connect
+  phylink_pcs_pre_init
+  phylink_prepare_resume
   phylink_resolve_c73
   phylink_resume
+  phylink_rx_clk_stop_block
+  phylink_rx_clk_stop_unblock
   phylink_speed_down
   phylink_speed_up
   phylink_start
@@ -1871,16 +1927,21 @@
   phy_reset_after_clk_enable
   phy_resolve_aneg_pause
   phy_restore_page
+  phy_save_page
   phy_select_page
   phy_set_max_speed
   phy_set_mode_ext
+  phy_set_speed
   phy_set_sym_pause
   phy_sfp_attach
+  phy_sfp_connect_phy
   phy_sfp_detach
+  phy_sfp_disconnect_phy
   phy_sfp_probe
   phy_start
   phy_start_aneg
   phy_stop
+  phy_support_eee
   phy_support_sym_pause
   phy_trigger_machine
   phy_validate
@@ -1907,16 +1968,20 @@
   pinctrl_select_default_state
   pinctrl_select_state
   pin_get_name
+  pinmux_generic_add_pinfunction
   pinmux_generic_get_function
   pinmux_generic_get_function_count
   pinmux_generic_get_function_groups
   pinmux_generic_get_function_name
   pin_user_pages
   pin_user_pages_remote
+  platform_bus_type
   platform_device_add
   platform_device_add_data
   platform_device_add_resources
   platform_device_alloc
+  platform_device_msi_free_irqs_all
+  platform_device_msi_init_and_alloc_irqs
   platform_device_put
   platform_device_register
   platform_device_register_full
@@ -1945,6 +2010,7 @@
   pm_runtime_force_resume
   pm_runtime_force_suspend
   pm_runtime_get_if_active
+  pm_runtime_get_if_in_use
   __pm_runtime_idle
   pm_runtime_no_callbacks
   __pm_runtime_resume
@@ -1960,6 +2026,7 @@
   pm_wakeup_ws_event
   power_supply_am_i_supplied
   power_supply_changed
+  power_supply_get_by_reference
   power_supply_get_drvdata
   power_supply_get_property
   power_supply_put
@@ -1979,6 +2046,7 @@
   proc_create_single_data
   proc_mkdir
   proc_remove
+  prot_ns_shared
   pskb_expand_head
   __pskb_pull_tail
   ___pskb_trim
@@ -1986,8 +2054,11 @@
   ptp_classify_raw
   ptp_clock_event
   ptp_clock_index
+  ptp_clock_index_by_dev
+  ptp_clock_index_by_of_node
   ptp_clock_register
   ptp_clock_unregister
+  ptp_find_pin
   ptp_find_pin_unlocked
   ptp_parse_header
   __put_cred
@@ -1995,6 +2066,7 @@
   __put_net
   put_pid
   __put_task_struct
+  __put_task_struct_rcu_cb
   put_unused_fd
   pwm_apply_might_sleep
   pwmchip_remove
@@ -2042,6 +2114,7 @@
   rdev_get_drvdata
   rdev_get_id
   reboot_mode
+  refcount_dec_and_mutex_lock
   refcount_warn_saturate
   __refrigerator
   regcache_cache_bypass
@@ -2067,6 +2140,7 @@
   register_syscore_ops
   register_tcf_proto_ops
   register_virtio_device
+  __register_virtio_driver
   regmap_add_irq_chip
   regmap_attach_dev
   regmap_bulk_read
@@ -2084,6 +2158,7 @@
   regmap_raw_read
   regmap_raw_write
   regmap_read
+  regmap_read_bypassed
   regmap_register_patch
   regmap_reinit_cache
   regmap_test_bits
@@ -2129,6 +2204,7 @@
   report_iommu_fault
   request_firmware
   request_firmware_direct
+  request_firmware_into_buf
   request_firmware_nowait
   __request_module
   __request_percpu_irq
@@ -2751,6 +2827,7 @@
   v4l2_async_nf_init
   v4l2_async_nf_register
   v4l2_async_nf_unregister
+  __v4l2_async_register_subdev
   v4l2_async_register_subdev_sensor
   v4l2_async_subdev_nf_init
   v4l2_async_unregister_subdev
@@ -2771,11 +2848,16 @@
   v4l2_ctrl_new_std_menu_items
   v4l2_ctrl_poll
   __v4l2_ctrl_s_ctrl
+  __v4l2_ctrl_s_ctrl_compound
   __v4l2_ctrl_s_ctrl_int64
   v4l2_ctrl_subdev_log_status
   v4l2_ctrl_subdev_subscribe_event
   v4l2_ctrl_subscribe_event
+  v4l2_ctrl_type_op_equal
+  v4l2_ctrl_type_op_init
+  v4l2_ctrl_type_op_validate
   v4l2_device_register
+  __v4l2_device_register_subdev
   __v4l2_device_register_subdev_nodes
   v4l2_device_unregister
   v4l2_device_unregister_subdev
@@ -2793,6 +2875,7 @@
   v4l2_fh_init
   v4l2_fh_open
   v4l2_fh_release
+  __v4l2_find_nearest_size_conditional
   v4l2_format_info
   v4l2_fwnode_device_parse
   v4l2_fwnode_endpoint_alloc_parse
@@ -2828,6 +2911,7 @@
   v4l2_m2m_ioctl_try_decoder_cmd
   v4l2_m2m_ioctl_try_encoder_cmd
   v4l2_m2m_job_finish
+  v4l2_m2m_last_buf
   v4l2_m2m_last_buffer_done
   v4l2_m2m_next_buf
   v4l2_m2m_register_media_controller
@@ -2839,6 +2923,9 @@
   v4l2_m2m_update_start_streaming_state
   v4l2_m2m_update_stop_streaming_state
   v4l2_match_dv_timings
+  v4l2_pipeline_link_notify
+  v4l2_pipeline_pm_get
+  v4l2_pipeline_pm_put
   v4l2_s_parm_cap
   v4l2_src_change_event_subscribe
   v4l2_subdev_call_wrappers
@@ -2855,7 +2942,12 @@
   __v4l2_subdev_next_active_route
   v4l2_subdev_routing_find_opposite_end
   v4l2_subdev_routing_validate
+  v4l2_subdev_set_routing
   v4l2_subdev_set_routing_with_fmt
+  v4l2_subdev_s_stream_helper
+  __v4l2_subdev_state_get_compose
+  __v4l2_subdev_state_get_crop
+  __v4l2_subdev_state_get_format
   v4l2_subdev_state_get_opposite_stream_format
   v4l2_subdev_state_xlate_streams
   v4l_bound_align_image
@@ -2907,6 +2999,7 @@
   video_devdata
   video_device_alloc
   __video_device_pipeline_start
+  __video_device_pipeline_stop
   video_device_pipeline_stop
   video_device_release
   video_device_release_empty
