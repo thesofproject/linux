@@ -345276,15 +345276,6 @@ function {
   parameter_id: 0x33f8a50c
 }
 function {
-  id: 0x9bd47a1d
-  return_type_id: 0x6720d32f
-  parameter_id: 0x18bd6530
-  parameter_id: 0x1d19a9d5
-  parameter_id: 0x38fa32ef
-  parameter_id: 0x6720d32f
-  parameter_id: 0x13580d6c
-}
-function {
   id: 0x9bd481b1
   return_type_id: 0x6720d32f
   parameter_id: 0x18bd6530
@@ -345653,6 +345644,16 @@ function {
   parameter_id: 0x18ea6ae3
   parameter_id: 0x18bd6530
   parameter_id: 0x1323af5e
+}
+function {
+  id: 0x9bdc60c3
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x1d19a9d5
+  parameter_id: 0x1d19a9d5
+  parameter_id: 0x38fa32ef
+  parameter_id: 0x6720d32f
+  parameter_id: 0x13580d6c
 }
 function {
   id: 0x9bdc70e1
@@ -361354,8 +361355,8 @@ elf_symbol {
   name: "__traceiter_android_rvh_find_lowest_rq"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xee5dcc0f
-  type_id: 0x9bd47a1d
+  crc: 0x8afe50cf
+  type_id: 0x9bdc60c3
   full_name: "__traceiter_android_rvh_find_lowest_rq"
 }
 elf_symbol {
