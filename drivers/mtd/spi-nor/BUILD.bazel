@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2025 The Android Open Source Project
+
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_module",
+)
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+ddk_module(
+    name = "spi-nor",
+    srcs = [
+        "atmel.c",
+        "core.c",
+        "debugfs.c",
+        "eon.c",
+        "esmt.c",
+        "everspin.c",
+        "gigadevice.c",
+        "intel.c",
+        "issi.c",
+        "macronix.c",
+        "micron-st.c",
+        "otp.c",
+        "sfdp.c",
+        "spansion.c",
+        "sst.c",
+        "swp.c",
+        "sysfs.c",
+        "winbond.c",
+        "xmc.c",
+    ],
+    out = "spi-nor.ko",
+    hdrs = [
+        "core.h",
+        "sfdp.h",
+    ],
+    includes = [
+        ".",
+        "include",
+    ],
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
