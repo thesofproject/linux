@@ -75,6 +75,6 @@ pub(crate) fn to_kernel_prio(policy: Policy, prio: Nice) -> Priority {
     if is_fair_policy(policy) {
         prio + DEFAULT_PRIO
     } else {
-        MAX_RT_PRIO - 1 - prio
+        (MAX_RT_PRIO - 1).saturating_sub(prio)
     }
 }
