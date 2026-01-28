@@ -91,6 +91,7 @@ static __init void pkvm_setup_syms(void)
 		static_branch_enable(&pkvm_sym(__fpu_state_size_dynamic));
 #endif
 	pkvm_sym(x86_pred_cmd) = x86_pred_cmd;
+	pkvm_sym(tsc_khz) = tsc_khz;
 }
 
 static __init int pkvm_setup_host_vmcs_config(void)
