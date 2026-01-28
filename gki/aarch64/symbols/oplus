@@ -1,5 +1,6 @@
 [abi_symbol_list]
   address_space_init_once
+  add_wait_queue_priority
   arm64_mismatched_32bit_el0
   backing_file_open
   backing_tmpfile_open
@@ -9,6 +10,10 @@
   __blkdev_issue_discard
   blk_fill_rwbs
   blk_finish_plug
+  blk_mq_debugfs_rq_show
+  blk_mq_run_hw_queue
+  blk_mq_sched_try_insert_merge
+  blk_mq_sched_try_merge
   blk_rq_map_user
   blk_rq_map_user_iov
   blk_start_plug
@@ -45,14 +50,26 @@
   down_write_killable
   d_rehash
   drm_crtc_vblank_waitqueue
+  elv_bio_merge_ok
+  elv_rb_add
+  elv_rb_del
+  elv_rb_find
+  elv_rb_former_request
+  elv_rb_latter_request
+  elv_register
+  elv_rqhash_add
+  elv_rqhash_del
+  elv_unregister
   errseq_check
   errseq_sample
+  eventfd_ctx_do_read
   exportfs_decode_fh
   exportfs_encode_inode_fh
   ext_sched_class
   filp_close
   find_user_dsq
   finish_open
+  finish_rcuwait
   folio_add_lru
   folio_mapping
   folio_referenced
@@ -157,6 +174,8 @@
   noop_direct_IO
   notify_change
   ns_capable_noaudit
+  param_get_ulong
+  param_set_ulong
   platform_device_add
   platform_device_alloc
   platform_device_put
@@ -168,8 +187,12 @@
   public_key_verify_signature
   __qdisc_calculate_pkt_len
   register_btf_kfunc_id_set
+  regulator_map_voltage_linear_range
   release_dentry_name_snapshot
+  rtc_read_alarm
+  rtc_set_alarm
   rw_verify_area
+  sbitmap_queue_min_shallow_depth
   __scx_enabled
   scx_root
   __scx_switched_all
@@ -178,6 +201,8 @@
   security_inode_copy_up_xattr
   seq_escape_mem
   __skb_checksum_complete
+  snd_soc_add_card_controls
+  sock_from_file
   spi_bus_type
   sprint_symbol_no_offset
   stack_depot_print
@@ -356,6 +381,7 @@
   unregister_net_sysctl_table
   unregister_sysctl_table
   uuid_gen
+  __v4l2_async_register_subdev
   vfs_clone_file_range
   vfs_copy_file_range
   vfs_create
