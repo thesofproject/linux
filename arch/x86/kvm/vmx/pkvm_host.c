@@ -125,8 +125,13 @@ static void pkvm_cache_segment(struct vcpu_vmx *vmx, struct kvm_segment *var, in
 
 static fastpath_t pkvm_exit_handlers_fastpath(struct kvm_vcpu *vcpu)
 {
-	/* TODO Handle vmexit for fastpath */
-	return EXIT_FASTPATH_NONE;
+	switch (vmx_get_exit_reason(vcpu).basic) {
+	case EXIT_REASON_PREEMPTION_TIMER:
+		kvm_lapic_expired_hv_timer(vcpu);
+		return EXIT_FASTPATH_REENTER_GUEST;
+	default:
+		return EXIT_FASTPATH_NONE;
+	}
 }
 
 /*
