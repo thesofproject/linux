@@ -6,25 +6,9 @@
 #include <asm/kvm_pkvm.h>
 #include <asm/pkvm_trace.h>
 
-static void enable_vmexit_trace_func(void *data)
-{
-	u64 val;
-
-	if (!data)
-		return;
-
-	val = *(u64 *)data;
-	pkvm_hypercall(enable_vmexit_trace, val);
-}
-
 static int enable_vmexit_trace(void *data, u64 val)
 {
-	int cpu;
-
-	for_each_possible_cpu(cpu)
-		smp_call_function_single(cpu, enable_vmexit_trace_func, &val, true);
-
-	return 0;
+	return pkvm_hypercall(enable_vmexit_trace, val);
 }
 DEFINE_SIMPLE_ATTRIBUTE(enable_vmexit_trace_fops, NULL, enable_vmexit_trace, "%llu\n");
 
