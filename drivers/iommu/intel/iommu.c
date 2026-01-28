@@ -290,6 +290,7 @@ static int __init intel_iommu_setup(char *str)
 	return 1;
 }
 __setup("intel_iommu=", intel_iommu_setup);
+#endif /*!__PKVM_HYP__*/
 
 static int domain_pfn_supported(struct dmar_domain *domain, unsigned long pfn)
 {
@@ -298,6 +299,7 @@ static int domain_pfn_supported(struct dmar_domain *domain, unsigned long pfn)
 	return !(addr_width < BITS_PER_LONG && pfn >> addr_width);
 }
 
+#ifndef __PKVM_HYP__
 /*
  * Calculate the Supported Adjusted Guest Address Widths of an IOMMU.
  * Refer to 11.4.2 of the VT-d spec for the encoding of each bit of
@@ -727,6 +729,7 @@ pgtable_walk:
 	pgtable_walk(iommu, addr >> VTD_PAGE_SHIFT, bus, devfn, pgtable, level);
 }
 #endif
+#endif /*!__PKVM_HYP__*/
 
 static struct dma_pte *pfn_to_dma_pte(struct dmar_domain *domain,
 				      unsigned long pfn, int *target_level,
@@ -755,11 +758,18 @@ static struct dma_pte *pfn_to_dma_pte(struct dmar_domain *domain,
 		if (!dma_pte_present(pte)) {
 			uint64_t pteval, tmp;
 
+#ifndef __PKVM_HYP__
 			tmp_page = iommu_alloc_pages_node_sz(domain->nid, gfp,
 							     SZ_4K);
 
 			if (!tmp_page)
 				return NULL;
+#else
+			tmp_page = pop_pkvm_memcache_page(&domain->mc, pkvm_phys_to_virt);
+			if (!tmp_page)
+				return NULL;
+			memset(tmp_page, 0, VTD_PAGE_SIZE);
+#endif
 
 			domain_flush_cache(domain, tmp_page, VTD_PAGE_SIZE);
 			pteval = virt_to_phys(tmp_page) | DMA_PTE_READ |
@@ -768,9 +778,15 @@ static struct dma_pte *pfn_to_dma_pte(struct dmar_domain *domain,
 				pteval |= DMA_FL_PTE_US | DMA_FL_PTE_ACCESS;
 
 			tmp = 0ULL;
-			if (!try_cmpxchg64(&pte->val, &tmp, pteval))
+			if (!try_cmpxchg64(&pte->val, &tmp, pteval)) {
 				/* Someone else set it while we were thinking; use theirs. */
+#ifndef __PKVM_HYP__
 				iommu_free_pages(tmp_page);
+#else
+				push_pkvm_memcache_page(&domain->mc, tmp_page,
+							pkvm_virt_to_phys);
+#endif
+			}
 			else
 				domain_flush_cache(domain, pte, sizeof(*pte));
 		}
@@ -883,7 +899,12 @@ static void dma_pte_free_level(struct dmar_domain *domain, int level,
 		      last_pfn < level_pfn + level_size(level) - 1)) {
 			dma_clear_pte(pte);
 			domain_flush_cache(domain, pte, sizeof(*pte));
+#ifndef __PKVM_HYP__
 			iommu_free_pages(level_pte);
+#else
+			push_pkvm_memcache_page(&domain->mc, (phys_addr_t *)level_pte,
+						pkvm_virt_to_phys);
+#endif
 		}
 next:
 		pfn += level_size(level);
@@ -918,16 +939,29 @@ static void dma_pte_list_pagetables(struct dmar_domain *domain,
 {
 	struct dma_pte *pte = phys_to_virt(dma_pte_addr(parent_pte));
 
+#ifndef __PKVM_HYP__
 	iommu_pages_list_add(freelist, pte);
+#endif
 
-	if (level == 1)
+	if (level == 1) {
+#ifndef __PKVM_HYP__
 		return;
+#else
+		goto push_memcache;
+#endif
+	}
 
 	do {
 		if (dma_pte_present(pte) && !dma_pte_superpage(pte))
 			dma_pte_list_pagetables(domain, level - 1, pte, freelist);
 		pte++;
 	} while (!first_pte_in_page(pte));
+
+#ifdef __PKVM_HYP__
+push_memcache:
+	push_pkvm_memcache_page(&domain->mc, pkvm_phys_to_virt(dma_pte_addr(parent_pte)),
+				pkvm_virt_to_phys);
+#endif
 }
 
 static void dma_pte_clear_level(struct dmar_domain *domain, int level,
@@ -977,10 +1011,13 @@ next:
 /* We can't just free the pages because the IOMMU may still be walking
    the page tables, and may have cached the intermediate levels. The
    pages can only be freed after the IOTLB flush has been done. */
-static void domain_unmap(struct dmar_domain *domain, unsigned long start_pfn,
-			 unsigned long last_pfn,
-			 struct iommu_pages_list *freelist)
+void domain_unmap(struct dmar_domain *domain, unsigned long start_pfn,
+		  unsigned long last_pfn, struct iommu_pages_list *freelist)
 {
+#ifdef __PKVM_HYP__
+	unsigned int nr_pages = domain->mc.count;
+#endif
+
 	if (WARN_ON(!domain_pfn_supported(domain, last_pfn)) ||
 	    WARN_ON(start_pfn > last_pfn))
 		return;
@@ -989,13 +1026,30 @@ static void domain_unmap(struct dmar_domain *domain, unsigned long start_pfn,
 	dma_pte_clear_level(domain, agaw_to_level(domain->agaw),
 			    domain->pgd, 0, start_pfn, last_pfn, freelist);
 
+#ifndef __PKVM_HYP__
 	/* free pgd */
 	if (start_pfn == 0 && last_pfn == DOMAIN_MAX_PFN(domain->gaw)) {
 		iommu_pages_list_add(freelist, domain->pgd);
 		domain->pgd = NULL;
 	}
+#else
+	/*
+	 * Regardless of the DMA mode used by host, we perform iotlb flush on
+	 * unmap. Unmapped pages may be donated to a pVM or to the hypervisor.
+	 * Until a flush happens, stale entries in cache could enable a device
+	 * to access those pages, breaking pKVM security guarantees. So perform
+	 * flush immediately.
+	 */
+	/*
+	 * No new pages released during unmap implies only the leaf
+	 * PTEs were updated. Set IH=1(Invalidation Hint) in that case.
+	 */
+	cache_tag_flush_range(domain, start_pfn << VTD_PAGE_SHIFT,
+			      last_pfn << VTD_PAGE_SHIFT, nr_pages == domain->mc.count);
+#endif
 }
 
+#ifndef __PKVM_HYP__
 /* iommu handling */
 static int iommu_alloc_root_entry(struct intel_iommu *iommu)
 {
@@ -1593,6 +1647,7 @@ domain_context_mapping(struct dmar_domain *domain, struct device *dev)
 
 	return 0;
 }
+#endif /*!__PKVM_HYP__*/
 
 /* Return largest possible superpage level for a given mapping */
 static int hardware_largepage_caps(struct dmar_domain *domain, unsigned long iov_pfn,
@@ -1657,10 +1712,9 @@ static void switch_to_super_page(struct dmar_domain *domain,
 	}
 }
 
-static int
-__domain_mapping(struct dmar_domain *domain, unsigned long iov_pfn,
-		 unsigned long phys_pfn, unsigned long nr_pages, int prot,
-		 gfp_t gfp)
+int domain_map(struct dmar_domain *domain, unsigned long iov_pfn,
+	       unsigned long phys_pfn, unsigned long nr_pages, int prot,
+	       gfp_t gfp)
 {
 	struct dma_pte *first_pte = NULL, *pte = NULL;
 	unsigned int largepage_lvl = 0;
@@ -1674,10 +1728,12 @@ __domain_mapping(struct dmar_domain *domain, unsigned long iov_pfn,
 	if ((prot & (DMA_PTE_READ|DMA_PTE_WRITE)) == 0)
 		return -EINVAL;
 
+#ifndef __PKVM_HYP__
 	if (!(prot & DMA_PTE_WRITE) && domain->nested_parent) {
 		pr_err_ratelimited("Read-only mapping is disallowed on the domain which serves as the parent in a nested configuration, due to HW errata (ERRATA_772415_SPR17)\n");
 		return -EINVAL;
 	}
+#endif
 
 	attr = prot & (DMA_PTE_READ | DMA_PTE_WRITE | DMA_PTE_SNP);
 	if (domain->use_first_level) {
@@ -1686,7 +1742,9 @@ __domain_mapping(struct dmar_domain *domain, unsigned long iov_pfn,
 			attr |= DMA_FL_PTE_DIRTY;
 	}
 
+#ifndef __PKVM_HYP__
 	domain->has_mappings = true;
+#endif
 
 	pteval = ((phys_addr_t)phys_pfn << VTD_PAGE_SHIFT) | attr;
 
@@ -1726,6 +1784,7 @@ __domain_mapping(struct dmar_domain *domain, unsigned long iov_pfn,
 		 */
 		tmp = 0ULL;
 		if (!try_cmpxchg64_local(&pte->val, &tmp, pteval)) {
+#ifndef __PKVM_HYP__
 			static int dumps = 5;
 			pr_crit("ERROR: DMA PTE for vPFN 0x%lx already set (to %llx not %llx)\n",
 				iov_pfn, tmp, (unsigned long long)pteval);
@@ -1733,6 +1792,7 @@ __domain_mapping(struct dmar_domain *domain, unsigned long iov_pfn,
 				dumps--;
 				debug_dma_dump_mappings(NULL);
 			}
+#endif
 			WARN_ON(1);
 		}
 
@@ -1764,8 +1824,8 @@ __domain_mapping(struct dmar_domain *domain, unsigned long iov_pfn,
 
 	return 0;
 }
-#else /* __PKVM_HYP__ */
 
+#ifdef __PKVM_HYP__
 static bool pasid_table_has_present_entries(struct pasid_dir_entry *dir, int max_pde)
 {
 	int i;
@@ -1802,7 +1862,7 @@ static void pasid_free_table(struct pasid_dir_entry *dir, int max_pde)
 	}
 	pkvm_hyp_donate_host(__pkvm_pa(dir), ALIGN(max_pde * 8, VTD_PAGE_SIZE), false);
 }
-#endif /* !__PKVM_HYP__ */
+#endif /* __PKVM_HYP__ */
 
 void domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn)
 {
@@ -3802,8 +3862,8 @@ static int intel_iommu_map(struct iommu_domain *domain,
 	/* Round up size to next multiple of PAGE_SIZE, if it and
 	   the low bits of hpa would take us onto the next page */
 	size = aligned_nrpages(hpa, size);
-	return __domain_mapping(dmar_domain, iova >> VTD_PAGE_SHIFT,
-				hpa >> VTD_PAGE_SHIFT, size, prot, gfp);
+	return domain_map(dmar_domain, iova >> VTD_PAGE_SHIFT,
+			  hpa >> VTD_PAGE_SHIFT, size, prot, gfp);
 }
 
 static int intel_iommu_map_pages(struct iommu_domain *domain,
