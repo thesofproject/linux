@@ -25,8 +25,10 @@ static inline struct vmexit_perf *vcpu_to_perf(struct kvm_vcpu *vcpu)
 
 static void refresh_vmexit_perf(struct perf_ctrl *pctrl, struct vmexit_perf *perf)
 {
+	pkvm_spin_lock(&perf->lock);
 	memset(perf->data.vmexit_reasons, 0, sizeof(perf->data.vmexit_reasons));
 	memset(perf->data.hypercalls, 0, sizeof(perf->data.hypercalls));
+	pkvm_spin_unlock(&perf->lock);
 
 	perf->age = pctrl->age;
 }
