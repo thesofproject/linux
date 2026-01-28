@@ -131,6 +131,8 @@ static fastpath_t pkvm_exit_handlers_fastpath(struct kvm_vcpu *vcpu)
 	case EXIT_REASON_PREEMPTION_TIMER:
 		kvm_lapic_expired_hv_timer(vcpu);
 		return EXIT_FASTPATH_REENTER_GUEST;
+	case EXIT_REASON_MSR_WRITE:
+		return handle_fastpath_wrmsr(vcpu);
 	default:
 		return EXIT_FASTPATH_NONE;
 	}
