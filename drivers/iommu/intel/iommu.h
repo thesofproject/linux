@@ -546,11 +546,21 @@ enum {
 #define sm_supported(iommu)	(intel_iommu_sm && ecap_smts((iommu)->ecap))
 #define pasid_supported(iommu)	(sm_supported(iommu) &&			\
 				 ecap_pasid((iommu)->ecap))
-#define ssads_supported(iommu) (sm_supported(iommu) &&                 \
+/* pKVM doesn't yet support dirty tracking, nested and PRS */
+#ifndef __PKVM_HYP__
+#define ssads_supported(iommu) (!pkvm_enabled() &&                    \
+				sm_supported(iommu) &&                 \
 				ecap_slads((iommu)->ecap) &&           \
 				ecap_smpwc(iommu->ecap))
-#define nested_supported(iommu)	(sm_supported(iommu) &&			\
+
+#define nested_supported(iommu)	(!pkvm_enabled() && sm_supported(iommu) &&\
 				 ecap_nest((iommu)->ecap))
+#define prs_supported(iommu)	(!pkvm_enabled() && ecap_prs((iommu)->ecap))
+#else
+#define ssads_supported(iommu)	false
+#define nested_supported(iommu)	false
+#define prs_supported(iommu)	false
+#endif
 
 struct pasid_entry;
 struct pasid_state_entry;
