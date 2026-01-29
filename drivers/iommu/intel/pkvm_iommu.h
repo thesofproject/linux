@@ -119,6 +119,8 @@ int pkvm_context_mapping(struct intel_iommu *iommu, struct device_domain_info *i
 			 u8 bus, u8 devfn, u64 pgd_gpa, u16 did);
 int pkvm_pasid_table_setup(struct intel_iommu *iommu, struct device_domain_info *info,
 			   u8 bus, u8 devfn);
+int pkvm_pasid_setup_fl(struct device_domain_info *info, phys_addr_t fsptptr,
+			u32 pasid, u16 did, u16 old_did, int flags);
 #else /* __PKVM_HYP__ */
 /*
  * dev_iommu_priv_get is called from quite a few places in code re-used by
@@ -171,6 +173,7 @@ int pkvm_iommu_qi_submit(u64 phys, u64 desc_gpa, u32 count, u32 options);
 int pkvm_iommu_clear_ce(struct clear_ce_data *data);
 int pkvm_iommu_set_lm_ce(struct set_lm_ce_data *in, struct set_lm_ce_data *out);
 int pkvm_iommu_set_sm_ce(struct set_sm_ce_data *in, struct set_sm_ce_data *out);
+int pkvm_iommu_pasid_setup_fl(struct pasid_setup_fl_data *in, struct pasid_setup_fl_data *out);
 #endif /* !__PKVM_HYP__ */
 #else /* !CONFIG_PKVM_INTEL */
 static inline int pkvm_qi_submit_sync(struct intel_iommu *iommu,
@@ -193,6 +196,12 @@ static inline int pkvm_context_mapping(struct intel_iommu *iommu,
 static inline int pkvm_pasid_table_setup(struct intel_iommu *iommu,
 					 struct device_domain_info *info,
 					 u8 bus, u8 devfn)
+{
+	return -EOPNOTSUPP;
+}
+static inline int pkvm_pasid_setup_fl(struct device_domain_info *info,
+				      phys_addr_t fsptptr, u32 pasid,
+				      u16 did, u16 old_did, int flags)
 {
 	return -EOPNOTSUPP;
 }
