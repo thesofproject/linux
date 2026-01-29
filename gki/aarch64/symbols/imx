@@ -451,6 +451,7 @@
   devm_phy_create
   devm_phy_get
   devm_phy_optional_get
+  devm_phy_package_join
   devm_pinctrl_get
   devm_pinctrl_put
   devm_pinctrl_register_and_init
@@ -1009,6 +1010,7 @@
   fwnode_get_child_node_count
   fwnode_get_named_child_node
   fwnode_get_next_available_child_node
+  fwnode_get_next_child_node
   fwnode_get_phy_node
   fwnode_graph_get_endpoint_by_id
   fwnode_graph_get_next_endpoint
@@ -1915,6 +1917,8 @@
   phy_modify_mmd_changed
   phy_modify_paged
   phy_modify_paged_changed
+  phy_package_get_priv
+  phy_package_init_once
   phy_pm_runtime_get_sync
   phy_pm_runtime_put
   phy_power_off
