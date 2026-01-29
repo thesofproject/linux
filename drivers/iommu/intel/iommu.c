@@ -3960,9 +3960,17 @@ static size_t intel_iommu_unmap_pages(struct iommu_domain *domain,
 static void intel_iommu_tlb_sync(struct iommu_domain *domain,
 				 struct iommu_iotlb_gather *gather)
 {
-	cache_tag_flush_range(to_dmar_domain(domain), gather->start,
-			      gather->end,
-			      iommu_pages_list_empty(&gather->freelist));
+	/*
+	 * pKVM unconditionally performs the flush on unmap to close a security
+	 * gap where device will be able to read contents of a donated page which
+	 * was previously mapped for dma and then unmapped but iotlb not yet
+	 * flushed.
+	 * So, since pKVM already flushed the iotlb, don't bother doing it here.
+	 */
+	if (!pkvm_enabled())
+		cache_tag_flush_range(to_dmar_domain(domain), gather->start,
+				      gather->end,
+				      iommu_pages_list_empty(&gather->freelist));
 	iommu_put_pages_list(&gather->freelist);
 }
 
@@ -4045,7 +4053,11 @@ static bool intel_iommu_capable(struct device *dev, enum iommu_cap cap)
 	switch (cap) {
 	case IOMMU_CAP_CACHE_COHERENCY:
 	case IOMMU_CAP_DEFERRED_FLUSH:
-		return true;
+		/*
+		 * pKVM enforces immediate flush and hence
+		 * does not support deferred flush capability.
+		 */
+		return !pkvm_enabled();
 	case IOMMU_CAP_PRE_BOOT_PROTECTION:
 		return dmar_platform_optin();
 	case IOMMU_CAP_ENFORCE_CACHE_COHERENCY:
@@ -4343,7 +4355,8 @@ static int intel_iommu_iotlb_sync_map(struct iommu_domain *domain,
 {
 	struct dmar_domain *dmar_domain = to_dmar_domain(domain);
 
-	if (dmar_domain->iotlb_sync_map)
+	/* pKVM performs iotlb flush after map if required */
+	if (!pkvm_enabled() && dmar_domain->iotlb_sync_map)
 		cache_tag_flush_range_np(dmar_domain, iova, iova + size - 1);
 
 	return 0;
