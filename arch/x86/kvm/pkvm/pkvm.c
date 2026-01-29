@@ -1916,6 +1916,9 @@ void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 		ret = pkvm_iommu_pasid_setup_sl(&in.iommu_pasid_setup_sl.in,
 						&out.iommu_pasid_setup_sl.out);
 		break;
+	case __pkvm__iommu_pasid_teardown:
+		ret = pkvm_iommu_pasid_teardown(&in.iommu_pasid_teardown.data);
+		break;
 #endif
 	default:
 		ret = pkvm_vcpu_handle_host_hypercall(vcpu, hc, &in, &out);

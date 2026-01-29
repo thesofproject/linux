@@ -292,6 +292,23 @@ void intel_pasid_tear_down_entry(struct intel_iommu *iommu, struct pkvm_device *
 	struct pasid_entry *pte;
 	u16 did, pgtt;
 
+#ifndef __PKVM_HYP__
+	if (pkvm_enabled()) {
+		struct device_domain_info *info = dev_iommu_priv_get(dev);
+		int ret;
+
+		if (WARN_ON(!info || !info->pasid_table))
+			return;
+
+		ret = pkvm_pasid_teardown(info, pasid);
+		if (ret)
+			pr_err("iommu%d: pkvm_pasid_teardown failed(err=%d)\n",
+			       iommu->seq_id, ret);
+
+		return;
+	}
+#endif
+
 	spin_lock(&iommu->lock);
 	pte = intel_pasid_get_entry(dev, pasid);
 	if (WARN_ON(IS_ERR(pte))) {
