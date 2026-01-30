@@ -406,3 +406,5 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_filemap_map_pages);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_try_alloc_pages_gfp);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_dma_heap_buffer_alloc_start);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_dma_heap_buffer_alloc_end);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_zs_shrinker_adjust);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_zs_shrinker_bypass);
