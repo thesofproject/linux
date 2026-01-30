@@ -2050,6 +2050,7 @@
   of_genpd_add_provider_onecell
   of_genpd_add_provider_simple
   of_genpd_del_provider
+  of_genpd_sync_state
   of_gen_pool_get
   __of_get_address
   of_get_child_by_name
