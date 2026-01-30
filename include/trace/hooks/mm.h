@@ -171,6 +171,9 @@ DECLARE_HOOK(android_vh_si_mem_available_adjust,
 DECLARE_HOOK(android_vh_si_meminfo_adjust,
 	TP_PROTO(unsigned long *totalram, unsigned long *freeram),
 	TP_ARGS(totalram, freeram));
+DECLARE_HOOK(android_vh_si_meminfo_adjust_shmem,
+	TP_PROTO(unsigned long *sharedram),
+	TP_ARGS(sharedram));
 DECLARE_HOOK(android_vh_compact_finished,
 	TP_PROTO(bool *abort_compact),
 	TP_ARGS(abort_compact));
