@@ -35365,11 +35365,6 @@ array {
   element_type_id: 0x6720d32f
 }
 array {
-  id: 0xfe75526d
-  number_of_elements: 19
-  element_type_id: 0x400ccf19
-}
-array {
   id: 0xfead10eb
   number_of_elements: 5
   element_type_id: 0x5d44f96b
@@ -323884,8 +323879,8 @@ elf_symbol {
   name: "snd_soc_acpi_intel_ptl_sdw_machines"
   is_defined: true
   symbol_type: OBJECT
-  crc: 0xa972fb5a
-  type_id: 0xfe75526d
+  crc: 0xf3a104f3
+  type_id: 0x94fd264d
   full_name: "snd_soc_acpi_intel_ptl_sdw_machines"
 }
 elf_symbol {
