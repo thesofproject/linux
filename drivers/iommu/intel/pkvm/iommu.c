@@ -240,6 +240,8 @@ static void set_root_table(struct intel_iommu *iommu)
 static int handle_gcmd_srtp(struct intel_iommu *iommu)
 {
 	u32 gsts = readl(iommu->reg + DMAR_GSTS_REG);
+	u64 root_pa;
+	int ret;
 
 	if (WARN_ON(gsts != iommu->vgsts))
 		iommu->vgsts = gsts;
@@ -255,9 +257,18 @@ static int handle_gcmd_srtp(struct intel_iommu *iommu)
 		return -EBUSY;
 	}
 
-	/* TODO: Write protect Root Table page */
+	root_pa = pkvm_host_gpa_to_phys(iommu->vrta & VTD_PAGE_MASK);
+	ret = pkvm_host_donate_hyp_share_ro(root_pa, VTD_PAGE_SIZE, true);
+	if (ret) {
+		pkvm_err("iommu%d: failed to write protect root table page(err=%d)!\n",
+			 iommu->seq_id, ret);
+		return ret;
+	}
+
+	iommu->root_entry = __pkvm_va(root_pa);
+	__iommu_flush_cache(iommu, iommu->root_entry, VTD_PAGE_SIZE);
+
 	set_root_table(iommu);
-	iommu->root_entry = pkvm_host_gpa_to_virt(iommu->vrta & VTD_PAGE_MASK);
 
 	pkvm_dbg("iommu%d Set Root Table(%llx)!\n", iommu->seq_id, iommu->vrta);
 	return 0;
