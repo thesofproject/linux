@@ -214,6 +214,8 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_timer_calc_index);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_is_fpsimd_save);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_tune_swappiness);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_shmem_get_folio);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_shmem_mod_shmem);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_shmem_mod_swapped);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_add_lazyfree_bypass);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_cma_alloc_retry);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_tcp_v4_connect);

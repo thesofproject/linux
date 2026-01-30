@@ -28,6 +28,12 @@ DECLARE_RESTRICTED_HOOK(android_rvh_shmem_allowable_huge_orders,
 			TP_PROTO(struct inode *inode, pgoff_t index,
 				struct vm_area_struct *vma, unsigned long *orders),
 			TP_ARGS(inode, index, vma, orders), 4);
+DECLARE_HOOK(android_vh_shmem_mod_shmem,
+	TP_PROTO(struct address_space *mapping, long nr_pages),
+	TP_ARGS(mapping, nr_pages));
+DECLARE_HOOK(android_vh_shmem_mod_swapped,
+	TP_PROTO(struct address_space *mapping, long nr_pages),
+	TP_ARGS(mapping, nr_pages));
 DECLARE_RESTRICTED_HOOK(android_rvh_try_alloc_pages_gfp,
 			TP_PROTO(struct page **page, unsigned int order,
 				gfp_t gfp, enum zone_type highest_zoneidx),
