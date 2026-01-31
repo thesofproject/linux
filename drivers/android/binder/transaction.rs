@@ -115,7 +115,7 @@ impl Transaction {
                     prio: from.task.normal_prio(),
                 }
             } else {
-                from.process.default_priority
+                to.default_priority
             };
 
         Ok(DTRWrap::arc_pin_init(pin_init!(Transaction {
