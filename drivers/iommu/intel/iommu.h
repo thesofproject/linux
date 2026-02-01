@@ -57,6 +57,29 @@
 #define DMA_SL_PTE_DIRTY_BIT	9
 #define DMA_SL_PTE_DIRTY	BIT_ULL(DMA_SL_PTE_DIRTY_BIT)
 
+#ifdef CONFIG_PKVM_INTEL
+/*
+ * pKVM hypervisor does unmap in two pass:
+ * 1. Walk the page table, unpresent the leaf PTE for all mappings in
+ *    the range to be unmapped and flush caches(iotlb/devtlb).
+ * 2. Walk the page table again, determine the physical pages in the
+ *    unmapped region and unpin them.
+ *
+ * This is to guarantee that the host would not be able to donate the
+ * pages until the caches are flushed. And cache flushing is done after
+ * all pages in the range are unmapped for efficiency and performance.
+ *
+ * So we need a reliable way to determine if a leaf PTE points to a
+ * valid mapping even after unpresented. FL/SL address can be used
+ * for this, but only under the assumption that address 0 is not used
+ * for mapping. Rather, lets use an unused bit in the PTE to denote
+ * that the PTE has a valid mapping.
+ * Bit 63 is ignored by hardware in both FL and SL mode, Use that to
+ * denote that the leaf PTE is mapped.
+ */
+#define DMA_PTE_MAPPED		BIT_ULL(63)
+#endif /* CONFIG_PKVM_INTEL */
+
 #define ADDR_WIDTH_5LEVEL	(57)
 #define ADDR_WIDTH_4LEVEL	(48)
 
@@ -1022,7 +1045,7 @@ static inline void dma_clear_pte(struct dma_pte *pte)
 	pte->val = 0;
 }
 
-static inline u64 dma_pte_addr(struct dma_pte *pte)
+static inline u64 __dma_pte_addr(struct dma_pte *pte)
 {
 #ifdef CONFIG_64BIT
 	return pte->val & VTD_PAGE_MASK;
@@ -1031,6 +1054,23 @@ static inline u64 dma_pte_addr(struct dma_pte *pte)
 	return  __cmpxchg64(&pte->val, 0ULL, 0ULL) & VTD_PAGE_MASK;
 #endif
 }
+
+#ifdef CONFIG_PKVM_INTEL
+static inline u64 dma_pte_addr(struct dma_pte *pte)
+{
+	return __dma_pte_addr(pte) & ~DMA_PTE_MAPPED;
+}
+
+static inline bool dma_pte_mapped(struct dma_pte *pte)
+{
+	return pte->val & DMA_PTE_MAPPED;
+}
+#else
+static inline u64 dma_pte_addr(struct dma_pte *pte)
+{
+	return __dma_pte_addr(pte);
+}
+#endif /* CONFIG_PKVM_INTEL */
 
 static inline bool dma_pte_present(struct dma_pte *pte)
 {
