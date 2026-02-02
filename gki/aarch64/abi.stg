@@ -327131,6 +327131,11 @@ function {
   parameter_id: 0x49b889e7
 }
 function {
+  id: 0x5acb19d0
+  return_type_id: 0x18bd6530
+  parameter_id: 0x3176a085
+}
+function {
   id: 0x5adb0623
   return_type_id: 0x18bd6530
   parameter_id: 0x324f0972
@@ -350571,6 +350576,14 @@ function {
   parameter_id: 0x3e10b518
 }
 function {
+  id: 0x9dc91f17
+  return_type_id: 0x6720d32f
+  parameter_id: 0x0258f96e
+  parameter_id: 0x3176a085
+  parameter_id: 0x6720d32f
+  parameter_id: 0xf435685e
+}
+function {
   id: 0x9dc9962d
   return_type_id: 0x6720d32f
   parameter_id: 0x054f691a
@@ -357766,6 +357779,11 @@ function {
   id: 0xf2f497a5
   return_type_id: 0x6d7f5ff6
   parameter_id: 0x31433284
+}
+function {
+  id: 0xf2f9f325
+  return_type_id: 0x6d7f5ff6
+  parameter_id: 0x3176a085
 }
 function {
   id: 0xf300f8e6
@@ -380773,6 +380791,15 @@ elf_symbol {
   crc: 0xf607357e
   type_id: 0x1154b37f
   full_name: "devm_phy_optional_get"
+}
+elf_symbol {
+  id: 0x0c059f07
+  name: "devm_phy_package_join"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x28b62988
+  type_id: 0x9dc91f17
+  full_name: "devm_phy_package_join"
 }
 elf_symbol {
   id: 0x3856a7af
@@ -405079,6 +405106,24 @@ elf_symbol {
   full_name: "phy_modify_paged_changed"
 }
 elf_symbol {
+  id: 0x4db961aa
+  name: "phy_package_get_priv"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x61709398
+  type_id: 0x5acb19d0
+  full_name: "phy_package_get_priv"
+}
+elf_symbol {
+  id: 0x9008adc8
+  name: "phy_package_init_once"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xf28efd8c
+  type_id: 0xf2f9f325
+  full_name: "phy_package_init_once"
+}
+elf_symbol {
   id: 0xb37c1005
   name: "phy_pm_runtime_get_sync"
   is_defined: true
@@ -428717,6 +428762,7 @@ interface {
   symbol_id: 0xd6e5f7c7
   symbol_id: 0x7695d1dd
   symbol_id: 0xcf6046cf
+  symbol_id: 0x0c059f07
   symbol_id: 0x3856a7af
   symbol_id: 0x8a8e86c7
   symbol_id: 0x69272f95
@@ -431414,6 +431460,8 @@ interface {
   symbol_id: 0x90818f05
   symbol_id: 0x49b0b3dc
   symbol_id: 0xe4264e80
+  symbol_id: 0x4db961aa
+  symbol_id: 0x9008adc8
   symbol_id: 0xb37c1005
   symbol_id: 0x793c34e6
   symbol_id: 0xe501016b
