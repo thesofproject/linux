@@ -141,6 +141,24 @@ pasid_get_domain_id(struct pasid_entry *pe)
 }
 
 /*
+ * Get the FLPTPTR (First Level Page Table Pointer) field (Bit 140 ~ 191)
+ * of a scalable mode PASID entry.
+ */
+static inline u64 pasid_get_flptr(struct pasid_entry *pe)
+{
+	return (u64)(READ_ONCE(pe->val[2]) & VTD_PAGE_MASK);
+}
+
+/*
+ * Get the SLPTPTR (Second Level Page Table Pointer) field (Bit 12 ~ 63)
+ * of a scalable mode PASID entry.
+ */
+static inline u64 pasid_get_slptr(struct pasid_entry *pe)
+{
+	return (u64)(READ_ONCE(pe->val[0]) & VTD_PAGE_MASK);
+}
+
+/*
  * Setup the SLPTPTR(Second Level Page Table Pointer) field (Bit 12~63)
  * of a scalable mode PASID entry.
  */

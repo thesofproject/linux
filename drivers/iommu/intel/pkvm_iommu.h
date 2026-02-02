@@ -177,6 +177,11 @@ int pkvm_free_iommu_domain(struct dmar_domain *domain);
 struct cache_tag *pkvm_alloc_cache_tag(void);
 void pkvm_free_cache_tag(struct cache_tag *cache_tag);
 
+int pkvm_get_domain_cache_tag_assign(void *pgd, int did, u32 pasid,
+				     struct device_domain_info *info);
+void pkvm_put_domain_cache_tag_unassign(void *pgd, int did, u32 pasid,
+					struct device_domain_info *info);
+
 int pkvm_intel_iommu_init(void);
 
 int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val);
