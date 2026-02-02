@@ -3064,6 +3064,11 @@ static void cs35l41_fixup_spi_four(struct hda_codec *codec, const struct hda_fix
 	comp_generic_fixup(codec, action, "spi", "CSC3551", "-%s:00-cs35l41-hda.%d", 4);
 }
 
+static void max98390_fixup_i2c_four(struct hda_codec *codec, const struct hda_fixup *fix, int action)
+{
+	comp_generic_fixup(codec, action, "i2c", "MAX98390", "-%s:00-max98390-hda.%d", 4);
+}
+
 static void alc287_fixup_legion_16achg6_speakers(struct hda_codec *cdc, const struct hda_fixup *fix,
 						 int action)
 {
@@ -3753,6 +3758,7 @@ enum {
 	ALC298_FIXUP_SAMSUNG_AMP,
 	ALC298_FIXUP_SAMSUNG_AMP_V2_2_AMPS,
 	ALC298_FIXUP_SAMSUNG_AMP_V2_4_AMPS,
+	ALC298_FIXUP_SAMSUNG_MAX98390_4_AMPS,
 	ALC298_FIXUP_SAMSUNG_HEADPHONE_VERY_QUIET,
 	ALC256_FIXUP_SAMSUNG_HEADPHONE_VERY_QUIET,
 	ALC295_FIXUP_ASUS_MIC_NO_PRESENCE,
@@ -5430,6 +5436,10 @@ static const struct hda_fixup alc269_fixups[] = {
 		.type = HDA_FIXUP_FUNC,
 		.v.func = alc298_fixup_samsung_amp_v2_4_amps
 	},
+	[ALC298_FIXUP_SAMSUNG_MAX98390_4_AMPS] = {
+		.type = HDA_FIXUP_FUNC,
+		.v.func = max98390_fixup_i2c_four
+	},
 	[ALC298_FIXUP_SAMSUNG_HEADPHONE_VERY_QUIET] = {
 		.type = HDA_FIXUP_VERBS,
 		.v.verbs = (const struct hda_verb[]) {
@@ -7090,6 +7100,11 @@ static const struct hda_quirk alc269_fixup_tbl[] = {
 	SND_PCI_QUIRK(0x144d, 0xc832, "Samsung Galaxy Book Flex Alpha (NP730QCJ)", ALC256_FIXUP_SAMSUNG_HEADPHONE_VERY_QUIET),
 	SND_PCI_QUIRK(0x144d, 0xca03, "Samsung Galaxy Book2 Pro 360 (NP930QED)", ALC298_FIXUP_SAMSUNG_AMP),
 	SND_PCI_QUIRK(0x144d, 0xca06, "Samsung Galaxy Book3 360 (NP730QFG)", ALC298_FIXUP_SAMSUNG_HEADPHONE_VERY_QUIET),
+	SND_PCI_QUIRK(0x144d, 0xca07, "Samsung Galaxy Book4 Pro 14-inch (NP940XGK)", ALC298_FIXUP_SAMSUNG_MAX98390_4_AMPS),
+	SND_PCI_QUIRK(0x144d, 0xc890, "Samsung Galaxy Book4 Pro 16 inch (NP960XGK)", ALC298_FIXUP_SAMSUNG_MAX98390_4_AMPS),
+	SND_PCI_QUIRK(0x144d, 0xc892, "Samsung Galaxy Book4 Pro 360 (NP960QGK)", ALC298_FIXUP_SAMSUNG_MAX98390_4_AMPS),
+	SND_PCI_QUIRK(0x144d, 0xc1d8, "Samsung Galaxy Book4 Ultra (NP960XGL)", ALC298_FIXUP_SAMSUNG_MAX98390_4_AMPS),
+	SND_PCI_QUIRK(0x144d, 0xc1da, "Samsung Galaxy Book5 Pro 360 (NP960QHA)", ALC298_FIXUP_SAMSUNG_MAX98390_4_AMPS),
 	SND_PCI_QUIRK(0x144d, 0xc868, "Samsung Galaxy Book2 Pro (NP930XED)", ALC298_FIXUP_SAMSUNG_AMP),
 	SND_PCI_QUIRK(0x144d, 0xc870, "Samsung Galaxy Book2 Pro (NP950XED)", ALC298_FIXUP_SAMSUNG_AMP_V2_2_AMPS),
 	SND_PCI_QUIRK(0x144d, 0xc872, "Samsung Galaxy Book2 Pro (NP950XEE)", ALC298_FIXUP_SAMSUNG_AMP_V2_2_AMPS),
@@ -7599,6 +7614,7 @@ static const struct hda_model_fixup alc269_fixup_models[] = {
 	{.id = ALC298_FIXUP_SAMSUNG_AMP, .name = "alc298-samsung-amp"},
 	{.id = ALC298_FIXUP_SAMSUNG_AMP_V2_2_AMPS, .name = "alc298-samsung-amp-v2-2-amps"},
 	{.id = ALC298_FIXUP_SAMSUNG_AMP_V2_4_AMPS, .name = "alc298-samsung-amp-v2-4-amps"},
+	{.id = ALC298_FIXUP_SAMSUNG_MAX98390_4_AMPS, .name = "alc298-samsung-max98390-4-amps"},
 	{.id = ALC256_FIXUP_SAMSUNG_HEADPHONE_VERY_QUIET, .name = "alc256-samsung-headphone"},
 	{.id = ALC255_FIXUP_XIAOMI_HEADSET_MIC, .name = "alc255-xiaomi-headset"},
 	{.id = ALC274_FIXUP_HP_MIC, .name = "alc274-hp-mic-detect"},

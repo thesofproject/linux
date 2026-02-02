@@ -664,4 +664,8 @@ struct max98390_priv {
 	unsigned int ambient_temp_value;
 	const char *dsm_param_name;
 };
+
+/* Exported for HDA side-codec driver */
+extern const struct regmap_config max98390_regmap;
+
 #endif
