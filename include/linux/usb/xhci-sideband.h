@@ -37,6 +37,39 @@ struct xhci_sideband_event {
 };
 
 /**
+ * struct xhci_sideband_ep_properties - controller properties of an endpoint.
+ * @bus: PCI bus number if xHCI is on a PCI bus
+ * @device: PCI device number if xHCI is on a PCI bus
+ * @function: PCI function number if xHCI is on a PCI bus
+ * @slot_id: xHCI slot_id of the usb device this endpoint is part of
+ * @reserved_res_id: driver reserved resource number for this endpoint
+ * @rh_port: root hub port number
+ * @res_id: xHCI sideband resource number in use by offloaded endpoint
+ * @port_speed: PORTSC protocol speed ID
+ * @tt: endpoint is behind a USB 2.0 transaction translator
+ *
+ * reserved_res_id is set after calling xhci_sideband_alloc_resource_id(),
+ * res_id is set after offloading the endpoint when xhci_sideband_add_endpoint()
+ * is called, and should match reserved_res_id at that point.
+ */
+struct xhci_sideband_ep_properties {
+	/* PCI bus, device and function */
+	u8 bus;
+	u8 device;
+	u8 function;
+
+	/* xHCI usb device slot_id */
+	int slot_id;
+	u8 reserved_res_id;
+
+	/* Properties queried with Get Endpoint Properties Command */
+	u8 rh_port;
+	u8 res_id;
+	u8 port_speed;
+	bool tt;
+};
+
+/**
  * struct xhci_sideband - representation of a sideband accessed usb device.
  * @xhci: The xhci host controller the usb device is connected to
  * @udev: the usb device accessed via sideband
@@ -106,6 +139,10 @@ xhci_sideband_alloc_resource_id(struct xhci_sideband *sb,
 int
 xhci_sideband_free_resource_id(struct xhci_sideband *sb,
 			       unsigned int res_id);
+int
+xhci_sideband_get_ep_properties(struct xhci_sideband *sb,
+				struct usb_host_endpoint *host_ep,
+				struct xhci_sideband_ep_properties *properties);
 
 #if IS_ENABLED(CONFIG_USB_XHCI_SIDEBAND)
 void xhci_sideband_notify_ep_ring_free(struct xhci_sideband *sb,

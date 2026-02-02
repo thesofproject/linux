@@ -10,6 +10,7 @@
 
 #include <linux/usb/xhci-sideband.h>
 #include <linux/dma-direct.h>
+#include <linux/pci.h>
 
 #include "xhci.h"
 
@@ -397,6 +398,79 @@ __xhci_sideband_remove_interrupter(struct xhci_sideband *sb)
 }
 
 /* sideband api functions */
+
+/**
+ * xhci_sideband_get_ep_properties - query xHC properties for an endpoint
+ * @sb: sideband instance for this usb device
+ * @host_ep: usb host endpoint
+ * @properties: returned properties.
+ *
+ * Return: 0 on success, negative error otherwise
+ */
+int
+xhci_sideband_get_ep_properties(struct xhci_sideband *sb,
+				struct usb_host_endpoint *host_ep,
+				struct xhci_sideband_ep_properties *properties)
+{
+	union xhci_extprop_ctx *ctx;
+	unsigned int ep_index;
+	struct device *dev;
+	u32 ep_id;
+	int ret = 0;
+
+	guard(mutex)(&sb->mutex);
+
+	if (!sideband_to_vdev(sb))
+		return -ENODEV;
+
+	if (!xhci_sideband_endpoint_belongs(sb, host_ep))
+		return -EINVAL;
+
+	if (sb->type != XHCI_SIDEBAND_AUDIO || !properties)
+		return -EINVAL;
+
+	memset(properties, 0, sizeof(*properties));
+	ep_index = xhci_get_endpoint_index(&host_ep->desc);
+	dev = xhci_to_hcd(sb->xhci)->self.controller;
+	ep_id = ep_index + 1;
+
+	/* get the PCI B:D:F data of parent xHC */
+	if (dev_is_pci(dev)) {
+		struct pci_dev *pdev = to_pci_dev(dev);
+
+		properties->bus = pdev->bus->number;
+		properties->device = PCI_SLOT(pdev->devfn);
+		properties->function = PCI_FUNC(pdev->devfn);
+	}
+
+	properties->slot_id = sb->udev->slot_id;
+
+	properties->reserved_res_id = sb->eps_res_id[ep_index];
+
+	/* no resource id set for endpoint, don't query ep property */
+	if (properties->reserved_res_id == 0)
+		return 0;
+
+	ctx = kzalloc_obj(*ctx, GFP_KERNEL);
+	if (!ctx)
+		return -ENOMEM;
+
+	/* query extended endpoint property from xHC */
+	ret = xhci_get_ext_property(sb->xhci, sb->udev->slot_id, ep_id,
+				    PROP_ECI_AUDIO, AUDIO_SUBTYPE_GET_EP_PROP,
+				    ctx, sizeof(*ctx));
+	if (!ret) {
+		properties->rh_port = ctx->audio_ep.rh_port;
+		properties->res_id = ctx->audio_ep.res_id;
+		properties->port_speed = ctx->audio_ep.port_speed_tt & 0xf;
+		properties->tt = !!(ctx->audio_ep.port_speed_tt & 0x10);
+	}
+
+	kfree(ctx);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(xhci_sideband_get_ep_properties);
 
 /**
  * xhci_sideband_alloc_resource_id - reserve a resource id to offload an endpoint
