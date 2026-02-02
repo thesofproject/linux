@@ -90,3 +90,15 @@
   ucsi_send_command
   unlock_buffer
   __wait_on_buffer
+  __traceiter_android_rvh_tcp_sendmsg
+  __traceiter_android_rvh_tcp_recvmsg
+  __traceiter_android_rvh_udp_sendmsg
+  __traceiter_android_rvh_udp_recvmsg
+  __traceiter_android_rvh_udpv6_sendmsg
+  __traceiter_android_rvh_udpv6_recvmsg
+  __tracepoint_android_rvh_tcp_sendmsg
+  __tracepoint_android_rvh_tcp_recvmsg
+  __tracepoint_android_rvh_udp_sendmsg
+  __tracepoint_android_rvh_udp_recvmsg
+  __tracepoint_android_rvh_udpv6_sendmsg
+  __tracepoint_android_rvh_udpv6_recvmsg
