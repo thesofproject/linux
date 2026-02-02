@@ -114,3 +114,5 @@
   __tracepoint_android_vh_tcp_rtt_estimator
   __tracepoint_android_vh_udp_enqueue_schedule_skb
   __tracepoint_android_vh_build_skb_around
+  __traceiter_android_rvh_bpf_skb_load_bytes
+  __tracepoint_android_rvh_bpf_skb_load_bytes
