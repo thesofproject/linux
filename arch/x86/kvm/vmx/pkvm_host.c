@@ -375,6 +375,15 @@ static void pkvm_vcpu_reset(struct kvm_vcpu *vcpu, bool init_event)
 		KVM_BUG_ON(pkvm_hypercall(vcpu_reset), vcpu->kvm);
 
 	/*
+	 * The host is responsible for emulating guest timer by using the
+	 * preemption timer if this feature is supported. The hv_deadline_tsc
+	 * is synced to the pKVM hypervosr to update the preemption timer
+	 * accordingly. Initialize hv_deadline_tsc as -1 so that the pKVM
+	 * hypervisor can disable the preemption timer if it is unused.
+	 */
+	vmx->hv_deadline_tsc = -1;
+
+	/*
 	 * The host is responsible for injecting interrupts to the guest. The
 	 * pi_desc is the key structure for the host to inject interrupts via
 	 * the posted interrupt mechanism. Its physical address is used for the
@@ -1306,6 +1315,10 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.pi_update_irte = vmx_pi_update_irte,
 	.pi_start_bypass = vmx_pi_start_bypass,
 
+#ifdef CONFIG_X86_64
+	.set_hv_timer = vmx_set_hv_timer,
+	.cancel_hv_timer = vmx_cancel_hv_timer,
+#endif
 	.setup_mce = pkvm_setup_mce,
 
 #ifdef CONFIG_KVM_SMM
