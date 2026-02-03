@@ -1867,6 +1867,8 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.deliver_interrupt = vmx_deliver_interrupt,
 	.dy_apicv_has_pending_interrupt = pi_has_pending_interrupt,
 
+	.get_mt_mask = vmx_get_mt_mask,
+
 	.get_exit_info = pkvm_get_exit_info,
 	.get_entry_info = pkvm_get_entry_info,
 
