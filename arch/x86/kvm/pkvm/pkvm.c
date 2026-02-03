@@ -1594,6 +1594,9 @@ void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 		ret = pkvm_vcpu_put(pkvm_hc_input1(vcpu),
 				    pkvm_hc_input2(vcpu));
 		break;
+	case __pkvm__has_wbinvd_exit:
+		ret = kvm_x86_call(has_wbinvd_exit)();
+		break;
 	default:
 		ret = pkvm_vcpu_handle_host_hypercall(vcpu, hc, &in, &out);
 		break;
