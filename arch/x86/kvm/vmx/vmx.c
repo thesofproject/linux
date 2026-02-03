@@ -9628,7 +9628,8 @@ static void update_protected_vcpu_state(struct kvm_vcpu *vcpu,
 		/* Only need to update RAX for the input data */
 		if ((vmx_get_exit_qual(vcpu) & 8) != 0)
 			kvm_rax_write(vcpu, shared_vcpu->arch.regs[VCPU_REGS_RAX]);
-
+		fallthrough;
+	case EXIT_REASON_WBINVD:
 		WARN_ON_ONCE(kvm_skip_emulated_instruction(vcpu) != 1);
 		break;
 	case EXIT_REASON_MSR_READ:

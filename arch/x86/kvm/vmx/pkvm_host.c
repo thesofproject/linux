@@ -13,6 +13,8 @@
 static int pkvm_complete_emulated_msr(struct kvm_vcpu *vcpu, int err);
 static unsigned short has_wbinvd_exit = USHRT_MAX;
 
+static bool pkvm_has_vmx_wbinvd_exit(void);
+
 static void pkvm_free_loaded_vmcs(struct loaded_vmcs *loaded_vmcs)
 {
 	if (!loaded_vmcs->vmcs)
@@ -384,6 +386,7 @@ static int (*pkvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_TPR_BELOW_THRESHOLD]     = handle_tpr_below_threshold,
 	[EXIT_REASON_APIC_WRITE]              = handle_apic_write,
 	[EXIT_REASON_EOI_INDUCED]             = handle_apic_eoi_induced,
+	[EXIT_REASON_WBINVD]                  = kvm_emulate_wbinvd,
 };
 
 static const int pkvm_vmx_max_exit_handlers = ARRAY_SIZE(pkvm_vmx_exit_handlers);
