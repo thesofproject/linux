@@ -82,6 +82,10 @@ DECLARE_HOOK(android_vh_tcp_rcv_established_slow_path,
 	TP_PROTO(struct sock *sk), TP_ARGS(sk));
 DECLARE_HOOK(android_vh_tcp_rcv_rtt_update,
 	TP_PROTO(struct tcp_sock *tp, u32 sample, int win_dep), TP_ARGS(tp, sample, win_dep));
+DECLARE_HOOK(android_vh_receive_sock,
+	TP_PROTO(struct sock *sk), TP_ARGS(sk));
+DECLARE_HOOK(android_vh_task_get_classid,
+	TP_PROTO(const struct sk_buff *skb, u32 *classid), TP_ARGS(skb, classid));
 struct msghdr;
 DECLARE_RESTRICTED_HOOK(android_rvh_tcp_sendmsg,
 	TP_PROTO(struct sock *sk, struct msghdr *msg, size_t len),
