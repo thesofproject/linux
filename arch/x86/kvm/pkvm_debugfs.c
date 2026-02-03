@@ -288,3 +288,12 @@ out_dir:
 	}
 	debugfs_remove(debugfs_dir);
 }
+
+void pkvm_create_vm_debugfs(struct kvm *kvm)
+{
+	if (!enable_pkvm)
+		return;
+
+	debugfs_create_file("pkvm_vmexit_trace", 0444, kvm->debugfs_dentry,
+			    kvm, &vmexit_trace_fops);
+}
