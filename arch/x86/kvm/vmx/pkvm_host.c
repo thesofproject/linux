@@ -838,6 +838,8 @@ static void pkvm_vcpu_reset(struct kvm_vcpu *vcpu, bool init_event)
 	}
 }
 
+static void pkvm_prepare_switch_to_guest(struct kvm_vcpu *vcpu) {}
+
 static void pkvm_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
@@ -1178,6 +1180,8 @@ static void pkvm_set_dr7(struct kvm_vcpu *vcpu, unsigned long val)
 	if (!pkvm_is_protected_vcpu(vcpu))
 		KVM_BUG_ON(pkvm_hypercall(set_dr7, val), vcpu->kvm);
 }
+
+static void pkvm_sync_dirty_debug_regs(struct kvm_vcpu *vcpu) {}
 
 static void pkvm_cache_reg(struct kvm_vcpu *vcpu, enum kvm_reg reg)
 {
@@ -1807,6 +1811,7 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.vcpu_free = pkvm_vcpu_free,
 	.vcpu_reset = pkvm_vcpu_reset,
 
+	.prepare_switch_to_guest = pkvm_prepare_switch_to_guest,
 	.vcpu_load = pkvm_vcpu_load,
 	.vcpu_put = pkvm_vcpu_put,
 
@@ -1830,6 +1835,7 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.get_gdt = pkvm_get_gdt,
 	.set_gdt = pkvm_set_gdt,
 	.set_dr7 = pkvm_set_dr7,
+	.sync_dirty_debug_regs = pkvm_sync_dirty_debug_regs,
 	.cache_reg = pkvm_cache_reg,
 	.get_rflags = pkvm_get_rflags,
 	.set_rflags = pkvm_set_rflags,
