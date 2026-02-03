@@ -1592,7 +1592,7 @@ void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 		break;
 	case __pkvm__dump_vmexit_trace:
 		ret = pkvm_dump_vmexit_trace(pkvm_host_gpa_to_phys(pkvm_hc_input1(vcpu)),
-					     pkvm_hc_input2(vcpu), PKVM_HOST_VM_HANDLE);
+					     pkvm_hc_input2(vcpu), pkvm_hc_input3(vcpu));
 		break;
 	case __pkvm__check_processor_compatibility:
 		ret = kvm_x86_call(check_processor_compatibility)();
