@@ -453,6 +453,22 @@ static int handle_ept_misconfig(struct kvm_vcpu *vcpu)
 }
 
 /*
+ * Indicate a busy-waiting vcpu in spinlock. We do not enable the PAUSE
+ * exiting, so only get here on cpu with PAUSE-Loop-Exiting.
+ */
+static int handle_pause(struct kvm_vcpu *vcpu)
+{
+	/*
+	 * Intel sdm vol3 ch-25.1.3 says: The "PAUSE-loop exiting"
+	 * VM-execution control is ignored if CPL > 0. OTOH, KVM
+	 * never set PAUSE_EXITING and just set PLE if supported,
+	 * so the vcpu must be CPL=0 if it gets a PAUSE exit.
+	 */
+	kvm_vcpu_on_spin(vcpu, true);
+	return kvm_skip_emulated_instruction(vcpu);
+}
+
+/*
  * The exit handlers return 1 if the exit was handled fully and guest execution
  * may resume.  Otherwise they set the kvm_run parameter to indicate what needs
  * to be done to userspace and return 0.
@@ -477,6 +493,7 @@ static int (*pkvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_MCE_DURING_VMENTRY]      = handle_machine_check,
 	[EXIT_REASON_EPT_VIOLATION]	      = handle_ept_violation,
 	[EXIT_REASON_EPT_MISCONFIG]           = handle_ept_misconfig,
+	[EXIT_REASON_PAUSE_INSTRUCTION]       = handle_pause,
 };
 
 static const int pkvm_vmx_max_exit_handlers = ARRAY_SIZE(pkvm_vmx_exit_handlers);

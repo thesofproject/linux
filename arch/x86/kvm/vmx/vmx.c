@@ -1472,7 +1472,6 @@ static void vmx_write_guest_kernel_gs_base(struct vcpu_vmx *vmx, u64 data)
 }
 #endif
 
-#ifndef __PKVM_HYP__
 static void grow_ple_window(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
@@ -1488,7 +1487,6 @@ static void grow_ple_window(struct kvm_vcpu *vcpu)
 					    vmx->ple_window, old);
 	}
 }
-#endif /* !__PKVM_HYP__ */
 
 static void shrink_ple_window(struct kvm_vcpu *vcpu)
 {
@@ -6495,6 +6493,7 @@ int vmx_vcpu_pre_run(struct kvm_vcpu *vcpu)
 
 	return 1;
 }
+#endif /* !__PKVM_HYP__ */
 
 /*
  * Indicate a busy-waiting vcpu in spinlock. We do not enable the PAUSE
@@ -6511,10 +6510,15 @@ static int handle_pause(struct kvm_vcpu *vcpu)
 	 * never set PAUSE_EXITING and just set PLE if supported,
 	 * so the vcpu must be CPL=0 if it gets a PAUSE exit.
 	 */
+#ifndef __PKVM_HYP__
 	kvm_vcpu_on_spin(vcpu, true);
 	return kvm_skip_emulated_instruction(vcpu);
+#else
+	return 0;
+#endif
 }
 
+#ifndef __PKVM_HYP__
 static int handle_monitor_trap(struct kvm_vcpu *vcpu)
 {
 	return 1;
@@ -6783,8 +6787,8 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 #endif
 	[EXIT_REASON_EPT_VIOLATION]	      = handle_ept_violation,
 	[EXIT_REASON_EPT_MISCONFIG]           = handle_ept_misconfig,
-#ifndef __PKVM_HYP__
 	[EXIT_REASON_PAUSE_INSTRUCTION]       = handle_pause,
+#ifndef __PKVM_HYP__
 	[EXIT_REASON_MWAIT_INSTRUCTION]	      = kvm_emulate_mwait,
 	[EXIT_REASON_MONITOR_TRAP_FLAG]       = handle_monitor_trap,
 	[EXIT_REASON_MONITOR_INSTRUCTION]     = kvm_emulate_monitor,
@@ -9685,6 +9689,7 @@ static void update_protected_vcpu_state(struct kvm_vcpu *vcpu,
 			kvm_rax_write(vcpu, shared_vcpu->arch.regs[VCPU_REGS_RAX]);
 		fallthrough;
 	case EXIT_REASON_WBINVD:
+	case EXIT_REASON_PAUSE_INSTRUCTION:
 		WARN_ON_ONCE(kvm_skip_emulated_instruction(vcpu) != 1);
 		break;
 	case EXIT_REASON_MSR_READ:
