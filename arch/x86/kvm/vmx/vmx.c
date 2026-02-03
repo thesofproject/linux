@@ -6693,7 +6693,9 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_INVD]		      = kvm_emulate_invd,
 #ifndef __PKVM_HYP__
 	[EXIT_REASON_INVLPG]		      = handle_invlpg,
+#endif
 	[EXIT_REASON_RDPMC]                   = kvm_emulate_rdpmc,
+#ifndef __PKVM_HYP__
 	[EXIT_REASON_VMCALL]                  = kvm_emulate_hypercall,
 	[EXIT_REASON_VMCLEAR]		      = handle_vmx_instruction,
 	[EXIT_REASON_VMLAUNCH]		      = handle_vmx_instruction,
