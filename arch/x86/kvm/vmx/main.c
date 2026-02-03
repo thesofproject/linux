@@ -886,9 +886,7 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 	.vcpu_free = vt_op(vcpu_free),
 	.vcpu_reset = vt_op(vcpu_reset),
 
-#ifndef __PKVM_HYP__
 	.prepare_switch_to_guest = vt_op(prepare_switch_to_guest),
-#endif
 	.vcpu_load = vt_op(vcpu_load),
 	.vcpu_put = vt_op(vcpu_put),
 

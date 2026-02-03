@@ -1276,17 +1276,20 @@ void vmx_set_host_fs_gs(struct vmcs_host_state *host, u16 fs_sel, u16 gs_sel,
 		host->gs_base = gs_base;
 	}
 }
+#endif /* !__PKVM_HYP__ */
 
 void vmx_prepare_switch_to_guest(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	struct vcpu_vt *vt = to_vt(vcpu);
+#ifndef __PKVM_HYP__
 	struct vmcs_host_state *host_state;
 #ifdef CONFIG_X86_64
 	int cpu = raw_smp_processor_id();
 #endif
 	unsigned long fs_base, gs_base;
 	u16 fs_sel, gs_sel;
+#endif
 	int i;
 
 	/*
@@ -1312,6 +1315,7 @@ void vmx_prepare_switch_to_guest(struct kvm_vcpu *vcpu)
 	if (vt->guest_state_loaded)
 		return;
 
+#ifndef __PKVM_HYP__
 	host_state = &vmx->loaded_vmcs->host_state;
 
 	/*
@@ -1347,9 +1351,24 @@ void vmx_prepare_switch_to_guest(struct kvm_vcpu *vcpu)
 #endif
 
 	vmx_set_host_fs_gs(host_state, fs_sel, gs_sel, fs_base, gs_base);
+#else
+	/*
+	 * The pKVM hypervisor's segments are constant thus they are either
+	 * initialized during resetting the guest VMCS or loading the guest
+	 * VMCS. No need to manually save them.
+	 *
+	 * The MSR_KERNEL_GS_BASE is not used by the pKVM hypervisor. It will be
+	 * restored with the host's value before switching to the host by the
+	 * vmx_prepare_switch_to_host, thus save this MSR for the host before
+	 * loading with the guest's value.
+	 */
+	rdmsrq(MSR_KERNEL_GS_BASE, vt->msr_host_kernel_gs_base);
+	wrmsrq(MSR_KERNEL_GS_BASE, vmx->msr_guest_kernel_gs_base);
+#endif
 	vt->guest_state_loaded = true;
 }
 
+#ifndef __PKVM_HYP__
 static void vmx_prepare_switch_to_host(struct vcpu_vmx *vmx)
 {
 	struct vmcs_host_state *host_state;
