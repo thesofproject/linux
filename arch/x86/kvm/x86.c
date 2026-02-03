@@ -10396,6 +10396,9 @@ int kvm_x86_vendor_init(struct kvm_x86_init_ops *ops)
 	if (IS_ENABLED(CONFIG_KVM_SW_PROTECTED_VM) && tdp_mmu_enabled)
 		kvm_caps.supported_vm_types |= BIT(KVM_X86_SW_PROTECTED_VM);
 
+	if (enable_pkvm)
+		kvm_caps.supported_vm_types |= BIT(KVM_X86_PKVM_PROTECTED_VM);
+
 	/* KVM always ignores guest PAT for shadow paging.  */
 	if (!tdp_enabled)
 		kvm_caps.supported_quirks &= ~KVM_X86_QUIRK_IGNORE_GUEST_PAT;
