@@ -4860,7 +4860,7 @@ repeat_iter:
 		bool skip = false;
 
 		trace_android_vh_setscheduler_class(&new_class, NULL, p, p->policy, p->prio);
-		if (!tryget_task_struct(p))
+		if (scx_get_task_state(p) != SCX_TASK_READY)
 			continue;
 
 		trace_android_vh_scx_switch_repeat_skip(p, &skip, &repeat);
@@ -4879,7 +4879,6 @@ repeat_iter:
 		sched_enq_and_set_task(&ctx);
 
 		check_class_changed(task_rq(p), p, old_class, p->prio);
-		put_task_struct(p);
 	}
 	scx_task_iter_stop(&sti);
 	if (repeat > 0) {
