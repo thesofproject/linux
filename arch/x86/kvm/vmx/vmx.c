@@ -6598,6 +6598,18 @@ static int handle_wrmsr_imm(struct kvm_vcpu *vcpu)
 }
 #endif /* !__PKVM_HYP__ */
 
+#ifdef __PKVM_HYP__
+static int handle_init(struct kvm_vcpu *vcpu)
+{
+	/*
+	 * EXIT_REASON_INIT_SIGNAL is caused by the pKVM hypervisor sending INIT
+	 * signal to kick vCPU out of non-root mode. Nothing needs to be handled
+	 * by the pKVM hypervisor, and also no need to involve the host.
+	 */
+	return 1;
+}
+#endif
+
 /*
  * The exit handlers return 1 if the exit was handled fully and guest execution
  * may resume.  Otherwise they set the kvm_run parameter to indicate what needs
@@ -6661,6 +6673,8 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_TDCALL]		      = handle_tdx_instruction,
 	[EXIT_REASON_MSR_READ_IMM]            = handle_rdmsr_imm,
 	[EXIT_REASON_MSR_WRITE_IMM]           = handle_wrmsr_imm,
+#else
+	[EXIT_REASON_INIT_SIGNAL]	      = handle_init,
 #endif
 };
 
