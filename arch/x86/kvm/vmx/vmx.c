@@ -6672,13 +6672,14 @@ static int handle_bus_lock_vmexit(struct kvm_vcpu *vcpu)
 	return 1;
 }
 
-#ifndef __PKVM_HYP__
 static int handle_notify(struct kvm_vcpu *vcpu)
 {
 	unsigned long exit_qual = vmx_get_exit_qual(vcpu);
+#ifndef __PKVM_HYP__
 	bool context_invalid = exit_qual & NOTIFY_VM_CONTEXT_INVALID;
 
 	++vcpu->stat.notify_window_exits;
+#endif
 
 	/*
 	 * Notify VM exit happened while executing iret from NMI,
@@ -6688,6 +6689,7 @@ static int handle_notify(struct kvm_vcpu *vcpu)
 		vmcs_set_bits(GUEST_INTERRUPTIBILITY_INFO,
 			      GUEST_INTR_STATE_NMI);
 
+#ifndef __PKVM_HYP__
 	if (vcpu->kvm->arch.notify_vmexit_flags & KVM_X86_NOTIFY_VMEXIT_USER ||
 	    context_invalid) {
 		vcpu->run->exit_reason = KVM_EXIT_NOTIFY;
@@ -6697,8 +6699,12 @@ static int handle_notify(struct kvm_vcpu *vcpu)
 	}
 
 	return 1;
+#else
+	return 0;
+#endif
 }
 
+#ifndef __PKVM_HYP__
 static int vmx_get_msr_imm_reg(struct kvm_vcpu *vcpu)
 {
 	return vmx_get_instr_info_reg(vmcs_read32(VMX_INSTRUCTION_INFO));
@@ -6807,8 +6813,8 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 #endif
 	[EXIT_REASON_ENCLS]		      = handle_encls,
 	[EXIT_REASON_BUS_LOCK]                = handle_bus_lock_vmexit,
-#ifndef __PKVM_HYP__
 	[EXIT_REASON_NOTIFY]		      = handle_notify,
+#ifndef __PKVM_HYP__
 	[EXIT_REASON_SEAMCALL]		      = handle_tdx_instruction,
 	[EXIT_REASON_TDCALL]		      = handle_tdx_instruction,
 	[EXIT_REASON_MSR_READ_IMM]            = handle_rdmsr_imm,
