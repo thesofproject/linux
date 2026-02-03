@@ -12,6 +12,7 @@ extern struct kvm_x86_ops vt_x86_ops __initdata;
 extern struct kvm_x86_init_ops vt_init_ops __initdata;
 #ifdef CONFIG_PKVM_INTEL
 extern struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata;
+extern struct kvm_x86_init_ops pkvm_host_vt_init_ops __initdata;
 #endif
 
 void vmx_hardware_unsetup(void);
