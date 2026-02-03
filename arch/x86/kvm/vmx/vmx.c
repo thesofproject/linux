@@ -6588,7 +6588,6 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 static const int kvm_vmx_max_exit_handlers =
 	ARRAY_SIZE(kvm_vmx_exit_handlers);
 
-#ifndef __PKVM_HYP__
 void vmx_get_exit_info(struct kvm_vcpu *vcpu, u32 *reason,
 		       u64 *info1, u64 *info2, u32 *intr_info, u32 *error_code)
 {
@@ -6610,6 +6609,7 @@ void vmx_get_exit_info(struct kvm_vcpu *vcpu, u32 *reason,
 	}
 }
 
+#ifndef __PKVM_HYP__
 void vmx_get_entry_info(struct kvm_vcpu *vcpu, u32 *intr_info, u32 *error_code)
 {
 	*intr_info = vmcs_read32(VM_ENTRY_INTR_INFO_FIELD);
@@ -9453,6 +9453,64 @@ void pkvm_vmx_prepare_switch_to_host(struct kvm_vcpu *vcpu)
 	vmx_prepare_switch_to_host(to_vmx(vcpu));
 }
 
+static void pkvm_vmx_update_vcpu_state_from_host(struct kvm_vcpu *vcpu)
+{
+	/*
+	 * TODO: Update vcpu state according to the vmexit reason handled by
+	 * the host.
+	 */
+}
+
+static void pkvm_vmx_share_vcpu_state_with_host(struct kvm_vcpu *vcpu)
+{
+	struct kvm_vcpu *shared_vcpu = to_pkvm_vcpu(vcpu)->shared_vcpu;
+	struct vcpu_vmx *shared_vmx = to_vmx(shared_vcpu);
+	u32 exit_reason, exit_intr_info, error_code;
+	struct vcpu_vmx *vmx = to_vmx(vcpu);
+	u64 exit_info1, exit_info2;
+
+	vmx_get_exit_info(vcpu, &exit_reason, &exit_info1,
+			  &exit_info2, &exit_intr_info, &error_code);
+
+	shared_vmx->vt.exit_reason.full = exit_reason;
+	kvm_register_mark_available(shared_vcpu, VCPU_EXREG_EXIT_INFO_1);
+	shared_vmx->vt.exit_qualification = exit_info1;
+	shared_vmx->idt_vectoring_info = exit_info2;
+	shared_vmx->vt.exit_intr_info = exit_intr_info;
+	kvm_register_mark_available(shared_vcpu, VCPU_EXREG_EXIT_INFO_2);
+	shared_vmx->error_code = error_code;
+
+	if (!pkvm_is_protected_vcpu(vcpu)) {
+		/*
+		 * Share the npVM's AR field of CS/SS for optimization purposes
+		 * as these are more frequently used by the host, namely: by
+		 * get_cs_db_l_bits to emulate instructions, and by
+		 * get_cpl_no_cache to schedule out a non-protected vCPU at
+		 * runtime, so that the host doesn't need to issue additional
+		 * hypercalls to retrieve the AR field of CS/SS for that. No
+		 * need to share for a pVM as the host does not emulate
+		 * instructions or use CPL for scheduling in case of a pVM
+		 * anyway.
+		 */
+		if (WARN_ON(vmx->rmode.vm86_active)) {
+			shared_vmx->segment_cache.seg[VCPU_SREG_CS].ar = 0;
+			shared_vmx->segment_cache.seg[VCPU_SREG_SS].ar = 0;
+		} else {
+			shared_vmx->segment_cache.seg[VCPU_SREG_CS].ar =
+				vmx_read_guest_seg_ar(vmx, VCPU_SREG_CS);
+			shared_vmx->segment_cache.seg[VCPU_SREG_SS].ar =
+				vmx_read_guest_seg_ar(vmx, VCPU_SREG_SS);
+		}
+		vmx_segment_cache_test_set(shared_vmx, VCPU_SREG_CS, SEG_FIELD_AR);
+		vmx_segment_cache_test_set(shared_vmx, VCPU_SREG_SS, SEG_FIELD_AR);
+	}
+}
+
+static struct pkvm_x86_ops pkvm_vt_x86_ops = {
+	.update_vcpu_state_from_host = pkvm_vmx_update_vcpu_state_from_host,
+	.share_vcpu_state_with_host = pkvm_vmx_share_vcpu_state_with_host,
+};
+
 int pkvm_vmx_init(void)
 {
 	BUILD_BUG_ON(offsetof(struct kvm_vmx, kvm) != 0);
@@ -9467,6 +9525,8 @@ int pkvm_vmx_init(void)
 	enable_pml = false;
 
 	kvm_vcpu_sz = sizeof(struct vcpu_vmx);
+
+	pkvm_x86_ops_init(&pkvm_vt_x86_ops);
 
 	return pkvm_x86_vendor_init(&vt_init_ops);
 }
