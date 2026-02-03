@@ -422,6 +422,18 @@ static int handle_machine_check(struct kvm_vcpu *vcpu)
 	return 1;
 }
 
+static int handle_ept_violation(struct kvm_vcpu *vcpu)
+{
+	unsigned long exit_qualification = vmx_get_exit_qual(vcpu);
+	gpa_t gpa;
+
+	gpa = to_vmx(vcpu)->exit_gpa;
+
+	trace_kvm_page_fault(vcpu, gpa, exit_qualification);
+
+	return __vmx_handle_ept_violation(vcpu, gpa, exit_qualification);
+}
+
 /*
  * The exit handlers return 1 if the exit was handled fully and guest execution
  * may resume.  Otherwise they set the kvm_run parameter to indicate what needs
@@ -445,6 +457,7 @@ static int (*pkvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_WBINVD]                  = kvm_emulate_wbinvd,
 	[EXIT_REASON_TASK_SWITCH]             = handle_task_switch,
 	[EXIT_REASON_MCE_DURING_VMENTRY]      = handle_machine_check,
+	[EXIT_REASON_EPT_VIOLATION]	      = handle_ept_violation,
 };
 
 static const int pkvm_vmx_max_exit_handlers = ARRAY_SIZE(pkvm_vmx_exit_handlers);
