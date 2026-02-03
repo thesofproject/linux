@@ -2060,7 +2060,6 @@ static int __kvm_set_msr(struct kvm_vcpu *vcpu, u32 index, u64 data,
 	return kvm_x86_call(set_msr)(vcpu, &msr);
 }
 
-#ifndef __PKVM_HYP__
 static int _kvm_set_msr(struct kvm_vcpu *vcpu, u32 index, u64 *data,
 			bool host_initiated)
 {
@@ -2073,7 +2072,6 @@ static int kvm_set_msr_ignored_check(struct kvm_vcpu *vcpu,
 	return kvm_do_msr_access(vcpu, index, &data, host_initiated, MSR_TYPE_W,
 				 _kvm_set_msr);
 }
-#endif /* !__PKVM_HYP__ */
 
 /*
  * Read the MSR specified by @index into @data.  Select MSR specific fault
@@ -2145,13 +2143,11 @@ int __kvm_emulate_msr_read(struct kvm_vcpu *vcpu, u32 index, u64 *data)
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(__kvm_emulate_msr_read);
 
-#ifndef __PKVM_HYP__
 int __kvm_emulate_msr_write(struct kvm_vcpu *vcpu, u32 index, u64 data)
 {
 	return kvm_set_msr_ignored_check(vcpu, index, data, false);
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(__kvm_emulate_msr_write);
-#endif /* __PKVM_HYP__ */
 
 int kvm_emulate_msr_read(struct kvm_vcpu *vcpu, u32 index, u64 *data)
 {
@@ -2162,7 +2158,6 @@ int kvm_emulate_msr_read(struct kvm_vcpu *vcpu, u32 index, u64 *data)
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_msr_read);
 
-#ifndef __PKVM_HYP__
 int kvm_emulate_msr_write(struct kvm_vcpu *vcpu, u32 index, u64 data)
 {
 	if (!kvm_msr_allowed(vcpu, index, KVM_MSR_FILTER_WRITE))
@@ -2173,6 +2168,7 @@ int kvm_emulate_msr_write(struct kvm_vcpu *vcpu, u32 index, u64 data)
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_msr_write);
 
 
+#ifndef __PKVM_HYP__
 static void complete_userspace_rdmsr(struct kvm_vcpu *vcpu)
 {
 	if (!vcpu->run->msr.error) {
@@ -2301,15 +2297,22 @@ int kvm_emulate_rdmsr_imm(struct kvm_vcpu *vcpu, u32 msr, int reg)
 	return __kvm_emulate_rdmsr(vcpu, msr, reg, complete_fast_rdmsr_imm);
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_rdmsr_imm);
+#endif /* !__PKVM_HYP__ */
 
 static int __kvm_emulate_wrmsr(struct kvm_vcpu *vcpu, u32 msr, u64 data)
 {
 	int r;
 
+#ifdef __PKVM_HYP__
+	if (pkvm_host_has_emulated_msr(vcpu->kvm, msr))
+		return 0;
+#endif
+
 	r = kvm_emulate_msr_write(vcpu, msr, data);
 	if (!r) {
 		trace_kvm_msr_write(msr, data);
 	} else {
+#ifndef __PKVM_HYP__
 		/* MSR write failed? See if we should ask user space */
 		if (kvm_msr_user_space(vcpu, msr, KVM_EXIT_X86_WRMSR, data,
 				       complete_fast_msr_access, r))
@@ -2317,6 +2320,7 @@ static int __kvm_emulate_wrmsr(struct kvm_vcpu *vcpu, u32 msr, u64 data)
 		/* Signal all other negative errors to userspace */
 		if (r < 0)
 			return r;
+#endif
 		trace_kvm_msr_write_ex(msr, data);
 	}
 
@@ -2330,6 +2334,7 @@ int kvm_emulate_wrmsr(struct kvm_vcpu *vcpu)
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_wrmsr);
 
+#ifndef __PKVM_HYP__
 int kvm_emulate_wrmsr_imm(struct kvm_vcpu *vcpu, u32 msr, int reg)
 {
 	return __kvm_emulate_wrmsr(vcpu, msr, kvm_register_read(vcpu, reg));
