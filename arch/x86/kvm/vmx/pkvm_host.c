@@ -1843,6 +1843,7 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.skip_emulated_instruction = pkvm_skip_emulated_instruction,
 	.set_interrupt_shadow = pkvm_set_interrupt_shadow,
 	.get_interrupt_shadow = pkvm_get_interrupt_shadow,
+	.patch_hypercall = vmx_patch_hypercall,
 	.inject_irq = pkvm_inject_irq,
 	.inject_nmi = pkvm_inject_nmi,
 	.inject_exception = pkvm_inject_exception,
