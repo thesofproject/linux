@@ -1848,9 +1848,7 @@ EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_valid_efer);
 
 static int set_efer(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 {
-#ifndef __PKVM_HYP__
 	u64 old_efer = vcpu->arch.efer;
-#endif
 	u64 efer = msr_info->data;
 	int r;
 
@@ -1875,11 +1873,15 @@ static int set_efer(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 		return r;
 	}
 
-	/* TODO: Notify the host VMM to reset kvm mmu reset. */
-#ifndef __PKVM_HYP__
 	if ((efer ^ old_efer) & KVM_MMU_EFER_ROLE_BITS)
+#ifndef __PKVM_HYP__
 		kvm_mmu_reset_context(vcpu);
+#else
+		if (!pkvm_is_protected_vcpu(vcpu))
+			pkvm_make_req_to_host(HOST_RESET_MMU, vcpu);
+#endif
 
+#ifndef __PKVM_HYP__
 	if (!static_cpu_has(X86_FEATURE_XSAVES) &&
 	    (efer & EFER_SVME))
 		kvm_hv_xsaves_xsavec_maybe_warn(vcpu);
