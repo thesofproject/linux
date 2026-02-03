@@ -1083,6 +1083,45 @@ static void pkvm_hwapic_isr_update(struct kvm_vcpu *vcpu, int max_isr)
 	KVM_BUG_ON(pkvm_hypercall(hwapic_isr_update, max_isr), vcpu->kvm);
 }
 
+static void pkvm_get_exit_info(struct kvm_vcpu *vcpu, u32 *reason, u64 *info1,
+			       u64 *info2, u32 *intr_info, u32 *error_code)
+{
+	struct vcpu_vmx *vmx = to_vmx(vcpu);
+
+	*reason = vmx->vt.exit_reason.full;
+	*info1 = vmx_get_exit_qual(vcpu);
+	if (!(vmx->vt.exit_reason.failed_vmentry)) {
+		*info2 = vmx->idt_vectoring_info;
+		*intr_info = vmx_get_intr_info(vcpu);
+		if (is_exception_with_error_code(*intr_info))
+			*error_code = vmx->error_code;
+		else
+			*error_code = 0;
+	} else {
+		*info2 = 0;
+		*intr_info = 0;
+		*error_code = 0;
+	}
+}
+
+static void pkvm_get_entry_info(struct kvm_vcpu *vcpu, u32 *intr_info, u32 *error_code)
+{
+	if (vcpu->arch.exception.injected)
+		*intr_info = vcpu->arch.exception.vector;
+	else if (vcpu->arch.nmi_injected)
+		*intr_info = NMI_VECTOR;
+	else if (vcpu->arch.interrupt.injected)
+		*intr_info = vcpu->arch.interrupt.nr;
+	else
+		*intr_info = 0;
+
+	if (vcpu->arch.exception.injected &&
+	    vcpu->arch.exception.has_error_code)
+		*error_code = vcpu->arch.exception.error_code;
+	else
+		*error_code = 0;
+}
+
 static int pkvm_vcpu_realloc_fpstate(struct kvm_vcpu *vcpu)
 {
 	union pkvm_hc_data out;
@@ -1303,6 +1342,9 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.sync_pir_to_irr = vmx_sync_pir_to_irr,
 	.deliver_interrupt = vmx_deliver_interrupt,
 	.dy_apicv_has_pending_interrupt = pi_has_pending_interrupt,
+
+	.get_exit_info = pkvm_get_exit_info,
+	.get_entry_info = pkvm_get_entry_info,
 
 	.vcpu_after_set_cpuid = pkvm_vcpu_after_set_cpuid,
 
