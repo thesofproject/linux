@@ -266,6 +266,22 @@ static int handle_io(struct kvm_vcpu *vcpu)
 	return kvm_fast_pio(vcpu, size, port, in);
 }
 
+static int handle_dr(struct kvm_vcpu *vcpu)
+{
+	if ((vcpu->arch.guest_debug_dr7 & DR7_GD) &&
+	    (vcpu->guest_debug & KVM_GUESTDBG_USE_HW_BP)) {
+		vcpu->run->debug.arch.dr6 = DR6_BD | DR6_ACTIVE_LOW;
+		vcpu->run->debug.arch.dr7 = vcpu->arch.guest_debug_dr7;
+		vcpu->run->debug.arch.pc = kvm_get_linear_rip(vcpu);
+		vcpu->run->debug.arch.exception = DB_VECTOR;
+		vcpu->run->exit_reason = KVM_EXIT_DEBUG;
+
+		return 0;
+	}
+
+	return 1;
+}
+
 /*
  * The exit handlers return 1 if the exit was handled fully and guest execution
  * may resume.  Otherwise they set the kvm_run parameter to indicate what needs
@@ -277,6 +293,7 @@ static int (*pkvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_TRIPLE_FAULT]            = handle_triple_fault,
 	[EXIT_REASON_NMI_WINDOW]	      = handle_nmi_window,
 	[EXIT_REASON_IO_INSTRUCTION]          = handle_io,
+	[EXIT_REASON_DR_ACCESS]               = handle_dr,
 };
 
 static const int pkvm_vmx_max_exit_handlers = ARRAY_SIZE(pkvm_vmx_exit_handlers);
