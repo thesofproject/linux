@@ -9614,7 +9614,24 @@ static void share_nonprotected_vcpu_state(struct kvm_vcpu *vcpu,
 				vmcs_read32(VM_EXIT_INSTRUCTION_LEN);
 		}
 		break;
+	case EXIT_REASON_IO_INSTRUCTION:
+		/* For the host to skip the emulated IO instruction. */
+		shared_vcpu->arch.event_exit_inst_len = vmcs_read32(VM_EXIT_INSTRUCTION_LEN);
+		break;
 	}
+	default:
+		break;
+	}
+}
+
+static void share_protected_vcpu_state(struct kvm_vcpu *vcpu,
+				       struct kvm_vcpu *shared_vcpu)
+{
+	switch (vmx_get_exit_reason(vcpu).basic) {
+	case EXIT_REASON_IO_INSTRUCTION:
+		/* IO output/Input data */
+		shared_vcpu->arch.regs[VCPU_REGS_RAX] = kvm_rax_read(vcpu);
+		break;
 	default:
 		break;
 	}
@@ -9669,6 +9686,8 @@ static void pkvm_vmx_share_vcpu_state_with_host(struct kvm_vcpu *vcpu)
 	    !vmx->fail) {
 		if (!pkvm_is_protected_vcpu(vcpu))
 			share_nonprotected_vcpu_state(vcpu, shared_vcpu);
+		else
+			share_protected_vcpu_state(vcpu, shared_vcpu);
 	}
 }
 
