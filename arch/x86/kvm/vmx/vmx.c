@@ -5833,9 +5833,11 @@ static int handle_triple_fault(struct kvm_vcpu *vcpu)
 	vcpu->mmio_needed = 0;
 	return 0;
 }
+#endif /* !__PKVM_HYP__ */
 
 static int handle_io(struct kvm_vcpu *vcpu)
 {
+#ifndef __PKVM_HYP__
 	unsigned long exit_qualification;
 	int size, in, string;
 	unsigned port;
@@ -5853,8 +5855,29 @@ static int handle_io(struct kvm_vcpu *vcpu)
 	in = (exit_qualification & 8) != 0;
 
 	return kvm_fast_pio(vcpu, size, port, in);
+#else
+	/*
+	 * The pKVM hypervisor doesn't emulate IO device thus the IO exit should
+	 * be handled by the host.
+	 *
+	 * To emulate a string IO instruction, decoder is required. But the host
+	 * cannot decode for a pVM due to isolation. Thus a pVM should be
+	 * enlightened to unroll string IO instructions to IO instructions. In
+	 * case this is not done by the pVM, handling such IO exit by injecting
+	 * a #GP exception to the pVM.
+	 */
+	if ((vmx_get_exit_qual(vcpu) & 16) != 0) {
+		if (pkvm_is_protected_vcpu(vcpu)) {
+			kvm_queue_exception(vcpu, GP_VECTOR);
+			return 1;
+		}
+	}
+
+	return 0;
+#endif
 }
 
+#ifndef __PKVM_HYP__
 void vmx_patch_hypercall(struct kvm_vcpu *vcpu, unsigned char *hypercall)
 {
 	/*
@@ -6626,8 +6649,8 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_TRIPLE_FAULT]            = handle_triple_fault,
 #endif
 	[EXIT_REASON_NMI_WINDOW]	      = handle_nmi_window,
-#ifndef __PKVM_HYP__
 	[EXIT_REASON_IO_INSTRUCTION]          = handle_io,
+#ifndef __PKVM_HYP__
 	[EXIT_REASON_CR_ACCESS]               = handle_cr,
 	[EXIT_REASON_DR_ACCESS]               = handle_dr,
 	[EXIT_REASON_CPUID]                   = kvm_emulate_cpuid,
