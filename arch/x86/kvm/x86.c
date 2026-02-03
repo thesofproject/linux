@@ -87,6 +87,8 @@
 #include <clocksource/hyperv_timer.h>
 
 #ifdef __PKVM_HYP__
+#include "pkvm.h"
+
 #undef module_param_named
 #define module_param_named(...)
 #endif
@@ -138,7 +140,9 @@ static u64 __read_mostly efer_reserved_bits = ~((u64)EFER_SCE);
 
 static void update_cr8_intercept(struct kvm_vcpu *vcpu);
 static void process_nmi(struct kvm_vcpu *vcpu);
+#endif /* !__PKVM_HYP__ */
 static void __kvm_set_rflags(struct kvm_vcpu *vcpu, unsigned long rflags);
+#ifndef __PKVM_HYP__
 static void store_regs(struct kvm_vcpu *vcpu);
 static int sync_regs(struct kvm_vcpu *vcpu);
 static int kvm_vcpu_do_singlestep(struct kvm_vcpu *vcpu);
@@ -747,8 +751,6 @@ static int exception_class(int vector)
 	return EXCPT_BENIGN;
 }
 
-#ifndef __PKVM_HYP__
-
 #define EXCPT_FAULT		0
 #define EXCPT_TRAP		1
 #define EXCPT_ABORT		2
@@ -780,7 +782,6 @@ static int exception_type(int vector)
 	/* Reserved exceptions will result in fault */
 	return EXCPT_FAULT;
 }
-#endif /* !__PKVM_HYP__ */
 
 void kvm_deliver_exception_payload(struct kvm_vcpu *vcpu,
 				   struct kvm_queued_exception *ex)
@@ -3791,6 +3792,7 @@ static void kvmclock_reset(struct kvm_vcpu *vcpu)
 	kvm_gpc_deactivate(&vcpu->arch.pv_time);
 	vcpu->arch.time = 0;
 }
+#endif /* !__PKVM_HYP__ */
 
 static void kvm_vcpu_flush_tlb_all(struct kvm_vcpu *vcpu)
 {
@@ -3801,6 +3803,7 @@ static void kvm_vcpu_flush_tlb_all(struct kvm_vcpu *vcpu)
 	kvm_clear_request(KVM_REQ_TLB_FLUSH_CURRENT, vcpu);
 }
 
+#ifndef __PKVM_HYP__
 static void kvm_vcpu_flush_tlb_guest(struct kvm_vcpu *vcpu)
 {
 	++vcpu->stat.tlb_flush;
@@ -3824,6 +3827,7 @@ static void kvm_vcpu_flush_tlb_guest(struct kvm_vcpu *vcpu)
 	 */
 	kvm_hv_vcpu_purge_flush_tlb(vcpu);
 }
+#endif /* !__PKVM_HYP__ */
 
 
 static inline void kvm_vcpu_flush_tlb_current(struct kvm_vcpu *vcpu)
@@ -3832,6 +3836,7 @@ static inline void kvm_vcpu_flush_tlb_current(struct kvm_vcpu *vcpu)
 	kvm_x86_call(flush_tlb_current)(vcpu);
 }
 
+#ifndef __PKVM_HYP__
 /*
  * Service "local" TLB flush requests, which are specific to the current MMU
  * context.  In addition to the generic event handling in vcpu_enter_guest(),
@@ -10736,6 +10741,7 @@ int kvm_check_nested_events(struct kvm_vcpu *vcpu)
 
 	return kvm_x86_ops.nested_ops->check_events(vcpu);
 }
+#endif /* !__PKVM_HYP__ */
 
 static void kvm_inject_exception(struct kvm_vcpu *vcpu)
 {
@@ -10798,6 +10804,7 @@ static void kvm_inject_exception(struct kvm_vcpu *vcpu)
 static int kvm_check_and_inject_events(struct kvm_vcpu *vcpu,
 				       bool *req_immediate_exit)
 {
+#ifndef __PKVM_HYP__
 	bool can_inject;
 	int r;
 
@@ -10810,6 +10817,9 @@ static int kvm_check_and_inject_events(struct kvm_vcpu *vcpu,
 		r = kvm_check_nested_events(vcpu);
 	else
 		r = 0;
+#else
+	int r = 0;
+#endif
 
 	/*
 	 * Re-inject exceptions and events *especially* if immediate entry+exit
@@ -10871,12 +10881,14 @@ static int kvm_check_and_inject_events(struct kvm_vcpu *vcpu,
 	WARN_ON_ONCE(vcpu->arch.exception_vmexit.injected ||
 		     vcpu->arch.exception_vmexit.pending);
 
+#ifndef __PKVM_HYP__
 	/*
 	 * New events, other than exceptions, cannot be injected if KVM needs
 	 * to re-inject a previous event.  See above comments on re-injecting
 	 * for why pending exceptions get priority.
 	 */
 	can_inject = !kvm_event_needs_reinjection(vcpu);
+#endif
 
 	if (vcpu->arch.exception.pending) {
 		/*
@@ -10906,13 +10918,20 @@ static int kvm_check_and_inject_events(struct kvm_vcpu *vcpu,
 		vcpu->arch.exception.pending = false;
 		vcpu->arch.exception.injected = true;
 
+#ifndef __PKVM_HYP__
 		can_inject = false;
+#endif
 	}
 
 	/* Don't inject interrupts if the user asked to avoid doing so */
 	if (vcpu->guest_debug & KVM_GUESTDBG_BLOCKIRQ)
 		return 0;
 
+	/*
+	 * For the pKVM hypervisor, the interrupts are injected by the host via
+	 * using PV interfaces.
+	 */
+#ifndef __PKVM_HYP__
 	/*
 	 * Finally, inject interrupt events.  If an event cannot be injected
 	 * due to architectural conditions (e.g. IF=0) a window-open exit
@@ -10973,6 +10992,7 @@ static int kvm_check_and_inject_events(struct kvm_vcpu *vcpu,
 		if (kvm_cpu_has_injectable_intr(vcpu))
 			kvm_x86_call(enable_irq_window)(vcpu);
 	}
+#endif
 
 	if (is_guest_mode(vcpu) &&
 	    kvm_x86_ops.nested_ops->has_events &&
@@ -11003,6 +11023,7 @@ out:
 	return r;
 }
 
+#ifndef __PKVM_HYP__
 static void process_nmi(struct kvm_vcpu *vcpu)
 {
 	unsigned int limit;
@@ -14617,4 +14638,161 @@ static void __exit kvm_x86_exit(void)
 	WARN_ON_ONCE(static_branch_unlikely(&kvm_has_noapic_vcpu));
 }
 module_exit(kvm_x86_exit);
+#else /* !__PKVM_HYP__ */
+static void kvm_restore_user_return_msr(void)
+{
+	struct kvm_user_return_msrs *msrs = this_cpu_ptr(user_return_msrs);
+	struct kvm_user_return_msr_values *values;
+	u32 slot;
+
+	for (slot = 0; slot < kvm_nr_uret_msrs; ++slot) {
+		values = &msrs->values[slot];
+		if (values->host != values->curr) {
+			wrmsrl(kvm_uret_msrs_list[slot], values->host);
+			values->curr = values->host;
+		}
+	}
+}
+
+static int __pkvm_vcpu_enter_guest(struct kvm_vcpu *vcpu, bool force_immediate_exit)
+{
+	bool req_immediate_exit = false;
+	fastpath_t exit_fastpath;
+	u64 run_flags;
+	int ret;
+
+	if (kvm_request_pending(vcpu)) {
+		if (kvm_check_request(KVM_REQ_TLB_FLUSH, vcpu))
+			kvm_vcpu_flush_tlb_all(vcpu);
+
+		if (kvm_check_request(KVM_REQ_TLB_FLUSH_CURRENT, vcpu))
+			kvm_vcpu_flush_tlb_current(vcpu);
+
+		if (kvm_check_request(KVM_REQ_EVENT, vcpu))
+			kvm_check_and_inject_events(vcpu, &req_immediate_exit);
+
+		if (kvm_check_request(KVM_REQ_RECALC_INTERCEPTS, vcpu))
+			kvm_x86_call(recalc_intercepts)(vcpu);
+	}
+
+	kvm_x86_call(prepare_switch_to_guest)(vcpu);
+
+	/*
+	 * Make sure vcpu->mode is changed to IN_GUEST_MODE before
+	 * running to mark this vcpu should be kicked for any new
+	 * vcpu request.
+	 */
+	smp_store_mb(vcpu->mode, IN_GUEST_MODE);
+
+	if (req_immediate_exit)
+		kvm_make_request(KVM_REQ_EVENT, vcpu);
+	else
+		req_immediate_exit = force_immediate_exit;
+
+	run_flags = 0;
+	if (req_immediate_exit)
+		run_flags |= KVM_RUN_FORCE_IMMEDIATE_EXIT;
+
+	if (vcpu->arch.guest_fpu.xfd_err)
+		wrmsrl(MSR_IA32_XFD_ERR, vcpu->arch.guest_fpu.xfd_err);
+
+	if (unlikely(vcpu->arch.switch_db_regs &&
+		     !(vcpu->arch.switch_db_regs & KVM_DEBUGREG_AUTO_SWITCH))) {
+		set_debugreg(DR7_FIXED_1, 7);
+		set_debugreg(vcpu->arch.eff_db[0], 0);
+		set_debugreg(vcpu->arch.eff_db[1], 1);
+		set_debugreg(vcpu->arch.eff_db[2], 2);
+		set_debugreg(vcpu->arch.eff_db[3], 3);
+		/* When KVM_DEBUGREG_WONT_EXIT, dr6 is accessible in guest. */
+		if (unlikely(vcpu->arch.switch_db_regs & KVM_DEBUGREG_WONT_EXIT))
+			run_flags |= KVM_RUN_LOAD_GUEST_DR6;
+	}
+
+	exit_fastpath = kvm_x86_call(vcpu_run)(vcpu, run_flags);
+
+	/* Sync the guest debug registers */
+	if (unlikely(vcpu->arch.switch_db_regs & KVM_DEBUGREG_WONT_EXIT)) {
+		WARN_ON(vcpu->guest_debug & KVM_GUESTDBG_USE_HW_BP);
+		WARN_ON(vcpu->arch.switch_db_regs & KVM_DEBUGREG_AUTO_SWITCH);
+		kvm_x86_call(sync_dirty_debug_regs)(vcpu);
+		kvm_update_dr0123(vcpu);
+		kvm_update_dr7(vcpu);
+	}
+
+	/*
+	 * Make sure vcpu->mode is changed to OUTSIDE_GUEST_MODE after
+	 * vmexit to mark this vcpu no need to be kicked for any new
+	 * vcpu request.
+	 */
+	smp_store_mb(vcpu->mode, OUTSIDE_GUEST_MODE);
+
+	if (unlikely(exit_fastpath == EXIT_FASTPATH_REENTER_GUEST))
+		return 1;
+
+	/*
+	 * Sync xfd before calling handle_exit_irqoff() which may
+	 * rely on the fact that guest_fpu::xfd is up-to-date (e.g.
+	 * in #NM irqoff handler).
+	 */
+	if (vcpu->arch.xfd_no_write_intercept)
+		fpu_sync_guest_vmexit_xfd_state();
+
+	kvm_x86_call(handle_exit_irqoff)(vcpu);
+
+	if (vcpu->arch.guest_fpu.xfd_err)
+		wrmsrl(MSR_IA32_XFD_ERR, 0);
+
+	ret = kvm_x86_call(handle_exit)(vcpu, exit_fastpath);
+	if (ret <= 0) {
+		pkvm_make_req_to_host(HOST_HANDLE_EXIT, vcpu);
+		return ret;
+	}
+
+	if (unlikely(force_immediate_exit) || to_pkvm_vcpu(vcpu)->reqs_to_host)
+		return 0;
+
+	return 1;
+}
+
+int pkvm_vcpu_enter_guest(struct kvm_vcpu *vcpu, bool force_immediate_exit,
+			  unsigned long *reqs_to_host)
+{
+	struct kvm_vcpu *hvcpu = this_cpu_read(host_vcpu);
+	struct pkvm_vcpu *pkvm_vcpu = to_pkvm_vcpu(vcpu);
+	int i, ret;
+
+	pkvm_vcpu->reqs_to_host = 0;
+
+	vcpu->arch.last_vmentry_cpu = vcpu->cpu;
+
+	kvm_load_guest_fpu(vcpu);
+
+	/* Save the host debug registers */
+	get_debugreg(hvcpu->arch.dr7, 7);
+	for (i = 0; i < KVM_NR_DB_REGS; i++)
+		get_debugreg(hvcpu->arch.db[i], i);
+
+	vcpu->arch.host_debugctl = get_debugctlmsr();
+
+	for (;;) {
+		ret = __pkvm_vcpu_enter_guest(vcpu, force_immediate_exit);
+		if (ret <= 0)
+			break;
+	}
+
+	kvm_x86_call(prepare_switch_to_host)(vcpu);
+
+	/* Restore the host debug registers */
+	set_debugreg(hvcpu->arch.dr7, 7);
+	for (i = 0; i < KVM_NR_DB_REGS; i++)
+		set_debugreg(hvcpu->arch.db[i], i);
+
+	kvm_put_guest_fpu(vcpu);
+
+	kvm_restore_user_return_msr();
+
+	*reqs_to_host = pkvm_vcpu->reqs_to_host;
+
+	return ret;
+}
 #endif /* !__PKVM_HYP__ */

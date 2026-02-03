@@ -123,6 +123,8 @@ union pkvm_hc_data {
 	} raw;
 };
 
+#define HOST_HANDLE_EXIT			0
+
 /*
  * The union pkvm_hc_data is passed in hypercalls via the registers used for
  * hypercall arguments, and PKVM_HC_DATA_MAX_NUM represents the number of those
