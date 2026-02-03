@@ -361,6 +361,7 @@ static int __vcpu_create(struct kvm *kvm, struct kvm_vcpu *vcpu, struct fpstate 
 {
 	struct pkvm_vcpu *pkvm_vcpu = to_pkvm_vcpu(vcpu);
 	int ret = kvm_x86_call(vcpu_precreate)(kvm);
+	struct pkvm_vm *pkvm_vm = to_pkvm(kvm);
 	void *unused = (void *)pkvm_vcpu +
 		       PKVM_VCPU_BASE_SIZE +
 		       kvm_vcpu_sz;
@@ -368,6 +369,24 @@ static int __vcpu_create(struct kvm *kvm, struct kvm_vcpu *vcpu, struct fpstate 
 
 	if (ret)
 		return ret;
+
+	pkvm_spin_lock(&pkvm_vm->lock);
+
+	/*
+	 * The following setup is per VM, not per vCPU, however it cannot be
+	 * done during VM creation, since these values are set by the host VMM
+	 * via an ioctl after a VM is already created. At the same time, the
+	 * host KVM relies on these values being already set when setting up a
+	 * vCPU, thus implicitly assuming that the VMM should set them before
+	 * creating vCPUs. So it is ok to assume these host's values here are
+	 * up-to-date.
+	 */
+	if (!kvm->arch.bus_lock_detection_enabled &&
+	    pkvm_vm->shared_kvm->arch.bus_lock_detection_enabled &&
+	    kvm_caps.has_bus_lock_exit)
+		kvm->arch.bus_lock_detection_enabled = true;
+
+	pkvm_spin_unlock(&pkvm_vm->lock);
 
 	vcpu->kvm = kvm;
 	/* Set cpu to -1 to indicate it is not loaded on any CPU */
