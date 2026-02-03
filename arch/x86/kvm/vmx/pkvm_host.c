@@ -1722,6 +1722,14 @@ static struct kvm_x86_nested_ops pkvm_nested_ops = {
 	.write_log_dirty = pkvm_nested_write_pml_buffer,
 };
 
+static int pkvm_check_intercept(struct kvm_vcpu *vcpu,
+				struct x86_instruction_info *info,
+				enum x86_intercept_stage stage,
+				struct x86_exception *exception)
+{
+	return X86EMUL_UNHANDLEABLE;
+}
+
 static void pkvm_setup_mce(struct kvm_vcpu *vcpu)
 {
 	KVM_BUG_ON(pkvm_hypercall(setup_mce), vcpu->kvm);
@@ -1897,6 +1905,7 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 
 	.load_mmu_pgd = pkvm_load_mmu_pgd,
 
+	.check_intercept = pkvm_check_intercept,
 	.handle_exit_irqoff = vmx_handle_exit_irqoff,
 
 	.nested_ops = &pkvm_nested_ops,
