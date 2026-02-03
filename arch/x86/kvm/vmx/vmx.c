@@ -6793,9 +6793,9 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_MONITOR_INSTRUCTION]     = kvm_emulate_monitor,
 	[EXIT_REASON_INVEPT]                  = handle_vmx_instruction,
 	[EXIT_REASON_INVVPID]                 = handle_vmx_instruction,
-#ifndef __PKVM_HYP__
 	[EXIT_REASON_RDRAND]                  = kvm_handle_invalid_op,
 	[EXIT_REASON_RDSEED]                  = kvm_handle_invalid_op,
+#ifndef __PKVM_HYP__
 	[EXIT_REASON_PML_FULL]		      = handle_pml_full,
 	[EXIT_REASON_INVPCID]                 = handle_invpcid,
 #endif
