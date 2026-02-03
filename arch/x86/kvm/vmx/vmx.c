@@ -6670,6 +6670,15 @@ static int handle_init(struct kvm_vcpu *vcpu)
 }
 #endif
 
+static int handle_vmcall(struct kvm_vcpu *vcpu)
+{
+#ifndef __PKVM_HYP__
+	return kvm_emulate_hypercall(vcpu);
+#else
+	return pkvm_emulate_hypercall(vcpu);
+#endif
+}
+
 /*
  * The exit handlers return 1 if the exit was handled fully and guest execution
  * may resume.  Otherwise they set the kvm_run parameter to indicate what needs
@@ -6695,8 +6704,8 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_INVLPG]		      = handle_invlpg,
 #endif
 	[EXIT_REASON_RDPMC]                   = kvm_emulate_rdpmc,
+	[EXIT_REASON_VMCALL]                  = handle_vmcall,
 #ifndef __PKVM_HYP__
-	[EXIT_REASON_VMCALL]                  = kvm_emulate_hypercall,
 	[EXIT_REASON_VMCLEAR]		      = handle_vmx_instruction,
 	[EXIT_REASON_VMLAUNCH]		      = handle_vmx_instruction,
 	[EXIT_REASON_VMPTRLD]		      = handle_vmx_instruction,
@@ -9684,6 +9693,7 @@ static void share_nonprotected_vcpu_state(struct kvm_vcpu *vcpu,
 	case EXIT_REASON_IO_INSTRUCTION:
 	case EXIT_REASON_MSR_READ:
 	case EXIT_REASON_MSR_WRITE:
+	case EXIT_REASON_VMCALL:
 		/* For the host to skip the instruction for certain exit reasons */
 		shared_vcpu->arch.event_exit_inst_len = vmcs_read32(VM_EXIT_INSTRUCTION_LEN);
 		break;
