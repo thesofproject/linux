@@ -1029,8 +1029,10 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 	.check_emulate_instruction = vt_op(check_emulate_instruction),
 	.apic_init_signal_blocked = vt_op(apic_init_signal_blocked),
 	.migrate_timers = vmx_migrate_timers,
+#endif
 
 	.recalc_intercepts = vt_op(recalc_intercepts),
+#ifndef __PKVM_HYP__
 	.complete_emulated_msr = vt_op(complete_emulated_msr),
 
 	.vcpu_deliver_sipi_vector = kvm_vcpu_deliver_sipi_vector,
