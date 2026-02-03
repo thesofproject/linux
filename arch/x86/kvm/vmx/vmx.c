@@ -6343,9 +6343,9 @@ static int handle_ept_violation(struct kvm_vcpu *vcpu)
 #endif
 }
 
-#ifndef __PKVM_HYP__
 static int handle_ept_misconfig(struct kvm_vcpu *vcpu)
 {
+#ifndef __PKVM_HYP__
 	gpa_t gpa;
 
 	if (vmx_check_emulate_instruction(vcpu, EMULTYPE_PF, NULL, 0))
@@ -6363,8 +6363,21 @@ static int handle_ept_misconfig(struct kvm_vcpu *vcpu)
 	}
 
 	return kvm_mmu_page_fault(vcpu, gpa, PFERR_RSVD_MASK, NULL, 0);
+#else
+	if (WARN_ON_ONCE(pkvm_is_protected_vcpu(vcpu))) {
+		/*
+		 * The pVM should not cause EPT_MISCONFIG vmexit as it should be
+		 * enlightened to use PV method to access MMIO rather than the
+		 * memory mapped way. In case this is happened, injecting a #GP
+		 * to the pVM.
+		 */
+		kvm_queue_exception(vcpu, GP_VECTOR);
+		return 1;
+	}
+
+	return 0;
+#endif
 }
-#endif /* !__PKVM_HYP__ */
 
 static int handle_nmi_window(struct kvm_vcpu *vcpu)
 {
@@ -6769,8 +6782,8 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_LDTR_TR]		      = handle_desc,
 #endif
 	[EXIT_REASON_EPT_VIOLATION]	      = handle_ept_violation,
-#ifndef __PKVM_HYP__
 	[EXIT_REASON_EPT_MISCONFIG]           = handle_ept_misconfig,
+#ifndef __PKVM_HYP__
 	[EXIT_REASON_PAUSE_INSTRUCTION]       = handle_pause,
 	[EXIT_REASON_MWAIT_INSTRUCTION]	      = kvm_emulate_mwait,
 	[EXIT_REASON_MONITOR_TRAP_FLAG]       = handle_monitor_trap,
@@ -9740,6 +9753,7 @@ static void share_nonprotected_vcpu_state(struct kvm_vcpu *vcpu,
 		}
 		break;
 	case EXIT_REASON_EPT_VIOLATION:
+	case EXIT_REASON_EPT_MISCONFIG:
 		to_vmx(shared_vcpu)->exit_gpa = vmcs_read64(GUEST_PHYSICAL_ADDRESS);
 		fallthrough;
 	case EXIT_REASON_IO_INSTRUCTION:

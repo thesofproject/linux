@@ -14,6 +14,8 @@ static int pkvm_complete_emulated_msr(struct kvm_vcpu *vcpu, int err);
 static unsigned short has_wbinvd_exit = USHRT_MAX;
 
 static bool pkvm_has_vmx_wbinvd_exit(void);
+static int pkvm_check_emulate_instruction(struct kvm_vcpu *vcpu, int emul_type,
+					  void *insn, int insn_len);
 
 static void pkvm_free_loaded_vmcs(struct loaded_vmcs *loaded_vmcs)
 {
@@ -434,6 +436,22 @@ static int handle_ept_violation(struct kvm_vcpu *vcpu)
 	return __vmx_handle_ept_violation(vcpu, gpa, exit_qualification);
 }
 
+static int handle_ept_misconfig(struct kvm_vcpu *vcpu)
+{
+	gpa_t gpa;
+
+	if (pkvm_check_emulate_instruction(vcpu, EMULTYPE_PF, NULL, 0))
+		return 1;
+
+	gpa = to_vmx(vcpu)->exit_gpa;
+	if (!kvm_io_bus_write(vcpu, KVM_FAST_MMIO_BUS, gpa, 0, NULL)) {
+		trace_kvm_fast_mmio(gpa);
+		return kvm_skip_emulated_instruction(vcpu);
+	}
+
+	return kvm_mmu_page_fault(vcpu, gpa, PFERR_RSVD_MASK, NULL, 0);
+}
+
 /*
  * The exit handlers return 1 if the exit was handled fully and guest execution
  * may resume.  Otherwise they set the kvm_run parameter to indicate what needs
@@ -458,6 +476,7 @@ static int (*pkvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_TASK_SWITCH]             = handle_task_switch,
 	[EXIT_REASON_MCE_DURING_VMENTRY]      = handle_machine_check,
 	[EXIT_REASON_EPT_VIOLATION]	      = handle_ept_violation,
+	[EXIT_REASON_EPT_MISCONFIG]           = handle_ept_misconfig,
 };
 
 static const int pkvm_vmx_max_exit_handlers = ARRAY_SIZE(pkvm_vmx_exit_handlers);
