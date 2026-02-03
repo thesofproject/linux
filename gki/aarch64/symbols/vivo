@@ -118,3 +118,6 @@
   __tracepoint_android_rvh_bpf_skb_load_bytes
   __traceiter_android_rvh_tcp_rcv_spurious_retrans
   __tracepoint_android_rvh_tcp_rcv_spurious_retrans
+  skb_orphan_partial
+  __traceiter_tcp_retransmit_skb
+  __tracepoint_tcp_retransmit_skb
