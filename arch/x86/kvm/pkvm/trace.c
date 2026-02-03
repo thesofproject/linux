@@ -19,14 +19,8 @@ static inline bool is_host_vcpu(struct kvm_vcpu *vcpu)
 
 static inline struct vmexit_perf *vcpu_to_perf(struct kvm_vcpu *vcpu)
 {
-	/*
-	 * TODO: Currently there is only host vCPU but not guest vCPU.
-	 * Enable the trace support for guest once the pKVM hypervisor
-	 * support running a guest vCPU.
-	 */
-	BUG_ON(!is_host_vcpu(vcpu));
-
-	return this_cpu_ptr(&hvcpu_perf);
+	return is_host_vcpu(vcpu) ? this_cpu_ptr(&hvcpu_perf) :
+				    &to_pkvm_vcpu(vcpu)->perf;
 }
 
 static void refresh_vmexit_perf(struct perf_ctrl *pctrl, struct vmexit_perf *perf)
@@ -113,6 +107,7 @@ void pkvm_vcpu_perf_init(struct kvm_vcpu *vcpu)
 {
 	struct vmexit_perf *perf = vcpu_to_perf(vcpu);
 
+	perf->data.vm_handle = vcpu->kvm->arch.pkvm.handle;
 	perf->data.vcpu_id = vcpu->vcpu_id;
 
 	pkvm_spin_lock_init(&perf->lock);
