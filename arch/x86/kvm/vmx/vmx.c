@@ -6304,11 +6304,12 @@ static int handle_task_switch(struct kvm_vcpu *vcpu)
 #endif
 }
 
-#ifndef __PKVM_HYP__
 static int handle_ept_violation(struct kvm_vcpu *vcpu)
 {
 	unsigned long exit_qualification = vmx_get_exit_qual(vcpu);
+#ifndef __PKVM_HYP__
 	gpa_t gpa;
+#endif
 
 	/*
 	 * EPT violation happened while executing iret from NMI,
@@ -6321,6 +6322,7 @@ static int handle_ept_violation(struct kvm_vcpu *vcpu)
 			(exit_qualification & INTR_INFO_UNBLOCK_NMI))
 		vmcs_set_bits(GUEST_INTERRUPTIBILITY_INFO, GUEST_INTR_STATE_NMI);
 
+#ifndef __PKVM_HYP__
 	gpa = vmcs_read64(GUEST_PHYSICAL_ADDRESS);
 	trace_kvm_page_fault(vcpu, gpa, exit_qualification);
 
@@ -6336,8 +6338,12 @@ static int handle_ept_violation(struct kvm_vcpu *vcpu)
 		return kvm_emulate_instruction(vcpu, 0);
 
 	return __vmx_handle_ept_violation(vcpu, gpa, exit_qualification);
+#else
+	return 0;
+#endif
 }
 
+#ifndef __PKVM_HYP__
 static int handle_ept_misconfig(struct kvm_vcpu *vcpu)
 {
 	gpa_t gpa;
@@ -6761,7 +6767,9 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_MCE_DURING_VMENTRY]      = handle_machine_check,
 	[EXIT_REASON_GDTR_IDTR]		      = handle_desc,
 	[EXIT_REASON_LDTR_TR]		      = handle_desc,
+#endif
 	[EXIT_REASON_EPT_VIOLATION]	      = handle_ept_violation,
+#ifndef __PKVM_HYP__
 	[EXIT_REASON_EPT_MISCONFIG]           = handle_ept_misconfig,
 	[EXIT_REASON_PAUSE_INSTRUCTION]       = handle_pause,
 	[EXIT_REASON_MWAIT_INSTRUCTION]	      = kvm_emulate_mwait,
@@ -9731,6 +9739,9 @@ static void share_nonprotected_vcpu_state(struct kvm_vcpu *vcpu,
 				vmcs_read32(VM_EXIT_INSTRUCTION_LEN);
 		}
 		break;
+	case EXIT_REASON_EPT_VIOLATION:
+		to_vmx(shared_vcpu)->exit_gpa = vmcs_read64(GUEST_PHYSICAL_ADDRESS);
+		fallthrough;
 	case EXIT_REASON_IO_INSTRUCTION:
 	case EXIT_REASON_MSR_READ:
 	case EXIT_REASON_MSR_WRITE:
@@ -9758,6 +9769,9 @@ static void share_protected_vcpu_state(struct kvm_vcpu *vcpu,
 		fallthrough;
 	case EXIT_REASON_MSR_READ:
 		shared_vcpu->arch.regs[VCPU_REGS_RCX] = kvm_rcx_read(vcpu);
+		break;
+	case EXIT_REASON_EPT_VIOLATION:
+		to_vmx(shared_vcpu)->exit_gpa = vmcs_read64(GUEST_PHYSICAL_ADDRESS);
 		break;
 	default:
 		break;
