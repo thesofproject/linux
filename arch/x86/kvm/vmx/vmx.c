@@ -6141,17 +6141,24 @@ static int handle_tpr_below_threshold(struct kvm_vcpu *vcpu)
 	kvm_apic_update_ppr(vcpu);
 	return 1;
 }
+#endif /* !__PKVM_HYP__ */
 
 static int handle_interrupt_window(struct kvm_vcpu *vcpu)
 {
 	exec_controls_clearbit(to_vmx(vcpu), CPU_BASED_INTR_WINDOW_EXITING);
 
+#ifndef __PKVM_HYP__
 	kvm_make_request(KVM_REQ_EVENT, vcpu);
 
 	++vcpu->stat.irq_window_exits;
 	return 1;
+#else
+	/* Back to host to check if any pending event should be handled */
+	return 0;
+#endif
 }
 
+#ifndef __PKVM_HYP__
 static int handle_invlpg(struct kvm_vcpu *vcpu)
 {
 	unsigned long exit_qualification = vmx_get_exit_qual(vcpu);
@@ -6681,8 +6688,8 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_CPUID]                   = kvm_emulate_cpuid,
 	[EXIT_REASON_MSR_READ]                = kvm_emulate_rdmsr,
 	[EXIT_REASON_MSR_WRITE]               = kvm_emulate_wrmsr,
-#ifndef __PKVM_HYP__
 	[EXIT_REASON_INTERRUPT_WINDOW]        = handle_interrupt_window,
+#ifndef __PKVM_HYP__
 	[EXIT_REASON_HLT]                     = kvm_emulate_halt,
 	[EXIT_REASON_INVD]		      = kvm_emulate_invd,
 	[EXIT_REASON_INVLPG]		      = handle_invlpg,
