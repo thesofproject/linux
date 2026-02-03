@@ -6518,12 +6518,12 @@ static int handle_pause(struct kvm_vcpu *vcpu)
 #endif
 }
 
-#ifndef __PKVM_HYP__
 static int handle_monitor_trap(struct kvm_vcpu *vcpu)
 {
 	return 1;
 }
 
+#ifndef __PKVM_HYP__
 static int handle_invpcid(struct kvm_vcpu *vcpu)
 {
 	u32 vmx_instruction_info;
@@ -6789,9 +6789,7 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_EPT_MISCONFIG]           = handle_ept_misconfig,
 	[EXIT_REASON_PAUSE_INSTRUCTION]       = handle_pause,
 	[EXIT_REASON_MWAIT_INSTRUCTION]	      = kvm_emulate_mwait,
-#ifndef __PKVM_HYP__
 	[EXIT_REASON_MONITOR_TRAP_FLAG]       = handle_monitor_trap,
-#endif
 	[EXIT_REASON_MONITOR_INSTRUCTION]     = kvm_emulate_monitor,
 	[EXIT_REASON_INVEPT]                  = handle_vmx_instruction,
 	[EXIT_REASON_INVVPID]                 = handle_vmx_instruction,
