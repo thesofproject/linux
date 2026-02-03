@@ -1906,6 +1906,44 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.vcpu_deliver_sipi_vector = kvm_vcpu_deliver_sipi_vector,
 };
 
+static struct kvm_pmc *pkvm_intel_rdpmc_ecx_to_pmc(struct kvm_vcpu *vcpu,
+						   unsigned int idx, u64 *mask)
+{
+	return NULL;
+}
+static struct kvm_pmc *pkvm_intel_msr_idx_to_pmc(struct kvm_vcpu *vcpu, u32 msr) { return NULL; }
+static bool pkvm_intel_is_valid_msr(struct kvm_vcpu *vcpu, u32 msr) { return false; }
+static int pkvm_intel_pmu_get_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info) { return 1; }
+static int pkvm_intel_pmu_set_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info) { return 1; }
+static void pkvm_intel_pmu_refresh(struct kvm_vcpu *vcpu) {}
+static void pkvm_intel_pmu_init(struct kvm_vcpu *vcpu) {}
+static void pkvm_intel_pmu_reset(struct kvm_vcpu *vcpu) {}
+static void pkvm_intel_pmu_deliver_pmi(struct kvm_vcpu *vcpu) {}
+static void pkvm_intel_pmu_cleanup(struct kvm_vcpu *vcpu) {}
+
+static struct kvm_pmu_ops pkvm_host_vt_pmu_ops __initdata = {
+	.rdpmc_ecx_to_pmc = pkvm_intel_rdpmc_ecx_to_pmc,
+	.msr_idx_to_pmc = pkvm_intel_msr_idx_to_pmc,
+	.is_valid_msr = pkvm_intel_is_valid_msr,
+	.get_msr = pkvm_intel_pmu_get_msr,
+	.set_msr = pkvm_intel_pmu_set_msr,
+	.refresh = pkvm_intel_pmu_refresh,
+	.init = pkvm_intel_pmu_init,
+	.reset = pkvm_intel_pmu_reset,
+	.deliver_pmi = pkvm_intel_pmu_deliver_pmi,
+	.cleanup = pkvm_intel_pmu_cleanup,
+	.EVENTSEL_EVENT = ARCH_PERFMON_EVENTSEL_EVENT,
+	.MAX_NR_GP_COUNTERS = 0,
+	.MIN_NR_GP_COUNTERS = 0,
+};
+
+struct kvm_x86_init_ops pkvm_host_vt_init_ops __initdata = {
+	.handle_intel_pt_intr = NULL,
+
+	.runtime_ops = &pkvm_host_vt_x86_ops,
+	.pmu_ops = &pkvm_host_vt_pmu_ops,
+};
+
 bool pkvm_interrupt_blocked(struct kvm_vcpu *vcpu)
 {
 	return (pkvm_interrupt_allowed(vcpu, false) <= 0);
