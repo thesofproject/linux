@@ -7507,18 +7507,24 @@ static void handle_external_interrupt_irqoff(struct kvm_vcpu *vcpu,
 
 	vcpu->arch.at_instruction_boundary = true;
 }
+#endif /* !__PKVM_HYP__ */
 
 void vmx_handle_exit_irqoff(struct kvm_vcpu *vcpu)
 {
 	if (to_vt(vcpu)->emulation_required)
 		return;
 
+#ifndef __PKVM_HYP__
 	if (vmx_get_exit_reason(vcpu).basic == EXIT_REASON_EXTERNAL_INTERRUPT)
 		handle_external_interrupt_irqoff(vcpu, vmx_get_intr_info(vcpu));
 	else if (vmx_get_exit_reason(vcpu).basic == EXIT_REASON_EXCEPTION_NMI)
 		handle_exception_irqoff(vcpu, vmx_get_intr_info(vcpu));
+#else
+	/* TODO */
+#endif
 }
 
+#ifndef __PKVM_HYP__
 /*
  * The kvm parameter can be NULL (module initialization, or invocation before
  * VM creation). Be sure to check the kvm parameter before using it.
