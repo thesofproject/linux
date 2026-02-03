@@ -316,6 +316,54 @@ static int handle_halt(struct kvm_vcpu *vcpu)
 }
 
 /*
+ * This function is a 1:1 copy of handle_tpr_below_threshold in vmx.c.
+ * TODO: Check whether this requires updates whenever handle_tpr_below_threshold
+ * in vmx.c is updated in the future.
+ */
+static int handle_tpr_below_threshold(struct kvm_vcpu *vcpu)
+{
+	kvm_apic_update_ppr(vcpu);
+	return 1;
+}
+
+/*
+ * This function is a 1:1 copy of handle_apic_write in vmx.c.
+ * TODO: Check whether this requires updates whenever handle_apic_write in vmx.c
+ * is updated in the future.
+ */
+static int handle_apic_write(struct kvm_vcpu *vcpu)
+{
+	unsigned long exit_qualification = vmx_get_exit_qual(vcpu);
+
+	/*
+	 * APIC-write VM-Exit is trap-like, KVM doesn't need to advance RIP and
+	 * hardware has done any necessary aliasing, offset adjustments, etc...
+	 * for the access.  I.e. the correct value has already been  written to
+	 * the vAPIC page for the correct 16-byte chunk.  KVM needs only to
+	 * retrieve the register value and emulate the access.
+	 */
+	u32 offset = exit_qualification & 0xff0;
+
+	kvm_apic_write_nodecode(vcpu, offset);
+	return 1;
+}
+
+/*
+ * This function is a 1:1 copy of handle_apic_eoi_induced in vmx.c.
+ * TODO: Check whether this requires updates whenever handle_apic_eoi_induced in
+ * vmx.c is updated in the future.
+ */
+static int handle_apic_eoi_induced(struct kvm_vcpu *vcpu)
+{
+	unsigned long exit_qualification = vmx_get_exit_qual(vcpu);
+	int vector = exit_qualification & 0xff;
+
+	/* EOI-induced VM exit is trap-like and thus no need to adjust IP */
+	kvm_apic_set_eoi_accelerated(vcpu, vector);
+	return 1;
+}
+
+/*
  * The exit handlers return 1 if the exit was handled fully and guest execution
  * may resume.  Otherwise they set the kvm_run parameter to indicate what needs
  * to be done to userspace and return 0.
@@ -332,6 +380,9 @@ static int (*pkvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_INTERRUPT_WINDOW]        = handle_interrupt_window,
 	[EXIT_REASON_HLT]                     = handle_halt,
 	[EXIT_REASON_VMCALL]                  = kvm_emulate_hypercall,
+	[EXIT_REASON_TPR_BELOW_THRESHOLD]     = handle_tpr_below_threshold,
+	[EXIT_REASON_APIC_WRITE]              = handle_apic_write,
+	[EXIT_REASON_EOI_INDUCED]             = handle_apic_eoi_induced,
 };
 
 static const int pkvm_vmx_max_exit_handlers = ARRAY_SIZE(pkvm_vmx_exit_handlers);
