@@ -968,7 +968,6 @@ void kvm_requeue_exception(struct kvm_vcpu *vcpu, unsigned int nr,
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_requeue_exception);
 
-#ifndef __PKVM_HYP__
 int kvm_complete_insn_gp(struct kvm_vcpu *vcpu, int err)
 {
 	if (err)
@@ -980,6 +979,7 @@ int kvm_complete_insn_gp(struct kvm_vcpu *vcpu, int err)
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_complete_insn_gp);
 
+#ifndef __PKVM_HYP__
 static int complete_emulated_insn_gp(struct kvm_vcpu *vcpu, int err)
 {
 	if (err) {
@@ -1065,6 +1065,7 @@ bool kvm_require_dr(struct kvm_vcpu *vcpu, int dr)
 	return false;
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_require_dr);
+#endif /* !__PKVM_HYP__ */
 
 static bool kvm_pv_async_pf_enabled(struct kvm_vcpu *vcpu)
 {
@@ -1073,16 +1074,19 @@ static bool kvm_pv_async_pf_enabled(struct kvm_vcpu *vcpu)
 	return (vcpu->arch.apf.msr_en_val & mask) == mask;
 }
 
+#ifndef __PKVM_HYP__
 static inline u64 pdptr_rsvd_bits(struct kvm_vcpu *vcpu)
 {
 	return vcpu->arch.reserved_gpa_bits | rsvd_bits(5, 8) | rsvd_bits(1, 2);
 }
+#endif /* !__PKVM_HYP__ */
 
 /*
  * Load the pae pdptrs.  Return 1 if they are all valid, 0 otherwise.
  */
 int load_pdptrs(struct kvm_vcpu *vcpu, unsigned long cr3)
 {
+#ifndef __PKVM_HYP__
 	struct kvm_mmu *mmu = vcpu->arch.walk_mmu;
 	gfn_t pdpt_gfn = cr3 >> PAGE_SHIFT;
 	gpa_t real_gpa;
@@ -1125,6 +1129,10 @@ int load_pdptrs(struct kvm_vcpu *vcpu, unsigned long cr3)
 	vcpu->arch.pdptrs_from_userspace = false;
 
 	return 1;
+#else
+	/* TODO: Support reading guest memory to load PDPTR */
+	return 0;
+#endif
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(load_pdptrs);
 
@@ -1159,7 +1167,12 @@ void kvm_post_set_cr0(struct kvm_vcpu *vcpu, unsigned long old_cr0, unsigned lon
 			return;
 
 		if (tdp_enabled) {
+#ifndef __PKVM_HYP__
 			kvm_init_mmu(vcpu);
+#else
+			if (!pkvm_is_protected_vcpu(vcpu))
+				pkvm_make_req_to_host(HOST_INIT_MMU, vcpu);
+#endif
 			return;
 		}
 	}
@@ -1171,6 +1184,7 @@ void kvm_post_set_cr0(struct kvm_vcpu *vcpu, unsigned long old_cr0, unsigned lon
 		 */
 		if (!(cr0 & X86_CR0_PG))
 			kvm_make_request(KVM_REQ_TLB_FLUSH_GUEST, vcpu);
+#ifndef __PKVM_HYP__
 		/*
 		 * Check for async #PF completion events when enabling paging,
 		 * as the vCPU may have previously encountered async #PFs (it's
@@ -1179,10 +1193,20 @@ void kvm_post_set_cr0(struct kvm_vcpu *vcpu, unsigned long old_cr0, unsigned lon
 		 */
 		else if (kvm_pv_async_pf_enabled(vcpu))
 			kvm_make_request(KVM_REQ_APF_READY, vcpu);
+#else
+		else if (!pkvm_is_protected_vcpu(vcpu) &&
+			 kvm_pv_async_pf_enabled(to_pkvm_vcpu(vcpu)->shared_vcpu))
+			pkvm_make_req_to_host(HOST_APF_READY, vcpu);
+#endif
 	}
 
 	if ((cr0 ^ old_cr0) & KVM_MMU_CR0_ROLE_BITS)
+#ifndef __PKVM_HYP__
 		kvm_mmu_reset_context(vcpu);
+#else
+		if (!pkvm_is_protected_vcpu(vcpu))
+			pkvm_make_req_to_host(HOST_RESET_MMU, vcpu);
+#endif
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_post_set_cr0);
 
@@ -1235,7 +1259,6 @@ void kvm_lmsw(struct kvm_vcpu *vcpu, unsigned long msw)
 	(void)kvm_set_cr0(vcpu, kvm_read_cr0_bits(vcpu, ~0x0eul) | (msw & 0x0f));
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_lmsw);
-#endif /* !__PKVM_HYP__ */
 
 void kvm_load_guest_xsave_state(struct kvm_vcpu *vcpu)
 {
@@ -1352,6 +1375,7 @@ int kvm_emulate_xsetbv(struct kvm_vcpu *vcpu)
 	return kvm_skip_emulated_instruction(vcpu);
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_xsetbv);
+#endif /* !__PKVM_HYP__ */
 
 static bool kvm_is_valid_cr4(struct kvm_vcpu *vcpu, unsigned long cr4)
 {
@@ -1362,8 +1386,14 @@ static bool kvm_is_valid_cr4(struct kvm_vcpu *vcpu, unsigned long cr4)
 void kvm_post_set_cr4(struct kvm_vcpu *vcpu, unsigned long old_cr4, unsigned long cr4)
 {
 	if ((cr4 ^ old_cr4) & KVM_MMU_CR4_ROLE_BITS)
+#ifndef __PKVM_HYP__
 		kvm_mmu_reset_context(vcpu);
+#else
+		if (!pkvm_is_protected_vcpu(vcpu))
+			pkvm_make_req_to_host(HOST_RESET_MMU, vcpu);
+#endif
 
+#ifndef __PKVM_HYP__ /* The pKVM hypervisor requires TDP. */
 	/*
 	 * If CR4.PCIDE is changed 0 -> 1, there is no need to flush the TLB
 	 * according to the SDM; however, stale prev_roots could be reused
@@ -1375,6 +1405,7 @@ void kvm_post_set_cr4(struct kvm_vcpu *vcpu, unsigned long old_cr4, unsigned lon
 	if (!tdp_enabled &&
 	    (cr4 & X86_CR4_PCIDE) && !(old_cr4 & X86_CR4_PCIDE))
 		kvm_mmu_unload(vcpu);
+#endif
 
 	/*
 	 * The TLB has to be flushed for all PCIDs if any of the following
@@ -1435,6 +1466,7 @@ int kvm_set_cr4(struct kvm_vcpu *vcpu, unsigned long cr4)
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_set_cr4);
 
+#ifndef __PKVM_HYP__
 static void kvm_invalidate_pcid(struct kvm_vcpu *vcpu, unsigned long pcid)
 {
 	struct kvm_mmu *mmu = vcpu->arch.mmu;
