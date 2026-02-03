@@ -88,6 +88,9 @@ MODULE_AUTHOR("Qumranet");
 MODULE_DESCRIPTION("KVM support for VMX (Intel VT-x) extensions");
 MODULE_LICENSE("GPL");
 
+static struct kvm_x86_ops *x86_ops = &vt_x86_ops;
+static struct kvm_x86_init_ops *x86_init_ops = &vt_init_ops;
+
 #ifdef MODULE
 static const struct x86_cpu_id vmx_cpu_id[] = {
 	X86_MATCH_FEATURE(X86_FEATURE_VMX, NULL),
@@ -583,7 +586,7 @@ static __init void hv_init_evmcs(void)
 		}
 
 		if (ms_hyperv.nested_features & HV_X64_NESTED_DIRECT_FLUSH)
-			vt_x86_ops.enable_l2_tlb_flush
+			x86_ops->enable_l2_tlb_flush
 				= hv_enable_l2_tlb_flush;
 	} else {
 		enlightened_vmcs = false;
@@ -9407,11 +9410,11 @@ __init int vmx_hardware_setup(void)
 	 * using the APIC_ACCESS_ADDR VMCS field.
 	 */
 	if (!flexpriority_enabled)
-		vt_x86_ops.set_apic_access_page_addr = NULL;
+		x86_ops->set_apic_access_page_addr = NULL;
 
 	if (!cpu_has_vmx_tpr_shadow())
 #ifndef __PKVM_HYP__
-		vt_x86_ops.update_cr8_intercept = NULL;
+		x86_ops->update_cr8_intercept = NULL;
 #else
 		/*
 		 * The pKVM hypervisor requires TPR shadow to avoid emulating
@@ -9423,8 +9426,8 @@ __init int vmx_hardware_setup(void)
 #if IS_ENABLED(CONFIG_HYPERV) && !defined(__PKVM_HYP__)
 	if (ms_hyperv.nested_features & HV_X64_NESTED_GUEST_MAPPING_FLUSH
 	    && enable_ept) {
-		vt_x86_ops.flush_remote_tlbs = hv_flush_remote_tlbs;
-		vt_x86_ops.flush_remote_tlbs_range = hv_flush_remote_tlbs_range;
+		x86_ops->flush_remote_tlbs = hv_flush_remote_tlbs;
+		x86_ops->flush_remote_tlbs_range = hv_flush_remote_tlbs_range;
 	}
 #endif
 
@@ -9439,7 +9442,7 @@ __init int vmx_hardware_setup(void)
 	if (!cpu_has_vmx_apicv())
 		enable_apicv = 0;
 	if (!enable_apicv)
-		vt_x86_ops.sync_pir_to_irr = NULL;
+		x86_ops->sync_pir_to_irr = NULL;
 
 	if (!enable_apicv || !cpu_has_vmx_ipiv())
 		enable_ipiv = false;
@@ -9510,8 +9513,8 @@ __init int vmx_hardware_setup(void)
 
 #ifndef __PKVM_HYP__
 	if (!enable_preemption_timer) {
-		vt_x86_ops.set_hv_timer = NULL;
-		vt_x86_ops.cancel_hv_timer = NULL;
+		x86_ops->set_hv_timer = NULL;
+		x86_ops->cancel_hv_timer = NULL;
 	}
 #endif
 
@@ -9524,9 +9527,9 @@ __init int vmx_hardware_setup(void)
 	if (!enable_ept || !enable_pmu || !cpu_has_vmx_intel_pt())
 		pt_mode = PT_MODE_SYSTEM;
 	if (pt_mode == PT_MODE_HOST_GUEST)
-		vt_init_ops.handle_intel_pt_intr = vmx_handle_intel_pt_intr;
+		x86_init_ops->handle_intel_pt_intr = vmx_handle_intel_pt_intr;
 	else
-		vt_init_ops.handle_intel_pt_intr = NULL;
+		x86_init_ops->handle_intel_pt_intr = NULL;
 
 	setup_default_sgx_lepubkeyhash();
 
@@ -9614,8 +9617,27 @@ static void __init do_vmx_pkvm_init(void)
 	}
 #endif
 	r = vmx_pkvm_init();
-	if (r)
+	if (r) {
 		pr_warn("pKVM init failed with error %d. Continue KVM init\n", r);
+	} else if (enable_pkvm) {
+		x86_ops = &pkvm_host_vt_x86_ops;
+		x86_init_ops = &pkvm_host_vt_init_ops;
+
+		/*
+		 * Disable below features to keep align with the pKVM. See the
+		 * code in pkvm_vmx_init().
+		 */
+		enable_pmu = false;
+		nested = false;
+		flexpriority_enabled = false;
+		enable_pml = false;
+		enable_vmware_backdoor = false;
+		/* Below features are also disabled in the pKVM implicitly. */
+#ifdef CONFIG_X86_SGX_KVM
+		enable_sgx = false;
+#endif
+		allow_smaller_maxphyaddr = false;
+	}
 }
 #endif
 
@@ -9645,7 +9667,7 @@ int __init vmx_init(void)
 	if (setup_vmcs_config(&vmcs_config, &vmx_capability) < 0)
 		return -EIO;
 
-	r = kvm_x86_vendor_init(&vt_init_ops);
+	r = kvm_x86_vendor_init(x86_init_ops);
 	if (r)
 		return r;
 
@@ -9903,11 +9925,13 @@ int pkvm_vmx_init(void)
 	enable_pml = false;
 	enable_vmware_backdoor = false;
 
+	/* TODO: Respect the host kvm and kvm_intel module params. */
+
 	kvm_vcpu_sz = sizeof(struct vcpu_vmx);
 
 	pkvm_x86_ops_init(&pkvm_vt_x86_ops);
 
-	return pkvm_x86_vendor_init(&vt_init_ops);
+	return pkvm_x86_vendor_init(x86_init_ops);
 }
 
 #endif /* !__PKVM_HYP__ */
