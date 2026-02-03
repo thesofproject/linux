@@ -11973,18 +11973,25 @@ int kvm_emulate_halt_noskip(struct kvm_vcpu *vcpu)
 	return __kvm_emulate_halt(vcpu, KVM_MP_STATE_HALTED, KVM_EXIT_HLT);
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_halt_noskip);
+#endif /* !__PKVM_HYP__ */
 
 int kvm_emulate_halt(struct kvm_vcpu *vcpu)
 {
 	int ret = kvm_skip_emulated_instruction(vcpu);
+#ifndef __PKVM_HYP__
 	/*
 	 * TODO: we might be squashing a GUESTDBG_SINGLESTEP-triggered
 	 * KVM_EXIT_DEBUG here.
 	 */
 	return kvm_emulate_halt_noskip(vcpu) && ret;
+#else
+	WARN_ON_ONCE(ret != 1);
+	return 0;
+#endif
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_halt);
 
+#ifndef __PKVM_HYP__
 fastpath_t handle_fastpath_hlt(struct kvm_vcpu *vcpu)
 {
 	if (!kvm_emulate_halt(vcpu))
