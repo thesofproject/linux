@@ -116,3 +116,5 @@
   __tracepoint_android_vh_build_skb_around
   __traceiter_android_rvh_bpf_skb_load_bytes
   __tracepoint_android_rvh_bpf_skb_load_bytes
+  __traceiter_android_rvh_tcp_rcv_spurious_retrans
+  __tracepoint_android_rvh_tcp_rcv_spurious_retrans
