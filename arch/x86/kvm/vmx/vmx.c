@@ -6272,6 +6272,7 @@ static int handle_ept_misconfig(struct kvm_vcpu *vcpu)
 
 	return kvm_mmu_page_fault(vcpu, gpa, PFERR_RSVD_MASK, NULL, 0);
 }
+#endif /* !__PKVM_HYP__ */
 
 static int handle_nmi_window(struct kvm_vcpu *vcpu)
 {
@@ -6279,12 +6280,17 @@ static int handle_nmi_window(struct kvm_vcpu *vcpu)
 		return -EIO;
 
 	exec_controls_clearbit(to_vmx(vcpu), CPU_BASED_NMI_WINDOW_EXITING);
+#ifndef __PKVM_HYP__
 	++vcpu->stat.nmi_window_exits;
 	kvm_make_request(KVM_REQ_EVENT, vcpu);
 
 	return 1;
+#else
+	return 0;
+#endif
 }
 
+#ifndef __PKVM_HYP__
 /*
  * Returns true if emulation is required (due to the vCPU having invalid state
  * with unsrestricted guest mode disabled) and KVM can't faithfully emulate the
@@ -6620,7 +6626,9 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 #ifndef __PKVM_HYP__
 	[EXIT_REASON_EXTERNAL_INTERRUPT]      = handle_external_interrupt,
 	[EXIT_REASON_TRIPLE_FAULT]            = handle_triple_fault,
+#endif
 	[EXIT_REASON_NMI_WINDOW]	      = handle_nmi_window,
+#ifndef __PKVM_HYP__
 	[EXIT_REASON_IO_INSTRUCTION]          = handle_io,
 	[EXIT_REASON_CR_ACCESS]               = handle_cr,
 	[EXIT_REASON_DR_ACCESS]               = handle_dr,
