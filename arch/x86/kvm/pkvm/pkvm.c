@@ -695,6 +695,7 @@ static bool is_guest_vcpu_accessible(struct kvm_vcpu *vcpu, enum pkvm_hc hc)
 	case __pkvm__load_mmu_pgd:
 	case __pkvm__setup_mce:
 	case __pkvm__vcpu_run:
+	case __pkvm__complete_emulated_msr:
 		/*
 		 * The host is responsible for running vCPU, injecting
 		 * interrupts, emulating lapic etc. Always allow the related PV
@@ -867,7 +868,9 @@ static void pkvm_set_dr7(struct kvm_vcpu *vcpu, unsigned long val)
 
 static inline bool pkvm_event_injection_allowed(struct kvm_vcpu *vcpu)
 {
-	return !kvm_event_needs_reinjection(vcpu) && !vcpu->arch.exception.pending;
+	return !kvm_event_needs_reinjection(vcpu) &&
+	       !vcpu->arch.exception.pending &&
+	       !to_pkvm_vcpu(vcpu)->host_emulated_msr_err;
 }
 
 static int pkvm_interrupt_allowed(struct kvm_vcpu *vcpu, bool for_injection)
@@ -1317,6 +1320,29 @@ static int pkvm_vcpu_run(struct kvm_vcpu *vcpu, bool force_immediate_exit,
 	return ret;
 }
 
+static int pkvm_complete_emulated_msr(struct kvm_vcpu *vcpu, int err)
+{
+	/*
+	 * For the npVM, the host itself can complete the emulated MSR by either
+	 * injecting the exception or skipping the instruction, according to the
+	 * emulation result.
+	 */
+	if (!pkvm_is_protected_vcpu(vcpu))
+		return -EOPNOTSUPP;
+
+	/*
+	 * For the pVM, just save the error code rather than completing the MSR
+	 * emulation via kvm_x86_call(complete_emulated_msr), to prevent the
+	 * host from injecting exception or skipping instructions as the host
+	 * can use this PV interface at any scenario, e.g, not for MSR emulation
+	 * at all. The pKVM hypervisor will decide how to complete the MSR
+	 * emulation according to the last exit reason and this saved error code
+	 * before entering the guest again.
+	 */
+	to_pkvm_vcpu(vcpu)->host_emulated_msr_err = err;
+	return 1;
+}
+
 static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc hc,
 					   union pkvm_hc_data *in, union pkvm_hc_data *out)
 {
@@ -1498,6 +1524,9 @@ static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc 
 	case __pkvm__vcpu_run:
 		ret = pkvm_vcpu_run(vcpu, pkvm_hc_input1(hvcpu),
 				    &out->vcpu_run.reqs_to_host);
+		break;
+	case __pkvm__complete_emulated_msr:
+		ret = pkvm_complete_emulated_msr(vcpu, pkvm_hc_input1(hvcpu));
 		break;
 	default:
 		ret = -EINVAL;

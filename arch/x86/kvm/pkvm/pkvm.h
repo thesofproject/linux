@@ -18,6 +18,8 @@ struct pkvm_vcpu {
 	struct pkvm_vm *pkvm_vm;
 	/* Bitmap of requests for the host to handle */
 	unsigned long reqs_to_host;
+	/* The host emulated MSR error */
+	int host_emulated_msr_err;
 	/*
 	 * The donated structure size, possibly including a vendor specific
 	 * structure wrapping the kvm_vcpu structure (see below).
