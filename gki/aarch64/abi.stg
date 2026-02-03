@@ -418579,6 +418579,15 @@ elf_symbol {
   full_name: "pktgen_xfrm_outer_mode_output"
 }
 elf_symbol {
+  id: 0xb17adf40
+  name: "pkvm_enable_smc_forwarding"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x51ed50e0
+  type_id: 0x9bba7997
+  full_name: "pkvm_enable_smc_forwarding"
+}
+elf_symbol {
   id: 0x508c3717
   name: "pkvm_iommu_resume"
   is_defined: true
@@ -446424,6 +446433,7 @@ interface {
   symbol_id: 0x50cfaca0
   symbol_id: 0xf5634793
   symbol_id: 0xac156dd0
+  symbol_id: 0xb17adf40
   symbol_id: 0x508c3717
   symbol_id: 0xe5abcddf
   symbol_id: 0xb30e2978
