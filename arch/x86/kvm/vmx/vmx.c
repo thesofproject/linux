@@ -1368,14 +1368,16 @@ void vmx_prepare_switch_to_guest(struct kvm_vcpu *vcpu)
 	vt->guest_state_loaded = true;
 }
 
-#ifndef __PKVM_HYP__
 static void vmx_prepare_switch_to_host(struct vcpu_vmx *vmx)
 {
+#ifndef __PKVM_HYP__
 	struct vmcs_host_state *host_state;
+#endif
 
 	if (!vmx->vt.guest_state_loaded)
 		return;
 
+#ifndef __PKVM_HYP__
 	host_state = &vmx->loaded_vmcs->host_state;
 
 	++vmx->vcpu.stat.host_state_reload;
@@ -1404,10 +1406,22 @@ static void vmx_prepare_switch_to_host(struct vcpu_vmx *vmx)
 	wrmsrq(MSR_KERNEL_GS_BASE, vmx->vt.msr_host_kernel_gs_base);
 #endif
 	load_fixmap_gdt(raw_smp_processor_id());
+#else
+	/*
+	 * The pKVM hypervisor's segments (only cares about the GDT/IDT/FS/GS)
+	 * are restored by the VMX automatically when existing from the guest.
+	 *
+	 * Restore the MSR_KERNEL_GS_BASE with the host VM's value. This can
+	 * hidden the guest's value from the host which can provide security
+	 * benefit for pVMs. With this, the host doesn't need to save/restore
+	 * this MSR by itself.
+	 */
+	rdmsrq(MSR_KERNEL_GS_BASE, vmx->msr_guest_kernel_gs_base);
+	wrmsrq(MSR_KERNEL_GS_BASE, vmx->vt.msr_host_kernel_gs_base);
+#endif
 	vmx->vt.guest_state_loaded = false;
 	vmx->guest_uret_msrs_loaded = false;
 }
-#endif /* !__PKVM_HYP__ */
 
 #ifdef CONFIG_X86_64
 static u64 vmx_read_guest_host_msr(struct vcpu_vmx *vmx, u32 msr, u64 *cache)
@@ -9328,6 +9342,11 @@ err_l1d_flush:
 }
 
 #else /* !__PKVM_HYP__ */
+
+void pkvm_vmx_prepare_switch_to_host(struct kvm_vcpu *vcpu)
+{
+	vmx_prepare_switch_to_host(to_vmx(vcpu));
+}
 
 int pkvm_vmx_init(void)
 {
