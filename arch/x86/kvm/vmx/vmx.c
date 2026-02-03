@@ -914,6 +914,24 @@ void vmx_update_exception_bitmap(struct kvm_vcpu *vcpu)
 	if (vcpu->arch.xfd_no_write_intercept)
 		eb |= (1u << NM_VECTOR);
 
+#ifdef __PKVM_HYP__
+	/*
+	 * For simplicity, do not intercept #PF/#UD/#GP for pVM to avoid
+	 * instruction emulations in the pKVM hypervisor. In fact, the #GP
+	 * is actually not intercepted as the pKVM hypervisor has disabled
+	 * enable_vmware_backdoor which is the only one enabling interception
+	 * for #GP). Handling the #BP needs to exit to the user space VMM in the
+	 * host side with guest RIP, which is not supported for pVM. In fact,
+	 * the #BP is not intercepted for pVM as debugging pVM from host side is
+	 * not supported. As the guest debug features are not supported for the
+	 * pVM for security reasons, no need to intercept #DB for a pVM.
+	 */
+	if (pkvm_is_protected_vcpu(vcpu))
+		eb &= ~((1u << PF_VECTOR) | (1u << UD_VECTOR) |
+			(1u << GP_VECTOR) | (1u << BP_VECTOR) |
+			(1u << DB_VECTOR));
+#endif
+
 	vmcs_write32(EXCEPTION_BITMAP, eb);
 }
 
@@ -1818,6 +1836,7 @@ int vmx_check_emulate_instruction(struct kvm_vcpu *vcpu, int emul_type,
 
 	return X86EMUL_CONTINUE;
 }
+#endif /* !__PKVM_HYP__ */
 
 static int skip_emulated_instruction(struct kvm_vcpu *vcpu)
 {
@@ -1883,6 +1902,7 @@ rip_updated:
 	return 1;
 }
 
+#ifndef __PKVM_HYP__
 /*
  * Recognizes a pending MTF VM-exit and records the nested state for later
  * delivery.
@@ -5546,6 +5566,7 @@ static int handle_machine_check(struct kvm_vcpu *vcpu)
 	/* handled by vmx_vcpu_run() */
 	return 1;
 }
+#endif /* !__PKVM_HYP__ */
 
 /*
  * If the host has split lock detection disabled, then #AC is
@@ -5576,14 +5597,18 @@ static bool is_xfd_nm_fault(struct kvm_vcpu *vcpu)
 static int handle_exception_nmi(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
+#ifndef __PKVM_HYP__
 	struct kvm_run *kvm_run = vcpu->run;
+#endif
 	u32 intr_info, ex_no, error_code;
-	unsigned long cr2, dr6;
+	unsigned long dr6;
 	u32 vect_info;
 
 	vect_info = vmx->idt_vectoring_info;
 	intr_info = vmx_get_intr_info(vcpu);
 
+	/* The MC and NMI will be handled by the host. */
+#ifndef __PKVM_HYP__
 	/*
 	 * Machine checks are handled by handle_exception_irqoff(), or by
 	 * vmx_vcpu_run() if a #MC occurs on VM-Entry.  NMIs are handled by
@@ -5591,6 +5616,7 @@ static int handle_exception_nmi(struct kvm_vcpu *vcpu)
 	 */
 	if (is_machine_check(intr_info) || is_nmi(intr_info))
 		return 1;
+#endif
 
 	/*
 	 * Queue the exception here instead of in handle_nm_fault_irqoff().
@@ -5604,8 +5630,14 @@ static int handle_exception_nmi(struct kvm_vcpu *vcpu)
 		return 1;
 	}
 
+	/*
+	 * The pKVM hypervisor doesn't intercept #UD for pVM. For npVM, this
+	 * can be handled by the host.
+	 */
+#ifndef __PKVM_HYP__
 	if (is_invalid_opcode(intr_info))
 		return handle_ud(vcpu);
+#endif
 
 	if (WARN_ON_ONCE(is_ve_fault(intr_info))) {
 		struct vmx_ve_information *ve_info = vmx->ve_info;
@@ -5613,7 +5645,9 @@ static int handle_exception_nmi(struct kvm_vcpu *vcpu)
 		WARN_ONCE(ve_info->exit_reason != EXIT_REASON_EPT_VIOLATION,
 			  "Unexpected #VE on VM-Exit reason 0x%x", ve_info->exit_reason);
 		dump_vmcs(vcpu);
+#ifndef __PKVM_HYP__
 		kvm_mmu_print_sptes(vcpu, ve_info->guest_physical_address, "#VE");
+#endif
 		return 1;
 	}
 
@@ -5621,6 +5655,13 @@ static int handle_exception_nmi(struct kvm_vcpu *vcpu)
 	if (intr_info & INTR_INFO_DELIVER_CODE_MASK)
 		error_code = vmcs_read32(VM_EXIT_INTR_ERROR_CODE);
 
+	/*
+	 * The pKVM hypervisor has disabled enable_vmware_backdoor thus #GP will
+	 * not be intercepted for pVM and npVM.
+	 *
+	 * #PF is only intercepted for npVM, which can be handled by the host.
+	 */
+#ifndef __PKVM_HYP__
 	if (!vmx->rmode.vm86_active && is_gp_fault(intr_info)) {
 		WARN_ON_ONCE(!enable_vmware_backdoor);
 
@@ -5654,7 +5695,8 @@ static int handle_exception_nmi(struct kvm_vcpu *vcpu)
 	}
 
 	if (is_page_fault(intr_info)) {
-		cr2 = vmx_get_exit_qual(vcpu);
+		unsigned long cr2 = vmx_get_exit_qual(vcpu);
+
 		if (enable_ept && !vcpu->arch.apf.host_apf_flags) {
 			/*
 			 * EPT will cause page fault only if we need to
@@ -5666,11 +5708,18 @@ static int handle_exception_nmi(struct kvm_vcpu *vcpu)
 		} else
 			return kvm_handle_page_fault(vcpu, error_code, cr2, NULL, 0);
 	}
+#endif
 
 	ex_no = intr_info & INTR_INFO_VECTOR_MASK;
 
+	/*
+	 * The pKVM hypervisor requires to enable unrestricted guest feature
+	 * thus vm86_active won't be set and no rmode exception to be handled.
+	 */
+#ifndef __PKVM_HYP__
 	if (vmx->rmode.vm86_active && rmode_exception(vcpu, ex_no))
 		return handle_rmode_exception(vcpu, ex_no, error_code);
+#endif
 
 	switch (ex_no) {
 	case DB_VECTOR:
@@ -5710,9 +5759,25 @@ static int handle_exception_nmi(struct kvm_vcpu *vcpu)
 			kvm_queue_exception_p(vcpu, DB_VECTOR, dr6);
 			return 1;
 		}
+#ifndef __PKVM_HYP__
 		kvm_run->debug.arch.dr6 = dr6 | DR6_ACTIVE_LOW;
 		kvm_run->debug.arch.dr7 = vmcs_readl(GUEST_DR7);
 		fallthrough;
+#else
+		/*
+		 * The #DB caused by KVM_GUESTDBG_SINGLESTEP or
+		 * KVM_GUESTDBG_USE_HW_BP needs to be handled by exiting to the
+		 * user space VMM in the host side, which should be done by the
+		 * host.
+		 */
+		break;
+#endif
+		/*
+		 * The #BP is not intercepted for pVM but only npVM. It is
+		 * handled by exiting to the user space VMM, which should be
+		 * done by the host.
+		 */
+#ifndef __PKVM_HYP__
 	case BP_VECTOR:
 		/*
 		 * Update instruction length as we may reinject #BP from
@@ -5725,12 +5790,14 @@ static int handle_exception_nmi(struct kvm_vcpu *vcpu)
 		kvm_run->debug.arch.pc = kvm_get_linear_rip(vcpu);
 		kvm_run->debug.arch.exception = ex_no;
 		break;
+#endif
 	case AC_VECTOR:
 		if (vmx_guest_inject_ac(vcpu)) {
 			kvm_queue_exception_e(vcpu, AC_VECTOR, error_code);
 			return 1;
 		}
 
+#ifndef __PKVM_HYP__
 		/*
 		 * Handle split lock. Depending on detection mode this will
 		 * either warn and disable split lock detection for this
@@ -5739,15 +5806,23 @@ static int handle_exception_nmi(struct kvm_vcpu *vcpu)
 		if (handle_guest_split_lock(kvm_rip_read(vcpu)))
 			return 1;
 		fallthrough;
+#else
+		/* Handle split lock in the host side. */
+		break;
+#endif
 	default:
+#ifndef __PKVM_HYP__
 		kvm_run->exit_reason = KVM_EXIT_EXCEPTION;
 		kvm_run->ex.exception = ex_no;
 		kvm_run->ex.error_code = error_code;
+#endif
 		break;
 	}
+
 	return 0;
 }
 
+#ifndef __PKVM_HYP__
 static __always_inline int handle_external_interrupt(struct kvm_vcpu *vcpu)
 {
 	++vcpu->stat.irq_exits;
@@ -6529,8 +6604,8 @@ static int handle_wrmsr_imm(struct kvm_vcpu *vcpu)
  * to be done to userspace and return 0.
  */
 static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
-#ifndef __PKVM_HYP__
 	[EXIT_REASON_EXCEPTION_NMI]           = handle_exception_nmi,
+#ifndef __PKVM_HYP__
 	[EXIT_REASON_EXTERNAL_INTERRUPT]      = handle_external_interrupt,
 	[EXIT_REASON_TRIPLE_FAULT]            = handle_triple_fault,
 	[EXIT_REASON_NMI_WINDOW]	      = handle_nmi_window,
@@ -7454,6 +7529,7 @@ void vmx_load_eoi_exitmap(struct kvm_vcpu *vcpu, u64 *eoi_exit_bitmap)
 #ifndef __PKVM_HYP__
 void vmx_do_interrupt_irqoff(unsigned long entry);
 void vmx_do_nmi_irqoff(void);
+#endif /* !__PKVM_HYP__ */
 
 static void handle_nm_fault_irqoff(struct kvm_vcpu *vcpu)
 {
@@ -7476,17 +7552,20 @@ static void handle_nm_fault_irqoff(struct kvm_vcpu *vcpu)
 
 static void handle_exception_irqoff(struct kvm_vcpu *vcpu, u32 intr_info)
 {
-	/* if exit due to PF check for async PF */
-	if (is_page_fault(intr_info))
-		vcpu->arch.apf.host_apf_flags = kvm_read_and_reset_apf_flags();
 	/* if exit due to NM, handle before interrupts are enabled */
-	else if (is_nm_fault(intr_info))
+	if (is_nm_fault(intr_info))
 		handle_nm_fault_irqoff(vcpu);
+#ifndef __PKVM_HYP__
+	/* if exit due to PF check for async PF */
+	else if (is_page_fault(intr_info))
+		vcpu->arch.apf.host_apf_flags = kvm_read_and_reset_apf_flags();
 	/* Handle machine checks before interrupts are enabled */
 	else if (is_machine_check(intr_info))
 		kvm_machine_check();
+#endif
 }
 
+#ifndef __PKVM_HYP__
 static void handle_external_interrupt_irqoff(struct kvm_vcpu *vcpu,
 					     u32 intr_info)
 {
@@ -7518,13 +7597,11 @@ void vmx_handle_exit_irqoff(struct kvm_vcpu *vcpu)
 	if (to_vt(vcpu)->emulation_required)
 		return;
 
-#ifndef __PKVM_HYP__
-	if (vmx_get_exit_reason(vcpu).basic == EXIT_REASON_EXTERNAL_INTERRUPT)
-		handle_external_interrupt_irqoff(vcpu, vmx_get_intr_info(vcpu));
-	else if (vmx_get_exit_reason(vcpu).basic == EXIT_REASON_EXCEPTION_NMI)
+	if (vmx_get_exit_reason(vcpu).basic == EXIT_REASON_EXCEPTION_NMI)
 		handle_exception_irqoff(vcpu, vmx_get_intr_info(vcpu));
-#else
-	/* TODO */
+#ifndef __PKVM_HYP__
+	else if (vmx_get_exit_reason(vcpu).basic == EXIT_REASON_EXTERNAL_INTERRUPT)
+		handle_external_interrupt_irqoff(vcpu, vmx_get_intr_info(vcpu));
 #endif
 }
 
@@ -9532,6 +9609,7 @@ int pkvm_vmx_init(void)
 	nested = false;
 	flexpriority_enabled = false;
 	enable_pml = false;
+	enable_vmware_backdoor = false;
 
 	kvm_vcpu_sz = sizeof(struct vcpu_vmx);
 
