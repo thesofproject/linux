@@ -150,10 +150,8 @@ module_param(dump_invalid_vmcs, bool, 0644);
 
 #define KVM_VMX_TSC_MULTIPLIER_MAX     0xffffffffffffffffULL
 
-#ifndef __PKVM_HYP__
 /* Guest_tsc -> host_tsc conversion requires 64-bit division.  */
 static int __read_mostly cpu_preemption_timer_multi;
-#endif /* !__PKVM_HYP__ */
 static bool __read_mostly enable_preemption_timer = 1;
 #ifdef CONFIG_X86_64
 module_param_named(preemption_timer, enable_preemption_timer, bool, S_IRUGO);
@@ -9255,12 +9253,6 @@ __init int vmx_hardware_setup(void)
 		return -EOPNOTSUPP;
 #endif
 
-	/*
-	 * The pKVM hypervisor will use the preemption timer for immediate
-	 * vmexit thus will not use it for guest VMs. The following preemption
-	 * timer setup is for guest VMs, so it can be skipped for the pKVM.
-	 */
-#ifndef __PKVM_HYP__
 	if (enable_preemption_timer) {
 		u64 use_timer_freq = 5000ULL * 1000 * 1000;
 
@@ -9280,6 +9272,7 @@ __init int vmx_hardware_setup(void)
 			enable_preemption_timer = false;
 	}
 
+#ifndef __PKVM_HYP__
 	if (!enable_preemption_timer) {
 		vt_x86_ops.set_hv_timer = NULL;
 		vt_x86_ops.cancel_hv_timer = NULL;
@@ -9455,6 +9448,18 @@ void pkvm_vmx_prepare_switch_to_host(struct kvm_vcpu *vcpu)
 
 static void pkvm_vmx_update_vcpu_state_from_host(struct kvm_vcpu *vcpu)
 {
+	struct kvm_vcpu *shared_vcpu = to_pkvm_vcpu(vcpu)->shared_vcpu;
+	struct vcpu_vmx *vmx = to_vmx(vcpu);
+
+	/*
+	 * The pKVM hypervisor relies on the preemption timer feature. Thus the
+	 * host may also request the pKVM hypervisor to use this feature to
+	 * emulate the guest timer. So need to sync the host's hv_deadline_tsc
+	 * to the pKVM unconditionally so that the pKVM hypervisor can properly
+	 * update the preemption timer for the guest.
+	 */
+	vmx->hv_deadline_tsc = to_vmx(shared_vcpu)->hv_deadline_tsc;
+
 	/*
 	 * TODO: Update vcpu state according to the vmexit reason handled by
 	 * the host.
