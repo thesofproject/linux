@@ -302,6 +302,14 @@ static int handle_wrmsr(struct kvm_vcpu *vcpu)
 	return pkvm_complete_emulated_msr(vcpu, 1);
 }
 
+static int handle_interrupt_window(struct kvm_vcpu *vcpu)
+{
+	kvm_make_request(KVM_REQ_EVENT, vcpu);
+
+	++vcpu->stat.irq_window_exits;
+	return 1;
+}
+
 /*
  * The exit handlers return 1 if the exit was handled fully and guest execution
  * may resume.  Otherwise they set the kvm_run parameter to indicate what needs
@@ -316,6 +324,7 @@ static int (*pkvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_DR_ACCESS]               = handle_dr,
 	[EXIT_REASON_MSR_READ]                = handle_rdmsr,
 	[EXIT_REASON_MSR_WRITE]               = handle_wrmsr,
+	[EXIT_REASON_INTERRUPT_WINDOW]        = handle_interrupt_window,
 };
 
 static const int pkvm_vmx_max_exit_handlers = ARRAY_SIZE(pkvm_vmx_exit_handlers);
