@@ -9644,6 +9644,18 @@ static void __init do_vmx_pkvm_init(void)
 		enable_sgx = false;
 #endif
 		allow_smaller_maxphyaddr = false;
+
+		/*
+		 * Below features are required by the pKVM. See the checks in
+		 * vmx_hardware_setup().
+		 *
+		 * enable_preemption_timer is also required by pKVM, but on the
+		 * host side it can be disabled. In such case the host will
+		 * simply use the SW timer instead.
+		 */
+		enable_ept = true;
+		enable_unrestricted_guest = true;
+		enable_vnmi = true;
 	}
 }
 #endif
