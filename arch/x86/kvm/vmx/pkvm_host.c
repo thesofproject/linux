@@ -1059,6 +1059,36 @@ static int pkvm_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 	return __pkvm_handle_exit(vcpu, exit_fastpath);
 }
 
+static int pkvm_skip_emulated_instruction(struct kvm_vcpu *vcpu)
+{
+	if (vcpu->arch.guest_state_protected)
+		return 1;
+
+	if (vcpu->arch.event_exit_inst_len) {
+		unsigned long rip, orig_rip;
+
+		orig_rip = kvm_rip_read(vcpu);
+		rip = orig_rip + vcpu->arch.event_exit_inst_len;
+#ifdef CONFIG_X86_64
+		/*
+		 * We need to mask out the high 32 bits of RIP if not in 64-bit
+		 * mode, but just finding out that we are in 64-bit mode is
+		 * quite expensive.  Only do it if there was a carry.
+		 */
+		if (unlikely(((rip ^ orig_rip) >> 31) == 3) && !is_64_bit_mode(vcpu))
+			rip = (u32)rip;
+#endif
+		kvm_rip_write(vcpu, rip);
+	} else if (!kvm_emulate_instruction(vcpu, EMULTYPE_SKIP)) {
+		return 0;
+	}
+
+	/* skipping an emulated instruction also counts */
+	pkvm_hypercall(set_interrupt_shadow, 0);
+
+	return 1;
+}
+
 static void pkvm_set_interrupt_shadow(struct kvm_vcpu *vcpu, int mask)
 {
 	if (!pkvm_is_protected_vcpu(vcpu))
@@ -1428,6 +1458,7 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 
 	.vcpu_run = pkvm_vcpu_run,
 	.handle_exit = pkvm_handle_exit,
+	.skip_emulated_instruction = pkvm_skip_emulated_instruction,
 	.set_interrupt_shadow = pkvm_set_interrupt_shadow,
 	.get_interrupt_shadow = pkvm_get_interrupt_shadow,
 	.inject_irq = pkvm_inject_irq,
