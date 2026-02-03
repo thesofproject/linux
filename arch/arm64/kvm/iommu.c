@@ -356,8 +356,7 @@ size_t kvm_iommu_map_sg(pkvm_handle_t domain_id, struct kvm_iommu_sg *sg,
 			}
 		}
 
-		kvm_iommu_topup_memcache(&res, gfp);
-	} while (nent);
+	} while (nent && !kvm_iommu_topup_memcache(&res, gfp));
 
 	return total_mapped;
 }
