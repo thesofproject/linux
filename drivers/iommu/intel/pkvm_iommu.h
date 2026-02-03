@@ -113,8 +113,7 @@ int __init pkvm_scan_satc_devs(u16 satc_devs[], int *nr_satc_devs, int max_satc_
 int __init pkvm_host_prepare_iommu(void);
 int __init pkvm_host_init_iommu(void);
 
-int pkvm_qi_submit_sync(struct intel_iommu *iommu, struct qi_desc *desc,
-			unsigned int count, unsigned long options);
+int pkvm_iec_flush(struct intel_iommu *iommu, bool global, int index, int mask);
 int pkvm_context_clear(u64 phys, u8 bus, u8 devfn, struct device_domain_info *info);
 int pkvm_context_mapping(struct intel_iommu *iommu, struct device_domain_info *info,
 			 u8 bus, u8 devfn, u64 pgd_gpa, u16 did);
@@ -199,7 +198,7 @@ int pkvm_intel_iommu_init(void);
 
 int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val);
 int pkvm_iommu_mmio_write(u64 phys, int len, u64 val);
-int pkvm_iommu_qi_submit(u64 phys, u64 desc_gpa, u32 count, u32 options);
+int pkvm_iommu_iec_flush(u64 phys, int index, int mask, bool global);
 int pkvm_iommu_clear_ce(struct clear_ce_data *data);
 int pkvm_iommu_set_lm_ce(struct set_lm_ce_data *in, struct set_lm_ce_data *out);
 int pkvm_iommu_set_sm_ce(struct set_sm_ce_data *in, struct set_sm_ce_data *out);
@@ -212,9 +211,8 @@ int pkvm_iommu_domain_map(struct domain_map_data *in, struct domain_map_data *ou
 int pkvm_iommu_domain_unmap(u64 pgd_gpa, u64 start_pfn, u64 last_pfn);
 #endif /* !__PKVM_HYP__ */
 #else /* !CONFIG_PKVM_INTEL */
-static inline int pkvm_qi_submit_sync(struct intel_iommu *iommu,
-				      struct qi_desc *desc, unsigned int count,
-				      unsigned long options)
+static inline int pkvm_iec_flush(struct intel_iommu *iommu, bool global,
+				 int index, int mask)
 {
 	return -EOPNOTSUPP;
 }

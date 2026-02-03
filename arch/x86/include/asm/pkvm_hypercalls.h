@@ -93,7 +93,7 @@ PKVM_HC(vm_mmu_age)
 #ifdef CONFIG_PKVM_INTEL
 PKVM_HC_OUT(iommu_mmio_read)
 PKVM_HC(iommu_mmio_write)
-PKVM_HC(iommu_qi_submit)
+PKVM_HC(iommu_iec_flush)
 PKVM_HC_IN(iommu_clear_ce)
 PKVM_HC_INOUT(iommu_set_lm_ce)
 PKVM_HC_INOUT(iommu_set_sm_ce)

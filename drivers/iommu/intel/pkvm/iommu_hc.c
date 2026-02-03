@@ -13,7 +13,7 @@
 #include "../iommu.h"
 #include "../pasid.h"
 
-int pkvm_iommu_qi_submit(u64 phys, u64 desc_gpa, u32 count, u32 options)
+int pkvm_iommu_iec_flush(u64 phys, int index, int mask, bool global)
 {
 	struct intel_iommu *iommu = iommu_from_phys(phys);
 
@@ -22,14 +22,12 @@ int pkvm_iommu_qi_submit(u64 phys, u64 desc_gpa, u32 count, u32 options)
 
 	BUG_ON(!iommu->qi);
 
-	/*
-	 * This hypercall is temporary so don't bother to write protect
-	 * desc_gpa (host to hyp donation). It will be removed in future
-	 * patches being replaced by a dedicated hypercall specifically
-	 * for submitting QI_IEC_TYPE.
-	 */
-	return qi_submit_sync(iommu, pkvm_host_gpa_to_virt(desc_gpa),
-			      count, options);
+	if (global) {
+		qi_global_iec(iommu);
+		return 0;
+	}
+
+	return qi_flush_iec(iommu, index, mask);
 }
 
 int pkvm_iommu_clear_ce(struct clear_ce_data *data)

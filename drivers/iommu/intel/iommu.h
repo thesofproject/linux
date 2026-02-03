@@ -1390,6 +1390,7 @@ int dmar_enable_qi(struct intel_iommu *iommu);
 void dmar_disable_qi(struct intel_iommu *iommu);
 int dmar_reenable_qi(struct intel_iommu *iommu);
 void qi_global_iec(struct intel_iommu *iommu);
+int qi_flush_iec(struct intel_iommu *iommu, int index, int mask);
 
 void qi_flush_context(struct intel_iommu *iommu, u16 did,
 		      u16 sid, u8 fm, u64 type);
