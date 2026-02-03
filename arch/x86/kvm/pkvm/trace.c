@@ -38,19 +38,67 @@ static void copy_vmexit_perf_data(struct perf_data *dst, struct vmexit_perf *per
 	pkvm_spin_unlock(&perf->lock);
 }
 
-static void copy_host_vm_trace(void *dst, unsigned long size)
+static void copy_host_vm_trace(void **dst, unsigned long *size)
 {
 	struct vmexit_perf *perf;
 	int cpu;
 
 	for_each_possible_cpu(cpu) {
 		perf = per_cpu_ptr(&hvcpu_perf, cpu);
-		if (size >= sizeof(struct perf_data)) {
-			copy_vmexit_perf_data(dst, perf);
-			dst += sizeof(struct perf_data);
-			size -= sizeof(struct perf_data);
+		if (*size >= sizeof(struct perf_data)) {
+			copy_vmexit_perf_data(*dst, perf);
+			*dst += sizeof(struct perf_data);
+			*size -= sizeof(struct perf_data);
 		}
 	}
+}
+
+struct copy_arg {
+	int vm_handle;
+	void *dst;
+	unsigned long size;
+};
+
+static int __copy_guest_vm_trace(struct pkvm_vm *vm, void *param)
+{
+	struct copy_arg *arg = param;
+	int i;
+
+	if (arg->vm_handle != PKVM_HOST_VM_HANDLE &&
+	    arg->vm_handle != vm->kvm.arch.pkvm.handle)
+		return 0;
+
+	pkvm_spin_lock(&vm->lock);
+	for (i = 0; i < vm->kvm.created_vcpus; i++) {
+		if (!vm->vcpus[i])
+			continue;
+
+		if (arg->size < sizeof(struct perf_data))
+			return -ENOSPC;
+
+		copy_vmexit_perf_data(arg->dst, &vm->vcpus[i]->perf);
+		arg->dst += sizeof(struct perf_data);
+		arg->size -= sizeof(struct perf_data);
+	}
+	pkvm_spin_unlock(&vm->lock);
+
+	/*
+	 * If vm_handle != PKVM_HOST_VM_HANDLE, it means the host wants to get
+	 * the trace for a specific guest VM, and the pKVM can stop dumping the
+	 * other guest VM's trace. Otherwise, the pKVM will continue.
+	 */
+	return arg->vm_handle != PKVM_HOST_VM_HANDLE;
+}
+
+static void copy_guest_vm_trace(int vm_handle, void *dst, unsigned long size)
+{
+	struct copy_arg arg = {
+		.vm_handle = vm_handle,
+		.dst = dst,
+		.size = size,
+	};
+
+	pkvm_walk_each_vm(__copy_guest_vm_trace, &arg);
 }
 
 void pkvm_trace_vmexit_start(struct kvm_vcpu *vcpu)
@@ -125,14 +173,19 @@ void pkvm_enable_vmexit_trace(bool en)
 	}
 }
 
-int pkvm_dump_vmexit_trace(phys_addr_t phys, unsigned long size)
+int pkvm_dump_vmexit_trace(phys_addr_t phys, unsigned long size, int vm_handle)
 {
 	int ret = pkvm_host_share_hyp(phys, size);
+	unsigned long dst_size = size;
+	void *dst = __pkvm_va(phys);
 
 	if (ret)
 		return ret;
 
-	copy_host_vm_trace(__pkvm_va(phys), size);
+	if (vm_handle == PKVM_HOST_VM_HANDLE)
+		copy_host_vm_trace(&dst, &dst_size);
+
+	copy_guest_vm_trace(vm_handle, dst, dst_size);
 
 	pkvm_host_unshare_hyp(phys, size);
 
