@@ -6646,6 +6646,7 @@ static int handle_tdx_instruction(struct kvm_vcpu *vcpu)
 	kvm_queue_exception(vcpu, UD_VECTOR);
 	return 1;
 }
+#endif /* !__PKVM_HYP__ */
 
 #ifndef CONFIG_X86_SGX_KVM
 static int handle_encls(struct kvm_vcpu *vcpu)
@@ -6660,6 +6661,7 @@ static int handle_encls(struct kvm_vcpu *vcpu)
 }
 #endif /* CONFIG_X86_SGX_KVM */
 
+#ifndef __PKVM_HYP__
 static int handle_bus_lock_vmexit(struct kvm_vcpu *vcpu)
 {
 	/*
@@ -6802,7 +6804,9 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_VMFUNC]		      = handle_vmx_instruction,
 #ifndef __PKVM_HYP__
 	[EXIT_REASON_PREEMPTION_TIMER]	      = handle_preemption_timer,
+#endif
 	[EXIT_REASON_ENCLS]		      = handle_encls,
+#ifndef __PKVM_HYP__
 	[EXIT_REASON_BUS_LOCK]                = handle_bus_lock_vmexit,
 	[EXIT_REASON_NOTIFY]		      = handle_notify,
 	[EXIT_REASON_SEAMCALL]		      = handle_tdx_instruction,
