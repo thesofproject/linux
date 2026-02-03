@@ -1499,6 +1499,8 @@ void vmx_vcpu_load_vmcs(struct kvm_vcpu *vcpu, int cpu)
 	if (!already_loaded) {
 #ifdef __PKVM_HYP__
 		struct desc_ptr gdt;
+		u16 sel;
+
 		/*
 		 * Flush all EPTP/VPID contexts, the new pCPU may have stale
 		 * TLB entries from its previous association with the vCPU.
@@ -1515,6 +1517,28 @@ void vmx_vcpu_load_vmcs(struct kvm_vcpu *vcpu, int cpu)
 
 			vmcs_writel(HOST_IA32_SYSENTER_ESP, msr);
 		}
+
+		/*
+		 * Switch the FS/GS selector/base when loading the guest VMCS as
+		 * the pKVM hypervisor doesn't change FS/GS on this CPU at the
+		 * running time. Specifically, in the debug mode, the FS/GS are
+		 * initialized with the host FS/GS before deprivileging so may
+		 * be non-zero values. And in the non-debug mode, FS/GS selector
+		 * and FS base are zero, but GS base is non-zero value which is
+		 * the per cpu base. In this case, we can switch FS/GS for the
+		 * non-debug mode with fixed value rather than reading from
+		 * segment regs and MSRs. But as the vcpu loading is not a hot
+		 * path, using the same code logic to read values from segment
+		 * regs and MSRs for both modes can make the code a bit simpler
+		 * and also give a better flexibility for the non-debug mode if
+		 * in the future the FS/GS are changed.
+		 */
+		savesegment(fs, sel);
+		vmcs_write16(HOST_FS_SELECTOR, sel);
+		savesegment(gs, sel);
+		vmcs_write16(HOST_GS_SELECTOR, sel);
+		vmcs_writel(HOST_FS_BASE, read_msr(MSR_FS_BASE));
+		vmcs_writel(HOST_GS_BASE, read_msr(MSR_GS_BASE));
 #else
 		void *gdt = get_current_gdt_ro();
 
