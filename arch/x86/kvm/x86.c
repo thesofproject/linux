@@ -2291,15 +2291,17 @@ int kvm_emulate_rdmsr(struct kvm_vcpu *vcpu)
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_rdmsr);
 
-#ifndef __PKVM_HYP__
 int kvm_emulate_rdmsr_imm(struct kvm_vcpu *vcpu, u32 msr, int reg)
 {
+#ifndef __PKVM_HYP__
 	vcpu->arch.cui_rdmsr_imm_reg = reg;
 
 	return __kvm_emulate_rdmsr(vcpu, msr, reg, complete_fast_rdmsr_imm);
+#else
+	return __kvm_emulate_rdmsr(vcpu, msr, reg, NULL);
+#endif
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_rdmsr_imm);
-#endif /* !__PKVM_HYP__ */
 
 static int __kvm_emulate_wrmsr(struct kvm_vcpu *vcpu, u32 msr, u64 data)
 {
@@ -2336,13 +2338,11 @@ int kvm_emulate_wrmsr(struct kvm_vcpu *vcpu)
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_wrmsr);
 
-#ifndef __PKVM_HYP__
 int kvm_emulate_wrmsr_imm(struct kvm_vcpu *vcpu, u32 msr, int reg)
 {
 	return __kvm_emulate_wrmsr(vcpu, msr, kvm_register_read(vcpu, reg));
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_wrmsr_imm);
-#endif /* !__PKVM_HYP__ */
 
 int kvm_emulate_as_nop(struct kvm_vcpu *vcpu)
 {
