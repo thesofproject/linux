@@ -142,10 +142,8 @@ module_param_named(pml, enable_pml, bool, 0444);
 static bool __read_mostly error_on_inconsistent_vmcs_config = true;
 module_param(error_on_inconsistent_vmcs_config, bool, 0444);
 
-#ifndef __PKVM_HYP__
 static bool __read_mostly dump_invalid_vmcs = 0;
 module_param(dump_invalid_vmcs, bool, 0644);
-#endif /* !__PKVM_HYP__ */
 
 #define MSR_BITMAP_MODE_X2APIC		1
 #define MSR_BITMAP_MODE_X2APIC_APICV	2
@@ -6245,9 +6243,11 @@ static bool vmx_unhandleable_emulation_required(struct kvm_vcpu *vcpu)
 	return !vmx->rmode.vm86_active &&
 	       (kvm_is_exception_pending(vcpu) || vcpu->arch.exception.injected);
 }
+#endif /* !__PKVM_HYP__ */
 
 static int handle_invalid_guest_state(struct kvm_vcpu *vcpu)
 {
+#ifndef __PKVM_HYP__
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	bool intr_window_requested;
 	unsigned count = 130;
@@ -6292,8 +6292,16 @@ static int handle_invalid_guest_state(struct kvm_vcpu *vcpu)
 	}
 
 	return 1;
+#else
+	/*
+	 * The pKVM hypervisor requires to enable unrestricted guest thus the
+	 * guest state should be valid.
+	 */
+	return -EINVAL;
+#endif
 }
 
+#ifndef __PKVM_HYP__
 int vmx_vcpu_pre_run(struct kvm_vcpu *vcpu)
 {
 	if (vmx_unhandleable_emulation_required(vcpu)) {
@@ -6509,6 +6517,7 @@ static int handle_wrmsr_imm(struct kvm_vcpu *vcpu)
 	return kvm_emulate_wrmsr_imm(vcpu, vmx_get_exit_qual(vcpu),
 				     vmx_get_msr_imm_reg(vcpu));
 }
+#endif /* !__PKVM_HYP__ */
 
 /*
  * The exit handlers return 1 if the exit was handled fully and guest execution
@@ -6516,6 +6525,7 @@ static int handle_wrmsr_imm(struct kvm_vcpu *vcpu)
  * to be done to userspace and return 0.
  */
 static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
+#ifndef __PKVM_HYP__
 	[EXIT_REASON_EXCEPTION_NMI]           = handle_exception_nmi,
 	[EXIT_REASON_EXTERNAL_INTERRUPT]      = handle_external_interrupt,
 	[EXIT_REASON_TRIPLE_FAULT]            = handle_triple_fault,
@@ -6572,11 +6582,13 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_TDCALL]		      = handle_tdx_instruction,
 	[EXIT_REASON_MSR_READ_IMM]            = handle_rdmsr_imm,
 	[EXIT_REASON_MSR_WRITE_IMM]           = handle_wrmsr_imm,
+#endif
 };
 
 static const int kvm_vmx_max_exit_handlers =
 	ARRAY_SIZE(kvm_vmx_exit_handlers);
 
+#ifndef __PKVM_HYP__
 void vmx_get_exit_info(struct kvm_vcpu *vcpu, u32 *reason,
 		       u64 *info1, u64 *info2, u32 *intr_info, u32 *error_code)
 {
@@ -6653,6 +6665,7 @@ static void vmx_flush_pml_buffer(struct kvm_vcpu *vcpu)
 	/* reset PML index */
 	vmcs_write16(GUEST_PML_INDEX, PML_HEAD_INDEX);
 }
+#endif /* !__PKVM_HYP__ */
 
 static void vmx_dump_sel(char *name, uint32_t sel)
 {
@@ -6884,6 +6897,10 @@ void dump_vmcs(struct kvm_vcpu *vcpu)
 /*
  * The guest has exited.  See if we can fix it or if we need userspace
  * assistance.
+ *
+ * For the pKVM hypervisor, __vmx_handle_exit will return 1 if the exit reason
+ * is handled. Otherwise return 0 or negative value to indicate the host needs
+ * to be involved.
  */
 static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 {
@@ -6892,6 +6909,7 @@ static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 	u32 vectoring_info = vmx->idt_vectoring_info;
 	u16 exit_handler_index;
 
+#ifndef __PKVM_HYP__
 	/*
 	 * Flush logged GPAs PML buffer, this will make dirty_bitmap more
 	 * updated. Another good is, in kvm_vm_ioctl_get_dirty_log, before
@@ -6902,6 +6920,7 @@ static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 	 */
 	if (enable_pml && !is_guest_mode(vcpu))
 		vmx_flush_pml_buffer(vcpu);
+#endif
 
 	/*
 	 * KVM should never reach this point with a pending nested VM-Enter.
@@ -6959,19 +6978,23 @@ static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 
 	if (exit_reason.failed_vmentry) {
 		dump_vmcs(vcpu);
+#ifndef __PKVM_HYP__ /* The pKVM vcpu doesn't have run page. */
 		vcpu->run->exit_reason = KVM_EXIT_FAIL_ENTRY;
 		vcpu->run->fail_entry.hardware_entry_failure_reason
 			= exit_reason.full;
 		vcpu->run->fail_entry.cpu = vcpu->arch.last_vmentry_cpu;
+#endif
 		return 0;
 	}
 
 	if (unlikely(vmx->fail)) {
 		dump_vmcs(vcpu);
+#ifndef __PKVM_HYP__ /* The pKVM vcpu doesn't have run page. */
 		vcpu->run->exit_reason = KVM_EXIT_FAIL_ENTRY;
 		vcpu->run->fail_entry.hardware_entry_failure_reason
 			= vmcs_read32(VM_INSTRUCTION_ERROR);
 		vcpu->run->fail_entry.cpu = vcpu->arch.last_vmentry_cpu;
+#endif
 		return 0;
 	}
 
@@ -6983,7 +7006,9 @@ static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 	     exit_reason.basic != EXIT_REASON_TASK_SWITCH &&
 	     exit_reason.basic != EXIT_REASON_NOTIFY &&
 	     exit_reason.basic != EXIT_REASON_EPT_MISCONFIG)) {
+#ifndef __PKVM_HYP__ /* The pKVM vcpu doesn't have run page. */
 		kvm_prepare_event_vectoring_exit(vcpu, INVALID_GPA);
+#endif
 		return 0;
 	}
 
@@ -7011,7 +7036,7 @@ static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 
 	if (exit_reason.basic >= kvm_vmx_max_exit_handlers)
 		goto unexpected_vmexit;
-#ifdef CONFIG_MITIGATION_RETPOLINE
+#if defined(CONFIG_MITIGATION_RETPOLINE) && !defined(__PKVM_HYP__)
 	if (exit_reason.basic == EXIT_REASON_MSR_WRITE)
 		return kvm_emulate_wrmsr(vcpu);
 	else if (exit_reason.basic == EXIT_REASON_MSR_WRITE_IMM)
@@ -7036,6 +7061,7 @@ static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 	return kvm_vmx_exit_handlers[exit_handler_index](vcpu);
 
 unexpected_vmexit:
+#ifndef __PKVM_HYP__
 	vcpu_unimpl(vcpu, "vmx: unexpected exit reason 0x%x\n",
 		    exit_reason.full);
 	dump_vmcs(vcpu);
@@ -7045,6 +7071,7 @@ unexpected_vmexit:
 	vcpu->run->internal.ndata = 2;
 	vcpu->run->internal.data[0] = exit_reason.full;
 	vcpu->run->internal.data[1] = vcpu->arch.last_vmentry_cpu;
+#endif
 	return 0;
 }
 
@@ -7057,15 +7084,18 @@ int vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 	 * a bus lock in guest.
 	 */
 	if (vmx_get_exit_reason(vcpu).bus_lock_detected) {
+#ifndef __PKVM_HYP__ /* The pKVM vcpu doesn't have run page. */
 		if (ret > 0)
 			vcpu->run->exit_reason = KVM_EXIT_X86_BUS_LOCK;
 
 		vcpu->run->flags |= KVM_RUN_X86_BUS_LOCK;
+#endif
 		return 0;
 	}
 	return ret;
 }
 
+#ifndef __PKVM_HYP__
 /*
  * Software based L1D cache flush which is used when microcode providing
  * the cache control MSR is not loaded.
