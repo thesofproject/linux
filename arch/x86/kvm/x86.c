@@ -13342,6 +13342,7 @@ void kvm_arch_disable_virtualization_cpu(void)
 	kvm_x86_call(disable_virtualization_cpu)();
 	drop_user_return_notifiers();
 }
+#endif /* !__PKVM_HYP__ */
 
 bool kvm_vcpu_is_reset_bsp(struct kvm_vcpu *vcpu)
 {
@@ -13349,6 +13350,7 @@ bool kvm_vcpu_is_reset_bsp(struct kvm_vcpu *vcpu)
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_vcpu_is_reset_bsp);
 
+#ifndef __PKVM_HYP__
 bool kvm_vcpu_is_bsp(struct kvm_vcpu *vcpu)
 {
 	return (vcpu->arch.apic_base & MSR_IA32_APICBASE_BSP) != 0;
