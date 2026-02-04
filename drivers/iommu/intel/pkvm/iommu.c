@@ -34,6 +34,22 @@ int nr_satc_devs;
 static struct intel_iommu iommus[PKVM_MAX_IOMMU_NUM];
 static int nr_iommus;
 
+/*
+ * Flag denoting if all IOMMUs in the system have page walk coherency support.
+ * This is needed to decide whether to flush cpu caches on host ept updates as
+ * pKVM uses host ept as the second stage page table when host configures device
+ * for passthrough mode. IOMMUs that doesn't have page walk coherency support
+ * needs the pagetable updates to be reflected in memory and hence we need to
+ * flush cpu caches on host ept update if one or more IOMMUs doesn't have page
+ * walk coherency support.
+ */
+static bool iommu_paging_structure_coherent = true;
+
+bool pkvm_iommu_paging_structure_coherency(void)
+{
+	return iommu_paging_structure_coherent;
+}
+
 bool is_dev_in_satc(u16 bdf)
 {
 	int i;
@@ -434,6 +450,8 @@ int __init prepare_iommu(struct intel_iommu_info *info)
 	iommu->agaw = info->agaw;
 	iommu->msagaw = info->msagaw;
 	iommu->seq_id = info->seq_id;
+
+	iommu_paging_structure_coherent &= iommu_paging_structure_coherency(iommu);
 
 	return 0;
 }
