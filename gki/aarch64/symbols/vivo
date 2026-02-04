@@ -35,6 +35,7 @@
   __traceiter_android_vh_do_send_sig_info
   __traceiter_android_vh_dup_task_struct
   __traceiter_android_vh_free_task
+  __traceiter_android_vh_mmap_region
   __traceiter_android_vh_mutex_unlock_slowpath
   __traceiter_android_vh_mutex_wait_finish
   __traceiter_android_vh_mutex_wait_start
@@ -46,7 +47,10 @@
   __traceiter_android_vh_rwsem_write_wait_finish
   __traceiter_android_vh_rwsem_write_wait_start
   __traceiter_android_vh_scheduler_tick
+  __traceiter_android_vh_shrink_node_memcgs
+  __traceiter_android_vh_swap_writepage
   __traceiter_android_vh_sync_txn_recvd
+  __traceiter_android_vh_try_to_unmap_one
   __traceiter_cpu_frequency_limits
   __traceiter_sched_switch
   __traceiter_workqueue_execute_end
@@ -70,6 +74,7 @@
   __tracepoint_android_vh_do_send_sig_info
   __tracepoint_android_vh_dup_task_struct
   __tracepoint_android_vh_free_task
+  __tracepoint_android_vh_mmap_region
   __tracepoint_android_vh_mutex_unlock_slowpath
   __tracepoint_android_vh_mutex_wait_finish
   __tracepoint_android_vh_mutex_wait_start
@@ -81,7 +86,10 @@
   __tracepoint_android_vh_rwsem_write_wait_finish
   __tracepoint_android_vh_rwsem_write_wait_start
   __tracepoint_android_vh_scheduler_tick
+  __tracepoint_android_vh_shrink_node_memcgs
+  __tracepoint_android_vh_swap_writepage
   __tracepoint_android_vh_sync_txn_recvd
+  __tracepoint_android_vh_try_to_unmap_one
   __tracepoint_cpu_frequency_limits
   __tracepoint_sched_switch
   __tracepoint_workqueue_execute_end
