@@ -3539,6 +3539,11 @@ pointer_reference {
   pointee_type_id: 0x1a637dbb
 }
 pointer_reference {
+  id: 0x0c09b927
+  kind: POINTER
+  pointee_type_id: 0x1a660201
+}
+pointer_reference {
   id: 0x0c0aa344
   kind: POINTER
   pointee_type_id: 0x1a6a6b8f
@@ -16779,6 +16784,11 @@ pointer_reference {
   pointee_type_id: 0x987d8bf3
 }
 pointer_reference {
+  id: 0x2c8f9b7d
+  kind: POINTER
+  pointee_type_id: 0x987e8b69
+}
+pointer_reference {
   id: 0x2c8fa3e9
   kind: POINTER
   pointee_type_id: 0x987e6939
@@ -17027,6 +17037,11 @@ pointer_reference {
   id: 0x2cb1f121
   kind: POINTER
   pointee_type_id: 0x9887221a
+}
+pointer_reference {
+  id: 0x2cb1f201
+  kind: POINTER
+  pointee_type_id: 0x98872e98
 }
 pointer_reference {
   id: 0x2cb1fd82
@@ -50766,10 +50781,10 @@ member {
   offset: 5568
 }
 member {
-  id: 0x79966b60
+  id: 0x79966d85
   name: "alloc_domain"
   type_id: 0x2cb62240
-  offset: 384
+  offset: 448
 }
 member {
   id: 0x7c6b58f8
@@ -53608,6 +53623,12 @@ member {
   id: 0xce6fa034
   name: "attach_dev"
   type_id: 0x2f1b138b
+}
+member {
+  id: 0xfc7ee0c3
+  name: "attach_dev_nested"
+  type_id: 0x2cb1f201
+  offset: 192
 }
 member {
   id: 0x49eed1da
@@ -74387,10 +74408,10 @@ member {
   offset: 448
 }
 member {
-  id: 0xfaf31446
+  id: 0xfaf3132a
   name: "dabt_handler"
   type_id: 0x354ad02c
-  offset: 256
+  offset: 320
 }
 member {
   id: 0x890ecfcf
@@ -78874,10 +78895,10 @@ member {
   offset: 10368
 }
 member {
-  id: 0xa330df59
+  id: 0xa330d73b
   name: "detach_dev"
   type_id: 0x2cb1f121
-  offset: 192
+  offset: 256
 }
 member {
   id: 0xc045a990
@@ -79579,10 +79600,10 @@ member {
   offset: 64
 }
 member {
-  id: 0x2ea02f1f
+  id: 0x2ea02d4a
   name: "dev_block_dma"
   type_id: 0x2c57ba90
-  offset: 896
+  offset: 960
 }
 member {
   id: 0xd6e696a7
@@ -99159,10 +99180,10 @@ member {
   offset: 640
 }
 member {
-  id: 0x09baedf9
+  id: 0x09bae196
   name: "free_domain"
   type_id: 0x0c357df7
-  offset: 448
+  offset: 512
 }
 member {
   id: 0x2d72891c
@@ -102286,10 +102307,10 @@ member {
   offset: 704
 }
 member {
-  id: 0xcd597482
+  id: 0xcd597b6e
   name: "get_iommu_token_by_id"
   type_id: 0x2cb67dbb
-  offset: 960
+  offset: 1024
 }
 member {
   id: 0xb94b3964
@@ -108057,10 +108078,10 @@ member {
   offset: 64
 }
 member {
-  id: 0x98b50aed
+  id: 0x98b50cb8
   name: "host_stage2_idmap_complete"
   type_id: 0x0861d83c
-  offset: 320
+  offset: 384
 }
 member {
   id: 0x6ff079ad
@@ -117439,6 +117460,12 @@ member {
   offset: 640
 }
 member {
+  id: 0x98e97b93
+  name: "iotlb_inv_nested_domain"
+  type_id: 0x0c09b927
+  offset: 1088
+}
+member {
   id: 0x04877fe9
   name: "iotlb_iov"
   type_id: 0x3f60fa99
@@ -117451,10 +117478,10 @@ member {
   offset: 704
 }
 member {
-  id: 0x9f6582b2
+  id: 0x9f658821
   name: "iotlb_sync"
   type_id: 0x0c3fcc07
-  offset: 704
+  offset: 768
 }
 member {
   id: 0x9f65eb07
@@ -117469,10 +117496,10 @@ member {
   offset: 320
 }
 member {
-  id: 0xc185c385
+  id: 0xc185ca99
   name: "iotlb_sync_map"
   type_id: 0x2f4f676a
-  offset: 832
+  offset: 896
 }
 member {
   id: 0x61cf630a
@@ -117554,10 +117581,10 @@ member {
   offset: 512
 }
 member {
-  id: 0x80f5ad2f
+  id: 0x80f5a96b
   name: "iova_to_phys"
   type_id: 0x084a0a2a
-  offset: 640
+  offset: 704
 }
 member {
   id: 0x80f69140
@@ -129899,10 +129926,10 @@ member {
   offset: 128
 }
 member {
-  id: 0xa60fcbe7
+  id: 0xa60fc98d
   name: "map_pages"
   type_id: 0x2f4b0236
-  offset: 512
+  offset: 576
 }
 member {
   id: 0xa61995ce
@@ -142558,6 +142585,12 @@ member {
   name: "nest"
   type_id: 0x4585663f
   offset: 384
+}
+member {
+  id: 0x42fb5d51
+  name: "nested_cfg_sync"
+  type_id: 0x2c8f9b7d
+  offset: 1152
 }
 member {
   id: 0x94304f15
@@ -186733,10 +186766,10 @@ member {
   offset: 10176
 }
 member {
-  id: 0xc942307d
+  id: 0xc9423b69
   name: "set_identity"
   type_id: 0x2c8834f9
-  offset: 768
+  offset: 832
 }
 member {
   id: 0x9bb7ecf7
@@ -212622,10 +212655,10 @@ member {
   offset: 64
 }
 member {
-  id: 0xd12a0b82
+  id: 0xd12a0489
   name: "unmap_pages"
   type_id: 0x2de0596b
-  offset: 576
+  offset: 640
 }
 member {
   id: 0xd12a6023
@@ -258421,23 +258454,26 @@ struct_union {
   kind: STRUCT
   name: "kvm_iommu_ops"
   definition {
-    bytesize: 128
+    bytesize: 152
     member_id: 0x1ac65d40
     member_id: 0x9d362713
     member_id: 0xce6c0318
-    member_id: 0xa330df59
-    member_id: 0xfaf31446
-    member_id: 0x98b50aed
-    member_id: 0x79966b60
-    member_id: 0x09baedf9
-    member_id: 0xa60fcbe7
-    member_id: 0xd12a0b82
-    member_id: 0x80f5ad2f
-    member_id: 0x9f6582b2
-    member_id: 0xc942307d
-    member_id: 0xc185c385
-    member_id: 0x2ea02f1f
-    member_id: 0xcd597482
+    member_id: 0xfc7ee0c3
+    member_id: 0xa330d73b
+    member_id: 0xfaf3132a
+    member_id: 0x98b50cb8
+    member_id: 0x79966d85
+    member_id: 0x09bae196
+    member_id: 0xa60fc98d
+    member_id: 0xd12a0489
+    member_id: 0x80f5a96b
+    member_id: 0x9f658821
+    member_id: 0xc9423b69
+    member_id: 0xc185ca99
+    member_id: 0x2ea02d4a
+    member_id: 0xcd597b6e
+    member_id: 0x98e97b93
+    member_id: 0x42fb5d51
   }
 }
 struct_union {
@@ -319172,6 +319208,15 @@ function {
   parameter_id: 0x0258f96e
 }
 function {
+  id: 0x1a660201
+  return_type_id: 0x48b5725f
+  parameter_id: 0x28350343
+  parameter_id: 0x33756485
+  parameter_id: 0xf435685e
+  parameter_id: 0xf435685e
+  parameter_id: 0x6d7f5ff6
+}
+function {
   id: 0x1a6dbbc9
   return_type_id: 0x48b5725f
   parameter_id: 0x2936263d
@@ -339993,6 +340038,13 @@ function {
   parameter_id: 0x17fa285b
 }
 function {
+  id: 0x987e8b69
+  return_type_id: 0x6720d32f
+  parameter_id: 0x16864222
+  parameter_id: 0x18bd6530
+  parameter_id: 0xf435685e
+}
+function {
   id: 0x9882219f
   return_type_id: 0x6720d32f
   parameter_id: 0x106029c6
@@ -340056,6 +340108,17 @@ function {
   parameter_id: 0x28350343
   parameter_id: 0x16864222
   parameter_id: 0xc9082b19
+}
+function {
+  id: 0x98872e98
+  return_type_id: 0x6720d32f
+  parameter_id: 0x16864222
+  parameter_id: 0x28350343
+  parameter_id: 0x16864222
+  parameter_id: 0xc9082b19
+  parameter_id: 0x33756485
+  parameter_id: 0x18bd6530
+  parameter_id: 0xf435685e
 }
 function {
   id: 0x988786ac
