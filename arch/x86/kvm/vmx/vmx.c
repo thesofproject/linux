@@ -8514,7 +8514,6 @@ int vmx_vm_init(struct kvm *kvm)
 	return 0;
 }
 
-#ifndef __PKVM_HYP__
 static inline bool vmx_ignore_guest_pat(struct kvm *kvm)
 {
 	/*
@@ -8541,7 +8540,6 @@ u8 vmx_get_mt_mask(struct kvm_vcpu *vcpu, gfn_t gfn, bool is_mmio)
 
 	return (MTRR_TYPE_WRBACK << VMX_EPT_MT_EPTE_SHIFT);
 }
-#endif /* !__PKVM_HYP__ */
 
 static void vmcs_set_secondary_exec_control(struct vcpu_vmx *vmx, u32 new_ctl)
 {
