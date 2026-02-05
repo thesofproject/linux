@@ -22,6 +22,8 @@ struct pkvm_page {
 
 	/* Tracks how many times the page is shared with pKVM. */
 	u16 host_share_hyp_count;
+	/* Tracks how many times the page is shared with a guest VM. */
+	u16 host_share_guest_count;
 };
 
 /*

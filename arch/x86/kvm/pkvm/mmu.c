@@ -897,6 +897,7 @@ int pkvm_host_share_hyp(unsigned long phys, unsigned long size)
 		switch (page->host_state) {
 		case PKVM_PAGE_OWNED:
 			BUG_ON(page->host_share_hyp_count);
+			BUG_ON(page->host_share_guest_count);
 			continue;
 		case PKVM_PAGE_SHARED_OWNED:
 			if (page->host_share_hyp_count == U16_MAX) {
@@ -908,8 +909,10 @@ int pkvm_host_share_hyp(unsigned long phys, unsigned long size)
 			 * Allow sharing an already shared page as long as it is
 			 * shared with the hypervisor, not with a guest.
 			 */
-			if (page->host_share_hyp_count)
+			if (page->host_share_hyp_count) {
+				BUG_ON(page->host_share_guest_count);
 				continue;
+			}
 
 			fallthrough;
 		default:
@@ -1037,6 +1040,90 @@ int pkvm_host_donate_guest(struct kvm_vcpu *vcpu, unsigned long gpa,
 	BUG_ON(ret);
 
 	set_host_mem_pgstate(hpa, size, PKVM_PAGE_NONE);
+
+	ret = pkvm_pgtable_map(&pkvm_vm->mmu, gpa, hpa, size, prot,
+			       &vcpu->arch.pkvm.guest_mmu_memcache);
+unlock:
+	pkvm_guest_mmu_unlock(pkvm_vm);
+	pkvm_host_mmu_unlock();
+
+	return ret;
+}
+
+/**
+ * pkvm_host_share_guest() - Share host pages with a guest.
+ * @vcpu:	Guest's vCPU in whose context the sharing is requested.
+ * @gpa:	Guest physical address of the memory region to share.
+ * @hpa:	Host physical address of the memory region to share.
+ * @size:	Size of the memory region to share.
+ * @writable:	If true, share with RWX permissions; if false, with RX.
+ *
+ * Maps the GPA range [@gpa, @gpa + @size) to the physical memory range
+ * [@hpa, @hpa + @size) in the guest mmu and changes the ownership state of
+ * the pages in this range from exclusively owned by the host to shared with the
+ * guest. The host_share_guest_count counters of the memory pages are
+ * incremented. If a memory page is already shared with a guest, page state will
+ * not be changed but only the counter will be incremented. The guest must be a
+ * non-protected VM. The @gpa, @hpa and @size are required to be PAGE_SIZE
+ * aligned (@size is also required to be non-zero).
+ *
+ * Returns: 0 on success, or a negative error code on failure.
+ */
+int pkvm_host_share_guest(struct kvm_vcpu *vcpu, unsigned long gpa,
+			  unsigned long hpa, unsigned long size,
+			  bool writable)
+{
+	u64 prot = guest_mmu_pte_prot(vcpu, gpa, writable,
+				      PKVM_PAGE_SHARED_BORROWED);
+	struct pkvm_vm *pkvm_vm = to_pkvm_vcpu(vcpu)->pkvm_vm;
+	int ret;
+
+	if (!PAGE_ALIGNED(gpa) || !PAGE_ALIGNED(hpa) ||
+	    !PAGE_ALIGNED(size) || size == 0 ||
+	    !is_memory_range(hpa, size))
+		return -EINVAL;
+
+	if (WARN_ON_ONCE(pkvm_is_protected_vcpu(vcpu)))
+		return -EPERM;
+
+	pkvm_host_mmu_lock();
+	pkvm_guest_mmu_lock(pkvm_vm);
+
+	ret = check_page_state(&pkvm_vm->mmu, gpa, size, PKVM_PAGE_NONE);
+	if (ret)
+		goto unlock;
+
+	for_each_pkvm_page(page, hpa, size) {
+		switch (page->host_state) {
+		case PKVM_PAGE_OWNED:
+			BUG_ON(page->host_share_guest_count);
+			BUG_ON(page->host_share_hyp_count);
+			continue;
+		case PKVM_PAGE_SHARED_OWNED:
+			if (page->host_share_guest_count == U16_MAX) {
+				ret = -ENOSPC;
+				goto unlock;
+			}
+			/*
+			 * Allow sharing an already shared page as long as it is
+			 * shared with a guest, not with the hypervisor.
+			 */
+			if (page->host_share_guest_count) {
+				BUG_ON(page->host_share_hyp_count);
+				continue;
+			}
+
+			fallthrough;
+		default:
+			ret = -EPERM;
+			goto unlock;
+		}
+	}
+
+	for_each_pkvm_page(page, hpa, size) {
+		page->host_state = PKVM_PAGE_SHARED_OWNED;
+		page->host_share_guest_count++;
+	}
 
 	ret = pkvm_pgtable_map(&pkvm_vm->mmu, gpa, hpa, size, prot,
 			       &vcpu->arch.pkvm.guest_mmu_memcache);
