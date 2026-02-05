@@ -401,6 +401,30 @@ static int unmap_walker(struct pkvm_pgtable_visit_ctx *ctx, unsigned long walk_f
 	return 0;
 }
 
+static int free_walker(struct pkvm_pgtable_visit_ctx *ctx, unsigned long walk_flags,
+		       void *const arg)
+{
+	const struct pkvm_pgtable_mm_ops *mm_ops = ctx->pgt->mm_ops;
+	const struct pkvm_pgtable_ops *pgt_ops = ctx->pgt->pgt_ops;
+	void *child, *ptep = ctx->ptep;
+
+	if (!pgt_ops->pte_present(ptep) && !pgt_ops->pte_annotated(ptep))
+		return 0;
+
+	mm_ops->put_page(ptep);
+
+	if (!pgt_ops->pte_is_leaf(ptep, ctx->level)) {
+		BUG_ON(!pgt_ops->pte_present(ptep));
+
+		child = __pkvm_va(pgt_ops->pte_to_phys(ptep));
+		BUG_ON(mm_ops->page_count(child) != 1);
+
+		mm_ops->put_page(child);
+	}
+
+	return 0;
+}
+
 struct pgt_lookup_data {
 	unsigned long vaddr;
 	unsigned long phys;
@@ -766,4 +790,25 @@ void pkvm_pgtable_lookup(struct pkvm_pgtable *pgt, unsigned long vaddr,
 		*prot = data.prot;
 	if (level)
 		*level = data.level;
+}
+
+/**
+ * pkvm_pgtable_destroy() - Destroy an unused page table.
+ * @pgt:	The page table to be destroyed.
+ *
+ * Frees pages allocated for the given page table. Does not clear PTEs
+ * and does not flush TLB, assuming that the page table is no longer used
+ * by any hardware walkers.
+ */
+void pkvm_pgtable_destroy(struct pkvm_pgtable *pgt)
+{
+	struct pkvm_pgtable_walker walker = {
+		.cb = free_walker,
+		.arg = NULL,
+		.walk_flags = PKVM_PGTABLE_WALK_LEAF | PKVM_PGTABLE_WALK_TABLE_POST,
+	};
+
+	WARN_ON(pkvm_pgtable_walk(pgt, 0, pkvm_pgtable_max_size(pgt), &walker));
+
+	pgt->mm_ops->put_page(__pkvm_va(pgt->root_pa));
 }
