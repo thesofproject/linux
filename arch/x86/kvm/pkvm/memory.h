@@ -7,6 +7,7 @@
 #include <linux/kvm_types.h>
 #include <linux/mm.h>
 #include <vdso/limits.h>
+#include <asm/kvm_pkvm.h>
 #include <asm/page.h>
 #include "mem_protect.h"
 
@@ -87,6 +88,18 @@ static inline void pkvm_set_page_refcounted(struct pkvm_page *p)
 	p->refcount = 1;
 }
 
+static inline bool is_pvmfw(unsigned long phys)
+{
+	return pvmfw_present && (phys >= pvmfw_base) &&
+				(phys < pvmfw_base + pvmfw_size);
+}
+
+static inline bool overlaps_pvmfw(unsigned long phys, unsigned long size)
+{
+	return pvmfw_present && (phys < pvmfw_base + pvmfw_size) &&
+				(phys + size > pvmfw_base);
+}
+
 bool pkvm_find_addr_range(unsigned long phys, struct range *range);
 
 static inline bool is_memory_range(unsigned long phys, unsigned long size)
@@ -114,6 +127,13 @@ static inline bool is_mmio_range(unsigned long phys, unsigned long size)
 		.end = PAGE_ALIGN(phys + size) - 1,
 	};
 	struct range range;
+
+	/*
+	 * pvmfw is reserved in e820 so it is not "normal" memory.
+	 * However it shouldn't be treated as MMIO either.
+	 */
+	if (overlaps_pvmfw(phys, size))
+		return false;
 
 	if (pkvm_find_addr_range(phys, &range))
 		return false;
