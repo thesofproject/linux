@@ -2160,6 +2160,9 @@ extern struct kvm_x86_ops kvm_x86_ops;
 extern bool __read_mostly enable_pkvm;	/* kernel command-line flag */
 extern phys_addr_t pkvm_mem_base;
 extern phys_addr_t pkvm_mem_size;
+extern bool pvmfw_present;
+extern phys_addr_t pvmfw_base;
+extern phys_addr_t pvmfw_size;
 void __init pkvm_reserve(void);
 void pkvm_init_debugfs(void);
 void pkvm_create_vm_debugfs(struct kvm *kvm);

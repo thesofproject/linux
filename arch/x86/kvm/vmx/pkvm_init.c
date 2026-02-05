@@ -4,6 +4,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/extable.h>
+#include <asm/e820/api.h>
 #include <asm/pkvm_image.h>
 #include "pkvm_constants.h"
 #include "vmx.h"
@@ -22,6 +23,31 @@ static int __init early_pkvm_relax_cpu_bugs_parse_cmdline(char *buf)
 	return kstrtobool(buf, &relax_cpu_bugs);
 }
 early_param("kvm-intel.pkvm_relax_cpu_bugs", early_pkvm_relax_cpu_bugs_parse_cmdline);
+
+static int __init early_pvmfw_parse_cmdline(char *buf)
+{
+	u64 start, size;
+	char *p;
+
+	size = memparse(buf, &p);
+	if (p == buf || *p != '@')
+		return -EINVAL;
+
+	buf = p + 1;
+	start = memparse(buf, &p);
+	if (p == buf)
+		return -EINVAL;
+
+	/* clflush_cache_range() takes size as int */
+	if (size > UINT_MAX)
+		return -EINVAL;
+
+	pvmfw_present = true;
+	pvmfw_base = start;
+	pvmfw_size = size;
+	return 0;
+}
+early_param("pvmfw", early_pvmfw_parse_cmdline);
 
 static DEFINE_PER_CPU(struct vmcs *, pkvm_vmxarea);
 static unsigned long data_pages;
@@ -1189,13 +1215,70 @@ static __init int pkvm_hyp_init(void)
 	return ret ? ret : init_ret;
 }
 
+static int __init pkvm_firmware_rmem_init(void)
+{
+	phys_addr_t start, end, size;
+
+	if (!pvmfw_present)
+		return 0;
+
+	start = pvmfw_base;
+	end = pvmfw_base + pvmfw_size - 1;
+	size = pvmfw_size;
+
+	if (!e820__mapped_all(start, end, E820_TYPE_RESERVED)) {
+		pr_err("pvmfw memory [0x%llx-0x%llx] is not reserved in e820\n",
+		       start, end);
+		pvmfw_present = false;
+		return -EINVAL;
+	}
+
+	if (!PAGE_ALIGNED(start) || !PAGE_ALIGNED(size)) {
+		pr_err("pvmfw memory [0x%llx-0x%llx] is not page-aligned\n",
+		       start, end);
+		pvmfw_present = false;
+		return -EINVAL;
+	}
+
+	pkvm_sym(pvmfw_present) = true;
+	pkvm_sym(pvmfw_base) = start;
+	pkvm_sym(pvmfw_size) = size;
+	return 0;
+}
+
+static int __init pkvm_firmware_rmem_clear(void)
+{
+	void *addr;
+	phys_addr_t size;
+
+	if (!pvmfw_present)
+		return 0;
+
+	size = pvmfw_size;
+	addr = memremap(pvmfw_base, size, MEMREMAP_WB);
+	if (!addr)
+		return -EINVAL;
+
+	memset(addr, 0, size);
+	clflush_cache_range(addr, size);
+	memunmap(addr);
+
+	pr_info("Cleared pvmfw memory\n");
+	return 0;
+}
+
+
 int __init vmx_pkvm_init(void)
 {
 	struct pkvm_hyp *pkvm;
 	int ret, cpu;
 
-	if (!enable_pkvm)
+	pkvm_firmware_rmem_init();
+
+	if (!enable_pkvm) {
+		pkvm_firmware_rmem_clear();
 		return 0;
+	}
 
 	if (!pkvm_mem_base) {
 		pr_err("required memory not reserved\n");
@@ -1275,6 +1358,14 @@ int __init vmx_pkvm_init(void)
 repriv_cpus:
 	pkvm_host_reprivilege_cpus();
 out:
+	/*
+	 * TODO: clear pvmfw before reprivileging, not after, to ensure clearing
+	 * it even if the system gets stuck at reprivileging due to possible bugs
+	 * in the reprivileging code. To be able to do that, need to let the
+	 * hypervisor restore the host's access to the pvmfw memory, so that we
+	 * can clear it while we are still in VMX non-root.
+	 */
+	pkvm_firmware_rmem_clear();
 	/*
 	 * As the reserved memory at the pkvm_mem_base will not be
 	 * released back to the host, no need to de-initialize or
