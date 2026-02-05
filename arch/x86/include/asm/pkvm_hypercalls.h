@@ -79,6 +79,9 @@ PKVM_HC_OUT(vcpu_run)
 PKVM_HC(complete_emulated_msr)
 PKVM_HC(has_wbinvd_exit)
 
+/* KVM MMU hypercalls */
+PKVM_HC(vm_mmu_map)
+
 #undef PKVM_HC
 #undef PKVM_HC_OUT
 #undef PKVM_HC_IN
