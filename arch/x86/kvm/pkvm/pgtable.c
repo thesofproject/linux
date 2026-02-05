@@ -7,9 +7,10 @@
 
 #define PGTABLE_WALK_DONE      1
 
-static void *pgtable_alloc_page(const struct pkvm_pgtable_mm_ops *mm_ops)
+static void *pgtable_alloc_page(const struct pkvm_pgtable_mm_ops *mm_ops,
+				struct pkvm_memcache *mc)
 {
-	return mm_ops->zalloc_page(NULL);
+	return mm_ops->zalloc_page(mc);
 }
 
 static bool leaf_in_addr_range(unsigned long leaf_size,
@@ -29,6 +30,7 @@ struct pgt_map_data {
 	unsigned long phys;
 	u64 prot;
 	u64 annotation;
+	struct pkvm_memcache *memcache;
 };
 
 static bool leaf_mapping_changed(struct pkvm_pgtable_visit_ctx *ctx,
@@ -224,7 +226,7 @@ static int __map_walker(struct pkvm_pgtable_visit_ctx *ctx,
 	 * The mapping needs be done at the next level or even smaller.
 	 * Allocate a new page as the next level page table page.
 	 */
-	page = pgtable_alloc_page(mm_ops);
+	page = pgtable_alloc_page(mm_ops, data->memcache);
 	if (!page)
 		return -ENOMEM;
 
@@ -386,7 +388,7 @@ static int unmap_walker(struct pkvm_pgtable_visit_ctx *ctx, unsigned long walk_f
 	if (pgt_ops->pte_huge(ptep) || pgt_ops->pte_annotated(ptep)) {
 		void *page;
 
-		page = pgtable_alloc_page(mm_ops);
+		page = pgtable_alloc_page(mm_ops, NULL);
 		if (!page)
 			return -ENOMEM;
 
@@ -557,7 +559,7 @@ int pkvm_pgtable_init(struct pkvm_pgtable *pgt,
 	if (!pgt || !mm_ops || !pgt_ops)
 		return -EINVAL;
 
-	root = pgtable_alloc_page(mm_ops);
+	root = pgtable_alloc_page(mm_ops, NULL);
 	if (!root)
 		return -ENOMEM;
 
@@ -637,6 +639,7 @@ int pkvm_pgtable_walk(struct pkvm_pgtable *pgt, unsigned long vaddr,
  * @phys:	The physical address to map.
  * @size:	The memory size to map.
  * @prot:	The property bits to create the mapping.
+ * @mc:		Optional memcache for allocating page table pages.
  *
  * The mapped range is the minimum PAGE_SIZE-aligned range covering
  * [@vaddr, @vaddr + @size), and @phys is aligned down to the PAGE_SIZE.
@@ -651,11 +654,13 @@ int pkvm_pgtable_walk(struct pkvm_pgtable *pgt, unsigned long vaddr,
  * Return: 0 on success, negative error code on failure.
  */
 int pkvm_pgtable_map(struct pkvm_pgtable *pgt, unsigned long vaddr,
-		     unsigned long phys, unsigned long size, u64 prot)
+		     unsigned long phys, unsigned long size, u64 prot,
+		     struct pkvm_memcache *mc)
 {
 	struct pgt_map_data data = {
 		.prot = prot,
 		.annotation = 0,
+		.memcache = mc,
 	};
 	struct pkvm_pgtable_walker walker = {
 		.cb = map_walker,

@@ -138,7 +138,8 @@ int pkvm_pgtable_init(struct pkvm_pgtable *pgt,
 int pkvm_pgtable_walk(struct pkvm_pgtable *pgt, unsigned long vaddr,
 		      unsigned long size, struct pkvm_pgtable_walker *walker);
 int pkvm_pgtable_map(struct pkvm_pgtable *pgt, unsigned long vaddr,
-		     unsigned long phys, unsigned long size, u64 prot);
+		     unsigned long phys, unsigned long size, u64 prot,
+		     struct pkvm_memcache *mc);
 int pkvm_pgtable_unmap(struct pkvm_pgtable *pgt, unsigned long vaddr,
 		       unsigned long phys, unsigned long size);
 int pkvm_pgtable_set_owner(struct pkvm_pgtable *pgt, unsigned long vaddr,
