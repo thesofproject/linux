@@ -579,6 +579,31 @@ void pkvm_guest_mmu_destroy(struct pkvm_vm *pkvm_vm)
 	drain_pool(&pkvm_vm->mmu_pool, &shared_pkvm->guest_mmu_teardown_mc);
 }
 
+void pkvm_guest_mmu_free_memcache(struct pkvm_vcpu *pkvm_vcpu)
+{
+	struct kvm_pkvm_vm *shared_pkvm = &pkvm_vcpu->pkvm_vm->shared_kvm->arch.pkvm;
+	struct pkvm_memcache *vcpu_mc = &pkvm_vcpu->vcpu.arch.pkvm.guest_mmu_memcache;
+	void *addr;
+
+	while (vcpu_mc->count) {
+		/* Drain hyp owned memcache and push pages to the teardown memcache */
+		addr = pop_pkvm_memcache_page(vcpu_mc, pkvm_phys_to_virt);
+
+		/*
+		 * Since pages comes from non-used memcache, there is no need to
+		 * zero them before pushing to teardown_mc (which host can
+		 * access after donating them back to the host in next step).
+		 *
+		 * Assume that the host frees all vCPUs sequentially, so no need
+		 * to take a lock to protect the host's guest_mmu_teardown_mc from
+		 * concurrent access.
+		 */
+		push_pkvm_memcache_page(&shared_pkvm->guest_mmu_teardown_mc, addr,
+					pkvm_virt_to_host_gpa);
+		pkvm_hyp_donate_host(__pkvm_pa(addr), PAGE_SIZE, false);
+	}
+}
+
 /**
  * pkvm_host_donate_hyp() - Donate memory pages from host to hypervisor.
  * @phys:	Physical address of the memory region to donate.
