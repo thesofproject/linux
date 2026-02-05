@@ -259,6 +259,22 @@ static int check_page_owner(struct pkvm_pgtable *pgt, unsigned long vaddr,
 	return pkvm_pgtable_walk(pgt, vaddr, size, &walker);
 }
 
+static int check_page_state(struct pkvm_pgtable *pgt, unsigned long vaddr,
+			    unsigned long size, const enum pkvm_page_state expected_state)
+{
+	struct page_ownership expected_ownership = {
+		.owner = NULL,
+		.state = &expected_state,
+	};
+	struct pkvm_pgtable_walker walker = {
+		.cb = check_page_ownership_walker,
+		.arg = &expected_ownership,
+		.walk_flags = PKVM_PGTABLE_WALK_LEAF,
+	};
+
+	return pkvm_pgtable_walk(pgt, vaddr, size, &walker);
+}
+
 static int check_page_owner_and_state(struct pkvm_pgtable *pgt, unsigned long vaddr,
 				      unsigned long size, const enum pkvm_owner_id expected_owner,
 				      const enum pkvm_page_state expected_state)
@@ -394,6 +410,33 @@ static const struct pkvm_pgtable_mm_ops guest_mmu_mm_ops = {
 	.put_page = guest_mmu_put_page,
 	.page_count = guest_mmu_page_count,
 };
+
+static void pkvm_guest_mmu_lock(struct pkvm_vm *vm)
+{
+	pkvm_spin_lock(&vm->mmu_lock);
+	current_vm = vm;
+}
+
+static void pkvm_guest_mmu_unlock(struct pkvm_vm *vm)
+{
+	current_vm = NULL;
+	pkvm_spin_unlock(&vm->mmu_lock);
+}
+
+static u64 guest_mmu_pte_prot(struct kvm_vcpu *vcpu, unsigned long gpa,
+			      bool writable, enum pkvm_page_state state)
+{
+	struct pkvm_vm *pkvm_vm = to_pkvm_vcpu(vcpu)->pkvm_vm;
+	u64 prot;
+
+	prot = pkvm_vm->mmu.pgt_ops->calc_pte_perm(true, writable, true);
+	prot |= pkvm_vm->mmu.pgt_ops->pte_mk_pgstate(state);
+
+	/* memory type bits */
+	prot |= kvm_x86_call(get_mt_mask)(vcpu, gpa >> PAGE_SHIFT, false);
+
+	return prot;
+}
 
 static void drain_pool(struct pkvm_pool *pool, struct pkvm_memcache *host_mc)
 {
@@ -939,4 +982,67 @@ out:
 	 * hypervisor. So any error here means a pKVM bug.
 	 */
 	BUG_ON(ret);
+}
+
+/**
+ * pkvm_host_donate_guest() - Donate memory pages from host to guest.
+ * @vcpu:	Guest's vCPU in whose context the donation is requested.
+ * @gpa:	Guest physical address of the memory region to donate.
+ * @hpa:	Host physical address of the memory region to donate.
+ * @size:	Size of the memory region to donate.
+ *
+ * Maps the GPA range [@gpa, @gpa + @size) to the physical memory range
+ * [@hpa, @hpa + @size) in the guest mmu and transfers ownership of the pages in
+ * this range from the host to the guest, thus protecting them from accessing by
+ * the host. The guest must be a protected VM. The @gpa, @hpa and @size are
+ * required to be PAGE_SIZE aligned (@size is also required to be non-zero).
+ *
+ * The donated memory pages are annotated with PKVM_ID_GUEST owner id in the
+ * host mmu, and page states are updated to PKVM_PAGE_NONE, to indicate the
+ * ownership has been transferred to a guest.
+ *
+ * Returns: 0 on success, or a negative error code on failure.
+ */
+int pkvm_host_donate_guest(struct kvm_vcpu *vcpu, unsigned long gpa,
+			   unsigned long hpa, unsigned long size)
+{
+	u64 prot = guest_mmu_pte_prot(vcpu, gpa, true, PKVM_PAGE_OWNED);
+	struct pkvm_vm *pkvm_vm = to_pkvm_vcpu(vcpu)->pkvm_vm;
+	int ret;
+
+	if (!PAGE_ALIGNED(gpa) || !PAGE_ALIGNED(hpa) ||
+	    !PAGE_ALIGNED(size) || size == 0)
+		return -EINVAL;
+
+	if (WARN_ON_ONCE(!pkvm_is_protected_vcpu(vcpu)))
+		return -EPERM;
+
+	pkvm_host_mmu_lock();
+	pkvm_guest_mmu_lock(pkvm_vm);
+
+	ret = check_host_mem_pgstate(hpa, size, PKVM_PAGE_OWNED);
+	if (ret)
+		goto unlock;
+
+	ret = check_page_state(&pkvm_vm->mmu, gpa, size, PKVM_PAGE_NONE);
+	if (ret)
+		goto unlock;
+
+	/* The vaddr == phys for the host MMU. */
+	ret = pkvm_pgtable_set_owner(&host_mmu, hpa, size, PKVM_ID_GUEST);
+	/*
+	 * pkvm_pgtable_set_owner() shouldn't fail here unless there is a bug.
+	 * See also comment in pkvm_host_donate_hyp().
+	 */
+	BUG_ON(ret);
+
+	set_host_mem_pgstate(hpa, size, PKVM_PAGE_NONE);
+
+	ret = pkvm_pgtable_map(&pkvm_vm->mmu, gpa, hpa, size, prot,
+			       &vcpu->arch.pkvm.guest_mmu_memcache);
+unlock:
+	pkvm_guest_mmu_unlock(pkvm_vm);
+	pkvm_host_mmu_unlock();
+
+	return ret;
 }
