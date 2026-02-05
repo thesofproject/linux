@@ -932,6 +932,9 @@ struct kvm_pkvm_vm {
 struct kvm_pkvm_vcpu {
 	int handle;
 	struct pkvm_memcache guest_mmu_memcache;
+
+	/* Used for passing additional parameters in requests from pKVM to host */
+	u64 req_param;
 };
 #endif /* CONFIG_PKVM_X86 */
 
