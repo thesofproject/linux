@@ -13,6 +13,9 @@ static struct pkvm_pool hyp_mmu_pool;
 static struct pkvm_pgtable host_mmu;
 pkvm_spinlock_t host_mmu_lock;
 
+static const struct pkvm_pgtable_ops *guest_mmu_pgt_ops;
+static struct pkvm_pgtable_cap guest_mmu_pgt_cap;
+
 static void *hyp_mmu_zalloc_page(void)
 {
 	return pkvm_alloc_pages(&hyp_mmu_pool, 0);
@@ -457,6 +460,13 @@ int pkvm_host_mmu_init(void *pool_base, unsigned long pool_pages, host_mmu_init_
 int pkvm_host_mmu_finalize(host_mmu_finalize_fn_t fn)
 {
 	return fn ? fn(&host_mmu) : 0;
+}
+
+void pkvm_guest_mmu_setup(const struct pkvm_pgtable_ops *pgt_ops,
+			  struct pkvm_pgtable_cap pgt_cap)
+{
+	guest_mmu_pgt_ops = pgt_ops;
+	guest_mmu_pgt_cap = pgt_cap;
 }
 
 /**

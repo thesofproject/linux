@@ -78,6 +78,7 @@
 #include "memory.h"
 #include "pkvm.h"
 #include "pkvm/trace.h"
+#include "vmx/ept.h"
 
 #undef module_param_named
 #define module_param_named(...)
@@ -9464,7 +9465,7 @@ __init int vmx_hardware_setup(void)
 
 	set_bit(0, vmx_vpid_bitmap); /* 0 is reserved for host */
 
-#ifndef __PKVM_HYP__ /* TODO: Coordinate with pvEPT */
+#ifndef __PKVM_HYP__
 	if (enable_ept)
 		kvm_mmu_set_ept_masks(enable_ept_ad_bits,
 				      cpu_has_vmx_ept_execute_only());
@@ -9479,6 +9480,8 @@ __init int vmx_hardware_setup(void)
 
 	kvm_configure_mmu(enable_ept, 0, vmx_get_max_ept_level(),
 			  ept_caps_to_lpage_level(vmx_capability.ept));
+#else
+	pkvm_guest_ept_setup();
 #endif
 
 	/*
