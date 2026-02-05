@@ -83,5 +83,8 @@ int pkvm_host_share_hyp(unsigned long phys, unsigned long size);
 void pkvm_host_unshare_hyp(unsigned long phys, unsigned long size);
 int pkvm_host_donate_guest(struct kvm_vcpu *vcpu, unsigned long gpa,
 			   unsigned long hpa, unsigned long size);
+int pkvm_host_share_guest(struct kvm_vcpu *vcpu, unsigned long gpa,
+			  unsigned long hpa, unsigned long size,
+			  bool writable);
 
 #endif /* __PKVM_X86_MEM_PROTECT_H */
