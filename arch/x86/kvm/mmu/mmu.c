@@ -6988,7 +6988,7 @@ int kvm_mmu_init_vm(struct kvm *kvm)
 
 	if (tdp_mmu_enabled) {
 		kvm_mmu_init_tdp_mmu(kvm);
-	} else {
+	} else if (!enable_pkvm) {
 		r = kvm_mmu_alloc_page_hash(kvm);
 		if (r)
 			return r;
@@ -7735,8 +7735,10 @@ int kvm_mmu_vendor_module_init(void)
 {
 	int ret = -ENOMEM;
 
-	if (enable_pkvm)
+	if (enable_pkvm) {
 		pkvm_mmu_vendor_module_init();
+		return 0;
+	}
 
 	/*
 	 * MMU roles use union aliasing which is, generally speaking, an
@@ -7789,6 +7791,9 @@ void kvm_mmu_destroy(struct kvm_vcpu *vcpu)
 
 void kvm_mmu_vendor_module_exit(void)
 {
+	if (enable_pkvm)
+		return;
+
 	mmu_destroy_caches();
 }
 
