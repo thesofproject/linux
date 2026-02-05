@@ -145,6 +145,7 @@ int pkvm_pgtable_set_owner(struct pkvm_pgtable *pgt, unsigned long vaddr,
 			   unsigned long size, enum pkvm_owner_id owner);
 void pkvm_pgtable_lookup(struct pkvm_pgtable *pgt, unsigned long vaddr,
 			 unsigned long *phys, u64 *prot, int *level);
+void pkvm_pgtable_destroy(struct pkvm_pgtable *pgt);
 
 /*
  * Return the max size of the virtual address space that can be
