@@ -929,6 +929,8 @@ struct kvm_pkvm_vm {
 	struct rb_root_cached mappings;
 
 	gpa_t pvmfw_load_addr;
+	bool finalized;
+	struct mutex finalized_lock;
 };
 
 struct kvm_pkvm_vcpu {

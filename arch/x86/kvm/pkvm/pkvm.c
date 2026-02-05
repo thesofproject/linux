@@ -163,6 +163,7 @@ static int pkvm_vm_init(phys_addr_t host_kvm_pa, phys_addr_t pkvm_vm_pa,
 		kvm->arch.disabled_quirks = (kvm_caps.inapplicable_quirks |
 					     pkvm_vm->shared_kvm->arch.disabled_quirks) &
 					    kvm_caps.supported_quirks;
+	kvm->arch.pkvm.pvmfw_load_addr = INVALID_GPA;
 
 	pkvm_spin_lock_init(&pkvm_vm->lock);
 
@@ -330,6 +331,52 @@ unshare_apic:
 	return ret;
 }
 
+static int pkvm_vm_finalize(int vm_handle)
+{
+	struct kvm *kvm, *shared_kvm;
+	struct pkvm_vm *pkvm_vm;
+	u64 pvmfw_load_addr;
+	int ret = 0;
+
+	pkvm_vm = pkvm_get_vm(vm_handle);
+	if (!pkvm_vm)
+		return -EINVAL;
+
+	kvm = &pkvm_vm->kvm;
+	shared_kvm = pkvm_vm->shared_kvm;
+
+	if (!pkvm_is_protected_vm(kvm)) {
+		ret = -EINVAL;
+		goto put_pkvm_vm;
+	}
+
+	pkvm_spin_lock(&pkvm_vm->lock);
+
+	if (kvm->arch.pkvm.finalized) {
+		ret = -EBUSY;
+		goto unlock;
+	}
+
+	pvmfw_load_addr = READ_ONCE(shared_kvm->arch.pkvm.pvmfw_load_addr);
+	if (pvmfw_load_addr != INVALID_GPA) {
+		if (!pvmfw_present || U64_MAX - pvmfw_load_addr < pvmfw_size) {
+			ret = -EINVAL;
+			goto unlock;
+		}
+		kvm->arch.pkvm.pvmfw_load_addr = pvmfw_load_addr;
+	}
+
+	kvm->arch.bsp_vcpu_id = shared_kvm->arch.bsp_vcpu_id;
+
+	kvm->arch.pkvm.finalized = true;
+	shared_kvm->arch.pkvm.finalized = true;
+unlock:
+	pkvm_spin_unlock(&pkvm_vm->lock);
+put_pkvm_vm:
+	pkvm_put_vm(pkvm_vm);
+	return ret;
+}
+
 static void unsetup_vcpu_lapic(struct kvm_vcpu *vcpu)
 {
 	struct kvm_lapic *apic = vcpu->arch.apic;
@@ -415,7 +462,6 @@ static int __vcpu_create(struct kvm *kvm, struct kvm_vcpu *vcpu, struct fpstate 
 	vcpu->arch.regs_avail = ~0;
 	vcpu->arch.regs_dirty = ~0;
 	vcpu->arch.pat = MSR_IA32_CR_PAT_DEFAULT;
-
 	if (!pkvm_is_protected_vcpu(vcpu)) {
 		vcpu->arch.mce_banks = kern_pkvm_va(pkvm_vcpu->shared_vcpu->arch.mce_banks);
 		vcpu->arch.mci_ctl2_banks =
@@ -1683,6 +1729,9 @@ void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 		ret = pkvm_vm_init(pkvm_host_gpa_to_phys(pkvm_hc_input1(vcpu)),
 				   pkvm_host_gpa_to_phys(pkvm_hc_input2(vcpu)),
 				   pkvm_host_gpa_to_phys(pkvm_hc_input3(vcpu)));
+		break;
+	case __pkvm__vm_finalize:
+		ret = pkvm_vm_finalize(pkvm_hc_input1(vcpu));
 		break;
 	case __pkvm__vm_destroy:
 		pkvm_vm_destroy(pkvm_hc_input1(vcpu), &out.vm_destroy.memcache);
