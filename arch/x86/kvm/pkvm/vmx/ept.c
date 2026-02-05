@@ -70,6 +70,18 @@ static void ept_pte_mkhuge(void *ptep)
 	*(u64 *)ptep |= PT_PAGE_SIZE_MASK;
 }
 
+static bool ept_pte_young(void *ptep)
+{
+	u64 val = READ_ONCE(*(u64 *)ptep);
+
+	return !!(val & VMX_EPT_ACCESS_BIT);
+}
+
+static void ept_pte_mkold(void *ptep)
+{
+	*(u64 *)ptep &= ~VMX_EPT_ACCESS_BIT;
+}
+
 static unsigned long ept_pte_to_phys(void *ptep)
 {
 	return *(u64 *)ptep & SPTE_BASE_ADDR_MASK;
@@ -231,6 +243,8 @@ static const struct pkvm_pgtable_ops guest_ept_pgt_ops = {
 	.pte_annotated = ept_pte_annotated,
 	.pte_huge = ept_pte_huge,
 	.pte_mkhuge = ept_pte_mkhuge,
+	.pte_young = ept_pte_young,
+	.pte_mkold = ept_pte_mkold,
 	.pte_to_phys = ept_pte_to_phys,
 	.pte_to_prot = ept_pte_to_prot,
 	.calc_pte_perm = ept_calc_pte_perm,
