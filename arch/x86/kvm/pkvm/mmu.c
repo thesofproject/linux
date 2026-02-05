@@ -20,7 +20,7 @@ static struct pkvm_pgtable_cap guest_mmu_pgt_cap;
 static DEFINE_PER_CPU(struct pkvm_vm *, __current_vm);
 #define current_vm (*this_cpu_ptr(&__current_vm))
 
-static void *hyp_mmu_zalloc_page(void)
+static void *hyp_mmu_zalloc_page(struct pkvm_memcache *mc)
 {
 	return pkvm_alloc_pages(&hyp_mmu_pool, 0);
 }
@@ -350,7 +350,7 @@ static int host_mmu_map(unsigned long phys, unsigned long size, bool mmio)
 				host_mmu_pte_prot(mmio));
 }
 
-static void *guest_mmu_zalloc_page(void)
+static void *guest_mmu_zalloc_page(struct pkvm_memcache *mc)
 {
 	return pkvm_alloc_pages(&current_vm->mmu_pool, 0);
 }
