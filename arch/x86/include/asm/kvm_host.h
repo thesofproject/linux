@@ -28,6 +28,7 @@
 #include <linux/sched/vhost_task.h>
 #include <linux/call_once.h>
 #include <linux/atomic.h>
+#include <linux/interval_tree_generic.h>
 
 #include <asm/apic.h>
 #include <asm/pvclock-abi.h>
@@ -886,11 +887,44 @@ static inline void init_pkvm_mmu_memcache(struct pkvm_memcache *mc)
 	mc->flags = PKVM_MC_ACCOUNT_PGTABLE_PAGES;
 }
 
+struct pkvm_mapping {
+	struct rb_node node;
+	gfn_t gfn;
+	kvm_pfn_t pfn;
+	gfn_t nr_pages;
+	gfn_t __subtree_last;	/* Internal member for interval tree */
+};
+
+void pkvm_mapping_insert(struct pkvm_mapping *node,
+			 struct rb_root_cached *root);
+void pkvm_mapping_remove(struct pkvm_mapping *node,
+			 struct rb_root_cached *root);
+struct pkvm_mapping *pkvm_mapping_iter_first(struct rb_root_cached *root,
+					     gfn_t start, gfn_t last);
+struct pkvm_mapping *pkvm_mapping_iter_next(struct pkvm_mapping *node,
+					    gfn_t start, gfn_t last);
+
+/*
+ * Iterates the interval tree safely, allowing removing __map node from it
+ * while iterating.
+ * Caution: __start and __end are evaluated multiple times.
+ */
+#define for_each_pkvm_mapping(__kvm, __start, __end, __map)					\
+	for (struct pkvm_mapping *__tmp = pkvm_mapping_iter_first(&(__kvm)->arch.pkvm.mappings,	\
+								  (__start), (__end) - 1);	\
+	     __tmp && ({									\
+				__map = __tmp;							\
+				__tmp = pkvm_mapping_iter_next(__map, (__start), (__end) - 1);	\
+				true;								\
+		       });									\
+	    )
+
 #define PKVM_HOST_VM_HANDLE	INT_MAX
 
 struct kvm_pkvm_vm {
 	int handle;
 	struct pkvm_memcache guest_mmu_teardown_mc;
+	struct rb_root_cached mappings;
 };
 
 struct kvm_pkvm_vcpu {

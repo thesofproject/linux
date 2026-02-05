@@ -4927,8 +4927,22 @@ static unsigned long pkvm_mmu_cache_min_pages(void)
 	return kvm_mmu_get_max_tdp_level() - 1;
 }
 
+static gfn_t __pkvm_mapping_start(struct pkvm_mapping *m)
+{
+	return m->gfn;
+}
+
+static gfn_t __pkvm_mapping_end(struct pkvm_mapping *m)
+{
+	return m->gfn + m->nr_pages - 1;
+}
+
+INTERVAL_TREE_DEFINE(struct pkvm_mapping, node, gfn_t, __subtree_last,
+		     __pkvm_mapping_start, __pkvm_mapping_end, , pkvm_mapping)
+
 static int pkvm_page_fault(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)
 {
+	struct pkvm_mapping *mapping;
 	gfn_t base_gfn;
 	gfn_t nr_pages;
 	int r;
@@ -4954,6 +4968,11 @@ static int pkvm_page_fault(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)
 	if (r)
 		return r;
 
+	/* Allocate non-atomically before taking mmu_lock. */
+	mapping = kzalloc(sizeof(struct pkvm_mapping), GFP_KERNEL_ACCOUNT);
+	if (!mapping)
+		return -ENOMEM;
+
 	r = RET_PF_RETRY;
 	write_lock(&vcpu->kvm->mmu_lock);
 
@@ -4973,9 +4992,17 @@ static int pkvm_page_fault(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)
 
 	r = RET_PF_FIXED;
 
+	mapping->gfn = base_gfn;
+	mapping->pfn = fault->pfn;
+	mapping->nr_pages = nr_pages;
+	pkvm_mapping_insert(mapping, &vcpu->kvm->arch.pkvm.mappings);
+
 out_unlock:
 	kvm_mmu_finish_page_fault(vcpu, fault, r);
 	write_unlock(&vcpu->kvm->mmu_lock);
+
+	if (r != RET_PF_FIXED)
+		kfree(mapping);
 	return r;
 }
 #endif /* CONFIG_PKVM_X86 */
@@ -6837,6 +6864,11 @@ static void kvm_mmu_zap_all_fast(struct kvm *kvm)
 int kvm_mmu_init_vm(struct kvm *kvm)
 {
 	int r, i;
+
+#ifdef CONFIG_PKVM_X86
+	if (enable_pkvm)
+		kvm->arch.pkvm.mappings = RB_ROOT_CACHED;
+#endif
 
 	kvm->arch.shadow_mmio_value = shadow_mmio_value;
 	INIT_LIST_HEAD(&kvm->arch.active_mmu_pages);
