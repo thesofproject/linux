@@ -6727,6 +6727,8 @@ void kvm_configure_mmu(bool enable_tdp, int tdp_forced_root_level,
 	tdp_root_level = tdp_forced_root_level;
 	max_tdp_level = tdp_max_root_level;
 
+	WARN_ON(enable_pkvm && !tdp_enabled);
+
 #ifdef CONFIG_X86_64
 	tdp_mmu_enabled = tdp_mmu_allowed && tdp_enabled && !enable_pkvm;
 #endif
