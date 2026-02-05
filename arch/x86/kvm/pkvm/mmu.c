@@ -493,6 +493,108 @@ static int refill_memcache(struct pkvm_memcache *mc, unsigned long min_pages,
 				   pkvm_virt_to_phys, host_mc);
 }
 
+static int host_reclaim_guest_walker(struct pkvm_pgtable_visit_ctx *ctx,
+				     unsigned long walk_flags,
+				     void *const arg)
+{
+	const struct pkvm_pgtable_ops *pgt_ops = ctx->pgt->pgt_ops;
+	struct kvm *kvm = pgt_to_kvm(ctx->pgt);
+	unsigned long phys, size;
+	void *ptep = ctx->ptep;
+
+	if (!pgt_ops->pte_present(ptep)) {
+		/* Guest may only share its pages, not donate them. */
+		BUG_ON(pgt_ops->pte_annotated(ptep));
+
+		return 0;
+	}
+
+	phys = pgt_ops->pte_to_phys(ptep);
+	size = pgt_ops->level_to_size(ctx->level);
+
+	switch (pkvm_pte_pgstate(ctx->pgt, ptep)) {
+	case PKVM_PAGE_OWNED:
+		BUG_ON(!pkvm_is_protected_vm(kvm));
+		BUG_ON(check_host_mem_pgstate(phys, size, PKVM_PAGE_NONE));
+		BUG_ON(check_page_owner(&host_mmu, phys, size, PKVM_ID_GUEST));
+		/*
+		 * This must be a protected VM's page. Clear its contents
+		 * before returning it to host.
+		 */
+		pkvm_clear_memory(__pkvm_va(phys), size);
+		break;
+	case PKVM_PAGE_SHARED_OWNED:
+		BUG_ON(!pkvm_is_protected_vm(kvm));
+		BUG_ON(check_host_mem_pgstate(phys, size, PKVM_PAGE_SHARED_BORROWED));
+		/*
+		 * Still must be a protected VM's page, but already shared
+		 * with the host => no need to clear.
+		 */
+		break;
+	case PKVM_PAGE_SHARED_BORROWED:
+		BUG_ON(pkvm_is_protected_vm(kvm));
+		BUG_ON(check_host_mem_pgstate(phys, size, PKVM_PAGE_SHARED_OWNED));
+		break;
+	default:
+		BUG();
+	}
+
+	if (pkvm_is_protected_vm(kvm)) {
+		/*
+		 * pkvm_pgtable_map() shouldn't fail here unless there is a bug.
+		 * See also comment in pkvm_hyp_donate_host().
+		 */
+		BUG_ON(pkvm_pgtable_map(&host_mmu, phys, phys, size,
+					host_mmu_pte_prot(false), NULL));
+
+		for_each_pkvm_page(page, phys, size) {
+			BUG_ON(page->host_share_hyp_count);
+			BUG_ON(page->host_share_guest_count);
+
+			page->host_state = PKVM_PAGE_OWNED;
+		}
+	} else {
+		for_each_pkvm_page(page, phys, size) {
+			BUG_ON(page->host_share_hyp_count);
+			BUG_ON(!page->host_share_guest_count);
+
+			if (!--page->host_share_guest_count)
+				page->host_state = PKVM_PAGE_OWNED;
+		}
+	}
+
+	return 0;
+}
+
+static void host_reclaim_guest_pages(struct pkvm_vm *pkvm_vm)
+{
+	struct pkvm_pgtable_walker walker = {
+		.cb = host_reclaim_guest_walker,
+		.arg = NULL,
+		.walk_flags = PKVM_PGTABLE_WALK_LEAF,
+	};
+
+	/*
+	 * We're not gonna unmap the reclaimed pages from the guest MMU.
+	 * There is no need to, since the guest's vCPUs have been already
+	 * torn down and thus cannot run anymore.
+	 *
+	 * Note that the TLBs were not flushed during the vCPUs teardown,
+	 * and we're not gonna flush them now either, but that is fine too.
+	 * A pCPU's TLB will be flushed next time when loading any VM's
+	 * vCPU on that pCPU.
+	 *
+	 * Also no need to lock the guest mmu_lock, since no one else is
+	 * using the guest page table at this point. And even no need to
+	 * set the current_vm, as we are not gonna make any modifications
+	 * to the guest page table.
+	 */
+	pkvm_host_mmu_lock();
+	pkvm_pgtable_walk(&pkvm_vm->mmu, 0, pkvm_pgtable_max_size(&pkvm_vm->mmu),
+			  &walker);
+	pkvm_host_mmu_unlock();
+}
+
 int pkvm_hyp_mmu_init(void *pool_base, unsigned long pool_pages)
 {
 	struct pkvm_pgtable_cap cap = {
@@ -657,6 +759,8 @@ undonate:
 void pkvm_guest_mmu_destroy(struct pkvm_vm *pkvm_vm)
 {
 	struct kvm_pkvm_vm *shared_pkvm = &pkvm_vm->shared_kvm->arch.pkvm;
+
+	host_reclaim_guest_pages(pkvm_vm);
 
 	current_vm = pkvm_vm;
 	pkvm_pgtable_destroy(&pkvm_vm->mmu);
