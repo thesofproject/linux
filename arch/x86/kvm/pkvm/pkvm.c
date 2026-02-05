@@ -1411,6 +1411,27 @@ static int pkvm_vm_mmu_map(unsigned long gpa, unsigned long hpa,
 	return ret;
 }
 
+static int pkvm_vm_mmu_unmap(int vm_handle, unsigned long gpa,
+			     unsigned long size)
+{
+	struct pkvm_vm *pkvm_vm;
+	int ret;
+
+	pkvm_vm = pkvm_get_vm(vm_handle);
+	if (!pkvm_vm)
+		return -EINVAL;
+
+	if (pkvm_is_protected_vm(&pkvm_vm->kvm)) {
+		ret = -EPERM;
+		goto put_vm;
+	}
+
+	ret = pkvm_host_unshare_guest(&pkvm_vm->kvm, gpa, size);
+put_vm:
+	pkvm_put_vm(pkvm_vm);
+	return ret;
+}
+
 static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc hc,
 					   union pkvm_hc_data *in, union pkvm_hc_data *out)
 {
@@ -1670,6 +1691,11 @@ void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 		ret = pkvm_vm_mmu_map(pkvm_hc_input1(vcpu),
 				      pkvm_host_gpa_to_phys(pkvm_hc_input2(vcpu)),
 				      pkvm_hc_input3(vcpu), pkvm_hc_input4(vcpu));
+		break;
+	case __pkvm__vm_mmu_unmap:
+		ret = pkvm_vm_mmu_unmap(pkvm_hc_input1(vcpu),
+					pkvm_hc_input2(vcpu),
+					pkvm_hc_input3(vcpu));
 		break;
 	default:
 		ret = pkvm_vcpu_handle_host_hypercall(vcpu, hc, &in, &out);
