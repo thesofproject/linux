@@ -193,6 +193,15 @@ static inline enum pkvm_page_state pkvm_pte_pgstate(struct pkvm_pgtable *pgt, vo
 	return pgt->pgt_ops->pte_pgstate(ptep);
 }
 
+static inline u64 pkvm_pte_set_pgstate(u64 val, struct pkvm_pgtable *pgt,
+				       enum pkvm_page_state state)
+{
+	val &= ~pkvm_pgt_pgstate_mask(pgt);
+	val |= pkvm_pte_mk_pgstate(pgt, state);
+
+	return val;
+}
+
 /*
  * Use bit31 ~ bi12 as owner ID bits to avoid conflicting w/ low 12 property
  * bits for all kinds of page table.

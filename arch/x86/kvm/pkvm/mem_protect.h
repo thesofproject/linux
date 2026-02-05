@@ -90,5 +90,9 @@ int pkvm_host_unshare_guest(struct kvm *kvm, unsigned long gpa,
 			    unsigned long size);
 int pkvm_host_test_clear_young_guest(struct kvm *kvm, unsigned long gpa,
 				     unsigned long size, bool mkold);
+int pkvm_guest_share_host(struct kvm_vcpu *vcpu, unsigned long gpa,
+			  unsigned long size);
+int pkvm_guest_unshare_host(struct kvm_vcpu *vcpu, unsigned long gpa,
+			    unsigned long size);
 
 #endif /* __PKVM_X86_MEM_PROTECT_H */
