@@ -56,6 +56,7 @@
 #include <asm/set_memory.h>
 #include <asm/spec-ctrl.h>
 #include <asm/vmx.h>
+#include <asm/kvm_pkvm.h>
 
 #include "trace.h"
 
@@ -4759,22 +4760,24 @@ static int kvm_mmu_faultin_pfn(struct kvm_vcpu *vcpu,
 static bool is_page_fault_stale(struct kvm_vcpu *vcpu,
 				struct kvm_page_fault *fault)
 {
-	struct kvm_mmu_page *sp = root_to_sp(vcpu->arch.mmu->root.hpa);
+	if (/*!enable_pkvm*/ 1) {
+		struct kvm_mmu_page *sp = root_to_sp(vcpu->arch.mmu->root.hpa);
 
-	/* Special roots, e.g. pae_root, are not backed by shadow pages. */
-	if (sp && is_obsolete_sp(vcpu->kvm, sp))
-		return true;
+		/* Special roots, e.g. pae_root, are not backed by shadow pages. */
+		if (sp && is_obsolete_sp(vcpu->kvm, sp))
+			return true;
 
-	/*
-	 * Roots without an associated shadow page are considered invalid if
-	 * there is a pending request to free obsolete roots.  The request is
-	 * only a hint that the current root _may_ be obsolete and needs to be
-	 * reloaded, e.g. if the guest frees a PGD that KVM is tracking as a
-	 * previous root, then __kvm_mmu_prepare_zap_page() signals all vCPUs
-	 * to reload even if no vCPU is actively using the root.
-	 */
-	if (!sp && kvm_test_request(KVM_REQ_MMU_FREE_OBSOLETE_ROOTS, vcpu))
-		return true;
+		/*
+		 * Roots without an associated shadow page are considered invalid if
+		 * there is a pending request to free obsolete roots.  The request is
+		 * only a hint that the current root _may_ be obsolete and needs to be
+		 * reloaded, e.g. if the guest frees a PGD that KVM is tracking as a
+		 * previous root, then __kvm_mmu_prepare_zap_page() signals all vCPUs
+		 * to reload even if no vCPU is actively using the root.
+		 */
+		if (!sp && kvm_test_request(KVM_REQ_MMU_FREE_OBSOLETE_ROOTS, vcpu))
+			return true;
+	}
 
 	/*
 	 * Check for a relevant mmu_notifier invalidation event one last time
@@ -4914,11 +4917,78 @@ out_unlock:
 }
 #endif
 
+#ifdef CONFIG_PKVM_X86
+static unsigned long pkvm_mmu_cache_min_pages(void)
+{
+	/*
+	 * Minimum number of pages required to install stage-2 translation.
+	 * The root page table was pre-allocated during per-vm pool creation.
+	 */
+	return kvm_mmu_get_max_tdp_level() - 1;
+}
+
+static int pkvm_page_fault(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)
+{
+	gfn_t base_gfn;
+	gfn_t nr_pages;
+	int r;
+
+	r = kvm_mmu_faultin_pfn(vcpu, fault, ACC_ALL);
+	if (r != RET_PF_CONTINUE) {
+		/* MMIO emulation works for non-protected VMs only. */
+		if (unlikely(pkvm_is_protected_vcpu(vcpu) && r == RET_PF_EMULATE))
+			return -EFAULT;
+
+		if (unlikely(r != RET_PF_EMULATE && r != RET_PF_RETRY &&
+			     r != -EINTR && r != -EAGAIN && r != -EFAULT)) {
+			pr_warn_ratelimited("pkvm: unexpected page fault result %d\n", r);
+			WARN_ON_ONCE(1);
+		}
+		return r;
+	}
+
+	WARN_ON_ONCE(!fault->slot);
+
+	r = kvm_topup_pkvm_memcache(&vcpu->arch.pkvm.guest_mmu_memcache,
+				    pkvm_mmu_cache_min_pages());
+	if (r)
+		return r;
+
+	r = RET_PF_RETRY;
+	write_lock(&vcpu->kvm->mmu_lock);
+
+	if (is_page_fault_stale(vcpu, fault))
+		goto out_unlock;
+
+	kvm_mmu_hugepage_adjust(vcpu, fault);
+
+	base_gfn = gfn_round_for_level(fault->gfn, fault->goal_level);
+	nr_pages = KVM_PAGES_PER_HPAGE(fault->goal_level);
+
+	r = pkvm_hypercall(vm_mmu_map,
+			   base_gfn << PAGE_SHIFT, fault->pfn << PAGE_SHIFT,
+			   nr_pages << PAGE_SHIFT, fault->map_writable);
+	if (r)
+		goto out_unlock;
+
+	r = RET_PF_FIXED;
+
+out_unlock:
+	kvm_mmu_finish_page_fault(vcpu, fault, r);
+	write_unlock(&vcpu->kvm->mmu_lock);
+	return r;
+}
+#endif /* CONFIG_PKVM_X86 */
+
 int kvm_tdp_page_fault(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)
 {
 #ifdef CONFIG_X86_64
 	if (tdp_mmu_enabled)
 		return kvm_tdp_mmu_page_fault(vcpu, fault);
+#endif
+#ifdef CONFIG_PKVM_X86
+	if (/*enable_pkvm*/ 0)
+		return pkvm_page_fault(vcpu, fault);
 #endif
 
 	return direct_page_fault(vcpu, fault);
