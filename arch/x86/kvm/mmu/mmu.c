@@ -4942,7 +4942,7 @@ INTERVAL_TREE_DEFINE(struct pkvm_mapping, node, gfn_t, __subtree_last,
 
 static int pkvm_page_fault(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)
 {
-	struct pkvm_mapping *mapping;
+	struct pkvm_mapping *mapping, *old_mapping;
 	gfn_t base_gfn;
 	gfn_t nr_pages;
 	int r;
@@ -4983,6 +4983,17 @@ static int pkvm_page_fault(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)
 
 	base_gfn = gfn_round_for_level(fault->gfn, fault->goal_level);
 	nr_pages = KVM_PAGES_PER_HPAGE(fault->goal_level);
+
+	old_mapping = pkvm_mapping_iter_first(&vcpu->kvm->arch.pkvm.mappings,
+					      base_gfn, base_gfn + nr_pages - 1);
+	if (old_mapping) {
+		r = RET_PF_SPURIOUS;
+		if (WARN_ON_ONCE(old_mapping->gfn != base_gfn ||
+				 old_mapping->pfn != fault->pfn ||
+				 old_mapping->nr_pages != nr_pages))
+			r = -EFAULT;
+		goto out_unlock;
+	}
 
 	r = pkvm_hypercall(vm_mmu_map,
 			   base_gfn << PAGE_SHIFT, fault->pfn << PAGE_SHIFT,
