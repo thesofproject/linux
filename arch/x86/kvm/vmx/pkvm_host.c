@@ -1295,6 +1295,18 @@ static void pkvm_flush_tlb_guest(struct kvm_vcpu *vcpu)
 
 static int pkvm_vcpu_pre_run(struct kvm_vcpu *vcpu)
 {
+	struct kvm_pkvm_vm *pkvm = &vcpu->kvm->arch.pkvm;
+	int ret;
+
+	if (unlikely(pkvm_is_protected_vcpu(vcpu) && !kvm_vcpu_has_run(vcpu) &&
+		     kvm_vcpu_is_reset_bsp(vcpu))) {
+		mutex_lock(&pkvm->finalized_lock);
+		ret = pkvm_hypercall(vm_finalize, vcpu->kvm->arch.pkvm.handle);
+		mutex_unlock(&pkvm->finalized_lock);
+		if (ret < 0)
+			return ret;
+	}
+
 	return 1;
 }
 
