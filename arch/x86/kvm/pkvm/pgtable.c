@@ -454,6 +454,49 @@ static int lookup_walker(struct pkvm_pgtable_visit_ctx *ctx, unsigned long walk_
 	return PGTABLE_WALK_DONE;
 }
 
+struct pgt_lookup_range_data {
+	unsigned long vaddr, vaddr_end;
+	unsigned long start, end;
+	unsigned long phys;
+	u64 prot;
+};
+
+static int lookup_range_walker(struct pkvm_pgtable_visit_ctx *ctx,
+			       unsigned long walk_flags,
+			       void *const arg)
+{
+	const struct pkvm_pgtable_ops *pgt_ops = ctx->pgt->pgt_ops;
+	struct pgt_lookup_range_data *data = arg;
+	u64 pte = pgt_ops->pte_get(ctx->ptep);
+
+	if (pgt_ops->pte_present(&pte)) {
+		unsigned long size = pgt_ops->level_to_size(ctx->level);
+		unsigned long phys = pgt_ops->pte_to_phys(&pte);
+		u64 prot = pgt_ops->pte_to_prot(&pte);
+
+		if (data->start == INVALID_PAGE) {
+			unsigned long offset;
+
+			data->start = max(ctx->addr, data->vaddr);
+			offset = data->start & ~pgt_ops->level_to_mask(ctx->level);
+
+			data->end = min(data->start + (size - offset),
+					data->vaddr_end);
+			data->phys = phys + offset;
+			data->prot = prot;
+		} else if (phys == data->phys + (data->end - data->start) &&
+			   prot == data->prot) {
+			data->end = min(ctx->addr + size, data->vaddr_end);
+		} else {
+			return PGTABLE_WALK_DONE;
+		}
+	} else if (data->start != INVALID_PAGE) {
+		return PGTABLE_WALK_DONE;
+	}
+
+	return 0;
+}
+
 struct pgt_walk_data {
 	struct pkvm_pgtable *pgt;
 	unsigned long addr;
@@ -795,6 +838,59 @@ void pkvm_pgtable_lookup(struct pkvm_pgtable *pgt, unsigned long vaddr,
 		*prot = data.prot;
 	if (level)
 		*level = data.level;
+}
+
+/*
+ * pkvm_pgtable_lookup_range() - Lookup the first contiguously mapped sub-range
+ *				 within the given virtual address range.
+ * @pgt:		The page table to lookup.
+ * @vaddr:		The start address of virtual address range.
+ * @size:		The size of the virtual address range.
+ * @range_vaddr:	To return the start virtual address of the found range.
+ * @range_size:		To return the size of the found range.
+ * @phys:		To return the start physical address of the found range.
+ * @prot:		To return the property bits of the found range.
+ *
+ * The page table is walked to look up the first mapped sub-range within the VA
+ * range [@vaddr, @vaddr + @size) such that all the pages within this sub-range
+ * are mapped physically contiguously and with the same property bits. If such a
+ * VA sub-range is found, its start virtual address is returned as @range_vaddr,
+ * its size is returned as @range_size, its start physical address is returned
+ * as @phys and its property bits are returned as @prot. If no such VA sub-range
+ * found, @range_vaddr and @phys are set to INVALID_PAGE, and @range_size and
+ * @prot are set to 0.
+ */
+void pkvm_pgtable_lookup_range(struct pkvm_pgtable *pgt,
+			       unsigned long vaddr, unsigned long size,
+			       unsigned long *range_vaddr,
+			       unsigned long *range_size,
+			       unsigned long *phys, u64 *prot)
+{
+	struct pgt_lookup_range_data data = {
+		.vaddr = vaddr,
+		.vaddr_end = vaddr + size,
+		.start = INVALID_PAGE,
+		.end = INVALID_PAGE,
+		.phys = INVALID_PAGE,
+		.prot = 0,
+	};
+	struct pkvm_pgtable_walker walker = {
+		.cb = lookup_range_walker,
+		.arg = &data,
+		.walk_flags = PKVM_PGTABLE_WALK_LEAF,
+	};
+
+	BUG_ON(!VALID_PAGE(vaddr));
+	pkvm_pgtable_walk(pgt, vaddr, size, &walker);
+
+	if (range_vaddr)
+		*range_vaddr = data.start;
+	if (range_size)
+		*range_size = data.end - data.start;
+	if (phys)
+		*phys = data.phys;
+	if (prot)
+		*prot = data.prot;
 }
 
 /**
