@@ -470,3 +470,25 @@
   __tracepoint_android_rvh_kswapd_shrink_node
   __tracepoint_android_rvh_perform_reclaim
   __tracepoint_android_vh_mglru_should_abort_scan_ex
+  timer_init_key
+  alloc_workqueue_noprof
+  alloc_workqueue_attrs_noprof
+  apply_workqueue_attrs_locked
+  debugfs_create_file_unsafe
+  free_workqueue_attrs
+  inode_just_drop
+  hrtimer_setup
+  hrtimer_setup_on_stack
+  lookup_noperm
+  lookup_noperm_positive_unlocked
+  tcp_hashinfo
+  udp_table
+  devm_power_supply_get_by_reference
+  elevator_alloc
+  __msi_lock_descs
+  __msi_unlock_descs
+  krealloc_node_align_noprof
+  rtnl_link_register
+  rtnl_link_unregister
+  snd_soc_unregister_component_by_driver
+  kthread_create_worker_on_node
