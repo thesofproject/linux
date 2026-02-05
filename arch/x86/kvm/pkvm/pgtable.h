@@ -16,7 +16,7 @@ struct pkvm_pgtable;
  * @page_count:		Get the reference count of a given page.
  */
 struct pkvm_pgtable_mm_ops {
-	void *(*zalloc_page)(void);
+	void *(*zalloc_page)(struct pkvm_memcache *mc);
 	void (*get_page)(void *vaddr);
 	void (*put_page)(void *vaddr);
 	int (*page_count)(void *vaddr);
