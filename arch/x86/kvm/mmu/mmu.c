@@ -6606,6 +6606,11 @@ int kvm_mmu_create(struct kvm_vcpu *vcpu)
 {
 	int ret;
 
+#ifdef CONFIG_PKVM_X86
+	if (enable_pkvm)
+		init_pkvm_mmu_memcache(&vcpu->arch.pkvm.guest_mmu_memcache);
+#endif
+
 	vcpu->arch.mmu_pte_list_desc_cache.kmem_cache = pte_list_desc_cache;
 	vcpu->arch.mmu_pte_list_desc_cache.gfp_zero = __GFP_ZERO;
 
@@ -7534,6 +7539,12 @@ out:
 void kvm_mmu_destroy(struct kvm_vcpu *vcpu)
 {
 	kvm_mmu_unload(vcpu);
+
+#ifdef CONFIG_PKVM_X86
+	if (enable_pkvm)
+		kvm_free_pkvm_memcache(&vcpu->arch.pkvm.guest_mmu_memcache);
+#endif
+
 	if (tdp_mmu_enabled) {
 		read_lock(&vcpu->kvm->mmu_lock);
 		mmu_free_root_page(vcpu->kvm, &vcpu->arch.mmu->mirror_root_hpa,

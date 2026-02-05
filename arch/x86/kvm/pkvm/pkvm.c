@@ -572,6 +572,8 @@ static int __pkvm_vcpu_free(struct pkvm_vm *pkvm_vm, int vcpu_handle,
 
 	__vcpu_free(&pkvm_vcpu->vcpu);
 
+	pkvm_guest_mmu_free_memcache(pkvm_vcpu);
+
 	fps = pkvm_vcpu->vcpu.arch.guest_fpu.fpstate;
 	teardown_donated_memory(mc, fps, fps->size);
 	if (pkvm_vcpu->vcpu.arch.cpuid_entries)
