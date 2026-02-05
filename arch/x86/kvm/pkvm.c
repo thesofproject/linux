@@ -134,3 +134,40 @@ void kvm_free_pkvm_memcache(struct pkvm_memcache *mc)
 	free_pkvm_memcache(mc, kvm_free_pkvm_page_range, kvm_host_va,
 			   (void *)mc->flags);
 }
+
+static int pkvm_vm_ioctl_set_fw_gpa(struct kvm *kvm, u64 gpa)
+{
+	if (!pvmfw_present)
+		return -EINVAL;
+
+	WRITE_ONCE(kvm->arch.pkvm.pvmfw_load_addr, gpa);
+	return 0;
+}
+
+static int pkvm_vm_ioctl_info(struct kvm *kvm,
+			      struct kvm_protected_vm_info __user *info)
+{
+	struct kvm_protected_vm_info kinfo = {
+		.firmware_size = pvmfw_present ? pvmfw_size : 0,
+	};
+
+	return copy_to_user(info, &kinfo, sizeof(kinfo)) ? -EFAULT : 0;
+}
+
+int pkvm_vm_ioctl_enable_cap(struct kvm *kvm, struct kvm_enable_cap *cap)
+{
+	if (!pkvm_is_protected_vm(kvm))
+		return -EINVAL;
+
+	if (cap->args[1] || cap->args[2] || cap->args[3])
+		return -EINVAL;
+
+	switch (cap->flags) {
+	case KVM_CAP_X86_PROTECTED_VM_FLAGS_SET_FW_GPA:
+		return pkvm_vm_ioctl_set_fw_gpa(kvm, cap->args[0]);
+	case KVM_CAP_X86_PROTECTED_VM_FLAGS_INFO:
+		return pkvm_vm_ioctl_info(kvm, (void __force __user *)cap->args[0]);
+	default:
+		return -EINVAL;
+	}
+}

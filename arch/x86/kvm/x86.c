@@ -6997,6 +6997,16 @@ int kvm_vm_ioctl_enable_cap(struct kvm *kvm,
 {
 	int r;
 
+	/* Capabilities with flags */
+	switch (cap->cap) {
+	case KVM_CAP_X86_PROTECTED_VM:
+		return pkvm_vm_ioctl_enable_cap(kvm, cap);
+	default:
+		if (cap->flags)
+			return -EINVAL;
+	}
+
+	/* Capabilities without flags */
 	if (cap->flags)
 		return -EINVAL;
 
@@ -13584,6 +13594,10 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
 #if IS_ENABLED(CONFIG_HYPERV)
 	spin_lock_init(&kvm->arch.hv_root_tdp_lock);
 	kvm->arch.hv_root_tdp = INVALID_PAGE;
+#endif
+
+#ifdef CONFIG_PKVM_X86
+	kvm->arch.pkvm.pvmfw_load_addr = INVALID_GPA;
 #endif
 
 	INIT_DELAYED_WORK(&kvm->arch.kvmclock_update_work, kvmclock_update_fn);
