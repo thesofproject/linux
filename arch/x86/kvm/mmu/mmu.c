@@ -1668,6 +1668,31 @@ static bool pkvm_unmap_gfn_range(struct kvm *kvm, struct kvm_gfn_range *range)
 	/* pKVM itself always flushes TLB on unmap */
 	return false;
 }
+
+static bool pkvm_age_gfn_range(struct kvm *kvm, struct kvm_gfn_range *range,
+			       bool mkold)
+{
+	struct pkvm_mapping *m;
+	bool young = false;
+
+	if (pkvm_is_protected_vm(kvm))
+		return false;
+
+	read_lock(&kvm->mmu_lock);
+
+	for_each_pkvm_mapping(kvm, range->start, range->end, m) {
+		young |= pkvm_hypercall(vm_mmu_age, kvm->arch.pkvm.handle,
+					m->gfn << PAGE_SHIFT,
+					m->nr_pages << PAGE_SHIFT,
+					mkold);
+		if (young && !mkold)
+			break;
+	}
+
+	read_unlock(&kvm->mmu_lock);
+
+	return young;
+}
 #endif /* CONFIG_PKVM_X86 */
 
 bool kvm_unmap_gfn_range(struct kvm *kvm, struct kvm_gfn_range *range)
@@ -1796,6 +1821,11 @@ bool kvm_age_gfn(struct kvm *kvm, struct kvm_gfn_range *range)
 {
 	bool young = false;
 
+#ifdef CONFIG_PKVM_X86
+	if (/*enable_pkvm*/ 0)
+		young = pkvm_age_gfn_range(kvm, range, true);
+#endif
+
 	if (tdp_mmu_enabled)
 		young = kvm_tdp_mmu_age_gfn_range(kvm, range);
 
@@ -1808,6 +1838,11 @@ bool kvm_age_gfn(struct kvm *kvm, struct kvm_gfn_range *range)
 bool kvm_test_age_gfn(struct kvm *kvm, struct kvm_gfn_range *range)
 {
 	bool young = false;
+
+#ifdef CONFIG_PKVM_X86
+	if (/*enable_pkvm*/ 0)
+		young = pkvm_age_gfn_range(kvm, range, false);
+#endif
 
 	if (tdp_mmu_enabled)
 		young = kvm_tdp_mmu_test_age_gfn(kvm, range);
