@@ -1727,8 +1727,16 @@ static void pkvm_write_tsc_multiplier(struct kvm_vcpu *vcpu)
 
 static void pkvm_load_mmu_pgd(struct kvm_vcpu *vcpu, hpa_t root_hpa, int root_level)
 {
+	/*
+	 * The host's root_hpa and root_level values are ignored, since
+	 * the EPT is managed by the pKVM hypervisor independently of the
+	 * host, for both pVMs and npVMs. The purpose of the load_mmu_pgd
+	 * PV interface is not to load the guest's EPT (pKVM will load it
+	 * anyway, without the host's help) but only to load the guest's
+	 * stage-1 page table root, i.e. CR3 and/or PDPTRs.
+	 */
 	if (!vcpu->arch.guest_state_protected)
-		KVM_BUG_ON(pkvm_hypercall(load_mmu_pgd, root_hpa, root_level), vcpu->kvm);
+		KVM_BUG_ON(pkvm_hypercall(load_mmu_pgd), vcpu->kvm);
 }
 
 static void pkvm_leave_nested(struct kvm_vcpu *vcpu) {}
