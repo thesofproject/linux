@@ -14940,8 +14940,8 @@ int pkvm_vcpu_enter_guest(struct kvm_vcpu *vcpu, bool force_immediate_exit,
 
 int pkvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 {
+	u64 nr, a0, a1, a2, a3;
 	int ret = -KVM_EPERM;
-	u64 nr;
 
 	if (!pkvm_is_protected_vcpu(vcpu))
 		return 0;
@@ -14952,8 +14952,18 @@ int pkvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 	}
 
 	nr = kvm_rax_read(vcpu);
+	a0 = kvm_rbx_read(vcpu);
+	a1 = kvm_rcx_read(vcpu);
+	a2 = kvm_rdx_read(vcpu);
+	a3 = kvm_rsi_read(vcpu);
 
 	switch (nr) {
+	case PKVM_GHC_SHARE_MEM:
+		ret = pkvm_guest_share_host(vcpu, a0, a1);
+		break;
+	case PKVM_GHC_UNSHARE_MEM:
+		ret = pkvm_guest_unshare_host(vcpu, a0, a1);
+		break;
 	case PKVM_GHC_IOREAD:
 	case PKVM_GHC_IOWRITE:
 		/* Hypercall for MMIO accessing should be forwarded to the host */
