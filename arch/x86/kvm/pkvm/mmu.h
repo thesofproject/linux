@@ -4,6 +4,8 @@
 
 #include <asm/pkvm_spinlock.h>
 #include "init.h"
+#include "pgtable.h"
+#include "pkvm.h"
 
 extern pkvm_spinlock_t host_mmu_lock;
 
@@ -33,5 +35,7 @@ static inline void pkvm_host_mmu_unlock(void)
 
 void pkvm_guest_mmu_setup(const struct pkvm_pgtable_ops *pgt_ops,
 			  struct pkvm_pgtable_cap pgt_cap);
+int pkvm_guest_mmu_init(struct pkvm_vm *pkvm_vm, phys_addr_t pgd_pa);
+void pkvm_guest_mmu_destroy(struct pkvm_vm *pkvm_vm);
 
 #endif /* __PKVM_X86_MMU_H */

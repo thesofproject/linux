@@ -6,6 +6,7 @@
 #include "gfp.h"
 #include "mmu.h"
 #include "pgtable.h"
+#include "pkvm.h"
 
 static struct pkvm_pgtable hyp_mmu;
 static struct pkvm_pool hyp_mmu_pool;
@@ -15,6 +16,9 @@ pkvm_spinlock_t host_mmu_lock;
 
 static const struct pkvm_pgtable_ops *guest_mmu_pgt_ops;
 static struct pkvm_pgtable_cap guest_mmu_pgt_cap;
+
+static DEFINE_PER_CPU(struct pkvm_vm *, __current_vm);
+#define current_vm (*this_cpu_ptr(&__current_vm))
 
 static void *hyp_mmu_zalloc_page(void)
 {
@@ -346,6 +350,59 @@ static int host_mmu_map(unsigned long phys, unsigned long size, bool mmio)
 				host_mmu_pte_prot(mmio));
 }
 
+static void *guest_mmu_zalloc_page(void)
+{
+	return pkvm_alloc_pages(&current_vm->mmu_pool, 0);
+}
+
+static void guest_mmu_get_page(void *vaddr)
+{
+	pkvm_get_page(&current_vm->mmu_pool, vaddr);
+}
+
+static void guest_mmu_put_page(void *vaddr)
+{
+	pkvm_put_page(&current_vm->mmu_pool, vaddr);
+}
+
+static int guest_mmu_page_count(void *vaddr)
+{
+	return pkvm_page_count(vaddr);
+}
+
+static const struct pkvm_pgtable_mm_ops guest_mmu_mm_ops = {
+	.zalloc_page = guest_mmu_zalloc_page,
+	.get_page = guest_mmu_get_page,
+	.put_page = guest_mmu_put_page,
+	.page_count = guest_mmu_page_count,
+};
+
+static void drain_pool(struct pkvm_pool *pool, struct pkvm_memcache *host_mc)
+{
+	struct pkvm_page *page;
+	void *p;
+
+	p = pkvm_alloc_pages(pool, 0);
+	while (p) {
+		page = pkvm_virt_to_page(p);
+
+		/* Don't expect the pool to have greater order pages. */
+		WARN_ON(page->order);
+
+		pkvm_page_ref_dec(page);
+
+		push_pkvm_memcache_page(host_mc, p, pkvm_virt_to_host_gpa);
+
+		/*
+		 * Pages stored in pool are zeroed by __pkvm_attach_page so do
+		 * not repeat this step before donation.
+		 */
+		pkvm_hyp_donate_host(__pkvm_pa(p), PAGE_SIZE, false);
+
+		p = pkvm_alloc_pages(pool, 0);
+	}
+}
+
 int pkvm_hyp_mmu_init(void *pool_base, unsigned long pool_pages)
 {
 	struct pkvm_pgtable_cap cap = {
@@ -467,6 +524,59 @@ void pkvm_guest_mmu_setup(const struct pkvm_pgtable_ops *pgt_ops,
 {
 	guest_mmu_pgt_ops = pgt_ops;
 	guest_mmu_pgt_cap = pgt_cap;
+}
+
+int pkvm_guest_mmu_init(struct pkvm_vm *pkvm_vm, phys_addr_t pgd_pa)
+{
+	struct kvm_pkvm_vm *shared_pkvm = &pkvm_vm->shared_kvm->arch.pkvm;
+	int ret;
+
+	if (!PAGE_ALIGNED(pgd_pa))
+		return -EINVAL;
+
+	/*
+	 * The donated page will be cleared when allocating it from the pool,
+	 * before using it for the root pgd. Thus no need to clear it now.
+	 */
+	ret = pkvm_host_donate_hyp(pgd_pa, PAGE_SIZE, false);
+	if (ret)
+		return ret;
+
+	ret = pkvm_pool_init(&pkvm_vm->mmu_pool, pkvm_phys_to_pfn(pgd_pa), 1, 0);
+	if (ret)
+		goto undonate;
+
+	pkvm_spin_lock_init(&pkvm_vm->mmu_lock);
+
+	current_vm = pkvm_vm;
+	ret = pkvm_pgtable_init(&pkvm_vm->mmu, guest_mmu_pgt_cap,
+				&guest_mmu_mm_ops, guest_mmu_pgt_ops);
+	current_vm = NULL;
+	if (ret)
+		goto undonate;
+
+	init_pkvm_mmu_memcache(&shared_pkvm->guest_mmu_teardown_mc);
+
+	return 0;
+
+undonate:
+	pkvm_hyp_donate_host(pgd_pa, PAGE_SIZE, false);
+	return ret;
+}
+
+void pkvm_guest_mmu_destroy(struct pkvm_vm *pkvm_vm)
+{
+	struct kvm_pkvm_vm *shared_pkvm = &pkvm_vm->shared_kvm->arch.pkvm;
+
+	current_vm = pkvm_vm;
+	pkvm_pgtable_destroy(&pkvm_vm->mmu);
+	current_vm = NULL;
+
+	/*
+	 * Drain per VM pool after destroying the page-table so the pool
+	 * contains all pages freed during that step.
+	 */
+	drain_pool(&pkvm_vm->mmu_pool, &shared_pkvm->guest_mmu_teardown_mc);
 }
 
 /**

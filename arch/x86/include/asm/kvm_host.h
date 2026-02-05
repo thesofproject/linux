@@ -890,6 +890,7 @@ static inline void init_pkvm_mmu_memcache(struct pkvm_memcache *mc)
 
 struct kvm_pkvm_vm {
 	int handle;
+	struct pkvm_memcache guest_mmu_teardown_mc;
 };
 
 struct kvm_pkvm_vcpu {
