@@ -88,6 +88,7 @@
 
 #ifdef __PKVM_HYP__
 #include "pkvm.h"
+#include "pkvm/mmu.h"
 
 #undef module_param_named
 #define module_param_named(...)
@@ -10624,6 +10625,7 @@ static int complete_hypercall_exit(struct kvm_vcpu *vcpu)
 	return kvm_skip_emulated_instruction(vcpu);
 }
 
+#ifdef CONFIG_PKVM_X86
 static int kvm_pkvm_hypercall(struct kvm_vcpu *vcpu)
 {
 	unsigned long nr = kvm_rax_read(vcpu);
@@ -10653,6 +10655,35 @@ static int kvm_pkvm_hypercall(struct kvm_vcpu *vcpu)
 		/* Leverage sev_es MMIO write */
 		ret = kvm_sev_es_mmio_write(vcpu, kvm_rbx_read(vcpu), size, &val);
 		break;
+	case PKVM_GHC_SHARE_MEM:
+		/*
+		 * The only case when pKVM forwards this hypercall to the host
+		 * is when it asks the host to refill the memcache with the
+		 * needed amount of pages.
+		 */
+		ret = kvm_topup_pkvm_memcache(&vcpu->arch.pkvm.guest_mmu_memcache,
+					      vcpu->arch.pkvm.req_param);
+		/*
+		 * If refill succeeded, pKVM will let the guest re-issue the
+		 * hypercall, by avoiding skipping the instruction in
+		 * update_protected_vcpu_state().
+		 *
+		 * If refill failed (likely due to lack of memory), for simplicity
+		 * just return the error to userspace to let the VMM kill the VM.
+		 * We cannot return the error to the guest just by writing it to
+		 * RAX here, since we need to retain the hypercall nr in RAX (for
+		 * the successful case when we let the host re-issue the hypercall
+		 * instruction) and thus can't overwrite RAX with the returned
+		 * error.
+		 *
+		 * TODO: improve this by letting the guest itself handle -EAGAIN
+		 * to retry the hypercall, to avoid the need for the above and
+		 * thus allow the guest to properly handle other errors as well.
+		 * This would require updating existing guests.
+		 */
+		if (!ret)
+			ret = 1;
+		break;
 	}
 	default:
 		ret = 1;
@@ -10667,6 +10698,7 @@ invalid:
 	vcpu->run->internal.ndata = 0;
 	return 0;
 }
+#endif /* CONFIG_PKVM_X86 */
 
 int ____kvm_emulate_hypercall(struct kvm_vcpu *vcpu, int cpl,
 			      int (*complete_hypercall)(struct kvm_vcpu *))
@@ -10774,8 +10806,10 @@ EXPORT_SYMBOL_FOR_KVM_INTERNAL(____kvm_emulate_hypercall);
 
 int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 {
+#ifdef CONFIG_PKVM_X86
 	if (pkvm_is_protected_vcpu(vcpu))
 		return kvm_pkvm_hypercall(vcpu);
+#endif
 
 	if (kvm_xen_hypercall_enabled(vcpu->kvm))
 		return kvm_xen_hypercall(vcpu);
@@ -14940,6 +14974,8 @@ int pkvm_vcpu_enter_guest(struct kvm_vcpu *vcpu, bool force_immediate_exit,
 
 int pkvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 {
+	struct pkvm_vcpu *pkvm_vcpu = to_pkvm_vcpu(vcpu);
+	unsigned long min_pages;
 	u64 nr, a0, a1, a2, a3;
 	int ret = -KVM_EPERM;
 
@@ -14959,6 +14995,25 @@ int pkvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 
 	switch (nr) {
 	case PKVM_GHC_SHARE_MEM:
+		pkvm_guest_mmu_refill_memcache(pkvm_vcpu);
+
+		/*
+		 * May need to allocate additional pages for guest page table
+		 * in order to split a huge mapping into smaller ones. Assume
+		 * the worst case.
+		 */
+		min_pages = __pkvm_pgtable_max_pages(a1 >> PAGE_SHIFT);
+		if (vcpu->arch.pkvm.guest_mmu_memcache.count < min_pages) {
+			/*
+			 * If not enough pages in the memcache, forward request
+			 * to the host for refilling the memcache with the needed
+			 * number of pages. After that the guest will retry the
+			 * hypercall.
+			 */
+			pkvm_vcpu->shared_vcpu->arch.pkvm.req_param = min_pages;
+			return 0;
+		}
+
 		ret = pkvm_guest_share_host(vcpu, a0, a1);
 		break;
 	case PKVM_GHC_UNSHARE_MEM:
