@@ -14,8 +14,6 @@ static int pkvm_complete_emulated_msr(struct kvm_vcpu *vcpu, int err);
 static unsigned short has_wbinvd_exit = USHRT_MAX;
 
 static bool pkvm_has_vmx_wbinvd_exit(void);
-static int pkvm_check_emulate_instruction(struct kvm_vcpu *vcpu, int emul_type,
-					  void *insn, int insn_len);
 static int vmx_get_msr_imm_reg(struct kvm_vcpu *vcpu);
 
 static void pkvm_free_loaded_vmcs(struct loaded_vmcs *loaded_vmcs)
@@ -440,22 +438,6 @@ static int handle_ept_violation(struct kvm_vcpu *vcpu)
 	return __vmx_handle_ept_violation(vcpu, gpa, exit_qualification);
 }
 
-static int handle_ept_misconfig(struct kvm_vcpu *vcpu)
-{
-	gpa_t gpa;
-
-	if (pkvm_check_emulate_instruction(vcpu, EMULTYPE_PF, NULL, 0))
-		return 1;
-
-	gpa = to_vmx(vcpu)->exit_gpa;
-	if (!kvm_io_bus_write(vcpu, KVM_FAST_MMIO_BUS, gpa, 0, NULL)) {
-		trace_kvm_fast_mmio(gpa);
-		return kvm_skip_emulated_instruction(vcpu);
-	}
-
-	return kvm_mmu_page_fault(vcpu, gpa, PFERR_RSVD_MASK, NULL, 0);
-}
-
 /*
  * Indicate a busy-waiting vcpu in spinlock. We do not enable the PAUSE
  * exiting, so only get here on cpu with PAUSE-Loop-Exiting.
@@ -546,7 +528,6 @@ static int (*pkvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_TASK_SWITCH]             = handle_task_switch,
 	[EXIT_REASON_MCE_DURING_VMENTRY]      = handle_machine_check,
 	[EXIT_REASON_EPT_VIOLATION]	      = handle_ept_violation,
-	[EXIT_REASON_EPT_MISCONFIG]           = handle_ept_misconfig,
 	[EXIT_REASON_PAUSE_INSTRUCTION]       = handle_pause,
 	[EXIT_REASON_BUS_LOCK]                = handle_bus_lock_vmexit,
 	[EXIT_REASON_NOTIFY]		      = handle_notify,
