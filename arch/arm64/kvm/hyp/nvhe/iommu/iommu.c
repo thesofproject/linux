@@ -487,6 +487,96 @@ out_unlock:
 	return ret;
 }
 
+int kvm_iommu_attach_dev_nested(pkvm_handle_t iommu_id, pkvm_handle_t domain_id, u32 endpoint_id,
+				u32 pasid, unsigned long flags, void *s1_desc_hva,
+				size_t s1_desc_size)
+{
+	int ret;
+	struct kvm_iommu_ops *kvm_iommu_ops;
+	struct kvm_hyp_iommu_domain *domain;
+	void *s1_desc_hyp_va = kern_hyp_va(s1_desc_hva);
+	void *s1_desc_hyp_va_end = s1_desc_hyp_va + s1_desc_size;
+
+	/* Ensure the device can't transition to/from VMs while in the middle of attach. */
+	ret = pkvm_devices_get_context(iommu_id, endpoint_id, NULL);
+	if (ret)
+		return ret;
+
+	ret = hyp_pin_shared_mem(s1_desc_hyp_va, s1_desc_hyp_va_end);
+	if (ret)
+		goto out_put_context;
+
+	hyp_spin_lock(&kvm_iommu_domain_lock);
+	domain = handle_to_domain(domain_id);
+	if (!domain || domain_get(domain)) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
+	kvm_iommu_ops = domain->driver;
+	if (!kvm_iommu_ops || !kvm_iommu_ops->attach_dev_nested) {
+		ret = -ENODEV;
+		domain_put(domain);
+		goto out_unlock;
+	}
+
+	ret = kvm_iommu_ops->attach_dev_nested(iommu_id, domain, endpoint_id, pasid, flags,
+					       s1_desc_hyp_va, s1_desc_size);
+	if (ret)
+		domain_put(domain);
+out_unlock:
+	hyp_spin_unlock(&kvm_iommu_domain_lock);
+	hyp_unpin_shared_mem(s1_desc_hyp_va, s1_desc_hyp_va_end);
+out_put_context:
+	pkvm_devices_put_context(iommu_id, endpoint_id);
+	return ret;
+}
+
+int kvm_iommu_iotlb_inv_nested_domain(pkvm_handle_t domain_id, unsigned long iova,
+				      size_t size, size_t granule, bool leaf)
+{
+	struct kvm_hyp_iommu_domain *domain;
+	struct kvm_iommu_ops *kvm_iommu_ops;
+
+	domain = handle_to_domain(domain_id);
+	if (!domain || domain_get(domain))
+		return -EINVAL;
+
+	kvm_iommu_ops = domain->driver;
+	if (!kvm_iommu_ops || !kvm_iommu_ops->iotlb_inv_nested_domain) {
+		domain_put(domain);
+		return -ENODEV;
+	}
+
+	kvm_iommu_ops->iotlb_inv_nested_domain(domain, iova, size, granule, leaf);
+	domain_put(domain);
+	return 0;
+}
+
+int kvm_iommu_nested_cfg_sync(pkvm_handle_t drv_id, pkvm_handle_t iommu_id,
+			      void *cmd_desc_hva, size_t cmd_desc_size)
+{
+	void *cmd_desc_hyp_va = kern_hyp_va(cmd_desc_hva);
+	void *cmd_desc_hyp_va_end = cmd_desc_hyp_va + cmd_desc_size;
+	struct kvm_iommu_ops *kvm_iommu_ops;
+	int ret;
+
+	ret = hyp_pin_shared_mem(cmd_desc_hyp_va, cmd_desc_hyp_va_end);
+	if (ret)
+		return ret;
+
+	kvm_iommu_ops = get_drv(drv_id);
+	if (!kvm_iommu_ops || !kvm_iommu_ops->nested_cfg_sync) {
+		ret = -ENODEV;
+		goto out_unpin_mem;
+	}
+
+	ret = kvm_iommu_ops->nested_cfg_sync(iommu_id, cmd_desc_hyp_va, cmd_desc_size);
+out_unpin_mem:
+	hyp_unpin_shared_mem(cmd_desc_hyp_va, cmd_desc_hyp_va_end);
+	return ret;
+}
+
 int kvm_iommu_attach_dev(pkvm_handle_t iommu_id, pkvm_handle_t domain_id,
 			 u32 endpoint_id, u32 pasid, u32 pasid_bits, unsigned long flags)
 {
