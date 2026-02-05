@@ -153,6 +153,7 @@ void pkvm_put_vm(struct pkvm_vm *pkvm_vm);
 struct pkvm_vcpu *pkvm_get_vcpu(int vm_handle, int vcpu_handle);
 void pkvm_put_vcpu(struct pkvm_vcpu *pkvm_vcpu);
 unsigned long pkvm_pcpu_tss(int cpu);
+int pkvm_start_secondary_vcpu(struct kvm *kvm, u32 apic_id, unsigned long start_ip);
 int pkvm_vcpu_enter_guest(struct kvm_vcpu *vcpu, bool force_immediate_exit,
 			  unsigned long *reqs_to_host);
 void pkvm_x86_ops_init(struct pkvm_x86_ops *ops);

@@ -845,6 +845,13 @@ static bool is_guest_vcpu_accessible(struct kvm_vcpu *vcpu, enum pkvm_hc hc)
 		 * before that we don't know yet if the pVM will run with pvmfw
 		 * or not, since the host VMM may issue the ioctl enabling pvmfw
 		 * either before or after using any of the above PV interfaces.
+		 *
+		 * For secondary vCPUs, also allow the host to pre-configure the
+		 * initial state of the vcpu, even though the hypervisor itself
+		 * will enforce the initial state before the secondary vcpu starts
+		 * running, in pkvm_vcpu_ap_entry_init(), discarding whatever
+		 * the host has pre-configured. This is just for simplicity, to
+		 * let the host KVM code work as usual.
 		 */
 		return !kvm_vcpu_has_run(vcpu);
 	default:
@@ -1328,6 +1335,12 @@ static void pkvm_vcpu_pvmfw_entry_init(struct kvm_vcpu *vcpu)
 	kvm_x86_call(set_idt)(vcpu, &dt);
 }
 
+static void pkvm_vcpu_ap_entry_init(struct kvm_vcpu *vcpu)
+{
+	kvm_vcpu_reset(vcpu, true);
+	kvm_vcpu_deliver_sipi_vector(vcpu, vcpu->arch.apic->sipi_vector);
+}
+
 static void update_vcpu_state_from_host(struct kvm_vcpu *vcpu)
 {
 	struct kvm_vcpu *shared_vcpu = to_pkvm_vcpu(vcpu)->shared_vcpu;
@@ -1395,13 +1408,6 @@ static void update_vcpu_state_from_host(struct kvm_vcpu *vcpu)
 		if (!pkvm_vcpu_is_pvmfw_bsp(vcpu) &&
 		    kvm_register_is_dirty(shared_vcpu, VCPU_REGS_RIP))
 			kvm_rip_write(vcpu, shared_vcpu->arch.regs[VCPU_REGS_RIP]);
-	} else if (unlikely(!kvm_vcpu_has_run(vcpu) && !kvm_vcpu_is_reset_bsp(vcpu))) {
-		/*
-		 * FIXME: temporarily let the host set the initial RIP for
-		 * secondary vCPUs for INIT/SIPI emulation, until we implement
-		 * a guest PV mechanism for secondary vCPUs startup.
-		 */
-		kvm_rip_write(vcpu, shared_vcpu->arch.regs[VCPU_REGS_RIP]);
 	}
 
 	pkvm_x86_call(update_vcpu_state_from_host)(vcpu);
@@ -1463,8 +1469,9 @@ static int pkvm_vcpu_run(struct kvm_vcpu *vcpu, bool force_immediate_exit,
 
 	if (pkvm_is_protected_vcpu(vcpu)) {
 		/*
-		 * Pairs with smp_store_release() in pkvm_vm_finalize() to make sure
-		 * that pvmfw_load_addr and bsp_vcpu_id are read after reading mp_state,
+		 * Pairs with smp_store_release() in pkvm_vm_finalize() and in
+		 * pkvm_start_secondary_vcpu(), to make sure that pvmfw_load_addr,
+		 * bsp_vcpu_id and sipi_vector are read after reading mp_state,
 		 * so they are read with up-to-date values.
 		 */
 		if (smp_load_acquire(&vcpu->arch.mp_state) != KVM_MP_STATE_RUNNABLE)
@@ -1473,6 +1480,8 @@ static int pkvm_vcpu_run(struct kvm_vcpu *vcpu, bool force_immediate_exit,
 		if (unlikely(!kvm_vcpu_has_run(vcpu))) {
 			if (pkvm_vcpu_is_pvmfw_bsp(vcpu))
 				pkvm_vcpu_pvmfw_entry_init(vcpu);
+			else if (!kvm_vcpu_is_reset_bsp(vcpu))
+				pkvm_vcpu_ap_entry_init(vcpu);
 		}
 	}
 
@@ -2005,6 +2014,58 @@ unsigned long pkvm_pcpu_tss(int cpu)
 
 	return (unsigned long)&pcpu->tss;
 #endif
+}
+
+int pkvm_start_secondary_vcpu(struct kvm *kvm, u32 apic_id, unsigned long start_ip)
+{
+	struct pkvm_vm *pkvm_vm = to_pkvm(kvm);
+	int ret = -EINVAL;
+	int i;
+
+	if (!pkvm_is_protected_vm(kvm))
+		return -EINVAL;
+
+	if (start_ip & ~0xff000)
+		return -EFAULT;
+
+	pkvm_spin_lock(&pkvm_vm->lock);
+
+	for (i = 0; i < kvm->created_vcpus; i++) {
+		struct kvm_vcpu *vcpu = &pkvm_vm->vcpus[i]->vcpu;
+
+		if (vcpu->vcpu_id != apic_id)
+			continue;
+
+		if (kvm_vcpu_is_reset_bsp(vcpu)) {
+			ret = -EINVAL;
+			break;
+		}
+
+		if (!lapic_in_kernel(vcpu)) {
+			ret = -EOPNOTSUPP;
+			break;
+		}
+
+		if (vcpu->arch.mp_state != KVM_MP_STATE_UNINITIALIZED) {
+			ret = -EBUSY;
+			break;
+		}
+
+		vcpu->arch.apic->sipi_vector = start_ip >> 12;
+		/*
+		 * Make sure to update sipi_vector before updating mp_state, i.e.
+		 * before allowing the vCPU to run. Pairs with smp_load_acquire()
+		 * in pkvm_vcpu_run().
+		 */
+		smp_store_release(&vcpu->arch.mp_state, KVM_MP_STATE_RUNNABLE);
+
+		ret = 0;
+		break;
+	}
+
+	pkvm_spin_unlock(&pkvm_vm->lock);
+
+	return ret;
 }
 
 void pkvm_x86_ops_init(struct pkvm_x86_ops *ops)
