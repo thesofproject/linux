@@ -82,12 +82,27 @@ void __init pkvm_reserve(void)
 		 pkvm_mem_base);
 }
 
+static phys_addr_t kvm_host_pa(void *addr)
+{
+	return __pa(addr);
+}
+
 static void *kvm_host_va(phys_addr_t phys)
 {
 	return __va(phys);
 }
 
-static void kvm_free_pkvm_page_range(struct pkvm_page_range range)
+static void *kvm_alloc_pkvm_page(void *flags)
+{
+	void *addr = (void *)__get_free_page(GFP_KERNEL_ACCOUNT);
+
+	if (addr && (unsigned long)flags & PKVM_MC_ACCOUNT_PGTABLE_PAGES)
+		kvm_account_pgtable_pages(addr, 1);
+
+	return addr;
+}
+
+static void kvm_free_pkvm_page_range(struct pkvm_page_range range, void *flags)
 {
 	void *vaddr = __va(range.addr);
 	u64 nr_pages = range.nr_pages;
@@ -95,13 +110,23 @@ static void kvm_free_pkvm_page_range(struct pkvm_page_range range)
 	if (WARN_ON_ONCE(!nr_pages))
 		return;
 
+	if ((unsigned long)flags & PKVM_MC_ACCOUNT_PGTABLE_PAGES)
+		kvm_account_pgtable_pages(vaddr, -nr_pages);
+
 	if (nr_pages > 1)
 		free_pages_exact(vaddr, nr_pages << PAGE_SHIFT);
 	else
 		free_page((unsigned long)vaddr);
 }
 
+int kvm_topup_pkvm_memcache(struct pkvm_memcache *mc, unsigned long min_pages)
+{
+	return topup_pkvm_memcache(mc, min_pages, kvm_alloc_pkvm_page,
+				   kvm_host_pa, (void *)mc->flags);
+}
+
 void kvm_free_pkvm_memcache(struct pkvm_memcache *mc)
 {
-	free_pkvm_memcache(mc, kvm_free_pkvm_page_range, kvm_host_va);
+	free_pkvm_memcache(mc, kvm_free_pkvm_page_range, kvm_host_va,
+			   (void *)mc->flags);
 }
