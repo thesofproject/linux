@@ -497,6 +497,28 @@ static int lookup_range_walker(struct pkvm_pgtable_visit_ctx *ctx,
 	return 0;
 }
 
+struct pgt_age_data {
+	bool mkold;
+	bool young;
+};
+
+static int age_walker(struct pkvm_pgtable_visit_ctx *ctx, unsigned long walk_flags,
+		      void *const arg)
+{
+	const struct pkvm_pgtable_ops *pgt_ops = ctx->pgt->pgt_ops;
+	struct pgt_age_data *data = arg;
+	void *ptep = ctx->ptep;
+
+	if (!pgt_ops->pte_present(ptep) || !pgt_ops->pte_young(ptep))
+		return 0;
+
+	data->young = true;
+	if (data->mkold)
+		pgt_ops->pte_mkold(ptep);
+
+	return 0;
+}
+
 struct pgt_walk_data {
 	struct pkvm_pgtable *pgt;
 	unsigned long addr;
@@ -912,4 +934,35 @@ void pkvm_pgtable_destroy(struct pkvm_pgtable *pgt)
 	WARN_ON(pkvm_pgtable_walk(pgt, 0, pkvm_pgtable_max_size(pgt), &walker));
 
 	pgt->mm_ops->put_page(__pkvm_va(pgt->root_pa));
+}
+
+/**
+ * pkvm_pgtable_test_clear_young() - Test and optionally clear the access flag
+ *				     in the page table entries for the given
+ *				     virtual address range.
+ * @pgt:	The page table.
+ * @vaddr:	The start address of virtual address range.
+ * @size:	The size of the virtual address range.
+ * @mkold:	If true, clear the access flag if it is set.
+ *
+ * Does not flush the TLB after clearing the access flag. It is the caller's
+ * responsibility to flush the TLB when needed.
+ *
+ * Return: true if any of the visited PTEs had the access flag set.
+ */
+bool pkvm_pgtable_test_clear_young(struct pkvm_pgtable *pgt, unsigned long vaddr,
+				   unsigned long size, bool mkold)
+{
+	struct pgt_age_data data = {
+		.mkold = mkold,
+		.young = false,
+	};
+	struct pkvm_pgtable_walker walker = {
+		.cb = age_walker,
+		.arg = &data,
+		.walk_flags = PKVM_PGTABLE_WALK_LEAF,
+	};
+
+	WARN_ON_ONCE(pkvm_pgtable_walk(pgt, vaddr, size, &walker));
+	return data.young;
 }
