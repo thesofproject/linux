@@ -403,6 +403,35 @@ static void drain_pool(struct pkvm_pool *pool, struct pkvm_memcache *host_mc)
 	}
 }
 
+static void *admit_host_page(void *arg)
+{
+	struct pkvm_memcache *host_mc = arg;
+	void *page;
+
+	page = pop_pkvm_memcache_page(host_mc, pkvm_host_gpa_to_virt);
+	if (!page)
+		return NULL;
+
+	/*
+	 * The page will be cleared by zalloc_page when allocating it from
+	 * the memcache, thus no need to clear it now.
+	 */
+	if (WARN_ON(pkvm_host_donate_hyp(__pkvm_pa(page), PAGE_SIZE, false))) {
+		push_pkvm_memcache_page(host_mc, page, pkvm_virt_to_host_gpa);
+		return NULL;
+	}
+
+	return page;
+}
+
+/* Refill our local memcache by popping pages from the one provided by the host. */
+static int refill_memcache(struct pkvm_memcache *mc, unsigned long min_pages,
+			   struct pkvm_memcache *host_mc)
+{
+	return topup_pkvm_memcache(mc, min_pages, admit_host_page,
+				   pkvm_virt_to_phys, host_mc);
+}
+
 int pkvm_hyp_mmu_init(void *pool_base, unsigned long pool_pages)
 {
 	struct pkvm_pgtable_cap cap = {
@@ -577,6 +606,17 @@ void pkvm_guest_mmu_destroy(struct pkvm_vm *pkvm_vm)
 	 * contains all pages freed during that step.
 	 */
 	drain_pool(&pkvm_vm->mmu_pool, &shared_pkvm->guest_mmu_teardown_mc);
+}
+
+int pkvm_guest_mmu_refill_memcache(struct pkvm_vcpu *pkvm_vcpu)
+{
+	struct kvm_vcpu *vcpu = &pkvm_vcpu->vcpu;
+	struct pkvm_memcache *host_mc;
+
+	host_mc = &pkvm_vcpu->shared_vcpu->arch.pkvm.guest_mmu_memcache;
+
+	return refill_memcache(&vcpu->arch.pkvm.guest_mmu_memcache,
+			       host_mc->count, host_mc);
 }
 
 void pkvm_guest_mmu_free_memcache(struct pkvm_vcpu *pkvm_vcpu)

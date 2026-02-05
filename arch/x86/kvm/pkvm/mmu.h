@@ -37,6 +37,7 @@ void pkvm_guest_mmu_setup(const struct pkvm_pgtable_ops *pgt_ops,
 			  struct pkvm_pgtable_cap pgt_cap);
 int pkvm_guest_mmu_init(struct pkvm_vm *pkvm_vm, phys_addr_t pgd_pa);
 void pkvm_guest_mmu_destroy(struct pkvm_vm *pkvm_vm);
+int pkvm_guest_mmu_refill_memcache(struct pkvm_vcpu *pkvm_vcpu);
 void pkvm_guest_mmu_free_memcache(struct pkvm_vcpu *pkvm_vcpu);
 
 #endif /* __PKVM_X86_MMU_H */
