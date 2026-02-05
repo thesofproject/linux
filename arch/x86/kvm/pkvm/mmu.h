@@ -31,4 +31,7 @@ static inline void pkvm_host_mmu_unlock(void)
 	pkvm_spin_unlock(&host_mmu_lock);
 }
 
+void pkvm_guest_mmu_setup(const struct pkvm_pgtable_ops *pgt_ops,
+			  struct pkvm_pgtable_cap pgt_cap);
+
 #endif /* __PKVM_X86_MMU_H */

@@ -155,6 +155,12 @@ static void host_ept_flush_tlb(struct pkvm_pgtable *pgt,
 	}
 }
 
+static void guest_ept_flush_tlb(struct pkvm_pgtable *pgt,
+				unsigned long vaddr, unsigned long size)
+{
+	/* TODO */
+}
+
 static u64 ept_pgstate_mask(void)
 {
 	return EPT_PAGE_STATE_MASK;
@@ -196,6 +202,29 @@ static const struct pkvm_pgtable_ops host_ept_pgt_ops = {
 	.pte_set = ept_pte_set,
 	.pte_get = ept_pte_get,
 	.flush_tlb = host_ept_flush_tlb,
+	.pte_mk_pgstate = ept_pte_mk_pgstate,
+	.pte_pgstate = ept_pte_pgstate,
+	.pgstate_mask = ept_pgstate_mask,
+};
+
+static const struct pkvm_pgtable_ops guest_ept_pgt_ops = {
+	.pte_present = ept_pte_present,
+	.pte_annotated = ept_pte_annotated,
+	.pte_huge = ept_pte_huge,
+	.pte_mkhuge = ept_pte_mkhuge,
+	.pte_to_phys = ept_pte_to_phys,
+	.pte_to_prot = ept_pte_to_prot,
+	.calc_pte_perm = ept_calc_pte_perm,
+	.calc_pte_memtype = ept_calc_pte_memtype,
+	.vaddr_to_index = ept_pte_to_index,
+	.level_to_size = ept_level_to_size,
+	.level_to_mask = ept_level_to_mask,
+	.pte_is_leaf = ept_pte_is_leaf,
+	.pte_size = ept_pte_size,
+	.pte_count = ept_pte_count,
+	.pte_set = ept_pte_set,
+	.pte_get = ept_pte_get,
+	.flush_tlb = guest_ept_flush_tlb,
 	.pte_mk_pgstate = ept_pte_mk_pgstate,
 	.pte_pgstate = ept_pte_pgstate,
 	.pgstate_mask = ept_pgstate_mask,
@@ -363,4 +392,21 @@ void pkvm_flush_host_ept(void)
 		return;
 
 	ept_sync_context(construct_host_eptp(host_ept));
+}
+
+void pkvm_guest_ept_setup(void)
+{
+	struct pkvm_pgtable_cap cap = {
+		.level = cpu_has_vmx_ept_5levels() ? 5 : 4,
+		.allowed_pgsz = 1 << PG_LEVEL_4K,
+		.table_prot = VMX_EPT_RWX_MASK,
+		.flush_tlb_lazy = true,
+	};
+
+	if (cpu_has_vmx_ept_2m_page())
+		cap.allowed_pgsz |= 1 << PG_LEVEL_2M;
+	if (cpu_has_vmx_ept_1g_page())
+		cap.allowed_pgsz |= 1 << PG_LEVEL_1G;
+
+	pkvm_guest_mmu_setup(&guest_ept_pgt_ops, cap);
 }
