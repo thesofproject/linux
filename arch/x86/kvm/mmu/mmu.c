@@ -7495,6 +7495,10 @@ restart:
 
 void kvm_arch_flush_shadow_all(struct kvm *kvm)
 {
+	/* pKVM hypervisor takes care of MMU teardown when destroying VM. */
+	if (/*enable_pkvm*/ 0)
+		return;
+
 	kvm_mmu_zap_all(kvm);
 }
 
