@@ -893,6 +893,8 @@ struct pkvm_mapping {
 	kvm_pfn_t pfn;
 	gfn_t nr_pages;
 	gfn_t __subtree_last;	/* Internal member for interval tree */
+
+	struct page *pinned_page;
 };
 
 void pkvm_mapping_insert(struct pkvm_mapping *node,
