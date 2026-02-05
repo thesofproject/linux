@@ -721,6 +721,10 @@ static void pkvm_vm_destroy(struct kvm *kvm)
 	 * (which is currently completely postponed until vm_destroy).
 	 */
 	for_each_pkvm_mapping(kvm, 0, U64_MAX, mapping) {
+		WARN_ON_ONCE((mapping->pinned_page != NULL) ^ pkvm_is_protected_vm(kvm));
+		if (mapping->pinned_page)
+			put_page(mapping->pinned_page);
+
 		pkvm_mapping_remove(mapping, &kvm->arch.pkvm.mappings);
 		kfree(mapping);
 	}

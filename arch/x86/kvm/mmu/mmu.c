@@ -5006,6 +5006,25 @@ static int pkvm_page_fault(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)
 	mapping->gfn = base_gfn;
 	mapping->pfn = fault->pfn;
 	mapping->nr_pages = nr_pages;
+
+	if (pkvm_is_protected_vcpu(vcpu)) {
+		if (WARN_ON_ONCE(!fault->refcounted_page)) {
+			r = -EFAULT;
+			goto out_unlock;
+		}
+
+		/*
+		 * Pin pVM's page to prevent kernel from trying to swap or
+		 * migrate it.
+		 *
+		 * FIXME: this still doesn't fully prevent kernel from trying
+		 * to access this page in all cases. We should eventually
+		 * switch to guest_memfd instead.
+		 */
+		get_page(fault->refcounted_page);
+		mapping->pinned_page = fault->refcounted_page;
+	}
+
 	pkvm_mapping_insert(mapping, &vcpu->kvm->arch.pkvm.mappings);
 
 out_unlock:
