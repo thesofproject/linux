@@ -3420,3 +3420,17 @@ pkg_zip(
 exports_files([
     "Makefile",
 ])
+
+ddk_headers(
+    name = "xe_global_includes",
+    hdrs = [
+        "include/trace/define_trace.h",
+    ],
+    includes = [
+        "include",
+    ],
+    linux_includes = [
+        "include/trace",
+    ],
+)
+
