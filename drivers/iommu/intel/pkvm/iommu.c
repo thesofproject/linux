@@ -171,6 +171,13 @@ static int iommu_init(struct intel_iommu *iommu)
 		return ret;
 	}
 
+	ret = pkvm_host_donate_hyp_mmio(iommu->reg_phys, PAGE_ALIGN(iommu->reg_size));
+	if (ret) {
+		pkvm_err("iommu%d: failed to donate MMIO space to hyp(err=%d)\n",
+			 iommu->seq_id, ret);
+		return ret;
+	}
+
 	pkvm_spin_lock_init(&iommu->lock);
 
 	/*
