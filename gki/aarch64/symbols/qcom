@@ -1777,6 +1777,15 @@
   lowpan_register_netdevice
   lowpan_unregister_netdev
   lowpan_unregister_netdevice
+  LZ4_compress_fast
+  LZ4_compress_fast_continue
+  LZ4_decompress_safe
+  LZ4_decompress_safe_continue
+  LZ4_loadDict
+  LZ4_setStreamDecode
+  lzo1x_1_compress
+  lzo1x_decompress_safe
+  lzorle1x_1_compress
   mac_pton
   mas_find
   match_string
@@ -1827,6 +1836,9 @@
   mempool_destroy
   mempool_free
   mempool_free_slab
+  mempool_kfree
+  mempool_kmalloc
+  mempool_resize
   memremap
   memscan
   mem_section
@@ -1955,6 +1967,7 @@
   net_selftest
   net_selftest_get_count
   net_selftest_get_strings
+  next_arg
   nfc_add_se
   nfc_allocate_device
   nfc_alloc_recv_skb
@@ -2380,6 +2393,7 @@
   preempt_schedule
   preempt_schedule_notrace
   prepare_to_wait_event
+  prepare_to_wait_exclusive
   print_hex_dump
   _printk
   _printk_deferred
@@ -2520,6 +2534,7 @@
   rcu_unexpedite_gp
   rcuwait_wake_up
   rdev_get_drvdata
+  read_comp_algo_dictionary
   reboot_mode
   rebuild_sched_domains
   reclaim_shmem_address_space
