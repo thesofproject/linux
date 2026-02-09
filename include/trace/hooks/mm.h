@@ -365,6 +365,9 @@ DECLARE_HOOK(android_vh_zs_shrinker_bypass,
 DECLARE_HOOK(android_vh_adjust_nr_reclaimed,
 	TP_PROTO(struct folio *folio, unsigned int *nr_reclaimed),
 	TP_ARGS(folio, nr_reclaimed));
+DECLARE_HOOK(android_vh_mmap_region,
+	TP_PROTO(struct vm_area_struct *vma, unsigned long addr),
+	TP_ARGS(vma, addr));
 #endif /* _TRACE_HOOK_MM_H */
 
 /* This part must be outside protection */

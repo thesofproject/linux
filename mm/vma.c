@@ -6,6 +6,8 @@
 
 #include "vma_internal.h"
 #include "vma.h"
+#undef CREATE_TRACE_POINTS
+#include <trace/hooks/mm.h>
 
 struct mmap_state {
 	struct mm_struct *mm;
@@ -2713,6 +2715,7 @@ static unsigned long __mmap_region(struct file *file, unsigned long addr,
 	if (have_mmap_prepare)
 		set_vma_user_defined_fields(vma, &map);
 
+	trace_android_vh_mmap_region(vma, addr);
 	__mmap_complete(&map, vma);
 
 	return addr;
