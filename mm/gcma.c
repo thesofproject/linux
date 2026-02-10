@@ -629,8 +629,16 @@ void gcma_alloc_range(unsigned long start_pfn, unsigned long end_pfn)
 	 * GCMA returns pages with refcount 1 and expects them to have
 	 * the same refcount 1 whet they are freed.
 	 */
-	for (pfn = start_pfn; pfn <= end_pfn; pfn++)
-		set_page_count(pfn_to_page(pfn), 1);
+	for (pfn = start_pfn; pfn <= end_pfn; pfn++) {
+		struct page *page = pfn_to_page(pfn);
+
+		set_page_count(page, 1);
+		/*
+		 * page_type used to store area_id shares space with _mapcount
+		 * which has to be -1 upon allocation.
+		 */
+		atomic_set(&page->_mapcount, -1);
+	}
 }
 EXPORT_SYMBOL_GPL(gcma_alloc_range);
 
