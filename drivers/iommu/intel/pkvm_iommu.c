@@ -350,7 +350,23 @@ int pkvm_alloc_domain(struct device_domain_info *info, struct dmar_domain *domai
 	return ret;
 }
 
+static void *host_va(phys_addr_t phys)
+{
+	return __va(phys);
+}
+
+static void free_domain_memcache(struct pkvm_memcache *mc)
+{
+	while (mc->count)
+		iommu_free_pages(pop_pkvm_memcache_page(mc, host_va));
+}
+
 int pkvm_free_domain(struct dmar_domain *domain)
 {
-	return pkvm_hypercall(iommu_free_domain, virt_to_phys(domain->pgd));
+	union pkvm_hc_data out;
+	int ret;
+
+	ret = pkvm_hypercall_out(iommu_free_domain, &out, virt_to_phys(domain->pgd));
+	free_domain_memcache(&out.iommu_free_domain.memcache);
+	return ret;
 }

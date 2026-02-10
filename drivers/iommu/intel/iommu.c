@@ -3693,18 +3693,16 @@ static void intel_iommu_domain_free(struct iommu_domain *domain)
 		struct iommu_pages_list freelist =
 			IOMMU_PAGES_LIST_INIT(freelist);
 
-		domain_unmap(dmar_domain, 0, DOMAIN_MAX_PFN(dmar_domain->gaw),
-			     &freelist);
-		iommu_put_pages_list(&freelist);
-
 		if (pkvm_enabled()) {
 			int ret = pkvm_free_domain(dmar_domain);
 
 			if (ret)
 				pr_err("pkvm_free_domain failed [pgd=%p] (err=%d)\n",
 					dmar_domain->pgd, ret);
-			else
-				iommu_free_pages(dmar_domain->pgd);
+		} else {
+			domain_unmap(dmar_domain, 0, DOMAIN_MAX_PFN(dmar_domain->gaw),
+				     &freelist);
+			iommu_put_pages_list(&freelist);
 		}
 	}
 
