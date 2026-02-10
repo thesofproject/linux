@@ -669,7 +669,8 @@ static int __maybe_unused intel_suspend(struct device *dev)
 		return 0;
 	}
 
-	ret = sdw_intel_stop_bus(sdw, false);
+	/* No need to keep the SoundWire clock active in system suspend */
+	ret = sdw_intel_stop_bus(sdw, true);
 	if (ret < 0) {
 		dev_err(dev, "%s: cannot stop bus: %d\n", __func__, ret);
 		return ret;
