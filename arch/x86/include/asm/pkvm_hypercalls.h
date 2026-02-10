@@ -102,6 +102,8 @@ PKVM_HC_INOUT(iommu_pasid_setup_sl)
 PKVM_HC_IN(iommu_pasid_teardown)
 PKVM_HC_IN(iommu_alloc_domain)
 PKVM_HC_OUT(iommu_free_domain)
+PKVM_HC_INOUT(iommu_domain_map)
+PKVM_HC(iommu_domain_unmap)
 #endif
 
 #undef PKVM_HC
