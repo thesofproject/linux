@@ -366084,7 +366084,7 @@ elf_symbol {
   name: "__traceiter_android_vh_pcpu_rwsem_lock_acquired"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x21234fff
+  crc: 0x1f908581
   type_id: 0x9be96fa7
   full_name: "__traceiter_android_vh_pcpu_rwsem_lock_acquired"
 }
@@ -366093,7 +366093,7 @@ elf_symbol {
   name: "__traceiter_android_vh_pcpu_rwsem_lock_released"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x21234fff
+  crc: 0x1f908581
   type_id: 0x9be96fa7
   full_name: "__traceiter_android_vh_pcpu_rwsem_lock_released"
 }
