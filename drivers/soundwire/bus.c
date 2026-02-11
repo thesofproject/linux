@@ -1411,6 +1411,7 @@ static int sdw_slave_set_frequency(struct sdw_slave *slave)
 		dev_err(&slave->dev,
 			"SDW_SCP_BUSCLOCK_SCALE_B1 write failed:%d\n", ret);
 
+	slave->scale_index = scale_index;
 	return ret;
 }
 
