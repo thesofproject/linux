@@ -691,6 +691,9 @@ static int sdw_program_params(struct sdw_bus *bus, bool prepare)
 		if (scale_index < 0)
 			return scale_index;
 
+		if (scale_index == slave->scale_index)
+			continue;
+
 		/* Skip the unattached Peripherals */
 		if (!completion_done(&slave->enumeration_complete)) {
 			dev_warn(&slave->dev,
@@ -703,6 +706,7 @@ static int sdw_program_params(struct sdw_bus *bus, bool prepare)
 			dev_err(&slave->dev, "SDW_SCP_BUSCLOCK_SCALE register write failed\n");
 			return ret;
 		}
+		slave->scale_index = scale_index;
 	}
 
 manager_runtime:
