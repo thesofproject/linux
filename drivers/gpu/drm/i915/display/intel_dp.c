@@ -1696,7 +1696,7 @@ static int intel_dp_max_bpp(struct intel_dp *intel_dp,
 	struct intel_connector *connector = intel_dp->attached_connector;
 	int bpp, bpc;
 
-	bpc = crtc_state->pipe_bpp / 3;
+	bpc = crtc_state->max_pipe_bpp / 3;
 
 	if (intel_dp->dfp.max_bpc)
 		bpc = min_t(int, bpc, intel_dp->dfp.max_bpc);
@@ -2688,7 +2688,7 @@ intel_dp_compute_config_limits(struct intel_dp *intel_dp,
 		 * previously. This hack should be removed once we have the
 		 * proper retry logic in place.
 		 */
-		limits->pipe.max_bpp = min(crtc_state->pipe_bpp, 24);
+		limits->pipe.max_bpp = min(crtc_state->max_pipe_bpp, 24);
 	} else {
 		limits->pipe.max_bpp = intel_dp_max_bpp(intel_dp, crtc_state,
 							respect_downstream_limits);
@@ -2728,6 +2728,27 @@ intel_dp_compute_config_limits(struct intel_dp *intel_dp,
 
 	if (dsc && !intel_dp_dsc_compute_pipe_bpp_limits(connector, limits))
 		return false;
+
+	/*
+	 * crtc_state->pipe_bpp is the non-DP specific baseline (platform /
+	 * EDID) maximum pipe BPP limited by the max-BPC connector property
+	 * request. Since by now pipe.max_bpp is <= the above baseline
+	 * maximum BPP, the only remaining reason for adjusting pipe.max_bpp
+	 * is the max-BPC connector property request. Adjust pipe.max_bpp to
+	 * this request within the current valid pipe.min_bpp .. pipe.max_bpp
+	 * range.
+	 */
+	limits->pipe.max_bpp = clamp(crtc_state->pipe_bpp, limits->pipe.min_bpp,
+				     limits->pipe.max_bpp);
+	if (dsc)
+		limits->pipe.max_bpp = align_max_sink_dsc_input_bpp(connector,
+								    limits->pipe.max_bpp);
+
+	if (limits->pipe.max_bpp != crtc_state->pipe_bpp)
+		drm_dbg_kms(display->drm,
+			    "[CONNECTOR:%d:%s] Adjusting requested max pipe bpp %d -> %d\n",
+			    connector->base.base.id, connector->base.name,
+			    crtc_state->pipe_bpp, limits->pipe.max_bpp);
 
 	if (is_mst || intel_dp->use_max_params) {
 		/*

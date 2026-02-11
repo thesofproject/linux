@@ -4355,11 +4355,23 @@ compute_sink_pipe_bpp(const struct drm_connector_state *conn_state,
 	struct intel_display *display = to_intel_display(crtc_state);
 	struct drm_connector *connector = conn_state->connector;
 	const struct drm_display_info *info = &connector->display_info;
+	int edid_bpc = info->bpc ? : 8;
 	int target_pipe_bpp;
+	int max_edid_bpp;
+
+	max_edid_bpp = bpc_to_bpp(edid_bpc);
+	if (max_edid_bpp < 0)
+		return max_edid_bpp;
 
 	target_pipe_bpp = bpc_to_bpp(conn_state->max_bpc);
 	if (target_pipe_bpp < 0)
 		return target_pipe_bpp;
+
+	/*
+	 * The maximum pipe BPP is the minimum of the max platform BPP and
+	 * the max EDID BPP.
+	 */
+	crtc_state->max_pipe_bpp = min(crtc_state->pipe_bpp, max_edid_bpp);
 
 	if (target_pipe_bpp < crtc_state->pipe_bpp) {
 		drm_dbg_kms(display->drm,
