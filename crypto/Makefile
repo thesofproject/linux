@@ -226,23 +226,22 @@ UBSAN_SANITIZE_jitterentropy-fips.o = n
 
 crypto-fips-objs := drbg.o ecb.o cbc.o ctr.o cts.o gcm.o xts.o hmac.o cmac.o \
 		    aes_generic.o \
-		    jitterentropy.o jitterentropy-kcapi.o \
-		    sha256_generic.o sha512_generic.o \
+		    sha256.o \
+		    sha512.o \
 		    sha3_generic.o \
-		    lib-crypto-aes.o lib-crypto-gf128mul.o lib-crypto-memneq.o \
-		    lib-crypto-sha256.o lib-crypto-utils.o
+		    jitterentropy.o \
+		    jitterentropy-kcapi.o
 crypto-fips-objs := $(foreach o,$(crypto-fips-objs),$(o:.o=-fips.o))
-
-# get the arch to add its objects to $(crypto-fips-objs)
-include $(srctree)/arch/$(ARCH)/crypto/Kbuild.fips140
 
 $(obj)/%-fips.o: KBUILD_CFLAGS += $(FIPS140_CFLAGS)
 $(obj)/%-fips.o: $(src)/%.c FORCE
 	$(call if_changed_rule,cc_o_c)
-$(obj)/lib-%-fips.o: $(srctree)/lib/%.c FORCE
-	$(call if_changed_rule,cc_o_c)
-$(obj)/lib-crypto-%-fips.o: $(srctree)/lib/crypto/%.c FORCE
-	$(call if_changed_rule,cc_o_c)
+
+# get the crypto library to add its objects to $(crypto-fips-objs)
+include $(srctree)/lib/crypto/Kbuild.fips140
+
+# get the arch to add its objects to $(crypto-fips-objs)
+include $(srctree)/arch/$(ARCH)/crypto/Kbuild.fips140
 
 fips140-objs := \
 	fips140-alg-registration.o \
