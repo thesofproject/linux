@@ -298639,7 +298639,7 @@ elf_symbol {
   name: "__page_frag_cache_drain"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xb70a737c
+  crc: 0x5ffe4db5
   type_id: 0x102e93ac
   full_name: "__page_frag_cache_drain"
 }
@@ -315411,7 +315411,7 @@ elf_symbol {
   name: "mark_page_accessed"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x11a64a52
+  crc: 0xf3748477
   type_id: 0x11388634
   full_name: "mark_page_accessed"
 }
@@ -316251,7 +316251,7 @@ elf_symbol {
   name: "mpage_read_folio"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x3be02bd7
+  crc: 0x776512b9
   type_id: 0x956e6587
   full_name: "mpage_read_folio"
 }
@@ -316260,7 +316260,7 @@ elf_symbol {
   name: "mpage_readahead"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x75e1dd8a
+  crc: 0x43709179
   type_id: 0x19fc4f29
   full_name: "mpage_readahead"
 }
@@ -316269,7 +316269,7 @@ elf_symbol {
   name: "mpage_writepages"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x8bf00c36
+  crc: 0x6de45893
   type_id: 0x986b6304
   full_name: "mpage_writepages"
 }
@@ -317746,7 +317746,7 @@ elf_symbol {
   name: "pagecache_get_page"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x963d9d07
+  crc: 0x1bd4b21f
   type_id: 0xb8320a1a
   full_name: "pagecache_get_page"
 }
@@ -322289,7 +322289,7 @@ elf_symbol {
   name: "set_page_dirty"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xd0d22904
+  crc: 0x0bc498e5
   type_id: 0xff048ca3
   full_name: "set_page_dirty"
 }
@@ -326713,7 +326713,7 @@ elf_symbol {
   name: "truncate_inode_pages_final"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x5c8b126a
+  crc: 0x2d8d16d9
   type_id: 0x15f8fb52
   full_name: "truncate_inode_pages_final"
 }
@@ -326722,7 +326722,7 @@ elf_symbol {
   name: "truncate_pagecache"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x1558b1ee
+  crc: 0xb4a3ae4b
   type_id: 0x16e7aaa1
   full_name: "truncate_pagecache"
 }
@@ -326731,7 +326731,7 @@ elf_symbol {
   name: "truncate_setsize"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x1558b1ee
+  crc: 0xb4a3ae4b
   type_id: 0x16e7aaa1
   full_name: "truncate_setsize"
 }
@@ -328099,7 +328099,7 @@ elf_symbol {
   name: "unlock_page"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x11a64a52
+  crc: 0xf3748477
   type_id: 0x11388634
   full_name: "unlock_page"
 }
