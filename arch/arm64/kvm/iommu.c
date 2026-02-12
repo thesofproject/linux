@@ -243,7 +243,7 @@ int kvm_iommu_map_pages(pkvm_handle_t domain_id, unsigned long iova,
 		*total_mapped += mapped;
 	} while (*total_mapped < size && !kvm_iommu_topup_memcache(&res, gfp));
 	if (*total_mapped < size)
-		return -EINVAL;
+		return res.a0;
 	return 0;
 }
 EXPORT_SYMBOL(kvm_iommu_map_pages);
