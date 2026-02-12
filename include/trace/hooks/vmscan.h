@@ -19,6 +19,9 @@ DECLARE_HOOK(android_vh_mglru_should_abort_scan,
 	TP_PROTO(unsigned long nr_reclaimed, unsigned long nr_to_reclaim,
 	unsigned int order, bool *bypass),
 	TP_ARGS(nr_to_reclaim, nr_reclaimed, order, bypass));
+DECLARE_HOOK(android_vh_mglru_should_abort_scan_ex,
+	TP_PROTO(u64 *ext, bool *bypass),
+	TP_ARGS(ext, bypass));
 DECLARE_HOOK(android_vh_tune_swappiness,
 	TP_PROTO(int *swappiness),
 	TP_ARGS(swappiness));
