@@ -1261,7 +1261,6 @@ kernel_build(
     name = "fips140",
     outs = [],
     base_kernel = ":kernel_aarch64",
-    build_config = "build.config.common",
     defconfig = "arch/arm64/configs/gki_defconfig",
     make_goals = ["modules"],
     makefile = ":Makefile",
