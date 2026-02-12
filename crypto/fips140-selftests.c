@@ -781,22 +781,6 @@ static const struct fips_test fips140_selftests[] __initconst = {
 		}
 	},
 
-	/* Tests for SHA-1 */
-	{
-		.alg		= "sha1",
-		.impls		= {
-			/* All implementations of "sha1" */
-			"sha1-generic",
-			"sha1-ce"
-		},
-		.func		= fips_test_hash,
-		.hash		= {
-			.message	= fips_message,
-			.message_size	= sizeof(fips_message),
-			.digest		= fips_sha1_digest,
-			.digest_size	= sizeof(fips_sha1_digest)
-		}
-	},
 	/*
 	 * Tests for all SHA-256 implementations other than the sha256() library
 	 * function.  As per the IG, these tests also fulfill the tests for the

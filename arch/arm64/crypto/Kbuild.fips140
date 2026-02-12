@@ -4,7 +4,6 @@
 # for FIPS 140 certification as builtin objects
 #
 
-sha1-ce-y := sha1-ce-glue.o sha1-ce-core.o
 sha2-ce-y := sha2-ce-glue.o sha2-ce-core.o
 sha512-ce-y := sha512-ce-glue.o sha512-ce-core.o
 ghash-ce-y := ghash-ce-glue.o ghash-ce-core.o
@@ -17,7 +16,7 @@ aes-arm64-y := aes-cipher-core.o aes-cipher-glue.o
 aes-neon-bs-y := aes-neonbs-core.o aes-neonbs-glue.o
 
 crypto-arm64-fips-src	  := $(srctree)/arch/arm64/crypto/
-crypto-arm64-fips-modules := sha1-ce.o sha2-ce.o sha512-ce.o ghash-ce.o \
+crypto-arm64-fips-modules := sha2-ce.o sha512-ce.o ghash-ce.o \
 			     aes-ce-cipher.o aes-ce-blk.o aes-neon-blk.o \
 			     sha256-arm64.o sha512-arm64.o aes-arm64.o \
 			     aes-neon-bs.o
