@@ -27,11 +27,11 @@
 #include <linux/module.h>
 #include <crypto/aead.h>
 #include <crypto/aes.h>
+#include <crypto/fips140-lib-overrides.h>
 #include <crypto/hash.h>
 #include <crypto/sha2.h>
 #include <crypto/skcipher.h>
 #include <crypto/rng.h>
-#include <trace/hooks/fips140.h>
 
 #include "fips140-module.h"
 #include "internal.h"
@@ -653,44 +653,71 @@ out:
 	return ok;
 }
 
-static void fips140_sha256(void *p, const u8 *data, unsigned int len, u8 *out,
-			   int *hook_inuse)
-{
-	sha256(data, len, out);
-	*hook_inuse = 1;
-}
+#define FUNC(func) .func = func
+static const struct fips140_lib_funcs lib_funcs = {
+	/* lib/crypto/aes.c */
+	FUNC(aes_expandkey),
+	FUNC(aes_encrypt),
+	FUNC(aes_decrypt),
 
-static void fips140_aes_expandkey(void *p, struct crypto_aes_ctx *ctx,
-				  const u8 *in_key, unsigned int key_len,
-				  int *err)
-{
-	*err = aes_expandkey(ctx, in_key, key_len);
-}
+	/* lib/crypto/sha256.c */
+	FUNC(sha224_init),
+	FUNC(sha256_init),
+	FUNC(__sha256_update),
+	FUNC(sha224_final),
+	FUNC(sha256_final),
+	FUNC(sha224),
+	FUNC(sha256),
+	FUNC(sha256_finup_2x),
+	FUNC(sha256_finup_2x_is_optimized),
+	FUNC(hmac_sha224_preparekey),
+	FUNC(hmac_sha256_preparekey),
+	FUNC(__hmac_sha256_init),
+	FUNC(hmac_sha224_init_usingrawkey),
+	FUNC(hmac_sha256_init_usingrawkey),
+	FUNC(hmac_sha224_final),
+	FUNC(hmac_sha256_final),
+	FUNC(hmac_sha224),
+	FUNC(hmac_sha256),
+	FUNC(hmac_sha224_usingrawkey),
+	FUNC(hmac_sha256_usingrawkey),
 
-static void fips140_aes_encrypt(void *priv, const struct crypto_aes_ctx *ctx,
-				u8 *out, const u8 *in, int *hook_inuse)
-{
-	aes_encrypt(ctx, out, in);
-	*hook_inuse = 1;
-}
-
-static void fips140_aes_decrypt(void *priv, const struct crypto_aes_ctx *ctx,
-				u8 *out, const u8 *in, int *hook_inuse)
-{
-	aes_decrypt(ctx, out, in);
-	*hook_inuse = 1;
-}
+	/* lib/crypto/sha512.c */
+	FUNC(sha384_init),
+	FUNC(sha512_init),
+	FUNC(__sha512_update),
+	FUNC(sha384_final),
+	FUNC(sha512_final),
+	FUNC(sha384),
+	FUNC(sha512),
+	FUNC(hmac_sha384_preparekey),
+	FUNC(hmac_sha512_preparekey),
+	FUNC(__hmac_sha512_init),
+	FUNC(hmac_sha384_init_usingrawkey),
+	FUNC(hmac_sha512_init_usingrawkey),
+	FUNC(hmac_sha384_final),
+	FUNC(hmac_sha512_final),
+	FUNC(hmac_sha384),
+	FUNC(hmac_sha512),
+	FUNC(hmac_sha384_usingrawkey),
+	FUNC(hmac_sha512_usingrawkey),
+};
+#undef FUNC
 
 static bool update_fips140_library_routines(void)
 {
-	int ret;
+	void *const *p = (const void *)&lib_funcs;
+	size_t num_funcs = sizeof(lib_funcs) / sizeof(p[0]);
 
-	ret = register_trace_android_vh_sha256(fips140_sha256, NULL) ?:
-	      register_trace_android_vh_aes_expandkey(fips140_aes_expandkey, NULL) ?:
-	      register_trace_android_vh_aes_encrypt(fips140_aes_encrypt, NULL) ?:
-	      register_trace_android_vh_aes_decrypt(fips140_aes_decrypt, NULL);
+	/* Ensure that every entry in fips140_lib_funcs is filled in. */
+	for (size_t i = 0; i < num_funcs; i++) {
+		if (p[i] == NULL)
+			panic("Missing entry in fips140_lib_funcs");
+	}
 
-	return ret == 0;
+	register_fips140_lib_funcs(&lib_funcs);
+	pr_info("registered %zu library functions\n", num_funcs);
+	return true;
 }
 
 /* Initialize the FIPS 140 module */
