@@ -12,6 +12,9 @@
 DECLARE_RESTRICTED_HOOK(android_rvh_set_balance_anon_file_reclaim,
 			TP_PROTO(bool *balance_anon_file_reclaim),
 			TP_ARGS(balance_anon_file_reclaim), 1);
+DECLARE_RESTRICTED_HOOK(android_rvh_kswapd_shrink_node,
+			TP_PROTO(unsigned long *nr_reclaimed),
+			TP_ARGS(nr_reclaimed), 1);
 DECLARE_HOOK(android_vh_mglru_should_abort_scan,
 	TP_PROTO(unsigned long nr_reclaimed, unsigned long nr_to_reclaim,
 	unsigned int order, bool *bypass),
@@ -72,6 +75,15 @@ DECLARE_HOOK(android_vh_tune_inactive_ratio,
 DECLARE_HOOK(android_vh_shrink_node,
         TP_PROTO(pg_data_t *pgdat, struct mem_cgroup *memcg),
         TP_ARGS(pgdat, memcg));
+DECLARE_HOOK(android_vh_keep_reclaimed_folio,
+	TP_PROTO(struct folio *folio, int refcount, bool *keep),
+	TP_ARGS(folio, refcount, keep));
+DECLARE_HOOK(android_vh_clear_reclaimed_folio,
+	TP_PROTO(struct folio *folio, bool reclaimed),
+	TP_ARGS(folio, reclaimed));
+DECLARE_HOOK(android_vh_evict_folios_bypass,
+	TP_PROTO(struct folio *folio, bool *bypass),
+	TP_ARGS(folio, bypass));
 #endif /* _TRACE_HOOK_VMSCAN_H */
 /* This part must be outside protection */
 #include <trace/define_trace.h>
