@@ -39,6 +39,7 @@
   anon_inode_getfile
   arc4_crypt
   arc4_setkey
+  __arch_clear_user
   __arch_copy_from_user
   arch_freq_scale
   arch_stack_walk
@@ -225,6 +226,7 @@
   cgroup_taskset_first
   cgroup_taskset_next
   __check_object_size
+  check_move_unevictable_folios
   check_zeroed_user
   class_create
   class_create_file_ns
@@ -767,6 +769,11 @@
   dma_heap_get_dev
   dma_heap_get_drvdata
   dma_heap_get_name
+  dma_iova_free
+  dma_iova_link
+  dma_iova_sync
+  dma_iova_try_alloc
+  dma_iova_unlink
   dmam_alloc_attrs
   dma_map_page_attrs
   dma_map_resource
@@ -1097,6 +1104,7 @@
   flush_delayed_work
   flush_work
   __flush_workqueue
+  __folio_batch_release
   __folio_lock
   __folio_put
   folio_unlock
@@ -2127,6 +2135,7 @@
   of_reserved_mem_lookup
   of_root
   of_translate_address
+  of_translate_dma_region
   on_each_cpu_cond_mask
   oops_in_progress
   open_candev
@@ -2856,6 +2865,7 @@
   __sg_page_iter_dma_next
   __sg_page_iter_next
   __sg_page_iter_start
+  shmem_read_folio_gfp
   shmem_read_mapping_page_gfp
   show_rcu_gp_kthreads
   show_rcu_tasks_classic_gp_kthread
@@ -3017,6 +3027,7 @@
   sock_efree
   sockfd_lookup
   sock_gettstamp
+  sock_gen_put
   sock_init_data
   sock_no_accept
   sock_no_bind
@@ -3825,6 +3836,7 @@
   wait_for_completion_interruptible
   wait_for_completion_interruptible_timeout
   wait_for_completion_killable
+  wait_for_completion_state
   wait_for_completion_timeout
   wait_for_device_probe
   __wait_rcu_gp
