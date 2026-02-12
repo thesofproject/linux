@@ -220,8 +220,6 @@ static inline void rwsem_assert_held_write(const struct rw_semaphore *sem)
 		rwsem_assert_held_write_nolockdep(sem);
 }
 
-extern struct task_struct *rwsem_writer_owner(struct rw_semaphore *sem);
-
 /*
  * lock for reading
  */
