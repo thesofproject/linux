@@ -1336,6 +1336,8 @@ int sdca_parse_function(struct device *dev,
 			struct sdca_function_desc *desc,
 			struct sdca_function_data *function);
 
+const char *sdca_find_terminal_name(enum sdca_terminal_type type);
+
 struct sdca_control *sdca_selector_find_control(struct device *dev,
 						struct sdca_entity *entity,
 						const int sel);
