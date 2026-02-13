@@ -353,6 +353,9 @@ typedef unsigned int __bitwise blk_features_t;
  */
 #define BLK_FEAT_ORDERED_HWQ		((__force blk_features_t)(1u << 30))
 
+/* Whether restoring the zoned write order is supported. */
+#define BLK_FEAT_ZWOR			((__force blk_features_t)(1u << 31))
+
 /*
  * Flags automatically inherited when stacking limits.
  */
