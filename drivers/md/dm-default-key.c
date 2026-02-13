@@ -405,6 +405,7 @@ static void default_key_io_hints(struct dm_target *ti,
 	limits->physical_block_size =
 		max_t(unsigned int, limits->physical_block_size, sector_size);
 	limits->io_min = max_t(unsigned int, limits->io_min, sector_size);
+	limits->features |= BLK_FEAT_ORDERED_HWQ;
 }
 
 #ifdef CONFIG_BLK_DEV_ZONED
