@@ -1079,6 +1079,11 @@ pointer_reference {
   pointee_type_id: 0x387a6934
 }
 pointer_reference {
+  id: 0x048f8b50
+  kind: POINTER
+  pointee_type_id: 0x387ecbdc
+}
+pointer_reference {
   id: 0x0490bb4a
   kind: POINTER
   pointee_type_id: 0x38020bb6
@@ -1382,6 +1387,11 @@ pointer_reference {
   id: 0x0586cc54
   kind: POINTER
   pointee_type_id: 0x3c5bd7ce
+}
+pointer_reference {
+  id: 0x058e9fb2
+  kind: POINTER
+  pointee_type_id: 0x3c7a9857
 }
 pointer_reference {
   id: 0x0591125a
@@ -1797,6 +1807,11 @@ pointer_reference {
   id: 0x074f1a14
   kind: POINTER
   pointee_type_id: 0x377c8ecf
+}
+pointer_reference {
+  id: 0x0750af14
+  kind: POINTER
+  pointee_type_id: 0x37025ace
 }
 pointer_reference {
   id: 0x0756289d
@@ -5309,6 +5324,11 @@ pointer_reference {
   pointee_type_id: 0x13f52a95
 }
 pointer_reference {
+  id: 0x0e6e4c40
+  kind: POINTER
+  pointee_type_id: 0x13f9d79c
+}
+pointer_reference {
   id: 0x0e708ec6
   kind: POINTER
   pointee_type_id: 0x1382dd85
@@ -7862,6 +7882,11 @@ pointer_reference {
   id: 0x1692cf3f
   kind: POINTER
   pointee_type_id: 0x700bda61
+}
+pointer_reference {
+  id: 0x16a1216c
+  kind: POINTER
+  pointee_type_id: 0x70c4632f
 }
 pointer_reference {
   id: 0x16a379ef
@@ -10952,6 +10977,11 @@ pointer_reference {
   id: 0x25f5cdb3
   kind: POINTER
   pointee_type_id: 0xbd97d052
+}
+pointer_reference {
+  id: 0x25f79f9b
+  kind: POINTER
+  pointee_type_id: 0xbd9e98f0
 }
 pointer_reference {
   id: 0x25fa8fb1
@@ -23584,6 +23614,11 @@ pointer_reference {
   pointee_type_id: 0xcb0c91cc
 }
 pointer_reference {
+  id: 0x38545a77
+  kind: POINTER
+  pointee_type_id: 0xcb118f41
+}
+pointer_reference {
   id: 0x3855f122
   kind: POINTER
   pointee_type_id: 0xcb172217
@@ -24224,6 +24259,11 @@ pointer_reference {
   pointee_type_id: 0xc209267b
 }
 pointer_reference {
+  id: 0x3a13b0a9
+  kind: POINTER
+  pointee_type_id: 0xc20e243a
+}
+pointer_reference {
   id: 0x3a17b1db
   kind: POINTER
   pointee_type_id: 0xc21e21f0
@@ -24597,6 +24637,11 @@ pointer_reference {
   id: 0x3b143836
   kind: POINTER
   pointee_type_id: 0xc6100647
+}
+pointer_reference {
+  id: 0x3b15288b
+  kind: POINTER
+  pointee_type_id: 0xc61444b3
 }
 pointer_reference {
   id: 0x3b19ae48
@@ -25202,6 +25247,11 @@ pointer_reference {
   id: 0x3c792b1b
   kind: POINTER
   pointee_type_id: 0xdba44af3
+}
+pointer_reference {
+  id: 0x3c7a9857
+  kind: POINTER
+  pointee_type_id: 0xdbaa87c2
 }
 pointer_reference {
   id: 0x3c81805a
@@ -25862,6 +25912,11 @@ pointer_reference {
   id: 0x3e1c2855
   kind: POINTER
   pointee_type_id: 0xd23047c9
+}
+pointer_reference {
+  id: 0x3e204430
+  kind: POINTER
+  pointee_type_id: 0xd2c1f65d
 }
 pointer_reference {
   id: 0x3e23507a
@@ -35272,6 +35327,10 @@ array {
   element_type_id: 0x4585663f
 }
 array {
+  id: 0xf56e4ccf
+  element_type_id: 0xc55f08ff
+}
+array {
   id: 0xf67b8436
   element_type_id: 0xc9082b19
 }
@@ -36310,6 +36369,11 @@ member {
 member {
   id: 0x336ede77
   type_id: 0x42950f87
+  offset: 384
+}
+member {
+  id: 0x3377d6b6
+  type_id: 0x42f12c83
   offset: 384
 }
 member {
@@ -41251,6 +41315,11 @@ member {
   type_id: 0xf90dfce8
 }
 member {
+  id: 0x24e4d74d
+  name: "addr"
+  type_id: 0xc9082b19
+}
+member {
   id: 0x24e4e5b0
   name: "addr"
   type_id: 0xc93e017b
@@ -41766,10 +41835,10 @@ member {
   type_id: 0x92233392
 }
 member {
-  id: 0x6ea10151
+  id: 0x6ea10f95
   name: "adr"
   type_id: 0x295c7202
-  offset: 160
+  offset: 224
 }
 member {
   id: 0x6c30a137
@@ -41955,6 +42024,12 @@ member {
   name: "af"
   type_id: 0x0abe9fd1
   offset: 384
+}
+member {
+  id: 0xd1f548f2
+  name: "af_number_list"
+  type_id: 0xf55fd19d
+  offset: 256
 }
 member {
   id: 0xb375ae2c
@@ -45703,6 +45778,11 @@ member {
   offset: 10112
 }
 member {
+  id: 0x48662041
+  name: "auxdev"
+  type_id: 0x7337ecd4
+}
+member {
   id: 0x58b520b5
   name: "av_sgid_attr"
   type_id: 0x391be192
@@ -45982,6 +46062,12 @@ member {
   offset: 320
 }
 member {
+  id: 0x220a4212
+  name: "bCountryCode"
+  type_id: 0xb3e7bac9
+  offset: 32
+}
+member {
   id: 0x0fdfca44
   name: "bDataInterface"
   type_id: 0xb3e7bac9
@@ -45998,6 +46084,11 @@ member {
   name: "bDescriptorSubtype"
   type_id: 0xb3e7bac9
   offset: 16
+}
+member {
+  id: 0xfab9d2bd
+  name: "bDescriptorType"
+  type_id: 0xb3e7bac9
 }
 member {
   id: 0xfab9d95b
@@ -46218,6 +46309,12 @@ member {
   name: "bNumConfigurations"
   type_id: 0xb3e7bac9
   offset: 136
+}
+member {
+  id: 0xdee0f805
+  name: "bNumDescriptors"
+  type_id: 0xb3e7bac9
+  offset: 40
 }
 member {
   id: 0x6f203337
@@ -47172,6 +47269,12 @@ member {
   name: "bcdDevice_lo"
   type_id: 0xe8034002
   offset: 48
+}
+member {
+  id: 0xfded8406
+  name: "bcdHID"
+  type_id: 0x9bd401b6
+  offset: 16
 }
 member {
   id: 0x01f53df9
@@ -51041,6 +51144,12 @@ member {
   offset: 320
 }
 member {
+  id: 0x4355f3d9
+  name: "busy_max_delay"
+  type_id: 0x4585663f
+  offset: 352
+}
+member {
   id: 0xe42c71a2
   name: "busy_timeout"
   type_id: 0x4585663f
@@ -54547,6 +54656,12 @@ member {
   offset: 6912
 }
 member {
+  id: 0xea7f04db
+  name: "channels"
+  type_id: 0x38545a77
+  offset: 64
+}
+member {
   id: 0xea7f8124
   name: "channels"
   type_id: 0x38d23361
@@ -56070,6 +56185,11 @@ member {
   offset: 8256
 }
 member {
+  id: 0x45f2792a
+  name: "clock"
+  type_id: 0x3c7a9857
+}
+member {
   id: 0x5f8d8a58
   name: "clock_adjtime"
   type_id: 0x2c557718
@@ -56492,6 +56612,12 @@ member {
   offset: 768
 }
 member {
+  id: 0xf9862bc6
+  name: "clusters"
+  type_id: 0x0750af14
+  offset: 192
+}
+member {
   id: 0x831db28a
   name: "clx"
   type_id: 0x4585663f
@@ -56822,6 +56948,18 @@ member {
   type_id: 0xc9082b19
   offset: 136
   bitsize: 8
+}
+member {
+  id: 0x4b670416
+  name: "cn"
+  type_id: 0x6720d32f
+  offset: 64
+}
+member {
+  id: 0xea36bc38
+  name: "cn_list"
+  type_id: 0x92233392
+  offset: 192
 }
 member {
   id: 0x141e15ad
@@ -57276,6 +57414,11 @@ member {
   name: "colour_plane_id"
   type_id: 0xb3e7bac9
   offset: 120
+}
+member {
+  id: 0x4974176b
+  name: "cols"
+  type_id: 0x4585663f
 }
 member {
   id: 0xbd645b56
@@ -58761,6 +58904,12 @@ member {
   type_id: 0x2f0e69de
 }
 member {
+  id: 0xcf93c081
+  name: "connector"
+  type_id: 0xc017c7b5
+  offset: 96
+}
+member {
   id: 0x4d3f3813
   name: "connector_free_list"
   type_id: 0x0bf3e543
@@ -59315,6 +59464,12 @@ member {
   offset: 4288
 }
 member {
+  id: 0x478a8d50
+  name: "controls"
+  type_id: 0x16a1216c
+  offset: 256
+}
+member {
   id: 0x47a42e9e
   name: "controls"
   type_id: 0x3806a5e7
@@ -59325,6 +59480,11 @@ member {
   name: "controls"
   type_id: 0x3806a5e7
   offset: 3968
+}
+member {
+  id: 0x47b9db45
+  name: "controls"
+  type_id: 0x25f79f9b
 }
 member {
   id: 0x47bde5a6
@@ -61590,6 +61750,11 @@ member {
   type_id: 0x914dbfdc
 }
 member {
+  id: 0x9e9d7d04
+  name: "cs"
+  type_id: 0x20d581a8
+}
+member {
   id: 0xb5dc91ff
   name: "cs"
   type_id: 0x92233392
@@ -63838,6 +64003,12 @@ member {
   offset: 192
 }
 member {
+  id: 0xffaaf2be
+  name: "data"
+  type_id: 0x38d23361
+  offset: 64
+}
+member {
   id: 0xffab319e
   name: "data"
   type_id: 0x391f15ea
@@ -65533,6 +65704,12 @@ member {
   offset: 1600
 }
 member {
+  id: 0x7ee2eab2
+  name: "deferrable"
+  type_id: 0x6d7f5ff6
+  offset: 488
+}
+member {
   id: 0xf04d714b
   name: "deferred"
   type_id: 0xfb1df068
@@ -66327,6 +66504,11 @@ member {
   name: "desc"
   type_id: 0x0483e6f8
   offset: 1280
+}
+member {
+  id: 0x87e03e71
+  name: "desc"
+  type_id: 0x3a13b0a9
 }
 member {
   id: 0x87e3bc9e
@@ -75160,6 +75342,12 @@ member {
   name: "entities"
   type_id: 0xd3c80119
   offset: 1600
+}
+member {
+  id: 0xe2b678d6
+  name: "entities"
+  type_id: 0x3c7a9857
+  offset: 128
 }
 member {
   id: 0x449adaa1
@@ -84944,6 +85132,11 @@ member {
   offset: 320
 }
 member {
+  id: 0x5493d010
+  name: "from_ps"
+  type_id: 0x6720d32f
+}
+member {
   id: 0xcad7e6ac
   name: "from_user"
   type_id: 0x6d7f5ff6
@@ -85378,6 +85571,12 @@ member {
   offset: 1152
 }
 member {
+  id: 0x34e5ba85
+  name: "func_dev"
+  type_id: 0x3e204430
+  offset: 64
+}
+member {
   id: 0xa2c33570
   name: "func_idx"
   type_id: 0xc9082b19
@@ -85553,6 +85752,12 @@ member {
   name: "funcs"
   type_id: 0x3e7afc58
   offset: 448
+}
+member {
+  id: 0xab24a7c5
+  name: "function"
+  type_id: 0x4f21ed89
+  offset: 6912
 }
 member {
   id: 0xab42dc85
@@ -86206,6 +86411,11 @@ member {
   name: "gdev"
   type_id: 0x1a8fcc43
   offset: 128
+}
+member {
+  id: 0x0bdf5eb6
+  name: "ge"
+  type_id: 0x2bb72780
 }
 member {
   id: 0x7ca5b28d
@@ -88983,6 +89193,12 @@ member {
   type_id: 0x3e10b518
 }
 member {
+  id: 0xd3ae726c
+  name: "group"
+  type_id: 0x3c7a9857
+  offset: 128
+}
+member {
   id: 0xd3be0a3d
   name: "group"
   type_id: 0x2c0aa9ee
@@ -89854,6 +90070,12 @@ member {
   offset: 11208
 }
 member {
+  id: 0x0961c332
+  name: "has_default"
+  type_id: 0x6d7f5ff6
+  offset: 496
+}
+member {
   id: 0xa182581f
   name: "has_eht"
   type_id: 0x6d7f5ff6
@@ -89883,6 +90105,12 @@ member {
   type_id: 0x4585663f
   offset: 1220
   bitsize: 1
+}
+member {
+  id: 0x9e9d231c
+  name: "has_fixed"
+  type_id: 0x6d7f5ff6
+  offset: 504
 }
 member {
   id: 0xa56cecb9
@@ -91122,9 +91350,26 @@ member {
   offset: 32
 }
 member {
+  id: 0x1f0c5e96
+  name: "hid"
+  type_id: 0x0de4c6b1
+}
+member {
   id: 0x1f443f36
   name: "hid"
   type_id: 0x4585663f
+}
+member {
+  id: 0x5cfd0eb8
+  name: "hid_desc"
+  type_id: 0x006be54d
+  offset: 640
+}
+member {
+  id: 0x72a945fd
+  name: "hid_report_desc"
+  type_id: 0x1df06cce
+  offset: 576
 }
 member {
   id: 0xdedeb537
@@ -91174,6 +91419,17 @@ member {
   offset: 60928
 }
 member {
+  id: 0x7a69b6be
+  name: "hide"
+  type_id: 0x555a085d
+}
+member {
+  id: 0x819fa6c8
+  name: "hide_reside_function_num"
+  type_id: 0x4585663f
+  offset: 512
+}
+member {
   id: 0x0348f16f
   name: "hidinput"
   type_id: 0x3132930f
@@ -91190,6 +91446,18 @@ member {
   name: "hidraw"
   type_id: 0x18bd6530
   offset: 58496
+}
+member {
+  id: 0x3a16afc5
+  name: "hidrx_ids"
+  type_id: 0x1bf16028
+  offset: 128
+}
+member {
+  id: 0x1b4d751d
+  name: "hidtx_ids"
+  type_id: 0x1bf16028
+  offset: 64
 }
 member {
   id: 0x6606ec81
@@ -97260,6 +97528,12 @@ member {
   offset: 128
 }
 member {
+  id: 0x8d484d51
+  name: "init_table"
+  type_id: 0x048f8b50
+  offset: 64
+}
+member {
   id: 0xe71046c7
   name: "init_termios"
   type_id: 0x0c59c5c5
@@ -98427,6 +98701,12 @@ member {
   offset: 3712
 }
 member {
+  id: 0xc7dcc8e6
+  name: "interrupt_position"
+  type_id: 0x6720d32f
+  offset: 256
+}
+member {
   id: 0x02d1cd00
   name: "interrupt_service_routine"
   type_id: 0x2d244fcd
@@ -99444,6 +99724,11 @@ member {
   name: "iostat_cpu"
   type_id: 0x1a8ea527
   offset: 640
+}
+member {
+  id: 0x50b1eb57
+  name: "iot"
+  type_id: 0x24ef37ae
 }
 member {
   id: 0x9f65eb07
@@ -100908,6 +101193,12 @@ member {
   offset: 9944
 }
 member {
+  id: 0xd923bb47
+  name: "is_dataport"
+  type_id: 0x6d7f5ff6
+  offset: 192
+}
+member {
   id: 0xfe00ba75
   name: "is_dirty_writeback"
   type_id: 0x0cb1f3d5
@@ -102154,6 +102445,11 @@ member {
   name: "kctl"
   type_id: 0x2b8f13b3
   offset: 128
+}
+member {
+  id: 0xfc726bd0
+  name: "kctl"
+  type_id: 0x1cdba504
 }
 member {
   id: 0xc5eae45f
@@ -104347,6 +104643,12 @@ member {
   name: "launder_folio"
   type_id: 0x2fe70c6a
   offset: 768
+}
+member {
+  id: 0x6e5b7d72
+  name: "layers"
+  type_id: 0x295c7202
+  offset: 480
 }
 member {
   id: 0x4d141913
@@ -109408,6 +109710,11 @@ member {
   offset: 11912
 }
 member {
+  id: 0x3ee85ed6
+  name: "managed"
+  type_id: 0x058e9fb2
+}
+member {
   id: 0x3ef3e6ff
   name: "managed"
   type_id: 0x1e3e7f78
@@ -111598,9 +111905,27 @@ member {
   offset: 112
 }
 member {
+  id: 0x102f8d21
+  name: "max_delay"
+  type_id: 0x0e6e4c40
+  offset: 64
+}
+member {
   id: 0x1046ca64
   name: "max_delay"
   type_id: 0x6720d32f
+  offset: 32
+}
+member {
+  id: 0x10646c35
+  name: "max_delay"
+  type_id: 0x4585663f
+  offset: 544
+}
+member {
+  id: 0x10646fd1
+  name: "max_delay"
+  type_id: 0x4585663f
   offset: 32
 }
 member {
@@ -116921,6 +117246,12 @@ member {
   type_id: 0xddf37902
 }
 member {
+  id: 0x874d4e72
+  name: "mode"
+  type_id: 0xd05c9be0
+  offset: 448
+}
+member {
   id: 0x8754136a
   name: "mode"
   type_id: 0xc9082b19
@@ -117356,6 +117687,12 @@ member {
   id: 0x8421c9a6
   name: "modes"
   type_id: 0x6720d32f
+}
+member {
+  id: 0x847df8bc
+  name: "modes"
+  type_id: 0x3b15288b
+  offset: 64
 }
 member {
   id: 0x848fe61f
@@ -120422,6 +120759,12 @@ member {
   name: "nbcon_state"
   type_id: 0x74d29cf1
   offset: 1280
+}
+member {
+  id: 0x13047f8a
+  name: "nbits"
+  type_id: 0x6720d32f
+  offset: 96
 }
 member {
   id: 0x1326d317
@@ -125793,6 +126136,12 @@ member {
   offset: 6976
 }
 member {
+  id: 0x5facbbd6
+  name: "num_channels"
+  type_id: 0x6720d32f
+  offset: 32
+}
+member {
   id: 0xe42bc64c
   name: "num_children"
   type_id: 0x33756485
@@ -125845,6 +126194,12 @@ member {
   name: "num_closed_socks"
   type_id: 0x914dbfdc
   offset: 160
+}
+member {
+  id: 0xa04ca706
+  name: "num_clusters"
+  type_id: 0x6720d32f
+  offset: 320
 }
 member {
   id: 0x3566dfff
@@ -125950,6 +126305,18 @@ member {
   name: "num_consumer_supplies"
   type_id: 0x6720d32f
   offset: 1856
+}
+member {
+  id: 0xc3579d51
+  name: "num_controls"
+  type_id: 0x6720d32f
+  offset: 352
+}
+member {
+  id: 0xc3579de9
+  name: "num_controls"
+  type_id: 0x6720d32f
+  offset: 64
 }
 member {
   id: 0xc3579ffa
@@ -126132,6 +126499,12 @@ member {
   offset: 64
 }
 member {
+  id: 0x775c4b68
+  name: "num_entities"
+  type_id: 0x6720d32f
+  offset: 288
+}
+member {
   id: 0x4e4798c5
   name: "num_entries"
   type_id: 0x4585663f
@@ -126268,6 +126641,18 @@ member {
   offset: 20296
 }
 member {
+  id: 0x67603636
+  name: "num_hidrx_ids"
+  type_id: 0x6720d32f
+  offset: 224
+}
+member {
+  id: 0xdbb30f65
+  name: "num_hidtx_ids"
+  type_id: 0x6720d32f
+  offset: 192
+}
+member {
   id: 0x32f14c09
   name: "num_hook_entries"
   type_id: 0x914dbfdc
@@ -126319,6 +126704,12 @@ member {
   name: "num_info"
   type_id: 0x4585663f
   offset: 6752
+}
+member {
+  id: 0xfe55c0aa
+  name: "num_init_table"
+  type_id: 0x6720d32f
+  offset: 256
 }
 member {
   id: 0xd0fbffe5
@@ -126489,6 +126880,12 @@ member {
   offset: 160
 }
 member {
+  id: 0x2b6a2e0b
+  name: "num_managed"
+  type_id: 0x6720d32f
+  offset: 128
+}
+member {
   id: 0x600b2c08
   name: "num_mapped_sgs"
   type_id: 0x4585663f
@@ -126511,6 +126908,18 @@ member {
   name: "num_max"
   type_id: 0x4585663f
   offset: 384
+}
+member {
+  id: 0x74b1580e
+  name: "num_max_delay"
+  type_id: 0x6720d32f
+  offset: 160
+}
+member {
+  id: 0x7d629ff3
+  name: "num_modes"
+  type_id: 0x6720d32f
+  offset: 128
 }
 member {
   id: 0xe23b3c92
@@ -126934,6 +127343,12 @@ member {
   offset: 144
 }
 member {
+  id: 0xd6e265e5
+  name: "num_sources"
+  type_id: 0x6720d32f
+  offset: 320
+}
+member {
   id: 0x59b63ccb
   name: "num_srcu_structs"
   type_id: 0x4585663f
@@ -127059,6 +127474,12 @@ member {
   name: "num_tracepoints"
   type_id: 0x4585663f
   offset: 8480
+}
+member {
+  id: 0xabc6b85e
+  name: "num_transducer"
+  type_id: 0x6720d32f
+  offset: 160
 }
 member {
   id: 0xc0e3d7ab
@@ -129599,6 +130020,12 @@ member {
   name: "opt_addr_space"
   type_id: 0x2ee07f9d
   offset: 128
+}
+member {
+  id: 0x8966e4be
+  name: "opt_descs"
+  type_id: 0xf56e4ccf
+  offset: 72
 }
 member {
   id: 0x3b247fdc
@@ -133458,6 +133885,11 @@ member {
   name: "pdata"
   type_id: 0x2d222ff1
   offset: 2688
+}
+member {
+  id: 0xb32b3ed9
+  name: "pde"
+  type_id: 0x88336ba0
 }
 member {
   id: 0x58733d10
@@ -142710,6 +143142,12 @@ member {
   offset: 192
 }
 member {
+  id: 0x3ddb722d
+  name: "purpose"
+  type_id: 0xdbe46517
+  offset: 32
+}
+member {
   id: 0x8c475fb7
   name: "purpose"
   type_id: 0x362692fd
@@ -144396,6 +144834,12 @@ member {
   id: 0x0e0f62b4
   name: "range"
   type_id: 0xb3e7bac9
+}
+member {
+  id: 0x0e29f4b7
+  name: "range"
+  type_id: 0x95767e83
+  offset: 320
 }
 member {
   id: 0x0e758d25
@@ -147619,6 +148063,12 @@ member {
   offset: 192
 }
 member {
+  id: 0x991919f1
+  name: "reference"
+  type_id: 0x6720d32f
+  offset: 128
+}
+member {
   id: 0x997155ff
   name: "reference"
   type_id: 0x0f651fb6
@@ -148431,6 +148881,12 @@ member {
   id: 0xa3374b46
   name: "related_cpus"
   type_id: 0x99caa0ae
+  offset: 64
+}
+member {
+  id: 0x308410d6
+  name: "relationship"
+  type_id: 0xe001dc01
   offset: 64
 }
 member {
@@ -152850,6 +153306,12 @@ member {
   offset: 240
 }
 member {
+  id: 0x2f1beca6
+  name: "rows"
+  type_id: 0x4585663f
+  offset: 32
+}
+member {
   id: 0x4b6f46e1
   name: "rpa"
   type_id: 0xa61911b2
@@ -152945,6 +153407,12 @@ member {
   name: "rps_map"
   type_id: 0x1eb02e8b
   offset: 512
+}
+member {
+  id: 0xcce64176
+  name: "rpt_desc"
+  type_id: 0xc55f08ff
+  offset: 48
 }
 member {
   id: 0x0d1ed448
@@ -157995,6 +158463,18 @@ member {
   name: "sel"
   type_id: 0x7047fa95
   offset: 1120
+}
+member {
+  id: 0x33bfb05d
+  name: "sel"
+  type_id: 0x6720d32f
+  offset: 64
+}
+member {
+  id: 0x33bfb987
+  name: "sel"
+  type_id: 0x6720d32f
+  offset: 32
 }
 member {
   id: 0x33ce7cb1
@@ -164464,6 +164944,12 @@ member {
   name: "source_stream"
   type_id: 0xe62ebf07
   offset: 96
+}
+member {
+  id: 0xf70ec541
+  name: "sources"
+  type_id: 0x058e9fb2
+  offset: 192
 }
 member {
   id: 0xf720feb9
@@ -175478,6 +175964,12 @@ member {
   offset: 2240
 }
 member {
+  id: 0xb411a915
+  name: "to_ps"
+  type_id: 0x6720d32f
+  offset: 32
+}
+member {
   id: 0x5583ccf6
   name: "to_skip"
   type_id: 0x27a7c613
@@ -178989,6 +179481,12 @@ member {
   offset: 32
 }
 member {
+  id: 0x5c13eb90
+  name: "type"
+  type_id: 0x453a37b0
+  offset: 288
+}
+member {
   id: 0x5c1a40aa
   name: "type"
   type_id: 0x4c957f4c
@@ -179016,6 +179514,11 @@ member {
   id: 0x5c20fa3d
   name: "type"
   type_id: 0x762f432d
+}
+member {
+  id: 0x5c216448
+  name: "type"
+  type_id: 0x77b136dd
 }
 member {
   id: 0x5c224c83
@@ -179377,6 +179880,12 @@ member {
   type_id: 0x2d6f1c55
 }
 member {
+  id: 0x5c7c34f7
+  name: "type"
+  type_id: 0x2ae80aae
+  offset: 96
+}
+member {
   id: 0x5c7f2cfe
   name: "type"
   type_id: 0x29f042bf
@@ -179480,6 +179989,12 @@ member {
   name: "type"
   type_id: 0xc9082b19
   offset: 128
+}
+member {
+  id: 0x5c9fd59c
+  name: "type"
+  type_id: 0xc9082b19
+  offset: 192
 }
 member {
   id: 0x5c9fdcc7
@@ -179762,6 +180277,12 @@ member {
   name: "type"
   type_id: 0xabd4afbf
   offset: 96
+}
+member {
+  id: 0x5cfe4297
+  name: "type"
+  type_id: 0xa89308a3
+  offset: 64
 }
 member {
   id: 0x6bb4266c
@@ -182032,6 +182553,12 @@ member {
   offset: 352
 }
 member {
+  id: 0x8883e196
+  name: "us"
+  type_id: 0x4585663f
+  offset: 64
+}
+member {
   id: 0x072f08a8
   name: "usage"
   type_id: 0x4585663f
@@ -183759,6 +184286,12 @@ member {
   offset: 32
 }
 member {
+  id: 0x4f3fbf93
+  name: "val"
+  type_id: 0x295c7202
+  offset: 32
+}
+member {
   id: 0x4f48115f
   name: "val"
   type_id: 0x5ef3445b
@@ -183784,6 +184317,12 @@ member {
   id: 0x4f67c989
   name: "val"
   type_id: 0x712753fa
+}
+member {
+  id: 0x4f71c78a
+  name: "val"
+  type_id: 0x6720d32f
+  offset: 96
 }
 member {
   id: 0x4f71c7cb
@@ -184354,6 +184893,12 @@ member {
   name: "values"
   type_id: 0xedf277ba
   offset: 192
+}
+member {
+  id: 0x0f860e64
+  name: "values"
+  type_id: 0x13580d6c
+  offset: 128
 }
 member {
   id: 0x0f98efcc
@@ -187041,6 +187586,12 @@ member {
   name: "wDatagramLength"
   type_id: 0x9bd401b6
   offset: 16
+}
+member {
+  id: 0x1e1ddfda
+  name: "wDescriptorLength"
+  type_id: 0x9bd401b6
+  offset: 8
 }
 member {
   id: 0x3b766446
@@ -195544,6 +196095,18 @@ struct_union {
     member_id: 0x512600a3
     member_id: 0x69652f76
     member_id: 0xb62caf05
+  }
+}
+struct_union {
+  id: 0x42f12c83
+  kind: UNION
+  definition {
+    bytesize: 96
+    member_id: 0x50b1eb57
+    member_id: 0x9e9d7d04
+    member_id: 0xb32b3ed9
+    member_id: 0x0bdf5eb6
+    member_id: 0x7a69b6be
   }
 }
 struct_union {
@@ -214375,6 +214938,16 @@ struct_union {
   }
 }
 struct_union {
+  id: 0xc55f08ff
+  kind: STRUCT
+  name: "hid_class_descriptor"
+  definition {
+    bytesize: 3
+    member_id: 0xfab9d2bd
+    member_id: 0x1e1ddfda
+  }
+}
+struct_union {
   id: 0xe038416b
   kind: STRUCT
   name: "hid_collection"
@@ -214384,6 +214957,21 @@ struct_union {
     member_id: 0x5c135d23
     member_id: 0x072f08a8
     member_id: 0x86ff43f7
+  }
+}
+struct_union {
+  id: 0x006be54d
+  kind: STRUCT
+  name: "hid_descriptor"
+  definition {
+    bytesize: 9
+    member_id: 0xe74b71e2
+    member_id: 0xfab9d95b
+    member_id: 0xfded8406
+    member_id: 0x220a4212
+    member_id: 0xdee0f805
+    member_id: 0xcce64176
+    member_id: 0x8966e4be
   }
 }
 struct_union {
@@ -233355,14 +233943,176 @@ struct_union {
   }
 }
 struct_union {
+  id: 0xcb118f41
+  kind: STRUCT
+  name: "sdca_channel"
+  definition {
+    bytesize: 12
+    member_id: 0xcc480c42
+    member_id: 0x3ddb722d
+    member_id: 0x308410d6
+  }
+}
+struct_union {
+  id: 0x37025ace
+  kind: STRUCT
+  name: "sdca_cluster"
+  definition {
+    bytesize: 16
+    member_id: 0xcc480c42
+    member_id: 0x5facbbd6
+    member_id: 0xea7f04db
+  }
+}
+struct_union {
+  id: 0x70c4632f
+  kind: STRUCT
+  name: "sdca_control"
+  definition {
+    bytesize: 64
+    member_id: 0x0517038f
+    member_id: 0x33bfb05d
+    member_id: 0x13047f8a
+    member_id: 0x0f860e64
+    member_id: 0xea36bc38
+    member_id: 0xc7dcc8e6
+    member_id: 0x5c13eb90
+    member_id: 0x0e29f4b7
+    member_id: 0x874d4e72
+    member_id: 0x6e5b7d72
+    member_id: 0x7ee2eab2
+    member_id: 0x0961c332
+    member_id: 0x9e9d231c
+  }
+}
+struct_union {
+  id: 0x95767e83
+  kind: STRUCT
+  name: "sdca_control_range"
+  definition {
+    bytesize: 16
+    member_id: 0x4974176b
+    member_id: 0x2f1beca6
+    member_id: 0xffaaf2be
+  }
+}
+struct_union {
+  id: 0xd2c1f65d
+  kind: STRUCT
+  name: "sdca_dev"
+  definition {
+    bytesize: 912
+    member_id: 0x48662041
+    member_id: 0xab24a7c5
+  }
+}
+struct_union {
   id: 0xe2098f0a
   kind: STRUCT
   name: "sdca_device_data"
   definition {
-    bytesize: 200
+    bytesize: 264
     member_id: 0x9cb28706
     member_id: 0x5a3421ee
     member_id: 0xabbf3b45
+  }
+}
+struct_union {
+  id: 0xdbaa87c2
+  kind: STRUCT
+  name: "sdca_entity"
+  definition {
+    bytesize: 144
+    member_id: 0x0517038f
+    member_id: 0xcc4808a3
+    member_id: 0x5c7c34f7
+    member_id: 0xd3ae726c
+    member_id: 0xf70ec541
+    member_id: 0x478a8d50
+    member_id: 0xd6e265e5
+    member_id: 0xc3579d51
+    member_id: 0x3377d6b6
+  }
+}
+struct_union {
+  id: 0x20d581a8
+  kind: STRUCT
+  name: "sdca_entity_cs"
+  definition {
+    bytesize: 8
+    member_id: 0x5c216448
+    member_id: 0x10646fd1
+  }
+}
+struct_union {
+  id: 0x2bb72780
+  kind: STRUCT
+  name: "sdca_entity_ge"
+  definition {
+    bytesize: 24
+    member_id: 0xfc726bd0
+    member_id: 0x847df8bc
+    member_id: 0x7d629ff3
+  }
+}
+struct_union {
+  id: 0x555a085d
+  kind: STRUCT
+  name: "sdca_entity_hide"
+  definition {
+    bytesize: 96
+    member_id: 0x1f0c5e96
+    member_id: 0x1b4d751d
+    member_id: 0x3a16afc5
+    member_id: 0xdbb30f65
+    member_id: 0x67603636
+    member_id: 0xd1f548f2
+    member_id: 0x819fa6c8
+    member_id: 0x10646c35
+    member_id: 0x72a945fd
+    member_id: 0x5cfd0eb8
+  }
+}
+struct_union {
+  id: 0x24ef37ae
+  kind: STRUCT
+  name: "sdca_entity_iot"
+  definition {
+    bytesize: 32
+    member_id: 0x45f2792a
+    member_id: 0x5cfe4297
+    member_id: 0xcf93c081
+    member_id: 0x991919f1
+    member_id: 0xabc6b85e
+    member_id: 0xd923bb47
+  }
+}
+struct_union {
+  id: 0x88336ba0
+  kind: STRUCT
+  name: "sdca_entity_pde"
+  definition {
+    bytesize: 24
+    member_id: 0x3ee85ed6
+    member_id: 0x102f8d21
+    member_id: 0x2b6a2e0b
+    member_id: 0x74b1580e
+  }
+}
+struct_union {
+  id: 0x4f21ed89
+  kind: STRUCT
+  name: "sdca_function_data"
+  definition {
+    bytesize: 48
+    member_id: 0x87e03e71
+    member_id: 0x8d484d51
+    member_id: 0xe2b678d6
+    member_id: 0xf9862bc6
+    member_id: 0xfe55c0aa
+    member_id: 0x775c4b68
+    member_id: 0xa04ca706
+    member_id: 0x4355f3d9
   }
 }
 struct_union {
@@ -233370,11 +234120,56 @@ struct_union {
   kind: STRUCT
   name: "sdca_function_desc"
   definition {
-    bytesize: 24
+    bytesize: 32
     member_id: 0x0f719e15
-    member_id: 0x0de57809
-    member_id: 0x5c9fd497
-    member_id: 0x6ea10151
+    member_id: 0x34e5ba85
+    member_id: 0x0de5752a
+    member_id: 0x5c9fd59c
+    member_id: 0x6ea10f95
+  }
+}
+struct_union {
+  id: 0xbd9e98f0
+  kind: STRUCT
+  name: "sdca_ge_control"
+  definition {
+    bytesize: 16
+    member_id: 0xcc480c42
+    member_id: 0x33bfb987
+    member_id: 0x4b670416
+    member_id: 0x4f71c78a
+  }
+}
+struct_union {
+  id: 0xc61444b3
+  kind: STRUCT
+  name: "sdca_ge_mode"
+  definition {
+    bytesize: 16
+    member_id: 0x47b9db45
+    member_id: 0xc3579de9
+    member_id: 0x4f71c78a
+  }
+}
+struct_union {
+  id: 0x387ecbdc
+  kind: STRUCT
+  name: "sdca_init_write"
+  definition {
+    bytesize: 8
+    member_id: 0x24e4d74d
+    member_id: 0x4f3fbf93
+  }
+}
+struct_union {
+  id: 0x13f9d79c
+  kind: STRUCT
+  name: "sdca_pde_delay"
+  definition {
+    bytesize: 12
+    member_id: 0x5493d010
+    member_id: 0xb411a915
+    member_id: 0x8883e196
   }
 }
 struct_union {
@@ -233827,7 +234622,7 @@ struct_union {
   kind: STRUCT
   name: "sdw_slave"
   definition {
-    bytesize: 1792
+    bytesize: 1856
     member_id: 0xccd8d8c6
     member_id: 0xce1ac5a8
     member_id: 0xad5e2291
@@ -261434,6 +262229,689 @@ enumeration {
   }
 }
 enumeration {
+  id: 0xd05c9be0
+  name: "sdca_access_mode"
+  definition {
+    underlying_type_id: 0x4585663f
+    enumerator {
+      name: "SDCA_ACCESS_MODE_RW"
+    }
+    enumerator {
+      name: "SDCA_ACCESS_MODE_DUAL"
+      value: 1
+    }
+    enumerator {
+      name: "SDCA_ACCESS_MODE_RW1C"
+      value: 2
+    }
+    enumerator {
+      name: "SDCA_ACCESS_MODE_RO"
+      value: 3
+    }
+    enumerator {
+      name: "SDCA_ACCESS_MODE_RW1S"
+      value: 4
+    }
+    enumerator {
+      name: "SDCA_ACCESS_MODE_DC"
+      value: 5
+    }
+  }
+}
+enumeration {
+  id: 0xdbe46517
+  name: "sdca_channel_purpose"
+  definition {
+    underlying_type_id: 0x4585663f
+    enumerator {
+      name: "SDCA_CHAN_PURPOSE_GENERIC_AUDIO"
+      value: 1
+    }
+    enumerator {
+      name: "SDCA_CHAN_PURPOSE_VOICE"
+      value: 2
+    }
+    enumerator {
+      name: "SDCA_CHAN_PURPOSE_SPEECH"
+      value: 3
+    }
+    enumerator {
+      name: "SDCA_CHAN_PURPOSE_AMBIENT"
+      value: 4
+    }
+    enumerator {
+      name: "SDCA_CHAN_PURPOSE_REFERENCE"
+      value: 5
+    }
+    enumerator {
+      name: "SDCA_CHAN_PURPOSE_ULTRASOUND"
+      value: 6
+    }
+    enumerator {
+      name: "SDCA_CHAN_PURPOSE_SENSE"
+      value: 8
+    }
+    enumerator {
+      name: "SDCA_CHAN_PURPOSE_SILENCE"
+      value: 254
+    }
+    enumerator {
+      name: "SDCA_CHAN_PURPOSE_NON_AUDIO"
+      value: 255
+    }
+    enumerator {
+      name: "SDCA_CHAN_PURPOSE_SENSE_V1"
+      value: 9
+    }
+    enumerator {
+      name: "SDCA_CHAN_PURPOSE_SENSE_V2"
+      value: 10
+    }
+    enumerator {
+      name: "SDCA_CHAN_PURPOSE_SENSE_V12_INTERLEAVED"
+      value: 16
+    }
+    enumerator {
+      name: "SDCA_CHAN_PURPOSE_SENSE_V21_INTERLEAVED"
+      value: 17
+    }
+    enumerator {
+      name: "SDCA_CHAN_PURPOSE_SENSE_V12_PACKED"
+      value: 18
+    }
+    enumerator {
+      name: "SDCA_CHAN_PURPOSE_SENSE_V21_PACKED"
+      value: 19
+    }
+    enumerator {
+      name: "SDCA_CHAN_PURPOSE_SENSE_V1212_INTERLEAVED"
+      value: 20
+    }
+    enumerator {
+      name: "SDCA_CHAN_PURPOSE_SENSE_V2121_INTERLEAVED"
+      value: 21
+    }
+    enumerator {
+      name: "SDCA_CHAN_PURPOSE_SENSE_V1122_INTERLEAVED"
+      value: 22
+    }
+    enumerator {
+      name: "SDCA_CHAN_PURPOSE_SENSE_V2211_INTERLEAVED"
+      value: 23
+    }
+    enumerator {
+      name: "SDCA_CHAN_PURPOSE_SENSE_V1212_PACKED"
+      value: 24
+    }
+    enumerator {
+      name: "SDCA_CHAN_PURPOSE_SENSE_V2121_PACKED"
+      value: 25
+    }
+    enumerator {
+      name: "SDCA_CHAN_PURPOSE_SENSE_V1122_PACKED"
+      value: 26
+    }
+    enumerator {
+      name: "SDCA_CHAN_PURPOSE_SENSE_V2211_PACKED"
+      value: 27
+    }
+  }
+}
+enumeration {
+  id: 0xe001dc01
+  name: "sdca_channel_relationship"
+  definition {
+    underlying_type_id: 0x4585663f
+    enumerator {
+      name: "SDCA_CHAN_REL_UNDEFINED"
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_GENERIC_MONO"
+      value: 1
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_GENERIC_LEFT"
+      value: 2
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_GENERIC_RIGHT"
+      value: 3
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_GENERIC_TOP"
+      value: 72
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_GENERIC_BOTTOM"
+      value: 73
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_CAPTURE_DIRECT"
+      value: 78
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_RENDER_DIRECT"
+      value: 79
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_FRONT_LEFT"
+      value: 11
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_FRONT_RIGHT"
+      value: 12
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_FRONT_CENTER"
+      value: 13
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_SIDE_LEFT"
+      value: 18
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_SIDE_RIGHT"
+      value: 19
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_BACK_LEFT"
+      value: 22
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_BACK_RIGHT"
+      value: 23
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_LOW_FREQUENCY_EFFECTS"
+      value: 67
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_SOUNDWIRE_MIC"
+      value: 85
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_SENSE_TRANSDUCER_1"
+      value: 88
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_SENSE_TRANSDUCER_2"
+      value: 89
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_SENSE_TRANSDUCER_12"
+      value: 90
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_SENSE_TRANSDUCER_21"
+      value: 91
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_ECHOREF_NONE"
+      value: 112
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_ECHOREF_1"
+      value: 113
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_ECHOREF_2"
+      value: 114
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_ECHOREF_3"
+      value: 115
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_ECHOREF_4"
+      value: 116
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_ECHOREF_ALL"
+      value: 117
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_ECHOREF_LFE_ALL"
+      value: 118
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_PRIMARY_TRANSDUCER"
+      value: 80
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_SECONDARY_TRANSDUCER"
+      value: 81
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_TERTIARY_TRANSDUCER"
+      value: 82
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_LOWER_LEFT_ALLTRANSDUCER"
+      value: 96
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_LOWER_RIGHT_ALLTRANSDUCER"
+      value: 97
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_UPPER_LEFT_ALLTRANSDUCER"
+      value: 98
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_UPPER_RIGHT_ALLTRANSDUCER"
+      value: 99
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_LOWER_LEFT_PRIMARY"
+      value: 100
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_LOWER_RIGHT_PRIMARY"
+      value: 101
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_UPPER_LEFT_PRIMARY"
+      value: 102
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_UPPER_RIGHT_PRIMARY"
+      value: 103
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_LOWER_LEFT_SECONDARY"
+      value: 104
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_LOWER_RIGHT_SECONDARY"
+      value: 105
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_UPPER_LEFT_SECONDARY"
+      value: 106
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_UPPER_RIGHT_SECONDARY"
+      value: 107
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_LOWER_LEFT_TERTIARY"
+      value: 108
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_LOWER_RIGHT_TERTIARY"
+      value: 109
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_UPPER_LEFT_TERTIARY"
+      value: 110
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_UPPER_RIGHT_TERTIARY"
+      value: 111
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_DERIVED_LOWER_LEFT_PRIMARY"
+      value: 148
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_DERIVED_LOWER_RIGHT_PRIMARY"
+      value: 149
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_DERIVED_UPPER_LEFT_PRIMARY"
+      value: 150
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_DERIVED_UPPER_RIGHT_PRIMARY"
+      value: 151
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_DERIVED_LOWER_LEFT_SECONDARY"
+      value: 152
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_DERIVED_LOWER_RIGHT_SECONDARY"
+      value: 153
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_DERIVED_UPPER_LEFT_SECONDARY"
+      value: 154
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_DERIVED_UPPER_RIGHT_SECONDARY"
+      value: 155
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_DERIVED_LOWER_LEFT_TERTIARY"
+      value: 156
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_DERIVED_LOWER_RIGHT_TERTIARY"
+      value: 157
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_DERIVED_UPPER_LEFT_TERTIARY"
+      value: 158
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_DERIVED_UPPER_RIGHT_TERTIARY"
+      value: 159
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_DERIVED_MONO_PRIMARY"
+      value: 160
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_DERIVED_MONO_SECONDARY"
+      value: 171
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_DERIVED_MONO_TERTIARY"
+      value: 172
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_EQUIPMENT_LEFT"
+      value: 2
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_EQUIPMENT_RIGHT"
+      value: 3
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_EQUIPMENT_COMBINED"
+      value: 71
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_EQUIPMENT_TOP"
+      value: 72
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_EQUIPMENT_BOTTOM"
+      value: 73
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_EQUIPMENT_TOP_LEFT"
+      value: 74
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_EQUIPMENT_BOTTOM_LEFT"
+      value: 75
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_EQUIPMENT_TOP_RIGHT"
+      value: 76
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_EQUIPMENT_BOTTOM_RIGHT"
+      value: 77
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_EQUIPMENT_SILENCED_OUTPUT"
+      value: 87
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_ARRAY"
+      value: 4
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_MIC"
+      value: 83
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_RAW"
+      value: 84
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_SILENCED_MIC"
+      value: 86
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_MULTI_SOURCE_1"
+      value: 120
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_MULTI_SOURCE_2"
+      value: 121
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_MULTI_SOURCE_3"
+      value: 122
+    }
+    enumerator {
+      name: "SDCA_CHAN_REL_MULTI_SOURCE_4"
+      value: 123
+    }
+  }
+}
+enumeration {
+  id: 0x77b136dd
+  name: "sdca_clock_type"
+  definition {
+    underlying_type_id: 0x4585663f
+    enumerator {
+      name: "SDCA_CLOCK_TYPE_EXTERNAL"
+    }
+    enumerator {
+      name: "SDCA_CLOCK_TYPE_INTERNAL_ASYNC"
+      value: 1
+    }
+    enumerator {
+      name: "SDCA_CLOCK_TYPE_INTERNAL_SYNC"
+      value: 2
+    }
+    enumerator {
+      name: "SDCA_CLOCK_TYPE_INTERNAL_SOURCE_SYNC"
+      value: 3
+    }
+  }
+}
+enumeration {
+  id: 0xc017c7b5
+  name: "sdca_connector_type"
+  definition {
+    underlying_type_id: 0x4585663f
+    enumerator {
+      name: "SDCA_CONN_TYPE_UNKNOWN"
+    }
+    enumerator {
+      name: "SDCA_CONN_TYPE_2P5MM_JACK"
+      value: 1
+    }
+    enumerator {
+      name: "SDCA_CONN_TYPE_3P5MM_JACK"
+      value: 2
+    }
+    enumerator {
+      name: "SDCA_CONN_TYPE_QUARTER_INCH_JACK"
+      value: 3
+    }
+    enumerator {
+      name: "SDCA_CONN_TYPE_XLR"
+      value: 5
+    }
+    enumerator {
+      name: "SDCA_CONN_TYPE_SPDIF_OPTICAL"
+      value: 6
+    }
+    enumerator {
+      name: "SDCA_CONN_TYPE_RCA"
+      value: 7
+    }
+    enumerator {
+      name: "SDCA_CONN_TYPE_DIN"
+      value: 14
+    }
+    enumerator {
+      name: "SDCA_CONN_TYPE_MINI_DIN"
+      value: 15
+    }
+    enumerator {
+      name: "SDCA_CONN_TYPE_EIAJ_OPTICAL"
+      value: 19
+    }
+    enumerator {
+      name: "SDCA_CONN_TYPE_HDMI"
+      value: 20
+    }
+    enumerator {
+      name: "SDCA_CONN_TYPE_DISPLAYPORT"
+      value: 23
+    }
+    enumerator {
+      name: "SDCA_CONN_TYPE_LIGHTNING"
+      value: 27
+    }
+    enumerator {
+      name: "SDCA_CONN_TYPE_USB_C"
+      value: 30
+    }
+    enumerator {
+      name: "SDCA_CONN_TYPE_OTHER"
+      value: 255
+    }
+  }
+}
+enumeration {
+  id: 0x453a37b0
+  name: "sdca_control_datatype"
+  definition {
+    underlying_type_id: 0x4585663f
+    enumerator {
+      name: "SDCA_CTL_DATATYPE_ONEBIT"
+    }
+    enumerator {
+      name: "SDCA_CTL_DATATYPE_INTEGER"
+      value: 1
+    }
+    enumerator {
+      name: "SDCA_CTL_DATATYPE_SPEC_ENCODED_VALUE"
+      value: 2
+    }
+    enumerator {
+      name: "SDCA_CTL_DATATYPE_BCD"
+      value: 3
+    }
+    enumerator {
+      name: "SDCA_CTL_DATATYPE_Q7P8DB"
+      value: 4
+    }
+    enumerator {
+      name: "SDCA_CTL_DATATYPE_BYTEINDEX"
+      value: 5
+    }
+    enumerator {
+      name: "SDCA_CTL_DATATYPE_POSTURENUMBER"
+      value: 6
+    }
+    enumerator {
+      name: "SDCA_CTL_DATATYPE_DP_INDEX"
+      value: 7
+    }
+    enumerator {
+      name: "SDCA_CTL_DATATYPE_BITINDEX"
+      value: 8
+    }
+    enumerator {
+      name: "SDCA_CTL_DATATYPE_BITMAP"
+      value: 9
+    }
+    enumerator {
+      name: "SDCA_CTL_DATATYPE_GUID"
+      value: 10
+    }
+    enumerator {
+      name: "SDCA_CTL_DATATYPE_IMPDEF"
+      value: 11
+    }
+  }
+}
+enumeration {
+  id: 0x2ae80aae
+  name: "sdca_entity_type"
+  definition {
+    underlying_type_id: 0x4585663f
+    enumerator {
+      name: "SDCA_ENTITY_TYPE_ENTITY_0"
+    }
+    enumerator {
+      name: "SDCA_ENTITY_TYPE_IT"
+      value: 2
+    }
+    enumerator {
+      name: "SDCA_ENTITY_TYPE_OT"
+      value: 3
+    }
+    enumerator {
+      name: "SDCA_ENTITY_TYPE_MU"
+      value: 5
+    }
+    enumerator {
+      name: "SDCA_ENTITY_TYPE_SU"
+      value: 6
+    }
+    enumerator {
+      name: "SDCA_ENTITY_TYPE_FU"
+      value: 7
+    }
+    enumerator {
+      name: "SDCA_ENTITY_TYPE_XU"
+      value: 10
+    }
+    enumerator {
+      name: "SDCA_ENTITY_TYPE_CS"
+      value: 11
+    }
+    enumerator {
+      name: "SDCA_ENTITY_TYPE_CX"
+      value: 12
+    }
+    enumerator {
+      name: "SDCA_ENTITY_TYPE_PDE"
+      value: 17
+    }
+    enumerator {
+      name: "SDCA_ENTITY_TYPE_GE"
+      value: 18
+    }
+    enumerator {
+      name: "SDCA_ENTITY_TYPE_SPE"
+      value: 19
+    }
+    enumerator {
+      name: "SDCA_ENTITY_TYPE_CRU"
+      value: 32
+    }
+    enumerator {
+      name: "SDCA_ENTITY_TYPE_UDMPU"
+      value: 33
+    }
+    enumerator {
+      name: "SDCA_ENTITY_TYPE_MFPU"
+      value: 34
+    }
+    enumerator {
+      name: "SDCA_ENTITY_TYPE_SMPU"
+      value: 35
+    }
+    enumerator {
+      name: "SDCA_ENTITY_TYPE_SAPU"
+      value: 36
+    }
+    enumerator {
+      name: "SDCA_ENTITY_TYPE_PPU"
+      value: 37
+    }
+    enumerator {
+      name: "SDCA_ENTITY_TYPE_TG"
+      value: 48
+    }
+    enumerator {
+      name: "SDCA_ENTITY_TYPE_HIDE"
+      value: 49
+    }
+  }
+}
+enumeration {
   id: 0xb06fea96
   name: "sdca_quirk"
   definition {
@@ -261444,6 +262922,237 @@ enumeration {
     enumerator {
       name: "SDCA_QUIRKS_SKIP_FUNC_TYPE_PATCHING"
       value: 1
+    }
+  }
+}
+enumeration {
+  id: 0xa89308a3
+  name: "sdca_terminal_type"
+  definition {
+    underlying_type_id: 0x4585663f
+    enumerator {
+      name: "SDCA_TERM_TYPE_GENERIC"
+      value: 257
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_ULTRASOUND"
+      value: 384
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_CAPTURE_DIRECT_PCM_MIC"
+      value: 385
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_RAW_PDM_MIC"
+      value: 386
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_SPEECH"
+      value: 387
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_VOICE"
+      value: 388
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_SECONDARY_PCM_MIC"
+      value: 389
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_ACOUSTIC_CONTEXT_AWARENESS"
+      value: 390
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_DTOD_STREAM"
+      value: 391
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_REFERENCE_STREAM"
+      value: 392
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_SENSE_CAPTURE"
+      value: 393
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_STREAMING_MIC"
+      value: 394
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_OPTIMIZATION_STREAM"
+      value: 400
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_PDM_RENDER_STREAM"
+      value: 401
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_COMPANION_DATA"
+      value: 402
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_MICROPHONE_TRANSDUCER"
+      value: 513
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_MICROPHONE_ARRAY_TRANSDUCER"
+      value: 517
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_PRIMARY_FULL_RANGE_SPEAKER"
+      value: 896
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_PRIMARY_LFE_SPEAKER"
+      value: 897
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_PRIMARY_TWEETER_SPEAKER"
+      value: 898
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_PRIMARY_ULTRASOUND_SPEAKER"
+      value: 899
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_SECONDARY_FULL_RANGE_SPEAKER"
+      value: 912
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_SECONDARY_LFE_SPEAKER"
+      value: 913
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_SECONDARY_TWEETER_SPEAKER"
+      value: 914
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_SECONDARY_ULTRASOUND_SPEAKER"
+      value: 915
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_TERTIARY_FULL_RANGE_SPEAKER"
+      value: 928
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_TERTIARY_LFE_SPEAKER"
+      value: 929
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_TERTIARY_TWEETER_SPEAKER"
+      value: 930
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_TERTIARY_ULTRASOUND_SPEAKER"
+      value: 931
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_SPDIF"
+      value: 1541
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_NDAI_DISPLAY_AUDIO"
+      value: 1552
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_NDAI_USB"
+      value: 1554
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_NDAI_BLUETOOTH_MAIN"
+      value: 1556
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_NDAI_BLUETOOTH_ALTERNATE"
+      value: 1557
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_NDAI_BLUETOOTH_BOTH"
+      value: 1558
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_LINEIN_STEREO"
+      value: 1664
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_LINEIN_FRONT_LR"
+      value: 1665
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_LINEIN_CENTER_LFE"
+      value: 1666
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_LINEIN_SURROUND_LR"
+      value: 1667
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_LINEIN_REAR_LR"
+      value: 1668
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_LINEOUT_STEREO"
+      value: 1680
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_LINEOUT_FRONT_LR"
+      value: 1681
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_LINEOUT_CENTER_LFE"
+      value: 1682
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_LINEOUT_SURROUND_LR"
+      value: 1683
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_LINEOUT_REAR_LR"
+      value: 1684
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_MIC_JACK"
+      value: 1696
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_STEREO_JACK"
+      value: 1712
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_FRONT_LR_JACK"
+      value: 1713
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_CENTER_LFE_JACK"
+      value: 1714
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_SURROUND_LR_JACK"
+      value: 1715
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_REAR_LR_JACK"
+      value: 1716
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_HEADPHONE_JACK"
+      value: 1728
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_HEADSET_JACK"
+      value: 1744
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_SENSE_DATA"
+      value: 640
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_PRIVACY_SIGNALING"
+      value: 1857
+    }
+    enumerator {
+      name: "SDCA_TERM_TYPE_PRIVACY_INDICATORS"
+      value: 1863
     }
   }
 }
@@ -321490,7 +323199,7 @@ elf_symbol {
   name: "sdca_device_quirk_match"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x507151ea
+  crc: 0xf876ba6d
   namespace: "SND_SOC_SDCA"
   type_id: 0xf71d76e3
   full_name: "sdca_device_quirk_match"
@@ -321500,7 +323209,7 @@ elf_symbol {
   name: "sdca_lookup_functions"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x828d0191
+  crc: 0x8f500342
   namespace: "SND_SOC_SDCA"
   type_id: 0x1be0c3de
   full_name: "sdca_lookup_functions"
@@ -321510,7 +323219,7 @@ elf_symbol {
   name: "sdca_lookup_interface_revision"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x828d0191
+  crc: 0x8f500342
   namespace: "SND_SOC_SDCA"
   type_id: 0x1be0c3de
   full_name: "sdca_lookup_interface_revision"
@@ -324036,7 +325745,7 @@ elf_symbol {
   name: "snd_soc_acpi_sdw_link_slaves_found"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xcd4928f4
+  crc: 0xcff6d9fd
   type_id: 0xfec9ad60
   full_name: "snd_soc_acpi_sdw_link_slaves_found"
 }
