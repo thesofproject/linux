@@ -265,6 +265,7 @@ static int default_key_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	}
 
 	ti->num_flush_bios = 1;
+	ti->flush_bypasses_map = true;
 
 	err = 0;
 	goto out;
