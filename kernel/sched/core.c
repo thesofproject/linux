@@ -138,7 +138,7 @@ EXPORT_SYMBOL_GPL(runqueues);
 DEFINE_PER_CPU(struct rnd_state, sched_rnd_state);
 
 #ifdef CONFIG_SCHED_PROXY_EXEC
-DEFINE_STATIC_KEY_FALSE(__sched_proxy_exec);
+DEFINE_STATIC_KEY_TRUE(__sched_proxy_exec);
 static int __init setup_proxy_exec(char *str)
 {
 	bool proxy_enable = true;
