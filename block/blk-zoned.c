@@ -1753,6 +1753,16 @@ static int blk_revalidate_zone_cb(struct blk_zone *zone, unsigned int idx,
 		return -ENODEV;
 	}
 
+	/*
+	 * Require the zone size to be equal to zone capacity for
+	 * non-power-of-2 zoned devices.
+	 */
+	if (!is_power_of_2(zone->len) && zone->capacity < zone->len) {
+		pr_err("%s: Invalid zone capacity %lld for non power-of-2 zone size %lld",
+		       disk->disk_name, zone->capacity, zone->len);
+		return -ENODEV;
+	}
+
 	/* Check zone type */
 	switch (zone->type) {
 	case BLK_ZONE_TYPE_CONVENTIONAL:
@@ -1806,9 +1816,8 @@ int blk_revalidate_disk_zones(struct gendisk *disk)
 	 * Checks that the device driver indicated a valid zone size and that
 	 * the max zone append limit is set.
 	 */
-	if (!zone_sectors || !is_power_of_2(zone_sectors)) {
-		pr_warn("%s: Invalid non power of two zone size (%llu)\n",
-			disk->disk_name, zone_sectors);
+	if (!zone_sectors) {
+		pr_warn("%s: Invalid zone size\n", disk->disk_name);
 		return -ENODEV;
 	}
 
@@ -1817,7 +1826,7 @@ int blk_revalidate_disk_zones(struct gendisk *disk)
 	 * GFP_NOIO was specified.
 	 */
 	args.disk = disk;
-	args.nr_zones = (capacity + zone_sectors - 1) >> ilog2(zone_sectors);
+	args.nr_zones = div64_u64(capacity + zone_sectors - 1, zone_sectors);
 	noio_flag = memalloc_noio_save();
 	ret = disk_revalidate_zone_resources(disk, args.nr_zones);
 	if (ret) {
