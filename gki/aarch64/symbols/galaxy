@@ -98,6 +98,7 @@
   __traceiter_android_vh_split_large_folio_bypass
   __traceiter_android_vh_sync_irq_wait_finish
   __traceiter_android_vh_sync_irq_wait_start
+  __traceiter_android_vh_task_mem
   __traceiter_android_vh_try_to_freeze_todo
   __traceiter_android_vh_try_to_freeze_todo_unfrozen
   __traceiter_android_vh_tune_scan_control
@@ -110,6 +111,7 @@
   __traceiter_console
   __traceiter_error_report_end
   __traceiter_irq_handler_entry
+  __traceiter_rss_stat
   __traceiter_vm_unmapped_area
   __traceiter_workqueue_execute_start
   __tracepoint_android_rvh_arm64_serror_panic
@@ -163,6 +165,7 @@
   __tracepoint_android_vh_split_large_folio_bypass
   __tracepoint_android_vh_sync_irq_wait_finish
   __tracepoint_android_vh_sync_irq_wait_start
+  __tracepoint_android_vh_task_mem
   __tracepoint_android_vh_try_to_freeze_todo
   __tracepoint_android_vh_try_to_freeze_todo_unfrozen
   __tracepoint_android_vh_tune_scan_control
@@ -175,6 +178,7 @@
   __tracepoint_console
   __tracepoint_error_report_end
   __tracepoint_irq_handler_entry
+  __tracepoint_rss_stat
   __tracepoint_vm_unmapped_area
   __tracepoint_workqueue_execute_start
   unregister_console
