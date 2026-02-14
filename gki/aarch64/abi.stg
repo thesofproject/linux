@@ -347021,6 +347021,13 @@ function {
   parameter_id: 0x18bd6530
 }
 function {
+  id: 0x9bb0e048
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x0665e6b6
+  parameter_id: 0x1b36c7a2
+}
+function {
   id: 0x9bb12429
   return_type_id: 0x6720d32f
   parameter_id: 0x18e64f74
@@ -348291,6 +348298,13 @@ function {
   parameter_id: 0x1b36c7a2
   parameter_id: 0x6720d32f
   parameter_id: 0x3fe31e81
+}
+function {
+  id: 0x9bdaa949
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x1b36c7a2
+  parameter_id: 0x6720d32f
 }
 function {
   id: 0x9bdaaaaa
@@ -367684,6 +367698,15 @@ elf_symbol {
   full_name: "__traceiter_android_vh_task_get_classid"
 }
 elf_symbol {
+  id: 0x678eeaa9
+  name: "__traceiter_android_vh_task_mem"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x94421c92
+  type_id: 0x9bb0e048
+  full_name: "__traceiter_android_vh_task_mem"
+}
+elf_symbol {
   id: 0x503874e5
   name: "__traceiter_android_vh_task_tick_scx"
   is_defined: true
@@ -368591,6 +368614,15 @@ elf_symbol {
   crc: 0x4d3582c4
   type_id: 0x9bbf11b2
   full_name: "__traceiter_rpm_suspend"
+}
+elf_symbol {
+  id: 0x1e6a859e
+  name: "__traceiter_rss_stat"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x8217d2e8
+  type_id: 0x9bdaa949
+  full_name: "__traceiter_rss_stat"
 }
 elf_symbol {
   id: 0x2c11fea4
@@ -372526,6 +372558,15 @@ elf_symbol {
   full_name: "__tracepoint_android_vh_task_get_classid"
 }
 elf_symbol {
+  id: 0xba9cb6ff
+  name: "__tracepoint_android_vh_task_mem"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_vh_task_mem"
+}
+elf_symbol {
   id: 0x6f0645ff
   name: "__tracepoint_android_vh_task_tick_scx"
   is_defined: true
@@ -373433,6 +373474,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_rpm_suspend"
+}
+elf_symbol {
+  id: 0x3949a6b4
+  name: "__tracepoint_rss_stat"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_rss_stat"
 }
 elf_symbol {
   id: 0x009c40ce
@@ -430038,6 +430088,7 @@ interface {
   symbol_id: 0x989b4fa1
   symbol_id: 0x28fc87d0
   symbol_id: 0x3fd733a9
+  symbol_id: 0x678eeaa9
   symbol_id: 0x503874e5
   symbol_id: 0xf376df6b
   symbol_id: 0x6f27c15e
@@ -430139,6 +430190,7 @@ interface {
   symbol_id: 0x189202e9
   symbol_id: 0x04c5b642
   symbol_id: 0x88744d70
+  symbol_id: 0x1e6a859e
   symbol_id: 0x2c11fea4
   symbol_id: 0xe71ca6fa
   symbol_id: 0x45e62871
@@ -430576,6 +430628,7 @@ interface {
   symbol_id: 0xa0d0bf73
   symbol_id: 0x96610076
   symbol_id: 0xe4592907
+  symbol_id: 0xba9cb6ff
   symbol_id: 0x6f0645ff
   symbol_id: 0x4e038641
   symbol_id: 0xffc36f60
@@ -430677,6 +430730,7 @@ interface {
   symbol_id: 0xfbd9814b
   symbol_id: 0x7c591834
   symbol_id: 0x636e234e
+  symbol_id: 0x3949a6b4
   symbol_id: 0x009c40ce
   symbol_id: 0xb46bae90
   symbol_id: 0x02473ce7
