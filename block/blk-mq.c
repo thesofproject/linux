@@ -1548,6 +1548,35 @@ void blk_mq_requeue_request(struct request *rq, bool kick_requeue_list)
 }
 EXPORT_SYMBOL(blk_mq_requeue_request);
 
+/*
+ * Whether the block layer should preserve the order of @rq relative to other
+ * requests submitted to the same software queue.
+ */
+static bool blk_mq_preserve_order(struct request *rq)
+{
+	return blk_pipeline_zwr(rq->q) && blk_rq_is_seq_zoned_write(rq);
+}
+
+/*
+ * Whether the order should be preserved for any request in @list. Returns %true
+ * if and only if zoned write pipelining is enabled and if there are any
+ * sequential zoned writes in @list.
+ */
+static bool blk_mq_preserve_order_for_list(struct request_queue *q,
+					   struct list_head *list)
+{
+	struct request *rq;
+
+	if (!blk_pipeline_zwr(q))
+		return false;
+
+	list_for_each_entry(rq, list, queuelist)
+		if (blk_rq_is_seq_zoned_write(rq))
+			return true;
+
+	return false;
+}
+
 static void blk_mq_requeue_work(struct work_struct *work)
 {
 	struct request_queue *q =
@@ -2574,7 +2603,8 @@ static void blk_mq_insert_requests(struct blk_mq_hw_ctx *hctx,
 	 * Try to issue requests directly if the hw queue isn't busy to save an
 	 * extra enqueue & dequeue to the sw queue.
 	 */
-	if (!hctx->dispatch_busy && !run_queue_async) {
+	if (!hctx->dispatch_busy && !run_queue_async &&
+	    !blk_mq_preserve_order_for_list(hctx->queue, list)) {
 		blk_mq_run_dispatch_ops(hctx->queue,
 			blk_mq_try_issue_list_directly(hctx, list));
 		if (list_empty(list))
@@ -3226,7 +3256,8 @@ new_request:
 
 	hctx = rq->mq_hctx;
 	if ((rq->rq_flags & RQF_USE_SCHED) ||
-	    (hctx->dispatch_busy && (q->nr_hw_queues == 1 || !is_sync))) {
+	    (hctx->dispatch_busy && (q->nr_hw_queues == 1 || !is_sync)) ||
+	    blk_mq_preserve_order(rq)) {
 		blk_mq_insert_request(rq, 0);
 		blk_mq_run_hw_queue(hctx, true);
 	} else {
