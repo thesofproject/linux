@@ -10234,6 +10234,7 @@ static struct notifier_block pvclock_gtod_notifier = {
 	.notifier_call = pvclock_gtod_notify,
 };
 #endif
+#endif /* !__PKVM_HYP__ */
 
 void kvm_setup_xss_caps(void)
 {
@@ -10252,6 +10253,7 @@ void kvm_setup_xss_caps(void)
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_setup_xss_caps);
 
+#ifndef __PKVM_HYP__
 static inline void kvm_ops_update(struct kvm_x86_init_ops *ops)
 {
 	memcpy(&kvm_x86_ops, ops->runtime_ops, sizeof(kvm_x86_ops));
