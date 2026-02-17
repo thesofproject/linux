@@ -363545,6 +363545,15 @@ elf_symbol {
   full_name: "__rt_mutex_init"
 }
 elf_symbol {
+  id: 0xbbdc4ff0
+  name: "__sched_proxy_exec"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x64afdea6
+  type_id: 0xd2755d5f
+  full_name: "__sched_proxy_exec"
+}
+elf_symbol {
   id: 0x9c3568ef
   name: "__scm_destroy"
   is_defined: true
@@ -429656,6 +429665,7 @@ interface {
   symbol_id: 0x2b453adc
   symbol_id: 0xa5888f99
   symbol_id: 0x98379aaf
+  symbol_id: 0xbbdc4ff0
   symbol_id: 0x9c3568ef
   symbol_id: 0xe68925b8
   symbol_id: 0x0166be18
