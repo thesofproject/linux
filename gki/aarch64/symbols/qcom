@@ -2748,6 +2748,7 @@
   sched_clock
   sched_feat_keys
   sched_feat_names
+  __sched_proxy_exec
   sched_setattr
   sched_set_fifo
   sched_set_fifo_low
