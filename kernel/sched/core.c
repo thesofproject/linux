@@ -225,6 +225,7 @@ static inline struct task_struct *task_blocked_on_owner(struct task_struct *p)
 {
        return __blocked_on_owner(&p->blocked_on);
 }
+EXPORT_SYMBOL_GPL(__sched_proxy_exec);
 #else
 static int __init setup_proxy_exec(char *str)
 {
