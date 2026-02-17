@@ -218,6 +218,8 @@ enum pkvm_smc_handler_ret {
  *				for pVMs. The @ops.trng_uuid is used to advertise the
  *				identity of TRNG implementation. @ops.trng_rnd64 is used
  *				to generate entropy bits to guest.
+ * @arm_smccc_1_2_smc:		Make an SMCCC v1.2 call to EL3, including processing
+ *				hypervisor exit and entry actions.
  */
 struct pkvm_module_ops {
 	int (*create_private_mapping)(phys_addr_t phys, size_t size,
@@ -295,7 +297,8 @@ struct pkvm_module_ops {
 	int (*guest_accept_module_prot_page)(u64 ipa, u64 nr_pages);
 	int (*register_guest_accept_module_owned_handler)(int (*cb)(u64 phys, u64 ipa, u64 size,
 								   pkvm_handle_t handle));
-
+	void (*arm_smccc_1_2_smc)(struct arm_smccc_1_2_regs *args,
+				  struct arm_smccc_1_2_regs *regs);
 	ANDROID_KABI_RESERVE(1);
 	ANDROID_KABI_RESERVE(2);
 	ANDROID_KABI_RESERVE(3);
