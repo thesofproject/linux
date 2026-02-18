@@ -214,6 +214,7 @@ ddk_module(
                 "i915/display/intel_cmtg.c",
                 "i915/display/intel_color.c",
                 "i915/display/intel_colorop.c",
+                "i915/display/intel_color_pipeline.c",
                 "i915/display/intel_combo_phy.c",
                 "i915/display/intel_connector.c",
                 "i915/display/intel_crtc.c",
