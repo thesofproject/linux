@@ -97,6 +97,7 @@ ddk_module(
         "xe/xe_pt_walk.c",
         "xe/xe_pxp.c",
         "xe/xe_pxp_debugfs.c",
+        "xe/xe_pxp_multi_session.c",
         "xe/xe_pxp_submit.c",
         "xe/xe_query.c",
         "xe/xe_range_fence.c",
