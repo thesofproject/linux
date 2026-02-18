@@ -3434,3 +3434,15 @@ ddk_headers(
     ],
 )
 
+ddk_headers(
+    name = "drm_xe_uapi_includes",
+    hdrs = [
+        "include/uapi/drm/xe_drm_prelim.h",
+        "include/uapi/drm/xe_drm.h",
+        "include/uapi/drm/drm.h",
+        "include/uapi/drm/drm_mode.h",
+    ],
+    linux_includes = [
+        "include/uapi",
+    ],
+)

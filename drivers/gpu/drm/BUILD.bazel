@@ -341,6 +341,7 @@ ddk_module(
     ],
     deps = [
         ":xe_generated_hdrs",
+        "//private/desktop-google:drm_xe_uapi_includes",
         "//private/desktop-google:xe_global_includes",
     ],
 )
