@@ -167,6 +167,9 @@ static inline bool is_iommu_mmio(unsigned long phys)
 	return !!iommu_from_phys(phys);
 }
 
+extern struct dmar_domain pt_domain;
+void init_pt_domain(void);
+
 bool overlaps_iommu_mmio(unsigned long phys, unsigned long size);
 bool is_dev_in_satc(u16 bdf);
 bool pkvm_iommu_paging_structure_coherency(void);
@@ -179,6 +182,7 @@ int pkvm_free_iommu_domain(struct dmar_domain *domain);
 
 struct cache_tag *pkvm_alloc_cache_tag(void);
 void pkvm_free_cache_tag(struct cache_tag *cache_tag);
+void pkvm_iommu_pt_flush(unsigned long paddr, unsigned long size);
 
 int pkvm_get_domain_cache_tag_assign(void *pgd, int did, u32 pasid,
 				     struct device_domain_info *info);
