@@ -670,22 +670,15 @@ static int sof_ipc4_widget_setup_pcm(struct snd_sof_widget *swidget)
 		goto free_available_fmt;
 
 	sps = &spcm->stream[dir];
-	sof_update_ipc_object(scomp, &sps->dsp_max_burst_size_in_ms,
-			      SOF_COPIER_DEEP_BUFFER_TOKENS,
-			      swidget->tuples,
-			      swidget->num_tuples, sizeof(u32), 1);
-
-	/* Set default DMA buffer size if it is not specified in topology */
-	if (!sps->dsp_max_burst_size_in_ms) {
+	if (dir == SNDRV_PCM_STREAM_PLAYBACK) {
 		struct snd_sof_widget *pipe_widget = swidget->spipe->pipe_widget;
 		struct sof_ipc4_pipeline *pipeline = pipe_widget->private;
 
-		if (dir == SNDRV_PCM_STREAM_PLAYBACK)
-			sps->dsp_max_burst_size_in_ms = pipeline->use_chain_dma ?
-				SOF_IPC4_CHAIN_DMA_BUFFER_SIZE : SOF_IPC4_MIN_DMA_BUFFER_SIZE;
-		else
-			/* Capture data is copied from DSP to host in 1ms bursts */
-			sps->dsp_max_burst_size_in_ms = 1;
+		sps->dsp_max_burst_size_in_ms = pipeline->use_chain_dma ?
+			SOF_IPC4_CHAIN_DMA_BUFFER_SIZE : SOF_IPC4_MIN_DMA_BUFFER_SIZE;
+	} else {
+		/* Capture data is copied from DSP to host in 1ms bursts */
+		sps->dsp_max_burst_size_in_ms = 1;
 	}
 
 skip_gtw_cfg:
@@ -2043,6 +2036,79 @@ static void sof_ipc4_host_config(struct snd_sof_dev *sdev, struct snd_sof_widget
 	copier_data->gtw_cfg.node_id |=	SOF_IPC4_NODE_INDEX(host_dma_id);
 }
 
+static void
+sof_ipc4_set_host_copier_dma_buffer_size(struct snd_sof_widget *swidget,
+					 unsigned int fe_period_bytes)
+{
+	unsigned int min_size, no_headroom_mark, fw_period_bytes;
+	struct snd_soc_component *scomp = swidget->scomp;
+	struct sof_ipc4_copier_data *copier_data;
+	struct sof_ipc4_copier *ipc4_copier;
+	unsigned int deep_buffer_dma_ms = 0;
+	u32 buffer_bytes;
+	int ret;
+
+	ipc4_copier = (struct sof_ipc4_copier *)swidget->private;
+	copier_data = &ipc4_copier->data;
+
+	if (swidget->id == snd_soc_dapm_aif_in)
+		fw_period_bytes = copier_data->base_config.ibs;
+	else
+		fw_period_bytes = copier_data->base_config.obs;
+
+	/*
+	 * Calculate the minimum size of the host copier DMA host buffer and the
+	 * cut-out watermark when no headroom is needed to be added between the
+	 * host copier buffer size and the ALSA period size
+	 */
+	min_size = SOF_IPC4_MIN_DMA_BUFFER_SIZE * fw_period_bytes;
+	no_headroom_mark = SOF_IPC4_NO_DMA_BUFFER_HEADROOM_MS * fw_period_bytes;
+
+	/* parse the deep buffer dma size */
+	ret = sof_update_ipc_object(scomp, &deep_buffer_dma_ms,
+				    SOF_COPIER_DEEP_BUFFER_TOKENS, swidget->tuples,
+				    swidget->num_tuples, sizeof(u32), 1);
+	if (ret) {
+		dev_dbg(scomp->dev,
+			"Failed to parse deep buffer dma size for %s\n",
+			swidget->widget->name);
+		buffer_bytes = min_size;
+		goto out;
+	}
+
+	/*
+	 * Non Deepbuffer and small ALSA periods must use the minimal host DMA
+	 * buffer size in firmware.
+	 * Note: smaller than 2x the minimum host DMA buffer size for ALSA
+	 * period is not allowed and should be protected by platform code with
+	 * constraint.
+	 *
+	 * Add headroom the between host copier DMA buffer size and the ALSA
+	 * period size if the ALSA period is less than 
+	 * SOF_IPC4_NO_DMA_BUFFER_HEADROOM_MS, otherwise equal the host copier
+	 * DMA buffer size to ALSA period size, capped at the maximum DeepBuffer
+	 * depth specified in topology
+	 */
+	if (deep_buffer_dma_ms <= SOF_IPC4_MIN_DMA_BUFFER_SIZE ||
+	    fe_period_bytes < (min_size * 2))
+		buffer_bytes = min_size;
+	else if (fe_period_bytes < no_headroom_mark)
+		buffer_bytes = fe_period_bytes - min_size;
+	else
+		buffer_bytes = min(deep_buffer_dma_ms * fw_period_bytes,
+				   fe_period_bytes);
+
+out:
+	dev_dbg(scomp->dev,
+		"%s, dma buffer%s: %u ms (max: %u) / %u bytes, ALSA period: %u / %u\n",
+		swidget->widget->name, deep_buffer_dma_ms ? " (using Deep Buffer)" : "",
+		buffer_bytes / fw_period_bytes,
+		deep_buffer_dma_ms ? deep_buffer_dma_ms : SOF_IPC4_MIN_DMA_BUFFER_SIZE,
+		buffer_bytes, fe_period_bytes / fw_period_bytes, fe_period_bytes);
+
+	copier_data->gtw_cfg.dma_buffer_size = buffer_bytes;
+}
+
 static int
 sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 			       struct snd_pcm_hw_params *fe_params,
@@ -2064,7 +2130,6 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 	u32 **data;
 	int ipc_size, ret, out_ref_valid_bits;
 	u32 out_ref_rate, out_ref_channels, out_ref_type;
-	u32 deep_buffer_dma_ms = 0;
 	bool single_output_bitdepth;
 	int i;
 
@@ -2081,16 +2146,6 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 			swidget->widget->name, swidget->id,
 			str_yes_no(pipeline->use_chain_dma),
 			platform_params->stream_tag);
-
-		/* parse the deep buffer dma size */
-		ret = sof_update_ipc_object(scomp, &deep_buffer_dma_ms,
-					    SOF_COPIER_DEEP_BUFFER_TOKENS, swidget->tuples,
-					    swidget->num_tuples, sizeof(u32), 1);
-		if (ret) {
-			dev_err(scomp->dev, "Failed to parse deep buffer dma size for %s\n",
-				swidget->widget->name);
-			return ret;
-		}
 
 		ipc4_copier = (struct sof_ipc4_copier *)swidget->private;
 		gtw_attr = ipc4_copier->gtw_attr;
@@ -2426,33 +2481,18 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 	 * in topology.
 	 */
 	switch (swidget->id) {
+	case snd_soc_dapm_aif_in:
+	case snd_soc_dapm_aif_out:
+		sof_ipc4_set_host_copier_dma_buffer_size(swidget,
+							 params_period_bytes(fe_params));
+		break;
 	case snd_soc_dapm_dai_in:
 		copier_data->gtw_cfg.dma_buffer_size =
 			SOF_IPC4_MIN_DMA_BUFFER_SIZE * copier_data->base_config.ibs;
 		break;
-	case snd_soc_dapm_aif_in:
-		copier_data->gtw_cfg.dma_buffer_size =
-			max((u32)SOF_IPC4_MIN_DMA_BUFFER_SIZE, deep_buffer_dma_ms) *
-				copier_data->base_config.ibs;
-		dev_dbg(sdev->dev, "copier %s, dma buffer%s: %u ms (%u bytes)",
-			swidget->widget->name,
-			deep_buffer_dma_ms ? " (using Deep Buffer)" : "",
-			max((u32)SOF_IPC4_MIN_DMA_BUFFER_SIZE, deep_buffer_dma_ms),
-			copier_data->gtw_cfg.dma_buffer_size);
-		break;
 	case snd_soc_dapm_dai_out:
 		copier_data->gtw_cfg.dma_buffer_size =
 			SOF_IPC4_MIN_DMA_BUFFER_SIZE * copier_data->base_config.obs;
-		break;
-	case snd_soc_dapm_aif_out:
-		copier_data->gtw_cfg.dma_buffer_size =
-			max((u32)SOF_IPC4_MIN_DMA_BUFFER_SIZE, deep_buffer_dma_ms) *
-				copier_data->base_config.obs;
-		dev_dbg(sdev->dev, "copier %s, dma buffer%s: %u ms (%u bytes)",
-			swidget->widget->name,
-			deep_buffer_dma_ms ? " (using Deep Buffer)" : "",
-			max((u32)SOF_IPC4_MIN_DMA_BUFFER_SIZE, deep_buffer_dma_ms),
-			copier_data->gtw_cfg.dma_buffer_size);
 		break;
 	default:
 		break;

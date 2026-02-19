@@ -77,6 +77,17 @@
 #define SOF_IPC4_CHAIN_DMA_BUFFER_SIZE	5
 
 /*
+ * When the host DMA buffer size is larger than 8ms, the firmware switches from
+ * a constant fill mode to burst mode, keeping a 4ms threshold to trigger a
+ * transfer of approximately host DMA buffer size - 4ms after the initial burst
+ * to fill the entire buffer.
+ * To simplify the logic, above 20ms ALSA period size use the same size for host
+ * DMA buffer, while if the ALSA period size is smaller than 20ms, then use a
+ * headroom between host DMA buffer and ALSA period size.
+ */
+#define SOF_IPC4_NO_DMA_BUFFER_HEADROOM_MS	20
+
+/*
  * The base of multi-gateways. Multi-gateways addressing starts from
  * ALH_MULTI_GTW_BASE and there are ALH_MULTI_GTW_COUNT multi-sources
  * and ALH_MULTI_GTW_COUNT multi-sinks available.
