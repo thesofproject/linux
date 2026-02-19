@@ -674,11 +674,11 @@ static int sof_ipc4_widget_setup_pcm(struct snd_sof_widget *swidget)
 		struct snd_sof_widget *pipe_widget = swidget->spipe->pipe_widget;
 		struct sof_ipc4_pipeline *pipeline = pipe_widget->private;
 
-		sps->dsp_max_burst_size_in_ms = pipeline->use_chain_dma ?
+		sps->dsp_min_burst_size_in_ms = pipeline->use_chain_dma ?
 			SOF_IPC4_CHAIN_DMA_BUFFER_SIZE : SOF_IPC4_MIN_DMA_BUFFER_SIZE;
 	} else {
 		/* Capture data is copied from DSP to host in 1ms bursts */
-		sps->dsp_max_burst_size_in_ms = 1;
+		sps->dsp_min_burst_size_in_ms = 1;
 	}
 
 skip_gtw_cfg:
