@@ -29,8 +29,6 @@
 #define SDnFMT_BITS(x)	((x) << 4)
 #define SDnFMT_CHAN(x)	((x) << 0)
 
-#define HDA_MAX_PERIOD_TIME_HEADROOM	10
-
 static bool hda_always_enable_dmi_l1;
 module_param_named(always_enable_dmi_l1, hda_always_enable_dmi_l1, bool, 0444);
 MODULE_PARM_DESC(always_enable_dmi_l1, "SOF HDA always enable DMI l1");
@@ -297,35 +295,19 @@ int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
 					     SNDRV_PCM_FMTBIT_S16 | SNDRV_PCM_FMTBIT_S32);
 
 	/*
-	 * The dsp_max_burst_size_in_ms is the length of the maximum burst size
+	 * The dsp_min_burst_size_in_ms is the length of the minimum burst size
 	 * of the host DMA in the ALSA buffer.
 	 *
-	 * On playback start the DMA will transfer dsp_max_burst_size_in_ms
-	 * amount of data in one initial burst to fill up the host DMA buffer.
-	 * Consequent DMA burst sizes are shorter and their length can vary.
-	 * To avoid immediate xrun by the initial burst we need to place
-	 * constraint on the period size (via PERIOD_TIME) to cover the size of
-	 * the host buffer.
-	 * We need to add headroom of max 10ms as the firmware needs time to
-	 * settle to the 1ms pacing and initially it can run faster for few
-	 * internal periods.
-	 *
-	 * On capture the DMA will transfer 1ms chunks.
+	 * Set a constraint to period time min to be at least twice as long as
+	 * the minimum burst size to avoid DMA overruns
 	 */
-	if (spcm->stream[direction].dsp_max_burst_size_in_ms) {
-		unsigned int period_time = spcm->stream[direction].dsp_max_burst_size_in_ms;
-
-		/*
-		 * add headroom over the maximum burst size to cover the time
-		 * needed for the DMA pace to settle.
-		 * Limit the headroom time to HDA_MAX_PERIOD_TIME_HEADROOM
-		 */
-		period_time += min(period_time, HDA_MAX_PERIOD_TIME_HEADROOM);
+	if (spcm->stream[direction].dsp_min_burst_size_in_ms) {
+		unsigned int burst_time = spcm->stream[direction].dsp_min_burst_size_in_ms;
 
 		snd_pcm_hw_constraint_minmax(substream->runtime,
-			SNDRV_PCM_HW_PARAM_PERIOD_TIME,
-			period_time * USEC_PER_MSEC,
-			UINT_MAX);
+					     SNDRV_PCM_HW_PARAM_PERIOD_TIME,
+					     burst_time * USEC_PER_MSEC * 2,
+					     UINT_MAX);
 	}
 
 	/* binding pcm substream to hda stream */
