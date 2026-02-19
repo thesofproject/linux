@@ -226,6 +226,7 @@
   cancel_work
   cancel_work_sync
   capable
+  cc_mkdec
   cdc_ncm_bind_common
   cdc_ncm_change_mtu
   cdc_ncm_fill_tx_frame
