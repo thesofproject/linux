@@ -2138,6 +2138,38 @@ bool kvm_cpuid(struct kvm_vcpu *vcpu, u32 *eax, u32 *ebx,
 				*eax = vcpu->arch.hw_tsc_khz;
 			}
 #endif
+		} else if (pkvm_is_protected_vcpu(vcpu) && function == 0x15) {
+			/*
+			 * Since protected VMs cannot use kvmclock to find out the
+			 * TSC frequency, expose the native TSC frequency directly
+			 * via cpuid. For now this is not for security (pKVM does not
+			 * provide secure TSC yet) but just to let the guest know the
+			 * TSC frequency so that it doesn't need to calibrate the TSC
+			 * against host-emulated PIT/HPET timers which are inherently
+			 * inaccurate as they are sensitive to the system load in the
+			 * host.
+			 */
+			if (tsc_khz) {
+				/*
+				 * Core crystal clock must match the LAPIC clock.
+				 * See native_calibrate_tsc().
+				 */
+				*ecx = 1000000000 / vcpu->kvm->arch.apic_bus_cycle_ns;
+				/*
+				 * Try to minimize calculation error: use 38.4 MHz
+				 * which is the typical core crystal clock frequency
+				 * on today's Intel's desktop CPUs.
+				 *
+				 * TODO: we could avoid any calculation error, by
+				 * exposing tsc_khz via some PV (akin to kvmclock)
+				 * instead of cpuid.
+				 */
+				*eax = *ecx / 38400000;	/* denominator */
+				*ebx = tsc_khz / 38400;	/* numerator */
+				*edx = 0;
+			} else {
+				*eax = *ebx = *ecx = *edx = 0;
+			}
 		}
 	} else {
 		*eax = *ebx = *ecx = *edx = 0;
