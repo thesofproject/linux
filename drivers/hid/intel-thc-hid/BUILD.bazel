@@ -1,0 +1,77 @@
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_module",
+)
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+ddk_module(
+    name = "intel-thc",
+    srcs = [
+        "intel-thc/intel-thc-dev.c",
+        "intel-thc/intel-thc-dma.c",
+        "intel-thc/intel-thc-wot.c",
+    ],
+    out = "intel-thc.ko",
+    hdrs = [
+        "intel-thc/intel-thc-dev.h",
+        "intel-thc/intel-thc-dma.h",
+        "intel-thc/intel-thc-hw.h",
+        "intel-thc/intel-thc-wot.h",
+    ],
+    includes = [
+        ".",
+        "intel-thc",
+    ],
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "intel-quickspi",
+    srcs = [
+        "intel-quickspi/pci-quickspi.c",
+        "intel-quickspi/quickspi-hid.c",
+        "intel-quickspi/quickspi-protocol.c",
+    ],
+    out = "intel-quickspi.ko",
+    hdrs = [
+        "intel-quickspi/quickspi-dev.h",
+        "intel-quickspi/quickspi-hid.h",
+        "intel-quickspi/quickspi-protocol.h",
+    ],
+    includes = [
+        ".",
+        "intel-thc",
+    ],
+    kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        ":intel-thc",
+    ],
+)
+
+ddk_module(
+    name = "intel-quicki2c",
+    srcs = [
+        "intel-quicki2c/pci-quicki2c.c",
+        "intel-quicki2c/quicki2c-hid.c",
+        "intel-quicki2c/quicki2c-protocol.c",
+    ],
+    out = "intel-quicki2c.ko",
+    hdrs = [
+        "intel-quicki2c/quicki2c-dev.h",
+        "intel-quicki2c/quicki2c-hid.h",
+        "intel-quicki2c/quicki2c-protocol.h",
+    ],
+    includes = [
+        ".",
+        "intel-thc",
+    ],
+    kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        ":intel-thc",
+    ],
+)
