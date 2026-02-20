@@ -1,0 +1,91 @@
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_module",
+)
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+filegroup(
+    name = "mei_kconfigs",
+    srcs = [
+        "Kconfig",
+        "gsc_proxy/Kconfig",
+        "hdcp/Kconfig",
+        "pxp/Kconfig",
+    ],
+)
+
+ddk_module(
+    name = "mei_gsc",
+    srcs = [
+        "gsc-me.c",
+    ],
+    out = "mei-gsc.ko",
+    hdrs = [
+        "client.h",
+        "hbm.h",
+        "hw.h",
+        "hw-me.h",
+        "hw-me-regs.h",
+        "mei_dev.h",
+        "mei-trace.h",
+    ],
+    defconfig = "defconfig_mei",
+    kconfig = ":mei_kconfigs",
+    kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        "//private/desktop-google/drivers/gpu/drm:drm_xe",
+    ],
+)
+
+ddk_module(
+    name = "mei_hdcp",
+    srcs = [
+        "hdcp/mei_hdcp.c",
+    ],
+    out = "mei_hdcp.ko",
+    hdrs = [
+        "hdcp/mei_hdcp.h",
+    ],
+    defconfig = "defconfig_mei",
+    kconfig = ":mei_kconfigs",
+    kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        "//private/desktop-google/drivers/gpu/drm:drm_xe",
+    ],
+)
+
+ddk_module(
+    name = "mei_pxp",
+    srcs = [
+        "pxp/mei_pxp.c",
+    ],
+    out = "mei_pxp.ko",
+    hdrs = [
+        "pxp/mei_pxp.h",
+    ],
+    defconfig = "defconfig_mei",
+    kconfig = ":mei_kconfigs",
+    kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        "//private/desktop-google/drivers/gpu/drm:drm_xe",
+    ],
+)
+
+ddk_module(
+    name = "mei_gsc_proxy",
+    srcs = [
+        "gsc_proxy/mei_gsc_proxy.c",
+    ],
+    out = "mei_gsc_proxy.ko",
+    defconfig = "defconfig_mei",
+    kconfig = ":mei_kconfigs",
+    kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        "//private/desktop-google/drivers/gpu/drm:drm_xe",
+    ],
+)

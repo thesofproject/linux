@@ -3420,3 +3420,29 @@ pkg_zip(
 exports_files([
     "Makefile",
 ])
+
+ddk_headers(
+    name = "xe_global_includes",
+    hdrs = [
+        "include/trace/define_trace.h",
+    ],
+    includes = [
+        "include",
+    ],
+    linux_includes = [
+        "include/trace",
+    ],
+)
+
+ddk_headers(
+    name = "drm_xe_uapi_includes",
+    hdrs = [
+        "include/uapi/drm/xe_drm_prelim.h",
+        "include/uapi/drm/xe_drm.h",
+        "include/uapi/drm/drm.h",
+        "include/uapi/drm/drm_mode.h",
+    ],
+    linux_includes = [
+        "include/uapi",
+    ],
+)

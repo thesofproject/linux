@@ -13,6 +13,7 @@
 #include <linux/types.h>
 #include <linux/workqueue.h>
 
+struct drm_file;
 struct xe_bo;
 struct xe_exec_queue;
 struct xe_device;
@@ -29,6 +30,8 @@ enum xe_pxp_status {
 	XE_PXP_ACTIVE,
 	XE_PXP_SUSPENDED,
 };
+
+#define INTEL_PXP_MAX_HWDRM_SESSIONS 16
 
 /**
  * struct xe_pxp_gsc_client_resources - resources for GSC submission by a PXP
@@ -130,6 +133,27 @@ struct xe_pxp {
 	 * suspend cycles.
 	 */
 	u32 last_suspend_key_instance;
+
+	/**
+	 * @multi_session: track state for user clients and their sessions
+	 */
+	struct {
+		/** @multi_session.mutex: protects the session and client management */
+		struct mutex mutex;
+		/** @multi_session.client_list: list of user clients */
+		struct list_head client_list;
+		/** @multi_session.reserved_sessions: bitmask of sessions in use */
+		unsigned long reserved_sessions;
+		/** @multi_session.sessions: per-session information */
+		struct {
+			/** @multi_session.sessions.owner: client owning this session */
+			struct drm_file *owner;
+			/** @multi_session.sessions.tag: pxp tag for the session */
+			u32 tag;
+			/** @multi_session.sessions.instance: reservation instance */
+			u8 instance;
+		} sessions[INTEL_PXP_MAX_HWDRM_SESSIONS];
+	} multi_session;
 };
 
 #endif /* __XE_PXP_TYPES_H__ */
