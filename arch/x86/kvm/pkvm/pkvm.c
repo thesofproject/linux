@@ -1803,7 +1803,8 @@ static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc 
 void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 {
 	enum pkvm_hc hc = pkvm_hc(vcpu);
-	union pkvm_hc_data in, out;
+	/* Zero 'out' to prevent leaking stack data on error */
+	union pkvm_hc_data in, out = {0};
 	int ret = 0;
 
 	pkvm_hc_get_input(vcpu, hc, &in);
