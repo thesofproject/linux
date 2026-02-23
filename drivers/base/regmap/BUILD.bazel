@@ -1,0 +1,38 @@
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_module",
+)
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+_AUDIO_DEFCONFIG = "//private/desktop-google:intel_audio_ddk.defconfig"
+
+ddk_module(
+    name = "regmap-sdw",
+    srcs = [
+        "regmap-sdw.c",
+        "internal.h",
+    ],
+    out = "regmap-sdw.ko",
+    deps = ["//private/desktop-google/drivers/soundwire:soundwire-bus"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "regmap-sdw-mbq",
+    srcs = [
+        "regmap-sdw-mbq.c",
+        "internal.h",
+    ],
+    out = "regmap-sdw-mbq.ko",
+    deps = ["//private/desktop-google/drivers/soundwire:soundwire-bus"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)

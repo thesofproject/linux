@@ -1,0 +1,149 @@
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_headers",
+    "ddk_module",
+)
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+_AUDIO_DEFCONFIG = "//private/desktop-google:intel_audio_ddk.defconfig"
+
+ddk_headers(
+    name = "sof_headers",
+    hdrs = glob(["*.h"]),
+    includes = ["."],
+    linux_includes = [
+        "sound/soc/sof",
+    ],
+)
+
+ddk_module(
+    name = "snd-sof",
+    srcs = [
+        "core.c",
+        "ops.c",
+        "loader.c",
+        "ipc.c",
+        "pcm.c",
+        "pm.c",
+        "debug.c",
+        "topology.c",
+        "fw-file-profile.c",
+        "ipc3.c",
+        "ipc3-loader.c",
+        "ipc3-topology.c",
+        "ipc3-control.c",
+        "ipc3-pcm.c",
+        "ipc3-dtrace.c",
+        "ipc4.c",
+        "ipc4-loader.c",
+        "ipc4-topology.c",
+        "ipc4-control.c",
+        "ipc4-pcm.c",
+        "ipc4-mtrace.c",
+        "ipc4-telemetry.c",
+        "sof-client.c",
+        "sof-audio.c",
+        "control.c",
+        "stream-ipc.c",
+        "trace.c",
+        "iomem-utils.c",
+        "ops.h",
+        "sof-audio.h",
+        "sof-priv.h",
+        "sof-client.h",
+        "ipc3-priv.h",
+        "ipc4-priv.h",
+        "ipc4-fw-reg.h",
+        "ipc4-telemetry.h",
+        "ipc4-topology.h",
+        "sof-of-dev.h",
+        "sof-utils.h",
+    ],
+    out = "snd-sof.ko",
+    deps = [":snd-sof-utils"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-sof-pci",
+    srcs = [
+        "sof-pci-dev.c",
+        "sof-pci-dev.h",
+        "ops.h",
+        "sof-priv.h",
+        "sof-audio.h",
+        "sof-client.h",
+        "ipc3-priv.h",
+        "ipc4-priv.h",
+    ],
+    out = "snd-sof-pci.ko",
+    deps = [
+        ":snd-sof",
+        ":snd-sof-utils",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-sof-acpi",
+    srcs = [
+        "sof-acpi-dev.c",
+        "sof-acpi-dev.h",
+        "ops.h",
+        "sof-priv.h",
+        "sof-audio.h",
+        "sof-client.h",
+        "ipc3-priv.h",
+        "ipc4-priv.h",
+    ],
+    out = "snd-sof-acpi.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/soc/sof",
+        "-Iprivate/desktop-google/sound/soc/intel/common",
+    ],
+    deps = [
+        ":snd-sof",
+        ":snd-sof-utils",
+        "//private/desktop-google/sound/soc/sof/intel:intel_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-sof-utils",
+    srcs = [
+        "sof-utils.c",
+        "sof-utils.h",
+    ],
+    out = "snd-sof-utils.ko",
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-sof-probes",
+    srcs = [
+        "sof-client-probes.c",
+        "sof-client-probes-ipc3.c",
+        "sof-client-probes-ipc4.c",
+    ],
+    out = "snd-sof-probes.ko",
+    copts = ["-Iprivate/desktop-google/sound/soc/sof"],
+    deps = [":snd-sof", ":sof_headers"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)

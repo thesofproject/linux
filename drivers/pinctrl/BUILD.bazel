@@ -1,0 +1,15 @@
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_headers",
+)
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+ddk_headers(
+    name = "pinctrl_headers",
+    hdrs = glob(["*.h"]),
+)

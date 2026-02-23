@@ -1,0 +1,46 @@
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_module",
+)
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+_AUDIO_DEFCONFIG = "//private/desktop-google:intel_audio_ddk.defconfig"
+
+ddk_module(
+    name = "snd-soc-sdw-utils",
+    srcs = [
+        "soc_sdw_utils.c",
+        "soc_sdw_dmic.c",
+        "soc_sdw_rt_dmic.c",
+        "soc_sdw_rt700.c",
+        "soc_sdw_rt711.c",
+        "soc_sdw_rt5682.c",
+        "soc_sdw_rt_sdca_jack_common.c",
+        "soc_sdw_rt_amp.c",
+        "soc_sdw_rt_mf_sdca.c",
+        "soc_sdw_bridge_cs35l56.c",
+        "soc_sdw_cs42l42.c",
+        "soc_sdw_cs42l43.c",
+        "soc_sdw_cs_amp.c",
+        "soc_sdw_maxim.c",
+        "soc_sdw_ti_amp.c",
+        "soc_sdw_rt_amp_coeff_tables.h",
+    ],
+    out = "snd-soc-sdw-utils.ko",
+    includes = ["."],
+    copts = [
+        "-Iprivate/desktop-google/sound/soc/codecs",
+    ],
+    deps = [
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+        "//private/desktop-google/drivers/soundwire:soundwire-bus",
+    ],
+    kconfig = ":Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)

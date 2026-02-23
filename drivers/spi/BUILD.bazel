@@ -1,0 +1,24 @@
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_module",
+)
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+_AUDIO_DEFCONFIG = "//private/desktop-google:intel_audio_ddk.defconfig"
+
+ddk_module(
+    name = "spi-cs42l43",
+    srcs = [
+        "spi-cs42l43.c",
+    ],
+    out = "spi-cs42l43.ko",
+    deps = ["//private/desktop-google/drivers/mfd:cs42l43"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)

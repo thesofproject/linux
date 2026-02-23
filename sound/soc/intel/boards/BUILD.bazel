@@ -1,0 +1,429 @@
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_module",
+    "ddk_headers",
+)
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+_AUDIO_DEFCONFIG = "//private/desktop-google:intel_audio_ddk.defconfig"
+
+
+ddk_headers(
+    name = "boards_headers",
+    hdrs = glob(["*.h"]),
+)
+
+ddk_module(
+    name = "snd-soc-sof-sdw",
+    srcs = [
+        "sof_sdw.c",
+        "sof_sdw_hdmi.c",
+        "sof_sdw_common.h",
+        "sof_hdmi_common.h",
+        "hda_dsp_common.h",
+    ],
+    out = "snd-soc-sof-sdw.ko",
+    copts = ["-Iprivate/desktop-google/sound/soc"],
+    deps = [
+        ":boards_headers",
+        "//private/desktop-google/drivers/soundwire:soundwire-bus",
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+        "//private/desktop-google/sound/soc/sdw_utils:snd-soc-sdw-utils",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+        ":snd-soc-intel-hda-dsp-common",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-intel-sof-board-helpers",
+    srcs = [
+        "sof_board_helpers.c",
+        "sof_board_helpers.h",
+        "hda_dsp_common.h",
+        "sof_hdmi_common.h",
+        "sof_sdw_common.h",
+    ],
+    out = "snd-soc-intel-sof-board-helpers.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/soc",
+        "-Iprivate/desktop-google/sound/soc/intel",
+    ],
+    deps = [
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+        ":snd-soc-intel-hda-dsp-common",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-intel-sof-cirrus-common",
+    srcs = [
+        "sof_cirrus_common.c",
+        "sof_cirrus_common.h",
+        "sof_board_helpers.h",
+        "sof_hdmi_common.h",
+        "sof_sdw_common.h",
+    ],
+    out = "snd-soc-intel-sof-cirrus-common.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/soc",
+        "-Iprivate/desktop-google/sound/soc/intel",
+    ],
+    deps = [
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+        ":snd-soc-intel-hda-dsp-common",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-intel-sof-maxim-common",
+    srcs = [
+        "sof_maxim_common.c",
+        "sof_maxim_common.h",
+        "sof_board_helpers.h",
+        "sof_hdmi_common.h",
+        "sof_sdw_common.h",
+    ],
+    out = "snd-soc-intel-sof-maxim-common.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/soc",
+        "-Iprivate/desktop-google/sound/soc/intel",
+    ],
+    deps = [
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+        ":snd-soc-intel-hda-dsp-common",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-intel-sof-nuvoton-common",
+    srcs = [
+        "sof_nuvoton_common.c",
+        "sof_nuvoton_common.h",
+        "sof_board_helpers.h",
+        "sof_hdmi_common.h",
+        "sof_sdw_common.h",
+    ],
+    out = "snd-soc-intel-sof-nuvoton-common.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/soc",
+        "-Iprivate/desktop-google/sound/soc/intel",
+    ],
+    deps = [
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+        ":snd-soc-intel-hda-dsp-common",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-intel-sof-realtek-common",
+    srcs = [
+        "sof_realtek_common.c",
+        "sof_realtek_common.h",
+        "sof_sdw_common.h",
+        "sof_board_helpers.h",
+        "sof_hdmi_common.h",
+    ],
+    out = "snd-soc-intel-sof-realtek-common.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/soc",
+        "-Iprivate/desktop-google/sound/soc/intel",
+    ],
+    deps = [
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+        ":snd-soc-intel-hda-dsp-common",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-intel-sof-ti-common",
+    srcs = [
+        "sof_ti_common.c",
+        "sof_ti_common.h",
+        "sof_board_helpers.h",
+        "sof_hdmi_common.h",
+        "sof_sdw_common.h",
+    ],
+    out = "snd-soc-intel-sof-ti-common.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/soc",
+        "-Iprivate/desktop-google/sound/soc/intel",
+    ],
+    deps = [
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+        ":snd-soc-intel-hda-dsp-common",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-intel-hda-dsp-common",
+    srcs = [
+        "hda_dsp_common.c",
+        "hda_dsp_common.h",
+        "sof_hdmi_common.h",
+        "sof_board_helpers.h",
+        "sof_sdw_common.h",
+    ],
+    out = "snd-soc-intel-hda-dsp-common.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/soc",
+        "-Iprivate/desktop-google/sound/soc/intel",
+    ],
+    deps = [
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+        "//private/desktop-google/sound/hda:snd-hda-core",
+        "//private/desktop-google/sound/hda:snd-hda-codec",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-sof_nau8825",
+    srcs = [
+        "sof_nau8825.c",
+    ],
+    out = "snd-soc-sof_nau8825.ko",
+    copts = ["-Iprivate/desktop-google/sound/soc", "-Iprivate/desktop-google/sound/soc/intel/boards"],
+    deps = [
+        ":boards_headers",
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+        ":snd-soc-intel-sof-board-helpers",
+        ":snd-soc-intel-sof-maxim-common",
+        ":snd-soc-intel-sof-ti-common",
+        ":snd-soc-intel-sof-realtek-common",
+        ":snd-soc-intel-sof-cirrus-common",
+        ":snd-soc-intel-sof-nuvoton-common",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-skl_hda_dsp",
+    srcs = [
+        "skl_hda_dsp_generic.c",
+    ],
+    out = "snd-soc-skl_hda_dsp.ko",
+    copts = ["-Iprivate/desktop-google/sound/soc", "-Iprivate/desktop-google/sound/soc/intel/boards"],
+    deps = [
+        ":boards_headers",
+        ":snd-soc-intel-sof-board-helpers",
+        "//private/desktop-google/sound/hda:snd-hda-codec",
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+        "//private/desktop-google/sound/soc/sof:sof_headers",
+        "//private/desktop-google/sound/soc/sof/intel:intel_headers",
+        "//private/desktop-google/sound/soc/sof/intel:snd-sof-intel-hda-common",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-sof_cs42l42",
+    srcs = [
+        "sof_cs42l42.c",
+    ],
+    out = "snd-soc-sof_cs42l42.ko",
+    copts = ["-Iprivate/desktop-google/sound/soc", "-Iprivate/desktop-google/sound/soc/intel/boards"],
+    deps = [
+        ":boards_headers",
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+        ":snd-soc-intel-sof-board-helpers",
+        ":snd-soc-intel-sof-maxim-common",
+        ":snd-soc-intel-sof-ti-common",
+        ":snd-soc-intel-sof-realtek-common",
+        ":snd-soc-intel-sof-cirrus-common",
+        ":snd-soc-intel-sof-nuvoton-common",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-sof_da7219",
+    srcs = [
+        "sof_da7219.c",
+    ],
+    out = "snd-soc-sof_da7219.ko",
+    copts = ["-Iprivate/desktop-google/sound/soc", "-Iprivate/desktop-google/sound/soc/intel/boards"],
+    deps = [
+        ":boards_headers",
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+        ":snd-soc-intel-sof-board-helpers",
+        ":snd-soc-intel-sof-maxim-common",
+        ":snd-soc-intel-sof-ti-common",
+        ":snd-soc-intel-sof-realtek-common",
+        ":snd-soc-intel-sof-cirrus-common",
+        ":snd-soc-intel-sof-nuvoton-common",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-sof_rt5682",
+    srcs = [
+        "sof_rt5682.c",
+    ],
+    out = "snd-soc-sof_rt5682.ko",
+    copts = ["-Iprivate/desktop-google/sound/soc", "-Iprivate/desktop-google/sound/soc/intel/boards"],
+    deps = [
+        ":boards_headers",
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+        ":snd-soc-intel-sof-board-helpers",
+        ":snd-soc-intel-sof-maxim-common",
+        ":snd-soc-intel-sof-ti-common",
+        ":snd-soc-intel-sof-realtek-common",
+        ":snd-soc-intel-sof-cirrus-common",
+        ":snd-soc-intel-sof-nuvoton-common",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+        "//private/desktop-google/sound/soc/codecs:snd-soc-rt5645",
+        "//private/desktop-google/sound/soc/codecs:snd-soc-rt5682s",
+        "//private/desktop-google/sound/soc/codecs:snd-soc-rt5682",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-sof-ssp-amp",
+    srcs = [
+        "sof_ssp_amp.c",
+    ],
+    out = "snd-soc-sof-ssp-amp.ko",
+    copts = ["-Iprivate/desktop-google/sound/soc", "-Iprivate/desktop-google/sound/soc/intel/boards"],
+    deps = [
+        ":boards_headers",
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+        ":snd-soc-intel-sof-board-helpers",
+        ":snd-soc-intel-sof-cirrus-common",
+        ":snd-soc-intel-sof-realtek-common",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-sst-bytcr-rt5640",
+    srcs = [
+        "bytcr_rt5640.c",
+    ],
+    out = "snd-soc-sst-bytcr-rt5640.ko",
+    copts = ["-Iprivate/desktop-google/sound/soc", "-Iprivate/desktop-google/sound/soc/intel/boards", "-Iprivate/desktop-google/sound/soc/intel"],
+    deps = [
+        "//private/desktop-google/sound/soc/intel/atom:atom_headers",
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+        "//private/desktop-google/sound/soc/codecs:snd-soc-rt5640"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-sst-cht-bsw-max98090_ti",
+    srcs = [
+        "cht_bsw_max98090_ti.c",
+    ],
+    out = "snd-soc-sst-cht-bsw-max98090_ti.ko",
+    copts = ["-Iprivate/desktop-google/sound/soc", "-Iprivate/desktop-google/sound/soc/intel/boards", "-Iprivate/desktop-google/sound/soc/intel"],
+    deps = [
+        "//private/desktop-google/sound/soc/intel/atom:atom_headers",
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+        "//private/desktop-google/sound/soc/codecs:snd-soc-ts3a227e",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-sst-cht-bsw-rt5645",
+    srcs = [
+        "cht_bsw_rt5645.c",
+    ],
+    out = "snd-soc-sst-cht-bsw-rt5645.ko",
+    copts = ["-Iprivate/desktop-google/sound/soc", "-Iprivate/desktop-google/sound/soc/intel/boards", "-Iprivate/desktop-google/sound/soc/intel"],
+    deps = [
+        "//private/desktop-google/sound/soc/intel/atom:atom_headers",
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+        "//private/desktop-google/sound/soc/codecs:snd-soc-rt5645"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-sst-cht-bsw-rt5672",
+    srcs = [
+        "cht_bsw_rt5672.c",
+    ],
+    out = "snd-soc-sst-cht-bsw-rt5672.ko",
+    copts = ["-Iprivate/desktop-google/sound/soc", "-Iprivate/desktop-google/sound/soc/intel/boards", "-Iprivate/desktop-google/sound/soc/intel"],
+    deps = [
+        "//private/desktop-google/sound/soc/intel/atom:atom_headers",
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+        "//private/desktop-google/sound/soc/codecs:snd-soc-rt5670"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)

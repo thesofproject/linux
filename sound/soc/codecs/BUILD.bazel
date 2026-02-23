@@ -1,0 +1,870 @@
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_headers",
+    "ddk_module",
+)
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+_AUDIO_DEFCONFIG = "//private/desktop-google:intel_audio_ddk.defconfig"
+
+ddk_headers(
+    name = "all_headers",
+    hdrs = glob(["*.h"]),
+)
+
+ddk_module(
+    name = "snd-soc-rt5682",
+    srcs = ["rt5682.c", "rt5682.h", "rl6231.h"],
+    out = "snd-soc-rt5682.ko",
+    deps = [":snd-soc-rl6231"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-rt5682-i2c",
+    srcs = ["rt5682-i2c.c", "rt5682.h", "rl6231.h"],
+    out = "snd-soc-rt5682-i2c.ko",
+    deps = [":snd-soc-rt5682"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-rt5682-sdw",
+    srcs = ["rt5682-sdw.c", "rt5682.h", "rl6231.h"],
+    out = "snd-soc-rt5682-sdw.ko",
+    deps = [
+        ":snd-soc-rt5682",
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw",
+        "//private/desktop-google/drivers/soundwire:soundwire-bus",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-max98363",
+    srcs = ["max98363.c", "max98363.h"],
+    out = "snd-soc-max98363.ko",
+    deps = [
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw",
+        "//private/desktop-google/drivers/soundwire:soundwire-bus",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-max98373",
+    srcs = ["max98373.c", "max98373.h"],
+    out = "snd-soc-max98373.ko",
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-max98373-i2c",
+    srcs = ["max98373-i2c.c", "max98373.h"],
+    out = "snd-soc-max98373-i2c.ko",
+    deps = [":snd-soc-max98373"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-max98373-sdw",
+    srcs = [
+        "max98373-sdw.c",
+        "max98373.h",
+        "max98373-sdw.h",
+    ],
+    out = "snd-soc-max98373-sdw.ko",
+    deps = [
+        ":snd-soc-max98373",
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw",
+        "//private/desktop-google/drivers/soundwire:soundwire-bus",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-max98357a",
+    srcs = ["max98357a.c"],
+    out = "snd-soc-max98357a.ko",
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-dmic",
+    srcs = ["dmic.c"],
+    out = "snd-soc-dmic.ko",
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-rt700",
+    srcs = [
+        "rt700.c",
+        "rt700-sdw.c",
+        "rt700.h",
+        "rt700-sdw.h",
+    ],
+    out = "snd-soc-rt700.ko",
+    deps = [
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw",
+        "//private/desktop-google/drivers/soundwire:soundwire-bus",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+
+ddk_module(
+    name = "snd-soc-rt711",
+    srcs = [
+        "rt711.c",
+        "rt711-sdw.c",
+        "rt711.h",
+        "rt711-sdw.h",
+    ],
+    out = "snd-soc-rt711.ko",
+    deps = [
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw",
+        "//private/desktop-google/drivers/soundwire:soundwire-bus",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+
+ddk_module(
+    name = "snd-soc-rt711-sdca",
+    srcs = [
+        "rt711-sdca.c",
+        "rt711-sdca-sdw.c",
+        "rt711-sdca.h",
+        "rt711-sdca-sdw.h",
+        "rt-sdw-common.h",
+    ],
+    out = "snd-soc-rt711-sdca.ko",
+    deps = [
+        ":snd-soc-rt-sdw-common",
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw",
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw-mbq",
+        "//private/desktop-google/drivers/soundwire:soundwire-bus",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+
+
+ddk_module(
+    name = "snd-soc-rt712-sdca",
+    srcs = [
+        "rt712-sdca.c",
+        "rt712-sdca-sdw.c",
+        "rt712-sdca.h",
+        "rt712-sdca-sdw.h",
+        "rt-sdw-common.h",
+    ],
+    out = "snd-soc-rt712-sdca.ko",
+    deps = [
+        ":snd-soc-rt-sdw-common",
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw",
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw-mbq",
+        "//private/desktop-google/drivers/soundwire:soundwire-bus",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-rt712-sdca-dmic",
+    srcs = [
+        "rt712-sdca-dmic.c",
+        "rt712-sdca-dmic.h",
+        "rt712-sdca.h",
+    ],
+    out = "snd-soc-rt712-sdca-dmic.ko",
+    deps = [
+        ":snd-soc-rt-sdw-common",
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw",
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw-mbq",
+        "//private/desktop-google/drivers/soundwire:soundwire-bus",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-rt715",
+    srcs = [
+        "rt715.c",
+        "rt715-sdw.c",
+        "rt715.h",
+        "rt715-sdw.h",
+    ],
+    out = "snd-soc-rt715.ko",
+    deps = [
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw",
+        "//private/desktop-google/drivers/soundwire:soundwire-bus",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-rt715-sdca",
+    srcs = [
+        "rt715-sdca.c",
+        "rt715-sdca-sdw.c",
+        "rt715-sdca.h",
+        "rt715-sdca-sdw.h",
+        "rt-sdw-common.h",
+        "rt715.h",
+    ],
+    out = "snd-soc-rt715-sdca.ko",
+    deps = [
+        ":snd-soc-rt-sdw-common",
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw",
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw-mbq",
+        "//private/desktop-google/drivers/soundwire:soundwire-bus",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-rt721-sdca",
+    srcs = [
+        "rt721-sdca.c",
+        "rt721-sdca-sdw.c",
+        "rt721-sdca.h",
+        "rt721-sdca-sdw.h",
+        "rt-sdw-common.h",
+    ],
+    out = "snd-soc-rt721-sdca.ko",
+    deps = [
+        ":snd-soc-rt-sdw-common",
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw",
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw-mbq",
+        "//private/desktop-google/drivers/soundwire:soundwire-bus",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-rl6231",
+    srcs = ["rl6231.c", "rl6231.h"],
+    out = "snd-soc-rl6231.ko",
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-rt-sdw-common",
+    srcs = ["rt-sdw-common.c", "rt-sdw-common.h"],
+    out = "snd-soc-rt-sdw-common.ko",
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-rt722-sdca",
+    srcs = [
+        "rt722-sdca.c",
+        "rt722-sdca-sdw.c",
+        "rt722-sdca.h",
+        "rt722-sdca-sdw.h",
+        "rt-sdw-common.h",
+    ],
+    out = "snd-soc-rt722-sdca.ko",
+    deps = [
+        ":snd-soc-rt-sdw-common",
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw",
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw-mbq",
+        "//private/desktop-google/drivers/soundwire:soundwire-bus",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-rt1308",
+    srcs = [
+        "rt1308.c",
+        "rt1308.h",
+        "rl6231.h",
+    ],
+    out = "snd-soc-rt1308.ko",
+    deps = [
+        ":snd-soc-rl6231",
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw",
+        "//private/desktop-google/drivers/soundwire:soundwire-bus",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-rt1308-sdw",
+    srcs = ["rt1308-sdw.c", "rt1308-sdw.h", "rt1308.h", "rl6231.h"],
+    out = "snd-soc-rt1308-sdw.ko",
+    deps = [
+        ":snd-soc-rl6231",
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw",
+        "//private/desktop-google/drivers/soundwire:soundwire-bus",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-rt1316-sdw",
+    srcs = ["rt1316-sdw.c", "rt1316-sdw.h", "rt1308.h", "rl6231.h"],
+    out = "snd-soc-rt1316-sdw.ko",
+    deps = [
+        ":snd-soc-rl6231",
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw",
+        "//private/desktop-google/drivers/soundwire:soundwire-bus",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-rt1318-sdw",
+    srcs = ["rt1318-sdw.c", "rt1318-sdw.h", "rt1318.h", "rl6231.h"],
+    out = "snd-soc-rt1318-sdw.ko",
+    deps = [
+        ":snd-soc-rl6231",
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw",
+        "//private/desktop-google/drivers/soundwire:soundwire-bus",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-rt1320-sdw",
+    srcs = ["rt1320-sdw.c", "rt1320-sdw.h", "rt-sdw-common.h"],
+    out = "snd-soc-rt1320-sdw.ko",
+    deps = [
+        ":snd-soc-rl6231",
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw",
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw-mbq",
+        "//private/desktop-google/drivers/soundwire:soundwire-bus",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-cs42l43",
+    srcs = [
+        "cs42l43.c",
+        "cs42l43.h",
+        "cs42l43-jack.c",
+    ],
+    out = "snd-soc-cs42l43.ko",
+    deps = [":snd-soc-cs42l43-sdw"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-cs42l43-sdw",
+    srcs = ["cs42l43-sdw.c", "cs42l43.h"],
+    out = "snd-soc-cs42l43-sdw.ko",
+    deps = [
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw",
+        "//private/desktop-google/drivers/soundwire:soundwire-bus",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-rt5682s",
+    srcs = ["rt5682s.c", "rt5682s.h"],
+    out = "snd-soc-rt5682s.ko",
+    deps = [":snd-soc-rl6231"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-wm-adsp",
+    srcs = ["wm_adsp.c", "wm_adsp.h"],
+    out = "snd-soc-wm-adsp.ko",
+    deps = ["//private/desktop-google/drivers/firmware/cirrus:cs_dsp"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-cs35l56",
+    srcs = [
+        "cs35l56.c",
+        "cs35l56.h",
+        "wm_adsp.h",
+    ],
+    out = "snd-soc-cs35l56.ko",
+    deps = [
+        ":snd-soc-cs-amp-lib",
+        ":snd-soc-cs35l56-shared",
+        ":snd-soc-wm-adsp",
+        "//private/desktop-google/drivers/firmware/cirrus:cs_dsp",
+        "//private/desktop-google/drivers/soundwire:soundwire-bus",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-cs35l56-sdw",
+    srcs = ["cs35l56-sdw.c", "cs35l56.h", "wm_adsp.h"],
+    out = "snd-soc-cs35l56-sdw.ko",
+    deps = [
+        ":snd-soc-cs35l56",
+        ":snd-soc-cs35l56-shared",
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw",
+        "//private/desktop-google/drivers/soundwire:soundwire-bus",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-cs-amp-lib",
+    srcs = ["cs-amp-lib.c"],
+    out = "snd-soc-cs-amp-lib.ko",
+    deps = ["//private/desktop-google/drivers/firmware/cirrus:cs_dsp"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-cs35l56-shared",
+    srcs = ["cs35l56-shared.c", "cs35l56.h", "wm_adsp.h"],
+    out = "snd-soc-cs35l56-shared.ko",
+    deps = [
+        ":snd-soc-cs-amp-lib",
+        "//private/desktop-google/drivers/firmware/cirrus:cs_dsp",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-cs35l56-spi",
+    srcs = ["cs35l56-spi.c", "cs35l56.h", "wm_adsp.h"],
+    out = "snd-soc-cs35l56-spi.ko",
+    deps = [
+        ":snd-soc-cs35l56",
+        ":snd-soc-cs35l56-shared",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-da7219",
+    srcs = ["da7219.c", "da7219.h", "da7219-aad.c", "da7219-aad.h"],
+    out = "snd-soc-da7219.ko",
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-cs42l42",
+    srcs = [
+        "cs42l42.c",
+        "cs42l42.h",
+        "cirrus_legacy.h",
+    ],
+    out = "snd-soc-cs42l42.ko",
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-cs42l42-i2c",
+    srcs = ["cs42l42-i2c.c", "cs42l42.h"],
+    out = "snd-soc-cs42l42-i2c.ko",
+    deps = [":snd-soc-cs42l42"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-cs42l42-sdw",
+    srcs = ["cs42l42-sdw.c", "cs42l42.h"],
+    out = "snd-soc-cs42l42-sdw.ko",
+    deps = [
+        ":snd-soc-cs42l42",
+        "//private/desktop-google/drivers/base/regmap:regmap-sdw",
+        "//private/desktop-google/drivers/soundwire:soundwire-bus",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-nau8825",
+    srcs = ["nau8825.c", "nau8825.h"],
+    out = "snd-soc-nau8825.ko",
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-hdac-hda",
+    srcs = ["hdac_hda.c", "hdac_hda.h"],
+    out = "snd-soc-hdac-hda.ko",
+    deps = [
+        "//private/desktop-google/sound/hda/core/ext:snd-hda-ext-core",
+        "//private/desktop-google/sound/hda:snd-hda-core",
+        "//private/desktop-google/sound/hda:snd-hda-codec",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-hda-codec",
+    srcs = [
+        "hda.c",
+        "hda-dai.c",
+        "hda.h",
+    ],
+    out = "snd-soc-hda-codec.ko",
+    deps = [
+        "//private/desktop-google/sound/hda/core/ext:snd-hda-ext-core",
+        "//private/desktop-google/sound/hda:snd-hda-core",
+        "//private/desktop-google/sound/hda:snd-hda-codec",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-cs35l41-lib",
+    srcs = [
+        "cs35l41-lib.c",
+        "cs35l41.h",
+           "wm_adsp.h",
+ ],
+    out = "snd-soc-cs35l41-lib.ko",
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-cs35l41-i2c",
+    srcs = [
+        "cs35l41-i2c.c",
+        "cs35l41.h",
+           "wm_adsp.h",
+ ],
+    out = "snd-soc-cs35l41-i2c.ko",
+    deps = [":snd-soc-cs35l41", ":snd-soc-cs35l41-lib"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-cs35l41",
+    srcs = [
+        "cs35l41.c",
+        "cs35l41.h",
+           "wm_adsp.h",
+ ],
+    out = "snd-soc-cs35l41.ko",
+    deps = [":snd-soc-cs35l41-lib", ":snd-soc-wm-adsp"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-max98090",
+    srcs = [
+        "max98090.c",
+        "max98090.h",
+    ],
+    out = "snd-soc-max98090.ko",
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-max98390",
+    srcs = [
+        "max98390.c",
+        "max98390.h",
+    ],
+    out = "snd-soc-max98390.ko",
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-max98927",
+    srcs = [
+        "max98927.c",
+        "max98927.h",
+    ],
+    out = "snd-soc-max98927.ko",
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-nau8315",
+    srcs = [
+        "nau8315.c",
+            ],
+    out = "snd-soc-nau8315.ko",
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-rt1011",
+    srcs = [
+        "rt1011.c",
+        "rt1011.h",
+           "rl6231.h",
+ ],
+    out = "snd-soc-rt1011.ko",
+    deps = [":snd-soc-rl6231"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-rt1015",
+    srcs = [
+        "rt1015.c",
+        "rt1015.h",
+           "rl6231.h",
+ ],
+    out = "snd-soc-rt1015.ko",
+    deps = [":snd-soc-rl6231"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-rt1015p",
+    srcs = [
+        "rt1015p.c",
+            ],
+    out = "snd-soc-rt1015p.ko",
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-rt5514",
+    srcs = [
+        "rt5514.c",
+        "rt5514.h",
+           "rl6231.h",
+ ],
+    out = "snd-soc-rt5514.ko",
+    deps = [":snd-soc-rl6231"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-rt5640",
+    srcs = [
+        "rt5640.c",
+        "rt5640.h",
+           "rl6231.h",
+ ],
+    out = "snd-soc-rt5640.ko",
+    deps = [":snd-soc-rl6231"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-rt5645",
+    srcs = [
+        "rt5645.c",
+        "rt5645.h",
+           "rl6231.h",
+ ],
+    out = "snd-soc-rt5645.ko",
+    deps = [":snd-soc-rl6231"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-rt5663",
+    srcs = [
+        "rt5663.c",
+        "rt5663.h",
+           "rl6231.h",
+ ],
+    out = "snd-soc-rt5663.ko",
+    deps = [":snd-soc-rl6231"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-rt5670",
+    srcs = [
+        "rt5670.c",
+        "rt5670.h",
+           "rl6231.h",
+           "rt5670-dsp.h",
+ ],
+    out = "snd-soc-rt5670.ko",
+    deps = [":snd-soc-rl6231"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-sdw-mockup",
+    srcs = [
+        "sdw-mockup.c",
+            ],
+    out = "snd-soc-sdw-mockup.ko",
+    deps = ["//private/desktop-google/drivers/soundwire:soundwire-bus"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-tas2781-comlib-i2c",
+    srcs = [
+        "tas2781-comlib-i2c.c",
+            ],
+    out = "snd-soc-tas2781-comlib-i2c.ko",
+    deps = ["//private/desktop-google/lib/crc:crc8", ":snd-soc-tas2781-comlib"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-tas2781-comlib",
+    srcs = [
+        "tas2781-comlib.c",
+            ],
+    out = "snd-soc-tas2781-comlib.ko",
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-tas2781-fmwlib",
+    srcs = [
+        "tas2781-fmwlib.c",
+            ],
+    out = "snd-soc-tas2781-fmwlib.ko",
+    deps = ["//private/desktop-google/lib/crc:crc8", ":snd-soc-tas2781-comlib"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-tas2781-i2c",
+    srcs = [
+        "tas2781-i2c.c",
+            ],
+    out = "snd-soc-tas2781-i2c.ko",
+    deps = [":snd-soc-tas2781-comlib-i2c", ":snd-soc-tas2781-fmwlib", ":snd-soc-tas2781-comlib"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-ts3a227e",
+    srcs = [
+        "ts3a227e.c",
+        "ts3a227e.h",
+    ],
+    out = "snd-soc-ts3a227e.ko",
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
