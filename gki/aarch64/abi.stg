@@ -24299,6 +24299,11 @@ pointer_reference {
   pointee_type_id: 0x94df28bf
 }
 pointer_reference {
+  id: 0x2fa869ee
+  kind: POINTER
+  pointee_type_id: 0x94e14127
+}
+pointer_reference {
   id: 0x2fa88d73
   kind: POINTER
   pointee_type_id: 0x94e2d352
@@ -90062,6 +90067,17 @@ member {
   offset: 18048
 }
 member {
+  id: 0x54fc8deb
+  name: "epoch_cyc"
+  type_id: 0x92233392
+  offset: 64
+}
+member {
+  id: 0x26ce8437
+  name: "epoch_ns"
+  type_id: 0x92233392
+}
+member {
   id: 0x65a4a799
   name: "epoll_watches"
   type_id: 0x04fd619c
@@ -140798,6 +140814,12 @@ member {
   offset: 64
 }
 member {
+  id: 0x662d76f4
+  name: "mult"
+  type_id: 0xc9082b19
+  offset: 256
+}
+member {
   id: 0x662d77cd
   name: "mult"
   type_id: 0xc9082b19
@@ -173087,6 +173109,12 @@ member {
   offset: 1152
 }
 member {
+  id: 0x24b503bf
+  name: "read_sched_clock"
+  type_id: 0x1f66cd75
+  offset: 192
+}
+member {
   id: 0x190c63f6
   name: "read_size"
   type_id: 0x914dbfdc
@@ -185319,6 +185347,12 @@ member {
   offset: 7552
 }
 member {
+  id: 0xbc628860
+  name: "sched_clock_mask"
+  type_id: 0x92233392
+  offset: 128
+}
+member {
   id: 0xb10bb9ae
   name: "sched_contributes_to_load"
   type_id: 0x4585663f
@@ -190509,6 +190543,12 @@ member {
   name: "shift"
   type_id: 0xc9082b19
   offset: 416
+}
+member {
+  id: 0x32f8cc94
+  name: "shift"
+  type_id: 0xc9082b19
+  offset: 288
 }
 member {
   id: 0x67d3dfb0
@@ -240931,6 +240971,20 @@ struct_union {
   definition {
     bytesize: 8
     member_id: 0xccc14505
+  }
+}
+struct_union {
+  id: 0x94e14127
+  kind: STRUCT
+  name: "clock_read_data"
+  definition {
+    bytesize: 40
+    member_id: 0x26ce8437
+    member_id: 0x54fc8deb
+    member_id: 0xbc628860
+    member_id: 0x24b503bf
+    member_id: 0x662d76f4
+    member_id: 0x32f8cc94
   }
 }
 struct_union {
@@ -327292,6 +327346,11 @@ function {
   parameter_id: 0x37d7ca8b
   parameter_id: 0x6720d32f
   parameter_id: 0x6720d32f
+}
+function {
+  id: 0x27f3f494
+  return_type_id: 0x2fa869ee
+  parameter_id: 0x1bf16028
 }
 function {
   id: 0x2801c308
@@ -417523,6 +417582,24 @@ elf_symbol {
   full_name: "sched_clock"
 }
 elf_symbol {
+  id: 0x6f2c7b17
+  name: "sched_clock_read_begin"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x0083ea76
+  type_id: 0x27f3f494
+  full_name: "sched_clock_read_begin"
+}
+elf_symbol {
+  id: 0x18fbd52b
+  name: "sched_clock_read_retry"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x4f78ccdf
+  type_id: 0x8ce1baa0
+  full_name: "sched_clock_read_retry"
+}
+elf_symbol {
   id: 0xd2090791
   name: "sched_feat_keys"
   is_defined: true
@@ -439348,6 +439425,8 @@ interface {
   symbol_id: 0x56cb7a36
   symbol_id: 0xe8c754b0
   symbol_id: 0xac6ce0b0
+  symbol_id: 0x6f2c7b17
+  symbol_id: 0x18fbd52b
   symbol_id: 0xd2090791
   symbol_id: 0xedd0d1ed
   symbol_id: 0xda5d60be
