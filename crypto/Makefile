@@ -227,10 +227,10 @@ UBSAN_SANITIZE_jitterentropy-fips.o = n
 crypto-fips-objs := drbg.o ecb.o cbc.o ctr.o cts.o gcm.o xts.o hmac.o cmac.o \
 		    aes_generic.o \
 		    jitterentropy.o jitterentropy-kcapi.o \
-		    sha1_generic.o sha256_generic.o sha512_generic.o \
+		    sha256_generic.o sha512_generic.o \
 		    sha3_generic.o \
 		    lib-crypto-aes.o lib-crypto-gf128mul.o lib-crypto-memneq.o \
-		    lib-crypto-sha1.o lib-crypto-sha256.o lib-crypto-utils.o
+		    lib-crypto-sha256.o lib-crypto-utils.o
 crypto-fips-objs := $(foreach o,$(crypto-fips-objs),$(o:.o=-fips.o))
 
 # get the arch to add its objects to $(crypto-fips-objs)
