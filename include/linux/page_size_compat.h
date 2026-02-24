@@ -156,6 +156,16 @@ static __always_inline void __filemap_fixup(unsigned long addr, unsigned long pr
 extern int __fixup_swap_header(struct file *swap_file, struct address_space *mapping);
 
 extern void __fold_filemap_fixup_entry(struct vma_iterator *iter, unsigned long *end);
+
+#ifdef CONFIG_PROC_PAGE_MONITOR
+extern bool __is_emulated_pagemap_file(struct file *file);
+#else
+static inline bool __is_emulated_pagemap_file(struct file *file)
+{
+	return false;
+}
+#endif
+
 #endif /* !__ASSEMBLY__ */
 
 #endif /* __LINUX_PAGE_SIZE_COMPAT_H */
