@@ -13,7 +13,6 @@
 #    Arch Linux:  pacman -S python-pycryptodomex python-cryptography
 
 import hashlib
-import hmac
 import os
 
 import Cryptodome.Cipher.AES
@@ -30,7 +29,6 @@ aes_key     = bytes('128-bit AES key\0', 'ascii')
 aes_xts_key = bytes('This is an AES-128-XTS key.\0\0\0\0\0', 'ascii')
 aes_iv      = bytes('ABCDEFGHIJKLMNOP', 'ascii')
 assoc       = bytes('associated data string', 'ascii')
-hmac_key    = bytes('128-bit HMAC key', 'ascii')
 
 def warn_generated():
     print(f'''/*
@@ -106,12 +104,8 @@ def generate_aes_testvecs():
     print_value('aes_cmac_digest', cmac.digest())
 
 def generate_sha_testvecs():
-    print_value('hmac_key', hmac_key)
-    for alg in ['sha256', 'hmac_sha256', 'sha512', 'sha3_256']:
-        if alg.startswith('hmac_'):
-            h = hmac.new(hmac_key, message, alg.removeprefix('hmac_'))
-        else:
-            h = hashlib.new(alg, message)
+    for alg in ['sha3_256']:
+        h = hashlib.new(alg, message)
         print_value(f'{alg}_digest', h.digest())
 
 print('/* SPDX-License-Identifier: GPL-2.0-only */')
