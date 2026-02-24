@@ -1,0 +1,61 @@
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_module",
+    "kernel_module_group",
+)
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+kernel_module_group(
+    name = "mt7921e_group",
+    srcs = [
+        ":mt7921-common",
+        ":mt7921e",
+        "//private/desktop-google/drivers/net/wireless/mediatek/mt76:mt76_group",
+    ],
+)
+
+ddk_module(
+    name = "mt7921-common",
+    srcs = [
+        "debugfs.c",
+        "init.c",
+        "mac.c",
+        "main.c",
+        "mcu.c",
+    ],
+    out = "mt7921-common.ko",
+    hdrs = [
+        "mcu.h",
+        "mt7921.h",
+        "regs.h",
+    ],
+    kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        "//private/desktop-google/drivers/net/wireless/mediatek/mt76",
+        "//private/desktop-google/drivers/net/wireless/mediatek/mt76:mt76-connac-lib",
+        "//private/desktop-google/drivers/net/wireless/mediatek/mt76:mt792x-lib",
+        "//private/desktop-google/net/mac80211",
+        "//private/desktop-google/net/wireless:cfg80211",
+    ],
+)
+
+ddk_module(
+    name = "mt7921e",
+    srcs = [
+        "pci.c",
+        "pci_mac.c",
+        "pci_mcu.c",
+    ],
+    out = "mt7921e.ko",
+    kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        ":mt7921-common",
+        "//private/desktop-google/drivers/net/wireless/mediatek/mt76:mt76_group",
+        "//private/desktop-google/net/mac80211",
+    ],
+)

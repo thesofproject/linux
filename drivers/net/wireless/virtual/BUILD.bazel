@@ -1,0 +1,24 @@
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_module",
+)
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+ddk_module(
+    name = "mac80211_hwsim",
+    srcs = [
+        "mac80211_hwsim.c",
+        "mac80211_hwsim.h",
+    ],
+    out = "mac80211_hwsim.ko",
+    kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        "//private/desktop-google/net/mac80211",
+        "//private/desktop-google/net/wireless:cfg80211",
+    ],
+)

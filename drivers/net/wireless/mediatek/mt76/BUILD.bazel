@@ -1,0 +1,106 @@
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_module",
+    "kernel_module_group",
+)
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+kernel_module_group(
+    name = "mt76_group",
+    srcs = [
+        ":mt76",
+        ":mt76-connac-lib",
+        ":mt792x-lib",
+    ],
+)
+
+ddk_module(
+    name = "mt76",
+    srcs = [
+        "agg-rx.c",
+        "channel.c",
+        "debugfs.c",
+        "dma.c",
+        "eeprom.c",
+        "mac80211.c",
+        "mcu.c",
+        "mmio.c",
+        "pci.c",
+        "scan.c",
+        "trace.c",
+        "tx.c",
+        "util.c",
+        "wed.c",
+    ],
+    out = "mt76.ko",
+    hdrs = [
+        "dma.h",
+        "mt76.h",
+        "testmode.h",
+        "trace.h",
+        "util.h",
+    ],
+    includes = [
+        ".",
+    ],
+    kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        "//private/desktop-google/net/mac80211",
+        "//private/desktop-google/net/wireless:cfg80211",
+    ],
+)
+
+ddk_module(
+    name = "mt76-connac-lib",
+    srcs = [
+        "mt76_connac3_mac.c",
+        "mt76_connac_mac.c",
+        "mt76_connac_mcu.c",
+    ],
+    out = "mt76-connac-lib.ko",
+    hdrs = [
+        "mt76_connac.h",
+        "mt76_connac2_mac.h",
+        "mt76_connac3_mac.h",
+        "mt76_connac_mcu.h",
+    ],
+    kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        ":mt76",
+        "//private/desktop-google/net/mac80211",
+        "//private/desktop-google/net/wireless:cfg80211",
+    ],
+)
+
+ddk_module(
+    name = "mt792x-lib",
+    srcs = [
+        "mt792x_acpi_sar.c",
+        "mt792x_core.c",
+        "mt792x_debugfs.c",
+        "mt792x_dma.c",
+        "mt792x_mac.c",
+        "mt792x_trace.c",
+    ],
+    out = "mt792x-lib.ko",
+    hdrs = [
+        "mt792x.h",
+        "mt792x_acpi_sar.h",
+        "mt792x_regs.h",
+        "mt792x_trace.h",
+    ],
+    includes = [
+        ".",
+    ],
+    kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        ":mt76",
+        ":mt76-connac-lib",
+        "//private/desktop-google/net/mac80211",
+    ],
+)

@@ -1,0 +1,62 @@
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_module",
+)
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+ddk_module(
+    name = "cfg80211",
+    srcs = [
+        "ap.c",
+        "chan.c",
+        "core.c",
+        "debugfs.c",
+        "ethtool.c",
+        "ibss.c",
+        "mesh.c",
+        "mlme.c",
+        "nl80211.c",
+        "ocb.c",
+        "pmsr.c",
+        "radiotap.c",
+        "reg.c",
+        "scan.c",
+        "sme.c",
+        "sysfs.c",
+        "trace.c",
+        "util.c",
+    ],
+    out = "cfg80211.ko",
+    hdrs = [
+        "core.h",
+        "debugfs.h",
+        "nl80211.h",
+        "rdev-ops.h",
+        "reg.h",
+        "sysfs.h",
+        "trace.h",
+        "wext-compat.h",
+    ],
+    conditional_srcs = {
+        "CONFIG_OF": {
+            True: [
+                "of.c",
+            ],
+        },
+    },
+    includes = [
+        ".",
+    ],
+    kernel_build = "//private/devices/google/common:kernel_build",
+    local_defines = [
+        "CONFIG_CFG80211=1",
+        "CONFIG_CFG80211_CERTIFICATION_ONUS=1",
+        "CONFIG_CFG80211_REQUIRE_SIGNED_REGDB=1",
+        "CONFIG_CFG80211_DEBUGFS=1",
+    ],
+)
