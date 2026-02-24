@@ -42,6 +42,7 @@
 #include <linux/psi.h>
 #include <linux/ramfs.h>
 #include <linux/page_idle.h>
+#include <linux/page_size_compat.h>
 #include <linux/migrate.h>
 #include <linux/pipe_fs_i.h>
 #include <linux/splice.h>
@@ -4628,6 +4629,8 @@ resched:
 		}
 	}
 	rcu_read_unlock();
+
+	__adjust_cachestat_counters(cs);
 }
 
 /*
