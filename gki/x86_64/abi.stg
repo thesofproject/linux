@@ -316975,6 +316975,15 @@ elf_symbol {
   full_name: "kvrealloc_node_align_noprof"
 }
 elf_symbol {
+  id: 0x215a0ab6
+  name: "lcm"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x4d04e87b
+  type_id: 0x3dbc41e0
+  full_name: "lcm"
+}
+elf_symbol {
   id: 0x5326383d
   name: "led_add_lookup"
   is_defined: true
@@ -335563,6 +335572,7 @@ interface {
   symbol_id: 0x6e8c6baf
   symbol_id: 0xbbe14755
   symbol_id: 0xe8a14785
+  symbol_id: 0x215a0ab6
   symbol_id: 0x5326383d
   symbol_id: 0xfe24eb71
   symbol_id: 0x27d77d55

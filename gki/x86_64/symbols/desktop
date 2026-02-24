@@ -1700,6 +1700,7 @@
   __kvmalloc_node_noprof
   kvmemdup
   kvrealloc_node_align_noprof
+  lcm
   led_add_lookup
   led_classdev_register_ext
   led_classdev_unregister
