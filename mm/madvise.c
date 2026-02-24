@@ -2187,9 +2187,9 @@ static int madvise_set_anon_name(struct mm_struct *mm, unsigned long start,
 		.anon_name = anon_name,
 	};
 
-	if (start & ~PAGE_MASK)
+	if (start & ~__PAGE_MASK)
 		return -EINVAL;
-	len = (len_in + ~PAGE_MASK) & PAGE_MASK;
+	len = (len_in + ~__PAGE_MASK) & __PAGE_MASK;
 
 	/* Check to see whether len was rounded up from small -ve to zero */
 	if (len_in && !len)
