@@ -156,7 +156,8 @@ sha256_blocks_generic(struct sha256_block_state *state,
 	memzero_explicit(W, sizeof(W));
 }
 
-#if defined(CONFIG_CRYPTO_LIB_SHA256_ARCH) && !defined(__DISABLE_EXPORTS)
+#if defined(CONFIG_CRYPTO_LIB_SHA256_ARCH) && \
+	(!defined(__DISABLE_EXPORTS) || defined(BUILD_FIPS140_KO))
 #include "sha256.h" /* $(SRCARCH)/sha256.h */
 #else
 #define sha256_blocks sha256_blocks_generic
@@ -273,7 +274,7 @@ EXPORT_SYMBOL(sha256);
  * Pre-boot environments (as indicated by __DISABLE_EXPORTS being defined) just
  * need the generic SHA-256 code.  Omit all other features from them.
  */
-#ifndef __DISABLE_EXPORTS
+#if !defined(__DISABLE_EXPORTS) || defined(BUILD_FIPS140_KO)
 
 #ifndef sha256_finup_2x_arch
 static bool sha256_finup_2x_arch(const struct __sha256_ctx *ctx,
