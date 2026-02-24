@@ -383767,7 +383767,7 @@ elf_symbol {
   name: "default_llseek"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x540551b6
+  crc: 0xe56bf60d
   type_id: 0x2d64ae3e
   full_name: "default_llseek"
 }
@@ -388105,7 +388105,7 @@ elf_symbol {
   name: "dma_heap_add"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x947d6f34
+  crc: 0x9faf4c06
   namespace: "DMA_BUF_HEAP"
   type_id: 0x0a745291
   full_name: "dma_heap_add"
@@ -388115,7 +388115,7 @@ elf_symbol {
   name: "dma_heap_buffer_alloc"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x0a145c98
+  crc: 0x34120229
   type_id: 0x43c50d0f
   full_name: "dma_heap_buffer_alloc"
 }
@@ -388124,7 +388124,7 @@ elf_symbol {
   name: "dma_heap_buffer_free"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x0170b5a9
+  crc: 0x8a0434ca
   type_id: 0x10aa5f7a
   full_name: "dma_heap_buffer_free"
 }
@@ -388142,7 +388142,7 @@ elf_symbol {
   name: "dma_heap_get_dev"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x39a4d149
+  crc: 0xbba68017
   type_id: 0xa726fe6e
   full_name: "dma_heap_get_dev"
 }
@@ -394313,7 +394313,7 @@ elf_symbol {
   name: "fixed_size_llseek"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xceaa8b11
+  crc: 0x9d5958c1
   type_id: 0x2d6430a1
   full_name: "fixed_size_llseek"
 }
@@ -395402,7 +395402,7 @@ elf_symbol {
   name: "generic_file_llseek"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x540551b6
+  crc: 0xe56bf60d
   type_id: 0x2d64ae3e
   full_name: "generic_file_llseek"
 }
@@ -395528,7 +395528,7 @@ elf_symbol {
   name: "generic_write_checks"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x0006ea91
+  crc: 0xeac529a6
   type_id: 0x16637235
   full_name: "generic_write_checks"
 }
@@ -407784,7 +407784,7 @@ elf_symbol {
   name: "noop_llseek"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x540551b6
+  crc: 0xe56bf60d
   type_id: 0x2d64ae3e
   full_name: "noop_llseek"
 }
@@ -417455,7 +417455,7 @@ elf_symbol {
   name: "rw_verify_area"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x6783e70f
+  crc: 0xa9b3dfed
   type_id: 0x84275515
   full_name: "rw_verify_area"
 }
@@ -430752,7 +430752,7 @@ elf_symbol {
   name: "vfs_copy_file_range"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x8d64cf07
+  crc: 0xd5d526c8
   type_id: 0x12537c3f
   full_name: "vfs_copy_file_range"
 }
@@ -430878,7 +430878,7 @@ elf_symbol {
   name: "vfs_iocb_iter_read"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x15feee0c
+  crc: 0x5a7d1e5a
   type_id: 0x12e25202
   full_name: "vfs_iocb_iter_read"
 }
@@ -430887,7 +430887,7 @@ elf_symbol {
   name: "vfs_iocb_iter_write"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x15feee0c
+  crc: 0x5a7d1e5a
   type_id: 0x12e25202
   full_name: "vfs_iocb_iter_write"
 }
@@ -430896,7 +430896,7 @@ elf_symbol {
   name: "vfs_iter_read"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xab32fff0
+  crc: 0x0eab0f76
   type_id: 0x1274496e
   full_name: "vfs_iter_read"
 }
@@ -430905,7 +430905,7 @@ elf_symbol {
   name: "vfs_iter_write"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xab32fff0
+  crc: 0x0eab0f76
   type_id: 0x1274496e
   full_name: "vfs_iter_write"
 }
@@ -430932,7 +430932,7 @@ elf_symbol {
   name: "vfs_llseek"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x540551b6
+  crc: 0xe56bf60d
   type_id: 0x2d64ae3e
   full_name: "vfs_llseek"
 }
@@ -431022,7 +431022,7 @@ elf_symbol {
   name: "vfs_setpos"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x6c1404ef
+  crc: 0xe189154b
   type_id: 0x2d748ffb
   full_name: "vfs_setpos"
 }
