@@ -1039,6 +1039,8 @@
   iomem_resource
   is_virtio_device
   memdup_user
+  page_shift_compat
+  page_shift_compat_enabled
   pci_dev_put
   pci_get_device
   __SCK__tp_func_dma_fence_emit
