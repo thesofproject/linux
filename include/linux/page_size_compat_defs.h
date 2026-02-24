@@ -30,6 +30,7 @@
 #include <linux/align.h>
 #include <linux/jump_label.h>
 #include <linux/sched.h>
+#include <linux/math.h>
 
 DECLARE_STATIC_KEY_FALSE(page_shift_compat_enabled);
 extern int page_shift_compat __ro_after_init;
@@ -53,6 +54,16 @@ static __always_inline unsigned int __page_shift(void)
 #define __PAGE_ALIGN_DOWN(addr)	ALIGN_DOWN(addr, __PAGE_SIZE)
 
 #define __offset_in_page(p)		((unsigned long)(p) & ~__PAGE_MASK)
+
+/*
+ * Adjusts PAGE_SIZE counts to __PAGE_SIZE counts for x86 page size emulation.
+ */
+static inline unsigned long __page_size_count(unsigned long val)
+{
+	unsigned int nr_subpages = __PAGE_SIZE / PAGE_SIZE;
+
+	return DIV_ROUND_UP(val, nr_subpages);
+}
 
 #endif /* !__ASSEMBLY__ */
 

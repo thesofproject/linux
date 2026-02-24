@@ -10,6 +10,7 @@
 #include <linux/ptrace.h>
 #include <linux/slab.h>
 #include <linux/pagemap.h>
+#include <linux/page_size_compat.h>
 #include <linux/mempolicy.h>
 #include <linux/rmap.h>
 #include <linux/swap.h>
@@ -98,13 +99,14 @@ unsigned long task_statm(struct mm_struct *mm,
 			 unsigned long *shared, unsigned long *text,
 			 unsigned long *data, unsigned long *resident)
 {
-	*shared = get_mm_counter_sum(mm, MM_FILEPAGES) +
-			get_mm_counter_sum(mm, MM_SHMEMPAGES);
-	*text = (PAGE_ALIGN(mm->end_code) - (mm->start_code & PAGE_MASK))
-								>> PAGE_SHIFT;
-	*data = mm->data_vm + mm->stack_vm;
-	*resident = *shared + get_mm_counter_sum(mm, MM_ANONPAGES);
-	return mm->total_vm;
+	*shared = __page_size_count(get_mm_counter_sum(mm, MM_FILEPAGES) +
+			get_mm_counter_sum(mm, MM_SHMEMPAGES));
+	*text = (__PAGE_ALIGN(mm->end_code) - (mm->start_code & __PAGE_MASK))
+								>> __PAGE_SHIFT;
+	*data = __page_size_count(mm->data_vm + mm->stack_vm);
+	*resident = __page_size_count(*shared + get_mm_counter_sum(mm, MM_ANONPAGES));
+
+	return __page_size_count(mm->total_vm);
 }
 
 #ifdef CONFIG_NUMA
