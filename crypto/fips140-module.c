@@ -99,15 +99,6 @@ static struct fips140_alg {
 	bool approved;
 
 	/*
-	 * maybe_uninstantiated is true if the module provides this algorithm
-	 * but doesn't register it directly at module initialization time.  This
-	 * occurs for some of the HMAC variants because they are provided by a
-	 * template which isn't immediately instantiated for every SHA variant
-	 * (since the HMAC self-test only has to test one SHA variant).
-	 */
-	bool maybe_uninstantiated;
-
-	/*
 	 * unregistered_inkern gets set to true at runtime if at least one
 	 * algorithm matching this entry was unregistered from the kernel.  This
 	 * is used to detect unregistrations with no matching registration.
@@ -121,13 +112,10 @@ static struct fips140_alg {
 	{ .cra_name = "ctr(aes)", .approved = true },
 	{ .cra_name = "cts(cbc(aes))", .approved = true },
 	{ .cra_name = "ecb(aes)", .approved = true },
-	{ .cra_name = "hmac(sha224)", .approved = true,
-	  .maybe_uninstantiated = true },
+	{ .cra_name = "hmac(sha224)", .approved = true },
 	{ .cra_name = "hmac(sha256)", .approved = true },
-	{ .cra_name = "hmac(sha384)", .approved = true,
-	  .maybe_uninstantiated = true },
-	{ .cra_name = "hmac(sha512)", .approved = true,
-	  .maybe_uninstantiated = true },
+	{ .cra_name = "hmac(sha384)", .approved = true },
+	{ .cra_name = "hmac(sha512)", .approved = true },
 	{ .cra_name = "sha224", .approved = true },
 	{ .cra_name = "sha256", .approved = true },
 	{ .cra_name = "sha384", .approved = true },
@@ -380,7 +368,7 @@ static bool __init fips140_verify_no_extra_unregistrations(void)
 		const struct crypto_alg *calg;
 		bool registered = false;
 
-		if (falg->maybe_uninstantiated || !falg->unregistered_inkern)
+		if (!falg->unregistered_inkern)
 			continue;
 
 		list_for_each_entry(calg, &crypto_alg_list, cra_list) {
