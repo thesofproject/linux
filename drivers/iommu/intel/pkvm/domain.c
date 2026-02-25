@@ -119,7 +119,20 @@ void pkvm_put_domain_cache_tag_unassign(void *pgd, int did, u32 pasid,
 	pkvm_put_iommu_domain(domain);
 }
 
-int pkvm_free_iommu_domain(struct dmar_domain *domain)
+static void free_domain_memcache(struct dmar_domain *domain,
+				 struct pkvm_memcache *teardown_mc)
+{
+	struct pkvm_memcache *mc = &domain->mc;
+
+	while (mc->count) {
+		void *addr = pop_pkvm_memcache_page(mc, pkvm_phys_to_virt);
+
+		push_pkvm_memcache_page(teardown_mc, addr, pkvm_virt_to_host_gpa);
+		pkvm_hyp_donate_host(__pkvm_pa(addr), VTD_PAGE_SIZE, false);
+	}
+}
+
+int pkvm_free_iommu_domain(struct dmar_domain *domain, struct pkvm_memcache *teardown_mc)
 {
 	if (atomic_cmpxchg(&domain->refcount, 1, 0) != 1) {
 		pkvm_err("%s: domain[pgd:%p] has users, refcount %d\n",
@@ -127,7 +140,20 @@ int pkvm_free_iommu_domain(struct dmar_domain *domain)
 		return -EBUSY;
 	}
 
-	pkvm_dbg("%s: freed domain pgd: %p\n", __func__, domain->pgd);
+	/* Unmap any remaining mappings. */
+	domain_unmap(domain, 0, DOMAIN_MAX_PFN(domain->gaw), NULL);
+	free_domain_memcache(domain, teardown_mc);
+	/*
+	 * pgd was not allocated through memcache, but its safe to return to
+	 * memcache as the teardown mc frees it the same way host driver frees
+	 * the pages.
+	 */
+	push_pkvm_memcache_page(teardown_mc, domain->pgd, pkvm_virt_to_host_gpa);
+	pkvm_hyp_donate_host(__pkvm_pa(domain->pgd), VTD_PAGE_SIZE, false);
+
+	pkvm_dbg("%s: freeing domain[pgd: %p], freed pages: %lu\n",
+		 __func__, domain->pgd, teardown_mc->count);
+
 	pkvm_spin_lock(&iommu_domain_lock);
 	hash_del(&domain->hnode);
 	__clear_bit(domain->index, iommu_domains_bitmap);
