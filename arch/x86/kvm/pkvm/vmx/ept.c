@@ -11,6 +11,7 @@
 #include "gfp.h"
 #include "pkvm/mmu.h"
 #include "pkvm.h"
+#include "pkvm_iommu.h"
 
 /* The ignored bit56 ~ bit52 in EPT present leaf are used to store page state */
 #define EPT_PAGE_STATE_SHIFT			52
@@ -277,7 +278,7 @@ int pkvm_host_ept_init(struct pkvm_pgtable *pgt, void *pool_base,
 {
 	unsigned long pfn = __pkvm_pa(pool_base) >> PAGE_SHIFT;
 	struct pkvm_pgtable_cap cap = {
-		.level = cpu_has_vmx_ept_5levels() ? 5 : 4,
+		.level = 4,
 		.allowed_pgsz = 1 << PG_LEVEL_4K,
 		.table_prot = VMX_EPT_RWX_MASK,
 		.flush_tlb_lazy = true,
@@ -293,10 +294,13 @@ int pkvm_host_ept_init(struct pkvm_pgtable *pgt, void *pool_base,
 	if (ret)
 		return ret;
 
-	if (cpu_has_vmx_ept_2m_page())
+	if (cpu_has_vmx_ept_2m_page() && iommu_supports_2m_page())
 		cap.allowed_pgsz |=  1 << PG_LEVEL_2M;
-	if (cpu_has_vmx_ept_1g_page())
+	if (cpu_has_vmx_ept_1g_page() && iommu_supports_1g_page())
 		cap.allowed_pgsz |=  1 << PG_LEVEL_1G;
+
+	if (cpu_has_vmx_ept_5levels() && iommu_supports_5levels())
+		cap.level = 5;
 
 	ret = pkvm_pgtable_init(pgt, cap, &host_ept_mm_ops, &host_ept_pgt_ops);
 	if (ret)
