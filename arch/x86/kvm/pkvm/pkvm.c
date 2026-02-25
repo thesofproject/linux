@@ -1897,6 +1897,13 @@ void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 					   pkvm_hc_input3(vcpu),
 					   pkvm_hc_input4(vcpu));
 		break;
+	case __pkvm__iommu_clear_ce:
+		ret = pkvm_iommu_clear_ce(&in.iommu_clear_ce.data);
+		break;
+	case __pkvm__iommu_set_lm_ce:
+		ret = pkvm_iommu_set_lm_ce(&in.iommu_set_lm_ce.in,
+					   &out.iommu_set_lm_ce.out);
+		break;
 #endif
 	default:
 		ret = pkvm_vcpu_handle_host_hypercall(vcpu, hc, &in, &out);

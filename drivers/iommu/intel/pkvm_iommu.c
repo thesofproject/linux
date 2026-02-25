@@ -8,6 +8,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include "iommu.h"
+#include "../iommu-pages.h"
 
 int __init pkvm_host_prepare_iommu(void)
 {
@@ -127,5 +128,61 @@ int pkvm_qi_submit_sync(struct intel_iommu *iommu, struct qi_desc *desc,
 	ret = pkvm_hypercall(iommu_qi_submit, iommu->reg_phys,
 			     virt_to_phys(desc_ptr), count, options);
 	kfree(desc_ptr);
+	return ret;
+}
+
+int pkvm_context_clear(u64 phys, u8 bus, u8 devfn, struct device_domain_info *info)
+{
+	union pkvm_hc_data d = { 0 };
+	struct clear_ce_data *data = &d.iommu_clear_ce.data;
+
+	data->phys = phys;
+	data->bus = bus;
+	data->devfn = devfn;
+	data->ats_qdep = info->ats_qdep;
+	data->ats_supported = info->ats_supported;
+	data->ats_enabled = info->ats_enabled;
+
+	return pkvm_hypercall_in(iommu_clear_ce, &d);
+}
+
+int pkvm_context_mapping(struct intel_iommu *iommu, struct device_domain_info *info,
+			 u8 bus, u8 devfn, u64 pgd_gpa, u16 did)
+{
+	union pkvm_hc_data d = { 0 };
+	struct set_lm_ce_data *data = &d.iommu_set_lm_ce.in;
+	int ret;
+
+	data->phys = iommu->reg_phys;
+	data->pgd_gpa = pgd_gpa;
+	data->did = did;
+	data->bus = bus;
+	data->devfn = devfn;
+	data->ats_qdep = info->ats_qdep;
+	data->ats_supported = info->ats_supported;
+	data->ats_enabled = info->ats_enabled;
+
+	spin_lock(&iommu->lock);
+	ret = pkvm_hypercall_inout(iommu_set_lm_ce, &d, &d);
+	if (ret == -ENOMEM) {
+		void *donation_page = iommu_alloc_pages_node_sz(iommu->node, GFP_ATOMIC, SZ_4K);
+
+		if (!donation_page) {
+			pr_err("iommu%d: failed to allocate context page\n", iommu->seq_id);
+			spin_unlock(&iommu->lock);
+			return -ENOMEM;
+		}
+		data->donation_page_gpa = virt_to_phys(donation_page);
+		ret = pkvm_hypercall_inout(iommu_set_lm_ce, &d, &d);
+
+		/*
+		 * If the hypervisor used donation_gpa, it will be set to 0.
+		 * Free the page if hypervisor didn't use the page.
+		 */
+		if (data->donation_page_gpa)
+			iommu_free_pages(phys_to_virt(data->donation_page_gpa));
+	}
+	spin_unlock(&iommu->lock);
+
 	return ret;
 }
