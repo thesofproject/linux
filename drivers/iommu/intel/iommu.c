@@ -859,6 +859,9 @@ static void dma_pte_clear_range(struct dmar_domain *domain,
 			continue;
 		}
 		do {
+#ifdef __PKVM_HYP__
+			WARN_ON_ONCE(dma_pte_present(pte));
+#endif
 			dma_clear_pte(pte);
 			start_pfn += lvl_to_nr_pages(large_page);
 			pte++;
