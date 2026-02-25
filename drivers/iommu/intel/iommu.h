@@ -735,6 +735,16 @@ struct dmar_domain {
 	int		agaw;
 	/* maximum mapped address */
 	u64		max_addr;
+
+	atomic_t refcount;
+	unsigned int index;
+	/*
+	 * Lock to protect the mapping operations
+	 * on this domain.
+	 */
+	pkvm_spinlock_t lock;
+
+	struct hlist_node hnode;
 #endif /* !__PKVM_HYP__ */
 };
 
