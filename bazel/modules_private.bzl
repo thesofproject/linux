@@ -19,6 +19,7 @@ _COMMON_GKI_MODULES_LIST = [
     "drivers/bluetooth/hci_uart.ko",
     "drivers/char/virtio_console.ko",
     "drivers/gnss/gnss.ko",
+    "drivers/misc/open-dice.ko",
     "drivers/misc/vcpu_stall_detector.ko",
     "drivers/net/can/dev/can-dev.ko",
     "drivers/net/can/slcan/slcan.ko",
@@ -101,7 +102,6 @@ _ARM_GKI_MODULES_LIST = [
 _ARM64_GKI_MODULES_LIST = [
     # keep sorted
     "drivers/char/hw_random/cctrng.ko",
-    "drivers/misc/open-dice.ko",
 ]
 
 _X86_GKI_MODULES_LIST = [
