@@ -10,6 +10,10 @@
 #include <asm/kvm_host.h>
 #include <asm/kvm_pkvm.h>
 
+/* Page table level represented by IOMMU cap SAGAW bits */
+#define IOMMU_PGT_4LEVEL	BIT(2)
+#define IOMMU_PGT_5LEVEL	BIT(3)
+
 struct intel_iommu_info {
 	u64 reg_phys;
 	u64 reg_size;
@@ -21,6 +25,9 @@ struct intel_iommu_info {
 };
 
 #ifdef CONFIG_PKVM_INTEL
+extern unsigned int pkvm_sym(iommu_pglvl_mask);
+extern unsigned int pkvm_sym(iommu_pgsz_mask);
+
 extern int pkvm_sym(intel_iommu_sm);
 
 PKVM_DECLARE(int, prepare_iommu, (struct intel_iommu_info *info));
@@ -29,6 +36,21 @@ PKVM_DECLARE(int, prepare_iommu, (struct intel_iommu_info *info));
 int __init pkvm_host_prepare_iommu(void);
 int __init pkvm_host_init_iommu(void);
 #else /* __PKVM_HYP__ */
+static inline bool iommu_supports_2m_page(void)
+{
+	return iommu_pgsz_mask & (1 << PG_LEVEL_2M);
+}
+
+static inline bool iommu_supports_1g_page(void)
+{
+	return iommu_pgsz_mask & (1 << PG_LEVEL_1G);
+}
+
+static inline bool iommu_supports_5levels(void)
+{
+	return iommu_pglvl_mask & IOMMU_PGT_5LEVEL;
+}
+
 int pkvm_intel_iommu_init(void);
 #endif /* !__PKVM_HYP__ */
 #endif /* CONFIG_PKVM_INTEL */
