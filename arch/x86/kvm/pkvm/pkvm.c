@@ -1064,9 +1064,19 @@ static void pkvm_cancel_injection(struct kvm_vcpu *vcpu)
 		shared_vcpu->arch.nmi_injected = true;
 		vcpu->arch.nmi_injected = false;
 	} else if (vcpu->arch.interrupt.injected) {
-		kvm_queue_interrupt(shared_vcpu, vcpu->arch.interrupt.nr,
-				    vcpu->arch.interrupt.soft);
-		kvm_clear_interrupt_queue(vcpu);
+		/*
+		 * The npVM's injected software and external interrupts can be
+		 * canceled as the host is allowed to inject both. But the host
+		 * is not allowed to inject the pVM's software interrupt, and
+		 * the pending pVM's software interrupt (exits during delivering
+		 * a software interrupt) should be injected by the pKVM, thus
+		 * the host cannot cancel such injection.
+		 */
+		if (!pkvm_is_protected_vcpu(vcpu) || !vcpu->arch.interrupt.soft) {
+			kvm_queue_interrupt(shared_vcpu, vcpu->arch.interrupt.nr,
+					    vcpu->arch.interrupt.soft);
+			kvm_clear_interrupt_queue(vcpu);
+		}
 	} else if (!pkvm_is_protected_vcpu(vcpu) && vcpu->arch.exception.injected) {
 		/*
 		 * For the pVM, the exception can only be injected and canceled
