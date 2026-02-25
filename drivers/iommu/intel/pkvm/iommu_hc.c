@@ -304,3 +304,76 @@ int pkvm_iommu_pasid_setup_fl(struct pasid_setup_fl_data *in, struct pasid_setup
 	*out = *in;
 	return ret;
 }
+
+static int iommu_pasid_setup_sl(struct pasid_setup_sl_data *data)
+{
+	struct intel_iommu *iommu = iommu_from_phys(data->phys);
+	u16 bdf = PCI_DEVID(data->bus, data->devfn);
+	struct device_domain_info info = { 0 };
+	struct pkvm_device dev = { .info = &info };
+	struct dmar_domain domain = { 0 };
+	struct pasid_table table = { 0 };
+	int ret;
+
+	if (!iommu)
+		return -EINVAL;
+
+	if (data->ats_qdep > PCI_ATS_MAX_QDEP)
+		return -EINVAL;
+
+	if (is_dev_in_satc(bdf)) {
+		if (ecap_dit(iommu->ecap))
+			info.pfsid = bdf;
+	} else if (data->ats_supported || data->ats_enabled) {
+		return -EPERM;
+	}
+
+	ret = __get_pasid_table(iommu, data->bus, data->devfn, &table);
+	if (ret)
+		return ret;
+
+	info.bus = data->bus;
+	info.devfn = data->devfn;
+	info.pasid_table = &table;
+	info.iommu = iommu;
+	info.ats_qdep = data->ats_qdep;
+	info.ats_supported = data->ats_supported;
+	info.ats_enabled = data->ats_enabled;
+
+	if (data->did == FLPT_DEFAULT_DID) {
+		/*
+		 * Passthrough will break pkvm security guarantees as
+		 * device would be able to access the whole physical
+		 * memory range. Use Second stage translation with host ept
+		 * as second stage pagetable so as to limit device access
+		 * to host memory.
+		 */
+		domain.pgd = __pkvm_va(pkvm_host_ept_root());
+		domain.agaw = level_to_agaw(pkvm_host_ept_level());
+	} else {
+		domain.pgd = pkvm_host_gpa_to_virt(data->ssptptr_gpa);
+		domain.agaw = iommu->agaw;
+	}
+
+	ret = accept_page_donation(iommu, &data->donation_page_gpa);
+	if (ret)
+		return ret;
+
+	pkvm_dbg("%s: dev[%x:%x], pasid: %x ssptptr_gpa: %llx, did: %d, old_did: %d\n", __func__,
+		 data->bus, data->devfn, data->pasid, data->ssptptr_gpa, data->did, data->old_did);
+	if (!data->old_did) {
+		return intel_pasid_setup_second_level(iommu, &domain, &dev,
+						      data->did, data->pasid);
+	}
+	return intel_pasid_replace_second_level(iommu, &domain, &dev,
+						data->did, data->old_did,
+						data->pasid);
+}
+
+int pkvm_iommu_pasid_setup_sl(struct pasid_setup_sl_data *in, struct pasid_setup_sl_data *out)
+{
+	int ret = iommu_pasid_setup_sl(in);
+
+	*out = *in;
+	return ret;
+}

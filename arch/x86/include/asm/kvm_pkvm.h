@@ -102,6 +102,20 @@ struct pasid_setup_fl_data {
 	u8 ats_enabled: 1;
 	u8 ats_supported: 1;
 };
+
+struct pasid_setup_sl_data {
+	u64 phys;
+	u64 ssptptr_gpa;
+	u64 donation_page_gpa;
+	u32 pasid;
+	u16 did;
+	u16 old_did; /* replace_sl */
+	u8 bus;
+	u8 devfn;
+	u8 ats_qdep;
+	u8 ats_enabled: 1;
+	u8 ats_supported: 1;
+};
 #endif
 
 #define TO_PKVM_HC(f)		CONCATENATE(__pkvm__, f)
@@ -197,6 +211,10 @@ union pkvm_hc_data {
 		struct pasid_setup_fl_data in;
 		struct pasid_setup_fl_data out;
 	} iommu_pasid_setup_fl;
+	union {
+		struct pasid_setup_sl_data in;
+		struct pasid_setup_sl_data out;
+	} iommu_pasid_setup_sl;
 #endif
 	struct {
 		u64 data[PKVM_HC_DATA_MAX_NUM];
