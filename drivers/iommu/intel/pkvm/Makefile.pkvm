@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Makefile for IOMMU driver in pKVM
+
+ccflags-$(CONFIG_PKVM_INTEL) += -I $(srctree)/drivers/iommu/intel
+
+pkvm-iommu = ../../../../drivers/iommu/intel/pkvm
+
+pkvm-hyp-$(CONFIG_PKVM_INTEL) += $(pkvm-iommu)/iommu.o
