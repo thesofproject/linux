@@ -1802,11 +1802,10 @@ bool kvm_guest_ffa_handler(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 			goto out_guest_with_ret;
 		}
 
-		req = pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_MEM);
+		req = pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_HYP_ALLOC);
 		if (!req)
 			goto out_guest_with_ret;
 
-		req->mem.dest = REQ_MEM_DEST_HYP_ALLOC;
 		req->mem.nr_pages = hyp_alloc_missing_donations();
 		fallthrough;
 	case -ENOENT:
