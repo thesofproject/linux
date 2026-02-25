@@ -220,7 +220,7 @@ static void f2fs_verify_bio(struct work_struct *work)
 			struct folio *folio = fi.folio;
 
 			if (!f2fs_is_compressed_page(folio) &&
-			    !fsverity_verify_page(vi, &folio->page)) {
+			    !fsverity_verify_folio(vi, folio)) {
 				bio->bi_status = BLK_STS_IOERR;
 				break;
 			}
@@ -2468,6 +2468,7 @@ static void ffs_detach_free(struct folio *folio)
 }
 
 static int f2fs_read_data_large_folio(struct inode *inode,
+		struct fsverity_info *vi,
 		struct readahead_control *rac, struct folio *folio)
 {
 	struct bio *bio = NULL;
@@ -2537,10 +2538,9 @@ got_it:
 				goto err_out;
 			}
 		} else {
-			folio_zero_range(folio, offset << PAGE_SHIFT, PAGE_SIZE);
-			if (f2fs_need_verity(inode, index) &&
-			    !fsverity_verify_page(folio_file_page(folio,
-								index))) {
+			size_t page_offset = offset << PAGE_SHIFT;
+			folio_zero_range(folio, page_offset, PAGE_SIZE);
+			if (vi && !fsverity_verify_blocks(vi, folio, PAGE_SIZE, page_offset)) {
 				ret = -EIO;
 				goto err_out;
 			}
@@ -2571,8 +2571,8 @@ submit_and_realloc:
 			bio = NULL;
 		}
 		if (bio == NULL)
-			bio = f2fs_grab_read_bio(inode, block_nr,
-					max_nr_pages,
+			bio = f2fs_grab_read_bio(inode, vi,
+					block_nr, max_nr_pages,
 					f2fs_ra_op_flags(rac),
 					index, false);
 
@@ -2645,7 +2645,7 @@ static int f2fs_mpage_readpages(struct inode *inode, struct fsverity_info *vi,
 	int ret = 0;
 
 	if (mapping_large_folio_support(mapping))
-		return f2fs_read_data_large_folio(inode, rac, folio);
+		return f2fs_read_data_large_folio(inode, vi, rac, folio);
 
 #ifdef CONFIG_F2FS_FS_COMPRESSION
 	if (f2fs_compressed_file(inode)) {
