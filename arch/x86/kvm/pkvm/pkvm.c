@@ -1010,16 +1010,26 @@ static int pkvm_nmi_allowed(struct kvm_vcpu *vcpu, bool for_injection)
 	return kvm_x86_call(nmi_allowed)(vcpu, for_injection);
 }
 
-static void pkvm_inject_irq(struct kvm_vcpu *vcpu)
+static int pkvm_inject_irq(struct kvm_vcpu *vcpu)
 {
 	struct kvm_vcpu *shared_vcpu = to_pkvm_vcpu(vcpu)->shared_vcpu;
 
 	if (WARN_ON_ONCE(pkvm_interrupt_allowed(vcpu, true) <= 0))
-		return;
+		return -EBUSY;
+
+	/*
+	 * Injecting software interrupts will change the guest's RIP. As there
+	 * is no usage to require the host to do so for a pVM, disallow the host
+	 * to inject software interrupts to a pVM for security reason.
+	 */
+	if (pkvm_is_protected_vcpu(vcpu) && shared_vcpu->arch.interrupt.soft)
+		return -EPERM;
 
 	vcpu->arch.interrupt.soft = shared_vcpu->arch.interrupt.soft;
 	vcpu->arch.interrupt.nr = shared_vcpu->arch.interrupt.nr;
 	kvm_x86_call(inject_irq)(vcpu, false);
+
+	return 0;
 }
 
 static void pkvm_inject_nmi(struct kvm_vcpu *vcpu)
@@ -1734,7 +1744,7 @@ static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc 
 		kvm_x86_call(set_nmi_mask)(vcpu, pkvm_hc_input1(hvcpu));
 		break;
 	case __pkvm__inject_irq:
-		pkvm_inject_irq(vcpu);
+		ret = pkvm_inject_irq(vcpu);
 		break;
 	case __pkvm__inject_nmi:
 		pkvm_inject_nmi(vcpu);
