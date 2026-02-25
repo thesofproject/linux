@@ -3954,6 +3954,17 @@ static void do_activate_blocked_waiter(struct rq *target_rq, struct task_struct 
 		}
 		proxy_set_task_cpu(p, target_cpu);
 		rq_lock_irqsave(target_rq, &rf);
+		/*
+		 * proxy_enqueue_on_owner() called block_task() which
+		 * increments nr_uninterruptible/nr_iowait, so we need
+		 * to reverse that when we activate the blocked waiter
+		 */
+		if (p->sched_contributes_to_load)
+			target_rq->nr_uninterruptible--;
+		if (p->in_iowait) {
+			delayacct_blkio_end(p);
+			atomic_dec(&task_rq(p)->nr_iowait);
+		}
 		update_rq_clock(target_rq);
 		activate_task(target_rq, p, en_flags);
 		resched_curr(target_rq);
