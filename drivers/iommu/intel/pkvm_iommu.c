@@ -24,6 +24,9 @@ int __init pkvm_host_prepare_iommu(void)
 
 	ret = -ENODEV;
 	for_each_iommu(iommu, drhd) {
+		unsigned int pgsz_mask = 1 << PG_LEVEL_4K;
+		unsigned int pglvl_mask = 0;
+
 		if (drhd->ignored) {
 			pr_warn("iommu%d ignored, but pKVM needs iommu to be enabled!\n",
 				iommu->seq_id);
@@ -50,6 +53,24 @@ int __init pkvm_host_prepare_iommu(void)
 			pr_warn("iommu%d: queued Invalidation not supported!\n", iommu->seq_id);
 			goto out;
 		}
+
+		if (cap_sagaw(iommu->cap) & IOMMU_PGT_4LEVEL)
+			pglvl_mask |= IOMMU_PGT_4LEVEL;
+		if (cap_sagaw(iommu->cap) & IOMMU_PGT_5LEVEL)
+			pglvl_mask |= IOMMU_PGT_5LEVEL;
+
+		if (cap_super_page_val(iommu->cap) & BIT(0))
+			pgsz_mask |= 1 << PG_LEVEL_2M;
+		if (cap_super_page_val(iommu->cap) & BIT(1))
+			pgsz_mask |= 1 << PG_LEVEL_1G;
+
+		if (!pglvl_mask) {
+			pr_warn("iommu%d: No supported page levels\n", iommu->seq_id);
+			goto out;
+		}
+
+		pkvm_sym(iommu_pglvl_mask) &= pglvl_mask;
+		pkvm_sym(iommu_pgsz_mask) &= pgsz_mask;
 	}
 
 	pkvm_sym(intel_iommu_sm) = intel_iommu_sm;
