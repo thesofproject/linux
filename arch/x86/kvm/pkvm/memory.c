@@ -14,6 +14,25 @@ pteval_t __default_kernel_pte_mask;
 u64 sme_me_mask;
 #endif
 
+/*
+ * Copied from arch/x86/mm/init.c: __cachemode2pte_tbl
+ * Needed for PAGE_KERNEL_IO_NOCACHE which is used for
+ * mapping MMIO space.
+ *
+ * Static values are not filled here. Host updates its
+ * copy during early boot and the updated values are
+ * copied during pKVM initialization.
+ */
+uint16_t __cachemode2pte_tbl[_PAGE_CACHE_MODE_NUM];
+
+/* Copied from arch/x86/mm/init.c: cachemode2protval */
+unsigned long cachemode2protval(enum page_cache_mode pcm)
+{
+	if (likely(pcm == 0))
+		return 0;
+	return __cachemode2pte_tbl[pcm];
+}
+
 struct memblock_region pkvm_memory[PKVM_MEMBLOCK_REGIONS];
 unsigned int pkvm_memblock_nr;
 

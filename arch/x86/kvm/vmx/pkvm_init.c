@@ -84,6 +84,8 @@ u64 pkvm_total_reserve_pages(void)
 
 static __init void pkvm_setup_syms(void)
 {
+	int i;
+
 	/*
 	 * The pKVM hypervisor has defined the same symbol page_offset_base
 	 * and phys_base with the linux kernel. Initialize with the same value
@@ -105,6 +107,9 @@ static __init void pkvm_setup_syms(void)
 #endif
 	/* For the pKVM hypervisor to leverage pgprot_val macro */
 	pkvm_sym(__default_kernel_pte_mask) = __default_kernel_pte_mask;
+	for (i = 0; i < _PAGE_CACHE_MODE_NUM; i++)
+		pkvm_sym(__cachemode2pte_tbl)[i] = cachemode2protval(i);
+
 #ifdef CONFIG_AMD_MEM_ENCRYPT
 	pkvm_sym(sme_me_mask) = sme_me_mask;
 #endif

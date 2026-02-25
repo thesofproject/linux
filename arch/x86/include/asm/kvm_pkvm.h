@@ -506,6 +506,7 @@ extern pteval_t pkvm_sym(__default_kernel_pte_mask);
 #ifdef CONFIG_AMD_MEM_ENCRYPT
 extern u64 pkvm_sym(sme_me_mask);
 #endif
+extern uint16_t pkvm_sym(__cachemode2pte_tbl)[];
 extern struct pkvm_init_ops *pkvm_sym(init_ops);
 extern struct cpumask pkvm_sym(__cpu_possible_mask);
 extern unsigned int pkvm_sym(nr_cpu_ids);
