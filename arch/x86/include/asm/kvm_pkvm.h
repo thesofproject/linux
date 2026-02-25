@@ -52,6 +52,29 @@ struct pkvm_mem_info {
 	u64 prot;
 };
 
+#ifdef CONFIG_PKVM_INTEL
+struct clear_ce_data {
+	u64 phys;
+	u8 bus;
+	u8 devfn;
+	u8 ats_qdep;
+	u8 ats_enabled: 1;
+	u8 ats_supported: 1;
+};
+
+struct set_lm_ce_data {
+	u64 phys;
+	u64 pgd_gpa;
+	u64 donation_page_gpa;
+	u16 did;
+	u8 bus;
+	u8 devfn;
+	u8 ats_qdep;
+	u8 ats_enabled: 1;
+	u8 ats_supported: 1;
+};
+#endif
+
 #define TO_PKVM_HC(f)		CONCATENATE(__pkvm__, f)
 
 enum pkvm_hc {
@@ -130,6 +153,13 @@ union pkvm_hc_data {
 	struct {
 		u64 val;
 	} iommu_mmio_read;
+	struct {
+		struct clear_ce_data data;
+	} iommu_clear_ce;
+	union {
+		struct set_lm_ce_data in;
+		struct set_lm_ce_data out;
+	} iommu_set_lm_ce;
 #endif
 	struct {
 		u64 data[PKVM_HC_DATA_MAX_NUM];
