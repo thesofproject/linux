@@ -362,6 +362,12 @@ static int host_mmu_map(unsigned long phys, unsigned long size, bool mmio)
 				host_mmu_pte_prot(true, mmio), NULL);
 }
 
+static int host_mmu_unmap(unsigned long phys, unsigned long size)
+{
+	/* The vaddr == phys for the host MMU */
+	return pkvm_pgtable_unmap(&host_mmu, phys, phys, size);
+}
+
 static void *guest_mmu_zalloc_page(struct pkvm_memcache *mc)
 {
 	struct pkvm_page *p;
@@ -809,7 +815,9 @@ void pkvm_hyp_mmu_clone_host(unsigned long start_vaddr)
 }
 #endif
 
-int pkvm_host_mmu_init(void *pool_base, unsigned long pool_pages, host_mmu_init_fn_t fn)
+int pkvm_host_mmu_init(void *pool_base, unsigned long pool_pages,
+		       const struct pkvm_mem_info infos[], int nr_infos,
+		       host_mmu_init_fn_t fn)
 {
 	struct memblock_region *reg;
 	unsigned long phys;
@@ -842,9 +850,34 @@ int pkvm_host_mmu_init(void *pool_base, unsigned long pool_pages, host_mmu_init_
 			return ret;
 	}
 
-	/* Unmap pvmfw memory if it has just been mapped */
+	/*
+	 * Unmap the memory range in the pkvm_mem_info, which includes the pkvm
+	 * TEXT/DATA and its reserved memory, to protect the pKVM hypervisor
+	 * from the host VM.
+	 */
+	for (i = 0; i < nr_infos; i++) {
+#ifdef CONFIG_PKVM_X86_DEBUG
+		/*
+		 * Only keep the pKVM TEXT/DATA mapped in the host mmu to allow
+		 * the host to access pKVM's text and data for debugging, and
+		 * unmap all the other regions i.e., pKVM reserved memory region
+		 * which the host doesn't need to access.
+		 */
+		if (infos[i].type != PKVM_TEXT_DATA) {
+			ret = host_mmu_unmap(infos[i].pa, infos[i].size);
+			if (ret)
+				return ret;
+		}
+#else
+		ret = host_mmu_unmap(infos[i].pa, infos[i].size);
+		if (ret)
+			return ret;
+#endif
+	}
+
+	/* Unmap pvmfw memory to protect it from the host */
 	if (pvmfw_present) {
-		ret = pkvm_pgtable_unmap(&host_mmu, pvmfw_base, pvmfw_base, pvmfw_size);
+		ret = host_mmu_unmap(pvmfw_base, pvmfw_size);
 		if (ret)
 			return ret;
 	}
