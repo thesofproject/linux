@@ -138,6 +138,15 @@ struct alloc_domain_data {
 	u8 iommu_coherency;
 	u8 use_first_level;
 };
+
+struct domain_map_data {
+	u64 pgd_gpa;
+	u64 iov_pfn;
+	u64 phys_pfn;
+	u64 nr_pages;
+	u64 prot;
+	struct pkvm_memcache mc;
+};
 #endif
 
 #define TO_PKVM_HC(f)		CONCATENATE(__pkvm__, f)
@@ -246,6 +255,10 @@ union pkvm_hc_data {
 	struct {
 		struct pkvm_memcache memcache;
 	} iommu_free_domain;
+	union {
+		struct domain_map_data in;
+		struct domain_map_data out;
+	} iommu_domain_map;
 #endif
 	struct {
 		u64 data[PKVM_HC_DATA_MAX_NUM];
