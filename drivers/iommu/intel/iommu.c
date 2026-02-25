@@ -562,13 +562,6 @@ out:
 	return iommu;
 }
 
-static void domain_flush_cache(struct dmar_domain *domain,
-			       void *addr, int size)
-{
-	if (!domain->iommu_coherency)
-		clflush_cache_range(addr, size);
-}
-
 static void free_context_table(struct intel_iommu *iommu)
 {
 	struct context_entry *context;
@@ -3496,7 +3489,20 @@ static struct dmar_domain *paging_domain_alloc(struct device *dev, bool first_st
 		kfree(domain);
 		return ERR_PTR(-ENOMEM);
 	}
-	domain_flush_cache(domain, domain->pgd, PAGE_SIZE);
+
+	if (pkvm_enabled()) {
+		int ret = pkvm_alloc_domain(info, domain);
+
+		if (ret) {
+			pr_err("pkvm_alloc_domain failed [pgd=%p] (err=%d)\n",
+				domain->pgd, ret);
+			iommu_free_pages(domain->pgd);
+			kfree(domain);
+			return ERR_PTR(ret);
+		}
+	} else {
+		domain_flush_cache(domain, domain->pgd, PAGE_SIZE);
+	}
 
 	return domain;
 }
@@ -3608,6 +3614,16 @@ static void intel_iommu_domain_free(struct iommu_domain *domain)
 		domain_unmap(dmar_domain, 0, DOMAIN_MAX_PFN(dmar_domain->gaw),
 			     &freelist);
 		iommu_put_pages_list(&freelist);
+
+		if (pkvm_enabled()) {
+			int ret = pkvm_free_domain(dmar_domain);
+
+			if (ret)
+				pr_err("pkvm_free_domain failed [pgd=%p] (err=%d)\n",
+					dmar_domain->pgd, ret);
+			else
+				iommu_free_pages(dmar_domain->pgd);
+		}
 	}
 
 	kfree(dmar_domain->qi_batch);

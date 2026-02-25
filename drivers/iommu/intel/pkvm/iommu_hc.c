@@ -417,3 +417,94 @@ int pkvm_iommu_pasid_teardown(struct pasid_teardown_data *data)
 	intel_pasid_tear_down_entry(iommu, &dev, data->pasid, false);
 	return 0;
 }
+
+static int __validate_domain_params(struct intel_iommu *iommu, struct alloc_domain_data *data)
+{
+	int iommu_superpage = iommu_superpage_capability(iommu, data->use_first_level);
+	int gaw = agaw_to_width(iommu->agaw);
+	int ret = -EINVAL;
+
+	if (gaw > cap_mgaw(iommu->cap))
+		gaw = cap_mgaw(iommu->cap);
+
+	if (data->iommu_superpage != iommu_superpage) {
+		pkvm_err("%s: invalid iommu_superpage(%u) from host!\n",
+			 __func__, data->iommu_superpage);
+	} else if (data->iommu_coherency != iommu_paging_structure_coherency(iommu)) {
+		pkvm_err("%s: invalid iommu_coherency(%u) from host!\n",
+			 __func__, data->iommu_coherency);
+	} else if (data->agaw != iommu->agaw) {
+		pkvm_err("%s: invalid agaw(%u) from host!\n", __func__, data->agaw);
+	} else if (data->gaw != gaw) {
+		pkvm_err("%s: invalid gaw(%u) from host!\n", __func__, data->gaw);
+	} else if (data->max_addr != __DOMAIN_MAX_ADDR(data->gaw)) {
+		pkvm_err("%s: invalid max_addr(%llx) from host!\n",
+			 __func__, data->max_addr);
+	} else {
+		ret = 0;
+	}
+
+	return ret;
+}
+
+int pkvm_iommu_alloc_domain(struct alloc_domain_data *data)
+{
+	struct dmar_domain *domain;
+	struct intel_iommu *iommu;
+	void *pgd;
+	int ret;
+
+	iommu = iommu_from_phys(data->phys);
+	if (!iommu)
+		return -EINVAL;
+
+	ret = __validate_domain_params(iommu, data);
+	if (ret)
+		return ret;
+
+	pgd = pkvm_host_gpa_to_virt(data->pgd_gpa);
+	pkvm_dbg("%s: write protecting pgd: %p\n", __func__, pgd);
+	ret = pkvm_host_donate_hyp_share_ro(__pkvm_pa(pgd), VTD_PAGE_SIZE, true);
+	if (ret) {
+		pkvm_err("%s: failed to write protect pgd: %p (err=%d)\n",
+			 __func__, pgd, ret);
+		return ret;
+	}
+
+	domain = pkvm_alloc_iommu_domain(data);
+	if (IS_ERR(domain)) {
+		pkvm_err("%s: domain alloc failed for device[%x] (err=%ld)\n",
+			 __func__, data->bdf, PTR_ERR(domain));
+		return PTR_ERR(domain);
+	}
+
+	domain_flush_cache(domain, pgd, VTD_PAGE_SIZE);
+
+	pkvm_dbg("%s: allocated domain(pgd=%p) for device[%x]\n", __func__,
+		 pgd, data->bdf);
+	return 0;
+}
+
+int pkvm_iommu_free_domain(u64 pgd_gpa)
+{
+	struct dmar_domain *domain;
+	void *pgd = pkvm_host_gpa_to_virt(pgd_gpa);
+	int ret;
+
+	domain = pkvm_get_iommu_domain_noref(pgd);
+	if (!domain) {
+		pkvm_err("%s: no domain exist for pgd: %p\n", __func__, pgd);
+		return -EINVAL;
+	}
+	ret = pkvm_free_iommu_domain(domain);
+	if (ret) {
+		pkvm_err("%s: failed to free the domain[pgd:%p] (err=%d)\n",
+			 __func__, pgd, ret);
+		return ret;
+	}
+
+	pkvm_dbg("%s: remove write protect pgd: %p\n", __func__, pgd);
+	pkvm_hyp_donate_host(__pkvm_pa(pgd), VTD_PAGE_SIZE, false);
+
+	return ret;
+}
