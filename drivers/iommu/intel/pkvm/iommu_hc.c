@@ -11,6 +11,7 @@
 #include "pkvm/pkvm.h"
 #include "pkvm/debug.h"
 #include "../iommu.h"
+#include "../pasid.h"
 
 int pkvm_iommu_qi_submit(u64 phys, u64 desc_gpa, u32 count, u32 options)
 {
@@ -148,6 +149,79 @@ static int iommu_set_lm_ce(struct set_lm_ce_data *data)
 int pkvm_iommu_set_lm_ce(struct set_lm_ce_data *in, struct set_lm_ce_data *out)
 {
 	int ret = iommu_set_lm_ce(in);
+
+	*out = *in;
+	return ret;
+}
+
+/*
+ * Size of pasid directory in bytes, given the max pasid number
+ * A pasid directory entry can address 64 pasids and a pasid
+ * directory page holds 512 entries, hence one pasid dir page can
+ * address (64 * 512) entries.
+ * So pasid_dir_size = (max_pasid / (64 * 512)) * PAGE_SIZE
+ *                   => = (max_pasid >> 15) << PAGE_SHIFT
+ */
+#define pasid_dir_size(max_pasid) ((max_pasid) >> (15 - PAGE_SHIFT))
+
+static int iommu_set_sm_ce(struct set_sm_ce_data *data)
+{
+	struct intel_iommu *iommu = iommu_from_phys(data->phys);
+	u16 bdf = PCI_DEVID(data->bus, data->devfn);
+	struct device_domain_info info = { 0 };
+	struct pasid_table table = { 0 };
+	struct pkvm_device dev = { .info = &info };
+	int ret;
+
+	if (!iommu)
+		return -EINVAL;
+
+	if (data->ats_qdep > PCI_ATS_MAX_QDEP)
+		return -EINVAL;
+
+	if ((data->ats_supported || data->ats_enabled) &&
+	    !is_dev_in_satc(bdf))
+		return -EPERM;
+
+	info.bus = data->bus;
+	info.devfn = data->devfn;
+	info.ats_qdep = data->ats_qdep;
+	info.ats_supported = data->ats_supported;
+	info.ats_enabled = data->ats_enabled;
+	info.pasid_supported = data->pasid_supported;
+	info.pasid_enabled = data->pasid_enabled;
+	table.table = pkvm_host_gpa_to_virt(data->pasid_table_gpa);
+	table.max_pasid = data->max_pasid;
+	info.pasid_table = &table;
+	info.iommu = iommu;
+
+	ret = accept_page_donation(iommu, &data->donation_page_gpa);
+	if (ret)
+		return ret;
+
+	ret = pkvm_host_donate_hyp_share_ro(pkvm_host_gpa_to_phys(data->pasid_table_gpa),
+					    pasid_dir_size(data->max_pasid), true);
+	if (ret) {
+		pkvm_err("failed to write protect pasid dir for dev[%x:%x](err=%d)\n",
+			 data->bus, data->devfn, ret);
+		return ret;
+	}
+
+	__iommu_flush_cache(iommu, table.table, pasid_dir_size(data->max_pasid));
+
+	pkvm_dbg("%s: dev[%x:%x], ats_qdep: %d, pasid_table_gpa: %llx\n", __func__,
+		 data->bus, data->devfn, info.ats_qdep, data->pasid_table_gpa);
+	ret = device_pasid_table_setup(&dev, data->bus, data->devfn);
+
+	if (ret)
+		pkvm_hyp_donate_host(pkvm_host_gpa_to_phys(data->pasid_table_gpa),
+				     pasid_dir_size(data->max_pasid), false);
+	return ret;
+}
+
+int pkvm_iommu_set_sm_ce(struct set_sm_ce_data *in, struct set_sm_ce_data *out)
+{
+	int ret = iommu_set_sm_ce(in);
 
 	*out = *in;
 	return ret;

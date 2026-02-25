@@ -931,6 +931,15 @@ static void device_pasid_table_teardown(struct device *dev, u8 bus, u8 devfn)
 	struct context_entry *context;
 	u16 did;
 
+	if (pkvm_enabled()) {
+		int ret = pkvm_context_clear(iommu->reg_phys, bus, devfn, info);
+
+		if (ret)
+			pr_err("%s: iommu%d: pkvm_context_clear failed(err=%d)\n",
+			       __func__, iommu->seq_id, ret);
+		return;
+	}
+
 	spin_lock(&iommu->lock);
 	context = iommu_context_addr(iommu, bus, devfn, false);
 	if (!context) {
@@ -1026,6 +1035,17 @@ int device_pasid_table_setup(struct pkvm_device *dev, u8 bus, u8 devfn)
 	struct device_domain_info *info = dev_iommu_priv_get(dev);
 	struct intel_iommu *iommu = info->iommu;
 	struct context_entry *context;
+
+#ifndef __PKVM_HYP__
+	if (pkvm_enabled()) {
+		int ret = pkvm_pasid_table_setup(iommu, info, bus, devfn);
+
+		if (ret)
+			pr_err("iommu%d: pkvm_pasid_table_setup failed(err=%d)\n",
+			       iommu->seq_id, ret);
+		return ret;
+	}
+#endif
 
 	spin_lock(&iommu->lock);
 	context = iommu_context_addr(iommu, bus, devfn, true);
