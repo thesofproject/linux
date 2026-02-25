@@ -2363,6 +2363,11 @@ static int dmar_device_hotplug(acpi_handle handle, bool insert)
 	if (!dmar_in_use())
 		return 0;
 
+	if (pkvm_enabled()) {
+		pr_warn("DMAR hotplug not supported with pKVM!\n");
+		return -EOPNOTSUPP;
+	}
+
 	if (dmar_detect_dsm(handle, DMAR_DSM_FUNC_DRHD)) {
 		tmp = handle;
 	} else {
