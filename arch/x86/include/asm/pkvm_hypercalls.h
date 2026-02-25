@@ -93,6 +93,7 @@ PKVM_HC(vm_mmu_age)
 #ifdef CONFIG_PKVM_INTEL
 PKVM_HC_OUT(iommu_mmio_read)
 PKVM_HC(iommu_mmio_write)
+PKVM_HC(iommu_qi_submit)
 #endif
 
 #undef PKVM_HC
