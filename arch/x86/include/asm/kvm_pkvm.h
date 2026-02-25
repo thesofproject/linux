@@ -655,6 +655,8 @@ extern unsigned int pkvm_sym(tsc_khz);
 extern bool pkvm_sym(pvmfw_present);
 extern phys_addr_t pkvm_sym(pvmfw_base);
 extern phys_addr_t pkvm_sym(pvmfw_size);
+extern bool __read_mostly pkvm_sym(enable_apicv);
+extern bool __read_mostly pkvm_sym(enable_ipiv);
 
 u64 pkvm_total_reserve_pages(void);
 PKVM_DECLARE(void *, pkvm_early_alloc_page, (struct pkvm_memcache *mc));
