@@ -174,6 +174,9 @@ struct dmar_domain *pkvm_get_iommu_domain_noref(void *pgd);
 void pkvm_put_iommu_domain(struct dmar_domain *domain);
 int pkvm_free_iommu_domain(struct dmar_domain *domain);
 
+struct cache_tag *pkvm_alloc_cache_tag(void);
+void pkvm_free_cache_tag(struct cache_tag *cache_tag);
+
 int pkvm_intel_iommu_init(void);
 
 int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val);
