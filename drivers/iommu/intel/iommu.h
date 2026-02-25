@@ -832,6 +832,7 @@ struct intel_iommu {
 	int		msagaw; /* max sagaw of this iommu */
 	struct q_inval  _qi;    /* Queued invalidation info */
 	struct q_inval  *qi;    /* Pointer to _qi. Enables host code re-use */
+	struct iommu_flush flush;
 	pkvm_spinlock_t lock;
 };
 #endif /* !__PKVM_HYP__ */
