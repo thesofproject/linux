@@ -4,6 +4,7 @@
  */
 
 #include <asm/hypervisor.h>
+#include <asm/pkvm_guest.h>
 
 static u32 __init pkvm_detect(void)
 {
@@ -15,6 +16,7 @@ static u32 __init pkvm_detect(void)
 
 static void __init pkvm_init_platform(void)
 {
+	pkvm_guest_init_coco();
 }
 
 static bool pkvm_x2apic_available(void)
