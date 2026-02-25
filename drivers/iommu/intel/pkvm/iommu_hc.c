@@ -226,3 +226,81 @@ int pkvm_iommu_set_sm_ce(struct set_sm_ce_data *in, struct set_sm_ce_data *out)
 	*out = *in;
 	return ret;
 }
+
+static int __get_pasid_table(struct intel_iommu *iommu, u8 bus, u8 devfn, struct pasid_table *table)
+{
+	struct context_entry *context = iommu_context_addr(iommu, bus, devfn, false);
+	u32 pds;
+
+	if (!context || !context_present(context)) {
+		pkvm_err("%s: pasid directory table not found: device[%x:%x]\n",
+			 __func__, bus, devfn);
+		return -EINVAL;
+	}
+
+	pds = get_pasid_dir_size(context);
+	table->table = __pkvm_va(context->lo & VTD_PAGE_MASK);
+	table->max_pasid = pds << PASID_PDE_SHIFT;
+
+	return 0;
+}
+
+static int iommu_pasid_setup_fl(struct pasid_setup_fl_data *data)
+{
+	struct intel_iommu *iommu = iommu_from_phys(data->phys);
+	u16 bdf = PCI_DEVID(data->bus, data->devfn);
+	struct device_domain_info info = { 0 };
+	struct pkvm_device dev = { .info = &info };
+	struct pasid_table table = { 0 };
+	u64 fsptptr;
+	int ret;
+
+	if (!iommu)
+		return -EINVAL;
+
+	if (data->ats_qdep > PCI_ATS_MAX_QDEP)
+		return -EINVAL;
+
+	if (is_dev_in_satc(bdf)) {
+		if (ecap_dit(iommu->ecap))
+			info.pfsid = bdf;
+	} else if (data->ats_supported || data->ats_enabled) {
+		return -EPERM;
+	}
+
+	ret = __get_pasid_table(iommu, data->bus, data->devfn, &table);
+	if (ret)
+		return ret;
+
+	fsptptr = pkvm_host_gpa_to_phys(data->fsptptr_gpa);
+	info.bus = data->bus;
+	info.devfn = data->devfn;
+	info.ats_qdep = data->ats_qdep;
+	info.ats_enabled = data->ats_enabled;
+	info.ats_supported = data->ats_supported;
+	info.pasid_table = &table;
+	info.iommu = iommu;
+
+	ret = accept_page_donation(iommu, &data->donation_page_gpa);
+	if (ret)
+		return ret;
+
+	pkvm_dbg("%s: dev[%x:%x], pasid: %x, fsptptr_gpa: %llx, did: %d, old_did: %d\n", __func__,
+		 data->bus, data->devfn, data->pasid, data->fsptptr_gpa, data->did, data->old_did);
+	if (!data->old_did) {
+		return intel_pasid_setup_first_level(iommu, &dev, fsptptr,
+						     data->pasid, data->did,
+						     data->flags);
+	}
+	return intel_pasid_replace_first_level(iommu, &dev, fsptptr,
+					       data->pasid, data->did,
+					       data->old_did, data->flags);
+}
+
+int pkvm_iommu_pasid_setup_fl(struct pasid_setup_fl_data *in, struct pasid_setup_fl_data *out)
+{
+	int ret = iommu_pasid_setup_fl(in);
+
+	*out = *in;
+	return ret;
+}

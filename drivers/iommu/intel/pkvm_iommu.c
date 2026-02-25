@@ -227,3 +227,44 @@ int pkvm_pasid_table_setup(struct intel_iommu *iommu, struct device_domain_info 
 
 	return ret;
 }
+
+int pkvm_pasid_setup_fl(struct device_domain_info *info, phys_addr_t fsptptr,
+		      u32 pasid, u16 did, u16 old_did, int flags)
+{
+	union pkvm_hc_data d = { 0 };
+	struct pasid_setup_fl_data *data = &d.iommu_pasid_setup_fl.in;
+	struct intel_iommu *iommu = info->iommu;
+	int ret;
+
+	data->phys = iommu->reg_phys;
+	data->fsptptr_gpa = fsptptr;
+	data->pasid = pasid;
+	data->flags = flags;
+	data->did = did;
+	data->old_did = old_did;
+	data->bus = info->bus;
+	data->devfn = info->devfn;
+	data->ats_qdep = info->ats_qdep;
+	data->ats_enabled = info->ats_enabled;
+	data->ats_supported = info->ats_supported;
+
+	spin_lock(&iommu->lock);
+	ret = pkvm_hypercall_inout(iommu_pasid_setup_fl, &d, &d);
+	if (ret == -ENOMEM) {
+		void *donation_page = iommu_alloc_pages_node_sz(iommu->node, GFP_ATOMIC, SZ_4K);
+
+		if (!donation_page) {
+			pr_err("iommu%d: failed to allocate pasid table page\n", iommu->seq_id);
+			spin_unlock(&iommu->lock);
+			return -ENOMEM;
+		}
+		data->donation_page_gpa = virt_to_phys(donation_page);
+		ret = pkvm_hypercall_inout(iommu_pasid_setup_fl, &d, &d);
+
+		if (data->donation_page_gpa)
+			iommu_free_pages(phys_to_virt(data->donation_page_gpa));
+	}
+	spin_unlock(&iommu->lock);
+
+	return ret;
+}
