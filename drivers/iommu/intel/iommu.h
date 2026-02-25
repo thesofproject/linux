@@ -826,9 +826,12 @@ struct intel_iommu {
 	u64		cap;
 	u64		ecap;
 	u32		vgsts;	/* Virtual GSTS register */
+	u64		viqa;  /* Virtual IQA register */
 	int		seq_id;	/* sequence id of the iommu */
 	int		agaw; /* agaw of this iommu */
 	int		msagaw; /* max sagaw of this iommu */
+	struct q_inval  _qi;    /* Queued invalidation info */
+	struct q_inval  *qi;    /* Pointer to _qi. Enables host code re-use */
 	pkvm_spinlock_t lock;
 };
 #endif /* !__PKVM_HYP__ */
