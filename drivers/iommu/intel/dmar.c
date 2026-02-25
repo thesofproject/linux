@@ -1439,6 +1439,15 @@ int qi_submit_sync(struct intel_iommu *iommu, struct qi_desc *desc,
 		return 0;
 
 #ifndef __PKVM_HYP__
+	if (pkvm_enabled()) {
+		int ret = pkvm_qi_submit_sync(iommu, desc, count, options);
+
+		if (ret)
+			pr_err("iommu%d: pkvm_qi_submit_sync failed (err=%d)\n",
+			       iommu->seq_id, ret);
+		return ret;
+	}
+
 	type = desc->qw0 & GENMASK_ULL(3, 0);
 
 	if ((type == QI_IOTLB_TYPE || type == QI_EIOTLB_TYPE) &&

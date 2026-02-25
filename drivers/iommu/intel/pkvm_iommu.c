@@ -106,3 +106,20 @@ int __init pkvm_host_init_iommu(void)
 
 	return ret;
 }
+
+int pkvm_qi_submit_sync(struct intel_iommu *iommu, struct qi_desc *desc,
+			unsigned int count, unsigned long options)
+{
+	struct qi_desc *desc_ptr;
+	int ret;
+
+	desc_ptr = kcalloc(count, sizeof(struct qi_desc), GFP_ATOMIC);
+	if (!desc_ptr)
+		return -ENOMEM;
+
+	memcpy(desc_ptr, desc, count * sizeof(struct qi_desc));
+	ret = pkvm_hypercall(iommu_qi_submit, iommu->reg_phys,
+			     virt_to_phys(desc_ptr), count, options);
+	kfree(desc_ptr);
+	return ret;
+}
