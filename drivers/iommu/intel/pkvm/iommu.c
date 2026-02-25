@@ -27,9 +27,23 @@ unsigned int iommu_pglvl_mask = IOMMU_PGT_4LEVEL | IOMMU_PGT_5LEVEL;
 /* Mask of bits supported by pKVM */
 #define DMAR_GCMD_SUPPORTED_BITS	(DMAR_GSTS_EN_BITS | DMA_GCMD_SRTP | DMA_GCMD_SIRTP)
 
+u16 satc_devs[PKVM_MAX_SATC_DEVS];
+int nr_satc_devs;
+
 #define PKVM_MAX_IOMMU_NUM	16
 static struct intel_iommu iommus[PKVM_MAX_IOMMU_NUM];
 static int nr_iommus;
+
+bool is_dev_in_satc(u16 bdf)
+{
+	int i;
+
+	for (i = 0; i < nr_satc_devs; i++) {
+		if (bdf == satc_devs[i])
+			return true;
+	}
+	return false;
+}
 
 struct intel_iommu *iommu_from_phys(unsigned long phys)
 {

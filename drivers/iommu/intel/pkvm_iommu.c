@@ -73,6 +73,11 @@ int __init pkvm_host_prepare_iommu(void)
 		pkvm_sym(iommu_pgsz_mask) &= pgsz_mask;
 	}
 
+	ret = pkvm_scan_satc_devs(pkvm_sym(satc_devs), &pkvm_sym(nr_satc_devs),
+				  PKVM_MAX_SATC_DEVS);
+	if (ret)
+		goto out;
+
 	pkvm_sym(intel_iommu_sm) = intel_iommu_sm;
 
 	for_each_iommu(iommu, drhd) {
