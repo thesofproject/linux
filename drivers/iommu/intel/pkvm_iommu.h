@@ -33,6 +33,70 @@ extern int pkvm_sym(intel_iommu_sm);
 PKVM_DECLARE(int, prepare_iommu, (struct intel_iommu_info *info));
 
 #ifndef __PKVM_HYP__
+static inline u64 pkvm_readq(void __iomem *reg, unsigned long reg_phys, unsigned long offset)
+{
+	union pkvm_hc_data d;
+	int ret;
+
+	if (!pkvm_enabled())
+		return readq(reg + offset);
+
+	ret = pkvm_hypercall_out(iommu_mmio_read, &d, reg_phys + offset, sizeof(u64));
+	if (ret)
+		pr_err("%s: iommu_mmio_read(reg_phys: %lx, off: %lx) failed(err=%d)\n",
+		       __func__, reg_phys, offset, ret);
+
+	return d.iommu_mmio_read.val;
+}
+
+static inline u32 pkvm_readl(void __iomem *reg, unsigned long reg_phys, unsigned long offset)
+{
+	union pkvm_hc_data d;
+	int ret;
+
+	if (!pkvm_enabled())
+		return readl(reg + offset);
+
+	ret = pkvm_hypercall_out(iommu_mmio_read, &d, reg_phys + offset, sizeof(u32));
+	if (ret)
+		pr_err("%s: iommu_mmio_read(reg_phys: %lx, off: %lx) failed(err=%d)\n",
+		       __func__, reg_phys, offset, ret);
+
+	return (u32)d.iommu_mmio_read.val;
+}
+
+static inline void pkvm_writeq(void __iomem *reg, unsigned long reg_phys,
+			       unsigned long offset, u64 val)
+{
+	int ret;
+
+	if (!pkvm_enabled()) {
+		writeq(val, reg + offset);
+		return;
+	}
+
+	ret = pkvm_hypercall(iommu_mmio_write, reg_phys + offset, sizeof(u64), val);
+	if (ret)
+		pr_err("%s: iommu_mmio_write(phys: %lx, off: %lx, val: %llx) failed(err=%d)\n",
+		       __func__, reg_phys, offset, val, ret);
+}
+
+static inline void pkvm_writel(void __iomem *reg, unsigned long reg_phys,
+			       unsigned long offset, u32 val)
+{
+	int ret;
+
+	if (!pkvm_enabled()) {
+		writel(val, reg + offset);
+		return;
+	}
+
+	ret = pkvm_hypercall(iommu_mmio_write, reg_phys + offset, sizeof(u32), val);
+	if (ret)
+		pr_err("%s: iommu_mmio_write(phys: %lx, off: %lx, val: %x) failed(err=%d)\n",
+		       __func__, reg_phys, offset, val, ret);
+}
+
 int __init pkvm_host_prepare_iommu(void);
 int __init pkvm_host_init_iommu(void);
 #else /* __PKVM_HYP__ */
