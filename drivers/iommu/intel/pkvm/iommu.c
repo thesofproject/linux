@@ -18,6 +18,15 @@
 unsigned int iommu_pgsz_mask = 1 << PG_LEVEL_4K | 1 << PG_LEVEL_2M | 1 << PG_LEVEL_1G;
 unsigned int iommu_pglvl_mask = IOMMU_PGT_4LEVEL | IOMMU_PGT_5LEVEL;
 
+/* GCMD bits that handle enabling/disabling of IOMMU features */
+#define DMAR_GSTS_EN_BITS	(DMA_GCMD_TE | DMA_GCMD_QIE | DMA_GCMD_IRE | DMA_GCMD_CFI)
+/* GCMD oneshot bits where unsetting the bit doesn't have an effect */
+#define DMAR_GCMD_ONESHOT	(DMA_GCMD_SRTP | DMA_GCMD_SIRTP)
+/* Mask of bits the host is allowed to access directly (passed through to hardware) */
+#define DMAR_GCMD_DIRECT	(DMAR_GSTS_EN_BITS | DMA_GCMD_SRTP | DMA_GCMD_SIRTP)
+/* Mask of bits supported by pKVM */
+#define DMAR_GCMD_SUPPORTED_BITS	(DMAR_GSTS_EN_BITS | DMA_GCMD_SRTP | DMA_GCMD_SIRTP)
+
 #define PKVM_MAX_IOMMU_NUM	16
 static struct intel_iommu iommus[PKVM_MAX_IOMMU_NUM];
 static int nr_iommus;
@@ -76,6 +85,65 @@ static int iommu_direct_mmio_write(struct intel_iommu *iommu, u64 phys,
 	return 0;
 }
 
+static int handle_gcmd_direct(struct intel_iommu *iommu, u32 gcmd_bit, bool set)
+{
+	u32 gcmd = iommu->vgsts & DMAR_GSTS_EN_BITS;
+	u32 sts;
+
+	if ((gcmd_bit & DMAR_GCMD_ONESHOT) && !set)
+		return -EINVAL;
+
+	if (set)
+		gcmd |= gcmd_bit;
+	else
+		gcmd &= ~gcmd_bit;
+
+	writel(gcmd, iommu->reg + DMAR_GCMD_REG);
+	if (set)
+		IOMMU_WAIT_OP(iommu, DMAR_GSTS_REG, readl, (sts & gcmd_bit), sts);
+	else
+		IOMMU_WAIT_OP(iommu, DMAR_GSTS_REG, readl, !(sts & gcmd_bit), sts);
+
+	iommu->vgsts = (iommu->vgsts & DMAR_GCMD_ONESHOT) | gcmd;
+
+	return 0;
+}
+
+static int handle_global_cmd(struct intel_iommu *iommu, u32 val)
+{
+	u32 changed = (iommu->vgsts & DMAR_GSTS_EN_BITS) ^ val;
+
+	if (!changed)
+		return 0;
+
+	if (hweight32(changed) > 1) {
+		pkvm_warn("iommu%d: more than one changed bit in a gcmd write(%x)\n",
+			  iommu->seq_id, val);
+		return -EINVAL;
+	}
+
+	if (changed & ~DMAR_GCMD_SUPPORTED_BITS) {
+		pkvm_warn("iommu%d: received GCMD for unsupported bit: %x\n",
+			  iommu->seq_id, changed);
+		return -EOPNOTSUPP;
+	}
+
+	pkvm_dbg("iommu%d: handle gcmd val 0x%x gsts 0x%x changed 0x%x\n",
+		 iommu->seq_id, val, iommu->vgsts, changed);
+
+	/*
+	 * Check if the bits are allowed to be directly accessible by the host
+	 * and passthrough if so.
+	 */
+	if (changed & ~DMAR_GCMD_DIRECT) {
+		pkvm_warn("iommu%d: direct access of GCMD bit: %x(set=%d) not allowed\n",
+			  iommu->seq_id, changed, !!(val & changed));
+		return -EPERM;
+	}
+
+	return handle_gcmd_direct(iommu, changed, !!(val & changed));
+}
+
 int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val)
 {
 	struct intel_iommu *iommu = iommu_from_phys(phys);
@@ -126,6 +194,9 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 		fallthrough;
 	case DMAR_GSTS_REG:
 		ret = -EINVAL;
+		break;
+	case DMAR_GCMD_REG:
+		ret = handle_global_cmd(iommu, val);
 		break;
 	default:
 		/* Not emulated MMIO can directly go to hardware */
