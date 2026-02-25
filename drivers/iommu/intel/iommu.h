@@ -738,6 +738,7 @@ struct dmar_domain {
 
 	atomic_t refcount;
 	unsigned int index;
+	struct pkvm_memcache mc;
 	/*
 	 * Lock to protect the mapping operations
 	 * on this domain.
@@ -1183,6 +1184,13 @@ int domain_context_mapping_one(struct dmar_domain *domain,
 			       u16 did,
 #endif
 			       u8 bus, u8 devfn);
+
+int domain_map(struct dmar_domain *domain, unsigned long iov_pfn,
+	       unsigned long phys_pfn, unsigned long nr_pages,
+	       int prot, gfp_t gfp);
+
+void domain_unmap(struct dmar_domain *domain, unsigned long start_pfn,
+		  unsigned long last_pfn, struct iommu_pages_list *freelist);
 
 #ifndef __PKVM_HYP__
 #ifdef CONFIG_INTEL_IOMMU
