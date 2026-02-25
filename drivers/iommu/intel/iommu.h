@@ -28,6 +28,7 @@
 #include <asm/iommu.h>
 #include <uapi/linux/iommufd.h>
 
+#include <asm/pkvm_spinlock.h>
 #include "pkvm_iommu.h"
 
 /*
@@ -835,8 +836,28 @@ struct intel_iommu {
 	struct q_inval  *qi;    /* Pointer to _qi. Enables host code re-use */
 	struct iommu_flush flush;
 	struct root_entry *root_entry;
+	/*
+	 * Virtual address of page donated by host for constructing
+	 * translation structures(context table/pasid table). This
+	 * page is passed in by hypercalls that construct the
+	 * translation structures.
+	 */
+	void		*donation_page;
 	pkvm_spinlock_t lock;
 };
+
+/*
+ * Get the page donated by host for constructing
+ * translation structures(context/pasid).
+ * Requires the caller to hold iommu->lock
+ */
+static inline void *pkvm_iommu_donation_page(struct intel_iommu *iommu)
+{
+	void *donation_page = iommu->donation_page;
+
+	iommu->donation_page = NULL;
+	return donation_page;
+}
 #endif /* !__PKVM_HYP__ */
 
 #ifndef __PKVM_HYP__
@@ -880,6 +901,10 @@ struct dev_pasid_info {
 struct device_domain_info {
 	u8 bus;			/* PCI bus number */
 	u8 devfn;		/* PCI devfn number */
+	u16 pfsid;		/* SRIOV physical function source ID */
+	u8 ats_supported:1;
+	u8 ats_enabled:1;
+	u8 ats_qdep;
 	struct intel_iommu *iommu; /* IOMMU used by this device */
 };
 #endif /* !__PKVM_HYP__ */
@@ -1109,6 +1134,16 @@ static inline void context_clear_entry(struct context_entry *context)
 	context->lo = 0;
 	context->hi = 0;
 }
+
+void domain_context_clear_one(struct device_domain_info *info,
+			      u8 bus, u8 devfn);
+int domain_context_mapping_one(struct dmar_domain *domain,
+			       struct intel_iommu *iommu,
+#ifdef __PKVM_HYP__
+			       struct device_domain_info *info,
+			       u16 did,
+#endif
+			       u8 bus, u8 devfn);
 
 #ifndef __PKVM_HYP__
 #ifdef CONFIG_INTEL_IOMMU

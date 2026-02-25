@@ -22,6 +22,7 @@
 #include "pasid.h"
 #include "../iommu-pages.h"
 
+#ifndef __PKVM_HYP__
 /*
  * Intel IOMMU system wide PASID name space:
  */
@@ -1096,6 +1097,7 @@ int intel_pasid_setup_sm_context(struct device *dev)
 
 	return pci_for_each_dma_alias(to_pci_dev(dev), pci_pasid_table_setup, dev);
 }
+#endif /* !__PKVM_HYP__ */
 
 /*
  * Global Device-TLB invalidation following changes in a context entry which
@@ -1109,14 +1111,25 @@ static void __context_flush_dev_iotlb(struct device_domain_info *info)
 	qi_flush_dev_iotlb(info->iommu, PCI_DEVID(info->bus, info->devfn),
 			   info->pfsid, info->ats_qdep, 0, MAX_AGAW_PFN_WIDTH);
 
+#ifndef __PKVM_HYP__
 	/*
 	 * There is no guarantee that the device DMA is stopped when it reaches
 	 * here. Therefore, always attempt the extra device TLB invalidation
 	 * quirk. The impact on performance is acceptable since this is not a
 	 * performance-critical path.
 	 */
+	/*
+	 * pKVM NOTE:
+	 * This quirk is for devices(QAT: PCI device IDs ranging from 0x4940 to
+	 * 0x4943) which doesn't perform devtlb flush correctly and needs an
+	 * extra flush operation from the driver side.
+	 * Since these devices are not concerning to pkvm and we don't trust host
+	 * to pass this information correctly(if the host is compromised), we don't
+	 * do the second flush.
+	 */
 	quirk_extra_dev_tlb_flush(info, 0, MAX_AGAW_PFN_WIDTH, IOMMU_NO_PASID,
 				  info->ats_qdep);
+#endif
 }
 
 /*
