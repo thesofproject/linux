@@ -13,6 +13,7 @@
 #define pr_fmt(fmt)     "DMAR: " fmt
 #define dev_fmt(fmt)    pr_fmt(fmt)
 
+#ifndef __PKVM_HYP__
 #include <linux/crash_dump.h>
 #include <linux/dma-direct.h>
 #include <linux/dmi.h>
@@ -204,8 +205,10 @@ static LIST_HEAD(dmar_satc_units);
 static void intel_iommu_domain_free(struct iommu_domain *domain);
 
 int dmar_disabled = !IS_ENABLED(CONFIG_INTEL_IOMMU_DEFAULT_ON);
+#endif /* !__PKVM_HYP__ */
 int intel_iommu_sm = IS_ENABLED(CONFIG_INTEL_IOMMU_SCALABLE_MODE_DEFAULT_ON);
 
+#ifndef __PKVM_HYP__
 int intel_iommu_enabled = 0;
 EXPORT_SYMBOL_GPL(intel_iommu_enabled);
 
@@ -4797,3 +4800,4 @@ err:
 
 	return ret;
 }
+#endif /* !__PKVM_HYP__ */
