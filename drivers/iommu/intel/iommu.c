@@ -1772,6 +1772,30 @@ __domain_mapping(struct dmar_domain *domain, unsigned long iov_pfn,
 }
 #else /* __PKVM_HYP__ */
 
+static bool pasid_table_has_present_entries(struct pasid_dir_entry *dir, int max_pde)
+{
+	int i;
+
+	for (i = 0; i < max_pde; i++) {
+		int j;
+		struct pasid_entry *table = get_pasid_table_from_pde(&dir[i]);
+
+		if (!table)
+			continue;
+
+		for (j = 0; j < PASID_TBL_ENTRIES; j++) {
+			if (pasid_pte_is_present(&table[j])) {
+				u32 pasid = (i << PASID_PDE_SHIFT) + j;
+
+				pr_warn("pkvm: found active entry for pasid:%x\n",
+					pasid);
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 static void pasid_free_table(struct pasid_dir_entry *dir, int max_pde)
 {
 	for (int i = 0; i < max_pde; i++) {
@@ -1820,6 +1844,10 @@ void domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn)
 	if (sm) {
 		pasid_dir = __pkvm_va(context->lo & VTD_PAGE_MASK);
 		pasid_dir_sz = get_pasid_dir_size(context);
+		if (WARN_ON(pasid_table_has_present_entries(pasid_dir, pasid_dir_sz))) {
+			spin_unlock(&iommu->lock);
+			return;
+		}
 	} else {
 		pgd = __pkvm_va(context->lo & VTD_PAGE_MASK);
 	}
