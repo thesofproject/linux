@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 
 #include <linux/kvm_para.h>
+#include <linux/virtio_balloon.h>
 #include <asm/coco.h>
 #include <asm/pkvm_guest.h>
 #include <asm/pgtable.h>
@@ -132,6 +133,27 @@ static int pkvm_wakeup_secondary_cpu(u32 apic_id, unsigned long start_ip, unsign
 	return kvm_hypercall2(PKVM_GHC_START_CPU, apic_id, start_ip);
 }
 
+#ifdef CONFIG_VIRTIO_BALLOON_HYP_OPS
+static bool pkvm_page_relinquish_disallowed(void)
+{
+	/*
+	 * pKVM-x86 does not support balloon for protected guests yet,
+	 * so relinquish is always disallowed.
+	 */
+	return true;
+}
+
+static void pkvm_page_relinquish(struct page *page, unsigned int nr)
+{
+	WARN_ON_ONCE(1);
+}
+
+static struct virtio_balloon_hyp_ops pkvm_virtio_balloon_hyp_ops = {
+	.page_relinquish_disallowed = pkvm_page_relinquish_disallowed,
+	.page_relinquish = pkvm_page_relinquish,
+};
+#endif
+
 __init void pkvm_guest_init_coco(void)
 {
 	cc_vendor = CC_VENDOR_PKVM;
@@ -164,4 +186,8 @@ __init void pkvm_guest_init_coco(void)
 	pv_ops.mmio.pci_mmcfg_writel = pkvm_mmio_writel;
 
 	apic_update_callback(wakeup_secondary_cpu, pkvm_wakeup_secondary_cpu);
+
+#ifdef CONFIG_VIRTIO_BALLOON_HYP_OPS
+	virtio_balloon_hyp_ops = &pkvm_virtio_balloon_hyp_ops;
+#endif
 }
