@@ -37,6 +37,7 @@ extern unsigned int pkvm_sym(iommu_pglvl_mask);
 extern unsigned int pkvm_sym(iommu_pgsz_mask);
 
 extern int pkvm_sym(intel_iommu_sm);
+extern int pkvm_sym(intel_iommu_superpage);
 
 PKVM_DECLARE(int, prepare_iommu, (struct intel_iommu_info *info));
 

@@ -79,6 +79,7 @@ int __init pkvm_host_prepare_iommu(void)
 		goto out;
 
 	pkvm_sym(intel_iommu_sm) = intel_iommu_sm;
+	pkvm_sym(intel_iommu_superpage) = intel_iommu_superpage;
 
 	for_each_iommu(iommu, drhd) {
 		struct intel_iommu_info info = {
