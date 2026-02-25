@@ -350,9 +350,26 @@ int pkvm_alloc_domain(struct device_domain_info *info, struct dmar_domain *domai
 	return ret;
 }
 
+static phys_addr_t host_pa(void *addr)
+{
+	return __pa(addr);
+}
+
 static void *host_va(phys_addr_t phys)
 {
 	return __va(phys);
+}
+
+struct mc_alloc_arg {
+	int nid;
+	gfp_t gfp;
+};
+
+static void *host_mc_alloc_page(void *alloc_arg)
+{
+	struct mc_alloc_arg *arg = (struct mc_alloc_arg *)alloc_arg;
+
+	return iommu_alloc_pages_node_sz(arg->nid, arg->gfp, SZ_4K);
 }
 
 static void free_domain_memcache(struct pkvm_memcache *mc)
@@ -368,5 +385,60 @@ int pkvm_free_domain(struct dmar_domain *domain)
 
 	ret = pkvm_hypercall_out(iommu_free_domain, &out, virt_to_phys(domain->pgd));
 	free_domain_memcache(&out.iommu_free_domain.memcache);
+	return ret;
+}
+
+int pkvm_domain_map(struct dmar_domain *domain, unsigned long iov_pfn,
+		    unsigned long phys_pfn, unsigned long nr_pages,
+		    int prot, int gfp)
+{
+	union pkvm_hc_data d = { 0 };
+	struct domain_map_data *data = &d.iommu_domain_map.in;
+	int ret;
+
+	data->pgd_gpa = virt_to_phys(domain->pgd),
+	data->iov_pfn = iov_pfn,
+	data->phys_pfn = phys_pfn,
+	data->nr_pages = nr_pages,
+	data->prot = prot,
+
+	ret = pkvm_hypercall_inout(iommu_domain_map, &d, &d);
+	if (ret == -ENOMEM) {
+		struct mc_alloc_arg arg = {
+			.nid = domain->nid,
+			.gfp = gfp,
+		};
+
+		ret = topup_pkvm_memcache(&data->mc, __pkvm_pgtable_max_pages(nr_pages),
+					  host_mc_alloc_page, host_pa, &arg);
+		if (!ret)
+			ret = pkvm_hypercall_inout(iommu_domain_map, &d, &d);
+		else
+			pr_err("%s: memcache topup failed(err=%d)\n", __func__, ret);
+	}
+
+	if (ret) {
+		pr_err("%s: domain map[iov_pfn: %lx, pfn: %lx, nr_pages: %lu] failed (err=%d)\n",
+		       __func__, iov_pfn, phys_pfn, nr_pages, ret);
+
+		/*
+		 * pKVM would not have drained the memcache on
+		 * hypercall failure. Free it if not empty.
+		 */
+		free_domain_memcache(&data->mc);
+	}
+
+	domain->has_mappings = true;
+	return ret;
+}
+
+int pkvm_domain_unmap(struct dmar_domain *domain, unsigned long start_pfn, unsigned long last_pfn)
+{
+	int ret = pkvm_hypercall(iommu_domain_unmap, virt_to_phys(domain->pgd),
+				 start_pfn, last_pfn);
+
+	if (ret)
+		pr_err("%s: domain unmap[start_pfn: %lx, last_pfn: %lx] failed (err=%d)\n",
+		       __func__, start_pfn, last_pfn, ret);
 	return ret;
 }
