@@ -216,6 +216,7 @@ static int create_host_mmu(const struct pkvm_mem_info infos[], int nr_infos,
 static int initialize_global(struct pkvm_mem_info infos[], int nr_infos)
 {
 	host_mmu_init_fn_t host_mmu_init_fn = init_ops ? init_ops->host_mmu_init : NULL;
+	hyp_iommu_init_fn_t hyp_iommu_init = init_ops ? init_ops->hyp_iommu_init : NULL;
 	hyp_global_init_fn_t hyp_global_init = init_ops ? init_ops->hyp_global_init : NULL;
 	struct pkvm_mem_info tmp_infos[TMP_NR_INFOS];
 	phys_addr_t mem_base = INVALID_PAGE;
@@ -264,6 +265,12 @@ static int initialize_global(struct pkvm_mem_info infos[], int nr_infos)
 	 * guest VMs.
 	 */
 	kvm_init_xstate_sizes();
+
+	if (hyp_iommu_init) {
+		ret = hyp_iommu_init();
+		if (ret)
+			return ret;
+	}
 
 	return hyp_global_init ? hyp_global_init() : 0;
 }
