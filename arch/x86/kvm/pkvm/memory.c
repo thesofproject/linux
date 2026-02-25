@@ -80,7 +80,8 @@ bool pkvm_find_addr_range(unsigned long phys, struct range *range)
 	return false;
 }
 
-static void pkvm_clflush_cache_range_opt(void *vaddr, unsigned int size)
+/* Copied from arch/x86/mm/pat/set_memory.c: clflush_cache_range_opt() */
+static void clflush_cache_range_opt(void *vaddr, unsigned int size)
 {
 	const unsigned long clflush_size = boot_cpu_data.x86_clflush_size;
 	void *p = (void *)((unsigned long)vaddr & ~(clflush_size - 1));
@@ -93,9 +94,9 @@ static void pkvm_clflush_cache_range_opt(void *vaddr, unsigned int size)
 		clflushopt(p);
 }
 
+/* Copied from arch/x86/mm/pat/set_memory.c: clflush_cache_range() */
 /**
- * pkvm_clflush_cache_range - flush a cache range with clflush
- * which is implemented refer to clflush_cache_range() in kernel.
+ * clflush_cache_range - flush a cache range with clflush
  *
  * @vaddr:	virtual start address
  * @size:	number of bytes to flush
@@ -103,10 +104,10 @@ static void pkvm_clflush_cache_range_opt(void *vaddr, unsigned int size)
  * CLFLUSHOPT is an unordered instruction which needs fencing with MFENCE or
  * SFENCE to avoid ordering issues.
  */
-void pkvm_clflush_cache_range(void *vaddr, unsigned int size)
+void clflush_cache_range(void *vaddr, unsigned int size)
 {
 	mb();
-	pkvm_clflush_cache_range_opt(vaddr, size);
+	clflush_cache_range_opt(vaddr, size);
 	mb();
 }
 
