@@ -179,7 +179,8 @@ bool overlaps_iommu_mmio(unsigned long phys, unsigned long size);
 bool is_dev_in_satc(u16 bdf);
 bool pkvm_iommu_paging_structure_coherency(void);
 
-struct dmar_domain *pkvm_alloc_iommu_domain(struct alloc_domain_data *data);
+struct dmar_domain *pkvm_alloc_iommu_domain(struct alloc_domain_data *data,
+					    bool need_iotlb_sync_map);
 struct dmar_domain *pkvm_get_iommu_domain(void *pgd);
 struct dmar_domain *pkvm_get_iommu_domain_noref(void *pgd);
 void pkvm_put_iommu_domain(struct dmar_domain *domain);
