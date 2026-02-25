@@ -912,10 +912,15 @@ struct device_domain_info {
 	u8 bus;			/* PCI bus number */
 	u8 devfn;		/* PCI devfn number */
 	u16 pfsid;		/* SRIOV physical function source ID */
+	u8 pasid_supported:3;
+	u8 pasid_enabled:1;
+	u8 pri_supported:1;
+	u8 pri_enabled:1;
 	u8 ats_supported:1;
 	u8 ats_enabled:1;
 	u8 ats_qdep;
 	struct intel_iommu *iommu; /* IOMMU used by this device */
+	struct pasid_table *pasid_table; /* pasid table */
 };
 #endif /* !__PKVM_HYP__ */
 
