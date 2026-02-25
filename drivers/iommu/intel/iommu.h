@@ -943,6 +943,13 @@ static inline void __iommu_flush_cache(
 		clflush_cache_range(addr, size);
 }
 
+static inline void domain_flush_cache(struct dmar_domain *domain,
+			       void *addr, int size)
+{
+	if (!domain->iommu_coherency)
+		clflush_cache_range(addr, size);
+}
+
 #ifndef __PKVM_HYP__
 /* Convert generic struct iommu_domain to private struct dmar_domain */
 static inline struct dmar_domain *to_dmar_domain(struct iommu_domain *dom)
