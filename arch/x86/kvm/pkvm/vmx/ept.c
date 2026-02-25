@@ -369,7 +369,8 @@ int pkvm_handle_host_ept_violation(void)
 	 * EPT when initialize, except for the MMIO in the high-end address.
 	 * Handle the MMIO only.
 	 */
-	if (pkvm_find_addr_range(gpa, &range) || is_pvmfw(gpa)) {
+	if (pkvm_find_addr_range(gpa, &range) || is_pvmfw(gpa) ||
+	    is_iommu_mmio(gpa)) {
 		pkvm_err("Host access to protected memory at 0x%lx\n", gpa);
 		return ret;
 	}
@@ -402,7 +403,8 @@ int pkvm_handle_host_ept_violation(void)
 		cur.start = ALIGN_DOWN(gpa, size);
 		cur.end = cur.start + size - 1;
 
-		if (range_contains(&range, &cur) && !overlaps_pvmfw(cur.start, size)) {
+		if (range_contains(&range, &cur) && !overlaps_pvmfw(cur.start, size) &&
+		    !overlaps_iommu_mmio(cur.start, size)) {
 			/*
 			 * TODO: In case the host mmu free pages are not
 			 * enough, -ENOMEM will be returned. This could be
