@@ -10,6 +10,8 @@
 #include <asm/kvm_host.h>
 #include <asm/kvm_pkvm.h>
 
+#define PKVM_MAX_SATC_DEVS	16
+
 /* Page table level represented by IOMMU cap SAGAW bits */
 #define IOMMU_PGT_4LEVEL	BIT(2)
 #define IOMMU_PGT_5LEVEL	BIT(3)
@@ -28,6 +30,9 @@ struct qi_desc;
 struct intel_iommu;
 
 #ifdef CONFIG_PKVM_INTEL
+extern u16 pkvm_sym(satc_devs)[];
+extern int pkvm_sym(nr_satc_devs);
+
 extern unsigned int pkvm_sym(iommu_pglvl_mask);
 extern unsigned int pkvm_sym(iommu_pgsz_mask);
 
@@ -100,6 +105,8 @@ static inline void pkvm_writel(void __iomem *reg, unsigned long reg_phys,
 		       __func__, reg_phys, offset, val, ret);
 }
 
+int __init pkvm_scan_satc_devs(u16 satc_devs[], int *nr_satc_devs, int max_satc_devs);
+
 int __init pkvm_host_prepare_iommu(void);
 int __init pkvm_host_init_iommu(void);
 
@@ -128,6 +135,7 @@ static inline bool is_iommu_mmio(unsigned long phys)
 }
 
 bool overlaps_iommu_mmio(unsigned long phys, unsigned long size);
+bool is_dev_in_satc(u16 bdf);
 
 int pkvm_intel_iommu_init(void);
 
