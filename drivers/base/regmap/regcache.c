@@ -66,14 +66,13 @@ static int regcache_hw_init(struct regmap *map)
 	}
 
 	map->num_reg_defaults = count;
-	map->reg_defaults = kmalloc_array(count, sizeof(struct reg_default),
-					  GFP_KERNEL);
+	map->reg_defaults = kmalloc_objs(struct reg_default, count);
 	if (!map->reg_defaults)
 		return -ENOMEM;
 
 	if (!map->reg_defaults_raw) {
 		bool cache_bypass = map->cache_bypass;
-		dev_warn(map->dev, "No cache defaults, reading back from HW\n");
+		dev_dbg(map->dev, "No cache defaults, reading back from HW\n");
 
 		/* Bypass the cache access till data read from HW */
 		map->cache_bypass = true;
