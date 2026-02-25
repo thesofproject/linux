@@ -126,6 +126,11 @@ union pkvm_hc_data {
 #define HOST_RESET_MMU				3
 #define HOST_APF_READY				4
 	} vcpu_run;
+#ifdef CONFIG_PKVM_INTEL
+	struct {
+		u64 val;
+	} iommu_mmio_read;
+#endif
 	struct {
 		u64 data[PKVM_HC_DATA_MAX_NUM];
 	} raw;
