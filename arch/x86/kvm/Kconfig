@@ -137,6 +137,7 @@ config PKVM_X86
 config PKVM_INTEL
 	bool "pKVM for Intel processors support"
 	depends on KVM_INTEL=y
+	depends on INTEL_IOMMU
 	select PKVM_X86
 	help
 	  Provides support for pKVM on Intel processors.
