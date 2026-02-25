@@ -29,6 +29,7 @@
 #include <linux/numa.h>
 #include <linux/limits.h>
 #include <asm/irq_remapping.h>
+#include <asm/kvm_host.h>
 
 #include "iommu.h"
 #include "../irq_remapping.h"
@@ -915,6 +916,28 @@ dmar_validate_one_drhd(struct acpi_dmar_header *entry, void *arg)
 	return 0;
 }
 
+static int __init intel_iommu_init_nop(void) { return 0; }
+
+static inline void setup_iommu_init_hooks(void)
+{
+	if (enable_pkvm) {
+		/*
+		 * iommu_init happens during pkvm initialization
+		 * and hence a nop here.
+		 */
+		x86_init.iommu.iommu_init = intel_iommu_init_nop;
+	} else {
+		x86_init.iommu.iommu_init = intel_iommu_init;
+	}
+	/*
+	 * Set iommu_shutdown hook regardless of pkvm.
+	 * pkvm won't get a chance to shutdown iommu cleanly
+	 * on reboot as we don't reprivilege at reboot. So,
+	 * let the host do it in its normal shutdown flow.
+	 */
+	x86_platform.iommu_shutdown = intel_iommu_shutdown;
+}
+
 void __init detect_intel_iommu(void)
 {
 	int ret;
@@ -935,10 +958,8 @@ void __init detect_intel_iommu(void)
 		pci_request_acs();
 	}
 
-	if (!ret) {
-		x86_init.iommu.iommu_init = intel_iommu_init;
-		x86_platform.iommu_shutdown = intel_iommu_shutdown;
-	}
+	if (!ret)
+		setup_iommu_init_hooks();
 
 	if (dmar_tbl) {
 		acpi_put_table(dmar_tbl);
