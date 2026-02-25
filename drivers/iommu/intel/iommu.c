@@ -57,15 +57,6 @@
 
 #define DEFAULT_DOMAIN_ADDRESS_WIDTH 57
 
-#define __DOMAIN_MAX_PFN(gaw)  ((((uint64_t)1) << ((gaw) - VTD_PAGE_SHIFT)) - 1)
-#define __DOMAIN_MAX_ADDR(gaw) ((((uint64_t)1) << (gaw)) - 1)
-
-/* We limit DOMAIN_MAX_PFN to fit in an unsigned long, and DOMAIN_MAX_ADDR
-   to match. That way, we can use 'unsigned long' for PFNs with impunity. */
-#define DOMAIN_MAX_PFN(gaw)	((unsigned long) min_t(uint64_t, \
-				__DOMAIN_MAX_PFN(gaw), (unsigned long)-1))
-#define DOMAIN_MAX_ADDR(gaw)	(((uint64_t)__DOMAIN_MAX_PFN(gaw)) << VTD_PAGE_SHIFT)
-
 #ifndef __PKVM_HYP__
 static void __init check_tylersburg_isoch(void);
 static int rwbf_quirk;
@@ -219,12 +210,12 @@ static void intel_iommu_domain_free(struct iommu_domain *domain);
 int dmar_disabled = !IS_ENABLED(CONFIG_INTEL_IOMMU_DEFAULT_ON);
 #endif /* !__PKVM_HYP__ */
 int intel_iommu_sm = IS_ENABLED(CONFIG_INTEL_IOMMU_SCALABLE_MODE_DEFAULT_ON);
+int intel_iommu_superpage = 1;
 
 #ifndef __PKVM_HYP__
 int intel_iommu_enabled = 0;
 EXPORT_SYMBOL_GPL(intel_iommu_enabled);
 
-static int intel_iommu_superpage = 1;
 static int iommu_identity_mapping;
 static int iommu_skip_te_disable;
 static int disable_igfx_iommu;
@@ -360,12 +351,6 @@ int iommu_calculate_max_sagaw(struct intel_iommu *iommu)
 int iommu_calculate_agaw(struct intel_iommu *iommu)
 {
 	return __iommu_calculate_agaw(iommu, DEFAULT_DOMAIN_ADDRESS_WIDTH);
-}
-
-static bool iommu_paging_structure_coherency(struct intel_iommu *iommu)
-{
-	return sm_supported(iommu) ?
-			ecap_smpwc(iommu->ecap) : ecap_coherent(iommu->ecap);
 }
 
 /* Return the super pagesize bitmap if supported. */
@@ -3361,17 +3346,6 @@ static struct iommu_domain blocking_domain = {
 		.set_dev_pasid	= blocking_domain_set_dev_pasid,
 	}
 };
-
-static int iommu_superpage_capability(struct intel_iommu *iommu, bool first_stage)
-{
-	if (!intel_iommu_superpage)
-		return 0;
-
-	if (first_stage)
-		return cap_fl1gp_support(iommu->cap) ? 2 : 1;
-
-	return fls(cap_super_page_val(iommu->cap));
-}
 
 static struct dmar_domain *paging_domain_alloc(struct device *dev, bool first_stage)
 {
