@@ -298,6 +298,9 @@ int cache_tag_assign_domain(struct dmar_domain *domain,
 	u16 did = domain_get_id_for_dev(domain, dev);
 	int ret;
 
+	if (pkvm_enabled())
+		return 0;
+
 	ret = __cache_tag_assign_domain(domain, did, dev, pasid);
 	if (ret || domain->domain.type != IOMMU_DOMAIN_NESTED)
 		return ret;
@@ -320,6 +323,9 @@ void cache_tag_unassign_domain(struct dmar_domain *domain,
 			       struct device *dev, ioasid_t pasid)
 {
 	u16 did = domain_get_id_for_dev(domain, dev);
+
+	if (pkvm_enabled())
+		return;
 
 	__cache_tag_unassign_domain(domain, did, dev, pasid);
 	if (domain->domain.type == IOMMU_DOMAIN_NESTED)
