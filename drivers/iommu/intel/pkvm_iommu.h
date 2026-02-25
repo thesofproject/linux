@@ -178,7 +178,7 @@ struct dmar_domain *pkvm_alloc_iommu_domain(struct alloc_domain_data *data);
 struct dmar_domain *pkvm_get_iommu_domain(void *pgd);
 struct dmar_domain *pkvm_get_iommu_domain_noref(void *pgd);
 void pkvm_put_iommu_domain(struct dmar_domain *domain);
-int pkvm_free_iommu_domain(struct dmar_domain *domain);
+int pkvm_free_iommu_domain(struct dmar_domain *domain, struct pkvm_memcache *teardown_mc);
 
 struct cache_tag *pkvm_alloc_cache_tag(void);
 void pkvm_free_cache_tag(struct cache_tag *cache_tag);
@@ -201,7 +201,7 @@ int pkvm_iommu_pasid_setup_fl(struct pasid_setup_fl_data *in, struct pasid_setup
 int pkvm_iommu_pasid_setup_sl(struct pasid_setup_sl_data *in, struct pasid_setup_sl_data *out);
 int pkvm_iommu_pasid_teardown(struct pasid_teardown_data *data);
 int pkvm_iommu_alloc_domain(struct alloc_domain_data *data);
-int pkvm_iommu_free_domain(u64 pgd_gpa);
+int pkvm_iommu_free_domain(u64 pgd_gpa, struct pkvm_memcache *mc);
 #endif /* !__PKVM_HYP__ */
 #else /* !CONFIG_PKVM_INTEL */
 static inline int pkvm_qi_submit_sync(struct intel_iommu *iommu,
