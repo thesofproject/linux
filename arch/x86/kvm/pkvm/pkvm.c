@@ -1912,6 +1912,10 @@ void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 		ret = pkvm_iommu_pasid_setup_fl(&in.iommu_pasid_setup_fl.in,
 						&out.iommu_pasid_setup_fl.out);
 		break;
+	case __pkvm__iommu_pasid_setup_sl:
+		ret = pkvm_iommu_pasid_setup_sl(&in.iommu_pasid_setup_sl.in,
+						&out.iommu_pasid_setup_sl.out);
+		break;
 #endif
 	default:
 		ret = pkvm_vcpu_handle_host_hypercall(vcpu, hc, &in, &out);

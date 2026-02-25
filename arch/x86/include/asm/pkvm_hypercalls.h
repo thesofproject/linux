@@ -98,6 +98,7 @@ PKVM_HC_IN(iommu_clear_ce)
 PKVM_HC_INOUT(iommu_set_lm_ce)
 PKVM_HC_INOUT(iommu_set_sm_ce)
 PKVM_HC_INOUT(iommu_pasid_setup_fl)
+PKVM_HC_INOUT(iommu_pasid_setup_sl)
 #endif
 
 #undef PKVM_HC

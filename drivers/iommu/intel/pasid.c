@@ -615,6 +615,23 @@ int intel_pasid_setup_second_level(struct intel_iommu *iommu,
 	did = domain_id_iommu(domain, iommu);
 #endif
 
+#ifndef __PKVM_HYP__
+	if (pkvm_enabled()) {
+		struct device_domain_info *info = dev_iommu_priv_get(dev);
+		int ret;
+
+		if (!info || !info->pasid_table)
+			return -ENODEV;
+
+		ret = pkvm_pasid_setup_sl(info, pgd_val, pasid, did, 0);
+		if (ret)
+			pr_err("%s: iommu%d: pkvm_pasid_setup_sl failed(err=%d)\n",
+			       __func__, iommu->seq_id, ret);
+
+		return ret;
+	}
+#endif
+
 	spin_lock(&iommu->lock);
 	pte = intel_pasid_get_entry(dev, pasid);
 	if (IS_ERR(pte)) {
@@ -666,6 +683,23 @@ int intel_pasid_replace_second_level(struct intel_iommu *iommu,
 	pgd_val = virt_to_phys(pgd);
 #ifndef __PKVM_HYP__
 	did = domain_id_iommu(domain, iommu);
+#endif
+
+#ifndef __PKVM_HYP__
+	if (pkvm_enabled()) {
+		struct device_domain_info *info = dev_iommu_priv_get(dev);
+		int ret;
+
+		if (!info || !info->pasid_table)
+			return -ENODEV;
+
+		ret = pkvm_pasid_setup_sl(info, pgd_val, pasid, did, old_did);
+		if (ret)
+			pr_err("%s: iommu%d: pkvm_pasid_setup_sl failed(err=%d)\n",
+			       __func__, iommu->seq_id, ret);
+
+		return ret;
+	}
 #endif
 
 	pasid_pte_config_second_level(iommu, &new_pte, pgd_val,
@@ -790,6 +824,21 @@ int intel_pasid_setup_pass_through(struct intel_iommu *iommu,
 	u16 did = FLPT_DEFAULT_DID;
 	struct pasid_entry *pte;
 
+	if (pkvm_enabled()) {
+		struct device_domain_info *info = dev_iommu_priv_get(dev);
+		int ret;
+
+		if (!info || !info->pasid_table)
+			return -ENODEV;
+
+		ret = pkvm_pasid_setup_sl(info, 0, pasid, did, 0);
+		if (ret)
+			pr_err("%s: iommu%d: pkvm_pasid_setup_sl failed(err=%d)\n",
+			       __func__, iommu->seq_id, ret);
+
+		return ret;
+	}
+
 	spin_lock(&iommu->lock);
 	pte = intel_pasid_get_entry(dev, pasid);
 	if (IS_ERR(pte)) {
@@ -816,6 +865,21 @@ int intel_pasid_replace_pass_through(struct intel_iommu *iommu,
 {
 	struct pasid_entry *pte, new_pte;
 	u16 did = FLPT_DEFAULT_DID;
+
+	if (pkvm_enabled()) {
+		struct device_domain_info *info = dev_iommu_priv_get(dev);
+		int ret;
+
+		if (!info || !info->pasid_table)
+			return -ENODEV;
+
+		ret = pkvm_pasid_setup_sl(info, 0, pasid, did, old_did);
+		if (ret)
+			pr_err("%s: iommu%d: pkvm_pasid_setup_sl failed(err=%d)\n",
+			       __func__, iommu->seq_id, ret);
+
+		return ret;
+	}
 
 	pasid_pte_config_pass_through(iommu, &new_pte, did);
 
