@@ -137,6 +137,7 @@ static inline bool is_iommu_mmio(unsigned long phys)
 
 bool overlaps_iommu_mmio(unsigned long phys, unsigned long size);
 bool is_dev_in_satc(u16 bdf);
+bool pkvm_iommu_paging_structure_coherency(void);
 
 int pkvm_intel_iommu_init(void);
 
