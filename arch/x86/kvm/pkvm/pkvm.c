@@ -13,6 +13,7 @@
 #include "trace.h"
 #include "../x86.h"
 #include "../lapic.h"
+#include "pkvm_iommu.h"
 
 /*
  * Needed by kvm_spurious_fault() which is a generic fault function for the
@@ -1879,6 +1880,18 @@ void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 		ret = pkvm_vm_mmu_age(pkvm_hc_input1(vcpu), pkvm_hc_input2(vcpu),
 				      pkvm_hc_input3(vcpu), pkvm_hc_input4(vcpu));
 		break;
+#ifdef CONFIG_PKVM_INTEL
+	case __pkvm__iommu_mmio_read:
+		ret = pkvm_iommu_mmio_read(pkvm_hc_input1(vcpu),
+					   pkvm_hc_input2(vcpu),
+					   &out.iommu_mmio_read.val);
+		break;
+	case __pkvm__iommu_mmio_write:
+		ret = pkvm_iommu_mmio_write(pkvm_hc_input1(vcpu),
+					    pkvm_hc_input2(vcpu),
+					    pkvm_hc_input3(vcpu));
+		break;
+#endif
 	default:
 		ret = pkvm_vcpu_handle_host_hypercall(vcpu, hc, &in, &out);
 		break;
