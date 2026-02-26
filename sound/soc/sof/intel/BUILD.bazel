@@ -1,0 +1,506 @@
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_headers",
+    "ddk_module",
+)
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+exports_files(["Kconfig"])
+
+_AUDIO_DEFCONFIG = "//private/desktop-google:intel_audio_ddk.defconfig"
+
+ddk_headers(
+    name = "intel_headers",
+    hdrs = glob(["*.h"]),
+)
+
+ddk_module(
+    name = "snd-sof-intel-hda-common",
+    srcs = [
+        "hda-loader.c",
+        "hda-stream.c",
+        "hda-trace.c",
+        "hda-dsp.c",
+        "hda-ipc.c",
+        "hda-ctrl.c",
+        "hda-pcm.c",
+        "hda-dai.c",
+        "hda-dai-ops.c",
+        "hda-bus.c",
+        "hda-probes.c",
+        "telemetry.c",
+        "tracepoints.c",
+        "hda.h",
+        "hda-ipc.h",
+        "telemetry.h",
+        "shim.h",
+        "ext_manifest.h",
+        "mtl.h",
+        "lnl.h",
+        "ptl.h",
+    ],
+    out = "snd-sof-intel-hda-common.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/soc/sof",
+        "-Iprivate/desktop-google/sound/soc/sof/intel",
+        "-Iprivate/desktop-google/include",
+    ],
+    deps = [
+        "//private/desktop-google/sound/hda/core/ext:snd-hda-ext-core",
+        ":snd-sof-intel-hda",
+        ":snd-sof-intel-hda-mlink",
+        "//private/desktop-google/sound/hda:snd-hda-core",
+        "//private/desktop-google/sound/hda:snd-hda-codec",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+        "//private/desktop-google/sound/soc/sof:sof_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+        "//private/desktop-google/sound/soc/codecs:snd-soc-hdac-hda",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-sof-intel-hda-generic",
+    srcs = [
+        "hda.c",
+        "hda-common-ops.c",
+        "hda.h",
+        "shim.h",
+    ],
+    out = "snd-sof-intel-hda-generic.ko",
+    copts = ["-Iprivate/desktop-google/sound/soc/sof"],
+    deps = [
+        "//private/desktop-google/sound/soc/sof/xtensa:snd-sof-xtensa-dsp",
+        "//private/desktop-google/sound/hda/core/ext:snd-hda-ext-core",
+        ":snd-sof-intel-hda",
+        ":snd-sof-intel-hda-common",
+        ":snd-sof-intel-hda-mlink",
+        "//private/desktop-google/drivers/soundwire:soundwire-intel",
+        "//private/desktop-google/sound/hda:snd-hda-core",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+        "//private/desktop-google/sound/soc/sof:snd-sof-pci",
+        "//private/desktop-google/sound/soc/sof:sof_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+        "//private/desktop-google/sound/soc/sdw_utils:snd-soc-sdw-utils",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-sof-intel-hda-mlink",
+    srcs = [
+        "hda-mlink.c",
+        "hda.h",
+        "shim.h",
+    ],
+    out = "snd-sof-intel-hda-mlink.ko",
+    copts = ["-Iprivate/desktop-google/sound/soc/sof"],
+    deps = [
+        "//private/desktop-google/sound/hda/core/ext:snd-hda-ext-core",
+        "//private/desktop-google/sound/hda:snd-hda-core",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+        "//private/desktop-google/sound/soc/sof:sof_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-sof-intel-hda-sdw-bpt",
+    srcs = [
+        "hda-sdw-bpt.c",
+        "hda.h",
+        "shim.h",
+    ],
+    out = "snd-sof-intel-hda-sdw-bpt.ko",
+    copts = ["-Iprivate/desktop-google/sound/soc/sof"],
+    deps = [
+        "//private/desktop-google/sound/hda/core/ext:snd-hda-ext-core",
+        ":snd-sof-intel-hda-common",
+        ":snd-sof-intel-hda-mlink",
+        "//private/desktop-google/sound/hda:snd-hda-core",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+        "//private/desktop-google/sound/soc/sof:sof_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-sof-intel-hda",
+    srcs = [
+        "hda-codec.c",
+        "hda.h",
+        "shim.h",
+    ],
+    out = "snd-sof-intel-hda.ko",
+    copts = ["-Iprivate/desktop-google/sound/soc/sof"],
+    deps = [
+        "//private/desktop-google/sound/hda/core/ext:snd-hda-ext-core",
+        "//private/desktop-google/sound/hda:snd-hda-core",
+        "//private/desktop-google/sound/hda:snd-hda-codec",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+        "//private/desktop-google/sound/soc/sof:sof_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-sof-pci-intel-ptl",
+    srcs = [
+        "pci-ptl.c",
+        "ptl.c",
+        "ptl.h",
+        "lnl.h",
+        "hda.h",
+        "shim.h",
+        "hda-ipc.h",
+        "telemetry.h",
+        "mtl.h",
+    ],
+    out = "snd-sof-pci-intel-ptl.ko",
+    includes = ["."],
+    copts = [
+        "-Iprivate/desktop-google/sound/soc/sof",
+        "-Iprivate/desktop-google/sound/soc/intel/common",
+    ],
+    deps = [
+        "//private/desktop-google/sound/soc/sof/xtensa:snd-sof-xtensa-dsp",
+        ":snd-sof-intel-hda-common",
+        ":snd-sof-intel-hda-generic",
+        ":snd-sof-intel-hda-mlink",
+        ":snd-sof-pci-intel-lnl",
+        ":snd-sof-pci-intel-mtl",
+        "//private/desktop-google/sound/hda:snd-hda-core",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+        "//private/desktop-google/sound/soc/sof:snd-sof-pci",
+        "//private/desktop-google/sound/soc/sof:sof_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-sof-pci-intel-lnl",
+    srcs = [
+        "pci-lnl.c",
+        "lnl.c",
+        "lnl.h",
+        "ptl.h",
+        "hda.h",
+        "shim.h",
+        "hda-ipc.h",
+        "telemetry.h",
+        "mtl.h",
+    ],
+    out = "snd-sof-pci-intel-lnl.ko",
+    includes = ["."],
+    copts = [
+        "-Iprivate/desktop-google/sound/soc/sof",
+        "-Iprivate/desktop-google/sound/soc/intel/common",
+    ],
+    deps = [
+        "//private/desktop-google/sound/soc/sof/xtensa:snd-sof-xtensa-dsp",
+        ":snd-sof-intel-hda-common",
+        ":snd-sof-intel-hda-generic",
+        ":snd-sof-intel-hda-mlink",
+        ":snd-sof-pci-intel-mtl",
+        "//private/desktop-google/sound/hda:snd-hda-core",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+        "//private/desktop-google/sound/soc/sof:snd-sof-pci",
+        "//private/desktop-google/sound/soc/sof:sof_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-sof-pci-intel-mtl",
+    srcs = [
+        "pci-mtl.c",
+        "mtl.c",
+        "mtl.h",
+        "hda.h",
+        "shim.h",
+        "hda-ipc.h",
+        "telemetry.h",
+    ],
+    out = "snd-sof-pci-intel-mtl.ko",
+    includes = ["."],
+    copts = [
+        "-Iprivate/desktop-google/sound/soc/sof",
+        "-Iprivate/desktop-google/sound/soc/intel/common",
+    ],
+    deps = [
+        "//private/desktop-google/sound/soc/sof/xtensa:snd-sof-xtensa-dsp",
+        ":snd-sof-intel-hda-common",
+        ":snd-sof-intel-hda-generic",
+        "//private/desktop-google/sound/hda:snd-hda-core",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+        "//private/desktop-google/sound/soc/sof:snd-sof-pci",
+        "//private/desktop-google/sound/soc/sof:sof_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-sof-pci-intel-tgl",
+    srcs = [
+        "pci-tgl.c",
+        "tgl.c",
+        "hda.h",
+        "shim.h",
+        "hda-ipc.h",
+        "telemetry.h",
+    ],
+    out = "snd-sof-pci-intel-tgl.ko",
+    includes = ["."],
+    copts = [
+        "-Iprivate/desktop-google/sound/soc/sof",
+        "-Iprivate/desktop-google/sound/soc/intel/common",
+    ],
+    deps = [
+        "//private/desktop-google/sound/soc/sof/xtensa:snd-sof-xtensa-dsp",
+        ":snd-sof-intel-hda-common",
+        ":snd-sof-intel-hda-generic",
+        ":snd-sof-pci-intel-cnl",
+        "//private/desktop-google/sound/hda:snd-hda-core",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+        "//private/desktop-google/sound/soc/sof:snd-sof-pci",
+        "//private/desktop-google/sound/soc/sof:sof_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-sof-pci-intel-icl",
+    srcs = [
+        "pci-icl.c",
+        "icl.c",
+        "hda.h",
+        "shim.h",
+        "hda-ipc.h",
+        "telemetry.h",
+    ],
+    out = "snd-sof-pci-intel-icl.ko",
+    includes = ["."],
+    copts = [
+        "-Iprivate/desktop-google/sound/soc/sof",
+        "-Iprivate/desktop-google/sound/soc/intel/common",
+    ],
+    deps = [
+        "//private/desktop-google/sound/soc/sof/xtensa:snd-sof-xtensa-dsp",
+        ":snd-sof-intel-hda-common",
+        ":snd-sof-intel-hda-generic",
+        ":snd-sof-pci-intel-cnl",
+        "//private/desktop-google/sound/hda:snd-hda-core",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+        "//private/desktop-google/sound/soc/sof:snd-sof-pci",
+        "//private/desktop-google/sound/soc/sof:sof_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-sof-pci-intel-cnl",
+    srcs = [
+        "pci-cnl.c",
+        "cnl.c",
+        "hda.h",
+        "shim.h",
+        "hda-ipc.h",
+        "telemetry.h",
+    ],
+    out = "snd-sof-pci-intel-cnl.ko",
+    includes = ["."],
+    copts = [
+        "-Iprivate/desktop-google/sound/soc/sof",
+        "-Iprivate/desktop-google/sound/soc/intel/common",
+    ],
+    deps = [
+        "//private/desktop-google/sound/soc/sof/xtensa:snd-sof-xtensa-dsp",
+        ":snd-sof-intel-hda-common",
+        ":snd-sof-intel-hda-generic",
+        "//private/desktop-google/sound/hda:snd-hda-core",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+        "//private/desktop-google/sound/soc/sof:snd-sof-pci",
+        "//private/desktop-google/sound/soc/sof:sof_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-sof-pci-intel-apl",
+    srcs = [
+        "pci-apl.c",
+        "apl.c",
+        "hda.h",
+        "shim.h",
+        "hda-ipc.h",
+        "telemetry.h",
+    ],
+    out = "snd-sof-pci-intel-apl.ko",
+    includes = ["."],
+    copts = [
+        "-Iprivate/desktop-google/sound/soc/sof",
+        "-Iprivate/desktop-google/sound/soc/intel/common",
+    ],
+    deps = [
+        "//private/desktop-google/sound/soc/sof/xtensa:snd-sof-xtensa-dsp",
+        ":snd-sof-intel-hda-common",
+        ":snd-sof-intel-hda-generic",
+        "//private/desktop-google/sound/hda:snd-hda-core",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+        "//private/desktop-google/sound/soc/sof:snd-sof-pci",
+        "//private/desktop-google/sound/soc/sof:sof_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-sof-pci-intel-skl",
+    srcs = [
+        "pci-skl.c",
+        "skl.c",
+        "hda-loader-skl.c",
+        "hda.h",
+        "shim.h",
+        "hda-ipc.h",
+        "telemetry.h",
+    ],
+    out = "snd-sof-pci-intel-skl.ko",
+    includes = ["."],
+    copts = [
+        "-Iprivate/desktop-google/sound/soc/sof",
+        "-Iprivate/desktop-google/sound/soc/intel/common",
+    ],
+    deps = [
+        "//private/desktop-google/sound/soc/sof/xtensa:snd-sof-xtensa-dsp",
+        ":snd-sof-intel-hda-common",
+        ":snd-sof-intel-hda-generic",
+        "//private/desktop-google/sound/hda:snd-hda-core",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+        "//private/desktop-google/sound/soc/sof:snd-sof-pci",
+        "//private/desktop-google/sound/soc/sof:sof_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-sof-acpi-intel-bdw",
+    srcs = [
+        "bdw.c",
+        "shim.h",
+    ],
+    out = "snd-sof-acpi-intel-bdw.ko",
+    copts = ["-Iprivate/desktop-google/sound/soc/sof"],
+    deps = [
+        "//private/desktop-google/sound/soc/sof:sof_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+        "//private/desktop-google/sound/soc/sof:snd-sof-acpi",
+        "//private/desktop-google/sound/soc/sof/xtensa:snd-sof-xtensa-dsp",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-sof-acpi-intel-byt",
+    srcs = [
+        "byt.c",
+        "shim.h",
+        "atom.h",
+    ],
+    out = "snd-sof-acpi-intel-byt.ko",
+    copts = ["-Iprivate/desktop-google/sound/soc/sof"],
+    deps = [
+        "//private/desktop-google/sound/soc/sof:sof_headers",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+        ":snd-sof-intel-atom",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+        "//private/desktop-google/sound/soc/sof:snd-sof-acpi",
+        "//private/desktop-google/sound/soc/sof/xtensa:snd-sof-xtensa-dsp",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-sof-intel-atom",
+    srcs = [
+        "atom.c",
+        "shim.h",
+        "atom.h",
+    ],
+    out = "snd-sof-intel-atom.ko",
+    copts = ["-Iprivate/desktop-google/sound/soc/sof"],
+    deps = ["//private/desktop-google/sound/soc/sof:sof_headers", "//private/desktop-google/sound/soc/intel/common:intel_common_headers", "//private/desktop-google/sound/soc/sof:snd-sof"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-sof-pci-intel-tng",
+    srcs = [
+        "pci-tng.c",
+        "shim.h",
+        "atom.h",
+    ],
+    out = "snd-sof-pci-intel-tng.ko",
+    copts = ["-Iprivate/desktop-google/sound/soc/sof"],
+    deps = [
+        "//private/desktop-google/sound/soc/sof:sof_headers",
+        "//private/desktop-google/sound/soc/sof:snd-sof",
+        "//private/desktop-google/sound/soc/intel/common:intel_common_headers",
+        ":snd-sof-intel-atom",
+        "//private/desktop-google/sound/soc/sof:snd-sof-pci",
+        "//private/desktop-google/sound/soc/sof/xtensa:snd-sof-xtensa-dsp",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)

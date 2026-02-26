@@ -1,0 +1,12 @@
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_headers",
+    "ddk_module",
+)
+
+package(default_visibility = ["//visibility:public"])
+
+ddk_headers(
+    name = "atom_headers",
+    hdrs = glob(["*.h"]),
+)

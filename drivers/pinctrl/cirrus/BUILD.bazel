@@ -1,0 +1,28 @@
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_module",
+)
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+_AUDIO_DEFCONFIG = "//private/desktop-google:intel_audio_ddk.defconfig"
+
+ddk_module(
+    name = "pinctrl-cs42l43",
+    srcs = [
+        "pinctrl-cs42l43.c",
+    ],
+    out = "pinctrl-cs42l43.ko",
+    copts = ["-Iprivate/desktop-google/drivers/pinctrl"],
+    deps = [
+        "//private/desktop-google/drivers/mfd:cs42l43",
+        "//private/desktop-google/drivers/pinctrl:pinctrl_headers",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)

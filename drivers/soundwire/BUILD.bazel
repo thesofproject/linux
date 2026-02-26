@@ -1,0 +1,95 @@
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_module",
+)
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+_AUDIO_DEFCONFIG = "//private/desktop-google:intel_audio_ddk.defconfig"
+
+ddk_module(
+    name = "soundwire-bus",
+    srcs = [
+        "bus.c",
+        "bus.h",
+        "bus_type.c",
+        "debugfs.c",
+        "irq.c",
+        "irq.h",
+        "master.c",
+        "mipi_disco.c",
+        "slave.c",
+        "stream.c",
+        "sysfs_local.h",
+        "sysfs_slave.c",
+        "sysfs_slave_dpn.c",
+    ],
+    out = "soundwire-bus.ko",
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "soundwire-generic-allocation",
+    srcs = [
+        "generic_bandwidth_allocation.c",
+        "bus.h",
+    ],
+    out = "soundwire-generic-allocation.ko",
+    deps = [":soundwire-bus"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "soundwire-cadence",
+    srcs = [
+        "cadence_master.c",
+        "cadence_master.h",
+        "bus.h",
+    ],
+    out = "soundwire-cadence.ko",
+    deps = [
+        ":soundwire-bus",
+        "//private/desktop-google/lib/crc:crc8",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "soundwire-intel",
+    srcs = [
+        "intel.c",
+        "intel.h",
+        "intel_ace2x.c",
+        "intel_ace2x_debugfs.c",
+        "intel_auxdevice.c",
+        "intel_auxdevice.h",
+        "intel_bus_common.c",
+        "intel_init.c",
+        "dmi-quirks.c",
+        "bus.h",
+        "cadence_master.h",
+    ],
+    out = "soundwire-intel.ko",
+    deps = [
+        "//private/desktop-google/sound/hda/core/ext:snd-hda-ext-core",
+        ":soundwire-cadence",
+        ":soundwire-bus",
+        ":soundwire-generic-allocation",
+        "//private/desktop-google/sound/hda:snd-hda-core",
+        "//private/desktop-google/sound/soc/sof/intel:snd-sof-intel-hda-mlink",
+        "//private/desktop-google/sound/soc/sof/intel:snd-sof-intel-hda-sdw-bpt",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)

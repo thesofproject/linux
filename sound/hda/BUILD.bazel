@@ -1,0 +1,704 @@
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_headers",
+    "ddk_module",
+)
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+_AUDIO_DEFCONFIG = "//private/desktop-google:intel_audio_ddk.defconfig"
+
+ddk_module(
+    name = "snd-hda-core",
+    srcs = [
+        "core/hda_bus_type.c",
+        "core/bus.c",
+        "core/device.c",
+        "core/sysfs.c",
+        "core/regmap.c",
+        "core/controller.c",
+        "core/stream.c",
+        "core/array.c",
+        "core/hdmi_chmap.c",
+        "core/trace.c",
+        "core/component.c",
+        "core/i915.c",
+        "core/trace.h",
+        "core/local.h",
+    ],
+    out = "snd-hda-core.ko",
+    includes = ["core"],
+    copts = ["-Iprivate/desktop-google/sound/hda/core"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec",
+    srcs = [
+        "common/bind.c",
+        "common/codec.c",
+        "common/jack.c",
+        "common/auto_parser.c",
+        "common/sysfs.c",
+        "common/controller.c",
+        "common/proc.c",
+        "common/hwdep.c",
+        "common/beep.c",
+        "common/hda_local.h",
+        "common/hda_jack.h",
+        "common/hda_auto_parser.h",
+        "common/hda_controller.h",
+        "common/hda_beep.h",
+        "common/controller_trace.h",
+    ],
+    out = "snd-hda-codec.ko",
+    includes = ["common"],
+    copts = ["-Iprivate/desktop-google/sound/hda/common"],
+    deps = [":snd-hda-core"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-generic",
+    srcs = [
+        "codecs/generic.c",
+        "codecs/generic.h",
+        "common/hda_local.h",
+        "common/hda_jack.h",
+        "common/hda_auto_parser.h",
+        "common/hda_controller.h",
+        "common/hda_beep.h",
+        "common/controller_trace.h",
+    ],
+    out = "snd-hda-codec-generic.ko",
+    includes = [
+        "common",
+        "codecs",
+    ],
+    copts = ["-Iprivate/desktop-google/sound/hda/common"],
+    deps = [
+        ":snd-hda-core",
+        ":snd-hda-codec",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_headers(
+    name = "hda_common_headers",
+    hdrs = [
+        "codecs/generic.h",
+        "codecs/hdmi/hdmi_local.h",
+        "codecs/realtek/realtek.h",
+        "codecs/side-codecs/hda_component.h",
+        "common/controller_trace.h",
+        "common/hda_auto_parser.h",
+        "common/hda_beep.h",
+        "common/hda_controller.h",
+        "common/hda_jack.h",
+        "common/hda_local.h",
+    ],
+    includes = [
+        ".",
+        "codecs",
+        "codecs/cirrus",
+        "codecs/hdmi",
+        "codecs/realtek",
+        "codecs/side-codecs",
+        "common",
+    ],
+)
+
+ddk_headers(
+    name = "hda_helpers",
+    hdrs = [
+        "codecs/helpers/hp_x360.c",
+        "codecs/helpers/ideapad_hotkey_led.c",
+        "codecs/helpers/ideapad_s740.c",
+        "codecs/helpers/thinkpad.c",
+    ],
+)
+
+ddk_module(
+    name = "snd-hda-codec-realtek-lib",
+    srcs = ["codecs/realtek/realtek.c"],
+    out = "snd-hda-codec-realtek-lib.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/hda/common",
+        "-Iprivate/desktop-google/sound/hda/codecs/realtek",
+    ],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-codec",
+        ":snd-hda-codec-generic",
+        ":snd-hda-core",
+        ":snd-hda-scodec-component",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-alc260",
+    srcs = ["codecs/realtek/alc260.c"],
+    out = "snd-hda-codec-alc260.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/hda/common",
+        "-Iprivate/desktop-google/sound/hda/codecs/realtek",
+    ],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-codec",
+        ":snd-hda-codec-generic",
+        ":snd-hda-codec-realtek-lib",
+        ":snd-hda-core",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-alc262",
+    srcs = ["codecs/realtek/alc262.c"],
+    out = "snd-hda-codec-alc262.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/hda/common",
+        "-Iprivate/desktop-google/sound/hda/codecs/realtek",
+    ],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-codec",
+        ":snd-hda-codec-generic",
+        ":snd-hda-codec-realtek-lib",
+        ":snd-hda-core",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-alc268",
+    srcs = ["codecs/realtek/alc268.c"],
+    out = "snd-hda-codec-alc268.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/hda/common",
+        "-Iprivate/desktop-google/sound/hda/codecs/realtek",
+    ],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-codec",
+        ":snd-hda-codec-generic",
+        ":snd-hda-codec-realtek-lib",
+        ":snd-hda-core",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-alc269",
+    srcs = ["codecs/realtek/alc269.c"],
+    out = "snd-hda-codec-alc269.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/hda/common",
+        "-Iprivate/desktop-google/sound/hda/codecs/realtek",
+    ],
+    deps = [
+        ":hda_common_headers",
+        ":hda_helpers",
+        ":snd-hda-codec",
+        ":snd-hda-codec-generic",
+        ":snd-hda-codec-realtek-lib",
+        ":snd-hda-core",
+        ":snd-hda-scodec-component",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-alc662",
+    srcs = ["codecs/realtek/alc662.c"],
+    out = "snd-hda-codec-alc662.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/hda/common",
+        "-Iprivate/desktop-google/sound/hda/codecs/realtek",
+    ],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-codec",
+        ":snd-hda-codec-generic",
+        ":snd-hda-codec-realtek-lib",
+        ":snd-hda-core",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-alc680",
+    srcs = ["codecs/realtek/alc680.c"],
+    out = "snd-hda-codec-alc680.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/hda/common",
+        "-Iprivate/desktop-google/sound/hda/codecs/realtek",
+    ],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-codec",
+        ":snd-hda-codec-generic",
+        ":snd-hda-codec-realtek-lib",
+        ":snd-hda-core",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-alc861",
+    srcs = ["codecs/realtek/alc861.c"],
+    out = "snd-hda-codec-alc861.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/hda/common",
+        "-Iprivate/desktop-google/sound/hda/codecs/realtek",
+    ],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-codec",
+        ":snd-hda-codec-generic",
+        ":snd-hda-codec-realtek-lib",
+        ":snd-hda-core",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-alc861vd",
+    srcs = ["codecs/realtek/alc861vd.c"],
+    out = "snd-hda-codec-alc861vd.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/hda/common",
+        "-Iprivate/desktop-google/sound/hda/codecs/realtek",
+    ],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-codec",
+        ":snd-hda-codec-generic",
+        ":snd-hda-codec-realtek-lib",
+        ":snd-hda-core",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-alc880",
+    srcs = ["codecs/realtek/alc880.c"],
+    out = "snd-hda-codec-alc880.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/hda/common",
+        "-Iprivate/desktop-google/sound/hda/codecs/realtek",
+    ],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-codec",
+        ":snd-hda-codec-generic",
+        ":snd-hda-codec-realtek-lib",
+        ":snd-hda-core",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-alc882",
+    srcs = ["codecs/realtek/alc882.c"],
+    out = "snd-hda-codec-alc882.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/hda/common",
+        "-Iprivate/desktop-google/sound/hda/codecs/realtek",
+    ],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-codec",
+        ":snd-hda-codec-generic",
+        ":snd-hda-codec-realtek-lib",
+        ":snd-hda-core",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-scodec-component",
+    srcs = ["codecs/side-codecs/hda_component.c"],
+    out = "snd-hda-scodec-component.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/hda/common",
+        "-Iprivate/desktop-google/sound/hda/codecs/side-codecs",
+    ],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-core",
+        ":snd-hda-codec",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-hdmi",
+    srcs = [
+        "codecs/hdmi/hdmi.c",
+        "codecs/hdmi/eld.c",
+    ],
+    out = "snd-hda-codec-hdmi.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/hda/common",
+        "-Iprivate/desktop-google/sound/hda/codecs/hdmi",
+    ],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-core",
+        ":snd-hda-codec",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-analog",
+    srcs = ["codecs/analog.c"],
+    out = "snd-hda-codec-analog.ko",
+    copts = ["-Iprivate/desktop-google/sound/hda/common"],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-codec",
+        ":snd-hda-codec-generic",
+        ":snd-hda-core",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-ca0110",
+    srcs = ["codecs/ca0110.c"],
+    out = "snd-hda-codec-ca0110.ko",
+    copts = ["-Iprivate/desktop-google/sound/hda/common"],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-codec",
+        ":snd-hda-codec-generic",
+        ":snd-hda-core",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-ca0132",
+    srcs = [
+        "codecs/ca0132.c",
+        "codecs/ca0132_regs.h",
+    ],
+    out = "snd-hda-codec-ca0132.ko",
+    copts = ["-Iprivate/desktop-google/sound/hda/common"],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-codec",
+        ":snd-hda-core",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-cmedia",
+    srcs = ["codecs/cmedia.c"],
+    out = "snd-hda-codec-cmedia.ko",
+    copts = ["-Iprivate/desktop-google/sound/hda/common"],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-codec",
+        ":snd-hda-codec-generic",
+        ":snd-hda-core",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-conexant",
+    srcs = ["codecs/conexant.c"],
+    out = "snd-hda-codec-conexant.ko",
+    copts = ["-Iprivate/desktop-google/sound/hda/common"],
+    deps = [
+        ":hda_common_headers",
+        ":hda_helpers",
+        ":snd-hda-codec",
+        ":snd-hda-codec-generic",
+        ":snd-hda-core",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-idt",
+    srcs = ["codecs/sigmatel.c"],
+    out = "snd-hda-codec-idt.ko",
+    copts = ["-Iprivate/desktop-google/sound/hda/common"],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-codec",
+        ":snd-hda-codec-generic",
+        ":snd-hda-core",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-via",
+    srcs = ["codecs/via.c"],
+    out = "snd-hda-codec-via.ko",
+    copts = ["-Iprivate/desktop-google/sound/hda/common"],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-codec",
+        ":snd-hda-codec-generic",
+        ":snd-hda-core",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-cs420x",
+    srcs = ["codecs/cirrus/cs420x.c"],
+    out = "snd-hda-codec-cs420x.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/hda/common",
+        "-Iprivate/desktop-google/sound/hda/codecs/cirrus",
+    ],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-codec",
+        ":snd-hda-codec-generic",
+        ":snd-hda-core",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-cs421x",
+    srcs = ["codecs/cirrus/cs421x.c"],
+    out = "snd-hda-codec-cs421x.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/hda/common",
+        "-Iprivate/desktop-google/sound/hda/codecs/cirrus",
+    ],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-codec",
+        ":snd-hda-codec-generic",
+        ":snd-hda-core",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-intel",
+    srcs = [
+        "controllers/intel.c",
+        "controllers/intel.h",
+        "controllers/intel_trace.h",
+    ],
+    out = "snd-hda-intel.ko",
+    includes = ["controllers"],
+    copts = ["-Iprivate/desktop-google/sound/hda/common"],
+    deps = ["//private/desktop-google/sound/hda:hda_common_headers", "//private/desktop-google/sound/hda:snd-hda-core", "//private/desktop-google/sound/hda:snd-hda-codec"],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-atihdmi",
+    srcs = [
+        "codecs/hdmi/atihdmi.c",
+    ],
+    out = "snd-hda-codec-atihdmi.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/hda/common",
+        "-Iprivate/desktop-google/sound/hda/codecs/hdmi",
+    ],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-core",
+        ":snd-hda-codec",
+        ":snd-hda-codec-hdmi",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-intelhdmi",
+    srcs = [
+        "codecs/hdmi/intelhdmi.c",
+    ],
+    out = "snd-hda-codec-intelhdmi.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/hda/common",
+        "-Iprivate/desktop-google/sound/hda/codecs/hdmi",
+    ],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-core",
+        ":snd-hda-codec",
+        ":snd-hda-codec-hdmi",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-nvhdmi-mcp",
+    srcs = [
+        "codecs/hdmi/nvhdmi-mcp.c",
+    ],
+    out = "snd-hda-codec-nvhdmi-mcp.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/hda/common",
+        "-Iprivate/desktop-google/sound/hda/codecs/hdmi",
+    ],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-core",
+        ":snd-hda-codec",
+        ":snd-hda-codec-hdmi",
+        ":snd-hda-codec-simplehdmi",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-nvhdmi",
+    srcs = [
+        "codecs/hdmi/nvhdmi.c",
+    ],
+    out = "snd-hda-codec-nvhdmi.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/hda/common",
+        "-Iprivate/desktop-google/sound/hda/codecs/hdmi",
+    ],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-core",
+        ":snd-hda-codec",
+        ":snd-hda-codec-hdmi",
+        ":snd-hda-codec-simplehdmi",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-si3054",
+    srcs = [
+        "codecs/si3054.c",
+    ],
+    out = "snd-hda-codec-si3054.ko",
+    copts = ["-Iprivate/desktop-google/sound/hda/common"],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-core",
+        ":snd-hda-codec",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-simplehdmi",
+    srcs = [
+        "codecs/hdmi/simplehdmi.c",
+    ],
+    out = "snd-hda-codec-simplehdmi.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/hda/common",
+        "-Iprivate/desktop-google/sound/hda/codecs/hdmi",
+    ],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-core",
+        ":snd-hda-codec",
+        ":snd-hda-codec-hdmi",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-hda-codec-tegrahdmi",
+    srcs = [
+        "codecs/hdmi/tegrahdmi.c",
+    ],
+    out = "snd-hda-codec-tegrahdmi.ko",
+    copts = [
+        "-Iprivate/desktop-google/sound/hda/common",
+        "-Iprivate/desktop-google/sound/hda/codecs/hdmi",
+    ],
+    deps = [
+        ":hda_common_headers",
+        ":snd-hda-core",
+        ":snd-hda-codec",
+        ":snd-hda-codec-hdmi",
+    ],
+    kconfig = "Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)

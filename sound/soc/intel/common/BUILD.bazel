@@ -1,0 +1,67 @@
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_headers",
+    "ddk_module",
+)
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+_AUDIO_DEFCONFIG = "//private/desktop-google:intel_audio_ddk.defconfig"
+
+ddk_headers(
+    name = "intel_common_headers",
+    hdrs = glob(["*.h"]),
+)
+
+ddk_module(
+    name = "snd-soc-acpi-intel-match",
+    srcs = [
+        "soc-acpi-intel-byt-match.c",
+        "soc-acpi-intel-cht-match.c",
+        "soc-acpi-intel-hsw-bdw-match.c",
+        "soc-acpi-intel-skl-match.c",
+        "soc-acpi-intel-kbl-match.c",
+        "soc-acpi-intel-bxt-match.c",
+        "soc-acpi-intel-glk-match.c",
+        "soc-acpi-intel-cnl-match.c",
+        "soc-acpi-intel-cfl-match.c",
+        "soc-acpi-intel-cml-match.c",
+        "soc-acpi-intel-icl-match.c",
+        "soc-acpi-intel-tgl-match.c",
+        "soc-acpi-intel-ehl-match.c",
+        "soc-acpi-intel-jsl-match.c",
+        "soc-acpi-intel-adl-match.c",
+        "soc-acpi-intel-rpl-match.c",
+        "soc-acpi-intel-mtl-match.c",
+        "soc-acpi-intel-arl-match.c",
+        "soc-acpi-intel-lnl-match.c",
+        "soc-acpi-intel-ptl-match.c",
+        "soc-acpi-intel-hda-match.c",
+        "soc-acpi-intel-sdw-mockup-match.c",
+        "sof-function-topology-lib.c",
+        "soc-acpi-intel-ssp-common.c",
+        "soc-acpi-intel-sdca-quirks.h",
+        "soc-acpi-intel-sdw-mockup-match.h",
+        "sof-function-topology-lib.h",
+    ],
+    out = "snd-soc-acpi-intel-match.ko",
+    kconfig = "//private/desktop-google/sound/soc/intel:Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "snd-soc-acpi-intel-sdca-quirks",
+    srcs = [
+        "soc-acpi-intel-sdca-quirks.c",
+        "soc-acpi-intel-sdca-quirks.h",
+    ],
+    out = "snd-soc-acpi-intel-sdca-quirks.ko",
+    kconfig = "//private/desktop-google/sound/soc/intel:Kconfig",
+    defconfig = _AUDIO_DEFCONFIG,
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
