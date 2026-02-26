@@ -929,7 +929,6 @@ __perf_mmap_to_page(struct perf_buffer *rb, unsigned long pgoff)
 
 static void rb_free_work(struct work_struct *work)
 {
-	int metadata_pages = __PAGE_SIZE / PAGE_SIZE;
 	struct perf_buffer *rb;
 
 	rb = container_of(work, struct perf_buffer, work);
