@@ -65,6 +65,7 @@ struct cma {
 	/* NUMA node (NUMA_NO_NODE if unspecified) */
 	int nid;
 	ANDROID_VENDOR_DATA(1);
+	ANDROID_OEM_DATA(1);
 };
 
 enum cma_flags {
