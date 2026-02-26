@@ -321218,6 +321218,11 @@ function {
   parameter_id: 0x1d5934ce
 }
 function {
+  id: 0x17ceba19
+  return_type_id: 0x48b5725f
+  parameter_id: 0x1d5bae2a
+}
+function {
   id: 0x17d0688a
   return_type_id: 0x48b5725f
   parameter_id: 0x1d44326e
@@ -405625,6 +405630,15 @@ elf_symbol {
   full_name: "mem_alloc_profiling_key"
 }
 elf_symbol {
+  id: 0x52e670bc
+  name: "mem_cgroup_flush_stats"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x14c57a16
+  type_id: 0x17ceba19
+  full_name: "mem_cgroup_flush_stats"
+}
+elf_symbol {
   id: 0x140f40dd
   name: "mem_cgroup_from_id"
   is_defined: true
@@ -438670,6 +438684,7 @@ interface {
   symbol_id: 0xc023a87c
   symbol_id: 0x8d56397b
   symbol_id: 0x53620815
+  symbol_id: 0x52e670bc
   symbol_id: 0x140f40dd
   symbol_id: 0x6da682ae
   symbol_id: 0x7f797603
