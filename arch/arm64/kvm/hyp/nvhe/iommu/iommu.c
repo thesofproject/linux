@@ -362,9 +362,9 @@ static int domain_get(struct kvm_hyp_iommu_domain *domain)
 	BUG_ON(!old || (old + 1 < 0));
 
 	/* check done after refcount is elevated to avoid race with alloc_domain */
-	if (!hyp_vcpu && domain->vm)
+	if (!hyp_vcpu && domain->owner)
 		ret = -EPERM;
-	if (hyp_vcpu && (domain->vm != pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu)))
+	if (hyp_vcpu && (domain->owner != pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu)))
 		ret = -EPERM;
 
 	if (ret)
@@ -377,8 +377,8 @@ static void domain_put(struct kvm_hyp_iommu_domain *domain)
 	struct pkvm_hyp_vcpu *hyp_vcpu = __get_vcpu();
 
 	BUG_ON(!atomic_dec_return_release(&domain->refs));
-	WARN_ON(!hyp_vcpu && domain->vm);
-	WARN_ON(hyp_vcpu && (domain->vm != pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu)));
+	WARN_ON(!hyp_vcpu && domain->owner);
+	WARN_ON(hyp_vcpu && (domain->owner != pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu)));
 }
 
 int kvm_iommu_alloc_domain(pkvm_handle_t drv_id, pkvm_handle_t iommu_id,
@@ -388,7 +388,7 @@ int kvm_iommu_alloc_domain(pkvm_handle_t drv_id, pkvm_handle_t iommu_id,
 	struct kvm_hyp_iommu_domain *domain;
 	struct kvm_iommu_ops *kvm_iommu_ops;
 	struct pkvm_hyp_vcpu *hyp_vcpu = __get_vcpu();
-	struct pkvm_hyp_vm *vm;
+	void *owner;
 
 	kvm_iommu_ops = get_drv(drv_id);
 	if (!kvm_iommu_ops || !kvm_iommu_ops->alloc_domain)
@@ -416,8 +416,8 @@ int kvm_iommu_alloc_domain(pkvm_handle_t drv_id, pkvm_handle_t iommu_id,
 	domain->driver = kvm_iommu_ops;
 
 	if (hyp_vcpu) {
-		vm = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
-		domain->vm = vm;
+		owner = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
+		domain->owner = owner;
 	}
 	atomic_set_release(&domain->refs, 1);
 out_unlock:
@@ -444,7 +444,7 @@ int kvm_iommu_free_domain(pkvm_handle_t domain_id)
 	}
 
 	if (hyp_vcpu) {
-		if (domain->vm != pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu)) {
+		if (domain->owner != pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu)) {
 			ret = -EPERM;
 			goto out_unlock;
 		}
