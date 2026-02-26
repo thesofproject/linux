@@ -472,7 +472,7 @@ static void set_next_task_idle(struct rq *rq, struct task_struct *next, bool fir
 	update_idle_rq_clock_pelt(rq);
 }
 
-struct task_struct *pick_task_idle(struct rq *rq)
+struct task_struct *pick_task_idle(struct rq *rq, struct rq_flags *rf)
 {
 	scx_update_idle(rq, true, false);
 	return rq->idle;
