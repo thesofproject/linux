@@ -89,7 +89,10 @@ EXPORT_SYMBOL_GPL(__crypto_xor);
 
 #ifndef BUILD_FIPS140_KO
 struct fips140_lib_funcs fips140_lib_funcs;
+EXPORT_SYMBOL_GPL(fips140_lib_funcs);
+
 DEFINE_STATIC_KEY_FALSE(fips140_lib_funcs_loaded);
+EXPORT_SYMBOL_GPL(fips140_lib_funcs_loaded);
 
 void register_fips140_lib_funcs(const struct fips140_lib_funcs *funcs)
 {
