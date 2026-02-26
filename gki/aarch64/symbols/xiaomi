@@ -53,3 +53,7 @@
   __tracepoint_android_vh_handle_folio_writeback
   __traceiter_android_vh_reclaim_before_kswapd
   __tracepoint_android_vh_reclaim_before_kswapd
+  __traceiter_android_vh_filemap_add_folio
+  __tracepoint_android_vh_filemap_add_folio
+  __traceiter_android_vh_mem_cgroup_charge
+  __tracepoint_android_vh_mem_cgroup_charge
