@@ -361830,7 +361830,7 @@ elf_symbol {
   name: "__traceiter_android_vh_filemap_add_folio"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x6d73e340
+  crc: 0xb6f303ab
   type_id: 0x9bf1212e
   full_name: "__traceiter_android_vh_filemap_add_folio"
 }
@@ -362442,7 +362442,7 @@ elf_symbol {
   name: "__traceiter_android_vh_mem_cgroup_charge"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x0ce66047
+  crc: 0x5f7bda56
   type_id: 0x9b290896
   full_name: "__traceiter_android_vh_mem_cgroup_charge"
 }
