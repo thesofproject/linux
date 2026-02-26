@@ -2914,6 +2914,11 @@ pointer_reference {
   pointee_type_id: 0x0209ef0d
 }
 pointer_reference {
+  id: 0x0a126667
+  kind: POINTER
+  pointee_type_id: 0x02097f03
+}
+pointer_reference {
   id: 0x0a134144
   kind: POINTER
   pointee_type_id: 0x020de38d
@@ -325604,6 +325609,10 @@ function {
   return_type_id: 0x24e24923
 }
 function {
+  id: 0x7e9e1bfa
+  return_type_id: 0x0d5f1839
+}
+function {
   id: 0x7eed3f17
   return_type_id: 0x24e24923
   parameter_id: 0x0258f96e
@@ -325952,6 +325961,13 @@ function {
   id: 0x8448d7e4
   return_type_id: 0x6720d32f
   parameter_id: 0x6720d32f
+}
+function {
+  id: 0x84621ae4
+  return_type_id: 0x6720d32f
+  parameter_id: 0x6720d32f
+  parameter_id: 0x0a126667
+  parameter_id: 0x0a126667
 }
 function {
   id: 0x846ed06b
@@ -376464,6 +376480,15 @@ elf_symbol {
   full_name: "current_umask"
 }
 elf_symbol {
+  id: 0xedff0bea
+  name: "current_work"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xca64a0b1
+  type_id: 0x7e9e1bfa
+  full_name: "current_work"
+}
+elf_symbol {
   id: 0xfeea461b
   name: "d_drop"
   is_defined: true
@@ -408253,6 +408278,15 @@ elf_symbol {
   full_name: "rebuild_sched_domains"
 }
 elf_symbol {
+  id: 0xa0aae193
+  name: "recalc_sigpending"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xd272d446
+  type_id: 0x10985193
+  full_name: "recalc_sigpending"
+}
+elf_symbol {
   id: 0x91579542
   name: "reciprocal_value"
   is_defined: true
@@ -412608,6 +412642,15 @@ elf_symbol {
   namespace: "MINIDUMP"
   type_id: 0x1dcd0419
   full_name: "si_swapinfo"
+}
+elf_symbol {
+  id: 0x3878f32b
+  name: "sigprocmask"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xf669291e
+  type_id: 0x84621ae4
+  full_name: "sigprocmask"
 }
 elf_symbol {
   id: 0xfc18945f
@@ -428930,6 +428973,7 @@ interface {
   symbol_id: 0xbb54c900
   symbol_id: 0xde96cb2f
   symbol_id: 0x4c090f07
+  symbol_id: 0xedff0bea
   symbol_id: 0xfeea461b
   symbol_id: 0x9534fec7
   symbol_id: 0x22c4092b
@@ -432458,6 +432502,7 @@ interface {
   symbol_id: 0x94f761df
   symbol_id: 0x46082c90
   symbol_id: 0x590d247f
+  symbol_id: 0xa0aae193
   symbol_id: 0x91579542
   symbol_id: 0xc61bae77
   symbol_id: 0x2a59e35c
@@ -432942,6 +432987,7 @@ interface {
   symbol_id: 0xaba9754d
   symbol_id: 0x6a9fad39
   symbol_id: 0x99c66454
+  symbol_id: 0x3878f32b
   symbol_id: 0xfc18945f
   symbol_id: 0xcbc81720
   symbol_id: 0xda8bd5f1
