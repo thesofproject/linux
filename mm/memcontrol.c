@@ -631,6 +631,7 @@ void mem_cgroup_flush_stats(struct mem_cgroup *memcg)
 
 	__mem_cgroup_flush_stats(memcg, false);
 }
+EXPORT_SYMBOL_GPL(mem_cgroup_flush_stats);
 
 void mem_cgroup_flush_stats_ratelimited(struct mem_cgroup *memcg)
 {
