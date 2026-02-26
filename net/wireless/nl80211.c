@@ -6536,6 +6536,10 @@ static bool nl80211_valid_auth_type(struct cfg80211_registered_device *rdev,
 					     NL80211_EXT_FEATURE_EPPKE) &&
 		    auth_type == NL80211_AUTHTYPE_EPPKE)
 			return false;
+		if (!wiphy_ext_feature_isset(&rdev->wiphy,
+					     NL80211_EXT_FEATURE_IEEE8021X_AUTH) &&
+		    auth_type == NL80211_AUTHTYPE_IEEE8021X)
+			return false;
 		return true;
 	case NL80211_CMD_CONNECT:
 		if (!(rdev->wiphy.features & NL80211_FEATURE_SAE) &&
@@ -6556,6 +6560,10 @@ static bool nl80211_valid_auth_type(struct cfg80211_registered_device *rdev,
 		if (!wiphy_ext_feature_isset(&rdev->wiphy,
 					     NL80211_EXT_FEATURE_EPPKE) &&
 		    auth_type == NL80211_AUTHTYPE_EPPKE)
+			return false;
+		if (!wiphy_ext_feature_isset(&rdev->wiphy,
+					     NL80211_EXT_FEATURE_IEEE8021X_AUTH) &&
+		    auth_type == NL80211_AUTHTYPE_IEEE8021X)
 			return false;
 		return true;
 	case NL80211_CMD_START_AP:
@@ -12071,7 +12079,8 @@ static int nl80211_authenticate(struct sk_buff *skb, struct genl_info *info)
 	     auth_type == NL80211_AUTHTYPE_FILS_SK ||
 	     auth_type == NL80211_AUTHTYPE_FILS_SK_PFS ||
 	     auth_type == NL80211_AUTHTYPE_FILS_PK ||
-	     auth_type == NL80211_AUTHTYPE_EPPKE) &&
+	     auth_type == NL80211_AUTHTYPE_EPPKE ||
+	     auth_type == NL80211_AUTHTYPE_IEEE8021X) &&
 	    !info->attrs[NL80211_ATTR_AUTH_DATA])
 		return -EINVAL;
 
@@ -12080,7 +12089,8 @@ static int nl80211_authenticate(struct sk_buff *skb, struct genl_info *info)
 		    auth_type != NL80211_AUTHTYPE_FILS_SK &&
 		    auth_type != NL80211_AUTHTYPE_FILS_SK_PFS &&
 		    auth_type != NL80211_AUTHTYPE_FILS_PK &&
-		    auth_type != NL80211_AUTHTYPE_EPPKE)
+		    auth_type != NL80211_AUTHTYPE_EPPKE &&
+		    auth_type != NL80211_AUTHTYPE_IEEE8021X)
 			return -EINVAL;
 		req.auth_data = nla_data(info->attrs[NL80211_ATTR_AUTH_DATA]);
 		req.auth_data_len = nla_len(info->attrs[NL80211_ATTR_AUTH_DATA]);
