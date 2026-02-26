@@ -471,3 +471,5 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_flush_wq_wait_finish);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_flush_work_wait_start);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_flush_work_wait_finish);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_task_mem);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_mem_cgroup_charge);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_filemap_add_folio);
