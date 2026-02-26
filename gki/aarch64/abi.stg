@@ -421827,6 +421827,15 @@ elf_symbol {
   full_name: "snd_soc_dai_set_tdm_slot"
 }
 elf_symbol {
+  id: 0x9994fae4
+  name: "snd_soc_dai_set_tristate"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x62fc11ca
+  type_id: 0x9d578b63
+  full_name: "snd_soc_dai_set_tristate"
+}
+elf_symbol {
   id: 0x6b59ec0c
   name: "snd_soc_daifmt_clock_provider_flipped"
   is_defined: true
@@ -440461,6 +440470,7 @@ interface {
   symbol_id: 0x7f8de782
   symbol_id: 0x6a0561ba
   symbol_id: 0x14d25dda
+  symbol_id: 0x9994fae4
   symbol_id: 0x6b59ec0c
   symbol_id: 0xaf61c3cf
   symbol_id: 0x6c20af20
