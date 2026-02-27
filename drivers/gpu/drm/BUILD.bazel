@@ -13,9 +13,9 @@ package(
 filegroup(
     name = "xe_kconfigs",
     srcs = [
-        "Kconfig",
-        "clients/Kconfig",
+        "xe/Kconfig",
         "i915/Kconfig",
+        "//private/desktop-google/drivers/misc/mei:mei_kconfigs",
     ],
 )
 
@@ -346,6 +346,7 @@ ddk_module(
         "//private/desktop-google:drm_xe_uapi_includes",
         "//private/desktop-google:xe_global_includes",
     ],
+    kconfig = ":xe_kconfigs",
 )
 
 ddk_headers(
