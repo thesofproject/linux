@@ -314034,6 +314034,13 @@ function {
   parameter_id: 0x6720d32f
 }
 function {
+  id: 0x17b2e753
+  return_type_id: 0x48b5725f
+  parameter_id: 0x1a1051a0
+  parameter_id: 0x6d7f5ff6
+  parameter_id: 0x6d7f5ff6
+}
+function {
   id: 0x17b52d57
   return_type_id: 0x48b5725f
   parameter_id: 0x1d63cfed
@@ -369771,6 +369778,15 @@ elf_symbol {
   crc: 0x30dbc53d
   type_id: 0x914993bc
   full_name: "__tty_insert_flip_string_flags"
+}
+elf_symbol {
+  id: 0x2e92f92f
+  name: "__tty_port_tty_hangup"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x63af0193
+  type_id: 0x17b2e753
+  full_name: "__tty_port_tty_hangup"
 }
 elf_symbol {
   id: 0xce6c6f05
@@ -428321,6 +428337,7 @@ interface {
   symbol_id: 0xc9969dba
   symbol_id: 0xbc3bf362
   symbol_id: 0x0f3e6156
+  symbol_id: 0x2e92f92f
   symbol_id: 0xce6c6f05
   symbol_id: 0xb882f62e
   symbol_id: 0x79821b1f
