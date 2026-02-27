@@ -2342,24 +2342,29 @@ static int intel_edp_dsc_compute_pipe_bpp(struct intel_dp *intel_dp,
 	return 0;
 }
 
-static void intel_dp_fec_compute_config(struct intel_dp *intel_dp,
-					struct intel_crtc_state *crtc_state)
+/*
+ * Return whether FEC must be enabled for 8b10b SST or MST links. On 128b132b
+ * links FEC is always enabled implicitly by the HW, so this function returns
+ * false for that case.
+ */
+bool intel_dp_needs_8b10b_fec(const struct intel_crtc_state *crtc_state,
+			      bool dsc_enabled_on_crtc)
 {
+	if (intel_dp_is_uhbr(crtc_state))
+		return false;
+
 	if (crtc_state->fec_enable)
-		return;
+		return true;
 
 	/*
 	 * Though eDP v1.5 supports FEC with DSC, unlike DP, it is optional.
 	 * Since, FEC is a bandwidth overhead, continue to not enable it for
 	 * eDP. Until, there is a good reason to do so.
 	 */
-	if (intel_dp_is_edp(intel_dp))
-		return;
+	if (intel_crtc_has_type(crtc_state, INTEL_OUTPUT_EDP))
+		return false;
 
-	if (intel_dp_is_uhbr(crtc_state))
-		return;
-
-	crtc_state->fec_enable = true;
+	return dsc_enabled_on_crtc || intel_dsc_enabled_on_link(crtc_state);
 }
 
 int intel_dp_dsc_compute_config(struct intel_dp *intel_dp,
@@ -2377,7 +2382,11 @@ int intel_dp_dsc_compute_config(struct intel_dp *intel_dp,
 	bool is_mst = intel_crtc_has_type(pipe_config, INTEL_OUTPUT_DP_MST);
 	int ret;
 
-	intel_dp_fec_compute_config(intel_dp, pipe_config);
+	/*
+	 * FIXME: set the FEC enabled state once pipe_config->port_clock is
+	 * already known, so the UHBR/non-UHBR mode can be determined.
+	 */
+	pipe_config->fec_enable = intel_dp_needs_8b10b_fec(pipe_config, true);
 
 	if (!intel_dp_dsc_supports_format(connector, pipe_config->output_format))
 		return -EINVAL;
@@ -2452,7 +2461,8 @@ int intel_dp_dsc_compute_config(struct intel_dp *intel_dp,
 		return ret;
 	}
 
-	pipe_config->dsc.compression_enable = true;
+	intel_dsc_enable_on_crtc(pipe_config);
+
 	drm_dbg_kms(display->drm, "DP DSC computed with Input Bpp = %d "
 		    "Compressed Bpp = " FXP_Q4_FMT " Slice Count = %d\n",
 		    pipe_config->pipe_bpp,
@@ -5923,6 +5933,8 @@ intel_dp_detect(struct drm_connector *_connector,
 		memset(connector->dp.dsc_dpcd, 0, sizeof(connector->dp.dsc_dpcd));
 		intel_dp->psr.sink_panel_replay_support = false;
 		intel_dp->psr.sink_panel_replay_su_support = false;
+		intel_dp->psr.sink_panel_replay_dsc_support =
+			INTEL_DP_PANEL_REPLAY_DSC_NOT_SUPPORTED;
 
 		intel_dp_mst_disconnect(intel_dp);
 

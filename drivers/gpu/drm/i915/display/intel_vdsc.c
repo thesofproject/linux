@@ -372,6 +372,22 @@ int intel_dsc_compute_params(struct intel_crtc_state *pipe_config)
 	return 0;
 }
 
+void intel_dsc_enable_on_crtc(struct intel_crtc_state *crtc_state)
+{
+	crtc_state->dsc.compression_enabled_on_link = true;
+	crtc_state->dsc.compression_enable = true;
+}
+
+bool intel_dsc_enabled_on_link(const struct intel_crtc_state *crtc_state)
+{
+	struct intel_display *display = to_intel_display(crtc_state);
+
+	drm_WARN_ON(display->drm, crtc_state->dsc.compression_enable &&
+		    !crtc_state->dsc.compression_enabled_on_link);
+
+	return crtc_state->dsc.compression_enabled_on_link;
+}
+
 enum intel_display_power_domain
 intel_dsc_power_domain(struct intel_crtc *crtc, enum transcoder cpu_transcoder)
 {
