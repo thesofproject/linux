@@ -187,7 +187,7 @@ static int pkvm_vcpu_init_traps(struct pkvm_hyp_vcpu *hyp_vcpu)
 	pkvm_vcpu_reset_hcr(vcpu);
 	vcpu_set_hcrx(vcpu);
 
-	if ((!pkvm_hyp_vcpu_is_protected(hyp_vcpu))) {
+	if (!pkvm_hyp_vcpu_is_protected(hyp_vcpu)) {
 		struct kvm_vcpu *host_vcpu = hyp_vcpu->host_vcpu;
 
 		memcpy(vcpu->arch.fgt, host_vcpu->arch.fgt, sizeof(vcpu->arch.fgt));
