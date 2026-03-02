@@ -730,8 +730,6 @@ static void test_run(enum vm_mem_backing_src_type src_type)
 
 	getrusage(RUSAGE_SELF, &usage);
 	pr_info("Memory usage after teardown: %ld bytes\n", usage.ru_maxrss);
-
-	pr_info("All ok!\n");
 }
 
 int main(int argc, char *argv[])
@@ -739,14 +737,13 @@ int main(int argc, char *argv[])
 	pr_info("\n*** Testing regular pages.\n");
 	test_run(VM_MEM_SRC_ANONYMOUS);
 
-	if (!thp_configured()) {
+	if (thp_configured()) {
+		pr_info("\n*** Testing THP. This is best-effort.\n");
+		test_run(VM_MEM_SRC_ANONYMOUS_THP);
+	} else {
 		pr_info("\n*** THP is not configured. Skipping THP tests.\n");
-
-		return 0;
 	}
 
-	pr_info("\n*** Testing THP. This is best-effort.\n");
-	test_run(VM_MEM_SRC_ANONYMOUS_THP);
-
+	pr_info("All ok!\n");
 	return 0;
 }
