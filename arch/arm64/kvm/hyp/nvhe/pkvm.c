@@ -201,17 +201,18 @@ static int pkvm_vcpu_init_traps(struct pkvm_hyp_vcpu *hyp_vcpu)
 	pvm_init_traps_hcr(vcpu);
 	pvm_init_traps_mdcr(vcpu);
 
-	if (!test_bit(KVM_ARCH_FLAG_FGU_INITIALIZED, &kvm->arch.flags))
-		return 0;
+	if (!test_bit(KVM_ARCH_FLAG_FGU_INITIALIZED, &kvm->arch.flags)) {
+		compute_fgu(kvm, HFGRTR_GROUP);
+		compute_fgu(kvm, HFGITR_GROUP);
+		compute_fgu(kvm, HDFGRTR_GROUP);
+		compute_fgu(kvm, HAFGRTR_GROUP);
+		compute_fgu(kvm, HFGRTR2_GROUP);
+		compute_fgu(kvm, HFGITR2_GROUP);
+		compute_fgu(kvm, HDFGRTR2_GROUP);
+		set_bit(KVM_ARCH_FLAG_FGU_INITIALIZED, &kvm->arch.flags);
+	}
 
-	compute_fgu(kvm, HFGRTR_GROUP);
-	compute_fgu(kvm, HFGITR_GROUP);
-	compute_fgu(kvm, HDFGRTR_GROUP);
-	compute_fgu(kvm, HAFGRTR_GROUP);
-	compute_fgu(kvm, HFGRTR2_GROUP);
-	compute_fgu(kvm, HFGITR2_GROUP);
-	compute_fgu(kvm, HDFGRTR2_GROUP);
-	set_bit(KVM_ARCH_FLAG_FGU_INITIALIZED, &kvm->arch.flags);
+	kvm_vcpu_load_fgt(vcpu);
 
 	return 0;
 }
