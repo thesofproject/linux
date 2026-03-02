@@ -128,6 +128,7 @@ static __init void pkvm_setup_syms(void)
 	/* Respect below host KVM's module parameters */
 	pkvm_sym(enable_apicv) = enable_apicv;
 	pkvm_sym(enable_ipiv) = enable_ipiv;
+	pkvm_sym(enable_vpid) = enable_vpid;
 }
 
 static __init int pkvm_setup_host_vmcs_config(void)
