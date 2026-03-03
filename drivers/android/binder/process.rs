@@ -424,6 +424,10 @@ use kernel::bindings::rb_process_layout;
 pub(crate) const PROCESS_LAYOUT: rb_process_layout = rb_process_layout {
     arc_offset: Arc::<Process>::DATA_OFFSET,
     task: offset_of!(Process, task),
+    __kabi_reserved_backport0: 0,
+    __kabi_reserved_backport1: 0,
+    __kabi_reserved_backport2: 0,
+    __kabi_reserved_backport3: 0,
 };
 
 /// A process using binder.
