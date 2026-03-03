@@ -28,8 +28,6 @@ struct pkvm_vcpu {
 	 * structure wrapping the kvm_vcpu structure (see below).
 	 */
 	size_t size;
-	/* Maximum IRR value recorded for posted interrupts. */
-	int max_irr;
 	/* Vmexit perf data on this vcpu */
 	struct vmexit_perf perf;
 	/*
