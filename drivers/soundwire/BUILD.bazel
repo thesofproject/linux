@@ -1,5 +1,6 @@
 load(
     "//build/kernel/kleaf:kernel.bzl",
+    "ddk_headers",
     "ddk_module",
 )
 
@@ -10,6 +11,11 @@ package(
 )
 
 _AUDIO_DEFCONFIG = "//private/desktop-google:intel_audio_ddk.defconfig"
+
+ddk_headers(
+    name = "all_headers",
+    hdrs = glob(["*.h"]),
+)
 
 ddk_module(
     name = "soundwire-bus",

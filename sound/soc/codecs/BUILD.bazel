@@ -388,6 +388,7 @@ ddk_module(
         ":snd-soc-rl6231",
         "//private/desktop-google/drivers/base/regmap:regmap-sdw",
         "//private/desktop-google/drivers/base/regmap:regmap-sdw-mbq",
+        "//private/desktop-google/drivers/soundwire:all_headers",
         "//private/desktop-google/drivers/soundwire:soundwire-bus",
     ],
     kconfig = "Kconfig",
