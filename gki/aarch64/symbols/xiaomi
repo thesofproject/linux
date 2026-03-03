@@ -44,6 +44,9 @@
   __tracepoint_android_vh_do_new_mount_fc
   __tracepoint_android_vh_put_super
 
+  __traceiter_android_vh_save_vmalloc_stack
+  __tracepoint_android_vh_save_vmalloc_stack
+
 #required by metis.ko module
   __traceiter_android_rvh_try_to_wake_up_begin
   __tracepoint_android_rvh_try_to_wake_up_begin
