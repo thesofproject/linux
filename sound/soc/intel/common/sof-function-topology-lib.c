@@ -19,6 +19,7 @@ enum tplg_device_id {
 	TPLG_DEVICE_SDCA_MIC,
 	TPLG_DEVICE_INTEL_PCH_DMIC,
 	TPLG_DEVICE_HDMI,
+	TPLG_DEVICE_LOOPBACK_VIRTUAL,
 	TPLG_DEVICE_MAX
 };
 
@@ -91,6 +92,15 @@ int sof_sdw_get_tplg_files(struct snd_soc_card *card, const struct snd_soc_acpi_
 		} else if (strstr(dai_link->name, "iDisp")) {
 			tplg_devs[tplg_num].id = TPLG_DEVICE_HDMI;
 			tplg_devs[tplg_num].name = "hdmi-pcm5";
+		} else if (strstr(dai_link->name, "Loopback_Virtual")) {
+			tplg_devs[tplg_num].id = TPLG_DEVICE_LOOPBACK_VIRTUAL;
+			/*
+			 * Mark the LOOPBACK_VIRTUAL device but not create the LOOPBACK_VIRTUAL
+			 * topology. The information will be used to create the SoundWire
+			 * topologyes that may or may not include the echo reference
+			 */
+			tplg_mask |= BIT(tplg_devs[tplg_num].id);
+			continue;
 		} else {
 			/* The dai link is not supported by separated tplg yet */
 			dev_dbg(card->dev,
@@ -125,6 +135,42 @@ int sof_sdw_get_tplg_files(struct snd_soc_card *card, const struct snd_soc_acpi_
 								 prefix, platform,
 								 tplg_devs[i].name,
 								 tplg_devs[i].dai_link_id);
+			break;
+		case TPLG_DEVICE_SDCA_JACK:
+		case TPLG_DEVICE_SDCA_AMP:
+			if (tplg_mask & BIT(TPLG_DEVICE_LOOPBACK_VIRTUAL)) {
+				/* Use the topology with echo reference */
+				/*
+				 * The echo reference DAI should be created in the first
+				 * function topology that with the echo reference support.
+				 * SDCA JCAK function topology is always loaded before SDCA AMP,
+				 * so if the jack exists, create the echo reference DAI in the
+				 * jack topology, otherwise create it in the amp topology.
+				 */
+				const char *ref_name;
+				if (tplg_devs[i].id == TPLG_DEVICE_SDCA_AMP &&
+				    tplg_mask & BIT(TPLG_DEVICE_SDCA_JACK))
+					ref_name = "ref";
+				else
+					ref_name = "ref-dai";
+
+				(*tplg_files)[i] = devm_kasprintf(card->dev, GFP_KERNEL,
+									 "%s/sof-%s-%s-id%d.tplg",
+									 prefix,
+									 tplg_devs[i].name,
+									 ref_name,
+									 tplg_devs[i].dai_link_id);
+			} else {
+				/* Use the topology without echo reference */
+				(*tplg_files)[i] = devm_kasprintf(card->dev, GFP_KERNEL,
+									 "%s/sof-%s-id%d.tplg",
+									 prefix,
+									 tplg_devs[i].name,
+									 tplg_devs[i].dai_link_id);
+			}
+			break;
+		case TPLG_DEVICE_LOOPBACK_VIRTUAL:
+			/* No function topology is needed for the LOOPBACK_VIRTUAL DAI link */
 			break;
 		default:
 			(*tplg_files)[i] = devm_kasprintf(card->dev, GFP_KERNEL,
