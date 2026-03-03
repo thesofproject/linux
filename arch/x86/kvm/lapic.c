@@ -2908,6 +2908,16 @@ void kvm_lapic_reset(struct kvm_vcpu *vcpu, bool init_event)
 	if (!apic)
 		return;
 
+#ifdef __PKVM_HYP__
+	/*
+	 * If the apic page is not protected by the pKVM hypervisor, then it is
+	 * owned by the host and the host will reset it, so only reset for the
+	 * protected apic here.
+	 */
+	if (!apic->guest_apic_protected)
+		return;
+#endif
+
 #ifndef __PKVM_HYP__
 	/* Stop the timer in case it's a reset to an active apic */
 	hrtimer_cancel(&apic->lapic_timer.timer);

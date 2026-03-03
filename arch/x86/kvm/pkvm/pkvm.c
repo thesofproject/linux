@@ -368,8 +368,6 @@ static int pkvm_vm_finalize(int vm_handle)
 		kvm->arch.pkvm.pvmfw_load_addr = pvmfw_load_addr;
 	}
 
-	kvm->arch.bsp_vcpu_id = shared_kvm->arch.bsp_vcpu_id;
-
 	for (i = 0; i < kvm->created_vcpus; i++) {
 		struct kvm_vcpu *vcpu = &pkvm_vm->vcpus[i]->vcpu;
 
@@ -469,6 +467,9 @@ static int __vcpu_create(struct kvm *kvm, struct kvm_vcpu *vcpu, struct fpstate 
 	if (!pkvm_is_protected_vm(kvm))
 		kvm->arch.disabled_exits = pkvm_vm->shared_kvm->arch.disabled_exits;
 
+	if (!kvm->created_vcpus)
+		kvm->arch.bsp_vcpu_id = pkvm_vm->shared_kvm->arch.bsp_vcpu_id;
+
 	pkvm_spin_unlock(&pkvm_vm->lock);
 
 	vcpu->kvm = kvm;
@@ -496,7 +497,6 @@ static int __vcpu_create(struct kvm *kvm, struct kvm_vcpu *vcpu, struct fpstate 
 	}
 	vcpu->arch.mcg_cap = KVM_MAX_MCE_BANKS;
 
-	vcpu->arch.apic_base = pkvm_vcpu->shared_vcpu->arch.apic_base;
 	if (lapic_in_kernel(pkvm_vcpu->shared_vcpu))
 		vcpu->arch.apic = unused;
 
