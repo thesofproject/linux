@@ -6229,6 +6229,7 @@ static int handle_apic_eoi_induced(struct kvm_vcpu *vcpu)
 	kvm_apic_set_eoi_accelerated(vcpu, vector);
 	return 1;
 }
+#endif /* !__PKVM_HYP__ */
 
 static int handle_apic_write(struct kvm_vcpu *vcpu)
 {
@@ -6243,10 +6244,39 @@ static int handle_apic_write(struct kvm_vcpu *vcpu)
 	 */
 	u32 offset = exit_qualification & 0xff0;
 
+#ifndef __PKVM_HYP__
 	kvm_apic_write_nodecode(vcpu, offset);
 	return 1;
+#else
+	/*
+	 * If the apic page is protected by the pKVM, it represents this is a
+	 * pVM which is in x2apic mode, and the apic virtualization is enabled.
+	 * In this case, APIC-write VM exit may happen when accessing the x2APIC
+	 * MSR self-IPI(0x3F0) or ICR(0x300) in certain scenarios according to
+	 * the SDM vol3 VIRTUALIZING MSR-BASED APIC ACCESSES. Such vmexits
+	 * should be emulated by the host, which will need the value of self-IPI
+	 * or ICR to complete the APIC-write emulation. However these values are
+	 * stored in the pKVM's apic page rather than the host's apic page. Sync
+	 * these values to the host's side.
+	 */
+	if (lapic_in_kernel(vcpu) && vcpu->arch.apic->guest_apic_protected) {
+		void *shared_regs = to_pkvm_vcpu(vcpu)->shared_lapic_regs;
+		void *regs = vcpu->arch.apic->regs;
+
+		if (WARN_ON(!shared_regs || !regs))
+			return 0;
+
+		if (offset == APIC_ICR)
+			apic_set_reg64(shared_regs, offset, apic_get_reg64(regs, offset));
+		else if (offset == APIC_SELF_IPI)
+			apic_set_reg(shared_regs, offset, apic_get_reg(regs, offset));
+		else
+			WARN_ONCE(1, "Unexpected reg offset 0x%x for APIC-write exit", offset);
+	}
+
+	return 0;
+#endif
 }
-#endif /* !__PKVM_HYP__ */
 
 static int handle_task_switch(struct kvm_vcpu *vcpu)
 {
@@ -6788,7 +6818,9 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 #ifndef __PKVM_HYP__
 	[EXIT_REASON_TPR_BELOW_THRESHOLD]     = handle_tpr_below_threshold,
 	[EXIT_REASON_APIC_ACCESS]             = handle_apic_access,
+#endif
 	[EXIT_REASON_APIC_WRITE]              = handle_apic_write,
+#ifndef __PKVM_HYP__
 	[EXIT_REASON_EOI_INDUCED]             = handle_apic_eoi_induced,
 	[EXIT_REASON_WBINVD]                  = kvm_emulate_wbinvd,
 #endif
