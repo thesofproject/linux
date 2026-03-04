@@ -66,6 +66,7 @@
 #include <trace/hooks/madvise.h>
 #include <trace/hooks/dmabuf.h>
 #include <trace/hooks/softlockup.h>
+#include <trace/hooks/dwc3.h>
 
 /*
  * Export tracepoints that act as a bare tracehook (ie: have no trace event
@@ -482,3 +483,5 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_folio_add_file_rmap);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_folio_remove_rmap);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_folios_put_refs_direct_free_extent);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_free_pages_and_swap_cache);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_dwc3_core_soft_reset);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_dwc3_xhci_soft_reset);
