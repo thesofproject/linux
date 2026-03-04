@@ -150,6 +150,9 @@ int kvm_lapic_set_pv_eoi(struct kvm_vcpu *vcpu, u64 data, unsigned long len);
 void kvm_lapic_exit(void);
 
 u64 kvm_lapic_readable_reg_mask(struct kvm_lapic *apic);
+#ifdef __PKVM_HYP__
+u64 pkvm_protected_lapic_readable_reg_mask(struct kvm_lapic *apic);
+#endif
 
 static inline void kvm_lapic_set_irr(int vec, struct kvm_lapic *apic)
 {
