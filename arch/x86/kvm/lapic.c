@@ -625,7 +625,6 @@ static u8 count_vectors(void *bitmap)
 	return count;
 }
 
-#ifndef __PKVM_HYP__
 bool __kvm_apic_update_irr(unsigned long *pir, void *regs, int *max_irr)
 {
 	unsigned long pir_vals[NR_PIR_WORDS];
@@ -674,7 +673,6 @@ bool kvm_apic_update_irr(struct kvm_vcpu *vcpu, unsigned long *pir, int *max_irr
 	return irr_updated;
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_apic_update_irr);
-#endif /* !__PKVM_HYP__ */
 
 static inline int apic_search_irr(struct kvm_lapic *apic)
 {
@@ -800,6 +798,7 @@ void kvm_apic_update_hwapic_isr(struct kvm_vcpu *vcpu)
 	kvm_x86_call(hwapic_isr_update)(vcpu, apic_find_highest_isr(apic));
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_apic_update_hwapic_isr);
+#endif /* !__PKVM_HYP__ */
 
 int kvm_lapic_find_highest_irr(struct kvm_vcpu *vcpu)
 {
@@ -812,6 +811,7 @@ int kvm_lapic_find_highest_irr(struct kvm_vcpu *vcpu)
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_lapic_find_highest_irr);
 
+#ifndef __PKVM_HYP__
 static int __apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
 			     int vector, int level, int trig_mode,
 			     struct dest_map *dest_map);
