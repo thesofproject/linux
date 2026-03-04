@@ -2768,7 +2768,6 @@ static void __kvm_apic_set_base(struct kvm_vcpu *vcpu, u64 value)
 #endif
 }
 
-#ifndef __PKVM_HYP__
 int kvm_apic_set_base(struct kvm_vcpu *vcpu, u64 value, bool host_initiated)
 {
 	enum lapic_mode old_mode = kvm_get_apic_mode(vcpu);
@@ -2790,11 +2789,12 @@ int kvm_apic_set_base(struct kvm_vcpu *vcpu, u64 value, bool host_initiated)
 	}
 
 	__kvm_apic_set_base(vcpu, value);
+#ifndef __PKVM_HYP__
 	kvm_recalculate_apic_map(vcpu->kvm);
+#endif
 	return 0;
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_apic_set_base);
-#endif /* !__PKVM_HYP__ */
 
 void kvm_apic_update_apicv(struct kvm_vcpu *vcpu)
 {
