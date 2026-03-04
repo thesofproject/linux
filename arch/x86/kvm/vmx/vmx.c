@@ -4412,10 +4412,23 @@ static void vmx_update_msr_bitmap_x2apic(struct kvm_vcpu *vcpu)
 	 * through reads for all valid registers by default in x2APIC+APICv
 	 * mode, only the current timer count needs on-demand emulation by KVM.
 	 */
-	if (mode & MSR_BITMAP_MODE_X2APIC_APICV)
+	if (mode & MSR_BITMAP_MODE_X2APIC_APICV) {
 		msr_bitmap[read_idx] = ~kvm_lapic_readable_reg_mask(vcpu->arch.apic);
-	else
+#ifdef __PKVM_HYP__
+		if (vcpu->arch.apic->guest_apic_protected)
+			/*
+			 * The protected apic still has some registers emulated by the
+			 * host. Such registers should be intercepted to make sure the
+			 * guest always gets up-to-date values from the host via
+			 * the emulation, instead of reading stale values from the apic
+			 * page directly.
+			 */
+			msr_bitmap[read_idx] =
+				~pkvm_protected_lapic_readable_reg_mask(vcpu->arch.apic);
+#endif
+	} else {
 		msr_bitmap[read_idx] = ~0ull;
+	}
 	msr_bitmap[write_idx] = ~0ull;
 
 	/*
