@@ -109,6 +109,20 @@ static int sof_ipc4_mtrace_dfs_open(struct inode *inode, struct file *file)
 		return -ENOMEM;
 	}
 
+	/*
+	* Re-sync dsp_write_ptr from SRAM on open to avoid blocking when
+	* DSP goes idle before next aging timer IPC arrives.
+	*/
+	if (core_data->slot_offset != SOF_IPC4_INVALID_SLOT_OFFSET) {
+		struct snd_sof_dev *sdev = core_data->sdev;
+		u32 write_ptr;
+
+		sof_mailbox_read(sdev, core_data->slot_offset + sizeof(u32),
+				 &write_ptr, sizeof(write_ptr));
+		write_ptr -= write_ptr % 4;
+		core_data->dsp_write_ptr = write_ptr;
+	}
+
 	ret = simple_open(inode, file);
 	if (ret) {
 		kfree(core_data->log_buffer);
