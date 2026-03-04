@@ -92,6 +92,12 @@
   __traceiter_android_vh_slab_free
   __traceiter_android_vh_cgroup_set_task
   __tracepoint_android_vh_cgroup_set_task
+  __traceiter_android_rvh_f2fs_down_read
+  __tracepoint_android_rvh_f2fs_down_read
+  __traceiter_android_vh_f2fs_improve_priority
+  __tracepoint_android_vh_f2fs_improve_priority
+  __traceiter_android_vh_f2fs_restore_priority
+  __tracepoint_android_vh_f2fs_restore_priority
   binder_alloc_copy_from_buffer
   lruvec_page_state
   arch_vma_name
