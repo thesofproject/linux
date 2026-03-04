@@ -825,16 +825,23 @@ static void pkvm_vcpu_reset(struct kvm_vcpu *vcpu, bool init_event)
 
 	if (pkvm_is_protected_vcpu(vcpu)) {
 		/*
-		 * Emulating xapic mode will require the host to decode MMIO
-		 * instruction which is not supported if the guest is a pVM as
-		 * the pVM's CPU and memory state will be isolated. To avoid
-		 * using xapic mode for a pVM, enable x2apic mode by default so
-		 * that pVM will use MSR instructions to access lapic, which
-		 * doesn't require decoding.
+		 * The pVM's lapic is set up in x2apic mode by the pKVM
+		 * hypervisor when creating a vCPU. Set the apic_base from the
+		 * host side to x2apic mode to be consistent with the pKVM to
+		 * make sure the host emulated lapic registers (e.g., APIC_ID)
+		 * are initialized properly.
 		 */
 		u64 data = APIC_DEFAULT_PHYS_BASE | LAPIC_MODE_X2APIC |
 			   (kvm_vcpu_is_reset_bsp(vcpu) ? MSR_IA32_APICBASE_BSP : 0);
 
+		/*
+		 * Force set the X86_FEATURE_X2APIC bit in the vcpu caps to make
+		 * sure the x2apic mode apic base can be set successfully. Doing
+		 * so without respecting the X2APIC feature bit in the vCPUID
+		 * entries is fine as the pVM's vCPUID entries will be enforced
+		 * by the pKVM hypervisor to make sure the X2APIC feature bit
+		 * is always set.
+		 */
 		guest_cpu_cap_set(vcpu, X86_FEATURE_X2APIC);
 		kvm_apic_set_base(vcpu, data, true);
 	}
