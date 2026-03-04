@@ -11,6 +11,10 @@
 #include "hyperv.h"
 #include "smm.h"
 
+#ifdef __PKVM_HYP__
+#include "pkvm/pkvm.h"
+#endif
+
 #define KVM_APIC_INIT		0
 #define KVM_APIC_SIPI		1
 
@@ -204,7 +208,8 @@ static inline bool kvm_apic_sw_enabled(struct kvm_lapic *apic)
 		return apic->sw_enabled;
 	return true;
 #else
-	return apic_get_reg(apic->regs, APIC_SPIV) & APIC_SPIV_APIC_ENABLED;
+	return apic_get_reg(to_pkvm_vcpu(apic->vcpu)->shared_lapic_regs, APIC_SPIV) &
+	       APIC_SPIV_APIC_ENABLED;
 #endif
 }
 

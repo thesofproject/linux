@@ -17,6 +17,8 @@ extern size_t kvm_vcpu_sz;
 struct pkvm_vcpu {
 	/* Point to the kvm_vcpu structure owned by the host */
 	struct kvm_vcpu *shared_vcpu;
+	/* Point to the lapic regs page owned by the host */
+	void *shared_lapic_regs;
 	/* Point to the pkvm_vm this pkvm_vcpu belongs to */
 	struct pkvm_vm *pkvm_vm;
 	/* Bitmap of requests for the host to handle */
