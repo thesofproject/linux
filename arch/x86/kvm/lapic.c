@@ -3126,6 +3126,7 @@ nomem_free_apic:
 nomem:
 	return -ENOMEM;
 }
+#endif /* !__PKVM_HYP__ */
 
 int kvm_apic_has_interrupt(struct kvm_vcpu *vcpu)
 {
@@ -3135,14 +3136,17 @@ int kvm_apic_has_interrupt(struct kvm_vcpu *vcpu)
 	if (!kvm_apic_present(vcpu))
 		return -1;
 
+#ifndef __PKVM_HYP__
 	if (apic->guest_apic_protected)
 		return -1;
+#endif
 
 	__apic_update_ppr(apic, &ppr);
 	return apic_has_interrupt_for_ppr(apic, ppr);
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_apic_has_interrupt);
 
+#ifndef __PKVM_HYP__
 int kvm_apic_accept_pic_intr(struct kvm_vcpu *vcpu)
 {
 	u32 lvt0 = kvm_lapic_get_reg(vcpu->arch.apic, APIC_LVT0);

@@ -82,6 +82,7 @@ PKVM_HC(setup_mce)
 PKVM_HC_OUT(vcpu_run)
 PKVM_HC(complete_emulated_msr)
 PKVM_HC(has_wbinvd_exit)
+PKVM_HC_OUT(protected_apic_has_interrupt)
 
 /* KVM MMU hypercalls */
 PKVM_HC(vm_mmu_map)

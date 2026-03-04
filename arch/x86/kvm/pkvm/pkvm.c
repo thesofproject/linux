@@ -833,6 +833,7 @@ static bool is_guest_vcpu_accessible(struct kvm_vcpu *vcpu, enum pkvm_hc hc)
 	case __pkvm__setup_mce:
 	case __pkvm__vcpu_run:
 	case __pkvm__complete_emulated_msr:
+	case __pkvm__protected_apic_has_interrupt:
 		/*
 		 * The host is responsible for running vCPU, injecting
 		 * interrupts, emulating lapic etc. Always allow the related PV
@@ -1617,6 +1618,16 @@ static int pkvm_complete_emulated_msr(struct kvm_vcpu *vcpu, int err)
 	return 1;
 }
 
+static int pkvm_protected_apic_has_interrupt(struct kvm_vcpu *vcpu, bool *has_intr)
+{
+	if (!lapic_in_kernel(vcpu) || !vcpu->arch.apic->guest_apic_protected)
+		return -EOPNOTSUPP;
+
+	*has_intr = (kvm_apic_has_interrupt(vcpu) != -1);
+
+	return 0;
+}
+
 static int pkvm_vm_mmu_map(unsigned long gpa, unsigned long hpa,
 			   unsigned long size, bool writable)
 {
@@ -1868,6 +1879,10 @@ static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc 
 		break;
 	case __pkvm__complete_emulated_msr:
 		ret = pkvm_complete_emulated_msr(vcpu, pkvm_hc_input1(hvcpu));
+		break;
+	case __pkvm__protected_apic_has_interrupt:
+		ret = pkvm_protected_apic_has_interrupt(vcpu,
+				&out->protected_apic_has_interrupt.has_intr);
 		break;
 	default:
 		ret = -EINVAL;
