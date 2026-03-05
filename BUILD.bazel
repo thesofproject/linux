@@ -3484,3 +3484,53 @@ ddk_headers(
         "include/uapi",
     ],
 )
+
+ddk_headers(
+    name = "codec_cs35l56_header",
+    hdrs = [
+        "include/sound/cs35l56.h",
+    ],
+    linux_includes = [
+        "include",
+    ],
+)
+
+ddk_headers(
+    name = "hda_api_header",
+    hdrs = [
+        "include/sound/hdaudio.h",
+    ],
+    linux_includes = [
+        "include",
+    ],
+)
+
+ddk_headers(
+    name = "sdw_api_header",
+    hdrs = [
+        "include/sound/soc_sdw_utils.h",
+    ],
+    linux_includes = [
+        "include",
+    ],
+)
+
+ddk_headers(
+    name = "sof_api_header",
+    hdrs = [
+        "include/sound/sof.h",
+    ],
+    linux_includes = [
+        "include",
+    ],
+)
+
+ddk_headers(
+    name = "sof_config_header",
+    hdrs = [
+        "include/uapi/sound/sof/tokens.h",
+    ],
+    linux_includes = [
+        "include/uapi",
+    ],
+)

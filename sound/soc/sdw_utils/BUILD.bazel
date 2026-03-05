@@ -40,6 +40,7 @@ ddk_module(
     kconfig = ":Kconfig",
     kernel_build = "//private/devices/google/common:kernel_build",
     deps = [
+        "//private/desktop-google:sdw_api_header",
         "//private/desktop-google/drivers/soundwire:soundwire-bus",
         "//private/desktop-google/sound/soc/codecs:all_headers",
     ],

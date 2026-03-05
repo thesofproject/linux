@@ -36,6 +36,9 @@ ddk_module(
     includes = ["core"],
     kconfig = "Kconfig",
     kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        "//private/desktop-google:hda_api_header",
+    ],
 )
 
 ddk_module(

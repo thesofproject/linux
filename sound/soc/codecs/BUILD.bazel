@@ -509,6 +509,7 @@ ddk_module(
         ":snd-soc-cs-amp-lib",
         ":snd-soc-cs35l56-shared",
         ":snd-soc-wm-adsp",
+        "//private/desktop-google:codec_cs35l56_header",
         "//private/desktop-google/drivers/firmware/cirrus:cs_dsp",
         "//private/desktop-google/drivers/soundwire:soundwire-bus",
     ],
@@ -556,6 +557,7 @@ ddk_module(
     kernel_build = "//private/devices/google/common:kernel_build",
     deps = [
         ":snd-soc-cs-amp-lib",
+        "//private/desktop-google:codec_cs35l56_header",
         "//private/desktop-google/drivers/firmware/cirrus:cs_dsp",
     ],
 )

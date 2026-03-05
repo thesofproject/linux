@@ -68,7 +68,11 @@ ddk_module(
     defconfig = _AUDIO_DEFCONFIG,
     kconfig = "Kconfig",
     kernel_build = "//private/devices/google/common:kernel_build",
-    deps = [":snd-sof-utils"],
+    deps = [
+        ":snd-sof-utils",
+        "//private/desktop-google:sof_api_header",
+        "//private/desktop-google:sof_config_header",
+    ],
 )
 
 ddk_module(

@@ -34,6 +34,7 @@ ddk_module(
     deps = [
         ":boards_headers",
         ":snd-soc-intel-hda-dsp-common",
+        "//private/desktop-google:sdw_api_header",
         "//private/desktop-google/drivers/soundwire:soundwire-bus",
         "//private/desktop-google/sound/soc/codecs:all_headers",
         "//private/desktop-google/sound/soc/sdw_utils:snd-soc-sdw-utils",
