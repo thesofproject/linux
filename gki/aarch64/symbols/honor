@@ -1,5 +1,10 @@
   netdev_get_name
+  sock_from_file
+  tcp_done
   tcp_send_active_reset
+  tcp_sync_mss
+  udp4_lib_lookup
+  udp6_lib_lookup
   __traceiter_android_vh_fuse_request_end
   __traceiter_android_vh_fuse_request_send
   __tracepoint_android_vh_fuse_request_end
