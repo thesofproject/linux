@@ -1822,6 +1822,7 @@ ddk_headers(
         "drivers/android/binder_internal.h",
         "drivers/android/binder_trace.h",
         "drivers/android/dbitmap.h",
+        "kernel/futex/futex.h",
         "kernel/sched/cpudeadline.h",
         "kernel/sched/cpupri.h",
         "kernel/sched/ext.h",
