@@ -47,6 +47,8 @@
 
   __traceiter_android_vh_save_vmalloc_stack
   __tracepoint_android_vh_save_vmalloc_stack
+  __traceiter_android_vh_customize_thp_gfp_orders
+  __tracepoint_android_vh_customize_thp_gfp_orders
 
 #required by metis.ko module
   __traceiter_android_rvh_try_to_wake_up_begin
