@@ -3,8 +3,10 @@
  * Copyright (c) 2023 MediaTek Inc.
  */
 
+#include <linux/debugfs.h>
 #include <linux/device.h>
 #include <linux/file.h>
+#include <linux/fs.h>
 #include <linux/kdev_t.h>
 #include <linux/miscdevice.h>
 #include <linux/module.h>
@@ -19,6 +21,80 @@ static struct gzvm_driver gzvm_drv = {
 		.sub = 0,
 	},
 };
+
+static ssize_t demand_paging_batch_pages_show(struct file *file,
+					      char __user *buf,
+					      size_t count,
+					      loff_t *ppos)
+{
+	int len;
+	char buffer[16];	/* enough for a u32 integer*/
+
+	len = snprintf(buffer, sizeof(buffer), "%u\n",
+		       gzvm_drv.demand_paging_batch_pages);
+	return simple_read_from_buffer(buf, count, ppos, buffer, len);
+}
+
+static ssize_t demand_paging_batch_pages_store(struct file *file,
+					       const char __user *buf,
+					       size_t count,
+					       loff_t *ppos)
+{
+	int ret;
+	u32 temp;
+	char buffer[16];
+
+	if (*ppos != 0)
+		return 0;
+
+	if (count > sizeof(buffer))
+		return -EINVAL;
+
+	if (copy_from_user(buffer, buf, count))
+		return -EFAULT;
+
+	buffer[count] = '\0';
+
+	ret = kstrtoint(buf, 10, &temp);
+	if (ret < 0)
+		return ret;
+
+	if (temp == 0 || (PMD_SIZE % (PAGE_SIZE * temp)) != 0)
+		return -EINVAL;
+
+	gzvm_drv.demand_paging_batch_pages = temp;
+
+	return count;
+}
+
+/* /sys/kernel/debug/gzvm/demand_paging_batch_pages */
+static const struct file_operations demand_paging_batch_pages_fops = {
+	.owner = THIS_MODULE,
+	.open = simple_open,
+	.read = demand_paging_batch_pages_show,
+	.write = demand_paging_batch_pages_store,
+};
+
+static int gzvm_drv_debugfs_init(void)
+{
+	struct dentry *debugfs_dir;
+
+	debugfs_dir = debugfs_create_dir("gzvm", NULL);
+	if (IS_ERR_OR_NULL(debugfs_dir))
+		return -ENOMEM;
+
+	gzvm_drv.gzvm_debugfs_dir = debugfs_dir;
+
+	debugfs_create_file("demand_paging_batch_pages", 0660, debugfs_dir,
+			    &gzvm_drv, &demand_paging_batch_pages_fops);
+
+	return 0;
+}
+
+static void gzvm_drv_debugfs_exit(void)
+{
+	debugfs_remove_recursive(gzvm_drv.gzvm_debugfs_dir);
+}
 
 /**
  * gzvm_err_to_errno() - Convert geniezone return value to standard errno
@@ -100,6 +176,27 @@ static struct miscdevice gzvm_dev = {
 	.fops = &gzvm_chardev_ops,
 };
 
+static int gzvm_query_hyp_batch_pages(void)
+{
+	struct gzvm_enable_cap cap = {0};
+	int ret;
+
+	gzvm_drv.demand_paging_batch_pages = GZVM_DRV_DEMAND_PAGING_BATCH_PAGES;
+	cap.cap = GZVM_CAP_QUERY_HYP_BATCH_PAGES;
+
+	ret = gzvm_arch_query_hyp_batch_pages(&cap, NULL);
+	if (!ret)
+		gzvm_drv.demand_paging_batch_pages = cap.args[0];
+
+	/*
+	 * We have initialized demand_paging_batch_pages, and to maintain
+	 * compatibility with older GZ version, we can ignore the return value.
+	 */
+	if (ret == -EINVAL)
+		return 0;
+	return ret;
+}
+
 static int gzvm_drv_probe(struct platform_device *pdev)
 {
 	int ret;
@@ -125,8 +222,18 @@ static int gzvm_drv_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_deregister;
 
+	ret = gzvm_query_hyp_batch_pages();
+	if (ret)
+		goto err_irqfd_exit;
+
+	ret = gzvm_drv_debugfs_init();
+	if (ret)
+		goto err_irqfd_exit;
+
 	return 0;
 
+err_irqfd_exit:
+	gzvm_drv_irqfd_exit();
 err_deregister:
 	misc_deregister(&gzvm_dev);
 	return ret;
@@ -136,6 +243,7 @@ static void gzvm_drv_remove(struct platform_device *pdev)
 {
 	gzvm_drv_irqfd_exit();
 	misc_deregister(&gzvm_dev);
+	gzvm_drv_debugfs_exit();
 }
 
 static const struct of_device_id gzvm_of_match[] = {
