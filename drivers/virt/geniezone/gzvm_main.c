@@ -75,6 +75,60 @@ static const struct file_operations demand_paging_batch_pages_fops = {
 	.write = demand_paging_batch_pages_store,
 };
 
+static ssize_t destroy_batch_pages_show(struct file *file,
+					char __user *buf,
+					size_t count,
+					loff_t *ppos)
+{
+	int len;
+	char buffer[16];	/* enough for a u32 integer*/
+
+	len = snprintf(buffer, sizeof(buffer), "%u\n",
+		       gzvm_drv.destroy_batch_pages);
+	return simple_read_from_buffer(buf, count, ppos, buffer, len);
+}
+
+static ssize_t destroy_batch_pages_store(struct file *file,
+					 const char __user *buf,
+					 size_t count,
+					 loff_t *ppos)
+{
+	int ret;
+	u32 temp;
+	char buffer[16];
+
+	if (*ppos != 0)
+		return 0;
+
+	if (count > sizeof(buffer))
+		return -EINVAL;
+
+	if (copy_from_user(buffer, buf, count))
+		return -EFAULT;
+
+	buffer[count] = '\0';
+
+	ret = kstrtoint(buf, 10, &temp);
+	if (ret < 0)
+		return ret;
+
+	/* destroy page batch size should be power of 2 */
+	if ((temp & (temp - 1)) != 0)
+		return -EINVAL;
+
+	gzvm_drv.destroy_batch_pages = temp;
+
+	return count;
+}
+
+/* /sys/kernel/debug/gzvm/destroy_batch_pages */
+static const struct file_operations destroy_batch_pages_fops = {
+	.owner = THIS_MODULE,
+	.open = simple_open,
+	.read = destroy_batch_pages_show,
+	.write = destroy_batch_pages_store,
+};
+
 static int gzvm_drv_debugfs_init(void)
 {
 	struct dentry *debugfs_dir;
@@ -87,6 +141,9 @@ static int gzvm_drv_debugfs_init(void)
 
 	debugfs_create_file("demand_paging_batch_pages", 0660, debugfs_dir,
 			    &gzvm_drv, &demand_paging_batch_pages_fops);
+
+	debugfs_create_file("destroy_batch_pages", 0660, debugfs_dir,
+			   &gzvm_drv, &destroy_batch_pages_fops);
 
 	return 0;
 }
@@ -120,6 +177,8 @@ int gzvm_err_to_errno(unsigned long err)
 		return -EOPNOTSUPP;
 	case ERR_FAULT:
 		return -EFAULT;
+	case ERR_BUSY:
+		return -EAGAIN;
 	default:
 		break;
 	}
@@ -197,6 +256,20 @@ static int gzvm_query_hyp_batch_pages(void)
 	return ret;
 }
 
+static int gzvm_query_destroy_batch_pages(void)
+{
+	int ret;
+	struct gzvm_enable_cap cap = {0};
+
+	gzvm_drv.destroy_batch_pages = GZVM_DRV_DESTROY_PAGING_BATCH_PAGES;
+	cap.cap = GZVM_CAP_QUERY_DESTROY_BATCH_PAGES;
+
+	ret = gzvm_arch_query_destroy_batch_pages(&cap, NULL);
+	if (!ret)
+		gzvm_drv.destroy_batch_pages = cap.args[0];
+	return ret;
+}
+
 static int gzvm_drv_probe(struct platform_device *pdev)
 {
 	int ret;
@@ -227,6 +300,10 @@ static int gzvm_drv_probe(struct platform_device *pdev)
 		goto err_deregister;
 
 	ret = gzvm_query_hyp_batch_pages();
+	if (ret)
+		goto err_irqfd_exit;
+
+	ret = gzvm_query_destroy_batch_pages();
 	if (ret)
 		goto err_irqfd_exit;
 
