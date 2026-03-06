@@ -253,6 +253,15 @@ static long gzvm_vm_ioctl(struct file *filp, unsigned int ioctl,
 		ret = gzvm_irqfd(gzvm, &data);
 		break;
 	}
+	case GZVM_IOEVENTFD: {
+		struct gzvm_ioeventfd data;
+
+		if (copy_from_user(&data, argp, sizeof(data)))
+			return -EFAULT;
+
+		ret = gzvm_ioeventfd(gzvm, &data);
+		break;
+	}
 	case GZVM_ENABLE_CAP: {
 		struct gzvm_enable_cap cap;
 
@@ -277,6 +286,7 @@ static void gzvm_destroy_vm(struct gzvm *gzvm)
 	mutex_lock(&gzvm->lock);
 
 	gzvm_vm_irqfd_release(gzvm);
+	gzvm_vm_ioeventfd_release(gzvm);
 	gzvm_destroy_vcpus(gzvm);
 	gzvm_arch_destroy_vm(gzvm->vm_id);
 
@@ -345,6 +355,14 @@ static struct gzvm *gzvm_create_vm(struct gzvm_driver *drv, unsigned long vm_typ
 	ret = gzvm_vm_irqfd_init(gzvm);
 	if (ret) {
 		dev_err(drv->dev, "Failed to initialize irqfd\n");
+		kfree(gzvm);
+		return ERR_PTR(ret);
+	}
+
+	ret = gzvm_init_ioeventfd(gzvm);
+	if (ret) {
+		dev_err(drv->dev, "Failed to initialize ioeventfd\n");
+		gzvm_vm_irqfd_release(gzvm);
 		kfree(gzvm);
 		return ERR_PTR(ret);
 	}
