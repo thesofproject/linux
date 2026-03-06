@@ -180,6 +180,9 @@ static long gzvm_vcpu_run(struct gzvm_vcpu *vcpu, void __user *argp)
 		case GZVM_EXIT_IDLE:
 			gzvm_handle_guest_idle(vcpu);
 			break;
+		case GZVM_EXIT_IPI:
+			gzvm_handle_guest_ipi(vcpu);
+			break;
 		case GZVM_EXIT_UNKNOWN:
 		default:
 			dev_err(vcpu->gzvm->gzvm_drv->dev,
