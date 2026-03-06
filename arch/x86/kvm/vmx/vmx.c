@@ -9483,7 +9483,22 @@ __init int vmx_hardware_setup(void)
 	if (!cpu_has_vmx_apicv())
 		enable_apicv = 0;
 	if (!enable_apicv)
+#ifndef __PKVM_HYP__
 		x86_ops->sync_pir_to_irr = NULL;
+#else
+		/*
+		 * To mitigate the attack from the host by injecting malicious
+		 * software interrupt on vector 0x80, the pVM needs to either
+		 * not handle the software interrupt 0x80 by disabling the IA32
+		 * emulation or have the protected apic which is reliable for
+		 * the pVM to distinguish software and external int 0x80 so that
+		 * the pVM can only perform IA32 emulation for the software one.
+		 *
+		 * As the pVM's kernel now doesn't have the code to disable the
+		 * IA32 emulation, require the APICv support in hardware.
+		 */
+		return -EOPNOTSUPP;
+#endif
 
 	if (!enable_apicv || !cpu_has_vmx_ipiv())
 		enable_ipiv = false;
