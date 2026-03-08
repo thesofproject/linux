@@ -1363,7 +1363,7 @@ int device_pasid_table_setup(struct pkvm_device *dev, u8 bus, u8 devfn)
 #ifndef __PKVM_HYP__
 	BUG_ON(pkvm_enabled() && context_copied(iommu, bus, devfn));
 	if (context_copied(iommu, bus, devfn)) {
-		context_clear_entry(context);
+		context_clear_present(context);
 		__iommu_flush_cache(iommu, context, sizeof(*context));
 
 		/*
@@ -1382,6 +1382,9 @@ int device_pasid_table_setup(struct pkvm_device *dev, u8 bus, u8 devfn)
 		qi_flush_pasid_cache(iommu, 0, QI_PC_GLOBAL, 0);
 		iommu->flush.flush_iotlb(iommu, 0, 0, 0, DMA_TLB_GLOBAL_FLUSH);
 		devtlb_invalidation_with_pasid(iommu, dev, IOMMU_NO_PASID);
+
+		context_clear_entry(context);
+		__iommu_flush_cache(iommu, context, sizeof(*context));
 
 		/*
 		 * At this point, the device is supposed to finish reset at
