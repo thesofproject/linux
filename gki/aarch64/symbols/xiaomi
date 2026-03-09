@@ -60,6 +60,8 @@
   __tracepoint_android_vh_filemap_add_folio
   __traceiter_android_vh_mem_cgroup_charge
   __tracepoint_android_vh_mem_cgroup_charge
+  __traceiter_android_rvh_swap_bio_charge
+  __tracepoint_android_rvh_swap_bio_charge
 
 # required by custom memory policy
   __tracepoint_android_vh_mm_get_zone_mark
