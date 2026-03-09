@@ -299,7 +299,7 @@ static int setup_vcpu_lapic(struct kvm_vcpu *vcpu)
 	struct kvm_lapic *apic = vcpu->arch.apic, *shared_apic;
 	struct pkvm_vcpu *pkvm_vcpu = to_pkvm_vcpu(vcpu);
 	size_t apic_size = sizeof(struct kvm_lapic);
-	void *apic_regs = NULL;
+	void *shared_lapic_regs = NULL;
 	int ret;
 
 	if (!apic)
@@ -314,18 +314,39 @@ static int setup_vcpu_lapic(struct kvm_vcpu *vcpu)
 	if (ret)
 		return ret;
 
-	apic_regs = kern_pkvm_va(shared_apic->regs);
-	if (!apic_regs) {
+	shared_lapic_regs = kern_pkvm_va(shared_apic->regs);
+	if (!shared_lapic_regs) {
 		ret = -EINVAL;
 		goto unshare_apic;
 	}
 
-	ret = pkvm_host_share_hyp(__pkvm_pa(apic_regs), PAGE_SIZE);
+	ret = pkvm_host_share_hyp(__pkvm_pa(shared_lapic_regs), PAGE_SIZE);
 	if (ret)
 		goto unshare_apic;
 
-	pkvm_vcpu->shared_lapic_regs = apic_regs;
-	apic->regs = apic_regs;
+	pkvm_vcpu->shared_lapic_regs = shared_lapic_regs;
+	/*
+	 * For a protected vCPU with APICv enabled, the pKVM hypervisor will
+	 * donate the separate page for the vCPU's LAPIC registers to enforce
+	 * the protection. For other cases, the pKVM hypervisor can directly
+	 * use the host's apic page as the host will use PV interfaces which are
+	 * enforced the protection to inject interrupts.
+	 */
+	if (!pkvm_is_protected_vcpu(vcpu) || !enable_apicv) {
+		apic->regs = shared_lapic_regs;
+	} else {
+		apic->regs = PTR_ALIGN((void *)apic + apic_size, PAGE_SIZE);
+		apic->guest_apic_protected = true;
+
+		/*
+		 * The separate page for the vCPU's LAPIC registers should be
+		 * within the donated memory range of pkvm_vcpu, which is
+		 * guaranteed by the pkvm_vcpu_create. Otherwise it is a code
+		 * bug.
+		 */
+		BUG_ON((apic->regs + PAGE_SIZE) > ((void *)pkvm_vcpu + pkvm_vcpu->size));
+	}
+
 	if (enable_apicv) {
 		apic->apicv_active = true;
 		kvm_make_request(KVM_REQ_APICV_UPDATE, vcpu);
@@ -637,8 +658,11 @@ static int pkvm_vcpu_create(int vm_handle, phys_addr_t host_vcpu_pa,
 	vcpu_size = PKVM_VCPU_BASE_SIZE + kvm_vcpu_sz;
 	if (pkvm_is_protected_vm(&pkvm_vm->kvm))
 		vcpu_size += KVM_MCE_SIZE + KVM_MCI_CTL2_SIZE;
-	if (lapic_in_kernel(shared_vcpu))
+	if (lapic_in_kernel(shared_vcpu)) {
 		vcpu_size += sizeof(struct kvm_lapic);
+		if (pkvm_is_protected_vm(&pkvm_vm->kvm) && enable_apicv)
+			vcpu_size += PAGE_SIZE;
+	}
 	vcpu_size = PAGE_ALIGN(vcpu_size);
 
 	ret = pkvm_host_donate_hyp(pkvm_vcpu_pa, vcpu_size, true);
