@@ -16,44 +16,47 @@ ddk_headers(
 ddk_module(
     name = "snd-soc-avs",
     srcs = [
-        "dsp.c",
-        "ipc.c",
-        "messages.c",
-        "utils.c",
+        "apl.c",
+        "board_selection.c",
+        "cldma.c",
+        "cnl.c",
+        "control.c",
         "core.c",
+        "debugfs.c",
+        "dsp.c",
+        "icl.c",
+        "ipc.c",
+        "lnl.c",
         "loader.c",
-        "topology.c",
+        "messages.c",
+        "mtl.c",
         "path.c",
         "pcm.c",
-        "control.c",
-        "cldma.c",
-        "board_selection.c",
-        "skl.c",
-        "apl.c",
-        "cnl.c",
-        "icl.c",
-        "tgl.c",
-        "mtl.c",
-        "lnl.c",
-        "ptl.c",
-        "trace.c",
         "probes.c",
-        "debugfs.c",
+        "ptl.c",
+        "skl.c",
         "sysfs.c",
+        "tgl.c",
+        "topology.c",
+        "trace.c",
+        "utils.c",
     ],
     out = "snd-soc-avs.ko",
-    copts = ["-Iprivate/desktop-google/sound/soc/intel/avs", "-Iprivate/desktop-google/sound/soc"],
-    deps = [
-        ":avs_headers",
-        "//private/desktop-google/sound/soc/codecs:all_headers",
-        "//private/desktop-google/sound/hda:snd-hda-core",
-        "//private/desktop-google/sound/hda:snd-hda-codec",
-        "//private/desktop-google/sound/hda/core/ext:snd-hda-ext-core",
-        "//private/desktop-google/sound/soc/codecs:snd-soc-hdac-hda",
-        "//private/desktop-google/sound/soc/codecs:snd-soc-hda-codec",
+    copts = [
+        "-Iprivate/desktop-google/sound/soc/intel/avs",
+        "-Iprivate/desktop-google/sound/soc",
     ],
     defconfig = _AUDIO_DEFCONFIG,
     kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        ":avs_headers",
+        "//private/desktop-google/sound/hda:snd-hda-codec",
+        "//private/desktop-google/sound/hda:snd-hda-core",
+        "//private/desktop-google/sound/hda/core/ext:snd-hda-ext-core",
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+        "//private/desktop-google/sound/soc/codecs:snd-soc-hda-codec",
+        "//private/desktop-google/sound/soc/codecs:snd-soc-hdac-hda",
+    ],
 )
 
 ddk_module(
@@ -62,10 +65,16 @@ ddk_module(
         "boards/da7219.c",
     ],
     out = "snd-soc-avs-da7219.ko",
-    copts = ["-Iprivate/desktop-google/sound/soc/intel/avs", "-Iprivate/desktop-google/sound/soc"],
-    deps = [":avs_headers", "//private/desktop-google/sound/soc/codecs:all_headers"],
+    copts = [
+        "-Iprivate/desktop-google/sound/soc/intel/avs",
+        "-Iprivate/desktop-google/sound/soc",
+    ],
     defconfig = _AUDIO_DEFCONFIG,
     kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        ":avs_headers",
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+    ],
 )
 
 ddk_module(
@@ -74,10 +83,16 @@ ddk_module(
         "boards/dmic.c",
     ],
     out = "snd-soc-avs-dmic.ko",
-    copts = ["-Iprivate/desktop-google/sound/soc/intel/avs", "-Iprivate/desktop-google/sound/soc"],
-    deps = [":avs_headers", "//private/desktop-google/sound/soc/codecs:all_headers"],
+    copts = [
+        "-Iprivate/desktop-google/sound/soc/intel/avs",
+        "-Iprivate/desktop-google/sound/soc",
+    ],
     defconfig = _AUDIO_DEFCONFIG,
     kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        ":avs_headers",
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+    ],
 )
 
 ddk_module(
@@ -86,10 +101,17 @@ ddk_module(
         "boards/hdaudio.c",
     ],
     out = "snd-soc-avs-hdaudio.ko",
-    copts = ["-Iprivate/desktop-google/sound/soc/intel/avs", "-Iprivate/desktop-google/sound/soc"],
-    deps = [":avs_headers", "//private/desktop-google/sound/soc/codecs:all_headers", "//private/desktop-google/sound/soc/codecs:snd-soc-hda-codec"],
+    copts = [
+        "-Iprivate/desktop-google/sound/soc/intel/avs",
+        "-Iprivate/desktop-google/sound/soc",
+    ],
     defconfig = _AUDIO_DEFCONFIG,
     kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        ":avs_headers",
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+        "//private/desktop-google/sound/soc/codecs:snd-soc-hda-codec",
+    ],
 )
 
 ddk_module(
@@ -98,10 +120,16 @@ ddk_module(
         "boards/max98357a.c",
     ],
     out = "snd-soc-avs-max98357a.ko",
-    copts = ["-Iprivate/desktop-google/sound/soc/intel/avs", "-Iprivate/desktop-google/sound/soc"],
-    deps = [":avs_headers", "//private/desktop-google/sound/soc/codecs:all_headers"],
+    copts = [
+        "-Iprivate/desktop-google/sound/soc/intel/avs",
+        "-Iprivate/desktop-google/sound/soc",
+    ],
     defconfig = _AUDIO_DEFCONFIG,
     kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        ":avs_headers",
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+    ],
 )
 
 ddk_module(
@@ -110,10 +138,16 @@ ddk_module(
         "boards/max98373.c",
     ],
     out = "snd-soc-avs-max98373.ko",
-    copts = ["-Iprivate/desktop-google/sound/soc/intel/avs", "-Iprivate/desktop-google/sound/soc"],
-    deps = [":avs_headers", "//private/desktop-google/sound/soc/codecs:all_headers"],
+    copts = [
+        "-Iprivate/desktop-google/sound/soc/intel/avs",
+        "-Iprivate/desktop-google/sound/soc",
+    ],
     defconfig = _AUDIO_DEFCONFIG,
     kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        ":avs_headers",
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+    ],
 )
 
 ddk_module(
@@ -122,10 +156,16 @@ ddk_module(
         "boards/max98927.c",
     ],
     out = "snd-soc-avs-max98927.ko",
-    copts = ["-Iprivate/desktop-google/sound/soc/intel/avs", "-Iprivate/desktop-google/sound/soc"],
-    deps = [":avs_headers", "//private/desktop-google/sound/soc/codecs:all_headers"],
+    copts = [
+        "-Iprivate/desktop-google/sound/soc/intel/avs",
+        "-Iprivate/desktop-google/sound/soc",
+    ],
     defconfig = _AUDIO_DEFCONFIG,
     kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        ":avs_headers",
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+    ],
 )
 
 ddk_module(
@@ -134,10 +174,16 @@ ddk_module(
         "boards/nau8825.c",
     ],
     out = "snd-soc-avs-nau8825.ko",
-    copts = ["-Iprivate/desktop-google/sound/soc/intel/avs", "-Iprivate/desktop-google/sound/soc"],
-    deps = [":avs_headers", "//private/desktop-google/sound/soc/codecs:all_headers"],
+    copts = [
+        "-Iprivate/desktop-google/sound/soc/intel/avs",
+        "-Iprivate/desktop-google/sound/soc",
+    ],
     defconfig = _AUDIO_DEFCONFIG,
     kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        ":avs_headers",
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+    ],
 )
 
 ddk_module(
@@ -146,10 +192,17 @@ ddk_module(
         "boards/rt5514.c",
     ],
     out = "snd-soc-avs-rt5514.ko",
-    copts = ["-Iprivate/desktop-google/sound/soc/intel/avs", "-Iprivate/desktop-google/sound/soc"],
-    deps = [":avs_headers", "//private/desktop-google/sound/soc/codecs:all_headers", "//private/desktop-google/sound/soc/codecs:snd-soc-rt5514"],
+    copts = [
+        "-Iprivate/desktop-google/sound/soc/intel/avs",
+        "-Iprivate/desktop-google/sound/soc",
+    ],
     defconfig = _AUDIO_DEFCONFIG,
     kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        ":avs_headers",
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+        "//private/desktop-google/sound/soc/codecs:snd-soc-rt5514",
+    ],
 )
 
 ddk_module(
@@ -158,8 +211,15 @@ ddk_module(
         "boards/rt5663.c",
     ],
     out = "snd-soc-avs-rt5663.ko",
-    copts = ["-Iprivate/desktop-google/sound/soc/intel/avs", "-Iprivate/desktop-google/sound/soc"],
-    deps = [":avs_headers", "//private/desktop-google/sound/soc/codecs:all_headers", "//private/desktop-google/sound/soc/codecs:snd-soc-rt5663"],
+    copts = [
+        "-Iprivate/desktop-google/sound/soc/intel/avs",
+        "-Iprivate/desktop-google/sound/soc",
+    ],
     defconfig = _AUDIO_DEFCONFIG,
     kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        ":avs_headers",
+        "//private/desktop-google/sound/soc/codecs:all_headers",
+        "//private/desktop-google/sound/soc/codecs:snd-soc-rt5663",
+    ],
 )
