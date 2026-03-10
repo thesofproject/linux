@@ -343976,6 +343976,13 @@ function {
   parameter_id: 0x2c0e0dce
 }
 function {
+  id: 0x9bc796bb
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x1b8590a8
+  parameter_id: 0x18ea6ae3
+}
+function {
   id: 0x9bc79bf3
   return_type_id: 0x6720d32f
   parameter_id: 0x191de370
@@ -362437,6 +362444,15 @@ elf_symbol {
   full_name: "__traceiter_android_vh_f2fs_create"
 }
 elf_symbol {
+  id: 0x9c6911fb
+  name: "__traceiter_android_vh_f2fs_file_open"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xa192ef19
+  type_id: 0x9bc796bb
+  full_name: "__traceiter_android_vh_f2fs_file_open"
+}
+elf_symbol {
   id: 0xcb0a2c01
   name: "__traceiter_android_vh_f2fs_improve_priority"
   is_defined: true
@@ -367484,6 +367500,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_vh_f2fs_create"
+}
+elf_symbol {
+  id: 0x9ad783c1
+  name: "__tracepoint_android_vh_f2fs_file_open"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_vh_f2fs_file_open"
 }
 elf_symbol {
   id: 0x34b6590b
@@ -428859,6 +428884,7 @@ interface {
   symbol_id: 0xb38eccdd
   symbol_id: 0x1f554c2a
   symbol_id: 0xfb77f8d4
+  symbol_id: 0x9c6911fb
   symbol_id: 0xcb0a2c01
   symbol_id: 0xe26122c3
   symbol_id: 0x905272e6
@@ -429420,6 +429446,7 @@ interface {
   symbol_id: 0xac5d150b
   symbol_id: 0x0d418d38
   symbol_id: 0xb45361fe
+  symbol_id: 0x9ad783c1
   symbol_id: 0x34b6590b
   symbol_id: 0x07a41f19
   symbol_id: 0xbf5d713c
