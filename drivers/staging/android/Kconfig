@@ -20,7 +20,4 @@ config ASHMEM_RUST
 	bool "Use the Rust implementation of Ashmem"
 	depends on ASHMEM && RUST
 
-config ASHMEM_C
-	def_bool ASHMEM && !ASHMEM_RUST
-
 endmenu
