@@ -1193,12 +1193,14 @@
   get_cpu_idle_time_us
   get_device
   get_device_system_crosststamp
+  get_each_kmemcache_object
   get_free_pages_noprof
   get_governor_parent_kobj
   get_netmem
   get_net_ns_by_fd
   get_net_ns_by_pid
   get_option
+  get_page_owner_handle
   get_pid_task
   get_random_bytes
   get_random_u16
@@ -1210,6 +1212,7 @@
   get_task_cred
   get_task_mm
   get_task_pid
+  get_track
   __get_unmapped_area
   get_unused_fd_flags
   get_user_ifreq
@@ -2149,6 +2152,8 @@
   out_of_line_wait_on_bit_timeout
   overflowgid
   overflowuid
+  page_ext_get
+  page_ext_put
   page_is_ram
   page_pool_alloc_pages
   page_pool_create
