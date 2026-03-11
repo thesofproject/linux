@@ -9244,6 +9244,11 @@ pointer_reference {
   pointee_type_id: 0x6033a0b0
 }
 pointer_reference {
+  id: 0x12b97806
+  kind: POINTER
+  pointee_type_id: 0x60a50687
+}
+pointer_reference {
   id: 0x12bb09bf
   kind: POINTER
   pointee_type_id: 0x60acc062
@@ -22509,6 +22514,11 @@ pointer_reference {
   pointee_type_id: 0x91cc9f9b
 }
 pointer_reference {
+  id: 0x2ee34bd6
+  kind: POINTER
+  pointee_type_id: 0x91cdc9c6
+}
+pointer_reference {
   id: 0x2ee3cbcb
   kind: POINTER
   pointee_type_id: 0x91cfc9b1
@@ -33754,6 +33764,11 @@ typedef {
   referred_type_id: 0x1eb1a566
 }
 typedef {
+  id: 0x91cdc9c6
+  name: "free_folio_t"
+  referred_type_id: 0x1809b01a
+}
+typedef {
   id: 0xbadb1309
   name: "freeptr_t"
   referred_type_id: 0x126f7333
@@ -34157,6 +34172,11 @@ typedef {
   id: 0xf5c6a82e
   name: "netns_tracker"
   referred_type_id: 0x186c44db
+}
+typedef {
+  id: 0x60a50687
+  name: "new_folio_t"
+  referred_type_id: 0x54d24f34
 }
 typedef {
   id: 0x5e03c49b
@@ -314516,6 +314536,12 @@ function {
   parameter_id: 0xcd84e3cd
 }
 function {
+  id: 0x1809b01a
+  return_type_id: 0x48b5725f
+  parameter_id: 0x2170d06d
+  parameter_id: 0x33756485
+}
+function {
   id: 0x1810e728
   return_type_id: 0x48b5725f
   parameter_id: 0x2215f16e
@@ -321220,6 +321246,13 @@ function {
   parameter_id: 0x045d9eb9
 }
 function {
+  id: 0x30c9fba4
+  return_type_id: 0x33756485
+  parameter_id: 0x06835e9c
+  parameter_id: 0x3e6239e1
+  parameter_id: 0xf1a6dfed
+}
+function {
   id: 0x30d98140
   return_type_id: 0x0483e6f8
   parameter_id: 0x3bb11c92
@@ -323427,6 +323460,12 @@ function {
   return_type_id: 0x18a2fb63
   parameter_id: 0x2c1c2fdf
   parameter_id: 0x3a6b52de
+}
+function {
+  id: 0x54d24f34
+  return_type_id: 0x2170d06d
+  parameter_id: 0x2170d06d
+  parameter_id: 0x33756485
 }
 function {
   id: 0x54d3d1f1
@@ -331076,6 +331115,17 @@ function {
   parameter_id: 0x3b04bead
   parameter_id: 0x4585663f
   parameter_id: 0x3e75499e
+}
+function {
+  id: 0x9259ed8d
+  return_type_id: 0x6720d32f
+  parameter_id: 0x3e6239e1
+  parameter_id: 0x12b97806
+  parameter_id: 0x2ee34bd6
+  parameter_id: 0x33756485
+  parameter_id: 0x469ea43a
+  parameter_id: 0x6720d32f
+  parameter_id: 0x1bf16028
 }
 function {
   id: 0x925d6128
@@ -396290,6 +396340,24 @@ elf_symbol {
   full_name: "is_vmalloc_or_module_addr"
 }
 elf_symbol {
+  id: 0x2066c48d
+  name: "isolate_and_split_free_page"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x83f0e5c3
+  type_id: 0x30c9fba4
+  full_name: "isolate_and_split_free_page"
+}
+elf_symbol {
+  id: 0x1cd74592
+  name: "isolate_anon_lru_page"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xf9e9a2e4
+  type_id: 0x9c203488
+  full_name: "isolate_anon_lru_page"
+}
+elf_symbol {
   id: 0xbb7edccb
   name: "iter_file_splice_write"
   is_defined: true
@@ -400127,6 +400195,15 @@ elf_symbol {
   crc: 0xa5a2d91d
   type_id: 0x100e6fc8
   full_name: "mfd_remove_devices"
+}
+elf_symbol {
+  id: 0x89c6398f
+  name: "migrate_pages"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x66157075
+  type_id: 0x9259ed8d
+  full_name: "migrate_pages"
 }
 elf_symbol {
   id: 0xbad16ab3
@@ -408889,6 +408966,15 @@ elf_symbol {
   crc: 0x7c7c052f
   type_id: 0x10e42ea8
   full_name: "put_vaddr_frames"
+}
+elf_symbol {
+  id: 0x4e730977
+  name: "putback_movable_pages"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xe9f959f7
+  type_id: 0x1f00dfeb
+  full_name: "putback_movable_pages"
 }
 elf_symbol {
   id: 0x8dafa617
@@ -432774,6 +432860,8 @@ interface {
   symbol_id: 0x03de6dc5
   symbol_id: 0xe4e974b3
   symbol_id: 0x99bcb7fe
+  symbol_id: 0x2066c48d
+  symbol_id: 0x1cd74592
   symbol_id: 0xbb7edccb
   symbol_id: 0xd4b34ea6
   symbol_id: 0x3c6496cb
@@ -433201,6 +433289,7 @@ interface {
   symbol_id: 0x266bd73a
   symbol_id: 0x78495fd8
   symbol_id: 0xa208d2dc
+  symbol_id: 0x89c6398f
   symbol_id: 0xbad16ab3
   symbol_id: 0xe4572a81
   symbol_id: 0x561fc352
@@ -434174,6 +434263,7 @@ interface {
   symbol_id: 0xffdd03be
   symbol_id: 0x15848de9
   symbol_id: 0xde695e5a
+  symbol_id: 0x4e730977
   symbol_id: 0x8dafa617
   symbol_id: 0xcd51319b
   symbol_id: 0x4ecdb62e
