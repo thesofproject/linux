@@ -97,7 +97,7 @@ int host_stage2_get_leaf(phys_addr_t phys, kvm_pte_t *ptep, s8 *level);
 
 int refill_hyp_pool(struct hyp_pool *pool, struct kvm_hyp_memcache *host_mc);
 int reclaim_hyp_pool(struct hyp_pool *pool, struct kvm_hyp_memcache *host_mc,
-		     int nr_pages);
+		     int nr_pages, bool force);
 
 void destroy_hyp_vm_pgt(struct pkvm_hyp_vm *vm);
 void drain_hyp_pool(struct hyp_pool *pool, struct kvm_hyp_memcache *mc);
