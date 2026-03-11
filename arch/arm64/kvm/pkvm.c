@@ -128,6 +128,7 @@ int pkvm_host_stage2_topup(void)
 
 	return WARN_ON_ONCE(ret);
 }
+EXPORT_SYMBOL(pkvm_host_stage2_topup);
 #else
 static void __host_stage2_free(void *virt, void *arg, unsigned long order) { WARN_ON(1); }
 static void __init pkvm_host_stage2_drain(void) { }
