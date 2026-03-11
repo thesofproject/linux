@@ -1651,8 +1651,14 @@ static void handle___pkvm_hyp_alloc_mgt_refill(struct kvm_cpu_context *host_ctxt
 	};
 
 	cpu_reg(host_ctxt, 1) = hyp_alloc_mgt_refill(id, &mc);
-	cpu_reg(host_ctxt, 2) = mc.head;
-	cpu_reg(host_ctxt, 3) = mc.nr_pages;
+
+	/*
+	 * errno_to_smccc() uses X2/X3 to store a kvm_hyp_req. Luckily here, the
+	 * only request we can get is TYPE_MEM_HOST_S2, small enough to fit X2.
+	 * We can then use X3 for the memcache.
+	 */
+	WARN_ON(!PAGE_ALIGNED(mc.head) || mc.nr_pages > PAGE_SIZE);
+	cpu_reg(host_ctxt, 3) = mc.head | mc.nr_pages;
 }
 
 static void handle___pkvm_hyp_alloc_mgt_reclaimable(struct kvm_cpu_context *host_ctxt)

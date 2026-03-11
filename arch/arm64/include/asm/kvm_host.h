@@ -859,6 +859,7 @@ enum {
 	KVM_HYP_REQ_TYPE_SPLIT,
 	KVM_HYP_REQ_TYPE_HYP_ALLOC,
 	KVM_HYP_REQ_TYPE_MEM_IOMMU,
+	KVM_HYP_REQ_TYPE_MEM_HOST_S2,
 	__KVM_HYP_REQ_TYPE_MAX
 };
 
@@ -911,6 +912,8 @@ static inline size_t kvm_hyp_req_arg_size(u8 type)
 	case KVM_HYP_REQ_TYPE_HYP_ALLOC:
 	case KVM_HYP_REQ_TYPE_MEM_IOMMU:
 		return sizeof(req->mem);
+	case KVM_HYP_REQ_TYPE_MEM_HOST_S2:
+		return 0;
 	default:
 		WARN_ON(1);
 	}
