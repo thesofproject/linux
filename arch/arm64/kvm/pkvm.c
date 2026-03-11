@@ -66,6 +66,7 @@ extern u32 kvm_nvhe_sym(registered_devices_nr);
 
 #ifdef CONFIG_CMA
 static struct cma *host_s2_cma;
+static DEFINE_MUTEX(host_s2_cma_lock);
 
 /*
  * kvm_hyp_reserve() being called way too early for CMA, this function allows to later-on reserve
@@ -83,6 +84,53 @@ int __init pkvm_host_stage2_reserve(void)
 
 	return 0;
 }
+
+static void __init pkvm_host_stage2_drain(void)
+{
+	unsigned long reclaimed = 0;
+
+	if (kvm_nvhe_sym(host_s2_cma_size))
+		reclaimed = __pkvm_reclaim_hyp_alloc_mgt_id(HYP_ALLOC_MGT_HOSTS2_ID, ULONG_MAX);
+
+	kvm_info("Shrunk Hyp Reserved memory by %lu MiB\n", reclaimed >> (20 - PAGE_SHIFT));
+}
+
+static void *__host_stage2_alloc(void *mc, unsigned long order)
+{
+	struct page *p = cma_alloc(host_s2_cma, 1, 0, true);
+
+	if (!p)
+		return NULL;
+
+	return page_to_virt(p);
+}
+
+static void __host_stage2_free(void *virt, void *arg, unsigned long order)
+{
+	WARN_ON(!cma_release(host_s2_cma, virt_to_page(virt), 1));
+}
+
+int pkvm_host_stage2_topup(void)
+{
+	struct kvm_hyp_memcache mc;
+	int ret;
+
+	guard(mutex)(&host_s2_cma_lock);
+
+	init_hyp_memcache(&mc);
+	ret = __topup_hyp_memcache(&mc, 3, __host_stage2_alloc, kvm_host_pa, NULL, 0);
+	if (ret && !mc.nr_pages)
+		return ret;
+
+	ret = __pkvm_topup_hyp_alloc_mgt_mc(HYP_ALLOC_MGT_HOSTS2_ID, &mc);
+	if (ret)
+		__free_hyp_memcache(&mc, __host_stage2_free, kvm_host_va, NULL);
+
+	return WARN_ON_ONCE(ret);
+}
+#else
+static void __host_stage2_free(void *virt, void *arg, unsigned long order) { WARN_ON(1); }
+static void __init pkvm_host_stage2_drain(void) { }
 #endif
 
 static int __init register_memblock_regions(void)
@@ -722,6 +770,8 @@ static int __init finalize_pkvm(void)
 	kmemleak_free_part_phys(hyp_mem_base, hyp_mem_size + kvm_nvhe_sym(host_s2_cma_size));
 
 	kvm_s2_ptdump_host_create_debugfs();
+
+	pkvm_host_stage2_drain();
 
 	ret = pkvm_drop_host_privileges();
 	if (ret) {
@@ -1867,6 +1917,9 @@ unsigned long __pkvm_reclaim_hyp_alloc_mgt_id(enum hyp_alloc_mgt_id id, unsigned
 
 		if (id == HYP_ALLOC_MGT_IOMMU_ID)
 			reclaimed += __pkvm_free_iommu_hyp_memcache(&mc);
+		else if (id == HYP_ALLOC_MGT_HOSTS2_ID)
+			reclaimed += __free_hyp_memcache(&mc, __host_stage2_free, kvm_host_va,
+							 NULL);
 		else
 			reclaimed += free_hyp_memcache(&mc);
 	} while (reclaimed < nr_pages);

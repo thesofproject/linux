@@ -332,6 +332,12 @@ int __pkvm_handle_smccc_req(struct arm_smccc_res *res, void *arg);
 	__ret;								\
 })
 
+#ifdef CONFIG_CMA
+int pkvm_host_stage2_topup(void);
+#else
+static inline int pkvm_host_stage2_topup(void) { return -EINVAL; }
+#endif
+
 enum pkvm_ptdump_ops {
 	PKVM_PTDUMP_GET_LEVEL,
 	PKVM_PTDUMP_GET_RANGE,
