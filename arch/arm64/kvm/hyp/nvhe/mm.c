@@ -600,9 +600,10 @@ static void *admit_host_page(void *arg, unsigned long order)
 	phys_addr_t p;
 	struct kvm_hyp_memcache *host_mc = arg;
 	unsigned long mc_order;
+	int ret;
 
 	if (!host_mc->nr_pages)
-		return NULL;
+		return ERR_PTR(-EINVAL);
 
 	mc_order = FIELD_GET(~PAGE_MASK, host_mc->head);
 	BUG_ON(order != mc_order);
@@ -614,8 +615,9 @@ static void *admit_host_page(void *arg, unsigned long order)
 	 * __pkvm_host_donate_hyp() takes care of races for us, so if it
 	 * succeeds we're good to go.
 	 */
-	if (__pkvm_host_donate_hyp(hyp_phys_to_pfn(p), 1 << order))
-		return NULL;
+	ret = __pkvm_host_donate_hyp(hyp_phys_to_pfn(p), 1 << order);
+	if (ret)
+		return ERR_PTR(ret);
 
 	return pop_hyp_memcache(host_mc, hyp_phys_to_virt, &order);
 }
@@ -662,8 +664,8 @@ int refill_hyp_pool(struct hyp_pool *pool, struct kvm_hyp_memcache *host_mc)
 			return -EINVAL;
 
 		p = admit_host_page(&tmp, order);
-		if (!p)
-			return -EINVAL;
+		if (IS_ERR_OR_NULL(p))
+			return p ? PTR_ERR(p) : -EINVAL;
 		*host_mc = tmp;
 
 		ret = hyp_pool_admit(pool, hyp_virt_to_page(p), order);
