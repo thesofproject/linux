@@ -176,6 +176,23 @@ static const struct snd_soc_acpi_endpoint jack_dmic_endpoints[] = {
 	},
 };
 
+static const struct snd_soc_acpi_endpoint amp_dmic_endpoints[] = {
+	/* AMP Endpoint */
+	{
+		.num = 0,
+		.aggregated = 0,
+		.group_position = 0,
+		.group_id = 0,
+	},
+	/* DMIC Endpoint */
+	{
+		.num = 1,
+		.aggregated = 0,
+		.group_position = 0,
+		.group_id = 0,
+	},
+};
+
 static const struct snd_soc_acpi_endpoint jack_amp_g1_dmic_endpoints[] = {
 	/* Jack Endpoint */
 	{
@@ -365,6 +382,15 @@ static const struct snd_soc_acpi_adr_device rt722_0_agg_adr[] = {
 	}
 };
 
+static const struct snd_soc_acpi_adr_device rt722_vb_single_adr[] = {
+	{
+		.adr = 0x000330025D072201ull,
+		.num_endpoints = 1,
+		.endpoints = &single_endpoint,
+		.name_prefix = "rt722"
+	}
+};
+
 static const struct snd_soc_acpi_adr_device rt1320_1_group1_adr[] = {
 	{
 		.adr = 0x000130025D132001ull,
@@ -416,6 +442,15 @@ static const struct snd_soc_acpi_adr_device rt1320_3_group2_adr[] = {
 		.num_endpoints = 1,
 		.endpoints = &spk_r_endpoint,
 		.name_prefix = "rt1320-2"
+	}
+};
+
+static const struct snd_soc_acpi_adr_device rt1320_4_group1_adr[] = {
+	{
+		.adr = 0x000230025D132001ull,
+		.num_endpoints = ARRAY_SIZE(amp_dmic_endpoints),
+		.endpoints = amp_dmic_endpoints,
+		.name_prefix = "rt1320-1"
 	}
 };
 
@@ -560,6 +595,20 @@ static const struct snd_soc_acpi_link_adr ptl_sdw_rt712_vb_l3_rt1320_l3[] = {
 	{}
 };
 
+static const struct snd_soc_acpi_link_adr ptl_sdw_rt722_vb_l3_rt1320_l2[] = {
+	{
+		.mask = BIT(3),
+		.num_adr = ARRAY_SIZE(rt722_vb_single_adr),
+		.adr_d = rt722_vb_single_adr,
+	},
+	{
+		.mask = BIT(2),
+		.num_adr = ARRAY_SIZE(rt1320_4_group1_adr),
+		.adr_d = rt1320_4_group1_adr,
+	},
+	{}
+};
+
 /* this table is used when there is no I2S codec present */
 struct snd_soc_acpi_mach snd_soc_acpi_intel_ptl_sdw_machines[] = {
 /* Order Priority: mockup > most links > most bit link-mask > alphabetical */
@@ -630,6 +679,13 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_ptl_sdw_machines[] = {
 		.drv_name = "sof_sdw",
 		.machine_check = snd_soc_acpi_intel_sdca_is_device_rt712_vb,
 		.sof_tplg_filename = "sof-ptl-rt712-l3-rt1320-l2.tplg",
+		.get_function_tplg_files = sof_sdw_get_tplg_files,
+	},
+	{
+		.link_mask = BIT(2) | BIT(3),
+		.links = ptl_sdw_rt722_vb_l3_rt1320_l2,
+		.drv_name = "sof_sdw",
+		.sof_tplg_filename = "sof-ptl-rt722-l3-rt1320-l2.tplg",
 		.get_function_tplg_files = sof_sdw_get_tplg_files,
 	},
 	{
