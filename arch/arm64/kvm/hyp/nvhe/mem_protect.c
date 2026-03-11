@@ -30,6 +30,7 @@ struct pkvm_moveable_reg pkvm_moveable_regs[PKVM_NR_MOVEABLE_REGS];
 unsigned int pkvm_moveable_regs_nr;
 
 static struct hyp_pool host_s2_pool;
+static struct hyp_pool host_s2_mmio_pool;
 
 static int host_s2_pool_refill(struct kvm_hyp_memcache *host_mc)
 {
@@ -122,14 +123,24 @@ static void *host_s2_zalloc_page(void *pool)
 	return hyp_alloc_pages(pool, 0);
 }
 
+static struct hyp_pool *page_to_pool(void *addr)
+{
+	return hyp_pool_owned(&host_s2_pool, addr) ? &host_s2_pool : &host_s2_mmio_pool;
+}
+
+static struct hyp_pool *region_to_pool(bool is_memory)
+{
+	return is_memory ? &host_s2_pool : &host_s2_mmio_pool;
+}
+
 static void host_s2_get_page(void *addr)
 {
-	hyp_get_page(&host_s2_pool, addr);
+	hyp_get_page(page_to_pool(addr), addr);
 }
 
 static void host_s2_put_page(void *addr)
 {
-	hyp_put_page(&host_s2_pool, addr);
+	hyp_put_page(page_to_pool(addr), addr);
 }
 
 static void host_s2_free_unlinked_table(void *addr, s8 level)
@@ -138,7 +149,7 @@ static void host_s2_free_unlinked_table(void *addr, s8 level)
 					 addr, level);
 }
 
-static int prepare_s2_pool(void *pgt_pool_base)
+static int prepare_s2_pool(void *pgt_pool_base, void *mmio_pool_base)
 {
 	unsigned long nr_pages, pfn;
 	int ret;
@@ -146,6 +157,12 @@ static int prepare_s2_pool(void *pgt_pool_base)
 	pfn = hyp_virt_to_pfn(pgt_pool_base);
 	nr_pages = host_s2_cma_size ? host_s2_cma_size >> PAGE_SHIFT : host_s2_pgtable_pages();
 	ret = hyp_pool_init(&host_s2_pool, pfn, nr_pages, 0);
+	if (ret)
+		return ret;
+
+	pfn = hyp_virt_to_pfn(mmio_pool_base);
+	nr_pages = host_s2_mmio_pgtable_pages();
+	ret = hyp_pool_init(&host_s2_mmio_pool, pfn, nr_pages, 0);
 	if (ret)
 		return ret;
 
@@ -182,7 +199,7 @@ static int prepopulate_host_stage2(void)
 
 	for (i = 0; i < hyp_memblock_nr; i++) {
 		reg = &hyp_memory[i];
-		ret = host_stage2_idmap_locked(reg->base, reg->size, PKVM_HOST_MEM_PROT);
+		ret = host_stage2_idmap_locked(reg->base, reg->size, PKVM_HOST_MEM_PROT, true);
 		if (ret)
 			return ret;
 	}
@@ -190,7 +207,7 @@ static int prepopulate_host_stage2(void)
 	return ret;
 }
 
-int kvm_host_prepare_stage2(void *pgt_pool_base)
+int kvm_host_prepare_stage2(void *pgt_pool_base, void *mmio_pool_base)
 {
 	struct kvm_s2_mmu *mmu = &host_mmu.arch.mmu;
 	int ret;
@@ -199,7 +216,7 @@ int kvm_host_prepare_stage2(void *pgt_pool_base)
 	hyp_spin_lock_init(&host_mmu.lock);
 	mmu->arch = &host_mmu.arch;
 
-	ret = prepare_s2_pool(pgt_pool_base);
+	ret = prepare_s2_pool(pgt_pool_base, mmio_pool_base);
 	if (ret)
 		return ret;
 
@@ -650,26 +667,19 @@ static bool range_is_memory(u64 start, u64 end)
 	return is_in_mem_range(end - 1, &r);
 }
 
-static inline int __host_stage2_idmap(u64 start, u64 end,
-				      enum kvm_pgtable_prot prot)
-{
-	return kvm_pgtable_stage2_map(&host_mmu.pgt, start, end - start, start,
-				      prot, &host_s2_pool, 0);
-}
-
 /*
  * The pool has been provided with enough pages to cover all of moveable regions
  * with page granularity, but it is difficult to know how much of the
  * non-moveable regions we will need to cover upfront, so we may need to
  * 'recycle' the pages if we run out.
  */
-#define host_stage2_try(fn, ...)					\
+#define host_stage2_try(is_memory, fn, ...)				\
 	({								\
 		int __ret;						\
 		hyp_assert_lock_held(&host_mmu.lock);			\
 		__ret = fn(__VA_ARGS__);				\
-		if (__ret == -ENOMEM) {					\
-			__ret = host_stage2_unmap_unmoveable_regs();		\
+		if (!(is_memory) && __ret == -ENOMEM) {			\
+			__ret = host_stage2_unmap_unmoveable_regs();	\
 			if (!__ret)					\
 				__ret = fn(__VA_ARGS__);		\
 		}							\
@@ -719,9 +729,13 @@ static int host_stage2_adjust_range(u64 addr, struct kvm_mem_range *range)
 }
 
 int host_stage2_idmap_locked(phys_addr_t addr, u64 size,
-			     enum kvm_pgtable_prot prot)
+			     enum kvm_pgtable_prot prot, bool is_memory)
 {
-	return host_stage2_try(__host_stage2_idmap, addr, addr + size, prot);
+	struct kvm_pgtable *pgt = &host_mmu.pgt;
+	void *mc = region_to_pool(is_memory);
+
+	return host_stage2_try(is_memory, kvm_pgtable_stage2_map, pgt, addr,
+			       size, addr, prot, mc, 0);
 }
 
 static void __host_update_page_state(phys_addr_t addr, u64 size, enum pkvm_page_state state)
@@ -748,13 +762,13 @@ static int __host_stage2_set_owner_locked(phys_addr_t addr, u64 size, u8 owner_i
 		return -EINVAL;
 
 	if (owner_id == PKVM_ID_HOST) {
-		prot = default_host_prot(range_is_memory(addr, addr + size));
-		ret = host_stage2_idmap_locked(addr, size, prot);
+		prot = default_host_prot(is_memory);
+		ret = host_stage2_idmap_locked(addr, size, prot, is_memory);
 	} else {
 		annotation = kvm_init_invalid_leaf_owner(owner_id);
-		ret = host_stage2_try(kvm_pgtable_stage2_annotate,
-				&host_mmu.pgt,
-				addr, size, &host_s2_pool, annotation);
+		ret = host_stage2_try(is_memory, kvm_pgtable_stage2_annotate,
+				      &host_mmu.pgt, addr, size,
+				      region_to_pool(is_memory), annotation);
 	}
 
 	if (ret)
@@ -818,7 +832,7 @@ static bool host_stage2_pte_is_counted(kvm_pte_t pte, u32 level)
 	return (pte & KVM_HOST_S2_DEFAULT_MASK) != KVM_HOST_S2_DEFAULT_MMIO_PTE;
 }
 
-static int host_stage2_idmap(u64 addr)
+static int host_stage2_fault(u64 addr)
 {
 	struct kvm_mem_range range;
 	bool is_memory = !!find_mem_range(addr, &range);
@@ -830,7 +844,10 @@ static int host_stage2_idmap(u64 addr)
 	if (ret)
 		goto unlock;
 
-	ret = host_stage2_idmap_locked(range.start, range.end - range.start, prot);
+	/* Should never happen: host stage-2 memory region is prefaulted */
+	WARN_ON(is_memory);
+
+	ret = host_stage2_idmap_locked(range.start, range.end - range.start, prot, false);
 unlock:
 	host_unlock_component();
 
@@ -930,7 +947,7 @@ void handle_host_mem_abort(struct kvm_cpu_context *host_ctxt)
 
 	switch (esr & ESR_ELx_FSC_TYPE) {
 	case ESR_ELx_FSC_FAULT:
-		ret = host_stage2_idmap(addr);
+		ret = host_stage2_fault(addr);
 		break;
 	case ESR_ELx_FSC_PERM:
 		ret = module_handle_host_perm_fault(&host_ctxt->regs, esr, addr);
@@ -1062,7 +1079,7 @@ static int __host_set_page_state_range(u64 addr, u64 size,
 				       enum pkvm_page_state state)
 {
 	if (get_host_state(hyp_phys_to_page(addr)) == PKVM_NOPAGE) {
-		int ret = host_stage2_idmap_locked(addr, size, PKVM_HOST_MEM_PROT);
+		int ret = host_stage2_idmap_locked(addr, size, PKVM_HOST_MEM_PROT, true);
 
 		if (ret)
 			return ret;
@@ -1811,7 +1828,7 @@ update:
 						     update_iommu);
 	} else {
 		ret = host_stage2_idmap_locked(
-				addr, nr_pages << PAGE_SHIFT, prot);
+				addr, nr_pages << PAGE_SHIFT, prot, reg);
 		if (update_iommu) {
 			kvm_iommu_host_stage2_idmap(addr, end, prot);
 			kvm_iommu_host_stage2_idmap_complete(!!prot);
@@ -3301,7 +3318,7 @@ static int __pkvm_use_dma_locked(phys_addr_t phys, size_t size, struct pkvm_hyp_
 				return ret;
 		}
 		prot = pkvm_mkstate(PKVM_HOST_MMIO_PROT, PKVM_PAGE_SHARED_BORROWED);
-		WARN_ON(host_stage2_idmap_locked(phys, size, prot));
+		WARN_ON(host_stage2_idmap_locked(phys, size, prot, false));
 	} else {
 
 		/* For VMs, we know if we reach this point the VM has access to the page. */

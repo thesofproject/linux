@@ -43,6 +43,7 @@ static void *vmemmap_base;
 static void *vm_table_base;
 static void *hyp_pgt_base;
 static void *host_s2_pgt_base;
+static void *host_s2_mmio_base;
 static void *selftest_base;
 static void *ffa_proxy_pages;
 static struct kvm_pgtable_mm_ops pkvm_pgtable_mm_ops;
@@ -83,6 +84,11 @@ static int divide_memory_pool(void *virt, unsigned long size)
 		if (!host_s2_pgt_base)
 			return -ENOMEM;
 	}
+
+	nr_pages = host_s2_mmio_pgtable_pages();
+	host_s2_mmio_base = hyp_early_alloc_contig(nr_pages);
+	if (!host_s2_mmio_base)
+		return -ENOMEM;
 
 	nr_pages = hyp_ffa_proxy_pages();
 	ffa_proxy_pages = hyp_early_alloc_contig(nr_pages);
@@ -282,7 +288,7 @@ static int fix_host_ownership_walker(const struct kvm_pgtable_visit_ctx *ctx,
 		/* hyp text is RO in the host stage-2 to be inspected on panic. */
 		if (prot == PAGE_HYP_EXEC) {
 			set_host_state(page, PKVM_NOPAGE);
-			return host_stage2_idmap_locked(phys, PAGE_SIZE, KVM_PGTABLE_PROT_R);
+			return host_stage2_idmap_locked(phys, PAGE_SIZE, KVM_PGTABLE_PROT_R, true);
 		} else {
 			return host_stage2_set_owner_locked(phys, PAGE_SIZE, PKVM_ID_HYP);
 		}
@@ -403,7 +409,7 @@ void __noreturn __pkvm_init_finalise(void)
 	if (ret)
 		goto out;
 
-	ret = kvm_host_prepare_stage2(host_s2_pgt_base);
+	ret = kvm_host_prepare_stage2(host_s2_pgt_base, host_s2_mmio_base);
 	if (ret)
 		goto out;
 
