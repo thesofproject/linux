@@ -18,9 +18,6 @@
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
-#include <sys/types.h>
-#include <sys/ipc.h>
-#include <sys/sem.h>
 #include <unistd.h>
 #include <ctype.h>
 
@@ -42,20 +39,6 @@
 		    F_SEAL_EXEC)
 
 #define MFD_NOEXEC_SEAL	0x0008U
-union semun {
-	int val;
-	struct semid_ds *buf;
-	unsigned short int *array;
-	struct seminfo *__buf;
-};
-
-/*
- * we use semaphores on nested wait tasks due the use of CLONE_NEWPID: the
- * child will be PID 1 and can't send SIGSTOP to themselves due special
- * treatment of the init task, so the SIGSTOP/SIGCONT synchronization
- * approach can't be used here.
- */
-#define SEM_KEY 0xdeadbeef
 
 /*
  * Default is not to test hugetlbfs
@@ -1350,22 +1333,8 @@ static int sysctl_nested(void *arg)
 
 static int sysctl_nested_wait(void *arg)
 {
-	int sem = semget(SEM_KEY, 1, 0600);
-	struct sembuf sembuf;
-
-	if (sem < 0) {
-		perror("semget:");
-		abort();
-	}
-	sembuf.sem_num = 0;
-	sembuf.sem_flg = 0;
-	sembuf.sem_op = 0;
-
-	if (semop(sem, &sembuf, 1) < 0) {
-		perror("semop:");
-		abort();
-	}
-
+	/* Wait for a SIGCONT. */
+	kill(getpid(), SIGSTOP);
 	return sysctl_nested(arg);
 }
 
@@ -1386,9 +1355,7 @@ static void test_sysctl_sysctl2_failset(void)
 
 static int sysctl_nested_child(void *arg)
 {
-	int pid, sem;
-	union semun semun;
-	struct sembuf sembuf;
+	int pid;
 
 	printf("%s nested sysctl 0\n", memfd_str);
 	sysctl_assert_write("0");
@@ -1422,53 +1389,23 @@ static int sysctl_nested_child(void *arg)
 			   test_sysctl_sysctl2_failset);
 	join_thread(pid);
 
-	sem = semget(SEM_KEY, 1, IPC_CREAT | 0600);
-	if (sem < 0) {
-		perror("semget:");
-		return 1;
-	}
-	semun.val = 1;
-	sembuf.sem_op = -1;
-	sembuf.sem_flg = 0;
-	sembuf.sem_num = 0;
-
 	/* Verify that the rules are actually inherited after fork. */
 	printf("%s nested sysctl 0 -> 1 after fork\n", memfd_str);
 	sysctl_assert_write("0");
 
-	if (semctl(sem, 0, SETVAL, semun) < 0) {
-		perror("semctl:");
-		return 1;
-	}
-
 	pid = spawn_thread(CLONE_NEWPID, sysctl_nested_wait,
 			   test_sysctl_sysctl1_failset);
 	sysctl_assert_write("1");
-
-	/* Allow child to continue */
-	if (semop(sem, &sembuf, 1) < 0) {
-		perror("semop:");
-		return 1;
-	}
+	kill(pid, SIGCONT);
 	join_thread(pid);
 
 	printf("%s nested sysctl 0 -> 2 after fork\n", memfd_str);
 	sysctl_assert_write("0");
 
-	if (semctl(sem, 0, SETVAL, semun) < 0) {
-		perror("semctl:");
-		return 1;
-	}
-
 	pid = spawn_thread(CLONE_NEWPID, sysctl_nested_wait,
 			   test_sysctl_sysctl2_failset);
 	sysctl_assert_write("2");
-
-	/* Allow child to continue */
-	if (semop(sem, &sembuf, 1) < 0) {
-		perror("semop:");
-		return 1;
-	}
+	kill(pid, SIGCONT);
 	join_thread(pid);
 
 	/*
@@ -1478,61 +1415,27 @@ static int sysctl_nested_child(void *arg)
 	 */
 	printf("%s nested sysctl 2 -> 1 after fork\n", memfd_str);
 	sysctl_assert_write("2");
-
-	if (semctl(sem, 0, SETVAL, semun) < 0) {
-		perror("semctl:");
-		return 1;
-	}
-
 	pid = spawn_thread(CLONE_NEWPID, sysctl_nested_wait,
 			   test_sysctl_sysctl2);
 	sysctl_assert_write("1");
-
-	/* Allow child to continue */
-	if (semop(sem, &sembuf, 1) < 0) {
-		perror("semop:");
-		return 1;
-	}
+	kill(pid, SIGCONT);
 	join_thread(pid);
 
 	printf("%s nested sysctl 2 -> 0 after fork\n", memfd_str);
 	sysctl_assert_write("2");
-
-	if (semctl(sem, 0, SETVAL, semun) < 0) {
-		perror("semctl:");
-		return 1;
-	}
-
 	pid = spawn_thread(CLONE_NEWPID, sysctl_nested_wait,
 			   test_sysctl_sysctl2);
 	sysctl_assert_write("0");
-
-	/* Allow child to continue */
-	if (semop(sem, &sembuf, 1) < 0) {
-		perror("semop:");
-		return 1;
-	}
+	kill(pid, SIGCONT);
 	join_thread(pid);
 
 	printf("%s nested sysctl 1 -> 0 after fork\n", memfd_str);
 	sysctl_assert_write("1");
-
-	if (semctl(sem, 0, SETVAL, semun) < 0) {
-		perror("semctl:");
-		return 1;
-	}
-
 	pid = spawn_thread(CLONE_NEWPID, sysctl_nested_wait,
 			   test_sysctl_sysctl1);
 	sysctl_assert_write("0");
-	/* Allow child to continue */
-	if (semop(sem, &sembuf, 1) < 0) {
-		perror("semop:");
-		return 1;
-	}
+	kill(pid, SIGCONT);
 	join_thread(pid);
-
-	semctl(sem, 0, IPC_RMID);
 
 	return 0;
 }
