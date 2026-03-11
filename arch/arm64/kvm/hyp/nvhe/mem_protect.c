@@ -54,6 +54,11 @@ struct hyp_mgt_allocator_ops host_s2_pool_ops = {
 	.reclaimable	= host_s2_pool_reclaimable,
 };
 
+void make_host_stage2_reclaimable(void)
+{
+	__hyp_pool_set_range_reclaimable(&host_s2_pool);
+}
+
 static DEFINE_PER_CPU(struct pkvm_hyp_vm *, __current_vm);
 #define current_vm (*this_cpu_ptr(&__current_vm))
 
@@ -193,6 +198,16 @@ static void prepare_host_vtcr(void)
 					      id_aa64mmfr1_el1_sys_val, phys_shift);
 }
 
+static bool range_has_reclaimable_host_s2(u64 addr, u64 end)
+{
+	u64 cma_end = host_s2_cma_base + host_s2_cma_size;
+
+	if (!host_s2_cma_size)
+		return false;
+
+	return addr < cma_end && end > host_s2_cma_base;
+}
+
 static int prepopulate_host_stage2(void)
 {
 	struct memblock_region *reg;
@@ -200,7 +215,27 @@ static int prepopulate_host_stage2(void)
 
 	for (i = 0; i < hyp_memblock_nr; i++) {
 		reg = &hyp_memory[i];
-		ret = host_stage2_idmap_locked(reg->base, reg->size, PKVM_HOST_MEM_PROT, true);
+		u64 base, size;
+
+		base = reg->base;
+		size = reg->size;
+
+		if (range_has_reclaimable_host_s2(base, base + size)) {
+			ret = host_stage2_idmap_locked(reg->base, host_s2_cma_base - base,
+						       PKVM_HOST_MEM_PROT, true);
+			if (ret)
+				return ret;
+
+			ret = host_stage2_idmap_locked(host_s2_cma_base, host_s2_cma_size,
+						       PKVM_HOST_MEM_PROT, true);
+			if (ret)
+				return ret;
+
+			base = host_s2_cma_base + host_s2_cma_size;
+			size = reg->base + reg->size - base;
+		}
+
+		ret = host_stage2_idmap_locked(base, size, PKVM_HOST_MEM_PROT, true);
 		if (ret)
 			return ret;
 	}
@@ -801,6 +836,9 @@ int host_stage2_set_owner_locked(phys_addr_t addr, u64 size, u8 owner_id)
 
 static bool host_stage2_force_pte(u64 addr, u64 end, enum kvm_pgtable_prot prot)
 {
+	if (range_has_reclaimable_host_s2(addr, end))
+		return true;
+
 	/*
 	 * Block mappings must be used with care in the host stage-2 as a
 	 * kvm_pgtable_stage2_map() operation targeting a page in the range of
