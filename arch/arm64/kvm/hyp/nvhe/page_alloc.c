@@ -394,3 +394,20 @@ unsigned long hyp_pool_reclaimable(struct hyp_pool *pool, u8 order)
 
 	return 0;
 }
+
+bool hyp_pool_owned(struct hyp_pool *pool, void *addr)
+{
+	struct hyp_page *p = hyp_virt_to_page(addr);
+
+	if (!page_in_pool_range(p, pool))
+		return false;
+
+	if (pool->range_reclaimable != p->tag)
+		return false;
+
+	if (!pool->range_reclaimable)
+		return true;
+
+	WARN_ON(get_hyp_state(p) != PKVM_PAGE_OWNED);
+	return true;
+}
