@@ -162,6 +162,7 @@ static ssize_t sof_ipc4_mtrace_dfs_read(struct file *file, char __user *buffer,
 {
 	struct sof_mtrace_core_data *core_data = file->private_data;
 	u32 log_buffer_offset, log_buffer_size, read_ptr, write_ptr;
+	u32 slot_read_ptr, slot_write_ptr;
 	struct snd_sof_dev *sdev = core_data->sdev;
 	struct sof_mtrace_priv *priv = sdev->fw_trace_data;
 	void *log_buffer = core_data->log_buffer;
@@ -187,6 +188,19 @@ static ssize_t sof_ipc4_mtrace_dfs_read(struct file *file, char __user *buffer,
 
 	if (core_data->slot_offset == SOF_IPC4_INVALID_SLOT_OFFSET)
 		return 0;
+
+	/* Compare cached pointers against slot state to catch missed updates. */
+	sof_mailbox_read(sdev, core_data->slot_offset, &slot_read_ptr,
+			 sizeof(slot_read_ptr));
+	sof_mailbox_read(sdev, core_data->slot_offset + sizeof(u32), &slot_write_ptr,
+			 sizeof(slot_write_ptr));
+	slot_write_ptr -= slot_write_ptr % 4;
+	if (slot_read_ptr != core_data->host_read_ptr ||
+	    slot_write_ptr != core_data->dsp_write_ptr)
+		dev_dbg(sdev->dev,
+			"core%d ptr mismatch: slot r/w %#x/%#x vs cached r/w %#x/%#x\n",
+			core_data->id, slot_read_ptr, slot_write_ptr,
+			core_data->host_read_ptr, core_data->dsp_write_ptr);
 
 	/* The log data buffer starts after the two pointer in the slot */
 	log_buffer_offset =  core_data->slot_offset + (sizeof(u32) * 2);
