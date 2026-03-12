@@ -4945,6 +4945,8 @@ static long get_nr_to_scan(struct lruvec *lruvec, struct scan_control *sc, int s
 	unsigned long nr_to_scan;
 	struct mem_cgroup *memcg = lruvec_memcg(lruvec);
 	DEFINE_MAX_SEQ(lruvec);
+	bool bypass = false;
+	bool young = false;
 
 	if (mem_cgroup_below_min(sc->target_mem_cgroup, memcg))
 		return -1;
@@ -4960,6 +4962,11 @@ static long get_nr_to_scan(struct lruvec *lruvec, struct scan_control *sc, int s
 	/* try to get away with not aging at the default priority */
 	if (!success || sc->priority == DEF_PRIORITY)
 		return nr_to_scan >> sc->priority;
+
+	trace_android_vh_mglru_aging_bypass(lruvec, max_seq, swappiness,
+					   &bypass, &young);
+	if (bypass)
+		return young ? -1 : 0;
 
 	/* stop scanning this lruvec as it's low on cold folios */
 	return try_to_inc_max_seq(lruvec, max_seq, swappiness, false) ? -1 : 0;
