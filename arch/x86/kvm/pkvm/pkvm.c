@@ -825,7 +825,6 @@ static bool is_guest_vcpu_accessible(struct kvm_vcpu *vcpu, enum pkvm_hc hc)
 	case __pkvm__inject_nmi:
 	case __pkvm__cancel_injection:
 	case __pkvm__update_cr8_intercept:
-	case __pkvm__set_virtual_apic_mode:
 	case __pkvm__refresh_apicv_exec_ctrl:
 	case __pkvm__load_eoi_exitmap:
 	case __pkvm__hwapic_isr_update:
@@ -1128,17 +1127,6 @@ static void pkvm_cancel_injection(struct kvm_vcpu *vcpu)
 		shared_vcpu->arch.exception = vcpu->arch.exception;
 		kvm_clear_exception_queue(vcpu);
 	}
-}
-
-static void pkvm_set_virtual_apic_mode(struct kvm_vcpu *vcpu)
-{
-	u64 apic_base = to_pkvm_vcpu(vcpu)->shared_vcpu->arch.apic_base;
-
-	if ((vcpu->arch.apic_base ^ apic_base) & MSR_IA32_APICBASE_ENABLE)
-		vcpu->arch.cpuid_dynamic_bits_dirty = true;
-
-	vcpu->arch.apic_base = apic_base;
-	kvm_x86_call(set_virtual_apic_mode)(vcpu);
 }
 
 static int pkvm_refresh_apicv_exec_ctrl(struct kvm_vcpu *vcpu, bool apicv_active)
@@ -1848,7 +1836,8 @@ static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc 
 						   pkvm_hc_input2(hvcpu));
 		break;
 	case __pkvm__set_virtual_apic_mode:
-		pkvm_set_virtual_apic_mode(vcpu);
+		ret = kvm_apic_set_base(vcpu, to_pkvm_vcpu(vcpu)->shared_vcpu->arch.apic_base,
+					true);
 		break;
 	case __pkvm__refresh_apicv_exec_ctrl:
 		ret = pkvm_refresh_apicv_exec_ctrl(vcpu, pkvm_hc_input1(hvcpu));
