@@ -68,6 +68,8 @@
   __traceiter_android_vh_do_send_sig_info
   __traceiter_android_vh_do_swap_page
   __traceiter_android_vh_do_wp_page
+  __traceiter_android_vh_clear_rwsem_reader_owned
+  __traceiter_android_vh_clear_rwsem_writer_owned
   __traceiter_android_vh_dup_task_struct
   __traceiter_android_vh_f2fs_file_open
   __traceiter_android_vh_filemap_update_page
@@ -79,6 +81,8 @@
   __traceiter_android_vh_mutex_unlock_slowpath
   __traceiter_android_vh_mutex_wait_finish
   __traceiter_android_vh_mutex_wait_start
+  __traceiter_android_vh_record_rwsem_reader_owned
+  __traceiter_android_vh_record_rwsem_writer_owned
   __traceiter_android_vh_rwsem_init
   __traceiter_android_vh_rwsem_read_wait_finish
   __traceiter_android_vh_rwsem_read_wait_start
@@ -134,6 +138,8 @@
   __tracepoint_android_vh_do_send_sig_info
   __tracepoint_android_vh_do_swap_page
   __tracepoint_android_vh_do_wp_page
+  __tracepoint_android_vh_clear_rwsem_reader_owned
+  __tracepoint_android_vh_clear_rwsem_writer_owned
   __tracepoint_android_vh_dup_task_struct
   __tracepoint_android_vh_f2fs_file_open
   __tracepoint_android_vh_filemap_update_page
@@ -145,6 +151,8 @@
   __tracepoint_android_vh_mutex_unlock_slowpath
   __tracepoint_android_vh_mutex_wait_finish
   __tracepoint_android_vh_mutex_wait_start
+  __tracepoint_android_vh_record_rwsem_reader_owned
+  __tracepoint_android_vh_record_rwsem_writer_owned
   __tracepoint_android_vh_rwsem_init
   __tracepoint_android_vh_rwsem_read_wait_finish
   __tracepoint_android_vh_rwsem_read_wait_start
