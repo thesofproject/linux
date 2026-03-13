@@ -523,9 +523,16 @@ int __pkvm_guest_relinquish_to_host(struct pkvm_hyp_vcpu *vcpu,
 		hyp_poison_page(phys, PAGE_SIZE);
 	else
 		hyp_flush_page(phys, PAGE_SIZE);
-	psci_mem_protect_dec(1);
 
-	WARN_ON(host_stage2_set_owner_locked(phys, PAGE_SIZE, PKVM_ID_HOST));
+	ret = host_stage2_set_owner_locked(phys, PAGE_SIZE, PKVM_ID_HOST);
+	if (ret) {
+		WARN_ON(kvm_pgtable_stage2_map(&vm->pgt, ipa, PAGE_SIZE, phys,
+					       pkvm_mkstate(KVM_PGTABLE_PROT_RWX, PKVM_PAGE_OWNED),
+					       &vcpu->vcpu.arch.stage2_mc, 0));
+		goto end;
+	}
+
+	psci_mem_protect_dec(1);
 
 	if (pkvm_ipa_range_has_pvmfw(vm, ipa, ipa + PAGE_SIZE))
 		vm->kvm.arch.pkvm.pvmfw_load_addr = PVMFW_INVALID_LOAD_ADDR;
@@ -2202,7 +2209,10 @@ int __pkvm_guest_share_host(u64 gfn, struct pkvm_hyp_vcpu *vcpu, u64 nr_pages, u
 	if (ret)
 		goto unlock;
 
-	WARN_ON(__host_set_page_state_range(phys, size, PKVM_PAGE_SHARED_BORROWED));
+	ret = __host_set_page_state_range(phys, size, PKVM_PAGE_SHARED_BORROWED);
+	if (ret)
+		goto unlock;
+
 	psci_mem_protect_dec(nr_pages);
 	WARN_ON(kvm_pgtable_stage2_map(&vm->pgt, ipa, size, phys,
 				       pkvm_mkstate(KVM_PGTABLE_PROT_RWX, PKVM_PAGE_SHARED_OWNED),
@@ -2240,8 +2250,10 @@ int __pkvm_guest_unshare_host(u64 gfn, struct pkvm_hyp_vcpu *vcpu, u64 nr_pages,
 	if (ret)
 		goto unlock;
 
-	ret = 0;
-	WARN_ON(host_stage2_set_owner_locked(phys, size, PKVM_ID_GUEST));
+	ret = host_stage2_set_owner_locked(phys, size, PKVM_ID_GUEST);
+	if (ret)
+		goto unlock;
+
 	psci_mem_protect_inc(nr_pages);
 	WARN_ON(kvm_pgtable_stage2_map(&vm->pgt, ipa, size, phys,
 				       pkvm_mkstate(KVM_PGTABLE_PROT_RWX, PKVM_PAGE_OWNED),
