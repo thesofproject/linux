@@ -73,6 +73,158 @@ static const struct snd_kcontrol_new rt700_controls[] = {
 
 struct asoc_sdw_codec_info codec_info_list[] = {
 	{
+		.vendor_id = 0x0102,
+		.part_id = 0x5572,
+		.name_prefix = "tac5572",
+		.dais = {
+			{
+				/* speaker */
+				.direction = {true, false},
+				.dai_name = "tac5xx2-aif1",
+				.dai_type = SOC_SDW_DAI_TYPE_AMP,
+				.dailink = {SOC_SDW_AMP_OUT_DAI_ID, SOC_SDW_UNUSED_DAI_ID},
+				.init = asoc_sdw_ti_amp_init,
+				.rtd_init = asoc_sdw_ti_tac5xx2_spk_rtd_init,
+				.controls = lr_spk_controls,
+				.num_controls = ARRAY_SIZE(lr_spk_controls),
+				.widgets = lr_spk_widgets,
+				.num_widgets = ARRAY_SIZE(lr_spk_widgets),
+			},
+			{
+				/* mic */
+				.direction = {false, true},
+				.dai_name = "tac5xx2-aif2",
+				.dai_type = SOC_SDW_DAI_TYPE_MIC,
+				.dailink = {SOC_SDW_UNUSED_DAI_ID, SOC_SDW_DMIC_DAI_ID},
+				.rtd_init = asoc_sdw_ti_dmic_rtd_init,
+			},
+			{
+				/* UAJ */
+				.direction = {true, true},
+				.dai_name = "tac5xx2-aif3",
+				.dai_type = SOC_SDW_DAI_TYPE_JACK,
+				.dailink = {SOC_SDW_JACK_OUT_DAI_ID, SOC_SDW_JACK_IN_DAI_ID},
+				.controls = generic_jack_controls,
+				.num_controls = ARRAY_SIZE(generic_jack_controls),
+				.widgets = generic_jack_widgets,
+				.num_widgets = ARRAY_SIZE(generic_jack_widgets),
+				.rtd_init = asoc_sdw_ti_sdca_jack_rtd_init,
+			},
+		},
+		.dai_num = 3,
+	},
+	{
+		.vendor_id = 0x0102,
+		.part_id = 0x5672,
+		.name_prefix = "tac5672",
+		.dais = {
+			{
+				/* speaker with IV sense feedback */
+				.direction = {true, true},
+				.dai_name = "tac5xx2-aif1",
+				.dai_type = SOC_SDW_DAI_TYPE_AMP,
+				.dailink = {SOC_SDW_AMP_OUT_DAI_ID, SOC_SDW_AMP_IN_DAI_ID},
+				.init = asoc_sdw_ti_amp_init,
+				.rtd_init = asoc_sdw_ti_tac5xx2_spk_rtd_init,
+				.controls = lr_spk_controls,
+				.num_controls = ARRAY_SIZE(lr_spk_controls),
+				.widgets = lr_spk_widgets,
+				.num_widgets = ARRAY_SIZE(lr_spk_widgets),
+			},
+			{
+				/* mic */
+				.direction = {false, true},
+				.dai_name = "tac5xx2-aif2",
+				.dai_type = SOC_SDW_DAI_TYPE_MIC,
+				.dailink = {SOC_SDW_UNUSED_DAI_ID, SOC_SDW_DMIC_DAI_ID},
+				.rtd_init = asoc_sdw_ti_dmic_rtd_init,
+			},
+			{
+				/* UAJ */
+				.direction = {true, true},
+				.dai_name = "tac5xx2-aif3",
+				.dai_type = SOC_SDW_DAI_TYPE_JACK,
+				.dailink = {SOC_SDW_JACK_OUT_DAI_ID, SOC_SDW_JACK_IN_DAI_ID},
+				.controls = generic_jack_controls,
+				.num_controls = ARRAY_SIZE(generic_jack_controls),
+				.widgets = generic_jack_widgets,
+				.num_widgets = ARRAY_SIZE(generic_jack_widgets),
+				.rtd_init = asoc_sdw_ti_sdca_jack_rtd_init,
+			},
+		},
+		.dai_num = 3,
+	},
+	{
+		.vendor_id = 0x0102,
+		.part_id = 0x5682,
+		.name_prefix = "tac5682",
+		.dais = {
+			{
+				/* speaker with echo reference feedback */
+				.direction = {true, true},
+				.dai_name = "tac5xx2-aif1",
+				.dai_type = SOC_SDW_DAI_TYPE_AMP,
+				.dailink = {SOC_SDW_AMP_OUT_DAI_ID, SOC_SDW_AMP_IN_DAI_ID},
+				.init = asoc_sdw_ti_amp_init,
+				.rtd_init = asoc_sdw_ti_tac5xx2_spk_rtd_init,
+				.controls = lr_spk_controls,
+				.num_controls = ARRAY_SIZE(lr_spk_controls),
+				.widgets = lr_spk_widgets,
+				.num_widgets = ARRAY_SIZE(lr_spk_widgets),
+			},
+			{
+				/* mic */
+				.direction = {false, true},
+				.dai_name = "tac5xx2-aif2",
+				.dai_type = SOC_SDW_DAI_TYPE_MIC,
+				.dailink = {SOC_SDW_UNUSED_DAI_ID, SOC_SDW_DMIC_DAI_ID},
+				.rtd_init = asoc_sdw_ti_dmic_rtd_init,
+			},
+			{
+				/* UAJ */
+				.direction = {true, true},
+				.dai_name = "tac5xx2-aif3",
+				.dai_type = SOC_SDW_DAI_TYPE_JACK,
+				.dailink = {SOC_SDW_JACK_OUT_DAI_ID, SOC_SDW_JACK_IN_DAI_ID},
+				.controls = generic_jack_controls,
+				.num_controls = ARRAY_SIZE(generic_jack_controls),
+				.widgets = generic_jack_widgets,
+				.num_widgets = ARRAY_SIZE(generic_jack_widgets),
+				.rtd_init = asoc_sdw_ti_sdca_jack_rtd_init,
+			},
+		},
+		.dai_num = 3,
+	},
+	{
+		.vendor_id = 0x0102,
+		.part_id = 0x2883,
+		.name_prefix = "tas2883",
+		.dais = {
+			{
+				.direction = {true, false},
+				.dai_name = "tac5xx2-aif1",
+				.dai_type = SOC_SDW_DAI_TYPE_AMP,
+				.dailink = {SOC_SDW_AMP_OUT_DAI_ID, SOC_SDW_UNUSED_DAI_ID},
+				.init = asoc_sdw_ti_amp_init,
+				.rtd_init = asoc_sdw_ti_tac5xx2_spk_rtd_init,
+				.controls = lr_spk_controls,
+				.num_controls = ARRAY_SIZE(lr_spk_controls),
+				.widgets = lr_spk_widgets,
+				.num_widgets = ARRAY_SIZE(lr_spk_widgets),
+			},
+			{
+				/* mic */
+				.direction = {false, true},
+				.dai_name = "tac5xx2-aif2",
+				.dai_type = SOC_SDW_DAI_TYPE_MIC,
+				.dailink = {SOC_SDW_UNUSED_DAI_ID, SOC_SDW_DMIC_DAI_ID},
+				.rtd_init = asoc_sdw_ti_dmic_rtd_init,
+			},
+		},
+		.dai_num = 2,
+	},
+	{
+		.vendor_id = 0x0102,
 		.part_id = 0x0000, /* TAS2783A */
 		.name_prefix = "tas2783",
 		.dais = {
@@ -92,6 +244,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 1,
 	},
 	{
+		.vendor_id = 0x025d,
 		.part_id = 0x700,
 		.name_prefix = "rt700",
 		.dais = {
@@ -110,6 +263,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 1,
 	},
 	{
+		.vendor_id = 0x025d,
 		.part_id = 0x711,
 		.name_prefix = "rt711",
 		.version_id = 3,
@@ -131,6 +285,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 1,
 	},
 	{
+		.vendor_id = 0x025d,
 		.part_id = 0x711,
 		.name_prefix = "rt711",
 		.version_id = 2,
@@ -152,6 +307,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 1,
 	},
 	{
+		.vendor_id = 0x025d,
 		.part_id = 0x712,
 		.name_prefix = "rt712",
 		.version_id = 3,
@@ -194,6 +350,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 3,
 	},
 	{
+		.vendor_id = 0x025d,
 		.part_id = 0x1712,
 		.name_prefix = "rt712-dmic",
 		.version_id = 3,
@@ -209,6 +366,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 1,
 	},
 	{
+		.vendor_id = 0x025d,
 		.part_id = 0x713,
 		.name_prefix = "rt713",
 		.version_id = 3,
@@ -237,6 +395,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 2,
 	},
 	{
+		.vendor_id = 0x025d,
 		.part_id = 0x1713,
 		.name_prefix = "rt713-dmic",
 		.version_id = 3,
@@ -252,6 +411,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 1,
 	},
 	{
+		.vendor_id = 0x025d,
 		.part_id = 0x1308,
 		.name_prefix = "rt1308",
 		.acpi_id = "10EC1308",
@@ -275,6 +435,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.ops = &soc_sdw_rt1308_i2s_ops,
 	},
 	{
+		.vendor_id = 0x025d,
 		.part_id = 0x1316,
 		.name_prefix = "rt1316",
 		.dais = {
@@ -296,6 +457,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 1,
 	},
 	{
+		.vendor_id = 0x025d,
 		.part_id = 0x1318,
 		.name_prefix = "rt1318",
 		.dais = {
@@ -317,6 +479,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 1,
 	},
 	{
+		.vendor_id = 0x025d,
 		.part_id = 0x1320,
 		.name_prefix = "rt1320",
 		.dais = {
@@ -338,6 +501,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 1,
 	},
 	{
+		.vendor_id = 0x025d,
 		.part_id = 0x1321,
 		.name_prefix = "rt1320",
 		.dais = {
@@ -359,6 +523,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 1,
 	},
 	{
+		.vendor_id = 0x025d,
 		.part_id = 0x714,
 		.name_prefix = "rt714",
 		.version_id = 3,
@@ -375,6 +540,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 1,
 	},
 	{
+		.vendor_id = 0x025d,
 		.part_id = 0x715,
 		.name_prefix = "rt715",
 		.version_id = 3,
@@ -391,6 +557,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 1,
 	},
 	{
+		.vendor_id = 0x025d,
 		.part_id = 0x714,
 		.name_prefix = "rt714",
 		.version_id = 2,
@@ -407,6 +574,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 1,
 	},
 	{
+		.vendor_id = 0x025d,
 		.part_id = 0x715,
 		.name_prefix = "rt715",
 		.version_id = 2,
@@ -423,6 +591,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 1,
 	},
 	{
+		.vendor_id = 0x025d,
 		.part_id = 0x721,
 		.name_prefix = "rt721",
 		.version_id = 3,
@@ -466,6 +635,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 3,
 	},
 	{
+		.vendor_id = 0x025d,
 		.part_id = 0x722,
 		.name_prefix = "rt722",
 		.version_id = 3,
@@ -513,6 +683,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 3,
 	},
 	{
+		.vendor_id = 0x019f,
 		.part_id = 0x8373,
 		.name_prefix = "Left",
 		.dais = {
@@ -533,6 +704,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 1,
 	},
 	{
+		.vendor_id = 0x019f,
 		.part_id = 0x8363,
 		.name_prefix = "Left",
 		.dais = {
@@ -553,6 +725,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 1,
 	},
 	{
+		.vendor_id = 0x025d,
 		.part_id = 0x5682,
 		.name_prefix = "rt5682",
 		.dais = {
@@ -571,6 +744,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 1,
 	},
 	{
+		.vendor_id = 0x01fa,
 		.part_id = 0x3556,
 		.name_prefix = "AMP",
 		.dais = {
@@ -598,6 +772,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 2,
 	},
 	{
+		.vendor_id = 0x01fa,
 		.part_id = 0x3557,
 		.name_prefix = "AMP",
 		.dais = {
@@ -625,6 +800,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 2,
 	},
 	{
+		.vendor_id = 0x01fa,
 		.part_id = 0x3563,
 		.name_prefix = "AMP",
 		.dais = {
@@ -652,6 +828,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 2,
 	},
 	{
+		.vendor_id = 0x01fa,
 		.part_id = 0x4242,
 		.name_prefix = "cs42l42",
 		.dais = {
@@ -670,6 +847,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 1,
 	},
 	{
+		.vendor_id = 0x01fa,
 		.part_id = 0x4243,
 		.name_prefix = "cs42l43",
 		.count_sidecar = asoc_sdw_bridge_cs35l56_count_sidecar,
@@ -724,6 +902,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 4,
 	},
 	{
+		.vendor_id = 0x01fa,
 		.part_id = 0x4245,
 		.name_prefix = "cs42l45",
 		.dais = {
@@ -760,6 +939,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.aux_num = 1,
 	},
 	{
+		.vendor_id = 0x01fa,
 		.part_id = 0x4747,
 		.name_prefix = "cs47l47",
 		.dais = {
@@ -796,6 +976,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.aux_num = 1,
 	},
 	{
+		.vendor_id = 0x0105,
 		.part_id = 0xaaaa, /* generic codec mockup */
 		.name_prefix = "sdw_mockup_mmulti-function",
 		.version_id = 0,
@@ -822,6 +1003,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 3,
 	},
 	{
+		.vendor_id = 0x0105,
 		.part_id = 0xaa55, /* headset codec mockup */
 		.name_prefix = "sdw_mockup_headset0",
 		.version_id = 0,
@@ -836,6 +1018,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 1,
 	},
 	{
+		.vendor_id = 0x0105,
 		.part_id = 0x55aa, /* amplifier mockup */
 		.name_prefix = "sdw_mockup_amp1",
 		.version_id = 0,
@@ -850,6 +1033,7 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 		.dai_num = 1,
 	},
 	{
+		.vendor_id = 0x0105,
 		.part_id = 0x5555,
 		.name_prefix = "sdw_mockup_mic0",
 		.version_id = 0,
@@ -874,9 +1058,10 @@ EXPORT_SYMBOL_NS(asoc_sdw_get_codec_info_list_count, "SND_SOC_SDW_UTILS");
 
 struct asoc_sdw_codec_info *asoc_sdw_find_codec_info_part(const u64 adr)
 {
-	unsigned int part_id, sdw_version;
+	unsigned int vendor_id, part_id, sdw_version;
 	int i;
 
+	vendor_id = SDW_MFG_ID(adr);
 	part_id = SDW_PART_ID(adr);
 	sdw_version = SDW_VERSION(adr);
 	for (i = 0; i < ARRAY_SIZE(codec_info_list); i++)
@@ -885,6 +1070,7 @@ struct asoc_sdw_codec_info *asoc_sdw_find_codec_info_part(const u64 adr)
 		 * version_id is not specified in the codec info.
 		 */
 		if (part_id == codec_info_list[i].part_id &&
+		    vendor_id == codec_info_list[i].vendor_id &&
 		    (!codec_info_list[i].version_id ||
 		     sdw_version == codec_info_list[i].version_id))
 			return &codec_info_list[i];
@@ -899,6 +1085,7 @@ static struct asoc_sdw_codec_info *asoc_sdw_find_codec_info_sdw_id(const struct 
 
 	for (i = 0; i < ARRAY_SIZE(codec_info_list); i++)
 		if (id->part_id == codec_info_list[i].part_id &&
+		    id->mfg_id == codec_info_list[i].vendor_id &&
 		    (!codec_info_list[i].version_id ||
 		     id->sdw_version == codec_info_list[i].version_id))
 			return &codec_info_list[i];
@@ -1003,8 +1190,8 @@ int asoc_sdw_rtd_init(struct snd_soc_pcm_runtime *rtd)
 			ret = snd_soc_add_card_controls(card, codec_info->dais[dai_index].controls,
 							codec_info->dais[dai_index].num_controls);
 			if (ret) {
-				dev_err(card->dev, "%#x controls addition failed: %d\n",
-					codec_info->part_id, ret);
+				dev_err(card->dev, "%#x-%#x controls addition failed: %d\n",
+					codec_info->vendor_id, codec_info->part_id, ret);
 				return ret;
 			}
 		}
@@ -1013,8 +1200,8 @@ int asoc_sdw_rtd_init(struct snd_soc_pcm_runtime *rtd)
 							codec_info->dais[dai_index].widgets,
 							codec_info->dais[dai_index].num_widgets);
 			if (ret) {
-				dev_err(card->dev, "%#x widgets addition failed: %d\n",
-					codec_info->part_id, ret);
+				dev_err(card->dev, "%#x-%#x widgets addition failed: %d\n",
+					codec_info->vendor_id, codec_info->part_id, ret);
 				return ret;
 			}
 		}
