@@ -1224,6 +1224,9 @@ static struct snd_soc_acpi_adr_device *find_acpi_adr_device(struct device *dev,
 		break;
 	}
 
+	if (codec_info_list[i].is_amp)
+		is_amp = true;
+
 	if (i == asoc_sdw_get_codec_info_list_count()) {
 		dev_err(dev, "part id %#x is not supported\n", sdw_device->id.part_id);
 		return NULL;

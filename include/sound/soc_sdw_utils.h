@@ -82,6 +82,7 @@ struct asoc_sdw_codec_info {
 	const int dai_num;
 	struct asoc_sdw_aux_info auxs[SOC_SDW_MAX_AUX_NUM];
 	const int aux_num;
+	const bool is_amp;
 
 	int (*codec_card_late_probe)(struct snd_soc_card *card);
 
