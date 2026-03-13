@@ -1229,6 +1229,9 @@ static struct snd_soc_acpi_adr_device *find_acpi_adr_device(struct device *dev,
 		return NULL;
 	}
 
+	if (codec_info_list[i].is_amp)
+		is_amp = true;
+
 	adr_dev[index].adr = ((u64)sdw_device->id.class_id & 0xFF) |
 			((u64)sdw_device->id.part_id & 0xFFFF) << 8 |
 			((u64)sdw_device->id.mfg_id & 0xFFFF) << 24 |
