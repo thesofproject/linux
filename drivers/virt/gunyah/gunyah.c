@@ -44,11 +44,52 @@ void *gunyah_get_info(u16 owner, u16 id, size_t *size)
 }
 EXPORT_SYMBOL_GPL(gunyah_get_info);
 
+/**
+ * gunyah_map_addrspace_info_area - Map the addrspace info area
+ *
+ * Maps the hypervisor-provided addrspace info area into kernel space.
+ * Typically used once during the initialization and after hibernation
+ * restore (PM_POST_HIBERNATION) or in other scenarios where the info area
+ * needs to be re-initialized so as to establish the communincation with
+ * the resource manager.
+ */
+int gunyah_map_addrspace_info_area(void)
+{
+	unsigned long info_ipa, info_size;
+	enum gunyah_error gh_error;
+
+	gh_error = gunyah_hypercall_addrspace_find_info_area(&info_ipa, &info_size);
+	/* ignore errors for compatibility with gh without info_area support */
+	if (gh_error != GUNYAH_ERROR_OK)
+		return 0;
+
+	info_area = memremap(info_ipa, info_size, MEMREMAP_WB);
+	if (!info_area) {
+		pr_err("Failed to map addrspace info area\n");
+		return -ENOMEM;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(gunyah_map_addrspace_info_area);
+
+/**
+ * gunyah_unmap_addrspace_info_area - Unmap the addrspace info area
+ *
+ * Unmaps the previously mapped addrspace info area. Commonly used
+ * before hibernation (PM_HIBERNATION_PREPARE) or when the mapping
+ * is no longer needed.
+ */
+void gunyah_unmap_addrspace_info_area(void)
+{
+	memunmap(info_area);
+	info_area = NULL;
+}
+EXPORT_SYMBOL_GPL(gunyah_unmap_addrspace_info_area);
+
 static int __init gunyah_init(void)
 {
 	struct gunyah_hypercall_hyp_identify_resp gunyah_api;
-	unsigned long info_ipa, info_size;
-	enum gunyah_error gh_error;
 
 	if (!arch_is_gunyah_guest())
 		return -ENODEV;
@@ -66,18 +107,7 @@ static int __init gunyah_init(void)
 		return -ENODEV;
 	}
 
-	gh_error = gunyah_hypercall_addrspace_find_info_area(&info_ipa, &info_size);
-	/* ignore errors for compatability with gh without info_area support */
-	if (gh_error != GUNYAH_ERROR_OK)
-		return 0;
-
-	info_area = memremap(info_ipa, info_size, MEMREMAP_WB);
-	if (!info_area) {
-		pr_err("Failed to map addrspace info area\n");
-		return -ENOMEM;
-	}
-
-	return 0;
+	return gunyah_map_addrspace_info_area();
 }
 core_initcall(gunyah_init);
 

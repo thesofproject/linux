@@ -426,6 +426,8 @@ enum gunyah_info_owner {
 };
 
 void *gunyah_get_info(u16 owner, u16 id, size_t *size);
+int gunyah_map_addrspace_info_area(void);
+void gunyah_unmap_addrspace_info_area(void);
 
 #define GUNYAH_API_V1 1
 
