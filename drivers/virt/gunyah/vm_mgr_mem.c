@@ -15,6 +15,11 @@
 #define WRITE_TAG (1 << 0)
 #define SHARE_TAG (1 << 1)
 
+static inline bool gunyah_vm_is_fw_binding(struct gunyah_vm *ghvm, struct gunyah_vm_binding *b)
+{
+	return b->guest_phys_addr == ghvm->fw.config.guest_phys_addr;
+}
+
 static inline struct gunyah_resource *
 __first_resource(struct gunyah_vm_resource_ticket *ticket)
 {
@@ -154,25 +159,37 @@ int gunyah_vm_provide_folio(struct gunyah_vm *ghvm, struct folio *folio,
 	int ret, tmp;
 
 	/* clang-format off */
-	if (share) {
+	if (!ghvm->is_protected) {
+		guest_extent = __first_resource(&ghvm->guest_paged_extent_ticket);
+		host_extent = __first_resource(&ghvm->host_unprotected_extent_ticket);
+		tag |= SHARE_TAG;
+		if (write)
+			access = GUNYAH_PAGETABLE_ACCESS_RWX;
+		else
+			access = GUNYAH_PAGETABLE_ACCESS_RX;
+	} else if (share) {
 		guest_extent = __first_resource(&ghvm->guest_protected_shared_extent_ticket);
 		host_extent = __first_resource(&ghvm->host_unprotected_extent_ticket);
+		map_flags |= BIT(GUNYAH_ADDRSPACE_MAP_FLAG_VMMIO);
+		tag |= SHARE_TAG;
+		if (write)
+			access = GUNYAH_PAGETABLE_ACCESS_RW;
+		else
+			access = GUNYAH_PAGETABLE_ACCESS_R;
 	} else {
 		guest_extent = __first_resource(&ghvm->guest_paged_extent_ticket);
 		host_extent = __first_resource(&ghvm->host_protected_extent_ticket);
+		map_flags |= BIT(GUNYAH_ADDRSPACE_MAP_FLAG_PRIVATE);
+		if (write)
+			access = GUNYAH_PAGETABLE_ACCESS_RWX;
+		else
+			access = GUNYAH_PAGETABLE_ACCESS_RX;
 	}
 	/* clang-format on */
 	addrspace = __first_resource(&ghvm->addrspace_ticket);
 
 	if (!addrspace || !guest_extent || !host_extent)
 		return -ENODEV;
-
-	if (share) {
-		map_flags |= BIT(GUNYAH_ADDRSPACE_MAP_FLAG_VMMIO);
-		tag |= SHARE_TAG;
-	} else {
-		map_flags |= BIT(GUNYAH_ADDRSPACE_MAP_FLAG_PRIVATE);
-	}
 
 	if (write)
 		tag |= WRITE_TAG;
@@ -184,15 +201,6 @@ int gunyah_vm_provide_folio(struct gunyah_vm *ghvm, struct folio *folio,
 		ret = -EAGAIN;
 	if (ret)
 		return ret;
-
-	if (share && write)
-		access = GUNYAH_PAGETABLE_ACCESS_RW;
-	else if (share && !write)
-		access = GUNYAH_PAGETABLE_ACCESS_R;
-	else if (!share && write)
-		access = GUNYAH_PAGETABLE_ACCESS_RWX;
-	else /* !share && !write */
-		access = GUNYAH_PAGETABLE_ACCESS_RX;
 
 	ret = gunyah_rm_platform_pre_demand_page(ghvm->rm, ghvm->vmid, access,
 						 folio);
@@ -273,14 +281,29 @@ static int __gunyah_vm_reclaim_folio_locked(struct gunyah_vm *ghvm, void *entry,
 		map_flags |= BIT(GUNYAH_ADDRSPACE_MAP_FLAG_NOSYNC);
 
 	/* clang-format off */
-	if (share) {
+	if (!ghvm->is_protected) {
+		guest_extent = __first_resource(&ghvm->guest_paged_extent_ticket);
+		host_extent = __first_resource(&ghvm->host_unprotected_extent_ticket);
+		if (write)
+			access = GUNYAH_PAGETABLE_ACCESS_RWX;
+		else
+			access = GUNYAH_PAGETABLE_ACCESS_RX;
+	} else if (share) {
 		guest_extent = __first_resource(&ghvm->guest_protected_shared_extent_ticket);
 		host_extent = __first_resource(&ghvm->host_unprotected_extent_ticket);
 		map_flags |= BIT(GUNYAH_ADDRSPACE_MAP_FLAG_VMMIO);
+		if (write)
+			access = GUNYAH_PAGETABLE_ACCESS_RW;
+		else
+			access = GUNYAH_PAGETABLE_ACCESS_R;
 	} else {
 		guest_extent = __first_resource(&ghvm->guest_paged_extent_ticket);
 		host_extent = __first_resource(&ghvm->host_protected_extent_ticket);
 		map_flags |= BIT(GUNYAH_ADDRSPACE_MAP_FLAG_PRIVATE);
+		if (write)
+			access = GUNYAH_PAGETABLE_ACCESS_RWX;
+		else
+			access = GUNYAH_PAGETABLE_ACCESS_RX;
 	}
 	/* clang-format on */
 
@@ -309,15 +332,6 @@ static int __gunyah_vm_reclaim_folio_locked(struct gunyah_vm *ghvm, void *entry,
 		ret = gunyah_error_remap(gunyah_error);
 		goto err;
 	}
-
-	if (share && write)
-		access = GUNYAH_PAGETABLE_ACCESS_RW;
-	else if (share && !write)
-		access = GUNYAH_PAGETABLE_ACCESS_R;
-	else if (!share && write)
-		access = GUNYAH_PAGETABLE_ACCESS_RWX;
-	else /* !share && !write */
-		access = GUNYAH_PAGETABLE_ACCESS_RX;
 
 	ret = gunyah_rm_platform_reclaim_demand_page(ghvm->rm, ghvm->vmid,
 						     access, folio);
@@ -680,6 +694,26 @@ unlock:
 	return ret;
 }
 
+int gunyah_vm_set_protected(struct gunyah_vm *ghvm)
+{
+	struct gunyah_vm_binding *b;
+
+	down_read(&ghvm->bindings_lock);
+	b = mtree_load(&ghvm->bindings, ghvm->config_image.parcel.start);
+	if (!b) {
+		up_read(&ghvm->bindings_lock);
+		return -ENOENT;
+	}
+
+	/*
+	 * If the Image parcel also called the primary parcel is lent, then the VM is
+	 * considered to be a protected VM.
+	 */
+	ghvm->is_protected = b->share_type == VM_MEM_LEND;
+	up_read(&ghvm->bindings_lock);
+	return 0;
+}
+
 /*
  * This function will provide the number of bindings from
  * start_addr to end_addr.
@@ -860,10 +894,16 @@ int gunyah_setup_demand_paging(struct gunyah_vm *ghvm, u64 start_gfn,
 	int ret = 0;
 
 	down_read(&ghvm->bindings_lock);
-	mt_for_each(&ghvm->bindings, b, gfn, end_gfn)
-		if (b->share_type == VM_MEM_LEND &&
-			(b->guest_phys_addr != ghvm->fw.config.guest_phys_addr))
-			count++;
+	if (ghvm->is_protected) {
+		mt_for_each(&ghvm->bindings, b, gfn, end_gfn)
+			if (b->share_type == VM_MEM_LEND &&
+				!gunyah_vm_is_fw_binding(ghvm, b))
+				count++;
+	} else {
+		mt_for_each(&ghvm->bindings, b, gfn, end_gfn)
+			if (!gunyah_vm_is_fw_binding(ghvm, b))
+				count++;
+	}
 
 	if (!count)
 		goto out;
@@ -877,9 +917,15 @@ int gunyah_setup_demand_paging(struct gunyah_vm *ghvm, u64 start_gfn,
 	gfn = start_gfn;
 	i = 0;
 	mt_for_each(&ghvm->bindings, b, gfn, end_gfn) {
-		if (b->share_type != VM_MEM_LEND ||
-			(b->guest_phys_addr == ghvm->fw.config.guest_phys_addr))
-			continue;
+		if (ghvm->is_protected) {
+			if (b->share_type != VM_MEM_LEND ||
+				gunyah_vm_is_fw_binding(ghvm, b))
+				continue;
+		} else {
+			if (gunyah_vm_is_fw_binding(ghvm, b))
+				continue;
+		}
+
 		entries[i].phys_addr = cpu_to_le64(b->guest_phys_addr);
 		entries[i].size = cpu_to_le64(b->size);
 		if (++i == count)
