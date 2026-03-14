@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #define pr_fmt(fmt) "gunyah: " fmt
 
 #include <linux/completion.h>
 #include <linux/gunyah.h>
+#include <linux/kobject.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/notifier.h>
@@ -16,6 +17,7 @@
 #include <linux/miscdevice.h>
 #include <linux/auxiliary_bus.h>
 #include <linux/suspend.h>
+#include <linux/io.h>
 
 #include <asm/gunyah.h>
 
@@ -39,6 +41,13 @@
 #define GUNYAH_RM_MAX_NUM_FRAGMENTS		62
 #define RM_RPC_FRAGMENTS_MASK		GENMASK(7, 2)
 /* clang-format on */
+
+struct gunyah_rm_log {
+	uint32_t write_idx;
+	uint32_t size;
+
+	char buffer[];
+};
 
 struct gunyah_rm_rpc_hdr {
 	u8 api;
@@ -713,6 +722,90 @@ static const struct file_operations gunyah_dev_fops = {
 	/* clang-format on */
 };
 
+static struct gunyah_rm_log *rm_log_ptr;
+static DEFINE_MUTEX(rm_log_lock);
+
+static ssize_t rm_log_show(struct kobject *kobj, struct kobj_attribute *attr, char *buffer)
+{
+	struct gunyah_rm_log *log;
+	uint32_t write_idx, size;
+	int len = 0;
+	size_t buf_size = PAGE_SIZE;
+
+	mutex_lock(&rm_log_lock);
+	log = rm_log_ptr;
+	if (!log) {
+		mutex_unlock(&rm_log_lock);
+		return 0;
+	}
+
+	write_idx = READ_ONCE(log->write_idx);
+	size = READ_ONCE(log->size);
+
+	/* Validate indices to prevent out-of-bounds access */
+	if (write_idx >= size || size == 0) {
+		mutex_unlock(&rm_log_lock);
+		return 0;
+	}
+
+	/* Print the second part of the circular buffer */
+	if (write_idx + 1 < size) {
+		size_t remaining = size - (write_idx + 1);
+
+		len += sysfs_emit_at(buffer, len, "%.*s",
+			(int)min_t(size_t, remaining, buf_size - len),
+			&log->buffer[write_idx + 1]);
+	}
+
+	/* Print the first part of the circular buffer if there's space left */
+	if (len < buf_size && write_idx > 0) {
+		len += sysfs_emit_at(buffer, len, "%.*s",
+			(int)min_t(size_t, write_idx, buf_size - len),
+			&log->buffer[0]);
+	}
+
+	mutex_unlock(&rm_log_lock);
+	return len;
+}
+
+static struct kobj_attribute rm_log_attr = __ATTR_RO(rm_log);
+
+static int gunyah_rm_sysfs_register(struct gunyah_rm *rm)
+{
+	u64 addr;
+	u64 size;
+
+	int ret = gunyah_rm_get_log(rm, 0, &addr, &size);
+
+	if (ret < 0) {
+		pr_err("Error in returning log: %d\n", ret);
+		return 0;
+	}
+
+	rm_log_ptr = (struct gunyah_rm_log *) memremap(addr, size, MEMREMAP_WB);
+	if (!rm_log_ptr) {
+		pr_err("Failed to map RM log memory\n");
+		return -ENOMEM;
+	}
+
+	ret = sysfs_create_file(hypervisor_kobj, &rm_log_attr.attr);
+	if (ret) {
+		memunmap(rm_log_ptr);
+		rm_log_ptr = NULL;
+	}
+	return ret;
+}
+
+static void gunyah_rm_sysfs_unregister(void)
+{
+	sysfs_remove_file(hypervisor_kobj, &rm_log_attr.attr);
+	mutex_lock(&rm_log_lock);
+	if (rm_log_ptr)
+		memunmap(rm_log_ptr);
+	rm_log_ptr = NULL;
+	mutex_unlock(&rm_log_lock);
+}
+
 static int gunyah_rm_probe_info_area(struct gunyah_rm *rm)
 {
 	struct gunyah_rm_info *info;
@@ -946,6 +1039,10 @@ static int __init gunyah_rm_init(void)
 	if (ret)
 		pr_err("Failed to register gunyah CMA device\n");
 
+	ret = gunyah_rm_sysfs_register(rm);
+	if (ret)
+		pr_err("Failed to setup RM log\n");
+
 	__rm = no_free_ptr(rm);
 	return 0;
 deregister_misc:
@@ -967,6 +1064,7 @@ static void __exit gunyah_rm_exit(void)
 	if (!rm)
 		return;
 
+	gunyah_rm_sysfs_unregister();
 	gunyah_cma_mem_exit();
 	auxiliary_device_delete(&rm->adev);
 	misc_deregister(&rm->miscdev);

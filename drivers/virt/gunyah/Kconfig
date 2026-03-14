@@ -10,6 +10,8 @@ config GUNYAH
 	select AUXILIARY_BUS
 	imply GUNYAH_QCOM_PLATFORM if ARCH_QCOM
 	select GUNYAH_HYPERCALLS
+	depends on SYSFS
+	select SYS_HYPERVISOR
 	help
 	  The Gunyah drivers are the helper interfaces that run in a guest VM
 	  such as basic inter-VM IPC and signaling mechanisms, and higher level
