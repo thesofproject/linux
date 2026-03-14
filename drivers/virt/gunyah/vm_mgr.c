@@ -907,6 +907,10 @@ static int gunyah_vm_start(struct gunyah_vm *ghvm)
 	if (ret)
 		goto err;
 
+	if (ghvm->fw.config.size > 0 && ghvm->auth == GUNYAH_RM_VM_AUTH_QCOM_TRUSTED_VM)
+		trace_android_rvh_gh_note_fw_parcel(ghvm, ghvm->vmid,
+						    ghvm->fw.parcel.parcel.mem_handle);
+
 	ret = gunyah_rm_vm_start(ghvm->rm, ghvm->vmid);
 	if (ret) {
 		dev_warn(ghvm->parent, "Failed to start VM: %d\n", ret);

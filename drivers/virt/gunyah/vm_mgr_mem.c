@@ -784,6 +784,15 @@ int gunyah_reclaim_parcels(struct gunyah_vm *ghvm, u64 start_gfn,
 	return ret2;
 }
 
+int gunyah_reclaim_fw_parcel(struct gunyah_vm *ghvm, u32 mem_handle)
+{
+	if (ghvm->fw.parcel.parcel.mem_handle != mem_handle)
+		return -EINVAL;
+
+	return gunyah_reclaim_parcel(ghvm, &ghvm->fw.parcel);
+}
+EXPORT_SYMBOL_GPL(gunyah_reclaim_fw_parcel);
+
 /*
  * gunyah_share_range_as_parcels() - Share all bindings as parcels from start_gfn to end_gfn
  * @ghvm - The gunyah vm
