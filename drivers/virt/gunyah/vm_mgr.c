@@ -19,14 +19,14 @@
 #include "vm_mgr.h"
 
 #define GUNYAH_VM_ADDRSPACE_LABEL 0
-// "To" extent for memory private to guest
-#define GUNYAH_VM_MEM_EXTENT_GUEST_PRIVATE_LABEL 0
+// "To" extent for main memory of the guest
+#define GUNYAH_VM_MEM_EXTENT_GUEST_PAGED_LABEL 0
 // "From" extent for memory shared with guest
-#define GUNYAH_VM_MEM_EXTENT_HOST_SHARED_LABEL 1
-// "To" extent for memory shared with the guest
-#define GUNYAH_VM_MEM_EXTENT_GUEST_SHARED_LABEL 3
+#define GUNYAH_VM_MEM_EXTENT_HOST_UNPROTECTED_LABEL 1
 // "From" extent for memory private to guest
-#define GUNYAH_VM_MEM_EXTENT_HOST_PRIVATE_LABEL 2
+#define GUNYAH_VM_MEM_EXTENT_HOST_PROTECTED_LABEL 2
+// "To" extent for memory shared with the protected guest
+#define GUNYAH_VM_MEM_EXTENT_GUEST_PROTECTED_SHARED_LABEL 3
 
 #define BOOT_CONTEXT_REG_MASK	GUNYAH_VM_BOOT_CONTEXT_REG(0xff, 0xff)
 
@@ -716,14 +716,14 @@ static __must_check struct gunyah_vm *gunyah_vm_alloc(struct gunyah_rm *rm)
 		gunyah_vm_resource_ticket_unpopulate_noop;
 	gunyah_vm_add_resource_ticket(ghvm, &ghvm->addrspace_ticket);
 
-	setup_extent_ticket(ghvm, &ghvm->host_private_extent_ticket,
-			    GUNYAH_VM_MEM_EXTENT_HOST_PRIVATE_LABEL);
-	setup_extent_ticket(ghvm, &ghvm->host_shared_extent_ticket,
-			    GUNYAH_VM_MEM_EXTENT_HOST_SHARED_LABEL);
-	setup_extent_ticket(ghvm, &ghvm->guest_private_extent_ticket,
-			    GUNYAH_VM_MEM_EXTENT_GUEST_PRIVATE_LABEL);
-	setup_extent_ticket(ghvm, &ghvm->guest_shared_extent_ticket,
-			    GUNYAH_VM_MEM_EXTENT_GUEST_SHARED_LABEL);
+	setup_extent_ticket(ghvm, &ghvm->host_protected_extent_ticket,
+			    GUNYAH_VM_MEM_EXTENT_HOST_PROTECTED_LABEL);
+	setup_extent_ticket(ghvm, &ghvm->host_unprotected_extent_ticket,
+			    GUNYAH_VM_MEM_EXTENT_HOST_UNPROTECTED_LABEL);
+	setup_extent_ticket(ghvm, &ghvm->guest_paged_extent_ticket,
+			    GUNYAH_VM_MEM_EXTENT_GUEST_PAGED_LABEL);
+	setup_extent_ticket(ghvm, &ghvm->guest_protected_shared_extent_ticket,
+			    GUNYAH_VM_MEM_EXTENT_GUEST_PROTECTED_SHARED_LABEL);
 
 	ghvm->auth = GUNYAH_RM_VM_AUTH_NONE;
 	ghvm->auth_vm_mgr_ops = &generic_vm_ops;
@@ -1135,10 +1135,10 @@ static void _gunyah_vm_put(struct kref *kref)
 
 	/* clang-format off */
 	gunyah_vm_remove_resource_ticket(ghvm, &ghvm->addrspace_ticket);
-	gunyah_vm_remove_resource_ticket(ghvm, &ghvm->host_shared_extent_ticket);
-	gunyah_vm_remove_resource_ticket(ghvm, &ghvm->host_private_extent_ticket);
-	gunyah_vm_remove_resource_ticket(ghvm, &ghvm->guest_shared_extent_ticket);
-	gunyah_vm_remove_resource_ticket(ghvm, &ghvm->guest_private_extent_ticket);
+	gunyah_vm_remove_resource_ticket(ghvm, &ghvm->host_unprotected_extent_ticket);
+	gunyah_vm_remove_resource_ticket(ghvm, &ghvm->host_protected_extent_ticket);
+	gunyah_vm_remove_resource_ticket(ghvm, &ghvm->guest_protected_shared_extent_ticket);
+	gunyah_vm_remove_resource_ticket(ghvm, &ghvm->guest_paged_extent_ticket);
 	/* clang-format on */
 
 	ret = gunyah_vm_pre_vm_reset(ghvm);
