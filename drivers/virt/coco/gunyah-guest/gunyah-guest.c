@@ -5,6 +5,9 @@
 #include <linux/init.h>
 #include <linux/io.h>
 #include <linux/pgtable.h>
+#include <linux/memblock.h>
+#include <linux/of_fdt.h>
+#include <linux/libfdt.h>
 #include <linux/virtio_balloon.h>
 
 #include <asm/hypervisor.h>
@@ -103,3 +106,47 @@ static int __init gunyah_guest_init(void)
 	return 0;
 }
 core_initcall_sync(gunyah_guest_init);
+
+static int __init gunyah_map_restricted_dma(char *unused)
+{
+	const void *fdt = initial_boot_params;
+	int resv, off, len;
+	const __be32 *reg, *p;
+	phys_addr_t base, size;
+
+	if (!fdt)
+		return 0;
+
+	resv = fdt_path_offset(fdt, "/reserved-memory");
+	if (resv < 0)
+		return 0;
+
+	for (off = fdt_first_subnode(fdt, resv); off >= 0; off = fdt_next_subnode(fdt, off)) {
+		if (of_flat_dt_is_compatible(off, "restricted-dma-pool"))
+			break;
+	}
+
+	if (off < 0)
+		return 0;
+
+	if (fdt_getprop(fdt, off, "no-map", &len))
+		return 0;
+
+	reg = fdt_getprop(fdt, off, "reg", &len);
+	if (!reg)
+		return 0;
+
+	p = reg;
+	base = dt_mem_next_cell(dt_root_addr_cells, &p);
+	size = dt_mem_next_cell(dt_root_size_cells, &p);
+	if (!size)
+		return 0;
+
+	/* Make it mappable by the direct map; reserved-memory scan will reserve it */
+	memblock_add(base, size);
+
+	pr_debug("%s: added %pa..%pa to memblock.memory\n", __func__,
+		&base, &(phys_addr_t){ base + size - 1 });
+	return 0;
+}
+early_param("reset_devices", gunyah_map_restricted_dma);
