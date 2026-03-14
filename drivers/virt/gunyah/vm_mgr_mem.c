@@ -22,16 +22,37 @@ __first_resource(struct gunyah_vm_resource_ticket *ticket)
 					struct gunyah_resource, list);
 }
 
+/*
+ * Once the parcel is converted to paged, vm_mgr only tracks
+ * the pages. The parcel needs to be reclaimed by the caller.
+ */
 int gunyah_vm_parcel_to_paged(struct gunyah_vm *ghvm,
 			      struct gunyah_rm_mem_parcel *parcel, u64 gfn,
 			      u64 nr)
 {
+	struct gunyah_vm_parcel *vm_parcel;
 	struct gunyah_rm_mem_entry *entry;
+	struct gunyah_vm_binding *b;
 	unsigned long i, tag = 0;
 	struct folio *folio;
 	pgoff_t off = 0;
 	u64 size;
-	int ret;
+	int ret = 0;
+
+	down_write(&ghvm->bindings_lock);
+	b = mtree_load(&ghvm->bindings, gfn);
+	if (!b) {
+		WARN_ON("No backing binding for the parcel being paged");
+		ret = -ENOENT;
+		goto unlock;
+	}
+
+	vm_parcel = b->vm_parcel;
+	if (!vm_parcel) {
+		WARN_ON("No parcel found");
+		ret = -ENOENT;
+		goto unlock;
+	}
 
 	if (parcel->n_acl_entries > 1)
 		tag |= SHARE_TAG;
@@ -50,7 +71,7 @@ int gunyah_vm_parcel_to_paged(struct gunyah_vm *ghvm,
 			if (ret) {
 				WARN_ON(ret != -ENOMEM);
 				gunyah_vm_mm_erase_range(ghvm, gfn, off - 1);
-				return ret;
+				goto unlock;
 			}
 			off += folio_nr_pages(folio);
 			size -= folio_size(folio);
@@ -58,8 +79,12 @@ int gunyah_vm_parcel_to_paged(struct gunyah_vm *ghvm,
 		}
 	}
 	BUG_ON(off != nr);
+	vm_parcel->start = 0;
+	b->vm_parcel = NULL;
 
-	return 0;
+unlock:
+	up_write(&ghvm->bindings_lock);
+	return ret;
 }
 
 /**
@@ -74,9 +99,13 @@ void gunyah_vm_mm_erase_range(struct gunyah_vm *ghvm, u64 gfn, u64 nr)
 {
 	struct folio *folio;
 	u64 off = gfn;
+	void *entry;
 
 	while (off < gfn + nr) {
-		folio = xa_untag_pointer(mtree_erase(&ghvm->mm, off));
+		entry = mtree_erase(&ghvm->mm, off);
+		if (!entry)
+			return;
+		folio = xa_untag_pointer(entry);
 		if (!folio)
 			return;
 		off += folio_nr_pages(folio);
@@ -135,9 +164,8 @@ int gunyah_vm_provide_folio(struct gunyah_vm *ghvm, struct folio *folio,
 	/* clang-format on */
 	addrspace = __first_resource(&ghvm->addrspace_ticket);
 
-	if (!addrspace || !guest_extent || !host_extent) {
+	if (!addrspace || !guest_extent || !host_extent)
 		return -ENODEV;
-	}
 
 	if (share) {
 		map_flags |= BIT(GUNYAH_ADDRSPACE_MAP_FLAG_VMMIO);
@@ -356,7 +384,7 @@ int gunyah_vm_binding_alloc(struct gunyah_vm *ghvm,
 			    struct gunyah_userspace_memory_region *region,
 			    bool lend)
 {
-	struct gunyah_vm_gup_binding *binding;
+	struct gunyah_vm_binding *binding;
 	int ret = 0;
 
 	if (!region->memory_size || !PAGE_ALIGNED(region->memory_size) ||
@@ -372,10 +400,13 @@ int gunyah_vm_binding_alloc(struct gunyah_vm *ghvm,
 		return -ENOMEM;
 	}
 
+	binding->mem_type = VM_MEM_USER;
 	binding->userspace_addr = region->userspace_addr;
+	binding->vm_parcel = NULL;
 	binding->guest_phys_addr = region->guest_phys_addr;
 	binding->size = region->memory_size;
 	binding->flags = region->flags;
+	binding->label = region->label;
 
 	if (lend) {
 		binding->share_type = VM_MEM_LEND;
@@ -388,36 +419,25 @@ int gunyah_vm_binding_alloc(struct gunyah_vm *ghvm,
 				 gunyah_gpa_to_gfn(binding->guest_phys_addr + region->memory_size - 1),
 				 binding, GFP_KERNEL);
 
-
 	if(ret != 0)
 		kfree(binding);
-
 	up_write(&ghvm->bindings_lock);
 
 	return ret;
 }
 
-int gunyah_gup_demand_page(struct gunyah_vm *ghvm, u64 gpa, bool write)
+static int gunyah_gup_demand_page(struct gunyah_vm *ghvm, struct gunyah_vm_binding *b,
+								u64 gpa, bool write)
 {
 	unsigned long gfn = gunyah_gpa_to_gfn(gpa);
-	struct gunyah_vm_gup_binding *b;
 	unsigned int gup_flags;
 	u64 offset;
 	int pinned, ret;
 	struct page *page;
 	struct folio *folio;
 
-	down_read(&ghvm->bindings_lock);
-	b = mtree_load(&ghvm->bindings, gfn);
-	if (!b) {
-		ret = -ENOENT;
-		goto unlock;
-	}
-
-	if (write && !(b->flags & GUNYAH_MEM_ALLOW_WRITE)) {
-		ret = -EPERM;
-		goto unlock;
-	}
+	if (write && !(b->flags & GUNYAH_MEM_ALLOW_WRITE))
+		return -EPERM;
 	gup_flags = FOLL_LONGTERM;
 	if (b->flags & GUNYAH_MEM_ALLOW_WRITE)
 		gup_flags |= FOLL_WRITE;
@@ -426,7 +446,7 @@ int gunyah_gup_demand_page(struct gunyah_vm *ghvm, u64 gpa, bool write)
 
 	ret = account_locked_vm(current->mm, 1, true);
 	if (ret)
-		goto unlock;
+		return ret;
 
 	pinned = pin_user_pages_fast(b->userspace_addr + offset, 1,
 					gup_flags, &page);
@@ -455,48 +475,50 @@ int gunyah_gup_demand_page(struct gunyah_vm *ghvm, u64 gpa, bool write)
 				gpa, ret);
 		goto unpin_page;
 	}
-	goto unlock;
+	return ret;
 
 unpin_page:
 	unpin_user_page(page);
 unlock_page:
 	account_locked_vm(current->mm, 1, false);
-unlock:
-	up_read(&ghvm->bindings_lock);
 	return ret;
 }
-EXPORT_SYMBOL_GPL(gunyah_gup_demand_page);
 
-
-int gunyah_gup_share_parcel(struct gunyah_vm *ghvm, struct gunyah_rm_mem_parcel *parcel,
-			     u64 *gfn, u64 *nr)
+int gunyah_demand_page(struct gunyah_vm *ghvm, u64 gpa, bool write)
 {
-	struct gunyah_vm_gup_binding *b;
-	bool lend = false;
-	struct page **pages;
-	int pinned, ret;
-	u16 vmid;
-	struct folio *folio;
-	unsigned int gup_flags;
-	unsigned long i, offset, entries, entry_size;
+	unsigned long gfn = gunyah_gpa_to_gfn(gpa);
+	struct gunyah_vm_binding *b;
+	int ret;
 
-	parcel->mem_handle = GUNYAH_MEM_HANDLE_INVAL;
-
-	if (!*nr)
-		return -EINVAL;
 	down_read(&ghvm->bindings_lock);
-	b = mtree_load(&ghvm->bindings, *gfn);
+	b = mtree_load(&ghvm->bindings, gfn);
 	if (!b) {
 		ret = -ENOENT;
 		goto unlock;
 	}
+	ret = gunyah_gup_demand_page(ghvm, b, gpa, write);
+
+unlock:
+	up_read(&ghvm->bindings_lock);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(gunyah_demand_page);
+
+static int gunyah_gup_share_parcel(struct gunyah_vm *ghvm,
+			struct gunyah_vm_parcel *vm_parcel,
+			struct gunyah_vm_binding *b, u64 *gfn, u64 *nr)
+{
+	struct gunyah_rm_mem_parcel *parcel = &vm_parcel->parcel;
+	struct page **pages;
+	int pinned, ret;
+	struct folio *folio;
+	unsigned int gup_flags;
+	unsigned long i, offset, entries, entry_size;
 
 	offset = gunyah_gfn_to_gpa(*gfn) - b->guest_phys_addr;
 	pages = kcalloc(*nr, sizeof(*pages), GFP_KERNEL_ACCOUNT);
-	if (!pages) {
-		ret = -ENOMEM;
-		goto unlock;
-	}
+	if (!pages)
+		return -ENOMEM;
 
 	gup_flags = FOLL_LONGTERM;
 	if (b->flags & GUNYAH_MEM_ALLOW_WRITE)
@@ -516,49 +538,12 @@ int gunyah_gup_share_parcel(struct gunyah_vm *ghvm, struct gunyah_rm_mem_parcel 
 	if (ret)
 		goto unpin_pages;
 
-	if (b->share_type == VM_MEM_LEND) {
-		parcel->n_acl_entries = 1;
-		lend = true;
-	} else {
-		lend = false;
-		parcel->n_acl_entries = 2;
-	}
-	parcel->acl_entries = kcalloc(parcel->n_acl_entries,
-				      sizeof(*parcel->acl_entries), GFP_KERNEL);
-	if (!parcel->acl_entries) {
-		ret = -ENOMEM;
-		goto unaccount_pages;
-	}
-
-	/* acl_entries[0].vmid will be this VM's vmid. We'll fill it when the
-	 * VM is starting and we know the VM's vmid.
-	 */
-	parcel->acl_entries[0].vmid = cpu_to_le16(ghvm->vmid);
-	if (b->flags & GUNYAH_MEM_ALLOW_READ)
-		parcel->acl_entries[0].perms |= GUNYAH_RM_ACL_R;
-	if (b->flags & GUNYAH_MEM_ALLOW_WRITE)
-		parcel->acl_entries[0].perms |= GUNYAH_RM_ACL_W;
-	if (b->flags & GUNYAH_MEM_ALLOW_EXEC)
-		parcel->acl_entries[0].perms |= GUNYAH_RM_ACL_X;
-
-	if (!lend) {
-		ret = gunyah_rm_get_vmid(ghvm->rm, &vmid);
-		if (ret)
-			goto free_acl;
-
-		parcel->acl_entries[1].vmid = cpu_to_le16(vmid);
-		/* Host assumed to have all these permissions. Gunyah will not
-		* grant new permissions if host actually had less than RWX
-		*/
-		parcel->acl_entries[1].perms = GUNYAH_RM_ACL_R | GUNYAH_RM_ACL_W | GUNYAH_RM_ACL_X;
-	}
-
 	/* overallocate & assume no large folios */
 	parcel->mem_entries = kcalloc(pinned, sizeof(parcel->mem_entries[0]),
 					GFP_KERNEL_ACCOUNT);
 	if (!parcel->mem_entries) {
 		ret = -ENOMEM;
-		goto free_acl;
+		goto unaccount_pages;
 	}
 	folio = page_folio(pages[0]);
 	*gfn -= folio_page_idx(folio, pages[0]);
@@ -587,11 +572,15 @@ int gunyah_gup_share_parcel(struct gunyah_vm *ghvm, struct gunyah_rm_mem_parcel 
 	parcel->mem_entries[entries].size = entry_size;
 	parcel->n_mem_entries = entries + 1;
 	ret = gunyah_rm_mem_share(ghvm->rm, parcel);
+	if (ret)
+		goto free_mem_entries;
+
+	vm_parcel->start = *gfn;
+	vm_parcel->pages = *nr;
+	b->vm_parcel = vm_parcel;
 	goto free_pages;
 
-free_acl:
-	kfree(parcel->acl_entries);
-	parcel->acl_entries = NULL;
+free_mem_entries:
 	kfree(parcel->mem_entries);
 	parcel->mem_entries = NULL;
 	parcel->n_mem_entries = 0;
@@ -601,7 +590,278 @@ unpin_pages:
 	unpin_user_pages(pages, pinned);
 free_pages:
 	kfree(pages);
+	return ret;
+}
+
+int gunyah_share_parcel(struct gunyah_vm *ghvm, struct gunyah_vm_parcel *vm_parcel,
+			     u64 *gfn, u64 *nr)
+{
+	struct gunyah_rm_mem_parcel *parcel = &vm_parcel->parcel;
+	struct gunyah_vm_binding *b;
+	bool lend;
+	u16 vmid;
+	int ret;
+
+	if (!*nr)
+		return -EINVAL;
+
+	down_write(&ghvm->bindings_lock);
+	b = mtree_load(&ghvm->bindings, *gfn);
+	if (!b) {
+		ret = -ENOENT;
+		goto unlock;
+	}
+
+	parcel->mem_handle = GUNYAH_MEM_HANDLE_INVAL;
+	if (b->share_type == VM_MEM_LEND) {
+		parcel->n_acl_entries = 1;
+		lend = true;
+	} else {
+		lend = false;
+		parcel->n_acl_entries = 2;
+		parcel->label = b->label;
+	}
+	parcel->acl_entries = kcalloc(parcel->n_acl_entries,
+				      sizeof(*parcel->acl_entries), GFP_KERNEL);
+	if (!parcel->acl_entries) {
+		ret = -ENOMEM;
+		goto unlock;
+	}
+
+	/* acl_entries[0].vmid will be this VM's vmid. We'll fill it when the
+	 * VM is starting and we know the VM's vmid.
+	 */
+	parcel->acl_entries[0].vmid = cpu_to_le16(ghvm->vmid);
+	if (b->flags & GUNYAH_MEM_ALLOW_READ)
+		parcel->acl_entries[0].perms |= GUNYAH_RM_ACL_R;
+	if (b->flags & GUNYAH_MEM_ALLOW_WRITE)
+		parcel->acl_entries[0].perms |= GUNYAH_RM_ACL_W;
+	if (b->flags & GUNYAH_MEM_ALLOW_EXEC)
+		parcel->acl_entries[0].perms |= GUNYAH_RM_ACL_X;
+
+	if (!lend) {
+		ret = gunyah_rm_get_vmid(ghvm->rm, &vmid);
+		if (ret)
+			goto free_acl;
+
+		parcel->acl_entries[1].vmid = cpu_to_le16(vmid);
+		/* Host assumed to have all these permissions. Gunyah will not
+		* grant new permissions if host actually had less than RWX
+		*/
+		parcel->acl_entries[1].perms = GUNYAH_RM_ACL_R | GUNYAH_RM_ACL_W | GUNYAH_RM_ACL_X;
+	}
+
+	ret = gunyah_gup_share_parcel(ghvm, vm_parcel, b, gfn, nr);
+	if (ret) {
+		dev_warn(ghvm->parent, "Failed to share GUP memory: %d\n", ret);
+		goto free_acl;
+	}
+	goto unlock;
+
+free_acl:
+	kfree(parcel->acl_entries);
+	parcel->acl_entries = NULL;
 unlock:
+	up_write(&ghvm->bindings_lock);
+	return ret;
+}
+
+/*
+ * This function will provide the number of bindings from
+ * start_addr to end_addr.
+ * Use ULONG_MAX as the end_addr to get all the bindings of the VM.
+ */
+static u32 gunyah_count_bindings(struct gunyah_vm *ghvm, u64 start_addr,
+						u64 end_addr)
+{
+	struct gunyah_vm_binding *b;
+	unsigned long addr = start_addr;
+	u32 count = 0;
+
+	down_read(&ghvm->bindings_lock);
+	mt_for_each(&ghvm->bindings, b, addr, end_addr)
+		count++;
+	up_read(&ghvm->bindings_lock);
+
+	return count;
+}
+
+static int gunyah_gup_reclaim_parcel(struct gunyah_vm *ghvm,
+		struct gunyah_vm_parcel *vm_parcel, struct gunyah_vm_binding *b)
+{
+	struct gunyah_rm_mem_parcel *parcel = &vm_parcel->parcel;
+	struct gunyah_rm_mem_entry *entry;
+	struct folio *folio;
+	pgoff_t i;
+	int ret;
+
+	if (parcel->mem_handle == GUNYAH_MEM_HANDLE_INVAL)
+		return 0;
+
+	ret = gunyah_rm_mem_reclaim(ghvm->rm, parcel);
+	if (ret) {
+		dev_err(ghvm->parent, "Failed to reclaim parcel: %d\n",
+			ret);
+		/* We can't reclaim the pages -- hold onto the pages
+		 * forever because we don't know what state the memory
+		 * is in
+		 */
+		return ret;
+	}
+
+	for (i = 0; i < parcel->n_mem_entries; i++) {
+		entry = &parcel->mem_entries[i];
+
+		folio = pfn_folio(PHYS_PFN(le64_to_cpu(entry->phys_addr)));
+
+		if (folio_test_private(folio))
+			gunyah_folio_host_reclaim(folio);
+
+		unpin_user_page(folio_page(folio, 0));
+		account_locked_vm(ghvm->mm_s, 1, false);
+	}
+
+	parcel->mem_handle = GUNYAH_MEM_HANDLE_INVAL;
+	kfree(parcel->mem_entries);
+	kfree(parcel->acl_entries);
+	vm_parcel->start = 0;
+	vm_parcel->pages = 0;
+	b->vm_parcel = NULL;
+	return ret;
+}
+
+static int gunyah_reclaim_parcel(struct gunyah_vm *ghvm,
+			    struct gunyah_vm_parcel *vm_parcel)
+{
+	struct gunyah_vm_binding *b;
+	int ret;
+
+	down_write(&ghvm->bindings_lock);
+	b = mtree_load(&ghvm->bindings, vm_parcel->start);
+	if (!b) {
+		ret = -ENOENT;
+		goto unlock;
+	}
+	ret = gunyah_gup_reclaim_parcel(ghvm, vm_parcel, b);
+
+unlock:
+	up_write(&ghvm->bindings_lock);
+	return ret;
+}
+
+int gunyah_reclaim_parcels(struct gunyah_vm *ghvm, u64 start_gfn,
+							u64 end_gfn)
+{
+	unsigned long gfn = start_gfn;
+	struct gunyah_vm_binding *b;
+	int ret, ret2 = 0;
+
+	mt_for_each(&ghvm->bindings, b, gfn, end_gfn) {
+		if (b->vm_parcel)
+			ret = gunyah_reclaim_parcel(ghvm, b->vm_parcel);
+		if (ret)
+			ret2 = ret;
+	}
+
+	return ret2;
+}
+
+/*
+ * gunyah_share_range_as_parcels() - Share all bindings as parcels from start_gfn to end_gfn
+ * @ghvm - The gunyah vm
+ * @start_gfn: Start guest page number
+ * @end_gfn: Last guest page number
+ * @parcels: Array of parcels allocated.
+ *
+ * Use ULONG_MAX as the end_gfn to share all the bindings of the VM
+ * provided enough space for parcels is present.
+ * Caller is responsible to free the parcels when parcels are done
+ * being used.
+ */
+int gunyah_share_range_as_parcels(struct gunyah_vm *ghvm, u64 start_gfn,
+				u64 end_gfn, struct gunyah_vm_parcel **parcels)
+{
+	struct gunyah_vm_binding *b;
+	unsigned long gfn = start_gfn;
+	u32 count = 0, n;
+	int ret, ret_err;
+
+	/* Find the number of parcels needed to be created within the requested range*/
+	n = gunyah_count_bindings(ghvm, start_gfn, end_gfn);
+
+	*parcels = kzalloc(sizeof(struct gunyah_vm_parcel) * n, GFP_KERNEL);
+	if (!*parcels)
+		return -ENOMEM;
+
+	mt_for_each(&ghvm->bindings, b, gfn, end_gfn) {
+		u64 parcel_start = b->guest_phys_addr >> PAGE_SHIFT;
+		u64 parcel_pages = b->size >> PAGE_SHIFT;
+
+		ret = gunyah_share_parcel(ghvm, &(*parcels)[count++], &parcel_start, &parcel_pages);
+		if (ret) {
+			dev_err(ghvm->parent, "Failed to share parcel of %llx: %d\n",
+								parcel_start, ret);
+			/* Let's roll back.*/
+			while (count--) {
+				if ((*parcels)[count].parcel.mem_handle !=
+					GUNYAH_MEM_HANDLE_INVAL) {
+					ret_err = gunyah_reclaim_parcel(ghvm, &(*parcels)[count]);
+					if (ret_err)
+						dev_err(ghvm->parent, "Failed to reclaim parcel: %d, memory will leak\n",
+										ret_err);
+				}
+			}
+			goto err;
+		}
+	}
+	return ret;
+
+err:
+	kfree(*parcels);
+	*parcels = NULL;
+	return ret;
+}
+EXPORT_SYMBOL_GPL(gunyah_share_range_as_parcels);
+
+int gunyah_setup_demand_paging(struct gunyah_vm *ghvm, u64 start_gfn,
+				u64 end_gfn)
+{
+	struct gunyah_rm_mem_entry *entries;
+	unsigned long gfn = start_gfn;
+	struct gunyah_vm_binding *b;
+	u32 count = 0, i;
+	int ret = 0;
+
+	down_read(&ghvm->bindings_lock);
+	mt_for_each(&ghvm->bindings, b, gfn, end_gfn)
+		if (b->share_type == VM_MEM_LEND &&
+			(b->guest_phys_addr != ghvm->fw.config.guest_phys_addr))
+			count++;
+
+	if (!count)
+		goto out;
+
+	entries = kcalloc(count, sizeof(*entries), GFP_KERNEL);
+	if (!entries) {
+		ret = -ENOMEM;
+		goto out;
+	}
+
+	gfn = start_gfn;
+	i = 0;
+	mt_for_each(&ghvm->bindings, b, gfn, end_gfn) {
+		if (b->share_type != VM_MEM_LEND ||
+			(b->guest_phys_addr == ghvm->fw.config.guest_phys_addr))
+			continue;
+		entries[i].phys_addr = cpu_to_le64(b->guest_phys_addr);
+		entries[i].size = cpu_to_le64(b->size);
+		if (++i == count)
+			break;
+	}
+
+	ret = gunyah_rm_vm_set_demand_paging(ghvm->rm, ghvm->vmid, i, entries);
+	kfree(entries);
+out:
 	up_read(&ghvm->bindings_lock);
 	return ret;
 }

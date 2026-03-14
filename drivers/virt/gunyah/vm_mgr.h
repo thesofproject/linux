@@ -7,6 +7,7 @@
 #define _GUNYAH_VM_MGR_PRIV_H
 
 #include <linux/device.h>
+#include <linux/file.h>
 #include <linux/kref.h>
 #include <linux/maple_tree.h>
 #include <linux/mutex.h>
@@ -20,17 +21,20 @@
 
 #include "rsc_mgr.h"
 
-enum gunyah_vm_mem_share_type {
-	VM_MEM_SHARE,
-	VM_MEM_LEND,
+struct gunyah_vm_parcel {
+	u64 start, pages;
+	struct gunyah_rm_mem_parcel parcel;
 };
 
-struct gunyah_vm_gup_binding {
-	enum gunyah_vm_mem_share_type share_type;
-	u64 guest_phys_addr;
+struct gunyah_vm_binding {
+	enum { VM_MEM_USER } mem_type;
 	u64 userspace_addr;
+	struct gunyah_vm_parcel *vm_parcel;
+	enum { VM_MEM_SHARE, VM_MEM_LEND } share_type;
+	u64 guest_phys_addr;
 	u64 size;
 	u32 flags;
+	u32 label;
 };
 
 static inline u64 gunyah_gpa_to_gfn(u64 gpa)
@@ -134,13 +138,11 @@ struct gunyah_vm {
 	enum gunyah_rm_vm_auth_mechanism auth;
 	struct {
 		struct gunyah_vm_dtb_config config;
-		u64 parcel_start, parcel_pages;
-		struct gunyah_rm_mem_parcel parcel;
+		struct gunyah_vm_parcel parcel;
 	} dtb;
 	struct {
 		struct gunyah_vm_firmware_config config;
-		u64 parcel_start, parcel_pages;
-		struct gunyah_rm_mem_parcel parcel;
+		struct gunyah_vm_parcel parcel;
 	} fw;
 	struct xarray boot_context;
 };
@@ -210,22 +212,24 @@ int gunyah_vm_parcel_to_paged(struct gunyah_vm *ghvm,
 			      struct gunyah_rm_mem_parcel *parcel, u64 gfn,
 			      u64 nr);
 void gunyah_vm_mm_erase_range(struct gunyah_vm *ghvm, u64 gfn, u64 nr);
-int gunyah_vm_reclaim_parcel(struct gunyah_vm *ghvm,
-			     struct gunyah_rm_mem_parcel *parcel, u64 gfn);
 int gunyah_vm_provide_folio(struct gunyah_vm *ghvm, struct folio *folio,
 			    u64 gfn, bool share, bool write);
 int gunyah_vm_reclaim_folio(struct gunyah_vm *ghvm, u64 gfn, struct folio *folio);
 int gunyah_vm_reclaim_range(struct gunyah_vm *ghvm, u64 gfn, u64 nr);
-
 int gunyah_vm_binding_alloc(struct gunyah_vm *ghvm,
 			    struct gunyah_userspace_memory_region *region,
 			    bool lend);
-int gunyah_gup_setup_demand_paging(struct gunyah_vm *ghvm);
-int gunyah_gup_share_parcel(struct gunyah_vm *ghvm,
-			      struct gunyah_rm_mem_parcel *parcel,
+int gunyah_share_parcel(struct gunyah_vm *ghvm,
+			      struct gunyah_vm_parcel *parcel,
 			      u64 *gfn, u64 *nr);
-int gunyah_gup_demand_page(struct gunyah_vm *ghvm, u64 gpa, bool write);
-
+int gunyah_share_range_as_parcels(struct gunyah_vm *ghvm, u64 start_addr,
+				  u64 end_addr,
+				  struct gunyah_vm_parcel **parcels);
+int gunyah_reclaim_parcels(struct gunyah_vm *ghvm,
+				u64 start_gfn, u64 end_gfn);
+int gunyah_demand_page(struct gunyah_vm *ghvm, u64 gpa, bool write);
+int gunyah_setup_demand_paging(struct gunyah_vm *ghvm, u64 start_gfn,
+				u64 end_gfn);
 #ifdef CONFIG_DMA_CMA
 int gunyah_cma_mem_init(void);
 void gunyah_cma_mem_exit(void);
