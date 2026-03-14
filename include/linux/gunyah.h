@@ -363,6 +363,18 @@ enum gunyah_api_feature {
 
 bool arch_is_gunyah_guest(void);
 
+enum gunyah_info_owner {
+	/* clang-format off */
+	GUNYAH_INFO_OWNER_INVALID	= 0,
+	GUNYAH_INFO_OWNER_HYP		= 1,
+	GUNYAH_INFO_OWNER_ROOTVM	= 2,
+	GUNYAH_INFO_OWNER_RM		= 3,
+	GUNYAH_INFO_OWNER_QCRM		= 16,
+	/* clang-format on */
+};
+
+void *gunyah_get_info(u16 owner, u16 id, size_t *size);
+
 #define GUNYAH_API_V1 1
 
 /* Other bits reserved for future use and will be zero */
