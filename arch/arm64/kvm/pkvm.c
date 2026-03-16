@@ -1848,7 +1848,8 @@ int __pkvm_load_el2_module(struct module *this)
 	if (ret) {
 		kvm_err("Failed to init EL2 module: %d\n", ret);
 		list_del(&mod->node);
-		pkvm_unmap_module_sections(secs_map, hyp_va, ARRAY_SIZE(secs_map));
+		pkvm_unmap_module_sections(secs_map + secs_first, hyp_va,
+					   ARRAY_SIZE(secs_map) - secs_first);
 		module_put(this);
 		return ret;
 	}
