@@ -86,3 +86,7 @@
   __tracepoint_android_vh_free_mod_mem
   __tracepoint_android_vh_set_mod_perm_after_init
   __tracepoint_android_vh_set_mod_perm_before_init
+
+#required by perf_helper.ko
+  __traceiter_android_rvh_dequeue_entity_delayed
+  __tracepoint_android_rvh_dequeue_entity_delayed
