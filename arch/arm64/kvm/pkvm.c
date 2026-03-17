@@ -348,7 +348,7 @@ again:
 	 * carveout with a CMA region as it has the same alignment requirements.
 	 */
 	ret = cma_init_reserved_mem(hyp_mem_base, hyp_mem_size, 0, "pkvm,host_s2_cma",
-				    &host_s2_cma);
+				    &host_s2_cma, false);
 	if (ret) {
 		kvm_err("Failed to init CMA region for host stage-2 (%d)\n", ret);
 		return;
