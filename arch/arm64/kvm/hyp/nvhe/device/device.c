@@ -161,6 +161,25 @@ out_unlock:
 	return ret;
 }
 
+static int pkvm_device_power_lock(struct pkvm_device *dev, bool lock)
+{
+	int ret = 0;
+
+	hyp_assert_lock_held(&device_spinlock);
+
+	if (!dev || !dev->ops || !dev->ops->power_lock)
+		return -EOPNOTSUPP;
+
+	if (dev->power_locked == lock)
+		return 0;
+
+	ret = dev->ops->power_lock(dev->cookie, lock);
+	if (!ret)
+		dev->power_locked = lock;
+
+	return ret;
+}
+
 static int pkvm_device_reset(struct pkvm_device *dev, bool host_to_guest)
 {
 	struct pkvm_dev_iommu *iommu;
@@ -202,7 +221,7 @@ static int __pkvm_device_assign(struct pkvm_device *dev, struct pkvm_hyp_vm *vm)
 	}
 
 	if (dev->ops && dev->ops->power_lock) {
-		ret = dev->ops->power_lock(dev->cookie, true);
+		ret = pkvm_device_power_lock(dev, true);
 		if (ret)
 			return ret;
 	}
@@ -370,7 +389,8 @@ void pkvm_devices_teardown(struct pkvm_hyp_vm *vm)
 		if (dev->ctxt != vm)
 			continue;
 		WARN_ON(pkvm_device_reset(dev, false));
-		WARN_ON(dev->ops->power_lock && dev->ops->power_lock(dev->cookie, false));
+		if (dev->ops && dev->ops->power_lock)
+			WARN_ON(pkvm_device_power_lock(dev, false));
 		dev->ctxt = NULL;
 		pkvm_devices_reclaim_device(dev);
 	}
@@ -496,4 +516,86 @@ bool pkvm_device_request_dma(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 out_ret:
 	smccc_set_retval(vcpu, SMCCC_RET_INVALID_PARAMETER, 0, 0, 0);
 	return true;
+}
+
+static int
+__pkvm_device_request_power(struct pkvm_hyp_vcpu *hyp_vcpu, u64 ipa, bool on, bool dryrun)
+{
+	struct pkvm_hyp_vm *hyp_vm = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
+	struct pkvm_device *dev;
+	s8 level;
+	u64 phys;
+	int ret;
+
+	ret = pkvm_get_guest_pa_request(hyp_vcpu, ipa, PAGE_SIZE, &phys, &level);
+	if (ret) {
+		/* A hyp_req might have been generated. Reset it */
+		hyp_vcpu->vcpu.arch.hyp_reqs[0].type = KVM_HYP_LAST_REQ;
+		return ret;
+	}
+
+	hyp_spin_lock(&device_spinlock);
+	dev = pkvm_get_vm_device_by_addr(hyp_vm, phys);
+	if (dryrun)
+		ret = (!dev || !dev->ops || !dev->ops->power_lock) ? -EOPNOTSUPP : 0;
+	else
+		ret = pkvm_device_power_lock(dev, on);
+	hyp_spin_unlock(&device_spinlock);
+
+	return ret;
+}
+
+bool pkvm_device_request_power(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
+{
+	struct kvm_vcpu *vcpu = &hyp_vcpu->vcpu;
+	u64 func = smccc_get_arg1(vcpu);
+
+	/* args 3..6 reserved for future use. */
+	if (smccc_get_arg3(vcpu) || smccc_get_arg4(vcpu) || smccc_get_arg5(vcpu) ||
+	    smccc_get_arg6(vcpu))
+		goto out_guest_err;
+
+	switch (func) {
+	case KVM_DEV_REQ_PWR_OFF:
+	case KVM_DEV_REQ_PWR_ON: {
+		u64 ipa = smccc_get_arg2(vcpu);
+		bool on = func;
+		int ret;
+
+		/* When powering-on, power_lock is called after forwarding to shot  */
+		ret = __pkvm_device_request_power(hyp_vcpu, ipa, on, on);
+		if (ret)
+			goto out_guest_err;
+
+		/* Success! Forward to host */
+		return false;
+	}
+	}
+
+out_guest_err:
+	smccc_set_retval(vcpu, SMCCC_RET_INVALID_PARAMETER, 0, 0, 0);
+	return true;
+}
+
+int pkvm_device_request_power_pvm_entry(struct pkvm_hyp_vcpu *hyp_vcpu)
+{
+	struct kvm_vcpu *vcpu = &hyp_vcpu->vcpu;
+	u64 func = smccc_get_arg1(vcpu);
+
+	switch (func) {
+	case KVM_DEV_REQ_PWR_OFF:
+	case KVM_DEV_REQ_PWR_ON: {
+		u64 ipa = smccc_get_arg2(vcpu);
+		bool on = func;
+
+		/* When powering-off, power_lock is called before forwarding to host */
+		if (!on)
+			return 0;
+
+		/* power_lock failed. We have no way of rolling back the host power-on */
+		return WARN_ON(__pkvm_device_request_power(hyp_vcpu, ipa, on, false));
+	}
+	}
+
+	return 0;
 }

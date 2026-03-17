@@ -38,6 +38,7 @@ struct pkvm_device {
 	u32 group_id;
 	void *ctxt; /* Current context of the device */
 	unsigned short refcount;
+	bool power_locked;
 	struct pkvm_device_ops *ops;
 	void *cookie; /* cookie from drivers. */
 };
