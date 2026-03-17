@@ -90,3 +90,12 @@
 #required by perf_helper.ko
   __traceiter_android_rvh_dequeue_entity_delayed
   __tracepoint_android_rvh_dequeue_entity_delayed
+
+# low lat mem
+ __tracepoint_android_vh_compact_bypass
+ __traceiter_android_vh_compact_bypass
+ __tracepoint_android_vh_cma_release_bypass
+ __traceiter_android_vh_cma_release_bypass
+ __tracepoint_android_vh_cma_alloc_end
+ __traceiter_android_vh_cma_alloc_end
+
