@@ -67,9 +67,6 @@ enum migratetype {
 	MIGRATE_RECLAIMABLE,
 	/* the number of types that have fallbacks */
 	MIGRATE_FALLBACKS,
-	/* the number of types on the pcp lists */
-	MIGRATE_PCPTYPES = MIGRATE_FALLBACKS,
-	MIGRATE_HIGHATOMIC = MIGRATE_PCPTYPES,
 #ifdef CONFIG_CMA
 	/*
 	 * MIGRATE_CMA migration type is designed to mimic the way
@@ -81,11 +78,14 @@ enum migratetype {
 	 * pageblocks to MIGRATE_CMA which can be done by
 	 * __free_pageblock_cma() function.
 	 */
-	MIGRATE_CMA,
-	__MIGRATE_TYPE_END = MIGRATE_CMA,
+	MIGRATE_CMA = MIGRATE_FALLBACKS,
+	MIGRATE_PCPTYPES,
 #else
-	__MIGRATE_TYPE_END = MIGRATE_HIGHATOMIC,
+	/* the number of types on the pcp lists */
+	MIGRATE_PCPTYPES = MIGRATE_FALLBACKS,
 #endif
+	MIGRATE_HIGHATOMIC = MIGRATE_PCPTYPES,
+	__MIGRATE_TYPE_END = MIGRATE_HIGHATOMIC,
 #ifdef CONFIG_MEMORY_ISOLATION
 	MIGRATE_ISOLATE,	/* can't allocate from here */
 #endif
