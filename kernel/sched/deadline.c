@@ -2357,6 +2357,9 @@ static void enqueue_task_dl(struct rq *rq, struct task_struct *p, int flags)
 	if (task_is_blocked(p))
 		return;
 
+	if (dl_rq->curr == dl_se)
+		return;
+
 	if (!task_current(rq, p) && !p->dl.dl_throttled && p->nr_cpus_allowed > 1)
 		enqueue_pushable_dl_task(rq, p);
 }
@@ -2579,6 +2582,10 @@ static void start_hrtick_dl(struct rq *rq, struct sched_dl_entity *dl_se)
 }
 #endif /* !CONFIG_SCHED_HRTICK */
 
+/*
+ * DL keeps current in tree, because ->deadline is not typically changed while
+ * a task is runnable.
+ */
 static void set_next_task_dl(struct rq *rq, struct task_struct *p, bool first)
 {
 	struct sched_dl_entity *dl_se = &p->dl;
@@ -2590,6 +2597,9 @@ static void set_next_task_dl(struct rq *rq, struct task_struct *p, bool first)
 
 	/* You can't push away the running task */
 	dequeue_pushable_dl_task(rq, p);
+
+	WARN_ON_ONCE(dl_rq->curr);
+	dl_rq->curr = dl_se;
 
 	if (!first)
 		return;
@@ -2661,6 +2671,9 @@ static void put_prev_task_dl(struct rq *rq, struct task_struct *p, struct task_s
 	update_curr_dl(rq);
 
 	update_dl_rq_load_avg(rq_clock_pelt(rq), rq, 1);
+
+	WARN_ON_ONCE(dl_rq->curr != dl_se);
+	dl_rq->curr = NULL;
 
 	if (task_is_blocked(p))
 		return;
