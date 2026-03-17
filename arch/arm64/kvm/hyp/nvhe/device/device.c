@@ -61,19 +61,29 @@ static struct pkvm_device *pkvm_get_device(u64 addr, size_t size)
 	return NULL;
 }
 
+static bool pkvm_device_has_resource(struct pkvm_device *dev, u64 phys)
+{
+	int i;
+
+	for (i = 0 ; i < dev->nr_resources; i++) {
+		struct pkvm_dev_resource *res = &dev->resources[i];
+
+		if ((phys >= res->base) && (phys < res->base + res->size))
+			return true;
+	}
+
+	return false;
+}
+
 static struct pkvm_device *pkvm_get_device_by_addr(u64 addr)
 {
 	struct pkvm_device *dev;
-	struct pkvm_dev_resource *res;
-	int i, j;
+	int i;
 
 	for (i = 0 ; i < registered_devices_nr ; ++i) {
 		dev = &registered_devices[i];
-		for (j = 0 ; j < dev->nr_resources; ++j) {
-			res = &dev->resources[j];
-			if ((addr >= res->base) && (addr < res->base + res->size))
-				return dev;
-		}
+		if (pkvm_device_has_resource(dev, addr))
+			return dev;
 	}
 
 	return NULL;
@@ -274,14 +284,34 @@ out_ret:
 	return ret;
 }
 
+static struct pkvm_device *pkvm_get_vm_device_by_addr(struct pkvm_hyp_vm *hyp_vm, u64 phys)
+{
+	int i;
+
+	hyp_assert_lock_held(&device_spinlock);
+
+	for (i = 0 ; i < registered_devices_nr ; ++i) {
+		struct pkvm_device *dev = &registered_devices[i];
+
+		if (dev->ctxt != hyp_vm)
+			continue;
+
+		if (pkvm_device_has_resource(dev, phys))
+			return dev;
+	}
+
+	return NULL;
+}
+
 bool pkvm_device_request_mmio(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 {
-	int i, j, ret;
 	struct kvm_vcpu *vcpu = &hyp_vcpu->vcpu;
 	struct pkvm_hyp_vm *vm = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
 	u64 ipa = smccc_get_arg1(vcpu);
+	struct pkvm_device *dev;
 	u64 token;
 	s8 level;
+	int ret;
 
 	/* args 2..6 reserved for future use. */
 	if (smccc_get_arg2(vcpu) || smccc_get_arg3(vcpu) || smccc_get_arg4(vcpu) ||
@@ -295,8 +325,7 @@ bool pkvm_device_request_mmio(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 		write_sysreg_el2(read_sysreg_el2(SYS_ELR) - 4, SYS_ELR);
 		*exit_code = ARM_EXCEPTION_HYP_REQ;
 		return false;
-	}
-	else if (ret) {
+	} else if (ret) {
 		goto out_inval;
 	}
 
@@ -304,26 +333,14 @@ bool pkvm_device_request_mmio(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 	WARN_ON(level != KVM_PGTABLE_LAST_LEVEL);
 
 	hyp_spin_lock(&device_spinlock);
-	for (i = 0 ; i < registered_devices_nr ; ++i) {
-		struct pkvm_device *dev = &registered_devices[i];
+	dev = pkvm_get_vm_device_by_addr(vm, token);
+	hyp_spin_unlock(&device_spinlock);
 
-		if (dev->ctxt != vm)
-			continue;
-
-		for (j = 0 ; j < dev->nr_resources; ++j) {
-			struct pkvm_dev_resource *res = &dev->resources[j];
-
-			if ((token >= res->base) && (token + PAGE_SIZE <= res->base + res->size)) {
-				smccc_set_retval(vcpu, SMCCC_RET_SUCCESS, token, 0, 0);
-				goto out_ret;
-			}
-		}
+	if (dev) {
+		smccc_set_retval(vcpu, SMCCC_RET_SUCCESS, token, 0, 0);
+		return true;
 	}
 
-	smccc_set_retval(vcpu, SMCCC_RET_INVALID_PARAMETER, 0, 0, 0);
-out_ret:
-	hyp_spin_unlock(&device_spinlock);
-	return true;
 out_inval:
 	smccc_set_retval(vcpu, SMCCC_RET_INVALID_PARAMETER, 0, 0, 0);
 	return true;
