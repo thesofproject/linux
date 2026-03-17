@@ -344434,6 +344434,13 @@ function {
   parameter_id: 0x0db25a6d
 }
 function {
+  id: 0x9b943159
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x01222f7d
+  parameter_id: 0xfc0e1dbd
+}
+function {
   id: 0x9b94b8e2
   return_type_id: 0x6720d32f
   parameter_id: 0x18bd6530
@@ -367390,6 +367397,15 @@ elf_symbol {
   full_name: "__traceiter_suspend_resume"
 }
 elf_symbol {
+  id: 0x313b4348
+  name: "__traceiter_sys_exit"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x89905a87
+  type_id: 0x9b943159
+  full_name: "__traceiter_sys_exit"
+}
+elf_symbol {
   id: 0x2dc83a86
   name: "__traceiter_task_rename"
   is_defined: true
@@ -372599,6 +372615,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_suspend_resume"
+}
+elf_symbol {
+  id: 0x9deae602
+  name: "__tracepoint_sys_exit"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_sys_exit"
 }
 elf_symbol {
   id: 0x4f1ffabc
@@ -431483,6 +431508,7 @@ interface {
   symbol_id: 0x62a42e92
   symbol_id: 0xa7ccbbf5
   symbol_id: 0x863777a0
+  symbol_id: 0x313b4348
   symbol_id: 0x2dc83a86
   symbol_id: 0x59a320d1
   symbol_id: 0x35f53d2e
@@ -432062,6 +432088,7 @@ interface {
   symbol_id: 0x9a65f074
   symbol_id: 0x158cc323
   symbol_id: 0x5b327cd6
+  symbol_id: 0x9deae602
   symbol_id: 0x4f1ffabc
   symbol_id: 0x4c9e8f73
   symbol_id: 0x5dd7d3e4
