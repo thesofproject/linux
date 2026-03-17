@@ -962,6 +962,7 @@ struct page *__cma_alloc(struct cma *cma, unsigned long count,
 	pr_debug("%s(): returned %p\n", __func__, page);
 	trace_cma_alloc_finish(name, page ? page_to_pfn(page) : 0,
 			       page, count, align, ret);
+	trace_android_vh_cma_alloc_end(cma, page ? page_to_pfn(page) : 0, page, count, align, ret);
 	if (page) {
 		count_vm_event(CMA_ALLOC_SUCCESS);
 		cma_sysfs_account_success_pages(cma, count);
@@ -1049,6 +1050,7 @@ bool cma_release(struct cma *cma, const struct page *pages,
 	struct cma_memrange *cmr;
 	unsigned long pfn, end_pfn;
 	int r;
+	bool bypass = false;
 
 	pr_debug("%s(page %p, count %lu)\n", __func__, (void *)pages, count);
 
@@ -1069,6 +1071,10 @@ bool cma_release(struct cma *cma, const struct page *pages,
 
 	if (r == cma->nranges)
 		return false;
+
+	trace_android_vh_cma_release_bypass(cma, pages, count, &bypass);
+	if (bypass)
+		return true;
 
 	if (cma->gcma)
 		gcma_free_range(pfn, pfn + count - 1);
