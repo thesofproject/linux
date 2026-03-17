@@ -538,6 +538,10 @@ DECLARE_RESTRICTED_HOOK(android_rvh_util_fits_cpu,
 		 int cpu, bool *fits, bool *done),
 	TP_ARGS(util, uclamp_min, uclamp_max, cpu, fits, done), 1);
 
+DECLARE_RESTRICTED_HOOK(android_rvh_dequeue_entity_delayed,
+	TP_PROTO(struct cfs_rq *cfs_rq, struct sched_entity *se, bool *delay),
+	TP_ARGS(cfs_rq, se, delay), 1);
+
 /* macro versions of hooks are no longer required */
 #endif /* _TRACE_HOOK_SCHED_H */
 /* This part must be outside protection */
