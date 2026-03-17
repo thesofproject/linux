@@ -44,6 +44,7 @@ struct rb_thread_layout {
 	size_t arc_offset;
 	size_t process;
 	size_t id;
+	size_t task;
 };
 
 struct rb_process_layout {
@@ -115,6 +116,19 @@ static inline rust_binder_process rust_binder_thread_proc(rust_binder_thread t)
 static inline s32 rust_binder_thread_id(rust_binder_thread t)
 {
 	return *(s32 *) (t + RUST_BINDER_LAYOUT.th.id);
+}
+
+/*
+ * Binder thread exit (BINDER_THREAD_EXIT) or process deferred_release may set
+ * this field to NULL. So unless you are called from ioctl context of this
+ * specific thread, the task may be null and should be used under
+ * rcu_read_lock().
+ */
+static inline struct task_struct *rust_binder_thread_task(rust_binder_thread t)
+{
+	struct task_struct **task = (struct task_struct **) (t + RUST_BINDER_LAYOUT.th.task);
+
+	return READ_ONCE(*task);
 }
 
 /*
