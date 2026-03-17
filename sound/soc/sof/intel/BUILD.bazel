@@ -84,6 +84,7 @@ ddk_module(
         ":snd-sof-intel-hda",
         ":snd-sof-intel-hda-common",
         ":snd-sof-intel-hda-mlink",
+        "//private/desktop-google:sdw_api_header",
         "//private/desktop-google/drivers/soundwire:soundwire-intel",
         "//private/desktop-google/sound/hda:snd-hda-core",
         "//private/desktop-google/sound/hda/core/ext:snd-hda-ext-core",
