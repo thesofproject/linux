@@ -31,6 +31,7 @@
   reuseport_alloc
   reuseport_detach_sock
   reuseport_select_sock
+  cgroup_add_legacy_cftypes
   cgroup_rm_cftypes
   mem_cgroup_flush_stats
   __traceiter_android_vh_remove_mapping
