@@ -24,6 +24,7 @@
 
 #ifndef __ASSEMBLY__
 
+#include <linux/mman.h>
 #include <linux/printk.h>
 
 #define pgcompat_err(fmt, ...) \
