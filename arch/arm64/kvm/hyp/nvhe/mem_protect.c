@@ -776,9 +776,14 @@ int host_stage2_idmap_locked(phys_addr_t addr, u64 size,
 {
 	struct kvm_pgtable *pgt = &host_mmu.pgt;
 	void *mc = region_to_pool(is_memory);
+	int ret;
 
-	return host_stage2_try(is_memory, kvm_pgtable_stage2_map, pgt, addr,
-			       size, addr, prot, mc, 0);
+	ret = host_stage2_try(is_memory, kvm_pgtable_stage2_map, pgt, addr,
+			      size, addr, prot, mc, 0);
+	if (is_memory && ret == -ENOMEM)
+		ret = -ENOMEMHOSTS2;
+
+	return ret;
 }
 
 static void __host_update_page_state(phys_addr_t addr, u64 size, enum pkvm_page_state state)
