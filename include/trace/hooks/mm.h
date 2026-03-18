@@ -455,6 +455,9 @@ DECLARE_HOOK(android_vh_free_pages_and_swap_cache,
 DECLARE_HOOK(android_vh_customize_thp_gfp_orders,
 	TP_PROTO(gfp_t *gfp_mask, unsigned long *orders, int *order),
 	TP_ARGS(gfp_mask, orders, order));
+DECLARE_HOOK(android_vh_thp_vma_allowable_orders,
+	TP_PROTO(struct vm_area_struct *vma, unsigned long *orders),
+	TP_ARGS(vma, orders));
 DECLARE_HOOK(android_vh_do_anonymous_page,
 	TP_PROTO(struct vm_area_struct *vma, struct folio *folio),
 	TP_ARGS(vma, folio));
