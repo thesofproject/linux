@@ -326,16 +326,21 @@ void cfg80211_shutdown_all_interfaces(struct wiphy *wiphy)
 
 	ASSERT_RTNL();
 
+	/*
+	 * Some netdev interfaces need to be closed before some non-netdev
+	 * ones, i.e. NAN_DATA interfaces need to be closed before the NAN
+	 * interface
+	 */
 	list_for_each_entry(wdev, &rdev->wiphy.wdev_list, list) {
 		if (wdev->netdev) {
 			dev_close(wdev->netdev);
 			continue;
 		}
+	}
 
-		/* otherwise, check iftype */
+	guard(wiphy)(wiphy);
 
-		guard(wiphy)(wiphy);
-
+	list_for_each_entry(wdev, &rdev->wiphy.wdev_list, list) {
 		switch (wdev->iftype) {
 		case NL80211_IFTYPE_P2P_DEVICE:
 			cfg80211_stop_p2p_device(rdev, wdev);
@@ -393,6 +398,8 @@ void cfg80211_destroy_ifaces(struct cfg80211_registered_device *rdev)
 
 	list_for_each_entry_safe(wdev, tmp, &rdev->wiphy.wdev_list, list) {
 		if (wdev->nl_owner_dead) {
+			cfg80211_close_dependents(rdev, wdev);
+
 			if (wdev->netdev)
 				dev_close(wdev->netdev);
 
@@ -400,6 +407,21 @@ void cfg80211_destroy_ifaces(struct cfg80211_registered_device *rdev)
 
 			cfg80211_remove_virtual_intf(rdev, wdev);
 		}
+	}
+}
+
+void cfg80211_close_dependents(struct cfg80211_registered_device *rdev,
+			       struct wireless_dev *wdev)
+{
+	ASSERT_RTNL();
+
+	if (wdev->iftype != NL80211_IFTYPE_NAN)
+		return;
+
+	/* Close all NAN DATA interfaces */
+	list_for_each_entry(wdev, &rdev->wiphy.wdev_list, list) {
+		if (wdev->iftype == NL80211_IFTYPE_NAN_DATA)
+			dev_close(wdev->netdev);
 	}
 }
 
@@ -1405,9 +1427,8 @@ void cfg80211_update_iface_num(struct cfg80211_registered_device *rdev,
 		rdev->num_running_monitor_ifaces += num;
 }
 
-void cfg80211_leave(struct cfg80211_registered_device *rdev,
-		    struct wireless_dev *wdev,
-		    int link_id)
+void cfg80211_leave_locked(struct cfg80211_registered_device *rdev,
+			   struct wireless_dev *wdev, int link_id)
 {
 	struct net_device *dev = wdev->netdev;
 	struct cfg80211_sched_scan_request *pos, *tmp;
@@ -1460,6 +1481,7 @@ void cfg80211_leave(struct cfg80211_registered_device *rdev,
 		break;
 	case NL80211_IFTYPE_AP_VLAN:
 	case NL80211_IFTYPE_MONITOR:
+	case NL80211_IFTYPE_NAN_DATA:
 		/* nothing to do */
 		break;
 	case NL80211_IFTYPE_UNSPECIFIED:
@@ -1468,6 +1490,19 @@ void cfg80211_leave(struct cfg80211_registered_device *rdev,
 		/* invalid */
 		break;
 	}
+}
+
+void cfg80211_leave(struct cfg80211_registered_device *rdev,
+		    struct wireless_dev *wdev, int link_id)
+{
+	ASSERT_RTNL();
+
+	/* NAN_DATA interfaces must be closed before stopping NAN */
+	cfg80211_close_dependents(rdev, wdev);
+
+	guard(wiphy)(&rdev->wiphy);
+
+	cfg80211_leave_locked(rdev, wdev, link_id);
 }
 
 void cfg80211_stop_link(struct wiphy *wiphy, struct wireless_dev *wdev,
@@ -1484,6 +1519,9 @@ void cfg80211_stop_link(struct wiphy *wiphy, struct wireless_dev *wdev,
 		link_id = -1;
 
 	trace_cfg80211_stop_link(wiphy, wdev, link_id);
+
+	if (wdev->iftype == NL80211_IFTYPE_NAN)
+		return;
 
 	ev = kzalloc(sizeof(*ev), gfp);
 	if (!ev)
@@ -1635,10 +1673,9 @@ static int cfg80211_netdev_notifier_call(struct notifier_block *nb,
 		}
 		break;
 	case NETDEV_GOING_DOWN:
-		scoped_guard(wiphy, &rdev->wiphy) {
-			cfg80211_leave(rdev, wdev, -1);
+		cfg80211_leave(rdev, wdev, -1);
+		scoped_guard(wiphy, &rdev->wiphy)
 			cfg80211_remove_links(wdev);
-		}
 		/* since we just did cfg80211_leave() nothing to do there */
 		cancel_work_sync(&wdev->disconnect_wk);
 		cancel_work_sync(&wdev->pmsr_free_wk);
@@ -1719,6 +1756,23 @@ static int cfg80211_netdev_notifier_call(struct notifier_block *nb,
 
 		if (rfkill_blocked(rdev->wiphy.rfkill))
 			return notifier_from_errno(-ERFKILL);
+
+		/* NAN_DATA interfaces require a running NAN interface */
+		if (wdev->iftype == NL80211_IFTYPE_NAN_DATA) {
+			struct wireless_dev *iter;
+			bool nan_started = false;
+
+			list_for_each_entry(iter, &rdev->wiphy.wdev_list, list) {
+				if (iter->iftype == NL80211_IFTYPE_NAN &&
+				    wdev_running(iter)) {
+					nan_started = true;
+					break;
+				}
+			}
+
+			if (!nan_started)
+				return notifier_from_errno(-ENOLINK);
+		}
 		break;
 	default:
 		return NOTIFY_DONE;
