@@ -200,7 +200,7 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
 		 */
 		ret = pkvm_init_host_vm(kvm, type);
 		if (ret)
-			goto err_free_cpumask;
+			goto err_uninit_mmu;
 	} else if (type & KVM_VM_TYPE_ARM_PROTECTED) {
                 ret = -EINVAL;
                 goto err_free_cpumask;
@@ -219,6 +219,8 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
 
 	return 0;
 
+err_uninit_mmu:
+	kvm_uninit_stage2_mmu(kvm);
 err_free_cpumask:
 	free_cpumask_var(kvm->arch.supported_cpus);
 err_unshare_kvm:
