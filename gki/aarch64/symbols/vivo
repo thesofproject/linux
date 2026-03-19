@@ -77,6 +77,7 @@
   __traceiter_android_vh_do_wp_page
   __traceiter_android_vh_clear_rwsem_reader_owned
   __traceiter_android_vh_clear_rwsem_writer_owned
+  __traceiter_android_vh_do_async_mmap_readahead
   __traceiter_android_vh_dup_task_struct
   __traceiter_android_vh_f2fs_file_open
   __traceiter_android_vh_filemap_update_page
@@ -159,6 +160,7 @@
   __tracepoint_android_vh_do_wp_page
   __tracepoint_android_vh_clear_rwsem_reader_owned
   __tracepoint_android_vh_clear_rwsem_writer_owned
+  __tracepoint_android_vh_do_async_mmap_readahead
   __tracepoint_android_vh_dup_task_struct
   __tracepoint_android_vh_f2fs_file_open
   __tracepoint_android_vh_filemap_update_page
