@@ -292104,6 +292104,14 @@ function {
   parameter_id: 0x945e7ef6
 }
 function {
+  id: 0x9b5d6db7
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x3f84ee3c
+  parameter_id: 0x33756485
+  parameter_id: 0x064d6086
+}
+function {
   id: 0x9b5e2574
   return_type_id: 0x6720d32f
   parameter_id: 0x1b7b196f
@@ -296754,6 +296762,13 @@ function {
   id: 0x9ec960c7
   return_type_id: 0x6720d32f
   parameter_id: 0x0cadd9f1
+  parameter_id: 0x18bd6530
+}
+function {
+  id: 0x9eccfc59
+  return_type_id: 0x6720d32f
+  parameter_id: 0x0ca316ec
+  parameter_id: 0x18bd6530
   parameter_id: 0x18bd6530
 }
 function {
@@ -304049,6 +304064,15 @@ elf_symbol {
   full_name: "__trace_trigger_soft_disabled"
 }
 elf_symbol {
+  id: 0x72c43156
+  name: "__traceiter_android_rvh_iommu_limit_align_shift"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x83332a1b
+  type_id: 0x9b5d6db7
+  full_name: "__traceiter_android_rvh_iommu_limit_align_shift"
+}
+elf_symbol {
   id: 0x92373f85
   name: "__traceiter_dma_fence_emit"
   is_defined: true
@@ -304128,6 +304152,15 @@ elf_symbol {
   crc: 0x7cdbe99d
   type_id: 0x9b6e0d6b
   full_name: "__traceiter_xdp_exception"
+}
+elf_symbol {
+  id: 0x693af5b0
+  name: "__tracepoint_android_rvh_iommu_limit_align_shift"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0xc70ba1d6
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_rvh_iommu_limit_align_shift"
 }
 elf_symbol {
   id: 0xb2d6f207
@@ -306018,6 +306051,15 @@ elf_symbol {
   crc: 0xcb970a38
   type_id: 0x8c59d975
   full_name: "amd_get_boost_ratio_numerator"
+}
+elf_symbol {
+  id: 0xd8dbec6e
+  name: "android_rvh_probe_register"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x6a4d60e7
+  type_id: 0x9eccfc59
+  full_name: "android_rvh_probe_register"
 }
 elf_symbol {
   id: 0x95eaf556
@@ -337557,6 +337599,7 @@ interface {
   symbol_id: 0x461d89bb
   symbol_id: 0x02f9982e
   symbol_id: 0xa5905957
+  symbol_id: 0x72c43156
   symbol_id: 0x92373f85
   symbol_id: 0x104ffeec
   symbol_id: 0x5c33446d
@@ -337566,6 +337609,7 @@ interface {
   symbol_id: 0x0d6e6436
   symbol_id: 0x65ce4e87
   symbol_id: 0xb3150ce0
+  symbol_id: 0x693af5b0
   symbol_id: 0xb2d6f207
   symbol_id: 0xd8f3ca82
   symbol_id: 0x88a08d67
@@ -337776,6 +337820,7 @@ interface {
   symbol_id: 0xbd38414b
   symbol_id: 0x9cc81179
   symbol_id: 0xa9ac83b8
+  symbol_id: 0xd8dbec6e
   symbol_id: 0x95eaf556
   symbol_id: 0x520c1997
   symbol_id: 0x2d3715da
