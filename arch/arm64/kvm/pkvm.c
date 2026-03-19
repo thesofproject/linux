@@ -66,6 +66,7 @@ extern u32 kvm_nvhe_sym(registered_devices_nr);
 
 static enum {
 	PKVM_HOST_S2_CMA,
+	PKVM_HOST_S2_GCMA,
 	PKVM_HOST_S2_CARVEOUT,
 } host_s2_mode;
 
@@ -81,6 +82,8 @@ static int __init early_kvm_arm_host_s2_cfg(char *arg)
 		host_s2_mode = PKVM_HOST_S2_CARVEOUT;
 	else if (strcmp(arg, "cma") == 0)
 		host_s2_mode = PKVM_HOST_S2_CMA;
+	else if (strcmp(arg, "gcma") == 0)
+		host_s2_mode = PKVM_HOST_S2_GCMA;
 	else
 		return -EINVAL;
 
@@ -369,7 +372,7 @@ again:
 	 * carveout with a CMA region as it has the same alignment requirements.
 	 */
 	ret = cma_init_reserved_mem(hyp_mem_base, hyp_mem_size, 0, "pkvm,host_s2_cma",
-				    &host_s2_cma, false);
+				    &host_s2_cma, host_s2_mode == PKVM_HOST_S2_GCMA);
 	if (ret) {
 		kvm_err("Failed to init CMA region for host stage-2 (%d)\n", ret);
 		return;
