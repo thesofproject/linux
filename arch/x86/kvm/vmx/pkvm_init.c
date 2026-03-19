@@ -171,6 +171,23 @@ static __init int pkvm_setup_host_vmcs_config(void)
 		.vmentry_ctrl_opt = 0,
 	};
 
+	if (boot_cpu_has(X86_FEATURE_INTEL_PT)) {
+		/*
+		 * Enable the RTIT VM-Exit/VM-Entry controls to guarantee the
+		 * deprivileged host cannot profile the pKVM via Intel PT.
+		 *
+		 * Hide the vmx non-root indications and the VMCS packets from
+		 * the Intel PT, and make the output written to the GPA which
+		 * can be translated by the EPT.
+		 */
+		setting.vmexit_ctrl_req |= VM_EXIT_PT_CONCEAL_PIP |
+					   VM_EXIT_CLEAR_IA32_RTIT_CTL;
+		setting.vmentry_ctrl_req |= VM_ENTRY_PT_CONCEAL_PIP |
+					    VM_ENTRY_LOAD_IA32_RTIT_CTL;
+		setting.secondary_vm_exec_ctrl_req |= SECONDARY_EXEC_PT_CONCEAL_VMX |
+						      SECONDARY_EXEC_PT_USE_GPA;
+	}
+
 	if (setup_vmcs_config_common(vmcs_config, vmx_cap, &setting))
 		return -EINVAL;
 
@@ -769,6 +786,11 @@ static __init void init_guest_state_area_from_native(struct vcpu_vmx *vmx)
 		pmu->global_ctrl = msrq;
 		vmcs_write64(GUEST_IA32_PERF_GLOBAL_CTRL, msrq);
 	}
+
+	if (boot_cpu_has(X86_FEATURE_INTEL_PT)) {
+		rdmsrq(MSR_IA32_RTIT_CTL, msrq);
+		vmcs_write64(GUEST_IA32_RTIT_CTL, msrq);
+	}
 }
 
 static __init void init_guest_state_area(struct vcpu_vmx *vmx)
@@ -919,6 +941,15 @@ static __init void init_execution_control(struct vcpu_vmx *vmx)
 	secondary_exec_controls_set(vmx, pkvm_sym(host_vmcs_config).cpu_based_2nd_exec_ctrl &
 					 ~(SECONDARY_EXEC_ENABLE_EPT |
 					   SECONDARY_EXEC_ENABLE_VPID));
+
+	/*
+	 * The SECONDARY_EXEC_PT_USE_GPA bit is depending on the
+	 * SECONDARY_EXEC_ENABLE_EPT bit. Remove it at this point
+	 * and re-enable it after the EPT is enabled.
+	 */
+	if (boot_cpu_has(X86_FEATURE_INTEL_PT))
+		secondary_exec_controls_clearbit(vmx, SECONDARY_EXEC_PT_USE_GPA);
+
 	/*
 	 * Shadow VMCS will not be used as the VMCS will be exposed via PV-based
 	 * method.
@@ -972,6 +1003,25 @@ static __init void init_vmentry_control(struct vcpu_vmx *vmx)
 	/* No need to switch if PMU is not enabled */
 	if (!pmu->global_ctrl)
 		vmentry_ctrl &= ~VM_ENTRY_LOAD_IA32_PERF_GLOBAL_CTRL;
+
+	if (boot_cpu_has(X86_FEATURE_INTEL_PT)) {
+		u64 rtit;
+
+		rdmsrq(MSR_IA32_RTIT_CTL, rtit);
+		if (rtit & RTIT_CTL_TRACEEN) {
+			/*
+			 * According to SDM Vol.3 VM-Execution Control Fields:
+			 * If the logical processor is operating with Intel PT
+			 * enabled (if IA32_RTIT_CTL.TraceEn = 1) at the time of
+			 * VM entry, the “load IA32_RTIT_CTL” VM-entry control
+			 * must be 0.
+			 *
+			 * So need to clear the VM_ENTRY_LOAD_IA32_RTIT_CTL bit
+			 * and set it back after VM-Exit.
+			 */
+			vmentry_ctrl &= ~VM_ENTRY_LOAD_IA32_RTIT_CTL;
+		}
+	}
 
 	vm_entry_controls_set(vmx, vmentry_ctrl);
 	vmcs_write32(VM_ENTRY_INTR_INFO_FIELD, 0);
