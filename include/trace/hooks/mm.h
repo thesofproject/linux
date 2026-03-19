@@ -631,6 +631,10 @@ enum compact_result;
 DECLARE_HOOK(android_vh_compaction_try_to_compact_exit,
         TP_PROTO(enum compact_result *compact_result),
         TP_ARGS(compact_result));
+struct oom_control;
+DECLARE_HOOK(android_vh_mm_may_oom_exit,
+	TP_PROTO(struct oom_control *oc, unsigned long did_some_progress),
+	TP_ARGS(oc, did_some_progress));
 #endif /* _TRACE_HOOK_MM_H */
 
 /* This part must be outside protection */
