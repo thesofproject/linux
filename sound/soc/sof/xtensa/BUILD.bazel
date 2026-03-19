@@ -18,10 +18,10 @@ ddk_module(
     copts = [
         "-Iprivate/desktop-google/sound/soc/sof",
     ],
+    defconfig = _AUDIO_DEFCONFIG,
+    kconfig = "Kconfig",
+    kernel_build = "//private/devices/google/common:kernel_build",
     deps = [
         "//private/desktop-google/sound/soc/sof:sof_headers",
     ],
-    kconfig = "Kconfig",
-    defconfig = _AUDIO_DEFCONFIG,
-    kernel_build = "//private/devices/google/common:kernel_build",
 )
