@@ -446,3 +446,25 @@
   user_revoke
   utf8s_to_utf16s
   vfs_parse_fs_qstr
+  __traceiter_android_rvh_do_el1_bti
+  __traceiter_android_rvh_do_sea
+  __traceiter_android_rvh_panic_unhandled
+  __traceiter_android_vh_sk_free
+  __traceiter_task_newtask
+  __tracepoint_android_rvh_do_el1_bti
+  __tracepoint_android_rvh_do_sea
+  __tracepoint_android_rvh_panic_unhandled
+  __tracepoint_android_vh_sk_free
+  __tracepoint_task_newtask
+  filp_open_block
+  flush_signals
+  jiffies64_to_msecs
+  mktime64
+  nvmem_device_find
+  scsi_device_lookup
+  set_task_ioprio
+  task_cputime_adjusted
+  tcp_hashinfo
+  udp_table
+  wakeup_sources_walk_next
+  wakeup_sources_walk_start
