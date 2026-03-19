@@ -17,6 +17,7 @@ struct folio_batch;
 struct track;
 struct oom_control;
 struct compact_control;
+struct cma;
 
 DECLARE_RESTRICTED_HOOK(android_rvh_shmem_get_folio,
 			TP_PROTO(struct shmem_inode_info *info, struct folio **folio, int order),
