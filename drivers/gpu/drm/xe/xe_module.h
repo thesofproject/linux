@@ -23,6 +23,9 @@ struct xe_modparam {
 #endif
 	int wedged_mode;
 	u32 svm_notifier_size;
+#ifdef CONFIG_DRM_XE_GPUFREQTRACER
+	u32 gpufreq_monitoring_interval_ms;
+#endif
 };
 
 extern struct xe_modparam xe_modparam;
