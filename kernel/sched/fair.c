@@ -642,7 +642,7 @@ static inline s64 entity_key(struct cfs_rq *cfs_rq, struct sched_entity *se)
  * Which we track using:
  *
  *                    v0 := cfs_rq->zero_vruntime
- * \Sum (v_i - v0) * w_i := cfs_rq->avg_vruntime
+ * \Sum (v_i - v0) * w_i := cfs_rq->sum_w_vruntime
  *              \Sum w_i := cfs_rq->sum_weight
  *
  * Since zero_vruntime closely tracks the per-task service, these
@@ -654,32 +654,32 @@ static inline s64 entity_key(struct cfs_rq *cfs_rq, struct sched_entity *se)
  * As measured, the max (key * weight) value was ~44 bits for a kernel build.
  */
 static void
-avg_vruntime_add(struct cfs_rq *cfs_rq, struct sched_entity *se)
+sum_w_vruntime_add(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
 	unsigned long weight = scale_load_down(se->load.weight);
 	s64 key = entity_key(cfs_rq, se);
 
-	cfs_rq->avg_vruntime += key * weight;
+	cfs_rq->sum_w_vruntime += key * weight;
 	cfs_rq->sum_weight += weight;
 }
 
 static void
-avg_vruntime_sub(struct cfs_rq *cfs_rq, struct sched_entity *se)
+sum_w_vruntime_sub(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
 	unsigned long weight = scale_load_down(se->load.weight);
 	s64 key = entity_key(cfs_rq, se);
 
-	cfs_rq->avg_vruntime -= key * weight;
+	cfs_rq->sum_w_vruntime -= key * weight;
 	cfs_rq->sum_weight -= weight;
 }
 
 static inline
-void avg_vruntime_update(struct cfs_rq *cfs_rq, s64 delta)
+void sum_w_vruntime_update(struct cfs_rq *cfs_rq, s64 delta)
 {
 	/*
-	 * v' = v + d ==> avg_vruntime' = avg_runtime - d*sum_weight
+	 * v' = v + d ==> sum_w_vruntime' = sum_runtime - d*sum_weight
 	 */
-	cfs_rq->avg_vruntime -= cfs_rq->sum_weight * delta;
+	cfs_rq->sum_w_vruntime -= cfs_rq->sum_weight * delta;
 }
 
 /*
@@ -689,7 +689,7 @@ void avg_vruntime_update(struct cfs_rq *cfs_rq, s64 delta)
 u64 avg_vruntime(struct cfs_rq *cfs_rq)
 {
 	struct sched_entity *curr = cfs_rq->curr;
-	s64 avg = cfs_rq->avg_vruntime;
+	s64 avg = cfs_rq->sum_w_vruntime;
 	long load = cfs_rq->sum_weight;
 
 	if (curr && curr->on_rq) {
@@ -757,7 +757,7 @@ static void update_entity_lag(struct cfs_rq *cfs_rq, struct sched_entity *se)
 static int vruntime_eligible(struct cfs_rq *cfs_rq, u64 vruntime)
 {
 	struct sched_entity *curr = cfs_rq->curr;
-	s64 avg = cfs_rq->avg_vruntime;
+	s64 avg = cfs_rq->sum_w_vruntime;
 	long load = cfs_rq->sum_weight;
 
 	if (curr && curr->on_rq) {
@@ -780,7 +780,7 @@ static void update_zero_vruntime(struct cfs_rq *cfs_rq)
 	u64 vruntime = avg_vruntime(cfs_rq);
 	s64 delta = (s64)(vruntime - cfs_rq->zero_vruntime);
 
-	avg_vruntime_update(cfs_rq, delta);
+	sum_w_vruntime_update(cfs_rq, delta);
 
 	cfs_rq->zero_vruntime = vruntime;
 }
@@ -855,7 +855,7 @@ RB_DECLARE_CALLBACKS(static, min_vruntime_cb, struct sched_entity,
 static void __enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
 	trace_android_rvh_enqueue_entity(cfs_rq, se);
-	avg_vruntime_add(cfs_rq, se);
+	sum_w_vruntime_add(cfs_rq, se);
 	update_zero_vruntime(cfs_rq);
 	se->min_vruntime = se->vruntime;
 	se->min_slice = se->slice;
@@ -868,7 +868,7 @@ static void __dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 	trace_android_rvh_dequeue_entity(cfs_rq, se);
 	rb_erase_augmented_cached(&se->run_node, &cfs_rq->tasks_timeline,
 				  &min_vruntime_cb);
-	avg_vruntime_sub(cfs_rq, se);
+	sum_w_vruntime_sub(cfs_rq, se);
 	update_zero_vruntime(cfs_rq);
 }
 
