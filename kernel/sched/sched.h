@@ -690,8 +690,8 @@ struct cfs_rq {
 	unsigned int		h_nr_runnable;     /* SCHED_{NORMAL,BATCH,IDLE} */
 	unsigned int		h_nr_idle; /* SCHED_IDLE */
 
-	s64			sum_w_vruntime;
-	u64			sum_weight;
+	s64			avg_vruntime;
+	u64			avg_load;
 
 	u64			zero_vruntime;
 #ifdef CONFIG_SCHED_CORE
@@ -4033,7 +4033,7 @@ void sched_enq_and_set_task(struct sched_enq_and_set_ctx *ctx);
 
 #include "ext.h"
 
-extern void set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, bool first);
+extern void set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se);
 
 #ifdef CONFIG_RT_SOFTIRQ_AWARE_SCHED
 extern bool cpu_busy_with_softirqs(int cpu);
