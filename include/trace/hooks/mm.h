@@ -396,6 +396,9 @@ DECLARE_HOOK(android_vh_show_smap,
 DECLARE_HOOK(android_vh_page_cache_ra_unbounded,
 	TP_PROTO(struct address_space *mapping, struct folio *folio, u64 *data),
 	TP_ARGS(mapping, folio, data));
+DECLARE_HOOK(android_vh_ra_alloc_retry,
+	TP_PROTO(unsigned int *order, bool *retry),
+	TP_ARGS(order, retry));
 DECLARE_HOOK(android_vh_force_page_cache_ra,
 	TP_PROTO(struct address_space *mapping, u64 *data),
 	TP_ARGS(mapping, data));

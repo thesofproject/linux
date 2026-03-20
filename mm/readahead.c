@@ -547,9 +547,16 @@ void page_cache_ra_order(struct readahead_control *ractl,
 		/* Don't allocate pages past EOF */
 		while (order > min_order && index + (1UL << order) - 1 > limit)
 			order--;
+retry:
 		err = ra_alloc_folio(ractl, index, mark, order, gfp);
-		if (err)
+		if (err) {
+			bool retry = false;
+
+			trace_android_vh_ra_alloc_retry(&order, &retry);
+			if (retry)
+				goto retry;
 			break;
+		}
 		index += 1UL << order;
 	}
 
