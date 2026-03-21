@@ -977,6 +977,7 @@ void kvm_apic_update_ppr(struct kvm_vcpu *vcpu)
 	apic_update_ppr(vcpu->arch.apic);
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_apic_update_ppr);
+#endif /* !__PKVM_HYP__ */
 
 static void apic_set_tpr(struct kvm_lapic *apic, u32 tpr)
 {
@@ -984,6 +985,7 @@ static void apic_set_tpr(struct kvm_lapic *apic, u32 tpr)
 	apic_update_ppr(apic);
 }
 
+#ifndef __PKVM_HYP__
 static bool kvm_apic_broadcast(struct kvm_lapic *apic, u32 mda)
 {
 	return mda == (apic_x2apic_mode(apic) ?
@@ -2714,12 +2716,14 @@ void kvm_set_lapic_tscdeadline_msr(struct kvm_vcpu *vcpu, u64 data)
 	apic->lapic_timer.tscdeadline = data;
 	start_apic_timer(apic);
 }
+#endif /* !__PKVM_HYP__ */
 
 void kvm_lapic_set_tpr(struct kvm_vcpu *vcpu, unsigned long cr8)
 {
 	apic_set_tpr(vcpu->arch.apic, (cr8 & 0x0f) << 4);
 }
 
+#ifndef __PKVM_HYP__
 u64 kvm_lapic_get_cr8(struct kvm_vcpu *vcpu)
 {
 	u64 tpr;

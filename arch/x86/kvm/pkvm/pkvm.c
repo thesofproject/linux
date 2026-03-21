@@ -433,6 +433,29 @@ static void unshare_vcpu_mce_banks(struct kvm_vcpu *vcpu)
 	pkvm_host_unshare_hyp(__pkvm_pa(vcpu->arch.mci_ctl2_banks), KVM_MCI_CTL2_SIZE);
 }
 
+static void pkvm_vcpu_reset(struct kvm_vcpu *vcpu, bool init_event)
+{
+	kvm_vcpu_reset(vcpu, init_event);
+
+	if (lapic_in_kernel(vcpu) && vcpu->arch.apic->guest_apic_protected) {
+		/*
+		 * TPR is the key register for the protected APIC, as it will be
+		 * used by the APICv to evaluate pending interrupts. To prevent
+		 * the host from injecting exception vectors (0 - 31) via the
+		 * posted interrupt mechanism into the pVM, the TPR should be
+		 * set as 0x10 to prevent both class 1 and class 0 interrupts.
+		 * As the pVM OS may not set the TPR during early boot, or even
+		 * doesn't set the TPR at all if it doesn't use APIC, these will
+		 * make the TPR as 0x0 which allows the host to inject exception
+		 * vectors (16 - 31) into the pVM and may cause security issues.
+		 * So enforce the TPR as 0x10 after reset vcpu in the pKVM to
+		 * prevent the host from injecting exception vectors from the
+		 * beginning of the pVM boot.
+		 */
+		kvm_set_cr8(vcpu, 1);
+	}
+}
+
 static int __vcpu_create(struct kvm *kvm, struct kvm_vcpu *vcpu, struct fpstate *fps)
 {
 	struct pkvm_vcpu *pkvm_vcpu = to_pkvm_vcpu(vcpu);
@@ -536,7 +559,7 @@ static int __vcpu_create(struct kvm *kvm, struct kvm_vcpu *vcpu, struct fpstate 
 
 	kvm_vcpu_after_set_cpuid(vcpu);
 
-	kvm_vcpu_reset(vcpu, false);
+	pkvm_vcpu_reset(vcpu, false);
 
 	if (pkvm_is_protected_vcpu(vcpu)) {
 		u64 apic_base = APIC_DEFAULT_PHYS_BASE | LAPIC_MODE_X2APIC |
@@ -1422,7 +1445,7 @@ static void pkvm_vcpu_pvmfw_entry_init(struct kvm_vcpu *vcpu)
 
 static void pkvm_vcpu_ap_entry_init(struct kvm_vcpu *vcpu)
 {
-	kvm_vcpu_reset(vcpu, true);
+	pkvm_vcpu_reset(vcpu, true);
 	kvm_vcpu_deliver_sipi_vector(vcpu, vcpu->arch.apic->sipi_vector);
 }
 
