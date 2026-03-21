@@ -1607,6 +1607,9 @@ static void pkvm_load_eoi_exitmap(struct kvm_vcpu *vcpu, u64 *eoi_exit_bitmap)
 
 static void pkvm_hwapic_isr_update(struct kvm_vcpu *vcpu, int max_isr)
 {
+	if (lapic_in_kernel(vcpu) && vcpu->arch.apic->guest_apic_protected)
+		return;
+
 	KVM_BUG_ON(pkvm_hypercall(hwapic_isr_update, max_isr), vcpu->kvm);
 }
 
