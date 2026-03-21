@@ -35,6 +35,7 @@
 #include <asm/current.h>
 #include <asm/apicdef.h>
 #include <asm/delay.h>
+#include <asm/kvm_pkvm.h>
 #include <linux/atomic.h>
 #include <linux/jump_label.h>
 #include "kvm_cache_regs.h"
@@ -2787,6 +2788,15 @@ int kvm_apic_set_base(struct kvm_vcpu *vcpu, u64 value, bool host_initiated)
 		if (old_mode == LAPIC_MODE_DISABLED && new_mode == LAPIC_MODE_X2APIC)
 			return 1;
 	}
+
+	/*
+	 * The pVM's apic cannot be switched to xapic mode due to lack of MMIO
+	 * decoding support in the pKVM hypervisor. And also cannot be disabled
+	 * as re-enabling it will need to switch to xapic mode first according
+	 * to the SDM Vol3 x2APIC State Transitions.
+	 */
+	if (pkvm_is_protected_vcpu(vcpu) && (new_mode != LAPIC_MODE_X2APIC))
+		return 1;
 
 	__kvm_apic_set_base(vcpu, value);
 #ifndef __PKVM_HYP__
