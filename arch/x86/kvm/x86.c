@@ -14925,6 +14925,11 @@ static int __pkvm_vcpu_enter_guest(struct kvm_vcpu *vcpu, bool force_immediate_e
 	 */
 	smp_store_mb(vcpu->mode, IN_GUEST_MODE);
 
+	if (enable_apicv && kvm_lapic_enabled(vcpu)) {
+		kvm_x86_call(sync_pir_to_irr)(vcpu);
+		to_pkvm_vcpu(vcpu)->max_irr = -1;
+	}
+
 	if (req_immediate_exit)
 		kvm_make_request(KVM_REQ_EVENT, vcpu);
 	else

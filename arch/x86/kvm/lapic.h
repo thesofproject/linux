@@ -183,18 +183,26 @@ extern struct static_key_false_deferred apic_hw_disabled;
 
 static inline bool kvm_apic_hw_enabled(struct kvm_lapic *apic)
 {
+#ifndef __PKVM_HYP__
 	if (static_branch_unlikely(&apic_hw_disabled.key))
 		return apic->vcpu->arch.apic_base & MSR_IA32_APICBASE_ENABLE;
 	return true;
+#else
+	return apic->vcpu->arch.apic_base & MSR_IA32_APICBASE_ENABLE;
+#endif
 }
 
 extern struct static_key_false_deferred apic_sw_disabled;
 
 static inline bool kvm_apic_sw_enabled(struct kvm_lapic *apic)
 {
+#ifndef __PKVM_HYP__
 	if (static_branch_unlikely(&apic_sw_disabled.key))
 		return apic->sw_enabled;
 	return true;
+#else
+	return apic_get_reg(apic->regs, APIC_SPIV) & APIC_SPIV_APIC_ENABLED;
+#endif
 }
 
 static inline bool kvm_apic_present(struct kvm_vcpu *vcpu)
