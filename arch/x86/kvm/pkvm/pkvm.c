@@ -1112,13 +1112,15 @@ static void pkvm_set_virtual_apic_mode(struct kvm_vcpu *vcpu)
 	kvm_x86_call(set_virtual_apic_mode)(vcpu);
 }
 
-static void pkvm_refresh_apicv_exec_ctrl(struct kvm_vcpu *vcpu, bool apicv_active)
+static int pkvm_refresh_apicv_exec_ctrl(struct kvm_vcpu *vcpu, bool apicv_active)
 {
-	if (!lapic_in_kernel(vcpu))
-		return;
+	if (!lapic_in_kernel(vcpu) || (!enable_apicv && apicv_active))
+		return -EINVAL;
 
 	vcpu->arch.apic->apicv_active = apicv_active;
 	kvm_make_request(KVM_REQ_APICV_UPDATE, vcpu);
+
+	return 0;
 }
 
 static void pkvm_load_eoi_exitmap(struct kvm_vcpu *vcpu, u64 eoi_exit_bitmap0,
@@ -1806,7 +1808,7 @@ static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc 
 		pkvm_set_virtual_apic_mode(vcpu);
 		break;
 	case __pkvm__refresh_apicv_exec_ctrl:
-		pkvm_refresh_apicv_exec_ctrl(vcpu, pkvm_hc_input1(hvcpu));
+		ret = pkvm_refresh_apicv_exec_ctrl(vcpu, pkvm_hc_input1(hvcpu));
 		break;
 	case __pkvm__load_eoi_exitmap:
 		pkvm_load_eoi_exitmap(vcpu, pkvm_hc_input1(hvcpu), pkvm_hc_input2(hvcpu),
