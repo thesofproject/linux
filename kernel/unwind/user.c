@@ -26,12 +26,14 @@ get_user_word(unsigned long *word, unsigned long base, int off, unsigned int ws)
 	return get_user(*word, addr);
 }
 
-static int unwind_user_next_common(struct unwind_user_state *state,
-				   const struct unwind_user_frame *frame)
+static int unwind_user_next_fp(struct unwind_user_state *state)
 {
+	const struct unwind_user_frame frame = {
+		ARCH_INIT_USER_FP_FRAME(state->ws)
+	};
 	unsigned long cfa, fp, ra;
 
-	if (frame->use_fp) {
+	if (frame.use_fp) {
 		if (state->fp < state->sp)
 			return -EINVAL;
 		cfa = state->fp;
@@ -40,7 +42,7 @@ static int unwind_user_next_common(struct unwind_user_state *state,
 	}
 
 	/* Get the Canonical Frame Address (CFA) */
-	cfa += frame->cfa_off;
+	cfa += frame.cfa_off;
 
 	/* stack going in wrong direction? */
 	if (cfa <= state->sp)
@@ -51,39 +53,17 @@ static int unwind_user_next_common(struct unwind_user_state *state,
 		return -EINVAL;
 
 	/* Find the Return Address (RA) */
-	if (get_user_word(&ra, cfa, frame->ra_off, state->ws))
+	if (get_user_word(&ra, cfa, frame.ra_off, state->ws))
 		return -EINVAL;
 
-	if (frame->fp_off && get_user_word(&fp, cfa, frame->fp_off, state->ws))
+	if (frame.fp_off && get_user_word(&fp, cfa, frame.fp_off, state->ws))
 		return -EINVAL;
 
 	state->ip = ra;
 	state->sp = cfa;
-	if (frame->fp_off)
+	if (frame.fp_off)
 		state->fp = fp;
-	state->topmost = false;
 	return 0;
-}
-
-static int unwind_user_next_fp(struct unwind_user_state *state)
-{
-#ifdef CONFIG_HAVE_UNWIND_USER_FP
-	struct pt_regs *regs = task_pt_regs(current);
-
-	if (state->topmost && unwind_user_at_function_start(regs)) {
-		const struct unwind_user_frame fp_entry_frame = {
-			ARCH_INIT_USER_FP_ENTRY_FRAME(state->ws)
-		};
-		return unwind_user_next_common(state, &fp_entry_frame);
-	}
-
-	const struct unwind_user_frame fp_frame = {
-		ARCH_INIT_USER_FP_FRAME(state->ws)
-	};
-	return unwind_user_next_common(state, &fp_frame);
-#else
-	return -EINVAL;
-#endif
 }
 
 static int unwind_user_next(struct unwind_user_state *state)
@@ -138,7 +118,6 @@ static int unwind_user_start(struct unwind_user_state *state)
 		state->done = true;
 		return -EINVAL;
 	}
-	state->topmost = true;
 
 	return 0;
 }
