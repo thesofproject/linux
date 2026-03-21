@@ -1021,8 +1021,15 @@ static int pkvm_inject_irq(struct kvm_vcpu *vcpu)
 	 * Injecting software interrupts will change the guest's RIP. As there
 	 * is no usage to require the host to do so for a pVM, disallow the host
 	 * to inject software interrupts to a pVM for security reason.
+	 *
+	 * As the pVM's exceptions are emulated and injected by the pKVM itself,
+	 * the host is not allowed to inject exceptions to the pVM. So validate
+	 * the interrupt vector number to make sure it won't be a reserved
+	 * vector number by the Intel 64 and IA-32 architectures for
+	 * architecture-defined exceptions.
 	 */
-	if (pkvm_is_protected_vcpu(vcpu) && shared_vcpu->arch.interrupt.soft)
+	if (pkvm_is_protected_vcpu(vcpu) && (shared_vcpu->arch.interrupt.soft ||
+					     shared_vcpu->arch.interrupt.nr < 32))
 		return -EPERM;
 
 	vcpu->arch.interrupt.soft = shared_vcpu->arch.interrupt.soft;
