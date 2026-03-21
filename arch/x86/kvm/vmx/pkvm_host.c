@@ -1835,6 +1835,23 @@ static int pkvm_complete_emulated_msr(struct kvm_vcpu *vcpu, int err)
 	return kvm_complete_insn_gp(vcpu, err);
 }
 
+static bool pkvm_protected_apic_has_interrupt(struct kvm_vcpu *vcpu)
+{
+	union pkvm_hc_data out;
+
+	if (!lapic_in_kernel(vcpu) || KVM_BUG_ON(!vcpu->arch.apic->guest_apic_protected,
+						 vcpu->kvm))
+		return false;
+
+	if (pi_has_pending_interrupt(vcpu))
+		return true;
+
+	if (KVM_BUG_ON(pkvm_hypercall_out(protected_apic_has_interrupt, &out), vcpu->kvm))
+		return false;
+
+	return out.protected_apic_has_interrupt.has_intr;
+}
+
 struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.name = KBUILD_MODNAME,
 
@@ -1966,6 +1983,8 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.vcpu_deliver_sipi_vector = kvm_vcpu_deliver_sipi_vector,
 
 	.get_untagged_addr = vmx_get_untagged_addr,
+
+	.protected_apic_has_interrupt = pkvm_protected_apic_has_interrupt,
 };
 
 static struct kvm_pmc *pkvm_intel_rdpmc_ecx_to_pmc(struct kvm_vcpu *vcpu,
