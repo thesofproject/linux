@@ -1557,6 +1557,9 @@ static void pkvm_update_cr8_intercept(struct kvm_vcpu *vcpu, int tpr, int irr)
 
 static void pkvm_set_virtual_apic_mode(struct kvm_vcpu *vcpu)
 {
+	if (pkvm_is_protected_vcpu(vcpu))
+		return;
+
 	if (lapic_in_kernel(vcpu))
 		KVM_BUG_ON(pkvm_hypercall(set_virtual_apic_mode), vcpu->kvm);
 }
