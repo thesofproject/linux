@@ -1593,6 +1593,14 @@ static void pkvm_hwapic_isr_update(struct kvm_vcpu *vcpu, int max_isr)
 	KVM_BUG_ON(pkvm_hypercall(hwapic_isr_update, max_isr), vcpu->kvm);
 }
 
+static int pkvm_sync_pir_to_irr(struct kvm_vcpu *vcpu)
+{
+	if (!lapic_in_kernel(vcpu) || vcpu->arch.apic->guest_apic_protected)
+		return -1;
+
+	return vmx_sync_pir_to_irr(vcpu);
+}
+
 static void pkvm_get_exit_info(struct kvm_vcpu *vcpu, u32 *reason, u64 *info1,
 			       u64 *info2, u32 *intr_info, u32 *error_code)
 {
@@ -1935,7 +1943,7 @@ struct kvm_x86_ops pkvm_host_vt_x86_ops __initdata = {
 	.apicv_pre_state_restore = pi_apicv_pre_state_restore,
 	.required_apicv_inhibits = VMX_REQUIRED_APICV_INHIBITS,
 	.hwapic_isr_update = pkvm_hwapic_isr_update,
-	.sync_pir_to_irr = vmx_sync_pir_to_irr,
+	.sync_pir_to_irr = pkvm_sync_pir_to_irr,
 	.deliver_interrupt = vmx_deliver_interrupt,
 	.dy_apicv_has_pending_interrupt = pi_has_pending_interrupt,
 
