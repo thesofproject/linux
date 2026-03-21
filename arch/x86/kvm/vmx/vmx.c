@@ -7435,17 +7435,6 @@ void vmx_set_virtual_apic_mode(struct kvm_vcpu *vcpu)
 		return;
 	}
 
-#ifdef __PKVM_HYP__
-	/*
-	 * Emulating xapic mode requires instruction decoding. As pVM's CPU and
-	 * memory state are isolated from the host, the host cannot decode pVM's
-	 * instruction. Not to use xapic mode for a pVM.
-	 */
-	if (pkvm_is_protected_vcpu(vcpu) &&
-	    (kvm_get_apic_mode(vcpu) == LAPIC_MODE_XAPIC))
-		return;
-#endif
-
 	sec_exec_control = secondary_exec_controls_get(vmx);
 	sec_exec_control &= ~(SECONDARY_EXEC_VIRTUALIZE_APIC_ACCESSES |
 			      SECONDARY_EXEC_VIRTUALIZE_X2APIC_MODE);
