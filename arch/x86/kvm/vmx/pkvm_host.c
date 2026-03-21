@@ -734,8 +734,11 @@ static int pkvm_vcpu_create(struct kvm_vcpu *vcpu)
 	vcpu_size = PKVM_VMX_VCPU_SIZE;
 	if (pkvm_is_protected_vcpu(vcpu))
 		vcpu_size += KVM_MCE_SIZE + KVM_MCI_CTL2_SIZE;
-	if (lapic_in_kernel(vcpu))
+	if (lapic_in_kernel(vcpu)) {
 		vcpu_size += sizeof(struct kvm_lapic);
+		if (pkvm_is_protected_vcpu(vcpu) && enable_apicv)
+			vcpu_size += PAGE_SIZE;
+	}
 
 	ret = -ENOMEM;
 	pkvm_vcpu = alloc_pages_exact(vcpu_size, GFP_KERNEL_ACCOUNT);
@@ -1351,6 +1354,20 @@ static fastpath_t pkvm_vcpu_run(struct kvm_vcpu *vcpu, u64 run_flags)
 		     !vcpu->arch.guest_state_protected)) {
 		vcpu->arch.guest_state_protected = true;
 		fpstate_set_confidential(&vcpu->arch.guest_fpu);
+		if (lapic_in_kernel(vcpu)) {
+			/*
+			 * As the host VMM (e.g., crosvm) is still using the
+			 * ioctl to access the pVM's apic state, i.e.,
+			 * kvm_vcpu_ioctl_get/set_lapic, defer setting the
+			 * host's guest_apic_protected flag after the vCPU
+			 * starts running to avoid failures to the crosvm.
+			 * Allowing this should be fine as the apic page is
+			 * donated to the pKVM which is inaccessible to the
+			 * host, and the host VMM can only use this ioctl to
+			 * access the states emulated by the host itself.
+			 */
+			vcpu->arch.apic->guest_apic_protected = enable_apicv;
+		}
 	}
 
 	if (unlikely(vmx_get_exit_reason(vcpu).full == 0xdead))
