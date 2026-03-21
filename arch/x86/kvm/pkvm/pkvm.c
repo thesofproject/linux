@@ -324,7 +324,10 @@ static int setup_vcpu_lapic(struct kvm_vcpu *vcpu)
 		goto unshare_apic;
 
 	apic->regs = apic_regs;
-	apic->apicv_active = shared_apic->apicv_active;
+	if (enable_apicv) {
+		apic->apicv_active = true;
+		kvm_make_request(KVM_REQ_APICV_UPDATE, vcpu);
+	}
 	apic->nr_lvt_entries = kvm_apic_calc_nr_lvt_entries(vcpu);
 	apic->vcpu = vcpu;
 
@@ -1115,7 +1118,7 @@ static void pkvm_refresh_apicv_exec_ctrl(struct kvm_vcpu *vcpu, bool apicv_activ
 		return;
 
 	vcpu->arch.apic->apicv_active = apicv_active;
-	kvm_x86_call(refresh_apicv_exec_ctrl)(vcpu);
+	kvm_make_request(KVM_REQ_APICV_UPDATE, vcpu);
 }
 
 static void pkvm_load_eoi_exitmap(struct kvm_vcpu *vcpu, u64 eoi_exit_bitmap0,
