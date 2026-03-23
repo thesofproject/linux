@@ -823,6 +823,8 @@ static void binder_transaction_priority(struct binder_thread *thread,
 		.prio = node->min_priority,
 	};
 
+	trace_android_vh_binder_transaction_priority(thread, t);
+
 	if (t->set_priority_called)
 		return;
 
