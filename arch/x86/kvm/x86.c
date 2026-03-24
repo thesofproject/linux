@@ -14973,8 +14973,36 @@ static int __pkvm_vcpu_enter_guest(struct kvm_vcpu *vcpu, bool force_immediate_e
 		req_immediate_exit = force_immediate_exit;
 
 	run_flags = 0;
-	if (req_immediate_exit)
+	if (req_immediate_exit) {
 		run_flags |= KVM_RUN_FORCE_IMMEDIATE_EXIT;
+	} else if (READ_ONCE(vcpu->mode) == EXITING_GUEST_MODE ||
+		 kvm_request_pending(vcpu)) {
+		/*
+		 * Make the OUTSIDE_GUEST_MODE visible as early as possible for
+		 * the other CPUs to skip unnecessary kicks. It can also prevent
+		 * the vcpu->mode writing and the following vcpu->requests
+		 * reading from being reordered, so that the vcpu->requests made
+		 * before changing to OUTSIDE_GUEST_MODE can be handled. In fact
+		 * the vcpu->requests reading can be reordered before vcpu->mode
+		 * writing, as the missed vcpu->requests can be handled again
+		 * after setting to IN_GUEST_MODE with full memory barrier in
+		 * the next iteration. And a full memory barrier also cannot
+		 * prevent this CPU from missing the new requests made by the
+		 * other CPUs, e.g., the requests made after this CPU has
+		 * executed the event handlers. So a write barrier is fine from
+		 * functional point of view. But using a full memory barrier to
+		 * propagate the OUTSIDE_GUEST_MODE.
+		 */
+		smp_store_mb(vcpu->mode, OUTSIDE_GUEST_MODE);
+		/*
+		 * No need to cancel the previously injected events as the event
+		 * is injected via either handling exit reasons or the PV
+		 * interface which both happen on this CPU, thus there is no new
+		 * event injection request. And the vCPU run loop also doesn't
+		 * break out in this case, so no need to cancel.
+		 */
+		return 1;
+	}
 
 	if (vcpu->arch.guest_fpu.xfd_err)
 		wrmsrl(MSR_IA32_XFD_ERR, vcpu->arch.guest_fpu.xfd_err);
