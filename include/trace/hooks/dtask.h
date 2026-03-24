@@ -178,6 +178,15 @@ DECLARE_HOOK(android_vh_pcpu_rwsem_lock_acquired,
 DECLARE_HOOK(android_vh_pcpu_rwsem_lock_released,
 	TP_PROTO(struct percpu_rw_semaphore *sem),
 	TP_ARGS(sem));
+DECLARE_HOOK(android_vh_lock_delay_schedule,
+	TP_PROTO(struct task_struct *prev, int sched_mode, bool *ext_slice),
+	TP_ARGS(prev, sched_mode, ext_slice));
+DECLARE_HOOK(android_vh_lock_task_fork,
+	TP_PROTO(struct task_struct *p),
+	TP_ARGS(p));
+DECLARE_HOOK(android_vh_lock_task_exit,
+	TP_PROTO(struct task_struct *p),
+	TP_ARGS(p));
 #endif /* _TRACE_HOOK_DTASK_H */
 
 /* This part must be outside protection */
