@@ -576,7 +576,7 @@ static int __exec_queue_add(struct xe_pxp *pxp, struct xe_exec_queue *q)
 int xe_pxp_start(struct xe_pxp *pxp, u8 type)
 {
 	int ret = 0;
-	bool restart = false;
+	bool restart;
 
 	if (!xe_pxp_is_enabled(pxp))
 		return -ENODEV;
@@ -604,6 +604,8 @@ wait_for_idle:
 	if (!wait_for_completion_timeout(&pxp->activation,
 					 msecs_to_jiffies(PXP_ACTIVATION_TIMEOUT_MS)))
 		return -ETIMEDOUT;
+
+	restart = false;
 
 	mutex_lock(&pxp->multi_session.mutex);
 	mutex_lock(&pxp->mutex);
