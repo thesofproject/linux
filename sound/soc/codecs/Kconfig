@@ -927,6 +927,19 @@ config SND_SOC_CS35L56_CAL_SET_CTRL
 	  On most platforms this is not needed.
 
 	  If unsure select "N".
+
+config SND_SOC_CS35L56_CAL_PERFORM_CTRL
+	bool "CS35L56 ALSA control to perform factory calibration"
+	default N
+	select SND_SOC_CS35L56_CAL_DEBUGFS_COMMON
+	help
+	  Allow performing factory calibration data through an ALSA
+	  control. It is recommended to use the debugfs method instead
+	  because debugfs has restricted access permissions.
+
+	  On most platforms this is not needed.
+
+	  If unsure select "N".
 endmenu
 
 config SND_SOC_CS40L50
