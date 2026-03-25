@@ -79,6 +79,12 @@ DECLARE_HOOK(android_vh_rebalance_anon_lru_bypass,
 DECLARE_HOOK(android_vh_tune_scan_control,
 	TP_PROTO(bool *skip_swap),
 	TP_ARGS(skip_swap));
+DECLARE_HOOK(android_vh_folio_skip_activate,
+	TP_PROTO(struct folio *folio, bool *skip),
+	TP_ARGS(folio, skip));
+DECLARE_HOOK(android_vh_folio_trylock_clear_bypass,
+	TP_PROTO(struct folio *folio, bool *bypass),
+	TP_ARGS(folio, bypass));
 DECLARE_HOOK(android_vh_shrink_node_memcgs,
 	TP_PROTO(struct mem_cgroup *memcg, bool *skip),
 	TP_ARGS(memcg, skip));
