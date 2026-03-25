@@ -404,6 +404,7 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_ptype_head);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_put_super);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_queue_io);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_ra_tuning_max_page);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_readahead_add_folio);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_rebalance_anon_lru_bypass);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_receive_sock);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_reclaim_before_kswapd);
