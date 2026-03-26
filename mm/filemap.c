@@ -2720,10 +2720,17 @@ static inline bool pos_same_folio(loff_t pos1, loff_t pos2, struct folio *folio)
 
 static void filemap_end_dropbehind_read(struct folio *folio)
 {
+	bool bypass = false;
+
 	if (!folio_test_dropbehind(folio))
 		return;
 	if (folio_test_writeback(folio) || folio_test_dirty(folio))
 		return;
+
+	trace_android_vh_filemap_end_dropbehind_bypass(folio, &bypass);
+	if (bypass)
+		return;
+
 	if (folio_trylock(folio)) {
 		filemap_end_dropbehind(folio);
 		folio_unlock(folio);
@@ -2766,7 +2773,8 @@ ssize_t filemap_read(struct kiocb *iocb, struct iov_iter *iter,
 	iov_iter_truncate(iter, inode->i_sb->s_maxbytes - iocb->ki_pos);
 	folio_batch_init(&fbatch);
 	trace_android_vh_filemap_read(filp, iocb->ki_pos, iov_iter_count(iter));
-
+	trace_android_vh_adjust_iocb_flags(filp, iocb->ki_pos,
+					  iov_iter_count(iter), &iocb->ki_flags);
 	do {
 		cond_resched();
 
@@ -4303,6 +4311,7 @@ ssize_t generic_perform_write(struct kiocb *iocb, struct iov_iter *i)
 	long status = 0;
 	ssize_t written = 0;
 
+	trace_android_vh_adjust_iocb_flags(file, pos, iov_iter_count(i), &iocb->ki_flags);
 	do {
 		struct folio *folio;
 		size_t offset;		/* Offset into folio */
