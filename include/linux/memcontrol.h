@@ -23,6 +23,7 @@
 #include <linux/writeback.h>
 #include <linux/page-flags.h>
 #include <linux/shrinker.h>
+#include <linux/android_kabi.h>
 
 struct mem_cgroup;
 struct obj_cgroup;
@@ -58,6 +59,7 @@ enum memcg_memory_event {
 struct mem_cgroup_reclaim_cookie {
 	pg_data_t *pgdat;
 	int generation;
+	ANDROID_KABI_RESERVE(1);
 };
 
 #ifdef CONFIG_MEMCG
