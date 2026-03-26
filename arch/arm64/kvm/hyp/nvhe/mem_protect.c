@@ -828,8 +828,10 @@ static int __host_stage2_set_owner_locked(phys_addr_t addr, u64 size, u8 owner_i
 			ret = -ENOMEMHOSTS2;
 	}
 
-	if (ret)
+	if (ret) {
+		WARN_ON(ret != -ENOMEMHOSTS2);
 		return ret;
+	}
 
 	if (flags & HOST_SET_NO_IOMMU_UPDATE)
 		goto update_vmemmap;
@@ -1686,10 +1688,8 @@ int __pkvm_host_donate_sglist_hyp(struct pkvm_sglist_page *sglist, size_t nr_pag
 		if (!ret) {
 			ret = __host_stage2_set_owner_locked(phys, size, PKVM_ID_HYP, 0,
 							     HOST_SET_NO_IOMMU_UPDATE);
-			if (ret) {
-				WARN_ON(ret != -ENOMEMHOSTS2);
+			if (ret)
 				pkvm_remove_mappings_locked(__hyp_va(phys), __hyp_va(phys) + size);
-			}
 		}
 
 		/* Rollback if either hyp stage-1 -ENOMEM or host stage-2 -ENOMEMHOSTS2 */
@@ -1919,7 +1919,6 @@ update:
 		}
 	}
 
-	WARN_ON(ret && ret != -ENOMEMHOSTS2);
 	if (ret || !page || !prot)
 		goto unlock;
 
@@ -2525,8 +2524,6 @@ int __pkvm_host_donate_sglist_guest(struct pkvm_hyp_vcpu *vcpu)
 
 	if (ret) {
 		struct kvm_hyp_pinned_page *end = ppage;
-
-		WARN_ON(ret != -ENOMEMHOSTS2);
 
 		for (ppage = hyp_ppages; ppage < end; ppage++) {
 			size_t size = PAGE_SIZE << ppage->order;
