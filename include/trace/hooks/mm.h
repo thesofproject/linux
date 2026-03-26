@@ -490,6 +490,18 @@ DECLARE_HOOK(android_vh_folios_put_refs_direct_free_extent,
 DECLARE_HOOK(android_vh_free_pages_and_swap_cache,
 	TP_PROTO(struct folio *folio),
 	TP_ARGS(folio));
+DECLARE_HOOK(android_vh_swapin_start,
+	TP_PROTO(unsigned long *swapin_start),
+	TP_ARGS(swapin_start));
+DECLARE_HOOK(android_vh_swapin_end,
+	TP_PROTO(struct folio *folio, unsigned long swapin_start),
+	TP_ARGS(folio, swapin_start));
+DECLARE_HOOK(android_vh_swap_writepage_start,
+	TP_PROTO(unsigned long *swap_writepage_start),
+	TP_ARGS(swap_writepage_start));
+DECLARE_HOOK(android_vh_swap_writepage_end,
+	TP_PROTO(struct page *page, unsigned long swap_writepage_start),
+	TP_ARGS(page, swap_writepage_start));
 DECLARE_HOOK(android_vh_customize_thp_gfp_orders,
 	TP_PROTO(gfp_t *gfp_mask, unsigned long *orders, int *order),
 	TP_ARGS(gfp_mask, orders, order));
