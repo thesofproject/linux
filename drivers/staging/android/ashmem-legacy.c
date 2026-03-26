@@ -951,6 +951,100 @@ static struct miscdevice ashmem_misc = {
 	.fops = &ashmem_fops,
 };
 
+/**
+ * is_ashmem_file() - Indicates whether a given file structure belongs to an ashmem file.
+ * @file: A pointer to the file structure being inspected.
+ *
+ */
+bool is_ashmem_file(struct file *file)
+{
+	if (file && (file->f_op == &ashmem_fops))
+		return true;
+	return false;
+}
+EXPORT_SYMBOL_GPL(is_ashmem_file);
+
+/**
+ * ashmem_area_name() - Provides the name of a region associated with a given ashmem file.
+ * @file: A pointer to the file structure being inspected.
+ * @name: A pointer to a buffer of at least ASHMEM_FULL_NAME_LEN + 1 (for the NULL terminator).
+ *
+ * This function populates @name with the name of a given ashmem file. If the name has not been
+ * set yet, the buffer is populated with "/dev/ashmem". Otherwise, it is populated with
+ * "/dev/ashmem/name". If the file is not an ashmem file, -EINVAL is returned and the buffer is
+ * not touched.
+ */
+int ashmem_area_name(struct file *file, char *name)
+{
+	struct ashmem_area *asma;
+
+	if (!is_ashmem_file(file) || !name)
+		return -EINVAL;
+
+	asma = file->private_data;
+	mutex_lock(&ashmem_mutex);
+	strscpy(name, asma->name, ASHMEM_FULL_NAME_LEN);
+	mutex_unlock(&ashmem_mutex);
+
+	/*
+	 * If the name hasn't been set, the Rust driver will return /dev/ashmem (i.e. it removes
+	 * the trailing /, so lets do that here.
+	 */
+	if (name[ASHMEM_NAME_PREFIX_LEN] == '\0')
+		name[ASHMEM_NAME_PREFIX_LEN] = '\0';
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(ashmem_area_name);
+
+/**
+ * ashmem_area_size() - Provides the size of a region associated with a given ashmem file.
+ * @file: A pointer to the file structure being inspected.
+ *
+ * Returns the size of the region if the file is an ashmem buffer, or 0 otherwise.
+ */
+long ashmem_area_size(struct file *file)
+{
+	struct ashmem_area *asma;
+	ssize_t size;
+
+	if (!is_ashmem_file(file))
+		return 0;
+
+	asma = file->private_data;
+	mutex_lock(&ashmem_mutex);
+	size = asma->size;
+	mutex_unlock(&ashmem_mutex);
+	return size;
+}
+EXPORT_SYMBOL_GPL(ashmem_area_size);
+
+/**
+ * ashmem_area_vmfile() - Provides a pointer to the shmem file structure for an ashmem file.
+ * @file: A pointer to the file structure being inspected.
+ *
+ * Returns a pointer to the underlying shmem file structure for an ashmem file, with its reference
+ * count elevated by 1. It is the caller's responsibility to decrement this reference by invoking
+ * fput() on the return value of this function if it is not NULL. If the given file is not an ashmem
+ * file, then NULL is returned.
+ */
+struct file *ashmem_area_vmfile(struct file *file)
+{
+	struct ashmem_area *asma;
+	struct file *vmfile = NULL;
+
+	if (!is_ashmem_file(file))
+		return NULL;
+
+	asma = file->private_data;
+	mutex_lock(&ashmem_mutex);
+	if (asma->file)
+		vmfile = get_file(asma->file);
+	mutex_unlock(&ashmem_mutex);
+	return vmfile;
+}
+EXPORT_SYMBOL_GPL(ashmem_area_vmfile);
+
 static int __init ashmem_init(void)
 {
 	int ret = -ENOMEM;
