@@ -59,4 +59,7 @@ ddk_module(
         "CONFIG_CFG80211_REQUIRE_SIGNED_REGDB=1",
         "CONFIG_CFG80211_DEBUGFS=1",
     ],
+    deps = [
+        "//private/desktop-google:main80211_hdrs",
+    ],
 )

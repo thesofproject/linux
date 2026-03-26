@@ -104,5 +104,8 @@ ddk_module(
         "CONFIG_MAC80211_RC_DEFAULT=\"minstrel_ht\"",
         "CONFIG_MAC80211_MESSAGE_TRACING=1",
     ],
-    deps = ["//private/desktop-google/net/wireless:cfg80211"],
+    deps = [
+        "//private/desktop-google:main80211_hdrs",
+        "//private/desktop-google/net/wireless:cfg80211",
+    ],
 )

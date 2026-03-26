@@ -3556,3 +3556,25 @@ ddk_headers(
         "include/uapi",
     ],
 )
+
+ddk_headers(
+    name = "main80211_hdrs",
+    hdrs = [
+        "include/linux/ieee80211.h",
+        "include/linux/ieee80211-eht.h",
+        "include/linux/ieee80211-he.h",
+        "include/linux/ieee80211-ht.h",
+        "include/linux/ieee80211-mesh.h",
+        "include/linux/ieee80211-nan.h",
+        "include/linux/ieee80211-p2p.h",
+        "include/linux/ieee80211-s1g.h",
+        "include/linux/ieee80211-vht.h",
+        "include/net/cfg80211.h",
+        "include/net/mac80211.h",
+        "include/uapi/linux/nl80211.h",
+    ],
+    linux_includes = [
+        "include",
+        "include/uapi",
+    ],
+)

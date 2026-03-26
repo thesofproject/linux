@@ -18,6 +18,7 @@ ddk_module(
     out = "mac80211_hwsim.ko",
     kernel_build = "//private/devices/google/common:kernel_build",
     deps = [
+        "//private/desktop-google:main80211_hdrs",
         "//private/desktop-google/net/mac80211",
         "//private/desktop-google/net/wireless:cfg80211",
     ],
