@@ -72,6 +72,16 @@
   __traceiter_android_rvh_swap_bio_charge
   __tracepoint_android_rvh_swap_bio_charge
 
+# required by mi_kernel_monitor.ko
+  __tracepoint_android_vh_swapin_start
+  __traceiter_android_vh_swapin_start
+  __tracepoint_android_vh_swapin_end
+  __traceiter_android_vh_swapin_end
+  __tracepoint_android_vh_swap_writepage_start
+  __traceiter_android_vh_swap_writepage_start
+  __tracepoint_android_vh_swap_writepage_end
+  __traceiter_android_vh_swap_writepage_end
+
 # required by mi_ext_lru.ko
   mem_cgroup_iter
   __traceiter_android_vh_readahead_add_folio
