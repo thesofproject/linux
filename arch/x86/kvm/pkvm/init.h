@@ -37,5 +37,6 @@ struct pkvm_init_ops {
 int pkvm_init(struct pkvm_mem_info infos[], int nr_info);
 int pkvm_init_finalize(void);
 int pkvm_reprivilege_vcpu(struct kvm_vcpu *vcpu);
+bool pkvm_cpu_initialized(int cpu);
 
 #endif /* __PKVM_X86_INIT_H */
