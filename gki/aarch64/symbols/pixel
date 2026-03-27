@@ -1066,7 +1066,7 @@
   iommu_paging_domain_alloc_flags
   iommu_set_fault_handler
   iommu_unmap
-  ioremap_prot
+  __ioremap_prot
   io_schedule_timeout
   iounmap
   iova_domain_init_rcaches
