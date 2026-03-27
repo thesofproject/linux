@@ -71,7 +71,6 @@ static enum {
 
 #ifdef CONFIG_CMA
 static struct cma *host_s2_cma;
-static DEFINE_MUTEX(host_s2_cma_lock);
 
 static int __init early_kvm_arm_host_s2_cfg(char *arg)
 {
@@ -135,8 +134,6 @@ int pkvm_host_stage2_topup(void)
 {
 	struct kvm_hyp_memcache mc;
 	int ret;
-
-	guard(mutex)(&host_s2_cma_lock);
 
 	init_hyp_memcache(&mc);
 	ret = __topup_hyp_memcache(&mc, 3, __host_stage2_alloc, kvm_host_pa, NULL, 0);
