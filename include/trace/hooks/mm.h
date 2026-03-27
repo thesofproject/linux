@@ -542,6 +542,9 @@ DECLARE_HOOK(android_vh_do_swap_page,
 	TP_PROTO(struct folio *folio, pte_t *pte, struct vm_fault *vmf,
 		swp_entry_t entry),
 	TP_ARGS(folio, pte, vmf, entry));
+DECLARE_HOOK(android_vh_do_sync_mmap_readahead,
+	TP_PROTO(struct vm_fault *vmf, bool *skip),
+	TP_ARGS(vmf, skip));
 DECLARE_HOOK(android_vh_do_wp_page,
 	TP_PROTO(struct folio *folio),
 	TP_ARGS(folio));
