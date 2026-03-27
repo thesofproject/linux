@@ -193,6 +193,17 @@ static void host_ept_flush_tlb(struct pkvm_pgtable *pgt,
 	for (i = 0; i < pkvm_hyp->num_cpus; i++) {
 		struct kvm_vcpu *vcpu = pkvm_hyp->host_vcpus[i];
 
+		/*
+		 * During pKVM initialization phase, the host EPT will unmap the
+		 * pKVM's memory pages which can trigger TLB flushing on each
+		 * CPU. During this phase, a CPU may not be initialized yet to
+		 * respond to this request. In fact, it is also not necessary to
+		 * trigger TLB flushing for that CPU as the EPT will be flushed
+		 * eventually on that CPU when the CPU initialization is done.
+		 */
+		if (!pkvm_cpu_initialized(vcpu->cpu))
+			continue;
+
 		kvm_make_request(KVM_REQ_TLB_FLUSH_CURRENT, vcpu);
 		pkvm_kick_vcpu(vcpu);
 	}
