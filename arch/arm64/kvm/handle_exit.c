@@ -486,6 +486,8 @@ static int handle_hyp_req_mem(struct kvm_vcpu *vcpu, struct kvm_hyp_req *req)
 
 int handle_hyp_req(struct kvm_vcpu *vcpu, struct kvm_hyp_req *req, void *arg)
 {
+	trace_kvm_handle_hyp_req(vcpu, req);
+
 	switch (req->type) {
 	case KVM_HYP_REQ_TYPE_HYP_ALLOC:
 		return __pkvm_topup_hyp_alloc(req->mem.nr_pages);

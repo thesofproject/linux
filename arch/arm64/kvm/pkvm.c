@@ -64,9 +64,30 @@ phys_addr_t hyp_mem_size;
 extern struct pkvm_device *kvm_nvhe_sym(registered_devices);
 extern u32 kvm_nvhe_sym(registered_devices_nr);
 
+static enum {
+	PKVM_HOST_S2_CMA,
+	PKVM_HOST_S2_CARVEOUT,
+} host_s2_mode;
+
 #ifdef CONFIG_CMA
 static struct cma *host_s2_cma;
 static DEFINE_MUTEX(host_s2_cma_lock);
+
+static int __init early_kvm_arm_host_s2_cfg(char *arg)
+{
+	if (!arg)
+		return -EINVAL;
+
+	if (strcmp(arg, "carveout") == 0)
+		host_s2_mode = PKVM_HOST_S2_CARVEOUT;
+	else if (strcmp(arg, "cma") == 0)
+		host_s2_mode = PKVM_HOST_S2_CMA;
+	else
+		return -EINVAL;
+
+	return 0;
+}
+early_param("kvm-arm.host_s2", early_kvm_arm_host_s2_cfg);
 
 /*
  * kvm_hyp_reserve() being called way too early for CMA, this function allows to later-on reserve
@@ -343,6 +364,9 @@ again:
 	kvm_info("Reserved %lld MiB at 0x%llx\n", hyp_mem_size >> 20, hyp_mem_base);
 
 #ifdef CONFIG_CMA
+	if (host_s2_mode == PKVM_HOST_S2_CARVEOUT)
+		return;
+
 	/*
 	 * Even though only the host s2 is reclaimable, cover the entire
 	 * carveout with a CMA region as it has the same alignment requirements.
