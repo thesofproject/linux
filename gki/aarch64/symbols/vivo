@@ -30,6 +30,7 @@
   qdisc_put
   qdisc_reset
   qdisc_tree_reduce_backlog
+  readahead_gfp_mask
   regulator_get_drvdata
   remove_proc_entry
   set_blocksize
@@ -52,6 +53,8 @@
   __traceiter_android_rvh_inet_sock_create
   __traceiter_android_rvh_inet_sock_release
   __traceiter_android_rvh_replace_next_task_fair
+  __traceiter_android_rvh_set_gfp_zone_flags
+  __traceiter_android_rvh_set_readahead_gfp_mask
   __traceiter_android_rvh_set_user_nice
   __traceiter_android_rvh_tcp_rcv_spurious_retrans
   __traceiter_android_rvh_tcp_recvmsg
@@ -137,6 +140,8 @@
   __tracepoint_android_rvh_inet_sock_create
   __tracepoint_android_rvh_inet_sock_release
   __tracepoint_android_rvh_replace_next_task_fair
+  __tracepoint_android_rvh_set_gfp_zone_flags
+  __tracepoint_android_rvh_set_readahead_gfp_mask
   __tracepoint_android_rvh_set_user_nice
   __tracepoint_android_rvh_tcp_rcv_spurious_retrans
   __tracepoint_android_rvh_tcp_recvmsg
