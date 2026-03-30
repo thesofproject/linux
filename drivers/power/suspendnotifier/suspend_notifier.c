@@ -6,9 +6,9 @@
 #include <linux/kernel.h>
 #include <linux/miscdevice.h>
 #include <linux/module.h>
-#include <linux/mutex.h>
 #include <linux/platform_device.h>
 #include <linux/sched.h>
+#include <linux/spinlock.h>
 #include <linux/suspend.h>
 #include <linux/uaccess.h>
 #include <linux/wait.h>
@@ -23,7 +23,7 @@ struct pm_event {
 
 struct suspend_notifier_device {
 	struct miscdevice misc;
-	struct mutex pm_event_lock;
+	spinlock_t pm_event_lock;
 	struct pm_event current_pm_event;
 	u64 token_counter;
 	int file_open;
@@ -42,10 +42,11 @@ struct suspend_notifier_device {
 static bool check_ack_or_file_closed(struct suspend_notifier_device *drv_data)
 {
 	bool cond;
+	unsigned long flags;
 
-	mutex_lock(&drv_data->pm_event_lock);
+	spin_lock_irqsave(&drv_data->pm_event_lock, flags);
 	cond = !drv_data->file_open || drv_data->event_acknowledged;
-	mutex_unlock(&drv_data->pm_event_lock);
+	spin_unlock_irqrestore(&drv_data->pm_event_lock, flags);
 
 	return cond;
 }
@@ -57,8 +58,9 @@ static int suspend_notifier_cb(struct notifier_block *nb, unsigned long action, 
 		container_of(nb, struct suspend_notifier_device, suspend_notifier);
 	long timeout;
 	int ret = NOTIFY_OK;
+	unsigned long flags;
 
-	mutex_lock(&drv_data->pm_event_lock);
+	spin_lock_irqsave(&drv_data->pm_event_lock, flags);
 
 	switch (action) {
 	case PM_SUSPEND_PREPARE:
@@ -70,13 +72,13 @@ static int suspend_notifier_cb(struct notifier_block *nb, unsigned long action, 
 		drv_data->event_ready = 1;
 		break;
 	default:
-		mutex_unlock(&drv_data->pm_event_lock);
+		spin_unlock_irqrestore(&drv_data->pm_event_lock, flags);
 		return NOTIFY_OK;
 	}
 	drv_data->current_pm_event.token = drv_data->token_counter++;
 	drv_data->event_acknowledged = 0;
 	wake_up_interruptible(&drv_data->read_wq);
-	mutex_unlock(&drv_data->pm_event_lock);
+	spin_unlock_irqrestore(&drv_data->pm_event_lock, flags);
 
 	// If suspend is imminent and there is client wait suspend preparation for
 	// at most 500ms. Waiting stops if file is closed or writer sends ack.
@@ -91,9 +93,9 @@ static int suspend_notifier_cb(struct notifier_block *nb, unsigned long action, 
 			pr_warn("suspend_notifier: Caught signal while waiting for userspace acknowledgment.\n");
 			ret = notifier_from_errno(-EINTR);
 		}
-		mutex_lock(&drv_data->pm_event_lock);
+		spin_lock_irqsave(&drv_data->pm_event_lock, flags);
 		drv_data->current_pm_event.token = 0;
-		mutex_unlock(&drv_data->pm_event_lock);
+		spin_unlock_irqrestore(&drv_data->pm_event_lock, flags);
 	}
 
 	return ret;
@@ -102,10 +104,11 @@ static int suspend_notifier_cb(struct notifier_block *nb, unsigned long action, 
 static bool check_event_ready(struct suspend_notifier_device *drv_data)
 {
 	bool cond;
+	unsigned long flags;
 
-	mutex_lock(&drv_data->pm_event_lock);
+	spin_lock_irqsave(&drv_data->pm_event_lock, flags);
 	cond = !!drv_data->event_ready;
-	mutex_unlock(&drv_data->pm_event_lock);
+	spin_unlock_irqrestore(&drv_data->pm_event_lock, flags);
 
 	return cond;
 }
@@ -116,6 +119,8 @@ static ssize_t device_read(struct file *file, char __user *buf, size_t count, lo
 	struct suspend_notifier_device *drv_data =
 		container_of(file->private_data, struct suspend_notifier_device, misc);
 	int ret;
+	unsigned long flags;
+	struct pm_event local_copy;
 
 	if (count < sizeof(drv_data->current_pm_event))
 		return -EINVAL;
@@ -126,13 +131,15 @@ static ssize_t device_read(struct file *file, char __user *buf, size_t count, lo
 		return -EINTR;
 
 	// Atomically consume the event.
-	mutex_lock(&drv_data->pm_event_lock);
-	if (copy_to_user(buf, &drv_data->current_pm_event, sizeof(drv_data->current_pm_event)))
+	spin_lock_irqsave(&drv_data->pm_event_lock, flags);
+	local_copy = drv_data->current_pm_event;
+	drv_data->event_ready = 0; // Reset for next event
+	spin_unlock_irqrestore(&drv_data->pm_event_lock, flags);
+
+	if (copy_to_user(buf, &local_copy, sizeof(local_copy)))
 		ret = -EFAULT;
 	else
 		ret = sizeof(drv_data->current_pm_event);
-	drv_data->event_ready = 0; // Reset for next event
-	mutex_unlock(&drv_data->pm_event_lock);
 
 	return ret;
 }
@@ -142,6 +149,7 @@ static ssize_t device_write(struct file *file, const char __user *buf, size_t co
 	struct suspend_notifier_device *drv_data =
 		container_of(file->private_data, struct suspend_notifier_device, misc);
 	u64 received_token;
+	unsigned long flags;
 
 	if (count != sizeof(received_token))
 		return -EINVAL;
@@ -149,13 +157,13 @@ static ssize_t device_write(struct file *file, const char __user *buf, size_t co
 		return -EFAULT;
 
 	// Check if the received token matches the current event's token
-	mutex_lock(&drv_data->pm_event_lock);
+	spin_lock_irqsave(&drv_data->pm_event_lock, flags);
 	if (drv_data->current_pm_event.token != 0 &&
 			drv_data->current_pm_event.token == received_token) {
 		drv_data->event_acknowledged = 1;
 		wake_up_interruptible(&drv_data->ack_wq);
 	}
-	mutex_unlock(&drv_data->pm_event_lock);
+	spin_unlock_irqrestore(&drv_data->pm_event_lock, flags);
 
 	return sizeof(received_token);
 }
@@ -165,15 +173,16 @@ static int device_open(struct inode *inode, struct file *file)
 	struct suspend_notifier_device *drv_data =
 		container_of(file->private_data, struct suspend_notifier_device, misc);
 	int status = 0;
+	unsigned long flags;
 
-	mutex_lock(&drv_data->pm_event_lock);
+	spin_lock_irqsave(&drv_data->pm_event_lock, flags);
 	if (drv_data->file_open)  {
 		status = -EBUSY;
 		goto done;
 	}
 	drv_data->file_open = 1;
 done:
-	mutex_unlock(&drv_data->pm_event_lock);
+	spin_unlock_irqrestore(&drv_data->pm_event_lock, flags);
 	return status;
 }
 
@@ -181,12 +190,13 @@ static int device_release(struct inode *inode, struct file *file)
 {
 	struct suspend_notifier_device *drv_data =
 		container_of(file->private_data, struct suspend_notifier_device, misc);
+	unsigned long flags;
 
-	mutex_lock(&drv_data->pm_event_lock);
+	spin_lock_irqsave(&drv_data->pm_event_lock, flags);
 	drv_data->file_open = 0;
 	// Wake up the callback thread in case it was waiting for a response
 	wake_up_interruptible(&drv_data->ack_wq);
-	mutex_unlock(&drv_data->pm_event_lock);
+	spin_unlock_irqrestore(&drv_data->pm_event_lock, flags);
 
 	return 0;
 }
@@ -211,7 +221,7 @@ static int __init suspend_notifier_init(void)
 {
 	int ret;
 
-	mutex_init(&sn_device.pm_event_lock);
+	spin_lock_init(&sn_device.pm_event_lock);
 	init_waitqueue_head(&sn_device.read_wq);
 	init_waitqueue_head(&sn_device.ack_wq);
 	sn_device.token_counter = 1;
