@@ -8,32 +8,19 @@
 #include <linux/unwind_user.h>
 #include <linux/uaccess.h>
 
+static const struct unwind_user_frame fp_frame = {
+	ARCH_INIT_USER_FP_FRAME
+};
+
 #define for_each_user_frame(state) \
 	for (unwind_user_start(state); !(state)->done; unwind_user_next(state))
 
-static inline int
-get_user_word(unsigned long *word, unsigned long base, int off, unsigned int ws)
-{
-	unsigned long __user *addr = (void __user *)base + off;
-#ifdef CONFIG_COMPAT
-	if (ws == sizeof(int)) {
-		unsigned int data;
-		int ret = get_user(data, (unsigned int __user *)addr);
-		*word = data;
-		return ret;
-	}
-#endif
-	return get_user(*word, addr);
-}
-
 static int unwind_user_next_fp(struct unwind_user_state *state)
 {
-	const struct unwind_user_frame frame = {
-		ARCH_INIT_USER_FP_FRAME(state->ws)
-	};
+	const struct unwind_user_frame *frame = &fp_frame;
 	unsigned long cfa, fp, ra;
 
-	if (frame.use_fp) {
+	if (frame->use_fp) {
 		if (state->fp < state->sp)
 			return -EINVAL;
 		cfa = state->fp;
@@ -42,26 +29,26 @@ static int unwind_user_next_fp(struct unwind_user_state *state)
 	}
 
 	/* Get the Canonical Frame Address (CFA) */
-	cfa += frame.cfa_off;
+	cfa += frame->cfa_off;
 
 	/* stack going in wrong direction? */
 	if (cfa <= state->sp)
 		return -EINVAL;
 
 	/* Make sure that the address is word aligned */
-	if (cfa & (state->ws - 1))
+	if (cfa & (sizeof(long) - 1))
 		return -EINVAL;
 
 	/* Find the Return Address (RA) */
-	if (get_user_word(&ra, cfa, frame.ra_off, state->ws))
+	if (get_user(ra, (unsigned long *)(cfa + frame->ra_off)))
 		return -EINVAL;
 
-	if (frame.fp_off && get_user_word(&fp, cfa, frame.fp_off, state->ws))
+	if (frame->fp_off && get_user(fp, (unsigned long __user *)(cfa + frame->fp_off)))
 		return -EINVAL;
 
 	state->ip = ra;
 	state->sp = cfa;
-	if (frame.fp_off)
+	if (frame->fp_off)
 		state->fp = fp;
 	return 0;
 }
@@ -113,11 +100,6 @@ static int unwind_user_start(struct unwind_user_state *state)
 	state->ip = instruction_pointer(regs);
 	state->sp = user_stack_pointer(regs);
 	state->fp = frame_pointer(regs);
-	state->ws = unwind_user_word_size(regs);
-	if (!state->ws) {
-		state->done = true;
-		return -EINVAL;
-	}
 
 	return 0;
 }
