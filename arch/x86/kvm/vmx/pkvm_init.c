@@ -222,6 +222,20 @@ static __init int pkvm_setup_host_vmcs_config(void)
 		setting.vmentry_ctrl_req |= VM_ENTRY_LOAD_CET_STATE;
 	}
 
+	if (boot_cpu_has(X86_FEATURE_MPX)) {
+		/*
+		 * The MPX is deprecated in the newer Intel CPU, e.g., PTL. In
+		 * case the pKVM hypervisor runs on some older Intel CPU which
+		 * has the MPX, enable the MPX vmexit control to guarantee the
+		 * MSR_IA32_BNDCFGS will be cleared for the pKVM hypervisor.
+		 *
+		 * No need to enable vmentry control to load IA32_BNDCFGS for
+		 * the deprivileged host as the linux kernel will not use the
+		 * MPX even if the CPU supports it.
+		 */
+		setting.vmexit_ctrl_req |= VM_EXIT_CLEAR_BNDCFGS;
+	}
+
 	if (setup_vmcs_config_common(vmcs_config, vmx_cap, &setting))
 		return -EINVAL;
 
