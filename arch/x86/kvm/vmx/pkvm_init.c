@@ -188,6 +188,15 @@ static __init int pkvm_setup_host_vmcs_config(void)
 						      SECONDARY_EXEC_PT_USE_GPA;
 	}
 
+	if (boot_cpu_has(X86_FEATURE_ARCH_LBR)) {
+		/*
+		 * Enable the arch-LBR VM-Exit/VM-Entry controls to guarantee the
+		 * deprivileged host cannot profile the pKVM via arch-LBR.
+		 */
+		setting.vmexit_ctrl_req |= VM_EXIT_CLEAR_IA32_LBR_CTL;
+		setting.vmentry_ctrl_req |= VM_ENTRY_LOAD_IA32_LBR_CTL;
+	}
+
 	if (setup_vmcs_config_common(vmcs_config, vmx_cap, &setting))
 		return -EINVAL;
 
@@ -790,6 +799,11 @@ static __init void init_guest_state_area_from_native(struct vcpu_vmx *vmx)
 	if (boot_cpu_has(X86_FEATURE_INTEL_PT)) {
 		rdmsrq(MSR_IA32_RTIT_CTL, msrq);
 		vmcs_write64(GUEST_IA32_RTIT_CTL, msrq);
+	}
+
+	if (boot_cpu_has(X86_FEATURE_ARCH_LBR)) {
+		rdmsrq(MSR_ARCH_LBR_CTL, msrq);
+		vmcs_write64(GUEST_IA32_LBR_CTL, msrq);
 	}
 }
 
