@@ -36,9 +36,11 @@
   skb_copy_bits
   skb_orphan_partial
   submit_bh
+  __set_task_comm
   tcf_block_get
   tcf_block_put
   tcf_classify
+  __traceiter_android_rvh_alloc_and_link_pwqs
   __traceiter_android_rvh_alloc_pages_reclaim_cycle_end
   __traceiter_android_rvh_alloc_pages_reclaim_start
   __traceiter_android_rvh_bpf_skb_load_bytes
@@ -123,6 +125,7 @@
   __traceiter_workqueue_execute_end
   __traceiter_workqueue_execute_start
   __traceiter_sys_exit
+  __tracepoint_android_rvh_alloc_and_link_pwqs
   __tracepoint_android_rvh_alloc_pages_reclaim_cycle_end
   __tracepoint_android_rvh_alloc_pages_reclaim_start
   __tracepoint_android_rvh_bpf_skb_load_bytes
