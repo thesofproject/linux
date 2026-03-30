@@ -348917,6 +348917,15 @@ function {
   parameter_id: 0xf435685e
 }
 function {
+  id: 0x9bc62e3a
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x18ea6ae3
+  parameter_id: 0x27a7c613
+  parameter_id: 0xf435685e
+  parameter_id: 0x13580d6c
+}
+function {
   id: 0x9bc64292
   return_type_id: 0x6720d32f
   parameter_id: 0x188b9e81
@@ -367263,6 +367272,15 @@ elf_symbol {
   full_name: "__traceiter_android_vh_adjust_alloc_flags"
 }
 elf_symbol {
+  id: 0x646c9ba2
+  name: "__traceiter_android_vh_adjust_iocb_flags"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x838ccb55
+  type_id: 0x9bc62e3a
+  full_name: "__traceiter_android_vh_adjust_iocb_flags"
+}
+elf_symbol {
   id: 0xc9756e19
   name: "__traceiter_android_vh_adjust_kvmalloc_flags"
   is_defined: true
@@ -368206,6 +368224,15 @@ elf_symbol {
   crc: 0xfe94425a
   type_id: 0x9bf1212e
   full_name: "__traceiter_android_vh_filemap_adjust_folio_flags"
+}
+elf_symbol {
+  id: 0x8c59269d
+  name: "__traceiter_android_vh_filemap_end_dropbehind_bypass"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x34dd410b
+  type_id: 0x9b2e0ad9
+  full_name: "__traceiter_android_vh_filemap_end_dropbehind_bypass"
 }
 elf_symbol {
   id: 0x19fc04e0
@@ -372897,6 +372924,15 @@ elf_symbol {
   full_name: "__tracepoint_android_vh_adjust_alloc_flags"
 }
 elf_symbol {
+  id: 0x6e5cd808
+  name: "__tracepoint_android_vh_adjust_iocb_flags"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_vh_adjust_iocb_flags"
+}
+elf_symbol {
   id: 0xf3cd7eeb
   name: "__tracepoint_android_vh_adjust_kvmalloc_flags"
   is_defined: true
@@ -373840,6 +373876,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_vh_filemap_adjust_folio_flags"
+}
+elf_symbol {
+  id: 0x258d2f4f
+  name: "__tracepoint_android_vh_filemap_end_dropbehind_bypass"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_vh_filemap_end_dropbehind_bypass"
 }
 elf_symbol {
   id: 0x197d6be2
@@ -437423,6 +437468,7 @@ interface {
   symbol_id: 0x86527a4e
   symbol_id: 0x95da1cfe
   symbol_id: 0xf71b3e6c
+  symbol_id: 0x646c9ba2
   symbol_id: 0xc9756e19
   symbol_id: 0x8e546ac9
   symbol_id: 0xa21ae582
@@ -437528,6 +437574,7 @@ interface {
   symbol_id: 0x150ea575
   symbol_id: 0x6091a763
   symbol_id: 0xb4752447
+  symbol_id: 0x8c59269d
   symbol_id: 0x19fc04e0
   symbol_id: 0x980c4b2d
   symbol_id: 0x734973d4
@@ -438049,6 +438096,7 @@ interface {
   symbol_id: 0xe1489e0c
   symbol_id: 0xe5fbea44
   symbol_id: 0x8f23a62a
+  symbol_id: 0x6e5cd808
   symbol_id: 0xf3cd7eeb
   symbol_id: 0xa5a120db
   symbol_id: 0xbaee0a34
@@ -438154,6 +438202,7 @@ interface {
   symbol_id: 0x2b59c1a7
   symbol_id: 0x0c03d499
   symbol_id: 0x0bed5ac9
+  symbol_id: 0x258d2f4f
   symbol_id: 0x197d6be2
   symbol_id: 0xf045a23f
   symbol_id: 0xdac9a862
