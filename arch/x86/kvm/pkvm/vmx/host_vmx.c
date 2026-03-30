@@ -400,3 +400,8 @@ handle_events:
 
 	pkvm_trace_vmexit_end(vcpu, vt->exit_reason.basic);
 }
+
+void pkvm_host_vmx_fixup(struct vcpu_vmx *vmx)
+{
+	this_cpu_write(host_vcpu_fixup, false);
+}
