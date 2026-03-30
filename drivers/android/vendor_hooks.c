@@ -77,6 +77,7 @@
  */
 
 /* keep-sorted start */
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_alloc_and_link_pwqs);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_alloc_pages_reclaim_cycle_end);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_alloc_pages_reclaim_start);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_alloc_workqueue);
