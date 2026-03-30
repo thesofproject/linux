@@ -224,6 +224,9 @@ static void guest_ept_flush_tlb(struct pkvm_pgtable *pgt,
 		pkvm_kick_vcpu(vcpu);
 	}
 
+	for_each_pkvm_guest_vcpu(i, vcpu, pkvm_vm)
+		pkvm_wait_vcpu_kicked_out(vcpu);
+
 	pkvm_spin_unlock(&pkvm_vm->lock);
 }
 
