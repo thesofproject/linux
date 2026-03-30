@@ -2107,6 +2107,31 @@ void pkvm_kick_vcpu(struct kvm_vcpu *vcpu)
 	pkvm_lapic_send_init(READ_ONCE(vcpu->cpu));
 }
 
+void pkvm_wait_vcpu_kicked_out(struct kvm_vcpu *vcpu)
+{
+	int relax_iters = 0;
+	u64 start;
+
+	if (READ_ONCE(vcpu->mode) != EXITING_GUEST_MODE)
+		return;
+
+	start = rdtsc();
+	do {
+		cpu_relax();
+		if (++relax_iters == 1000) {
+			/*
+			 * Bug the system if waiting for the remote CPU to ack
+			 * the kick is taking longer than 1s. It may take
+			 * microseconds, sometimes up to milliseconds (if the
+			 * CPU needs to wake from a deeper low-power state) but
+			 * should not take as long as a second.
+			 */
+			BUG_ON(tsc_khz && (((rdtsc() - start) / tsc_khz) > 1000));
+			relax_iters = 0;
+		}
+	} while (READ_ONCE(vcpu->mode) == EXITING_GUEST_MODE);
+}
+
 int pkvm_x86_vendor_init(struct kvm_x86_init_ops *ops)
 {
 	int r;
