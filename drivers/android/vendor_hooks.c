@@ -72,6 +72,12 @@
 /* keep-sorted end */
 
 /*
+ * Moving this include at the end to avoid compilation errors
+ * due TRACE_INCLUDE_PATH is being redefined.
+ */
+#include <trace/events/android_vendor_lmk.h>
+
+/*
  * Export tracepoints that act as a bare tracehook (ie: have no trace event
  * associated with them) to allow external modules to probe them.
  */
@@ -155,6 +161,7 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_ufs_complete_init);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_ufs_reprogram_all_keys);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_vfree_bypass);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_vmalloc_node_bypass);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_trigger_vendor_lmk_kill);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_add_lazyfree_bypass);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_adjust_alloc_flags);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_adjust_kvmalloc_flags);
