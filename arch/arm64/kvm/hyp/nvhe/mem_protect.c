@@ -3292,6 +3292,7 @@ static int pkvm_ptdump_walker(const struct kvm_pgtable_visit_ctx *ctx,
 	log->table = FIELD_GET(KVM_PTE_TYPE, ctx->old);
 	log->level = ctx->level;
 	log->page_state = FIELD_GET(PKVM_PAGE_STATE_PROT_MASK, ctx->old);
+	log->mmio_guard = FIELD_GET(KVM_INVALID_PTE_MMIO_NOTE, ctx->old);
 
 	(*log_hdr)->w_index += sizeof(struct pkvm_ptdump_log);
 	return 0;
