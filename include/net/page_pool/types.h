@@ -246,7 +246,7 @@ struct page_pool {
 	/* User-facing fields, protected by page_pools_lock */
 	struct {
 		struct hlist_node list;
-		ktime_t detach_time;
+		u64 detach_time;
 		u32 id;
 	} user;
 };
