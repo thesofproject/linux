@@ -11,6 +11,7 @@
 
 DECLARE_PER_CPU(struct pkvm_pcpu *, phys_cpu);
 DECLARE_PER_CPU(struct kvm_vcpu *, host_vcpu);
+DECLARE_PER_CPU(bool, host_vcpu_fixup);
 extern size_t kvm_vcpu_sz;
 
 /* Represents a guest vCPU. */
