@@ -502,7 +502,7 @@ ddk_module(
         "wm_adsp.h",
     ],
     out = "snd-soc-cs35l56.ko",
-    defconfig = _AUDIO_DEFCONFIG,
+    defconfig = "defconfig_cs35l56",
     kconfig = "Kconfig",
     kernel_build = "//private/devices/google/common:kernel_build",
     deps = [
@@ -523,7 +523,7 @@ ddk_module(
         "wm_adsp.h",
     ],
     out = "snd-soc-cs35l56-sdw.ko",
-    defconfig = _AUDIO_DEFCONFIG,
+    defconfig = "defconfig_cs35l56",
     kconfig = "Kconfig",
     kernel_build = "//private/devices/google/common:kernel_build",
     deps = [
@@ -552,7 +552,7 @@ ddk_module(
         "wm_adsp.h",
     ],
     out = "snd-soc-cs35l56-shared.ko",
-    defconfig = _AUDIO_DEFCONFIG,
+    defconfig = "defconfig_cs35l56",
     kconfig = "Kconfig",
     kernel_build = "//private/devices/google/common:kernel_build",
     deps = [
@@ -570,7 +570,7 @@ ddk_module(
         "wm_adsp.h",
     ],
     out = "snd-soc-cs35l56-spi.ko",
-    defconfig = _AUDIO_DEFCONFIG,
+    defconfig = "defconfig_cs35l56",
     kconfig = "Kconfig",
     kernel_build = "//private/devices/google/common:kernel_build",
     deps = [
