@@ -690,6 +690,7 @@
   dev_pm_qos_remove_notifier
   dev_pm_qos_remove_request
   dev_pm_qos_update_request
+  dev_pm_set_dedicated_wake_irq
   dev_pm_set_wake_irq
   _dev_printk
   __dev_queue_xmit

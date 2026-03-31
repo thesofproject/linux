@@ -1718,6 +1718,8 @@ ddk_headers(
 ddk_headers(
     name = "all_headers_allowlist_exynos",
     hdrs = [
+        "drivers/android/binder/rust_binder.h",
+        "drivers/android/binder/rust_binder_hooks.h",
         "drivers/android/binder_alloc.h",
         "drivers/android/binder_internal.h",
         "drivers/android/binder_trace.h",
