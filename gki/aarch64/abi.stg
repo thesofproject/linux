@@ -349990,6 +349990,14 @@ function {
   parameter_id: 0x11cfee5a
 }
 function {
+  id: 0x9be905f1
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x11cfee5a
+  parameter_id: 0x0258f96e
+  parameter_id: 0x4585663f
+}
+function {
   id: 0x9be96fa7
   return_type_id: 0x6720d32f
   parameter_id: 0x18bd6530
@@ -366841,6 +366849,15 @@ elf_symbol {
   full_name: "__traceiter_android_rvh_schedule"
 }
 elf_symbol {
+  id: 0xf27119bc
+  name: "__traceiter_android_rvh_scmi_limit_notify_cb"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x62851c35
+  type_id: 0x9be905f1
+  full_name: "__traceiter_android_rvh_scmi_limit_notify_cb"
+}
+elf_symbol {
   id: 0x0f807f10
   name: "__traceiter_android_rvh_select_fallback_rq"
   is_defined: true
@@ -372464,6 +372481,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_rvh_schedule"
+}
+elf_symbol {
+  id: 0x16e6a696
+  name: "__tracepoint_android_rvh_scmi_limit_notify_cb"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_rvh_scmi_limit_notify_cb"
 }
 elf_symbol {
   id: 0x0daed96e
@@ -437351,6 +437377,7 @@ interface {
   symbol_id: 0x415dd5e7
   symbol_id: 0xd7ca6cc8
   symbol_id: 0x2bb177b4
+  symbol_id: 0xf27119bc
   symbol_id: 0x0f807f10
   symbol_id: 0xe48752ef
   symbol_id: 0x4c24a4be
@@ -437976,6 +438003,7 @@ interface {
   symbol_id: 0x7babd1c5
   symbol_id: 0x43527efa
   symbol_id: 0x51af6212
+  symbol_id: 0x16e6a696
   symbol_id: 0x0daed96e
   symbol_id: 0x3bb904a5
   symbol_id: 0xec4d6758
