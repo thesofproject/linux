@@ -9,6 +9,7 @@
 #include <uapi/linux/android/binder.h>
 #include <uapi/linux/android/binderfs.h>
 #include <linux/compiler.h>
+#include <linux/android_kabi.h>
 
 /*
  * These symbols are exposed by `rust_binderfs.c` and exist here so that Rust
@@ -38,6 +39,10 @@ struct rb_transaction_layout {
 	size_t from_thread;
 	size_t to_proc;
 	size_t target_node;
+	ANDROID_BACKPORT_RESERVE(0);
+	ANDROID_BACKPORT_RESERVE(1);
+	ANDROID_BACKPORT_RESERVE(2);
+	ANDROID_BACKPORT_RESERVE(3);
 };
 
 struct rb_thread_layout {
@@ -45,17 +50,29 @@ struct rb_thread_layout {
 	size_t process;
 	size_t id;
 	size_t task;
+	ANDROID_BACKPORT_RESERVE(0);
+	ANDROID_BACKPORT_RESERVE(1);
+	ANDROID_BACKPORT_RESERVE(2);
+	ANDROID_BACKPORT_RESERVE(3);
 };
 
 struct rb_process_layout {
 	size_t arc_offset;
 	size_t task;
+	ANDROID_BACKPORT_RESERVE(0);
+	ANDROID_BACKPORT_RESERVE(1);
+	ANDROID_BACKPORT_RESERVE(2);
+	ANDROID_BACKPORT_RESERVE(3);
 };
 
 struct rb_node_layout {
 	size_t arc_offset;
 	size_t debug_id;
 	size_t ptr;
+	ANDROID_BACKPORT_RESERVE(0);
+	ANDROID_BACKPORT_RESERVE(1);
+	ANDROID_BACKPORT_RESERVE(2);
+	ANDROID_BACKPORT_RESERVE(3);
 };
 
 struct rust_binder_layout {
@@ -63,6 +80,14 @@ struct rust_binder_layout {
 	struct rb_thread_layout th;
 	struct rb_process_layout p;
 	struct rb_node_layout n;
+	ANDROID_BACKPORT_RESERVE(0);
+	ANDROID_BACKPORT_RESERVE(1);
+	ANDROID_BACKPORT_RESERVE(2);
+	ANDROID_BACKPORT_RESERVE(3);
+	ANDROID_BACKPORT_RESERVE(4);
+	ANDROID_BACKPORT_RESERVE(5);
+	ANDROID_BACKPORT_RESERVE(6);
+	ANDROID_BACKPORT_RESERVE(7);
 };
 
 extern struct rust_binder_layout RUST_BINDER_LAYOUT;

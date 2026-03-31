@@ -96,6 +96,14 @@ const RUST_BINDER_LAYOUT: rust_binder_layout = rust_binder_layout {
     th: thread::THREAD_LAYOUT,
     p: process::PROCESS_LAYOUT,
     n: node::NODE_LAYOUT,
+    __kabi_reserved_backport0: 0,
+    __kabi_reserved_backport1: 0,
+    __kabi_reserved_backport2: 0,
+    __kabi_reserved_backport3: 0,
+    __kabi_reserved_backport4: 0,
+    __kabi_reserved_backport5: 0,
+    __kabi_reserved_backport6: 0,
+    __kabi_reserved_backport7: 0,
 };
 
 fn next_debug_id() -> usize {
