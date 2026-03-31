@@ -7,5 +7,10 @@ rust_binder-y := \
 	rust_binder_main.o	\
 	rust_binderfs.o		\
 	rust_binder_events.o	\
-	rust_binder_hooks.o	\
 	page_range_helper.o
+
+# Hooks needs to be built-in always so that DDK modules with vendor hooks do
+# not form a hard dependency on rust_binder.ko
+ifdef CONFIG_ANDROID_BINDER_IPC_RUST
+obj-y += rust_binder_hooks.o
+endif

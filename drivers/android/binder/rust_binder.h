@@ -63,7 +63,7 @@ struct rust_binder_layout {
 	struct rb_node_layout n;
 };
 
-extern const struct rust_binder_layout RUST_BINDER_LAYOUT;
+extern struct rust_binder_layout RUST_BINDER_LAYOUT;
 
 static inline size_t rust_binder_transaction_debug_id(rust_binder_transaction t)
 {
