@@ -385252,6 +385252,15 @@ elf_symbol {
   full_name: "dev_pm_qos_update_request"
 }
 elf_symbol {
+  id: 0xbc98390b
+  name: "dev_pm_set_dedicated_wake_irq"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x3e2e80d2
+  type_id: 0x9c8a5e38
+  full_name: "dev_pm_set_dedicated_wake_irq"
+}
+elf_symbol {
   id: 0x52122b68
   name: "dev_pm_set_wake_irq"
   is_defined: true
@@ -439043,6 +439052,7 @@ interface {
   symbol_id: 0x92e87d67
   symbol_id: 0x9134577e
   symbol_id: 0xb6e3e4d8
+  symbol_id: 0xbc98390b
   symbol_id: 0x52122b68
   symbol_id: 0xd084c59b
   symbol_id: 0x51d93b3b
