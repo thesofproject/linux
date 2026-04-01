@@ -854,7 +854,7 @@ static int __host_stage2_set_owner_locked(phys_addr_t addr, u64 size, u8 owner_i
 		goto psci_mem_protect;
 
 	prot = owner_id == PKVM_ID_HOST ? PKVM_HOST_MEM_PROT : 0;
-	kvm_iommu_host_stage2_idmap(addr, addr + size, prot);
+	WARN_ON(kvm_iommu_host_stage2_idmap(addr, addr + size, prot));
 
 psci_mem_protect:
 	if (flags & HOST_SET_PSCI_MEM_PROTECT) {
@@ -1179,7 +1179,8 @@ static int __host_set_page_state_range(u64 addr, u64 size,
 
 		if (ret)
 			return ret;
-		kvm_iommu_host_stage2_idmap(addr, addr + size, PKVM_HOST_MEM_PROT);
+
+		WARN_ON(kvm_iommu_host_stage2_idmap(addr, addr + size, PKVM_HOST_MEM_PROT));
 		kvm_iommu_host_stage2_idmap_complete(true);
 	}
 
@@ -1940,7 +1941,7 @@ update:
 		ret = host_stage2_idmap_locked(
 				addr, nr_pages << PAGE_SHIFT, prot, reg);
 		if (update_iommu) {
-			kvm_iommu_host_stage2_idmap(addr, end, prot);
+			WARN_ON(kvm_iommu_host_stage2_idmap(addr, end, prot));
 			kvm_iommu_host_stage2_idmap_complete(!!prot);
 		}
 	}
