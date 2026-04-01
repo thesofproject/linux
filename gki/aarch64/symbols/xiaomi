@@ -55,6 +55,10 @@
   __tracepoint_android_vh_thp_vma_allowable_orders
   __traceiter_android_vh_dma_buf_release
   __tracepoint_android_vh_dma_buf_release
+  __traceiter_cma_alloc_start
+  __tracepoint_cma_alloc_start
+  __traceiter_cma_alloc_finish
+  __tracepoint_cma_alloc_finish
   __traceiter_cma_alloc_busy_retry
   __tracepoint_cma_alloc_busy_retry
   __traceiter_cma_release

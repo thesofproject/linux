@@ -349400,6 +349400,17 @@ function {
   parameter_id: 0x4585663f
 }
 function {
+  id: 0x9b5bd27e
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x3e10b518
+  parameter_id: 0x33756485
+  parameter_id: 0x3e909b01
+  parameter_id: 0x33756485
+  parameter_id: 0x4585663f
+  parameter_id: 0x6720d32f
+}
+function {
   id: 0x9b5bd371
   return_type_id: 0x6720d32f
   parameter_id: 0x18bd6530
@@ -349407,6 +349418,16 @@ function {
   parameter_id: 0x33756485
   parameter_id: 0x3e909b01
   parameter_id: 0x33756485
+}
+function {
+  id: 0x9b5be5f0
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x3e10b518
+  parameter_id: 0x33756485
+  parameter_id: 0x33756485
+  parameter_id: 0x33756485
+  parameter_id: 0x4585663f
 }
 function {
   id: 0x9b5be873
@@ -373824,6 +373845,24 @@ elf_symbol {
   full_name: "__traceiter_cma_alloc_busy_retry"
 }
 elf_symbol {
+  id: 0xed482eb7
+  name: "__traceiter_cma_alloc_finish"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x177dbe6a
+  type_id: 0x9b5bd27e
+  full_name: "__traceiter_cma_alloc_finish"
+}
+elf_symbol {
+  id: 0xd2b4e369
+  name: "__traceiter_cma_alloc_start"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x94130f8c
+  type_id: 0x9b5be5f0
+  full_name: "__traceiter_cma_alloc_start"
+}
+elf_symbol {
   id: 0xb904ed4b
   name: "__traceiter_cma_release"
   is_defined: true
@@ -379501,6 +379540,24 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_cma_alloc_busy_retry"
+}
+elf_symbol {
+  id: 0x9f4da915
+  name: "__tracepoint_cma_alloc_finish"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_cma_alloc_finish"
+}
+elf_symbol {
+  id: 0x8262822b
+  name: "__tracepoint_cma_alloc_start"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_cma_alloc_start"
 }
 elf_symbol {
   id: 0x75dd9ec5
@@ -440780,6 +440837,8 @@ interface {
   symbol_id: 0x77d40b1c
   symbol_id: 0xdd24ab36
   symbol_id: 0x63f57d44
+  symbol_id: 0xed482eb7
+  symbol_id: 0xd2b4e369
   symbol_id: 0xb904ed4b
   symbol_id: 0x7443ed9a
   symbol_id: 0x1643e606
@@ -441411,6 +441470,8 @@ interface {
   symbol_id: 0xf4acf4ca
   symbol_id: 0x9772d1c0
   symbol_id: 0x2a4072b2
+  symbol_id: 0x9f4da915
+  symbol_id: 0x8262822b
   symbol_id: 0x75dd9ec5
   symbol_id: 0x4971cb68
   symbol_id: 0x10bc6dec
