@@ -602,7 +602,7 @@ void d_drop(struct dentry *dentry)
 	__d_drop(dentry);
 	spin_unlock(&dentry->d_lock);
 }
-EXPORT_SYMBOL(d_drop);
+EXPORT_SYMBOL_NS(d_drop, "ANDROID_GKI_VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver");
 
 static inline void dentry_unlist(struct dentry *dentry)
 {
@@ -984,7 +984,7 @@ repeat:
 	spin_unlock(&ret->d_lock);
 	return ret;
 }
-EXPORT_SYMBOL(dget_parent);
+EXPORT_SYMBOL_NS(dget_parent, "ANDROID_GKI_VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver");
 
 static struct dentry * __d_find_any_alias(struct inode *inode)
 {
@@ -2503,7 +2503,7 @@ void d_rehash(struct dentry * entry)
 	__d_rehash(entry);
 	spin_unlock(&entry->d_lock);
 }
-EXPORT_SYMBOL(d_rehash);
+EXPORT_SYMBOL_NS(d_rehash, "ANDROID_GKI_VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver");
 
 static inline unsigned start_dir_add(struct inode *dir)
 {
