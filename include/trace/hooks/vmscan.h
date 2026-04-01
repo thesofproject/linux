@@ -8,6 +8,7 @@
 #define _TRACE_HOOK_VMSCAN_H
 
 #include <trace/hooks/vendor_hooks.h>
+struct lruvec;
 
 DECLARE_RESTRICTED_HOOK(android_rvh_set_balance_anon_file_reclaim,
 			TP_PROTO(bool *balance_anon_file_reclaim),
@@ -32,6 +33,10 @@ DECLARE_HOOK(android_vh_mglru_should_abort_scan,
 DECLARE_HOOK(android_vh_mglru_should_abort_scan_ex,
 	TP_PROTO(u64 *ext, bool *bypass),
 	TP_ARGS(ext, bypass));
+DECLARE_HOOK(android_vh_mglru_aging_bypass,
+	TP_PROTO(struct lruvec *lruvec, unsigned long max_seq,
+	int swappiness, bool *bypass, bool *young),
+	TP_ARGS(lruvec, max_seq, swappiness, bypass, young));
 DECLARE_HOOK(android_vh_tune_swappiness,
 	TP_PROTO(int *swappiness),
 	TP_ARGS(swappiness));
