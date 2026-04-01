@@ -18,6 +18,7 @@ struct kvm_hyp_iommu_domain {
 	void			*priv;
 	struct kvm_iommu_ops	*driver;
 	void			*owner;
+	ANDROID_KABI_RESERVE(1);
 };
 
 int kvm_iommu_dev_block_dma(pkvm_handle_t iommu_id, u32 endpoint_id, bool host_to_guest);
@@ -57,6 +58,14 @@ struct kvm_iommu_ops {
 	void (*iotlb_inv_nested_domain)(struct kvm_hyp_iommu_domain *domain, unsigned long iova,
 					size_t size, size_t granule, bool leaf);
 	int (*nested_cfg_sync)(pkvm_handle_t iommu, void *cmd_desc, size_t cmd_desc_size);
+	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_RESERVE(2);
+	ANDROID_KABI_RESERVE(3);
+	ANDROID_KABI_RESERVE(4);
+	ANDROID_KABI_RESERVE(5);
+	ANDROID_KABI_RESERVE(6);
+	ANDROID_KABI_RESERVE(7);
+	ANDROID_KABI_RESERVE(8);
 };
 
 int kvm_iommu_init(void *pool_base, size_t nr_pages);
