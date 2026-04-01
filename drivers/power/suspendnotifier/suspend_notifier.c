@@ -22,6 +22,7 @@ struct pm_event {
 };
 
 struct suspend_notifier_device {
+	struct miscdevice misc;
 	struct mutex pm_event_lock;
 	struct pm_event current_pm_event;
 	u64 token_counter;
@@ -109,12 +110,11 @@ static bool check_event_ready(struct suspend_notifier_device *drv_data)
 	return cond;
 }
 
-static struct miscdevice misc_device;
-
 // File operations
 static ssize_t device_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
 {
-	struct suspend_notifier_device *drv_data = file->private_data;
+	struct suspend_notifier_device *drv_data =
+		container_of(file->private_data, struct suspend_notifier_device, misc);
 	int ret;
 
 	if (count < sizeof(drv_data->current_pm_event))
@@ -139,7 +139,8 @@ static ssize_t device_read(struct file *file, char __user *buf, size_t count, lo
 
 static ssize_t device_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos)
 {
-	struct suspend_notifier_device *drv_data = file->private_data;
+	struct suspend_notifier_device *drv_data =
+		container_of(file->private_data, struct suspend_notifier_device, misc);
 	u64 received_token;
 
 	if (count != sizeof(received_token))
@@ -161,12 +162,9 @@ static ssize_t device_write(struct file *file, const char __user *buf, size_t co
 
 static int device_open(struct inode *inode, struct file *file)
 {
-	struct suspend_notifier_device *drv_data = dev_get_drvdata(misc_device.this_device);
+	struct suspend_notifier_device *drv_data =
+		container_of(file->private_data, struct suspend_notifier_device, misc);
 	int status = 0;
-
-	if (!drv_data)
-		return -ENODEV;
-	file->private_data = drv_data;
 
 	mutex_lock(&drv_data->pm_event_lock);
 	if (drv_data->file_open)  {
@@ -181,7 +179,8 @@ done:
 
 static int device_release(struct inode *inode, struct file *file)
 {
-	struct suspend_notifier_device *drv_data = file->private_data;
+	struct suspend_notifier_device *drv_data =
+		container_of(file->private_data, struct suspend_notifier_device, misc);
 
 	mutex_lock(&drv_data->pm_event_lock);
 	drv_data->file_open = 0;
@@ -200,39 +199,34 @@ static const struct file_operations fops = {
 	.release = device_release,
 };
 
-static struct miscdevice misc_device = {
-	.minor = MISC_DYNAMIC_MINOR,
-	.name  = "suspend_notifier",
-	.fops  = &fops,
+static struct suspend_notifier_device sn_device = {
+	.misc = {
+		.minor = MISC_DYNAMIC_MINOR,
+		.name  = "suspend_notifier",
+		.fops  = &fops,
+	}
 };
 
 static int __init suspend_notifier_init(void)
 {
 	int ret;
-	struct suspend_notifier_device *drv_data;
 
-	ret = misc_register(&misc_device);
+	mutex_init(&sn_device.pm_event_lock);
+	init_waitqueue_head(&sn_device.read_wq);
+	init_waitqueue_head(&sn_device.ack_wq);
+	sn_device.token_counter = 1;
+	sn_device.suspend_notifier.notifier_call = suspend_notifier_cb;
+
+	// misc_open will set file.private_data = &sn_device.misc
+	ret = misc_register(&sn_device.misc);
 	if (ret) {
 		pr_err("suspend_notifier: Failed to register misc device\n");
 		return ret;
 	}
-
-	drv_data = devm_kzalloc(misc_device.this_device, sizeof(*drv_data), GFP_KERNEL);
-	if (!drv_data) {
-		misc_deregister(&misc_device);
-		return -ENOMEM;
-	}
-
-	mutex_init(&drv_data->pm_event_lock);
-	init_waitqueue_head(&drv_data->read_wq);
-	init_waitqueue_head(&drv_data->ack_wq);
-	drv_data->token_counter = 1;
-	drv_data->suspend_notifier.notifier_call = suspend_notifier_cb;
-	dev_set_drvdata(misc_device.this_device, drv_data);
-	ret = register_pm_notifier(&drv_data->suspend_notifier);
+	ret = register_pm_notifier(&sn_device.suspend_notifier);
 	if (ret) {
 		pr_err("suspend_notifier: Failed to register PM notifier\n");
-		misc_deregister(&misc_device);
+		misc_deregister(&sn_device.misc);
 		return ret;
 	}
 	return 0;
@@ -241,10 +235,8 @@ module_init(suspend_notifier_init);
 
 static void __exit suspend_notifier_exit(void)
 {
-	struct suspend_notifier_device *drv_data = dev_get_drvdata(misc_device.this_device);
-
-	unregister_pm_notifier(&drv_data->suspend_notifier);
-	misc_deregister(&misc_device);
+	unregister_pm_notifier(&sn_device.suspend_notifier);
+	misc_deregister(&sn_device.misc);
 }
 module_exit(suspend_notifier_exit);
 
