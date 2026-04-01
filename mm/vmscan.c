@@ -7079,6 +7079,7 @@ static bool kswapd_shrink_node(pg_data_t *pgdat,
 	struct zone *zone;
 	int z;
 	unsigned long nr_reclaimed = sc->nr_reclaimed;
+	bool bypass = false;
 
 	/* Reclaim a number of pages proportional to the number of zones */
 	sc->nr_to_reclaim = 0;
@@ -7087,11 +7088,15 @@ static bool kswapd_shrink_node(pg_data_t *pgdat,
 	}
 	trace_android_rvh_kswapd_shrink_node(&sc->nr_to_reclaim);
 
+	trace_android_rvh_kswapd_shrink_node_bypass(&sc->nr_to_reclaim, &sc->nr_scanned,
+						    &sc->nr_reclaimed, &bypass);
+
 	/*
 	 * Historically care was taken to put equal pressure on all zones but
 	 * now pressure is applied based on node LRU order.
 	 */
-	shrink_node(pgdat, sc);
+	if (!bypass)
+		shrink_node(pgdat, sc);
 
 	/*
 	 * Fragmentation may mean that the system cannot be rebalanced for
