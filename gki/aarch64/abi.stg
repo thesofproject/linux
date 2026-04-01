@@ -348188,6 +348188,15 @@ function {
   parameter_id: 0x13580d6c
 }
 function {
+  id: 0x9b1147fa
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x2e029f76
+  parameter_id: 0x1d19a9d5
+  parameter_id: 0x6d7f5ff6
+  parameter_id: 0x11cfee5a
+}
+function {
   id: 0x9b116af7
   return_type_id: 0x6720d32f
   parameter_id: 0x18bd6530
@@ -369747,6 +369756,15 @@ elf_symbol {
   full_name: "__traceiter_android_rvh_shmem_suitable_orders"
 }
 elf_symbol {
+  id: 0x9f6afc35
+  name: "__traceiter_android_rvh_should_honor_rt_sync"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x2d31a928
+  type_id: 0x9b1147fa
+  full_name: "__traceiter_android_rvh_should_honor_rt_sync"
+}
+elf_symbol {
   id: 0x46515de8
   name: "__traceiter_android_rvh_show_max_freq"
   is_defined: true
@@ -375415,6 +375433,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_rvh_shmem_suitable_orders"
+}
+elf_symbol {
+  id: 0xe8f80f2f
+  name: "__tracepoint_android_rvh_should_honor_rt_sync"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_rvh_should_honor_rt_sync"
 }
 elf_symbol {
   id: 0xe8cacf26
@@ -440283,6 +440310,7 @@ interface {
   symbol_id: 0x6762133d
   symbol_id: 0x73c83ef4
   symbol_id: 0xb0d7946f
+  symbol_id: 0x9f6afc35
   symbol_id: 0x46515de8
   symbol_id: 0x4ae52717
   symbol_id: 0x3b650ee3
@@ -440913,6 +440941,7 @@ interface {
   symbol_id: 0xb4c7b2ef
   symbol_id: 0x00b7ed82
   symbol_id: 0x21bd1459
+  symbol_id: 0xe8f80f2f
   symbol_id: 0xe8cacf26
   symbol_id: 0x3e08e111
   symbol_id: 0x5380a8d5
