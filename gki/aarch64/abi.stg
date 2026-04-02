@@ -423470,6 +423470,24 @@ elf_symbol {
   full_name: "scsi_device_put"
 }
 elf_symbol {
+  id: 0x61df84bc
+  name: "scsi_device_quiesce"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xc033f389
+  type_id: 0x94dfa784
+  full_name: "scsi_device_quiesce"
+}
+elf_symbol {
+  id: 0x054c0bba
+  name: "scsi_device_resume"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x72601f1a
+  type_id: 0x19c71538
+  full_name: "scsi_device_resume"
+}
+elf_symbol {
   id: 0x18cbd7f9
   name: "scsi_dma_unmap"
   is_defined: true
@@ -446269,6 +446287,8 @@ interface {
   symbol_id: 0x76dea2aa
   symbol_id: 0x14eb95fa
   symbol_id: 0x474e9bcc
+  symbol_id: 0x61df84bc
+  symbol_id: 0x054c0bba
   symbol_id: 0x18cbd7f9
   symbol_id: 0x30f6b9b1
   symbol_id: 0x8ef5c221
