@@ -510,6 +510,28 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 		pkvm_err("iommu%d: Setting IRTA is not supported!\n", iommu->seq_id);
 		ret = -EPERM;
 		break;
+	case DMAR_PMEN_REG: {
+		/* RsvdP bits: 30:1 */
+		u32 rsvdp_mask = GENMASK_U32(30, 1);
+		u32 rsvdp = readl(iommu->reg + DMAR_PMEN_REG) & rsvdp_mask;
+
+		if ((val & rsvdp_mask) != rsvdp) {
+			pkvm_err("iommu%d: PMEN reserved bits mismatch(0x%x != 0x%x)\n",
+				 iommu->seq_id, rsvdp, (u32)(val & rsvdp_mask));
+			ret = -EINVAL;
+		} else if (val & DMA_PMEN_EPM) {
+			/*
+			 * pKVM disables PMRs during iommu init. Block any attempt to
+			 * re-enable PMRs (EPM bit set) as that could disrupt guest DMA.
+			 */
+			pkvm_err("iommu%d: attempt to enable PMRs blocked\n",
+				 iommu->seq_id);
+			ret = -EPERM;
+		} else {
+			ret = iommu_direct_mmio_write(iommu, phys, len, val);
+		}
+		break;
+	}
 	case DMAR_PERFINTRCTL_REG:
 	case DMAR_FECTL_REG: {
 		/* RsvdP bits: 29:0 */
@@ -732,6 +754,22 @@ static int iommu_init(struct intel_iommu *iommu)
 	 * virtual GSTS for the host.
 	 */
 	iommu->vgsts = readl(iommu->reg + DMAR_GSTS_REG);
+
+	/*
+	 * Protected Memory Regions (PMRs) are a legacy DMA protection mechanism
+	 * used by firmware before DMA remapping is active. Host driver disables
+	 * PMRs once DMA remapping is set up. Disable them explicitly to be on
+	 * the safer side in case host driver doesn't get to do it.
+	 */
+	if (cap_plmr(iommu->cap) || cap_phmr(iommu->cap)) {
+		u32 pmen = readl(iommu->reg + DMAR_PMEN_REG);
+
+		if (pmen & DMA_PMEN_EPM) {
+			pkvm_dbg("iommu%d: disabling PMRs\n", iommu->seq_id);
+			pmen &= ~DMA_PMEN_EPM;
+			writel(pmen, iommu->reg + DMAR_PMEN_REG);
+		}
+	}
 
 	/*
 	 * Interrupt remapping(IR) hardware initialization happens during x2apic
