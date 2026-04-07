@@ -13,7 +13,7 @@
 #include <trace/hooks/vendor_hooks.h>
 #include <linux/tracepoint.h>
 
-#include "rust_binder_hooks.h"
+#include <trace/hooks/rust_binder.h>
 
 /*
  * Used by vendor hooks to access Rust Binder data structures.
