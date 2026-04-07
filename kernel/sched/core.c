@@ -7706,7 +7706,6 @@ find_proxy_task(struct rq *rq, struct task_struct *donor, struct rq_flags *rf)
 static void __sched notrace __schedule(int sched_mode)
 {
 	struct task_struct *prev, *next;
-	struct task_struct *prev_donor;
 	/*
 	 * On PREEMPT_RT kernel, SM_RTLOCK_WAIT is noted
 	 * as a preemption by schedule_debug() and RCU.
@@ -7717,7 +7716,6 @@ static void __sched notrace __schedule(int sched_mode)
 	unsigned long prev_state;
 	struct rq_flags rf;
 	struct rq *rq;
-	bool prev_not_proxied;
 	int cpu;
 
 	/* Trace preemptions consistently with task switches */
@@ -7726,7 +7724,6 @@ static void __sched notrace __schedule(int sched_mode)
 	cpu = smp_processor_id();
 	rq = cpu_rq(cpu);
 	prev = rq->curr;
-	prev_donor = rq->donor;
 
 	schedule_debug(prev, preempt);
 
@@ -7804,26 +7801,30 @@ static void __sched notrace __schedule(int sched_mode)
 		}
 	}
 
-	prev_not_proxied = !prev->blocked_donor;
-
 	trace_sched_start_task_selection(prev, cpu, task_is_blocked(prev));
 pick_again:
 	assert_balance_callbacks_empty(rq);
 	next = pick_next_task(rq, &rf);
-	rq_set_donor(rq, next);
-	next->blocked_donor = NULL;
-	if (unlikely(task_is_blocked(next))) {
-		next = find_proxy_task(rq, next, &rf);
-		if (!next) {
-			/* zap the balance_callbacks before picking again */
-			trace_sched_picking_again(rq->donor, cpu, task_is_blocked(rq->donor));
-			zap_balance_callbacks(rq);
-			goto pick_again;
-		}
-		if (next == rq->idle) {
-			trace_sched_proxy_resched_idle(rq->donor, cpu, task_is_blocked(rq->donor));
-			zap_balance_callbacks(rq);
-			goto keep_resched;
+	if (sched_proxy_exec()) {
+		struct task_struct *prev_donor = rq->donor;
+
+		rq_set_donor(rq, next);
+		next->blocked_donor = NULL;
+		if (unlikely(next->blocked_on.lock)) {
+			next = find_proxy_task(rq, next, &rf);
+			if (!next) {
+				trace_sched_picking_again(rq->donor, cpu,
+							  task_is_blocked(rq->donor));
+				zap_balance_callbacks(rq);
+				goto pick_again;
+			}
+			if (next == rq->idle) {
+				trace_sched_proxy_resched_idle(rq->donor, cpu,
+							       task_is_blocked(rq->donor));
+				zap_balance_callbacks(rq);
+				goto keep_resched;
+			}
+			trace_sched_found_proxy_task(rq->donor, next, cpu);
 		}
 		if (rq->donor == prev_donor && prev != next) {
 			struct task_struct *donor = rq->donor;
@@ -7842,13 +7843,14 @@ pick_again:
 			donor->sched_class->put_prev_task(rq, donor, donor);
 			donor->sched_class->set_next_task(rq, donor, true);
 		}
-		trace_sched_found_proxy_task(rq->donor, next, cpu);
+	} else {
+		rq_set_donor(rq, next);
 	}
-	trace_sched_finish_task_selection(rq->donor, next, cpu);
 picked:
 	clear_tsk_need_resched(prev);
 	clear_preempt_need_resched();
 keep_resched:
+	trace_sched_finish_task_selection(rq->donor, next, cpu);
 	rq->last_seen_need_resched_ns = 0;
 
 	trace_android_rvh_schedule(prev, next, rq);
