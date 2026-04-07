@@ -7281,10 +7281,11 @@ static void proxy_migrate_task(struct rq *rq, struct rq_flags *rf,
 		deactivate_task(rq, p, DEQUEUE_NOCLOCK);
 		proxy_set_task_cpu(p, target_cpu);
 		/*
-		 * We can abuse blocked_node to migrate the thing,
-		 * because @p was still on the rq.
+		 * We can re-use se.group_node to migrate the thing,
+		 * because @p is deactivated (won't be balanced) and
+		 * we hold the rq_lock.
 		 */
-		list_add(&p->migration_node, &migrate_list);
+		list_add(&p->se.group_node, &migrate_list);
 	}
 	/*
 	 * We have to zap callbacks before unlocking the rq
@@ -7298,8 +7299,8 @@ static void proxy_migrate_task(struct rq *rq, struct rq_flags *rf,
 
 	raw_spin_rq_lock(target_rq);
 	while (!list_empty(&migrate_list)) {
-		p = list_first_entry(&migrate_list, struct task_struct, migration_node);
-		list_del_init(&p->migration_node);
+		p = list_first_entry(&migrate_list, struct task_struct, se.group_node);
+		list_del_init(&p->se.group_node);
 		activate_task(target_rq, p, 0);
 		wakeup_preempt(target_rq, p, 0);
 	}
