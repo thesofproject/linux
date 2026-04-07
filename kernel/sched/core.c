@@ -7243,6 +7243,34 @@ static inline struct task_struct *proxy_resched_idle(struct rq *rq)
 	return rq->idle;
 }
 
+static inline void proxy_release_rq_lock(struct rq *rq, struct rq_flags *rf)
+	__releases(__rq_lockp(rq))
+{
+	/*
+	 * The class scheduler may have queued a balance callback
+	 * from pick_next_task() called earlier.
+	 *
+	 * So here we have to zap callbacks before unlocking the rq
+	 * as another CPU may jump in and call sched_balance_rq
+	 * which can trip the warning in rq_pin_lock() if we
+	 * leave callbacks set.
+	 *
+	 * After we later reaquire the rq lock, we will force __schedule()
+	 * to pick_again, so the callbacks will get re-established.
+	 */
+	zap_balance_callbacks(rq);
+	rq_unpin_lock(rq, rf);
+	raw_spin_rq_unlock(rq);
+}
+
+static inline void proxy_reacquire_rq_lock(struct rq *rq, struct rq_flags *rf)
+__acquires(__rq_lockp(rq))
+{
+	raw_spin_rq_lock(rq);
+	rq_repin_lock(rq, rf);
+	update_rq_clock(rq);
+}
+
 /*
  * If the blocked-on relationship crosses CPUs, migrate @p to the
  * owner's CPU.
@@ -7287,21 +7315,11 @@ static void proxy_migrate_task(struct rq *rq, struct rq_flags *rf,
 		 */
 		list_add(&p->se.group_node, &migrate_list);
 	}
-	/*
-	 * We have to zap callbacks before unlocking the rq
-	 * as another CPU may jump in and call sched_balance_rq
-	 * which can trip the warning in rq_pin_lock() if we
-	 * leave callbacks set.
-	 */
-	zap_balance_callbacks(rq);
-	rq_unpin_lock(rq, rf);
-	raw_spin_rq_unlock(rq);
+	proxy_release_rq_lock(rq, rf);
 
 	__attach_tasks(target_rq, &migrate_list);
 
-	raw_spin_rq_lock(rq);
-	rq_repin_lock(rq, rf);
-	update_rq_clock(rq);
+	proxy_reacquire_rq_lock(rq, rf);
 }
 
 static void proxy_force_return(struct rq *rq, struct rq_flags *rf,
@@ -7318,16 +7336,7 @@ static void proxy_force_return(struct rq *rq, struct rq_flags *rf,
 
 	get_task_struct(p);
 
-	/*
-	 * We have to zap callbacks before unlocking the rq
-	 * as another CPU may jump in and call sched_balance_rq
-	 * which can trip the warning in rq_pin_lock() if we
-	 * leave callbacks set.
-	 */
-	zap_balance_callbacks(rq);
-	rq_unpin_lock(rq, rf);
-	raw_spin_rq_unlock(rq);
-
+	proxy_release_rq_lock(rq, rf);
 	/*
 	 * We drop the rq lock, and re-grab task_rq_lock to get
 	 * the pi_lock (needed for select_task_rq) as well.
@@ -7378,17 +7387,13 @@ static void proxy_force_return(struct rq *rq, struct rq_flags *rf,
 	raw_spin_rq_unlock(target_rq);
 
 	/* Finally, re-grab the origianl rq lock and return to pick-again */
-	raw_spin_rq_lock(rq);
-	rq_repin_lock(rq, rf);
-	update_rq_clock(rq);
+	proxy_reacquire_rq_lock(rq, rf);
 	return;
 
 err_out:
 	task_rq_unlock(this_rq, p, &this_rf);
 	put_task_struct(p);
-	raw_spin_rq_lock(rq);
-	rq_repin_lock(rq, rf);
-	update_rq_clock(rq);
+	proxy_reacquire_rq_lock(rq, rf);
 }
 
 static void proxy_enqueue_on_owner(struct rq *rq, struct task_struct *owner,
