@@ -7297,14 +7297,7 @@ static void proxy_migrate_task(struct rq *rq, struct rq_flags *rf,
 	rq_unpin_lock(rq, rf);
 	raw_spin_rq_unlock(rq);
 
-	raw_spin_rq_lock(target_rq);
-	while (!list_empty(&migrate_list)) {
-		p = list_first_entry(&migrate_list, struct task_struct, se.group_node);
-		list_del_init(&p->se.group_node);
-		activate_task(target_rq, p, 0);
-		wakeup_preempt(target_rq, p, 0);
-	}
-	raw_spin_rq_unlock(target_rq);
+	__attach_tasks(target_rq, &migrate_list);
 
 	raw_spin_rq_lock(rq);
 	rq_repin_lock(rq, rf);
