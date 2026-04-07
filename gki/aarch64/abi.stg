@@ -350338,6 +350338,13 @@ function {
   parameter_id: 0x4585663f
 }
 function {
+  id: 0x9b7ba7c5
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x33756485
+  parameter_id: 0x6720d32f
+}
+function {
   id: 0x9b7bfb3b
   return_type_id: 0x6720d32f
   parameter_id: 0x1bd69199
@@ -372230,6 +372237,24 @@ elf_symbol {
   full_name: "__traceiter_android_vh_migration_target_bypass"
 }
 elf_symbol {
+  id: 0x9f58159a
+  name: "__traceiter_android_vh_mm_direct_reclaim_enter"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x6a59bf2d
+  type_id: 0x9ab9affb
+  full_name: "__traceiter_android_vh_mm_direct_reclaim_enter"
+}
+elf_symbol {
+  id: 0x29c67d40
+  name: "__traceiter_android_vh_mm_direct_reclaim_exit"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xc3231fcb
+  type_id: 0x9b7ba7c5
+  full_name: "__traceiter_android_vh_mm_direct_reclaim_exit"
+}
+elf_symbol {
   id: 0x3fe16974
   name: "__traceiter_android_vh_mm_free_page"
   is_defined: true
@@ -378042,6 +378067,24 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_vh_migration_target_bypass"
+}
+elf_symbol {
+  id: 0xd333a65c
+  name: "__tracepoint_android_vh_mm_direct_reclaim_enter"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_vh_mm_direct_reclaim_enter"
+}
+elf_symbol {
+  id: 0xddcff44a
+  name: "__tracepoint_android_vh_mm_direct_reclaim_exit"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_vh_mm_direct_reclaim_exit"
 }
 elf_symbol {
   id: 0x533ca98e
@@ -441450,6 +441493,8 @@ interface {
   symbol_id: 0x105350cb
   symbol_id: 0x912490ef
   symbol_id: 0xf8413699
+  symbol_id: 0x9f58159a
+  symbol_id: 0x29c67d40
   symbol_id: 0x3fe16974
   symbol_id: 0x7f7c30a9
   symbol_id: 0x945dd126
@@ -442096,6 +442141,8 @@ interface {
   symbol_id: 0xca4f3601
   symbol_id: 0x2b626fa1
   symbol_id: 0xb32b3b17
+  symbol_id: 0xd333a65c
+  symbol_id: 0xddcff44a
   symbol_id: 0x533ca98e
   symbol_id: 0x046ed8db
   symbol_id: 0xba9e92f8
