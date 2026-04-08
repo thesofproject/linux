@@ -1486,6 +1486,8 @@ int __init vmx_pkvm_init(void)
 
 	pkvm_sym(init_ops) = pkvm_sym(pkvm_vmx_init_ops);
 
+	pkvm_ramoops_init();
+
 	ret = pkvm_host_deprivilege_cpus(pkvm);
 	if (ret)
 		goto repriv_cpus;
