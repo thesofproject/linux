@@ -2597,6 +2597,16 @@ intel_dp_compute_config_limits(struct intel_dp *intel_dp,
 	} else {
 		limits->pipe.max_bpp = intel_dp_max_bpp(intel_dp, crtc_state,
 							respect_downstream_limits);
+		if (intel_dp_is_edp(intel_dp)) {
+			struct intel_atomic_state *state = conn_state->state ?
+				to_intel_atomic_state(conn_state->state) : NULL;
+			struct intel_crtc *crtc = to_intel_crtc(crtc_state->uapi.crtc);
+			struct intel_crtc_state *old_crtc_state = state ?
+				intel_atomic_get_old_crtc_state(state, crtc) : NULL;
+
+			if (old_crtc_state && old_crtc_state->inherited)
+				limits->pipe.max_bpp = min(limits->pipe.max_bpp, 24);
+		}
 	}
 
 	if (!dsc && intel_dp_in_hdr_mode(conn_state)) {
