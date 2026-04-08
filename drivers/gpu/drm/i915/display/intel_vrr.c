@@ -473,17 +473,29 @@ static bool intel_vrr_use_optimized_guardband(const struct intel_crtc_state *crt
 void intel_vrr_compute_guardband(struct intel_crtc_state *crtc_state)
 {
 	struct intel_display *display = to_intel_display(crtc_state);
+	struct intel_atomic_state *state = crtc_state->uapi.state ?
+		to_intel_atomic_state(crtc_state->uapi.state) : NULL;
+	struct intel_crtc *crtc = to_intel_crtc(crtc_state->uapi.crtc);
+	const struct intel_crtc_state *old_crtc_state = state ?
+		intel_atomic_get_old_crtc_state(state, crtc) : NULL;
 	struct drm_display_mode *adjusted_mode = &crtc_state->hw.adjusted_mode;
 	struct drm_display_mode *pipe_mode = &crtc_state->hw.pipe_mode;
 	int guardband;
+	int kernel_guardband;
 
 	if (!intel_vrr_possible(crtc_state))
 		return;
 
 	if (intel_vrr_use_optimized_guardband(crtc_state))
-		guardband = intel_vrr_compute_optimized_guardband(crtc_state);
+		kernel_guardband = intel_vrr_compute_optimized_guardband(crtc_state);
 	else
-		guardband = crtc_state->vrr.vmin - adjusted_mode->crtc_vdisplay;
+		kernel_guardband = crtc_state->vrr.vmin - adjusted_mode->crtc_vdisplay;
+
+	//Grab inherited guardband if present during handoff, clamped to kernel value
+	if (old_crtc_state && old_crtc_state->inherited && old_crtc_state->vrr.guardband)
+		guardband = max(old_crtc_state->vrr.guardband, kernel_guardband);
+	else
+		guardband = kernel_guardband;
 
 	crtc_state->vrr.guardband = min(guardband, intel_vrr_max_guardband(crtc_state));
 
