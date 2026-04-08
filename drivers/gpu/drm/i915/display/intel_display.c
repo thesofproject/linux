@@ -2423,6 +2423,11 @@ static int intel_crtc_compute_pipe_mode(struct intel_crtc_state *crtc_state)
 static int intel_crtc_set_context_latency(struct intel_crtc_state *crtc_state)
 {
 	struct intel_display *display = to_intel_display(crtc_state);
+	struct intel_atomic_state *state = crtc_state->uapi.state ?
+		to_intel_atomic_state(crtc_state->uapi.state) : NULL;
+	struct intel_crtc *crtc = to_intel_crtc(crtc_state->uapi.crtc);
+	const struct intel_crtc_state *old_crtc_state = state ?
+		intel_atomic_get_old_crtc_state(state, crtc) : NULL;
 	int set_context_latency = 0;
 
 	if (!HAS_DSB(display))
@@ -2430,6 +2435,11 @@ static int intel_crtc_set_context_latency(struct intel_crtc_state *crtc_state)
 
 	set_context_latency = max(set_context_latency,
 				  intel_psr_min_set_context_latency(crtc_state));
+
+	// This grabs the set_context_latency value from the bios if it's set
+	if (old_crtc_state && old_crtc_state->inherited)
+		set_context_latency = max(set_context_latency,
+					  old_crtc_state->set_context_latency);
 
 	return set_context_latency;
 }
