@@ -47,6 +47,7 @@
   sbitmap_init_node
   sbitmap_queue_clear
   __sbitmap_queue_get
+  sbitmap_queue_get_shallow
   sbitmap_queue_init_node
   sbitmap_queue_resize
   sbitmap_queue_show
@@ -116,6 +117,7 @@
   __traceiter_android_vh_clear_rwsem_reader_owned
   __traceiter_android_vh_clear_rwsem_writer_owned
   __traceiter_android_vh_do_async_mmap_readahead
+  __traceiter_android_vh_do_fault_around
   __traceiter_android_vh_dup_task_struct
   __traceiter_android_vh_f2fs_file_open
   __traceiter_android_vh_f2fs_ra_op_flags
@@ -129,6 +131,7 @@
   __traceiter_android_vh_lock_folio_drop_mmap_start
   __traceiter_android_vh_lruvec_add_folio
   __traceiter_android_vh_lruvec_del_folio
+  __traceiter_android_vh_map_order0_folio
   __traceiter_android_vh_mmap_region
   __traceiter_android_vh_mutex_unlock_slowpath
   __traceiter_android_vh_mutex_wait_finish
@@ -221,6 +224,7 @@
   __tracepoint_android_vh_clear_rwsem_reader_owned
   __tracepoint_android_vh_clear_rwsem_writer_owned
   __tracepoint_android_vh_do_async_mmap_readahead
+  __tracepoint_android_vh_do_fault_around
   __tracepoint_android_vh_dup_task_struct
   __tracepoint_android_vh_f2fs_file_open
   __tracepoint_android_vh_f2fs_ra_op_flags
@@ -234,6 +238,7 @@
   __tracepoint_android_vh_lock_folio_drop_mmap_start
   __tracepoint_android_vh_lruvec_add_folio
   __tracepoint_android_vh_lruvec_del_folio
+  __tracepoint_android_vh_map_order0_folio
   __tracepoint_android_vh_mmap_region
   __tracepoint_android_vh_mutex_unlock_slowpath
   __tracepoint_android_vh_mutex_wait_finish
