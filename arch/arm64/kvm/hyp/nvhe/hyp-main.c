@@ -1867,8 +1867,9 @@ static void handle___pkvm_host_iommu_set_identity(struct kvm_cpu_context *host_c
 	DECLARE_REG(pkvm_handle_t, iommu, host_ctxt, 2);
 	DECLARE_REG(pkvm_handle_t, dev, host_ctxt, 3);
 	DECLARE_REG(bool, on, host_ctxt, 4);
+	DECLARE_REG(unsigned long, flags, host_ctxt, 5);
 
-	ret = kvm_iommu_set_identity(drv_id, iommu, dev, on);
+	ret = kvm_iommu_set_identity(drv_id, iommu, dev, on, flags);
 	this_cpu_hyp_req_to_smccc(ret, host_ctxt);
 }
 
