@@ -1874,7 +1874,7 @@ __pkvm_pages_to_ppages(struct kvm *kvm, struct kvm_memory_slot *memslot, gfn_t g
 		ppage = kvm_pinned_pages_iter_first(&kvm->arch.pkvm.pinned_pages,
 						    ipa, ipa + PAGE_SIZE - 1);
 		if (ppage) {
-			unpin_user_pages(&page, 1);
+			unpin_user_page(page);
 			goto next;
 		}
 
@@ -1886,6 +1886,12 @@ __pkvm_pages_to_ppages(struct kvm *kvm, struct kvm_memory_slot *memslot, gfn_t g
 			unsigned long hva = gfn_to_hva_memslot_prot(memslot, gfn, NULL);
 
 			page_size = transparent_hugepage_adjust(kvm, memslot, hva, &pfn, &ipa);
+
+			/* Stage-1 mapping missing. Skip the page and retry the fault later */
+			if (page_size < 0) {
+				unpin_user_page(page);
+				goto next;
+			}
 		}
 
 		/* Pop a ppage from the pre-allocated list */
@@ -1903,7 +1909,7 @@ __pkvm_pages_to_ppages(struct kvm *kvm, struct kvm_memory_slot *memslot, gfn_t g
 
 next:
 		/* Number of pages to skip (covered by a THP) */
-		skip = ppage->order ? ALIGN(gfn + 1, 1 << ppage->order) - gfn - 1 : 0;
+		skip = (ppage && ppage->order) ? ALIGN(gfn + 1, 1 << ppage->order) - gfn - 1 : 0;
 		if (skip) {
 			long nr_pins = min_t(long, skip, nr_pages - p - 1);
 
