@@ -386080,6 +386080,15 @@ elf_symbol {
   full_name: "cpu_latency_qos_update_request"
 }
 elf_symbol {
+  id: 0x143e2fe6
+  name: "cpu_logical_map"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x03379d75
+  type_id: 0x46ba8ac4
+  full_name: "cpu_logical_map"
+}
+elf_symbol {
   id: 0xdd1168f7
   name: "cpu_pm_register_notifier"
   is_defined: true
@@ -442863,6 +442872,7 @@ interface {
   symbol_id: 0xa3ab8c31
   symbol_id: 0x8daa61e5
   symbol_id: 0x7511322a
+  symbol_id: 0x143e2fe6
   symbol_id: 0xdd1168f7
   symbol_id: 0x210f422e
   symbol_id: 0x288a6554
