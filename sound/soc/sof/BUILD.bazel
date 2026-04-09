@@ -24,6 +24,7 @@ ddk_headers(
 ddk_module(
     name = "snd-sof",
     srcs = [
+        "compress.c",
         "control.c",
         "core.c",
         "debug.c",
@@ -65,6 +66,10 @@ ddk_module(
         "trace.c",
     ],
     out = "snd-sof.ko",
+    copts = [
+        "-DCONFIG_SND_SOC_COMPRESS=1",
+        "-DCONFIG_SND_SOC_SOF_COMPRESS=1",
+    ],
     defconfig = _AUDIO_DEFCONFIG,
     kconfig = "Kconfig",
     kernel_build = "//private/devices/google/common:kernel_build",
@@ -152,5 +157,59 @@ ddk_module(
     deps = [
         ":snd-sof",
         ":sof_headers",
+    ],
+)
+
+ddk_module(
+    name = "snd-sof-ipc-flood-test",
+    srcs = [
+        "sof-client-ipc-flood-test.c",
+    ],
+    out = "snd-sof-ipc-flood-test.ko",
+    copts = ["-Iprivate/desktop-google/sound/soc/sof"],
+    defconfig = _AUDIO_DEFCONFIG,
+    kconfig = "Kconfig",
+    kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        ":snd-sof",
+        ":sof_headers",
+        "//private/desktop-google:sof_api_header",
+        "//private/desktop-google:sof_config_header",
+    ],
+)
+
+ddk_module(
+    name = "snd-sof-ipc-msg-injector",
+    srcs = [
+        "sof-client-ipc-msg-injector.c",
+    ],
+    out = "snd-sof-ipc-msg-injector.ko",
+    copts = ["-Iprivate/desktop-google/sound/soc/sof"],
+    defconfig = _AUDIO_DEFCONFIG,
+    kconfig = "Kconfig",
+    kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        ":snd-sof",
+        ":sof_headers",
+        "//private/desktop-google:sof_api_header",
+        "//private/desktop-google:sof_config_header",
+    ],
+)
+
+ddk_module(
+    name = "snd-sof-ipc-kernel-injector",
+    srcs = [
+        "sof-client-ipc-kernel-injector.c",
+    ],
+    out = "snd-sof-ipc-kernel-injector.ko",
+    copts = ["-Iprivate/desktop-google/sound/soc/sof"],
+    defconfig = _AUDIO_DEFCONFIG,
+    kconfig = "Kconfig",
+    kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        ":snd-sof",
+        ":sof_headers",
+        "//private/desktop-google:sof_api_header",
+        "//private/desktop-google:sof_config_header",
     ],
 )
