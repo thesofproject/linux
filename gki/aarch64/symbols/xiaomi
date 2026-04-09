@@ -171,6 +171,10 @@
  __traceiter_android_vh_folio_end_writeback
  __tracepoint_android_vh_folio_end_writeback
 
+# required by dw_wdt.ko
+ __traceiter_android_rvh_fiq_dump
+ __tracepoint_android_rvh_fiq_dump
+
 # required by sched-walt.ko
  __traceiter_android_rvh_should_honor_rt_sync
  __tracepoint_android_rvh_should_honor_rt_sync
