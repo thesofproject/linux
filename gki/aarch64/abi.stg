@@ -320897,6 +320897,11 @@ function {
   parameter_id: 0x295c7202
 }
 function {
+  id: 0x176dd804
+  return_type_id: 0xd5df6730
+  parameter_id: 0x1d19a9d5
+}
+function {
   id: 0x176dde0e
   return_type_id: 0x48b5725f
   parameter_id: 0x1d19a9d5
@@ -430722,6 +430727,15 @@ elf_symbol {
   full_name: "task_rq_lock"
 }
 elf_symbol {
+  id: 0xd32463bc
+  name: "task_sched_runtime"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xf8126d7d
+  type_id: 0x176dd804
+  full_name: "task_sched_runtime"
+}
+elf_symbol {
   id: 0xd26fea36
   name: "tasklet_init"
   is_defined: true
@@ -447800,6 +447814,7 @@ interface {
   symbol_id: 0x2eda3aae
   symbol_id: 0x9891b743
   symbol_id: 0x51f65372
+  symbol_id: 0xd32463bc
   symbol_id: 0xd26fea36
   symbol_id: 0x6d894b2b
   symbol_id: 0x9c77d018
