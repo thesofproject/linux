@@ -28644,6 +28644,11 @@ pointer_reference {
   pointee_type_id: 0xf1214399
 }
 pointer_reference {
+  id: 0x36da39bd
+  kind: POINTER
+  pointee_type_id: 0xf1280069
+}
+pointer_reference {
   id: 0x36dc02f2
   kind: POINTER
   pointee_type_id: 0xf130ed57
@@ -38842,6 +38847,11 @@ qualified {
   id: 0xf10b9ea7
   qualifier: CONST
   qualified_type_id: 0xb469cc14
+}
+qualified {
+  id: 0xf1280069
+  qualifier: CONST
+  qualified_type_id: 0xb4e7b72e
 }
 qualified {
   id: 0xf130ed57
@@ -317855,6 +317865,12 @@ function {
   parameter_id: 0x94aa5e96
 }
 function {
+  id: 0x136ba455
+  return_type_id: 0x48b5725f
+  parameter_id: 0x0ca27481
+  parameter_id: 0x36da39bd
+}
+function {
   id: 0x136d0952
   return_type_id: 0x48b5725f
   parameter_id: 0x0e5eb556
@@ -336211,6 +336227,13 @@ function {
   id: 0x914d4ae5
   return_type_id: 0x6720d32f
   parameter_id: 0x3336a72b
+}
+function {
+  id: 0x914d4fc7
+  return_type_id: 0x6720d32f
+  parameter_id: 0x32da4522
+  parameter_id: 0x18bd6530
+  parameter_id: 0x6720d32f
 }
 function {
   id: 0x914dbe16
@@ -401528,6 +401551,15 @@ elf_symbol {
   full_name: "gnet_stats_basic_sync_init"
 }
 elf_symbol {
+  id: 0xa67d8b49
+  name: "gnet_stats_copy_app"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x8493ee4a
+  type_id: 0x914d4fc7
+  full_name: "gnet_stats_copy_app"
+}
+elf_symbol {
   id: 0x8a6e138f
   name: "gnet_stats_copy_basic"
   is_defined: true
@@ -413249,6 +413281,24 @@ elf_symbol {
   full_name: "nf_conntrack_find_get"
 }
 elf_symbol {
+  id: 0x8769a228
+  name: "nf_conntrack_register_notifier"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x0f6f5ef0
+  type_id: 0x136ba455
+  full_name: "nf_conntrack_register_notifier"
+}
+elf_symbol {
+  id: 0xca0e14e2
+  name: "nf_conntrack_unregister_notifier"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x847b57ed
+  type_id: 0x13b0ccb3
+  full_name: "nf_conntrack_unregister_notifier"
+}
+elf_symbol {
   id: 0xb2e54d47
   name: "nf_ct_attach"
   is_defined: true
@@ -416448,6 +416498,15 @@ elf_symbol {
   crc: 0xef5816a3
   type_id: 0x1247424a
   full_name: "pci_msi_unmask_irq"
+}
+elf_symbol {
+  id: 0x9d3ae050
+  name: "pci_msix_vec_count"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x93b40c75
+  type_id: 0x99f942bc
+  full_name: "pci_msix_vec_count"
 }
 elf_symbol {
   id: 0x2f7fc8d4
@@ -444582,6 +444641,7 @@ interface {
   symbol_id: 0xb096071e
   symbol_id: 0x7990bc50
   symbol_id: 0xa9715193
+  symbol_id: 0xa67d8b49
   symbol_id: 0x8a6e138f
   symbol_id: 0x0ace9404
   symbol_id: 0x64b49555
@@ -445882,6 +445942,8 @@ interface {
   symbol_id: 0x57a41824
   symbol_id: 0xc8ea3547
   symbol_id: 0x8b0d44a9
+  symbol_id: 0x8769a228
+  symbol_id: 0xca0e14e2
   symbol_id: 0xb2e54d47
   symbol_id: 0x1b589c40
   symbol_id: 0xb4e99805
@@ -446237,6 +446299,7 @@ interface {
   symbol_id: 0x2feb66ad
   symbol_id: 0x9a271493
   symbol_id: 0xcb617d2b
+  symbol_id: 0x9d3ae050
   symbol_id: 0x2f7fc8d4
   symbol_id: 0x180e6903
   symbol_id: 0xf32782d8
