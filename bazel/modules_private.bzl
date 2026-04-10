@@ -10,6 +10,7 @@ visibility("private")
 
 _COMMON_GKI_MODULES_LIST = [
     # keep sorted
+    "drivers/android/binder/rust_binder.ko",
     "drivers/block/virtio_blk.ko",
     "drivers/block/zram/zram.ko",
     "drivers/bluetooth/btbcm.ko",
@@ -92,7 +93,6 @@ _COMMON_GKI_MODULES_LIST = [
 ]
 
 _RUST_GKI_MODULES_LIST = [
-    "drivers/android/binder/rust_binder.ko",
 ]
 
 _ARM_GKI_MODULES_LIST = [
