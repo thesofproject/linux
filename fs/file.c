@@ -1297,6 +1297,27 @@ __releases(&files->file_lock)
 	struct file *tofree;
 	struct fdtable *fdt;
 
+	get_file(file);
+
+	/*
+	 * Must be done before the dup and the file_lock is dropped at the end of the function to
+	 * avoid a race with close(fd) from another thread, but we can't allocate while atomic, so
+	 * account up-front and rollback upon error.
+	 */
+	if (is_dma_buf_file(file)) {
+		int err;
+
+		spin_unlock(&files->file_lock);
+		err = dma_buf_account_task(file->private_data, files->dmabuf_info);
+		if (err) {
+			pr_err("dmabuf accounting failed during %s operation, err %d\n", __func__,
+			       err);
+			fput(file);
+			return err;
+		}
+		spin_lock(&files->file_lock);
+	}
+
 	/*
 	 * dup2() is expected to close the file installed in the target fd slot
 	 * (if any). However, userspace hand-picking a fd may be racing against
@@ -1328,7 +1349,6 @@ __releases(&files->file_lock)
 	tofree = rcu_dereference_raw(fdt->fd[fd]);
 	if (!tofree && fd_is_open(fd, fdt))
 		goto Ebusy;
-	get_file(file);
 	rcu_assign_pointer(fdt->fd[fd], file);
 	__set_open_fd(fd, fdt, flags & O_CLOEXEC);
 	spin_unlock(&files->file_lock);
@@ -1343,6 +1363,9 @@ __releases(&files->file_lock)
 
 Ebusy:
 	spin_unlock(&files->file_lock);
+	if (is_dma_buf_file(file))
+		dma_buf_unaccount_task(file->private_data, files->dmabuf_info);
+	fput(file);
 	return -EBUSY;
 }
 
