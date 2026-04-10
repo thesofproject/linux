@@ -2135,6 +2135,15 @@ void pkvm_wait_vcpu_kicked_out(struct kvm_vcpu *vcpu)
 	} while (READ_ONCE(vcpu->mode) == EXITING_GUEST_MODE);
 }
 
+void pkvm_udelay(unsigned int usecs)
+{
+	u64 start = rdtsc_ordered();
+	u64 delta = (u64)usecs * tsc_khz / 1000;
+
+	while (rdtsc_ordered() - start < delta)
+		cpu_relax();
+}
+
 int pkvm_x86_vendor_init(struct kvm_x86_init_ops *ops)
 {
 	int r;
