@@ -175,3 +175,7 @@
 # required by xr-qi.ko
  __traceiter_android_vh_percpu_rwsem_init
  __tracepoint_android_vh_percpu_rwsem_init
+
+# required by xring_thermal.ko
+ __traceiter_android_vh_enable_thermal_genl_check
+ __tracepoint_android_vh_enable_thermal_genl_check
