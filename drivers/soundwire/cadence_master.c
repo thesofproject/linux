@@ -2144,9 +2144,6 @@ int sdw_cdns_bpt_find_buffer_sizes(int command, /* 0: write, 1: read */
 	if (!actual_bpt_bytes)
 		return -EINVAL;
 
-	if (data_bytes < actual_bpt_bytes)
-		actual_bpt_bytes = data_bytes;
-
 	/*
 	 * the caller may want to set the number of bytes per frame,
 	 * allow when possible
@@ -2155,6 +2152,9 @@ int sdw_cdns_bpt_find_buffer_sizes(int command, /* 0: write, 1: read */
 		actual_bpt_bytes = requested_bytes_per_frame;
 
 	*data_per_frame = actual_bpt_bytes;
+
+	if (data_bytes < actual_bpt_bytes)
+		actual_bpt_bytes = data_bytes;
 
 	if (command == 0) {
 		/*
@@ -2582,14 +2582,14 @@ int sdw_cdns_check_write_response(struct device *dev, u8 *dma_buffer,
 		ret = check_frame_start(header, counter);
 		if (ret < 0) {
 			dev_err(dev, "%s: bad frame %d/%d start header %x\n",
-				__func__, i, num_frames, header);
+				__func__, i + 1, num_frames, header);
 			return ret;
 		}
 
 		ret = check_frame_end(footer);
 		if (ret < 0) {
 			dev_err(dev, "%s: bad frame %d/%d end footer %x\n",
-				__func__, i, num_frames, footer);
+				__func__, i + 1, num_frames, footer);
 			return ret;
 		}
 
@@ -2666,7 +2666,7 @@ int sdw_cdns_check_read_response(struct device *dev, u8 *dma_buffer, int dma_buf
 		ret = check_frame_start(header, counter);
 		if (ret < 0) {
 			dev_err(dev, "%s: bad frame %d/%d start header %x\n",
-				__func__, i, num_frames, header);
+				__func__, i + 1, num_frames, header);
 			return ret;
 		}
 
@@ -2681,7 +2681,7 @@ int sdw_cdns_check_read_response(struct device *dev, u8 *dma_buffer, int dma_buf
 
 		if (crc != expected_crc) {
 			dev_err(dev, "%s: bad frame %d/%d crc %#x expected %#x\n",
-				__func__, i, num_frames, crc, expected_crc);
+				__func__, i + 1, num_frames, crc, expected_crc);
 			return -EIO;
 		}
 
@@ -2692,7 +2692,7 @@ int sdw_cdns_check_read_response(struct device *dev, u8 *dma_buffer, int dma_buf
 		ret = check_frame_end(footer);
 		if (ret < 0) {
 			dev_err(dev, "%s: bad frame %d/%d end footer %x\n",
-				__func__, i, num_frames, footer);
+				__func__, i + 1, num_frames, footer);
 			return ret;
 		}
 
