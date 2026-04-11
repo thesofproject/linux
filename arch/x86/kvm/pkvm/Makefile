@@ -37,6 +37,8 @@ pkvm-hyp-y			+= $(kernel-lib)/sort.o $(kernel-lib)/bsearch.o \
 				   $(kernel-lib)/string.o $(kernel-lib)/ctype.o
 pkvm-hyp-$(CONFIG_LIST_HARDENED) += $(kernel-lib)/list_debug.o
 
+CFLAGS_REMOVE_$(kernel-lib)/string.pkvm.o := -D__NO_FORTIFY
+
 kvm				:= ..
 pkvm-hyp-y			+= $(kvm)/x86.o $(kvm)/cpuid.o $(kvm)/mtrr.o \
 				   $(kvm)/lapic.o
