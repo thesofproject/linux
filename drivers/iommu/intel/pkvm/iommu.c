@@ -422,9 +422,6 @@ int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val)
 	offset = phys - iommu->reg_phys;
 
 	switch (offset) {
-	case DMAR_GCMD_REG:
-		ret = -EINVAL;
-		break;
 	case DMAR_CAP_REG:
 		*val = iommu->cap;
 		break;
@@ -443,13 +440,104 @@ int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val)
 	case DMAR_GSTS_REG:
 		*val = iommu->vgsts;
 		break;
+	case DMAR_VER_REG:
+	case DMAR_PMEN_REG:
+	case DMAR_PRS_REG:
+	case DMAR_PERFCFGOFF_REG:
+	case DMAR_PERFOVFOFF_REG:
+	case DMAR_PERFCNTROFF_REG:
+	case DMAR_PERFINTRSTS_REG:
+	case DMAR_PERFINTRCTL_REG:
+	case DMAR_FSTS_REG:
+	case DMAR_FECTL_REG:
+	case DMAR_IQH_REG:
+	case DMAR_IQT_REG:
+	case DMAR_ECRSP_REG:
+	case DMAR_IQER_REG:
+	case DMAR_PERFCAP_REG:
+	case DMAR_ECCAP_REG:
+	case DMAR_ECCAP_REG + DMA_ECMD_REG_STEP:
+	case DMAR_ECCAP_REG + 2 * DMA_ECMD_REG_STEP:
+	case DMAR_ECCAP_REG + 3 * DMA_ECMD_REG_STEP:
+#ifdef CONFIG_INTEL_IOMMU_DEBUGFS
+	/*
+	 * These registers are read only by the Intel IOMMU debugfs register
+	 * dump (iommu_regs_{32,64}[] in debugfs.c); the core driver never reads
+	 * them. Allow them only when debugfs is built, so a production
+	 * deny-by-default build keeps to least privilege.
+	 */
+	case DMAR_GCMD_REG:
+	case DMAR_PLMBASE_REG:
+	case DMAR_PLMLIMIT_REG:
+	case DMAR_ICS_REG:
+	case DMAR_PECTL_REG:
+	case DMAR_PEDATA_REG:
+	case DMAR_PEADDR_REG:
+	case DMAR_PEUADDR_REG:
+	case DMAR_PERFINTRDATA_REG:
+	case DMAR_PERFINTRADDR_REG:
+	case DMAR_PERFINTRUADDR_REG:
+	case DMAR_FEDATA_REG:
+	case DMAR_FEADDR_REG:
+	case DMAR_FEUADDR_REG:
+	case DMAR_PHMBASE_REG:
+	case DMAR_PHMLIMIT_REG:
+	case DMAR_PQH_REG:
+	case DMAR_PQT_REG:
+	case DMAR_PQA_REG:
+	case DMAR_MTRRCAP_REG:
+	case DMAR_MTRRDEF_REG:
+	case DMAR_MTRR_FIX64K_00000_REG:
+	case DMAR_MTRR_FIX16K_80000_REG:
+	case DMAR_MTRR_FIX16K_A0000_REG:
+	case DMAR_MTRR_FIX4K_C0000_REG:
+	case DMAR_MTRR_FIX4K_C8000_REG:
+	case DMAR_MTRR_FIX4K_D0000_REG:
+	case DMAR_MTRR_FIX4K_D8000_REG:
+	case DMAR_MTRR_FIX4K_E0000_REG:
+	case DMAR_MTRR_FIX4K_E8000_REG:
+	case DMAR_MTRR_FIX4K_F0000_REG:
+	case DMAR_MTRR_FIX4K_F8000_REG:
+	case DMAR_MTRR_PHYSBASE0_REG:
+	case DMAR_MTRR_PHYSMASK0_REG:
+	case DMAR_MTRR_PHYSBASE1_REG:
+	case DMAR_MTRR_PHYSMASK1_REG:
+	case DMAR_MTRR_PHYSBASE2_REG:
+	case DMAR_MTRR_PHYSMASK2_REG:
+	case DMAR_MTRR_PHYSBASE3_REG:
+	case DMAR_MTRR_PHYSMASK3_REG:
+	case DMAR_MTRR_PHYSBASE4_REG:
+	case DMAR_MTRR_PHYSMASK4_REG:
+	case DMAR_MTRR_PHYSBASE5_REG:
+	case DMAR_MTRR_PHYSMASK5_REG:
+	case DMAR_MTRR_PHYSBASE6_REG:
+	case DMAR_MTRR_PHYSMASK6_REG:
+	case DMAR_MTRR_PHYSBASE7_REG:
+	case DMAR_MTRR_PHYSMASK7_REG:
+	case DMAR_MTRR_PHYSBASE8_REG:
+	case DMAR_MTRR_PHYSMASK8_REG:
+	case DMAR_MTRR_PHYSBASE9_REG:
+	case DMAR_MTRR_PHYSMASK9_REG:
+#endif
+		ret = iommu_direct_mmio_read(iommu, phys, len, val);
+		break;
 	default:
 		ret = pkvm_iommu_pmu_validate_read(iommu, offset, len);
 		if (ret == IOMMU_REG_NOT_HANDLED)
 			ret = pkvm_iommu_frcd_validate_read(iommu, offset, len);
 
-		/* Not emulated MMIO can directly go to hardware */
-		if (!ret || ret == IOMMU_REG_NOT_HANDLED)
+		if (ret == IOMMU_REG_NOT_HANDLED) {
+			/*
+			 * Deny-by-default: block all registers not explicitly handled
+			 * above. Any register the host driver legitimately needs must
+			 * be added as an explicit case; unknown or unreviewed registers
+			 * must not reach hardware.
+			 */
+			pkvm_err("iommu%d: unsupported register read blocked at offset 0x%lx\n",
+				 iommu->seq_id, offset);
+			ret = -EOPNOTSUPP;
+		}
+		if (!ret)
 			ret = iommu_direct_mmio_read(iommu, phys, len, val);
 	}
 
