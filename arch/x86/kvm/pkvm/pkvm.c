@@ -1074,6 +1074,33 @@ static void pkvm_set_dr7(struct kvm_vcpu *vcpu, unsigned long val)
 		vcpu->arch.switch_db_regs |= KVM_DEBUGREG_BP_ENABLED;
 }
 
+static int pkvm_set_segment(struct kvm_vcpu *vcpu, struct kvm_segment *var, int seg)
+{
+	if (seg < 0 || seg >= NR_VCPU_SEGMENTS)
+		return -EINVAL;
+
+	kvm_x86_call(set_segment)(vcpu, var, seg);
+	return 0;
+}
+
+static int pkvm_get_segment(struct kvm_vcpu *vcpu, struct kvm_segment *var, int seg)
+{
+	if (seg < 0 || seg >= NR_VCPU_SEGMENTS)
+		return -EINVAL;
+
+	kvm_x86_call(get_segment)(vcpu, var, seg);
+	return 0;
+}
+
+static int pkvm_get_segment_base(struct kvm_vcpu *vcpu, int seg, u64 *data)
+{
+	if (seg < 0 || seg >= NR_VCPU_SEGMENTS)
+		return -EINVAL;
+
+	*data = kvm_x86_call(get_segment_base)(vcpu, seg);
+	return 0;
+}
+
 static inline bool pkvm_event_injection_allowed(struct kvm_vcpu *vcpu)
 {
 	return !kvm_event_needs_reinjection(vcpu) &&
@@ -1830,16 +1857,14 @@ static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc 
 		kvm_vcpu_reset(vcpu, true);
 		break;
 	case __pkvm__set_segment:
-		kvm_x86_call(set_segment)(vcpu, &in->set_segment.seg_val,
-					  in->set_segment.seg);
+		ret = pkvm_set_segment(vcpu, &in->set_segment.seg_val, in->set_segment.seg);
 		break;
 	case __pkvm__get_segment:
-		kvm_x86_call(get_segment)(vcpu, &out->get_segment.seg_val,
-					  pkvm_hc_input1(hvcpu));
+		ret = pkvm_get_segment(vcpu, &out->get_segment.seg_val, pkvm_hc_input1(hvcpu));
 		break;
 	case __pkvm__get_segment_base:
-		out->get_segment_base.data =
-			kvm_x86_call(get_segment_base)(vcpu, pkvm_hc_input1(hvcpu));
+		ret = pkvm_get_segment_base(vcpu, pkvm_hc_input1(hvcpu),
+					    &out->get_segment_base.data);
 		break;
 	case __pkvm__set_idt:
 		kvm_x86_call(set_idt)(vcpu, &in->set_idt.desc);
