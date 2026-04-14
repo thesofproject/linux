@@ -76,51 +76,11 @@
 #define __VM_NO_COMPAT      _BITULL(58)
 #define __MAP_NO_COMPAT     _BITUL(31)
 
-/*
- * Conditional page-alignment based on mmap flags
- *
- * If the VMA is allowed to not respect the emulated page size, align using the
- * base PAGE_SIZE, else align using the emulated __PAGE_SIZE.
- */
-#define __COMPAT_PAGE_ALIGN(size, flags) \
-	((flags & __MAP_NO_COMPAT) ? PAGE_ALIGN(size) : __PAGE_ALIGN(size))
-
-/*
- * Combines the mmap "flags" argument into "vm_flags"
- *
- * If page size emulation is enabled, adds translation of the no-compat flag.
- */
-static __always_inline unsigned long calc_vm_flag_bits(struct file *file, unsigned long flags)
+/* Combine the mmap "flags" argument into "vm_flags" add translation of the no-compat flag. */
+static inline unsigned long __calc_vm_flag_bits(struct file *file, unsigned long flags)
 {
-	unsigned long flag_bits = __calc_vm_flag_bits(file, flags);
-
-	if (static_branch_unlikely(&page_shift_compat_enabled))
-		flag_bits |= _calc_vm_trans(flags, __MAP_NO_COMPAT, __VM_NO_COMPAT);
-
-	return flag_bits;
-}
-
-extern unsigned long ___filemap_len(struct inode *inode, unsigned long pgoff,
-				    unsigned long len, unsigned long flags);
-
-extern void ___filemap_fixup(unsigned long addr, unsigned long prot, unsigned long old_len,
-			     unsigned long new_len);
-
-static __always_inline unsigned long __filemap_len(struct inode *inode, unsigned long pgoff,
-						   unsigned long len, unsigned long flags)
-{
-	if (static_branch_unlikely(&page_shift_compat_enabled))
-		return ___filemap_len(inode, pgoff, len, flags);
-	else
-		return len;
-}
-
-static __always_inline void __filemap_fixup(unsigned long addr, unsigned long prot,
-					    unsigned long old_len, unsigned long new_len)
-{
-
-	if (static_branch_unlikely(&page_shift_compat_enabled))
-		___filemap_fixup(addr, prot, old_len, new_len);
+	return calc_vm_flag_bits(file, flags) | _calc_vm_trans(flags, __MAP_NO_COMPAT,
+							       __VM_NO_COMPAT);
 }
 
 extern int __fixup_swap_header(struct file *swap_file, struct address_space *mapping);
