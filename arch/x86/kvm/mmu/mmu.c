@@ -1686,10 +1686,18 @@ static bool pkvm_age_gfn_range(struct kvm *kvm, struct kvm_gfn_range *range,
 	read_lock(&kvm->mmu_lock);
 
 	for_each_pkvm_mapping(kvm, range->start, range->end, m) {
-		young |= pkvm_hypercall(vm_mmu_age, kvm->arch.pkvm.handle,
-					m->gfn << PAGE_SHIFT,
-					m->nr_pages << PAGE_SHIFT,
-					mkold);
+		int ret = pkvm_hypercall(vm_mmu_age, kvm->arch.pkvm.handle,
+					 m->gfn << PAGE_SHIFT,
+					 m->nr_pages << PAGE_SHIFT,
+					 mkold);
+		if (ret < 0) {
+			WARN_ONCE(1, "pkvm %s gfn[%llx..%llx] failed, err = %d\n",
+				  mkold ? "age" : "test_age",
+				  m->gfn, m->gfn + m->nr_pages, ret);
+			continue;
+		}
+
+		young |= ret;
 		if (young && !mkold)
 			break;
 	}
