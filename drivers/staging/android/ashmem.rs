@@ -548,24 +548,11 @@ fn ashmem_memfd_ioctl_inner(file: &File, cmd: u32, arg: usize) -> Result<isize> 
     let size = _IOC_SIZE(cmd);
     match cmd {
         bindings::ASHMEM_GET_NAME => {
-            let file_ptr = file.as_ptr();
-            // SAFETY: It's safe to access a file's dentry.
-            let dentry = unsafe { (*file_ptr).__bindgen_anon_1.f_path.dentry };
-            // SAFETY: memfd stores the supplied name at this location. A default value is stored
-            // when no name is supplied, so this is always a valid string.
-            let full_name = unsafe {
-                core::slice::from_raw_parts(
-                    (*dentry).__bindgen_anon_1.d_name.name,
-                    (*dentry)
-                        .__bindgen_anon_1
-                        .d_name
-                        .__bindgen_anon_1
-                        .__bindgen_anon_1
-                        .len as usize,
-                )
-            };
+            pin_init::stack_pin_init! {
+                let full_name = shmem::DentryNameSnapshot::new(file)
+            }
 
-            let name = full_name.strip_prefix(b"memfd:").unwrap_or(full_name);
+            let name = full_name.strip_prefix(b"memfd:").unwrap_or(&full_name);
             let max = usize::min(name.len(), ASHMEM_NAME_LEN);
 
             let mut local_name = [0u8; ASHMEM_NAME_LEN];
@@ -574,6 +561,7 @@ fn ashmem_memfd_ioctl_inner(file: &File, cmd: u32, arg: usize) -> Result<isize> 
 
             let mut writer = UserSlice::new(UserPtr::from_addr(arg), size).writer();
             writer.write_slice(&local_name)?;
+
             Ok(0)
         }
         bindings::ASHMEM_GET_SIZE => {
