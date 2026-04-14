@@ -438,6 +438,14 @@ impl Ashmem {
         if max_size < len_plus_offset {
             return Err(EINVAL);
         }
+        if len == 0 {
+            return match cmd {
+                ASHMEM_PIN => Ok(bindings::ASHMEM_NOT_PURGED as isize),
+                ASHMEM_UNPIN => Ok(0),
+                ASHMEM_GET_PIN_STATUS => Ok(bindings::ASHMEM_IS_PINNED as isize),
+                _ => unreachable!(),
+            };
+        }
 
         let pgstart = offset / PAGE_SIZE;
         let pgend = pgstart + (len / PAGE_SIZE) - 1;
