@@ -24,7 +24,6 @@
 
 #ifndef __ASSEMBLY__
 
-#include <linux/mman.h>
 #include <linux/printk.h>
 
 #define pgcompat_err(fmt, ...) \
@@ -66,22 +65,6 @@
  */
 #define __PAGE_SIZE_ROUND_UP_ADJ(size) \
 	((size) + (((1 << (__PAGE_SHIFT - PAGE_SHIFT)) - 1) << PAGE_SHIFT))
-
-/*
- * VMA is exempt from emulated page align requirements
- *
- * NOTE: __MAP_NO_COMPAT is not new UABI it is only ever set by the kernel
- *       in ___filemap_fixup()
- */
-#define __VM_NO_COMPAT      _BITULL(58)
-#define __MAP_NO_COMPAT     _BITUL(31)
-
-/* Combine the mmap "flags" argument into "vm_flags" add translation of the no-compat flag. */
-static inline unsigned long __calc_vm_flag_bits(struct file *file, unsigned long flags)
-{
-	return calc_vm_flag_bits(file, flags) | _calc_vm_trans(flags, __MAP_NO_COMPAT,
-							       __VM_NO_COMPAT);
-}
 
 extern int __fixup_swap_header(struct file *swap_file, struct address_space *mapping);
 
