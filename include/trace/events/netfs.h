@@ -740,19 +740,19 @@ TRACE_EVENT(netfs_collect_stream,
 		    __field(unsigned int,	wreq)
 		    __field(unsigned char,	stream)
 		    __field(unsigned long long,	collected_to)
-		    __field(unsigned long long,	issued_to)
+		    __field(unsigned long long,	front)
 			     ),
 
 	    TP_fast_assign(
 		    __entry->wreq	= wreq->debug_id;
 		    __entry->stream	= stream->stream_nr;
 		    __entry->collected_to = stream->collected_to;
-		    __entry->issued_to	= atomic64_read(&wreq->issued_to);
+		    __entry->front	= stream->front ? stream->front->start : UINT_MAX;
 			   ),
 
-	    TP_printk("R=%08x[%x:] cto=%llx ito=%llx",
+	    TP_printk("R=%08x[%x:] cto=%llx frn=%llx",
 		      __entry->wreq, __entry->stream,
-		      __entry->collected_to, __entry->issued_to)
+		      __entry->collected_to, __entry->front)
 	    );
 
 TRACE_EVENT(netfs_folioq,
