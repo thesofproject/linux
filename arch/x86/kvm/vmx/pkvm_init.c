@@ -1113,7 +1113,6 @@ static __init void init_vmentry_control(struct vcpu_vmx *vmx)
 	vm_entry_controls_set(vmx, vmentry_ctrl);
 	vmcs_write32(VM_ENTRY_INTR_INFO_FIELD, 0);
 	vmcs_write32(VM_ENTRY_MSR_LOAD_COUNT, 0);
-	vmcs_write32(VM_ENTRY_INTR_INFO_FIELD, 0);
 }
 
 static __init int pkvm_host_init_vmx(struct vcpu_vmx *vmx)
