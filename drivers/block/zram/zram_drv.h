@@ -180,6 +180,8 @@ struct zram_wb_ctl {
 	u64 processed_bytes;
 };
 
+struct zram_wb_ctl *init_wb_ctl(struct zram *zram);
+void release_wb_ctl(struct zram_wb_ctl *wb_ctl);
 int zram_writeback_slots(struct zram *zram,
 			 struct zram_pp_ctl *ctl,
 			 struct zram_wb_ctl *wb_ctl);
