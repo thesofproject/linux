@@ -203,21 +203,8 @@ void ___filemap_fixup(unsigned long addr, unsigned long prot, unsigned long file
 	 */
 	BUG_ON(!vma);
 
-	/*
-	 * Insert fixup vmas for file backed, including tmpfs (shmem) backed, VMAs.
-	 *
-	 * Faulting off the end of a file will result in SIGBUS since there is no
-	 * file page for the given file offset.
-	 *
-	 * shmem pages live in page cache or swap cache. Looking up a page cache
-	 * page with an index (pgoff) beyond the file is invalid and will result
-	 * in shmem_get_folio_gfp() returning -EINVAL.
-	 *
-	 * It's not pratical to maintain a list of vm_ops for the constantly
-	 * changing list of supported filesystems on Android, so only test that
-	 * vm_ops exists.
-	 */
-	if (!vma->vm_ops)
+	/* Only handle fixups for filemap faults */
+	if (vma->vm_ops && vma->vm_ops->fault != filemap_fault)
 		return;
 
 	/*
