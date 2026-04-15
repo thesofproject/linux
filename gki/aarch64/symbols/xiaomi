@@ -143,6 +143,16 @@
   __traceiter_android_rvh_dequeue_entity_delayed
   __tracepoint_android_rvh_dequeue_entity_delayed
 
+# required by page reclaim
+  __traceiter_android_vh_filemap_fault_folio_locked
+  __traceiter_android_vh_filemap_read_end
+  __traceiter_android_vh_force_page_cache_ra
+  __traceiter_android_vh_page_cache_ra_unbounded
+  __tracepoint_android_vh_filemap_fault_folio_locked
+  __tracepoint_android_vh_filemap_read_end
+  __tracepoint_android_vh_force_page_cache_ra
+  __tracepoint_android_vh_page_cache_ra_unbounded
+
 # low lat mem
  __tracepoint_android_vh_compact_bypass
  __traceiter_android_vh_compact_bypass
