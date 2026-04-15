@@ -63,6 +63,7 @@
 #include <trace/hooks/sys.h>
 #include <trace/hooks/syscall_check.h>
 #include <trace/hooks/sysrqcrash.h>
+#include <trace/hooks/thermal.h>
 #include <trace/hooks/timer.h>
 #include <trace/hooks/topology.h>
 #include <trace/hooks/traps.h>
@@ -267,6 +268,7 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_drain_all_pages_bypass);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_dwc3_core_soft_reset);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_dwc3_xhci_soft_reset);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_early_resume_begin);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_enable_thermal_genl_check);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_ep_create_wakeup_source);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_evict);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_evict_folios_bypass);
