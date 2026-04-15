@@ -487,25 +487,6 @@ show_map_vma(struct seq_file *m, struct vm_area_struct *vma)
 	start = vma->vm_start;
 	end = VMA_PAD_START(vma);
 
-	/*
-	 * The seq_file iterator for /proc/pid/maps can be interrupted and
-	 * restarted. The restart logic uses the vm_end of the last VMA as
-	 * the new position (see get_vma_at_pos()).
-	 *
-	 * In page size compatibility mode, this can cause the scan to restart
-	 * exactly at an anonymous "fixup" VMA (__VM_NO_COMPAT). However, the
-	 * logic in __fold_filemap_fixup_entry() depends on processing the
-	 * main file-backed VMA first to correctly fold the subsequent fixup
-	 * VMA into it.
-	 *
-	 * If we start on a fixup VMA, the folding is missed, and it gets
-	 * printed as a separate, overlapping map. To prevent this, simply
-	 * skip printing these entries. They are only meant to be merged with
-	 * their preceding VMA, not displayed directly.
-	 */
-	if (flags & __VM_NO_COMPAT)
-		return;
-
 	__fold_filemap_fixup_entry(&((struct proc_maps_private *)m->private)->iter, &end);
 
 	show_vma_header_prefix(m, start, end, flags, pgoff, dev, ino);
