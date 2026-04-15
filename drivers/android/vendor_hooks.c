@@ -108,6 +108,7 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_do_sea);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_do_sp_pc_abort);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_dpm_prepare);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_f2fs_down_read);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_fiq_dump);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_gh_after_vcpu_run);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_gh_before_vcpu_run);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_gh_note_fw_parcel);
