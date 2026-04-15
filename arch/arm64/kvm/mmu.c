@@ -2018,8 +2018,13 @@ static int __pkvm_host_donate_guest_sglist(struct kvm_vcpu *vcpu, struct list_he
 
 		p = 0;
 		list_for_each_entry_safe(ppage, tmp, ppages, list_node) {
-			if (p++ >= nr_ppages)
+			if (p++ >= nr_ppages) {
+				/* Allow occasional preemption during large batches. */
+				write_unlock(&kvm->mmu_lock);
+				cond_resched();
+				write_lock(&kvm->mmu_lock);
 				break;
+			}
 
 			list_del(&ppage->list_node);
 			ppage->node.rb_right = ppage->node.rb_left = NULL;
