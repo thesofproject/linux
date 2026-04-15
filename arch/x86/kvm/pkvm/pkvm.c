@@ -1030,6 +1030,18 @@ static int pkvm_set_msr(struct kvm_vcpu *vcpu, u32 index, u64 data)
 static int pkvm_cache_reg(struct kvm_vcpu *vcpu, enum kvm_reg reg,
 			  union pkvm_hc_data *out)
 {
+	switch (reg) {
+	case VCPU_REGS_RSP:
+	case VCPU_REGS_RIP:
+	case VCPU_EXREG_PDPTR:
+	case VCPU_EXREG_CR0:
+	case VCPU_EXREG_CR3:
+	case VCPU_EXREG_CR4:
+		break;
+	default:
+		return -EOPNOTSUPP;
+	}
+
 	kvm_x86_call(cache_reg)(vcpu, reg);
 
 	switch (reg) {
@@ -1058,7 +1070,7 @@ static int pkvm_cache_reg(struct kvm_vcpu *vcpu, enum kvm_reg reg,
 		out->cache_reg.cr4 = vcpu->arch.cr4;
 		break;
 	default:
-		return -EOPNOTSUPP;
+		BUG();
 	}
 
 	return 0;
