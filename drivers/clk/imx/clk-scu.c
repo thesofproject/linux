@@ -696,7 +696,8 @@ struct clk_hw *imx_clk_scu_alloc_dev(const char *name,
 	if (ret)
 		goto put_device;
 
-	ret = device_set_driver_override(&pdev->dev, "imx-scu-clk");
+	ret = driver_set_override(&pdev->dev, &pdev->driver_override,
+				  "imx-scu-clk", strlen("imx-scu-clk"));
 	if (ret)
 		goto put_device;
 
