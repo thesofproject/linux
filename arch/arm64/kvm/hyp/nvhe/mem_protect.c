@@ -56,6 +56,9 @@ struct hyp_mgt_allocator_ops host_s2_pool_ops = {
 
 void make_host_stage2_reclaimable(void)
 {
+	if (!host_s2_cma_size)
+		return;
+
 	__hyp_pool_set_range_reclaimable(&host_s2_pool);
 }
 
