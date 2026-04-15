@@ -2595,6 +2595,10 @@ int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 							   tplg_filename_prefix,
 							   feature_topologies[i]);
 
+		if (!feature_topology) {
+			ret = -ENOMEM;
+			goto out;
+		}
 		dev_info(scomp->dev, "loading feature topology %d: %s\n", i, feature_topology);
 		ret = request_firmware(&fw, feature_topology, scomp->dev);
 		if (ret < 0) {
