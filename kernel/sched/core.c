@@ -7688,6 +7688,7 @@ find_proxy_task(struct rq *rq, struct task_struct *donor, struct rq_flags *rf)
 static void __sched notrace __schedule(int sched_mode)
 {
 	struct task_struct *prev, *next;
+	struct task_struct *prev_donor;
 	/*
 	 * On PREEMPT_RT kernel, SM_RTLOCK_WAIT is noted
 	 * as a preemption by schedule_debug() and RCU.
@@ -7707,6 +7708,7 @@ static void __sched notrace __schedule(int sched_mode)
 	cpu = smp_processor_id();
 	rq = cpu_rq(cpu);
 	prev = rq->curr;
+	prev_donor = rq->donor;
 
 	schedule_debug(prev, preempt);
 
@@ -7791,6 +7793,23 @@ pick_again:
 			trace_sched_proxy_resched_idle(rq->donor, cpu, task_is_blocked(rq->donor));
 			zap_balance_callbacks(rq);
 			goto keep_resched;
+		}
+		if (rq->donor == prev_donor && prev != next) {
+			struct task_struct *donor = rq->donor;
+			/*
+			 * When transitioning like:
+			 *
+			 *         prev         next
+			 * donor:    B            B
+			 * curr:     A          B or C
+			 *
+			 * then put_prev_set_next_task() will not have done
+			 * anything, since B == B. However, A might have
+			 * missed a RT/DL balance opportunity due to being
+			 * on_cpu.
+			 */
+			donor->sched_class->put_prev_task(rq, donor, donor);
+			donor->sched_class->set_next_task(rq, donor, true);
 		}
 		trace_sched_found_proxy_task(rq->donor, next, cpu);
 	}
