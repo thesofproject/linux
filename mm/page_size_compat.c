@@ -270,32 +270,6 @@ free_magic:
 	return error;
 }
 
-/*
- * Folds any anon fixup entries created by ___filemap_fixup()
- * into the previous mapping so that /proc/<pid>/[s]maps don't
- * show unaliged entries.
- */
-void __fold_filemap_fixup_entry(struct vma_iterator *iter, unsigned long *end)
-{
-	struct vm_area_struct *next_vma;
-
-	/* Not emulating page size? */
-	if (!static_branch_unlikely(&page_shift_compat_enabled))
-		return;
-
-	/* Advance iterator */
-	next_vma = vma_next(iter);
-
-	/* If fixup VMA, adjust the end to cover its extent */
-	if (next_vma && (next_vma->vm_flags & __VM_NO_COMPAT)) {
-		*end = next_vma->vm_end;
-		return;
-	}
-
-	/* Rewind iterator */
-	vma_prev(iter);
-}
-
 #if IS_ENABLED(CONFIG_PERF_EVENTS)
 static int __init init_sysctl_perf_event_mlock(void)
 {

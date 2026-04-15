@@ -125,8 +125,6 @@ static __always_inline void __filemap_fixup(unsigned long addr, unsigned long pr
 
 extern int __fixup_swap_header(struct file *swap_file, struct address_space *mapping);
 
-extern void __fold_filemap_fixup_entry(struct vma_iterator *iter, unsigned long *end);
-
 bool bpf_is_ringbuf_file(struct file *file);
 
 static inline unsigned long __bpf_pgoff_fixup(struct file *file, unsigned long pgoff)
