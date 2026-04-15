@@ -1380,6 +1380,29 @@ kernel_build(
     visibility = ["//visibility:private"],
 )
 
+# libbpf
+cc_library(
+    name = "bpf_x86",
+    srcs = glob([
+        "tools/arch/x86/include/**/*.h",
+        "tools/include/**/*.h",
+        "tools/lib/bpf/*.c",
+    ]),
+    hdrs = glob([
+        "tools/lib/bpf/*.h",
+    ]),
+    copts = [
+        "-I{}/tools/include".format(package_name()),
+        "-I{}/tools/lib/bpf".format(package_name()),
+    ],
+    includes = [
+        "tools/include/uapi",
+    ],
+    strip_include_prefix = "tools/lib",
+    visibility = ["//visibility:public"],
+    deps = ["//prebuilts/kernel-build-tools:imported_libs"],
+)
+
 # KUnit test targets
 _KUNIT_DIR = "testcases/kunit"
 
