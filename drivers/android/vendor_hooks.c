@@ -52,6 +52,7 @@
 #include <trace/hooks/printk.h>
 #include <trace/hooks/psci.h>
 #include <trace/hooks/psi.h>
+#include <trace/hooks/rcu.h>
 #include <trace/hooks/reboot.h>
 #include <trace/hooks/regmap.h>
 #include <trace/hooks/remoteproc.h>
@@ -446,6 +447,8 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_put_super);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_queue_io);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_ra_alloc_retry);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_ra_tuning_max_page);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_rcu_boost_end);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_rcu_boost_start);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_readahead_add_folio);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_rebalance_anon_lru_bypass);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_receive_sock);
@@ -526,6 +529,8 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_swapin_end);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_swapin_start);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_sync_irq_wait_finish);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_sync_irq_wait_start);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_sync_rcu_wait_end);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_sync_rcu_wait_start);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_sync_txn_recvd);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_syscall_prctl_finished);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_sysrq_crash);
