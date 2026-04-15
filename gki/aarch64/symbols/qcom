@@ -2199,6 +2199,7 @@
   pci_bus_claim_resources
   pci_bus_size_bridges
   pci_bus_type
+  pci_clear_and_set_config_dword
   pci_clear_master
   pci_dev_get
   pci_device_group
@@ -2218,6 +2219,7 @@
   pci_enable_device
   pci_enable_ptm
   pci_find_ext_capability
+  pci_find_vsec_capability
   pci_flags
   pci_free_irq_vectors
   pci_generic_config_read
