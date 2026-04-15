@@ -371,7 +371,7 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 		addr = round_hint_to_min(addr);
 
 	/* Careful about overflows.. */
-	len = PAGE_ALIGN(len);
+	len = __PAGE_ALIGN(len);
 	if (!len)
 		return -ENOMEM;
 
