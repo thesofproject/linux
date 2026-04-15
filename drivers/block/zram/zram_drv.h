@@ -177,6 +177,7 @@ struct zram_wb_ctl {
 	wait_queue_head_t done_wait;
 	spinlock_t done_lock;
 	atomic_t num_inflight;
+	u64 processed_bytes;
 };
 
 int zram_writeback_slots(struct zram *zram,
