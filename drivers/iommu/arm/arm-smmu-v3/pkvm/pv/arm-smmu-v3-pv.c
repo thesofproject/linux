@@ -1332,6 +1332,9 @@ static int smmu_host_stage2_idmap(phys_addr_t start, phys_addr_t end, int prot)
 		return 0;
 
 	if (prot) {
+		if (!(prot & IOMMU_MMIO))
+			prot |= IOMMU_CACHE;
+
 		while (size) {
 			mapped = 0;
 			pgsize = smmu_pgsize_idmap(size, start, pgtable->cfg.pgsize_bitmap);
