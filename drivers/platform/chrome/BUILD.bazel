@@ -9,6 +9,14 @@ package(
     ],
 )
 
+filegroup(
+    name = "cros_ec_kconfigs",
+    srcs = [
+        "Kconfig",
+        "//private/desktop-google/drivers/mfd/Kconfig",
+    ]
+)
+
 ddk_module(
     name = "cros-ec-usb",
     srcs = [
@@ -23,4 +31,18 @@ ddk_module(
     ],
     kconfig = "Kconfig",
     kernel_build = "//private/devices/google/common:kernel_build",
+)
+
+ddk_module(
+    name = "cros_kbd_led_backlight",
+    srcs = [
+        "cros_kbd_led_backlight.c",
+    ],
+    out = "cros_kbd_led_backlight.ko",
+    defconfig = "defconfig_cros_kbd_led_backlight",
+    kernel_build = "//private/devices/google/common:kernel_build",
+    kconfig = "Kconfig",
+    deps = [
+        "//private/desktop-google/drivers/mfd:cros_ec_dev",
+    ],
 )
