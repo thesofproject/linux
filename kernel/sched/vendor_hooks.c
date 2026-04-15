@@ -116,6 +116,8 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_free_task);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_irqtime_account_process_tick);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_jiffies_update);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_map_util_freq);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_mmap_lock_free);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_mmap_lock_init);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_mmput);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_reweight_entity);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_sched_move_task);

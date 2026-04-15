@@ -289,14 +289,23 @@ static void handle_pending_events(struct kvm_vcpu *vcpu, bool *req_immediate_exi
 		pkvm_flush_host_ept();
 }
 
-static inline void set_vcpu_mode(struct kvm_vcpu *vcpu, int mode)
+static void fixup_host_vmx(struct vcpu_vmx *vmx)
 {
-	vcpu->mode = mode;
-	/*
-	 * Make sure vcpu->mode is set before checking/handling the pending
-	 * requests. Pairs with kvm_vcpu_exiting_guest_mode().
-	 */
-	smp_wmb();
+	if (boot_cpu_has(X86_FEATURE_INTEL_PT)) {
+		/*
+		 * The VM_ENTRY_LOAD_IA32_RTIT_CTL bit may be cleared due to the
+		 * MSR_IA32_RTIT_CTL TRACEEN bit is set before deprivileging. See
+		 * comments in init_vmentry_control in pkvm_init.c.
+		 *
+		 * Ensure this bit is set after the host exits to the root mode.
+		 * This can be done safely as VM_EXIT_CLEAR_IA32_RTIT_CTL is
+		 * guaranteed to be set which causes the MSR_IA32_RTIT_CTL is 0.
+		 */
+		if (!(vm_entry_controls_get(vmx) & VM_ENTRY_LOAD_IA32_RTIT_CTL))
+			vm_entry_controls_setbit(vmx, VM_ENTRY_LOAD_IA32_RTIT_CTL);
+	}
+
+	this_cpu_write(host_vcpu_fixup, false);
 }
 
 void pkvm_host_vmexit_main(struct vcpu_vmx *vmx)
@@ -308,7 +317,7 @@ void pkvm_host_vmexit_main(struct vcpu_vmx *vmx)
 
 	pkvm_trace_vmexit_start(vcpu);
 
-	set_vcpu_mode(vcpu, OUTSIDE_GUEST_MODE);
+	pkvm_set_vcpu_outside_guest(vcpu);
 
 	vcpu->arch.cr2 = native_read_cr2();
 	vcpu->arch.exception.injected = false;
@@ -374,17 +383,14 @@ void pkvm_host_vmexit_main(struct vcpu_vmx *vmx)
 handle_events:
 	handle_pending_events(vcpu, &req_immediate_exit);
 
-	/*
-	 * Once the pending events have been handled, set IN_GUEST_MODE to
-	 * indicate kick is required for the new pending events.
-	 */
-	set_vcpu_mode(vcpu, IN_GUEST_MODE);
+	pkvm_set_vcpu_in_guest(vcpu);
 
 	if (req_immediate_exit) {
 		kvm_make_request(KVM_REQ_EVENT, vcpu);
 		request_host_immediate_exit(vmx);
 	} else if (READ_ONCE(vcpu->mode) == EXITING_GUEST_MODE ||
 		   kvm_request_pending(vcpu)) {
+		pkvm_set_vcpu_outside_guest(vcpu);
 		/*
 		 * Some vcpu requests may be set after handle_pending_events()
 		 * but before set vcpu mode to IN_GUEST_MODE. In this case the
@@ -398,24 +404,8 @@ handle_events:
 	if (vcpu->arch.cr2 != native_read_cr2())
 		native_write_cr2(vcpu->arch.cr2);
 
+	if (unlikely(this_cpu_read(host_vcpu_fixup)))
+		fixup_host_vmx(vmx);
+
 	pkvm_trace_vmexit_end(vcpu, vt->exit_reason.basic);
-}
-
-void pkvm_host_vmx_fixup(struct vcpu_vmx *vmx)
-{
-	if (boot_cpu_has(X86_FEATURE_INTEL_PT)) {
-		/*
-		 * The VM_ENTRY_LOAD_IA32_RTIT_CTL bit may be cleared due to the
-		 * MSR_IA32_RTIT_CTL TRACEEN bit is set before deprivileging. See
-		 * comments in init_vmentry_control in pkvm_init.c.
-		 *
-		 * Ensure this bit is set after the host exits to the root mode.
-		 * This can be done safely as VM_EXIT_CLEAR_IA32_RTIT_CTL is
-		 * guaranteed to be set which causes the MSR_IA32_RTIT_CTL is 0.
-		 */
-		if (!(vm_entry_controls_get(vmx) & VM_ENTRY_LOAD_IA32_RTIT_CTL))
-			vm_entry_controls_setbit(vmx, VM_ENTRY_LOAD_IA32_RTIT_CTL);
-	}
-
-	this_cpu_write(host_vcpu_fixup, false);
 }
