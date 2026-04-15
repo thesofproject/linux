@@ -14957,12 +14957,7 @@ static int __pkvm_vcpu_enter_guest(struct kvm_vcpu *vcpu, bool force_immediate_e
 
 	kvm_x86_call(prepare_switch_to_guest)(vcpu);
 
-	/*
-	 * Make sure vcpu->mode is changed to IN_GUEST_MODE before
-	 * running to mark this vcpu should be kicked for any new
-	 * vcpu request.
-	 */
-	smp_store_mb(vcpu->mode, IN_GUEST_MODE);
+	pkvm_set_vcpu_in_guest(vcpu);
 
 	if (enable_apicv && kvm_lapic_enabled(vcpu))
 		kvm_x86_call(sync_pir_to_irr)(vcpu);
@@ -14977,23 +14972,7 @@ static int __pkvm_vcpu_enter_guest(struct kvm_vcpu *vcpu, bool force_immediate_e
 		run_flags |= KVM_RUN_FORCE_IMMEDIATE_EXIT;
 	} else if (READ_ONCE(vcpu->mode) == EXITING_GUEST_MODE ||
 		 kvm_request_pending(vcpu)) {
-		/*
-		 * Make the OUTSIDE_GUEST_MODE visible as early as possible for
-		 * the other CPUs to skip unnecessary kicks. It can also prevent
-		 * the vcpu->mode writing and the following vcpu->requests
-		 * reading from being reordered, so that the vcpu->requests made
-		 * before changing to OUTSIDE_GUEST_MODE can be handled. In fact
-		 * the vcpu->requests reading can be reordered before vcpu->mode
-		 * writing, as the missed vcpu->requests can be handled again
-		 * after setting to IN_GUEST_MODE with full memory barrier in
-		 * the next iteration. And a full memory barrier also cannot
-		 * prevent this CPU from missing the new requests made by the
-		 * other CPUs, e.g., the requests made after this CPU has
-		 * executed the event handlers. So a write barrier is fine from
-		 * functional point of view. But using a full memory barrier to
-		 * propagate the OUTSIDE_GUEST_MODE.
-		 */
-		smp_store_mb(vcpu->mode, OUTSIDE_GUEST_MODE);
+		pkvm_set_vcpu_outside_guest(vcpu);
 		/*
 		 * No need to cancel the previously injected events as the event
 		 * is injected via either handling exit reasons or the PV
@@ -15030,12 +15009,7 @@ static int __pkvm_vcpu_enter_guest(struct kvm_vcpu *vcpu, bool force_immediate_e
 		kvm_update_dr7(vcpu);
 	}
 
-	/*
-	 * Make sure vcpu->mode is changed to OUTSIDE_GUEST_MODE after
-	 * vmexit to mark this vcpu no need to be kicked for any new
-	 * vcpu request.
-	 */
-	smp_store_mb(vcpu->mode, OUTSIDE_GUEST_MODE);
+	pkvm_set_vcpu_outside_guest(vcpu);
 
 	if (unlikely(exit_fastpath == EXIT_FASTPATH_REENTER_GUEST))
 		return 1;
