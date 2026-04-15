@@ -112,7 +112,7 @@ static void zram_slot_unlock(struct zram *zram, u32 index)
 	clear_and_wake_up_bit(ZRAM_ENTRY_LOCK, lock);
 }
 
-bool init_done(struct zram *zram)
+static inline bool init_done(struct zram *zram)
 {
 	return zram->disksize;
 }
@@ -238,7 +238,18 @@ struct zram_pp_slot {
 	struct list_head	entry;
 };
 
-struct zram_pp_ctl *init_pp_ctl(void)
+/*
+ * A post-processing bucket is, essentially, a size class, this defines
+ * the range (in bytes) of pp-slots sizes in particular bucket.
+ */
+#define PP_BUCKET_SIZE_RANGE	64
+#define NUM_PP_BUCKETS		((PAGE_SIZE / PP_BUCKET_SIZE_RANGE) + 1)
+
+struct zram_pp_ctl {
+	struct list_head	pp_buckets[NUM_PP_BUCKETS];
+};
+
+static struct zram_pp_ctl *init_pp_ctl(void)
 {
 	struct zram_pp_ctl *ctl;
 	u32 idx;
@@ -263,7 +274,7 @@ static void release_pp_slot(struct zram *zram, struct zram_pp_slot *pps)
 	kfree(pps);
 }
 
-void release_pp_ctl(struct zram *zram, struct zram_pp_ctl *ctl)
+static void release_pp_ctl(struct zram *zram, struct zram_pp_ctl *ctl)
 {
 	u32 idx;
 
@@ -723,7 +734,7 @@ static void read_from_bdev_async(struct zram *zram, struct page *page,
 	submit_bio(bio);
 }
 
-int zram_writeback_slots(struct zram *zram, struct zram_pp_ctl *ctl)
+static int zram_writeback_slots(struct zram *zram, struct zram_pp_ctl *ctl)
 {
 	unsigned long blk_idx = 0;
 	struct page *page = NULL;
@@ -892,9 +903,9 @@ static int parse_mode(char *val, u32 *mode)
 	return 0;
 }
 
-int scan_slots_for_writeback(struct zram *zram, u32 mode,
-			     unsigned long lo, unsigned long hi,
-			     struct zram_pp_ctl *ctl)
+static int scan_slots_for_writeback(struct zram *zram, u32 mode,
+				    unsigned long lo, unsigned long hi,
+				    struct zram_pp_ctl *ctl)
 {
 	u32 index = lo;
 
