@@ -16,6 +16,7 @@ load(
     "common_kernel_protected_module_names",
 )
 load("//build/kernel/kleaf:constants.bzl", "COMMON_KCFLAGS", "DEFAULT_GKI_OUTS", "X86_64_OUTS")
+load("//build/kernel/kleaf:dwarves.bzl", "pahole")
 load("//build/kernel/kleaf:fail.bzl", "fail_rule")
 load(
     "//build/kernel/kleaf:kernel.bzl",
@@ -1401,6 +1402,12 @@ cc_library(
     strip_include_prefix = "tools/lib",
     visibility = ["//visibility:public"],
     deps = ["//prebuilts/kernel-build-tools:imported_libs"],
+)
+
+pahole(
+    name = "pahole",
+    visibility = ["//visibility:private"],
+    deps = [":bpf_x86"],
 )
 
 # KUnit test targets
