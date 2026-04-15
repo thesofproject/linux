@@ -364,6 +364,7 @@ static int pkvm_vm_finalize(int vm_handle)
 {
 	struct kvm *kvm, *shared_kvm;
 	struct pkvm_vm *pkvm_vm;
+	struct kvm_vcpu *vcpu;
 	u64 pvmfw_load_addr;
 	int ret = 0, i;
 
@@ -395,9 +396,7 @@ static int pkvm_vm_finalize(int vm_handle)
 		kvm->arch.pkvm.pvmfw_load_addr = pvmfw_load_addr;
 	}
 
-	for (i = 0; i < kvm->created_vcpus; i++) {
-		struct kvm_vcpu *vcpu = &pkvm_vm->vcpus[i]->vcpu;
-
+	for_each_pkvm_guest_vcpu(i, vcpu, pkvm_vm) {
 		if (vcpu->vcpu_id == kvm->arch.bsp_vcpu_id) {
 			/*
 			 * Make sure pvmfw_load_addr and bsp_vcpu_id are updated before
@@ -2240,6 +2239,7 @@ unsigned long pkvm_pcpu_tss(int cpu)
 int pkvm_start_secondary_vcpu(struct kvm *kvm, u32 apic_id, unsigned long start_ip)
 {
 	struct pkvm_vm *pkvm_vm = to_pkvm(kvm);
+	struct kvm_vcpu *vcpu;
 	int ret = -EINVAL;
 	int i;
 
@@ -2251,9 +2251,7 @@ int pkvm_start_secondary_vcpu(struct kvm *kvm, u32 apic_id, unsigned long start_
 
 	pkvm_spin_lock(&pkvm_vm->lock);
 
-	for (i = 0; i < kvm->created_vcpus; i++) {
-		struct kvm_vcpu *vcpu = &pkvm_vm->vcpus[i]->vcpu;
-
+	for_each_pkvm_guest_vcpu(i, vcpu, pkvm_vm) {
 		if (vcpu->vcpu_id != apic_id)
 			continue;
 

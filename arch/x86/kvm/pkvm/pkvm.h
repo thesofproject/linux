@@ -83,6 +83,23 @@ struct pkvm_vm {
 /* The pkvm_vm structure size w/o struct kvm */
 #define PKVM_VM_BASE_SIZE		offsetof(struct pkvm_vm, kvm)
 
+/**
+ * for_each_pkvm_guest_vcpu - iterate over non-NULL guest vCPUs
+ * @i: loop counter
+ * @vcpu: struct kvm_vcpu pointer, assigned by macro and guaranteed non-NULL.
+ * @vm: struct pkvm_vm pointer, evaluated multiple times. Don't use expressions.
+ *
+ * Iterates over all vCPUs in the VM, automatically skipping if vCPU pointer is
+ * NULL.
+ */
+#define for_each_pkvm_guest_vcpu(i, vcpu, vm)							\
+	for ((i) = 0; (i) < (vm)->kvm.created_vcpus &&						\
+		      ({ (vcpu) = (vm)->vcpus[(i)] ?						\
+				  &(vm)->vcpus[(i)]->vcpu : NULL; true; }); (i)++)		\
+		if (!(vcpu))									\
+			continue;								\
+		else
+
 static inline struct pkvm_vm *to_pkvm(struct kvm *kvm)
 {
 	/*
