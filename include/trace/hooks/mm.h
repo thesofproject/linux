@@ -594,6 +594,12 @@ DECLARE_HOOK(android_vh_do_mmap_map_count,
 			unsigned long len, unsigned long prot,
 			unsigned long flags),
 	TP_ARGS(file, addr, len, prot, flags));
+DECLARE_HOOK(android_vh_mm_direct_reclaim_enter,
+	TP_PROTO(unsigned int order),
+	TP_ARGS(order));
+DECLARE_HOOK(android_vh_mm_direct_reclaim_exit,
+	TP_PROTO(unsigned long did_some_progress, int retry_times),
+	TP_ARGS(did_some_progress, retry_times));
 #endif /* _TRACE_HOOK_MM_H */
 
 /* This part must be outside protection */
