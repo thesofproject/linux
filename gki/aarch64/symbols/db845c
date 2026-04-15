@@ -124,6 +124,7 @@
   device_property_read_string_array
   device_property_read_u32_array
   device_register
+  __device_set_driver_override
   device_set_node
   device_set_of_node_from_dev
   device_set_wakeup_capable

@@ -316,6 +316,7 @@
   device_remove_file
   device_remove_groups
   device_rename
+  __device_set_driver_override
   device_set_wakeup_capable
   device_set_wakeup_enable
   device_show_string
