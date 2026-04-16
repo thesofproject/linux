@@ -2376,6 +2376,13 @@
   ww_mutex_lock
   ww_mutex_unlock
   x509_load_certificate_list
+  __xa_clear_mark
+  xa_destroy
+  xa_find
+  xa_find_after
+  xa_load
+  xa_set_mark
+  xa_store
   __xfrm_state_destroy
   xfrm_state_lookup_byspi
   xfrm_stateonly_find
