@@ -181,6 +181,8 @@
  task_sched_runtime
 
 # required by xr-qi.ko
+ __traceiter_android_vh_fuse_request_fetch
+ __tracepoint_android_vh_fuse_request_fetch
  __traceiter_android_vh_mmap_lock_init
  __tracepoint_android_vh_mmap_lock_init
  __traceiter_android_vh_mmap_lock_free
