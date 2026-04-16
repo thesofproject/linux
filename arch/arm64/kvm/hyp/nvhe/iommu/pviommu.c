@@ -154,6 +154,11 @@ static bool pkvm_guest_iommu_alloc_domain(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *e
 	struct kvm_hyp_req *req;
 	struct pkvm_hyp_vm *vm = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
 
+	/* MBZ */
+	if (smccc_get_arg2(vcpu) || smccc_get_arg3(vcpu) || smccc_get_arg4(vcpu) ||
+	    smccc_get_arg5(vcpu) || smccc_get_arg6(vcpu))
+		goto out;
+
 	guest_domain = hyp_alloc(sizeof(*guest_domain));
 	if (!guest_domain) {
 		BUG_ON(hyp_alloc_errno() != -ENOMEMHYPALLOC);
@@ -165,15 +170,10 @@ static bool pkvm_guest_iommu_alloc_domain(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *e
 		return false;
 	}
 
-	/* MBZ */
-	if (smccc_get_arg2(vcpu) || smccc_get_arg3(vcpu) || smccc_get_arg4(vcpu) ||
-	    smccc_get_arg5(vcpu) || smccc_get_arg6(vcpu))
-		goto out_inval;
-
 	hyp_spin_lock(&pviommu_guest_domain_lock);
 	domain_id = pkvm_guest_iommu_alloc_id();
 	if (domain_id < 0)
-		goto out_inval;
+		goto out_unlock;
 
 	/*
 	 * Starting from Android17-6.18 the IOMMU requires an IOMMU to alloc the domain,
@@ -187,9 +187,10 @@ static bool pkvm_guest_iommu_alloc_domain(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *e
 	smccc_set_retval(vcpu, SMCCC_RET_SUCCESS, domain_id, 0, 0);
 	return true;
 
-out_inval:
+out_unlock:
 	hyp_spin_unlock(&pviommu_guest_domain_lock);
 	hyp_free(guest_domain);
+out:
 	smccc_set_retval(vcpu, SMCCC_RET_INVALID_PARAMETER, 0, 0, 0);
 	return true;
 }
