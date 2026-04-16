@@ -455,8 +455,8 @@ static int kvm_vfio_pviommu_attach(struct kvm_device *dev)
 
 	filep = anon_inode_getfile("kvm-pviommu", &pviommu_fops, pviommu, O_CLOEXEC);
 	if (IS_ERR(filep)) {
-		ret = PTR_ERR(filep);
-		goto out_free;
+		kfree(pviommu);
+		return PTR_ERR(filep);
 	}
 
 	fdno = get_unused_fd_flags(O_CLOEXEC);
@@ -472,13 +472,11 @@ static int kvm_vfio_pviommu_attach(struct kvm_device *dev)
 
 	pviommu->fd = fdno;
 	fd_install(fdno, filep);
-	return pviommu->fd;
+	return fdno;
 out_err:
 	put_unused_fd(fdno);
 out_fput:
 	fput(filep);
-out_free:
-	kfree(pviommu);
 	return ret;
 }
 
