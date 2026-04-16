@@ -3138,6 +3138,13 @@ static int sof_ipc4_widget_mod_init_msg_payload(struct snd_sof_dev *sdev,
 	u32 *payload;
 	u32 ext_pos;
 
+	/*
+	 * Only DP widgets currently add init-ext objects here. Avoid allocating
+	 * a max-sized payload buffer for widgets that will immediately return 0.
+	 */
+	if (swidget->comp_domain != SOF_COMP_DOMAIN_DP)
+		return 0;
+
 	payload = kzalloc(sdev->ipc->max_payload_size, GFP_KERNEL);
 	if (!payload)
 		return -ENOMEM;
