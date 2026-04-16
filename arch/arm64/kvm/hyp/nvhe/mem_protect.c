@@ -2185,7 +2185,7 @@ static int ___pkvm_module_unshare_guest(struct pkvm_hyp_vm *vm, u64 phys, u64 ip
 		return -EPERM;
 
 	WARN_ON(kvm_pgtable_stage2_unmap(&vm->pgt, ipa, size));
-	set_host_state(hyp_phys_to_page(phys), PKVM_MODULE_OWNED_PAGE);
+	__host_update_page_state(phys, size, PKVM_MODULE_OWNED_PAGE);
 
 	return 0;
 }
@@ -2199,6 +2199,9 @@ int __pkvm_host_reclaim_page_guest(u64 gfn, u64 nr_pages, struct pkvm_hyp_vm *vm
 	ret = __guest_check_transition_size(0, ipa, nr_pages, &size);
 	if (ret)
 		return ret;
+
+	if (!pkvm_hyp_vm_is_protected(vm))
+		return -EPERM;
 
 	host_lock_component();
 	guest_lock_component(vm);
@@ -2216,13 +2219,8 @@ int __pkvm_host_reclaim_page_guest(u64 gfn, u64 nr_pages, struct pkvm_hyp_vm *vm
 		break;
 	case PKVM_PAGE_SHARED_BORROWED:
 	case PKVM_PAGE_SHARED_BORROWED | PKVM_PAGE_RESTRICTED_PROT:
-		if (__host_check_page_state_range(phys, size, PKVM_PAGE_SHARED_OWNED)) {
-			ret = ___pkvm_module_unshare_guest(vm, phys, ipa, size);
-			goto unlock;
-		}
-		__host_update_page_state(phys, size, PKVM_PAGE_OWNED);
-
-		break;
+		ret = ___pkvm_module_unshare_guest(vm, phys, ipa, size);
+		goto unlock;
 	case PKVM_PAGE_SHARED_OWNED:
 		if (__host_check_page_state_range(phys, size, PKVM_PAGE_SHARED_BORROWED)) {
 			/* Presumably a page shared via FF-A, will be handled separately */
