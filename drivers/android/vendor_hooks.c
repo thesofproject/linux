@@ -336,6 +336,7 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_ftrace_format_check);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_ftrace_oops_enter);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_ftrace_oops_exit);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_fuse_request_end);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_fuse_request_fetch);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_fuse_request_send);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_futex_sleep_start);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_futex_wait_end);
