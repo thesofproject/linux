@@ -135,6 +135,12 @@ DECLARE_RESTRICTED_HOOK(android_rvh_ctl_dirty_rate,
 DECLARE_HOOK(android_vh_adjust_kvmalloc_flags,
 	TP_PROTO(unsigned int order, gfp_t *alloc_flags),
 	TP_ARGS(order, alloc_flags));
+DECLARE_RESTRICTED_HOOK(android_rvh_kmalloc_large_fallback_cma,
+	TP_PROTO(struct folio **folio, unsigned int order, gfp_t flags),
+	TP_ARGS(folio, order, flags), 1);
+DECLARE_HOOK(android_vh_free_large_kmalloc_bypass,
+	TP_PROTO(struct folio *folio, bool *bypass),
+	TP_ARGS(folio, bypass));
 DECLARE_HOOK(android_vh_alloc_pages_reclaim_bypass,
     TP_PROTO(gfp_t gfp_mask, int order, int alloc_flags,
 	int migratetype, struct page **page),
