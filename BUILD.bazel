@@ -63,16 +63,6 @@ _GKI_X86_64_MAKE_GOALS = [
     "modules",
 ]
 
-_GKI_AARCH64_BOOT_IMAGE_SIZES = {
-    "": "67108864",
-    "lz4": "53477376",
-    "gz": "47185920",
-}
-
-_GKI_X86_64_BOOT_IMAGE_SIZES = {
-    "": "67108864",
-}
-
 # Extra generated headers below $OUT_DIR for external modules.
 _GENERATED_HEADERS_FOR_MODULE = [
     "security/selinux/flask.h",
@@ -248,7 +238,6 @@ common_kernel(
         ":tests_zip_arm64",
     ],
     generated_headers_for_module = _GENERATED_HEADERS_FOR_MODULE,
-    gki_boot_img_sizes = _GKI_AARCH64_BOOT_IMAGE_SIZES,
     gki_system_dlkm_modules = ":gki_system_dlkm_modules_arm64",
     kcflags = COMMON_KCFLAGS,
     kmi_enforced = True,
@@ -278,7 +267,6 @@ common_kernel(
         ":tests_zip_arm64_16k",
     ],
     generated_headers_for_module = _GENERATED_HEADERS_FOR_MODULE,
-    gki_boot_img_sizes = _GKI_AARCH64_BOOT_IMAGE_SIZES,
     gki_system_dlkm_modules = ":gki_system_dlkm_modules_arm64",
     kcflags = COMMON_KCFLAGS,
     kmi_symbol_list = "gki/aarch64/symbols/base",
@@ -337,7 +325,6 @@ common_kernel(
         ":tests_zip_x86_64",
     ],
     generated_headers_for_module = _GENERATED_HEADERS_FOR_MODULE,
-    gki_boot_img_sizes = _GKI_X86_64_BOOT_IMAGE_SIZES,
     gki_system_dlkm_modules = ":gki_system_dlkm_modules_x86_64",
     kcflags = COMMON_KCFLAGS,
     kmi_enforced = True,
@@ -3513,27 +3500,28 @@ exports_files([
 
 ddk_headers(
     name = "xe_global_includes",
+    # Although we don't modify define_trace.h, this is necessary to resolve
+    # TRACE_INCLUDE_PATH relative to this repo, rather than that of the ddk
+    # package's "kernel_build".
+    # Otherwise, compile errors are produced since Xe tracepoint headers
+    # are not provided inside the sandbox for that "kernel_build" target.
     hdrs = [
         "include/trace/define_trace.h",
     ],
     includes = [
-        "include",
-    ],
-    linux_includes = [
         "include/trace",
     ],
 )
 
 ddk_headers(
+    # exposes uAPI headers used only between Xe and userspace
     name = "drm_xe_uapi_includes",
     hdrs = [
-        "include/uapi/drm/drm.h",
-        "include/uapi/drm/drm_mode.h",
         "include/uapi/drm/xe_drm.h",
         "include/uapi/drm/xe_drm_prelim.h",
     ],
-    linux_includes = [
-        "include/uapi",
+    includes = [
+        "include",
     ],
 )
 

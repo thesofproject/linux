@@ -332059,6 +332059,11 @@ function {
   parameter_id: 0x2936263d
 }
 function {
+  id: 0x5000668e
+  return_type_id: 0x18a16691
+  parameter_id: 0x3e10b518
+}
+function {
   id: 0x501bb554
   return_type_id: 0x92233392
   parameter_id: 0x1dce0fdd
@@ -373748,6 +373753,15 @@ elf_symbol {
   full_name: "__traceiter_android_vh_fuse_request_end"
 }
 elf_symbol {
+  id: 0x24bd444b
+  name: "__traceiter_android_vh_fuse_request_fetch"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x7775882c
+  type_id: 0x9be64bdf
+  full_name: "__traceiter_android_vh_fuse_request_fetch"
+}
+elf_symbol {
   id: 0xdd3e0da4
   name: "__traceiter_android_vh_fuse_request_send"
   is_defined: true
@@ -379652,6 +379666,15 @@ elf_symbol {
   full_name: "__tracepoint_android_vh_fuse_request_end"
 }
 elf_symbol {
+  id: 0xa4ee9479
+  name: "__tracepoint_android_vh_fuse_request_fetch"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_vh_fuse_request_fetch"
+}
+elf_symbol {
   id: 0xacb1802a
   name: "__tracepoint_android_vh_fuse_request_send"
   is_defined: true
@@ -383306,6 +383329,15 @@ elf_symbol {
   full_name: "__xa_alloc_cyclic"
 }
 elf_symbol {
+  id: 0x017f1776
+  name: "__xa_clear_mark"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x6bbec261
+  type_id: 0x1ae27633
+  full_name: "__xa_clear_mark"
+}
+elf_symbol {
   id: 0x1820daaf
   name: "__xa_cmpxchg"
   is_defined: true
@@ -386881,6 +386913,15 @@ elf_symbol {
   crc: 0x3404d1b8
   type_id: 0x9f4f3809
   full_name: "cgroup_add_legacy_cftypes"
+}
+elf_symbol {
+  id: 0xdf6f1e29
+  name: "cgroup_get_from_path"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x824be42e
+  type_id: 0x5000668e
+  full_name: "cgroup_get_from_path"
 }
 elf_symbol {
   id: 0x4ce62869
@@ -443729,6 +443770,7 @@ interface {
   symbol_id: 0xfcf37c56
   symbol_id: 0x9eec9c93
   symbol_id: 0x39120fb0
+  symbol_id: 0x24bd444b
   symbol_id: 0xdd3e0da4
   symbol_id: 0x494c2e7a
   symbol_id: 0x79670e34
@@ -444385,6 +444427,7 @@ interface {
   symbol_id: 0xaa012cfc
   symbol_id: 0x44d76aa5
   symbol_id: 0x50b14cbe
+  symbol_id: 0xa4ee9479
   symbol_id: 0xacb1802a
   symbol_id: 0xef0379f8
   symbol_id: 0x08e2cf92
@@ -444791,6 +444834,7 @@ interface {
   symbol_id: 0xcf1808d5
   symbol_id: 0x01b711f3
   symbol_id: 0xb0e141a3
+  symbol_id: 0x017f1776
   symbol_id: 0x1820daaf
   symbol_id: 0x4b52e164
   symbol_id: 0xd6e3f912
@@ -445189,6 +445233,7 @@ interface {
   symbol_id: 0xe2dc88d9
   symbol_id: 0x4d06ba53
   symbol_id: 0x3c85cae0
+  symbol_id: 0xdf6f1e29
   symbol_id: 0x4ce62869
   symbol_id: 0xd7e100b7
   symbol_id: 0x6d77f512
