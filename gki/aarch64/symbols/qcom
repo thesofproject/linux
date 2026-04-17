@@ -3203,6 +3203,7 @@
   sysfs_create_link
   sysfs_emit
   sysfs_emit_at
+  sysfs_file_change_owner
   __sysfs_match_string
   sysfs_notify
   sysfs_remove_bin_file
