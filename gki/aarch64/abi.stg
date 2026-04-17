@@ -369268,6 +369268,15 @@ elf_symbol {
   full_name: "__irq_domain_alloc_irqs"
 }
 elf_symbol {
+  id: 0x16e2bd0b
+  name: "__irq_regs"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x9df8aff8
+  type_id: 0x01222f7d
+  full_name: "__irq_regs"
+}
+elf_symbol {
   id: 0xe064ac65
   name: "__irq_resolve_mapping"
   is_defined: true
@@ -426467,6 +426476,15 @@ elf_symbol {
   full_name: "schedule_timeout_interruptible"
 }
 elf_symbol {
+  id: 0x137bb912
+  name: "schedule_timeout_killable"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x0bac81a1
+  type_id: 0x9823bcf6
+  full_name: "schedule_timeout_killable"
+}
+elf_symbol {
   id: 0xf41c5e13
   name: "schedule_timeout_uninterruptible"
   is_defined: true
@@ -443288,6 +443306,7 @@ interface {
   symbol_id: 0x1c57a05b
   symbol_id: 0xdf2d2827
   symbol_id: 0x64bb2ece
+  symbol_id: 0x16e2bd0b
   symbol_id: 0xe064ac65
   symbol_id: 0xafc169af
   symbol_id: 0xcaf40f72
@@ -449634,6 +449653,7 @@ interface {
   symbol_id: 0x34a94ed3
   symbol_id: 0x3bc1cc84
   symbol_id: 0xb05cd7bd
+  symbol_id: 0x137bb912
   symbol_id: 0xf41c5e13
   symbol_id: 0x375858cb
   symbol_id: 0xafbfe5ff
