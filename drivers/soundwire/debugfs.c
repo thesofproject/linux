@@ -9,11 +9,81 @@
 #include <linux/pm_runtime.h>
 #include <linux/slab.h>
 #include <linux/soundwire/sdw.h>
+#include <linux/soundwire/sdw_type.h>
 #include <linux/soundwire/sdw_registers.h>
 #include <linux/string_choices.h>
 #include "bus.h"
 
 static struct dentry *sdw_debugfs_root;
+
+#define SDW_PERIPH_HEADER_FMT "%-28s %-7s %-16s %-6s %-7s %-8s %-9s %-11s\n"
+#define SDW_PERIPH_ENTRY_FMT  "%-28s %-7u %#016llx %-6.4x %-7.4x %-8.2x %-9.2x %-11.1x\n"
+
+static u64 sdw_slave_addr_from_id(struct sdw_bus *bus,
+				 const struct sdw_slave_id *id)
+{
+	u64 addr = 0;
+	u8 unique_id = id->unique_id;
+
+	if (unique_id == SDW_IGNORED_UNIQUE_ID)
+		unique_id = 0;
+
+	addr |= FIELD_PREP(SDW_DISCO_LINK_ID_MASK, bus->link_id);
+	addr |= FIELD_PREP(SDW_VERSION_MASK, id->sdw_version);
+	addr |= FIELD_PREP(SDW_UNIQUE_ID_MASK, unique_id);
+	addr |= FIELD_PREP(SDW_MFG_ID_MASK, id->mfg_id);
+	addr |= FIELD_PREP(SDW_PART_ID_MASK, id->part_id);
+	addr |= FIELD_PREP(SDW_CLASS_ID_MASK, id->class_id);
+
+	return addr;
+}
+
+static void sdw_dump_bus_peripherals(struct seq_file *s_file, struct sdw_bus *bus)
+{
+	struct sdw_slave *slave;
+	u64 addr;
+
+	seq_printf(s_file, "master-%d-%d\n",
+		   bus->controller_id, bus->link_id);
+	seq_printf(s_file, SDW_PERIPH_HEADER_FMT,
+		   "name", "dev_num", "addr", "mfg_id", "part_id",
+		   "class_id", "unique_id", "sdw_version");
+
+	mutex_lock(&bus->bus_lock);
+	list_for_each_entry(slave, &bus->slaves, node) {
+		addr = sdw_slave_addr_from_id(bus, &slave->id);
+		seq_printf(s_file, SDW_PERIPH_ENTRY_FMT,
+			   dev_name(&slave->dev), slave->dev_num,
+			   addr,
+			   slave->id.mfg_id, slave->id.part_id,
+			   slave->id.class_id, slave->id.unique_id,
+			   slave->id.sdw_version);
+	}
+	mutex_unlock(&bus->bus_lock);
+
+	seq_putc(s_file, '\n');
+}
+
+static int sdw_root_peripherals_dump(struct device *dev, void *data)
+{
+	struct sdw_master_device *md;
+	struct seq_file *s_file = data;
+
+	if (dev->type != &sdw_master_type)
+		return 0;
+
+	md = dev_to_sdw_master_device(dev);
+	sdw_dump_bus_peripherals(s_file, md->bus);
+
+	return 0;
+}
+
+static int sdw_root_peripherals_show(struct seq_file *s_file, void *data)
+{
+	return bus_for_each_dev(&sdw_bus_type, NULL, s_file,
+				sdw_root_peripherals_dump);
+}
+DEFINE_SHOW_ATTRIBUTE(sdw_root_peripherals);
 
 void sdw_bus_debugfs_init(struct sdw_bus *bus)
 {
@@ -375,6 +445,8 @@ void sdw_debugfs_init(void)
 		firmware_file = kstrdup("", GFP_KERNEL);
 
 	sdw_debugfs_root = debugfs_create_dir("soundwire", NULL);
+	debugfs_create_file("peripherals", 0400, sdw_debugfs_root, NULL,
+			    &sdw_root_peripherals_fops);
 }
 
 void sdw_debugfs_exit(void)
