@@ -668,8 +668,6 @@ skip_soundwire:
 	if (!HDA_IDISP_CODEC(bus->codec_mask))
 		hda_codec_i915_display_power(sdev, false);
 
-	hda_bus_ml_put_all(bus);
-
 	return 0;
 }
 
