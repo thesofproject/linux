@@ -1381,7 +1381,6 @@ cc_library(
     ]),
     copts = [
         "-I{}/tools/include".format(package_name()),
-        "-I{}/tools/lib/bpf".format(package_name()),
     ],
     includes = [
         "tools/include/uapi",
