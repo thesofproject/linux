@@ -559,14 +559,14 @@ fn ashmem_memfd_ioctl_inner(file: &File, cmd: u32, arg: usize) -> Result<isize> 
             }
 
             let name = full_name.strip_prefix(b"memfd:").unwrap_or(&full_name);
-            let max = usize::min(name.len(), ASHMEM_NAME_LEN);
+            let len = usize::min(name.len(), ASHMEM_NAME_LEN - 1);
 
             let mut local_name = [0u8; ASHMEM_NAME_LEN];
-            local_name[..max].copy_from_slice(&name[..max]);
-            local_name[ASHMEM_NAME_LEN - 1] = 0;
+            local_name[..len].copy_from_slice(&name[..len]);
 
             let mut writer = UserSlice::new(UserPtr::from_addr(arg), size).writer();
-            writer.write_slice(&local_name)?;
+            // Include `local_name[len]` for NUL-terminator.
+            writer.write_slice(&local_name[..=len])?;
 
             Ok(0)
         }
