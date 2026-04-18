@@ -1370,6 +1370,16 @@ kernel_build(
 
 # libbpf
 cc_library(
+    name = "tools_includes",
+    hdrs = glob([
+        "tools/include/uapi/**/*.h",
+    ]),
+    includes = [
+        "tools/include/uapi",
+    ],
+)
+
+cc_library(
     name = "bpf_x86",
     srcs = glob([
         "tools/arch/x86/include/**/*.h",
@@ -1382,9 +1392,7 @@ cc_library(
     copts = [
         "-I{}/tools/include".format(package_name()),
     ],
-    includes = [
-        "tools/include/uapi",
-    ],
+    implementation_deps = [":tools_includes"],
     strip_include_prefix = "tools/lib",
     visibility = ["//visibility:public"],
     deps = ["//prebuilts/kernel-build-tools:imported_libs"],
