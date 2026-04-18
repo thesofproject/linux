@@ -344177,6 +344177,14 @@ function {
   parameter_id: 0x0b59f310
 }
 function {
+  id: 0x95bc074c
+  return_type_id: 0x6720d32f
+  parameter_id: 0x23f09c34
+  parameter_id: 0x3e10b518
+  parameter_id: 0xe90b32b7
+  parameter_id: 0xb0ddb211
+}
+function {
   id: 0x95bcfc36
   return_type_id: 0x6720d32f
   parameter_id: 0x26e55184
@@ -369260,6 +369268,15 @@ elf_symbol {
   full_name: "__irq_domain_alloc_irqs"
 }
 elf_symbol {
+  id: 0x16e2bd0b
+  name: "__irq_regs"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x9df8aff8
+  type_id: 0x01222f7d
+  full_name: "__irq_regs"
+}
+elf_symbol {
   id: 0xe064ac65
   name: "__irq_resolve_mapping"
   is_defined: true
@@ -372698,6 +372715,15 @@ elf_symbol {
   crc: 0xc2baba4a
   type_id: 0x9bd6fb19
   full_name: "__traceiter_android_vh_binder_trans"
+}
+elf_symbol {
+  id: 0x5cf60b10
+  name: "__traceiter_android_vh_binder_transaction_init"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x13422092
+  type_id: 0x9ba51920
+  full_name: "__traceiter_android_vh_binder_transaction_init"
 }
 elf_symbol {
   id: 0xcc2edef9
@@ -378611,6 +378637,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_vh_binder_trans"
+}
+elf_symbol {
+  id: 0xa9d55136
+  name: "__tracepoint_android_vh_binder_transaction_init"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_vh_binder_transaction_init"
 }
 elf_symbol {
   id: 0xabc729f7
@@ -426459,6 +426494,15 @@ elf_symbol {
   full_name: "schedule_timeout_interruptible"
 }
 elf_symbol {
+  id: 0x137bb912
+  name: "schedule_timeout_killable"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x0bac81a1
+  type_id: 0x9823bcf6
+  full_name: "schedule_timeout_killable"
+}
+elf_symbol {
   id: 0xf41c5e13
   name: "schedule_timeout_uninterruptible"
   is_defined: true
@@ -432918,6 +432962,15 @@ elf_symbol {
   crc: 0x4e5bf4c2
   type_id: 0x9d318958
   full_name: "sysfs_emit_at"
+}
+elf_symbol {
+  id: 0x99cd436e
+  name: "sysfs_file_change_owner"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x55011e72
+  type_id: 0x95bc074c
+  full_name: "sysfs_file_change_owner"
 }
 elf_symbol {
   id: 0x1deea65a
@@ -443271,6 +443324,7 @@ interface {
   symbol_id: 0x1c57a05b
   symbol_id: 0xdf2d2827
   symbol_id: 0x64bb2ece
+  symbol_id: 0x16e2bd0b
   symbol_id: 0xe064ac65
   symbol_id: 0xafc169af
   symbol_id: 0xcaf40f72
@@ -443653,6 +443707,7 @@ interface {
   symbol_id: 0x6bce867e
   symbol_id: 0x4785a3dd
   symbol_id: 0xf6faffcb
+  symbol_id: 0x5cf60b10
   symbol_id: 0xcc2edef9
   symbol_id: 0x61c82fb5
   symbol_id: 0x47b414fe
@@ -444310,6 +444365,7 @@ interface {
   symbol_id: 0xdda667b0
   symbol_id: 0x306b5ff7
   symbol_id: 0xec7035fd
+  symbol_id: 0xa9d55136
   symbol_id: 0xabc729f7
   symbol_id: 0x75b174bb
   symbol_id: 0xf458bc84
@@ -449617,6 +449673,7 @@ interface {
   symbol_id: 0x34a94ed3
   symbol_id: 0x3bc1cc84
   symbol_id: 0xb05cd7bd
+  symbol_id: 0x137bb912
   symbol_id: 0xf41c5e13
   symbol_id: 0x375858cb
   symbol_id: 0xafbfe5ff
@@ -450335,6 +450392,7 @@ interface {
   symbol_id: 0xd284bafa
   symbol_id: 0x8e57aec2
   symbol_id: 0x06721103
+  symbol_id: 0x99cd436e
   symbol_id: 0x1deea65a
   symbol_id: 0x5e1b9bc5
   symbol_id: 0x51be9cf5

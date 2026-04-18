@@ -39,3 +39,13 @@ ddk_module(
     defconfig = _AUDIO_DEFCONFIG,
     kernel_build = "//private/devices/google/common:kernel_build",
 )
+
+ddk_module(
+    name = "cros_ec_dev",
+    srcs = [
+        "cros_ec_dev.c",
+    ],
+    out = "cros_ec_dev.ko",
+    defconfig = "defconfig_cros_ec_dev",
+    kernel_build = "//private/devices/google/common:kernel_build",
+)

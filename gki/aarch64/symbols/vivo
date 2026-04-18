@@ -64,6 +64,8 @@
   tcf_classify
   timer_reduce
   __traceiter_android_rvh_alloc_and_link_pwqs
+  schedule_timeout_killable
+  __irq_regs
   __traceiter_android_rvh_alloc_pages_reclaim_cycle_end
   __traceiter_android_rvh_alloc_pages_reclaim_start
   __traceiter_android_vh_mglru_aging_bypass
@@ -159,6 +161,7 @@
   __traceiter_workqueue_execute_start
   __traceiter_sys_exit
   __tracepoint_android_rvh_alloc_and_link_pwqs
+  __traceiter_task_newtask
   __tracepoint_android_rvh_alloc_pages_reclaim_cycle_end
   __tracepoint_android_rvh_alloc_pages_reclaim_start
   __tracepoint_android_vh_mglru_aging_bypass
@@ -253,6 +256,7 @@
   __tracepoint_workqueue_execute_end
   __tracepoint_workqueue_execute_start
   __tracepoint_sys_exit
+  __tracepoint_task_newtask
   ucsi_send_command
   unlock_buffer
   __wait_on_buffer

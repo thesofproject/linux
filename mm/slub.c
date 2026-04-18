@@ -188,22 +188,6 @@
  * 			the fast path and disables lockless freelists.
  */
 
-/**
- * enum slab_flags - How the slab flags bits are used.
- * @SL_locked: Is locked with slab_lock()
- * @SL_partial: On the per-node partial list
- * @SL_pfmemalloc: Was allocated from PF_MEMALLOC reserves
- *
- * The slab flags share space with the page flags but some bits have
- * different interpretations.  The high bits are used for information
- * like zone/node/section.
- */
-enum slab_flags {
-	SL_locked = PG_locked,
-	SL_partial = PG_workingset,	/* Historical reasons for this bit */
-	SL_pfmemalloc = PG_active,	/* Historical reasons for this bit */
-};
-
 /*
  * We could simply use migrate_disable()/enable() but as long as it's a
  * function call even on !PREEMPT_RT, use inline preempt_disable() there.
@@ -719,11 +703,6 @@ static inline bool slab_test_pfmemalloc(const struct slab *slab)
 static inline void slab_set_pfmemalloc(struct slab *slab)
 {
 	set_bit(SL_pfmemalloc, &slab->flags.f);
-}
-
-static inline void __slab_clear_pfmemalloc(struct slab *slab)
-{
-	__clear_bit(SL_pfmemalloc, &slab->flags.f);
 }
 
 /*
