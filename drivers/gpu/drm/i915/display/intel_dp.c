@@ -3810,7 +3810,7 @@ bool intel_dp_initial_fastset_check(struct intel_encoder *encoder,
 		fastset = false;
 	}
 
-	if (CAN_PANEL_REPLAY(intel_dp)) {
+	if (CAN_PANEL_REPLAY(intel_dp) && display->params.enable_panel_replay) {
 		drm_dbg_kms(display->drm,
 			    "[ENCODER:%d:%s] Forcing full modeset to compute panel replay state\n",
 			    encoder->base.base.id, encoder->base.name);
