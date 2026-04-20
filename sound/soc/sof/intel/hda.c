@@ -1304,6 +1304,8 @@ done_name_prefix:
 	return adr_dev;
 }
 
+#define SDW_ENUM_TIMEOUT_MS 3000
+
 static struct snd_soc_acpi_mach *hda_sdw_machine_select(struct snd_sof_dev *sdev)
 {
 	struct snd_sof_pdata *pdata = sdev->pdata;
@@ -1313,7 +1315,9 @@ static struct snd_soc_acpi_mach *hda_sdw_machine_select(struct snd_sof_dev *sdev
 	struct sdw_peripherals *peripherals;
 	struct snd_soc_acpi_mach *mach;
 	struct sof_intel_hda_dev *hdev;
+	struct sdw_slave *slave;
 	int link_index, link_num;
+	unsigned long time;
 	int amp_index = 1;
 	u32 link_mask = 0;
 	int i;
@@ -1415,14 +1419,44 @@ static struct snd_soc_acpi_mach *hda_sdw_machine_select(struct snd_sof_dev *sdev
 	if (!links)
 		return NULL;
 
+	/*
+	 * Recalculate the link_mask as a link will be empty if all peripherals on the link are
+	 * not enumerated
+	 */
+	link_mask = 0;
 	/* Generate snd_soc_acpi_link_adr struct for each peripheral reported by the ACPI table */
 	for (i = 0; i < peripherals->num_peripherals; i++) {
+		slave = peripherals->array[i];
+
+		if (!slave->bus->is_present)
+			continue;
+
+		if (sdw_show_ping_status(slave->bus, true) == 0) {
+			/* no peripherals attached on this link */
+			slave->bus->is_present = false;
+			continue;
+		}
+
+		time = wait_for_completion_timeout(&slave->bus->enumeration_complete,
+						   msecs_to_jiffies(SDW_ENUM_TIMEOUT_MS));
+		if (!time) {
+			dev_warn(slave->bus->dev, "No peripheral is present\n");
+			slave->bus->is_present = false;
+			continue;
+		}
+
+		/* Check if the SoundWire peripheral is present */
+		if (!slave->dev_num_sticky) {
+			dev_warn(&slave->dev, "SoundWire peripheral is not present\n");
+			continue;
+		}
 		/* link_index = the number of used links below the current link */
-		link_index = hweight32(link_mask & (BIT(peripherals->array[i]->bus->link_id) - 1));
-		links[link_index].adr_d = find_acpi_adr_device(sdev->dev, peripherals->array[i],
+		link_index = hweight32(link_mask & (BIT(slave->bus->link_id) - 1));
+		links[link_index].adr_d = find_acpi_adr_device(sdev->dev, slave,
 							       &links[link_index], &amp_index);
 		if (!links[link_index].adr_d)
 			return NULL;
+		link_mask |= BIT(slave->bus->link_id);
 	}
 
 	mach->drv_name = "sof_sdw";
