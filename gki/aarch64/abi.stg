@@ -353554,6 +353554,14 @@ function {
   parameter_id: 0x6d7f5ff6
 }
 function {
+  id: 0x9bb62d97
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x02cc0dbc
+  parameter_id: 0x4585663f
+  parameter_id: 0xf1a6dfed
+}
+function {
   id: 0x9bb62df9
   return_type_id: 0x6720d32f
   parameter_id: 0x18bd6530
@@ -372018,6 +372026,15 @@ elf_symbol {
   full_name: "__traceiter_android_rvh_is_cpu_allowed"
 }
 elf_symbol {
+  id: 0x98c4a18d
+  name: "__traceiter_android_rvh_kmalloc_large_fallback_cma"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xd5e87c18
+  type_id: 0x9bb62d97
+  full_name: "__traceiter_android_rvh_kmalloc_large_fallback_cma"
+}
+elf_symbol {
   id: 0xa5a0ecca
   name: "__traceiter_android_rvh_kswapd_shrink_node"
   is_defined: true
@@ -373951,6 +373968,15 @@ elf_symbol {
   crc: 0xdcd12a6a
   type_id: 0x9b3b5f44
   full_name: "__traceiter_android_vh_free_folio_bypass"
+}
+elf_symbol {
+  id: 0xfc359fb1
+  name: "__traceiter_android_vh_free_large_kmalloc_bypass"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xc0203e0d
+  type_id: 0x9b2e0ad9
+  full_name: "__traceiter_android_vh_free_large_kmalloc_bypass"
 }
 elf_symbol {
   id: 0xa51a0f0c
@@ -377994,6 +378020,15 @@ elf_symbol {
   full_name: "__tracepoint_android_rvh_is_cpu_allowed"
 }
 elf_symbol {
+  id: 0x7df572d7
+  name: "__tracepoint_android_rvh_kmalloc_large_fallback_cma"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_rvh_kmalloc_large_fallback_cma"
+}
+elf_symbol {
   id: 0x77ee65c8
   name: "__tracepoint_android_rvh_kswapd_shrink_node"
   is_defined: true
@@ -379927,6 +379962,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_vh_free_folio_bypass"
+}
+elf_symbol {
+  id: 0xdc3840ff
+  name: "__tracepoint_android_vh_free_large_kmalloc_bypass"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_vh_free_large_kmalloc_bypass"
 }
 elf_symbol {
   id: 0x4f752d52
@@ -444272,6 +444316,7 @@ interface {
   symbol_id: 0x72c43156
   symbol_id: 0x61e95c07
   symbol_id: 0x7c212080
+  symbol_id: 0x98c4a18d
   symbol_id: 0xa5a0ecca
   symbol_id: 0x0ccee092
   symbol_id: 0x3444c3ba
@@ -444487,6 +444532,7 @@ interface {
   symbol_id: 0x18234c18
   symbol_id: 0xb10c10b1
   symbol_id: 0xe78b407f
+  symbol_id: 0xfc359fb1
   symbol_id: 0xa51a0f0c
   symbol_id: 0x9e91661b
   symbol_id: 0xc189c2a7
@@ -444936,6 +444982,7 @@ interface {
   symbol_id: 0x693af5b0
   symbol_id: 0x59d74b45
   symbol_id: 0x99d57c12
+  symbol_id: 0x7df572d7
   symbol_id: 0x77ee65c8
   symbol_id: 0x30425cb0
   symbol_id: 0x8efb0ca4
@@ -445151,6 +445198,7 @@ interface {
   symbol_id: 0xe04fc49a
   symbol_id: 0xd808cc6f
   symbol_id: 0x63048a89
+  symbol_id: 0xdc3840ff
   symbol_id: 0x4f752d52
   symbol_id: 0x901d0e89
   symbol_id: 0x04a824b5
