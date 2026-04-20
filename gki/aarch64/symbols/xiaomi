@@ -148,6 +148,10 @@
 #required by perf_helper.ko
   __traceiter_android_rvh_dequeue_entity_delayed
   __tracepoint_android_rvh_dequeue_entity_delayed
+  __traceiter_android_rvh_fair_dl_server_start
+  __tracepoint_android_rvh_fair_dl_server_start
+  __traceiter_android_rvh_dl_server_stop_skip
+  __tracepoint_android_rvh_dl_server_stop_skip
 
 # required by page reclaim
   __traceiter_android_vh_filemap_fault_folio_locked
