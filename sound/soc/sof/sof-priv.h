@@ -56,6 +56,9 @@ struct snd_sof_pcm_stream;
 							 * DSPLESS_MODE is not set.
 							 * No audio functionality when enabled.
 							 */
+#define SOF_DBG_CHECK_SDW_PERIPHERAL		BIT(17) /* Check if SoundWire peripherals are
+							 * present while selecting machine driver
+							 */
 
 /* Flag definitions used for controlling the DSP dump behavior */
 #define SOF_DBG_DUMP_REGS		BIT(0)
