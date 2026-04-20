@@ -3810,11 +3810,23 @@ bool intel_dp_initial_fastset_check(struct intel_encoder *encoder,
 	 * Remove once we have readout for DSC.
 	 */
 	if (crtc_state->dsc.compression_enable) {
-		drm_dbg_kms(display->drm,
-			    "[ENCODER:%d:%s] Forcing full modeset due to DSC being enabled\n",
-			    encoder->base.base.id, encoder->base.name);
-		crtc_state->uapi.mode_changed = true;
-		fastset = false;
+		struct intel_atomic_state *state = crtc_state->uapi.state ?
+			to_intel_atomic_state(crtc_state->uapi.state) : NULL;
+		struct intel_crtc *crtc = to_intel_crtc(crtc_state->uapi.crtc);
+		const struct intel_crtc_state *old_crtc_state = state ?
+			intel_atomic_get_old_crtc_state(state, crtc) : NULL;
+
+		/*
+		 * Only force full modeset for bigjoiner cases and cases
+		 * where it's not the first firmware to kernel handoff.
+		 */
+		if (crtc_state->joiner_pipes || !old_crtc_state || !old_crtc_state->inherited) {
+			drm_dbg_kms(display->drm,
+				    "[ENCODER:%d:%s] Forcing full modeset due to DSC being enabled on joiner or non-inherited state\n",
+				    encoder->base.base.id, encoder->base.name);
+			crtc_state->uapi.mode_changed = true;
+			fastset = false;
+		}
 	}
 
 	if (CAN_PANEL_REPLAY(intel_dp) && display->params.enable_panel_replay) {

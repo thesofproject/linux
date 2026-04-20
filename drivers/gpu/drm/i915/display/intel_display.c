@@ -5460,10 +5460,12 @@ intel_pipe_config_compare(const struct intel_crtc_state *current_config,
 	PIPE_CONF_CHECK_I(dsc.config.slice_chunk_size);
 	PIPE_CONF_CHECK_I(dsc.config.second_line_bpg_offset);
 	PIPE_CONF_CHECK_I(dsc.config.nsl_bpg_offset);
+	PIPE_CONF_CHECK_I(dsc.config.second_line_offset_adj);
 
 	PIPE_CONF_CHECK_BOOL(dsc.compression_enable);
 	PIPE_CONF_CHECK_I(dsc.num_streams);
 	PIPE_CONF_CHECK_I(dsc.compressed_bpp_x16);
+	PIPE_CONF_CHECK_I(dsc.slice_count);
 
 	PIPE_CONF_CHECK_BOOL(splitter.enable);
 	PIPE_CONF_CHECK_I(splitter.link_count);

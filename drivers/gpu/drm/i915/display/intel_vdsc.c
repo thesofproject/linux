@@ -1002,6 +1002,8 @@ static void intel_dsc_get_pps_config(struct intel_crtc_state *crtc_state)
 
 	vdsc_cfg->slice_chunk_size = REG_FIELD_GET(DSC_PPS16_SLICE_CHUNK_SIZE_MASK, pps_temp);
 
+	crtc_state->dsc.slice_count = DIV_ROUND_UP(vdsc_cfg->pic_width, vdsc_cfg->slice_width);
+
 	if (DISPLAY_VER(display) >= 14) {
 		/* PPS 17 */
 		pps_temp = intel_dsc_pps_read_and_verify(crtc_state, 17);
