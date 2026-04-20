@@ -2693,6 +2693,10 @@ intel_dp_compute_link_config(struct intel_encoder *encoder,
 	struct intel_crtc *crtc = to_intel_crtc(pipe_config->uapi.crtc);
 	struct intel_connector *connector =
 		to_intel_connector(conn_state->connector);
+	struct intel_atomic_state *state = conn_state->state ?
+		to_intel_atomic_state(conn_state->state) : NULL;
+	struct intel_crtc_state *old_crtc_state = state ?
+		intel_atomic_get_old_crtc_state(state, crtc) : NULL;
 	const struct drm_display_mode *adjusted_mode =
 		&pipe_config->hw.adjusted_mode;
 	struct intel_dp *intel_dp = enc_to_intel_dp(encoder);
@@ -2717,7 +2721,10 @@ intel_dp_compute_link_config(struct intel_encoder *encoder,
 		     !intel_dp_compute_config_limits(intel_dp, conn_state, pipe_config,
 						     respect_downstream_limits,
 						     false,
-						     &limits);
+						     &limits) ||
+		     (intel_dp_supports_dsc(intel_dp, connector, pipe_config) &&
+		      old_crtc_state && old_crtc_state->inherited &&
+		      old_crtc_state->dsc.compression_enable);
 
 	if (!dsc_needed) {
 		/*
