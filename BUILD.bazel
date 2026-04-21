@@ -3552,6 +3552,7 @@ ddk_headers(
 ddk_headers(
     name = "sdw_api_header",
     hdrs = [
+        "include/linux/soundwire/sdw.h",
         "include/sound/soc_sdw_utils.h",
     ],
     linux_includes = [

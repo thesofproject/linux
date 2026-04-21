@@ -38,6 +38,9 @@ ddk_module(
     defconfig = _AUDIO_DEFCONFIG,
     kconfig = "Kconfig",
     kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        "//private/desktop-google:sdw_api_header",
+    ],
 )
 
 ddk_module(
