@@ -2632,6 +2632,7 @@ static struct task_struct *__pick_task_dl(struct rq *rq, struct rq_flags *rf)
 	struct sched_dl_entity *dl_se;
 	struct dl_rq *dl_rq = &rq->dl;
 	struct task_struct *p;
+	bool skip = false;
 
 again:
 	if (!sched_dl_runnable(rq))
@@ -2642,7 +2643,8 @@ again:
 
 	if (dl_server(dl_se)) {
 		p = dl_se->server_pick_task(dl_se, rf);
-		if (!p) {
+		trace_android_rvh_dl_server_stop_skip(dl_se, rq, p, &skip);
+		if (!p || skip) {
 			dl_server_stop(dl_se);
 			goto again;
 		}
