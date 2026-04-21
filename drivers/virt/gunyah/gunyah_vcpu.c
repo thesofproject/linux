@@ -19,6 +19,9 @@
 #include <uapi/linux/gunyah.h>
 #include <trace/hooks/gunyah.h>
 
+#define CREATE_TRACE_POINTS
+#include "trace_vcpu.h"
+
 #define MAX_VCPU_NAME 20 /* gh-vcpu:strlen(U32::MAX)+NUL */
 
 static void vcpu_release(struct kref *kref)
@@ -46,6 +49,7 @@ static enum hrtimer_restart gunyah_vcpu_wakeup_timer_fn(struct hrtimer *timer)
 	struct gunyah_vcpu *vcpu =
 		container_of(timer, struct gunyah_vcpu, wakeup_timer);
 
+	trace_gh_vcpu_timer_fired(vcpu->ghvm->vmid, vcpu->ticket.label);
 	complete(&vcpu->ready);
 	return HRTIMER_NORESTART;
 }
@@ -230,6 +234,8 @@ static int gunyah_vcpu_run(struct gunyah_vcpu *vcpu)
 	struct gunyah_hypercall_vcpu_run_resp vcpu_run_resp;
 	unsigned long resume_data[3] = { 0 };
 	enum gunyah_error gunyah_error;
+	bool timer_was_active;
+	u64 deadline_ticks;
 	ktime_t expires;
 	int ret = 0;
 	u32 vcpu_id;
@@ -334,30 +340,46 @@ static int gunyah_vcpu_run(struct gunyah_vcpu *vcpu)
 					goto out;
 				break;
 			case GUNYAH_VCPU_STATE_EXPECTS_WAKEUP_OR_TIMEOUT:
+				deadline_ticks = vcpu_run_resp.state_data[2];
 
 				/*
 				 * state_data[2]: absolute deadline in system counter ticks
 				 * Deadline already passed: skip the wait and
 				 * re-enter the hypercall immediately.
 				 */
-				if (!gunyah_arch_deadline_to_ktime(
-						vcpu_run_resp.state_data[2], &expires)) {
+				if (!gunyah_arch_deadline_to_ktime(deadline_ticks, &expires)) {
+					trace_gh_vcpu_timer_deadline_passed(
+						vcpu->ghvm->vmid, vcpu_id,
+						vcpu_run_resp.sized_state,
+						deadline_ticks);
 					if (!gunyah_vcpu_check_system(vcpu))
 						goto out;
 					break;
 				}
 
+				trace_gh_vcpu_timer_arm(
+					vcpu->ghvm->vmid, vcpu_id,
+					vcpu_run_resp.sized_state,
+					deadline_ticks,
+					ktime_to_ns(ktime_sub(expires, ktime_get())),
+					ktime_to_ns(expires));
+
 				hrtimer_start(&vcpu->wakeup_timer, expires,
 					      HRTIMER_MODE_ABS);
 				ret = wait_for_completion_interruptible(&vcpu->ready);
 				/* no-op if the timer already fired */
-				hrtimer_cancel(&vcpu->wakeup_timer);
+				timer_was_active = hrtimer_cancel(&vcpu->wakeup_timer);
 				/*
 				 * Reinitialize before the next hypercall so a VIRQ
 				 * arriving between now and re-entry is not lost
 				 * (same reasoning as EXPECTS_WAKEUP above).
 				 */
 				reinit_completion(&vcpu->ready);
+
+				trace_gh_vcpu_timer_wake(
+					vcpu->ghvm->vmid, vcpu_id,
+					vcpu_run_resp.sized_state,
+					ret, timer_was_active);
 
 				if (!ret && !gunyah_vcpu_check_system(vcpu))
 					goto out;
