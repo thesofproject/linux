@@ -131,24 +131,34 @@ static int iommu_direct_mmio_write(struct intel_iommu *iommu, u64 phys,
 
 static int handle_gcmd_direct(struct intel_iommu *iommu, u32 gcmd_bit, bool set)
 {
-	u32 gcmd = iommu->vgsts & DMAR_GSTS_EN_BITS;
+	u32 gcmd = readl(iommu->reg + DMAR_GSTS_REG) & DMAR_GSTS_EN_BITS;
 	u32 sts;
 
 	if ((gcmd_bit & DMAR_GCMD_ONESHOT) && !set)
 		return -EINVAL;
 
-	if (set)
+	if (set) {
+		if (gcmd & gcmd_bit) {
+			iommu->vgsts |= gcmd_bit;
+			return 0;
+		}
 		gcmd |= gcmd_bit;
-	else
+	} else {
+		if (!(gcmd & gcmd_bit)) {
+			iommu->vgsts &= ~gcmd_bit;
+			return 0;
+		}
 		gcmd &= ~gcmd_bit;
+	}
 
 	writel(gcmd, iommu->reg + DMAR_GCMD_REG);
-	if (set)
+	if (set) {
 		IOMMU_WAIT_OP(iommu, DMAR_GSTS_REG, readl, (sts & gcmd_bit), sts);
-	else
+		iommu->vgsts |= gcmd_bit;
+	} else {
 		IOMMU_WAIT_OP(iommu, DMAR_GSTS_REG, readl, !(sts & gcmd_bit), sts);
-
-	iommu->vgsts = (iommu->vgsts & DMAR_GCMD_ONESHOT) | gcmd;
+		iommu->vgsts &= ~gcmd_bit;
+	}
 
 	return 0;
 }
@@ -304,7 +314,7 @@ static int handle_gcmd_te(struct intel_iommu *iommu, bool enable)
 		 * compromise pKVM security guarantees.
 		 */
 		iommu->vgsts &= ~DMA_GSTS_TES;
-		pkvm_dbg("iommu%d: Translation marked as disabled!", iommu->seq_id);
+		pkvm_dbg("iommu%d: Translation marked as disabled!\n", iommu->seq_id);
 	}
 
 	return 0;
