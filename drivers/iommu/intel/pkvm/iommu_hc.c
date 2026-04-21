@@ -472,6 +472,7 @@ int pkvm_iommu_alloc_domain(struct alloc_domain_data *data)
 	if (IS_ERR(domain)) {
 		pkvm_err("%s: domain alloc failed for device[%x] (err=%ld)\n",
 			 __func__, data->bdf, PTR_ERR(domain));
+		pkvm_hyp_donate_host(__pkvm_pa(pgd), VTD_PAGE_SIZE, false);
 		return PTR_ERR(domain);
 	}
 
