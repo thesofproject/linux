@@ -199,6 +199,7 @@
  __tracepoint_android_vh_sync_rcu_wait_end
  __traceiter_android_vh_sync_rcu_wait_start
  __tracepoint_android_vh_sync_rcu_wait_start
+ cpumask_any_distribute
 
 # required by xring_thermal.ko
  __traceiter_android_vh_enable_thermal_genl_check
