@@ -1,0 +1,123 @@
+load("//build/kernel/kleaf:kernel.bzl", "ddk_headers", "ddk_module")
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+ddk_headers(
+    name = "bluetooth_headers",
+    hdrs = [
+        "btbcm.h",
+        "btintel.h",
+        "btmtk.h",
+        "btrtl.h",
+    ],
+    includes = ["."],
+)
+
+ddk_module(
+    name = "btintel",
+    srcs = [
+        "btintel.c",
+        "btintel.h",
+    ],
+    out = "btintel.ko",
+    defconfig = "defconfig",
+    kconfig = "Kconfig",
+    kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [":bluetooth_headers"],
+)
+
+ddk_module(
+    name = "btintel_pcie",
+    srcs = [
+        "btintel_pcie.c",
+        "btintel_pcie.h",
+    ],
+    out = "btintel_pcie.ko",
+    defconfig = "defconfig",
+    kconfig = "Kconfig",
+    kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        ":bluetooth_headers",
+        ":btintel",
+    ],
+)
+
+ddk_module(
+    name = "btbcm",
+    srcs = ["btbcm.c"],
+    out = "btbcm.ko",
+    defconfig = "defconfig",
+    kconfig = "Kconfig",
+    kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [":bluetooth_headers"],
+)
+
+ddk_module(
+    name = "btrtl",
+    srcs = ["btrtl.c"],
+    out = "btrtl.ko",
+    defconfig = "defconfig",
+    kconfig = "Kconfig",
+    kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [":bluetooth_headers"],
+)
+
+ddk_module(
+    name = "btmtk",
+    srcs = ["btmtk.c"],
+    out = "btmtk.ko",
+    defconfig = "defconfig",
+    kconfig = "Kconfig",
+    kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [":bluetooth_headers"],
+)
+
+ddk_module(
+    name = "btusb",
+    srcs = ["btusb.c"],
+    out = "btusb.ko",
+    defconfig = "defconfig",
+    kconfig = "Kconfig",
+    kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [
+        ":bluetooth_headers",
+        ":btbcm",
+        ":btintel",
+        ":btmtk",
+        ":btrtl",
+    ],
+)
+
+ddk_module(
+    name = "hci_vhci",
+    srcs = ["hci_vhci.c"],
+    out = "hci_vhci.ko",
+    defconfig = "defconfig",
+    kconfig = "Kconfig",
+    kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [":bluetooth_headers"],
+)
+
+ddk_module(
+    name = "bcm203x",
+    srcs = ["bcm203x.c"],
+    out = "bcm203x.ko",
+    defconfig = "defconfig",
+    kconfig = "Kconfig",
+    kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [":bluetooth_headers"],
+)
+
+ddk_module(
+    name = "bfusb",
+    srcs = ["bfusb.c"],
+    out = "bfusb.ko",
+    defconfig = "defconfig",
+    kconfig = "Kconfig",
+    kernel_build = "//private/devices/google/common:kernel_build",
+    deps = [":bluetooth_headers"],
+)
