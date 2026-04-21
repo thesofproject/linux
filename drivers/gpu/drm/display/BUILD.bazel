@@ -1,0 +1,92 @@
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_module",
+)
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+ddk_module(
+    name = "drm_display_helper",
+    srcs = [
+        "drm_display_helper_mod.c",
+        "drm_dp_helper_internal.h",
+    ],
+    out = "drm_display_helper.ko",
+    # hdrs are transitively exported to dependents
+    hdrs = [
+        "//private/desktop-google:drm_display_helper_headers",
+    ],
+    conditional_srcs = {
+        "CONFIG_DRM_BRIDGE_CONNECTOR": {
+            True: [
+                "drm_bridge_connector.c",
+            ],
+        },
+        "CONFIG_DRM_DISPLAY_DP_HELPER": {
+            True: [
+                "drm_dp_dual_mode_helper.c",
+                "drm_dp_helper.c",
+                "drm_dp_mst_topology.c",
+                "drm_dp_mst_topology_internal.h",
+            ],
+        },
+        "CONFIG_DRM_DISPLAY_DP_TUNNEL": {
+            True: [
+                "drm_dp_tunnel.c",
+            ],
+        },
+        "CONFIG_DRM_DISPLAY_DSC_HELPER": {
+            True: [
+                "drm_dsc_helper.c",
+            ],
+        },
+        "CONFIG_DRM_DISPLAY_HDCP_HELPER": {
+            True: [
+                "drm_hdcp_helper.c",
+            ],
+        },
+        "CONFIG_DRM_DISPLAY_HDMI_AUDIO_HELPER": {
+            True: [
+                "drm_hdmi_audio_helper.c",
+            ],
+        },
+        "CONFIG_DRM_DISPLAY_HDMI_CEC_HELPER": {
+            True: [
+                "drm_hdmi_cec_helper.c",
+            ],
+        },
+        "CONFIG_DRM_DISPLAY_HDMI_CEC_NOTIFIER_HELPER": {
+            True: [
+                "drm_hdmi_cec_notifier_helper.c",
+            ],
+        },
+        "CONFIG_DRM_DISPLAY_HDMI_HELPER": {
+            True: [
+                "drm_hdmi_helper.c",
+                "drm_scdc_helper.c",
+            ],
+        },
+        "CONFIG_DRM_DISPLAY_HDMI_STATE_HELPER": {
+            True: [
+                "drm_hdmi_state_helper.c",
+            ],
+        },
+        "CONFIG_DRM_DISPLAY_DP_AUX_CHARDEV": {
+            True: [
+                "drm_dp_aux_dev.c",
+            ],
+        },
+        "CONFIG_DRM_DISPLAY_DP_AUX_CEC": {
+            True: [
+                "drm_dp_cec.c",
+            ],
+        },
+    },
+    defconfig = "defconfig_drm_display_helper",
+    kconfig = "Kconfig",
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
