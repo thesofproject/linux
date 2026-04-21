@@ -378,11 +378,11 @@ int pkvm_domain_map(struct dmar_domain *domain, unsigned long iov_pfn,
 	struct domain_map_data *data = &d.iommu_domain_map.in;
 	int ret;
 
-	data->pgd_gpa = virt_to_phys(domain->pgd),
-	data->iov_pfn = iov_pfn,
-	data->phys_pfn = phys_pfn,
-	data->nr_pages = nr_pages,
-	data->prot = prot,
+	data->pgd_gpa = virt_to_phys(domain->pgd);
+	data->iov_pfn = iov_pfn;
+	data->phys_pfn = phys_pfn;
+	data->nr_pages = nr_pages;
+	data->prot = prot;
 
 	ret = pkvm_hypercall_inout(iommu_domain_map, &d, &d);
 	if (ret == -ENOMEM) {
