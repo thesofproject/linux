@@ -1416,6 +1416,12 @@ int __init vmx_pkvm_init(void)
 		return 0;
 	}
 
+	if (!tsc_khz) {
+		pr_err("TSC frequency not calibrated\n");
+		ret = -ENODEV;
+		goto out;
+	}
+
 	if (!pkvm_mem_base) {
 		pr_err("required memory not reserved\n");
 		ret = -ENOMEM;
