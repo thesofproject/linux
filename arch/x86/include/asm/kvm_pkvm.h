@@ -657,6 +657,8 @@ extern phys_addr_t pkvm_sym(pvmfw_size);
 extern phys_addr_t pkvm_sym(pkvm_ramoops_console_pa);
 extern size_t pkvm_sym(pkvm_ramoops_console_size);
 
+extern unsigned long pkvm_sym(kaslr_offset_val);
+
 extern bool __read_mostly pkvm_sym(enable_apicv);
 extern bool __read_mostly pkvm_sym(enable_ipiv);
 extern bool __read_mostly pkvm_sym(enable_vpid);
