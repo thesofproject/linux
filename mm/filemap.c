@@ -1045,6 +1045,18 @@ struct folio *filemap_alloc_folio_noprof(gfp_t gfp, unsigned int order)
 	return folio_alloc_noprof(gfp, order);
 }
 EXPORT_SYMBOL(filemap_alloc_folio_noprof);
+#else
+/*
+ * trace_android_vh_filemap_alloc_folio is called in include/linux/pagemap.h
+ * by including include/trace/hooks/mm.h, which will result to build-err.
+ * So we create func: _trace_android_vh_filemap_alloc_folio.
+ */
+void _trace_android_vh_filemap_alloc_folio(gfp_t gfp, unsigned int order,
+					   bool *alloc_fail)
+{
+	trace_android_vh_filemap_alloc_folio(gfp, order, alloc_fail);
+}
+EXPORT_SYMBOL_GPL(_trace_android_vh_filemap_alloc_folio);
 #endif
 
 /*
@@ -3402,6 +3414,7 @@ static struct file *do_sync_mmap_readahead(struct vm_fault *vmf)
 	ractl._index = ra->start;
 	trace_android_vh_page_cache_readahead_start(file, vmf->pgoff,
 			ra->size, true);
+	trace_android_vh_customize_ractl(&ractl, ra, vmf->vma, false);
 	page_cache_ra_order(&ractl, ra);
 	trace_android_vh_page_cache_readahead_end(file, vmf->pgoff);
 	return fpin;

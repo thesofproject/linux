@@ -40,6 +40,9 @@ DECLARE_HOOK(android_vh_shmem_mod_shmem,
 DECLARE_HOOK(android_vh_shmem_mod_swapped,
 	TP_PROTO(struct address_space *mapping, long nr_pages),
 	TP_ARGS(mapping, nr_pages));
+DECLARE_RESTRICTED_HOOK(android_rvh_folio_prepare_wb_folio_wait,
+			TP_PROTO(struct folio *folio),
+			TP_ARGS(folio), 1);
 DECLARE_RESTRICTED_HOOK(android_rvh_mm_customize_alloc_anon_thp,
 			TP_PROTO(gfp_t *gfp_mask, unsigned long *orders,
 				 int *order, struct folio **folio),
@@ -151,6 +154,10 @@ DECLARE_HOOK(android_vh_process_madvise,
 DECLARE_RESTRICTED_HOOK(android_rvh_ctl_dirty_rate,
 	TP_PROTO(struct inode *inode),
 	TP_ARGS(inode), 1);
+DECLARE_RESTRICTED_HOOK(android_rvh_customize_force_ra,
+	TP_PROTO(struct readahead_control *ractl,
+		 unsigned long nr_to_read, bool *ra_done),
+	TP_ARGS(ractl, nr_to_read, ra_done), 1);
 DECLARE_HOOK(android_vh_adjust_kvmalloc_flags,
 	TP_PROTO(unsigned int order, gfp_t *alloc_flags),
 	TP_ARGS(order, alloc_flags));
@@ -541,10 +548,17 @@ DECLARE_HOOK(android_vh_filemap_adjust_folio_flags,
 DECLARE_HOOK(android_vh_mark_folio_accessed,
 	TP_PROTO(struct folio *folio),
 	TP_ARGS(folio));
+DECLARE_HOOK(android_vh_filemap_alloc_folio,
+	TP_PROTO(gfp_t gfp, unsigned int order, bool *alloc_fail),
+	TP_ARGS(gfp, order, alloc_fail));
 DECLARE_HOOK(android_vh_filemap_map_pages,
 	TP_PROTO(struct file *file, pgoff_t orig_start_pgoff, pgoff_t first_pgoff,
 		pgoff_t last_pgoff, vm_fault_t ret),
 	TP_ARGS(file, orig_start_pgoff, first_pgoff, last_pgoff, ret));
+DECLARE_HOOK(android_vh_customize_ractl,
+	TP_PROTO(struct readahead_control *ractl, struct file_ra_state *ra,
+		 struct vm_area_struct *vma, bool is_async),
+	TP_ARGS(ractl, ra, vma, is_async));
 DECLARE_HOOK(android_vh_zs_shrinker_adjust,
 	TP_PROTO(unsigned long *pages_to_free),
 	TP_ARGS(pages_to_free));
