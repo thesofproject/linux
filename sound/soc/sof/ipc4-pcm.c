@@ -434,12 +434,16 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 	spcm_dbg(spcm, substream->stream, "cmd: %d, state: %d\n", cmd, state);
 
 	pipeline_list = &spcm->stream[substream->stream].pipeline_list;
+	guard(mutex)(&ipc4_data->pipeline_state_mutex);
 
 	/* nothing to trigger if the list is empty */
 	if (!pipeline_list->pipelines || !pipeline_list->count)
 		return 0;
 
 	spipe = pipeline_list->pipelines[0];
+	if (!spipe || !spipe->pipe_widget || !spipe->pipe_widget->private)
+		return 0;
+
 	pipe_widget = spipe->pipe_widget;
 	pipeline = pipe_widget->private;
 
@@ -487,8 +491,6 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 		return -ENOMEM;
 	}
 
-	guard(mutex)(&ipc4_data->pipeline_state_mutex);
-
 	/*
 	 * IPC4 requires pipelines to be triggered in order starting at the sink and
 	 * walking all the way to the source. So traverse the pipeline_list in the order
@@ -501,12 +503,16 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 	if (state == SOF_IPC4_PIPE_RUNNING || state == SOF_IPC4_PIPE_RESET)
 		for (i = pipeline_list->count - 1; i >= 0; i--) {
 			spipe = pipeline_list->pipelines[i];
+			if (!spipe || !spipe->pipe_widget || !spipe->pipe_widget->private)
+				continue;
 			sof_ipc4_add_pipeline_to_trigger_list(sdev, state, spipe, trigger_list,
 							      pipe_priority);
 		}
 	else
 		for (i = 0; i < pipeline_list->count; i++) {
 			spipe = pipeline_list->pipelines[i];
+			if (!spipe || !spipe->pipe_widget || !spipe->pipe_widget->private)
+				continue;
 			sof_ipc4_add_pipeline_to_trigger_list(sdev, state, spipe, trigger_list,
 							      pipe_priority);
 		}
@@ -546,6 +552,8 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 	/* update PAUSED state for all pipelines just triggered */
 	for (i = 0; i < pipeline_list->count ; i++) {
 		spipe = pipeline_list->pipelines[i];
+		if (!spipe || !spipe->pipe_widget || !spipe->pipe_widget->private)
+			continue;
 		sof_ipc4_update_pipeline_state(sdev, SOF_IPC4_PIPE_PAUSED, cmd, spipe,
 					       trigger_list);
 	}
@@ -589,6 +597,8 @@ skip_pause_transition:
 	/* update RUNNING/RESET state for all pipelines that were just triggered */
 	for (i = 0; i < pipeline_list->count; i++) {
 		spipe = pipeline_list->pipelines[i];
+		if (!spipe || !spipe->pipe_widget || !spipe->pipe_widget->private)
+			continue;
 		sof_ipc4_update_pipeline_state(sdev, state, cmd, spipe, trigger_list);
 	}
 
@@ -903,13 +913,17 @@ static int sof_ipc4_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 static void sof_ipc4_pcm_free(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm)
 {
 	struct snd_sof_pcm_stream_pipeline_list *pipeline_list;
+	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	struct sof_ipc4_pcm_stream_priv *stream_priv;
 	int stream;
+
+	guard(mutex)(&ipc4_data->pipeline_state_mutex);
 
 	for_each_pcm_streams(stream) {
 		pipeline_list = &spcm->stream[stream].pipeline_list;
 		kfree(pipeline_list->pipelines);
 		pipeline_list->pipelines = NULL;
+		pipeline_list->count = 0;
 
 		stream_priv = spcm->stream[stream].private;
 		kfree(stream_priv->time_info);
