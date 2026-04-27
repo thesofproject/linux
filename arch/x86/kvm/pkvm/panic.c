@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <linux/kernel.h>
+#include <linux/atomic.h>
 #include <asm/io.h>
 #include <asm/apic.h>
 #include <asm/kvm_pkvm.h>
@@ -8,6 +9,93 @@
 #include "debug.h"
 #include "pkvm.h"
 #include "memory.h"
+
+/*
+ * NOTE: Both PERSISTENT_RAM_SIG and persistent_ram_buffer definition copied
+ * from fs/pstore/ram_core.c
+ */
+#define PERSISTENT_RAM_SIG (0x43474244) /* DBGC */
+
+struct persistent_ram_buffer {
+	uint32_t    sig;
+	atomic_t    start;
+	atomic_t    size;
+	uint8_t     data[];
+};
+
+static void pkvm_write_ramoops_console(const char *msg)
+{
+	struct persistent_ram_buffer *buffer;
+	size_t msg_len = strlen(msg);
+	size_t capacity;
+	u32 start, size;
+
+	/* Size check is sufficient; address validity is verified during init */
+	if (!pkvm_ramoops_console_size)
+		return;
+
+	buffer = __pkvm_va(pkvm_ramoops_console_pa);
+
+	/*
+	 * Sanity check if writing to correct area by making sure it is valid
+	 * persistent_ram_buffer structure which starts with PERSISTENT_RAM_SIG
+	 */
+	if (READ_ONCE(buffer->sig) != PERSISTENT_RAM_SIG)
+		return;
+
+	/*
+	 * The ramoops console uses the 'persistent_ram_buffer' ABI defined in
+	 * fs/pstore/ram_core.c. The buffer starts with a header:
+	 * [u32 sig] [u32 start] [u32 size] [raw data...]
+	 */
+	capacity = pkvm_ramoops_console_size - sizeof(struct persistent_ram_buffer);
+
+	/*
+	 * 'start' indicates where the host stopped logging. In the
+	 * persistent_ram_buffer ABI, this field is the "write pointer".
+	 *
+	 * By reading this value, the hypervisor knows where the host VM (which
+	 * is now frozen) left off, allowing the panic message to be appended
+	 * to the console log.
+	 */
+	start = atomic_read(&buffer->start);
+	size = atomic_read(&buffer->size);
+
+	if (start >= capacity)
+		start = 0;
+
+	/* Circular append logic */
+	if (start + msg_len <= capacity) {
+		memcpy(&buffer->data[start], msg, msg_len);
+		start += msg_len;
+	} else {
+		size_t first_part = capacity - start;
+		size_t second_part = msg_len - first_part;
+
+		memcpy(&buffer->data[start], msg, first_part);
+		if (second_part > capacity)
+			second_part = capacity;
+		memcpy(&buffer->data[0], msg + first_part, second_part);
+		start = second_part;
+	}
+
+	if (start >= capacity)
+		start = 0;
+
+	/* Update total valid data size, capping at the buffer capacity */
+	if (size < capacity) {
+		size += msg_len;
+		if (size > capacity)
+			size = capacity;
+	}
+
+	/* Sync metadata so host pstore can find the new data after reboot */
+	atomic_set(&buffer->start, start);
+	atomic_set(&buffer->size, size);
+
+	/* Ensure data is visible in physical RAM before the hardware reset */
+	clflush_cache_range(buffer, pkvm_ramoops_console_size);
+}
 
 /*
  * To not include ACPI based reboot and its complexity, try to reset the system
@@ -85,7 +173,7 @@ void __noreturn pkvm_panic(const char *fmt, ...)
 
 	pkvm_err("%s", panic_msg);
 
-	/* TODO: add ramoops logging */
+	pkvm_write_ramoops_console(panic_msg);
 
 	pkvm_emergency_reset();
 }
