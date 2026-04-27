@@ -214,14 +214,37 @@ static void handle_preemption_timer(struct kvm_vcpu *vcpu)
 	pin_controls_clearbit(to_vmx(vcpu), PIN_BASED_VMX_PREEMPTION_TIMER);
 }
 
-static void handle_xsetbv(struct kvm_vcpu *vcpu)
+static int handle_xsetbv(struct kvm_vcpu *vcpu)
 {
 	u32 eax = (u32)(vcpu->arch.regs[VCPU_REGS_RAX] & -1u);
 	u32 edx = (u32)(vcpu->arch.regs[VCPU_REGS_RDX] & -1u);
 	u32 ecx = (u32)(vcpu->arch.regs[VCPU_REGS_RCX] & -1u);
 
-	asm volatile(".byte 0x0f,0x01,0xd1"
-			: : "a" (eax), "d" (edx), "c" (ecx));
+	asm goto("1: xsetbv\n\t"
+		 _ASM_EXTABLE(1b, %l[fault])
+		 : : "a" (eax), "d" (edx), "c" (ecx) : : fault);
+
+	return X86EMUL_CONTINUE;
+
+fault:
+	/*
+	 * Although the SDM doesn't describe the priority of #UD and
+	 * interception for xsetbv, the experiment shows that #UD due to
+	 * CR4.OSXSAVE[bit 18] == 0 and the LOCK prefix has priority
+	 * over the interception.
+	 *
+	 * So the pKVM hypervisor itself won't generate #UD when
+	 * executes the xsetbv instruction, only #GP can be generated
+	 * due to invalid configurations. Always inject #GP if xsetbv
+	 * is failed.
+	 *
+	 * TODO: CPUID.01H:ECX.XSAVE[bit 26] == 0 will also result in
+	 * #UD but all modern Intel CPUs have XSAVE. If the pKVM runs
+	 * on such CPU without XSAVE, verify if this #UD also has
+	 * priority over the interception.
+	 */
+	kvm_inject_gp(vcpu, 0);
+	return X86EMUL_UNHANDLEABLE;
 }
 
 static void inject_pending_nmi(struct kvm_vcpu *vcpu)
@@ -364,8 +387,8 @@ void pkvm_host_vmexit_main(struct vcpu_vmx *vmx)
 		handle_preemption_timer(vcpu);
 		break;
 	case EXIT_REASON_XSETBV:
-		handle_xsetbv(vcpu);
-		skip_instruction = true;
+		if (handle_xsetbv(vcpu) == X86EMUL_CONTINUE)
+			skip_instruction = true;
 		break;
 	default:
 		pkvm_err_ratelimited("Unsupported vmexit reason 0x%x.\n",
