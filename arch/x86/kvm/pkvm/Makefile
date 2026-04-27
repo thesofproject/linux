@@ -14,7 +14,8 @@ cmd_deps			:= $(src)/compiling_cmds.sh
 
 pkvm-hyp-y			:= early_alloc.o pkvm.o memory.o cpu.o \
 				   idt.o entry.o kern_stub.o init.o pgtable.o \
-				   mmu.o page_alloc.o lapic.o trace.o fpu.o
+				   mmu.o page_alloc.o lapic.o trace.o fpu.o \
+				   panic.o
 pkvm-lib			:= lib
 pkvm-hyp-y			+= $(pkvm-lib)/find_bit.o $(pkvm-lib)/printf.o
 
