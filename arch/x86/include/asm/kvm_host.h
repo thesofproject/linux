@@ -213,6 +213,7 @@ enum {
 	VCPU_SREG_GS,
 	VCPU_SREG_TR,
 	VCPU_SREG_LDTR,
+	NR_VCPU_SEGMENTS,
 };
 
 enum exit_fastpath_completion {
