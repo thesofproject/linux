@@ -817,6 +817,7 @@ SYSCALL_DEFINE3(close_range, unsigned int, fd, unsigned int, max_fd,
 
 	if ((flags & CLOSE_RANGE_UNSHARE) && atomic_read(&cur_fds->count) > 1) {
 		struct fd_range range = {fd, max_fd}, *punch_hole = &range;
+		struct task_dma_buf_info *dmabuf_info;
 
 		/*
 		 * If the caller requested all fds to be made cloexec we always
@@ -836,8 +837,11 @@ SYSCALL_DEFINE3(close_range, unsigned int, fd, unsigned int, max_fd,
 		 * the accounting info from the task. Leave the cur_fds->dmabuf_info so any existing
 		 * accounting can be unaccounted properly.
 		 */
-		put_dmabuf_info(current->dmabuf_info);
+		task_lock(current);
+		dmabuf_info = current->dmabuf_info;
 		current->dmabuf_info = NULL;
+		task_unlock(current);
+		put_dmabuf_info(dmabuf_info);
 		/*
 		 * We used to share our file descriptor table, and have now
 		 * created a private one, make sure we're using it below.
