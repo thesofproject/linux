@@ -6,6 +6,7 @@
 #include <linux/extable.h>
 #include <asm/e820/api.h>
 #include <asm/pkvm_image.h>
+#include <asm/setup.h>
 #include "pkvm_constants.h"
 #include "vmx.h"
 #include "pkvm_iommu.h"
@@ -92,6 +93,7 @@ static __init void pkvm_setup_syms(void)
 	 */
 	pkvm_sym(page_offset_base) = page_offset_base;
 	pkvm_sym(phys_base) = phys_base;
+	pkvm_sym(kaslr_offset_val) = kaslr_offset();
 
 	/*
 	 * For the pKVM hypervisor to leverage the boot_cpu_has macro to check

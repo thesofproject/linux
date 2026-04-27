@@ -38,6 +38,8 @@ DEFINE_PER_CPU(bool, host_vcpu_fixup);
 phys_addr_t pkvm_ramoops_console_pa;
 size_t pkvm_ramoops_console_size;
 
+unsigned long kaslr_offset_val;
+
 /*
  * similarly pmu.c is not compiled. define kvm_mmu_cap here for the use
  * in cpuid.c
