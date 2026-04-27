@@ -1246,22 +1246,29 @@ static int pkvm_hwapic_isr_update(struct kvm_vcpu *vcpu, int max_isr)
 	 * The value -1 represents no interrupt, thus always allow the host to
 	 * update the ISR in this case. For the other values, should do proper
 	 * checks.
-	 *
-	 * For a protected APIC, the ISR state is protected so don't allow the
-	 * host to update it. But the host will recognize the protected apic
-	 * after the vCPU starts running. Before that the host may still use
-	 * this PV interface with value -1 for the protected apic to indicate no
-	 * interrupts when reset the vCPU. So don't allow for any other max_isr
-	 * values for the protected apic.
-	 *
-	 * For pVMs which don't have protected apic, also needs to validate the
-	 * max_isr value to make sure the host cannot inject an exception vector
-	 * for the same security reason with the PV interface __pkvm__inject_irq.
-	 * See comments in the function pkvm_inject_irq.
 	 */
-	if ((max_isr != -1) && (vcpu->arch.apic->guest_apic_protected ||
-				(pkvm_is_protected_vcpu(vcpu) && max_isr < 32)))
-		return -EPERM;
+	if (max_isr != -1) {
+		/* A valid max_isr should be in [0-255]. */
+		if (max_isr & ~0xff)
+			return -EINVAL;
+
+		/*
+		 * For a protected APIC, the ISR state is protected so don't allow the
+		 * host to update it. But the host will recognize the protected apic
+		 * after the vCPU starts running. Before that the host may still use
+		 * this PV interface with value -1 for the protected apic to indicate no
+		 * interrupts when reset the vCPU. So don't allow for any other max_isr
+		 * values for the protected apic.
+		 *
+		 * For pVMs which don't have protected apic, also needs to validate the
+		 * max_isr value to make sure the host cannot inject an exception vector
+		 * for the same security reason with the PV interface __pkvm__inject_irq.
+		 * See comments in the function pkvm_inject_irq.
+		 */
+		if (vcpu->arch.apic->guest_apic_protected ||
+		    (pkvm_is_protected_vcpu(vcpu) && max_isr < 32))
+			return -EPERM;
+	}
 
 	kvm_x86_call(hwapic_isr_update)(vcpu, max_isr);
 
