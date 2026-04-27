@@ -2129,7 +2129,7 @@ void pkvm_wait_vcpu_kicked_out(struct kvm_vcpu *vcpu)
 			 * CPU needs to wake from a deeper low-power state) but
 			 * should not take as long as a second.
 			 */
-			BUG_ON(tsc_khz && (((rdtsc() - start) / tsc_khz) > 1000));
+			BUG_ON(((rdtsc() - start) / tsc_khz) > 1000);
 			relax_iters = 0;
 		}
 	} while (READ_ONCE(vcpu->mode) == EXITING_GUEST_MODE);
