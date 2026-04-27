@@ -2243,10 +2243,11 @@ struct pkvm_vcpu *pkvm_get_vcpu(int vm_handle, int vcpu_handle)
 void pkvm_put_vcpu(struct pkvm_vcpu *pkvm_vcpu)
 {
 	int vcpu_handle = pkvm_vcpu->vcpu.arch.pkvm.handle;
+	struct pkvm_vm *pkvm_vm = pkvm_vcpu->pkvm_vm;
 
-	WARN_ON(atomic_dec_if_positive(&pkvm_vcpu->pkvm_vm->vcpu_refs[vcpu_handle]) <= 0);
+	WARN_ON(atomic_dec_if_positive(&pkvm_vm->vcpu_refs[vcpu_handle]) <= 0);
 
-	pkvm_put_vm(pkvm_vcpu->pkvm_vm);
+	pkvm_put_vm(pkvm_vm);
 }
 
 unsigned long pkvm_pcpu_tss(int cpu)
