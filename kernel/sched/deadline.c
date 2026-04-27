@@ -2756,7 +2756,7 @@ static int find_later_rq(struct task_struct *sched_ctx, struct task_struct *exec
 	if (unlikely(!later_mask))
 		return -1;
 
-	if (exec_ctx && exec_ctx->nr_cpus_allowed == 1)
+	if (!exec_ctx || exec_ctx->nr_cpus_allowed == 1)
 		return -1;
 
 	/*
