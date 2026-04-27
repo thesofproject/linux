@@ -534,10 +534,8 @@ fn ashmem_memfd_ioctl_inner(file: &File, cmd: u32, arg: usize) -> Result<isize> 
     use kernel::bindings::{F_ADD_SEALS, F_GET_SEALS, F_SEAL_FUTURE_WRITE, F_SEAL_WRITE};
     const WRITE_SEALS_MASK: usize = (F_SEAL_WRITE | F_SEAL_FUTURE_WRITE) as usize;
 
-    /// # Safety
-    /// The file must be a memfd file.
-    unsafe fn get_seals(file: &File) -> Result<usize> {
-        // SAFETY: This is a memfd file.
+    fn get_seals(file: &File) -> Result<usize> {
+        // SAFETY: This is a valid file.
         let seals: isize = unsafe { bindings::memfd_fcntl(file.as_ptr(), F_GET_SEALS, 0) };
         if seals < 0 {
             return Err(Error::from_errno(seals as i32));
@@ -573,8 +571,7 @@ fn ashmem_memfd_ioctl_inner(file: &File, cmd: u32, arg: usize) -> Result<isize> 
             Ok(size as isize)
         }
         bindings::ASHMEM_SET_PROT_MASK => {
-            // SAFETY: This is a memfd file.
-            let seals = unsafe { get_seals(file) }?;
+            let seals = get_seals(file)?;
             let mut prot = arg;
 
             // The memfd compat layer does not support unsetting these.
@@ -589,7 +586,7 @@ fn ashmem_memfd_ioctl_inner(file: &File, cmd: u32, arg: usize) -> Result<isize> 
             }
 
             if is_writable && !should_be_writable {
-                // SAFETY: This is a memfd file.
+                // SAFETY: This is a valid file.
                 let ret = unsafe {
                     bindings::memfd_fcntl(file.as_ptr(), F_ADD_SEALS, F_SEAL_FUTURE_WRITE)
                 };
@@ -600,8 +597,7 @@ fn ashmem_memfd_ioctl_inner(file: &File, cmd: u32, arg: usize) -> Result<isize> 
             Ok(0)
         }
         bindings::ASHMEM_GET_PROT_MASK => {
-            // SAFETY: This is a memfd file.
-            let seals = unsafe { get_seals(file) }?;
+            let seals = get_seals(file)?;
 
             let mut prot = PROT_READ | PROT_EXEC;
             if seals & WRITE_SEALS_MASK == 0 {
