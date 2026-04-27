@@ -80,6 +80,13 @@ fn shrinker_should_stop() -> bool {
     NUM_PIN_IOCTLS_WAITING.load(Ordering::Relaxed) > 0
 }
 
+#[cfg(CONFIG_COMPAT)]
+fn compat_writer(compat_user_ptr: u32, size: usize) -> UserSliceWriter {
+    // SAFETY: Caller guarantees that this is a valid pointer.
+    let user_ptr = unsafe { bindings::compat_ptr(compat_user_ptr) };
+    UserSlice::new(UserPtr::from_addr(user_ptr as usize), size).writer()
+}
+
 module! {
     type: AshmemModule,
     name: "ashmem_rust",
@@ -284,6 +291,9 @@ impl MiscDevice for Ashmem {
         let cmd = match compat_cmd {
             bindings::COMPAT_ASHMEM_SET_SIZE => bindings::ASHMEM_SET_SIZE,
             bindings::COMPAT_ASHMEM_SET_PROT_MASK => bindings::ASHMEM_SET_PROT_MASK,
+            bindings::COMPAT_ASHMEM_GET_FILE_ID => {
+                return me.compat_get_file_id(compat_writer(arg as u32, _IOC_SIZE(compat_cmd)))
+            }
             _ => compat_cmd,
         };
         Self::ioctl(me, file, cmd, arg)
@@ -381,15 +391,24 @@ impl Ashmem {
         Ok(self.inner.lock().prot_mask as isize)
     }
 
-    fn get_file_id(&self, mut writer: UserSliceWriter) -> Result<isize> {
-        let ino = {
-            let asma = self.inner.lock();
-            let Some(file) = asma.file.as_ref() else {
-                return Err(EINVAL);
-            };
-            file.inode_ino()
+    fn __get_file_id(&self) -> Result<usize> {
+        let asma = self.inner.lock();
+        let Some(file) = asma.file.as_ref() else {
+            return Err(EINVAL);
         };
+        Ok(file.inode_ino())
+    }
+
+    fn get_file_id(&self, mut writer: UserSliceWriter) -> Result<isize> {
+        let ino = self.__get_file_id()?;
         writer.write(&ino)?;
+        Ok(0)
+    }
+
+    #[cfg(CONFIG_COMPAT)]
+    fn compat_get_file_id(&self, mut writer: UserSliceWriter) -> Result<isize> {
+        let ino = self.__get_file_id()?;
+        writer.write(&(ino as u32))?;
         Ok(0)
     }
 
@@ -520,17 +539,27 @@ impl AshmemInner {
 
 #[no_mangle]
 unsafe extern "C" fn ashmem_memfd_ioctl(file: *mut bindings::file, cmd: u32, arg: usize) -> isize {
-    #[cfg(CONFIG_COMPAT)]
-    let cmd = match cmd {
-        bindings::COMPAT_ASHMEM_SET_SIZE => bindings::ASHMEM_SET_SIZE,
-        bindings::COMPAT_ASHMEM_SET_PROT_MASK => bindings::ASHMEM_SET_PROT_MASK,
-        cmd => cmd,
-    };
-
     // SAFETY:
     // * The file is valid for the duration of this call.
     // * There is no active fdget_pos region on the file on this thread.
     let file = unsafe { File::from_raw_file(file) };
+
+    #[cfg(CONFIG_COMPAT)]
+    let cmd = match cmd {
+        bindings::COMPAT_ASHMEM_SET_SIZE => bindings::ASHMEM_SET_SIZE,
+        bindings::COMPAT_ASHMEM_SET_PROT_MASK => bindings::ASHMEM_SET_PROT_MASK,
+        bindings::COMPAT_ASHMEM_GET_FILE_ID => {
+            // SAFETY: Accessing the ino is always okay.
+            let ino = unsafe { (*(*file.as_ptr()).f_inode).i_ino as usize };
+
+            let mut writer = compat_writer(arg as u32, _IOC_SIZE(cmd));
+            match writer.write(&(ino as u32)) {
+                Ok(_) => return 0,
+                Err(err) => return err.to_errno() as isize,
+            };
+        }
+        cmd => cmd,
+    };
 
     match ashmem_memfd_ioctl_inner(file, cmd, arg) {
         Ok(ret) => ret,
@@ -642,7 +671,7 @@ fn ashmem_memfd_ioctl_inner(file: &File, cmd: u32, arg: usize) -> Result<isize> 
         // memfd is used, so we should never end up here.
         bindings::ASHMEM_SET_NAME => Err(EINVAL),
         bindings::ASHMEM_SET_SIZE => Err(EINVAL),
-        _ => Err(EINVAL),
+        _ => Err(ENOTTY),
     }
 }
 
