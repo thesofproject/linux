@@ -295,7 +295,9 @@ int pkvm_init(struct pkvm_mem_info infos[], int nr_infos)
 	if (ret)
 		return ret;
 
-	pkvm_init_percpu_fpu();
+	ret = pkvm_init_percpu_fpu();
+	if (ret)
+		return ret;
 
 	pkvm_vcpu_perf_init(this_cpu_read(host_vcpu));
 
