@@ -658,7 +658,7 @@ unsafe extern "C" fn is_ashmem_file(file: *mut bindings::file) -> bool {
 /// The caller must ensure that `file` references a valid file for the duration of 'a.
 unsafe fn get_ashmem_area<'a>(file: *mut bindings::file) -> Result<&'a Ashmem, Error> {
     // SAFETY: Caller ensures that file is valid, so this should be safe.
-    if unsafe { is_ashmem_file(file) } {
+    if unsafe { !is_ashmem_file(file) } {
         return Err(EINVAL);
     }
 
