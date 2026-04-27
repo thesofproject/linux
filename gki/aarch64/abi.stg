@@ -363942,6 +363942,11 @@ function {
   parameter_id: 0x249959de
 }
 function {
+  id: 0xc23d0fef
+  return_type_id: 0x4585663f
+  parameter_id: 0x3399c453
+}
+function {
   id: 0xc2505de9
   return_type_id: 0x4585663f
   parameter_id: 0x322c8c4b
@@ -415866,6 +415871,15 @@ elf_symbol {
   full_name: "netif_device_detach"
 }
 elf_symbol {
+  id: 0x9968d472
+  name: "netif_get_flags"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x5208f6ff
+  type_id: 0xc23d0fef
+  full_name: "netif_get_flags"
+}
+elf_symbol {
   id: 0x659c1a4c
   name: "netif_inherit_tso_max"
   is_defined: true
@@ -449179,6 +449193,7 @@ interface {
   symbol_id: 0x3a4c076b
   symbol_id: 0x3ce8e22e
   symbol_id: 0xa03599a6
+  symbol_id: 0x9968d472
   symbol_id: 0x659c1a4c
   symbol_id: 0xeb191edf
   symbol_id: 0x5bdcd401
