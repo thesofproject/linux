@@ -661,6 +661,7 @@ struct sdw_slave_ops {
  * protocol for SoundWire mockup devices
  * @sdw_dev_lock: mutex used to protect callbacks/remove races
  * @sdca_data: structure containing all device data for SDCA helpers
+ * @scale_index: current bus clock scaling index
  */
 struct sdw_slave {
 	struct sdw_slave_id id;
@@ -686,6 +687,7 @@ struct sdw_slave {
 	bool is_mockup_device;
 	struct mutex sdw_dev_lock; /* protect callbacks/remove races */
 	struct sdca_device_data sdca_data;
+	unsigned int scale_index;
 };
 
 #define dev_to_sdw_dev(_dev) container_of(_dev, struct sdw_slave, dev)
