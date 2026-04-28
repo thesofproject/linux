@@ -186,6 +186,29 @@ static inline int sof_register_fw_gdb(struct snd_sof_dev *sdev)
 static inline void sof_unregister_fw_gdb(struct snd_sof_dev *sdev) {}
 #endif /* CONFIG_SND_SOC_SOF_DEBUG_FW_GDB */
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_SERIAL)
+static int sof_register_serial(struct snd_sof_dev *sdev)
+{
+	/* Only IPC4 firmware supports the serial client */
+	if (sdev->pdata->ipc_type != SOF_IPC_TYPE_4)
+		return 0;
+
+	return sof_client_dev_register(sdev, "serial", 0, NULL, 0);
+}
+
+static void sof_unregister_serial(struct snd_sof_dev *sdev)
+{
+	sof_client_dev_unregister(sdev, "serial", 0);
+}
+#else
+static inline int sof_register_serial(struct snd_sof_dev *sdev)
+{
+	return 0;
+}
+
+static inline void sof_unregister_serial(struct snd_sof_dev *sdev) {}
+#endif /* CONFIG_SND_SOC_SOF_SERIAL */
+
 int sof_register_clients(struct snd_sof_dev *sdev)
 {
 	int ret;
@@ -218,6 +241,12 @@ int sof_register_clients(struct snd_sof_dev *sdev)
 		goto err_fw_gdb;
 	}
 
+	ret = sof_register_serial(sdev);
+	if (ret) {
+		dev_err(sdev->dev, "Serial client registration failed\n");
+		goto err_serial;
+	}
+
 	/* Platform dependent client device registration */
 
 	if (sof_ops(sdev) && sof_ops(sdev)->register_ipc_clients)
@@ -226,6 +255,9 @@ int sof_register_clients(struct snd_sof_dev *sdev)
 	if (!ret)
 		return 0;
 
+	sof_unregister_serial(sdev);
+
+err_serial:
 	sof_unregister_ipc_kernel_injector(sdev);
 
 err_fw_gdb:
@@ -245,6 +277,7 @@ void sof_unregister_clients(struct snd_sof_dev *sdev)
 	if (sof_ops(sdev) && sof_ops(sdev)->unregister_ipc_clients)
 		sof_ops(sdev)->unregister_ipc_clients(sdev);
 
+	sof_unregister_serial(sdev);
 	sof_unregister_ipc_kernel_injector(sdev);
 	sof_unregister_ipc_msg_injector(sdev);
 	sof_unregister_ipc_flood_test(sdev);

@@ -271,6 +271,18 @@ config SND_SOC_SOF_DEBUG_FW_GDB
 	  socket, to which GDB can then connect.
 	  If unsure, select "N".
 
+config SND_SOC_SOF_SERIAL
+	tristate "SOF serial port client driver"
+	depends on SND_SOC_SOF
+	select SND_SOC_SOF_CLIENT
+	help
+	  This enables a virtual serial port (tty) client for the SOF DSP.
+	  The driver registers a ttysof0 device that exchanges shell data
+	  with IPC4 firmware through the ADSP shell debug window using the
+	  Zephyr sys_winstream format. A debugfs file is also created to
+	  expose the shared DSP memory window for inspection and testing.
+	  Only IPC4 is supported.  If unsure, select "N".
+
 config SND_SOC_SOF_DEBUG_RETAIN_DSP_CONTEXT
 	bool "SOF retain DSP context on any FW exceptions"
 	help
