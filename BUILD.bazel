@@ -54,7 +54,9 @@ package(
 _GKI_AARCH64_MAKE_GOALS = [
     "Image",
     "Image.lz4",
+    "Image.lzma",
     "Image.gz",
+    "Image.zst",
     "modules",
 ]
 
@@ -3552,6 +3554,7 @@ ddk_headers(
 ddk_headers(
     name = "sdw_api_header",
     hdrs = [
+        "include/linux/soundwire/sdw.h",
         "include/sound/soc_sdw_utils.h",
     ],
     linux_includes = [

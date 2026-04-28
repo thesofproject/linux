@@ -435,6 +435,7 @@
   dev_pm_qos_add_notifier
   dev_pm_qos_read_value
   dev_pm_qos_remove_notifier
+  dev_pm_qos_remove_request
   dev_pm_qos_update_request
   _dev_printk
   dev_printk_emit

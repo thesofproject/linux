@@ -454,6 +454,7 @@ int kvm_iommu_free_domain(pkvm_handle_t domain_id)
 	struct kvm_hyp_iommu_domain *domain;
 	struct kvm_iommu_ops *kvm_iommu_ops;
 	struct pkvm_hyp_vcpu *hyp_vcpu = __get_vcpu();
+	struct pkvm_hyp_vm *vm = NULL;
 
 	domain = handle_to_domain(domain_id);
 	if (!domain)
@@ -466,14 +467,10 @@ int kvm_iommu_free_domain(pkvm_handle_t domain_id)
 		goto out_unlock;
 	}
 
-	if (hyp_vcpu) {
-		if (domain->owner != pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu)) {
-			ret = -EPERM;
-			goto out_unlock;
-		}
-	}
+	if (hyp_vcpu)
+		vm = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
 
-	if (WARN_ON(atomic_cmpxchg_acquire(&domain->refs, 1, 0) != 1)) {
+	if (domain->owner != vm || WARN_ON(atomic_cmpxchg_acquire(&domain->refs, 1, 0) != 1)) {
 		ret = -EINVAL;
 		goto out_unlock;
 	}

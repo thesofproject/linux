@@ -135,6 +135,12 @@ DECLARE_RESTRICTED_HOOK(android_rvh_ctl_dirty_rate,
 DECLARE_HOOK(android_vh_adjust_kvmalloc_flags,
 	TP_PROTO(unsigned int order, gfp_t *alloc_flags),
 	TP_ARGS(order, alloc_flags));
+DECLARE_RESTRICTED_HOOK(android_rvh_kmalloc_large_fallback_cma,
+	TP_PROTO(struct folio **folio, unsigned int order, gfp_t flags),
+	TP_ARGS(folio, order, flags), 1);
+DECLARE_HOOK(android_vh_free_large_kmalloc_bypass,
+	TP_PROTO(struct folio *folio, bool *bypass),
+	TP_ARGS(folio, bypass));
 DECLARE_HOOK(android_vh_alloc_pages_reclaim_bypass,
     TP_PROTO(gfp_t gfp_mask, int order, int alloc_flags,
 	int migratetype, struct page **page),
@@ -551,6 +557,12 @@ DECLARE_HOOK(android_vh_do_swap_page,
 	TP_PROTO(struct folio *folio, pte_t *pte, struct vm_fault *vmf,
 		swp_entry_t entry),
 	TP_ARGS(folio, pte, vmf, entry));
+DECLARE_HOOK(android_vh_do_swap_page_folio_lock_check,
+	TP_PROTO(struct folio *folio, struct vm_fault *vmf),
+	TP_ARGS(folio, vmf));
+DECLARE_HOOK(android_vh_do_swap_page_wait,
+	TP_PROTO(struct folio *folio, struct vm_fault *vmf),
+	TP_ARGS(folio, vmf));
 DECLARE_HOOK(android_vh_do_sync_mmap_readahead,
 	TP_PROTO(struct vm_fault *vmf, bool *skip),
 	TP_ARGS(vmf, skip));
@@ -576,6 +588,9 @@ DECLARE_HOOK(android_vh_filemap_update_page,
 		struct file *file),
 	TP_ARGS(mapping, folio, file));
 DECLARE_HOOK(android_vh_folio_end_writeback,
+	TP_PROTO(struct folio *folio),
+	TP_ARGS(folio));
+DECLARE_HOOK(android_vh_folio_start_writeback,
 	TP_PROTO(struct folio *folio),
 	TP_ARGS(folio));
 DECLARE_HOOK(android_vh_calculate_totalreserve_pages,
