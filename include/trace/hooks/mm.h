@@ -557,6 +557,12 @@ DECLARE_HOOK(android_vh_do_swap_page,
 	TP_PROTO(struct folio *folio, pte_t *pte, struct vm_fault *vmf,
 		swp_entry_t entry),
 	TP_ARGS(folio, pte, vmf, entry));
+DECLARE_HOOK(android_vh_do_swap_page_folio_lock_check,
+	TP_PROTO(struct folio *folio, struct vm_fault *vmf),
+	TP_ARGS(folio, vmf));
+DECLARE_HOOK(android_vh_do_swap_page_wait,
+	TP_PROTO(struct folio *folio, struct vm_fault *vmf),
+	TP_ARGS(folio, vmf));
 DECLARE_HOOK(android_vh_do_sync_mmap_readahead,
 	TP_PROTO(struct vm_fault *vmf, bool *skip),
 	TP_ARGS(vmf, skip));
@@ -582,6 +588,9 @@ DECLARE_HOOK(android_vh_filemap_update_page,
 		struct file *file),
 	TP_ARGS(mapping, folio, file));
 DECLARE_HOOK(android_vh_folio_end_writeback,
+	TP_PROTO(struct folio *folio),
+	TP_ARGS(folio));
+DECLARE_HOOK(android_vh_folio_start_writeback,
 	TP_PROTO(struct folio *folio),
 	TP_ARGS(folio));
 DECLARE_HOOK(android_vh_calculate_totalreserve_pages,

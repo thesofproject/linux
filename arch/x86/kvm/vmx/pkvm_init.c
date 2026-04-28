@@ -6,6 +6,7 @@
 #include <linux/extable.h>
 #include <asm/e820/api.h>
 #include <asm/pkvm_image.h>
+#include <asm/setup.h>
 #include "pkvm_constants.h"
 #include "vmx.h"
 #include "pkvm_iommu.h"
@@ -92,6 +93,7 @@ static __init void pkvm_setup_syms(void)
 	 */
 	pkvm_sym(page_offset_base) = page_offset_base;
 	pkvm_sym(phys_base) = phys_base;
+	pkvm_sym(kaslr_offset_val) = kaslr_offset();
 
 	/*
 	 * For the pKVM hypervisor to leverage the boot_cpu_has macro to check
@@ -1111,7 +1113,6 @@ static __init void init_vmentry_control(struct vcpu_vmx *vmx)
 	vm_entry_controls_set(vmx, vmentry_ctrl);
 	vmcs_write32(VM_ENTRY_INTR_INFO_FIELD, 0);
 	vmcs_write32(VM_ENTRY_MSR_LOAD_COUNT, 0);
-	vmcs_write32(VM_ENTRY_INTR_INFO_FIELD, 0);
 }
 
 static __init int pkvm_host_init_vmx(struct vcpu_vmx *vmx)
@@ -1416,6 +1417,12 @@ int __init vmx_pkvm_init(void)
 		return 0;
 	}
 
+	if (!tsc_khz) {
+		pr_err("TSC frequency not calibrated\n");
+		ret = -ENODEV;
+		goto out;
+	}
+
 	if (!pkvm_mem_base) {
 		pr_err("required memory not reserved\n");
 		ret = -ENOMEM;
@@ -1485,6 +1492,8 @@ int __init vmx_pkvm_init(void)
 		goto out;
 
 	pkvm_sym(init_ops) = pkvm_sym(pkvm_vmx_init_ops);
+
+	pkvm_ramoops_init();
 
 	ret = pkvm_host_deprivilege_cpus(pkvm);
 	if (ret)
