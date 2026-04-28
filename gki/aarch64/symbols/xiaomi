@@ -174,6 +174,8 @@
 # required by mi clean page
  __traceiter_android_vh_folio_end_writeback
  __tracepoint_android_vh_folio_end_writeback
+ __traceiter_android_vh_folio_start_writeback
+ __tracepoint_android_vh_folio_start_writeback
 
 # required by dw_wdt.ko
  __traceiter_android_rvh_fiq_dump
