@@ -1679,7 +1679,11 @@ int __pkvm_host_donate_hyp(u64 pfn, u64 nr_pages)
 
 int __pkvm_host_donate_sglist_hyp(struct pkvm_sglist_page *sglist, size_t nr_pages)
 {
+	enum kvm_pgtable_prot prot;
+	u8 max_order;
+	size_t size;
 	int p, ret;
+	u64 phys;
 
 	host_lock_component();
 	hyp_lock_component();
@@ -1689,58 +1693,40 @@ int __pkvm_host_donate_sglist_hyp(struct pkvm_sglist_page *sglist, size_t nr_pag
 					     PKVM_PAGE_OWNED));
 
 	for (p = 0; p < nr_pages; p++) {
-		u8 max_order = get_order(PMD_SIZE);
-		size_t size;
-		u64 phys;
+		max_order = get_order(PMD_SIZE);
 
 		if (sglist[p].order > max_order) {
 			ret = -EINVAL;
-			goto unlock;
+			goto err_page_state;
 		}
 		size = PAGE_SIZE << sglist[p].order;
 
 		if (!pfn_range_is_valid(sglist[p].pfn, size >> PAGE_SHIFT)) {
 			ret = -EINVAL;
-			goto unlock;
+			goto err_page_state;
 		}
 		phys = hyp_pfn_to_phys(sglist[p].pfn);
 
 		ret = __host_check_page_state_range(phys, size, PKVM_PAGE_OWNED);
 		if (ret)
-			goto unlock;
+			goto err_page_state;
 
 		ret = __hyp_check_page_state_range((u64)__hyp_va(phys), size, PKVM_NOPAGE);
 		if (ret)
-			goto unlock;
-	}
-
-	for (p = 0; p < nr_pages; p++) {
-		size_t size = PAGE_SIZE << sglist[p].order;
-		u64 phys = hyp_pfn_to_phys(sglist[p].pfn);
-		enum kvm_pgtable_prot prot;
+			goto err_page_state;
 
 		prot = pkvm_mkstate(PAGE_HYP, PKVM_PAGE_OWNED);
 		ret = pkvm_create_mappings_locked(__hyp_va(phys), __hyp_va(phys) + size, prot);
-		WARN_ON(ret && ret != -ENOMEM);
-		if (!ret) {
-			ret = __host_stage2_set_owner_locked(phys, size, PKVM_ID_HYP, 0,
-							     HOST_SET_NO_COMPLETE);
-			if (ret)
-				pkvm_remove_mappings_locked(__hyp_va(phys), __hyp_va(phys) + size);
-		}
+		if (ret == -ENOMEM)
+			goto err_page_state;
 
-		/* Rollback if either hyp stage-1 -ENOMEM or host stage-2 -ENOMEMHOSTS2 */
+		WARN_ON(ret);
+
+		ret = __host_stage2_set_owner_locked(phys, size, PKVM_ID_HYP, 0,
+						     HOST_SET_NO_COMPLETE);
 		if (ret) {
-			__host_stage2_set_owner_complete(PKVM_ID_HYP, 0);
-
-			while (p-- > 0) {
-				phys = hyp_pfn_to_phys(sglist[p].pfn);
-				size = PAGE_SIZE << sglist[p].order;
-
-				pkvm_remove_mappings_locked(__hyp_va(phys), __hyp_va(phys) + size);
-				WARN_ON(host_stage2_set_owner_locked(phys, size, PKVM_ID_HOST));
-			}
-			goto unlock;
+			pkvm_remove_mappings_locked(__hyp_va(phys), __hyp_va(phys) + size);
+			goto err_page_state;
 		}
 	}
 
@@ -1751,6 +1737,23 @@ unlock:
 	host_unlock_component();
 
 	return ret;
+err_page_state:
+	/*
+	 * Roll back if either hyp stage-1 -ENOMEM or host stage-2 -ENOMEMHOSTS2
+	 * or if the page state doesn't match the expected state.
+	 */
+	if (p == 0)
+		goto unlock;
+
+	__host_stage2_set_owner_complete(PKVM_ID_HYP, 0);
+	while (p-- > 0) {
+		phys = hyp_pfn_to_phys(sglist[p].pfn);
+		size = PAGE_SIZE << sglist[p].order;
+
+		pkvm_remove_mappings_locked(__hyp_va(phys), __hyp_va(phys) + size);
+		WARN_ON(host_stage2_set_owner_locked(phys, size, PKVM_ID_HOST));
+	}
+	goto unlock;
 }
 
 static int pkvm_hyp_donate_guest(struct pkvm_hyp_vcpu *vcpu, u64 pfn, u64 gfn)
@@ -2492,6 +2495,9 @@ int __pkvm_host_donate_sglist_guest(struct pkvm_hyp_vcpu *vcpu)
 {
 	struct pkvm_hyp_vm *vm = pkvm_hyp_vcpu_to_hyp_vm(vcpu);
 	struct kvm_hyp_pinned_page *ppage = hyp_ppages;
+	enum kvm_pgtable_prot prot;
+	u64 phys, ipa;
+	size_t size;
 	int ret;
 
 	host_lock_component();
@@ -2502,65 +2508,43 @@ int __pkvm_host_donate_sglist_guest(struct pkvm_hyp_vcpu *vcpu)
 		goto unlock;
 
 	for_each_hyp_ppage(ppage) {
-		u64 phys = hyp_pfn_to_phys(ppage->pfn);
-		u64 ipa = hyp_pfn_to_phys(ppage->gfn);
-		size_t size;
+		phys = hyp_pfn_to_phys(ppage->pfn);
+		ipa = hyp_pfn_to_phys(ppage->gfn);
 
 		if (check_shl_overflow(PAGE_SIZE, ppage->order, &size)) {
 			ret = -EINVAL;
-			goto unlock;
+			goto err_page_state;
 		}
 
 		ret = ___host_check_page_state_range(phys, size, PKVM_PAGE_OWNED,
 						     HOST_CHECK_NULL_REFCNT |
 						     HOST_CHECK_IS_MEMORY);
-		if (ret) {
-			if (ret == -EPERM)
-				ret = ___pkvm_module_share_guest_sglist(vcpu);
-			goto unlock;
-		}
+		if (ret)
+			goto err_page_state;
 
 		ret = __guest_check_page_state_range(vm, ipa, size, PKVM_NOPAGE);
 		if (ret)
-			goto unlock;
-	}
-
-	for_each_hyp_ppage(ppage) {
-		size_t size = PAGE_SIZE << ppage->order;
-		u64 phys = hyp_pfn_to_phys(ppage->pfn);
+			goto err_page_state;
 
 		ret = __host_stage2_set_owner_locked(phys, size, PKVM_ID_GUEST, 0,
 						     HOST_SET_NO_COMPLETE |
 						     HOST_SET_PSCI_MEM_PROTECT);
 		if (ret)
-			break;
+			goto err_page_state;
 	}
 	__host_stage2_set_owner_complete(PKVM_ID_GUEST, 0);
 
-	if (!ret) {
-		for_each_hyp_ppage(ppage) {
-			size_t size = PAGE_SIZE << ppage->order;
-			u64 phys = hyp_pfn_to_phys(ppage->pfn);
-			u64 ipa = hyp_pfn_to_phys(ppage->gfn);
-			enum kvm_pgtable_prot prot;
+	for_each_hyp_ppage(ppage) {
+		size = PAGE_SIZE << ppage->order;
+		phys = hyp_pfn_to_phys(ppage->pfn);
+		ipa = hyp_pfn_to_phys(ppage->gfn);
 
-			if (pkvm_ipa_range_has_pvmfw(vm, ipa, ipa + size))
-				WARN_ON(pkvm_load_pvmfw_pages(vm, ipa, phys, size));
+		if (pkvm_ipa_range_has_pvmfw(vm, ipa, ipa + size))
+			WARN_ON(pkvm_load_pvmfw_pages(vm, ipa, phys, size));
 
-			prot = pkvm_mkstate(KVM_PGTABLE_PROT_RWX, PKVM_PAGE_OWNED);
-			WARN_ON(kvm_pgtable_stage2_map(&vm->pgt, ipa, size, phys, prot,
-						       &vcpu->vcpu.arch.stage2_mc, 0));
-		}
-	} else {
-		struct kvm_hyp_pinned_page *end = ppage;
-
-		for (ppage = hyp_ppages; ppage < end; ppage++) {
-			size_t size = PAGE_SIZE << ppage->order;
-			u64 phys = hyp_pfn_to_phys(ppage->pfn);
-
-			WARN_ON(__host_stage2_set_owner_locked(phys, size, PKVM_ID_HOST, 0,
-							       HOST_SET_PSCI_MEM_PROTECT));
-		}
+		prot = pkvm_mkstate(KVM_PGTABLE_PROT_RWX, PKVM_PAGE_OWNED);
+		WARN_ON(kvm_pgtable_stage2_map(&vm->pgt, ipa, size, phys, prot,
+					       &vcpu->vcpu.arch.stage2_mc, 0));
 	}
 
 unlock:
@@ -2568,6 +2552,24 @@ unlock:
 	host_unlock_component();
 
 	return ret;
+err_page_state:
+	if (ppage == hyp_ppages) {
+		if (ret == -EPERM)
+			ret = ___pkvm_module_share_guest_sglist(vcpu);
+		goto unlock;
+	}
+
+	__host_stage2_set_owner_complete(PKVM_ID_GUEST, 0);
+	while (ppage-- != hyp_ppages) {
+		size = PAGE_SIZE << ppage->order;
+		phys = hyp_pfn_to_phys(ppage->pfn);
+		ipa = hyp_pfn_to_phys(ppage->gfn);
+		WARN_ON(__host_stage2_set_owner_locked(phys, size, PKVM_ID_HOST, 0,
+						       HOST_SET_NO_COMPLETE |
+						       HOST_SET_PSCI_MEM_PROTECT));
+	}
+	__host_stage2_set_owner_complete(PKVM_ID_HOST, 0);
+	goto unlock;
 }
 
 int __pkvm_host_share_guest(u64 pfn, u64 gfn, u64 nr_pages, struct pkvm_hyp_vcpu *vcpu,
