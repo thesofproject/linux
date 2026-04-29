@@ -2535,6 +2535,8 @@ next_folio:
 	if (!folio)
 		goto out;
 
+	f2fs_update_read_folio_count(F2FS_I_SB(inode), folio);
+
 	folio_in_bio = false;
 	index = folio->index;
 	offset = 0;
@@ -2708,6 +2710,8 @@ static int f2fs_mpage_readpages(struct inode *inode, struct fsverity_info *vi,
 			folio = readahead_folio(rac);
 			prefetchw(&folio->flags);
 		}
+
+		f2fs_update_read_folio_count(F2FS_I_SB(inode), folio);
 
 #ifdef CONFIG_F2FS_FS_COMPRESSION
 		index = folio->index;
