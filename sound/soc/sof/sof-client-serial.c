@@ -189,7 +189,7 @@ static u32 sof_serial_winstream_read(struct sof_serial_winstream *ws, u32 *seq,
 static int sof_serial_read_window(struct sof_serial_priv *priv, u32 rel_offset,
 				  void *dst, size_t bytes)
 {
-	if (priv->win_offset < 0)
+	if (priv->win_offset <= 0)
 		return -ENODEV;
 
 	sof_client_mailbox_read(priv->cdev, priv->win_offset + rel_offset, dst, bytes);
@@ -199,7 +199,7 @@ static int sof_serial_read_window(struct sof_serial_priv *priv, u32 rel_offset,
 static int sof_serial_write_window(struct sof_serial_priv *priv, u32 rel_offset,
 				   const void *src, size_t bytes)
 {
-	if (priv->win_offset < 0)
+	if (priv->win_offset <= 0)
 		return -ENODEV;
 
 	sof_client_mailbox_write(priv->cdev, priv->win_offset + rel_offset,
@@ -378,7 +378,7 @@ static ssize_t sof_serial_dfs_memwin_read(struct file *file, char __user *ubuf,
 	struct sof_serial_priv *priv = cdev->data;
 	u8 *tmp;
 
-	if (priv->win_offset < 0)
+	if (priv->win_offset <= 0)
 		return -ENODEV;
 
 	if (*ppos >= SOF_SERIAL_ADSP_DW_SLOT_SIZE)
@@ -411,7 +411,7 @@ static ssize_t sof_serial_dfs_memwin_write(struct file *file,
 	struct sof_serial_priv *priv = cdev->data;
 	u8 *tmp;
 
-	if (priv->win_offset < 0)
+	if (priv->win_offset <= 0)
 		return -ENODEV;
 
 	if (*ppos >= SOF_SERIAL_ADSP_DW_SLOT_SIZE)
@@ -469,7 +469,7 @@ static int sof_serial_probe(struct auxiliary_device *auxdev,
 
 	priv->win_offset = sof_client_ipc4_find_debug_slot_offset_by_type(cdev,
 							   SOF_SERIAL_ADSP_DW_SLOT_SHELL);
-	if (priv->win_offset < 0) {
+	if (priv->win_offset <= 0) {
 		dev_err(dev, "No ADSP shell debug slot found\n");
 		return -ENODEV;
 	}
