@@ -1403,7 +1403,6 @@ intel_dp_mode_valid(struct drm_connector *_connector,
 	struct intel_connector *connector = to_intel_connector(_connector);
 	struct intel_dp *intel_dp = intel_attached_dp(connector);
 	enum intel_output_format sink_format, output_format;
-	const struct drm_display_mode *fixed_mode;
 	int target_clock = mode->clock;
 	int max_rate, mode_rate, max_lanes, max_link_clock;
 	int max_dotclk = display->cdclk.max_dotclk_freq;
@@ -1424,13 +1423,10 @@ intel_dp_mode_valid(struct drm_connector *_connector,
 	if (mode->clock < 10000)
 		return MODE_CLOCK_LOW;
 
-	fixed_mode = intel_panel_fixed_mode(connector, mode);
-	if (intel_dp_is_edp(intel_dp) && fixed_mode) {
-		status = intel_panel_mode_valid(connector, mode);
+	if (intel_dp_is_edp(intel_dp)) {
+		status = intel_panel_mode_valid(connector, mode, &target_clock);
 		if (status != MODE_OK)
 			return status;
-
-		target_clock = fixed_mode->clock;
 	}
 
 	num_joined_pipes = intel_dp_num_joined_pipes(intel_dp, connector,
