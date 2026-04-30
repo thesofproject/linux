@@ -661,6 +661,16 @@ config CPCAP_ADC
 	  This driver can also be built as a module. If so, the module will be
 	  called cpcap-adc.
 
+config CROS_EC_PWRMON
+	tristate "ChromeOS EC Power Monitor Driver"
+	depends on MFD_CROS_EC_DEV || COMPILE_TEST
+	help
+	  Say yes here to build support for the ChromeOS EC On-Device Power
+	  Monitoring (ODPM) driver.
+
+	  To compile this driver as a module, choose M here: the module will be
+	  called cros_ec_pwrmon.
+
 config DA9150_GPADC
 	tristate "Dialog DA9150 GPADC driver support"
 	depends on MFD_DA9150
