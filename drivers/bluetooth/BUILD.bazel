@@ -47,16 +47,6 @@ ddk_module(
 )
 
 ddk_module(
-    name = "btbcm",
-    srcs = ["btbcm.c"],
-    out = "btbcm.ko",
-    defconfig = "defconfig",
-    kconfig = "Kconfig",
-    kernel_build = "//private/devices/google/common:kernel_build",
-    deps = [":bluetooth_headers"],
-)
-
-ddk_module(
     name = "btrtl",
     srcs = ["btrtl.c"],
     out = "btrtl.ko",
@@ -85,7 +75,6 @@ ddk_module(
     kernel_build = "//private/devices/google/common:kernel_build",
     deps = [
         ":bluetooth_headers",
-        ":btbcm",
         ":btintel",
         ":btmtk",
         ":btrtl",
