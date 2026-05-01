@@ -3815,15 +3815,10 @@ static netdev_features_t gso_features_check(const struct sk_buff *skb,
 	 * segmentation-offloads.rst).
 	 */
 	if (skb_shinfo(skb)->gso_type & SKB_GSO_TCPV4) {
-		const struct iphdr *iph;
-		struct iphdr _iph;
-		int nhoff = skb->encapsulation ?
-			    skb_inner_network_offset(skb) :
-			    skb_network_offset(skb);
+		struct iphdr *iph = skb->encapsulation ?
+				    inner_ip_hdr(skb) : ip_hdr(skb);
 
-		iph = skb_header_pointer(skb, nhoff, sizeof(_iph), &_iph);
-
-		if (!iph || !(iph->frag_off & htons(IP_DF)))
+		if (!(iph->frag_off & htons(IP_DF)))
 			features &= ~dev->mangleid_features;
 	}
 
