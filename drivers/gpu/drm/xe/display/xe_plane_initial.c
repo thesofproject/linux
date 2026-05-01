@@ -22,6 +22,7 @@
 #include "intel_plane.h"
 #include "intel_plane_initial.h"
 #include "xe_bo.h"
+#include "xe_ttm_stolen_mgr.h"
 #include "xe_vram_types.h"
 #include "xe_wa.h"
 
@@ -120,7 +121,38 @@ initial_plane_bo(struct xe_device *xe,
 
 		if (!stolen)
 			return NULL;
-		phys_base = base;
+
+		/* Read PTE to find physical address backing the GGTT address */
+		u64 pte = xe_ggtt_read_pte(tile0->mem.ggtt, base);
+
+		/*
+		 * Integrated platforms with Graphics >= 12.70 use stolen memory
+		 * that is accessed via PCI BAR and requires the XE_GGTT_PTE_DM bit
+		 * to be set.
+		 */
+		if (GRAPHICS_VERx100(xe) >= 1270 && !(pte & XE_GGTT_PTE_DM)) {
+			drm_err(&xe->drm,
+				"Initial plane stolen programming missing DM bit\n");
+			return NULL;
+		}
+
+		u64 phys_addr = pte & ~(page_size - 1);
+
+		u64 stolen_base = xe_ttm_stolen_gpu_offset(xe);
+
+		drm_dbg_kms(&xe->drm,
+			"Stolen Framebuffer base=%x pte=%llx phys_addr=%llx stolen_base=%llx\n",
+			 base, pte, phys_addr, stolen_base);
+
+		/* Make sure that the physical address is in the range of stolen memory */
+		if (phys_addr >= stolen_base) {
+			phys_base = phys_addr - stolen_base;
+		} else {
+			drm_err(&xe->drm, "Stolen memory outside of stolen range phys_base=%pa\n",
+				&phys_addr);
+			return NULL;
+		}
+
 		flags |= XE_BO_FLAG_STOLEN;
 
 		if (XE_GT_WA(xe_root_mmio_gt(xe), 22019338487_display))
