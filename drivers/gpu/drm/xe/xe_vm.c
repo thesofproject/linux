@@ -1434,7 +1434,7 @@ struct xe_vm *xe_vm_create(struct xe_device *xe, u32 flags, struct xe_file *xef)
 	struct xe_validation_ctx ctx;
 	struct drm_exec exec;
 	struct xe_vm *vm;
-	int err, number_tiles = 0;
+	int err;
 	struct xe_tile *tile;
 	u8 id;
 
@@ -1598,7 +1598,6 @@ struct xe_vm *xe_vm_create(struct xe_device *xe, u32 flags, struct xe_file *xef)
 				goto err_close;
 			}
 			vm->q[id] = q;
-			number_tiles++;
 		}
 	}
 
