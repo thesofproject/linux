@@ -2137,6 +2137,10 @@ static void sof_ipc4_host_config(struct snd_sof_dev *sdev, struct snd_sof_widget
 	struct sof_ipc4_pipeline *pipeline = pipe_widget->private;
 	u32 host_dma_id = platform_params->stream_tag - 1;
 
+	dev_dbg(sdev->dev, "Host copier %s, type %d, ChainDMA: %s, stream_tag: %d\n",
+		swidget->widget->name, swidget->id, str_yes_no(pipeline->use_chain_dma),
+		platform_params->stream_tag);
+
 	if (pipeline->use_chain_dma) {
 		pipeline->msg.primary &= ~SOF_IPC4_GLB_CHAIN_DMA_HOST_ID_MASK;
 		pipeline->msg.primary |= SOF_IPC4_GLB_CHAIN_DMA_HOST_ID(host_dma_id);
