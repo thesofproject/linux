@@ -1711,10 +1711,10 @@ struct task_struct {
 	struct unwind_task_info		unwind_info;
 #endif
 
+	struct task_dma_buf_info *dmabuf_info;
+
 	/* CPU-specific state of this task: */
 	struct thread_struct		thread;
-
-	struct task_dma_buf_info *dmabuf_info;
 
 	/*
 	 * New fields for task_struct should be added above here, so that
