@@ -889,6 +889,7 @@ struct task_struct {
 	int				recent_used_cpu;
 	int				wake_cpu;
 	int				on_rq;
+	int				is_blocked;
 
 	int				prio;
 	int				static_prio;
