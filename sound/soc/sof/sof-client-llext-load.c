@@ -77,8 +77,13 @@ static ssize_t sof_llext_dfs_write(struct file *file,
 	u32 lib_id, state;
 	int ret;
 
-	if (*ppos)
+	if (*ppos) {
+		dev_err_ratelimited(&cdev->auxdev.dev,
+			"llext_load: partial write rejected (offset=%lld) — "
+			"use 'dd if=<module.ri> of=/sys/kernel/debug/sof/llext_load bs=$(stat -c%%s <module.ri>) count=1'\n",
+			*ppos);
 		return -EINVAL;		/* no seek; single-shot write only */
+	}
 
 	if (!count || count > SOF_LLEXT_MAX_SIZE)
 		return count ? -EFBIG : -EINVAL;
@@ -217,6 +222,7 @@ static const struct file_operations sof_llext_load_fops = {
 	.open    = sof_llext_dfs_open,
 	.write   = sof_llext_dfs_write,
 	.release = sof_llext_dfs_release,
+	.llseek  = noop_llseek,	/* allow lseek(0) from dd/tools; write must start at pos=0 */
 	.owner   = THIS_MODULE,
 };
 
