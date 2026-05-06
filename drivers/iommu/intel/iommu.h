@@ -774,7 +774,6 @@ struct dmar_domain {
 #endif /* !__PKVM_HYP__ */
 };
 
-#ifndef __PKVM_HYP__
 /*
  * In theory, the VT-d 4.0 spec can support up to 2 ^ 16 counters.
  * But in practice, there are only 14 counters for the existing
@@ -785,6 +784,7 @@ struct dmar_domain {
  */
 #define IOMMU_PMU_IDX_MAX		64
 
+#ifndef __PKVM_HYP__
 struct iommu_pmu {
 	struct intel_iommu	*iommu;
 	u32			num_cntr;	/* Number of counters */
@@ -884,6 +884,17 @@ struct intel_iommu {
 	struct q_inval  *qi;    /* Pointer to _qi. Enables host code re-use */
 	struct iommu_flush flush;
 	struct root_entry *root_entry;
+	bool		pmu_supported;
+	u64		pmu_perfcap;
+	u32		pmu_cfg;
+	u32		pmu_overflow;
+	u32		pmu_counter;
+	u32		pmu_num_cntr;
+	u32		pmu_num_eg;
+	u32		pmu_cntr_width;
+	u32		pmu_cntr_stride;
+	u32		pmu_filter;
+	u32		pmu_cntrcap[IOMMU_PMU_IDX_MAX];
 	/*
 	 * Virtual address of page donated by host for constructing
 	 * translation structures(context table/pasid table). This
