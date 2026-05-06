@@ -209,6 +209,29 @@ static inline int sof_register_serial(struct snd_sof_dev *sdev)
 static inline void sof_unregister_serial(struct snd_sof_dev *sdev) {}
 #endif /* CONFIG_SND_SOC_SOF_SERIAL */
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT_LLEXT_LOAD)
+static int sof_register_llext_load(struct snd_sof_dev *sdev)
+{
+	/* Only IPC4 supports the llext_load shell client */
+	if (sdev->pdata->ipc_type != SOF_IPC_TYPE_4)
+		return 0;
+
+	return sof_client_dev_register(sdev, "llext-load", 0, NULL, 0);
+}
+
+static void sof_unregister_llext_load(struct snd_sof_dev *sdev)
+{
+	sof_client_dev_unregister(sdev, "llext-load", 0);
+}
+#else
+static inline int sof_register_llext_load(struct snd_sof_dev *sdev)
+{
+	return 0;
+}
+
+static inline void sof_unregister_llext_load(struct snd_sof_dev *sdev) {}
+#endif /* CONFIG_SND_SOC_SOF_CLIENT_LLEXT_LOAD */
+
 int sof_register_clients(struct snd_sof_dev *sdev)
 {
 	int ret;
@@ -247,6 +270,12 @@ int sof_register_clients(struct snd_sof_dev *sdev)
 		goto err_serial;
 	}
 
+	ret = sof_register_llext_load(sdev);
+	if (ret) {
+		dev_err(sdev->dev, "llext_load client registration failed\n");
+		goto err_llext_load;
+	}
+
 	/* Platform dependent client device registration */
 
 	if (sof_ops(sdev) && sof_ops(sdev)->register_ipc_clients)
@@ -255,6 +284,9 @@ int sof_register_clients(struct snd_sof_dev *sdev)
 	if (!ret)
 		return 0;
 
+	sof_unregister_llext_load(sdev);
+
+err_llext_load:
 	sof_unregister_serial(sdev);
 
 err_serial:
@@ -277,6 +309,7 @@ void sof_unregister_clients(struct snd_sof_dev *sdev)
 	if (sof_ops(sdev) && sof_ops(sdev)->unregister_ipc_clients)
 		sof_ops(sdev)->unregister_ipc_clients(sdev);
 
+	sof_unregister_llext_load(sdev);
 	sof_unregister_serial(sdev);
 	sof_unregister_ipc_kernel_injector(sdev);
 	sof_unregister_ipc_msg_injector(sdev);
@@ -344,24 +377,36 @@ EXPORT_SYMBOL_NS_GPL(sof_client_dev_register, "SND_SOC_SOF_CLIENT");
 
 void sof_client_dev_unregister(struct snd_sof_dev *sdev, const char *name, u32 id)
 {
-	struct sof_client_dev_entry *centry;
+	struct sof_client_dev_entry *centry = NULL;
+	struct sof_client_dev_entry *pos;
 
-	guard(mutex)(&sdev->ipc_client_mutex);
+	/*
+	 * Find the entry and remove it from the list under the mutex, but do
+	 * NOT call auxiliary_device_delete() while holding ipc_client_mutex.
+	 * The driver remove() callback (e.g. sof_serial_remove) may call
+	 * sof_client_unregister_fw_state_handler(), which also takes
+	 * ipc_client_mutex, causing a self-deadlock.
+	 */
+	scoped_guard(mutex, &sdev->ipc_client_mutex) {
+		list_for_each_entry(pos, &sdev->ipc_client_list, list) {
+			if (!strcmp(pos->client_dev.auxdev.name, name) &&
+			    pos->client_dev.auxdev.id == id) {
+				list_del(&pos->list);
+				centry = pos;
+				break;
+			}
+		}
+	}
+
+	if (!centry)
+		return;
 
 	/*
 	 * sof_client_auxdev_release() will be invoked to free up memory
 	 * allocations through put_device()
 	 */
-	list_for_each_entry(centry, &sdev->ipc_client_list, list) {
-		struct sof_client_dev *cdev = &centry->client_dev;
-
-		if (!strcmp(cdev->auxdev.name, name) && cdev->auxdev.id == id) {
-			list_del(&centry->list);
-			auxiliary_device_delete(&cdev->auxdev);
-			auxiliary_device_uninit(&cdev->auxdev);
-			break;
-		}
-	}
+	auxiliary_device_delete(&centry->client_dev.auxdev);
+	auxiliary_device_uninit(&centry->client_dev.auxdev);
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_dev_unregister, "SND_SOC_SOF_CLIENT");
 
@@ -459,6 +504,26 @@ ssize_t sof_client_ipc4_find_debug_slot_offset_by_type(struct sof_client_dev *cd
 	return sof_ipc4_find_debug_slot_offset_by_type(sof_client_dev_to_sof_dev(cdev), type);
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_ipc4_find_debug_slot_offset_by_type, "SND_SOC_SOF_CLIENT");
+
+/**
+ * sof_client_ipc4_load_library_buf - load an IPC4 library from a memory buffer
+ * @cdev:    SOF client device
+ * @lib_id:  library slot ID [1 .. max_libs_count - 1]
+ * @buf:     raw library binary (rimage format)
+ * @size:    size of the binary in bytes
+ *
+ * Wrapper around snd_sof_ipc4_load_library_from_buf() for use by SOF client
+ * driver modules (e.g. the shell llext_load debugfs client).
+ *
+ * Return: 0 on success, negative errno on error.
+ */
+int sof_client_ipc4_load_library_buf(struct sof_client_dev *cdev, u32 lib_id,
+				     const void *buf, size_t size)
+{
+	return snd_sof_ipc4_load_library_from_buf(sof_client_dev_to_sof_dev(cdev),
+						  lib_id, buf, size);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_ipc4_load_library_buf, "SND_SOC_SOF_CLIENT");
 #endif
 
 int sof_suspend_clients(struct snd_sof_dev *sdev, pm_message_t state)
@@ -685,7 +750,7 @@ int sof_client_register_fw_state_handler(struct sof_client_dev *cdev,
 	event->callback = callback;
 
 	/* add to list of SOF client devices */
-	guard(mutex)(&sdev->client_event_handler_mutex);
+	guard(mutex)(&sdev->ipc_client_mutex);
 	list_add(&event->list, &sdev->fw_state_handler_list);
 
 	return 0;

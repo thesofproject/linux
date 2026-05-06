@@ -110,6 +110,9 @@ int sof_ipc4_mtrace_update_pos(struct snd_sof_dev *sdev, int core);
 int sof_ipc4_complete_split_release(struct snd_sof_dev *sdev);
 int sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev);
 int sof_ipc4_reload_fw_libraries(struct snd_sof_dev *sdev);
+
+int snd_sof_ipc4_load_library_from_buf(struct snd_sof_dev *sdev, u32 lib_id,
+					const void *buf, size_t size);
 struct sof_ipc4_fw_module *sof_ipc4_find_module_by_uuid(struct snd_sof_dev *sdev,
 							const guid_t *uuid);
 

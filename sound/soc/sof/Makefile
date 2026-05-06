@@ -37,6 +37,7 @@ snd-sof-probes-y += sof-client-probes-ipc4.o
 endif
 snd-sof-fw-gdb-objs := sof-client-fw-gdb.o
 snd-sof-serial-y := sof-client-serial.o
+snd-sof-llext-load-y := sof-client-llext-load.o
 
 snd-sof-nocodec-y := nocodec.o
 
@@ -57,6 +58,7 @@ obj-$(CONFIG_SND_SOC_SOF_DEBUG_IPC_KERNEL_INJECTOR) += snd-sof-ipc-kernel-inject
 obj-$(CONFIG_SND_SOC_SOF_DEBUG_PROBES) += snd-sof-probes.o
 obj-$(CONFIG_SND_SOC_SOF_DEBUG_FW_GDB) += snd-sof-fw-gdb.o
 obj-$(CONFIG_SND_SOC_SOF_SERIAL) += snd-sof-serial.o
+obj-$(CONFIG_SND_SOC_SOF_CLIENT_LLEXT_LOAD) += snd-sof-llext-load.o
 
 obj-$(CONFIG_SND_SOC_SOF_INTEL_TOPLEVEL) += intel/
 obj-$(CONFIG_SND_SOC_SOF_IMX_TOPLEVEL) += imx/

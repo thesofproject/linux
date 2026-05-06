@@ -253,6 +253,95 @@ free_fw_lib:
 }
 
 /**
+ * snd_sof_ipc4_load_library_from_buf - load an IPC4 library from an in-memory buffer
+ * @sdev:    SOF device
+ * @lib_id:  target library slot [1 .. max_libs_count - 1]
+ * @buf:     raw library binary (rimage format with ext-manifest header)
+ * @size:    size of the binary in bytes
+ *
+ * Mirrors sof_ipc4_load_library() but accepts an already-loaded buffer instead
+ * of a filename.  Used by the shell llext_load debugfs client driver.
+ * The HDA DMA path is reused via ipc4_data->load_library().
+ *
+ * Return: 0 on success, negative errno on error.
+ */
+int snd_sof_ipc4_load_library_from_buf(struct snd_sof_dev *sdev, u32 lib_id,
+				       const void *buf, size_t size)
+{
+	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
+	/*
+	 * Use a devm-allocated firmware wrapper so fw_lib->sof_fw.fw remains
+	 * valid for the lifetime of the device.  A stack-allocated struct would
+	 * create a use-after-return when the xa_insert'd fw_lib is later
+	 * accessed (e.g. during library reload after S3).  The caller's @buf
+	 * must also remain valid for the device lifetime; callers that pass a
+	 * vmalloc'd buffer should not free it — devm cleanup handles it.
+	 */
+	struct firmware *fake_fw;
+	struct sof_ipc4_fw_library *fw_lib;
+	ssize_t payload_offset;
+	int i, ret;
+
+	if (!ipc4_data->load_library) {
+		dev_err(sdev->dev, "Library loading not supported on this platform\n");
+		return -EOPNOTSUPP;
+	}
+
+	if (!lib_id || lib_id >= ipc4_data->max_libs_count) {
+		dev_err(sdev->dev, "Invalid lib_id %u (max %u)\n",
+			lib_id, ipc4_data->max_libs_count - 1);
+		return -EINVAL;
+	}
+
+	fake_fw = devm_kzalloc(sdev->dev, sizeof(*fake_fw), GFP_KERNEL);
+	if (!fake_fw)
+		return -ENOMEM;
+	fake_fw->data = buf;
+	fake_fw->size = size;
+
+	fw_lib = devm_kzalloc(sdev->dev, sizeof(*fw_lib), GFP_KERNEL);
+	if (!fw_lib)
+		return -ENOMEM;
+
+	fw_lib->sof_fw.fw = fake_fw;
+	fw_lib->name = "shell-llext";
+
+	payload_offset = sof_ipc4_fw_parse_ext_man(sdev, fw_lib);
+	if (payload_offset <= 0) {
+		ret = payload_offset ? (int)payload_offset : -EINVAL;
+		goto free_fw_lib;
+	}
+
+	fw_lib->sof_fw.payload_offset = payload_offset;
+	fw_lib->id = lib_id;
+
+	for (i = 0; i < fw_lib->num_modules; i++)
+		fw_lib->modules[i].man4_module_entry.id |=
+			(lib_id << SOF_IPC4_MOD_LIB_ID_SHIFT);
+
+	ret = ipc4_data->load_library(sdev, fw_lib, false);
+	if (ret)
+		goto free_modules;
+
+	ret = xa_insert(&ipc4_data->fw_lib_xa, lib_id, fw_lib, GFP_KERNEL);
+	if (unlikely(ret)) {
+		dev_err(sdev->dev, "Library ID %u already registered\n", lib_id);
+		goto free_modules;
+	}
+
+	dev_info(sdev->dev, "Shell llext loaded as lib_id=%u (%zu bytes)\n",
+		 lib_id, size);
+	return 0;
+
+free_modules:
+	devm_kfree(sdev->dev, fw_lib->modules);
+free_fw_lib:
+	devm_kfree(sdev->dev, fw_lib);
+	return ret;
+}
+EXPORT_SYMBOL_NS_GPL(snd_sof_ipc4_load_library_from_buf, "SND_SOC_SOF");
+
+/**
  * sof_ipc4_complete_split_release - loads the library parts of a split firmware
  * @sdev: SOF device
  *

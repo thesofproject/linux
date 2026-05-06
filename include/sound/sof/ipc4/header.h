@@ -590,6 +590,7 @@ struct sof_ipc4_notify_resource_data {
 #define SOF_IPC4_DEBUG_SLOT_GDB_STUB		0x42444700
 #define SOF_IPC4_DEBUG_SLOT_TELEMETRY		0x4c455400
 #define SOF_IPC4_DEBUG_SLOT_BROKEN		0x44414544
+#define SOF_IPC4_DEBUG_SLOT_LLEXT_LOAD		0x4C454C44 /* shell llext_load rendezvous */
 
 /**
  * struct sof_ipc4_notify_module_data - payload for module notification

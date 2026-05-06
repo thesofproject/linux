@@ -16,6 +16,8 @@
  */
 
 #include <linux/firmware.h>
+#include <linux/kthread.h>
+#include <linux/pci.h>
 #include <sound/hdaudio_ext.h>
 #include <sound/hda_register.h>
 #include <sound/sof.h>
@@ -30,6 +32,35 @@ static bool persistent_cl_buffer = true;
 module_param(persistent_cl_buffer, bool, 0444);
 MODULE_PARM_DESC(persistent_cl_buffer, "Persistent Code Loader DMA buffer "
 		 "(default = Y, use N to force buffer re-allocation)");
+
+/*
+ * On ACE (MTL/ARL-S) the Intel DMI link between CPU and PCH can enter
+ * L1 power state when the CPU has no pending DMI transactions.  While
+ * the kernel blocks in wait_event waiting for the firmware to complete
+ * LOAD_LIBRARY, the CPU may enter deep C-states, DMI enters L1, and
+ * the code-loader HDA stream stalls permanently (SPIB-limited linear
+ * streams do not auto-resume after DMI L1 exit).
+ *
+ * A small busy-wait polling thread reads the HDA global capabilities
+ * register every ~50 µs using udelay() so the CPU stays in C0/C1 and
+ * DMI remains in L0 for the duration of the library DMA transfer.
+ */
+struct lib_dmi_keepalive {
+	void __iomem		*hda_bar;
+	struct task_struct	*task;
+};
+
+static int lib_dmi_keepalive_fn(void *data)
+{
+	struct lib_dmi_keepalive *ka = data;
+
+	while (!kthread_should_stop()) {
+		/* Busy-wait read: keeps CPU in C0 so DMI stays in L0 */
+		readl(ka->hda_bar);
+		udelay(50);
+	}
+	return 0;
+}
 
 static void hda_ssp_set_cbp_cfp(struct snd_sof_dev *sdev)
 {
@@ -573,8 +604,33 @@ int hda_dsp_ipc4_load_library(struct snd_sof_dev *sdev,
 	 */
 	msg.primary &= ~SOF_IPC4_MSG_TYPE_MASK;
 	msg.primary |= SOF_IPC4_MSG_TYPE_SET(SOF_IPC4_GLB_LOAD_LIBRARY);
-	msg.primary |= SOF_IPC4_GLB_LOAD_LIBRARY_LIB_ID(fw_lib->id);
-	ret = sof_ipc_tx_message_no_reply(sdev->ipc, &msg, 0);
+msg.primary |= SOF_IPC4_GLB_LOAD_LIBRARY_LIB_ID(fw_lib->id);
+
+	/*
+	 * Start a short-lived keepalive thread that reads the HDA BAR
+	 * every ~50 µs to keep the DMI link in L0 while sof_ipc_tx_message
+	 * sleeps waiting for the firmware reply.  Without this, DMI enters
+	 * L1 and the code-loader host-to-DSP DMA stream stalls permanently.
+	 */
+	{
+		struct lib_dmi_keepalive ka = {
+			.hda_bar = sdev->bar[HDA_DSP_HDA_BAR],
+		};
+
+		ka.task = kthread_run(lib_dmi_keepalive_fn, &ka,
+				      "sof-lib-dmi-keepalive");
+		if (IS_ERR(ka.task)) {
+			dev_warn(sdev->dev,
+				 "%s: failed to start DMI keepalive (%ld)\n",
+				 __func__, PTR_ERR(ka.task));
+			ka.task = NULL;
+		}
+
+		ret = sof_ipc_tx_message_no_reply(sdev->ipc, &msg, 0);
+
+		if (ka.task)
+			kthread_stop(ka.task);
+	}
 
 	/* Stop the DMA channel */
 	ret1 = hda_cl_trigger(sdev->dev, hext_stream, SNDRV_PCM_TRIGGER_STOP);

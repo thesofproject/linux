@@ -84,4 +84,7 @@ void sof_client_mailbox_write(struct sof_client_dev *cdev, u32 offset,
 ssize_t sof_client_ipc4_find_debug_slot_offset_by_type(struct sof_client_dev *cdev,
 						       u32 type);
 
+int sof_client_ipc4_load_library_buf(struct sof_client_dev *cdev, u32 lib_id,
+				     const void *buf, size_t size);
+
 #endif /* __SOC_SOF_CLIENT_H */
