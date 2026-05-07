@@ -356,6 +356,39 @@ static struct hdac_ext_link *sdw_get_hlink(struct snd_sof_dev *sdev,
 	return hdac_bus_eml_sdw_get_hlink(bus);
 }
 
+/*
+ * Check if all CPU DAIs sharing the same pipeline (spipe) have their link
+ * DMA streams running. Used to gate pipeline state transitions for aggregate
+ * DAIs: the RUNNING IPC is deferred until the last DAI's link DMA has started.
+ */
+static bool hda_ipc4_all_spipe_dmas_running(struct snd_pcm_substream *substream,
+					    struct snd_sof_pipeline *target_spipe)
+{
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_dai *dai;
+	int i;
+
+	for_each_rtd_cpu_dais(rtd, i, dai) {
+		struct snd_soc_dapm_widget *w;
+		struct snd_sof_widget *sw;
+		struct hdac_ext_stream *hext_stream;
+
+		w = snd_soc_dai_get_widget(dai, substream->stream);
+		if (!w)
+			continue;
+
+		sw = w->dobj.private;
+		if (!sw || sw->spipe != target_spipe)
+			continue;
+
+		hext_stream = snd_soc_dai_get_dma_data(dai, substream);
+		if (!hext_stream || !hext_stream->hstream.running)
+			return false;
+	}
+
+	return true;
+}
+
 static int hda_ipc4_pre_trigger(struct snd_sof_dev *sdev, struct snd_soc_dai *cpu_dai,
 				struct snd_pcm_substream *substream, int cmd)
 {
@@ -383,13 +416,22 @@ static int hda_ipc4_pre_trigger(struct snd_sof_dev *sdev, struct snd_soc_dai *cp
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_STOP:
+		/*
+		 * For aggregate DAIs with shared pipelines, the state check
+		 * deduplicates: the first DAI sends the IPC, subsequent DAIs
+		 * sharing the same pipeline see it already paused and skip.
+		 * For aggregate DAIs with different pipelines, each DAI pauses
+		 * its own pipeline independently.
+		 */
+		if (pipeline->state == SOF_IPC4_PIPE_PAUSED)
+			break;
+
 		ret = sof_ipc4_set_pipeline_state(sdev, pipe_widget->instance_id,
 						  SOF_IPC4_PIPE_PAUSED);
 		if (ret < 0)
 			return ret;
 
 		pipeline->state = SOF_IPC4_PIPE_PAUSED;
-
 		break;
 	default:
 		dev_err(sdev->dev, "unknown trigger command %d\n", cmd);
@@ -436,11 +478,13 @@ static int hda_trigger(struct snd_sof_dev *sdev, struct snd_soc_dai *cpu_dai,
 static int hda_ipc4_post_trigger(struct snd_sof_dev *sdev, struct snd_soc_dai *cpu_dai,
 				 struct snd_pcm_substream *substream, int cmd)
 {
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	struct snd_sof_widget *pipe_widget;
 	struct sof_ipc4_pipeline *pipeline;
 	struct snd_sof_widget *swidget;
 	struct snd_soc_dapm_widget *w;
+	int num_cpus = rtd->dai_link->num_cpus;
 	int ret = 0;
 
 	w = snd_soc_dai_get_widget(cpu_dai, substream->stream);
@@ -455,6 +499,16 @@ static int hda_ipc4_post_trigger(struct snd_sof_dev *sdev, struct snd_soc_dai *c
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
+		/*
+		 * For aggregated DAIs (num_cpus > 1), defer pipeline RUNNING
+		 * IPC until all CPU DAIs sharing this pipeline have started
+		 * their link DMAs via hda_trigger(). The running state of each
+		 * DAI's HDA stream naturally tracks completion.
+		 */
+		if (num_cpus > 1 &&
+		    !hda_ipc4_all_spipe_dmas_running(substream, swidget->spipe))
+			break;
+
 		if (pipeline->state != SOF_IPC4_PIPE_PAUSED) {
 			ret = sof_ipc4_set_pipeline_state(sdev, pipe_widget->instance_id,
 							  SOF_IPC4_PIPE_PAUSED);
@@ -473,6 +527,10 @@ static int hda_ipc4_post_trigger(struct snd_sof_dev *sdev, struct snd_soc_dai *c
 		swidget->spipe->started_count++;
 		break;
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+		if (num_cpus > 1 &&
+		    !hda_ipc4_all_spipe_dmas_running(substream, swidget->spipe))
+			break;
+
 		ret = sof_ipc4_set_pipeline_state(sdev, pipe_widget->instance_id,
 						  SOF_IPC4_PIPE_RUNNING);
 		if (ret < 0)
