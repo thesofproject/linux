@@ -40,5 +40,5 @@ ddk_module(
         "drivers/media/pci/intel/ipu6",
         "include",
     ],
-    kernel_build = "//private/devices/google/x86-64/intel/common:kernel",
+    kernel_build = "//private/devices/google/common:kernel_build",
 )
