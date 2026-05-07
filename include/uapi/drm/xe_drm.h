@@ -6,7 +6,7 @@
 #ifndef _UAPI_XE_DRM_H_
 #define _UAPI_XE_DRM_H_
 
-#include "drm.h"
+#include <uapi/drm/drm.h>
 
 #if defined(__cplusplus)
 extern "C" {

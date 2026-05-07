@@ -3514,7 +3514,9 @@ ddk_headers(
     hdrs = [
         "include/trace/define_trace.h",
     ],
-    includes = [
+    # must use linux_includes (instead of includes) to ensure that files
+    # explicitly declared hdrs override those in ACK.
+    linux_includes = [
         "include/trace",
     ],
 )
@@ -3526,7 +3528,9 @@ ddk_headers(
         "include/uapi/drm/xe_drm.h",
         "include/uapi/drm/xe_drm_prelim.h",
     ],
-    includes = [
+    # must use linux_includes (instead of includes) to ensure that files
+    # explicitly declared hdrs override those in ACK.
+    linux_includes = [
         "include",
     ],
 )
