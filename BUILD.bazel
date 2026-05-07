@@ -3593,6 +3593,7 @@ ddk_headers(
         "include/linux/ieee80211-nan.h",
         "include/linux/ieee80211-p2p.h",
         "include/linux/ieee80211-s1g.h",
+        "include/linux/ieee80211-uhr.h",
         "include/linux/ieee80211-vht.h",
         "include/net/cfg80211.h",
         "include/net/mac80211.h",
