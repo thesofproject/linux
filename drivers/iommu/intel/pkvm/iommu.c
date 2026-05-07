@@ -445,6 +445,8 @@ int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val)
 		break;
 	default:
 		ret = pkvm_iommu_pmu_validate_read(iommu, offset, len);
+		if (ret == IOMMU_REG_NOT_HANDLED)
+			ret = pkvm_iommu_frcd_validate_read(iommu, offset, len);
 
 		/* Not emulated MMIO can directly go to hardware */
 		if (!ret || ret == IOMMU_REG_NOT_HANDLED)
@@ -632,6 +634,8 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 		break;
 	default:
 		ret = pkvm_iommu_pmu_validate_write(iommu, offset, len, val);
+		if (ret == IOMMU_REG_NOT_HANDLED)
+			ret = pkvm_iommu_frcd_validate_write(iommu, offset, len, val);
 
 		/* Not emulated MMIO can directly go to hardware */
 		if (!ret || ret == IOMMU_REG_NOT_HANDLED)
