@@ -263,6 +263,7 @@
  scsi_scan_host
  __scsi_add_device
  scsi_remove_device
+ __scsi_register_driver
  blk_pm_runtime_init
  scsi_device_quiesce
  scsi_print_sense_hdr
@@ -284,3 +285,5 @@
  blk_mq_alloc_queue
  scsi_host_busy
  dev_pm_opp_find_freq_ceil_indexed
+ __tracepoint_android_rvh_ufs_complete_init
+ __traceiter_android_rvh_ufs_complete_init
