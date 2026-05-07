@@ -47,6 +47,10 @@ DECLARE_RESTRICTED_HOOK(android_rvh_try_alloc_pages_gfp,
 DECLARE_RESTRICTED_HOOK(android_rvh_swap_bio_charge,
 			TP_PROTO(struct bio *bio),
 			TP_ARGS(bio), 1);
+DECLARE_RESTRICTED_HOOK(android_rvh_swap_read_folio_bdev_sync,
+	TP_PROTO(struct block_device *bdev, sector_t sector,
+		struct page *page, bool *read),
+	TP_ARGS(bdev, sector, page, read), 4);
 DECLARE_RESTRICTED_HOOK(android_rvh_bitmap_find_best_next_area,
 		TP_PROTO(unsigned long *bitmap,
 			unsigned long bitmap_maxno,
