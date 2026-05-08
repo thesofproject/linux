@@ -522,7 +522,7 @@ DECLARE_HOOK(android_vh_folio_remove_rmap,
 	TP_PROTO(struct folio *folio, struct page *page, int nr_pages,
 		 int level),
 	TP_ARGS(folio, page, nr_pages, level));
-DECLARE_HOOK(android_vh_folios_put_refs_direct_free_extent,
+DECLARE_HOOK(android_vh_folios_put_direct_free,
 	TP_PROTO(struct folio *folio, unsigned int nr_refs,
 		 struct lruvec **lruvec, unsigned long flags, bool *direct_free),
 	TP_ARGS(folio, nr_refs, lruvec, flags, direct_free));
@@ -624,6 +624,17 @@ DECLARE_HOOK(android_vh_mm_direct_reclaim_enter,
 DECLARE_HOOK(android_vh_mm_direct_reclaim_exit,
 	TP_PROTO(unsigned long did_some_progress, int retry_times),
 	TP_ARGS(did_some_progress, retry_times));
+DECLARE_HOOK(android_vh_compaction_exit,
+	TP_PROTO(int node_id, int order, const int highest_zoneidx),
+	TP_ARGS(node_id, order, highest_zoneidx));
+enum compact_result;
+DECLARE_HOOK(android_vh_compaction_try_to_compact_exit,
+        TP_PROTO(enum compact_result *compact_result),
+        TP_ARGS(compact_result));
+struct oom_control;
+DECLARE_HOOK(android_vh_mm_may_oom_exit,
+	TP_PROTO(struct oom_control *oc, unsigned long did_some_progress),
+	TP_ARGS(oc, did_some_progress));
 #endif /* _TRACE_HOOK_MM_H */
 
 /* This part must be outside protection */
