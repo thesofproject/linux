@@ -721,7 +721,12 @@ static void binder_do_set_priority(struct binder_thread *thread,
 	struct task_struct *task = thread->task;
 	int priority; /* user-space prio value */
 	bool has_cap_nice;
+	bool skip = false;
 	unsigned int policy = desired->sched_policy;
+
+	trace_android_vh_binder_skip_set_priority(thread, &skip);
+	if (skip)
+		return;
 
 	if (task->policy == policy && task->prio == desired->prio) {
 		spin_lock(&thread->prio_lock);
