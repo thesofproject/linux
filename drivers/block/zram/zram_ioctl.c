@@ -367,6 +367,8 @@ int zram_ioctl(struct block_device *bdev, blk_mode_t mode,
 
 		if (copy_to_user(argp, &ioc_data, sizeof(ioc_data)))
 			ret = -EFAULT;
+	} else if (cmd == ZRAM_ANDROID_IOC_GET_VERSION) {
+		return ZRAM_ANDROID_IOC_VERSION;
 	}
 
 	return ret;

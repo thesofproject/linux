@@ -6,6 +6,8 @@
 #include <linux/types.h>
 #include <linux/ioctl.h>
 
+#define ZRAM_ANDROID_IOC_VERSION 1
+
 /* Legacy for process writeback */
 struct zram_android_ioc_data_process_writeback {
 	__aligned_u64	pidfd;
@@ -63,6 +65,8 @@ struct zram_android_ioc_process_prefetch {
 
 #define ZRAM_ANDROID_IOC_PROCESS_PREFETCH \
 	_IOW(ZRAM_ANDROID_IOC_MAGIC, 3, struct zram_android_ioc_process_prefetch)
+
+#define ZRAM_ANDROID_IOC_GET_VERSION _IO(ZRAM_ANDROID_IOC_MAGIC, 4)
 
 #endif /* _UAPI_LINUX_ZRAM_IOCTL_H */
 
