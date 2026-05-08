@@ -2335,17 +2335,20 @@ unlock:
 
 static int ___pkvm_check_module_share_guest(struct pkvm_hyp_vm *vm, u64 phys, u64 ipa, u64 size)
 {
-	if (___host_check_page_state_range(phys, size, PKVM_NOPAGE | PKVM_MODULE_OWNED_PAGE,
-					   HOST_CHECK_IS_MEMORY))
-		return -EFAULT;
+	int ret;
 
-	if (__guest_check_page_state_range(vm, ipa, size, PKVM_NOPAGE | PKVM_ACCEPT_MODULE_OWNED))
-		return -EFAULT;
+	ret = ___host_check_page_state_range(phys, size,
+					     PKVM_NOPAGE | PKVM_MODULE_OWNED_PAGE,
+					     HOST_CHECK_IS_MEMORY);
+	if (ret)
+		return ret;
 
-	if (module_guest_accept_module_owned_share(phys, ipa, size, vm))
-		return -EFAULT;
+	ret = __guest_check_page_state_range(vm, ipa, size,
+					     PKVM_NOPAGE | PKVM_ACCEPT_MODULE_OWNED);
+	if (ret)
+		return ret;
 
-	return 0;
+	return module_guest_accept_module_owned_share(phys, ipa, size, vm);
 }
 
 static int ___pkvm_module_share_guest(u64 pfn, u64 gfn, u64 nr_pages, struct pkvm_hyp_vcpu *vcpu)
@@ -2458,10 +2461,9 @@ static int ___pkvm_module_share_guest_sglist(struct pkvm_hyp_vcpu *vcpu)
 			goto fail;
 		}
 
-		if (___pkvm_check_module_share_guest(vm, phys, ipa, size)) {
-			ret = -EFAULT;
+		ret = ___pkvm_check_module_share_guest(vm, phys, ipa, size);
+		if (ret)
 			goto fail;
-		}
 
 		__host_update_page_state(phys, size, PKVM_MODULE_SHARED_OWNED_PAGE);
 	}
