@@ -309,3 +309,7 @@
  __tracepoint_android_vh_mmput
  read_swap_cache_async
  vfs_fadvise
+
+# required by xiaomi binder
+__tracepoint_android_vh_binder_skip_set_priority
+__traceiter_android_vh_binder_skip_set_priority
