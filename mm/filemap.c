@@ -3325,7 +3325,7 @@ static struct file *do_sync_mmap_readahead(struct vm_fault *vmf)
 		if (!(vm_flags & VM_RAND_READ))
 			ra->size *= 2;
 		ra->async_size = HPAGE_PMD_NR;
-		ra_mmap_miss->order = HPAGE_PMD_ORDER;
+		ra->order = HPAGE_PMD_ORDER;
 		page_cache_ra_order(&ractl, ra);
 		return fpin;
 	}
@@ -3392,7 +3392,7 @@ static struct file *do_sync_mmap_readahead(struct vm_fault *vmf)
 		ra->start = max_t(long, 0, vmf->pgoff - ra->ra_pages / 2);
 		ra->size = ra->ra_pages;
 		ra->async_size = ra->ra_pages / 4;
-		ra_mmap_miss->order = 0;
+		ra->order = 0;
 	}
 
 	fpin = maybe_unlock_mmap_for_io(vmf, fpin);

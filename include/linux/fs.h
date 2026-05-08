@@ -1177,7 +1177,7 @@ struct file_ra_state {
 		(struct file_ra_state_mmap_miss *)&(ra)->mmap_miss;
 
 struct file_ra_state_mmap_miss {
-	unsigned short order;
+	unsigned short mmap_miss_reserved;
 	unsigned short mmap_miss;
 };
 
