@@ -33,6 +33,14 @@ unsigned int pkvm_moveable_regs_nr;
 static struct hyp_pool host_s2_pool;
 static struct hyp_pool host_s2_mmio_pool;
 
+/* Returns TRUE if a VM-owned page has a reference held for Hyp or DMA use. */
+static bool hyp_page_referenced(void *addr)
+{
+	struct hyp_page *p = hyp_virt_to_page(addr);
+
+	return hyp_refcount_get(p->refcount);
+}
+
 static int host_s2_pool_refill(struct kvm_hyp_memcache *host_mc)
 {
 	return refill_hyp_pool(&host_s2_pool, host_mc);
@@ -525,7 +533,7 @@ int __pkvm_guest_relinquish_to_host(struct pkvm_hyp_vcpu *vcpu,
 		goto end;
 	}
 	/* page might be used for DMA! */
-	if (hyp_page_count(hyp_phys_to_virt(phys))) {
+	if (hyp_page_referenced(hyp_phys_to_virt(phys))) {
 		ret = -EBUSY;
 		goto end;
 	}
@@ -1454,7 +1462,7 @@ int __pkvm_host_unshare_hyp(u64 pfn)
 	ret = __hyp_check_page_state_range(phys, size, PKVM_PAGE_SHARED_BORROWED);
 	if (ret)
 		goto unlock;
-	if (hyp_page_count((void *)virt)) {
+	if (hyp_page_referenced((void *)virt)) {
 		ret = -EBUSY;
 		goto unlock;
 	}
@@ -3182,7 +3190,7 @@ void pkvm_ownership_selftest(void *base)
 	assert_transition_res(0,	hyp_pin_shared_mem, virt, virt + size);
 	assert_transition_res(0,	hyp_pin_shared_mem, virt, virt + size);
 	hyp_unpin_shared_mem(virt, virt + size);
-	WARN_ON(hyp_page_count(virt) != 1);
+	WARN_ON(!hyp_page_referenced(virt));
 	assert_transition_res(-EBUSY,	__pkvm_host_unshare_hyp, pfn);
 	assert_transition_res(-EPERM,	__pkvm_host_share_hyp, pfn);
 	assert_transition_res(-EPERM,	__pkvm_host_donate_hyp, pfn, 1);
@@ -3193,7 +3201,7 @@ void pkvm_ownership_selftest(void *base)
 
 	hyp_unpin_shared_mem(virt, virt + size);
 	assert_page_state();
-	WARN_ON(hyp_page_count(virt));
+	WARN_ON(hyp_page_referenced(virt));
 
 	selftest_state.host = PKVM_PAGE_OWNED;
 	selftest_state.hyp = PKVM_NOPAGE;
