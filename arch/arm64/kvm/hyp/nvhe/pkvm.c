@@ -1382,6 +1382,9 @@ struct pkvm_hyp_vcpu *pkvm_mpidr_to_hyp_vcpu(struct pkvm_hyp_vm *hyp_vm,
 	for (i = 0; i < hyp_vm->kvm.created_vcpus; i++) {
 		hyp_vcpu = hyp_vm->vcpus[i];
 
+		if (!hyp_vcpu)
+			continue;
+
 		if (mpidr == kvm_vcpu_get_mpidr_aff(&hyp_vcpu->vcpu))
 			goto unlock;
 	}
@@ -1490,6 +1493,9 @@ static bool pvm_psci_vcpu_affinity_info(struct pkvm_hyp_vcpu *hyp_vcpu)
 	hyp_spin_lock(&hyp_vm->vcpus_lock);
 	for (i = 0; i < hyp_vm->kvm.created_vcpus; i++) {
 		struct pkvm_hyp_vcpu *target = hyp_vm->vcpus[i];
+
+		if (!target)
+			continue;
 
 		mpidr = kvm_vcpu_get_mpidr_aff(&target->vcpu);
 
