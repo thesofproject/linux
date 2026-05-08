@@ -18,6 +18,10 @@
 #include <linux/rwsem.h>
 #include <linux/zsmalloc.h>
 
+#if IS_ENABLED(CONFIG_ZRAM_ANDROID_IOCTL)
+#include <linux/xarray.h>
+#endif
+
 #include "zcomp.h"
 
 #define SECTORS_PER_PAGE_SHIFT	(PAGE_SHIFT - SECTOR_SHIFT)
@@ -140,6 +144,9 @@ struct zram {
 	unsigned long *bitmap;
 	unsigned long nr_pages;
 #endif
+#if IS_ENABLED(CONFIG_ZRAM_ANDROID_IOCTL)
+	struct xarray prefetch_cache;
+#endif
 #ifdef CONFIG_ZRAM_MEMORY_TRACKING
 	struct dentry *debugfs_dir;
 #endif
@@ -188,6 +195,39 @@ int zram_writeback_slots(struct zram *zram,
 int scan_slot_for_prefetch(struct zram *zram, unsigned long index,
 			   struct zram_pp_ctl *ctl);
 int zram_prefetch_slots(struct zram *zram, struct zram_pp_ctl *ctl);
+#endif
+
+#if IS_ENABLED(CONFIG_ZRAM_ANDROID_IOCTL)
+void zram_prefetch_cache_init(struct zram *zram);
+void zram_prefetch_cache_destroy(struct zram *zram);
+bool zram_prefetch_cache_exist(struct zram *zram, u32 index);
+int zram_prefetch_cache_store(struct zram *zram, u32 index,
+			      unsigned long blk_idx);
+int zram_prefetch_cache_reuse(struct zram *zram, u32 index);
+int zram_prefetch_cache_drop(struct zram *zram, u32 index);
+#else
+static inline void zram_prefetch_cache_init(struct zram *zram) {};
+static inline void zram_prefetch_cache_destroy(struct zram *zram) {};
+static inline bool zram_prefetch_cache_exist(struct zram *zram, u32 index)
+{
+	return false;
+}
+
+static inline int zram_prefetch_cache_store(struct zram *zram, u32 index,
+					    unsigned long blk_idx)
+{
+	return 0; /* unsupported */
+}
+
+static inline int zram_prefetch_cache_reuse(struct zram *zram, u32 index)
+{
+	return -EOPNOTSUPP;
+}
+
+static inline int zram_prefetch_cache_drop(struct zram *zram, u32 index)
+{
+	return -EOPNOTSUPP;
+}
 #endif
 
 #endif
