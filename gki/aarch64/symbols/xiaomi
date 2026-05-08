@@ -190,6 +190,10 @@
   __tracepoint_android_vh_force_page_cache_ra
   __tracepoint_android_vh_page_cache_ra_unbounded
 
+#required by mi_mempool.ko
+  __traceiter_android_vh_alloc_pages_failure_bypass
+  __tracepoint_android_vh_alloc_pages_failure_bypass
+
 # low lat mem
  __tracepoint_android_vh_compact_bypass
  __traceiter_android_vh_compact_bypass
