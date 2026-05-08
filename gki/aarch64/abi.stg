@@ -354197,6 +354197,14 @@ function {
   parameter_id: 0x11cfee5a
 }
 function {
+  id: 0x9bb1cedb
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x06901f39
+  parameter_id: 0x11cfee5a
+  parameter_id: 0x11cfee5a
+}
+function {
   id: 0x9bb23dd9
   return_type_id: 0x6720d32f
   parameter_id: 0x1b8590a8
@@ -374118,6 +374126,15 @@ elf_symbol {
   full_name: "__traceiter_android_vh_cpu_cgroup_css_free"
 }
 elf_symbol {
+  id: 0xa9ea48a7
+  name: "__traceiter_android_vh_cpu_domain_power_down_ok"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x8eb2aa6f
+  type_id: 0x9bb1cedb
+  full_name: "__traceiter_android_vh_cpu_domain_power_down_ok"
+}
+elf_symbol {
   id: 0x9247dcb1
   name: "__traceiter_android_vh_cpu_idle_enter"
   is_defined: true
@@ -380191,6 +380208,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_vh_cpu_cgroup_css_free"
+}
+elf_symbol {
+  id: 0x2716bb15
+  name: "__tracepoint_android_vh_cpu_domain_power_down_ok"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_vh_cpu_domain_power_down_ok"
 }
 elf_symbol {
   id: 0x26324a1f
@@ -445512,6 +445538,7 @@ interface {
   symbol_id: 0x63b166c2
   symbol_id: 0x21cae9c7
   symbol_id: 0xceeb829a
+  symbol_id: 0xa9ea48a7
   symbol_id: 0x9247dcb1
   symbol_id: 0xfd04e27a
   symbol_id: 0xa124d3e0
@@ -446187,6 +446214,7 @@ interface {
   symbol_id: 0xe054bfe0
   symbol_id: 0xbe784d1d
   symbol_id: 0xb8dc863c
+  symbol_id: 0x2716bb15
   symbol_id: 0x26324a1f
   symbol_id: 0x4ade2774
   symbol_id: 0x704b9aae
