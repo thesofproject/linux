@@ -525,6 +525,24 @@ static void teardown_sve_state(struct pkvm_hyp_vcpu *hyp_vcpu)
 	}
 }
 
+static void teardown_hyp_vcpu_init(struct pkvm_hyp_vcpu *hyp_vcpu)
+{
+	struct pkvm_hyp_vm *hyp_vm = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
+
+	unpin_host_vcpu(hyp_vcpu);
+
+	if (hyp_vm->pvmfw_entry_vcpu == hyp_vcpu)
+		hyp_vm->pvmfw_entry_vcpu = NULL;
+
+	if (!hyp_vcpu->vcpu.arch.sve_state)
+		return;
+
+	if (pkvm_hyp_vcpu_is_protected(hyp_vcpu))
+		teardown_sve_state(hyp_vcpu);
+	else
+		unpin_host_sve_state(hyp_vcpu);
+}
+
 static void unpin_host_vcpus(struct pkvm_hyp_vcpu *hyp_vcpus[],
 			     unsigned int nr_vcpus)
 {
@@ -666,40 +684,36 @@ static int init_pkvm_hyp_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu,
 			      struct pkvm_hyp_vm *hyp_vm,
 			      struct kvm_vcpu *host_vcpu)
 {
-	int ret = 0;
-	u32 mp_state;
+	struct kvm_hyp_req *hyp_reqs_va;
 	struct kvm_hyp_req *hyp_reqs;
+	u32 mp_state;
+	int ret = -EINVAL;
 
 	if (hyp_pin_shared_mem(host_vcpu, host_vcpu + 1))
 		return -EBUSY;
 
-	hyp_reqs = READ_ONCE(host_vcpu->arch.hyp_reqs);
-	if (!PAGE_ALIGNED(hyp_reqs)) {
-		hyp_unpin_shared_mem(host_vcpu, host_vcpu + 1);
-		return -EINVAL;
-	}
-
-	hyp_vcpu->vcpu.arch.hyp_reqs = kern_hyp_va(hyp_reqs);
-	if (hyp_pin_shared_mem(hyp_vcpu->vcpu.arch.hyp_reqs,
-			       hyp_vcpu->vcpu.arch.hyp_reqs + 1)) {
-		hyp_unpin_shared_mem(host_vcpu, host_vcpu + 1);
-		return -EBUSY;
-	}
+	/* Set before mp_state check so 'done:' cleanup can unpin host_vcpu. */
+	hyp_vcpu->host_vcpu = host_vcpu;
+	hyp_vcpu->vcpu.kvm = &hyp_vm->kvm;
 
 	mp_state = READ_ONCE(host_vcpu->arch.mp_state.mp_state);
-	if (mp_state != KVM_MP_STATE_RUNNABLE && mp_state != KVM_MP_STATE_STOPPED) {
-		ret = -EINVAL;
+	if (mp_state != KVM_MP_STATE_RUNNABLE && mp_state != KVM_MP_STATE_STOPPED)
 		goto done;
-	}
 
-	hyp_vcpu->host_vcpu = host_vcpu;
+	hyp_reqs = READ_ONCE(host_vcpu->arch.hyp_reqs);
+	if (!PAGE_ALIGNED(hyp_reqs))
+		goto done;
 
-	hyp_vcpu->vcpu.kvm = &hyp_vm->kvm;
+	hyp_reqs_va = kern_hyp_va(hyp_reqs);
+	if (hyp_pin_shared_mem(hyp_reqs_va, hyp_reqs_va + 1))
+		goto done;
+
 	hyp_vcpu->vcpu.vcpu_id = READ_ONCE(host_vcpu->vcpu_id);
 	hyp_vcpu->vcpu.vcpu_idx = READ_ONCE(host_vcpu->vcpu_idx);
 
 	hyp_vcpu->vcpu.arch.hw_mmu = &hyp_vm->kvm.arch.mmu;
 	hyp_vcpu->vcpu.arch.cflags = READ_ONCE(host_vcpu->arch.cflags);
+	hyp_vcpu->vcpu.arch.hyp_reqs = hyp_reqs_va;
 	hyp_vcpu->vcpu.arch.hyp_reqs->type = KVM_HYP_LAST_REQ;
 
 	ret = pkvm_vcpu_init_sysregs(hyp_vcpu);
@@ -719,7 +733,7 @@ static int init_pkvm_hyp_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu,
 		goto done;
 done:
 	if (ret)
-		unpin_host_vcpu(hyp_vcpu);
+		teardown_hyp_vcpu_init(hyp_vcpu);
 	return ret;
 }
 
@@ -1086,10 +1100,8 @@ int __pkvm_init_vcpu(pkvm_handle_t handle, struct kvm_vcpu *host_vcpu)
 		goto unlock_vcpus;
 
 	ret = register_hyp_vcpu(hyp_vm, hyp_vcpu);
-	if (ret) {
-		unpin_host_vcpu(hyp_vcpu);
-		unpin_host_sve_state(hyp_vcpu);
-	}
+	if (ret)
+		teardown_hyp_vcpu_init(hyp_vcpu);
 unlock_vcpus:
 	hyp_spin_unlock(&hyp_vm->vcpus_lock);
 
