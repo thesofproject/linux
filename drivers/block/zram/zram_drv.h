@@ -163,9 +163,6 @@ struct zram_pp_ctl {
 
 struct zram_pp_ctl *init_pp_ctl(void);
 void release_pp_ctl(struct zram *zram, struct zram_pp_ctl *ctl);
-int scan_slots_for_writeback(struct zram *zram, u32 mode,
-			     unsigned long lo, unsigned long hi,
-			     struct zram_pp_ctl *ctl);
 #endif
 
 #ifdef CONFIG_ZRAM_WRITEBACK
@@ -182,9 +179,15 @@ struct zram_wb_ctl {
 
 struct zram_wb_ctl *init_wb_ctl(struct zram *zram);
 void release_wb_ctl(struct zram_wb_ctl *wb_ctl);
+int scan_slots_for_writeback(struct zram *zram, u32 mode,
+			     unsigned long lo, unsigned long hi,
+			     struct zram_pp_ctl *ctl);
 int zram_writeback_slots(struct zram *zram,
 			 struct zram_pp_ctl *ctl,
 			 struct zram_wb_ctl *wb_ctl);
+int scan_slot_for_prefetch(struct zram *zram, unsigned long index,
+			   struct zram_pp_ctl *ctl);
+int zram_prefetch_slots(struct zram *zram, struct zram_pp_ctl *ctl);
 #endif
 
 #endif

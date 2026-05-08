@@ -486,6 +486,8 @@ static ssize_t idle_store(struct device *dev, struct device_attribute *attr,
 static int read_from_zspool_raw(struct zram *zram, struct page *page,
 				u32 index);
 static int read_from_zspool(struct zram *zram, struct page *page, u32 index);
+static int read_from_bdev_sync(struct zram *zram, struct page *page, u32 index,
+			       unsigned long blk_idx);
 
 struct zram_wb_req {
 	unsigned long blk_idx;
@@ -935,6 +937,12 @@ static int zram_writeback_complete(struct zram *zram, struct zram_wb_req *req)
 	set_slot_handle(zram, index, req->blk_idx);
 	set_slot_flag(zram, index, ZRAM_WB);
 
+	/* Non-compressed writeback will decompress to PAGE_SIZE. */
+	if (!zram->compressed_wb) {
+		set_slot_size(zram, index, PAGE_SIZE);
+		set_slot_flag(zram, index, ZRAM_HUGE);
+	}
+
 out:
 	slot_unlock(zram, index);
 	return 0;
@@ -1011,6 +1019,168 @@ static struct zram_wb_req *zram_select_idle_req(struct zram_wb_ctl *wb_ctl)
 	if (req)
 		list_del(&req->entry);
 	return req;
+}
+
+static int zram_populate_table(struct zram *zram, struct page *page, u32 index)
+{
+	unsigned long handle;
+	void *src;
+	u32 size;
+
+	slot_lock(zram, index);
+	/*
+	 * We release slot lock during zram_prefetch_slots, so slot can be
+	 * changed via slot_free(). To avoid the race, we need to check ZRAM_WB
+	 * again.
+	 */
+	if (!test_slot_flag(zram, index, ZRAM_WB)) {
+		slot_unlock(zram, index);
+		return -EIO;
+	}
+
+	size = get_slot_size(zram, index);
+
+	handle = zs_malloc(zram->mem_pool, size,
+			   GFP_NOIO | __GFP_NOWARN | __GFP_HIGHMEM |
+			   __GFP_MOVABLE | __GFP_CMA,
+			   page_to_nid(page));
+	if (IS_ERR_VALUE(handle)) {
+		slot_unlock(zram, index);
+		return PTR_ERR((void *)handle);
+	}
+
+	if (!zram_can_store_page(zram)) {
+		slot_unlock(zram, index);
+		zs_free(zram->mem_pool, handle);
+		return -ENOMEM;
+	}
+
+	src = kmap_local_page(page);
+	zs_obj_write(zram->mem_pool, handle, src, size);
+	kunmap_local(src);
+
+	clear_slot_flag(zram, index, ZRAM_WB);
+	zram_release_bdev_block(zram, get_slot_handle(zram, index));
+	set_slot_handle(zram, index, handle);
+	atomic64_add(size, &zram->stats.compr_data_size);
+	if (test_slot_flag(zram, index, ZRAM_HUGE))
+		atomic64_inc(&zram->stats.huge_pages);
+	slot_unlock(zram, index);
+
+	return 0;
+}
+
+static void zram_deferred_prefetch(struct work_struct *w)
+{
+	struct zram_rb_req *req = container_of(w, struct zram_rb_req, work);
+	struct page *page = bio_first_page_all(req->bio);
+	struct zram *zram = req->zram;
+	u32 index = req->index;
+
+	zram_populate_table(zram, page, index);
+
+	__free_page(page);
+	bio_put(req->bio);
+	kfree(req);
+}
+
+static void zram_prefetch_read_endio(struct bio *bio)
+{
+	struct zram_rb_req *req = bio->bi_private;
+	struct page *page = bio_first_page_all(bio);
+
+	if (bio->bi_status) {
+		__free_page(page);
+		bio_put(bio);
+		kfree(req);
+		return;
+	}
+
+	/*
+	 * Prefetch bdev page to zsmalloc_pool is sleepable.
+	 * We need to defer it to a preemptible context.
+	 */
+	INIT_WORK(&req->work, zram_deferred_prefetch);
+	queue_work(system_highpri_wq, &req->work);
+}
+
+static int zram_prefetch_from_bdev(struct zram *zram, struct page *page,
+				   u32 index, unsigned long blk_idx)
+{
+	struct zram_rb_req *req;
+	struct bio *bio;
+
+	req = kmalloc(sizeof(*req), GFP_KERNEL);
+	if (!req)
+		return -ENOMEM;
+
+	bio = bio_alloc(zram->bdev, 1, REQ_OP_READ, GFP_KERNEL);
+	if (!bio) {
+		kfree(req);
+		return -ENOMEM;
+	}
+
+	atomic64_inc(&zram->stats.bd_reads);
+
+	req->zram = zram;
+	req->index = index;
+	req->blk_idx = blk_idx;
+	req->bio = bio;
+
+	bio->bi_iter.bi_sector = blk_idx * (PAGE_SIZE >> 9);
+	bio->bi_private = req;
+	bio->bi_end_io = zram_prefetch_read_endio;
+
+	__bio_add_page(bio, page, PAGE_SIZE, 0);
+	submit_bio(bio);
+
+	return 0;
+}
+
+int zram_prefetch_slots(struct zram *zram, struct zram_pp_ctl *ctl)
+{
+	struct zram_pp_slot *pps;
+	int ret = 0;
+	u32 index = 0;
+	unsigned long blk_idx;
+	struct page *page = NULL;
+
+	while ((pps = select_pp_slot(ctl))) {
+		index = pps->index;
+		slot_lock(zram, index);
+
+		if (!test_slot_flag(zram, index, ZRAM_PP_SLOT))
+			goto unlock_next;
+		if (!test_slot_flag(zram, index, ZRAM_WB))
+			goto unlock_next;
+
+		blk_idx = get_slot_handle(zram, index);
+		slot_unlock(zram, index);
+
+		if (!page) {
+			page = alloc_page(GFP_KERNEL);
+			if (!page)
+				return -ENOMEM;
+		}
+
+		/* Read the page from backing device and restore to zram */
+		ret = zram_prefetch_from_bdev(zram, page, index, blk_idx);
+		if (ret)
+			break;
+
+		page = NULL;
+		release_pp_slot(zram, pps);
+		cond_resched();
+		continue;
+
+unlock_next:
+		slot_unlock(zram, index);
+		release_pp_slot(zram, pps);
+	}
+
+	if (page)
+		__free_page(page);
+	return ret;
 }
 
 int zram_writeback_slots(struct zram *zram,
@@ -1179,6 +1349,27 @@ static int parse_mode(char *val, u32 *mode)
 		return -EINVAL;
 	return 0;
 }
+
+int scan_slot_for_prefetch(struct zram *zram, unsigned long index,
+			   struct zram_pp_ctl *ctl)
+{
+	bool ok = true;
+
+	slot_lock(zram, index);
+	if (!slot_allocated(zram, index))
+		goto unlock_out;
+
+	if (!test_slot_flag(zram, index, ZRAM_WB))
+		goto unlock_out;
+
+	ok = place_pp_slot(zram, ctl, index);
+
+unlock_out:
+	slot_unlock(zram, index);
+
+	return ok ? 0 : -ENOMEM;
+}
+
 
 int scan_slots_for_writeback(struct zram *zram, u32 mode,
 			     unsigned long lo, unsigned long hi,
