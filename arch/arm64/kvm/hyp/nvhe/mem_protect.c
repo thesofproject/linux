@@ -1730,7 +1730,7 @@ int __pkvm_host_donate_sglist_hyp(struct pkvm_sglist_page *sglist, size_t nr_pag
 		if (ret) {
 			__host_stage2_set_owner_complete(PKVM_ID_HYP, 0);
 
-			for (; p >= 0; p--) {
+			while (p-- > 0) {
 				phys = hyp_pfn_to_phys(sglist[p].pfn);
 				size = PAGE_SIZE << sglist[p].order;
 
