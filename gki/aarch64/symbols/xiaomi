@@ -116,6 +116,8 @@
   __tracepoint_android_vh_mem_cgroup_charge
   __traceiter_android_rvh_swap_bio_charge
   __tracepoint_android_rvh_swap_bio_charge
+  __traceiter_android_rvh_swap_read_folio_bdev_sync
+  __tracepoint_android_rvh_swap_read_folio_bdev_sync
 
 # required by mi_kernel_monitor.ko
   __tracepoint_android_vh_swapin_start

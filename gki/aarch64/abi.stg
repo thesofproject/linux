@@ -354068,6 +354068,15 @@ function {
   parameter_id: 0x6d7f5ff6
 }
 function {
+  id: 0x9bab3090
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x0c2e195c
+  parameter_id: 0xd0b3a203
+  parameter_id: 0x06835e9c
+  parameter_id: 0x11cfee5a
+}
+function {
   id: 0x9bab32de
   return_type_id: 0x6720d32f
   parameter_id: 0x18bd6530
@@ -373277,6 +373286,15 @@ elf_symbol {
   full_name: "__traceiter_android_rvh_swap_bio_charge"
 }
 elf_symbol {
+  id: 0x6c071d53
+  name: "__traceiter_android_rvh_swap_read_folio_bdev_sync"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x9de59483
+  type_id: 0x9bab3090
+  full_name: "__traceiter_android_rvh_swap_read_folio_bdev_sync"
+}
+elf_symbol {
   id: 0x3b650ee3
   name: "__traceiter_android_rvh_tcp_rcv_spurious_retrans"
   is_defined: true
@@ -379368,6 +379386,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_rvh_swap_bio_charge"
+}
+elf_symbol {
+  id: 0x95871e95
+  name: "__tracepoint_android_rvh_swap_read_folio_bdev_sync"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_rvh_swap_read_folio_bdev_sync"
 }
 elf_symbol {
   id: 0x5380a8d5
@@ -445476,6 +445503,7 @@ interface {
   symbol_id: 0x46515de8
   symbol_id: 0x970d0e94
   symbol_id: 0x4ae52717
+  symbol_id: 0x6c071d53
   symbol_id: 0x3b650ee3
   symbol_id: 0xcf016f05
   symbol_id: 0x79480d0a
@@ -446153,6 +446181,7 @@ interface {
   symbol_id: 0xe8cacf26
   symbol_id: 0x0f16c786
   symbol_id: 0x3e08e111
+  symbol_id: 0x95871e95
   symbol_id: 0x5380a8d5
   symbol_id: 0x1f12a317
   symbol_id: 0x454d16cc
