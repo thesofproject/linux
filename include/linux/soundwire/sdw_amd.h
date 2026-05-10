@@ -37,6 +37,8 @@ struct acp_sdw_pdata {
 	u32 acp_rev;
 	/* mutex to protect acp common register access */
 	struct mutex *acp_sdw_lock;
+	/* mutex to protect the SoundWire BRA transfer vs the other manager instance */
+	struct mutex *acp_bra_lock;
 };
 
 /**
@@ -63,6 +65,7 @@ struct sdw_amd_dai_runtime {
  * @amd_sdw_irq_thread: SoundWire manager irq workqueue
  * @amd_sdw_work: peripheral status work queue
  * @acp_sdw_lock: mutex to protect acp share register access
+ * @acp_bra_lock: mutex to protect the SoundWire BRA transfer vs the other manager instance
  * @status: peripheral devices status array
  * @num_din_ports: number of input ports
  * @num_dout_ports: number of output ports
@@ -89,6 +92,8 @@ struct amd_sdw_manager {
 	struct work_struct amd_sdw_work;
 	/* mutex to protect acp common register access */
 	struct mutex *acp_sdw_lock;
+	/* mutex to protect the SoundWire BRA transfer vs the other manager instance */
+	struct mutex *acp_bra_lock;
 
 	enum sdw_slave_status status[SDW_MAX_DEVICES + 1];
 
@@ -108,6 +113,27 @@ struct amd_sdw_manager {
 	bool clk_stopped;
 
 	struct sdw_amd_dai_runtime **dai_runtime_array;
+
+	/* Transport columns allocated for the active BPT transfer */
+	u8 bra_hstart;
+	u8 bra_hstop;
+
+	/*
+	 * Serialises concurrent BPT requests from multiple slaves on the
+	 * same bus.  Acquired at the start of amd_sdw_bpt_wait() and released
+	 * before it returns, so that only one slave can use the single ACP BRA
+	 * engine at a time.  amd_sdw_bpt_send_async() deliberately takes no
+	 * lock; the whole transfer is serialised in amd_sdw_bpt_wait().
+	 */
+	struct mutex bpt_lock;
+
+	/*
+	 * Set true while the bus clock is stopped for system suspend so
+	 * that amd_sdw_bpt_wait() refuses new BPT transfers: starting one
+	 * on a clock-stopped bus wedges the command channel and leaves the
+	 * peripheral unable to re-enumerate on resume.  Guarded by bpt_lock.
+	 */
+	bool bpt_disabled;
 };
 
 /**
@@ -153,6 +179,7 @@ struct sdw_amd_ctx {
  * @parent: parent device
  * @dev: device implementing hwparams and free callbacks
  * @acp_lock: mutex protecting acp common registers access
+ * @acp_bra_lock: mutex protecting the SoundWire BRA transfer vs the other manager instance
  */
 struct sdw_amd_res {
 	u32 acp_rev;
@@ -166,6 +193,8 @@ struct sdw_amd_res {
 	struct device *dev;
 	/* use to protect acp common registers access */
 	struct mutex *acp_lock;
+	/* use to protect the SoundWire BRA transfer vs the other manager instance */
+	struct mutex *acp_bra_lock;
 };
 
 int sdw_amd_probe(struct sdw_amd_res *res, struct sdw_amd_ctx **ctx);
