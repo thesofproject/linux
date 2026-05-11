@@ -293,3 +293,9 @@
  dev_pm_opp_find_freq_ceil_indexed
  __tracepoint_android_rvh_ufs_complete_init
  __traceiter_android_rvh_ufs_complete_init
+
+# required by pte preread
+ __traceiter_android_vh_mmput
+ __tracepoint_android_vh_mmput
+ read_swap_cache_async
+ vfs_fadvise
