@@ -1640,7 +1640,7 @@ static int pkvm_host_donate_hyp(u64 pfn, u64 nr_pages, enum kvm_pgtable_prot pro
 	if (ret)
 		goto unlock;
 
-	ret = pkvm_create_mappings_locked(virt, virt + size, default_hyp_prot(phys));
+	ret = pkvm_create_mappings_locked(virt, virt + size, prot);
 	if (ret) {
 		WARN_ON(ret != -ENOMEM);
 		/* We might have failed halfway through, so remove anything we've installed */
