@@ -1044,6 +1044,7 @@ struct sdw_bus {
 	int stream_refcount;
 	int bpt_stream_refcount;
 	struct sdw_stream_runtime *bpt_stream;
+	struct mutex bpt_lock; /* serialize BPT/BRA transfers per bus */
 	const struct sdw_master_ops *ops;
 	const struct sdw_master_port_ops *port_ops;
 	struct sdw_master_prop prop;

@@ -87,6 +87,8 @@ int sdw_bus_master_add(struct sdw_bus *bus, struct device *parent,
 	lockdep_register_key(&bus->bus_lock_key);
 	__mutex_init(&bus->bus_lock, "bus_lock", &bus->bus_lock_key);
 
+	mutex_init(&bus->bpt_lock);
+
 	INIT_LIST_HEAD(&bus->slaves);
 	INIT_LIST_HEAD(&bus->m_rt_list);
 
@@ -2094,6 +2096,7 @@ EXPORT_SYMBOL(sdw_clear_slave_status);
 int sdw_bpt_send_async(struct sdw_bus *bus, struct sdw_slave *slave, struct sdw_bpt_msg *msg)
 {
 	int len = 0;
+	int ret;
 	int i;
 
 	for (i = 0; i < msg->sections; i++)
@@ -2118,13 +2121,26 @@ int sdw_bpt_send_async(struct sdw_bus *bus, struct sdw_slave *slave, struct sdw_
 		return -EOPNOTSUPP;
 	}
 
-	return bus->ops->bpt_send_async(bus, slave, msg);
+	/* Serialize BPT/BRA transfers per bus: PDIs and DMA resources are shared */
+	mutex_lock(&bus->bpt_lock);
+
+	ret = bus->ops->bpt_send_async(bus, slave, msg);
+	if (ret < 0)
+		mutex_unlock(&bus->bpt_lock);
+
+	/* on success the lock is held until sdw_bpt_wait() */
+	return ret;
 }
 EXPORT_SYMBOL(sdw_bpt_send_async);
 
 int sdw_bpt_wait(struct sdw_bus *bus, struct sdw_slave *slave, struct sdw_bpt_msg *msg)
 {
-	return bus->ops->bpt_wait(bus, slave, msg);
+	int ret;
+
+	ret = bus->ops->bpt_wait(bus, slave, msg);
+	mutex_unlock(&bus->bpt_lock);
+
+	return ret;
 }
 EXPORT_SYMBOL(sdw_bpt_wait);
 
