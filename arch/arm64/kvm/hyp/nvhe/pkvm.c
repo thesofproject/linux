@@ -28,6 +28,15 @@
 #include <nvhe/pviommu-host.h>
 #include <nvhe/trap_handler.h>
 
+int pkvm_refill_memcache(struct pkvm_hyp_vcpu *hyp_vcpu)
+{
+	struct kvm_vcpu *host_vcpu = hyp_vcpu->host_vcpu;
+
+	return refill_memcache(&hyp_vcpu->vcpu.arch.stage2_mc,
+			       host_vcpu->arch.stage2_mc.nr_pages,
+			       &host_vcpu->arch.stage2_mc);
+}
+
 /* Used by icache_is_aliasing(). */
 unsigned long __icache_flags;
 
@@ -1701,14 +1710,15 @@ static int pkvm_request_map(struct pkvm_hyp_vcpu *hyp_vcpu, u64 ipa, u64 nr_page
 	return 0;
 }
 
-int pkvm_request_host_s2(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
+int pkvm_request_host_s2(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code, bool rewind)
 {
 	struct kvm_hyp_req *req = pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_MEM_HOST_S2);
 
 	if (!req)
 		return -ENOMEM;
 
-	write_sysreg_el2(read_sysreg_el2(SYS_ELR) - 4, SYS_ELR);
+	if (rewind)
+		write_sysreg_el2(read_sysreg_el2(SYS_ELR) - 4, SYS_ELR);
 	*exit_code = ARM_EXCEPTION_HYP_REQ;
 
 	return 0;
@@ -1750,7 +1760,7 @@ static bool pkvm_memshare_call(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 
 		goto out_host;
 	case -ENOMEMHOSTS2:
-		if (pkvm_request_host_s2(hyp_vcpu, exit_code))
+		if (pkvm_request_host_s2(hyp_vcpu, exit_code, true))
 			goto out_guest_err;
 
 		goto out_host;
@@ -1790,7 +1800,7 @@ static bool pkvm_memunshare_call(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 
 		return true;
 	case -ENOMEMHOSTS2:
-		if (pkvm_request_host_s2(hyp_vcpu, exit_code))
+		if (pkvm_request_host_s2(hyp_vcpu, exit_code, true))
 			goto out_guest_err;
 
 		return false;
@@ -1817,6 +1827,19 @@ static bool pkvm_install_ioguard_page(struct pkvm_hyp_vcpu *hyp_vcpu,
 		nr_pages = 1;
 	else if (smccc_get_arg3(&hyp_vcpu->vcpu))
 		goto out_guest_err;
+
+	ret = pkvm_refill_memcache(hyp_vcpu);
+	switch (ret) {
+	case 0:
+		break;
+	case -ENOMEMHOSTS2:
+		if (pkvm_request_host_s2(hyp_vcpu, exit_code, true))
+			goto out_guest_err;
+
+		return false;
+	default:
+		goto out_guest_err;
+	}
 
 	ret = __pkvm_install_ioguard_page(hyp_vcpu, ipa, nr_pages, &nr_guarded);
 	if (ret == -ENOMEM && !pkvm_request_vcpu_memcache(hyp_vcpu, exit_code, true))
@@ -1905,7 +1928,7 @@ static bool pkvm_memrelinquish_call(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_co
 
 		return false;
 	case -ENOMEMHOSTS2:
-		if (pkvm_request_host_s2(hyp_vcpu, exit_code))
+		if (pkvm_request_host_s2(hyp_vcpu, exit_code, true))
 			goto out_guest_err;
 
 		return false;
@@ -2043,6 +2066,7 @@ bool kvm_handle_pvm_smc64(struct kvm_vcpu *vcpu, u64 *exit_code)
 	struct arm_smccc_1_2_regs regs;
 	struct arm_smccc_1_2_regs res;
 	DECLARE_REG(u64, func_id, ctxt, 0);
+	int ret;
 
 	hyp_vcpu = container_of(vcpu, struct pkvm_hyp_vcpu, vcpu);
 	vm = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
@@ -2052,6 +2076,20 @@ bool kvm_handle_pvm_smc64(struct kvm_vcpu *vcpu, u64 *exit_code)
 
 	if (!vm->kvm.arch.pkvm.smc_forwarded)
 		return false;
+
+	/* SMC handlers might use the vCPU memcache (GUEST_SMC_NEED_TOPUP) */
+	ret = pkvm_refill_memcache(hyp_vcpu);
+	switch (ret) {
+	case 0:
+		break;
+	case -ENOMEMHOSTS2:
+		if (pkvm_request_host_s2(hyp_vcpu, exit_code, false))
+			goto out_guest_err;
+
+		return false;
+	default:
+		goto out_guest_err;
+	}
 
 	memcpy(&regs, &ctxt->regs, sizeof(regs));
 	handler_ret = module_handle_guest_smc(&regs, &res, vm->kvm.arch.pkvm.handle);
@@ -2065,15 +2103,18 @@ bool kvm_handle_pvm_smc64(struct kvm_vcpu *vcpu, u64 *exit_code)
 	case GUEST_SMC_NEED_TOPUP:
 		if (!pkvm_request_vcpu_memcache(hyp_vcpu, exit_code, false))
 			return false;
-		smccc_set_retval(vcpu, SMCCC_RET_INVALID_PARAMETER, 0, 0, 0);
-		break;
+		goto out_guest_err;
 	default:
 		WARN_ON(1);
 	}
 
+out:
 	__kvm_skip_instr(vcpu);
-
 	return true;
+
+out_guest_err:
+	smccc_set_retval(vcpu, SMCCC_RET_INVALID_PARAMETER, 0, 0, 0);
+	goto out;
 }
 
 /*
