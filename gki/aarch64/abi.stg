@@ -339889,6 +339889,13 @@ function {
   parameter_id: 0x0483e6f8
 }
 function {
+  id: 0x91ac57a3
+  return_type_id: 0xf435685e
+  parameter_id: 0x1a1051a0
+  parameter_id: 0x0aa1f0ee
+  parameter_id: 0xf435685e
+}
+function {
   id: 0x91adf8fd
   return_type_id: 0x6720d32f
   parameter_id: 0x32a623d7
@@ -404362,6 +404369,15 @@ elf_symbol {
   full_name: "generic_handle_domain_irq"
 }
 elf_symbol {
+  id: 0xb6802638
+  name: "generic_handle_domain_irq_safe"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x39dbc232
+  type_id: 0x9abe486f
+  full_name: "generic_handle_domain_irq_safe"
+}
+elf_symbol {
   id: 0x7d577f86
   name: "generic_handle_irq"
   is_defined: true
@@ -427267,6 +427283,24 @@ elf_symbol {
   full_name: "round_jiffies_up"
 }
 elf_symbol {
+  id: 0x641a30d7
+  name: "rpmsg_chrdev_eptdev_destroy"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x9a4a40f0
+  type_id: 0x9d7428e0
+  full_name: "rpmsg_chrdev_eptdev_destroy"
+}
+elf_symbol {
+  id: 0x28967786
+  name: "rpmsg_class"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0xe58bd245
+  type_id: 0xfccdbf80
+  full_name: "rpmsg_class"
+}
+elf_symbol {
   id: 0xa3ee1393
   name: "rpmsg_create_channel"
   is_defined: true
@@ -427283,6 +427317,15 @@ elf_symbol {
   crc: 0xe5368afc
   type_id: 0x4cd21214
   full_name: "rpmsg_create_ept"
+}
+elf_symbol {
+  id: 0xfd36afa6
+  name: "rpmsg_destroy_ept"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x3e6ac37e
+  type_id: 0x1fc886d7
+  full_name: "rpmsg_destroy_ept"
 }
 elf_symbol {
   id: 0x988f4d92
@@ -427364,6 +427407,15 @@ elf_symbol {
   crc: 0x5a342d34
   type_id: 0x92ab09cb
   full_name: "rpmsg_trysend"
+}
+elf_symbol {
+  id: 0xba0a2474
+  name: "rpmsg_trysendto"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x9443fcd6
+  type_id: 0x92a82deb
+  full_name: "rpmsg_trysendto"
 }
 elf_symbol {
   id: 0xab5f4767
@@ -436995,6 +437047,15 @@ elf_symbol {
   crc: 0xdd88dde3
   type_id: 0x161c45fb
   full_name: "tty_port_tty_wakeup"
+}
+elf_symbol {
+  id: 0x9ed9153d
+  name: "tty_prepare_flip_string"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x01bba9f7
+  type_id: 0x91ac57a3
+  full_name: "tty_prepare_flip_string"
 }
 elf_symbol {
   id: 0x727ea003
@@ -448974,6 +449035,7 @@ interface {
   symbol_id: 0xf45a31b6
   symbol_id: 0x3812bb22
   symbol_id: 0x2f7205ee
+  symbol_id: 0xb6802638
   symbol_id: 0x7d577f86
   symbol_id: 0x238e8343
   symbol_id: 0x600f1fb4
@@ -451515,8 +451577,11 @@ interface {
   symbol_id: 0x0e66eaf7
   symbol_id: 0x81bce56b
   symbol_id: 0x01a1f5e7
+  symbol_id: 0x641a30d7
+  symbol_id: 0x28967786
   symbol_id: 0xa3ee1393
   symbol_id: 0x492407e0
+  symbol_id: 0xfd36afa6
   symbol_id: 0x988f4d92
   symbol_id: 0x006a385d
   symbol_id: 0x1bdc5aa0
@@ -451526,6 +451591,7 @@ interface {
   symbol_id: 0xa4ceb82a
   symbol_id: 0x47a1f086
   symbol_id: 0x8c26ec8b
+  symbol_id: 0xba0a2474
   symbol_id: 0xab5f4767
   symbol_id: 0xd056ad1b
   symbol_id: 0x2104bead
@@ -452596,6 +452662,7 @@ interface {
   symbol_id: 0xb958a87a
   symbol_id: 0xdcd44915
   symbol_id: 0x1f87b736
+  symbol_id: 0x9ed9153d
   symbol_id: 0x727ea003
   symbol_id: 0x2aefba25
   symbol_id: 0xc2ec2319
