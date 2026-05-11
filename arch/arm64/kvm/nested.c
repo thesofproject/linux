@@ -1057,6 +1057,9 @@ void kvm_nested_s2_wp(struct kvm *kvm)
 
 	lockdep_assert_held_write(&kvm->mmu_lock);
 
+	if (!kvm->arch.nested_mmus_size)
+		return;
+
 	for (i = 0; i < kvm->arch.nested_mmus_size; i++) {
 		struct kvm_s2_mmu *mmu = &kvm->arch.nested_mmus[i];
 
@@ -1072,6 +1075,9 @@ void kvm_nested_s2_unmap(struct kvm *kvm, bool may_block)
 	int i;
 
 	lockdep_assert_held_write(&kvm->mmu_lock);
+
+	if (!kvm->arch.nested_mmus_size)
+		return;
 
 	for (i = 0; i < kvm->arch.nested_mmus_size; i++) {
 		struct kvm_s2_mmu *mmu = &kvm->arch.nested_mmus[i];
@@ -1089,6 +1095,9 @@ void kvm_nested_s2_flush(struct kvm *kvm)
 
 	lockdep_assert_held_write(&kvm->mmu_lock);
 
+	if (!kvm->arch.nested_mmus_size)
+		return;
+
 	for (i = 0; i < kvm->arch.nested_mmus_size; i++) {
 		struct kvm_s2_mmu *mmu = &kvm->arch.nested_mmus[i];
 
@@ -1100,6 +1109,9 @@ void kvm_nested_s2_flush(struct kvm *kvm)
 void kvm_arch_flush_shadow_all(struct kvm *kvm)
 {
 	int i;
+
+	if (!kvm->arch.nested_mmus_size)
+		return;
 
 	for (i = 0; i < kvm->arch.nested_mmus_size; i++) {
 		struct kvm_s2_mmu *mmu = &kvm->arch.nested_mmus[i];
