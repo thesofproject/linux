@@ -1701,7 +1701,7 @@ static int pkvm_request_map(struct pkvm_hyp_vcpu *hyp_vcpu, u64 ipa, u64 nr_page
 	return 0;
 }
 
-static int pkvm_request_host_s2(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
+int pkvm_request_host_s2(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 {
 	struct kvm_hyp_req *req = pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_MEM_HOST_S2);
 
