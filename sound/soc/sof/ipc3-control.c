@@ -380,6 +380,7 @@ static int sof_ipc3_bytes_ext_put(struct snd_sof_control *scontrol,
 	struct sof_ipc_ctrl_data *cdata = scontrol->ipc_control_data;
 	struct snd_soc_component *scomp = scontrol->scomp;
 	struct snd_ctl_tlv header;
+	unsigned int payload;
 	int ret = -EINVAL;
 
 	/*
@@ -446,6 +447,15 @@ static int sof_ipc3_bytes_ext_put(struct snd_sof_control *scontrol,
 	/* be->max has been verified to be >= sizeof(struct sof_abi_hdr) */
 	if (cdata->data->size > scontrol->max_size - sizeof(*cdata) - sizeof(struct sof_abi_hdr)) {
 		dev_err_ratelimited(scomp->dev, "Mismatch in ABI data size (truncated?)\n");
+		goto err_restore;
+	}
+
+	/* header.length has been verified to be >= sizeof(struct sof_abi_hdr) */
+	payload = header.length - sizeof(struct sof_abi_hdr);
+	if (cdata->data->size > payload) {
+		dev_err_ratelimited(scomp->dev,
+				    "ABI header claims %u bytes of data, TLV carries %u\n",
+				    cdata->data->size, payload);
 		goto err_restore;
 	}
 
