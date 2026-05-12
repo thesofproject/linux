@@ -506,3 +506,4 @@
   unregister_memory_notifier
   of_css
   wait_for_completion_io_timeout
+  get_pfnblock_migratetype

@@ -308485,6 +308485,52 @@ enumeration {
   }
 }
 enumeration {
+  id: 0xb31bda38
+  name: "migratetype"
+  definition {
+    underlying_type_id: 0x4585663f
+    enumerator {
+      name: "MIGRATE_UNMOVABLE"
+    }
+    enumerator {
+      name: "MIGRATE_MOVABLE"
+      value: 1
+    }
+    enumerator {
+      name: "MIGRATE_RECLAIMABLE"
+      value: 2
+    }
+    enumerator {
+      name: "MIGRATE_FALLBACKS"
+      value: 3
+    }
+    enumerator {
+      name: "MIGRATE_CMA"
+      value: 3
+    }
+    enumerator {
+      name: "MIGRATE_PCPTYPES"
+      value: 4
+    }
+    enumerator {
+      name: "MIGRATE_HIGHATOMIC"
+      value: 4
+    }
+    enumerator {
+      name: "__MIGRATE_TYPE_END"
+      value: 4
+    }
+    enumerator {
+      name: "MIGRATE_ISOLATE"
+      value: 5
+    }
+    enumerator {
+      name: "MIGRATE_TYPES"
+      value: 6
+    }
+  }
+}
+enumeration {
   id: 0xda0bfa94
   name: "mipi_dsi_dcs_tear_mode"
   definition {
@@ -363960,6 +364006,12 @@ function {
   parameter_id: 0xc9082b19
 }
 function {
+  id: 0xb0129d69
+  return_type_id: 0xb31bda38
+  parameter_id: 0x3e909b01
+  parameter_id: 0x33756485
+}
+function {
   id: 0xb019e307
   return_type_id: 0x397d00ab
   parameter_id: 0x3f37d9d5
@@ -405277,6 +405329,15 @@ elf_symbol {
   crc: 0xa83a32f6
   type_id: 0x3ec9e358
   full_name: "get_pfnblock_flags_mask"
+}
+elf_symbol {
+  id: 0xd7d2b77a
+  name: "get_pfnblock_migratetype"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x579c5fd4
+  type_id: 0xb0129d69
+  full_name: "get_pfnblock_migratetype"
 }
 elf_symbol {
   id: 0x475d45f1
@@ -449301,6 +449362,7 @@ interface {
   symbol_id: 0xb3083c09
   symbol_id: 0x3746f7a2
   symbol_id: 0x7fafe916
+  symbol_id: 0xd7d2b77a
   symbol_id: 0x475d45f1
   symbol_id: 0x8f644487
   symbol_id: 0xbc123b47
