@@ -244,18 +244,21 @@ int fuse_create_open_backing(
 				&(struct qstr) QSTR_INIT(fa->in_args[1].value,
 						strlen(fa->in_args[1].value)),
 				dir_fuse_dentry->backing_path.dentry);
-	inode_unlock(dir_fuse_inode->backing_inode);
 
-	if (IS_ERR(backing_dentry))
+	if (IS_ERR(backing_dentry)) {
+		inode_unlock(dir_fuse_inode->backing_inode);
 		return PTR_ERR(backing_dentry);
+	}
 
 	if (d_really_is_positive(backing_dentry)) {
 		err = -EIO;
+		inode_unlock(dir_fuse_inode->backing_inode);
 		goto out;
 	}
 
 	err = vfs_create(&nop_mnt_idmap, dir_fuse_inode->backing_inode,
 			 backing_dentry, fci->mode, true);
+	inode_unlock(dir_fuse_inode->backing_inode);
 	if (err)
 		goto out;
 
