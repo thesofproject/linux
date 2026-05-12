@@ -503,3 +503,6 @@
   rtnl_link_unregister
   snd_soc_unregister_component_by_driver
   kthread_create_worker_on_node
+  unregister_memory_notifier
+  of_css
+  wait_for_completion_io_timeout

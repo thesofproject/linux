@@ -438813,6 +438813,15 @@ elf_symbol {
   full_name: "unregister_kretprobe"
 }
 elf_symbol {
+  id: 0xd3f1f6f2
+  name: "unregister_memory_notifier"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x8c705ff7
+  type_id: 0x1675f88f
+  full_name: "unregister_memory_notifier"
+}
+elf_symbol {
   id: 0x2b66ae90
   name: "unregister_module_notifier"
   is_defined: true
@@ -453014,6 +453023,7 @@ interface {
   symbol_id: 0x31dfbba5
   symbol_id: 0x4bd3e4fd
   symbol_id: 0x67d5fb19
+  symbol_id: 0xd3f1f6f2
   symbol_id: 0x2b66ae90
   symbol_id: 0x66161dd0
   symbol_id: 0x06168d57
