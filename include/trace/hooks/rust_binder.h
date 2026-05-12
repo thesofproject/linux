@@ -28,6 +28,9 @@ DECLARE_HOOK(android_vh_rust_binder_set_priority,
 DECLARE_HOOK(android_vh_rust_binder_restore_priority,
 	TP_PROTO(struct task_struct *task),
 	TP_ARGS(task));
+DECLARE_HOOK(android_vh_rust_binder_looper_entry,
+	TP_PROTO(rust_binder_thread thread, unsigned int looper_flags),
+	TP_ARGS(thread, looper_flags));
 
 #endif /* _RUST_BINDER_HOOK_H */
 
