@@ -132,7 +132,7 @@ static int smmu_submit_batch_sync(struct hyp_arm_smmu_v3_device *smmu,
 		return ret;
 
 	for (i = 0; i < cmds->num; i++)
-		smmu_add_cmd_raw(smmu, &cmds->cmds[i]);
+		smmu_add_cmd_raw(smmu, &cmds->cmds[i * CMDQ_ENT_DWORDS]);
 
 	return smmu_sync_cmd(smmu);
 }
