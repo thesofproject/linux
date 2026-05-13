@@ -47,6 +47,10 @@ DECLARE_RESTRICTED_HOOK(android_rvh_try_alloc_pages_gfp,
 DECLARE_RESTRICTED_HOOK(android_rvh_swap_bio_charge,
 			TP_PROTO(struct bio *bio),
 			TP_ARGS(bio), 1);
+DECLARE_RESTRICTED_HOOK(android_rvh_swap_read_folio_bdev_sync,
+	TP_PROTO(struct block_device *bdev, sector_t sector,
+		struct page *page, bool *read),
+	TP_ARGS(bdev, sector, page, read), 4);
 DECLARE_RESTRICTED_HOOK(android_rvh_bitmap_find_best_next_area,
 		TP_PROTO(unsigned long *bitmap,
 			unsigned long bitmap_maxno,
@@ -89,6 +93,10 @@ DECLARE_HOOK(android_vh_slab_alloc_node,
 DECLARE_HOOK(android_vh_slab_free,
 	TP_PROTO(unsigned long addr, struct kmem_cache *s),
 	TP_ARGS(addr, s));
+DECLARE_HOOK(android_vh_filemap_get_folio,
+	TP_PROTO(struct address_space *mapping, pgoff_t index,
+		int fgp_flags, gfp_t gfp_mask, struct folio *folio),
+	TP_ARGS(mapping, index, fgp_flags, gfp_mask, folio));
 DECLARE_HOOK(android_vh_meminfo_proc_show,
 	TP_PROTO(struct seq_file *m),
 	TP_ARGS(m));
@@ -624,6 +632,21 @@ DECLARE_HOOK(android_vh_mm_direct_reclaim_enter,
 DECLARE_HOOK(android_vh_mm_direct_reclaim_exit,
 	TP_PROTO(unsigned long did_some_progress, int retry_times),
 	TP_ARGS(did_some_progress, retry_times));
+DECLARE_HOOK(android_vh_compaction_exit,
+	TP_PROTO(int node_id, int order, const int highest_zoneidx),
+	TP_ARGS(node_id, order, highest_zoneidx));
+enum compact_result;
+DECLARE_HOOK(android_vh_compaction_try_to_compact_exit,
+        TP_PROTO(enum compact_result *compact_result),
+        TP_ARGS(compact_result));
+struct oom_control;
+DECLARE_HOOK(android_vh_mm_may_oom_exit,
+	TP_PROTO(struct oom_control *oc, unsigned long did_some_progress),
+	TP_ARGS(oc, did_some_progress));
+DECLARE_HOOK(android_vh_alloc_pages_entry,
+	TP_PROTO(gfp_t *gfp, unsigned int order, int preferred_nid,
+		nodemask_t *nodemask),
+	TP_ARGS(gfp, order, preferred_nid, nodemask));
 #endif /* _TRACE_HOOK_MM_H */
 
 /* This part must be outside protection */
