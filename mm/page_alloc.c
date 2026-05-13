@@ -553,6 +553,7 @@ get_pfnblock_migratetype(const struct page *page, unsigned long pfn)
 #endif
 	return flags & MIGRATETYPE_MASK;
 }
+EXPORT_SYMBOL_GPL(get_pfnblock_migratetype);
 
 /**
  * __set_pfnblock_flags_mask - Set the requested group of flags for
@@ -5518,6 +5519,7 @@ struct page *__alloc_frozen_pages_noprof(gfp_t gfp, unsigned int order,
 	gfp_t alloc_gfp; /* The gfp_t that was actually used for allocation */
 	struct alloc_context ac = { };
 
+	trace_android_vh_alloc_pages_entry(&gfp, order, preferred_nid, nodemask);
 	/*
 	 * There are several places where we assume that the order value is sane
 	 * so bail out early if the request is out of bound.
