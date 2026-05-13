@@ -406,7 +406,7 @@ bool kvm_handle_pviommu_hvc(struct kvm_vcpu *vcpu, u64 *exit_code)
 	case 0:
 		break;
 	case -ENOMEMHOSTS2:
-		if (pkvm_request_host_s2(hyp_vcpu, exit_code))
+		if (pkvm_request_host_s2(hyp_vcpu, exit_code, true))
 			goto out_guest_err;
 
 		return false;
