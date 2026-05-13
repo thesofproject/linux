@@ -924,6 +924,7 @@ struct page *__cma_alloc(struct cma *cma, unsigned long count,
 	gfp_t gfp_allowed;
 	unsigned long i;
 	const char *name = cma ? cma->name : NULL;
+	bool bypass = false;
 
 	/*
 	 * GCMA allows GFP_ATOMIC, while CMA can only do GFP_KERNEL.
@@ -935,6 +936,11 @@ struct page *__cma_alloc(struct cma *cma, unsigned long count,
 		return page;
 
 	if (!cma || !cma->count)
+		return page;
+
+	trace_android_vh_cma_alloc_bypass(cma, count, align, gfp,
+				&page, &bypass);
+	if (bypass)
 		return page;
 
 	pr_debug("%s(cma %p, name: %s, count %lu, align %d)\n", __func__,
