@@ -321,6 +321,7 @@
   config_item_set_name
   __const_udelay
   consume_skb
+  contig_page_data
   cont_write_begin
   _copy_from_iter
   _copy_from_user
