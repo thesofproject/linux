@@ -813,7 +813,7 @@ static int dma_buf_mmap_internal(struct file *file, struct vm_area_struct *vma)
 		return -EINVAL;
 
 	ret = dmabuf->ops->mmap(dmabuf, vma);
-	if (!ret) {
+	if (!ret && vma->vm_file == file) {
 		int err = dma_buf_account_task(dmabuf, vma->vm_mm->dmabuf_info);
 
 		if (err)
@@ -2149,7 +2149,7 @@ int dma_buf_mmap(struct dma_buf *dmabuf, struct vm_area_struct *vma,
 	vma->vm_pgoff = pgoff;
 
 	ret = dmabuf->ops->mmap(dmabuf, vma);
-	if (!ret) {
+	if (!ret && vma->vm_file == dmabuf->file) {
 		int err = dma_buf_account_task(dmabuf, vma->vm_mm->dmabuf_info);
 
 		if (err)
