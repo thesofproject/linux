@@ -373,7 +373,7 @@ static int __dma_buf_account_task(struct dma_buf *dmabuf, struct task_dma_buf_in
 	struct task_dma_buf_record *rec;
 	int ret = 0;
 
-	if (!static_key_enabled(&dmabuf_accounting_key))
+	if (!is_dmabuf_accounting_enabled())
 		return 0;
 
 	if (!dmabuf_info)
@@ -436,7 +436,7 @@ void dma_buf_unaccount_task(struct dma_buf *dmabuf, struct task_dma_buf_info *dm
 {
 	struct task_dma_buf_record *rec;
 
-	if (!static_key_enabled(&dmabuf_accounting_key))
+	if (!is_dmabuf_accounting_enabled())
 		return;
 
 	if (!dmabuf_info)
@@ -582,7 +582,7 @@ int copy_dmabuf_info(u64 clone_flags, struct task_struct *task)
 	bool share_vm = clone_flags & CLONE_VM;
 	bool share_fs = clone_flags & CLONE_FILES;
 
-	if (!static_key_enabled(&dmabuf_accounting_key))
+	if (!is_dmabuf_accounting_enabled())
 		return 0;
 
 	/* kthreads are not supported */
@@ -698,7 +698,7 @@ int dma_buf_begin_new_exec(struct files_struct *old_files)
 	struct task_dma_buf_info *old_dmabuf_info;
 	struct files_struct *my_files = current->files;
 
-	if (!static_key_enabled(&dmabuf_accounting_key))
+	if (!is_dmabuf_accounting_enabled())
 		return 0;
 
 	new_dmabuf_info = alloc_task_dma_buf_info();
@@ -2419,7 +2419,7 @@ static int __init setup_early_dmabuf_accounting(char *str)
 	if (kstrtobool(str, &enable))
 		return -EINVAL;
 
-	if (enable != static_key_enabled(&dmabuf_accounting_key)) {
+	if (enable != is_dmabuf_accounting_enabled()) {
 		if (enable)
 			static_branch_enable(&dmabuf_accounting_key);
 		else
