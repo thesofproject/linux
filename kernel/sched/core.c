@@ -692,6 +692,12 @@ EXPORT_SYMBOL(__trace_set_current_state);
  *   [ The astute reader will observe that it is possible for two tasks on one
  *     CPU to have ->on_cpu = 1 at the same time. ]
  *
+ * p->is_blocked <- { 0, 1 }:
+ *
+ *   is set by try_to_block_task() and cleared by ttwu_do_wakeup() and tracks
+ *   if the task is blocked. Traditionally this would mirror p->on_rq, however
+ *   due things like DELAY_DEQUEUE and PROXY_EXEC, this can diverge.
+ *
  * task_cpu(p): is changed by set_task_cpu(), the rules are:
  *
  *  - Don't call set_task_cpu() on a blocked task:
@@ -3929,6 +3935,7 @@ ttwu_stat(struct task_struct *p, int cpu, int wake_flags)
  */
 static inline void ttwu_do_wakeup(struct task_struct *p)
 {
+	p->is_blocked = 0;
 	WRITE_ONCE(p->__state, TASK_RUNNING);
 	trace_sched_wakeup(p);
 }
@@ -4771,6 +4778,7 @@ int try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 		 *    it disabling IRQs (this allows not taking ->pi_lock).
 		 */
 		WARN_ON_ONCE(p->se.sched_delayed);
+		WARN_ON_ONCE(p->is_blocked);
 		/* If p is current, we know we can run here, so clear blocked_on */
 		clear_task_blocked_on(p, NULL);
 		if (!ttwu_state_match(p, state, &success))
@@ -5088,6 +5096,7 @@ static void __sched_fork(u64 clone_flags, struct task_struct *p)
 
 	/* A delayed task cannot be in clone(). */
 	WARN_ON_ONCE(p->se.sched_delayed);
+	WARN_ON_ONCE(p->is_blocked);
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	p->se.cfs_rq			= NULL;
@@ -7209,12 +7218,15 @@ static bool try_to_block_task(struct rq *rq, struct task_struct *p,
 	unsigned long task_state = *task_state_p;
 
 	if (signal_pending_state(task_state, p)) {
+		p->is_blocked = 0;
 		WRITE_ONCE(p->__state, TASK_RUNNING);
 		*task_state_p = TASK_RUNNING;
 		clear_task_blocked_on(p, NULL);
 
 		return false;
 	}
+
+	p->is_blocked = 1;
 
 	/*
 	 * We check should_block after signal_pending because we
@@ -7436,6 +7448,7 @@ find_proxy_task(struct rq *rq, struct task_struct *donor, struct rq_flags *rf)
 		/* if its PROXY_WAKING, do return migration or run if current */
 		if (blocked_on->lock == PROXY_WAKING) {
 			if (task_current(rq, p)) {
+				p->is_blocked = 0;
 				clear_task_blocked_on(p, PROXY_WAKING);
 				return p;
 			}
@@ -7471,6 +7484,7 @@ find_proxy_task(struct rq *rq, struct task_struct *donor, struct rq_flags *rf)
 			 * just run on this rq), or return-migrate the task.
 			 */
 			if (task_current(rq, p)) {
+				p->is_blocked = 0;
 				__clear_task_blocked_on(p, NULL);
 				return p;
 			}
@@ -7741,7 +7755,7 @@ pick_again:
 
 		rq_set_donor(rq, next);
 		next->blocked_donor = NULL;
-		if (unlikely(next->blocked_on.lock)) {
+		if (unlikely(next->is_blocked && next->blocked_on.lock)) {
 			next = find_proxy_task(rq, next, &rf);
 			if (!next) {
 				trace_sched_picking_again(rq->donor, cpu,
