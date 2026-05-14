@@ -2513,6 +2513,9 @@ static void check_preempt_equal_dl(struct rq *rq, struct task_struct *p)
 		return;
 
 	exec_ctx = find_exec_ctx(rq, p);
+	if (!exec_ctx)
+		return;
+
 	if (task_current(rq, exec_ctx))
 		return;
 
