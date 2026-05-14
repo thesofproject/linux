@@ -116,8 +116,8 @@ int module_change_host_page_prot(u64 pfn, enum kvm_pgtable_prot prot,
 void psci_mem_protect_inc(u64 n);
 void psci_mem_protect_dec(u64 n);
 
-int __pkvm_use_dma(u64 phys_addr, size_t size, struct pkvm_hyp_vcpu *hyp_vcpu);
-int __pkvm_unuse_dma(u64 phys_addr, size_t size, struct pkvm_hyp_vcpu *hyp_vcpu);
+int __pkvm_use_dma(u64 phys_addr, size_t size, struct pkvm_hyp_vm *vm);
+int __pkvm_unuse_dma(u64 phys_addr, size_t size, struct pkvm_hyp_vm *vm);
 
 static __always_inline void __load_host_stage2(void)
 {

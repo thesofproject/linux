@@ -3435,7 +3435,7 @@ static void __pkvm_unuse_dma_page(phys_addr_t phys)
 	hyp_page_ref_dec(p);
 }
 
-static int __pkvm_use_dma_locked(phys_addr_t phys, size_t size, struct pkvm_hyp_vcpu *hyp_vcpu)
+static int __pkvm_use_dma_locked(phys_addr_t phys, size_t size, struct pkvm_hyp_vm *vm)
 {
 	int i;
 	int ret = 0;
@@ -3457,7 +3457,7 @@ static int __pkvm_use_dma_locked(phys_addr_t phys, size_t size, struct pkvm_hyp_
 	if (!reg) {
 		enum kvm_pgtable_prot prot;
 
-		if (hyp_vcpu)
+		if (vm)
 			return -EINVAL;
 		for (i = 0; i < nr_pages; i++) {
 			u64 addr = phys + i * PAGE_SIZE;
@@ -3477,7 +3477,7 @@ static int __pkvm_use_dma_locked(phys_addr_t phys, size_t size, struct pkvm_hyp_
 	} else {
 
 		/* For VMs, we know if we reach this point the VM has access to the page. */
-		if (!hyp_vcpu) {
+		if (!vm) {
 			for_each_hyp_page(page, phys, size) {
 				if (get_host_state(page) != PKVM_PAGE_OWNED)
 					return -EPERM;
@@ -3505,12 +3505,12 @@ static int __pkvm_use_dma_locked(phys_addr_t phys, size_t size, struct pkvm_hyp_
  * similar checks are needed in host_request_unshare() and
  * host_ack_unshare()
  */
-int __pkvm_use_dma(phys_addr_t phys, size_t size, struct pkvm_hyp_vcpu *hyp_vcpu)
+int __pkvm_use_dma(phys_addr_t phys, size_t size, struct pkvm_hyp_vm *vm)
 {
 	int ret;
 
 	host_lock_component();
-	ret = __pkvm_use_dma_locked(phys, size, hyp_vcpu);
+	ret = __pkvm_use_dma_locked(phys, size, vm);
 	host_unlock_component();
 	return ret;
 }
@@ -3519,7 +3519,7 @@ int __pkvm_use_dma(phys_addr_t phys, size_t size, struct pkvm_hyp_vcpu *hyp_vcpu
  * Must be called after a __pkvm_host_use_dma() for the same
  * range, typically after a page was unmapped from an IOMMU.
  */
-int __pkvm_unuse_dma(phys_addr_t phys, size_t size, struct pkvm_hyp_vcpu *hyp_vcpu)
+int __pkvm_unuse_dma(phys_addr_t phys, size_t size, struct pkvm_hyp_vm *vm)
 {
 	int i;
 	size_t nr_pages = size >> PAGE_SHIFT;
@@ -3528,7 +3528,7 @@ int __pkvm_unuse_dma(phys_addr_t phys, size_t size, struct pkvm_hyp_vcpu *hyp_vc
 		return -EINVAL;
 
 	if (!range_is_memory(phys, phys + size)) {
-		WARN_ON(hyp_vcpu);
+		WARN_ON(vm);
 		return 0;
 	}
 	host_lock_component();
@@ -3547,8 +3547,9 @@ int __pkvm_unuse_dma(phys_addr_t phys, size_t size, struct pkvm_hyp_vcpu *hyp_vc
 int pkvm_get_guest_pa_request_use_dma(struct pkvm_hyp_vcpu *hyp_vcpu, u64 ipa,
                                      size_t ipa_size, u64 *out_pa, s8 *level)
 {
-	int ret;
+	struct pkvm_hyp_vm *vm = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
 	size_t off;
+	int ret;
 
 	host_lock_component();
 	ret = pkvm_get_guest_pa_request(hyp_vcpu, ipa, ipa_size,
@@ -3557,8 +3558,7 @@ int pkvm_get_guest_pa_request_use_dma(struct pkvm_hyp_vcpu *hyp_vcpu, u64 ipa,
 		goto out_ret;
 	off = *out_pa - ALIGN_DOWN(*out_pa, kvm_granule_size(*level));
 	WARN_ON(__pkvm_use_dma_locked(*out_pa,
-				      min(kvm_granule_size(*level) - off, ipa_size),
-				      hyp_vcpu));
+				      min(kvm_granule_size(*level) - off, ipa_size), vm));
 out_ret:
 	host_unlock_component();
 	return ret;
