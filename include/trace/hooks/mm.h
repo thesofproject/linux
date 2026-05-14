@@ -435,6 +435,9 @@ DECLARE_HOOK(android_vh_map_order0_folio,
 	TP_PROTO(struct file *file, pgoff_t pgoff, struct folio *folio,
 		vm_fault_t ret),
 	TP_ARGS(file, pgoff, folio, ret));
+DECLARE_HOOK(android_vh_do_fault_around,
+	TP_PROTO(struct vm_fault *vmf, pgoff_t *nr_pages),
+	TP_ARGS(vmf, nr_pages));
 
 DECLARE_HOOK(android_vh_alloc_contig_range_not_isolated,
 	TP_PROTO(unsigned long start, unsigned end),
