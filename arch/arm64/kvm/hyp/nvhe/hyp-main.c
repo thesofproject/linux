@@ -1010,11 +1010,16 @@ static void handle___kvm_vcpu_run(struct kvm_cpu_context *host_ctxt)
 		if (unlikely(system_supports_sme() && read_sysreg_s(SYS_SVCR)))
 			goto out;
 
-		if (hyp_vcpu->power_state == PSCI_0_2_AFFINITY_LEVEL_ON_PENDING)
-			pkvm_reset_vcpu(hyp_vcpu);
-
-		if (unlikely(hyp_vcpu->power_state != PSCI_0_2_AFFINITY_LEVEL_ON))
+		switch (READ_ONCE(hyp_vcpu->power_state)) {
+		case PSCI_0_2_AFFINITY_LEVEL_ON:
+			break;
+		case PSCI_0_2_AFFINITY_LEVEL_ON_PENDING:
+			if (pkvm_reset_vcpu(hyp_vcpu))
+				goto out;
+			break;
+		default:
 			goto out;
+		}
 
 		flush_hyp_vcpu(hyp_vcpu);
 		ret = __kvm_vcpu_run(&hyp_vcpu->vcpu);
