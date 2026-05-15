@@ -718,6 +718,10 @@ static void smmu_update_ste_shadow(struct hyp_arm_smmu_v3_nested_device *nested_
 		strtab_size = strtab_l1_size(nested_smmu);
 		WARN_ON(fmt != STRTAB_BASE_CFG_FMT_2LVL);
 		WARN_ON((strtab_split(nested_smmu) != STRTAB_SPLIT));
+		WARN_ON(strtab_split(nested_smmu) >= strtab_log2size(nested_smmu));
+		WARN_ON(strtab_log2size(nested_smmu) >
+			(ilog2(STRTAB_MAX_L1_ENTRIES) + STRTAB_SPLIT));
+
 	} else {
 		strtab_size = strtab_size(nested_smmu);
 		WARN_ON(fmt != STRTAB_BASE_CFG_FMT_LINEAR);
