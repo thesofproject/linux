@@ -13,6 +13,7 @@
 #include <linux/idr.h>
 #include <linux/slab.h>
 #include <linux/xarray.h>
+#include <trace/hooks/mm.h>
 #include "gcma_sysfs.h"
 #include "internal.h"
 
@@ -773,7 +774,9 @@ static void gcma_cc_store_page(int hash_id, struct cleancache_filekey key,
 	void *src, *dst;
 	bool is_new = false;
 	bool workingset = PageWorkingset(page);
+	bool bypass = false;
 
+	trace_android_vh_gcma_cc_store_page_bypass(&bypass);
 	/*
 	 * This cleancache function is called under irq disabled so every
 	 * locks in this function should take of the irq if they are
@@ -788,7 +791,7 @@ static void gcma_cc_store_page(int hash_id, struct cleancache_filekey key,
 find_inode:
 	inode = find_and_get_gcma_inode(gcma_fs, &key);
 	if (!inode) {
-		if (!workingset)
+		if (!workingset || bypass)
 			return;
 		inode = add_gcma_inode(gcma_fs, &key);
 		if (!IS_ERR(inode))
@@ -807,14 +810,14 @@ load_page:
 	xa_lock(&inode->pages);
 	g_page = xa_load(&inode->pages, offset);
 	if (g_page) {
-		if (!workingset) {
+		if (!workingset || bypass) {
 			gcma_erase_page(inode, offset, g_page, true);
 			goto out_unlock;
 		}
 		goto copy;
 	}
 
-	if (!workingset)
+	if (!workingset || bypass)
 		goto out_unlock;
 
 	g_page = gcma_alloc_page();
