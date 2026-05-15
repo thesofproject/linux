@@ -16,6 +16,7 @@
 /* keep-sorted start */
 #include <trace/hooks/avc.h>
 #include <trace/hooks/binder.h>
+#include <trace/hooks/bl_hib.h>
 #include <trace/hooks/blk.h>
 #include <trace/hooks/bug.h>
 #include <trace/hooks/cgroup.h>
@@ -234,6 +235,7 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_cgroup_set_task);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_check_bpf_syscall);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_check_file_open);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_check_folio_look_around_ref);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_check_hibernation_swap);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_check_mmap_file);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_check_nanosleep_syscall);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_check_new_page);
@@ -521,6 +523,8 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_rwsem_wake_finish);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_rwsem_write_finished);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_rwsem_write_wait_finish);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_rwsem_write_wait_start);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_save_cpu_resume);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_save_hib_resume_bdev);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_save_track_hash);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_save_vmalloc_stack);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_sched_show_task);
