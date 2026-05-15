@@ -703,7 +703,7 @@ static void smmu_emulate_cmdq_insert(struct hyp_arm_smmu_v3_nested_device *neste
 		smmu_add_cmd_raw(smmu, cmd);
 	}
 
-	writel_relaxed(smmu->cmdq.llq.prod, smmu->cmdq.prod_reg);
+	writel(smmu->cmdq.llq.prod, smmu->cmdq.prod_reg);
 
 	WARN_ON(smmu_wait(use_wfe, smmu_cmdq_empty(&smmu->cmdq)));
 }
