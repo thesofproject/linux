@@ -283,12 +283,12 @@ intel_crtc_duplicate_state(struct drm_crtc *crtc)
 
 static void intel_crtc_put_color_blobs(struct intel_crtc_state *crtc_state)
 {
-	drm_property_blob_put(crtc_state->hw.degamma_lut);
-	drm_property_blob_put(crtc_state->hw.gamma_lut);
-	drm_property_blob_put(crtc_state->hw.ctm);
+	drm_property_replace_blob(&crtc_state->hw.degamma_lut, NULL);
+	drm_property_replace_blob(&crtc_state->hw.gamma_lut, NULL);
+	drm_property_replace_blob(&crtc_state->hw.ctm, NULL);
 
-	drm_property_blob_put(crtc_state->pre_csc_lut);
-	drm_property_blob_put(crtc_state->post_csc_lut);
+	drm_property_replace_blob(&crtc_state->pre_csc_lut, NULL);
+	drm_property_replace_blob(&crtc_state->post_csc_lut, NULL);
 }
 
 void intel_crtc_free_hw_state(struct intel_crtc_state *crtc_state)
