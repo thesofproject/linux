@@ -56,6 +56,8 @@
 #undef CREATE_TRACE_POINTS
 #include <trace/hooks/mm.h>
 
+EXPORT_TRACEPOINT_SYMBOL_GPL(mark_victim);
+
 static int sysctl_panic_on_oom;
 static int sysctl_oom_kill_allocating_task;
 static int sysctl_oom_dump_tasks = 1;
