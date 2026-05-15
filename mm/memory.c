@@ -5669,6 +5669,8 @@ static vm_fault_t do_fault_around(struct vm_fault *vmf)
 	pgoff_t from_pte, to_pte;
 	vm_fault_t ret;
 
+	trace_android_vh_do_fault_around(vmf, &nr_pages);
+
 	/*
 	 * Fault occurred in the padding region. There are no file-cache pages
 	 * to map in this region, so skip fault-around.
