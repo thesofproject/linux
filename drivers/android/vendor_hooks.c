@@ -272,6 +272,7 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_do_anonymous_page);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_do_async_mmap_readahead);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_do_fault_around);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_do_futex);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_do_group_exit);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_do_mmap_map_count);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_do_new_mount_fc);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_do_read_fault);
