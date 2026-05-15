@@ -1040,6 +1040,8 @@ static bool smmu_dabt_device(struct hyp_arm_smmu_v3_device_pv *smmu,
 	const u32 read_write = (u32)(-1);
 	const u32 read_only = is_write ? no_access : read_write;
 	u32 mask = no_access;
+	bool is_xzr = (rd == 31);
+	u64 val = is_xzr ? 0 : regs->regs[rd];
 
 	/*
 	 * Only handle MMIO access with u32 size and alignment.
@@ -1065,11 +1067,15 @@ static bool smmu_dabt_device(struct hyp_arm_smmu_v3_device_pv *smmu,
 
 	if (!mask)
 		return false;
-	if (is_write)
-		writel_relaxed(regs->regs[rd] & mask, smmu->common.base + off);
-	else
-		regs->regs[rd] = readl_relaxed(smmu->common.base + off);
 
+	if (is_write) {
+		writel_relaxed(val & mask, smmu->common.base + off);
+		return true;
+	}
+
+	val = readl_relaxed(smmu->common.base + off);
+	if (!is_xzr)
+		regs->regs[rd] = val;
 	return true;
 }
 

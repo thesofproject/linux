@@ -758,9 +758,9 @@ static bool smmu_dabt_device(struct hyp_arm_smmu_v3_nested_device *nested_smmu,
 	const u64 no_access = 0;
 	u64 mask = no_access;
 	const u64 read_only = is_write ? no_access : read_write;
-	u64 val = regs->regs[rd];
 	struct hyp_arm_smmu_v3_device *smmu = &nested_smmu->common;
-
+	bool is_xzr = (rd == 31);
+	u64 val = is_xzr ? 0 : regs->regs[rd];
 
 	switch (off) {
 	case ARM_SMMU_IDR0:
@@ -774,7 +774,8 @@ static bool smmu_dabt_device(struct hyp_arm_smmu_v3_nested_device *nested_smmu,
 			WARN_ON(is_cmdq_enabled(nested_smmu));
 			nested_smmu->cmdq_host.q_base = val;
 		} else {
-			regs->regs[rd] = nested_smmu->cmdq_host.q_base;
+			val = nested_smmu->cmdq_host.q_base;
+			goto out_update_regs;
 		}
 		goto out_ret;
 	case ARM_SMMU_CMDQ_PROD:
@@ -782,7 +783,8 @@ static bool smmu_dabt_device(struct hyp_arm_smmu_v3_nested_device *nested_smmu,
 			nested_smmu->cmdq_host.llq.prod = val;
 			smmu_emulate_cmdq_insert(nested_smmu);
 		} else {
-			regs->regs[rd] = nested_smmu->cmdq_host.llq.prod;
+			val = nested_smmu->cmdq_host.llq.prod;
+			goto out_update_regs;
 		}
 		goto out_ret;
 	case ARM_SMMU_CMDQ_CONS:
@@ -795,7 +797,8 @@ static bool smmu_dabt_device(struct hyp_arm_smmu_v3_nested_device *nested_smmu,
 			u32 cons = readl_relaxed(smmu->base + ARM_SMMU_CMDQ_CONS);
 			u32 err = CMDQ_CONS_ERR & cons;
 
-			regs->regs[rd] = nested_smmu->cmdq_host.llq.cons | err;
+			val = nested_smmu->cmdq_host.llq.cons | err;
+			goto out_update_regs;
 		}
 		goto out_ret;
 	case ARM_SMMU_STRTAB_BASE:
@@ -814,8 +817,10 @@ static bool smmu_dabt_device(struct hyp_arm_smmu_v3_nested_device *nested_smmu,
 		goto out_ret;
 	case ARM_SMMU_GBPA:
 		/* Ignore write, always read to abort. */
-		if (!is_write)
-			regs->regs[rd] = GBPA_ABORT;
+		if (!is_write) {
+			val = GBPA_ABORT;
+			goto out_update_regs;
+		}
 
 		WARN_ON(len != sizeof(u32));
 		goto out_ret;
@@ -896,16 +901,24 @@ static bool smmu_dabt_device(struct hyp_arm_smmu_v3_nested_device *nested_smmu,
 
 	if (is_write) {
 		if (len == sizeof(u64))
-			writeq_relaxed(regs->regs[rd] & mask, smmu->base + off);
+			writeq_relaxed(val & mask, smmu->base + off);
 		else
-			writel_relaxed(regs->regs[rd] & mask, smmu->base + off);
+			writel_relaxed(val & mask, smmu->base + off);
+		return true;
 	} else {
 		if (len == sizeof(u64))
-			regs->regs[rd] = readq_relaxed(smmu->base + off) & mask;
+			val = readq_relaxed(smmu->base + off) & mask;
 		else
-			regs->regs[rd] = readl_relaxed(smmu->base + off) & mask;
+			val = readl_relaxed(smmu->base + off) & mask;
 	}
 
+out_update_regs:
+	/*
+	 * Device might be read senstive, so do it but ignore writing
+	 * back for xzr.
+	 */
+	if (!is_xzr)
+		regs->regs[rd] = val;
 out_ret:
 	return true;
 }
