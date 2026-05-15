@@ -176,13 +176,6 @@ static int smmu_tlb_inv_range_smmu(struct hyp_arm_smmu_v3_device *smmu,
 static void smmu_tlb_inv_range(unsigned long iova, size_t size, size_t granule,
 			       bool leaf)
 {
-	struct arm_smmu_cmdq_ent cmd = {
-		.opcode = CMDQ_OP_TLBI_S2_IPA,
-		.tlbi = {
-			.leaf = leaf,
-			.vmid = 0,
-		},
-	};
 	struct arm_smmu_cmdq_ent cmd_s1 = {
 		.opcode = CMDQ_OP_TLBI_NH_ALL,
 		.tlbi = {
@@ -192,6 +185,14 @@ static void smmu_tlb_inv_range(unsigned long iova, size_t size, size_t granule,
 	struct hyp_arm_smmu_v3_nested_device *nested_smmu;
 
 	for_each_smmu(nested_smmu) {
+		struct arm_smmu_cmdq_ent cmd = {
+			.opcode = CMDQ_OP_TLBI_S2_IPA,
+			.tlbi = {
+				.leaf = leaf,
+				.vmid = 0,
+			},
+		};
+
 		kvm_smmu_lock(&nested_smmu->common);
 		/*
 		 * Don't bother if SMMU is disabled, this would be useful for the case

@@ -1386,15 +1386,16 @@ static void smmu_tlb_inv_range_idmap(unsigned long iova, size_t size, size_t gra
 				     bool leaf)
 {
 	struct hyp_arm_smmu_v3_device_pv *smmu;
-	struct arm_smmu_cmdq_ent cmd = {
-		.opcode = CMDQ_OP_TLBI_S2_IPA,
-		.tlbi = {
-			.leaf = leaf,
-			.vmid = 0,
-		},
-	};
 
 	for_each_smmu(smmu) {
+		struct arm_smmu_cmdq_ent cmd = {
+			.opcode = CMDQ_OP_TLBI_S2_IPA,
+			.tlbi = {
+				.leaf = leaf,
+				.vmid = 0,
+			},
+		};
+
 		kvm_smmu_lock(&smmu->common);
 		if (!smmu->idmap_ref || smmu->power_is_off) {
 			kvm_smmu_unlock(&smmu->common);
