@@ -250,6 +250,11 @@ void __drm_printfn_line(struct drm_printer *p, struct va_format *vaf)
 }
 EXPORT_SYMBOL(__drm_printfn_line);
 
+void __drm_printfn_noop(struct drm_printer *p, struct va_format *vaf)
+{
+}
+EXPORT_SYMBOL(__drm_printfn_noop);
+
 /**
  * drm_puts - print a const string to a &drm_printer stream
  * @p: the &drm printer
