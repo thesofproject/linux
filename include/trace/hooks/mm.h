@@ -671,6 +671,12 @@ DECLARE_HOOK(android_vh_gcma_cc_allow_nonworkingset,
 DECLARE_HOOK(android_vh_gcma_cc_store_page_bypass,
 	TP_PROTO(bool *bypass),
 	TP_ARGS(bypass));
+DECLARE_HOOK(android_vh_exit_oom_victim,
+	TP_PROTO(struct task_struct *task),
+	TP_ARGS(task));
+DECLARE_HOOK(android_vh_oom_killer_disable,
+	TP_PROTO(int oom_victims),
+	TP_ARGS(oom_victims));
 #endif /* _TRACE_HOOK_MM_H */
 
 /* This part must be outside protection */
