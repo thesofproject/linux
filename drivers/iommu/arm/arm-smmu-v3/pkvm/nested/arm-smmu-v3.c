@@ -358,63 +358,39 @@ static void smmu_attach_stage_2(struct arm_smmu_ste *ste)
 	ste->data[0] |= FIELD_PREP(STRTAB_STE_0_CFG, cfg | BIT(1));
 }
 
-/* Get an STE for a stream table base. */
-static struct arm_smmu_ste *smmu_get_ste_ptr(struct hyp_arm_smmu_v3_device *smmu,
-					     u32 sid, u64 *strtab)
+static int smmu_get_host_l2_ste(struct hyp_arm_smmu_v3_nested_device *nested_smmu,
+				u32 sid, struct arm_smmu_ste *host_ste_out)
 {
-	struct arm_smmu_strtab_cfg *cfg = &smmu->strtab_cfg;
-	struct arm_smmu_ste *table = (struct arm_smmu_ste *)strtab;
-
-	if (smmu->features & ARM_SMMU_FEAT_2_LVL_STRTAB) {
-		struct arm_smmu_strtab_l1 *l1tab = (struct arm_smmu_strtab_l1 *)strtab;
-		u32 l1_idx = arm_smmu_strtab_l1_idx(sid);
-		struct arm_smmu_strtab_l2 *l2ptr;
-
-		if (WARN_ON(l1_idx >= cfg->l2.num_l1_ents) ||
-			!(l1tab[l1_idx].l2ptr & STRTAB_L1_DESC_SPAN))
-			return NULL;
-
-		l2ptr = hyp_phys_to_virt(l1tab[l1_idx].l2ptr & STRTAB_L1_DESC_L2PTR_MASK);
-		/* Two-level walk */
-		return &l2ptr->stes[arm_smmu_strtab_l2_idx(sid)];
-	}
-	if (WARN_ON(sid >= cfg->linear.num_ents))
-		return NULL;
-	return &table[sid];
-}
-
-static int smmu_shadow_l2_strtab(struct hyp_arm_smmu_v3_nested_device *nested_smmu, u32 sid)
-{
-	u32 idx = arm_smmu_strtab_l1_idx(sid);
 	u64 *host_ste_base = hyp_phys_to_virt(strtab_host_base(nested_smmu));
 	struct hyp_arm_smmu_v3_device *smmu = &nested_smmu->common;
-	struct arm_smmu_strtab_l1 *l1_desc = &smmu->strtab_cfg.l2.l1tab[idx];
-	u64 l1_desc_host;
-	struct arm_smmu_strtab_l2 *l2table;
+	struct arm_smmu_strtab_l1 host_l1_desc;
+	struct arm_smmu_strtab_l2 *l2ptr;
+	phys_addr_t host_l2_tab;
+	int ret;
 
-	l2table = kvm_iommu_donate_pages_atomic(get_order(sizeof(*l2table)));
-	if (!l2table)
-		return -ENOMEM;
+	host_l1_desc.l2ptr = le64_to_cpu(READ_ONCE(host_ste_base[arm_smmu_strtab_l1_idx(sid)]));
+	if (!(host_l1_desc.l2ptr & STRTAB_L1_DESC_SPAN))
+		return -EINVAL;
 
-	if (!(smmu->features & ARM_SMMU_FEAT_COHERENCY))
-		kvm_flush_dcache_to_poc(&host_ste_base[idx], sizeof(*l1_desc));
-	l1_desc_host = host_ste_base[idx];
+	host_l2_tab = host_l1_desc.l2ptr & STRTAB_L1_DESC_L2PTR_MASK;
+	/* Share and pin the table before accessing it. */
+	ret = smmu_share_pages(host_l2_tab, sizeof(struct arm_smmu_strtab_l2));
+	if (ret)
+		return ret;
 
-	arm_smmu_write_strtab_l1_desc(l1_desc, hyp_virt_to_phys(l2table));
-	if (!(smmu->features & ARM_SMMU_FEAT_COHERENCY))
-		kvm_flush_dcache_to_poc(l1_desc, sizeof(*l1_desc));
-
-	smmu_share_pages(l1_desc_host & STRTAB_L1_DESC_L2PTR_MASK, sizeof(*l2table));
+	l2ptr = hyp_phys_to_virt(host_l2_tab);
+	smmu_copy_from_host(smmu, host_ste_out, &l2ptr->stes[arm_smmu_strtab_l2_idx(sid)],
+			    STRTAB_STE_DWORDS << 3);
+	WARN_ON(smmu_unshare_pages(host_l2_tab, sizeof(struct arm_smmu_strtab_l2)));
 	return 0;
 }
 
-static void smmu_reshadow_ste(struct hyp_arm_smmu_v3_nested_device *nested_smmu, u32 sid, bool leaf)
+static int smmu_reshadow_ste(struct hyp_arm_smmu_v3_nested_device *nested_smmu, u32 sid, bool leaf)
 {
 	struct hyp_arm_smmu_v3_device *smmu = &nested_smmu->common;
-	u64 *host_ste_base = hyp_phys_to_virt(strtab_host_base(nested_smmu));
+	struct arm_smmu_strtab_cfg *cfg = &smmu->strtab_cfg;
 	u64 *hyp_ste_base = strtab_hyp_base(smmu);
-	struct arm_smmu_ste *host_ste_ptr = smmu_get_ste_ptr(smmu, sid, host_ste_base);
-	struct arm_smmu_ste *hyp_ste_ptr = smmu_get_ste_ptr(smmu, sid, hyp_ste_base);
+	struct arm_smmu_ste *hyp_ste_ptr;
 	struct arm_smmu_ste target = {};
 	struct arm_smmu_cmdq_ent cfgi_cmd = {
 		.opcode	= CMDQ_OP_CFGI_STE,
@@ -423,24 +399,54 @@ static void smmu_reshadow_ste(struct hyp_arm_smmu_v3_nested_device *nested_smmu,
 			.leaf	= true,
 		},
 	};
-	int i;
+	int i, ret;
 
 	/*
 	 * Linux only uses leaf = 1, when leaf is 0, we need to verify that this
 	 * is a 2 level table and reshadow of l2.
 	 * Also Linux never clears l1 ptr, that needs to free the old shadow.
 	 */
-	if (WARN_ON(!leaf || !host_ste_ptr))
-		return;
+	if (!leaf || sid >= (1UL << strtab_log2size(nested_smmu)) ||
+	    !is_smmu_enabled(nested_smmu))
+		return -EINVAL;
 
-	/* If host is valid and hyp is not, means a new L1 installed. */
-	if (!hyp_ste_ptr) {
-		WARN_ON(smmu_shadow_l2_strtab(nested_smmu, sid));
-		hyp_ste_ptr = smmu_get_ste_ptr(smmu, sid, hyp_ste_base);
+	if (!(smmu->features & ARM_SMMU_FEAT_2_LVL_STRTAB)) {
+		struct arm_smmu_ste *hyp_table = (struct arm_smmu_ste *)hyp_ste_base;
+		u64 *host_ste_base = hyp_phys_to_virt(strtab_host_base(nested_smmu));
+		struct arm_smmu_ste *host_table = (struct arm_smmu_ste *)host_ste_base;
+
+		if (sid >= cfg->linear.num_ents)
+			return -E2BIG;
+
+		hyp_ste_ptr = &hyp_table[sid];
+		smmu_copy_from_host(smmu, target.data, host_table[sid].data,
+				    STRTAB_STE_DWORDS << 3);
+	} else {
+		struct arm_smmu_strtab_l1 *l1tab = (struct arm_smmu_strtab_l1 *)hyp_ste_base;
+		u32 l1_idx = arm_smmu_strtab_l1_idx(sid);
+		struct arm_smmu_strtab_l2 *l2ptr;
+
+		if (l1_idx >= cfg->l2.num_l1_ents)
+			return -E2BIG;
+
+		ret = smmu_get_host_l2_ste(nested_smmu, sid, &target);
+		if (ret)
+			return ret;
+
+		if (!l1tab[l1_idx].l2ptr) {
+			struct arm_smmu_strtab_l2 *l2table;
+
+			/* No hypervisor entry, first time the L2 is populated. */
+			l2table = kvm_iommu_donate_pages_atomic(get_order(sizeof(*l2table)));
+			if (!l2table)
+				return -ENOMEM;
+			arm_smmu_write_strtab_l1_desc(&l1tab[l1_idx], hyp_virt_to_phys(l2table));
+		}
+		l2ptr = hyp_phys_to_virt(le64_to_cpu(l1tab[l1_idx].l2ptr) &
+				STRTAB_L1_DESC_L2PTR_MASK);
+		hyp_ste_ptr = &l2ptr->stes[arm_smmu_strtab_l2_idx(sid)];
 	}
 
-	smmu_copy_from_host(smmu, target.data, host_ste_ptr->data,
-			    STRTAB_STE_DWORDS << 3);
 	/*
 	 * Typically, STE update is done as the following
 	 * 1- Write last 7 dwords, while STE is invalid
@@ -465,6 +471,7 @@ static void smmu_reshadow_ste(struct hyp_arm_smmu_v3_nested_device *nested_smmu,
 
 	WARN_ON(smmu_send_cmd(smmu, &cfgi_cmd));
 	WRITE_ONCE(hyp_ste_ptr->data[0], target.data[0]);
+	return 0;
 }
 
 static int smmu_init_strtab(struct hyp_arm_smmu_v3_nested_device *nested_smmu)
@@ -631,7 +638,7 @@ static bool smmu_filter_command(struct hyp_arm_smmu_v3_nested_device *smmu, u64 
 		u32 sid = FIELD_GET(CMDQ_CFGI_0_SID, command[0]);
 		u32 leaf = FIELD_GET(CMDQ_CFGI_1_LEAF, command[1]);
 
-		smmu_reshadow_ste(smmu, sid, leaf);
+		WARN_ON(smmu_reshadow_ste(smmu, sid, leaf));
 		break;
 	}
 	case CMDQ_OP_CFGI_ALL:
