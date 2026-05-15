@@ -1329,6 +1329,7 @@ static int smmu_host_stage2_idmap(phys_addr_t start, phys_addr_t end, int prot)
 	size_t mapped, unmapped;
 	int ret;
 	struct io_pgtable *pgtable = idmap_pgtable;
+	struct iommu_iotlb_gather gather;
 
 	end = min(end, BIT(pgtable->cfg.oas));
 	if (start >= end)
@@ -1356,10 +1357,11 @@ static int smmu_host_stage2_idmap(phys_addr_t start, phys_addr_t end, int prot)
 		}
 	} else {
 		while (size) {
+			iommu_iotlb_gather_init(&gather);
 			pgsize = smmu_pgsize_idmap(size, start, pgtable->cfg.pgsize_bitmap);
 			pgcount = size / pgsize;
 			unmapped = pgtable->ops.unmap_pages(&pgtable->ops, start,
-							    pgsize, pgcount, NULL);
+							    pgsize, pgcount, &gather);
 			if (!unmapped)
 				break;
 
