@@ -3784,6 +3784,11 @@ pointer_reference {
   pointee_type_id: 0x1ac9bc7c
 }
 pointer_reference {
+  id: 0x0c225e5c
+  kind: POINTER
+  pointee_type_id: 0x1ac99fee
+}
+pointer_reference {
   id: 0x0c22919d
   kind: POINTER
   pointee_type_id: 0x1acaa0e8
@@ -11532,6 +11537,11 @@ pointer_reference {
   id: 0x1abdb0ad
   kind: POINTER
   pointee_type_id: 0x40b6242b
+}
+pointer_reference {
+  id: 0x1ac99fee
+  kind: POINTER
+  pointee_type_id: 0x41669927
 }
 pointer_reference {
   id: 0x1aca7048
@@ -289900,6 +289910,11 @@ struct_union {
   }
 }
 struct_union {
+  id: 0x41669927
+  kind: STRUCT
+  name: "swap_iocb"
+}
+struct_union {
   id: 0x1fc5e84f
   kind: STRUCT
   name: "swap_sequential_cluster"
@@ -340813,6 +340828,15 @@ function {
   return_type_id: 0x18bd6530
   parameter_id: 0x052fac00
   parameter_id: 0x6720d32f
+}
+function {
+  id: 0x5642f564
+  return_type_id: 0x2170d06d
+  parameter_id: 0x27162aac
+  parameter_id: 0xf1a6dfed
+  parameter_id: 0x0a134144
+  parameter_id: 0x33756485
+  parameter_id: 0x0c225e5c
 }
 function {
   id: 0x56430286
@@ -434854,6 +434878,15 @@ elf_symbol {
   full_name: "read_comp_algo_dictionary"
 }
 elf_symbol {
+  id: 0x04f125b0
+  name: "read_swap_cache_async"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x6aacb209
+  type_id: 0x5642f564
+  full_name: "read_swap_cache_async"
+}
+elf_symbol {
   id: 0x2886690b
   name: "readahead_gfp_mask"
   is_defined: true
@@ -461931,6 +461964,7 @@ interface {
   symbol_id: 0x87a9e1a0
   symbol_id: 0x5b227eda
   symbol_id: 0x94f761df
+  symbol_id: 0x04f125b0
   symbol_id: 0x2886690b
   symbol_id: 0x46082c90
   symbol_id: 0x590d247f
