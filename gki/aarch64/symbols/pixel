@@ -2097,6 +2097,10 @@
   __traceiter_android_vh_cpu_idle_enter
   __traceiter_android_vh_cpu_idle_exit
   __traceiter_android_vh_ipi_stop
+  __traceiter_android_vh_platform_pci_choose_state
+  __traceiter_android_vh_platform_pci_get_power_state
+  __traceiter_android_vh_platform_pci_power_manageable
+  __traceiter_android_vh_platform_pci_set_power_state
   __traceiter_android_vh_rust_binder_restore_priority
   __traceiter_android_vh_rust_binder_set_priority
   __traceiter_android_vh_scheduler_tick
@@ -2128,6 +2132,10 @@
   __tracepoint_android_vh_cpu_idle_enter
   __tracepoint_android_vh_cpu_idle_exit
   __tracepoint_android_vh_ipi_stop
+  __tracepoint_android_vh_platform_pci_choose_state
+  __tracepoint_android_vh_platform_pci_get_power_state
+  __tracepoint_android_vh_platform_pci_power_manageable
+  __tracepoint_android_vh_platform_pci_set_power_state
   __tracepoint_android_vh_rust_binder_restore_priority
   __tracepoint_android_vh_rust_binder_set_priority
   __tracepoint_android_vh_scheduler_tick
