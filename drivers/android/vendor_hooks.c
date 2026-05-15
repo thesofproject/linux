@@ -47,6 +47,7 @@
 #include <trace/hooks/module.h>
 #include <trace/hooks/mpam.h>
 #include <trace/hooks/net.h>
+#include <trace/hooks/pci.h>
 #include <trace/hooks/pm_domain.h>
 #include <trace/hooks/power.h>
 #include <trace/hooks/preemptirq.h>
@@ -466,6 +467,10 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_percpu_rwsem_down_read);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_percpu_rwsem_init);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_percpu_rwsem_up_write);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_percpu_rwsem_wq_add);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_platform_pci_choose_state);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_platform_pci_get_power_state);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_platform_pci_power_manageable);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_platform_pci_set_power_state);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_post_alloc_hook);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_post_image_save);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_print_slabinfo_header);
