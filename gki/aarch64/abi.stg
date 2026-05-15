@@ -382631,6 +382631,24 @@ elf_symbol {
   full_name: "__traceiter_android_vh_customize_thp_gfp_orders"
 }
 elf_symbol {
+  id: 0x17df4128
+  name: "__traceiter_android_vh_direct_reclaim_begin"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xa5578c91
+  type_id: 0x9be2da56
+  full_name: "__traceiter_android_vh_direct_reclaim_begin"
+}
+elf_symbol {
+  id: 0x5db6a094
+  name: "__traceiter_android_vh_direct_reclaim_end"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x4b2f86ab
+  type_id: 0x9a33392f
+  full_name: "__traceiter_android_vh_direct_reclaim_end"
+}
+elf_symbol {
   id: 0x6664371a
   name: "__traceiter_android_vh_dma_buf_release"
   is_defined: true
@@ -382692,6 +382710,15 @@ elf_symbol {
   crc: 0x19bf426c
   type_id: 0x9b555b6b
   full_name: "__traceiter_android_vh_do_futex"
+}
+elf_symbol {
+  id: 0xb5020a7f
+  name: "__traceiter_android_vh_do_group_exit"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x6d2f6728
+  type_id: 0x9bdbdcc4
+  full_name: "__traceiter_android_vh_do_group_exit"
 }
 elf_symbol {
   id: 0xed8d5c18
@@ -383781,6 +383808,15 @@ elf_symbol {
   crc: 0x8f087706
   type_id: 0x9b6e7eec
   full_name: "__traceiter_android_vh_map_util_freq"
+}
+elf_symbol {
+  id: 0xe0099970
+  name: "__traceiter_android_vh_mark_folio_accessed"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xf5a220b0
+  type_id: 0x9b2a7922
+  full_name: "__traceiter_android_vh_mark_folio_accessed"
 }
 elf_symbol {
   id: 0xdea07d28
@@ -389039,6 +389075,24 @@ elf_symbol {
   full_name: "__tracepoint_android_vh_customize_thp_gfp_orders"
 }
 elf_symbol {
+  id: 0x749563a6
+  name: "__tracepoint_android_vh_direct_reclaim_begin"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_vh_direct_reclaim_begin"
+}
+elf_symbol {
+  id: 0x694ad7a6
+  name: "__tracepoint_android_vh_direct_reclaim_end"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_vh_direct_reclaim_end"
+}
+elf_symbol {
   id: 0x7bbd7744
   name: "__tracepoint_android_vh_dma_buf_release"
   is_defined: true
@@ -389100,6 +389154,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_vh_do_futex"
+}
+elf_symbol {
+  id: 0xa628b8f1
+  name: "__tracepoint_android_vh_do_group_exit"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_vh_do_group_exit"
 }
 elf_symbol {
   id: 0x47925dca
@@ -390189,6 +390252,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_vh_map_util_freq"
+}
+elf_symbol {
+  id: 0x2bd3fbd2
+  name: "__tracepoint_android_vh_mark_folio_accessed"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_vh_mark_folio_accessed"
 }
 elf_symbol {
   id: 0x03845c7a
@@ -456168,6 +456240,8 @@ interface {
   symbol_id: 0x96cfd964
   symbol_id: 0xecf16451
   symbol_id: 0x3444cc6c
+  symbol_id: 0x17df4128
+  symbol_id: 0x5db6a094
   symbol_id: 0x6664371a
   symbol_id: 0x94b48bb0
   symbol_id: 0xbcd1a27c
@@ -456175,6 +456249,7 @@ interface {
   symbol_id: 0xb7d9e03a
   symbol_id: 0x9f9229ec
   symbol_id: 0xd593b3ef
+  symbol_id: 0xb5020a7f
   symbol_id: 0xed8d5c18
   symbol_id: 0x707cf8c6
   symbol_id: 0xea6452e1
@@ -456296,6 +456371,7 @@ interface {
   symbol_id: 0x0e1f9e23
   symbol_id: 0x8399021c
   symbol_id: 0x61ea12b8
+  symbol_id: 0xe0099970
   symbol_id: 0xdea07d28
   symbol_id: 0x1bfed9f9
   symbol_id: 0x44892f77
@@ -456880,6 +456956,8 @@ interface {
   symbol_id: 0x611b30be
   symbol_id: 0xc2fde553
   symbol_id: 0x66823d32
+  symbol_id: 0x749563a6
+  symbol_id: 0x694ad7a6
   symbol_id: 0x7bbd7744
   symbol_id: 0x30442e2e
   symbol_id: 0x9d32ef5e
@@ -456887,6 +456965,7 @@ interface {
   symbol_id: 0x066e59a8
   symbol_id: 0xfbc457d6
   symbol_id: 0x9fe99d05
+  symbol_id: 0xa628b8f1
   symbol_id: 0x47925dca
   symbol_id: 0xb75a1654
   symbol_id: 0xff7bbbff
@@ -457008,6 +457087,7 @@ interface {
   symbol_id: 0xc34a5545
   symbol_id: 0x026c48c6
   symbol_id: 0x00a5fe5e
+  symbol_id: 0x2bd3fbd2
   symbol_id: 0x03845c7a
   symbol_id: 0x6377ba8b
   symbol_id: 0x013b5969
