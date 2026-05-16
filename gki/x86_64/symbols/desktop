@@ -3706,3 +3706,5 @@
   zlib_inflateEnd
   zlib_inflateInit2
   zlib_inflate_workspacesize
+__drm_debug_trace
+__drm_printfn_trace

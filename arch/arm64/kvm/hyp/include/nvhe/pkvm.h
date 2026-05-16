@@ -189,6 +189,8 @@ u64 pkvm_time_get(void);
 struct kvm_power_domain_ops {
 	int (*power_on)(struct kvm_power_domain *pd);
 	int (*power_off)(struct kvm_power_domain *pd);
+	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_RESERVE(2);
 };
 
 int pkvm_init_hvc_pd(struct kvm_power_domain *pd,
