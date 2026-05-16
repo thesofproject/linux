@@ -495,9 +495,9 @@ DECLARE_HOOK(android_vh_mark_folio_accessed,
 	TP_PROTO(struct folio *folio),
 	TP_ARGS(folio));
 DECLARE_HOOK(android_vh_filemap_map_pages,
-	TP_PROTO(struct file *file, pgoff_t first_pgoff,
+	TP_PROTO(struct file *file, pgoff_t orig_start_pgoff, pgoff_t first_pgoff,
 		pgoff_t last_pgoff, vm_fault_t ret),
-	TP_ARGS(file, first_pgoff, last_pgoff, ret));
+	TP_ARGS(file, orig_start_pgoff, first_pgoff, last_pgoff, ret));
 DECLARE_HOOK(android_vh_zs_shrinker_adjust,
 	TP_PROTO(unsigned long *pages_to_free),
 	TP_ARGS(pages_to_free));

@@ -3908,12 +3908,14 @@ vm_fault_t filemap_map_pages(struct vm_fault *vmf,
 	unsigned int nr_pages = 0, folio_type;
 	unsigned short mmap_miss = 0, mmap_miss_saved;
 	pgoff_t first_pgoff = 0;
+	pgoff_t orig_start_pgoff = start_pgoff;
 
 	rcu_read_lock();
 	folio = next_uptodate_folio(&xas, mapping, end_pgoff);
 	if (!folio)
 		goto out;
 	first_pgoff = xas.xa_index;
+	orig_start_pgoff = xas.xa_index;
 
 	file_end = DIV_ROUND_UP(i_size_read(mapping->host), PAGE_SIZE) - 1;
 	end_pgoff = min(end_pgoff, file_end);
@@ -3972,7 +3974,8 @@ out:
 		WRITE_ONCE(file->f_ra.mmap_miss, 0);
 	else
 		WRITE_ONCE(file->f_ra.mmap_miss, mmap_miss_saved - mmap_miss);
-	trace_android_vh_filemap_map_pages(file, first_pgoff, last_pgoff, ret);
+	trace_android_vh_filemap_map_pages(file, orig_start_pgoff,
+					first_pgoff, last_pgoff, ret);
 
 	return ret;
 }
