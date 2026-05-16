@@ -5,6 +5,7 @@
  */
 
 #include <linux/kvm_host.h>
+
 #include <asm/kvm_emulate.h>
 #include <asm/kvm_hyp.h>
 #include <asm/kvm_hypevents.h>
@@ -15,6 +16,7 @@
 
 #include <hyp/fault.h>
 
+#include <nvhe/arm-smccc.h>
 #include <nvhe/errno.h>
 #include <nvhe/gfp.h>
 #include <nvhe/iommu.h>
@@ -72,6 +74,19 @@ void make_host_stage2_reclaimable(void)
 
 static DEFINE_PER_CPU(struct pkvm_hyp_vm *, __current_vm);
 #define current_vm (*this_cpu_ptr(&__current_vm))
+
+static void pkvm_sme_dvmsync_fw_call(void)
+{
+	if (alternative_has_cap_unlikely(ARM64_WORKAROUND_4193714)) {
+		struct arm_smccc_res res;
+
+		/*
+		 * Ignore the return value. Probing for the workaround
+		 * availability took place in init_hyp_mode().
+		 */
+		arm_smccc_1_1_smc(ARM_SMCCC_CPU_WORKAROUND_4193714, &res);
+	}
+}
 
 static struct kvm_pgtable_pte_ops host_s2_pte_ops;
 static bool host_stage2_force_pte(u64 addr, u64 end, enum kvm_pgtable_prot prot);
