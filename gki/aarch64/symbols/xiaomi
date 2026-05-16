@@ -172,6 +172,13 @@
   prep_new_page
   folio_isolate_lru
 
+
+# required by launch_boost driver
+  __traceiter_android_vh_filemap_read
+  __tracepoint_android_vh_filemap_read
+  __traceiter_android_vh_filemap_map_pages
+  __tracepoint_android_vh_filemap_map_pages
+
 # required by kmem_protect.ko
   __traceiter_android_vh_free_mod_mem
   __traceiter_android_vh_set_mod_perm_after_init
