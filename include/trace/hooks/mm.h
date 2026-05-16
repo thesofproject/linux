@@ -59,7 +59,7 @@ DECLARE_RESTRICTED_HOOK(android_rvh_bitmap_find_best_next_area,
 			unsigned long mask,
 			unsigned long offset,
 			unsigned long *bitmap_no,
-			bool status),
+			unsigned long status),
 		TP_ARGS(bitmap, bitmap_maxno, start, bitmap_count, mask,
 			offset, bitmap_no, status), 1);
 
