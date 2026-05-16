@@ -1214,6 +1214,8 @@ isolate_success_no_list:
 		cc->nr_migratepages += folio_nr_pages(folio);
 		nr_isolated += folio_nr_pages(folio);
 		nr_scanned += folio_nr_pages(folio) - 1;
+		if (!folio_test_anon(folio))
+			cc->nr_migrate_file_pages += folio_nr_pages(folio);
 
 		/*
 		 * Avoid isolating too much unless this block is being
@@ -1253,6 +1255,7 @@ isolate_fail:
 			}
 			putback_movable_pages(&cc->migratepages);
 			cc->nr_migratepages = 0;
+			cc->nr_migrate_file_pages = 0;
 			nr_isolated = 0;
 		}
 
@@ -1406,6 +1409,10 @@ static bool suitable_migration_target(struct compact_control *cc,
 
 	if (cc->ignore_block_suitable)
 		return true;
+
+	/* Allow file pages to migrate only into MIGRATE_MOVABLE blocks */
+	if (cc->nr_migrate_file_pages)
+		return get_pageblock_migratetype(page) == MIGRATE_MOVABLE;
 
 	/* If the block is MIGRATE_MOVABLE or MIGRATE_CMA, allow migration */
 	if (is_migrate_movable(get_pageblock_migratetype(page)))
@@ -2645,6 +2652,7 @@ rescan:
 			ret = COMPACT_CONTENDED;
 			putback_movable_pages(&cc->migratepages);
 			cc->nr_migratepages = 0;
+			cc->nr_migrate_file_pages = 0;
 			goto out;
 		case ISOLATE_NONE:
 			if (update_cached) {
@@ -2678,6 +2686,7 @@ rescan:
 
 		/* All pages were either migrated or will be released */
 		cc->nr_migratepages = 0;
+		cc->nr_migrate_file_pages = 0;
 		if (err) {
 			putback_movable_pages(&cc->migratepages);
 			/*
