@@ -111,6 +111,7 @@ static struct plist_head *swap_avail_heads;
 static DEFINE_SPINLOCK(swap_avail_lock);
 
 struct swap_info_struct *swap_info[MAX_SWAPFILES];
+EXPORT_SYMBOL_GPL(swap_info);
 
 static struct kmem_cache *swap_table_cachep;
 
