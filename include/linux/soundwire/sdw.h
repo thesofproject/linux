@@ -659,7 +659,7 @@ struct sdw_slave_ops {
  * for a Slave happens for the first time after enumeration
  * @is_mockup_device: status flag used to squelch errors in the command/control
  * protocol for SoundWire mockup devices
- * @sdw_dev_lock: mutex used to protect callbacks/remove races
+ * @probe_remove_lock: mutex used to protect callbacks/remove races
  * @sdca_data: structure containing all device data for SDCA helpers
  */
 struct sdw_slave {
@@ -684,7 +684,7 @@ struct sdw_slave {
 	u32 unattach_request;
 	bool first_interrupt_done;
 	bool is_mockup_device;
-	struct mutex sdw_dev_lock; /* protect callbacks/remove races */
+	struct mutex probe_remove_lock;
 	struct sdca_device_data sdca_data;
 };
 

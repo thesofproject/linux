@@ -2,6 +2,8 @@
 // Copyright(c) 2015-17 Intel Corporation.
 
 #include <linux/acpi.h>
+#include <linux/cleanup.h>
+#include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_type.h>
@@ -9,12 +11,27 @@
 #include "bus.h"
 #include "sysfs_local.h"
 
+struct device *sdw_slave_device_get(struct sdw_slave *slave)
+{
+	guard(mutex)(&slave->probe_remove_lock);
+
+	if (!slave->probed)
+		return NULL;
+
+	return get_device(&slave->dev);
+}
+
+void sdw_slave_device_put(struct sdw_slave *slave)
+{
+	put_device(&slave->dev);
+}
+
 static void sdw_slave_release(struct device *dev)
 {
 	struct sdw_slave *slave = dev_to_sdw_dev(dev);
 
 	of_node_put(slave->dev.of_node);
-	mutex_destroy(&slave->sdw_dev_lock);
+	mutex_destroy(&slave->probe_remove_lock);
 	kfree(slave);
 }
 
@@ -64,7 +81,7 @@ int sdw_slave_add(struct sdw_bus *bus,
 	slave->dev_num = 0;
 	slave->probed = false;
 	slave->first_interrupt_done = false;
-	mutex_init(&slave->sdw_dev_lock);
+	mutex_init(&slave->probe_remove_lock);
 
 	for (i = 0; i < SDW_MAX_PORTS; i++)
 		init_completion(&slave->port_ready[i]);

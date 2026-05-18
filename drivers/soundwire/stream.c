@@ -430,9 +430,7 @@ static int sdw_do_port_prep(struct sdw_slave_runtime *s_rt,
 	int ret = 0;
 	struct sdw_slave *slave = s_rt->slave;
 
-	mutex_lock(&slave->sdw_dev_lock);
-
-	if (slave->probed) {
+	if (sdw_slave_device_get(slave)) {
 		struct device *dev = &slave->dev;
 		struct sdw_driver *drv = drv_to_sdw_driver(dev->driver);
 
@@ -442,9 +440,9 @@ static int sdw_do_port_prep(struct sdw_slave_runtime *s_rt,
 				dev_err(dev, "Slave Port Prep cmd %d failed: %d\n",
 					cmd, ret);
 		}
-	}
 
-	mutex_unlock(&slave->sdw_dev_lock);
+		sdw_slave_device_put(slave);
+	}
 
 	return ret;
 }
@@ -642,9 +640,7 @@ static int sdw_notify_config(struct sdw_master_runtime *m_rt)
 	list_for_each_entry(s_rt, &m_rt->slave_rt_list, m_rt_node) {
 		slave = s_rt->slave;
 
-		mutex_lock(&slave->sdw_dev_lock);
-
-		if (slave->probed) {
+		if (sdw_slave_device_get(slave)) {
 			struct device *dev = &slave->dev;
 			struct sdw_driver *drv = drv_to_sdw_driver(dev->driver);
 
@@ -653,13 +649,13 @@ static int sdw_notify_config(struct sdw_master_runtime *m_rt)
 				if (ret < 0) {
 					dev_err(dev, "Notify Slave: %d failed\n",
 						slave->dev_num);
-					mutex_unlock(&slave->sdw_dev_lock);
+					sdw_slave_device_put(slave);
 					return ret;
 				}
 			}
-		}
 
-		mutex_unlock(&slave->sdw_dev_lock);
+			sdw_slave_device_put(slave);
+		}
 	}
 
 	return 0;

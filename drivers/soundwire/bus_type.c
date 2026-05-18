@@ -112,7 +112,7 @@ static int sdw_bus_probe(struct device *dev)
 		return ret;
 	}
 
-	mutex_lock(&slave->sdw_dev_lock);
+	mutex_lock(&slave->probe_remove_lock);
 
 	/* device is probed so let's read the properties now */
 	if (drv->ops && drv->ops->read_prop)
@@ -151,7 +151,7 @@ static int sdw_bus_probe(struct device *dev)
 			dev_warn(dev, "failed to update status at probe: %d\n", ret);
 	}
 
-	mutex_unlock(&slave->sdw_dev_lock);
+	mutex_unlock(&slave->probe_remove_lock);
 
 	dev_dbg(dev, "probe complete\n");
 
@@ -163,11 +163,11 @@ static void sdw_bus_remove(struct device *dev)
 	struct sdw_slave *slave = dev_to_sdw_dev(dev);
 	struct sdw_driver *drv = drv_to_sdw_driver(dev->driver);
 
-	mutex_lock(&slave->sdw_dev_lock);
+	mutex_lock(&slave->probe_remove_lock);
 
 	slave->probed = false;
 
-	mutex_unlock(&slave->sdw_dev_lock);
+	mutex_unlock(&slave->probe_remove_lock);
 
 	if (drv->remove)
 		drv->remove(slave);

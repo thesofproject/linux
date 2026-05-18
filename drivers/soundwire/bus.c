@@ -962,17 +962,15 @@ static int sdw_slave_clk_stop_callback(struct sdw_slave *slave,
 {
 	int ret = 0;
 
-	mutex_lock(&slave->sdw_dev_lock);
-
-	if (slave->probed)  {
+	if (sdw_slave_device_get(slave)) {
 		struct device *dev = &slave->dev;
 		struct sdw_driver *drv = drv_to_sdw_driver(dev->driver);
 
 		if (drv->ops && drv->ops->clk_stop)
 			ret = drv->ops->clk_stop(slave, mode, type);
-	}
 
-	mutex_unlock(&slave->sdw_dev_lock);
+		sdw_slave_device_put(slave);
+	}
 
 	return ret;
 }
@@ -1799,9 +1797,7 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 			if (slave->prop.use_domain_irq && slave->irq)
 				handle_nested_irq(slave->irq);
 
-			mutex_lock(&slave->sdw_dev_lock);
-
-			if (slave->probed) {
+			if (sdw_slave_device_get(slave)) {
 				struct device *dev = &slave->dev;
 				struct sdw_driver *drv = drv_to_sdw_driver(dev->driver);
 
@@ -1813,9 +1809,9 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 
 					drv->ops->interrupt_callback(slave, &slave_intr);
 				}
-			}
 
-			mutex_unlock(&slave->sdw_dev_lock);
+				sdw_slave_device_put(slave);
+			}
 		}
 
 		/* Ack interrupt */
@@ -1887,17 +1883,15 @@ static int sdw_update_slave_status(struct sdw_slave *slave,
 {
 	int ret = 0;
 
-	mutex_lock(&slave->sdw_dev_lock);
-
-	if (slave->probed) {
+	if (sdw_slave_device_get(slave)) {
 		struct device *dev = &slave->dev;
 		struct sdw_driver *drv = drv_to_sdw_driver(dev->driver);
 
 		if (drv->ops && drv->ops->update_status)
 			ret = drv->ops->update_status(slave, status);
-	}
 
-	mutex_unlock(&slave->sdw_dev_lock);
+		sdw_slave_device_put(slave);
+	}
 
 	return ret;
 }
