@@ -1164,6 +1164,7 @@ retry:
 		bool bypass = false;
 		bool activate = false;
 		bool keep = false;
+		bool try_release = false;
 
 		cond_resched();
 
@@ -1411,6 +1412,17 @@ retry:
 				 */
 				folio_mark_dirty(folio);
 			}
+		}
+
+		trace_android_vh_shrink_try_release_folio(folio, &try_release);
+		if (try_release) {
+			trace_android_vh_shrink_folio_lock_owner_clear(folio);
+			folio_unlock(folio);
+			if (folio_put_testzero(folio))
+				goto free_it;
+
+			nr_reclaimed += nr_pages;
+			continue;
 		}
 
 		/*
