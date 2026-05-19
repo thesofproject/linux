@@ -1698,6 +1698,7 @@ ddk_headers(
         ":all_headers_allowlist_aarch64_globs",
         ":all_headers_allowlist_common_globs",
         ":all_headers_allowlist_exynos",
+        ":all_headers_allowlist_vivo",
         ":pkvm_headers_aarch64",
         ":xhci_headers",
     ],
@@ -1869,6 +1870,19 @@ devicetree_library(
     includes = ["arch/arm64/boot/dts/exynos/google"],
     visibility = ["//devices/google:__subpackages__"],
     deps = ["//common:dtc_includes_aarch64"],
+)
+
+ddk_headers(
+    name = "all_headers_allowlist_vivo",
+    hdrs = [
+        "fs/f2fs/f2fs.h",
+        "fs/f2fs/iostat.h",
+        "fs/f2fs/node.h",
+        "fs/f2fs/segment.h",
+        "mm/internal.h",
+        "mm/swap.h",
+    ],
+    visibility = ["//visibility:private"],
 )
 
 _KSELFTEST_DIR = "testcases/selftests"

@@ -1543,6 +1543,7 @@ int fuse_mkdir_backing(
 					backing_path.dentry, mode);
 	if (IS_ERR(backing_path.dentry)) {
 		err = PTR_ERR(backing_path.dentry);
+		backing_path.dentry = NULL;  // Safe - vfs_mkdir already did dput!
 		goto out;
 	}
 	if (d_really_is_negative(backing_path.dentry) ||
