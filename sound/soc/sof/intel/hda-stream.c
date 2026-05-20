@@ -198,13 +198,18 @@ int hda_dsp_stream_spib_config(struct snd_sof_dev *sdev,
 
 	mask = (1 << hstream->index);
 
+	/* Reset the spib_addr before disabling SPIB */
+	if (!enable)
+		sof_io_write(sdev, hstream->spib_addr, 0);
+
 	/* enable/disable SPIB for the stream */
 	snd_sof_dsp_update_bits(sdev, HDA_DSP_SPIB_BAR,
 				SOF_HDA_ADSP_REG_CL_SPBFIFO_SPBFCCTL, mask,
 				enable << hstream->index);
 
 	/* set the SPIB value */
-	sof_io_write(sdev, hstream->spib_addr, size);
+	if (enable)
+		sof_io_write(sdev, hstream->spib_addr, size);
 
 	return 0;
 }
