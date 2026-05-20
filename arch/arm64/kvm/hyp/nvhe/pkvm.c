@@ -481,21 +481,22 @@ static int pkvm_vcpu_init_psci(struct pkvm_hyp_vcpu *hyp_vcpu, u32 mp_state)
 	if (mp_state == KVM_MP_STATE_STOPPED) {
 		reset_state->reset = false;
 		hyp_vcpu->power_state = PSCI_0_2_AFFINITY_LEVEL_OFF;
-	} else if (pkvm_hyp_vm_has_pvmfw(hyp_vm)) {
-		if (READ_ONCE(hyp_vm->primary_vcpu))
-			return -EINVAL;
+		return 0;
+	}
 
-		WRITE_ONCE(hyp_vm->primary_vcpu, hyp_vcpu);
-		reset_state->reset = true;
-		hyp_vcpu->power_state = PSCI_0_2_AFFINITY_LEVEL_ON_PENDING;
-	} else {
+	if (READ_ONCE(hyp_vm->primary_vcpu))
+		return -EINVAL;
+
+	if (!pkvm_hyp_vm_has_pvmfw(hyp_vm)) {
 		struct kvm_vcpu *host_vcpu = hyp_vcpu->host_vcpu;
 
 		reset_state->pc = READ_ONCE(host_vcpu->arch.ctxt.regs.pc);
 		reset_state->r0 = READ_ONCE(host_vcpu->arch.ctxt.regs.regs[0]);
-		reset_state->reset = true;
-		hyp_vcpu->power_state = PSCI_0_2_AFFINITY_LEVEL_ON_PENDING;
 	}
+
+	WRITE_ONCE(hyp_vm->primary_vcpu, hyp_vcpu);
+	reset_state->reset = true;
+	hyp_vcpu->power_state = PSCI_0_2_AFFINITY_LEVEL_ON_PENDING;
 
 	return 0;
 }
@@ -1348,7 +1349,8 @@ int pkvm_reset_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu)
 
 	/* Must be done after reseting sys registers. */
 	kvm_reset_vcpu_psci(vcpu, reset_state);
-	if (READ_ONCE(hyp_vm->primary_vcpu) == hyp_vcpu) {
+	if (pkvm_hyp_vm_has_pvmfw(hyp_vm) &&
+	    READ_ONCE(hyp_vm->primary_vcpu) == hyp_vcpu) {
 		struct kvm_vcpu *host_vcpu = hyp_vcpu->host_vcpu;
 		u64 entry = hyp_vm->kvm.arch.pkvm.pvmfw_load_addr;
 		int i;
