@@ -1008,6 +1008,9 @@ static bool dma_pte_clear_level(struct dmar_domain *domain, int level,
 				first_pte = pte;
 			last_pte = pte;
 		} else if (level > 1) {
+			if (WARN_ON_ONCE(dma_pte_superpage(pte)))
+				goto next;
+
 			/* Recurse down into a level that isn't *entirely* obsolete */
 			leaf_ptes_only = dma_pte_clear_level(domain, level - 1,
 							     phys_to_virt(dma_pte_addr(pte)),
@@ -1095,6 +1098,9 @@ static void dma_unuse_range(struct dmar_domain *domain, int level,
 				first_pte = pte;
 			last_pte = pte;
 		} else if (level > 1) {
+			if (WARN_ON_ONCE(dma_pte_superpage(pte)))
+				goto next;
+
 			dma_unuse_range(domain, level - 1,
 					phys_to_virt(dma_pte_addr(pte)),
 					level_pfn, start_pfn, last_pfn);
