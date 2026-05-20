@@ -292,7 +292,7 @@ struct ipu_psys_kbuffer {
 	/* The number of descriptors that point to this buffer */
 	atomic_t desc_count;
 	/* Set if kbuf is mapped */
-	bool valid;
+	bool mapped;
 };
 
 struct ipu_psys_desc {

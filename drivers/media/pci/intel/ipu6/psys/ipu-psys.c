@@ -552,9 +552,9 @@ static inline void ipu_psys_kbuf_unmap(struct ipu_psys_fh *fh,
 		return;
 
 	/* map ref-count */
-	if (kbuf->valid) {
+	if (kbuf->mapped) {
 		dma_buf_put(kbuf->dbuf);
-		kbuf->valid = false;
+		kbuf->mapped = false;
 	}
 
 	if (kbuf->kaddr) {
@@ -797,6 +797,7 @@ struct ipu_psys_kbuffer *ipu_psys_mapbuf_locked(int fd, struct ipu_psys_fh *fh)
 	struct iosys_map dmap;
 	int ret;
 
+	/* This refcount is retained as the map refcount if we map the buffer */
 	dbuf = dma_buf_get(fd);
 	if (IS_ERR(dbuf))
 		return NULL;
@@ -816,7 +817,6 @@ struct ipu_psys_kbuffer *ipu_psys_mapbuf_locked(int fd, struct ipu_psys_fh *fh)
 			goto buf_alloc_fail;
 		/* Grab extra ref-count for driver ownership */
 		get_dma_buf(dbuf);
-		kbuf->valid = true;
 		kbuf->dbuf = dbuf;
 		ipu_buffer_add(fh, kbuf);
 	}
@@ -837,7 +837,7 @@ struct ipu_psys_kbuffer *ipu_psys_mapbuf_locked(int fd, struct ipu_psys_fh *fh)
 		desc->kbuf = kbuf;
 	}
 
-	if (kbuf->sgt) {
+	if (kbuf->mapped) {
 		dev_dbg(dev, "fd %d has been mapped!\n", fd);
 		dma_buf_put(dbuf);
 		goto mapbuf_end;
@@ -879,6 +879,7 @@ struct ipu_psys_kbuffer *ipu_psys_mapbuf_locked(int fd, struct ipu_psys_fh *fh)
 
 mapbuf_end:
 	kbuf->dma_addr = sg_dma_address(kbuf->sgt->sgl);
+	kbuf->mapped = true;
 
 	dev_dbg(dev, "%s %s kbuf %p fd %d with len %llu mapped\n",
 		__func__, kbuf->userptr ? "private" : "imported", kbuf, fd,
