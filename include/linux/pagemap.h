@@ -1343,7 +1343,6 @@ struct readahead_control {
 	struct file_ra_state *ra;
 /* private: use the readahead_* accessors instead */
 	pgoff_t _index;
-	pgoff_t _max_index; /* limit readahead to _max_index, inclusive */
 	unsigned int _nr_pages;
 	unsigned int _batch_count;
 	bool dropbehind;
@@ -1351,7 +1350,7 @@ struct readahead_control {
 	unsigned long _pflags;
 
 	ANDROID_OEM_DATA(1);
-	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_USE(1, pgoff_t _max_index); /* limit readahead to _max_index, inclusive */
 };
 
 #define DEFINE_READAHEAD(ractl, f, r, m, i)				\

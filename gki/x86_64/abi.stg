@@ -35856,6 +35856,10 @@ member {
   type_id: 0x09fe2b42
 }
 member {
+  id: 0x21c53df9
+  type_id: 0x083a87f4
+}
+member {
   id: 0x21e71182
   type_id: 0x08b23619
 }
@@ -36556,6 +36560,11 @@ member {
   offset: 3200
 }
 member {
+  id: 0x31b67e6e
+  type_id: 0x49f7a5c8
+  offset: 512
+}
+member {
   id: 0x31bc782d
   type_id: 0x49df90a7
 }
@@ -37185,6 +37194,10 @@ member {
   id: 0x364b4150
   type_id: 0x56037e9c
   offset: 1408
+}
+member {
+  id: 0x36752b74
+  type_id: 0x56faddc1
 }
 member {
   id: 0x3697c485
@@ -41440,6 +41453,11 @@ member {
   name: "_mapcount_1"
   type_id: 0x74d29cf1
   offset: 384
+}
+member {
+  id: 0x7c14136d
+  name: "_max_index"
+  type_id: 0x33756485
 }
 member {
   id: 0xf0757ecd
@@ -196306,6 +196324,14 @@ struct_union {
   }
 }
 struct_union {
+  id: 0x083a87f4
+  kind: STRUCT
+  definition {
+    bytesize: 8
+    member_id: 0x415b0cbc
+  }
+}
+struct_union {
   id: 0x08b23619
   kind: STRUCT
   definition {
@@ -200596,6 +200622,16 @@ struct_union {
   }
 }
 struct_union {
+  id: 0x49f7a5c8
+  kind: UNION
+  definition {
+    bytesize: 8
+    member_id: 0x7c14136d
+    member_id: 0x21c53df9
+    member_id: 0x36752b74
+  }
+}
+struct_union {
   id: 0x49fe71bd
   kind: UNION
   definition {
@@ -201216,6 +201252,12 @@ struct_union {
     bytesize: 4
     member_id: 0x032aedf1
     member_id: 0x0f4b9ba4
+  }
+}
+struct_union {
+  id: 0x56faddc1
+  kind: UNION
+  definition {
   }
 }
 struct_union {
@@ -236111,7 +236153,7 @@ struct_union {
     member_id: 0xa8b88d77
     member_id: 0x1517dd06
     member_id: 0xd671c19a
-    member_id: 0x415b07a4
+    member_id: 0x31b67e6e
   }
 }
 struct_union {
