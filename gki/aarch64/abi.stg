@@ -358884,6 +358884,13 @@ function {
   parameter_id: 0x309e18ad
 }
 function {
+  id: 0x9acd4ef5
+  return_type_id: 0x6720d32f
+  parameter_id: 0x1d19a9d5
+  parameter_id: 0x0483e6f8
+  parameter_id: 0x6720d32f
+}
+function {
   id: 0x9ad0bd67
   return_type_id: 0x6720d32f
   parameter_id: 0x1b337410
@@ -382505,6 +382512,15 @@ elf_symbol {
   full_name: "__traceiter_android_rvh_update_load_avg_se"
 }
 elf_symbol {
+  id: 0x6fdb7fd2
+  name: "__traceiter_android_rvh_update_load_sum"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x7ec1e1ef
+  type_id: 0x9be2da56
+  full_name: "__traceiter_android_rvh_update_load_sum"
+}
+elf_symbol {
   id: 0x16809a5a
   name: "__traceiter_android_rvh_update_misfit_status"
   is_defined: true
@@ -389379,6 +389395,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_rvh_update_load_avg_se"
+}
+elf_symbol {
+  id: 0x51c819cc
+  name: "__tracepoint_android_rvh_update_load_sum"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_rvh_update_load_sum"
 }
 elf_symbol {
   id: 0x1362c5b0
@@ -415780,6 +415805,15 @@ elf_symbol {
   crc: 0x019de15e
   type_id: 0x016a77c2
   full_name: "get_cached_msi_msg"
+}
+elf_symbol {
+  id: 0xef77a3de
+  name: "get_cmdline"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xccf127ec
+  type_id: 0x9acd4ef5
+  full_name: "get_cmdline"
 }
 elf_symbol {
   id: 0xe8d92d04
@@ -457812,6 +457846,7 @@ interface {
   symbol_id: 0xa1fc4e45
   symbol_id: 0xea6ec56d
   symbol_id: 0x42b8fcc6
+  symbol_id: 0x6fdb7fd2
   symbol_id: 0x16809a5a
   symbol_id: 0x47fa897e
   symbol_id: 0x71c5eeb6
@@ -458576,6 +458611,7 @@ interface {
   symbol_id: 0x23231c63
   symbol_id: 0x1dace1db
   symbol_id: 0x8ca0ae74
+  symbol_id: 0x51c819cc
   symbol_id: 0x1362c5b0
   symbol_id: 0x6c04db48
   symbol_id: 0x0852bdac
@@ -461504,6 +461540,7 @@ interface {
   symbol_id: 0x78414415
   symbol_id: 0x993f37c8
   symbol_id: 0x10f04788
+  symbol_id: 0xef77a3de
   symbol_id: 0xe8d92d04
   symbol_id: 0xafbdd1c4
   symbol_id: 0x0431ade4
