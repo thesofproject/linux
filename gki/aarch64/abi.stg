@@ -2099,6 +2099,11 @@ pointer_reference {
   pointee_type_id: 0x316e396a
 }
 pointer_reference {
+  id: 0x06d389a0
+  kind: POINTER
+  pointee_type_id: 0x310ec01d
+}
+pointer_reference {
   id: 0x06dcdc5a
   kind: POINTER
   pointee_type_id: 0x313397f7
@@ -350485,6 +350490,13 @@ function {
   parameter_id: 0x0292b875
 }
 function {
+  id: 0x935ab420
+  return_type_id: 0x6720d32f
+  parameter_id: 0x3f37d9d5
+  parameter_id: 0x4585663f
+  parameter_id: 0x06d389a0
+}
+function {
   id: 0x935b00c2
   return_type_id: 0x6720d32f
   parameter_id: 0x3f37d9d5
@@ -432351,6 +432363,15 @@ elf_symbol {
   full_name: "percpu_up_write"
 }
 elf_symbol {
+  id: 0xd2981ed5
+  name: "perf_allow_kernel"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x7851be11
+  type_id: 0x9d80e32f
+  full_name: "perf_allow_kernel"
+}
+elf_symbol {
   id: 0xf9e83d36
   name: "perf_aux_output_begin"
   is_defined: true
@@ -434194,6 +434215,15 @@ elf_symbol {
   crc: 0x44c2aa6c
   type_id: 0x935b00c2
   full_name: "platform_get_irq"
+}
+elf_symbol {
+  id: 0xa43f7f43
+  name: "platform_get_irq_affinity"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x1b38a75d
+  type_id: 0x935ab420
+  full_name: "platform_get_irq_affinity"
 }
 elf_symbol {
   id: 0xaa322a74
@@ -463399,6 +463429,7 @@ interface {
   symbol_id: 0x22f7748e
   symbol_id: 0x12951e5c
   symbol_id: 0xe4bc7703
+  symbol_id: 0xd2981ed5
   symbol_id: 0xf9e83d36
   symbol_id: 0x80bebca0
   symbol_id: 0xe207c73b
@@ -463604,6 +463635,7 @@ interface {
   symbol_id: 0x2c91b5be
   symbol_id: 0xf8b12136
   symbol_id: 0xb11c92aa
+  symbol_id: 0xa43f7f43
   symbol_id: 0xaa322a74
   symbol_id: 0x0d9f5d07
   symbol_id: 0x864eb34f
