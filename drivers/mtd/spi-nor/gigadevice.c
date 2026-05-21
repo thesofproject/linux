@@ -87,6 +87,7 @@ static const struct flash_info gigadevice_nor_parts[] = {
 		.no_sfdp_flags = SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ,
 	}, {
 		.id = SNOR_ID(0xc8, 0x60, 0x19),
+		.name = "gd25lq255e",
 		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB,
 	},
 };
