@@ -205,6 +205,7 @@ static int cros_ec_pwrmon_probe(struct platform_device *pdev)
 	indio_dev->name = dev_name(dev);
 	indio_dev->info = &cros_ec_pwrmon_info;
 	indio_dev->modes = INDIO_DIRECT_MODE;
+	platform_set_drvdata(pdev, indio_dev);
 
 	return devm_iio_device_register(dev, indio_dev);
 }
