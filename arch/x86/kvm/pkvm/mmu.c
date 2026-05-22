@@ -745,6 +745,14 @@ static bool gpa_range_overlaps_pvmfw(struct kvm *kvm,
 	return true;
 }
 
+static bool is_valid_addr_range(unsigned long addr, unsigned long size, bool page_aligned)
+{
+	if (!size || addr + size < addr || PAGE_ALIGN(addr + size) < (addr + size))
+		return false;
+
+	return page_aligned ? PAGE_ALIGNED(addr) && PAGE_ALIGNED(size) : true;
+}
+
 int pkvm_hyp_mmu_init(void *pool_base, unsigned long pool_pages)
 {
 	struct pkvm_pgtable_cap cap = {
@@ -1019,7 +1027,7 @@ int pkvm_host_donate_hyp(unsigned long phys, unsigned long size, bool clear)
 {
 	int ret;
 
-	if (!PAGE_ALIGNED(phys) || !PAGE_ALIGNED(size) || size == 0)
+	if (!is_valid_addr_range(phys, size, true))
 		return -EINVAL;
 
 	pkvm_host_mmu_lock();
@@ -1080,7 +1088,7 @@ int pkvm_host_donate_hyp_share_ro(unsigned long phys, unsigned long size, bool c
 {
 	int ret;
 
-	if (!PAGE_ALIGNED(phys) || !PAGE_ALIGNED(size) || size == 0)
+	if (!is_valid_addr_range(phys, size, true))
 		return -EINVAL;
 
 	pkvm_host_mmu_lock();
@@ -1133,7 +1141,7 @@ void pkvm_hyp_donate_host(unsigned long phys, unsigned long size, bool clear)
 	void *va = __pkvm_va(phys);
 	int ret;
 
-	if (!PAGE_ALIGNED(phys) || !PAGE_ALIGNED(size) || size == 0) {
+	if (!is_valid_addr_range(phys, size, true)) {
 		ret = -EINVAL;
 		goto out;
 	}
@@ -1205,7 +1213,7 @@ int pkvm_host_donate_hyp_mmio(unsigned long phys, unsigned long size)
 {
 	int ret;
 
-	if (!PAGE_ALIGNED(phys) || !PAGE_ALIGNED(size) || size == 0)
+	if (!is_valid_addr_range(phys, size, true))
 		return -EINVAL;
 
 	if (!is_mmio_range(phys, size))
@@ -1247,7 +1255,7 @@ int pkvm_hyp_donate_host_mmio_locked(unsigned long phys, unsigned long size)
 		   host_mmu_pte_prot(true, true);
 	int ret;
 
-	if (!PAGE_ALIGNED(phys) || !PAGE_ALIGNED(size) || size == 0)
+	if (!is_valid_addr_range(phys, size, true))
 		return -EINVAL;
 
 	if (!is_mmio_range(phys, size))
@@ -1280,7 +1288,7 @@ int pkvm_host_share_hyp(unsigned long phys, unsigned long size)
 {
 	int ret;
 
-	if (size == 0 || !is_memory_range(phys, size))
+	if (!is_valid_addr_range(phys, size, false) || !is_memory_range(phys, size))
 		return -EINVAL;
 
 	pkvm_host_mmu_lock();
@@ -1344,7 +1352,7 @@ void pkvm_host_unshare_hyp(unsigned long phys, unsigned long size)
 {
 	int ret;
 
-	if (size == 0) {
+	if (!is_valid_addr_range(phys, size, false)) {
 		ret = -EINVAL;
 		goto out;
 	}
@@ -1409,8 +1417,8 @@ int pkvm_host_donate_guest(struct kvm_vcpu *vcpu, unsigned long gpa,
 	unsigned long gpa_offset, pvmfw_offset, load_size;
 	int ret;
 
-	if (!PAGE_ALIGNED(gpa) || !PAGE_ALIGNED(hpa) ||
-	    !PAGE_ALIGNED(size) || size == 0)
+	if (!is_valid_addr_range(gpa, size, true) ||
+	    !is_valid_addr_range(hpa, size, true))
 		return -EINVAL;
 
 	if (WARN_ON_ONCE(!pkvm_is_protected_vcpu(vcpu)))
@@ -1494,8 +1502,8 @@ int pkvm_host_share_guest(struct kvm_vcpu *vcpu, unsigned long gpa,
 	struct pkvm_vm *pkvm_vm = to_pkvm_vcpu(vcpu)->pkvm_vm;
 	int ret;
 
-	if (!PAGE_ALIGNED(gpa) || !PAGE_ALIGNED(hpa) ||
-	    !PAGE_ALIGNED(size) || size == 0 ||
+	if (!is_valid_addr_range(gpa, size, true) ||
+	    !is_valid_addr_range(hpa, size, true) ||
 	    !is_memory_range(hpa, size))
 		return -EINVAL;
 
@@ -1573,7 +1581,7 @@ int pkvm_host_unshare_guest(struct kvm *kvm, unsigned long gpa,
 	struct pkvm_vm *pkvm_vm = to_pkvm(kvm);
 	int ret;
 
-	if (!PAGE_ALIGNED(gpa) || !PAGE_ALIGNED(size))
+	if (!is_valid_addr_range(gpa, size, true))
 		return -EINVAL;
 
 	pkvm_host_mmu_lock();
@@ -1622,7 +1630,7 @@ int pkvm_host_test_clear_young_guest(struct kvm *kvm, unsigned long gpa,
 	struct pkvm_vm *pkvm_vm = to_pkvm(kvm);
 	int ret;
 
-	if (!PAGE_ALIGNED(gpa) || !PAGE_ALIGNED(size))
+	if (!is_valid_addr_range(gpa, size, true))
 		return -EINVAL;
 
 	if (WARN_ON_ONCE(pkvm_is_protected_vm(kvm)))
@@ -1656,7 +1664,7 @@ int pkvm_guest_share_host(struct kvm_vcpu *vcpu, unsigned long gpa,
 	struct pkvm_vm *pkvm_vm = to_pkvm_vcpu(vcpu)->pkvm_vm;
 	int ret;
 
-	if (!PAGE_ALIGNED(gpa) || !PAGE_ALIGNED(size))
+	if (!is_valid_addr_range(gpa, size, true))
 		return -EINVAL;
 
 	pkvm_host_mmu_lock();
@@ -1702,7 +1710,7 @@ int pkvm_guest_unshare_host(struct kvm_vcpu *vcpu, unsigned long gpa,
 	struct pkvm_vm *pkvm_vm = to_pkvm_vcpu(vcpu)->pkvm_vm;
 	int ret;
 
-	if (!PAGE_ALIGNED(gpa) || !PAGE_ALIGNED(size))
+	if (!is_valid_addr_range(gpa, size, true))
 		return -EINVAL;
 
 	pkvm_host_mmu_lock();
@@ -1740,7 +1748,7 @@ int pkvm_host_use_dma(unsigned long phys, unsigned long size)
 {
 	int ret;
 
-	if (!PAGE_ALIGNED(phys) || !PAGE_ALIGNED(size) || size == 0)
+	if (!is_valid_addr_range(phys, size, true))
 		return -EINVAL;
 
 	pkvm_host_mmu_lock();
@@ -1805,7 +1813,7 @@ unlock:
  */
 void pkvm_host_unuse_dma(unsigned long phys, unsigned long size)
 {
-	if (WARN_ON_ONCE(!PAGE_ALIGNED(phys) || !PAGE_ALIGNED(size) || size == 0))
+	if (WARN_ON_ONCE(!is_valid_addr_range(phys, size, true)))
 		return;
 
 	if (is_mmio_range(phys, size))
