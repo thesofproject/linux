@@ -483,6 +483,49 @@ static void pkvm_vcpu_reset(struct kvm_vcpu *vcpu, bool init_event)
 	}
 }
 
+static void postponed_per_vm_setup(struct kvm *kvm)
+{
+	struct pkvm_vm *pkvm_vm = to_pkvm(kvm);
+	struct kvm *shared_kvm;
+	u64 apic_bus_cycle_ns;
+
+	pkvm_spin_lock(&pkvm_vm->lock);
+
+	shared_kvm = pkvm_vm->shared_kvm;
+	/*
+	 * The following setup is per VM, not per vCPU, however it cannot be
+	 * done during VM creation, since these values are set by the host VMM
+	 * via an ioctl after a VM is already created. At the same time, the
+	 * host KVM relies on these values being already set when setting up a
+	 * vCPU, thus implicitly assuming that the VMM should set them before
+	 * creating vCPUs. So it is ok to assume these host's values here are
+	 * up-to-date.
+	 */
+	if (!kvm->arch.bus_lock_detection_enabled &&
+	    shared_kvm->arch.bus_lock_detection_enabled &&
+	    kvm_caps.has_bus_lock_exit)
+		kvm->arch.bus_lock_detection_enabled = true;
+
+	if (!kvm->arch.notify_vmexit_flags &&
+	    shared_kvm->arch.notify_vmexit_flags &&
+	    kvm_caps.has_notify_vmexit) {
+		kvm->arch.notify_window = shared_kvm->arch.notify_window;
+		kvm->arch.notify_vmexit_flags = shared_kvm->arch.notify_vmexit_flags;
+	}
+
+	apic_bus_cycle_ns = READ_ONCE(shared_kvm->arch.apic_bus_cycle_ns);
+	if (apic_bus_cycle_ns)
+		kvm->arch.apic_bus_cycle_ns = apic_bus_cycle_ns;
+
+	if (!pkvm_is_protected_vm(kvm))
+		kvm->arch.disabled_exits = shared_kvm->arch.disabled_exits;
+
+	if (!kvm->created_vcpus)
+		kvm->arch.bsp_vcpu_id = shared_kvm->arch.bsp_vcpu_id;
+
+	pkvm_spin_unlock(&pkvm_vm->lock);
+}
+
 static int __vcpu_create(struct kvm *kvm, struct kvm_vcpu *vcpu, struct fpstate *fps,
 			 struct kvm_lapic *shared_apic)
 {
@@ -497,36 +540,7 @@ static int __vcpu_create(struct kvm *kvm, struct kvm_vcpu *vcpu, struct fpstate 
 	if (ret)
 		return ret;
 
-	pkvm_spin_lock(&pkvm_vm->lock);
-
-	/*
-	 * The following setup is per VM, not per vCPU, however it cannot be
-	 * done during VM creation, since these values are set by the host VMM
-	 * via an ioctl after a VM is already created. At the same time, the
-	 * host KVM relies on these values being already set when setting up a
-	 * vCPU, thus implicitly assuming that the VMM should set them before
-	 * creating vCPUs. So it is ok to assume these host's values here are
-	 * up-to-date.
-	 */
-	if (!kvm->arch.bus_lock_detection_enabled &&
-	    pkvm_vm->shared_kvm->arch.bus_lock_detection_enabled &&
-	    kvm_caps.has_bus_lock_exit)
-		kvm->arch.bus_lock_detection_enabled = true;
-	if (!kvm->arch.notify_vmexit_flags &&
-	    pkvm_vm->shared_kvm->arch.notify_vmexit_flags &&
-	    kvm_caps.has_notify_vmexit) {
-		kvm->arch.notify_window = pkvm_vm->shared_kvm->arch.notify_window;
-		kvm->arch.notify_vmexit_flags = pkvm_vm->shared_kvm->arch.notify_vmexit_flags;
-	}
-	if (pkvm_vm->shared_kvm->arch.apic_bus_cycle_ns)
-		kvm->arch.apic_bus_cycle_ns = pkvm_vm->shared_kvm->arch.apic_bus_cycle_ns;
-	if (!pkvm_is_protected_vm(kvm))
-		kvm->arch.disabled_exits = pkvm_vm->shared_kvm->arch.disabled_exits;
-
-	if (!kvm->created_vcpus)
-		kvm->arch.bsp_vcpu_id = pkvm_vm->shared_kvm->arch.bsp_vcpu_id;
-
-	pkvm_spin_unlock(&pkvm_vm->lock);
+	postponed_per_vm_setup(kvm);
 
 	vcpu->kvm = kvm;
 	/* Set cpu to -1 to indicate it is not loaded on any CPU */
