@@ -263,6 +263,9 @@ static int handle_gcmd_srtp(struct intel_iommu *iommu)
 	} else if (iommu->root_entry) {
 		pkvm_warn("iommu%d: SRTP allowed only once", iommu->seq_id);
 		return -EBUSY;
+	} else if (!cap_esrtps(iommu->cap) && !iommu->qi) {
+		pkvm_warn("iommu%d: QI is required but not initialized yet", iommu->seq_id);
+		return -EINVAL;
 	}
 
 	root_pa = pkvm_host_gpa_to_phys(iommu->vrta & VTD_PAGE_MASK);
