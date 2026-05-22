@@ -146,8 +146,8 @@ int pkvm_context_mapping(struct intel_iommu *iommu, struct device_domain_info *i
 	data->did = did;
 	data->bus = bus;
 	data->devfn = devfn;
-	data->ats_qdep = info->ats_qdep;
-	data->ats_supported = info->ats_supported;
+	data->ats_qdep = info ? info->ats_qdep : 0;
+	data->ats_supported = info ? info->ats_supported : 0;
 
 	spin_lock(&iommu->lock);
 	ret = pkvm_hypercall_inout(iommu_set_lm_ce, &d, &d);
