@@ -427,6 +427,10 @@ DECLARE_RESTRICTED_HOOK(android_rvh_update_rq_clock_pelt,
 	TP_PROTO(struct rq *rq, s64 delta, int *ret),
 	TP_ARGS(rq, delta, ret), 1);
 
+DECLARE_RESTRICTED_HOOK(android_rvh_update_load_sum,
+	TP_PROTO(int *force_update),
+	TP_ARGS(force_update), 1);
+
 DECLARE_RESTRICTED_HOOK(android_rvh_update_load_avg_blocked_se,
 	TP_PROTO(u64 now, struct sched_entity *se, int *ret),
 	TP_ARGS(now, se, ret), 1);

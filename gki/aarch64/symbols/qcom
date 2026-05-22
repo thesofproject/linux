@@ -1555,6 +1555,7 @@
   ipv6_skip_exthdr
   ipv6_stub
   __irq_apply_affinity_hint
+  irq_work_run
   irq_check_status_bit
   irq_chip_ack_parent
   irq_chip_disable_parent
@@ -2263,6 +2264,7 @@
   __per_cpu_offset
   per_cpu_ptr_to_phys
   percpu_up_write
+  perf_allow_kernel
   perf_aux_output_begin
   perf_aux_output_end
   perf_aux_output_flag
@@ -2369,6 +2371,7 @@
   __platform_driver_register
   platform_driver_unregister
   platform_get_irq
+  platform_get_irq_affinity
   platform_get_irq_byname
   platform_get_irq_byname_optional
   platform_get_irq_optional
