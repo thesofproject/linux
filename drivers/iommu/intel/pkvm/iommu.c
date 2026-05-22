@@ -155,9 +155,10 @@ static int handle_gcmd_direct(struct intel_iommu *iommu, u32 gcmd_bit, bool set)
 
 static int initialize_qi(struct intel_iommu *iommu)
 {
+	void *desc = pkvm_host_gpa_to_virt(iommu->viqa & VTD_PAGE_MASK);
 	u64 desc_sz = ecap_smts(iommu->ecap) ? SZ_8K : SZ_4K;
-	struct q_inval *qi = iommu->qi;
-	u64 val = __pkvm_pa(qi->desc);
+	struct q_inval *qi = &iommu->_qi;
+	u64 val = __pkvm_pa(desc);
 	int ret;
 
 	ret = pkvm_host_donate_hyp_share_ro(val, desc_sz, true);
@@ -172,6 +173,7 @@ static int initialize_qi(struct intel_iommu *iommu)
 	pkvm_spin_lock_init(&qi->q_lock);
 	qi->free_head = qi->free_tail = 0;
 	qi->free_cnt = QI_LENGTH;
+	qi->desc = desc;
 
 	/*
 	 * Set DW=1 and QS=1 in IQA_REG when Scalable Mode capability
@@ -185,7 +187,22 @@ static int initialize_qi(struct intel_iommu *iommu)
 	/* Set IQA */
 	writeq(val, iommu->reg + DMAR_IQA_REG);
 
-	return handle_gcmd_direct(iommu, DMA_GCMD_QIE, true);
+	/*
+	 * QIE is not oneshot bit for enabling thus should not be failed unless
+	 * there is a code bug.
+	 */
+	BUG_ON(handle_gcmd_direct(iommu, DMA_GCMD_QIE, true));
+
+	/*
+	 * Host IOMMU driver dynamically allocates iommu->qi, but pKVM has it
+	 * embedded. For easy re-use of host code, the embedded field is named
+	 * as iommu->_qi, and the pointer iommu->qi points to iommu->_qi.
+	 * Also, it serves as a flag to denote whether qi is
+	 * enabled(similar to how host driver does)
+	 */
+	iommu->qi = qi;
+
+	return 0;
 }
 
 static int handle_gcmd_qie(struct intel_iommu *iommu, bool enable)
@@ -201,15 +218,6 @@ static int handle_gcmd_qie(struct intel_iommu *iommu, bool enable)
 			return -EINVAL;
 		}
 
-		/*
-		 * Host IOMMU driver dynamically allocates iommu->qi, but pKVM has it
-		 * embedded. For easy re-use of host code, the embedded field is named
-		 * as iommu->_qi, and the pointer iommu->qi points to iommu->_qi.
-		 * Also, it serves as a flag to denote whether qi is
-		 * enabled(similar to how host driver does)
-		 */
-		iommu->qi = &iommu->_qi;
-		iommu->qi->desc = pkvm_host_gpa_to_virt(iommu->viqa & VTD_PAGE_MASK);
 		ret = initialize_qi(iommu);
 	} else {
 		if (!iommu->qi)
@@ -421,7 +429,7 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 		if (iommu->qi) {
 			pkvm_err("iommu%d: write to IQT not allowed!\n",
 				 iommu->seq_id);
-			return -EPERM;
+			ret = -EPERM;
 		}
 		break;
 	case DMAR_RTADDR_REG:

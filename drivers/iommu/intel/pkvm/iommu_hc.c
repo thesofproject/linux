@@ -17,10 +17,8 @@ int pkvm_iommu_iec_flush(u64 phys, int index, int mask, bool global)
 {
 	struct intel_iommu *iommu = iommu_from_phys(phys);
 
-	if (!iommu)
+	if (!iommu || !iommu->qi)
 		return -EINVAL;
-
-	BUG_ON(!iommu->qi);
 
 	if (global) {
 		qi_global_iec(iommu);
