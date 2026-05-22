@@ -1378,6 +1378,12 @@ static int pkvm_vcpu_add_fpstate(struct kvm_vcpu *vcpu,
 	memset(mc, 0, sizeof(*mc));
 
 	old = vcpu->arch.guest_fpu.fpstate;
+	/*
+	 * The old fpstate should always exist if the vCPU is successfully
+	 * created as it is created together with vCPU via pkvm_vcpu_create().
+	 */
+	BUG_ON(!old);
+
 	new = __pkvm_va(fpstate_pa);
 	/*
 	 * Reuse the existing fpstate memory if it's sufficiently large. At this
@@ -1388,7 +1394,7 @@ static int pkvm_vcpu_add_fpstate(struct kvm_vcpu *vcpu,
 	 * be updated. Therefore, ensuring the new fpstate size is at least as
 	 * large as the previous one allows continued support for this scenario.
 	 */
-	if (old && old->size >= size) {
+	if (size <= old->size) {
 		teardown_donated_memory(mc, new, size);
 		return 0;
 	}
@@ -1401,10 +1407,9 @@ static int pkvm_vcpu_add_fpstate(struct kvm_vcpu *vcpu,
 
 	/*
 	 * New physical fpstate memory is consumed. Tear down the old fpstate
-	 * memory if there is.
+	 * memory.
 	 */
-	if (old)
-		teardown_donated_memory(mc, old, old->size);
+	teardown_donated_memory(mc, old, old->size);
 
 	return 0;
 }
