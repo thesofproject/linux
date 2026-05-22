@@ -145,16 +145,6 @@ intel_plane_duplicate_state(struct drm_plane *plane)
 	if (intel_state->hw.fb)
 		drm_framebuffer_get(intel_state->hw.fb);
 
-	/* Acquire krefs for duplicated hardware color blobs */
-	if (intel_state->hw.degamma_lut)
-		drm_property_blob_get(intel_state->hw.degamma_lut);
-	if (intel_state->hw.gamma_lut)
-		drm_property_blob_get(intel_state->hw.gamma_lut);
-	if (intel_state->hw.ctm)
-		drm_property_blob_get(intel_state->hw.ctm);
-	if (intel_state->hw.lut_3d)
-		drm_property_blob_get(intel_state->hw.lut_3d);
-
 	return &intel_state->uapi;
 }
 
@@ -178,12 +168,6 @@ intel_plane_destroy_state(struct drm_plane *plane,
 	__drm_atomic_helper_plane_destroy_state(&plane_state->uapi);
 	if (plane_state->hw.fb)
 		drm_framebuffer_put(plane_state->hw.fb);
-
-	drm_property_blob_put(plane_state->hw.degamma_lut);
-	drm_property_blob_put(plane_state->hw.gamma_lut);
-	drm_property_blob_put(plane_state->hw.ctm);
-	drm_property_blob_put(plane_state->hw.lut_3d);
-
 	kfree(plane_state);
 }
 
@@ -373,11 +357,6 @@ static void intel_plane_clear_hw_state(struct intel_plane_state *plane_state)
 {
 	if (plane_state->hw.fb)
 		drm_framebuffer_put(plane_state->hw.fb);
-
-	drm_property_blob_put(plane_state->hw.degamma_lut);
-	drm_property_blob_put(plane_state->hw.gamma_lut);
-	drm_property_blob_put(plane_state->hw.ctm);
-	drm_property_blob_put(plane_state->hw.lut_3d);
 
 	memset(&plane_state->hw, 0, sizeof(plane_state->hw));
 }
