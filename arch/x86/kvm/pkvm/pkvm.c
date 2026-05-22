@@ -1136,27 +1136,14 @@ static inline bool pkvm_event_injection_allowed(struct kvm_vcpu *vcpu)
 	       !to_pkvm_vcpu(vcpu)->host_emulated_msr_err;
 }
 
-static int pkvm_interrupt_allowed(struct kvm_vcpu *vcpu, bool for_injection)
-{
-	if (for_injection && !pkvm_event_injection_allowed(vcpu))
-		return -EBUSY;
-
-	return kvm_x86_call(interrupt_allowed)(vcpu, for_injection);
-}
-
-static int pkvm_nmi_allowed(struct kvm_vcpu *vcpu, bool for_injection)
-{
-	if (for_injection && !pkvm_event_injection_allowed(vcpu))
-		return -EBUSY;
-
-	return kvm_x86_call(nmi_allowed)(vcpu, for_injection);
-}
-
 static int pkvm_inject_irq(struct kvm_vcpu *vcpu)
 {
 	struct kvm_vcpu *shared_vcpu = to_pkvm_vcpu(vcpu)->shared_vcpu;
+	bool soft = READ_ONCE(shared_vcpu->arch.interrupt.soft);
+	u8 irq = READ_ONCE(shared_vcpu->arch.interrupt.nr);
 
-	if (WARN_ON_ONCE(pkvm_interrupt_allowed(vcpu, true) <= 0))
+	if (WARN_ON_ONCE(kvm_x86_call(interrupt_allowed)(vcpu, true) <= 0 ||
+			 !pkvm_event_injection_allowed(vcpu)))
 		return -EBUSY;
 
 	/*
@@ -1170,12 +1157,10 @@ static int pkvm_inject_irq(struct kvm_vcpu *vcpu)
 	 * vector number by the Intel 64 and IA-32 architectures for
 	 * architecture-defined exceptions.
 	 */
-	if (pkvm_is_protected_vcpu(vcpu) && (shared_vcpu->arch.interrupt.soft ||
-					     shared_vcpu->arch.interrupt.nr < 32))
+	if (pkvm_is_protected_vcpu(vcpu) && (soft || irq < 32))
 		return -EPERM;
 
-	vcpu->arch.interrupt.soft = shared_vcpu->arch.interrupt.soft;
-	vcpu->arch.interrupt.nr = shared_vcpu->arch.interrupt.nr;
+	kvm_queue_interrupt(vcpu, irq, soft);
 	kvm_x86_call(inject_irq)(vcpu, false);
 
 	return 0;
@@ -1183,9 +1168,11 @@ static int pkvm_inject_irq(struct kvm_vcpu *vcpu)
 
 static int pkvm_inject_nmi(struct kvm_vcpu *vcpu)
 {
-	if (WARN_ON_ONCE(pkvm_nmi_allowed(vcpu, true) <= 0))
+	if (WARN_ON_ONCE(kvm_x86_call(nmi_allowed)(vcpu, true) <= 0 ||
+			 !pkvm_event_injection_allowed(vcpu)))
 		return -EBUSY;
 
+	vcpu->arch.nmi_injected = true;
 	kvm_x86_call(inject_nmi)(vcpu);
 
 	return 0;
@@ -1193,12 +1180,17 @@ static int pkvm_inject_nmi(struct kvm_vcpu *vcpu)
 
 static void pkvm_inject_exception(struct kvm_vcpu *vcpu)
 {
+	struct kvm_vcpu *shared_vcpu = to_pkvm_vcpu(vcpu)->shared_vcpu;
 	/*
 	 * As the __pkvm__inject_exception is always denied for the pVM,
 	 * it must be a code bug if the vcpu is protected.
 	 */
 	BUG_ON(pkvm_is_protected_vcpu(vcpu));
-	vcpu->arch.exception = to_pkvm_vcpu(vcpu)->shared_vcpu->arch.exception;
+
+	vcpu->arch.exception =
+		*(volatile typeof(shared_vcpu->arch.exception) *)&shared_vcpu->arch.exception;
+	vcpu->arch.exception.pending = false;
+	vcpu->arch.exception.injected = true;
 
 	kvm_x86_call(inject_exception)(vcpu);
 }
@@ -1944,10 +1936,10 @@ static int pkvm_vcpu_handle_host_hypercall(struct kvm_vcpu *hvcpu, enum pkvm_hc 
 		kvm_x86_call(enable_irq_window)(vcpu);
 		break;
 	case __pkvm__interrupt_allowed:
-		ret = pkvm_interrupt_allowed(vcpu, pkvm_hc_input1(hvcpu));
+		ret = kvm_x86_call(interrupt_allowed)(vcpu, pkvm_hc_input1(hvcpu));
 		break;
 	case __pkvm__nmi_allowed:
-		ret = pkvm_nmi_allowed(vcpu, pkvm_hc_input1(hvcpu));
+		ret = kvm_x86_call(nmi_allowed)(vcpu, pkvm_hc_input1(hvcpu));
 		break;
 	case __pkvm__get_nmi_mask:
 		out->get_nmi_mask.data = kvm_x86_call(get_nmi_mask)(vcpu);
