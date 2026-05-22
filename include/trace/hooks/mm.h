@@ -637,6 +637,12 @@ DECLARE_HOOK(android_vh_customize_pmd_gfp_bypass,
 DECLARE_HOOK(android_vh_thp_vma_allowable_orders,
 	TP_PROTO(struct vm_area_struct *vma, unsigned long *orders),
 	TP_ARGS(vma, orders));
+DECLARE_HOOK(android_vh_mm_direct_reclaim_start,
+       TP_PROTO(u64 *stime),
+       TP_ARGS(stime));
+DECLARE_HOOK(android_vh_mm_direct_reclaim_end,
+       TP_PROTO(unsigned int order, u64 stime),
+       TP_ARGS(order, stime));
 DECLARE_HOOK(android_vh_do_anonymous_page,
 	TP_PROTO(struct vm_area_struct *vma, struct folio *folio),
 	TP_ARGS(vma, folio));
