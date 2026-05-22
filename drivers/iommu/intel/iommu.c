@@ -1012,10 +1012,10 @@ static bool dma_pte_clear_level(struct dmar_domain *domain, int level,
 				goto next;
 
 			/* Recurse down into a level that isn't *entirely* obsolete */
-			leaf_ptes_only = dma_pte_clear_level(domain, level - 1,
-							     phys_to_virt(dma_pte_addr(pte)),
-							     level_pfn, start_pfn, last_pfn,
-							     freelist);
+			leaf_ptes_only &= dma_pte_clear_level(domain, level - 1,
+							      phys_to_virt(dma_pte_addr(pte)),
+							      level_pfn, start_pfn, last_pfn,
+							      freelist);
 		}
 next:
 		pfn = level_pfn + level_size(level);
