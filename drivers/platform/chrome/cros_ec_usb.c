@@ -216,6 +216,13 @@ static int do_cros_ec_pkt_xfer_usb(struct cros_ec_device *ec_dev,
 	}
 	dev_dbg(ec_dev->dev, "Prepared len=%d\n", req_size);
 
+	/* Resume device and block autosuspend. */
+	ret = usb_autopm_get_interface(ec_usb->interface);
+	if (ret) {
+		dev_err(ec_dev->dev, "Failed to auto-resume: %d\n", ret);
+		goto exit;
+	}
+
 	ec_usb->resp_ready = false;
 	/*
 	 * Buffers dout and din are allocated with devm_kzalloc which means it is suitable
@@ -225,7 +232,7 @@ static int do_cros_ec_pkt_xfer_usb(struct cros_ec_device *ec_dev,
 			   BULK_TRANSFER_TIMEOUT_MS);
 	if (ret) {
 		dev_err(ec_dev->dev, "Failed to send request: %d\n", ret);
-		goto exit;
+		goto exit_autopm;
 	}
 
 	/*
@@ -236,7 +243,7 @@ static int do_cros_ec_pkt_xfer_usb(struct cros_ec_device *ec_dev,
 				msecs_to_jiffies(RESPONSE_TIMEOUT_MS))) {
 		dev_err(ec_dev->dev, "Timed out waiting for response\n");
 		ret = -ETIMEDOUT;
-		goto exit;
+		goto exit_autopm;
 	}
 
 	/* Get first part of response that contains a header. */
@@ -244,21 +251,21 @@ static int do_cros_ec_pkt_xfer_usb(struct cros_ec_device *ec_dev,
 			   &actual_length, BULK_TRANSFER_TIMEOUT_MS);
 	if (ret) {
 		dev_err(ec_dev->dev, "Failed to get response: %d\n", ret);
-		goto exit;
+		goto exit_autopm;
 	}
 
 	/* Verify number of received bytes. */
 	if (actual_length < header_size) {
 		dev_err(ec_dev->dev, "Received too little bytes: %d\n", actual_length);
 		ret = -ENOSPC;
-		goto exit;
+		goto exit_autopm;
 	}
 
 	host_response = (struct ec_host_response *)ec_dev->din;
 	if (host_response->struct_version != 3 || host_response->reserved != 0) {
 		dev_err(ec_dev->dev, "Received invalid header\n");
 		ret = -ENOSPC;
-		goto exit;
+		goto exit_autopm;
 	}
 
 	expected_resp_size = header_size + host_response->data_len;
@@ -266,7 +273,7 @@ static int do_cros_ec_pkt_xfer_usb(struct cros_ec_device *ec_dev,
 		dev_err(ec_dev->dev, "Incorrect number of expected bytes: %d\n",
 			expected_resp_size);
 		ret = -ENOSPC;
-		goto exit;
+		goto exit_autopm;
 	}
 
 	/* Get the rest of the response if needed. */
@@ -277,7 +284,7 @@ static int do_cros_ec_pkt_xfer_usb(struct cros_ec_device *ec_dev,
 				   BULK_TRANSFER_TIMEOUT_MS);
 		if (ret) {
 			dev_err(ec_dev->dev, "Failed to get second part of response: %d\n", ret);
-			goto exit;
+			goto exit_autopm;
 		}
 		resp_size += actual_length;
 	}
@@ -287,7 +294,7 @@ static int do_cros_ec_pkt_xfer_usb(struct cros_ec_device *ec_dev,
 		dev_err(ec_dev->dev, "Received incorrect number of bytes: %d, expected: %d\n",
 			resp_size, expected_resp_size);
 		ret = -ENOSPC;
-		goto exit;
+		goto exit_autopm;
 	}
 
 	/* Validate checksum */
@@ -297,7 +304,7 @@ static int do_cros_ec_pkt_xfer_usb(struct cros_ec_device *ec_dev,
 	if (sum) {
 		dev_err(ec_dev->dev, "Bad packet checksum calculated %x\n", sum);
 		ret = -EBADMSG;
-		goto exit;
+		goto exit_autopm;
 	}
 
 	ec_msg->result = host_response->result;
@@ -307,6 +314,9 @@ static int do_cros_ec_pkt_xfer_usb(struct cros_ec_device *ec_dev,
 	if (ec_msg->command == EC_CMD_REBOOT_EC)
 		msleep(EC_REBOOT_DELAY_MS);
 
+exit_autopm:
+	/* Allow autosuspend again. */
+	usb_autopm_put_interface(ec_usb->interface);
 exit:
 	mutex_unlock(&ec_usb->io_mutex);
 	if (ret < 0) {
@@ -462,6 +472,7 @@ static int cros_ec_usb_probe(struct usb_interface *intf, const struct usb_device
 	usb_set_intfdata(intf, ec_dev);
 	/* Allow EC to do remote wake-up - host sends SET_FEATURE(remote wake-up) before suspend. */
 	device_init_wakeup(&usb_dev->dev, true);
+	intf->needs_remote_wakeup = 1;
 
 	ec_usb->udev = usb_get_dev(usb_dev);
 	ec_usb->interface = usb_get_intf(intf);
@@ -627,8 +638,7 @@ static struct usb_driver cros_ec_usb = {
 	.pre_reset = cros_ec_usb_pre_reset,
 	.post_reset = cros_ec_usb_post_reset,
 	.id_table = cros_ec_usb_id_table,
-	/* Do not autosuspend EC */
-	.supports_autosuspend = 0,
+	.supports_autosuspend = 1,
 };
 module_usb_driver(cros_ec_usb);
 
