@@ -249,6 +249,9 @@ asmlinkage void __noreturn __kvm_host_psci_cpu_entry(bool is_cpu_on)
 	host_ctxt = host_data_ptr(host_ctxt);
 	pkvm_cpu_context_init(host_ctxt);
 
+	if (static_branch_unlikely(&kvm_vgic_global_state.gicv3_cpuif))
+		__vgic_v3_init_lrs();
+
 	if (is_cpu_on)
 		boot_args = this_cpu_ptr(&cpu_on_args);
 	else
