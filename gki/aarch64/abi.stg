@@ -304644,6 +304644,14 @@ enumeration {
       name: "QUERY_ATTR_IDN_WB_BUF_RESIZE_STATUS"
       value: 62
     }
+    enumerator {
+      name: "QUERY_ATTR_IDN_TX_EQ_GN_SETTINGS"
+      value: 71
+    }
+    enumerator {
+      name: "QUERY_ATTR_IDN_TX_EQ_GN_SETTINGS_EXT"
+      value: 72
+    }
   }
 }
 enumeration {
