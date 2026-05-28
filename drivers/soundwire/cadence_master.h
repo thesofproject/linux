@@ -108,6 +108,7 @@ struct sdw_cdns_dai_runtime {
  * @dev: Linux device
  * @bus: Bus handle
  * @instance: instance number
+ * @peripheral_int_mask: Peripheral interrupt mask
  * @ip_offset: version-dependent offset to access IP_MCP registers and fields
  * @response_buf: SoundWire response buffer
  * @tx_complete: Tx completion
@@ -125,6 +126,7 @@ struct sdw_cdns {
 	struct device *dev;
 	struct sdw_bus bus;
 	unsigned int instance;
+	unsigned int peripheral_int_mask;
 
 	u32 ip_offset;
 

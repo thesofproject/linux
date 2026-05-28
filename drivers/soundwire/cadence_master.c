@@ -1113,7 +1113,7 @@ update_status:
 
 	/* unmask Slave interrupt now */
 	cdns_updatel(cdns, CDNS_MCP_INTMASK,
-		     CDNS_MCP_INT_SLAVE_MASK, CDNS_MCP_INT_SLAVE_MASK);
+		     CDNS_MCP_INT_SLAVE_MASK, cdns->peripheral_int_mask);
 
 }
 
@@ -1199,7 +1199,7 @@ static void cdns_enable_slave_interrupts(struct sdw_cdns *cdns, bool state)
 
 	mask = cdns_readl(cdns, CDNS_MCP_INTMASK);
 	if (state)
-		mask |= CDNS_MCP_INT_SLAVE_MASK;
+		mask |= cdns->peripheral_int_mask;
 	else
 		mask &= ~CDNS_MCP_INT_SLAVE_MASK;
 
@@ -1224,7 +1224,7 @@ int sdw_cdns_enable_interrupt(struct sdw_cdns *cdns, bool state)
 	slave_intmask1 = CDNS_MCP_SLAVE_INTMASK1_MASK;
 
 	/* enable detection of all slave state changes */
-	mask = CDNS_MCP_INT_SLAVE_MASK;
+	mask = cdns->peripheral_int_mask;
 
 	/* enable detection of bus issues */
 	mask |= CDNS_MCP_INT_CTRL_CLASH | CDNS_MCP_INT_DATA_CLASH |
@@ -1830,6 +1830,7 @@ int sdw_cdns_probe(struct sdw_cdns *cdns)
 {
 	init_completion(&cdns->tx_complete);
 	cdns->bus.port_ops = &cdns_port_ops;
+	cdns->peripheral_int_mask = CDNS_MCP_INT_SLAVE_MASK;
 
 	mutex_init(&cdns->status_update_lock);
 
