@@ -781,6 +781,7 @@
   dma_iova_unlink
   dmam_alloc_attrs
   dma_map_page_attrs
+  dma_map_phys
   dma_map_resource
   dma_map_sg_attrs
   dma_map_sgtable
@@ -799,6 +800,7 @@
   __dma_sync_single_for_cpu
   __dma_sync_single_for_device
   dma_unmap_page_attrs
+  dma_unmap_phys
   dma_unmap_resource
   dma_unmap_sg_attrs
   dma_vmap_noncontiguous
