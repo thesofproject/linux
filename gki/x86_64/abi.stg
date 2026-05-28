@@ -310911,6 +310911,15 @@ elf_symbol {
   full_name: "cont_write_begin"
 }
 elf_symbol {
+  id: 0x9e7d8d76
+  name: "contig_page_data"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x2889b6fd
+  type_id: 0x264eeece
+  full_name: "contig_page_data"
+}
+elf_symbol {
   id: 0xc1167624
   name: "copy_page"
   is_defined: true
@@ -341170,6 +341179,7 @@ interface {
   symbol_id: 0x1b144a7e
   symbol_id: 0xca337eb1
   symbol_id: 0x2a36ed7a
+  symbol_id: 0x9e7d8d76
   symbol_id: 0xc1167624
   symbol_id: 0x46061653
   symbol_id: 0x962b6a68
