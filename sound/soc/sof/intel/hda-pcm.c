@@ -152,11 +152,12 @@ int hda_dsp_pcm_hw_params(struct snd_soc_component *component,
 }
 EXPORT_SYMBOL_NS(hda_dsp_pcm_hw_params, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
-int hda_dsp_compr_hw_params(struct snd_sof_dev *sdev,
+int hda_dsp_compr_hw_params(struct snd_soc_component *component,
 			    struct snd_compr_stream *cstream,
 			    struct snd_compr_params *params,
 			    struct snd_sof_platform_stream_params *platform_params)
 {
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct hdac_stream *hstream = cstream->runtime->private_data;
 	struct hdac_ext_stream *hext_stream = stream_to_hdac_ext_stream(hstream);
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
@@ -253,9 +254,10 @@ int hda_dsp_pcm_trigger(struct snd_soc_component *component,
 }
 EXPORT_SYMBOL_NS(hda_dsp_pcm_trigger, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
-int hda_dsp_compr_trigger(struct snd_sof_dev *sdev,
+int hda_dsp_compr_trigger(struct snd_soc_component *component,
 			  struct snd_compr_stream *cstream, int cmd)
 {
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct hdac_stream *hstream = cstream->runtime->private_data;
 	struct hdac_ext_stream *hext_stream = stream_to_hdac_ext_stream(hstream);
 
@@ -295,7 +297,8 @@ found:
 }
 EXPORT_SYMBOL_NS(hda_dsp_pcm_pointer, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
-int hda_dsp_compr_pointer(struct snd_sof_dev *sdev, struct snd_compr_stream *cstream,
+int hda_dsp_compr_pointer(struct snd_soc_component *component,
+			  struct snd_compr_stream *cstream,
 			  struct snd_compr_tstamp64 *tstamp)
 {
 	struct hdac_stream *hstream = cstream->runtime->private_data;
@@ -435,15 +438,16 @@ int hda_dsp_pcm_open(struct snd_soc_component *component,
 }
 EXPORT_SYMBOL_NS(hda_dsp_pcm_open, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
-int hda_dsp_compr_open(struct snd_sof_dev *sdev, struct snd_compr_stream *cstream)
+int hda_dsp_compr_open(struct snd_soc_component *component,
+		       struct snd_compr_stream *cstream)
 {
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
-	struct snd_soc_component *scomp = sdev->component;
 	struct hdac_ext_stream *dsp_stream;
 	struct snd_sof_pcm *spcm;
 	int direction = cstream->direction;
 
-	spcm = snd_sof_find_spcm_dai(scomp, rtd);
+	spcm = snd_sof_find_spcm_dai(component, rtd);
 	if (!spcm) {
 		dev_err(sdev->dev, "%s: can't find PCM with DAI ID %d\n",
 			__func__, rtd->dai_link->id);
@@ -491,8 +495,10 @@ int hda_dsp_pcm_close(struct snd_soc_component *component,
 }
 EXPORT_SYMBOL_NS(hda_dsp_pcm_close, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
-int hda_dsp_compr_close(struct snd_sof_dev *sdev, struct snd_compr_stream *cstream)
+int hda_dsp_compr_close(struct snd_soc_component *component,
+			struct snd_compr_stream *cstream)
 {
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct hdac_stream *hstream = cstream->runtime->private_data;
 	int direction = cstream->direction;
 	int ret;
