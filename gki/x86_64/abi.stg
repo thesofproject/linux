@@ -274352,6 +274352,12 @@ function {
   parameter_id: 0xc9082b19
 }
 function {
+  id: 0x1230d8bc
+  return_type_id: 0x48b5725f
+  parameter_id: 0x0562c566
+  parameter_id: 0xfc0e1dbd
+}
+function {
   id: 0x1236df75
   return_type_id: 0x48b5725f
   parameter_id: 0x08641f0b
@@ -317662,6 +317668,13 @@ elf_symbol {
   full_name: "emergency_restart"
 }
 elf_symbol {
+  id: 0x483e9e6a
+  name: "empty_zero_page"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0xe26c559c
+}
+elf_symbol {
   id: 0x8f99729e
   name: "enable_irq"
   is_defined: true
@@ -322667,6 +322680,15 @@ elf_symbol {
   crc: 0xa5ce650a
   type_id: 0x91c5850e
   full_name: "kstrtoull_from_user"
+}
+elf_symbol {
+  id: 0xd20ecdb9
+  name: "kthread_complete_and_exit"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x927a4f1c
+  type_id: 0x1230d8bc
+  full_name: "kthread_complete_and_exit"
 }
 elf_symbol {
   id: 0x54d851dc
@@ -341927,6 +341949,7 @@ interface {
   symbol_id: 0x43ce9332
   symbol_id: 0x616b379c
   symbol_id: 0x2935539f
+  symbol_id: 0x483e9e6a
   symbol_id: 0x8f99729e
   symbol_id: 0xadddd86b
   symbol_id: 0xda116c83
@@ -342481,6 +342504,7 @@ interface {
   symbol_id: 0x35384efd
   symbol_id: 0x95eb59ef
   symbol_id: 0xa074b313
+  symbol_id: 0xd20ecdb9
   symbol_id: 0x54d851dc
   symbol_id: 0x899f9516
   symbol_id: 0xeae01788
