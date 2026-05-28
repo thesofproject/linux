@@ -750,6 +750,21 @@ DECLARE_HOOK(android_vh_exit_oom_victim,
 DECLARE_HOOK(android_vh_oom_killer_disable,
 	TP_PROTO(int oom_victims),
 	TP_ARGS(oom_victims));
+DECLARE_HOOK(android_vh_swapmem_gather_init,
+	TP_PROTO(struct mm_struct *mm),
+	TP_ARGS(mm));
+DECLARE_HOOK(android_vh_swapmem_gather_add_bypass,
+	TP_PROTO(struct mm_struct *mm, swp_entry_t entry, int nr, bool *bypass),
+	TP_ARGS(mm, entry, nr, bypass));
+DECLARE_HOOK(android_vh_swapmem_gather_finish,
+	TP_PROTO(struct mm_struct *mm),
+	TP_ARGS(mm));
+DECLARE_HOOK(android_vh_oom_swapmem_gather_init,
+	TP_PROTO(struct mm_struct *mm),
+	TP_ARGS(mm));
+DECLARE_HOOK(android_vh_oom_swapmem_gather_finish,
+	TP_PROTO(struct mm_struct *mm),
+	TP_ARGS(mm));
 #endif /* _TRACE_HOOK_MM_H */
 
 /* This part must be outside protection */
