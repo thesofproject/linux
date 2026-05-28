@@ -861,13 +861,12 @@ static int ipc3_fw_ready(struct snd_sof_dev *sdev, u32 cmd)
 /* IPC stream position. */
 static void ipc3_period_elapsed(struct snd_sof_dev *sdev, u32 msg_id)
 {
-	struct snd_soc_component *scomp = sdev->component;
 	struct snd_sof_pcm_stream *stream;
 	struct sof_ipc_stream_posn posn;
 	struct snd_sof_pcm *spcm;
 	int direction, ret;
 
-	spcm = snd_sof_find_spcm_comp(scomp, msg_id, &direction);
+	spcm = snd_sof_find_spcm_comp_by_sdev(sdev, msg_id, &direction);
 	if (!spcm) {
 		dev_err(sdev->dev, "period elapsed for unknown stream, msg_id %d\n",
 			msg_id);
@@ -896,13 +895,12 @@ static void ipc3_period_elapsed(struct snd_sof_dev *sdev, u32 msg_id)
 /* DSP notifies host of an XRUN within FW */
 static void ipc3_xrun(struct snd_sof_dev *sdev, u32 msg_id)
 {
-	struct snd_soc_component *scomp = sdev->component;
 	struct snd_sof_pcm_stream *stream;
 	struct sof_ipc_stream_posn posn;
 	struct snd_sof_pcm *spcm;
 	int direction, ret;
 
-	spcm = snd_sof_find_spcm_comp(scomp, msg_id, &direction);
+	spcm = snd_sof_find_spcm_comp_by_sdev(sdev, msg_id, &direction);
 	if (!spcm) {
 		dev_err(sdev->dev, "XRUN for unknown stream, msg_id %d\n",
 			msg_id);

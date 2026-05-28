@@ -51,7 +51,7 @@ static int sof_ipc3_compr_open(struct snd_soc_component *component,
 static int sof_ipc3_compr_free(struct snd_soc_component *component,
 			       struct snd_compr_stream *cstream)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct sof_compr_stream *sstream = cstream->runtime->private_data;
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct sof_ipc_stream stream;
@@ -83,7 +83,7 @@ static int sof_ipc3_compr_set_params(struct snd_soc_component *component,
 				     struct snd_compr_stream *cstream,
 				     struct snd_compr_params *params)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_compr_runtime *crtd = cstream->runtime;
 	struct sof_ipc_pcm_params_reply ipc_params_reply;
@@ -200,7 +200,7 @@ static int sof_ipc3_compr_get_params(struct snd_soc_component *component,
 static int sof_ipc3_compr_trigger(struct snd_soc_component *component,
 				  struct snd_compr_stream *cstream, int cmd)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct sof_ipc_stream stream;
 	struct snd_sof_pcm *spcm;

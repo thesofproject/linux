@@ -560,7 +560,7 @@ static void sof_ipc4_widget_free_comp_pipeline(struct snd_sof_widget *swidget)
 static int sof_ipc4_widget_set_module_info(struct snd_sof_widget *swidget)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 
 	swidget->module_info = sof_ipc4_find_module_by_uuid(sdev, &swidget->uuid);
 
@@ -610,7 +610,7 @@ static int sof_ipc4_widget_setup_msg(struct snd_sof_widget *swidget, struct sof_
 static void sof_ipc4_widget_update_kcontrol_module_id(struct snd_sof_widget *swidget)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_ipc4_fw_module *fw_module = swidget->module_info;
 	struct snd_sof_control *scontrol;
 
@@ -809,7 +809,7 @@ static int sof_ipc4_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 {
 	struct sof_ipc4_available_audio_format *available_fmt;
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct snd_sof_dai *dai = swidget->private;
 	struct sof_ipc4_copier *ipc4_copier;
 	struct snd_sof_widget *pipe_widget;
@@ -989,7 +989,7 @@ static void sof_ipc4_widget_free_comp_dai(struct snd_sof_widget *swidget)
 static int sof_ipc4_widget_setup_comp_pipeline(struct snd_sof_widget *swidget)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_ipc4_pipeline *pipeline;
 	struct snd_sof_pipeline *spipe = swidget->spipe;
 	int ret;
@@ -2156,7 +2156,7 @@ sof_ipc4_copier_module_update_params(struct snd_sof_widget *swidget,
 				     struct snd_pcm_hw_params *pipeline_params)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_ipc4_copier_data *copier_data;
 	struct sof_ipc4_copier *ipc4_copier;
 
@@ -2206,7 +2206,7 @@ _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 {
 	struct sof_ipc4_available_audio_format *available_fmt;
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_ipc4_copier_data *copier_data;
 	int input_fmt_index, output_fmt_index;
 	struct sof_ipc4_copier *ipc4_copier;
@@ -2718,7 +2718,7 @@ static int sof_ipc4_prepare_gain_module(struct snd_sof_widget *swidget,
 					struct snd_pcm_hw_params *pipeline_params, int dir)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_ipc4_gain *gain = swidget->private;
 	struct sof_ipc4_available_audio_format *available_fmt = &gain->available_fmt;
 	struct sof_ipc4_audio_format *in_fmt;
@@ -2767,7 +2767,7 @@ static int sof_ipc4_prepare_mixer_module(struct snd_sof_widget *swidget,
 					 struct snd_pcm_hw_params *pipeline_params, int dir)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_ipc4_mixer *mixer = swidget->private;
 	struct sof_ipc4_available_audio_format *available_fmt = &mixer->available_fmt;
 	struct sof_ipc4_audio_format *in_fmt;
@@ -2816,7 +2816,7 @@ static int sof_ipc4_prepare_src_module(struct snd_sof_widget *swidget,
 				       struct snd_pcm_hw_params *pipeline_params, int dir)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_ipc4_src *src = swidget->private;
 	struct sof_ipc4_available_audio_format *available_fmt = &src->available_fmt;
 	struct sof_ipc4_audio_format *out_audio_fmt;
@@ -2985,7 +2985,7 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 					   struct snd_pcm_hw_params *pipeline_params, int dir)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_ipc4_process *process = swidget->private;
 	struct sof_ipc4_available_audio_format *available_fmt = &process->available_fmt;
 	void *cfg = process->ipc_config_data;
@@ -4128,7 +4128,7 @@ static int sof_ipc4_dai_config(struct snd_sof_dev *sdev, struct snd_sof_widget *
 static int sof_ipc4_parse_manifest(struct snd_soc_component *scomp, int index,
 				   struct snd_soc_tplg_manifest *man)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	struct sof_manifest_tlv *manifest_tlv;
 	struct snd_ipc4_nhlt *tplg_nhlt;

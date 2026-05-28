@@ -15,7 +15,7 @@
 static int sof_ipc3_set_get_kcontrol_data(struct snd_sof_control *scontrol,
 					  bool set, bool lock)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scontrol->scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scontrol->scomp);
 	struct sof_ipc_ctrl_data *cdata = scontrol->ipc_control_data;
 	const struct sof_ipc_ops *iops = sdev->ipc->ops;
 	enum sof_ipc_ctrl_type ctrl_type;

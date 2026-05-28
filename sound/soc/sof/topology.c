@@ -64,7 +64,7 @@ int sof_update_ipc_object(struct snd_soc_component *scomp, void *object, enum so
 			  struct snd_sof_tuple *tuples, int num_tuples,
 			  size_t object_size, int token_instance_num)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
 	const struct sof_token_info *token_list;
 	const struct sof_topology_token *tokens;
@@ -278,7 +278,7 @@ static int set_up_volume_table(struct snd_sof_control *scontrol,
 			       int tlv[SOF_TLV_ITEMS], int size)
 {
 	struct snd_soc_component *scomp = scontrol->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
 
 	if (tplg_ops && tplg_ops->control && tplg_ops->control->set_up_volume_table)
@@ -842,7 +842,7 @@ static int sof_control_load_volume(struct snd_soc_component *scomp,
 				   struct snd_kcontrol_new *kc,
 				   struct snd_soc_tplg_ctl_hdr *hdr)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct snd_soc_tplg_mixer_control *mc =
 		container_of(hdr, struct snd_soc_tplg_mixer_control, hdr);
 	int tlv[SOF_TLV_ITEMS];
@@ -970,7 +970,7 @@ static int sof_control_load(struct snd_soc_component *scomp, int index,
 	struct soc_mixer_control *sm;
 	struct soc_bytes_ext *sbe;
 	struct soc_enum *se;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct snd_soc_dobj *dobj;
 	struct snd_sof_control *scontrol;
 	int ret;
@@ -1045,7 +1045,7 @@ static int sof_control_load(struct snd_soc_component *scomp, int index,
 static int sof_control_unload(struct snd_soc_component *scomp,
 			      struct snd_soc_dobj *dobj)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
 	struct snd_sof_control *scontrol = dobj->private;
 	int ret = 0;
@@ -1180,7 +1180,7 @@ static void sof_disconnect_dai_widget(struct snd_soc_component *scomp,
 static int spcm_bind(struct snd_soc_component *scomp, struct snd_sof_pcm *spcm,
 		     int dir)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct snd_sof_widget *host_widget;
 
 	if (sdev->dspless_mode_selected)
@@ -1218,7 +1218,7 @@ static int sof_widget_parse_tokens(struct snd_soc_component *scomp, struct snd_s
 				   struct snd_soc_tplg_dapm_widget *tw,
 				   enum sof_tokens *object_token_list, int count)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
 	struct snd_soc_tplg_private *private = &tw->priv;
 	const struct sof_token_info *token_list;
@@ -1457,7 +1457,7 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 			    struct snd_soc_dapm_widget *w,
 			    struct snd_soc_tplg_dapm_widget *tw)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
 	const struct sof_ipc_tplg_widget_ops *widget_ops;
 	struct snd_soc_tplg_private *priv = &tw->priv;
@@ -1687,7 +1687,7 @@ static int sof_route_unload(struct snd_soc_component *scomp,
 static int sof_widget_unload(struct snd_soc_component *scomp,
 			     struct snd_soc_dobj *dobj)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
 	const struct sof_ipc_tplg_widget_ops *widget_ops;
 	const struct snd_kcontrol_new *kc;
@@ -1786,7 +1786,7 @@ static int sof_dai_load(struct snd_soc_component *scomp, int index,
 			struct snd_soc_dai_driver *dai_drv,
 			struct snd_soc_tplg_pcm *pcm, struct snd_soc_dai *dai)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	const struct sof_ipc_pcm_ops *ipc_pcm_ops = sof_ipc_get_ops(sdev, pcm);
 	struct snd_soc_tplg_stream_caps *caps;
 	struct snd_soc_tplg_private *private = &pcm->priv;
@@ -1901,7 +1901,7 @@ free_playback_tables:
 static int sof_dai_unload(struct snd_soc_component *scomp,
 			  struct snd_soc_dobj *dobj)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	const struct sof_ipc_pcm_ops *ipc_pcm_ops = sof_ipc_get_ops(sdev, pcm);
 	struct snd_sof_pcm *spcm = dobj->private;
 
@@ -1932,7 +1932,7 @@ static const struct sof_topology_token common_dai_link_tokens[] = {
 static int sof_link_load(struct snd_soc_component *scomp, int index, struct snd_soc_dai_link *link,
 			 struct snd_soc_tplg_link_config *cfg)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
 	struct snd_soc_tplg_private *private = &cfg->priv;
 	const struct sof_token_info *token_list;
@@ -2137,7 +2137,7 @@ static int sof_link_unload(struct snd_soc_component *scomp, struct snd_soc_dobj 
 static int sof_route_load(struct snd_soc_component *scomp, int index,
 			  struct snd_soc_dapm_route *route)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct snd_sof_widget *source_swidget, *sink_swidget;
 	struct snd_soc_dobj *dobj = &route->dobj;
 	struct snd_sof_route *sroute;
@@ -2241,7 +2241,7 @@ static int sof_set_widget_pipeline(struct snd_sof_dev *sdev, struct snd_sof_pipe
 /* completion - called at completion of firmware loading */
 static int sof_complete(struct snd_soc_component *scomp)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
 	const struct sof_ipc_tplg_widget_ops *widget_ops;
 	struct snd_sof_control *scontrol;
@@ -2329,7 +2329,7 @@ static int sof_complete(struct snd_soc_component *scomp)
 static int sof_manifest(struct snd_soc_component *scomp, int index,
 			struct snd_soc_tplg_manifest *man)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
 
 	if (tplg_ops && tplg_ops->parse_manifest)
@@ -2444,7 +2444,7 @@ static int sof_dspless_widget_ready(struct snd_soc_component *scomp, int index,
 	if (WIDGET_IS_DAI(w->id)) {
 		static const struct sof_topology_token dai_tokens[] = {
 			{SOF_TKN_DAI_TYPE, SND_SOC_TPLG_TUPLE_TYPE_STRING, get_token_dai_type, 0}};
-		struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+		struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 		struct snd_sof_widget *swidget;
 		struct snd_sof_dai *sdai;
 
@@ -2543,7 +2543,7 @@ static const struct snd_soc_tplg_ops sof_dspless_tplg_ops = {
 
 int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct snd_sof_pdata *sof_pdata = sdev->pdata;
 	const char *tplg_filename_prefix = sof_pdata->tplg_filename_prefix;
 	const struct firmware *fw;

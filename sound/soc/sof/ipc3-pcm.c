@@ -17,7 +17,7 @@ static int sof_ipc3_pcm_hw_free(struct snd_soc_component *component,
 				struct snd_pcm_substream *substream,
 				struct snd_sof_pcm *spcm, int dir)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct sof_ipc_stream stream;
 
 	if (!spcm->prepared[dir])
@@ -36,7 +36,7 @@ static int sof_ipc3_pcm_hw_params(struct snd_soc_component *component,
 				  struct snd_pcm_hw_params *params,
 				  struct snd_sof_platform_stream_params *platform_params)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct sof_ipc_fw_version *v = &sdev->fw_ready.version;
 	struct snd_pcm_runtime *runtime = substream->runtime;
@@ -139,7 +139,7 @@ static int sof_ipc3_pcm_trigger(struct snd_soc_component *component,
 				struct snd_pcm_substream *substream,
 				struct snd_sof_pcm *spcm, int cmd, int dir)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct sof_ipc_stream stream;
 
 	stream.hdr.size = sizeof(stream);
@@ -205,7 +205,7 @@ static int sof_ipc3_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 	struct snd_sof_dai *dai = snd_sof_find_dai(component, (char *)rtd->dai_link->name);
 	struct snd_interval *rate = hw_param_interval(params, SNDRV_PCM_HW_PARAM_RATE);
 	struct snd_mask *fmt = hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT);
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct sof_dai_private_data *private;
 	struct snd_soc_dpcm *dpcm;
 

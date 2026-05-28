@@ -17,7 +17,7 @@ static int sof_ipc4_set_get_kcontrol_data(struct snd_sof_control *scontrol,
 					  bool set, bool lock)
 {
 	struct snd_soc_component *scomp = scontrol->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	const struct sof_ipc_ops *iops = sdev->ipc->ops;
 	struct snd_sof_widget *swidget;
 	bool widget_found = false;
@@ -143,7 +143,7 @@ static bool sof_ipc4_volume_put(struct snd_sof_control *scontrol,
 {
 	struct sof_ipc4_control_data *cdata = scontrol->ipc_control_data;
 	struct snd_soc_component *scomp = scontrol->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	unsigned int channels = scontrol->num_channels;
 	struct snd_sof_widget *swidget;
 	bool widget_found = false;
@@ -383,7 +383,7 @@ static bool sof_ipc4_switch_put(struct snd_sof_control *scontrol,
 {
 	struct sof_ipc4_control_data *cdata = scontrol->ipc_control_data;
 	struct snd_soc_component *scomp = scontrol->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct snd_sof_widget *swidget;
 	bool widget_found = false;
 	bool change = false;
@@ -442,7 +442,7 @@ static bool sof_ipc4_enum_put(struct snd_sof_control *scontrol,
 {
 	struct sof_ipc4_control_data *cdata = scontrol->ipc_control_data;
 	struct snd_soc_component *scomp = scontrol->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct snd_sof_widget *swidget;
 	bool widget_found = false;
 	bool change = false;
@@ -552,7 +552,7 @@ static int sof_ipc4_bytes_put(struct snd_sof_control *scontrol,
 {
 	struct sof_ipc4_control_data *cdata = scontrol->ipc_control_data;
 	struct snd_soc_component *scomp = scontrol->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_abi_hdr *data = cdata->data;
 	const struct sof_abi_hdr *new_hdr =
 		(const struct sof_abi_hdr *)ucontrol->value.bytes.data;
@@ -626,7 +626,7 @@ static int sof_ipc4_bytes_ext_put(struct snd_sof_control *scontrol,
 	struct snd_ctl_tlv __user *tlvd = (struct snd_ctl_tlv __user *)binary_data;
 	struct sof_ipc4_control_data *cdata = scontrol->ipc_control_data;
 	struct snd_soc_component *scomp = scontrol->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_abi_hdr *data = cdata->data;
 	struct sof_abi_hdr abi_hdr;
 	struct snd_ctl_tlv header;
@@ -725,7 +725,7 @@ static int _sof_ipc4_bytes_ext_get(struct snd_sof_control *scontrol,
 
 	/* get all the component data from DSP */
 	if (from_dsp) {
-		struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+		struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 		int ret = sof_ipc4_set_get_bytes_data(sdev, scontrol, false, true);
 
 		if (ret < 0)

@@ -67,7 +67,7 @@ static u32 sof_ipc4_compr_calc_min_fragment_size(struct snd_sof_pcm_stream *sps)
 static int sof_ipc4_compr_open(struct snd_soc_component *component,
 			       struct snd_compr_stream *cstream)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_sof_pcm *spcm;
 	int dir, ret;
@@ -145,7 +145,7 @@ static int sof_ipc4_compr_stream_free(struct snd_sof_dev *sdev,
 static int sof_ipc4_compr_free(struct snd_soc_component *component,
 			       struct snd_compr_stream *cstream)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_sof_pcm *spcm;
 	int ret, err;
@@ -188,7 +188,7 @@ static int sof_ipc4_compr_get_caps(struct snd_soc_component *component,
 				   struct snd_compr_stream *cstream,
 				   struct snd_compr_caps *caps)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	struct sof_ipc4_codec_info_data *codec_info = ipc4_data->codec_info;
@@ -316,7 +316,7 @@ static int sof_ipc4_compr_set_params(struct snd_soc_component *component,
 				     struct snd_compr_stream *cstream,
 				     struct snd_compr_params *params)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
 	struct sof_ipc4_compr_init_data *compr_data __free(kfree) = NULL;
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
@@ -511,7 +511,7 @@ static int sof_ipc4_compr_get_params(struct snd_soc_component *component,
 				     struct snd_compr_stream *cstream,
 				     struct snd_codec *params)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_sof_pcm *spcm;
 	/* TODO: we don't query the supported codecs for now, if the
@@ -534,7 +534,7 @@ static int sof_ipc4_compr_get_params(struct snd_soc_component *component,
 static int sof_ipc4_compr_trigger(struct snd_soc_component *component,
 				  struct snd_compr_stream *cstream, int cmd)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	const struct sof_ipc_pcm_ops *pcm_ops = sof_ipc_get_ops(sdev, pcm);
 	struct snd_sof_pcm *spcm;
@@ -653,7 +653,7 @@ static int sof_ipc4_compr_pointer(struct snd_soc_component *component,
 				  struct snd_compr_stream *cstream,
 				  struct snd_compr_tstamp64 *tstamp)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct sof_ipc4_timestamp_info *time_info;
 	struct snd_pcm_hw_params *params;

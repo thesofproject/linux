@@ -619,11 +619,17 @@ snd_sof_find_swidget_sname(struct snd_soc_component *scomp,
 struct snd_sof_dai *snd_sof_find_dai(struct snd_soc_component *scomp,
 				     const char *name);
 
+static inline struct snd_sof_dev *
+snd_sof_component_get_sdev(struct snd_soc_component *scomp)
+{
+	return snd_soc_component_get_drvdata(scomp);
+}
+
 static inline
 struct snd_sof_pcm *snd_sof_find_spcm_dai(struct snd_soc_component *scomp,
 					  struct snd_soc_pcm_runtime *rtd)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct snd_sof_pcm *spcm;
 
 	list_for_each_entry(spcm, &sdev->pcm_list, list) {
@@ -639,6 +645,9 @@ struct snd_sof_pcm *snd_sof_find_spcm_name(struct snd_soc_component *scomp,
 struct snd_sof_pcm *snd_sof_find_spcm_comp(struct snd_soc_component *scomp,
 					   unsigned int comp_id,
 					   int *direction);
+struct snd_sof_pcm *snd_sof_find_spcm_comp_by_sdev(struct snd_sof_dev *sdev,
+						   unsigned int comp_id,
+						   int *direction);
 void snd_sof_pcm_period_elapsed(struct snd_pcm_substream *substream);
 void snd_sof_pcm_init_elapsed_work(struct work_struct *work);
 int sof_pcm_setup_connected_widgets(struct snd_sof_dev *sdev, struct snd_soc_pcm_runtime *rtd,
