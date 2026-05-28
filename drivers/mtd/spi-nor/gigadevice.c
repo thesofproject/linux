@@ -36,6 +36,34 @@ static const struct spi_nor_fixups gd25q256_fixups = {
 	.post_bfpt = gd25q256_post_bfpt,
 };
 
+static const struct flash_info gd25lq256h_info = {
+	.name = "gd25lq256h",
+	.id = SNOR_ID(0xc8, 0x60, 0x19),
+	.flags = SPI_NOR_HAS_LOCK | SPI_NOR_4BIT_BP | SPI_NOR_HAS_TB | SPI_NOR_TB_SR_BIT6,
+};
+
+static int
+gd25lq255e_post_bfpt(struct spi_nor *nor,
+		     const struct sfdp_parameter_header *bfpt_header,
+		     const struct sfdp_bfpt *bfpt)
+{
+	/*
+	 * GD25LQ255E and GD25LQ256H share the same JEDEC ID (c8 60 19).
+	 * We can differentiate them by checking if the chip supports DTR
+	 * (Double Transfer Rate) mode, which is only supported by GD25LQ256H.
+	 *
+	 * SFDP parsing sets the DTR hwcaps if supported.
+	 */
+	if (bfpt->dwords[SFDP_DWORD(1)] & BFPT_DWORD1_DTR)
+		nor->info = &gd25lq256h_info;
+
+	return 0;
+}
+
+static const struct spi_nor_fixups gd25lq255e_fixups = {
+	.post_bfpt = gd25lq255e_post_bfpt,
+};
+
 static const struct flash_info gigadevice_nor_parts[] = {
 	{
 		.id = SNOR_ID(0xc8, 0x40, 0x15),
@@ -89,6 +117,7 @@ static const struct flash_info gigadevice_nor_parts[] = {
 		.id = SNOR_ID(0xc8, 0x60, 0x19),
 		.name = "gd25lq255e",
 		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB,
+		.fixups = &gd25lq255e_fixups,
 	},
 };
 
