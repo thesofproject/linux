@@ -333009,6 +333009,15 @@ function {
   parameter_id: 0xf435685e
 }
 function {
+  id: 0x1a5df559
+  return_type_id: 0x48b5725f
+  parameter_id: 0x2f73da3b
+  parameter_id: 0x4585663f
+  parameter_id: 0x3edc1393
+  parameter_id: 0x33756485
+  parameter_id: 0xf435685e
+}
+function {
   id: 0x1a5fed1b
   return_type_id: 0x48b5725f
   parameter_id: 0x2b1ef221
@@ -421093,6 +421102,15 @@ elf_symbol {
   full_name: "iov_iter_advance"
 }
 elf_symbol {
+  id: 0xe15835cc
+  name: "iov_iter_bvec"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x93521842
+  type_id: 0x1a5df559
+  full_name: "iov_iter_bvec"
+}
+elf_symbol {
   id: 0x067b9161
   name: "iov_iter_discard"
   is_defined: true
@@ -462371,6 +462389,7 @@ interface {
   symbol_id: 0x45ab591d
   symbol_id: 0xfb789e26
   symbol_id: 0x382b3272
+  symbol_id: 0xe15835cc
   symbol_id: 0x067b9161
   symbol_id: 0xa571d095
   symbol_id: 0x1f83f77d

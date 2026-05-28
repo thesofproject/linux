@@ -513,3 +513,4 @@
   of_css
   wait_for_completion_io_timeout
   get_pfnblock_migratetype
+  iov_iter_bvec
