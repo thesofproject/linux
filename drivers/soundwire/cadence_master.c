@@ -87,11 +87,7 @@ MODULE_PARM_DESC(cdns_mcp_int_mask, "Cadence MCP IntMask");
 #define CDNS_MCP_INT_IRQ			BIT(31)
 #define CDNS_MCP_INT_RESERVED1			GENMASK(30, 17)
 #define CDNS_MCP_INT_WAKEUP			BIT(16)
-#define CDNS_MCP_INT_SLAVE_RSVD			BIT(15)
-#define CDNS_MCP_INT_SLAVE_ALERT		BIT(14)
-#define CDNS_MCP_INT_SLAVE_ATTACH		BIT(13)
-#define CDNS_MCP_INT_SLAVE_NATTACH		BIT(12)
-#define CDNS_MCP_INT_SLAVE_MASK			GENMASK(15, 12)
+/* CDNS_MCP_INT_SLAVE_xxx defines are moved to cadence_master.h */
 #define CDNS_MCP_INT_DPINT			BIT(11)
 #define CDNS_MCP_INT_CTRL_CLASH			BIT(10)
 #define CDNS_MCP_INT_DATA_CLASH			BIT(9)

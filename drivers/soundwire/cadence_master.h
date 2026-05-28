@@ -17,6 +17,12 @@
 
 #define SDW_CADENCE_MCP_IP_OFFSET	0x4000
 
+#define CDNS_MCP_INT_SLAVE_RSVD			BIT(15)
+#define CDNS_MCP_INT_SLAVE_ALERT		BIT(14)
+#define CDNS_MCP_INT_SLAVE_ATTACH		BIT(13)
+#define CDNS_MCP_INT_SLAVE_NATTACH		BIT(12)
+#define CDNS_MCP_INT_SLAVE_MASK			GENMASK(15, 12)
+
 /**
  * struct sdw_cdns_pdi: PDI (Physical Data Interface) instance
  *
