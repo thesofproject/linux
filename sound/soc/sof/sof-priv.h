@@ -233,33 +233,34 @@ struct snd_sof_dsp_ops {
 			   struct snd_sof_mod_hdr *hdr); /* optional */
 
 	/* connect pcm substream to a host stream */
-	int (*pcm_open)(struct snd_sof_dev *sdev,
+	int (*pcm_open)(struct snd_soc_component *component,
 			struct snd_pcm_substream *substream); /* optional */
 	/* disconnect pcm substream to a host stream */
-	int (*pcm_close)(struct snd_sof_dev *sdev,
+	int (*pcm_close)(struct snd_soc_component *component,
 			 struct snd_pcm_substream *substream); /* optional */
 
 	/* host stream hw params */
-	int (*pcm_hw_params)(struct snd_sof_dev *sdev,
+	int (*pcm_hw_params)(struct snd_soc_component *component,
 			     struct snd_pcm_substream *substream,
 			     struct snd_pcm_hw_params *params,
 			     struct snd_sof_platform_stream_params *platform_params); /* optional */
 
 	/* host stream hw_free */
-	int (*pcm_hw_free)(struct snd_sof_dev *sdev,
+	int (*pcm_hw_free)(struct snd_soc_component *component,
 			   struct snd_pcm_substream *substream); /* optional */
 
 	/* host stream trigger */
-	int (*pcm_trigger)(struct snd_sof_dev *sdev,
+	int (*pcm_trigger)(struct snd_soc_component *component,
 			   struct snd_pcm_substream *substream,
 			   int cmd); /* optional */
 
 	/* host stream pointer */
-	snd_pcm_uframes_t (*pcm_pointer)(struct snd_sof_dev *sdev,
+	snd_pcm_uframes_t (*pcm_pointer)(struct snd_soc_component *component,
 					 struct snd_pcm_substream *substream); /* optional */
 
 	/* pcm ack */
-	int (*pcm_ack)(struct snd_sof_dev *sdev, struct snd_pcm_substream *substream); /* optional */
+	int (*pcm_ack)(struct snd_soc_component *component,
+		       struct snd_pcm_substream *substream); /* optional */
 
 	int (*compr_open)(struct snd_sof_dev *sdev, struct snd_compr_stream *cstream);
 	int (*compr_close)(struct snd_sof_dev *sdev, struct snd_compr_stream *cstream);
@@ -849,9 +850,9 @@ int sof_set_stream_data_offset(struct snd_sof_dev *sdev,
 			       struct snd_sof_pcm_stream *sps,
 			       size_t posn_offset);
 
-int sof_stream_pcm_open(struct snd_sof_dev *sdev,
+int sof_stream_pcm_open(struct snd_soc_component *component,
 			struct snd_pcm_substream *substream);
-int sof_stream_pcm_close(struct snd_sof_dev *sdev,
+int sof_stream_pcm_close(struct snd_soc_component *component,
 			 struct snd_pcm_substream *substream);
 
 /* SOF client support */

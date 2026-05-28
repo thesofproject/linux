@@ -436,7 +436,7 @@ static int mt8365_get_bar_index(struct snd_sof_dev *sdev, u32 type)
 	return type;
 }
 
-static int mt8365_pcm_hw_params(struct snd_sof_dev *sdev,
+static int mt8365_pcm_hw_params(struct snd_soc_component *component,
 				struct snd_pcm_substream *substream,
 				struct snd_pcm_hw_params *params,
 				struct snd_sof_platform_stream_params *platform_params)
@@ -446,18 +446,18 @@ static int mt8365_pcm_hw_params(struct snd_sof_dev *sdev,
 	return 0;
 }
 
-static snd_pcm_uframes_t mt8365_pcm_pointer(struct snd_sof_dev *sdev,
+static snd_pcm_uframes_t mt8365_pcm_pointer(struct snd_soc_component *component,
 					    struct snd_pcm_substream *substream)
 {
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_sof_pcm *spcm;
 	struct sof_ipc_stream_posn posn;
 	struct snd_sof_pcm_stream *stream;
-	struct snd_soc_component *scomp = sdev->component;
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	snd_pcm_uframes_t pos;
 	int ret;
 
-	spcm = snd_sof_find_spcm_dai(scomp, rtd);
+	spcm = snd_sof_find_spcm_dai(component, rtd);
 	if (!spcm) {
 		dev_warn_ratelimited(sdev->dev, "warn: can't find PCM with DAI ID %d\n",
 				     rtd->dai_link->id);

@@ -18,6 +18,7 @@
 #include <sound/compress_driver.h>
 #include <sound/pcm.h>
 #include "sof-priv.h"
+#include "sof-audio.h"
 
 #define sof_ops(sdev) \
 	((sdev)->pdata->desc->ops)
@@ -415,35 +416,41 @@ static inline int snd_sof_dsp_send_msg(struct snd_sof_dev *sdev,
 
 /* host PCM ops */
 static inline int
-snd_sof_pcm_platform_open(struct snd_sof_dev *sdev,
+snd_sof_pcm_platform_open(struct snd_soc_component *component,
 			  struct snd_pcm_substream *substream)
 {
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
+
 	if (sof_ops(sdev) && sof_ops(sdev)->pcm_open)
-		return sof_ops(sdev)->pcm_open(sdev, substream);
+		return sof_ops(sdev)->pcm_open(component, substream);
 
 	return 0;
 }
 
 /* disconnect pcm substream to a host stream */
 static inline int
-snd_sof_pcm_platform_close(struct snd_sof_dev *sdev,
+snd_sof_pcm_platform_close(struct snd_soc_component *component,
 			   struct snd_pcm_substream *substream)
 {
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
+
 	if (sof_ops(sdev) && sof_ops(sdev)->pcm_close)
-		return sof_ops(sdev)->pcm_close(sdev, substream);
+		return sof_ops(sdev)->pcm_close(component, substream);
 
 	return 0;
 }
 
 /* host stream hw params */
 static inline int
-snd_sof_pcm_platform_hw_params(struct snd_sof_dev *sdev,
+snd_sof_pcm_platform_hw_params(struct snd_soc_component *component,
 			       struct snd_pcm_substream *substream,
 			       struct snd_pcm_hw_params *params,
 			       struct snd_sof_platform_stream_params *platform_params)
 {
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
+
 	if (sof_ops(sdev) && sof_ops(sdev)->pcm_hw_params)
-		return sof_ops(sdev)->pcm_hw_params(sdev, substream, params,
+		return sof_ops(sdev)->pcm_hw_params(component, substream, params,
 						    platform_params);
 
 	return 0;
@@ -524,22 +531,26 @@ snd_sof_compr_get_dai_frame_counter(struct snd_sof_dev *sdev,
 
 /* host stream hw free */
 static inline int
-snd_sof_pcm_platform_hw_free(struct snd_sof_dev *sdev,
+snd_sof_pcm_platform_hw_free(struct snd_soc_component *component,
 			     struct snd_pcm_substream *substream)
 {
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
+
 	if (sof_ops(sdev) && sof_ops(sdev)->pcm_hw_free)
-		return sof_ops(sdev)->pcm_hw_free(sdev, substream);
+		return sof_ops(sdev)->pcm_hw_free(component, substream);
 
 	return 0;
 }
 
 /* host stream trigger */
 static inline int
-snd_sof_pcm_platform_trigger(struct snd_sof_dev *sdev,
+snd_sof_pcm_platform_trigger(struct snd_soc_component *component,
 			     struct snd_pcm_substream *substream, int cmd)
 {
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
+
 	if (sof_ops(sdev) && sof_ops(sdev)->pcm_trigger)
-		return sof_ops(sdev)->pcm_trigger(sdev, substream, cmd);
+		return sof_ops(sdev)->pcm_trigger(component, substream, cmd);
 
 	return 0;
 }
@@ -576,21 +587,25 @@ snd_sof_set_stream_data_offset(struct snd_sof_dev *sdev,
 
 /* host stream pointer */
 static inline snd_pcm_uframes_t
-snd_sof_pcm_platform_pointer(struct snd_sof_dev *sdev,
+snd_sof_pcm_platform_pointer(struct snd_soc_component *component,
 			     struct snd_pcm_substream *substream)
 {
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
+
 	if (sof_ops(sdev) && sof_ops(sdev)->pcm_pointer)
-		return sof_ops(sdev)->pcm_pointer(sdev, substream);
+		return sof_ops(sdev)->pcm_pointer(component, substream);
 
 	return 0;
 }
 
 /* pcm ack */
-static inline int snd_sof_pcm_platform_ack(struct snd_sof_dev *sdev,
+static inline int snd_sof_pcm_platform_ack(struct snd_soc_component *component,
 					   struct snd_pcm_substream *substream)
 {
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
+
 	if (sof_ops(sdev) && sof_ops(sdev)->pcm_ack)
-		return sof_ops(sdev)->pcm_ack(sdev, substream);
+		return sof_ops(sdev)->pcm_ack(component, substream);
 
 	return 0;
 }

@@ -667,21 +667,22 @@ u32 hda_get_interface_mask(struct snd_sof_dev *sdev);
  */
 u32 hda_dsp_get_mult_div(struct snd_sof_dev *sdev, int rate);
 u32 hda_dsp_get_bits(struct snd_sof_dev *sdev, int sample_bits);
-int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
+int hda_dsp_pcm_open(struct snd_soc_component *component,
 		     struct snd_pcm_substream *substream);
-int hda_dsp_pcm_close(struct snd_sof_dev *sdev,
+int hda_dsp_pcm_close(struct snd_soc_component *component,
 		      struct snd_pcm_substream *substream);
-int hda_dsp_pcm_hw_params(struct snd_sof_dev *sdev,
+int hda_dsp_pcm_hw_params(struct snd_soc_component *component,
 			  struct snd_pcm_substream *substream,
 			  struct snd_pcm_hw_params *params,
 			  struct snd_sof_platform_stream_params *platform_params);
-int hda_dsp_stream_hw_free(struct snd_sof_dev *sdev,
+int hda_dsp_stream_hw_free(struct snd_soc_component *component,
 			   struct snd_pcm_substream *substream);
-int hda_dsp_pcm_trigger(struct snd_sof_dev *sdev,
+int hda_dsp_pcm_trigger(struct snd_soc_component *component,
 			struct snd_pcm_substream *substream, int cmd);
-snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_sof_dev *sdev,
+snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_soc_component *component,
 				      struct snd_pcm_substream *substream);
-int hda_dsp_pcm_ack(struct snd_sof_dev *sdev, struct snd_pcm_substream *substream);
+int hda_dsp_pcm_ack(struct snd_soc_component *component,
+		    struct snd_pcm_substream *substream);
 
 int hda_dsp_compr_open(struct snd_sof_dev *sdev, struct snd_compr_stream *cstream);
 int hda_dsp_compr_close(struct snd_sof_dev *sdev, struct snd_compr_stream *cstream);

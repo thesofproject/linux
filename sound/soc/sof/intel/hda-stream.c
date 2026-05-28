@@ -803,9 +803,11 @@ static int _hda_dsp_stream_hw_free(struct snd_sof_dev *sdev,
 	return 0;
 }
 
-int hda_dsp_stream_hw_free(struct snd_sof_dev *sdev,
+int hda_dsp_stream_hw_free(struct snd_soc_component *component,
 			   struct snd_pcm_substream *substream)
 {
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
+
 	return _hda_dsp_stream_hw_free(sdev, substream->runtime->private_data);
 }
 EXPORT_SYMBOL_NS(hda_dsp_stream_hw_free, "SND_SOC_SOF_INTEL_HDA_COMMON");

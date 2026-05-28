@@ -156,12 +156,12 @@ EXPORT_SYMBOL(mtk_adsp_get_bar_index);
 
 /**
  * mtk_adsp_stream_pcm_hw_params - Platform specific host stream hw params
- * @sdev: SOF device
+ * @component: ASoC component
  * @substream: PCM Substream
  * @params: hw params
  * @platform_params: Platform specific SOF stream parameters
  */
-int mtk_adsp_stream_pcm_hw_params(struct snd_sof_dev *sdev,
+int mtk_adsp_stream_pcm_hw_params(struct snd_soc_component *component,
 				  struct snd_pcm_substream *substream,
 				  struct snd_pcm_hw_params *params,
 				  struct snd_sof_platform_stream_params *platform_params)
@@ -173,21 +173,21 @@ EXPORT_SYMBOL(mtk_adsp_stream_pcm_hw_params);
 
 /**
  * mtk_adsp_stream_pcm_pointer - Get host stream pointer
- * @sdev: SOF device
+ * @component: ASoC component
  * @substream: PCM substream
  */
-snd_pcm_uframes_t mtk_adsp_stream_pcm_pointer(struct snd_sof_dev *sdev,
+snd_pcm_uframes_t mtk_adsp_stream_pcm_pointer(struct snd_soc_component *component,
 					      struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
-	struct snd_soc_component *scomp = sdev->component;
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_sof_pcm_stream *stream;
 	struct sof_ipc_stream_posn posn;
 	struct snd_sof_pcm *spcm;
 	snd_pcm_uframes_t pos;
 	int ret;
 
-	spcm = snd_sof_find_spcm_dai(scomp, rtd);
+	spcm = snd_sof_find_spcm_dai(component, rtd);
 	if (!spcm) {
 		dev_warn_ratelimited(sdev->dev, "warn: can't find PCM with DAI ID %d\n",
 				     rtd->dai_link->id);
@@ -211,3 +211,4 @@ EXPORT_SYMBOL(mtk_adsp_stream_pcm_pointer);
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("SOF helpers for MTK ADSP platforms");
+MODULE_IMPORT_NS("SND_SOC_SOF_CLIENT");

@@ -160,7 +160,7 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 	}
 
 	platform_params = &spcm->platform_params[substream->stream];
-	ret = snd_sof_pcm_platform_hw_params(sdev, substream, params, platform_params);
+	ret = snd_sof_pcm_platform_hw_params(component, substream, params, platform_params);
 	if (ret < 0) {
 		spcm_err(spcm, substream->stream, "platform hw params failed\n");
 		return ret;
@@ -207,6 +207,7 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 }
 
 static int sof_pcm_stream_free(struct snd_sof_dev *sdev,
+			       struct snd_soc_component *component,
 			       struct snd_pcm_substream *substream,
 			       struct snd_sof_pcm *spcm, int dir,
 			       bool free_widget_list)
@@ -218,12 +219,12 @@ static int sof_pcm_stream_free(struct snd_sof_dev *sdev,
 	if (spcm->prepared[substream->stream]) {
 		/* stop DMA first if needed */
 		if (pcm_ops && pcm_ops->platform_stop_during_hw_free)
-			snd_sof_pcm_platform_trigger(sdev, substream,
+			snd_sof_pcm_platform_trigger(component, substream,
 						     SNDRV_PCM_TRIGGER_STOP);
 
 		/* free PCM in the DSP */
 		if (pcm_ops && pcm_ops->hw_free) {
-			ret = pcm_ops->hw_free(sdev->component, substream, spcm,
+			ret = pcm_ops->hw_free(component, substream, spcm,
 					       substream->stream);
 			if (ret < 0) {
 				spcm_err(spcm, substream->stream,
@@ -237,7 +238,7 @@ static int sof_pcm_stream_free(struct snd_sof_dev *sdev,
 	}
 
 	/* reset the DMA */
-	ret = snd_sof_pcm_platform_hw_free(sdev, substream);
+	ret = snd_sof_pcm_platform_hw_free(component, substream);
 	if (ret < 0) {
 		spcm_err(spcm, substream->stream,
 			 "platform hw free failed %d\n", ret);
@@ -274,7 +275,7 @@ int sof_pcm_free_all_streams(struct snd_sof_dev *sdev)
 				continue;
 
 			if (spcm->stream[dir].list) {
-				ret = sof_pcm_stream_free(sdev, substream, spcm,
+				ret = sof_pcm_stream_free(sdev, spcm->scomp, substream, spcm,
 							  dir, true);
 				if (ret < 0)
 					return ret;
@@ -303,7 +304,8 @@ static int sof_pcm_hw_free(struct snd_soc_component *component,
 
 	spcm_dbg(spcm, substream->stream, "Entry: hw_free\n");
 
-	ret = sof_pcm_stream_free(sdev, substream, spcm, substream->stream, true);
+	ret = sof_pcm_stream_free(sdev, component, substream, spcm,
+				  substream->stream, true);
 
 	/* unprepare and free the list of DAPM widgets */
 	sof_widget_list_unprepare(sdev, spcm, substream->stream);
@@ -344,7 +346,7 @@ static int sof_pcm_prepare(struct snd_soc_component *component,
 		 * this case should be reached in case of xruns where we absolutely
 		 * want to free-up and reset all PCM/DMA resources
 		 */
-		ret = sof_pcm_stream_free(sdev, substream, spcm, substream->stream, true);
+		ret = sof_pcm_stream_free(sdev, component, substream, spcm, dir, true);
 		if (ret < 0)
 			return ret;
 	}
@@ -456,7 +458,7 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 	}
 
 	if (!ipc_first)
-		snd_sof_pcm_platform_trigger(sdev, substream, cmd);
+		snd_sof_pcm_platform_trigger(component, substream, cmd);
 
 	if (pcm_ops && pcm_ops->trigger)
 		ret = pcm_ops->trigger(component, substream, spcm, cmd, substream->stream);
@@ -466,14 +468,14 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 	case SNDRV_PCM_TRIGGER_START:
 		/* invoke platform trigger to start DMA only if pcm_ops is successful */
 		if (ipc_first && !ret)
-			snd_sof_pcm_platform_trigger(sdev, substream, cmd);
+			snd_sof_pcm_platform_trigger(component, substream, cmd);
 		break;
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 	case SNDRV_PCM_TRIGGER_STOP:
 		/* invoke platform trigger to stop DMA even if pcm_ops isn't set or if it failed */
 		if (!pcm_ops || !pcm_ops->platform_stop_during_hw_free)
-			snd_sof_pcm_platform_trigger(sdev, substream, cmd);
+			snd_sof_pcm_platform_trigger(component, substream, cmd);
 
 		/*
 		 * set the pending_stop flag to indicate that pipeline stop has been delayed.
@@ -490,7 +492,8 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 
 	/* free PCM if reset_hw_params is set and the STOP IPC is successful */
 	if (!ret && reset_hw_params)
-		ret = sof_pcm_stream_free(sdev, substream, spcm, substream->stream, false);
+		ret = sof_pcm_stream_free(sdev, component, substream, spcm,
+					  substream->stream, false);
 
 	return ret;
 }
@@ -517,7 +520,7 @@ static snd_pcm_uframes_t sof_pcm_pointer(struct snd_soc_component *component,
 
 	/* use dsp ops pointer callback directly if set */
 	if (sof_ops(sdev)->pcm_pointer)
-		return sof_ops(sdev)->pcm_pointer(sdev, substream);
+		return sof_ops(sdev)->pcm_pointer(component, substream);
 
 	spcm = snd_sof_find_spcm_dai(component, rtd);
 	if (!spcm)
@@ -581,7 +584,7 @@ static int sof_pcm_open(struct snd_soc_component *component,
 	spcm->stream[substream->stream].substream = substream;
 	spcm->prepared[substream->stream] = false;
 
-	ret = snd_sof_pcm_platform_open(sdev, substream);
+	ret = snd_sof_pcm_platform_open(component, substream);
 	if (ret < 0) {
 		spcm_err(spcm, substream->stream,
 			 "platform pcm open failed %d\n", ret);
@@ -601,7 +604,6 @@ static int sof_pcm_close(struct snd_soc_component *component,
 			 struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_sof_pcm *spcm;
 	int err;
 
@@ -615,7 +617,7 @@ static int sof_pcm_close(struct snd_soc_component *component,
 
 	spcm_dbg(spcm, substream->stream, "Entry: close\n");
 
-	err = snd_sof_pcm_platform_close(sdev, substream);
+	err = snd_sof_pcm_platform_close(component, substream);
 	if (err < 0) {
 		spcm_err(spcm, substream->stream,
 			 "platform pcm close failed %d\n", err);
@@ -804,9 +806,7 @@ static void sof_pcm_remove(struct snd_soc_component *component)
 static int sof_pcm_ack(struct snd_soc_component *component,
 		       struct snd_pcm_substream *substream)
 {
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
-
-	return snd_sof_pcm_platform_ack(sdev, substream);
+	return snd_sof_pcm_platform_ack(component, substream);
 }
 
 static snd_pcm_sframes_t sof_pcm_delay(struct snd_soc_component *component,
