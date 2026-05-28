@@ -323,6 +323,8 @@
  dev_pm_opp_find_freq_ceil_indexed
  __tracepoint_android_rvh_ufs_complete_init
  __traceiter_android_rvh_ufs_complete_init
+ blk_mq_freeze_queue_nomemsave
+ blk_mq_unfreeze_queue_nomemrestore
 
 # required by pte preread
  __traceiter_android_vh_mmput

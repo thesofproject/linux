@@ -829,6 +829,9 @@ enum ufshcd_quirks {
 enum ufshcd_android_quirks {
 	/* Set IID to one. */
 	UFSHCD_ANDROID_QUIRK_SET_IID_TO_ONE		= 1 << 30,
+
+	/* AH8 being enabled may break DME */
+	UFSHCD_ANDROID_QUIRK_AH8_BREAKS_DME             = 1 << 31,
 };
 
 enum ufshcd_caps {
