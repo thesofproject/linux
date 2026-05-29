@@ -1663,7 +1663,7 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 	}
 
 	w->dobj.private = swidget;
-	list_add(&swidget->list, &sdev->widget_list);
+	list_add(&swidget->list, &instance->widget_list);
 	return ret;
 free:
 	kfree(swidget->private);
@@ -2293,7 +2293,7 @@ static int sof_complete(struct snd_soc_component *scomp)
 		}
 
 		/* set the pipeline and update the IPC structure for the non scheduler widgets */
-		list_for_each_entry(swidget, &sdev->widget_list, list)
+		list_for_each_entry(swidget, &instance->widget_list, list)
 			if (swidget->widget->id != snd_soc_dapm_scheduler &&
 			    swidget->pipeline_id == pipe_widget->pipeline_id) {
 				ret = sof_set_widget_pipeline(sdev, spipe, swidget);
@@ -2458,7 +2458,8 @@ static int sof_dspless_widget_ready(struct snd_soc_component *scomp, int index,
 	if (WIDGET_IS_DAI(w->id)) {
 		static const struct sof_topology_token dai_tokens[] = {
 			{SOF_TKN_DAI_TYPE, SND_SOC_TPLG_TUPLE_TYPE_STRING, get_token_dai_type, 0}};
-		struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
+		struct snd_sof_audio_instance *instance =
+			snd_sof_component_get_audio_instance(scomp);
 		struct snd_sof_widget *swidget;
 		struct snd_sof_dai *sdai;
 
@@ -2493,7 +2494,7 @@ static int sof_dspless_widget_ready(struct snd_soc_component *scomp, int index,
 		swidget->private = sdai;
 		mutex_init(&swidget->setup_mutex);
 		w->dobj.private = swidget;
-		list_add(&swidget->list, &sdev->widget_list);
+		list_add(&swidget->list, &instance->widget_list);
 	}
 
 	return 0;

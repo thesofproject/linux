@@ -336,7 +336,7 @@ static int sof_ipc4_compr_set_params(struct snd_soc_component *component,
 	if (!spcm)
 		return -EINVAL;
 
-	host_swidget = snd_sof_find_swidget_by_comp_id(sdev, spcm->stream[dir].comp_id);
+	host_swidget = snd_sof_find_swidget_by_comp_id(component, spcm->stream[dir].comp_id);
 	if (!host_swidget) {
 		spcm_err(spcm, dir, "failed to find host widget with comp_id %d\n",
 			 spcm->stream[dir].comp_id);
@@ -720,6 +720,7 @@ void sof_ipc4_compr_drain_done(struct snd_sof_dev *sdev, void *ipc_message)
 	struct sof_ipc4_msg *ipc4_msg = ipc_message;
 	struct sof_ipc4_notify_module_data *ndata = ipc4_msg->data_ptr;
 	struct snd_sof_widget *swidget, *host_swidget;
+	struct snd_sof_audio_instance *instance;
 	bool widget_found = false;
 	struct snd_sof_pcm *spcm;
 	int dir;
@@ -737,7 +738,8 @@ void sof_ipc4_compr_drain_done(struct snd_sof_dev *sdev, void *ipc_message)
 		return;
 
 	/* Find the swidget of the host copier on the same pipeline */
-	list_for_each_entry(host_swidget, &sdev->widget_list, list) {
+	instance = snd_sof_component_get_audio_instance(swidget->scomp);
+	list_for_each_entry(host_swidget, &instance->widget_list, list) {
 		if (WIDGET_IS_AIF(host_swidget->id) &&
 		    host_swidget->pipeline_id == swidget->pipeline_id) {
 			widget_found = true;

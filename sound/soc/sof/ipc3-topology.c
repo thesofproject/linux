@@ -2343,7 +2343,7 @@ static int sof_ipc3_set_up_all_pipelines(struct snd_sof_dev *sdev, bool verify)
 	int ret;
 
 	/* restore pipeline components */
-	list_for_each_entry(swidget, &sdev->widget_list, list) {
+	for_each_swidget_in_instances(swidget, sdev, instance) {
 		/* only set up the widgets belonging to static pipelines */
 		if (!verify && swidget->dynamic_pipeline_widget)
 			continue;
@@ -2408,7 +2408,7 @@ static int sof_ipc3_set_up_all_pipelines(struct snd_sof_dev *sdev, bool verify)
 	}
 
 	/* complete pipeline */
-	list_for_each_entry(swidget, &sdev->widget_list, list) {
+	for_each_swidget_in_instances(swidget, sdev, instance) {
 		switch (swidget->id) {
 		case snd_soc_dapm_scheduler:
 			/* only complete static pipelines */
@@ -2439,6 +2439,7 @@ static int sof_ipc3_set_up_all_pipelines(struct snd_sof_dev *sdev, bool verify)
  */
 static int sof_tear_down_left_over_pipelines(struct snd_sof_dev *sdev)
 {
+	struct snd_sof_audio_instance *instance;
 	struct snd_sof_widget *swidget;
 	int ret;
 
@@ -2455,7 +2456,7 @@ static int sof_tear_down_left_over_pipelines(struct snd_sof_dev *sdev)
 	 * free any left over DAI widgets. This is equivalent to the handling of suspend trigger
 	 * for the BE DAI for running streams.
 	 */
-	list_for_each_entry(swidget, &sdev->widget_list, list)
+	for_each_swidget_in_instances(swidget, sdev, instance)
 		if (WIDGET_IS_DAI(swidget->id) && swidget->use_count == 1) {
 			ret = sof_widget_free(sdev, swidget);
 			if (ret < 0)
@@ -2468,11 +2469,12 @@ static int sof_tear_down_left_over_pipelines(struct snd_sof_dev *sdev)
 static int sof_ipc3_free_widgets_in_list(struct snd_sof_dev *sdev, bool include_scheduler,
 					 bool *dyn_widgets, bool verify)
 {
+	struct snd_sof_audio_instance *instance;
 	struct sof_ipc_fw_version *v = &sdev->fw_ready.version;
 	struct snd_sof_widget *swidget;
 	int ret;
 
-	list_for_each_entry(swidget, &sdev->widget_list, list) {
+	for_each_swidget_in_instances(swidget, sdev, instance) {
 		if (swidget->dynamic_pipeline_widget) {
 			*dyn_widgets = true;
 			continue;
@@ -2556,7 +2558,7 @@ static int sof_ipc3_tear_down_all_pipelines(struct snd_sof_dev *sdev, bool verif
 	 * to recover at this point but this will help root cause bad sequences leading to
 	 * more issues on resume
 	 */
-	list_for_each_entry(swidget, &sdev->widget_list, list) {
+	for_each_swidget_in_instances(swidget, sdev, instance) {
 		if (swidget->use_count != 0) {
 			dev_err(swidget->scomp->dev,
 				"%s: widget %s is still in use: count %d\n",

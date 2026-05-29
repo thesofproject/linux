@@ -15,6 +15,8 @@
 static int sof_ipc3_set_get_kcontrol_data(struct snd_sof_control *scontrol,
 					  bool set, bool lock)
 {
+	struct snd_sof_audio_instance *instance =
+		snd_sof_component_get_audio_instance(scontrol->scomp);
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scontrol->scomp);
 	struct sof_ipc_ctrl_data *cdata = scontrol->ipc_control_data;
 	const struct sof_ipc_ops *iops = sdev->ipc->ops;
@@ -24,7 +26,7 @@ static int sof_ipc3_set_get_kcontrol_data(struct snd_sof_control *scontrol,
 	u32 ipc_cmd, msg_bytes;
 	int ret = 0;
 
-	list_for_each_entry(swidget, &sdev->widget_list, list) {
+	list_for_each_entry(swidget, &instance->widget_list, list) {
 		if (swidget->comp_id == scontrol->comp_id) {
 			widget_found = true;
 			break;
@@ -589,6 +591,7 @@ static void snd_sof_update_control(struct snd_sof_control *scontrol,
 static void sof_ipc3_control_update(struct snd_sof_dev *sdev, void *ipc_control_message)
 {
 	struct sof_ipc_ctrl_data *cdata = ipc_control_message;
+	struct snd_sof_audio_instance *instance;
 	struct snd_soc_dapm_widget *widget;
 	struct snd_sof_control *scontrol;
 	struct snd_sof_widget *swidget;
@@ -607,7 +610,7 @@ static void sof_ipc3_control_update(struct snd_sof_dev *sdev, void *ipc_control_
 	}
 
 	/* Find the swidget first */
-	list_for_each_entry(swidget, &sdev->widget_list, list) {
+	for_each_swidget_in_instances(swidget, sdev, instance) {
 		if (swidget->comp_id == cdata->comp_id) {
 			found = true;
 			break;

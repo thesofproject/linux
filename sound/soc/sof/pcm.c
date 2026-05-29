@@ -100,12 +100,16 @@ sof_pcm_setup_connected_widgets(struct snd_sof_dev *sdev, struct snd_soc_pcm_run
 	return 0;
 }
 
-struct snd_sof_widget *snd_sof_find_swidget_by_comp_id(struct snd_sof_dev *sdev,
+struct snd_sof_widget *snd_sof_find_swidget_by_comp_id(struct snd_soc_component *scomp,
 						       int comp_id)
 {
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct snd_sof_widget *swidget;
 
-	list_for_each_entry(swidget, &sdev->widget_list, list) {
+	if (!instance)
+		return NULL;
+
+	list_for_each_entry(swidget, &instance->widget_list, list) {
 		if (comp_id == swidget->comp_id)
 			return swidget;
 	}
@@ -177,7 +181,7 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 	if (!sdev->dspless_mode_selected) {
 		int host_comp_id = spcm->stream[substream->stream].comp_id;
 
-		host_widget = snd_sof_find_swidget_by_comp_id(sdev, host_comp_id);
+		host_widget = snd_sof_find_swidget_by_comp_id(component, host_comp_id);
 		if (!host_widget) {
 			spcm_err(spcm, substream->stream,
 				 "failed to find host widget with comp_id %d\n", host_comp_id);

@@ -32,6 +32,7 @@ snd_sof_audio_instance_register(struct snd_sof_dev *sdev,
 	INIT_LIST_HEAD(&instance->route_list);
 	INIT_LIST_HEAD(&instance->pcm_list);
 	INIT_LIST_HEAD(&instance->kcontrol_list);
+	INIT_LIST_HEAD(&instance->widget_list);
 
 	scoped_guard(spinlock, &sdev->audio_instance_list_lock)
 		list_add_tail_rcu(&instance->list, &sdev->audio_instance_list);
@@ -1091,10 +1092,10 @@ struct snd_sof_pcm *snd_sof_find_spcm_comp_by_sdev(struct snd_sof_dev *sdev,
 struct snd_sof_widget *snd_sof_find_swidget(struct snd_soc_component *scomp,
 					    const char *name)
 {
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct snd_sof_widget *swidget;
 
-	list_for_each_entry(swidget, &sdev->widget_list, list) {
+	list_for_each_entry(swidget, &instance->widget_list, list) {
 		if (strcmp(name, swidget->widget->name) == 0)
 			return swidget;
 	}
@@ -1107,7 +1108,7 @@ struct snd_sof_widget *
 snd_sof_find_swidget_sname(struct snd_soc_component *scomp,
 			   const char *pcm_name, int dir)
 {
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct snd_sof_widget *swidget;
 	enum snd_soc_dapm_type type;
 
@@ -1116,7 +1117,7 @@ snd_sof_find_swidget_sname(struct snd_soc_component *scomp,
 	else
 		type = snd_soc_dapm_aif_out;
 
-	list_for_each_entry(swidget, &sdev->widget_list, list) {
+	list_for_each_entry(swidget, &instance->widget_list, list) {
 		if (!strcmp(pcm_name, swidget->widget->sname) &&
 		    swidget->id == type)
 			return swidget;

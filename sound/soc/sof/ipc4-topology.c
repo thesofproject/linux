@@ -221,9 +221,10 @@ static const struct sof_token_info ipc4_token_list[SOF_TOKEN_COUNT] = {
 struct snd_sof_widget *sof_ipc4_find_swidget_by_ids(struct snd_sof_dev *sdev,
 						    u32 module_id, int instance_id)
 {
+	struct snd_sof_audio_instance *instance;
 	struct snd_sof_widget *swidget;
 
-	list_for_each_entry(swidget, &sdev->widget_list, list) {
+	for_each_swidget_in_instances(swidget, sdev, instance) {
 		struct sof_ipc4_fw_module *fw_module = swidget->module_info;
 
 		/* Only active module instances have valid instance_id */
@@ -809,6 +810,7 @@ static int sof_ipc4_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 {
 	struct sof_ipc4_available_audio_format *available_fmt;
 	struct snd_soc_component *scomp = swidget->scomp;
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct snd_sof_dai *dai = swidget->private;
 	struct sof_ipc4_copier *ipc4_copier;
@@ -893,7 +895,7 @@ static int sof_ipc4_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 			goto free_available_fmt;
 		}
 
-		list_for_each_entry(w, &sdev->widget_list, list) {
+		list_for_each_entry(w, &instance->widget_list, list) {
 			struct snd_sof_dai *alh_dai;
 
 			if (!WIDGET_IS_DAI(w->id) || !w->widget->sname ||
@@ -2214,6 +2216,7 @@ _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 {
 	struct sof_ipc4_available_audio_format *available_fmt;
 	struct snd_soc_component *scomp = swidget->scomp;
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_ipc4_copier_data *copier_data;
 	int input_fmt_index, output_fmt_index;
@@ -2535,7 +2538,7 @@ _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 			 * for all widgets with the same stream name
 			 */
 			i = 0;
-			list_for_each_entry(w, &sdev->widget_list, list) {
+			list_for_each_entry(w, &instance->widget_list, list) {
 				u32 node_type;
 
 				if (!WIDGET_IS_DAI(w->id) || !w->widget->sname ||
