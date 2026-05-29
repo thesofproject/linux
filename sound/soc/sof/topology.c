@@ -1460,6 +1460,7 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 			    struct snd_soc_tplg_dapm_widget *tw)
 {
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
 	const struct sof_ipc_tplg_widget_ops *widget_ops;
 	struct snd_soc_tplg_private *priv = &tw->priv;
@@ -1468,6 +1469,9 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 	struct snd_sof_dai *dai;
 	int token_list_size = 0;
 	int ret = 0;
+
+	if (!instance)
+		return -EINVAL;
 
 	swidget = kzalloc_obj(*swidget);
 	if (!swidget)
@@ -1655,7 +1659,7 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 
 		spipe->pipe_widget = swidget;
 		swidget->spipe = spipe;
-		list_add(&spipe->list, &sdev->pipeline_list);
+		list_add(&spipe->list, &instance->pipeline_list);
 	}
 
 	w->dobj.private = swidget;
@@ -2244,11 +2248,15 @@ static int sof_set_widget_pipeline(struct snd_sof_dev *sdev, struct snd_sof_pipe
 static int sof_complete(struct snd_soc_component *scomp)
 {
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
 	const struct sof_ipc_tplg_widget_ops *widget_ops;
 	struct snd_sof_control *scontrol;
 	struct snd_sof_pipeline *spipe;
 	int ret;
+
+	if (!instance)
+		return -EINVAL;
 
 	widget_ops = tplg_ops ? tplg_ops->widget : NULL;
 
@@ -2264,7 +2272,7 @@ static int sof_complete(struct snd_soc_component *scomp)
 		}
 
 	/* set up the IPC structures for the pipeline widgets */
-	list_for_each_entry(spipe, &sdev->pipeline_list, list) {
+	list_for_each_entry(spipe, &instance->pipeline_list, list) {
 		struct snd_sof_widget *pipe_widget = spipe->pipe_widget;
 		struct snd_sof_widget *swidget;
 

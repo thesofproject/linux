@@ -26,6 +26,7 @@ snd_sof_audio_instance_register(struct snd_sof_dev *sdev,
 
 	instance->sdev = sdev;
 	instance->component = component;
+	INIT_LIST_HEAD(&instance->pipeline_list);
 
 	scoped_guard(spinlock, &sdev->audio_instance_list_lock)
 		list_add_tail_rcu(&instance->list, &sdev->audio_instance_list);
