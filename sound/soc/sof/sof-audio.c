@@ -30,6 +30,7 @@ snd_sof_audio_instance_register(struct snd_sof_dev *sdev,
 	INIT_LIST_HEAD(&instance->dai_list);
 	INIT_LIST_HEAD(&instance->dai_link_list);
 	INIT_LIST_HEAD(&instance->route_list);
+	INIT_LIST_HEAD(&instance->pcm_list);
 
 	scoped_guard(spinlock, &sdev->audio_instance_list_lock)
 		list_add_tail_rcu(&instance->list, &sdev->audio_instance_list);
@@ -971,12 +972,13 @@ int sof_widget_list_free(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, int
  */
 bool snd_sof_dsp_state_is_d0i3_compatible(struct snd_sof_dev *sdev)
 {
+	struct snd_sof_audio_instance *instance;
 	struct snd_pcm_substream *substream;
 	struct snd_sof_pcm *spcm;
 	bool d0i3_compatible_active = false;
 	int dir;
 
-	list_for_each_entry(spcm, &sdev->pcm_list, list) {
+	for_each_spcm_in_instances(spcm, sdev, instance) {
 		for_each_pcm_streams(dir) {
 			substream = spcm->stream[dir].substream;
 			if (!substream || !substream->runtime)
@@ -1015,9 +1017,10 @@ EXPORT_SYMBOL(snd_sof_dsp_state_is_d0i3_compatible);
 
 bool snd_sof_stream_suspend_ignored(struct snd_sof_dev *sdev)
 {
+	struct snd_sof_audio_instance *instance;
 	struct snd_sof_pcm *spcm;
 
-	list_for_each_entry(spcm, &sdev->pcm_list, list) {
+	for_each_spcm_in_instances(spcm, sdev, instance) {
 		if (spcm->stream[SNDRV_PCM_STREAM_PLAYBACK].suspend_ignored ||
 		    spcm->stream[SNDRV_PCM_STREAM_CAPTURE].suspend_ignored)
 			return true;
@@ -1033,10 +1036,10 @@ bool snd_sof_stream_suspend_ignored(struct snd_sof_dev *sdev)
 struct snd_sof_pcm *snd_sof_find_spcm_name(struct snd_soc_component *scomp,
 					   const char *name)
 {
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct snd_sof_pcm *spcm;
 
-	list_for_each_entry(spcm, &sdev->pcm_list, list) {
+	list_for_each_entry(spcm, &instance->pcm_list, list) {
 		/* match with PCM dai name */
 		if (strcmp(spcm->pcm.dai_name, name) == 0)
 			return spcm;
@@ -1068,10 +1071,11 @@ struct snd_sof_pcm *snd_sof_find_spcm_comp_by_sdev(struct snd_sof_dev *sdev,
 						   unsigned int comp_id,
 						   int *direction)
 {
+	struct snd_sof_audio_instance *instance;
 	struct snd_sof_pcm *spcm;
 	int dir;
 
-	list_for_each_entry(spcm, &sdev->pcm_list, list) {
+	for_each_spcm_in_instances(spcm, sdev, instance) {
 		for_each_pcm_streams(dir) {
 			if (spcm->stream[dir].comp_id == comp_id) {
 				*direction = dir;

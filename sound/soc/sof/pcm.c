@@ -262,11 +262,12 @@ static int sof_pcm_stream_free(struct snd_sof_dev *sdev,
 
 int sof_pcm_free_all_streams(struct snd_sof_dev *sdev)
 {
+	struct snd_sof_audio_instance *instance;
 	struct snd_pcm_substream *substream;
 	struct snd_sof_pcm *spcm;
 	int dir, ret;
 
-	list_for_each_entry(spcm, &sdev->pcm_list, list) {
+	for_each_spcm_in_instances(spcm, sdev, instance) {
 		for_each_pcm_streams(dir) {
 			substream = spcm->stream[dir].substream;
 

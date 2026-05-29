@@ -51,6 +51,10 @@
 	list_for_each_entry(instance, &(sdev)->audio_instance_list, list)	\
 		list_for_each_entry(sroute, &(instance)->route_list, list)
 
+#define for_each_spcm_in_instances(spcm, sdev, instance)				\
+	list_for_each_entry(instance, &(sdev)->audio_instance_list, list)	\
+		list_for_each_entry(spcm, &(instance)->pcm_list, list)
+
 #define SOF_DAI_PARAM_INTEL_SSP_MCLK		0
 #define SOF_DAI_PARAM_INTEL_SSP_BCLK		1
 #define SOF_DAI_PARAM_INTEL_SSP_TDM_SLOTS	2
@@ -629,14 +633,21 @@ snd_sof_component_get_sdev(struct snd_soc_component *scomp)
 	return snd_soc_component_get_drvdata(scomp);
 }
 
+struct snd_sof_audio_instance *
+snd_sof_audio_instance_register(struct snd_sof_dev *sdev,
+				struct snd_soc_component *component);
+void snd_sof_audio_instance_unregister(struct snd_sof_audio_instance *instance);
+struct snd_sof_audio_instance *
+snd_sof_component_get_audio_instance(struct snd_soc_component *component);
+
 static inline
 struct snd_sof_pcm *snd_sof_find_spcm_dai(struct snd_soc_component *scomp,
 					  struct snd_soc_pcm_runtime *rtd)
 {
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct snd_sof_pcm *spcm;
 
-	list_for_each_entry(spcm, &sdev->pcm_list, list) {
+	list_for_each_entry(spcm, &instance->pcm_list, list) {
 		if (le32_to_cpu(spcm->pcm.dai_id) == rtd->dai_link->id)
 			return spcm;
 	}
@@ -652,13 +663,6 @@ struct snd_sof_pcm *snd_sof_find_spcm_comp(struct snd_soc_component *scomp,
 struct snd_sof_pcm *snd_sof_find_spcm_comp_by_sdev(struct snd_sof_dev *sdev,
 						   unsigned int comp_id,
 						   int *direction);
-
-struct snd_sof_audio_instance *
-snd_sof_audio_instance_register(struct snd_sof_dev *sdev,
-				struct snd_soc_component *component);
-void snd_sof_audio_instance_unregister(struct snd_sof_audio_instance *instance);
-struct snd_sof_audio_instance *
-snd_sof_component_get_audio_instance(struct snd_soc_component *component);
 
 void snd_sof_pcm_period_elapsed(struct snd_pcm_substream *substream);
 void snd_sof_pcm_init_elapsed_work(struct work_struct *work);

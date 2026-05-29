@@ -529,12 +529,13 @@ static int hda_dsp_update_d0i3c_register(struct snd_sof_dev *sdev, u8 value)
  */
 static bool hda_dsp_d0i3_streaming_applicable(struct snd_sof_dev *sdev)
 {
+	struct snd_sof_audio_instance *instance;
 	struct snd_pcm_substream *substream;
 	struct snd_sof_pcm *spcm;
 	bool playback_active = false;
 	int dir;
 
-	list_for_each_entry(spcm, &sdev->pcm_list, list) {
+	for_each_spcm_in_instances(spcm, sdev, instance) {
 		for_each_pcm_streams(dir) {
 			substream = spcm->stream[dir].substream;
 			if (!substream || !substream->runtime)
