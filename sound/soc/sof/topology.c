@@ -1939,6 +1939,7 @@ static int sof_link_load(struct snd_soc_component *scomp, int index, struct snd_
 			 struct snd_soc_tplg_link_config *cfg)
 {
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
 	struct snd_soc_tplg_private *private = &cfg->priv;
 	const struct sof_token_info *token_list;
@@ -2110,7 +2111,7 @@ static int sof_link_load(struct snd_soc_component *scomp, int index, struct snd_
 	}
 out:
 	link->dobj.private = slink;
-	list_add(&slink->list, &sdev->dai_link_list);
+	list_add(&slink->list, &instance->dai_link_list);
 
 	return 0;
 

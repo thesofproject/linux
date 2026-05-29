@@ -638,7 +638,6 @@ static int ipc4_ssp_dai_config_pcm_params_match(struct snd_soc_component *compon
 						struct snd_pcm_hw_params *params)
 {
 	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_sof_dai_link *slink;
 	struct snd_sof_dai *dai;
 	bool dai_link_found = false;
@@ -646,7 +645,7 @@ static int ipc4_ssp_dai_config_pcm_params_match(struct snd_soc_component *compon
 	bool partial_match;
 	int i;
 
-	list_for_each_entry(slink, &sdev->dai_link_list, list) {
+	list_for_each_entry(slink, &instance->dai_link_list, list) {
 		if (!strcmp(slink->link->name, link_name)) {
 			dai_link_found = true;
 			break;

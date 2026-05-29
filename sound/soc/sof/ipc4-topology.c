@@ -1802,6 +1802,8 @@ static void sof_ipc4_unprepare_copier_module(struct snd_sof_widget *swidget)
 static int snd_sof_get_hw_config_params(struct snd_sof_dev *sdev, struct snd_sof_dai *dai,
 					int *sample_rate, int *channel_count, int *bit_depth)
 {
+	struct snd_soc_component *scomp = dai->scomp;
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct snd_soc_tplg_hw_config *hw_config;
 	struct snd_sof_dai_link *slink;
 	bool dai_link_found = false;
@@ -1809,7 +1811,7 @@ static int snd_sof_get_hw_config_params(struct snd_sof_dev *sdev, struct snd_sof
 	int i;
 
 	/* get current hw_config from link */
-	list_for_each_entry(slink, &sdev->dai_link_list, list) {
+	list_for_each_entry(slink, &instance->dai_link_list, list) {
 		if (!strcmp(slink->link->name, dai->name)) {
 			dai_link_found = true;
 			break;
@@ -4206,6 +4208,8 @@ static int sof_ipc4_parse_manifest(struct snd_soc_component *scomp, int index,
 
 static int sof_ipc4_dai_get_param(struct snd_sof_dev *sdev, struct snd_sof_dai *dai, int param_type)
 {
+	struct snd_soc_component *scomp = dai->scomp;
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct sof_ipc4_copier *ipc4_copier = dai->private;
 	struct snd_soc_tplg_hw_config *hw_config;
 	struct snd_sof_dai_link *slink;
@@ -4216,7 +4220,7 @@ static int sof_ipc4_dai_get_param(struct snd_sof_dev *sdev, struct snd_sof_dai *
 	if (!ipc4_copier)
 		return 0;
 
-	list_for_each_entry(slink, &sdev->dai_link_list, list) {
+	list_for_each_entry(slink, &instance->dai_link_list, list) {
 		if (!strcmp(slink->link->name, dai->name)) {
 			dai_link_found = true;
 			break;

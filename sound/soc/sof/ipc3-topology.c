@@ -1600,7 +1600,7 @@ static int sof_link_alh_load(struct snd_soc_component *scomp, struct snd_sof_dai
 static int sof_ipc3_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct snd_sof_dai *dai = swidget->private;
 	struct sof_dai_private_data *private;
 	struct sof_ipc_comp_dai *comp_dai;
@@ -1656,7 +1656,7 @@ static int sof_ipc3_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 	sof_dbg_comp_config(scomp, &comp_dai->config);
 
 	/* now update DAI config */
-	list_for_each_entry(slink, &sdev->dai_link_list, list) {
+	list_for_each_entry(slink, &instance->dai_link_list, list) {
 		struct sof_ipc_dai_config common_config;
 		int i;
 
