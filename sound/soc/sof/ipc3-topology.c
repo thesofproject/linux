@@ -757,7 +757,7 @@ static int sof_ipc3_widget_setup_comp_mux(struct snd_sof_widget *swidget)
 static int sof_ipc3_widget_setup_comp_pga(struct snd_sof_widget *swidget)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct sof_ipc_comp_volume *volume;
 	struct snd_sof_control *scontrol;
 	size_t ipc_size = sizeof(*volume);
@@ -790,7 +790,7 @@ static int sof_ipc3_widget_setup_comp_pga(struct snd_sof_widget *swidget)
 	dev_dbg(scomp->dev, "loaded PGA %s\n", swidget->widget->name);
 	sof_dbg_comp_config(scomp, &volume->config);
 
-	list_for_each_entry(scontrol, &sdev->kcontrol_list, list) {
+	list_for_each_entry(scontrol, &instance->kcontrol_list, list) {
 		if (scontrol->comp_id == swidget->comp_id &&
 		    scontrol->volume_table) {
 			min_step = scontrol->min_volume_step;

@@ -791,6 +791,7 @@ static void sof_ipc4_control_update(struct snd_sof_dev *sdev, void *ipc_message)
 	struct sof_ipc4_msg *ipc4_msg = ipc_message;
 	struct sof_ipc4_notify_module_data *ndata = ipc4_msg->data_ptr;
 	struct sof_ipc4_control_msg_payload *msg_data;
+	struct snd_sof_audio_instance *instance;
 	struct sof_ipc4_control_data *cdata;
 	struct snd_soc_dapm_widget *widget;
 	struct snd_sof_control *scontrol;
@@ -838,7 +839,8 @@ static void sof_ipc4_control_update(struct snd_sof_dev *sdev, void *ipc_message)
 
 	/* Find the scontrol which is the source of the notification */
 	msg_data = (struct sof_ipc4_control_msg_payload *)ndata->event_data;
-	list_for_each_entry(scontrol, &sdev->kcontrol_list, list) {
+	instance = snd_sof_component_get_audio_instance(swidget->scomp);
+	list_for_each_entry(scontrol, &instance->kcontrol_list, list) {
 		if (scontrol->comp_id == swidget->comp_id) {
 			u32 local_param_id;
 
@@ -957,10 +959,12 @@ notify:
 /* set up all controls for the widget */
 static int sof_ipc4_widget_kcontrol_setup(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
 {
+	struct snd_sof_audio_instance *instance =
+		snd_sof_component_get_audio_instance(swidget->scomp);
 	struct snd_sof_control *scontrol;
 	int ret = 0;
 
-	list_for_each_entry(scontrol, &sdev->kcontrol_list, list) {
+	list_for_each_entry(scontrol, &instance->kcontrol_list, list) {
 		if (scontrol->comp_id == swidget->comp_id) {
 			switch (scontrol->info_type) {
 			case SND_SOC_TPLG_CTL_VOLSW:

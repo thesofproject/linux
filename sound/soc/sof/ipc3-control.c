@@ -713,11 +713,13 @@ static void sof_ipc3_control_update(struct snd_sof_dev *sdev, void *ipc_control_
 static int sof_ipc3_widget_kcontrol_setup(struct snd_sof_dev *sdev,
 					  struct snd_sof_widget *swidget)
 {
+	struct snd_sof_audio_instance *instance =
+		snd_sof_component_get_audio_instance(swidget->scomp);
 	struct snd_sof_control *scontrol;
 	int ret;
 
 	/* set up all controls for the widget */
-	list_for_each_entry(scontrol, &sdev->kcontrol_list, list)
+	list_for_each_entry(scontrol, &instance->kcontrol_list, list)
 		if (scontrol->comp_id == swidget->comp_id) {
 			/* set kcontrol data in DSP */
 			ret = sof_ipc3_set_get_kcontrol_data(scontrol, true, false);

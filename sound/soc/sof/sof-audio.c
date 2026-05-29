@@ -31,6 +31,7 @@ snd_sof_audio_instance_register(struct snd_sof_dev *sdev,
 	INIT_LIST_HEAD(&instance->dai_link_list);
 	INIT_LIST_HEAD(&instance->route_list);
 	INIT_LIST_HEAD(&instance->pcm_list);
+	INIT_LIST_HEAD(&instance->kcontrol_list);
 
 	scoped_guard(spinlock, &sdev->audio_instance_list_lock)
 		list_add_tail_rcu(&instance->list, &sdev->audio_instance_list);

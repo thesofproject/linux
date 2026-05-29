@@ -972,7 +972,7 @@ static int sof_control_load(struct snd_soc_component *scomp, int index,
 	struct soc_mixer_control *sm;
 	struct soc_bytes_ext *sbe;
 	struct soc_enum *se;
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct snd_soc_dobj *dobj;
 	struct snd_sof_control *scontrol;
 	int ret;
@@ -1040,7 +1040,7 @@ static int sof_control_load(struct snd_soc_component *scomp, int index,
 	scontrol->led_ctl.led_value = -1;
 
 	dobj->private = scontrol;
-	list_add(&scontrol->list, &sdev->kcontrol_list);
+	list_add(&scontrol->list, &instance->kcontrol_list);
 	return 0;
 }
 
@@ -2224,12 +2224,14 @@ err:
 static int sof_set_widget_pipeline(struct snd_sof_dev *sdev, struct snd_sof_pipeline *spipe,
 				   struct snd_sof_widget *swidget)
 {
+	struct snd_sof_audio_instance *instance =
+		snd_sof_component_get_audio_instance(swidget->scomp);
 	struct snd_sof_widget *pipe_widget = spipe->pipe_widget;
 	struct snd_sof_control *scontrol;
 
 	if (pipe_widget->dynamic_pipeline_widget) {
 		/* dynamic widgets cannot have volatile kcontrols */
-		list_for_each_entry(scontrol, &sdev->kcontrol_list, list)
+		list_for_each_entry(scontrol, &instance->kcontrol_list, list)
 			if (scontrol->comp_id == swidget->comp_id &&
 			    (scontrol->access & SNDRV_CTL_ELEM_ACCESS_VOLATILE)) {
 				dev_err(swidget->scomp->dev,
@@ -2264,7 +2266,7 @@ static int sof_complete(struct snd_soc_component *scomp)
 
 	/* first update all control IPC structures based on the IPC version */
 	if (tplg_ops && tplg_ops->control_setup)
-		list_for_each_entry(scontrol, &sdev->kcontrol_list, list) {
+		list_for_each_entry(scontrol, &instance->kcontrol_list, list) {
 			ret = tplg_ops->control_setup(sdev, scontrol);
 			if (ret < 0) {
 				dev_err(scomp->dev, "failed updating IPC struct for control %s\n",

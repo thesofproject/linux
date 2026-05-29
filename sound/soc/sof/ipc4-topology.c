@@ -610,12 +610,12 @@ static int sof_ipc4_widget_setup_msg(struct snd_sof_widget *swidget, struct sof_
 static void sof_ipc4_widget_update_kcontrol_module_id(struct snd_sof_widget *swidget)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct sof_ipc4_fw_module *fw_module = swidget->module_info;
 	struct snd_sof_control *scontrol;
 
 	/* update module ID for all kcontrols for this widget */
-	list_for_each_entry(scontrol, &sdev->kcontrol_list, list) {
+	list_for_each_entry(scontrol, &instance->kcontrol_list, list) {
 		if (scontrol->comp_id == swidget->comp_id) {
 			struct sof_ipc4_control_data *cdata = scontrol->ipc_control_data;
 			struct sof_ipc4_msg *msg = &cdata->msg;
