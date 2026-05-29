@@ -378,10 +378,14 @@ static unsigned long domain_super_pgsize_bitmap(struct dmar_domain *domain)
 struct context_entry *iommu_context_addr(struct intel_iommu *iommu, u8 bus,
 					 u8 devfn, int alloc)
 {
-	struct root_entry *root = &iommu->root_entry[bus];
+	struct root_entry *root;
 	struct context_entry *context;
 	u64 *entry;
 
+	if (WARN_ON(!iommu->root_entry))
+		return NULL;
+
+	root = &iommu->root_entry[bus];
 	/*
 	 * Except that the caller requested to allocate a new entry,
 	 * returning a copied context entry makes no sense.

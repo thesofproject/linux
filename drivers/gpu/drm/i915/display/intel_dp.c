@@ -2598,13 +2598,7 @@ intel_dp_compute_config_limits(struct intel_dp *intel_dp,
 		limits->pipe.max_bpp = intel_dp_max_bpp(intel_dp, crtc_state,
 							respect_downstream_limits);
 		if (intel_dp_is_edp(intel_dp)) {
-			struct intel_atomic_state *state = conn_state->state ?
-				to_intel_atomic_state(conn_state->state) : NULL;
-			struct intel_crtc *crtc = to_intel_crtc(crtc_state->uapi.crtc);
-			struct intel_crtc_state *old_crtc_state = state ?
-				intel_atomic_get_old_crtc_state(state, crtc) : NULL;
-
-			if (old_crtc_state && old_crtc_state->inherited)
+			if (crtc_state->inherited)
 				limits->pipe.max_bpp = min(limits->pipe.max_bpp, 24);
 		}
 	}
@@ -2723,7 +2717,7 @@ intel_dp_compute_link_config(struct intel_encoder *encoder,
 						     false,
 						     &limits) ||
 		     (intel_dp_supports_dsc(intel_dp, connector, pipe_config) &&
-		      old_crtc_state && old_crtc_state->inherited &&
+		      pipe_config->inherited && old_crtc_state &&
 		      old_crtc_state->dsc.compression_enable);
 
 	if (!dsc_needed) {
@@ -3810,17 +3804,11 @@ bool intel_dp_initial_fastset_check(struct intel_encoder *encoder,
 	 * Remove once we have readout for DSC.
 	 */
 	if (crtc_state->dsc.compression_enable) {
-		struct intel_atomic_state *state = crtc_state->uapi.state ?
-			to_intel_atomic_state(crtc_state->uapi.state) : NULL;
-		struct intel_crtc *crtc = to_intel_crtc(crtc_state->uapi.crtc);
-		const struct intel_crtc_state *old_crtc_state = state ?
-			intel_atomic_get_old_crtc_state(state, crtc) : NULL;
-
 		/*
 		 * Only force full modeset for bigjoiner cases and cases
 		 * where it's not the first firmware to kernel handoff.
 		 */
-		if (crtc_state->joiner_pipes || !old_crtc_state || !old_crtc_state->inherited) {
+		if (crtc_state->joiner_pipes || !crtc_state->inherited) {
 			drm_dbg_kms(display->drm,
 				    "[ENCODER:%d:%s] Forcing full modeset due to DSC being enabled on joiner or non-inherited state\n",
 				    encoder->base.base.id, encoder->base.name);

@@ -492,7 +492,7 @@ void intel_vrr_compute_guardband(struct intel_crtc_state *crtc_state)
 		kernel_guardband = crtc_state->vrr.vmin - adjusted_mode->crtc_vdisplay;
 
 	//Grab inherited guardband if present during handoff, clamped to kernel value
-	if (old_crtc_state && old_crtc_state->inherited && old_crtc_state->vrr.guardband)
+	if (crtc_state->inherited && old_crtc_state && old_crtc_state->vrr.guardband)
 		guardband = max(old_crtc_state->vrr.guardband, kernel_guardband);
 	else
 		guardband = kernel_guardband;
