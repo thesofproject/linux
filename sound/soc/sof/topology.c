@@ -1565,7 +1565,7 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 			kfree(dai);
 			break;
 		}
-		list_add(&dai->list, &sdev->dai_list);
+		list_add(&dai->list, &instance->dai_list);
 		swidget->private = dai;
 		break;
 	case snd_soc_dapm_decoder:

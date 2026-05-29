@@ -170,9 +170,12 @@ static int sof_ipc3_pcm_trigger(struct snd_soc_component *component,
 	return sof_ipc_tx_message_no_reply(sdev->ipc, &stream, sizeof(stream));
 }
 
-static void ssp_dai_config_pcm_params_match(struct snd_sof_dev *sdev, const char *link_name,
+static void ssp_dai_config_pcm_params_match(struct snd_soc_component *component,
+					    const char *link_name,
 					    struct snd_pcm_hw_params *params)
 {
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct sof_ipc_dai_config *config;
 	struct snd_sof_dai *dai;
 	int i;
@@ -181,7 +184,7 @@ static void ssp_dai_config_pcm_params_match(struct snd_sof_dev *sdev, const char
 	 * Search for all matching DAIs as we can have both playback and capture DAI
 	 * associated with the same link.
 	 */
-	list_for_each_entry(dai, &sdev->dai_list, list) {
+	list_for_each_entry(dai, &instance->dai_list, list) {
 		if (!dai->name || strcmp(link_name, dai->name))
 			continue;
 		for (i = 0; i < dai->number_configs; i++) {
@@ -205,7 +208,6 @@ static int sof_ipc3_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 	struct snd_sof_dai *dai = snd_sof_find_dai(component, (char *)rtd->dai_link->name);
 	struct snd_interval *rate = hw_param_interval(params, SNDRV_PCM_HW_PARAM_RATE);
 	struct snd_mask *fmt = hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT);
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct sof_dai_private_data *private;
 	struct snd_soc_dpcm *dpcm;
 
@@ -244,7 +246,7 @@ static int sof_ipc3_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 	switch (private->dai_config->type) {
 	case SOF_DAI_INTEL_SSP:
 		/* search for config to pcm params match, if not found use default */
-		ssp_dai_config_pcm_params_match(sdev, (char *)rtd->dai_link->name, params);
+		ssp_dai_config_pcm_params_match(component, (char *)rtd->dai_link->name, params);
 
 		rate->min = private->dai_config[dai->current_config].ssp.fsync_rate;
 		rate->max = private->dai_config[dai->current_config].ssp.fsync_rate;

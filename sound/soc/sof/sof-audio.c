@@ -27,6 +27,7 @@ snd_sof_audio_instance_register(struct snd_sof_dev *sdev,
 	instance->sdev = sdev;
 	instance->component = component;
 	INIT_LIST_HEAD(&instance->pipeline_list);
+	INIT_LIST_HEAD(&instance->dai_list);
 
 	scoped_guard(spinlock, &sdev->audio_instance_list_lock)
 		list_add_tail_rcu(&instance->list, &sdev->audio_instance_list);
@@ -1115,10 +1116,10 @@ snd_sof_find_swidget_sname(struct snd_soc_component *scomp,
 struct snd_sof_dai *snd_sof_find_dai(struct snd_soc_component *scomp,
 				     const char *name)
 {
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct snd_sof_dai *dai;
 
-	list_for_each_entry(dai, &sdev->dai_list, list) {
+	list_for_each_entry(dai, &instance->dai_list, list) {
 		if (dai->name && (strcmp(name, dai->name) == 0))
 			return dai;
 	}

@@ -633,10 +633,12 @@ static int sof_ipc4_pcm_hw_free(struct snd_soc_component *component,
 	return sof_ipc4_trigger_pipelines(component, substream, SOF_IPC4_PIPE_RESET, 0, spcm, dir);
 }
 
-static int ipc4_ssp_dai_config_pcm_params_match(struct snd_sof_dev *sdev,
+static int ipc4_ssp_dai_config_pcm_params_match(struct snd_soc_component *component,
 						const char *link_name,
 						struct snd_pcm_hw_params *params)
 {
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_sof_dai_link *slink;
 	struct snd_sof_dai *dai;
 	bool dai_link_found = false;
@@ -681,17 +683,17 @@ static int ipc4_ssp_dai_config_pcm_params_match(struct snd_sof_dev *sdev,
 	}
 
 	if (current_config < 0) {
-		dev_err(sdev->dev,
+		dev_err(component->dev,
 			"%s: No suitable hw_config found for %s (num_hw_configs: %d)\n",
 			__func__, slink->link->name, slink->num_hw_configs);
 		return -EINVAL;
 	}
 
-	dev_dbg(sdev->dev,
+	dev_dbg(component->dev,
 		"hw_config for %s: %d (num_hw_configs: %d) with %s match\n",
 		slink->link->name, current_config, slink->num_hw_configs,
 		partial_match ? "partial" : "full");
-	list_for_each_entry(dai, &sdev->dai_list, list)
+	list_for_each_entry(dai, &instance->dai_list, list)
 		if (!strcmp(slink->link->name, dai->name))
 			dai->current_config = current_config;
 
@@ -895,7 +897,7 @@ static int sof_ipc4_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 	}
 
 	if (ipc4_copier->dai_type == SOF_DAI_INTEL_SSP)
-		return ipc4_ssp_dai_config_pcm_params_match(sdev,
+		return ipc4_ssp_dai_config_pcm_params_match(component,
 							    (char *)rtd->dai_link->name,
 							    params);
 
