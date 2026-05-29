@@ -763,16 +763,23 @@ static int sof_pcm_probe(struct snd_soc_component *component)
 {
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_sof_pdata *plat_data = sdev->pdata;
+	struct snd_sof_audio_instance *instance;
 	const char *tplg_filename;
 	int ret;
+
+	instance = snd_sof_audio_instance_register(sdev, component);
+	if (!instance)
+		return -ENOMEM;
 
 	/*
 	 * make sure the device is pm_runtime_active before loading the
 	 * topology and initiating IPC or bus transactions
 	 */
 	ret = pm_runtime_resume_and_get(component->dev);
-	if (ret < 0 && ret != -EACCES)
+	if (ret < 0 && ret != -EACCES) {
+		snd_sof_audio_instance_unregister(instance);
 		return ret;
+	}
 
 	/* load the default topology */
 	tplg_filename = devm_kasprintf(component->dev, GFP_KERNEL,
@@ -781,7 +788,7 @@ static int sof_pcm_probe(struct snd_soc_component *component)
 				       plat_data->tplg_filename);
 	if (!tplg_filename) {
 		ret = -ENOMEM;
-		goto pm_error;
+		goto out;
 	}
 
 	ret = snd_sof_load_topology(component, tplg_filename);
@@ -789,7 +796,9 @@ static int sof_pcm_probe(struct snd_soc_component *component)
 		dev_err(component->dev, "error: failed to load DSP topology %d\n",
 			ret);
 
-pm_error:
+out:
+	if (ret)
+		snd_sof_audio_instance_unregister(instance);
 	pm_runtime_put_autosuspend(component->dev);
 
 	return ret;
@@ -797,6 +806,11 @@ pm_error:
 
 static void sof_pcm_remove(struct snd_soc_component *component)
 {
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);
+
+	if (instance)
+		snd_sof_audio_instance_unregister(instance);
+
 	/* remove topology */
 	snd_soc_tplg_component_remove(component);
 }

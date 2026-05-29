@@ -129,6 +129,13 @@ struct snd_soc_tplg_ops;
 struct snd_soc_component;
 struct snd_sof_pdata;
 
+/* SOF audio instance container */
+struct snd_sof_audio_instance {
+	struct snd_sof_dev *sdev;
+	struct snd_soc_component *component;
+	struct list_head list;
+};
+
 /**
  * struct snd_sof_platform_stream_params - platform dependent stream parameters
  * @phy_addr:		Platform dependent address to be used, if  @use_phy_addr
@@ -655,6 +662,9 @@ struct snd_sof_dev {
 	struct list_head dai_list;
 	struct list_head dai_link_list;
 	struct list_head route_list;
+	struct list_head audio_instance_list;
+	/* Protect audio_instance_list */
+	spinlock_t audio_instance_list_lock;
 	u32 enabled_cores_mask; /* keep track of enabled cores */
 	bool led_present;
 

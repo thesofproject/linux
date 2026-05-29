@@ -648,6 +648,14 @@ struct snd_sof_pcm *snd_sof_find_spcm_comp(struct snd_soc_component *scomp,
 struct snd_sof_pcm *snd_sof_find_spcm_comp_by_sdev(struct snd_sof_dev *sdev,
 						   unsigned int comp_id,
 						   int *direction);
+
+struct snd_sof_audio_instance *
+snd_sof_audio_instance_register(struct snd_sof_dev *sdev,
+				struct snd_soc_component *component);
+void snd_sof_audio_instance_unregister(struct snd_sof_audio_instance *instance);
+struct snd_sof_audio_instance *
+snd_sof_component_get_audio_instance(struct snd_soc_component *component);
+
 void snd_sof_pcm_period_elapsed(struct snd_pcm_substream *substream);
 void snd_sof_pcm_init_elapsed_work(struct work_struct *work);
 int sof_pcm_setup_connected_widgets(struct snd_sof_dev *sdev, struct snd_soc_pcm_runtime *rtd,

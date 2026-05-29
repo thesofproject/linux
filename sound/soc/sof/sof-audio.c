@@ -14,6 +14,53 @@
 #include "sof-utils.h"
 #include "ops.h"
 
+struct snd_sof_audio_instance *
+snd_sof_audio_instance_register(struct snd_sof_dev *sdev,
+				struct snd_soc_component *component)
+{
+	struct snd_sof_audio_instance *instance;
+
+	instance = devm_kzalloc(sdev->dev, sizeof(*instance), GFP_KERNEL);
+	if (!instance)
+		return NULL;
+
+	instance->sdev = sdev;
+	instance->component = component;
+
+	scoped_guard(spinlock, &sdev->audio_instance_list_lock)
+		list_add_tail_rcu(&instance->list, &sdev->audio_instance_list);
+
+	return instance;
+}
+
+void snd_sof_audio_instance_unregister(struct snd_sof_audio_instance *instance)
+{
+	struct snd_sof_dev *sdev = instance->sdev;
+
+	scoped_guard(spinlock, &sdev->audio_instance_list_lock)
+		list_del_rcu(&instance->list);
+	synchronize_rcu();
+}
+
+struct snd_sof_audio_instance *
+snd_sof_component_get_audio_instance(struct snd_soc_component *component)
+{
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
+	struct snd_sof_audio_instance *instance;
+
+	if (!sdev)
+		return NULL;
+
+	guard(rcu)();
+	list_for_each_entry_rcu(instance, &sdev->audio_instance_list, list) {
+		if (instance->component == component)
+			return instance;
+	}
+
+	return NULL;
+}
+EXPORT_SYMBOL(snd_sof_component_get_audio_instance);
+
 /*
  * Check if a DAI widget is an aggregated DAI. Aggregated DAI's have names ending in numbers
  * starting with 0. For example: in the case of a SDW speaker with 2 amps, the topology contains
