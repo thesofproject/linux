@@ -45,16 +45,25 @@ static bool hyp_page_referenced(void *addr)
 
 static int host_s2_pool_refill(struct kvm_hyp_memcache *host_mc)
 {
+	if (!host_s2_cma_size)
+		return -EINVAL;
+
 	return refill_hyp_pool(&host_s2_pool, host_mc);
 }
 
 static void host_s2_pool_reclaim(struct kvm_hyp_memcache *host_mc, int target)
 {
+	if (!host_s2_cma_size)
+		return;
+
 	reclaim_hyp_pool(&host_s2_pool, host_mc, target, false);
 }
 
 static int host_s2_pool_reclaimable(void)
 {
+	if (!host_s2_cma_size)
+		return 0;
+
 	return hyp_pool_reclaimable(&host_s2_pool, 0);
 }
 
