@@ -1725,6 +1725,7 @@ static inline int zap_nonpresent_ptes(struct mmu_gather *tlb,
 {
 	swp_entry_t entry;
 	int nr = 1;
+	bool bypass = false;
 
 	*any_skipped = true;
 	entry = pte_to_swp_entry(ptent);
@@ -1752,6 +1753,9 @@ static inline int zap_nonpresent_ptes(struct mmu_gather *tlb,
 
 		nr = swap_pte_batch(pte, max_nr, ptent);
 		rss[MM_SWAPENTS] -= nr;
+		trace_android_vh_swapmem_gather_add_bypass(tlb->mm, entry, nr, &bypass);
+		if (bypass)
+			goto skip;
 		free_swap_and_cache_nr(entry, nr);
 	} else if (is_migration_entry(entry)) {
 		struct folio *folio = pfn_swap_entry_folio(entry);
@@ -1782,6 +1786,7 @@ static inline int zap_nonpresent_ptes(struct mmu_gather *tlb,
 		pr_alert("unrecognized swap entry 0x%lx\n", entry.val);
 		WARN_ON_ONCE(1);
 	}
+skip:
 	clear_not_present_full_ptes(vma->vm_mm, addr, pte, nr, tlb->fullmm);
 	*any_skipped = zap_install_uffd_wp_if_needed(vma, addr, pte, nr, details, ptent);
 
@@ -5730,6 +5735,8 @@ static vm_fault_t do_read_fault(struct vm_fault *vmf)
 {
 	vm_fault_t ret = 0;
 	struct folio *folio;
+
+	trace_android_rvh_do_read_fault(vmf, &fault_around_pages);
 
 	/*
 	 * Let's call ->map_pages() first and use ->fault() as fallback

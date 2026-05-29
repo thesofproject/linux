@@ -52,6 +52,8 @@
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/oom.h>
+#undef CREATE_TRACE_POINTS
+#include <trace/hooks/mm.h>
 
 #undef CREATE_TRACE_POINTS
 #include <trace/hooks/mm.h>
@@ -543,6 +545,7 @@ static bool __oom_reap_task_mm(struct mm_struct *mm)
 	 * Reduce those races by reaping the oom victim from the other end
 	 * of the address space.
 	 */
+	trace_android_vh_oom_swapmem_gather_init(mm);
 	mas_for_each_rev(&mas, vma, 0) {
 		if (vma->vm_flags & (VM_HUGETLB|VM_PFNMAP))
 			continue;
@@ -575,6 +578,7 @@ static bool __oom_reap_task_mm(struct mm_struct *mm)
 			tlb_finish_mmu(&tlb);
 		}
 	}
+	trace_android_vh_oom_swapmem_gather_finish(mm);
 
 	return ret;
 }
