@@ -2437,7 +2437,7 @@ static int intel_crtc_set_context_latency(struct intel_crtc_state *crtc_state)
 				  intel_psr_min_set_context_latency(crtc_state));
 
 	// This grabs the set_context_latency value from the bios if it's set
-	if (old_crtc_state && old_crtc_state->inherited)
+	if (crtc_state->inherited && old_crtc_state)
 		set_context_latency = max(set_context_latency,
 					  old_crtc_state->set_context_latency);
 
