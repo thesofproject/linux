@@ -775,8 +775,6 @@ static int sof_pcm_probe(struct snd_soc_component *component)
 		return ret;
 
 	/* load the default topology */
-	sdev->component = component;
-
 	tplg_filename = devm_kasprintf(component->dev, GFP_KERNEL,
 				       "%s/%s",
 				       plat_data->tplg_filename_prefix,
