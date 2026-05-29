@@ -29,6 +29,7 @@ snd_sof_audio_instance_register(struct snd_sof_dev *sdev,
 	INIT_LIST_HEAD(&instance->pipeline_list);
 	INIT_LIST_HEAD(&instance->dai_list);
 	INIT_LIST_HEAD(&instance->dai_link_list);
+	INIT_LIST_HEAD(&instance->route_list);
 
 	scoped_guard(spinlock, &sdev->audio_instance_list_lock)
 		list_add_tail_rcu(&instance->list, &sdev->audio_instance_list);
@@ -99,10 +100,12 @@ static bool is_virtual_widget(struct snd_soc_dapm_widget *widget, const char *fu
 static void sof_reset_route_setup_status(struct snd_sof_widget *widget)
 {
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(widget->scomp);
+	struct snd_sof_audio_instance *instance =
+		snd_sof_component_get_audio_instance(widget->scomp);
 	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
 	struct snd_sof_route *sroute;
 
-	list_for_each_entry(sroute, &sdev->route_list, list)
+	list_for_each_entry(sroute, &instance->route_list, list)
 		if (sroute->src_widget == widget || sroute->sink_widget == widget) {
 			if (sroute->setup && tplg_ops && tplg_ops->route_free)
 				tplg_ops->route_free(sdev, sroute);
@@ -321,6 +324,8 @@ int sof_route_setup(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *wsourc
 	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
 	struct snd_sof_widget *src_widget = wsource->dobj.private;
 	struct snd_sof_widget *sink_widget = wsink->dobj.private;
+	struct snd_sof_audio_instance *instance =
+		snd_sof_component_get_audio_instance(src_widget->scomp);
 	struct snd_sof_route *sroute;
 	bool route_found = false;
 
@@ -334,7 +339,7 @@ int sof_route_setup(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *wsourc
 		return 0;
 
 	/* find route matching source and sink widgets */
-	list_for_each_entry(sroute, &sdev->route_list, list)
+	list_for_each_entry(sroute, &instance->route_list, list)
 		if (sroute->src_widget == src_widget && sroute->sink_widget == sink_widget) {
 			route_found = true;
 			break;
@@ -391,6 +396,7 @@ static int sof_setup_pipeline_connections(struct snd_soc_dapm_widget_list *list,
 					  struct snd_soc_component *scomp, int dir)
 {
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct snd_soc_dapm_widget *widget;
 	struct snd_sof_route *sroute;
 	struct snd_soc_dapm_path *p;
@@ -445,7 +451,7 @@ static int sof_setup_pipeline_connections(struct snd_soc_dapm_widget_list *list,
 	 * different directions, e.g. a sidetone or an amplifier feedback connected to a speaker
 	 * protection module.
 	 */
-	list_for_each_entry(sroute, &sdev->route_list, list) {
+	list_for_each_entry(sroute, &instance->route_list, list) {
 		bool src_widget_in_dapm_list, sink_widget_in_dapm_list;
 
 		if (sroute->setup)

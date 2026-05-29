@@ -2144,7 +2144,7 @@ static int sof_link_unload(struct snd_soc_component *scomp, struct snd_soc_dobj 
 static int sof_route_load(struct snd_soc_component *scomp, int index,
 			  struct snd_soc_dapm_route *route)
 {
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct snd_sof_widget *source_swidget, *sink_swidget;
 	struct snd_soc_dobj *dobj = &route->dobj;
 	struct snd_sof_route *sroute;
@@ -2202,7 +2202,7 @@ static int sof_route_load(struct snd_soc_component *scomp, int index,
 	sroute->sink_widget = sink_swidget;
 
 	/* add route to route list */
-	list_add(&sroute->list, &sdev->route_list);
+	list_add(&sroute->list, &instance->route_list);
 
 	return 0;
 err:

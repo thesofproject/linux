@@ -2337,6 +2337,7 @@ static int sof_ipc3_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 static int sof_ipc3_set_up_all_pipelines(struct snd_sof_dev *sdev, bool verify)
 {
 	struct sof_ipc_fw_version *v = &sdev->fw_ready.version;
+	struct snd_sof_audio_instance *instance;
 	struct snd_sof_widget *swidget;
 	struct snd_sof_route *sroute;
 	int ret;
@@ -2384,7 +2385,7 @@ static int sof_ipc3_set_up_all_pipelines(struct snd_sof_dev *sdev, bool verify)
 	}
 
 	/* restore pipeline connections */
-	list_for_each_entry(sroute, &sdev->route_list, list) {
+	for_each_sroute_in_instances(sroute, sdev, instance) {
 		/* only set up routes belonging to static pipelines */
 		if (!verify && (sroute->src_widget->dynamic_pipeline_widget ||
 				sroute->sink_widget->dynamic_pipeline_widget))
@@ -2509,6 +2510,7 @@ static int sof_ipc3_free_widgets_in_list(struct snd_sof_dev *sdev, bool include_
 static int sof_ipc3_tear_down_all_pipelines(struct snd_sof_dev *sdev, bool verify)
 {
 	struct sof_ipc_fw_version *v = &sdev->fw_ready.version;
+	struct snd_sof_audio_instance *instance;
 	struct snd_sof_widget *swidget;
 	struct snd_sof_route *sroute;
 	bool dyn_widgets = false;
@@ -2546,7 +2548,7 @@ static int sof_ipc3_tear_down_all_pipelines(struct snd_sof_dev *sdev, bool verif
 	if (ret < 0)
 		return ret;
 
-	list_for_each_entry(sroute, &sdev->route_list, list)
+	for_each_sroute_in_instances(sroute, sdev, instance)
 		sroute->setup = false;
 
 	/*

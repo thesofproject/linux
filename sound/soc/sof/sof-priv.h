@@ -136,6 +136,7 @@ struct snd_sof_audio_instance {
 	struct list_head pipeline_list;
 	struct list_head dai_list;
 	struct list_head dai_link_list;
+	struct list_head route_list;
 	struct list_head list;
 };
 
@@ -661,7 +662,6 @@ struct snd_sof_dev {
 	struct list_head pcm_list;
 	struct list_head kcontrol_list;
 	struct list_head widget_list;
-	struct list_head route_list;
 	struct list_head audio_instance_list;
 	/* Protect audio_instance_list */
 	spinlock_t audio_instance_list_lock;
