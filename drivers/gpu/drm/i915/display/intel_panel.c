@@ -313,9 +313,53 @@ static void intel_panel_destroy_probed_modes(struct intel_connector *connector)
 	}
 }
 
+#define WA_AFFECTED_DISPLAY_MFG_ID	0x4c83
+#define WA_AFFECTED_DISPLAY_PROD_CODE	0x4231
+
+/*
+ * TODO(b/503853270): Temporary workaround to force 60Hz and disable VRR on
+ * SDC 0x4231 panel. Revert once the driver-level LRR/VRR fixes land.
+ */
+static void wa_vrr_display_broken(struct intel_connector *connector)
+{
+	struct intel_display *display = to_intel_display(connector);
+	struct drm_property_blob *edid_blob = connector->base.edid_blob_ptr;
+	const struct edid *edid;
+	u16 mfg_id, prod_code;
+	struct drm_display_mode *mode, *next;
+
+	if (!edid_blob)
+		return;
+
+	edid = (const struct edid *)edid_blob->data;
+	mfg_id = (edid->mfg_id[0] << 8) | edid->mfg_id[1];
+	prod_code = edid->prod_code[0] | (edid->prod_code[1] << 8);
+
+	if (mfg_id != WA_AFFECTED_DISPLAY_MFG_ID ||
+	    prod_code != WA_AFFECTED_DISPLAY_PROD_CODE)
+		return;
+
+	/* Force VRR range to 60-60Hz to disable it */
+	connector->base.display_info.monitor_range.min_vfreq = 60;
+	connector->base.display_info.monitor_range.max_vfreq = 60;
+
+	list_for_each_entry_safe(mode, next, &connector->base.probed_modes, head) {
+		if (drm_mode_vrefresh(mode) > 60) {
+			drm_dbg_kms(display->drm,
+				    "[CONNECTOR:%d:%s] Quirk: Prune >60Hz: " DRM_MODE_FMT "\n",
+				    connector->base.base.id, connector->base.name,
+				    DRM_MODE_ARG(mode));
+			list_del(&mode->head);
+			drm_mode_destroy(display->drm, mode);
+		}
+	}
+}
+
 void intel_panel_add_edid_fixed_modes(struct intel_connector *connector,
 				      bool use_alt_fixed_modes)
 {
+	wa_vrr_display_broken(connector);
+
 	intel_panel_add_edid_preferred_mode(connector);
 	if (intel_panel_preferred_fixed_mode(connector) && use_alt_fixed_modes)
 		intel_panel_add_edid_alt_fixed_modes(connector);
