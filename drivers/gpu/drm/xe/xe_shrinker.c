@@ -236,6 +236,19 @@ static unsigned long xe_shrinker_scan(struct shrinker *shrink, struct shrink_con
 	if (nr_scanned >= nr_to_scan || !can_backup)
 		goto out;
 
+	if (current_is_kswapd()) {
+		struct zone *zone = &NODE_DATA(sc->nid)->node_zones[ZONE_NORMAL];
+		unsigned long free_pages = zone_page_state(zone, NR_FREE_PAGES);
+		unsigned long high_wmark = high_wmark_pages(zone);
+
+		/*
+		 * If we have 2x the high watermark free, this is definitely
+		 * fragmentation
+		 */
+		if (free_pages > (high_wmark * 2))
+			goto out;
+	}
+
 	/* If we didn't wake before, try to do it now if needed. */
 	if (!runtime_pm)
 		runtime_pm = xe_shrinker_runtime_pm_get(shrinker, true, 0, can_backup);
