@@ -379,7 +379,7 @@ valid_fb:
 	drm_framebuffer_get(fb);
 
 	plane_state->uapi.crtc = &crtc->base;
-	intel_plane_copy_uapi_to_hw_state(plane_state, plane_state, crtc);
+	intel_plane_copy_uapi_to_hw_state(NULL, plane_state, plane_state, crtc);
 
 	atomic_or(plane->frontbuffer_bit, &to_intel_frontbuffer(fb)->bits);
 }
