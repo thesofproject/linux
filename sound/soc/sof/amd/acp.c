@@ -12,6 +12,7 @@
  * Hardware interface for generic AMD ACP processor
  */
 
+#include <linux/acpi.h>
 #include <linux/io.h>
 #include <linux/module.h>
 #include <linux/pci.h>
@@ -1001,6 +1002,107 @@ void amd_sof_acp_remove(struct snd_sof_dev *sdev)
 	acp_reset(sdev);
 }
 EXPORT_SYMBOL_NS(amd_sof_acp_remove, "SND_SOC_SOF_AMD_COMMON");
+
+int amd_sof_acp7x_probe(struct snd_sof_dev *sdev)
+{
+	struct pci_dev *pci = to_pci_dev(sdev->dev);
+	struct acp_dev_data *adata;
+	const struct sof_amd_acp_desc *chip;
+	const union acpi_object *obj;
+	struct acpi_device *adev;
+	unsigned int addr;
+	int ret;
+
+	chip = get_chip_info(sdev->pdata);
+	if (!chip) {
+		dev_err(sdev->dev, "no such device supported, chip id:%x\n", pci->device);
+		return -EIO;
+	}
+	adata = devm_kzalloc(sdev->dev, sizeof(struct acp_dev_data), GFP_KERNEL);
+	if (!adata)
+		return -ENOMEM;
+
+	adata->dev = sdev;
+	adata->dmic_dev = platform_device_register_data(sdev->dev, "dmic-codec",
+							PLATFORM_DEVID_NONE, NULL, 0);
+	if (IS_ERR(adata->dmic_dev)) {
+		dev_err(sdev->dev, "failed to register platform for dmic codec\n");
+		return PTR_ERR(adata->dmic_dev);
+	}
+
+	addr = pci_resource_start(pci, ACP_DSP_BAR);
+	sdev->bar[ACP_DSP_BAR] = devm_ioremap(sdev->dev, addr, pci_resource_len(pci, ACP_DSP_BAR));
+	if (!sdev->bar[ACP_DSP_BAR]) {
+		dev_err(sdev->dev, "ioremap error\n");
+		ret = -ENXIO;
+		goto unregister_dev;
+	}
+
+	pci_set_master(pci);
+	adata->addr = addr;
+	adata->reg_range = chip->reg_end_addr - chip->reg_start_addr;
+	adata->pci_rev = pci->revision;
+	mutex_init(&adata->acp_lock);
+	sdev->pdata->hw_pdata = adata;
+
+	ret = acp_init(sdev);
+	if (ret < 0)
+		goto unregister_dev;
+
+	adev = ACPI_COMPANION(&pci->dev);
+
+	if (adev) {
+		if (!acpi_dev_get_property(adev, "acp-sof-signed-firmware-image",
+					   ACPI_TYPE_INTEGER, &obj))
+			adata->acp_sof_signed_firmware_image = obj->integer.value;
+	}
+
+	sdev->dsp_box.offset = 0;
+	sdev->dsp_box.size = BOX_SIZE_512;
+
+	sdev->host_box.offset = sdev->dsp_box.offset + sdev->dsp_box.size;
+	sdev->host_box.size = BOX_SIZE_512;
+
+	sdev->debug_box.offset = sdev->host_box.offset + sdev->host_box.size;
+	sdev->debug_box.size = BOX_SIZE_1024;
+
+	if (adata->acp_sof_signed_firmware_image) {
+		adata->fw_code_bin = devm_kasprintf(sdev->dev, GFP_KERNEL,
+						    "sof-%s-code.bin", chip->name);
+		if (!adata->fw_code_bin) {
+			ret = -ENOMEM;
+			goto unregister_dev;
+		}
+		adata->fw_data_bin = devm_kasprintf(sdev->dev, GFP_KERNEL,
+						    "sof-%s-data.bin", chip->name);
+		if (!adata->fw_data_bin) {
+			ret = -ENOMEM;
+			goto unregister_dev;
+		}
+	}
+
+	adata->enable_fw_debug = enable_fw_debug;
+	acp_memory_init(sdev);
+	acp_dsp_stream_init(sdev);
+
+	return 0;
+
+unregister_dev:
+	platform_device_unregister(adata->dmic_dev);
+	return ret;
+}
+EXPORT_SYMBOL_NS(amd_sof_acp7x_probe, "SND_SOC_SOF_AMD_COMMON");
+
+void amd_sof_acp7x_remove(struct snd_sof_dev *sdev)
+{
+	struct acp_dev_data *adata = sdev->pdata->hw_pdata;
+
+	if (adata->dmic_dev)
+		platform_device_unregister(adata->dmic_dev);
+
+	acp_reset(sdev);
+}
+EXPORT_SYMBOL_NS(amd_sof_acp7x_remove, "SND_SOC_SOF_AMD_COMMON");
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("AMD ACP sof driver");

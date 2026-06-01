@@ -137,6 +137,8 @@ int sof_acp7x_ops_init(struct snd_sof_dev *sdev)
 
 	sof_acp7x_ops.drv = acp7x_sof_dai;
 	sof_acp7x_ops.num_drv = ARRAY_SIZE(acp7x_sof_dai);
+	sof_acp7x_ops.probe = amd_sof_acp7x_probe;
+	sof_acp7x_ops.remove = amd_sof_acp7x_remove;
 
 	return 0;
 }
