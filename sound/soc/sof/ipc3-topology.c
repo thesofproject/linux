@@ -281,7 +281,10 @@ static const struct sof_topology_token acpdmic_tokens[] = {
 		offsetof(struct sof_ipc_dai_acpdmic_params, pdm_ch)},
 };
 
-/* ACPI2S */
+/*
+ * ACPI2S tokens fill struct sof_ipc_dai_acp_params; SOF_DAI_AMD_I2S (ACPTDM
+ * on ACP7.B/7.F) reuses this tuple group rather than defining a parallel set.
+ */
 static const struct sof_topology_token acpi2s_tokens[] = {
 	{SOF_TKN_AMD_ACPI2S_RATE, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
 		offsetof(struct sof_ipc_dai_acp_params, fsync_rate)},
@@ -289,6 +292,8 @@ static const struct sof_topology_token acpi2s_tokens[] = {
 		offsetof(struct sof_ipc_dai_acp_params, tdm_slots)},
 	{SOF_TKN_AMD_ACPI2S_TDM_MODE, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
 		offsetof(struct sof_ipc_dai_acp_params, tdm_mode)},
+	{SOF_TKN_AMD_ACPI2S_FORMAT, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_ipc_dai_acp_params, format)},
 };
 
 /* MICFIL PDM */
