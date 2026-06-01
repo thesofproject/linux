@@ -1150,6 +1150,77 @@ void amd_sof_acp7x_remove(struct snd_sof_dev *sdev)
 }
 EXPORT_SYMBOL_NS(amd_sof_acp7x_remove, "SND_SOC_SOF_AMD_COMMON");
 
+int amd_sof_acp7x_suspend(struct snd_sof_dev *sdev, u32 target_state)
+{
+	struct acp_dev_data *acp_data;
+	int ret;
+	bool enable = false;
+
+	acp_data = sdev->pdata->hw_pdata;
+
+	ret = acp_reset(sdev);
+	if (ret) {
+		dev_err(sdev->dev, "ACP Reset failed\n");
+		return ret;
+	}
+	switch (acp_data->pci_rev) {
+	case ACP7B_PCI_ID:
+	case ACP7F_PCI_ID:
+		enable = true;
+		break;
+	default:
+		break;
+	}
+	snd_sof_dsp_write(sdev, ACP_DSP_BAR, ACP_CONTROL, enable);
+	snd_sof_dsp_write(sdev, ACP_DSP_BAR, ACP7X_ZSC_DSP_CTRL, 1);
+
+	return 0;
+}
+EXPORT_SYMBOL_NS(amd_sof_acp7x_suspend, "SND_SOC_SOF_AMD_COMMON");
+
+int amd_sof_acp7x_resume(struct snd_sof_dev *sdev)
+{
+	struct acp_dev_data *acp_data;
+	int ret;
+
+	acp_data = sdev->pdata->hw_pdata;
+
+	ret = acp_init(sdev);
+	if (ret) {
+		dev_err(sdev->dev, "ACP Init failed\n");
+		return ret;
+	}
+	ret = acp_memory_init(sdev);
+	if (ret) {
+		dev_err(sdev->dev, "ACP Memory init failed\n");
+		return ret;
+	}
+
+	switch (acp_data->pci_rev) {
+	case ACP7B_PCI_ID:
+	case ACP7F_PCI_ID:
+		snd_sof_dsp_write(sdev, ACP_DSP_BAR, ACP7X_PME_EN, 1);
+		break;
+	default:
+		break;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_NS(amd_sof_acp7x_resume, "SND_SOC_SOF_AMD_COMMON");
+
+int amd_sof_acp7x_suspend_runtime(struct snd_sof_dev *sdev)
+{
+	return amd_sof_acp7x_suspend(sdev, 0);
+}
+EXPORT_SYMBOL_NS(amd_sof_acp7x_suspend_runtime, "SND_SOC_SOF_AMD_COMMON");
+
+int amd_sof_acp7x_resume_runtime(struct snd_sof_dev *sdev)
+{
+	return amd_sof_acp7x_resume(sdev);
+}
+EXPORT_SYMBOL_NS(amd_sof_acp7x_resume_runtime, "SND_SOC_SOF_AMD_COMMON");
+
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("AMD ACP sof driver");
 MODULE_IMPORT_NS("SOUNDWIRE_AMD_INIT");

@@ -176,5 +176,10 @@ int sof_acp7x_ops_init(struct snd_sof_dev *sdev)
 	if (acp_sof_post_fw_run_delay)
 		sof_acp7x_ops.post_fw_run = sof_acp7x_post_fw_run_delay;
 
+	sof_acp7x_ops.suspend = amd_sof_acp7x_suspend;
+	sof_acp7x_ops.resume = amd_sof_acp7x_resume;
+	sof_acp7x_ops.runtime_suspend = amd_sof_acp7x_suspend_runtime;
+	sof_acp7x_ops.runtime_resume = amd_sof_acp7x_resume_runtime;
+
 	return 0;
 }

@@ -357,6 +357,10 @@ int sof_acp7x_ops_init(struct snd_sof_dev *sdev);
 
 int amd_sof_acp7x_probe(struct snd_sof_dev *sdev);
 void amd_sof_acp7x_remove(struct snd_sof_dev *sdev);
+int amd_sof_acp7x_suspend(struct snd_sof_dev *sdev, u32 target_state);
+int amd_sof_acp7x_resume(struct snd_sof_dev *sdev);
+int amd_sof_acp7x_suspend_runtime(struct snd_sof_dev *sdev);
+int amd_sof_acp7x_resume_runtime(struct snd_sof_dev *sdev);
 
 struct snd_soc_acpi_mach *amd_sof_machine_select(struct snd_sof_dev *sdev);
 /* Machine configuration */
