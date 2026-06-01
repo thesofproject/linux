@@ -149,6 +149,7 @@ int sof_acp7x_ops_init(struct snd_sof_dev *sdev)
 {
 	struct acpi_device *adev = ACPI_COMPANION(&to_pci_dev(sdev->dev)->dev);
 	const union acpi_object *obj;
+	int acp_sof_signed_firmware_image = 0;
 	int acp_sof_post_fw_run_delay = 0;
 
 	/* common defaults */
@@ -160,10 +161,17 @@ int sof_acp7x_ops_init(struct snd_sof_dev *sdev)
 	sof_acp7x_ops.remove = amd_sof_acp7x_remove;
 
 	if (adev) {
+		if (!acpi_dev_get_property(adev, "acp-sof-signed-firmware-image",
+					   ACPI_TYPE_INTEGER, &obj))
+			acp_sof_signed_firmware_image = obj->integer.value;
+
 		if (!acpi_dev_get_property(adev, "acp-sof-post_fw_run_delay",
 					   ACPI_TYPE_INTEGER, &obj))
 			acp_sof_post_fw_run_delay = obj->integer.value;
 	}
+
+	if (acp_sof_signed_firmware_image)
+		sof_acp7x_ops.load_firmware = acp_sof_load_signed_firmware;
 
 	if (acp_sof_post_fw_run_delay)
 		sof_acp7x_ops.post_fw_run = sof_acp7x_post_fw_run_delay;
