@@ -549,6 +549,7 @@ static int acp_power_on(struct snd_sof_dev *sdev)
 	unsigned int base = desc->pgfsm_base;
 	unsigned int val;
 	unsigned int acp_pgfsm_status_mask, acp_pgfsm_cntl_mask;
+	bool use_masked_status = false;
 	int ret;
 
 	val = snd_sof_dsp_read(sdev, ACP_DSP_BAR, base + PGFSM_STATUS_OFFSET);
@@ -577,6 +578,7 @@ static int acp_power_on(struct snd_sof_dev *sdev)
 	case ACP7F_PCI_ID:
 		acp_pgfsm_status_mask = ACP7X_PGFSM_STATUS_MASK;
 		acp_pgfsm_cntl_mask = ACP7X_PGFSM_CNTL_POWER_ON_MASK;
+		use_masked_status = true;
 		break;
 	default:
 		return -EINVAL;
@@ -586,9 +588,17 @@ static int acp_power_on(struct snd_sof_dev *sdev)
 		snd_sof_dsp_write(sdev, ACP_DSP_BAR, base + PGFSM_CONTROL_OFFSET,
 				  acp_pgfsm_cntl_mask);
 
-	ret = snd_sof_dsp_read_poll_timeout(sdev, ACP_DSP_BAR, base + PGFSM_STATUS_OFFSET, val,
-					    !val, ACP_REG_POLL_INTERVAL,
-					    ACP_REG_POLL_TIMEOUT_US);
+	if (use_masked_status)
+		ret = snd_sof_dsp_read_poll_timeout(sdev, ACP_DSP_BAR,
+						    base + PGFSM_STATUS_OFFSET, val,
+						    !(val & acp_pgfsm_status_mask),
+						    ACP_REG_POLL_INTERVAL,
+						    ACP_REG_POLL_TIMEOUT_US);
+	else
+		ret = snd_sof_dsp_read_poll_timeout(sdev, ACP_DSP_BAR,
+						    base + PGFSM_STATUS_OFFSET, val,
+						    !val, ACP_REG_POLL_INTERVAL,
+						    ACP_REG_POLL_TIMEOUT_US);
 	if (ret < 0)
 		dev_err(sdev->dev, "timeout in ACP_PGFSM_STATUS read\n");
 
