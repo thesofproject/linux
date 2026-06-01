@@ -11,6 +11,7 @@
  * Hardware interface for Audio DSP on ACP7.B/7.F platforms
  */
 
+#include <linux/acpi.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/pci.h>
@@ -127,11 +128,29 @@ static struct snd_soc_dai_driver acp7x_sof_dai[] = {
 	},
 };
 
+static int sof_acp7x_post_fw_run_delay(struct snd_sof_dev *sdev)
+{
+	/*
+	 * Resuming from suspend in some cases may cause the DSP firmware
+	 * to enter an unrecoverable faulty state. Delaying a bit any host
+	 * to DSP transmission right after firmware boot completion seems
+	 * to resolve the issue.
+	 */
+	if (!sdev->first_boot)
+		usleep_range(100, 150);
+
+	return 0;
+}
+
 struct snd_sof_dsp_ops sof_acp7x_ops;
 EXPORT_SYMBOL_NS(sof_acp7x_ops, "SND_SOC_SOF_AMD_COMMON");
 
 int sof_acp7x_ops_init(struct snd_sof_dev *sdev)
 {
+	struct acpi_device *adev = ACPI_COMPANION(&to_pci_dev(sdev->dev)->dev);
+	const union acpi_object *obj;
+	int acp_sof_post_fw_run_delay = 0;
+
 	/* common defaults */
 	memcpy(&sof_acp7x_ops, &sof_acp_common_ops, sizeof(struct snd_sof_dsp_ops));
 
@@ -139,6 +158,15 @@ int sof_acp7x_ops_init(struct snd_sof_dev *sdev)
 	sof_acp7x_ops.num_drv = ARRAY_SIZE(acp7x_sof_dai);
 	sof_acp7x_ops.probe = amd_sof_acp7x_probe;
 	sof_acp7x_ops.remove = amd_sof_acp7x_remove;
+
+	if (adev) {
+		if (!acpi_dev_get_property(adev, "acp-sof-post_fw_run_delay",
+					   ACPI_TYPE_INTEGER, &obj))
+			acp_sof_post_fw_run_delay = obj->integer.value;
+	}
+
+	if (acp_sof_post_fw_run_delay)
+		sof_acp7x_ops.post_fw_run = sof_acp7x_post_fw_run_delay;
 
 	return 0;
 }
