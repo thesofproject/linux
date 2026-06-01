@@ -552,6 +552,35 @@ static irqreturn_t acp_irq_handler(int irq, void *dev_id)
 		return IRQ_NONE;
 }
 
+static irqreturn_t acp7x_irq_handler(int irq, void *dev_id)
+{
+	struct snd_sof_dev *sdev = dev_id;
+	const struct sof_amd_acp_desc *desc = get_chip_info(sdev->pdata);
+	unsigned int base = desc->dsp_intr_base;
+	unsigned int val;
+	unsigned int ext_intr_stat;
+	int irq_flag = 0;
+
+	val = snd_sof_dsp_read(sdev, ACP_DSP_BAR, base + DSP_SW_INTR_STAT_OFFSET);
+	if (val & ACP_DSP_TO_HOST_IRQ) {
+		snd_sof_dsp_write(sdev, ACP_DSP_BAR, base + DSP_SW_INTR_STAT_OFFSET,
+				  ACP_DSP_TO_HOST_IRQ);
+		return IRQ_WAKE_THREAD;
+	}
+
+	ext_intr_stat = snd_sof_dsp_read(sdev, ACP_DSP_BAR, desc->ext_intr_stat);
+	if (ext_intr_stat & ACP_ERROR_IRQ_MASK) {
+		snd_sof_dsp_write(sdev, ACP_DSP_BAR, desc->ext_intr_stat, ACP_ERROR_IRQ_MASK);
+		snd_sof_dsp_write(sdev, ACP_DSP_BAR, desc->acp_error_stat, 0);
+		irq_flag = 1;
+	}
+
+	if (irq_flag)
+		return IRQ_HANDLED;
+
+	return IRQ_NONE;
+}
+
 static int acp_power_on(struct snd_sof_dev *sdev)
 {
 	const struct sof_amd_acp_desc *desc = get_chip_info(sdev->pdata);
@@ -1011,6 +1040,7 @@ int amd_sof_acp7x_probe(struct snd_sof_dev *sdev)
 	const union acpi_object *obj;
 	struct acpi_device *adev;
 	unsigned int addr;
+	unsigned int irqflags;
 	int ret;
 
 	chip = get_chip_info(sdev->pdata);
@@ -1051,6 +1081,16 @@ int amd_sof_acp7x_probe(struct snd_sof_dev *sdev)
 
 	adev = ACPI_COMPANION(&pci->dev);
 
+	sdev->ipc_irq = pci->irq;
+	irqflags = IRQF_SHARED;
+
+	ret = request_threaded_irq(pci->irq, acp7x_irq_handler, acp_irq_thread,
+				   irqflags, "AudioDSP", sdev);
+	if (ret < 0) {
+		dev_err(sdev->dev, "failed to register IRQ %d\n", sdev->ipc_irq);
+		goto unregister_dev;
+	}
+
 	if (adev) {
 		if (!acpi_dev_get_property(adev, "acp-sof-signed-firmware-image",
 					   ACPI_TYPE_INTEGER, &obj))
@@ -1071,13 +1111,13 @@ int amd_sof_acp7x_probe(struct snd_sof_dev *sdev)
 						    "sof-%s-code.bin", chip->name);
 		if (!adata->fw_code_bin) {
 			ret = -ENOMEM;
-			goto unregister_dev;
+			goto free_ipc_irq;
 		}
 		adata->fw_data_bin = devm_kasprintf(sdev->dev, GFP_KERNEL,
 						    "sof-%s-data.bin", chip->name);
 		if (!adata->fw_data_bin) {
 			ret = -ENOMEM;
-			goto unregister_dev;
+			goto free_ipc_irq;
 		}
 	}
 
@@ -1087,6 +1127,8 @@ int amd_sof_acp7x_probe(struct snd_sof_dev *sdev)
 
 	return 0;
 
+free_ipc_irq:
+	free_irq(sdev->ipc_irq, sdev);
 unregister_dev:
 	platform_device_unregister(adata->dmic_dev);
 	return ret;
@@ -1096,6 +1138,9 @@ EXPORT_SYMBOL_NS(amd_sof_acp7x_probe, "SND_SOC_SOF_AMD_COMMON");
 void amd_sof_acp7x_remove(struct snd_sof_dev *sdev)
 {
 	struct acp_dev_data *adata = sdev->pdata->hw_pdata;
+
+	if (sdev->ipc_irq)
+		free_irq(sdev->ipc_irq, sdev);
 
 	if (adata->dmic_dev)
 		platform_device_unregister(adata->dmic_dev);
