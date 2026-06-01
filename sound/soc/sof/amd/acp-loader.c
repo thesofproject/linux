@@ -334,9 +334,14 @@ int acp_sof_load_signed_firmware(struct snd_sof_dev *sdev, const char *fw_name)
 	}
 	kfree(fw_filename);
 
-	ret = snd_sof_dsp_block_write(sdev, SOF_FW_BLK_TYPE_DRAM, 0,
-				      (void *)adata->fw_dbin->data,
-				      adata->fw_dbin->size);
+	if (adata->pci_rev >= ACP7B_PCI_ID)
+		ret = snd_sof_dsp_block_write(sdev, SOF_FW_BLK_TYPE_SRAM, 0,
+					      (void *)adata->fw_dbin->data,
+					      adata->fw_dbin->size);
+	else
+		ret = snd_sof_dsp_block_write(sdev, SOF_FW_BLK_TYPE_DRAM, 0,
+					      (void *)adata->fw_dbin->data,
+					      adata->fw_dbin->size);
 	return ret;
 }
 EXPORT_SYMBOL_NS(acp_sof_load_signed_firmware, "SND_SOC_SOF_AMD_COMMON");
