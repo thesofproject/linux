@@ -76,6 +76,12 @@
 #define ACP70_PCI_ID				0x70
 #define ACP71_PCI_ID				0x71
 #define ACP72_PCI_ID				0x72
+#define ACP7B_PCI_ID				0x7B
+#define ACP7F_PCI_ID				0x7F
+
+#define ACP7X_PGFSM_CNTL_POWER_ON_MASK		0x7F
+#define ACP7X_PGFSM_STATUS_MASK			0xFFF
+#define ACP7X_SRAM_PTE_OFFSET			ACP6X_SRAM_PTE_OFFSET
 
 #define HOST_BRIDGE_CZN				0x1630
 #define HOST_BRIDGE_VGH				0x1645
@@ -341,6 +347,9 @@ int sof_acp63_ops_init(struct snd_sof_dev *sdev);
 
 extern struct snd_sof_dsp_ops sof_acp70_ops;
 int sof_acp70_ops_init(struct snd_sof_dev *sdev);
+
+extern struct snd_sof_dsp_ops sof_acp7x_ops;
+int sof_acp7x_ops_init(struct snd_sof_dev *sdev);
 
 struct snd_soc_acpi_mach *amd_sof_machine_select(struct snd_sof_dev *sdev);
 /* Machine configuration */
