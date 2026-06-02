@@ -4349,26 +4349,27 @@ static int ttwu_runnable(struct task_struct *p, int wake_flags)
 	int ret = 0;
 
 	rq = __task_rq_lock(p, &rf);
-	if (task_on_rq_queued(p)) {
-		update_rq_clock(rq);
-		if (p->se.sched_delayed) {
-			proxy_remove_from_sleeping_owner(p);
-			enqueue_task(rq, p, ENQUEUE_NOCLOCK | ENQUEUE_DELAYED);
-		}
-		if (proxy_needs_return(rq, p)) {
-			_trace_sched_pe_return_migration(p);
-			goto out;
-		}
-		if (!task_on_cpu(rq, p)) {
-			/*
-			 * When on_rq && !on_cpu the task is preempted, see if
-			 * it should preempt the task that is current now.
-			 */
-			wakeup_preempt(rq, p, wake_flags);
-		}
-		ttwu_do_wakeup(p);
-		ret = 1;
+	if (!task_on_rq_queued(p))
+		goto out;
+
+	update_rq_clock(rq);
+	if (p->se.sched_delayed) {
+		proxy_remove_from_sleeping_owner(p);
+		enqueue_task(rq, p, ENQUEUE_NOCLOCK | ENQUEUE_DELAYED);
 	}
+	if (proxy_needs_return(rq, p)) {
+		_trace_sched_pe_return_migration(p);
+		goto out;
+	}
+	if (!task_on_cpu(rq, p)) {
+		/*
+		 * When on_rq && !on_cpu the task is preempted, see if
+		 * it should preempt the task that is current now.
+		 */
+		wakeup_preempt(rq, p, wake_flags);
+	}
+	ttwu_do_wakeup(p);
+	ret = 1;
 out:
 	__task_rq_unlock(rq, &rf);
 
