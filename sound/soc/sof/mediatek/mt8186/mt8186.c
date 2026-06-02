@@ -428,21 +428,11 @@ static const struct snd_sof_dsp_ops sof_mt8186_ops = {
 	/* misc */
 	.get_bar_index	= mtk_adsp_get_bar_index,
 
-	/* stream callbacks */
-	.pcm_open	= sof_stream_pcm_open,
-	.pcm_hw_params	= mtk_adsp_stream_pcm_hw_params,
-	.pcm_pointer	= mtk_adsp_stream_pcm_pointer,
-	.pcm_close	= sof_stream_pcm_close,
-
 	/* firmware loading */
 	.load_firmware	= snd_sof_load_firmware_memcpy,
 
 	/* Firmware ops */
 	.dsp_arch_ops = &sof_xtensa_arch_ops,
-
-	/* DAI drivers */
-	.drv		= mt8186_dai,
-	.num_drv	= ARRAY_SIZE(mt8186_dai),
 
 	/* Debug information */
 	.dbg_dump = mt8186_adsp_dump,
@@ -451,13 +441,6 @@ static const struct snd_sof_dsp_ops sof_mt8186_ops = {
 	/* PM */
 	.suspend	= mt8186_dsp_suspend,
 	.resume		= mt8186_dsp_resume,
-
-	/* ALSA HW info flags */
-	.hw_info =	SNDRV_PCM_INFO_MMAP |
-			SNDRV_PCM_INFO_MMAP_VALID |
-			SNDRV_PCM_INFO_INTERLEAVED |
-			SNDRV_PCM_INFO_PAUSE |
-			SNDRV_PCM_INFO_NO_PERIOD_WAKEUP,
 };
 
 static struct snd_sof_of_mach sof_mt8186_machs[] = {
@@ -544,9 +527,6 @@ static int sof_mt8188_ops_init(struct snd_sof_dev *sdev)
 {
 	/* common defaults */
 	memcpy(&sof_mt8188_ops, &sof_mt8186_ops, sizeof(sof_mt8188_ops));
-
-	sof_mt8188_ops.drv = mt8188_dai;
-	sof_mt8188_ops.num_drv = ARRAY_SIZE(mt8188_dai);
 
 	sdev->audio_ops = &sof_mt8188_audio_ops;
 

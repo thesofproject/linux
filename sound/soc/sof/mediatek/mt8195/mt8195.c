@@ -452,12 +452,6 @@ static const struct snd_sof_dsp_ops sof_mt8195_ops = {
 	/* misc */
 	.get_bar_index	= mtk_adsp_get_bar_index,
 
-	/* stream callbacks */
-	.pcm_open	= sof_stream_pcm_open,
-	.pcm_hw_params	= mtk_adsp_stream_pcm_hw_params,
-	.pcm_pointer	= mtk_adsp_stream_pcm_pointer,
-	.pcm_close	= sof_stream_pcm_close,
-
 	/* firmware loading */
 	.load_firmware	= snd_sof_load_firmware_memcpy,
 
@@ -468,20 +462,9 @@ static const struct snd_sof_dsp_ops sof_mt8195_ops = {
 	.dbg_dump = mt8195_adsp_dump,
 	.debugfs_add_region_item = snd_sof_debugfs_add_region_item_iomem,
 
-	/* DAI drivers */
-	.drv = mt8195_dai,
-	.num_drv = ARRAY_SIZE(mt8195_dai),
-
 	/* PM */
 	.suspend	= mt8195_dsp_suspend,
 	.resume		= mt8195_dsp_resume,
-
-	/* ALSA HW info flags */
-	.hw_info =	SNDRV_PCM_INFO_MMAP |
-			SNDRV_PCM_INFO_MMAP_VALID |
-			SNDRV_PCM_INFO_INTERLEAVED |
-			SNDRV_PCM_INFO_PAUSE |
-			SNDRV_PCM_INFO_NO_PERIOD_WAKEUP,
 };
 
 static struct snd_sof_of_mach sof_mt8195_machs[] = {

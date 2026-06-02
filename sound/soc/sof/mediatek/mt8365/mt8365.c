@@ -584,12 +584,6 @@ static struct snd_sof_dsp_ops sof_mt8365_ops = {
 	/* misc */
 	.get_bar_index	= mt8365_get_bar_index,
 
-	/* stream callbacks */
-	.pcm_open	= sof_stream_pcm_open,
-	.pcm_hw_params	= mt8365_pcm_hw_params,
-	.pcm_pointer	= mt8365_pcm_pointer,
-	.pcm_close	= sof_stream_pcm_close,
-
 	/* firmware loading */
 	.load_firmware	= snd_sof_load_firmware_memcpy,
 
@@ -600,20 +594,9 @@ static struct snd_sof_dsp_ops sof_mt8365_ops = {
 	.dbg_dump = mt8365_adsp_dump,
 	.debugfs_add_region_item = snd_sof_debugfs_add_region_item_iomem,
 
-	/* DAI drivers */
-	.drv = mt8365_dai,
-	.num_drv = ARRAY_SIZE(mt8365_dai),
-
 	/* PM */
 	.suspend	= mt8365_dsp_suspend,
 	.resume		= mt8365_dsp_resume,
-
-	/* ALSA HW info flags */
-	.hw_info =	SNDRV_PCM_INFO_MMAP |
-			SNDRV_PCM_INFO_MMAP_VALID |
-			SNDRV_PCM_INFO_INTERLEAVED |
-			SNDRV_PCM_INFO_PAUSE |
-			SNDRV_PCM_INFO_NO_PERIOD_WAKEUP,
 };
 
 static struct snd_sof_of_mach sof_mt8365_machs[] = {
