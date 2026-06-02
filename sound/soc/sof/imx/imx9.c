@@ -14,6 +14,19 @@ static struct snd_soc_dai_driver imx95_dai[] = {
 	IMX_SOF_DAI_DRV_ENTRY_BIDIR("sai3", 1, 32),
 };
 
+static const struct sof_audio_ops sof_imx95_audio_ops = {
+	.pcm_open	= sof_stream_pcm_open,
+	.pcm_close	= sof_stream_pcm_close,
+	.drv		= imx95_dai,
+	.num_drv	= ARRAY_SIZE(imx95_dai),
+	.hw_info	= SNDRV_PCM_INFO_MMAP |
+			  SNDRV_PCM_INFO_MMAP_VALID |
+			  SNDRV_PCM_INFO_INTERLEAVED |
+			  SNDRV_PCM_INFO_PAUSE |
+			  SNDRV_PCM_INFO_BATCH |
+			  SNDRV_PCM_INFO_NO_PERIOD_WAKEUP,
+};
+
 static struct snd_sof_dsp_ops sof_imx9_ops;
 
 static int imx95_ops_init(struct snd_sof_dev *sdev)
@@ -24,6 +37,8 @@ static int imx95_ops_init(struct snd_sof_dev *sdev)
 	/* ... and finally set DAI driver */
 	sof_imx9_ops.drv = get_chip_info(sdev)->drv;
 	sof_imx9_ops.num_drv = get_chip_info(sdev)->num_drv;
+
+	sdev->audio_ops = get_chip_info(sdev)->audio_ops;
 
 	return 0;
 }
@@ -76,6 +91,7 @@ static const struct imx_chip_info imx95_chip_info = {
 	.memory = imx95_memory_regions,
 	.drv = imx95_dai,
 	.num_drv = ARRAY_SIZE(imx95_dai),
+	.audio_ops = &sof_imx95_audio_ops,
 	.ops = &imx95_chip_ops,
 };
 
