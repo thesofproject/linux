@@ -128,11 +128,65 @@ struct snd_sof_debugfs_map;
 struct snd_soc_tplg_ops;
 struct snd_soc_component;
 struct snd_sof_pdata;
+struct snd_sof_platform_stream_params;
+
+/*
+ * SOF platform-specific audio operations.
+ *
+ * These callbacks handle platform-specific stream management (host DMA,
+ * stream allocation, etc.) and are provided per audio instance.
+ * All callbacks receive snd_soc_component to identify the instance,
+ * platform code internally resolves to the hardware device as needed.
+ */
+struct sof_audio_ops {
+	/* host stream management */
+	int (*pcm_open)(struct snd_soc_component *component,
+			struct snd_pcm_substream *substream);
+	int (*pcm_close)(struct snd_soc_component *component,
+			 struct snd_pcm_substream *substream);
+	int (*pcm_hw_params)(struct snd_soc_component *component,
+			     struct snd_pcm_substream *substream,
+			     struct snd_pcm_hw_params *params,
+			     struct snd_sof_platform_stream_params *platform_params);
+	int (*pcm_hw_free)(struct snd_soc_component *component,
+			   struct snd_pcm_substream *substream);
+	int (*pcm_trigger)(struct snd_soc_component *component,
+			   struct snd_pcm_substream *substream, int cmd);
+	snd_pcm_uframes_t (*pcm_pointer)(struct snd_soc_component *component,
+					 struct snd_pcm_substream *substream);
+	int (*pcm_ack)(struct snd_soc_component *component,
+		       struct snd_pcm_substream *substream);
+
+	/* compressed streams */
+	int (*compr_open)(struct snd_soc_component *component,
+			  struct snd_compr_stream *cstream);
+	int (*compr_close)(struct snd_soc_component *component,
+			   struct snd_compr_stream *cstream);
+	int (*compr_hw_params)(struct snd_soc_component *component,
+			       struct snd_compr_stream *cstream,
+			       struct snd_compr_params *params,
+			       struct snd_sof_platform_stream_params *platform_params);
+	int (*compr_hw_free)(struct snd_soc_component *component,
+			     struct snd_compr_stream *cstream);
+	int (*compr_trigger)(struct snd_soc_component *component,
+			     struct snd_compr_stream *cstream, int cmd);
+	int (*compr_pointer)(struct snd_soc_component *component,
+			     struct snd_compr_stream *cstream,
+			     struct snd_compr_tstamp64 *tstamp);
+
+	/* DAI drivers */
+	struct snd_soc_dai_driver *drv;
+	int num_drv;
+
+	/* ALSA HW info flags, will be stored in snd_pcm_runtime.hw.info */
+	u32 hw_info;
+};
 
 /* SOF audio instance container */
 struct snd_sof_audio_instance {
 	struct snd_sof_dev *sdev;
 	struct snd_soc_component *component;
+	const struct sof_audio_ops *audio_ops;
 	struct list_head pipeline_list;
 	struct list_head dai_list;
 	struct list_head dai_link_list;
@@ -663,6 +717,7 @@ struct snd_sof_dev {
 
 	/* topology */
 	struct snd_soc_tplg_ops *tplg_ops;
+	const struct sof_audio_ops *audio_ops;
 	struct list_head audio_instance_list;
 	/* Protect audio_instance_list */
 	spinlock_t audio_instance_list_lock;

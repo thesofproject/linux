@@ -20,12 +20,18 @@ snd_sof_audio_instance_register(struct snd_sof_dev *sdev,
 {
 	struct snd_sof_audio_instance *instance;
 
+	if (!sdev->audio_ops) {
+		dev_err(sdev->dev, "Missing audio ops for audio instance\n");
+		return NULL;
+	}
+
 	instance = devm_kzalloc(sdev->dev, sizeof(*instance), GFP_KERNEL);
 	if (!instance)
 		return NULL;
 
 	instance->sdev = sdev;
 	instance->component = component;
+	instance->audio_ops = sdev->audio_ops;
 	INIT_LIST_HEAD(&instance->pipeline_list);
 	INIT_LIST_HEAD(&instance->dai_list);
 	INIT_LIST_HEAD(&instance->dai_link_list);

@@ -17,6 +17,7 @@
 
 struct snd_sof_dsp_ops;
 struct snd_sof_dev;
+struct sof_audio_ops;
 
 /**
  * enum sof_fw_state - DSP firmware state definitions
@@ -187,6 +188,7 @@ struct sof_dev_desc {
 	const char *default_fw_filename[SOF_IPC_TYPE_COUNT];
 
 	const struct snd_sof_dsp_ops *ops;
+	const struct sof_audio_ops *audio_ops;
 	int (*ops_init)(struct snd_sof_dev *sdev);
 	void (*ops_free)(struct snd_sof_dev *sdev);
 };
