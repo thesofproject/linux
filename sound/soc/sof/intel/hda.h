@@ -1030,7 +1030,7 @@ struct sof_ipc_dai_config;
 
 extern int sof_hda_position_quirk;
 
-void hda_set_dai_drv_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops *ops);
+void hda_set_dai_drv_ops(struct snd_sof_dev *sdev);
 void hda_ops_free(struct snd_sof_dev *sdev);
 
 /* SKL/KBL */

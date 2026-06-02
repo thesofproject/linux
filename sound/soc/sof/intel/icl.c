@@ -166,7 +166,7 @@ int sof_icl_ops_init(struct snd_sof_dev *sdev)
 	sof_icl_ops.core_get = hda_dsp_core_get;
 
 	/* set DAI driver ops */
-	hda_set_dai_drv_ops(sdev, &sof_icl_ops);
+	hda_set_dai_drv_ops(sdev);
 
 	return 0;
 };

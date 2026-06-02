@@ -76,20 +76,6 @@ const struct snd_sof_dsp_ops sof_hda_common_ops = {
 	.debugfs_add_region_item = snd_sof_debugfs_add_region_item_iomem,
 
 	/* stream callbacks */
-	.pcm_open	= hda_dsp_pcm_open,
-	.pcm_close	= hda_dsp_pcm_close,
-	.pcm_hw_params	= hda_dsp_pcm_hw_params,
-	.pcm_hw_free	= hda_dsp_stream_hw_free,
-	.pcm_trigger	= hda_dsp_pcm_trigger,
-	.pcm_pointer	= hda_dsp_pcm_pointer,
-	.pcm_ack	= hda_dsp_pcm_ack,
-
-	.compr_open = hda_dsp_compr_open,
-	.compr_hw_params = hda_dsp_compr_hw_params,
-	.compr_hw_free = hda_dsp_stream_compr_hw_free,
-	.compr_close = hda_dsp_compr_close,
-	.compr_trigger = hda_dsp_compr_trigger,
-	.compr_pointer = hda_dsp_compr_pointer,
 	.compr_get_dai_frame_counter = hda_dsp_compr_get_stream_llp,
 
 	.get_dai_frame_counter = hda_dsp_get_stream_llp,
@@ -119,8 +105,6 @@ const struct snd_sof_dsp_ops sof_hda_common_ops = {
 	.unregister_ipc_clients = hda_unregister_clients,
 
 	/* DAI drivers */
-	.drv		= skl_dai,
-	.num_drv	= SOF_SKL_NUM_DAIS,
 	.is_chain_dma_supported	= hda_is_chain_dma_supported,
 
 	/* PM */
@@ -130,13 +114,6 @@ const struct snd_sof_dsp_ops sof_hda_common_ops = {
 	.runtime_resume		= hda_dsp_runtime_resume,
 	.runtime_idle		= hda_dsp_runtime_idle,
 	.set_hw_params_upon_resume = hda_dsp_set_hw_params_upon_resume,
-
-	/* ALSA HW info flags */
-	.hw_info =	SNDRV_PCM_INFO_MMAP |
-			SNDRV_PCM_INFO_MMAP_VALID |
-			SNDRV_PCM_INFO_INTERLEAVED |
-			SNDRV_PCM_INFO_PAUSE |
-			SNDRV_PCM_INFO_NO_PERIOD_WAKEUP,
 
 	.dsp_arch_ops = &sof_xtensa_arch_ops,
 };

@@ -530,8 +530,8 @@ static void bdw_set_mach_params(struct snd_soc_acpi_mach *mach,
 
 	mach_params = &mach->mach_params;
 	mach_params->platform = dev_name(sdev->dev);
-	mach_params->num_dai_drivers = desc->ops->num_drv;
-	mach_params->dai_drivers = desc->ops->drv;
+	mach_params->num_dai_drivers = desc->audio_ops->num_drv;
+	mach_params->dai_drivers = desc->audio_ops->drv;
 }
 
 /* Broadwell DAIs */
@@ -613,23 +613,8 @@ static const struct snd_sof_dsp_ops sof_bdw_ops = {
 	.dbg_dump   = bdw_dump,
 	.debugfs_add_region_item = snd_sof_debugfs_add_region_item_iomem,
 
-	/* stream callbacks */
-	.pcm_open	= sof_stream_pcm_open,
-	.pcm_close	= sof_stream_pcm_close,
-
 	/*Firmware loading */
 	.load_firmware	= snd_sof_load_firmware_memcpy,
-
-	/* DAI drivers */
-	.drv = bdw_dai,
-	.num_drv = ARRAY_SIZE(bdw_dai),
-
-	/* ALSA HW info flags */
-	.hw_info =	SNDRV_PCM_INFO_MMAP |
-			SNDRV_PCM_INFO_MMAP_VALID |
-			SNDRV_PCM_INFO_INTERLEAVED |
-			SNDRV_PCM_INFO_PAUSE |
-			SNDRV_PCM_INFO_BATCH,
 
 	.dsp_arch_ops = &sof_xtensa_arch_ops,
 };

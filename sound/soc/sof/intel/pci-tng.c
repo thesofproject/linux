@@ -188,23 +188,8 @@ const struct snd_sof_dsp_ops sof_tng_ops = {
 	.dbg_dump	= atom_dump,
 	.debugfs_add_region_item = snd_sof_debugfs_add_region_item_iomem,
 
-	/* stream callbacks */
-	.pcm_open	= sof_stream_pcm_open,
-	.pcm_close	= sof_stream_pcm_close,
-
 	/*Firmware loading */
 	.load_firmware	= snd_sof_load_firmware_memcpy,
-
-	/* DAI drivers */
-	.drv = atom_dai,
-	.num_drv = 3, /* we have only 3 SSPs on byt*/
-
-	/* ALSA HW info flags */
-	.hw_info =	SNDRV_PCM_INFO_MMAP |
-			SNDRV_PCM_INFO_MMAP_VALID |
-			SNDRV_PCM_INFO_INTERLEAVED |
-			SNDRV_PCM_INFO_PAUSE |
-			SNDRV_PCM_INFO_BATCH,
 
 	.dsp_arch_ops = &sof_xtensa_arch_ops,
 };

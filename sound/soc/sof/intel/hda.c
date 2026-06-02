@@ -1460,8 +1460,8 @@ void hda_set_mach_params(struct snd_soc_acpi_mach *mach,
 	    sof_debug_check_flag(SOF_DBG_FORCE_NOCODEC))
 		mach_params->num_dai_drivers = SOF_SKL_NUM_DAIS_NOCODEC;
 	else
-		mach_params->num_dai_drivers = desc->ops->num_drv;
-	mach_params->dai_drivers = desc->ops->drv;
+		mach_params->num_dai_drivers = desc->audio_ops->num_drv;
+	mach_params->dai_drivers = desc->audio_ops->drv;
 }
 
 static int check_tplg_quirk_mask(struct snd_soc_acpi_mach *mach)

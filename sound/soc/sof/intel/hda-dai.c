@@ -705,7 +705,7 @@ static int hda_dai_suspend(struct hdac_bus *bus)
 	return 0;
 }
 
-static void ssp_set_dai_drv_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops *ops)
+static void ssp_set_dai_drv_ops(struct snd_sof_dev *sdev)
 {
 	const struct sof_intel_dsp_desc *chip;
 	int i;
@@ -713,14 +713,14 @@ static void ssp_set_dai_drv_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops
 	chip = get_chip_info(sdev->pdata);
 
 	if (chip->hw_ip_version >= SOF_INTEL_ACE_2_0) {
-		for (i = 0; i < ops->num_drv; i++) {
-			if (strstr(ops->drv[i].name, "SSP"))
-				ops->drv[i].ops = &ssp_dai_ops;
+		for (i = 0; i < sdev->audio_ops->num_drv; i++) {
+			if (strstr(sdev->audio_ops->drv[i].name, "SSP"))
+				sdev->audio_ops->drv[i].ops = &ssp_dai_ops;
 		}
 	}
 }
 
-static void dmic_set_dai_drv_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops *ops)
+static void dmic_set_dai_drv_ops(struct snd_sof_dev *sdev)
 {
 	const struct sof_intel_dsp_desc *chip;
 	int i;
@@ -728,35 +728,35 @@ static void dmic_set_dai_drv_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_op
 	chip = get_chip_info(sdev->pdata);
 
 	if (chip->hw_ip_version >= SOF_INTEL_ACE_2_0) {
-		for (i = 0; i < ops->num_drv; i++) {
-			if (strstr(ops->drv[i].name, "DMIC"))
-				ops->drv[i].ops = &dmic_dai_ops;
+		for (i = 0; i < sdev->audio_ops->num_drv; i++) {
+			if (strstr(sdev->audio_ops->drv[i].name, "DMIC"))
+				sdev->audio_ops->drv[i].ops = &dmic_dai_ops;
 		}
 	}
 }
 
 #else
 
-static inline void ssp_set_dai_drv_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops *ops) {}
-static inline void dmic_set_dai_drv_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops *ops) {}
+static inline void ssp_set_dai_drv_ops(struct snd_sof_dev *sdev) {}
+static inline void dmic_set_dai_drv_ops(struct snd_sof_dev *sdev) {}
 
 #endif /* CONFIG_SND_SOC_SOF_HDA_LINK */
 
-void hda_set_dai_drv_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops *ops)
+void hda_set_dai_drv_ops(struct snd_sof_dev *sdev)
 {
 	int i;
 
-	for (i = 0; i < ops->num_drv; i++) {
+	for (i = 0; i < sdev->audio_ops->num_drv; i++) {
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_AUDIO_CODEC)
-		if (strstr(ops->drv[i].name, "iDisp") ||
-		    strstr(ops->drv[i].name, "Analog") ||
-		    strstr(ops->drv[i].name, "Digital"))
-			ops->drv[i].ops = &hda_dai_ops;
+		if (strstr(sdev->audio_ops->drv[i].name, "iDisp") ||
+		    strstr(sdev->audio_ops->drv[i].name, "Analog") ||
+		    strstr(sdev->audio_ops->drv[i].name, "Digital"))
+			sdev->audio_ops->drv[i].ops = &hda_dai_ops;
 #endif
 	}
 
-	ssp_set_dai_drv_ops(sdev, ops);
-	dmic_set_dai_drv_ops(sdev, ops);
+	ssp_set_dai_drv_ops(sdev);
+	dmic_set_dai_drv_ops(sdev);
 
 	if (sdev->pdata->ipc_type == SOF_IPC_TYPE_4 && !hda_use_tplg_nhlt) {
 		struct sof_ipc4_fw_data *ipc4_data = sdev->private;
