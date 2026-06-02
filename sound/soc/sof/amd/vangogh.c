@@ -151,6 +151,22 @@ static int sof_vangogh_post_fw_run_delay(struct snd_sof_dev *sdev)
 struct snd_sof_dsp_ops sof_vangogh_ops;
 EXPORT_SYMBOL_NS(sof_vangogh_ops, "SND_SOC_SOF_AMD_COMMON");
 
+static const struct sof_audio_ops sof_vangogh_audio_ops = {
+	.pcm_open	= acp_pcm_open,
+	.pcm_close	= acp_pcm_close,
+	.pcm_hw_params	= acp_pcm_hw_params,
+	.pcm_pointer	= acp_pcm_pointer,
+
+	.drv		= vangogh_sof_dai,
+	.num_drv	= ARRAY_SIZE(vangogh_sof_dai),
+
+	.hw_info =	SNDRV_PCM_INFO_MMAP |
+			SNDRV_PCM_INFO_MMAP_VALID |
+			SNDRV_PCM_INFO_INTERLEAVED |
+			SNDRV_PCM_INFO_PAUSE |
+			SNDRV_PCM_INFO_NO_PERIOD_WAKEUP,
+};
+
 int sof_vangogh_ops_init(struct snd_sof_dev *sdev)
 {
 	const struct dmi_system_id *dmi_id;
@@ -161,6 +177,8 @@ int sof_vangogh_ops_init(struct snd_sof_dev *sdev)
 
 	sof_vangogh_ops.drv = vangogh_sof_dai;
 	sof_vangogh_ops.num_drv = ARRAY_SIZE(vangogh_sof_dai);
+
+	sdev->audio_ops = &sof_vangogh_audio_ops;
 
 	dmi_id = dmi_first_match(acp_sof_quirk_table);
 	if (dmi_id) {

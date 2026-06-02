@@ -130,6 +130,22 @@ static struct snd_soc_dai_driver rembrandt_sof_dai[] = {
 struct snd_sof_dsp_ops sof_rembrandt_ops;
 EXPORT_SYMBOL_NS(sof_rembrandt_ops, "SND_SOC_SOF_AMD_COMMON");
 
+static const struct sof_audio_ops sof_rembrandt_audio_ops = {
+	.pcm_open	= acp_pcm_open,
+	.pcm_close	= acp_pcm_close,
+	.pcm_hw_params	= acp_pcm_hw_params,
+	.pcm_pointer	= acp_pcm_pointer,
+
+	.drv		= rembrandt_sof_dai,
+	.num_drv	= ARRAY_SIZE(rembrandt_sof_dai),
+
+	.hw_info =	SNDRV_PCM_INFO_MMAP |
+			SNDRV_PCM_INFO_MMAP_VALID |
+			SNDRV_PCM_INFO_INTERLEAVED |
+			SNDRV_PCM_INFO_PAUSE |
+			SNDRV_PCM_INFO_NO_PERIOD_WAKEUP,
+};
+
 int sof_rembrandt_ops_init(struct snd_sof_dev *sdev)
 {
 	/* common defaults */
@@ -137,6 +153,8 @@ int sof_rembrandt_ops_init(struct snd_sof_dev *sdev)
 
 	sof_rembrandt_ops.drv = rembrandt_sof_dai;
 	sof_rembrandt_ops.num_drv = ARRAY_SIZE(rembrandt_sof_dai);
+
+	sdev->audio_ops = &sof_rembrandt_audio_ops;
 
 	return 0;
 }
