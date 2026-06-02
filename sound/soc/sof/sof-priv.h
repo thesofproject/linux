@@ -303,52 +303,6 @@ struct snd_sof_dsp_ops {
 	int (*load_module)(struct snd_sof_dev *sof_dev,
 			   struct snd_sof_mod_hdr *hdr); /* optional */
 
-	/* connect pcm substream to a host stream */
-	int (*pcm_open)(struct snd_soc_component *component,
-			struct snd_pcm_substream *substream); /* optional */
-	/* disconnect pcm substream to a host stream */
-	int (*pcm_close)(struct snd_soc_component *component,
-			 struct snd_pcm_substream *substream); /* optional */
-
-	/* host stream hw params */
-	int (*pcm_hw_params)(struct snd_soc_component *component,
-			     struct snd_pcm_substream *substream,
-			     struct snd_pcm_hw_params *params,
-			     struct snd_sof_platform_stream_params *platform_params); /* optional */
-
-	/* host stream hw_free */
-	int (*pcm_hw_free)(struct snd_soc_component *component,
-			   struct snd_pcm_substream *substream); /* optional */
-
-	/* host stream trigger */
-	int (*pcm_trigger)(struct snd_soc_component *component,
-			   struct snd_pcm_substream *substream,
-			   int cmd); /* optional */
-
-	/* host stream pointer */
-	snd_pcm_uframes_t (*pcm_pointer)(struct snd_soc_component *component,
-					 struct snd_pcm_substream *substream); /* optional */
-
-	/* pcm ack */
-	int (*pcm_ack)(struct snd_soc_component *component,
-		       struct snd_pcm_substream *substream); /* optional */
-
-	int (*compr_open)(struct snd_soc_component *component,
-			  struct snd_compr_stream *cstream);
-	int (*compr_close)(struct snd_soc_component *component,
-			   struct snd_compr_stream *cstream);
-	int (*compr_hw_params)(struct snd_soc_component *component,
-			       struct snd_compr_stream *cstream,
-			       struct snd_compr_params *params,
-			       struct snd_sof_platform_stream_params *platform_params);
-	int (*compr_hw_free)(struct snd_soc_component *component,
-			     struct snd_compr_stream *cstream);
-	int (*compr_trigger)(struct snd_soc_component *component,
-			     struct snd_compr_stream *cstream,
-			     int cmd);
-	int (*compr_pointer)(struct snd_soc_component *component,
-			     struct snd_compr_stream *cstream,
-			     struct snd_compr_tstamp64 *tstamp);
 	u64 (*compr_get_dai_frame_counter)(struct snd_sof_dev *sdev,
 					   struct snd_compr_stream *cstream);
 	/*
@@ -444,13 +398,7 @@ struct snd_sof_dsp_ops {
 	void (*unregister_ipc_clients)(struct snd_sof_dev *sdev); /* optional */
 
 	/* DAI ops */
-	struct snd_soc_dai_driver *drv;
-	int num_drv;
-
 	bool (*is_chain_dma_supported)(struct snd_sof_dev *sdev, u32 dai_type); /* optional */
-
-	/* ALSA HW info flags, will be stored in snd_pcm_runtime.hw.info */
-	u32 hw_info;
 
 	const struct dsp_arch_ops *dsp_arch_ops;
 };
@@ -717,7 +665,6 @@ struct snd_sof_dev {
 	struct snd_soc_tplg_ops *tplg_ops;
 	const struct sof_audio_ops *audio_ops;
 	struct list_head audio_instance_list;
-	/* Protect audio_instance_list */
 	spinlock_t audio_instance_list_lock;
 	u32 enabled_cores_mask; /* keep track of enabled cores */
 
