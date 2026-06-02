@@ -534,6 +534,22 @@ static struct snd_soc_dai_driver mt8365_dai[] = {
 },
 };
 
+static const struct sof_audio_ops sof_mt8365_audio_ops = {
+	.pcm_open	= sof_stream_pcm_open,
+	.pcm_hw_params	= mt8365_pcm_hw_params,
+	.pcm_pointer	= mt8365_pcm_pointer,
+	.pcm_close	= sof_stream_pcm_close,
+
+	.drv		= mt8365_dai,
+	.num_drv	= ARRAY_SIZE(mt8365_dai),
+
+	.hw_info =	SNDRV_PCM_INFO_MMAP |
+			SNDRV_PCM_INFO_MMAP_VALID |
+			SNDRV_PCM_INFO_INTERLEAVED |
+			SNDRV_PCM_INFO_PAUSE |
+			SNDRV_PCM_INFO_NO_PERIOD_WAKEUP,
+};
+
 /* mt8365 ops */
 static struct snd_sof_dsp_ops sof_mt8365_ops = {
 	/* probe and remove */
@@ -624,6 +640,7 @@ static const struct sof_dev_desc sof_of_mt8365_desc = {
 	},
 	.nocodec_tplg_filename = "sof-mt8365-nocodec.tplg",
 	.ops = &sof_mt8365_ops,
+	.audio_ops = &sof_mt8365_audio_ops,
 	.ipc_timeout = 1000,
 };
 
