@@ -151,9 +151,6 @@ int sof_rembrandt_ops_init(struct snd_sof_dev *sdev)
 	/* common defaults */
 	memcpy(&sof_rembrandt_ops, &sof_acp_common_ops, sizeof(struct snd_sof_dsp_ops));
 
-	sof_rembrandt_ops.drv = rembrandt_sof_dai;
-	sof_rembrandt_ops.num_drv = ARRAY_SIZE(rembrandt_sof_dai);
-
 	sdev->audio_ops = &sof_rembrandt_audio_ops;
 
 	return 0;

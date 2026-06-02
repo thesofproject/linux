@@ -126,9 +126,6 @@ int sof_renoir_ops_init(struct snd_sof_dev *sdev)
 	/* common defaults */
 	memcpy(&sof_renoir_ops, &sof_acp_common_ops, sizeof(struct snd_sof_dsp_ops));
 
-	sof_renoir_ops.drv = renoir_sof_dai;
-	sof_renoir_ops.num_drv = ARRAY_SIZE(renoir_sof_dai);
-
 	sdev->audio_ops = &sof_renoir_audio_ops;
 
 	return 0;

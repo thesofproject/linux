@@ -225,18 +225,6 @@ const struct snd_sof_dsp_ops sof_acp_common_ops = {
 	.get_window_offset      = acp_sof_ipc_get_window_offset,
 	.irq_thread		= acp_sof_ipc_irq_thread,
 
-	/* stream callbacks */
-	.pcm_open		= acp_pcm_open,
-	.pcm_close		= acp_pcm_close,
-	.pcm_hw_params		= acp_pcm_hw_params,
-	.pcm_pointer		= acp_pcm_pointer,
-
-	.hw_info		= SNDRV_PCM_INFO_MMAP |
-				  SNDRV_PCM_INFO_MMAP_VALID |
-				  SNDRV_PCM_INFO_INTERLEAVED |
-				  SNDRV_PCM_INFO_PAUSE |
-				  SNDRV_PCM_INFO_NO_PERIOD_WAKEUP,
-
 	/* Machine driver callbacks */
 	.machine_select		= amd_sof_machine_select,
 	.machine_register	= sof_machine_register,

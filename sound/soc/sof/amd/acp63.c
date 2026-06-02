@@ -151,9 +151,6 @@ int sof_acp63_ops_init(struct snd_sof_dev *sdev)
 	/* common defaults */
 	memcpy(&sof_acp63_ops, &sof_acp_common_ops, sizeof(struct snd_sof_dsp_ops));
 
-	sof_acp63_ops.drv = acp63_sof_dai;
-	sof_acp63_ops.num_drv = ARRAY_SIZE(acp63_sof_dai);
-
 	sdev->audio_ops = &sof_acp63_audio_ops;
 
 	return 0;
