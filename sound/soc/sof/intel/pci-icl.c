@@ -48,6 +48,7 @@ static const struct sof_dev_desc icl_desc = {
 	},
 	.nocodec_tplg_filename = "sof-icl-nocodec.tplg",
 	.ops = &sof_icl_ops,
+	.audio_ops = &sof_hda_audio_ops,
 	.ops_init = sof_icl_ops_init,
 	.ops_free = hda_ops_free,
 };
@@ -80,6 +81,7 @@ static const struct sof_dev_desc jsl_desc = {
 	},
 	.nocodec_tplg_filename = "sof-jsl-nocodec.tplg",
 	.ops = &sof_cnl_ops,
+	.audio_ops = &sof_hda_audio_ops,
 	.ops_init = sof_cnl_ops_init,
 	.ops_free = hda_ops_free,
 };

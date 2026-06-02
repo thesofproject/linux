@@ -132,6 +132,20 @@ irq:
 	return ret;
 }
 
+static const struct sof_audio_ops sof_tng_audio_ops = {
+	.pcm_open	= sof_stream_pcm_open,
+	.pcm_close	= sof_stream_pcm_close,
+
+	.drv		= atom_dai,
+	.num_drv	= 3,
+
+	.hw_info =	SNDRV_PCM_INFO_MMAP |
+			SNDRV_PCM_INFO_MMAP_VALID |
+			SNDRV_PCM_INFO_INTERLEAVED |
+			SNDRV_PCM_INFO_PAUSE |
+			SNDRV_PCM_INFO_BATCH,
+};
+
 const struct snd_sof_dsp_ops sof_tng_ops = {
 	/* device init */
 	.probe		= tangier_pci_probe,
@@ -221,6 +235,7 @@ static const struct sof_dev_desc tng_desc = {
 	},
 	.nocodec_tplg_filename = "sof-byt.tplg",
 	.ops = &sof_tng_ops,
+	.audio_ops = &sof_tng_audio_ops,
 };
 
 /* PCI IDs */

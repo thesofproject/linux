@@ -53,6 +53,7 @@ static const struct sof_dev_desc ptl_desc = {
 	},
 	.nocodec_tplg_filename = "sof-ptl-nocodec.tplg",
 	.ops = &sof_ptl_ops,
+	.audio_ops = &sof_hda_audio_ops,
 	.ops_init = sof_ptl_ops_init,
 };
 
@@ -83,6 +84,7 @@ static const struct sof_dev_desc wcl_desc = {
 	},
 	.nocodec_tplg_filename = "sof-ptl-nocodec.tplg",
 	.ops = &sof_ptl_ops,
+	.audio_ops = &sof_hda_audio_ops,
 	.ops_init = sof_ptl_ops_init,
 };
 

@@ -213,6 +213,20 @@ irq:
 }
 
 /* baytrail ops */
+static const struct sof_audio_ops sof_byt_audio_ops = {
+	.pcm_open	= sof_stream_pcm_open,
+	.pcm_close	= sof_stream_pcm_close,
+
+	.drv		= atom_dai,
+	.num_drv	= 3,
+
+	.hw_info =	SNDRV_PCM_INFO_MMAP |
+			SNDRV_PCM_INFO_MMAP_VALID |
+			SNDRV_PCM_INFO_INTERLEAVED |
+			SNDRV_PCM_INFO_PAUSE |
+			SNDRV_PCM_INFO_BATCH,
+};
+
 static const struct snd_sof_dsp_ops sof_byt_ops = {
 	/* device init */
 	.probe		= byt_acpi_probe,
@@ -288,6 +302,20 @@ static const struct sof_intel_dsp_desc byt_chip_info = {
 };
 
 /* cherrytrail and braswell ops */
+static const struct sof_audio_ops sof_cht_audio_ops = {
+	.pcm_open	= sof_stream_pcm_open,
+	.pcm_close	= sof_stream_pcm_close,
+
+	.drv		= atom_dai,
+	.num_drv	= 6,
+
+	.hw_info =	SNDRV_PCM_INFO_MMAP |
+			SNDRV_PCM_INFO_MMAP_VALID |
+			SNDRV_PCM_INFO_INTERLEAVED |
+			SNDRV_PCM_INFO_PAUSE |
+			SNDRV_PCM_INFO_BATCH,
+};
+
 static const struct snd_sof_dsp_ops sof_cht_ops = {
 	/* device init */
 	.probe		= byt_acpi_probe,
@@ -384,6 +412,7 @@ static const struct sof_dev_desc sof_acpi_baytrailcr_desc = {
 	},
 	.nocodec_tplg_filename = "sof-byt-nocodec.tplg",
 	.ops = &sof_byt_ops,
+	.audio_ops = &sof_byt_audio_ops,
 };
 
 static const struct sof_dev_desc sof_acpi_baytrail_desc = {
@@ -406,6 +435,7 @@ static const struct sof_dev_desc sof_acpi_baytrail_desc = {
 	},
 	.nocodec_tplg_filename = "sof-byt-nocodec.tplg",
 	.ops = &sof_byt_ops,
+	.audio_ops = &sof_byt_audio_ops,
 };
 
 static const struct sof_dev_desc sof_acpi_cherrytrail_desc = {
@@ -428,6 +458,7 @@ static const struct sof_dev_desc sof_acpi_cherrytrail_desc = {
 	},
 	.nocodec_tplg_filename = "sof-cht-nocodec.tplg",
 	.ops = &sof_cht_ops,
+	.audio_ops = &sof_cht_audio_ops,
 };
 
 static const struct acpi_device_id sof_baytrail_match[] = {

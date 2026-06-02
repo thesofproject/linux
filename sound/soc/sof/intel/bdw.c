@@ -560,6 +560,20 @@ static struct snd_soc_dai_driver bdw_dai[] = {
 },
 };
 
+static const struct sof_audio_ops sof_bdw_audio_ops = {
+	.pcm_open	= sof_stream_pcm_open,
+	.pcm_close	= sof_stream_pcm_close,
+
+	.drv		= bdw_dai,
+	.num_drv	= ARRAY_SIZE(bdw_dai),
+
+	.hw_info =	SNDRV_PCM_INFO_MMAP |
+			SNDRV_PCM_INFO_MMAP_VALID |
+			SNDRV_PCM_INFO_INTERLEAVED |
+			SNDRV_PCM_INFO_PAUSE |
+			SNDRV_PCM_INFO_BATCH,
+};
+
 /* broadwell ops */
 static const struct snd_sof_dsp_ops sof_bdw_ops = {
 	/*Device init */
@@ -646,6 +660,7 @@ static const struct sof_dev_desc sof_acpi_broadwell_desc = {
 	},
 	.nocodec_tplg_filename = "sof-bdw-nocodec.tplg",
 	.ops = &sof_bdw_ops,
+	.audio_ops = &sof_bdw_audio_ops,
 };
 
 static const struct acpi_device_id sof_broadwell_match[] = {
