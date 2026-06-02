@@ -314,10 +314,6 @@ static int imx8_ops_init(struct snd_sof_dev *sdev)
 	sof_imx8_ops.debugfs_add_region_item =
 		snd_sof_debugfs_add_region_item_iomem;
 
-	/* ... and finally set DAI driver */
-	sof_imx8_ops.drv = get_chip_info(sdev)->drv;
-	sof_imx8_ops.num_drv = get_chip_info(sdev)->num_drv;
-
 	sdev->audio_ops = get_chip_info(sdev)->audio_ops;
 
 	return 0;
@@ -372,8 +368,6 @@ static const struct imx_chip_info imx8_chip_info = {
 		.window_offset = 0x800000,
 	},
 	.memory = imx8_memory_regions,
-	.drv = imx8_dai,
-	.num_drv = ARRAY_SIZE(imx8_dai),
 	.audio_ops = &sof_imx8_audio_ops,
 	.ops = &imx8_chip_ops,
 };
@@ -385,8 +379,6 @@ static const struct imx_chip_info imx8x_chip_info = {
 		.window_offset = 0x800000,
 	},
 	.memory = imx8_memory_regions,
-	.drv = imx8_dai,
-	.num_drv = ARRAY_SIZE(imx8_dai),
 	.audio_ops = &sof_imx8_audio_ops,
 	.ops = &imx8x_chip_ops,
 };
@@ -398,8 +390,6 @@ static const struct imx_chip_info imx8m_chip_info = {
 		.window_offset = 0x800000,
 	},
 	.memory = imx8m_memory_regions,
-	.drv = imx8m_dai,
-	.num_drv = ARRAY_SIZE(imx8m_dai),
 	.audio_ops = &sof_imx8m_audio_ops,
 	.ops = &imx8m_chip_ops,
 };
@@ -412,8 +402,6 @@ static const struct imx_chip_info imx8ulp_chip_info = {
 	},
 	.has_dma_reserved = true,
 	.memory = imx8ulp_memory_regions,
-	.drv = imx8ulp_dai,
-	.num_drv = ARRAY_SIZE(imx8ulp_dai),
 	.audio_ops = &sof_imx8ulp_audio_ops,
 	.ops = &imx8ulp_chip_ops,
 };

@@ -100,8 +100,6 @@ struct imx_chip_info {
 	/* does the chip have a reserved memory region for DMA? */
 	bool has_dma_reserved;
 	struct imx_memory_info *memory;
-	struct snd_soc_dai_driver *drv;
-	int num_drv;
 	const struct sof_audio_ops *audio_ops;
 	/* optional */
 	const struct imx_chip_ops *ops;

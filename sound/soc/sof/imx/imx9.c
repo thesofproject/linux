@@ -34,10 +34,6 @@ static int imx95_ops_init(struct snd_sof_dev *sdev)
 	/* first copy from template */
 	memcpy(&sof_imx9_ops, &sof_imx_ops, sizeof(sof_imx_ops));
 
-	/* ... and finally set DAI driver */
-	sof_imx9_ops.drv = get_chip_info(sdev)->drv;
-	sof_imx9_ops.num_drv = get_chip_info(sdev)->num_drv;
-
 	sdev->audio_ops = get_chip_info(sdev)->audio_ops;
 
 	return 0;
@@ -89,8 +85,6 @@ static const struct imx_chip_info imx95_chip_info = {
 	},
 	.has_dma_reserved = true,
 	.memory = imx95_memory_regions,
-	.drv = imx95_dai,
-	.num_drv = ARRAY_SIZE(imx95_dai),
 	.audio_ops = &sof_imx95_audio_ops,
 	.ops = &imx95_chip_ops,
 };

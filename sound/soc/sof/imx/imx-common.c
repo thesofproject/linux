@@ -457,22 +457,12 @@ const struct snd_sof_dsp_ops sof_imx_ops = {
 
 	.debugfs_add_region_item = snd_sof_debugfs_add_region_item_iomem,
 
-	.pcm_open = sof_stream_pcm_open,
-	.pcm_close = sof_stream_pcm_close,
-
 	.runtime_suspend = imx_runtime_suspend,
 	.runtime_resume = imx_runtime_resume,
 	.suspend = imx_suspend,
 	.resume = imx_resume,
 
 	.set_power_state = imx_set_power_state,
-
-	.hw_info = SNDRV_PCM_INFO_MMAP |
-		SNDRV_PCM_INFO_MMAP_VALID |
-		SNDRV_PCM_INFO_INTERLEAVED |
-		SNDRV_PCM_INFO_PAUSE |
-		SNDRV_PCM_INFO_BATCH |
-		SNDRV_PCM_INFO_NO_PERIOD_WAKEUP,
 };
 EXPORT_SYMBOL(sof_imx_ops);
 
