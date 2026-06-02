@@ -507,6 +507,8 @@ static snd_pcm_uframes_t sof_pcm_pointer(struct snd_soc_component *component,
 					 struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_sof_audio_instance *ins =
+		snd_sof_component_get_audio_instance(component);
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	const struct sof_ipc_pcm_ops *pcm_ops = snd_sof_component_get_pcm_ops(component);
 	struct snd_sof_pcm *spcm;
@@ -524,8 +526,8 @@ static snd_pcm_uframes_t sof_pcm_pointer(struct snd_soc_component *component,
 		return ret ? ret : host;
 
 	/* use dsp ops pointer callback directly if set */
-	if (sof_ops(sdev)->pcm_pointer)
-		return sof_ops(sdev)->pcm_pointer(component, substream);
+	if (ins && ins->audio_ops->pcm_pointer)
+		return ins->audio_ops->pcm_pointer(component, substream);
 
 	spcm = snd_sof_find_spcm_dai(component, rtd);
 	if (!spcm)
@@ -547,8 +549,8 @@ static int sof_pcm_open(struct snd_soc_component *component,
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct snd_pcm_runtime *runtime = substream->runtime;
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
-	const struct snd_sof_dsp_ops *ops = sof_ops(sdev);
+	struct snd_sof_audio_instance *ins =
+		snd_sof_component_get_audio_instance(component);
 	struct snd_sof_pcm *spcm;
 	struct snd_soc_tplg_stream_caps *caps;
 	int ret;
@@ -566,7 +568,7 @@ static int sof_pcm_open(struct snd_soc_component *component,
 	caps = &spcm->pcm.caps[substream->stream];
 
 	/* set runtime config */
-	runtime->hw.info = ops->hw_info; /* platform-specific */
+	runtime->hw.info = ins->audio_ops->hw_info; /* platform-specific */
 
 	/* set any runtime constraints based on topology */
 	runtime->hw.formats = le64_to_cpu(caps->formats);

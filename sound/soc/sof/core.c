@@ -556,8 +556,8 @@ skip_dsp_init:
 
 	/* now register audio DSP platform driver and dai */
 	ret = devm_snd_soc_register_component(sdev->dev, &sdev->plat_drv,
-					      sof_ops(sdev)->drv,
-					      sof_ops(sdev)->num_drv);
+					      sdev->audio_ops->drv,
+					      sdev->audio_ops->num_drv);
 	if (ret < 0) {
 		dev_err(sdev->dev,
 			"error: failed to register DSP DAI driver %d\n", ret);
@@ -678,13 +678,14 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 
 	sof_apply_profile_override(&plat_data->ipc_file_profile_base, plat_data);
 
+	sdev->audio_ops = plat_data->desc->audio_ops;
+
 	/* Initialize sof_ops based on the initial selected IPC version */
 	ret = sof_init_sof_ops(sdev);
 	if (ret)
 		return ret;
 
 	INIT_LIST_HEAD(&sdev->audio_instance_list);
-	sdev->audio_ops = plat_data->desc->audio_ops;
 	INIT_LIST_HEAD(&sdev->ipc_client_list);
 	INIT_LIST_HEAD(&sdev->client_ops_list);
 	spin_lock_init(&sdev->ipc_lock);
