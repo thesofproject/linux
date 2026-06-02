@@ -4331,6 +4331,23 @@ static int intel_crtc_atomic_check(struct intel_atomic_state *state,
 	return 0;
 }
 
+static int bpc_to_bpp(int bpc)
+{
+	switch (bpc) {
+	case 6 ... 7:
+		return 6 * 3;
+	case 8 ... 9:
+		return 8 * 3;
+	case 10 ... 11:
+		return 10 * 3;
+	case 12 ... 16:
+		return 12 * 3;
+	default:
+		MISSING_CASE(bpc);
+		return -EINVAL;
+	}
+}
+
 static int
 compute_sink_pipe_bpp(const struct drm_connector_state *conn_state,
 		      struct intel_crtc_state *crtc_state)
@@ -4338,36 +4355,34 @@ compute_sink_pipe_bpp(const struct drm_connector_state *conn_state,
 	struct intel_display *display = to_intel_display(crtc_state);
 	struct drm_connector *connector = conn_state->connector;
 	const struct drm_display_info *info = &connector->display_info;
-	int bpp;
+	int edid_bpc = info->bpc ? : 8;
+	int target_pipe_bpp;
+	int max_edid_bpp;
 
-	switch (conn_state->max_bpc) {
-	case 6 ... 7:
-		bpp = 6 * 3;
-		break;
-	case 8 ... 9:
-		bpp = 8 * 3;
-		break;
-	case 10 ... 11:
-		bpp = 10 * 3;
-		break;
-	case 12 ... 16:
-		bpp = 12 * 3;
-		break;
-	default:
-		MISSING_CASE(conn_state->max_bpc);
-		return -EINVAL;
-	}
+	max_edid_bpp = bpc_to_bpp(edid_bpc);
+	if (max_edid_bpp < 0)
+		return max_edid_bpp;
 
-	if (bpp < crtc_state->pipe_bpp) {
+	target_pipe_bpp = bpc_to_bpp(conn_state->max_bpc);
+	if (target_pipe_bpp < 0)
+		return target_pipe_bpp;
+
+	/*
+	 * The maximum pipe BPP is the minimum of the max platform BPP and
+	 * the max EDID BPP.
+	 */
+	crtc_state->max_pipe_bpp = min(crtc_state->pipe_bpp, max_edid_bpp);
+
+	if (target_pipe_bpp < crtc_state->pipe_bpp) {
 		drm_dbg_kms(display->drm,
-			    "[CONNECTOR:%d:%s] Limiting display bpp to %d "
+			    "[CONNECTOR:%d:%s] Limiting target display pipe bpp to %d "
 			    "(EDID bpp %d, max requested bpp %d, max platform bpp %d)\n",
 			    connector->base.id, connector->name,
-			    bpp, 3 * info->bpc,
+			    target_pipe_bpp, 3 * info->bpc,
 			    3 * conn_state->max_requested_bpc,
 			    crtc_state->pipe_bpp);
 
-		crtc_state->pipe_bpp = bpp;
+		crtc_state->pipe_bpp = target_pipe_bpp;
 	}
 
 	return 0;

@@ -3587,6 +3587,19 @@ exports_files([
 ])
 
 ddk_headers(
+    name = "drm_display_helper_headers",
+    # hdrs are transitively exported to dependents
+    hdrs = [
+        "include/drm/display/drm_dp_helper.h",
+    ],
+    # must use linux_includes (instead of includes) to ensure that files
+    # explicitly declared hdrs override those in ACK.
+    linux_includes = [
+        "include",
+    ],
+)
+
+ddk_headers(
     name = "xe_global_includes",
     # Although we don't modify define_trace.h, this is necessary to resolve
     # TRACE_INCLUDE_PATH relative to this repo, rather than that of the ddk
