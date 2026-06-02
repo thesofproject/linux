@@ -335,3 +335,11 @@
 # required by xiaomi binder
 __tracepoint_android_vh_binder_skip_set_priority
 __traceiter_android_vh_binder_skip_set_priority
+
+# required by xiaomi game
+__traceiter_android_vh_free_user
+__traceiter_android_vh_alloc_uid
+__tracepoint_android_vh_free_user
+__tracepoint_android_vh_alloc_uid
+free_uid
+find_user
