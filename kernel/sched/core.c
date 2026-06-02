@@ -7296,25 +7296,24 @@ __acquires(__rq_lockp(rq))
  */
 static void proxy_migrate_task(struct rq *rq, struct rq_flags *rf,
 			       struct task_struct *p, int target_cpu)
+	__must_hold(__rq_lockp(rq))
 {
 	struct rq *target_rq = cpu_rq(target_cpu);
 	LIST_HEAD(migrate_list);
 
 	lockdep_assert_rq_held(rq);
-
 	/*
-	 * Since we're going to drop @rq, we have to put(@rq->donor) first,
-	 * otherwise we have a reference that no longer belongs to us.
+	 * Since we are migrating a blocked donor, it could be rq->donor,
+	 * and we want to make sure there aren't any references from this
+	 * rq to it before we drop the lock. This avoids another cpu
+	 * jumping in and grabbing the rq lock and referencing rq->donor
+	 * or cfs_rq->curr, etc after we have migrated it to another cpu,
+	 * and before we pick_again in __schedule.
 	 *
-	 * Additionally, as we put_prev_task(prev) earlier, its possible that
-	 * prev will migrate away as soon as we drop the rq lock, however we
-	 * still have it marked as rq->curr, as we've not yet switched tasks.
-	 *
-	 * So call proxy_resched_idle() to let go of the references before
-	 * we release the lock.
+	 * So call proxy_resched_idle() to drop the rq->donor references
+	 * before we release the lock.
 	 */
 	proxy_resched_idle(rq);
-
 	for (; p; p = p->blocked_donor) {
 		WARN_ON(p == rq->curr);
 		deactivate_task(rq, p, DEQUEUE_NOCLOCK);
@@ -7476,6 +7475,7 @@ DEFINE_LOCK_GUARD_1(blocked_on_lock, struct blocked_on_lock,
  */
 static struct task_struct *
 find_proxy_task(struct rq *rq, struct task_struct *donor, struct rq_flags *rf)
+	__must_hold(__rq_lockp(rq))
 {
 	enum { FOUND, MIGRATE, NEEDS_RETURN } action = FOUND;
 	struct blocked_on_lock bo, *blocked_on;
