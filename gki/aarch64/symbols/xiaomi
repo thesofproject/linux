@@ -347,3 +347,4 @@ __tracepoint_android_vh_alloc_uid
 __tracepoint_android_rvh_cpuset_fork
 free_uid
 find_user
+jiffies_64

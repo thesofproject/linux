@@ -424505,6 +424505,15 @@ elf_symbol {
   full_name: "jiffies64_to_nsecs"
 }
 elf_symbol {
+  id: 0x075fdad1
+  name: "jiffies_64"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x7f175992
+  type_id: 0x92233392
+  full_name: "jiffies_64"
+}
+elf_symbol {
   id: 0x6bcfa61d
   name: "jiffies_64_to_clock_t"
   is_defined: true
@@ -465188,6 +465197,7 @@ interface {
   symbol_id: 0xa6e6c879
   symbol_id: 0x6e47d2cf
   symbol_id: 0xd63a3f70
+  symbol_id: 0x075fdad1
   symbol_id: 0x6bcfa61d
   symbol_id: 0x01438401
   symbol_id: 0x9175ce1c
