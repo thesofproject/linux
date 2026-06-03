@@ -95,7 +95,7 @@ struct cs42l43_codec {
 
 	bool load_detect_running;
 	bool button_detect_running;
-	bool jack_present;
+	int jack_state;
 	int jack_override;
 	bool suspend_jack_debounce;
 

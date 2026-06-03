@@ -29,6 +29,17 @@
 
 #include "cs42l43.h"
 
+enum cs42l43_raw_jack {
+	CS42L43_JACK_RAW_CTIA = 0,
+	CS42L43_JACK_RAW_OMTP,
+	CS42L43_JACK_RAW_HEADPHONE,
+	CS42L43_JACK_RAW_LINE_OUT,
+	CS42L43_JACK_RAW_LINE_IN,
+	CS42L43_JACK_RAW_MICROPHONE,
+	CS42L43_JACK_RAW_OPTICAL,
+	CS42L43_JACK_RAW_NONE,
+};
+
 static const unsigned int cs42l43_accdet_us[] = {
 	20, 100, 1000, 10000, 50000, 75000, 100000, 200000,
 };
@@ -42,6 +53,8 @@ static const unsigned int cs42l43_accdet_ramp_ms[] = { 10, 40, 90, 170 };
 static const unsigned int cs42l43_accdet_bias_sense[] = {
 	14, 24, 43, 52, 61, 71, 90, 99, 0,
 };
+
+static void cs42l43_force_jack(struct cs42l43_codec *priv, unsigned int override);
 
 static int cs42l43_find_index(struct cs42l43_codec *priv, const char * const prop,
 			      unsigned int defval, unsigned int *val,
@@ -229,6 +242,7 @@ int cs42l43_set_jack(struct snd_soc_component *component,
 			   CS42L43_AUTO_HSDET_TIME_MASK, hs2);
 
 done:
+	priv->jack_state = CS42L43_JACK_RAW_NONE;
 	ret = 0;
 
 	regmap_update_bits(cs42l43->regmap, CS42L43_HS_BIAS_SENSE_AND_CLAMP_AUTOCONTROL,
@@ -652,6 +666,7 @@ static int cs42l43_run_load_detect(struct cs42l43_codec *priv, bool mic)
 	case 0x2: // < 1000 Ohm impedance
 		return CS42L43_JACK_HEADPHONE;
 	case 0x3: // > 1000 Ohm impedance
+		priv->jack_state = CS42L43_JACK_RAW_LINE_OUT;
 		return CS42L43_JACK_LINEOUT;
 	default:
 		return -EINVAL;
@@ -698,12 +713,17 @@ static int cs42l43_run_type_detect(struct cs42l43_codec *priv)
 
 	switch (type & CS42L43_HSDET_TYPE_STS_MASK) {
 	case 0x0: // CTIA
-	case 0x1: // OMTP
 	case 0x4:
+		priv->jack_state = CS42L43_JACK_RAW_CTIA;
+		return cs42l43_run_load_detect(priv, true);
+	case 0x1: // OMTP
+		priv->jack_state = CS42L43_JACK_RAW_OMTP;
 		return cs42l43_run_load_detect(priv, true);
 	case 0x2: // 3-pole
+		priv->jack_state = CS42L43_JACK_RAW_HEADPHONE;
 		return cs42l43_run_load_detect(priv, false);
 	case 0x3: // Open-circuit
+		priv->jack_state = CS42L43_JACK_RAW_HEADPHONE;
 		return CS42L43_JACK_EXTENSION;
 	default:
 		return -EINVAL;
@@ -755,14 +775,10 @@ void cs42l43_tip_sense_work(struct work_struct *work)
 	tip = (sts >> CS42L43_TIPSENSE_PLUG_DB_STS_SHIFT) & CS42L43_JACK_PRESENT;
 	ring = (sts >> CS42L43_RINGSENSE_PLUG_DB_STS_SHIFT) & CS42L43_JACK_PRESENT;
 
-	if (tip == CS42L43_JACK_PRESENT) {
-		if (cs42l43->sdw && !priv->jack_present) {
-			priv->jack_present = true;
-			pm_runtime_get(priv->dev);
-		}
-
+	if (tip == CS42L43_JACK_PRESENT && priv->jack_state == CS42L43_JACK_RAW_NONE) {
 		if (priv->use_ring_sense && ring == CS42L43_JACK_ABSENT) {
 			report = CS42L43_JACK_OPTICAL;
+			priv->jack_state = CS42L43_JACK_RAW_OPTICAL;
 		} else {
 			report = cs42l43_run_type_detect(priv);
 			if (report < 0) {
@@ -770,19 +786,22 @@ void cs42l43_tip_sense_work(struct work_struct *work)
 				goto error;
 			}
 		}
+		if (cs42l43->sdw)
+			pm_runtime_get(priv->dev);
 
 		snd_soc_jack_report(priv->jack_hp, report, report);
-	} else {
+	} else if (tip != CS42L43_JACK_PRESENT && priv->jack_state != CS42L43_JACK_RAW_NONE) {
 		priv->jack_override = 0;
 
 		cs42l43_clear_jack(priv);
 
 		snd_soc_jack_report(priv->jack_hp, 0, 0xFFFF);
 
-		if (cs42l43->sdw && priv->jack_present) {
+		if (cs42l43->sdw)
 			pm_runtime_put(priv->dev);
-			priv->jack_present = false;
-		}
+		priv->jack_state = CS42L43_JACK_RAW_NONE;
+	} else if (priv->suspend_jack_debounce && priv->jack_state != CS42L43_JACK_RAW_NONE) {
+		cs42l43_force_jack(priv, priv->jack_state);
 	}
 
 error:
@@ -810,16 +829,6 @@ irqreturn_t cs42l43_tip_sense(int irq, void *data)
 
 	return IRQ_HANDLED;
 }
-
-enum cs42l43_raw_jack {
-	CS42L43_JACK_RAW_CTIA = 0,
-	CS42L43_JACK_RAW_OMTP,
-	CS42L43_JACK_RAW_HEADPHONE,
-	CS42L43_JACK_RAW_LINE_OUT,
-	CS42L43_JACK_RAW_LINE_IN,
-	CS42L43_JACK_RAW_MICROPHONE,
-	CS42L43_JACK_RAW_OPTICAL,
-};
 
 #define CS42L43_JACK_3_POLE_SWITCHES ((0x2 << CS42L43_HSDET_MANUAL_MODE_SHIFT) | \
 				      CS42L43_AMP3_4_GNDREF_HS3_SEL_MASK | \
@@ -906,7 +915,6 @@ int cs42l43_jack_put(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *u
 {
 	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
 	struct cs42l43_codec *priv = snd_soc_component_get_drvdata(component);
-	struct cs42l43 *cs42l43 = priv->core;
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
 	unsigned int override = ucontrol->value.integer.value[0];
 
@@ -936,46 +944,9 @@ int cs42l43_jack_put(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *u
 	} else {
 		override--;
 
-		regmap_update_bits(cs42l43->regmap, CS42L43_HS2,
-				   CS42L43_HSDET_MODE_MASK |
-				   CS42L43_HSDET_MANUAL_MODE_MASK |
-				   CS42L43_AMP3_4_GNDREF_HS3_SEL_MASK |
-				   CS42L43_AMP3_4_GNDREF_HS4_SEL_MASK |
-				   CS42L43_HSBIAS_GNDREF_HS3_SEL_MASK |
-				   CS42L43_HSBIAS_GNDREF_HS4_SEL_MASK |
-				   CS42L43_HSBIAS_OUT_HS3_SEL_MASK |
-				   CS42L43_HSBIAS_OUT_HS4_SEL_MASK |
-				   CS42L43_HSGND_HS3_SEL_MASK |
-				   CS42L43_HSGND_HS4_SEL_MASK,
-				   cs42l43_jack_override_modes[override].hsdet_mode);
-		regmap_update_bits(cs42l43->regmap, CS42L43_STEREO_MIC_CTRL,
-				   CS42L43_HS2_BIAS_EN_MASK | CS42L43_HS1_BIAS_EN_MASK |
-				   CS42L43_JACK_STEREO_CONFIG_MASK,
-				   cs42l43_jack_override_modes[override].mic_ctrl);
-		regmap_update_bits(cs42l43->regmap, CS42L43_STEREO_MIC_CLAMP_CTRL,
-				   CS42L43_SMIC_HPAMP_CLAMP_DIS_FRC_MASK,
-				   cs42l43_jack_override_modes[override].clamp_ctrl);
+		cs42l43_force_jack(priv, override);
 
-		switch (override) {
-		case CS42L43_JACK_RAW_CTIA:
-		case CS42L43_JACK_RAW_OMTP:
-			cs42l43_start_hs_bias(priv, false);
-			cs42l43_start_button_detect(priv);
-			break;
-		case CS42L43_JACK_RAW_LINE_IN:
-			regmap_update_bits(cs42l43->regmap, CS42L43_ADC_B_CTRL1,
-					   CS42L43_PGA_WIDESWING_MODE_EN_MASK,
-					   CS42L43_PGA_WIDESWING_MODE_EN_MASK);
-			regmap_update_bits(cs42l43->regmap, CS42L43_ADC_B_CTRL2,
-					   CS42L43_PGA_WIDESWING_MODE_EN_MASK,
-					   CS42L43_PGA_WIDESWING_MODE_EN_MASK);
-			break;
-		case CS42L43_JACK_RAW_MICROPHONE:
-			cs42l43_start_hs_bias(priv, false);
-			break;
-		default:
-			break;
-		}
+		priv->jack_state = override;
 
 		snd_soc_jack_report(priv->jack_hp,
 				    cs42l43_jack_override_modes[override].report,
@@ -985,4 +956,50 @@ int cs42l43_jack_put(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *u
 	mutex_unlock(&priv->jack_lock);
 
 	return 1;
+}
+
+static void cs42l43_force_jack(struct cs42l43_codec *priv, unsigned int override)
+{
+	struct cs42l43 *cs42l43 = priv->core;
+
+	regmap_update_bits(cs42l43->regmap, CS42L43_HS2,
+			   CS42L43_HSDET_MODE_MASK |
+			   CS42L43_HSDET_MANUAL_MODE_MASK |
+			   CS42L43_AMP3_4_GNDREF_HS3_SEL_MASK |
+			   CS42L43_AMP3_4_GNDREF_HS4_SEL_MASK |
+			   CS42L43_HSBIAS_GNDREF_HS3_SEL_MASK |
+			   CS42L43_HSBIAS_GNDREF_HS4_SEL_MASK |
+			   CS42L43_HSBIAS_OUT_HS3_SEL_MASK |
+			   CS42L43_HSBIAS_OUT_HS4_SEL_MASK |
+			   CS42L43_HSGND_HS3_SEL_MASK |
+			   CS42L43_HSGND_HS4_SEL_MASK,
+			   cs42l43_jack_override_modes[override].hsdet_mode);
+	regmap_update_bits(cs42l43->regmap, CS42L43_STEREO_MIC_CTRL,
+			   CS42L43_HS2_BIAS_EN_MASK | CS42L43_HS1_BIAS_EN_MASK |
+			   CS42L43_JACK_STEREO_CONFIG_MASK,
+			   cs42l43_jack_override_modes[override].mic_ctrl);
+	regmap_update_bits(cs42l43->regmap, CS42L43_STEREO_MIC_CLAMP_CTRL,
+			   CS42L43_SMIC_HPAMP_CLAMP_DIS_FRC_MASK,
+			   cs42l43_jack_override_modes[override].clamp_ctrl);
+
+	switch (override) {
+	case CS42L43_JACK_RAW_CTIA:
+	case CS42L43_JACK_RAW_OMTP:
+		cs42l43_start_hs_bias(priv, false);
+		cs42l43_start_button_detect(priv);
+		break;
+	case CS42L43_JACK_RAW_LINE_IN:
+		regmap_update_bits(cs42l43->regmap, CS42L43_ADC_B_CTRL1,
+				   CS42L43_PGA_WIDESWING_MODE_EN_MASK,
+				   CS42L43_PGA_WIDESWING_MODE_EN_MASK);
+		regmap_update_bits(cs42l43->regmap, CS42L43_ADC_B_CTRL2,
+				   CS42L43_PGA_WIDESWING_MODE_EN_MASK,
+				   CS42L43_PGA_WIDESWING_MODE_EN_MASK);
+		break;
+	case CS42L43_JACK_RAW_MICROPHONE:
+		cs42l43_start_hs_bias(priv, false);
+		break;
+	default:
+		break;
+	}
 }
