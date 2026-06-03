@@ -14,6 +14,7 @@
 #include <sound/soc-acpi-intel-match.h>
 #include <sound/sof.h>
 #include "../ops.h"
+#include "../sof-client.h"
 #include "atom.h"
 #include "../sof-pci-dev.h"
 #include "../sof-audio.h"
@@ -182,6 +183,10 @@ const struct snd_sof_dsp_ops sof_tng_ops = {
 	.machine_unregister = sof_machine_unregister,
 	.set_mach_params = atom_set_mach_params,
 
+	/* audio client */
+	.register_audio_client = sof_register_audio_client,
+	.unregister_audio_client = sof_unregister_audio_client,
+
 	/* debug */
 	.debug_map	= tng_debugfs,
 	.debug_map_count	= ARRAY_SIZE(tng_debugfs),
@@ -245,6 +250,7 @@ module_pci_driver(snd_sof_pci_intel_tng_driver);
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("SOF support for Tangier platforms");
+MODULE_IMPORT_NS("SND_SOC_SOF_CLIENT");
 MODULE_IMPORT_NS("SND_SOC_SOF_XTENSA");
 MODULE_IMPORT_NS("SND_SOC_SOF_PCI_DEV");
 MODULE_IMPORT_NS("SND_SOC_SOF_INTEL_ATOM_HIFI_EP");

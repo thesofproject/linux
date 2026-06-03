@@ -12,6 +12,7 @@
 #include <sound/sof/xtensa.h>
 
 #include "../ops.h"
+#include "../sof-client.h"
 
 #include "imx-common.h"
 
@@ -455,6 +456,10 @@ const struct snd_sof_dsp_ops sof_imx_ops = {
 	.get_bar_index = imx_get_bar_index,
 	.load_firmware = snd_sof_load_firmware_memcpy,
 
+	/* audio client */
+	.register_audio_client = sof_register_audio_client,
+	.unregister_audio_client = sof_unregister_audio_client,
+
 	.debugfs_add_region_item = snd_sof_debugfs_add_region_item_iomem,
 
 	.runtime_suspend = imx_runtime_suspend,
@@ -468,3 +473,4 @@ EXPORT_SYMBOL(sof_imx_ops);
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("SOF helpers for IMX platforms");
+MODULE_IMPORT_NS("SND_SOC_SOF_CLIENT");

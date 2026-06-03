@@ -12,6 +12,7 @@
 
 #include "../sof-priv.h"
 #include "../sof-audio.h"
+#include "../sof-client.h"
 #include "../ops.h"
 #include "acp.h"
 #include "acp-dsp-offset.h"
@@ -230,6 +231,10 @@ const struct snd_sof_dsp_ops sof_acp_common_ops = {
 	.machine_register	= sof_machine_register,
 	.machine_unregister	= sof_machine_unregister,
 
+	/* audio client */
+	.register_audio_client	= sof_register_audio_client,
+	.unregister_audio_client = sof_unregister_audio_client,
+
 	/* Trace Logger */
 	.trace_init		= acp_sof_trace_init,
 	.trace_release		= acp_sof_trace_release,
@@ -252,5 +257,6 @@ EXPORT_SYMBOL_NS(sof_acp_common_ops, "SND_SOC_SOF_AMD_COMMON");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("ACP SOF COMMON Driver");
 MODULE_IMPORT_NS("SND_SOC_SOF_AMD_COMMON");
+MODULE_IMPORT_NS("SND_SOC_SOF_CLIENT");
 MODULE_IMPORT_NS("SND_SOC_SOF_XTENSA");
 MODULE_IMPORT_NS("SOUNDWIRE_AMD_INIT");

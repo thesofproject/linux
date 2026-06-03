@@ -20,6 +20,7 @@
 #include <sound/sof.h>
 #include <sound/sof/xtensa.h>
 #include "../../ops.h"
+#include "../../sof-client.h"
 #include "../../sof-of-dev.h"
 #include "../adsp_helper.h"
 #include "../mtk-adsp-common.h"
@@ -455,6 +456,10 @@ static const struct snd_sof_dsp_ops sof_mt8195_ops = {
 	/* firmware loading */
 	.load_firmware	= snd_sof_load_firmware_memcpy,
 
+	/* audio client */
+	.register_audio_client = sof_register_audio_client,
+	.unregister_audio_client = sof_unregister_audio_client,
+
 	/* Firmware ops */
 	.dsp_arch_ops = &sof_xtensa_arch_ops,
 
@@ -522,5 +527,6 @@ module_platform_driver(snd_sof_of_mt8195_driver);
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("SOF support for MTL 8195 platforms");
+MODULE_IMPORT_NS("SND_SOC_SOF_CLIENT");
 MODULE_IMPORT_NS("SND_SOC_SOF_XTENSA");
 MODULE_IMPORT_NS("SND_SOC_SOF_MTK_COMMON");

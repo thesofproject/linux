@@ -397,6 +397,10 @@ struct snd_sof_dsp_ops {
 	int (*register_ipc_clients)(struct snd_sof_dev *sdev); /* optional */
 	void (*unregister_ipc_clients)(struct snd_sof_dev *sdev); /* optional */
 
+	/* audio client ops */
+	int (*register_audio_client)(struct snd_sof_dev *sdev); /* mandatory */
+	void (*unregister_audio_client)(struct snd_sof_dev *sdev); /* mandatory */
+
 	/* DAI ops */
 	bool (*is_chain_dma_supported)(struct snd_sof_dev *sdev, u32 dai_type); /* optional */
 
@@ -603,12 +607,6 @@ struct snd_sof_dev {
 
 	/* Main, Base firmware image */
 	struct sof_firmware basefw;
-
-	/*
-	 * ASoC components. plat_drv fields are set dynamically so
-	 * can't use const
-	 */
-	struct snd_soc_component_driver plat_drv;
 
 	/* current DSP power state */
 	struct sof_dsp_power_state dsp_power_state;

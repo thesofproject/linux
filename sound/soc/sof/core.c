@@ -14,7 +14,6 @@
 #include <sound/sof.h>
 #include "sof-priv.h"
 #include "sof-of-dev.h"
-#include "sof-client-audio.h"
 #include "ops.h"
 
 #define CREATE_TRACE_POINTS
@@ -473,9 +472,6 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	if (sdev->dspless_mode_selected) {
 		sof_set_fw_state(sdev, SOF_DSPLESS_MODE);
 
-		/* set up platform component driver */
-		snd_sof_new_platform_drv(sdev, &sdev->plat_drv);
-
 		goto skip_dsp_init;
 	}
 
@@ -499,9 +495,6 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 		dev_err(sdev->dev, "error: failed to init DSP IPC %d\n", ret);
 		goto ipc_err;
 	}
-
-	/* set up platform component driver after initializing the IPC ops */
-	snd_sof_new_platform_drv(sdev, &sdev->plat_drv);
 
 	/*
 	 * skip loading/booting firmware and registering the machine driver when DSP OPS testing
@@ -555,28 +548,10 @@ skip_dsp_init:
 	/* hereafter all FW boot flows are for PM reasons */
 	sdev->first_boot = false;
 
-	/* Register audio client device */
-	{
-		struct sof_audio_client_pdata audio_pdata = {
-			.plat_drv = sdev->plat_drv,
-			.drv = sdev->audio_ops->drv,
-			.num_drv = sdev->audio_ops->num_drv,
-		};
-
-		ret = sof_client_dev_register(sdev, "audio", 0,
-					      &audio_pdata,
-					      sizeof(audio_pdata));
-	}
-	if (ret < 0) {
-		dev_err(sdev->dev,
-			"error: failed to register audio client %d\n", ret);
-		goto fw_trace_err;
-	}
-
 	ret = sof_register_clients(sdev);
 	if (ret < 0) {
 		dev_err(sdev->dev, "failed to register clients %d\n", ret);
-		goto audio_client_err;
+		goto fw_trace_err;
 	}
 
 	/*
@@ -594,8 +569,6 @@ skip_dsp_init:
 
 	return 0;
 
-audio_client_err:
-	sof_client_dev_unregister(sdev, "audio", 0);
 fw_trace_err:
 	sof_fw_trace_free(sdev);
 fw_run_err:
@@ -759,13 +732,6 @@ int snd_sof_device_remove(struct device *dev)
 	 * to allow client drivers to be removed cleanly
 	 */
 	sof_unregister_clients(sdev);
-
-	/*
-	 * Unregister audio client device. This will unregister the machine
-	 * driver and the ASoC component, which will unbind the snd_card,
-	 * unload the topology and free the snd_card.
-	 */
-	sof_client_dev_unregister(sdev, "audio", 0);
 
 	/*
 	 * Balance the runtime pm usage count in case we are faced with an

@@ -15,6 +15,7 @@
 #include <sound/sof/ipc4/header.h>
 #include "ops.h"
 #include "sof-client.h"
+#include "sof-client-audio.h"
 #include "sof-priv.h"
 #include "ipc3-priv.h"
 #include "ipc4-priv.h"
@@ -164,6 +165,16 @@ int sof_register_clients(struct snd_sof_dev *sdev)
 {
 	int ret;
 
+	/* Register audio client (needed in dspless mode too) */
+	if (sof_ops(sdev) && sof_ops(sdev)->register_audio_client) {
+		ret = sof_ops(sdev)->register_audio_client(sdev);
+		if (ret < 0) {
+			dev_err(sdev->dev,
+				"audio client registration failed: %d\n", ret);
+			return ret;
+		}
+	}
+
 	if (sdev->dspless_mode_selected)
 		return 0;
 
@@ -171,7 +182,7 @@ int sof_register_clients(struct snd_sof_dev *sdev)
 	ret = sof_register_ipc_flood_test(sdev);
 	if (ret) {
 		dev_err(sdev->dev, "IPC flood test client registration failed\n");
-		return ret;
+		goto err_audio;
 	}
 
 	ret = sof_register_ipc_msg_injector(sdev);
@@ -211,6 +222,10 @@ err_kernel_injector:
 err_msg_injector:
 	sof_unregister_ipc_flood_test(sdev);
 
+err_audio:
+	if (sof_ops(sdev) && sof_ops(sdev)->unregister_audio_client)
+		sof_ops(sdev)->unregister_audio_client(sdev);
+
 	return ret;
 }
 
@@ -223,6 +238,10 @@ void sof_unregister_clients(struct snd_sof_dev *sdev)
 	sof_unregister_ipc_msg_injector(sdev);
 	sof_unregister_ipc_flood_test(sdev);
 	sof_unregister_fw_gdb(sdev);
+
+	/* Audio client last (reverse of registration order) */
+	if (sof_ops(sdev) && sof_ops(sdev)->unregister_audio_client)
+		sof_ops(sdev)->unregister_audio_client(sdev);
 }
 
 int sof_client_dev_register(struct snd_sof_dev *sdev, const char *name, u32 id,
@@ -806,7 +825,42 @@ EXPORT_SYMBOL_NS_GPL(sof_client_machine_register, "SND_SOC_SOF_CLIENT");
 void sof_client_machine_unregister(struct sof_client_dev *cdev)
 {
 	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+	struct platform_device *pdev = cdev->data;
+
+	if (pdev) {
+		platform_device_unregister(pdev);
+		return;
+	}
 
 	snd_sof_machine_unregister(sdev, sdev->pdata);
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_machine_unregister, "SND_SOC_SOF_CLIENT");
+
+void sof_audio_client_init_pdata(struct snd_sof_dev *sdev,
+				 struct sof_audio_client_pdata *pdata)
+{
+	void *plat_drv = (void *)&pdata->plat_drv;
+
+	memset(pdata, 0, sizeof(*pdata));
+	snd_sof_new_platform_drv(sdev, plat_drv);
+	pdata->drv = sdev->audio_ops->drv;
+	pdata->num_drv = sdev->audio_ops->num_drv;
+}
+EXPORT_SYMBOL_NS_GPL(sof_audio_client_init_pdata, "SND_SOC_SOF_CLIENT");
+
+int sof_register_audio_client(struct snd_sof_dev *sdev)
+{
+	struct sof_audio_client_pdata pdata;
+
+	sof_audio_client_init_pdata(sdev, &pdata);
+
+	return sof_client_dev_register(sdev, "audio", 0,
+				       &pdata, sizeof(pdata));
+}
+EXPORT_SYMBOL_NS_GPL(sof_register_audio_client, "SND_SOC_SOF_CLIENT");
+
+void sof_unregister_audio_client(struct snd_sof_dev *sdev)
+{
+	sof_client_dev_unregister(sdev, "audio", 0);
+}
+EXPORT_SYMBOL_NS_GPL(sof_unregister_audio_client, "SND_SOC_SOF_CLIENT");

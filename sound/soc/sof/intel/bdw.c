@@ -19,6 +19,7 @@
 #include <sound/soc-acpi-intel-match.h>
 #include <sound/intel-dsp-config.h>
 #include "../ops.h"
+#include "../sof-client.h"
 #include "shim.h"
 #include "../sof-acpi-dev.h"
 #include "../sof-audio.h"
@@ -607,6 +608,10 @@ static const struct snd_sof_dsp_ops sof_bdw_ops = {
 	.machine_unregister = sof_machine_unregister,
 	.set_mach_params = bdw_set_mach_params,
 
+	/* audio client */
+	.register_audio_client = sof_register_audio_client,
+	.unregister_audio_client = sof_unregister_audio_client,
+
 	/* debug */
 	.debug_map  = bdw_debugfs,
 	.debug_map_count    = ARRAY_SIZE(bdw_debugfs),
@@ -689,5 +694,6 @@ module_platform_driver(snd_sof_acpi_intel_bdw_driver);
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("SOF support for Broadwell platforms");
+MODULE_IMPORT_NS("SND_SOC_SOF_CLIENT");
 MODULE_IMPORT_NS("SND_SOC_SOF_XTENSA");
 MODULE_IMPORT_NS("SND_SOC_SOF_ACPI_DEV");

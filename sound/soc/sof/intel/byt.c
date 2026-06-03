@@ -19,6 +19,7 @@
 #include <sound/soc-acpi-intel-match.h>
 #include <sound/intel-dsp-config.h>
 #include "../ops.h"
+#include "../sof-client.h"
 #include "atom.h"
 #include "shim.h"
 #include "../sof-acpi-dev.h"
@@ -264,6 +265,10 @@ static const struct snd_sof_dsp_ops sof_byt_ops = {
 	.machine_unregister = sof_machine_unregister,
 	.set_mach_params = atom_set_mach_params,
 
+	/* audio client */
+	.register_audio_client = sof_register_audio_client,
+	.unregister_audio_client = sof_unregister_audio_client,
+
 	/* debug */
 	.debug_map	= byt_debugfs,
 	.debug_map_count	= ARRAY_SIZE(byt_debugfs),
@@ -337,6 +342,10 @@ static const struct snd_sof_dsp_ops sof_cht_ops = {
 	.machine_register = sof_machine_register,
 	.machine_unregister = sof_machine_unregister,
 	.set_mach_params = atom_set_mach_params,
+
+	/* audio client */
+	.register_audio_client = sof_register_audio_client,
+	.unregister_audio_client = sof_unregister_audio_client,
 
 	/* debug */
 	.debug_map	= cht_debugfs,
@@ -475,6 +484,7 @@ module_platform_driver(snd_sof_acpi_intel_byt_driver);
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("SOF support for Baytrail/Cherrytrail");
+MODULE_IMPORT_NS("SND_SOC_SOF_CLIENT");
 MODULE_IMPORT_NS("SND_SOC_SOF_XTENSA");
 MODULE_IMPORT_NS("SND_SOC_SOF_ACPI_DEV");
 MODULE_IMPORT_NS("SND_SOC_SOF_INTEL_ATOM_HIFI_EP");
