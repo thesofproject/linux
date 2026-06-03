@@ -794,3 +794,19 @@ u32 sof_client_get_new_comp_id(struct sof_client_dev *cdev)
 	return atomic_fetch_inc(&sdev->next_comp_id);
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_get_new_comp_id, "SND_SOC_SOF_CLIENT");
+
+int sof_client_machine_register(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	return snd_sof_machine_register(sdev, sdev->pdata);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_machine_register, "SND_SOC_SOF_CLIENT");
+
+void sof_client_machine_unregister(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	snd_sof_machine_unregister(sdev, sdev->pdata);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_machine_unregister, "SND_SOC_SOF_CLIENT");

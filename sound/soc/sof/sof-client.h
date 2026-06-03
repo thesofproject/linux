@@ -138,4 +138,8 @@ int sof_client_get_num_cores(struct sof_client_dev *cdev);
 struct sof_ipc4_fw_data *sof_client_get_ipc4_fw_data(struct sof_client_dev *cdev);
 u32 sof_client_get_new_comp_id(struct sof_client_dev *cdev);
 
+/* machine driver registration */
+int sof_client_machine_register(struct sof_client_dev *cdev);
+void sof_client_machine_unregister(struct sof_client_dev *cdev);
+
 #endif /* __SOC_SOF_CLIENT_H */
