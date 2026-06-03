@@ -650,3 +650,19 @@ struct snd_sof_mailbox *sof_client_get_mailbox(struct sof_client_dev *cdev,
 	}
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_get_mailbox, "SND_SOC_SOF_CLIENT");
+
+bool sof_client_is_dspless(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	return sdev->dspless_mode_selected;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_is_dspless, "SND_SOC_SOF_CLIENT");
+
+int sof_client_get_num_cores(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	return sdev->num_cores;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_get_num_cores, "SND_SOC_SOF_CLIENT");
