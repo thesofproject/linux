@@ -461,6 +461,8 @@
   __tracepoint_android_rvh_panic_unhandled
   __tracepoint_android_vh_sk_free
   __tracepoint_task_newtask
+  _trace_android_vh_pcpu_rwsem_lock_acquired
+  _trace_android_vh_pcpu_rwsem_lock_released
   filp_open_block
   flush_signals
   jiffies64_to_msecs
