@@ -2123,8 +2123,17 @@ static void __init cpu_prepare_hyp_mode(int cpu, u32 hyp_va_bits)
 	if (cpus_have_final_cap(ARM64_KVM_HVHE))
 		params->hcr_el2 |= HCR_E2H;
 	params->vttbr = params->vtcr = 0;
+	/*
+	 * Software mirror of HFGWTR_EL2: ___kvm_hyp_init() writes this over
+	 * the value set by __init_el2_fgt() (el2_setup.h), so every
+	 * trap-disable bit set there must be replicated here. nPOR_EL1 /
+	 * nS2POR_EL1 are a deliberate superset of that baseline.
+	 */
 	params->hfgwtr_el2 = HFGWTR_EL2_nSMPRI_EL1_MASK | HFGWTR_EL2_nTPIDR2_EL0_MASK |
-			     HFGWTR_EL2_nGCS_EL0_MASK | HFGWTR_EL2_nGCS_EL1_MASK;
+			     HFGWTR_EL2_nGCS_EL0_MASK | HFGWTR_EL2_nGCS_EL1_MASK |
+			     HFGWTR_EL2_nPIR_EL1_MASK | HFGWTR_EL2_nPIRE0_EL1_MASK |
+			     HFGWTR_EL2_nPOR_EL1_MASK | HFGWTR_EL2_nPOR_EL0_MASK |
+			     HFGWTR_EL2_nS2POR_EL1_MASK;
 
 	/*
 	 * Flush the init params from the data cache because the struct will
