@@ -155,6 +155,8 @@
   __tracepoint_android_vh_do_group_exit
   __traceiter_android_vh_mark_folio_accessed
   __tracepoint_android_vh_mark_folio_accessed
+  __tracepoint_android_vh_do_shrink_slab
+  __traceiter_android_vh_do_shrink_slab
 
 # required by custom memory policy
   __tracepoint_android_vh_mm_get_zone_mark
