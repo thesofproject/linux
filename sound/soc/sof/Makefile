@@ -28,6 +28,7 @@ snd-sof-of-y := sof-of-dev.o
 snd-sof-ipc-flood-test-y := sof-client-ipc-flood-test.o
 snd-sof-ipc-msg-injector-y := sof-client-ipc-msg-injector.o
 snd-sof-ipc-kernel-injector-y := sof-client-ipc-kernel-injector.o
+snd-sof-audio-y := sof-client-audio.o
 snd-sof-probes-y := sof-client-probes.o
 ifneq ($(CONFIG_SND_SOC_SOF_IPC3),)
 snd-sof-probes-y += sof-client-probes-ipc3.o
@@ -42,6 +43,7 @@ snd-sof-nocodec-y := nocodec.o
 snd-sof-utils-y := sof-utils.o
 
 obj-$(CONFIG_SND_SOC_SOF) += snd-sof.o
+obj-$(CONFIG_SND_SOC_SOF) += snd-sof-audio.o
 obj-$(CONFIG_SND_SOC_SOF_NOCODEC) += snd-sof-nocodec.o
 
 obj-$(CONFIG_SND_SOC_SOF) += snd-sof-utils.o

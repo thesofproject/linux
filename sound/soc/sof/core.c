@@ -14,6 +14,7 @@
 #include <sound/sof.h>
 #include "sof-priv.h"
 #include "sof-of-dev.h"
+#include "sof-client-audio.h"
 #include "ops.h"
 
 #define CREATE_TRACE_POINTS
@@ -554,27 +555,28 @@ skip_dsp_init:
 	/* hereafter all FW boot flows are for PM reasons */
 	sdev->first_boot = false;
 
-	/* now register audio DSP platform driver and dai */
-	ret = devm_snd_soc_register_component(sdev->dev, &sdev->plat_drv,
-					      sdev->audio_ops->drv,
-					      sdev->audio_ops->num_drv);
-	if (ret < 0) {
-		dev_err(sdev->dev,
-			"error: failed to register DSP DAI driver %d\n", ret);
-		goto fw_trace_err;
-	}
+	/* Register audio client device */
+	{
+		struct sof_audio_client_pdata audio_pdata = {
+			.plat_drv = sdev->plat_drv,
+			.drv = sdev->audio_ops->drv,
+			.num_drv = sdev->audio_ops->num_drv,
+		};
 
-	ret = snd_sof_machine_register(sdev, plat_data);
+		ret = sof_client_dev_register(sdev, "audio", 0,
+					      &audio_pdata,
+					      sizeof(audio_pdata));
+	}
 	if (ret < 0) {
 		dev_err(sdev->dev,
-			"error: failed to register machine driver %d\n", ret);
+			"error: failed to register audio client %d\n", ret);
 		goto fw_trace_err;
 	}
 
 	ret = sof_register_clients(sdev);
 	if (ret < 0) {
 		dev_err(sdev->dev, "failed to register clients %d\n", ret);
-		goto sof_machine_err;
+		goto audio_client_err;
 	}
 
 	/*
@@ -592,8 +594,8 @@ skip_dsp_init:
 
 	return 0;
 
-sof_machine_err:
-	snd_sof_machine_unregister(sdev, plat_data);
+audio_client_err:
+	sof_client_dev_unregister(sdev, "audio", 0);
 fw_trace_err:
 	sof_fw_trace_free(sdev);
 fw_run_err:
@@ -746,7 +748,6 @@ EXPORT_SYMBOL(snd_sof_device_probe_completed);
 int snd_sof_device_remove(struct device *dev)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
-	struct snd_sof_pdata *pdata = sdev->pdata;
 	int ret;
 	bool aborted = false;
 
@@ -760,11 +761,11 @@ int snd_sof_device_remove(struct device *dev)
 	sof_unregister_clients(sdev);
 
 	/*
-	 * Unregister machine driver. This will unbind the snd_card which
-	 * will remove the component driver and unload the topology
-	 * before freeing the snd_card.
+	 * Unregister audio client device. This will unregister the machine
+	 * driver and the ASoC component, which will unbind the snd_card,
+	 * unload the topology and free the snd_card.
 	 */
-	snd_sof_machine_unregister(sdev, pdata);
+	sof_client_dev_unregister(sdev, "audio", 0);
 
 	/*
 	 * Balance the runtime pm usage count in case we are faced with an
