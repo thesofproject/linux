@@ -17,6 +17,8 @@
 #include "sof-of-dev.h"
 #include "sof-priv.h"
 #include "sof-audio.h"
+#include "sof-client.h"
+#include "sof-client-audio.h"
 #include "sof-utils.h"
 #include "ops.h"
 
@@ -549,6 +551,7 @@ static int sof_pcm_open(struct snd_soc_component *component,
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct snd_pcm_runtime *runtime = substream->runtime;
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(component);
 	struct snd_sof_audio_instance *ins =
 		snd_sof_component_get_audio_instance(component);
 	struct snd_sof_pcm *spcm;
@@ -558,6 +561,10 @@ static int sof_pcm_open(struct snd_soc_component *component,
 	/* nothing to do for BE */
 	if (rtd->dai_link->no_pcm)
 		return 0;
+
+	ret = sof_client_core_module_get(cdev);
+	if (ret)
+		return ret;
 
 	spcm = snd_sof_find_spcm_dai(component, rtd);
 	if (!spcm)
@@ -595,6 +602,7 @@ static int sof_pcm_open(struct snd_soc_component *component,
 	if (ret < 0) {
 		spcm_err(spcm, substream->stream,
 			 "platform pcm open failed %d\n", ret);
+		sof_client_core_module_put(cdev);
 		return ret;
 	}
 
@@ -611,6 +619,7 @@ static int sof_pcm_close(struct snd_soc_component *component,
 			 struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(component);
 	struct snd_sof_pcm *spcm;
 	int err;
 
@@ -635,6 +644,8 @@ static int sof_pcm_close(struct snd_soc_component *component,
 	}
 
 	spcm->stream[substream->stream].substream = NULL;
+
+	sof_client_core_module_put(cdev);
 
 	return 0;
 }
@@ -767,9 +778,12 @@ EXPORT_SYMBOL(sof_pcm_dai_link_fixup);
 
 static int sof_pcm_probe(struct snd_soc_component *component)
 {
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(component);
+	struct sof_audio_client_pdata *audio_pdata = dev_get_platdata(&cdev->auxdev.dev);
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
 	struct snd_sof_pdata *plat_data = sdev->pdata;
 	struct snd_sof_audio_instance *instance;
+	bool got_runtime_pm;
 	const char *tplg_filename;
 	int ret;
 
@@ -786,11 +800,14 @@ static int sof_pcm_probe(struct snd_soc_component *component)
 		snd_sof_audio_instance_unregister(instance);
 		return ret;
 	}
+	got_runtime_pm = ret >= 0;
 
 	/* load the default topology */
 	tplg_filename = devm_kasprintf(component->dev, GFP_KERNEL,
 				       "%s/%s",
 				       plat_data->tplg_filename_prefix,
+				       audio_pdata->machine.sof_tplg_filename ?
+				       audio_pdata->machine.sof_tplg_filename :
 				       plat_data->tplg_filename);
 	if (!tplg_filename) {
 		ret = -ENOMEM;
@@ -803,9 +820,21 @@ static int sof_pcm_probe(struct snd_soc_component *component)
 			ret);
 
 out:
-	if (ret)
+	if (ret) {
+		/*
+		 * Remove topology objects to prevent dangling references.
+		 * When sof_complete() or a late topology file fails, DAIs from
+		 * previously successful loads remain on the component's DAI
+		 * list. Their driver structs are allocated under the card
+		 * device (tplg->dev) which gets freed by devres when mc_probe
+		 * fails, leaving dangling driver pointers. Subsequent card
+		 * binding would crash iterating these DAIs.
+		 */
+		snd_soc_tplg_component_remove(component);
 		snd_sof_audio_instance_unregister(instance);
-	pm_runtime_put_autosuspend(component->dev);
+	}
+	if (got_runtime_pm)
+		pm_runtime_put_autosuspend(component->dev);
 
 	return ret;
 }

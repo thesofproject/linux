@@ -636,10 +636,16 @@ snd_sof_find_swidget_sname(struct snd_soc_component *scomp,
 struct snd_sof_dai *snd_sof_find_dai(struct snd_soc_component *scomp,
 				     const char *name);
 
+static inline struct sof_client_dev *
+snd_sof_component_get_cdev(struct snd_soc_component *scomp)
+{
+	return snd_soc_component_get_drvdata(scomp);
+}
+
 static inline struct snd_sof_dev *
 snd_sof_component_get_sdev(struct snd_soc_component *scomp)
 {
-	return snd_soc_component_get_drvdata(scomp);
+	return sof_client_dev_to_sof_dev(snd_sof_component_get_cdev(scomp));
 }
 
 struct snd_sof_audio_instance *

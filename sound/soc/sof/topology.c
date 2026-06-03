@@ -17,6 +17,8 @@
 #include <uapi/sound/sof/tokens.h>
 #include "sof-priv.h"
 #include "sof-audio.h"
+#include "sof-client.h"
+#include "sof-client-audio.h"
 #include "ops.h"
 
 static bool disable_function_topology;
@@ -2552,8 +2554,12 @@ static const struct snd_soc_tplg_ops sof_dspless_tplg_ops = {
 int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 {
 	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(scomp);
+	struct sof_audio_client_pdata *audio_pdata = dev_get_platdata(&cdev->auxdev.dev);
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
 	struct snd_sof_pdata *sof_pdata = sdev->pdata;
+	const struct snd_soc_acpi_mach *mach = audio_pdata->machine.drv_name ?
+					 &audio_pdata->machine : sof_pdata->machine;
 	const char *tplg_filename_prefix = sof_pdata->tplg_filename_prefix;
 	const struct firmware *fw;
 	const char **tplg_files;
@@ -2567,7 +2573,7 @@ int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 
 	/* Try to use function topologies if possible */
 	if (!sof_pdata->disable_function_topology && !disable_function_topology &&
-	    sof_pdata->machine && sof_pdata->machine->get_function_tplg_files) {
+	    mach && mach->get_function_tplg_files) {
 		/*
 		 * When the topology name contains 'dummy' word, it means that
 		 * there is no fallback option to monolithic topology in case
@@ -2582,11 +2588,11 @@ int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 		 */
 		bool no_fallback = strstr(file, "dummy");
 
-		tplg_cnt = sof_pdata->machine->get_function_tplg_files(scomp->card,
-								       sof_pdata->machine,
-								       tplg_filename_prefix,
-								       &tplg_files,
-								       no_fallback);
+		tplg_cnt = mach->get_function_tplg_files(scomp->card,
+							 mach,
+							 tplg_filename_prefix,
+							 &tplg_files,
+							 no_fallback);
 		if (tplg_cnt < 0) {
 			kfree(tplg_files);
 			return tplg_cnt;
