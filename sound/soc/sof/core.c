@@ -473,7 +473,7 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 		sof_set_fw_state(sdev, SOF_DSPLESS_MODE);
 
 		/* set up platform component driver */
-		snd_sof_new_platform_drv(sdev);
+		snd_sof_new_platform_drv(sdev, &sdev->plat_drv);
 
 		goto skip_dsp_init;
 	}
@@ -500,7 +500,7 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	}
 
 	/* set up platform component driver after initializing the IPC ops */
-	snd_sof_new_platform_drv(sdev);
+	snd_sof_new_platform_drv(sdev, &sdev->plat_drv);
 
 	/*
 	 * skip loading/booting firmware and registering the machine driver when DSP OPS testing

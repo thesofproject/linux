@@ -838,9 +838,9 @@ static snd_pcm_sframes_t sof_pcm_delay(struct snd_soc_component *component,
 	return 0;
 }
 
-void snd_sof_new_platform_drv(struct snd_sof_dev *sdev)
+void snd_sof_new_platform_drv(struct snd_sof_dev *sdev,
+			      struct snd_soc_component_driver * const pd)
 {
-	struct snd_soc_component_driver *pd = &sdev->plat_drv;
 	struct snd_sof_pdata *plat_data = sdev->pdata;
 	const struct sof_ipc_pcm_ops *pcm_ops = NULL;
 	const char *drv_name;
