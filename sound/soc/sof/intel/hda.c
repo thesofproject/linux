@@ -31,6 +31,8 @@
 #include <sound/sof/xtensa.h>
 #include <sound/hda-mlink.h>
 #include "../sof-audio.h"
+#include "../sof-client.h"
+#include "../sof-client-audio.h"
 #include "../sof-pci-dev.h"
 #include "../ops.h"
 #include "../ipc4-topology.h"
@@ -1766,6 +1768,241 @@ int hda_pci_intel_probe(struct pci_dev *pci, const struct pci_device_id *pci_id)
 	return sof_pci_probe(pci, pci_id);
 }
 EXPORT_SYMBOL_NS(hda_pci_intel_probe, "SND_SOC_SOF_INTEL_HDA_GENERIC");
+
+static bool multi_card;
+module_param(multi_card, bool, 0444);
+MODULE_PARM_DESC(multi_card, "Split audio into per-function cards. Experimental.");
+
+struct hda_sdw_func_card {
+	u32 dai_type_bit;
+	const char *card_name;
+};
+
+static const struct hda_sdw_func_card sdw_func_cards[] = {
+	{ BIT(SOC_SDW_DAI_TYPE_JACK), "jack" },
+	{ BIT(SOC_SDW_DAI_TYPE_AMP),  "speaker" },
+	{ BIT(SOC_SDW_DAI_TYPE_MIC),  "mic" },
+};
+
+/*
+ * Group SDW DAI types that share physical codec devices. Types on the
+ * same device must be on the same card because ASoC components can only
+ * be bound to one card.
+ *
+ * Returns the number of groups. Each group's merged DAI type bitmask
+ * is stored in groups[] and the representative codec name in names[].
+ */
+static int hda_sdw_group_dai_types(const struct snd_soc_acpi_mach *mach,
+				   u32 *groups, const char **names,
+				   int max_groups)
+{
+	const struct snd_soc_acpi_link_adr *adr_link;
+	int num_groups = 0;
+	int i, j, k;
+
+	for (adr_link = mach->mach_params.links;
+	     adr_link && adr_link->num_adr; adr_link++) {
+		for (i = 0; i < adr_link->num_adr; i++) {
+			const struct snd_soc_acpi_adr_device *adr_dev =
+							&adr_link->adr_d[i];
+			struct asoc_sdw_codec_info *codec_info;
+			const char *dev_name = NULL;
+			u32 dev_types = 0;
+			int merged = -1;
+
+			codec_info = asoc_sdw_find_codec_info_part(adr_dev->adr);
+			if (!codec_info)
+				continue;
+
+			for (j = 0; j < adr_dev->num_endpoints; j++) {
+				int ep_num = adr_dev->endpoints[j].num;
+
+				if (ep_num < codec_info->dai_num)
+					dev_types |=
+					    BIT(codec_info->dais[ep_num].dai_type);
+			}
+
+			if (!dev_types)
+				continue;
+
+			/*
+			 * Pick a representative codec name: prefer
+			 * name_prefix for non-amp codecs, fall back to
+			 * the first DAI's component_name for amps.
+			 */
+			if (!codec_info->is_amp)
+				dev_name = codec_info->name_prefix;
+			else if (codec_info->dai_num &&
+				 codec_info->dais[0].component_name)
+				dev_name = codec_info->dais[0].component_name;
+
+			/* Merge with any existing group that overlaps */
+			for (k = 0; k < num_groups; k++) {
+				if (!(groups[k] & dev_types))
+					continue;
+
+				if (merged < 0) {
+					groups[k] |= dev_types;
+					if (dev_name)
+						names[k] = dev_name;
+					merged = k;
+				} else {
+					groups[merged] |= groups[k];
+					groups[k] = groups[--num_groups];
+					names[k] = names[num_groups];
+					k--;
+				}
+			}
+
+			if (merged < 0 && num_groups < max_groups) {
+				groups[num_groups] = dev_types;
+				names[num_groups] = dev_name;
+				num_groups++;
+			}
+		}
+	}
+
+	return num_groups;
+}
+
+static int hda_register_audio_client_multi(struct snd_sof_dev *sdev)
+{
+	static const struct snd_soc_acpi_link_adr empty_links[] = { {} };
+	const struct snd_soc_acpi_mach *mach = sdev->pdata->machine;
+	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+	struct sof_audio_client_pdata pdata;
+	u32 dai_groups[ARRAY_SIZE(sdw_func_cards)];
+	const char *group_names[ARRAY_SIZE(sdw_func_cards)];
+	int num_groups;
+	int card_idx = 0;
+	int ret, i, j;
+
+	if (!mach)
+		return -ENODEV;
+
+	num_groups = hda_sdw_group_dai_types(mach, dai_groups, group_names,
+					     ARRAY_SIZE(dai_groups));
+
+	dev_dbg(sdev->dev, "multi_card: %d SDW groups, dmic: %d, idisp: %s\n",
+		num_groups, mach->mach_params.dmic_num,
+		HDA_IDISP_CODEC(mach->mach_params.codec_mask) ? "yes" : "no");
+
+	sof_audio_client_init_pdata(sdev, &pdata);
+
+	/* Create one card per SDW DAI type group */
+	for (i = 0; i < num_groups; i++) {
+		const char *card_name;
+
+		/*
+		 * Prefer codec device name (e.g. "cs42l43") over the
+		 * generic function type name (e.g. "jack").
+		 */
+		card_name = group_names[i];
+		if (!card_name) {
+			for (j = 0; j < ARRAY_SIZE(sdw_func_cards); j++) {
+				if (dai_groups[i] & sdw_func_cards[j].dai_type_bit) {
+					card_name = sdw_func_cards[j].card_name;
+					break;
+				}
+			}
+		}
+		if (!card_name)
+			continue;
+
+		dev_dbg(sdev->dev, "multi_card: group %d mask %#x card %s\n",
+			i, dai_groups[i], card_name);
+
+		memcpy(&pdata.machine, mach, sizeof(pdata.machine));
+		pdata.machine.mach_params.dai_type_mask = dai_groups[i];
+		pdata.machine.mach_params.codec_mask &= ~BIT(HDA_IDISP_ADDR);
+		pdata.machine.mach_params.dmic_num = 0;
+		pdata.machine.mach_params.card_name = card_name;
+		ret = sof_client_dev_register(sdev, "audio", card_idx,
+					      &pdata, sizeof(pdata));
+		if (ret) {
+			dev_warn(sdev->dev,
+				 "multi_card: failed to register card %s: %d\n",
+				 card_name, ret);
+			continue;
+		}
+		card_idx++;
+	}
+
+	/* DMIC card */
+	if (mach->mach_params.dmic_num) {
+		memcpy(&pdata.machine, mach, sizeof(pdata.machine));
+		pdata.machine.mach_params.links = empty_links;
+		pdata.machine.mach_params.link_mask = 0;
+		pdata.machine.mach_params.codec_mask &= ~BIT(HDA_IDISP_ADDR);
+		pdata.machine.mach_params.card_name = "dmic";
+		ret = sof_client_dev_register(sdev, "audio", card_idx,
+					      &pdata, sizeof(pdata));
+		if (ret)
+			dev_warn(sdev->dev,
+				 "multi_card: failed to register card dmic: %d\n",
+				 ret);
+		else
+			card_idx++;
+	}
+
+	/* HDMI card */
+	if (HDA_IDISP_CODEC(mach->mach_params.codec_mask)) {
+		memcpy(&pdata.machine, mach, sizeof(pdata.machine));
+		pdata.machine.mach_params.links = empty_links;
+		pdata.machine.mach_params.link_mask = 0;
+		pdata.machine.mach_params.codec_mask = BIT(HDA_IDISP_ADDR);
+		pdata.machine.mach_params.dmic_num = 0;
+		pdata.machine.mach_params.card_name = "hdmi";
+		ret = sof_client_dev_register(sdev, "audio", card_idx,
+					      &pdata, sizeof(pdata));
+		if (ret)
+			dev_warn(sdev->dev,
+				 "multi_card: failed to register card hdmi: %d\n",
+				 ret);
+		else
+			card_idx++;
+	}
+
+	hdev->num_audio_clients = card_idx;
+
+	return 0;
+}
+
+int hda_register_audio_client(struct snd_sof_dev *sdev)
+{
+	if (multi_card) {
+		const struct snd_soc_acpi_mach *mach = sdev->pdata->machine;
+
+		if (mach && !sdev->pdata->disable_function_topology &&
+		    mach->get_function_tplg_files)
+			return hda_register_audio_client_multi(sdev);
+
+		dev_warn(sdev->dev,
+			 "multi_card is only supported with function topologies, using single card\n");
+	}
+
+	return sof_register_audio_client(sdev);
+}
+
+void hda_unregister_audio_client(struct snd_sof_dev *sdev)
+{
+	if (multi_card) {
+		const struct snd_soc_acpi_mach *mach = sdev->pdata->machine;
+
+		if (mach && !sdev->pdata->disable_function_topology &&
+		    mach->get_function_tplg_files) {
+			struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+			int i;
+
+			for (i = hdev->num_audio_clients - 1; i >= 0; i--)
+				sof_client_dev_unregister(sdev, "audio", i);
+			hdev->num_audio_clients = 0;
+			return;
+		}
+	}
+
+	sof_unregister_audio_client(sdev);
+}
 
 int hda_register_clients(struct snd_sof_dev *sdev)
 {

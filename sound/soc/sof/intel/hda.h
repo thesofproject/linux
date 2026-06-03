@@ -580,6 +580,9 @@ struct sof_intel_hda_dev {
 	 * is received from the DSP for the previous message)
 	 */
 	struct snd_sof_ipc_msg *delayed_ipc_tx_msg;
+
+	/* number of audio client devices registered in multi-card mode */
+	int num_audio_clients;
 };
 
 static inline struct hdac_bus *sof_to_bus(struct snd_sof_dev *s)
@@ -1012,6 +1015,10 @@ static inline void hda_probes_unregister(struct snd_sof_dev *sdev)
 /* SOF client registration for HDA platforms */
 int hda_register_clients(struct snd_sof_dev *sdev);
 void hda_unregister_clients(struct snd_sof_dev *sdev);
+
+/* SOF audio client registration for HDA platforms (multi-card) */
+int hda_register_audio_client(struct snd_sof_dev *sdev);
+void hda_unregister_audio_client(struct snd_sof_dev *sdev);
 
 /* machine driver select */
 struct snd_soc_acpi_mach *hda_machine_select(struct snd_sof_dev *sdev);

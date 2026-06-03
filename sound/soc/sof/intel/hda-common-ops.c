@@ -104,8 +104,8 @@ const struct snd_sof_dsp_ops sof_hda_common_ops = {
 	.unregister_ipc_clients = hda_unregister_clients,
 
 	/* audio client */
-	.register_audio_client = sof_register_audio_client,
-	.unregister_audio_client = sof_unregister_audio_client,
+	.register_audio_client = hda_register_audio_client,
+	.unregister_audio_client = hda_unregister_audio_client,
 
 	/* DAI drivers */
 	.is_chain_dma_supported	= hda_is_chain_dma_supported,
