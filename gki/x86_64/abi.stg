@@ -316035,6 +316035,15 @@ elf_symbol {
   full_name: "drm_gem_prime_export"
 }
 elf_symbol {
+  id: 0x9446177d
+  name: "drm_gem_prime_handle_to_fd"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xfe456fac
+  type_id: 0x930d2c35
+  full_name: "drm_gem_prime_handle_to_fd"
+}
+elf_symbol {
   id: 0x6bfc59a2
   name: "drm_gem_prime_import"
   is_defined: true
@@ -341805,6 +341814,7 @@ interface {
   symbol_id: 0xfcbea4f3
   symbol_id: 0xcd83af95
   symbol_id: 0x82fd8719
+  symbol_id: 0x9446177d
   symbol_id: 0x6bfc59a2
   symbol_id: 0x08ad4333
   symbol_id: 0x13aa17f1
