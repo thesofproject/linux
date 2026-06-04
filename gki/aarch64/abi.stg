@@ -443771,6 +443771,24 @@ elf_symbol {
   full_name: "serdev_device_write_flush"
 }
 elf_symbol {
+  id: 0x98b882af
+  name: "serial8250_do_pm"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x2e5a3077
+  type_id: 0x11b2c04d
+  full_name: "serial8250_do_pm"
+}
+elf_symbol {
+  id: 0x339d8925
+  name: "serial8250_do_set_mctrl"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x3dcdfaf1
+  type_id: 0x11a3a114
+  full_name: "serial8250_do_set_mctrl"
+}
+elf_symbol {
   id: 0x2bb7ad6a
   name: "serial8250_do_set_termios"
   is_defined: true
@@ -467527,6 +467545,8 @@ interface {
   symbol_id: 0x3c71822d
   symbol_id: 0x6e10178a
   symbol_id: 0x5d6a93ff
+  symbol_id: 0x98b882af
+  symbol_id: 0x339d8925
   symbol_id: 0x2bb7ad6a
   symbol_id: 0x4bb58367
   symbol_id: 0x63762e51
