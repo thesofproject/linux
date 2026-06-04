@@ -82,7 +82,10 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 				.direction = {true, false},
 				.dai_name = "tac5xx2-aif1",
 				.dai_type = SOC_SDW_DAI_TYPE_AMP,
-				.dailink = {SOC_SDW_AMP_OUT_DAI_ID, SOC_SDW_UNUSED_DAI_ID},
+					.dailink = {
+						SOC_SDW_AMP_OUT_DAI_ID,
+						SOC_SDW_UNUSED_DAI_ID,
+					},
 				.init = asoc_sdw_ti_amp_init,
 				.rtd_init = asoc_sdw_ti_tac5xx2_spk_rtd_init,
 				.controls = lr_spk_controls,
@@ -103,7 +106,10 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 				.direction = {true, true},
 				.dai_name = "tac5xx2-aif3",
 				.dai_type = SOC_SDW_DAI_TYPE_JACK,
-				.dailink = {SOC_SDW_JACK_OUT_DAI_ID, SOC_SDW_JACK_IN_DAI_ID},
+					.dailink = {
+						SOC_SDW_JACK_OUT_DAI_ID,
+						SOC_SDW_JACK_IN_DAI_ID,
+					},
 				.controls = generic_jack_controls,
 				.num_controls = ARRAY_SIZE(generic_jack_controls),
 				.widgets = generic_jack_widgets,
@@ -1860,6 +1866,29 @@ put_dev:
 	return ret;
 }
 
+/*
+ * Check if a codec device has any endpoints matching the dai_type_mask.
+ * Returns true if no filtering (mask == 0) or at least one endpoint matches.
+ */
+static bool adr_dev_matches_dai_type_mask(const struct snd_soc_acpi_adr_device *adr_dev,
+					  struct asoc_sdw_codec_info *codec_info,
+					  u32 dai_type_mask)
+{
+	int j;
+
+	if (!dai_type_mask)
+		return true;
+
+	for (j = 0; j < adr_dev->num_endpoints; j++) {
+		int ep_num = adr_dev->endpoints[j].num;
+
+		if (ep_num < codec_info->dai_num &&
+		    (dai_type_mask & BIT(codec_info->dais[ep_num].dai_type)))
+			return true;
+	}
+	return false;
+}
+
 int asoc_sdw_count_sdw_endpoints(struct snd_soc_card *card,
 				 int *num_devs, int *num_ends, int *num_aux)
 {
@@ -1881,6 +1910,11 @@ int asoc_sdw_count_sdw_endpoints(struct snd_soc_card *card,
 			codec_info = asoc_sdw_find_codec_info_part(adr_dev->adr);
 			if (!codec_info)
 				return -EINVAL;
+
+			/* Skip aux devices for codecs with no matching endpoints */
+			if (!adr_dev_matches_dai_type_mask(adr_dev, codec_info,
+							   mach_params->dai_type_mask))
+				continue;
 
 			for (j = 0; j < codec_info->aux_num; j++) {
 				ret = is_sdca_aux_dev_present(dev, codec_info->auxs[j].codec_name,
@@ -2045,29 +2079,34 @@ int asoc_sdw_parse_sdw_endpoints(struct device *dev,
 			if (!codec_info)
 				return -EINVAL;
 
-			for (j = 0; j < codec_info->aux_num; j++) {
-				struct snd_soc_component *component;
+			/* Skip aux devices for codecs with no matching endpoints */
+			if (adr_dev_matches_dai_type_mask(adr_dev, codec_info,
+							  mach_params->dai_type_mask)) {
+				for (j = 0; j < codec_info->aux_num; j++) {
+					struct snd_soc_component *component;
+					const char *aux_name = codec_info->auxs[j].codec_name;
 
-				ret = is_sdca_aux_dev_present(dev, codec_info->auxs[j].codec_name,
-							      adr_link, i);
-				if (ret < 0)
-					return ret;
+					ret = is_sdca_aux_dev_present(dev, aux_name, adr_link, i);
+					if (ret < 0)
+						return ret;
 
-				if (ret == 0)
-					continue;
+					if (ret == 0)
+						continue;
 
-				component = snd_soc_lookup_component_by_name(codec_info->auxs[j].codec_name);
-				if (component) {
-					dev_dbg(dev, "%s found component %s for aux name %s\n",
-						__func__, component->name,
-						codec_info->auxs[j].codec_name);
-					soc_aux->dlc.name = component->name;
-				} else {
-					dev_dbg(dev, "%s the aux component %s is not registered yet\n",
-						__func__, codec_info->auxs[j].codec_name);
-					return -EPROBE_DEFER;
+					component = snd_soc_lookup_component_by_name(aux_name);
+					if (component) {
+						dev_dbg(dev,
+							"found component %s for aux name %s\n",
+							component->name, aux_name);
+						soc_aux->dlc.name = component->name;
+					} else {
+						dev_dbg(dev,
+							"aux component %s is not registered yet\n",
+							aux_name);
+						return -EPROBE_DEFER;
+					}
+					soc_aux++;
 				}
-				soc_aux++;
 			}
 
 			ctx->ignore_internal_dmic |= codec_info->ignore_internal_dmic;
@@ -2091,6 +2130,14 @@ int asoc_sdw_parse_sdw_endpoints(struct device *dev,
 
 				adr_end = &adr_dev->endpoints[j];
 				dai_info = &codec_info->dais[adr_end->num];
+
+				/* Filter by DAI type if mask is set */
+				if (mach_params->dai_type_mask &&
+				    !(mach_params->dai_type_mask & BIT(dai_info->dai_type))) {
+					(*num_devs)--;
+					continue;
+				}
+
 				soc_dai = asoc_sdw_find_dailink(soc_dais, adr_end);
 
 				/*
