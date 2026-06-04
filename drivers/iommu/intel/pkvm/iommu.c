@@ -511,10 +511,6 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 			iommu->vrta = val;
 		}
 		break;
-	case DMAR_IRTA_REG:
-		pkvm_err("iommu%d: Setting IRTA is not supported!\n", iommu->seq_id);
-		ret = -EPERM;
-		break;
 	case DMAR_PMEN_REG: {
 		/* RsvdP bits: 30:1 */
 		u32 rsvdp_mask = GENMASK_U32(30, 1);
@@ -637,8 +633,18 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 		if (ret == IOMMU_REG_NOT_HANDLED)
 			ret = pkvm_iommu_frcd_validate_write(iommu, offset, len, val);
 
-		/* Not emulated MMIO can directly go to hardware */
-		if (!ret || ret == IOMMU_REG_NOT_HANDLED)
+		if (ret == IOMMU_REG_NOT_HANDLED) {
+			/*
+			 * Deny-by-default: block all registers not explicitly handled
+			 * above. Any register the host driver legitimately needs must
+			 * be added as an explicit case; unknown or unreviewed registers
+			 * must not reach hardware.
+			 */
+			pkvm_err("iommu%d: unsupported register write blocked at offset 0x%lx val 0x%llx\n",
+				 iommu->seq_id, offset, val);
+			ret = -EOPNOTSUPP;
+		}
+		if (!ret)
 			ret = iommu_direct_mmio_write(iommu, phys, len, val);
 	}
 
