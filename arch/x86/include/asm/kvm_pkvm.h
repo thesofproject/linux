@@ -26,6 +26,8 @@ struct pkvm_pcpu {
 	struct gdt_page gdt_page;
 	struct idt_page idt_page;
 	struct tss_struct tss;
+	u32 apic_id;
+	u32 msi_dest_id;
 	int cpu;
 };
 
@@ -653,6 +655,7 @@ extern uint16_t pkvm_sym(__cachemode2pte_tbl)[];
 extern struct pkvm_init_ops *pkvm_sym(init_ops);
 extern struct cpumask pkvm_sym(__cpu_possible_mask);
 extern unsigned int pkvm_sym(nr_cpu_ids);
+extern bool pkvm_sym(msi_dest_mode_logical);
 DECLARE_STATIC_KEY_FALSE(pkvm_sym(switch_vcpu_ibpb));
 extern u64 pkvm_sym(x86_pred_cmd);
 extern struct fpu_state_config pkvm_sym(fpu_kernel_cfg);
