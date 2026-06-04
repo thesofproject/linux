@@ -424,3 +424,21 @@ int pkvm_domain_unmap(struct dmar_domain *domain, unsigned long start_pfn, unsig
 		       __func__, start_pfn, last_pfn, ret);
 	return ret;
 }
+
+int pkvm_modify_irte(struct intel_iommu *iommu, int index, struct irte *irte_modified)
+{
+	union pkvm_hc_data d = { 0 };
+	struct modify_irte_data *data = &d.iommu_modify_irte.data;
+	int ret;
+
+	data->phys    = iommu->reg_phys;
+	data->index   = index;
+	data->irte_lo = irte_modified->low;
+	data->irte_hi = irte_modified->high;
+
+	ret = pkvm_hypercall_in(iommu_modify_irte, &d);
+	if (ret)
+		pr_err("iommu%d: modify_irte index=%d failed (err=%d)\n",
+		       iommu->seq_id, index, ret);
+	return ret;
+}

@@ -30,6 +30,7 @@ struct qi_desc;
 struct intel_iommu;
 struct dmar_domain;
 struct device_domain_info;
+struct irte;
 
 #ifdef CONFIG_PKVM_INTEL
 extern u16 pkvm_sym(satc_devs)[];
@@ -131,6 +132,8 @@ int pkvm_domain_map(struct dmar_domain *domain, unsigned long iov_pfn,
 		    int prot, int gfp);
 int pkvm_domain_unmap(struct dmar_domain *domain, unsigned long start_pfn,
 		      unsigned long last_pfn);
+int pkvm_modify_irte(struct intel_iommu *iommu, int index, struct irte *irte_modified);
+
 #else /* __PKVM_HYP__ */
 /*
  * dev_iommu_priv_get is called from quite a few places in code re-used by
@@ -209,6 +212,7 @@ int pkvm_iommu_alloc_domain(struct alloc_domain_data *data);
 int pkvm_iommu_free_domain(u64 pgd_gpa, struct pkvm_memcache *mc);
 int pkvm_iommu_domain_map(struct domain_map_data *in, struct domain_map_data *out);
 int pkvm_iommu_domain_unmap(u64 pgd_gpa, u64 start_pfn, u64 last_pfn);
+int pkvm_iommu_modify_irte(struct modify_irte_data *data);
 #endif /* !__PKVM_HYP__ */
 #else /* !CONFIG_PKVM_INTEL */
 static inline int pkvm_iec_flush(struct intel_iommu *iommu, bool global,
@@ -266,6 +270,11 @@ static inline int pkvm_domain_map(struct dmar_domain *domain, unsigned long iov_
 }
 static inline int pkvm_domain_unmap(struct dmar_domain *domain, unsigned long start_pfn,
 				    unsigned long last_pfn)
+{
+	return -EOPNOTSUPP;
+}
+static inline int pkvm_modify_irte(struct intel_iommu *iommu, int index,
+				   struct irte *irte_modified)
 {
 	return -EOPNOTSUPP;
 }
