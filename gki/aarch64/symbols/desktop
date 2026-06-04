@@ -1,5 +1,9 @@
 [abi_symbol_list]
   alt_cb_patch_nops
+  __arm_smccc_smc
+  blk_queue_flag_set
+  bpf_trace_run2
+  bpf_trace_run3
   clk_bulk_disable
   clk_bulk_enable
   clk_bulk_prepare
@@ -23,8 +27,11 @@
   clk_mux_determine_rate_flags
   clk_mux_ops
   clk_prepare
+  clk_set_parent
   clk_unprepare
   __const_udelay
+  cpu_bit_bitmap
+  __cpu_online_mask
   debugfs_create_file_full
   debugfs_get_aux
   _dev_err
@@ -32,6 +39,7 @@
   __dev_fwnode
   dev_get_regmap
   device_get_match_data
+  device_link_add
   device_node_to_regmap
   device_property_present
   device_property_read_bool
@@ -51,6 +59,7 @@
   devm_kfree
   devm_kmalloc
   devm_mfd_add_devices
+  devm_of_phy_get_by_index
   __devm_of_phy_provider_register
   devm_phy_create
   devm_pinctrl_register_and_init
@@ -69,7 +78,9 @@
   dev_pm_clear_wake_irq
   dev_pm_set_dedicated_wake_irq_reverse
   _dev_warn
+  disable_irq
   driver_unregister
+  enable_irq
   generic_handle_domain_irq
   gpiochip_add_data_with_key
   gpiochip_generic_free
@@ -89,6 +100,7 @@
   irq_modify_status
   irq_of_parse_and_map
   __irq_resolve_mapping
+  irq_set_affinity
   irq_set_chained_handler_and_data
   irq_set_chip_and_handler_name
   irq_set_chip_data
@@ -109,6 +121,7 @@
   log_write_mmio
   match_string
   mem_alloc_profiling_key
+  memcpy
   memset
   module_layout
   __mutex_init
@@ -116,6 +129,7 @@
   mutex_unlock
   nbcon_device_release
   nbcon_device_try_acquire
+  nr_cpu_ids
   nvmem_cell_read_variable_le_u32
   of_address_to_resource
   of_clk_add_hw_provider
@@ -123,11 +137,14 @@
   of_clk_hw_onecell_get
   of_device_get_match_data
   of_device_is_compatible
+  of_find_compatible_node
+  of_find_device_by_node
   of_find_property
   of_genpd_add_provider_onecell
   of_get_next_child
   of_get_property
   of_iomap
+  of_match_device
   of_match_node
   __of_parse_phandle_with_args
   of_platform_populate
@@ -136,6 +153,10 @@
   of_property_read_u32_index
   of_property_read_variable_u32_array
   of_prop_next_string
+  perf_trace_buf_alloc
+  perf_trace_run_bpf_submit
+  phy_power_off
+  phy_power_on
   pinconf_generic_parse_dt_config
   pinctrl_dev_get_drvdata
   pinctrl_enable
@@ -164,7 +185,9 @@
   __pm_runtime_set_status
   __pm_runtime_suspend
   __pm_runtime_use_autosuspend
+  preempt_schedule_notrace
   _printk
+  put_device
   __put_task_struct
   _raw_spin_lock_irqsave
   _raw_spin_unlock_irqrestore
@@ -180,6 +203,7 @@
   regulator_disable_regmap
   regulator_enable
   regulator_enable_regmap
+  regulator_get
   regulator_get_voltage_sel_regmap
   regulator_is_enabled_regmap
   regulator_list_voltage_linear
@@ -188,8 +212,12 @@
   regulator_map_voltage_iterate
   regulator_map_voltage_linear
   regulator_map_voltage_linear_range
+  regulator_set_mode
+  regulator_set_voltage
   regulator_set_voltage_sel_regmap
   regulator_set_voltage_time_sel
+  reset_control_assert
+  reset_control_deassert
   reset_control_reset
   scnprintf
   seq_lseek
@@ -208,14 +236,22 @@
   sg_init_table
   single_open
   single_release
+  snprintf
   __spmi_driver_register
   __stack_chk_fail
+  strcmp
   strlen
   strncmp
   syscon_node_to_regmap
   syscon_regmap_lookup_by_compatible
   syscon_regmap_lookup_by_phandle
   timer_delete_sync
+  trace_event_buffer_commit
+  trace_event_buffer_reserve
+  trace_event_printf
+  trace_event_raw_init
+  trace_event_reg
+  trace_handle_return
   __traceiter_rwmmio_post_read
   __traceiter_rwmmio_post_write
   __traceiter_rwmmio_read
@@ -224,6 +260,8 @@
   __tracepoint_rwmmio_post_write
   __tracepoint_rwmmio_read
   __tracepoint_rwmmio_write
+  trace_raw_output_prep
+  __trace_trigger_soft_disabled
   tty_flip_buffer_push
   __tty_insert_flip_string_flags
   tty_termios_baud_rate
@@ -231,6 +269,37 @@
   uart_get_baud_rate
   uart_get_divisor
   uart_update_timeout
+  ufshcd_delay_us
+  ufshcd_dme_configure_adapt
+  ufshcd_dme_get_attr
+  ufshcd_dme_set_attr
+  ufshcd_dump_regs
+  ufshcd_fixup_dev_quirks
+  ufshcd_force_error_recovery
+  ufshcd_get_vreg
+  ufshcd_hba_enable
+  ufshcd_hba_stop
+  ufshcd_init_host_params
+  ufshcd_link_recovery
+  ufshcd_make_hba_operational
+  ufshcd_mcq_config_mac
+  ufshcd_mcq_enable
+  ufshcd_mcq_make_queues_operational
+  ufshcd_mcq_poll_cqe_lock
+  ufshcd_mcq_read_cqis
+  ufshcd_mcq_write_cqis
+  ufshcd_negotiate_pwr_params
+  ufshcd_pltfrm_init
+  ufshcd_pltfrm_remove
+  ufshcd_populate_vreg
+  ufshcd_resume_complete
+  ufshcd_runtime_resume
+  ufshcd_runtime_suspend
+  ufshcd_suspend_prepare
+  ufshcd_system_resume
+  ufshcd_system_suspend
+  ufshcd_uic_change_pwr_mode
+  ufshcd_uic_hibern8_exit
   usb_add_hcd
   usb_create_hcd
   usb_create_shared_hcd
