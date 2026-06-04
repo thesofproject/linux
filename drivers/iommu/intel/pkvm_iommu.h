@@ -133,6 +133,8 @@ int pkvm_domain_map(struct dmar_domain *domain, unsigned long iov_pfn,
 int pkvm_domain_unmap(struct dmar_domain *domain, unsigned long start_pfn,
 		      unsigned long last_pfn);
 int pkvm_modify_irte(struct intel_iommu *iommu, int index, struct irte *irte_modified);
+int pkvm_write_iommu_msi(struct intel_iommu *iommu, u32 offset, u32 data,
+			 u32 addr, u32 uaddr);
 
 #else /* __PKVM_HYP__ */
 /*
@@ -201,6 +203,7 @@ int pkvm_intel_iommu_init(void);
 
 int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val);
 int pkvm_iommu_mmio_write(u64 phys, int len, u64 val);
+int pkvm_iommu_msi_write(u64 phys, u32 offset, u32 data, u32 addr, u32 uaddr);
 int pkvm_iommu_iec_flush(u64 phys, int index, int mask, bool global);
 int pkvm_iommu_clear_ce(struct clear_ce_data *data);
 int pkvm_iommu_set_lm_ce(struct set_lm_ce_data *in, struct set_lm_ce_data *out);
@@ -275,6 +278,11 @@ static inline int pkvm_domain_unmap(struct dmar_domain *domain, unsigned long st
 }
 static inline int pkvm_modify_irte(struct intel_iommu *iommu, int index,
 				   struct irte *irte_modified)
+{
+	return -EOPNOTSUPP;
+}
+static inline int pkvm_write_iommu_msi(struct intel_iommu *iommu, u32 offset, u32 data,
+				       u32 addr, u32 uaddr)
 {
 	return -EOPNOTSUPP;
 }
