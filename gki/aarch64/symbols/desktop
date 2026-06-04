@@ -24,22 +24,31 @@
   _dev_err
   dev_err_probe
   __dev_fwnode
+  dev_get_regmap
   device_get_match_data
   device_node_to_regmap
+  devm_clk_bulk_get_all_enabled
   devm_clk_get
   devm_clk_get_enabled
   devm_clk_notifier_register
   devm_ioremap
   devm_kfree
   devm_kmalloc
+  devm_mfd_add_devices
   devm_pinctrl_register_and_init
   devm_platform_ioremap_resource
   devm_platform_ioremap_resource_byname
   devm_pm_runtime_enable
+  __devm_regmap_init
+  __devm_regmap_init_spmi_ext
   devm_regulator_get_optional
+  devm_regulator_register
+  devm_request_threaded_irq
+  __devm_reset_control_get
   devm_reset_controller_register
   _dev_notice
   _dev_warn
+  driver_unregister
   generic_handle_domain_irq
   gpiochip_add_data_with_key
   gpiochip_generic_free
@@ -48,11 +57,15 @@
   gpiochip_lock_as_irq
   gpiochip_unlock_as_irq
   handle_level_irq
+  handle_nested_irq
   iounmap
   irq_create_mapping_affinity
   irq_domain_instantiate
+  irq_domain_remove
   irq_domain_simple_ops
+  irq_domain_xlate_twocell
   irq_get_irq_data
+  irq_modify_status
   irq_of_parse_and_map
   __irq_resolve_mapping
   irq_set_chained_handler_and_data
@@ -72,6 +85,9 @@
   mem_alloc_profiling_key
   memset
   module_layout
+  __mutex_init
+  mutex_lock
+  mutex_unlock
   nbcon_device_release
   nbcon_device_try_acquire
   of_clk_add_hw_provider
@@ -83,7 +99,9 @@
   of_get_next_child
   of_get_property
   of_iomap
+  of_match_node
   __of_parse_phandle_with_args
+  of_platform_populate
   of_property_read_bool
   of_property_read_string_helper
   of_property_read_u32_index
@@ -115,11 +133,27 @@
   __put_task_struct
   _raw_spin_lock_irqsave
   _raw_spin_unlock_irqrestore
+  rdev_get_drvdata
+  rdev_get_id
+  register_pm_notifier
   regmap_read
   regmap_update_bits_base
   regmap_write
   regulator_disable
+  regulator_disable_regmap
   regulator_enable
+  regulator_enable_regmap
+  regulator_get_voltage_sel_regmap
+  regulator_is_enabled_regmap
+  regulator_list_voltage_linear
+  regulator_list_voltage_linear_range
+  regulator_list_voltage_table
+  regulator_map_voltage_iterate
+  regulator_map_voltage_linear
+  regulator_map_voltage_linear_range
+  regulator_set_voltage_sel_regmap
+  regulator_set_voltage_time_sel
+  reset_control_reset
   scnprintf
   seq_printf
   serial8250_do_pm
@@ -133,6 +167,7 @@
   serial8250_suspend_port
   serial8250_unregister_port
   sg_init_table
+  __spmi_driver_register
   __stack_chk_fail
   strlen
   strncmp
