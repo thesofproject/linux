@@ -444,8 +444,11 @@ int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val)
 		*val = iommu->vgsts;
 		break;
 	default:
+		ret = pkvm_iommu_pmu_validate_read(iommu, offset, len);
+
 		/* Not emulated MMIO can directly go to hardware */
-		ret = iommu_direct_mmio_read(iommu, phys, len, val);
+		if (!ret || ret == IOMMU_REG_NOT_HANDLED)
+			ret = iommu_direct_mmio_read(iommu, phys, len, val);
 	}
 
 	pkvm_spin_unlock(&iommu->lock);
@@ -628,8 +631,11 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 		}
 		break;
 	default:
+		ret = pkvm_iommu_pmu_validate_write(iommu, offset, len, val);
+
 		/* Not emulated MMIO can directly go to hardware */
-		ret = iommu_direct_mmio_write(iommu, phys, len, val);
+		if (!ret || ret == IOMMU_REG_NOT_HANDLED)
+			ret = iommu_direct_mmio_write(iommu, phys, len, val);
 	}
 
 	pkvm_spin_unlock(&iommu->lock);
@@ -790,6 +796,8 @@ static int iommu_init(struct intel_iommu *iommu)
 	}
 
 	pkvm_spin_lock_init(&iommu->lock);
+
+	pkvm_iommu_pmu_init(iommu);
 
 	/*
 	 * Take a snapshot of GSTS. GCMD updates will be handled by pKVM and
