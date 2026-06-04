@@ -56,6 +56,16 @@ int __init pkvm_host_prepare_iommu(void)
 			goto out;
 		}
 
+		/* pKVM requires x2APIC and expects EIM and IR support */
+		if (!ecap_eim_support(iommu->ecap)) {
+			pr_warn("iommu%d: Extended Interrupt mode not supported!\n", iommu->seq_id);
+			goto out;
+		}
+		if (!ecap_ir_support(iommu->ecap)) {
+			pr_warn("iommu%d: Interrupt Remapping not supported!\n", iommu->seq_id);
+			goto out;
+		}
+
 		if (cap_sagaw(iommu->cap) & IOMMU_PGT_4LEVEL)
 			pglvl_mask |= IOMMU_PGT_4LEVEL;
 		if (cap_sagaw(iommu->cap) & IOMMU_PGT_5LEVEL)
