@@ -224,6 +224,7 @@ filegroup(
         "gki/aarch64/symbols/vivo",
         "gki/aarch64/symbols/wonder",
         "gki/aarch64/symbols/xiaomi",
+        "gki/aarch64/symbols/xring",
     ],
     visibility = ["//visibility:public"],
 )
