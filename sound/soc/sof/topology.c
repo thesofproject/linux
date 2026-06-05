@@ -2548,6 +2548,47 @@ static const struct snd_soc_tplg_ops sof_dspless_tplg_ops = {
 	.bytes_ext_ops_count = ARRAY_SIZE(sof_dspless_bytes_ext_ops),
 };
 
+/*
+ * Check if a feature topology is compatible with the current card by
+ * verifying that matching BE DAI links exist.
+ *
+ * Feature topologies extend specific codec function types. If the card
+ * doesn't have the corresponding BE DAI links, the topology load would
+ * fail due to missing routes/widgets. This works transparently for both
+ * multi-card and single-card configurations.
+ */
+static bool
+sof_feature_tplg_matches_card(struct snd_soc_component *scomp,
+			      const char *feature_tplg)
+{
+	static const struct {
+		const char *tplg_key;	/* substring in feature topology filename */
+		const char *dai_key;	/* substring in BE DAI link name */
+	} match_table[] = {
+		{ "amp",  "SmartAmp" },
+		{ "jack", "SimpleJack" },
+		{ "mic",  "SmartMic" },
+	};
+	struct snd_soc_dai_link *dai_link;
+	bool needs_match = false;
+	int i, j;
+
+	for (i = 0; i < ARRAY_SIZE(match_table); i++) {
+		if (!strstr(feature_tplg, match_table[i].tplg_key))
+			continue;
+
+		needs_match = true;
+
+		for_each_card_prelinks(scomp->card, j, dai_link) {
+			if (strstr(dai_link->name, match_table[i].dai_key))
+				return true;
+		}
+	}
+
+	/* Unknown feature type: load it (backwards compatible) */
+	return !needs_match;
+}
+
 int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 {
 	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
@@ -2647,11 +2688,25 @@ int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 		}
 	}
 
-	/* Loading user defined topologies */
+	/*
+	 * Loading user defined feature topologies.
+	 * Each feature topology extends a specific function type (amp, jack,
+	 * mic, etc.). Only load if the card has a matching BE DAI link,
+	 * otherwise the routes would fail due to missing widgets.
+	 */
 	for (i = 0; i < feature_tplg_cnt; i++) {
-		const char *feature_topology = devm_kasprintf(scomp->dev, GFP_KERNEL, "%s/%s",
-							   tplg_filename_prefix,
-							   feature_topologies[i]);
+		const char *feature_topology;
+
+		if (!sof_feature_tplg_matches_card(scomp, feature_topologies[i])) {
+			dev_dbg(scomp->dev,
+				"skip feature topology %s: no matching BE DAI link\n",
+				feature_topologies[i]);
+			continue;
+		}
+
+		feature_topology = devm_kasprintf(scomp->dev, GFP_KERNEL, "%s/%s",
+						  tplg_filename_prefix,
+						  feature_topologies[i]);
 
 		if (!feature_topology) {
 			ret = -ENOMEM;
