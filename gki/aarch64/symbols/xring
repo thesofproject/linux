@@ -2076,6 +2076,7 @@
   sscanf
   __stack_chk_fail
   stack_depot_fetch
+  stack_depot_init
   stack_depot_save
   stack_trace_print
   stack_trace_save

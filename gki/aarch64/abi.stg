@@ -448383,6 +448383,15 @@ elf_symbol {
   full_name: "stack_depot_fetch"
 }
 elf_symbol {
+  id: 0x501bb3f5
+  name: "stack_depot_init"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x7851be11
+  type_id: 0x9d80e32f
+  full_name: "stack_depot_init"
+}
+elf_symbol {
   id: 0xeef73c19
   name: "stack_depot_print"
   is_defined: true
@@ -467890,6 +467899,7 @@ interface {
   symbol_id: 0xc78ca9c9
   symbol_id: 0xf0ca1a39
   symbol_id: 0x4ca735c5
+  symbol_id: 0x501bb3f5
   symbol_id: 0xeef73c19
   symbol_id: 0xf4594c32
   symbol_id: 0xa33694f6
