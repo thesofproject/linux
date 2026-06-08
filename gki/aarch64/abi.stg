@@ -397967,6 +397967,24 @@ elf_symbol {
   full_name: "_trace_android_vh_filemap_alloc_folio"
 }
 elf_symbol {
+  id: 0x865111be
+  name: "_trace_android_vh_pcpu_rwsem_lock_acquired"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xa9188e46
+  type_id: 0x14f50ddf
+  full_name: "_trace_android_vh_pcpu_rwsem_lock_acquired"
+}
+elf_symbol {
+  id: 0x983b2122
+  name: "_trace_android_vh_pcpu_rwsem_lock_released"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xa9188e46
+  type_id: 0x14f50ddf
+  full_name: "_trace_android_vh_pcpu_rwsem_lock_released"
+}
+elf_symbol {
   id: 0x86a88093
   name: "_vb2_fop_release"
   is_defined: true
@@ -462379,6 +462397,8 @@ interface {
   symbol_id: 0xa5eaf571
   symbol_id: 0x7c570dc6
   symbol_id: 0x6445950c
+  symbol_id: 0x865111be
+  symbol_id: 0x983b2122
   symbol_id: 0x86a88093
   symbol_id: 0xfbb6649f
   symbol_id: 0xdf7862e2
