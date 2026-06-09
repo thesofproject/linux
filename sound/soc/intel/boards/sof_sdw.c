@@ -1485,7 +1485,8 @@ static int mc_probe(struct platform_device *pdev)
 	ctx->codec_info_list_count = asoc_sdw_get_codec_info_list_count();
 	card = &ctx->card;
 	card->dev = &pdev->dev;
-	card->name = "soundwire";
+	card->name = mach->mach_params.card_name ?
+		    mach->mach_params.card_name : "soundwire";
 	card->owner = THIS_MODULE;
 	card->late_probe = sof_sdw_card_late_probe;
 	card->add_dai_link = sof_sdw_add_dai_link;
