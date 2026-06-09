@@ -449,6 +449,46 @@ static int sdw_ntransfer_no_pm(struct sdw_slave *slave, u32 addr, u8 flags,
 	return 0;
 }
 
+static int sdw_ntransfer_no_pm_bpt(struct sdw_slave *slave, u32 addr, u8 flags,
+				   size_t count, u8 *val)
+{
+	struct sdw_bpt_section sec;
+	struct sdw_bpt_msg msg;
+	size_t size;
+	int retry = 5;
+	int ret;
+
+	msg.sections = 1;
+	msg.dev_num = slave->dev_num;
+	msg.flags = flags;
+	msg.sec = &sec;
+
+	while (count) {
+		size = min_t(size_t, count, SDW_BPT_MSG_MAX_BYTES);
+
+		sec.addr = addr;
+		sec.len = size;
+		sec.buf = val;
+
+		do {
+			ret = sdw_bpt_send_sync(slave->bus, slave, &msg);
+			if (ret == -EAGAIN)
+				msleep(10);
+			retry--;
+		} while (ret == -EAGAIN && retry > 0);
+
+		if (ret < 0)
+			return ret;
+
+		addr += size;
+		val += size;
+		count -= size;
+		retry = 5;
+	}
+
+	return 0;
+}
+
 /**
  * sdw_nread_no_pm() - Read "n" contiguous SDW Slave registers with no PM
  * @slave: SDW Slave
@@ -457,10 +497,26 @@ static int sdw_ntransfer_no_pm(struct sdw_slave *slave, u32 addr, u8 flags,
  * @val: Buffer for values to be read
  *
  * Note that if the message crosses a page boundary each page will be
- * transferred under a separate invocation of the msg_lock.
+ * transferred under a separate invocation of the msg_lock if it is not
+ * transferred via BPT.
  */
 int sdw_nread_no_pm(struct sdw_slave *slave, u32 addr, size_t count, u8 *val)
 {
+	struct sdw_bus *bus = slave->bus;
+	int ret;
+
+	if (!bus->ops->bpt_send_async || !bus->ops->bpt_wait ||
+	    count < bus->bpt_r_threshold)
+		goto fallback;
+
+	ret = sdw_ntransfer_no_pm_bpt(slave, addr, SDW_MSG_FLAG_READ, count, val);
+	if (!ret)
+		return 0;
+
+	dev_dbg(&slave->dev,
+		"BPT read failed for addr %x, count %zu, ret %d fallback to normal read\n",
+		addr, count, ret);
+fallback:
 	return sdw_ntransfer_no_pm(slave, addr, SDW_MSG_FLAG_READ, count, val);
 }
 EXPORT_SYMBOL(sdw_nread_no_pm);
@@ -473,10 +529,26 @@ EXPORT_SYMBOL(sdw_nread_no_pm);
  * @val: Buffer for values to be written
  *
  * Note that if the message crosses a page boundary each page will be
- * transferred under a separate invocation of the msg_lock.
+ * transferred under a separate invocation of the msg_lock if it is not
+ * transferred via BPT.
  */
 int sdw_nwrite_no_pm(struct sdw_slave *slave, u32 addr, size_t count, const u8 *val)
 {
+	struct sdw_bus *bus = slave->bus;
+	int ret;
+
+	if (!bus->ops->bpt_send_async || !bus->ops->bpt_wait ||
+	    count < bus->bpt_w_threshold)
+		goto fallback;
+
+	ret = sdw_ntransfer_no_pm_bpt(slave, addr, SDW_MSG_FLAG_WRITE, count, (u8 *)val);
+	if (!ret)
+		return 0;
+
+	dev_dbg(&slave->dev,
+		"BPT write failed for addr %x, count %zu, ret %d fallback to normal write\n",
+		addr, count, ret);
+fallback:
 	return sdw_ntransfer_no_pm(slave, addr, SDW_MSG_FLAG_WRITE, count, (u8 *)val);
 }
 EXPORT_SYMBOL(sdw_nwrite_no_pm);
@@ -614,7 +686,8 @@ EXPORT_SYMBOL(sdw_update);
  * This version of the function will take a PM reference to the slave
  * device.
  * Note that if the message crosses a page boundary each page will be
- * transferred under a separate invocation of the msg_lock.
+ * transferred under a separate invocation of the msg_lock if it is not
+ * transferred via BPT.
  */
 int sdw_nread(struct sdw_slave *slave, u32 addr, size_t count, u8 *val)
 {
@@ -645,7 +718,8 @@ EXPORT_SYMBOL(sdw_nread);
  * This version of the function will take a PM reference to the slave
  * device.
  * Note that if the message crosses a page boundary each page will be
- * transferred under a separate invocation of the msg_lock.
+ * transferred under a separate invocation of the msg_lock if it is not
+ * transferred via BPT.
  */
 int sdw_nwrite(struct sdw_slave *slave, u32 addr, size_t count, const u8 *val)
 {
