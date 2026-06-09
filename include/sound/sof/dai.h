@@ -90,6 +90,7 @@ enum sof_ipc_dai_type {
 	SOF_DAI_AMD_HS_VIRTUAL,		/**< AMD ACP HS VIRTUAL */
 	SOF_DAI_IMX_MICFIL,		/** < i.MX MICFIL PDM */
 	SOF_DAI_AMD_SDW,		/**< AMD ACP SDW */
+	SOF_DAI_INTEL_UAOL,		/**< Intel UAOL */
 };
 
 /* general purpose DAI configuration */
