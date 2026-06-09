@@ -1,0 +1,75 @@
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_module",
+)
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+ddk_module(
+    name = "intel_vpu",
+    srcs = [
+        "ivpu_drv.c",
+        "ivpu_fw.c",
+        "ivpu_fw_log.c",
+        "ivpu_gem.c",
+        "ivpu_gem_userptr.c",
+        "ivpu_hw.c",
+        "ivpu_hw_btrs.c",
+        "ivpu_hw_ip.c",
+        "ivpu_ipc.c",
+        "ivpu_job.c",
+        "ivpu_jsm_msg.c",
+        "ivpu_mmu.c",
+        "ivpu_mmu_context.c",
+        "ivpu_ms.c",
+        "ivpu_pm.c",
+        "ivpu_sysfs.c",
+        "ivpu_trace_points.c",
+    ],
+    out = "intel_vpu.ko",
+    hdrs = [
+        "ivpu_coredump.h",
+        "ivpu_debugfs.h",
+        "ivpu_drv.h",
+        "ivpu_fw.h",
+        "ivpu_fw_log.h",
+        "ivpu_gem.h",
+        "ivpu_hw.h",
+        "ivpu_hw_37xx_reg.h",
+        "ivpu_hw_40xx_reg.h",
+        "ivpu_hw_btrs.h",
+        "ivpu_hw_btrs_lnl_reg.h",
+        "ivpu_hw_btrs_mtl_reg.h",
+        "ivpu_hw_ip.h",
+        "ivpu_hw_reg_io.h",
+        "ivpu_ipc.h",
+        "ivpu_job.h",
+        "ivpu_jsm_msg.h",
+        "ivpu_mmu.h",
+        "ivpu_mmu_context.h",
+        "ivpu_ms.h",
+        "ivpu_pm.h",
+        "ivpu_sysfs.h",
+        "ivpu_trace.h",
+        "vpu_boot_api.h",
+        "vpu_jsm_api.h",
+    ],
+    conditional_srcs = {
+        "CONFIG_DEBUG_FS": {
+            True: ["ivpu_debugfs.c"],
+        },
+        "CONFIG_DEV_COREDUMP": {
+            True: ["ivpu_coredump.c"],
+        },
+    },
+    defconfig = "defconfig_intel_vpu",
+    includes = [
+        ".",
+    ],
+    kconfig = "Kconfig",
+    kernel_build = "//private/devices/google/common:kernel_build",
+)
