@@ -427,6 +427,7 @@ static void handle_pvm_exit_dabt(struct pkvm_hyp_vcpu *hyp_vcpu)
 			int rt = kvm_vcpu_dabt_get_rd(&hyp_vcpu->vcpu);
 			u64 rt_val = vcpu_get_reg(&hyp_vcpu->vcpu, rt);
 
+			rt_val = kvm_mmio_clamp_data(&hyp_vcpu->vcpu, rt_val);
 			WRITE_ONCE(host_vcpu->arch.ctxt.regs.regs[0], rt_val);
 		}
 	} else {
