@@ -237,10 +237,17 @@ int intel_panel_compute_config(struct intel_connector *connector,
 
 	drm_mode_copy(adjusted_mode, fixed_mode);
 
-	if (is_vrr && fixed_mode_vrefresh != vrefresh)
+	if (is_vrr && fixed_mode_vrefresh != vrefresh) {
+		int vsync_start_offset = adjusted_mode->vtotal - adjusted_mode->vsync_start;
+		int vsync_end_offset = adjusted_mode->vtotal - adjusted_mode->vsync_end;
+
 		adjusted_mode->vtotal =
 			DIV_ROUND_CLOSEST(adjusted_mode->clock * 1000,
 					  adjusted_mode->htotal * vrefresh);
+
+		adjusted_mode->vsync_start = adjusted_mode->vtotal - vsync_start_offset;
+		adjusted_mode->vsync_end = adjusted_mode->vtotal - vsync_end_offset;
+	}
 
 	drm_mode_set_crtcinfo(adjusted_mode, 0);
 
