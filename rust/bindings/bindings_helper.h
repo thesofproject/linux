@@ -122,7 +122,6 @@ const vm_flags_t RUST_CONST_HELPER_VM_MERGEABLE = VM_MERGEABLE;
 #include "../../drivers/android/binder/rust_binder.h"
 #include "../../drivers/android/binder/rust_binder_events.h"
 #include <trace/hooks/rust_binder.h>
-#include "../../drivers/android/binder/page_range_helper.h"
 #endif
 
 #ifdef CONFIG_ASHMEM
