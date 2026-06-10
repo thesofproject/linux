@@ -185,15 +185,30 @@ static struct snd_sof_of_mach *sof_of_machine_select(struct snd_sof_dev *sdev)
 	struct snd_sof_pdata *sof_pdata = sdev->pdata;
 	const struct sof_dev_desc *desc = sof_pdata->desc;
 	struct snd_sof_of_mach *mach = desc->of_machines;
+	const char *tplg_name;
+	int ret;
 
 	if (!mach)
 		return NULL;
 
 	for (; mach->compatible; mach++) {
 		if (of_machine_is_compatible(mach->compatible)) {
-			sof_pdata->tplg_filename = mach->sof_tplg_filename;
+
 			if (mach->fw_filename)
 				sof_pdata->fw_filename = mach->fw_filename;
+
+			ret = of_property_read_string(sdev->dev->of_node,
+						      "tplg-name",
+						      &tplg_name);
+			if (ret < 0 && ret != -EINVAL) {
+				dev_err(sdev->dev, "failed to fetch topology name: %d\n", ret);
+				return NULL;
+			}
+
+			if (ret == -EINVAL)
+				sof_pdata->tplg_filename = mach->sof_tplg_filename;
+			else
+				sof_pdata->tplg_filename = tplg_name;
 
 			return mach;
 		}
