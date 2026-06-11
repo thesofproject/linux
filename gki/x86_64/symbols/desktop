@@ -902,6 +902,7 @@
   drm_gem_object_release
   drm_gem_plane_helper_prepare_fb
   drm_gem_prime_export
+  drm_gem_prime_handle_to_fd
   drm_gem_prime_mmap
   drm_gem_private_object_init
   drm_gem_reset_shadow_plane
