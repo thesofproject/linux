@@ -800,9 +800,9 @@ static void flush_hyp_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu)
 			__flush_hyp_vcpu(hyp_vcpu);
 
 		hyp_vcpu->vcpu.arch.iflags = host_iflags;
-		hyp_vcpu->vcpu.arch.hcr_el2 &= ~(HCR_TWI | HCR_TWE);
+		hyp_vcpu->vcpu.arch.hcr_el2 &= ~(HCR_TWI | HCR_TWE | HCR_VSE);
 		hyp_vcpu->vcpu.arch.hcr_el2 |= READ_ONCE(host_vcpu->arch.hcr_el2) &
-							 (HCR_TWI | HCR_TWE);
+							 (HCR_TWI | HCR_TWE | HCR_VSE);
 
 		hyp_vcpu->vcpu.arch.mdcr_el2 = host_vcpu->arch.mdcr_el2;
 		hyp_vcpu->vcpu.arch.vsesr_el2 = host_vcpu->arch.vsesr_el2;
@@ -885,10 +885,14 @@ static void sync_hyp_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 		BUG();
 	}
 
-	if (pkvm_hyp_vcpu_is_protected(hyp_vcpu))
+	if (pkvm_hyp_vcpu_is_protected(hyp_vcpu)) {
 		vcpu_clear_flag(host_vcpu, PC_UPDATE_REQ);
-	else
+	} else {
 		host_vcpu->arch.iflags = hyp_vcpu->vcpu.arch.iflags;
+
+		host_vcpu->arch.hcr_el2 &= ~HCR_VSE;
+		host_vcpu->arch.hcr_el2 |= hyp_vcpu->vcpu.arch.hcr_el2 & HCR_VSE;
+	}
 
 	hyp_vcpu->exit_code = *exit_code;
 }
