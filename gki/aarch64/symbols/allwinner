@@ -102,3 +102,5 @@
   __usb_serial_register_drivers
   v4l2_s_ctrl
   vmalloc_array_noprof
+  mmc_retune_pause
+  mmc_retune_unpause
