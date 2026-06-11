@@ -72,6 +72,7 @@
 #include <trace/hooks/traps.h>
 #include <trace/hooks/ttm_pool.h>
 #include <trace/hooks/ufshcd.h>
+#include <trace/hooks/user.h>
 #include <trace/hooks/vmscan.h>
 #include <trace/hooks/wqlockup.h>
 /* keep-sorted end */
@@ -101,6 +102,7 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_cpu_cgroup_attach);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_cpu_cgroup_online);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_cpufreq_transition);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_cpuinfo_c_show);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_cpuset_fork);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_create_worker);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_ctl_dirty_rate);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_customize_force_ra);
@@ -112,6 +114,8 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_do_fcntl);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_do_read_fault);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_do_sea);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_do_sp_pc_abort);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_do_swap_page_relax);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_do_swap_page_start);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_dpm_prepare);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_f2fs_buffer_write);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_f2fs_down_read);
@@ -142,6 +146,8 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_kmalloc_large_fallback_cma);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_kswapd_shrink_node);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_kswapd_shrink_node_bypass);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_logbuf);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_madvise_pageout_begin);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_madvise_pageout_end);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_mglru_shrink_spec_lru);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_mm_customize_alloc_anon_thp);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_mm_folio_split_bypass);
@@ -154,6 +160,7 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_preempt_enable);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_process_madvise_bypass);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_psci_cpu_suspend);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_psci_tos_resident_on);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_reclaim_folio_list);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_report_bug);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_scmi_limit_notify_cb);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_selinux_avc_insert);
@@ -200,6 +207,7 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_alloc_pages_failure_bypass);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_alloc_pages_reclaim_bypass);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_alloc_pages_slowpath_end);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_alloc_pages_slowpath_start);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_alloc_uid);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_allow_domain_state);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_alter_futex_plist_add);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_alter_mutex_list_add);
@@ -299,7 +307,9 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_do_mmap_map_count);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_do_new_mount_fc);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_do_read_fault);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_do_send_sig_info);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_do_shrink_slab);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_do_swap_page);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_do_swap_page_done);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_do_swap_page_folio_lock_check);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_do_swap_page_wait);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_do_sync_mmap_readahead);
@@ -373,6 +383,7 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_free_pages_prepare_bypass);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_free_pages_prepare_init);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_free_unref_folios_to_pcp_bypass);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_free_unref_page_bypass);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_free_user);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_freeze_whether_wake);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_freq_qos_add_request);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_freq_qos_remove_request);

@@ -224,6 +224,7 @@ filegroup(
         "gki/aarch64/symbols/vivo",
         "gki/aarch64/symbols/wonder",
         "gki/aarch64/symbols/xiaomi",
+        "gki/aarch64/symbols/xring",
     ],
     visibility = ["//visibility:public"],
 )
@@ -327,6 +328,7 @@ common_kernel(
     # We use aarch64 here because it's readily available and improves performance.
     # See b/500458317 for more on x86_64 collection efforts.
     clang_autofdo_profile = ":gki/aarch64/afdo/kernel.afdo",
+    ddk_headers_archive = ":kernel_x86_64_ddk_headers_archive",
     ddk_module_headers = [":all_headers_x86_64"],
     defconfig = "arch/x86/configs/gki_defconfig",
     extra_dist = [
@@ -1602,6 +1604,14 @@ ddk_headers(
         "//conditions:default": [],
     }),
     visibility = ["//visibility:public"],
+)
+
+ddk_headers_archive(
+    name = "kernel_x86_64_ddk_headers_archive",
+    srcs = [
+        "all_headers_x86_64",
+    ],
+    visibility = ["//visibility:private"],
 )
 
 ddk_headers(
@@ -3576,6 +3586,19 @@ pkg_zip(
 exports_files([
     "Makefile",
 ])
+
+ddk_headers(
+    name = "drm_display_helper_headers",
+    # hdrs are transitively exported to dependents
+    hdrs = [
+        "include/drm/display/drm_dp_helper.h",
+    ],
+    # must use linux_includes (instead of includes) to ensure that files
+    # explicitly declared hdrs override those in ACK.
+    linux_includes = [
+        "include",
+    ],
+)
 
 ddk_headers(
     name = "xe_global_includes",

@@ -591,8 +591,11 @@ static int init_pkvm_hyp_vm(struct kvm *host_kvm, struct pkvm_hyp_vm *hyp_vm,
 	hyp_vm->kvm.created_vcpus = nr_vcpus;
 	hyp_vm->kvm.arch.pkvm.is_protected = READ_ONCE(host_kvm->arch.pkvm.is_protected);
 
-	if (hyp_vm->kvm.arch.pkvm.is_protected)
+	if (hyp_vm->kvm.arch.pkvm.is_protected) {
 		pvmfw_load_addr = READ_ONCE(host_kvm->arch.pkvm.pvmfw_load_addr);
+		if ((pvmfw_load_addr != PVMFW_INVALID_LOAD_ADDR) && !PAGE_ALIGNED(pvmfw_load_addr))
+			return -EINVAL;
+	}
 	hyp_vm->kvm.arch.pkvm.pvmfw_load_addr = pvmfw_load_addr;
 
 	hyp_vm->kvm.arch.pkvm.smc_forwarded = READ_ONCE(host_kvm->arch.pkvm.smc_forwarded);

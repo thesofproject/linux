@@ -351,6 +351,7 @@ ddk_module(
         ":xe_generated_hdrs",
         "//private/desktop-google:drm_xe_uapi_includes",
         "//private/desktop-google:xe_global_includes",
+        "//private/desktop-google/drivers/gpu/drm/display:drm_display_helper",
     ],
 )
 

@@ -551,7 +551,16 @@ struct intel_connector {
 		u8 fec_capability;
 
 		u8 dsc_hblank_expansion_quirk:1;
+		u8 dsc_throughput_quirk:1;
 		u8 dsc_decompression_enabled:1;
+
+		struct {
+			struct {
+				int rgb_yuv444;
+				int yuv422_420;
+			} overall_throughput;
+			int max_line_width;
+		} dsc_branch_caps;
 	} dp;
 
 	struct {
@@ -1114,6 +1123,7 @@ struct intel_crtc_state {
 	} dsi_pll;
 
 	int max_link_bpp_x16;	/* in 1/16 bpp units */
+	int max_pipe_bpp;	/* in 1 bpp units */
 	int pipe_bpp;		/* in 1 bpp units */
 	int min_hblank;
 	struct intel_link_m_n dp_m_n;
