@@ -261,6 +261,18 @@ static void handle_pvm_entry_iabt(struct pkvm_hyp_vcpu *hyp_vcpu)
 	kvm_pend_exception(&hyp_vcpu->vcpu, EXCEPT_AA64_EL1_SYNC);
 }
 
+/*
+ * Clamp regs[0] MMIO data to the access width: a write must not leak the
+ * guest register's upper bits and a read must not let the untrusted host
+ * inject bits beyond the load. Mask only; the host applies endianness.
+ */
+static inline u64 kvm_mmio_clamp_data(struct kvm_vcpu *vcpu, u64 val)
+{
+	unsigned int len = kvm_vcpu_dabt_get_as(vcpu);
+
+	return val & GENMASK_U64(len * 8 - 1, 0);
+}
+
 static void handle_pvm_entry_dabt(struct pkvm_hyp_vcpu *hyp_vcpu)
 {
 	struct kvm_vcpu *host_vcpu = hyp_vcpu->host_vcpu;
@@ -304,6 +316,7 @@ static void handle_pvm_entry_dabt(struct pkvm_hyp_vcpu *hyp_vcpu)
 		u64 rd_val = READ_ONCE(host_vcpu->arch.ctxt.regs.regs[0]);
 		int rd = kvm_vcpu_dabt_get_rd(&hyp_vcpu->vcpu);
 
+		rd_val = kvm_mmio_clamp_data(&hyp_vcpu->vcpu, rd_val);
 		vcpu_set_reg(&hyp_vcpu->vcpu, rd, rd_val);
 	}
 
