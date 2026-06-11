@@ -13,6 +13,9 @@
 #include "irq.h"
 #include "sysfs_local.h"
 
+#define DEFAULT_BRA_WRITE_THRESHOLD	800
+#define DEFAULT_BRA_READ_THRESHOLD	400
+
 static DEFINE_IDA(sdw_bus_ida);
 
 static int sdw_get_id(struct sdw_bus *bus)
@@ -164,6 +167,11 @@ int sdw_bus_master_add(struct sdw_bus *bus, struct device *parent,
 	bus->params.curr_dr_freq = bus->params.max_dr_freq;
 	bus->params.curr_bank = SDW_BANK0;
 	bus->params.next_bank = SDW_BANK1;
+
+	if (!bus->bpt_w_threshold)
+		bus->bpt_w_threshold = DEFAULT_BRA_WRITE_THRESHOLD;
+	if (!bus->bpt_r_threshold)
+		bus->bpt_r_threshold = DEFAULT_BRA_READ_THRESHOLD;
 
 	return 0;
 }
