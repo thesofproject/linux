@@ -1773,6 +1773,10 @@ static bool multi_card;
 module_param(multi_card, bool, 0444);
 MODULE_PARM_DESC(multi_card, "Split audio into per-function cards. Experimental.");
 
+static bool split_hdmi;
+module_param(split_hdmi, bool, 0444);
+MODULE_PARM_DESC(split_hdmi, "Split monolithic audio into analog/HDMI cards.");
+
 struct hda_sdw_func_card {
 	u32 dai_type_bit;
 	const char *card_name;
@@ -1783,6 +1787,28 @@ static const struct hda_sdw_func_card sdw_func_cards[] = {
 	{ BIT(SOC_SDW_DAI_TYPE_AMP),  "speaker" },
 	{ BIT(SOC_SDW_DAI_TYPE_MIC),  "mic" },
 };
+
+static int hda_register_hdmi_audio_client(struct snd_sof_dev *sdev,
+					  const struct snd_soc_acpi_mach *mach,
+					  int card_idx)
+{
+	static const struct snd_soc_acpi_link_adr empty_links[] = { {} };
+	struct sof_audio_client_pdata pdata;
+
+	sof_audio_client_init_pdata(sdev, &pdata);
+	memcpy(&pdata.machine, mach, sizeof(pdata.machine));
+	pdata.machine.mach_params.links = empty_links;
+	pdata.machine.mach_params.link_mask = 0;
+	pdata.machine.mach_params.codec_mask = BIT(HDA_IDISP_ADDR);
+	pdata.machine.mach_params.dmic_num = 0;
+	pdata.machine.mach_params.card_name = "hdmi";
+	/* Always use a dedicated HDA generic HDMI card. */
+	pdata.machine.get_function_tplg_files = NULL;
+	pdata.machine.drv_name = "skl_hda_dsp_generic";
+	pdata.machine.sof_tplg_filename = "sof-hda-generic-idisp.tplg";
+
+	return sof_client_dev_register(sdev, "audio", card_idx, &pdata, sizeof(pdata));
+}
 
 /*
  * Group SDW DAI types that share physical codec devices. Types on the
@@ -1947,14 +1973,7 @@ static int hda_register_audio_client_multi(struct snd_sof_dev *sdev)
 
 	/* HDMI card */
 	if (HDA_IDISP_CODEC(mach->mach_params.codec_mask)) {
-		memcpy(&pdata.machine, mach, sizeof(pdata.machine));
-		pdata.machine.mach_params.links = empty_links;
-		pdata.machine.mach_params.link_mask = 0;
-		pdata.machine.mach_params.codec_mask = BIT(HDA_IDISP_ADDR);
-		pdata.machine.mach_params.dmic_num = 0;
-		pdata.machine.mach_params.card_name = "hdmi";
-		ret = sof_client_dev_register(sdev, "audio", card_idx,
-					      &pdata, sizeof(pdata));
+		ret = hda_register_hdmi_audio_client(sdev, mach, card_idx);
 		if (ret)
 			dev_warn(sdev->dev,
 				 "multi_card: failed to register card hdmi: %d\n",
@@ -1968,11 +1987,75 @@ static int hda_register_audio_client_multi(struct snd_sof_dev *sdev)
 	return 0;
 }
 
+static int hda_register_audio_client_split_hdmi(struct snd_sof_dev *sdev)
+{
+	const struct snd_soc_acpi_mach *mach = sdev->pdata->machine;
+	struct hdac_bus *bus = sof_to_bus(sdev);
+	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+	bool function_tplg_enabled;
+	bool has_analog_card;
+	struct sof_audio_client_pdata pdata;
+	int ret;
+
+	hdev->num_audio_clients = 0;
+
+	if (!mach)
+		return -ENODEV;
+
+	function_tplg_enabled = !sdev->pdata->disable_function_topology &&
+					mach->get_function_tplg_files;
+
+	if (!HDA_IDISP_CODEC(mach->mach_params.codec_mask))
+		return sof_register_audio_client(sdev);
+
+	has_analog_card = HDA_EXT_CODEC(bus->codec_mask) ||
+			  mach->mach_params.link_mask ||
+			  mach->mach_params.dmic_num;
+
+	if (!function_tplg_enabled && !has_analog_card) {
+		dev_info(sdev->dev,
+			 "split_hdmi is not supported on this machine, using single card\n");
+		return sof_register_audio_client(sdev);
+	}
+
+	sof_audio_client_init_pdata(sdev, &pdata);
+
+	/* Analog card: remove iDisp codec from the base machine configuration */
+	memcpy(&pdata.machine, mach, sizeof(pdata.machine));
+	pdata.machine.mach_params.codec_mask &= ~BIT(HDA_IDISP_ADDR);
+	pdata.machine.mach_params.card_name = NULL;
+	if (function_tplg_enabled) {
+		pdata.machine.sof_tplg_filename = mach->sof_tplg_filename ?
+			mach->sof_tplg_filename : sdev->pdata->tplg_filename;
+	} else {
+		pdata.machine.get_function_tplg_files = NULL;
+		pdata.machine.sof_tplg_filename = NULL;
+	}
+	ret = sof_client_dev_register(sdev, "audio", 0, &pdata, sizeof(pdata));
+	if (ret) {
+		dev_warn(sdev->dev,
+			 "split_hdmi: failed to register analog card: %d\n", ret);
+		return sof_register_audio_client(sdev);
+	}
+
+	ret = hda_register_hdmi_audio_client(sdev, mach, 1);
+	if (ret) {
+		dev_warn(sdev->dev,
+			 "split_hdmi: failed to register HDMI card: %d, using single card\n", ret);
+		sof_client_dev_unregister(sdev, "audio", 0);
+		return sof_register_audio_client(sdev);
+	}
+
+	hdev->num_audio_clients = 2;
+
+	return 0;
+}
+
 int hda_register_audio_client(struct snd_sof_dev *sdev)
 {
-	if (multi_card) {
-		const struct snd_soc_acpi_mach *mach = sdev->pdata->machine;
+	const struct snd_soc_acpi_mach *mach = sdev->pdata->machine;
 
+	if (multi_card) {
 		if (mach && !sdev->pdata->disable_function_topology &&
 		    mach->get_function_tplg_files)
 			return hda_register_audio_client_multi(sdev);
@@ -1981,14 +2064,17 @@ int hda_register_audio_client(struct snd_sof_dev *sdev)
 			 "multi_card is only supported with function topologies, using single card\n");
 	}
 
+	if (split_hdmi)
+		return hda_register_audio_client_split_hdmi(sdev);
+
 	return sof_register_audio_client(sdev);
 }
 
 void hda_unregister_audio_client(struct snd_sof_dev *sdev)
 {
-	if (multi_card) {
-		const struct snd_soc_acpi_mach *mach = sdev->pdata->machine;
+	const struct snd_soc_acpi_mach *mach = sdev->pdata->machine;
 
+	if (multi_card) {
 		if (mach && !sdev->pdata->disable_function_topology &&
 		    mach->get_function_tplg_files) {
 			struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
@@ -2001,6 +2087,24 @@ void hda_unregister_audio_client(struct snd_sof_dev *sdev)
 		}
 	}
 
+	if (split_hdmi && mach && HDA_IDISP_CODEC(mach->mach_params.codec_mask)) {
+		struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+		int i;
+
+		/*
+		 * split_hdmi may fall back to single-card registration. In that case,
+		 * use the legacy single-client unregister path.
+		 */
+		if (hdev->num_audio_clients <= 1)
+			goto single_client_unregister;
+
+		for (i = hdev->num_audio_clients - 1; i >= 0; i--)
+			sof_client_dev_unregister(sdev, "audio", i);
+		hdev->num_audio_clients = 0;
+		return;
+	}
+
+single_client_unregister:
 	sof_unregister_audio_client(sdev);
 }
 
