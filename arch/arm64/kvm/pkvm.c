@@ -144,6 +144,15 @@ int pkvm_host_stage2_topup(gfp_t gfp)
 	if (!gfpflags_allow_blocking(gfp) && host_s2_mode != PKVM_HOST_S2_GCMA)
 		goto err;
 
+	if (host_s2_mode == PKVM_HOST_S2_GCMA)
+		/*
+		 * GCMA allows host stage-2 topup in atomic context which can
+		 * happen on systems using IOMMU domains. Keeping track of the context
+		 * is cumbersome with nested hypervisor requests. So instead enforce the
+		 * atomic context when GCMA used.
+		 */
+		gfp |= GFP_ATOMIC;
+
 	init_hyp_memcache(&mc);
 	ret = __topup_hyp_memcache(&mc, 3, __host_stage2_alloc, kvm_host_pa,
 				   (void *)(uintptr_t)(gfp | __GFP_NOWARN), 0);
