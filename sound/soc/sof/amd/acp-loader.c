@@ -14,6 +14,7 @@
 #include <linux/firmware.h>
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/unaligned.h>
 
 #include "../ops.h"
 #include "acp-dsp-offset.h"
@@ -173,10 +174,19 @@ int acp_dsp_pre_fw_run(struct snd_sof_dev *sdev)
 
 	adata = sdev->pdata->hw_pdata;
 
-	if (adata->quirks && adata->quirks->signed_fw_image)
+	if (adata->pci_rev >= ACP7B_PCI_ID) {
+		if (adata->acp_sof_signed_firmware_image) {
+			size_fw = get_unaligned_le32(adata->bin_buf +
+						     ACP_IMAGE_HDR_SIZE_FW_SIGNED_OFF);
+			size_fw += ACP_IMAGE_HEADER_SIZE;
+		} else {
+			size_fw = adata->fw_bin_size;
+		}
+	} else if (adata->quirks && adata->quirks->signed_fw_image) {
 		size_fw = adata->fw_bin_size - ACP_FIRMWARE_SIGNATURE;
-	else
+	} else {
 		size_fw = adata->fw_bin_size;
+	}
 
 	page_count = PAGE_ALIGN(size_fw) >> PAGE_SHIFT;
 	adata->fw_bin_page_count = page_count;
