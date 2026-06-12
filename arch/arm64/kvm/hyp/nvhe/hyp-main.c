@@ -1503,11 +1503,6 @@ static void handle___pkvm_create_private_mapping(struct kvm_cpu_context *host_ct
 	cpu_reg(host_ctxt, 1) = haddr;
 }
 
-static void handle___pkvm_init_params_finalize(struct kvm_cpu_context *host_ctxt)
-{
-	__pkvm_init_params_finalize();
-}
-
 static void handle___pkvm_prot_finalize(struct kvm_cpu_context *host_ctxt)
 {
 	cpu_reg(host_ctxt, 1) = __pkvm_prot_finalize();
@@ -2046,7 +2041,6 @@ static const hcall_t host_hcall[] = {
 	HANDLE_FUNC(__pkvm_register_hcall),
 	HANDLE_FUNC(__pkvm_iommu_register_ops),
 	HANDLE_FUNC(__pkvm_devices_init),
-	HANDLE_FUNC(__pkvm_init_params_finalize),
 	HANDLE_FUNC(__pkvm_prot_finalize),
 
 	HANDLE_FUNC(__pkvm_host_share_hyp),
