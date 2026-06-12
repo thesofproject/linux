@@ -496,7 +496,7 @@ static int sof_parse_uuid_tokens(struct snd_soc_component *scomp,
 
 /**
  * sof_copy_tuples - Parse tokens and copy them to the @tuples array
- * @sdev: pointer to struct snd_sof_dev
+ * @scomp: pointer to struct snd_soc_component
  * @array: source pointer to consecutive vendor arrays in topology
  * @array_size: size of @array
  * @token_id: Token ID associated with a token array
@@ -508,10 +508,12 @@ static int sof_parse_uuid_tokens(struct snd_soc_component *scomp,
  * @num_copied_tuples: pointer to the number of copied tuples in the tuples array
  *
  */
-static int sof_copy_tuples(struct snd_sof_dev *sdev, struct snd_soc_tplg_vendor_array *array,
+static int sof_copy_tuples(struct snd_soc_component *scomp,
+			   struct snd_soc_tplg_vendor_array *array,
 			   int array_size, u32 token_id, int token_instance_num,
 			   struct snd_sof_tuple *tuples, int tuples_size, int *num_copied_tuples)
 {
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
 	const struct sof_token_info *token_list;
 	const struct sof_topology_token *tokens;
@@ -525,7 +527,7 @@ static int sof_copy_tuples(struct snd_sof_dev *sdev, struct snd_soc_tplg_vendor_
 		return 0;
 
 	if (!tuples || !num_copied_tuples) {
-		dev_err(sdev->dev, "Invalid tuples array\n");
+		dev_err(scomp->dev, "Invalid tuples array\n");
 		return -EINVAL;
 	}
 
@@ -533,13 +535,13 @@ static int sof_copy_tuples(struct snd_sof_dev *sdev, struct snd_soc_tplg_vendor_
 	num_tokens = token_list[token_id].count;
 
 	if (!tokens) {
-		dev_err(sdev->dev, "No token array defined for token ID: %d\n", token_id);
+		dev_err(scomp->dev, "No token array defined for token ID: %d\n", token_id);
 		return -EINVAL;
 	}
 
 	/* check if there's space in the tuples array for new tokens */
 	if (*num_copied_tuples >= tuples_size) {
-		dev_err(sdev->dev, "No space in tuples array for new tokens from %s",
+		dev_err(scomp->dev, "No space in tuples array for new tokens from %s",
 			token_list[token_id].name);
 		return -EINVAL;
 	}
@@ -549,14 +551,14 @@ static int sof_copy_tuples(struct snd_sof_dev *sdev, struct snd_soc_tplg_vendor_
 
 		/* validate asize */
 		if (asize < 0) {
-			dev_err(sdev->dev, "Invalid array size 0x%x\n", asize);
+			dev_err(scomp->dev, "Invalid array size 0x%x\n", asize);
 			return -EINVAL;
 		}
 
 		/* make sure there is enough data before parsing */
 		array_size -= asize;
 		if (array_size < 0) {
-			dev_err(sdev->dev, "Invalid array size 0x%x\n", asize);
+			dev_err(scomp->dev, "Invalid array size 0x%x\n", asize);
 			return -EINVAL;
 		}
 
@@ -583,7 +585,7 @@ static int sof_copy_tuples(struct snd_sof_dev *sdev, struct snd_soc_tplg_vendor_
 
 					tuples[*num_copied_tuples].token = tokens[j].token;
 					tuples[*num_copied_tuples].value.s =
-						devm_kasprintf(sdev->dev, GFP_KERNEL,
+						devm_kasprintf(scomp->dev, GFP_KERNEL,
 							       "%s", elem->string);
 					if (!tuples[*num_copied_tuples].value.s)
 						return -ENOMEM;
@@ -1274,7 +1276,7 @@ static int sof_widget_parse_tokens(struct snd_soc_component *scomp, struct snd_s
 			num_sets = sof_get_token_value(SOF_TKN_COMP_NUM_INPUT_AUDIO_FORMATS,
 						       swidget->tuples, swidget->num_tuples);
 			if (num_sets < 0) {
-				dev_err(sdev->dev, "Invalid input audio format count for %s\n",
+				dev_err(scomp->dev, "Invalid input audio format count for %s\n",
 					swidget->widget->name);
 				ret = num_sets;
 				goto err;
@@ -1284,7 +1286,7 @@ static int sof_widget_parse_tokens(struct snd_soc_component *scomp, struct snd_s
 			num_sets = sof_get_token_value(SOF_TKN_COMP_NUM_OUTPUT_AUDIO_FORMATS,
 						       swidget->tuples, swidget->num_tuples);
 			if (num_sets < 0) {
-				dev_err(sdev->dev, "Invalid output audio format count for %s\n",
+				dev_err(scomp->dev, "Invalid output audio format count for %s\n",
 					swidget->widget->name);
 				ret = num_sets;
 				goto err;
@@ -1309,7 +1311,7 @@ static int sof_widget_parse_tokens(struct snd_soc_component *scomp, struct snd_s
 		}
 
 		/* copy one set of tuples per token ID into swidget->tuples */
-		ret = sof_copy_tuples(sdev, private->array, le32_to_cpu(private->size),
+		ret = sof_copy_tuples(scomp, private->array, le32_to_cpu(private->size),
 				      object_token_list[i], num_sets, swidget->tuples,
 				      num_tuples, &swidget->num_tuples);
 		if (ret < 0) {
@@ -2059,7 +2061,7 @@ static int sof_link_load(struct snd_soc_component *scomp, int index, struct snd_
 
 	if (token_list[SOF_DAI_LINK_TOKENS].tokens) {
 		/* parse one set of DAI link tokens */
-		ret = sof_copy_tuples(sdev, private->array, le32_to_cpu(private->size),
+		ret = sof_copy_tuples(scomp, private->array, le32_to_cpu(private->size),
 				      SOF_DAI_LINK_TOKENS, 1, slink->tuples,
 				      num_tuples, &slink->num_tuples);
 		if (ret < 0) {
@@ -2074,7 +2076,7 @@ static int sof_link_load(struct snd_soc_component *scomp, int index, struct snd_
 		goto out;
 
 	/* parse "num_sets" sets of DAI-specific tokens */
-	ret = sof_copy_tuples(sdev, private->array, le32_to_cpu(private->size),
+	ret = sof_copy_tuples(scomp, private->array, le32_to_cpu(private->size),
 			      token_id, num_sets, slink->tuples, num_tuples, &slink->num_tuples);
 	if (ret < 0) {
 		dev_err(scomp->dev, "failed to parse %s for dai link %s\n",
@@ -2088,12 +2090,12 @@ static int sof_link_load(struct snd_soc_component *scomp, int index, struct snd_
 					       slink->tuples, slink->num_tuples);
 
 		if (num_sets < 0) {
-			dev_err(sdev->dev, "Invalid active PDM count for %s\n", link->name);
+			dev_err(scomp->dev, "Invalid active PDM count for %s\n", link->name);
 			ret = num_sets;
 			goto err;
 		}
 
-		ret = sof_copy_tuples(sdev, private->array, le32_to_cpu(private->size),
+		ret = sof_copy_tuples(scomp, private->array, le32_to_cpu(private->size),
 				      SOF_DMIC_PDM_TOKENS, num_sets, slink->tuples,
 				      num_tuples, &slink->num_tuples);
 		if (ret < 0) {
@@ -2224,7 +2226,7 @@ static int sof_set_widget_pipeline(struct snd_sof_dev *sdev, struct snd_sof_pipe
 		list_for_each_entry(scontrol, &sdev->kcontrol_list, list)
 			if (scontrol->comp_id == swidget->comp_id &&
 			    (scontrol->access & SNDRV_CTL_ELEM_ACCESS_VOLATILE)) {
-				dev_err(sdev->dev,
+				dev_err(swidget->scomp->dev,
 					"error: volatile control found for dynamic widget %s\n",
 					swidget->widget->name);
 				return -EINVAL;
@@ -2255,7 +2257,7 @@ static int sof_complete(struct snd_soc_component *scomp)
 		list_for_each_entry(scontrol, &sdev->kcontrol_list, list) {
 			ret = tplg_ops->control_setup(sdev, scontrol);
 			if (ret < 0) {
-				dev_err(sdev->dev, "failed updating IPC struct for control %s\n",
+				dev_err(scomp->dev, "failed updating IPC struct for control %s\n",
 					scontrol->name);
 				return ret;
 			}
@@ -2272,7 +2274,7 @@ static int sof_complete(struct snd_soc_component *scomp)
 		if (widget_ops && widget_ops[pipe_widget->id].ipc_setup) {
 			ret = widget_ops[pipe_widget->id].ipc_setup(pipe_widget);
 			if (ret < 0) {
-				dev_err(sdev->dev, "failed updating IPC struct for %s\n",
+				dev_err(scomp->dev, "failed updating IPC struct for %s\n",
 					pipe_widget->widget->name);
 				return ret;
 			}
@@ -2289,7 +2291,7 @@ static int sof_complete(struct snd_soc_component *scomp)
 				if (widget_ops && widget_ops[swidget->id].ipc_setup) {
 					ret = widget_ops[swidget->id].ipc_setup(swidget);
 					if (ret < 0) {
-						dev_err(sdev->dev,
+						dev_err(scomp->dev,
 							"failed updating IPC struct for %s\n",
 							swidget->widget->name);
 						return ret;
@@ -2304,14 +2306,14 @@ static int sof_complete(struct snd_soc_component *scomp)
 		    tplg_ops->tear_down_all_pipelines) {
 			ret = tplg_ops->set_up_all_pipelines(sdev, true);
 			if (ret < 0) {
-				dev_err(sdev->dev, "Failed to set up all topology pipelines: %d\n",
+				dev_err(scomp->dev, "Failed to set up all topology pipelines: %d\n",
 					ret);
 				return ret;
 			}
 
 			ret = tplg_ops->tear_down_all_pipelines(sdev, true);
 			if (ret < 0) {
-				dev_err(sdev->dev, "Failed to tear down topology pipelines: %d\n",
+				dev_err(scomp->dev, "Failed to tear down topology pipelines: %d\n",
 					ret);
 				return ret;
 			}

@@ -32,7 +32,7 @@ static int sof_ipc3_set_get_kcontrol_data(struct snd_sof_control *scontrol,
 	}
 
 	if (!widget_found) {
-		dev_err(sdev->dev, "%s: can't find widget with id %d\n", __func__,
+		dev_err(scontrol->scomp->dev, "%s: can't find widget with id %d\n", __func__,
 			scontrol->comp_id);
 		return -EINVAL;
 	}
@@ -603,7 +603,7 @@ static void sof_ipc3_control_update(struct snd_sof_dev *sdev, void *ipc_control_
 	if (cdata->type == SOF_CTRL_TYPE_VALUE_COMP_GET ||
 	    cdata->type == SOF_CTRL_TYPE_VALUE_COMP_SET) {
 		dev_err(sdev->dev, "Component data is not supported in control notification\n");
-		return;
+		return; /* swidget not yet found, sdev->dev is correct here */
 	}
 
 	/* Find the swidget first */
@@ -630,7 +630,7 @@ static void sof_ipc3_control_update(struct snd_sof_dev *sdev, void *ipc_control_
 		type = SND_SOC_TPLG_TYPE_ENUM;
 		break;
 	default:
-		dev_err(sdev->dev, "Unknown cmd %u in %s\n", cdata->cmd, __func__);
+		dev_err(swidget->scomp->dev, "Unknown cmd %u in %s\n", cdata->cmd, __func__);
 		return;
 	}
 
@@ -693,7 +693,7 @@ static void sof_ipc3_control_update(struct snd_sof_dev *sdev, void *ipc_control_
 	}
 
 	if (cdata->rhdr.hdr.size != expected_size) {
-		dev_err(sdev->dev, "Component notification size mismatch\n");
+		dev_err(swidget->scomp->dev, "Component notification size mismatch\n");
 		return;
 	}
 
@@ -722,7 +722,7 @@ static int sof_ipc3_widget_kcontrol_setup(struct snd_sof_dev *sdev,
 			/* set kcontrol data in DSP */
 			ret = sof_ipc3_set_get_kcontrol_data(scontrol, true, false);
 			if (ret < 0) {
-				dev_err(sdev->dev,
+				dev_err(swidget->scomp->dev,
 					"kcontrol %d set up failed for widget %s\n",
 					scontrol->comp_id, swidget->widget->name);
 				return ret;
@@ -739,7 +739,7 @@ static int sof_ipc3_widget_kcontrol_setup(struct snd_sof_dev *sdev,
 
 			ret = sof_ipc3_set_get_kcontrol_data(scontrol, false, false);
 			if (ret < 0)
-				dev_warn(sdev->dev,
+				dev_warn(swidget->scomp->dev,
 					 "kcontrol %d read failed for widget %s\n",
 					 scontrol->comp_id, swidget->widget->name);
 		}

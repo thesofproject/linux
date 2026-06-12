@@ -699,7 +699,7 @@ static int ipc4_ssp_dai_config_pcm_params_match(struct snd_sof_dev *sdev,
  * Fixup DAI link parameters for sampling rate based on
  * DAI copier configuration.
  */
-static int sof_ipc4_pcm_dai_link_fixup_rate(struct snd_sof_dev *sdev,
+static int sof_ipc4_pcm_dai_link_fixup_rate(struct snd_soc_component *component,
 					    struct snd_pcm_hw_params *params,
 					    struct sof_ipc4_copier *ipc4_copier)
 {
@@ -740,7 +740,7 @@ static int sof_ipc4_pcm_dai_link_fixup_rate(struct snd_sof_dev *sdev,
 	 */
 	if (!fe_be_rate_match) {
 		if (!single_be_rate) {
-			dev_err(sdev->dev, "Unable to select sampling rate for DAI link\n");
+			dev_err(component->dev, "Unable to select sampling rate for DAI link\n");
 			return -EINVAL;
 		}
 
@@ -751,7 +751,7 @@ static int sof_ipc4_pcm_dai_link_fixup_rate(struct snd_sof_dev *sdev,
 	return 0;
 }
 
-static int sof_ipc4_pcm_dai_link_fixup_channels(struct snd_sof_dev *sdev,
+static int sof_ipc4_pcm_dai_link_fixup_channels(struct snd_soc_component *component,
 						struct snd_pcm_hw_params *params,
 						struct sof_ipc4_copier *ipc4_copier)
 {
@@ -792,7 +792,7 @@ static int sof_ipc4_pcm_dai_link_fixup_channels(struct snd_sof_dev *sdev,
 	 */
 	if (!fe_be_match) {
 		if (!single_be_channels) {
-			dev_err(sdev->dev, "Unable to select channels for DAI link\n");
+			dev_err(component->dev, "Unable to select channels for DAI link\n");
 			return -EINVAL;
 		}
 
@@ -862,11 +862,11 @@ static int sof_ipc4_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 		}
 	}
 
-	ret = sof_ipc4_pcm_dai_link_fixup_rate(sdev, params, ipc4_copier);
+	ret = sof_ipc4_pcm_dai_link_fixup_rate(component, params, ipc4_copier);
 	if (ret)
 		return ret;
 
-	ret = sof_ipc4_pcm_dai_link_fixup_channels(sdev, params, ipc4_copier);
+	ret = sof_ipc4_pcm_dai_link_fixup_channels(component, params, ipc4_copier);
 	if (ret)
 		return ret;
 

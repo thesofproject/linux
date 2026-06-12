@@ -81,9 +81,9 @@ unlock:
 	return ret;
 }
 
-static int
-sof_ipc4_set_volume_data(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget,
-			 struct snd_sof_control *scontrol, bool lock)
+static int sof_ipc4_set_volume_data(struct snd_sof_widget *swidget,
+				    struct snd_sof_control *scontrol,
+				    bool lock)
 {
 	struct sof_ipc4_control_data *cdata = scontrol->ipc_control_data;
 	struct sof_ipc4_gain *gain = swidget->private;
@@ -126,7 +126,7 @@ sof_ipc4_set_volume_data(struct snd_sof_dev *sdev, struct snd_sof_widget *swidge
 
 		ret = sof_ipc4_set_get_kcontrol_data(scontrol, &msg, true, lock);
 		if (ret < 0) {
-			dev_err(sdev->dev, "Failed to set volume update for %s\n",
+			dev_err(swidget->scomp->dev, "Failed to set volume update for %s\n",
 				scontrol->name);
 			return ret;
 		}
@@ -177,7 +177,7 @@ static bool sof_ipc4_volume_put(struct snd_sof_control *scontrol,
 		return false;
 	}
 
-	ret = sof_ipc4_set_volume_data(sdev, swidget, scontrol, true);
+	ret = sof_ipc4_set_volume_data(swidget, scontrol, true);
 	if (ret < 0)
 		return false;
 
@@ -199,10 +199,9 @@ static int sof_ipc4_volume_get(struct snd_sof_control *scontrol,
 	return 0;
 }
 
-static int
-sof_ipc4_set_generic_control_data(struct snd_sof_dev *sdev,
-				  struct snd_sof_widget *swidget,
-				  struct snd_sof_control *scontrol, bool lock)
+static int sof_ipc4_set_generic_control_data(struct snd_sof_widget *swidget,
+					     struct snd_sof_control *scontrol,
+					     bool lock)
 {
 	struct sof_ipc4_control_data *cdata = scontrol->ipc_control_data;
 	struct sof_ipc4_control_msg_payload *data;
@@ -229,7 +228,7 @@ sof_ipc4_set_generic_control_data(struct snd_sof_dev *sdev,
 
 	ret = sof_ipc4_set_get_kcontrol_data(scontrol, &msg, true, lock);
 	if (ret < 0)
-		dev_err(sdev->dev, "Failed to set control update for %s\n",
+		dev_err(scontrol->scomp->dev, "Failed to set control update for %s\n",
 			scontrol->name);
 
 	kfree(data);
@@ -415,7 +414,7 @@ static bool sof_ipc4_switch_put(struct snd_sof_control *scontrol,
 		return false;
 	}
 
-	ret = sof_ipc4_set_generic_control_data(sdev, swidget, scontrol, true);
+	ret = sof_ipc4_set_generic_control_data(swidget, scontrol, true);
 	if (ret < 0)
 		return false;
 
@@ -474,7 +473,7 @@ static bool sof_ipc4_enum_put(struct snd_sof_control *scontrol,
 		return false;
 	}
 
-	ret = sof_ipc4_set_generic_control_data(sdev, swidget, scontrol, true);
+	ret = sof_ipc4_set_generic_control_data(swidget, scontrol, true);
 	if (ret < 0)
 		return false;
 
@@ -496,22 +495,22 @@ static int sof_ipc4_enum_get(struct snd_sof_control *scontrol,
 	return 0;
 }
 
-static int sof_ipc4_set_get_bytes_data(struct snd_sof_dev *sdev,
-				       struct snd_sof_control *scontrol,
+static int sof_ipc4_set_get_bytes_data(struct snd_sof_control *scontrol,
 				       bool set, bool lock)
 {
 	struct sof_ipc4_control_data *cdata = scontrol->ipc_control_data;
+	struct snd_soc_component *scomp = scontrol->scomp;
 	struct sof_abi_hdr *data = cdata->data;
 	struct sof_ipc4_msg msg;
 	int ret = 0;
 
 	/* Send the new data to the firmware only if it is powered up */
 	if (set) {
-		if (!pm_runtime_active(sdev->dev))
+		if (!pm_runtime_active(scomp->dev))
 			return 0;
 
 		if (!data->size) {
-			dev_dbg(sdev->dev, "%s: No data to be sent.\n",
+			dev_dbg(scomp->dev, "%s: No data to be sent.\n",
 				scontrol->name);
 			return 0;
 		}
@@ -535,7 +534,7 @@ static int sof_ipc4_set_get_bytes_data(struct snd_sof_dev *sdev,
 
 	ret = sof_ipc4_set_get_kcontrol_data(scontrol, &msg, set, lock);
 	if (ret < 0) {
-		dev_err(sdev->dev, "Failed to %s for %s\n",
+		dev_err(scomp->dev, "Failed to %s for %s\n",
 			set ? "set bytes update" : "get bytes",
 			scontrol->name);
 	} else if (!set) {
@@ -552,7 +551,6 @@ static int sof_ipc4_bytes_put(struct snd_sof_control *scontrol,
 {
 	struct sof_ipc4_control_data *cdata = scontrol->ipc_control_data;
 	struct snd_soc_component *scomp = scontrol->scomp;
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_abi_hdr *data = cdata->data;
 	const struct sof_abi_hdr *new_hdr =
 		(const struct sof_abi_hdr *)ucontrol->value.bytes.data;
@@ -580,7 +578,7 @@ static int sof_ipc4_bytes_put(struct snd_sof_control *scontrol,
 	/* copy from kcontrol */
 	memcpy(data, ucontrol->value.bytes.data, size);
 
-	ret = sof_ipc4_set_get_bytes_data(sdev, scontrol, true, true);
+	ret = sof_ipc4_set_get_bytes_data(scontrol, true, true);
 	if (!ret)
 		/* Update the cdata size */
 		scontrol->size = sizeof(*cdata) + size;
@@ -626,7 +624,6 @@ static int sof_ipc4_bytes_ext_put(struct snd_sof_control *scontrol,
 	struct snd_ctl_tlv __user *tlvd = (struct snd_ctl_tlv __user *)binary_data;
 	struct sof_ipc4_control_data *cdata = scontrol->ipc_control_data;
 	struct snd_soc_component *scomp = scontrol->scomp;
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_abi_hdr *data = cdata->data;
 	struct sof_abi_hdr abi_hdr;
 	struct snd_ctl_tlv header;
@@ -700,7 +697,7 @@ static int sof_ipc4_bytes_ext_put(struct snd_sof_control *scontrol,
 	/* Update the cdata size */
 	scontrol->size = sizeof(*cdata) + header.length;
 
-	return sof_ipc4_set_get_bytes_data(sdev, scontrol, true, true);
+	return sof_ipc4_set_get_bytes_data(scontrol, true, true);
 }
 
 static int _sof_ipc4_bytes_ext_get(struct snd_sof_control *scontrol,
@@ -725,8 +722,7 @@ static int _sof_ipc4_bytes_ext_get(struct snd_sof_control *scontrol,
 
 	/* get all the component data from DSP */
 	if (from_dsp) {
-		struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
-		int ret = sof_ipc4_set_get_bytes_data(sdev, scontrol, false, true);
+		int ret = sof_ipc4_set_get_bytes_data(scontrol, false, true);
 
 		if (ret < 0)
 			return ret;
@@ -777,14 +773,14 @@ static int sof_ipc4_bytes_ext_volatile_get(struct snd_sof_control *scontrol,
 	return _sof_ipc4_bytes_ext_get(scontrol, binary_data, size, true);
 }
 
-static int
-sof_ipc4_volsw_setup(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget,
-		     struct snd_sof_control *scontrol)
+static int sof_ipc4_volsw_setup(struct snd_sof_widget *swidget,
+				struct snd_sof_control *scontrol)
+
 {
 	if (scontrol->max == 1)
-		return sof_ipc4_set_generic_control_data(sdev, swidget, scontrol, false);
+		return sof_ipc4_set_generic_control_data(swidget, scontrol, false);
 
-	return sof_ipc4_set_volume_data(sdev, swidget, scontrol, false);
+	return sof_ipc4_set_volume_data(swidget, scontrol, false);
 }
 
 #define PARAM_ID_FROM_EXTENSION(_ext)	(((_ext) & SOF_IPC4_MOD_EXT_MSG_PARAM_ID_MASK)	\
@@ -861,7 +857,7 @@ static void sof_ipc4_control_update(struct snd_sof_dev *sdev, void *ipc_message)
 	}
 
 	if (!scontrol_found) {
-		dev_err(sdev->dev,
+		dev_err(swidget->scomp->dev,
 			"%s: Failed to find control on widget %s: %u:%u\n",
 			__func__, swidget->widget->name, ndata->event_id & 0xffff,
 			msg_data->id);
@@ -878,7 +874,7 @@ static void sof_ipc4_control_update(struct snd_sof_dev *sdev, void *ipc_message)
 			size_t source_size = struct_size(msg_data, data, msg_data->num_elems);
 
 			if (source_size > ndata->event_data_size) {
-				dev_warn(sdev->dev,
+				dev_warn(swidget->scomp->dev,
 					 "%s: invalid bytes notification size for %s (%zu, %u)\n",
 					 __func__, scontrol->name, source_size,
 					 ndata->event_data_size);
@@ -887,7 +883,7 @@ static void sof_ipc4_control_update(struct snd_sof_dev *sdev, void *ipc_message)
 			}
 
 			if (msg_data->num_elems > scontrol->max_size - sizeof(*data)) {
-				dev_warn(sdev->dev,
+				dev_warn(swidget->scomp->dev,
 					 "%s: no space for data in %s (%u, %zu)\n",
 					 __func__, scontrol->name, msg_data->num_elems,
 					 scontrol->max_size - sizeof(*data));
@@ -900,7 +896,7 @@ static void sof_ipc4_control_update(struct snd_sof_dev *sdev, void *ipc_message)
 			size_t source_size = struct_size(msg_data, chanv, msg_data->num_elems);
 
 			if (source_size > ndata->event_data_size) {
-				dev_warn(sdev->dev,
+				dev_warn(swidget->scomp->dev,
 					 "%s: invalid channel notification size for %s (%zu, %u)\n",
 					 __func__, scontrol->name, source_size,
 					 ndata->event_data_size);
@@ -912,7 +908,7 @@ static void sof_ipc4_control_update(struct snd_sof_dev *sdev, void *ipc_message)
 				u32 channel = msg_data->chanv[i].channel;
 
 				if (channel >= scontrol->num_channels) {
-					dev_warn(sdev->dev,
+					dev_warn(swidget->scomp->dev,
 						 "Invalid channel index for %s: %u\n",
 						 scontrol->name, i);
 
@@ -970,23 +966,21 @@ static int sof_ipc4_widget_kcontrol_setup(struct snd_sof_dev *sdev, struct snd_s
 			case SND_SOC_TPLG_CTL_VOLSW:
 			case SND_SOC_TPLG_CTL_VOLSW_SX:
 			case SND_SOC_TPLG_CTL_VOLSW_XR_SX:
-				ret = sof_ipc4_volsw_setup(sdev, swidget, scontrol);
+				ret = sof_ipc4_volsw_setup(swidget, scontrol);
 				break;
 			case SND_SOC_TPLG_CTL_BYTES:
-				ret = sof_ipc4_set_get_bytes_data(sdev, scontrol,
-								  true, false);
+				ret = sof_ipc4_set_get_bytes_data(scontrol, true, false);
 				break;
 			case SND_SOC_TPLG_CTL_ENUM:
 			case SND_SOC_TPLG_CTL_ENUM_VALUE:
-				ret = sof_ipc4_set_generic_control_data(sdev, swidget,
-									scontrol, false);
+				ret = sof_ipc4_set_generic_control_data(swidget, scontrol, false);
 				break;
 			default:
 				break;
 			}
 
 			if (ret < 0) {
-				dev_err(sdev->dev,
+				dev_err(swidget->scomp->dev,
 					"kcontrol %d set up failed for widget %s\n",
 					scontrol->comp_id, swidget->widget->name);
 				return ret;

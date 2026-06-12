@@ -29,22 +29,26 @@ static bool is_aggregated_dai(struct snd_sof_widget *swidget)
 		swidget->widget->name[strlen(swidget->widget->name) - 1] != '0');
 }
 
-static bool is_virtual_widget(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *widget,
-			      const char *func)
+static bool is_virtual_widget(struct snd_soc_dapm_widget *widget, const char *func)
 {
+	struct snd_sof_widget *swidget = widget->dobj.private;
+
 	switch (widget->id) {
 	case snd_soc_dapm_out_drv:
 	case snd_soc_dapm_output:
 	case snd_soc_dapm_input:
-		dev_dbg(sdev->dev, "%s: %s is a virtual widget\n", func, widget->name);
+		if (swidget)
+			dev_dbg(swidget->scomp->dev, "%s: %s is a virtual widget\n",
+				func, widget->name);
 		return true;
 	default:
 		return false;
 	}
 }
 
-static void sof_reset_route_setup_status(struct snd_sof_dev *sdev, struct snd_sof_widget *widget)
+static void sof_reset_route_setup_status(struct snd_sof_widget *widget)
 {
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(widget->scomp);
 	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
 	struct snd_sof_route *sroute;
 
@@ -58,6 +62,7 @@ static void sof_reset_route_setup_status(struct snd_sof_dev *sdev, struct snd_so
 }
 
 static int sof_widget_free_unlocked(struct snd_sof_dev *sdev,
+				    struct snd_soc_component *scomp,
 				    struct snd_sof_widget *swidget)
 {
 	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
@@ -75,7 +80,7 @@ static int sof_widget_free_unlocked(struct snd_sof_dev *sdev,
 		return 0;
 
 	/* reset route setup status for all routes that contain this widget */
-	sof_reset_route_setup_status(sdev, swidget);
+	sof_reset_route_setup_status(swidget);
 
 	/* free DAI config and continue to free widget even if it fails */
 	if (WIDGET_IS_DAI(swidget->id)) {
@@ -87,7 +92,8 @@ static int sof_widget_free_unlocked(struct snd_sof_dev *sdev,
 		if (tplg_ops && tplg_ops->dai_config) {
 			err = tplg_ops->dai_config(sdev, swidget, flags, &data);
 			if (err < 0)
-				dev_err(sdev->dev, "failed to free config for widget %s\n",
+				dev_err(scomp->dev,
+					"failed to free config for widget %s\n",
 					swidget->widget->name);
 		}
 	}
@@ -109,7 +115,8 @@ static int sof_widget_free_unlocked(struct snd_sof_dev *sdev,
 		for_each_set_bit(i, &spipe->core_mask, sdev->num_cores) {
 			ret = snd_sof_dsp_core_put(sdev, i);
 			if (ret < 0) {
-				dev_err(sdev->dev, "failed to disable target core: %d for pipeline %s\n",
+				dev_err(scomp->dev,
+					"failed to disable target core: %d for pipeline %s\n",
 					i, swidget->widget->name);
 				if (!err)
 					err = ret;
@@ -124,13 +131,13 @@ static int sof_widget_free_unlocked(struct snd_sof_dev *sdev,
 	 */
 	if (spipe && spipe->pipe_widget && swidget->dynamic_pipeline_widget &&
 	    swidget->id != snd_soc_dapm_scheduler) {
-		ret = sof_widget_free_unlocked(sdev, spipe->pipe_widget);
+		ret = sof_widget_free_unlocked(sdev, scomp, spipe->pipe_widget);
 		if (ret < 0 && !err)
 			err = ret;
 	}
 
 	if (!err)
-		dev_dbg(sdev->dev, "widget %s freed\n", swidget->widget->name);
+		dev_dbg(scomp->dev, "widget %s freed\n", swidget->widget->name);
 
 	return err;
 }
@@ -138,11 +145,12 @@ static int sof_widget_free_unlocked(struct snd_sof_dev *sdev,
 int sof_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
 {
 	guard(mutex)(&swidget->setup_mutex);
-	return sof_widget_free_unlocked(sdev, swidget);
+	return sof_widget_free_unlocked(sdev, swidget->scomp, swidget);
 }
 EXPORT_SYMBOL(sof_widget_free);
 
 static int sof_widget_setup_unlocked(struct snd_sof_dev *sdev,
+				     struct snd_soc_component *scomp,
 				     struct snd_sof_widget *swidget)
 {
 	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
@@ -169,12 +177,13 @@ static int sof_widget_setup_unlocked(struct snd_sof_dev *sdev,
 	 */
 	if (swidget->dynamic_pipeline_widget && swidget->id != snd_soc_dapm_scheduler) {
 		if (!swidget->spipe || !swidget->spipe->pipe_widget) {
-			dev_err(sdev->dev, "No pipeline set for %s\n", swidget->widget->name);
+			dev_err(scomp->dev, "No pipeline set for %s\n",
+				swidget->widget->name);
 			ret = -EINVAL;
 			goto use_count_dec;
 		}
 
-		ret = sof_widget_setup_unlocked(sdev, swidget->spipe->pipe_widget);
+		ret = sof_widget_setup_unlocked(sdev, scomp, swidget->spipe->pipe_widget);
 		if (ret < 0)
 			goto use_count_dec;
 	}
@@ -184,7 +193,8 @@ static int sof_widget_setup_unlocked(struct snd_sof_dev *sdev,
 		for_each_set_bit(i, &spipe->core_mask, sdev->num_cores) {
 			ret = snd_sof_dsp_core_get(sdev, i);
 			if (ret < 0) {
-				dev_err(sdev->dev, "failed to enable target core %d for pipeline %s\n",
+				dev_err(scomp->dev,
+					"failed to enable target core %d for pipeline %s\n",
 					i, swidget->widget->name);
 				goto pipe_widget_free;
 			}
@@ -220,18 +230,18 @@ static int sof_widget_setup_unlocked(struct snd_sof_dev *sdev,
 			goto widget_free;
 	}
 
-	dev_dbg(sdev->dev, "widget %s setup complete\n", swidget->widget->name);
+	dev_dbg(scomp->dev, "widget %s setup complete\n", swidget->widget->name);
 
 	return 0;
 
 widget_free:
 	/* widget use_count and core_put handled by sof_widget_free() */
-	sof_widget_free_unlocked(sdev, swidget);
+	sof_widget_free_unlocked(sdev, scomp, swidget);
 	return ret;
 
 pipe_widget_free:
 	if (swidget->id != snd_soc_dapm_scheduler) {
-		sof_widget_free_unlocked(sdev, swidget->spipe->pipe_widget);
+		sof_widget_free_unlocked(sdev, scomp, swidget->spipe->pipe_widget);
 	} else {
 		int j;
 
@@ -251,7 +261,7 @@ use_count_dec:
 int sof_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
 {
 	guard(mutex)(&swidget->setup_mutex);
-	return sof_widget_setup_unlocked(sdev, swidget);
+	return sof_widget_setup_unlocked(sdev, swidget->scomp, swidget);
 }
 EXPORT_SYMBOL(sof_widget_setup);
 
@@ -265,8 +275,8 @@ int sof_route_setup(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *wsourc
 	bool route_found = false;
 
 	/* ignore routes involving virtual widgets in topology */
-	if (is_virtual_widget(sdev, src_widget->widget, __func__) ||
-	    is_virtual_widget(sdev, sink_widget->widget, __func__))
+	if (is_virtual_widget(src_widget->widget, __func__) ||
+	    is_virtual_widget(sink_widget->widget, __func__))
 		return 0;
 
 	/* skip route if source/sink widget is not set up */
@@ -281,7 +291,8 @@ int sof_route_setup(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *wsourc
 		}
 
 	if (!route_found) {
-		dev_err(sdev->dev, "error: cannot find SOF route for source %s -> %s sink\n",
+		dev_err(src_widget->scomp->dev,
+			"error: cannot find SOF route for source %s -> %s sink\n",
 			wsource->name, wsink->name);
 		return -EINVAL;
 	}
@@ -326,9 +337,10 @@ static int sof_set_up_same_dir_widget_routes(struct snd_sof_dev *sdev,
 	return sof_route_setup(sdev, wsource, wsink);
 }
 
-static int sof_setup_pipeline_connections(struct snd_sof_dev *sdev,
-					  struct snd_soc_dapm_widget_list *list, int dir)
+static int sof_setup_pipeline_connections(struct snd_soc_dapm_widget_list *list,
+					  struct snd_soc_component *scomp, int dir)
 {
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct snd_soc_dapm_widget *widget;
 	struct snd_sof_route *sroute;
 	struct snd_soc_dapm_path *p;
@@ -440,7 +452,7 @@ sof_unprepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widg
 	const struct sof_ipc_tplg_widget_ops *widget_ops;
 	struct snd_soc_dapm_path *p;
 
-	if (is_virtual_widget(sdev, widget, __func__))
+	if (is_virtual_widget(widget, __func__))
 		return;
 
 	if (!swidget)
@@ -488,7 +500,7 @@ sof_prepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget
 	struct snd_soc_dapm_path *p;
 	int ret;
 
-	if (is_virtual_widget(sdev, widget, __func__))
+	if (is_virtual_widget(widget, __func__))
 		return 0;
 
 	if (!swidget)
@@ -510,7 +522,7 @@ sof_prepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget
 	ret = widget_ops[widget->id].ipc_prepare(swidget, fe_params, platform_params,
 					     pipeline_params, dir);
 	if (ret < 0) {
-		dev_err(sdev->dev, "failed to prepare widget %s\n", widget->name);
+		dev_err(swidget->scomp->dev, "failed to prepare widget %s\n", widget->name);
 		return ret;
 	}
 
@@ -561,7 +573,7 @@ static int sof_free_widgets_in_path_internal(struct snd_sof_dev *sdev,
 	if (!list)
 		return 0;
 
-	if (is_virtual_widget(sdev, widget, __func__))
+	if (is_virtual_widget(widget, __func__))
 		return 0;
 
 	if (!swidget)
@@ -641,7 +653,7 @@ static int sof_set_up_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_d
 	struct snd_soc_dapm_path *p;
 	int ret;
 
-	if (is_virtual_widget(sdev, widget, __func__))
+	if (is_virtual_widget(widget, __func__))
 		return 0;
 
 	if (swidget) {
@@ -756,14 +768,14 @@ sof_walk_widgets_in_order(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
 			sof_unprepare_widgets_in_path(sdev, widget, list, dir);
 			break;
 		default:
-			dev_err(sdev->dev, "Invalid widget op %d\n", op);
+			dev_err(spcm->scomp->dev, "Invalid widget op %d\n", op);
 			return -EINVAL;
 		}
 		if (ret < 0) {
 			if (op == SOF_WIDGET_FREE)
 				sof_reset_path_walking_flags(list);
 
-			dev_err(sdev->dev, "Failed to %s connected widgets\n", str);
+			dev_err(spcm->scomp->dev, "Failed to %s connected widgets\n", str);
 			return ret;
 		}
 	}
@@ -825,7 +837,7 @@ int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
 	 * error in setting pipeline connections will result in route status being reset for
 	 * routes that were successfully set up when the widgets are freed.
 	 */
-	ret = sof_setup_pipeline_connections(sdev, list, dir);
+	ret = sof_setup_pipeline_connections(list, spcm->scomp, dir);
 	if (ret < 0)
 		goto widget_free;
 
@@ -840,7 +852,7 @@ int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
 
 		spipe = swidget->spipe;
 		if (!spipe) {
-			dev_err(sdev->dev, "no pipeline found for %s\n",
+			dev_err(swidget->scomp->dev, "no pipeline found for %s\n",
 				swidget->widget->name);
 			ret = -EINVAL;
 			goto widget_free;
@@ -848,7 +860,7 @@ int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
 
 		pipe_widget = spipe->pipe_widget;
 		if (!pipe_widget) {
-			dev_err(sdev->dev, "error: no pipeline widget found for %s\n",
+			dev_err(swidget->scomp->dev, "error: no pipeline widget found for %s\n",
 				swidget->widget->name);
 			ret = -EINVAL;
 			goto widget_free;
