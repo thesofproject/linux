@@ -2178,9 +2178,6 @@ static void cpu_init_hyp_mode(void)
 
 static void cpu_hyp_reset(void)
 {
-	if (is_pkvm_initialized())
-		return;
-
 	if (!is_kernel_in_hyp_mode())
 		__hyp_reset_vectors();
 }
@@ -2221,18 +2218,12 @@ static void cpu_hyp_init_context(void)
 	kvm_init_host_cpu_context(host_data_ptr(host_ctxt));
 	kvm_init_host_debug_data();
 
-	if (is_pkvm_initialized())
-		return;
-
 	if (!is_kernel_in_hyp_mode())
 		cpu_init_hyp_mode();
 }
 
 static void cpu_hyp_init_features(void)
 {
-	if (is_pkvm_initialized())
-		return;
-
 	cpu_set_hyp_vector();
 
 	if (is_kernel_in_hyp_mode()) {
@@ -2357,8 +2348,13 @@ static void __init init_cpu_logical_map(void)
 {
 	unsigned int cpu;
 
-	/* Copy the MPIDR <-> logical CPU ID mapping to hyp. */
-	for_each_possible_cpu(cpu)
+	/*
+	 * Copy the MPIDR <-> logical CPU ID mapping to hyp.
+	 * Only copy the set of online CPUs whose features have been checked
+	 * against the finalized system capabilities. The hypervisor will not
+	 * allow any other CPUs from the `possible` set to boot.
+	 */
+	for_each_online_cpu(cpu)
 		hyp_cpu_logical_map[cpu] = cpu_logical_map(cpu);
 }
 
