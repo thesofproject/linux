@@ -22,6 +22,10 @@
 #include <linux/irqdomain.h>
 #include <linux/pm_runtime.h>
 #include <linux/bitfield.h>
+#include <linux/android_kabi.h>
+#include <trace/hooks/pci.h>
+ANDROID_KABI_DECLONLY(trace_eval_map);
+ANDROID_KABI_DECLONLY(static_call_mod);
 #include "pci.h"
 
 #define CARDBUS_LATENCY_TIMER	176	/* secondary latency timer */
@@ -2570,6 +2574,7 @@ static struct platform_device *pci_pwrctrl_create_device(struct pci_bus *bus, in
 	struct pci_host_bridge *host = pci_find_host_bridge(bus);
 	struct platform_device *pdev;
 	struct device_node *np;
+	bool skip = false;
 
 	np = of_pci_find_child_device(dev_of_node(&bus->dev), devfn);
 	if (!np)
@@ -2580,6 +2585,10 @@ static struct platform_device *pci_pwrctrl_create_device(struct pci_bus *bus, in
 		put_device(&pdev->dev);
 		goto err_put_of_node;
 	}
+
+	trace_android_vh_pci_pwrctrl_should_skip(np, &skip);
+	if (skip)
+		goto err_put_of_node;
 
 	/*
 	 * First check whether the pwrctrl device really needs to be created or
