@@ -126,6 +126,7 @@
   __mod_lruvec_state
   mem_cgroup_update_lru_size
   folio_referenced
+  folios_put_refs
   get_reclaim_params
   set_reclaim_params
   __traceiter_android_vh_mem_cgroup_free
