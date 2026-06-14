@@ -176,6 +176,11 @@ int acp_dsp_pre_fw_run(struct snd_sof_dev *sdev)
 
 	if (adata->pci_rev >= ACP7B_PCI_ID) {
 		if (adata->acp_sof_signed_firmware_image) {
+			if (adata->fw_bin_size <= ACP_IMAGE_HEADER_SIZE) {
+				dev_err(sdev->dev, "Invalid signed firmware size %u\n",
+					adata->fw_bin_size);
+				return -EINVAL;
+			}
 			size_fw = get_unaligned_le32(adata->bin_buf +
 						     ACP_IMAGE_HDR_SIZE_FW_SIGNED_OFF);
 			size_fw += ACP_IMAGE_HEADER_SIZE;
