@@ -183,6 +183,13 @@ int acp_dsp_pre_fw_run(struct snd_sof_dev *sdev)
 			}
 			size_fw = get_unaligned_le32(adata->bin_buf +
 						     ACP_IMAGE_HDR_SIZE_FW_SIGNED_OFF);
+			if (!size_fw ||
+			    size_fw > adata->fw_bin_size - ACP_IMAGE_HEADER_SIZE) {
+				dev_err(sdev->dev,
+					"Invalid signed firmware payload size %u (max %u)\n",
+					size_fw, adata->fw_bin_size - ACP_IMAGE_HEADER_SIZE);
+				return -EINVAL;
+			}
 			size_fw += ACP_IMAGE_HEADER_SIZE;
 		} else {
 			size_fw = adata->fw_bin_size;
