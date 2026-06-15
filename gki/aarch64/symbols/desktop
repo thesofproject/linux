@@ -1,26 +1,70 @@
 [abi_symbol_list]
   alt_cb_patch_nops
   clk_disable
+  clk_divider_ops
   clk_enable
+  clk_gate_ops
+  __clk_get_hw
   clk_get_rate
+  clk_hw_register
+  clk_hw_register_composite
+  __clk_hw_register_divider
+  clk_hw_register_fixed_factor
+  __clk_hw_register_fixed_rate
+  clk_hw_unregister
+  clk_hw_unregister_composite
+  clk_hw_unregister_divider
+  clk_hw_unregister_fixed_factor
+  clk_hw_unregister_fixed_rate
+  clk_mux_determine_rate_flags
+  clk_mux_ops
   clk_prepare
   clk_unprepare
+  __const_udelay
   _dev_err
+  dev_err_probe
+  device_get_match_data
+  device_node_to_regmap
+  devm_clk_get
   devm_clk_get_enabled
+  devm_clk_notifier_register
   devm_ioremap
   devm_kfree
   devm_kmalloc
+  devm_platform_ioremap_resource
+  devm_pm_runtime_enable
+  devm_regulator_get_optional
   devm_reset_controller_register
+  _dev_notice
   _dev_warn
+  iounmap
   irq_set_irq_wake
+  jiffies_to_usecs
+  kfree
+  __kmalloc_cache_noprof
+  kmalloc_caches
+  __kmalloc_noprof
+  ktime_get
+  log_post_read_mmio
   log_post_write_mmio
+  log_read_mmio
   log_write_mmio
+  mem_alloc_profiling_key
   memset
   module_layout
   nbcon_device_release
   nbcon_device_try_acquire
+  of_clk_add_hw_provider
+  of_clk_del_provider
+  of_clk_hw_onecell_get
+  of_device_get_match_data
+  of_find_property
+  of_genpd_add_provider_onecell
   of_get_property
+  of_iomap
+  __of_parse_phandle_with_args
   of_property_read_string_helper
+  of_prop_next_string
   pinctrl_pm_select_default_state
   pinctrl_pm_select_sleep_state
   __platform_driver_register
@@ -28,8 +72,11 @@
   platform_get_irq
   platform_get_irq_optional
   platform_get_resource
+  pm_genpd_add_subdomain
+  pm_genpd_init
   __pm_runtime_disable
   pm_runtime_enable
+  __pm_runtime_idle
   __pm_runtime_resume
   __pm_runtime_set_status
   __pm_runtime_suspend
@@ -39,6 +86,9 @@
   _raw_spin_unlock_irqrestore
   regmap_read
   regmap_update_bits_base
+  regmap_write
+  regulator_disable
+  regulator_enable
   serial8250_do_pm
   serial8250_do_set_mctrl
   serial8250_do_set_termios
@@ -51,10 +101,18 @@
   serial8250_unregister_port
   sg_init_table
   __stack_chk_fail
+  strlen
+  strncmp
   syscon_node_to_regmap
+  syscon_regmap_lookup_by_compatible
+  syscon_regmap_lookup_by_phandle
+  __traceiter_rwmmio_post_read
   __traceiter_rwmmio_post_write
+  __traceiter_rwmmio_read
   __traceiter_rwmmio_write
+  __tracepoint_rwmmio_post_read
   __tracepoint_rwmmio_post_write
+  __tracepoint_rwmmio_read
   __tracepoint_rwmmio_write
   tty_flip_buffer_push
   __tty_insert_flip_string_flags
@@ -63,4 +121,5 @@
   uart_get_baud_rate
   uart_get_divisor
   uart_update_timeout
+  usleep_range_state
   utf8_data_table
