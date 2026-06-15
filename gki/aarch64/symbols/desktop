@@ -1,5 +1,9 @@
 [abi_symbol_list]
   alt_cb_patch_nops
+  clk_bulk_disable
+  clk_bulk_enable
+  clk_bulk_prepare
+  clk_bulk_unprepare
   clk_disable
   clk_divider_ops
   clk_enable
@@ -21,32 +25,49 @@
   clk_prepare
   clk_unprepare
   __const_udelay
+  debugfs_create_file_full
+  debugfs_get_aux
   _dev_err
   dev_err_probe
   __dev_fwnode
   dev_get_regmap
   device_get_match_data
   device_node_to_regmap
+  device_property_present
+  device_property_read_bool
+  device_property_read_u32_array
+  __device_reset
+  device_set_wakeup_capable
+  device_wakeup_disable
+  device_wakeup_enable
+  _dev_info
   devm_clk_bulk_get_all_enabled
+  devm_clk_bulk_get_optional
   devm_clk_get
   devm_clk_get_enabled
   devm_clk_notifier_register
   devm_ioremap
+  devm_ioremap_resource
   devm_kfree
   devm_kmalloc
   devm_mfd_add_devices
+  __devm_of_phy_provider_register
+  devm_phy_create
   devm_pinctrl_register_and_init
   devm_platform_ioremap_resource
   devm_platform_ioremap_resource_byname
   devm_pm_runtime_enable
   __devm_regmap_init
   __devm_regmap_init_spmi_ext
+  devm_regulator_bulk_get
   devm_regulator_get_optional
   devm_regulator_register
   devm_request_threaded_irq
   __devm_reset_control_get
   devm_reset_controller_register
   _dev_notice
+  dev_pm_clear_wake_irq
+  dev_pm_set_dedicated_wake_irq_reverse
   _dev_warn
   driver_unregister
   generic_handle_domain_irq
@@ -77,11 +98,16 @@
   __kmalloc_cache_noprof
   kmalloc_caches
   __kmalloc_noprof
+  kstrtouint_from_user
   ktime_get
+  ktime_get_mono_fast_ns
+  __list_add_valid_or_report
+  __list_del_entry_valid_or_report
   log_post_read_mmio
   log_post_write_mmio
   log_read_mmio
   log_write_mmio
+  match_string
   mem_alloc_profiling_key
   memset
   module_layout
@@ -90,10 +116,13 @@
   mutex_unlock
   nbcon_device_release
   nbcon_device_try_acquire
+  nvmem_cell_read_variable_le_u32
+  of_address_to_resource
   of_clk_add_hw_provider
   of_clk_del_provider
   of_clk_hw_onecell_get
   of_device_get_match_data
+  of_device_is_compatible
   of_find_property
   of_genpd_add_provider_onecell
   of_get_next_child
@@ -105,6 +134,7 @@
   of_property_read_bool
   of_property_read_string_helper
   of_property_read_u32_index
+  of_property_read_variable_u32_array
   of_prop_next_string
   pinconf_generic_parse_dt_config
   pinctrl_dev_get_drvdata
@@ -119,16 +149,21 @@
   __platform_driver_register
   platform_driver_unregister
   platform_get_irq
+  platform_get_irq_byname_optional
   platform_get_irq_optional
   platform_get_resource
+  platform_get_resource_byname
   pm_genpd_add_subdomain
   pm_genpd_init
   __pm_runtime_disable
   pm_runtime_enable
+  pm_runtime_forbid
   __pm_runtime_idle
   __pm_runtime_resume
+  pm_runtime_set_autosuspend_delay
   __pm_runtime_set_status
   __pm_runtime_suspend
+  __pm_runtime_use_autosuspend
   _printk
   __put_task_struct
   _raw_spin_lock_irqsave
@@ -139,6 +174,8 @@
   regmap_read
   regmap_update_bits_base
   regmap_write
+  regulator_bulk_disable
+  regulator_bulk_enable
   regulator_disable
   regulator_disable_regmap
   regulator_enable
@@ -155,7 +192,9 @@
   regulator_set_voltage_time_sel
   reset_control_reset
   scnprintf
+  seq_lseek
   seq_printf
+  seq_read
   serial8250_do_pm
   serial8250_do_set_mctrl
   serial8250_do_set_termios
@@ -167,6 +206,8 @@
   serial8250_suspend_port
   serial8250_unregister_port
   sg_init_table
+  single_open
+  single_release
   __spmi_driver_register
   __stack_chk_fail
   strlen
@@ -174,6 +215,7 @@
   syscon_node_to_regmap
   syscon_regmap_lookup_by_compatible
   syscon_regmap_lookup_by_phandle
+  timer_delete_sync
   __traceiter_rwmmio_post_read
   __traceiter_rwmmio_post_write
   __traceiter_rwmmio_read
@@ -189,5 +231,22 @@
   uart_get_baud_rate
   uart_get_divisor
   uart_update_timeout
+  usb_add_hcd
+  usb_create_hcd
+  usb_create_shared_hcd
+  usb_disabled
+  usb_hcd_is_primary_hcd
+  usb_hcd_poll_rh_status
+  usb_put_hcd
+  usb_remove_hcd
   usleep_range_state
   utf8_data_table
+  __warn_printk
+  xhci_add_endpoint
+  xhci_check_bandwidth
+  xhci_drop_endpoint
+  xhci_gen_setup
+  xhci_get_endpoint_index
+  xhci_get_ep_ctx
+  xhci_init_driver
+  xhci_reset_bandwidth
