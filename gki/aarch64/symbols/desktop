@@ -23,6 +23,7 @@
   __const_udelay
   _dev_err
   dev_err_probe
+  __dev_fwnode
   device_get_match_data
   device_node_to_regmap
   devm_clk_get
@@ -31,13 +32,32 @@
   devm_ioremap
   devm_kfree
   devm_kmalloc
+  devm_pinctrl_register_and_init
   devm_platform_ioremap_resource
+  devm_platform_ioremap_resource_byname
   devm_pm_runtime_enable
   devm_regulator_get_optional
   devm_reset_controller_register
   _dev_notice
   _dev_warn
+  generic_handle_domain_irq
+  gpiochip_add_data_with_key
+  gpiochip_generic_free
+  gpiochip_generic_request
+  gpiochip_get_data
+  gpiochip_lock_as_irq
+  gpiochip_unlock_as_irq
+  handle_level_irq
   iounmap
+  irq_create_mapping_affinity
+  irq_domain_instantiate
+  irq_domain_simple_ops
+  irq_get_irq_data
+  irq_of_parse_and_map
+  __irq_resolve_mapping
+  irq_set_chained_handler_and_data
+  irq_set_chip_and_handler_name
+  irq_set_chip_data
   irq_set_irq_wake
   jiffies_to_usecs
   kfree
@@ -60,13 +80,24 @@
   of_device_get_match_data
   of_find_property
   of_genpd_add_provider_onecell
+  of_get_next_child
   of_get_property
   of_iomap
   __of_parse_phandle_with_args
+  of_property_read_bool
   of_property_read_string_helper
+  of_property_read_u32_index
   of_prop_next_string
+  pinconf_generic_parse_dt_config
+  pinctrl_dev_get_drvdata
+  pinctrl_enable
+  pinctrl_gpio_direction_input
+  pinctrl_gpio_direction_output
   pinctrl_pm_select_default_state
   pinctrl_pm_select_sleep_state
+  pinctrl_utils_add_map_configs
+  pinctrl_utils_free_map
+  pinctrl_utils_reserve_map
   __platform_driver_register
   platform_driver_unregister
   platform_get_irq
@@ -89,6 +120,8 @@
   regmap_write
   regulator_disable
   regulator_enable
+  scnprintf
+  seq_printf
   serial8250_do_pm
   serial8250_do_set_mctrl
   serial8250_do_set_termios
