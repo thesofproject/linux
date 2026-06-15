@@ -407192,6 +407192,15 @@ elf_symbol {
   full_name: "devm_clk_bulk_get_all"
 }
 elf_symbol {
+  id: 0x49ce2287
+  name: "devm_clk_bulk_get_all_enabled"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x275d11d1
+  type_id: 0x9d053909
+  full_name: "devm_clk_bulk_get_all_enabled"
+}
+elf_symbol {
   id: 0xf770e060
   name: "devm_clk_bulk_get_optional"
   is_defined: true
@@ -463526,6 +463535,7 @@ interface {
   symbol_id: 0x01a0cc1d
   symbol_id: 0x32439a1e
   symbol_id: 0x70cc5ef2
+  symbol_id: 0x49ce2287
   symbol_id: 0xf770e060
   symbol_id: 0xfe156c9a
   symbol_id: 0x4cc1057f
