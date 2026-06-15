@@ -228,6 +228,17 @@ static int psci_system_suspend(u64 func_id, struct kvm_cpu_context *host_ctxt)
 			 __hyp_pa(init_params), 0);
 }
 
+static void pkvm_cpu_context_init(struct kvm_cpu_context *host_ctxt)
+{
+	if (!host_data_test_flag(PKVM_LATE_CPU))
+		return;
+
+	kvm_init_host_cpu_context(host_ctxt);
+	kvm_init_host_debug_data();
+
+	host_data_clear_flag(PKVM_LATE_CPU);
+}
+
 asmlinkage void __noreturn __kvm_host_psci_cpu_entry(bool is_cpu_on)
 {
 	struct psci_boot_args *boot_args;
@@ -236,6 +247,7 @@ asmlinkage void __noreturn __kvm_host_psci_cpu_entry(bool is_cpu_on)
 	__hyp_enter();
 
 	host_ctxt = host_data_ptr(host_ctxt);
+	pkvm_cpu_context_init(host_ctxt);
 
 	if (is_cpu_on)
 		boot_args = this_cpu_ptr(&cpu_on_args);
