@@ -1135,7 +1135,7 @@ impl Thread {
             }
         };
 
-        crate::trace::trace_transaction_alloc_buf(debug_id, tr);
+        crate::trace::trace_transaction_alloc_buf(debug_id, data_size, offsets_size, buffers_size);
 
         let mut buffer_reader = UserSlice::new(info.data_ptr, data_size).reader();
         let mut end_of_previous_object = 0;
