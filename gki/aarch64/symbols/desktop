@@ -10,6 +10,7 @@
   devm_ioremap
   devm_kfree
   devm_kmalloc
+  devm_reset_controller_register
   _dev_warn
   irq_set_irq_wake
   log_post_write_mmio
@@ -18,6 +19,7 @@
   module_layout
   nbcon_device_release
   nbcon_device_try_acquire
+  of_get_property
   of_property_read_string_helper
   pinctrl_pm_select_default_state
   pinctrl_pm_select_sleep_state
@@ -35,6 +37,8 @@
   __put_task_struct
   _raw_spin_lock_irqsave
   _raw_spin_unlock_irqrestore
+  regmap_read
+  regmap_update_bits_base
   serial8250_do_pm
   serial8250_do_set_mctrl
   serial8250_do_set_termios
@@ -47,6 +51,7 @@
   serial8250_unregister_port
   sg_init_table
   __stack_chk_fail
+  syscon_node_to_regmap
   __traceiter_rwmmio_post_write
   __traceiter_rwmmio_write
   __tracepoint_rwmmio_post_write
