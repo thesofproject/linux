@@ -596,13 +596,9 @@ end:
 	return ret;
 }
 
-int __pkvm_prot_finalize(void)
+static void pkvm_init_params_finalize(struct kvm_nvhe_init_params *params)
 {
 	struct kvm_s2_mmu *mmu = &host_mmu.arch.mmu;
-	struct kvm_nvhe_init_params *params = this_cpu_ptr(&kvm_init_params);
-
-	if (params->hcr_el2 & HCR_VM)
-		return -EPERM;
 
 	params->vttbr = kvm_get_vttbr(mmu);
 	params->vtcr = mmu->vtcr;
@@ -615,6 +611,37 @@ int __pkvm_prot_finalize(void)
 	 * have completed.
 	 */
 	kvm_flush_dcache_to_poc(params, sizeof(*params));
+}
+
+void __pkvm_late_cpus_finalize(void)
+{
+	struct kvm_nvhe_init_params *params;
+	unsigned long i;
+
+	for (i = 0; i < hyp_nr_cpus; i++) {
+		if (!test_bit(KVM_HOST_DATA_FLAG_PKVM_LATE_CPU,
+			      &per_cpu_ptr(&kvm_host_data, i)->flags))
+			continue;
+
+		params = per_cpu_ptr(&kvm_init_params, i);
+		pkvm_init_params_finalize(params);
+
+		/* For CPUs we've not seen before, assume the worst */
+		if (!*per_cpu_ptr(&kvm_hyp_vector, i))
+			__pkvm_cpu_set_vector(HYP_VECTOR_INDIRECT, i);
+	}
+
+	__pkvm_close_module_registration();
+}
+
+int __pkvm_prot_finalize(void)
+{
+	struct kvm_nvhe_init_params *params = this_cpu_ptr(&kvm_init_params);
+
+	if (read_sysreg(HCR_EL2) & HCR_VM)
+		return -EINVAL;
+
+	pkvm_init_params_finalize(params);
 
 	write_sysreg_hcr(params->hcr_el2);
 	__load_stage2(&host_mmu.arch.mmu, &host_mmu.arch);
@@ -629,8 +656,6 @@ int __pkvm_prot_finalize(void)
 	__tlbi(vmalls12e1);
 	dsb(nsh);
 	isb();
-
-	__pkvm_close_module_registration();
 
 	return 0;
 }
