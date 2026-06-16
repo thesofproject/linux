@@ -361519,6 +361519,14 @@ function {
   parameter_id: 0x38e698da
 }
 function {
+  id: 0x9b4396e7
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x3861403d
+  parameter_id: 0x3e6396e0
+  parameter_id: 0x8c586ef5
+}
+function {
   id: 0x9b43a9b0
   return_type_id: 0x6720d32f
   parameter_id: 0x18bd6530
@@ -389821,6 +389829,15 @@ elf_symbol {
   full_name: "__traceiter_tcp_retransmit_skb"
 }
 elf_symbol {
+  id: 0xf2cd7e13
+  name: "__traceiter_tcp_send_reset"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x5560bcba
+  type_id: 0x9b4396e7
+  full_name: "__traceiter_tcp_send_reset"
+}
+elf_symbol {
   id: 0x35f53d2e
   name: "__traceiter_ufshcd_profile_clk_gating"
   is_defined: true
@@ -397019,6 +397036,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_tcp_retransmit_skb"
+}
+elf_symbol {
+  id: 0x3482f919
+  name: "__tracepoint_tcp_send_reset"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_tcp_send_reset"
 }
 elf_symbol {
   id: 0x5dd7d3e4
@@ -461758,6 +461784,7 @@ interface {
   symbol_id: 0xcac5a7d5
   symbol_id: 0x2dc83a86
   symbol_id: 0x59a320d1
+  symbol_id: 0xf2cd7e13
   symbol_id: 0x35f53d2e
   symbol_id: 0x0dd41e78
   symbol_id: 0x3b50eb54
@@ -462558,6 +462585,7 @@ interface {
   symbol_id: 0xe91cdbb3
   symbol_id: 0x4f1ffabc
   symbol_id: 0x4c9e8f73
+  symbol_id: 0x3482f919
   symbol_id: 0x5dd7d3e4
   symbol_id: 0x4bf305e6
   symbol_id: 0x483c06ba
