@@ -33,6 +33,7 @@
 #include <linux/stddef.h>
 #include <linux/sysctl.h>
 #include <linux/swab.h>
+#include <trace/hooks/fpsimd.h>
 
 #include <asm/esr.h>
 #include <asm/exception.h>
@@ -1515,6 +1516,12 @@ void do_sme_acc(unsigned long esr, struct pt_regs *regs)
 	}
 
 	put_cpu_fpsimd_context();
+
+	/*
+	 * TIF_SME is now set and SME state is fully initialised.
+	 * Notify vendor drivers via hook.
+	 */
+	trace_android_rvh_sme_smstart(current);
 }
 
 /*
