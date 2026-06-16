@@ -327941,6 +327941,11 @@ function {
   parameter_id: 0xc9082b19
 }
 function {
+  id: 0x11ed5dd4
+  return_type_id: 0x48b5725f
+  parameter_id: 0x05d4311d
+}
+function {
   id: 0x11f73b29
   return_type_id: 0x48b5725f
   parameter_id: 0x0665e6b6
@@ -363189,6 +363194,13 @@ function {
   parameter_id: 0x2df352f2
 }
 function {
+  id: 0x9b8ddd14
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x09484746
+  parameter_id: 0x1d19a9d5
+}
+function {
   id: 0x9b8e2bf2
   return_type_id: 0x6720d32f
   parameter_id: 0x1462a9ec
@@ -385480,6 +385492,15 @@ elf_symbol {
   full_name: "__traceiter_android_vh_drain_all_pages_bypass"
 }
 elf_symbol {
+  id: 0xc9036089
+  name: "__traceiter_android_vh_dump_dl_server"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x9010d009
+  type_id: 0x9b8ddd14
+  full_name: "__traceiter_android_vh_dump_dl_server"
+}
+elf_symbol {
   id: 0xf432d1c9
   name: "__traceiter_android_vh_dup_task_struct"
   is_defined: true
@@ -392669,6 +392690,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_vh_drain_all_pages_bypass"
+}
+elf_symbol {
+  id: 0x40e581af
+  name: "__tracepoint_android_vh_dump_dl_server"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_vh_dump_dl_server"
 }
 elf_symbol {
   id: 0x732a182b
@@ -427085,6 +427115,15 @@ elf_symbol {
   full_name: "led_get_default_pattern"
 }
 elf_symbol {
+  id: 0x62cd5012
+  name: "led_get_flash_fault"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x55d86568
+  type_id: 0x92625532
+  full_name: "led_get_flash_fault"
+}
+elf_symbol {
   id: 0xda95494e
   name: "led_init_default_state_get"
   is_defined: true
@@ -427184,6 +427223,15 @@ elf_symbol {
   full_name: "led_trigger_register_simple"
 }
 elf_symbol {
+  id: 0xbadeab0f
+  name: "led_trigger_remove"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x194e0375
+  type_id: 0x1c2afa5a
+  full_name: "led_trigger_remove"
+}
+elf_symbol {
   id: 0xa60f59c7
   name: "led_trigger_unregister"
   is_defined: true
@@ -427200,6 +427248,15 @@ elf_symbol {
   crc: 0xf75f5154
   type_id: 0x1302b82e
   full_name: "led_trigger_unregister_simple"
+}
+elf_symbol {
+  id: 0xf4949824
+  name: "led_update_brightness"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x84d07e7a
+  type_id: 0x913248e6
+  full_name: "led_update_brightness"
 }
 elf_symbol {
   id: 0xf48c4979
@@ -453584,6 +453641,15 @@ elf_symbol {
   full_name: "unregister_rpmsg_driver"
 }
 elf_symbol {
+  id: 0x5e7cbd86
+  name: "unregister_sys_off_handler"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xa1203100
+  type_id: 0x11ed5dd4
+  full_name: "unregister_sys_off_handler"
+}
+elf_symbol {
   id: 0xe437e69c
   name: "unregister_syscore_ops"
   is_defined: true
@@ -461211,6 +461277,7 @@ interface {
   symbol_id: 0xdd171ab0
   symbol_id: 0x515cade3
   symbol_id: 0xf80eb64b
+  symbol_id: 0xc9036089
   symbol_id: 0xf432d1c9
   symbol_id: 0xffd74922
   symbol_id: 0x3ee1b2cf
@@ -462010,6 +462077,7 @@ interface {
   symbol_id: 0x0ec5d99e
   symbol_id: 0xfe5b8eb1
   symbol_id: 0x8405c9a1
+  symbol_id: 0x40e581af
   symbol_id: 0x732a182b
   symbol_id: 0x77b87208
   symbol_id: 0xb5fa1975
@@ -465826,6 +465894,7 @@ interface {
   symbol_id: 0xfe24eb71
   symbol_id: 0x27d77d55
   symbol_id: 0x61740d72
+  symbol_id: 0x62cd5012
   symbol_id: 0xda95494e
   symbol_id: 0x76f00da5
   symbol_id: 0xa5be7046
@@ -465837,8 +465906,10 @@ interface {
   symbol_id: 0x678fcec9
   symbol_id: 0x73ea3871
   symbol_id: 0xaaa8b4f9
+  symbol_id: 0xbadeab0f
   symbol_id: 0xa60f59c7
   symbol_id: 0x61d92429
+  symbol_id: 0xf4949824
   symbol_id: 0xf48c4979
   symbol_id: 0xe30546d3
   symbol_id: 0xb514ffaf
@@ -468768,6 +468839,7 @@ interface {
   symbol_id: 0x115960c0
   symbol_id: 0xb70e9915
   symbol_id: 0x2da08566
+  symbol_id: 0x5e7cbd86
   symbol_id: 0xe437e69c
   symbol_id: 0x2e6d8f4b
   symbol_id: 0xd7ac8836
