@@ -63,6 +63,8 @@
   __tracepoint_android_vh_udp_v6_connect
   __traceiter_android_vh_uplink_send_msg
   __tracepoint_android_vh_uplink_send_msg
+  __traceiter_tcp_send_reset
+  __tracepoint_tcp_send_reset
   __tracepoint_android_vh_set_tsk_need_resched_lazy
   __traceiter_android_vh_set_tsk_need_resched_lazy
   __tracepoint_android_vh_task_cmdline_prio_inherit
