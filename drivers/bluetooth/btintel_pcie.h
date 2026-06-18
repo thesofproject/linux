@@ -34,9 +34,6 @@
 #define BTINTEL_PCIE_CSR_FUNC_CTRL_MAC_ACCESS_STS	(BIT(20))
 
 #define BTINTEL_PCIE_CSR_FUNC_CTRL_MAC_ACCESS_REQ	(BIT(21))
-/* Stop MAC Access disconnection request */
-#define BTINTEL_PCIE_CSR_FUNC_CTRL_STOP_MAC_ACCESS_DIS	(BIT(22))
-#define BTINTEL_PCIE_CSR_FUNC_CTRL_XTAL_CLK_REQ		(BIT(23))
 
 #define BTINTEL_PCIE_CSR_FUNC_CTRL_BUS_MASTER_STS	(BIT(28))
 #define BTINTEL_PCIE_CSR_FUNC_CTRL_BUS_MASTER_DISCON	(BIT(29))
@@ -71,6 +68,10 @@
 #define BTINTEL_PCIE_DBGC_CUR_DBGBUFF_STATUS		(BTINTEL_PCIE_DBGC_BASE_ADDR + 0x1C)
 #define BTINTEL_PCIE_DBGC_DBGBUFF_WRAP_ARND		(BTINTEL_PCIE_DBGC_BASE_ADDR + 0x2C)
 
+#define BTINTEL_PCIE_DBGC_BASE_ADDR_SCP			(0xf0d5d500)
+#define BTINTEL_PCIE_DBGC_CUR_DBGBUFF_STATUS_SCP	(BTINTEL_PCIE_DBGC_BASE_ADDR_SCP + 0x1C)
+#define BTINTEL_PCIE_DBGC_DBGBUFF_WRAP_ARND_SCP		(BTINTEL_PCIE_DBGC_BASE_ADDR_SCP + 0x2C)
+
 #define BTINTEL_PCIE_DBG_IDX_BIT_MASK		0x0F
 #define BTINTEL_PCIE_DBGC_DBG_BUF_IDX(data)	(((data) >> 24) & BTINTEL_PCIE_DBG_IDX_BIT_MASK)
 #define BTINTEL_PCIE_DBG_OFFSET_BIT_MASK	0xFFFFFF
@@ -101,6 +102,7 @@ enum msix_hw_int_causes {
 	BTINTEL_PCIE_MSIX_HW_INT_CAUSES_GP0	= BIT(0),	/* cause 32 */
 	BTINTEL_PCIE_MSIX_HW_INT_CAUSES_GP1	= BIT(1),	/* cause 33 */
 	BTINTEL_PCIE_MSIX_HW_INT_CAUSES_HWEXP	= BIT(3),	/* cause 35 */
+	BTINTEL_PCIE_MSIX_HW_INT_CAUSES_FWTRIG	= BIT(5),	/* cause 37 */
 };
 
 /* PCIe device states
@@ -118,6 +120,7 @@ enum {
 	BTINTEL_PCIE_CORE_HALTED,
 	BTINTEL_PCIE_HWEXP_INPROGRESS,
 	BTINTEL_PCIE_COREDUMP_INPROGRESS,
+	BTINTEL_PCIE_FWTRIGGER_DUMP_INPROGRESS,
 	BTINTEL_PCIE_RECOVERY_IN_PROGRESS,
 	BTINTEL_PCIE_SETUP_DONE
 };
@@ -133,7 +136,9 @@ enum btintel_pcie_tlv_type {
 	BTINTEL_DUMP_TIME,
 	BTINTEL_FW_BUILD,
 	BTINTEL_VENDOR,
-	BTINTEL_DRIVER
+	BTINTEL_DRIVER,
+	BTINTEL_EVENT_TYPE,
+	BTINTEL_EVENT_ID
 };
 
 /* causes for the MBOX interrupts */
@@ -162,6 +167,8 @@ enum btintel_pcie_reset_type {
 
 /* Default interrupt timeout in msec */
 #define BTINTEL_DEFAULT_INTR_TIMEOUT_MS	3000
+
+#define BTINTEL_PCIE_DX_TRANSITION_MAX_RETRIES	3
 
 /* The number of descriptors in TX queues */
 #define BTINTEL_PCIE_TX_DESCS_COUNT	32
@@ -434,6 +441,8 @@ struct btintel_pcie_dump_header {
 	u32		wrap_ctr;
 	u16		trigger_reason;
 	int		state;
+	u8		event_type;
+	u16		event_id;
 };
 
 /* struct btintel_pcie_data
@@ -460,6 +469,8 @@ struct btintel_pcie_dump_header {
  * @workqueue: workqueue for RX work
  * @rx_skb_q: SKB queue for RX packet
  * @rx_work: RX work struct to process the RX packet in @rx_skb_q
+ * @coredump_workqueue: dedicated workqueue for coredump collection
+ * @coredump_work: work struct for coredump trace collection
  * @dma_pool: DMA pool for descriptors, index array and ci
  * @dma_p_addr: DMA address for pool
  * @dma_v_addr: address of pool
@@ -508,6 +519,9 @@ struct btintel_pcie_data {
 	struct work_struct	rx_work;
 	struct work_struct      reset_work;
 
+	struct workqueue_struct	*coredump_workqueue;
+	struct work_struct	coredump_work;
+
 	struct dma_pool	*dma_pool;
 	dma_addr_t	dma_p_addr;
 	void		*dma_v_addr;
@@ -522,6 +536,8 @@ struct btintel_pcie_data {
 	struct btintel_pcie_dbgc	dbgc;
 	struct btintel_pcie_dump_header dmp_hdr;
 	u8	pm_sx_event;
+	u32	debug_evt_addr;
+	u32	debug_evt_size;
 };
 
 static inline u32 btintel_pcie_rd_reg32(struct btintel_pcie_data *data,

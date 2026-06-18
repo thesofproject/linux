@@ -514,3 +514,10 @@
   wait_for_completion_io_timeout
   get_pfnblock_migratetype
   iov_iter_bvec
+  led_trigger_remove
+  led_update_brightness
+  led_get_flash_fault
+  get_tree_nodev
+  fs_param_is_enum
+  compat_vma_mmap_prepare
+  unregister_sys_off_handler
