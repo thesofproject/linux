@@ -66,6 +66,7 @@ static struct {
 	const char *driver_name;
 	u8         hw_variant;
 	u32        fw_build_num;
+	u32        fw_git_sha1;
 } coredump_info;
 
 const guid_t btintel_guid_dsm =
@@ -560,6 +561,7 @@ int btintel_version_info_tlv(struct hci_dev *hdev,
 
 	coredump_info.hw_variant = INTEL_HW_VARIANT(version->cnvi_bt);
 	coredump_info.fw_build_num = version->build_num;
+	coredump_info.fw_git_sha1 = version->git_sha1;
 
 	bt_dev_info(hdev, "%s timestamp %u.%u buildtype %u build %u", variant,
 		    2000 + (version->timestamp >> 8), version->timestamp & 0xff,
@@ -2449,6 +2451,13 @@ static int btintel_prepare_fw_download_tlv(struct hci_dev *hdev,
 		btintel_reset_to_bootloader(hdev);
 
 done:
+	{
+		struct btintel_data *intel_data = hci_get_priv(hdev);
+
+		intel_data->cnvi_bt = ver->cnvi_bt;
+		bt_dev_dbg(hdev, "INTEL HW VARIANT is: 0x%2x",
+			   INTEL_HW_VARIANT(intel_data->cnvi_bt));
+	}
 	release_firmware(fw);
 	return err;
 }
@@ -3450,6 +3459,9 @@ int btintel_bootloader_setup_tlv(struct hci_dev *hdev,
 		return err;
 
 	btintel_version_info_tlv(hdev, &new_ver);
+
+	/* Update ver with the operational firmware version */
+	*ver = new_ver;
 
 finish:
 	/* Set the event mask for Intel specific vendor events. This enables
