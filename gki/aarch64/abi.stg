@@ -43288,6 +43288,11 @@ array {
   element_type_id: 0x3b4ce03a
 }
 array {
+  id: 0x8399007a
+  number_of_elements: 23
+  element_type_id: 0xc5d9d969
+}
+array {
   id: 0x839f12d6
   number_of_elements: 17
   element_type_id: 0x1d841d76
@@ -354447,6 +354452,14 @@ function {
   parameter_id: 0x21e54bf6
 }
 function {
+  id: 0x95fc7a3d
+  return_type_id: 0x6720d32f
+  parameter_id: 0x23f09c34
+  parameter_id: 0x23f09c34
+  parameter_id: 0x3e10b518
+  parameter_id: 0x3e10b518
+}
+function {
   id: 0x95fc827f
   return_type_id: 0x6720d32f
   parameter_id: 0x23f09c34
@@ -402486,6 +402499,15 @@ elf_symbol {
   full_name: "compact_node_async"
 }
 elf_symbol {
+  id: 0xfb23b117
+  name: "compat_only_sysfs_link_entry_to_kobj"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x08b5f3d5
+  type_id: 0x95fc7a3d
+  full_name: "compat_only_sysfs_link_entry_to_kobj"
+}
+elf_symbol {
   id: 0x4f627b39
   name: "compat_ptr_ioctl"
   is_defined: true
@@ -415350,6 +415372,15 @@ elf_symbol {
   full_name: "efi_status_to_err"
 }
 elf_symbol {
+  id: 0xd719521c
+  name: "efi_tpm_final_log_size"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x7ec472ba
+  type_id: 0x6720d32f
+  full_name: "efi_tpm_final_log_size"
+}
+elf_symbol {
   id: 0x165fbaf9
   name: "efivar_get_variable"
   is_defined: true
@@ -419964,6 +419995,15 @@ elf_symbol {
   crc: 0x8272805e
   type_id: 0x1acf4d13
   full_name: "handle_sysrq"
+}
+elf_symbol {
+  id: 0xb7058c51
+  name: "hash_digest_size"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0xfd6bf63e
+  type_id: 0x8399007a
+  full_name: "hash_digest_size"
 }
 elf_symbol {
   id: 0x4ae6d6c4
@@ -437584,6 +437624,15 @@ elf_symbol {
   full_name: "pm_suspend_default_s2idle"
 }
 elf_symbol {
+  id: 0x7ee02b97
+  name: "pm_suspend_global_flags"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0xf296206e
+  type_id: 0x4585663f
+  full_name: "pm_suspend_global_flags"
+}
+elf_symbol {
   id: 0x2e13b831
   name: "pm_suspend_target_state"
   is_defined: true
@@ -443696,6 +443745,33 @@ elf_symbol {
   crc: 0x5c55f911
   type_id: 0x1788ddaf
   full_name: "security_sock_graft"
+}
+elf_symbol {
+  id: 0x60e70069
+  name: "securityfs_create_dir"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x0fb07056
+  type_id: 0x83bdcb7d
+  full_name: "securityfs_create_dir"
+}
+elf_symbol {
+  id: 0x3f085d83
+  name: "securityfs_create_file"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x549e439e
+  type_id: 0x83b87db5
+  full_name: "securityfs_create_file"
+}
+elf_symbol {
+  id: 0x8e148419
+  name: "securityfs_remove"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xca699629
+  type_id: 0x141901a7
+  full_name: "securityfs_remove"
 }
 elf_symbol {
   id: 0xb543d6ba
@@ -463242,6 +463318,7 @@ interface {
   symbol_id: 0xab62b21c
   symbol_id: 0xdbbde05c
   symbol_id: 0x036561b6
+  symbol_id: 0xfb23b117
   symbol_id: 0x4f627b39
   symbol_id: 0xc35c4166
   symbol_id: 0xda163e44
@@ -464667,6 +464744,7 @@ interface {
   symbol_id: 0xd9e73815
   symbol_id: 0x7a956b27
   symbol_id: 0xa8c1e0c3
+  symbol_id: 0xd719521c
   symbol_id: 0x165fbaf9
   symbol_id: 0x7fd2c000
   symbol_id: 0x4315fea8
@@ -465178,6 +465256,7 @@ interface {
   symbol_id: 0x9f446d29
   symbol_id: 0xab6386a0
   symbol_id: 0x55e1ead1
+  symbol_id: 0xb7058c51
   symbol_id: 0x4ae6d6c4
   symbol_id: 0x23498da9
   symbol_id: 0xdbab134a
@@ -467132,6 +467211,7 @@ interface {
   symbol_id: 0x59caaeac
   symbol_id: 0xb6d3c009
   symbol_id: 0x64f92138
+  symbol_id: 0x7ee02b97
   symbol_id: 0x2e13b831
   symbol_id: 0x57ba6430
   symbol_id: 0x131272a2
@@ -467811,6 +467891,9 @@ interface {
   symbol_id: 0x24b9d7ed
   symbol_id: 0x25471057
   symbol_id: 0xb77dc501
+  symbol_id: 0x60e70069
+  symbol_id: 0x3f085d83
+  symbol_id: 0x8e148419
   symbol_id: 0xb543d6ba
   symbol_id: 0x569844be
   symbol_id: 0x17b3f8eb
