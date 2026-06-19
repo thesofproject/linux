@@ -362902,6 +362902,13 @@ function {
   parameter_id: 0xfc0e1dbd
 }
 function {
+  id: 0x9b7a0596
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x347303b4
+  parameter_id: 0x11cfee5a
+}
+function {
   id: 0x9b7b9b19
   return_type_id: 0x6720d32f
   parameter_id: 0x18ea6ae3
@@ -387174,6 +387181,15 @@ elf_symbol {
   full_name: "__traceiter_android_vh_pagetypeinfo_show"
 }
 elf_symbol {
+  id: 0x92225561
+  name: "__traceiter_android_vh_pci_pwrctrl_should_skip"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x28fd8e9e
+  type_id: 0x9b7a0596
+  full_name: "__traceiter_android_vh_pci_pwrctrl_should_skip"
+}
+elf_symbol {
   id: 0xa8af12cd
   name: "__traceiter_android_vh_pcpu_rwsem_lock_acquired"
   is_defined: true
@@ -394381,6 +394397,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_vh_pagetypeinfo_show"
+}
+elf_symbol {
+  id: 0x36a3cbc3
+  name: "__tracepoint_android_vh_pci_pwrctrl_should_skip"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_vh_pci_pwrctrl_should_skip"
 }
 elf_symbol {
   id: 0x94fbe99f
@@ -461516,6 +461541,7 @@ interface {
   symbol_id: 0xed7b87e3
   symbol_id: 0xb4d5ffdc
   symbol_id: 0x3c5e668a
+  symbol_id: 0x92225561
   symbol_id: 0xa8af12cd
   symbol_id: 0xe6eecb59
   symbol_id: 0x13b0736e
@@ -462317,6 +462343,7 @@ interface {
   symbol_id: 0xeeab2985
   symbol_id: 0x352038ba
   symbol_id: 0x2f61d5a4
+  symbol_id: 0x36a3cbc3
   symbol_id: 0x94fbe99f
   symbol_id: 0x98b47047
   symbol_id: 0xa4c454d8
