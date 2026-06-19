@@ -353,8 +353,6 @@ void __init kvm_hyp_reserve(void)
 	hyp_mem_pages += hyp_vmemmap_pages(STRUCT_HYP_PAGE_SIZE);
 	hyp_mem_pages += pkvm_selftest_pages();
 	hyp_mem_pages += hyp_ffa_proxy_pages();
-	if (static_branch_unlikely(&kvm_ffa_unmap_on_lend))
-		hyp_mem_pages += KVM_FFA_SPM_HANDLE_NR_PAGES;
 	hyp_mem_pages++; /* hyp_ppages */
 	hyp_mem_pages += kvm_iommu_pages();
 
