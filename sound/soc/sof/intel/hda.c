@@ -1392,10 +1392,17 @@ static struct snd_soc_acpi_mach *hda_sdw_machine_select(struct snd_sof_dev *sdev
 		return NULL;
 
 	/* Get link mask and link number */
-	for (i = 0; i < peripherals->num_peripherals; i++)
+	for (i = 0; i < peripherals->num_peripherals; i++) {
+		if (peripherals->array[i]->status == SDW_SLAVE_UNATTACHED)
+			continue;
 		link_mask |= BIT(peripherals->array[i]->bus->link_id);
+	}
+
+	if (!link_mask)
+		return NULL;
 
 	link_num = hweight32(link_mask);
+
 	/* An empty adr_link is needed to terminate the adr_link loop */
 	links = devm_kcalloc(sdev->dev, link_num + 1, sizeof(*links), GFP_KERNEL);
 	if (!links)
@@ -1403,6 +1410,8 @@ static struct snd_soc_acpi_mach *hda_sdw_machine_select(struct snd_sof_dev *sdev
 
 	/* Generate snd_soc_acpi_link_adr struct for each peripheral reported by the ACPI table */
 	for (i = 0; i < peripherals->num_peripherals; i++) {
+		if (peripherals->array[i]->status == SDW_SLAVE_UNATTACHED)
+			continue;
 		/* link_index = the number of used links below the current link */
 		link_index = hweight32(link_mask & (BIT(peripherals->array[i]->bus->link_id) - 1));
 		links[link_index].adr_d = find_acpi_adr_device(sdev->dev, peripherals->array[i],
