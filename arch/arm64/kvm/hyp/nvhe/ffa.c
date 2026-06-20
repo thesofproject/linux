@@ -1922,6 +1922,7 @@ u32 ffa_get_hypervisor_version(void)
 
 int hyp_ffa_init(void *pages)
 {
+	unsigned long num_pages = hyp_ffa_proxy_pages();
 	struct arm_smccc_1_2_regs res;
 	void *tx, *rx;
 
@@ -1956,12 +1957,20 @@ int hyp_ffa_init(void *pages)
 	else
 		hyp_ffa_version = FFA_VERSION_1_2;
 
+	if (num_pages < 2 * KVM_FFA_MBOX_NR_PAGES)
+		return -ENOMEM;
+
+	num_pages -= 2 * KVM_FFA_MBOX_NR_PAGES;
 	tx = pages;
 	pages += KVM_FFA_MBOX_NR_PAGES * PAGE_SIZE;
 	rx = pages;
 	pages += KVM_FFA_MBOX_NR_PAGES * PAGE_SIZE;
 
 	if (static_branch_unlikely(&kvm_ffa_unmap_on_lend)) {
+		if (num_pages < KVM_FFA_SPM_HANDLE_NR_PAGES)
+			return -ENOMEM;
+
+		num_pages -= KVM_FFA_SPM_HANDLE_NR_PAGES;
 		spm_handles = pages;
 		pages += KVM_FFA_SPM_HANDLE_NR_PAGES * PAGE_SIZE;
 		num_spm_handles = KVM_FFA_SPM_HANDLE_NR_PAGES * PAGE_SIZE /
@@ -1969,10 +1978,12 @@ int hyp_ffa_init(void *pages)
 		memset(spm_handles, -1, KVM_FFA_SPM_HANDLE_NR_PAGES * PAGE_SIZE);
 	}
 
+	if (!num_pages)
+		return -ENOMEM;
+
 	ffa_desc_buf = (struct kvm_ffa_descriptor_buffer) {
 		.buf	= pages,
-		.len	= PAGE_SIZE *
-			  (hyp_ffa_proxy_pages() - (2 * KVM_FFA_MBOX_NR_PAGES)),
+		.len	= PAGE_SIZE * num_pages,
 	};
 
 	hyp_buffers = (struct kvm_ffa_buffers) {
