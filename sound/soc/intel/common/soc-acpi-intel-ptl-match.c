@@ -292,6 +292,21 @@ static const struct snd_soc_acpi_adr_device rt1320_2_group2_l_adr[] = {
 	}
 };
 
+static const struct snd_soc_acpi_adr_device rt1320_2_group2_lr_adr[] = {
+	{
+		.adr = 0x000230025D132001ull,
+		.num_endpoints = 1,
+		.endpoints = &spk_l_endpoint,
+		.name_prefix = "rt1320-1"
+	},
+	{
+		.adr = 0x000231025D132001ull,
+		.num_endpoints = 1,
+		.endpoints = &spk_r_endpoint,
+		.name_prefix = "rt1320-2"
+	}
+};
+
 static const struct snd_soc_acpi_adr_device rt1320_3_group2_adr[] = {
 	{
 		.adr = 0x000330025D132001ull,
@@ -395,6 +410,20 @@ static const struct snd_soc_acpi_link_adr ptl_sdw_rt713_vb_l3_rt1320_l1[] = {
 	{}
 };
 
+static const struct snd_soc_acpi_link_adr ptl_sdw_rt713_vb_l3_rt1320_l2[] = {
+	{
+		.mask = BIT(3),
+		.num_adr = ARRAY_SIZE(rt713_vb_3_adr),
+		.adr_d = rt713_vb_3_adr,
+	},
+	{
+		.mask = BIT(2),
+		.num_adr = ARRAY_SIZE(rt1320_2_group2_lr_adr),
+		.adr_d = rt1320_2_group2_lr_adr,
+	},
+	{}
+};
+
 static const struct snd_soc_acpi_link_adr ptl_sdw_rt712_vb_l2_rt1320_l1[] = {
 	{
 		.mask = BIT(2),
@@ -485,6 +514,13 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_ptl_sdw_machines[] = {
 		.links = ptl_sdw_rt713_vb_l3_rt1320_l1,
 		.drv_name = "sof_sdw",
 		.sof_tplg_filename = "sof-ptl-rt713-l3-rt1320-l1.tplg",
+		.get_function_tplg_files = sof_sdw_get_tplg_files,
+	},
+	{
+		.link_mask = BIT(2) | BIT(3),
+		.links = ptl_sdw_rt713_vb_l3_rt1320_l2,
+		.drv_name = "sof_sdw",
+		.sof_tplg_filename = "sof-ptl-rt713-l3-rt1320-l2.tplg",
 		.get_function_tplg_files = sof_sdw_get_tplg_files,
 	},
 	{
