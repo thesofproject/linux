@@ -413,7 +413,8 @@ intel_lvds_mode_valid(struct drm_connector *_connector,
 	return MODE_OK;
 }
 
-static int intel_lvds_compute_config(struct intel_encoder *encoder,
+static int intel_lvds_compute_config(struct intel_atomic_state *state,
+				     struct intel_encoder *encoder,
 				     struct intel_crtc_state *crtc_state,
 				     struct drm_connector_state *conn_state)
 {

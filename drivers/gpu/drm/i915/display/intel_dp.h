@@ -70,7 +70,8 @@ void intel_dp_sink_disable_decompression(struct intel_atomic_state *state,
 void intel_dp_encoder_suspend(struct intel_encoder *intel_encoder);
 void intel_dp_encoder_shutdown(struct intel_encoder *intel_encoder);
 void intel_dp_encoder_flush_work(struct drm_encoder *encoder);
-int intel_dp_compute_config(struct intel_encoder *encoder,
+int intel_dp_compute_config(struct intel_atomic_state *state,
+			    struct intel_encoder *encoder,
 			    struct intel_crtc_state *pipe_config,
 			    struct drm_connector_state *conn_state);
 bool intel_dp_needs_8b10b_fec(const struct intel_crtc_state *crtc_state,

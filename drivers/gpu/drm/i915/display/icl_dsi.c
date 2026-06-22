@@ -1660,7 +1660,8 @@ static int gen11_dsi_dsc_compute_config(struct intel_encoder *encoder,
 	return 0;
 }
 
-static int gen11_dsi_compute_config(struct intel_encoder *encoder,
+static int gen11_dsi_compute_config(struct intel_atomic_state *state,
+				    struct intel_encoder *encoder,
 				    struct intel_crtc_state *pipe_config,
 				    struct drm_connector_state *conn_state)
 {

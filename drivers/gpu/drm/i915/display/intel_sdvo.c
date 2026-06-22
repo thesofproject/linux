@@ -1354,7 +1354,8 @@ static bool intel_sdvo_has_audio(struct intel_encoder *encoder,
 		return intel_conn_state->force_audio == HDMI_AUDIO_ON;
 }
 
-static int intel_sdvo_compute_config(struct intel_encoder *encoder,
+static int intel_sdvo_compute_config(struct intel_atomic_state *state,
+				     struct intel_encoder *encoder,
 				     struct intel_crtc_state *pipe_config,
 				     struct drm_connector_state *conn_state)
 {

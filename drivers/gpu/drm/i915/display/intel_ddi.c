@@ -4432,7 +4432,8 @@ intel_ddi_compute_output_type(struct intel_encoder *encoder,
 	}
 }
 
-static int intel_ddi_compute_config(struct intel_encoder *encoder,
+static int intel_ddi_compute_config(struct intel_atomic_state *state,
+				    struct intel_encoder *encoder,
 				    struct intel_crtc_state *pipe_config,
 				    struct drm_connector_state *conn_state)
 {
@@ -4450,7 +4451,7 @@ static int intel_ddi_compute_config(struct intel_encoder *encoder,
 
 		ret = intel_hdmi_compute_config(encoder, pipe_config, conn_state);
 	} else {
-		ret = intel_dp_compute_config(encoder, pipe_config, conn_state);
+		ret = intel_dp_compute_config(state, encoder, pipe_config, conn_state);
 	}
 
 	if (ret)
@@ -4553,7 +4554,8 @@ intel_ddi_port_sync_transcoders(const struct intel_crtc_state *ref_crtc_state,
 	return transcoders;
 }
 
-static int intel_ddi_compute_config_late(struct intel_encoder *encoder,
+static int intel_ddi_compute_config_late(struct intel_atomic_state *state,
+					 struct intel_encoder *encoder,
 					 struct intel_crtc_state *crtc_state,
 					 struct drm_connector_state *conn_state)
 {

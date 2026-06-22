@@ -267,7 +267,8 @@ static void band_gap_reset(struct intel_display *display)
 	vlv_flisdsi_put(display->drm);
 }
 
-static int intel_dsi_compute_config(struct intel_encoder *encoder,
+static int intel_dsi_compute_config(struct intel_atomic_state *state,
+				    struct intel_encoder *encoder,
 				    struct intel_crtc_state *pipe_config,
 				    struct drm_connector_state *conn_state)
 {

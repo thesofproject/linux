@@ -3399,12 +3399,12 @@ int intel_dp_compute_min_hblank(struct intel_crtc_state *crtc_state,
 }
 
 int
-intel_dp_compute_config(struct intel_encoder *encoder,
+intel_dp_compute_config(struct intel_atomic_state *state,
+			struct intel_encoder *encoder,
 			struct intel_crtc_state *pipe_config,
 			struct drm_connector_state *conn_state)
 {
 	struct intel_display *display = to_intel_display(encoder);
-	struct intel_atomic_state *state = to_intel_atomic_state(conn_state->state);
 	struct drm_display_mode *adjusted_mode = &pipe_config->hw.adjusted_mode;
 	struct intel_dp *intel_dp = enc_to_intel_dp(encoder);
 	struct intel_connector *connector = intel_dp->attached_connector;

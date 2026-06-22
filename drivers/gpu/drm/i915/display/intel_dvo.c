@@ -242,7 +242,8 @@ intel_dvo_mode_valid(struct drm_connector *_connector,
 	return intel_dvo->dev.dev_ops->mode_valid(&intel_dvo->dev, mode);
 }
 
-static int intel_dvo_compute_config(struct intel_encoder *encoder,
+static int intel_dvo_compute_config(struct intel_atomic_state *state,
+				    struct intel_encoder *encoder,
 				    struct intel_crtc_state *pipe_config,
 				    struct drm_connector_state *conn_state)
 {

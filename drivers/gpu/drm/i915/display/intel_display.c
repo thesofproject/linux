@@ -4780,7 +4780,7 @@ intel_modeset_pipe_config(struct intel_atomic_state *state,
 		if (connector_state->crtc != &crtc->base)
 			continue;
 
-		ret = encoder->compute_config(encoder, crtc_state,
+		ret = encoder->compute_config(state, encoder, crtc_state,
 					      connector_state);
 		if (ret == -EDEADLK)
 			return ret;
@@ -4840,7 +4840,7 @@ intel_modeset_pipe_config_late(struct intel_atomic_state *state,
 		    !encoder->compute_config_late)
 			continue;
 
-		ret = encoder->compute_config_late(encoder, crtc_state,
+		ret = encoder->compute_config_late(state, encoder, crtc_state,
 						   conn_state);
 		if (ret)
 			return ret;
