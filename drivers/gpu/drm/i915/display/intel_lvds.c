@@ -460,7 +460,7 @@ static int intel_lvds_compute_config(struct intel_atomic_state *state,
 	 * with the panel scaling set up to source from the H/VDisplay
 	 * of the original mode.
 	 */
-	ret = intel_panel_compute_config(connector, adjusted_mode);
+	ret = intel_panel_compute_config(state, crtc_state, connector);
 	if (ret)
 		return ret;
 

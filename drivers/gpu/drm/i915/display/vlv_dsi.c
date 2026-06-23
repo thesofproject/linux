@@ -282,7 +282,7 @@ static int intel_dsi_compute_config(struct intel_atomic_state *state,
 	pipe_config->sink_format = INTEL_OUTPUT_FORMAT_RGB;
 	pipe_config->output_format = INTEL_OUTPUT_FORMAT_RGB;
 
-	ret = intel_panel_compute_config(intel_connector, adjusted_mode);
+	ret = intel_panel_compute_config(state, pipe_config, intel_connector);
 	if (ret)
 		return ret;
 

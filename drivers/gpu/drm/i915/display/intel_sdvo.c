@@ -1399,8 +1399,8 @@ static int intel_sdvo_compute_config(struct intel_atomic_state *state,
 		const struct drm_display_mode *fixed_mode;
 		int ret;
 
-		ret = intel_panel_compute_config(&intel_sdvo_connector->base,
-						 adjusted_mode);
+		ret = intel_panel_compute_config(state, pipe_config,
+						 &intel_sdvo_connector->base);
 		if (ret)
 			return ret;
 
