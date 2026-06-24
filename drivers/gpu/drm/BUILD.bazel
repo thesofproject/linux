@@ -297,6 +297,8 @@ ddk_module(
                 "i915/display/skl_scaler.c",
                 "i915/display/skl_universal_plane.c",
                 "i915/display/skl_watermark.c",
+                "i915/display/intel_dbuf_bw.c",
+                "i915/display/intel_dbuf_bw.h",
             ],
         },
         "CONFIG_ACPI": {
