@@ -813,10 +813,14 @@ static int smmu_set_identity(pkvm_handle_t iommu, pkvm_handle_t sid,
 		smmu->idmap_ref++;
 	} else {
 		if (le64_to_cpu(dst->data[0]) != (STRTAB_STE_0_V |
-			FIELD_PREP(STRTAB_STE_0_CFG, STRTAB_STE_0_CFG_S2_TRANS)))
-			return -EINVAL;
-		if (FIELD_GET(STRTAB_STE_2_S2VMID, le64_to_cpu(dst->data[2])))
-			return -EINVAL;
+			FIELD_PREP(STRTAB_STE_0_CFG, STRTAB_STE_0_CFG_S2_TRANS))) {
+			ret = -EINVAL;
+			goto out_unlock;
+		}
+		if (FIELD_GET(STRTAB_STE_2_S2VMID, le64_to_cpu(dst->data[2]))) {
+			ret = -EINVAL;
+			goto out_unlock;
+		}
 
 		dst->data[0] = 0;
 		ret = smmu_sync_ste(smmu, dst->data, sid);
