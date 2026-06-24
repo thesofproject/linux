@@ -158,6 +158,20 @@ static int ffa_host_clear_handle(u64 ffa_handle)
 	return 0;
 }
 
+static bool ffa_check_unused_args_sbz(struct kvm_cpu_context *ctxt, int first_reg)
+{
+	DECLARE_REG(u32, func_id, ctxt, 0);
+	int reg, end_reg;
+
+	end_reg = ARM_SMCCC_IS_64(func_id) ? 17 : 7;
+	for (reg = first_reg; reg <= end_reg; reg++) {
+		if (cpu_reg(ctxt, reg))
+			return true;
+	}
+
+	return false;
+}
+
 static void ffa_to_smccc_error(struct arm_smccc_1_2_regs *res, u64 ffa_errno)
 {
 	*res = (struct arm_smccc_1_2_regs) {
@@ -514,6 +528,11 @@ static void do_ffa_rxtx_map(struct arm_smccc_1_2_regs *res,
 	void *rx_virt, *tx_virt;
 	struct kvm_ffa_buffers *ffa_buf;
 
+	if (ffa_check_unused_args_sbz(ctxt, 4)) {
+		ret = FFA_RET_INVALID_PARAMETERS;
+		goto out;
+	}
+
 	if (npages != (KVM_FFA_MBOX_NR_PAGES * PAGE_SIZE) / FFA_PAGE_SIZE) {
 		ret = FFA_RET_INVALID_PARAMETERS;
 		goto out;
@@ -664,6 +683,11 @@ static void do_ffa_rxtx_unmap(struct arm_smccc_1_2_regs *res,
 	DECLARE_REG(u32, id, ctxt, 1);
 	int ret = 0;
 	struct kvm_ffa_buffers *ffa_buf;
+
+	if (ffa_check_unused_args_sbz(ctxt, 2)) {
+		ret = FFA_RET_INVALID_PARAMETERS;
+		goto out;
+	}
 
 	if (hyp_vcpu_to_ffa_handle(hyp_vcpu) != id) {
 		ret = FFA_RET_INVALID_PARAMETERS;
@@ -886,6 +910,11 @@ static void do_ffa_mem_frag_tx(struct arm_smccc_1_2_regs *res,
 	u64 host_handle = PACK_HANDLE(handle_lo, handle_hi);
 	struct ffa_handle *entry;
 
+	if (ffa_check_unused_args_sbz(ctxt, 5)) {
+		ffa_to_smccc_res(res, FFA_RET_INVALID_PARAMETERS);
+		return;
+	}
+
 	if (fraglen > KVM_FFA_MBOX_NR_PAGES * PAGE_SIZE)
 		goto out;
 
@@ -982,6 +1011,11 @@ static int __do_ffa_mem_xfer(const u64 func_id,
 	u64 ffa_handle;
 	bool is_lend = func_id == FFA_FN64_MEM_LEND;
 	struct ffa_handle *handle = NULL;
+
+	if (ffa_check_unused_args_sbz(ctxt, 5)) {
+		ffa_to_smccc_error(res, FFA_RET_INVALID_PARAMETERS);
+		return 0;
+	}
 
 	if (addr_mbz || npages_mbz || fraglen > len ||
 	    fraglen > KVM_FFA_MBOX_NR_PAGES * PAGE_SIZE) {
@@ -1173,6 +1207,11 @@ static void do_ffa_mem_reclaim(struct arm_smccc_1_2_regs *res,
 	struct kvm_ffa_buffers *ffa_buf;
 	struct ffa_handle *entry;
 	bool is_lend = false;
+
+	if (ffa_check_unused_args_sbz(ctxt, 4)) {
+		ffa_to_smccc_res(res, FFA_RET_INVALID_PARAMETERS);
+		return;
+	}
 
 	handle = PACK_HANDLE(handle_lo, handle_hi);
 
@@ -1366,6 +1405,11 @@ static void do_ffa_guest_features(struct arm_smccc_1_2_regs *res, struct kvm_cpu
 	u64 prop = 0;
 	int ret;
 
+	if (ffa_check_unused_args_sbz(ctxt, 3)) {
+		ret = FFA_RET_INVALID_PARAMETERS;
+		goto out_handled;
+	}
+
 	switch (id) {
 	case FFA_MEM_SHARE:
 	case FFA_FN64_MEM_SHARE:
@@ -1487,6 +1531,11 @@ static void do_ffa_version(struct arm_smccc_1_2_regs *res,
 {
 	DECLARE_REG(u32, ffa_req_version, ctxt, 1);
 
+	if (ffa_check_unused_args_sbz(ctxt, 2)) {
+		res->a0 = FFA_RET_NOT_SUPPORTED;
+		return;
+	}
+
 	if (FFA_MAJOR_VERSION(ffa_req_version) != 1) {
 		res->a0 = FFA_RET_NOT_SUPPORTED;
 		return;
@@ -1564,6 +1613,11 @@ static void do_ffa_part_get(struct arm_smccc_1_2_regs *res,
 	DECLARE_REG(u32, uuid3, ctxt, 4);
 	DECLARE_REG(u32, flags, ctxt, 5);
 	struct kvm_ffa_buffers *ffa_buf;
+
+	if (ffa_check_unused_args_sbz(ctxt, 6)) {
+		ffa_to_smccc_res(res, FFA_RET_INVALID_PARAMETERS);
+		return;
+	}
 
 	hyp_spin_lock(&kvm_ffa_hyp_lock);
 	ffa_buf = ffa_get_buffers(hyp_vcpu);
@@ -1672,6 +1726,11 @@ bool kvm_host_ffa_handler(struct kvm_cpu_context *host_ctxt, u32 func_id)
 
 	switch (func_id) {
 	case FFA_FEATURES:
+		if (ffa_check_unused_args_sbz(host_ctxt, 3)) {
+			ffa_to_smccc_res(&res, FFA_RET_INVALID_PARAMETERS);
+			goto out_handled;
+		}
+
 		if (!do_ffa_features(&res, host_ctxt))
 			return false;
 		goto out_handled;
