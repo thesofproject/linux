@@ -315,6 +315,9 @@
   __traceiter_android_vh_shrink_node
   __traceiter_android_vh_save_vmalloc_stack
   __traceiter_android_vh_show_stack_hash
+  __traceiter_android_vh_lock_delay_schedule
+  __traceiter_android_vh_lock_task_fork
+  __traceiter_android_vh_lock_task_exit
   __traceiter_android_vh_calc_alloc_flags
   __tracepoint_android_vh_rmqueue_pcplist_override_batch
   __tracepoint_android_vh_tune_inactive_ratio
@@ -416,6 +419,9 @@
   __tracepoint_sched_stat_wait
   __tracepoint_sched_waking
   __tracepoint_task_rename
+  __tracepoint_android_vh_lock_delay_schedule
+  __tracepoint_android_vh_lock_task_fork
+  __tracepoint_android_vh_lock_task_exit
   __udp4_lib_lookup
   __udp6_lib_lookup
   unlock_rename
