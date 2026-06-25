@@ -379751,6 +379751,11 @@ function {
   parameter_id: 0x07dcdbe1
 }
 function {
+  id: 0xfc99743d
+  return_type_id: 0x4585663f
+  parameter_id: 0xc9082b19
+}
+function {
   id: 0xfc9ebae8
   return_type_id: 0xa047635b
   parameter_id: 0x340dec91
@@ -405588,6 +405593,15 @@ elf_symbol {
   full_name: "crc8"
 }
 elf_symbol {
+  id: 0x548aa132
+  name: "crc8_populate_lsb"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xfa29f41b
+  type_id: 0x100ce912
+  full_name: "crc8_populate_lsb"
+}
+elf_symbol {
   id: 0xac913841
   name: "crc8_populate_msb"
   is_defined: true
@@ -425439,6 +425453,15 @@ elf_symbol {
   crc: 0x372d8ccb
   type_id: 0x1b4c69f5
   full_name: "interval_tree_remove"
+}
+elf_symbol {
+  id: 0x09639ee8
+  name: "intlog10"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x67a6a32f
+  type_id: 0xfc99743d
+  full_name: "intlog10"
 }
 elf_symbol {
   id: 0x22167fe7
@@ -449730,6 +449753,15 @@ elf_symbol {
   full_name: "snd_soc_dapm_new_widgets"
 }
 elf_symbol {
+  id: 0x270d39be
+  name: "snd_soc_dapm_pinctrl_event"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xe62fa644
+  type_id: 0x9fb0a0b3
+  full_name: "snd_soc_dapm_pinctrl_event"
+}
+elf_symbol {
   id: 0xc665994d
   name: "snd_soc_dapm_put_enum_double"
   is_defined: true
@@ -452415,6 +452447,15 @@ elf_symbol {
   crc: 0x7b117434
   type_id: 0x1e18ac15
   full_name: "system_cpucaps"
+}
+elf_symbol {
+  id: 0x634f2511
+  name: "system_dfl_wq"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x571c73d5
+  type_id: 0x18db1c77
+  full_name: "system_dfl_wq"
 }
 elf_symbol {
   id: 0xb5701f35
@@ -466450,6 +466491,7 @@ interface {
   symbol_id: 0xd6cf566d
   symbol_id: 0x7f200902
   symbol_id: 0xec1b66f9
+  symbol_id: 0x548aa132
   symbol_id: 0xac913841
   symbol_id: 0x42676517
   symbol_id: 0xab0e3dee
@@ -468648,6 +468690,7 @@ interface {
   symbol_id: 0x0d19106d
   symbol_id: 0xfe94820e
   symbol_id: 0xe7fc8dce
+  symbol_id: 0x09639ee8
   symbol_id: 0x22167fe7
   symbol_id: 0xae43d3d4
   symbol_id: 0xc3e2d4ae
@@ -471344,6 +471387,7 @@ interface {
   symbol_id: 0x78acbf5c
   symbol_id: 0xc1355d55
   symbol_id: 0xaffee4ad
+  symbol_id: 0x270d39be
   symbol_id: 0xc665994d
   symbol_id: 0x6e3b2c73
   symbol_id: 0x739b4d97
@@ -471643,6 +471687,7 @@ interface {
   symbol_id: 0xb6c44fb1
   symbol_id: 0x0efe16de
   symbol_id: 0xe09b400a
+  symbol_id: 0x634f2511
   symbol_id: 0xb5701f35
   symbol_id: 0xeeb4dc4c
   symbol_id: 0x314b4b2e
