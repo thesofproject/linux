@@ -97,9 +97,9 @@ static void sdw_compute_dp0_slave_ports(struct sdw_master_runtime *m_rt)
 		list_for_each_entry(p_rt, &s_rt->port_list, port_node) {
 			sdw_fill_xport_params(&p_rt->transport_params, p_rt->num, false,
 					      SDW_BLK_GRP_CNT_1, bus->params.col, 0, 0, 1,
-					      bus->params.col - 1, SDW_BLK_PKG_PER_PORT, 0x0);
+					      bus->params.bpt_hstop, SDW_BLK_PKG_PER_PORT, 0x0);
 
-			sdw_fill_port_params(&p_rt->port_params, p_rt->num, bus->params.col - 1,
+			sdw_fill_port_params(&p_rt->port_params, p_rt->num, bus->params.bpt_hstop,
 					     SDW_PORT_FLOW_MODE_ISOCH, SDW_PORT_DATA_MODE_NORMAL);
 		}
 	}
@@ -113,9 +113,9 @@ static void sdw_compute_dp0_master_ports(struct sdw_master_runtime *m_rt)
 	list_for_each_entry(p_rt, &m_rt->port_list, port_node) {
 		sdw_fill_xport_params(&p_rt->transport_params, p_rt->num, false,
 				      SDW_BLK_GRP_CNT_1, bus->params.col, 0, 0, 1,
-				      bus->params.col - 1, SDW_BLK_PKG_PER_PORT, 0x0);
+				      bus->params.bpt_hstop, SDW_BLK_PKG_PER_PORT, 0x0);
 
-		sdw_fill_port_params(&p_rt->port_params, p_rt->num, bus->params.col - 1,
+		sdw_fill_port_params(&p_rt->port_params, p_rt->num, bus->params.bpt_hstop,
 				     SDW_PORT_FLOW_MODE_ISOCH, SDW_PORT_DATA_MODE_NORMAL);
 	}
 }
@@ -700,6 +700,7 @@ int sdw_compute_params(struct sdw_bus *bus, struct sdw_stream_runtime *stream)
 	if (ret < 0)
 		return ret;
 
+	bus->params.bpt_hstop = bus->params.col - 1;
 	if (stream->type == SDW_STREAM_BPT) {
 		sdw_compute_dp0_port_params(bus);
 		return 0;

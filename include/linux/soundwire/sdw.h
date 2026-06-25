@@ -590,6 +590,7 @@ enum sdw_port_prep_ops {
  * @curr_dr_freq: Current double rate clock frequency, in Hz
  * @bandwidth: Current bandwidth
  * @lane_used_bandwidth: how much bandwidth in bits per second is used by each lane
+ * @bpt_hstop: The hstop of the BPT stream
  * @col: Active columns
  * @row: Active rows
  * @s_data_mode: NORMAL, STATIC or PRBS mode for all Slave ports
@@ -604,6 +605,7 @@ struct sdw_bus_params {
 	unsigned int curr_dr_freq;
 	unsigned int bandwidth;
 	unsigned int lane_used_bandwidth[SDW_MAX_LANES];
+	int bpt_hstop;
 	unsigned int col;
 	unsigned int row;
 	int s_data_mode;
