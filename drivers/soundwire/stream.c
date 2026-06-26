@@ -1479,14 +1479,19 @@ static int _sdw_prepare_stream(struct sdw_stream_runtime *stream,
 	struct sdw_master_runtime *m_rt;
 	struct sdw_bus *bus;
 	struct sdw_master_prop *prop;
-	struct sdw_bus_params params;
 	int ret;
+
+	/* Pre-save all buses' params before making any changes, for error recovery */
+	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
+		bus = m_rt->bus;
+		memcpy(&m_rt->saved_params, &bus->params, sizeof(bus->params));
+		m_rt->saved_bpt_hstop = bus->bpt_hstop;
+	}
 
 	/* Prepare  Master(s) and Slave(s) port(s) associated with stream */
 	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
 		bus = m_rt->bus;
 		prop = &bus->prop;
-		memcpy(&params, &bus->params, sizeof(params));
 
 		/* TODO: Support Asynchronous mode */
 		if ((prop->max_clk_freq % stream->params.rate) != 0) {
@@ -1542,7 +1547,11 @@ static int _sdw_prepare_stream(struct sdw_stream_runtime *stream,
 	return ret;
 
 restore_params:
-	memcpy(&bus->params, &params, sizeof(params));
+	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
+		bus = m_rt->bus;
+		memcpy(&bus->params, &m_rt->saved_params, sizeof(bus->params));
+		bus->bpt_hstop = m_rt->saved_bpt_hstop;
+	}
 	return ret;
 }
 

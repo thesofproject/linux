@@ -172,6 +172,8 @@ struct sdw_master_runtime {
 	struct list_head port_list;
 	struct list_head stream_node;
 	struct list_head bus_node;
+	struct sdw_bus_params saved_params;
+	int saved_bpt_hstop;
 };
 
 struct sdw_transport_data {
