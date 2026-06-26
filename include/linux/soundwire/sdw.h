@@ -1003,7 +1003,9 @@ struct sdw_stream_runtime {
  * @stream_refcount: number of streams currently using this bus
  * @bpt_stream_refcount: number of BTP streams currently using this bus (should
  * be zero or one, multiple streams per link is not supported).
- * @bpt_hstop: The hstop of the BPT stream.
+ * @bpt_hstop: The column stop index (hstop) used by the BPT stream's DP0 port.
+ * This value determines the last column allocated to the BPT data path on
+ * lane 0, allowing audio streams to use the remaining columns.
  * @bpt_stream: pointer stored to handle BTP streams.
  * @ops: Master callback ops
  * @port_ops: Master port callback ops
