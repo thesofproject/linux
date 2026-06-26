@@ -1354,7 +1354,8 @@ static bool intel_sdvo_has_audio(struct intel_encoder *encoder,
 		return intel_conn_state->force_audio == HDMI_AUDIO_ON;
 }
 
-static int intel_sdvo_compute_config(struct intel_encoder *encoder,
+static int intel_sdvo_compute_config(struct intel_atomic_state *state,
+				     struct intel_encoder *encoder,
 				     struct intel_crtc_state *pipe_config,
 				     struct drm_connector_state *conn_state)
 {
@@ -1395,14 +1396,15 @@ static int intel_sdvo_compute_config(struct intel_encoder *encoder,
 							   adjusted_mode);
 		pipe_config->sdvo_tv_clock = true;
 	} else if (IS_LVDS(intel_sdvo_connector)) {
-		const struct drm_display_mode *fixed_mode =
-			intel_panel_fixed_mode(&intel_sdvo_connector->base, mode);
+		const struct drm_display_mode *fixed_mode;
 		int ret;
 
-		ret = intel_panel_compute_config(&intel_sdvo_connector->base,
-						 adjusted_mode);
+		ret = intel_panel_compute_config(state, pipe_config,
+						 &intel_sdvo_connector->base);
 		if (ret)
 			return ret;
+
+		fixed_mode = &pipe_config->hw.adjusted_mode;
 
 		if (!intel_sdvo_set_output_timings_from_mode(intel_sdvo,
 							     intel_sdvo_connector,
@@ -1967,10 +1969,14 @@ intel_sdvo_mode_valid(struct drm_connector *connector,
 
 	if (IS_LVDS(intel_sdvo_connector)) {
 		enum drm_mode_status status;
+		int target_clock;
 
-		status = intel_panel_mode_valid(&intel_sdvo_connector->base, mode);
+		status = intel_panel_mode_valid(&intel_sdvo_connector->base, mode, &target_clock);
 		if (status != MODE_OK)
 			return status;
+
+		if (target_clock > max_dotclk)
+			return MODE_CLOCK_HIGH;
 	}
 
 	return MODE_OK;

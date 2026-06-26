@@ -1224,7 +1224,8 @@ static bool ilk_digital_port_connected(struct intel_encoder *encoder)
 	return intel_de_read(display, DEISR) & bit;
 }
 
-static int g4x_dp_compute_config(struct intel_encoder *encoder,
+static int g4x_dp_compute_config(struct intel_atomic_state *state,
+				 struct intel_encoder *encoder,
 				 struct intel_crtc_state *crtc_state,
 				 struct drm_connector_state *conn_state)
 {
@@ -1234,7 +1235,7 @@ static int g4x_dp_compute_config(struct intel_encoder *encoder,
 	if (HAS_PCH_SPLIT(display) && encoder->port != PORT_A)
 		crtc_state->has_pch_encoder = true;
 
-	ret = intel_dp_compute_config(encoder, crtc_state, conn_state);
+	ret = intel_dp_compute_config(state, encoder, crtc_state, conn_state);
 	if (ret)
 		return ret;
 
