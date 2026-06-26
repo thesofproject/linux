@@ -593,7 +593,12 @@ static int sdw_compute_bus_params(struct sdw_bus *bus)
 	if (!is_clock_scaling_supported(bus))
 		clk_values = 1;
 
+	if (!mstr_prop->default_frame_rate || !mstr_prop->default_row)
+		return -EINVAL;
+
 	for (i = 0; i < clk_values; i++) {
+		int total_col;
+
 		if (!clk_buf)
 			curr_dr_freq = bus->params.max_dr_freq;
 		else
@@ -601,8 +606,10 @@ static int sdw_compute_bus_params(struct sdw_bus *bus)
 				(bus->params.max_dr_freq >>  clk_buf[i]) :
 				clk_buf[i] * SDW_DOUBLE_RATE_FACTOR;
 
-		if (curr_dr_freq * (mstr_prop->default_col - 1) >=
-		    bus->params.bandwidth * mstr_prop->default_col)
+		total_col = curr_dr_freq / mstr_prop->default_frame_rate / mstr_prop->default_row;
+
+		if (curr_dr_freq * (total_col - 1) >=
+		    bus->params.bandwidth * total_col)
 			break;
 
 		list_for_each_entry(m_rt, &bus->m_rt_list, bus_node) {
@@ -663,9 +670,6 @@ out:
 			m_p_rt->lane = m_lane;
 		}
 	}
-
-	if (!mstr_prop->default_frame_rate || !mstr_prop->default_row)
-		return -EINVAL;
 
 	mstr_prop->default_col = curr_dr_freq / mstr_prop->default_frame_rate /
 				 mstr_prop->default_row;
