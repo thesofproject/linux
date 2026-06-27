@@ -595,12 +595,12 @@ mst_stream_compute_config_limits(struct intel_dp *intel_dp,
 							    dsc);
 }
 
-static int mst_stream_compute_config(struct intel_encoder *encoder,
+static int mst_stream_compute_config(struct intel_atomic_state *state,
+				     struct intel_encoder *encoder,
 				     struct intel_crtc_state *pipe_config,
 				     struct drm_connector_state *conn_state)
 {
 	struct intel_display *display = to_intel_display(encoder);
-	struct intel_atomic_state *state = to_intel_atomic_state(conn_state->state);
 	struct intel_crtc *crtc = to_intel_crtc(pipe_config->uapi.crtc);
 	struct intel_dp *intel_dp = to_primary_dp(encoder);
 	struct intel_connector *connector =
@@ -871,11 +871,11 @@ int intel_dp_mst_atomic_check_link(struct intel_atomic_state *state,
 	return 0;
 }
 
-static int mst_stream_compute_config_late(struct intel_encoder *encoder,
+static int mst_stream_compute_config_late(struct intel_atomic_state *state,
+					  struct intel_encoder *encoder,
 					  struct intel_crtc_state *crtc_state,
 					  struct drm_connector_state *conn_state)
 {
-	struct intel_atomic_state *state = to_intel_atomic_state(conn_state->state);
 	struct intel_dp *intel_dp = to_primary_dp(encoder);
 
 	/* lowest numbered transcoder will be designated master */
