@@ -92,6 +92,7 @@ static bool has_host_signalled;
 
 static struct ffa_handle *spm_handles, *spm_free_handle;
 static u32 num_spm_handles;
+size_t ffa_max_nr_constituents = KVM_FFA_MAX_NR_CONSTITUENTS;
 
 static DEFINE_HYP_SPINLOCK(version_lock);
 static DEFINE_HYP_SPINLOCK(kvm_ffa_hyp_lock);
