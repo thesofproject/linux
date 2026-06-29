@@ -53,7 +53,9 @@ static int pkvm_device_pm_toggle(struct pkvm_device_pd *pd, bool on)
 	struct arm_smccc_res res;
 
 	arm_smccc_1_1_invoke(ARM_SMCCC_VENDOR_HYP_KVM_DEV_REQ_PWR_FUNC_ID,
-			     on ? KVM_DEV_REQ_PWR_ON : KVM_DEV_REQ_PWR_OFF, pd->mmio, &res);
+			     on ? KVM_DEV_REQ_PWR_ON : KVM_DEV_REQ_PWR_OFF, pd->mmio,
+			     0, 0, 0, 0,
+			     &res);
 
 	return res.a0 == SMCCC_RET_SUCCESS ? 0 : -EPERM;
 }
