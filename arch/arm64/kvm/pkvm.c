@@ -788,7 +788,7 @@ static int __init pkvm_drop_host_privileges(void)
 	 * Flip the static key upfront as that may no longer be possible
 	 * once the host stage 2 is installed.
 	 */
-	static_branch_enable(&kvm_protected_mode_initialized);
+	static_branch_enable_cpuslocked(&kvm_protected_mode_initialized);
 	on_each_cpu(_kvm_host_prot_finalize, &ret, 1);
 	return ret;
 }
