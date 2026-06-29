@@ -320,6 +320,13 @@ early_param("kvm-arm.hyp_lm_size_mb", early_hyp_lm_size_mb_cfg);
 
 DEFINE_STATIC_KEY_FALSE(kvm_ffa_unmap_on_lend);
 
+static int __init early_ffa_max_nr_constituents(char *arg)
+{
+	return kstrtoul(arg, 10, &kvm_nvhe_sym(ffa_max_nr_constituents));
+}
+
+early_param("kvm-arm.ffa_max_nr_constituents", early_ffa_max_nr_constituents);
+
 void __init kvm_hyp_reserve(void)
 {
 	u64 hyp_mem_pages = 0;
