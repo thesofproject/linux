@@ -41,8 +41,11 @@
 
 #define BTINTEL_PCIE_DMA_ALIGN_128B	128 /* 128 byte aligned */
 
-/* Debug output path selector. Cached in data->dbg_path_cache and
- * initialized to BTINTEL_PCIE_WIFI_DBGC in probe.
+/* Debug output path selector. The companion tool writes this value to
+ * the INI file (BTINTEL_PCIE_DBG_INI_FILE) as e.g. "DBG_PATH=0x06";
+ * the driver loads it during probe via
+ * btintel_pcie_load_dbg_path_from_ini() and caches it in
+ * data->dbg_path_cache.
  *
  *   0x06 (BTINTEL_PCIE_WIFI_DBGC) -> firmware writes traces to the
  *        WiFi DBGC; the BT driver must NOT allocate host DBGC/MDBGC
@@ -53,11 +56,12 @@
  *
  * Default is 0x06 (WiFi).
  */
+#define BTINTEL_PCIE_DBG_INI_FILE "ibt_bt_dbg_cfg.ini"
 
 /* Returns true when firmware traces are routed to WiFi DBGC. In that
  * mode the host must not allocate DBGC/MDBGC buffers and must not
  * publish their addresses in the context info. Driven solely by the
- * data->dbg_path_cache.
+ * data->dbg_path_cache (loaded from INI).
  */
 static inline bool btintel_pcie_dbg_to_wifi(struct btintel_pcie_data *data)
 {
@@ -211,6 +215,73 @@ static inline char *btintel_pcie_alivectxt_state2str(u32 alive_intr_ctxt)
 	default:
 		return "unknown";
 	}
+}
+
+static void btintel_pcie_load_dbg_path_from_ini(struct btintel_pcie_data *data)
+{
+	const struct firmware *fw;
+	const char *ini_file = BTINTEL_PCIE_DBG_INI_FILE;
+	char *buf, *cursor, *line;
+	bool applied = false;
+	int err;
+
+	err = request_firmware_direct(&fw, ini_file,
+				      &data->pdev->dev);
+	if (err < 0) {
+		BT_ERR("%s not found (%d), using dbg_path=0x%02x",
+		       ini_file, err, data->dbg_path_cache);
+		return;
+	}
+
+	buf = kmemdup_nul(fw->data, fw->size, GFP_KERNEL);
+	release_firmware(fw);
+	if (!buf)
+		return;
+
+	cursor = buf;
+	while ((line = strsep(&cursor, "\n"))) {
+		char *eq;
+		char *val;
+		uint parsed;
+
+		line = strim(line);
+		if (!line[0] || line[0] == '#' || line[0] == ';')
+			continue;
+
+		/* Accept "DBG_PATH" (as written by the tool) and "dbg_path"
+		 * case-insensitively as the key.
+		 */
+		if (strncasecmp(line, "DBG_PATH", 8) != 0)
+			continue;
+
+		eq = strchr(line, '=');
+		if (!eq)
+			continue;
+
+		val = strim(eq + 1);
+		BT_INFO("Read DBG_PATH from %s: '%s'",
+			ini_file, val);
+
+		/* base 0 lets kstrtouint accept "0x06", "6", "0b110" etc. */
+		if (kstrtouint(val, 0, &parsed) == 0 &&
+		    (parsed == BTINTEL_PCIE_DRAM ||
+		     parsed == BTINTEL_PCIE_WIFI_DBGC)) {
+			data->dbg_path_cache = parsed;
+			applied = true;
+			BT_INFO("WRT dbg_path accepted: 0x%02x", data->dbg_path_cache);
+		} else {
+			BT_ERR("Invalid DBG_PATH='%s' in %s, using dbg_path=0x%02x",
+			       val, ini_file, data->dbg_path_cache);
+		}
+		break;
+	}
+
+	if (applied)
+		BT_DBG("Loaded dbg_path=0x%02x from %s", data->dbg_path_cache, ini_file);
+	else
+		BT_ERR("No valid DBG_PATH in %s, dbg_path=0x%02x", ini_file, data->dbg_path_cache);
+
+	kfree(buf);
 }
 
 /* Helper function to allocate and setup a debug buffer group
@@ -3889,6 +3960,8 @@ static int btintel_pcie_probe(struct pci_dev *pdev,
 		goto exit_error;
 
 	pci_set_drvdata(pdev, data);
+
+	btintel_pcie_load_dbg_path_from_ini(data);
 
 	err = btintel_pcie_alloc(data);
 	if (err)
