@@ -41,6 +41,29 @@
 
 #define BTINTEL_PCIE_DMA_ALIGN_128B	128 /* 128 byte aligned */
 
+/* Debug output path selector. Cached in data->dbg_path_cache and
+ * initialized to BTINTEL_PCIE_WIFI_DBGC in probe.
+ *
+ *   0x06 (BTINTEL_PCIE_WIFI_DBGC) -> firmware writes traces to the
+ *        WiFi DBGC; the BT driver must NOT allocate host DBGC/MDBGC
+ *        DRAM buffers.
+ *   0x01 (BTINTEL_PCIE_DRAM)      -> firmware writes traces to host
+ *        DRAM; the BT driver allocates DBGC/MDBGC buffers and dumps
+ *        them on assert.
+ *
+ * Default is 0x06 (WiFi).
+ */
+
+/* Returns true when firmware traces are routed to WiFi DBGC. In that
+ * mode the host must not allocate DBGC/MDBGC buffers and must not
+ * publish their addresses in the context info. Driven solely by the
+ * data->dbg_path_cache.
+ */
+static inline bool btintel_pcie_dbg_to_wifi(struct btintel_pcie_data *data)
+{
+	return data->dbg_path_cache != BTINTEL_PCIE_DRAM;
+}
+
 /* Intel Bluetooth PCIe device id table */
 static const struct pci_device_id btintel_pcie_table[] = {
 	/* BlazarI, Wildcat Lake */
@@ -1155,11 +1178,23 @@ static int btintel_pcie_read_debug_regions(struct btintel_pcie_data *data)
 	if (!IS_ENABLED(CPTCFG_DEV_COREDUMP))
 		return -EOPNOTSUPP;
 
-	bt_dev_info(data->hdev, "%s: WRT dump triggered",
+	bt_dev_info(data->hdev,
+		    "%s WRT dump collection started (trigger_reason=0x%04x)",
 		    data->dmp_hdr.trigger_reason == BTINTEL_PCIE_TRIGGER_REASON_FW_ASSERT ?
-			"Firmware" : "User");
+				"AUTO (firmware)" : "USER",
+		    data->dmp_hdr.trigger_reason);
 
-	if (btintel_pcie_is_mdbgc_supported(data)) {
+	if (btintel_pcie_dbg_to_wifi(data)) {
+		/* Firmware traces are routed to WiFi DBGC and no host DBGC
+		 * buffers were allocated. Skip read of host DBGC write
+		 * pointer / wrap counter and the DRAM monitor dump; only
+		 * device-memory regions (SMEM/DCCM/SDS/ECL/exception) are
+		 * collected below.
+		 */
+		bt_dev_info(hdev,
+			    "dbg_path=0x%02x (wifi): skipping host DBGC write-ptr read and DRAM monitor dump",
+			    data->dbg_path_cache);
+	} else if (btintel_pcie_is_mdbgc_supported(data)) {
 		mdbgc = &data->mdbgc;
 		count = mdbgc->count;
 	} else {
@@ -1169,7 +1204,9 @@ static int btintel_pcie_read_debug_regions(struct btintel_pcie_data *data)
 
 	hw_variant = INTEL_HW_VARIANT(data->cnvi);
 
-	if (hw_variant == BTINTEL_HWID_BZRI ||
+	if (btintel_pcie_dbg_to_wifi(data)) {
+		/* No host DBGC pointers to read; jump to device-memory dumps. */
+	} else if (hw_variant == BTINTEL_HWID_BZRI ||
 	    hw_variant == BTINTEL_HWID_BZRIW) {
 		wr_ptr_status = btintel_pcie_rd_dev_mem(data,
 						BTINTEL_PCIE_DBGC_CUR_DBGBUFF_STATUS);
@@ -1187,24 +1224,25 @@ static int btintel_pcie_read_debug_regions(struct btintel_pcie_data *data)
 		return -EINVAL;
 	}
 
-	offset = wr_ptr_status & BTINTEL_PCIE_DBG_OFFSET_BIT_MASK;
+	if (!btintel_pcie_dbg_to_wifi(data)) {
+		offset = wr_ptr_status & BTINTEL_PCIE_DBG_OFFSET_BIT_MASK;
+		buf_idx = BTINTEL_PCIE_DBGC_DBG_BUF_IDX(wr_ptr_status);
+		if (buf_idx > count) {
+			bt_dev_warn(hdev, "Buffer index is invalid");
+			return -EINVAL;
+		}
 
-	buf_idx = BTINTEL_PCIE_DBGC_DBG_BUF_IDX(wr_ptr_status);
-	if (buf_idx > count) {
-		bt_dev_warn(hdev, "Buffer index is invalid");
-		return -EINVAL;
+		prev_size = buf_idx * BTINTEL_PCIE_DBGC_BUFFER_SIZE;
+		if (prev_size + offset >= prev_size)
+			data->dmp_hdr.write_ptr = prev_size + offset;
+		else
+			return -EINVAL;
+
+		bt_dev_dbg(hdev, "wr_ptr_status=0x%08x buf_idx=%u offset=0x%06x",
+			   wr_ptr_status, buf_idx, offset);
+		bt_dev_dbg(hdev, "write_ptr=0x%08x wrap_ctr=0x%08x",
+			   data->dmp_hdr.write_ptr, data->dmp_hdr.wrap_ctr);
 	}
-
-	prev_size = buf_idx * BTINTEL_PCIE_DBGC_BUFFER_SIZE;
-	if (prev_size + offset >= prev_size)
-		data->dmp_hdr.write_ptr = prev_size + offset;
-	else
-		return -EINVAL;
-
-	bt_dev_dbg(hdev, "wr_ptr_status=0x%08x buf_idx=%u offset=0x%06x",
-		   wr_ptr_status, buf_idx, offset);
-	bt_dev_dbg(hdev, "write_ptr=0x%08x wrap_ctr=0x%08x",
-		   data->dmp_hdr.write_ptr, data->dmp_hdr.wrap_ctr);
 
 	smem_rd_addr = data->dump_info.smem_addr_start;
 	smem_rd_size = (data->dump_info.smem_addr_end + 0x04) -
@@ -1220,7 +1258,9 @@ static int btintel_pcie_read_debug_regions(struct btintel_pcie_data *data)
 		smem_rd_size = 0;
 	}
 
-	if (btintel_pcie_is_mdbgc_supported(data)) {
+	if (btintel_pcie_dbg_to_wifi(data)) {
+		/* No host DRAM monitor buffers were allocated; nothing to dump. */
+	} else if (btintel_pcie_is_mdbgc_supported(data)) {
 		ret = btintel_pcie_dump_dram(&dump_list, count,
 					     mdbgc->buf1, 0,
 					     data->dmp_hdr.write_ptr,
@@ -1374,7 +1414,7 @@ static int btintel_pcie_read_debug_regions(struct btintel_pcie_data *data)
 			offs += entry->size;
 		}
 
-		bt_dev_info(hdev, "triggering dev_coredumpsg()");
+		bt_dev_info(hdev, "triggering dev_coredumpsg() len=%u", file_len);
 		dev_coredumpsg(&hdev->dev, sg_dump_data, file_len, GFP_KERNEL);
 	} else {
 		bt_dev_err(hdev, "Failed to allocate scatter-gather table for coredump");
@@ -2711,14 +2751,29 @@ static void btintel_pcie_init_ci(struct btintel_pcie_data *data,
 	ci->num_urbdq1 = data->rxq.count;
 	ci->urbdq_db_vec = BTINTEL_PCIE_RXQ_NUM;
 
-	ci->dbg_output_mode = BTINTEL_PCIE_DRAM;
-
-	if (btintel_pcie_is_mdbgc_supported(data)) {
-		ci->dbgc_addr = data->mdbgc.frag_p_addr;
-		ci->dbgc_size = data->mdbgc.frag_size;
+	if (btintel_pcie_dbg_to_wifi(data)) {
+		/* Firmware will forward debug traces to the WiFi DBGC, so
+		 * no host DBGC buffer is needed and dbgc_addr/size remain 0.
+		 */
+		ci->dbg_output_mode = BTINTEL_PCIE_WIFI_DBGC;
+		ci->dbgc_addr = 0;
+		ci->dbgc_size = 0;
+		BT_INFO("CI: WiFi mode - zeroing DBGC (addr=0x%llx size=%u)",
+			(u64)ci->dbgc_addr, ci->dbgc_size);
 	} else {
-		ci->dbgc_addr = data->dbgc.frag_p_addr;
-		ci->dbgc_size = data->dbgc.frag_size;
+		ci->dbg_output_mode = BTINTEL_PCIE_DRAM;
+
+		if (btintel_pcie_is_mdbgc_supported(data)) {
+			ci->dbgc_addr = data->mdbgc.frag_p_addr;
+			ci->dbgc_size = data->mdbgc.frag_size;
+			BT_INFO("CI: MDBGC addr=0x%llx size=%u",
+				(u64)ci->dbgc_addr, ci->dbgc_size);
+		} else {
+			ci->dbgc_addr = data->dbgc.frag_p_addr;
+			ci->dbgc_size = data->dbgc.frag_size;
+			BT_INFO("CI: DBGC addr=0x%llx size=%u",
+				(u64)ci->dbgc_addr, ci->dbgc_size);
+		}
 	}
 
 	ci->dbg_preset = 0x00;
@@ -2947,8 +3002,13 @@ static int btintel_pcie_alloc(struct btintel_pcie_data *data)
 	p_addr += ci_size;
 	v_addr += ci_size;
 
-	/* Setup data buffers for dbgc */
-	if (btintel_pcie_is_mdbgc_supported(data))
+	if (btintel_pcie_dbg_to_wifi(data)) {
+		/* WiFi DBGC routing: firmware writes traces to the WiFi
+		 * subsystem, so we skip host buffer allocation entirely.
+		 * Dump the dbgc/mdbgc state to confirm nothing was allocated.
+		 */
+		err = 0;
+	} else if (btintel_pcie_is_mdbgc_supported(data))
 		err = btintel_pcie_setup_mdbgc(data);
 	else
 		err = btintel_pcie_setup_dbgc(data);
@@ -3819,6 +3879,7 @@ static int btintel_pcie_probe(struct pci_dev *pdev,
 
 	data->boot_stage_cache = 0x00;
 	data->img_resp_cache = 0x00;
+	data->dbg_path_cache = BTINTEL_PCIE_WIFI_DBGC;
 	/* FLR can be invoked by echoing to debugfs path, so explicitly
 	 * initialized
 	 */

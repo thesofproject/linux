@@ -125,6 +125,16 @@
 #define BTINTEL_PCIE_DRAM	0x01
 #define BTINTEL_PCIE_FW_MON_MODE_DRAM	0x02
 
+/* dbg_output_mode value to route firmware traces to the WiFi DBGC.
+ *   Bit[0] DBGC O/P  : 0 = SRAM (don't care, DBGI selected)
+ *   Bit[1] DBGC I/P  : 1 = DBGI
+ *   Bits[2:3] DBGI O/P : 01 = WiFi DBGC
+ * => 0b0110 = 0x06.  When this mode is selected the host does NOT need
+ * to allocate DBGC/MDBGC fragment/data buffers because the firmware
+ * forwards traces to the WiFi side instead of writing to host DRAM.
+ */
+#define BTINTEL_PCIE_WIFI_DBGC	0x06
+
 /* Causes for the FH register interrupts */
 enum msix_fh_int_causes {
 	BTINTEL_PCIE_MSIX_FH_INT_CAUSES_0	= BIT(0),	/* cause 0 */
@@ -737,6 +747,7 @@ struct btintel_pcie_ini_dump_info {
  * @rxq: RX Queue struct
  * @alive_intr_ctxt: Alive interrupt context
  * @pm_sx_event: PM event on which system got suspended
+ * @dbg_path_cache: cached debug output routing mode (BT DRAM or WiFi DBGC)
  */
 struct btintel_pcie_data {
 	struct pci_dev	*pdev;
@@ -798,6 +809,7 @@ struct btintel_pcie_data {
 	u8	pm_sx_event;
 	u32	debug_evt_addr;
 	u32	debug_evt_size;
+	u32	dbg_path_cache;
 	dma_addr_t	debug_table_addr;
 	u32	debug_table_size;
 	struct btintel_pcie_dump_mem_info	dump_info;
