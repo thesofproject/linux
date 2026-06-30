@@ -755,7 +755,8 @@ static int pkvm_init_devices(void)
 
 	kvm_nvhe_sym(registered_devices_nr) = dev_cnt;
 	kvm_nvhe_sym(registered_devices) = dev_base;
-	return ret;
+
+	return kvm_call_hyp_nvhe(__pkvm_devices_init);
 
 out_free:
 	free_pages_exact(dev_base, dev_sz);
@@ -827,10 +828,6 @@ static int __init finalize_pkvm(void)
 		pr_err("Failed to init kvm devices %d\n", ret);
 		pkvm_firmware_rmem_clear();
 	}
-
-	ret = kvm_call_hyp_nvhe(__pkvm_devices_init);
-	if (ret)
-		pr_warn("Assignable devices failed to initialize in the hypervisor %d", ret);
 
 	/*
 	 * Exclude HYP sections from kmemleak so that they don't get peeked
