@@ -1274,6 +1274,13 @@ static __always_inline int get_lazy_tif_bit(void)
 
 void resched_curr_lazy(struct rq *rq)
 {
+	bool need_lazy = false;
+
+	trace_android_vh_preempt_lazy_mode(rq, &need_lazy);
+
+	if (need_lazy)
+		return;
+
 	__resched_curr(rq, get_lazy_tif_bit());
 }
 EXPORT_SYMBOL_GPL(resched_curr);

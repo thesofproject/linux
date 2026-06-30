@@ -81,6 +81,11 @@ DECLARE_HOOK(android_vh_rwsem_can_spin_on_owner,
 	TP_PROTO(struct rw_semaphore *sem, bool *ret),
 	TP_ARGS(sem, ret));
 
+struct rq;
+DECLARE_HOOK(android_vh_preempt_lazy_mode,
+	TP_PROTO(struct rq *rq, bool *need_lazy),
+	TP_ARGS(rq, need_lazy));
+
 struct device;
 DECLARE_HOOK(android_vh_dpm_wait_start,
 	TP_PROTO(struct device *dev),

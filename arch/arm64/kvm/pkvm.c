@@ -320,6 +320,13 @@ early_param("kvm-arm.hyp_lm_size_mb", early_hyp_lm_size_mb_cfg);
 
 DEFINE_STATIC_KEY_FALSE(kvm_ffa_unmap_on_lend);
 
+static int __init early_ffa_max_nr_constituents(char *arg)
+{
+	return kstrtoul(arg, 10, &kvm_nvhe_sym(ffa_max_nr_constituents));
+}
+
+early_param("kvm-arm.ffa_max_nr_constituents", early_ffa_max_nr_constituents);
+
 void __init kvm_hyp_reserve(void)
 {
 	u64 hyp_mem_pages = 0;
@@ -788,7 +795,7 @@ static int __init pkvm_drop_host_privileges(void)
 	 * Flip the static key upfront as that may no longer be possible
 	 * once the host stage 2 is installed.
 	 */
-	static_branch_enable(&kvm_protected_mode_initialized);
+	static_branch_enable_cpuslocked(&kvm_protected_mode_initialized);
 	on_each_cpu(_kvm_host_prot_finalize, &ret, 1);
 	return ret;
 }
