@@ -2832,6 +2832,8 @@
   snd_soc_acpi_intel_lnl_sdw_machines
   snd_soc_acpi_intel_mtl_machines
   snd_soc_acpi_intel_mtl_sdw_machines
+  snd_soc_acpi_intel_nvl_machines
+  snd_soc_acpi_intel_nvl_sdw_machines
   snd_soc_acpi_intel_ptl_machines
   snd_soc_acpi_intel_ptl_sdw_machines
   snd_soc_acpi_intel_rpl_machines

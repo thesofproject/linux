@@ -332743,6 +332743,24 @@ elf_symbol {
   full_name: "snd_soc_acpi_intel_mtl_sdw_machines"
 }
 elf_symbol {
+  id: 0x65c19d4a
+  name: "snd_soc_acpi_intel_nvl_machines"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0xed91c3c1
+  type_id: 0xa5cad54c
+  full_name: "snd_soc_acpi_intel_nvl_machines"
+}
+elf_symbol {
+  id: 0x8822a6c3
+  name: "snd_soc_acpi_intel_nvl_sdw_machines"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x5b8947c6
+  type_id: 0x9c4e20dc
+  full_name: "snd_soc_acpi_intel_nvl_sdw_machines"
+}
+elf_symbol {
   id: 0xfe324fe0
   name: "snd_soc_acpi_intel_ptl_machines"
   is_defined: true
@@ -343939,6 +343957,8 @@ interface {
   symbol_id: 0x49d64be3
   symbol_id: 0x9293bfb8
   symbol_id: 0x5ca8639b
+  symbol_id: 0x65c19d4a
+  symbol_id: 0x8822a6c3
   symbol_id: 0xfe324fe0
   symbol_id: 0x352dcfcd
   symbol_id: 0xe3bfdae8
