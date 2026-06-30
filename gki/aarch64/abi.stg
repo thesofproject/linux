@@ -404541,6 +404541,15 @@ elf_symbol {
   full_name: "component_bind_all"
 }
 elf_symbol {
+  id: 0x9901e8ee
+  name: "component_compare_dev"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x14335e0d
+  type_id: 0x9d7428e0
+  full_name: "component_compare_dev"
+}
+elf_symbol {
   id: 0xa06e08e9
   name: "component_compare_of"
   is_defined: true
@@ -466449,6 +466458,7 @@ interface {
   symbol_id: 0x0356dc1d
   symbol_id: 0x53eb2602
   symbol_id: 0xcce97787
+  symbol_id: 0x9901e8ee
   symbol_id: 0xa06e08e9
   symbol_id: 0x98bdb018
   symbol_id: 0xd080858f
