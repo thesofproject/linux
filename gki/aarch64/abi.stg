@@ -399510,6 +399510,15 @@ elf_symbol {
   full_name: "arch_timer_read_counter"
 }
 elf_symbol {
+  id: 0x312b81db
+  name: "arch_touch_nmi_watchdog"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xd272d446
+  type_id: 0x10985193
+  full_name: "arch_touch_nmi_watchdog"
+}
+elf_symbol {
   id: 0x1198e2f6
   name: "arch_vma_name"
   is_defined: true
@@ -464345,6 +464354,7 @@ interface {
   symbol_id: 0x7ff45ec2
   symbol_id: 0x0c805860
   symbol_id: 0xc447be59
+  symbol_id: 0x312b81db
   symbol_id: 0x1198e2f6
   symbol_id: 0x69e13e13
   symbol_id: 0xc6d0ad0a
