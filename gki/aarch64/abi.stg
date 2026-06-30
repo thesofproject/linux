@@ -345518,6 +345518,12 @@ function {
   parameter_id: 0x14b9453b
 }
 function {
+  id: 0x823a7fd2
+  return_type_id: 0x3267a784
+  parameter_id: 0x3e10b518
+  parameter_id: 0x3fc3d195
+}
+function {
   id: 0x825faca7
   return_type_id: 0x31fa879c
   parameter_id: 0x4585663f
@@ -411553,6 +411559,15 @@ elf_symbol {
   full_name: "driver_create_file"
 }
 elf_symbol {
+  id: 0xf2cf40cf
+  name: "driver_find"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xfcc849ae
+  type_id: 0x823a7fd2
+  full_name: "driver_find"
+}
+elf_symbol {
   id: 0xa6a7d8d9
   name: "driver_find_device"
   is_defined: true
@@ -453448,6 +453463,15 @@ elf_symbol {
   full_name: "typec_altmode_vdm"
 }
 elf_symbol {
+  id: 0x81132d96
+  name: "typec_bus"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x83986a53
+  type_id: 0xd54fa0c8
+  full_name: "typec_bus"
+}
+elf_symbol {
   id: 0x0d23e13a
   name: "typec_find_port_data_role"
   is_defined: true
@@ -465656,6 +465680,7 @@ interface {
   symbol_id: 0x472f65cb
   symbol_id: 0x8fbdd27e
   symbol_id: 0xbde576b8
+  symbol_id: 0xf2cf40cf
   symbol_id: 0xa6a7d8d9
   symbol_id: 0x1f0cd029
   symbol_id: 0xd90c83a1
@@ -470305,6 +470330,7 @@ interface {
   symbol_id: 0x0d2420a7
   symbol_id: 0xe7fb597f
   symbol_id: 0xe6cbb47e
+  symbol_id: 0x81132d96
   symbol_id: 0x0d23e13a
   symbol_id: 0xd02d0c21
   symbol_id: 0xe9d634b5
