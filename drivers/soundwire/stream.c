@@ -1479,19 +1479,37 @@ static int _sdw_prepare_stream(struct sdw_stream_runtime *stream,
 	struct sdw_master_runtime *m_rt;
 	struct sdw_bus *bus;
 	struct sdw_master_prop *prop;
-	struct sdw_bus_params params;
 	int ret;
+
+	/* Local structure to store backup params for error recovery */
+	struct {
+		struct list_head list_node;
+		struct sdw_bus *bus;
+		struct sdw_bus_params params;
+	} *params_entry, *temp_entry;
+
+	LIST_HEAD(params_backup_list);
 
 	/* Prepare  Master(s) and Slave(s) port(s) associated with stream */
 	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
 		bus = m_rt->bus;
 		prop = &bus->prop;
-		memcpy(&params, &bus->params, sizeof(params));
+
+		/* Allocate and save current params for error recovery */
+		params_entry = kzalloc_obj(*params_entry);
+		if (!params_entry) {
+			ret = -ENOMEM;
+			goto restore_params;
+		}
+		params_entry->bus = bus;
+		memcpy(&params_entry->params, &bus->params, sizeof(params_entry->params));
+		list_add_tail(&params_entry->list_node, &params_backup_list);
 
 		/* TODO: Support Asynchronous mode */
 		if ((prop->max_clk_freq % stream->params.rate) != 0) {
 			dev_err(bus->dev, "Async mode not supported\n");
-			return -EINVAL;
+			ret = -EINVAL;
+			goto restore_params;
 		}
 
 		if (update_params) {
@@ -1539,10 +1557,26 @@ static int _sdw_prepare_stream(struct sdw_stream_runtime *stream,
 
 	stream->state = SDW_STREAM_PREPARED;
 
+	/* Free the backup list on success */
+	list_for_each_entry_safe(params_entry, temp_entry, &params_backup_list, list_node) {
+		list_del(&params_entry->list_node);
+		kfree(params_entry);
+	}
+
 	return ret;
 
 restore_params:
-	memcpy(&bus->params, &params, sizeof(params));
+	/* Restore all bus params from the backup list */
+	list_for_each_entry(params_entry, &params_backup_list, list_node) {
+		memcpy(&params_entry->bus->params, &params_entry->params,
+		       sizeof(params_entry->params));
+	}
+
+	/* Free the backup list on error */
+	list_for_each_entry_safe(params_entry, temp_entry, &params_backup_list, list_node) {
+		list_del(&params_entry->list_node);
+		kfree(params_entry);
+	}
 	return ret;
 }
 
