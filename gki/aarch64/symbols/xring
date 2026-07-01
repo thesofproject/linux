@@ -27,6 +27,7 @@
   __arch_copy_from_user
   __arch_copy_to_user
   arch_freq_scale
+  arch_touch_nmi_watchdog
   arch_wb_cache_pmem
   arm64_use_ng_mappings
   arm_smccc_1_1_get_conduit
@@ -271,7 +272,9 @@
   crypto_skcipher_encrypt
   crypto_skcipher_setkey
   css_next_child
+  csum_ipv6_magic
   csum_partial
+  csum_tcpudp_nofold
   _ctype
   deactivate_task
   debugfs_attr_read
@@ -608,6 +611,7 @@
   down_timeout
   down_write
   down_write_killable
+  down_write_trylock
   d_path
   drain_workqueue
   driver_find_device
@@ -807,6 +811,7 @@
   extcon_set_state
   extcon_set_state_sync
   extcon_unregister_notifier
+  ext_sched_class
   fasync_helper
   faux_device_create
   faux_device_destroy
@@ -909,6 +914,7 @@
   __get_random_u32_below
   get_slabinfo
   get_task_cred
+  get_task_mm
   get_unused_fd_flags
   get_user_pages
   get_zeroed_page_noprof
@@ -1114,6 +1120,8 @@
   is_dma_buf_file
   is_vmalloc_addr
   iterate_dir
+  its_restore_enable
+  its_save_disable
   jiffies
   jiffies_to_msecs
   jiffies_to_usecs
@@ -1301,6 +1309,7 @@
   mmc_detect_change
   mmc_of_parse
   __mmdrop
+  mmput
   mod_delayed_work_on
   mod_node_page_state
   mod_timer
@@ -1711,6 +1720,7 @@
   register_die_notifier
   register_inetaddr_notifier
   register_kprobe
+  register_kretprobe
   register_memory_notifier
   register_netdev
   register_netdevice
@@ -1847,6 +1857,7 @@
   sched_setscheduler
   sched_setscheduler_nocheck
   sched_show_task
+  sched_uclamp_used
   schedule
   schedule_timeout
   schedule_timeout_uninterruptible
@@ -1936,6 +1947,7 @@
   shrinker_alloc
   shrinker_free
   shrinker_register
+  sigprocmask
   si_mem_available
   si_meminfo
   simple_attr_open
@@ -1952,6 +1964,7 @@
   si_swapinfo
   sized_strscpy
   skb_add_rx_frag_netmem
+  skb_checksum
   skb_checksum_help
   skb_copy
   skb_copy_bits
@@ -2255,6 +2268,7 @@
   __traceiter_android_vh_binder_transaction_init
   __traceiter_android_vh_binder_transaction_received
   __traceiter_android_vh_binder_wait_for_work
+  __traceiter_android_vh_calc_alloc_flags
   __traceiter_android_vh_check_file_open
   __traceiter_android_vh_clear_rwsem_reader_owned
   __traceiter_android_vh_clear_rwsem_writer_owned
@@ -2463,6 +2477,7 @@
   __tracepoint_android_vh_binder_transaction_init
   __tracepoint_android_vh_binder_transaction_received
   __tracepoint_android_vh_binder_wait_for_work
+  __tracepoint_android_vh_calc_alloc_flags
   __tracepoint_android_vh_check_file_open
   __tracepoint_android_vh_clear_rwsem_reader_owned
   __tracepoint_android_vh_clear_rwsem_writer_owned
@@ -2684,6 +2699,7 @@
   unregister_chrdev_region
   unregister_inetaddr_notifier
   unregister_kprobe
+  unregister_kretprobe
   unregister_memory_notifier
   unregister_netdev
   unregister_netdevice_notifier
