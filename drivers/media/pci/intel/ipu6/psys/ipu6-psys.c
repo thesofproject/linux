@@ -419,7 +419,7 @@ void ipu_psys_kcmd_complete(struct ipu_psys_ppg *kppg,
 
 		kbuf = ipu_psys_lookup_kbuffer_by_kaddr(kcmd->fh,
 							kcmd->pg_user);
-		if (kbuf && kbuf->valid)
+		if (kbuf && kbuf->mapped)
 			memcpy(kcmd->pg_user,
 			       kcmd->kpg->pg, kcmd->kpg->pg_size);
 		else
