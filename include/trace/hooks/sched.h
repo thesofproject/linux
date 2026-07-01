@@ -376,6 +376,11 @@ DECLARE_HOOK(android_vh_dup_task_struct,
 	TP_ARGS(tsk, orig));
 
 struct affinity_context;
+
+DECLARE_HOOK(android_vh_sca_migrate_same,
+	TP_PROTO(struct task_struct *p, struct affinity_context *ctx),
+	TP_ARGS(p, ctx));
+
 DECLARE_HOOK(android_vh_scx_restore_flags,
 	TP_PROTO(const struct sched_class *prev_class,
 		 const struct sched_class *next_class,
