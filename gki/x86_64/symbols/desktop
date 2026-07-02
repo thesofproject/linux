@@ -1376,7 +1376,9 @@
   hid_output_report
   hid_parse_report
   __hid_register_driver
+  __hid_report_raw_event
   hid_report_raw_event
+  hid_safe_input_report
   hid_unregister_driver
   hmm_range_fault
   hrtimer_active
