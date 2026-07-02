@@ -45249,6 +45249,10 @@ member {
   type_id: 0x0312ab60
 }
 member {
+  id: 0x23332489
+  type_id: 0x03e2e237
+}
+member {
   id: 0x2365112b
   type_id: 0x02ba34bc
 }
@@ -45407,6 +45411,10 @@ member {
 member {
   id: 0x26c9c4e3
   type_id: 0x1409639e
+}
+member {
+  id: 0x26cfd818
+  type_id: 0x14111072
 }
 member {
   id: 0x26d82350
@@ -46290,6 +46298,10 @@ member {
   id: 0x3443ff3b
   type_id: 0x5e219122
   offset: 448
+}
+member {
+  id: 0x344476a6
+  type_id: 0x5e3faa88
 }
 member {
   id: 0x34480421
@@ -48463,6 +48475,11 @@ member {
   type_id: 0xd3c80119
 }
 member {
+  id: 0x6e3a9bb3
+  name: "__donotuse_b448672457"
+  type_id: 0x92233392
+}
+member {
   id: 0x6d24d29f
   name: "__empty_array"
   type_id: 0x186c44db
@@ -48593,6 +48610,11 @@ member {
   id: 0x289a9b79
   name: "__iov"
   type_id: 0x3ea6bd8c
+}
+member {
+  id: 0x31f552a4
+  name: "__kabi_renamedcpumask"
+  type_id: 0x99caa0ae
 }
 member {
   id: 0x415b002c
@@ -77044,11 +77066,6 @@ member {
   name: "cpumask"
   type_id: 0x99caa0ae
   offset: 1344
-}
-member {
-  id: 0x3dac8abc
-  name: "cpumask"
-  type_id: 0x99caa0ae
 }
 member {
   id: 0x3dac8e5d
@@ -234145,6 +234162,14 @@ struct_union {
   }
 }
 struct_union {
+  id: 0x03e2e237
+  kind: STRUCT
+  definition {
+    bytesize: 8
+    member_id: 0x6e3a9bb3
+  }
+}
+struct_union {
   id: 0x0404d15c
   kind: STRUCT
   definition {
@@ -236083,6 +236108,14 @@ struct_union {
     member_id: 0x1c99f341
     member_id: 0x4e0cfd04
     member_id: 0x7921da23
+  }
+}
+struct_union {
+  id: 0x14111072
+  kind: STRUCT
+  definition {
+    bytesize: 8
+    member_id: 0x31f552a4
   }
 }
 struct_union {
@@ -241175,6 +241208,16 @@ struct_union {
   }
 }
 struct_union {
+  id: 0x5e3faa88
+  kind: UNION
+  definition {
+    bytesize: 8
+    member_id: 0x23332489
+    member_id: 0x26cfd818
+    member_id: 0x36752b74
+  }
+}
+struct_union {
   id: 0x5e4227fa
   kind: UNION
   definition {
@@ -244664,7 +244707,7 @@ struct_union {
   name: "arch_tlbflush_unmap_batch"
   definition {
     bytesize: 16
-    member_id: 0x3dac8abc
+    member_id: 0x344476a6
     member_id: 0x415b085d
   }
 }
