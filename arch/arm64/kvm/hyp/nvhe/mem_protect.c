@@ -1258,23 +1258,6 @@ static int __host_check_page_state_range(u64 addr, u64 size,
 	return ___host_check_page_state_range(addr, size, state, flags);
 }
 
-static int __host_set_page_state_range(u64 addr, u64 size,
-				       enum pkvm_page_state state)
-{
-	if (get_host_state(hyp_phys_to_page(addr)) == PKVM_NOPAGE) {
-		int ret = host_stage2_idmap_locked(addr, size, PKVM_HOST_MEM_PROT, true);
-
-		if (ret)
-			return ret;
-
-		WARN_ON(kvm_iommu_host_stage2_idmap(addr, addr + size, PKVM_HOST_MEM_PROT));
-		kvm_iommu_host_stage2_idmap_complete(true);
-	}
-
-	__host_update_page_state(addr, size, state);
-
-	return 0;
-}
 
 static void __hyp_set_page_state_range(phys_addr_t phys, u64 size, enum pkvm_page_state state)
 {
@@ -1508,7 +1491,7 @@ int __pkvm_host_share_hyp(u64 pfn)
 		goto unlock;
 
 	__hyp_set_page_state_range(phys, size, PKVM_PAGE_SHARED_BORROWED);
-	WARN_ON(__host_set_page_state_range(phys, size, PKVM_PAGE_SHARED_OWNED));
+	__host_update_page_state(phys, size, PKVM_PAGE_SHARED_OWNED);
 
 unlock:
 	hyp_unlock_component();
@@ -1539,7 +1522,7 @@ int __pkvm_host_unshare_hyp(u64 pfn)
 	}
 
 	__hyp_set_page_state_range(phys, size, PKVM_NOPAGE);
-	WARN_ON(__host_set_page_state_range(phys, size, PKVM_PAGE_OWNED));
+	__host_update_page_state(phys, size, PKVM_PAGE_OWNED);
 
 unlock:
 	hyp_unlock_component();
@@ -2147,7 +2130,7 @@ int __pkvm_host_share_ffa(u64 pfn, u64 nr_pages)
 						     HOST_CHECK_NULL_REFCNT |
 						     HOST_CHECK_ALLOW_NO_MAP);
 	if (!ret)
-		ret = __host_set_page_state_range(phys, size, PKVM_PAGE_SHARED_OWNED);
+		__host_update_page_state(phys, size, PKVM_PAGE_SHARED_OWNED);
 	host_unlock_component();
 
 	return ret;
@@ -2169,7 +2152,7 @@ int __pkvm_host_unshare_ffa(u64 pfn, u64 nr_pages)
 					     HOST_CHECK_IS_MEMORY |
 						     HOST_CHECK_ALLOW_NO_MAP);
 	if (!ret)
-		ret = __host_set_page_state_range(phys, size, PKVM_PAGE_OWNED);
+		__host_update_page_state(phys, size, PKVM_PAGE_OWNED);
 	host_unlock_component();
 
 	return ret;
@@ -2367,9 +2350,14 @@ int __pkvm_guest_share_host(u64 gfn, struct pkvm_hyp_vcpu *vcpu, u64 nr_pages, u
 	if (ret)
 		goto unlock;
 
-	ret = __host_set_page_state_range(phys, size, PKVM_PAGE_SHARED_BORROWED);
+	ret = host_stage2_idmap_locked(phys, size, PKVM_HOST_MEM_PROT, true);
 	if (ret)
 		goto unlock;
+
+	WARN_ON(kvm_iommu_host_stage2_idmap(phys, phys + size, PKVM_HOST_MEM_PROT));
+	kvm_iommu_host_stage2_idmap_complete(true);
+
+	__host_update_page_state(phys, size, PKVM_PAGE_SHARED_BORROWED);
 
 	psci_mem_protect_dec(nr_pages);
 	WARN_ON(kvm_pgtable_stage2_map(&vm->pgt, ipa, size, phys,
