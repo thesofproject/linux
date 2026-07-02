@@ -199,7 +199,7 @@ static void _sdw_compute_port_params(struct sdw_bus *bus,
 
 	/* Run loop for all groups to compute transport parameters */
 	for (l = 0; l < SDW_MAX_LANES; l++) {
-		if (l > 0 && !bus->lane_used_bandwidth[l])
+		if (l > 0 && !bus->params.lane_used_bandwidth[l])
 			continue;
 		/* reset hstop for each lane */
 		hstop = bus->params.col - 1;
@@ -270,7 +270,7 @@ static int sdw_compute_group_params(struct sdw_bus *bus,
 	}
 
 	for (l = 0; l < SDW_MAX_LANES; l++) {
-		if (l > 0 && !bus->lane_used_bandwidth[l])
+		if (l > 0 && !bus->params.lane_used_bandwidth[l])
 			continue;
 		/* reset column_needed for each lane */
 		column_needed = 0;
@@ -510,7 +510,7 @@ static int get_manager_lane(struct sdw_bus *bus, struct sdw_master_runtime *m_rt
 					      m_rt->stream->params.bps;
 		}
 		if (required_bandwidth <=
-		    curr_dr_freq - bus->lane_used_bandwidth[l]) {
+		    curr_dr_freq - bus->params.lane_used_bandwidth[l]) {
 			/* Check if m_lane is connected to all Peripherals */
 			if (!is_lane_connected_to_all_peripherals(m_rt,
 				slave_prop->lane_maps[l])) {
@@ -521,7 +521,7 @@ static int get_manager_lane(struct sdw_bus *bus, struct sdw_master_runtime *m_rt
 			}
 			m_lane = slave_prop->lane_maps[l];
 			dev_dbg(&s_rt->slave->dev, "M lane %d is used\n", m_lane);
-			bus->lane_used_bandwidth[l] += required_bandwidth;
+			bus->params.lane_used_bandwidth[l] += required_bandwidth;
 			/*
 			 * Use non-zero manager lane, subtract the lane 0
 			 * bandwidth that is already calculated

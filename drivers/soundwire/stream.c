@@ -1794,8 +1794,8 @@ static int _sdw_deprepare_stream(struct sdw_stream_runtime *stream)
 			bandwidth = m_rt->stream->params.rate * hweight32(p_rt->ch_mask) *
 				    m_rt->stream->params.bps;
 			multi_lane_bandwidth += bandwidth;
-			bus->lane_used_bandwidth[p_rt->lane] -= bandwidth;
-			if (!bus->lane_used_bandwidth[p_rt->lane])
+			bus->params.lane_used_bandwidth[p_rt->lane] -= bandwidth;
+			if (!bus->params.lane_used_bandwidth[p_rt->lane])
 				p_rt->lane = 0;
 		}
 		/* TODO: Update this during Device-Device support */

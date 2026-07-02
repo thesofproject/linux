@@ -589,6 +589,7 @@ enum sdw_port_prep_ops {
  * @max_dr_freq: Maximum double rate clock frequency supported, in Hz
  * @curr_dr_freq: Current double rate clock frequency, in Hz
  * @bandwidth: Current bandwidth
+ * @lane_used_bandwidth: how much bandwidth in bits per second is used by each lane
  * @col: Active columns
  * @row: Active rows
  * @s_data_mode: NORMAL, STATIC or PRBS mode for all Slave ports
@@ -602,6 +603,7 @@ struct sdw_bus_params {
 	unsigned int max_dr_freq;
 	unsigned int curr_dr_freq;
 	unsigned int bandwidth;
+	unsigned int lane_used_bandwidth[SDW_MAX_LANES];
 	unsigned int col;
 	unsigned int row;
 	int s_data_mode;
@@ -1027,7 +1029,6 @@ struct sdw_stream_runtime {
  * @multi_link: Store bus property that indicates if multi links
  * are supported. This flag is populated by drivers after reading
  * appropriate firmware (ACPI/DT).
- * @lane_used_bandwidth: how much bandwidth in bits per second is used by each lane
  */
 struct sdw_bus {
 	struct device *dev;
@@ -1062,7 +1063,6 @@ struct sdw_bus {
 	struct dentry *debugfs;
 #endif
 	bool multi_link;
-	unsigned int lane_used_bandwidth[SDW_MAX_LANES];
 };
 
 struct sdw_stream_runtime *sdw_alloc_stream(const char *stream_name, enum sdw_stream_type type);
