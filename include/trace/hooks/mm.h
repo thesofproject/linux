@@ -786,6 +786,21 @@ DECLARE_HOOK(android_vh_oom_swapmem_gather_init,
 DECLARE_HOOK(android_vh_oom_swapmem_gather_finish,
 	TP_PROTO(struct mm_struct *mm),
 	TP_ARGS(mm));
+DECLARE_HOOK(android_vh_swap_alloc_fast_bypass,
+	TP_PROTO(struct folio *folio, swp_entry_t *entry, bool *bypass),
+	TP_ARGS(folio, entry, bypass));
+DECLARE_HOOK(android_vh_pick_swap_device_bypass,
+	TP_PROTO(swp_entry_t *entry, struct swap_info_struct *si, bool *bypass),
+	TP_ARGS(entry, si, bypass));
+DECLARE_HOOK(android_vh_update_percpu_swap_cluster_bypass,
+	TP_PROTO(struct swap_info_struct *si, bool *bypass),
+	TP_ARGS(si, bypass));
+DECLARE_HOOK(android_vh_check_swap_entries_free,
+	TP_PROTO(struct swap_info_struct *si, swp_entry_t *entry, unsigned int nr_pages),
+	TP_ARGS(si, entry, nr_pages));
+DECLARE_HOOK(android_vh_folio_alloc_swap_finish,
+	TP_PROTO(struct folio *folio, swp_entry_t *entry, bool bypass_fast),
+	TP_ARGS(folio, entry, bypass_fast));
 #endif /* _TRACE_HOOK_MM_H */
 
 /* This part must be outside protection */
