@@ -8,6 +8,7 @@
 #include <linux/cma.h>
 #include <linux/file.h>
 #include <linux/miscdevice.h>
+#include <linux/mutex.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/platform_device.h>
 #include <linux/rwsem.h>
@@ -17,7 +18,8 @@
 
 struct gunyah_cma {
 	struct device dev;
-	struct file *file;
+	struct mutex lock;
+	bool fd_active;
 	struct page *page;
 	struct miscdevice miscdev;
 	struct list_head list;
@@ -25,7 +27,6 @@ struct gunyah_cma {
 	unsigned long mapped_size;
 	bool is_shared_parcel;
 	struct rw_semaphore parcel_lock;
-	struct mm_struct *owner_mm;
 };
 
 struct gunyah_cma_parent {
@@ -41,16 +42,17 @@ struct gunyah_cma_parent {
  *
  * Return: The 0 on success or an error.
  */
-static int gunyah_cma_alloc(struct gunyah_cma *cma, loff_t len)
+static int gunyah_cma_alloc(struct gunyah_cma *cma, struct file *file, loff_t len)
 {
 	pgoff_t pagecount = len >> PAGE_SHIFT;
 	unsigned long align = get_order(len);
 	loff_t max_size;
 
+	guard(mutex)(&cma->lock);
 	if (cma->page)
 		return -EINVAL;
 
-	max_size = i_size_read(file_inode(cma->file));
+	max_size = i_size_read(file_inode(file));
 	if (len > max_size)
 		return -EINVAL;
 
@@ -73,18 +75,18 @@ static int gunyah_cma_alloc(struct gunyah_cma *cma, loff_t len)
 static int gunyah_cma_release(struct inode *inode, struct file *file)
 {
 	struct gunyah_cma *cma = file->private_data;
-	unsigned int count = PAGE_ALIGN(cma->mapped_size) >> PAGE_SHIFT;
+	unsigned int count;
 
-	if (cma->owner_mm) {
-		mmput(cma->owner_mm);
-		cma->owner_mm = NULL;
-	}
+	guard(mutex)(&cma->lock);
+	cma->fd_active = false;
 
 	if (!cma->page)
 		return 0;
 
+	count = PAGE_ALIGN(cma->mapped_size) >> PAGE_SHIFT;
 	cma_release(cma->dev.cma_area, cma->page, count);
 	cma->page = NULL;
+	cma->mapped_size = 0;
 
 	return 0;
 }
@@ -103,7 +105,7 @@ static int gunyah_cma_mmap(struct file *file, struct vm_area_struct *vma)
 	if (!pages)
 		return -ENOMEM;
 
-	ret = gunyah_cma_alloc(cma, len);
+	ret = gunyah_cma_alloc(cma, file, len);
 	if (ret < 0) {
 		kvfree(pages);
 		return ret;
@@ -128,9 +130,6 @@ static ssize_t gunyah_cma_read(struct file *file, char __user *ubuf,
 
 	if (!cma->page)
 		return -EINVAL;
-
-	if (current->mm != cma->owner_mm)
-		return -EACCES;
 
 	ret = down_read_interruptible(&cma->parcel_lock);
 	if (ret)
@@ -322,7 +321,15 @@ static long gunyah_cma_create_mem_fd(struct gunyah_cma *cma)
 	struct file *file;
 	int fd, err;
 
-	if (cma->page)
+	guard(mutex)(&cma->lock);
+	/*
+	 * Allow only one anon fd at a time. Each open creates a new struct
+	 * file with private_data pointing to the same singleton struct
+	 * gunyah_cma. A second fd could call cma_release() and free the CMA
+	 * pages that were allocated by the first fd's mmap(), leaving the
+	 * first fd's VMA mapping freed memory.
+	 */
+	if (cma->fd_active)
 		return -EBUSY;
 
 	flags |= O_CLOEXEC;
@@ -344,10 +351,8 @@ static long gunyah_cma_create_mem_fd(struct gunyah_cma *cma)
 
 	file->f_flags |= O_LARGEFILE;
 	file->f_mapping = inode->i_mapping;
-	cma->file = file;
-	mmget(current->mm);
-	cma->owner_mm = current->mm;
 	fd_install(fd, file);
+	cma->fd_active = true;
 
 	return fd;
 err_put_fd:
@@ -428,8 +433,8 @@ static int gunyah_cma_probe(struct platform_device *pdev)
 			goto err_continue;
 		}
 
+		mutex_init(&cma->lock);
 		init_rwsem(&cma->parcel_lock);
-
 		cma->miscdev.parent = &pdev->dev;
 		cma->miscdev.name = mem_name[i];
 		cma->miscdev.minor = MISC_DYNAMIC_MINOR;
