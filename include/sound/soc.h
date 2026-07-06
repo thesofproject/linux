@@ -976,9 +976,6 @@ struct snd_soc_card {
 	const char *long_name;
 	const char *driver_name;
 	const char *components;
-#ifdef CONFIG_DMI
-	char dmi_longname[80];
-#endif /* CONFIG_DMI */
 
 #ifdef CONFIG_PCI
 	/*
@@ -990,7 +987,7 @@ struct snd_soc_card {
 	bool pci_subsystem_set;
 #endif /* CONFIG_PCI */
 
-	char topology_shortname[32];
+	char *topology_shortname;
 
 	struct device *dev;
 	struct snd_card *snd_card;
@@ -1087,7 +1084,6 @@ struct snd_soc_card {
 #endif
 	/* bit field */
 	unsigned int instantiated:1;
-	unsigned int topology_shortname_created:1;
 	unsigned int fully_routed:1;
 	unsigned int probed:1;
 	unsigned int component_chaining:1;

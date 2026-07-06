@@ -217,7 +217,7 @@ int ksmbd_query_inode_status(struct dentry *dentry)
 		ret = KSMBD_INODE_STATUS_OK;
 	up_read(&ci->m_lock);
 
-	atomic_dec(&ci->m_count);
+	ksmbd_inode_put(ci);
 	return ret;
 }
 
@@ -719,14 +719,14 @@ struct ksmbd_file *ksmbd_lookup_fd_inode(struct dentry *dentry)
 	down_read(&ci->m_lock);
 	list_for_each_entry(lfp, &ci->m_fp_list, node) {
 		if (inode == file_inode(lfp->filp)) {
-			atomic_dec(&ci->m_count);
 			lfp = ksmbd_fp_get(lfp);
 			up_read(&ci->m_lock);
+			ksmbd_inode_put(ci);
 			return lfp;
 		}
 	}
-	atomic_dec(&ci->m_count);
 	up_read(&ci->m_lock);
+	ksmbd_inode_put(ci);
 	return NULL;
 }
 
@@ -1390,18 +1390,18 @@ int ksmbd_reopen_durable_fd(struct ksmbd_work *work, struct ksmbd_file *fp)
 	struct ksmbd_lock *smb_lock;
 	unsigned int old_f_state;
 
+	write_lock(&global_ft.lock);
 	if (!fp->is_durable || fp->conn || fp->tcon) {
+		write_unlock(&global_ft.lock);
 		pr_err("Invalid durable fd [%p:%p]\n", fp->conn, fp->tcon);
 		return -EBADF;
 	}
 
 	if (has_file_id(fp->volatile_id)) {
+		write_unlock(&global_ft.lock);
 		pr_err("Still in use durable fd: %llu\n", fp->volatile_id);
 		return -EBADF;
 	}
-
-	old_f_state = fp->f_state;
-	fp->f_state = FP_NEW;
 
 	/*
 	 * Initialize fp's connection binding before publishing fp into the
@@ -1413,11 +1413,17 @@ int ksmbd_reopen_durable_fd(struct ksmbd_work *work, struct ksmbd_file *fp)
 	 */
 	fp->conn = ksmbd_conn_get(conn);
 	fp->tcon = work->tcon;
+	write_unlock(&global_ft.lock);
+
+	old_f_state = fp->f_state;
+	fp->f_state = FP_NEW;
 
 	__open_id(&work->sess->file_table, fp, OPEN_ID_TYPE_VOLATILE_ID);
 	if (!has_file_id(fp->volatile_id)) {
+		write_lock(&global_ft.lock);
 		fp->conn = NULL;
 		fp->tcon = NULL;
+		write_unlock(&global_ft.lock);
 		ksmbd_conn_put(conn);
 		fp->f_state = old_f_state;
 		return -EBADF;
