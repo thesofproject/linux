@@ -533,7 +533,7 @@ static int gunyah_gup_share_parcel(struct gunyah_vm *ghvm,
 	int pinned, ret;
 	struct folio *folio;
 	unsigned int gup_flags;
-	unsigned long i, offset, entries, entry_size;
+	unsigned long i, offset, entries, entry_size, tail_unpins = 0;
 
 	offset = gunyah_gfn_to_gpa(*gfn) - b->guest_phys_addr;
 	pages = kcalloc(*nr, sizeof(*pages), GFP_KERNEL_ACCOUNT);
@@ -586,7 +586,9 @@ static int gunyah_gup_share_parcel(struct gunyah_vm *ghvm,
 			}
 		} else {
 			unpin_user_page(pages[i]);
+			pages[i] = NULL;
 			account_locked_vm(current->mm, 1, false);
+			tail_unpins++;
 		}
 	}
 	parcel->mem_entries[entries].size = entry_size;
@@ -605,7 +607,7 @@ free_mem_entries:
 	parcel->mem_entries = NULL;
 	parcel->n_mem_entries = 0;
 unaccount_pages:
-	account_locked_vm(current->mm, pinned, false);
+	account_locked_vm(current->mm, pinned - tail_unpins, false);
 unpin_pages:
 	unpin_user_pages(pages, pinned);
 free_pages:
