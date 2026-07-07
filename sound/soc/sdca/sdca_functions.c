@@ -200,6 +200,124 @@ void sdca_lookup_functions(struct sdw_slave *slave)
 }
 EXPORT_SYMBOL_NS(sdca_lookup_functions, "SND_SOC_SDCA");
 
+int sdca_get_mic_count(struct sdw_slave *slave, struct sdca_function_desc *function)
+{
+	struct fwnode_handle *function_node;
+	u32 *entity_list __free(kfree) = NULL;
+	u32 transducer_count = 0;
+	u32 terminal_type;
+	int num_entities;
+	int ret;
+	int i;
+
+	if (!function || !function->node)
+		return -EINVAL;
+
+	function_node = function->node;
+
+	num_entities = fwnode_property_count_u32(function_node,
+					 "mipi-sdca-entity-id-list");
+	if (num_entities < 0) {
+		dev_err(&slave->dev,
+			"%pfwP: failed to get entity id list count for function type %u: %d\n",
+			function_node, function->type, num_entities);
+		return num_entities;
+	}
+	if (num_entities == 0) {
+		dev_warn(&slave->dev,
+			 "%pfwP: empty entity id list for function type %u\n",
+			 function_node, function->type);
+		return -ENODATA;
+	}
+	if (num_entities > SDCA_MAX_ENTITY_COUNT) {
+		dev_err(&slave->dev,
+			"%pfwP: entity number %d is invalid for function type %u\n",
+			function_node, num_entities, function->type);
+		return -EINVAL;
+	}
+
+	entity_list = kcalloc(num_entities, sizeof(*entity_list), GFP_KERNEL);
+	if (!entity_list)
+		return -ENOMEM;
+
+	ret = fwnode_property_read_u32_array(function_node,
+					    "mipi-sdca-entity-id-list",
+					    entity_list, num_entities);
+	if (ret) {
+		dev_err(&slave->dev,
+			"%pfwP: failed to read entity id list for function type %u: %d\n",
+			function_node, function->type, ret);
+		return ret;
+	}
+
+	for (i = 0; i < num_entities; i++) {
+		struct fwnode_handle *entity_node;
+		const char *entity_label = "<unknown>";
+		u32 entity_type;
+		char entity_property[SDCA_PROPERTY_LENGTH];
+
+		/* DisCo uses upper-case for hex numbers */
+		snprintf(entity_property, sizeof(entity_property),
+			 "mipi-sdca-entity-id-0x%X-subproperties", entity_list[i]);
+
+		entity_node = fwnode_get_named_child_node(function_node, entity_property);
+		if (!entity_node) {
+			dev_dbg(&slave->dev, "%pfwP: missing entity node %s\n",
+				function_node, entity_property);
+			continue;
+		}
+
+		fwnode_property_read_string(entity_node, "mipi-sdca-entity-label",
+					    &entity_label);
+
+		ret = fwnode_property_read_u32(entity_node, "mipi-sdca-entity-type",
+					      &entity_type);
+		if (ret) {
+			dev_info(&slave->dev,
+				 "SDCA function %s (type %u adr 0x%x): entity 0x%x label %s type missing\n",
+				 function->name, function->type, function->adr,
+				 entity_list[i], entity_label);
+			goto put_entity_node;
+		}
+
+		dev_dbg(&slave->dev,
+			"SDCA function %s (type %u adr 0x%x): entity 0x%x label %s type 0x%x\n",
+			function->name, function->type, function->adr,
+			entity_list[i], entity_label, entity_type);
+
+		if (entity_type == SDCA_ENTITY_TYPE_IT) {
+			ret = fwnode_property_read_u32(entity_node,
+					       "mipi-sdca-terminal-type",
+					       &terminal_type);
+			if (ret)
+				goto put_entity_node;
+
+			if (terminal_type != SDCA_TERM_TYPE_MICROPHONE_TRANSDUCER &&
+			    terminal_type != SDCA_TERM_TYPE_MICROPHONE_ARRAY_TRANSDUCER)
+				goto put_entity_node;
+
+			ret = fwnode_property_read_u32(entity_node,
+					       "mipi-sdca-terminal-transducer-count",
+					       &transducer_count);
+			if (ret)
+				goto put_entity_node;
+
+			dev_dbg(&slave->dev,
+				"SDCA function %s entity %s: mipi-sdca-terminal-type=%#x mipi-sdca-terminal-transducer-count=%u\n",
+				function->name, entity_label, terminal_type, transducer_count);
+
+			fwnode_handle_put(entity_node);
+			break;
+		}
+
+put_entity_node:
+		fwnode_handle_put(entity_node);
+	}
+
+	return transducer_count;
+}
+EXPORT_SYMBOL_NS(sdca_get_mic_count, "SND_SOC_SDCA");
+
 struct raw_init_write {
 	__le32 addr;
 	u8 val;
