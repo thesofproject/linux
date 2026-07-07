@@ -1502,6 +1502,11 @@ impl Thread {
         });
 
         // Restore the priority even on failure.
+        if orig.from_parent.is_some() {
+            let mut prio_state = self.prio_lock.lock();
+            prio_state.state = PriorityState::Pending;
+            prio_state.next = orig.saved_priority();
+        }
         self.restore_priority(&orig.saved_priority());
         out
     }
