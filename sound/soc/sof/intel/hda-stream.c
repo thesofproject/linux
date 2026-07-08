@@ -1331,16 +1331,18 @@ out_put:
 EXPORT_SYMBOL_NS(hda_data_stream_prepare, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 int hda_data_stream_cleanup(struct device *dev, struct snd_dma_buffer *dmab,
-			    bool persistent_buffer, struct hdac_ext_stream *hext_stream, bool pair)
+			    bool persistent_buffer, struct hdac_ext_stream *hext_stream,
+			    bool is_iccmax, bool pair)
 {
 	struct snd_sof_dev *sdev =  dev_get_drvdata(dev);
 	struct hdac_stream *hstream = hdac_stream(hext_stream);
 	int sd_offset = SOF_STREAM_SD_OFFSET(hstream);
 	int ret = 0;
 
-	if (hstream->direction == SNDRV_PCM_STREAM_PLAYBACK)
+	if (!is_iccmax)
 		ret = hda_dsp_stream_spib_config(sdev, hext_stream, HDA_DSP_SPIB_DISABLE, 0);
-	else
+
+	if (hstream->direction == SNDRV_PCM_STREAM_CAPTURE)
 		snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR, sd_offset,
 					SOF_HDA_SD_CTL_DMA_START, 0);
 
