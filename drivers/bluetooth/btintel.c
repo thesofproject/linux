@@ -671,6 +671,19 @@ int btintel_parse_version_tlv(struct hci_dev *hdev,
 			snprintf(version->fw_id, sizeof(version->fw_id),
 				 "%s", tlv->val);
 			break;
+
+		case INTEL_TLV_UNLOCK_POLICY:
+			version->unlock_policy = tlv->val[0];
+			bt_dev_info(hdev, "Platform Unlock policy: 0x%2.2x",
+					version->unlock_policy);
+			break;
+		case INTEL_TLV_PLATFORM_ID:
+			if (tlv->len == 6) {
+				memcpy(version->bt_platform_id, tlv->val, 6);
+				bt_dev_info(hdev, "BT Platform ID: %6phN",
+						version->bt_platform_id);
+			}
+			break;
 		default:
 			/* Ignore rest of information */
 			break;

@@ -43,6 +43,8 @@ enum {
 	INTEL_TLV_OTP_BDADDR,
 	INTEL_TLV_UNLOCKED_STATE,
 	INTEL_TLV_GIT_SHA1,
+	INTEL_TLV_UNLOCK_POLICY = 0x3c,
+	INTEL_TLV_PLATFORM_ID = 0x3d,
 	INTEL_TLV_FW_ID = 0x50
 };
 
@@ -106,6 +108,8 @@ struct intel_version_tlv {
 	u32	git_sha1;
 	u8	fw_id[BTINTEL_FWID_MAXLEN];
 	bdaddr_t otp_bd_addr;
+	u8	unlock_policy;
+	u8	bt_platform_id[6];
 };
 
 struct intel_version {
