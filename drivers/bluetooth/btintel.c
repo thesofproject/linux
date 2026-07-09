@@ -3399,6 +3399,7 @@ int btintel_bootloader_setup_tlv(struct hci_dev *hdev,
 	int err;
 	struct intel_version_tlv new_ver;
 	struct btintel_data *data = hci_get_priv(hdev);
+	u8 hw_variant = INTEL_HW_VARIANT(ver->cnvi_bt);
 
 	bt_dev_dbg(hdev, "");
 
@@ -3419,12 +3420,19 @@ int btintel_bootloader_setup_tlv(struct hci_dev *hdev,
 
 	data->unlocker = false;
 
-	/* Send unlocker image BlazarI onwards */
-	if (INTEL_HW_VARIANT(ver->cnvi_bt) >= 0x1e && ver->api_lock) {
-		data->unlocker = true;
-		btintel_prepare_fw_download_tlv(hdev, ver, &boot_param);
+	/* Flow until (BZRI / BZRU / BZRIW)
+	 * Flow: Boot ROM -> unlocker.sfi -> iml -> opfw load
+	 */
+	if (hw_variant >= BTINTEL_HWID_BZRI && hw_variant <= BTINTEL_HWID_BZRIW) {
+		if (ver->api_lock && ver->unlock_policy == 0) {
+			data->unlocker = true;
+			err = btintel_prepare_fw_download_tlv(hdev, ver, &boot_param);
+			if (err) {
+				bt_dev_err(hdev, "Failed to load legacy unlocker.sfi (%d). Moving to IML...", err);
+				data->unlocker = false;
+			}
+		}
 	}
-
 
 	err = btintel_prepare_fw_download_tlv(hdev, ver, &boot_param);
 	if (err)
@@ -3449,8 +3457,23 @@ int btintel_bootloader_setup_tlv(struct hci_dev *hdev,
 		return err;
 	}
 
-	/* If image type returned is BTINTEL_IMG_IML, then controller supports
-	 * intermediate loader image
+	/* New Unlocker Flow (SCP / PTL onwards)
+	 * Flow: Boot ROM -> iml -> unlocker.sfi -> opfw load
+	 */
+	if (hw_variant >= BTINTEL_HWID_SCP) {
+		if (ver->api_lock && ver->unlock_policy == 1) {
+			data->unlocker = true;
+			err = btintel_prepare_fw_download_tlv(hdev, ver, &boot_param);
+			if (err) {
+				bt_dev_err(hdev, "Failed to load SCP unlocker.sfi (%d). Moving to OPFW...", err);
+				data->unlocker = false;
+			}
+		}
+	}
+
+	/* Transition to Operational Firmware
+	 * If image type returned is BTINTEL_IMG_IML, then controller supports
+	 * intermediate loader image.
 	 */
 	if (ver->img_type == BTINTEL_IMG_IML) {
 		err = btintel_prepare_fw_download_tlv(hdev, ver, &boot_param);
