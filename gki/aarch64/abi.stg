@@ -366244,6 +366244,13 @@ function {
   parameter_id: 0x141e84b4
 }
 function {
+  id: 0x9bdd9427
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x1d19a9d5
+  parameter_id: 0x19238db3
+}
+function {
   id: 0x9bddb220
   return_type_id: 0x6720d32f
   parameter_id: 0x18bd6530
@@ -388719,6 +388726,15 @@ elf_symbol {
   full_name: "__traceiter_android_vh_save_vmalloc_stack"
 }
 elf_symbol {
+  id: 0x3b3c5487
+  name: "__traceiter_android_vh_sca_migrate_same"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x6f45ec29
+  type_id: 0x9bdd9427
+  full_name: "__traceiter_android_vh_sca_migrate_same"
+}
+elf_symbol {
   id: 0xa413d12c
   name: "__traceiter_android_vh_sched_move_task"
   is_defined: true
@@ -396115,6 +396131,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_vh_save_vmalloc_stack"
+}
+elf_symbol {
+  id: 0xd7fa0501
+  name: "__tracepoint_android_vh_sca_migrate_same"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_vh_sca_migrate_same"
 }
 elf_symbol {
   id: 0xbb309826
@@ -463581,6 +463606,7 @@ interface {
   symbol_id: 0xa1325610
   symbol_id: 0x2540195e
   symbol_id: 0x979b6b9c
+  symbol_id: 0x3b3c5487
   symbol_id: 0xa413d12c
   symbol_id: 0x3a4e20d6
   symbol_id: 0x237634b3
@@ -464403,6 +464429,7 @@ interface {
   symbol_id: 0xb91d18b6
   symbol_id: 0x1ce15a0c
   symbol_id: 0x64cdb186
+  symbol_id: 0xd7fa0501
   symbol_id: 0xbb309826
   symbol_id: 0xb3b18fc4
   symbol_id: 0x40d6a8c5
