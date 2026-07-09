@@ -73,20 +73,27 @@ static enum {
 
 #ifdef CONFIG_CMA
 static struct cma *host_s2_cma;
+static size_t host_s2_cma_keep;
 
 static int __init early_kvm_arm_host_s2_cfg(char *arg)
 {
+	char *opt;
+
 	if (!arg)
 		return -EINVAL;
 
-	if (strcmp(arg, "carveout") == 0)
-		host_s2_mode = PKVM_HOST_S2_CARVEOUT;
-	else if (strcmp(arg, "cma") == 0)
-		host_s2_mode = PKVM_HOST_S2_CMA;
-	else if (strcmp(arg, "gcma") == 0)
-		host_s2_mode = PKVM_HOST_S2_GCMA;
-	else
-		return -EINVAL;
+	while ((opt = strsep(&arg, ","))) {
+		if (!strcmp(opt, "carveout"))
+			host_s2_mode = PKVM_HOST_S2_CARVEOUT;
+		else if (!strcmp(opt, "cma"))
+			host_s2_mode = PKVM_HOST_S2_CMA;
+		else if (!strcmp(opt, "gcma"))
+			host_s2_mode = PKVM_HOST_S2_GCMA;
+		else if (!strncmp(opt, "keep=", 5))
+			host_s2_cma_keep = memparse(opt + 5, NULL);
+		else
+			return -EINVAL;
+	}
 
 	return 0;
 }
@@ -113,8 +120,23 @@ static void __init pkvm_host_stage2_drain(void)
 {
 	unsigned long reclaimed = 0;
 
-	if (kvm_nvhe_sym(host_s2_cma_size))
-		reclaimed = __pkvm_reclaim_hyp_alloc_mgt_id(HYP_ALLOC_MGT_HOSTS2_ID, ULONG_MAX);
+	if (kvm_nvhe_sym(host_s2_cma_size)) {
+		unsigned long max = ULONG_MAX;
+
+		if (host_s2_cma_keep) {
+			unsigned long reclaimable;
+
+			reclaimable = kvm_call_hyp_nvhe(__pkvm_hyp_alloc_mgt_reclaimable,
+							HYP_ALLOC_MGT_HOSTS2_ID);
+			max = reclaimable - (host_s2_cma_keep >> PAGE_SHIFT);
+			/* overflow */
+			if (max > reclaimable)
+				max = 0;
+		}
+
+		if (max)
+			reclaimed = __pkvm_reclaim_hyp_alloc_mgt_id(HYP_ALLOC_MGT_HOSTS2_ID, max);
+	}
 
 	kvm_info("Shrunk Hyp Reserved memory by %lu MiB\n", reclaimed >> (20 - PAGE_SHIFT));
 }
