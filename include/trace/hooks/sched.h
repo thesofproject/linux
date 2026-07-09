@@ -420,6 +420,9 @@ DECLARE_HOOK(android_vh_scx_task_switch_finish,
 DECLARE_HOOK(android_vh_scx_task_can_run_on,
 	TP_PROTO(bool *disallow, struct task_struct *p, struct rq *rq),
 	TP_ARGS(disallow, p, rq));
+DECLARE_HOOK(android_vh_scx_cpu_allowed,
+	TP_PROTO(struct task_struct *p, int cpu, bool *allowed),
+	TP_ARGS(p, cpu, allowed));
 
 struct scx_exit_info;
 DECLARE_HOOK(android_vh_scx_exit_on_abnormal,
