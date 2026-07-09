@@ -388780,6 +388780,15 @@ elf_symbol {
   full_name: "__traceiter_android_vh_scheduler_tick"
 }
 elf_symbol {
+  id: 0x8ebeec71
+  name: "__traceiter_android_vh_scx_cpu_allowed"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x916e6a49
+  type_id: 0x9bc253cf
+  full_name: "__traceiter_android_vh_scx_cpu_allowed"
+}
+elf_symbol {
   id: 0x0c8a699d
   name: "__traceiter_android_vh_scx_enabled"
   is_defined: true
@@ -396185,6 +396194,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_vh_scheduler_tick"
+}
+elf_symbol {
+  id: 0x46eb1d7f
+  name: "__tracepoint_android_vh_scx_cpu_allowed"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_vh_scx_cpu_allowed"
 }
 elf_symbol {
   id: 0x04a09533
@@ -463612,6 +463630,7 @@ interface {
   symbol_id: 0x237634b3
   symbol_id: 0xb5ed74f6
   symbol_id: 0xb841c45e
+  symbol_id: 0x8ebeec71
   symbol_id: 0x0c8a699d
   symbol_id: 0x5e2a42c5
   symbol_id: 0x5f49f571
@@ -464435,6 +464454,7 @@ interface {
   symbol_id: 0x40d6a8c5
   symbol_id: 0x931fa088
   symbol_id: 0xff2bccb8
+  symbol_id: 0x46eb1d7f
   symbol_id: 0x04a09533
   symbol_id: 0x1574802b
   symbol_id: 0x0af2fd87
