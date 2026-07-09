@@ -3350,6 +3350,7 @@ static int __set_cpus_allowed_ptr_locked(struct task_struct *p,
 
 	if (!(ctx->flags & SCA_MIGRATE_ENABLE)) {
 		if (cpumask_equal(&p->cpus_mask, ctx->new_mask)) {
+			trace_android_vh_sca_migrate_same(p, ctx);
 			if (ctx->flags & SCA_USER)
 				swap(p->user_cpus_ptr, ctx->user_mask);
 			goto out;
