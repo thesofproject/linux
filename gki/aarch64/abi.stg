@@ -365198,6 +365198,13 @@ function {
   parameter_id: 0x06835e9c
 }
 function {
+  id: 0x9bb5c5c3
+  return_type_id: 0x6720d32f
+  parameter_id: 0x18bd6530
+  parameter_id: 0x078316ff
+  parameter_id: 0x11cfee5a
+}
+function {
   id: 0x9bb61cbe
   return_type_id: 0x6720d32f
   parameter_id: 0x18bd6530
@@ -390485,6 +390492,15 @@ elf_symbol {
   full_name: "__traceiter_android_vh_ufs_update_sysfs"
 }
 elf_symbol {
+  id: 0xb4260f8a
+  name: "__traceiter_android_vh_ufs_use_threaded_intr"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xce162ac2
+  type_id: 0x9bb5c5c3
+  full_name: "__traceiter_android_vh_ufs_use_threaded_intr"
+}
+elf_symbol {
   id: 0xda2652c8
   name: "__traceiter_android_vh_ufs_wait_for_uic_cmd"
   is_defined: true
@@ -397899,6 +397915,15 @@ elf_symbol {
   crc: 0x57962c48
   type_id: 0x18ccbd2c
   full_name: "__tracepoint_android_vh_ufs_update_sysfs"
+}
+elf_symbol {
+  id: 0x5ee8cef8
+  name: "__tracepoint_android_vh_ufs_use_threaded_intr"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0x57962c48
+  type_id: 0x18ccbd2c
+  full_name: "__tracepoint_android_vh_ufs_use_threaded_intr"
 }
 elf_symbol {
   id: 0x4aab77a6
@@ -464747,6 +464772,7 @@ interface {
   symbol_id: 0x999f9072
   symbol_id: 0x810f6abf
   symbol_id: 0xcc8dcd0c
+  symbol_id: 0xb4260f8a
   symbol_id: 0xda2652c8
   symbol_id: 0x46e1dbde
   symbol_id: 0xb67b9934
@@ -465571,6 +465597,7 @@ interface {
   symbol_id: 0xd578ff0c
   symbol_id: 0xb7ba0c6d
   symbol_id: 0xaf7a4dba
+  symbol_id: 0x5ee8cef8
   symbol_id: 0x4aab77a6
   symbol_id: 0xd309f564
   symbol_id: 0x7db89fba
