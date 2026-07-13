@@ -8,8 +8,11 @@
   blk_stat_disable_accounting
   blk_stat_enable_accounting
   __brelse
+  __contpte_try_fold
+  __contpte_try_unfold
   class_find_device
   _copy_from_iter
+  copy_highpage
   end_buffer_read_sync
   end_buffer_write_sync
   gnet_stats_add_queue
@@ -22,6 +25,7 @@
   __mmu_notifier_arch_invalidate_secondary_tlbs
   __mmu_notifier_invalidate_range_end
   __mmu_notifier_invalidate_range_start
+  mm_trace_rss_stat
   mte_sync_tags
   mthp_stats
   mipi_dsi_dcs_write
@@ -62,6 +66,7 @@
   seq_put_decimal_ull
   seq_read_iter
   set_blocksize
+  shmem_mapping
   skb_copy_bits
   skb_orphan_partial
   submit_bh
@@ -69,12 +74,14 @@
   swap_migration_ad_supported
   swap_space
   __set_task_comm
+  __sync_icache_dcache
   tcf_block_get
   tcf_block_put
   tcf_classify
   timer_reduce
   __traceiter_android_rvh_alloc_and_link_pwqs
   schedule_timeout_killable
+  zone_pageset_high_and_batch_update
   __irq_regs
   _trace_android_vh_filemap_alloc_folio
   __traceiter_android_rvh_alloc_pages_reclaim_cycle_end
@@ -163,6 +170,7 @@
   __traceiter_android_vh_map_order0_folio
   __traceiter_android_vh_mm_customize_ac
   __traceiter_android_vh_mm_customize_file_is_tiny
+  __traceiter_android_vh_mm_customize_longterm_pinnable
   __traceiter_android_vh_mm_customize_pgdat_balanced
   __traceiter_android_vh_mm_customize_reclaim_idx
   __traceiter_android_vh_mm_customize_rmqueue
@@ -171,7 +179,10 @@
   __traceiter_android_vh_mm_customize_zone_can_compact
   __traceiter_android_vh_mm_customize_zone_max_order
   __traceiter_android_vh_mm_customize_zone_pageset
+  __traceiter_android_vh_mm_do_madvise_bypass
   __traceiter_android_vh_mm_folio_split_supported
+  __traceiter_android_vh_mm_migrate_one_page
+  __traceiter_android_vh_mm_remove_migration_pte_bypass
   __traceiter_android_vh_mm_truncate_try_split_folio
   __traceiter_android_vh_mmap_region
   __traceiter_android_vh_mutex_unlock_slowpath
@@ -311,6 +322,7 @@
   __tracepoint_android_vh_map_order0_folio
   __tracepoint_android_vh_mm_customize_ac
   __tracepoint_android_vh_mm_customize_file_is_tiny
+  __tracepoint_android_vh_mm_customize_longterm_pinnable
   __tracepoint_android_vh_mm_customize_pgdat_balanced
   __tracepoint_android_vh_mm_customize_reclaim_idx
   __tracepoint_android_vh_mm_customize_rmqueue
@@ -319,7 +331,10 @@
   __tracepoint_android_vh_mm_customize_zone_can_compact
   __tracepoint_android_vh_mm_customize_zone_max_order
   __tracepoint_android_vh_mm_customize_zone_pageset
+  __tracepoint_android_vh_mm_do_madvise_bypass
   __tracepoint_android_vh_mm_folio_split_supported
+  __tracepoint_android_vh_mm_migrate_one_page
+  __tracepoint_android_vh_mm_remove_migration_pte_bypass
   __tracepoint_android_vh_mm_truncate_try_split_folio
   __tracepoint_android_vh_mmap_region
   __tracepoint_android_vh_mutex_unlock_slowpath
