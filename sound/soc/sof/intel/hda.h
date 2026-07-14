@@ -739,7 +739,7 @@ struct hdac_ext_stream *hda_cl_prepare(struct device *dev, unsigned int format,
 int hda_cl_trigger(struct device *dev, struct hdac_ext_stream *hext_stream, int cmd);
 
 int hda_cl_cleanup(struct device *dev, struct snd_dma_buffer *dmab,
-		   bool persistent_buffer, struct hdac_ext_stream *hext_stream);
+		   bool persistent_buffer, struct hdac_ext_stream *hext_stream, bool is_iccmax);
 int cl_dsp_init(struct snd_sof_dev *sdev, int stream_tag, bool imr_boot);
 #define HDA_CL_STREAM_FORMAT 0x40
 
@@ -911,7 +911,8 @@ hda_data_stream_prepare(struct device *dev, unsigned int format, unsigned int si
 			bool is_iccmax, bool pair);
 
 int hda_data_stream_cleanup(struct device *dev, struct snd_dma_buffer *dmab,
-			    bool persistent_buffer, struct hdac_ext_stream *hext_stream, bool pair);
+			    bool persistent_buffer, struct hdac_ext_stream *hext_stream,
+			    bool is_iccmax, bool pair);
 
 /* common dai driver */
 extern struct snd_soc_dai_driver skl_dai[];

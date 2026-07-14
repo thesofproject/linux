@@ -671,7 +671,7 @@ static int es9356_sdca_mbq_size(struct device *dev, unsigned int reg)
 	}
 }
 
-static struct regmap_sdw_mbq_cfg es9356_mbq_config = {
+static const struct regmap_sdw_mbq_cfg es9356_mbq_config = {
 	.mbq_size = es9356_sdca_mbq_size,
 };
 
