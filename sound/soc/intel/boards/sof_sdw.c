@@ -14,6 +14,9 @@
 #include <linux/soundwire/sdw_type.h>
 #include <linux/soundwire/sdw_intel.h>
 #include <sound/core.h>
+#include <sound/sdca.h>
+#include <sound/sdca_function.h>
+#include <sound/soc.h>
 #include <sound/soc-acpi.h>
 #include "sof_sdw_common.h"
 #include "../../codecs/rt711.h"
@@ -900,6 +903,23 @@ static const struct snd_soc_ops sdw_ops = {
 
 static const char * const type_strings[] = {"SimpleJack", "SmartAmp", "SmartMic"};
 
+static struct sdw_slave *sof_sdw_get_peripheral_by_codec_name(const char *codec_name)
+{
+	struct snd_soc_component *component;
+
+	component = snd_soc_lookup_component_by_name(codec_name);
+	if (!component)
+		return NULL;
+
+	if (is_sdw_slave(component->dev))
+		return dev_to_sdw_dev(component->dev);
+
+	if (component->dev->parent && is_sdw_slave(component->dev->parent))
+		return dev_to_sdw_dev(component->dev->parent);
+
+	return NULL;
+}
+
 static int create_sdw_dailink(struct snd_soc_card *card,
 			      struct asoc_sdw_dailink *sof_dai,
 			      struct snd_soc_dai_link **dai_links,
@@ -1011,12 +1031,69 @@ static int create_sdw_dailink(struct snd_soc_card *card,
 
 			codecs[j].name = sof_end->codec_name;
 			codecs[j].dai_name = sof_end->dai_info->dai_name;
+
 			if (sof_end->dai_info->dai_type == SOC_SDW_DAI_TYPE_MIC &&
 			    mach_params->dmic_num > 0) {
 				dev_warn(dev,
 					 "Both SDW DMIC and PCH DMIC are present, if incorrect, please set kernel params snd_sof_intel_hda_generic dmic_num=0 to disable PCH DMIC\n");
 			}
 			j++;
+
+			if (sof_end->dai_info->dai_type == SOC_SDW_DAI_TYPE_MIC) {
+				struct sdw_slave *peripheral;
+				const char *codec_name = sof_end->codec_name;
+				int sdw_mic_num;
+				int k;
+
+				peripheral = sof_sdw_get_peripheral_by_codec_name(codec_name);
+				if (!peripheral) {
+					/*
+					 * asoc_sdw_parse_sdw_endpoints() is already checked
+					 * peripheral is not NULL, so this should never happen.
+					 */
+					dev_err(dev, "Can't get peripheral for codec %s\n",
+						sof_end->codec_name);
+					return -EINVAL;
+				}
+
+				for (k = 0; k < peripheral->sdca_data.num_functions; k++) {
+					struct sdca_function_desc *function =
+						&peripheral->sdca_data.function[k];
+					char *tmp = name;
+
+					if (function->type != SDCA_FUNCTION_TYPE_SMART_MIC)
+						continue;
+
+					sdw_mic_num = sdca_get_mic_count(peripheral, function);
+					if (sdw_mic_num < 0) {
+						dev_dbg(dev, "%s mic count query failed: %d\n",
+							sof_end->codec_name, sdw_mic_num);
+						continue;
+					}
+					dev_dbg(dev, "%s mic num %d\n",
+						sof_end->codec_name, sdw_mic_num);
+
+					if (strstr(name, "ch"))
+						continue;
+
+					if (sdw_mic_num != 1 && sdw_mic_num != 2 &&
+					    sdw_mic_num != 4 && sdw_mic_num != 8) {
+						dev_warn(dev,
+							 "%s mic count %d is not supported\n",
+							 sof_end->codec_name, sdw_mic_num);
+						continue;
+					}
+
+					name = devm_kasprintf(dev, GFP_KERNEL, "%s-%dch",
+							      name, sdw_mic_num);
+					if (!name)
+						return -ENOMEM;
+
+					devm_kfree(dev, tmp);
+					break;
+				}
+			}
+
 		}
 
 		WARN_ON(i != num_cpus || j != num_codecs);
@@ -1582,3 +1659,4 @@ MODULE_AUTHOR("Pierre-Louis Bossart <pierre-louis.bossart@linux.intel.com>");
 MODULE_LICENSE("GPL v2");
 MODULE_IMPORT_NS("SND_SOC_INTEL_HDA_DSP_COMMON");
 MODULE_IMPORT_NS("SND_SOC_SDW_UTILS");
+MODULE_IMPORT_NS("SND_SOC_SDCA");
