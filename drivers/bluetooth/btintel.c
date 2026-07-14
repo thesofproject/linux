@@ -2343,6 +2343,7 @@ static int btintel_prepare_fw_download_tlv(struct hci_dev *hdev,
 	char fwname[128];
 	int err;
 	ktime_t calltime;
+	struct btintel_data *data = hci_get_priv(hdev);
 
 	if (!ver || !boot_param)
 		return -EINVAL;
@@ -2386,7 +2387,14 @@ static int btintel_prepare_fw_download_tlv(struct hci_dev *hdev,
 		else
 			btintel_get_fw_name_tlv(ver, fwname, sizeof(fwname), "sfi");
 	} else {
-		btintel_get_fw_name_tlv(ver, fwname, sizeof(fwname), "sfi");
+		if (data->unlocker) {
+			strcpy(fwname, "intel/unlocker.sfi");
+			data->unlocker = false;
+		}
+		else
+		{
+			btintel_get_fw_name_tlv(ver, fwname, sizeof(fwname), "sfi");
+		}
 	}
 
 	err = firmware_request_nowarn(&fw, fwname, &hdev->dev);
@@ -3377,6 +3385,7 @@ int btintel_bootloader_setup_tlv(struct hci_dev *hdev,
 	char ddcname[64];
 	int err;
 	struct intel_version_tlv new_ver;
+	struct btintel_data *data = hci_get_priv(hdev);
 
 	bt_dev_dbg(hdev, "");
 
@@ -3394,6 +3403,15 @@ int btintel_bootloader_setup_tlv(struct hci_dev *hdev,
 		btintel_clear_flag(hdev, i);
 
 	btintel_set_flag(hdev, INTEL_BOOTLOADER);
+
+	data->unlocker = false;
+
+	/* Send unlocker image BlazarI onwards */
+	if (INTEL_HW_VARIANT(ver->cnvi_bt) >= 0x1e && ver->api_lock) {
+		data->unlocker = true;
+		btintel_prepare_fw_download_tlv(hdev, ver, &boot_param);
+	}
+
 
 	err = btintel_prepare_fw_download_tlv(hdev, ver, &boot_param);
 	if (err)
