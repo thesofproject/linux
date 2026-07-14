@@ -124,6 +124,8 @@
   __traceiter_android_vh_swapin_start
   __tracepoint_android_vh_swapin_end
   __traceiter_android_vh_swapin_end
+  __tracepoint_android_vh_customize_swapin_gfp_mask
+  __traceiter_android_vh_customize_swapin_gfp_mask
   __tracepoint_android_vh_swap_writepage_start
   __traceiter_android_vh_swap_writepage_start
   __tracepoint_android_vh_swap_writepage_end
