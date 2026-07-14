@@ -177,6 +177,8 @@ impl ProcessInner {
     ) -> Result<(), (BinderError, DLArc<dyn DeliverToRead>)> {
         // Try to find a ready thread to which to push the work.
         if let Some(thread) = self.ready_threads.pop_front() {
+            work.on_thread_selected(&thread);
+
             // Push to thread while holding state lock. This prevents the thread from giving up
             // (for example, because of a signal) when we're about to deliver work.
             match thread.push_work(work) {
