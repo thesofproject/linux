@@ -851,14 +851,10 @@ static void intel_modeset_readout_hw_state(struct intel_display *display)
 			 * FIXME don't have the fb yet, so can't
 			 * use plane->min_cdclk() :(
 			 */
-			if (plane_state->uapi.visible && plane->min_cdclk) {
-				if (crtc_state->double_wide || DISPLAY_VER(display) >= 10)
-					crtc_state->plane_min_cdclk[plane->id] =
-						DIV_ROUND_UP(crtc_state->pixel_rate, 2);
-				else
-					crtc_state->plane_min_cdclk[plane->id] =
-						crtc_state->pixel_rate;
-			}
+			if (plane_state->uapi.visible && plane->min_cdclk)
+				crtc_state->plane_min_cdclk[plane->id] =
+					DIV_ROUND_UP(crtc_state->pixel_rate,
+						     intel_cdclk_ppc(display, crtc_state->double_wide));
 			drm_dbg_kms(display->drm,
 				    "[PLANE:%d:%s] min_cdclk %d kHz\n",
 				    plane->base.base.id, plane->base.name,

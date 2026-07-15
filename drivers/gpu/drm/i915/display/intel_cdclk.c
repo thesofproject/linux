@@ -2798,7 +2798,7 @@ intel_set_cdclk_post_plane_update(struct intel_atomic_state *state)
 }
 
 /* pixels per CDCLK */
-static int intel_cdclk_ppc(struct intel_display *display, bool double_wide)
+int intel_cdclk_ppc(struct intel_display *display, bool double_wide)
 {
 	return DISPLAY_VER(display) >= 10 || double_wide ? 2 : 1;
 }
