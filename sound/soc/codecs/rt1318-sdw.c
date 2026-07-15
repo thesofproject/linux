@@ -8,7 +8,6 @@
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/pm_runtime.h>
-#include <linux/mod_devicetable.h>
 #include <linux/module.h>
 #include <linux/regmap.h>
 #include <linux/dmi.h>
@@ -831,7 +830,12 @@ static int rt1318_dev_resume(struct device *dev)
 		return ret;
 
 	regcache_cache_only(rt1318->regmap, false);
-	regcache_sync(rt1318->regmap);
+	ret = regcache_sync(rt1318->regmap);
+	if (ret) {
+		regcache_cache_only(rt1318->regmap, true);
+		regcache_mark_dirty(rt1318->regmap);
+		return ret;
+	}
 
 	return 0;
 }

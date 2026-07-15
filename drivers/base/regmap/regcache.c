@@ -401,7 +401,8 @@ static int rbtree_all(const void *key, const struct rb_node *node)
  */
 int regcache_sync(struct regmap *map)
 {
-	int ret = 0;
+	int sync_ret = 0;
+	int selector_ret = 0;
 	unsigned int i;
 	const char *name;
 	bool bypass;
@@ -426,21 +427,21 @@ int regcache_sync(struct regmap *map)
 	/* Apply any patch first */
 	map->cache_bypass = true;
 	for (i = 0; i < map->patch_regs; i++) {
-		ret = _regmap_write(map, map->patch[i].reg, map->patch[i].def);
-		if (ret != 0) {
+		sync_ret = _regmap_write(map, map->patch[i].reg, map->patch[i].def);
+		if (sync_ret != 0) {
 			dev_err(map->dev, "Failed to write %x = %x: %d\n",
-				map->patch[i].reg, map->patch[i].def, ret);
+				map->patch[i].reg, map->patch[i].def, sync_ret);
 			goto out;
 		}
 	}
 	map->cache_bypass = false;
 
 	if (map->cache_ops->sync)
-		ret = map->cache_ops->sync(map, 0, map->max_register);
+		sync_ret = map->cache_ops->sync(map, 0, map->max_register);
 	else
-		ret = regcache_default_sync(map, 0, map->max_register);
+		sync_ret = regcache_default_sync(map, 0, map->max_register);
 
-	if (ret == 0)
+	if (sync_ret == 0)
 		map->cache_dirty = false;
 
 out:
@@ -462,10 +463,11 @@ out:
 		if (regcache_read(map, this->selector_reg, &i) != 0)
 			continue;
 
-		ret = _regmap_write(map, this->selector_reg, i);
-		if (ret != 0) {
+		selector_ret = _regmap_write(map, this->selector_reg, i);
+		if (selector_ret != 0) {
+			map->cache_dirty = true;
 			dev_err(map->dev, "Failed to write %x = %x: %d\n",
-				this->selector_reg, i, ret);
+				this->selector_reg, i, selector_ret);
 			break;
 		}
 	}
@@ -476,7 +478,7 @@ out:
 
 	trace_regcache_sync(map, name, "stop");
 
-	return ret;
+	return sync_ret ? sync_ret : selector_ret;
 }
 EXPORT_SYMBOL_GPL(regcache_sync);
 
