@@ -420,13 +420,13 @@ static int i9xx_plane_min_cdclk(const struct intel_crtc_state *crtc_state,
 	unsigned int num, den;
 
 	/*
-	 * Note that crtc_state->pixel_rate accounts for both
+	 * Note that crtc_state->pixel_rate_cdclk accounts for both
 	 * horizontal and vertical panel fitter downscaling factors.
 	 * Pre-HSW bspec tells us to only consider the horizontal
 	 * downscaling factor here. We ignore that and just consider
 	 * both for simplicity.
 	 */
-	pixel_rate = crtc_state->pixel_rate;
+	pixel_rate = crtc_state->pixel_rate_cdclk;
 
 	i9xx_plane_ratio(crtc_state, plane_state, &num, &den);
 

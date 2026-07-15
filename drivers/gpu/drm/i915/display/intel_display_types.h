@@ -1043,6 +1043,13 @@ struct intel_crtc_state {
 	 */
 	unsigned int pixel_rate;
 
+	/*
+	 * Pipe pixel rate for CDCLK, adjusted for
+	 * panel fitter/pipe scaler downscaling.
+	 * CDCLK use cases need further adjustment.
+	 */
+	unsigned int pixel_rate_cdclk;
+
 	/* Whether to set up the PCH/FDI. Note that we never allow sharing
 	 * between pch encoders and cpu encoders. */
 	bool has_pch_encoder;

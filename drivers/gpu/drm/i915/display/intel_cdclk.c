@@ -2826,7 +2826,7 @@ static int _intel_pixel_rate_to_cdclk(const struct intel_crtc_state *crtc_state,
 
 static int intel_pixel_rate_to_cdclk(const struct intel_crtc_state *crtc_state)
 {
-	return _intel_pixel_rate_to_cdclk(crtc_state, crtc_state->pixel_rate);
+	return _intel_pixel_rate_to_cdclk(crtc_state, crtc_state->pixel_rate_cdclk);
 }
 
 static int intel_planes_min_cdclk(const struct intel_crtc_state *crtc_state)

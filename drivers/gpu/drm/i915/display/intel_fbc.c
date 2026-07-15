@@ -1426,7 +1426,7 @@ static int _intel_fbc_min_cdclk(const struct intel_crtc_state *crtc_state)
 
 	/* WaFbcExceedCdClockThreshold:hsw,bdw */
 	if (display->platform.haswell || display->platform.broadwell)
-		return DIV_ROUND_UP(crtc_state->pixel_rate * 100, 95);
+		return DIV_ROUND_UP(crtc_state->pixel_rate_cdclk * 100, 95);
 
 	/* no FBC specific limits to worry about */
 	return 0;

@@ -853,7 +853,7 @@ static void intel_modeset_readout_hw_state(struct intel_display *display)
 			 */
 			if (plane_state->uapi.visible && plane->min_cdclk)
 				crtc_state->plane_min_cdclk[plane->id] =
-					DIV_ROUND_UP(crtc_state->pixel_rate,
+					DIV_ROUND_UP(crtc_state->pixel_rate_cdclk,
 						     intel_cdclk_ppc(display, crtc_state->double_wide));
 			drm_dbg_kms(display->drm,
 				    "[PLANE:%d:%s] min_cdclk %d kHz\n",
