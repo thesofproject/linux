@@ -2,6 +2,7 @@
   add_device_randomness
   alloc_chrdev_region
   alloc_io_pgtable_ops
+  __alloc_pages_noprof
   alloc_workqueue_noprof
   alt_cb_patch_nops
   __arch_copy_from_user
@@ -79,6 +80,9 @@
   clk_set_parent
   clk_set_rate
   clk_unprepare
+  cma_alloc
+  cma_get_name
+  cma_release
   compat_only_sysfs_link_entry_to_kobj
   complete
   completion_done
@@ -220,16 +224,26 @@
   _dev_warn
   disable_irq
   dma_alloc_attrs
+  dma_buf_export
+  dma_contiguous_default_area
   dma_free_attrs
   dma_get_sgtable_attrs
+  dma_heap_add
+  dma_heap_get_dev
+  dma_heap_get_drvdata
+  dma_heap_get_name
   dmam_alloc_attrs
   dma_map_page_attrs
+  dma_map_sgtable
   dma_mmap_attrs
   dma_set_coherent_mask
   dma_set_mask
+  __dma_sync_sg_for_cpu
+  __dma_sync_sg_for_device
   __dma_sync_single_for_cpu
   __dma_sync_single_for_device
   dma_unmap_page_attrs
+  dma_unmap_sg_attrs
   do_wait_intr
   down_read
   down_timeout
@@ -408,6 +422,7 @@
   flush_work
   __fortify_panic
   free_irq
+  __free_pages
   free_pages
   freezer_active
   freezing_slow_path
@@ -512,6 +527,7 @@
   jiffies
   jiffies_to_msecs
   jiffies_to_usecs
+  kasan_flag_enabled
   kasprintf
   kfree
   kimage_voffset
@@ -752,6 +768,7 @@
   regulator_set_voltage_sel_regmap
   regulator_set_voltage_time_sel
   release_firmware
+  remap_pfn_range
   remove_proc_entry
   report_iommu_fault
   request_firmware
@@ -792,9 +809,13 @@
   serial8250_resume_port
   serial8250_suspend_port
   serial8250_unregister_port
+  sg_alloc_table
+  sg_alloc_table_from_pages_segment
   sget_dev
   sg_free_table
   sg_init_table
+  __sg_page_iter_next
+  __sg_page_iter_start
   simple_open
   simple_read_from_buffer
   simple_strtoul
@@ -925,6 +946,7 @@
   __sw_hweight32
   __sw_hweight64
   __sw_hweight8
+  __swiotlb_find_pool
   synchronize_irq
   syscon_node_to_regmap
   syscon_regmap_lookup_by_compatible
@@ -1087,6 +1109,7 @@
   vmap
   __vma_start_write
   vmemdup_user
+  vmf_insert_pfn
   vm_get_page_prot
   vunmap
   wait_for_completion_timeout
