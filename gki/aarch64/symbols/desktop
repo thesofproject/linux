@@ -101,6 +101,7 @@
   device_get_next_child_node
   device_initialize
   device_link_add
+  device_match_of_node
   device_node_to_regmap
   device_property_present
   device_property_read_bool
@@ -138,6 +139,7 @@
   devm_led_trigger_register
   devm_memremap
   devm_mfd_add_devices
+  devm_nvmem_register
   devm_of_clk_add_hw_provider
   devm_of_phy_get_by_index
   __devm_of_phy_provider_register
@@ -346,6 +348,9 @@
   nonseekable_open
   nr_cpu_ids
   nvmem_cell_read_variable_le_u32
+  nvmem_device_find
+  nvmem_device_put
+  nvmem_device_read
   nvmem_register
   nvmem_unregister
   of_address_to_resource
@@ -614,6 +619,8 @@
   snd_soc_put_volsw_sx
   snd_soc_rtdcom_lookup
   snprintf
+  soc_device_register
+  soc_device_unregister
   sort
   spi_bus_lock
   spi_bus_unlock
