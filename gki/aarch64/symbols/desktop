@@ -40,7 +40,10 @@
   clk_enable
   clk_gate_ops
   __clk_get_hw
+  clk_get_parent
   clk_get_rate
+  clk_hw_get_name
+  clk_hw_get_parent
   clk_hw_register
   clk_hw_register_composite
   __clk_hw_register_divider
@@ -54,7 +57,9 @@
   clk_mux_determine_rate_flags
   clk_mux_ops
   clk_prepare
+  clk_round_rate
   clk_set_parent
+  clk_set_rate
   clk_unprepare
   compat_only_sysfs_link_entry_to_kobj
   complete
@@ -66,6 +71,8 @@
   cpu_latency_qos_remove_request
   cpu_latency_qos_update_request
   __cpu_online_mask
+  crc8
+  crc8_populate_lsb
   _ctype
   deactivate_locked_super
   debugfs_create_blob
@@ -97,6 +104,8 @@
   device_node_to_regmap
   device_property_present
   device_property_read_bool
+  device_property_read_string
+  device_property_read_string_array
   device_property_read_u32_array
   device_property_read_u8_array
   device_register
@@ -112,6 +121,8 @@
   devm_clk_get
   devm_clk_get_enabled
   devm_clk_get_optional
+  devm_clk_hw_register
+  devm_clk_hw_register_clkdev
   devm_clk_notifier_register
   devm_free_irq
   devm_gpiod_get_optional
@@ -127,6 +138,7 @@
   devm_led_trigger_register
   devm_memremap
   devm_mfd_add_devices
+  devm_of_clk_add_hw_provider
   devm_of_phy_get_by_index
   __devm_of_phy_provider_register
   devm_of_platform_populate
@@ -138,6 +150,8 @@
   devm_pm_runtime_enable
   devm_power_supply_register
   __devm_regmap_init
+  __devm_regmap_init_i2c
+  __devm_regmap_init_mmio_clk
   __devm_regmap_init_spmi_ext
   devm_regulator_bulk_get
   devm_regulator_get_enable
@@ -146,6 +160,8 @@
   devm_request_threaded_irq
   __devm_reset_control_get
   devm_reset_controller_register
+  devm_snd_soc_register_card
+  devm_snd_soc_register_component
   __devm_spi_alloc_controller
   devm_spi_mem_dirmap_create
   devm_spi_register_controller
@@ -162,6 +178,8 @@
   dma_unmap_page_attrs
   do_wait_intr
   down_read
+  down_timeout
+  down_trylock
   down_write
   driver_unregister
   dump_stack
@@ -170,10 +188,12 @@
   enable_irq
   _find_next_bit
   finish_wait
+  firmware_request_nowarn
   fixed_size_llseek
   flush_delayed_work
   flush_work
   __fortify_panic
+  free_irq
   free_pages
   freezer_active
   freezing_slow_path
@@ -185,6 +205,7 @@
   fwnode_typec_retimer_get
   fwnode_typec_switch_get
   fwnode_usb_role_switch_get
+  gcd
   generic_handle_domain_irq
   generic_shutdown_super
   get_device
@@ -196,11 +217,14 @@
   gpiochip_lock_as_irq
   gpiochip_unlock_as_irq
   gpiod_direction_output
+  gpiod_get_value
+  gpiod_set_value
   gpiod_set_value_cansleep
   handle_level_irq
   handle_nested_irq
   handle_sysrq
   hash_digest_size
+  hdmi_audio_infoframe_init
   hwrng_register
   hwrng_unregister
   i2c_adapter_type
@@ -212,6 +236,7 @@
   i2c_for_each_dev
   i2c_get_adapter
   i2c_get_dma_safe_msg_buf
+  i2c_match_id
   i2c_parse_fw_timings
   i2c_put_adapter
   i2c_put_dma_safe_msg_buf
@@ -235,6 +260,7 @@
   input_event
   input_register_device
   input_set_capability
+  intlog10
   iounmap
   irq_create_mapping_affinity
   irq_domain_instantiate
@@ -254,11 +280,13 @@
   jiffies
   jiffies_to_msecs
   jiffies_to_usecs
+  kasprintf
   kfree
   __kmalloc_cache_noprof
   kmalloc_caches
   __kmalloc_noprof
   kmemdup_array
+  kmemdup_noprof
   kstrdup
   kstrtobool
   kstrtou16
@@ -271,6 +299,7 @@
   kthread_queue_work
   ktime_get
   ktime_get_mono_fast_ns
+  ktime_get_ts64
   ktime_get_with_offset
   kvfree
   __kvmalloc_node_noprof
@@ -294,6 +323,7 @@
   memory_read_from_buffer
   memremap
   memset
+  memset_io
   memstart_addr
   memunmap
   mfd_add_devices
@@ -323,6 +353,7 @@
   of_clk_add_hw_provider
   of_clk_del_provider
   of_clk_hw_onecell_get
+  of_clk_hw_simple_get
   of_device_get_match_data
   of_device_is_compatible
   of_find_compatible_node
@@ -331,6 +362,7 @@
   of_genpd_add_provider_onecell
   of_get_child_by_name
   of_get_compatible_child
+  of_get_next_available_child
   of_get_next_child
   of_get_property
   of_iomap
@@ -349,6 +381,8 @@
   of_property_read_u32_index
   of_property_read_variable_u32_array
   of_prop_next_string
+  of_reserved_mem_device_init_by_idx
+  of_reserved_mem_device_release
   of_reserved_mem_region_to_resource
   param_ops_bool
   param_ops_string
@@ -410,12 +444,23 @@
   rdev_get_drvdata
   rdev_get_id
   refcount_warn_saturate
+  regcache_cache_bypass
+  regcache_cache_only
+  regcache_mark_dirty
+  regcache_sync
   __register_chrdev
   register_chrdev_region
   register_pm_notifier
   register_reboot_notifier
   __register_rpmsg_driver
+  regmap_bulk_read
+  regmap_get_device
+  regmap_multi_reg_write
+  regmap_multi_reg_write_bypassed
+  regmap_raw_read
+  regmap_raw_write
   regmap_read
+  regmap_register_patch
   regmap_update_bits_base
   regmap_write
   regulator_bulk_disable
@@ -437,8 +482,11 @@
   regulator_set_voltage
   regulator_set_voltage_sel_regmap
   regulator_set_voltage_time_sel
+  release_firmware
   remove_proc_entry
+  request_firmware
   __request_module
+  request_threaded_irq
   reset_control_assert
   reset_control_deassert
   reset_control_reset
@@ -481,6 +529,90 @@
   single_open
   single_release
   sized_strscpy
+  snd_compr_stop_error
+  snd_ctl_add
+  snd_ctl_boolean_mono_info
+  snd_ctl_new1
+  snd_info_create_card_entry
+  snd_info_free_entry
+  snd_jack_set_key
+  snd_parse_eld
+  snd_pcm_add_chmap_ctls
+  snd_pcm_create_iec958_consumer_default
+  snd_pcm_fill_iec958_consumer
+  snd_pcm_fill_iec958_consumer_hw_params
+  snd_pcm_format_physical_width
+  snd_pcm_format_width
+  snd_pcm_hw_constraint_eld
+  snd_pcm_hw_constraint_integer
+  snd_pcm_hw_constraint_list
+  snd_pcm_hw_constraint_minmax
+  snd_pcm_hw_constraint_step
+  snd_pcm_lib_preallocate_free_for_all
+  snd_pcm_period_elapsed
+  snd_pcm_set_managed_buffer_all
+  snd_print_eld_info
+  snd_show_eld
+  snd_soc_add_card_controls
+  snd_soc_add_component_controls
+  snd_soc_bytes_info_ext
+  snd_soc_bytes_tlv_callback
+  snd_soc_card_jack_new_pins
+  snd_soc_component_disable_pin
+  snd_soc_component_force_enable_pin
+  snd_soc_component_init_regmap
+  snd_soc_component_read
+  snd_soc_component_set_jack
+  snd_soc_component_set_sysclk
+  snd_soc_component_update_bits
+  snd_soc_component_write
+  snd_soc_daifmt_parse_format
+  snd_soc_dai_set_channel_map
+  snd_soc_dai_set_pll
+  snd_soc_dai_set_sysclk
+  snd_soc_dai_set_tdm_slot
+  snd_soc_dapm_add_routes
+  snd_soc_dapm_disable_pin
+  snd_soc_dapm_disable_pin_unlocked
+  snd_soc_dapm_force_bias_level
+  snd_soc_dapm_force_enable_pin
+  snd_soc_dapm_force_enable_pin_unlocked
+  snd_soc_dapm_get_bias_level
+  snd_soc_dapm_get_enum_double
+  snd_soc_dapm_get_pin_status
+  snd_soc_dapm_get_pin_switch
+  snd_soc_dapm_get_volsw
+  snd_soc_dapm_info_pin_switch
+  snd_soc_dapm_new_controls
+  snd_soc_dapm_new_widgets
+  snd_soc_dapm_pinctrl_event
+  snd_soc_dapm_put_enum_double
+  snd_soc_dapm_put_pin_switch
+  snd_soc_dapm_put_volsw
+  snd_soc_dapm_sync
+  snd_soc_dapm_sync_unlocked
+  snd_soc_dapm_to_component
+  snd_soc_dapm_widget_name_cmp
+  snd_soc_dummy_dlc
+  snd_soc_get_enum_double
+  snd_soc_get_volsw
+  snd_soc_get_volsw_sx
+  snd_soc_info_enum_double
+  snd_soc_info_volsw
+  snd_soc_info_volsw_sx
+  snd_soc_jack_report
+  snd_soc_lookup_component
+  snd_soc_of_get_dai_link_codecs
+  snd_soc_of_parse_audio_routing
+  snd_soc_of_parse_card_name
+  snd_soc_of_put_dai_link_codecs
+  snd_soc_params_to_bclk
+  snd_soc_params_to_frame_size
+  snd_soc_pm_ops
+  snd_soc_put_enum_double
+  snd_soc_put_volsw
+  snd_soc_put_volsw_sx
+  snd_soc_rtdcom_lookup
   snprintf
   sort
   spi_bus_lock
@@ -515,6 +647,8 @@
   strncasecmp
   strncmp
   strnlen
+  strstr
+  __sw_hweight64
   __sw_hweight8
   synchronize_irq
   syscon_node_to_regmap
@@ -528,7 +662,10 @@
   sysfs_remove_files
   sysfs_remove_group
   sysfs_remove_link
+  system_dfl_wq
   system_percpu_wq
+  system_power_efficient_wq
+  system_wq
   timer_delete_sync
   timer_init_key
   trace_event_buffer_commit
@@ -646,6 +783,7 @@
   unregister_chrdev_region
   unregister_reboot_notifier
   unregister_rpmsg_driver
+  up
   up_read
   up_write
   usb_add_hcd
@@ -665,7 +803,10 @@
   usleep_range_state
   utf8_data_table
   validate_usercopy_range
+  vfree
   vivaldi_function_row_physmap_show
+  vmalloc_noprof
+  vmemdup_user
   wait_for_completion_timeout
   __wake_up
   __wake_up_locked
