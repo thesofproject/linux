@@ -1,6 +1,7 @@
 [abi_symbol_list]
   add_device_randomness
   alloc_chrdev_region
+  alloc_io_pgtable_ops
   alloc_workqueue_noprof
   alt_cb_patch_nops
   __arch_copy_from_user
@@ -83,6 +84,7 @@
   completion_done
   component_add
   component_bind_all
+  component_compare_dev
   component_compare_of
   component_del
   component_master_add_with_match
@@ -128,6 +130,7 @@
   device_get_next_child_node
   device_initialize
   device_link_add
+  device_link_remove
   device_match_of_node
   device_node_to_regmap
   device_property_present
@@ -144,8 +147,10 @@
   device_wakeup_disable
   device_wakeup_enable
   _dev_info
+  dev_iommu_priv_set
   __devm_add_action
   devm_backlight_device_register
+  devm_clk_bulk_get
   devm_clk_bulk_get_all_enabled
   devm_clk_bulk_get_optional
   devm_clk_get
@@ -479,6 +484,15 @@
   input_register_device
   input_set_capability
   intlog10
+  iommu_alloc_resv_region
+  iommu_device_register
+  iommu_device_sysfs_add
+  iommu_device_sysfs_remove
+  iommu_device_unregister
+  iommu_fwspec_add_ids
+  iommu_get_domain_for_dev
+  iommu_group_alloc
+  iommu_group_ref_get
   iounmap
   irq_create_mapping_affinity
   irq_domain_instantiate
@@ -500,6 +514,7 @@
   jiffies_to_usecs
   kasprintf
   kfree
+  kimage_voffset
   __kmalloc_cache_noprof
   kmalloc_caches
   __kmalloc_noprof
@@ -587,6 +602,7 @@
   of_clk_get
   of_clk_hw_onecell_get
   of_clk_hw_simple_get
+  of_count_phandle_with_args
   of_device_get_match_data
   of_device_is_available
   of_device_is_compatible
@@ -631,6 +647,7 @@
   param_ops_int
   param_ops_string
   param_ops_uint
+  pci_bus_type
   perf_trace_buf_alloc
   perf_trace_run_bpf_submit
   pfn_is_map_memory
@@ -648,6 +665,7 @@
   pinctrl_utils_add_map_configs
   pinctrl_utils_free_map
   pinctrl_utils_reserve_map
+  platform_device_put
   platform_device_register_full
   platform_device_unregister
   __platform_driver_register
@@ -666,6 +684,7 @@
   pm_runtime_forbid
   pm_runtime_force_resume
   pm_runtime_force_suspend
+  pm_runtime_get_if_in_use
   __pm_runtime_idle
   __pm_runtime_resume
   pm_runtime_set_autosuspend_delay
@@ -734,6 +753,7 @@
   regulator_set_voltage_time_sel
   release_firmware
   remove_proc_entry
+  report_iommu_fault
   request_firmware
   __request_module
   request_threaded_irq
