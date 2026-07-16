@@ -1089,7 +1089,7 @@ int pkvm_pgtable_stage2_init(struct kvm_pgtable *pgt, struct kvm_s2_mmu *mmu,
 
 void pkvm_host_reclaim_page(struct kvm *kvm, phys_addr_t ipa)
 {
-	struct mm_struct *mm = current->mm;
+	struct mm_struct *mm = kvm->mm;
 	struct kvm_pinned_page *ppage;
 
 	write_lock(&kvm->mmu_lock);
@@ -1115,7 +1115,7 @@ static int __pkvm_pgtable_stage2_unmap(struct kvm_pgtable *pgt, u64 start, u64 e
 {
 	struct kvm *kvm = kvm_s2_mmu_to_kvm(pgt->mmu);
 	pkvm_handle_t handle = kvm->arch.pkvm.handle;
-	struct mm_struct *mm = current->mm;
+	struct mm_struct *mm = kvm->mm;
 	struct kvm_pinned_page *ppage;
 	struct pkvm_mapping *mapping;
 	u64 pages, nr_busy;
