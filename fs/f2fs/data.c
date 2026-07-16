@@ -2578,6 +2578,8 @@ next_folio:
 		goto out;
 
 	f2fs_update_read_folio_count(F2FS_I_SB(inode), folio);
+
+	folio_in_bio = false;
 	index = folio->index;
 	offset = 0;
 	ffs = NULL;
