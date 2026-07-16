@@ -14,6 +14,7 @@
 #include <sound/intel-nhlt.h>
 #include "sof-priv.h"
 #include "sof-audio.h"
+#include "sof-client.h"
 #include "ipc4-priv.h"
 #include "ipc4-topology.h"
 #include "ops.h"
@@ -3487,6 +3488,7 @@ static int sof_ipc4_widget_pipe_create_msg_payload(struct snd_sof_widget *swidge
 static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(scomp);
 	struct snd_sof_widget *pipe_widget = swidget->spipe->pipe_widget;
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	struct sof_ipc4_pipeline *pipeline;
@@ -3702,7 +3704,7 @@ static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 	msg->data_size = ipc_size;
 	msg->data_ptr = ipc_data;
 
-	ret = sof_ipc_tx_message_no_reply(sdev->ipc, msg, ipc_size);
+	ret = sof_client_ipc_tx_message_no_reply(cdev, msg);
 
 fail:
 	if (ret < 0) {
@@ -3724,6 +3726,7 @@ fail:
 static int sof_ipc4_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(scomp);
 	struct sof_ipc4_fw_module *fw_module = swidget->module_info;
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	int ret = 0;
@@ -3749,7 +3752,7 @@ static int sof_ipc4_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget 
 
 		msg.primary = header;
 
-		ret = sof_ipc_tx_message_no_reply(sdev->ipc, &msg, 0);
+		ret = sof_client_ipc_tx_message_no_reply(cdev, &msg);
 		if (ret < 0)
 			dev_err(scomp->dev, "failed to free pipeline widget %s\n",
 				swidget->widget->name);
@@ -3859,8 +3862,8 @@ static int sof_ipc4_set_copier_sink_format(struct snd_sof_dev *sdev,
 					   struct snd_sof_route *sroute)
 {
 	struct snd_soc_component *scomp = sroute->scomp;
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(scomp);
 	struct sof_ipc4_copier_config_set_sink_format format;
-	const struct sof_ipc_ops *iops = sdev->ipc->ops;
 	struct sof_ipc4_base_module_cfg *src_config;
 	const struct sof_ipc4_audio_format *pin_fmt;
 	struct sof_ipc4_fw_module *fw_module;
@@ -3901,12 +3904,13 @@ static int sof_ipc4_set_copier_sink_format(struct snd_sof_dev *sdev,
 	msg.extension =
 		SOF_IPC4_MOD_EXT_MSG_PARAM_ID(SOF_IPC4_COPIER_MODULE_CFG_PARAM_SET_SINK_FORMAT);
 
-	return iops->set_get_data(sdev, &msg, msg.data_size, true);
+	return sof_client_ipc_set_get_data(cdev, &msg, true);
 }
 
 static int sof_ipc4_route_setup(struct snd_sof_dev *sdev, struct snd_sof_route *sroute)
 {
 	struct snd_soc_component *scomp = sroute->scomp;
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(scomp);
 	struct snd_sof_widget *src_widget = sroute->src_widget;
 	struct snd_sof_widget *sink_widget = sroute->sink_widget;
 	struct snd_sof_widget *src_pipe_widget = src_widget->spipe->pipe_widget;
@@ -3990,7 +3994,7 @@ static int sof_ipc4_route_setup(struct snd_sof_dev *sdev, struct snd_sof_route *
 	msg.primary = header;
 	msg.extension = extension;
 
-	ret = sof_ipc_tx_message_no_reply(sdev->ipc, &msg, 0);
+	ret = sof_client_ipc_tx_message_no_reply(cdev, &msg);
 	if (ret < 0) {
 		dev_err(scomp->dev, "failed to bind modules %s:%d -> %s:%d\n",
 			src_widget->widget->name, sroute->src_queue_id,
@@ -4009,6 +4013,7 @@ out:
 static int sof_ipc4_route_free(struct snd_sof_dev *sdev, struct snd_sof_route *sroute)
 {
 	struct snd_soc_component *scomp = sroute->scomp;
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(scomp);
 	struct snd_sof_widget *src_widget = sroute->src_widget;
 	struct snd_sof_widget *sink_widget = sroute->sink_widget;
 	struct sof_ipc4_fw_module *src_fw_module = src_widget->module_info;
@@ -4050,7 +4055,7 @@ static int sof_ipc4_route_free(struct snd_sof_dev *sdev, struct snd_sof_route *s
 	msg.primary = header;
 	msg.extension = extension;
 
-	ret = sof_ipc_tx_message_no_reply(sdev->ipc, &msg, 0);
+	ret = sof_client_ipc_tx_message_no_reply(cdev, &msg);
 	if (ret < 0)
 		dev_err(scomp->dev, "failed to unbind modules %s:%d -> %s:%d\n",
 			src_widget->widget->name, sroute->src_queue_id,

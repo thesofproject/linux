@@ -11,6 +11,7 @@
 #include <sound/pcm_params.h>
 #include "sof-priv.h"
 #include "sof-audio.h"
+#include "sof-client.h"
 #include "ipc3-priv.h"
 #include "ops.h"
 
@@ -1780,6 +1781,7 @@ static void sof_ipc3_widget_free_comp_dai(struct snd_sof_widget *swidget)
 static int sof_ipc3_route_setup(struct snd_sof_dev *sdev, struct snd_sof_route *sroute)
 {
 	struct snd_soc_component *scomp = sroute->scomp;
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(scomp);
 	struct sof_ipc_pipe_comp_connect connect;
 	int ret;
 
@@ -1793,7 +1795,7 @@ static int sof_ipc3_route_setup(struct snd_sof_dev *sdev, struct snd_sof_route *
 		sroute->sink_widget->widget->name);
 
 	/* send ipc */
-	ret = sof_ipc_tx_message_no_reply(sdev->ipc, &connect, sizeof(connect));
+	ret = sof_client_ipc_tx_message_no_reply(cdev, &connect);
 	if (ret < 0)
 		dev_err(scomp->dev, "%s: route %s -> %s failed\n", __func__,
 			sroute->src_widget->widget->name, sroute->sink_widget->widget->name);
@@ -1936,6 +1938,7 @@ static int sof_ipc3_control_setup(struct snd_sof_dev *sdev, struct snd_sof_contr
 
 static int sof_ipc3_control_free(struct snd_sof_dev *sdev, struct snd_sof_control *scontrol)
 {
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(scontrol->scomp);
 	struct sof_ipc_free fcomp;
 
 	fcomp.hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_COMP_FREE;
@@ -1943,14 +1946,14 @@ static int sof_ipc3_control_free(struct snd_sof_dev *sdev, struct snd_sof_contro
 	fcomp.id = scontrol->comp_id;
 
 	/* send IPC to the DSP */
-	return sof_ipc_tx_message_no_reply(sdev->ipc, &fcomp, sizeof(fcomp));
+	return sof_client_ipc_tx_message_no_reply(cdev, &fcomp);
 }
 
 /* send pcm params ipc */
 static int sof_ipc3_keyword_detect_pcm_params(struct snd_sof_widget *swidget, int dir)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(scomp);
 	struct snd_pcm_hw_params *params;
 	struct sof_ipc_pcm_params pcm;
 	struct snd_sof_pcm *spcm;
@@ -1994,7 +1997,7 @@ static int sof_ipc3_keyword_detect_pcm_params(struct snd_sof_widget *swidget, in
 	}
 
 	/* send IPC to the DSP */
-	ret = sof_ipc_tx_message_no_reply(sdev->ipc, &pcm, sizeof(pcm));
+	ret = sof_client_ipc_tx_message_no_reply(cdev, &pcm);
 	if (ret < 0)
 		dev_err(scomp->dev, "%s: PCM params failed for %s\n", __func__,
 			swidget->widget->name);
@@ -2006,7 +2009,7 @@ static int sof_ipc3_keyword_detect_pcm_params(struct snd_sof_widget *swidget, in
 static int sof_ipc3_keyword_detect_trigger(struct snd_sof_widget *swidget, int cmd)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(scomp);
 	struct sof_ipc_stream stream;
 	int ret;
 
@@ -2016,7 +2019,7 @@ static int sof_ipc3_keyword_detect_trigger(struct snd_sof_widget *swidget, int c
 	stream.comp_id = swidget->comp_id;
 
 	/* send IPC to the DSP */
-	ret = sof_ipc_tx_message_no_reply(sdev->ipc, &stream, sizeof(stream));
+	ret = sof_client_ipc_tx_message_no_reply(cdev, &stream);
 	if (ret < 0)
 		dev_err(scomp->dev, "%s: Failed to trigger %s\n", __func__, swidget->widget->name);
 
@@ -2133,6 +2136,7 @@ static int sof_ipc3_widget_bind_event(struct snd_soc_component *scomp,
 static int sof_ipc3_complete_pipeline(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(scomp);
 	struct sof_ipc_pipe_ready ready;
 	int ret;
 
@@ -2144,7 +2148,7 @@ static int sof_ipc3_complete_pipeline(struct snd_sof_dev *sdev, struct snd_sof_w
 	ready.hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_PIPE_COMPLETE;
 	ready.comp_id = swidget->comp_id;
 
-	ret = sof_ipc_tx_message_no_reply(sdev->ipc, &ready, sizeof(ready));
+	ret = sof_client_ipc_tx_message_no_reply(cdev, &ready);
 	if (ret < 0)
 		return ret;
 
@@ -2153,6 +2157,7 @@ static int sof_ipc3_complete_pipeline(struct snd_sof_dev *sdev, struct snd_sof_w
 
 static int sof_ipc3_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
 {
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(swidget->scomp);
 	struct sof_ipc_free ipc_free = {
 		.hdr = {
 			.size = sizeof(ipc_free),
@@ -2179,7 +2184,7 @@ static int sof_ipc3_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget 
 		break;
 	}
 
-	ret = sof_ipc_tx_message_no_reply(sdev->ipc, &ipc_free, sizeof(ipc_free));
+	ret = sof_client_ipc_tx_message_no_reply(cdev, &ipc_free);
 	if (ret < 0)
 		dev_err(swidget->scomp->dev, "failed to free widget %s\n",
 			swidget->widget->name);
@@ -2280,7 +2285,8 @@ static int sof_ipc3_dai_config(struct snd_sof_dev *sdev, struct snd_sof_widget *
 
 	/* only send the IPC if the widget is set up in the DSP */
 	if (swidget->use_count > 0) {
-		ret = sof_ipc_tx_message_no_reply(sdev->ipc, config, config->hdr.size);
+		ret = sof_client_ipc_tx_message_no_reply(snd_sof_component_get_cdev(swidget->scomp),
+							 config);
 		if (ret < 0)
 			dev_err(swidget->scomp->dev, "Failed to set dai config for %s\n",
 				dai->name);
@@ -2294,6 +2300,7 @@ static int sof_ipc3_dai_config(struct snd_sof_dev *sdev, struct snd_sof_widget *
 
 static int sof_ipc3_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
 {
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(swidget->scomp);
 	int ret;
 
 	if (!swidget->private)
@@ -2305,9 +2312,8 @@ static int sof_ipc3_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 	{
 		struct snd_sof_dai *dai = swidget->private;
 		struct sof_dai_private_data *dai_data = dai->private;
-		struct sof_ipc_comp *comp = &dai_data->comp_dai->comp;
 
-		ret = sof_ipc_tx_message_no_reply(sdev->ipc, dai_data->comp_dai, comp->hdr.size);
+		ret = sof_client_ipc_tx_message_no_reply(cdev, dai_data->comp_dai);
 		break;
 	}
 	case snd_soc_dapm_scheduler:
@@ -2315,17 +2321,12 @@ static int sof_ipc3_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 		struct sof_ipc_pipe_new *pipeline;
 
 		pipeline = swidget->private;
-		ret = sof_ipc_tx_message_no_reply(sdev->ipc, pipeline, sizeof(*pipeline));
+		ret = sof_client_ipc_tx_message_no_reply(cdev, pipeline);
 		break;
 	}
 	default:
-	{
-		struct sof_ipc_cmd_hdr *hdr;
-
-		hdr = swidget->private;
-		ret = sof_ipc_tx_message_no_reply(sdev->ipc, swidget->private, hdr->size);
+		ret = sof_client_ipc_tx_message_no_reply(cdev, swidget->private);
 		break;
-	}
 	}
 	if (ret < 0)
 		dev_err(swidget->scomp->dev, "Failed to setup widget %s\n",
