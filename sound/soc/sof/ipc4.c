@@ -870,6 +870,9 @@ static void sof_ipc4_rx_msg(struct snd_sof_dev *sdev)
 	if (handler_func)
 		handler_func(sdev, ipc4_msg);
 
+	/* Notify registered clients */
+	sof_client_ipc_rx_dispatcher(sdev, ipc4_msg);
+
 	sof_ipc4_log_header(sdev->dev, "ipc rx done ", ipc4_msg, true);
 
 	if (data_size) {
