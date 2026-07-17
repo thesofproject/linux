@@ -64,16 +64,18 @@ char *sof_ipc4_set_multi_pipeline_state_debug(struct snd_sof_dev *sdev, char *bu
 	return buf;
 }
 
-static int sof_ipc4_set_multi_pipeline_state(struct snd_sof_dev *sdev, u32 state,
+static int sof_ipc4_set_multi_pipeline_state(struct snd_soc_component *component, u32 state,
 					     struct ipc4_pipeline_set_state_data *trigger_list)
 {
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct sof_ipc4_msg msg = {{ 0 }};
 	u32 primary, ipc_size;
 	char debug_buf[32];
 
 	/* trigger a single pipeline */
 	if (trigger_list->count == 1)
-		return sof_ipc4_set_pipeline_state(sdev, trigger_list->pipeline_instance_ids[0],
+		return sof_ipc4_set_pipeline_state(component,
+						   trigger_list->pipeline_instance_ids[0],
 						   state);
 
 	dev_dbg(sdev->dev, "Set pipelines %s to state %d%s",
@@ -98,12 +100,13 @@ static int sof_ipc4_set_multi_pipeline_state(struct snd_sof_dev *sdev, u32 state
 	return sof_ipc_tx_message_no_reply(sdev->ipc, &msg, ipc_size);
 }
 
-int sof_ipc4_set_pipeline_state(struct snd_sof_dev *sdev, u32 instance_id, u32 state)
+int sof_ipc4_set_pipeline_state(struct snd_soc_component *component, u32 instance_id, u32 state)
 {
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct sof_ipc4_msg msg = {{ 0 }};
 	u32 primary;
 
-	dev_dbg(sdev->dev, "Set pipeline %d to state %d%s", instance_id, state,
+	dev_dbg(component->dev, "Set pipeline %d to state %d%s", instance_id, state,
 		sof_ipc4_pipeline_state_str(state));
 
 	primary = state;
@@ -514,7 +517,7 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 	 * set paused state for pipelines if the final state is PAUSED or when the pipeline
 	 * is set to RUNNING for the first time after the PCM is started.
 	 */
-	ret = sof_ipc4_set_multi_pipeline_state(sdev, SOF_IPC4_PIPE_PAUSED, trigger_list);
+	ret = sof_ipc4_set_multi_pipeline_state(component, SOF_IPC4_PIPE_PAUSED, trigger_list);
 	if (ret < 0) {
 		spcm_err(spcm, dir, "failed to pause all pipelines\n");
 		/*
@@ -557,7 +560,7 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 	}
 skip_pause_transition:
 	/* else set the RUNNING/RESET state in the DSP */
-	ret = sof_ipc4_set_multi_pipeline_state(sdev, state, trigger_list);
+	ret = sof_ipc4_set_multi_pipeline_state(component, state, trigger_list);
 	if (ret < 0) {
 		spcm_err(spcm, dir,
 			 "failed to set final state %d for all pipelines\n",
