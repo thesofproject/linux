@@ -12,12 +12,13 @@
 #include "ops.h"
 #include "sof-priv.h"
 #include "sof-audio.h"
+#include "sof-client.h"
 
 static int sof_ipc3_pcm_hw_free(struct snd_soc_component *component,
 				struct snd_pcm_substream *substream,
 				struct snd_sof_pcm *spcm, int dir)
 {
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(component);
 	struct sof_ipc_stream stream;
 
 	if (!spcm->prepared[dir])
@@ -28,7 +29,7 @@ static int sof_ipc3_pcm_hw_free(struct snd_soc_component *component,
 	stream.comp_id = spcm->stream[dir].comp_id;
 
 	/* send IPC to the DSP */
-	return sof_ipc_tx_message_no_reply(sdev->ipc, &stream, sizeof(stream));
+	return sof_client_ipc_tx_message_no_reply(cdev, &stream);
 }
 
 static int sof_ipc3_pcm_hw_params(struct snd_soc_component *component,
@@ -36,6 +37,7 @@ static int sof_ipc3_pcm_hw_params(struct snd_soc_component *component,
 				  struct snd_pcm_hw_params *params,
 				  struct snd_sof_platform_stream_params *platform_params)
 {
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(component);
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct sof_ipc_fw_version *v = &sdev->fw_ready.version;
@@ -116,8 +118,8 @@ static int sof_ipc3_pcm_hw_params(struct snd_soc_component *component,
 		 pcm.params.stream_tag);
 
 	/* send hw_params IPC to the DSP */
-	ret = sof_ipc_tx_message(sdev->ipc, &pcm, sizeof(pcm),
-				 &ipc_params_reply, sizeof(ipc_params_reply));
+	ret = sof_client_ipc_tx_message(cdev, &pcm, &ipc_params_reply,
+					sizeof(ipc_params_reply));
 	if (ret < 0) {
 		spcm_err(spcm, substream->stream,
 			 "STREAM_PCM_PARAMS ipc failed for stream_tag %d\n",
@@ -139,7 +141,7 @@ static int sof_ipc3_pcm_trigger(struct snd_soc_component *component,
 				struct snd_pcm_substream *substream,
 				struct snd_sof_pcm *spcm, int cmd, int dir)
 {
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(component);
 	struct sof_ipc_stream stream;
 
 	stream.hdr.size = sizeof(stream);
@@ -167,7 +169,7 @@ static int sof_ipc3_pcm_trigger(struct snd_soc_component *component,
 	}
 
 	/* send IPC to the DSP */
-	return sof_ipc_tx_message_no_reply(sdev->ipc, &stream, sizeof(stream));
+	return sof_client_ipc_tx_message_no_reply(cdev, &stream);
 }
 
 static void ssp_dai_config_pcm_params_match(struct snd_soc_component *component,

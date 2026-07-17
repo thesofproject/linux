@@ -14,6 +14,7 @@
 #include "ipc4-priv.h"
 #include "ipc4-topology.h"
 #include "ipc4-fw-reg.h"
+#include "sof-client.h"
 
 /**
  * struct sof_ipc4_pcm_stream_priv - IPC4 specific private data
@@ -67,6 +68,7 @@ char *sof_ipc4_set_multi_pipeline_state_debug(struct snd_sof_dev *sdev, char *bu
 static int sof_ipc4_set_multi_pipeline_state(struct snd_soc_component *component, u32 state,
 					     struct ipc4_pipeline_set_state_data *trigger_list)
 {
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(component);
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct sof_ipc4_msg msg = {{ 0 }};
 	u32 primary, ipc_size;
@@ -97,12 +99,12 @@ static int sof_ipc4_set_multi_pipeline_state(struct snd_soc_component *component
 	msg.data_size = ipc_size;
 	msg.data_ptr = trigger_list;
 
-	return sof_ipc_tx_message_no_reply(sdev->ipc, &msg, ipc_size);
+	return sof_client_ipc_tx_message_no_reply(cdev, &msg);
 }
 
 int sof_ipc4_set_pipeline_state(struct snd_soc_component *component, u32 instance_id, u32 state)
 {
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(component);
 	struct sof_ipc4_msg msg = {{ 0 }};
 	u32 primary;
 
@@ -117,7 +119,7 @@ int sof_ipc4_set_pipeline_state(struct snd_soc_component *component, u32 instanc
 
 	msg.primary = primary;
 
-	return sof_ipc_tx_message_no_reply(sdev->ipc, &msg, 0);
+	return sof_client_ipc_tx_message_no_reply(cdev, &msg);
 }
 EXPORT_SYMBOL(sof_ipc4_set_pipeline_state);
 
@@ -296,6 +298,7 @@ sof_ipc4_update_pipeline_state(struct snd_sof_dev *sdev, int state, int cmd,
  */
 
 static int sof_ipc4_chain_dma_trigger(struct snd_sof_dev *sdev,
+				      struct sof_client_dev *cdev,
 				      struct snd_sof_pcm *spcm, int direction,
 				      struct snd_sof_pcm_stream_pipeline_list *pipeline_list,
 				      int state, int cmd)
@@ -389,7 +392,7 @@ static int sof_ipc4_chain_dma_trigger(struct snd_sof_dev *sdev,
 	if (enable)
 		msg.primary |= SOF_IPC4_GLB_CHAIN_DMA_ENABLE_MASK;
 
-	ret = sof_ipc_tx_message_no_reply(sdev->ipc, &msg, 0);
+	ret = sof_client_ipc_tx_message_no_reply(cdev, &msg);
 	/* Update the ChainDMA allocation state */
 	if (!ret)
 		stream_priv->chain_dma_allocated = allocate;
@@ -402,6 +405,7 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 				      struct snd_sof_pcm *spcm, int dir)
 {
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(component);
 	struct snd_sof_pcm_stream_pipeline_list *pipeline_list;
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	struct ipc4_pipeline_set_state_data *trigger_list;
@@ -437,7 +441,7 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 
 		time_info = sof_ipc4_sps_to_time_info(&spcm->stream[dir]);
 
-		ret = sof_ipc4_chain_dma_trigger(sdev, spcm, dir,
+		ret = sof_ipc4_chain_dma_trigger(sdev, cdev, spcm, dir,
 						 pipeline_list, state, cmd);
 		if (ret || !time_info)
 			return ret;
