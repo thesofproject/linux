@@ -101,7 +101,7 @@ static int sof_ipc4_compr_stream_free(struct snd_sof_dev *sdev,
 				      struct snd_sof_pcm *spcm,
 				      struct snd_compr_stream *cstream)
 {
-	const struct sof_ipc_pcm_ops *pcm_ops = sof_ipc_get_ops(sdev, pcm);
+	const struct sof_ipc_pcm_ops *pcm_ops = snd_sof_component_get_pcm_ops(spcm->scomp);
 	int dir = cstream->direction;
 	int ret = 0;
 	int err = 0;
@@ -316,7 +316,7 @@ static int sof_ipc4_compr_set_params(struct snd_soc_component *component,
 				     struct snd_compr_params *params)
 {
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
-	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
+	const struct sof_ipc_tplg_ops *tplg_ops = snd_sof_component_get_tplg_ops(component);
 	struct sof_ipc4_compr_init_data *compr_data __free(kfree) = NULL;
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_sof_platform_stream_params *platform_params;
@@ -532,9 +532,8 @@ static int sof_ipc4_compr_get_params(struct snd_soc_component *component,
 static int sof_ipc4_compr_trigger(struct snd_soc_component *component,
 				  struct snd_compr_stream *cstream, int cmd)
 {
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
-	const struct sof_ipc_pcm_ops *pcm_ops = sof_ipc_get_ops(sdev, pcm);
+	const struct sof_ipc_pcm_ops *pcm_ops = snd_sof_component_get_pcm_ops(component);
 	struct snd_sof_pcm *spcm;
 	int dir = cstream->direction;
 	bool trigger_platform = false;

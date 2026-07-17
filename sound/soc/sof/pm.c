@@ -78,7 +78,7 @@ static void sof_cache_debugfs(struct snd_sof_dev *sdev)
 int snd_sof_boot_dsp_firmware(struct snd_sof_dev *sdev)
 {
 	const struct sof_ipc_pm_ops *pm_ops = sof_ipc_get_ops(sdev, pm);
-	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
+	const struct sof_ipc_tplg_ops *tplg_ops = snd_sof_sdev_get_tplg_ops(sdev);
 	int ret;
 
 	guard(mutex)(&sdev->dsp_fw_boot_mutex);
@@ -230,7 +230,7 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	const struct sof_ipc_pm_ops *pm_ops = sof_ipc_get_ops(sdev, pm);
-	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
+	const struct sof_ipc_tplg_ops *tplg_ops = snd_sof_sdev_get_tplg_ops(sdev);
 	pm_message_t pm_state;
 	u32 target_state = snd_sof_dsp_power_target(sdev);
 	u32 old_state = sdev->dsp_power_state.state;

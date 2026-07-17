@@ -104,6 +104,11 @@ struct snd_sof_control;
 struct snd_sof_dai;
 struct snd_sof_pcm;
 
+extern const struct sof_ipc_tplg_ops ipc3_tplg_ops;
+extern const struct sof_ipc_tplg_ops ipc4_tplg_ops;
+extern const struct sof_ipc_pcm_ops ipc3_pcm_ops;
+extern const struct sof_ipc_pcm_ops ipc4_pcm_ops;
+
 struct snd_sof_dai_config_data {
 	int dai_index;
 	int dai_data; /* contains DAI-specific information */
@@ -643,6 +648,10 @@ snd_sof_audio_instance_register(struct snd_sof_dev *sdev,
 void snd_sof_audio_instance_unregister(struct snd_sof_audio_instance *instance);
 struct snd_sof_audio_instance *
 snd_sof_component_get_audio_instance(struct snd_soc_component *component);
+const struct sof_ipc_tplg_ops *snd_sof_sdev_get_tplg_ops(struct snd_sof_dev *sdev);
+const struct sof_ipc_pcm_ops *snd_sof_sdev_get_pcm_ops(struct snd_sof_dev *sdev);
+const struct sof_ipc_tplg_ops *snd_sof_component_get_tplg_ops(struct snd_soc_component *component);
+const struct sof_ipc_pcm_ops *snd_sof_component_get_pcm_ops(struct snd_soc_component *component);
 
 static inline
 struct snd_sof_pcm *snd_sof_find_spcm_dai(struct snd_soc_component *scomp,

@@ -41,7 +41,7 @@ int hda_dai_config(struct snd_soc_dapm_widget *w, unsigned int flags,
 		return 0;
 
 	sdev = widget_to_sdev(w);
-	tplg_ops = sof_ipc_get_ops(sdev, tplg);
+	tplg_ops = snd_sof_component_get_tplg_ops(swidget->scomp);
 
 	if (tplg_ops && tplg_ops->dai_config) {
 		ret = tplg_ops->dai_config(sdev, swidget, flags, data);

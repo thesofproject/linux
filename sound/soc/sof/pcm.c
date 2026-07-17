@@ -123,8 +123,8 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 {
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
-	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
-	const struct sof_ipc_pcm_ops *pcm_ops = sof_ipc_get_ops(sdev, pcm);
+	const struct sof_ipc_tplg_ops *tplg_ops = snd_sof_component_get_tplg_ops(component);
+	const struct sof_ipc_pcm_ops *pcm_ops = snd_sof_component_get_pcm_ops(component);
 	struct snd_sof_platform_stream_params *platform_params;
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct snd_sof_widget *host_widget;
@@ -216,7 +216,7 @@ static int sof_pcm_stream_free(struct snd_sof_dev *sdev,
 			       struct snd_sof_pcm *spcm, int dir,
 			       bool free_widget_list)
 {
-	const struct sof_ipc_pcm_ops *pcm_ops = sof_ipc_get_ops(sdev, pcm);
+	const struct sof_ipc_pcm_ops *pcm_ops = snd_sof_component_get_pcm_ops(component);
 	int ret;
 	int err = 0;
 
@@ -325,7 +325,7 @@ static int sof_pcm_prepare(struct snd_soc_component *component,
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
-	const struct sof_ipc_pcm_ops *pcm_ops = sof_ipc_get_ops(sdev, pcm);
+	const struct sof_ipc_pcm_ops *pcm_ops = snd_sof_component_get_pcm_ops(component);
 	struct snd_sof_platform_stream_params *platform_params;
 	struct snd_soc_dapm_widget_list *list;
 	struct snd_pcm_hw_params *params;
@@ -395,7 +395,7 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
-	const struct sof_ipc_pcm_ops *pcm_ops = sof_ipc_get_ops(sdev, pcm);
+	const struct sof_ipc_pcm_ops *pcm_ops = snd_sof_component_get_pcm_ops(component);
 	struct snd_sof_pcm *spcm;
 	bool reset_hw_params = false;
 	bool ipc_first = false;
@@ -508,7 +508,7 @@ static snd_pcm_uframes_t sof_pcm_pointer(struct snd_soc_component *component,
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
-	const struct sof_ipc_pcm_ops *pcm_ops = sof_ipc_get_ops(sdev, pcm);
+	const struct sof_ipc_pcm_ops *pcm_ops = snd_sof_component_get_pcm_ops(component);
 	struct snd_sof_pcm *spcm;
 	snd_pcm_uframes_t host, dai;
 	int ret = -EOPNOTSUPP;
@@ -735,8 +735,7 @@ int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_pa
 		snd_soc_rtdcom_lookup(rtd, SOF_AUDIO_PCM_DRV_NAME);
 	struct snd_sof_dai *dai =
 		snd_sof_find_dai(component, (char *)rtd->dai_link->name);
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
-	const struct sof_ipc_pcm_ops *pcm_ops = sof_ipc_get_ops(sdev, pcm);
+	const struct sof_ipc_pcm_ops *pcm_ops = snd_sof_component_get_pcm_ops(component);
 
 	/* no topology exists for this BE, try a common configuration */
 	if (!dai) {
@@ -829,8 +828,7 @@ static int sof_pcm_ack(struct snd_soc_component *component,
 static snd_pcm_sframes_t sof_pcm_delay(struct snd_soc_component *component,
 				       struct snd_pcm_substream *substream)
 {
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
-	const struct sof_ipc_pcm_ops *pcm_ops = sof_ipc_get_ops(sdev, pcm);
+	const struct sof_ipc_pcm_ops *pcm_ops = snd_sof_component_get_pcm_ops(component);
 
 	if (pcm_ops && pcm_ops->delay)
 		return pcm_ops->delay(component, substream);
@@ -842,7 +840,23 @@ void snd_sof_new_platform_drv(struct snd_sof_dev *sdev)
 {
 	struct snd_soc_component_driver *pd = &sdev->plat_drv;
 	struct snd_sof_pdata *plat_data = sdev->pdata;
+	const struct sof_ipc_pcm_ops *pcm_ops = NULL;
 	const char *drv_name;
+
+	switch (sdev->pdata->ipc_type) {
+#if defined(CONFIG_SND_SOC_SOF_IPC3)
+	case SOF_IPC_TYPE_3:
+		pcm_ops = &ipc3_pcm_ops;
+		break;
+#endif
+#if defined(CONFIG_SND_SOC_SOF_IPC4)
+	case SOF_IPC_TYPE_4:
+		pcm_ops = &ipc4_pcm_ops;
+		break;
+#endif
+	default:
+		break;
+	}
 
 	if (plat_data->machine)
 		drv_name = plat_data->machine->drv_name;
@@ -865,8 +879,6 @@ void snd_sof_new_platform_drv(struct snd_sof_dev *sdev)
 	pd->delay = sof_pcm_delay;
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_COMPRESS)
-	const struct sof_ipc_pcm_ops *pcm_ops = sof_ipc_get_ops(sdev, pcm);
-
 	if (pcm_ops)
 		pd->compress_ops = pcm_ops->compress_ops;
 #endif

@@ -785,7 +785,7 @@ static void sof_ipc4_module_notification_handler(struct snd_sof_dev *sdev,
 	switch (data->event_id & SOF_IPC4_NOTIFY_MODULE_EVENTID_SOF_MAGIC_MASK) {
 	case SOF_IPC4_NOTIFY_MODULE_EVENTID_ALSA_MAGIC_VAL:
 	{
-		const struct sof_ipc_tplg_ops *tplg_ops = sdev->ipc->ops->tplg;
+		const struct sof_ipc_tplg_ops *tplg_ops = snd_sof_sdev_get_tplg_ops(sdev);
 
 		if (tplg_ops->control->update)
 			tplg_ops->control->update(sdev, ipc4_msg);
@@ -1021,8 +1021,6 @@ const struct sof_ipc_ops ipc4_ops = {
 	.get_reply = sof_ipc4_get_reply,
 	.pm = &ipc4_pm_ops,
 	.fw_loader = &ipc4_loader_ops,
-	.tplg = &ipc4_tplg_ops,
-	.pcm = &ipc4_pcm_ops,
 	.fw_tracing = &ipc4_mtrace_ops,
 };
 

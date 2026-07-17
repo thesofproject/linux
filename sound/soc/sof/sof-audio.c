@@ -19,6 +19,32 @@ snd_sof_audio_instance_register(struct snd_sof_dev *sdev,
 				struct snd_soc_component *component)
 {
 	struct snd_sof_audio_instance *instance;
+	const struct sof_ipc_tplg_ops *tplg_ops;
+	const struct sof_ipc_pcm_ops *pcm_ops;
+
+	switch (sdev->pdata->ipc_type) {
+#if defined(CONFIG_SND_SOC_SOF_IPC3)
+	case SOF_IPC_TYPE_3:
+		tplg_ops = &ipc3_tplg_ops;
+		pcm_ops = &ipc3_pcm_ops;
+		break;
+#endif
+#if defined(CONFIG_SND_SOC_SOF_IPC4)
+	case SOF_IPC_TYPE_4:
+		tplg_ops = &ipc4_tplg_ops;
+		pcm_ops = &ipc4_pcm_ops;
+		break;
+#endif
+	default:
+		dev_err(sdev->dev, "Unsupported IPC type %d for audio instance\n",
+			sdev->pdata->ipc_type);
+		return NULL;
+	}
+
+	if (!pcm_ops || !tplg_ops || !tplg_ops->widget || !tplg_ops->control) {
+		dev_err(sdev->dev, "Missing IPC PCM/topology ops for audio instance\n");
+		return NULL;
+	}
 
 	if (!sdev->audio_ops) {
 		dev_err(sdev->dev, "Missing audio ops for audio instance\n");
@@ -32,6 +58,8 @@ snd_sof_audio_instance_register(struct snd_sof_dev *sdev,
 	instance->sdev = sdev;
 	instance->component = component;
 	instance->audio_ops = sdev->audio_ops;
+	instance->tplg_ops = tplg_ops;
+	instance->pcm_ops = pcm_ops;
 	INIT_LIST_HEAD(&instance->pipeline_list);
 	INIT_LIST_HEAD(&instance->dai_list);
 	INIT_LIST_HEAD(&instance->dai_link_list);
@@ -74,6 +102,46 @@ snd_sof_component_get_audio_instance(struct snd_soc_component *component)
 }
 EXPORT_SYMBOL(snd_sof_component_get_audio_instance);
 
+const struct sof_ipc_tplg_ops *snd_sof_sdev_get_tplg_ops(struct snd_sof_dev *sdev)
+{
+	struct snd_sof_audio_instance *instance;
+
+	guard(rcu)();
+	list_for_each_entry_rcu(instance, &sdev->audio_instance_list, list)
+		return instance->tplg_ops;
+
+	return NULL;
+}
+EXPORT_SYMBOL(snd_sof_sdev_get_tplg_ops);
+
+const struct sof_ipc_pcm_ops *snd_sof_sdev_get_pcm_ops(struct snd_sof_dev *sdev)
+{
+	struct snd_sof_audio_instance *instance;
+
+	guard(rcu)();
+	list_for_each_entry_rcu(instance, &sdev->audio_instance_list, list)
+		return instance->pcm_ops;
+
+	return NULL;
+}
+EXPORT_SYMBOL(snd_sof_sdev_get_pcm_ops);
+
+const struct sof_ipc_tplg_ops *snd_sof_component_get_tplg_ops(struct snd_soc_component *component)
+{
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);
+
+	return instance ? instance->tplg_ops : NULL;
+}
+EXPORT_SYMBOL(snd_sof_component_get_tplg_ops);
+
+const struct sof_ipc_pcm_ops *snd_sof_component_get_pcm_ops(struct snd_soc_component *component)
+{
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);
+
+	return instance ? instance->pcm_ops : NULL;
+}
+EXPORT_SYMBOL(snd_sof_component_get_pcm_ops);
+
 /*
  * Check if a DAI widget is an aggregated DAI. Aggregated DAI's have names ending in numbers
  * starting with 0. For example: in the case of a SDW speaker with 2 amps, the topology contains
@@ -111,7 +179,7 @@ static void sof_reset_route_setup_status(struct snd_sof_widget *widget)
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(widget->scomp);
 	struct snd_sof_audio_instance *instance =
 		snd_sof_component_get_audio_instance(widget->scomp);
-	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
+	const struct sof_ipc_tplg_ops *tplg_ops = snd_sof_component_get_tplg_ops(widget->scomp);
 	struct snd_sof_route *sroute;
 
 	list_for_each_entry(sroute, &instance->route_list, list)
@@ -127,7 +195,7 @@ static int sof_widget_free_unlocked(struct snd_sof_dev *sdev,
 				    struct snd_soc_component *scomp,
 				    struct snd_sof_widget *swidget)
 {
-	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
+	const struct sof_ipc_tplg_ops *tplg_ops = snd_sof_component_get_tplg_ops(scomp);
 	struct snd_sof_pipeline *spipe = swidget->spipe;
 	int err = 0;
 	int ret;
@@ -215,7 +283,7 @@ static int sof_widget_setup_unlocked(struct snd_sof_dev *sdev,
 				     struct snd_soc_component *scomp,
 				     struct snd_sof_widget *swidget)
 {
-	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
+	const struct sof_ipc_tplg_ops *tplg_ops = snd_sof_component_get_tplg_ops(scomp);
 	struct snd_sof_pipeline *spipe = swidget->spipe;
 	int ret;
 	int i;
@@ -330,9 +398,9 @@ EXPORT_SYMBOL(sof_widget_setup);
 int sof_route_setup(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *wsource,
 		    struct snd_soc_dapm_widget *wsink)
 {
-	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
 	struct snd_sof_widget *src_widget = wsource->dobj.private;
 	struct snd_sof_widget *sink_widget = wsink->dobj.private;
+	const struct sof_ipc_tplg_ops *tplg_ops = snd_sof_component_get_tplg_ops(src_widget->scomp);
 	struct snd_sof_audio_instance *instance =
 		snd_sof_component_get_audio_instance(src_widget->scomp);
 	struct snd_sof_route *sroute;
@@ -513,9 +581,9 @@ sof_unprepare_widgets_in_path(struct snd_soc_component *component,
 			      struct snd_soc_dapm_widget *widget,
 			      struct snd_soc_dapm_widget_list *list, int dir)
 {
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
-	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
 	struct snd_sof_widget *swidget = widget->dobj.private;
+	const struct sof_ipc_tplg_ops *tplg_ops = swidget ?
+		snd_sof_component_get_tplg_ops(swidget->scomp) : NULL;
 	const struct sof_ipc_tplg_widget_ops *widget_ops;
 	struct snd_soc_dapm_path *p;
 
@@ -562,9 +630,9 @@ sof_prepare_widgets_in_path(struct snd_soc_component *component,
 			    struct snd_pcm_hw_params *pipeline_params, int dir,
 			    struct snd_soc_dapm_widget_list *list)
 {
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
-	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
 	struct snd_sof_widget *swidget = widget->dobj.private;
+	const struct sof_ipc_tplg_ops *tplg_ops = swidget ?
+		snd_sof_component_get_tplg_ops(swidget->scomp) : NULL;
 	const struct sof_ipc_tplg_widget_ops *widget_ops;
 	struct snd_soc_dapm_path *p;
 	int ret;
@@ -890,7 +958,7 @@ int sof_widget_list_setup(struct snd_soc_component *component, struct snd_sof_pc
 			  int dir)
 {
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
-	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
+	const struct sof_ipc_tplg_ops *tplg_ops = snd_sof_component_get_tplg_ops(spcm->scomp);
 	struct snd_soc_dapm_widget_list *list = spcm->stream[dir].list;
 	struct snd_soc_dapm_widget *widget;
 	int i, ret;
@@ -1163,7 +1231,7 @@ static int sof_dai_get_param(struct snd_soc_pcm_runtime *rtd, int param_type)
 	struct snd_sof_dai *dai =
 		snd_sof_find_dai(component, (char *)rtd->dai_link->name);
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
-	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
+	const struct sof_ipc_tplg_ops *tplg_ops = snd_sof_component_get_tplg_ops(component);
 
 	/* use the tplg configured mclk if existed */
 	if (!dai)

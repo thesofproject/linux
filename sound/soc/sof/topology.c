@@ -64,8 +64,7 @@ int sof_update_ipc_object(struct snd_soc_component *scomp, void *object, enum so
 			  struct snd_sof_tuple *tuples, int num_tuples,
 			  size_t object_size, int token_instance_num)
 {
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
-	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
+	const struct sof_ipc_tplg_ops *tplg_ops = snd_sof_component_get_tplg_ops(scomp);
 	const struct sof_token_info *token_list;
 	const struct sof_topology_token *tokens;
 	int i, j;
@@ -278,8 +277,7 @@ static int set_up_volume_table(struct snd_sof_control *scontrol,
 			       int tlv[SOF_TLV_ITEMS], int size)
 {
 	struct snd_soc_component *scomp = scontrol->scomp;
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
-	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
+	const struct sof_ipc_tplg_ops *tplg_ops = snd_sof_component_get_tplg_ops(scomp);
 
 	if (tplg_ops && tplg_ops->control && tplg_ops->control->set_up_volume_table)
 		return tplg_ops->control->set_up_volume_table(scontrol, tlv, size);
@@ -513,8 +511,7 @@ static int sof_copy_tuples(struct snd_soc_component *scomp,
 			   int array_size, u32 token_id, int token_instance_num,
 			   struct snd_sof_tuple *tuples, int tuples_size, int *num_copied_tuples)
 {
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
-	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
+	const struct sof_ipc_tplg_ops *tplg_ops = snd_sof_component_get_tplg_ops(scomp);
 	const struct sof_token_info *token_list;
 	const struct sof_topology_token *tokens;
 	int found = 0;
@@ -1048,7 +1045,7 @@ static int sof_control_unload(struct snd_soc_component *scomp,
 			      struct snd_soc_dobj *dobj)
 {
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
-	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
+	const struct sof_ipc_tplg_ops *tplg_ops = snd_sof_component_get_tplg_ops(scomp);
 	struct snd_sof_control *scontrol = dobj->private;
 	int ret = 0;
 
@@ -1220,8 +1217,7 @@ static int sof_widget_parse_tokens(struct snd_soc_component *scomp, struct snd_s
 				   struct snd_soc_tplg_dapm_widget *tw,
 				   enum sof_tokens *object_token_list, int count)
 {
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
-	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
+	const struct sof_ipc_tplg_ops *tplg_ops = snd_sof_component_get_tplg_ops(scomp);
 	struct snd_soc_tplg_private *private = &tw->priv;
 	const struct sof_token_info *token_list;
 	int num_tuples = 0;
@@ -1461,7 +1457,7 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 {
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
-	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
+	const struct sof_ipc_tplg_ops *tplg_ops = snd_sof_component_get_tplg_ops(scomp);
 	const struct sof_ipc_tplg_widget_ops *widget_ops;
 	struct snd_soc_tplg_private *priv = &tw->priv;
 	enum sof_tokens *token_list = NULL;
@@ -1693,8 +1689,7 @@ static int sof_route_unload(struct snd_soc_component *scomp,
 static int sof_widget_unload(struct snd_soc_component *scomp,
 			     struct snd_soc_dobj *dobj)
 {
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
-	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
+	const struct sof_ipc_tplg_ops *tplg_ops = snd_sof_component_get_tplg_ops(scomp);
 	const struct sof_ipc_tplg_widget_ops *widget_ops;
 	const struct snd_kcontrol_new *kc;
 	struct snd_soc_dapm_widget *widget;
@@ -1794,7 +1789,7 @@ static int sof_dai_load(struct snd_soc_component *scomp, int index,
 {
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
-	const struct sof_ipc_pcm_ops *ipc_pcm_ops = sof_ipc_get_ops(sdev, pcm);
+	const struct sof_ipc_pcm_ops *ipc_pcm_ops = snd_sof_component_get_pcm_ops(scomp);
 	struct snd_soc_tplg_stream_caps *caps;
 	struct snd_soc_tplg_private *private = &pcm->priv;
 	struct snd_sof_pcm *spcm;
@@ -1909,7 +1904,7 @@ static int sof_dai_unload(struct snd_soc_component *scomp,
 			  struct snd_soc_dobj *dobj)
 {
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
-	const struct sof_ipc_pcm_ops *ipc_pcm_ops = sof_ipc_get_ops(sdev, pcm);
+	const struct sof_ipc_pcm_ops *ipc_pcm_ops = snd_sof_component_get_pcm_ops(scomp);
 	struct snd_sof_pcm *spcm = dobj->private;
 
 	/* free PCM DMA pages */
@@ -1941,7 +1936,7 @@ static int sof_link_load(struct snd_soc_component *scomp, int index, struct snd_
 {
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
-	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
+	const struct sof_ipc_tplg_ops *tplg_ops = snd_sof_component_get_tplg_ops(scomp);
 	struct snd_soc_tplg_private *private = &cfg->priv;
 	const struct sof_token_info *token_list;
 	struct snd_sof_dai_link *slink;
@@ -2253,7 +2248,7 @@ static int sof_complete(struct snd_soc_component *scomp)
 {
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
-	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
+	const struct sof_ipc_tplg_ops *tplg_ops = snd_sof_component_get_tplg_ops(scomp);
 	const struct sof_ipc_tplg_widget_ops *widget_ops;
 	struct snd_sof_control *scontrol;
 	struct snd_sof_pipeline *spipe;
@@ -2343,8 +2338,7 @@ static int sof_complete(struct snd_soc_component *scomp)
 static int sof_manifest(struct snd_soc_component *scomp, int index,
 			struct snd_soc_tplg_manifest *man)
 {
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
-	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
+	const struct sof_ipc_tplg_ops *tplg_ops = snd_sof_component_get_tplg_ops(scomp);
 
 	if (tplg_ops && tplg_ops->parse_manifest)
 		return tplg_ops->parse_manifest(scomp, index, man);

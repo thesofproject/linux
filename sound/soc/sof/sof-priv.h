@@ -187,6 +187,8 @@ struct snd_sof_audio_instance {
 	struct snd_sof_dev *sdev;
 	struct snd_soc_component *component;
 	const struct sof_audio_ops *audio_ops;
+	const struct sof_ipc_tplg_ops *tplg_ops;
+	const struct sof_ipc_pcm_ops *pcm_ops;
 	struct list_head pipeline_list;
 	struct list_head dai_list;
 	struct list_head dai_link_list;
@@ -564,9 +566,7 @@ struct sof_ipc_pcm_ops;
 
 /**
  * struct sof_ipc_ops - IPC-specific ops
- * @tplg:	Pointer to IPC-specific topology ops
  * @pm:		Pointer to PM ops
- * @pcm:	Pointer to PCM ops
  * @fw_loader:	Pointer to Firmware Loader ops
  * @fw_tracing:	Optional pointer to Firmware tracing ops
  *
@@ -590,9 +590,7 @@ struct sof_ipc_pcm_ops;
  * handled with multiple chunks.
  */
 struct sof_ipc_ops {
-	const struct sof_ipc_tplg_ops *tplg;
 	const struct sof_ipc_pm_ops *pm;
-	const struct sof_ipc_pcm_ops *pcm;
 	const struct sof_ipc_fw_loader_ops *fw_loader;
 	const struct sof_ipc_fw_tracing_ops *fw_tracing;
 
