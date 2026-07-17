@@ -319245,6 +319245,116 @@ enumeration {
   }
 }
 enumeration {
+  id: 0xa12a969e
+  name: "pci_bus_speed"
+  definition {
+    underlying_type_id: 0x4585663f
+    enumerator {
+      name: "PCI_SPEED_33MHz"
+    }
+    enumerator {
+      name: "PCI_SPEED_66MHz"
+      value: 1
+    }
+    enumerator {
+      name: "PCI_SPEED_66MHz_PCIX"
+      value: 2
+    }
+    enumerator {
+      name: "PCI_SPEED_100MHz_PCIX"
+      value: 3
+    }
+    enumerator {
+      name: "PCI_SPEED_133MHz_PCIX"
+      value: 4
+    }
+    enumerator {
+      name: "PCI_SPEED_66MHz_PCIX_ECC"
+      value: 5
+    }
+    enumerator {
+      name: "PCI_SPEED_100MHz_PCIX_ECC"
+      value: 6
+    }
+    enumerator {
+      name: "PCI_SPEED_133MHz_PCIX_ECC"
+      value: 7
+    }
+    enumerator {
+      name: "PCI_SPEED_66MHz_PCIX_266"
+      value: 9
+    }
+    enumerator {
+      name: "PCI_SPEED_100MHz_PCIX_266"
+      value: 10
+    }
+    enumerator {
+      name: "PCI_SPEED_133MHz_PCIX_266"
+      value: 11
+    }
+    enumerator {
+      name: "AGP_UNKNOWN"
+      value: 12
+    }
+    enumerator {
+      name: "AGP_1X"
+      value: 13
+    }
+    enumerator {
+      name: "AGP_2X"
+      value: 14
+    }
+    enumerator {
+      name: "AGP_4X"
+      value: 15
+    }
+    enumerator {
+      name: "AGP_8X"
+      value: 16
+    }
+    enumerator {
+      name: "PCI_SPEED_66MHz_PCIX_533"
+      value: 17
+    }
+    enumerator {
+      name: "PCI_SPEED_100MHz_PCIX_533"
+      value: 18
+    }
+    enumerator {
+      name: "PCI_SPEED_133MHz_PCIX_533"
+      value: 19
+    }
+    enumerator {
+      name: "PCIE_SPEED_2_5GT"
+      value: 20
+    }
+    enumerator {
+      name: "PCIE_SPEED_5_0GT"
+      value: 21
+    }
+    enumerator {
+      name: "PCIE_SPEED_8_0GT"
+      value: 22
+    }
+    enumerator {
+      name: "PCIE_SPEED_16_0GT"
+      value: 23
+    }
+    enumerator {
+      name: "PCIE_SPEED_32_0GT"
+      value: 24
+    }
+    enumerator {
+      name: "PCIE_SPEED_64_0GT"
+      value: 25
+    }
+    enumerator {
+      name: "PCI_SPEED_UNKNOWN"
+      value: 255
+    }
+  }
+}
+enumeration {
   id: 0x4b32ef45
   name: "pci_epc_bar_type"
   definition {
@@ -340075,6 +340185,13 @@ function {
   return_type_id: 0x48b5725f
   parameter_id: 0x32fddfe5
   parameter_id: 0xf641dd8a
+}
+function {
+  id: 0x1ffead59
+  return_type_id: 0x48b5725f
+  parameter_id: 0x3e10b518
+  parameter_id: 0x3e6396e0
+  parameter_id: 0x6d7f5ff6
 }
 function {
   id: 0x20122f85
@@ -375929,6 +376046,11 @@ function {
   parameter_id: 0x92233392
   parameter_id: 0x302296c0
   parameter_id: 0x18bd6530
+}
+function {
+  id: 0xba0eb204
+  return_type_id: 0x3e10b518
+  parameter_id: 0xa12a969e
 }
 function {
   id: 0xba5ef4b3
@@ -436525,6 +436647,15 @@ elf_symbol {
   full_name: "param_ops_long"
 }
 elf_symbol {
+  id: 0xa94e278d
+  name: "param_ops_short"
+  is_defined: true
+  symbol_type: OBJECT
+  crc: 0xae2dbea2
+  type_id: 0xd865d5b5
+  full_name: "param_ops_short"
+}
+elf_symbol {
   id: 0xbbecac69
   name: "param_ops_string"
   is_defined: true
@@ -437532,6 +437663,15 @@ elf_symbol {
   crc: 0x2a8b91cd
   type_id: 0x998196f8
   full_name: "pci_set_power_state"
+}
+elf_symbol {
+  id: 0x18c6be42
+  name: "pci_speed_string"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xbf6af3d8
+  type_id: 0xba0eb204
+  full_name: "pci_speed_string"
 }
 elf_symbol {
   id: 0x3eaf8928
@@ -448186,6 +448326,15 @@ elf_symbol {
   crc: 0x451ab823
   type_id: 0x6f42ce8a
   full_name: "skb_dequeue_tail"
+}
+elf_symbol {
+  id: 0xc8bed5da
+  name: "skb_dump"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xe7d94755
+  type_id: 0x1ffead59
+  full_name: "skb_dump"
 }
 elf_symbol {
   id: 0x33735fec
@@ -470229,6 +470378,7 @@ interface {
   symbol_id: 0xb3d7f6dd
   symbol_id: 0x24c72ae5
   symbol_id: 0x5269af0f
+  symbol_id: 0xa94e278d
   symbol_id: 0xbbecac69
   symbol_id: 0x73430331
   symbol_id: 0x3e079c30
@@ -470341,6 +470491,7 @@ interface {
   symbol_id: 0xc62d75dd
   symbol_id: 0x9595d229
   symbol_id: 0xe770d8d1
+  symbol_id: 0x18c6be42
   symbol_id: 0x3eaf8928
   symbol_id: 0x065ce7c2
   symbol_id: 0x57bd8573
@@ -471524,6 +471675,7 @@ interface {
   symbol_id: 0xff7ffd9c
   symbol_id: 0xe40dd16b
   symbol_id: 0xe3dfe241
+  symbol_id: 0xc8bed5da
   symbol_id: 0x33735fec
   symbol_id: 0x414be22e
   symbol_id: 0x020865bd
