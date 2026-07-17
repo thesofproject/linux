@@ -8,6 +8,7 @@
 #include <sound/sof.h>
 #include <sound/compress_driver.h>
 #include "sof-audio.h"
+#include "sof-client.h"
 #include "sof-priv.h"
 #include "sof-utils.h"
 #include "ops.h"
@@ -51,7 +52,7 @@ static int sof_ipc3_compr_open(struct snd_soc_component *component,
 static int sof_ipc3_compr_free(struct snd_soc_component *component,
 			       struct snd_compr_stream *cstream)
 {
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(component);
 	struct sof_compr_stream *sstream = cstream->runtime->private_data;
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct sof_ipc_stream stream;
@@ -67,7 +68,7 @@ static int sof_ipc3_compr_free(struct snd_soc_component *component,
 	stream.comp_id = spcm->stream[cstream->direction].comp_id;
 
 	if (spcm->prepared[cstream->direction]) {
-		ret = sof_ipc_tx_message_no_reply(sdev->ipc, &stream, sizeof(stream));
+		ret = sof_client_ipc_tx_message_no_reply(cdev, &stream);
 		if (!ret)
 			spcm->prepared[cstream->direction] = false;
 	}
@@ -83,6 +84,7 @@ static int sof_ipc3_compr_set_params(struct snd_soc_component *component,
 				     struct snd_compr_stream *cstream,
 				     struct snd_compr_params *params)
 {
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(component);
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_compr_runtime *crtd = cstream->runtime;
@@ -158,8 +160,8 @@ static int sof_ipc3_compr_set_params(struct snd_soc_component *component,
 
 	memcpy((u8 *)pcm->params.ext_data, &params->codec, ext_data_size);
 
-	ret = sof_ipc_tx_message(sdev->ipc, pcm, sizeof(*pcm) + ext_data_size,
-				 &ipc_params_reply, sizeof(ipc_params_reply));
+	ret = sof_client_ipc_tx_message(cdev, pcm, &ipc_params_reply,
+					sizeof(ipc_params_reply));
 	if (ret < 0) {
 		dev_err(component->dev, "error ipc failed\n");
 		goto out;
@@ -200,7 +202,7 @@ static int sof_ipc3_compr_get_params(struct snd_soc_component *component,
 static int sof_ipc3_compr_trigger(struct snd_soc_component *component,
 				  struct snd_compr_stream *cstream, int cmd)
 {
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(component);
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct sof_ipc_stream stream;
 	struct snd_sof_pcm *spcm;
@@ -231,7 +233,7 @@ static int sof_ipc3_compr_trigger(struct snd_soc_component *component,
 		break;
 	}
 
-	return sof_ipc_tx_message_no_reply(sdev->ipc, &stream, sizeof(stream));
+	return sof_client_ipc_tx_message_no_reply(cdev, &stream);
 }
 
 static int sof_ipc3_compr_copy_playback(struct snd_compr_runtime *rtd,
