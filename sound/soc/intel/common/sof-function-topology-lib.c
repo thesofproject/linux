@@ -66,8 +66,18 @@ int sof_sdw_get_tplg_files(struct snd_soc_card *card, const struct snd_soc_acpi_
 						       "sdca-%damp", dai_link->num_cpus);
 			if (!tplg_dev_name)
 				return -ENOMEM;
+		} else if (strstr(dai_link->name, "SmartMic-8ch")) {
+			tplg_dev = TPLG_DEVICE_SDCA_MIC;
+			tplg_dev_name = "sdca-mic-8ch";
+		} else if (strstr(dai_link->name, "SmartMic-4ch")) {
+			tplg_dev = TPLG_DEVICE_SDCA_MIC;
+			tplg_dev_name = "sdca-mic-4ch";
+		} else if (strstr(dai_link->name, "SmartMic-1ch")) {
+			tplg_dev = TPLG_DEVICE_SDCA_MIC;
+			tplg_dev_name = "sdca-mic-1ch";
 		} else if (strstr(dai_link->name, "SmartMic")) {
 			tplg_dev = TPLG_DEVICE_SDCA_MIC;
+			/* Use the default 2ch topology */
 			tplg_dev_name = "sdca-mic";
 		} else if (strstr(dai_link->name, "dmic")) {
 			switch (mach_params.dmic_num) {
