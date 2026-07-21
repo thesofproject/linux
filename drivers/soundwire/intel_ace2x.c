@@ -83,7 +83,7 @@ static int intel_ace2x_bpt_open_stream(struct sdw_intel *sdw, struct sdw_slave *
 	int len;
 	int i;
 
-	if (cdns->bus.bpt_stream) {
+	if (READ_ONCE(cdns->bus.bpt_stream)) {
 		dev_err(cdns->dev, "%s: BPT stream already exists\n", __func__);
 		return -EAGAIN;
 	}
@@ -91,8 +91,6 @@ static int intel_ace2x_bpt_open_stream(struct sdw_intel *sdw, struct sdw_slave *
 	stream = sdw_alloc_stream("BPT", SDW_STREAM_BPT);
 	if (!stream)
 		return -ENOMEM;
-
-	cdns->bus.bpt_stream = stream;
 
 	ret = sdw_slave_bpt_stream_add(slave, stream);
 	if (ret < 0)
@@ -152,9 +150,25 @@ static int intel_ace2x_bpt_open_stream(struct sdw_intel *sdw, struct sdw_slave *
 		goto remove_master;
 	}
 
-	ret = sdw_prepare_stream(cdns->bus.bpt_stream);
+	/*
+	 * Publish bus->bpt_stream now that the BPT master runtime is fully
+	 * built and bpt_stream_refcount has been raised. The increment happens
+	 * in sdw_slave_bpt_stream_add() above, via sdw_stream_add_slave() ->
+	 * sdw_master_rt_alloc(); sdw_stream_add_master() then reuses that same
+	 * runtime through sdw_master_rt_find() without incrementing it again.
+	 * Publish before sdw_prepare_stream() below: the prepare runs
+	 * sdw_program_params(), whose filter skips idle audio runtimes only
+	 * while bus->bpt_stream is set, so publishing here (rather than after
+	 * the DMA setup) keeps that filter active for the BPT prepare. Ordering
+	 * the publish after the refcount is raised keeps the pointer and
+	 * refcount consistent for lockless observers, mirroring amd_manager.c
+	 * and pairing with the READ_ONCE() in sdw_program_params().
+	 */
+	WRITE_ONCE(cdns->bus.bpt_stream, stream);
+
+	ret = sdw_prepare_stream(stream);
 	if (ret < 0)
-		goto remove_master;
+		goto clear_bpt_stream;
 
 	command = (msg->flags & SDW_MSG_FLAG_WRITE) ? 0 : 1;
 
@@ -285,22 +299,30 @@ static int intel_ace2x_bpt_open_stream(struct sdw_intel *sdw, struct sdw_slave *
 			__func__, ret1);
 
 deprepare_stream:
-	sdw_deprepare_stream(cdns->bus.bpt_stream);
+	sdw_deprepare_stream(stream);
+
+clear_bpt_stream:
+	/*
+	 * Paths that jump here published bus->bpt_stream above; clear it before
+	 * sdw_stream_remove_master() drops bpt_stream_refcount so the pointer and
+	 * refcount stay consistent for lockless observers. The pre-publish failure
+	 * paths jump to remove_master and skip this clear.
+	 */
+	WRITE_ONCE(cdns->bus.bpt_stream, NULL);
 
 remove_master:
-	ret1 = sdw_stream_remove_master(&cdns->bus, cdns->bus.bpt_stream);
+	ret1 = sdw_stream_remove_master(&cdns->bus, stream);
 	if (ret1 < 0)
 		dev_err(cdns->dev, "%s: remove master failed: %d\n",
 			__func__, ret1);
 
-	ret1 = sdw_stream_remove_slave(slave, cdns->bus.bpt_stream);
+	ret1 = sdw_stream_remove_slave(slave, stream);
 	if (ret1 < 0)
 		dev_err(cdns->dev, "%s: remove slave failed: %d\n",
 			__func__, ret1);
 
 release_stream:
-	sdw_release_stream(cdns->bus.bpt_stream);
-	cdns->bus.bpt_stream = NULL;
+	sdw_release_stream(stream);
 
 	return ret;
 }
@@ -309,6 +331,7 @@ static void intel_ace2x_bpt_close_stream(struct sdw_intel *sdw, struct sdw_slave
 					 struct sdw_bpt_msg *msg)
 {
 	struct sdw_cdns *cdns = &sdw->cdns;
+	struct sdw_stream_runtime *stream = READ_ONCE(cdns->bus.bpt_stream);
 	int ret;
 
 	ret = hda_sdw_bpt_close(cdns->dev->parent /* PCI device */, sdw->instance,
@@ -319,23 +342,29 @@ static void intel_ace2x_bpt_close_stream(struct sdw_intel *sdw, struct sdw_slave
 		dev_err(cdns->dev, "%s:  hda_sdw_bpt_close failed: ret %d\n",
 			__func__, ret);
 
-	ret = sdw_deprepare_stream(cdns->bus.bpt_stream);
+	ret = sdw_deprepare_stream(stream);
 	if (ret < 0)
 		dev_err(cdns->dev, "%s: sdw_deprepare_stream failed: ret %d\n",
 			__func__, ret);
 
-	ret = sdw_stream_remove_master(&cdns->bus, cdns->bus.bpt_stream);
+	/*
+	 * Clear bus->bpt_stream before sdw_stream_remove_master() drops
+	 * bpt_stream_refcount, so the pointer is never visible while the
+	 * refcount reads zero (mirrors the open path and amd_manager.c).
+	 */
+	WRITE_ONCE(cdns->bus.bpt_stream, NULL);
+
+	ret = sdw_stream_remove_master(&cdns->bus, stream);
 	if (ret < 0)
 		dev_err(cdns->dev, "%s: remove master failed: %d\n",
 			__func__, ret);
 
-	ret = sdw_stream_remove_slave(slave, cdns->bus.bpt_stream);
+	ret = sdw_stream_remove_slave(slave, stream);
 	if (ret < 0)
 		dev_err(cdns->dev, "%s: remove slave failed: %d\n",
 			__func__, ret);
 
-	sdw_release_stream(cdns->bus.bpt_stream);
-	cdns->bus.bpt_stream = NULL;
+	sdw_release_stream(stream);
 }
 
 #define INTEL_BPT_MSG_BYTE_MIN 16
@@ -374,7 +403,7 @@ static int intel_ace2x_bpt_send_async(struct sdw_intel *sdw, struct sdw_slave *s
 		return ret;
 	}
 
-	ret = sdw_enable_stream(cdns->bus.bpt_stream);
+	ret = sdw_enable_stream(READ_ONCE(cdns->bus.bpt_stream));
 	if (ret < 0) {
 		dev_err(cdns->dev, "%s: sdw_stream_enable failed: %d\n",
 			__func__, ret);
@@ -397,7 +426,7 @@ static int intel_ace2x_bpt_wait(struct sdw_intel *sdw, struct sdw_slave *slave,
 	if (ret < 0)
 		dev_err(cdns->dev, "%s: hda_sdw_bpt_wait failed: %d\n", __func__, ret);
 
-	ret = sdw_disable_stream(cdns->bus.bpt_stream);
+	ret = sdw_disable_stream(READ_ONCE(cdns->bus.bpt_stream));
 	if (ret < 0) {
 		dev_err(cdns->dev, "%s: sdw_stream_enable failed: %d\n",
 			__func__, ret);
