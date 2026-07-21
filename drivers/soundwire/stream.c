@@ -674,9 +674,11 @@ static int sdw_notify_config(struct sdw_master_runtime *m_rt)
 static int sdw_program_params(struct sdw_bus *bus, bool prepare)
 {
 	struct sdw_master_runtime *m_rt;
+	struct sdw_stream_runtime *bpt;
 	struct sdw_slave *slave;
 	int ret = 0;
 	u32 addr1;
+	bool bpt_seen = false;
 
 	/* Check if all Peripherals comply with SDCA */
 	list_for_each_entry(slave, &bus->slaves, node) {
@@ -719,7 +721,21 @@ static int sdw_program_params(struct sdw_bus *bus, bool prepare)
 	}
 
 manager_runtime:
+	/*
+	 * Read bus->bpt_stream once so the whole programming pass uses a
+	 * consistent snapshot. While a BPT transfer owns the bus, only its own
+	 * runtime may be (re)programmed. Any audio runtimes still allocated
+	 * during a flagged resume-time download are idle by contract; skip them
+	 * so BPT preparation does not rewrite their transport/port parameters or
+	 * deliver BPT bus parameters to their Slaves via sdw_notify_config().
+	 */
+	bpt = READ_ONCE(bus->bpt_stream);
 	list_for_each_entry(m_rt, &bus->m_rt_list, bus_node) {
+		if (bpt) {
+			if (m_rt->stream != bpt)
+				continue;
+			bpt_seen = true;
+		}
 
 		/*
 		 * this loop walks through all master runtimes for a
@@ -754,6 +770,24 @@ manager_runtime:
 			dev_err(bus->dev, "Enable channel failed: %d\n", ret);
 			return ret;
 		}
+	}
+
+	/*
+	 * bpt_stream is published only while its runtime is on m_rt_list: the
+	 * manager adds the runtime before prepare and clears bpt_stream before
+	 * removing it at teardown, so a non-NULL bpt must always be matched in
+	 * the loop above. If it was not, a BPT teardown left a dangling pointer
+	 * on an error path (or a manager violated the exclusivity contract):
+	 * every audio runtime was filtered out and nothing was programmed.
+	 * Fail loudly rather than return success for Slave registers that were
+	 * never written, which would let the stream state machine advance to
+	 * the bank switch on stale hardware.
+	 */
+	if (bpt && !bpt_seen) {
+		dev_err(bus->dev,
+			"BPT stream set but its runtime is absent; skipped programming\n");
+		WARN_ON_ONCE(1);
+		return -EINVAL;
 	}
 
 	return ret;
@@ -1234,6 +1268,33 @@ static struct sdw_master_runtime
 	return NULL;
 }
 
+/*
+ * sdw_bus_has_active_stream() - check for an audio stream actively using the bus
+ *
+ * Returns true if any master runtime on @bus has a stream in the PREPARED or
+ * ENABLED state, i.e. one that is reserving or moving data over the bus. BPT
+ * and active audio are mutually exclusive, so a BPT transfer must not be
+ * started while this returns true. Allocated-but-idle streams
+ * (ALLOCATED/CONFIGURED/DISABLED/DEPREPARED) are not reported here; whether
+ * they permit BPT is decided by the caller and gated on the
+ * bus->bpt_fw_download resume flag.
+ *
+ * Must be called with bus_lock held.
+ */
+static bool sdw_bus_has_active_stream(struct sdw_bus *bus)
+{
+	struct sdw_master_runtime *m_rt;
+
+	list_for_each_entry(m_rt, &bus->m_rt_list, bus_node) {
+		if (m_rt->stream &&
+		    (m_rt->stream->state == SDW_STREAM_PREPARED ||
+		     m_rt->stream->state == SDW_STREAM_ENABLED))
+			return true;
+	}
+
+	return false;
+}
+
 /**
  * sdw_master_rt_alloc() - Allocates a Master runtime handle
  *
@@ -1250,9 +1311,39 @@ static struct sdw_master_runtime
 	struct list_head *insert_after;
 
 	if (stream->type == SDW_STREAM_BPT) {
-		if (bus->stream_refcount > 0 || bus->bpt_stream_refcount > 0) {
-			dev_err(bus->dev, "%s: %d/%d audio/BPT stream already allocated\n",
-				__func__, bus->stream_refcount, bus->bpt_stream_refcount);
+		/*
+		 * BPT and audio are mutually exclusive on the bus: BPT needs
+		 * exclusive bandwidth, so it must never run while another BPT
+		 * transfer is allocated or while an audio stream is actively using
+		 * the bus (PREPARED/ENABLED).
+		 *
+		 * The one exception is resume-time firmware download, flagged by the
+		 * manager via bus->bpt_fw_download: on a power-off-mode platform the
+		 * codec loses power across system suspend and must re-download its
+		 * firmware over BPT before its stream (left DISABLED across suspend)
+		 * can be re-enabled. In that window the manager guarantees no audio
+		 * stream is made active, so there is no concurrent audio and no
+		 * bandwidth to share; only then may BPT proceed while an idle
+		 * allocated stream exists. Without the flag such a stream blocks BPT.
+		 * This is not a mechanism for running audio concurrently with a
+		 * download.
+		 */
+		if (bus->bpt_stream_refcount > 0) {
+			dev_err(bus->dev,
+				"%s: BPT rejected: another BPT transfer active\n",
+				__func__);
+			return ERR_PTR(-EBUSY);
+		}
+		if (sdw_bus_has_active_stream(bus)) {
+			dev_err(bus->dev,
+				"%s: BPT rejected: audio stream active\n",
+				__func__);
+			return ERR_PTR(-EBUSY);
+		}
+		if (bus->stream_refcount > 0 && !READ_ONCE(bus->bpt_fw_download)) {
+			dev_err(bus->dev,
+				"%s: BPT rejected: audio stream allocated\n",
+				__func__);
 			return ERR_PTR(-EBUSY);
 		}
 	} else {

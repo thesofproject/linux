@@ -1005,6 +1005,19 @@ struct sdw_stream_runtime {
  * @bpt_stream_refcount: number of BTP streams currently using this bus (should
  * be zero or one, multiple streams per link is not supported).
  * @bpt_stream: pointer stored to handle BTP streams.
+ * @bpt_fw_download: set by a BPT-capable manager to flag a resume-time firmware
+ * download (BPT/BRA). BPT and active audio are mutually exclusive on the bus;
+ * this flag marks the one narrow exception -- a power-off-mode resume where the
+ * codec must re-download firmware over BPT before its stream (left DISABLED
+ * across suspend) is re-enabled. The manager guarantees no audio stream is made
+ * active on the bus for the duration, so sdw_master_rt_alloc() permits the BPT
+ * allocation even when idle audio streams are still allocated; an actively
+ * streaming audio stream (PREPARED/ENABLED) still blocks BPT. It is not a
+ * mechanism for running audio concurrently with a download. Written with
+ * WRITE_ONCE() by the manager before it enters the stream allocation path and
+ * cleared (also WRITE_ONCE()) after the transfer; read with READ_ONCE() in
+ * sdw_master_rt_alloc() under bus_lock. Single-BPT exclusivity
+ * (bpt_stream_refcount) means no concurrent writer races the lock-protected read.
  * @ops: Master callback ops
  * @port_ops: Master port callback ops
  * @prop: Master properties
@@ -1045,6 +1058,7 @@ struct sdw_bus {
 	int stream_refcount;
 	int bpt_stream_refcount;
 	struct sdw_stream_runtime *bpt_stream;
+	bool bpt_fw_download;
 	const struct sdw_master_ops *ops;
 	const struct sdw_master_port_ops *port_ops;
 	struct sdw_master_prop prop;
