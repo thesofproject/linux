@@ -3937,7 +3937,9 @@ static int wm8962_runtime_resume(struct device *dev)
 			   WM8962_OSC_ENA | WM8962_PLL2_ENA | WM8962_PLL3_ENA,
 			   0);
 
-	regcache_sync(wm8962->regmap);
+	ret = regcache_sync(wm8962->regmap);
+	if (ret)
+		goto cache_sync_err;
 
 	regmap_update_bits(wm8962->regmap, WM8962_ANTI_POP,
 			   WM8962_STARTUP_BIAS_ENA | WM8962_VMID_BUF_ENA,
@@ -3955,6 +3957,11 @@ static int wm8962_runtime_resume(struct device *dev)
 
 	return 0;
 
+cache_sync_err:
+	regcache_cache_only(wm8962->regmap, true);
+	regcache_mark_dirty(wm8962->regmap);
+	regulator_bulk_disable(ARRAY_SIZE(wm8962->supplies),
+			       wm8962->supplies);
 disable_clock:
 	clk_disable_unprepare(wm8962->pdata.mclk);
 	return ret;
