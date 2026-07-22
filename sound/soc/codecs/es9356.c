@@ -7,7 +7,6 @@
 //
 
 #include <linux/device.h>
-#include <linux/mod_devicetable.h>
 #include <linux/module.h>
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_type.h>
@@ -672,7 +671,7 @@ static int es9356_sdca_mbq_size(struct device *dev, unsigned int reg)
 	}
 }
 
-static struct regmap_sdw_mbq_cfg es9356_mbq_config = {
+static const struct regmap_sdw_mbq_cfg es9356_mbq_config = {
 	.mbq_size = es9356_sdca_mbq_size,
 };
 
@@ -1111,8 +1110,10 @@ static int es9356_sdca_dev_resume(struct device *dev)
 		es9356->disable_irq = false;
 
 	ret = sdw_slave_wait_for_init(slave, es9356_PROBE_TIMEOUT);
-	if (ret)
+	if (ret) {
+		sdw_show_ping_status(slave->bus, true);
 		return ret;
+	}
 
 	regcache_cache_only(es9356->regmap, false);
 	regcache_sync(es9356->regmap);

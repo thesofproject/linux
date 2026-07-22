@@ -9,7 +9,6 @@
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/module.h>
-#include <linux/mod_devicetable.h>
 #include <linux/pm_runtime.h>
 #include <linux/soundwire/sdw_registers.h>
 
@@ -505,14 +504,29 @@ static int rt721_sdca_dev_resume(struct device *dev)
 	}
 
 	ret = sdw_slave_wait_for_init(slave, RT721_PROBE_TIMEOUT);
-	if (ret)
+	if (ret) {
+		sdw_show_ping_status(slave->bus, true);
 		return ret;
+	}
 
 	regcache_cache_only(rt721->regmap, false);
-	regcache_sync(rt721->regmap);
+	ret = regcache_sync(rt721->regmap);
+	if (ret)
+		goto err_sync;
+
 	regcache_cache_only(rt721->mbq_regmap, false);
-	regcache_sync(rt721->mbq_regmap);
+	ret = regcache_sync(rt721->mbq_regmap);
+	if (ret)
+		goto err_sync;
+
 	return 0;
+
+err_sync:
+	regcache_cache_only(rt721->regmap, true);
+	regcache_cache_only(rt721->mbq_regmap, true);
+	regcache_mark_dirty(rt721->regmap);
+	regcache_mark_dirty(rt721->mbq_regmap);
+	return ret;
 }
 
 static const struct dev_pm_ops rt721_sdca_pm = {

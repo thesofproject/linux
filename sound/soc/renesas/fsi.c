@@ -1992,7 +1992,7 @@ static int fsi_probe(struct platform_device *pdev)
 	const struct fsi_core *core;
 	struct fsi_priv *fsi;
 	struct resource *res;
-	unsigned int irq;
+	int irq;
 	int ret;
 
 	memset(&info, 0, sizeof(info));
@@ -2007,11 +2007,14 @@ static int fsi_probe(struct platform_device *pdev)
 	}
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	irq = platform_get_irq(pdev, 0);
-	if (!res || (int)irq <= 0) {
+	if (!res) {
 		dev_err(&pdev->dev, "Not enough FSI platform resources.\n");
 		return -ENODEV;
 	}
+
+	irq = platform_get_irq(pdev, 0);
+	if (irq < 0)
+		return irq;
 
 	master = devm_kzalloc(&pdev->dev, sizeof(*master), GFP_KERNEL);
 	if (!master)
