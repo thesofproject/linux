@@ -691,20 +691,11 @@ struct snd_sof_dev {
 	/* mutex to protect client list */
 	struct mutex ipc_client_mutex;
 
-	/*
-	 * Used for tracking the IPC client's RX registration for DSP initiated
-	 * message handling.
-	 */
-	struct list_head ipc_rx_handler_list;
+	/* list of clients that registered event ops via sof_client_register_ops() */
+	struct list_head client_ops_list;
 
-	/*
-	 * Used for tracking the IPC client's registration for DSP state change
-	 * notification
-	 */
-	struct list_head fw_state_handler_list;
-
-	/* to protect the ipc_rx_handler_list  and  dsp_state_handler_list list */
-	struct mutex client_event_handler_mutex;
+	/* to protect client_ops_list */
+	struct mutex client_ops_mutex;
 
 	/* quirks to override topology values */
 	bool mclk_id_override;

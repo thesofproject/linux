@@ -20,32 +20,6 @@
 #include "ipc4-priv.h"
 
 /**
- * struct sof_ipc_event_entry - IPC client event description
- * @ipc_msg_type:	IPC msg type of the event the client is interested
- * @cdev:		sof_client_dev of the requesting client
- * @callback:		Callback function of the client
- * @list:		item in SOF core client event list
- */
-struct sof_ipc_event_entry {
-	u32 ipc_msg_type;
-	struct sof_client_dev *cdev;
-	sof_client_event_callback callback;
-	struct list_head list;
-};
-
-/**
- * struct sof_state_event_entry - DSP panic event subscription entry
- * @cdev:		sof_client_dev of the requesting client
- * @callback:		Callback function of the client
- * @list:		item in SOF core client event list
- */
-struct sof_state_event_entry {
-	struct sof_client_dev *cdev;
-	sof_client_fw_state_callback callback;
-	struct list_head list;
-};
-
-/**
  * struct sof_client_dev_entry - client device entry for internal management use
  * @sdev:	pointer to SOF core device struct
  * @list:	item in SOF core client dev list
@@ -544,137 +518,54 @@ EXPORT_SYMBOL_NS_GPL(sof_client_core_module_put, "SND_SOC_SOF_CLIENT");
 /* IPC event handling */
 void sof_client_ipc_rx_dispatcher(struct snd_sof_dev *sdev, void *msg_buf)
 {
-	struct sof_ipc_event_entry *event;
-	u32 msg_type;
+	struct sof_client_dev *cdev;
 
-	if (sdev->pdata->ipc_type == SOF_IPC_TYPE_3) {
-		struct sof_ipc_cmd_hdr *hdr = msg_buf;
-
-		msg_type = hdr->cmd & SOF_GLB_TYPE_MASK;
-	} else if (sdev->pdata->ipc_type == SOF_IPC_TYPE_4) {
-		struct sof_ipc4_msg *msg = msg_buf;
-
-		msg_type = SOF_IPC4_NOTIFICATION_TYPE_GET(msg->primary);
-	} else {
-		dev_dbg_once(sdev->dev, "Not supported IPC version: %d\n",
-			     sdev->pdata->ipc_type);
-		return;
-	}
-
-	guard(mutex)(&sdev->client_event_handler_mutex);
-	list_for_each_entry(event, &sdev->ipc_rx_handler_list, list) {
-		if (event->ipc_msg_type == msg_type)
-			event->callback(event->cdev, msg_buf);
+	guard(mutex)(&sdev->client_ops_mutex);
+	list_for_each_entry(cdev, &sdev->client_ops_list, ops_node) {
+		if (cdev->ops->ipc_rx_handler)
+			cdev->ops->ipc_rx_handler(cdev, msg_buf);
 	}
 }
 
-int sof_client_register_ipc_rx_handler(struct sof_client_dev *cdev,
-				       u32 ipc_msg_type,
-				       sof_client_event_callback callback)
-{
-	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
-	struct sof_ipc_event_entry *event;
-
-	if (!callback)
-		return -EINVAL;
-
-	if (sdev->pdata->ipc_type == SOF_IPC_TYPE_3) {
-		if (!(ipc_msg_type & SOF_GLB_TYPE_MASK))
-			return -EINVAL;
-	} else if (sdev->pdata->ipc_type == SOF_IPC_TYPE_4) {
-		if (!(ipc_msg_type & SOF_IPC4_NOTIFICATION_TYPE_MASK))
-			return -EINVAL;
-	} else {
-		dev_warn(sdev->dev, "%s: Not supported IPC version: %d\n",
-			 __func__, sdev->pdata->ipc_type);
-		return -EINVAL;
-	}
-
-	event = kmalloc_obj(*event);
-	if (!event)
-		return -ENOMEM;
-
-	event->ipc_msg_type = ipc_msg_type;
-	event->cdev = cdev;
-	event->callback = callback;
-
-	/* add to list of SOF client devices */
-	guard(mutex)(&sdev->client_event_handler_mutex);
-	list_add(&event->list, &sdev->ipc_rx_handler_list);
-
-	return 0;
-}
-EXPORT_SYMBOL_NS_GPL(sof_client_register_ipc_rx_handler, "SND_SOC_SOF_CLIENT");
-
-void sof_client_unregister_ipc_rx_handler(struct sof_client_dev *cdev,
-					  u32 ipc_msg_type)
-{
-	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
-	struct sof_ipc_event_entry *event;
-
-	guard(mutex)(&sdev->client_event_handler_mutex);
-
-	list_for_each_entry(event, &sdev->ipc_rx_handler_list, list) {
-		if (event->cdev == cdev && event->ipc_msg_type == ipc_msg_type) {
-			list_del(&event->list);
-			kfree(event);
-			break;
-		}
-	}
-}
-EXPORT_SYMBOL_NS_GPL(sof_client_unregister_ipc_rx_handler, "SND_SOC_SOF_CLIENT");
-
-/*DSP state notification and query */
+/* DSP state notification */
 void sof_client_fw_state_dispatcher(struct snd_sof_dev *sdev)
 {
-	struct sof_state_event_entry *event;
+	struct sof_client_dev *cdev;
 
-	guard(mutex)(&sdev->client_event_handler_mutex);
-
-	list_for_each_entry(event, &sdev->fw_state_handler_list, list)
-		event->callback(event->cdev, sdev->fw_state);
+	guard(mutex)(&sdev->client_ops_mutex);
+	list_for_each_entry(cdev, &sdev->client_ops_list, ops_node) {
+		if (cdev->ops->fw_state_handler)
+			cdev->ops->fw_state_handler(cdev, sdev->fw_state);
+	}
 }
 
-int sof_client_register_fw_state_handler(struct sof_client_dev *cdev,
-					 sof_client_fw_state_callback callback)
+int sof_client_register_ops(struct sof_client_dev *cdev,
+			    const struct sof_client_ops *ops)
 {
 	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
-	struct sof_state_event_entry *event;
 
-	if (!callback)
+	if (!ops)
 		return -EINVAL;
 
-	event = kmalloc_obj(*event);
-	if (!event)
-		return -ENOMEM;
-
-	event->cdev = cdev;
-	event->callback = callback;
-
-	/* add to list of SOF client devices */
-	guard(mutex)(&sdev->client_event_handler_mutex);
-	list_add(&event->list, &sdev->fw_state_handler_list);
+	guard(mutex)(&sdev->client_ops_mutex);
+	cdev->ops = ops;
+	list_add(&cdev->ops_node, &sdev->client_ops_list);
 
 	return 0;
 }
-EXPORT_SYMBOL_NS_GPL(sof_client_register_fw_state_handler, "SND_SOC_SOF_CLIENT");
+EXPORT_SYMBOL_NS_GPL(sof_client_register_ops, "SND_SOC_SOF_CLIENT");
 
-void sof_client_unregister_fw_state_handler(struct sof_client_dev *cdev)
+void sof_client_unregister_ops(struct sof_client_dev *cdev)
 {
 	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
-	struct sof_state_event_entry *event;
 
-	guard(mutex)(&sdev->client_event_handler_mutex);
-
-	list_for_each_entry(event, &sdev->fw_state_handler_list, list) {
-		if (event->cdev == cdev) {
-			list_del(&event->list);
-			kfree(event);
-			break;
-		}
+	guard(mutex)(&sdev->client_ops_mutex);
+	if (cdev->ops) {
+		list_del(&cdev->ops_node);
+		cdev->ops = NULL;
 	}
 }
-EXPORT_SYMBOL_NS_GPL(sof_client_unregister_fw_state_handler, "SND_SOC_SOF_CLIENT");
+EXPORT_SYMBOL_NS_GPL(sof_client_unregister_ops, "SND_SOC_SOF_CLIENT");
 
 enum sof_fw_state sof_client_get_fw_state(struct sof_client_dev *cdev)
 {

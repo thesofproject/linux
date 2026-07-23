@@ -14,14 +14,19 @@ struct snd_sof_dev;
 struct dentry;
 
 struct sof_ipc4_fw_module;
+struct sof_client_ops;
 
 /**
  * struct sof_client_dev - SOF client device
  * @auxdev:	auxiliary device
+ * @ops:	client event callbacks, set via sof_client_register_ops()
+ * @ops_node:	entry in the SOF core client ops list
  * @data:	device specific data
  */
 struct sof_client_dev {
 	struct auxiliary_device auxdev;
+	const struct sof_client_ops *ops;
+	struct list_head ops_node;
 	void *data;
 };
 
@@ -60,19 +65,31 @@ void sof_client_core_module_put(struct sof_client_dev *cdev);
 /* IPC notification */
 typedef void (*sof_client_event_callback)(struct sof_client_dev *cdev, void *msg_buf);
 
-int sof_client_register_ipc_rx_handler(struct sof_client_dev *cdev,
-				       u32 ipc_msg_type,
-				       sof_client_event_callback callback);
-void sof_client_unregister_ipc_rx_handler(struct sof_client_dev *cdev,
-					  u32 ipc_msg_type);
-
-/* DSP state notification and query */
+/* DSP state notification */
 typedef void (*sof_client_fw_state_callback)(struct sof_client_dev *cdev,
 					     enum sof_fw_state state);
 
-int sof_client_register_fw_state_handler(struct sof_client_dev *cdev,
-					 sof_client_fw_state_callback callback);
-void sof_client_unregister_fw_state_handler(struct sof_client_dev *cdev);
+/**
+ * struct sof_client_ops - SOF client event callbacks
+ * @ipc_rx_handler:	Called for every DSP-initiated IPC notification. The
+ *			client is responsible for filtering the message types it
+ *			is interested in.
+ * @fw_state_handler:	Called on every DSP firmware state change.
+ *
+ * A client that wants to receive notifications registers a static instance of
+ * this structure with sof_client_register_ops() from its probe and drops it
+ * with sof_client_unregister_ops() from its remove. All callbacks are optional
+ * and are invoked for every client that registered ops.
+ */
+struct sof_client_ops {
+	sof_client_event_callback ipc_rx_handler;
+	sof_client_fw_state_callback fw_state_handler;
+};
+
+int sof_client_register_ops(struct sof_client_dev *cdev,
+			    const struct sof_client_ops *ops);
+void sof_client_unregister_ops(struct sof_client_dev *cdev);
+
 enum sof_fw_state sof_client_get_fw_state(struct sof_client_dev *cdev);
 int sof_client_ipc_rx_message(struct sof_client_dev *cdev, void *ipc_msg, void *msg_buf);
 

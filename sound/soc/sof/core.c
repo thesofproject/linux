@@ -691,13 +691,12 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 	INIT_LIST_HEAD(&sdev->dai_link_list);
 	INIT_LIST_HEAD(&sdev->route_list);
 	INIT_LIST_HEAD(&sdev->ipc_client_list);
-	INIT_LIST_HEAD(&sdev->ipc_rx_handler_list);
-	INIT_LIST_HEAD(&sdev->fw_state_handler_list);
+	INIT_LIST_HEAD(&sdev->client_ops_list);
 	spin_lock_init(&sdev->ipc_lock);
 	spin_lock_init(&sdev->hw_lock);
 	mutex_init(&sdev->power_state_access);
 	mutex_init(&sdev->ipc_client_mutex);
-	mutex_init(&sdev->client_event_handler_mutex);
+	mutex_init(&sdev->client_ops_mutex);
 	mutex_init(&sdev->dsp_fw_boot_mutex);
 
 	/* set default timeouts if none provided */
