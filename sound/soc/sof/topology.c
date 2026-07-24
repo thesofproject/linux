@@ -2208,7 +2208,6 @@ err:
 
 /**
  * sof_set_widget_pipeline - Set pipeline for a component
- * @sdev: pointer to struct snd_sof_dev
  * @spipe: pointer to struct snd_sof_pipeline
  * @swidget: pointer to struct snd_sof_widget that has the same pipeline ID as @pipe_widget
  *
@@ -2216,7 +2215,7 @@ err:
  * The function checks if @swidget is associated with any volatile controls. If so, setting
  * the dynamic_pipeline_widget is disallowed.
  */
-static int sof_set_widget_pipeline(struct snd_sof_dev *sdev, struct snd_sof_pipeline *spipe,
+static int sof_set_widget_pipeline(struct snd_sof_pipeline *spipe,
 				   struct snd_sof_widget *swidget)
 {
 	struct snd_sof_audio_instance *instance =
@@ -2291,7 +2290,7 @@ static int sof_complete(struct snd_soc_component *scomp)
 		list_for_each_entry(swidget, &instance->widget_list, list)
 			if (swidget->widget->id != snd_soc_dapm_scheduler &&
 			    swidget->pipeline_id == pipe_widget->pipeline_id) {
-				ret = sof_set_widget_pipeline(sdev, spipe, swidget);
+				ret = sof_set_widget_pipeline(spipe, swidget);
 				if (ret < 0)
 					return ret;
 
