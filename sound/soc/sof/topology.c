@@ -1473,7 +1473,7 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 
 	swidget->scomp = scomp;
 	swidget->widget = w;
-	swidget->comp_id = sdev->next_comp_id++;
+	swidget->comp_id = atomic_fetch_inc(&sdev->next_comp_id);
 	swidget->id = w->id;
 	swidget->pipeline_id = index;
 	swidget->private = NULL;

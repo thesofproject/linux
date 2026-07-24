@@ -619,7 +619,7 @@ struct snd_sof_dev {
 	struct snd_sof_mailbox debug_box;	/* Debug info updates */
 	struct snd_sof_ipc_msg *msg;
 	int ipc_irq;
-	u32 next_comp_id; /* monotonic - reset during S3 */
+	atomic_t next_comp_id; /* monotonic comp_id allocator */
 
 	/* memory bases for mmaped DSPs - set by dsp_init() */
 	void __iomem *bar[SND_SOF_BARS];	/* DSP base address */
