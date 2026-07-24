@@ -57,6 +57,22 @@ enum sof_ipc_type {
 	SOF_IPC_TYPE_COUNT
 };
 
+/* mailbox descriptor, used for host <-> DSP IPC */
+struct snd_sof_mailbox {
+	size_t size;
+	u32 offset;
+};
+
+/* DSP mailbox types */
+enum snd_sof_mailbox_type {
+	SOF_MAILBOX_FW_INFO,
+	SOF_MAILBOX_DSP,
+	SOF_MAILBOX_HOST,
+	SOF_MAILBOX_STREAM,
+	SOF_MAILBOX_DEBUG,
+	SOF_MAILBOX_COUNT
+};
+
 struct sof_loadable_file_profile {
 	enum sof_ipc_type ipc_type;
 

@@ -421,12 +421,6 @@ struct snd_sof_debugfs_map {
 	enum sof_debugfs_access_type access_type;
 };
 
-/* mailbox descriptor, used for host <-> DSP IPC */
-struct snd_sof_mailbox {
-	size_t size;
-	u32 offset;
-};
-
 /* IPC message descriptor for host <-> DSP IO */
 struct snd_sof_ipc_msg {
 	/* message data */
