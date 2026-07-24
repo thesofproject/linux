@@ -628,3 +628,25 @@ void sof_client_mailbox_write(struct sof_client_dev *cdev, u32 offset,
 	sof_mailbox_write(sof_client_dev_to_sof_dev(cdev), offset, message, bytes);
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_mailbox_write, "SND_SOC_SOF_CLIENT");
+
+struct snd_sof_mailbox *sof_client_get_mailbox(struct sof_client_dev *cdev,
+					       enum snd_sof_mailbox_type type)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	switch (type) {
+	case SOF_MAILBOX_FW_INFO:
+		return &sdev->fw_info_box;
+	case SOF_MAILBOX_DSP:
+		return &sdev->dsp_box;
+	case SOF_MAILBOX_HOST:
+		return &sdev->host_box;
+	case SOF_MAILBOX_STREAM:
+		return &sdev->stream_box;
+	case SOF_MAILBOX_DEBUG:
+		return &sdev->debug_box;
+	default:
+		return NULL;
+	}
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_get_mailbox, "SND_SOC_SOF_CLIENT");

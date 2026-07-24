@@ -119,6 +119,8 @@ void sof_client_mailbox_read(struct sof_client_dev *cdev, u32 offset,
 			     void *message, size_t bytes);
 void sof_client_mailbox_write(struct sof_client_dev *cdev, u32 offset,
 			      void *message, size_t bytes);
+struct snd_sof_mailbox *sof_client_get_mailbox(struct sof_client_dev *cdev,
+					       enum snd_sof_mailbox_type type);
 
 ssize_t sof_client_ipc4_find_debug_slot_offset_by_type(struct sof_client_dev *cdev,
 						       u32 type);
