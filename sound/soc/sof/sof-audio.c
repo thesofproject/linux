@@ -901,7 +901,7 @@ int sof_widget_list_free(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, int
  * helper to determine if there are only D0i3 compatible
  * streams active
  */
-bool snd_sof_dsp_only_d0i3_compatible_stream_active(struct snd_sof_dev *sdev)
+bool snd_sof_dsp_state_is_d0i3_compatible(struct snd_sof_dev *sdev)
 {
 	struct snd_pcm_substream *substream;
 	struct snd_sof_pcm *spcm;
@@ -928,7 +928,7 @@ bool snd_sof_dsp_only_d0i3_compatible_stream_active(struct snd_sof_dev *sdev)
 
 	return d0i3_compatible_active;
 }
-EXPORT_SYMBOL(snd_sof_dsp_only_d0i3_compatible_stream_active);
+EXPORT_SYMBOL(snd_sof_dsp_state_is_d0i3_compatible);
 
 bool snd_sof_stream_suspend_ignored(struct snd_sof_dev *sdev)
 {

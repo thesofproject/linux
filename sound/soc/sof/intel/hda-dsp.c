@@ -1180,7 +1180,7 @@ void hda_dsp_d0i3_work(struct work_struct *work)
 	int ret;
 
 	/* DSP can enter D0I3 iff only D0I3-compatible streams are active */
-	if (!snd_sof_dsp_only_d0i3_compatible_stream_active(sdev))
+	if (!snd_sof_dsp_state_is_d0i3_compatible(sdev))
 		/* remain in D0I0 */
 		return;
 
