@@ -674,3 +674,11 @@ struct sof_ipc4_fw_data *sof_client_get_ipc4_fw_data(struct sof_client_dev *cdev
 	return sdev->private;
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_get_ipc4_fw_data, "SND_SOC_SOF_CLIENT");
+
+u32 sof_client_get_new_comp_id(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	return atomic_fetch_inc(&sdev->next_comp_id);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_get_new_comp_id, "SND_SOC_SOF_CLIENT");
