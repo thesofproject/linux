@@ -88,7 +88,7 @@ sof_pcm_setup_connected_widgets(struct snd_sof_dev *sdev, struct snd_soc_pcm_run
 
 		spcm->stream[dir].list = list;
 
-		ret = sof_widget_list_prepare(sdev, spcm, params, platform_params, dir);
+		ret = sof_widget_list_prepare(spcm->scomp, spcm, params, platform_params, dir);
 		if (ret < 0) {
 			spcm_err(spcm, dir, "widget list prepare failed\n");
 			spcm->stream[dir].list = NULL;
@@ -252,7 +252,7 @@ static int sof_pcm_stream_free(struct snd_sof_dev *sdev,
 
 	/* free widget list */
 	if (free_widget_list) {
-		ret = sof_widget_list_free(sdev, spcm, dir);
+		ret = sof_widget_list_free(component, spcm, dir);
 		if (ret < 0) {
 			spcm_err(spcm, substream->stream,
 				 "sof_widget_list_free failed %d\n", ret);
@@ -313,7 +313,7 @@ static int sof_pcm_hw_free(struct snd_soc_component *component,
 				  substream->stream, true);
 
 	/* unprepare and free the list of DAPM widgets */
-	sof_widget_list_unprepare(sdev, spcm, substream->stream);
+	sof_widget_list_unprepare(component, spcm, substream->stream);
 
 	cancel_work_sync(&spcm->stream[substream->stream].period_elapsed_work);
 
@@ -366,7 +366,7 @@ static int sof_pcm_prepare(struct snd_soc_component *component,
 	list = spcm->stream[dir].list;
 	params = &spcm->params[substream->stream];
 	platform_params = &spcm->platform_params[substream->stream];
-	ret = sof_widget_list_setup(sdev, spcm, params, platform_params, dir);
+	ret = sof_widget_list_setup(component, spcm, params, platform_params, dir);
 	if (ret < 0) {
 		dev_err(component->dev, "failed widget list set up for pcm %d dir %u\n",
 			le32_to_cpu(spcm->pcm.pcm_id), dir);

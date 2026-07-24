@@ -726,16 +726,17 @@ int sof_route_setup(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *wsourc
 		    struct snd_soc_dapm_widget *wsink);
 
 /* PCM */
-int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
+int sof_widget_list_setup(struct snd_soc_component *component, struct snd_sof_pcm *spcm,
 			  struct snd_pcm_hw_params *fe_params,
 			  struct snd_sof_platform_stream_params *platform_params,
 			  int dir);
-int sof_widget_list_prepare(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
+int sof_widget_list_prepare(struct snd_soc_component *component, struct snd_sof_pcm *spcm,
 			    struct snd_pcm_hw_params *fe_params,
 			    struct snd_sof_platform_stream_params *platform_params,
 			    int dir);
-void sof_widget_list_unprepare(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, int dir);
-int sof_widget_list_free(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, int dir);
+void sof_widget_list_unprepare(struct snd_soc_component *component, struct snd_sof_pcm *spcm,
+			       int dir);
+int sof_widget_list_free(struct snd_soc_component *component, struct snd_sof_pcm *spcm, int dir);
 int sof_pcm_dsp_pcm_free(struct snd_pcm_substream *substream, struct snd_sof_dev *sdev,
 			 struct snd_sof_pcm *spcm);
 int sof_pcm_free_all_streams(struct snd_sof_dev *sdev);

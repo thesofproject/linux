@@ -132,7 +132,7 @@ static int sof_ipc4_compr_stream_free(struct snd_sof_dev *sdev,
 	}
 
 	/* free widget list */
-	ret = sof_widget_list_free(sdev, spcm, dir);
+	ret = sof_widget_list_free(spcm->scomp, spcm, dir);
 	if (ret < 0 && err == 0) {
 		spcm_err(spcm, dir, "sof_widget_list_free failed %d\n", ret);
 		err = ret;
@@ -158,7 +158,7 @@ static int sof_ipc4_compr_free(struct snd_soc_component *component,
 	ret = sof_ipc4_compr_stream_free(sdev, spcm, cstream);
 
 	/* unprepare and free the list of DAPM widgets */
-	sof_widget_list_unprepare(sdev, spcm, cstream->direction);
+	sof_widget_list_unprepare(component, spcm, cstream->direction);
 
 	cancel_work_sync(&spcm->stream[cstream->direction].period_elapsed_work);
 
@@ -468,7 +468,7 @@ static int sof_ipc4_compr_set_params(struct snd_soc_component *component,
 		tplg_ops->host_config(sdev, host_swidget, platform_params);
 
 	/* set up the widgets and pipelines in the DSP */
-	ret = sof_widget_list_setup(sdev, spcm, &p, platform_params, dir);
+	ret = sof_widget_list_setup(component, spcm, &p, platform_params, dir);
 	if (ret < 0) {
 		spcm_err(spcm, dir, "widget list set up failed\n");
 		goto clear_init_ext;
