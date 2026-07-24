@@ -1430,7 +1430,7 @@ sof_ipc4_update_resource_usage(struct snd_sof_widget *swidget,
 		if (pipe_widget->stack_bytes < swidget->stack_bytes)
 			pipe_widget->stack_bytes = swidget->stack_bytes;
 
-		dev_dbg(sdev->dev, "%s mem reqs to %s heap %u stack %u",
+		dev_dbg(scomp->dev, "%s mem reqs to %s heap %u stack %u",
 			swidget->widget->name, pipe_widget->widget->name,
 			pipe_widget->heap_bytes, pipe_widget->stack_bytes);
 	}
@@ -1801,7 +1801,7 @@ static void sof_ipc4_unprepare_copier_module(struct snd_sof_widget *swidget)
 }
 
 #if IS_ENABLED(CONFIG_ACPI) && IS_ENABLED(CONFIG_SND_INTEL_NHLT)
-static int snd_sof_get_hw_config_params(struct snd_sof_dev *sdev, struct snd_sof_dai *dai,
+static int snd_sof_get_hw_config_params(struct snd_sof_dai *dai,
 					int *sample_rate, int *channel_count, int *bit_depth)
 {
 	struct snd_soc_component *scomp = dai->scomp;
@@ -1821,7 +1821,7 @@ static int snd_sof_get_hw_config_params(struct snd_sof_dev *sdev, struct snd_sof
 	}
 
 	if (!dai_link_found) {
-		dev_err(sdev->dev, "%s: no DAI link found for DAI %s\n", __func__, dai->name);
+		dev_err(scomp->dev, "%s: no DAI link found for DAI %s\n", __func__, dai->name);
 		return -EINVAL;
 	}
 
@@ -1834,7 +1834,7 @@ static int snd_sof_get_hw_config_params(struct snd_sof_dev *sdev, struct snd_sof
 	}
 
 	if (!hw_cfg_found) {
-		dev_err(sdev->dev, "%s: no matching hw_config found for DAI %s\n", __func__,
+		dev_err(scomp->dev, "%s: no matching hw_config found for DAI %s\n", __func__,
 			dai->name);
 		return -EINVAL;
 	}
@@ -1843,18 +1843,20 @@ static int snd_sof_get_hw_config_params(struct snd_sof_dev *sdev, struct snd_sof
 	*channel_count = le32_to_cpu(hw_config->tdm_slots);
 	*sample_rate = le32_to_cpu(hw_config->fsync_rate);
 
-	dev_dbg(sdev->dev, "sample rate: %d sample width: %d channels: %d\n",
+	dev_dbg(scomp->dev, "sample rate: %d sample width: %d channels: %d\n",
 		*sample_rate, *bit_depth, *channel_count);
 
 	return 0;
 }
 
 static int
-snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, struct snd_sof_dai *dai,
+snd_sof_get_nhlt_endpoint_data(struct snd_sof_dai *dai,
 			       bool single_bitdepth,
 			       struct snd_pcm_hw_params *params, u32 dai_index,
 			       u32 linktype, u8 dir, u32 **dst, u32 *len)
 {
+	struct snd_soc_component *scomp = dai->scomp;
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	struct nhlt_specific_cfg *cfg = NULL;
 	struct snd_ipc4_nhlt *entry = NULL;
@@ -1874,14 +1876,14 @@ snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, struct snd_sof_dai *dai
 
 		/* Prefer 32-bit blob if copier supports multiple formats */
 		if (bit_depth <= 16 && !single_bitdepth) {
-			dev_dbg(sdev->dev, "Looking for 32-bit blob first for DMIC\n");
+			dev_dbg(scomp->dev, "Looking for 32-bit blob first for DMIC\n");
 			format_change = true;
 			bit_depth = 32;
 		}
 		break;
 	case SOF_DAI_INTEL_SSP:
 		nhlt_type = NHLT_LINK_SSP;
-		ret = snd_sof_get_hw_config_params(sdev, dai, &sample_rate, &channel_count,
+		ret = snd_sof_get_hw_config_params(dai, &sample_rate, &channel_count,
 						   &bit_depth);
 		if (ret < 0)
 			return ret;
@@ -1900,14 +1902,14 @@ snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, struct snd_sof_dai *dai
 				break;
 		}
 		if (dev_type < 0) {
-			dev_err(sdev->dev, "%s: No match for SSP%d in NHLT table\n",
+			dev_err(scomp->dev, "%s: No match for SSP%d in NHLT table\n",
 				__func__, dai_index);
 			return dev_type;
 		}
 
 		if (params_width(params) != bit_depth) {
 			format_change = true;
-			dev_dbg(sdev->dev, "SSP sample width change from %d to %d\n",
+			dev_dbg(scomp->dev, "SSP sample width change from %d to %d\n",
 				params_width(params), bit_depth);
 		}
 		break;
@@ -1915,7 +1917,7 @@ snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, struct snd_sof_dai *dai
 		return 0;
 	}
 
-	dev_dbg(sdev->dev, "dai index %d nhlt type %d direction %d dev type %d\n",
+	dev_dbg(scomp->dev, "dai index %d nhlt type %d direction %d dev type %d\n",
 		dai_index, nhlt_type, dir, dev_type);
 
 	/* find NHLT blob with matching params */
@@ -1971,7 +1973,7 @@ snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, struct snd_sof_dai *dai
 			}
 		}
 
-		dev_err(sdev->dev,
+		dev_err(scomp->dev,
 			"no matching blob for sample rate: %d sample width: %d channels: %d\n",
 			sample_rate, bit_depth, channel_count);
 		return -EINVAL;
@@ -2004,7 +2006,7 @@ out:
 }
 #else
 static int
-snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, struct snd_sof_dai *dai,
+snd_sof_get_nhlt_endpoint_data(struct snd_sof_dai *dai,
 			       bool single_bitdepth,
 			       struct snd_pcm_hw_params *params, u32 dai_index,
 			       u32 linktype, u8 dir, u32 **dst, u32 *len)
@@ -2088,9 +2090,11 @@ sof_ipc4_adjust_params_to_dai_format(struct snd_soc_component *scomp,
 }
 
 static int
-sof_ipc4_prepare_dai_copier(struct snd_sof_dev *sdev, struct snd_sof_dai *dai,
+sof_ipc4_prepare_dai_copier(struct snd_sof_dai *dai,
 			    struct snd_pcm_hw_params *params, int dir)
 {
+	struct snd_soc_component *scomp = dai->scomp;
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_ipc4_available_audio_format *available_fmt;
 	struct snd_pcm_hw_params dai_params = *params;
 	struct sof_ipc4_copier_data *copier_data;
@@ -2124,7 +2128,7 @@ sof_ipc4_prepare_dai_copier(struct snd_sof_dev *sdev, struct snd_sof_dai *dai,
 
 	single_bitdepth = sof_ipc4_copier_is_single_bitdepth(sdev, pin_fmts,
 							     num_pin_fmts);
-	ret = snd_sof_get_nhlt_endpoint_data(sdev, dai, single_bitdepth,
+	ret = snd_sof_get_nhlt_endpoint_data(dai, single_bitdepth,
 					     &dai_params,
 					     ipc4_copier->dai_index,
 					     ipc4_copier->dai_type, dir,
@@ -2356,7 +2360,7 @@ _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 			if (!ref_params)
 				return -ENOMEM;
 
-			ret = sof_ipc4_prepare_dai_copier(sdev, dai, ref_params, dir);
+			ret = sof_ipc4_prepare_dai_copier(dai, ref_params, dir);
 			if (ret < 0)
 				return ret;
 		}
@@ -2428,7 +2432,7 @@ _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		memcpy(ref_params, fe_params, sizeof(*ref_params));
 		if (dir == SNDRV_PCM_STREAM_PLAYBACK &&
  		    swidget->id == snd_soc_dapm_dai_in) {
-			ret = sof_ipc4_prepare_dai_copier(sdev, dai, ref_params, dir);
+			ret = sof_ipc4_prepare_dai_copier(dai, ref_params, dir);
 			if (ret < 0)
 				return ret;
 		}
@@ -3317,8 +3321,7 @@ static int sof_ipc4_control_setup(struct snd_sof_dev *sdev, struct snd_sof_contr
 	return 0;
 }
 
-static void sof_ipc4_add_init_ext_dp_memory_data(struct snd_sof_dev *sdev,
-						 struct snd_sof_widget *swidget,
+static void sof_ipc4_add_init_ext_dp_memory_data(struct snd_sof_widget *swidget,
 						 u32 *payload, u32 *ext_pos,
 						 struct sof_ipc4_module_init_ext_object **hdr)
 {
@@ -3356,8 +3359,7 @@ sof_ipc4_add_init_ext_module_data(struct snd_sof_dev *sdev,
 	*ext_pos += DIV_ROUND_UP(data_size, sizeof(u32));
 }
 
-static int sof_ipc4_widget_mod_init_msg_payload(struct snd_sof_dev *sdev,
-						struct snd_sof_widget *swidget,
+static int sof_ipc4_widget_mod_init_msg_payload(struct snd_sof_widget *swidget,
 						struct sof_ipc4_msg *msg,
 						void *ipc_data, u32 ipc_size,
 						void **new_data)
@@ -3365,6 +3367,7 @@ static int sof_ipc4_widget_mod_init_msg_payload(struct snd_sof_dev *sdev,
 	struct sof_ipc4_process *process = swidget->private;
 	struct sof_ipc4_module_init_ext_object *hdr = NULL;
 	struct snd_soc_component *scomp = swidget->scomp;
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_ipc4_module_init_ext_init *ext_init;
 	bool in_dp_domain = swidget->comp_domain == SOF_COMP_DOMAIN_DP;
 	bool has_ext_data = WIDGET_IS_PROCESS(swidget->id) && process->init_ext_module_size;
@@ -3386,7 +3389,7 @@ static int sof_ipc4_widget_mod_init_msg_payload(struct snd_sof_dev *sdev,
 
 	/* Add object array objects after ext_init */
 	if (in_dp_domain)
-		sof_ipc4_add_init_ext_dp_memory_data(sdev, swidget, payload,
+		sof_ipc4_add_init_ext_dp_memory_data(swidget, payload,
 						     &ext_pos, &hdr);
 
 	if (has_ext_data)
@@ -3417,12 +3420,12 @@ static int sof_ipc4_widget_mod_init_msg_payload(struct snd_sof_dev *sdev,
 	return new_size;
 }
 
-static void sof_ipc4_widget_pipe_ext_obj_memory_data(struct snd_sof_dev *sdev,
-						     struct snd_sof_widget *swidget,
+static void sof_ipc4_widget_pipe_ext_obj_memory_data(struct snd_sof_widget *swidget,
 						     u32 *payload, u32 *ext_pos,
 						     struct sof_ipc4_glb_pipe_ext_object **hdr)
 {
 	struct sof_ipc4_glb_pipe_ext_obj_memory_data *mem_data;
+	struct snd_soc_component *scomp = swidget->scomp;
 
 	*hdr = (struct sof_ipc4_glb_pipe_ext_object *)&payload[*ext_pos];
 	(*hdr)->header =
@@ -3436,17 +3439,18 @@ static void sof_ipc4_widget_pipe_ext_obj_memory_data(struct snd_sof_dev *sdev,
 	mem_data->heap_bytes = swidget->heap_bytes;
 	*ext_pos += DIV_ROUND_UP(sizeof(*mem_data), sizeof(u32));
 
-	dev_dbg(sdev->dev,
+	dev_dbg(scomp->dev,
 		"%s; domain_id %u stack %u heap %u bytes",
 		swidget->widget->name, mem_data->domain_id, mem_data->stack_bytes,
 		mem_data->heap_bytes);
 }
 
-static int sof_ipc4_widget_pipe_create_msg_payload(struct snd_sof_dev *sdev,
-						   struct snd_sof_widget *swidget,
+static int sof_ipc4_widget_pipe_create_msg_payload(struct snd_sof_widget *swidget,
 						   struct sof_ipc4_msg *msg,
 						   void **new_data)
 {
+	struct snd_soc_component *scomp = swidget->scomp;
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_ipc4_glb_pipe_payload *payload_hdr;
 	struct sof_ipc4_glb_pipe_ext_object *hdr = NULL;
 	u32 *payload;
@@ -3461,7 +3465,7 @@ static int sof_ipc4_widget_pipe_create_msg_payload(struct snd_sof_dev *sdev,
 	payload_hdr->word0 |= SOF_IPC4_GLB_PIPE_EXT_OBJ_ARRAY_MASK;
 	ext_pos = DIV_ROUND_UP(sizeof(*payload_hdr), sizeof(u32));
 
-	sof_ipc4_widget_pipe_ext_obj_memory_data(sdev, swidget, payload, &ext_pos, &hdr);
+	sof_ipc4_widget_pipe_ext_obj_memory_data(swidget, payload, &ext_pos, &hdr);
 	/* Add following array objects here */
 
 	/* Mark end of object array */
@@ -3474,7 +3478,7 @@ static int sof_ipc4_widget_pipe_create_msg_payload(struct snd_sof_dev *sdev,
 	/* Update msg extension bits according to the payload changes */
 	msg->extension |= SOF_IPC4_GLB_PIPE_PAYLOAD_MASK;
 
-	dev_dbg(sdev->dev, "%s: payload word0 %#x", swidget->widget->name,
+	dev_dbg(scomp->dev, "%s: payload word0 %#x", swidget->widget->name,
 		payload_hdr->word0);
 
 	return ext_pos * sizeof(int32_t);
@@ -3669,7 +3673,7 @@ static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 			swidget->widget->name, swidget->pipeline_id, module_id,
 			swidget->instance_id, swidget->core);
 
-		ret = sof_ipc4_widget_mod_init_msg_payload(sdev, swidget, msg, ipc_data, ipc_size,
+		ret = sof_ipc4_widget_mod_init_msg_payload(swidget, msg, ipc_data, ipc_size,
 							   &ext_data);
 		if (ret < 0)
 			goto fail;
@@ -3684,7 +3688,7 @@ static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 			swidget->instance_id, swidget->core);
 
 		msg->extension &= ~SOF_IPC4_GLB_PIPE_PAYLOAD_MASK;
-		ret = sof_ipc4_widget_pipe_create_msg_payload(sdev, swidget, msg,
+		ret = sof_ipc4_widget_pipe_create_msg_payload(swidget, msg,
 							      &ext_data);
 		if (ret < 0)
 			goto fail;
@@ -4231,7 +4235,7 @@ static int sof_ipc4_dai_get_param(struct snd_sof_dev *sdev, struct snd_sof_dai *
 	}
 
 	if (!dai_link_found) {
-		dev_err(sdev->dev, "no DAI link found for DAI %s\n", dai->name);
+		dev_err(scomp->dev, "no DAI link found for DAI %s\n", dai->name);
 		return -EINVAL;
 	}
 
@@ -4244,7 +4248,7 @@ static int sof_ipc4_dai_get_param(struct snd_sof_dev *sdev, struct snd_sof_dai *
 	}
 
 	if (!hw_cfg_found) {
-		dev_err(sdev->dev, "no matching hw_config found for DAI %s\n", dai->name);
+		dev_err(scomp->dev, "no matching hw_config found for DAI %s\n", dai->name);
 		return -EINVAL;
 	}
 
@@ -4258,12 +4262,12 @@ static int sof_ipc4_dai_get_param(struct snd_sof_dev *sdev, struct snd_sof_dai *
 		case SOF_DAI_PARAM_INTEL_SSP_TDM_SLOTS:
 			return le32_to_cpu(hw_config->tdm_slots);
 		default:
-			dev_err(sdev->dev, "invalid SSP param %d\n", param_type);
+			dev_err(scomp->dev, "invalid SSP param %d\n", param_type);
 			break;
 		}
 		break;
 	default:
-		dev_err(sdev->dev, "DAI type %d not supported yet!\n", ipc4_copier->dai_type);
+		dev_err(scomp->dev, "DAI type %d not supported yet!\n", ipc4_copier->dai_type);
 		break;
 	}
 
