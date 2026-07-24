@@ -926,6 +926,21 @@ bool snd_sof_dsp_state_is_d0i3_compatible(struct snd_sof_dev *sdev)
 		}
 	}
 
+	/*
+	 * Fold in the votes of any sof-client that participates in the D0i3
+	 * decision: an incompatible client stream vetoes D0i3, a compatible
+	 * active client stream counts as compatible activity.
+	 */
+	switch (sof_client_get_d0i3_vote(sdev)) {
+	case SOF_D0I3_INCOMPATIBLE:
+		return false;
+	case SOF_D0I3_COMPATIBLE_ACTIVE:
+		d0i3_compatible_active = true;
+		break;
+	case SOF_D0I3_NO_ACTIVITY:
+		break;
+	}
+
 	return d0i3_compatible_active;
 }
 EXPORT_SYMBOL(snd_sof_dsp_state_is_d0i3_compatible);

@@ -69,12 +69,33 @@ typedef void (*sof_client_event_callback)(struct sof_client_dev *cdev, void *msg
 typedef void (*sof_client_fw_state_callback)(struct sof_client_dev *cdev,
 					     enum sof_fw_state state);
 
+/*
+ * enum sof_d0i3_vote - a client's vote on DSP D0i3 low-power entry
+ *
+ * A client reports whether its currently active streams permit the DSP to
+ * enter the low-power D0i3 substate. The core folds the votes of all clients
+ * that implement the d0i3_vote callback:
+ *   - any SOF_D0I3_INCOMPATIBLE           -> D0i3 denied
+ *   - else any SOF_D0I3_COMPATIBLE_ACTIVE -> D0i3 allowed
+ *   - else (all SOF_D0I3_NO_ACTIVITY)     -> D0i3 denied, nothing to keep it up
+ * Clients without the callback do not participate in the vote.
+ */
+enum sof_d0i3_vote {
+	SOF_D0I3_NO_ACTIVITY = 0,	/* no active stream; does not affect the vote */
+	SOF_D0I3_COMPATIBLE_ACTIVE,	/* active streams, all D0i3-compatible */
+	SOF_D0I3_INCOMPATIBLE,		/* an active stream requires the DSP in D0i0 */
+};
+
+typedef enum sof_d0i3_vote (*sof_client_d0i3_vote_callback)(struct sof_client_dev *cdev);
+
 /**
  * struct sof_client_ops - SOF client event callbacks
  * @ipc_rx_handler:	Called for every DSP-initiated IPC notification. The
  *			client is responsible for filtering the message types it
  *			is interested in.
  * @fw_state_handler:	Called on every DSP firmware state change.
+ * @d0i3_vote:		Returns the client's D0i3 compatibility vote, see
+ *			enum sof_d0i3_vote.
  *
  * A client that wants to receive notifications registers a static instance of
  * this structure with sof_client_register_ops() from its probe and drops it
@@ -84,6 +105,7 @@ typedef void (*sof_client_fw_state_callback)(struct sof_client_dev *cdev,
 struct sof_client_ops {
 	sof_client_event_callback ipc_rx_handler;
 	sof_client_fw_state_callback fw_state_handler;
+	sof_client_d0i3_vote_callback d0i3_vote;
 };
 
 int sof_client_register_ops(struct sof_client_dev *cdev,

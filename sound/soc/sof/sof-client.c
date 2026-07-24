@@ -539,6 +539,38 @@ void sof_client_fw_state_dispatcher(struct snd_sof_dev *sdev)
 	}
 }
 
+/*
+ * Fold the D0i3 votes of every client that implements the d0i3_vote callback:
+ *   - any SOF_D0I3_INCOMPATIBLE           -> SOF_D0I3_INCOMPATIBLE (veto)
+ *   - else any SOF_D0I3_COMPATIBLE_ACTIVE -> SOF_D0I3_COMPATIBLE_ACTIVE
+ *   - else                                -> SOF_D0I3_NO_ACTIVITY
+ * Clients without the callback do not participate in the vote.
+ */
+enum sof_d0i3_vote sof_client_get_d0i3_vote(struct snd_sof_dev *sdev)
+{
+	enum sof_d0i3_vote result = SOF_D0I3_NO_ACTIVITY;
+	struct sof_client_dev *cdev;
+
+	guard(mutex)(&sdev->client_ops_mutex);
+	list_for_each_entry(cdev, &sdev->client_ops_list, ops_node) {
+		if (!cdev->ops->d0i3_vote)
+			continue;
+
+		switch (cdev->ops->d0i3_vote(cdev)) {
+		case SOF_D0I3_INCOMPATIBLE:
+			return SOF_D0I3_INCOMPATIBLE;
+		case SOF_D0I3_COMPATIBLE_ACTIVE:
+			result = SOF_D0I3_COMPATIBLE_ACTIVE;
+			break;
+		case SOF_D0I3_NO_ACTIVITY:
+			break;
+		}
+	}
+
+	return result;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_get_d0i3_vote, "SND_SOC_SOF_CLIENT");
+
 int sof_client_register_ops(struct sof_client_dev *cdev,
 			    const struct sof_client_ops *ops)
 {
