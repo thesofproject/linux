@@ -862,7 +862,6 @@ static int sof_control_load_volume(struct snd_soc_component *scomp,
 	if (le32_to_cpu(mc->num_channels) > 2)
 		kc->info = snd_sof_volume_info;
 
-	scontrol->comp_id = sdev->next_comp_id;
 	scontrol->min_volume_step = le32_to_cpu(mc->min);
 	scontrol->max_volume_step = le32_to_cpu(mc->max);
 	scontrol->num_channels = le32_to_cpu(mc->num_channels);
@@ -906,7 +905,7 @@ skip:
 	}
 
 	dev_dbg(scomp->dev, "tplg: load kcontrol index %d chans %d\n",
-		scontrol->comp_id, scontrol->num_channels);
+		scontrol->index, scontrol->num_channels);
 
 	return 0;
 
@@ -922,7 +921,6 @@ static int sof_control_load_enum(struct snd_soc_component *scomp,
 				 struct snd_kcontrol_new *kc,
 				 struct snd_soc_tplg_ctl_hdr *hdr)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_tplg_enum_control *ec =
 		container_of(hdr, struct snd_soc_tplg_enum_control, hdr);
 
@@ -930,11 +928,10 @@ static int sof_control_load_enum(struct snd_soc_component *scomp,
 	if (le32_to_cpu(ec->num_channels) > SND_SOC_TPLG_MAX_CHAN)
 		return -EINVAL;
 
-	scontrol->comp_id = sdev->next_comp_id;
 	scontrol->num_channels = le32_to_cpu(ec->num_channels);
 
-	dev_dbg(scomp->dev, "tplg: load kcontrol index %d chans %d comp_id %d\n",
-		scontrol->comp_id, scontrol->num_channels, scontrol->comp_id);
+	dev_dbg(scomp->dev, "tplg: load kcontrol index %d chans %d\n",
+		scontrol->index, scontrol->num_channels);
 
 	return 0;
 }
@@ -944,16 +941,14 @@ static int sof_control_load_bytes(struct snd_soc_component *scomp,
 				  struct snd_kcontrol_new *kc,
 				  struct snd_soc_tplg_ctl_hdr *hdr)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_tplg_bytes_control *control =
 		container_of(hdr, struct snd_soc_tplg_bytes_control, hdr);
 	struct soc_bytes_ext *sbe = (struct soc_bytes_ext *)kc->private_value;
 	size_t priv_size = le32_to_cpu(control->priv.size);
 
 	scontrol->max_size = sbe->max;
-	scontrol->comp_id = sdev->next_comp_id;
 
-	dev_dbg(scomp->dev, "tplg: load kcontrol index %d\n", scontrol->comp_id);
+	dev_dbg(scomp->dev, "tplg: load kcontrol index %d\n", scontrol->index);
 
 	/* copy the private data */
 	if (priv_size > 0) {
@@ -1417,6 +1412,46 @@ static const struct sof_topology_token dapm_widget_tokens[] = {
 	 get_w_no_wname_in_long_name, 0}
 };
 
+/*
+ * The kcontrols of a widget are loaded before the widget itself, so the
+ * comp_id of the widget they belong to is not yet known at control load time.
+ * Assign the widget's comp_id to each of its kcontrols once the widget has
+ * been created.
+ */
+static void sof_widget_update_kcontrols_comp_id(struct snd_sof_widget *swidget)
+{
+	struct snd_soc_dapm_widget *widget = swidget->widget;
+	const struct snd_kcontrol_new *kc;
+	struct snd_sof_control *scontrol;
+	struct soc_mixer_control *sm;
+	struct soc_bytes_ext *sbe;
+	struct soc_enum *se;
+	int i;
+
+	for (i = 0; i < widget->num_kcontrols; i++) {
+		kc = &widget->kcontrol_news[i];
+		switch (widget->dobj.widget.kcontrol_type[i]) {
+		case SND_SOC_TPLG_TYPE_MIXER:
+			sm = (struct soc_mixer_control *)kc->private_value;
+			scontrol = sm->dobj.private;
+			break;
+		case SND_SOC_TPLG_TYPE_ENUM:
+			se = (struct soc_enum *)kc->private_value;
+			scontrol = se->dobj.private;
+			break;
+		case SND_SOC_TPLG_TYPE_BYTES:
+			sbe = (struct soc_bytes_ext *)kc->private_value;
+			scontrol = sbe->dobj.private;
+			break;
+		default:
+			continue;
+		}
+
+		if (scontrol)
+			scontrol->comp_id = swidget->comp_id;
+	}
+}
+
 /* external widget init - used for any driver specific init */
 static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 			    struct snd_soc_dapm_widget *w,
@@ -1446,6 +1481,9 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 
 	ida_init(&swidget->output_queue_ida);
 	ida_init(&swidget->input_queue_ida);
+
+	/* assign the widget's comp_id to the kcontrols that belong to it */
+	sof_widget_update_kcontrols_comp_id(swidget);
 
 	ret = sof_parse_tokens(scomp, w, dapm_widget_tokens, ARRAY_SIZE(dapm_widget_tokens),
 			       priv->array, le32_to_cpu(priv->size));
