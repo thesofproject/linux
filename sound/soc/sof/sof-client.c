@@ -666,3 +666,11 @@ int sof_client_get_num_cores(struct sof_client_dev *cdev)
 	return sdev->num_cores;
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_get_num_cores, "SND_SOC_SOF_CLIENT");
+
+struct sof_ipc4_fw_data *sof_client_get_ipc4_fw_data(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	return sdev->private;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_get_ipc4_fw_data, "SND_SOC_SOF_CLIENT");
