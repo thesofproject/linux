@@ -396,8 +396,9 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 			   struct snd_pcm_substream *substream, int cmd)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	const struct sof_ipc_pcm_ops *pcm_ops = snd_sof_component_get_pcm_ops(component);
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_sof_pcm *spcm;
 	bool reset_hw_params = false;
 	bool ipc_first = false;
@@ -443,7 +444,7 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 		 * D0I3-compatible streams to keep the firmware pipeline running
 		 */
 		if (pcm_ops && pcm_ops->d0i3_supported_in_s0ix &&
-		    sdev->system_suspend_target == SOF_SUSPEND_S0IX &&
+		    sof_client_is_suspend_target_s0ix(cdev) &&
 		    spcm->stream[substream->stream].d0i3_compatible) {
 			spcm->stream[substream->stream].suspend_ignored = true;
 			return 0;
