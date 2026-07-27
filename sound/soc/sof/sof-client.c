@@ -578,6 +578,29 @@ const struct snd_soc_acpi_mach *sof_client_get_machine(struct sof_client_dev *cd
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_get_machine, "SND_SOC_SOF_CLIENT");
 
+/**
+ * sof_client_get_ssp_mclk_id_quirk - get the platform SSP MCLK ID quirk
+ * @cdev:	SOF client device
+ * @mclk_id:	filled with the quirk value when a quirk is present
+ *
+ * Some platforms need to override the SSP mclk_id specified by the topology,
+ * either derived from NHLT or forced via a kernel parameter.
+ *
+ * Return: true if @mclk_id was set and the topology value must be overridden.
+ */
+bool sof_client_get_ssp_mclk_id_quirk(struct sof_client_dev *cdev, u16 *mclk_id)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	if (!sdev->mclk_id_override)
+		return false;
+
+	*mclk_id = sdev->mclk_id_quirk;
+
+	return true;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_get_ssp_mclk_id_quirk, "SND_SOC_SOF_CLIENT");
+
 int sof_client_boot_dsp(struct sof_client_dev *cdev)
 {
 	return snd_sof_boot_dsp_firmware(sof_client_dev_to_sof_dev(cdev));
