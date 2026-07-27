@@ -525,6 +525,24 @@ const char *sof_client_get_topology_name(struct sof_client_dev *cdev)
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_get_topology_name, "SND_SOC_SOF_CLIENT");
 
+/**
+ * sof_client_get_topology_prefix - get the topology path of the SOF device
+ * @cdev:	SOF client device
+ *
+ * The topology path is a property of the SOF device, it is shared by all
+ * clients and it applies to the topology name of the client's own machine
+ * description as well.
+ *
+ * Return: the path the topology files are loaded from.
+ */
+const char *sof_client_get_topology_prefix(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	return sdev->pdata->tplg_filename_prefix;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_get_topology_prefix, "SND_SOC_SOF_CLIENT");
+
 int sof_client_boot_dsp(struct sof_client_dev *cdev)
 {
 	return snd_sof_boot_dsp_firmware(sof_client_dev_to_sof_dev(cdev));
