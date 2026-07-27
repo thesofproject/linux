@@ -543,6 +543,23 @@ const char *sof_client_get_topology_prefix(struct sof_client_dev *cdev)
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_get_topology_prefix, "SND_SOC_SOF_CLIENT");
 
+/**
+ * sof_client_is_function_topology_disabled - check if function topology is off
+ * @cdev:	SOF client device
+ *
+ * Function topology loading is disabled when the user requested a specific
+ * topology file to be loaded, in which case that file must be used as is.
+ *
+ * Return: true if function topology loading must not be attempted.
+ */
+bool sof_client_is_function_topology_disabled(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	return sdev->pdata->disable_function_topology;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_is_function_topology_disabled, "SND_SOC_SOF_CLIENT");
+
 int sof_client_boot_dsp(struct sof_client_dev *cdev)
 {
 	return snd_sof_boot_dsp_firmware(sof_client_dev_to_sof_dev(cdev));
