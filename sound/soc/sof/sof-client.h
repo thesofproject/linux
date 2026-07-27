@@ -55,6 +55,7 @@ struct device *sof_client_get_dma_dev(struct sof_client_dev *cdev);
 const struct sof_ipc_fw_version *sof_client_get_fw_version(struct sof_client_dev *cdev);
 size_t sof_client_get_ipc_max_payload_size(struct sof_client_dev *cdev);
 enum sof_ipc_type sof_client_get_ipc_type(struct sof_client_dev *cdev);
+const char *sof_client_get_topology_name(struct sof_client_dev *cdev);
 bool sof_client_is_suspend_target_s0ix(struct sof_client_dev *cdev);
 
 /* DSP/firmware boot request */

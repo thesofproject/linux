@@ -506,6 +506,25 @@ bool sof_client_is_suspend_target_s0ix(struct sof_client_dev *cdev)
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_is_suspend_target_s0ix, "SND_SOC_SOF_CLIENT");
 
+/**
+ * sof_client_get_topology_name - get the topology file name of the SOF device
+ * @cdev:	SOF client device
+ *
+ * The returned name is the topology resolved by the SOF core, either from the
+ * selected machine descriptor or from the firmware file profile. Clients
+ * owning their own machine description should prefer the topology name from
+ * it and only fall back to this one.
+ *
+ * Return: the topology file name, without the topology path prefix.
+ */
+const char *sof_client_get_topology_name(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	return sdev->pdata->tplg_filename;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_get_topology_name, "SND_SOC_SOF_CLIENT");
+
 int sof_client_boot_dsp(struct sof_client_dev *cdev)
 {
 	return snd_sof_boot_dsp_firmware(sof_client_dev_to_sof_dev(cdev));
