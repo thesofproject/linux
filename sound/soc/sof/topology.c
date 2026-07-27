@@ -844,7 +844,7 @@ static int sof_control_load_volume(struct snd_soc_component *scomp,
 				   struct snd_kcontrol_new *kc,
 				   struct snd_soc_tplg_ctl_hdr *hdr)
 {
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct snd_soc_tplg_mixer_control *mc =
 		container_of(hdr, struct snd_soc_tplg_mixer_control, hdr);
 	int tlv[SOF_TLV_ITEMS];
@@ -903,7 +903,7 @@ skip:
 		scontrol->access |= mask;
 		kc->access &= ~SNDRV_CTL_ELEM_ACCESS_LED_MASK;
 		kc->access |= mask;
-		sdev->led_present = true;
+		instance->led_present = true;
 	}
 
 	dev_dbg(scomp->dev, "tplg: load kcontrol index %d chans %d\n",
@@ -2558,6 +2558,7 @@ static const struct snd_soc_tplg_ops sof_dspless_tplg_ops = {
 
 int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 {
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct snd_sof_pdata *sof_pdata = sdev->pdata;
 	const char *tplg_filename_prefix = sof_pdata->tplg_filename_prefix;
@@ -2702,7 +2703,7 @@ int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 	ret = sof_complete(scomp);
 
 out:
-	if (ret >= 0 && sdev->led_present)
+	if (ret >= 0 && instance->led_present)
 		ret = snd_ctl_led_request();
 
 	kfree(tplg_files);
