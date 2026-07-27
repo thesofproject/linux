@@ -6,6 +6,7 @@
  * Author: Oder Chiou <oder_chiou@realtek.com>
  */
 
+#include <linux/bits.h>
 #include <linux/delay.h>
 #include <linux/firmware.h>
 #include <linux/fs.h>
@@ -4767,6 +4768,21 @@ static int rt5677_gpio_direction_in(struct gpio_chip *chip, unsigned offset)
 	return rt5677_update_gpio_bits(rt5677, offset, m, v);
 }
 
+static int rt5677_gpio_get_direction(struct gpio_chip *chip, unsigned int offset)
+{
+	struct rt5677_priv *rt5677 = gpiochip_get_data(chip);
+	unsigned int shift = RT5677_GPIOx_DIR_SFT + (offset % 5) * 3;
+	unsigned int bank = offset / 5;
+	unsigned int reg = bank ? RT5677_GPIO_CTRL3 : RT5677_GPIO_CTRL2;
+	int ret;
+
+	ret = regmap_test_bits(rt5677->regmap, reg, BIT(shift));
+	if (ret < 0)
+		return ret;
+
+	return ret ? GPIO_LINE_DIRECTION_OUT : GPIO_LINE_DIRECTION_IN;
+}
+
 /*
  * Configures the GPIO as
  *   0 - floating
@@ -4834,6 +4850,7 @@ static int rt5677_to_irq(struct gpio_chip *chip, unsigned offset)
 static const struct gpio_chip rt5677_template_chip = {
 	.label			= RT5677_DRV_NAME,
 	.owner			= THIS_MODULE,
+	.get_direction		= rt5677_gpio_get_direction,
 	.direction_output	= rt5677_gpio_direction_out,
 	.set			= rt5677_gpio_set,
 	.direction_input	= rt5677_gpio_direction_in,

@@ -615,8 +615,8 @@ config SND_SOC_AK4613
 	depends on I2C
 
 config SND_SOC_AK4619
-        tristate "AKM AK4619 CODEC"
-        depends on I2C
+	tristate "AKM AK4619 CODEC"
+	depends on I2C
 
 config SND_SOC_AK4642
 	tristate "AKM AK4642 CODEC"
@@ -1201,16 +1201,16 @@ config SND_SOC_JZ4725B_CODEC
 	  will be called snd-soc-jz4725b-codec.
 
 config SND_SOC_JZ4760_CODEC
-        depends on MACH_INGENIC || COMPILE_TEST
-        depends on OF
-        select REGMAP
-        tristate "Ingenic JZ4760 internal CODEC"
-        help
-          Enable support for the internal CODEC found in the JZ4760 SoC
-          from Ingenic.
+	depends on MACH_INGENIC || COMPILE_TEST
+	depends on OF
+	select REGMAP
+	tristate "Ingenic JZ4760 internal CODEC"
+	help
+	  Enable support for the internal CODEC found in the JZ4760 SoC
+	  from Ingenic.
 
-          This driver can also be built as a module. If so, the module
-          will be called snd-soc-jz4760-codec.
+	  This driver can also be built as a module. If so, the module
+	  will be called snd-soc-jz4760-codec.
 
 config SND_SOC_JZ4770_CODEC
 	depends on MACH_INGENIC || COMPILE_TEST
@@ -1888,7 +1888,7 @@ config SND_SOC_RT5670
 	depends on I2C
 
 config SND_SOC_RT5677
-	tristate
+	tristate "Realtek RT5677 Codec"
 	depends on I2C
 	select REGMAP_I2C
 	select REGMAP_IRQ
@@ -2296,8 +2296,8 @@ config SND_SOC_TLV320ADC3XXX
 	depends on I2C
 	depends on GPIOLIB
 	help
-	 Enable support for Texas Instruments TLV320ADC3001 and TLV320ADC3101
-	 ADCs.
+	  Enable support for Texas Instruments TLV320ADC3001 and TLV320ADC3101
+	  ADCs.
 
 config SND_SOC_TLV320AIC23
 	tristate
@@ -2893,28 +2893,32 @@ config SND_SOC_TPA6130A2
 	depends on I2C
 
 config SND_SOC_LPASS_MACRO_COMMON
-        tristate
+	tristate
 
 config SND_SOC_LPASS_WSA_MACRO
 	depends on COMMON_CLK
+	depends on PM_CLK
 	select REGMAP_MMIO
 	select SND_SOC_LPASS_MACRO_COMMON
 	tristate "Qualcomm WSA Macro in LPASS(Low Power Audio SubSystem)"
 
 config SND_SOC_LPASS_VA_MACRO
 	depends on COMMON_CLK
+	depends on PM_CLK
 	select REGMAP_MMIO
 	select SND_SOC_LPASS_MACRO_COMMON
 	tristate "Qualcomm VA Macro in LPASS(Low Power Audio SubSystem)"
 
 config SND_SOC_LPASS_RX_MACRO
 	depends on COMMON_CLK
+	depends on PM_CLK
 	select REGMAP_MMIO
 	select SND_SOC_LPASS_MACRO_COMMON
 	tristate "Qualcomm RX Macro in LPASS(Low Power Audio SubSystem)"
 
 config SND_SOC_LPASS_TX_MACRO
 	depends on COMMON_CLK
+	depends on PM_CLK
 	select REGMAP_MMIO
 	select SND_SOC_LPASS_MACRO_COMMON
 	tristate "Qualcomm TX Macro in LPASS(Low Power Audio SubSystem)"

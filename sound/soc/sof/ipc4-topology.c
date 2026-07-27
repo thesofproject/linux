@@ -1130,6 +1130,7 @@ static int sof_ipc4_widget_setup_comp_src(struct snd_sof_widget *swidget)
 			"Invalid number of formats: input: %d, output: %d\n",
 			src->available_fmt.num_input_formats,
 			src->available_fmt.num_output_formats);
+		ret = -EINVAL;
 		goto err;
 	}
 
@@ -1182,6 +1183,7 @@ static int sof_ipc4_widget_setup_comp_asrc(struct snd_sof_widget *swidget)
 			"Invalid number of formats: input: %d, output: %d\n",
 			asrc->available_fmt.num_input_formats,
 			asrc->available_fmt.num_output_formats);
+		ret = -EINVAL;
 		goto err;
 	}
 
