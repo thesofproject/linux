@@ -1430,11 +1430,12 @@ static int sof_link_afe_load(struct snd_soc_component *scomp, struct snd_sof_dai
 static int sof_link_ssp_load(struct snd_soc_component *scomp, struct snd_sof_dai_link *slink,
 			     struct sof_ipc_dai_config *config, struct snd_sof_dai *dai)
 {
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(scomp);
 	struct snd_soc_tplg_hw_config *hw_config = slink->hw_configs;
 	struct sof_dai_private_data *private = dai->private;
 	u32 size = sizeof(*config);
 	int current_config = 0;
+	u16 mclk_id;
 	int i, ret;
 
 	/*
@@ -1455,10 +1456,10 @@ static int sof_link_ssp_load(struct snd_soc_component *scomp, struct snd_sof_dai
 
 		config[i].hdr.size = size;
 
-		if (sdev->mclk_id_override) {
+		if (sof_client_get_ssp_mclk_id_quirk(cdev, &mclk_id)) {
 			dev_dbg(scomp->dev, "tplg: overriding topology mclk_id %d by quirk %d\n",
-				config[i].ssp.mclk_id, sdev->mclk_id_quirk);
-			config[i].ssp.mclk_id = sdev->mclk_id_quirk;
+				config[i].ssp.mclk_id, mclk_id);
+			config[i].ssp.mclk_id = mclk_id;
 		}
 
 		/* copy differentiating hw configs to ipc structs */
