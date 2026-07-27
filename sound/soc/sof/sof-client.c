@@ -489,6 +489,23 @@ enum sof_ipc_type sof_client_get_ipc_type(struct sof_client_dev *cdev)
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_get_ipc_type, "SND_SOC_SOF_CLIENT");
 
+/**
+ * sof_client_is_suspend_target_s0ix - check if the system is suspending to S0iX
+ * @cdev:	SOF client device
+ *
+ * The suspend target is only valid while a system suspend is in progress, it
+ * is reset when the system resumes.
+ *
+ * Return: true if the pending system suspend targets S0iX.
+ */
+bool sof_client_is_suspend_target_s0ix(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	return sdev->system_suspend_target == SOF_SUSPEND_S0IX;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_is_suspend_target_s0ix, "SND_SOC_SOF_CLIENT");
+
 int sof_client_boot_dsp(struct sof_client_dev *cdev)
 {
 	return snd_sof_boot_dsp_firmware(sof_client_dev_to_sof_dev(cdev));
