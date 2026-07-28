@@ -746,58 +746,42 @@ static int ipc4_fw_ready(struct snd_sof_dev *sdev, struct sof_ipc4_msg *ipc4_msg
 	return sof_ipc4_init_msg_memory(sdev);
 }
 
-static void sof_ipc4_module_notification_handler(struct snd_sof_dev *sdev,
-						 struct sof_ipc4_msg *ipc4_msg)
+/*
+ * Complete the payload of a module notification.
+ *
+ * If the notification includes additional, module specific data, then we need
+ * to re-allocate the buffer and re-read the whole payload, including the
+ * event_data.
+ *
+ * The payload is owned by the core and it is handed to the notification
+ * handlers as read-only, it must be completed before the notification is
+ * dispatched.
+ */
+static void sof_ipc4_module_notification_get_payload(struct snd_sof_dev *sdev,
+						     struct sof_ipc4_msg *ipc4_msg)
 {
 	struct sof_ipc4_notify_module_data *data = ipc4_msg->data_ptr;
+	void *new;
+	int ret;
 
-	/*
-	 * If the notification includes additional, module specific data, then
-	 * we need to re-allocate the buffer and re-read the whole payload,
-	 * including the event_data
-	 */
-	if (data->event_data_size) {
-		void *new;
-		int ret;
+	if (!data->event_data_size)
+		return;
 
-		ipc4_msg->data_size += data->event_data_size;
+	ipc4_msg->data_size += data->event_data_size;
 
-		new = krealloc(ipc4_msg->data_ptr, ipc4_msg->data_size, GFP_KERNEL);
-		if (!new) {
-			ipc4_msg->data_size -= data->event_data_size;
-			return;
-		}
-
-		/* re-read the whole payload */
-		ipc4_msg->data_ptr = new;
-		ret = snd_sof_ipc_msg_data(sdev, NULL, ipc4_msg->data_ptr,
-					   ipc4_msg->data_size);
-		if (ret < 0) {
-			dev_err(sdev->dev,
-				"Failed to read the full module notification: %d\n",
-				ret);
-			return;
-		}
-		data = ipc4_msg->data_ptr;
+	new = krealloc(ipc4_msg->data_ptr, ipc4_msg->data_size, GFP_KERNEL);
+	if (!new) {
+		ipc4_msg->data_size -= data->event_data_size;
+		return;
 	}
 
-	/* Handle ALSA kcontrol notification */
-	switch (data->event_id & SOF_IPC4_NOTIFY_MODULE_EVENTID_SOF_MAGIC_MASK) {
-	case SOF_IPC4_NOTIFY_MODULE_EVENTID_ALSA_MAGIC_VAL:
-	{
-		const struct sof_ipc_tplg_ops *tplg_ops = snd_sof_sdev_get_tplg_ops(sdev);
-
-		if (tplg_ops->control->update)
-			tplg_ops->control->update(sdev, ipc4_msg);
-
-		break;
-	}
-	case SOF_IPC4_NOTIFY_MODULE_EVENTID_COMPR_MAGIC_VAL:
-		sof_ipc4_compr_drain_done(sdev, ipc4_msg);
-		break;
-	default:
-		break;
-	}
+	/* re-read the whole payload */
+	ipc4_msg->data_ptr = new;
+	ret = snd_sof_ipc_msg_data(sdev, NULL, ipc4_msg->data_ptr,
+				   ipc4_msg->data_size);
+	if (ret < 0)
+		dev_err(sdev->dev,
+			"Failed to read the full module notification: %d\n", ret);
 }
 
 static void sof_ipc4_rx_msg(struct snd_sof_dev *sdev)
@@ -842,7 +826,7 @@ static void sof_ipc4_rx_msg(struct snd_sof_dev *sdev)
 		break;
 	case SOF_IPC4_NOTIFY_MODULE_NOTIFICATION:
 		data_size = sizeof(struct sof_ipc4_notify_module_data);
-		handler_func = sof_ipc4_module_notification_handler;
+		handler_func = sof_ipc4_module_notification_get_payload;
 		break;
 	default:
 		dev_dbg(sdev->dev, "Unhandled DSP message: %#x|%#x\n",

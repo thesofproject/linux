@@ -765,6 +765,7 @@ void sof_ipc4_compr_drain_done(struct snd_sof_dev *sdev, void *ipc_message)
 	if (spcm->stream[dir].cstream)
 		snd_compr_drain_notify(spcm->stream[dir].cstream);
 }
+EXPORT_SYMBOL(sof_ipc4_compr_drain_done);
 
 const struct snd_compress_ops sof_ipc4_compressed_ops = {
 	.open		= sof_ipc4_compr_open,

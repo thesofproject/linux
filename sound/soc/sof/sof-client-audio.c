@@ -50,6 +50,31 @@ static void sof_audio_client_init_debugfs(struct sof_client_dev *cdev,
 				   (char **)&pdata->debug_machine_driver);
 }
 
+static void sof_audio_client_ipc_rx_handler(struct sof_client_dev *cdev, void *msg_buf)
+{
+	struct sof_audio_client_pdata *pdata = dev_get_platdata(&cdev->auxdev.dev);
+
+	if (pdata->ipc_ops && pdata->ipc_ops->rx_notification)
+		pdata->ipc_ops->rx_notification(cdev, msg_buf);
+}
+
+static const struct sof_client_ops sof_audio_client_ops = {
+	.ipc_rx_handler = sof_audio_client_ipc_rx_handler,
+};
+
+static const struct sof_audio_client_ipc_ops *
+sof_audio_client_get_ipc_ops(struct sof_client_dev *cdev)
+{
+	switch (sof_client_get_ipc_type(cdev)) {
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_IPC4)
+	case SOF_IPC_TYPE_4:
+		return &sof_audio_client_ipc4_ops;
+#endif
+	default:
+		return NULL;
+	}
+}
+
 static int sof_audio_client_probe(struct auxiliary_device *auxdev,
 				  const struct auxiliary_device_id *id)
 {
@@ -59,14 +84,23 @@ static int sof_audio_client_probe(struct auxiliary_device *auxdev,
 
 	auxiliary_set_drvdata(auxdev, cdev);
 
-	ret = snd_soc_register_component(&auxdev->dev, &pdata->plat_drv,
-					 pdata->drv, pdata->num_drv);
+	pdata->ipc_ops = sof_audio_client_get_ipc_ops(cdev);
+
+	ret = sof_client_register_ops(cdev, &sof_audio_client_ops);
 	if (ret < 0)
 		return ret;
+
+	ret = snd_soc_register_component(&auxdev->dev, &pdata->plat_drv,
+					 pdata->drv, pdata->num_drv);
+	if (ret < 0) {
+		sof_client_unregister_ops(cdev);
+		return ret;
+	}
 
 	ret = sof_client_machine_register(cdev);
 	if (ret < 0) {
 		snd_soc_unregister_component(&auxdev->dev);
+		sof_client_unregister_ops(cdev);
 		return ret;
 	}
 
@@ -85,6 +119,8 @@ static void sof_audio_client_remove(struct auxiliary_device *auxdev)
 {
 	struct sof_client_dev *cdev = auxiliary_dev_to_sof_client_dev(auxdev);
 	struct sof_audio_client_pdata *pdata = dev_get_platdata(&auxdev->dev);
+
+	sof_client_unregister_ops(cdev);
 
 	if (pdata && pdata->debugfs_root)
 		debugfs_remove_recursive(pdata->debugfs_root);
