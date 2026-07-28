@@ -197,6 +197,7 @@ struct snd_sof_audio_instance {
 	struct list_head kcontrol_list;
 	struct list_head widget_list;
 	bool led_present;
+	bool pipelines_set_up;
 	struct list_head list;
 };
 

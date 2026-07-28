@@ -144,6 +144,7 @@ void sof_client_machine_unregister(struct sof_client_dev *cdev);
 
 /* audio client power management */
 int sof_client_audio_suspend(struct sof_client_dev *cdev);
+int sof_client_audio_resume(struct sof_client_dev *cdev);
 
 /* audio client pdata initialization */
 struct sof_audio_client_pdata;

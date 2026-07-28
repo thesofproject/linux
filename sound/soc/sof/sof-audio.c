@@ -143,14 +143,27 @@ const struct sof_ipc_pcm_ops *snd_sof_component_get_pcm_ops(struct snd_soc_compo
 EXPORT_SYMBOL(snd_sof_component_get_pcm_ops);
 
 /*
- * Set up the static pipelines of a single audio instance.
+ * Set up the static pipelines of a single audio instance. The pipelines are
+ * only created if they are not present in the DSP already, which makes it safe
+ * to call this from both the firmware boot and the audio client resume path.
  */
 int sof_instance_set_up_pipelines(struct snd_sof_audio_instance *instance)
 {
+	int ret;
+
+	if (instance->pipelines_set_up)
+		return 0;
+
 	if (!instance->tplg_ops || !instance->tplg_ops->set_up_all_pipelines)
 		return 0;
 
-	return instance->tplg_ops->set_up_all_pipelines(instance->component, false);
+	ret = instance->tplg_ops->set_up_all_pipelines(instance->component, false);
+	if (ret < 0)
+		return ret;
+
+	instance->pipelines_set_up = true;
+
+	return 0;
 }
 
 /*
@@ -164,6 +177,9 @@ int sof_restore_pipelines(struct snd_sof_dev *sdev)
 	int ret;
 
 	list_for_each_entry(instance, &sdev->audio_instance_list, list) {
+		/* nothing of the previous state is left in the DSP */
+		instance->pipelines_set_up = false;
+
 		ret = sof_instance_set_up_pipelines(instance);
 		if (ret < 0)
 			return ret;

@@ -881,7 +881,9 @@ int sof_client_audio_suspend(struct sof_client_dev *cdev)
 {
 	struct sof_audio_client_pdata *pdata = dev_get_platdata(&cdev->auxdev.dev);
 	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+	struct snd_sof_audio_instance *instance;
 	const struct sof_ipc_tplg_ops *tplg_ops;
+	int ret;
 
 	if (!pdata || !pdata->component)
 		return 0;
@@ -893,13 +895,55 @@ int sof_client_audio_suspend(struct sof_client_dev *cdev)
 	if (sdev->dsp_power_state.state != SOF_DSP_PM_D0)
 		return 0;
 
-	tplg_ops = snd_sof_component_get_tplg_ops(pdata->component);
+	instance = snd_sof_component_get_audio_instance(pdata->component);
+	if (!instance)
+		return 0;
+
+	tplg_ops = instance->tplg_ops;
 	if (!tplg_ops || !tplg_ops->tear_down_all_pipelines)
 		return 0;
 
-	return tplg_ops->tear_down_all_pipelines(pdata->component, false);
+	ret = tplg_ops->tear_down_all_pipelines(pdata->component, false);
+	if (ret < 0)
+		return ret;
+
+	instance->pipelines_set_up = false;
+
+	return 0;
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_audio_suspend, "SND_SOC_SOF_CLIENT");
+
+/*
+ * Set up the static topology pipelines owned by this audio client.
+ *
+ * The audio clients are children of the SOF device, so the PM core invokes
+ * their resume callbacks after the SOF device has been resumed. If the DSP was
+ * powered down the firmware boot has already restored all instances, this only
+ * covers the case when the instance was suspended while the DSP remained in D0.
+ */
+int sof_client_audio_resume(struct sof_client_dev *cdev)
+{
+	struct sof_audio_client_pdata *pdata = dev_get_platdata(&cdev->auxdev.dev);
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+	struct snd_sof_audio_instance *instance;
+
+	if (!pdata || !pdata->component)
+		return 0;
+
+	/*
+	 * With on-demand DSP boot the firmware is not running at this point,
+	 * the pipelines are set up when the DSP is booted.
+	 */
+	if (sdev->fw_state != SOF_FW_BOOT_COMPLETE)
+		return 0;
+
+	instance = snd_sof_component_get_audio_instance(pdata->component);
+	if (!instance)
+		return 0;
+
+	return sof_instance_set_up_pipelines(instance);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_audio_resume, "SND_SOC_SOF_CLIENT");
 
 void sof_audio_client_init_pdata(struct snd_sof_dev *sdev,
 				 struct sof_audio_client_pdata *pdata)
