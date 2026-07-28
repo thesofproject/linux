@@ -2336,16 +2336,20 @@ static int sof_ipc3_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 	return ret;
 }
 
-static int sof_ipc3_set_up_all_pipelines(struct snd_sof_dev *sdev, bool verify)
+static int sof_ipc3_set_up_all_pipelines(struct snd_soc_component *component, bool verify)
 {
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct sof_ipc_fw_version *v = &sdev->fw_ready.version;
-	struct snd_sof_audio_instance *instance;
 	struct snd_sof_widget *swidget;
 	struct snd_sof_route *sroute;
 	int ret;
 
+	if (!instance)
+		return 0;
+
 	/* restore pipeline components */
-	for_each_swidget_in_instances(swidget, sdev, instance) {
+	list_for_each_entry(swidget, &instance->widget_list, list) {
 		/* only set up the widgets belonging to static pipelines */
 		if (!verify && swidget->dynamic_pipeline_widget)
 			continue;
@@ -2387,7 +2391,7 @@ static int sof_ipc3_set_up_all_pipelines(struct snd_sof_dev *sdev, bool verify)
 	}
 
 	/* restore pipeline connections */
-	for_each_sroute_in_instances(sroute, sdev, instance) {
+	list_for_each_entry(sroute, &instance->route_list, list) {
 		/* only set up routes belonging to static pipelines */
 		if (!verify && (sroute->src_widget->dynamic_pipeline_widget ||
 				sroute->sink_widget->dynamic_pipeline_widget))
@@ -2410,7 +2414,7 @@ static int sof_ipc3_set_up_all_pipelines(struct snd_sof_dev *sdev, bool verify)
 	}
 
 	/* complete pipeline */
-	for_each_swidget_in_instances(swidget, sdev, instance) {
+	list_for_each_entry(swidget, &instance->widget_list, list) {
 		switch (swidget->id) {
 		case snd_soc_dapm_scheduler:
 			/* only complete static pipelines */

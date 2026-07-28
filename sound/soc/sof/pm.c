@@ -78,7 +78,6 @@ static void sof_cache_debugfs(struct snd_sof_dev *sdev)
 int snd_sof_boot_dsp_firmware(struct snd_sof_dev *sdev)
 {
 	const struct sof_ipc_pm_ops *pm_ops = sof_ipc_get_ops(sdev, pm);
-	const struct sof_ipc_tplg_ops *tplg_ops = snd_sof_sdev_get_tplg_ops(sdev);
 	int ret;
 
 	guard(mutex)(&sdev->dsp_fw_boot_mutex);
@@ -123,14 +122,12 @@ int snd_sof_boot_dsp_firmware(struct snd_sof_dev *sdev)
 			 __func__, ret);
 	}
 
-	/* restore pipelines */
-	if (tplg_ops && tplg_ops->set_up_all_pipelines) {
-		ret = tplg_ops->set_up_all_pipelines(sdev, false);
-		if (ret < 0) {
-			dev_err(sdev->dev, "%s: failed to restore pipeline: %d\n",
-				__func__, ret);
-			goto setup_fail;
-		}
+	/* restore the pipelines of all audio instances backed by this DSP */
+	ret = sof_restore_pipelines(sdev);
+	if (ret < 0) {
+		dev_err(sdev->dev, "%s: failed to restore pipeline: %d\n",
+			__func__, ret);
+		goto setup_fail;
 	}
 
 	/* Notify clients not managed by pm framework about core resume */

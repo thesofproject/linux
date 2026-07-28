@@ -2312,7 +2312,7 @@ static int sof_complete(struct snd_soc_component *scomp)
 	if (sof_debug_check_flag(SOF_DBG_VERIFY_TPLG)) {
 		if (tplg_ops && tplg_ops->set_up_all_pipelines &&
 		    tplg_ops->tear_down_all_pipelines) {
-			ret = tplg_ops->set_up_all_pipelines(sdev, true);
+			ret = tplg_ops->set_up_all_pipelines(scomp, true);
 			if (ret < 0) {
 				dev_err(scomp->dev, "Failed to set up all topology pipelines: %d\n",
 					ret);
@@ -2329,10 +2329,7 @@ static int sof_complete(struct snd_soc_component *scomp)
 	}
 
 	/* set up static pipelines */
-	if (tplg_ops && tplg_ops->set_up_all_pipelines)
-		return tplg_ops->set_up_all_pipelines(sdev, false);
-
-	return 0;
+	return sof_instance_set_up_pipelines(instance);
 }
 
 /* manifest - optional to inform component of manifest */

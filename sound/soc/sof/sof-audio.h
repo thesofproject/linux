@@ -234,7 +234,8 @@ struct sof_ipc_tplg_widget_ops {
  * @dai_config: Function pointer for sending DAI config IPC to the DSP
  * @host_config: Function pointer for setting the DMA ID for host widgets
  * @dai_get_param: Function pointer for getting the DAI parameter
- * @set_up_all_pipelines: Function pointer for setting up all topology pipelines
+ * @set_up_all_pipelines: Function pointer for setting up the topology pipelines of
+ *			  the audio instance the component belongs to
  * @tear_down_all_pipelines: Function pointer for tearing down all topology pipelines
  * @parse_manifest: Function pointer for ipc4 specific parsing of topology manifest
  * @link_setup: Function pointer for IPC-specific DAI link set up
@@ -257,7 +258,7 @@ struct sof_ipc_tplg_ops {
 	void (*host_config)(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget,
 			    struct snd_sof_platform_stream_params *platform_params);
 	int (*dai_get_param)(struct snd_sof_dev *sdev, struct snd_sof_dai *dai, int param_type);
-	int (*set_up_all_pipelines)(struct snd_sof_dev *sdev, bool verify);
+	int (*set_up_all_pipelines)(struct snd_soc_component *component, bool verify);
 	int (*tear_down_all_pipelines)(struct snd_sof_dev *sdev, bool verify);
 	int (*parse_manifest)(struct snd_soc_component *scomp, int index,
 			      struct snd_soc_tplg_manifest *man);
@@ -658,6 +659,8 @@ const struct sof_ipc_tplg_ops *snd_sof_sdev_get_tplg_ops(struct snd_sof_dev *sde
 const struct sof_ipc_pcm_ops *snd_sof_sdev_get_pcm_ops(struct snd_sof_dev *sdev);
 const struct sof_ipc_tplg_ops *snd_sof_component_get_tplg_ops(struct snd_soc_component *component);
 const struct sof_ipc_pcm_ops *snd_sof_component_get_pcm_ops(struct snd_soc_component *component);
+int sof_instance_set_up_pipelines(struct snd_sof_audio_instance *instance);
+int sof_restore_pipelines(struct snd_sof_dev *sdev);
 
 static inline
 struct snd_sof_pcm *snd_sof_find_spcm_dai(struct snd_soc_component *scomp,

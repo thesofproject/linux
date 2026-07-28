@@ -143,6 +143,36 @@ const struct sof_ipc_pcm_ops *snd_sof_component_get_pcm_ops(struct snd_soc_compo
 EXPORT_SYMBOL(snd_sof_component_get_pcm_ops);
 
 /*
+ * Set up the static pipelines of a single audio instance.
+ */
+int sof_instance_set_up_pipelines(struct snd_sof_audio_instance *instance)
+{
+	if (!instance->tplg_ops || !instance->tplg_ops->set_up_all_pipelines)
+		return 0;
+
+	return instance->tplg_ops->set_up_all_pipelines(instance->component, false);
+}
+
+/*
+ * Set up the static pipelines of every audio instance. Called after the DSP
+ * firmware has been (re)booted, which invalidates the state of all instances
+ * backed by that DSP.
+ */
+int sof_restore_pipelines(struct snd_sof_dev *sdev)
+{
+	struct snd_sof_audio_instance *instance;
+	int ret;
+
+	list_for_each_entry(instance, &sdev->audio_instance_list, list) {
+		ret = sof_instance_set_up_pipelines(instance);
+		if (ret < 0)
+			return ret;
+	}
+
+	return 0;
+}
+
+/*
  * Check if a DAI widget is an aggregated DAI. Aggregated DAI's have names ending in numbers
  * starting with 0. For example: in the case of a SDW speaker with 2 amps, the topology contains
  * 2 DAI's names alh-copier.SDW1.Playback.0 and alh-copier-SDW1.Playback.1. In this case, only the
