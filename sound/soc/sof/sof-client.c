@@ -649,6 +649,15 @@ void sof_client_core_module_put(struct sof_client_dev *cdev)
 EXPORT_SYMBOL_NS_GPL(sof_client_core_module_put, "SND_SOC_SOF_CLIENT");
 
 /* IPC event handling */
+int sof_client_ipc_msg_data(struct sof_client_dev *cdev,
+			    struct snd_sof_pcm_stream *sps, void *p, size_t sz)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	return snd_sof_ipc_msg_data(sdev, sps, p, sz);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_ipc_msg_data, "SND_SOC_SOF_CLIENT");
+
 void sof_client_ipc_rx_dispatcher(struct snd_sof_dev *sdev, void *msg_buf)
 {
 	struct sof_client_dev *cdev;

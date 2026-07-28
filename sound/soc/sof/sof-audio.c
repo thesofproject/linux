@@ -1198,6 +1198,7 @@ struct snd_sof_pcm *snd_sof_find_spcm_comp(struct snd_soc_component *scomp,
 
 	return snd_sof_find_spcm_comp_by_sdev(sdev, comp_id, direction);
 }
+EXPORT_SYMBOL(snd_sof_find_spcm_comp);
 
 struct snd_sof_pcm *snd_sof_find_spcm_comp_by_sdev(struct snd_sof_dev *sdev,
 						   unsigned int comp_id,
@@ -1380,6 +1381,7 @@ void snd_sof_compr_fragment_elapsed(struct snd_compr_stream *cstream)
 	/* use the same workqueue-based solution as for PCM, cf. snd_sof_pcm_elapsed */
 	schedule_work(&spcm->stream[cstream->direction].period_elapsed_work);
 }
+EXPORT_SYMBOL(snd_sof_compr_fragment_elapsed);
 
 int snd_sof_compr_create_page_table(struct snd_soc_component *component,
 				    struct snd_compr_stream *cstream,

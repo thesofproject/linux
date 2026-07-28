@@ -11,6 +11,7 @@
 struct sof_ipc_fw_version;
 struct sof_ipc_cmd_hdr;
 struct snd_sof_dev;
+struct snd_sof_pcm_stream;
 struct snd_soc_acpi_mach;
 struct dentry;
 
@@ -46,6 +47,8 @@ static inline int sof_client_ipc_tx_message_no_reply(struct sof_client_dev *cdev
 }
 int sof_client_ipc_set_get_data(struct sof_client_dev *cdev, void *ipc_msg,
 				bool set);
+int sof_client_ipc_msg_data(struct sof_client_dev *cdev,
+			    struct snd_sof_pcm_stream *sps, void *p, size_t sz);
 
 struct sof_ipc4_fw_module *sof_client_ipc4_find_module(struct sof_client_dev *c, const guid_t *u);
 struct snd_sof_widget *sof_client_ipc4_find_swidget_by_id(struct sof_client_dev *cdev,
