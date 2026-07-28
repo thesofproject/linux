@@ -13,6 +13,7 @@ struct dentry;
  * @drv:	Array of DAI drivers to register
  * @num_drv:	Number of DAI drivers
  * @machine:	Per-instance copy of the machine descriptor
+ * @component:	The ASoC component registered by this audio client instance
  * @debugfs_root:	Per-audio-client debugfs directory
  * @debug_topology_name:	Topology loaded by this audio client
  * @debug_card_name:	Card name for this audio client
@@ -23,6 +24,7 @@ struct sof_audio_client_pdata {
 	struct snd_soc_dai_driver *drv;
 	int num_drv;
 	struct snd_soc_acpi_mach machine;
+	struct snd_soc_component *component;
 	struct dentry *debugfs_root;
 	const char *debug_topology_name;
 	const char *debug_card_name;

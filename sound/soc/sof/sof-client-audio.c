@@ -95,6 +95,18 @@ static void sof_audio_client_remove(struct auxiliary_device *auxdev)
 	snd_soc_unregister_component(&auxdev->dev);
 }
 
+static int sof_audio_client_suspend(struct device *dev)
+{
+	struct auxiliary_device *auxdev = to_auxiliary_dev(dev);
+
+	return sof_client_audio_suspend(auxiliary_dev_to_sof_client_dev(auxdev));
+}
+
+static const struct dev_pm_ops sof_audio_client_pm = {
+	SYSTEM_SLEEP_PM_OPS(sof_audio_client_suspend, NULL)
+	RUNTIME_PM_OPS(sof_audio_client_suspend, NULL, NULL)
+};
+
 static const struct auxiliary_device_id sof_audio_client_id_table[] = {
 	{ .name = "snd_sof.audio", },
 	{},
@@ -104,6 +116,10 @@ MODULE_DEVICE_TABLE(auxiliary, sof_audio_client_id_table);
 static struct auxiliary_driver sof_audio_client_drv = {
 	.probe = sof_audio_client_probe,
 	.remove = sof_audio_client_remove,
+	.driver = {
+		/* auxiliary_driver_register() sets .name to be the modname */
+		.pm = pm_ptr(&sof_audio_client_pm),
+	},
 	.id_table = sof_audio_client_id_table,
 };
 

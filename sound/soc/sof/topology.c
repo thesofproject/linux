@@ -2319,7 +2319,7 @@ static int sof_complete(struct snd_soc_component *scomp)
 				return ret;
 			}
 
-			ret = tplg_ops->tear_down_all_pipelines(sdev, true);
+			ret = tplg_ops->tear_down_all_pipelines(scomp, true);
 			if (ret < 0) {
 				dev_err(scomp->dev, "Failed to tear down topology pipelines: %d\n",
 					ret);

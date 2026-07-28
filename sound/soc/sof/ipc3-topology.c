@@ -2443,9 +2443,10 @@ static int sof_ipc3_set_up_all_pipelines(struct snd_soc_component *component, bo
  * Free the PCM, its associated widgets and set the prepared flag to false for all PCMs that
  * did not get suspended(ex: paused streams) so the widgets can be set up again during resume.
  */
-static int sof_tear_down_left_over_pipelines(struct snd_sof_dev *sdev)
+static int sof_tear_down_left_over_pipelines(struct snd_soc_component *component)
 {
-	struct snd_sof_audio_instance *instance;
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_sof_widget *swidget;
 	int ret;
 
@@ -2454,7 +2455,7 @@ static int sof_tear_down_left_over_pipelines(struct snd_sof_dev *sdev)
 	 * list is not NULL. This should only be true for paused streams at this point.
 	 * This is equivalent to the handling of FE DAI suspend trigger for running streams.
 	 */
-	ret = sof_pcm_free_all_streams(sdev);
+	ret = sof_pcm_free_all_streams(component);
 	if (ret)
 		return ret;
 
@@ -2462,7 +2463,7 @@ static int sof_tear_down_left_over_pipelines(struct snd_sof_dev *sdev)
 	 * free any left over DAI widgets. This is equivalent to the handling of suspend trigger
 	 * for the BE DAI for running streams.
 	 */
-	for_each_swidget_in_instances(swidget, sdev, instance)
+	list_for_each_entry(swidget, &instance->widget_list, list)
 		if (WIDGET_IS_DAI(swidget->id) && swidget->use_count == 1) {
 			ret = sof_widget_free(sdev, swidget);
 			if (ret < 0)
@@ -2472,15 +2473,17 @@ static int sof_tear_down_left_over_pipelines(struct snd_sof_dev *sdev)
 	return 0;
 }
 
-static int sof_ipc3_free_widgets_in_list(struct snd_sof_dev *sdev, bool include_scheduler,
+static int sof_ipc3_free_widgets_in_list(struct snd_soc_component *component,
+					 bool include_scheduler,
 					 bool *dyn_widgets, bool verify)
 {
-	struct snd_sof_audio_instance *instance;
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct sof_ipc_fw_version *v = &sdev->fw_ready.version;
 	struct snd_sof_widget *swidget;
 	int ret;
 
-	for_each_swidget_in_instances(swidget, sdev, instance) {
+	list_for_each_entry(swidget, &instance->widget_list, list) {
 		if (swidget->dynamic_pipeline_widget) {
 			*dyn_widgets = true;
 			continue;
@@ -2515,14 +2518,18 @@ static int sof_ipc3_free_widgets_in_list(struct snd_sof_dev *sdev, bool include_
  * For older firmware, this function doesn't free widgets for static pipelines during suspend.
  * It only resets use_count for all widgets.
  */
-static int sof_ipc3_tear_down_all_pipelines(struct snd_sof_dev *sdev, bool verify)
+static int sof_ipc3_tear_down_all_pipelines(struct snd_soc_component *component, bool verify)
 {
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct sof_ipc_fw_version *v = &sdev->fw_ready.version;
-	struct snd_sof_audio_instance *instance;
 	struct snd_sof_widget *swidget;
 	struct snd_sof_route *sroute;
 	bool dyn_widgets = false;
 	int ret;
+
+	if (!instance)
+		return 0;
 
 	/*
 	 * This function is called during suspend and for one-time topology verification during
@@ -2532,7 +2539,7 @@ static int sof_ipc3_tear_down_all_pipelines(struct snd_sof_dev *sdev, bool verif
 	 * widgets yet so that the secondary cores do not get powered down before all the widgets
 	 * associated with the scheduler are freed.
 	 */
-	ret = sof_ipc3_free_widgets_in_list(sdev, false, &dyn_widgets, verify);
+	ret = sof_ipc3_free_widgets_in_list(component, false, &dyn_widgets, verify);
 	if (ret < 0)
 		return ret;
 
@@ -2544,19 +2551,19 @@ static int sof_ipc3_tear_down_all_pipelines(struct snd_sof_dev *sdev, bool verif
 	 */
 	if (!verify && (dyn_widgets || SOF_FW_VER(v->major, v->minor, v->micro) >=
 	    SOF_FW_VER(2, 2, 0))) {
-		ret = sof_tear_down_left_over_pipelines(sdev);
+		ret = sof_tear_down_left_over_pipelines(component);
 		if (ret < 0) {
-			dev_err(sdev->dev, "failed to tear down paused pipelines\n");
+			dev_err(component->dev, "failed to tear down paused pipelines\n");
 			return ret;
 		}
 	}
 
 	/* free all the scheduler widgets now. This will also power down the secondary cores */
-	ret = sof_ipc3_free_widgets_in_list(sdev, true, &dyn_widgets, verify);
+	ret = sof_ipc3_free_widgets_in_list(component, true, &dyn_widgets, verify);
 	if (ret < 0)
 		return ret;
 
-	for_each_sroute_in_instances(sroute, sdev, instance)
+	list_for_each_entry(sroute, &instance->route_list, list)
 		sroute->setup = false;
 
 	/*
@@ -2564,7 +2571,7 @@ static int sof_ipc3_tear_down_all_pipelines(struct snd_sof_dev *sdev, bool verif
 	 * to recover at this point but this will help root cause bad sequences leading to
 	 * more issues on resume
 	 */
-	for_each_swidget_in_instances(swidget, sdev, instance) {
+	list_for_each_entry(swidget, &instance->widget_list, list) {
 		if (swidget->use_count != 0) {
 			dev_err(swidget->scomp->dev,
 				"%s: widget %s is still in use: count %d\n",

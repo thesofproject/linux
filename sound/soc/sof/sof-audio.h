@@ -47,10 +47,6 @@
 			       (id) == snd_soc_dapm_decoder ||	\
 			       (id) == snd_soc_dapm_encoder)
 
-#define for_each_sroute_in_instances(sroute, sdev, instance)			\
-	list_for_each_entry(instance, &(sdev)->audio_instance_list, list)	\
-		list_for_each_entry(sroute, &(instance)->route_list, list)
-
 #define for_each_spcm_in_instances(spcm, sdev, instance)				\
 	list_for_each_entry(instance, &(sdev)->audio_instance_list, list)	\
 		list_for_each_entry(spcm, &(instance)->pcm_list, list)
@@ -236,7 +232,8 @@ struct sof_ipc_tplg_widget_ops {
  * @dai_get_param: Function pointer for getting the DAI parameter
  * @set_up_all_pipelines: Function pointer for setting up the topology pipelines of
  *			  the audio instance the component belongs to
- * @tear_down_all_pipelines: Function pointer for tearing down all topology pipelines
+ * @tear_down_all_pipelines: Function pointer for tearing down the topology pipelines of
+ *			     the audio instance the component belongs to
  * @parse_manifest: Function pointer for ipc4 specific parsing of topology manifest
  * @link_setup: Function pointer for IPC-specific DAI link set up
  *
@@ -259,7 +256,7 @@ struct sof_ipc_tplg_ops {
 			    struct snd_sof_platform_stream_params *platform_params);
 	int (*dai_get_param)(struct snd_sof_dev *sdev, struct snd_sof_dai *dai, int param_type);
 	int (*set_up_all_pipelines)(struct snd_soc_component *component, bool verify);
-	int (*tear_down_all_pipelines)(struct snd_sof_dev *sdev, bool verify);
+	int (*tear_down_all_pipelines)(struct snd_soc_component *component, bool verify);
 	int (*parse_manifest)(struct snd_soc_component *scomp, int index,
 			      struct snd_soc_tplg_manifest *man);
 	int (*link_setup)(struct snd_sof_dev *sdev, struct snd_soc_dai_link *link);
@@ -757,7 +754,7 @@ void sof_widget_list_unprepare(struct snd_soc_component *component, struct snd_s
 int sof_widget_list_free(struct snd_soc_component *component, struct snd_sof_pcm *spcm, int dir);
 int sof_pcm_dsp_pcm_free(struct snd_pcm_substream *substream, struct snd_sof_dev *sdev,
 			 struct snd_sof_pcm *spcm);
-int sof_pcm_free_all_streams(struct snd_sof_dev *sdev);
+int sof_pcm_free_all_streams(struct snd_soc_component *component);
 int get_token_u32(void *elem, void *object, u32 offset);
 int get_token_u16(void *elem, void *object, u32 offset);
 int get_token_comp_format(void *elem, void *object, u32 offset);

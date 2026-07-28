@@ -15,6 +15,7 @@
 #include <linux/slab.h>
 #include <sound/sof/ipc4/header.h>
 #include "ops.h"
+#include "sof-audio.h"
 #include "sof-client.h"
 #include "sof-client-audio.h"
 #include "sof-priv.h"
@@ -867,6 +868,38 @@ void sof_client_machine_unregister(struct sof_client_dev *cdev)
 	snd_sof_machine_unregister(sdev, sdev->pdata);
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_machine_unregister, "SND_SOC_SOF_CLIENT");
+
+/*
+ * Tear down the topology pipelines owned by this audio client.
+ *
+ * The audio clients are children of the SOF device, so the PM core invokes
+ * their suspend callbacks before the SOF device is suspended. Only the
+ * pipelines of the calling instance are freed, other audio clients of the same
+ * DSP are left untouched.
+ */
+int sof_client_audio_suspend(struct sof_client_dev *cdev)
+{
+	struct sof_audio_client_pdata *pdata = dev_get_platdata(&cdev->auxdev.dev);
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+	const struct sof_ipc_tplg_ops *tplg_ops;
+
+	if (!pdata || !pdata->component)
+		return 0;
+
+	/*
+	 * The pipelines need to be torn down only if the DSP hardware is
+	 * active. If it is already suspended there is nothing to free up.
+	 */
+	if (sdev->dsp_power_state.state != SOF_DSP_PM_D0)
+		return 0;
+
+	tplg_ops = snd_sof_component_get_tplg_ops(pdata->component);
+	if (!tplg_ops || !tplg_ops->tear_down_all_pipelines)
+		return 0;
+
+	return tplg_ops->tear_down_all_pipelines(pdata->component, false);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_audio_suspend, "SND_SOC_SOF_CLIENT");
 
 void sof_audio_client_init_pdata(struct snd_sof_dev *sdev,
 				 struct sof_audio_client_pdata *pdata)

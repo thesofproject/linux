@@ -142,6 +142,9 @@ u32 sof_client_get_new_comp_id(struct sof_client_dev *cdev);
 int sof_client_machine_register(struct sof_client_dev *cdev);
 void sof_client_machine_unregister(struct sof_client_dev *cdev);
 
+/* audio client power management */
+int sof_client_audio_suspend(struct sof_client_dev *cdev);
+
 /* audio client pdata initialization */
 struct sof_audio_client_pdata;
 void sof_audio_client_init_pdata(struct snd_sof_dev *sdev,

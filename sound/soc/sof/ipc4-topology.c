@@ -4279,11 +4279,11 @@ static int sof_ipc4_dai_get_param(struct snd_sof_dev *sdev, struct snd_sof_dai *
 	return -EINVAL;
 }
 
-static int sof_ipc4_tear_down_all_pipelines(struct snd_sof_dev *sdev, bool verify)
+static int sof_ipc4_tear_down_all_pipelines(struct snd_soc_component *component, bool verify)
 {
 	/*
 	 * This function is called during system suspend, we need to make sure
-	 * that all streams have been freed up.
+	 * that all streams of this audio instance have been freed up.
 	 * Freeing might have been skipped when xrun happened just at the start
 	 * of the suspend and it sent a SNDRV_PCM_TRIGGER_STOP to the active
 	 * stream. This will call sof_pcm_stream_free() with
@@ -4293,7 +4293,7 @@ static int sof_ipc4_tear_down_all_pipelines(struct snd_sof_dev *sdev, bool verif
 	 * This will also make sure that paused streams handled correctly.
 	 */
 
-	return sof_pcm_free_all_streams(sdev);
+	return sof_pcm_free_all_streams(component);
 }
 
 static int sof_ipc4_link_setup(struct snd_sof_dev *sdev, struct snd_soc_dai_link *link)

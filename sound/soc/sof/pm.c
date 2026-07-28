@@ -227,11 +227,15 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	const struct sof_ipc_pm_ops *pm_ops = sof_ipc_get_ops(sdev, pm);
-	const struct sof_ipc_tplg_ops *tplg_ops = snd_sof_sdev_get_tplg_ops(sdev);
 	pm_message_t pm_state;
 	u32 target_state = snd_sof_dsp_power_target(sdev);
-	u32 old_state = sdev->dsp_power_state.state;
 	int ret;
+
+	/*
+	 * Note: the topology pipelines are torn down by the audio clients from
+	 * their own suspend callbacks. The audio clients are children of the
+	 * SOF device, so the PM core runs them before this callback.
+	 */
 
 	/* do nothing if dsp suspend callback is not set */
 	if (!runtime_suspend && !sof_ops(sdev)->suspend)
@@ -239,14 +243,6 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 
 	if (runtime_suspend && !sof_ops(sdev)->runtime_suspend)
 		return 0;
-
-	/* we need to tear down pipelines only if the DSP hardware is
-	 * active, which happens for PCI devices. if the device is
-	 * suspended, it is brought back to full power and then
-	 * suspended again
-	 */
-	if (tplg_ops && tplg_ops->tear_down_all_pipelines && (old_state == SOF_DSP_PM_D0))
-		tplg_ops->tear_down_all_pipelines(sdev, false);
 
 	if (sdev->fw_state != SOF_FW_BOOT_COMPLETE)
 		goto suspend;

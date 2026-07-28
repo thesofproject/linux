@@ -266,14 +266,18 @@ static int sof_pcm_stream_free(struct snd_sof_dev *sdev,
 	return err;
 }
 
-int sof_pcm_free_all_streams(struct snd_sof_dev *sdev)
+int sof_pcm_free_all_streams(struct snd_soc_component *component)
 {
-	struct snd_sof_audio_instance *instance;
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_pcm_substream *substream;
 	struct snd_sof_pcm *spcm;
 	int dir, ret;
 
-	for_each_spcm_in_instances(spcm, sdev, instance) {
+	if (!instance)
+		return 0;
+
+	list_for_each_entry(spcm, &instance->pcm_list, list) {
 		for_each_pcm_streams(dir) {
 			substream = spcm->stream[dir].substream;
 
@@ -792,6 +796,8 @@ static int sof_pcm_probe(struct snd_soc_component *component)
 	if (!instance)
 		return -ENOMEM;
 
+	audio_pdata->component = component;
+
 	/*
 	 * make sure the device is pm_runtime_active before loading the
 	 * topology and initiating IPC or bus transactions
@@ -833,6 +839,7 @@ out:
 		 */
 		snd_soc_tplg_component_remove(component);
 		snd_sof_audio_instance_unregister(instance);
+		audio_pdata->component = NULL;
 	}
 	if (got_runtime_pm)
 		pm_runtime_put_autosuspend(component->dev);
@@ -843,6 +850,10 @@ out:
 static void sof_pcm_remove(struct snd_soc_component *component)
 {
 	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(component);
+	struct sof_audio_client_pdata *audio_pdata = dev_get_platdata(&cdev->auxdev.dev);
+
+	audio_pdata->component = NULL;
 
 	if (instance)
 		snd_sof_audio_instance_unregister(instance);
