@@ -946,25 +946,6 @@ static void ipc3_stream_message(struct snd_sof_dev *sdev, void *msg_buf)
 }
 
 /* component notifications from firmware */
-static void ipc3_comp_notification(struct snd_sof_dev *sdev, void *msg_buf)
-{
-	const struct sof_ipc_tplg_ops *tplg_ops = snd_sof_sdev_get_tplg_ops(sdev);
-	struct sof_ipc_cmd_hdr *hdr = msg_buf;
-	u32 msg_type = hdr->cmd & SOF_CMD_TYPE_MASK;
-
-	switch (msg_type) {
-	case SOF_IPC_COMP_GET_VALUE:
-	case SOF_IPC_COMP_GET_DATA:
-		break;
-	default:
-		dev_err(sdev->dev, "unhandled component message %#x\n", msg_type);
-		return;
-	}
-
-	if (tplg_ops->control->update)
-		tplg_ops->control->update(sdev, msg_buf);
-}
-
 static void ipc3_trace_message(struct snd_sof_dev *sdev, void *msg_buf)
 {
 	struct sof_ipc_cmd_hdr *hdr = msg_buf;
@@ -1017,9 +998,7 @@ void sof_ipc3_do_rx_work(struct snd_sof_dev *sdev, struct sof_ipc_cmd_hdr *hdr, 
 	case SOF_IPC_GLB_COMPOUND:
 	case SOF_IPC_GLB_TPLG_MSG:
 	case SOF_IPC_GLB_PM_MSG:
-		break;
 	case SOF_IPC_GLB_COMP_MSG:
-		rx_callback = ipc3_comp_notification;
 		break;
 	case SOF_IPC_GLB_STREAM_MSG:
 		rx_callback = ipc3_stream_message;

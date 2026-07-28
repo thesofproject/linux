@@ -47,6 +47,7 @@ struct sof_audio_client_pdata {
 	const char *debug_machine_driver;
 };
 
+extern const struct sof_audio_client_ipc_ops sof_audio_client_ipc3_ops;
 extern const struct sof_audio_client_ipc_ops sof_audio_client_ipc4_ops;
 
 #endif /* __SOF_CLIENT_AUDIO_H */

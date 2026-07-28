@@ -66,6 +66,10 @@ static const struct sof_audio_client_ipc_ops *
 sof_audio_client_get_ipc_ops(struct sof_client_dev *cdev)
 {
 	switch (sof_client_get_ipc_type(cdev)) {
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_IPC3)
+	case SOF_IPC_TYPE_3:
+		return &sof_audio_client_ipc3_ops;
+#endif
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_IPC4)
 	case SOF_IPC_TYPE_4:
 		return &sof_audio_client_ipc4_ops;
