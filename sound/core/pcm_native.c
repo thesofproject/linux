@@ -2873,9 +2873,10 @@ static int snd_pcm_open_file(struct file *file,
 static int snd_pcm_playback_open(struct inode *inode, struct file *file)
 {
 	struct snd_pcm *pcm;
-	int err = nonseekable_open(inode, file);
-	if (err < 0)
-		return err;
+	int err;
+
+	nonseekable_open(inode, file);
+
 	pcm = snd_lookup_minor_data(iminor(inode),
 				    SNDRV_DEVICE_TYPE_PCM_PLAYBACK);
 	err = snd_pcm_open(file, pcm, SNDRV_PCM_STREAM_PLAYBACK);
@@ -2887,9 +2888,10 @@ static int snd_pcm_playback_open(struct inode *inode, struct file *file)
 static int snd_pcm_capture_open(struct inode *inode, struct file *file)
 {
 	struct snd_pcm *pcm;
-	int err = nonseekable_open(inode, file);
-	if (err < 0)
-		return err;
+	int err;
+
+	nonseekable_open(inode, file);
+
 	pcm = snd_lookup_minor_data(iminor(inode),
 				    SNDRV_DEVICE_TYPE_PCM_CAPTURE);
 	err = snd_pcm_open(file, pcm, SNDRV_PCM_STREAM_CAPTURE);
@@ -2911,7 +2913,7 @@ static int snd_pcm_open(struct file *file, struct snd_pcm *pcm, int stream)
 	if (err < 0)
 		goto __error1;
 	if (!try_module_get(pcm->card->module)) {
-		err = -EFAULT;
+		err = -ENODEV;
 		goto __error2;
 	}
 	init_waitqueue_entry(&wait, current);
@@ -3907,6 +3909,8 @@ static vm_fault_t snd_pcm_mmap_data_fault(struct vm_fault *vmf)
 	if (substream == NULL)
 		return VM_FAULT_SIGBUS;
 	runtime = substream->runtime;
+	if (runtime->state == SNDRV_PCM_STATE_DISCONNECTED)
+		return VM_FAULT_SIGBUS;
 	offset = vmf->pgoff << PAGE_SHIFT;
 	dma_bytes = PAGE_ALIGN(runtime->dma_bytes);
 	if (offset > dma_bytes - PAGE_SIZE)
@@ -4232,29 +4236,29 @@ static unsigned long snd_pcm_get_unmapped_area(struct file *file,
 
 const struct file_operations snd_pcm_f_ops[2] = {
 	{
-		.owner =		THIS_MODULE,
-		.write =		snd_pcm_write,
-		.write_iter =		snd_pcm_writev,
-		.open =			snd_pcm_playback_open,
-		.release =		snd_pcm_release,
-		.poll =			snd_pcm_poll,
-		.unlocked_ioctl =	snd_pcm_ioctl,
-		.compat_ioctl = 	snd_pcm_ioctl_compat,
-		.mmap =			snd_pcm_mmap,
-		.fasync =		snd_pcm_fasync,
-		.get_unmapped_area =	snd_pcm_get_unmapped_area,
+		.owner			=	THIS_MODULE,
+		.write			=	snd_pcm_write,
+		.write_iter		=	snd_pcm_writev,
+		.open			=	snd_pcm_playback_open,
+		.release		=	snd_pcm_release,
+		.poll			=	snd_pcm_poll,
+		.unlocked_ioctl		=	snd_pcm_ioctl,
+		.compat_ioctl		=	snd_pcm_ioctl_compat,
+		.mmap			=	snd_pcm_mmap,
+		.fasync			=	snd_pcm_fasync,
+		.get_unmapped_area	=	snd_pcm_get_unmapped_area,
 	},
 	{
-		.owner =		THIS_MODULE,
-		.read =			snd_pcm_read,
-		.read_iter =		snd_pcm_readv,
-		.open =			snd_pcm_capture_open,
-		.release =		snd_pcm_release,
-		.poll =			snd_pcm_poll,
-		.unlocked_ioctl =	snd_pcm_ioctl,
-		.compat_ioctl = 	snd_pcm_ioctl_compat,
-		.mmap =			snd_pcm_mmap,
-		.fasync =		snd_pcm_fasync,
-		.get_unmapped_area =	snd_pcm_get_unmapped_area,
+		.owner			=	THIS_MODULE,
+		.read			=	snd_pcm_read,
+		.read_iter		=	snd_pcm_readv,
+		.open			=	snd_pcm_capture_open,
+		.release		=	snd_pcm_release,
+		.poll			=	snd_pcm_poll,
+		.unlocked_ioctl		=	snd_pcm_ioctl,
+		.compat_ioctl		=	snd_pcm_ioctl_compat,
+		.mmap			=	snd_pcm_mmap,
+		.fasync			=	snd_pcm_fasync,
+		.get_unmapped_area	=	snd_pcm_get_unmapped_area,
 	}
 };

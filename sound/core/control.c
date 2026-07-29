@@ -55,9 +55,7 @@ static int snd_ctl_open(struct inode *inode, struct file *file)
 	struct snd_ctl_file *ctl;
 	int i, err;
 
-	err = stream_open(inode, file);
-	if (err < 0)
-		return err;
+	stream_open(inode, file);
 
 	card = snd_lookup_minor_data(iminor(inode), SNDRV_DEVICE_TYPE_CONTROL);
 	if (!card) {
@@ -65,12 +63,10 @@ static int snd_ctl_open(struct inode *inode, struct file *file)
 		goto __error1;
 	}
 	err = snd_card_file_add(card, file);
-	if (err < 0) {
-		err = -ENODEV;
+	if (err < 0)
 		goto __error1;
-	}
 	if (!try_module_get(card->module)) {
-		err = -EFAULT;
+		err = -ENODEV;
 		goto __error2;
 	}
 	ctl = kzalloc(sizeof(*ctl), GFP_KERNEL);
@@ -2339,16 +2335,15 @@ EXPORT_SYMBOL_GPL(snd_ctl_disconnect_layer);
  *  INIT PART
  */
 
-static const struct file_operations snd_ctl_f_ops =
-{
-	.owner =	THIS_MODULE,
-	.read =		snd_ctl_read,
-	.open =		snd_ctl_open,
-	.release =	snd_ctl_release,
-	.poll =		snd_ctl_poll,
-	.unlocked_ioctl =	snd_ctl_ioctl,
-	.compat_ioctl =	snd_ctl_ioctl_compat,
-	.fasync =	snd_ctl_fasync,
+static const struct file_operations snd_ctl_f_ops = {
+	.owner		=	THIS_MODULE,
+	.read		=	snd_ctl_read,
+	.open		=	snd_ctl_open,
+	.release	=	snd_ctl_release,
+	.poll		=	snd_ctl_poll,
+	.unlocked_ioctl	=	snd_ctl_ioctl,
+	.compat_ioctl	=	snd_ctl_ioctl_compat,
+	.fasync		=	snd_ctl_fasync,
 };
 
 /* call lops under rwsems; called from snd_ctl_dev_*() below() */
