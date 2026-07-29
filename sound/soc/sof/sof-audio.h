@@ -51,10 +51,6 @@
 	list_for_each_entry(instance, &(sdev)->audio_instance_list, list)	\
 		list_for_each_entry(spcm, &(instance)->pcm_list, list)
 
-#define for_each_swidget_in_instances(swidget, sdev, instance)			\
-	list_for_each_entry(instance, &(sdev)->audio_instance_list, list)	\
-		list_for_each_entry(swidget, &(instance)->widget_list, list)
-
 #define SOF_DAI_PARAM_INTEL_SSP_MCLK		0
 #define SOF_DAI_PARAM_INTEL_SSP_BCLK		1
 #define SOF_DAI_PARAM_INTEL_SSP_TDM_SLOTS	2
@@ -179,7 +175,7 @@ struct sof_ipc_tplg_control_ops {
 	int (*bytes_ext_put)(struct snd_sof_control *scontrol,
 			     const unsigned int __user *binary_data, unsigned int size);
 	/* update control data based on notification from the DSP */
-	void (*update)(struct snd_sof_dev *sdev, void *ipc_control_message);
+	void (*update)(struct snd_soc_component *scomp, void *ipc_control_message);
 	/* Optional callback to setup kcontrols associated with an swidget */
 	int (*widget_kcontrol_setup)(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget);
 	/* mandatory callback to set up volume table for volume kcontrols */
@@ -679,9 +675,6 @@ struct snd_sof_pcm *snd_sof_find_spcm_name(struct snd_soc_component *scomp,
 struct snd_sof_pcm *snd_sof_find_spcm_comp(struct snd_soc_component *scomp,
 					   unsigned int comp_id,
 					   int *direction);
-struct snd_sof_pcm *snd_sof_find_spcm_comp_by_sdev(struct snd_sof_dev *sdev,
-						   unsigned int comp_id,
-						   int *direction);
 
 void snd_sof_pcm_period_elapsed(struct snd_pcm_substream *substream);
 void snd_sof_pcm_init_elapsed_work(struct work_struct *work);

@@ -1194,21 +1194,14 @@ struct snd_sof_pcm *snd_sof_find_spcm_comp(struct snd_soc_component *scomp,
 					   unsigned int comp_id,
 					   int *direction)
 {
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
-
-	return snd_sof_find_spcm_comp_by_sdev(sdev, comp_id, direction);
-}
-EXPORT_SYMBOL(snd_sof_find_spcm_comp);
-
-struct snd_sof_pcm *snd_sof_find_spcm_comp_by_sdev(struct snd_sof_dev *sdev,
-						   unsigned int comp_id,
-						   int *direction)
-{
-	struct snd_sof_audio_instance *instance;
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct snd_sof_pcm *spcm;
 	int dir;
 
-	for_each_spcm_in_instances(spcm, sdev, instance) {
+	if (!instance)
+		return NULL;
+
+	list_for_each_entry(spcm, &instance->pcm_list, list) {
 		for_each_pcm_streams(dir) {
 			if (spcm->stream[dir].comp_id == comp_id) {
 				*direction = dir;
@@ -1219,6 +1212,7 @@ struct snd_sof_pcm *snd_sof_find_spcm_comp_by_sdev(struct snd_sof_dev *sdev,
 
 	return NULL;
 }
+EXPORT_SYMBOL(snd_sof_find_spcm_comp);
 
 struct snd_sof_widget *snd_sof_find_swidget(struct snd_soc_component *scomp,
 					    const char *name)

@@ -219,13 +219,16 @@ static const struct sof_token_info ipc4_token_list[SOF_TOKEN_COUNT] = {
 	[SOF_ASRC_TOKENS] = {"ASRC tokens", asrc_tokens, ARRAY_SIZE(asrc_tokens)},
 };
 
-struct snd_sof_widget *sof_ipc4_find_swidget_by_ids(struct snd_sof_dev *sdev,
+struct snd_sof_widget *sof_ipc4_find_swidget_by_ids(struct snd_soc_component *scomp,
 						    u32 module_id, int instance_id)
 {
-	struct snd_sof_audio_instance *instance;
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct snd_sof_widget *swidget;
 
-	for_each_swidget_in_instances(swidget, sdev, instance) {
+	if (!instance)
+		return NULL;
+
+	list_for_each_entry(swidget, &instance->widget_list, list) {
 		struct sof_ipc4_fw_module *fw_module = swidget->module_info;
 
 		/* Only active module instances have valid instance_id */

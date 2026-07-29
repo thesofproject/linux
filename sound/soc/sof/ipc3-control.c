@@ -588,10 +588,10 @@ static void snd_sof_update_control(struct snd_sof_control *scontrol,
 	}
 }
 
-static void sof_ipc3_control_update(struct snd_sof_dev *sdev, void *ipc_control_message)
+static void sof_ipc3_control_update(struct snd_soc_component *scomp, void *ipc_control_message)
 {
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct sof_ipc_ctrl_data *cdata = ipc_control_message;
-	struct snd_sof_audio_instance *instance;
 	struct snd_soc_dapm_widget *widget;
 	struct snd_sof_control *scontrol;
 	struct snd_sof_widget *swidget;
@@ -603,14 +603,21 @@ static void sof_ipc3_control_update(struct snd_sof_dev *sdev, void *ipc_control_
 	bool found = false;
 	int i, type;
 
+	if (!instance)
+		return;
+
 	if (cdata->type == SOF_CTRL_TYPE_VALUE_COMP_GET ||
 	    cdata->type == SOF_CTRL_TYPE_VALUE_COMP_SET) {
-		dev_err(sdev->dev, "Component data is not supported in control notification\n");
-		return; /* swidget not yet found, sdev->dev is correct here */
+		dev_err(scomp->dev, "Component data is not supported in control notification\n");
+		return;
 	}
 
-	/* Find the swidget first */
-	for_each_swidget_in_instances(swidget, sdev, instance) {
+	/*
+	 * Find the swidget first. The notification is broadcast to all audio
+	 * clients of the DSP, a miss here only means that the component is not
+	 * owned by this client.
+	 */
+	list_for_each_entry(swidget, &instance->widget_list, list) {
 		if (swidget->comp_id == cdata->comp_id) {
 			found = true;
 			break;

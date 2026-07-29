@@ -20,7 +20,6 @@ static void sof_audio_client_ipc4_module_notification(struct sof_client_dev *cde
 {
 	struct sof_audio_client_pdata *pdata = dev_get_platdata(&cdev->auxdev.dev);
 	struct sof_ipc4_notify_module_data *data = ipc4_msg->data_ptr;
-	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
 
 	/* The component is only available while the sound card is bound */
 	if (!pdata->component)
@@ -34,12 +33,12 @@ static void sof_audio_client_ipc4_module_notification(struct sof_client_dev *cde
 		/* ALSA kcontrol notification */
 		tplg_ops = snd_sof_component_get_tplg_ops(pdata->component);
 		if (tplg_ops && tplg_ops->control->update)
-			tplg_ops->control->update(sdev, ipc4_msg);
+			tplg_ops->control->update(pdata->component, ipc4_msg);
 
 		break;
 	}
 	case SOF_IPC4_NOTIFY_MODULE_EVENTID_COMPR_MAGIC_VAL:
-		sof_ipc4_compr_drain_done(sdev, ipc4_msg);
+		sof_ipc4_compr_drain_done(pdata->component, ipc4_msg);
 		break;
 	default:
 		break;

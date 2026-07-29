@@ -29,7 +29,8 @@ static void sof_audio_client_ipc3_period_elapsed(struct sof_client_dev *cdev,
 
 	spcm = snd_sof_find_spcm_comp(component, msg_id, &direction);
 	if (!spcm) {
-		dev_err(&cdev->auxdev.dev,
+		/* The stream is not owned by this component */
+		dev_dbg(&cdev->auxdev.dev,
 			"period elapsed for unknown stream, msg_id %d\n", msg_id);
 		return;
 	}
@@ -66,7 +67,8 @@ static void sof_audio_client_ipc3_xrun(struct sof_client_dev *cdev,
 
 	spcm = snd_sof_find_spcm_comp(component, msg_id, &direction);
 	if (!spcm) {
-		dev_err(&cdev->auxdev.dev, "XRUN for unknown stream, msg_id %d\n",
+		/* The stream is not owned by this component */
+		dev_dbg(&cdev->auxdev.dev, "XRUN for unknown stream, msg_id %d\n",
 			msg_id);
 		return;
 	}
@@ -120,7 +122,6 @@ static void sof_audio_client_ipc3_comp_notification(struct sof_client_dev *cdev,
 						    struct sof_ipc_cmd_hdr *hdr)
 {
 	struct sof_audio_client_pdata *pdata = dev_get_platdata(&cdev->auxdev.dev);
-	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
 	const struct sof_ipc_tplg_ops *tplg_ops;
 	u32 msg_type = hdr->cmd & SOF_CMD_TYPE_MASK;
 
@@ -140,7 +141,7 @@ static void sof_audio_client_ipc3_comp_notification(struct sof_client_dev *cdev,
 
 	tplg_ops = snd_sof_component_get_tplg_ops(pdata->component);
 	if (tplg_ops && tplg_ops->control->update)
-		tplg_ops->control->update(sdev, hdr);
+		tplg_ops->control->update(pdata->component, hdr);
 }
 
 static void sof_audio_client_ipc3_rx_notification(struct sof_client_dev *cdev,

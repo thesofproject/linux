@@ -787,7 +787,7 @@ static int sof_ipc4_volsw_setup(struct snd_sof_widget *swidget,
 #define PARAM_ID_FROM_EXTENSION(_ext)	(((_ext) & SOF_IPC4_MOD_EXT_MSG_PARAM_ID_MASK)	\
 					 >> SOF_IPC4_MOD_EXT_MSG_PARAM_ID_SHIFT)
 
-static void sof_ipc4_control_update(struct snd_sof_dev *sdev, void *ipc_message)
+static void sof_ipc4_control_update(struct snd_soc_component *scomp, void *ipc_message)
 {
 	struct sof_ipc4_msg *ipc4_msg = ipc_message;
 	struct sof_ipc4_notify_module_data *ndata = ipc4_msg->data_ptr;
@@ -803,7 +803,7 @@ static void sof_ipc4_control_update(struct snd_sof_dev *sdev, void *ipc_message)
 	int i, type;
 
 	if (ndata->event_data_size < sizeof(*msg_data)) {
-		dev_err(sdev->dev,
+		dev_err(scomp->dev,
 			"%s: Invalid event data size for module %u.%u: %u\n",
 			__func__, ndata->module_id, ndata->instance_id,
 			ndata->event_data_size);
@@ -822,7 +822,7 @@ static void sof_ipc4_control_update(struct snd_sof_dev *sdev, void *ipc_message)
 		type = SND_SOC_TPLG_TYPE_BYTES;
 		break;
 	default:
-		dev_err(sdev->dev,
+		dev_err(scomp->dev,
 			"%s: Invalid control type for module %u.%u: %u\n",
 			__func__, ndata->module_id, ndata->instance_id,
 			event_param_id);
@@ -830,10 +830,11 @@ static void sof_ipc4_control_update(struct snd_sof_dev *sdev, void *ipc_message)
 	}
 
 	/* Find the swidget based on ndata->module_id and ndata->instance_id */
-	swidget = sof_ipc4_find_swidget_by_ids(sdev, ndata->module_id,
+	swidget = sof_ipc4_find_swidget_by_ids(scomp, ndata->module_id,
 					       ndata->instance_id);
 	if (!swidget) {
-		dev_err(sdev->dev, "%s: Failed to find widget for module %u.%u\n",
+		/* The module is not owned by this component */
+		dev_dbg(scomp->dev, "%s: No widget for module %u.%u\n",
 			__func__, ndata->module_id, ndata->instance_id);
 		return;
 	}

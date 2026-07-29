@@ -12,6 +12,7 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/platform_device.h>
+#include <linux/rcupdate.h>
 #include <linux/slab.h>
 #include <sound/sof/ipc4/header.h>
 #include "ops.h"
@@ -406,10 +407,23 @@ struct snd_sof_widget *sof_client_ipc4_find_swidget_by_id(struct sof_client_dev 
 							  u32 module_id, int instance_id)
 {
 	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+	struct snd_sof_audio_instance *instance;
 
-	if (sdev->pdata->ipc_type == SOF_IPC_TYPE_4)
-		return sof_ipc4_find_swidget_by_ids(sdev, module_id, instance_id);
-	dev_err(sdev->dev, "Only supported with IPC4\n");
+	if (sdev->pdata->ipc_type != SOF_IPC_TYPE_4) {
+		dev_err(sdev->dev, "Only supported with IPC4\n");
+		return NULL;
+	}
+
+	/* The module can be in the topology of any of the audio instances */
+	guard(rcu)();
+	list_for_each_entry_rcu(instance, &sdev->audio_instance_list, list) {
+		struct snd_sof_widget *swidget;
+
+		swidget = sof_ipc4_find_swidget_by_ids(instance->component,
+						       module_id, instance_id);
+		if (swidget)
+			return swidget;
+	}
 
 	return NULL;
 }
