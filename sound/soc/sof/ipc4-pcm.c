@@ -455,8 +455,8 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 			 * never get here with compress.
 			 */
 			if (substream) {
-				u64 pos = snd_sof_pcm_get_dai_frame_counter(sdev, component,
-									    substream);
+				u64 pos = snd_sof_pcm_get_dai_frame_counter(component,
+									   substream);
 
 				time_info->stream_end_offset += pos;
 			}
@@ -931,6 +931,8 @@ static void sof_ipc4_pcm_free(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm
 
 static int sof_ipc4_pcm_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm)
 {
+	struct snd_sof_audio_instance *instance =
+		snd_sof_component_get_audio_instance(spcm->scomp);
 	struct snd_sof_pcm_stream_pipeline_list *pipeline_list;
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	struct sof_ipc4_pcm_stream_priv *stream_priv;
@@ -948,7 +950,7 @@ static int sof_ipc4_pcm_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm
 		support_info = false;
 
 	/* For delay reporting the get_host_byte_counter callback is needed */
-	if (!sof_ops(sdev) || !sof_ops(sdev)->get_host_byte_counter)
+	if (!instance || !instance->audio_ops->get_host_byte_counter)
 		support_info = false;
 
 	for_each_pcm_streams(stream) {
@@ -1218,7 +1220,7 @@ static int sof_ipc4_pcm_pointer(struct snd_soc_component *component,
 	}
 
 	/* For delay calculation we need the host counter */
-	host_cnt = snd_sof_pcm_get_host_byte_counter(sdev, component, substream);
+	host_cnt = snd_sof_pcm_get_host_byte_counter(component, substream);
 
 	/* Store the original value to host_ptr */
 	host_ptr = host_cnt;
@@ -1232,7 +1234,7 @@ static int sof_ipc4_pcm_pointer(struct snd_soc_component *component,
 	 * available.
 	 */
 	if (!time_info->llp_offset) {
-		dai_cnt = snd_sof_pcm_get_dai_frame_counter(sdev, component, substream);
+		dai_cnt = snd_sof_pcm_get_dai_frame_counter(component, substream);
 		if (!dai_cnt)
 			return -EOPNOTSUPP;
 	} else {

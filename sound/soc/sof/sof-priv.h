@@ -173,6 +173,29 @@ struct sof_audio_ops {
 	int (*compr_pointer)(struct snd_soc_component *component,
 			     struct snd_compr_stream *cstream,
 			     struct snd_compr_tstamp64 *tstamp);
+	u64 (*compr_get_dai_frame_counter)(struct snd_soc_component *component,
+					   struct snd_compr_stream *cstream);
+
+	/*
+	 * Optional callback to retrieve the number of frames left/arrived
+	 * from/to the DSP on the DAI side (link/codec/DMIC/etc).
+	 *
+	 * The callback is used when the firmware does not provide this
+	 * information via the shared SRAM window and it can be retrieved by
+	 * host.
+	 */
+	u64 (*get_dai_frame_counter)(struct snd_soc_component *component,
+				     struct snd_pcm_substream *substream);
+
+	/*
+	 * Optional callback to retrieve the number of bytes left/arrived
+	 * from/to the DSP on the host side (bytes between host ALSA buffer and
+	 * DSP).
+	 *
+	 * The callback is needed for ALSA delay reporting.
+	 */
+	u64 (*get_host_byte_counter)(struct snd_soc_component *component,
+				     struct snd_pcm_substream *substream);
 
 	/* DAI drivers */
 	struct snd_soc_dai_driver *drv;
@@ -303,29 +326,6 @@ struct snd_sof_dsp_ops {
 	int (*load_firmware)(struct snd_sof_dev *sof_dev, const char *fw_filename); /* mandatory */
 	int (*load_module)(struct snd_sof_dev *sof_dev,
 			   struct snd_sof_mod_hdr *hdr); /* optional */
-
-	u64 (*compr_get_dai_frame_counter)(struct snd_sof_dev *sdev,
-					   struct snd_compr_stream *cstream);
-	/*
-	 * optional callback to retrieve the number of frames left/arrived from/to
-	 * the DSP on the DAI side (link/codec/DMIC/etc).
-	 *
-	 * The callback is used when the firmware does not provide this information
-	 * via the shared SRAM window and it can be retrieved by host.
-	 */
-	u64 (*get_dai_frame_counter)(struct snd_sof_dev *sdev,
-				     struct snd_soc_component *component,
-				     struct snd_pcm_substream *substream); /* optional */
-
-	/*
-	 * Optional callback to retrieve the number of bytes left/arrived from/to
-	 * the DSP on the host side (bytes between host ALSA buffer and DSP).
-	 *
-	 * The callback is needed for ALSA delay reporting.
-	 */
-	u64 (*get_host_byte_counter)(struct snd_sof_dev *sdev,
-				     struct snd_soc_component *component,
-				     struct snd_pcm_substream *substream); /* optional */
 
 	/* host read DSP stream data */
 	int (*ipc_msg_data)(struct snd_sof_dev *sdev,

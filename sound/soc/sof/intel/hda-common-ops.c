@@ -30,6 +30,10 @@ const struct sof_audio_ops sof_hda_audio_ops = {
 	.compr_close	= hda_dsp_compr_close,
 	.compr_trigger	= hda_dsp_compr_trigger,
 	.compr_pointer	= hda_dsp_compr_pointer,
+	.compr_get_dai_frame_counter = hda_dsp_compr_get_stream_llp,
+
+	.get_dai_frame_counter = hda_dsp_get_stream_llp,
+	.get_host_byte_counter = hda_dsp_get_stream_ldp,
 
 	.drv		= skl_dai,
 	.num_drv	= SOF_SKL_NUM_DAIS,
@@ -75,12 +79,6 @@ const struct snd_sof_dsp_ops sof_hda_common_ops = {
 	/* debug */
 	.dbg_dump	= hda_dsp_dump,
 	.debugfs_add_region_item = snd_sof_debugfs_add_region_item_iomem,
-
-	/* stream callbacks */
-	.compr_get_dai_frame_counter = hda_dsp_compr_get_stream_llp,
-
-	.get_dai_frame_counter = hda_dsp_get_stream_llp,
-	.get_host_byte_counter = hda_dsp_get_stream_ldp,
 
 	/* firmware loading */
 	.load_firmware = snd_sof_load_firmware_raw,

@@ -699,7 +699,7 @@ int hda_dsp_compr_trigger(struct snd_soc_component *component,
 int hda_dsp_compr_pointer(struct snd_soc_component *component,
 			  struct snd_compr_stream *cstream,
 			  struct snd_compr_tstamp64 *tstamp);
-u64 hda_dsp_compr_get_stream_llp(struct snd_sof_dev *sdev,
+u64 hda_dsp_compr_get_stream_llp(struct snd_soc_component *component,
 				 struct snd_compr_stream *cstream);
 
 /*
@@ -727,11 +727,9 @@ bool hda_dsp_check_stream_irq(struct snd_sof_dev *sdev);
 
 snd_pcm_uframes_t hda_dsp_stream_get_position(struct hdac_stream *hstream,
 					      int direction, bool can_sleep);
-u64 hda_dsp_get_stream_llp(struct snd_sof_dev *sdev,
-			   struct snd_soc_component *component,
+u64 hda_dsp_get_stream_llp(struct snd_soc_component *component,
 			   struct snd_pcm_substream *substream);
-u64 hda_dsp_get_stream_ldp(struct snd_sof_dev *sdev,
-			   struct snd_soc_component *component,
+u64 hda_dsp_get_stream_ldp(struct snd_soc_component *component,
 			   struct snd_pcm_substream *substream);
 
 struct hdac_ext_stream *

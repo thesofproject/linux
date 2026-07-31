@@ -544,11 +544,15 @@ snd_sof_compr_platform_pointer(struct snd_soc_component *component,
 }
 
 static inline u64
-snd_sof_compr_get_dai_frame_counter(struct snd_sof_dev *sdev,
+snd_sof_compr_get_dai_frame_counter(struct snd_soc_component *component,
 				    struct snd_compr_stream *cstream)
 {
-	if (sof_ops(sdev) && sof_ops(sdev)->compr_get_dai_frame_counter)
-		return sof_ops(sdev)->compr_get_dai_frame_counter(sdev, cstream);
+	struct snd_sof_audio_instance *ins =
+		snd_sof_component_get_audio_instance(component);
+
+	if (ins && ins->audio_ops->compr_get_dai_frame_counter)
+		return ins->audio_ops->compr_get_dai_frame_counter(component,
+								   cstream);
 
 	return 0;
 }
@@ -639,25 +643,29 @@ static inline int snd_sof_pcm_platform_ack(struct snd_soc_component *component,
 }
 
 static inline u64
-snd_sof_pcm_get_dai_frame_counter(struct snd_sof_dev *sdev,
-				  struct snd_soc_component *component,
+snd_sof_pcm_get_dai_frame_counter(struct snd_soc_component *component,
 				  struct snd_pcm_substream *substream)
 {
-	if (sof_ops(sdev) && sof_ops(sdev)->get_dai_frame_counter)
-		return sof_ops(sdev)->get_dai_frame_counter(sdev, component,
-							    substream);
+	struct snd_sof_audio_instance *ins =
+		snd_sof_component_get_audio_instance(component);
+
+	if (ins && ins->audio_ops->get_dai_frame_counter)
+		return ins->audio_ops->get_dai_frame_counter(component,
+							     substream);
 
 	return 0;
 }
 
 static inline u64
-snd_sof_pcm_get_host_byte_counter(struct snd_sof_dev *sdev,
-				  struct snd_soc_component *component,
+snd_sof_pcm_get_host_byte_counter(struct snd_soc_component *component,
 				  struct snd_pcm_substream *substream)
 {
-	if (sof_ops(sdev) && sof_ops(sdev)->get_host_byte_counter)
-		return sof_ops(sdev)->get_host_byte_counter(sdev, component,
-							    substream);
+	struct snd_sof_audio_instance *ins =
+		snd_sof_component_get_audio_instance(component);
+
+	if (ins && ins->audio_ops->get_host_byte_counter)
+		return ins->audio_ops->get_host_byte_counter(component,
+							     substream);
 
 	return 0;
 }

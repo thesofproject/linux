@@ -690,7 +690,7 @@ static int sof_ipc4_compr_pointer(struct snd_soc_component *component,
 	}
 
 	if (!time_info->llp_offset) {
-		dai_cnt = snd_sof_compr_get_dai_frame_counter(sdev, cstream);
+		dai_cnt = snd_sof_compr_get_dai_frame_counter(component, cstream);
 	} else {
 		struct sof_ipc4_llp_reading_slot llp;
 

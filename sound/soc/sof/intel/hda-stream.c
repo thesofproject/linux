@@ -1195,8 +1195,7 @@ EXPORT_SYMBOL_NS(hda_dsp_stream_get_position, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 #define merge_u64(u32_u, u32_l) (((u64)(u32_u) << 32) | (u32_l))
 
-static u64 hda_dsp_get_llp(struct snd_sof_dev *sdev,
-			   struct snd_soc_pcm_runtime *rtd, int dir)
+static u64 hda_dsp_get_llp(struct snd_soc_pcm_runtime *rtd, int dir)
 {
 	struct snd_soc_pcm_runtime *be_rtd = NULL;
 	struct hdac_ext_stream *hext_stream;
@@ -1249,44 +1248,41 @@ static u64 hda_dsp_get_llp(struct snd_sof_dev *sdev,
 
 /**
  * hda_dsp_get_stream_llp - Retrieve the LLP (Linear Link Position) of the stream
- * @sdev: SOF device
  * @component: ASoC component
  * @substream: PCM substream
  *
  * Returns the raw Linear Link Position value
  */
-u64 hda_dsp_get_stream_llp(struct snd_sof_dev *sdev,
-			   struct snd_soc_component *component,
+u64 hda_dsp_get_stream_llp(struct snd_soc_component *component,
 			   struct snd_pcm_substream *substream)
 {
-	return hda_dsp_get_llp(sdev, snd_soc_substream_to_rtd(substream),
+	return hda_dsp_get_llp(snd_soc_substream_to_rtd(substream),
 			       substream->stream);
 }
 EXPORT_SYMBOL_NS(hda_dsp_get_stream_llp, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 /**
  * hda_dsp_compr_get_stream_llp - Retrieve the LLP (Linear Link Position) of the stream
- * @sdev: SOF device
+ * @component: ASoC component
  * @cstream: Compress stream
  *
  * Returns the raw Linear Link Position value
  */
-u64 hda_dsp_compr_get_stream_llp(struct snd_sof_dev *sdev, struct snd_compr_stream *cstream)
+u64 hda_dsp_compr_get_stream_llp(struct snd_soc_component *component,
+				 struct snd_compr_stream *cstream)
 {
-	return hda_dsp_get_llp(sdev, cstream->private_data, cstream->direction);
+	return hda_dsp_get_llp(cstream->private_data, cstream->direction);
 }
 EXPORT_SYMBOL_NS(hda_dsp_compr_get_stream_llp, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 /**
  * hda_dsp_get_stream_ldp - Retrieve the LDP (Linear DMA Position) of the stream
- * @sdev: SOF device
  * @component: ASoC component
  * @substream: PCM substream
  *
  * Returns the raw Linear Link Position value
  */
-u64 hda_dsp_get_stream_ldp(struct snd_sof_dev *sdev,
-			   struct snd_soc_component *component,
+u64 hda_dsp_get_stream_ldp(struct snd_soc_component *component,
 			   struct snd_pcm_substream *substream)
 {
 	struct hdac_stream *hstream = substream->runtime->private_data;
