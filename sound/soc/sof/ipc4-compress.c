@@ -377,7 +377,7 @@ static int sof_ipc4_compr_set_params(struct snd_soc_component *component,
 	/* Use correct format based on the used codec */
 	switch (params->codec.id) {
 	case SND_AUDIOCODEC_PCM:
-		snd_mask_set_format(fmt, params->codec.format);
+		snd_mask_set_format(fmt, (snd_pcm_format_t)params->codec.format);
 		break;
 	case SND_AUDIOCODEC_VORBIS:
 		snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S16_LE);
