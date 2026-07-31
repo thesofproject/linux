@@ -170,7 +170,7 @@ int hda_dsp_compr_hw_params(struct snd_sof_dev *sdev,
 	/* Use correct format based on the used codec */
 	switch (params->codec.id) {
 	case SND_AUDIOCODEC_PCM:
-		bps = snd_pcm_format_physical_width(params->codec.format);
+		bps = snd_pcm_format_physical_width((snd_pcm_format_t)params->codec.format);
 		break;
 	case SND_AUDIOCODEC_VORBIS:
 		bps = snd_pcm_format_physical_width(SNDRV_PCM_FORMAT_S16_LE);
