@@ -1191,14 +1191,6 @@ EXPORT_SYMBOL_NS(hda_dsp_stream_get_position, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 #define merge_u64(u32_u, u32_l) (((u64)(u32_u) << 32) | (u32_l))
 
-/**
- * hda_dsp_get_stream_llp - Retrieve the LLP (Linear Link Position) of the stream
- * @sdev: SOF device
- * @component: ASoC component
- * @substream: PCM substream
- *
- * Returns the raw Linear Link Position value
- */
 static u64 hda_dsp_get_llp(struct snd_sof_dev *sdev,
 			   struct snd_soc_pcm_runtime *rtd, int dir)
 {
@@ -1251,6 +1243,14 @@ static u64 hda_dsp_get_llp(struct snd_sof_dev *sdev,
 	return merge_u64(llp_u, llp_l);
 }
 
+/**
+ * hda_dsp_get_stream_llp - Retrieve the LLP (Linear Link Position) of the stream
+ * @sdev: SOF device
+ * @component: ASoC component
+ * @substream: PCM substream
+ *
+ * Returns the raw Linear Link Position value
+ */
 u64 hda_dsp_get_stream_llp(struct snd_sof_dev *sdev,
 			   struct snd_soc_component *component,
 			   struct snd_pcm_substream *substream)
